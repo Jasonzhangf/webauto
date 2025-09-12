@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "webauto-cli": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "webauto-cli@0.0.1",
+        "mcp"
+      ]
+    }
+  }
+}
