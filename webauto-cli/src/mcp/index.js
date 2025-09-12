@@ -111,6 +111,17 @@ class MCPManager extends BaseModule {
         required: ['action']
       }
     });
+
+    // 注册LLM工具
+    try {
+      const LLMTool = require('../tools/llm-tool');
+      this.llmTool = new LLMTool();
+      const toolDefinition = this.llmTool.getToolDefinition();
+      this.framework.registerTool(toolDefinition);
+      this.debug('LLM工具注册成功');
+    } catch (error) {
+      this.debug(`LLM工具注册失败: ${error.message}`);
+    }
   }
 
   async initialize() {
@@ -145,6 +156,11 @@ class MCPManager extends BaseModule {
           return await this.startBrowser(args);
         case 'performWebAction':
           return await this.performWebAction(args);
+        case 'llm':
+          if (!this.llmTool) {
+            throw new Error('LLM工具未初始化');
+          }
+          return await this.llmTool.execute(args);
         default:
           throw new Error(`Unknown tool: ${toolName}`);
       }

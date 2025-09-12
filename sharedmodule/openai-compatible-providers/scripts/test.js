@@ -10,9 +10,10 @@ const path = require('path');
 
 console.log('🧪 Testing OpenAI Compatible Providers Framework...');
 
-try {
+async function runTests() {
+  try {
   // 加载framework
-  const frameworkPath = path.resolve(__dirname, '../src/index.js');
+  const frameworkPath = path.resolve(__dirname, '../dist/index.js');
   const { ProviderFramework, BaseProvider, ModuleScanner } = require(frameworkPath);
 
   console.log('✅ Framework loaded successfully');
@@ -185,8 +186,12 @@ try {
 
   console.log('🎉 All tests passed! Framework is ready for use.');
 
-} catch (error) {
-  console.error('❌ Test failed:', error.message);
-  console.error('Stack:', error.stack);
-  process.exit(1);
+  } catch (error) {
+    console.error('❌ Test failed:', error.message);
+    console.error('Stack:', error.stack);
+    process.exit(1);
+  }
 }
+
+// 运行测试
+runTests();

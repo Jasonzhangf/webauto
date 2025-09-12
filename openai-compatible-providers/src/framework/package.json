@@ -13,12 +13,15 @@
     "README.md"
   ],
   "scripts": {
-    "build": "npm run clean && tsc",
+    "build": "node scripts/build.js",
     "build:watch": "tsc --watch",
+    "build:prod": "node scripts/build.js --skip-tests",
     "clean": "rimraf dist",
+    "clean:all": "rimraf dist node_modules package-lock.json",
     "test": "jest",
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",
+    "test:ci": "jest --ci --coverage --watchAll=false",
     "lint": "eslint . --ext .js,.ts,.json",
     "lint:fix": "eslint . --ext .js,.ts,.json --fix",
     "format": "prettier --write .",
@@ -27,9 +30,18 @@
     "prepublishOnly": "npm run build && npm run test && npm run lint",
     "version": "npm run build && git add -A dist",
     "postversion": "git push && git push --tags",
-    "release": "npm version patch && npm publish",
+    "publish:safe": "node scripts/publish.js",
+    "publish:quick": "npm run build && npm publish",
+    "release": "node scripts/publish.js",
+    "release:patch": "npm version patch && npm publish",
     "release:minor": "npm version minor && npm publish",
-    "release:major": "npm version major && npm publish"
+    "release:major": "npm version major && npm publish",
+    "release:dry": "node scripts/publish.js --dry-run",
+    "docs": "npx typedoc src/index.ts --out docs/",
+    "check": "npm run lint && npm run test && npm run format:check",
+    "security": "npm audit",
+    "security:fix": "npm audit fix",
+    "dev:setup": "npm install && npm install --save-dev typescript @types/node jest eslint prettier @types/jest"
   },
   "keywords": [
     "openai",

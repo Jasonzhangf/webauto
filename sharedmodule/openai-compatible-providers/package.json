@@ -1,19 +1,20 @@
 {
   "name": "openai-compatible-providers-framework",
-  "version": "0.0.3",
+  "version": "0.0.6",
   "description": "OpenAI Compatible Providers Framework with dynamic module loading and compatibility layer",
-  "main": "src/index.js",
-  "types": "src/index.d.ts",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
   "scripts": {
-    "build": "node scripts/build.js",
-    "test": "node scripts/test.js",
-    "lint": "node scripts/lint.js",
-    "prepublishOnly": "npm run build && npm run test && npm run lint",
+    "build": "tsc",
+    "test": "jest",
+    "lint": "eslint src/**/*.ts",
+    "prepublishOnly": "npm run build",
     "publish:patch": "npm version patch && npm publish",
     "publish:minor": "npm version minor && npm publish",
     "publish:major": "npm version major && npm publish",
-    "clean": "node scripts/clean.js",
-    "dev": "node scripts/dev.js"
+    "clean": "rm -rf dist",
+    "dev": "ts-node src/index.ts",
+    "typecheck": "tsc --noEmit"
   },
   "keywords": [
     "openai",
@@ -29,11 +30,20 @@
   "author": "WebAuto Team",
   "license": "MIT",
   "dependencies": {
+    "axios": "^1.12.0",
+    "open": "^10.0.3",
     "rcc-basemodule": "^0.1.4",
     "rcc-errorhandling": "^1.0.5"
   },
   "devDependencies": {
-    "jest": "^29.0.0"
+    "typescript": "^5.0.0",
+    "@types/node": "^20.0.0",
+    "ts-node": "^10.9.0",
+    "jest": "^29.0.0",
+    "@types/jest": "^29.0.0",
+    "eslint": "^8.0.0",
+    "@typescript-eslint/eslint-plugin": "^6.0.0",
+    "@typescript-eslint/parser": "^6.0.0"
   },
   "engines": {
     "node": ">=14.0.0"
