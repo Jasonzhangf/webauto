@@ -112,3 +112,17 @@ coverage/
 # Build artifacts
 dist/
 build/
+
+# Test configuration files (contain sensitive information)
+**/config/*.config.js
+**/config/*.config.json
+**/config/secrets.*
+**/.env*
+
+# Debug logs
+debug-logs/
+*.debug.log
+
+# Temporary test files
+*.tmp
+*.temp

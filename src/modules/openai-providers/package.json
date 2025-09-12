@@ -1,0 +1,49 @@
+{
+  "name": "openai-providers-collection",
+  "version": "1.0.0",
+  "description": "Collection of OpenAI Compatible Providers including LMStudio and iFlow",
+  "main": "index.js",
+  "scripts": {
+    "build": "node scripts/build.js",
+    "test": "node scripts/test.js",
+    "lint": "node scripts/lint.js",
+    "prepublishOnly": "npm run build && npm run test && npm run lint",
+    "publish:patch": "npm version patch && npm publish",
+    "publish:minor": "npm version minor && npm publish",
+    "publish:major": "npm version major && npm publish",
+    "clean": "node scripts/clean.js",
+    "dev": "node scripts/dev.js",
+    "test:tool-calling": "node tests/tool-calling-test.js"
+  },
+  "keywords": [
+    "openai",
+    "providers",
+    "lmstudio",
+    "iflow",
+    "chat",
+    "llm",
+    "ai",
+    "tools",
+    "function-calling"
+  ],
+  "author": "WebAuto Team",
+  "license": "MIT",
+  "dependencies": {
+    "openai-compatible-providers-framework": "^0.0.3"
+  },
+  "devDependencies": {
+    "jest": "^29.0.0"
+  },
+  "engines": {
+    "node": ">=14.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Jasonzhangf/webauto.git",
+    "directory": "src/modules/openai-providers"
+  },
+  "bugs": {
+    "url": "https://github.com/Jasonzhangf/webauto/issues"
+  },
+  "homepage": "https://github.com/Jasonzhangf/webauto#readme"
+}
