@@ -147,6 +147,33 @@ class QwenProvider extends BaseProvider {
   private getDefaultModels(): Array<any> {
     return [
       {
+        id: 'qwen-turbo',
+        name: 'Qwen Turbo',
+        description: 'Fast and efficient general-purpose model',
+        maxTokens: 8192,
+        contextWindow: 32768,
+        supportsStreaming: true,
+        supportsTools: true
+      },
+      {
+        id: 'qwen-plus',
+        name: 'Qwen Plus',
+        description: 'Enhanced general-purpose model with better reasoning',
+        maxTokens: 8192,
+        contextWindow: 32768,
+        supportsStreaming: true,
+        supportsTools: true
+      },
+      {
+        id: 'qwen-max',
+        name: 'Qwen Max',
+        description: 'Most capable general-purpose model',
+        maxTokens: 8192,
+        contextWindow: 32768,
+        supportsStreaming: true,
+        supportsTools: true
+      },
+      {
         id: 'qwen3-coder-plus',
         name: 'Qwen 3 Coder Plus',
         description: 'Advanced coding model with enhanced reasoning',
@@ -489,11 +516,17 @@ class QwenProvider extends BaseProvider {
     
     while (retryCount <= maxRetries) {
       try {
-        // 确保有有效token
-        await this.ensureValidTokenWithRetry(retryCount > 0);
+        // 确保有有效token（只有在认证失败时才强制刷新）
+        await this.ensureValidToken();
         
         // 转换OpenAI格式到Qwen格式
         const qwenRequest = this.convertToQwenFormat(providerRequest);
+        
+        // 调试日志：检查转换后的请求内容
+        console.log(`Qwen request keys: ${Object.keys(qwenRequest).join(', ')}`);
+        if (qwenRequest.tools) {
+          console.log(`Tools included: ${qwenRequest.tools.length} tools`);
+        }
 
         const response = await axios.post(this.endpoint + '/chat/completions', qwenRequest, {
           headers: {
@@ -567,8 +600,8 @@ class QwenProvider extends BaseProvider {
     
     while (retryCount <= maxRetries) {
       try {
-        // 确保有有效token
-        await this.ensureValidTokenWithRetry(retryCount > 0);
+        // 确保有有效token（只有在认证失败时才强制刷新）
+        await this.ensureValidToken();
         
         const qwenRequest = this.convertToQwenFormat({ ...providerRequest, stream: true });
 
@@ -683,9 +716,9 @@ class QwenProvider extends BaseProvider {
       qwenRequest.max_tokens = openaiRequest.max_tokens;
     }
 
-    // 工具调用支持
+    // 工具调用支持 - 转换OpenAI格式到Qwen格式
     if (openaiRequest.tools && this.supportsTools(openaiRequest.model)) {
-      qwenRequest.tools = openaiRequest.tools;
+      qwenRequest.tools = this.convertToQwenTools(openaiRequest.tools);
     }
 
     return qwenRequest;
@@ -715,10 +748,36 @@ class QwenProvider extends BaseProvider {
     };
   }
 
+  // 转换OpenAI工具格式到Qwen格式
+  private convertToQwenTools(openAITools: any[]): any[] {
+    return openAITools.map(tool => {
+      if (tool.type === 'function' && tool.function) {
+        return {
+          type: 'function',
+          function: {
+            name: tool.function.name,
+            description: tool.function.description,
+            parameters: tool.function.parameters || {},
+            // Qwen特定的字段
+            input_schema: tool.function.parameters || {}
+          }
+        };
+      }
+      return tool; // 保持其他格式不变
+    });
+  }
+
   // 检查模型是否支持工具调用
   private supportsTools(model: string): boolean {
+    // 首先检查本地配置的模型
     const modelInfo = this.supportedModels.find(m => m.id === model);
-    return modelInfo?.supportsTools || false;
+    if (modelInfo && modelInfo.supportsTools !== undefined) {
+      return modelInfo.supportsTools;
+    }
+    
+    // 如果本地没有配置，假设Qwen模型都支持工具调用
+    // Qwen API文档显示支持工具调用
+    return model.startsWith('qwen-');
   }
 
   // 获取Provider信息

@@ -1,7 +1,7 @@
 {
   "name": "openai-compatible-providers-framework",
-  "version": "0.0.6",
-  "description": "OpenAI Compatible Providers Framework with dynamic module loading and compatibility layer",
+  "version": "0.0.7",
+  "description": "OpenAI Compatible Providers Framework with Qwen and iFlow tool calling support, OAuth authentication, and dynamic module loading",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
@@ -25,7 +25,12 @@
     "chat",
     "llm",
     "basemodule",
-    "rcc"
+    "rcc",
+    "qwen",
+    "iflow",
+    "tool-calling",
+    "oauth",
+    "authentication"
   ],
   "author": "WebAuto Team",
   "license": "MIT",
