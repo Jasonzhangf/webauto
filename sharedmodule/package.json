@@ -1,0 +1,43 @@
+{
+  "name": "mcp-protocol-framework",
+  "version": "0.0.2",
+  "description": "Advanced MCP Protocol Framework with automatic tool discovery and BaseModule integration",
+  "main": "src/index.js",
+  "types": "src/index.d.ts",
+  "scripts": {
+    "build": "echo 'Framework build complete'",
+    "test": "echo 'Tests not implemented yet'",
+    "lint": "echo 'Linting not implemented yet'",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "mcp",
+    "framework",
+    "tools",
+    "protocol",
+    "json-rpc",
+    "base-module",
+    "tool-discovery"
+  ],
+  "author": "WebAuto Team",
+  "license": "MIT",
+  "dependencies": {
+    "rcc-basemodule": "^0.1.4",
+    "rcc-errorhandling": "^1.0.5"
+  },
+  "devDependencies": {
+    "jest": "^29.0.0"
+  },
+  "engines": {
+    "node": ">=14.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Jasonzhangf/webauto.git",
+    "directory": "sharedmodule"
+  },
+  "bugs": {
+    "url": "https://github.com/Jasonzhangf/webauto/issues"
+  },
+  "homepage": "https://github.com/Jasonzhangf/webauto#readme"
+}

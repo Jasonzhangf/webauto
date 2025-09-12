@@ -1,5 +1,5 @@
 const { BaseModule } = require('rcc-basemodule');
-const { ErrorHandler } = require('rcc-errorhandling');
+const { ErrorHandlingCenter } = require('rcc-errorhandling');
 const Pipeline = require('./pipeline');
 const Step = require('./step');
 const Browser = require('./browser');
@@ -12,7 +12,10 @@ const MCPManager = require('./mcp');
 class WebAutoCLI extends BaseModule {
   constructor() {
     super();
-    this.errorHandler = new ErrorHandler();
+    this.errorHandler = new ErrorHandlingCenter({
+      id: 'webauto-cli',
+      name: 'WebAuto CLI Error Handler'
+    });
     this.browser = new Browser();
     this.cookieManager = new CookieManager();
     this.ruleEngine = new RuleEngine();
@@ -42,7 +45,11 @@ class WebAutoCLI extends BaseModule {
     try {
       await pipeline.execute();
     } catch (error) {
-      this.errorHandler.handle(error);
+      this.errorHandler.handleError({
+        error: error,
+        source: 'WebAutoCLI.start',
+        severity: 'error'
+      });
     }
   }
 }
