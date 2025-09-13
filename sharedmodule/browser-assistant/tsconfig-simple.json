@@ -1,0 +1,28 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "outDir": "./dist-simple"
+  },
+  "include": [
+    "src/core/SimpleBaseModule.ts",
+    "src/browser/SimpleCookieManager.ts",
+    "src/browser/CamoufoxManager.ts",
+    "src/operations/SimplePageOperationCenter.ts",
+    "src/operations/SimpleSmartElementSelector.ts",
+    "src/errors/index.ts",
+    "src/types/index.ts",
+    "src/index-simple.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "dist-simple",
+    "tests",
+    "examples",
+    "src/core/BaseModule.ts",
+    "src/browser/CookieManager.ts",
+    "src/operations/PageOperationCenter.ts",
+    "src/operations/SmartElementSelector.ts",
+    "src/index.ts"
+  ]
+}
