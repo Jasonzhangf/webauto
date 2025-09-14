@@ -15,10 +15,10 @@ export class CookieValidator extends ICookieValidator {
    * Initialize default domain configurations
    */
   initializeDefaultConfigs() {
-    // Weibo configuration
+    // Weibo configuration - updated with actual cookie names
     this.domainConfigs.set('weibo.com', {
-      requiredCookies: ['SUB', 'SUBP', 'SRT', 'SCF'],
-      sessionCookies: ['SUB', 'SUBP'],
+      requiredCookies: ['SUB', 'SUBP', 'SRT', 'SCF', 'XSRF-TOKEN', 'SRF', 'X-CSRF-TOKEN', 'ALC', 'ALF', 'WBPSESS', 'tid'],
+      sessionCookies: ['SUB', 'SUBP', 'WBPSESS', 'XSRF-TOKEN'],
       refreshThreshold: 24 * 60 * 60 * 1000, // 24 hours
       loginUrl: 'https://weibo.com/login.php'
     });
