@@ -126,3 +126,31 @@ debug-logs/
 # Temporary test files
 *.tmp
 *.temp
+
+# Test results and data
+results/
+test-results/
+*.results.json
+test-cookies/
+screenshots/
+reports/
+artifacts/
+test-artifacts/
+
+# Cookie and session data
+*.cookies
+sessions/
+storage/
+
+# Playwright
+playwright-report/
+playwright/.cache/
+
+# Browser cache and data
+*.cache/
+.cache/
+
+# Development databases
+*.db
+*.sqlite
+*.sqlite3

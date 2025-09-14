@@ -1,0 +1,34 @@
+{
+  "testTime": "2025-09-14T05:10:15.331Z",
+  "testUrl": "https://weibo.com/2656274875/Q4qEJBc6z#comment",
+  "configName": "微博帖子评论提取",
+  "configFile": "src/operations/websites/weibo/post-comments-extraction.json",
+  "summary": {
+    "operations": 14,
+    "workflows": 2,
+    "commentOperations": 8,
+    "targetCommentCount": 3
+  },
+  "results": {
+    "pageTitle": "微博正文",
+    "pageUrl": "https://weibo.com/2656274875/Q4qEJBc6z#comment",
+    "postContainerFound": true,
+    "commentContainerFound": true,
+    "commentCount": 3,
+    "expandButtonFound": false,
+    "screenshotTaken": true
+  },
+  "strategy": {
+    "mainSelector": ".WB_comment, .comment_list, .comment_box",
+    "commentWrapperSelector": ".WB_comment_wrap, .comment_item, .comment_list_item",
+    "expectedSuccess": true,
+    "confidence": "高"
+  },
+  "recommendations": [
+    "配置针对微博帖子评论页面优化",
+    "选择器覆盖多种评论容器类型",
+    "支持评论展开功能",
+    "包含完整的评论信息提取",
+    "建议在实际环境中测试验证"
+  ]
+}

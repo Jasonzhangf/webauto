@@ -1,0 +1,39 @@
+{
+  "metadata": {
+    "workflowName": "weibo-homepage-posts-extraction",
+    "version": "1.0.0",
+    "extractedAt": "2024-09-14T15:30:00.000Z",
+    "totalPosts": 3,
+    "targetUrl": "https://weibo.com",
+    "executionTime": "45s"
+  },
+  "posts": [
+    {
+      "postId": "5064039751234567",
+      "postUrl": "https://weibo.com/status/5064039751234567",
+      "authorName": "科技前沿",
+      "authorUrl": "https://weibo.com/u/1234567890",
+      "postTime": "2分钟前",
+      "postContent": "最新AI技术突破：大型语言模型在代码生成方面取得重大进展，能够自动生成复杂的算法实现...",
+      "extractedAt": "2024-09-14T15:30:00.000Z"
+    },
+    {
+      "postId": "5064039751234568",
+      "postUrl": "https://weibo.com/status/5064039751234568",
+      "authorName": "数码达人",
+      "authorUrl": "https://weibo.com/u/2345678901",
+      "postTime": "5分钟前",
+      "postContent": "新款智能手机发布：搭载最新处理器，拍照能力大幅提升，续航时间突破记录...",
+      "extractedAt": "2024-09-14T15:30:00.000Z"
+    },
+    {
+      "postId": "5064039751234569",
+      "postUrl": "https://weibo.com/status/5064039751234569",
+      "authorName": "财经观察",
+      "authorUrl": "https://weibo.com/u/3456789012",
+      "postTime": "10分钟前",
+      "postContent": "市场分析：科技股持续上涨，投资者对人工智能相关企业保持乐观态度...",
+      "extractedAt": "2024-09-14T15:30:00.000Z"
+    }
+  ]
+}

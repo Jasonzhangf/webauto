@@ -1,0 +1,373 @@
+{
+  "version": "1.0.0",
+  "description": "微博页面容器配置",
+  "containers": {
+    "weiboHomepage": {
+      "selector": "div[node-type='feed_list']",
+      "type": "page",
+      "capabilities": [
+        {
+          "name": "linkExtraction",
+          "type": "extraction",
+          "description": "提取页面中的所有链接",
+          "supportedDataTypes": ["post", "user", "topic", "hashtag", "image", "video"],
+          "parameters": [
+            {
+              "name": "maxCount",
+              "type": "number",
+              "required": false,
+              "defaultValue": 100,
+              "description": "最大提取数量"
+            },
+            {
+              "name": "targetTypes",
+              "type": "array",
+              "required": false,
+              "defaultValue": ["post", "user", "topic"],
+              "description": "目标链接类型数组"
+            },
+            {
+              "name": "containerFilter",
+              "type": "string",
+              "required": false,
+              "description": "容器过滤器"
+            }
+          ]
+        },
+        {
+          "name": "postExtraction",
+          "type": "extraction",
+          "description": "提取微博帖子信息",
+          "supportedDataTypes": ["post"],
+          "parameters": [
+            {
+              "name": "maxCount",
+              "type": "number",
+              "required": false,
+              "defaultValue": 50,
+              "description": "最大提取数量"
+            },
+            {
+              "name": "includeContent",
+              "type": "boolean",
+              "required": false,
+              "defaultValue": true,
+              "description": "是否包含内容"
+            },
+            {
+              "name": "includeMetadata",
+              "type": "boolean",
+              "required": false,
+              "defaultValue": true,
+              "description": "是否包含元数据"
+            }
+          ]
+        }
+      ],
+      "subContainers": ["feedItems", "sidebar", "hotSearch"],
+      "discovery": {
+        "maxDepth": 3,
+        "patterns": ["div[class*='feed']", "div[class*='card']", "div[class*='item']"],
+        "excludePatterns": ["div[class*='ad']", "div[class*='promotion']"]
+      }
+    },
+    "feedItems": {
+      "selector": "div[action-type='feed_list_item']",
+      "type": "list",
+      "capabilities": [
+        {
+          "name": "postExtraction",
+          "type": "extraction",
+          "description": "提取单个微博帖子信息",
+          "supportedDataTypes": ["post"],
+          "parameters": [
+            {
+              "name": "includeContent",
+              "type": "boolean",
+              "required": false,
+              "defaultValue": true,
+              "description": "是否包含内容"
+            },
+            {
+              "name": "includeUser",
+              "type": "boolean",
+              "required": false,
+              "defaultValue": true,
+              "description": "是否包含用户信息"
+            },
+            {
+              "name": "includeInteractions",
+              "type": "boolean",
+              "required": false,
+              "defaultValue": true,
+              "description": "是否包含交互信息"
+            }
+          ]
+        },
+        {
+          "name": "linkExtraction",
+          "type": "extraction",
+          "description": "提取帖子中的链接",
+          "supportedDataTypes": ["post", "user", "topic", "hashtag", "image", "video"],
+          "parameters": [
+            {
+              "name": "targetTypes",
+              "type": "array",
+              "required": false,
+              "defaultValue": ["post", "user", "topic"],
+              "description": "目标链接类型"
+            }
+          ]
+        }
+      ],
+      "subContainers": ["postContent", "userInfo", "postActions"]
+    },
+    "postContent": {
+      "selector": "div[node-type='feed_list_content']",
+      "type": "content",
+      "capabilities": [
+        {
+          "name": "textExtraction",
+          "type": "extraction",
+          "description": "提取微博文本内容",
+          "supportedDataTypes": ["text"],
+          "parameters": [
+            {
+              "name": "maxLength",
+              "type": "number",
+              "required": false,
+              "defaultValue": 500,
+              "description": "最大长度"
+            },
+            {
+              "name": "includeHTML",
+              "type": "boolean",
+              "required": false,
+              "defaultValue": false,
+              "description": "是否包含HTML"
+            }
+          ]
+        },
+        {
+          "name": "hashtagExtraction",
+          "type": "extraction",
+          "description": "提取话题标签",
+          "supportedDataTypes": ["hashtag"],
+          "parameters": [
+            {
+              "name": "maxCount",
+              "type": "number",
+              "required": false,
+              "defaultValue": 20,
+              "description": "最大提取数量"
+            }
+          ]
+        },
+        {
+          "name": "mediaExtraction",
+          "type": "extraction",
+          "description": "提取媒体资源",
+          "supportedDataTypes": ["image", "video"],
+          "parameters": [
+            {
+              "name": "mediaType",
+              "type": "string",
+              "required": false,
+              "defaultValue": "all",
+              "description": "媒体类型 (image/video/all)"
+            }
+          ]
+        }
+      ]
+    },
+    "userInfo": {
+      "selector": "div[class*='feed_user']",
+      "type": "content",
+      "capabilities": [
+        {
+          "name": "userExtraction",
+          "type": "extraction",
+          "description": "提取用户信息",
+          "supportedDataTypes": ["user"],
+          "parameters": [
+            {
+              "name": "includeProfile",
+              "type": "boolean",
+              "required": false,
+              "defaultValue": true,
+              "description": "是否包含详细资料"
+            },
+            {
+              "name": "includeStats",
+              "type": "boolean",
+              "required": false,
+              "defaultValue": true,
+              "description": "是否包含统计信息"
+            }
+          ]
+        }
+      ]
+    },
+    "sidebar": {
+      "selector": "div[class*='sidebar']",
+      "type": "component",
+      "capabilities": [
+        {
+          "name": "topicExtraction",
+          "type": "extraction",
+          "description": "提取侧边栏话题",
+          "supportedDataTypes": ["topic"],
+          "parameters": [
+            {
+              "name": "maxCount",
+              "type": "number",
+              "required": false,
+              "defaultValue": 10,
+              "description": "最大提取数量"
+            }
+          ]
+        },
+        {
+          "name": "userRecommendationExtraction",
+          "type": "extraction",
+          "description": "提取推荐用户",
+          "supportedDataTypes": ["user"],
+          "parameters": [
+            {
+              "name": "maxCount",
+              "type": "number",
+              "required": false,
+              "defaultValue": 5,
+              "description": "最大提取数量"
+            }
+          ]
+        }
+      ]
+    },
+    "hotSearch": {
+      "selector": "div[node-type='hot_list']",
+      "type": "list",
+      "capabilities": [
+        {
+          "name": "hotTopicExtraction",
+          "type": "extraction",
+          "description": "提取热搜话题",
+          "supportedDataTypes": ["topic", "hashtag"],
+          "parameters": [
+            {
+              "name": "maxCount",
+              "type": "number",
+              "required": false,
+              "defaultValue": 20,
+              "description": "最大提取数量"
+            },
+            {
+              "name": "includeRank",
+              "type": "boolean",
+              "required": false,
+              "defaultValue": true,
+              "description": "是否包含排名"
+            },
+            {
+              "name": "includeHeat",
+              "type": "boolean",
+              "required": false,
+              "defaultValue": true,
+              "description": "是否包含热度"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "workflows": {
+    "comprehensiveWeiboAnalysis": {
+      "description": "全面分析微博页面内容",
+      "steps": [
+        {
+          "containerName": "weiboHomepage",
+          "operation": "linkExtraction",
+          "parameters": {
+            "maxCount": 100,
+            "targetTypes": ["post", "user", "topic", "hashtag"]
+          }
+        },
+        {
+          "containerName": "feedItems",
+          "operation": "postExtraction",
+          "parameters": {
+            "maxCount": 50,
+            "includeContent": true,
+            "includeUser": true
+          }
+        },
+        {
+          "containerName": "postContent",
+          "operation": "hashtagExtraction",
+          "parameters": {
+            "maxCount": 30
+          }
+        },
+        {
+          "containerName": "sidebar",
+          "operation": "topicExtraction",
+          "parameters": {
+            "maxCount": 10
+          }
+        },
+        {
+          "containerName": "hotSearch",
+          "operation": "hotTopicExtraction",
+          "parameters": {
+            "maxCount": 15,
+            "includeRank": true,
+            "includeHeat": true
+          }
+        }
+      ]
+    },
+    "userProfileAnalysis": {
+      "description": "分析用户主页",
+      "steps": [
+        {
+          "containerName": "feedItems",
+          "operation": "postExtraction",
+          "parameters": {
+            "maxCount": 20,
+            "includeContent": true,
+            "includeMetadata": true
+          }
+        },
+        {
+          "containerName": "userInfo",
+          "operation": "userExtraction",
+          "parameters": {
+            "includeProfile": true,
+            "includeStats": true
+          }
+        }
+      ]
+    },
+    "trendingTopicsExtraction": {
+      "description": "提取热门话题",
+      "steps": [
+        {
+          "containerName": "hotSearch",
+          "operation": "hotTopicExtraction",
+          "parameters": {
+            "maxCount": 30,
+            "includeRank": true,
+            "includeHeat": true
+          }
+        },
+        {
+          "containerName": "sidebar",
+          "operation": "topicExtraction",
+          "parameters": {
+            "maxCount": 10
+          }
+        }
+      ]
+    }
+  }
+}

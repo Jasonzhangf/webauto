@@ -1,0 +1,19 @@
+{
+  "timestamp": "2025-09-14T05:34:21.481Z",
+  "url": "https://weibo.com/2656274875/Q4qEJBc6z#comment",
+  "pageStructure": {
+    "patterns": {},
+    "candidateSelectors": [],
+    "totalElements": 0,
+    "analysisTime": 1757828061481
+  },
+  "results": {
+    "url": "https://weibo.com/2656274875/Q4qEJBc6z#comment",
+    "comments": [],
+    "totalExtracted": 0,
+    "pageStructure": {},
+    "performance": {
+      "extraction": 0
+    }
+  }
+}

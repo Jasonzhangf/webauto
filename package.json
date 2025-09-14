@@ -1,60 +1,39 @@
 {
-  "name": "openai-compatible-providers-framework",
-  "version": "0.0.6",
-  "description": "OpenAI Compatible Providers Framework with dynamic module loading and compatibility layer",
-  "main": "dist/index.js",
-  "types": "dist/index.d.ts",
+  "name": "webauto-project",
+  "version": "1.0.0",
+  "description": "WebAuto Project Collection - Multiple Web Automation Modules",
+  "private": true,
   "scripts": {
-    "build": "tsc",
-    "test": "jest",
-    "lint": "eslint src/**/*.ts",
-    "prepublishOnly": "npm run build",
-    "publish:patch": "npm version patch && npm publish",
-    "publish:minor": "npm version minor && npm publish",
-    "publish:major": "npm version major && npm publish",
-    "clean": "rm -rf dist",
-    "dev": "ts-node src/index.ts",
-    "typecheck": "tsc --noEmit"
+    "install:all": "npm install && cd sharedmodule && npm install && cd mcp-framework && npm install && cd ../weibo-workflow-system && npm install && cd ../openai-compatible-providers && npm install",
+    "build:all": "cd sharedmodule/mcp-framework && npm run build && cd ../weibo-workflow-system && npm run build && cd ../openai-compatible-providers && npm run build",
+    "test:all": "cd sharedmodule/mcp-framework && npm test && cd ../weibo-workflow-system && npm test && cd ../openai-compatible-providers && npm test",
+    "lint:all": "cd sharedmodule/mcp-framework && npm run lint && cd ../weibo-workflow-system && npm run lint && cd ../openai-compatible-providers && npm run lint",
+    "start:mcp": "cd sharedmodule/mcp-framework && npm start",
+    "start:weibo": "cd sharedmodule/weibo-workflow-system && npm start",
+    "clean": "rm -rf node_modules sharedmodule/*/node_modules sharedmodule/*/dist"
   },
   "keywords": [
-    "openai",
-    "providers",
+    "web-automation",
+    "mcp",
     "framework",
-    "compatibility",
-    "ai",
-    "chat",
-    "llm",
-    "basemodule",
-    "rcc"
+    "playwright",
+    "automation",
+    "scraping",
+    "weibo",
+    "openai"
   ],
   "author": "WebAuto Team",
   "license": "MIT",
-  "dependencies": {
-    "axios": "^1.12.0",
-    "open": "^10.0.3",
-    "rcc-basemodule": "^0.1.4",
-    "rcc-errorhandling": "^1.0.5"
-  },
-  "devDependencies": {
-    "typescript": "^5.0.0",
-    "@types/node": "^20.0.0",
-    "ts-node": "^10.9.0",
-    "jest": "^29.0.0",
-    "@types/jest": "^29.0.0",
-    "eslint": "^8.0.0",
-    "@typescript-eslint/eslint-plugin": "^6.0.0",
-    "@typescript-eslint/parser": "^6.0.0"
-  },
-  "engines": {
-    "node": ">=14.0.0"
-  },
   "repository": {
     "type": "git",
-    "url": "https://github.com/Jasonzhangf/webauto.git",
-    "directory": "sharedmodule/openai-compatible-providers"
+    "url": "https://github.com/Jasonzhangf/webauto.git"
   },
   "bugs": {
     "url": "https://github.com/Jasonzhangf/webauto/issues"
   },
-  "homepage": "https://github.com/Jasonzhangf/webauto#readme"
+  "homepage": "https://github.com/Jasonzhangf/webauto#readme",
+  "dependencies": {
+    "@types/node": "^24.3.3",
+    "playwright": "^1.55.0"
+  }
 }
