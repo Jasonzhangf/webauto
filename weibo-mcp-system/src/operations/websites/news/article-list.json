@@ -1,0 +1,178 @@
+{
+  "website": "news",
+  "page": "article-list",
+  "description": "新闻网站文章列表页面配置",
+  "urlPattern": "https?://(.*\\.)?(news|sina|163|sohu)\\.com.*",
+  "operations": [
+    {
+      "name": "获取页面标题",
+      "atomicOperation": "get_page_title",
+      "outputKey": "page_title"
+    },
+    {
+      "name": "查找文章列表容器",
+      "atomicOperation": "find_element",
+      "selector": ".article-list, .news-list, .content-list",
+      "outputKey": "article_container"
+    },
+    {
+      "name": "提取文章标题",
+      "atomicOperation": "extract_text",
+      "selector": ".article-list .title, .news-list .title, .content-list .title, h1, h2, h3",
+      "parameters": {
+        "multi": true
+      },
+      "outputKey": "article_titles"
+    },
+    {
+      "name": "提取文章链接",
+      "atomicOperation": "extract_attribute",
+      "selector": ".article-list a, .news-list a, .content-list a",
+      "parameters": {
+        "attribute": "href",
+        "multi": true
+      },
+      "outputKey": "article_links"
+    },
+    {
+      "name": "提取文章摘要",
+      "atomicOperation": "extract_text",
+      "selector": ".article-list .summary, .news-list .summary, .content-list .desc",
+      "parameters": {
+        "multi": true
+      },
+      "outputKey": "article_summaries"
+    },
+    {
+      "name": "提取文章时间",
+      "atomicOperation": "extract_text",
+      "selector": ".article-list .time, .news-list .time, .content-list .date",
+      "parameters": {
+        "multi": true
+      },
+      "outputKey": "article_times"
+    },
+    {
+      "name": "提取文章作者",
+      "atomicOperation": "extract_text",
+      "selector": ".article-list .author, .news-list .author, .content-list .source",
+      "parameters": {
+        "multi": true
+      },
+      "outputKey": "article_authors"
+    },
+    {
+      "name": "获取文章数量",
+      "atomicOperation": "get_element_count",
+      "selector": ".article-list .article, .news-list .news-item, .content-list .item",
+      "outputKey": "article_count"
+    },
+    {
+      "name": "检查是否加载更多",
+      "atomicOperation": "check_element_exists",
+      "selector": ".load-more, .more-btn, .next-page",
+      "outputKey": "has_load_more"
+    },
+    {
+      "name": "等待页面加载",
+      "atomicOperation": "wait_for_timeout",
+      "parameters": {
+        "timeout": 2000
+      },
+      "outputKey": "page_loaded"
+    }
+  ],
+  "workflows": [
+    {
+      "name": "快速文章抓取",
+      "description": "快速抓取文章列表的标题和链接",
+      "steps": [
+        {
+          "operationName": "等待页面加载"
+        },
+        {
+          "operationName": "获取页面标题"
+        },
+        {
+          "operationName": "提取文章标题"
+        },
+        {
+          "operationName": "提取文章链接"
+        }
+      ]
+    },
+    {
+      "name": "完整文章信息提取",
+      "description": "提取文章列表的完整信息",
+      "steps": [
+        {
+          "operationName": "等待页面加载"
+        },
+        {
+          "operationName": "获取页面标题"
+        },
+        {
+          "operationName": "查找文章列表容器"
+        },
+        {
+          "operationName": "提取文章标题"
+        },
+        {
+          "operationName": "提取文章链接"
+        },
+        {
+          "operationName": "提取文章摘要"
+        },
+        {
+          "operationName": "提取文章时间"
+        },
+        {
+          "operationName": "提取文章作者"
+        },
+        {
+          "operationName": "获取文章数量"
+        }
+      ]
+    },
+    {
+      "name": "文章列表截图",
+      "description": "对文章列表页面进行截图",
+      "steps": [
+        {
+          "operationName": "等待页面加载"
+        },
+        {
+          "operationName": "获取页面标题"
+        },
+        {
+          "operationName": "screenshot",
+          "parameters": {
+            "filename": "news_articles.png"
+          }
+        }
+      ]
+    },
+    {
+      "name": "文章数据统计",
+      "description": "统计文章列表的基本数据",
+      "steps": [
+        {
+          "operationName": "等待页面加载"
+        },
+        {
+          "operationName": "获取页面标题"
+        },
+        {
+          "operationName": "获取文章数量"
+        },
+        {
+          "operationName": "检查是否加载更多"
+        },
+        {
+          "operationName": "get_page_url",
+          "outputKey": "page_url"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,118 @@
+{
+  "website": "weibo",
+  "page": "user-profile",
+  "description": "微博用户个人页面信息提取配置",
+  "urlPattern": "https?://weibo\\.com/u/\\d+|https?://weibo\\.com/[a-zA-Z0-9_]+",
+  "operations": [
+    {
+      "name": "获取用户基本信息",
+      "atomicOperation": "extract_text",
+      "selector": ".Profile_header_title .UserName",
+      "outputKey": "username"
+    },
+    {
+      "name": "获取用户简介",
+      "atomicOperation": "extract_text", 
+      "selector": ".Profile_header_intro .Profile_header_intro_text",
+      "outputKey": "bio"
+    },
+    {
+      "name": "获取粉丝数",
+      "atomicOperation": "extract_text",
+      "selector": ".Profile_header_follow .Follow_count_1 li:nth-child(2) strong",
+      "outputKey": "followers_count"
+    },
+    {
+      "name": "获取关注数",
+      "atomicOperation": "extract_text",
+      "selector": ".Profile_header_follow .Follow_count_1 li:nth-child(1) strong", 
+      "outputKey": "following_count"
+    },
+    {
+      "name": "获取微博数",
+      "atomicOperation": "extract_text",
+      "selector": ".Profile_header_follow .Follow_count_1 li:nth-child(3) strong",
+      "outputKey": "posts_count"
+    },
+    {
+      "name": "获取用户头像",
+      "atomicOperation": "extract_attribute",
+      "selector": ".Profile_header_avatar img",
+      "parameters": {
+        "attribute": "src"
+      },
+      "outputKey": "avatar_url"
+    },
+    {
+      "name": "检查是否认证用户",
+      "atomicOperation": "check_element_exists",
+      "selector": ".Profile_header_title .Icon_icon",
+      "outputKey": "is_verified"
+    },
+    {
+      "name": "获取认证信息",
+      "atomicOperation": "extract_text",
+      "selector": ".Profile_header_title .Verify_reason",
+      "condition": "is_verified.exists",
+      "outputKey": "verification_info"
+    },
+    {
+      "name": "获取页面URL",
+      "atomicOperation": "get_page_url",
+      "outputKey": "profile_url"
+    }
+  ],
+  "workflows": [
+    {
+      "name": "完整用户信息提取",
+      "description": "提取微博用户的完整信息",
+      "steps": [
+        {
+          "operationName": "获取用户基本信息"
+        },
+        {
+          "operationName": "获取用户简介"
+        },
+        {
+          "operationName": "获取粉丝数"
+        },
+        {
+          "operationName": "获取关注数"
+        },
+        {
+          "operationName": "获取微博数"
+        },
+        {
+          "operationName": "获取用户头像"
+        },
+        {
+          "operationName": "检查是否认证用户"
+        },
+        {
+          "operationName": "获取认证信息"
+        },
+        {
+          "operationName": "获取页面URL"
+        }
+      ]
+    },
+    {
+      "name": "快速用户统计",
+      "description": "快速获取用户统计数据",
+      "steps": [
+        {
+          "operationName": "获取用户基本信息"
+        },
+        {
+          "operationName": "获取粉丝数"
+        },
+        {
+          "operationName": "获取关注数"
+        },
+        {
+          "operationName": "获取微博数"
+        }
+      ]
+    }
+  ]
+}

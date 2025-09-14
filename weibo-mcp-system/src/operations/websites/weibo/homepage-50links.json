@@ -1,0 +1,172 @@
+{
+  "website": "weibo",
+  "page": "homepage-50links",
+  "description": "微博主页50条链接提取配置",
+  "urlPattern": "https?://weibo\\.com(/.*)?|https?://www\\.weibo\\.com(/.*)?",
+  "operations": [
+    {
+      "name": "等待页面加载",
+      "atomicOperation": "wait_for_timeout",
+      "parameters": {
+        "timeout": 3000
+      },
+      "outputKey": "page_loaded"
+    },
+    {
+      "name": "获取页面标题",
+      "atomicOperation": "get_page_title",
+      "outputKey": "page_title"
+    },
+    {
+      "name": "获取页面URL",
+      "atomicOperation": "get_page_url",
+      "outputKey": "page_url"
+    },
+    {
+      "name": "检查微博容器",
+      "atomicOperation": "find_element",
+      "selector": "div[node-type='feed_list'], .Feed_body, .WB_feed, .feed_list",
+      "outputKey": "feed_container"
+    },
+    {
+      "name": "获取微博链接",
+      "atomicOperation": "extract_attribute",
+      "selector": "div[node-type='feed_list'] a[href*='weibo.com'], .Feed_body a[href*='weibo.com'], .WB_feed a[href*='weibo.com']",
+      "parameters": {
+        "attribute": "href",
+        "multi": true
+      },
+      "condition": "feed_container.found",
+      "outputKey": "weibo_links"
+    },
+    {
+      "name": "获取所有链接",
+      "atomicOperation": "extract_attribute",
+      "selector": "div[node-type='feed_list'] a[href], .Feed_body a[href], .WB_feed a[href]",
+      "parameters": {
+        "attribute": "href",
+        "multi": true
+      },
+      "condition": "feed_container.found",
+      "outputKey": "all_links"
+    },
+    {
+      "name": "获取链接文本",
+      "atomicOperation": "extract_text",
+      "selector": "div[node-type='feed_list'] a[href], .Feed_body a[href], .WB_feed a[href]",
+      "parameters": {
+        "multi": true,
+        "trim": true
+      },
+      "condition": "feed_container.found",
+      "outputKey": "link_texts"
+    },
+    {
+      "name": "获取用户信息链接",
+      "atomicOperation": "extract_attribute",
+      "selector": "div[node-type='feed_list'] a[href*='/u/'], div[node-type='feed_list'] a[href*='/n/'], .Feed_body a[href*='/u/'], .Feed_body a[href*='/n/']",
+      "parameters": {
+        "attribute": "href",
+        "multi": true
+      },
+      "condition": "feed_container.found",
+      "outputKey": "user_links"
+    },
+    {
+      "name": "获取帖子链接",
+      "atomicOperation": "extract_attribute",
+      "selector": "div[node-type='feed_list'] a[href*='/status/'], div[node-type='feed_list'] a[href*='detail'], .Feed_body a[href*='/status/'], .Feed_body a[href*='detail']",
+      "parameters": {
+        "attribute": "href",
+        "multi": true
+      },
+      "condition": "feed_container.found",
+      "outputKey": "post_links"
+    },
+    {
+      "name": "获取话题链接",
+      "atomicOperation": "extract_attribute",
+      "selector": "div[node-type='feed_list'] a[href*='#'], div[node-type='feed_list'] a[href*='search'], .Feed_body a[href*='#'], .Feed_body a[href*='search']",
+      "parameters": {
+        "attribute": "href",
+        "multi": true
+      },
+      "condition": "feed_container.found",
+      "outputKey": "topic_links"
+    },
+    {
+      "name": "统计链接数量",
+      "atomicOperation": "get_element_count",
+      "selector": "div[node-type='feed_list'] a[href], .Feed_body a[href], .WB_feed a[href]",
+      "condition": "feed_container.found",
+      "outputKey": "total_links_count"
+    },
+    {
+      "name": "截图保存",
+      "atomicOperation": "screenshot",
+      "parameters": {
+        "filename": "weibo-homepage-links.png"
+      },
+      "outputKey": "screenshot_info"
+    }
+  ],
+  "workflows": [
+    {
+      "name": "50条链接提取",
+      "description": "提取微博主页的50条链接",
+      "steps": [
+        {
+          "operationName": "等待页面加载"
+        },
+        {
+          "operationName": "获取页面标题"
+        },
+        {
+          "operationName": "获取页面URL"
+        },
+        {
+          "operationName": "检查微博容器"
+        },
+        {
+          "operationName": "获取微博链接"
+        },
+        {
+          "operationName": "获取所有链接"
+        },
+        {
+          "operationName": "获取链接文本"
+        },
+        {
+          "operationName": "获取用户信息链接"
+        },
+        {
+          "operationName": "获取帖子链接"
+        },
+        {
+          "operationName": "获取话题链接"
+        },
+        {
+          "operationName": "统计链接数量"
+        }
+      ]
+    },
+    {
+      "name": "快速链接检查",
+      "description": "快速检查微博主页链接提取情况",
+      "steps": [
+        {
+          "operationName": "等待页面加载"
+        },
+        {
+          "operationName": "检查微博容器"
+        },
+        {
+          "operationName": "获取所有链接"
+        },
+        {
+          "operationName": "统计链接数量"
+        }
+      ]
+    }
+  ]
+}
