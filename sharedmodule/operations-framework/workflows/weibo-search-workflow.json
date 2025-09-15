@@ -1,0 +1,377 @@
+{
+  "name": "weibo-keyword-search-workflow",
+  "description": "微博关键词搜索和内容捕获工作流 - 基于实际测试的查理柯克搜索",
+  "version": "2.0.0",
+  "author": "WebAuto Team",
+  "created": "2025-09-15",
+  "updated": "2025-09-15",
+  "category": "weibo-search",
+  "tags": ["weibo", "search", "keyword", "content-extraction"],
+  "settings": {
+    "maxRetries": 3,
+    "timeout": 300000,
+    "parallelExecution": false,
+    "continueOnError": false,
+    "saveResults": true,
+    "resultFormat": "structured",
+    "enableImageFiltering": true,
+    "enableDeduplication": true
+  },
+  "context": {
+    "container": {
+      "type": "weibo-search-page",
+      "platform": "weibo",
+      "language": "zh",
+      "url": "https://s.weibo.com"
+    },
+    "browser": {
+      "headless": false,
+      "autoInjectCookies": true,
+      "waitForLogin": true,
+      "targetDomain": "weibo.com",
+      "defaultTimeout": 15000,
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+    },
+    "save": {
+      "rootDir": "~/.webauto/weibo",
+      "format": "structured",
+      "includeImages": true,
+      "includeMetadata": true,
+      "createReadme": true,
+      "includeCSV": true,
+      "enableDeduplication": true
+    },
+    "imageFiltering": {
+      "enabled": true,
+      "filterAvatars": true,
+      "filterLogos": true,
+      "filterSystemImages": true,
+      "filterThumbnails": true,
+      "filterEmojis": true,
+      "minImageSize": 50
+    }
+  },
+  "steps": [
+    {
+      "id": "initialize-browser",
+      "name": "初始化浏览器环境",
+      "abstractCategory": "browser-initialization",
+      "description": "启动浏览器并设置微博Cookie",
+      "config": {
+        "url": "https://s.weibo.com",
+        "waitForSelector": ".card-wrap, .card-feed, .wbs-feed",
+        "timeout": 30000,
+        "loadCookies": true,
+        "cookieDomain": "weibo.com",
+        "cookiePath": "~/.webauto/cookies"
+      },
+      "expectedOutput": ["browserContext", "page"],
+      "forceOperation": "BrowserInitializationOperation"
+    },
+    {
+      "id": "construct-search-url",
+      "name": "构建搜索URL",
+      "abstractCategory": "url-construction",
+      "description": "构建微博搜索URL",
+      "config": {
+        "baseUrl": "https://s.weibo.com/weibo",
+        "keyword": "${keyword}",
+        "params": {
+          "q": "${keyword}",
+          "xsort": "${sortBy:hot}",
+          "Refer": "hotmore",
+          "page": 1
+        }
+      },
+      "expectedOutput": ["searchUrl"],
+      "forceOperation": "UrlConstructionOperation"
+    },
+    {
+      "id": "navigate-to-search",
+      "name": "导航到搜索页面",
+      "abstractCategory": "page-navigation",
+      "description": "导航到微博搜索结果页面",
+      "config": {
+        "url": "${searchUrl}",
+        "waitForSelector": ".Feed_body_3R0rO, .card-wrap, .card-feed",
+        "timeout": 30000,
+        "screenshot": false
+      },
+      "expectedOutput": ["page"],
+      "forceOperation": "PageNavigationOperation"
+    },
+    {
+      "id": "wait-for-content-load",
+      "name": "等待内容加载",
+      "abstractCategory": "wait-operation",
+      "description": "等待搜索结果内容完全加载",
+      "config": {
+        "waitForSelector": ".Feed_body_3R0rO",
+        "timeout": 15000,
+        "waitForState": "networkidle"
+      },
+      "expectedOutput": ["contentLoaded"],
+      "forceOperation": "WaitOperation"
+    },
+    {
+      "id": "extract-search-results",
+      "name": "提取搜索结果",
+      "abstractCategory": "content-extraction",
+      "description": "从搜索页面提取微博帖子信息",
+      "config": {
+        "source": "page",
+        "maxItems": "${count:50}",
+        "contentSelector": ".Feed_body_3R0rO",
+        "includeFields": ["id", "username", "content", "time", "stats", "images", "links"],
+        "imageFiltering": {
+          "enabled": true,
+          "filterRules": {
+            "avatars": ["avatar", "head", "profile"],
+            "logos": ["logo", "icon", "vip", "svvip"],
+            "system": ["s.weibo.com/upload", "s.weibo.com/default", "weibo.com/img"],
+            "thumbnails": ["thumb", "orj", "crop", "square", "small", "mini"],
+            "emojis": ["expression", "emoji", "sinajs.cn/t4/appstyle", "face.t.sinajs.cn"],
+            "sizes": ["20x20", "24x24", "32x32", "64x64"]
+          }
+        }
+      },
+      "expectedOutput": ["searchResults"],
+      "forceOperation": "WeiboSearchOperation"
+    },
+    {
+      "id": "process-and-filter-images",
+      "name": "处理和过滤图片",
+      "abstractCategory": "image-processing",
+      "description": "过滤并处理帖子中的图片，移除logo、头像、缩略图等",
+      "config": {
+        "data": "${searchResults}",
+        "processingRules": {
+          "removeThumbnails": true,
+          "removeAvatars": true,
+          "removeLogos": true,
+          "removeEmojis": true,
+          "minImageWidth": 50,
+          "allowedDomains": ["wx1.sinaimg.cn", "wx2.sinaimg.cn", "wx3.sinaimg.cn", "wx4.sinaimg.cn", "tvax1.sinaimg.cn", "tvax2.sinaimg.cn", "tvax3.sinaimg.cn", "tvax4.sinaimg.cn"]
+        }
+      },
+      "expectedOutput": ["filteredResults"],
+      "forceOperation": "ImageProcessingOperation"
+    },
+    {
+      "id": "scan-existing-data",
+      "name": "扫描现有数据",
+      "abstractCategory": "data-scanning",
+      "description": "扫描已存在的数据以进行去重",
+      "config": {
+        "basePath": "${save.rootDir}",
+        "keyword": "${keyword}",
+        "checkExistingFiles": true
+      },
+      "expectedOutput": ["existingData"],
+      "forceOperation": "DataScanningOperation"
+    },
+    {
+      "id": "deduplicate-content",
+      "name": "内容去重",
+      "abstractCategory": "data-deduplication",
+      "description": "基于URL和内容进行去重处理",
+      "config": {
+        "newContent": "${filteredResults}",
+        "existingData": "${existingData}",
+        "deduplicationFields": ["url", "content"],
+        "strategy": "merge-and-skip"
+      },
+      "expectedOutput": ["deduplicatedContent"],
+      "forceOperation": "DataDeduplicationOperation"
+    },
+    {
+      "id": "save-structured-data",
+      "name": "保存结构化数据",
+      "abstractCategory": "file-save",
+      "description": "保存搜索结果到结构化目录",
+      "config": {
+        "content": "${deduplicatedContent}",
+        "keyword": "${keyword}",
+        "basePath": "${save.rootDir}",
+        "includeCSV": true,
+        "includeIndividualFiles": true,
+        "includeImages": true,
+        "createReadme": true,
+        "filePrefix": "weibo-search",
+        "deduplication": true,
+        "skipExistingImages": true,
+        "incrementalMode": true
+      },
+      "expectedOutput": ["saveResult"],
+      "forceOperation": "FileSaveOperation"
+    },
+    {
+      "id": "download-images",
+      "name": "下载图片",
+      "abstractCategory": "image-download",
+      "description": "下载帖子中的图片文件",
+      "config": {
+        "saveResult": "${saveResult}",
+        "skipExistingImages": true,
+        "downloadTimeout": 30000,
+        "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+      },
+      "expectedOutput": ["downloadResults"],
+      "forceOperation": "ImageDownloadOperation"
+    },
+    {
+      "id": "generate-report",
+      "name": "生成搜索报告",
+      "abstractCategory": "report-generation",
+      "description": "生成搜索结果统计报告",
+      "config": {
+        "keyword": "${keyword}",
+        "searchResult": "${deduplicatedContent}",
+        "saveResult": "${saveResult}",
+        "downloadResults": "${downloadResults}",
+        "executionTime": "${executionTime}",
+        "includeStatistics": true,
+        "includeSummary": true
+      },
+      "expectedOutput": ["report"],
+      "forceOperation": "ReportGenerationOperation"
+    }
+  ],
+  "output": {
+    "success": {
+      "message": "微博关键词搜索完成",
+      "data": {
+        "keyword": "${keyword}",
+        "resultCount": "${deduplicatedContent.length}",
+        "savePath": "${saveResult.basePath}",
+        "totalFiles": "${saveResult.totalFiles}",
+        "newItemsCount": "${saveResult.newItemsCount}",
+        "existingItemsCount": "${saveResult.existingItemCount}",
+        "executionTime": "${executionTime}"
+      },
+      "files": {
+        "basePath": "${saveResult.basePath}",
+        "metadata": "${saveResult.basePath}/metadata.json",
+        "summary": "${saveResult.basePath}/all-items.json",
+        "csv": "${saveResult.basePath}/all-items.csv",
+        "readme": "${saveResult.basePath}/README.md"
+      },
+      "statistics": {
+        "totalPosts": "${deduplicatedContent.length}",
+        "postsWithImages": "${saveResult.postsWithImages}",
+        "totalImages": "${saveResult.totalImages}",
+        "downloadedImages": "${downloadResults.successCount}",
+        "skippedImages": "${downloadResults.skippedCount}",
+        "searchTime": "${timestamp}",
+        "keyword": "${keyword}"
+      }
+    },
+    "error": {
+      "message": "微博关键词搜索失败",
+      "retry": true,
+      "maxRetries": 3,
+      "errorHandling": {
+        "browserError": "restart-browser",
+        "networkError": "retry-with-delay",
+        "contentError": "log-and-continue"
+      }
+    }
+  },
+  "parameters": {
+    "keyword": {
+      "type": "string",
+      "required": true,
+      "description": "搜索关键词",
+      "example": "查理柯克"
+    },
+    "count": {
+      "type": "number",
+      "required": false,
+      "default": 50,
+      "min": 1,
+      "max": 200,
+      "description": "要获取的帖子数量"
+    },
+    "sortBy": {
+      "type": "string",
+      "required": false,
+      "default": "hot",
+      "enum": ["hot", "time", "relevant"],
+      "description": "排序方式：hot-热门, time-时间, relevant-相关"
+    },
+    "timeRange": {
+      "type": "string",
+      "required": false,
+      "default": "all",
+      "enum": ["all", "today", "week", "month"],
+      "description": "时间范围"
+    },
+    "saveDir": {
+      "type": "string",
+      "required": false,
+      "default": "~/.webauto/weibo",
+      "description": "保存根目录"
+    },
+    "enableImageFiltering": {
+      "type": "boolean",
+      "required": false,
+      "default": true,
+      "description": "是否启用图片过滤"
+    },
+    "enableDeduplication": {
+      "type": "boolean",
+      "required": false,
+      "default": true,
+      "description": "是否启用去重功能"
+    }
+  },
+  "examples": {
+    "查理柯克搜索": {
+      "keyword": "查理柯克",
+      "count": 50,
+      "sortBy": "hot",
+      "enableImageFiltering": true,
+      "enableDeduplication": true
+    },
+    "新闻图片搜索": {
+      "keyword": "新闻图片",
+      "count": 30,
+      "sortBy": "time",
+      "enableImageFiltering": true,
+      "enableDeduplication": true
+    }
+  },
+  "performance": {
+    "estimatedTime": "2-5分钟",
+    "successRate": "85-95%",
+    "memoryUsage": "medium",
+    "networkUsage": "high"
+  },
+  "dependencies": {
+    "required": [
+      "BrowserInitializationOperation",
+      "PageNavigationOperation",
+      "WeiboSearchOperation",
+      "FileSaveOperation"
+    ],
+    "optional": [
+      "ImageProcessingOperation",
+      "ImageDownloadOperation",
+      "ReportGenerationOperation"
+    ]
+  },
+  "changelog": {
+    "2.0.0": [
+      "基于实际查理柯克搜索测试优化",
+      "增强图片过滤功能",
+      "更新保存路径到 ~/.webauto/weibo",
+      "添加去重功能",
+      "改进错误处理",
+      "添加详细报告生成"
+    ],
+    "1.0.0": [
+      "初始版本",
+      "基础微博搜索功能"
+    ]
+  }
+}

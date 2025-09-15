@@ -1,0 +1,50 @@
+{
+  "name": "webauto-operations-framework",
+  "version": "1.0.0",
+  "description": "WebAuto Operations Framework - A comprehensive framework for web automation operations",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src/**/*.ts",
+    "clean": "rm -rf dist",
+    "start": "node dist/index.js"
+  },
+  "keywords": [
+    "web-automation",
+    "typescript",
+    "operations-framework",
+    "playwright",
+    "data-processing",
+    "workflow",
+    "weibo",
+    "web-scraping",
+    "micro-operations",
+    "file-operations",
+    "search",
+    "extraction",
+    "navigation"
+  ],
+  "author": "WebAuto Team",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@typescript-eslint/eslint-plugin": "^6.0.0",
+    "@typescript-eslint/parser": "^6.0.0",
+    "eslint": "^8.0.0",
+    "typescript": "^5.0.0"
+  },
+  "dependencies": {
+    "playwright": "^1.40.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "files": [
+    "dist/**/*",
+    "src/**/*"
+  ]
+}
