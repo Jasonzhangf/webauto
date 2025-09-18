@@ -1,0 +1,298 @@
+{
+  "nodes": [
+    {
+      "id": "cookie_manager",
+      "type": "COOKIE_MANAGER",
+      "title": "Cookie Manager",
+      "parameters": {
+        "cookiePath": "${cookiePath}",
+        "domain": "weibo.com"
+      },
+      "position": {
+        "x": 100,
+        "y": 100
+      },
+      "metadata": {}
+    },
+    {
+      "id": "browser_operator",
+      "type": "BROWSER_OPERATOR",
+      "title": "Browser Operator",
+      "parameters": {
+        "headless": false,
+        "viewport": {
+          "width": 1920,
+          "height": 1080
+        },
+        "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
+      },
+      "position": {
+        "x": 300,
+        "y": 100
+      },
+      "metadata": {}
+    },
+    {
+      "id": "cookie_validation",
+      "type": "CONDITIONAL_ROUTER",
+      "title": "Cookie Validation",
+      "parameters": {
+        "condition": "${cookie_manager.success}"
+      },
+      "position": {
+        "x": 500,
+        "y": 50
+      },
+      "metadata": {}
+    },
+    {
+      "id": "navigate_to_weibo",
+      "type": "NAVIGATION_OPERATOR",
+      "title": "Navigate to Weibo",
+      "parameters": {
+        "url": "${targetUrl}",
+        "waitUntil": "domcontentloaded",
+        "timeout": 30000
+      },
+      "position": {
+        "x": 700,
+        "y": 100
+      },
+      "metadata": {}
+    },
+    {
+      "id": "extract_containers",
+      "type": "CONTAINER_EXTRACTOR",
+      "title": "Extract Post Containers",
+      "parameters": {
+        "containerSelector": "[class*=\"Feed\"]",
+        "linkSelector": "a[href*=\"/\"]",
+        "maxPosts": "${maxPosts}",
+        "filterPostLinks": true
+      },
+      "position": {
+        "x": 900,
+        "y": 100
+      },
+      "metadata": {}
+    },
+    {
+      "id": "filter_links",
+      "type": "LINK_FILTER",
+      "title": "Filter Links",
+      "parameters": {
+        "includePostLinks": true,
+        "requireHttps": true,
+        "uniqueOnly": true,
+        "excludePatterns": [
+          "javascript:",
+          "tel:",
+          "mailto:",
+          "#"
+        ]
+      },
+      "position": {
+        "x": 1100,
+        "y": 100
+      },
+      "metadata": {}
+    },
+    {
+      "id": "check_links_found",
+      "type": "CONDITIONAL_ROUTER",
+      "title": "Check Links Found",
+      "parameters": {
+        "condition": true
+      },
+      "position": {
+        "x": 1300,
+        "y": 50
+      },
+      "metadata": {}
+    },
+    {
+      "id": "save_post_links",
+      "type": "FILE_SAVER",
+      "title": "Save Post Links",
+      "parameters": {
+        "filePath": "${outputDir}/weibo-post-links-${timestamp}.json",
+        "format": "json"
+      },
+      "position": {
+        "x": 1500,
+        "y": 50
+      },
+      "metadata": {}
+    },
+    {
+      "id": "save_post_links_csv",
+      "type": "FILE_SAVER",
+      "title": "Save Post Links CSV",
+      "parameters": {
+        "filePath": "${outputDir}/weibo-post-links-${timestamp}.csv",
+        "format": "csv"
+      },
+      "position": {
+        "x": 1500,
+        "y": 150
+      },
+      "metadata": {}
+    },
+    {
+      "id": "save_links_text",
+      "type": "FILE_SAVER",
+      "title": "Save Links Text",
+      "parameters": {
+        "filePath": "${outputDir}/weibo-links-${timestamp}.txt",
+        "format": "lines"
+      },
+      "position": {
+        "x": 1500,
+        "y": 250
+      },
+      "metadata": {}
+    },
+    {
+      "id": "error_handler",
+      "type": "FILE_SAVER",
+      "title": "Error Handler",
+      "parameters": {
+        "filePath": "${outputDir}/error-log-${timestamp}.json",
+        "format": "json"
+      },
+      "position": {
+        "x": 700,
+        "y": 200
+      },
+      "metadata": {}
+    },
+    {
+      "id": "no_links_handler",
+      "type": "FILE_SAVER",
+      "title": "No Links Handler",
+      "parameters": {
+        "filePath": "${outputDir}/no-links-found-${timestamp}.json",
+        "format": "json"
+      },
+      "position": {
+        "x": 1500,
+        "y": 350
+      },
+      "metadata": {}
+    },
+    {
+      "id": "workflow_stats",
+      "type": "FILE_SAVER",
+      "title": "Workflow Statistics",
+      "parameters": {
+        "filePath": "${outputDir}/workflow-stats-${timestamp}.json",
+        "format": "json"
+      },
+      "position": {
+        "x": 1700,
+        "y": 150
+      },
+      "metadata": {}
+    }
+  ],
+  "connections": [
+    {
+      "from": "cookie_manager",
+      "fromOutput": "cookies",
+      "to": "browser_operator",
+      "toInput": "cookies"
+    },
+    {
+      "from": "cookie_manager",
+      "fromOutput": "success",
+      "to": "cookie_validation",
+      "toInput": "condition"
+    },
+    {
+      "from": "cookie_validation",
+      "fromOutput": "true",
+      "to": "navigate_to_weibo",
+      "toInput": "trigger"
+    },
+    {
+      "from": "cookie_validation",
+      "fromOutput": "false",
+      "to": "error_handler",
+      "toInput": "data"
+    },
+    {
+      "from": "browser_operator",
+      "fromOutput": "page",
+      "to": "navigate_to_weibo",
+      "toInput": "page"
+    },
+    {
+      "from": "navigate_to_weibo",
+      "fromOutput": "page",
+      "to": "extract_containers",
+      "toInput": "page"
+    },
+    {
+      "from": "extract_containers",
+      "fromOutput": "links",
+      "to": "filter_links",
+      "toInput": "links"
+    },
+    {
+      "from": "filter_links",
+      "fromOutput": "filteredLinks",
+      "to": "check_links_found",
+      "toInput": "input"
+    },
+    {
+      "from": "check_links_found",
+      "fromOutput": "true",
+      "to": "save_post_links",
+      "toInput": "data"
+    },
+    {
+      "from": "check_links_found",
+      "fromOutput": "true",
+      "to": "save_post_links_csv",
+      "toInput": "data"
+    },
+    {
+      "from": "check_links_found",
+      "fromOutput": "true",
+      "to": "save_links_text",
+      "toInput": "data"
+    },
+    {
+      "from": "check_links_found",
+      "fromOutput": "false",
+      "to": "no_links_handler",
+      "toInput": "data"
+    },
+    {
+      "from": "filter_links",
+      "fromOutput": "filterStats",
+      "to": "workflow_stats",
+      "toInput": "data"
+    },
+    {
+      "from": "extract_containers",
+      "fromOutput": "extractionResult",
+      "to": "workflow_stats",
+      "toInput": "data"
+    }
+  ],
+  "variables": {
+    "cookiePath": "~/.webauto/cookies/weibo-cookies.json",
+    "targetUrl": "https://weibo.com",
+    "maxPosts": 50,
+    "outputDir": "./extracted-links",
+    "timestamp": "2025-09-18T12-34-44-617Z",
+    "TIMESTAMP": "2025-09-18T12-34-44-617Z",
+    "DATE": "2025-09-18",
+    "TIME": "12:34:44",
+    "HOME": "/Users/fanzhang",
+    "TMP": "/var/folders/jm/blkk8bbd6v78rv2pwxgxh3kr0000gn/T",
+    "CWD": "/Users/fanzhang/Documents/github/webauto/sharedmodule/operations-framework/node-system"
+  },
+  "version": "1.0"
+}

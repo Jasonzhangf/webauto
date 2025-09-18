@@ -1,0 +1,240 @@
+{
+  "version": "1.0",
+  "name": "Weibo Homepage Post Link Extraction",
+  "description": "Extract post links from Weibo homepage using container-based extraction with filtering and file saving",
+  "variables": {
+    "cookiePath": "~/.webauto/cookies/weibo-cookies.json",
+    "targetUrl": "https://weibo.com",
+    "maxPosts": 50,
+    "outputDir": "./extracted-links",
+    "timestamp": "${TIMESTAMP}"
+  },
+  "nodes": [
+    {
+      "id": "cookie_manager",
+      "type": "COOKIE_MANAGER",
+      "title": "Cookie Manager",
+      "position": { "x": 100, "y": 100 },
+      "parameters": {
+        "cookiePath": "${cookiePath}",
+        "domain": "weibo.com"
+      }
+    },
+    {
+      "id": "browser_operator",
+      "type": "BROWSER_OPERATOR",
+      "title": "Browser Operator",
+      "position": { "x": 300, "y": 100 },
+      "parameters": {
+        "headless": false,
+        "viewport": { "width": 1920, "height": 1080 },
+        "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
+      }
+    },
+    {
+      "id": "cookie_validation",
+      "type": "CONDITIONAL_ROUTER",
+      "title": "Cookie Validation",
+      "position": { "x": 500, "y": 50 },
+      "parameters": {
+        "condition": "${cookie_manager.success}"
+      }
+    },
+    {
+      "id": "navigate_to_weibo",
+      "type": "NAVIGATION_OPERATOR",
+      "title": "Navigate to Weibo",
+      "position": { "x": 700, "y": 100 },
+      "parameters": {
+        "url": "${targetUrl}",
+        "waitUntil": "domcontentloaded",
+        "timeout": 30000
+      }
+    },
+    {
+      "id": "extract_containers",
+      "type": "CONTAINER_EXTRACTOR",
+      "title": "Extract Post Containers",
+      "position": { "x": 900, "y": 100 },
+      "parameters": {
+        "containerSelector": "[class*=\"Feed\"]",
+        "linkSelector": "a[href*=\"/\"]",
+        "maxPosts": "${maxPosts}",
+        "filterPostLinks": true
+      }
+    },
+    {
+      "id": "filter_links",
+      "type": "LINK_FILTER",
+      "title": "Filter Links",
+      "position": { "x": 1100, "y": 100 },
+      "parameters": {
+        "includePostLinks": true,
+        "requireHttps": true,
+        "uniqueOnly": true,
+        "excludePatterns": ["javascript:", "tel:", "mailto:", "#"]
+      }
+    },
+    {
+      "id": "check_links_found",
+      "type": "CONDITIONAL_ROUTER",
+      "title": "Check Links Found",
+      "position": { "x": 1300, "y": 50 },
+      "parameters": {
+        "condition": true
+      }
+    },
+    {
+      "id": "save_post_links",
+      "type": "FILE_SAVER",
+      "title": "Save Post Links",
+      "position": { "x": 1500, "y": 50 },
+      "parameters": {
+        "filePath": "${outputDir}/weibo-post-links-${timestamp}.json",
+        "format": "json"
+      }
+    },
+    {
+      "id": "save_post_links_csv",
+      "type": "FILE_SAVER",
+      "title": "Save Post Links CSV",
+      "position": { "x": 1500, "y": 150 },
+      "parameters": {
+        "filePath": "${outputDir}/weibo-post-links-${timestamp}.csv",
+        "format": "csv"
+      }
+    },
+    {
+      "id": "save_links_text",
+      "type": "FILE_SAVER",
+      "title": "Save Links Text",
+      "position": { "x": 1500, "y": 250 },
+      "parameters": {
+        "filePath": "${outputDir}/weibo-links-${timestamp}.txt",
+        "format": "lines"
+      }
+    },
+    {
+      "id": "error_handler",
+      "type": "FILE_SAVER",
+      "title": "Error Handler",
+      "position": { "x": 700, "y": 200 },
+      "parameters": {
+        "filePath": "${outputDir}/error-log-${timestamp}.json",
+        "format": "json"
+      }
+    },
+    {
+      "id": "no_links_handler",
+      "type": "FILE_SAVER",
+      "title": "No Links Handler",
+      "position": { "x": 1500, "y": 350 },
+      "parameters": {
+        "filePath": "${outputDir}/no-links-found-${timestamp}.json",
+        "format": "json"
+      }
+    },
+    {
+      "id": "workflow_stats",
+      "type": "FILE_SAVER",
+      "title": "Workflow Statistics",
+      "position": { "x": 1700, "y": 150 },
+      "parameters": {
+        "filePath": "${outputDir}/workflow-stats-${timestamp}.json",
+        "format": "json"
+      }
+    }
+  ],
+  "connections": [
+    {
+      "from": "cookie_manager",
+      "fromOutput": "cookies",
+      "to": "browser_operator",
+      "toInput": "cookies"
+    },
+    {
+      "from": "cookie_manager",
+      "fromOutput": "success",
+      "to": "cookie_validation",
+      "toInput": "condition"
+    },
+    {
+      "from": "cookie_validation",
+      "fromOutput": "true",
+      "to": "navigate_to_weibo",
+      "toInput": "trigger"
+    },
+    {
+      "from": "cookie_validation",
+      "fromOutput": "false",
+      "to": "error_handler",
+      "toInput": "data"
+    },
+    {
+      "from": "browser_operator",
+      "fromOutput": "page",
+      "to": "navigate_to_weibo",
+      "toInput": "page"
+    },
+    {
+      "from": "navigate_to_weibo",
+      "fromOutput": "page",
+      "to": "extract_containers",
+      "toInput": "page"
+    },
+    {
+      "from": "extract_containers",
+      "fromOutput": "links",
+      "to": "filter_links",
+      "toInput": "links"
+    },
+    {
+      "from": "filter_links",
+      "fromOutput": "filteredLinks",
+      "to": "check_links_found",
+      "toInput": "input"
+    },
+    {
+      "from": "check_links_found",
+      "fromOutput": "true",
+      "to": "save_post_links",
+      "toInput": "data"
+    },
+    {
+      "from": "check_links_found",
+      "fromOutput": "true",
+      "to": "save_post_links_csv",
+      "toInput": "data"
+    },
+    {
+      "from": "check_links_found",
+      "fromOutput": "true",
+      "to": "save_links_text",
+      "toInput": "data"
+    },
+    {
+      "from": "check_links_found",
+      "fromOutput": "false",
+      "to": "no_links_handler",
+      "toInput": "data"
+    },
+    {
+      "from": "filter_links",
+      "fromOutput": "filterStats",
+      "to": "workflow_stats",
+      "toInput": "data"
+    },
+    {
+      "from": "extract_containers",
+      "fromOutput": "extractionResult",
+      "to": "workflow_stats",
+      "toInput": "data"
+    }
+  ],
+  "execution": {
+    "maxExecutionTime": 300000,
+    "retryAttempts": 3,
+    "retryDelay": 1000,
+    "continueOnFailure": false
+  }
+}
