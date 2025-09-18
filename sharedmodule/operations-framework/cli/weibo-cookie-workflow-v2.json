@@ -1,0 +1,74 @@
+{
+  "id": "weibo-cookie-workflow-v2",
+  "name": "Weibo Cookie Management Workflow",
+  "description": "Universal cookie management workflow with configurable paths",
+  "version": "2.0",
+  "variables": {
+    "cookiePath": "~/.webauto/cookies/weibo-cookies.json",
+    "targetUrl": "https://weibo.com",
+    "browserHeadless": false,
+    "timeout": 30000
+  },
+  "steps": [
+    {
+      "id": "start-browser",
+      "name": "Start Browser Instance",
+      "operator": "browser",
+      "params": {
+        "action": "start",
+        "headless": "${browserHeadless}",
+        "viewport": {
+          "width": 1920,
+          "height": 1080
+        }
+      }
+    },
+    {
+      "id": "load-cookies",
+      "name": "Load Weibo Cookies",
+      "operator": "cookie",
+      "params": {
+        "action": "load",
+        "path": "${cookiePath}",
+        "domain": "weibo.com"
+      }
+    },
+    {
+      "id": "navigate-to-weibo",
+      "name": "Navigate to Weibo",
+      "operator": "navigation",
+      "params": {
+        "action": "navigate",
+        "url": "${targetUrl}",
+        "waitUntil": "networkidle",
+        "timeout": "${timeout}"
+      }
+    },
+    {
+      "id": "get-page-info",
+      "name": "Get Page Information",
+      "operator": "navigation",
+      "params": {
+        "action": "getInfo"
+      }
+    },
+    {
+      "id": "save-cookies",
+      "name": "Save Updated Cookies",
+      "operator": "cookie",
+      "params": {
+        "action": "save",
+        "path": "${cookiePath}",
+        "domain": "weibo.com"
+      }
+    },
+    {
+      "id": "stop-browser",
+      "name": "Stop Browser",
+      "operator": "browser",
+      "params": {
+        "action": "stop"
+      }
+    }
+  ]
+}
