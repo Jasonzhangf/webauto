@@ -1,234 +1,262 @@
 /**
- * Basic usage example for the WebAuto Operations Framework
- * Demonstrates core functionality with simple tasks
+ * WebAuto Operator Framework - 基础使用示例
+ * @package @webauto/operator-framework
+ *
+ * 演示如何使用各个操作子进行基本操作
  */
 
-import {
-  createDaemon,
-  TaskBuilder,
-  ScheduleBuilder,
-  ScheduleHelpers,
-  DaemonConfig
-} from '../src/index';
+import { CookieOperator, CookieData } from '../operators/browser/CookieOperator';
+import { NavigationOperator } from '../operators/browser/NavigationOperator';
+import { ScrollOperator } from '../operators/browser/ScrollOperator';
+import { ConditionOperator } from '../operators/control/ConditionOperator';
+import { StateOperator } from '../operators/control/StateOperator';
 
 async function basicUsageExample() {
-  console.log('🚀 WebAuto Operations Framework - Basic Usage Example\n');
+  console.log('🎯 WebAuto Operator Framework - 基础使用示例');
+  console.log('=' * 60);
 
-  // Create daemon configuration
-  const config: DaemonConfig = {
-    name: 'Example Daemon',
-    version: '1.0.0',
-    port: 8080,
-    host: 'localhost',
-    logLevel: 'info',
-    maxWorkers: 4,
-    taskTimeout: 30000,
-    healthCheckInterval: 10000,
-    storagePath: './example-data',
-    enableMetrics: true,
-    enableWebSocket: true
-  };
+  // 创建操作子实例
+  const cookieOperator = new CookieOperator();
+  const navigationOperator = new NavigationOperator();
+  const scrollOperator = new ScrollOperator();
+  const conditionOperator = new ConditionOperator();
+  const stateOperator = new StateOperator();
 
-  try {
-    // Create and start daemon
-    console.log('📋 Creating daemon...');
-    const daemon = await createDaemon(config);
-    console.log('✅ Daemon started successfully\n');
+  console.log('✅ 操作子实例创建完成');
 
-    // Example 1: Create and submit a simple task
-    console.log('📝 Example 1: Submitting a simple file task');
-    const fileTask = new TaskBuilder('Create example file')
-      .withType('operation')
-      .withCategory('file')
-      .withOperation('write')
-      .withParameters({
-        path: './example-data/test.txt',
-        content: 'Hello from WebAuto Operations Framework!',
-        encoding: 'utf8'
-      })
-      .withPriority('medium')
-      .withTimeout(10000)
-      .build();
+  // 1. Cookie操作示例
+  console.log('\n🍪 Cookie 操作示例:');
 
-    const taskId = await daemon.submitTask(fileTask);
-    console.log(`✅ Task submitted with ID: ${taskId}\n`);
+  // 设置一些测试Cookie
+  const testCookies: CookieData[] = [
+    {
+      name: 'session_id',
+      value: 'test_session_123',
+      domain: 'weibo.com',
+      path: '/',
+      secure: true,
+      httpOnly: true
+    },
+    {
+      name: 'user_token',
+      value: 'test_token_456',
+      domain: 'weibo.com',
+      path: '/',
+      secure: true
+    }
+  ];
 
-    // Example 2: Submit a browser task
-    console.log('🌐 Example 2: Submitting a browser task');
-    const browserTask = new TaskBuilder('Fetch webpage')
-      .withType('operation')
-      .withCategory('browser')
-      .withOperation('navigate')
-      .withParameters({
-        url: 'https://example.com',
-        waitFor: 'h1'
-      })
-      .withPriority('high')
-      .withTimeout(15000)
-      .withMetadata({ description: 'Fetch example.com homepage' })
-      .build();
+  const importResult = await cookieOperator.importCookies(testCookies);
+  console.log(`   导入Cookie: ${importResult.success ? '成功' : '失败'}`);
+  console.log(`   导入数量: ${importResult.data?.count || 0}`);
 
-    const browserTaskId = await daemon.submitTask(browserTask);
-    console.log(`✅ Browser task submitted with ID: ${browserTaskId}\n`);
+  // 列出Cookie
+  const listResult = await cookieOperator.listCookies('weibo.com');
+  console.log(`   列出Cookie: ${listResult.success ? '成功' : '失败'}`);
+  console.log(`   Cookie数量: ${listResult.data?.count || 0}`);
 
-    // Example 3: Create a schedule
-    console.log('⏰ Example 3: Creating a daily schedule');
-    const dailySchedule = new ScheduleBuilder('Daily cleanup')
-      .withCronExpression('0 2 * * *') // Daily at 2 AM
-      .withTaskTemplate({
-        name: 'Daily cleanup task',
-        type: 'operation',
-        category: 'file',
-        operation: 'cleanup',
-        parameters: {
-          directory: './example-data/temp',
-          olderThan: '7d'
-        },
-        priority: 'low',
-        maxRetries: 3,
-        timeout: 300000
-      })
-      .withEnabled(true)
-      .build();
+  // 2. 导航操作示例
+  console.log('\n🧭 导航操作示例:');
 
-    const scheduleId = await daemon.scheduler.addSchedule(dailySchedule);
-    console.log(`✅ Schedule created with ID: ${scheduleId}\n`);
+  const navigateResult = await navigationOperator.execute({
+    action: 'navigate',
+    url: 'https://weibo.com',
+    waitUntil: 'networkidle'
+  });
+  console.log(`   导航到微博: ${navigateResult.success ? '成功' : '失败'}`);
 
-    // Example 4: Using predefined schedule helpers
-    console.log('⏰ Example 4: Creating hourly health check');
-    const healthCheckSchedule = ScheduleHelpers.hourly(0) // Every hour at minute 0
-      .withName('System health check')
-      .withTaskTemplate({
-        name: 'Health check',
-        type: 'operation',
-        category: 'communication',
-        operation: 'health_check',
-        parameters: { components: ['cpu', 'memory', 'disk'] },
-        priority: 'high',
-        timeout: 30000
-      })
-      .build();
+  const currentUrlResult = await navigationOperator.execute({
+    action: 'getCurrentUrl'
+  });
+  console.log(`   当前URL: ${currentUrlResult.data?.currentUrl || '未知'}`);
 
-    const healthScheduleId = await daemon.scheduler.addSchedule(healthCheckSchedule);
-    console.log(`✅ Health check schedule created with ID: ${healthScheduleId}\n`);
+  // 3. 滚动操作示例
+  console.log('\n📜 滚动操作示例:');
 
-    // Example 5: Check daemon status
-    console.log('📊 Example 5: Checking daemon status');
-    const health = await daemon.getHealthStatus();
-    console.log('🏥 Health Status:', health.status);
-    console.log('⏱️  Uptime:', `${Math.floor(health.uptime / 1000)}s`);
-    console.log('📈 Components:', Object.entries(health.components)
-      .filter(([_, healthy]) => healthy)
-      .map(([component]) => component)
-      .join(', '));
-    console.log('');
+  const scrollToTopResult = await scrollOperator.execute({
+    action: 'toTop',
+    behavior: 'smooth'
+  });
+  console.log(`   滚动到顶部: ${scrollToTopResult.success ? '成功' : '失败'}`);
 
-    // Example 6: Get resource metrics
-    console.log('📊 Example 6: Getting resource metrics');
-    const metrics = await daemon.getResourceMetrics();
-    console.log('💾 Memory Usage:', `${metrics.memory.percentage.toFixed(1)}%`);
-    console.log('🖥️  CPU Usage:', `${metrics.cpu.usage.toFixed(1)}%`);
-    console.log('💽 Disk Usage:', `${metrics.disk.percentage.toFixed(1)}%`);
-    console.log('');
+  const scrollByPixelsResult = await scrollOperator.execute({
+    action: 'byPixels',
+    x: 0,
+    y: 500,
+    behavior: 'smooth'
+  });
+  console.log(`   向下滚动500px: ${scrollByPixelsResult.success ? '成功' : '失败'}`);
 
-    // Example 7: Submit a batch of tasks
-    console.log('📦 Example 7: Submitting a batch of tasks');
-    const batchTasks = [
-      new TaskBuilder('Batch task 1')
-        .withCategory('file')
-        .withOperation('read')
-        .withParameters({ path: './package.json' })
-        .build(),
-      new TaskBuilder('Batch task 2')
-        .withCategory('ai')
-        .withOperation('analyze')
-        .withParameters({ text: 'Analyze this text for sentiment' })
-        .build(),
-      new TaskBuilder('Batch task 3')
-        .withCategory('communication')
-        .withOperation('ping')
-        .withParameters({ endpoint: 'https://api.example.com/health' })
-        .build()
-    ];
+  const scrollPositionResult = await scrollOperator.execute({
+    action: 'getCurrentPosition'
+  });
+  console.log(`   当前滚动位置: ${JSON.stringify(scrollPositionResult.data?.position || {})}`);
 
-    const batchTaskIds = await Promise.all(
-      batchTasks.map(task => daemon.submitTask(task))
-    );
-    console.log(`✅ Batch tasks submitted: ${batchTaskIds.join(', ')}\n`);
+  // 4. 条件操作示例
+  console.log('\n🔍 条件操作示例:');
 
-    // Example 8: Get statistics
-    console.log('📈 Example 8: Getting daemon statistics');
-    const stats = await daemon.getStats();
-    console.log('📊 Statistics:');
-    console.log(`  - Uptime: ${Math.floor(stats.uptime / 1000)}s`);
-    console.log(`  - Active workers: ${stats.workers.active}`);
-    console.log(`  - Queue length: ${stats.workers.queueLength}`);
-    console.log(`  - Total tasks completed: ${stats.workers.totalTasksCompleted}`);
-    console.log('');
+  const conditionResult = await conditionOperator.execute({
+    expression: 'user_session',
+    operator: 'exists',
+    data: {
+      user_session: 'active',
+      user_role: 'admin'
+    }
+  });
+  console.log(`   条件检查: ${conditionResult.success ? '成功' : '失败'}`);
+  console.log(`   条件结果: ${conditionResult.data?.passed ? '通过' : '未通过'}`);
 
-    // Example 9: Create a workflow task
-    console.log('🔄 Example 9: Creating a workflow task');
-    const workflowTask = new TaskBuilder('Data processing workflow')
-      .withType('workflow')
-      .withCategory('file')
-      .withOperation('process_data')
-      .withParameters({
-        inputPath: './data/input.csv',
-        outputPath: './data/output.json',
-        steps: [
-          { operation: 'validate', parameters: { schema: 'data' } },
-          { operation: 'transform', parameters: { format: 'json' } },
-          { operation: 'save', parameters: { path: './data/processed/' } }
-        ]
-      })
-      .withPriority('medium')
-      .withTimeout(120000)
-      .build();
+  const rangeResult = await conditionOperator.execute({
+    action: 'checkRange',
+    value: 75,
+    min: 0,
+    max: 100,
+    inclusive: true
+  });
+  console.log(`   范围检查: ${rangeResult.success ? '成功' : '失败'}`);
+  console.log(`   范围结果: ${rangeResult.data?.passed ? '通过' : '未通过'}`);
 
-    const workflowTaskId = await daemon.submitTask(workflowTask);
-    console.log(`✅ Workflow task submitted with ID: ${workflowTaskId}\n`);
+  // 5. 状态操作示例
+  console.log('\n💾 状态操作示例:');
 
-    // Example 10: List all schedules
-    console.log('📋 Example 10: Listing all schedules');
-    const schedules = await daemon.scheduler.getSchedules();
-    console.log(`📅 Total schedules: ${schedules.length}`);
-    schedules.forEach(schedule => {
-      console.log(`  - ${schedule.name} (${schedule.enabled ? 'enabled' : 'disabled'})`);
-      if (schedule.nextRun) {
-        console.log(`    Next run: ${schedule.nextRun.toISOString()}`);
+  const setStateResult = await stateOperator.execute({
+    action: 'set',
+    key: 'workflow.status',
+    value: 'running',
+    namespace: 'demo'
+  });
+  console.log(`   设置状态: ${setStateResult.success ? '成功' : '失败'}`);
+
+  const getStateResult = await stateOperator.execute({
+    action: 'get',
+    key: 'workflow.status',
+    namespace: 'demo'
+  });
+  console.log(`   获取状态: ${getStateResult.success ? '成功' : '失败'}`);
+  console.log(`   状态值: ${getStateResult.data?.value}`);
+
+  const incrementResult = await stateOperator.execute({
+    action: 'increment',
+    key: 'workflow.attempts',
+    incrementBy: 1,
+    namespace: 'demo'
+  });
+  console.log(`   递增状态: ${incrementResult.success ? '成功' : '失败'}`);
+  console.log(`   新值: ${incrementResult.data?.newValue}`);
+
+  // 6. 获取操作子统计信息
+  console.log('\n📊 操作子统计信息:');
+
+  const cookieStats = await cookieOperator.getStats();
+  console.log(`   Cookie统计: ${JSON.stringify(cookieStats.data)}`);
+
+  const conditionStats = await conditionOperator.getStats();
+  console.log(`   条件统计: ${JSON.stringify(conditionStats.data)}`);
+
+  const stateStats = await stateOperator.getStats();
+  console.log(`   状态统计: ${JSON.stringify(stateStats.data)}`);
+
+  console.log('\n✅ 基础使用示例完成');
+}
+
+// 异步操作示例
+async function asyncOperationExample() {
+  console.log('\n⚡ 异步操作示例:');
+  console.log('=' * 40);
+
+  const cookieOperator = new CookieOperator();
+  const stateOperator = new StateOperator();
+
+  // 启动异步Cookie保存
+  const asyncOperationId = await cookieOperator.executeAsync({
+    action: 'save',
+    path: './async-cookies.json'
+  });
+  console.log(`   异步操作已启动: ${asyncOperationId}`);
+
+  // 启动异步状态设置
+  const asyncStateId = await stateOperator.executeAsync({
+    action: 'set',
+    key: 'async.test',
+    value: 'async_value',
+    namespace: 'demo'
+  });
+  console.log(`   异步状态设置已启动: ${asyncStateId}`);
+
+  // 模拟等待异步操作完成
+  await new Promise(resolve => setTimeout(resolve, 2000));
+
+  // 检查异步操作结果
+  const cookieResult = await cookieOperator.getAsyncResult(asyncOperationId);
+  console.log(`   Cookie操作结果: ${cookieResult.success ? '成功' : '失败'}`);
+
+  const stateResult = await stateOperator.getAsyncResult(asyncStateId);
+  console.log(`   状态操作结果: ${stateResult.success ? '成功' : '失败'}`);
+
+  console.log('✅ 异步操作示例完成');
+}
+
+// 批量操作示例
+async function batchOperationExample() {
+  console.log('\n📦 批量操作示例:');
+  console.log('=' * 40);
+
+  const cookieOperator = new CookieOperator();
+
+  // 批量Cookie操作
+  const batchOperations = [
+    {
+      id: 'op1',
+      params: {
+        action: 'set' as const,
+        key: 'batch_cookie_1',
+        value: 'value_1',
+        domain: 'test.com'
       }
-    });
-    console.log('');
+    },
+    {
+      id: 'op2',
+      params: {
+        action: 'set' as const,
+        key: 'batch_cookie_2',
+        value: 'value_2',
+        domain: 'test.com'
+      }
+    },
+    {
+      id: 'op3',
+      params: {
+        action: 'set' as const,
+        key: 'batch_cookie_3',
+        value: 'value_3',
+        domain: 'test.com'
+      }
+    }
+  ];
 
-    // Keep the daemon running for demonstration
-    console.log('⏳ Keeping daemon running for 30 seconds...');
-    console.log('💡 You can connect to the WebSocket server at:');
-    console.log(`   ws://${config.host}:${config.port}`);
-    console.log('');
+  const batchResult = await cookieOperator.executeBatch(batchOperations);
+  console.log(`   批量操作: ${batchResult.success ? '成功' : '失败'}`);
+  console.log(`   总操作数: ${batchResult.data?.total}`);
+  console.log(`   成功数: ${batchResult.data?.successful}`);
+  console.log(`   失败数: ${batchResult.data?.failed}`);
 
-    setTimeout(async () => {
-      console.log('🛑 Shutting down daemon...');
-      await daemon.stop();
-      console.log('✅ Daemon stopped. Example completed.');
-      process.exit(0);
-    }, 30000);
-
-    // Handle graceful shutdown
-    process.on('SIGINT', async () => {
-      console.log('\n🛑 Interrupt received, shutting down...');
-      await daemon.stop();
-      process.exit(0);
-    });
-
-  } catch (error) {
-    console.error('❌ Example failed:', error);
-    process.exit(1);
-  }
+  console.log('✅ 批量操作示例完成');
 }
 
-// Run the example
+// 导出示例函数
+export { basicUsageExample, asyncOperationExample, batchOperationExample };
+
+// 如果直接运行此文件，执行所有示例
 if (require.main === module) {
-  basicUsageExample();
+  (async () => {
+    try {
+      await basicUsageExample();
+      await asyncOperationExample();
+      await batchOperationExample();
+      console.log('\n🎉 所有示例执行完成');
+    } catch (error) {
+      console.error('💥 示例执行失败:', error);
+      process.exit(1);
+    }
+  })();
 }
-
-export { basicUsageExample };

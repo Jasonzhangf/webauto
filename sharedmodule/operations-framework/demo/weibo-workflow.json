@@ -1,0 +1,102 @@
+{
+  "id": "weibo-browser-workflow",
+  "name": "Weibo Browser Workflow",
+  "description": "A complete workflow that starts browser, loads cookies, and navigates to Weibo homepage",
+  "version": "1.0.0",
+  "variables": {
+    "targetUrl": "https://weibo.com",
+    "cookiePath": "./cookies.json",
+    "browserHeadless": false,
+    "viewportWidth": 1920,
+    "viewportHeight": 1080,
+    "navigationTimeout": 30000,
+    "screenshotEnabled": true
+  },
+  "steps": [
+    {
+      "id": "start-browser",
+      "name": "Start Browser",
+      "operator": "browser",
+      "params": {
+        "action": "start",
+        "headless": "${browserHeadless}",
+        "viewport": {
+          "width": "${viewportWidth}",
+          "height": "${viewportHeight}"
+        },
+        "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+        "timeout": "${navigationTimeout}"
+      },
+      "retry": 2,
+      "timeout": 15000
+    },
+    {
+      "id": "load-cookies",
+      "name": "Load Weibo Cookies",
+      "operator": "cookie",
+      "params": {
+        "action": "load",
+        "path": "${cookiePath}"
+      },
+      "continueOnError": true,
+      "timeout": 10000
+    },
+    {
+      "id": "navigate-to-weibo",
+      "name": "Navigate to Weibo Homepage",
+      "operator": "navigation",
+      "params": {
+        "action": "navigate",
+        "url": "${targetUrl}",
+        "timeout": "${navigationTimeout}",
+        "waitFor": ".Feed_body",
+        "screenshot": "${screenshotEnabled}"
+      },
+      "retry": 3,
+      "timeout": 30000,
+      "output": "navigationResult"
+    },
+    {
+      "id": "wait-for-page-load",
+      "name": "Wait for Page to Fully Load",
+      "operator": "navigation",
+      "params": {
+        "action": "wait",
+        "waitTime": 3000
+      },
+      "timeout": 5000
+    },
+    {
+      "id": "capture-screenshot",
+      "name": "Capture Screenshot",
+      "operator": "navigation",
+      "params": {
+        "action": "screenshot"
+      },
+      "continueOnError": true,
+      "timeout": 10000
+    },
+    {
+      "id": "save-session-cookies",
+      "name": "Save Session Cookies",
+      "operator": "cookie",
+      "params": {
+        "action": "save",
+        "path": "${cookiePath}"
+      },
+      "continueOnError": true,
+      "timeout": 10000
+    },
+    {
+      "id": "get-page-info",
+      "name": "Get Page Information",
+      "operator": "navigation",
+      "params": {
+        "action": "navigate",
+        "url": "${targetUrl}"
+      },
+      "timeout": 5000,
+      "output": "pageInfo"
+    }
+  ]
+}

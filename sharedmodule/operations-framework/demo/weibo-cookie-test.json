@@ -1,0 +1,83 @@
+{
+  "id": "weibo-cookie-login-test",
+  "name": "Weibo Cookie Login Test",
+  "description": "测试使用微博Cookie进行非headless模式登录访问",
+  "version": "1.0.0",
+  "variables": {
+    "targetUrl": "https://weibo.com",
+    "cookiePath": "./cookies.json",
+    "browserHeadless": false,
+    "viewportWidth": 1920,
+    "viewportHeight": 1080,
+    "waitTime": 5000
+  },
+  "steps": [
+    {
+      "id": "start-browser",
+      "name": "Start Browser (Non-Headless)",
+      "operator": "browser",
+      "params": {
+        "action": "start",
+        "headless": "${browserHeadless}",
+        "viewport": {
+          "width": "${viewportWidth}",
+          "height": "${viewportHeight}"
+        }
+      }
+    },
+    {
+      "id": "load-cookies",
+      "name": "Load Weibo Cookies",
+      "operator": "cookie",
+      "params": {
+        "action": "load",
+        "path": "${cookiePath}"
+      }
+    },
+    {
+      "id": "navigate-to-weibo",
+      "name": "Navigate to Weibo Homepage",
+      "operator": "navigation",
+      "params": {
+        "action": "navigate",
+        "url": "${targetUrl}",
+        "timeout": 30000
+      }
+    },
+    {
+      "id": "wait-for-login",
+      "name": "Wait for Login to Complete",
+      "operator": "navigation",
+      "params": {
+        "action": "wait",
+        "timeout": "${waitTime}"
+      }
+    },
+    {
+      "id": "capture-login-screenshot",
+      "name": "Capture Login State Screenshot",
+      "operator": "navigation",
+      "params": {
+        "action": "screenshot",
+        "path": "./screenshots/weibo-login-state.png"
+      }
+    },
+    {
+      "id": "get-page-info",
+      "name": "Get Page Information After Login",
+      "operator": "navigation",
+      "params": {
+        "action": "getInfo"
+      }
+    },
+    {
+      "id": "save-session-cookies",
+      "name": "Save Session Cookies",
+      "operator": "cookie",
+      "params": {
+        "action": "save",
+        "path": "./cookies-after-login.json"
+      }
+    }
+  ]
+}
