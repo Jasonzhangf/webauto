@@ -111,7 +111,7 @@
         "source": "page",
         "selectors": {
           "hotSearch": [".hot_search", ".gn_nav_list .hot", ".trending_topics"],
-          "superTopic": [".super_topic", .gn_nav_list .super"],
+          "superTopic": [".super_topic", ".gn_nav_list .super"],
           "topicList": [".topic_list", ".WB_topiclist", ".feed_topics"]
         },
         "maxTopics": 50,
@@ -160,7 +160,7 @@
       "config": {
         "source": "page",
         "selectors": {
-          "recommendedUsers": [".recommended_users", ".WB_follow_rec", .gn_recommend],
+          "recommendedUsers": [".recommended_users", ".WB_follow_rec", ".gn_recommend"],
           "recommendedTopics": [".recommended_topics", ".WB_topic_rec"],
           "recommendedFeeds": [".recommended_feeds", ".WB_feed_rec"]
         },
@@ -186,9 +186,9 @@
           "lifestyle": ["生活", "美食", "旅游"]
         },
         "categorySelectors": {
-          "news": [".news_section", .gn_nav_news],
-          "entertainment": [".ent_section", .gn_nav_ent],
-          "sports": [".sports_section", .gn_nav_sports]
+          "news": [".news_section", ".gn_nav_news"],
+          "entertainment": [".ent_section", ".gn_nav_ent"],
+          "sports": [".sports_section", ".gn_nav_sports"]
         }
       },
       "expectedOutput": ["categories"],

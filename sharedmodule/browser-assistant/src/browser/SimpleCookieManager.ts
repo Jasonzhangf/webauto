@@ -84,13 +84,30 @@ export class CookieManager {
       
       if (fs.existsSync(cookieFile)) {
         const cookieData = fs.readFileSync(cookieFile, 'utf8');
-        const cookies = JSON.parse(cookieData);
+        const allCookies = JSON.parse(cookieData);
         
-        if (Array.isArray(cookies)) {
-          await context.addCookies(cookies);
-          this.cookies.set(domain, cookies);
-          console.log(`[CookieManager] Loaded ${cookies.length} cookies for ${domain}`);
-          return true;
+        if (Array.isArray(allCookies)) {
+          // 过滤出适用于目标域名的Cookie
+          const filteredCookies = allCookies.filter(cookie => {
+            const cookieDomain = cookie.domain || '';
+            // 检查Cookie域是否匹配目标域名
+            return cookieDomain === domain || 
+                   cookieDomain === `.${domain}` || 
+                   cookieDomain === domain.replace(/^www\./, '') ||
+                   cookieDomain === `.${domain.replace(/^www\./, '')}` ||
+                   domain.endsWith(cookieDomain.replace(/^\./, '')) ||
+                   cookieDomain.endsWith(domain);
+          });
+          
+          if (filteredCookies.length > 0) {
+            await context.addCookies(filteredCookies);
+            this.cookies.set(domain, filteredCookies);
+            console.log(`[CookieManager] Loaded ${filteredCookies.length} cookies for ${domain} (filtered from ${allCookies.length} total)`);
+            return true;
+          } else {
+            console.warn(`[CookieManager] No applicable cookies found for ${domain} in ${allCookies.length} total cookies`);
+            return false;
+          }
         }
       }
       return false;

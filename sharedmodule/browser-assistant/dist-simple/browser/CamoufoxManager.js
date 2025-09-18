@@ -87,14 +87,21 @@ class CamoufoxManager extends SimpleBaseModule_1.BaseBrowserModule {
         }
         try {
             this.logInfo('Initializing Camoufox browser...');
-            // 动态导入playwright
-            const { chromium } = await Promise.resolve().then(() => __importStar(require('playwright')));
-            // 启动浏览器（使用Chromium，Camoufox会通过环境变量启用）
-            this.browser = await chromium.launch({
+            // 导入Camoufox
+            const { Camoufox } = await Promise.resolve().then(() => __importStar(require('camoufox')));
+            // 启动真正的Camoufox浏览器（反指纹版本）
+            this.browser = await Camoufox.launch({
                 headless: this.camoufoxConfig.headless,
                 timeout: this.camoufoxConfig.launchTimeout || 30000,
-                args: this.camoufoxConfig.browserArgs,
-                ignoreDefaultArgs: this.camoufoxConfig.ignoreDefaultArgs
+                args: this.camoufoxConfig.browserArgs || [
+                    '--no-sandbox',
+                    '--disable-setuid-sandbox',
+                    '--disable-dev-shm-usage',
+                    '--disable-accelerated-2d-canvas',
+                    '--no-first-run',
+                    '--no-zygote',
+                    '--disable-gpu'
+                ]
             });
             // 创建浏览器上下文
             this.context = await this.browser.newContext({
@@ -356,6 +363,11 @@ class CamoufoxManager extends SimpleBaseModule_1.BaseBrowserModule {
                 currentUrl.includes('login') ||
                 currentUrl.includes('weibo.com/login');
             if (isLoginPage) {
+                // 检查是否是反爬虫重定向
+                if (currentUrl.includes('tabtype=weibo') || currentUrl.includes('openLoginLayer=0')) {
+                    this.warn('🚨 检测到可能的反爬虫重定向，停止自动操作');
+                    this.warn('🔐 请手动完成登录验证');
+                }
                 return false;
             }
             // 检查页面内容是否包含登录成功特征

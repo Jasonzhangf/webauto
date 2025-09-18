@@ -1,0 +1,364 @@
+{
+  "meta": {
+    "site": "weibo",
+    "name": "微博统一抽象元素配置",
+    "version": "1.0.0",
+    "description": "基于抽象元素系统的微博评论提取配置",
+    "author": "webauto-team",
+    "created": "2025-09-13",
+    "lastModified": "2025-09-13"
+  },
+  
+  "abstractElements": {
+    "page": {
+      "title": {
+        "type": "text",
+        "selector": "title",
+        "description": "页面标题"
+      },
+      "mainContent": {
+        "type": "container",
+        "selector": "main, [role='main'], .main, #main",
+        "description": "主要内容区域"
+      },
+      "author": {
+        "type": "text",
+        "selector": "h1, h2, h3, [class*='title'], [class*='author'], .username",
+        "description": "内容作者"
+      },
+      "publishTime": {
+        "type": "text",
+        "selector": "time, [data-time], [class*='time'], .date",
+        "description": "发布时间"
+      },
+      "content": {
+        "type": "text",
+        "selector": "[class*='content'], [class*='body'], .article-content, .post-content",
+        "description": "正文内容"
+      }
+    },
+    
+    "navigation": {
+      "expandButton": {
+        "type": "clickable",
+        "selector": [
+          "text='展开'",
+          "text='查看更多'",
+          "text='更多评论'",
+          "text='加载更多'",
+          "[class*='expand']",
+          "[class*='more']",
+          "[class*='load']",
+          "button:has-text('展开')",
+          "button:has-text('更多')",
+          "a:has-text('展开')",
+          "a:has-text('更多')"
+        ],
+        "action": "click",
+        "description": "展开按钮"
+      },
+      "loadMoreButton": {
+        "type": "clickable",
+        "selector": [
+          "text='加载更多'",
+          "text='下一页'",
+          "[class*='load-more']",
+          "[class*='next-page']",
+          ".load-more-btn"
+        ],
+        "action": "click",
+        "description": "加载更多按钮"
+      },
+      "nextPageButton": {
+        "type": "clickable",
+        "selector": [
+          "text='下一页'",
+          "text='下一页>'",
+          "[class*='next']",
+          ".next-page"
+        ],
+        "action": "click",
+        "description": "下一页按钮"
+      }
+    },
+    
+    "comments": {
+      "container": {
+        "type": "container",
+        "selector": [
+          "[class*='comment']",
+          "[class*='reply']",
+          "[class*='feed']",
+          "[class*='item']",
+          "div:has(img):has-text(':')",
+          "div:has(img):has-text('来自')",
+          "div:has(img):has-text('赞')",
+          "[node-type*='comment']",
+          "[data-type*='comment']",
+          "[class*='list'] > div",
+          "[class*='comments'] > div",
+          "[class*='comment-list'] > div",
+          "div > div > div:has(img):has-text(':')"
+        ],
+        "description": "评论容器"
+      },
+      
+      "comment": {
+        "type": "structured",
+        "fields": {
+          "id": {
+            "type": "attribute",
+            "selector": "[id], [data-id], [class*='id']",
+            "attribute": "id",
+            "description": "评论ID"
+          },
+          "author": {
+            "type": "text",
+            "selector": "[class*='name'], [class*='user'], [class*='author'], a, .username",
+            "description": "评论作者"
+          },
+          "avatar": {
+            "type": "element",
+            "selector": "img, [class*='avatar'], .user-avatar",
+            "description": "用户头像"
+          },
+          "content": {
+            "type": "text",
+            "selector": "[class*='content'], [class*='text'], [class*='body'], .comment-text",
+            "description": "评论内容"
+          },
+          "publishTime": {
+            "type": "text",
+            "selector": "time, [data-time], [class*='time'], .comment-time",
+            "description": "评论时间"
+          },
+          "likes": {
+            "type": "number",
+            "selector": "[class*='like'], .like-count, [data-likes]",
+            "description": "点赞数"
+          },
+          "replies": {
+            "type": "number",
+            "selector": "[class*='reply'], .reply-count, [data-replies]",
+            "description": "回复数"
+          },
+          "location": {
+            "type": "text",
+            "selector": "[class*='location'], .geo, .place",
+            "description": "地理位置"
+          },
+          "likeButton": {
+            "type": "clickable",
+            "selector": "button:has-text('赞'), [class*='like'], .like-btn",
+            "description": "点赞按钮"
+          },
+          "replyButton": {
+            "type": "clickable",
+            "selector": "button:has-text('回复'), [class*='reply'], .reply-btn",
+            "description": "回复按钮"
+          }
+        },
+        "filters": {
+          "minWidth": 50,
+          "minHeight": 20,
+          "minTextLength": 10,
+          "maxTextLength": 1000,
+          "excludeKeywords": [
+            "热搜", "榜单", "排行", "播放视频", "加载完毕", "直播",
+            "全屏", "静音", "复制视频地址", "小窗播放", "高清", "标清",
+            "倍速", "关注", "精选", "超话", "相册", "文章", "导航"
+          ],
+          "requireColon": true,
+          "requireAvatar": false,
+          "requireTimestamp": false
+        },
+        "validation": {
+          "requiredFields": ["author", "content"],
+          "contentPattern": ".*:.*",
+          "authorPattern": "[\\u4e00-\\u9fa5a-zA-Z0-9_]{2,15}"
+        }
+      }
+    },
+    
+    "ui": {
+      "loadingIndicator": {
+        "type": "element",
+        "selector": "[class*='loading'], [class*='spinner'], .loading",
+        "description": "加载指示器"
+      },
+      "errorMessage": {
+        "type": "element",
+        "selector": "[class*='error'], .error-message, .alert-error",
+        "description": "错误消息"
+      },
+      "loginButton": {
+        "type": "clickable",
+        "selector": "text='登录', [class*='login'], .login-btn",
+        "description": "登录按钮"
+      },
+      "closeButton": {
+        "type": "clickable",
+        "selector": "text='关闭', [class*='close'], .close-btn, button[aria-label*='close']",
+        "description": "关闭按钮"
+      }
+    },
+    
+    "pagination": {
+      "currentPage": {
+        "type": "number",
+        "selector": "[class*='current'], .current-page, [data-page]",
+        "description": "当前页码"
+      },
+      "totalPages": {
+        "type": "number",
+        "selector": "[class*='total'], .total-pages, [data-total]",
+        "description": "总页数"
+      },
+      "pageList": {
+        "type": "list",
+        "selector": "[class*='pagination'], .pagination, .page-nav",
+        "description": "分页列表"
+      }
+    }
+  },
+  
+  "actions": {
+    "expandComments": {
+      "name": "展开评论",
+      "type": "sequential",
+      "elements": ["navigation.expandButton"],
+      "maxAttempts": 20,
+      "waitTime": 1000,
+      "description": "展开所有评论"
+    },
+    
+    "loadMoreComments": {
+      "name": "加载更多评论",
+      "type": "sequential",
+      "elements": ["navigation.loadMoreButton"],
+      "maxAttempts": 10,
+      "waitTime": 2000,
+      "description": "加载更多评论"
+    },
+    
+    "scrollToLoad": {
+      "name": "滚动加载",
+      "type": "scroll",
+      "scrollCount": 5,
+      "scrollInterval": 2000,
+      "scrollTo": "bottom",
+      "description": "滚动页面加载更多内容"
+    },
+    
+    "extractComments": {
+      "name": "提取评论",
+      "type": "extraction",
+      "container": "comments.container",
+      "template": "comments.comment",
+      "description": "提取所有评论"
+    },
+    
+    "navigateToNextPage": {
+      "name": "下一页",
+      "type": "sequential",
+      "elements": ["navigation.nextPageButton"],
+      "maxAttempts": 1,
+      "waitTime": 2000,
+      "description": "导航到下一页"
+    }
+  },
+  
+  "workflows": {
+    "commentExtraction": {
+      "name": "评论提取工作流",
+      "description": "完整的评论提取流程",
+      "steps": [
+        {
+          "action": "expandComments",
+          "required": false
+        },
+        {
+          "action": "scrollToLoad",
+          "required": false
+        },
+        {
+          "action": "loadMoreComments",
+          "required": false,
+          "repeat": true,
+          "maxRepeats": 5
+        },
+        {
+          "action": "extractComments",
+          "required": true
+        }
+      ]
+    },
+    
+    "paginatedExtraction": {
+      "name": "分页提取工作流",
+      "description": "跨多页的评论提取",
+      "steps": [
+        {
+          "action": "commentExtraction",
+          "required": true
+        },
+        {
+          "action": "navigateToNextPage",
+          "required": false,
+          "repeat": true,
+          "maxRepeats": 10,
+          "stopCondition": "pagination.totalPages <= pagination.currentPage"
+        }
+      ]
+    }
+  },
+  
+  "extraction": {
+    "outputFormat": {
+      "includeRawHtml": false,
+      "includeElementInfo": false,
+      "includeMetadata": true,
+      "maxItemsPerPage": 100
+    },
+    
+    "postProcessing": {
+      "deduplication": {
+        "enabled": true,
+        "fields": ["author.name", "content"],
+        "similarityThreshold": 0.9
+      },
+      "cleaning": {
+        "removeWhitespace": true,
+        "removeHtmlTags": true,
+        "normalizeText": true
+      },
+      "validation": {
+        "minContentLength": 5,
+        "maxContentLength": 1000,
+        "requiredFields": ["author", "content"]
+      }
+    },
+    
+    "storage": {
+      "format": "json",
+      "includeReport": true,
+      "compressOutput": false,
+      "backupEnabled": true
+    }
+  },
+  
+  "errorHandling": {
+    "retryAttempts": 3,
+    "retryDelay": 2000,
+    "timeout": 30000,
+    "fallbackSelectors": true,
+    "logLevel": "info"
+  },
+  
+  "performance": {
+    "maxConcurrentActions": 3,
+    "batchSize": 50,
+    "cacheSelectors": true,
+    "preloadResources": false
+  }
+}

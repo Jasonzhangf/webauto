@@ -16,7 +16,7 @@ import {
   ExecutionContext,
   ExecutionContextState,
   IBaseOperation
-} from './types';
+} from './types/operationTypes';
 
 /**
  * Workflow编排引擎 - 基于操作子的工作流编排和执行系统

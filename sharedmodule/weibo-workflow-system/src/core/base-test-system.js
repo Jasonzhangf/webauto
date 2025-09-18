@@ -2,6 +2,7 @@ const { chromium } = require('playwright');
 const fs = require('fs');
 const path = require('path');
 const EventEmitter = require('events');
+const WeiboNavigationStrategy = require('../navigation/weibo-navigation-strategy');
 
 /**
  * 基础测试系统 - 所有原子操作的基础
@@ -39,7 +40,10 @@ class BaseTestSystem extends EventEmitter {
     
     // Cookie管理
     this.cookieFile = options.cookieFile || path.join(__dirname, 'cookies.json');
-    
+
+    // 微博导航策略
+    this.weiboNavigation = new WeiboNavigationStrategy(options.weiboNavigation);
+
     // 测试统计
     this.stats = {
       startTime: null,
@@ -323,7 +327,13 @@ class BaseTestSystem extends EventEmitter {
       // 高级操作
       executeScript: this.atomicExecuteScript.bind(this),
       scrollTo: this.atomicScrollTo.bind(this),
-      waitForNavigation: this.atomicWaitForNavigation.bind(this)
+      waitForNavigation: this.atomicWaitForNavigation.bind(this),
+
+      // 微博专用操作
+      weiboNavigate: this.atomicWeiboNavigate.bind(this),
+      weiboHomepage: this.atomicWeiboHomepage.bind(this),
+      weiboPost: this.atomicWeiboPost.bind(this),
+      scrollToBottom: this.atomicScrollToBottom.bind(this)
     };
     
     return operations[operationName];
@@ -424,6 +434,29 @@ class BaseTestSystem extends EventEmitter {
     const { timeout = 30000 } = params;
     await page.waitForNavigation({ timeout });
     return { navigated: true };
+  }
+
+  // 微博专用原子操作
+  async atomicWeiboNavigate(page, params) {
+    const { url, options = {} } = params;
+    return await this.weiboNavigation.navigateToWeiboPage(page, url, options);
+  }
+
+  async atomicWeiboHomepage(page, params) {
+    const { options = {} } = params;
+    return await this.weiboNavigation.navigateToWeiboHomepage(page, options);
+  }
+
+  async atomicWeiboPost(page, params) {
+    const { url, options = {} } = params;
+    return await this.weiboNavigation.navigateToWeiboPost(page, url, options);
+  }
+
+  async atomicScrollToBottom(page, params) {
+    await page.evaluate(() => {
+      window.scrollTo(0, document.body.scrollHeight);
+    });
+    return { scrolled: true };
   }
 
   /**

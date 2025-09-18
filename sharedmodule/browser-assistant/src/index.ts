@@ -1,54 +1,62 @@
 /**
- * WebAuto Browser Assistant
- * 智能浏览器自动化助手，基于 Camoufox 和 AI 驱动的页面分析
- * 
+ * WebAuto Browser Assistant - Operation-Based Architecture
+ * 基于操作子架构的智能浏览器自动化助手
+ *
  * @module @webauto/browser-assistant
  */
 
-// 核心类导出
+// === 操作子架构核心组件 ===
+export { OperationBasedBrowserAssistant } from './operations';
+export {
+  BrowserContextManager,
+  BrowserWorkflowEngine,
+  BrowserWorkflowEngine as WorkflowEngine
+} from './operations';
+
+export {
+  IBrowserOperation,
+  BrowserOperationContext,
+  BrowserOperationConfig,
+  CookieParams,
+  ExtractionParams,
+  ContainerParams
+} from './operations/interfaces';
+
+// === 核心浏览器操作子 ===
+export { BrowserLaunchOperation } from './operations/browser/BrowserLaunchOperationSimple';
+
+// === 向后兼容的组件（保留以便迁移） ===
 export { BrowserAssistant } from './core/BrowserAssistant';
 export { BaseBrowserModule } from './core/BaseModule';
 export { BrowserAssistantErrorHandler } from './core/ErrorHandler';
 
-// 分析器导出
 export { PageAnalyzer } from './core/PageAnalyzer';
 export { ContentExtractor } from './core/ContentExtractor';
 export { ListAnalyzer } from './core/ListAnalyzer';
 
-// 管理器导出
 export { BrowserManager } from './core/BrowserManager';
 export { PageObserver } from './observers/PageObserver';
 export { OperationEngine } from './operations/OperationEngine';
 export { CookieManager } from './browser/CookieManager';
 export { CamoufoxManager, type CamoufoxConfig } from './browser/CamoufoxManager';
 
-// 操作中心导出
 export { PageOperationCenter, type OperationOptions, type ClickOptions, type ScrollOptions, type TypeOptions, type ContentExtractionOptions, type CopyPasteOptions, type ExtractedContent } from './operations/PageOperationCenter';
-
-// 智能选择器导出
 export { SmartElementSelector, type ElementContext, type ElementSelection, type SelectorStrategy, type ElementIdentification } from './operations/SmartElementSelector';
 
-// WebSocket 导出
 export { WebSocketServer } from './websocket/WebSocketServer';
-
-// AI 分析器导出
 export { AIAnalyzer } from './observers/AIAnalyzer';
 
-// 类型定义导出
+// === 类型定义和接口 ===
 export * from './types';
 export * from './types/page-analysis';
-
-// 接口定义导出
 export * from './interfaces';
 
-// 工具函数
+// === 工具函数和配置 ===
 export { generateId, generateClientId } from './utils/idGenerator';
 export { deepMerge, debounce, throttle } from './utils/helpers';
-
-// 默认配置
 export { defaultConfig } from './config/default';
 
-// 错误类型
+// === 错误类型 ===
 export {
   BrowserAssistantError,
   BrowserConnectionError,
@@ -57,61 +65,97 @@ export {
   AnalysisError
 } from './errors';
 
-// 版本信息
-export const version = '0.1.0';
+// === 版本信息 ===
+export const version = '2.0.0';
 export const name = '@webauto/browser-assistant';
 
 /**
- * 快速创建浏览器助手实例
+ * 快速创建基于操作子的浏览器助手实例
  * @param config 配置选项
- * @returns BrowserAssistant 实例
+ * @returns OperationBasedBrowserAssistant 实例
  */
-export async function createBrowserAssistant(config?: Partial<import('./types').BrowserAssistantConfig>) {
-  const { BrowserAssistant } = await import('./core/BrowserAssistant');
-  return new BrowserAssistant(config);
+export async function createOperationBasedBrowserAssistant(config?: any) {
+  const { OperationBasedBrowserAssistant } = await import('./operations');
+  return new OperationBasedBrowserAssistant(config);
 }
 
 /**
- * 快速页面分析
+ * 快速页面分析（基于操作子架构）
  * @param url 目标URL
  * @param options 分析选项
  * @returns 分析结果
  */
 export async function analyzePage(url: string, options?: any) {
-  const assistant = await createBrowserAssistant();
-  await assistant.initialize();
-  
+  const assistant = await createOperationBasedBrowserAssistant(options);
+
   try {
-    return await assistant.analyzePage(url);
+    const workflow = {
+      name: 'page-analysis',
+      description: 'Navigate to URL and analyze page structure',
+      steps: [
+        {
+          operation: 'browser-launch',
+          parameters: { headless: options?.headless ?? false },
+          required: true
+        },
+        {
+          operation: 'page-navigation',
+          parameters: { url, waitUntil: 'networkidle' },
+          required: true
+        }
+      ]
+    };
+
+    return await assistant.executeWorkflow(workflow);
   } finally {
-    await assistant.close();
+    // Context cleanup can be handled automatically or manually
   }
 }
 
 /**
- * 快速内容提取
+ * 快速内容提取（基于操作子架构）
  * @param url 目标URL
  * @param options 提取选项
  * @returns 提取结果
  */
 export async function extractContent(url: string, options?: any) {
-  const assistant = await createBrowserAssistant({
-    observation: { enableAI: false }
-  });
-  
-  await assistant.initialize();
-  
+  const assistant = await createOperationBasedBrowserAssistant(options);
+
   try {
-    const analysis = await assistant.analyzePage(url);
-    return await assistant.getContentExtractor().extractContent(analysis.structure);
+    const workflow = {
+      name: 'content-extraction',
+      description: 'Navigate to URL and extract content',
+      steps: [
+        {
+          operation: 'browser-launch',
+          parameters: { headless: options?.headless ?? false },
+          required: true
+        },
+        {
+          operation: 'page-navigation',
+          parameters: { url, waitUntil: 'networkidle' },
+          required: true
+        }
+      ]
+    };
+
+    return await assistant.executeWorkflow(workflow);
   } finally {
-    await assistant.close();
+    // Context cleanup can be handled automatically or manually
   }
+}
+
+// === 向后兼容的便利函数 ===
+export async function createBrowserAssistant(config?: Partial<import('./types').BrowserAssistantConfig>) {
+  const { BrowserAssistant } = await import('./core/BrowserAssistant');
+  return new BrowserAssistant(config);
 }
 
 // 便利的默认导出
 export default {
+  OperationBasedBrowserAssistant: require('./operations').OperationBasedBrowserAssistant,
   BrowserAssistant: require('./core/BrowserAssistant').BrowserAssistant,
+  createOperationBasedBrowserAssistant,
   createBrowserAssistant,
   analyzePage,
   extractContent,

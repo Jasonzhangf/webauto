@@ -1,0 +1,232 @@
+{
+  "site": "weibo",
+  "name": "微博",
+  "version": "2.0.0",
+  "domain": "weibo.com",
+  "requiresAuth": true,
+  "description": "微博社交网站配置",
+  
+  "browser": {
+    "engine": "playwright",
+    "headless": false,
+    "viewport": {
+      "width": 1920,
+      "height": 1080
+    },
+    "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "timeout": 30000,
+    "navigationTimeout": 60000,
+    "browserContext": {
+      "extraHTTPHeaders": {
+        "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+        "Accept-Encoding": "gzip, deflate, br",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8"
+      }
+    }
+  },
+
+  "authentication": {
+    "type": "cookie",
+    "domain": "weibo.com",
+    "loginSelectors": [
+      ".gn_header .gn_nav_list .gn_nav_userinfo",
+      ".woo-box-flex.woo-box-alignCenter.Card_title__3Q_WA .woo-box-flex.woo-box-alignCenter",
+      ".main-container .user .link-wrapper .channel",
+      "[data-v-*] .user-info"
+    ],
+    "loginValidation": {
+      "checkInterval": 300000,
+      "maxConsecutiveFailures": 3
+    }
+  },
+
+  "layout": {
+    "type": "single-column-infinite",
+    "mainContainer": ".woo-layout-main",
+    "contentContainer": ".Feed_body__3R0rO",
+    "itemPattern": "card-feed"
+  },
+
+  "scrollStrategy": {
+    "type": "vertical-infinite",
+    "strategy": "vertical-infinite",
+    "config": {
+      "maxScrolls": 20,
+      "scrollDelay": 2000,
+      "scrollAmount": "80vh",
+      "detectNextPage": true,
+      "containerSelector": ".woo-layout-main"
+    }
+  },
+
+  "elements": {
+    "post": {
+      "container": ".Feed_body__3R0rO",
+      "item": ".card-feed",
+      "title": ".woo-box-flex.woo-box-alignCenter.Card_title__3Q_WA",
+      "content": ".Feed_body__3R0rO",
+      "author": ".woo-box-flex.woo-box-alignCenter.Card_title__3Q_WA .woo-box-flex.woo-box-alignCenter",
+      "time": ".Feed_body__3R0rO time",
+      "actions": ".Feed_body__3R0rO .woo-box-flex.woo-box-alignCenter.woo-box-justifyCenter"
+    },
+    "comments": {
+      "container": ".Feed_body__3R0rO .Frame_comment__2W2z4",
+      "item": ".Comment_item__3y_5v",
+      "author": ".Comment_item__3y_5v .woo-box-flex.woo-box-alignCenter",
+      "content": ".Comment_item__3y_5v .Feed_body__3R0rO",
+      "expandButton": ".Feed_body__3R0rO .woo-box-flex.woo-box-alignCenter.woo-box-justifyCenter",
+      "loadMoreButton": ".Feed_body__3R0rO .woo-box-flex.woo-box-alignCenter.woo-box-justifyCenter"
+    },
+    "navigation": {
+      "searchInput": "input[type='search']",
+      "searchButton": "button[aria-label='搜索']",
+      "userMenu": ".woo-box-flex.woo-box-alignCenter.Card_title__3Q_WA .woo-box-flex.woo-box-alignCenter"
+    },
+    "pagination": {
+      "nextPage": ".next-page, .pagination .next, .pager .next",
+      "loadMore": ".load-more, .view-more, .woo-box-flex.woo-box-alignCenter.woo-box-justifyCenter"
+    }
+  },
+
+  "extraction": {
+    "strategy": "structured",
+    "dataTypes": [
+      {
+        "name": "posts",
+        "selector": ".card-feed",
+        "fields": {
+          "title": {
+            "selector": ".woo-box-flex.woo-box-alignCenter.Card_title__3Q_WA",
+            "type": "text"
+          },
+          "content": {
+            "selector": ".Feed_body__3R0rO",
+            "type": "text"
+          },
+          "author": {
+            "selector": ".woo-box-flex.woo-box-alignCenter.Card_title__3Q_WA .woo-box-flex.woo-box-alignCenter",
+            "type": "text"
+          },
+          "time": {
+            "selector": ".Feed_body__3R0rO time",
+            "type": "text"
+          },
+          "url": {
+            "selector": "a[href*='/status/']",
+            "type": "attribute",
+            "attribute": "href"
+          }
+        }
+      },
+      {
+        "name": "comments",
+        "selector": ".Comment_item__3y_5v",
+        "fields": {
+          "author": {
+            "selector": ".Comment_item__3y_5v .woo-box-flex.woo-box-alignCenter",
+            "type": "text"
+          },
+          "content": {
+            "selector": ".Comment_item__3y_5v .Feed_body__3R0rO",
+            "type": "text"
+          },
+          "time": {
+            "selector": ".Comment_item__3y_5v time",
+            "type": "text"
+          },
+          "likes": {
+            "selector": ".woo-box-flex.woo-box-alignCenter span",
+            "type": "number"
+          }
+        }
+      }
+    ]
+  },
+
+  "interaction": {
+    "strategy": "direct-click",
+    "clickDelays": {
+      "min": 800,
+      "max": 2000
+    },
+    "typeDelays": {
+      "min": 100,
+      "max": 300
+    },
+    "scrollDelays": {
+      "min": 1500,
+      "max": 3000
+    }
+  },
+
+  "security": {
+    "rateLimits": {
+      "click": { "max": 20, "window": 60000 },
+      "navigate": { "max": 10, "window": 60000 },
+      "scroll": { "max": 30, "window": 60000 },
+      "extract": { "max": 5, "window": 60000 }
+    },
+    "humanBehavior": {
+      "enabled": true,
+      "mouseMovement": true,
+      "typingSimulation": true,
+      "randomDelays": true
+    },
+    "errorHandling": {
+      "maxConsecutiveErrors": 3,
+      "blockDuration": 1800000,
+      "autoRetry": true,
+      "maxRetries": 3
+    }
+  },
+
+  "workflows": {
+    "searchAndCapture": {
+      "description": "搜索并捕获帖子",
+      "steps": [
+        {
+          "action": "navigate",
+          "url": "https://s.weibo.com/weibo?q={keyword}"
+        },
+        {
+          "action": "wait",
+          "timeout": 5000
+        },
+        {
+          "action": "scroll",
+          "strategy": "vertical-infinite",
+          "maxItems": 50
+        },
+        {
+          "action": "extract",
+          "type": "posts"
+        }
+      ]
+    },
+    "extractComments": {
+      "description": "提取帖子评论",
+      "steps": [
+        {
+          "action": "navigate",
+          "url": "{postUrl}"
+        },
+        {
+          "action": "wait",
+          "timeout": 3000
+        },
+        {
+          "action": "checkLogin"
+        },
+        {
+          "action": "scroll",
+          "strategy": "vertical-infinite",
+          "maxItems": 200
+        },
+        {
+          "action": "extract",
+          "type": "comments"
+        }
+      ]
+    }
+  }
+}

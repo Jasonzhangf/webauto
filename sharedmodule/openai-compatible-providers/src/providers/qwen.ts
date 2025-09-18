@@ -113,12 +113,13 @@ class QwenProvider extends BaseProvider {
 
   constructor(config: QwenProviderConfig) {
     // 准备完整的配置，包括auth配置
+    const { name, ...configWithoutName } = config;
     const fullConfig = {
-      id: 'provider-' + config.name,
-      name: config.name + ' Provider',
+      id: 'provider-' + name,
+      name: name + ' Provider',
       version: '1.0.0',
       type: 'provider',
-      ...config,
+      ...configWithoutName,
       metadata: {
         auth: {
           tokenStoragePath: config.tokenStoragePath || path.join(os.homedir(), '.webauto', 'auth', 'qwen-token.json'),
@@ -361,13 +362,15 @@ class QwenProvider extends BaseProvider {
         }
       });
 
+      const responseData = response.data as any;
+
       const deviceFlow: DeviceFlowData = {
-        deviceCode: response.data.device_code,
-        userCode: response.data.user_code,
-        verificationUri: response.data.verification_uri,
-        verificationUriComplete: response.data.verification_uri_complete,
-        expiresIn: response.data.expires_in,
-        interval: response.data.interval,
+        deviceCode: responseData.device_code,
+        userCode: responseData.user_code,
+        verificationUri: responseData.verification_uri,
+        verificationUriComplete: responseData.verification_uri_complete,
+        expiresIn: responseData.expires_in,
+        interval: responseData.interval,
         pkceVerifier
       };
 
@@ -423,10 +426,12 @@ class QwenProvider extends BaseProvider {
           }
         });
 
+        const tokenData = response.data as any;
+
         // 成功获取token
-        this.accessToken = response.data.access_token;
-        this.refreshToken = response.data.refresh_token;
-        this.tokenExpiry = Date.now() + (response.data.expires_in * 1000);
+        this.accessToken = tokenData.access_token;
+        this.refreshToken = tokenData.refresh_token;
+        this.tokenExpiry = Date.now() + (tokenData.expires_in * 1000);
 
         // 保存tokens到文件
         this.saveTokens();
@@ -434,9 +439,9 @@ class QwenProvider extends BaseProvider {
         return {
           accessToken: this.accessToken!,
           refreshToken: this.refreshToken!,
-          expiresIn: response.data.expires_in,
-          tokenType: response.data.token_type,
-          scope: response.data.scope
+          expiresIn: tokenData.expires_in,
+          tokenType: tokenData.token_type,
+          scope: tokenData.scope
         };
       } catch (error) {
         if ((error as any).response?.data?.error === 'authorization_pending') {
@@ -484,17 +489,19 @@ class QwenProvider extends BaseProvider {
         }
       });
 
-      this.accessToken = response.data.access_token;
-      this.refreshToken = response.data.refresh_token;
-      this.tokenExpiry = Date.now() + (response.data.expires_in * 1000);
+      const refreshData = response.data as any;
+
+      this.accessToken = refreshData.access_token;
+      this.refreshToken = refreshData.refresh_token;
+      this.tokenExpiry = Date.now() + (refreshData.expires_in * 1000);
 
       // 保存完整的token信息，包括resource_url
-      this.saveTokens(response.data);
+      this.saveTokens(refreshData);
 
       return {
         accessToken: this.accessToken!,
         refreshToken: this.refreshToken!,
-        expiresIn: response.data.expires_in,
+        expiresIn: refreshData.expires_in,
         tokenType: 'Bearer',
         scope: this.oauthConfig.scopes.join(' ')
       };
@@ -573,7 +580,7 @@ class QwenProvider extends BaseProvider {
                 throw new Error('Automatic re-authentication failed: ' + authResult.error);
               }
             } catch (authError) {
-              console.log('[QwenProvider] Automatic re-authentication error:', authError.message);
+              console.log('[QwenProvider] Automatic re-authentication error:', (authError as Error).message);
               throw new Error('Re-authentication failed: ' + (authError as Error).message);
             }
           }
@@ -613,7 +620,7 @@ class QwenProvider extends BaseProvider {
           responseType: 'stream'
         });
 
-        const stream = response.data;
+        const stream = response.data as any;
         let buffer = '';
 
         for await (const chunk of stream) {
@@ -674,7 +681,7 @@ class QwenProvider extends BaseProvider {
                 throw new Error('Stream re-authentication failed: ' + authResult.error);
               }
             } catch (authError) {
-              console.log('[QwenProvider] Stream automatic re-authentication error:', authError.message);
+              console.log('[QwenProvider] Stream automatic re-authentication error:', (authError as Error).message);
               throw new Error('Stream re-authentication failed: ' + (authError as Error).message);
             }
           }
@@ -829,11 +836,13 @@ class QwenProvider extends BaseProvider {
         }
       });
 
+      const testData = testResponse.data as any;
+
       return {
         status: 'healthy',
         provider: this.getInfo().name,
         timestamp: Date.now(),
-        models: testResponse.data?.data?.length || 0
+        models: testData?.data?.length || 0
       };
     } catch (error) {
       this.errorHandler.handleError({
@@ -861,7 +870,8 @@ class QwenProvider extends BaseProvider {
         }
       });
 
-      return response.data.data || [];
+      const modelData = response.data as any;
+      return modelData.data || [];
     } catch (error) {
       // 如果API失败，返回本地配置的模型
       return this.supportedModels;

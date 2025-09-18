@@ -1,0 +1,88 @@
+{
+  "version": "1.0.0",
+  "description": "微博工作流配置文件",
+  "browser": {
+    "headless": false,
+    "args": [
+      "--no-sandbox",
+      "--disable-setuid-sandbox",
+      "--disable-dev-shm-usage",
+      "--disable-accelerated-2d-canvas",
+      "--no-first-run",
+      "--no-default-browser-check"
+    ]
+  },
+  "context": {
+    "viewport": {
+      "width": 1920,
+      "height": 1080
+    },
+    "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+    "extraHTTPHeaders": {
+      "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8"
+    }
+  },
+  "orchestrator": {
+    "maxConcurrentWorkflows": 2,
+    "defaultTimeout": 120000,
+    "autoSaveReports": true,
+    "delayBetweenWorkflows": 2000,
+    "reportsDirectory": "./reports"
+  },
+  "workflows": {
+    "weibo-homepage": {
+      "maxPosts": 50,
+      "timeout": 120000,
+      "maxRetries": 3,
+      "includeUserInfo": false
+    },
+    "weibo-profile": {
+      "maxPosts": 100,
+      "timeout": 120000,
+      "maxRetries": 3,
+      "includeUserInfo": true,
+      "includeTimeline": true
+    },
+    "weibo-search": {
+      "maxResults": 100,
+      "timeout": 120000,
+      "maxRetries": 3,
+      "includeRelated": true,
+      "sortBy": "recent",
+      "timeRange": "all"
+    }
+  },
+  "output": {
+    "format": "json",
+    "structure": {
+      "metadata": true,
+      "results": true,
+      "execution": true
+    },
+    "compress": false
+  },
+  "logging": {
+    "level": "info",
+    "saveToFile": true,
+    "logDirectory": "./logs",
+    "maxFileSize": "10MB",
+    "maxFiles": 5
+  },
+  "errorHandling": {
+    "retryAttempts": 3,
+    "retryDelay": 2000,
+    "continueOnError": false,
+    "saveErrorReports": true
+  },
+  "performance": {
+    "memoryLimit": "512MB",
+    "timeoutPerOperation": 30000,
+    "delayBetweenOperations": 500,
+    "maxConcurrentOperations": 3
+  },
+  "security": {
+    "enableCORS": false,
+    "validateSSL": true,
+    "userAgentRotation": false
+  }
+}

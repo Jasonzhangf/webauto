@@ -1,0 +1,126 @@
+{
+  "transformers": [
+    {
+      "name": "anthropic-default",
+      "type": "anthropic",
+      "options": {}
+    },
+    {
+      "name": "openai-default",
+      "type": "openai",
+      "options": {}
+    },
+    {
+      "name": "openai-pass-through",
+      "type": "pass-through",
+      "options": {
+        "modelAliases": {
+          "gpt-4-turbo-preview": "gpt-4-turbo",
+          "gpt-3.5-turbo-0125": "gpt-3.5-turbo"
+        },
+        "defaultParams": {
+          "temperature": 0.7,
+          "max_tokens": 1024
+        },
+        "paramLimits": {
+          "temperature": {
+            "min": 0,
+            "max": 2
+          },
+          "top_p": {
+            "min": 0,
+            "max": 1
+          }
+        }
+      }
+    },
+    {
+      "name": "gemini-default",
+      "type": "gemini",
+      "options": {}
+    },
+    {
+      "name": "simple-pass-through",
+      "type": "pass-through",
+      "options": {}
+    }
+  ],
+  "providers": [
+    {
+      "name": "anthropic",
+      "api_base_url": "https://api.anthropic.com/v1/messages",
+      "api_key": "$ANTHROPIC_API_KEY",
+      "models": [
+        "claude-3-5-sonnet-20240620",
+        "claude-3-opus-20240229"
+      ],
+      "transformer": {
+        "use": [
+          "anthropic-default"
+        ]
+      }
+    },
+    {
+      "name": "openai",
+      "api_base_url": "https://api.openai.com/v1/chat/completions",
+      "api_key": "$OPENAI_API_KEY",
+      "models": [
+        "gpt-4-turbo",
+        "gpt-3.5-turbo"
+      ],
+      "transformer": {
+        "use": [
+          "openai-default"
+        ]
+      }
+    },
+    {
+      "name": "openai-with-config",
+      "api_base_url": "https://api.openai.com/v1/chat/completions",
+      "api_key": "$OPENAI_API_KEY",
+      "models": [
+        "gpt-4-turbo-preview",
+        "gpt-3.5-turbo-0125"
+      ],
+      "transformer": {
+        "use": [
+          "openai-pass-through"
+        ]
+      }
+    },
+    {
+      "name": "gemini",
+      "api_base_url": "https://generativelanguage.googleapis.com/v1beta/models/",
+      "api_key": "$GEMINI_API_KEY",
+      "models": [
+        "gemini-1.5-pro",
+        "gemini-1.5-flash"
+      ],
+      "transformer": {
+        "use": [
+          "gemini-default"
+        ]
+      }
+    },
+    {
+      "name": "custom-provider",
+      "api_base_url": "https://api.custom-provider.com/v1/chat/completions",
+      "api_key": "$CUSTOM_PROVIDER_API_KEY",
+      "models": [
+        "custom-model-1",
+        "custom-model-2"
+      ],
+      "transformer": {
+        "use": [
+          [
+            "maxtoken",
+            {
+              "max_tokens": 130000
+            }
+          ],
+          "simple-pass-through"
+        ]
+      }
+    }
+  ]
+}

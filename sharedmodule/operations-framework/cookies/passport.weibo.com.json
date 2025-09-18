@@ -1,0 +1,62 @@
+[
+  {
+    "name": "tid",
+    "value": "01AfgSEU3AwtEgOZ-lmEBnpXpOokSYOWQLdnitZrz2O06o",
+    "domain": "passport.weibo.com",
+    "path": "/visitor",
+    "expires": 1788671765,
+    "httpOnly": false,
+    "secure": false,
+    "sameSite": "Lax"
+  },
+  {
+    "name": "SUB",
+    "value": "_2AkMfmy4if8NxqwFRmvsXymvgbo1_zwHEieKpx9_5JRMxHRl-yT9kqhA8tRB6NBsAzY8cVPSqjFiHPOJUbL7T1xO69n7N",
+    "domain": ".weibo.com",
+    "path": "/",
+    "expires": 1789449365.023891,
+    "httpOnly": true,
+    "secure": true,
+    "sameSite": "None"
+  },
+  {
+    "name": "SUBP",
+    "value": "0033WrSXqPxfM72-Ws9jqgMF55529P9D9W5VnflFzpr1IBnKNphKEHXV",
+    "domain": ".weibo.com",
+    "path": "/",
+    "expires": 1789449365.024315,
+    "httpOnly": false,
+    "secure": false,
+    "sameSite": "Lax"
+  },
+  {
+    "name": "SRT",
+    "value": "D.QqHBTrscUQ%21rTdRtOeYoWrSNUQSqdGbkWcW8UqEa5eWzMdbbN3BtKP0sNbHi5mYNUCsuPDbhVdYBKGMNAZSKAeiB5b%21tRsSA43EgMcbz4my1PdHJisAo5m0-Kdt3OX77%2AB.vAflW-P9Rc0lR-ykKDvnJqiQVbiRVPBtS%21r3J8sQVqbgVdWiMZ4siOzu4DbmKPVsPcucUmSwVGzoN4HlNrunTmkENEYd",
+    "domain": ".passport.weibo.com",
+    "path": "/",
+    "expires": 1792473365.024334,
+    "httpOnly": true,
+    "secure": true,
+    "sameSite": "Lax"
+  },
+  {
+    "name": "SRF",
+    "value": "1757913365",
+    "domain": ".passport.weibo.com",
+    "path": "/",
+    "expires": 1792473365.024344,
+    "httpOnly": false,
+    "secure": true,
+    "sameSite": "Lax"
+  },
+  {
+    "name": "X-CSRF-TOKEN",
+    "value": "CK-YcoFMN_1oCogwJ_A-CWIRcW1MNWzKEM5sDXyzC_1Zx_eZN_u=",
+    "domain": ".passport.weibo.com",
+    "path": "/",
+    "expires": -1,
+    "httpOnly": false,
+    "secure": true,
+    "sameSite": "Lax"
+  }
+]

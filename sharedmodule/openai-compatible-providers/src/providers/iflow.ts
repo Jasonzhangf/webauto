@@ -168,7 +168,7 @@ class IFlowProvider extends BaseProvider {
    * 检查Token是否有效
    */
   private isTokenValid(): boolean {
-    return this.accessToken && Date.now() < this.tokenExpiry;
+    return !!this.accessToken && Date.now() < this.tokenExpiry;
   }
 
   /**
@@ -558,14 +558,16 @@ class IFlowProvider extends BaseProvider {
           'Accept': 'application/json'
         }
       });
+
+      const responseData = response.data as any;
       
       const deviceFlow: DeviceFlowData = {
-        deviceCode: response.data.device_code,
-        userCode: response.data.user_code,
-        verificationUri: response.data.verification_uri,
-        verificationUriComplete: response.data.verification_uri_complete,
-        expiresIn: response.data.expires_in,
-        interval: response.data.interval,
+        deviceCode: responseData.device_code,
+        userCode: responseData.user_code,
+        verificationUri: responseData.verification_uri,
+        verificationUriComplete: responseData.verification_uri_complete,
+        expiresIn: responseData.expires_in,
+        interval: responseData.interval,
         pkceVerifier: pkceVerifier
       };
       
@@ -614,13 +616,15 @@ class IFlowProvider extends BaseProvider {
               'Accept': 'application/json'
             }
           });
-          
+
+          const tokenData = response.data as any;
+
           const tokens: OAuthTokens = {
-            accessToken: response.data.access_token,
-            refreshToken: response.data.refresh_token || '',
-            expiresIn: response.data.expires_in,
-            tokenType: response.data.token_type,
-            scope: response.data.scope
+            accessToken: tokenData.access_token,
+            refreshToken: tokenData.refresh_token || '',
+            expiresIn: tokenData.expires_in,
+            tokenType: tokenData.token_type,
+            scope: tokenData.scope
           };
           
           this.log('Device authorization completed successfully');
@@ -708,13 +712,15 @@ class IFlowProvider extends BaseProvider {
           'Accept': 'application/json'
         }
       });
-      
+
+      const refreshData = response.data as any;
+
       const tokens: OAuthTokens = {
-        accessToken: response.data.access_token,
-        refreshToken: response.data.refresh_token || this.refreshToken,
-        expiresIn: response.data.expires_in,
-        tokenType: response.data.token_type,
-        scope: response.data.scope
+        accessToken: refreshData.access_token,
+        refreshToken: refreshData.refresh_token || this.refreshToken,
+        expiresIn: refreshData.expires_in,
+        tokenType: refreshData.token_type,
+        scope: refreshData.scope
       };
       
       // 保存刷新后的令牌
@@ -844,12 +850,6 @@ class IFlowProvider extends BaseProvider {
   }
 
   
-  /**
-   * 日志记录
-   */
-  private log(message: string): void {
-    console.log(`[iFlowProvider] ${message}`);
   }
-}
 
 export default IFlowProvider;

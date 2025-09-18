@@ -6,6 +6,133 @@
 
 智能浏览器自动化助手，基于 Camoufox 和 AI 驱动的页面分析。结合了 stagehand 的智能观察理念和 Camoufox 的反指纹识别技术，提供强大的页面理解和内容提取能力。
 
+## 🏗️ 架构概览
+
+### 核心设计理念
+Browser Assistant 采用**模块化架构**，将复杂的浏览器自动化任务分解为多个专业化模块。每个模块负责特定功能，通过统一的接口进行协作，支持灵活的配置和扩展。
+
+### 核心组件
+
+#### 1. 核心架构模块 (`src/core/`)
+- **`BrowserAssistant.ts`** - 主要的浏览器助手类
+  - 提供统一的 API 接口
+  - 协调各个子模块的工作
+  - 管理生命周期和资源
+
+- **`BaseModule.ts`** - 基础模块类
+  - 提供模块通用功能
+  - 实现模块间的通信机制
+  - 支持模块的初始化和清理
+
+- **`SimpleBaseModule.ts`** - 简化版基础模块类
+  - 轻量级模块基类
+  - 适合简单的功能模块
+  - 减少依赖和复杂度
+
+- **`ErrorHandler.ts`** - 错误处理模块
+  - 统一的错误处理机制
+  - 支持错误分类和恢复策略
+  - 提供详细的错误信息
+
+- **`PageAnalyzer.ts`** - 页面分析器
+  - 分析页面结构和布局
+  - 识别页面类型和特征
+  - 提取关键元素选择器
+
+- **`ContentExtractor.ts`** - 内容提取器
+  - 从页面提取结构化数据
+  - 支持多种内容类型（帖子、评论、用户信息）
+  - 智能过滤和清理数据
+
+- **`ListAnalyzer.ts`** - 列表分析器
+  - 分析页面中的列表结构
+  - 检测滚动和分页机制
+  - 识别重复元素模式
+
+#### 2. 浏览器管理模块 (`src/browser/`)
+- **`CamoufoxManager.ts`** - Camoufox 浏览器管理器
+  - 基于 Firefox 的反检测浏览器管理
+  - 支持多种启动配置
+  - 处理浏览器生命周期
+  - 关键功能：`launch()`, `newPage()`, `close()`, `configure()`
+
+- **`CookieManager.ts`** - Cookie 管理器
+  - 管理浏览器 Cookie
+  - 支持持久化和自动注入
+  - 处理跨域 Cookie
+
+- **`SimpleCookieManager.ts`** - 简化版 Cookie 管理器
+  - 轻量级 Cookie 管理功能
+  - 适合简单场景使用
+
+#### 3. 操作模块 (`src/operations/`)
+- **`PageOperationCenter.ts`** - 页面操作中心
+  - 提供统一的页面操作接口
+  - 支持点击、滚动、输入等操作
+  - 智能元素定位和交互
+  - 关键操作：`click()`, `scroll()`, `type()`, `extractContent()`, `copyPaste()`
+
+- **`SmartElementSelector.ts`** - 智能元素选择器
+  - 多策略元素定位
+  - 支持 AI 辅助选择
+  - 处理动态元素和复杂选择器
+
+- **`SimplePageOperationCenter.ts`** - 简化版页面操作中心
+  - 基础页面操作功能
+  - 减少复杂度和依赖
+
+- **`SimpleSmartElementSelector.ts`** - 简化版智能元素选择器
+  - 基础元素选择功能
+  - 适合简单场景
+
+#### 4. 接口定义 (`src/interfaces/`)
+- **`core.ts`** - 核心接口定义
+  - 定义模块基础接口
+  - 规范模块间通信协议
+
+- **`analysis.ts`** - 分析相关接口
+  - 页面分析结果接口
+  - 内容提取接口定义
+
+- **`operations.ts`** - 操作相关接口
+  - 操作参数和返回值接口
+  - 操作配置接口
+
+- **`index.ts`** - 接口统一导出
+  - 汇总所有接口定义
+  - 便于外部引用
+
+#### 5. 类型定义 (`src/types/`)
+- **`page-analysis.ts`** - 页面分析类型
+  - 页面结构类型定义
+  - 分析结果数据结构
+
+- **`index.ts`** - 类型统一导出
+  - 汇总所有类型定义
+  - 提供完整的类型支持
+
+#### 6. 错误处理 (`src/errors/`)
+- **`index.ts`** - 错误类型定义
+  - 自定义错误类型
+  - 错误分类和处理
+
+#### 7. 入口文件
+- **`src/index.ts`** - 主入口文件
+  - 导出所有公共 API
+  - 提供快速创建函数
+  - 版本信息和配置
+
+- **`src/index-simple.ts`** - 简化版入口文件
+  - 导出简化版 API
+  - 适合轻量级使用
+
+#### 8. 构建和发布
+- **`scripts/post-build.js`** - 构建后处理脚本
+- **`scripts/publish.js`** - 发布脚本
+- **`tsconfig.json`** - TypeScript 配置
+- **`tsconfig-simple.json`** - 简化版 TypeScript 配置
+- **`package.json`** - 包配置和依赖管理
+
 ## ✨ 特性
 
 ### 🧠 智能页面分析

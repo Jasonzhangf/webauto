@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "description": "WebAuto Project Collection - Multiple Web Automation Modules",
   "private": true,
+  "type": "module",
   "scripts": {
     "install:all": "npm install && cd sharedmodule && npm install && cd mcp-framework && npm install && cd ../weibo-workflow-system && npm install && cd ../openai-compatible-providers && npm install",
     "build:all": "cd sharedmodule/mcp-framework && npm run build && cd ../weibo-workflow-system && npm run build && cd ../openai-compatible-providers && npm run build",
@@ -36,7 +37,8 @@
     "playwright": "^1.55.0"
   },
   "devDependencies": {
-    "@types/node": "^24.4.0",
+    "@types/node": "^24.5.0",
+    "ts-node": "^10.9.2",
     "typescript": "^5.9.2"
   }
 }

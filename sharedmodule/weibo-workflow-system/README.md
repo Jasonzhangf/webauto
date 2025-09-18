@@ -1,32 +1,32 @@
-# 微博容器操作系统 (Weibo Container OS)
+# Weibo Workflow System (微博工作流系统)
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Node.js Version](https://img.shields.io/badge/node-%3E%3D18.0.0-brightgreen)](https://nodejs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-4.x-blue.svg)](https://www.typescriptlang.org/)
 
-微博容器操作系统是一个基于容器架构的微博自动化操作系统，采用现代化的模块化设计，支持点号访问、状态管理、流程执行等高级功能。
+基于操作子架构的微博自动化工作流系统，提供模块化、可复用的微博数据采集和交互功能。系统采用现代化的操作子设计模式，支持复杂的工作流编排和错误恢复。
 
 ## ✨ 特性
 
-### 🏗️ 架构设计
-- **容器系统**: 基于RCC BaseModule的容器架构
-- **状态中心**: 统一的状态管理和监控
-- **操作子系统**: 可复用的操作组件
-- **执行流引擎**: 支持JSON配置的流程执行
+### 🏗️ 操作子架构
+- **WeiboNavigationOperation**: 微博页面导航操作子
+- **WeiboContentExtractionOperation**: 内容提取操作子（帖子、评论、用户资料）
+- **WeiboLoginOperation**: 登录管理操作子（二维码登录、Cookie管理）
+- **WeiboWorkflowSystem**: 统一工作流执行引擎
 
 ### 🔧 核心功能
-- **点号访问**: 支持 `page.xxx.xxx.xxx` 的链式访问
-- **状态管理**: 实时状态同步和变化检测
-- **流程执行**: 支持条件判断、循环、并行执行
-- **健康监控**: 自动健康检查和故障恢复
-- **调试支持**: 完整的日志和调试信息
+- **页面导航**: 智能导航到微博首页、用户主页、帖子详情、搜索结果
+- **内容提取**: 高精度提取微博帖子、评论、用户资料信息
+- **登录管理**: 支持二维码登录、Cookie管理、会话保持
+- **工作流执行**: 复杂多步骤工作流的编排和执行
+- **错误处理**: 完善的错误处理和重试机制
 
 ### 🚀 高级特性
-- **模块化组件**: 每个组件都可独立扩展和测试
-- **异步操作**: 支持异步操作和并发处理
-- **错误恢复**: 智能错误处理和重试机制
-- **资源管理**: 自动资源清理和内存管理
-- **配置灵活**: 支持JSON和程序化配置
+- **模块化设计**: 每个操作子都可以独立使用和测试
+- **类型安全**: 完整的TypeScript类型定义
+- **可扩展性**: 易于添加新的操作子和功能
+- **监控日志**: 详细的执行日志和性能监控
+- **测试覆盖**: 全面的单元测试和集成测试
 
 ## 📋 系统要求
 
@@ -34,6 +34,28 @@
 - **npm**: >= 8.0.0
 - **操作系统**: macOS, Linux, Windows
 - **TypeScript**: >= 4.0.0
+
+## 📁 文件结构
+
+```
+sharedmodule/weibo-workflow-system/
+├── src/
+│   ├── operations/
+│   │   ├── interfaces/
+│   │   │   └── IWeiboOperation.ts          # 操作子接口定义和数据类型
+│   │   ├── core/
+│   │   │   ├── WeiboNavigationOperation.ts    # 微博导航操作子
+│   │   │   ├── WeiboContentExtractionOperation.ts  # 内容提取操作子
+│   │   │   └── WeiboLoginOperation.ts         # 登录管理操作子
+│   │   └── index.ts                          # 主入口文件和工作流系统
+│   └── config/
+│       └── weibo-timeout-config.js          # 微博超时配置
+├── test-weibo-operations.test.ts            # 完整的单元测试套件
+├── jest.config.js                           # Jest测试配置
+├── test-setup.ts                           # 测试环境配置
+├── package.json                            # 项目配置和依赖
+└── README.md                               # 项目文档
+```
 
 ## 🚀 快速开始
 
@@ -47,35 +69,37 @@ npm install
 ### 2. 基本使用
 
 ```typescript
-import { quickStart, logger } from './src/index';
+import { WeiboWorkflowSystem } from './src/operations';
 
 async function main() {
   try {
-    // 1. 启动系统
-    const system = await quickStart({
-      debug: true,
-      enableMetrics: true,
-      enableHealthMonitoring: true
+    // 1. 初始化工作流系统
+    const workflowSystem = new WeiboWorkflowSystem();
+
+    // 2. 创建操作上下文
+    const context = {
+      browser: await createBrowserContext(), // 需要实现浏览器上下文创建
+      weibo: {},
+      startTime: Date.now()
+    };
+
+    // 3. 导航到微博首页
+    const navigationResult = await workflowSystem.navigate(context, 'homepage');
+
+    // 4. 提取微博内容
+    const extractionResult = await workflowSystem.extractContent(context, 'posts', {
+      maxItems: 20,
+      includeImages: true,
+      includeMetadata: true
     });
-    
-    logger.info('系统启动成功');
-    
-    // 2. 获取容器
-    const profileContainer = system.getComponent('UserProfileContainer');
-    
-    // 3. 点号访问子容器
-    const userProfile = profileContainer.userProfile;
-    const postList = profileContainer.postList;
-    const pagination = profileContainer.pagination;
-    
-    // 4. 执行操作
-    const userInfo = await profileContainer.executeOperation('extractUserInfo');
-    const posts = await profileContainer.executeOperation('extractPosts', { limit: 20 });
-    
-    logger.info('数据提取完成', { userInfo, postsCount: posts.length });
-    
+
+    console.log('数据提取完成:', {
+      navigationSuccess: navigationResult.success,
+      postsCount: extractionResult.result?.length || 0
+    });
+
   } catch (error) {
-    logger.error('系统运行失败', error);
+    console.error('系统运行失败:', error);
   }
 }
 
@@ -85,128 +109,115 @@ main();
 ### 3. 流程执行
 
 ```typescript
-import { FlowExecutor } from './src/index';
+import { WeiboWorkflowSystem } from './src/operations';
 
-// 创建流程配置
-const flowConfig = {
-  id: 'userProfileFlow',
-  name: '用户主页信息提取流程',
-  steps: [
-    {
-      type: 'operation',
-      container: 'UserProfileContainer',
-      operation: 'extractUserInfo',
-      params: {}
-    },
-    {
-      type: 'condition',
-      condition: {
-        type: 'container_state',
-        containerId: 'UserProfileContainer',
-        property: 'elementCount',
-        operator: 'greater_than',
-        value: 0
+async function runWorkflow() {
+  const workflowSystem = new WeiboWorkflowSystem();
+
+  const context = {
+    browser: await createBrowserContext(),
+    weibo: {},
+    startTime: Date.now()
+  };
+
+  // 创建工作流配置
+  const workflow = {
+    id: 'weibo-data-collection',
+    type: 'weibo-data-collection',
+    steps: [
+      {
+        id: 'step1',
+        name: '导航到首页',
+        operation: 'navigation',
+        params: { target: 'homepage' },
+        required: true
       },
-      trueBranch: {
-        steps: [
-          {
-            type: 'operation',
-            container: 'UserProfileContainer',
-            operation: 'extractPosts',
-            params: { limit: 20 }
-          }
-        ]
+      {
+        id: 'step2',
+        name: '提取微博帖子',
+        operation: 'content-extraction',
+        params: { contentType: 'posts', maxItems: 20 },
+        required: true
+      },
+      {
+        id: 'step3',
+        name: '检查登录状态',
+        operation: 'login',
+        params: { action: 'check-status' },
+        required: false
       }
-    }
-  ]
-};
+    ]
+  };
 
-// 执行流程
-const flowExecutor = new FlowExecutor();
-const result = await flowExecutor.executeFlow(flowConfig);
-```
+  // 执行工作流
+  const result = await workflowSystem.executeWorkflow(context, workflow);
+
+  console.log('工作流执行完成:', result);
+}
+
+runWorkflow();
 
 ## 🏗️ 架构设计
 
 ### 核心组件
 
-#### 1. SystemStateCenter (系统状态中心)
-- 系统核心服务，管理所有实体的状态
-- 提供状态注册、更新、查询、订阅功能
-- 支持健康监控和变化检测
+#### 1. WeiboWorkflowSystem (工作流系统)
+- 统一的工作流执行引擎，管理所有微博操作子
+- 提供系统初始化、健康检查、状态监控功能
+- 支持多步骤工作流的编排和执行
 
-#### 2. BaseContainer (容器基类)
-- 继承自RCC BaseModule
-- 提供容器的基础功能：子容器管理、操作注册、状态管理
-- 支持点号访问和操作调用
+#### 2. WeiboNavigationOperation (导航操作子)
+- 继承自WeiboBaseOperation，负责微博页面导航
+- 支持首页、用户主页、帖子详情、搜索页面导航
+- 提供页面类型识别和URL验证功能
 
-#### 3. UserProfileContainer (用户主页容器)
-- 用户主页专用容器实现
-- 包含用户信息、微博列表、分页等子容器
-- 集成常用的微博操作
+#### 3. WeiboContentExtractionOperation (内容提取操作子)
+- 继承自WeiboBaseOperation，负责内容数据提取
+- 支持微博帖子、评论、用户资料的提取
+- 提供智能滚动加载和内容过滤功能
 
-#### 4. BaseOperation (操作子基类)
-- 操作的抽象基类
-- 提供执行前后的生命周期管理
-- 支持重试、超时、条件等待等功能
+#### 4. WeiboLoginOperation (登录管理操作子)
+- 继承自WeiboBaseOperation，负责登录状态管理
+- 支持二维码登录、Cookie管理、会话保持
+- 提供登录状态检查和验证功能
 
-#### 5. FlowExecutor (执行流引擎)
-- 支持JSON配置的流程执行
-- 支持操作、条件、循环、并行等流程步骤
-- 提供流程状态管理和监控
-
-#### 6. WeiboSystemBootstrapper (系统启动器)
-- 系统启动和关闭管理
-- 核心组件注册和初始化
-- 健康检查和监控服务
+#### 5. WeiboBaseOperation (操作子基类)
+- 提供操作子的基础功能和生命周期管理
+- 实现参数验证、错误处理、日志记录等通用功能
+- 支持超时控制、重试机制、条件等待等功能
 
 ### 数据流
 
 ```
-用户请求 → WeiboSystemBootstrapper → SystemStateCenter
-                                              ↓
-                                      FlowExecutor → BaseContainer
-                                              ↓
-                                      BaseOperation → 页面操作
-                                              ↓
-                                        状态更新和监控
+用户请求 → WeiboWorkflowSystem → 具体操作子执行
+                                    ↓
+                              操作结果收集与聚合
+                                    ↓
+                              状态更新和错误处理
+                                    ↓
+                              返回结构化结果
 ```
 
 ## 📁 项目结构
 
 ```
-weibo-mcp-system/
-├── src/                      
-│   ├── core/                  # 核心系统组件
-│   │   ├── system-state-center.ts    # 系统状态中心
-│   │   ├── weibo-system-bootstrapper.ts # 系统启动器
-│   │   ├── interfaces.ts            # 核心接口定义
-│   │   └── utils.ts                # 核心工具类
-│   ├── containers/            # 容器系统
-│   │   ├── base-container.ts        # 容器基类
-│   │   └── user-profile-container.ts # 用户主页容器
+sharedmodule/weibo-workflow-system/
+├── src/
 │   ├── operations/            # 操作子系统
-│   │   └── base-operation.ts       # 操作子基类
-│   ├── flows/                 # 执行流系统
-│   │   └── flow-executor.ts        # 流程执行器
-│   ├── examples/              # 使用示例
-│   │   ├── usage-examples.ts       # 完整使用示例
-│   │   └── simple-example.ts       # 简单使用示例
-│   ├── tests/                 # 测试套件
-│   │   └── system-tests.ts         # 系统测试
-│   ├── config/                # 配置管理
-│   ├── types/                 # 类型定义
-│   ├── utils/                 # 工具函数
-│   ├── mcp/                   # MCP服务层
-│   └── index.ts               # 主入口文件
-├── config/                   # 配置文件
-├── tests/                    # 测试文件
-├── data/                     # 数据目录
-├── temp/                     # 临时文件
-├── dist/                     # 编译输出
-├── package.json              # 项目配置
-├── tsconfig.json            # TypeScript 配置
-└── README.md               # 项目说明
+│   │   ├── interfaces/            # 操作子接口定义和数据类型
+│   │   │   └── IWeiboOperation.ts # 微博操作子接口定义
+│   │   ├── core/                  # 核心操作子实现
+│   │   │   ├── WeiboNavigationOperation.ts    # 微博导航操作子
+│   │   │   ├── WeiboContentExtractionOperation.ts  # 内容提取操作子
+│   │   │   └── WeiboLoginOperation.ts         # 登录管理操作子
+│   │   └── index.ts              # 主入口文件和工作流系统
+│   └── config/                   # 配置管理
+│       └── weibo-timeout-config.js # 微博超时配置
+├── test-weibo-operations.test.ts # 完整的单元测试套件
+├── jest.config.js              # Jest测试配置
+├── test-setup.ts               # 测试环境配置
+├── package.json                # 项目配置和依赖
+└── README.md                   # 项目文档
 ```
 
 ## 🧪 测试

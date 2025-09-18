@@ -1,0 +1,35 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "commonjs",
+    "lib": ["ES2022"],
+    "outDir": "./dist-minimal",
+    "rootDir": "./src",
+    "strict": false,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "declaration": true,
+    "sourceMap": true,
+    "resolveJsonModule": true
+  },
+  "include": [
+    "src/operations/core/BaseOperationSimple.ts",
+    "src/operations/interfaces/IBrowserOperation.ts",
+    "src/operations/browser/BrowserLaunchOperationSimple.ts",
+    "src/operations/core/BrowserContextManager.ts",
+    "src/operations/core/BrowserWorkflowEngine.ts",
+    "src/operations/core/BrowserOperationRegistrySimple.ts",
+    "src/operations/index.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "src/core",
+    "src/browser",
+    "src/observers",
+    "src/websocket",
+    "src/operations/PageOperationCenter.ts",
+    "src/operations/SmartElementSelector.ts"
+  ]
+}

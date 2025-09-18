@@ -2,7 +2,7 @@
  * Operation Registry for managing micro-operations
  */
 
-import { IBaseOperation, PerformanceMetrics, OperationConfig } from '../types';
+import { IBaseOperation, PerformanceMetrics, OperationConfig } from '../types/operationTypes';
 
 /**
  * 操作注册表 - 管理所有微操作的注册和查找

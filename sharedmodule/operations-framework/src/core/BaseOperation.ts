@@ -10,7 +10,7 @@ import {
   PerformanceMetrics,
   ExecutionStats,
   OperationContext
-} from '../types';
+} from '../types/operationTypes';
 
 export abstract class BaseOperation implements IBaseOperation {
   public name: string;
