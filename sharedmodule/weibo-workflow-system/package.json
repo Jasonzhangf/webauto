@@ -32,15 +32,16 @@
     "open": "^10.0.0",
     "path": "^0.12.7",
     "playwright": "^1.40.0",
+    "puppeteer-core": "^24.22.0",
     "puppeteer-extra": "^3.3.6",
     "puppeteer-extra-plugin-stealth": "^2.11.2",
+    "rcc-basemodule": "^0.1.4",
+    "rcc-errorhandling": "^1.0.5",
     "sharp": "^0.33.0",
     "sqlite3": "^5.1.6",
     "uuid": "^9.0.1",
     "winston": "^3.11.0",
-    "yaml": "^2.3.4",
-    "rcc-basemodule": "^0.1.4",
-    "rcc-errorhandling": "^1.0.5"
+    "yaml": "^2.3.4"
   },
   "devDependencies": {
     "@types/fs-extra": "^11.0.4",
