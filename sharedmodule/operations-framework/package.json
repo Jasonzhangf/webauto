@@ -4,6 +4,7 @@
   "description": "WebAuto Operator Framework - 基于嵌套operator的自动化操作框架",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "type": "module",
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",
