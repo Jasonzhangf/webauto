@@ -8,38 +8,38 @@
     "esModuleInterop": true,
     "allowSyntheticDefaultImports": true,
     "strict": false,
-    "forceConsistentCasingInFileNames": true,
+    "forceConsistentCasingInFileNames": false,
     "moduleResolution": "node",
     "resolveJsonModule": true,
-    "isolatedModules": true,
+    "isolatedModules": false,
     "noEmit": false,
     "declaration": false,
     "sourceMap": true,
     "outDir": "./dist",
     "baseUrl": ".",
-    "paths": {
-      "@/*": ["./*"],
-      "@/sharedmodule/*": ["./sharedmodule/*"]
-    },
-    "typeRoots": [
-      "./node_modules/@types",
-      "./sharedmodule/operations-framework/dist/types"
-    ],
-    "noImplicitAny": false,
+    "noImplicitAny": true,
     "strictNullChecks": false,
     "noImplicitReturns": false,
     "noFallthroughCasesInSwitch": false,
     "downlevelIteration": true
   },
   "include": [
-    "**/*.ts",
-    "**/*.js",
-    "sharedmodule/operations-framework/src/**/*.ts"
+    "weibo-login-detector.ts",
+    "event-driven-cookie-manager.ts"
   ],
   "exclude": [
     "node_modules",
     "dist",
+    "sharedmodule/**",
     "**/*.test.js",
-    "**/*.spec.js"
+    "**/*.spec.js",
+    "test-*.ts",
+    "comment-count-detector/**",
+    "node-system/**",
+    "batch-*.ts",
+    "single-*.ts",
+    "weibo-*.ts",
+    "execute-*.ts",
+    "webauto-*.ts"
   ]
 }

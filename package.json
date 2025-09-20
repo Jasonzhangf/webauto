@@ -7,10 +7,14 @@
   "scripts": {
     "install:all": "npm install && cd sharedmodule && npm install && cd mcp-framework && npm install && cd ../weibo-workflow-system && npm install && cd ../openai-compatible-providers && npm install",
     "build:all": "cd sharedmodule/mcp-framework && npm run build && cd ../weibo-workflow-system && npm run build && cd ../openai-compatible-providers && npm run build",
+    "build:ts": "npx tsc",
+    "build:ts:watch": "npx tsc --watch",
     "test:all": "cd sharedmodule/mcp-framework && npm test && cd ../weibo-workflow-system && npm test && cd ../openai-compatible-providers && npm test",
     "lint:all": "cd sharedmodule/mcp-framework && npm run lint && cd ../weibo-workflow-system && npm run lint && cd ../openai-compatible-providers && npm run lint",
     "start:mcp": "cd sharedmodule/mcp-framework && npm start",
     "start:weibo": "cd sharedmodule/weibo-workflow-system && npm start",
+    "test:login-detector": "npx ts-node weibo-login-detector.ts",
+    "test:cookie-manager": "npx ts-node event-driven-cookie-manager.ts",
     "clean": "rm -rf node_modules sharedmodule/*/node_modules sharedmodule/*/dist"
   },
   "keywords": [
