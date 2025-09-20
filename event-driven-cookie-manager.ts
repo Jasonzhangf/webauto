@@ -5,14 +5,91 @@
  * 集成徽章检测、登录状态确认和Cookie管理流程
  */
 
-import { chromium } from 'playwright';
-import fs from 'fs/promises';
-import path from 'path';
+import { chromium, Browser, BrowserContext, Page } from 'playwright';
+import * as fs from 'fs/promises';
+import * as path from 'path';
 import { EventBus } from './sharedmodule/operations-framework/dist/event-driven/EventBus.js';
 import { WorkflowEngine } from './sharedmodule/operations-framework/dist/event-driven/WorkflowEngine.js';
 
+// 类型定义
+interface EventDrivenCookieManagerOptions {
+  headless?: boolean;
+  viewport?: { width: number; height: number };
+  timeout?: number;
+  userAgent?: string;
+  cookiesPath?: string;
+  debug?: boolean;
+  autoSave?: boolean;
+}
+
+interface BadgeDetectionResult {
+  detected: boolean;
+  elements: Array<{
+    selector: string;
+    count: number;
+    visibleCount: number;
+  }>;
+  visibleCount: number;
+  totalCount: number;
+  details: string;
+}
+
+interface CookieValidationResult {
+  valid: boolean;
+  cookies: any[];
+  hasEssentialCookies: boolean;
+  details: string;
+}
+
+interface LoginStatus {
+  confirmed: boolean;
+  badgeDetection: BadgeDetectionResult;
+  cookieValidation: CookieValidationResult;
+  timestamp: number;
+}
+
+interface CookieComparison {
+  oldCount: number;
+  newCount: number;
+  added: any[];
+  removed: any[];
+  modified: Array<{ old: any; new: any }>;
+  unchanged: any[];
+}
+
+interface SaveRecord {
+  timestamp: number;
+  cookieCount: number;
+  comparison: CookieComparison;
+  badgeDetection: BadgeDetectionResult;
+  loginStatus: LoginStatus;
+}
+
+interface CookieManagerState {
+  browser: Browser | null;
+  context: BrowserContext | null;
+  page: Page | null;
+  cookies: any[];
+  loginStatus: LoginStatus | null;
+  badgeDetection: BadgeDetectionResult | null;
+  cookieValidation: CookieValidationResult | null;
+  lastSaveTime: number | null;
+  saveHistory: SaveRecord[];
+}
+
 class EventDrivenCookieManager {
-  constructor(options = {}) {
+  private headless: boolean;
+  private viewport: { width: number; height: number };
+  private timeout: number;
+  private userAgent: string;
+  private cookiesPath: string;
+  private debug: boolean;
+  private autoSave: boolean;
+  private eventBus: EventBus;
+  private workflowEngine: WorkflowEngine;
+  private state: CookieManagerState;
+
+  constructor(options: EventDrivenCookieManagerOptions = {}) {
     this.headless = options.headless ?? false;
     this.viewport = options.viewport || { width: 1920, height: 1080 };
     this.timeout = options.timeout || 30000;

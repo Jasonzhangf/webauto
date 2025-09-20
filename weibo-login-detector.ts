@@ -5,14 +5,66 @@
  * 基于事件驱动容器系统，正确检测微博登录状态
  */
 
-import { chromium } from 'playwright';
-import fs from 'fs/promises';
-import path from 'path';
+import { chromium, Browser, BrowserContext, Page } from 'playwright';
+import * as fs from 'fs/promises';
+import * as path from 'path';
 import { EventBus } from './sharedmodule/operations-framework/dist/event-driven/EventBus.js';
+// Use the JavaScript version for more flexible event typing
 import { WorkflowEngine } from './sharedmodule/operations-framework/dist/event-driven/WorkflowEngine.js';
 
+// 类型定义
+interface WeiboLoginDetectorOptions {
+  headless?: boolean;
+  viewport?: { width: number; height: number };
+  timeout?: number;
+  userAgent?: string;
+  cookiesPath?: string;
+  debug?: boolean;
+}
+
+interface LoginStatus {
+  isLoggedIn: boolean;
+  details: string;
+  detectedElements: string[];
+  badgeDetected: boolean;
+  loginConfirmed: boolean;
+}
+
+interface BadgeInfo {
+  selector: string;
+  count: number;
+  visible: boolean;
+}
+
+interface DetectionState {
+  browser: Browser | null;
+  context: BrowserContext | null;
+  page: Page | null;
+  loginStatus: LoginStatus | null;
+  detectionResults: LoginStatus | null;
+}
+
+interface BadgeDetectionCompleteData {
+  badgeDetected: boolean;
+  loginConfirmed: boolean;
+  visibleBadges: number;
+  totalBadges: number;
+  hasWeiboCookies: boolean;
+  detectionTime: number;
+}
+
 class WeiboLoginDetector {
-  constructor(options = {}) {
+  private headless: boolean;
+  private viewport: { width: number; height: number };
+  private timeout: number;
+  private userAgent: string;
+  private cookiesPath: string;
+  private debug: boolean;
+  private eventBus: EventBus;
+  private workflowEngine: WorkflowEngine;
+  private state: DetectionState;
+
+  constructor(options: WeiboLoginDetectorOptions = {}) {
     this.headless = options.headless ?? false;
     this.viewport = options.viewport || { width: 1920, height: 1080 };
     this.timeout = options.timeout || 30000;
@@ -526,9 +578,9 @@ class WeiboLoginDetector {
   /**
    * 清理资源
    */
-  async cleanup() {
-    if (this.browser) {
-      await this.browser.close();
+  async cleanup(): Promise<void> {
+    if (this.state.browser) {
+      await this.state.browser.close();
     }
   }
 
