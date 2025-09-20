@@ -36,7 +36,7 @@ class CookieManagerNode extends BaseNode {
 
             try {
                 const content = await readFile(expandedPath, 'utf-8');
-                this.cookies = JSON.parse(content);
+                this.cookies = JSON.parse(content) || [];
                 this.log('info', `Loaded ${this.cookies.length} cookies`);
             } catch (error) {
                 this.log('warn', `Failed to load cookies: ${error.message}`);

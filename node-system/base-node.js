@@ -314,7 +314,7 @@ const NodeTypes = {
         class: 'NavigationOperatorNode',
         inputs: [
             { name: 'page', type: 'object', required: true },
-            { name: 'url', type: 'string', required: true },
+            { name: 'url', type: 'string', required: false },
             { name: 'trigger', type: 'any', required: false }
         ],
         outputs: [
@@ -322,18 +322,19 @@ const NodeTypes = {
             { name: 'navigationResult', type: 'object' }
         ]
     },
-    CONTAINER_EXTRACTOR: {
-        class: 'ContainerExtractorNode',
+    RECURSIVE_TREE_EXTRACTOR: {
+        class: 'RecursiveTreeExtractorNode',
         inputs: [
             { name: 'page', type: 'object', required: true },
-            { name: 'containerSelector', type: 'string', required: true },
-            { name: 'linkSelector', type: 'string', required: false },
-            { name: 'maxPosts', type: 'number', required: false }
+            { name: 'traversalRules', type: 'object', required: false },
+            { name: 'maxResults', type: 'number', required: false },
+            { name: 'scrollConfig', type: 'object', required: false }
         ],
         outputs: [
             { name: 'containers', type: 'array' },
+            { name: 'elements', type: 'array' },
             { name: 'links', type: 'array' },
-            { name: 'extractionResult', type: 'object' }
+            { name: 'traversalResult', type: 'object' }
         ]
     },
     LINK_FILTER: {
@@ -351,7 +352,7 @@ const NodeTypes = {
         class: 'FileSaverNode',
         inputs: [
             { name: 'data', type: 'any', required: true },
-            { name: 'filePath', type: 'string', required: true },
+            { name: 'filePath', type: 'string', required: false },
             { name: 'format', type: 'string', required: false }
         ],
         outputs: [

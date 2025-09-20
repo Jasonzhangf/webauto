@@ -3,10 +3,11 @@
  * This replaces the mock browser operator with real browser functionality
  */
 
-const { chromium } = require('playwright');
-const fs = require('fs').promises;
-const path = require('path');
-const UniversalCookieManager = require('../universal-cookie-manager.js');
+import { chromium } from 'playwright';
+import fs from 'fs/promises';
+import path from 'path';
+import os from 'os';
+import UniversalCookieManager from '../universal-cookie-manager.js';
 
 class RealBrowserOperator {
   constructor() {
@@ -253,7 +254,7 @@ class RealCookieOperator {
     };
     this._browserOperator = null;
     this._cookieManager = new UniversalCookieManager({
-      basePath: path.join(require('os').homedir(), '.webauto')
+      basePath: path.join(os.homedir(), '.webauto')
     });
   }
 
@@ -485,11 +486,13 @@ class RealNavigationOperator {
         case 'refresh':
           return await this.refresh();
         case 'wait':
-          return await this.waitForLoad(params.timeout);
+          return await this.waitForLoad(params.timeout, params.duration);
         case 'screenshot':
           return await this.takeScreenshot(params.path);
         case 'getInfo':
           return await this.getPageInfo();
+        case 'analyzeStructure':
+          return await this.analyzeStructure(params.outputFile);
         default:
           throw new Error(`Unknown action: ${params.action}`);
       }
@@ -518,7 +521,7 @@ class RealNavigationOperator {
       const timeout = params.timeout || 30000;
 
       await page.goto(url, {
-        waitUntil: 'networkidle',
+        waitUntil: params.waitUntil || 'domcontentloaded',
         timeout: timeout
       });
 
@@ -551,30 +554,40 @@ class RealNavigationOperator {
     }
   }
 
-  async waitForLoad(timeout = 30000) {
+  async waitForLoad(timeout = 30000, duration = null) {
+    const startTime = Date.now();
+
     if (!this._browserOperator || !this._browserOperator.getPage()) {
       throw new Error('Browser not initialized. Please start browser first.');
     }
 
     try {
-      console.log(`⏳ Waiting for page to load (${timeout}ms)...`);
+      const waitTime = duration || timeout;
+      console.log(`⏳ Waiting for ${waitTime}ms...`);
 
       const page = this._browserOperator.getPage();
-      await page.waitForLoadState('networkidle', { timeout });
 
-      console.log(`✅ Page loaded successfully`);
+      if (duration) {
+        // Simple duration-based wait
+        await new Promise(resolve => setTimeout(resolve, duration));
+        console.log(`✅ Wait completed for ${duration}ms`);
+      } else {
+        // Load state-based wait
+        await page.waitForLoadState('networkidle', { timeout });
+        console.log(`✅ Page loaded successfully`);
+      }
 
       return {
         success: true,
         data: {
-          message: `Waited for ${timeout}ms`
+          message: `Waited for ${waitTime}ms`
         },
         duration: Date.now() - startTime,
         timestamp: Date.now()
       };
 
     } catch (error) {
-      console.error(`❌ Failed to wait for page load: ${error.message}`);
+      console.error(`❌ Failed to wait: ${error.message}`);
       return {
         success: false,
         data: null,
@@ -761,9 +774,186 @@ class RealNavigationOperator {
       };
     }
   }
+
+  async analyzeStructure(outputFile = './structure-analysis.json') {
+    const startTime = Date.now();
+    
+    if (!this._browserOperator || !this._browserOperator.getPage()) {
+      throw new Error('Browser not initialized. Please start browser first.');
+    }
+
+    try {
+      console.log('🔍 Analyzing page structure...');
+      const page = this._browserOperator.getPage();
+
+      const analysis = await page.evaluate(() => {
+        const containers = [];
+        const posts = [];
+        const links = [];
+
+        // Analyze feed containers
+        const feedSelectors = [
+          '[class*="Feed"]',
+          '[class*="feed"]',
+          '[class*="Weibo"]',
+          '[class*="weibo"]',
+          '[class*="Card"]',
+          '[class*="card"]',
+          '[id*="feed"]',
+          '[id*="Feed"]',
+          '.main-content',
+          '.content-wrap',
+          '.Feed_body',
+          '.Feed_body_3O0gD'
+        ];
+
+        feedSelectors.forEach(selector => {
+          const elements = document.querySelectorAll(selector);
+          if (elements.length > 0) {
+            containers.push({
+              selector,
+              count: elements.length,
+              visible: Array.from(elements).filter(el => el.offsetParent !== null).length,
+              sample: Array.from(elements).slice(0, 3).map(el => ({
+                tagName: el.tagName,
+                className: el.className,
+                id: el.id,
+                text: el.textContent?.substring(0, 100),
+                children: el.children.length
+              }))
+            });
+          }
+        });
+
+        // Analyze post items
+        const postSelectors = [
+          '[class*="Feed_body"] [class*="Item"]',
+          '[class*="feed-item"]',
+          '[class*="weibo-item"]',
+          '[class*="card-item"]',
+          '[class*="Feed_item"]',
+          '[class*="FeedItem"]',
+          'article',
+          '[role="article"]'
+        ];
+
+        postSelectors.forEach(selector => {
+          const elements = document.querySelectorAll(selector);
+          if (elements.length > 0) {
+            posts.push({
+              selector,
+              count: elements.length,
+              visible: Array.from(elements).filter(el => el.offsetParent !== null).length,
+              sample: Array.from(elements).slice(0, 3).map(el => ({
+                tagName: el.tagName,
+                className: el.className,
+                id: el.id,
+                hasLinks: el.querySelectorAll('a').length,
+                linkSample: Array.from(el.querySelectorAll('a')).slice(0, 3).map(a => ({
+                  href: a.href,
+                  text: a.textContent?.substring(0, 50)
+                }))
+              }))
+            });
+          }
+        });
+
+        // Analyze links
+        const linkSelectors = [
+          'a[href*="/detail/"]',
+          'a[href*="/status/"]',
+          'a[href*="weibo.com/"]',
+          '[class*="title"] a',
+          '[class*="content"] a',
+          '.Feed_body_3O0gD a'
+        ];
+
+        linkSelectors.forEach(selector => {
+          const elements = document.querySelectorAll(selector);
+          if (elements.length > 0) {
+            const uniqueLinks = new Set();
+            const linkDetails = Array.from(elements)
+              .filter(el => el.offsetParent !== null)
+              .map(el => {
+                const href = el.href;
+                if (href && !uniqueLinks.has(href)) {
+                  uniqueLinks.add(href);
+                  return {
+                    href,
+                    text: el.textContent?.trim(),
+                    className: el.className,
+                    isPostLink: href.includes('/detail/') || href.includes('/status/')
+                  };
+                }
+                return null;
+              })
+              .filter(Boolean);
+
+            links.push({
+              selector,
+              total: elements.length,
+              unique: linkDetails.length,
+              postLinks: linkDetails.filter(l => l.isPostLink),
+              sample: linkDetails.slice(0, 10)
+            });
+          }
+        });
+
+        return {
+          url: window.location.href,
+          title: document.title,
+          timestamp: new Date().toISOString(),
+          containers: { feed: containers, posts: posts },
+          elements: { links: links },
+          topSelectors: [
+            ...containers.map(c => ({ selector: c.selector, type: 'container', confidence: c.visible >= 3 ? 'high' : 'medium' })),
+            ...posts.map(p => ({ selector: p.selector, type: 'post', confidence: p.visible >= 5 ? 'high' : 'medium' })),
+            ...links.map(l => ({ selector: l.selector, type: 'link', confidence: l.postLinks.length > 0 ? 'high' : 'medium' }))
+          ].sort((a, b) => {
+            const order = { high: 3, medium: 2, low: 1 };
+            return order[b.confidence] - order[a.confidence];
+          })
+        };
+      });
+
+      // Save analysis to file
+      await fs.writeFile(outputFile, JSON.stringify(analysis, null, 2));
+
+      console.log(`✅ Structure analysis complete`);
+      console.log(`📊 Found: ${analysis.containers.feed.length} feed containers, ${analysis.containers.posts.length} post selectors`);
+      console.log(`🔗 Found: ${analysis.elements.links.filter(g => g.postLinks.length > 0).length} groups with post links`);
+      console.log(`💾 Analysis saved to: ${outputFile}`);
+
+      return {
+        success: true,
+        data: {
+          message: 'Structure analysis completed',
+          analysis: {
+            containers: analysis.containers.feed.length,
+            posts: analysis.containers.posts.length,
+            linkGroups: analysis.elements.links.length,
+            topSelectors: analysis.topSelectors.slice(0, 5)
+          },
+          outputFile
+        },
+        duration: Date.now() - startTime,
+        timestamp: Date.now()
+      };
+
+    } catch (error) {
+      console.error(`❌ Structure analysis failed: ${error.message}`);
+      return {
+        success: false,
+        data: null,
+        error: error.message,
+        duration: Date.now() - startTime,
+        timestamp: Date.now()
+      };
+    }
+  }
 }
 
-module.exports = {
+export {
   RealBrowserOperator,
   RealCookieOperator,
   RealNavigationOperator

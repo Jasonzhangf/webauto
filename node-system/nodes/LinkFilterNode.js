@@ -5,7 +5,7 @@
  * Filters extracted links based on patterns and criteria
  */
 
-const { BaseNode } = import '../base-node' from '../base-node';
+import { BaseNode } from '../base-node.js';
 
 class LinkFilterNode extends BaseNode {
     constructor(nodeId, config) {

@@ -3,9 +3,9 @@
  * Supports configurable cookie paths and centralized cookie management
  */
 
-const fs = require('fs').promises;
-const path = require('path');
-const os = require('os');
+import fs from 'fs/promises';
+import path from 'path';
+import os from 'os';
 
 class UniversalCookieManager {
   constructor(options = {}) {
@@ -283,4 +283,4 @@ class UniversalCookieManager {
   }
 }
 
-module.exports = UniversalCookieManager;
+export default UniversalCookieManager;

@@ -5,9 +5,10 @@
  * Saves extracted data to files in various formats
  */
 
-const { BaseNode } = import '../base-node' from '../base-node';
-const fs = import 'fs' from 'fs'.promises;
-const path = import 'path' from 'path';
+import { BaseNode } from '../base-node.js';
+import { promises as fs } from 'fs';
+import path from 'path';
+import os from 'os';
 
 class FileSaverNode extends BaseNode {
     constructor(nodeId, config) {
@@ -37,7 +38,7 @@ class FileSaverNode extends BaseNode {
             // Expand home directory if needed
             let resolvedPath = filePath;
             if (filePath.startsWith('~')) {
-                resolvedPath = filePath.replace('~', import 'os' from 'os'.homedir());
+                resolvedPath = filePath.replace('~', os.homedir());
             }
 
             // Ensure directory exists

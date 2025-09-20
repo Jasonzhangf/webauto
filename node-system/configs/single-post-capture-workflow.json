@@ -1,0 +1,302 @@
+{
+  "version": "1.0",
+  "name": "Weibo Single Post Capture",
+  "description": "单个微博帖子内容捕获工作流 - 提取帖子内容、评论和媒体文件",
+  "type": "sequential",
+  "timeout": 300000,
+  "retryPolicy": {
+    "maxRetries": 3,
+    "retryDelay": 5000,
+    "exponentialBackoff": true
+  },
+  "nodes": [
+    {
+      "id": "browser_initializer",
+      "type": "BROWSER_INITIALIZER",
+      "title": "浏览器初始化器",
+      "description": "启动浏览器并加载Cookie",
+      "parameters": {
+        "browserType": "camoufox",
+        "headless": false,
+        "viewport": {
+          "width": 1920,
+          "height": 1080
+        },
+        "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "loadCookies": true,
+        "cookieFile": "./sharedmodule/weibo-workflow-system/cookies/weibo.com.json",
+        "timeout": 30000
+      }
+    },
+    {
+      "id": "post_analyzer",
+      "type": "WEIBO_POST_ANALYZER",
+      "title": "帖子分析器",
+      "description": "分析微博帖子页面结构，提取基础信息",
+      "parameters": {
+        "extractImages": true,
+        "extractVideos": true,
+        "analyzeStructure": true,
+        "maxMediaCount": 50,
+        "timeout": 30000,
+        "selectors": {
+          "postContainer": ".Feed_body_3R0rO",
+          "postTitle": ".Feed_body_3R0rO h2, .Feed_body_3R0rO .Feed_body_title",
+          "postContent": ".Feed_body_3R0rO .Feed_body_body, .Feed_body_3R0rO .Feed_body_content",
+          "postTime": ".Feed_body_3R0rO .Feed_body_date, .Feed_body_3R0rO .Feed_body_time",
+          "authorName": ".Feed_body_3R0rO .Feed_body_author_name",
+          "mediaContainer": ".Feed_body_3R0rO .Feed_body_media",
+          "imageElements": ".Feed_body_3R0rO img[src*=\"jpg\"], .Feed_body_3R0rO img[src*=\"png\"]",
+          "videoElements": ".Feed_body_3R0rO video, .Feed_body_3R0rO [data-video-src]",
+          "commentContainer": ".Feed_body_3R0rO .Feed_body_comments, .Feed_body_3R0rO .Comment_container"
+        }
+      }
+    },
+    {
+      "id": "comment_extractor",
+      "type": "WEIBO_COMMENT_EXTRACTOR",
+      "title": "评论提取器",
+      "description": "提取帖子的所有评论，包括嵌套回复",
+      "parameters": {
+        "maxComments": 1000,
+        "maxReplyDepth": 5,
+        "extractMedia": true,
+        "autoLoadMore": true,
+        "loadMoreDelay": 2000,
+        "maxLoadMoreAttempts": 10,
+        "timeout": 60000,
+        "selectors": {
+          "commentContainer": ".Feed_body_3R0rO .Feed_body_comments, .Comment_container",
+          "commentList": ".Feed_body_3R0rO .Comment_list, .Comment_container_list",
+          "commentItem": ".Feed_body_3R0rO .Comment_item, .Comment_container_item",
+          "commentAuthor": ".Comment_author, .Comment_item_author, [class*=\"author\"]",
+          "commentContent": ".Comment_content, .Comment_item_content, [class*=\"content\"]",
+          "commentTime": ".Comment_time, .Comment_item_time, [class*=\"time\"]",
+          "commentLikes": ".Comment_likes, .Comment_item_likes, [class*=\"likes\"]",
+          "replyContainer": ".Comment_replies_container, .Comment_item_replies_container",
+          "replyItem": ".Comment_reply, .Comment_item_reply, [class*=\"reply\"]",
+          "loadMoreButton": ".Comment_more, .Feed_body_comments_more, [class*=\"more\"]"
+        }
+      }
+    },
+    {
+      "id": "media_capture",
+      "type": "WEIBO_MEDIA_CAPTURE",
+      "title": "媒体捕获器",
+      "description": "捕获帖子中的图片和视频文件",
+      "parameters": {
+        "maxFileSize": "50MB",
+        "allowedFormats": ["jpg", "jpeg", "png", "gif", "webp", "mp4", "webm", "mov"],
+        "downloadPath": "./downloads/${postId}",
+        "createSubdirs": true,
+        "organizeByType": true,
+        "generateThumbnails": true,
+        "thumbnailSize": {
+          "width": 200,
+          "height": 200
+        },
+        "downloadTimeout": 30000,
+        "maxConcurrentDownloads": 3,
+        "retryFailedDownloads": true,
+        "maxRetries": 3,
+        "validateDownloads": true,
+        "deduplicate": true
+      }
+    },
+    {
+      "id": "data_integrator",
+      "type": "DATA_INTEGRATOR",
+      "title": "数据整合器",
+      "description": "整合所有提取的数据，形成结构化输出",
+      "parameters": {
+        "generateRelations": true,
+        "validateData": true,
+        "enrichMetadata": true,
+        "deduplicateMedia": true,
+        "generateStats": true,
+        "generateSummary": true,
+        "includeRawData": false,
+        "timestampFormat": "iso",
+        "dataVersion": "1.0"
+      }
+    },
+    {
+      "id": "structured_saver",
+      "type": "STRUCTURED_DATA_SAVER",
+      "title": "结构化保存器",
+      "description": "将结构化数据保存到多种格式",
+      "parameters": {
+        "formats": ["json", "csv"],
+        "savePath": "./output/${postId}",
+        "filenamePrefix": "weibo_post",
+        "includeMetadata": true,
+        "includeMedia": true,
+        "compress": false,
+        "createSubdirs": true,
+        "overwrite": false,
+        "generateReport": true,
+        "csvOptions": {
+          "delimiter": ",",
+          "includeHeaders": true,
+          "encoding": "utf8"
+        },
+        "jsonOptions": {
+          "indent": 2,
+          "sortKeys": false
+        }
+      }
+    }
+  ],
+  "connections": [
+    {
+      "id": "browser_to_analyzer",
+      "from": "browser_initializer",
+      "fromOutput": "page",
+      "to": "post_analyzer",
+      "toInput": "page"
+    },
+    {
+      "id": "url_to_analyzer",
+      "from": "workflow_input",
+      "fromOutput": "postUrl",
+      "to": "post_analyzer",
+      "toInput": "postUrl"
+    },
+    {
+      "id": "analyzer_to_integrator_post",
+      "from": "post_analyzer",
+      "fromOutput": "postData",
+      "to": "data_integrator",
+      "toInput": "postData"
+    },
+    {
+      "id": "analyzer_to_comment_extractor",
+      "from": "post_analyzer",
+      "fromOutput": "commentInfo",
+      "to": "comment_extractor",
+      "toInput": "commentInfo"
+    },
+    {
+      "id": "analyzer_to_media_capture",
+      "from": "post_analyzer",
+      "fromOutput": "mediaInfo",
+      "to": "media_capture",
+      "toInput": "mediaInfo"
+    },
+    {
+      "id": "analyzer_page_to_comment_extractor",
+      "from": "post_analyzer",
+      "fromOutput": "page",
+      "to": "comment_extractor",
+      "toInput": "page"
+    },
+    {
+      "id": "analyzer_page_to_media_capture",
+      "from": "post_analyzer",
+      "fromOutput": "page",
+      "to": "media_capture",
+      "toInput": "page"
+    },
+    {
+      "id": "analyzer_post_to_media_capture",
+      "from": "post_analyzer",
+      "fromOutput": "postData",
+      "to": "media_capture",
+      "toInput": "postData"
+    },
+    {
+      "id": "comment_extractor_to_integrator",
+      "from": "comment_extractor",
+      "fromOutput": "comments",
+      "to": "data_integrator",
+      "toInput": "comments"
+    },
+    {
+      "id": "media_capture_to_integrator",
+      "from": "media_capture",
+      "fromOutput": "capturedMedia",
+      "to": "data_integrator",
+      "toInput": "mediaFiles"
+    },
+    {
+      "id": "integrator_to_saver",
+      "from": "data_integrator",
+      "fromOutput": "structuredData",
+      "to": "structured_saver",
+      "toInput": "structuredData"
+    },
+    {
+      "id": "integrator_metadata_to_saver",
+      "from": "data_integrator",
+      "fromOutput": "metadata",
+      "to": "structured_saver",
+      "toInput": "metadata"
+    }
+  ],
+  "variables": {
+    "postId": "${input.postUrl.extractPostId()}",
+    "timestamp": "${TIMESTAMP}",
+    "outputDir": "./output/weibo-posts",
+    "downloadDir": "./downloads/weibo-media",
+    "browser": {
+      "type": "camoufox",
+      "headless": false,
+      "viewport": "1920x1080"
+    }
+  },
+  "errorHandling": {
+    "continueOnError": true,
+    "maxConsecutiveErrors": 3,
+    "errorOutputPath": "./logs/errors/${postId}_${timestamp}.json",
+    "saveStateOnError": true,
+    "cleanupOnError": true
+  },
+  "logging": {
+    "level": "info",
+    "saveToFile": true,
+    "logPath": "./logs/workflow/${postId}_${timestamp}.log",
+    "includeNodeExecution": true,
+    "includePerformanceMetrics": true,
+    "maxLogSize": "10MB"
+  },
+  "performance": {
+    "enableMetrics": true,
+    "saveMetrics": true,
+    "metricsPath": "./logs/metrics/${postId}_${timestamp}.json",
+    "profiling": false
+  },
+  "output": {
+    "mainOutput": "structured_saver.savedFiles",
+    "exportPaths": "structured_saver.exportPaths",
+    "executionSummary": {
+      "path": "structured_saver.metadata.integrationStats",
+      "includeInResponse": true
+    },
+    "debugOutput": {
+      "enabled": true,
+      "path": "./debug/${postId}_${timestamp}/",
+      "includeScreenshots": true,
+      "includePageSource": false,
+      "includeConsoleLogs": true
+    }
+  },
+  "cleanup": {
+    "enabled": true,
+    "cleanupTempFiles": true,
+    "cleanupBrowserData": true,
+    "saveCookies": true,
+    "cleanupDelay": 1000
+  },
+  "metadata": {
+    "createdBy": "Weibo Post Capture System",
+    "version": "1.0.0",
+    "description": "Single post capture workflow with node-driven architecture",
+    "supportedPostTypes": ["text", "image", "video", "mixed"],
+    "estimatedProcessingTime": "2-5 minutes",
+    "dependencies": [
+      "playwright",
+      "camoufox",
+      "node-system"
+    ]
+  }
+}

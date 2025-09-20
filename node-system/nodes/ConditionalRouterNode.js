@@ -5,7 +5,7 @@
  * Routes data flow based on conditional logic
  */
 
-const { BaseNode } = import '../base-node' from '../base-node';
+import { BaseNode } from '../base-node.js';
 
 class ConditionalRouterNode extends BaseNode {
     constructor(nodeId, config) {

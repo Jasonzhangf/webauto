@@ -40,7 +40,7 @@
       "params": {
         "action": "navigate",
         "url": "${targetUrl}",
-        "waitUntil": "networkidle",
+        "waitUntil": "domcontentloaded",
         "timeout": "${timeout}"
       }
     },

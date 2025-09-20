@@ -1,6 +1,6 @@
 # 节点系统 (Node System)
 
-一个基于节点的可视化工作流执行引擎，专为 Web 自动化任务设计。
+一个基于节点的可视化工作流执行引擎，专为微博批量下载等 Web 自动化任务设计。
 
 ## 特性
 
@@ -11,6 +11,29 @@
 - 📊 **事件驱动** - 完整的事件监听和进度跟踪
 - 🔧 **可扩展** - 易于添加新的节点类型
 - 📝 **全面测试** - 包含完整的测试套件
+
+## 📁 文件用途说明
+
+### 核心基础文件
+- **base-node.js** - 节点系统基础类，包含 BaseNode、NodeConnection、ExecutionContext 和 NodeTypes 的定义
+- **workflow-engine.js** - 工作流引擎核心，负责工作流的加载、验证、依赖解析和执行调度
+- **workflow-runner.js** - 工作流运行器，提供 CLI 接口、进度跟踪、结果保存和变量处理功能
+
+### 测试和验证文件
+- **comprehensive-test-suite.js** - 全面测试套件，测试整个节点系统的完整性
+- **node-type-tests.js** - 节点类型独立测试，验证每个节点类型的功能
+- **final-comprehensive-test.js** - 最终综合测试，确保系统稳定性
+- **execution-test.js** - 执行测试，测试工作流执行流程
+- **WORKFLOW_INTERFACE_STANDARD.md** - 工作流接口标准文档
+
+### 节点实现文件 (nodes/ 目录)
+- **nodes/BrowserOperatorNode.js** - 浏览器操作节点，管理浏览器实例和页面操作
+- **nodes/CookieManagerNode.js** - Cookie 管理节点，处理 Cookie 加载和验证
+- **nodes/NavigationOperatorNode.js** - 页面导航节点，处理页面跳转和等待
+- **nodes/ContainerExtractorNode.js** - 容器提取节点，从页面提取微博容器和链接
+- **nodes/LinkFilterNode.js** - 链接过滤节点，过滤和处理提取的链接
+- **nodes/FileSaverNode.js** - 文件保存节点，保存下载结果到文件
+- **nodes/ConditionalRouterNode.js** - 条件路由节点，基于条件控制执行流程
 
 ## 核心组件
 

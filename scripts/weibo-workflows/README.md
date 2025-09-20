@@ -2,6 +2,24 @@
 
 本目录包含基于原子操作子模式的微博工作流系统，支持三种主要微博页面的自动化处理：
 
+## 📁 根目录脚本文件用途
+
+### 批量捕获脚本
+- **../weibo-batch-capture.cjs** - 基础批量捕获脚本，从主页提取50条链接并批量下载
+- **../weibo-batch-download-workflow.cjs** - 批量下载和合并工作流，获取链接→批量下载→合并为文档
+- **../weibo-optimized-batch-capture.cjs** - 优化版本批量捕获脚本，集成所有微博专用优化功能
+
+### 工具脚本
+- **../simple-weibo-link-extractor.cjs** - 简单微博链接提取器，基础链接提取功能
+- **../validate-test-framework.cjs** - 测试框架验证脚本
+
+### 批量捕获脚本对比
+| 脚本文件 | 主要特点 | 适用场景 | 优化程度 |
+|---------|---------|---------|---------|
+| weibo-batch-capture.cjs | 基础功能，从主页提取50条链接并批量下载 | 快速测试，简单需求 | ⭐⭐ |
+| weibo-batch-download-workflow.cjs | 完整工作流，包含链接提取、批量下载、文档合并 | 正式生产环境使用 | ⭐⭐⭐ |
+| weibo-optimized-batch-capture.cjs | 集成所有微博专用优化，智能导航和重试 | 高性能要求，复杂场景 | ⭐⭐⭐⭐⭐ |
+
 ## 工作流类型
 
 ### 1. 微博主页工作流 (`weibo-homepage-workflow.js`)

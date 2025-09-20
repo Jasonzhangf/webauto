@@ -16,6 +16,8 @@ const {
   RealNavigationOperator
 } = require('./real-browser-operator.js');
 
+const ContainerExtractorOperator = require('./container-extractor-operator.js');
+
 // Parse command line arguments
 function parseArgs() {
   const args = process.argv.slice(2);
@@ -177,10 +179,12 @@ class RealWorkflowExecutor {
     this.browserOperator = new RealBrowserOperator();
     this.cookieOperator = new RealCookieOperator();
     this.navigationOperator = new RealNavigationOperator();
+    this.containerExtractor = new ContainerExtractorOperator();
 
     // Connect operators
     this.cookieOperator.setBrowserOperator(this.browserOperator);
     this.navigationOperator.setBrowserOperator(this.browserOperator);
+    this.containerExtractor.setBrowserOperator(this.browserOperator);
   }
 
   async executeWorkflow(workflow, inputVariables = {}) {
