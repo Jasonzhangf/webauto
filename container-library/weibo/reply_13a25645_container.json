@@ -1,0 +1,37 @@
+{
+  "id": "reply_nested_container",
+  "website": "weibo",
+  "name": "回复嵌套容器",
+  "selector": "[class*='reply'][class*='nested'], [class*='sub'][class*='comment']",
+  "description": "包含嵌套回复评论的容器",
+  "priority": 15,
+  "specificity": 80,
+  "registeredAt": "2025-09-22T00:25:13.312Z",
+  "isActive": true,
+  "type": "container",
+  "usage": {
+    "accessCount": 0,
+    "lastUsed": null,
+    "successRate": 0
+  },
+  "validation": {
+    "selectorValid": true,
+    "lastValidation": "2025-09-22T00:25:13.312Z",
+    "validationMethod": "comment-analysis"
+  },
+  "discovery": {
+    "strategy": "precise-selector",
+    "specificityThreshold": 100,
+    "uniquenessThreshold": 0.8,
+    "waitForElements": true,
+    "timeout": 10000
+  },
+  "structure": "nested",
+  "metadata": {
+    "generatedFrom": "container-library.json",
+    "generatedAt": "2025-09-22T00:45:00.746Z",
+    "originalPriority": 15,
+    "selectorHash": "13a25645",
+    "fileVersion": "1.0.0"
+  }
+}

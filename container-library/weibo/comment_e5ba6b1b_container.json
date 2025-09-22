@@ -1,0 +1,28 @@
+{
+  "id": "comments_section",
+  "website": "weibo",
+  "name": "评论区容器",
+  "selector": "[class*=\"comment\"], [class*=\"reply\"]",
+  "description": "微博评论区域容器",
+  "priority": 4,
+  "specificity": 20,
+  "registeredAt": "2025-09-22T00:04:15.445Z",
+  "isActive": true,
+  "usage": {
+    "accessCount": 0,
+    "lastUsed": null,
+    "successRate": 0
+  },
+  "validation": {
+    "selectorValid": true,
+    "lastValidation": "2025-09-22T00:04:15.445Z",
+    "validationMethod": "dynamic-load"
+  },
+  "metadata": {
+    "generatedFrom": "container-library.json",
+    "generatedAt": "2025-09-22T00:45:00.744Z",
+    "originalPriority": 4,
+    "selectorHash": "e5ba6b1b",
+    "fileVersion": "1.0.0"
+  }
+}

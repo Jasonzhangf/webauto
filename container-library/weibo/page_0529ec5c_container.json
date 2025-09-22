@@ -1,0 +1,39 @@
+{
+  "id": "page",
+  "website": "weibo",
+  "name": "页面容器",
+  "selector": "#app",
+  "description": "整个微博页面的根容器",
+  "priority": 1,
+  "specificity": 1000,
+  "registeredAt": "2025-09-22T00:04:15.445Z",
+  "isActive": true,
+  "usage": {
+    "accessCount": 2,
+    "lastUsed": "2025-09-21T23:48:40.384Z",
+    "successRate": 1,
+    "success": true,
+    "discoveryMethod": "auto-discovery",
+    "elementCount": 1,
+    "lastAccessed": "2025-09-21T23:48:40.383Z"
+  },
+  "validation": {
+    "selectorValid": true,
+    "lastValidation": "2025-09-22T00:04:15.445Z",
+    "validationMethod": "registration"
+  },
+  "discovery": {
+    "strategy": "precise-selector",
+    "specificityThreshold": 100,
+    "uniquenessThreshold": 0.8,
+    "waitForElements": true,
+    "timeout": 10000
+  },
+  "metadata": {
+    "generatedFrom": "container-library.json",
+    "generatedAt": "2025-09-22T00:45:00.743Z",
+    "originalPriority": 1,
+    "selectorHash": "0529ec5c",
+    "fileVersion": "1.0.0"
+  }
+}

@@ -1,0 +1,37 @@
+{
+  "id": "load_more_dropdown",
+  "website": "weibo",
+  "name": "加载更多下拉菜单",
+  "selector": ".woo-pop-wrap.morepop_more_3ssan",
+  "description": "显示更多选项的下拉菜单容器",
+  "priority": 7,
+  "specificity": 1010,
+  "registeredAt": "2025-09-22T00:25:13.312Z",
+  "isActive": true,
+  "type": "container",
+  "usage": {
+    "accessCount": 0,
+    "lastUsed": null,
+    "successRate": 0
+  },
+  "validation": {
+    "selectorValid": true,
+    "lastValidation": "2025-09-22T00:25:13.312Z",
+    "validationMethod": "comment-analysis"
+  },
+  "discovery": {
+    "strategy": "precise-selector",
+    "specificityThreshold": 100,
+    "uniquenessThreshold": 0.8,
+    "waitForElements": true,
+    "timeout": 10000
+  },
+  "interaction": "dropdown",
+  "metadata": {
+    "generatedFrom": "container-library.json",
+    "generatedAt": "2025-09-22T00:45:00.745Z",
+    "originalPriority": 7,
+    "selectorHash": "d15d1e18",
+    "fileVersion": "1.0.0"
+  }
+}

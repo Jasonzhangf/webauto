@@ -1,0 +1,28 @@
+{
+  "id": "user_info_panel",
+  "website": "weibo",
+  "name": "用户信息面板",
+  "selector": "[class*=\"user\"], [class*=\"profile\"]",
+  "description": "用户信息展示面板",
+  "priority": 5,
+  "specificity": 15,
+  "registeredAt": "2025-09-22T00:04:15.445Z",
+  "isActive": true,
+  "usage": {
+    "accessCount": 0,
+    "lastUsed": null,
+    "successRate": 0
+  },
+  "validation": {
+    "selectorValid": true,
+    "lastValidation": "2025-09-22T00:04:15.445Z",
+    "validationMethod": "dynamic-load"
+  },
+  "metadata": {
+    "generatedFrom": "container-library.json",
+    "generatedAt": "2025-09-22T00:45:00.745Z",
+    "originalPriority": 5,
+    "selectorHash": "d8f61ae5",
+    "fileVersion": "1.0.0"
+  }
+}

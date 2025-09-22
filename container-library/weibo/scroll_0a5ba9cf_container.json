@@ -1,0 +1,37 @@
+{
+  "id": "virtual_scroller",
+  "website": "weibo",
+  "name": "虚拟滚动容器",
+  "selector": ".vue-recycle-scroller.ready.page-mode.direction-vertical",
+  "description": "Vue虚拟滚动技术的页面容器，用于高效加载大量内容",
+  "priority": 11,
+  "specificity": 1010,
+  "registeredAt": "2025-09-22T00:25:13.312Z",
+  "isActive": true,
+  "type": "container",
+  "usage": {
+    "accessCount": 0,
+    "lastUsed": null,
+    "successRate": 0
+  },
+  "validation": {
+    "selectorValid": true,
+    "lastValidation": "2025-09-22T00:25:13.312Z",
+    "validationMethod": "comment-analysis"
+  },
+  "discovery": {
+    "strategy": "precise-selector",
+    "specificityThreshold": 100,
+    "uniquenessThreshold": 0.8,
+    "waitForElements": true,
+    "timeout": 10000
+  },
+  "technology": "vue-virtual-scroller",
+  "metadata": {
+    "generatedFrom": "container-library.json",
+    "generatedAt": "2025-09-22T00:45:00.745Z",
+    "originalPriority": 11,
+    "selectorHash": "0a5ba9cf",
+    "fileVersion": "1.0.0"
+  }
+}
