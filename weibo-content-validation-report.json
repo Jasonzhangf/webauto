@@ -1,0 +1,358 @@
+{
+  "validationTime": "2025-09-20T09:22:41.802Z",
+  "summary": {
+    "homepage": {
+      "totalFeedItems": 12,
+      "validPosts": 0,
+      "emptyPosts": 0,
+      "adPosts": 12,
+      "postsWithContent": 12,
+      "postsWithTitle": 12,
+      "postsWithAuthor": 12,
+      "postsWithTime": 12,
+      "postsWithLink": 12,
+      "samplePosts": [
+        {
+          "index": 0,
+          "hasTitle": true,
+          "hasContent": true,
+          "hasAuthor": true,
+          "hasTime": true,
+          "hasLink": true,
+          "title": "2小时前 109万人关注了他 已编辑",
+          "content": "科技感知 2小时前 109万人关注了他 已编辑  关注 #2025世界制造业大会#  今天在合肥滨湖开展啦！人工智能、机器人、高端装备这些展区都超有料～华为的尊界S800、智界R7已经就位，现场还有惊",
+          "author": "科技感知",
+          "time": "2小时前",
+          "link": "https://s.weibo.com/weibo/%23%E6%83%B3%E5%AF%B9%E8%80%81%E5%B8%88%E8%AF%B4%23",
+          "isEmpty": false,
+          "isAd": true
+        },
+        {
+          "index": 1,
+          "hasTitle": true,
+          "hasContent": true,
+          "hasAuthor": true,
+          "hasTime": true,
+          "hasLink": true,
+          "title": "2小时前 109万人关注了他 已编辑",
+          "content": "科技感知 2小时前 109万人关注了他 已编辑 ",
+          "author": "科技感知",
+          "time": "2小时前",
+          "link": "https://s.weibo.com/weibo/%23%E6%83%B3%E5%AF%B9%E8%80%81%E5%B8%88%E8%AF%B4%23",
+          "isEmpty": false,
+          "isAd": true
+        },
+        {
+          "index": 2,
+          "hasTitle": true,
+          "hasContent": true,
+          "hasAuthor": true,
+          "hasTime": true,
+          "hasLink": true,
+          "title": "原创 6小时前 湖南日报社三湘都市报官方微博 已编辑",
+          "content": "三湘都市报原创 6小时前 湖南日报社三湘都市报官方微博 已编辑  关注 【 #始祖鸟联手蔡国强的烟花艺术引争议##主办方已删蔡国强喜马拉雅烟花秀视频#】9月19日晚，户外品牌#始祖鸟#联手艺术家蔡国强",
+          "author": "三湘都市报",
+          "time": "6小时前",
+          "link": "http://s.weibo.com/weibo?q=%23%E5%BC%80%E5%AD%A6%E5%AD%A3%23",
+          "isEmpty": false,
+          "isAd": true
+        },
+        {
+          "index": 3,
+          "hasTitle": true,
+          "hasContent": true,
+          "hasAuthor": true,
+          "hasTime": true,
+          "hasLink": true,
+          "title": "原创 6小时前 湖南日报社三湘都市报官方微博 已编辑",
+          "content": "三湘都市报原创 6小时前 湖南日报社三湘都市报官方微博 已编辑 ",
+          "author": "三湘都市报",
+          "time": "6小时前",
+          "link": "http://s.weibo.com/weibo?q=%23%E5%BC%80%E5%AD%A6%E5%AD%A3%23",
+          "isEmpty": false,
+          "isAd": true
+        },
+        {
+          "index": 4,
+          "hasTitle": true,
+          "hasContent": true,
+          "hasAuthor": true,
+          "hasTime": true,
+          "hasLink": true,
+          "title": "昨天 12:15 微博电视团成员",
+          "content": "季风号苏打 昨天 12:15 微博电视团成员 关注 #张智霖儿子在歌手做暑假工#张智霖儿子魔童竟然在《歌手2025》当过暑假工啊？张智霖：现在我看披荆斩棘每一个推着按摩椅进来的人都感觉在看我儿子，对他",
+          "author": "季风号苏打",
+          "time": "昨天 12:15",
+          "link": "http://s.weibo.com/weibo?q=%23%E5%BC%80%E5%AD%A6%E5%AD%A3%23",
+          "isEmpty": false,
+          "isAd": true
+        }
+      ]
+    },
+    "userProfile": {
+      "hasProfileHeader": true,
+      "hasPostsContainer": false,
+      "totalPosts": 0,
+      "postsWithContent": 0,
+      "postsWithMedia": 0,
+      "postsWithInteraction": 0
+    },
+    "searchResults": {
+      "totalResults": 28,
+      "validResults": 7,
+      "resultsWithLinks": 5,
+      "sampleResults": [
+        {
+          "index": 0,
+          "hasTitle": false,
+          "hasContent": false,
+          "hasLink": false,
+          "title": "",
+          "content": "",
+          "link": ""
+        },
+        {
+          "index": 1,
+          "hasTitle": false,
+          "hasContent": false,
+          "hasLink": false,
+          "title": "",
+          "content": "",
+          "link": ""
+        },
+        {
+          "index": 2,
+          "hasTitle": false,
+          "hasContent": false,
+          "hasLink": false,
+          "title": "",
+          "content": "",
+          "link": ""
+        }
+      ]
+    },
+    "topicPage": {
+      "hasTopicHeader": false,
+      "totalPosts": 2,
+      "postsWithTopic": 0,
+      "postsWithImages": 0,
+      "postsWithVideos": 0
+    },
+    "deepValidation": {
+      "totalValidated": 5,
+      "validPosts": 5,
+      "postsWithContent": 5,
+      "postsWithAuthor": 5,
+      "postsWithMedia": 5
+    }
+  },
+  "validationResults": {
+    "homepage": {
+      "totalFeedItems": 12,
+      "validPosts": 0,
+      "emptyPosts": 0,
+      "adPosts": 12,
+      "postsWithContent": 12,
+      "postsWithTitle": 12,
+      "postsWithAuthor": 12,
+      "postsWithTime": 12,
+      "postsWithLink": 12,
+      "samplePosts": [
+        {
+          "index": 0,
+          "hasTitle": true,
+          "hasContent": true,
+          "hasAuthor": true,
+          "hasTime": true,
+          "hasLink": true,
+          "title": "2小时前 109万人关注了他 已编辑",
+          "content": "科技感知 2小时前 109万人关注了他 已编辑  关注 #2025世界制造业大会#  今天在合肥滨湖开展啦！人工智能、机器人、高端装备这些展区都超有料～华为的尊界S800、智界R7已经就位，现场还有惊",
+          "author": "科技感知",
+          "time": "2小时前",
+          "link": "https://s.weibo.com/weibo/%23%E6%83%B3%E5%AF%B9%E8%80%81%E5%B8%88%E8%AF%B4%23",
+          "isEmpty": false,
+          "isAd": true
+        },
+        {
+          "index": 1,
+          "hasTitle": true,
+          "hasContent": true,
+          "hasAuthor": true,
+          "hasTime": true,
+          "hasLink": true,
+          "title": "2小时前 109万人关注了他 已编辑",
+          "content": "科技感知 2小时前 109万人关注了他 已编辑 ",
+          "author": "科技感知",
+          "time": "2小时前",
+          "link": "https://s.weibo.com/weibo/%23%E6%83%B3%E5%AF%B9%E8%80%81%E5%B8%88%E8%AF%B4%23",
+          "isEmpty": false,
+          "isAd": true
+        },
+        {
+          "index": 2,
+          "hasTitle": true,
+          "hasContent": true,
+          "hasAuthor": true,
+          "hasTime": true,
+          "hasLink": true,
+          "title": "原创 6小时前 湖南日报社三湘都市报官方微博 已编辑",
+          "content": "三湘都市报原创 6小时前 湖南日报社三湘都市报官方微博 已编辑  关注 【 #始祖鸟联手蔡国强的烟花艺术引争议##主办方已删蔡国强喜马拉雅烟花秀视频#】9月19日晚，户外品牌#始祖鸟#联手艺术家蔡国强",
+          "author": "三湘都市报",
+          "time": "6小时前",
+          "link": "http://s.weibo.com/weibo?q=%23%E5%BC%80%E5%AD%A6%E5%AD%A3%23",
+          "isEmpty": false,
+          "isAd": true
+        },
+        {
+          "index": 3,
+          "hasTitle": true,
+          "hasContent": true,
+          "hasAuthor": true,
+          "hasTime": true,
+          "hasLink": true,
+          "title": "原创 6小时前 湖南日报社三湘都市报官方微博 已编辑",
+          "content": "三湘都市报原创 6小时前 湖南日报社三湘都市报官方微博 已编辑 ",
+          "author": "三湘都市报",
+          "time": "6小时前",
+          "link": "http://s.weibo.com/weibo?q=%23%E5%BC%80%E5%AD%A6%E5%AD%A3%23",
+          "isEmpty": false,
+          "isAd": true
+        },
+        {
+          "index": 4,
+          "hasTitle": true,
+          "hasContent": true,
+          "hasAuthor": true,
+          "hasTime": true,
+          "hasLink": true,
+          "title": "昨天 12:15 微博电视团成员",
+          "content": "季风号苏打 昨天 12:15 微博电视团成员 关注 #张智霖儿子在歌手做暑假工#张智霖儿子魔童竟然在《歌手2025》当过暑假工啊？张智霖：现在我看披荆斩棘每一个推着按摩椅进来的人都感觉在看我儿子，对他",
+          "author": "季风号苏打",
+          "time": "昨天 12:15",
+          "link": "http://s.weibo.com/weibo?q=%23%E5%BC%80%E5%AD%A6%E5%AD%A3%23",
+          "isEmpty": false,
+          "isAd": true
+        }
+      ]
+    },
+    "userProfile": {
+      "hasProfileHeader": true,
+      "hasPostsContainer": false,
+      "totalPosts": 0,
+      "postsWithContent": 0,
+      "postsWithMedia": 0,
+      "postsWithInteraction": 0
+    },
+    "searchResults": {
+      "totalResults": 28,
+      "validResults": 7,
+      "resultsWithLinks": 5,
+      "sampleResults": [
+        {
+          "index": 0,
+          "hasTitle": false,
+          "hasContent": false,
+          "hasLink": false,
+          "title": "",
+          "content": "",
+          "link": ""
+        },
+        {
+          "index": 1,
+          "hasTitle": false,
+          "hasContent": false,
+          "hasLink": false,
+          "title": "",
+          "content": "",
+          "link": ""
+        },
+        {
+          "index": 2,
+          "hasTitle": false,
+          "hasContent": false,
+          "hasLink": false,
+          "title": "",
+          "content": "",
+          "link": ""
+        }
+      ]
+    },
+    "topicPage": {
+      "hasTopicHeader": false,
+      "totalPosts": 2,
+      "postsWithTopic": 0,
+      "postsWithImages": 0,
+      "postsWithVideos": 0
+    }
+  },
+  "deepValidationResults": [
+    {
+      "link": "https://weibo.com/2438203151/Q5rAbnLJ4",
+      "hasContent": true,
+      "hasAuthor": true,
+      "hasTime": true,
+      "hasStats": false,
+      "hasComments": true,
+      "imageCount": 5,
+      "hasVideo": true,
+      "contentLength": 1209,
+      "isRealPost": true,
+      "validationTime": 1758360143176
+    },
+    {
+      "link": "https://weibo.com/1700087532/Q5pQhsqJw",
+      "hasContent": true,
+      "hasAuthor": true,
+      "hasTime": true,
+      "hasStats": false,
+      "hasComments": true,
+      "imageCount": 1,
+      "hasVideo": true,
+      "contentLength": 1733,
+      "isRealPost": true,
+      "validationTime": 1758360145355
+    },
+    {
+      "link": "https://weibo.com/6159487799/Q5gOTetrg",
+      "hasContent": true,
+      "hasAuthor": true,
+      "hasTime": true,
+      "hasStats": false,
+      "hasComments": true,
+      "imageCount": 1,
+      "hasVideo": true,
+      "contentLength": 1398,
+      "isRealPost": true,
+      "validationTime": 1758360147544
+    },
+    {
+      "link": "https://weibo.com/5607257930/Q5jg1kUMO",
+      "hasContent": true,
+      "hasAuthor": true,
+      "hasTime": true,
+      "hasStats": false,
+      "hasComments": true,
+      "imageCount": 16,
+      "hasVideo": true,
+      "contentLength": 836,
+      "isRealPost": true,
+      "validationTime": 1758360149725
+    },
+    {
+      "link": "https://weibo.com/1259110474/Q5iHA4bOx",
+      "hasContent": true,
+      "hasAuthor": true,
+      "hasTime": true,
+      "hasStats": false,
+      "hasComments": true,
+      "imageCount": 6,
+      "hasVideo": true,
+      "contentLength": 1193,
+      "isRealPost": true,
+      "validationTime": 1758360151906
+    }
+  ],
+  "recommendations": [
+    "主页有效帖子比例偏低，需要改进内容识别算法"
+  ]
+}

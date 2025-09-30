@@ -44,25 +44,24 @@ export const homepageLinkCaptureConfig: ContainerSystemConfig = {
     refreshInterval: 3000,
     containerConfigs: {
       linkContainer: {
-        id: 'homepage-link-container',
-        name: '主页链接提取',
-        selector: '.Feed_body, .card-wrap, .article',
-        maxLinks: 100,
+        id: 'weibo-links',
+        name: '微博链接容器',
+        selector: '.Feed_body, .WB_feed, .card-list',
+        type: 'WeiboLinkContainer',
+        maxLinks: 50,
         enableAutoScroll: true,
         enableAutoPagination: false,
         scrollStep: 2,
         maxScrollAttempts: 30,
-        scrollStep: 2,
-        maxScrollAttempts: 30,
         linkPatterns: [
-          /weibo\.com\/\d+\/[A-Za-z0-9_\-]+/, // 微博帖子
-          /weibo\.com\/[A-Za-z0-9_\-]+/,      // 用户主页
-          /weibo\.com\/search\?q=.+/          // 搜索页面
+          'weibo.com/\d+/[A-Za-z0-9_\-]+', // 微博帖子
+          'weibo.com/[A-Za-z0-9_\-]+',      // 用户主页
+          'weibo.com/search\\?q=.+'          // 搜索页面
         ],
         excludePatterns: [
-          /login/,
-          /register/,
-          /logout/
+          'login',
+          'register',
+          'logout'
         ],
         enableAutoRefresh: true,
         refreshInterval: 2000,
@@ -97,14 +96,14 @@ export const homepageLinkCaptureConfig: ContainerSystemConfig = {
     scrollStep: 2,
     maxScrollAttempts: 30,
     linkPatterns: [
-      /weibo\.com\/\d+\/[A-Za-z0-9_\-]+/, // 微博帖子
-      /weibo\.com\/[A-Za-z0-9_\-]+/,      // 用户主页
-      /weibo\.com\/search\?q=.+/          // 搜索页面
+      'weibo.com/\d+/[A-Za-z0-9_\-]+', // 微博帖子
+      'weibo.com/[A-Za-z0-9_\-]+',      // 用户主页
+      'weibo.com/search\?q=.+'          // 搜索页面
     ],
     excludePatterns: [
-      /login/,
-      /register/,
-      /logout/
+      'login',
+      'register',
+      'logout'
     ],
     enableAutoRefresh: true,
     refreshInterval: 2000,

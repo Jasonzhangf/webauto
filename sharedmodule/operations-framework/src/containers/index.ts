@@ -10,9 +10,7 @@ export type {
   RefreshTrigger,
   ContainerState,
   TaskCompletionCriteria,
-  OperationResult,
-  ContainerSharedSpace,
-  ContainerStats
+  ContainerSharedSpace
 } from './BaseSelfRefreshingContainer.js';
 
 // 微博特定容器
@@ -25,8 +23,7 @@ export type {
 export { WeiboLinkContainer } from './WeiboLinkContainer.js';
 export type {
   WeiboLinkConfig,
-  LinkData,
-  LinkExtractionResult
+  LinkData
 } from './WeiboLinkContainer.js';
 
 export { WeiboScrollContainer } from './WeiboScrollContainer.js';
@@ -46,8 +43,7 @@ export type {
 export { WeiboCommentContainer } from './WeiboCommentContainer.js';
 export type {
   WeiboCommentConfig,
-  CommentData,
-  CommentExtractionResult
+  CommentData
 } from './WeiboCommentContainer.js';
 
 export { WeiboReplyContainer } from './WeiboReplyContainer.js';
@@ -56,8 +52,22 @@ export type {
   ReplyData
 } from './WeiboReplyContainer.js';
 
-// 容器注册器
-export class ContainerRegistry {
+// 统一容器注册系统
+export { UnifiedContainerRegistry, unifiedContainerRegistry } from './UnifiedContainerRegistry.js';
+export type {
+  ContainerInfo,
+  ContainerUsageStats,
+  ContainerDiscoveryConfig,
+  ContainerLibrary,
+  DiscoveryResult,
+  ContainerHierarchy,
+  ContainerRelationship,
+  DiscoveryStats,
+  UnifiedContainerRegistryOptions
+} from './UnifiedContainerRegistry.js';
+
+// 保持向后兼容的容器注册器
+class ContainerRegistry {
   private static instance: ContainerRegistry;
   private containerTypes: Map<string, any> = new Map();
 
@@ -73,39 +83,34 @@ export class ContainerRegistry {
   }
 
   private registerDefaultContainers(): void {
-    // 注册内置容器类型
-    this.registerContainer('BaseSelfRefreshingContainer', BaseSelfRefreshingContainer);
-    this.registerContainer('WeiboPageContainer', WeiboPageContainer);
-    this.registerContainer('WeiboLinkContainer', WeiboLinkContainer);
-    this.registerContainer('WeiboScrollContainer', WeiboScrollContainer);
-    this.registerContainer('WeiboPaginationContainer', WeiboPaginationContainer);
-    this.registerContainer('WeiboCommentContainer', WeiboCommentContainer);
-    this.registerContainer('WeiboReplyContainer', WeiboReplyContainer);
+    // 注册内置容器类型到统一注册系统
+    unifiedContainerRegistry.registerContainerType('BaseSelfRefreshingContainer', BaseSelfRefreshingContainer);
+    unifiedContainerRegistry.registerContainerType('WeiboPageContainer', WeiboPageContainer);
+    unifiedContainerRegistry.registerContainerType('WeiboLinkContainer', WeiboLinkContainer);
+    unifiedContainerRegistry.registerContainerType('WeiboScrollContainer', WeiboScrollContainer);
+    unifiedContainerRegistry.registerContainerType('WeiboPaginationContainer', WeiboPaginationContainer);
+    unifiedContainerRegistry.registerContainerType('WeiboCommentContainer', WeiboCommentContainer);
+    unifiedContainerRegistry.registerContainerType('WeiboReplyContainer', WeiboReplyContainer);
   }
 
   public registerContainer(type: string, containerClass: any): void {
-    this.containerTypes.set(type, containerClass);
-    console.log(`📦 容器类型已注册: ${type}`);
+    unifiedContainerRegistry.registerContainerType(type, containerClass);
   }
 
   public getContainer(type: string): any {
-    return this.containerTypes.get(type);
+    return unifiedContainerRegistry.getContainerType(type);
   }
 
   public hasContainer(type: string): boolean {
-    return this.containerTypes.has(type);
+    return unifiedContainerRegistry.hasContainerType(type);
   }
 
   public getAllContainerTypes(): string[] {
-    return Array.from(this.containerTypes.keys());
+    return unifiedContainerRegistry.getAllContainerTypes();
   }
 
   public createContainer(type: string, config: any): any {
-    const ContainerClass = this.getContainer(type);
-    if (!ContainerClass) {
-      throw new Error(`未知的容器类型: ${type}`);
-    }
-    return new ContainerClass(config);
+    return unifiedContainerRegistry.createContainer(type, config);
   }
 
   public getContainerInfo(): Array<{
@@ -113,43 +118,7 @@ export class ContainerRegistry {
     description: string;
     configInterface?: string;
   }> {
-    return [
-      {
-        type: 'BaseSelfRefreshingContainer',
-        description: '自刷新容器基类，提供多触发源刷新机制',
-        configInterface: 'ContainerConfig'
-      },
-      {
-        type: 'WeiboPageContainer',
-        description: '微博页面管理容器，负责整体页面状态和容器协调',
-        configInterface: 'WeiboPageConfig'
-      },
-      {
-        type: 'WeiboLinkContainer',
-        description: '微博链接提取容器，专门处理链接发现和提取',
-        configInterface: 'WeiboLinkConfig'
-      },
-      {
-        type: 'WeiboScrollContainer',
-        description: '微博滚动控制容器，专门处理页面滚动和无限加载',
-        configInterface: 'WeiboScrollConfig'
-      },
-      {
-        type: 'WeiboPaginationContainer',
-        description: '微博分页控制容器，专门处理分页操作和多页内容加载',
-        configInterface: 'WeiboPaginationConfig'
-      },
-      {
-        type: 'WeiboCommentContainer',
-        description: '微博评论容器，专门处理评论提取和动态加载',
-        configInterface: 'WeiboCommentConfig'
-      },
-      {
-        type: 'WeiboReplyContainer',
-        description: '微博回复容器，专门处理评论下的回复内容',
-        configInterface: 'WeiboReplyConfig'
-      }
-    ];
+    return unifiedContainerRegistry.getContainerInfo();
   }
 }
 
@@ -208,7 +177,11 @@ export default {
   WeiboCommentContainer,
   WeiboReplyContainer,
 
-  // 工具类
+  // 新的统一容器注册系统
+  UnifiedContainerRegistry,
+  unifiedContainerRegistry,
+
+  // 向后兼容的工具类
   ContainerRegistry,
   containerRegistry,
 

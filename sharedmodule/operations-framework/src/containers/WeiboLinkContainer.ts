@@ -3,7 +3,8 @@
  * 专门处理微博页面的链接发现和提取
  */
 
-import { BaseSelfRefreshingContainer, ContainerConfig, RefreshTrigger } from './BaseSelfRefreshingContainer.js';
+import { BaseSelfRefreshingContainer, ContainerConfig, ContainerState, ContainerSharedSpace, TaskCompletionCriteria } from './BaseSelfRefreshingContainer.js';
+import { OperationResult } from '../core/types/OperatorTypes.js';
 import { UniversalOperator, OperationResult } from '../core/UniversalOperator.js';
 
 // ==================== 接口定义 ====================
@@ -425,7 +426,7 @@ export class WeiboLinkContainer extends BaseSelfRefreshingContainer {
         return false;
       }
 
-      await nextButton.click();
+      await this.safeClick(nextButton, { container: this.containerSelector });
       await this.page.waitForTimeout(2000);
       return true;
     } catch (error) {
@@ -520,7 +521,7 @@ export class WeiboLinkContainer extends BaseSelfRefreshingContainer {
         });
       }
 
-      await loadMoreButton.click();
+      await this.safeClick(loadMoreButton, { container: this.containerSelector });
       await page.waitForTimeout(1500);
 
       return OperationResult.success({

@@ -1,0 +1,116 @@
+{
+  "homepage": {
+    "name": "微博主页",
+    "description": "无限垂直刷新信息流页面",
+    "urlPattern": "^https?://weibo\\.com/?$",
+    "scrollType": "infinite",
+    "containers": {
+      "required": [
+        "page",
+        "feed",
+        "post"
+      ],
+      "optional": []
+    },
+    "operations": {
+      "scroll": {
+        "condition": "viewport_no_change",
+        "action": "scroll_to_bottom",
+        "interval": 2000,
+        "maxAttempts": 50
+      },
+      "extract": {
+        "target": "posts",
+        "selector": "[class*=\"Card\"]:not([class*=\"head\"]):not([class*=\"nav\"]):not([class*=\"footer\"])",
+        "limit": 50
+      }
+    }
+  },
+  "search": {
+    "name": "微博搜索结果",
+    "description": "分页式搜索结果页面",
+    "urlPattern": "^https?://weibo\\.com/search.*",
+    "scrollType": "pagination",
+    "containers": {
+      "required": [
+        "page",
+        "feed",
+        "post",
+        "pagination"
+      ],
+      "optional": [
+        "next_page"
+      ]
+    },
+    "operations": {
+      "scroll": {
+        "condition": "element_count_reached",
+        "action": "click_next_page",
+        "interval": 3000,
+        "maxAttempts": 10
+      },
+      "pagination": {
+        "selector": "[class*=\"page\"], [class*=\"pagination\"], .next, [aria-label*=\"next\"]",
+        "condition": "not_last_page"
+      }
+    }
+  },
+  "user_profile": {
+    "name": "用户主页",
+    "description": "用户个人微博页面",
+    "urlPattern": "^https?://weibo\\.com/u/\\d+",
+    "scrollType": "infinite",
+    "containers": {
+      "required": [
+        "page",
+        "feed",
+        "post"
+      ],
+      "optional": [
+        "user_info"
+      ]
+    },
+    "operations": {
+      "scroll": {
+        "condition": "viewport_no_change",
+        "action": "scroll_to_bottom",
+        "interval": 2000,
+        "maxAttempts": 30
+      },
+      "extract": {
+        "target": "user_posts",
+        "selector": "[class*=\"Card\"]:not([class*=\"head\"]):not([class*=\"nav\"]):not([class*=\"footer\"])",
+        "limit": 30
+      }
+    }
+  },
+  "single_post": {
+    "name": "单条微博详情",
+    "description": "单条微博及其评论页面",
+    "urlPattern": "^https?://weibo\\.com/\\d+/",
+    "scrollType": "infinite",
+    "containers": {
+      "required": [
+        "page",
+        "post",
+        "comments"
+      ],
+      "optional": [
+        "comment_form"
+      ]
+    },
+    "operations": {
+      "scroll": {
+        "condition": "viewport_no_change",
+        "action": "scroll_to_bottom",
+        "interval": 1500,
+        "maxAttempts": 20
+      },
+      "extract": {
+        "target": "comments",
+        "selector": "[class*=\"comment\"], [class*=\"reply\"]",
+        "limit": 100
+      }
+    }
+  }
+}

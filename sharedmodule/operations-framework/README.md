@@ -1,6 +1,6 @@
 # WebAuto Operations Framework
 
-基于嵌套operator的自动化操作框架，采用Core/Detector架构模式，提供事件驱动的登录状态检测和Cookie管理功能。
+基于嵌套operator的自动化操作框架，采用Core/Detector架构模式，提供完整的事件驱动工作流系统。包括智能容器系统、事件驱动引擎、徽章检测和Cookie管理功能。
 
 ## 🏗️ 架构设计
 
@@ -24,6 +24,9 @@ src/
 ├── event-driven/          # 事件驱动系统
 │   ├── EventBus.ts        # 事件总线
 │   └── WorkflowEngine.ts  # 工作流引擎
+├── containers/             # 智能容器系统
+│   ├── BaseSelfRefreshingContainer.ts  # 自刷新容器基类
+│   └── WeiboLinkContainer.ts           # 微博链接捕获容器
 ├── micro-operations/      # 微操作
 │   ├── AIOperations.ts    # AI操作
 │   ├── BrowserOperations.ts  # 浏览器操作
@@ -36,7 +39,26 @@ src/
 
 ## ✨ 核心功能
 
-### 1. 事件驱动登录检测
+### 1. 智能容器系统
+
+基于BaseSelfRefreshingContainer的 sophisiticated 事件驱动容器系统，支持自动发现和刷新：
+
+- **多触发源统一管理**: manual、operation、mutation、timer、initialization
+- **优先级队列系统**: 确保重要事件优先处理
+- **动态元素发现**: 实时发现和处理新元素
+- **自动滚动控制**: 智能判断何时停止滚动
+- **事件驱动刷新**: 每次操作后自动触发刷新
+
+### 2. Weibo专用链接捕获容器
+
+WeiboLinkContainer提供专用的微博链接捕获功能：
+
+- **智能链接发现**: 使用CSS选择器发现用户链接 `a[href*="/u/"]`
+- **自动滚动机制**: 智能滚动和分页处理
+- **重复链接过滤**: 避免重复发现相同链接
+- **性能优化**: 避免重复发现和超时控制
+
+### 3. 事件驱动登录检测
 
 基于徽章检测的智能登录状态识别，支持多种检测策略：
 
@@ -45,7 +67,7 @@ src/
 - **多维度验证**: 结合页面元素、Cookie状态和URL分析
 - **事件驱动**: 使用EventBus和WorkflowEngine实现自动化流程
 
-### 2. Cookie管理系统
+### 4. Cookie管理系统
 
 完整的Cookie生命周期管理：
 
@@ -54,7 +76,7 @@ src/
 - **智能保存**: 登录确认后自动更新Cookie文件
 - **事件通知**: Cookie状态变化的事件通知
 
-### 3. 工作流引擎
+### 5. 工作流引擎
 
 灵活的工作流规则系统：
 
@@ -135,6 +157,54 @@ result.loginConfirmed = result.badgeDetected && result.hasWeiboCookies;
    - 自动验证Cookie存在性和有效性
 
 ## 🛠️ 使用示例
+
+### 使用现有容器系统进行Weibo链接捕获
+
+```typescript
+import { WeiboLinkContainer } from './src/containers/WeiboLinkContainer';
+import { WeiboLoginDetector } from './src/detectors/weibo-login-detector';
+import { EventBus } from './src/event-driven/EventBus';
+
+// 创建事件总线
+const eventBus = new EventBus({ historyLimit: 1000 });
+
+// 1. 验证登录状态
+const loginDetector = new WeiboLoginDetector({
+  headless: true,
+  debug: false,
+  cookiesPath: '~/.webauto/cookies/weibo-cookies.json'
+});
+
+const loginResult = await loginDetector.runDetection();
+
+if (loginResult.isLoggedIn) {
+  // 2. 创建Weibo链接捕获容器
+  const linkContainer = new WeiboLinkContainer({
+    page: loginDetector.page,
+    config: {
+      selector: 'a[href*="/u/"]',
+      maxScrollAttempts: 50,
+      targetLinks: 100,
+      autoScroll: true
+    }
+  });
+
+  // 3. 启动链接捕获
+  await linkContainer.startCapture();
+
+  // 4. 监听事件
+  eventBus.on('links:discovered', (data) => {
+    console.log(`发现 ${data.newLinksCount} 个新链接`);
+  });
+
+  eventBus.on('capture:completed', (data) => {
+    console.log(`捕获完成，总共 ${data.totalLinks} 个链接`);
+  });
+
+  // 5. 等待完成
+  await linkContainer.waitForCompletion();
+}
+```
 
 ### 基础登录检测
 

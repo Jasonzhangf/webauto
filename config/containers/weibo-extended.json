@@ -1,0 +1,52 @@
+{
+  "website": "weibo.com",
+  "version": "2.0.0",
+  "containers": {
+    "comments_section": {
+      "name": "评论区容器",
+      "selector": "[class*=\"comment\"], [class*=\"reply\"]",
+      "description": "微博评论区域容器",
+      "priority": 4,
+      "specificity": 20
+    },
+    "user_info_panel": {
+      "name": "用户信息面板",
+      "selector": "[class*=\"user\"], [class*=\"profile\"]",
+      "description": "用户信息展示面板",
+      "priority": 5,
+      "specificity": 15
+    }
+  },
+  "pageTypes": {
+    "comments_page": {
+      "name": "评论详情页",
+      "description": "单条微博的评论页面",
+      "urlPattern": "^https?://weibo\\.com/\\d+/.*",
+      "scrollType": "infinite",
+      "containers": {
+        "required": [
+          "page",
+          "post",
+          "comments_section"
+        ],
+        "optional": [
+          "user_info_panel",
+          "comment_form"
+        ]
+      },
+      "operations": {
+        "scroll": {
+          "condition": "viewport_no_change",
+          "action": "scroll_to_bottom",
+          "interval": 1500,
+          "maxAttempts": 30
+        }
+      }
+    }
+  },
+  "metadata": {
+    "description": "微博扩展容器和页面类型配置",
+    "author": "Container Library System",
+    "createdAt": "2025-09-22T00:04:15.444Z"
+  }
+}

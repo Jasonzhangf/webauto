@@ -1,5 +1,6 @@
 // 分页捕获节点
 import BaseNode from './BaseNode.js';
+import { safeAccessManager } from '../../../dist/src/core/SafePageAccessManager.js';
 
 class PaginationCaptureNode extends BaseNode {
     constructor() {
@@ -149,10 +150,16 @@ class PaginationCaptureNode extends BaseNode {
             console.log(`🔍 导航到: ${nextPageUrl}`);
 
             // 导航到下一页
-            await page.goto(nextPageUrl, {
+            // 使用安全访问管理器导航到下一页
+            const accessResult = await safeAccessManager.safePageAccess(page, nextPageUrl, {
                 waitUntil: 'domcontentloaded',
                 timeout: 15000
             });
+
+            if (!accessResult.success) {
+                console.warn(`🚨 安全访问失败: ${nextPageUrl}`);
+                return false;
+            }
 
             // 验证页面是否成功加载
             await this.sleep(2000);

@@ -3,7 +3,8 @@
  * 继承自BaseSelfRefreshingContainer，专门处理微博评论的动态加载
  */
 
-import { BaseSelfRefreshingContainer, ContainerConfig, RefreshTrigger, ContainerSharedSpace } from './BaseSelfRefreshingContainer';
+import { BaseSelfRefreshingContainer, ContainerConfig, ContainerState, ContainerSharedSpace, TaskCompletionCriteria } from './BaseSelfRefreshingContainer.js';
+import { OperationResult } from '../core/types/OperatorTypes.js';
 import { UniversalOperator, OperationResult } from '../core/UniversalOperator';
 
 // ==================== 接口定义 ====================
@@ -443,7 +444,7 @@ export class WeiboCommentContainer extends BaseSelfRefreshingContainer {
         });
       }
 
-      await loadMoreButton.click();
+      await this.safeClick(loadMoreButton, { container: this.containerSelector });
       await page.waitForTimeout(2000);
 
       // 检查是否有新内容加载
@@ -472,7 +473,7 @@ export class WeiboCommentContainer extends BaseSelfRefreshingContainer {
         });
       }
 
-      await expandButton.click();
+      await this.safeClick(expandButton, { container: this.containerSelector });
       await page.waitForTimeout(1000);
 
       return OperationResult.success({
@@ -515,7 +516,7 @@ export class WeiboCommentContainer extends BaseSelfRefreshingContainer {
         });
       }
 
-      await button.click();
+      await this.safeClick(button, { container: this.containerSelector });
       await page.waitForTimeout(1000);
 
       return OperationResult.success({

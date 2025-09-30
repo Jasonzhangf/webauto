@@ -24,7 +24,7 @@ interface WeiboLoginDetectorOptions {
 interface LoginStatus {
   isLoggedIn: boolean;
   details: string;
-  detectedElements: string[];
+  detectedElements: Array<{ selector: string; count: number; visible: boolean }>;
   badgeDetected: boolean;
   loginConfirmed: boolean;
 }
@@ -314,7 +314,7 @@ class WeiboLoginDetector {
     const result = {
       isLoggedIn: false,
       details: '',
-      detectedElements: [],
+      detectedElements: [] as Array<{ selector: string; count: number; visible: boolean }>,
       badgeDetected: false,
       loginConfirmed: false
     };
@@ -338,7 +338,7 @@ class WeiboLoginDetector {
           const elements = await this.state.page.$$(selector);
           if (elements.length > 0) {
             hasLoginElements = true;
-            result.detectedElements.push(`登录元素: ${selector}`);
+            result.detectedElements.push({ selector: `登录元素: ${selector}`, count: elements.length, visible: true });
             break;
           }
         } catch (e) {
@@ -384,7 +384,7 @@ class WeiboLoginDetector {
               count: elements.length,
               visible: await this.areElementsVisible(elements)
             });
-            result.detectedElements.push(`徽章元素: ${selector} (${elements.length}个)`);
+            result.detectedElements.push({ selector: `徽章元素: ${selector} (${elements.length}个)`, count: elements.length, visible: await this.areElementsVisible(elements) });
           }
         } catch (e) {
           // 忽略选择器错误
@@ -419,7 +419,7 @@ class WeiboLoginDetector {
           const elements = await this.state.page.$$(selector);
           if (elements.length > 0) {
             additionalUserCount++;
-            result.detectedElements.push(`辅助用户元素: ${selector} (${elements.length}个)`);
+            result.detectedElements.push({ selector: `辅助用户元素: ${selector} (${elements.length}个)`, count: elements.length, visible: true });
           }
         } catch (e) {
           // 忽略选择器错误

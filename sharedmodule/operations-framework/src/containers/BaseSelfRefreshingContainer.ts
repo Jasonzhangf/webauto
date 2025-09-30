@@ -4,7 +4,8 @@
  */
 
 import { EventEmitter } from 'events';
-import { UniversalOperator, OperationResult } from '../core/UniversalOperator';
+import { UniversalOperator } from '../core/UniversalOperator.js';
+import { OperationResult } from '../core/types/OperatorTypes.js';
 
 // ==================== 接口定义 ====================
 

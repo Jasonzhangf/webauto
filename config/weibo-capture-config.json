@@ -1,0 +1,44 @@
+{
+  "name": "Weibo Homepage Link Capture",
+  "version": "1.0.0",
+  "description": "使用事件驱动容器系统捕获微博主页链接",
+  "target": {
+    "url": "https://weibo.com/",
+    "targetLinks": 50,
+    "maxScrollAttempts": 100,
+    "scrollInterval": 2000,
+    "timeout": 300000
+  },
+  "container": {
+    "selector": "a[href^=\"/\"]:not([href*=\"/u/\"]):not([href*=\"/home\"]):not([href*=\"/follow\"]):not([href*=\"/fans\"]):not([href*=\"/profile\"])",
+    "autoScroll": true,
+    "autoDiscover": true,
+    "enableMutationObserver": true,
+    "maxConcurrentRefreshes": 3
+  },
+  "browser": {
+    "headless": true,
+    "viewport": {
+      "width": 1920,
+      "height": 1080
+    },
+    "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+  },
+  "cookie": {
+    "path": "~/.webauto/cookies/weibo-cookies.json",
+    "autoLoad": true,
+    "autoSave": true
+  },
+  "output": {
+    "saveToFile": true,
+    "filePath": "~/.webauto/results/weibo-links-capture.json",
+    "includeTimestamp": true,
+    "format": "json"
+  },
+  "logging": {
+    "level": "info",
+    "enableConsole": true,
+    "enableFile": true,
+    "logPath": "~/.webauto/logs/weibo-capture.log"
+  }
+}

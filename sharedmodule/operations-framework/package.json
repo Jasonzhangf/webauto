@@ -8,9 +8,12 @@
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",
-    "test": "jest",
+    "test": "tsc --project tsconfig.test.json && node dist-tests/tests/container-system-test.js",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage",
     "lint": "eslint src --ext .ts",
-    "clean": "rm -rf dist"
+    "lint:fix": "eslint src --ext .ts --fix",
+    "clean": "rm -rf dist dist-tests"
   },
   "keywords": [
     "automation",

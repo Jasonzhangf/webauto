@@ -3,7 +3,8 @@
  * 专门处理分页操作和多页内容加载
  */
 
-import { BaseSelfRefreshingContainer, ContainerConfig, RefreshTrigger } from './BaseSelfRefreshingContainer.js';
+import { BaseSelfRefreshingContainer, ContainerConfig, ContainerState, ContainerSharedSpace, TaskCompletionCriteria } from './BaseSelfRefreshingContainer.js';
+import { OperationResult } from '../core/types/OperatorTypes.js';
 import { UniversalOperator, OperationResult } from '../core/UniversalOperator.js';
 
 // ==================== 接口定义 ====================
@@ -395,7 +396,7 @@ export class WeiboPaginationContainer extends BaseSelfRefreshingContainer {
         };
       }
 
-      await nextButton.click();
+      await this.safeClick(nextButton, { container: this.containerSelector });
       await this.page.waitForTimeout(this.config.pageDelay || 2000);
 
       // 等待页面加载
@@ -483,7 +484,7 @@ export class WeiboPaginationContainer extends BaseSelfRefreshingContainer {
         };
       }
 
-      await loadMoreButton.click();
+      await this.safeClick(loadMoreButton, { container: this.containerSelector });
       await this.page.waitForTimeout(this.config.pageDelay || 2000);
 
       const newContentLoaded = await this.checkNewContentLoaded();

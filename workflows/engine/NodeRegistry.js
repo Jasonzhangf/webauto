@@ -9,6 +9,9 @@ import PaginationCaptureNode from './nodes/PaginationCaptureNode.js';
 import URLBuilderNode from './nodes/URLBuilderNode.js';
 import ResultSaverNode from './nodes/ResultSaverNode.js';
 import EndNode from './nodes/EndNode.js';
+import ContentDownloadNode from './nodes/ContentDownloadNode.js';
+import DownloadResultSaverNode from './nodes/DownloadResultSaverNode.js';
+import FileReaderNode from './nodes/FileReaderNode.js';
 
 class NodeRegistry {
     constructor() {
@@ -28,6 +31,9 @@ class NodeRegistry {
         this.registerNode('URLBuilderNode', new URLBuilderNode());
         this.registerNode('ResultSaverNode', new ResultSaverNode());
         this.registerNode('EndNode', new EndNode());
+        this.registerNode('ContentDownloadNode', new ContentDownloadNode());
+        this.registerNode('DownloadResultSaverNode', new DownloadResultSaverNode());
+        this.registerNode('FileReaderNode', new FileReaderNode());
     }
 
     registerNode(type, handler) {

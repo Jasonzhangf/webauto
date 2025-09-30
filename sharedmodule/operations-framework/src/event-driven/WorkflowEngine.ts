@@ -39,6 +39,7 @@ export interface WorkflowTask {
   timeout?: number;
   retryCount?: number;
   retryDelay?: number;
+  status?: 'pending' | 'processing' | 'completed' | 'failed';
 }
 
 export interface WorkflowInstance {

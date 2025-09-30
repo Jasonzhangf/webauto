@@ -1,5 +1,6 @@
 // 导航节点
 import BaseNode from './BaseNode.js';
+import { safeAccessManager } from '../../../dist/src/core/SafePageAccessManager.js';
 
 class NavigationNode extends BaseNode {
     constructor() {
@@ -27,11 +28,16 @@ class NavigationNode extends BaseNode {
 
             logger.info(`🌐 导航到: ${url}`);
 
-            // 导航到目标页面
-            await page.goto(url, {
+            // 使用安全访问管理器导航到目标页面
+            const accessResult = await safeAccessManager.safePageAccess(page, url, {
                 waitUntil: config.waitUntil || 'domcontentloaded',
                 timeout: config.timeout || 30000
             });
+
+            if (!accessResult.success) {
+                logger.error(`🚨 安全访问失败: ${url}`);
+                throw new Error(`安全访问失败: ${url}`);
+            }
 
             // 等待页面加载
             if (config.waitTime) {

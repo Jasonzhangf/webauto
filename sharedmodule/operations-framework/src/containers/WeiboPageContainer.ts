@@ -4,7 +4,8 @@
  */
 
 import { BaseSelfRefreshingContainer, ContainerConfig, RefreshTrigger } from './BaseSelfRefreshingContainer.js';
-import { UniversalOperator, OperationResult } from '../core/UniversalOperator.js';
+import { UniversalOperator } from '../core/UniversalOperator.js';
+import { OperationResult } from '../core/types/OperatorTypes.js';
 import { WeiboLinkContainer, WeiboLinkConfig, LinkData } from './WeiboLinkContainer.js';
 
 // ==================== 接口定义 ====================
