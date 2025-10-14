@@ -22,6 +22,7 @@ import HandshakeSignalNode from './nodes/HandshakeSignalNode.js';
 import BehaviorLogNode from './nodes/BehaviorLogNode.js';
 import ContextExportNode from './nodes/ContextExportNode.js';
 import SessionFinalizeNode from './nodes/SessionFinalizeNode.js';
+import CamoufoxEnsureNode from './nodes/CamoufoxEnsureNode.js';
 
 class NodeRegistry {
     constructor() {
@@ -54,6 +55,7 @@ class NodeRegistry {
         this.registerNode('BehaviorLogNode', new BehaviorLogNode());
         this.registerNode('ContextExportNode', new ContextExportNode());
         this.registerNode('SessionFinalizeNode', new SessionFinalizeNode());
+        this.registerNode('CamoufoxEnsureNode', new CamoufoxEnsureNode());
     }
 
     registerNode(type, handler) {

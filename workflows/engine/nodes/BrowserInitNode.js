@@ -36,11 +36,11 @@ class BrowserInitNode extends BaseNode {
             if (userDataDir) { try { mkdirSync(userDataDir, { recursive: true }); } catch {} }
 
             if (engine === 'camoufox' || engine === 'firefox') {
-                let executablePath = config?.executablePath || process.env.CAMOUFOX_PATH || '';
+                let executablePath = config?.executablePath || variables.get('camoufoxPath') || process.env.CAMOUFOX_PATH || '';
                 try {
                     if (!executablePath && engine === 'camoufox') {
-                        // 尝试从子模块解析 camoufox 包（若已安装）
-                        const mod = await import('../../../sharedmodule/node_modules/camoufox/index.js').catch(() => null);
+                        // 尝试从包解析（要求外部确保安装）
+                        const mod = await import('camoufox').catch(() => null);
                         if (mod && (mod.default?.executablePath || mod.executablePath)) {
                             executablePath = mod.default?.executablePath || mod.executablePath;
                         }
@@ -49,6 +49,9 @@ class BrowserInitNode extends BaseNode {
 
                 const launchOpts = { headless, args: [] };
                 if (executablePath) launchOpts.executablePath = executablePath;
+                if (engine === 'camoufox' && !executablePath) {
+                    throw new Error('Camoufox required but not found. Run CamoufoxEnsureNode or set CAMOUFOX_PATH.');
+                }
                 if (userDataDir) {
                     contextObj = await firefox.launchPersistentContext(userDataDir, launchOpts);
                     browser = contextObj.browser();
