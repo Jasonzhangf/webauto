@@ -1,5 +1,8 @@
 // 浏览器初始化节点
 import { chromium, firefox } from 'playwright';
+import { join } from 'node:path';
+import { homedir } from 'node:os';
+import { mkdirSync } from 'node:fs';
 import BaseNode from './BaseNode.js';
 
 class BrowserInitNode extends BaseNode {
@@ -21,6 +24,16 @@ class BrowserInitNode extends BaseNode {
             const ua = config?.userAgent || 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
             const viewport = config?.viewport || { width: 1920, height: 1080 };
             let browser;
+            let contextObj;
+
+            // 解析 userDataDir（可用模板 {sessionId} ）
+            const replaceVars = (s) => {
+                if (!s) return s;
+                return String(s).replace('{sessionId}', context.variables?.get('sessionId') || 'session');
+            };
+            let userDataDir = replaceVars(config?.userDataDirTemplate) || replaceVars(config?.userDataDir);
+            if (userDataDir && userDataDir.startsWith('~/')) userDataDir = join(homedir(), userDataDir.slice(2));
+            if (userDataDir) { try { mkdirSync(userDataDir, { recursive: true }); } catch {} }
 
             if (engine === 'camoufox' || engine === 'firefox') {
                 let executablePath = config?.executablePath || process.env.CAMOUFOX_PATH || '';
@@ -36,29 +49,82 @@ class BrowserInitNode extends BaseNode {
 
                 const launchOpts = { headless, args: [] };
                 if (executablePath) launchOpts.executablePath = executablePath;
-                browser = await firefox.launch(launchOpts);
+                if (userDataDir) {
+                    contextObj = await firefox.launchPersistentContext(userDataDir, launchOpts);
+                    browser = contextObj.browser();
+                } else {
+                    browser = await firefox.launch(launchOpts);
+                }
             } else {
-                browser = await chromium.launch({
-                    headless,
-                    args: ['--no-sandbox', '--disable-setuid-sandbox', '--lang=zh-CN']
-                });
+                const args = ['--no-sandbox', '--disable-setuid-sandbox', '--lang=zh-CN', '--disable-blink-features=AutomationControlled'];
+                if (userDataDir) {
+                    contextObj = await chromium.launchPersistentContext(userDataDir, { headless, args });
+                    browser = contextObj.browser();
+                } else {
+                    browser = await chromium.launch({ headless, args });
+                }
             }
 
-            const contextObj = await browser.newContext({
-                userAgent: ua,
-                viewport,
-                locale: 'zh-CN',
-                timezoneId: Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Shanghai'
-            });
+            if (!contextObj) {
+                contextObj = await browser.newContext({
+                    userAgent: ua,
+                    viewport,
+                    locale: 'zh-CN',
+                    timezoneId: Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Shanghai'
+                });
+            } else {
+                // 对持久化上下文设置 UA/viewport
+                try { await contextObj.setDefaultNavigationTimeout(30000); } catch {}
+            }
+
+            // 严格反自动化脚本（在任何页面创建前注入）
+            try {
+                if (config?.strictAutomationMitigation !== false) {
+                    await contextObj.addInitScript(() => {
+                        try { Object.defineProperty(navigator, 'webdriver', { get: () => false }); } catch {}
+                        try { window.chrome = window.chrome || { runtime: {} }; } catch {}
+                        try { Object.defineProperty(navigator, 'languages', { get: () => ['zh-CN', 'zh'] }); } catch {}
+                        try { Object.defineProperty(navigator, 'platform', { get: () => 'MacIntel' }); } catch {}
+                        try {
+                            const getParameter = WebGLRenderingContext.prototype.getParameter;
+                            WebGLRenderingContext.prototype.getParameter = function(param) {
+                                if (param === 37445) return 'Intel Inc.'; // UNMASKED_VENDOR_WEBGL
+                                if (param === 37446) return 'Intel Iris OpenGL Engine'; // UNMASKED_RENDERER_WEBGL
+                                return getParameter.call(this, param);
+                            };
+                        } catch {}
+                        try {
+                            const originalQuery = window.navigator.permissions && window.navigator.permissions.query;
+                            if (originalQuery) {
+                                window.navigator.permissions.query = (parameters) => (
+                                    parameters && parameters.name === 'notifications'
+                                        ? Promise.resolve({ state: Notification.permission })
+                                        : originalQuery(parameters)
+                                );
+                            }
+                        } catch {}
+                        try {
+                            if (navigator.plugins && navigator.plugins.length === 0) {
+                                // 简单伪造 plugins 长度
+                                const fake = { length: 1 };
+                                Object.setPrototypeOf(fake, PluginArray.prototype);
+                                Object.defineProperty(navigator, 'plugins', { get: () => fake });
+                            }
+                        } catch {}
+                    });
+                }
+            } catch {}
 
             // 设置常见请求头，降低风控命中
-            try {
-                await contextObj.setExtraHTTPHeaders({
-                    'Accept-Language': 'zh-CN,zh;q=0.9',
-                    'DNT': '1',
-                    'Upgrade-Insecure-Requests': '1'
-                });
-            } catch {}
+            if (config?.extraHeaders !== false) {
+                try {
+                    await contextObj.setExtraHTTPHeaders({
+                        'Accept-Language': 'zh-CN,zh;q=0.9',
+                        'DNT': '1',
+                        'Upgrade-Insecure-Requests': '1'
+                    });
+                } catch {}
+            }
 
             context.engine?.recordBehavior?.('browser_init', { engine, headless, viewport });
 
