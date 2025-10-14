@@ -9,42 +9,67 @@ class LoginVerificationNode extends BaseNode {
     }
 
     async execute(context) {
-        const { config, logger, page } = context;
+        const { config, logger, page, context: browserContext } = context;
 
         try {
             logger.info('🔐 验证登录状态...');
 
-            const maxRetries = config.maxRetries || 3;
-            const retryDelay = config.retryDelay || 2000;
-            const loginSelector = config.loginSelector;
+            const maxRetries = Number(config.maxRetries || 3);
+            const retryDelay = Number(config.retryDelay || 2000);
+            const selectors = (Array.isArray(config.loginSelectors) && config.loginSelectors.length)
+              ? config.loginSelectors
+              : [config.loginSelector].filter(Boolean);
+            const successText = Array.isArray(config.successText) ? config.successText : [];
+            const cookieNames = Array.isArray(config.cookieNames) ? config.cookieNames : [];
+            const requireVisible = config.requireVisible !== false; // 默认需要可见
+            const postWait = Number(config.postLoginWaitMs || 0);
 
             let isLoggedIn = false;
             let loginInfo = null;
 
             for (let attempt = 1; attempt <= maxRetries; attempt++) {
                 try {
-                    // 查找登录验证元素
-                    const loginElement = await page.$(loginSelector);
+                    // 1) 选择器检测（任意命中即可）
+                    for (const sel of selectors) {
+                        try {
+                            const elements = await page.$$(sel);
+                            if (elements && elements.length > 0) {
+                                const visibleAny = requireVisible
+                                  ? await Promise.any(elements.map(async el => await el.isVisible()).map(p => p.catch(()=>false))).catch(()=>false)
+                                  : true;
+                                loginInfo = { found: true, selector: sel, count: elements.length, visible: Boolean(visibleAny) };
+                                if (!requireVisible || visibleAny) {
+                                    isLoggedIn = true;
+                                    break;
+                                }
+                            }
+                        } catch {}
+                    }
 
-                    if (loginElement) {
-                        // 获取元素信息
-                        const src = await loginElement.getAttribute('src');
-                        const alt = await loginElement.getAttribute('alt');
-                        const visible = await loginElement.isVisible();
-
-                        loginInfo = {
-                            found: true,
-                            src: src,
-                            alt: alt,
-                            visible: visible,
-                            selector: loginSelector
-                        };
-
-                        if (visible) {
+                    // 2) 文本信号（可选）
+                    if (!isLoggedIn && successText.length) {
+                        const text = await page.evaluate(() => document.body?.innerText || '');
+                        if (successText.some(t => text.includes(t))) {
+                            loginInfo = { ...(loginInfo||{}), textHit: true };
                             isLoggedIn = true;
-                            logger.info(`✅ 登录验证成功 (尝试 ${attempt}/${maxRetries})`);
-                            break;
                         }
+                    }
+
+                    // 3) Cookie 信号（可选）
+                    if (!isLoggedIn && cookieNames.length && browserContext) {
+                        const cookies = await browserContext.cookies();
+                        const nameSet = new Set(cookies.map(c => c.name));
+                        if (cookieNames.some(n => nameSet.has(n))) {
+                            loginInfo = { ...(loginInfo||{}), cookieHit: true };
+                            isLoggedIn = true;
+                        }
+                    }
+
+                    if (isLoggedIn) {
+                        context.engine?.recordBehavior?.('login_check', { attempt, success: true, info: loginInfo });
+                        if (postWait > 0) { await this.sleep(postWait); }
+                        logger.info(`✅ 登录验证成功 (尝试 ${attempt}/${maxRetries})`);
+                        break;
                     }
 
                     if (attempt < maxRetries) {
@@ -61,6 +86,7 @@ class LoginVerificationNode extends BaseNode {
             }
 
             if (!isLoggedIn) {
+                context.engine?.recordBehavior?.('login_check', { success: false });
                 throw new Error('登录验证失败，请检查Cookie或登录状态');
             }
 
@@ -68,9 +94,9 @@ class LoginVerificationNode extends BaseNode {
                 success: true,
                 variables: {
                     isLoggedIn: true,
-                    loginInfo: loginInfo,
-                    loginVerifiedAt: new Date().toISOString()
-                }
+                loginInfo: loginInfo,
+                loginVerifiedAt: new Date().toISOString()
+            }
             };
 
         } catch (error) {

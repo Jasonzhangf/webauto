@@ -9,13 +9,25 @@ class EndNode extends BaseNode {
     }
 
     async execute(context) {
-        const { config, logger, browser, variables } = context;
+        const { config, logger, browser, variables, engine } = context;
 
         try {
             logger.info('🏁 工作流结束');
 
             // 设置结束时间
             variables.set('endTime', new Date().toISOString());
+
+            // 选择是否持久化会话
+            const persistSession = config.persistSession !== false; // 默认持久化
+            if (persistSession) {
+                try {
+                    engine.saveSession();
+                    logger.info(`🔗 会话已持久化 (sessionId=${variables.get('sessionId')})`);
+                    variables.set('sessionPersisted', true);
+                } catch (e) {
+                    logger.warn('⚠️ 会话持久化失败: ' + (e?.message || e));
+                }
+            }
 
             // 清理浏览器
             if (config.cleanup && browser) {
@@ -35,7 +47,9 @@ class EndNode extends BaseNode {
                 variables: {
                     workflowCompleted: true,
                     endTime: variables.get('endTime'),
-                    executionTime: this.calculateExecutionTime(variables)
+                    executionTime: this.calculateExecutionTime(variables),
+                    sessionId: variables.get('sessionId'),
+                    sessionPersisted: variables.get('sessionPersisted') || false
                 }
             };
 
@@ -64,7 +78,12 @@ class EndNode extends BaseNode {
             properties: {
                 cleanup: {
                     type: 'boolean',
-                    description: '是否清理浏览器资源',
+                description: '是否清理浏览器资源',
+                default: true
+            },
+                persistSession: {
+                    type: 'boolean',
+                    description: '是否持久化浏览器会话以便后续工作流接力',
                     default: true
                 },
                 saveLogs: {

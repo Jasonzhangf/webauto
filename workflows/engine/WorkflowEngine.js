@@ -5,28 +5,35 @@ import { dirname, join } from 'node:path';
 import NodeRegistry from './NodeRegistry.js';
 import VariableManager from './VariableManager.js';
 import Logger from './Logger.js';
+import SessionRegistry from './SessionRegistry.js';
+import SessionFS from './SessionFS.js';
+import BehaviorRecorder from './BehaviorRecorder.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 class WorkflowEngine {
-    constructor() {
-        this.nodeRegistry = new NodeRegistry();
-        this.variableManager = new VariableManager();
-        this.logger = new Logger();
-        this.browser = null;
-        this.context = null;
-        this.page = null;
-        this.currentState = 'idle';
-        this.executionStack = [];
-        this.results = {};
-    }
+  constructor() {
+    this.nodeRegistry = new NodeRegistry();
+    this.variableManager = new VariableManager();
+    this.logger = new Logger();
+    this.browser = null;
+    this.context = null;
+    this.page = null;
+    this.currentState = 'idle';
+    this.executionStack = [];
+    this.results = {};
+    this.behaviorLog = [];
+    this.recorder = null;
+  }
 
     async executeWorkflow(workflowConfig, parameters = {}) {
         try {
             this.logger.info(`🚀 开始执行工作流: ${workflowConfig.name}`);
             this.currentState = 'running';
             this.variableManager.initialize(workflowConfig.variables);
+            // 记录工作流名称，便于外部节点输出
+            this.variableManager.set('workflowName', workflowConfig.name || 'workflow');
 
             // 设置参数
             if (workflowConfig.parameters) {
@@ -36,6 +43,22 @@ class WorkflowEngine {
                     }
                 });
             }
+
+            // 准备会话ID（用于跨工作流共享浏览器上下文）
+            const providedSessionId = parameters.sessionId || workflowConfig.sessionId;
+            const sessionId = providedSessionId || `sess-${Date.now()}-${Math.floor(Math.random()*1e6)}`;
+            this.variableManager.set('sessionId', sessionId);
+            // 会话目录
+            const sessionDir = SessionFS.ensureSessionDir(sessionId);
+            this.variableManager.set('sessionDir', sessionDir);
+
+            // 传入参数（全部写入为变量，便于节点读取，如 debug）
+            for (const k of Object.keys(parameters || {})) {
+                this.variableManager.set(k, parameters[k]);
+            }
+
+            // 行为记录器
+            this.recorder = new BehaviorRecorder({ workflow: workflowConfig.name || 'workflow', sessionId, sessionDir });
 
             // 开始时间
             this.variableManager.set('startTime', new Date().toISOString());
@@ -158,6 +181,37 @@ class WorkflowEngine {
             throw error;
         }
     }
+
+    // 保存会话到注册表（供后续工作流接力）
+  saveSession() {
+    const sessionId = this.variableManager.get('sessionId');
+    if (!sessionId) return false;
+    return SessionRegistry.save(sessionId, {
+      browser: this.browser,
+      context: this.context,
+      page: this.page
+    });
+  }
+
+    // 附着已有会话（可供 AttachSessionNode 调用）
+  attachSession(sessionId) {
+    const s = SessionRegistry.get(sessionId);
+    if (!s) return false;
+    this.browser = s.browser;
+    this.context = s.context;
+    this.page = s.page;
+    return true;
+  }
+
+  // 行为记录（供节点调用）
+  recordBehavior(type, data = {}) {
+    try {
+      if (this.recorder) this.recorder.record(type, data);
+      this.behaviorLog.push({ ts: Date.now(), type, data });
+    } catch {}
+  }
+
+  getBehaviorLog() { return this.behaviorLog.slice(); }
 
     calculateExecutionTime() {
         const startTime = this.variableManager.get('startTime');

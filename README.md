@@ -1,337 +1,284 @@
-# WebAuto - 事件驱动的Web自动化框架
+# Page Analyzer v0.1.0
 
-## 🚀 项目概述
+🔍 **智能页面分析器** - 基于Playwright的现代化网页容器发现和层次结构分析系统
 
-WebAuto是一个基于事件驱动架构的现代Web自动化框架，专门为复杂的Web数据采集和处理任务设计。项目采用三层解耦架构，结合了容器化操作子、工作流引擎和任务编排系统，提供了强大、灵活且可扩展的自动化解决方案。
+## 📋 项目概述
 
-## 🏗️ 核心架构
+Page Analyzer是一个强大的网页分析工具，专门设计用于智能识别页面结构、发现内容容器并构建层次关系。它采用策略模式支持多种发现策略，具备智能缓存和性能优化功能。
 
-### 三层解耦设计
+## ✨ 核心特性
 
-```
-任务编排层 (Task Layer)
-    ↓
-工作流组合层 (Workflow Layer)
-    ↓
-操作子执行层 (Operation Layer)
-    ↓
-基础设施层 (Infrastructure Layer)
-```
+### 🎯 智能页面类型识别
+- 支持微博等多种社交平台页面类型识别
+- 基于URL模式和内容特征的智能匹配
+- 可扩展的页面类型配置系统
 
-### 🆕 事件驱动容器系统
+### 🏗️ 容器发现系统
+- **多策略支持** - DOM遍历、CSS选择器、AI辅助等多种策略
+- **智能去重** - 自动合并重复发现的容器
+- **优先级排序** - 基于重要性的容器排序
+- **缓存优化** - 5分钟智能缓存避免重复计算
 
-项目的核心创新是完全事件驱动的容器系统，实现了：
+### 📊 层次结构构建
+- **DOM关系分析** - 基于实际DOM位置建立父子关系
+- **深度计算** - 自动计算容器在层次结构中的深度
+- **关键容器识别** - 智能识别页面中的重要容器
+- **类型兼容性** - 验证容器类型组合的合理性
 
-- **事件总线 (EventBus)** - 支持中间件、事件历史、错误隔离
-- **工作流引擎 (WorkflowEngine)** - 基于规则的容器编排系统
-- **事件驱动容器** - 滚动、链接提取、分页容器的自驱动架构
-- **类型安全事件系统** - 完整的事件类型定义和数据结构
+### 🛠️ 开发者友好
+- **TypeScript支持** - 完整的类型定义和类型安全
+- **模块化设计** - 清晰的组件分离和职责划分
+- **可扩展架构** - 易于添加新的发现策略和分析功能
+- **测试覆盖** - 完整的单元测试和集成测试
 
-## 📦 核心模块
+## 🚀 快速开始
 
-### 操作子库 (6大类)
-
-#### 浏览器操作子
-- 页面导航、内容提取、元素交互
-- 智能滚动、自动分页、链接捕获
-- Cookie管理、登录状态维护
-
-#### 文件操作子
-- 文件读写、格式转换、存储管理
-- 批量下载、数据导出、压缩处理
-
-#### AI模型操作子
-- 文本推理、图像分析、多模态处理
-- 内容分类、智能摘要、自动标注
-
-#### 通信操作子
-- HTTP请求、API调用、消息传递
-- 代理管理、会话控制、错误重试
-
-#### 数据处理操作子
-- 数据验证、转换、聚合
-- 内容过滤、去重、质量评估
-
-#### 系统操作子
-- 日志记录、监控告警、资源管理
-- 性能统计、错误恢复、健康检查
-
-### 工作流框架
-
-#### 🆕 事件驱动工作流引擎
-- **规则引擎** - 基于规则的容器行为控制
-- **事件总线** - 容器间松耦合通信机制
-- **条件执行** - 基于数据的分支逻辑
-- **错误处理** - 多层次的错误恢复策略
-- **性能优化** - 并行执行和资源管理
-
-### 任务编排系统
-
-#### 智能调度器
-- **任务编排器** - 任务组合和依赖管理
-- **调度系统** - Cron、间隔、事件调度
-- **模板系统** - 可重用的任务模板
-- **资源管理** - 智能资源分配和监控
-
-## 🎯 关键特性
-
-### 强大的编排能力
-- ✅ **依赖管理** - 自动处理组件间依赖关系
-- ✅ **条件执行** - 支持基于条件的分支逻辑
-- ✅ **并行处理** - 多任务并发执行
-- ✅ **错误恢复** - 完善的重试和回滚机制
-
-### 智能调度系统
-- ✅ **定时任务** - Cron 表达式调度
-- ✅ **间隔任务** - 固定时间间隔执行
-- ✅ **事件驱动** - 基于事件触发的执行
-- ✅ **资源管理** - 智能资源分配和监控
-
-### 用户友好
-- ✅ **配置驱动** - JSON 配置文件控制行为
-- ✅ **模板系统** - 预设的可重用模板
-- ✅ **可视化监控** - 实时执行状态和日志
-- ✅ **渐进复杂度** - 从简单到复杂的学习路径
-
-## 🚀 实际应用场景
-
-### 微博自动化系统 🆕
-
-项目已经实现了完整的微博自动化解决方案，包括：
-
-#### 事件驱动链接获取系统
-- **EventDrivenPageContainer** - 协调多个子容器的工作
-- **EventDrivenScrollContainer** - 智能滚动和内容检测
-- **EventDrivenLinkContainer** - 自动链接提取和质量评估
-- **EventDrivenPaginationContainer** - 多模式分页支持
-
-#### 批量下载工作流
-- **主页批量下载** - 从微博主页提取热门帖子
-- **搜索结果下载** - 基于关键词搜索结果下载
-- **个人主页下载** - 用户个人主页内容下载
-
-#### 实际功能
-- 📝 **内容提取** - 文字内容、图片文件、评论数据、视频链接
-- 🔗 **链接处理** - 智能链接识别、去重、质量评估
-- 🍪 **状态管理** - Cookie管理、登录状态维护
-- 📊 **结果管理** - 批量下载、格式转换、数据导出
-
-### 电商产品监控
-- 价格监控、库存跟踪、竞品分析
-- 自动化数据采集和报告生成
-
-### 内容聚合平台
-- 多源数据采集、内容清洗、智能分类
-- 自动化内容发布和分发
-
-## 📁 项目结构
-
-```
-webauto/
-├── 核心模块
-│   ├── weibo-login-detector.ts            # 🆕 事件驱动微博登录检测器
-│   ├── event-driven-cookie-manager.ts      # 🆕 事件驱动Cookie管理系统
-│   ├── verify-system-functionality.js      # 系统功能验证脚本
-│   └── tsconfig.json                      # TypeScript配置
-├── sharedmodule/                          # 共享模块库
-│   ├── operations-framework/              # 🆕 事件驱动操作框架
-│   │   ├── src/event-driven/               # 事件驱动系统核心
-│   │   │   ├── EventBus.ts                 # 事件总线 (支持通配符、中间件)
-│   │   │   ├── WorkflowEngine.ts           # 工作流引擎 (规则驱动)
-│   │   │   ├── EventDrivenContainer.ts     # 容器基类
-│   │   │   └── types/                      # 完整类型定义
-│   │   └── dist/                          # 编译输出
-│   └── openai-compatible-providers/        # AI模型提供商系统
-├── cookies/                               # Cookie管理
-│   ├── weibo-cookies.json                 # 微博认证Cookie
-│   └── README.md                          # Cookie模块文档
-├── cookies-backup/                        # Cookie备份系统
-│   ├── cookie-manager.js                  # Cookie管理器
-│   └── README.md                          # 备份模块文档
-├── dist/                                  # TypeScript编译输出
-│   ├── weibo-login-detector.js           # 登录检测器编译版本
-│   ├── event-driven-cookie-manager.js     # Cookie管理器编译版本
-│   ├── test-event-simple.js               # 事件系统测试
-│   └── README.md                          # 编译输出文档
-├── node-system/                           # 节点工作流系统
-│   ├── workflow-engine.js                  # 工作流引擎
-│   ├── workflow-runner.js                  # 运行器
-│   └── README.md                          # 节点系统文档
-├── workflows/                             # 工作流定义
-│   ├── weibo-homepage-workflow.js         # 微博主页工作流
-│   ├── weibo-profile-workflow.js          # 微博主页工作流
-│   └── README.md                          # 工作流文档
-├── comment-count-detector/                # 评论计数检测器
-│   ├── index.ts                           # 检测器实现
-│   └── README.md                          # 检测器文档
-├── docs/                                  # 项目文档
-│   ├── architecture-summary.md             # 架构总结
-│   ├── operations-framework-architecture.md
-│   ├── workflow-framework-architecture.md
-│   ├── implementation-roadmap.md
-│   └── CONTAINER_ARCHITECTURE_DESIGN.md   # 容器架构设计
-└── scripts/                               # 脚本文件
-    └── weibo-workflows/                    # 微博工作流脚本
-```
-
-## 🎯 核心特性
-
-### 🔥 事件驱动架构 (100% 测试通过)
-- **事件总线 (EventBus)** - 支持通配符、中间件、事件历史的完整事件系统
-- **工作流引擎 (WorkflowEngine)** - 基于规则的容器编排和自动化
-- **事件驱动容器** - 自驱动、松耦合的容器化操作子
-- **徽章检测系统** - 智能的登录状态检测和验证
-
-### 🍪 Cookie管理系统
-- **事件驱动Cookie管理** - 基于徽章检测的Cookie生命周期管理
-- **自动捕获和验证** - 智能Cookie捕获和有效性验证
-- **备份和恢复** - 完整的Cookie备份和恢复机制
-- **安全性保障** - 加密存储和访问控制
-
-### 🧪 测试和验证
-- **17/17 系统测试通过** - 100%事件系统测试覆盖率
-- **集成测试** - 完整的功能集成测试
-- **性能测试** - 系统性能和稳定性验证
-- **类型安全** - 完整的TypeScript类型定义
-
-## 🛠️ 快速开始
-
-### 1. 环境准备
+### 安装依赖
 
 ```bash
-# 安装项目依赖
 npm install
-
-# 编译TypeScript文件
-npm run build:ts
-
-# 验证系统功能
-node verify-system-functionality.js
 ```
 
-### 2. 使用事件驱动登录检测器
+### 构建项目
 
 ```bash
-# 运行微博登录检测器
-npm run test:login-detector
-
-# 或直接运行编译后的文件
-node dist/weibo-login-detector.js
+npm run build
 ```
 
-### 3. 使用事件驱动Cookie管理器
+### 基础使用
 
-```bash
-# 运行Cookie管理器
-npm run test:cookie-manager
+```typescript
+import { PageAnalyzer } from './src/page-analyzer/index.js';
+import { chromium } from 'playwright';
 
-# 或直接运行编译后的文件
-node dist/event-driven-cookie-manager.js
+async function analyzePage() {
+  const browser = await chromium.launch();
+  const page = await browser.newPage();
+  
+  await page.goto('https://weibo.com');
+  
+  const analyzer = new PageAnalyzer();
+  const result = await analyzer.analyze(page, page.url());
+  
+  console.log('发现容器数量:', result.containers.length);
+  console.log('页面类型:', result.pageType.name);
+  console.log('层次结构深度:', result.hierarchy.maxDepth);
+  
+  await browser.close();
+}
+
+analyzePage().catch(console.error);
 ```
 
-### 4. 测试事件系统
+## 📖 API 文档
 
-```bash
-# 运行事件系统测试
-node dist/test-event-simple.js
+### 核心组件
 
-# 预期输出: 17/17 测试通过 🎉
+#### PageTypeIdentifier
+页面类型识别器，用于识别不同类型的页面。
+
+```typescript
+const identifier = new PageTypeIdentifier();
+const pageType = identifier.identifyPageType('https://weibo.com');
 ```
 
-### 5. 开发模式
+#### ContainerDiscoveryManager
+容器发现管理器，协调多种发现策略。
+
+```typescript
+const manager = new ContainerDiscoveryManager();
+const result = await manager.discoverContainers(page, url);
+```
+
+#### HierarchyBuilder
+层次结构构建器，建立容器间的关系。
+
+```typescript
+const builder = new HierarchyBuilder();
+const hierarchy = await builder.buildHierarchy(containers, page);
+```
+
+#### DOMWalkStrategy
+DOM遍历策略，智能发现页面容器。
+
+```typescript
+const strategy = new DOMWalkStrategy();
+const containers = await strategy.discover(page);
+```
+
+### 类型定义
+
+#### ContainerType
+支持的容器类型：
+- `page` - 页面级容器
+- `main` - 主要内容区域
+- `sidebar` - 侧边栏
+- `feed` - 信息流
+- `post` - 帖子/文章
+- `widget` - 小部件
+- `nav` - 导航
+- `header` - 页头
+- `footer` - 页脚
+- `content` - 内容
+- `item` - 项目
+- `comment` - 评论
+- `media` - 媒体
+- `action` - 操作按钮
+- `text` - 文本
+- `scroll` - 滚动区域
+- `navigation` - 导航区域
+- `interaction` - 交互区域
+- `pagination` - 分页
+- `filter` - 筛选
+- `user` - 用户信息
+
+#### DiscoveredContainer
+发现的容器信息：
+```typescript
+interface DiscoveredContainer {
+  id: string;
+  selector: string;
+  name: string;
+  type: ContainerType;
+  priority: number;
+  specificity: number;
+  rect: DOMRect;
+  elementCount: number;
+  capabilities: ContainerCapability[];
+  metadata: ContainerMetadata;
+}
+```
+
+## 🧪 测试
+
+### 运行所有测试
 
 ```bash
-# 监听模式编译TypeScript
-npm run build:ts:watch
+npm test
+```
+### 运行特定测试
 
-# 使用ts-node直接运行TypeScript文件
-npx ts-node weibo-login-detector.ts
-npx ts-node event-driven-cookie-manager.ts
+```bash
+# 基础功能测试
+node test-basic.js
+
+# 容器发现管理器测试
+node test-discovery-manager.js
+
+# 层次结构构建器测试
+node test-hierarchy-builder.js
+```
+
+## 🏗️ 架构设计
+
+### 策略模式
+
+系统采用策略模式，支持多种容器发现策略：
+
+```
+ContainerDiscoveryManager
+├── DOMWalkStrategy (已实现)
+├── CSSSelectorStrategy (计划中)
+├── AIAssistedStrategy (计划中)
+└── PatternMatchingStrategy (计划中)
+```
+
+### 组件关系
+
+```
+PageAnalyzer (主分析器)
+├── PageTypeIdentifier (页面类型识别)
+├── ContainerDiscoveryManager (容器发现管理)
+│   ├── HierarchyBuilder (层次结构构建)
+│   └── DiscoveryStrategy[] (发现策略集合)
+└── CapabilityEvaluator (能力评估器 - 计划中)
 ```
 
 ## 📊 性能特性
 
-### 系统性能
-- **高可用性** - 99.5%+ 可用性目标
-- **高性能** - 优化的并发和缓存策略
-- **可扩展性** - 支持水平和垂直扩展
-- **可观测性** - 完整的监控和日志系统
+- **智能缓存** - 5分钟缓存避免重复计算
+- **并行处理** - 支持多策略并行执行
+- **内存优化** - 高效的数据结构和算法
+- **增量更新** - 支持页面变化时的增量分析
 
-### 事件驱动优势
-- **松耦合** - 容器间通过事件通信，不直接依赖
-- **可观测** - 完整的事件历史记录和调试支持
-- **可扩展** - 易于添加新的容器类型和事件处理器
-- **容错性** - 错误隔离，单个容器错误不影响整体
+## 🔧 配置选项
 
-## 📚 文档资源
+```typescript
+interface PageAnalysisConfig {
+  enableAIDiscovery: boolean;
+  maxDiscoveryDepth: number;
+  timeout: number;
+  strategies: string[];
+  containerTypes: ContainerType[];
+  enablePerformanceMonitoring: boolean;
+  cacheResults: boolean;
+  cacheTimeout: number;
+}
+```
 
-### 📖 核心文档
-- **[架构设计总结](docs/architecture-summary.md)** - 整体架构设计文档
-- **[事件驱动系统文档](sharedmodule/operations-framework/docs/EVENT_DRIVEN_SYSTEM_DOCUMENTATION.md)** - 完整系统架构文档
-- **[事件驱动使用指南](sharedmodule/operations-framework/docs/EVENT_DRIVEN_USAGE_GUIDE.md)** - 实用使用指南
+## 🌟 支持的页面类型
 
-### 📁 模块文档
-- **[节点系统](node-system/README.md)** - 基于节点的可视化工作流引擎
-- **[工作流系统](workflows/README.md)** - 微博批量下载工作流系统
+### 微博 (Weibo)
+- ✅ 主页 (Homepage)
+- ✅ 搜索页 (Search)
+- ✅ 个人主页 (Profile)
+- ✅ 帖子详情页 (Post Detail)
 
-### 🚀 实现路线图
-- **[实现路线图](docs/implementation-roadmap.md)** - 16周详细开发计划
-- **[架构设计文档](docs/)** - 完整的模块架构设计
+### 计划支持
+- 🔄 Twitter/X
+- 🔄 Facebook
+- 🔄 Instagram
+- 🔄 LinkedIn
+- 🔄 Reddit
 
-## 🎯 开发指南
+## 🤝 贡献指南
 
-### 代码规范
-- **TypeScript优先** - 强类型支持，提高代码质量
-- **事件驱动** - 优先使用事件机制而非直接方法调用
-- **容器化** - 使用容器模式封装功能模块
-- **配置驱动** - 通过JSON配置文件控制行为
+1. Fork 项目
+2. 创建特性分支 (`git checkout -b feature/AmazingFeature`)
+3. 提交更改 (`git commit -m 'Add some AmazingFeature'`)
+4. 推送到分支 (`git push origin feature/AmazingFeature`)
+5. 打开 Pull Request
 
-### 测试要求
-- **单元测试** - 每个模块必须有对应的单元测试
-- **集成测试** - 测试模块间的协作和数据流
-- **端到端测试** - 完整工作流程的测试验证
+## 📝 开发计划
 
-### 贡献指南
-1. Fork 项目并创建功能分支
-2. 遵循项目代码规范和架构原则
-3. 编写测试用例确保功能正确
-4. 提交 Pull Request 进行代码审查
+### v0.2.0 (计划中)
+- [ ] CapabilityEvaluator - 容器能力评估
+- [ ] PageAnalyzer - 主分析器类
+- [ ] 事件系统 - 实时监控
+- [ ] 性能优化 - 并行处理
 
-## 🔄 版本历史
-
-### v2.0.0 - 事件驱动架构重构 🆕
-- ✅ 完全重新设计为事件驱动架构
-- ✅ 实现事件总线和工作流引擎
-- ✅ 重构所有容器为事件驱动模式
-- ✅ 添加完整的事件类型系统
-- ✅ 提供综合的文档和示例
-
-### v1.0.0 - 初始版本
-- ✅ 基础操作子框架
-- ✅ 微博工作流系统
-- ✅ 节点系统架构
-- ✅ 批量下载功能
+### v0.3.0 (计划中)
+- [ ] AI辅助发现策略
+- [ ] 更多社交平台支持
+- [ ] 可视化分析结果
+- [ ] 配置文件支持
 
 ## 📄 许可证
 
-MIT License - 详见 [LICENSE](LICENSE) 文件
+本项目采用 MIT 许可证 - 查看 [LICENSE](LICENSE) 文件了解详情。
 
-## 🤝 联系方式
-
-- **项目维护者**: WebAuto Team
-- **问题反馈**: [GitHub Issues](https://github.com/yourusername/webauto/issues)
-- **功能请求**: [GitHub Discussions](https://github.com/yourusername/webauto/discussions)
+## 🙏 致谢
 
 ---
 
-## 🎉 总结
+## Workflow Execution (Preflows + Relay)
 
-WebAuto 平台的事件驱动架构重构已经完成，提供了：
+本项目集成了一个轻量的工作流系统（见 `workflows/`），支持运行前置流程（preflows）、写执行记录、并在同一 Node 进程内进行会话接力。
 
-✅ **完整的事件驱动系统** - 事件总线、工作流引擎、容器系统
-✅ **强大的微博自动化能力** - 链接获取、批量下载、数据处理
-✅ **灵活的架构设计** - 三层解耦、模块化、可扩展
-✅ **生产级特性** - 高可用、高性能、可观测
-✅ **完善的文档体系** - 架构文档、使用指南、示例代码
+- 前置流程：`workflows/preflows/enabled.json`（数组，按顺序执行；失败重试 3 次，最终失败则主工作流不启动）。
+- 记录：所有运行写入 `workflows/records/`（含 preflow 与主流程结果、变量、输出、参数）。
+- 会话接力：默认在 `EndNode` 持久化会话；下一个工作流可用 `AttachSessionNode` 继续使用同一浏览器上下文（同进程）。
 
-这个项目为构建复杂Web自动化任务提供了一个强大、灵活且可维护的解决方案框架。
+快速运行
+- 单流程（自动跑 preflows）：`node scripts/run-workflow.js workflows/1688/domestic/1688-homepage-workflow.json`
+- 序列接力：`node workflows/SequenceRunner.js workflows/sequences/example-sequence.json`
+
+登录前置（示例）
+- `workflows/preflows/1688-login-preflow.json`：先加载本地 Cookie 并验证 `.userAvatarLogo img`；失败进入 10 分钟人工登录等待（每 10s 检测）。成功/失败均写握手记录。
+
+- [Playwright](https://playwright.dev/) - 强大的浏览器自动化框架
+- [TypeScript](https://www.typescriptlang.org/) - 类型安全的JavaScript
+
+---
+
+**Page Analyzer v0.1.0** - 让网页分析变得简单而强大 🚀

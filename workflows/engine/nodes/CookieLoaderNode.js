@@ -1,6 +1,7 @@
 // Cookie加载节点
 import { readFileSync, existsSync } from 'node:fs';
-import { join, dirname } from 'node:path';
+import { join } from 'node:path';
+import os from 'node:os';
 import BaseNode from './BaseNode.js';
 
 class CookieLoaderNode extends BaseNode {
@@ -18,8 +19,12 @@ class CookieLoaderNode extends BaseNode {
 
             // 解析Cookie文件路径
             let cookiePath = config.cookiePath;
+            // 波浪线展开
+            if (cookiePath.startsWith('~/')) {
+                cookiePath = join(os.homedir(), cookiePath.slice(2));
+            }
+            // 相对路径处理
             if (!cookiePath.startsWith('/')) {
-                // 相对路径处理
                 const basePath = process.cwd();
                 cookiePath = join(basePath, cookiePath);
             }
@@ -47,6 +52,7 @@ class CookieLoaderNode extends BaseNode {
             await browserContext.addCookies(cookies);
 
             logger.info(`✅ Cookie加载成功，共 ${cookies.length} 个Cookie`);
+            context.engine?.recordBehavior?.('cookie_load', { path: cookiePath, count: cookies.length });
 
             return {
                 success: true,

@@ -1,11 +1,13 @@
 // 工作流执行器
-import { readFileSync, existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { readFileSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { join, dirname } from 'node:path';
 import WorkflowEngine from './engine/WorkflowEngine.js';
 
 class WorkflowRunner {
     constructor() {
         this.engine = new WorkflowEngine();
+        this.recordsDir = join(process.cwd(), 'workflows', 'records');
+        this.preflowsConfigPath = join(process.cwd(), 'workflows', 'preflows', 'enabled.json');
     }
 
     async runWorkflow(workflowPath, parameters = {}) {
@@ -20,10 +22,22 @@ class WorkflowRunner {
             // 验证工作流配置
             this.validateWorkflow(workflowConfig);
 
+            // 执行前置流程（若存在配置）
+            const preflowRecords = await this.runPreflows(parameters);
+
             // 执行工作流
             const result = await this.engine.executeWorkflow(workflowConfig, parameters);
 
-            return result;
+            // 记录结果
+            const record = this.writeRecord({
+                workflowPath,
+                workflowName: workflowConfig.name,
+                parameters,
+                result,
+                preflowRecords
+            });
+
+            return { ...result, record };
 
         } catch (error) {
             console.error('❌ 工作流执行失败:', error.message);
@@ -31,6 +45,88 @@ class WorkflowRunner {
                 success: false,
                 error: error.message
             };
+        }
+    }
+
+    async runPreflows(parameters = {}) {
+        if (!existsSync(this.preflowsConfigPath)) return [];
+        try {
+            const raw = readFileSync(this.preflowsConfigPath, 'utf8');
+            const list = JSON.parse(raw);
+            if (!Array.isArray(list) || list.length === 0) return [];
+
+            const records = [];
+            for (const p of list) {
+                const abs = p.startsWith('.') || p.startsWith('/')
+                    ? join(process.cwd(), p)
+                    : join(process.cwd(), p);
+                if (!existsSync(abs)) {
+                    throw new Error(`前置流程不存在: ${abs}`);
+                }
+                const cfg = JSON.parse(readFileSync(abs, 'utf8'));
+                this.validateWorkflow(cfg);
+                // 最多重试三次
+                const preResult = await this.executeWithRetries(() => this.engine.executeWorkflow(cfg, parameters), 3, cfg.name);
+                const rec = this.writeRecord({
+                    workflowPath: abs,
+                    workflowName: cfg.name,
+                    parameters,
+                    result: preResult,
+                    isPreflow: true
+                });
+                records.push(rec);
+                if (!preResult.success) {
+                    throw new Error(`前置流程失败: ${cfg.name}`);
+                }
+            }
+            return records;
+        } catch (e) {
+            throw new Error(`前置流程执行错误: ${e.message}`);
+        }
+    }
+
+    async executeWithRetries(fn, maxAttempts = 3, label = 'task') {
+        let attempt = 0;
+        let last = null;
+        while (attempt < maxAttempts) {
+            attempt++;
+            try {
+                const res = await fn();
+                if (res && res.success) return res;
+                last = res || { error: 'unknown failure' };
+            } catch (e) {
+                last = { success: false, error: e?.message || String(e) };
+            }
+            this.logger.warn(`⚠️ ${label} 第 ${attempt}/${maxAttempts} 次失败`);
+        }
+        this.logger.error(`❌ ${label} 已达到最大重试次数(${maxAttempts})，停止`);
+        return last || { success: false, error: `${label} failed after ${maxAttempts} attempts` };
+    }
+
+    writeRecord({ workflowPath, workflowName, parameters, result, preflowRecords = [], isPreflow = false }) {
+        try {
+            mkdirSync(this.recordsDir, { recursive: true });
+            const ts = new Date().toISOString().replace(/[:.]/g, '-');
+            const base = `${isPreflow ? 'preflow' : 'workflow'}-${ts}.json`;
+            const file = join(this.recordsDir, base);
+            const data = {
+                type: isPreflow ? 'preflow' : 'workflow',
+                path: workflowPath,
+                name: workflowName,
+                startedAt: result?.startedAt || Date.now(),
+                finishedAt: Date.now(),
+                success: !!result?.success,
+                error: result?.error || null,
+                variables: result?.variables || {},
+                outputs: result?.results || {},
+                parameters,
+                preflows: preflowRecords
+            };
+            writeFileSync(file, JSON.stringify(data, null, 2));
+            return { file, ...data };
+        } catch (e) {
+            console.warn('⚠️ 写入工作流记录失败:', e.message);
+            return null;
         }
     }
 

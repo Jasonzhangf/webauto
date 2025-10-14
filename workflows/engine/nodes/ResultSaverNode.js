@@ -54,6 +54,7 @@ class ResultSaverNode extends BaseNode {
             writeFileSync(filepath, JSON.stringify(output, null, 2));
 
             logger.info(`✅ 结果已保存到: ${filepath}`);
+            context.engine?.recordBehavior?.('result_save', { path: filepath });
 
             return {
                 success: true,

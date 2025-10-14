@@ -28,6 +28,9 @@ class NavigationNode extends BaseNode {
 
             logger.info(`🌐 导航到: ${url}`);
 
+            // 行为记录：准备导航
+            context.engine?.recordBehavior?.('navigate_request', { url });
+
             // 使用安全访问管理器导航到目标页面
             const accessResult = await safeAccessManager.safePageAccess(page, url, {
                 waitUntil: config.waitUntil || 'domcontentloaded',
@@ -45,6 +48,7 @@ class NavigationNode extends BaseNode {
             }
 
             logger.info('✅ 页面导航成功');
+            context.engine?.recordBehavior?.('navigate_success', { url: page.url() });
 
             return {
                 success: true,

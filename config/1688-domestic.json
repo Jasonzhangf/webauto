@@ -1,0 +1,32 @@
+{
+  "platform": "1688",
+  "variant": "domestic",
+  "domain": "www.1688.com",
+  "loginUrl": "https://passport.1688.com/member/signin.htm",
+  "cookieFile": "~/.webauto/cookies/1688-domestic.json",
+  "cookieLock": false,
+  "fixedCookieKeysFile": "~/.webauto/cookies/1688-domestic.keys.json",
+  "cookieFilter": {
+    "allowDomains": [
+      "1688.com",
+      "alibaba.com",
+      "passport.1688.com",
+      "passport.alibaba.com"
+    ],
+    "allowNames": [
+      "cookie2",
+      "_tb_token_",
+      "_m_h5_tk",
+      "_m_h5_tk_enc",
+      "cna",
+      "ali_ab",
+      "x5sec",
+      "JSESSIONID"
+    ]
+  },
+  "selectors": {
+    "root": "body",
+    "productList": "[data-spm*='product']",
+    "nextPage": "button.next, a.next"
+  }
+}

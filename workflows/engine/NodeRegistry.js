@@ -12,6 +12,16 @@ import EndNode from './nodes/EndNode.js';
 import ContentDownloadNode from './nodes/ContentDownloadNode.js';
 import DownloadResultSaverNode from './nodes/DownloadResultSaverNode.js';
 import FileReaderNode from './nodes/FileReaderNode.js';
+import HaltNode from './nodes/HaltNode.js';
+import AttachSessionNode from './nodes/AttachSessionNode.js';
+import CookieSaverNode from './nodes/CookieSaverNode.js';
+import WaitNode from './nodes/WaitNode.js';
+import AntiBotMitigationNode from './nodes/AntiBotMitigationNode.js';
+import ModalDismissNode from './nodes/ModalDismissNode.js';
+import HandshakeSignalNode from './nodes/HandshakeSignalNode.js';
+import BehaviorLogNode from './nodes/BehaviorLogNode.js';
+import ContextExportNode from './nodes/ContextExportNode.js';
+import SessionFinalizeNode from './nodes/SessionFinalizeNode.js';
 
 class NodeRegistry {
     constructor() {
@@ -34,6 +44,16 @@ class NodeRegistry {
         this.registerNode('ContentDownloadNode', new ContentDownloadNode());
         this.registerNode('DownloadResultSaverNode', new DownloadResultSaverNode());
         this.registerNode('FileReaderNode', new FileReaderNode());
+        this.registerNode('HaltNode', new HaltNode());
+        this.registerNode('AttachSessionNode', new AttachSessionNode());
+        this.registerNode('CookieSaverNode', new CookieSaverNode());
+        this.registerNode('WaitNode', new WaitNode());
+        this.registerNode('AntiBotMitigationNode', new AntiBotMitigationNode());
+        this.registerNode('ModalDismissNode', new ModalDismissNode());
+        this.registerNode('HandshakeSignalNode', new HandshakeSignalNode());
+        this.registerNode('BehaviorLogNode', new BehaviorLogNode());
+        this.registerNode('ContextExportNode', new ContextExportNode());
+        this.registerNode('SessionFinalizeNode', new SessionFinalizeNode());
     }
 
     registerNode(type, handler) {

@@ -22,7 +22,8 @@ workflows/
 │   ├── BrowserInitNode.js            # 浏览器初始化
 │   ├── CookieLoaderNode.js          # Cookie加载
 │   ├── NavigationNode.js             # 页面导航
-│   ├── LoginVerificationNode.js      # 登录验证
+│   ├── LoginVerificationNode.js      # 登录验证（可用于人工等待/轮询）
+│   ├── AttachSessionNode.js          # 附着已有会话（与前置流程接力）
 │   ├── ScrollCaptureNode.js          # 滚动捕获
 │   ├── PaginationCaptureNode.js      # 分页捕获
 │   ├── URLBuilderNode.js             # URL构建
@@ -35,7 +36,8 @@ workflows/
 ├── weibo-search-workflow.json        # 搜索结果链接捕获工作流配置
 ├── weibo-profile-workflow.json       # 个人主页链接捕获工作流配置
 ├── weibo-download-workflow.json      # 内容下载工作流配置
-├── WorkflowRunner.js                 # 工作流执行器
+├── WorkflowRunner.js                 # 工作流执行器（支持前置流程 + 记录）
+├── SequenceRunner.js                 # 时序编排器（同进程会话接力）
 ├── weibo-download-runner.js          # 下载工作流执行器
 └── README.md                         # 本文档
 ```
@@ -49,7 +51,8 @@ workflows/
 - **weibo-download-workflow.json** - 内容下载工作流的JSON配置，用于批量下载微博内容
 
 ### 执行文件
-- **WorkflowRunner.js** - 工作流执行器，提供统一的命令行接口来运行链接捕获工作流
+- **WorkflowRunner.js** - 标准执行器（自动跑 `workflows/preflows/enabled.json` 中配置），写入 `workflows/records/`
+- **SequenceRunner.js** - 时序执行器（多个工作流接力，前一步变量自动并入下一步参数，默认保留会话）
 - **weibo-download-runner.js** - 下载工作流执行器，专门用于执行内容下载工作流
 
 ### 引擎核心文件
@@ -64,7 +67,8 @@ workflows/
 - **engine/nodes/BrowserInitNode.js** - 浏览器初始化节点，启动浏览器实例
 - **engine/nodes/CookieLoaderNode.js** - Cookie加载节点，处理登录状态
 - **engine/nodes/NavigationNode.js** - 页面导航节点，处理页面跳转
-- **engine/nodes/LoginVerificationNode.js** - 登录验证节点，检查登录状态
+- **engine/nodes/LoginVerificationNode.js** - 登录验证节点，检查登录状态，支持 `maxRetries/retryDelay`
+- **engine/nodes/AttachSessionNode.js** - 附着上一步持久化的会话（同进程）
 - **engine/nodes/ScrollCaptureNode.js** - 滚动捕获节点，处理无限滚动页面
 - **engine/nodes/PaginationCaptureNode.js** - 分页捕获节点，处理分页页面
 - **engine/nodes/URLBuilderNode.js** - URL构建节点，动态构建目标URL
@@ -153,3 +157,22 @@ ContentDownloadNode → DownloadResultSaverNode → EndNode
 - 错误处理和重试
 - 详细的执行日志
 - 性能监控和统计
+
+## 🔐 前置流程（Preflows）
+- 入口：`workflows/preflows/enabled.json`（数组，按顺序执行）。
+- 示例：`workflows/preflows/1688-login-preflow.json`
+  - 分支：
+    - 成功：写入 `preflow-1688-login-success-*.json` → EndNode（`cleanup=false`, `persistSession=true`）。
+    - 失败：进入人工登录等待（每 10 秒检测 `.userAvatarLogo img`，最长 10 分钟）→ 仍失败则写入失败记录并 Halt，主流程不会启动。
+  - 重试：WorkflowRunner 对每个前置流程最多重试 3 次。
+
+## 🔗 会话接力（同进程）
+- EndNode 默认 `persistSession=true`，将会话写入内存注册表（`SessionRegistry`）。
+- 下一工作流可在同一进程通过 `AttachSessionNode` + `sessionId` 复用浏览器上下文。
+- 跨进程接力建议使用 Cookie 方式（重新加载 Cookie），或后续引入远程调试端口方案。
+
+## 🧭 运行示例
+- 单个工作流（会自动执行 preflows）：
+  - `node scripts/run-workflow.js workflows/1688/domestic/1688-homepage-workflow.json`
+- 时序编排（同进程接力）：
+  - `node workflows/SequenceRunner.js workflows/sequences/example-sequence.json`
