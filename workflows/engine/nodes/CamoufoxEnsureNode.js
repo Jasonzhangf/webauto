@@ -23,13 +23,33 @@ export default class CamoufoxEnsureNode extends BaseNode {
       // 尝试从已安装的包解析
       let mod = null;
       try { mod = await import('camoufox'); } catch {}
-      camoufoxPath = (mod && (mod.default?.executablePath || mod.executablePath)) || '';
+      async function resolveFromModule(m) {
+        if (!m) return '';
+        try { if (m.getLaunchPath) { const p = await m.getLaunchPath(); return p || ''; } } catch {}
+        try { if (m.launchOptions?.executablePath) return m.launchOptions.executablePath; } catch {}
+        return '';
+      }
+      camoufoxPath = await resolveFromModule(mod);
       if (!camoufoxPath || !existsSync(camoufoxPath)) {
         // 自动安装
-        logger.info('📦 安装 Camoufox (npm i camoufox) ...');
+        logger.info('📦 安装/下载 Camoufox 浏览器 (npm i camoufox && camoufox.downloadBrowser) ...');
         execSync('npm i camoufox@^0.1.12', { stdio: 'inherit' });
         try { mod = await import('camoufox'); } catch {}
-        camoufoxPath = (mod && (mod.default?.executablePath || mod.executablePath)) || '';
+        try { if (mod?.downloadBrowser) { await mod.downloadBrowser(); } } catch {}
+        camoufoxPath = await resolveFromModule(mod);
+      }
+
+      // 常见系统安装路径猜测
+      if (!camoufoxPath || !existsSync(camoufoxPath)) {
+        const candidates = [
+          '/Applications/Camoufox.app/Contents/MacOS/firefox', // macOS
+          process.env.HOME ? `${process.env.HOME}/Camoufox/firefox` : '', // Linux 用户目录
+          'C:/Program Files/Camoufox/camoufox.exe', // Windows x64
+          'C:/Program Files (x86)/Camoufox/camoufox.exe'
+        ].filter(Boolean);
+        for (const p of candidates) {
+          if (existsSync(p)) { camoufoxPath = p; break; }
+        }
       }
 
       if (!camoufoxPath || !existsSync(camoufoxPath)) {
@@ -38,6 +58,7 @@ export default class CamoufoxEnsureNode extends BaseNode {
       }
 
       variables.set('camoufoxPath', camoufoxPath);
+      try { process.env.CAMOUFOX_PATH = camoufoxPath; } catch {}
       context.engine?.recordBehavior?.('camoufox_path', { source: mod ? 'package' : 'install', camoufoxPath });
       return { success: true, variables: { camoufoxPath } };
 
@@ -47,4 +68,3 @@ export default class CamoufoxEnsureNode extends BaseNode {
     }
   }
 }
-
