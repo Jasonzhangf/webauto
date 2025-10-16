@@ -1,0 +1,23 @@
+{
+  "type": "preflow",
+  "path": "/Users/fanzhang/Documents/github/webauto/workflows/preflows/1688-login-preflow.json",
+  "name": "1688 Login Preflow",
+  "startedAt": 1760596230177,
+  "finishedAt": 1760596230177,
+  "success": false,
+  "error": "Camoufox required but not found. Run CamoufoxEnsureNode or set CAMOUFOX_PATH.",
+  "variables": {
+    "workflowName": "1688 Login Preflow",
+    "sessionId": "sess-1760596230020-269361",
+    "sessionDir": "/Users/fanzhang/.webauto/sessions/sess-1760596230020-269361",
+    "debug": true,
+    "startTime": "2025-10-16T06:30:30.177Z",
+    "workflowStarted": true
+  },
+  "outputs": {},
+  "parameters": {
+    "debug": true,
+    "sessionId": "sess-1760596230020-269361"
+  },
+  "preflows": []
+}

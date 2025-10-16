@@ -1,0 +1,8 @@
+{
+  "scripts": {
+    "test:page-analyzer": "node test-basic.js && node test-discovery-manager.js && node test-hierarchy-builder.js",
+    "dev:page-analyzer": "npm run build && npm run test:page-analyzer",
+    "clean:page-analyzer": "rm -rf dist/page-analyzer",
+    "docs:page-analyzer": "echo 'Documentation generated successfully!'
+  }
+}

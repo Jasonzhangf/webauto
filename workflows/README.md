@@ -176,3 +176,129 @@ ContentDownloadNode → DownloadResultSaverNode → EndNode
   - `node scripts/run-workflow.js workflows/1688/domestic/1688-homepage-workflow.json`
 - 时序编排（同进程接力）：
   - `node workflows/SequenceRunner.js workflows/sequences/example-sequence.json`
+ - 单路径运行（含预置 preflows，同进程接力）：
+   - `node scripts/run-with-preflows.js <workflow.json> [--debug]`
+
+## 1688 预登录与分析
+- 预登录（Firefox，本地人工登录，保持会话，不关闭）：
+  - `gtimeout 600s node scripts/run-workflow.js workflows/preflows/1688-login-preflow.json --debug`
+  - 成功后在 `~/.webauto/sessions/<sessionId>/` 下生成 `login.json`、`context.json`；记录写入 `workflows/records/`
+- 分析（接力会话 → 页面快照 HTML/JS）：
+  - `node scripts/run-workflow.js workflows/1688/analysis/1688-page-snapshot.json --sessionId=<上一步的sessionId> --debug`
+- 分析（接力会话 → 导航搜索页 → 快照 + 批量 token 捕获）：
+  - `node scripts/run-workflow.js workflows/1688/analysis/1688-offer-snapshot-and-token.json --sessionId=<sessionId> --debug`
+- 分析（纯解析 JS/HTML 提取 token，无需点击）：
+  - `node scripts/run-workflow.js workflows/1688/analysis/1688-script-token-extract.json --sessionId=<sessionId> --debug`
+
+## 1688 聊天交互功能
+
+### 概述
+1688聊天交互功能支持自动化输入和发送消息到1688旺旺聊天界面。该功能专门针对1688非标准DOM结构进行了深度优化。
+
+### 核心组件
+
+#### ChatComposeNodeFinalV2 - 最终版本聊天组件
+- **功能**：完整的聊天输入和发送功能
+- **特性**：
+  - 智能识别contenteditable输入元素
+  - 多策略发送按钮定位
+  - 可视化高亮反馈
+  - 完整的事件触发机制
+  - 错误恢复和样式重置
+
+#### ChatHighlightOnlyNode1688 - 识别验证组件
+- **功能**：仅识别和高亮显示聊天界面元素
+- **用途**：调试和验证识别准确性
+- **特性**：
+  - 红色高亮输入元素
+  - 绿色高亮发送按钮
+  - 详细统计信息面板
+  - 自动清理机制
+
+### 使用示例
+
+#### 完整聊天功能测试
+```bash
+# 运行完整聊天功能测试
+node scripts/run-with-preflows.js workflows/1688/analysis/1688-final-chat-test.json --debug
+```
+
+#### 仅识别验证
+```bash
+# 运行仅识别高亮测试
+node scripts/run-with-preflows.js workflows/1688/analysis/1688-chat-highlight-only-test.json --debug
+```
+
+#### DOM结构分析
+```bash
+# 运行DOM结构深度分析
+node workflows/1688/analysis/1688-dom-structure-analyzer.js
+```
+
+### 配置参数
+
+```json
+{
+  "type": "ChatComposeNodeFinalV2",
+  "config": {
+    "hostFilter": "air.1688.com",
+    "message": "你好，这是测试消息",
+    "send": true,
+    "highlightMs": 5000
+  }
+}
+```
+
+**参数说明**：
+- `hostFilter`: 主机过滤器，默认"air.1688.com"
+- `message`: 要发送的消息内容
+- `send`: 是否执行发送操作，默认true
+- `highlightMs`: 高亮显示持续时间（毫秒）
+
+### 技术实现要点
+
+#### 输入元素识别
+- **主要目标**：`<PRE class="edit" contenteditable="true">`
+- **备选策略**：查找所有contenteditable元素
+- **输入方法**：使用innerHTML而非value属性
+- **事件触发**：input、change、keydown、keyup完整事件链
+
+#### 发送按钮识别
+- **主要目标**：`<BUTTON class="next-btn next-small next-btn-primary send-btn">`
+- **识别策略**：精确文字匹配 + 类名匹配 + 可点击元素匹配
+- **位置信息**：(775, 830)，尺寸78x30像素
+- **触发方法**：click事件 + 多种鼠标事件确保兼容性
+
+#### 可视化反馈
+- **输入框**：红色边框 + 红色背景
+- **发送按钮**：绿色边框 + 绿色背景 + 缩放效果
+- **信息面板**：左上角显示识别统计和调试信息
+
+### 成功验证指标
+
+#### 识别结果
+- ✅ 输入元素：7个（包括1个contenteditable和6个容器）
+- ✅ 发送按钮：16个（包括真正的发送按钮）
+
+#### 功能验证
+- ✅ 输入功能：消息正确输入到contenteditable元素
+- ✅ 发送功能：消息成功发送并显示在聊天界面
+- ✅ 高亮显示：红色输入框，绿色发送按钮清晰可见
+
+### 故障排除
+
+#### 常见问题
+1. **"input box not found"** → 使用contenteditable策略
+2. **"send button not found"** → 使用原生JavaScript遍历
+3. **高亮不显示** → 使用setProperty和important
+4. **变量未定义** → 检查作用域和变量传递
+
+#### 性能数据
+- 页面加载：8-12秒
+- 识别时间：3-5秒
+- 输入操作：<1秒
+- 发送操作：<1秒
+- 总体时间：约20-30秒
+
+### 详细文档
+完整的技术实现指南请参考：`docs/1688-chat-implementation-guide.md`

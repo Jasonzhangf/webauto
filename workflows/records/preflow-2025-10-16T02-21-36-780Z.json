@@ -1,0 +1,60 @@
+{
+  "type": "preflow",
+  "path": "/Users/fanzhang/Documents/github/webauto/workflows/preflows/1688-login-preflow.json",
+  "name": "1688 Login Preflow",
+  "startedAt": 1760581296780,
+  "finishedAt": 1760581296780,
+  "success": true,
+  "error": null,
+  "variables": {
+    "workflowName": "1688 Login Preflow",
+    "sessionId": "sess-1760581290900-407633",
+    "sessionDir": "/Users/fanzhang/.webauto/sessions/sess-1760581290900-407633",
+    "debug": true,
+    "startTime": "2025-10-16T02:21:30.902Z",
+    "workflowStarted": true,
+    "browserInitialized": true,
+    "browserInfo": {
+      "headless": false,
+      "viewport": {
+        "width": 1280,
+        "height": 900
+      }
+    },
+    "lastWaitMs": 1090,
+    "cookiesLoaded": true,
+    "cookieCount": 89,
+    "cookiePath": "/Users/fanzhang/.webauto/cookies/1688-domestic.json",
+    "currentUrl": "https://www.1688.com/",
+    "navigationCompleted": true,
+    "lastNavigationTime": "2025-10-16T02:21:34.013Z",
+    "antiBotWaitMs": 1249,
+    "modalsDismissed": 0,
+    "isLoggedIn": true,
+    "loginInfo": {
+      "cookieHit": true
+    },
+    "loginVerifiedAt": "2025-10-16T02:21:36.776Z",
+    "cookieSaved": true,
+    "cookieSavePath": "/Users/fanzhang/.webauto/cookies/1688-domestic.json",
+    "cookieSaveCount": 89,
+    "resultSaved": true,
+    "resultFilePath": "workflows/records/preflow-1688-login-success-2025-10-16T02-21-36-778Z.json",
+    "resultFilename": "preflow-1688-login-success-2025-10-16T02-21-36-778Z.json",
+    "handshakeSignalPath": "/Users/fanzhang/.webauto/sessions/sess-1760581290900-407633/login.json",
+    "behaviorLogPath": "/Users/fanzhang/.webauto/sessions/sess-1760581290900-407633/behavior-1688 Login Preflow-2025-10-16T02-21-36-779Z.json",
+    "behaviorEventCount": 110,
+    "contextExportPath": "/Users/fanzhang/.webauto/sessions/sess-1760581290900-407633/context.json",
+    "endTime": "2025-10-16T02:21:36.780Z",
+    "sessionPersisted": true,
+    "logsExported": true,
+    "workflowCompleted": true,
+    "executionTime": 5878
+  },
+  "outputs": {},
+  "parameters": {
+    "debug": true,
+    "sessionId": "sess-1760581290900-407633"
+  },
+  "preflows": []
+}

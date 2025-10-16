@@ -1,0 +1,101 @@
+{
+  "type": "workflow",
+  "path": "/Users/fanzhang/Documents/github/webauto/workflows/1688/analysis/1688-direct-login-only.json",
+  "name": "1688 直接进入登录页",
+  "startedAt": 1760590949572,
+  "finishedAt": 1760590949572,
+  "success": true,
+  "error": null,
+  "variables": {
+    "workflowName": "1688 直接进入登录页",
+    "sessionId": "sess-1760590940006-205367",
+    "sessionDir": "/Users/fanzhang/.webauto/sessions/sess-1760590940006-205367",
+    "debug": false,
+    "startTime": "2025-10-16T05:02:27.239Z",
+    "workflowStarted": true,
+    "camoufoxPath": "/Users/fanzhang/Library/Caches/camoufox/Camoufox.app/Contents/MacOS/camoufox",
+    "browserInitialized": true,
+    "browserInfo": {
+      "headless": false,
+      "viewport": {
+        "width": 1920,
+        "height": 1080
+      }
+    },
+    "currentUrl": "https://login.taobao.com/?redirect_url=https%3A%2F%2Flogin.1688.com%2Fmember%2Fjump.htm%3Ftarget%3Dhttps%253A%252F%252Flogin.1688.com%252Fmember%252FmarketSigninJump.htm%253FDone%253Dhttps%25253A%25252F%25252Fmember.1688.com%25252Fmember%25252Foperations%25252Fmember_operations_jump_engine.htm%25253Ftracelog%25253Dlogin%252526operSceneId%25253Dafter_pass_from_taobao_new%252526defaultTarget%25253Dhttps%2525253A%2525252F%2525252Fwork.1688.com%2525252F%2525253Ftracelog%2525253Dlogin_target_is_blank_1688&style=tao_custom&from=1688web",
+    "navigationCompleted": true,
+    "lastNavigationTime": "2025-10-16T05:02:29.572Z",
+    "endTime": "2025-10-16T05:02:29.572Z",
+    "sessionPersisted": true,
+    "logsExported": true,
+    "workflowCompleted": true,
+    "executionTime": 2333
+  },
+  "outputs": {},
+  "parameters": {
+    "debug": false
+  },
+  "preflows": [
+    {
+      "file": "/Users/fanzhang/Documents/github/webauto/workflows/records/preflow-2025-10-16T05-02-27-239Z.json",
+      "type": "preflow",
+      "path": "/Users/fanzhang/Documents/github/webauto/workflows/preflows/1688-login-preflow.json",
+      "name": "1688 Login Preflow",
+      "startedAt": 1760590947239,
+      "finishedAt": 1760590947239,
+      "success": true,
+      "error": null,
+      "variables": {
+        "workflowName": "1688 Login Preflow",
+        "sessionId": "sess-1760590940006-205367",
+        "sessionDir": "/Users/fanzhang/.webauto/sessions/sess-1760590940006-205367",
+        "debug": false,
+        "startTime": "2025-10-16T05:02:20.008Z",
+        "workflowStarted": true,
+        "browserInitialized": true,
+        "browserInfo": {
+          "headless": false,
+          "viewport": {
+            "width": 1280,
+            "height": 900
+          }
+        },
+        "lastWaitMs": 1283,
+        "cookiesLoaded": true,
+        "cookieCount": 89,
+        "cookiePath": "/Users/fanzhang/.webauto/cookies/1688-domestic.json",
+        "currentUrl": "https://www.1688.com/",
+        "navigationCompleted": true,
+        "lastNavigationTime": "2025-10-16T05:02:24.673Z",
+        "antiBotWaitMs": 1229,
+        "modalsDismissed": 0,
+        "isLoggedIn": true,
+        "loginInfo": {
+          "cookieHit": true
+        },
+        "loginVerifiedAt": "2025-10-16T05:02:27.236Z",
+        "cookieSaved": true,
+        "cookieSavePath": "/Users/fanzhang/.webauto/cookies/1688-domestic.json",
+        "cookieSaveCount": 88,
+        "resultSaved": true,
+        "resultFilePath": "workflows/records/preflow-1688-login-success-2025-10-16T05-02-27-238Z.json",
+        "resultFilename": "preflow-1688-login-success-2025-10-16T05-02-27-238Z.json",
+        "handshakeSignalPath": "/Users/fanzhang/.webauto/sessions/sess-1760590940006-205367/login.json",
+        "behaviorLogPath": "/Users/fanzhang/.webauto/sessions/sess-1760590940006-205367/behavior-1688 Login Preflow-2025-10-16T05-02-27-238Z.json",
+        "behaviorEventCount": 107,
+        "contextExportPath": "/Users/fanzhang/.webauto/sessions/sess-1760590940006-205367/context.json",
+        "endTime": "2025-10-16T05:02:27.239Z",
+        "sessionPersisted": true,
+        "logsExported": true,
+        "workflowCompleted": true,
+        "executionTime": 7231
+      },
+      "outputs": {},
+      "parameters": {
+        "debug": false,
+        "sessionId": "sess-1760590940006-205367"
+      },
+      "preflows": []
+    }
+  ]
+}

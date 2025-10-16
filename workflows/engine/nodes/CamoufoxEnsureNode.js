@@ -14,7 +14,20 @@ export default class CamoufoxEnsureNode extends BaseNode {
     const { logger, variables } = context;
     try {
       let camoufoxPath = process.env.CAMOUFOX_PATH || '';
+      const resolveBinary = (p) => {
+        if (!p) return '';
+        try {
+          if (!p.endsWith('camoufox') && !p.endsWith('firefox') && existsSync(p)) {
+            const mac1 = p + '/Camoufox.app/Contents/MacOS/camoufox';
+            const mac2 = p + '/Camoufox.app/Contents/MacOS/firefox';
+            if (existsSync(mac1)) return mac1;
+            if (existsSync(mac2)) return mac2;
+          }
+        } catch {}
+        return p;
+      };
       if (camoufoxPath && existsSync(camoufoxPath)) {
+        camoufoxPath = resolveBinary(camoufoxPath);
         variables.set('camoufoxPath', camoufoxPath);
         context.engine?.recordBehavior?.('camoufox_path', { source: 'env', camoufoxPath });
         return { success: true, variables: { camoufoxPath } };
@@ -29,14 +42,32 @@ export default class CamoufoxEnsureNode extends BaseNode {
         try { if (m.launchOptions?.executablePath) return m.launchOptions.executablePath; } catch {}
         return '';
       }
-      camoufoxPath = await resolveFromModule(mod);
+      camoufoxPath = resolveBinary(await resolveFromModule(mod));
       if (!camoufoxPath || !existsSync(camoufoxPath)) {
         // 自动安装
         logger.info('📦 安装/下载 Camoufox 浏览器 (npm i camoufox && camoufox.downloadBrowser) ...');
         execSync('npm i camoufox@^0.1.12', { stdio: 'inherit' });
         try { mod = await import('camoufox'); } catch {}
         try { if (mod?.downloadBrowser) { await mod.downloadBrowser(); } } catch {}
-        camoufoxPath = await resolveFromModule(mod);
+        camoufoxPath = resolveBinary(await resolveFromModule(mod));
+      }
+
+      // 使用 Python CLI 路径作为补充
+      if (!camoufoxPath || !existsSync(camoufoxPath)) {
+        try {
+          const out = execSync('python3 -m camoufox path', { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+          if (out) {
+            let p = resolveBinary(out);
+            if (!existsSync(p)) {
+              // 递归查找 Camoufox.app
+              try {
+                const found = execSync(`bash -lc 'find ${out} -maxdepth 3 -type f -path "*Camoufox.app/Contents/MacOS/*" | head -n 1'`, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+                if (found) p = found;
+              } catch {}
+            }
+            if (existsSync(p)) camoufoxPath = p;
+          }
+        } catch {}
       }
 
       // 常见系统安装路径猜测

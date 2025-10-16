@@ -1,0 +1,30 @@
+{
+  "timestamp": "2025-10-14T05-15-09-112Z",
+  "workflowType": "homepage",
+  "success": true,
+  "executionTime": 0,
+  "metadata": {
+    "workflowType": "homepage",
+    "capturedAt": "2025-10-14T05:15:09.112Z",
+    "linkCount": 0,
+    "pageCount": 0,
+    "scrollCount": 0
+  },
+  "results": {},
+  "variables": {
+    "sessionId": "sess-1760418310256-526544",
+    "startTime": "2025-10-14T05:05:10.257Z",
+    "workflowStarted": true,
+    "browserInitialized": true,
+    "browserInfo": {
+      "headless": false,
+      "viewport": {
+        "width": 1280,
+        "height": 900
+      }
+    },
+    "currentUrl": "https://www.1688.com/",
+    "navigationCompleted": true,
+    "lastNavigationTime": "2025-10-14T05:05:18.872Z"
+  }
+}

@@ -1,0 +1,41 @@
+{
+  "timestamp": "2025-10-14T04-37-37-501Z",
+  "workflowType": "homepage",
+  "success": true,
+  "executionTime": 0,
+  "metadata": {
+    "workflowType": "homepage",
+    "capturedAt": "2025-10-14T04:37:37.501Z",
+    "linkCount": 0,
+    "pageCount": 0,
+    "scrollCount": 0
+  },
+  "results": {},
+  "variables": {
+    "startTime": "2025-10-14T04:37:25.930Z",
+    "workflowStarted": true,
+    "browserInitialized": true,
+    "browserInfo": {
+      "headless": false,
+      "viewport": {
+        "width": 1280,
+        "height": 900
+      }
+    },
+    "cookiesLoaded": true,
+    "cookieCount": 151,
+    "cookiePath": "/Users/fanzhang/.webauto/cookies/1688-domestic.json",
+    "currentUrl": "https://www.1688.com/",
+    "navigationCompleted": true,
+    "lastNavigationTime": "2025-10-14T04:37:27.432Z",
+    "isLoggedIn": true,
+    "loginInfo": {
+      "found": true,
+      "src": "https://cbu01.alicdn.com/img/ibank/2020/428/378/22185873824_536529798.jpg_88x88q90.jpg",
+      "alt": null,
+      "visible": true,
+      "selector": ".userAvatarLogo img"
+    },
+    "loginVerifiedAt": "2025-10-14T04:37:37.498Z"
+  }
+}

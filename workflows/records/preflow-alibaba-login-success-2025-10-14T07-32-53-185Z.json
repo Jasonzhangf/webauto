@@ -1,0 +1,43 @@
+{
+  "timestamp": "2025-10-14T07-32-53-185Z",
+  "workflowType": "homepage",
+  "success": true,
+  "executionTime": 0,
+  "metadata": {
+    "workflowType": "homepage",
+    "capturedAt": "2025-10-14T07:32:53.185Z",
+    "linkCount": 0,
+    "pageCount": 0,
+    "scrollCount": 0
+  },
+  "results": {},
+  "variables": {
+    "workflowName": "Alibaba.com Login Preflow",
+    "sessionDir": "/Users/fanzhang/.webauto/sessions/sess-1760427163986-954169",
+    "debug": true,
+    "startTime": "2025-10-14T07:32:43.986Z",
+    "workflowStarted": true,
+    "browserInitialized": true,
+    "browserInfo": {
+      "headless": false,
+      "viewport": {
+        "width": 1280,
+        "height": 900
+      }
+    },
+    "lastWaitMs": 1131,
+    "currentUrl": "https://www.alibaba.com/",
+    "navigationCompleted": true,
+    "lastNavigationTime": "2025-10-14T07:32:50.518Z",
+    "antiBotWaitMs": 1412,
+    "modalsDismissed": 0,
+    "isLoggedIn": true,
+    "loginInfo": {
+      "textHit": true
+    },
+    "loginVerifiedAt": "2025-10-14T07:32:53.184Z",
+    "cookieSaved": true,
+    "cookieSavePath": "/Users/fanzhang/.webauto/cookies/alibaba.com.json",
+    "cookieSaveCount": 26
+  }
+}

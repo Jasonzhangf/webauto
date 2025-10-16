@@ -1,0 +1,159 @@
+{
+  "name": "1688 单页面手动登录（直接注入cookie）",
+  "description": "直接在登录页面注入cookie，只打开一个页面供手动登录",
+  "version": "1.0.0",
+  "nodes": [
+    { "id": "start", "type": "StartNode", "name": "开始", "next": ["ensure_camoufox"] },
+
+    {
+      "id": "ensure_camoufox",
+      "type": "CamoufoxEnsureNode",
+      "name": "确保Camoufox可用",
+      "config": {},
+      "next": ["init_camoufox"]
+    },
+
+    {
+      "id": "init_camoufox",
+      "type": "BrowserInitNode",
+      "name": "初始化Camoufox浏览器",
+      "config": {
+        "engine": "camoufox",
+        "headless": false,
+        "viewport": { "width": 1920, "height": 1080 },
+        "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "strictAutomationMitigation": true,
+        "extraHeaders": true,
+        "cookieFile": "/Users/fanzhang/.webauto/cookies/1688-domestic.json"
+      },
+      "next": ["navigate_login"]
+    },
+
+    {
+      "id": "navigate_login",
+      "type": "NavigationNode",
+      "name": "直接导航到1688登录页",
+      "config": {
+        "url": "https://login.1688.com/member/signin.htm",
+        "waitUntil": "domcontentloaded",
+        "timeout": 30000
+      },
+      "next": ["wait_login_page"]
+    },
+
+    {
+      "id": "wait_login_page",
+      "type": "WaitNode",
+      "name": "等待登录页面加载",
+      "config": { "minMs": 3000, "maxMs": 5000 },
+      "next": ["check_login_ready"]
+    },
+
+    {
+      "id": "check_login_ready",
+      "type": "PageSnapshotNode",
+      "name": "检查登录页面状态",
+      "config": {
+        "script": "console.log('🔍 检查1688登录页面...'); const pageTitle = document.title; const pageUrl = window.location.href; const hasLoginForm = document.querySelector('#login-form, .login-form, [class*=login]') !== null; const hasUsernameInput = document.querySelector('input[name=username], input[type=email], input[type=text]') !== null; const hasPasswordInput = document.querySelector('input[name=password], input[type=password]') !== null; console.log('页面标题:', pageTitle); console.log('当前URL:', pageUrl); console.log('是否有登录表单:', hasLoginForm); console.log('是否有用户名输入框:', hasUsernameInput); console.log('是否有密码输入框:', hasPasswordInput); return { success: true, pageTitle, pageUrl, hasLoginForm, hasUsernameInput, hasPasswordInput, isLoginPage: hasLoginForm && (hasUsernameInput || hasPasswordInput), timestamp: new Date().toISOString() };",
+        "saveScreenshots": true
+      },
+      "next": ["wait_manual_login"]
+    },
+
+    {
+      "id": "wait_manual_login",
+      "type": "PageSnapshotNode",
+      "name": "等待手动登录（10分钟）",
+      "config": {
+        "script": "console.log('⏳ 等待用户手动登录，请在此页面完成登录...'); const pageTitle = document.title; const pageUrl = window.location.href; const isLoggedIn = document.body.textContent.includes('登录') === false || document.querySelector('.user-name, [class*=user], [class*=login][style*=none]') !== null; const hasLoginSuccess = document.querySelector('.welcome, .user-info, [class*=welcome]') !== null; console.log('当前页面标题:', pageTitle); console.log('当前URL:', pageUrl); console.log('是否已登录:', isLoggedIn); console.log('是否有登录成功标识:', hasLoginSuccess); console.log('请在此页面手动完成登录过程...'); return { success: true, pageTitle, pageUrl, isLoggedIn, hasLoginSuccess, needsManualLogin: !isLoggedIn && !hasLoginSuccess, timestamp: new Date().toISOString() };",
+        "saveScreenshots": false,
+        "waitInterval": 30000,
+        "maxWaitTime": 600000
+      },
+      "next": ["check_login_status"]
+    },
+
+    {
+      "id": "check_login_status",
+      "type": "PageSnapshotNode",
+      "name": "检查登录状态",
+      "config": {
+        "script": "console.log('🔐 检查登录状态...'); const pageTitle = document.title; const pageUrl = window.location.href; const isLoggedIn = document.body.textContent.includes('登录') === false || document.querySelector('.user-name, [class*=user], [class*=login][style*=none]') !== null; const hasLoginSuccess = document.querySelector('.welcome, .user-info, [class*=welcome]') !== null; const is1688Domain = pageUrl.includes('1688.com'); console.log('最终登录检查 - 页面标题:', pageTitle); console.log('最终登录检查 - 当前URL:', pageUrl); console.log('最终登录检查 - 是否已登录:', isLoggedIn); console.log('最终登录检查 - 是否在1688域名:', is1688Domain); return { success: isLoggedIn && is1688Domain, pageTitle, pageUrl, isLoggedIn, hasLoginSuccess, is1688Domain, timestamp: new Date().toISOString() };",
+        "saveScreenshots": true
+      },
+      "next": ["save_complete_cookies"]
+    },
+
+    {
+      "id": "save_complete_cookies",
+      "type": "CookieSaverNode",
+      "name": "保存完整Cookie",
+      "config": {
+        "outputFile": "/Users/fanzhang/.webauto/cookies/1688-complete-manual-cookies.json",
+        "includeAllDomains": true,
+        "includeSessionCookies": true,
+        "includeHttpOnly": true,
+        "includeSecure": true,
+        "cookiePath": "/Users/fanzhang/.webauto/cookies/1688-complete-manual-cookies.json"
+      },
+      "next": ["navigate_home_verify"]
+    },
+
+    {
+      "id": "navigate_home_verify",
+      "type": "NavigationNode",
+      "name": "导航到主页验证",
+      "config": {
+        "url": "https://www.1688.com/",
+        "waitUntil": "domcontentloaded",
+        "timeout": 30000
+      },
+      "next": ["wait_home_verify"]
+    },
+
+    {
+      "id": "wait_home_verify",
+      "type": "WaitNode",
+      "name": "等待主页稳定",
+      "config": { "minMs": 3000, "maxMs": 5000 },
+      "next": ["final_verification"]
+    },
+
+    {
+      "id": "final_verification",
+      "type": "PageSnapshotNode",
+      "name": "最终验证登录状态",
+      "config": {
+        "script": "console.log('✅ 最终验证登录状态...'); const pageTitle = document.title; const pageUrl = window.location.href; const isVerification = pageTitle.includes('验证码') || document.body.textContent.includes('验证码') || document.body.textContent.includes('verification'); const hasNormalContent = document.querySelectorAll('.search-box, .nav-menu, .banner, [class*=search]').length > 0; const hasProducts = document.querySelectorAll('.offer-item, .product-item, [class*=offer]').length > 0; const isLoggedIn = document.body.textContent.includes('登录') === false || document.querySelector('.user-name, [class*=user], [class*=login][style*=none]') !== null; console.log('最终页面标题:', pageTitle); console.log('最终URL:', pageUrl); console.log('是否被验证码拦截:', isVerification); console.log('是否有正常主页内容:', hasNormalContent); console.log('是否有产品内容:', hasProducts); console.log('登录状态:', isLoggedIn); return { success: isLoggedIn && !isVerification && (hasNormalContent || hasProducts), pageTitle, pageUrl, isVerification, hasNormalContent, hasProducts, isLoggedIn, isHomepage: pageUrl.includes('1688.com') && !pageUrl.includes('s.1688.com'), timestamp: new Date().toISOString() };",
+        "saveScreenshots": true
+      },
+      "next": ["save_results"]
+    },
+
+    {
+      "id": "save_results",
+      "type": "ResultSaverNode",
+      "name": "保存测试结果",
+      "config": {
+        "outputDir": "workflows/records",
+        "filenameTemplate": "1688-single-page-manual-login-{timestamp}.json",
+        "includeMetadata": true
+      },
+      "next": ["end"]
+    },
+
+    {
+      "id": "end",
+      "type": "EndNode",
+      "name": "保持页面打开",
+      "config": { "cleanup": false, "saveLogs": true }
+    }
+  ],
+  "globalConfig": {
+    "logLevel": "info",
+    "screenshotOnError": true,
+    "autoCleanup": false,
+    "parallelExecution": false,
+    "timeout": 1200000
+  }
+}

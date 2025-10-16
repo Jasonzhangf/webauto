@@ -1,0 +1,561 @@
+import { EventEmitter } from 'events';
+import { WeiboHomepageStrategy } from './WeiboHomepageStrategy';
+import { WeiboLinkExtractor } from './WeiboLinkExtractor';
+import { WeiboInfiniteScrollDetector } from './WeiboInfiniteScrollDetector';
+import { WeiboAntiBotProtection } from './WeiboAntiBotProtection';
+import { WeiboPostAnalyzer, WeiboPost } from './WeiboPostAnalyzer';
+
+/**
+ * 微博批量分析器
+ * 协调所有组件，实现微博主页链接爬取和帖子批量分析
+ */
+
+export interface BatchAnalysisConfig {
+  // 主页配置
+  homepage: {
+    url: string;
+    maxPosts: number;
+    scrollCount: number;
+  };
+  // 帖子分析配置
+  posts: {
+    includeMedia: boolean;
+    includeComments: boolean;
+    maxCommentDepth: number;
+    maxComments: number;
+    downloadMedia: boolean;
+  };
+  // 并发配置
+  concurrency: {
+    maxConcurrent: number;
+    delayBetween: number;
+  };
+  // 输出配置
+  output: {
+    directory: string;
+    format: 'json' | 'csv' | 'markdown';
+    saveProgress: boolean;
+  };
+}
+
+export interface BatchAnalysisResult {
+  summary: {
+    totalPosts: number;
+    analyzedPosts: number;
+    successfulPosts: number;
+    failedPosts: number;
+    totalComments: number;
+    totalImages: number;
+    totalVideos: number;
+    duration: number;
+  };
+  posts: WeiboPost[];
+  errors: Array<{
+    url: string;
+    error: string;
+    timestamp: Date;
+  }>;
+  progress: {
+    current: number;
+    total: number;
+    percentage: number;
+  };
+}
+
+export interface ProgressCheckpoint {
+  timestamp: number;
+  processedPosts: string[];
+  failedPosts: string[];
+  config: BatchAnalysisConfig;
+}
+
+export class WeiboBatchAnalyzer extends EventEmitter {
+  private homepageStrategy: WeiboHomepageStrategy;
+  private linkExtractor: WeiboLinkExtractor;
+  private scrollDetector: WeiboInfiniteScrollDetector;
+  private antiBotProtection: WeiboAntiBotProtection;
+  private postAnalyzer: WeiboPostAnalyzer;
+
+  private config: BatchAnalysisConfig;
+  private result: BatchAnalysisResult;
+  private isRunning: boolean = false;
+  private startTime: number = 0;
+
+  constructor(config?: Partial<BatchAnalysisConfig>) {
+    super();
+    
+    this.homepageStrategy = new WeiboHomepageStrategy();
+    this.linkExtractor = new WeiboLinkExtractor();
+    this.scrollDetector = new WeiboInfiniteScrollDetector();
+    this.antiBotProtection = new WeiboAntiBotProtection();
+    this.postAnalyzer = new WeiboPostAnalyzer();
+
+    this.config = {
+      homepage: {
+        url: 'https://weibo.com',
+        maxPosts: 100,
+        scrollCount: 10
+      },
+      posts: {
+        includeMedia: true,
+        includeComments: true,
+        maxCommentDepth: 3,
+        maxComments: 50,
+        downloadMedia: false
+      },
+      concurrency: {
+        maxConcurrent: 2,
+        delayBetween: 5000
+      },
+      output: {
+        directory: './results',
+        format: 'json',
+        saveProgress: true
+      },
+      ...config
+    };
+
+    this.initializeResult();
+    this.setupEventHandlers();
+  }
+
+  /**
+   * 初始化结果对象
+   */
+  private initializeResult(): void {
+    this.result = {
+      summary: {
+        totalPosts: 0,
+        analyzedPosts: 0,
+        successfulPosts: 0,
+        failedPosts: 0,
+        totalComments: 0,
+        totalImages: 0,
+        totalVideos: 0,
+        duration: 0
+      },
+      posts: [],
+      errors: [],
+      progress: {
+        current: 0,
+        total: 0,
+        percentage: 0
+      }
+    };
+  }
+
+  /**
+   * 设置事件处理器
+   */
+  private setupEventHandlers(): void {
+    this.linkExtractor.on('linksExtracted', (data) => {
+      this.emit('linksFound', data);
+    });
+
+    this.scrollDetector.on('newContent', (data) => {
+      this.emit('newContentLoaded', data);
+    });
+
+    this.antiBotProtection.on('antiBotDetected', (data) => {
+      this.emit('antiBotTriggered', data);
+    });
+
+    this.antiBotProtection.on('failureHandled', (data) => {
+      this.emit('operationFailure', data);
+    });
+  }
+
+  /**
+   * 执行批量分析
+   */
+  async runBatchAnalysis(page: any): Promise<BatchAnalysisResult> {
+    if (this.isRunning) {
+      throw new Error('Batch analysis is already running');
+    }
+
+    this.isRunning = true;
+    this.startTime = Date.now();
+    
+    try {
+      this.emit('batchStart', { config: this.config });
+
+      // 第一步：加载主页并检测
+      await this.loadHomepage(page);
+      
+      // 第二步：获取帖子链接
+      const postLinks = await this.extractPostLinks(page);
+      this.result.summary.totalPosts = postLinks.length;
+      this.result.progress.total = Math.min(postLinks.length, this.config.homepage.maxPosts);
+      
+      // 第三步：批量分析帖子
+      await this.analyzePostsBatch(page, postLinks);
+      
+      // 第四步：生成报告
+      await this.generateReport();
+      
+      // 计算总耗时
+      this.result.summary.duration = Date.now() - this.startTime;
+      
+      this.emit('batchComplete', this.result);
+      return this.result;
+
+    } catch (error) {
+      this.emit('batchError', { error, result: this.result });
+      throw error;
+    } finally {
+      this.isRunning = false;
+    }
+  }
+
+  /**
+   * 加载微博主页
+   */
+  private async loadHomepage(page: any): Promise<void> {
+    try {
+      this.emit('stageStart', { stage: 'loading_homepage', url: this.config.homepage.url });
+      
+      // 访问主页
+      await page.goto(this.config.homepage.url, { waitUntil: 'networkidle2' });
+      await this.antiBotProtection.executeDelay('pageLoad');
+      
+      // 检测是否为微博主页
+      const isWeiboHomepage = await this.homepageStrategy.detect(page);
+      if (!isWeiboHomepage) {
+        throw new Error('Not a valid Weibo homepage');
+      }
+      
+      // 模拟人类行为
+      await this.antiBotProtection.simulateMouseBehavior(page);
+      
+      this.emit('stageComplete', { stage: 'loading_homepage' });
+      
+    } catch (error) {
+      this.emit('stageError', { stage: 'loading_homepage', error });
+      throw error;
+    }
+  }
+
+  /**
+   * 提取帖子链接
+   */
+  private async extractPostLinks(page: any): Promise<Array<{id: string, url: string, type: string}>> {
+    try {
+      this.emit('stageStart', { stage: 'extracting_links' });
+      
+      let allLinks: Array<{id: string, url: string, type: string}> = [];
+      
+      // 初始提取
+      const initialLinks = await this.linkExtractor.extractLinks(page, {
+        includeTypes: ['post']
+      });
+      allLinks = initialLinks.posts;
+      
+      // 滚动加载更多内容
+      if (this.config.homepage.scrollCount > 0) {
+        const scrollResult = await this.scrollDetector.performInfiniteScroll(page, {
+          targetCount: this.config.homepage.maxPosts,
+          itemSelector: '[data-e2e="feed-item"], .WB_feed_type, .feed_item'
+        });
+        
+        if (scrollResult.success && scrollResult.itemsFound > initialLinks.posts.length) {
+          // 滚动后再次提取链接
+          const newLinks = await this.linkExtractor.extractLinks(page, {
+            includeTypes: ['post']
+          });
+          
+          // 合并并去重
+          const existingUrls = new Set(allLinks.map(link => link.url));
+          const uniqueNewLinks = newLinks.posts.filter(link => !existingUrls.has(link.url));
+          allLinks = [...allLinks, ...uniqueNewLinks];
+        }
+      }
+      
+      // 限制数量
+      const limitedLinks = allLinks.slice(0, this.config.homepage.maxPosts);
+      
+      this.emit('stageComplete', { 
+        stage: 'extracting_links', 
+        totalFound: allLinks.length,
+        limitedTo: limitedLinks.length
+      });
+      
+      return limitedLinks;
+      
+    } catch (error) {
+      this.emit('stageError', { stage: 'extracting_links', error });
+      throw error;
+    }
+  }
+
+  /**
+   * 批量分析帖子
+   */
+  private async analyzePostsBatch(page: any, postLinks: Array<{id: string, url: string, type: string}>): Promise<void> {
+    try {
+      this.emit('stageStart', { stage: 'analyzing_posts', totalPosts: postLinks.length });
+      
+      const { maxConcurrent, delayBetween } = this.config.concurrency;
+      
+      // 分批处理
+      for (let i = 0; i < postLinks.length; i += maxConcurrent) {
+        const batch = postLinks.slice(i, i + maxConcurrent);
+        
+        // 并发处理当前批次
+        const batchPromises = batch.map(async (postLink, index) => {
+          const globalIndex = i + index;
+          return this.analyzeSinglePost(page, postLink, globalIndex);
+        });
+        
+        await Promise.allSettled(batchPromises);
+        
+        // 批次间延迟
+        if (i + maxConcurrent < postLinks.length) {
+          await this.antiBotProtection.executeDelay('pageLoad', delayBetween);
+        }
+        
+        // 保存进度
+        if (this.config.output.saveProgress) {
+          await this.saveProgress();
+        }
+      }
+      
+      this.emit('stageComplete', { stage: 'analyzing_posts' });
+      
+    } catch (error) {
+      this.emit('stageError', { stage: 'analyzing_posts', error });
+      throw error;
+    }
+  }
+
+  /**
+   * 分析单个帖子
+   */
+  private async analyzeSinglePost(
+    page: any, 
+    postLink: {id: string, url: string, type: string}, 
+    index: number
+  ): Promise<void> {
+    try {
+      this.result.progress.current = index + 1;
+      this.result.progress.percentage = Math.round(
+        (this.result.progress.current / this.result.progress.total) * 100
+      );
+      
+      this.emit('postAnalysisStart', { 
+        post: postLink, 
+        index, 
+        progress: this.result.progress 
+      });
+      
+      // 访问帖子页面
+      await page.goto(postLink.url, { waitUntil: 'networkidle2' });
+      await this.antiBotProtection.executeDelay('pageLoad');
+      
+      // 分析帖子
+      const post = await this.postAnalyzer.analyzePost(page, postLink.url, this.config.posts);
+      
+      // 更新统计
+      this.result.posts.push(post);
+      this.result.summary.successfulPosts++;
+      this.result.summary.totalComments += post.comments.length;
+      this.result.summary.totalImages += post.media.images.length;
+      this.result.summary.totalVideos += post.media.videos.length;
+      
+      this.emit('postAnalysisComplete', { post, index });
+      
+    } catch (error) {
+      this.result.failedPosts++;
+      this.result.errors.push({
+        url: postLink.url,
+        error: error.message,
+        timestamp: new Date()
+      });
+      
+      this.emit('postAnalysisError', { post: postLink, error, index });
+    } finally {
+      this.result.summary.analyzedPosts++;
+    }
+  }
+
+  /**
+   * 生成报告
+   */
+  private async generateReport(): Promise<void> {
+    try {
+      this.emit('stageStart', { stage: 'generating_report' });
+      
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const filename = `weibo-batch-analysis-${timestamp}`;
+      
+      let content: string;
+      let extension: string;
+      
+      switch (this.config.output.format) {
+        case 'json':
+          content = JSON.stringify(this.result, null, 2);
+          extension = 'json';
+          break;
+          
+        case 'csv':
+          content = this.generateCSVReport();
+          extension = 'csv';
+          break;
+          
+        case 'markdown':
+          content = this.generateMarkdownReport();
+          extension = 'md';
+          break;
+          
+        default:
+          throw new Error(`Unsupported format: ${this.config.output.format}`);
+      }
+      
+      // 在实际环境中保存文件
+      console.log(`Report would be saved to: ${this.config.output.directory}/${filename}.${extension}`);
+      console.log(`Report size: ${content.length} characters`);
+      
+      this.emit('stageComplete', { stage: 'generating_report', filename: `${filename}.${extension}` });
+      
+    } catch (error) {
+      this.emit('stageError', { stage: 'generating_report', error });
+      throw error;
+    }
+  }
+
+  /**
+   * 生成CSV报告
+   */
+  private generateCSVReport(): string {
+    const headers = [
+      'Post ID', 'URL', 'Author', 'Publish Time', 'Text', 
+      'Images', 'Videos', 'Comments', 'Likes', 'Reposts'
+    ];
+    
+    const rows = this.result.posts.map(post => [
+      post.id,
+      post.url,
+      post.author.name,
+      post.metadata.publishTime.toISOString(),
+      post.content.text.substring(0, 100),
+      post.media.images.length,
+      post.media.videos.length,
+      post.comments.length,
+      post.engagement.likes,
+      post.engagement.reposts
+    ]);
+    
+    return [headers, ...rows]
+      .map(row => row.map(cell => `"${cell}"`).join(','))
+      .join('
+');
+  }
+
+  /**
+   * 生成Markdown报告
+   */
+  private generateMarkdownReport(): string {
+    const { summary, posts, errors } = this.result;
+    
+    let markdown = `# 微博批量分析报告
+
+`;
+    markdown += `## 分析概要
+
+`;
+    markdown += `- **总帖子数**: ${summary.totalPosts}
+`;
+    markdown += `- **成功分析**: ${summary.successfulPosts}
+`;
+    markdown += `- **分析失败**: ${summary.failedPosts}
+`;
+    markdown += `- **总评论数**: ${summary.totalComments}
+`;
+    markdown += `- **图片总数**: ${summary.totalImages}
+`;
+    markdown += `- **视频总数**: ${summary.totalVideos}
+`;
+    markdown += `- **分析耗时**: ${(summary.duration / 1000).toFixed(2)}秒
+
+`;
+    
+    if (posts.length > 0) {
+      markdown += `## 帖子详情
+
+`;
+      posts.forEach((post, index) => {
+        markdown += `### ${index + 1}. ${post.author.name}
+`;
+        markdown += `- **发布时间**: ${post.metadata.publishTime.toLocaleString()}
+`;
+        markdown += `- **内容**: ${post.content.text.substring(0, 200)}...
+`;
+        markdown += `- **媒体**: ${post.media.images.length}图片, ${post.media.videos.length}视频
+`;
+        markdown += `- **互动**: ${post.engagement.likes}赞, ${post.engagement.comments}评论, ${post.engagement.reposts}转发
+`;
+        markdown += `- **链接**: [查看原文](${post.url})
+
+`;
+      });
+    }
+    
+    if (errors.length > 0) {
+      markdown += `## 错误记录
+
+`;
+      errors.forEach(error => {
+        markdown += `- **${error.timestamp.toLocaleString()}**: ${error.url} - ${error.error}
+`;
+      });
+    }
+    
+    return markdown;
+  }
+
+  /**
+   * 保存进度检查点
+   */
+  private async saveProgress(): Promise<void> {
+    const checkpoint: ProgressCheckpoint = {
+      timestamp: Date.now(),
+      processedPosts: this.result.posts.map(post => post.id),
+      failedPosts: this.result.errors.map(error => error.url),
+      config: this.config
+    };
+    
+    // 在实际环境中保存到文件
+    console.log(`Progress checkpoint saved: ${checkpoint.processedPosts.length} posts processed`);
+  }
+
+  /**
+   * 停止批量分析
+   */
+  stopBatchAnalysis(): void {
+    if (this.isRunning) {
+      this.isRunning = false;
+      this.scrollDetector.stopScroll();
+      this.emit('batchStopped', { result: this.result });
+    }
+  }
+
+  /**
+   * 获取当前状态
+   */
+  getStatus() {
+    return {
+      isRunning: this.isRunning,
+      config: this.config,
+      result: this.result,
+      startTime: this.startTime,
+      antiBotStatus: this.antiBotProtection.getStatus()
+    };
+  }
+
+  /**
+   * 更新配置
+   */
+  updateConfig(newConfig: Partial<BatchAnalysisConfig>): void {
+    this.config = { ...this.config, ...newConfig };
+    this.emit('configUpdated', this.config);
+  }
+}

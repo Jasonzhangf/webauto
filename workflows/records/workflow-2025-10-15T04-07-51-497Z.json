@@ -1,0 +1,90 @@
+{
+  "type": "workflow",
+  "path": "/Users/fanzhang/Documents/github/webauto/workflows/1688/analysis/1688-direct-chat-test.json",
+  "name": "1688 Direct Chat Test",
+  "startedAt": 1760501271497,
+  "finishedAt": 1760501271497,
+  "success": false,
+  "error": "no editable elements found",
+  "variables": {
+    "workflowName": "1688 Direct Chat Test",
+    "sessionId": "sess-1760501248060-196722",
+    "sessionDir": "/Users/fanzhang/.webauto/sessions/sess-1760501248060-196722",
+    "debug": true,
+    "startTime": "2025-10-15T04:07:34.054Z",
+    "workflowStarted": true,
+    "sessionAttached": true,
+    "currentUrl": "https://air.1688.com/app/ocms-fusion-components-1688/def_cbu_web_im/index.html?touid=cnalichn%E6%B0%B8%E5%BA%B7%E5%B8%82%E9%80%94%E6%B4%BE%E5%B7%A5%E8%B4%B8%E6%9C%89%E9%99%90%E5%85%AC%E5%8F%B8&siteid=cnalichn&status=2&portalId=&gid=&offerId=858532417224&itemsId=&spmid=a26352.13672862.offerlist#/",
+    "navigationCompleted": true,
+    "lastNavigationTime": "2025-10-15T04:07:34.184Z",
+    "lastWaitMs": 5266,
+    "modalsDismissed": 0
+  },
+  "outputs": {},
+  "parameters": {
+    "debug": true
+  },
+  "preflows": [
+    {
+      "file": "/Users/fanzhang/Documents/github/webauto/workflows/records/preflow-2025-10-15T04-07-34-054Z.json",
+      "type": "preflow",
+      "path": "/Users/fanzhang/Documents/github/webauto/workflows/preflows/1688-login-preflow.json",
+      "name": "1688 Login Preflow",
+      "startedAt": 1760501254054,
+      "finishedAt": 1760501254054,
+      "success": true,
+      "error": null,
+      "variables": {
+        "workflowName": "1688 Login Preflow",
+        "sessionId": "sess-1760501248060-196722",
+        "sessionDir": "/Users/fanzhang/.webauto/sessions/sess-1760501248060-196722",
+        "debug": true,
+        "startTime": "2025-10-15T04:07:28.062Z",
+        "workflowStarted": true,
+        "browserInitialized": true,
+        "browserInfo": {
+          "headless": false,
+          "viewport": {
+            "width": 1280,
+            "height": 900
+          }
+        },
+        "lastWaitMs": 1383,
+        "cookiesLoaded": true,
+        "cookieCount": 90,
+        "cookiePath": "/Users/fanzhang/.webauto/cookies/1688-domestic.json",
+        "currentUrl": "https://www.1688.com/",
+        "navigationCompleted": true,
+        "lastNavigationTime": "2025-10-15T04:07:31.544Z",
+        "antiBotWaitMs": 1132,
+        "modalsDismissed": 0,
+        "isLoggedIn": true,
+        "loginInfo": {
+          "cookieHit": true
+        },
+        "loginVerifiedAt": "2025-10-15T04:07:34.050Z",
+        "cookieSaved": true,
+        "cookieSavePath": "/Users/fanzhang/.webauto/cookies/1688-domestic.json",
+        "cookieSaveCount": 90,
+        "resultSaved": true,
+        "resultFilePath": "workflows/records/preflow-1688-login-success-2025-10-15T04-07-34-052Z.json",
+        "resultFilename": "preflow-1688-login-success-2025-10-15T04-07-34-052Z.json",
+        "handshakeSignalPath": "/Users/fanzhang/.webauto/sessions/sess-1760501248060-196722/login.json",
+        "behaviorLogPath": "/Users/fanzhang/.webauto/sessions/sess-1760501248060-196722/behavior-1688 Login Preflow-2025-10-15T04-07-34-053Z.json",
+        "behaviorEventCount": 131,
+        "contextExportPath": "/Users/fanzhang/.webauto/sessions/sess-1760501248060-196722/context.json",
+        "endTime": "2025-10-15T04:07:34.053Z",
+        "sessionPersisted": true,
+        "logsExported": true,
+        "workflowCompleted": true,
+        "executionTime": 5991
+      },
+      "outputs": {},
+      "parameters": {
+        "debug": true,
+        "sessionId": "sess-1760501248060-196722"
+      },
+      "preflows": []
+    }
+  ]
+}

@@ -46,7 +46,7 @@ Manual runners:
 - Make behavior configuration‑driven using files under `config/`.
 - Maintain strict types for events and data structures; isolate errors.
 - For workflows, prefer preflows for environment/login prep and write handshake records to `workflows/records/`.
-  - Login preflow: `workflows/preflows/1688-login-preflow.json` (success/failure → record + End/Halt).
+  - Login preflow: `workflows/preflows/1688-login-preflow.json` (cookie-first; if cookie invalid → manual login polling → resave cookies; success/failure → record + End/Halt).
   - Engine retries preflows up to 3 times; on final failure, main workflow does not start.
   - Session relay (same process): EndNode persists session; next workflow can use `AttachSessionNode` with `sessionId`.
 

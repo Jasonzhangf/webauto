@@ -1,0 +1,9 @@
+{
+  "name": "1688 Prelogin + Enter Send",
+  "sharedParameters": { "debug": true },
+  "pauseBetweenMs": 500,
+  "workflows": [
+    { "path": "workflows/1688/analysis/1688-open-and-compose-enter.json", "parameters": {}, "stopOnFailure": true }
+  ]
+}
+

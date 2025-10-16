@@ -1,0 +1,84 @@
+{
+  "type": "workflow",
+  "path": "/Users/fanzhang/Documents/github/webauto/workflows/1688/analysis/1688-complete-cookie-login.json",
+  "name": "1688 单页面手动登录（修正版）",
+  "startedAt": 1760590186217,
+  "finishedAt": 1760590186217,
+  "success": false,
+  "error": "未找到节点类型 PreflowRunnerNode 的处理器",
+  "variables": {
+    "workflowName": "1688 单页面手动登录（修正版）",
+    "sessionId": "sess-1760590179270-699800",
+    "sessionDir": "/Users/fanzhang/.webauto/sessions/sess-1760590179270-699800",
+    "debug": true,
+    "startTime": "2025-10-16T04:49:46.217Z",
+    "workflowStarted": true
+  },
+  "outputs": {},
+  "parameters": {
+    "debug": true
+  },
+  "preflows": [
+    {
+      "file": "/Users/fanzhang/Documents/github/webauto/workflows/records/preflow-2025-10-16T04-49-46-217Z.json",
+      "type": "preflow",
+      "path": "/Users/fanzhang/Documents/github/webauto/workflows/preflows/1688-login-preflow.json",
+      "name": "1688 Login Preflow",
+      "startedAt": 1760590186217,
+      "finishedAt": 1760590186217,
+      "success": true,
+      "error": null,
+      "variables": {
+        "workflowName": "1688 Login Preflow",
+        "sessionId": "sess-1760590179270-699800",
+        "sessionDir": "/Users/fanzhang/.webauto/sessions/sess-1760590179270-699800",
+        "debug": true,
+        "startTime": "2025-10-16T04:49:39.272Z",
+        "workflowStarted": true,
+        "browserInitialized": true,
+        "browserInfo": {
+          "headless": false,
+          "viewport": {
+            "width": 1280,
+            "height": 900
+          }
+        },
+        "lastWaitMs": 898,
+        "cookiesLoaded": true,
+        "cookieCount": 89,
+        "cookiePath": "/Users/fanzhang/.webauto/cookies/1688-domestic.json",
+        "currentUrl": "https://www.1688.com/",
+        "navigationCompleted": true,
+        "lastNavigationTime": "2025-10-16T04:49:42.171Z",
+        "antiBotWaitMs": 2457,
+        "modalsDismissed": 0,
+        "isLoggedIn": true,
+        "loginInfo": {
+          "cookieHit": true
+        },
+        "loginVerifiedAt": "2025-10-16T04:49:46.214Z",
+        "cookieSaved": true,
+        "cookieSavePath": "/Users/fanzhang/.webauto/cookies/1688-domestic.json",
+        "cookieSaveCount": 89,
+        "resultSaved": true,
+        "resultFilePath": "workflows/records/preflow-1688-login-success-2025-10-16T04-49-46-215Z.json",
+        "resultFilename": "preflow-1688-login-success-2025-10-16T04-49-46-215Z.json",
+        "handshakeSignalPath": "/Users/fanzhang/.webauto/sessions/sess-1760590179270-699800/login.json",
+        "behaviorLogPath": "/Users/fanzhang/.webauto/sessions/sess-1760590179270-699800/behavior-1688 Login Preflow-2025-10-16T04-49-46-216Z.json",
+        "behaviorEventCount": 129,
+        "contextExportPath": "/Users/fanzhang/.webauto/sessions/sess-1760590179270-699800/context.json",
+        "endTime": "2025-10-16T04:49:46.217Z",
+        "sessionPersisted": true,
+        "logsExported": true,
+        "workflowCompleted": true,
+        "executionTime": 6945
+      },
+      "outputs": {},
+      "parameters": {
+        "debug": true,
+        "sessionId": "sess-1760590179270-699800"
+      },
+      "preflows": []
+    }
+  ]
+}

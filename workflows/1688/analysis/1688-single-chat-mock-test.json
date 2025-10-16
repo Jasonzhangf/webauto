@@ -1,0 +1,176 @@
+{
+  "name": "1688单个对话流程Mock测试",
+  "description": "测试从主页搜索到商家对话的完整流程，使用mock发送模式",
+  "version": "1.0.0",
+  "preflows": [
+    "1688-login-preflow"
+  ],
+  "nodes": [
+    {
+      "id": "start",
+      "type": "StartNode",
+      "config": {}
+    },
+    {
+      "id": "browser-init",
+      "type": "CamoufoxEnsureNode",
+      "config": {
+        "headless": false,
+        "viewport": {
+          "width": 1920,
+          "height": 1080
+        }
+      }
+    },
+    {
+      "id": "load-cookies",
+      "type": "CookieLoaderNode",
+      "config": {
+        "cookieFile": "../sharedmodule/operations-framework/cookies.json"
+      }
+    },
+    {
+      "id": "navigate-homepage",
+      "type": "NavigationNode",
+      "config": {
+        "url": "https://www.1688.com/",
+        "waitUntil": "networkidle"
+      }
+    },
+    {
+      "id": "search-products",
+      "type": "PageActionNode",
+      "config": {
+        "actions": [
+          {
+            "type": "waitForSelector",
+            "selector": "input[placeholder*='搜索'], input[type='search'], #q",
+            "timeout": 5000
+          },
+          {
+            "type": "fill",
+            "selector": "input[placeholder*='搜索'], input[type='search'], #q",
+            "value": "服装批发"
+          },
+          {
+            "type": "press",
+            "selector": "input[placeholder*='搜索'], input[type='search'], #q",
+            "key": "Enter"
+          },
+          {
+            "type": "waitForLoadState",
+            "state": "networkidle"
+          }
+        ]
+      }
+    },
+    {
+      "id": "find-products",
+      "type": "PageActionNode",
+      "config": {
+        "actions": [
+          {
+            "type": "waitForSelector",
+            "selector": ".sm-offer-item, .offer-item, .product-item",
+            "timeout": 5000
+          },
+          {
+            "type": "evaluate",
+            "script": "return document.querySelectorAll('.sm-offer-item, .offer-item, .product-item').length"
+          }
+        ]
+      }
+    },
+    {
+      "id": "navigate-to-chat",
+      "type": "PageActionNode",
+      "config": {
+        "actions": [
+          {
+            "type": "click",
+            "selector": ".sm-offer-item, .offer-item, .product-item",
+            "index": 0
+          },
+          {
+            "type": "waitForTimeout",
+            "timeout": 2000
+          },
+          {
+            "type": "click",
+            "selector": "a[href*='contact'], button[title*='联系'], .contact-btn, .chat-btn",
+            "timeout": 5000
+          },
+          {
+            "type": "waitForTimeout",
+            "timeout": 3000
+          }
+        ]
+      }
+    },
+    {
+      "id": "mock-chat-input",
+      "type": "ChatComposeNodeFinalV2",
+      "config": {
+        "hostFilter": "air.1688.com",
+        "message": "你好，请问这个产品有现货吗？",
+        "send": false,
+        "highlightMs": 3000,
+        "mock": true
+      }
+    },
+    {
+      "id": "take-screenshot",
+      "type": "PageSnapshotNode",
+      "config": {
+        "path": "screenshots/1688-single-chat-mock-test.png",
+        "fullPage": true
+      }
+    },
+    {
+      "id": "end",
+      "type": "EndNode",
+      "config": {
+        "cleanup": true,
+        "persistSession": false
+      }
+    }
+  ],
+  "edges": [
+    {
+      "from": "start",
+      "to": "browser-init"
+    },
+    {
+      "from": "browser-init",
+      "to": "load-cookies"
+    },
+    {
+      "from": "load-cookies",
+      "to": "navigate-homepage"
+    },
+    {
+      "from": "navigate-homepage",
+      "to": "search-products"
+    },
+    {
+      "from": "search-products",
+      "to": "find-products"
+    },
+    {
+      "from": "find-products",
+      "to": "navigate-to-chat"
+    },
+    {
+      "from": "navigate-to-chat",
+      "to": "mock-chat-input"
+    },
+    {
+      "from": "mock-chat-input",
+      "to": "take-screenshot"
+    },
+    {
+      "from": "take-screenshot",
+      "to": "end"
+    }
+  ]
+}

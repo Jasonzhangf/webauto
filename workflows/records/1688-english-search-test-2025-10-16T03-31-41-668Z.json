@@ -1,0 +1,61 @@
+{
+  "timestamp": "2025-10-16T03-31-41-668Z",
+  "workflowType": "homepage",
+  "success": true,
+  "executionTime": 0,
+  "metadata": {
+    "workflowType": "homepage",
+    "capturedAt": "2025-10-16T03:31:41.668Z",
+    "linkCount": 0,
+    "pageCount": 0,
+    "scrollCount": 0
+  },
+  "results": {},
+  "variables": {
+    "workflowName": "1688 英文搜索测试",
+    "sessionId": "sess-1760585491551-718620",
+    "sessionDir": "/Users/fanzhang/.webauto/sessions/sess-1760585491551-718620",
+    "debug": true,
+    "startTime": "2025-10-16T03:31:38.224Z",
+    "workflowStarted": true,
+    "sessionAttached": true,
+    "currentUrl": "https://s.1688.com/selloffer/offer_search.htm?keywords=phone",
+    "navigationCompleted": true,
+    "lastNavigationTime": "2025-10-16T03:31:38.660Z",
+    "batchChatCompleted": true,
+    "summary": {
+      "totalItems": 0,
+      "processedItems": 0,
+      "successCount": 0,
+      "failCount": 0,
+      "highlightOnly": true,
+      "startTime": "2025-10-16T03:31:41.666Z",
+      "endTime": "2025-10-16T03:31:41.666Z",
+      "averageProcessingTime": 0,
+      "results": []
+    },
+    "chatResults": [],
+    "searchResults": [],
+    "processedResults": [],
+    "debugInfo": [
+      "🚀 开始批量聊天操作...",
+      "📊 最大聊天数量: 2",
+      "📝 只高亮发送键: true",
+      "📍 当前页面: https://s.1688.com//selloffer/offer_search.htm/_____tmd_____/punish?x5secdata=xf2MMQ3oKl65C0H3FDhooV7fHCKODcOr2K2lC8RT_kUuLtPjtEZqv2wI0U5YbswirDZ7HYS5Ab4keaVSTNkZc5tyuZtzhMxOiJ4_M3Zior5M5FljshqHOua0ABf17vrovW-8XYv3H1J1kxnYMA1riqs2IxhwYVw6g-BIZAACyaTUhW22rQhn5T5FMv0CnY_BVp9b9jiiWDebtaBdDirfsTzOAvPb8bGbbFm60_OXZfEDbWd3-7gs-aWCFuMvve_-Mm5jkscU0_KsI4AKMEetLI-CTdwio6yTJq-7pYUMKXPVMZTzNIXMrDdIRRVdZ8CNu1r-Y7YqXH-z3YpQVQB4umA52M8G-CLIaBdpWV__f9ZMs061_vz7qGmOsGBaVLFPsYQQrXH-WYkcghuK6ls50IzkP23tiiLp272-B8wdMdnMteSicO27bf-fDNpj8sovf5D_MYROFNADi12SWYPWisC3psAEacj-rxkLameGPx-jb8GdPnRVypKdTYu7aki_c2QmwlelDCPjPzyAc0BV1kkyzzllwJ_OBRFYeeqjJrx0JZaCCa9hSn1pI-q4Adsxkgm_y54RL3hz3IBJuHqcU-jzqaDxJ4IadMLHtL1LriuiPP_N-5CtKKKIbd8Uu67kWLCfBfTb8_KYEIYFDvMIjh_U7gTUflpnUijih5Yjfz49UuieH4pvrxFHJNsBkCpMBgXkF3SJSivisdcvfgOThnh4v7YL_Gv0naOZ4900j35-bEGQt9JSDJ6jIFXhZBM2EpeKIDJ7eojlv911sB8z-HjbATtrWqu1WcRWgqMSRyHNg28l0SYwegF_v285hy0ZIx__bx__s.1688.com%2fselloffer%2foffer_search.htm&x5step=1",
+      "📄 页面标题: 验证码拦截",
+      "🔍 页面准备状态: complete",
+      "🔍 开始提取真实搜索结果...",
+      "🔍 页面调试信息:",
+      "- 页面标题: 验证码拦截",
+      "- 页面URL: https://s.1688.com//selloffer/offer_search.htm/_____tmd_____/punish?x5secdata=xf2MMQ3oKl65C0H3FDhooV7fHCKODcOr2K2lC8RT_kUuLtPjtEZqv2wI0U5YbswirDZ7HYS5Ab4keaVSTNkZc5tyuZtzhMxOiJ4_M3Zior5M5FljshqHOua0ABf17vrovW-8XYv3H1J1kxnYMA1riqs2IxhwYVw6g-BIZAACyaTUhW22rQhn5T5FMv0CnY_BVp9b9jiiWDebtaBdDirfsTzOAvPb8bGbbFm60_OXZfEDbWd3-7gs-aWCFuMvve_-Mm5jkscU0_KsI4AKMEetLI-CTdwio6yTJq-7pYUMKXPVMZTzNIXMrDdIRRVdZ8CNu1r-Y7YqXH-z3YpQVQB4umA52M8G-CLIaBdpWV__f9ZMs061_vz7qGmOsGBaVLFPsYQQrXH-WYkcghuK6ls50IzkP23tiiLp272-B8wdMdnMteSicO27bf-fDNpj8sovf5D_MYROFNADi12SWYPWisC3psAEacj-rxkLameGPx-jb8GdPnRVypKdTYu7aki_c2QmwlelDCPjPzyAc0BV1kkyzzllwJ_OBRFYeeqjJrx0JZaCCa9hSn1pI-q4Adsxkgm_y54RL3hz3IBJuHqcU-jzqaDxJ4IadMLHtL1LriuiPP_N-5CtKKKIbd8Uu67kWLCfBfTb8_KYEIYFDvMIjh_U7gTUflpnUijih5Yjfz49UuieH4pvrxFHJNsBkCpMBgXkF3SJSivisdcvfgOThnh4v7YL_Gv0naOZ4900j35-bEGQt9JSDJ6jIFXhZBM2EpeKIDJ7eojlv911sB8z-HjbATtrWqu1WcRWgqMSRyHNg28l0SYwegF_v285hy0ZIx__bx__s.1688.com%2fselloffer%2foffer_search.htm&x5step=1",
+      "- 页面准备状态: complete",
+      "🔍 找到 0 个1688商品链接",
+      "⚠️ 未找到商品链接，检查其他可能的链接模式...",
+      "🔍 找到 1 个1688链接",
+      "🔍 找到 0 个商品容器",
+      "📄 页面主要内容区域: <script id=\"tb-beacon-aplus\" src=\"//g.alicdn.com/alilog/mlog/aplus_v2.js\" exparams=\"category=&amp;userid=28217351&amp;aplus&amp;yunid=&amp;5333e07637666&amp;trid=213e014717605854987345553e9489&amp;asid=AQeQrgEaZ/Bod7kneQAAAADI3RHQx767jg==\"></script><script>\nwith(document)with(body)with(insertBefore(createElement(\"script\"),firstChild))setAttribute(\"exparams\",\"category=&userid=28217351&aplus&yunid=&5333e07637666&trid=213e014717605854987345553e9489&asid=AQeQrgEaZ/Bod7kneQAAAADI3RHQx767jg==\",id=\"tb-beacon-aplus\",src=(location>\"https\"?\"//g\":\"//g\")+\".alicdn.com/alilog/mlog/aplus_v2.js\")\n</script>\n\n    <punish-component>\n  \t<script>\n  \t\ttry{!function(){var e=new Uint16Array([83,101,116,79,98,106,101,99,116,103,101,116,80,114,111,116,111,116,121,112,101,79,102,112,114,111,116,111,116,121,112,101,103,101,116,79,119,110,80,114,111,112,101,114,116,121,78,97,109,101,115,108,101,110,103,116,104,115,104,105,102,116,104,97,115,103,101,116,79,119,110,80,114,111,112,101,114,116,121,68,101,115,99,114,10",
+      "📋 找到 0 个真实搜索结果，处理前 0 个",
+      "⚠️ 未找到搜索结果，但继续执行以输出调试信息"
+    ]
+  }
+}

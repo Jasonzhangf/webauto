@@ -29,14 +29,14 @@ class BrowserInitNode extends BaseNode {
             // 解析 userDataDir（可用模板 {sessionId} ）
             const replaceVars = (s) => {
                 if (!s) return s;
-                return String(s).replace('{sessionId}', context.variables?.get('sessionId') || 'session');
+                return String(s).replace('{sessionId}', (context.variables && context.variables.get('sessionId')) || 'session');
             };
             let userDataDir = replaceVars(config?.userDataDirTemplate) || replaceVars(config?.userDataDir);
             if (userDataDir && userDataDir.startsWith('~/')) userDataDir = join(homedir(), userDataDir.slice(2));
             if (userDataDir) { try { mkdirSync(userDataDir, { recursive: true }); } catch {} }
 
             if (engine === 'camoufox' || engine === 'firefox') {
-                let executablePath = config?.executablePath || variables.get('camoufoxPath') || process.env.CAMOUFOX_PATH || '';
+                let executablePath = config?.executablePath || (context.variables && context.variables.get('camoufoxPath')) || process.env.CAMOUFOX_PATH || '';
                 try {
                     if (!executablePath && engine === 'camoufox') {
                         // 尝试从包解析（要求外部确保安装）
@@ -47,7 +47,7 @@ class BrowserInitNode extends BaseNode {
                     }
                 } catch {}
 
-                const launchOpts = { headless, args: [] };
+                const launchOpts = { headless, args: config?.launchArgs || [] };
                 if (executablePath) launchOpts.executablePath = executablePath;
                 if (engine === 'camoufox' && !executablePath) {
                     throw new Error('Camoufox required but not found. Run CamoufoxEnsureNode or set CAMOUFOX_PATH.');

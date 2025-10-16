@@ -1,0 +1,44 @@
+{
+  "timestamp": "2025-10-14T05-56-36-979Z",
+  "workflowType": "homepage",
+  "success": true,
+  "executionTime": 0,
+  "metadata": {
+    "workflowType": "homepage",
+    "capturedAt": "2025-10-14T05:56:36.980Z",
+    "linkCount": 0,
+    "pageCount": 0,
+    "scrollCount": 0
+  },
+  "results": {},
+  "variables": {
+    "sessionId": "sess-1760421385538-166339",
+    "startTime": "2025-10-14T05:56:25.539Z",
+    "workflowStarted": true,
+    "browserInitialized": true,
+    "browserInfo": {
+      "headless": false,
+      "viewport": {
+        "width": 1280,
+        "height": 900
+      }
+    },
+    "lastWaitMs": 1777,
+    "cookiesLoaded": true,
+    "cookieCount": 86,
+    "cookiePath": "/Users/fanzhang/.webauto/cookies/1688-domestic.json",
+    "currentUrl": "https://www.1688.com/",
+    "navigationCompleted": true,
+    "lastNavigationTime": "2025-10-14T05:56:33.877Z",
+    "antiBotWaitMs": 1803,
+    "modalsDismissed": 0,
+    "isLoggedIn": true,
+    "loginInfo": {
+      "found": true,
+      "selector": ".userAvatarLogo img",
+      "count": 1,
+      "visible": true
+    },
+    "loginVerifiedAt": "2025-10-14T05:56:36.979Z"
+  }
+}

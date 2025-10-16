@@ -22,7 +22,17 @@ import HandshakeSignalNode from './nodes/HandshakeSignalNode.js';
 import BehaviorLogNode from './nodes/BehaviorLogNode.js';
 import ContextExportNode from './nodes/ContextExportNode.js';
 import SessionFinalizeNode from './nodes/SessionFinalizeNode.js';
+import PopupTokenCaptureNode from './nodes/PopupTokenCaptureNode.js';
 import CamoufoxEnsureNode from './nodes/CamoufoxEnsureNode.js';
+import PageSnapshotNode from './nodes/PageSnapshotNode.js';
+import ScriptTokenExtractorNode from './nodes/ScriptTokenExtractorNode.js';
+import ChatComposeNode from './nodes/ChatComposeNode.js';
+import ChatComposeNode1688 from './nodes/ChatComposeNode1688.js';
+import ChatHighlightOnlyNode1688 from './nodes/ChatHighlightOnlyNode1688.js';
+import ChatComposeNodeFinalV2 from './nodes/ChatComposeNodeFinalV2.js';
+import SelectorProbeNode from './nodes/SelectorProbeNode.js';
+import GateOverlayNode from './nodes/GateOverlayNode.js';
+import MockBatchChatNode from './nodes/MockBatchChatNode.js';
 
 class NodeRegistry {
     constructor() {
@@ -55,7 +65,17 @@ class NodeRegistry {
         this.registerNode('BehaviorLogNode', new BehaviorLogNode());
         this.registerNode('ContextExportNode', new ContextExportNode());
         this.registerNode('SessionFinalizeNode', new SessionFinalizeNode());
+        this.registerNode('PopupTokenCaptureNode', new PopupTokenCaptureNode());
         this.registerNode('CamoufoxEnsureNode', new CamoufoxEnsureNode());
+        this.registerNode('PageSnapshotNode', new PageSnapshotNode());
+        this.registerNode('ScriptTokenExtractorNode', new ScriptTokenExtractorNode());
+        this.registerNode('ChatComposeNode', new ChatComposeNode());
+        this.registerNode('ChatComposeNode1688', new ChatComposeNode1688());
+        this.registerNode('ChatHighlightOnlyNode1688', new ChatHighlightOnlyNode1688());
+        this.registerNode('ChatComposeNodeFinalV2', new ChatComposeNodeFinalV2());
+        this.registerNode('SelectorProbeNode', new SelectorProbeNode());
+        this.registerNode('GateOverlayNode', new GateOverlayNode());
+        this.registerNode('MockBatchChatNode', new MockBatchChatNode());
     }
 
     registerNode(type, handler) {

@@ -2,12 +2,15 @@
 import { readFileSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import WorkflowEngine from './engine/WorkflowEngine.js';
+import Logger from './engine/Logger.js';
 
 class WorkflowRunner {
-    constructor() {
+  constructor() {
         this.engine = new WorkflowEngine();
         this.recordsDir = join(process.cwd(), 'workflows', 'records');
         this.preflowsConfigPath = join(process.cwd(), 'workflows', 'preflows', 'enabled.json');
+        // Basic logger for runner-level retries/errors
+        this.logger = new Logger();
     }
 
     async runWorkflow(workflowPath, parameters = {}) {
@@ -22,11 +25,14 @@ class WorkflowRunner {
             // 验证工作流配置
             this.validateWorkflow(workflowConfig);
 
+            // 统一会话ID（前置与主流程同一会话，便于 AttachSessionNode 接力）
+            const workingSessionId = parameters.sessionId || `sess-${Date.now()}-${Math.floor(Math.random()*1e6)}`;
+
             // 执行前置流程（若存在配置）
-            const preflowRecords = await this.runPreflows(parameters);
+            const preflowRecords = parameters.skipPreflows ? [] : await this.runPreflows({ ...parameters, sessionId: workingSessionId });
 
             // 执行工作流
-            const result = await this.engine.executeWorkflow(workflowConfig, parameters);
+            const result = await this.engine.executeWorkflow(workflowConfig, { ...parameters, sessionId: workingSessionId });
 
             // 记录结果
             const record = this.writeRecord({

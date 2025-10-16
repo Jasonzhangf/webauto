@@ -1,0 +1,10 @@
+{
+  "name": "1688 Parse Then Click",
+  "sharedParameters": { "debug": true },
+  "pauseBetweenMs": 1000,
+  "workflows": [
+    { "path": "workflows/1688/analysis/1688-script-token-extract.json", "parameters": {}, "stopOnFailure": true },
+    { "path": "workflows/1688/analysis/1688-offer-snapshot-and-token.json", "parameters": { "skipPreflows": true }, "stopOnFailure": true }
+  ]
+}
+

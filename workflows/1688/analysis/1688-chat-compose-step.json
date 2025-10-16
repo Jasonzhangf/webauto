@@ -1,0 +1,12 @@
+{
+  "name": "1688 Chat Compose Step",
+  "description": "附着当前会话 → 在聊天页输入‘你好’ → 注入面板等待你确认后发送",
+  "version": "1.0.0",
+  "nodes": [
+    { "id": "start", "type": "StartNode", "name": "开始", "next": ["attach"] },
+    { "id": "attach", "type": "AttachSessionNode", "name": "会话接力", "config": {}, "next": ["compose"] },
+    { "id": "compose", "type": "ChatComposeNode", "name": "输入并等待发送", "config": { "hostFilter": "air.1688.com", "message": "你好", "stepGate": true, "inputSelectors": ["pre.edit[contenteditable=true]", ".im-chat-input [contenteditable]", ".msg-input [contenteditable]", "div[contenteditable=true]", "div[contenteditable]", "textarea"], "sendSelectors": [".im-chat-send-btn", ".send-btn", "button:has-text(发送)", "a:has-text(发送)", "[role=button]"] }, "next": ["end"] },
+    { "id": "end", "type": "EndNode", "name": "结束", "config": { "cleanup": false, "saveLogs": true } }
+  ],
+  "globalConfig": { "logLevel": "info", "screenshotOnError": true, "autoCleanup": false, "parallelExecution": false, "timeout": 120000 }
+}

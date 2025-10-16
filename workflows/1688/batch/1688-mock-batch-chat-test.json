@@ -1,0 +1,48 @@
+{
+  "name": "1688 Mock批量聊天测试",
+  "description": "测试阶段的批量聊天工作流，使用Mock模式避免实际发送",
+  "version": "1.0.0",
+  "nodes": [
+    { "id": "start", "type": "StartNode", "name": "开始", "next": ["attach"] },
+    { "id": "attach", "type": "AttachSessionNode", "name": "会话接力", "config": {}, "next": ["mock_batch"] },
+
+    {
+      "id": "mock_batch",
+      "type": "MockBatchChatNode",
+      "name": "Mock批量聊天测试",
+      "config": {
+        "hostFilter": "1688.com",
+        "mockMode": true,
+        "maxChats": 5,
+        "messageTemplate": "您好，我们对贵公司的产品很感兴趣，希望能了解更多详情。"
+      },
+      "next": ["save_results"]
+    },
+
+    {
+      "id": "save_results",
+      "type": "ResultSaverNode",
+      "name": "保存批量聊天结果",
+      "config": {
+        "outputDir": "workflows/records",
+        "filenameTemplate": "1688-mock-batch-chat-{timestamp}.json",
+        "includeMetadata": true
+      },
+      "next": ["end"]
+    },
+
+    {
+      "id": "end",
+      "type": "EndNode",
+      "name": "结束",
+      "config": { "cleanup": false, "saveLogs": true }
+    }
+  ],
+  "globalConfig": {
+    "logLevel": "info",
+    "screenshotOnError": true,
+    "autoCleanup": false,
+    "parallelExecution": false,
+    "timeout": 1800000
+  }
+}

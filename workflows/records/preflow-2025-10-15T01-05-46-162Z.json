@@ -1,0 +1,23 @@
+{
+  "type": "preflow",
+  "path": "/Users/fanzhang/Documents/github/webauto/workflows/preflows/1688-login-preflow.json",
+  "name": "1688 Login Preflow",
+  "startedAt": 1760490346162,
+  "finishedAt": 1760490346162,
+  "success": false,
+  "error": "browserType.launch: Target page, context or browser has been closed\nBrowser logs:\n\n<launching> /Users/fanzhang/Library/Caches/ms-playwright/firefox-1495/firefox/Nightly.app/Contents/MacOS/firefox -no-remote -wait-for-browser -foreground -profile /var/folders/jm/blkk8bbd6v78rv2pwxgxh3kr0000gn/T/playwright_firefoxdev_profile-Q9eV0p -juggler-pipe -silent\n<launched> pid=25549\n[pid=25549] <process did exit: exitCode=null, signal=SIGABRT>\n[pid=25549] starting temporary directories cleanup\nCall log:\n\u001b[2m  - <launching> /Users/fanzhang/Library/Caches/ms-playwright/firefox-1495/firefox/Nightly.app/Contents/MacOS/firefox -no-remote -wait-for-browser -foreground -profile /var/folders/jm/blkk8bbd6v78rv2pwxgxh3kr0000gn/T/playwright_firefoxdev_profile-Q9eV0p -juggler-pipe -silent\u001b[22m\n\u001b[2m  - <launched> pid=25549\u001b[22m\n\u001b[2m  - [pid=25549] <process did exit: exitCode=null, signal=SIGABRT>\u001b[22m\n\u001b[2m  - [pid=25549] starting temporary directories cleanup\u001b[22m\n\u001b[2m  - [pid=25549] <gracefully close start>\u001b[22m\n\u001b[2m  - [pid=25549] finished temporary directories cleanup\u001b[22m\n\u001b[2m  - [pid=25549] <gracefully close end>\u001b[22m\n",
+  "variables": {
+    "workflowName": "1688 Login Preflow",
+    "sessionId": "sess-1760490346034-158867",
+    "sessionDir": "/Users/fanzhang/.webauto/sessions/sess-1760490346034-158867",
+    "debug": true,
+    "startTime": "2025-10-15T01:05:46.120Z",
+    "workflowStarted": true
+  },
+  "outputs": {},
+  "parameters": {
+    "debug": true,
+    "sessionId": "sess-1760490346034-158867"
+  },
+  "preflows": []
+}

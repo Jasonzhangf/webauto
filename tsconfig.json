@@ -2,11 +2,7 @@
   "compilerOptions": {
     "target": "ES2022",
     "module": "ESNext",
-    "lib": [
-      "ES2022",
-      "DOM",
-      "DOM.Iterable"
-    ],
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "allowJs": true,
     "skipLibCheck": true,
     "esModuleInterop": true,
@@ -23,27 +19,13 @@
     "baseUrl": ".",
     "noImplicitAny": true,
     "strictNullChecks": false,
-    "noImplicitReturns": false,
-    "noFallthroughCasesInSwitch": false,
     "downlevelIteration": true
   },
   "include": [
-    "sharedmodule/operations-framework/src/detectors/weibo-login-detector.ts",
-    "sharedmodule/operations-framework/src/detectors/event-driven-cookie-manager.ts",
-    "src/**/*.ts"
+    "src/page-analyzer/**/*.ts"
   ],
   "exclude": [
     "node_modules",
-    "dist",
-    "**/*.test.js",
-    "**/*.spec.js",
-    "test-*.ts",
-    "comment-count-detector/**",
-    "node-system/**",
-    "batch-*.ts",
-    "single-*.ts",
-    "weibo-*.ts",
-    "execute-*.ts",
-    "webauto-*.ts"
+    "dist"
   ]
 }
