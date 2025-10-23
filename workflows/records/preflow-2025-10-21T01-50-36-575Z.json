@@ -1,0 +1,38 @@
+{
+  "type": "preflow",
+  "path": "/Users/fanzhang/Documents/github/webauto/workflows/1688/relay/1688-search-wangwang-chat-compose.json#anchor",
+  "name": "1688 搜索-旺旺-聊天接力 Anchor Check",
+  "startedAt": 1761011436575,
+  "finishedAt": 1761011436575,
+  "success": true,
+  "error": null,
+  "variables": {
+    "workflowName": "1688 搜索-旺旺-聊天接力 Anchor Check",
+    "sessionId": "sess-1761011423600-392406",
+    "sessionDir": "/Users/fanzhang/.webauto/sessions/sess-1761011423600-392406",
+    "debug": true,
+    "keyword": "冲锋衣",
+    "startTime": "2025-10-21T01:50:36.563Z",
+    "workflowStarted": true,
+    "sessionAttached": true,
+    "anchorSettled": true,
+    "anchorSelector": ".userAvatarLogo img",
+    "anchorRect": {
+      "x": 1799,
+      "y": 11.5,
+      "width": 41,
+      "height": 41
+    },
+    "endTime": "2025-10-21T01:50:36.575Z",
+    "sessionPersisted": true,
+    "workflowCompleted": true,
+    "executionTime": 12
+  },
+  "outputs": {},
+  "parameters": {
+    "debug": true,
+    "sessionId": "sess-1761011423600-392406",
+    "keyword": "冲锋衣"
+  },
+  "preflows": []
+}

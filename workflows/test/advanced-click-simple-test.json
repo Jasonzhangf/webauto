@@ -1,0 +1,84 @@
+{
+  "name": "AdvancedClickNode简单测试",
+  "description": "简单测试AdvancedClickNode的基本功能",
+  "version": "1.0.0",
+  "preflows": [],
+  "nodes": [
+    { "id": "start", "type": "StartNode", "name": "开始", "next": ["init_browser"] },
+    {
+      "id": "init_browser",
+      "type": "BrowserInitNode",
+      "name": "初始化浏览器",
+      "config": {
+        "headless": false,
+        "viewport": { "width": 1920, "height": 1080 },
+        "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "timeout": 30000
+      },
+      "next": ["navigate_baidu"]
+    },
+    {
+      "id": "navigate_baidu",
+      "type": "NavigationNode",
+      "name": "导航到百度",
+      "config": {
+        "url": "https://www.baidu.com",
+        "waitUntil": "domcontentloaded",
+        "timeout": 30000
+      },
+      "next": ["find_search_button"]
+    },
+    {
+      "id": "find_search_button",
+      "type": "JavaScriptExecutionNode",
+      "name": "查找搜索按钮",
+      "config": {
+        "script": "console.log('🔍 查找搜索按钮...');\n\nconst searchButton = document.querySelector('#su');\n\nif (searchButton) {\n  console.log('✅ 找到搜索按钮');\n  return {\n    success: true,\n    selector: '#su',\n    text: searchButton.value || '搜索按钮',\n    timestamp: new Date().toISOString()\n  };\n} else {\n  console.error('❌ 未找到搜索按钮');\n  return {\n    success: false,\n    error: '未找到搜索按钮',\n    timestamp: new Date().toISOString()\n  };\n}",
+        "saveScreenshots": false
+      },
+      "next": ["test_click"]
+    },
+    {
+      "id": "test_click",
+      "type": "AdvancedClickNode",
+      "name": "测试点击",
+      "config": {
+        "selector": "#su",
+        "strategy": "auto",
+        "clickMethods": ["playwright_click"],
+        "maxRetries": 1,
+        "retryDelay": 500,
+        "waitAfter": 1000,
+        "timeout": 5000,
+        "verifyNavigation": false,
+        "highlightElement": true,
+        "highlightDuration": 1000,
+        "logLevel": "info"
+      },
+      "next": ["verify_result"]
+    },
+    {
+      "id": "verify_result",
+      "type": "JavaScriptExecutionNode",
+      "name": "验证结果",
+      "config": {
+        "script": "console.log('🔍 验证点击结果...');\n\nconst clickResult = results?.clickResult || {};\nconst successScore = results?.successScore || 0;\n\nconsole.log('点击结果:', clickResult);\nconsole.log('成功分数:', successScore);\n\nreturn {\n  success: clickResult?.success || false,\n  score: successScore,\n  method: clickResult?.method || 'unknown',\n  timestamp: new Date().toISOString()\n};",
+        "saveScreenshots": false
+      },
+      "next": ["end"]
+    },
+    {
+      "id": "end",
+      "type": "EndNode",
+      "name": "结束",
+      "config": { "cleanup": true, "saveLogs": false }
+    }
+  ],
+  "globalConfig": {
+    "logLevel": "info",
+    "screenshotOnError": true,
+    "autoCleanup": true,
+    "parallelExecution": false,
+    "timeout": 60000
+  }
+}

@@ -1,0 +1,64 @@
+{
+  "name": "1688真实页面高亮测试",
+  "description": "使用能够实际操作页面的节点进行高亮测试",
+  "version": "1.0.0",
+  "preflows": ["1688-login-preflow"],
+  "nodes": [
+    { "id": "start", "type": "StartNode", "name": "开始", "next": ["attach"] },
+    {
+      "id": "attach",
+      "type": "AttachSessionNode",
+      "name": "会话接力",
+      "config": {},
+      "next": ["navigate_search"]
+    },
+    {
+      "id": "navigate_search",
+      "type": "NavigationNode",
+      "name": "导航到搜索结果页",
+      "config": {
+        "url": "https://s.1688.com/selloffer/offer_search.htm?keywords=%B7%FE%D7%B0",
+        "waitUntil": "domcontentloaded",
+        "timeout": 30000
+      },
+      "next": ["wait_search"]
+    },
+    {
+      "id": "wait_search",
+      "type": "WaitNode",
+      "name": "等待搜索结果完全加载",
+      "config": { "minMs": 5000, "maxMs": 8000 },
+      "next": ["execute_highlight_script"]
+    },
+    {
+      "id": "execute_highlight_script",
+      "type": "PageActionNode",
+      "name": "执行高亮脚本",
+      "config": {
+        "action": "execute_script",
+        "script": "// 修改页面背景色为黄色\ndocument.body.style.backgroundColor = 'rgba(255, 255, 0, 0.3)';\n\n// 添加顶部提示条\nconst topBanner = document.createElement('div');\ntopBanner.innerHTML = '<h1 style=\"background:red;color:white;padding:15px;font-size:24px;position:fixed;top:0;left:0;width:100%;z-index:999999999;text-align:center;\">🔥 高亮测试正在运行 🔥</h1>';\ndocument.body.appendChild(topBanner);\n\n// 高亮商家容器\nconst merchantSelectors = ['.sm-offer-item', '.offer-item', '.sm-offer', '[class*=offer]'];\nlet merchantCount = 0;\nmerchantSelectors.forEach(selector => {\n  const elements = document.querySelectorAll(selector);\n  elements.forEach((el, index) => {\n    if (index < 8) {\n      el.style.setProperty('border', '4px solid red', 'important');\n      el.style.setProperty('background-color', 'rgba(255, 0, 0, 0.2)', 'important');\n      el.style.setProperty('box-shadow', '0 0 10px red', 'important');\n      el.style.setProperty('z-index', '999998', 'important');\n      \n      // 添加标记\n      const marker = document.createElement('div');\n      marker.textContent = `商家${++merchantCount}`;\n      marker.style.cssText = 'position:absolute;top:0;left:0;background:yellow;color:red;font-weight:bold;padding:2px;z-index:999999;font-size:12px;border:1px solid red;';\n      el.style.position = 'relative';\n      el.appendChild(marker);\n    }\n  });\n});\n\n// 高亮旺旺联系方式\nconst contactSelectors = ['[class*=contact]', '[class*=chat]', '[class*=im]', '[class*=旺旺]', '.sm-im', '.s-im'];\nlet contactCount = 0;\ncontactSelectors.forEach(selector => {\n  const elements = document.querySelectorAll(selector);\n  elements.forEach((el, index) => {\n    if (index < 15) {\n      el.style.setProperty('border', '3px solid blue', 'important');\n      el.style.setProperty('background-color', 'rgba(0, 0, 255, 0.3)', 'important');\n      el.style.setProperty('box-shadow', '0 0 8px blue', 'important');\n      el.style.setProperty('z-index', '999999', 'important');\n      \n      // 添加标记\n      const marker = document.createElement('div');\n      marker.textContent = `旺旺${++contactCount}`;\n      marker.style.cssText = 'position:absolute;top:0;right:0;background:cyan;color:blue;font-weight:bold;padding:2px;z-index:1000000;font-size:10px;border:1px solid blue;';\n      el.style.position = 'relative';\n      el.appendChild(marker);\n    }\n  });\n});\n\n// 添加统计信息\nconst statsDiv = document.createElement('div');\nstatsDiv.innerHTML = `<div style=\"background:black;color:white;padding:10px;position:fixed;bottom:0;left:0;width:100%;z-index:999999999;font-size:16px;text-align:center;\">✅ 找到商家容器: ${merchantCount} 个, 旺旺联系: ${contactCount} 个 - 高亮效果应该很明显</div>`;\ndocument.body.appendChild(statsDiv);\n\nconsole.log(`高亮完成: ${merchantCount} 个商家容器, ${contactCount} 个旺旺联系`);"
+      },
+      "next": ["wait_for_observation"]
+    },
+    {
+      "id": "wait_for_observation",
+      "type": "WaitNode",
+      "name": "等待观察高亮效果",
+      "config": { "minMs": 30000, "maxMs": 35000 },
+      "next": ["end"]
+    },
+    {
+      "id": "end",
+      "type": "EndNode",
+      "name": "结束测试（保持页面打开）",
+      "config": { "cleanup": false, "saveLogs": true }
+    }
+  ],
+  "globalConfig": {
+    "logLevel": "info",
+    "screenshotOnError": true,
+    "autoCleanup": false,
+    "parallelExecution": false,
+    "timeout": 300000
+  }
+}

@@ -1,0 +1,39 @@
+{
+  "timestamp": "2025-10-21T03-38-06-093Z",
+  "workflowType": "homepage",
+  "success": true,
+  "executionTime": 0,
+  "metadata": {
+    "workflowType": "homepage",
+    "capturedAt": "2025-10-21T03:38:06.093Z",
+    "linkCount": 0,
+    "pageCount": 0,
+    "scrollCount": 0
+  },
+  "results": {
+    "success": true,
+    "highlightedCount": 4,
+    "timestamp": "2025-10-21T03:38:06.091Z",
+    "url": "https://air.1688.com/app/ocms-fusion-components-1688/def_cbu_web_im/index.html#/",
+    "title": "1688旺旺聊天",
+    "elementsFound": {
+      "blueButtons": 2,
+      "textareas": 1,
+      "containers": 9,
+      "textButtons": 108
+    }
+  },
+  "variables": {
+    "workflowName": "1688超强化发送按钮高亮-MCP连接测试",
+    "sessionId": "sess-1761017869400-588339",
+    "sessionDir": "/Users/fanzhang/.webauto/sessions/sess-1761017869400-588339",
+    "debug": true,
+    "startTime": "2025-10-21T03:38:01.844Z",
+    "workflowStarted": true,
+    "sessionAttached": true,
+    "currentUrl": "https://air.1688.com/app/ocms-fusion-components-1688/def_cbu_web_im/index.html#/",
+    "navigationCompleted": true,
+    "lastNavigationTime": "2025-10-21T03:38:01.999Z",
+    "lastWaitMs": 4086
+  }
+}

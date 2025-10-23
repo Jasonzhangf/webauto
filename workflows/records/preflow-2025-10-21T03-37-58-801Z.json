@@ -1,0 +1,61 @@
+{
+  "type": "preflow",
+  "path": "/Users/fanzhang/Documents/github/webauto/workflows/preflows/1688-login-preflow.json",
+  "name": "1688 Login Preflow",
+  "startedAt": 1761017878801,
+  "finishedAt": 1761017878801,
+  "success": true,
+  "error": null,
+  "variables": {
+    "workflowName": "1688 Login Preflow",
+    "sessionId": "sess-1761017869400-588339",
+    "sessionDir": "/Users/fanzhang/.webauto/sessions/sess-1761017869400-588339",
+    "debug": true,
+    "startTime": "2025-10-21T03:37:49.402Z",
+    "workflowStarted": true,
+    "camoufoxPath": "/Users/fanzhang/Library/Caches/camoufox/Camoufox.app/Contents/MacOS/camoufox",
+    "browserInitialized": true,
+    "browserInfo": {
+      "headless": false,
+      "viewport": {
+        "width": 1920,
+        "height": 1080
+      }
+    },
+    "lastWaitMs": 2142,
+    "cookiesLoaded": true,
+    "cookieCount": 157,
+    "cookiePath": "/Users/fanzhang/.webauto/cookies/1688-domestic.json",
+    "currentUrl": "https://www.1688.com/",
+    "navigationCompleted": true,
+    "lastNavigationTime": "2025-10-21T03:37:56.304Z",
+    "antiBotWaitMs": 1075,
+    "modalsDismissed": 0,
+    "isLoggedIn": true,
+    "loginInfo": {
+      "cookieHit": true
+    },
+    "loginVerifiedAt": "2025-10-21T03:37:58.797Z",
+    "cookieSaved": true,
+    "cookieSavePath": "/Users/fanzhang/.webauto/cookies/1688-domestic.json",
+    "cookieSaveCount": 157,
+    "resultSaved": true,
+    "resultFilePath": "workflows/records/preflow-1688-login-success-2025-10-21T03-37-58-799Z.json",
+    "resultFilename": "preflow-1688-login-success-2025-10-21T03-37-58-799Z.json",
+    "handshakeSignalPath": "/Users/fanzhang/.webauto/sessions/sess-1761017869400-588339/login.json",
+    "behaviorLogPath": "/Users/fanzhang/.webauto/sessions/sess-1761017869400-588339/behavior-1688 Login Preflow-2025-10-21T03-37-58-800Z.json",
+    "behaviorEventCount": 422,
+    "contextExportPath": "/Users/fanzhang/.webauto/sessions/sess-1761017869400-588339/context.json",
+    "endTime": "2025-10-21T03:37:58.801Z",
+    "sessionPersisted": true,
+    "logsExported": true,
+    "workflowCompleted": true,
+    "executionTime": 9399
+  },
+  "outputs": {},
+  "parameters": {
+    "debug": true,
+    "sessionId": "sess-1761017869400-588339"
+  },
+  "preflows": []
+}

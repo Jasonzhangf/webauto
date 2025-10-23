@@ -1,0 +1,27 @@
+{
+  "timestamp": "2025-10-17T01-03-48-356Z",
+  "workflowType": "homepage",
+  "success": true,
+  "executionTime": 0,
+  "metadata": {
+    "workflowType": "homepage",
+    "capturedAt": "2025-10-17T01:03:48.356Z",
+    "linkCount": 0,
+    "pageCount": 0,
+    "scrollCount": 0
+  },
+  "results": {},
+  "variables": {
+    "workflowName": "1688旺旺链接测试",
+    "sessionId": "sess-1760663003712-34934",
+    "sessionDir": "/Users/fanzhang/.webauto/sessions/sess-1760663003712-34934",
+    "debug": true,
+    "startTime": "2025-10-17T01:03:34.827Z",
+    "workflowStarted": true,
+    "sessionAttached": true,
+    "currentUrl": "https://air.1688.com/app/ocms-fusion-components-1688/def_cbu_web_im/index.html?uid=test%E5%95%86%E5%AE%B6&site=cnalichn&fromid=cnalichnviridite#/",
+    "navigationCompleted": true,
+    "lastNavigationTime": "2025-10-17T01:03:43.860Z",
+    "lastWaitMs": 4495
+  }
+}

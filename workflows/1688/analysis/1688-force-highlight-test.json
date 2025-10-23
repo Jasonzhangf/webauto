@@ -1,0 +1,74 @@
+{
+  "name": "1688强制高亮测试",
+  "description": "强制高亮搜索页面中的所有可能元素，确保能看到高亮效果",
+  "version": "1.0.0",
+  "preflows": ["1688-login-preflow"],
+  "nodes": [
+    { "id": "start", "type": "StartNode", "name": "开始", "next": ["attach"] },
+    {
+      "id": "attach",
+      "type": "AttachSessionNode",
+      "name": "会话接力",
+      "config": {},
+      "next": ["navigate_search"]
+    },
+    {
+      "id": "navigate_search",
+      "type": "NavigationNode",
+      "name": "导航到搜索结果页",
+      "config": {
+        "url": "https://s.1688.com/selloffer/offer_search.htm?keywords=%B7%FE%D7%B0",
+        "waitUntil": "domcontentloaded",
+        "timeout": 30000
+      },
+      "next": ["wait_search"]
+    },
+    {
+      "id": "wait_search",
+      "type": "WaitNode",
+      "name": "等待搜索结果完全加载",
+      "config": { "minMs": 5000, "maxMs": 8000 },
+      "next": ["analyze_page"]
+    },
+    {
+      "id": "analyze_page",
+      "type": "PageSnapshotNode",
+      "name": "分析页面结构",
+      "config": {
+        "script": "console.log('🔍 分析页面结构...'); const allDivs = document.querySelectorAll('div'); const allArticles = document.querySelectorAll('article'); const allSections = document.querySelectorAll('section'); const allLis = document.querySelectorAll('li'); console.log('页面元素统计:'); console.log('- 所有div元素:', allDivs.length); console.log('- 所有article元素:', allArticles.length); console.log('- 所有section元素:', allSections.length); console.log('- 所有li元素:', allLis.length); // 查找包含商家信息的元素 const merchantKeywords = ['offer', 'product', 'item', 'goods', 'supplier', 'company']; let potentialMerchants = 0; allDivs.forEach(div => { const text = div.textContent.toLowerCase(); const className = div.className.toLowerCase(); if (merchantKeywords.some(keyword => text.includes(keyword) || className.includes(keyword))) { potentialMerchants++; } }); console.log('潜在商家容器:', potentialMerchants); // 查找包含联系信息的元素 const contactKeywords = ['contact', 'chat', 'im', 'talk', '旺旺', '联系', '客服']; let potentialContacts = 0; allElements = document.querySelectorAll('*'); allElements.forEach(el => { const text = el.textContent.toLowerCase(); const className = el.className.toLowerCase(); if (contactKeywords.some(keyword => text.includes(keyword) || className.includes(keyword))) { potentialContacts++; } }); console.log('潜在联系方式元素:', potentialContacts); return { success: true, totalDivs: allDivs.length, totalArticles: allArticles.length, totalSections: allSections.length, totalLis: allLis.length, potentialMerchants: potentialMerchants, potentialContacts: potentialContacts, timestamp: new Date().toISOString() };",
+        "saveScreenshots": true
+      },
+      "next": ["force_highlight_all"]
+    },
+    {
+      "id": "force_highlight_all",
+      "type": "PageSnapshotNode",
+      "name": "强制高亮所有可疑元素",
+      "config": {
+        "script": "console.log('🎨 开始强制高亮...'); let highlightedCount = 0; // 高亮所有可能的商家容器 const merchantSelectors = ['div[class*=\"offer\"]', 'div[class*=\"product\"]', 'div[class*=\"item\"]', 'div[class*=\"sm-offer\"]', 'article', 'section[class*=\"offer\"]', 'li[class*=\"offer\"]', '.sm-offer-item', '.offer-item']; merchantSelectors.forEach(selector => { try { const elements = document.querySelectorAll(selector); console.log(`选择器 ${selector}: 找到 ${elements.length} 个元素`); elements.forEach((el, index) => { if (index < 15) { el.style.setProperty('border', '5px solid red', 'important'); el.style.setProperty('background-color', 'rgba(255, 0, 0, 0.3)', 'important'); el.style.setProperty('box-shadow', '0 0 15px red', 'important'); el.style.setProperty('z-index', '999999', 'important'); el.style.setProperty('position', 'relative', 'important'); // 添加标记 const marker = document.createElement('div'); marker.textContent = '商家容器'; marker.style.cssText = 'position:absolute;top:0;left:0;background:yellow;color:red;font-weight:bold;padding:2px;z-index:1000000;font-size:12px;'; el.style.position = 'relative'; el.appendChild(marker); highlightedCount++; } }); } catch (e) { console.log(`选择器 ${selector} 执行出错:`, e.message); } }); // 高亮所有可能的联系方式 const contactSelectors = ['a[class*=\"contact\"]', 'a[class*=\"chat\"]', 'a[class*=\"im\"]', 'button[class*=\"contact\"]', 'button[class*=\"chat\"]', 'div[class*=\"contact\"]', 'div[class*=\"chat\"]', 'span[class*=\"contact\"]', 'span[class*=\"chat\"]', '[class*=\"旺旺\"]', '.sm-im', '.s-im']; contactSelectors.forEach(selector => { try { const elements = document.querySelectorAll(selector); console.log(`联系方式选择器 ${selector}: 找到 ${elements.length} 个元素`); elements.forEach((el, index) => { if (index < 20) { el.style.setProperty('border', '4px solid blue', 'important'); el.style.setProperty('background-color', 'rgba(0, 0, 255, 0.4)', 'important'); el.style.setProperty('box-shadow', '0 0 12px blue', 'important'); el.style.setProperty('z-index', '999999', 'important'); // 添加标记 const marker = document.createElement('div'); marker.textContent = '联系方式'; marker.style.cssText = 'position:absolute;top:0;left:0;background:cyan;color:blue;font-weight:bold;padding:2px;z-index:1000000;font-size:10px;'; el.style.position = 'relative'; el.appendChild(marker); highlightedCount++; } }); } catch (e) { console.log(`联系方式选择器 ${selector} 执行出错:`, e.message); } }); console.log(`总共高亮了 ${highlightedCount} 个元素`); // 在页面顶部添加提示 const notice = document.createElement('div'); notice.innerHTML = '<h1 style=\"background:red;color:white;padding:20px;font-size:24px;z-index:10000000;position:fixed;top:0;left:0;width:100%;text-align:center;\">✅ 高亮测试完成 - 找到 ' + highlightedCount + ' 个元素</h1>'; document.body.insertBefore(notice, document.body.firstChild); return { success: true, highlightedCount: highlightedCount, message: `已强制高亮 ${highlightedCount} 个元素，请检查浏览器页面`, timestamp: new Date().toISOString() };",
+        "saveScreenshots": true
+      },
+      "next": ["keep_highlight_forever"]
+    },
+    {
+      "id": "keep_highlight_forever",
+      "type": "WaitNode",
+      "name": "保持高亮60秒便于观察",
+      "config": { "minMs": 60000, "maxMs": 65000 },
+      "next": ["end"]
+    },
+    {
+      "id": "end",
+      "type": "EndNode",
+      "name": "结束测试（保持页面打开）",
+      "config": { "cleanup": false, "saveLogs": true }
+    }
+  ],
+  "globalConfig": {
+    "logLevel": "info",
+    "screenshotOnError": true,
+    "autoCleanup": false,
+    "parallelExecution": false,
+    "timeout": 300000
+  }
+}

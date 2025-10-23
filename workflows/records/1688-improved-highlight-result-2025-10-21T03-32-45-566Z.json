@@ -1,0 +1,31 @@
+{
+  "timestamp": "2025-10-21T03-32-45-566Z",
+  "workflowType": "homepage",
+  "success": true,
+  "executionTime": 0,
+  "metadata": {
+    "workflowType": "homepage",
+    "capturedAt": "2025-10-21T03:32:45.566Z",
+    "linkCount": 0,
+    "pageCount": 0,
+    "scrollCount": 0
+  },
+  "results": {
+    "success": true,
+    "highlightedCount": 4,
+    "timestamp": "2025-10-21T03:32:45.565Z"
+  },
+  "variables": {
+    "workflowName": "1688改进版高亮测试",
+    "sessionId": "sess-1761017424511-440660",
+    "sessionDir": "/Users/fanzhang/.webauto/sessions/sess-1761017424511-440660",
+    "debug": true,
+    "startTime": "2025-10-21T03:32:38.360Z",
+    "workflowStarted": true,
+    "sessionAttached": true,
+    "currentUrl": "https://air.1688.com/app/ocms-fusion-components-1688/def_cbu_web_im/index.html#/",
+    "navigationCompleted": true,
+    "lastNavigationTime": "2025-10-21T03:32:38.493Z",
+    "lastWaitMs": 7066
+  }
+}

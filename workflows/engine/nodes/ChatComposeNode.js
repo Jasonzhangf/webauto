@@ -19,7 +19,20 @@ export default class ChatComposeNode extends BaseNode {
     const enterCombos = Array.isArray(config.enterCombos) && config.enterCombos.length
       ? config.enterCombos
       : ['Enter', 'Control+Enter', 'Meta+Enter'];
-    const highlightMs = Number(config.highlightMs || 5000);
+    // 读取高亮配置
+    const highlightPreset = context.highlight?.perNode?.ChatComposeNode
+      ?? context.highlight?.action
+      ?? context.highlight
+      ?? {};
+    const highlightEnabled = config?.highlight !== undefined 
+      ? config.highlight 
+      : (highlightPreset.enabled ?? true);
+    const highlightMs = Number(config.highlightMs ?? highlightPreset.durationMs ?? 5000);
+    const persistSendHighlight = config.persistSendHighlight !== undefined
+      ? config.persistSendHighlight
+      : (highlightPreset.persist ?? false);
+    const sendHighlightColor = config.sendHighlightColor || highlightPreset.color || '#ff2d55';
+    const sendHighlightLabel = config.sendHighlightLabel || highlightPreset.label || 'SEND';
     const stabilizeMs = Number(config.stabilizeMs || 1200);
     const inputSelectors = (Array.isArray(config.inputSelectors) && config.inputSelectors.length)
       ? config.inputSelectors
@@ -178,89 +191,357 @@ export default class ChatComposeNode extends BaseNode {
           try { const el = await target.$(sel); if (el) { sendHandle = el; break; } } catch {}
         }
       }
-      // 高亮“发送”按钮：优先直接句柄，否则在 DOM 中筛选候选并高亮
-      let highlightApplied = false;
+      // 高亮"发送"按钮：使用统一高亮服务
+      let highlightApplied = !highlightEnabled;
       if (sendHandle) {
         try {
-          const info = await sendHandle.evaluate((el, ms) => {
-            el.scrollIntoView({behavior:'instant', block:'center'});
-            const r = el.getBoundingClientRect();
-            // 元素自身描边
-            el.__old_outline = el.style.outline; el.style.outline = '3px solid #ff2d55';
-            el.__old_boxShadow = el.style.boxShadow; el.style.boxShadow = '0 0 0 2px rgba(255,45,85,0.35)';
-            // 叠加一个固定定位的遮罩，避免 span 内描边不明显
-            const ov = document.createElement('div');
-            ov.id = '__webauto_highlight_overlay__';
-            ov.style.position = 'fixed';
-            ov.style.left = r.x + 'px';
-            ov.style.top = r.y + 'px';
-            ov.style.width = r.width + 'px';
-            ov.style.height = r.height + 'px';
-            ov.style.border = '3px solid #ff2d55';
-            ov.style.borderRadius = '6px';
-            ov.style.boxSizing = 'border-box';
-            ov.style.pointerEvents = 'none';
-            ov.style.zIndex = '2147483647';
-            document.body.appendChild(ov);
-            setTimeout(()=>{ try{ ov.remove(); }catch{} }, ms);
-            setTimeout(()=>{ try{ el.style.outline = el.__old_outline || ''; el.style.boxShadow = el.__old_boxShadow || ''; }catch{} }, ms);
-            return { x: r.x, y: r.y, w: r.width, h: r.height };
-          }, highlightMs);
-          engine?.recordBehavior?.('send_highlight', { via: 'handle', rect: info });
-          highlightApplied = true;
-        } catch {}
-      }
-      if (!highlightApplied) {
-        const res = await target.evaluate((exclude, ms) => {
-          const isVisible = (el) => {
-            const s = getComputedStyle(el);
-            if (s.display === 'none' || s.visibility === 'hidden' || Number(s.opacity) === 0) return false;
-            const r = el.getBoundingClientRect();
-            return r.width > 2 && r.height > 10;
-          };
-          const all = Array.from(document.querySelectorAll('.next-btn, button, a, [role="button"], .im-chat-send-btn, .send-btn, .btn, span, div'));
-          const cands = [];
-          for (const el of all) {
-            const t = (el.innerText || el.textContent || '').trim();
-            if (!t) continue;
-            if (t.includes('发送') && !exclude.some(x => t.includes(x)) && isVisible(el)) {
-              // 提升到底部右侧区域的候选分数
+          // 检查统一高亮服务是否可用
+          const serviceAvailable = await page.evaluate(() => {
+            return typeof window.__webautoHighlight !== 'undefined' &&
+                   typeof window.__webautoHighlight.createHighlight === 'function';
+          });
+
+          if (serviceAvailable) {
+            // 使用统一高亮服务
+            const highlightId = await page.evaluate((el, config) => {
+              // 标记元素，供后续点击节点复用
+              try { el.setAttribute('data-webauto-send','1'); } catch {}
+              el.scrollIntoView({behavior:'instant', block:'center'});
+              return window.__webautoHighlight.createHighlight(el, config);
+            }, sendHandle, {
+              color: sendHighlightColor,
+              label: sendHighlightLabel,
+              duration: persistSendHighlight ? 0 : highlightMs,
+              persist: persistSendHighlight,
+              scrollIntoView: true,
+              alias: 'send-button'
+            });
+
+            if (highlightId) {
+              logger.info(`✨ 创建发送按钮高亮: ${highlightId}`);
+              highlightApplied = true;
+              engine?.recordBehavior?.('send_highlight', { via: 'handle', service: 'unified', id: highlightId });
+            } else {
+              throw new Error('统一高亮服务创建失败');
+            }
+          } else {
+            // 回退到原始实现
+            logger.warn('⚠️ 统一高亮服务不可用，使用原始实现');
+
+            const info = await sendHandle.evaluate((el, ms, color, label, persist) => {
+              el.scrollIntoView({behavior:'instant', block:'center'});
               const r = el.getBoundingClientRect();
-              const score = (r.width*r.height) + (r.y > (innerHeight - 220) ? 5000 : 0) + (r.x > innerWidth/2 ? 2500 : 0);
-              cands.push({ el, score });
+              // 标记元素，供后续点击节点复用
+              try { el.setAttribute('data-webauto-send','1'); } catch {}
+              // 元素自身描边 - 使用强化样式
+              el.__old_outline = el.style.outline;
+              el.style.setProperty('outline', '3px solid ' + color, 'important');
+              el.__old_boxShadow = el.style.boxShadow;
+              el.style.setProperty('boxShadow', '0 0 0 2px rgba(255,45,85,0.35)', 'important');
+              el.style.setProperty('transition', 'all 0.3s ease', 'important');
+
+              // 叠加一个固定定位的遮罩，避免 span 内描边不明显
+              const ov = document.createElement('div');
+              ov.id = '__webauto_highlight_overlay__';
+              ov.style.setProperty('position', 'fixed', 'important');
+              ov.style.setProperty('left', r.x + 'px', 'important');
+              ov.style.setProperty('top', r.y + 'px', 'important');
+              ov.style.setProperty('width', r.width + 'px', 'important');
+              ov.style.setProperty('height', r.height + 'px', 'important');
+              ov.style.setProperty('border', `3px solid ${color}`, 'important');
+              ov.style.setProperty('border-radius', '6px', 'important');
+              ov.style.setProperty('box-sizing', 'border-box', 'important');
+              ov.style.setProperty('pointer-events', 'none', 'important');
+              ov.style.setProperty('z-index', '2147483647', 'important');
+              ov.style.setProperty('box-shadow', `0 0 15px ${color}40`, 'important');
+              document.body.appendChild(ov);
+
+              // 标签
+              const tag = document.createElement('div');
+              tag.textContent = label;
+              tag.style.setProperty('position', 'fixed', 'important');
+              tag.style.setProperty('left', r.x + 'px', 'important');
+              tag.style.setProperty('top', (r.y - 18) + 'px', 'important');
+              tag.style.setProperty('background', color, 'important');
+              tag.style.setProperty('color', '#fff', 'important');
+              tag.style.setProperty('font-size', '12px', 'important');
+              tag.style.setProperty('padding', '1px 4px', 'important');
+              tag.style.setProperty('border-radius', '3px', 'important');
+              tag.style.setProperty('z-index', '2147483647', 'important');
+              tag.className = '__webauto_highlight_overlay__';
+              document.body.appendChild(tag);
+
+              if (!persist) {
+                setTimeout(() => {
+                  try { ov.remove(); tag.remove(); } catch {}
+                  try {
+                    el.style.outline = el.__old_outline || '';
+                    el.style.boxShadow = el.__old_boxShadow || '';
+                    el.style.transition = '';
+                  } catch {}
+                }, ms);
+              }
+              return { x: r.x, y: r.y, w: r.width, h: r.height };
+            }, highlightMs, sendHighlightColor, sendHighlightLabel, persistSendHighlight);
+            engine?.recordBehavior?.('send_highlight', { via: 'handle', rect: info });
+            highlightApplied = true;
+          }
+        } catch (error) {
+          logger.warn(`⚠️ 发送按钮高亮失败: ${error.message}`);
+        }
+      }
+      if (highlightEnabled && !highlightApplied) {
+        try {
+          // 检查统一高亮服务是否可用
+          const serviceAvailable = await page.evaluate(() => {
+            return typeof window.__webautoHighlight !== 'undefined' &&
+                   typeof window.__webautoHighlight.createHighlight === 'function';
+          });
+
+          if (serviceAvailable) {
+            // 使用统一高亮服务扫描
+            const res = await page.evaluate((exclude, ms, color, label, persist) => {
+              const isVisible = (el) => {
+                const s = getComputedStyle(el);
+                if (s.display === 'none' || s.visibility === 'hidden' || Number(s.opacity) === 0) return false;
+                const r = el.getBoundingClientRect();
+                return r.width > 2 && r.height > 10;
+              };
+              const all = Array.from(document.querySelectorAll('.next-btn, .im-chat-send-btn, .send-btn, [class*="send" i], button, a, [role="button"], .btn, span, div'));
+              const cands = [];
+              for (const el of all) {
+                const t = (el.innerText || el.textContent || '').trim();
+                const cls = String(el.className||'');
+                const title = el.getAttribute && (el.getAttribute('title')||'');
+                const looksSend = (t && (t.includes('发送') || t.includes('发') || /send/i.test(t)))
+                                  || /send/i.test(cls) || /send/i.test(title);
+                if (!looksSend) continue;
+                if (exclude.some(x => t.includes(x))) continue;
+                if (!isVisible(el)) continue;
+                  // 提升到底部右侧区域的候选分数
+                  const r = el.getBoundingClientRect();
+                  const score = (r.width*r.height) + (r.y > (innerHeight - 220) ? 5000 : 0) + (r.x > innerWidth/2 ? 2500 : 0);
+                  cands.push({ el, score });
+              }
+              if (!cands.length) return { applied: false, count: 0 };
+              // 选得分最高元素
+              cands.sort((a,b) => b.score - a.score);
+              let el = cands[0].el;
+              // 若是 span/div，尝试提升到可点击的祖先
+              const clickable = el.closest('.next-btn, [class*="send" i], button, [role="button"], .im-chat-send-btn, .send-btn');
+              if (clickable) el = clickable;
+
+              // 标记元素并使用统一高亮服务
+              try { el.setAttribute('data-webauto-send','1'); } catch {}
+              const highlightId = window.__webautoHighlight.createHighlight(el, {
+                color: color,
+                label: label,
+                duration: persist ? 0 : ms,
+                persist: persist,
+                scrollIntoView: true,
+                alias: 'send-button-scanned'
+              });
+
+              return { applied: !!highlightId, count: cands.length, highlightId: highlightId };
+            }, excludeTexts, highlightMs, sendHighlightColor, sendHighlightLabel, persistSendHighlight).catch(()=>({ applied:false }));
+
+            highlightApplied = !!res?.applied;
+            engine?.recordBehavior?.('send_highlight', { via: 'scan', service: 'unified', applied: highlightApplied, count: res?.count, id: res?.highlightId });
+          } else {
+            // 回退到原始扫描实现
+            logger.warn('⚠️ 统一高亮服务不可用，使用原始扫描实现');
+
+            const res = await target.evaluate((exclude, ms, color, label, persist) => {
+              const isVisible = (el) => {
+                const s = getComputedStyle(el);
+                if (s.display === 'none' || s.visibility === 'hidden' || Number(s.opacity) === 0) return false;
+                const r = el.getBoundingClientRect();
+                return r.width > 2 && r.height > 10;
+              };
+              const all = Array.from(document.querySelectorAll('.next-btn, .im-chat-send-btn, .send-btn, [class*="send" i], button, a, [role="button"], .btn, span, div'));
+              const cands = [];
+              for (const el of all) {
+                const t = (el.innerText || el.textContent || '').trim();
+                const cls = String(el.className||'');
+                const title = el.getAttribute && (el.getAttribute('title')||'');
+                const looksSend = (t && (t.includes('发送') || t.includes('发') || /send/i.test(t)))
+                                  || /send/i.test(cls) || /send/i.test(title);
+                if (!looksSend) continue;
+                if (exclude.some(x => t.includes(x))) continue;
+                if (!isVisible(el)) continue;
+                  // 提升到底部右侧区域的候选分数
+                  const r = el.getBoundingClientRect();
+                  const score = (r.width*r.height) + (r.y > (innerHeight - 220) ? 5000 : 0) + (r.x > innerWidth/2 ? 2500 : 0);
+                  cands.push({ el, score });
+              }
+              if (!cands.length) return { applied: false, count: 0 };
+              // 选得分最高元素
+              cands.sort((a,b) => b.score - a.score);
+              let el = cands[0].el;
+              // 若是 span/div，尝试提升到可点击的祖先
+              const clickable = el.closest('.next-btn, [class*="send" i], button, [role="button"], .im-chat-send-btn, .send-btn');
+              if (clickable) el = clickable;
+              el.scrollIntoView({behavior:'instant', block:'center'});
+              const r = el.getBoundingClientRect();
+
+              // 使用强化样式
+              try { el.__old_outline = el.style.outline; el.style.setProperty('outline', '3px solid ' + color, 'important'); } catch {}
+              try { el.__old_boxShadow = el.style.boxShadow; el.style.setProperty('boxShadow', '0 0 0 2px rgba(255,45,85,0.35)', 'important'); } catch {}
+
+              // 叠加一个固定定位遮罩
+              const ov = document.createElement('div');
+              ov.id = '__webauto_highlight_overlay__';
+              ov.style.setProperty('position', 'fixed', 'important');
+              ov.style.setProperty('left', r.x + 'px', 'important');
+              ov.style.setProperty('top', r.y + 'px', 'important');
+              ov.style.setProperty('width', r.width + 'px', 'important');
+              ov.style.setProperty('height', r.height + 'px', 'important');
+              ov.style.setProperty('border', `3px solid ${color}`, 'important');
+              ov.style.setProperty('border-radius', '6px', 'important');
+              ov.style.setProperty('box-sizing', 'border-box', 'important');
+              ov.style.setProperty('pointer-events', 'none', 'important');
+              ov.style.setProperty('z-index', '2147483647', 'important');
+              ov.style.setProperty('box-shadow', `0 0 15px ${color}40`, 'important');
+              document.body.appendChild(ov);
+
+              const tag = document.createElement('div');
+              tag.textContent = label;
+              tag.style.setProperty('position', 'fixed', 'important');
+              tag.style.setProperty('left', r.x + 'px', 'important');
+              tag.style.setProperty('top', (r.y - 18) + 'px', 'important');
+              tag.style.setProperty('background', color, 'important');
+              tag.style.setProperty('color', '#fff', 'important');
+              tag.style.setProperty('font-size', '12px', 'important');
+              tag.style.setProperty('padding', '1px 4px', 'important');
+              tag.style.setProperty('border-radius', '3px', 'important');
+              tag.style.setProperty('z-index', '2147483647', 'important');
+              tag.className = '__webauto_highlight_overlay__';
+              document.body.appendChild(tag);
+
+              if (!persist) {
+                setTimeout(() => {
+                  try { ov.remove(); tag.remove(); } catch {}
+                  try { el.style.outline = el.__old_outline || ''; el.style.boxShadow = el.__old_boxShadow || ''; } catch {}
+                }, ms);
+              }
+              try { el.setAttribute('data-webauto-send','1'); } catch {}
+              return { applied: true, count: cands.length, rect: { x:r.x, y:r.y, w:r.width, h:r.height } };
+            }, excludeTexts, highlightMs, sendHighlightColor, sendHighlightLabel, persistSendHighlight).catch(()=>({ applied:false }));
+            highlightApplied = !!res?.applied;
+            engine?.recordBehavior?.('send_highlight', { via: 'scan', service: 'fallback', applied: highlightApplied, count: res?.count, rect: res?.rect });
+          }
+        } catch (error) {
+          logger.warn(`⚠️ 扫描高亮失败: ${error.message}`);
+        }
+      }
+      // 1688 特殊：若依旧未标记，尝试根据 data-spm-anchor-id + 文本"发送" 精确标记
+      if (!highlightApplied) {
+        try {
+          // 检查统一高亮服务是否可用
+          const serviceAvailable = await page.evaluate(() => {
+            return typeof window.__webautoHighlight !== 'undefined' &&
+                   typeof window.__webautoHighlight.createHighlight === 'function';
+          });
+
+          if (serviceAvailable) {
+            // 使用统一高亮服务精确查找
+            const ok = await page.evaluate((color, label, persist) => {
+              function vis(n){ try{ const s=getComputedStyle(n); if(s.display==='none'||s.visibility==='hidden'||Number(s.opacity)===0) return false; const r=n.getBoundingClientRect(); return r.width>6&&r.height>6; }catch(e){ return false; } }
+              // 精确查找 span[data-spm-anchor-id*='1688_web_im'] 且文本含"发送"
+              const spans = Array.from(document.querySelectorAll("span[data-spm-anchor-id*='1688_web_im']"));
+              let span = spans.find(el => vis(el) && ((el.innerText||el.textContent||'').includes('发送')));
+              if (!span) {
+                // 兜底：在页面底部区域找文本"发送"的元素
+                const all = Array.from(document.querySelectorAll('button, [role="button"], .im-chat-send-btn, .send-btn, .next-btn, span, div, a'));
+                span = all.find(el => vis(el) && (el.innerText||el.textContent||'').trim()==='发送');
+              }
+              if (!span) return false;
+              let btn = span.closest('button, [role="button"], .im-chat-send-btn, .send-btn, .next-btn');
+              if (!btn) btn = span;
+
+              try { btn.setAttribute('data-webauto-send','1'); } catch {}
+              const highlightId = window.__webautoHighlight.createHighlight(btn, {
+                color: color,
+                label: label,
+                duration: persist ? 0 : 4000,
+                persist: persist,
+                scrollIntoView: true,
+                alias: 'send-button-spm'
+              });
+              return !!highlightId;
+            }, sendHighlightColor, sendHighlightLabel, persistSendHighlight);
+
+            if (ok) {
+              highlightApplied = true;
+              engine?.recordBehavior?.('send_highlight', { via: 'spm-span', service: 'unified' });
+            }
+          } else {
+            // 回退到原始实现
+            logger.warn('⚠️ 统一高亮服务不可用，使用原始SPM实现');
+
+            const ok = await target.evaluate((color, label, persist) => {
+              function vis(n){ try{ const s=getComputedStyle(n); if(s.display==='none'||s.visibility==='hidden'||Number(s.opacity)===0) return false; const r=n.getBoundingClientRect(); return r.width>6&&r.height>6; }catch(e){ return false; } }
+              // 精确查找 span[data-spm-anchor-id*='1688_web_im'] 且文本含"发送"
+              const spans = Array.from(document.querySelectorAll("span[data-spm-anchor-id*='1688_web_im']"));
+              let span = spans.find(el => vis(el) && ((el.innerText||el.textContent||'').includes('发送')));
+              if (!span) {
+                // 兜底：在页面底部区域找文本"发送"的元素
+                const all = Array.from(document.querySelectorAll('button, [role="button"], .im-chat-send-btn, .send-btn, .next-btn, span, div, a'));
+                span = all.find(el => vis(el) && (el.innerText||el.textContent||'').trim()==='发送');
+              }
+              if (!span) return false;
+              let btn = span.closest('button, [role="button"], .im-chat-send-btn, .send-btn, .next-btn');
+              if (!btn) btn = span;
+
+              try { btn.setAttribute('data-webauto-send','1'); } catch {}
+              const r = btn.getBoundingClientRect();
+
+              // 使用强化样式高亮
+              try { btn.__old_outline = btn.style.outline; btn.style.setProperty('outline', '3px solid ' + color, 'important'); } catch {}
+
+              const ov = document.createElement('div');
+              ov.className='__webauto_highlight_overlay__';
+              ov.style.setProperty('position', 'fixed', 'important');
+              ov.style.setProperty('left', r.x + 'px', 'important');
+              ov.style.setProperty('top', r.y + 'px', 'important');
+              ov.style.setProperty('width', r.width + 'px', 'important');
+              ov.style.setProperty('height', r.height + 'px', 'important');
+              ov.style.setProperty('border', `3px solid ${color}`, 'important');
+              ov.style.setProperty('border-radius', '6px', 'important');
+              ov.style.setProperty('pointer-events', 'none', 'important');
+              ov.style.setProperty('z-index', '2147483647', 'important');
+              ov.style.setProperty('box-shadow', `0 0 15px ${color}40`, 'important');
+              document.body.appendChild(ov);
+
+              const tag=document.createElement('div');
+              tag.textContent = label;
+              tag.style.setProperty('position', 'fixed', 'important');
+              tag.style.setProperty('left', r.x + 'px', 'important');
+              tag.style.setProperty('top', (r.y - 18) + 'px', 'important');
+              tag.style.setProperty('background', color, 'important');
+              tag.style.setProperty('color', '#fff', 'important');
+              tag.style.setProperty('font-size', '12px', 'important');
+              tag.style.setProperty('padding', '1px 4px', 'important');
+              tag.style.setProperty('border-radius', '3px', 'important');
+              tag.style.setProperty('z-index', '2147483647', 'important');
+              document.body.appendChild(tag);
+
+              if (!persist) {
+                setTimeout(() => {
+                  try{ ov.remove(); tag.remove(); btn.style.outline = btn.__old_outline||''; }catch{}
+                }, 4000);
+              }
+              return true;
+            }, sendHighlightColor, sendHighlightLabel, persistSendHighlight);
+
+            if (ok) {
+              highlightApplied = true;
+              engine?.recordBehavior?.('send_highlight', { via: 'spm-span', service: 'fallback' });
             }
           }
-          if (!cands.length) return { applied: false, count: 0 };
-          // 选得分最高元素
-          cands.sort((a,b) => b.score - a.score);
-          let el = cands[0].el;
-          // 若是 span/div，尝试提升到可点击的祖先
-          const clickable = el.closest('.next-btn, button, [role="button"], .im-chat-send-btn, .send-btn');
-          if (clickable) el = clickable;
-          el.scrollIntoView({behavior:'instant', block:'center'});
-          const r = el.getBoundingClientRect();
-          el.__old_outline = el.style.outline; el.style.outline = '3px solid #ff2d55';
-          el.__old_boxShadow = el.style.boxShadow; el.style.boxShadow = '0 0 0 2px rgba(255,45,85,0.35)';
-          // 叠加一个固定定位遮罩
-          const ov = document.createElement('div');
-          ov.id = '__webauto_highlight_overlay__';
-          ov.style.position = 'fixed';
-          ov.style.left = r.x + 'px';
-          ov.style.top = r.y + 'px';
-          ov.style.width = r.width + 'px';
-          ov.style.height = r.height + 'px';
-          ov.style.border = '3px solid #ff2d55';
-          ov.style.borderRadius = '6px';
-          ov.style.boxSizing = 'border-box';
-          ov.style.pointerEvents = 'none';
-          ov.style.zIndex = '2147483647';
-          document.body.appendChild(ov);
-          setTimeout(()=>{ try{ ov.remove(); }catch{} }, ms);
-          setTimeout(()=>{ try{ el.style.outline = el.__old_outline || ''; el.style.boxShadow = el.__old_boxShadow || ''; }catch{} }, ms);
-          return { applied: true, count: cands.length, rect: { x:r.x, y:r.y, w:r.width, h:r.height } };
-        }, excludeTexts, highlightMs).catch(()=>({ applied:false }));
-        engine?.recordBehavior?.('send_highlight', { via: 'scan', applied: !!res?.applied, count: res?.count, rect: res?.rect });
-        highlightApplied = !!res?.applied;
+        } catch (error) {
+          logger.warn(`⚠️ SPM高亮失败: ${error.message}`);
+        }
       }
       if (!highlightApplied) {
         return { success: false, error: 'send button not found/highlight failed' };

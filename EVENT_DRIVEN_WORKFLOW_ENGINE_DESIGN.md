@@ -2,7 +2,7 @@
 
 ## 📋 执行摘要
 
-经过深入分析现有系统，发现Weibo工作流系统已经实现了完整的事件驱动架构。现有的BaseSelfRefreshingContainer和WeiboLinkContainer已经提供了 sophisticated的事件驱动容器系统，无需重新构建，而是需要在现有基础上进行协调和优化。
+WebAuto 工作流引擎在事件驱动的基础上，新增“锚点协议（Anchor Protocol）”，确保每一次接力都在“可确认的页面状态”下继续执行：主流程之前的入站锚点、阶段锚点、以及出现即点的事件驱动容器，实现了端到端的稳定性提升。
 
 ## 🏗️ 现有系统架构分析
 
@@ -132,7 +132,7 @@ class WeiboLinkContainer extends BaseSelfRefreshingContainer {
 
 ### 真实架构分析
 
-**现有的系统已经是事件驱动的**，而不是传统命令式系统：
+**现有的系统是事件驱动 + 锚点驱动**，而不是传统命令式系统：
 
 ```typescript
 // 已有的完整事件驱动系统
@@ -237,9 +237,37 @@ private async performAutoScroll(): Promise<void> {
 
 ```typescript
 // 已有的事件驱动工作流生命周期
-'workflow:start' → 'browser:init:complete' → 'cookie:load:complete' →
-'page:navigate:complete' → 'login:verify:success' → 'weibo:scroll:completed' →
-'result:save:complete' → 'workflow:complete'
+顶层流程：
+`workflow:start` → `browser:init:complete` → `cookie:load:complete` →
+`anchor:check:success` → `page:navigate:complete` → `login:verify:success` →
+`stage:anchor:success*` → `result:save:complete` → `workflow:complete`
+
+其中：
+- anchor:check:success：顶层锚点（工作流 JSON 顶层 `anchor`）命中；未命中则停止
+- stage:anchor:success*：阶段锚点（显式 `AnchorPointNode`）命中
+
+### 锚点协议（Anchor Protocol）
+
+#### 目标
+在复杂站点与风控场景中，保证接力流程在“确定状态”的页面/容器上继续，消除“错误页面继续执行”的风险。
+
+#### 能力
+- hostFilter/urlPattern/frame 限定目标页面与 iframe；
+- selectors + textIncludes + requireVisible 组合精确命中元素；
+- MutationObserver + 轮询混合等待，支持超时控制；
+- 可视化高亮（ANCHOR 标注），记录锚点信息；
+- 顶层锚点：由 Runner 自动注入 Anchor 小流（Start→AttachSession→AnchorPointNode→End）；
+- 阶段锚点：在工作流关键步骤显式放置 `AnchorPointNode`。
+
+#### 相关节点
+- AnchorPointNode：锚点检测与可视化；
+- EventDrivenOptionalClickNode：出现即点、未出现跳过；
+- AdvancedClickNode：鼠标/JS/Playwright 多策略点击（支持鼠标可视化与子元素优先打点）。
+
+#### 迁移准则
+- 工作流顶层补充 `anchor`；
+- 关键阶段插入 `AnchorPointNode`（例如：搜索完成、聊天页附着后）；
+- 点击类节点尽量在阶段锚点之后执行，确保容器已加载。
 ```
 
 #### 2. **容器内部的自我刷新**

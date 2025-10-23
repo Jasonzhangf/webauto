@@ -12,6 +12,28 @@ import BehaviorRecorder from './BehaviorRecorder.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
+const DEFAULT_HIGHLIGHT = Object.freeze({
+  enabled: true,
+  persist: true,
+  durationMs: 4000,
+  anchor: { enabled: true, color: '#34c759', label: 'ANCHOR', persist: true, durationMs: 4000 },
+  action: { enabled: true, color: '#ff2d55', label: 'ACTION', persist: false, durationMs: 5000 },
+  perNode: {},
+});
+
+const deepMerge = (base = {}, patch = {}) => {
+  if (!patch || typeof patch !== 'object') return base;
+  const out = Array.isArray(base) ? base.slice() : { ...base };
+  for (const [key, value] of Object.entries(patch)) {
+    if (value && typeof value === 'object' && !Array.isArray(value)) {
+      out[key] = deepMerge(out[key] || {}, value);
+    } else if (value !== undefined) {
+      out[key] = value;
+    }
+  }
+  return out;
+};
+
 class WorkflowEngine {
   constructor() {
     this.nodeRegistry = new NodeRegistry();
@@ -25,10 +47,40 @@ class WorkflowEngine {
     this.results = {};
     this.behaviorLog = [];
     this.recorder = null;
+    this.highlightDefaults = { ...DEFAULT_HIGHLIGHT };
+  }
+
+  applyHighlightDefaults(overrides) {
+    if (!overrides) return;
+    this.highlightDefaults = deepMerge(this.highlightDefaults, overrides);
+  }
+
+  resolveHighlightContext(node) {
+    const perNode = this.highlightDefaults.perNode?.[node?.type] || {};
+    const merged = deepMerge(
+      deepMerge(this.highlightDefaults, perNode),
+      node?.config?.highlightOverrides
+    );
+    if (node?.config?.highlight === false || merged.enabled === false) {
+      return {
+        ...merged,
+        enabled: false,
+        anchor: { ...(merged.anchor || {}), enabled: false },
+        action: { ...(merged.action || {}), enabled: false },
+      };
+    }
+    return merged;
   }
 
     async executeWorkflow(workflowConfig, parameters = {}) {
         try {
+            // 初始化高亮默认配置
+            this.highlightDefaults = { ...DEFAULT_HIGHLIGHT };
+            this.applyHighlightDefaults(workflowConfig?.highlightDefaults);
+            if (parameters?.highlightDefaults) {
+                this.applyHighlightDefaults(parameters.highlightDefaults);
+            }
+            
             this.logger.info(`🚀 开始执行工作流: ${workflowConfig.name}`);
             this.currentState = 'running';
             this.variableManager.initialize(workflowConfig.variables);
@@ -86,12 +138,13 @@ class WorkflowEngine {
             };
 
         } catch (error) {
-            this.logger.error(`❌ 工作流执行失败: ${error.message}`);
+            const errorMessage = error && typeof error === 'object' && error.message ? error.message : String(error);
+            this.logger.error(`❌ 工作流执行失败: ${errorMessage}`);
             this.currentState = 'failed';
 
             return {
                 success: false,
-                error: error.message,
+                error: errorMessage,
                 results: this.results,
                 variables: this.variableManager.getAll()
             };
@@ -99,7 +152,10 @@ class WorkflowEngine {
     }
 
     async executeNode(workflowConfig, node, allNodes) {
-        this.logger.info(`🔧 执行节点: ${node.name} (${node.type})`);
+        if (!node) {
+            throw new Error('节点参数不能为空');
+        }
+        this.logger.info(`🔧 执行节点: ${node.name || '未知节点'} (${node.type || '未知类型'})`);
 
         try {
             // 获取节点处理器
@@ -119,7 +175,8 @@ class WorkflowEngine {
                 context: this.context,
                 page: this.page,
                 results: this.results,
-                engine: this
+                engine: this,
+                highlight: this.resolveHighlightContext(node)
             };
 
             // 执行节点
@@ -127,7 +184,7 @@ class WorkflowEngine {
 
             // 处理节点结果
             if (nodeResult.success) {
-                this.logger.info(`✅ 节点 ${node.name} 执行成功`);
+                this.logger.info(`✅ 节点 ${node.name || '未知节点'} 执行成功`);
 
                 // 更新变量
                 if (nodeResult.variables) {
@@ -162,22 +219,24 @@ class WorkflowEngine {
                 }
 
             } else {
-                this.logger.error(`❌ 节点 ${node.name} 执行失败: ${nodeResult.error}`);
+                const nodeError = nodeResult && nodeResult.error ? nodeResult.error : '未知错误';
+                this.logger.error(`❌ 节点 ${node.name || '未知节点'} 执行失败: ${nodeError}`);
 
                 // 处理错误分支
-                if (node.error && node.error.length > 0) {
+                if (node && node.error && Array.isArray(node.error) && node.error.length > 0) {
                     const errorNodeId = node.error[0];
                     const errorNode = allNodes.find(n => n.id === errorNodeId);
                     if (errorNode) {
                         await this.executeNode(workflowConfig, errorNode, allNodes);
                     }
                 } else {
-                    throw new Error(nodeResult.error);
+                    throw new Error(nodeError);
                 }
             }
 
         } catch (error) {
-            this.logger.error(`💥 节点 ${node.name} 执行异常: ${error.message}`);
+            const errorMessage = error && typeof error === 'object' && error.message ? error.message : String(error);
+            this.logger.error(`💥 节点 ${node.name || '未知节点'} 执行异常: ${errorMessage}`);
             throw error;
         }
     }

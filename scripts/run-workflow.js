@@ -19,15 +19,25 @@ async function main() {
     process.exit(1);
   }
 
-  // 解析简单参数（--debug、--sessionId=...）
-  const flags = new Set(args.slice(1));
-  const debug = flags.has('--debug');
-  const sidMatch = args.find(a => a.startsWith('--sessionId='));
-  const sessionId = sidMatch ? sidMatch.split('=')[1] : undefined;
+  // 解析参数（--debug、--sessionId=...、以及任意 --key=value 注入为运行参数）
+  const flags = args.slice(1);
+  const debug = flags.includes('--debug');
+  const parameters = {};
+  for (const a of flags) {
+    if (!a.startsWith('--')) continue;
+    if (a === '--debug') continue;
+    const idx = a.indexOf('=');
+    if (idx > 2) {
+      const k = a.slice(2, idx);
+      const v = a.slice(idx + 1);
+      parameters[k] = v;
+    }
+  }
+  const sessionId = parameters.sessionId;
 
   const cfg = JSON.parse(readFileSync(workflowPath, 'utf8'));
   const engine = new WorkflowEngine();
-  const res = await engine.executeWorkflow(cfg, { debug, sessionId });
+  const res = await engine.executeWorkflow(cfg, { debug, sessionId, ...parameters });
   console.log('📦 执行完成:', res.success ? '✅ 成功' : '❌ 失败');
   if (!res.success) {
     console.error('错误:', res.error);

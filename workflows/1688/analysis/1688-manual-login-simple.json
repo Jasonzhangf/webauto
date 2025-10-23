@@ -83,7 +83,8 @@
       "type": "CookieSaverNode",
       "name": "保存Cookie",
       "config": {
-        "outputFile": "/Users/fanzhang/.webauto/cookies/1688-complete-cookies.json"
+        "outputFile": "/Users/fanzhang/.webauto/cookies/1688-domestic.json",
+        "cookiePath": "/Users/fanzhang/.webauto/cookies/1688-domestic.json"
       },
       "next": ["end"]
     },

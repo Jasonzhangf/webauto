@@ -31,19 +31,69 @@ class WorkflowRunner {
             // 执行前置流程（若存在配置）
             const preflowRecords = parameters.skipPreflows ? [] : await this.runPreflows({ ...parameters, sessionId: workingSessionId });
 
+            // Anchor 入站检查（如果 workflow 声明了 anchor，则先执行锚点检查工作流）
+            if (workflowConfig.anchor && typeof workflowConfig.anchor === 'object') {
+                const anchorFlow = {
+                    name: `${workflowConfig.name || 'Workflow'} Anchor Check`,
+                    nodes: [
+                        { id: 'start', type: 'StartNode', name: '开始', next: ['attach'] },
+                        { id: 'attach', type: 'AttachSessionNode', name: '会话接力', config: {}, next: ['anchor'] },
+                        { id: 'anchor', type: 'AnchorPointNode', name: '锚点确认', config: workflowConfig.anchor, next: ['end'] },
+                        { id: 'end', type: 'EndNode', name: '结束', config: { cleanup: false } }
+                    ],
+                    globalConfig: { logLevel: 'info', timeout: Math.max(600000, Number(workflowConfig?.globalConfig?.timeout || 0)) }
+                };
+                const anchorResult = await this.engine.executeWorkflow(anchorFlow, { ...parameters, sessionId: workingSessionId });
+                const rec = this.writeRecord({
+                    workflowPath: workflowPath + '#anchor',
+                    workflowName: anchorFlow.name,
+                    parameters: { ...parameters, sessionId: workingSessionId },
+                    result: anchorResult,
+                    isPreflow: true
+                });
+                if (!anchorResult?.success) {
+                    return { success: false, error: 'anchor check failed', anchorRecord: rec };
+                }
+            }
+
             // 执行工作流
             const result = await this.engine.executeWorkflow(workflowConfig, { ...parameters, sessionId: workingSessionId });
+
+            // 结束锚点检查（如果 workflow 声明了 endAnchor）
+            let endAnchorResult = null;
+            if (result.success && workflowConfig.endAnchor && typeof workflowConfig.endAnchor === 'object') {
+                const endAnchorFlow = {
+                    name: `${workflowConfig.name || 'Workflow'} End Anchor Check`,
+                    nodes: [
+                        { id: 'start', type: 'StartNode', name: '开始', next: ['attach'] },
+                        { id: 'attach', type: 'AttachSessionNode', name: '会话接力', config: {}, next: ['endAnchor'] },
+                        { id: 'endAnchor', type: 'AnchorPointNode', name: '结束锚点确认', config: workflowConfig.endAnchor, next: ['end'] },
+                        { id: 'end', type: 'EndNode', name: '结束', config: { cleanup: false } }
+                    ],
+                    globalConfig: { logLevel: 'info', timeout: 60000 }
+                };
+                endAnchorResult = await this.engine.executeWorkflow(endAnchorFlow, { ...parameters, sessionId: workingSessionId });
+                
+                if (!endAnchorResult?.success) {
+                    return { 
+                        success: false, 
+                        error: 'end anchor check failed', 
+                        result,
+                        endAnchorRecord: endAnchorResult 
+                    };
+                }
+            }
 
             // 记录结果
             const record = this.writeRecord({
                 workflowPath,
                 workflowName: workflowConfig.name,
                 parameters,
-                result,
+                result: { ...result, endAnchorResult },
                 preflowRecords
             });
 
-            return { ...result, record };
+            return { ...result, record, endAnchorResult };
 
         } catch (error) {
             console.error('❌ 工作流执行失败:', error.message);

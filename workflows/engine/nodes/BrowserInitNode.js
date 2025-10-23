@@ -118,6 +118,17 @@ class BrowserInitNode extends BaseNode {
                 }
             } catch {}
 
+            // 注入WebAuto统一高亮服务
+            try {
+                const highlightServicePath = new URL('../utils/highlight-service.js', import.meta.url).href;
+                await contextObj.addInitScript({
+                    path: highlightServicePath
+                });
+                logger.info('✅ 注入WebAuto统一高亮服务');
+            } catch (error) {
+                logger.warn('⚠️ 高亮服务注入失败:', error.message);
+            }
+
             // 设置常见请求头，降低风控命中
             if (config?.extraHeaders !== false) {
                 try {

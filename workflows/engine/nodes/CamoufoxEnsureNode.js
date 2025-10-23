@@ -17,11 +17,17 @@ export default class CamoufoxEnsureNode extends BaseNode {
       const resolveBinary = (p) => {
         if (!p) return '';
         try {
-          if (!p.endsWith('camoufox') && !p.endsWith('firefox') && existsSync(p)) {
+          if (existsSync(p)) {
+            // 1) 若是 macOS app 目录
             const mac1 = p + '/Camoufox.app/Contents/MacOS/camoufox';
             const mac2 = p + '/Camoufox.app/Contents/MacOS/firefox';
             if (existsSync(mac1)) return mac1;
             if (existsSync(mac2)) return mac2;
+            // 2) 若 p 为目录，搜索可执行文件
+            try {
+              const found = execSync(`bash -lc 'test -d "${p}" && (find "${p}" -maxdepth 3 -type f \( -name "camoufox*" -o -name "firefox*" \) -perm +111 | head -n 1) || true'`, { encoding: 'utf8', stdio: ['ignore','pipe','ignore'] }).trim();
+              if (found && existsSync(found)) return found;
+            } catch {}
           }
         } catch {}
         return p;
@@ -87,6 +93,11 @@ export default class CamoufoxEnsureNode extends BaseNode {
         logger.error('❌ 无法解析 Camoufox 可执行路径。请设置环境变量 CAMOUFOX_PATH');
         return { success: false, error: 'Camoufox not found' };
       }
+
+      // 确保可执行权限（macOS/Linux）
+      try { execSync(`chmod +x "${camoufoxPath}"`, { stdio: 'ignore' }); } catch {}
+      // 移除下载隔离（macOS 可选）
+      try { execSync(`xattr -dr com.apple.quarantine "${camoufoxPath}"`, { stdio: 'ignore' }); } catch {}
 
       variables.set('camoufoxPath', camoufoxPath);
       try { process.env.CAMOUFOX_PATH = camoufoxPath; } catch {}

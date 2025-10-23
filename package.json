@@ -5,6 +5,13 @@
   "type": "module",
   "dependencies": {
     "camoufox": "^0.1.19",
+    "iconv-lite": "^0.6.3",
     "playwright": "^1.56.0"
+  },
+  "scripts": {
+    "start:mcp:browser": "npx @browsermcp/mcp@latest"
+  },
+  "devDependencies": {
+    "@modelcontextprotocol/sdk": "^1.20.1"
   }
 }

@@ -1,0 +1,38 @@
+{
+  "type": "preflow",
+  "path": "./workflows/1688/relay/1688-mobile-protector-chat-workflow.json#anchor",
+  "name": "1688手机保护膜搜索聊天工作流 Anchor Check",
+  "startedAt": 1761105125535,
+  "finishedAt": 1761105125535,
+  "success": true,
+  "error": null,
+  "variables": {
+    "workflowName": "1688手机保护膜搜索聊天工作流 Anchor Check",
+    "sessionId": "sess-1761105110995-605189",
+    "sessionDir": "/Users/fanzhang/.webauto/sessions/sess-1761105110995-605189",
+    "debug": true,
+    "keyword": "手机保护膜",
+    "startTime": "2025-10-22T03:52:05.522Z",
+    "workflowStarted": true,
+    "sessionAttached": true,
+    "anchorSettled": true,
+    "anchorSelector": ".userAvatarLogo img",
+    "anchorRect": {
+      "x": 1799,
+      "y": 11.5,
+      "width": 41,
+      "height": 41
+    },
+    "endTime": "2025-10-22T03:52:05.535Z",
+    "sessionPersisted": true,
+    "workflowCompleted": true,
+    "executionTime": 13
+  },
+  "outputs": {},
+  "parameters": {
+    "debug": true,
+    "keyword": "手机保护膜",
+    "sessionId": "sess-1761105110995-605189"
+  },
+  "preflows": []
+}

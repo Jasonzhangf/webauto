@@ -71,8 +71,8 @@
       "type": "CookieSaverNode",
       "name": "保存完整Cookie",
       "config": {
-        "outputFile": "/Users/fanzhang/.webauto/cookies/1688-manual-complete-cookies.json",
-        "cookiePath": "/Users/fanzhang/.webauto/cookies/1688-manual-complete-cookies.json",
+        "outputFile": "/Users/fanzhang/.webauto/cookies/1688-domestic.json",
+        "cookiePath": "/Users/fanzhang/.webauto/cookies/1688-domestic.json",
         "includeAllDomains": true,
         "includeSessionCookies": true,
         "includeHttpOnly": true,

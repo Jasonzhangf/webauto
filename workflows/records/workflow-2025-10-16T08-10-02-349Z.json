@@ -1,0 +1,127 @@
+{
+  "type": "workflow",
+  "path": "/Users/fanzhang/Documents/github/webauto/workflows/preflows/1688-login-preflow.json",
+  "name": "1688 Login Preflow",
+  "startedAt": 1760602202349,
+  "finishedAt": 1760602202349,
+  "success": true,
+  "error": null,
+  "variables": {
+    "workflowName": "1688 Login Preflow",
+    "sessionId": "sess-1760602181337-847964",
+    "sessionDir": "/Users/fanzhang/.webauto/sessions/sess-1760602181337-847964",
+    "debug": true,
+    "startTime": "2025-10-16T08:09:52.071Z",
+    "workflowStarted": true,
+    "browserInitialized": true,
+    "browserInfo": {
+      "headless": false,
+      "viewport": {
+        "width": 1920,
+        "height": 1080
+      }
+    },
+    "lastWaitMs": 2728,
+    "cookiesLoaded": true,
+    "cookieCount": 171,
+    "cookiePath": "/Users/fanzhang/.webauto/cookies/1688-domestic.json",
+    "currentUrl": "https://www.1688.com/",
+    "navigationCompleted": true,
+    "lastNavigationTime": "2025-10-16T08:09:59.309Z",
+    "antiBotWaitMs": 1064,
+    "modalsDismissed": 0,
+    "isLoggedIn": true,
+    "loginInfo": {
+      "found": true,
+      "selector": ".userAvatarLogo img",
+      "count": 1,
+      "visible": true
+    },
+    "loginVerifiedAt": "2025-10-16T08:10:02.343Z",
+    "cookieSaved": true,
+    "cookieSavePath": "/Users/fanzhang/.webauto/cookies/1688-domestic.json",
+    "cookieSaveCount": 171,
+    "resultSaved": true,
+    "resultFilePath": "workflows/records/preflow-1688-login-success-2025-10-16T08-10-02-345Z.json",
+    "resultFilename": "preflow-1688-login-success-2025-10-16T08-10-02-345Z.json",
+    "handshakeSignalPath": "/Users/fanzhang/.webauto/sessions/sess-1760602181337-847964/login.json",
+    "behaviorLogPath": "/Users/fanzhang/.webauto/sessions/sess-1760602181337-847964/behavior-1688 Login Preflow-2025-10-16T08-10-02-346Z.json",
+    "behaviorEventCount": 1259,
+    "contextExportPath": "/Users/fanzhang/.webauto/sessions/sess-1760602181337-847964/context.json",
+    "endTime": "2025-10-16T08:10:02.349Z",
+    "sessionPersisted": true,
+    "logsExported": true,
+    "workflowCompleted": true,
+    "executionTime": 10278
+  },
+  "outputs": {},
+  "parameters": {
+    "debug": true
+  },
+  "preflows": [
+    {
+      "file": "/Users/fanzhang/Documents/github/webauto/workflows/records/preflow-2025-10-16T08-09-52-070Z.json",
+      "type": "preflow",
+      "path": "/Users/fanzhang/Documents/github/webauto/workflows/preflows/1688-login-preflow.json",
+      "name": "1688 Login Preflow",
+      "startedAt": 1760602192070,
+      "finishedAt": 1760602192070,
+      "success": true,
+      "error": null,
+      "variables": {
+        "workflowName": "1688 Login Preflow",
+        "sessionId": "sess-1760602181337-847964",
+        "sessionDir": "/Users/fanzhang/.webauto/sessions/sess-1760602181337-847964",
+        "debug": true,
+        "startTime": "2025-10-16T08:09:41.339Z",
+        "workflowStarted": true,
+        "browserInitialized": true,
+        "browserInfo": {
+          "headless": false,
+          "viewport": {
+            "width": 1920,
+            "height": 1080
+          }
+        },
+        "lastWaitMs": 2136,
+        "cookiesLoaded": true,
+        "cookieCount": 170,
+        "cookiePath": "/Users/fanzhang/.webauto/cookies/1688-domestic.json",
+        "currentUrl": "https://www.1688.com/",
+        "navigationCompleted": true,
+        "lastNavigationTime": "2025-10-16T08:09:48.575Z",
+        "antiBotWaitMs": 1595,
+        "modalsDismissed": 0,
+        "isLoggedIn": true,
+        "loginInfo": {
+          "found": true,
+          "selector": ".userAvatarLogo img",
+          "count": 1,
+          "visible": true
+        },
+        "loginVerifiedAt": "2025-10-16T08:09:52.063Z",
+        "cookieSaved": true,
+        "cookieSavePath": "/Users/fanzhang/.webauto/cookies/1688-domestic.json",
+        "cookieSaveCount": 171,
+        "resultSaved": true,
+        "resultFilePath": "workflows/records/preflow-1688-login-success-2025-10-16T08-09-52-066Z.json",
+        "resultFilename": "preflow-1688-login-success-2025-10-16T08-09-52-066Z.json",
+        "handshakeSignalPath": "/Users/fanzhang/.webauto/sessions/sess-1760602181337-847964/login.json",
+        "behaviorLogPath": "/Users/fanzhang/.webauto/sessions/sess-1760602181337-847964/behavior-1688 Login Preflow-2025-10-16T08-09-52-067Z.json",
+        "behaviorEventCount": 1266,
+        "contextExportPath": "/Users/fanzhang/.webauto/sessions/sess-1760602181337-847964/context.json",
+        "endTime": "2025-10-16T08:09:52.070Z",
+        "sessionPersisted": true,
+        "logsExported": true,
+        "workflowCompleted": true,
+        "executionTime": 10731
+      },
+      "outputs": {},
+      "parameters": {
+        "debug": true,
+        "sessionId": "sess-1760602181337-847964"
+      },
+      "preflows": []
+    }
+  ]
+}

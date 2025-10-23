@@ -1,0 +1,118 @@
+{
+  "name": "1688动态搜索工作流模板",
+  "description": "支持动态GBK编码的1688搜索工作流模板",
+  "version": "1.0.0",
+  "preflows": ["1688-login-preflow"],
+  "nodes": [
+    { "id": "start", "type": "StartNode", "name": "开始", "next": ["attach"] },
+    {
+      "id": "attach",
+      "type": "AttachSessionNode",
+      "name": "会话接力",
+      "config": {},
+      "next": ["generate_search_url"]
+    },
+    {
+      "id": "generate_search_url",
+      "type": "PageSnapshotNode",
+      "name": "动态生成搜索URL",
+      "config": {
+        "script": "// 动态生成1688搜索URL的GBK编码\nconst keyword = '{{keyword}}'; // 从全局配置获取关键词\n\nconsole.log('🔍 搜索关键词:', keyword);\n\n// 动态GBK编码生成\nfunction generateGBKURL(keyword) {\n  // 使用Node.js原生方法进行GBK编码\n  try {\n    // 创建临时的GBK编码映射\n    const gbkMap = {\n      '港': '%B8%DB',\n      '货': '%BB%F5',\n      '钢': '%B8%D6',\n      '化': '%BB%AF',\n      '膜': '%C4%A4',\n      '手': '%CA%D6',\n      '机': '%BB%FA',\n      '汽': '%C6%FB',\n      '车': '%B3%B5',\n      '配': '%C5%E4',\n      '件': '%BC%FE'\n    };\n    \n    let encoded = '';\n    for (let i = 0; i < keyword.length; i++) {\n      const char = keyword[i];\n      if (gbkMap[char]) {\n        encoded += gbkMap[char];\n      } else if (/[a-zA-Z0-9]/.test(char)) {\n        // ASCII字符\n        encoded += '%' + char.charCodeAt(0).toString(16).toUpperCase().padStart(2, '0');\n      } else {\n        // 对于其他字符，使用基本的UTF-8编码作为fallback\n        const utf8Bytes = Buffer.from(char, 'utf8');\n        for (const byte of utf8Bytes) {\n          encoded += '%' + byte.toString(16).toUpperCase().padStart(2, '0');\n        }\n      }\n    }\n    \n    return `https://s.1688.com/selloffer/offer_search.htm?keywords=${encoded}`;\n  } catch (error) {\n    console.error('GBK编码生成失败:', error);\n    return `https://s.1688.com/selloffer/offer_search.htm?keywords=${keyword}`;\n  }\n}\n\nconst searchURL = generateGBKURL(keyword);\nconsole.log('🔗 生成的搜索URL:', searchURL);\n\nreturn { \n  success: true, \n  keyword: keyword, \n  searchURL: searchURL,\n  timestamp: new Date().toISOString()\n};",
+        "saveScreenshots": false
+      },
+      "next": ["navigate_search"]
+    },
+    {
+      "id": "navigate_search",
+      "type": "NavigationNode",
+      "name": "导航到搜索页",
+      "config": {
+        "url": "{{previous.searchURL}}",
+        "waitUntil": "domcontentloaded",
+        "timeout": 30000
+      },
+      "next": ["wait_search"]
+    },
+    {
+      "id": "wait_search",
+      "type": "WaitNode",
+      "name": "等待搜索结果加载",
+      "config": { "minMs": 3000, "maxMs": 5000 },
+      "next": ["extract_results"]
+    },
+    {
+      "id": "extract_results",
+      "type": "PageSnapshotNode",
+      "name": "提取搜索结果",
+      "config": {
+        "script": "console.log('🔍 提取1688搜索结果...'); const offerItems = document.querySelectorAll('.sm-offer-item, .offer-item, .sm-offer, [class*=offer]'); console.log('找到 ' + offerItems.length + ' 个商品项'); let merchantLinks = []; let merchantTitles = []; if (offerItems.length > 0) { for (let i = 0; i < Math.min(20, offerItems.length); i++) { const item = offerItems[i]; const link = item.querySelector('a[href*=\"1688.com\"]'); const title = item.querySelector('h4, [class*=title], a[title]'); if (link && link.href) { merchantLinks.push(link.href); merchantTitles.push(title ? title.textContent.trim() : ''); } } } console.log('🔗 提取的商家链接数量:', merchantLinks.length); console.log('📝 前3个商品标题:', merchantTitles.slice(0, 3)); return { success: true, keyword: '{{keyword}}', merchantLinks: merchantLinks, merchantTitles: merchantTitles, totalFound: merchantLinks.length, currentUrl: window.location.href, pageTitle: document.title, timestamp: new Date().toISOString() };",
+        "saveScreenshots": true
+      },
+      "next": ["check_results"]
+    },
+    {
+      "id": "check_results",
+      "type": "PageSnapshotNode",
+      "name": "检查结果并选择第一条",
+      "config": {
+        "script": "console.log('🔍 检查搜索结果...'); const merchantLinks = {{previous.merchantLinks}}; if (merchantLinks && merchantLinks.length > 0) { console.log('✅ 找到商家链接，准备打开第一条'); console.log('🔗 第一条链接:', merchantLinks[0]); return { success: true, hasResults: true, firstLink: merchantLinks[0], totalLinks: merchantLinks.length }; } else { console.log('❌ 未找到商家链接'); return { success: true, hasResults: false, firstLink: null, totalLinks: 0 }; }",
+        "saveScreenshots": false
+      },
+      "next": ["open_first"]
+    },
+    {
+      "id": "open_first",
+      "type": "NavigationNode",
+      "name": "打开第一条商家链接",
+      "config": {
+        "url": "{{previous.firstLink}}",
+        "waitUntil": "domcontentloaded",
+        "timeout": 30000
+      },
+      "next": ["wait_first_page"]
+    },
+    {
+      "id": "wait_first_page",
+      "type": "WaitNode",
+      "name": "等待商家页面加载",
+      "config": { "minMs": 2000, "maxMs": 3000 },
+      "next": ["analyze_first_page"]
+    },
+    {
+      "id": "analyze_first_page",
+      "type": "PageSnapshotNode",
+      "name": "分析商家页面",
+      "config": {
+        "script": "console.log('🔍 分析第一条商家页面...'); const pageInfo = { url: window.location.href, title: document.title, timestamp: new Date().toISOString() }; const isMerchantPage = window.location.href.includes('1688.com') && (window.location.href.includes('/offer/') || window.location.href.includes('/company/') || window.location.href.includes('member_id=')); const merchantInfo = {}; const companyTitle = document.querySelector('[class*=company], [class*=title], h1'); const contactInfo = document.querySelector('[class*=contact], [class*=phone], [class*=tel]'); const productImages = document.querySelectorAll('img[src*=\"1688\"]'); merchantInfo.companyName = companyTitle ? companyTitle.textContent.trim() : ''; merchantInfo.hasContact = !!contactInfo; merchantInfo.imageCount = productImages.length; console.log('📋 商家页面信息:', { isMerchantPage, url: pageInfo.url, title: pageInfo.title, merchantInfo }); return { success: true, pageInfo: pageInfo, merchantInfo: merchantInfo, isMerchantPage: isMerchantPage };",
+        "saveScreenshots": true
+      },
+      "next": ["save_results"]
+    },
+    {
+      "id": "save_results",
+      "type": "ResultSaverNode",
+      "name": "保存完整结果",
+      "config": {
+        "outputDir": "workflows/records",
+        "filenameTemplate": "1688-dynamic-search-{timestamp}.json",
+        "includeMetadata": true,
+        "mergeData": true
+      },
+      "next": ["end"]
+    },
+    {
+      "id": "end",
+      "type": "EndNode",
+      "name": "结束",
+      "config": { "cleanup": false, "saveLogs": true }
+    }
+  ],
+  "globalConfig": {
+    "logLevel": "info",
+    "screenshotOnError": true,
+    "autoCleanup": false,
+    "parallelExecution": false,
+    "timeout": 180000,
+    "keyword": "钢化膜"
+  }
+}

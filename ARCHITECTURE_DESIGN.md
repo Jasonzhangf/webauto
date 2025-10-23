@@ -6,7 +6,7 @@ WebAuto 是一个基于分层架构的综合性 Web 自动化平台，通过 **�
 
 ## 🏗️ 整体架构设计
 
-### 架构分层图
+### 架构分层图（含锚点协议）
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -247,6 +247,8 @@ communication/
 ### 操作子编排模式
 ```
 Workflow Engine
+├── Preflows（登录/环境）
+├── Anchor Flow（入站锚点：Start→AttachSession→AnchorPointNode→End）
 ├── Browser Operations → Page Navigation → Content Extraction
 ├── File Operations → Data Storage → Format Conversion  
 ├── AI Operations → Content Analysis → Result Processing
@@ -255,8 +257,21 @@ Workflow Engine
 
 ### 数据流向
 ```
-Input Data → Browser Operations → Extracted Content → AI Operations → 
-Analyzed Results → File Operations → Stored Data → Communication Operations → Output
+Input → Preflows → Anchor(Top) → Workflow Nodes → Stage Anchor(s) →
+Results → Save/Relay → Output
+
+## 锚点协议（Anchor Protocol）
+
+### 为什么需要
+复杂站点（例如 1688）存在风控与跳页延迟，若直接执行节点易误触。锚点协议通过“页面级定位元素”作为入站门槛，确保“在对的页面/容器上继续”。
+
+### 如何使用
+- 顶层锚点：在工作流 JSON 顶层声明 `anchor`（host/urlPattern/frame/selectors/textIncludes/requireVisible 等），Runner 会自动在主流前执行锚点检查小流；
+- 阶段锚点：在关键步骤显式加入 `AnchorPointNode`；
+- 失败处理：未命中锚点直接停止主流，保留页面供人工解除风控后复跑。
+
+### 与接力的关系
+锚点协议为每一次接力提供“入口约束”，结合 `AttachSessionNode` 和 CookieManager，保证同一会话内的上下文连贯与安全。
 ```
 
 ### 2. 工作流框架 (Workflow Framework)

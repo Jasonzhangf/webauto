@@ -1,0 +1,39 @@
+{
+  "topLevel": {
+    "hostFilter": "1688.com",
+    "selectors": [
+      ".userAvatarLogo img",
+      "[class*=userAvatarLogo] img"
+    ],
+    "requireVisible": true
+  },
+  "stages": {
+    "home": {
+      "selectors": [".userAvatarLogo img", "#alisearch-keywords", "input[name='keywords']", "#alisearch-form", ".alisearch-bd"],
+      "requireVisible": true
+    },
+    "searchResults": {
+      "selectors": [".sm-offer-list", "#offer-list", ".offer-list", ".sm-offer", ".offer-item", ".offer-card", ".sm-offer-card", "[data-spm*='offer']"],
+      "requireVisible": true
+    },
+    "chatTarget": {
+      "frame": { "urlPattern": "def_cbu_web_im_core" },
+      "selectors": [".im-chat-header", ".im-chat-title", ".chat-header", ".im-conv-list .selected", ".im-session-list .selected", ".conv-item.active"],
+      "requireVisible": true
+    },
+    "sendArea": {
+      "frame": { "urlPattern": "def_cbu_web_im_core" },
+      "selectors": [
+        ".im-chat-input [contenteditable]",
+        "pre.edit[contenteditable]",
+        "div[contenteditable]",
+        "textarea",
+        "[role='textbox']",
+        "span[data-spm-anchor-id*='1688_web_im']",
+        ".im-chat-send-btn", ".send-btn", ".next-btn", "button[atype='send']", "button[type='submit']"
+      ],
+      "requireVisible": true
+    }
+  }
+}
+

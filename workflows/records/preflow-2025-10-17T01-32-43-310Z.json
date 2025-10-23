@@ -1,0 +1,71 @@
+{
+  "type": "preflow",
+  "path": "/Users/fanzhang/Documents/github/webauto/workflows/preflows/1688-login-preflow.json",
+  "name": "1688 Login Preflow",
+  "startedAt": 1760664763310,
+  "finishedAt": 1760664763310,
+  "success": true,
+  "error": null,
+  "variables": {
+    "workflowName": "1688 Login Preflow",
+    "sessionId": "sess-1760664750465-51351",
+    "sessionDir": "/Users/fanzhang/.webauto/sessions/sess-1760664750465-51351",
+    "keyword": "钢化膜",
+    "maxResults": 3,
+    "debug": true,
+    "openFirstLink": true,
+    "searchCategory": "selloffer",
+    "startTime": "2025-10-17T01:32:30.478Z",
+    "workflowStarted": true,
+    "browserInitialized": true,
+    "browserInfo": {
+      "headless": false,
+      "viewport": {
+        "width": 1920,
+        "height": 1080
+      }
+    },
+    "lastWaitMs": 2441,
+    "cookiesLoaded": true,
+    "cookieCount": 170,
+    "cookiePath": "/Users/fanzhang/.webauto/cookies/1688-domestic.json",
+    "currentUrl": "https://www.1688.com/",
+    "navigationCompleted": true,
+    "lastNavigationTime": "2025-10-17T01:32:38.757Z",
+    "antiBotWaitMs": 2000,
+    "modalsDismissed": 0,
+    "isLoggedIn": true,
+    "loginInfo": {
+      "found": true,
+      "selector": ".userAvatarLogo img",
+      "count": 1,
+      "visible": true
+    },
+    "loginVerifiedAt": "2025-10-17T01:32:43.300Z",
+    "cookieSaved": true,
+    "cookieSavePath": "/Users/fanzhang/.webauto/cookies/1688-domestic.json",
+    "cookieSaveCount": 170,
+    "resultSaved": true,
+    "resultFilePath": "workflows/records/preflow-1688-login-success-2025-10-17T01-32-43-306Z.json",
+    "resultFilename": "preflow-1688-login-success-2025-10-17T01-32-43-306Z.json",
+    "handshakeSignalPath": "/Users/fanzhang/.webauto/sessions/sess-1760664750465-51351/login.json",
+    "behaviorLogPath": "/Users/fanzhang/.webauto/sessions/sess-1760664750465-51351/behavior-1688 Login Preflow-2025-10-17T01-32-43-307Z.json",
+    "behaviorEventCount": 1169,
+    "contextExportPath": "/Users/fanzhang/.webauto/sessions/sess-1760664750465-51351/context.json",
+    "endTime": "2025-10-17T01:32:43.310Z",
+    "sessionPersisted": true,
+    "logsExported": true,
+    "workflowCompleted": true,
+    "executionTime": 12832
+  },
+  "outputs": {},
+  "parameters": {
+    "keyword": "钢化膜",
+    "maxResults": 3,
+    "debug": true,
+    "openFirstLink": true,
+    "searchCategory": "selloffer",
+    "sessionId": "sess-1760664750465-51351"
+  },
+  "preflows": []
+}

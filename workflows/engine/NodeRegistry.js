@@ -33,6 +33,15 @@ import ChatComposeNodeFinalV2 from './nodes/ChatComposeNodeFinalV2.js';
 import SelectorProbeNode from './nodes/SelectorProbeNode.js';
 import GateOverlayNode from './nodes/GateOverlayNode.js';
 import MockBatchChatNode from './nodes/MockBatchChatNode.js';
+import PlaywrightClickNode from './nodes/PlaywrightClickNode.js';
+import JavaScriptExecutionNode from './nodes/JavaScriptExecutionNode.js';
+import AdvancedClickNode from './nodes/AdvancedClickNode.js';
+import InputNode from './nodes/InputNode.js';
+import BatchClickNode from './nodes/BatchClickNode.js';
+import GBKURLBuilderNode from './nodes/GBKURLBuilderNode.js';
+import AttachHostPageNode from './nodes/AttachHostPageNode.js';
+import EventDrivenOptionalClickNode from './nodes/EventDrivenOptionalClickNode.js';
+import AnchorPointNode from './nodes/AnchorPointNode.js';
 
 class NodeRegistry {
     constructor() {
@@ -76,6 +85,15 @@ class NodeRegistry {
         this.registerNode('SelectorProbeNode', new SelectorProbeNode());
         this.registerNode('GateOverlayNode', new GateOverlayNode());
         this.registerNode('MockBatchChatNode', new MockBatchChatNode());
+        this.registerNode('PlaywrightClickNode', new PlaywrightClickNode());
+        this.registerNode('JavaScriptExecutionNode', new JavaScriptExecutionNode());
+        this.registerNode('AdvancedClickNode', new AdvancedClickNode());
+        this.registerNode('InputNode', new InputNode());
+        this.registerNode('BatchClickNode', new BatchClickNode());
+        this.registerNode('GBKURLBuilderNode', new GBKURLBuilderNode());
+        this.registerNode('AttachHostPageNode', new AttachHostPageNode());
+        this.registerNode('EventDrivenOptionalClickNode', new EventDrivenOptionalClickNode());
+        this.registerNode('AnchorPointNode', new AnchorPointNode());
     }
 
     registerNode(type, handler) {

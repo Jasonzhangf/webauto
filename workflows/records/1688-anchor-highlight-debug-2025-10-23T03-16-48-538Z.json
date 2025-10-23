@@ -1,0 +1,44 @@
+{
+  "timestamp": "2025-10-23T03-16-48-538Z",
+  "workflowType": "homepage",
+  "success": true,
+  "executionTime": 0,
+  "metadata": {
+    "workflowType": "homepage",
+    "capturedAt": "2025-10-23T03:16:48.538Z",
+    "linkCount": 0,
+    "pageCount": 0,
+    "scrollCount": 0
+  },
+  "results": {
+    "snapshot": {
+      "url": "about:blank",
+      "title": "",
+      "html": "<html><head></head><body></body></html>",
+      "htmlLength": 39,
+      "truncated": false,
+      "scripts": {
+        "inline": [],
+        "external": []
+      },
+      "takenAt": "2025-10-23T03:16:48.538Z"
+    }
+  },
+  "variables": {
+    "workflowName": "1688锚点高亮调试测试",
+    "sessionDir": "/Users/fanzhang/.webauto/sessions/sess-1761189404554-612239",
+    "debug": false,
+    "startTime": "2025-10-23T03:16:44.555Z",
+    "workflowStarted": true,
+    "camoufoxPath": "/Users/fanzhang/Library/Caches/camoufox/Camoufox.app/Contents/MacOS/camoufox",
+    "browserInitialized": true,
+    "browserInfo": {
+      "headless": false,
+      "viewport": {
+        "width": 1920,
+        "height": 1080
+      }
+    },
+    "lastSnapshotUrl": "about:blank"
+  }
+}

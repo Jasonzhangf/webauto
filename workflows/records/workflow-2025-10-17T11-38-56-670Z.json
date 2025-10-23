@@ -1,0 +1,124 @@
+{
+  "type": "workflow",
+  "path": "/Users/fanzhang/Documents/github/webauto/workflows/1688/1688-glass-film-advanced-click-v11.json",
+  "name": "1688钢化膜高级点击测试V11",
+  "startedAt": 1760701136670,
+  "finishedAt": 1760701136670,
+  "success": false,
+  "error": null,
+  "variables": {
+    "workflowName": "1688钢化膜高级点击测试V11",
+    "sessionId": "sess-1760701112188-703148",
+    "sessionDir": "/Users/fanzhang/.webauto/sessions/sess-1760701112188-703148",
+    "debug": true,
+    "startTime": "2025-10-17T11:38:48.589Z",
+    "workflowStarted": true,
+    "sessionAttached": true,
+    "currentUrl": "https://s.1688.com/selloffer/offer_search.htm?keywords=%B8%D6%BB%AF%C4%A4",
+    "navigationCompleted": true,
+    "lastNavigationTime": "2025-10-17T11:38:50.198Z",
+    "lastWaitMs": 3096
+  },
+  "outputs": {
+    "success": true,
+    "action": "merchant_info_extracted",
+    "merchantUrl": "http://shop7119ss90727z1.1688.com/?tracelog=p4p",
+    "merchantText": "深圳市摩奈斯科技有限公司",
+    "selector": "div.space-common-offerlist:nth-child(1) a.offer-desc-item",
+    "clickInfo": {
+      "selector": "div.space-common-offerlist:nth-child(1) a.offer-desc-item",
+      "targetUrl": "http://shop7119ss90727z1.1688.com/?tracelog=p4p",
+      "targetText": "深圳市摩奈斯科技有限公司",
+      "originalUrl": "https://s.1688.com/selloffer/offer_search.htm?keywords=%B8%D6%BB%AF%C4%A4",
+      "originalTitle": "钢化膜_钢化膜批发_钢化膜供应_阿里巴巴",
+      "foundSelector": "[class*=offer]",
+      "timestamp": "2025-10-17T11:38:53.464Z"
+    },
+    "timestamp": "2025-10-17T11:38:53.464Z"
+  },
+  "parameters": {
+    "debug": true
+  },
+  "preflows": [
+    {
+      "file": "/Users/fanzhang/Documents/github/webauto/workflows/records/preflow-2025-10-17T11-38-48-588Z.json",
+      "type": "preflow",
+      "path": "/Users/fanzhang/Documents/github/webauto/workflows/preflows/1688-login-preflow.json",
+      "name": "1688 Login Preflow",
+      "startedAt": 1760701128588,
+      "finishedAt": 1760701128588,
+      "success": true,
+      "error": null,
+      "variables": {
+        "workflowName": "1688 Login Preflow",
+        "sessionId": "sess-1760701112188-703148",
+        "sessionDir": "/Users/fanzhang/.webauto/sessions/sess-1760701112188-703148",
+        "debug": true,
+        "startTime": "2025-10-17T11:38:32.190Z",
+        "workflowStarted": true,
+        "browserInitialized": true,
+        "browserInfo": {
+          "headless": false,
+          "viewport": {
+            "width": 1920,
+            "height": 1080
+          }
+        },
+        "lastWaitMs": 2253,
+        "cookiesLoaded": true,
+        "cookieCount": 171,
+        "cookiePath": "/Users/fanzhang/.webauto/cookies/1688-domestic.json",
+        "currentUrl": "https://www.1688.com/",
+        "navigationCompleted": true,
+        "lastNavigationTime": "2025-10-17T11:38:45.561Z",
+        "antiBotWaitMs": 1502,
+        "modalsDismissed": 0,
+        "isLoggedIn": true,
+        "loginInfo": {
+          "found": true,
+          "selector": ".userAvatarLogo img",
+          "count": 1,
+          "visible": true
+        },
+        "loginVerifiedAt": "2025-10-17T11:38:48.581Z",
+        "cookieSaved": true,
+        "cookieSavePath": "/Users/fanzhang/.webauto/cookies/1688-domestic.json",
+        "cookieSaveCount": 170,
+        "resultSaved": true,
+        "resultFilePath": "workflows/records/preflow-1688-login-success-2025-10-17T11-38-48-584Z.json",
+        "resultFilename": "preflow-1688-login-success-2025-10-17T11-38-48-584Z.json",
+        "handshakeSignalPath": "/Users/fanzhang/.webauto/sessions/sess-1760701112188-703148/login.json",
+        "behaviorLogPath": "/Users/fanzhang/.webauto/sessions/sess-1760701112188-703148/behavior-1688 Login Preflow-2025-10-17T11-38-48-585Z.json",
+        "behaviorEventCount": 1270,
+        "contextExportPath": "/Users/fanzhang/.webauto/sessions/sess-1760701112188-703148/context.json",
+        "endTime": "2025-10-17T11:38:48.588Z",
+        "sessionPersisted": true,
+        "logsExported": true,
+        "workflowCompleted": true,
+        "executionTime": 16398
+      },
+      "outputs": {
+        "success": true,
+        "action": "merchant_info_extracted",
+        "merchantUrl": "http://shop7119ss90727z1.1688.com/?tracelog=p4p",
+        "merchantText": "深圳市摩奈斯科技有限公司",
+        "selector": "div.space-common-offerlist:nth-child(1) a.offer-desc-item",
+        "clickInfo": {
+          "selector": "div.space-common-offerlist:nth-child(1) a.offer-desc-item",
+          "targetUrl": "http://shop7119ss90727z1.1688.com/?tracelog=p4p",
+          "targetText": "深圳市摩奈斯科技有限公司",
+          "originalUrl": "https://s.1688.com/selloffer/offer_search.htm?keywords=%B8%D6%BB%AF%C4%A4",
+          "originalTitle": "钢化膜_钢化膜批发_钢化膜供应_阿里巴巴",
+          "foundSelector": "[class*=offer]",
+          "timestamp": "2025-10-17T11:38:53.464Z"
+        },
+        "timestamp": "2025-10-17T11:38:53.464Z"
+      },
+      "parameters": {
+        "debug": true,
+        "sessionId": "sess-1760701112188-703148"
+      },
+      "preflows": []
+    }
+  ]
+}

@@ -169,6 +169,60 @@ node test-discovery-manager.js
 node test-hierarchy-builder.js
 ```
 
+## 🧭 Workflow Engine 与锚点协议（Anchor Protocol）
+
+> 本项目包含一个事件驱动的浏览器工作流引擎（workflows/engine/*）。为保障接力流程在“确定页面状态”下执行，我们在框架层引入了锚点协议。
+
+### 锚点协议是什么
+- 工作流执行前，必须命中“页面入站锚点”（可视元素/容器），否则不进入主流程；
+- 关键阶段也可设置“阶段锚点”，例如“搜索结果已呈现”“聊天容器已加载”。
+
+### 如何声明顶层锚点
+在工作流 JSON 顶层加入 `anchor` 字段，Runner 会自动执行 Start→AttachSession→AnchorPointNode→End 的锚点检查小流：
+
+```jsonc
+{
+  "name": "Example Flow",
+  "anchor": {
+    "hostFilter": "1688.com",
+    "selectors": [".userAvatarLogo img"],
+    "requireVisible": true,
+    "maxWaitMs": 600000,
+    "pollIntervalMs": 1500,
+    "highlight": true,
+    "persistHighlight": true,
+    "highlightLabel": "ANCHOR"
+  },
+  "nodes": [ { "id": "start", "type": "StartNode", "next": ["..."] } ]
+}
+```
+
+### 在阶段中使用锚点
+在合适的阶段插入 `AnchorPointNode`，例如搜索完成后：
+
+```jsonc
+{ "id": "search_anchor", "type": "AnchorPointNode",
+  "config": { "selectors": ["a[href*='air.1688.com/app/']", ".ww-link.ww-online"],
+              "requireVisible": true, "highlight": true, "persistHighlight": true } }
+```
+
+### 相关框架改动（已合入）
+- 新增节点：`AnchorPointNode`（workflows/engine/nodes/AnchorPointNode.js）
+- NodeRegistry 注册锚点节点
+- WorkflowRunner 自动检测顶层 `anchor` 并在主流前执行锚点检查小流
+- 辅助节点：`EventDrivenOptionalClickNode`（出现即点，未出现跳过）
+- 点击增强：`AdvancedClickNode` 支持鼠标可视化/子元素优先打点/Frame 感知
+
+### 运行示例（含预登录）
+
+```bash
+node scripts/run-with-preflows.js workflows/1688/relay/1688-search-wangwang-chat-compose.json --keyword=冲锋衣 --debug
+```
+
+### 发送按钮定位策略（聊天页）
+- data‑spm + 文本“发送”的 span → 提升到最近可点击祖先（button/[role=button]/.im-chat-send-btn/.send-btn/.next-btn）并标记 `data-webauto-send='1'`
+- 若未匹配，底部右侧区域评分候选作为兜底；点击阶段使用鼠标移动+悬停+点击（可视化光标）。
+
 ## 🏗️ 架构设计
 
 ### 策略模式

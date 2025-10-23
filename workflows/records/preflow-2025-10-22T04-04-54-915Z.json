@@ -1,0 +1,27 @@
+{
+  "type": "preflow",
+  "path": "./workflows/test/anchor-test-workflow.json#anchor",
+  "name": "锚点测试工作流 Anchor Check",
+  "startedAt": 1761105894915,
+  "finishedAt": 1761105894915,
+  "success": false,
+  "error": "session not found",
+  "variables": {
+    "workflowName": "锚点测试工作流 Anchor Check",
+    "sessionId": "anchor-test-1761105894913",
+    "sessionDir": "/Users/fanzhang/.webauto/sessions/anchor-test-1761105894913",
+    "debug": true,
+    "keyword": "手机保护膜",
+    "skipPreflows": true,
+    "startTime": "2025-10-22T04:04:54.915Z",
+    "workflowStarted": true
+  },
+  "outputs": {},
+  "parameters": {
+    "debug": true,
+    "keyword": "手机保护膜",
+    "skipPreflows": true,
+    "sessionId": "anchor-test-1761105894913"
+  },
+  "preflows": []
+}

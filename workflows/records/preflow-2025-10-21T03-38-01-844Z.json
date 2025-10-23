@@ -1,0 +1,36 @@
+{
+  "type": "preflow",
+  "path": "/Users/fanzhang/Documents/github/webauto/workflows/1688/analysis/1688-ultra-highlight-mcp-test.json#anchor",
+  "name": "1688超强化发送按钮高亮-MCP连接测试 Anchor Check",
+  "startedAt": 1761017881844,
+  "finishedAt": 1761017881844,
+  "success": true,
+  "error": null,
+  "variables": {
+    "workflowName": "1688超强化发送按钮高亮-MCP连接测试 Anchor Check",
+    "sessionId": "sess-1761017869400-588339",
+    "sessionDir": "/Users/fanzhang/.webauto/sessions/sess-1761017869400-588339",
+    "debug": true,
+    "startTime": "2025-10-21T03:37:58.801Z",
+    "workflowStarted": true,
+    "sessionAttached": true,
+    "anchorSettled": true,
+    "anchorSelector": ".userAvatarLogo img",
+    "anchorRect": {
+      "x": 1799,
+      "y": 11.5,
+      "width": 41,
+      "height": 41
+    },
+    "endTime": "2025-10-21T03:38:01.843Z",
+    "sessionPersisted": true,
+    "workflowCompleted": true,
+    "executionTime": 3042
+  },
+  "outputs": {},
+  "parameters": {
+    "debug": true,
+    "sessionId": "sess-1761017869400-588339"
+  },
+  "preflows": []
+}

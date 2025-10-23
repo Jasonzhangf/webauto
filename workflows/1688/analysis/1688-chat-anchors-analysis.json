@@ -1,0 +1,122 @@
+{
+  "name": "1688聊天界面锚点分析",
+  "description": "分析1688聊天界面的关键锚点元素：发送按钮和对话名称",
+  "version": "1.0.0",
+  "preflows": ["1688-login-preflow-improved"],
+  "nodes": [
+    {
+      "id": "navigate_to_chat",
+      "type": "NavigateNode",
+      "config": {
+        "url": "https://im.1688.com/",
+        "waitUntil": "networkidle2",
+        "timeout": 30000
+      }
+    },
+    {
+      "id": "wait_for_chat_interface",
+      "type": "WaitNode",
+      "config": {
+        "timeout": 5000
+      }
+    },
+    {
+      "id": "anchor_chat_partner_name",
+      "type": "AnchorPointNode",
+      "config": {
+        "name": "chat_partner_name",
+        "selector": ".go-shop-container",
+        "description": "对话伙伴名称容器",
+        "required": true,
+        "highlight": {
+          "style": "border: 4px solid #FFD700 !important; background: rgba(255, 215, 0, 0.3) !important; z-index: 9999 !important;",
+          "label": "对话伙伴名称"
+        },
+        "validation": {
+          "textContent": {
+            "minLength": 2,
+            "pattern": ".*[\\u4e00-\\u9fa5].*",
+            "description": "必须包含中文字符且长度至少2个字符"
+          }
+        },
+        "dataExtraction": {
+          "name": "partner_name",
+          "text": true,
+          "attributes": ["data-spm-anchor-id", "class"]
+        }
+      }
+    },
+    {
+      "id": "anchor_send_button",
+      "type": "AnchorPointNode",
+      "config": {
+        "name": "send_button",
+        "selector": "button.next-btn.next-small.next-btn-primary.send-btn",
+        "description": "发送按钮",
+        "required": true,
+        "highlight": {
+          "style": "border: 6px solid #FF0000 !important; background: rgba(255, 0, 0, 0.5) !important; box-shadow: 0 0 30px rgba(255, 0, 0, 1) !important; z-index: 9999 !important;",
+          "label": "发送按钮"
+        },
+        "validation": {
+          "textContent": {
+            "equals": "发送",
+            "description": "文本内容必须是'发送'"
+          }
+        },
+        "dataExtraction": {
+          "name": "send_button",
+          "attributes": ["class", "type"],
+          "textContent": true,
+          "childElements": {
+            "span": {
+              "selector": "span[data-spm-anchor-id]",
+              "attributes": ["data-spm-anchor-id"],
+              "textContent": true
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "anchor_input_box",
+      "type": "AnchorPointNode",
+      "config": {
+        "name": "input_box",
+        "selector": "textarea.insight-mf-textarea",
+        "description": "聊天输入框",
+        "required": true,
+        "highlight": {
+          "style": "border: 5px solid #0066FF !important; background: rgba(0, 102, 255, 0.3) !important; z-index: 9999 !important;",
+          "label": "输入框"
+        },
+        "validation": {
+          "placeholder": {
+            "contains": "填写",
+            "description": "占位符应包含'填写'字符"
+          }
+        },
+        "dataExtraction": {
+          "name": "input_box",
+          "attributes": ["class", "placeholder"],
+          "properties": ["value", "disabled"]
+        }
+      }
+    },
+    {
+      "id": "comprehensive_analysis",
+      "type": "JavaScriptExecutionNode",
+      "config": {
+        "script": "// 1688聊天界面综合分析脚本\nconsole.clear();\nconsole.log('🔍 开始1688聊天界面综合分析...');\n\n// 获取锚点数据\nconst chatPartner = window.anchorData?.chat_partner_name;\nconst sendButton = window.anchorData?.send_button;\nconst inputBox = window.anchorData?.input_box;\n\nconsole.log('\\n📊 锚点分析结果:');\nconsole.log('='.repeat(60));\n\nif(chatPartner){\n    console.log('👤 对话伙伴名称:');\n    console.log('  - 名称:', chatPartner.text);\n    console.log('  - SPM:', chatPartner.attributes['data-spm-anchor-id']);\n    console.log('  - 类名:', chatPartner.attributes.class);\n}\n\nif(sendButton){\n    console.log('\\n📤 发送按钮:');\n    console.log('  - 文本:', sendButton.textContent);\n    console.log('  - 类名:', sendButton.attributes.class);\n    console.log('  - 类型:', sendButton.attributes.type);\n    if(sendButton.childElements && sendButton.childElements.span){\n        console.log('  - SPAN SPM:', sendButton.childElements.span.attributes['data-spm-anchor-id']);\n    }\n}\n\nif(inputBox){\n    console.log('\\n📝 输入框:');\n    console.log('  - 占位符:', inputBox.attributes.placeholder);\n    console.log('  - 类名:', inputBox.attributes.class);\n    console.log('  - 当前值:', inputBox.properties.value || '空');\n    console.log('  - 禁用状态:', inputBox.properties.disabled || '启用');\n}\n\nconsole.log('\\n🎯 CSS选择器总结:');\nconsole.log('• 对话伙伴: .go-shop-container');\nconsole.log('• 发送按钮: button.next-btn.next-small.next-btn-primary.send-btn');\nconsole.log('• 输入框: textarea.insight-mf-textarea');\n\nconsole.log('\\n✅ 1688聊天界面分析完成！');\n\nreturn {\n    analysisComplete: true,\n    anchorsFound: {\n        chatPartner: !!chatPartner,\n        sendButton: !!sendButton,\n        inputBox: !!inputBox\n    },\n    selectors: {\n        chatPartner: '.go-shop-container',\n        sendButton: 'button.next-btn.next-small.next-btn-primary.send-btn',\n        inputBox: 'textarea.insight-mf-textarea'\n    }\n};"
+      }
+    }
+  ],
+  "settings": {
+    "timeout": 60000,
+    "retries": 2,
+    "saveCookies": true,
+    "saveScreenshots": true,
+    "highlightAnchors": true,
+    "debugMode": true
+  }
+}

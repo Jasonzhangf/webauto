@@ -1,0 +1,190 @@
+{
+  "name": "1688 Login Preflow Improved",
+  "description": "改进版1688登录预流，增加锚点确认后的Cookie保存以避免风控",
+  "version": "1.1.0",
+  "author": "WebAuto Team",
+  "nodes": [
+    { "id": "start", "type": "StartNode", "name": "开始", "next": ["ensure_camoufox"] },
+    { "id": "ensure_camoufox", "type": "CamoufoxEnsureNode", "name": "Camoufox 校验/安装", "config": {}, "next": ["browser_init"] },
+    {
+      "id": "browser_init",
+      "type": "BrowserInitNode",
+      "name": "浏览器初始化",
+      "config": {
+        "engine": "camoufox",
+        "headless": false,
+        "viewport": { "width": 1920, "height": 1080 },
+        "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "strictAutomationMitigation": true,
+        "extraHeaders": true,
+        "launchArgs": [
+          "--disable-blink-features=AutomationControlled",
+          "--disable-web-security",
+          "--disable-features=VizDisplayCompositor",
+          "--no-first-run",
+          "--disable-default-apps",
+          "--disable-sync",
+          "--metrics-recording-only",
+          "--disable-default-browser-check",
+          "--disable-background-networking",
+          "--disable-background-timer-throttling",
+          "--disable-renderer-backgrounding",
+          "--disable-backgrounding-occluded-windows",
+          "--disable-extensions",
+          "--disable-plugins-discovery",
+          "--disable-ipc-flooding-protection",
+          "--shuffle-messagetypes",
+          "--disable-gpu",
+          "--disable-dev-shm-usage",
+          "--no-sandbox",
+          "--disable-setuid-sandbox",
+          "--disable-features=TranslateUI",
+          "--disable-features=Translate",
+          "--lang=zh-CN",
+          "--accept-lang=zh-CN,zh"
+        ]
+      },
+      "next": ["wait_after_init"]
+    },
+    { "id": "wait_after_init", "type": "WaitNode", "name": "初始化抖动等待", "config": { "minMs": 800, "maxMs": 1800 }, "next": ["load_cookies"] },
+    {
+      "id": "load_cookies",
+      "type": "CookieLoaderNode",
+      "name": "加载Cookie",
+      "config": {
+        "cookiePath": "~/.webauto/cookies/1688-domestic.json"
+      },
+      "position": { "x": 500, "y": 100 },
+      "next": ["pre_nav_wait"],
+      "error": ["navigate_home"]
+    },
+    { "id": "pre_nav_wait", "type": "WaitNode", "name": "加载后等待", "config": { "minMs": 1000, "maxMs": 2500 }, "next": ["warmup_site"] },
+    {
+      "id": "warmup_site",
+      "type": "NavigationNode",
+      "name": "访问预热网站建立会话",
+      "config": {
+        "url": "https://www.baidu.com/",
+        "waitUntil": "domcontentloaded",
+        "timeout": 15000
+      },
+      "next": ["warmup_wait"]
+    },
+    { "id": "warmup_wait", "type": "WaitNode", "name": "预热等待", "config": { "minMs": 2000, "maxMs": 3000 }, "next": ["navigate_home"] },
+    {
+      "id": "navigate_home",
+      "type": "NavigationNode",
+      "name": "导航到主页",
+      "config": {
+        "url": "https://www.1688.com/",
+        "waitUntil": "domcontentloaded",
+        "timeout": 30000
+      },
+      "next": ["antibot_soft"]
+    },
+    { "id": "antibot_soft", "type": "AntiBotMitigationNode", "name": "轻量反风控", "config": { "mouseMoves": 3, "scroll": true, "jitterMinMs": 1500, "jitterMaxMs": 3000 }, "next": ["dismiss_modals"] },
+    { "id": "dismiss_modals", "type": "ModalDismissNode", "name": "关闭模态", "config": { "maxAttempts": 5, "retryDelay": 500 }, "next": ["verify_login"] },
+    {
+      "id": "verify_login",
+      "type": "LoginVerificationNode",
+      "name": "验证登录状态",
+      "config": {
+        "loginSelectors": [
+          ".userAvatarLogo img",
+          "[class*=userAvatarLogo] img",
+          "img[src*=\"alicdn.com/img/ibank/\"]",
+          ".userAvatarLogo > div:nth-child(2)"
+        ],
+        "successText": ["我的1688","消息","订单","退出","账号"],
+        "cookieNames": ["cookie2","_tb_token_","_m_h5_tk","_m_h5_tk_enc","cna","ali_ab","x5sec"],
+        "requireVisible": true,
+        "postLoginWaitMs": 500,
+        "maxRetries": 120,
+        "retryDelay": 15000
+      },
+      "next": ["save_cookies_initial"],
+      "error": ["manual_login"]
+    },
+    { "id": "save_cookies_initial", "type": "CookieSaverNode", "name": "保存Cookie(初始)", "config": { "cookiePath": "~/.webauto/cookies/1688-domestic.json" }, "next": ["wait_after_login"] },
+    { "id": "wait_after_login", "type": "WaitNode", "name": "登录后等待", "config": { "minMs": 2000, "maxMs": 4000 }, "next": ["verify_anchor"] },
+    {
+      "id": "verify_anchor",
+      "type": "AnchorPointNode",
+      "name": "锚点确认",
+      "config": {
+        "hostFilter": "1688.com",
+        "selectors": [".userAvatarLogo img"],
+        "requireVisible": true,
+        "maxWaitMs": 30000,
+        "pollIntervalMs": 1500,
+        "highlight": true,
+        "persistHighlight": true,
+        "highlightLabel": "LOGIN_ANCHOR"
+      },
+      "next": ["save_cookies_final"],
+      "error": ["save_cookies_final"]
+    },
+    { "id": "save_cookies_final", "type": "CookieSaverNode", "name": "保存Cookie(锚点确认后)", "config": { "cookiePath": "~/.webauto/cookies/1688-domestic.json" }, "next": ["handshake_success"] },
+    {
+      "id": "manual_login",
+      "type": "LoginVerificationNode",
+      "name": "手动登录等待",
+      "config": {
+        "loginSelector": ".userAvatarLogo img",
+        "maxRetries": 120,
+        "retryDelay": 15000
+      },
+      "next": ["save_cookies_manual"],
+      "error": ["handshake_failed"]
+    },
+    { "id": "save_cookies_manual", "type": "CookieSaverNode", "name": "保存Cookie(手动登录)", "config": { "cookiePath": "~/.webauto/cookies/1688-domestic.json" }, "next": ["handshake_success"] },
+    {
+      "id": "handshake_success",
+      "type": "ResultSaverNode",
+      "name": "握手成功记录",
+      "config": {
+        "outputDir": "workflows/records",
+        "filenameTemplate": "preflow-1688-login-success-{timestamp}.json",
+        "includeMetadata": true
+      },
+      "next": ["signal_success"]
+    },
+    { "id": "signal_success", "type": "HandshakeSignalNode", "name": "写入成功信号", "config": { "path": "~/.webauto/handshakes/1688-login.json", "status": "success" }, "next": ["behavior_log"] },
+    { "id": "behavior_log", "type": "BehaviorLogNode", "name": "输出行为日志", "config": { "outputDir": "workflows/records" }, "next": ["export_context"] },
+    { "id": "export_context", "type": "ContextExportNode", "name": "导出上下文", "config": { "path": "~/.webauto/handshakes/1688-context.json" }, "next": ["end"] },
+    {
+      "id": "handshake_failed",
+      "type": "ResultSaverNode",
+      "name": "握手失败记录",
+      "config": {
+        "outputDir": "workflows/records",
+        "filenameTemplate": "preflow-1688-login-failed-{timestamp}.json",
+        "includeMetadata": true
+      },
+      "next": ["signal_failed"]
+    },
+    { "id": "signal_failed", "type": "HandshakeSignalNode", "name": "写入失败信号", "config": { "path": "~/.webauto/handshakes/1688-login.json", "status": "failed" }, "next": ["behavior_log_failed"] },
+    { "id": "behavior_log_failed", "type": "BehaviorLogNode", "name": "输出行为日志(失败)", "config": { "outputDir": "workflows/records" }, "next": ["halt"] },
+    {
+      "id": "halt",
+      "type": "HaltNode",
+      "name": "停止",
+      "config": {
+        "message": "前置登录流程失败，停止后续工作流（保留浏览器以便人工处理）"
+      }
+    },
+    {
+      "id": "end",
+      "type": "EndNode",
+      "name": "结束",
+      "config": { "cleanup": false, "saveLogs": true }
+    }
+  ],
+  "globalConfig": {
+    "logLevel": "info",
+    "screenshotOnError": true,
+    "autoCleanup": true,
+    "parallelExecution": false,
+    "timeout": 660000
+  }
+}

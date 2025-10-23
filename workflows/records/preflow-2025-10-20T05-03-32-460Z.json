@@ -1,0 +1,66 @@
+{
+  "type": "preflow",
+  "path": "/Users/fanzhang/Documents/github/webauto/workflows/preflows/1688-login-preflow.json",
+  "name": "1688 Login Preflow",
+  "startedAt": 1760936612460,
+  "finishedAt": 1760936612460,
+  "success": true,
+  "error": null,
+  "variables": {
+    "workflowName": "1688 Login Preflow",
+    "sessionId": "sess-1760936597585-787145",
+    "sessionDir": "/Users/fanzhang/.webauto/sessions/sess-1760936597585-787145",
+    "debug": true,
+    "keyword": "冲锋衣",
+    "startTime": "2025-10-20T05:03:17.586Z",
+    "workflowStarted": true,
+    "camoufoxPath": "/Users/fanzhang/Library/Caches/camoufox/Camoufox.app/Contents/MacOS/camoufox",
+    "browserInitialized": true,
+    "browserInfo": {
+      "headless": false,
+      "viewport": {
+        "width": 1920,
+        "height": 1080
+      }
+    },
+    "lastWaitMs": 2914,
+    "cookiesLoaded": true,
+    "cookieCount": 152,
+    "cookiePath": "/Users/fanzhang/.webauto/cookies/1688-domestic.json",
+    "currentUrl": "https://www.1688.com/",
+    "navigationCompleted": true,
+    "lastNavigationTime": "2025-10-20T05:03:28.435Z",
+    "antiBotWaitMs": 2318,
+    "modalsDismissed": 0,
+    "isLoggedIn": true,
+    "loginInfo": {
+      "found": true,
+      "selector": ".userAvatarLogo img",
+      "count": 1,
+      "visible": true
+    },
+    "loginVerifiedAt": "2025-10-20T05:03:32.454Z",
+    "cookieSaved": true,
+    "cookieSavePath": "/Users/fanzhang/.webauto/cookies/1688-domestic.json",
+    "cookieSaveCount": 154,
+    "resultSaved": true,
+    "resultFilePath": "workflows/records/preflow-1688-login-success-2025-10-20T05-03-32-456Z.json",
+    "resultFilename": "preflow-1688-login-success-2025-10-20T05-03-32-456Z.json",
+    "handshakeSignalPath": "/Users/fanzhang/.webauto/sessions/sess-1760936597585-787145/login.json",
+    "behaviorLogPath": "/Users/fanzhang/.webauto/sessions/sess-1760936597585-787145/behavior-1688 Login Preflow-2025-10-20T05-03-32-457Z.json",
+    "behaviorEventCount": 1265,
+    "contextExportPath": "/Users/fanzhang/.webauto/sessions/sess-1760936597585-787145/context.json",
+    "endTime": "2025-10-20T05:03:32.460Z",
+    "sessionPersisted": true,
+    "logsExported": true,
+    "workflowCompleted": true,
+    "executionTime": 14874
+  },
+  "outputs": {},
+  "parameters": {
+    "debug": true,
+    "sessionId": "sess-1760936597585-787145",
+    "keyword": "冲锋衣"
+  },
+  "preflows": []
+}

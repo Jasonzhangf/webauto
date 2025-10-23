@@ -4,7 +4,8 @@
   "version": "1.0.0",
   "author": "WebAuto Team",
   "nodes": [
-    { "id": "start", "type": "StartNode", "name": "开始", "next": ["browser_init"] },
+    { "id": "start", "type": "StartNode", "name": "开始", "next": ["ensure_camoufox"] },
+    { "id": "ensure_camoufox", "type": "CamoufoxEnsureNode", "name": "Camoufox 校验/安装", "config": {}, "next": ["browser_init"] },
     {
       "id": "browser_init",
       "type": "BrowserInitNode",
@@ -81,7 +82,7 @@
       },
       "next": ["antibot_soft"]
     },
-    { "id": "antibot_soft", "type": "AntiBotMitigationNode", "name": "轻量反风控", "config": { "mouseMoves": 3, "scroll": true, "jitterMinMs": 1000, "jitterMaxMs": 2500 }, "next": ["dismiss_modals"] },
+    { "id": "antibot_soft", "type": "AntiBotMitigationNode", "name": "轻量反风控", "config": { "mouseMoves": 1, "scroll": false, "jitterMinMs": 500, "jitterMaxMs": 1000 }, "next": ["dismiss_modals"] },
     { "id": "dismiss_modals", "type": "ModalDismissNode", "name": "关闭模态", "config": { "maxAttempts": 5, "retryDelay": 500 }, "next": ["verify_login"] },
     {
       "id": "verify_login",
@@ -98,8 +99,8 @@
         "cookieNames": ["cookie2","_tb_token_","_m_h5_tk","_m_h5_tk_enc","cna","ali_ab","x5sec"],
         "requireVisible": true,
         "postLoginWaitMs": 300,
-        "maxRetries": 60,
-        "retryDelay": 10000
+        "maxRetries": 120,
+        "retryDelay": 15000
       },
       "next": ["save_cookies"],
       "error": ["manual_login"]
@@ -111,8 +112,8 @@
       "name": "手动登录等待",
       "config": {
         "loginSelector": ".userAvatarLogo img",
-        "maxRetries": 60,
-        "retryDelay": 10000
+        "maxRetries": 120,
+        "retryDelay": 15000
       },
       "next": ["save_cookies"],
       "error": ["handshake_failed"]

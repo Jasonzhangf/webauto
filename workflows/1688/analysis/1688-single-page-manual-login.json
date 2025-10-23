@@ -89,12 +89,12 @@
       "type": "CookieSaverNode",
       "name": "保存完整Cookie",
       "config": {
-        "outputFile": "/Users/fanzhang/.webauto/cookies/1688-complete-manual-cookies.json",
+        "outputFile": "/Users/fanzhang/.webauto/cookies/1688-domestic.json",
         "includeAllDomains": true,
         "includeSessionCookies": true,
         "includeHttpOnly": true,
         "includeSecure": true,
-        "cookiePath": "/Users/fanzhang/.webauto/cookies/1688-complete-manual-cookies.json"
+        "cookiePath": "/Users/fanzhang/.webauto/cookies/1688-domestic.json"
       },
       "next": ["navigate_home_verify"]
     },

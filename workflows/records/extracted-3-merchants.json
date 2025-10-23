@@ -1,0 +1,18 @@
+{
+  "timestamp": "2025-10-16T10:00:22.800Z",
+  "sourceFile": "1688-merchants-extracted-2025-10-16T09-57-23-867Z.json",
+  "merchants": [
+    {
+      "index": 1,
+      "merchantName": "tingyu非凡",
+      "chatUrl": "https://air.1688.com/app/ocms-fusion-components-1688/def_cbu_web_im/index.html?uid=tingyu%E9%9D%9E%E5%87%A1&amp;site=cnalichn&amp;fromid=cnalichnviridite",
+      "wangwangHtml": "<span class=\"J_WangWang ww-light ww-static\" data-nick=\"tingyu%E9%9D%9E%E5%87%A1\" data-icon=\"static\" data-encode=\"true\" data-from=\"cnalichn\" data-display=\"inline\"><a href=\"https://air.1688.com/app/ocms-fusion-components-1688/def_cbu_web_im/index.html?uid=tingyu%E9%9D%9E%E5%87%A1&amp;site=cnalichn&amp;fromid=cnalichnviridite\" target=\"_blank\" class=\"ww-link ww-inline ww-online\" title=\"点此可以直接和卖家交流选好的宝贝，或相互交流网购体验，还支持语音视频噢。\"><span>旺旺在线</span>"
+    },
+    {
+      "index": 2,
+      "merchantName": "平南坤安制衣厂",
+      "chatUrl": "https://air.1688.com/app/ocms-fusion-components-1688/def_cbu_web_im/index.html?uid=%E5%B9%B3%E5%8D%97%E5%9D%A4%E5%AE%89%E5%88%B6%E8%A1%A3%E5%8E%82&amp;site=cnalichn&amp;fromid=cnalichnviridite&amp;offerId=856392528921",
+      "wangwangHtml": "<span class=\"J_WangWang ww-light ww-static\" data-nick=\"%E5%B9%B3%E5%8D%97%E5%9D%A4%E5%AE%89%E5%88%B6%E8%A1%A3%E5%8E%82\" data-icon=\"static\" data-encode=\"true\" data-from=\"cnalichn\" data-display=\"inline\" data-extra=\"{&quot;offerId&quot;:&quot;856392528921&quot;}\"><a href=\"https://air.1688.com/app/ocms-fusion-components-1688/def_cbu_web_im/index.html?uid=%E5%B9%B3%E5%8D%97%E5%9D%A4%E5%AE%89%E5%88%B6%E8%A1%A3%E5%8E%82&amp;site=cnalichn&amp;fromid=cnalichnviridite&amp;offerId=856392528921\" target=\"_blank\" class=\"ww-link ww-inline ww-online\" title=\"点此可以直接和卖家交流选好的宝贝，或相互交流网购体验，还支持语音视频噢。\"><span>旺旺在线</span>"
+    }
+  ]
+}
