@@ -91,7 +91,7 @@
       "type": "ResultSaverNode",
       "name": "保存测试结果",
       "config": {
-        "outputDir": "workflows/records",
+        "outputDir": "archive/workflow-records",
         "filenameTemplate": "baidu-advanced-click-test-{timestamp}.json",
         "includeMetadata": true,
         "mergeData": true

@@ -1,0 +1,202 @@
+{
+  "name": "1688钢化膜第3-5条商家聊天工作流",
+  "description": "搜索钢化膜，选择第3-5条商家，间隔30秒访问聊天页面",
+  "version": "1.0.0",
+  "preflows": ["1688-login-preflow-simple"],
+  "nodes": [
+    { "id": "start", "type": "StartNode", "name": "开始", "next": ["attach"] },
+    {
+      "id": "attach",
+      "type": "AttachSessionNode",
+      "name": "会话接力",
+      "config": {},
+      "next": ["navigate_search"]
+    },
+    {
+      "id": "navigate_search",
+      "type": "NavigationNode",
+      "name": "导航到钢化膜搜索结果页",
+      "config": {
+        "url": "https://s.1688.com/selloffer/offer_search.htm?keywords=%B8%D6%BB%AF%C4%A4",
+        "waitUntil": "domcontentloaded",
+        "timeout": 30000
+      },
+      "next": ["wait_search"]
+    },
+    {
+      "id": "wait_search",
+      "type": "WaitNode",
+      "name": "等待搜索结果加载",
+      "config": { "minMs": 3000, "maxMs": 5000 },
+      "next": ["extract_merchants"]
+    },
+    {
+      "id": "extract_merchants",
+      "type": "PageSnapshotNode",
+      "name": "提取第3-5条商家信息",
+      "config": {
+        "script": "console.log('🔍 提取第3-5条商家信息...'); const merchants = []; const offerItems = document.querySelectorAll('.sm-offer-item, .offer-item, .sm-offer, [class*=offer]'); console.log('找到 ' + offerItems.length + ' 个商品项'); // 提取第3-5条商家 (索引2-4) for (let i = 2; i < Math.min(5, offerItems.length); i++) { const item = offerItems[i]; const title = item.querySelector('h4, [class*=title], a[title]'); const wangwangSpan = item.querySelector('span.J_WangWang, span[class*=WangWang]'); const wangwangLink = wangwangSpan ? wangwangSpan.querySelector('a.ww-link') : null; if (wangwangLink && wangwangLink.href && wangwangLink.href.includes('offerId')) { const merchantName = wangwangSpan.getAttribute('data-nick') || '未知商家'; const decodedName = decodeURIComponent(merchantName); merchants.push({ index: i, merchantName: decodedName, title: title ? title.textContent.trim().substring(0, 50) : '', chatUrl: wangwangLink.href, hasWangWang: true, hasOfferId: true, realChatUrl: wangwangLink.href }); console.log(`找到第${i + 1}条商家: ${decodedName}`); console.log(`聊天链接: ${wangwangLink.href}`); } else if (wangwangLink && wangwangLink.href) { const merchantName = wangwangSpan.getAttribute('data-nick') || '未知商家'; const decodedName = decodeURIComponent(merchantName); merchants.push({ index: i, merchantName: decodedName, title: title ? title.textContent.trim().substring(0, 50) : '', chatUrl: wangwangLink.href, hasWangWang: true, hasOfferId: false, realChatUrl: wangwangLink.href }); console.log(`第${i + 1}条商家(无offerId): ${decodedName}`); } } console.log(`总共提取到 ${merchants.length} 个旺旺链接`); return { success: true, merchants: merchants, totalItems: offerItems.length, timestamp: new Date().toISOString() };",
+        "saveScreenshots": true
+      },
+      "next": ["process_merchant_3"]
+    },
+    {
+      "id": "process_merchant_3",
+      "type": "PageSnapshotNode",
+      "name": "处理第3条商家",
+      "config": {
+        "script": "console.log('🔄 处理第3条商家...'); const batchData = arguments[0] || {}; const merchants = batchData.merchants || []; if (merchants.length === 0) { return { success: false, error: '没有找到商家', finished: true }; } const currentMerchant = merchants[0]; // 第3条商家 (索引0) console.log(`处理第3条商家: ${currentMerchant.title.substring(0, 30)}`); return { success: true, currentMerchant: currentMerchant, merchants: merchants, currentIndex: 0, totalToProcess: merchants.length, timestamp: new Date().toISOString() };",
+        "saveScreenshots": true
+      },
+      "next": ["navigate_merchant_3"]
+    },
+    {
+      "id": "navigate_merchant_3",
+      "type": "NavigationNode",
+      "name": "访问第3条商家聊天页面",
+      "config": {
+        "url": "{{currentMerchant.realChatUrl}}",
+        "waitUntil": "domcontentloaded",
+        "timeout": 20000
+      },
+      "next": ["wait_merchant_3"]
+    },
+    {
+      "id": "wait_merchant_3",
+      "type": "WaitNode",
+      "name": "等待第3条商家页面加载",
+      "config": { "minMs": 3000, "maxMs": 5000 },
+      "next": ["send_message_3"]
+    },
+    {
+      "id": "send_message_3",
+      "type": "ChatHighlightOnlyNode1688",
+      "name": "第3条商家发送消息(MOCK)",
+      "config": {
+        "hostFilter": "air.1688.com",
+        "message": "你好，请问钢化膜有现货吗？现在下单有优惠吗？",
+        "highlightMs": 3000,
+        "mock": true
+      },
+      "next": ["delay_before_4"]
+    },
+    {
+      "id": "delay_before_4",
+      "type": "WaitNode",
+      "name": "间隔30秒等待",
+      "config": { "minMs": 30000, "maxMs": 35000 },
+      "next": ["process_merchant_4"]
+    },
+    {
+      "id": "process_merchant_4",
+      "type": "PageSnapshotNode",
+      "name": "处理第4条商家",
+      "config": {
+        "script": "console.log('🔄 处理第4条商家...'); const batchData = arguments[0] || {}; const merchants = batchData.merchants || []; const nextIndex = 1; // 第4条商家 (索引1) if (nextIndex < merchants.length) { const nextMerchant = merchants[nextIndex]; console.log(`处理第4条商家: ${nextMerchant.title.substring(0, 30)}`); return { success: true, currentMerchant: nextMerchant, merchants: merchants, currentIndex: nextIndex, timestamp: new Date().toISOString() }; } else { console.log('没有第4条商家'); return { success: false, finished: true, timestamp: new Date().toISOString() }; }",
+        "saveScreenshots": true
+      },
+      "next": ["navigate_merchant_4"]
+    },
+    {
+      "id": "navigate_merchant_4",
+      "type": "NavigationNode",
+      "name": "访问第4条商家聊天页面",
+      "config": {
+        "url": "{{currentMerchant.realChatUrl}}",
+        "waitUntil": "domcontentloaded",
+        "timeout": 20000
+      },
+      "next": ["wait_merchant_4"]
+    },
+    {
+      "id": "wait_merchant_4",
+      "type": "WaitNode",
+      "name": "等待第4条商家页面加载",
+      "config": { "minMs": 3000, "maxMs": 5000 },
+      "next": ["send_message_4"]
+    },
+    {
+      "id": "send_message_4",
+      "type": "ChatHighlightOnlyNode1688",
+      "name": "第4条商家发送消息(MOCK)",
+      "config": {
+        "hostFilter": "air.1688.com",
+        "message": "你好，钢化膜质量怎么样？有质保吗？",
+        "highlightMs": 3000,
+        "mock": true
+      },
+      "next": ["delay_before_5"]
+    },
+    {
+      "id": "delay_before_5",
+      "type": "WaitNode",
+      "name": "间隔30秒等待",
+      "config": { "minMs": 30000, "maxMs": 35000 },
+      "next": ["process_merchant_5"]
+    },
+    {
+      "id": "process_merchant_5",
+      "type": "PageSnapshotNode",
+      "name": "处理第5条商家",
+      "config": {
+        "script": "console.log('🔄 处理第5条商家...'); const batchData = arguments[0] || {}; const merchants = batchData.merchants || []; const nextIndex = 2; // 第5条商家 (索引2) if (nextIndex < merchants.length) { const nextMerchant = merchants[nextIndex]; console.log(`处理第5条商家: ${nextMerchant.title.substring(0, 30)}`); return { success: true, currentMerchant: nextMerchant, merchants: merchants, currentIndex: nextIndex, timestamp: new Date().toISOString() }; } else { console.log('没有第5条商家'); return { success: false, finished: true, timestamp: new Date().toISOString() }; }",
+        "saveScreenshots": true
+      },
+      "next": ["navigate_merchant_5"]
+    },
+    {
+      "id": "navigate_merchant_5",
+      "type": "NavigationNode",
+      "name": "访问第5条商家聊天页面",
+      "config": {
+        "url": "{{currentMerchant.realChatUrl}}",
+        "waitUntil": "domcontentloaded",
+        "timeout": 20000
+      },
+      "next": ["wait_merchant_5"]
+    },
+    {
+      "id": "wait_merchant_5",
+      "type": "WaitNode",
+      "name": "等待第5条商家页面加载",
+      "config": { "minMs": 3000, "maxMs": 5000 },
+      "next": ["send_message_5"]
+    },
+    {
+      "id": "send_message_5",
+      "type": "ChatHighlightOnlyNode1688",
+      "name": "第5条商家发送消息(MOCK)",
+      "config": {
+        "hostFilter": "air.1688.com",
+        "message": "你好，钢化膜批发价多少？起批量要求多少？",
+        "highlightMs": 3000,
+        "mock": true
+      },
+      "next": ["save_results"]
+    },
+    {
+      "id": "save_results",
+      "type": "ResultSaverNode",
+      "name": "保存测试结果",
+      "config": {
+        "outputDir": "workflows/records",
+        "filenameTemplate": "1688-钢化膜-第3-5条商家聊天-{timestamp}.json",
+        "includeMetadata": true
+      },
+      "next": ["end"]
+    },
+    {
+      "id": "end",
+      "type": "EndNode",
+      "name": "结束",
+      "config": { "cleanup": false, "saveLogs": true }
+    }
+  ],
+  "globalConfig": {
+    "logLevel": "info",
+    "screenshotOnError": true,
+    "autoCleanup": false,
+    "parallelExecution": false,
+    "timeout": 600000
+  }
+}

@@ -1,0 +1,96 @@
+{
+  "name": "1688验证商家聊天页面",
+  "description": "逐一打开提取的商家聊天页面进行验证",
+  "version": "1.0.0",
+  "preflows": ["1688-login-preflow"],
+  "nodes": [
+    { "id": "start", "type": "StartNode", "name": "开始", "next": ["attach"] },
+    {
+      "id": "attach",
+      "type": "AttachSessionNode",
+      "name": "会话接力",
+      "config": {},
+      "next": ["verify_merchant_1"]
+    },
+    {
+      "id": "verify_merchant_1",
+      "type": "NavigationNode",
+      "name": "验证第1个商家聊天页面",
+      "config": {
+        "url": "https://air.1688.com/app/ocms-fusion-components-1688/def_cbu_web_im/index.html?uid=tingyu%E9%9D%9E%E5%87%A1&site=cnalichn&fromid=cnalichnviridite",
+        "waitUntil": "domcontentloaded",
+        "timeout": 20000
+      },
+      "next": ["wait_merchant_1"]
+    },
+    {
+      "id": "wait_merchant_1",
+      "type": "WaitNode",
+      "name": "等待第1个聊天页面加载",
+      "config": { "minMs": 3000, "maxMs": 5000 },
+      "next": ["check_merchant_1"]
+    },
+    {
+      "id": "check_merchant_1",
+      "type": "PageSnapshotNode",
+      "name": "验证第1个商家聊天页面",
+      "config": {
+        "script": "console.log('🔍 验证第1个商家聊天页面...'); const currentUrl = window.location.href; const pageTitle = document.title; const isInChat = currentUrl.includes('air.1688.com') || currentUrl.includes('def_cbu_web_im'); console.log(`当前URL: ${currentUrl}`); console.log(`页面标题: ${pageTitle}`); console.log(`是否在聊天页面: ${isInChat}`); const chatInterface = document.querySelector('textarea, input[type=\"text\"], [contenteditable], .chat-input, .message-input'); const sendButton = document.querySelector('button[type=\"submit\"], [class*=\"send\"], [class*=\"send-btn\"]'); console.log(`找到聊天输入框: ${!!chatInterface}`); console.log(`找到发送按钮: ${!!sendButton}`); const merchantInfo = { currentUrl: currentUrl, pageTitle: pageTitle, isInChat: isInChat, hasChatInterface: !!chatInterface, hasSendButton: !!sendButton, merchantName: 'tingyu非凡', merchantIndex: 1, timestamp: new Date().toISOString() }; return { success: isInChat, verification: merchantInfo, timestamp: new Date().toISOString() };",
+        "saveScreenshots": true
+      },
+      "next": ["verify_merchant_2"]
+    },
+    {
+      "id": "verify_merchant_2",
+      "type": "NavigationNode",
+      "name": "验证第2个商家聊天页面",
+      "config": {
+        "url": "https://air.1688.com/app/ocms-fusion-components-1688/def_cbu_web_im/index.html?uid=%E5%B9%B3%E5%8D%97%E5%9D%A4%E5%AE%89%E5%88%B6%E8%A1%A3%E5%8E%82&site=cnalichn&fromid=cnalichnviridite&offerId=856392528921",
+        "waitUntil": "domcontentloaded",
+        "timeout": 20000
+      },
+      "next": ["wait_merchant_2"]
+    },
+    {
+      "id": "wait_merchant_2",
+      "type": "WaitNode",
+      "name": "等待第2个聊天页面加载",
+      "config": { "minMs": 3000, "maxMs": 5000 },
+      "next": ["check_merchant_2"]
+    },
+    {
+      "id": "check_merchant_2",
+      "type": "PageSnapshotNode",
+      "name": "验证第2个商家聊天页面",
+      "config": {
+        "script": "console.log('🔍 验证第2个商家聊天页面...'); const currentUrl = window.location.href; const pageTitle = document.title; const isInChat = currentUrl.includes('air.1688.com') || currentUrl.includes('def_cbu_web_im'); console.log(`当前URL: ${currentUrl}`); console.log(`页面标题: ${pageTitle}`); console.log(`是否在聊天页面: ${isInChat}`); const chatInterface = document.querySelector('textarea, input[type=\"text\"], [contenteditable], .chat-input, .message-input'); const sendButton = document.querySelector('button[type=\"submit\"], [class*=\"send\"], [class*=\"send-btn\"]'); console.log(`找到聊天输入框: ${!!chatInterface}`); console.log(`找到发送按钮: ${!!sendButton}`); const merchantInfo = { currentUrl: currentUrl, pageTitle: pageTitle, isInChat: isInChat, hasChatInterface: !!chatInterface, hasSendButton: !!sendButton, merchantName: '平南坤安制衣厂', merchantIndex: 2, timestamp: new Date().toISOString() }; return { success: isInChat, verification: merchantInfo, timestamp: new Date().toISOString() };",
+        "saveScreenshots": true
+      },
+      "next": ["save_results"]
+    },
+    {
+      "id": "save_results",
+      "type": "ResultSaverNode",
+      "name": "保存验证结果",
+      "config": {
+        "outputDir": "workflows/records",
+        "filenameTemplate": "1688-merchant-chat-verification-{timestamp}.json",
+        "includeMetadata": true
+      },
+      "next": ["end"]
+    },
+    {
+      "id": "end",
+      "type": "EndNode",
+      "name": "验证完成",
+      "config": { "cleanup": false, "saveLogs": true }
+    }
+  ],
+  "globalConfig": {
+    "logLevel": "info",
+    "screenshotOnError": true,
+    "autoCleanup": false,
+    "parallelExecution": false,
+    "timeout": 300000
+  }
+}

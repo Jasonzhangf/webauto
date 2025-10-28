@@ -83,14 +83,14 @@
       "id": "save_results",
       "type": "ResultSaverNode",
       "name": "保存测试结果",
-      "config": { "outputDir": "workflows/records", "filenameTemplate": "standard-click-test-{timestamp}.json", "includeMetadata": true, "mergeData": true },
+      "config": { "outputDir": "archive/workflow-records", "filenameTemplate": "standard-click-test-{timestamp}.json", "includeMetadata": true, "mergeData": true },
       "next": ["end"]
     },
     {
       "id": "save_results",
       "type": "ResultSaverNode",
       "name": "保存测试结果",
-      "config": { "outputDir": "workflows/records", "filenameTemplate": "standard-click-test-{timestamp}.json", "includeMetadata": true, "mergeData": true },
+      "config": { "outputDir": "archive/workflow-records", "filenameTemplate": "standard-click-test-{timestamp}.json", "includeMetadata": true, "mergeData": true },
       "next": ["end"]
     },
     { "id": "end", "type": "EndNode", "name": "结束", "config": { "cleanup": false, "saveLogs": true, "persistSession": true } }

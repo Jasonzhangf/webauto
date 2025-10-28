@@ -1,0 +1,37 @@
+{
+  "id": "comment_icon_trigger",
+  "website": "weibo",
+  "name": "评论图标触发器",
+  "selector": ".woo-font.woo-font--comment.toolbar_commentIcon_3o7HB",
+  "description": "点击进入评论区的评论图标按钮",
+  "priority": 6,
+  "specificity": 1000,
+  "registeredAt": "2025-09-22T00:25:13.311Z",
+  "isActive": true,
+  "type": "interactive",
+  "usage": {
+    "accessCount": 0,
+    "lastUsed": null,
+    "successRate": 0
+  },
+  "validation": {
+    "selectorValid": true,
+    "lastValidation": "2025-09-22T00:25:13.312Z",
+    "validationMethod": "comment-analysis"
+  },
+  "discovery": {
+    "strategy": "precise-selector",
+    "specificityThreshold": 100,
+    "uniquenessThreshold": 0.8,
+    "waitForElements": true,
+    "timeout": 10000
+  },
+  "action": "click",
+  "metadata": {
+    "generatedFrom": "container-library.json",
+    "generatedAt": "2025-09-22T00:45:00.745Z",
+    "originalPriority": 6,
+    "selectorHash": "7659ee97",
+    "fileVersion": "1.0.0"
+  }
+}

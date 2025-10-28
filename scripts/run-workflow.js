@@ -2,7 +2,7 @@
 // 运行指定的单个工作流（不触发全局前置流程）
 import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
-import WorkflowEngine from '../workflows/engine/WorkflowEngine.js';
+import WorkflowEngine from '../src/core/workflow/WorkflowEngine.js';
 
 async function main() {
   const args = process.argv.slice(2);

@@ -1,0 +1,66 @@
+{
+  "name": "1688 直接聊天测试",
+  "description": "测试直接跳转到聊天页面是否会被风控拦截",
+  "version": "1.0.0",
+  "nodes": [
+    { "id": "start", "type": "StartNode", "name": "开始", "next": ["attach"] },
+    { "id": "attach", "type": "AttachSessionNode", "name": "会话接力", "config": {}, "next": ["navigate_chat"] },
+
+    {
+      "id": "navigate_chat",
+      "type": "NavigationNode",
+      "name": "导航到聊天页面",
+      "config": {
+        "url": "https://air.1688.com/app/ocms-fusion-components-1688/def_cbu_web_im/index.html?uid=%E6%B8%A9%E5%B7%9D%E7%9F%97%E7%AB%8B%E8%B4%B8%E6%98%93%E6%9C%89%E9%99%90%E5%85%AC%E5%8F%B8%E7%89%9B&site=cnalichn&fromid=cnalichnviridite",
+        "waitUntil": "domcontentloaded",
+        "timeout": 30000
+      },
+      "next": ["wait_chat"]
+    },
+
+    {
+      "id": "wait_chat",
+      "type": "WaitNode",
+      "name": "等待聊天页面加载",
+      "config": { "minMs": 8000, "maxMs": 12000 },
+      "next": ["check_chat"]
+    },
+
+    {
+      "id": "check_chat",
+      "type": "PageSnapshotNode",
+      "name": "检查聊天页面状态",
+      "config": {
+        "script": "console.log('🔍 检查1688聊天页面状态...'); const pageTitle = document.title; const pageUrl = window.location.href; const isChatPage = pageUrl.includes('air.1688.com') && pageUrl.includes('im'); const hasInput = document.querySelector('div[contenteditable], textarea, input[type=\"text\"]'); const isVerification = pageTitle.includes('验证码') || document.body.textContent.includes('验证码') || document.body.textContent.includes('verification'); console.log('页面标题:', pageTitle); console.log('当前URL:', pageUrl); console.log('是否为聊天页面:', isChatPage); console.log('是否有输入框:', !!hasInput); console.log('是否被验证码拦截:', isVerification); return { success: isChatPage && !isVerification, pageTitle, pageUrl, isChatPage, hasInput: !!hasInput, isVerification, timestamp: new Date().toISOString() };",
+        "saveScreenshots": true
+      },
+      "next": ["save_results"]
+    },
+
+    {
+      "id": "save_results",
+      "type": "ResultSaverNode",
+      "name": "保存测试结果",
+      "config": {
+        "outputDir": "workflows/records",
+        "filenameTemplate": "1688-direct-chat-test-{timestamp}.json",
+        "includeMetadata": true
+      },
+      "next": ["end"]
+    },
+
+    {
+      "id": "end",
+      "type": "EndNode",
+      "name": "结束",
+      "config": { "cleanup": false, "saveLogs": true }
+    }
+  ],
+  "globalConfig": {
+    "logLevel": "info",
+    "screenshotOnError": true,
+    "autoCleanup": false,
+    "parallelExecution": false,
+    "timeout": 900000
+  }
+}

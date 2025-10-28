@@ -1,0 +1,99 @@
+{
+  "type": "workflow",
+  "path": "/Users/fanzhang/Documents/github/webauto/workflows/preflows/weibo-prelogin-staging-auto.json",
+  "name": "Weibo Prelogin Staging Auto",
+  "startedAt": 1761558844162,
+  "finishedAt": 1761558844162,
+  "success": false,
+  "error": "未找到节点类型 InjectContainerIndexNode 的处理器",
+  "variables": {
+    "workflowName": "Weibo Prelogin Staging Auto",
+    "sessionId": "sess-1761558834471-588373",
+    "sessionDir": "/Users/fanzhang/.webauto/sessions/sess-1761558834471-588373",
+    "debug": true,
+    "startTime": "2025-10-27T09:54:03.520Z",
+    "workflowStarted": true,
+    "browserInitialized": true,
+    "browserInfo": {
+      "headless": false,
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      }
+    }
+  },
+  "outputs": {},
+  "parameters": {
+    "debug": true
+  },
+  "preflows": [
+    {
+      "file": "/Users/fanzhang/Documents/github/webauto/archive/workflow-records/preflow-2025-10-27T09-54-03-520Z.json",
+      "type": "preflow",
+      "path": "/Users/fanzhang/Documents/github/webauto/workflows/preflows/1688-login-preflow.json",
+      "name": "1688 Login Preflow",
+      "startedAt": 1761558843520,
+      "finishedAt": 1761558843520,
+      "success": true,
+      "error": null,
+      "variables": {
+        "workflowName": "1688 Login Preflow",
+        "sessionId": "sess-1761558834471-588373",
+        "sessionDir": "/Users/fanzhang/.webauto/sessions/sess-1761558834471-588373",
+        "debug": true,
+        "startTime": "2025-10-27T09:53:54.472Z",
+        "workflowStarted": true,
+        "camoufoxPath": "/Users/fanzhang/Library/Caches/camoufox/Camoufox.app/Contents/MacOS/camoufox",
+        "browserInitialized": true,
+        "browserInfo": {
+          "headless": false,
+          "viewport": {
+            "width": 1920,
+            "height": 1080
+          }
+        },
+        "lastWaitMs": 2334,
+        "cookiesLoaded": true,
+        "cookieCount": 138,
+        "cookiePath": "/Users/fanzhang/.webauto/cookies/1688-domestic.json",
+        "currentUrl": "https://www.1688.com/",
+        "navigationCompleted": true,
+        "lastNavigationTime": "2025-10-27T09:54:02.071Z",
+        "antiBotWaitMs": 646,
+        "modalsDismissed": 0,
+        "isLoggedIn": true,
+        "loginInfo": {
+          "found": true,
+          "selector": "img[src*=\"alicdn.com/img/ibank/\"]",
+          "count": 78,
+          "visible": true,
+          "cookieUpdated": true,
+          "cookieUpdatePath": "/Users/fanzhang/.webauto/cookies/default-domestic.json",
+          "cookieUpdateCount": 138
+        },
+        "loginVerifiedAt": "2025-10-27T09:54:03.512Z",
+        "cookieSaved": true,
+        "cookieSavePath": "/Users/fanzhang/.webauto/cookies/1688-domestic.json",
+        "cookieSaveCount": 138,
+        "resultSaved": true,
+        "resultFilePath": "archive/workflow-records/preflow-1688-login-success-2025-10-27T09-54-03-514Z.json",
+        "resultFilename": "preflow-1688-login-success-2025-10-27T09-54-03-514Z.json",
+        "handshakeSignalPath": "/Users/fanzhang/.webauto/sessions/sess-1761558834471-588373/login.json",
+        "behaviorLogPath": "/Users/fanzhang/.webauto/sessions/sess-1761558834471-588373/behavior-1688 Login Preflow-2025-10-27T09-54-03-515Z.json",
+        "behaviorEventCount": 1226,
+        "contextExportPath": "/Users/fanzhang/.webauto/sessions/sess-1761558834471-588373/context.json",
+        "endTime": "2025-10-27T09:54:03.520Z",
+        "sessionPersisted": true,
+        "logsExported": true,
+        "workflowCompleted": true,
+        "executionTime": 9046
+      },
+      "outputs": {},
+      "parameters": {
+        "debug": true,
+        "sessionId": "sess-1761558834471-588373"
+      },
+      "preflows": []
+    }
+  ]
+}

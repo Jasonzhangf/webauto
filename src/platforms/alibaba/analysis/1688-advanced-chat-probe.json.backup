@@ -1,0 +1,143 @@
+{
+  "name": "1688 Advanced Chat Probe",
+  "description": "深度探测1688聊天界面的Shadow DOM、iframe和自定义组件",
+  "version": "1.0.0",
+  "nodes": [
+    { "id": "start", "type": "StartNode", "name": "开始", "next": ["attach"] },
+    { "id": "attach", "type": "AttachSessionNode", "name": "会话接力", "config": {}, "next": ["navigate_search"] },
+    {
+      "id": "navigate_search",
+      "type": "NavigationNode",
+      "name": "导航到搜索页面",
+      "config": {
+        "url": "https://s.1688.com/selloffer/offer_search.htm?keywords=%B9%A4%D2%B5%B4%F3%B7%E7%C9%C8&spm=a260k.home2025.searchbox.0",
+        "waitUntil": "domcontentloaded",
+        "timeout": 30000
+      },
+      "next": ["wait_search"]
+    },
+    { "id": "wait_search", "type": "WaitNode", "name": "搜索页面等待", "config": { "minMs": 2000, "maxMs": 3000 }, "next": ["dismiss_modals"] },
+    { "id": "dismiss_modals", "type": "ModalDismissNode", "name": "关闭搜索页模态", "config": { "maxAttempts": 4, "retryDelay": 500 }, "next": ["open_chat"] },
+    {
+      "id": "open_chat",
+      "type": "PopupTokenCaptureNode",
+      "name": "打开聊天窗口",
+      "config": {
+        "containerSelector": ".space-pc-ui2024-content > div:nth-child(5)",
+        "clickSelectors": ["a.ww-link.ww-inline", "span.J_WangWang a.ww-link", "a[href*=air.1688.com/app/]"],
+        "hostFilter": "air.1688.com",
+        "maxItems": 1,
+        "minClickDelay": 500,
+        "maxClickDelay": 1500,
+        "afterPopupWaitMs": 3000,
+        "closePopup": false,
+        "popupClickSelectors": ["body > div:nth-child(23)"],
+        "dryMode": false,
+        "enforceWebPreference": true,
+        "popupStepGate": false
+      },
+      "next": ["deep_probe"]
+    },
+    {
+      "id": "deep_probe",
+      "type": "SelectorProbeNode",
+      "name": "深度DOM探测",
+      "config": {
+        "targetPopup": true,
+        "probes": [
+          {
+            "name": "Shadow DOM探测",
+            "selectors": ["*"],
+            "action": "shadow-dom-scan",
+            "description": "扫描所有元素的Shadow DOM"
+          },
+          {
+            "name": "iframe探测",
+            "selectors": ["iframe"],
+            "action": "iframe-content-scan",
+            "description": "扫描iframe内容"
+          },
+          {
+            "name": "自定义组件探测",
+            "selectors": ["[class*='chat']", "[class*='im']", "[class*='message']", "[class*='compose']", "[class*='editor']"],
+            "action": "component-scan",
+            "description": "扫描聊天相关组件"
+          },
+          {
+            "name": "React/Vue组件探测",
+            "selectors": ["[data-reactroot]", "[data-v-]", "[class*='vue-']"],
+            "action": "framework-scan",
+            "description": "扫描框架生成的组件"
+          }
+        ],
+        "saveScreenshots": true,
+        "saveHtml": true,
+        "outputDir": "workflows/records"
+      },
+      "next": ["js_probe"]
+    },
+    {
+      "id": "js_probe",
+      "type": "GateOverlayNode",
+      "name": "JavaScript深度探测",
+      "config": {
+        "hostFilter": "air.1688.com",
+        "title": "🔬 JavaScript深度探测",
+        "message": "请运行以下JavaScript代码进行深度探测：\n\n1️⃣ Shadow DOM探测：\n// 查找所有包含Shadow DOM的元素\ndocument.querySelectorAll('*').forEach(el => {\n  if (el.shadowRoot) {\n    console.log('Shadow DOM元素:', el);\n    console.log('Shadow内容:', el.shadowRoot.innerHTML);\n  }\n});\n\n2️⃣ iframe内容探测：\n// 查看所有iframe内容\ndocument.querySelectorAll('iframe').forEach((frame, index) => {\n  try {\n    const doc = frame.contentDocument || frame.contentWindow.document;\n    console.log(`iframe ${index}内容:`, doc.body.innerHTML);\n  } catch(e) {\n    console.log(`iframe ${index}跨域:`, e.message);\n  }\n});\n\n3️⃣ 深度元素扫描：\n// 扫描所有可能的可编辑元素\nfunction scanEditableElements(root = document) {\n  const elements = [];\n  const walker = document.createTreeWalker(\n    root,\n    NodeFilter.SHOW_ELEMENT,\n    {\n      acceptNode: (node) => {\n        const tag = node.tagName.toLowerCase();\n        const editable = node.contentEditable === 'true' || \n                       node.isContentEditable ||\n                       node.getAttribute('contenteditable') === 'true';\n        const hasInputAttrs = node.hasAttribute('data-input') ||\n                           node.hasAttribute('role') && node.getAttribute('role') === 'textbox';\n        \n        if (editable || hasInputAttrs || \n            tag.includes('input') || \n            tag.includes('textarea') ||\n            node.onclick || node.oninput || node.onchange) {\n          elements.push(node);\n          // 高亮显示\n          node.style.border = '2px solid red';\n          node.style.backgroundColor = 'rgba(255,0,0,0.1)';\n        }\n        return NodeFilter.FILTER_SKIP;\n      }\n    }\n  );\n  \n  let node;\n  while (node = walker.nextNode()) {\n    // 已在acceptNode中处理\n  }\n  \n  return elements;\n}\n\nconst editableElements = scanEditableElements();\nconsole.log('可编辑元素数量:', editableElements.length);\neditableElements.forEach((el, i) => {\n  console.log(`元素 ${i}:`, el.tagName, el.className, el.id);\n});\n\n运行完毕后点击'下一步'",
+        "stepGate": true,
+        "block": true
+      },
+      "next": ["manual_input_test"]
+    },
+    {
+      "id": "manual_input_test",
+      "type": "GateOverlayNode",
+      "name": "手动输入测试",
+      "config": {
+        "hostFilter": "air.1688.com",
+        "title": "✍️ 手动输入测试",
+        "message": "现在请手动测试输入功能：\n\n🔍 尝试以下操作：\n1. 点击聊天界面的任何地方\n2. 尝试输入文字\n3. 观察哪里出现光标或输入框\n4. 记录能输入文字的元素\n\n💡 如果找不到输入框，可能需要：\n- 点击特定区域激活输入模式\n- 等待页面完全加载\n- 检查是否有隐藏的输入组件\n\n测试完成后点击'下一步'",
+        "stepGate": true,
+        "block": true
+      },
+      "next": ["find_send_button"]
+    },
+    {
+      "id": "find_send_button",
+      "type": "GateOverlayNode",
+      "name": "查找发送按钮",
+      "config": {
+        "hostFilter": "air.1688.com",
+        "title": "📤 查找发送按钮",
+        "message": "请查找发送按钮：\n\n🔍 运行以下代码查找所有可能的发送按钮：\n\n// 查找所有按钮\ndocument.querySelectorAll('button, a, span, div, [role=\"button\"]').forEach(el => {\n  const text = (el.innerText || el.textContent || '').trim();\n  const rect = el.getBoundingClientRect();\n  \n  if (rect.width > 0 && rect.height > 0 && text.length < 50) {\n    // 高亮所有按钮\n    el.style.border = '2px solid blue';\n    el.style.backgroundColor = 'rgba(0,0,255,0.1)';\n    console.log('按钮:', text, el.tagName, el.className);\n  }\n});\n\n// 特别查找可能的发送按钮\n['发送', 'Send', '提交', 'Submit', '确定', 'OK'].forEach(sendText => {\n  document.querySelectorAll('*').forEach(el => {\n    const text = (el.innerText || el.textContent || '').trim();\n    if (text === sendText) {\n      el.style.border = '3px solid red';\n      el.style.backgroundColor = 'rgba(255,0,0,0.2)';\n      console.log('可能的发送按钮:', el);\n    }\n  });\n});\n\n检查完成后点击'下一步'",
+        "stepGate": true,
+        "block": true
+      },
+      "next": ["save_results"]
+    },
+    {
+      "id": "save_results",
+      "type": "ResultSaverNode",
+      "name": "保存探测结果",
+      "config": {
+        "outputDir": "workflows/records",
+        "filenameTemplate": "1688-advanced-chat-probe-{timestamp}.json",
+        "includeMetadata": true
+      },
+      "next": ["end"]
+    },
+    {
+      "id": "end",
+      "type": "EndNode",
+      "name": "结束",
+      "config": { "cleanup": false, "saveLogs": true }
+    }
+  ],
+  "globalConfig": {
+    "logLevel": "info",
+    "screenshotOnError": true,
+    "autoCleanup": false,
+    "parallelExecution": false,
+    "timeout": 900000
+  }
+}

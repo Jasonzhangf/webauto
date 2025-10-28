@@ -1,0 +1,123 @@
+{
+  "type": "workflow",
+  "path": "/Users/fanzhang/Documents/github/webauto/workflows/1688/complete-chat-workflow.json",
+  "name": "1688完整聊天工作流",
+  "startedAt": 1761202194327,
+  "finishedAt": 1761202194327,
+  "success": false,
+  "error": "await is only valid in async functions, async generators and modules",
+  "variables": {
+    "workflowName": "1688完整聊天工作流",
+    "sessionId": "sess-1761202173688-98776",
+    "sessionDir": "/Users/fanzhang/.webauto/sessions/sess-1761202173688-98776",
+    "debug": false,
+    "startTime": "2025-10-23T06:49:42.532Z",
+    "workflowStarted": true,
+    "clicked": false,
+    "appeared": false,
+    "lastWaitMs": 0,
+    "anchorSettled.default": true,
+    "anchorSelector.default": ".sm-offer-card",
+    "anchorRect.default": {
+      "x": 453.8999938964844,
+      "y": 699,
+      "width": 203.89999389648438,
+      "height": 345.9000244140625
+    },
+    "anchorSettled": true,
+    "anchorSelector": ".sm-offer-card",
+    "anchorRect": {
+      "x": 453.8999938964844,
+      "y": 699,
+      "width": 203.89999389648438,
+      "height": 345.9000244140625
+    },
+    "anchorSettled_default": true,
+    "anchorSelector_default": ".sm-offer-card",
+    "anchorRect_default": {
+      "x": 453.8999938964844,
+      "y": 699,
+      "width": 203.89999389648438,
+      "height": 345.9000244140625
+    }
+  },
+  "outputs": {
+    "inputSelector": "input[name='keywords'], input[placeholder*='搜索'], input[placeholder*='找商品'], .search-input input, .search-box input, input[data-spm-anchor-id*='search'], input[type='text'], .s-search-input, .search-input, input[data-spm='search'], .search-input-text, input[class*='search'], input[id*='search']",
+    "inputValue": "冲锋衣",
+    "found": false
+  },
+  "parameters": {
+    "debug": false
+  },
+  "preflows": [
+    {
+      "file": "/Users/fanzhang/Documents/github/webauto/archive/workflow-records/preflow-2025-10-23T06-49-42-506Z.json",
+      "type": "preflow",
+      "path": "/Users/fanzhang/Documents/github/webauto/workflows/preflows/1688-login-preflow.json",
+      "name": "1688 Login Preflow",
+      "startedAt": 1761202182506,
+      "finishedAt": 1761202182506,
+      "success": true,
+      "error": null,
+      "variables": {
+        "workflowName": "1688 Login Preflow",
+        "sessionId": "sess-1761202173688-98776",
+        "sessionDir": "/Users/fanzhang/.webauto/sessions/sess-1761202173688-98776",
+        "debug": false,
+        "startTime": "2025-10-23T06:49:33.690Z",
+        "workflowStarted": true,
+        "camoufoxPath": "/Users/fanzhang/Library/Caches/camoufox/Camoufox.app/Contents/MacOS/camoufox",
+        "browserInitialized": true,
+        "browserInfo": {
+          "headless": false,
+          "viewport": {
+            "width": 1920,
+            "height": 1080
+          }
+        },
+        "lastWaitMs": 2318,
+        "cookiesLoaded": true,
+        "cookieCount": 154,
+        "cookiePath": "/Users/fanzhang/.webauto/cookies/1688-domestic.json",
+        "currentUrl": "https://www.1688.com/",
+        "navigationCompleted": true,
+        "lastNavigationTime": "2025-10-23T06:49:41.318Z",
+        "antiBotWaitMs": 612,
+        "modalsDismissed": 0,
+        "isLoggedIn": true,
+        "loginInfo": {
+          "cookieHit": true,
+          "cookieUpdated": true,
+          "cookieUpdatePath": "/Users/fanzhang/.webauto/cookies/default-domestic.json",
+          "cookieUpdateCount": 154
+        },
+        "loginVerifiedAt": "2025-10-23T06:49:42.501Z",
+        "cookieSaved": true,
+        "cookieSavePath": "/Users/fanzhang/.webauto/cookies/1688-domestic.json",
+        "cookieSaveCount": 154,
+        "resultSaved": true,
+        "resultFilePath": "archive/workflow-records/preflow-1688-login-success-2025-10-23T06-49-42-503Z.json",
+        "resultFilename": "preflow-1688-login-success-2025-10-23T06-49-42-503Z.json",
+        "handshakeSignalPath": "/Users/fanzhang/.webauto/sessions/sess-1761202173688-98776/login.json",
+        "behaviorLogPath": "/Users/fanzhang/.webauto/sessions/sess-1761202173688-98776/behavior-1688 Login Preflow-2025-10-23T06-49-42-504Z.json",
+        "behaviorEventCount": 444,
+        "contextExportPath": "/Users/fanzhang/.webauto/sessions/sess-1761202173688-98776/context.json",
+        "endTime": "2025-10-23T06:49:42.506Z",
+        "sessionPersisted": true,
+        "logsExported": true,
+        "workflowCompleted": true,
+        "executionTime": 8815
+      },
+      "outputs": {
+        "inputSelector": "input[name='keywords'], input[placeholder*='搜索'], input[placeholder*='找商品'], .search-input input, .search-box input, input[data-spm-anchor-id*='search'], input[type='text'], .s-search-input, .search-input, input[data-spm='search'], .search-input-text, input[class*='search'], input[id*='search']",
+        "inputValue": "冲锋衣",
+        "found": false
+      },
+      "parameters": {
+        "debug": false,
+        "sessionId": "sess-1761202173688-98776"
+      },
+      "preflows": []
+    }
+  ]
+}

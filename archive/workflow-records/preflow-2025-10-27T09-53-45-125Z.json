@@ -1,0 +1,67 @@
+{
+  "type": "preflow",
+  "path": "/Users/fanzhang/Documents/github/webauto/workflows/preflows/1688-login-preflow.json",
+  "name": "1688 Login Preflow",
+  "startedAt": 1761558825125,
+  "finishedAt": 1761558825125,
+  "success": true,
+  "error": null,
+  "variables": {
+    "workflowName": "1688 Login Preflow",
+    "sessionId": "sess-1761558816178-189282",
+    "sessionDir": "/Users/fanzhang/.webauto/sessions/sess-1761558816178-189282",
+    "debug": true,
+    "startTime": "2025-10-27T09:53:36.181Z",
+    "workflowStarted": true,
+    "camoufoxPath": "/Users/fanzhang/Library/Caches/camoufox/Camoufox.app/Contents/MacOS/camoufox",
+    "browserInitialized": true,
+    "browserInfo": {
+      "headless": false,
+      "viewport": {
+        "width": 1920,
+        "height": 1080
+      }
+    },
+    "lastWaitMs": 2638,
+    "cookiesLoaded": true,
+    "cookieCount": 157,
+    "cookiePath": "/Users/fanzhang/.webauto/cookies/1688-domestic.json",
+    "currentUrl": "https://www.1688.com/",
+    "navigationCompleted": true,
+    "lastNavigationTime": "2025-10-27T09:53:43.477Z",
+    "antiBotWaitMs": 715,
+    "modalsDismissed": 0,
+    "isLoggedIn": true,
+    "loginInfo": {
+      "found": true,
+      "selector": "img[src*=\"alicdn.com/img/ibank/\"]",
+      "count": 77,
+      "visible": true,
+      "cookieUpdated": true,
+      "cookieUpdatePath": "/Users/fanzhang/.webauto/cookies/default-domestic.json",
+      "cookieUpdateCount": 138
+    },
+    "loginVerifiedAt": "2025-10-27T09:53:45.117Z",
+    "cookieSaved": true,
+    "cookieSavePath": "/Users/fanzhang/.webauto/cookies/1688-domestic.json",
+    "cookieSaveCount": 138,
+    "resultSaved": true,
+    "resultFilePath": "archive/workflow-records/preflow-1688-login-success-2025-10-27T09-53-45-119Z.json",
+    "resultFilename": "preflow-1688-login-success-2025-10-27T09-53-45-119Z.json",
+    "handshakeSignalPath": "/Users/fanzhang/.webauto/sessions/sess-1761558816178-189282/login.json",
+    "behaviorLogPath": "/Users/fanzhang/.webauto/sessions/sess-1761558816178-189282/behavior-1688 Login Preflow-2025-10-27T09-53-45-120Z.json",
+    "behaviorEventCount": 1310,
+    "contextExportPath": "/Users/fanzhang/.webauto/sessions/sess-1761558816178-189282/context.json",
+    "endTime": "2025-10-27T09:53:45.125Z",
+    "sessionPersisted": true,
+    "logsExported": true,
+    "workflowCompleted": true,
+    "executionTime": 8943
+  },
+  "outputs": {},
+  "parameters": {
+    "debug": true,
+    "sessionId": "sess-1761558816178-189282"
+  },
+  "preflows": []
+}

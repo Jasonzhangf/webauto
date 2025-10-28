@@ -1,0 +1,37 @@
+{
+  "name": "锚点选择器测试",
+  "description": "测试1688页面上的锚点选择器",
+  "version": "1.0.0",
+  "nodes": [
+    {
+      "id": "start",
+      "type": "StartNode",
+      "next": ["attach_session"]
+    },
+    {
+      "id": "attach_session",
+      "type": "AttachSessionNode",
+      "config": {
+        "sessionId": "sess-1761200849117-742542",
+        "timeout": 10000
+      },
+      "next": ["test_selectors"]
+    },
+    {
+      "id": "test_selectors",
+      "type": "JavaScriptExecutionNode",
+      "config": {
+        "script": "// 测试各种锚点选择器\nconsole.log('=== 测试1688页面锚点选择器 ===');\n\nconst testSelectors = [\n  '.userAvatarLogo img',\n  '.username', \n  '.user-info',\n  '.header-user',\n  '.login-user',\n  '[data-spm-anchor-id*=\\\"user\\\"]',\n  '.member-nickname',\n  '.name',\n  '.user-name',\n  '.avatar',\n  '.header-avatar',\n  '.s-login-info',\n  '.user-info-wrapper'\n];\n\nconst results = {};\ntestSelectors.forEach(selector => {\n  try {\n    const elements = document.querySelectorAll(selector);\n    if (elements.length > 0) {\n      const visibleElements = Array.from(elements).filter(el => {\n        const style = window.getComputedStyle(el);\n        return style.display !== 'none' && style.visibility !== 'hidden' && el.offsetWidth > 0 && el.offsetHeight > 0;\n      });\n      \n      results[selector] = {\n        total: elements.length,\n        visible: visibleElements.length,\n        elements: visibleElements.slice(0, 2).map(el => ({\n          tagName: el.tagName,\n          text: el.textContent?.trim().substring(0, 50),\n          className: el.className,\n          id: el.id\n        }))\n      };\n      \n      // 高亮可见元素\n      visibleElements.forEach(el => {\n        el.style.setProperty('outline', '3px solid #007AFF', 'important');\n        el.style.setProperty('background', 'rgba(0, 122, 255, 0.2)', 'important');\n      });\n    } else {\n      results[selector] = { total: 0, visible: 0 };\n    }\n  } catch (e) {\n    results[selector] = { error: e.message };\n  }\n});\n\nconsole.log('锚点选择器测试结果:', JSON.stringify(results, null, 2));\n\n// 查找所有可能的用户相关元素\nconst allUserElements = [];\nconst userKeywords = ['user', 'login', 'member', 'avatar', 'name', 'nickname', 'profile'];\nconst allElements = document.querySelectorAll('*');\n\nallElements.forEach(el => {\n  if (el.offsetWidth > 0 && el.offsetHeight > 0) {\n    const id = el.id?.toLowerCase() || '';\n    const className = el.className?.toLowerCase() || '';\n    const text = el.textContent?.trim().substring(0, 30).toLowerCase() || '';\n    \n    if (userKeywords.some(keyword => \n      id.includes(keyword) || \n      className.includes(keyword) || \n      (text.length > 0 && text.length < 30 && (className.includes('header') || className.includes('user') || className.includes('login')))\n    )) {\n      allUserElements.push({\n        tagName: el.tagName,\n        id: el.id,\n        className: el.className,\n        text: el.textContent?.trim().substring(0, 30)\n      });\n    }\n  }\n});\n\nconsole.log('找到的用户相关元素数量:', allUserElements.length);\nconsole.log('前10个用户元素:', allUserElements.slice(0, 10));\n\nreturn {\n  selectorResults: results,\n  userElementsCount: allUserElements.length,\n  userElements: allUserElements.slice(0, 15),\n  currentUrl: window.location.href,\n  pageTitle: document.title\n};"
+      },
+      "next": ["end"]
+    },
+    {
+      "id": "end",
+      "type": "EndNode",
+      "config": {
+        "cleanupHighlights": false,
+        "persistSession": true
+      }
+    }
+  ]
+}

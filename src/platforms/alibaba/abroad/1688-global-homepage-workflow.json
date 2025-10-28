@@ -1,0 +1,14 @@
+{
+  "name": "1688 Abroad Homepage Workflow",
+  "description": "1688 海外版主页基础工作流（占位）",
+  "version": "0.1.0",
+  "author": "WebAuto Team",
+  "nodes": [
+    { "id": "start", "type": "StartNode", "name": "Start", "next": ["browser_init"] },
+    { "id": "browser_init", "type": "BrowserInitNode", "name": "Browser Init", "config": { "headless": true }, "next": ["navigate_homepage"] },
+    { "id": "navigate_homepage", "type": "NavigationNode", "name": "Navigate", "config": { "url": "https://global.1688.com", "waitUntil": "domcontentloaded" }, "next": ["end"] },
+    { "id": "end", "type": "EndNode", "name": "End", "config": { "cleanup": true } }
+  ],
+  "globalConfig": { "timeout": 180000, "autoCleanup": true }
+}
+

@@ -122,28 +122,28 @@
       "type": "ResultSaverNode",
       "name": "握手成功记录",
       "config": {
-        "outputDir": "workflows/records",
+        "outputDir": "archive/workflow-records",
         "filenameTemplate": "preflow-weibo-login-success-{timestamp}.json",
         "includeMetadata": true
       },
       "next": ["signal_success"]
     },
     { "id": "signal_success", "type": "HandshakeSignalNode", "name": "写入成功信号", "config": { "path": "~/.webauto/handshakes/weibo-login.json", "status": "success" }, "next": ["behavior_log"] },
-    { "id": "behavior_log", "type": "BehaviorLogNode", "name": "输出行为日志", "config": { "outputDir": "workflows/records" }, "next": ["export_context"] },
+    { "id": "behavior_log", "type": "BehaviorLogNode", "name": "输出行为日志", "config": { "outputDir": "archive/workflow-records" }, "next": ["export_context"] },
     { "id": "export_context", "type": "ContextExportNode", "name": "导出上下文", "config": { "path": "~/.webauto/handshakes/weibo-context.json" }, "next": ["end"] },
     {
       "id": "handshake_failed",
       "type": "ResultSaverNode",
       "name": "握手失败记录",
       "config": {
-        "outputDir": "workflows/records",
+        "outputDir": "archive/workflow-records",
         "filenameTemplate": "preflow-weibo-login-failed-{timestamp}.json",
         "includeMetadata": true
       },
       "next": ["signal_failed"]
     },
     { "id": "signal_failed", "type": "HandshakeSignalNode", "name": "写入失败信号", "config": { "path": "~/.webauto/handshakes/weibo-login.json", "status": "failed" }, "next": ["behavior_log_failed"] },
-    { "id": "behavior_log_failed", "type": "BehaviorLogNode", "name": "输出行为日志(失败)", "config": { "outputDir": "workflows/records" }, "next": ["halt"] },
+    { "id": "behavior_log_failed", "type": "BehaviorLogNode", "name": "输出行为日志(失败)", "config": { "outputDir": "archive/workflow-records" }, "next": ["halt"] },
     {
       "id": "halt",
       "type": "HaltNode",

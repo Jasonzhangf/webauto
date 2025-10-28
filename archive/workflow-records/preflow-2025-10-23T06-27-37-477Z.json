@@ -1,0 +1,64 @@
+{
+  "type": "preflow",
+  "path": "/Users/fanzhang/Documents/github/webauto/workflows/preflows/1688-login-preflow.json",
+  "name": "1688 Login Preflow",
+  "startedAt": 1761200857477,
+  "finishedAt": 1761200857477,
+  "success": true,
+  "error": null,
+  "variables": {
+    "workflowName": "1688 Login Preflow",
+    "sessionId": "sess-1761200849117-742542",
+    "sessionDir": "/Users/fanzhang/.webauto/sessions/sess-1761200849117-742542",
+    "debug": false,
+    "startTime": "2025-10-23T06:27:29.121Z",
+    "workflowStarted": true,
+    "camoufoxPath": "/Users/fanzhang/Library/Caches/camoufox/Camoufox.app/Contents/MacOS/camoufox",
+    "browserInitialized": true,
+    "browserInfo": {
+      "headless": false,
+      "viewport": {
+        "width": 1920,
+        "height": 1080
+      }
+    },
+    "lastWaitMs": 2590,
+    "cookiesLoaded": true,
+    "cookieCount": 157,
+    "cookiePath": "/Users/fanzhang/.webauto/cookies/1688-domestic.json",
+    "currentUrl": "https://www.1688.com/",
+    "navigationCompleted": true,
+    "lastNavigationTime": "2025-10-23T06:27:36.255Z",
+    "antiBotWaitMs": 518,
+    "modalsDismissed": 0,
+    "isLoggedIn": true,
+    "loginInfo": {
+      "cookieHit": true,
+      "cookieUpdated": true,
+      "cookieUpdatePath": "/Users/fanzhang/.webauto/cookies/default-domestic.json",
+      "cookieUpdateCount": 157
+    },
+    "loginVerifiedAt": "2025-10-23T06:27:37.472Z",
+    "cookieSaved": true,
+    "cookieSavePath": "/Users/fanzhang/.webauto/cookies/1688-domestic.json",
+    "cookieSaveCount": 157,
+    "resultSaved": true,
+    "resultFilePath": "archive/workflow-records/preflow-1688-login-success-2025-10-23T06-27-37-474Z.json",
+    "resultFilename": "preflow-1688-login-success-2025-10-23T06-27-37-474Z.json",
+    "handshakeSignalPath": "/Users/fanzhang/.webauto/sessions/sess-1761200849117-742542/login.json",
+    "behaviorLogPath": "/Users/fanzhang/.webauto/sessions/sess-1761200849117-742542/behavior-1688 Login Preflow-2025-10-23T06-27-37-475Z.json",
+    "behaviorEventCount": 430,
+    "contextExportPath": "/Users/fanzhang/.webauto/sessions/sess-1761200849117-742542/context.json",
+    "endTime": "2025-10-23T06:27:37.477Z",
+    "sessionPersisted": true,
+    "logsExported": true,
+    "workflowCompleted": true,
+    "executionTime": 8355
+  },
+  "outputs": {},
+  "parameters": {
+    "debug": false,
+    "sessionId": "sess-1761200849117-742542"
+  },
+  "preflows": []
+}

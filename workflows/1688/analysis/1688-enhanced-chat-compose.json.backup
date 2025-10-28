@@ -1,0 +1,237 @@
+{
+  "name": "1688 Enhanced Chat Compose Test",
+  "description": "1688专用增强版聊天组件测试，包含深度DOM探测和多种输入方法",
+  "version": "1.0.0",
+  "nodes": [
+    { "id": "start", "type": "StartNode", "name": "开始", "next": ["attach"] },
+    { "id": "attach", "type": "AttachSessionNode", "name": "会话接力", "config": {}, "next": ["navigate_search"] },
+    {
+      "id": "navigate_search",
+      "type": "NavigationNode",
+      "name": "导航到搜索页面",
+      "config": {
+        "url": "https://s.1688.com/selloffer/offer_search.htm?keywords=%B9%A4%D2%B5%B4%F3%B7%E7%C9%C8&spm=a260k.home2025.searchbox.0",
+        "waitUntil": "domcontentloaded",
+        "timeout": 30000
+      },
+      "next": ["wait_search"]
+    },
+    { "id": "wait_search", "type": "WaitNode", "name": "搜索页面等待", "config": { "minMs": 2000, "maxMs": 3000 }, "next": ["dismiss_modals"] },
+    { "id": "dismiss_modals", "type": "ModalDismissNode", "name": "关闭搜索页模态", "config": { "maxAttempts": 4, "retryDelay": 500 }, "next": ["open_chat"] },
+    {
+      "id": "open_chat",
+      "type": "PopupTokenCaptureNode",
+      "name": "打开聊天窗口",
+      "config": {
+        "containerSelector": ".space-pc-ui2024-content > div:nth-child(5)",
+        "clickSelectors": ["a.ww-link.ww-inline", "span.J_WangWang a.ww-link", "a[href*=air.1688.com/app/]"],
+        "hostFilter": "air.1688.com",
+        "maxItems": 1,
+        "minClickDelay": 500,
+        "maxClickDelay": 1500,
+        "afterPopupWaitMs": 3000,
+        "closePopup": false,
+        "popupClickSelectors": ["body > div:nth-child(23)"],
+        "dryMode": false,
+        "enforceWebPreference": true,
+        "popupStepGate": false
+      },
+      "next": ["enhanced_chat_test"]
+    },
+    {
+      "id": "enhanced_chat_test",
+      "type": "ChatComposeNode",
+      "name": "增强版聊天测试",
+      "config": {
+        "hostFilter": "air.1688.com",
+        "message": "🔍测试消息 - 这是增强版ChatComposeNode的测试",
+        "stepGate": true,
+        "send": false,
+        "inputSelectors": [
+          // 标准输入元素
+          "textarea",
+          "div[contenteditable='true']",
+          "div[contenteditable]",
+          "input[type='text']",
+          "input[type='search']",
+          "input[type='email']",
+          "input:not([type])",
+
+          // 1688特定类名
+          ".im-chat-input",
+          ".msg-input",
+          ".chat-input",
+          ".message-input",
+          ".input-area",
+          ".editor-content",
+          ".rich-editor",
+          ".chat-editor",
+          ".compose-area",
+          "[class*='input']",
+          "[class*='editor']",
+          "[class*='compose']",
+          "[class*='chat']",
+          "[class*='im-']",
+
+          // 可能的隐藏输入
+          "input[type='hidden']",
+          "input[name='message']",
+          "input[name='content']",
+          "input[name='text']",
+          "[data-input]",
+          "[data-content]",
+          "[data-message]",
+
+          // React/Vue组件
+          "[data-reactroot]",
+          "[data-v-]",
+          "[class*='vue-']",
+          "[class*='react-']",
+
+          // 自定义属性
+          "[contenteditable]",
+          "[iscontenteditable]",
+          "[role='textbox']",
+          "[role='input']",
+          "[aria-multiline]",
+          "[aria-label*='输入']",
+          "[aria-label*='消息']",
+          "[aria-label*='chat']",
+
+          // 通过父容器查找
+          ".chat-footer *",
+          ".input-container *",
+          ".compose-container *",
+          ".message-box *",
+          ".editor-container *",
+
+          // 通用查找
+          "*"
+        ],
+        "sendSelectors": [
+          // 标准发送按钮
+          "button:has-text('发送')",
+          "button:has-text('Send')",
+          ".send-btn",
+          ".btn-send",
+          ".im-chat-send-btn",
+          ".chat-send-btn",
+          "[class*='send']",
+          "[class*='Send']",
+          "button[type='submit']",
+          "input[type='submit']",
+          "button[type='button']",
+          "a:has-text('发送')",
+          "a:has-text('Send')",
+
+          // 1688特定
+          ".chat-send",
+          ".msg-send",
+          ".im-chat-send",
+          "[data-action='send']",
+          "[onclick*='send']",
+          "[onclick*='Send']",
+          "[data-command='send']",
+
+          // 通过位置查找
+          ".input-area + button",
+          ".compose-area button:last-child",
+          ".chat-footer button:last-child",
+          ".message-box button:last-child",
+          "textarea + button",
+          "input + button",
+          "[class*='input'] ~ button",
+          "[class*='editor'] ~ button",
+
+          // 通用按钮
+          "button",
+          "input[type='button']",
+          "[role='button']",
+          "a[role='button']",
+          "span[role='button']",
+          "div[role='button']",
+
+          // 特殊类名
+          "[class*='primary']",
+          "[class*='action']",
+          "[class*='submit']",
+          "[class*='confirm']",
+          "[class*='ok']",
+
+          // 通用查找
+          "*"
+        ],
+        "highlightMs": 15000,
+        "stabilizeMs": 3000,
+        "gateTitle": "🚀 增强版聊天测试",
+        "gateMessage": "正在使用增强版ChatComposeNode进行深度探测...\n\n🔍 测试内容：\n✅ 扩展的输入框选择器列表\n✅ 深度DOM扫描\n✅ Shadow DOM探测\n✅ iframe内容探测\n✅ 自定义组件识别\n\n📋 请观察：\n1. 是否看到输入框有文字？\n2. 是否看到发送按钮有红色边框？\n3. 记录有效的选择器\n\n点击'下一步'继续测试发送功能"
+      },
+      "next": ["send_test_only"]
+    },
+    {
+      "id": "send_test_only",
+      "type": "ChatComposeNode",
+      "name": "发送按钮测试",
+      "config": {
+        "hostFilter": "air.1688.com",
+        "message": "🎯 这是发送测试消息",
+        "stepGate": true,
+        "send": true,
+        "inputSelectors": ["*"], // 使用最广泛的选择器
+        "sendSelectors": [
+          "button:has-text('发送')",
+          "button:has-text('Send')",
+          ".send-btn",
+          ".btn-send",
+          ".im-chat-send-btn",
+          ".chat-send-btn",
+          "[class*='send']",
+          "button[type='submit']",
+          "button",
+          "[role='button']"
+        ],
+        "highlightMs": 20000,
+        "gateTitle": "📤 发送按钮测试",
+        "gateMessage": "准备测试发送功能...\n\n🎯 测试内容：\n✅ 多种发送方法尝试\n✅ 键盘快捷键发送\n✅ 鼠标点击发送\n✅ 事件分发发送\n\n⚠️ 重要提示：\n- 如果发送成功，消息应该出现在聊天记录中\n- 如果失败，会显示具体的错误信息\n- 请观察聊天界面的反应\n\n点击'下一步'完成测试"
+      },
+      "next": ["save_enhanced_results"]
+    },
+    {
+      "id": "save_enhanced_results",
+      "type": "ResultSaverNode",
+      "name": "保存增强测试结果",
+      "config": {
+        "outputDir": "workflows/records",
+        "filenameTemplate": "1688-enhanced-chat-test-{timestamp}.json",
+        "includeMetadata": true
+      },
+      "next": ["final_summary"]
+    },
+    {
+      "id": "final_summary",
+      "type": "GateOverlayNode",
+      "name": "显示测试总结",
+      "config": {
+        "hostFilter": "air.1688.com",
+        "title": "✅ 增强版测试完成",
+        "message": "1688聊天界面测试已完成！\n\n📊 测试总结：\n1. 输入框定位结果：[根据实际测试结果填写]\n2. 发送按钮定位结果：[根据实际测试结果填写]\n3. 有效的选择器列表：[记录有效选择器]\n4. 特殊发现：[记录Shadow DOM、iframe等]\n\n💡 基于这些结果，我们可以：\n- 更新ChatComposeNode的默认配置\n- 创建专门的1688聊天交互workflow\n- 实现可靠的自动化聊天功能\n\n点击'下一步'结束测试",
+        "stepGate": true,
+        "block": true
+      },
+      "next": ["end"]
+    },
+    {
+      "id": "end",
+      "type": "EndNode",
+      "name": "结束",
+      "config": { "cleanup": false, "saveLogs": true }
+    }
+  ],
+  "globalConfig": {
+    "logLevel": "info",
+    "screenshotOnError": true,
+    "autoCleanup": false,
+    "parallelExecution": false,
+    "timeout": 900000
+  }
+}

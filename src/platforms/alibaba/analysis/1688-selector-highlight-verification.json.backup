@@ -1,0 +1,88 @@
+{
+  "name": "1688商家选择器高亮验证",
+  "description": "验证商家列表容器和旺旺链接选择器的正确性，通过高亮显示确认元素选择",
+  "version": "1.0.0",
+  "preflows": ["1688-login-preflow"],
+  "nodes": [
+    { "id": "start", "type": "StartNode", "name": "开始", "next": ["attach"] },
+    {
+      "id": "attach",
+      "type": "AttachSessionNode",
+      "name": "会话接力",
+      "config": {},
+      "next": ["navigate_search"]
+    },
+    {
+      "id": "navigate_search",
+      "type": "NavigationNode",
+      "name": "导航到搜索结果页",
+      "config": {
+        "url": "https://s.1688.com/selloffer/offer_search.htm?keywords=%B7%FE%D7%B0",
+        "waitUntil": "domcontentloaded",
+        "timeout": 30000
+      },
+      "next": ["wait_search"]
+    },
+    {
+      "id": "wait_search",
+      "type": "WaitNode",
+      "name": "等待搜索结果加载",
+      "config": { "minMs": 3000, "maxMs": 5000 },
+      "next": ["highlight_merchants"]
+    },
+    {
+      "id": "highlight_merchants",
+      "type": "PageSnapshotNode",
+      "name": "高亮商家容器验证",
+      "config": {
+        "script": "console.log('🔍 开始高亮商家容器验证...'); const merchantSelectors = ['.sm-offer-item', '.offer-item', '.sm-offer', '[class*=offer]']; const results = []; merchantSelectors.forEach(selector => { const elements = document.querySelectorAll(selector); if (elements.length > 0) { console.log(`✅ 找到选择器 ${selector}: ${elements.length} 个元素`); elements.forEach((el, index) => { if (index < 5) { el.style.border = '3px solid red'; el.style.backgroundColor = 'rgba(255, 255, 0, 0.3)'; el.style.zIndex = '9999'; const title = el.querySelector('h4, [class*=title], a[title]'); const link = el.querySelector('a[href*=\"1688.com\"]'); const contact = el.querySelector('[class*=contact], [class*=chat], [class*=im], [class*=旺旺], .sm-im'); console.log(`  商家 ${index + 1}: 标题=${title ? title.textContent.trim().substring(0, 30) : '未找到'}, 联系方式=${contact ? '找到' : '未找到'}`); } }); results.push({ selector: selector, count: elements.length, highlighted: Math.min(5, elements.length), status: 'success' }); } else { console.log(`❌ 选择器 ${selector}: 未找到元素`); results.push({ selector: selector, count: 0, highlighted: 0, status: 'failed' }); } }); console.log('商家容器高亮完成，5秒后移除高亮'); setTimeout(() => { document.querySelectorAll('[style*=\"border: 3px solid red\"]').forEach(el => { el.style.border = ''; el.style.backgroundColor = ''; el.style.zIndex = ''; }); }, 5000); return { success: true, type: 'merchant_highlight', results: results, timestamp: new Date().toISOString() };",
+        "saveScreenshots": true
+      },
+      "next": ["highlight_contacts"]
+    },
+    {
+      "id": "highlight_contacts",
+      "type": "PageSnapshotNode",
+      "name": "高亮联系方式验证",
+      "config": {
+        "script": "console.log('📞 开始高亮联系方式验证...'); const contactSelectors = ['[class*=contact]', '[class*=chat]', '[class*=im]', '[class*=旺旺]', '.sm-im', '.s-im']; const results = []; let totalContacts = 0; contactSelectors.forEach(selector => { const elements = document.querySelectorAll(selector); if (elements.length > 0) { console.log(`✅ 找到联系方式选择器 ${selector}: ${elements.length} 个元素`); elements.forEach((el, index) => { if (index < 10) { el.style.border = '3px solid blue'; el.style.backgroundColor = 'rgba(0, 255, 255, 0.3)'; el.style.zIndex = '9999'; const merchantItem = el.closest('.sm-offer-item, .offer-item, .sm-offer, [class*=offer]'); const merchantTitle = merchantItem ? merchantItem.querySelector('h4, [class*=title], a[title]') : null; console.log(`  联系方式 ${index + 1}: 所属商家=${merchantTitle ? merchantTitle.textContent.trim().substring(0, 20) : '未找到商家'}, 元素文本=${el.textContent.trim().substring(0, 20)}`); } }); results.push({ selector: selector, count: elements.length, highlighted: Math.min(10, elements.length), status: 'success' }); totalContacts += elements.length; } else { console.log(`❌ 联系方式选择器 ${selector}: 未找到元素`); results.push({ selector: selector, count: 0, highlighted: 0, status: 'failed' }); } }); console.log('联系方式高亮完成，5秒后移除高亮'); setTimeout(() => { document.querySelectorAll('[style*=\"border: 3px solid blue\"]').forEach(el => { el.style.border = ''; el.style.backgroundColor = ''; el.style.zIndex = ''; }); }, 5000); return { success: true, type: 'contact_highlight', results: results, totalContacts: totalContacts, timestamp: new Date().toISOString() };",
+        "saveScreenshots": true
+      },
+      "next": ["extract_sample_merchants"]
+    },
+    {
+      "id": "extract_sample_merchants",
+      "type": "PageSnapshotNode",
+      "name": "提取样本商家数据",
+      "config": {
+        "script": "console.log('📊 提取样本商家数据进行验证...'); const merchants = []; const offerItems = document.querySelectorAll('.sm-offer-item, .offer-item, .sm-offer, [class*=offer]'); console.log(`找到 ${offerItems.length} 个商家容器`); for (let i = 0; i < Math.min(5, offerItems.length); i++) { const item = offerItems[i]; const title = item.querySelector('h4, [class*=title], a[title]'); const link = item.querySelector('a[href*=\"1688.com\"]'); const price = item.querySelector('[class*=price], [data-price]'); const image = item.querySelector('img[src]'); const contactButton = item.querySelector('[class*=contact], [class*=chat], [class*=im], [class*=旺旺], .sm-im, .s-im'); const merchantName = item.querySelector('[class*=company], [class*=name], [class*=shop]'); const merchantLink = link ? link.href : null; let merchantId = null; if (merchantLink) { const idMatch = merchantLink.match(/member_id=([\\d]+)/); if (idMatch) merchantId = idMatch[1]; else { const pathMatch = merchantLink.match(/\\/(\\d+)\\.htm/); if (pathMatch) merchantId = pathMatch[1]; } } merchants.push({ index: i, merchantId: merchantId, title: title ? title.textContent.trim() : '', merchantName: merchantName ? merchantName.textContent.trim() : '', price: price ? price.textContent.trim() : '', merchantLink: merchantLink, hasImage: !!image, hasContact: !!contactButton, contactInfo: contactButton ? { className: contactButton.className, text: contactButton.textContent.trim(), href: contactButton.href } : null }); console.log(`商家 ${i + 1}: ID=${merchantId}, 标题=${title ? title.textContent.trim().substring(0, 30) : ''}, 联系方式=${contactButton ? '找到' : '未找到'}`); } const validMerchants = merchants.filter(m => m.merchantId && m.title); const withContact = merchants.filter(m => m.hasContact); console.log(`有效商家: ${validMerchants.length}/5`); console.log(`有联系方式: ${withContact.length}/5`); return { success: true, type: 'sample_extraction', sampleData: merchants, totalFound: offerItems.length, validMerchants: validMerchants.length, withContact: withContact.length, timestamp: new Date().toISOString() };",
+        "saveScreenshots": true
+      },
+      "next": ["save_results"]
+    },
+    {
+      "id": "save_results",
+      "type": "ResultSaverNode",
+      "name": "保存验证结果",
+      "config": {
+        "outputDir": "workflows/records",
+        "filenameTemplate": "1688-selector-verification-{timestamp}.json",
+        "includeMetadata": true
+      },
+      "next": ["end"]
+    },
+    {
+      "id": "end",
+      "type": "EndNode",
+      "name": "结束验证",
+      "config": { "cleanup": false, "saveLogs": true }
+    }
+  ],
+  "globalConfig": {
+    "logLevel": "info",
+    "screenshotOnError": true,
+    "autoCleanup": false,
+    "parallelExecution": false,
+    "timeout": 300000
+  }
+}

@@ -1,0 +1,52 @@
+{
+  "type": "preflow",
+  "path": "/Users/fanzhang/Documents/github/webauto/workflows/1688/complete-chat-workflow.json#anchor",
+  "name": "1688完整聊天工作流 Anchor Check",
+  "startedAt": 1761205924667,
+  "finishedAt": 1761205924667,
+  "success": true,
+  "error": null,
+  "variables": {
+    "workflowName": "1688完整聊天工作流 Anchor Check",
+    "sessionId": "sess-1761205916328-365668",
+    "sessionDir": "/Users/fanzhang/.webauto/sessions/sess-1761205916328-365668",
+    "debug": false,
+    "startTime": "2025-10-23T07:52:04.640Z",
+    "workflowStarted": true,
+    "sessionAttached": true,
+    "anchorSettled.default": true,
+    "anchorSelector.default": ".userAvatarLogo img",
+    "anchorRect.default": {
+      "x": 448,
+      "y": 0,
+      "width": 1024,
+      "height": 52
+    },
+    "anchorSettled": true,
+    "anchorSelector": ".userAvatarLogo img",
+    "anchorRect": {
+      "x": 448,
+      "y": 0,
+      "width": 1024,
+      "height": 52
+    },
+    "anchorSettled_default": true,
+    "anchorSelector_default": ".userAvatarLogo img",
+    "anchorRect_default": {
+      "x": 448,
+      "y": 0,
+      "width": 1024,
+      "height": 52
+    },
+    "endTime": "2025-10-23T07:52:04.667Z",
+    "sessionPersisted": true,
+    "workflowCompleted": true,
+    "executionTime": 27
+  },
+  "outputs": {},
+  "parameters": {
+    "debug": false,
+    "sessionId": "sess-1761205916328-365668"
+  },
+  "preflows": []
+}

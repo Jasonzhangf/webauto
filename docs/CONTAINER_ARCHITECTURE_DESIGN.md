@@ -362,6 +362,26 @@ class WeiboCommentContainer extends BaseSelfRefreshingContainer {
 - [ ] 集成容器系统
 - [ ] 完善错误处理和监控
 
+## 📦 容器库分层与生命周期管理（新增）
+
+为保证容器定义的质量与可演进性，引入双库管理策略：
+
+- `containers/test`：测试库，承载新建与变更中的容器；自动生成和快速验证。
+- `containers/validated`：验证库，承载通过审批与完整验证的容器；供生产工作流优先使用。
+
+### 目录结构与索引
+- 两个库分别维护各自的 `<site>/index.json`，并沿用 `interactive-elements/`、`containers/`、`indicators/` 的子目录结构。
+- `index.json` 规则与现有平台索引一致，新增可选 `relationships` 图以表达父子关系。
+
+### 新增与发布流程
+1) 新建/更新 → 测试库：拾取器创建“可执行容器定义”，写入 `containers/test/<site>/…` 并更新测试索引。
+2) 验证与审批：基于 Playwright 与运行时校验策略进行验证。
+3) 发布 → 验证库：拷贝到 `containers/validated/<site>/…`，更新验证索引；必要时标记旧定义 `deprecated` 或 `replacedBy`。
+
+### 兼容与迁移
+- 兼容 legacy 路径 `container-system/platforms/<site>/`：Loader 优先按 `validated → test → legacy` 解析。
+- 迁移既有库：将 `container-system/platforms/<site>/` 复制到 `containers/test/<site>/`，修复/生成测试索引，验证后逐步提升至验证库。
+
 ## 📝 总结
 
 本架构设计提供了一个完整的解决方案，用于处理现代网页中的动态内容加载和交互。通过自刷新容器、动态操作注册、任务驱动生命周期等核心特性，能够有效应对各种复杂的自动化操作场景。

@@ -1,88 +1,78 @@
 {
   "name": "1688页面结构分析",
-  "description": "分析1688搜索结果页面的DOM结构，找到商家列表和旺旺链接的正确选择器",
+  "description": "分析1688主页面的实际结构，找到搜索输入框",
   "version": "1.0.0",
-  "preflows": ["1688-login-preflow"],
+  "preflows": ["workflows/preflows/1688-login-preflow.json"],
+  "anchor": {
+    "hostFilter": "1688.com",
+    "selectors": [
+      ".userAvatarLogo img",
+      ".username",
+      ".user-info",
+      ".header-user",
+      ".login-user",
+      "[data-spm-anchor-id*='user']",
+      ".member-nickname",
+      ".s-login-info",
+      ".ui-header",
+      ".head-user-info",
+      ".login-info",
+      ".header-avatar",
+      ".user-name",
+      ".avatar",
+      "img[alt*='用户']",
+      "img[alt*='头像']",
+      ".header",
+      ".top-header",
+      ".ui-header-wrapper"
+    ],
+    "requireVisible": false,
+    "maxWaitMs": 10000,
+    "pollIntervalMs": 1000,
+    "highlight": true,
+    "persistHighlight": true,
+    "highlightLabel": "ANCHOR",
+    "highlightColor": "#007AFF"
+  },
   "nodes": [
-    { "id": "start", "type": "StartNode", "name": "开始", "next": ["attach"] },
     {
-      "id": "attach",
-      "type": "AttachSessionNode",
-      "name": "会话接力",
-      "config": {},
-      "next": ["navigate_search"]
+      "id": "start",
+      "type": "StartNode",
+      "next": ["navigate_home"]
     },
     {
-      "id": "navigate_search",
+      "id": "navigate_home",
       "type": "NavigationNode",
-      "name": "导航到搜索结果页",
       "config": {
-        "url": "https://s.1688.com/selloffer/offer_search.htm?keywords=%B7%FE%D7%B0",
-        "waitUntil": "domcontentloaded",
-        "timeout": 30000
+        "url": "https://www.1688.com/",
+        "waitUntil": "networkidle",
+        "timeout": 15000
       },
-      "next": ["wait_search"]
+      "next": ["wait_page_load"]
     },
     {
-      "id": "wait_search",
+      "id": "wait_page_load",
       "type": "WaitNode",
-      "name": "等待搜索结果加载",
-      "config": { "minMs": 3000, "maxMs": 5000 },
-      "next": ["analyze_page_structure"]
-    },
-    {
-      "id": "analyze_page_structure",
-      "type": "PageSnapshotNode",
-      "name": "分析页面整体结构",
       "config": {
-        "script": "console.log('🔍 开始分析1688页面结构...'); const analysis = { title: document.title, url: window.location.href, userAgent: navigator.userAgent }; // 分析主要容器 const mainContainers = []; const containerSelectors = ['#container', '.container', '.main', '[class*main]', '[class*container]', '.sm-offer-list', '.offer-list', '.search-result']; containerSelectors.forEach(selector => { const elements = document.querySelectorAll(selector); if (elements.length > 0) { mainContainers.push({ selector, count: elements.length, firstElementId: elements[0].id, firstElementClass: elements[0].className, innerHTML: elements[0].innerHTML.substring(0, 200) }); } }); // 分析商家容器 const merchantContainers = []; const merchantSelectors = ['.sm-offer-item', '.offer-item', '.sm-offer', '[class*=offer]', '.product-item', '[class*=product]', '.sm-offer-card', '[class*=card]', '.list-item', '[class*=item]']; merchantSelectors.forEach(selector => { const elements = document.querySelectorAll(selector); if (elements.length > 0) { const firstElement = elements[0]; merchantContainers.push({ selector, count: elements.length, hasImage: !!firstElement.querySelector('img'), hasLink: !!firstElement.querySelector('a'), hasPrice: !!firstElement.querySelector('[class*=price], [data-price], .price'), hasTitle: !!firstElement.querySelector('h4, h3, h5, [class*=title]'), htmlSample: firstElement.outerHTML.substring(0, 300) }); } }); // 分析联系/聊天元素 const contactElements = []; const contactSelectors = ['[class*=contact]', '[class*=chat]', '[class*=talk]', '[class*=im]', '[class*=旺旺]', '.sm-im', '.s-im', '[data-im]', '[onclick*=chat]', '[onclick*=talk]', 'a[href*=\"im\"]', 'a[href*=\"chat\"]', 'button[onclick*=\"chat\"]']; contactSelectors.forEach(selector => { const elements = document.querySelectorAll(selector); if (elements.length > 0) { const samples = Array.from(elements).slice(0, 3).map(el => ({ text: el.textContent.trim(), href: el.href, onclick: el.getAttribute('onclick'), className: el.className, tagName: el.tagName })); contactElements.push({ selector, count: elements.length, samples: samples }); } }); // 分析分页 const pagination = document.querySelector('.ui-pagination, .pagination, [class*=page]'); const paginationInfo = pagination ? { exists: true, className: pagination.className, html: pagination.outerHTML.substring(0, 200) } : { exists: false }; console.log('页面结构分析完成'); console.log('主要容器数量:', mainContainers.length); console.log('商家容器数量:', merchantContainers.length); console.log('联系元素数量:', contactElements.length); return { success: true, analysis: analysis, mainContainers: mainContainers, merchantContainers: merchantContainers, contactElements: contactElements, paginationInfo: paginationInfo, timestamp: new Date().toISOString() };",
-        "saveScreenshots": true
+        "duration": 3000
       },
-      "next": ["test_selectors"]
+      "next": ["page_analysis"]
     },
     {
-      "id": "test_selectors",
-      "type": "PageSnapshotNode",
-      "name": "测试最佳选择器",
+      "id": "page_analysis",
+      "type": "JavaScriptExecutionNode",
       "config": {
-        "script": "console.log('🧪 测试选择器并高亮显示...'); const results = []; // 测试商家容器选择器 const testMerchantSelectors = ['.sm-offer-item', '.offer-item', '.sm-offer', '[class*=offer]']; testMerchantSelectors.forEach(selector => { const elements = document.querySelectorAll(selector); if (elements.length > 0 && elements.length <= 50) { // 高亮显示元素 elements.forEach((el, index) => { if (index < 3) { el.style.border = '3px solid red'; el.style.backgroundColor = 'yellow'; el.style.zIndex = '9999'; } }); results.push({ type: 'merchant', selector: selector, count: elements.length, highlighted: Math.min(3, elements.length), status: 'tested' }); } }); // 测试联系按钮选择器 const testContactSelectors = ['[class*=contact]', '[class*=chat]', '[class*=im]', '.sm-im', '[class*=旺旺]']; testContactSelectors.forEach(selector => { const elements = document.querySelectorAll(selector); if (elements.length > 0) { // 高亮显示 elements.forEach((el, index) => { if (index < 2) { el.style.border = '3px solid blue'; el.style.backgroundColor = 'lightblue'; el.style.zIndex = '9999'; } }); results.push({ type: 'contact', selector: selector, count: elements.length, highlighted: Math.min(2, elements.length), status: 'tested' }); } }); // 3秒后移除高亮 setTimeout(() => { document.querySelectorAll('[style*=\"border\"]').forEach(el => { el.style.border = ''; el.style.backgroundColor = ''; el.style.zIndex = ''; }); }, 3000); console.log('选择器测试完成，高亮3秒'); return { success: true, testedSelectors: results, totalTested: results.length, timestamp: new Date().toISOString() };",
-        "saveScreenshots": true
-      },
-      "next": ["extract_sample_data"]
-    },
-    {
-      "id": "extract_sample_data",
-      "type": "PageSnapshotNode",
-      "name": "提取样本数据验证",
-      "config": {
-        "script": "console.log('📊 提取样本商家数据进行验证...'); const sampleData = []; // 使用最佳选择器提取商家信息 const bestMerchantSelector = '.sm-offer-item'; const merchants = document.querySelectorAll(bestMerchantSelector); console.log('找到商家数量:', merchants.length); // 提取前5个商家的详细信息 for (let i = 0; i < Math.min(5, merchants.length); i++) { const item = merchants[i]; const titleEl = item.querySelector('h4, [class*=title], a[title], [class*=name]'); const linkEl = item.querySelector('a[href*=\"1688.com\"]'); const priceEl = item.querySelector('[class*=price], [data-price], .price'); const imgEl = item.querySelector('img[src]'); const contactEl = item.querySelector('[class*=contact], [class*=chat], [class*=im], [class*=旺旺], .sm-im'); const companyEl = item.querySelector('[class*=company], [class*=shop]'); const merchantLink = linkEl ? linkEl.href : null; // 提取商家ID let merchantId = null; if (merchantLink) { const idMatch = merchantLink.match(/member_id=([\\d]+)/); if (idMatch) merchantId = idMatch[1]; else { const pathMatch = merchantLink.match(/\\/(\\d+)\\.htm/); if (pathMatch) merchantId = pathMatch[1]; } } sampleData.push({ index: i, merchantId: merchantId, title: titleEl ? titleEl.textContent.trim() : '', companyName: companyEl ? companyEl.textContent.trim() : '', price: priceEl ? priceEl.textContent.trim() : '', merchantLink: merchantLink, hasImage: !!imgEl, hasContact: !!contactEl, contactInfo: contactEl ? { className: contactEl.className, text: contactEl.textContent.trim(), href: contactEl.href } : null, itemHTML: item.outerHTML.substring(0, 200) }); } // 分析数据质量 const validMerchants = sampleData.filter(m => m.merchantId && m.title); const withContact = sampleData.filter(m => m.hasContact); console.log('有效商家数量:', validMerchants.length); console.log('有联系方式的商家数量:', withContact.length); console.log('样本数据提取完成'); return { success: true, sampleData: sampleData, totalFound: merchants.length, validMerchants: validMerchants.length, withContact: withContact.length, timestamp: new Date().toISOString() };",
-        "saveScreenshots": true
-      },
-      "next": ["save_analysis"]
-    },
-    {
-      "id": "save_analysis",
-      "type": "ResultSaverNode",
-      "name": "保存分析结果",
-      "config": {
-        "outputDir": "workflows/records",
-        "filenameTemplate": "1688-page-structure-analysis-{timestamp}.json",
-        "includeMetadata": true
+        "script": "// 分析1688页面结构，找到搜索输入框\nconsole.log('=== 1688页面结构分析 ===');\n\nconst results = {\n  currentUrl: window.location.href,\n  pageTitle: document.title,\n  readyState: document.readyState,\n  allInputs: [],\n  searchInputs: [],\n  forms: [],\n  visibleElements: []\n};\n\n// 1. 查找所有输入框\nconst allInputs = document.querySelectorAll('input');\nresults.allInputs = Array.from(allInputs).map(input => ({\n  type: input.type,\n  name: input.name,\n  id: input.id,\n  className: input.className,\n  placeholder: input.placeholder,\n  value: input.value,\n  visible: input.offsetWidth > 0 && input.offsetHeight > 0 && window.getComputedStyle(input).display !== 'none',\n  tagName: input.tagName\n}));\n\n// 2. 查找可能的搜索输入框\nconst searchSelectors = [\n  'input[name=\"keywords\"]',\n  'input[placeholder*=\"搜索\"]',\n  'input[placeholder*=\"找商品\"]',\n  '.search-input input',\n  '.search-box input',\n  'input[data-spm-anchor-id*=\"search\"]',\n  'input[type=\"text\"]',\n  '.s-search-input',\n  '.search-input',\n  'input[data-spm=\"search\"]',\n  '.search-input-text',\n  'input[class*=\"search\"]',\n  'input[id*=\"search\"]'\n];\n\nsearchSelectors.forEach(selector => {\n  try {\n    const elements = document.querySelectorAll(selector);\n    if (elements.length > 0) {\n      results.searchInputs.push({\n        selector: selector,\n        count: elements.length,\n        elements: Array.from(elements).map(el => ({\n          type: el.type,\n          name: el.name,\n          id: el.id,\n          className: el.className,\n          placeholder: el.placeholder,\n          value: el.value,\n          visible: el.offsetWidth > 0 && el.offsetHeight > 0 && window.getComputedStyle(el).display !== 'none'\n        }))\n      });\n    }\n  } catch (e) {\n    console.error(`选择器 ${selector} 错误:`, e.message);\n  }\n});\n\n// 3. 查找所有表单\nconst forms = document.querySelectorAll('form');\nresults.forms = Array.from(forms).map(form => ({\n  action: form.action,\n  method: form.method,\n  className: form.className,\n  id: form.id,\n  inputCount: form.querySelectorAll('input').length,\n  visible: form.offsetWidth > 0 && form.offsetHeight > 0\n}));\n\n// 4. 查找页面顶部区域的可见元素（可能是搜索相关）\nconst topElements = document.querySelectorAll('header, .header, .top, .search, .nav');\nresults.visibleElements = Array.from(topElements).map(el => ({\n  tagName: el.tagName,\n  className: el.className,\n  id: el.id,\n  text: el.textContent?.substring(0, 100),\n  visible: el.offsetWidth > 0 && el.offsetHeight > 0,\n  childElementCount: el.children.length\n}));\n\n// 5. 高亮找到的搜索输入框\nlet highlightedCount = 0;\nresults.searchInputs.forEach(searchGroup => {\n  searchGroup.elements.forEach(input => {\n    if (input.visible) {\n      const element = document.querySelector(`${searchGroup.selector}[type=\"text\"], ${searchGroup.selector}[type=\"search\"]`);\n      if (element) {\n        element.style.setProperty('border', '3px solid #FF6B6B', 'important');\n        element.style.setProperty('background', 'rgba(255, 107, 107, 0.2)', 'important');\n        \n        // 添加标签\n        const label = document.createElement('div');\n        label.textContent = `SEARCH_INPUT_${highlightedCount + 1}`;\n        label.style.cssText = `\n          position: absolute;\n          top: ${element.getBoundingClientRect().top - 30}px;\n          left: ${element.getBoundingClientRect().left}px;\n          background: #FF6B6B;\n          color: white;\n          padding: 4px 8px;\n          font-size: 12px;\n          font-weight: bold;\n          z-index: 999999;\n          border-radius: 4px;\n        `;\n        document.body.appendChild(label);\n        highlightedCount++;\n      }\n    }\n  });\n});\n\nconsole.log('=== 分析结果 ===');\nconsole.log('搜索输入框组数:', results.searchInputs.length);\nconsole.log('高亮输入框数量:', highlightedCount);\nconsole.log('总输入框数量:', results.allInputs.length);\nconsole.log('表单数量:', results.forms.length);\n\nreturn results;"
       },
       "next": ["end"]
     },
     {
       "id": "end",
       "type": "EndNode",
-      "name": "结束分析",
-      "config": { "cleanup": false, "saveLogs": true }
+      "config": {
+        "cleanupHighlights": false,
+        "persistSession": false
+      }
     }
-  ],
-  "globalConfig": {
-    "logLevel": "info",
-    "screenshotOnError": true,
-    "autoCleanup": false,
-    "parallelExecution": false,
-    "timeout": 300000
-  }
+  ]
 }

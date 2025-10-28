@@ -51,7 +51,7 @@ workflows/
 - **weibo-download-workflow.json** - 内容下载工作流的JSON配置，用于批量下载微博内容
 
 ### 执行文件
-- **WorkflowRunner.js** - 标准执行器（自动跑 `workflows/preflows/enabled.json` 中配置），写入 `workflows/records/`
+- **WorkflowRunner.js** - 标准执行器（自动跑 `workflows/preflows/enabled.json` 中配置），写入 `archive/workflow-records/`
 - **SequenceRunner.js** - 时序执行器（多个工作流接力，前一步变量自动并入下一步参数，默认保留会话）
 - **weibo-download-runner.js** - 下载工作流执行器，专门用于执行内容下载工作流
 
@@ -182,7 +182,7 @@ ContentDownloadNode → DownloadResultSaverNode → EndNode
 ## 1688 预登录与分析
 - 预登录（Firefox，本地人工登录，保持会话，不关闭）：
   - `gtimeout 600s node scripts/run-workflow.js workflows/preflows/1688-login-preflow.json --debug`
-  - 成功后在 `~/.webauto/sessions/<sessionId>/` 下生成 `login.json`、`context.json`；记录写入 `workflows/records/`
+  - 成功后在 `~/.webauto/sessions/<sessionId>/` 下生成 `login.json`、`context.json`；记录写入 `archive/workflow-records/`
 - 分析（接力会话 → 页面快照 HTML/JS）：
   - `node scripts/run-workflow.js workflows/1688/analysis/1688-page-snapshot.json --sessionId=<上一步的sessionId> --debug`
 - 分析（接力会话 → 导航搜索页 → 快照 + 批量 token 捕获）：

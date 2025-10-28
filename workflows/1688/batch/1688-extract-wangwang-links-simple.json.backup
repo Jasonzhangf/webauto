@@ -1,0 +1,68 @@
+{
+  "name": "1688提取旺旺链接测试（简化版）",
+  "description": "直接测试从搜索结果页面提取旺旺链接，跳过反风控",
+  "version": "1.0.0",
+  "preflows": ["1688-login-preflow-simple"],
+  "nodes": [
+    { "id": "start", "type": "StartNode", "name": "开始", "next": ["attach"] },
+    {
+      "id": "attach",
+      "type": "AttachSessionNode",
+      "name": "会话接力",
+      "config": {},
+      "next": ["navigate_search"]
+    },
+    {
+      "id": "navigate_search",
+      "type": "NavigationNode",
+      "name": "导航到搜索结果页",
+      "config": {
+        "url": "https://s.1688.com/selloffer/offer_search.htm?keywords=%B7%FE%D7%B0",
+        "waitUntil": "domcontentloaded",
+        "timeout": 30000
+      },
+      "next": ["wait_search"]
+    },
+    {
+      "id": "wait_search",
+      "type": "WaitNode",
+      "name": "等待搜索结果加载",
+      "config": { "minMs": 3000, "maxMs": 5000 },
+      "next": ["extract_wangwang_links"]
+    },
+    {
+      "id": "extract_wangwang_links",
+      "type": "PageSnapshotNode",
+      "name": "提取旺旺链接",
+      "config": {
+        "script": "console.log('🔍 开始提取旺旺链接...'); const merchants = []; const offerItems = document.querySelectorAll('.sm-offer-item, .offer-item, .sm-offer, [class*=offer]'); console.log('找到 ' + offerItems.length + ' 个商品项'); offerItems.forEach(function(item, index) { if (index < 5) { const title = item.querySelector('h4, [class*=title], a[title]'); const wangwangSpan = item.querySelector('span.J_WangWang, span[class*=WangWang]'); const wangwangLink = wangwangSpan ? wangwangSpan.querySelector('a.ww-link') : null; if (wangwangLink && wangwangLink.href) { const merchantName = wangwangSpan.getAttribute('data-nick') || '未知商家'; const decodedName = decodeURIComponent(merchantName); merchants.push({ index: index, merchantName: decodedName, title: title ? title.textContent.trim().substring(0, 50) : '', chatUrl: wangwangLink.href, hasWangWang: true }); console.log(`商家 ${index + 1}: ${decodedName}`); console.log(`聊天链接: ${wangwangLink.href}`); } } }); console.log('总共提取到 ' + merchants.length + ' 个旺旺链接'); return { success: true, merchants: merchants, totalItems: offerItems.length, timestamp: new Date().toISOString() };",
+        "saveScreenshots": true
+      },
+      "next": ["save_results"]
+    },
+    {
+      "id": "save_results",
+      "type": "ResultSaverNode",
+      "name": "保存提取结果",
+      "config": {
+        "outputDir": "workflows/records",
+        "filenameTemplate": "1688-wangwang-links-extraction-{timestamp}.json",
+        "includeMetadata": true
+      },
+      "next": ["end"]
+    },
+    {
+      "id": "end",
+      "type": "EndNode",
+      "name": "结束",
+      "config": { "cleanup": false, "saveLogs": true }
+    }
+  ],
+  "globalConfig": {
+    "logLevel": "info",
+    "screenshotOnError": true,
+    "autoCleanup": false,
+    "parallelExecution": false,
+    "timeout": 300000
+  }
+}

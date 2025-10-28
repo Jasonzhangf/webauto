@@ -86,7 +86,7 @@ const WORKFLOW_TEMPLATE = {
       "type": "ResultSaverNode",
       "name": "保存完整结果",
       "config": {
-        "outputDir": "workflows/records",
+        "outputDir": "archive/workflow-records",
         "filenameTemplate": "1688-dynamic-search-{timestamp}.json",
         "includeMetadata": true,
         "mergeData": true

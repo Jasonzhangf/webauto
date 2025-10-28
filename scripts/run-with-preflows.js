@@ -2,7 +2,7 @@
 // 运行任意工作流，并在同一进程内先执行 workflows/preflows/enabled.json 中的前置流程
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
-import WorkflowRunner from '../workflows/WorkflowRunner.js';
+import WorkflowRunner from '../src/core/workflow/WorkflowRunner.js';
 
 async function main() {
   const args = process.argv.slice(2);

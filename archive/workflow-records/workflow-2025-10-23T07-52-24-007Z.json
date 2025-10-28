@@ -1,0 +1,103 @@
+{
+  "type": "workflow",
+  "path": "/Users/fanzhang/Documents/github/webauto/workflows/1688/complete-chat-workflow.json",
+  "name": "1688完整聊天工作流",
+  "startedAt": 1761205944008,
+  "finishedAt": 1761205944008,
+  "success": false,
+  "error": "anchor not found or timeout",
+  "variables": {
+    "workflowName": "1688完整聊天工作流",
+    "sessionId": "sess-1761205916328-365668",
+    "sessionDir": "/Users/fanzhang/.webauto/sessions/sess-1761205916328-365668",
+    "debug": false,
+    "startTime": "2025-10-23T07:52:04.668Z",
+    "workflowStarted": true,
+    "targetUrl": "https://s.1688.com/selloffer/offer_search.htm?keywords=%B3%E5%B7%E6%D2%C2",
+    "keyword": "冲锋衣",
+    "gbkEncoded": "%B3%E5%B7%E6%D2%C2",
+    "currentUrl": "https://s.1688.com/selloffer/offer_search.htm?keywords=%B3%E5%B7%E6%D2%C2",
+    "navigationCompleted": true,
+    "lastNavigationTime": "2025-10-23T07:52:08.813Z",
+    "lastWaitMs": 0
+  },
+  "outputs": {
+    "url": "https://s.1688.com/selloffer/offer_search.htm?keywords=%B3%E5%B7%E6%D2%C2",
+    "keyword": "冲锋衣",
+    "gbkEncoded": "%B3%E5%B7%E6%D2%C2"
+  },
+  "parameters": {
+    "debug": false
+  },
+  "preflows": [
+    {
+      "file": "/Users/fanzhang/Documents/github/webauto/archive/workflow-records/preflow-2025-10-23T07-52-04-640Z.json",
+      "type": "preflow",
+      "path": "/Users/fanzhang/Documents/github/webauto/workflows/preflows/1688-login-preflow.json",
+      "name": "1688 Login Preflow",
+      "startedAt": 1761205924640,
+      "finishedAt": 1761205924640,
+      "success": true,
+      "error": null,
+      "variables": {
+        "workflowName": "1688 Login Preflow",
+        "sessionId": "sess-1761205916328-365668",
+        "sessionDir": "/Users/fanzhang/.webauto/sessions/sess-1761205916328-365668",
+        "debug": false,
+        "startTime": "2025-10-23T07:51:56.331Z",
+        "workflowStarted": true,
+        "camoufoxPath": "/Users/fanzhang/Library/Caches/camoufox/Camoufox.app/Contents/MacOS/camoufox",
+        "browserInitialized": true,
+        "browserInfo": {
+          "headless": false,
+          "viewport": {
+            "width": 1920,
+            "height": 1080
+          }
+        },
+        "lastWaitMs": 2145,
+        "cookiesLoaded": true,
+        "cookieCount": 157,
+        "cookiePath": "/Users/fanzhang/.webauto/cookies/1688-domestic.json",
+        "currentUrl": "https://www.1688.com/",
+        "navigationCompleted": true,
+        "lastNavigationTime": "2025-10-23T07:52:03.016Z",
+        "antiBotWaitMs": 934,
+        "modalsDismissed": 0,
+        "isLoggedIn": true,
+        "loginInfo": {
+          "cookieHit": true,
+          "cookieUpdated": true,
+          "cookieUpdatePath": "/Users/fanzhang/.webauto/cookies/default-domestic.json",
+          "cookieUpdateCount": 157
+        },
+        "loginVerifiedAt": "2025-10-23T07:52:04.635Z",
+        "cookieSaved": true,
+        "cookieSavePath": "/Users/fanzhang/.webauto/cookies/1688-domestic.json",
+        "cookieSaveCount": 157,
+        "resultSaved": true,
+        "resultFilePath": "archive/workflow-records/preflow-1688-login-success-2025-10-23T07-52-04-637Z.json",
+        "resultFilename": "preflow-1688-login-success-2025-10-23T07-52-04-637Z.json",
+        "handshakeSignalPath": "/Users/fanzhang/.webauto/sessions/sess-1761205916328-365668/login.json",
+        "behaviorLogPath": "/Users/fanzhang/.webauto/sessions/sess-1761205916328-365668/behavior-1688 Login Preflow-2025-10-23T07-52-04-638Z.json",
+        "behaviorEventCount": 435,
+        "contextExportPath": "/Users/fanzhang/.webauto/sessions/sess-1761205916328-365668/context.json",
+        "endTime": "2025-10-23T07:52:04.640Z",
+        "sessionPersisted": true,
+        "logsExported": true,
+        "workflowCompleted": true,
+        "executionTime": 8308
+      },
+      "outputs": {
+        "url": "https://s.1688.com/selloffer/offer_search.htm?keywords=%B3%E5%B7%E6%D2%C2",
+        "keyword": "冲锋衣",
+        "gbkEncoded": "%B3%E5%B7%E6%D2%C2"
+      },
+      "parameters": {
+        "debug": false,
+        "sessionId": "sess-1761205916328-365668"
+      },
+      "preflows": []
+    }
+  ]
+}

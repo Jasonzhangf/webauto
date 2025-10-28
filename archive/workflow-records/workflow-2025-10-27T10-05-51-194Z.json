@@ -1,0 +1,34 @@
+{
+  "type": "workflow",
+  "path": "/Users/fanzhang/Documents/github/webauto/workflows/preflows/weibo-prelogin-staging-auto.json",
+  "name": "Weibo Prelogin Staging Auto",
+  "startedAt": 1761559551194,
+  "finishedAt": 1761559551194,
+  "success": false,
+  "error": "Cookie文件不存在: /Users/fanzhang/.webauto/weibo-cookies.json",
+  "variables": {
+    "workflowName": "Weibo Prelogin Staging Auto",
+    "sessionId": "sess-1761559550361-869330",
+    "sessionDir": "/Users/fanzhang/.webauto/sessions/sess-1761559550361-869330",
+    "debug": true,
+    "skipPreflows": "true",
+    "startTime": "2025-10-27T10:05:50.363Z",
+    "workflowStarted": true,
+    "browserInitialized": true,
+    "browserInfo": {
+      "headless": false,
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      }
+    },
+    "injectedIndex": true,
+    "indexPath": "/Users/fanzhang/Documents/github/webauto/containers/staging/weibo.com/index.json"
+  },
+  "outputs": {},
+  "parameters": {
+    "debug": true,
+    "skipPreflows": "true"
+  },
+  "preflows": []
+}

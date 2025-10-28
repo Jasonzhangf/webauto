@@ -1,0 +1,162 @@
+{
+  "name": "1688 Camoufox增强反检测测试",
+  "description": "使用camoufox加强版反检测配置，进入主页验证风控绕过效果",
+  "version": "1.0.0",
+  "nodes": [
+    { "id": "start", "type": "StartNode", "name": "开始", "next": ["ensure_camoufox"] },
+
+    {
+      "id": "ensure_camoufox",
+      "type": "CamoufoxEnsureNode",
+      "name": "确保Camoufox可用",
+      "config": {},
+      "next": ["init_camoufox"]
+    },
+
+    {
+      "id": "init_camoufox",
+      "type": "BrowserInitNode",
+      "name": "初始化Camoufox浏览器（增强反检测）",
+      "config": {
+        "engine": "camoufox",
+        "headless": false,
+        "viewport": { "width": 1920, "height": 1080 },
+        "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "strictAutomationMitigation": true,
+        "extraHeaders": true,
+        "cookieFile": "/Users/fanzhang/.webauto/cookies/1688-domestic.json",
+        "launchArgs": [
+          "--disable-blink-features=AutomationControlled",
+          "--disable-web-security",
+          "--disable-features=VizDisplayCompositor",
+          "--no-first-run",
+          "--disable-default-apps",
+          "--disable-sync",
+          "--metrics-recording-only",
+          "--disable-default-browser-check",
+          "--disable-background-networking",
+          "--disable-background-timer-throttling",
+          "--disable-renderer-backgrounding",
+          "--disable-backgrounding-occluded-windows",
+          "--disable-extensions",
+          "--disable-plugins-discovery",
+          "--disable-ipc-flooding-protection",
+          "--shuffle-messagetypes",
+          "--disable-gpu",
+          "--disable-dev-shm-usage",
+          "--no-sandbox",
+          "--disable-setuid-sandbox",
+          "--disable-features=TranslateUI",
+          "--disable-features=Translate",
+          "--lang=zh-CN",
+          "--accept-lang=zh-CN,zh",
+          "--disable-features=AudioService",
+          "--disable-features=MediaSession",
+          "--disable-features=PictureInPicture",
+          "--disable-features=WebBluetooth",
+          "--disable-features=WebHID",
+          "--disable-features=WebUSB",
+          "--disable-features=WebSerial",
+          "--disable-features=WebXR",
+          "--disable-features=WebGPU"
+        ]
+      },
+      "next": ["anti_detection_wait"]
+    },
+
+    {
+      "id": "anti_detection_wait",
+      "type": "WaitNode",
+      "name": "反检测稳定等待",
+      "config": { "minMs": 3000, "maxMs": 5000 },
+      "next": ["navigate_home"]
+    },
+
+    {
+      "id": "navigate_home",
+      "type": "NavigationNode",
+      "name": "导航到1688主页",
+      "config": {
+        "url": "https://www.1688.com/",
+        "waitUntil": "domcontentloaded",
+        "timeout": 30000
+      },
+      "next": ["wait_stabilize"]
+    },
+
+    {
+      "id": "wait_stabilize",
+      "type": "WaitNode",
+      "name": "等待页面稳定",
+      "config": { "minMs": 5000, "maxMs": 8000 },
+      "next": ["check_page_state"]
+    },
+
+    {
+      "id": "check_page_state",
+      "type": "PageSnapshotNode",
+      "name": "检查页面状态",
+      "config": {
+        "script": "console.log('🔍 检查1688页面状态...'); const pageTitle = document.title; const pageUrl = window.location.href; const isVerification = pageTitle.includes('验证码') || document.body.textContent.includes('验证码') || document.body.textContent.includes('verification') || document.querySelector('#nocaptcha, [class*=\"captcha\"], [class*=\"nc_\"]') !== null; const hasNormalContent = document.querySelectorAll('.search-box, .nav-menu, .banner, [class*=search]').length > 0; const hasProducts = document.querySelectorAll('.offer-item, .product-item, [class*=offer]').length > 0; const isLoggedIn = document.body.textContent.includes('登录') === false || document.querySelector('.user-name, [class*=user], [class*=login][style*=none]') !== null; console.log('页面标题:', pageTitle); console.log('当前URL:', pageUrl); console.log('是否被验证码拦截:', isVerification); console.log('是否有正常主页内容:', hasNormalContent); console.log('是否有产品内容:', hasProducts); console.log('登录状态:', isLoggedIn); return { success: !isVerification && (hasNormalContent || hasProducts), pageTitle, pageUrl, isVerification, hasNormalContent, hasProducts, isLoggedIn, isHomepage: pageUrl.includes('1688.com') && !pageUrl.includes('s.1688.com'), timestamp: new Date().toISOString() };",
+        "saveScreenshots": true
+      },
+      "next": ["simulate_human_behavior"]
+    },
+
+    {
+      "id": "simulate_human_behavior",
+      "type": "PageSnapshotNode",
+      "name": "模拟人类行为",
+      "config": {
+        "script": "console.log('🤖 模拟人类行为...'); const scrollStep = 300; const maxScrolls = 5; let currentScroll = 0; const performScroll = () => { window.scrollBy(0, scrollStep); currentScroll++; console.log('滚动第', currentScroll, '次'); if (currentScroll < maxScrolls) { setTimeout(performScroll, 200 + Math.random() * 300); } else { console.log('模拟行为完成'); } }; setTimeout(performScroll, 1000 + Math.random() * 2000); return { success: true, action: 'human_behavior_simulated', timestamp: new Date().toISOString() };",
+        "saveScreenshots": false
+      },
+      "next": ["wait_final"]
+    },
+
+    {
+      "id": "wait_final",
+      "type": "WaitNode",
+      "name": "最终等待",
+      "config": { "minMs": 3000, "maxMs": 5000 },
+      "next": ["final_check"]
+    },
+
+    {
+      "id": "final_check",
+      "type": "PageSnapshotNode",
+      "name": "最终状态检查",
+      "config": {
+        "script": "console.log('✅ 最终状态检查...'); const pageTitle = document.title; const pageUrl = window.location.href; const isVerification = pageTitle.includes('验证码') || document.body.textContent.includes('验证码') || document.body.textContent.includes('verification'); const hasNormalContent = document.querySelectorAll('.search-box, .nav-menu, .banner, [class*=search]').length > 0; const hasProducts = document.querySelectorAll('.offer-item, .product-item, [class*=offer]').length > 0; const isLoggedIn = document.body.textContent.includes('登录') === false || document.querySelector('.user-name, [class*=user], [class*=login][style*=none]') !== null; console.log('最终页面标题:', pageTitle); console.log('最终URL:', pageUrl); console.log('是否被验证码拦截:', isVerification); console.log('是否有正常主页内容:', hasNormalContent); console.log('是否有产品内容:', hasProducts); console.log('登录状态:', isLoggedIn); return { success: !isVerification && (hasNormalContent || hasProducts), pageTitle, pageUrl, isVerification, hasNormalContent, hasProducts, isLoggedIn, isHomepage: pageUrl.includes('1688.com') && !pageUrl.includes('s.1688.com'), timestamp: new Date().toISOString() };",
+        "saveScreenshots": true
+      },
+      "next": ["save_results"]
+    },
+
+    {
+      "id": "save_results",
+      "type": "ResultSaverNode",
+      "name": "保存测试结果",
+      "config": {
+        "outputDir": "workflows/records",
+        "filenameTemplate": "1688-camoufox-enhanced-{timestamp}.json",
+        "includeMetadata": true
+      },
+      "next": ["end"]
+    },
+
+    {
+      "id": "end",
+      "type": "EndNode",
+      "name": "保持页面打开",
+      "config": { "cleanup": false, "saveLogs": true }
+    }
+  ],
+  "globalConfig": {
+    "logLevel": "info",
+    "screenshotOnError": true,
+    "autoCleanup": false,
+    "parallelExecution": false,
+    "timeout": 1200000
+  }
+}

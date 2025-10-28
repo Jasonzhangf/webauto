@@ -1,0 +1,38 @@
+{
+  "name": "1688 Page Snapshot (Attach)",
+  "description": "接力会话后抓取当前页面的 HTML 与脚本清单，并保存结果",
+  "version": "1.0.0",
+  "nodes": [
+    { "id": "start", "type": "StartNode", "name": "开始", "next": ["attach"] },
+    { "id": "attach", "type": "AttachSessionNode", "name": "会话接力", "config": {}, "next": ["wait"] },
+    { "id": "wait", "type": "WaitNode", "name": "渲染等待", "config": { "minMs": 800, "maxMs": 1600 }, "next": ["dismiss"] },
+    { "id": "dismiss", "type": "ModalDismissNode", "name": "关闭模态", "config": { "maxAttempts": 4, "retryDelay": 400 }, "next": ["snapshot"] },
+    {
+      "id": "snapshot",
+      "type": "PageSnapshotNode",
+      "name": "页面快照",
+      "config": {
+        "maxHtmlLength": 400000,
+        "includeInlineScripts": true,
+        "includeExternalScripts": true,
+        "maxInlineScripts": 30,
+        "maxInlineScriptLength": 16000
+      },
+      "next": ["save"]
+    },
+    {
+      "id": "save",
+      "type": "ResultSaverNode",
+      "name": "保存结果",
+      "config": {
+        "outputDir": "workflows/records",
+        "filenameTemplate": "1688-page-snapshot-{timestamp}.json",
+        "includeMetadata": true
+      },
+      "next": ["end"]
+    },
+    { "id": "end", "type": "EndNode", "name": "结束", "config": { "cleanup": false, "saveLogs": true } }
+  ],
+  "globalConfig": { "logLevel": "info", "screenshotOnError": true, "autoCleanup": false, "parallelExecution": false, "timeout": 480000 }
+}
+

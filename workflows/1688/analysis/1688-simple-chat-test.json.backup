@@ -1,0 +1,104 @@
+{
+  "name": "1688 Simple Chat Test",
+  "description": "简化的1688聊天测试，避免特殊字符问题",
+  "version": "1.0.0",
+  "nodes": [
+    { "id": "start", "type": "StartNode", "name": "开始", "next": ["attach"] },
+    { "id": "attach", "type": "AttachSessionNode", "name": "会话接力", "config": {}, "next": ["navigate_search"] },
+    {
+      "id": "navigate_search",
+      "type": "NavigationNode",
+      "name": "导航到搜索页面",
+      "config": {
+        "url": "https://s.1688.com/selloffer/offer_search.htm?keywords=%B9%A4%D2%B5%B4%F3%B7%E7%C9%C8&spm=a260k.home2025.searchbox.0",
+        "waitUntil": "domcontentloaded",
+        "timeout": 30000
+      },
+      "next": ["wait_search"]
+    },
+    { "id": "wait_search", "type": "WaitNode", "name": "搜索页面等待", "config": { "minMs": 2000, "maxMs": 3000 }, "next": ["dismiss_modals"] },
+    { "id": "dismiss_modals", "type": "ModalDismissNode", "name": "关闭搜索页模态", "config": { "maxAttempts": 4, "retryDelay": 500 }, "next": ["open_chat"] },
+    {
+      "id": "open_chat",
+      "type": "PopupTokenCaptureNode",
+      "name": "打开聊天窗口",
+      "config": {
+        "containerSelector": ".space-pc-ui2024-content > div:nth-child(5)",
+        "clickSelectors": ["a.ww-link.ww-inline", "span.J_WangWang a.ww-link", "a[href*=air.1688.com/app/]"],
+        "hostFilter": "air.1688.com",
+        "maxItems": 1,
+        "minClickDelay": 500,
+        "maxClickDelay": 1500,
+        "afterPopupWaitMs": 3000,
+        "closePopup": false,
+        "popupClickSelectors": ["body > div:nth-child(23)"],
+        "dryMode": false,
+        "enforceWebPreference": true,
+        "popupStepGate": false
+      },
+      "next": ["simple_chat_test"]
+    },
+    {
+      "id": "simple_chat_test",
+      "type": "ChatComposeNode",
+      "name": "简单聊天测试",
+      "config": {
+        "hostFilter": "air.1688.com",
+        "message": "测试消息 - 增强版ChatComposeNode",
+        "stepGate": true,
+        "send": false,
+        "inputSelectors": [
+          "textarea",
+          "div[contenteditable=true]",
+          "div[contenteditable]",
+          "input[type=text]",
+          ".im-chat-input",
+          ".msg-input",
+          ".chat-input",
+          ".message-input",
+          ".input-area",
+          "[class*=input]",
+          "[class*=editor]",
+          "[role=textbox]",
+          "[contenteditable]"
+        ],
+        "sendSelectors": [
+          "button:has-text(发送)",
+          ".send-btn",
+          ".im-chat-send-btn",
+          "[class*=send]",
+          "button",
+          "[role=button]"
+        ],
+        "highlightMs": 10000,
+        "gateTitle": "简单聊天测试",
+        "gateMessage": "正在测试1688聊天界面...\n\n如果看到输入框有文字或发送按钮有红色边框，说明定位成功！\n\n点击下一步继续..."
+      },
+      "next": ["save_results"]
+    },
+    {
+      "id": "save_results",
+      "type": "ResultSaverNode",
+      "name": "保存测试结果",
+      "config": {
+        "outputDir": "workflows/records",
+        "filenameTemplate": "1688-simple-chat-test-{timestamp}.json",
+        "includeMetadata": true
+      },
+      "next": ["end"]
+    },
+    {
+      "id": "end",
+      "type": "EndNode",
+      "name": "结束",
+      "config": { "cleanup": false, "saveLogs": true }
+    }
+  ],
+  "globalConfig": {
+    "logLevel": "info",
+    "screenshotOnError": true,
+    "autoCleanup": false,
+    "parallelExecution": false,
+    "timeout": 600000
+  }
+}

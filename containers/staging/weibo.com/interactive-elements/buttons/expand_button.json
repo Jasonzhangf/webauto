@@ -1,0 +1,37 @@
+{
+  "id": "expand_button",
+  "website": "weibo",
+  "name": "展开回复按钮",
+  "selector": ".expand",
+  "description": "展开被折叠的回复评论的按钮",
+  "priority": 13,
+  "specificity": 100,
+  "registeredAt": "2025-09-22T00:25:13.312Z",
+  "isActive": true,
+  "type": "interactive",
+  "usage": {
+    "accessCount": 0,
+    "lastUsed": null,
+    "successRate": 0
+  },
+  "validation": {
+    "selectorValid": true,
+    "lastValidation": "2025-09-22T00:25:13.312Z",
+    "validationMethod": "comment-analysis"
+  },
+  "discovery": {
+    "strategy": "precise-selector",
+    "specificityThreshold": 100,
+    "uniquenessThreshold": 0.8,
+    "waitForElements": true,
+    "timeout": 10000
+  },
+  "action": "click",
+  "metadata": {
+    "generatedFrom": "container-library.json",
+    "generatedAt": "2025-09-22T00:45:00.745Z",
+    "originalPriority": 13,
+    "selectorHash": "2da4e3ec",
+    "fileVersion": "1.0.0"
+  }
+}

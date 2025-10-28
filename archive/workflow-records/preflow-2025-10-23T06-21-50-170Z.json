@@ -1,0 +1,24 @@
+{
+  "type": "preflow",
+  "path": "/Users/fanzhang/Documents/github/webauto/workflows/1688/complete-chat-workflow.json#anchor",
+  "name": "1688完整聊天工作流 Anchor Check",
+  "startedAt": 1761200510170,
+  "finishedAt": 1761200510170,
+  "success": false,
+  "error": "anchor not found or timeout",
+  "variables": {
+    "workflowName": "1688完整聊天工作流 Anchor Check",
+    "sessionId": "sess-1761200379165-504623",
+    "sessionDir": "/Users/fanzhang/.webauto/sessions/sess-1761200379165-504623",
+    "debug": false,
+    "startTime": "2025-10-23T06:21:20.042Z",
+    "workflowStarted": true,
+    "sessionAttached": true
+  },
+  "outputs": {},
+  "parameters": {
+    "debug": false,
+    "sessionId": "sess-1761200379165-504623"
+  },
+  "preflows": []
+}

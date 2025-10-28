@@ -1,0 +1,20 @@
+{
+  "name": "1688 Open Chat And Probe",
+  "description": "会话接力 → 导航搜索页 → 打开单个聊天窗口（优先网页版）→ 探测输入框与发送按钮选择器",
+  "version": "1.0.0",
+  "nodes": [
+    { "id": "start", "type": "StartNode", "name": "开始", "next": ["attach"] },
+    { "id": "attach", "type": "AttachSessionNode", "name": "会话接力", "config": {}, "next": ["cookies"] },
+    { "id": "cookies", "type": "CookieLoaderNode", "name": "加载Cookie", "config": { "cookiePath": "~/.webauto/cookies/1688-domestic.json" }, "next": ["nav"] },
+    { "id": "nav", "type": "NavigationNode", "name": "导航搜索页", "config": { "url": "https://s.1688.com/selloffer/offer_search.htm?keywords=%B9%A4%D2%B5%B4%F3%B7%E7%C9%C8&spm=a260k.home2025.searchbox.0", "waitUntil": "domcontentloaded", "timeout": 30000 }, "next": ["wait"] },
+    { "id": "wait", "type": "WaitNode", "name": "等待渲染", "config": { "minMs": 1200, "maxMs": 1800 }, "next": ["dismiss"] },
+    { "id": "dismiss", "type": "ModalDismissNode", "name": "关闭模态", "config": { "maxAttempts": 5, "retryDelay": 400 }, "next": ["open"] },
+    { "id": "open", "type": "PopupTokenCaptureNode", "name": "打开聊天窗口(单次)", "config": { "containerSelector": ".space-pc-ui2024-content > div:nth-child(5)", "clickSelectors": [".offer-shop-row .ww-link.ww-online", "span.J_WangWang .ww-link.ww-online", "a.ww-link.ww-inline", "span.J_WangWang a.ww-link", "a[href*=air.1688.com/app/]"] , "hostFilter": "air.1688.com", "maxItems": 1, "minClickDelay": 600, "maxClickDelay": 1500, "afterPopupWaitMs": 1000, "closePopup": false, "popupClickSelectors": ["body > div:nth-child(23)"], "dryMode": false, "enforceWebPreference": true }, "next": ["gate"] },
+    { "id": "gate", "type": "GateOverlayNode", "name": "暂停等待(检查模态)", "config": { "hostFilter": "air.1688.com", "title": "WebAuto 步进", "message": "已打开会话窗口，请检查模态元素。准备好后点击“下一步”继续。", "block": true, "timeoutMs": 300000 }, "next": ["probe"] },
+    { "id": "probe", "type": "SelectorProbeNode", "name": "探测聊天选择器", "config": { "hostFilter": "air.1688.com", "inputCandidates": ["div[contenteditable=true]", "div[contenteditable]", "textarea", ".im-chat-input [contenteditable]", ".msg-input [contenteditable]"], "sendCandidates": [".im-chat-send-btn", ".send-btn", "button", "a", "[role=button]"], "sendText": ["发送", "Send"] }, "next": ["compose"] },
+    { "id": "compose", "type": "ChatComposeNode", "name": "输入并等待发送", "config": { "hostFilter": "air.1688.com", "message": "你好", "stepGate": true, "inputSelectors": ["div[contenteditable=true]", "div[contenteditable]", "textarea", ".im-chat-input [contenteditable]", ".msg-input [contenteditable]"], "sendSelectors": [".im-chat-send-btn", ".send-btn", "button:has-text(发送)", "a:has-text(发送)", "[role=button]"] }, "next": ["save"] },
+    { "id": "save", "type": "ResultSaverNode", "name": "保存结果", "config": { "outputDir": "workflows/records", "filenameTemplate": "1688-chat-probe-{timestamp}.json", "includeMetadata": true }, "next": ["end"] },
+    { "id": "end", "type": "EndNode", "name": "结束", "config": { "cleanup": false, "saveLogs": true } }
+  ],
+  "globalConfig": { "logLevel": "info", "screenshotOnError": true, "autoCleanup": false, "parallelExecution": false, "timeout": 120000 }
+}

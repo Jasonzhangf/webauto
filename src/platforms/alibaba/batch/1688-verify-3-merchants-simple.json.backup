@@ -1,0 +1,68 @@
+{
+  "name": "1688验证3个商家",
+  "description": "提取3个商家信息并逐一验证",
+  "version": "1.0.0",
+  "preflows": ["1688-login-preflow"],
+  "nodes": [
+    { "id": "start", "type": "StartNode", "name": "开始", "next": ["attach"] },
+    {
+      "id": "attach",
+      "type": "AttachSessionNode",
+      "name": "会话接力",
+      "config": {},
+      "next": ["navigate_search"]
+    },
+    {
+      "id": "navigate_search",
+      "type": "NavigationNode",
+      "name": "导航到搜索结果页",
+      "config": {
+        "url": "https://s.1688.com/selloffer/offer_search.htm?keywords=%B7%FE%D7%B0",
+        "waitUntil": "domcontentloaded",
+        "timeout": 30000
+      },
+      "next": ["wait_search"]
+    },
+    {
+      "id": "wait_search",
+      "type": "WaitNode",
+      "name": "等待搜索结果完全加载",
+      "config": { "minMs": 3000, "maxMs": 5000 },
+      "next": ["extract_merchants"]
+    },
+    {
+      "id": "extract_merchants",
+      "type": "PageSnapshotNode",
+      "name": "提取3个商家信息",
+      "config": {
+        "script": "console.log('🔍 开始提取商家信息...'); const merchants = []; const offerItems = document.querySelectorAll('.sm-offer-item, .offer-item, .sm-offer, [class*=offer]'); console.log(`找到 ${offerItems.length} 个商家`); for (let i = 0; i < Math.min(3, offerItems.length); i++) { const item = offerItems[i]; const title = item.querySelector('h4, [class*=title], a[title]'); const link = item.querySelector('a[href*=\"1688.com\"]'); const price = item.querySelector('[class*=price], [data-price]'); const wangwang = item.querySelector('span.J_WangWang'); const merchantLink = link ? link.href : null; let merchantId = null; if (merchantLink) { const idMatch = merchantLink.match(/member_id=([\\d]+)/); if (idMatch) merchantId = idMatch[1]; } const chatUrl = wangwang ? wangwang.querySelector('a.ww-link') : null; merchants.push({ index: i + 1, merchantId: merchantId, title: title ? title.textContent.trim() : '', merchantLink: merchantLink, price: price ? price.textContent.trim() : '', chatUrl: chatUrl ? chatUrl.href : null }); console.log(`商家 ${i + 1}: ${title ? title.textContent.trim().substring(0, 30) : '无标题'}, ID: ${merchantId}`); } return { success: true, merchants: merchants, totalFound: offerItems.length, extractedCount: merchants.length };",
+        "saveScreenshots": true
+      },
+      "next": ["save_data"]
+    },
+    {
+      "id": "save_data",
+      "type": "ResultSaverNode",
+      "name": "保存商家数据",
+      "config": {
+        "outputDir": "workflows/records",
+        "filenameTemplate": "1688-merchants-extracted-{timestamp}.json",
+        "includeMetadata": true
+      },
+      "next": ["end"]
+    },
+    {
+      "id": "end",
+      "type": "EndNode",
+      "name": "结束",
+      "config": { "cleanup": false, "saveLogs": true }
+    }
+  ],
+  "globalConfig": {
+    "logLevel": "info",
+    "screenshotOnError": true,
+    "autoCleanup": false,
+    "parallelExecution": false,
+    "timeout": 300000
+  }
+}

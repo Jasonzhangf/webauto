@@ -1,0 +1,139 @@
+{
+  "name": "1688锚点高亮测试",
+  "description": "独立测试1688页面锚点高亮功能",
+  "version": "1.0.0",
+  "nodes": [
+    { "id": "start", "type": "StartNode", "name": "开始", "next": ["ensure_camoufox"] },
+    { "id": "ensure_camoufox", "type": "CamoufoxEnsureNode", "name": "Camoufox 校验/安装", "config": {}, "next": ["browser_init"] },
+    {
+      "id": "browser_init",
+      "type": "BrowserInitNode",
+      "name": "浏览器初始化",
+      "config": {
+        "engine": "camoufox",
+        "headless": false,
+        "viewport": { "width": 1920, "height": 1080 },
+        "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "strictAutomationMitigation": true,
+        "extraHeaders": true,
+        "launchArgs": [
+          "--disable-blink-features=AutomationControlled",
+          "--disable-web-security",
+          "--disable-features=VizDisplayCompositor",
+          "--no-first-run",
+          "--disable-default-apps",
+          "--disable-sync",
+          "--metrics-recording-only",
+          "--disable-default-browser-check",
+          "--disable-background-networking",
+          "--disable-background-timer-throttling",
+          "--disable-renderer-backgrounding",
+          "--disable-backgrounding-occluded-windows",
+          "--disable-extensions",
+          "--disable-plugins-discovery",
+          "--disable-ipc-flooding-protection",
+          "--shuffle-messagetypes",
+          "--disable-gpu",
+          "--disable-dev-shm-usage",
+          "--no-sandbox",
+          "--disable-setuid-sandbox",
+          "--disable-features=TranslateUI",
+          "--disable-features=Translate",
+          "--lang=zh-CN",
+          "--accept-lang=zh-CN,zh"
+        ]
+      },
+      "next": ["load_cookies"]
+    },
+    {
+      "id": "load_cookies",
+      "type": "CookieLoaderNode",
+      "name": "加载Cookie",
+      "config": {
+        "cookiePath": "~/.webauto/cookies/1688-domestic.json"
+      },
+      "next": ["navigate_search"]
+    },
+    {
+      "id": "navigate_search",
+      "type": "NavigationNode",
+      "name": "导航到钢化膜搜索页",
+      "config": {
+        "url": "https://s.1688.com/selloffer/offer_search.htm?keywords=%B8%D6%BB%AF%C4%A4",
+        "waitUntil": "domcontentloaded",
+        "timeout": 30000
+      },
+      "next": ["wait_search_loaded"]
+    },
+    {
+      "id": "wait_search_loaded",
+      "type": "WaitNode",
+      "name": "等待搜索页面完全加载",
+      "config": { "minMs": 3000, "maxMs": 5000 },
+      "next": ["anchor_first_item"]
+    },
+    {
+      "id": "anchor_first_item",
+      "type": "AnchorPointNode",
+      "name": "锚点高亮第一条商家",
+      "config": {
+        "selectors": [".sm-offer-item", ".offer-item", ".sm-offer", "[class*=offer]", ".sm-offer-item-wrapper"],
+        "requireVisible": true,
+        "maxWaitMs": 15000,
+        "pollIntervalMs": 1000,
+        "highlight": true,
+        "persistHighlight": true,
+        "highlightColor": "#ff3b30",
+        "highlightLabel": "TARGET",
+        "highlightDurationMs": 10000,
+        "alias": "firstMerchant"
+      },
+      "next": ["verify_highlight"]
+    },
+    {
+      "id": "verify_highlight",
+      "type": "PageSnapshotNode",
+      "name": "验证锚点高亮效果",
+      "config": {
+        "script": "console.log('🔍 验证锚点高亮效果...');\n\n// 检查高亮元素是否存在\nconst highlightElements = document.querySelectorAll('.__webauto_anchor_overlay__');\nconst labelElements = document.querySelectorAll('div[style*=\"position:fixed\"][style*=\"background:#ff3b30\"]');\n\nconsole.log(`找到高亮覆盖层: ${highlightElements.length} 个`);\nconsole.log(`找到标签元素: ${labelElements.length} 个`);\n\n// 查找被高亮的元素\nconst anchoredElements = [];\nconst selectors = ['.sm-offer-item', '.offer-item', '.sm-offer', '[class*=offer]', '.sm-offer-item-wrapper'];\n\nfor (const selector of selectors) {\n  const elements = document.querySelectorAll(selector);\n  elements.forEach(el => {\n    if (el.style.outline && el.style.outline.includes('#ff3b30')) {\n      anchoredElements.push({\n        selector: selector,\n        text: el.textContent.trim().substring(0, 100),\n        outline: el.style.outline\n      });\n    }\n  });\n}\n\nconsole.log(`被锚点高亮的元素: ${anchoredElements.length} 个`);\nanchoredElements.forEach((item, index) => {\n  console.log(`  ${index + 1}. ${item.selector}: ${item.text}`);\n});\n\n// 创建测试高亮效果\nif (anchoredElements.length > 0) {\n  const testHighlight = document.createElement('div');\n  testHighlight.id = 'anchor-test-verification';\n  testHighlight.textContent = '✅ 锚点高亮测试成功';\n  testHighlight.style.cssText = `\n    position: fixed;\n    top: 20px;\n    right: 20px;\n    background: #34c759;\n    color: white;\n    padding: 10px 15px;\n    border-radius: 8px;\n    font-size: 14px;\n    font-weight: bold;\n    z-index: 2147483647;\n    box-shadow: 0 4px 12px rgba(0,0,0,0.3);\n    animation: slideInRight 0.5s ease-out;\n  `;\n  \n  // 添加动画\n  if (!document.querySelector('#anchor-test-style')) {\n    const style = document.createElement('style');\n    style.id = 'anchor-test-style';\n    style.textContent = `\n      @keyframes slideInRight {\n        from { transform: translateX(100%); opacity: 0; }\n        to { transform: translateX(0); opacity: 1; }\n      }\n    `;\n    document.head.appendChild(style);\n  }\n  \n  document.body.appendChild(testHighlight);\n  \n  // 5秒后自动移除测试提示\n  setTimeout(() => {\n    try { testHighlight.remove(); } catch {}\n  }, 5000);\n}\n\nreturn {\n  success: true,\n  highlightOverlays: highlightElements.length,\n  labelElements: labelElements.length,\n  anchoredElements: anchoredElements.length,\n  anchoredDetails: anchoredElements,\n  timestamp: new Date().toISOString()\n};",
+        "saveScreenshots": true
+      },
+      "next": ["final_verification"]
+    },
+    {
+      "id": "final_verification",
+      "type": "PageSnapshotNode",
+      "name": "最终验证所有高亮",
+      "config": {
+        "script": "console.log('🎯 最终验证所有锚点高亮...');\n\n// 统计所有高亮元素\nconst allHighlights = document.querySelectorAll('.__webauto_anchor_overlay__');\nconst allLabels = document.querySelectorAll('[style*=\"position:fixed\"][style*=\"z-index:2147483647\"]');\nconst outlinedElements = document.querySelectorAll('[style*=\"outline\"][style*=\"#\"]');\n\nconsole.log(`总高亮覆盖层: ${allHighlights.length} 个`);\nconsole.log(`总标签元素: ${allLabels.length} 个`);\nconsole.log(`轮廓元素: ${outlinedElements.length} 个`);\n\n// 创建最终测试结果\nconst resultDiv = document.createElement('div');\nresultDiv.id = 'final-anchor-result';\nresultDiv.innerHTML = `\n  <h3 style=\"color: #34c759; margin: 10px 0;\">🎯 锚点高亮测试完成</h3>\n  <p style=\"margin: 5px 0;\">高亮覆盖层: ${allHighlights.length} 个</p>\n  <p style=\"margin: 5px 0;\">标签元素: ${allLabels.length} 个</p>\n  <p style=\"margin: 5px 0;\">轮廓元素: ${outlinedElements.length} 个</p>\n  <p style=\"margin: 5px 0; color: #007aff;\">测试时间: ${new Date().toLocaleString()}</p>\n`;\nresultDiv.style.cssText = `\n  position: fixed;\n  top: 20px;\n  left: 20px;\n  background: rgba(255, 255, 255, 0.95);\n  padding: 15px;\n  border-radius: 10px;\n  box-shadow: 0 4px 20px rgba(0,0,0,0.2);\n  z-index: 2147483647;\n  font-family: Arial, sans-serif;\n  font-size: 12px;\n  max-width: 300px;\n  animation: fadeIn 0.5s ease-in;\n`;\n\n// 添加淡入动画\nif (!document.querySelector('#final-result-style')) {\n  const style = document.createElement('style');\n  style.id = 'final-result-style';\n  style.textContent = `\n    @keyframes fadeIn {\n      from { opacity: 0; transform: translateY(-20px); }\n      to { opacity: 1; transform: translateY(0); }\n    }\n  `;\n  document.head.appendChild(style);\n}\n\ndocument.body.appendChild(resultDiv);\n\n// 10秒后自动移除结果提示\nsetTimeout(() => {\n  try { resultDiv.remove(); } catch {}\n}, 10000);\n\nreturn {\n  success: true,\n  totalHighlights: allHighlights.length,\n  totalLabels: allLabels.length,\n  totalOutlined: outlinedElements.length,\n  testCompleted: true,\n  timestamp: new Date().toISOString()\n};",
+        "saveScreenshots": true
+      },
+      "next": ["save_results"]
+    },
+    {
+      "id": "save_results",
+      "type": "ResultSaverNode",
+      "name": "保存测试结果",
+      "config": {
+        "outputDir": "workflows/records",
+        "filenameTemplate": "1688-anchor-highlight-test-{timestamp}.json",
+        "includeMetadata": true,
+        "mergeData": true
+      },
+      "next": ["end"]
+    },
+    {
+      "id": "end",
+      "type": "EndNode",
+      "name": "结束",
+      "config": { "cleanup": false, "saveLogs": true }
+    }
+  ],
+  "globalConfig": {
+    "logLevel": "info",
+    "screenshotOnError": true,
+    "autoCleanup": false,
+    "parallelExecution": false,
+    "timeout": 120000
+  }
+}

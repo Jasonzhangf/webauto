@@ -217,7 +217,7 @@ async function main() {
     const result = await runDirect1688Search(keyword, debug);
 
     // 保存结果
-    const resultFile = `workflows/records/dynamic-search-${keyword.replace(/[^a-zA-Z0-9\u4e00-\u9fa5]/g, '-')}-${Date.now()}.json`;
+    const resultFile = `archive/workflow-records/dynamic-search-${keyword.replace(/[^a-zA-Z0-9\u4e00-\u9fa5]/g, '-')}-${Date.now()}.json`;
     const resultDir = path.dirname(resultFile);
 
     if (!fs.existsSync(resultDir)) {

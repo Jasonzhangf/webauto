@@ -2,7 +2,7 @@
 // 1688通用搜索工作流执行器
 import { readFileSync, existsSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import WorkflowRunner from '../workflows/WorkflowRunner.js';
+import WorkflowRunner from '../src/core/workflow/WorkflowRunner.js';
 
 class UniversalSearchExecutor {
   constructor() {
