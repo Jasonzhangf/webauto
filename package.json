@@ -9,7 +9,9 @@
     "playwright": "^1.56.0"
   },
   "scripts": {
-    "start:mcp:browser": "npx @browsermcp/mcp@latest"
+    "start:mcp:browser": "npx @browsermcp/mcp@latest",
+    "actions:validate": "node scripts/actions-validate.cjs",
+    "actions:run": "node scripts/run-action.cjs"
   },
   "devDependencies": {
     "@modelcontextprotocol/sdk": "^1.20.1"
