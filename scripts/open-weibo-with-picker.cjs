@@ -326,7 +326,14 @@ async function main() {
       const origKeyDown = keyInput.onkeydown; keyInput.onkeydown=(ev)=>{ if (ev.key==='Enter' || ev.key===','){ ev.preventDefault(); const v=keyInput.value.trim(); if (v){ addKeyToken(v); if (instantChk.checked) sendNow([v]); } keyInput.value=''; } };
       // 执行按钮
       const execRow=document.createElement('div'); execRow.className='row'; const execGap=document.createElement('label'); execGap.textContent=''; const opsBtn=document.createElement('button'); opsBtn.textContent='执行选择'; execRow.appendChild(execGap); execRow.appendChild(opsBtn);
-      opsBtn.onclick=(ev)=>{ ev.stopPropagation(); const opKey=currentOpKey; if(!opKey) return; const s=i1.value||sel; try{ window.__webautoTmpValue = valInput.value || ''; window.__webautoTmpKeys = keyTokens.slice(); }catch{} window.webauto_dispatch?.({ type:'picker:operation', data:{ opKey, selector: s } }); window.webauto_dispatch?.({ type:'picker:save', data:{ selector:s, containerTree: buildContainerTree(el), containerId:(sel2.selectedOptions[0]&&sel2.selectedOptions[0].value!=='__custom__')?sel2.selectedOptions[0].value:'', containerSelector:(sel2.selectedOptions[0]&&sel2.selectedOptions[0].dataset&&sel2.selectedOptions[0].dataset.selector)||'', classChoice:(clsSelect&&clsSelect.value)||'', opKey, value: (valInput.value||''), keys: keyTokens.slice() } }); };
+      opsBtn.onclick=(ev)=>{ ev.stopPropagation(); const opKey=currentOpKey; if(!opKey) return; const s=i1.value||sel; try{ window.__webautoTmpValue = valInput.value || ''; window.__webautoTmpKeys = keyTokens.slice(); }catch{} 
+        // 先执行所选操作
+        window.webauto_dispatch?.({ type:'picker:operation', data:{ opKey, selector: s } });
+        // 如果存在按键序列且当前操作不是 keyboard:sequence，则在稍后串行执行按键序列
+        if (keyTokens.length && opKey !== 'keyboard:sequence') {
+          setTimeout(()=>{ try{ window.__webautoTmpValue = ''; window.__webautoTmpKeys = keyTokens.slice(); window.webauto_dispatch?.({ type:'picker:operation', data:{ opKey:'keyboard:sequence', selector: s } }); }catch{} }, 120);
+        }
+        window.webauto_dispatch?.({ type:'picker:save', data:{ selector:s, containerTree: buildContainerTree(el), containerId:(sel2.selectedOptions[0]&&sel2.selectedOptions[0].value!=='__custom__')?sel2.selectedOptions[0].value:'', containerSelector:(sel2.selectedOptions[0]&&sel2.selectedOptions[0].dataset&&sel2.selectedOptions[0].dataset.selector)||'', classChoice:(clsSelect&&clsSelect.value)||'', opKey, value: (valInput.value||''), keys: keyTokens.slice() } }); };
 
       // 虚拟键盘（Enter / Backspace / 方向键）
       const vkRow=document.createElement('div'); vkRow.className='row'; const vkLab=document.createElement('label'); vkLab.textContent='虚拟键盘'; vkRow.appendChild(vkLab);
