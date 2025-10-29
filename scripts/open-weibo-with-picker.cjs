@@ -149,10 +149,17 @@ async function main() {
           '.webauto-toolbar{position:fixed;right:16px;top:16px;background:#1e1e1e;color:#fff;padding:6px 10px;border-radius:8px;box-shadow:0 2px 12px rgba(0,0,0,.4);z-index:'+Z+';font:12px/1.4 Arial;}'+
           '.webauto-toolbar button{cursor:pointer;background:#2c2c2c;color:#fff;border:1px solid #444;border-radius:6px;padding:4px 8px;}'+
           '.webauto-menu{position:fixed;background:#1e1e1e;color:#fff;padding:10px 12px;border-radius:10px;box-shadow:0 2px 12px rgba(0,0,0,.4);z-index:'+Z+';font:12px/1.4 Arial;min-width:360px;max-width:560px;pointer-events:auto;}'+
-          '.webauto-menu .row{margin:6px 0; display:flex; align-items:center; gap:8px;}'+
+          '.webauto-menu .row{margin:6px 0; display:flex; align-items:center; gap:8px; position:relative;}'+
           '.webauto-menu label{display:block;color:#aaa;min-width:92px;margin:0;}'+
           '.webauto-menu select, .webauto-menu input{flex:1;width:100%;padding:6px 8px;border-radius:6px;border:1px solid #444;background:#2c2c2c;color:#fff;}'+
-          '.webauto-menu .actions button{margin-right:6px;margin-top:6px;}';
+          '.webauto-menu .actions button{margin-right:6px;margin-top:6px;}'+
+          '.webauto-menu .ops-box{flex:1;display:flex;align-items:center;justify-content:space-between;border:1px solid #444;border-radius:6px;padding:6px 8px;background:#2c2c2c;cursor:pointer;user-select:none;}'+
+          '.webauto-menu .ops-current{color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;}'+
+          '.webauto-menu .ops-list{position:absolute;right:0;top:100%;margin-top:4px;background:#1e1e1e;border:1px solid #444;border-radius:6px;max-height:220px;overflow:auto;min-width:320px;box-shadow:0 2px 12px rgba(0,0,0,.4);}'+
+          '.webauto-menu .ops-item{padding:6px 8px;color:#ddd;cursor:pointer;white-space:nowrap;}'+
+          '.webauto-menu .ops-item:hover{background:#2c2c2c;}'+
+          '.webauto-menu .chip{display:inline-block;padding:2px 6px;border:1px solid #555;border-radius:12px;background:#2a2a2a;color:#ddd;cursor:pointer;}'+
+          '.webauto-menu .chip + .chip{margin-left:6px;}';
         (document.head||document.documentElement).appendChild(s);
       }catch{}
     }
@@ -232,15 +239,25 @@ async function main() {
       const bSave=document.createElement('button'); bSave.textContent='保存容器'; bSave.onclick=(ev)=>{ ev.stopPropagation(); const opt=sel2.selectedOptions[0]; const payload={ selector: i1.value||sel, classChoice: (clsSelect&&clsSelect.value)||'', containerId: (opt&&opt.value!=='__custom__')?opt.value:'', containerSelector: (opt&&opt.dataset&&opt.dataset.selector)?opt.dataset.selector:'', containerTree: buildContainerTree(el) }; window.webauto_dispatch?.({ type:'picker:save', data: payload }); };
       const bClose=document.createElement('button'); bClose.textContent='关闭'; bClose.onclick=(ev)=>{ ev.stopPropagation(); hideMenu(); };
       row3.appendChild(bHi); row3.appendChild(bClickMouse); row3.appendChild(bClickDom); row3.appendChild(bCopy); row3.appendChild(bSave); row3.appendChild(bClose);
-      // 操作选择（库）
-      const opsRow=document.createElement('div'); opsRow.className='row'; const opsLabel=document.createElement('label'); opsLabel.textContent='操作选择(库)'; const opsSelect=document.createElement('select');
-      const valLabel=document.createElement('label'); valLabel.textContent='参数/输入值(可选)'; valLabel.style.marginTop='6px'; const valInput=document.createElement('input'); valInput.type='text'; valInput.placeholder='如：文本 或 属性名 href';
+      // 操作选择（库） - 自定义下拉
+      const opsRow=document.createElement('div'); opsRow.className='row'; const opsLabel=document.createElement('label'); opsLabel.textContent='操作选择(库)';
+      const opsBox=document.createElement('div'); opsBox.className='ops-box'; const opsCurrent=document.createElement('div'); opsCurrent.className='ops-current'; opsCurrent.textContent='(请选择)'; opsBox.appendChild(opsCurrent); opsRow.appendChild(opsLabel); opsRow.appendChild(opsBox);
+      const opsList=document.createElement('div'); opsList.className='ops-list'; opsList.style.display='none'; opsRow.appendChild(opsList);
+      let currentOpKey='';
+      const setCurrent=(key,label)=>{ currentOpKey=key||''; opsCurrent.textContent=label ? (String(label)+' ('+String(key)+')') : (key||'(请选择)'); };
       let ops=(Array.isArray(window.__webautoOps)?window.__webautoOps:[]);
-      const fillOps=(items)=>{ try{ opsSelect.innerHTML=''; if(!items || !items.length){ const o=document.createElement('option'); o.value=''; o.textContent='(暂无)'; opsSelect.appendChild(o); return; } items.forEach(op=>{ const o=document.createElement('option'); o.value=op.key; o.textContent=(op.label||op.key)+' ('+op.key+')'; opsSelect.appendChild(o); }); }catch{} };
+      const fillOps=(items)=>{ try{ opsList.innerHTML=''; if(!items || !items.length){ const it=document.createElement('div'); it.className='ops-item'; it.textContent='(暂无)'; it.style.pointerEvents='none'; opsList.appendChild(it); return; } items.forEach(op=>{ const it=document.createElement('div'); it.className='ops-item'; it.textContent=(op.label||op.key)+' ('+op.key+')'; it.onclick=(e)=>{ e.stopPropagation(); setCurrent(op.key, op.label||op.key); opsList.style.display='none'; }; opsList.appendChild(it); }); }catch{} };
       fillOps(ops);
       if (!ops || !ops.length) { try { window.webauto_get_actions?.().then(res=>{ const items=(res && (res.operations||res.ops||[])) || []; fillOps(items); window.__webautoOps = items; }); } catch {} }
-      const opsBtn=document.createElement('button'); opsBtn.textContent='执行选择'; opsBtn.onclick=(ev)=>{ ev.stopPropagation(); const opKey=opsSelect.value; if(!opKey) return; const s=i1.value||sel; try{ window.__webautoTmpValue = valInput.value || ''; }catch{} window.webauto_dispatch?.({ type:'picker:operation', data:{ opKey, selector: s } }); window.webauto_dispatch?.({ type:'picker:save', data:{ selector:s, containerTree: buildContainerTree(el), containerId:(sel2.selectedOptions[0]&&sel2.selectedOptions[0].value!=='__custom__')?sel2.selectedOptions[0].value:'', containerSelector:(sel2.selectedOptions[0]&&sel2.selectedOptions[0].dataset&&sel2.selectedOptions[0].dataset.selector)||'', classChoice:(clsSelect&&clsSelect.value)||'', opKey, value: (valInput.value||'') } }); };
-      opsRow.appendChild(opsLabel); opsRow.appendChild(opsSelect); opsRow.appendChild(valLabel); opsRow.appendChild(valInput); opsRow.appendChild(opsBtn);
+      opsBox.onclick=(e)=>{ e.stopPropagation(); opsList.style.display = (opsList.style.display==='none') ? 'block' : 'none'; };
+      document.addEventListener('click', ()=>{ try{ opsList.style.display='none'; }catch{} });
+      // 参数与按键序列
+      const valRow=document.createElement('div'); valRow.className='row'; const valLabel=document.createElement('label'); valLabel.textContent='参数/输入值'; const valInput=document.createElement('input'); valInput.type='text'; valInput.placeholder='如：文本 或 属性名 href'; valRow.appendChild(valLabel); valRow.appendChild(valInput);
+      const keyRow=document.createElement('div'); keyRow.className='row'; const keyLabel=document.createElement('label'); keyLabel.textContent='按键序列'; const keysInput=document.createElement('input'); keysInput.type='text'; keysInput.placeholder='Enter,Tab 或 Ctrl+Enter'; keyRow.appendChild(keyLabel); keyRow.appendChild(keysInput);
+      const keyChips=document.createElement('div'); ['Enter','Tab','Escape','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].forEach(k=>{ const chip=document.createElement('span'); chip.className='chip'; chip.textContent=k; chip.onclick=(e)=>{ e.stopPropagation(); const cur=keysInput.value.trim(); keysInput.value = cur ? (cur+','+k) : k; }; keyRow.appendChild(chip); });
+      // 执行按钮
+      const execRow=document.createElement('div'); execRow.className='row'; const execGap=document.createElement('label'); execGap.textContent=''; const opsBtn=document.createElement('button'); opsBtn.textContent='执行选择'; execRow.appendChild(execGap); execRow.appendChild(opsBtn);
+      opsBtn.onclick=(ev)=>{ ev.stopPropagation(); const opKey=currentOpKey; if(!opKey) return; const s=i1.value||sel; try{ window.__webautoTmpValue = valInput.value || ''; window.__webautoTmpKeys = (keysInput.value||'').split(',').map(x=>x.trim()).filter(Boolean); }catch{} window.webauto_dispatch?.({ type:'picker:operation', data:{ opKey, selector: s } }); window.webauto_dispatch?.({ type:'picker:save', data:{ selector:s, containerTree: buildContainerTree(el), containerId:(sel2.selectedOptions[0]&&sel2.selectedOptions[0].value!=='__custom__')?sel2.selectedOptions[0].value:'', containerSelector:(sel2.selectedOptions[0]&&sel2.selectedOptions[0].dataset&&sel2.selectedOptions[0].dataset.selector)||'', classChoice:(clsSelect&&clsSelect.value)||'', opKey, value: (valInput.value||''), keys: (keysInput.value||'') } }); };
       // 执行结果显示
       const rowResult=document.createElement('div'); rowResult.className='row'; const lRes=document.createElement('label'); lRes.textContent='执行结果'; const pre=document.createElement('pre'); pre.id='webauto-result'; pre.style.maxHeight='260px'; pre.style.minHeight='120px'; pre.style.overflow='auto'; pre.style.background='#111'; pre.style.padding='8px'; pre.style.border='1px solid #333'; pre.style.borderRadius='8px'; pre.textContent='(暂无)'; rowResult.appendChild(lRes); rowResult.appendChild(pre);
       const showResult=(obj)=>{ try{ const el=document.getElementById('webauto-result'); if(!el) return; const txt=(typeof obj==='string')?obj:JSON.stringify(obj,null,2); el.textContent=txt; }catch{} };
@@ -250,7 +267,7 @@ async function main() {
       const customRow=document.createElement('div'); customRow.className='row'; const customInput=document.createElement('input'); customInput.type='text'; customInput.placeholder='输入自定义操作（如：点击第3个关注）'; const customBtn=document.createElement('button'); customBtn.textContent='保存测试容器'; customBtn.onclick=(ev)=>{ ev.stopPropagation(); const opt=sel2.selectedOptions[0]; const payload={ selector: i1.value||sel, classChoice: (clsSelect&&clsSelect.value)||'', containerId: (opt&&opt.value!=='__custom__')?opt.value:'', containerSelector: (opt&&opt.dataset&&opt.dataset.selector)?opt.dataset.selector:'', containerTree: buildContainerTree(el), prompt: customInput.value||'' }; window.webauto_dispatch?.({ type:'picker:save', data: payload }); };
       customRow.appendChild(customInput); customRow.appendChild(customBtn);
       // 组装
-      wrap.appendChild(rowHeader); wrap.appendChild(row2); wrap.appendChild(rowTree); wrap.appendChild(rowParent); wrap.appendChild(rowMode); wrap.appendChild(rowCls); wrap.appendChild(rowSaved); wrap.appendChild(row1); wrap.appendChild(row3); wrap.appendChild(opsRow); wrap.appendChild(rowResult); wrap.appendChild(customRow); wrap.style.visibility='hidden'; document.body.appendChild(wrap); state.menu=wrap;
+      wrap.appendChild(rowHeader); wrap.appendChild(row2); wrap.appendChild(rowTree); wrap.appendChild(rowParent); wrap.appendChild(rowMode); wrap.appendChild(rowCls); wrap.appendChild(rowSaved); wrap.appendChild(row1); wrap.appendChild(row3); wrap.appendChild(opsRow); wrap.appendChild(valRow); wrap.appendChild(keyRow); wrap.appendChild(execRow); wrap.appendChild(rowResult); wrap.appendChild(customRow); wrap.style.visibility='hidden'; document.body.appendChild(wrap); state.menu=wrap;
       try{
         const m=wrap.getBoundingClientRect();
         // 初始靠右显示
