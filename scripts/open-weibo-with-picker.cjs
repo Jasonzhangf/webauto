@@ -108,6 +108,35 @@ async function main() {
       }
     });
 
+    // picks read/write bindings for editor
+    await context.exposeBinding('webauto_pick_read', async (_source, id) => {
+      try { ensureDirs(); const fp = path.join(picksDir, String(id||'')); const txt = fs.readFileSync(fp,'utf8'); const j = JSON.parse(txt); return { ok:true, data: j }; } catch (e) { return { ok:false, error: e?.message||String(e) }; }
+    });
+    await context.exposeBinding('webauto_pick_write', async (_source, payload) => {
+      try {
+        ensureDirs();
+        const id = payload?.id; if (!id) return { ok:false, error:'no id' };
+        const fp = path.join(picksDir, String(id));
+        let j = {}; try { j = JSON.parse(fs.readFileSync(fp,'utf8')); } catch {}
+        const next = { ...j };
+        if (typeof payload.selector === 'string') next.selector = payload.selector;
+        if (typeof payload.classChoice === 'string') next.classChoice = payload.classChoice;
+        if (typeof payload.containerId === 'string') next.containerId = payload.containerId;
+        if (typeof payload.containerSelector === 'string') next.containerSelector = payload.containerSelector;
+        // dedupe by class
+        try {
+          const files = (fs.readdirSync(picksDir)||[]).filter(n=>n.endsWith('.json'));
+          if (next.classChoice) {
+            for (const name of files) {
+              if (name === id) continue; try { const jj = JSON.parse(fs.readFileSync(path.join(picksDir,name),'utf8')); if (jj && jj.classChoice === next.classChoice) return { ok:false, error:'duplicate-class' }; } catch {}
+            }
+          }
+        } catch {}
+        fs.writeFileSync(fp, JSON.stringify(next, null, 2));
+        return { ok:true, data: next };
+      } catch (e) { return { ok:false, error: e?.message||String(e) }; }
+    });
+
     await context.exposeBinding('webauto_dispatch', async (source, evt) => {
       try { console.log('[picker evt]', JSON.stringify(evt)); } catch {}
       const page = source?.page;
