@@ -258,6 +258,9 @@ async function main() {
           '.webauto-menu .tabs{display:flex;gap:8px;margin:4px 0 8px 0;}'+
           '.webauto-menu .tab{padding:4px 10px;border:1px solid #444;border-radius:6px;background:#2a2a2a;color:#ddd;cursor:pointer;}'+
           '.webauto-menu .tab.active{background:#3a3a3a;color:#fff;border-color:#666;}';
+        s.textContent += '.webauto-modal{position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:'+Z+';display:flex;align-items:center;justify-content:center;}'+
+                         '.webauto-modal .box{background:#1e1e1e;color:#fff;width:min(80vw,860px);max-height:80vh;border-radius:10px;box-shadow:0 6px 24px rgba(0,0,0,.5);padding:12px;display:flex;flex-direction:column;overflow:hidden;}'+
+                         '.webauto-modal .body{flex:1;overflow:auto;padding:8px;}';
         (document.head||document.documentElement).appendChild(s);
       }catch{}
     }
@@ -335,21 +338,8 @@ async function main() {
       document.addEventListener('click', ()=>{ try{ savedList.style.display='none'; }catch{} });
       const savedBtns=document.createElement('div'); savedBtns.style.display='flex'; savedBtns.style.gap='6px'; const loadBtn=document.createElement('button'); loadBtn.textContent='加载'; const editBtn=document.createElement('button'); editBtn.textContent='编辑'; const copyBtn=document.createElement('button'); copyBtn.textContent='复制'; const delBtn=document.createElement('button'); delBtn.textContent='删除'; savedBtns.appendChild(loadBtn); savedBtns.appendChild(editBtn); savedBtns.appendChild(copyBtn); savedBtns.appendChild(delBtn); rowSaved.appendChild(savedBtns);
       loadBtn.onclick=async (ev)=>{ ev.stopPropagation(); if (!savedCurrentId) return; try{ const list=Array.isArray(window.__webautoSavedPicks)?window.__webautoSavedPicks:[]; const it=list.find(x=>x.id===savedCurrentId); if (!it) return; const s=it.selector||''; const cid=it.containerId||''; const csel=it.containerSelector||''; const cclass=it.classChoice||''; if (s) i1.value=s; if (cid){ const match=[...sel2.options].find(o=>o.value===cid || (o.dataset&&o.dataset.selector===csel)); if (match) sel2.value=match.value; } if (cclass && clsSelect){ const found=[...clsSelect.options].find(o=>o.value===cclass); if (found) clsSelect.value=cclass; } }catch{} };
-      // 编辑器（仅操作、删除、复制；不编辑样式与ID）
-      const rowEditor=document.createElement('div'); rowEditor.className='row'; rowEditor.style.display='none'; const labEditor=document.createElement('label'); labEditor.textContent='容器编辑'; const edWrap=document.createElement('div'); edWrap.style.flex='1';
-      // 只显示只读信息
-      const edInfo=document.createElement('div'); edInfo.style.fontSize='12px'; edInfo.style.color='#aaa'; edWrap.appendChild(edInfo);
-      // 操作chips
-      const edOpsLabel=document.createElement('div'); edOpsLabel.textContent='操作列表'; edOpsLabel.style.color='#aaa'; const edOpsTags=document.createElement('div'); edOpsTags.className='tags'; edOpsTags.style.marginTop='6px'; edWrap.appendChild(edOpsLabel); edWrap.appendChild(edOpsTags);
-      const edOpsAddBox=document.createElement('div'); edOpsAddBox.className='ops-box'; const edOpsCur=document.createElement('div'); edOpsCur.className='ops-current'; edOpsCur.textContent='(选择要添加的操作)'; edOpsAddBox.appendChild(edOpsCur); const edOpsList=document.createElement('div'); edOpsList.className='ops-list'; edOpsList.style.display='none'; edOpsAddBox.appendChild(edOpsList); edWrap.appendChild(edOpsAddBox);
-      const edSaveOps=document.createElement('button'); edSaveOps.textContent='保存操作'; const edCancel=document.createElement('button'); edCancel.textContent='取消'; edWrap.appendChild(edSaveOps); edWrap.appendChild(edCancel);
-      rowEditor.appendChild(labEditor); rowEditor.appendChild(edWrap);
-      let edOps=[];
-      const renderEdOps=()=>{ try{ while(edOpsTags.firstChild) edOpsTags.removeChild(edOpsTags.firstChild); edOps.forEach((k,idx)=>{ const tg=document.createElement('span'); tg.className='tag'; const tt=document.createElement('span'); tt.textContent=k; const x=document.createElement('span'); x.className='x'; x.textContent='×'; x.onclick=(e)=>{ e.stopPropagation(); edOps.splice(idx,1); renderEdOps(); }; tg.appendChild(tt); tg.appendChild(x); edOpsTags.appendChild(tg); }); }catch{} };
-      const fillEdOpsList=()=>{ try{ edOpsList.innerHTML=''; const ops=(Array.isArray(window.__webautoOps)?window.__webautoOps:[]); ops.forEach(op=>{ const it=document.createElement('div'); it.className='ops-item'; it.textContent=(op.label||op.key)+' ('+op.key+')'; it.onclick=(e)=>{ e.stopPropagation(); edOps.push(op.key); renderEdOps(); edOpsList.style.display='none'; }; edOpsList.appendChild(it); }); }catch{} };
-      edOpsAddBox.onclick=(e)=>{ e.stopPropagation(); const will=(edOpsList.style.display==='none'); edOpsList.style.display= will?'block':'none'; if (will){ fillEdOpsList(); const lb=edOpsList.getBoundingClientRect(); if (lb.bottom>window.innerHeight-8){ edOpsList.style.top='auto'; edOpsList.style.bottom='100%'; } else { edOpsList.style.bottom='auto'; edOpsList.style.top='100%'; } } };
-      document.addEventListener('click', ()=>{ try{ edOpsList.style.display='none'; }catch{} });
-      editBtn.onclick=async (ev)=>{ ev.stopPropagation(); if (!savedCurrentId) return; try{ const info = await window.webauto_pick_read?.(savedCurrentId); const j=(info&&info.data)||{}; edInfo.textContent='selector: '+(j.selector||'')+'  | class: '+(j.classChoice||'')+'  | containerId: '+(j.containerId||''); edOps = Array.isArray(j.operations)? j.operations.slice(): []; renderEdOps(); rowEditor.style.display=''; }catch(e){ console.warn('edit load',e); } };
+      // (弃用内联编辑器，改用模态框)
+      editBtn.onclick=async (ev)=>{ ev.stopPropagation(); if (!savedCurrentId) return; try{ const info = await window.webauto_pick_read?.(savedCurrentId); const j=(info&&info.data)||{}; openOpsModal({ pickId: savedCurrentId, selector: j.selector||'', operations: Array.isArray(j.operations)? j.operations.slice(): [] }); }catch(e){ console.warn('edit load',e); } };
       edCancel.onclick=(e)=>{ e.stopPropagation(); rowEditor.style.display='none'; };
       edSaveOps.onclick=async (e)=>{ e.stopPropagation(); try{ const res = await window.webauto_pick_write?.({ id: savedCurrentId, operations: edOps.slice() }); (window).__webautoShowResult && (window).__webautoShowResult({ ok: !!(res&&res.ok), type:'pick:update:ops', res }); rowEditor.style.display='none'; }catch(err){ console.warn('edit save ops',err); } };
       delBtn.onclick=async (e)=>{ e.stopPropagation(); if (!savedCurrentId) return; try{ const res = await window.webauto_pick_delete?.(savedCurrentId); (window).__webautoShowResult && (window).__webautoShowResult({ ok: !!(res&&res.ok), type:'pick:delete', id: savedCurrentId }); // remove from list
@@ -430,7 +420,7 @@ async function main() {
       const tabs=document.createElement('div'); tabs.className='tabs'; const tabBasic=document.createElement('div'); tabBasic.className='tab active'; tabBasic.textContent='常规'; const tabOps=document.createElement('div'); tabOps.className='tab'; tabOps.textContent='操作'; tabs.appendChild(tabBasic); tabs.appendChild(tabOps);
 
       // 需要切换显示的分区
-      const basicRows=[row2,rowTree,rowParent,rowMode,rowCls,rowSaved,rowEditor,row1,row3];
+      const basicRows=[row2,rowTree,rowParent,rowMode,rowCls,rowSaved,row1,row3];
       const opsRows=[opsRow,valRow,keyRow,vkRow,execRow];
       const setTab=(which)=>{
         const basic = which==='basic';
@@ -442,7 +432,7 @@ async function main() {
       tabOps.onclick=(e)=>{ e.stopPropagation(); setTab('ops'); };
 
       // 组装
-      wrap.appendChild(rowHeader); wrap.appendChild(tabs); wrap.appendChild(row2); wrap.appendChild(rowTree); wrap.appendChild(rowParent); wrap.appendChild(rowMode); wrap.appendChild(rowCls); wrap.appendChild(rowSaved); wrap.appendChild(rowEditor); wrap.appendChild(row1); wrap.appendChild(row3); wrap.appendChild(opsRow); wrap.appendChild(valRow); wrap.appendChild(keyRow); wrap.appendChild(vkRow); wrap.appendChild(execRow); wrap.appendChild(rowResult); wrap.appendChild(customRow); setTab('basic'); wrap.style.visibility='hidden'; document.body.appendChild(wrap); state.menu=wrap;
+      wrap.appendChild(rowHeader); wrap.appendChild(tabs); wrap.appendChild(row2); wrap.appendChild(rowTree); wrap.appendChild(rowParent); wrap.appendChild(rowMode); wrap.appendChild(rowCls); wrap.appendChild(rowSaved); wrap.appendChild(row1); wrap.appendChild(row3); wrap.appendChild(opsRow); wrap.appendChild(valRow); wrap.appendChild(keyRow); wrap.appendChild(vkRow); wrap.appendChild(execRow); wrap.appendChild(rowResult); wrap.appendChild(customRow); setTab('basic'); wrap.style.visibility='hidden'; document.body.appendChild(wrap); state.menu=wrap;
       try{
         const m=wrap.getBoundingClientRect();
         // 初始靠右显示
@@ -505,3 +495,27 @@ async function main() {
 }
 
 main().catch(e => { console.error(e); process.exit(1); });
+      // 模态：完整操作编辑器（与操作Tab一致）
+      function openOpsModal(ctx){ try{
+        const modal=document.createElement('div'); modal.className='webauto-modal'; const box=document.createElement('div'); box.className='box'; const head=document.createElement('div'); head.style.display='flex'; head.style.justifyContent='space-between'; head.style.alignItems='center'; const hTitle=document.createElement('div'); hTitle.textContent='操作编辑器'; const hClose=document.createElement('button'); hClose.textContent='关闭'; head.appendChild(hTitle); head.appendChild(hClose); const body=document.createElement('div'); body.className='body';
+        // 复用“操作”分区的 UI（新建一套简版）
+        // 操作选择
+        const mOpsRow=document.createElement('div'); mOpsRow.className='row'; const ml=document.createElement('label'); ml.textContent='操作选择'; const mOpsBox=document.createElement('div'); mOpsBox.className='ops-box'; const mCur=document.createElement('div'); mCur.className='ops-current'; mCur.textContent='(请选择)'; mOpsBox.appendChild(mCur); const mList=document.createElement('div'); mList.className='ops-list'; mList.style.display='none'; mOpsBox.appendChild(mList); mOpsRow.appendChild(ml); mOpsRow.appendChild(mOpsBox);
+        const items=Array.isArray(window.__webautoOps)?window.__webautoOps:[]; items.forEach(op=>{ const it=document.createElement('div'); it.className='ops-item'; it.textContent=(op.label||op.key)+' ('+op.key+')'; it.onclick=(e)=>{ e.stopPropagation(); mOpsBox.dataset.key=op.key; mCur.textContent=(op.label||op.key)+' ('+op.key+')'; mList.style.display='none'; }; mList.appendChild(it); });
+        mOpsBox.onclick=(e)=>{ e.stopPropagation(); const will=(mList.style.display==='none'); mList.style.display = will? 'block':'none'; if (will){ const lb=mList.getBoundingClientRect(); if (lb.bottom>window.innerHeight-8){ mList.style.top='auto'; mList.style.bottom='100%'; } else { mList.style.bottom='auto'; mList.style.top='100%'; } } };
+        document.addEventListener('click', ()=>{ try{ mList.style.display='none'; }catch{} });
+        // 参数
+        const mValRow=document.createElement('div'); mValRow.className='row'; const ml2=document.createElement('label'); ml2.textContent='参数/输入值'; const mVal=document.createElement('input'); mVal.type='text'; mValRow.appendChild(ml2); mValRow.appendChild(mVal);
+        // 键序列标签
+        const mKeyRow=document.createElement('div'); mKeyRow.className='row'; const mkL=document.createElement('label'); mkL.textContent='按键序列'; const mTags=document.createElement('div'); mTags.className='tags'; const mKeyInput=document.createElement('input'); mKeyInput.type='text'; mKeyInput.placeholder='输入后回车添加，如 Ctrl+Enter'; const mTokens=[]; const render=()=>{ mTags.innerHTML=''; mTokens.forEach((t,idx)=>{ const tg=document.createElement('span'); tg.className='tag'; const tt=document.createElement('span'); tt.textContent=t; const x=document.createElement('span'); x.className='x'; x.textContent='×'; x.onclick=()=>{ mTokens.splice(idx,1); render(); }; tg.appendChild(tt); tg.appendChild(x); mTags.appendChild(tg); }); mTags.appendChild(mKeyInput); }; render(); mKeyInput.onkeydown=(ev)=>{ if (ev.key==='Enter' || ev.key===','){ ev.preventDefault(); const v=mKeyInput.value.trim(); if (v){ mTokens.push(v); render(); } mKeyInput.value=''; } }; mKeyRow.appendChild(mkL); mKeyRow.appendChild(mTags);
+        // 执行 + 保存
+        const actRow=document.createElement('div'); actRow.className='row'; const gap=document.createElement('label'); gap.textContent=''; const run=document.createElement('button'); run.textContent='执行'; const saveOps=document.createElement('button'); saveOps.textContent='保存操作到容器'; actRow.appendChild(gap); actRow.appendChild(run); actRow.appendChild(saveOps);
+        run.onclick=()=>{ const opKey=mOpsBox.dataset.key||''; if (!opKey) return; const s=(ctx&&ctx.selector)|| (document.getElementById('webauto-menu-sel')?.value || ''); try{ window.__webautoTmpValue=mVal.value||''; window.__webautoTmpKeys=mTokens.slice(); }catch{} window.webauto_dispatch?.({ type:'picker:operation', data:{ opKey, selector: s } }); if (mTokens.length && opKey!=='keyboard:sequence'){ setTimeout(()=>{ try{ window.__webautoTmpValue=''; window.__webautoTmpKeys=mTokens.slice(); window.webauto_dispatch?.({ type:'picker:operation', data:{ opKey:'keyboard:sequence', selector:s } }); }catch{} },120); } };
+        saveOps.onclick=async ()=>{ if (!(ctx&&ctx.pickId)) return; try{ const res = await window.webauto_pick_write?.({ id: ctx.pickId, operations: mTokens.slice() }); (window).__webautoShowResult && (window).__webautoShowResult({ ok: !!(res&&res.ok), type:'pick:update:ops', res }); }catch(e){ console.warn('modal save',e); } };
+        hClose.onclick=()=>{ try{ document.body.removeChild(modal); }catch{} };
+        body.appendChild(mOpsRow); body.appendChild(mValRow); body.appendChild(mKeyRow); body.appendChild(actRow);
+        box.appendChild(head); box.appendChild(body); modal.appendChild(box); document.body.appendChild(modal);
+        // 预填 tokens
+        try{ if (Array.isArray(ctx?.operations)) { mTokens.splice(0,mTokens.length,...ctx.operations); render(); } }catch{}
+      }catch(err){ console.warn('openOpsModal',err); }
+      }
