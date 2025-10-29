@@ -62,9 +62,17 @@ async function main() {
     const ensureDirs = () => { try { fs.mkdirSync(picksDir, { recursive: true }); fs.mkdirSync(snapsDir, { recursive: true }); } catch {} };
     const slug = (s) => (s||'').toString().toLowerCase().replace(/[^a-z0-9._-]+/g,'-').slice(0,80)||'na';
 
+    function readPick(fp){ try { return JSON.parse(fs.readFileSync(fp,'utf8')); } catch { return null; } }
+    function listPickNames(){ try { return (fs.readdirSync(picksDir)||[]).filter(n=>n.endsWith('.json')); } catch { return []; } }
+    function hasDupClass(cls, exclude){ if (!cls) return false; for (const n of listPickNames()){ if (exclude && exclude===n) continue; const j=readPick(path.join(picksDir,n)); if (j && j.classChoice===cls) return true; } return false; }
+
     async function savePick(page, payload){
       try {
         ensureDirs();
+        // dedupe by class
+        if (payload?.classChoice && hasDupClass(payload.classChoice)) {
+          return { ok:false, reason:'duplicate-class', classChoice: payload.classChoice };
+        }
         const ts = new Date().toISOString().replace(/[:.]/g,'-');
         const snap = path.join(snapsDir, `${ts}.png`);
         try { await page.screenshot({ path: snap, fullPage: true }); } catch {}
@@ -84,7 +92,8 @@ async function main() {
         const fp = path.join(picksDir, name);
         fs.writeFileSync(fp, JSON.stringify(rec, null, 2));
         console.log('[picker save]', fp);
-      } catch (e) { console.warn('savePick warn:', e.message); }
+        return { ok:true, id: name };
+      } catch (e) { return { ok:false, error: e?.message || String(e) }; }
     }
 
     // expose actions getter for in-page menu fallback
@@ -114,12 +123,12 @@ async function main() {
         } catch (e) { console.warn('op exec warn:', e.message); }
       }
       if (evt?.type === 'picker:operation:custom') {
-        await savePick(page, evt?.data || {});
-        try { const data = evt?.data || {}; await page.evaluate(p => { try { if (!Array.isArray(window.__webautoSavedPicks)) window.__webautoSavedPicks = []; window.__webautoSavedPicks.push({ id: p.id||'', ts: p.timestamp||new Date().toISOString(), selector: p.selector||'', containerId: p.containerId||'', containerSelector: p.containerSelector||'', pageUrl: location.href }); (window).__webautoShowResult && (window).__webautoShowResult({ ok:true, type:'save', data: p }); } catch {} }, data); } catch {}
+        // 仅记录到结果，不自动保存
+        try { await page.evaluate((payload)=>{ try { (window).__webautoShowResult && (window).__webautoShowResult({ ok:true, type:'custom_op', data: payload }); } catch {} }, evt?.data||{}); } catch {}
       }
       if (evt?.type === 'picker:save') {
-        await savePick(page, evt?.data || {});
-        try { const data = evt?.data || {}; await page.evaluate(p => { try { if (!Array.isArray(window.__webautoSavedPicks)) window.__webautoSavedPicks = []; window.__webautoSavedPicks.push({ id: p.id||'', ts: p.timestamp||new Date().toISOString(), selector: p.selector||'', containerId: p.containerId||'', containerSelector: p.containerSelector||'', pageUrl: location.href }); (window).__webautoShowResult && (window).__webautoShowResult({ ok:true, type:'save', data: p }); } catch {} }, data); } catch {}
+        const res = await savePick(page, evt?.data || {});
+        try { const data = evt?.data || {}; await page.evaluate(p => { try { if (!Array.isArray(window.__webautoSavedPicks)) window.__webautoSavedPicks = []; window.__webautoSavedPicks.push({ id: p.id||'', ts: p.timestamp||new Date().toISOString(), selector: p.selector||'', containerId: p.containerId||'', containerSelector: p.containerSelector||'', pageUrl: location.href, classChoice: p.classChoice||'' }); (window).__webautoShowResult && (window).__webautoShowResult({ ok:true, type:'save', data: p }); } catch {} }, data); } catch {}
       }
 
       // virtual keyboard immediate
@@ -273,19 +282,33 @@ async function main() {
       const clsList = getClasses(el);
       if (clsList.length){ clsList.forEach(cn=>{ const o=document.createElement('option'); o.value=cn; o.textContent=cn; clsSelect.appendChild(o); }); } else { const o=document.createElement('option'); o.value=''; o.textContent='(无类)'; clsSelect.appendChild(o); }
       rowCls.appendChild(lCls); rowCls.appendChild(clsSelect);
-      // 已保存容器列表
-      const rowSaved=document.createElement('div'); rowSaved.className='row'; const labSaved=document.createElement('label'); labSaved.textContent='已保存容器'; const savedSel=document.createElement('select');
-      const saved=(Array.isArray(window.__webautoSavedPicks)?window.__webautoSavedPicks:[]); if (saved.length){ saved.slice().reverse().forEach(p=>{ const o=document.createElement('option'); o.value=p.id; o.textContent=(p.ts||'')+' | '+(p.containerId||p.selector||''); o.dataset.selector=p.selector||''; o.dataset.containerId=p.containerId||''; o.dataset.containerSelector=p.containerSelector||''; if (p.classChoice) o.dataset.classChoice=p.classChoice; savedSel.appendChild(o); }); } else { const o=document.createElement('option'); o.value=''; o.textContent='(暂无)'; savedSel.appendChild(o); }
-      const loadBtn=document.createElement('button'); loadBtn.textContent='加载'; loadBtn.onclick=(ev)=>{ ev.stopPropagation(); const opt=savedSel.selectedOptions[0]; if(!opt) return; const s=opt.dataset.selector||''; const cid=opt.dataset.containerId||''; const csel=opt.dataset.containerSelector||''; const cclass=opt.dataset.classChoice||''; if (s) i1.value=s; if (cid){ const match=[...sel2.options].find(o=>o.value===cid || (o.dataset&&o.dataset.selector===csel)); if (match) sel2.value=match.value; } if (cclass && clsSelect){ const found=[...clsSelect.options].find(o=>o.value===cclass); if (found) clsSelect.value=cclass; } };
-      rowSaved.appendChild(labSaved); rowSaved.appendChild(savedSel); rowSaved.appendChild(loadBtn);
+      // 已保存容器（自定义下拉）
+      const rowSaved=document.createElement('div'); rowSaved.className='row'; const labSaved=document.createElement('label'); labSaved.textContent='已保存容器';
+      const savedBox=document.createElement('div'); savedBox.className='ops-box'; const savedCurrent=document.createElement('div'); savedCurrent.className='ops-current'; savedCurrent.textContent='(请选择)'; savedBox.appendChild(savedCurrent); rowSaved.appendChild(labSaved); rowSaved.appendChild(savedBox);
+      const savedList=document.createElement('div'); savedList.className='ops-list'; savedList.style.display='none'; savedBox.appendChild(savedList);
+      let savedCurrentId='';
+      const fillSaved=(list)=>{ try{ savedList.innerHTML=''; if(!list||!list.length){ const it=document.createElement('div'); it.className='ops-item'; it.textContent='(暂无)'; it.style.pointerEvents='none'; savedList.appendChild(it); return; } list.slice().reverse().forEach(p=>{ const it=document.createElement('div'); it.className='ops-item'; it.textContent=(p.ts||'')+' | '+(p.containerId||p.selector||''); it.onclick=(e)=>{ e.stopPropagation(); savedCurrentId=p.id||''; savedCurrent.textContent=it.textContent; savedList.style.display='none'; }; savedList.appendChild(it); }); }catch{} };
+      fillSaved(Array.isArray(window.__webautoSavedPicks)?window.__webautoSavedPicks:[]);
+      savedBox.onclick=(e)=>{ e.stopPropagation(); const will=(savedList.style.display==='none'); savedList.style.display = will? 'block':'none'; if (will){ try{ const lb=savedList.getBoundingClientRect(); if (lb.bottom>window.innerHeight-8){ savedList.style.top='auto'; savedList.style.bottom='100%'; } else { savedList.style.bottom='auto'; savedList.style.top='100%'; } }catch{} } };
+      document.addEventListener('click', ()=>{ try{ savedList.style.display='none'; }catch{} });
+      const savedBtns=document.createElement('div'); savedBtns.style.display='flex'; savedBtns.style.gap='6px'; const loadBtn=document.createElement('button'); loadBtn.textContent='加载'; const editBtn=document.createElement('button'); editBtn.textContent='编辑'; savedBtns.appendChild(loadBtn); savedBtns.appendChild(editBtn); rowSaved.appendChild(savedBtns);
+      loadBtn.onclick=async (ev)=>{ ev.stopPropagation(); if (!savedCurrentId) return; try{ const list=Array.isArray(window.__webautoSavedPicks)?window.__webautoSavedPicks:[]; const it=list.find(x=>x.id===savedCurrentId); if (!it) return; const s=it.selector||''; const cid=it.containerId||''; const csel=it.containerSelector||''; const cclass=it.classChoice||''; if (s) i1.value=s; if (cid){ const match=[...sel2.options].find(o=>o.value===cid || (o.dataset&&o.dataset.selector===csel)); if (match) sel2.value=match.value; } if (cclass && clsSelect){ const found=[...clsSelect.options].find(o=>o.value===cclass); if (found) clsSelect.value=cclass; } }catch{} };
+      // 编辑器
+      const rowEditor=document.createElement('div'); rowEditor.className='row'; rowEditor.style.display='none'; const labEditor=document.createElement('label'); labEditor.textContent='容器编辑'; const edWrap=document.createElement('div'); edWrap.style.flex='1'; const edSel=document.createElement('input'); edSel.placeholder='selector'; const edCls=document.createElement('input'); edCls.placeholder='classChoice'; const edCid=document.createElement('input'); edCid.placeholder='containerId'; const edCsel=document.createElement('input'); edCsel.placeholder='containerSelector'; const edBtn=document.createElement('button'); edBtn.textContent='保存修改'; const edCancel=document.createElement('button'); edCancel.textContent='取消'; edWrap.appendChild(edSel); edWrap.appendChild(edCls); edWrap.appendChild(edCid); edWrap.appendChild(edCsel); edWrap.appendChild(edBtn); edWrap.appendChild(edCancel); rowEditor.appendChild(labEditor); rowEditor.appendChild(edWrap);
+      editBtn.onclick=async (ev)=>{ ev.stopPropagation(); if (!savedCurrentId) return; try{ const info = await window.webauto_pick_read?.(savedCurrentId); const j=(info&&info.data)||{}; edSel.value=j.selector||''; edCls.value=j.classChoice||''; edCid.value=j.containerId||''; edCsel.value=j.containerSelector||''; rowEditor.style.display=''; }catch(e){ console.warn('edit load',e); } };
+      edCancel.onclick=(e)=>{ e.stopPropagation(); rowEditor.style.display='none'; };
+      edBtn.onclick=async (e)=>{ e.stopPropagation(); try{ const res = await window.webauto_pick_write?.({ id: savedCurrentId, selector: edSel.value, classChoice: edCls.value, containerId: edCid.value, containerSelector: edCsel.value }); (window).__webautoShowResult && (window).__webautoShowResult({ ok: !!(res&&res.ok), type:'pick:update', res }); // refresh list minimal
+        const list=Array.isArray(window.__webautoSavedPicks)?window.__webautoSavedPicks:[]; const it=list.find(x=>x.id===savedCurrentId); if (it){ it.selector=edSel.value; it.classChoice=edCls.value; it.containerId=edCid.value; it.containerSelector=edCsel.value; savedCurrent.textContent=(it.ts||'')+' | '+(it.containerId||it.selector||''); }
+        rowEditor.style.display='none'; }catch(err){ console.warn('edit save',err); }
+      };
       // 选择器输入（当前 CSS）
       const row1=document.createElement('div'); row1.className='row'; const l1=document.createElement('label'); l1.textContent='当前选择器(CSS)'; const i1=document.createElement('input'); i1.value=sel; i1.readOnly=false; i1.id='webauto-menu-sel'; row1.appendChild(l1); row1.appendChild(i1);
       const updateByClass = ()=>{ const c=clsSelect.value; if (!c) return; const t=el.tagName?.toLowerCase()||'div'; i1.value = t + '.' + CSS.escape(c); };
       clsSelect.onchange = (ev)=>{ ev.stopPropagation(); updateByClass(); };
       modeChk.onchange = () => { const xpathOn = modeChk.checked; i1.disabled = !xpathOn ? false : false; sel2.disabled = xpathOn; };
       const row3=document.createElement('div'); row3.className='row actions'; const bHi=document.createElement('button'); bHi.textContent='高亮'; bHi.onclick=(ev)=>{ ev.stopPropagation(); try{ window.__webautoHighlight?.createHighlight(el,{color:'#34c759',label:'PICK',duration:4000}); }catch{} };
-      const bClickMouse=document.createElement('button'); bClickMouse.textContent='点击(鼠标)'; bClickMouse.onclick=(ev)=>{ ev.stopPropagation(); const s = i1.value || sel; window.webauto_dispatch?.({ type:'picker:operation', data:{ opKey:'click-playwright', selector: s } }); window.webauto_dispatch?.({ type:'picker:save', data:{ selector:s, containerTree: buildContainerTree(el), containerId: (sel2.selectedOptions[0]&&sel2.selectedOptions[0].value!=='__custom__')?sel2.selectedOptions[0].value:'', containerSelector:(sel2.selectedOptions[0]&&sel2.selectedOptions[0].dataset&&sel2.selectedOptions[0].dataset.selector)||'', classChoice:(clsSelect&&clsSelect.value)||'', opKey:'click-playwright' } }); };
-      const bClickDom=document.createElement('button'); bClickDom.textContent='点击(DOM)'; bClickDom.onclick=(ev)=>{ ev.stopPropagation(); const s = i1.value || sel; window.webauto_dispatch?.({ type:'picker:operation', data:{ opKey:'click-dom', selector: s } }); window.webauto_dispatch?.({ type:'picker:save', data:{ selector:s, containerTree: buildContainerTree(el), containerId: (sel2.selectedOptions[0]&&sel2.selectedOptions[0].value!=='__custom__')?sel2.selectedOptions[0].value:'', containerSelector:(sel2.selectedOptions[0]&&sel2.selectedOptions[0].dataset&&sel2.selectedOptions[0].dataset.selector)||'', classChoice:(clsSelect&&clsSelect.value)||'', opKey:'click-dom' } }); };
+      const bClickMouse=document.createElement('button'); bClickMouse.textContent='点击(鼠标)'; bClickMouse.onclick=(ev)=>{ ev.stopPropagation(); const s = i1.value || sel; window.webauto_dispatch?.({ type:'picker:operation', data:{ opKey:'click-playwright', selector: s } }); };
+      const bClickDom=document.createElement('button'); bClickDom.textContent='点击(DOM)'; bClickDom.onclick=(ev)=>{ ev.stopPropagation(); const s = i1.value || sel; window.webauto_dispatch?.({ type:'picker:operation', data:{ opKey:'click-dom', selector: s } }); };
       const bCopy=document.createElement('button'); bCopy.textContent='复制选择器'; bCopy.onclick=(ev)=>{ ev.stopPropagation(); const useXPath = modeChk.checked; const s = useXPath ? (i1.value||sel) : ((sel2.selectedOptions[0]&&sel2.selectedOptions[0].dataset&&sel2.selectedOptions[0].dataset.selector)||sel); navigator.clipboard?.writeText(s); };
       const bSave=document.createElement('button'); bSave.textContent='保存容器'; bSave.onclick=(ev)=>{ ev.stopPropagation(); const opt=sel2.selectedOptions[0]; const payload={ selector: i1.value||sel, classChoice: (clsSelect&&clsSelect.value)||'', containerId: (opt&&opt.value!=='__custom__')?opt.value:'', containerSelector: (opt&&opt.dataset&&opt.dataset.selector)?opt.dataset.selector:'', containerTree: buildContainerTree(el) }; window.webauto_dispatch?.({ type:'picker:save', data: payload }); };
       const bClose=document.createElement('button'); bClose.textContent='关闭'; bClose.onclick=(ev)=>{ ev.stopPropagation(); hideMenu(); };
@@ -351,7 +374,7 @@ async function main() {
       const tabs=document.createElement('div'); tabs.className='tabs'; const tabBasic=document.createElement('div'); tabBasic.className='tab active'; tabBasic.textContent='常规'; const tabOps=document.createElement('div'); tabOps.className='tab'; tabOps.textContent='操作'; tabs.appendChild(tabBasic); tabs.appendChild(tabOps);
 
       // 需要切换显示的分区
-      const basicRows=[row2,rowTree,rowParent,rowMode,rowCls,rowSaved,row1,row3];
+      const basicRows=[row2,rowTree,rowParent,rowMode,rowCls,rowSaved,rowEditor,row1,row3];
       const opsRows=[opsRow,valRow,keyRow,vkRow,execRow];
       const setTab=(which)=>{
         const basic = which==='basic';
@@ -363,7 +386,7 @@ async function main() {
       tabOps.onclick=(e)=>{ e.stopPropagation(); setTab('ops'); };
 
       // 组装
-      wrap.appendChild(rowHeader); wrap.appendChild(tabs); wrap.appendChild(row2); wrap.appendChild(rowTree); wrap.appendChild(rowParent); wrap.appendChild(rowMode); wrap.appendChild(rowCls); wrap.appendChild(rowSaved); wrap.appendChild(row1); wrap.appendChild(row3); wrap.appendChild(opsRow); wrap.appendChild(valRow); wrap.appendChild(keyRow); wrap.appendChild(vkRow); wrap.appendChild(execRow); wrap.appendChild(rowResult); wrap.appendChild(customRow); setTab('basic'); wrap.style.visibility='hidden'; document.body.appendChild(wrap); state.menu=wrap;
+      wrap.appendChild(rowHeader); wrap.appendChild(tabs); wrap.appendChild(row2); wrap.appendChild(rowTree); wrap.appendChild(rowParent); wrap.appendChild(rowMode); wrap.appendChild(rowCls); wrap.appendChild(rowSaved); wrap.appendChild(rowEditor); wrap.appendChild(row1); wrap.appendChild(row3); wrap.appendChild(opsRow); wrap.appendChild(valRow); wrap.appendChild(keyRow); wrap.appendChild(vkRow); wrap.appendChild(execRow); wrap.appendChild(rowResult); wrap.appendChild(customRow); setTab('basic'); wrap.style.visibility='hidden'; document.body.appendChild(wrap); state.menu=wrap;
       try{
         const m=wrap.getBoundingClientRect();
         // 初始靠右显示
