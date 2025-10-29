@@ -149,9 +149,9 @@ async function main() {
           '.webauto-toolbar{position:fixed;right:16px;top:16px;background:#1e1e1e;color:#fff;padding:6px 10px;border-radius:8px;box-shadow:0 2px 12px rgba(0,0,0,.4);z-index:'+Z+';font:12px/1.4 Arial;}'+
           '.webauto-toolbar button{cursor:pointer;background:#2c2c2c;color:#fff;border:1px solid #444;border-radius:6px;padding:4px 8px;}'+
           '.webauto-menu{position:fixed;background:#1e1e1e;color:#fff;padding:10px 12px;border-radius:10px;box-shadow:0 2px 12px rgba(0,0,0,.4);z-index:'+Z+';font:12px/1.4 Arial;min-width:360px;max-width:560px;pointer-events:auto;}'+
-          '.webauto-menu .row{margin:6px 0;}'+
-          '.webauto-menu label{display:block;color:#aaa;margin-bottom:4px;}'+
-          '.webauto-menu select, .webauto-menu input{width:100%;padding:6px 8px;border-radius:6px;border:1px solid #444;background:#2c2c2c;color:#fff;}'+
+          '.webauto-menu .row{margin:6px 0; display:flex; align-items:center; gap:8px;}'+
+          '.webauto-menu label{display:block;color:#aaa;min-width:92px;margin:0;}'+
+          '.webauto-menu select, .webauto-menu input{flex:1;width:100%;padding:6px 8px;border-radius:6px;border:1px solid #444;background:#2c2c2c;color:#fff;}'+
           '.webauto-menu .actions button{margin-right:6px;margin-top:6px;}';
         (document.head||document.documentElement).appendChild(s);
       }catch{}

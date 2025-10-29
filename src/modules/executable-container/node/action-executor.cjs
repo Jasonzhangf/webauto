@@ -8,7 +8,8 @@ function resolveNodePath(nodeName){
   const map = {
     'EventDrivenOptionalClickNode': 'src/core/workflow/nodes/EventDrivenOptionalClickNode.js',
     'JavaScriptExecutionNode': 'src/core/workflow/nodes/JavaScriptExecutionNode.js',
-    'PlaywrightClickNode': 'src/core/workflow/nodes/PlaywrightClickNode.js'
+    'PlaywrightClickNode': 'src/core/workflow/nodes/PlaywrightClickNode.js',
+    'PlaywrightKeySequenceNode': 'src/core/workflow/nodes/PlaywrightKeySequenceNode.js'
   };
   return map[nodeName] || null;
 }
