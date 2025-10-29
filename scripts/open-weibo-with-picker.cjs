@@ -163,7 +163,10 @@ async function main() {
           '.webauto-menu .tags{flex:1;display:flex;flex-wrap:wrap;gap:6px;align-items:center;border:1px dashed #444;border-radius:6px;padding:6px;min-height:34px;}'+
           '.webauto-menu .tag{display:inline-flex;align-items:center;gap:6px;padding:2px 8px;border:1px solid #555;border-radius:12px;background:#2a2a2a;color:#ddd;}'+
           '.webauto-menu .tag .x{color:#aaa;cursor:pointer;}'+
-          '.webauto-menu .tag .x:hover{color:#fff;}';
+          '.webauto-menu .tag .x:hover{color:#fff;}'+
+          '.webauto-menu .tabs{display:flex;gap:8px;margin:4px 0 8px 0;}'+
+          '.webauto-menu .tab{padding:4px 10px;border:1px solid #444;border-radius:6px;background:#2a2a2a;color:#ddd;cursor:pointer;}'+
+          '.webauto-menu .tab.active{background:#3a3a3a;color:#fff;border-color:#666;}';
         (document.head||document.documentElement).appendChild(s);
       }catch{}
     }
@@ -284,8 +287,23 @@ async function main() {
       // 自定义操作（记录）
       const customRow=document.createElement('div'); customRow.className='row'; const customInput=document.createElement('input'); customInput.type='text'; customInput.placeholder='输入自定义操作（如：点击第3个关注）'; const customBtn=document.createElement('button'); customBtn.textContent='保存测试容器'; customBtn.onclick=(ev)=>{ ev.stopPropagation(); const opt=sel2.selectedOptions[0]; const payload={ selector: i1.value||sel, classChoice: (clsSelect&&clsSelect.value)||'', containerId: (opt&&opt.value!=='__custom__')?opt.value:'', containerSelector: (opt&&opt.dataset&&opt.dataset.selector)?opt.dataset.selector:'', containerTree: buildContainerTree(el), prompt: customInput.value||'' }; window.webauto_dispatch?.({ type:'picker:save', data: payload }); };
       customRow.appendChild(customInput); customRow.appendChild(customBtn);
+      // 选项卡：常规 / 操作
+      const tabs=document.createElement('div'); tabs.className='tabs'; const tabBasic=document.createElement('div'); tabBasic.className='tab active'; tabBasic.textContent='常规'; const tabOps=document.createElement('div'); tabOps.className='tab'; tabOps.textContent='操作'; tabs.appendChild(tabBasic); tabs.appendChild(tabOps);
+
+      // 需要切换显示的分区
+      const basicRows=[row2,rowTree,rowParent,rowMode,rowCls,rowSaved,row1,row3];
+      const opsRows=[opsRow,valRow,keyRow,execRow];
+      const setTab=(which)=>{
+        const basic = which==='basic';
+        tabBasic.classList.toggle('active', basic); tabOps.classList.toggle('active', !basic);
+        basicRows.forEach(n=> n.style.display = basic ? '' : 'none');
+        opsRows.forEach(n=> n.style.display = basic ? 'none' : '');
+      };
+      tabBasic.onclick=(e)=>{ e.stopPropagation(); setTab('basic'); };
+      tabOps.onclick=(e)=>{ e.stopPropagation(); setTab('ops'); };
+
       // 组装
-      wrap.appendChild(rowHeader); wrap.appendChild(row2); wrap.appendChild(rowTree); wrap.appendChild(rowParent); wrap.appendChild(rowMode); wrap.appendChild(rowCls); wrap.appendChild(rowSaved); wrap.appendChild(row1); wrap.appendChild(row3); wrap.appendChild(opsRow); wrap.appendChild(valRow); wrap.appendChild(keyRow); wrap.appendChild(execRow); wrap.appendChild(rowResult); wrap.appendChild(customRow); wrap.style.visibility='hidden'; document.body.appendChild(wrap); state.menu=wrap;
+      wrap.appendChild(rowHeader); wrap.appendChild(tabs); wrap.appendChild(row2); wrap.appendChild(rowTree); wrap.appendChild(rowParent); wrap.appendChild(rowMode); wrap.appendChild(rowCls); wrap.appendChild(rowSaved); wrap.appendChild(row1); wrap.appendChild(row3); wrap.appendChild(opsRow); wrap.appendChild(valRow); wrap.appendChild(keyRow); wrap.appendChild(execRow); wrap.appendChild(rowResult); wrap.appendChild(customRow); setTab('basic'); wrap.style.visibility='hidden'; document.body.appendChild(wrap); state.menu=wrap;
       try{
         const m=wrap.getBoundingClientRect();
         // 初始靠右显示
