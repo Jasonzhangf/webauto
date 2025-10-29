@@ -87,6 +87,18 @@ async function main() {
       } catch (e) { console.warn('savePick warn:', e.message); }
     }
 
+    // expose actions getter for in-page menu fallback
+    await context.exposeBinding('webauto_get_actions', async (_source) => {
+      try {
+        const act = require('../src/modules/executable-container/node/actions-loader.cjs');
+        const evts = (act.loadEvents(site)||{}).events || [];
+        const ops = (act.loadOperations(site)||{}).operations || [];
+        return { events: evts, operations: ops };
+      } catch (e) {
+        return { events: [], operations: [], error: e?.message || String(e) };
+      }
+    });
+
     await context.exposeBinding('webauto_dispatch', async (source, evt) => {
       try { console.log('[picker evt]', JSON.stringify(evt)); } catch {}
       const page = source?.page;
@@ -175,6 +187,11 @@ async function main() {
     function eventDrivenClick(selector,{maxWaitMs=10000,poll=400}={}){ const t0=Date.now(); const timer=setInterval(()=>{ try{ const el=document.querySelector(selector); if (el && isVisible(el)){ el.click(); clearInterval(timer); window.webauto_dispatch?.({ts:Date.now(),type:'picker:action',data:{action:'click',selector,ok:true}}); } else if (Date.now()-t0>maxWaitMs){ clearInterval(timer); window.webauto_dispatch?.({ts:Date.now(),type:'picker:action',data:{action:'click',selector,ok:false,reason:'timeout'}}); } }catch(e){ clearInterval(timer); window.webauto_dispatch?.({ts:Date.now(),type:'picker:action',data:{action:'click',selector,ok:false,reason:e.message}}); } }, poll); }
     function showMenu(el){ hideMenu(); const r=el.getBoundingClientRect(); const wrap=document.createElement('div'); wrap.className='webauto-menu'; wrap.style.left=Math.max(6, r.left)+'px'; wrap.style.top=(r.bottom+6)+'px';
       const sel=buildSelector(el); const cands=findCandidates(el);
+      // 拖拽标题
+      const rowHeader=document.createElement('div'); rowHeader.className='row'; const h=document.createElement('div'); h.textContent='操作菜单'; h.style.cursor='move'; h.style.userSelect='none'; h.style.padding='4px 6px'; h.style.background='#2c2c2c'; h.style.border='1px solid #444'; h.style.borderRadius='6px'; rowHeader.appendChild(h);
+      let drag=false, dx=0, dy=0; h.onmousedown=(e)=>{ drag=true; dx=e.clientX - wrap.getBoundingClientRect().left; dy=e.clientY - wrap.getBoundingClientRect().top; e.preventDefault(); };
+      document.addEventListener('mousemove', (e)=>{ if(!drag) return; wrap.style.left=Math.max(6, e.clientX-dx)+'px'; wrap.style.top=Math.max(6, e.clientY-dy)+'px'; });
+      document.addEventListener('mouseup', ()=>{ drag=false; });
       // 容器优先（默认）
       const row2=document.createElement('div'); row2.className='row'; const l2=document.createElement('label'); l2.textContent='容器选择（默认）'; const sel2=document.createElement('select');
       let firstContainer = null;
@@ -214,18 +231,22 @@ async function main() {
       row3.appendChild(bHi); row3.appendChild(bClickMouse); row3.appendChild(bClickDom); row3.appendChild(bCopy); row3.appendChild(bSave); row3.appendChild(bClose);
       // 操作选择（库）
       const opsRow=document.createElement('div'); opsRow.className='row'; const opsLabel=document.createElement('label'); opsLabel.textContent='操作选择(库)'; const opsSelect=document.createElement('select');
-      const ops=(Array.isArray(window.__webautoOps)?window.__webautoOps:[]); ops.forEach(op=>{ try{ const o=document.createElement('option'); o.value=op.key; o.textContent=(op.label||op.key)+' ('+op.key+')'; opsSelect.appendChild(o);}catch{} });
+      let ops=(Array.isArray(window.__webautoOps)?window.__webautoOps:[]);
+      const fillOps=(items)=>{ try{ opsSelect.innerHTML=''; if(!items || !items.length){ const o=document.createElement('option'); o.value=''; o.textContent='(暂无)'; opsSelect.appendChild(o); return; } items.forEach(op=>{ const o=document.createElement('option'); o.value=op.key; o.textContent=(op.label||op.key)+' ('+op.key+')'; opsSelect.appendChild(o); }); }catch{} };
+      fillOps(ops);
+      if (!ops || !ops.length) { try { window.webauto_get_actions?.().then(res=>{ const items=(res && (res.operations||res.ops||[])) || []; fillOps(items); window.__webautoOps = items; }); } catch {} }
       const opsBtn=document.createElement('button'); opsBtn.textContent='执行选择'; opsBtn.onclick=(ev)=>{ ev.stopPropagation(); const opKey=opsSelect.value; if(!opKey) return; const s=i1.value||sel; window.webauto_dispatch?.({ type:'picker:operation', data:{ opKey, selector: s } }); window.webauto_dispatch?.({ type:'picker:save', data:{ selector:s, containerTree: buildContainerTree(el), containerId:(sel2.selectedOptions[0]&&sel2.selectedOptions[0].value!=='__custom__')?sel2.selectedOptions[0].value:'', containerSelector:(sel2.selectedOptions[0]&&sel2.selectedOptions[0].dataset&&sel2.selectedOptions[0].dataset.selector)||'', classChoice:(clsSelect&&clsSelect.value)||'', opKey } }); };
       opsRow.appendChild(opsLabel); opsRow.appendChild(opsSelect); opsRow.appendChild(opsBtn);
       // 自定义操作（记录）
       const customRow=document.createElement('div'); customRow.className='row'; const customInput=document.createElement('input'); customInput.type='text'; customInput.placeholder='输入自定义操作（如：点击第3个关注）'; const customBtn=document.createElement('button'); customBtn.textContent='保存测试容器'; customBtn.onclick=(ev)=>{ ev.stopPropagation(); const opt=sel2.selectedOptions[0]; const payload={ selector: i1.value||sel, classChoice: (clsSelect&&clsSelect.value)||'', containerId: (opt&&opt.value!=='__custom__')?opt.value:'', containerSelector: (opt&&opt.dataset&&opt.dataset.selector)?opt.dataset.selector:'', containerTree: buildContainerTree(el), prompt: customInput.value||'' }; window.webauto_dispatch?.({ type:'picker:save', data: payload }); };
       customRow.appendChild(customInput); customRow.appendChild(customBtn);
       // 组装
-      wrap.appendChild(row2); wrap.appendChild(rowTree); wrap.appendChild(rowParent); wrap.appendChild(rowMode); wrap.appendChild(rowCls); wrap.appendChild(rowSaved); wrap.appendChild(row1); wrap.appendChild(row3); wrap.appendChild(opsRow); wrap.appendChild(customRow); wrap.style.visibility='hidden'; document.body.appendChild(wrap); state.menu=wrap;
+      wrap.appendChild(rowHeader); wrap.appendChild(row2); wrap.appendChild(rowTree); wrap.appendChild(rowParent); wrap.appendChild(rowMode); wrap.appendChild(rowCls); wrap.appendChild(rowSaved); wrap.appendChild(row1); wrap.appendChild(row3); wrap.appendChild(opsRow); wrap.appendChild(customRow); wrap.style.visibility='hidden'; document.body.appendChild(wrap); state.menu=wrap;
       try{
         const m=wrap.getBoundingClientRect();
-        let left=Math.max(6, r.left);
-        let top=r.bottom+6;
+        // 初始靠右显示
+        let left=Math.max(6, window.innerWidth - m.width - 16);
+        let top=16;
         if (m.right > window.innerWidth - 6) left = Math.max(6, window.innerWidth - m.width - 6);
         if (m.bottom > window.innerHeight - 6) top = Math.max(6, r.top - m.height - 6);
         wrap.style.left=left+'px'; wrap.style.top=top+'px'; wrap.style.visibility='visible';
