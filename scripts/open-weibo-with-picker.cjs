@@ -108,15 +108,18 @@ async function main() {
         try {
           const res = await actionExec.executeOperation(page, null, site, evt.data.opKey, selector);
           console.log('[op result]', evt.data.opKey, res?.success);
+          try {
+            await page.evaluate((payload)=>{ try { (window).__webautoShowResult && (window).__webautoShowResult(payload); } catch(e){} }, { ok:true, type:'operation', key: evt.data.opKey, selector, res });
+          } catch {}
         } catch (e) { console.warn('op exec warn:', e.message); }
       }
       if (evt?.type === 'picker:operation:custom') {
         await savePick(page, evt?.data || {});
-        try { const data = evt?.data || {}; await page.evaluate(p => { try { if (!Array.isArray(window.__webautoSavedPicks)) window.__webautoSavedPicks = []; window.__webautoSavedPicks.push({ id: p.id||'', ts: p.timestamp||new Date().toISOString(), selector: p.selector||'', containerId: p.containerId||'', containerSelector: p.containerSelector||'', pageUrl: location.href }); } catch {} }, data); } catch {}
+        try { const data = evt?.data || {}; await page.evaluate(p => { try { if (!Array.isArray(window.__webautoSavedPicks)) window.__webautoSavedPicks = []; window.__webautoSavedPicks.push({ id: p.id||'', ts: p.timestamp||new Date().toISOString(), selector: p.selector||'', containerId: p.containerId||'', containerSelector: p.containerSelector||'', pageUrl: location.href }); (window).__webautoShowResult && (window).__webautoShowResult({ ok:true, type:'save', data: p }); } catch {} }, data); } catch {}
       }
       if (evt?.type === 'picker:save') {
         await savePick(page, evt?.data || {});
-        try { const data = evt?.data || {}; await page.evaluate(p => { try { if (!Array.isArray(window.__webautoSavedPicks)) window.__webautoSavedPicks = []; window.__webautoSavedPicks.push({ id: p.id||'', ts: p.timestamp||new Date().toISOString(), selector: p.selector||'', containerId: p.containerId||'', containerSelector: p.containerSelector||'', pageUrl: location.href }); } catch {} }, data); } catch {}
+        try { const data = evt?.data || {}; await page.evaluate(p => { try { if (!Array.isArray(window.__webautoSavedPicks)) window.__webautoSavedPicks = []; window.__webautoSavedPicks.push({ id: p.id||'', ts: p.timestamp||new Date().toISOString(), selector: p.selector||'', containerId: p.containerId||'', containerSelector: p.containerSelector||'', pageUrl: location.href }); (window).__webautoShowResult && (window).__webautoShowResult({ ok:true, type:'save', data: p }); } catch {} }, data); } catch {}
       }
     });
   } catch (e) { console.warn('bind warn:', e.message); }
@@ -237,11 +240,16 @@ async function main() {
       if (!ops || !ops.length) { try { window.webauto_get_actions?.().then(res=>{ const items=(res && (res.operations||res.ops||[])) || []; fillOps(items); window.__webautoOps = items; }); } catch {} }
       const opsBtn=document.createElement('button'); opsBtn.textContent='执行选择'; opsBtn.onclick=(ev)=>{ ev.stopPropagation(); const opKey=opsSelect.value; if(!opKey) return; const s=i1.value||sel; window.webauto_dispatch?.({ type:'picker:operation', data:{ opKey, selector: s } }); window.webauto_dispatch?.({ type:'picker:save', data:{ selector:s, containerTree: buildContainerTree(el), containerId:(sel2.selectedOptions[0]&&sel2.selectedOptions[0].value!=='__custom__')?sel2.selectedOptions[0].value:'', containerSelector:(sel2.selectedOptions[0]&&sel2.selectedOptions[0].dataset&&sel2.selectedOptions[0].dataset.selector)||'', classChoice:(clsSelect&&clsSelect.value)||'', opKey } }); };
       opsRow.appendChild(opsLabel); opsRow.appendChild(opsSelect); opsRow.appendChild(opsBtn);
+      // 执行结果显示
+      const rowResult=document.createElement('div'); rowResult.className='row'; const lRes=document.createElement('label'); lRes.textContent='执行结果'; const pre=document.createElement('pre'); pre.id='webauto-result'; pre.style.maxHeight='160px'; pre.style.overflow='auto'; pre.style.background='#111'; pre.style.padding='6px'; pre.style.border='1px solid #333'; pre.style.borderRadius='6px'; pre.textContent='(暂无)'; rowResult.appendChild(lRes); rowResult.appendChild(pre);
+      const showResult=(obj)=>{ try{ const el=document.getElementById('webauto-result'); if(!el) return; const txt=(typeof obj==='string')?obj:JSON.stringify(obj,null,2); el.textContent=txt; }catch{} };
+      // expose result sink globally for Node update
+      try { window.__webautoShowResult = showResult; } catch {}
       // 自定义操作（记录）
       const customRow=document.createElement('div'); customRow.className='row'; const customInput=document.createElement('input'); customInput.type='text'; customInput.placeholder='输入自定义操作（如：点击第3个关注）'; const customBtn=document.createElement('button'); customBtn.textContent='保存测试容器'; customBtn.onclick=(ev)=>{ ev.stopPropagation(); const opt=sel2.selectedOptions[0]; const payload={ selector: i1.value||sel, classChoice: (clsSelect&&clsSelect.value)||'', containerId: (opt&&opt.value!=='__custom__')?opt.value:'', containerSelector: (opt&&opt.dataset&&opt.dataset.selector)?opt.dataset.selector:'', containerTree: buildContainerTree(el), prompt: customInput.value||'' }; window.webauto_dispatch?.({ type:'picker:save', data: payload }); };
       customRow.appendChild(customInput); customRow.appendChild(customBtn);
       // 组装
-      wrap.appendChild(rowHeader); wrap.appendChild(row2); wrap.appendChild(rowTree); wrap.appendChild(rowParent); wrap.appendChild(rowMode); wrap.appendChild(rowCls); wrap.appendChild(rowSaved); wrap.appendChild(row1); wrap.appendChild(row3); wrap.appendChild(opsRow); wrap.appendChild(customRow); wrap.style.visibility='hidden'; document.body.appendChild(wrap); state.menu=wrap;
+      wrap.appendChild(rowHeader); wrap.appendChild(row2); wrap.appendChild(rowTree); wrap.appendChild(rowParent); wrap.appendChild(rowMode); wrap.appendChild(rowCls); wrap.appendChild(rowSaved); wrap.appendChild(row1); wrap.appendChild(row3); wrap.appendChild(opsRow); wrap.appendChild(rowResult); wrap.appendChild(customRow); wrap.style.visibility='hidden'; document.body.appendChild(wrap); state.menu=wrap;
       try{
         const m=wrap.getBoundingClientRect();
         // 初始靠右显示
