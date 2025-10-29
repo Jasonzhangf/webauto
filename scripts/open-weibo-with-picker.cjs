@@ -121,6 +121,50 @@ async function main() {
         await savePick(page, evt?.data || {});
         try { const data = evt?.data || {}; await page.evaluate(p => { try { if (!Array.isArray(window.__webautoSavedPicks)) window.__webautoSavedPicks = []; window.__webautoSavedPicks.push({ id: p.id||'', ts: p.timestamp||new Date().toISOString(), selector: p.selector||'', containerId: p.containerId||'', containerSelector: p.containerSelector||'', pageUrl: location.href }); (window).__webautoShowResult && (window).__webautoShowResult({ ok:true, type:'save', data: p }); } catch {} }, data); } catch {}
       }
+
+      // virtual keyboard immediate
+      if (evt?.type === 'picker:vk' && evt?.data?.key) {
+        const key = evt.data.key;
+        const selector = evt?.data?.selector || '';
+        try {
+          // focus target if provided
+          if (selector) {
+            try { const el = await page.$(selector); if (el) await el.focus(); } catch {}
+          }
+          // append fallback for Enter/Backspace in input-like
+          if (key === 'Enter' || key === 'Backspace') {
+            try {
+              await page.evaluate((k)=>{
+                const el = document.activeElement;
+                if (!el) return;
+                const edit = (node)=> (node && (node.tagName==='INPUT' || node.tagName==='TEXTAREA' || node.isContentEditable || ('value' in node)));
+                if (!edit(el)) return;
+                const apply = (fn)=>{ try { fn(); el.dispatchEvent(new Event('input',{bubbles:true})); el.dispatchEvent(new Event('change',{bubbles:true})); } catch {} };
+                if (k==='Enter') {
+                  const start = (el.selectionStart!=null)? el.selectionStart : (el.value?String(el.value).length:0);
+                  const end = (el.selectionEnd!=null)? el.selectionEnd : start;
+                  const val = String(el.value||'');
+                  apply(()=>{ el.value = val.slice(0,start)+'\n'+val.slice(end); el.selectionStart = el.selectionEnd = start+1; });
+                  return;
+                }
+                if (k==='Backspace') {
+                  const start = (el.selectionStart!=null)? el.selectionStart : (el.value?String(el.value).length:0);
+                  const end = (el.selectionEnd!=null)? el.selectionEnd : start;
+                  const val = String(el.value||'');
+                  apply(()=>{ if (start!==end){ el.value = val.slice(0,start)+val.slice(end); el.selectionStart = el.selectionEnd = start; } else if (start>0){ el.value = val.slice(0,start-1)+val.slice(end); el.selectionStart = el.selectionEnd = start-1; } });
+                  return;
+                }
+              }, key);
+            } catch {}
+          }
+          // always send real key press as primary action
+          const norm = (k)=>{
+            const m={ 'enter':'Enter','return':'Enter','backspace':'Backspace','space':'Space','tab':'Tab','esc':'Escape','escape':'Escape','arrowup':'ArrowUp','arrowdown':'ArrowDown','arrowleft':'ArrowLeft','arrowright':'ArrowRight' }; const s=String(k).toLowerCase(); return m[s]||k;
+          };
+          await page.keyboard.press(norm(key));
+          try { await page.evaluate((payload)=>{ try { (window).__webautoShowResult && (window).__webautoShowResult(payload); } catch {} }, { ok:true, type:'vk', key, selector }); } catch {}
+        } catch (e) { console.warn('vk warn:', e.message); }
+      }
     });
   } catch (e) { console.warn('bind warn:', e.message); }
 
@@ -283,6 +327,11 @@ async function main() {
       // 执行按钮
       const execRow=document.createElement('div'); execRow.className='row'; const execGap=document.createElement('label'); execGap.textContent=''; const opsBtn=document.createElement('button'); opsBtn.textContent='执行选择'; execRow.appendChild(execGap); execRow.appendChild(opsBtn);
       opsBtn.onclick=(ev)=>{ ev.stopPropagation(); const opKey=currentOpKey; if(!opKey) return; const s=i1.value||sel; try{ window.__webautoTmpValue = valInput.value || ''; window.__webautoTmpKeys = keyTokens.slice(); }catch{} window.webauto_dispatch?.({ type:'picker:operation', data:{ opKey, selector: s } }); window.webauto_dispatch?.({ type:'picker:save', data:{ selector:s, containerTree: buildContainerTree(el), containerId:(sel2.selectedOptions[0]&&sel2.selectedOptions[0].value!=='__custom__')?sel2.selectedOptions[0].value:'', containerSelector:(sel2.selectedOptions[0]&&sel2.selectedOptions[0].dataset&&sel2.selectedOptions[0].dataset.selector)||'', classChoice:(clsSelect&&clsSelect.value)||'', opKey, value: (valInput.value||''), keys: keyTokens.slice() } }); };
+
+      // 虚拟键盘（Enter / Backspace / 方向键）
+      const vkRow=document.createElement('div'); vkRow.className='row'; const vkLab=document.createElement('label'); vkLab.textContent='虚拟键盘'; vkRow.appendChild(vkLab);
+      const vkKeys=['Enter','Backspace','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'];
+      vkKeys.forEach(k=>{ const chip=document.createElement('span'); chip.className='chip'; chip.textContent=k.replace('Arrow',''); chip.onclick=(e)=>{ e.stopPropagation(); const s=i1.value||sel; window.webauto_dispatch?.({ type:'picker:vk', data:{ key:k, selector:s } }); }; vkRow.appendChild(chip); });
       // 执行结果显示
       const rowResult=document.createElement('div'); rowResult.className='row'; const lRes=document.createElement('label'); lRes.textContent='执行结果'; const pre=document.createElement('pre'); pre.id='webauto-result'; pre.style.maxHeight='260px'; pre.style.minHeight='120px'; pre.style.overflow='auto'; pre.style.background='#111'; pre.style.padding='8px'; pre.style.border='1px solid #333'; pre.style.borderRadius='8px'; pre.textContent='(暂无)'; rowResult.appendChild(lRes); rowResult.appendChild(pre);
       const showResult=(obj)=>{ try{ const el=document.getElementById('webauto-result'); if(!el) return; const txt=(typeof obj==='string')?obj:JSON.stringify(obj,null,2); el.textContent=txt; }catch{} };
