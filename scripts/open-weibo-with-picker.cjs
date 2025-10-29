@@ -100,9 +100,11 @@ async function main() {
       }
       if (evt?.type === 'picker:operation:custom') {
         await savePick(page, evt?.data || {});
+        try { const data = evt?.data || {}; await page.evaluate(p => { try { if (!Array.isArray(window.__webautoSavedPicks)) window.__webautoSavedPicks = []; window.__webautoSavedPicks.push({ id: p.id||'', ts: p.timestamp||new Date().toISOString(), selector: p.selector||'', containerId: p.containerId||'', containerSelector: p.containerSelector||'', pageUrl: location.href }); } catch {} }, data); } catch {}
       }
       if (evt?.type === 'picker:save') {
         await savePick(page, evt?.data || {});
+        try { const data = evt?.data || {}; await page.evaluate(p => { try { if (!Array.isArray(window.__webautoSavedPicks)) window.__webautoSavedPicks = []; window.__webautoSavedPicks.push({ id: p.id||'', ts: p.timestamp||new Date().toISOString(), selector: p.selector||'', containerId: p.containerId||'', containerSelector: p.containerSelector||'', pageUrl: location.href }); } catch {} }, data); } catch {}
       }
     });
   } catch (e) { console.warn('bind warn:', e.message); }
@@ -193,6 +195,11 @@ async function main() {
       const clsList = getClasses(el);
       if (clsList.length){ clsList.forEach(cn=>{ const o=document.createElement('option'); o.value=cn; o.textContent=cn; clsSelect.appendChild(o); }); } else { const o=document.createElement('option'); o.value=''; o.textContent='(无类)'; clsSelect.appendChild(o); }
       rowCls.appendChild(lCls); rowCls.appendChild(clsSelect);
+      // 已保存容器列表
+      const rowSaved=document.createElement('div'); rowSaved.className='row'; const labSaved=document.createElement('label'); labSaved.textContent='已保存容器'; const savedSel=document.createElement('select');
+      const saved=(Array.isArray(window.__webautoSavedPicks)?window.__webautoSavedPicks:[]); if (saved.length){ saved.slice().reverse().forEach(p=>{ const o=document.createElement('option'); o.value=p.id; o.textContent=(p.ts||'')+' | '+(p.containerId||p.selector||''); o.dataset.selector=p.selector||''; o.dataset.containerId=p.containerId||''; o.dataset.containerSelector=p.containerSelector||''; savedSel.appendChild(o); }); } else { const o=document.createElement('option'); o.value=''; o.textContent='(暂无)'; savedSel.appendChild(o); }
+      const loadBtn=document.createElement('button'); loadBtn.textContent='加载'; loadBtn.onclick=(ev)=>{ ev.stopPropagation(); const opt=savedSel.selectedOptions[0]; if(!opt) return; const s=opt.dataset.selector||''; const cid=opt.dataset.containerId||''; const csel=opt.dataset.containerSelector||''; if (s) i1.value=s; if (cid){ const match=[...sel2.options].find(o=>o.value===cid || (o.dataset&&o.dataset.selector===csel)); if (match) sel2.value=match.value; } };
+      rowSaved.appendChild(labSaved); rowSaved.appendChild(savedSel); rowSaved.appendChild(loadBtn);
       // 选择器输入（当前 CSS）
       const row1=document.createElement('div'); row1.className='row'; const l1=document.createElement('label'); l1.textContent='当前选择器(CSS)'; const i1=document.createElement('input'); i1.value=sel; i1.readOnly=false; i1.id='webauto-menu-sel'; row1.appendChild(l1); row1.appendChild(i1);
       const updateByClass = ()=>{ const c=clsSelect.value; if (!c) return; const t=el.tagName?.toLowerCase()||'div'; i1.value = t + '.' + CSS.escape(c); };
@@ -214,7 +221,7 @@ async function main() {
       const customRow=document.createElement('div'); customRow.className='row'; const customInput=document.createElement('input'); customInput.type='text'; customInput.placeholder='输入自定义操作（如：点击第3个关注）'; const customBtn=document.createElement('button'); customBtn.textContent='保存测试容器'; customBtn.onclick=(ev)=>{ ev.stopPropagation(); const opt=sel2.selectedOptions[0]; const payload={ selector: i1.value||sel, classChoice: (clsSelect&&clsSelect.value)||'', containerId: (opt&&opt.value!=='__custom__')?opt.value:'', containerSelector: (opt&&opt.dataset&&opt.dataset.selector)?opt.dataset.selector:'', containerTree: buildContainerTree(el), prompt: customInput.value||'' }; window.webauto_dispatch?.({ type:'picker:save', data: payload }); };
       customRow.appendChild(customInput); customRow.appendChild(customBtn);
       // 组装
-      wrap.appendChild(row2); wrap.appendChild(rowTree); wrap.appendChild(rowParent); wrap.appendChild(rowMode); wrap.appendChild(rowCls); wrap.appendChild(row1); wrap.appendChild(row3); wrap.appendChild(opsRow); wrap.appendChild(customRow); wrap.style.visibility='hidden'; document.body.appendChild(wrap); state.menu=wrap;
+      wrap.appendChild(row2); wrap.appendChild(rowTree); wrap.appendChild(rowParent); wrap.appendChild(rowMode); wrap.appendChild(rowCls); wrap.appendChild(rowSaved); wrap.appendChild(row1); wrap.appendChild(row3); wrap.appendChild(opsRow); wrap.appendChild(customRow); wrap.style.visibility='hidden'; document.body.appendChild(wrap); state.menu=wrap;
       try{
         const m=wrap.getBoundingClientRect();
         let left=Math.max(6, r.left);
@@ -245,60 +252,16 @@ async function main() {
   if (idxObj) await context.addInitScript((i)=>{ window.__containerIndex = i; }, idxObj);
   if (hs) await context.addInitScript(hs);
   await context.addInitScript(pickerJS);
-  // enhance picker menu: enforce CSS default, add class-first flow, container tree, and custom operation input
-  await context.addInitScript(`(() => {
-    function q1(root, sel){ try{ return root.querySelector(sel); }catch{ return null; } }
-    function qall(root, sel){ try{ return Array.from(root.querySelectorAll(sel)); }catch{ return []; } }
-    function getSelInput(menu){ const inputs=qall(menu,'input[type=text]'); return inputs[0] || null; }
-    function getModeSelect(menu){ const sels=qall(menu,'select'); // heuristic: the second select is often mode
-      if (sels.length>=2) return sels[1]; return sels[sels.length-1]||null; }
-    function getContainerSelect(menu){ const sels=qall(menu,'select'); return sels[0] || null; }
-    function getClassesFromSelector(sel){ try{ const el=document.querySelector(sel); if(!el) return []; const arr=(el.className||'').toString().split(/\\s+/).filter(Boolean); return Array.from(new Set(arr)); }catch{ return []; } }
-    function buildContainerTreeFromSelector(sel){ const out=[]; try{ const el=document.querySelector(sel)||document.querySelector(window.__webautoTmpSelector||''); if(!el) return out; const idx=window.__containerIndex; if(!idx||!Array.isArray(idx.containers)) return out; let n=el; let depth=0; while(n && n.nodeType===1){ const matches=[]; for(const c of idx.containers){ const s=c.selector; if(!s) continue; try{ if(n.matches(s)) matches.push({id:c.id, selector:s}); }catch(_){} } if(matches.length) out.push({depth, matches}); if(n===document.documentElement) break; n=n.parentElement; depth++; } }catch{} return out; }
-    function makeRow(labelText){ const row=document.createElement('div'); row.className='row'; const lab=document.createElement('label'); lab.textContent=labelText; row.appendChild(lab); return { row, lab }; }
-    function augment(menu){ try{
-      // default CSS mode
-      const modeSel = getModeSelect(menu); if (modeSel) { try{ modeSel.value='css'; modeSel.dispatchEvent(new Event('change')); }catch{} }
-      // selector input
-      const selInput = getSelInput(menu); if (!selInput) return; try{ selInput.id = 'webauto-menu-sel'; }catch{}
-      const containerSel = getContainerSelect(menu);
-      const currentSel = selInput.value || (window.__webautoTmpSelector||'');
-      // class-first row
-      const { row: clsRow } = makeRow('类选择（首选）');
-      const clsSelect = document.createElement('select');
-      const clss = getClassesFromSelector(currentSel); if (clss.length){ clss.forEach(cn=>{ const o=document.createElement('option'); o.value=cn; o.textContent=cn; clsSelect.appendChild(o); }); } else { const o=document.createElement('option'); o.value=''; o.textContent='(无类)'; clsSelect.appendChild(o); }
-      clsSelect.onchange = (ev)=>{ ev.stopPropagation(); const c=clsSelect.value; if(!c) return; try{ const el=document.querySelector(currentSel)||document.querySelector(window.__webautoTmpSelector||''); const t=el?.tagName?.toLowerCase()||'div'; selInput.value = t + '.' + CSS.escape(c); }catch{} };
-      clsRow.appendChild(clsSelect);
-      // insert before selector row
-      const firstText = selInput; if (firstText && firstText.parentElement) {
-        firstText.parentElement.parentElement.insertBefore(clsRow, firstText.parentElement);
-      }
-      // container tree row
-      const { row: treeRow } = makeRow('父容器树'); const treeWrap = document.createElement('div'); treeWrap.style.maxHeight='140px'; treeWrap.style.overflow='auto'; treeWrap.style.border='1px solid #333'; treeWrap.style.padding='6px'; treeWrap.style.borderRadius='6px'; treeRow.appendChild(treeWrap);
-      const renderTree = ()=>{ treeWrap.innerHTML=''; const tree=buildContainerTreeFromSelector(selInput.value||currentSel); if(!tree.length){ treeWrap.textContent='无匹配容器'; return; } tree.forEach(level=>{ const line=document.createElement('div'); line.style.margin='4px 0'; const d=document.createElement('span'); d.textContent='层级 '+level.depth+': '; d.style.color='#888'; line.appendChild(d); level.matches.forEach((m,idx)=>{ const b=document.createElement('button'); b.textContent=m.id; b.style.marginRight='6px'; b.style.padding='2px 6px'; b.style.borderRadius='4px'; b.style.border='1px solid #444'; b.style.background='#2c2c2c'; b.style.color='#fff'; b.onclick=(ev)=>{ ev.stopPropagation(); if (containerSel){ const opt=[...containerSel.options].find(o=>o.textContent.includes(m.id)); if(opt) containerSel.value=opt.value; } }; line.appendChild(b); if(idx<level.matches.length-1){ const sep=document.createElement('span'); sep.textContent='· '; sep.style.color='#555'; line.appendChild(sep); } }); treeWrap.appendChild(line); }); };
-      renderTree();
-      // place treeRow under container select (row2)
-      const selects = qall(menu,'select'); if (selects.length){ const row2 = selects[0].parentElement; row2.parentElement.insertBefore(treeRow, row2.nextSibling); }
-      // 操作选择（来自动作库）
-      const opsRow = document.createElement('div'); opsRow.className='row'; const opsLabel=document.createElement('label'); opsLabel.textContent='操作选择(库)'; const opsSelect=document.createElement('select');
-      const ops = Array.isArray(window.__webautoOps) ? window.__webautoOps : [];
-      ops.forEach(op=>{ try{ const o=document.createElement('option'); o.value=op.key; o.textContent = (op.label||op.key) + ' (' + op.key + ')'; opsSelect.appendChild(o); }catch{} });
-      const opsBtn = document.createElement('button'); opsBtn.textContent='执行选择'; opsBtn.onclick=(ev)=>{ ev.stopPropagation(); const opKey = opsSelect.value; if (!opKey) return; window.webauto_dispatch?.({ type:'picker:operation', data:{ opKey, selector: selInput.value || currentSel } }); };
-      opsRow.appendChild(opsLabel); opsRow.appendChild(opsSelect); opsRow.appendChild(opsBtn); menu.appendChild(opsRow);
-
-      // 自定义操作输入 + 保存测试容器
-      const customRow = document.createElement('div'); customRow.className='row'; const customInput=document.createElement('input'); customInput.type='text'; customInput.placeholder='输入自定义操作（如：点击第3个关注）'; const customBtn=document.createElement('button'); customBtn.textContent='保存测试容器'; customBtn.onclick=(ev)=>{ ev.stopPropagation(); const opt=sel2.selectedOptions[0]; const payload = { selector: selInput.value || currentSel, classChoice: clsSelect.value, containerId: (opt && opt.value!=='__custom__') ? opt.value : '', containerSelector: (opt && opt.dataset && opt.dataset.selector) ? opt.dataset.selector : '', containerTree: buildContainerTreeFromSelector(selInput.value||currentSel), prompt: customInput.value||'' }; window.webauto_dispatch?.({ type:'picker:save', data: payload }); };
-      customRow.appendChild(customInput); customRow.appendChild(customBtn); menu.appendChild(customRow);
-    }catch(e){ /* noop */ }
+  // preload saved picks to window for menu usage
+  try {
+    const picksRoot = path.join(process.cwd(), 'containers', 'test', 'weibo', 'picks');
+    let arr = [];
+    if (fs.existsSync(picksRoot)) {
+      const files = fs.readdirSync(picksRoot).filter(n=>n.endsWith('.json')).sort().slice(-50);
+      arr = files.map(n=>{ try{ const j=JSON.parse(fs.readFileSync(path.join(picksRoot,n),'utf8')); return { id:n, ts:j.timestamp, selector:j.selector, containerId:j.containerId, containerSelector:j.containerSelector, pageUrl:j.pageUrl }; } catch { return null; } }).filter(Boolean);
     }
-    function install(){
-      const mo = new MutationObserver((recs)=>{
-        for (const r of recs){ for (const n of r.addedNodes){ if (n && n.nodeType===1 && n.classList && n.classList.contains('webauto-menu')){ try{ augment(n); }catch{} } } }
-      });
-      mo.observe(document.documentElement, { childList: true, subtree: true });
-    }
-    if (document.readyState==='loading') document.addEventListener('DOMContentLoaded', install, { once:true }); else install();
-  })();`);
+    await context.addInitScript((list)=>{ window.__webautoSavedPicks = Array.isArray(list)?list:[]; }, arr);
+  } catch {}
   // inject actions lists for menu
   try {
     const act = require('../src/modules/executable-container/node/actions-loader.cjs');
