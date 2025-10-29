@@ -34,7 +34,21 @@ export default class PlaywrightKeySequenceNode extends BaseNode {
         dynKeys: (window).__webautoTmpKeys || []
       }));
       const textValue = String(dyn?.value || '');
-      const keySeq = (Array.isArray(dyn?.dynKeys) && dyn.dynKeys.length) ? dyn.dynKeys : keys;
+      const norm = (k) => {
+        if (!k) return '';
+        const parts = String(k).split('+').map(p => p.trim());
+        const map = {
+          'ctrl': 'Control', 'control': 'Control', 'cmd': 'Meta', 'win': 'Meta', 'meta': 'Meta',
+          'shift': 'Shift', 'alt': 'Alt', 'option': 'Alt',
+          'enter': 'Enter', 'return': 'Enter', 'tab': 'Tab', 'esc': 'Escape', 'escape': 'Escape',
+          'space': 'Space', 'backspace': 'Backspace', 'del': 'Delete', 'delete': 'Delete',
+          'arrowup': 'ArrowUp', 'arrowdown': 'ArrowDown', 'arrowleft': 'ArrowLeft', 'arrowright': 'ArrowRight',
+        };
+        const toKey = (s) => map[s.toLowerCase()] || s;
+        return parts.map(toKey).join('+');
+      };
+      const keySeqRaw = (Array.isArray(dyn?.dynKeys) && dyn.dynKeys.length) ? dyn.dynKeys : keys;
+      const keySeq = keySeqRaw.map(norm).filter(Boolean);
 
       // 聚焦目标（若有）
       let el = null;
@@ -70,4 +84,3 @@ export default class PlaywrightKeySequenceNode extends BaseNode {
     }
   }
 }
-
