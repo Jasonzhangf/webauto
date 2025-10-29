@@ -159,7 +159,11 @@ async function main() {
           '.webauto-menu .ops-item{padding:6px 8px;color:#ddd;cursor:pointer;white-space:nowrap;}'+
           '.webauto-menu .ops-item:hover{background:#2c2c2c;}'+
           '.webauto-menu .chip{display:inline-block;padding:2px 6px;border:1px solid #555;border-radius:12px;background:#2a2a2a;color:#ddd;cursor:pointer;}'+
-          '.webauto-menu .chip + .chip{margin-left:6px;}';
+          '.webauto-menu .chip + .chip{margin-left:6px;}'+
+          '.webauto-menu .tags{flex:1;display:flex;flex-wrap:wrap;gap:6px;align-items:center;border:1px dashed #444;border-radius:6px;padding:6px;min-height:34px;}'+
+          '.webauto-menu .tag{display:inline-flex;align-items:center;gap:6px;padding:2px 8px;border:1px solid #555;border-radius:12px;background:#2a2a2a;color:#ddd;}'+
+          '.webauto-menu .tag .x{color:#aaa;cursor:pointer;}'+
+          '.webauto-menu .tag .x:hover{color:#fff;}';
         (document.head||document.documentElement).appendChild(s);
       }catch{}
     }
@@ -253,11 +257,21 @@ async function main() {
       document.addEventListener('click', ()=>{ try{ opsList.style.display='none'; }catch{} });
       // 参数与按键序列
       const valRow=document.createElement('div'); valRow.className='row'; const valLabel=document.createElement('label'); valLabel.textContent='参数/输入值'; const valInput=document.createElement('input'); valInput.type='text'; valInput.placeholder='如：文本 或 属性名 href'; valRow.appendChild(valLabel); valRow.appendChild(valInput);
-      const keyRow=document.createElement('div'); keyRow.className='row'; const keyLabel=document.createElement('label'); keyLabel.textContent='按键序列'; const keysInput=document.createElement('input'); keysInput.type='text'; keysInput.placeholder='Enter,Tab 或 Ctrl+Enter'; keyRow.appendChild(keyLabel); keyRow.appendChild(keysInput);
-      const keyChips=document.createElement('div'); ['Enter','Tab','Escape','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].forEach(k=>{ const chip=document.createElement('span'); chip.className='chip'; chip.textContent=k; chip.onclick=(e)=>{ e.stopPropagation(); const cur=keysInput.value.trim(); keysInput.value = cur ? (cur+','+k) : k; }; keyRow.appendChild(chip); });
+      // 按键序列（标签可编辑）
+      const keyRow=document.createElement('div'); keyRow.className='row'; const keyLabel=document.createElement('label'); keyLabel.textContent='按键序列';
+      const tagsBox=document.createElement('div'); tagsBox.className='tags';
+      const keyInput=document.createElement('input'); keyInput.type='text'; keyInput.placeholder='输入后回车添加，如 Ctrl+Enter'; keyInput.style.minWidth='140px'; keyInput.onkeydown=(ev)=>{ if (ev.key==='Enter' || ev.key===','){ ev.preventDefault(); const v=keyInput.value.trim(); if (v) addKeyToken(v); keyInput.value=''; } };
+      tagsBox.appendChild(keyInput);
+      keyRow.appendChild(keyLabel); keyRow.appendChild(tagsBox);
+      const keyQuickRow=document.createElement('div'); keyQuickRow.className='row'; const quickLab=document.createElement('label'); quickLab.textContent='快捷按键'; keyQuickRow.appendChild(quickLab);
+      const addKeyToken=(txt)=>{ const t=String(txt||'').trim(); if(!t) return; keyTokens.push(t); renderTags(); };
+      const removeKeyToken=(idx)=>{ keyTokens.splice(idx,1); renderTags(); };
+      const renderTags=()=>{ try{ while(tagsBox.firstChild) tagsBox.removeChild(tagsBox.firstChild); keyTokens.forEach((t,idx)=>{ const tg=document.createElement('span'); tg.className='tag'; const tt=document.createElement('span'); tt.textContent=t; const x=document.createElement('span'); x.className='x'; x.textContent='×'; x.onclick=(e)=>{ e.stopPropagation(); removeKeyToken(idx); }; tg.appendChild(tt); tg.appendChild(x); tagsBox.appendChild(tg); }); tagsBox.appendChild(keyInput); }catch{} };
+      const keyTokens=[];
+      ['Enter','Tab','Escape','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].forEach(k=>{ const chip=document.createElement('span'); chip.className='chip'; chip.textContent=k; chip.onclick=(e)=>{ e.stopPropagation(); addKeyToken(k); }; keyQuickRow.appendChild(chip); });
       // 执行按钮
       const execRow=document.createElement('div'); execRow.className='row'; const execGap=document.createElement('label'); execGap.textContent=''; const opsBtn=document.createElement('button'); opsBtn.textContent='执行选择'; execRow.appendChild(execGap); execRow.appendChild(opsBtn);
-      opsBtn.onclick=(ev)=>{ ev.stopPropagation(); const opKey=currentOpKey; if(!opKey) return; const s=i1.value||sel; try{ window.__webautoTmpValue = valInput.value || ''; window.__webautoTmpKeys = (keysInput.value||'').split(',').map(x=>x.trim()).filter(Boolean); }catch{} window.webauto_dispatch?.({ type:'picker:operation', data:{ opKey, selector: s } }); window.webauto_dispatch?.({ type:'picker:save', data:{ selector:s, containerTree: buildContainerTree(el), containerId:(sel2.selectedOptions[0]&&sel2.selectedOptions[0].value!=='__custom__')?sel2.selectedOptions[0].value:'', containerSelector:(sel2.selectedOptions[0]&&sel2.selectedOptions[0].dataset&&sel2.selectedOptions[0].dataset.selector)||'', classChoice:(clsSelect&&clsSelect.value)||'', opKey, value: (valInput.value||''), keys: (keysInput.value||'') } }); };
+      opsBtn.onclick=(ev)=>{ ev.stopPropagation(); const opKey=currentOpKey; if(!opKey) return; const s=i1.value||sel; try{ window.__webautoTmpValue = valInput.value || ''; window.__webautoTmpKeys = keyTokens.slice(); }catch{} window.webauto_dispatch?.({ type:'picker:operation', data:{ opKey, selector: s } }); window.webauto_dispatch?.({ type:'picker:save', data:{ selector:s, containerTree: buildContainerTree(el), containerId:(sel2.selectedOptions[0]&&sel2.selectedOptions[0].value!=='__custom__')?sel2.selectedOptions[0].value:'', containerSelector:(sel2.selectedOptions[0]&&sel2.selectedOptions[0].dataset&&sel2.selectedOptions[0].dataset.selector)||'', classChoice:(clsSelect&&clsSelect.value)||'', opKey, value: (valInput.value||''), keys: keyTokens.slice() } }); };
       // 执行结果显示
       const rowResult=document.createElement('div'); rowResult.className='row'; const lRes=document.createElement('label'); lRes.textContent='执行结果'; const pre=document.createElement('pre'); pre.id='webauto-result'; pre.style.maxHeight='260px'; pre.style.minHeight='120px'; pre.style.overflow='auto'; pre.style.background='#111'; pre.style.padding='8px'; pre.style.border='1px solid #333'; pre.style.borderRadius='8px'; pre.textContent='(暂无)'; rowResult.appendChild(lRes); rowResult.appendChild(pre);
       const showResult=(obj)=>{ try{ const el=document.getElementById('webauto-result'); if(!el) return; const txt=(typeof obj==='string')?obj:JSON.stringify(obj,null,2); el.textContent=txt; }catch{} };
