@@ -149,11 +149,11 @@ async function main() {
           '.webauto-toolbar{position:fixed;right:16px;top:16px;background:#1e1e1e;color:#fff;padding:6px 10px;border-radius:8px;box-shadow:0 2px 12px rgba(0,0,0,.4);z-index:'+Z+';font:12px/1.4 Arial;}'+
           '.webauto-toolbar button{cursor:pointer;background:#2c2c2c;color:#fff;border:1px solid #444;border-radius:6px;padding:4px 8px;}'+
           '.webauto-menu{position:fixed;background:#1e1e1e;color:#fff;padding:10px 12px;border-radius:10px;box-shadow:0 2px 12px rgba(0,0,0,.4);z-index:'+Z+';font:12px/1.4 Arial;min-width:360px;max-width:560px;pointer-events:auto;}'+
-          '.webauto-menu .row{margin:6px 0; display:flex; align-items:center; gap:8px; position:relative;}'+
+          '.webauto-menu .row{margin:6px 0; display:flex; align-items:flex-start; gap:8px; position:relative;}'+
           '.webauto-menu label{display:block;color:#aaa;min-width:92px;margin:0;}'+
           '.webauto-menu select, .webauto-menu input{flex:1;width:100%;padding:6px 8px;border-radius:6px;border:1px solid #444;background:#2c2c2c;color:#fff;}'+
           '.webauto-menu .actions button{margin-right:6px;margin-top:6px;}'+
-          '.webauto-menu .ops-box{flex:1;display:flex;align-items:center;justify-content:space-between;border:1px solid #444;border-radius:6px;padding:6px 8px;background:#2c2c2c;cursor:pointer;user-select:none;}'+
+          '.webauto-menu .ops-box{flex:1;display:flex;align-items:center;justify-content:space-between;border:1px solid #444;border-radius:6px;padding:6px 8px;background:#2c2c2c;cursor:pointer;user-select:none;position:relative;}'+
           '.webauto-menu .ops-current{color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;}'+
           '.webauto-menu .ops-list{position:absolute;left:0;top:100%;right:auto;margin-top:4px;background:#1e1e1e;border:1px solid #444;border-radius:6px;max-height:220px;overflow:auto;min-width:260px;width:100%;box-sizing:border-box;box-shadow:0 2px 12px rgba(0,0,0,.4);}'+
           '.webauto-menu .ops-item{padding:6px 8px;color:#ddd;cursor:pointer;white-space:nowrap;}'+
@@ -249,7 +249,7 @@ async function main() {
       // 操作选择（库） - 自定义下拉
       const opsRow=document.createElement('div'); opsRow.className='row'; const opsLabel=document.createElement('label'); opsLabel.textContent='操作选择(库)';
       const opsBox=document.createElement('div'); opsBox.className='ops-box'; const opsCurrent=document.createElement('div'); opsCurrent.className='ops-current'; opsCurrent.textContent='(请选择)'; opsBox.appendChild(opsCurrent); opsRow.appendChild(opsLabel); opsRow.appendChild(opsBox);
-      const opsList=document.createElement('div'); opsList.className='ops-list'; opsList.style.display='none'; opsRow.appendChild(opsList);
+      const opsList=document.createElement('div'); opsList.className='ops-list'; opsList.style.display='none'; opsBox.appendChild(opsList);
       let currentOpKey='';
       const setCurrent=(key,label)=>{ currentOpKey=key||''; opsCurrent.textContent=label ? (String(label)+' ('+String(key)+')') : (key||'(请选择)'); };
       let ops=(Array.isArray(window.__webautoOps)?window.__webautoOps:[]);
