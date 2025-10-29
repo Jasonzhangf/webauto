@@ -86,6 +86,7 @@ async function main() {
           containerSelector: payload?.containerSelector || '',
           containerTree: payload?.containerTree || [],
           operation: payload?.opKey ? { key: payload.opKey } : { prompt: payload?.prompt || '' },
+          operations: Array.isArray(payload?.operations) ? payload.operations : [],
           snapshotPath: snap
         };
         const name = `${ts}_${slug(rec.containerId||rec.classChoice||'pick')}.json`;
@@ -123,6 +124,7 @@ async function main() {
         if (typeof payload.classChoice === 'string') next.classChoice = payload.classChoice;
         if (typeof payload.containerId === 'string') next.containerId = payload.containerId;
         if (typeof payload.containerSelector === 'string') next.containerSelector = payload.containerSelector;
+        if (Array.isArray(payload.operations)) next.operations = payload.operations;
         // dedupe by class
         try {
           const files = (fs.readdirSync(picksDir)||[]).filter(n=>n.endsWith('.json'));
@@ -135,6 +137,13 @@ async function main() {
         fs.writeFileSync(fp, JSON.stringify(next, null, 2));
         return { ok:true, data: next };
       } catch (e) { return { ok:false, error: e?.message||String(e) }; }
+    });
+
+    await context.exposeBinding('webauto_pick_delete', async (_source, id) => {
+      try { ensureDirs(); const fp = path.join(picksDir, String(id||'')); fs.unlinkSync(fp); return { ok:true }; } catch (e) { return { ok:false, error: e?.message||String(e) }; }
+    });
+    await context.exposeBinding('webauto_pick_copy', async (_source, id) => {
+      try { ensureDirs(); const src = path.join(picksDir, String(id||'')); const j = readPick(src); if (!j) return { ok:false, error:'not found' }; const ts = new Date().toISOString().replace(/[:.]/g,'-'); j.timestamp = ts; const name = `${ts}_${slug(j.containerId||j.classChoice||'pick')}.json`; const dst = path.join(picksDir, name); fs.writeFileSync(dst, JSON.stringify(j, null, 2)); return { ok:true, id:name, data:j }; } catch (e) { return { ok:false, error: e?.message||String(e) }; }
     });
 
     await context.exposeBinding('webauto_dispatch', async (source, evt) => {
@@ -292,11 +301,15 @@ async function main() {
       document.addEventListener('mousemove', (e)=>{ if(!drag) return; wrap.style.left=Math.max(6, e.clientX-dx)+'px'; wrap.style.top=Math.max(6, e.clientY-dy)+'px'; });
       document.addEventListener('mouseup', ()=>{ drag=false; });
       // 容器优先（默认）
-      const row2=document.createElement('div'); row2.className='row'; const l2=document.createElement('label'); l2.textContent='容器选择（默认）'; const sel2=document.createElement('select');
+      const row2=document.createElement('div'); row2.className='row'; const l2=document.createElement('label'); l2.textContent='容器选择（默认）'; const sel2=document.createElement('select'); sel2.style.display='none';
       let firstContainer = null;
       cands.forEach(c=>{ const o=document.createElement('option'); o.value=c.id; o.textContent=c.label; o.dataset.selector=c.selector||''; sel2.appendChild(o); if (!firstContainer && c.id !== '__custom__') firstContainer = o; });
       if (firstContainer) sel2.value = firstContainer.value; // 默认选容器，不是自定义XPath
-      row2.appendChild(l2); row2.appendChild(sel2);
+      const contBox=document.createElement('div'); contBox.className='ops-box'; const contCur=document.createElement('div'); contCur.className='ops-current'; contCur.textContent = firstContainer ? firstContainer.textContent : '(请选择)'; contBox.appendChild(contCur); row2.appendChild(l2); row2.appendChild(contBox); row2.appendChild(sel2);
+      const contList=document.createElement('div'); contList.className='ops-list'; contList.style.display='none'; contBox.appendChild(contList);
+      const fillCont=()=>{ contList.innerHTML=''; [...sel2.options].forEach(o=>{ const it=document.createElement('div'); it.className='ops-item'; it.textContent=o.textContent; it.onclick=(e)=>{ e.stopPropagation(); sel2.value=o.value; contCur.textContent=o.textContent; contList.style.display='none'; }; contList.appendChild(it); }); };
+      fillCont(); contBox.onclick=(e)=>{ e.stopPropagation(); const will=(contList.style.display==='none'); contList.style.display = will? 'block':'none'; if (will){ try{ const lb=contList.getBoundingClientRect(); if (lb.bottom>window.innerHeight-8){ contList.style.top='auto'; contList.style.bottom='100%'; } else { contList.style.bottom='auto'; contList.style.top='100%'; } }catch{} } };
+      document.addEventListener('click', ()=>{ try{ contList.style.display='none'; }catch{} });
       // 父容器树
       const rowTree=document.createElement('div'); rowTree.className='row'; const treeLabel=document.createElement('label'); treeLabel.textContent='父容器树'; const treeWrap=document.createElement('div'); treeWrap.style.maxHeight='140px'; treeWrap.style.overflow='auto'; treeWrap.style.border='1px solid #333'; treeWrap.style.padding='6px'; treeWrap.style.borderRadius='6px';
       const renderTree=(element)=>{ treeWrap.innerHTML=''; const tree=buildContainerTree(element); if(!tree.length){ treeWrap.textContent='无匹配容器'; return; } tree.forEach(level=>{ const line=document.createElement('div'); line.style.margin='4px 0'; const d=document.createElement('span'); d.textContent='层级 '+level.depth+': '; d.style.color='#888'; line.appendChild(d); level.matches.forEach((m,idx)=>{ const b=document.createElement('button'); b.textContent=m.id; b.style.marginRight='6px'; b.style.padding='2px 6px'; b.style.borderRadius='4px'; b.style.border='1px solid #444'; b.style.background='#2c2c2c'; b.style.color='#fff'; b.onclick=(ev)=>{ ev.stopPropagation(); const opt=[...sel2.options].find(o=>o.textContent.includes(m.id)); if(opt) sel2.value=opt.value; }; line.appendChild(b); if(idx<level.matches.length-1){ const sep=document.createElement('span'); sep.textContent='· '; sep.style.color='#555'; line.appendChild(sep); } }); treeWrap.appendChild(line); }); };
@@ -320,15 +333,29 @@ async function main() {
       fillSaved(Array.isArray(window.__webautoSavedPicks)?window.__webautoSavedPicks:[]);
       savedBox.onclick=(e)=>{ e.stopPropagation(); const will=(savedList.style.display==='none'); savedList.style.display = will? 'block':'none'; if (will){ try{ const lb=savedList.getBoundingClientRect(); if (lb.bottom>window.innerHeight-8){ savedList.style.top='auto'; savedList.style.bottom='100%'; } else { savedList.style.bottom='auto'; savedList.style.top='100%'; } }catch{} } };
       document.addEventListener('click', ()=>{ try{ savedList.style.display='none'; }catch{} });
-      const savedBtns=document.createElement('div'); savedBtns.style.display='flex'; savedBtns.style.gap='6px'; const loadBtn=document.createElement('button'); loadBtn.textContent='加载'; const editBtn=document.createElement('button'); editBtn.textContent='编辑'; savedBtns.appendChild(loadBtn); savedBtns.appendChild(editBtn); rowSaved.appendChild(savedBtns);
+      const savedBtns=document.createElement('div'); savedBtns.style.display='flex'; savedBtns.style.gap='6px'; const loadBtn=document.createElement('button'); loadBtn.textContent='加载'; const editBtn=document.createElement('button'); editBtn.textContent='编辑'; const copyBtn=document.createElement('button'); copyBtn.textContent='复制'; const delBtn=document.createElement('button'); delBtn.textContent='删除'; savedBtns.appendChild(loadBtn); savedBtns.appendChild(editBtn); savedBtns.appendChild(copyBtn); savedBtns.appendChild(delBtn); rowSaved.appendChild(savedBtns);
       loadBtn.onclick=async (ev)=>{ ev.stopPropagation(); if (!savedCurrentId) return; try{ const list=Array.isArray(window.__webautoSavedPicks)?window.__webautoSavedPicks:[]; const it=list.find(x=>x.id===savedCurrentId); if (!it) return; const s=it.selector||''; const cid=it.containerId||''; const csel=it.containerSelector||''; const cclass=it.classChoice||''; if (s) i1.value=s; if (cid){ const match=[...sel2.options].find(o=>o.value===cid || (o.dataset&&o.dataset.selector===csel)); if (match) sel2.value=match.value; } if (cclass && clsSelect){ const found=[...clsSelect.options].find(o=>o.value===cclass); if (found) clsSelect.value=cclass; } }catch{} };
-      // 编辑器
-      const rowEditor=document.createElement('div'); rowEditor.className='row'; rowEditor.style.display='none'; const labEditor=document.createElement('label'); labEditor.textContent='容器编辑'; const edWrap=document.createElement('div'); edWrap.style.flex='1'; const edSel=document.createElement('input'); edSel.placeholder='selector'; const edCls=document.createElement('input'); edCls.placeholder='classChoice'; const edCid=document.createElement('input'); edCid.placeholder='containerId'; const edCsel=document.createElement('input'); edCsel.placeholder='containerSelector'; const edBtn=document.createElement('button'); edBtn.textContent='保存修改'; const edCancel=document.createElement('button'); edCancel.textContent='取消'; edWrap.appendChild(edSel); edWrap.appendChild(edCls); edWrap.appendChild(edCid); edWrap.appendChild(edCsel); edWrap.appendChild(edBtn); edWrap.appendChild(edCancel); rowEditor.appendChild(labEditor); rowEditor.appendChild(edWrap);
-      editBtn.onclick=async (ev)=>{ ev.stopPropagation(); if (!savedCurrentId) return; try{ const info = await window.webauto_pick_read?.(savedCurrentId); const j=(info&&info.data)||{}; edSel.value=j.selector||''; edCls.value=j.classChoice||''; edCid.value=j.containerId||''; edCsel.value=j.containerSelector||''; rowEditor.style.display=''; }catch(e){ console.warn('edit load',e); } };
+      // 编辑器（仅操作、删除、复制；不编辑样式与ID）
+      const rowEditor=document.createElement('div'); rowEditor.className='row'; rowEditor.style.display='none'; const labEditor=document.createElement('label'); labEditor.textContent='容器编辑'; const edWrap=document.createElement('div'); edWrap.style.flex='1';
+      // 只显示只读信息
+      const edInfo=document.createElement('div'); edInfo.style.fontSize='12px'; edInfo.style.color='#aaa'; edWrap.appendChild(edInfo);
+      // 操作chips
+      const edOpsLabel=document.createElement('div'); edOpsLabel.textContent='操作列表'; edOpsLabel.style.color='#aaa'; const edOpsTags=document.createElement('div'); edOpsTags.className='tags'; edOpsTags.style.marginTop='6px'; edWrap.appendChild(edOpsLabel); edWrap.appendChild(edOpsTags);
+      const edOpsAddBox=document.createElement('div'); edOpsAddBox.className='ops-box'; const edOpsCur=document.createElement('div'); edOpsCur.className='ops-current'; edOpsCur.textContent='(选择要添加的操作)'; edOpsAddBox.appendChild(edOpsCur); const edOpsList=document.createElement('div'); edOpsList.className='ops-list'; edOpsList.style.display='none'; edOpsAddBox.appendChild(edOpsList); edWrap.appendChild(edOpsAddBox);
+      const edSaveOps=document.createElement('button'); edSaveOps.textContent='保存操作'; const edCancel=document.createElement('button'); edCancel.textContent='取消'; edWrap.appendChild(edSaveOps); edWrap.appendChild(edCancel);
+      rowEditor.appendChild(labEditor); rowEditor.appendChild(edWrap);
+      let edOps=[];
+      const renderEdOps=()=>{ try{ while(edOpsTags.firstChild) edOpsTags.removeChild(edOpsTags.firstChild); edOps.forEach((k,idx)=>{ const tg=document.createElement('span'); tg.className='tag'; const tt=document.createElement('span'); tt.textContent=k; const x=document.createElement('span'); x.className='x'; x.textContent='×'; x.onclick=(e)=>{ e.stopPropagation(); edOps.splice(idx,1); renderEdOps(); }; tg.appendChild(tt); tg.appendChild(x); edOpsTags.appendChild(tg); }); }catch{} };
+      const fillEdOpsList=()=>{ try{ edOpsList.innerHTML=''; const ops=(Array.isArray(window.__webautoOps)?window.__webautoOps:[]); ops.forEach(op=>{ const it=document.createElement('div'); it.className='ops-item'; it.textContent=(op.label||op.key)+' ('+op.key+')'; it.onclick=(e)=>{ e.stopPropagation(); edOps.push(op.key); renderEdOps(); edOpsList.style.display='none'; }; edOpsList.appendChild(it); }); }catch{} };
+      edOpsAddBox.onclick=(e)=>{ e.stopPropagation(); const will=(edOpsList.style.display==='none'); edOpsList.style.display= will?'block':'none'; if (will){ fillEdOpsList(); const lb=edOpsList.getBoundingClientRect(); if (lb.bottom>window.innerHeight-8){ edOpsList.style.top='auto'; edOpsList.style.bottom='100%'; } else { edOpsList.style.bottom='auto'; edOpsList.style.top='100%'; } } };
+      document.addEventListener('click', ()=>{ try{ edOpsList.style.display='none'; }catch{} });
+      editBtn.onclick=async (ev)=>{ ev.stopPropagation(); if (!savedCurrentId) return; try{ const info = await window.webauto_pick_read?.(savedCurrentId); const j=(info&&info.data)||{}; edInfo.textContent='selector: '+(j.selector||'')+'  | class: '+(j.classChoice||'')+'  | containerId: '+(j.containerId||''); edOps = Array.isArray(j.operations)? j.operations.slice(): []; renderEdOps(); rowEditor.style.display=''; }catch(e){ console.warn('edit load',e); } };
       edCancel.onclick=(e)=>{ e.stopPropagation(); rowEditor.style.display='none'; };
-      edBtn.onclick=async (e)=>{ e.stopPropagation(); try{ const res = await window.webauto_pick_write?.({ id: savedCurrentId, selector: edSel.value, classChoice: edCls.value, containerId: edCid.value, containerSelector: edCsel.value }); (window).__webautoShowResult && (window).__webautoShowResult({ ok: !!(res&&res.ok), type:'pick:update', res }); // refresh list minimal
-        const list=Array.isArray(window.__webautoSavedPicks)?window.__webautoSavedPicks:[]; const it=list.find(x=>x.id===savedCurrentId); if (it){ it.selector=edSel.value; it.classChoice=edCls.value; it.containerId=edCid.value; it.containerSelector=edCsel.value; savedCurrent.textContent=(it.ts||'')+' | '+(it.containerId||it.selector||''); }
-        rowEditor.style.display='none'; }catch(err){ console.warn('edit save',err); }
+      edSaveOps.onclick=async (e)=>{ e.stopPropagation(); try{ const res = await window.webauto_pick_write?.({ id: savedCurrentId, operations: edOps.slice() }); (window).__webautoShowResult && (window).__webautoShowResult({ ok: !!(res&&res.ok), type:'pick:update:ops', res }); rowEditor.style.display='none'; }catch(err){ console.warn('edit save ops',err); } };
+      delBtn.onclick=async (e)=>{ e.stopPropagation(); if (!savedCurrentId) return; try{ const res = await window.webauto_pick_delete?.(savedCurrentId); (window).__webautoShowResult && (window).__webautoShowResult({ ok: !!(res&&res.ok), type:'pick:delete', id: savedCurrentId }); // remove from list
+        const list=Array.isArray(window.__webautoSavedPicks)?window.__webautoSavedPicks:[]; const idx=list.findIndex(x=>x.id===savedCurrentId); if (idx>=0){ list.splice(idx,1); fillSaved(list); savedCurrentId=''; savedCurrent.textContent='(请选择)'; } }catch(err){ console.warn('del',err); }
+      };
+      copyBtn.onclick=async (e)=>{ e.stopPropagation(); if (!savedCurrentId) return; try{ const res = await window.webauto_pick_copy?.(savedCurrentId); if (res && res.ok){ const list=Array.isArray(window.__webautoSavedPicks)?window.__webautoSavedPicks:[]; list.push({ id: res.id, ts: res.data?.timestamp, selector: res.data?.selector, containerId: res.data?.containerId, containerSelector: res.data?.containerSelector, classChoice: res.data?.classChoice }); fillSaved(list); (window).__webautoShowResult && (window).__webautoShowResult({ ok:true, type:'pick:copy', id: res.id }); } }catch(err){ console.warn('copy',err); }
       };
       // 选择器输入（当前 CSS）
       const row1=document.createElement('div'); row1.className='row'; const l1=document.createElement('label'); l1.textContent='当前选择器(CSS)'; const i1=document.createElement('input'); i1.value=sel; i1.readOnly=false; i1.id='webauto-menu-sel'; row1.appendChild(l1); row1.appendChild(i1);
