@@ -457,6 +457,13 @@ async function main() {
       bar.appendChild(btn); (document.body||document.documentElement).appendChild(bar);
     }
     function onReady(fn){ if (document.readyState==='loading'){ document.addEventListener('DOMContentLoaded', fn, { once:true }); } else { try{ fn(); }catch{} } }
+    // hotkeys: Alt+P toggle pick; Ctrl+; force open on active
+    document.addEventListener('keydown', (ev)=>{
+      try{
+        if (ev.altKey && (ev.key||'').toLowerCase()==='p') { ev.preventDefault(); setPick(!state.picking); }
+        if (ev.ctrlKey && (ev.key === ';' || ev.key === '；')) { ev.preventDefault(); const t=document.activeElement instanceof Element ? document.activeElement : document.body; showMenu(t); }
+      }catch{}
+    }, true);
     onReady(mountToolbar);
     window.__webautoPicker = { start: ()=>{ onReady(()=>setPick(true)); }, stop: ()=>setPick(false), getState: ()=>({ picking: state.picking }) };
   })();`;
