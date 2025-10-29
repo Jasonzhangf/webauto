@@ -345,7 +345,7 @@ async function main() {
 
       // 需要切换显示的分区
       const basicRows=[row2,rowTree,rowParent,rowMode,rowCls,rowSaved,row1,row3];
-      const opsRows=[opsRow,valRow,keyRow,execRow];
+      const opsRows=[opsRow,valRow,keyRow,vkRow,execRow];
       const setTab=(which)=>{
         const basic = which==='basic';
         tabBasic.classList.toggle('active', basic); tabOps.classList.toggle('active', !basic);
@@ -356,7 +356,7 @@ async function main() {
       tabOps.onclick=(e)=>{ e.stopPropagation(); setTab('ops'); };
 
       // 组装
-      wrap.appendChild(rowHeader); wrap.appendChild(tabs); wrap.appendChild(row2); wrap.appendChild(rowTree); wrap.appendChild(rowParent); wrap.appendChild(rowMode); wrap.appendChild(rowCls); wrap.appendChild(rowSaved); wrap.appendChild(row1); wrap.appendChild(row3); wrap.appendChild(opsRow); wrap.appendChild(valRow); wrap.appendChild(keyRow); wrap.appendChild(execRow); wrap.appendChild(rowResult); wrap.appendChild(customRow); setTab('basic'); wrap.style.visibility='hidden'; document.body.appendChild(wrap); state.menu=wrap;
+      wrap.appendChild(rowHeader); wrap.appendChild(tabs); wrap.appendChild(row2); wrap.appendChild(rowTree); wrap.appendChild(rowParent); wrap.appendChild(rowMode); wrap.appendChild(rowCls); wrap.appendChild(rowSaved); wrap.appendChild(row1); wrap.appendChild(row3); wrap.appendChild(opsRow); wrap.appendChild(valRow); wrap.appendChild(keyRow); wrap.appendChild(vkRow); wrap.appendChild(execRow); wrap.appendChild(rowResult); wrap.appendChild(customRow); setTab('basic'); wrap.style.visibility='hidden'; document.body.appendChild(wrap); state.menu=wrap;
       try{
         const m=wrap.getBoundingClientRect();
         // 初始靠右显示
