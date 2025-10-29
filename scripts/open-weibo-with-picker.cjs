@@ -148,10 +148,10 @@ async function main() {
         const s=document.createElement('style'); s.id='webauto-picker-style'; s.textContent=
           '.webauto-toolbar{position:fixed;right:16px;top:16px;background:#1e1e1e;color:#fff;padding:6px 10px;border-radius:8px;box-shadow:0 2px 12px rgba(0,0,0,.4);z-index:'+Z+';font:12px/1.4 Arial;}'+
           '.webauto-toolbar button{cursor:pointer;background:#2c2c2c;color:#fff;border:1px solid #444;border-radius:6px;padding:4px 8px;}'+
-          '.webauto-menu{position:fixed;background:#1e1e1e;color:#fff;padding:8px 10px;border-radius:8px;box-shadow:0 2px 12px rgba(0,0,0,.4);z-index:'+Z+';font:12px/1.4 Arial;min-width:260px;pointer-events:auto;}'+
+          '.webauto-menu{position:fixed;background:#1e1e1e;color:#fff;padding:10px 12px;border-radius:10px;box-shadow:0 2px 12px rgba(0,0,0,.4);z-index:'+Z+';font:12px/1.4 Arial;min-width:360px;max-width:560px;pointer-events:auto;}'+
           '.webauto-menu .row{margin:6px 0;}'+
           '.webauto-menu label{display:block;color:#aaa;margin-bottom:4px;}'+
-          '.webauto-menu select, .webauto-menu input{width:100%;padding:4px 6px;border-radius:6px;border:1px solid #444;background:#2c2c2c;color:#fff;}'+
+          '.webauto-menu select, .webauto-menu input{width:100%;padding:6px 8px;border-radius:6px;border:1px solid #444;background:#2c2c2c;color:#fff;}'+
           '.webauto-menu .actions button{margin-right:6px;margin-top:6px;}';
         (document.head||document.documentElement).appendChild(s);
       }catch{}
@@ -217,8 +217,8 @@ async function main() {
       rowCls.appendChild(lCls); rowCls.appendChild(clsSelect);
       // 已保存容器列表
       const rowSaved=document.createElement('div'); rowSaved.className='row'; const labSaved=document.createElement('label'); labSaved.textContent='已保存容器'; const savedSel=document.createElement('select');
-      const saved=(Array.isArray(window.__webautoSavedPicks)?window.__webautoSavedPicks:[]); if (saved.length){ saved.slice().reverse().forEach(p=>{ const o=document.createElement('option'); o.value=p.id; o.textContent=(p.ts||'')+' | '+(p.containerId||p.selector||''); o.dataset.selector=p.selector||''; o.dataset.containerId=p.containerId||''; o.dataset.containerSelector=p.containerSelector||''; savedSel.appendChild(o); }); } else { const o=document.createElement('option'); o.value=''; o.textContent='(暂无)'; savedSel.appendChild(o); }
-      const loadBtn=document.createElement('button'); loadBtn.textContent='加载'; loadBtn.onclick=(ev)=>{ ev.stopPropagation(); const opt=savedSel.selectedOptions[0]; if(!opt) return; const s=opt.dataset.selector||''; const cid=opt.dataset.containerId||''; const csel=opt.dataset.containerSelector||''; if (s) i1.value=s; if (cid){ const match=[...sel2.options].find(o=>o.value===cid || (o.dataset&&o.dataset.selector===csel)); if (match) sel2.value=match.value; } };
+      const saved=(Array.isArray(window.__webautoSavedPicks)?window.__webautoSavedPicks:[]); if (saved.length){ saved.slice().reverse().forEach(p=>{ const o=document.createElement('option'); o.value=p.id; o.textContent=(p.ts||'')+' | '+(p.containerId||p.selector||''); o.dataset.selector=p.selector||''; o.dataset.containerId=p.containerId||''; o.dataset.containerSelector=p.containerSelector||''; if (p.classChoice) o.dataset.classChoice=p.classChoice; savedSel.appendChild(o); }); } else { const o=document.createElement('option'); o.value=''; o.textContent='(暂无)'; savedSel.appendChild(o); }
+      const loadBtn=document.createElement('button'); loadBtn.textContent='加载'; loadBtn.onclick=(ev)=>{ ev.stopPropagation(); const opt=savedSel.selectedOptions[0]; if(!opt) return; const s=opt.dataset.selector||''; const cid=opt.dataset.containerId||''; const csel=opt.dataset.containerSelector||''; const cclass=opt.dataset.classChoice||''; if (s) i1.value=s; if (cid){ const match=[...sel2.options].find(o=>o.value===cid || (o.dataset&&o.dataset.selector===csel)); if (match) sel2.value=match.value; } if (cclass && clsSelect){ const found=[...clsSelect.options].find(o=>o.value===cclass); if (found) clsSelect.value=cclass; } };
       rowSaved.appendChild(labSaved); rowSaved.appendChild(savedSel); rowSaved.appendChild(loadBtn);
       // 选择器输入（当前 CSS）
       const row1=document.createElement('div'); row1.className='row'; const l1=document.createElement('label'); l1.textContent='当前选择器(CSS)'; const i1=document.createElement('input'); i1.value=sel; i1.readOnly=false; i1.id='webauto-menu-sel'; row1.appendChild(l1); row1.appendChild(i1);
@@ -234,14 +234,15 @@ async function main() {
       row3.appendChild(bHi); row3.appendChild(bClickMouse); row3.appendChild(bClickDom); row3.appendChild(bCopy); row3.appendChild(bSave); row3.appendChild(bClose);
       // 操作选择（库）
       const opsRow=document.createElement('div'); opsRow.className='row'; const opsLabel=document.createElement('label'); opsLabel.textContent='操作选择(库)'; const opsSelect=document.createElement('select');
+      const valLabel=document.createElement('label'); valLabel.textContent='参数/输入值(可选)'; valLabel.style.marginTop='6px'; const valInput=document.createElement('input'); valInput.type='text'; valInput.placeholder='如：文本 或 属性名 href';
       let ops=(Array.isArray(window.__webautoOps)?window.__webautoOps:[]);
       const fillOps=(items)=>{ try{ opsSelect.innerHTML=''; if(!items || !items.length){ const o=document.createElement('option'); o.value=''; o.textContent='(暂无)'; opsSelect.appendChild(o); return; } items.forEach(op=>{ const o=document.createElement('option'); o.value=op.key; o.textContent=(op.label||op.key)+' ('+op.key+')'; opsSelect.appendChild(o); }); }catch{} };
       fillOps(ops);
       if (!ops || !ops.length) { try { window.webauto_get_actions?.().then(res=>{ const items=(res && (res.operations||res.ops||[])) || []; fillOps(items); window.__webautoOps = items; }); } catch {} }
-      const opsBtn=document.createElement('button'); opsBtn.textContent='执行选择'; opsBtn.onclick=(ev)=>{ ev.stopPropagation(); const opKey=opsSelect.value; if(!opKey) return; const s=i1.value||sel; window.webauto_dispatch?.({ type:'picker:operation', data:{ opKey, selector: s } }); window.webauto_dispatch?.({ type:'picker:save', data:{ selector:s, containerTree: buildContainerTree(el), containerId:(sel2.selectedOptions[0]&&sel2.selectedOptions[0].value!=='__custom__')?sel2.selectedOptions[0].value:'', containerSelector:(sel2.selectedOptions[0]&&sel2.selectedOptions[0].dataset&&sel2.selectedOptions[0].dataset.selector)||'', classChoice:(clsSelect&&clsSelect.value)||'', opKey } }); };
-      opsRow.appendChild(opsLabel); opsRow.appendChild(opsSelect); opsRow.appendChild(opsBtn);
+      const opsBtn=document.createElement('button'); opsBtn.textContent='执行选择'; opsBtn.onclick=(ev)=>{ ev.stopPropagation(); const opKey=opsSelect.value; if(!opKey) return; const s=i1.value||sel; try{ window.__webautoTmpValue = valInput.value || ''; }catch{} window.webauto_dispatch?.({ type:'picker:operation', data:{ opKey, selector: s } }); window.webauto_dispatch?.({ type:'picker:save', data:{ selector:s, containerTree: buildContainerTree(el), containerId:(sel2.selectedOptions[0]&&sel2.selectedOptions[0].value!=='__custom__')?sel2.selectedOptions[0].value:'', containerSelector:(sel2.selectedOptions[0]&&sel2.selectedOptions[0].dataset&&sel2.selectedOptions[0].dataset.selector)||'', classChoice:(clsSelect&&clsSelect.value)||'', opKey, value: (valInput.value||'') } }); };
+      opsRow.appendChild(opsLabel); opsRow.appendChild(opsSelect); opsRow.appendChild(valLabel); opsRow.appendChild(valInput); opsRow.appendChild(opsBtn);
       // 执行结果显示
-      const rowResult=document.createElement('div'); rowResult.className='row'; const lRes=document.createElement('label'); lRes.textContent='执行结果'; const pre=document.createElement('pre'); pre.id='webauto-result'; pre.style.maxHeight='160px'; pre.style.overflow='auto'; pre.style.background='#111'; pre.style.padding='6px'; pre.style.border='1px solid #333'; pre.style.borderRadius='6px'; pre.textContent='(暂无)'; rowResult.appendChild(lRes); rowResult.appendChild(pre);
+      const rowResult=document.createElement('div'); rowResult.className='row'; const lRes=document.createElement('label'); lRes.textContent='执行结果'; const pre=document.createElement('pre'); pre.id='webauto-result'; pre.style.maxHeight='260px'; pre.style.minHeight='120px'; pre.style.overflow='auto'; pre.style.background='#111'; pre.style.padding='8px'; pre.style.border='1px solid #333'; pre.style.borderRadius='8px'; pre.textContent='(暂无)'; rowResult.appendChild(lRes); rowResult.appendChild(pre);
       const showResult=(obj)=>{ try{ const el=document.getElementById('webauto-result'); if(!el) return; const txt=(typeof obj==='string')?obj:JSON.stringify(obj,null,2); el.textContent=txt; }catch{} };
       // expose result sink globally for Node update
       try { window.__webautoShowResult = showResult; } catch {}
@@ -287,7 +288,7 @@ async function main() {
     let arr = [];
     if (fs.existsSync(picksRoot)) {
       const files = fs.readdirSync(picksRoot).filter(n=>n.endsWith('.json')).sort().slice(-50);
-      arr = files.map(n=>{ try{ const j=JSON.parse(fs.readFileSync(path.join(picksRoot,n),'utf8')); return { id:n, ts:j.timestamp, selector:j.selector, containerId:j.containerId, containerSelector:j.containerSelector, pageUrl:j.pageUrl }; } catch { return null; } }).filter(Boolean);
+      arr = files.map(n=>{ try{ const j=JSON.parse(fs.readFileSync(path.join(picksRoot,n),'utf8')); return { id:n, ts:j.timestamp, selector:j.selector, containerId:j.containerId, containerSelector:j.containerSelector, pageUrl:j.pageUrl, classChoice: j.classChoice||'' }; } catch { return null; } }).filter(Boolean);
     }
     await context.addInitScript((list)=>{ window.__webautoSavedPicks = Array.isArray(list)?list:[]; }, arr);
   } catch {}
