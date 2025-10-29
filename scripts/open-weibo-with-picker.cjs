@@ -155,7 +155,7 @@ async function main() {
           '.webauto-menu .actions button{margin-right:6px;margin-top:6px;}'+
           '.webauto-menu .ops-box{flex:1;display:flex;align-items:center;justify-content:space-between;border:1px solid #444;border-radius:6px;padding:6px 8px;background:#2c2c2c;cursor:pointer;user-select:none;}'+
           '.webauto-menu .ops-current{color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;}'+
-          '.webauto-menu .ops-list{position:absolute;right:0;top:100%;margin-top:4px;background:#1e1e1e;border:1px solid #444;border-radius:6px;max-height:220px;overflow:auto;min-width:320px;box-shadow:0 2px 12px rgba(0,0,0,.4);}'+
+          '.webauto-menu .ops-list{position:absolute;left:0;top:100%;right:auto;margin-top:4px;background:#1e1e1e;border:1px solid #444;border-radius:6px;max-height:220px;overflow:auto;min-width:260px;width:100%;box-sizing:border-box;box-shadow:0 2px 12px rgba(0,0,0,.4);}'+
           '.webauto-menu .ops-item{padding:6px 8px;color:#ddd;cursor:pointer;white-space:nowrap;}'+
           '.webauto-menu .ops-item:hover{background:#2c2c2c;}'+
           '.webauto-menu .chip{display:inline-block;padding:2px 6px;border:1px solid #555;border-radius:12px;background:#2a2a2a;color:#ddd;cursor:pointer;}'+
@@ -253,7 +253,11 @@ async function main() {
       const fillOps=(items)=>{ try{ opsList.innerHTML=''; if(!items || !items.length){ const it=document.createElement('div'); it.className='ops-item'; it.textContent='(暂无)'; it.style.pointerEvents='none'; opsList.appendChild(it); return; } items.forEach(op=>{ const it=document.createElement('div'); it.className='ops-item'; it.textContent=(op.label||op.key)+' ('+op.key+')'; it.onclick=(e)=>{ e.stopPropagation(); setCurrent(op.key, op.label||op.key); opsList.style.display='none'; }; opsList.appendChild(it); }); }catch{} };
       fillOps(ops);
       if (!ops || !ops.length) { try { window.webauto_get_actions?.().then(res=>{ const items=(res && (res.operations||res.ops||[])) || []; fillOps(items); window.__webautoOps = items; }); } catch {} }
-      opsBox.onclick=(e)=>{ e.stopPropagation(); opsList.style.display = (opsList.style.display==='none') ? 'block' : 'none'; };
+      opsBox.onclick=(e)=>{ e.stopPropagation(); const willOpen = (opsList.style.display==='none'); opsList.style.display = willOpen ? 'block' : 'none'; if (willOpen){ try{ // auto flip above if overflow bottom
+          const lb = opsList.getBoundingClientRect();
+          if (lb.bottom > window.innerHeight - 8){ opsList.style.top='auto'; opsList.style.bottom='100%'; } else { opsList.style.bottom='auto'; opsList.style.top='100%'; }
+        }catch{} }
+      };
       document.addEventListener('click', ()=>{ try{ opsList.style.display='none'; }catch{} });
       // 参数与按键序列
       const valRow=document.createElement('div'); valRow.className='row'; const valLabel=document.createElement('label'); valLabel.textContent='参数/输入值'; const valInput=document.createElement('input'); valInput.type='text'; valInput.placeholder='如：文本 或 属性名 href'; valRow.appendChild(valLabel); valRow.appendChild(valInput);
