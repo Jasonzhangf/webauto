@@ -239,7 +239,7 @@ async function main() {
         const s=document.createElement('style'); s.id='webauto-picker-style'; s.textContent=
           '.webauto-toolbar{position:fixed;right:16px;top:16px;background:#1e1e1e;color:#fff;padding:6px 10px;border-radius:8px;box-shadow:0 2px 12px rgba(0,0,0,.4);z-index:'+Z+';font:12px/1.4 Arial;}'+
           '.webauto-toolbar button{cursor:pointer;background:#2c2c2c;color:#fff;border:1px solid #444;border-radius:6px;padding:4px 8px;}'+
-          '.webauto-menu{position:fixed;background:#1e1e1e;color:#fff;padding:10px 12px;border-radius:10px;box-shadow:0 2px 12px rgba(0,0,0,.4);z-index:'+Z+';font:12px/1.4 Arial;min-width:360px;max-width:560px;pointer-events:auto;overflow:visible;}'+
+          '.webauto-menu{position:fixed;background:#1e1e1e;color:#fff;padding:10px 12px;border-radius:10px;box-shadow:0 2px 12px rgba(0,0,0,.4);z-index:'+Z+';font:12px/1.4 Arial;min-width:360px;max-width:560px;max-height:calc(100vh - 40px);overflow-y:auto;overflow-x:visible;overscroll-behavior:contain;pointer-events:auto;}'+
           '.webauto-menu .row{margin:6px 0; display:flex; align-items:flex-start; gap:8px; position:relative; overflow:visible;}'+
           '.webauto-menu label{display:block;color:#aaa;min-width:92px;margin:0;}'+
           '.webauto-menu select, .webauto-menu input{flex:1;width:100%;padding:6px 8px;border-radius:6px;border:1px solid #444;background:#2c2c2c;color:#fff;}'+
