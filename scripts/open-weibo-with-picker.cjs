@@ -229,8 +229,50 @@ async function main() {
     hs = hs.replace(/\n\/\/ 导出服务[\s\S]*$/,'');
   } catch (e) { console.warn('failed to read highlight service:', e.message); }
 
+  // Minimal, safe toolbar + basic menu (fallback UI)
+  const miniJS = `(() => {
+    try {
+      if (window.__webautoPicker && window.__webautoPicker.kind==='full') return;
+      const Z = 2147483647;
+      const mkBtn = (txt)=>{ const b=document.createElement('button'); b.textContent=txt; b.style.cssText='cursor:pointer;background:#2c2c2c;color:#fff;border:1px solid #444;border-radius:6px;padding:4px 8px;'; return b; };
+      let picking=false; let hoverHi=null; let pickBtn, menuBtn, forceBtn;
+      function setPick(on){ picking=!!on; try{ pickBtn.textContent = picking? 'Pick: ON' : 'Pick: OFF'; }catch{} if (picking){ document.addEventListener('mousemove', onMove, true); document.addEventListener('click', onClick, true);} else { document.removeEventListener('mousemove', onMove, true); document.removeEventListener('click', onClick, true); try{ if(hoverHi){ window.__webautoHighlight?.removeHighlight(hoverHi); hoverHi=null; } }catch{} } }
+      function onMove(e){ const t=(e.composedPath && e.composedPath()[0])||e.target; if(!(t instanceof Element)) return; if (t.closest && t.closest('#wa-mini-toolbar')) return; try{ if(hoverHi){ window.__webautoHighlight?.removeHighlight(hoverHi); } hoverHi = window.__webautoHighlight?.createHighlight(t,{ color:'#34c759', label:'HOVER', persist:true, duration:0, scrollIntoView:false }); }catch{} }
+      function onClick(e){ if(!picking||e.button!==0) return; const t=(e.composedPath && e.composedPath()[0])||e.target; if(!(t instanceof Element)) return; if (t.closest && t.closest('#wa-mini-toolbar')) return; e.preventDefault(); e.stopPropagation(); try{ window.__webautoHighlight?.createHighlight(t,{ color:'#34c759', label:'PICK', duration:2000 }); }catch{} setPick(false); openBasic(); }
+      function buildSelector(el){ if(!el || !(el instanceof Element)) return ''; const classes=(el.className||'').toString().split(/\\s+/).filter(Boolean); if(classes.length){ const tag=el.tagName?.toLowerCase()||'div'; return tag + '.' + classes.map(c=>CSS.escape(c)).join('.'); } if (el.id) return '#'+CSS.escape(el.id); const parts=[]; let cur=el; for(let i=0;i<4 && cur && cur!==document.body;i++){ const tag=cur.tagName?.toLowerCase()||'div'; const p=cur.parentElement; let idx=''; if(p){ const sib=[...p.children].filter(x=>x.tagName?.toLowerCase()===tag); if(sib.length>1){ idx=':nth-of-type('+(sib.indexOf(cur)+1)+')'; } } parts.unshift(tag+idx); cur=p; } return parts.join(' > '); }
+      function openBasic(){
+        let box=document.getElementById('wa-mini-menu'); if(box) box.remove();
+        box=document.createElement('div'); box.id='wa-mini-menu';
+        box.style.cssText='position:fixed;right:16px;top:56px;z-index:'+Z+';background:#1e1e1e;color:#fff;padding:10px 12px;border-radius:8px;border:1px solid #444;min-width:360px;max-width:520px;box-shadow:0 2px 12px rgba(0,0,0,.4);font:12px Arial;';
+        const title=document.createElement('div'); title.textContent='操作菜单(简版)'; title.style.cssText='margin-bottom:6px;font-weight:bold;';
+        const rowSel=document.createElement('div'); const selLabel=document.createElement('div'); selLabel.textContent='当前选择器'; selLabel.style.color='#aaa'; const selVal=document.createElement('input'); selVal.type='text'; selVal.style.cssText='width:100%;padding:6px 8px;border-radius:6px;border:1px solid #444;background:#2c2c2c;color:#fff;'; try{ const el=(document.activeElement instanceof Element)?document.activeElement:document.body; selVal.value=buildSelector(el);}catch{ selVal.value=''; }
+        rowSel.appendChild(selLabel); rowSel.appendChild(selVal);
+        const rowOps=document.createElement('div'); rowOps.style.marginTop='8px'; const opsLabel=document.createElement('div'); opsLabel.textContent='操作选择'; opsLabel.style.color='#aaa'; const opsSel=document.createElement('select'); opsSel.style.cssText='width:100%;padding:6px 8px;border-radius:6px;border:1px solid #444;background:#2c2c2c;color:#fff;';
+        const ops=(Array.isArray(window.__webautoOps)?window.__webautoOps:[]); if (ops.length){ ops.forEach(op=>{ const o=document.createElement('option'); o.value=op.key; o.textContent=(op.label||op.key)+' ('+op.key+')'; opsSel.appendChild(o); }); } else { const o=document.createElement('option'); o.value=''; o.textContent='(操作库未加载)'; opsSel.appendChild(o); }
+        rowOps.appendChild(opsLabel); rowOps.appendChild(opsSel);
+        const rowBtn=document.createElement('div'); rowBtn.style.marginTop='8px'; const run=mkBtn('执行'); const hi=mkBtn('高亮'); const click=mkBtn('点击(DOM)');
+        run.onclick=(e)=>{ try{ e.preventDefault(); e.stopPropagation(); }catch{} const s=selVal.value||''; const key=opsSel.value||''; if(!key) return; window.webauto_dispatch?.({ type:'picker:operation', data:{ opKey:key, selector:s } }); };
+        hi.onclick=(e)=>{ try{ e.preventDefault(); e.stopPropagation(); }catch{} try{ const el=document.querySelector(selVal.value||''); if(el) window.__webautoHighlight?.createHighlight(el,{color:'#34c759',label:'PICK',duration:2000}); }catch{} };
+        click.onclick=(e)=>{ try{ e.preventDefault(); e.stopPropagation(); }catch{} const s=selVal.value||''; window.webauto_dispatch?.({ type:'picker:operation', data:{ opKey:'click-dom', selector:s } }); };
+        rowBtn.appendChild(run); rowBtn.appendChild(hi); rowBtn.appendChild(click);
+        const tips=document.createElement('div'); tips.textContent='Alt+P 开关拾取；Ctrl+M 打开菜单'; tips.style.color='#aaa'; tips.style.marginTop='6px';
+        const rowClose=document.createElement('div'); rowClose.style.marginTop='6px'; const close=mkBtn('关闭'); close.onclick=(e)=>{ try{ e.preventDefault(); e.stopPropagation(); }catch{} box.remove(); };
+        rowClose.appendChild(close);
+        box.appendChild(title); box.appendChild(rowSel); box.appendChild(rowOps); box.appendChild(rowBtn); box.appendChild(tips); box.appendChild(rowClose);
+        document.body.appendChild(box);
+      }
+      function bind(){ try{ pickBtn.onclick=(e)=>{ try{ e.preventDefault(); e.stopPropagation(); }catch{} setPick(!picking); }; menuBtn.onclick=(e)=>{ try{ e.preventDefault(); e.stopPropagation(); }catch{} openBasic(); }; forceBtn.onclick=(e)=>{ try{ e.preventDefault(); e.stopPropagation(); }catch{} openBasic(); }; }catch{} }
+      function mount(){ try{ if (document.getElementById('wa-mini-toolbar')) return; const bar = document.createElement('div'); bar.id='wa-mini-toolbar'; bar.style.cssText='position:fixed;right:16px;top:16px;z-index:'+Z+';background:#1e1e1e;color:#fff;padding:6px 8px;border-radius:8px;box-shadow:0 2px 12px rgba(0,0,0,.4);font:12px Arial;display:flex;gap:6px;'; pickBtn = mkBtn('Pick: OFF'); menuBtn = mkBtn('菜单'); forceBtn = mkBtn('强制菜单'); bar.appendChild(pickBtn); bar.appendChild(menuBtn); bar.appendChild(forceBtn); (document.body||document.documentElement).appendChild(bar); bind(); }catch(e){ try{ console.warn('[mini] mount fail', e?.message||String(e)); }catch{} } }
+      function ready(fn){ if (document.readyState==='loading'){ document.addEventListener('DOMContentLoaded', fn, { once:true }); } else { fn(); } }
+      ready(mount);
+      document.addEventListener('keydown', (ev)=>{ try{ if(ev.altKey && (ev.key||'').toLowerCase()==='p'){ ev.preventDefault(); setPick(!picking); } if (ev.ctrlKey && (ev.key||'').toLowerCase()==='m'){ ev.preventDefault(); openBasic(); } }catch(e){} }, true);
+      window.__webautoPicker = { kind:'mini', start: ()=>setPick(true), stop: ()=>setPick(false), openBasic: ()=>openBasic(), getState: ()=>({ picking }) };
+    } catch (e) { try { console.warn('[mini] inject error', e?.message||String(e)); } catch {} }
+  })();`;
+
+  // Original full-feature picker (may be unstable on some pages)
   const pickerJS = `(() => {
-    if (window.__webautoPicker) return;
+    if (window.__webautoPicker && window.__webautoPicker.kind==='full') return;
     const state = { picking: false, menu: null, pickedEl: null, index: null, btn: null, hoverHiId: null };
     const Z = 2147483647;
     function ensureCSS(){
@@ -295,8 +337,25 @@ async function main() {
     function isVisible(el){ if (!el) return false; const s=getComputedStyle(el); if (s.display==='none'||s.visibility==='hidden'||Number(s.opacity)===0) return false; const r=el.getBoundingClientRect(); return r.width>1 && r.height>1; }
     function findCandidates(el){ const out=[{id:'__custom__',label:'自定义(当前选择器)',selector:buildSelector(el)}]; const idx=window.__containerIndex; if (!idx||!Array.isArray(idx.containers)) return out; for (const c of idx.containers){ const sel=c.selector; if (!sel) continue; try{ if (el.matches(sel)) out.push({id:c.id,label:'匹配: '+c.id,selector:sel}); else if (el.closest(sel)) out.push({id:c.id,label:'父容器: '+c.id,selector:sel}); }catch(_){} } return out; }
     function hideMenu(){ try{ state.menu?.remove(); }catch{} state.menu=null; }
+    function showErrorMenu(err){
+      try{
+        hideMenu();
+        const wrap=document.createElement('div'); wrap.className='webauto-menu';
+        wrap.style.left=Math.max(6, window.innerWidth - 420)+'px';
+        wrap.style.top='16px';
+        const rowHeader=document.createElement('div'); rowHeader.className='row'; const h=document.createElement('div'); h.textContent='菜单加载失败'; h.style.padding='4px 6px'; h.style.background='#5a1e1e'; h.style.border='1px solid #733'; h.style.borderRadius='6px'; rowHeader.appendChild(h);
+        const rowMsg=document.createElement('div'); rowMsg.className='row'; const lab=document.createElement('label'); lab.textContent='错误'; const pre=document.createElement('pre'); pre.style.maxHeight='200px'; pre.style.overflow='auto'; pre.textContent=String(err&&err.message?err.message:err||'unknown'); rowMsg.appendChild(lab); rowMsg.appendChild(pre);
+        const rowAct=document.createElement('div'); rowAct.className='row'; const gap=document.createElement('label'); gap.textContent=''; const btn=document.createElement('button'); btn.textContent='复制错误'; btn.onclick=(e)=>{ e.stopPropagation(); try{ navigator.clipboard?.writeText(pre.textContent||''); }catch{} }; rowAct.appendChild(gap); rowAct.appendChild(btn);
+        wrap.appendChild(rowHeader); wrap.appendChild(rowMsg); wrap.appendChild(rowAct);
+        document.body.appendChild(wrap); state.menu=wrap;
+      }catch{}
+    }
     function eventDrivenClick(selector,{maxWaitMs=10000,poll=400}={}){ const t0=Date.now(); const timer=setInterval(()=>{ try{ const el=document.querySelector(selector); if (el && isVisible(el)){ el.click(); clearInterval(timer); window.webauto_dispatch?.({ts:Date.now(),type:'picker:action',data:{action:'click',selector,ok:true}}); } else if (Date.now()-t0>maxWaitMs){ clearInterval(timer); window.webauto_dispatch?.({ts:Date.now(),type:'picker:action',data:{action:'click',selector,ok:false,reason:'timeout'}}); } }catch(e){ clearInterval(timer); window.webauto_dispatch?.({ts:Date.now(),type:'picker:action',data:{action:'click',selector,ok:false,reason:e.message}}); } }, poll); }
-    function showMenu(el){ hideMenu(); const r=el.getBoundingClientRect(); const wrap=document.createElement('div'); wrap.className='webauto-menu'; wrap.style.left=Math.max(6, r.left)+'px'; wrap.style.top=(r.bottom+6)+'px';
+    function showMenu(el){
+      try { ensureCSS(); } catch {}
+      try { console.log('[picker-ui] showMenu called'); } catch {}
+      try{
+      hideMenu(); const r=el.getBoundingClientRect(); const wrap=document.createElement('div'); wrap.className='webauto-menu'; wrap.style.left=Math.max(6, r.left)+'px'; wrap.style.top=(r.bottom+6)+'px';
       const sel=buildSelector(el); const cands=findCandidates(el);
       // 拖拽标题
       const rowHeader=document.createElement('div'); rowHeader.className='row'; const h=document.createElement('div'); h.textContent='操作菜单'; h.style.cursor='move'; h.style.userSelect='none'; h.style.padding='4px 6px'; h.style.background='#2c2c2c'; h.style.border='1px solid #444'; h.style.borderRadius='6px'; rowHeader.appendChild(h);
@@ -441,9 +500,9 @@ async function main() {
         if (m.right > window.innerWidth - 6) left = Math.max(6, window.innerWidth - m.width - 6);
         if (m.bottom > window.innerHeight - 6) top = Math.max(6, r.top - m.height - 6);
         wrap.style.left=left+'px'; wrap.style.top=top+'px'; wrap.style.visibility='visible';
-      }catch{}
+      }catch(e){ try { console.error('[picker-ui] showMenu error', String(e&&e.message?e.message:e)); } catch {} showErrorMenu(e); }
     }
-    function onDocClick(e){ if (!state.picking) return; if (e.button!==0) return; const t=e.composedPath ? e.composedPath()[0] : e.target; if (!(t instanceof Element)) return; if (t.closest('.webauto-toolbar,.webauto-menu')) return; e.preventDefault(); e.stopPropagation(); state.pickedEl=t; try{ if (state.hoverHiId){ window.__webautoHighlight?.removeHighlight(state.hoverHiId); state.hoverHiId=null; } window.__webautoHighlight?.createHighlight(t,{color:'#34c759',label:'PICK',duration:4000}); }catch{} showMenu(t); window.webauto_dispatch?.({ts:Date.now(),type:'picker:container',data:{selector:buildSelector(t)}}); setPick(false, { keepMenu: true }); }
+    function onDocClick(e){ if (!state.picking) return; if (e.button!==0) return; const t=e.composedPath ? e.composedPath()[0] : e.target; if (!(t instanceof Element)) return; if (t.closest('.webauto-toolbar,.webauto-menu')) return; e.preventDefault(); e.stopPropagation(); state.pickedEl=t; try{ if (state.hoverHiId){ window.__webautoHighlight?.removeHighlight(state.hoverHiId); state.hoverHiId=null; } window.__webautoHighlight?.createHighlight(t,{color:'#34c759',label:'PICK',duration:4000}); }catch{} setPick(false,{ keepMenu:true }); showMenu(t); window.webauto_dispatch?.({ts:Date.now(),type:'picker:container',data:{selector:buildSelector(t)}}); }
     function onMove(e){ if (!state.picking) return; const t=(e.composedPath && e.composedPath()[0]) || e.target; if (!(t instanceof Element)) return; if (t.closest && t.closest('.webauto-toolbar,.webauto-menu')) return; if (state.pickedEl===t) return; state.pickedEl=t; try{ if (state.hoverHiId){ window.__webautoHighlight?.removeHighlight(state.hoverHiId); state.hoverHiId=null; } state.hoverHiId = window.__webautoHighlight?.createHighlight(t,{ color:'#34c759', label:'HOVER', persist:true, duration:0, scrollIntoView:false, alias:'picker-hover' }); }catch{} }
     function updateToolbarUI(){ try{ if (state.btn){ state.btn.textContent = state.picking ? 'Pick: ON' : 'Pick: OFF'; state.btn.style.background = state.picking ? '#34c759' : '#2c2c2c'; } }catch{} }
     function setPick(on, opts){ state.picking=!!on; updateToolbarUI(); if (state.picking) { document.addEventListener('click', onDocClick, true); document.addEventListener('mousemove', onMove, true); console.log('[picker] pick=ON'); } else { document.removeEventListener('click', onDocClick, true); document.removeEventListener('mousemove', onMove, true); if (state.hoverHiId){ try{ window.__webautoHighlight?.removeHighlight(state.hoverHiId); }catch{} state.hoverHiId=null; } if (!(opts&&opts.keepMenu)) hideMenu(); console.log('[picker] pick=OFF'); } }
@@ -453,23 +512,40 @@ async function main() {
       ensureCSS();
       const bar=document.createElement('div'); bar.className='webauto-toolbar'; bar.id='webauto-toolbar';
       const btn=document.createElement('button'); btn.id='webauto-pick-btn'; btn.textContent='Pick: OFF'; btn.onclick=(e)=>{ e.stopPropagation(); setPick(!state.picking); };
+      const openBtn=document.createElement('button'); openBtn.textContent='菜单';
+      const openHandler=(e)=>{
+        try { console.log('[picker-ui] menu button clicked'); } catch {}
+        try {
+          e.preventDefault();
+          e.stopPropagation();
+        } catch {}
+        const t=(document.activeElement instanceof Element)? document.activeElement : document.body;
+        setTimeout(()=>{ try { setPick(false,{keepMenu:true}); showMenu(t); } catch (err) { try{ console.warn('[picker] open menu failed:', err?.message||String(err)); }catch{} } }, 0);
+      };
+      openBtn.onclick=openHandler;
+      // Some sites eat click; bind down as fallback
+      openBtn.onmousedown=(e)=>{ if (e && e.button===0) openHandler(e); };
       state.btn = btn; updateToolbarUI();
-      bar.appendChild(btn); (document.body||document.documentElement).appendChild(bar);
+      bar.appendChild(btn); bar.appendChild(openBtn); (document.body||document.documentElement).appendChild(bar);
+      try { console.log('[picker-ui] toolbar mounted'); } catch {}
     }
     function onReady(fn){ if (document.readyState==='loading'){ document.addEventListener('DOMContentLoaded', fn, { once:true }); } else { try{ fn(); }catch{} } }
     // hotkeys: Alt+P toggle pick; Ctrl+; force open on active
     document.addEventListener('keydown', (ev)=>{
       try{
         if (ev.altKey && (ev.key||'').toLowerCase()==='p') { ev.preventDefault(); setPick(!state.picking); }
-        if (ev.ctrlKey && (ev.key === ';' || ev.key === '；')) { ev.preventDefault(); const t=document.activeElement instanceof Element ? document.activeElement : document.body; showMenu(t); }
+        if (ev.ctrlKey && (ev.key === ';' || ev.key === '；')) { ev.preventDefault(); const t=document.activeElement instanceof Element ? document.activeElement : document.body; setPick(false,{keepMenu:true}); setTimeout(()=>showMenu(t),0); }
+        if (ev.ctrlKey && (ev.key||'').toLowerCase()==='m') { ev.preventDefault(); setPick(false,{keepMenu:true}); setTimeout(()=>showMenu(document.body),0); }
       }catch{}
     }, true);
     onReady(mountToolbar);
-    window.__webautoPicker = { start: ()=>{ onReady(()=>setPick(true)); }, stop: ()=>setPick(false), getState: ()=>({ picking: state.picking }) };
+    window.__webautoPicker = { kind:'full', start: ()=>{ onReady(()=>setPick(true)); }, stop: ()=>setPick(false), getState: ()=>({ picking: state.picking }), openHere: ()=>{ const t=(document.activeElement instanceof Element)? document.activeElement : document.body; setPick(false,{keepMenu:true}); showMenu(t); }, openAt: (el)=>{ try{ if (el instanceof Element){ setPick(false,{keepMenu:true}); showMenu(el); } }catch{} }, forceMenu: ()=>{ try{ const t=(state.pickedEl instanceof Element)? state.pickedEl : (document.activeElement instanceof Element? document.activeElement : document.body); showMenu(t); }catch(e){ showErrorMenu(e); } } };
   })();`;
 
   if (idxObj) await context.addInitScript((i)=>{ window.__containerIndex = i; }, idxObj);
   if (hs) await context.addInitScript(hs);
+  // Always inject minimal UI to guarantee visibility; full picker follows
+  await context.addInitScript(miniJS);
   await context.addInitScript(pickerJS);
   // preload saved picks to window for menu usage
   try {
@@ -493,36 +569,41 @@ async function main() {
   context.on('page', async (p) => {
     try { await p.bringToFront(); } catch {}
     console.log('[context] new page:', p.url());
+    try {
+      p.on('console', msg => {
+        try { console.log('[page console]', msg.type(), msg.text()); } catch {}
+      });
+    } catch {}
   });
 
   const page = await context.newPage();
+  try {
+    page.on('console', msg => { try { console.log('[page console]', msg.type(), msg.text()); } catch {} });
+  } catch {}
+  try {
+    const isInjected = await page.evaluate(() => !!window.__webautoPicker);
+    const hasToolbar = await page.evaluate(() => !!document.getElementById('webauto-toolbar'));
+    console.log('[inject check] __webautoPicker:', isInjected, 'toolbar:', hasToolbar);
+  } catch {}
   await page.goto('https://weibo.com', { waitUntil: 'domcontentloaded', timeout: 60000 }).catch(e=>console.warn('goto warn:', e.message));
+  try {
+    page.on('pageerror', err => { try { console.warn('[page error]', err?.message||String(err)); } catch {} });
+  } catch {}
+  // Fallback: if initScript didn't mount, inject directly into this page
+  try {
+    const present = await page.evaluate(() => ({ picker: !!window.__webautoPicker, toolbar: !!document.getElementById('webauto-toolbar') }));
+    console.log('[inject after goto]', present);
+    if (!present.picker || !present.toolbar) {
+      console.log('[inject fallback] injecting scripts via addScriptTag');
+      if (hs) { try { await page.addScriptTag({ content: hs }); } catch (e) { console.warn('inject hs warn:', e?.message||String(e)); } }
+      try { await page.addScriptTag({ content: miniJS }); } catch (e) { console.warn('inject mini warn:', e?.message||String(e)); }
+      try { await page.addScriptTag({ content: pickerJS }); } catch (e) { console.warn('inject picker warn:', e?.message||String(e)); }
+      try { await page.waitForFunction(() => window.__webautoPicker, null, { timeout: 5000 }); } catch {}
+      try { await page.evaluate(() => { try { (window.__webautoPicker?.openBasic && window.__webautoPicker.openBasic()) || (window.__webautoPicker?.openHere && window.__webautoPicker.openHere()); } catch {} }); } catch {}
+    }
+  } catch (e) { console.warn('post-goto check failed:', e?.message||String(e)); }
   console.log('Weibo opened. Picker is active. This process will stay until you close the browser.');
   await new Promise(resolve => browser.on('disconnected', resolve));
 }
 
 main().catch(e => { console.error(e); process.exit(1); });
-      // 模态：完整操作编辑器（与操作Tab一致）
-      function openOpsModal(ctx){ try{
-        const modal=document.createElement('div'); modal.className='webauto-modal'; const box=document.createElement('div'); box.className='box'; const head=document.createElement('div'); head.style.display='flex'; head.style.justifyContent='space-between'; head.style.alignItems='center'; const hTitle=document.createElement('div'); hTitle.textContent='操作编辑器'; const hClose=document.createElement('button'); hClose.textContent='关闭'; head.appendChild(hTitle); head.appendChild(hClose); const body=document.createElement('div'); body.className='body';
-        // 复用“操作”分区的 UI（新建一套简版）
-        // 操作选择
-        const mOpsRow=document.createElement('div'); mOpsRow.className='row'; const ml=document.createElement('label'); ml.textContent='操作选择'; const mOpsBox=document.createElement('div'); mOpsBox.className='ops-box'; const mCur=document.createElement('div'); mCur.className='ops-current'; mCur.textContent='(请选择)'; mOpsBox.appendChild(mCur); const mList=document.createElement('div'); mList.className='ops-list'; mList.style.display='none'; mOpsBox.appendChild(mList); mOpsRow.appendChild(ml); mOpsRow.appendChild(mOpsBox);
-        const items=Array.isArray(window.__webautoOps)?window.__webautoOps:[]; items.forEach(op=>{ const it=document.createElement('div'); it.className='ops-item'; it.textContent=(op.label||op.key)+' ('+op.key+')'; it.onclick=(e)=>{ e.stopPropagation(); mOpsBox.dataset.key=op.key; mCur.textContent=(op.label||op.key)+' ('+op.key+')'; mList.style.display='none'; }; mList.appendChild(it); });
-        mOpsBox.onclick=(e)=>{ e.stopPropagation(); const will=(mList.style.display==='none'); mList.style.display = will? 'block':'none'; if (will){ const lb=mList.getBoundingClientRect(); if (lb.bottom>window.innerHeight-8){ mList.style.top='auto'; mList.style.bottom='100%'; } else { mList.style.bottom='auto'; mList.style.top='100%'; } } };
-        document.addEventListener('click', ()=>{ try{ mList.style.display='none'; }catch{} });
-        // 参数
-        const mValRow=document.createElement('div'); mValRow.className='row'; const ml2=document.createElement('label'); ml2.textContent='参数/输入值'; const mVal=document.createElement('input'); mVal.type='text'; mValRow.appendChild(ml2); mValRow.appendChild(mVal);
-        // 键序列标签
-        const mKeyRow=document.createElement('div'); mKeyRow.className='row'; const mkL=document.createElement('label'); mkL.textContent='按键序列'; const mTags=document.createElement('div'); mTags.className='tags'; const mKeyInput=document.createElement('input'); mKeyInput.type='text'; mKeyInput.placeholder='输入后回车添加，如 Ctrl+Enter'; const mTokens=[]; const render=()=>{ mTags.innerHTML=''; mTokens.forEach((t,idx)=>{ const tg=document.createElement('span'); tg.className='tag'; const tt=document.createElement('span'); tt.textContent=t; const x=document.createElement('span'); x.className='x'; x.textContent='×'; x.onclick=()=>{ mTokens.splice(idx,1); render(); }; tg.appendChild(tt); tg.appendChild(x); mTags.appendChild(tg); }); mTags.appendChild(mKeyInput); }; render(); mKeyInput.onkeydown=(ev)=>{ if (ev.key==='Enter' || ev.key===','){ ev.preventDefault(); const v=mKeyInput.value.trim(); if (v){ mTokens.push(v); render(); } mKeyInput.value=''; } }; mKeyRow.appendChild(mkL); mKeyRow.appendChild(mTags);
-        // 执行 + 保存
-        const actRow=document.createElement('div'); actRow.className='row'; const gap=document.createElement('label'); gap.textContent=''; const run=document.createElement('button'); run.textContent='执行'; const saveOps=document.createElement('button'); saveOps.textContent='保存操作到容器'; actRow.appendChild(gap); actRow.appendChild(run); actRow.appendChild(saveOps);
-        run.onclick=()=>{ const opKey=mOpsBox.dataset.key||''; if (!opKey) return; const s=(ctx&&ctx.selector)|| (document.getElementById('webauto-menu-sel')?.value || ''); try{ window.__webautoTmpValue=mVal.value||''; window.__webautoTmpKeys=mTokens.slice(); }catch{} window.webauto_dispatch?.({ type:'picker:operation', data:{ opKey, selector: s } }); if (mTokens.length && opKey!=='keyboard:sequence'){ setTimeout(()=>{ try{ window.__webautoTmpValue=''; window.__webautoTmpKeys=mTokens.slice(); window.webauto_dispatch?.({ type:'picker:operation', data:{ opKey:'keyboard:sequence', selector:s } }); }catch{} },120); } };
-        saveOps.onclick=async ()=>{ if (!(ctx&&ctx.pickId)) return; try{ const res = await window.webauto_pick_write?.({ id: ctx.pickId, operations: mTokens.slice() }); (window).__webautoShowResult && (window).__webautoShowResult({ ok: !!(res&&res.ok), type:'pick:update:ops', res }); }catch(e){ console.warn('modal save',e); } };
-        hClose.onclick=()=>{ try{ document.body.removeChild(modal); }catch{} };
-        body.appendChild(mOpsRow); body.appendChild(mValRow); body.appendChild(mKeyRow); body.appendChild(actRow);
-        box.appendChild(head); box.appendChild(body); modal.appendChild(box); document.body.appendChild(modal);
-        // 预填 tokens
-        try{ if (Array.isArray(ctx?.operations)) { mTokens.splice(0,mTokens.length,...ctx.operations); render(); } }catch{}
-      }catch(err){ console.warn('openOpsModal',err); }
-      }
