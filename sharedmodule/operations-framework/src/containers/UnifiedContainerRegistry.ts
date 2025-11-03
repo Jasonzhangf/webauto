@@ -174,12 +174,16 @@ class ContainerLibraryManager {
 
   constructor(options: { libraryPath?: string; cacheTimeout?: number; enableFileLibrary?: boolean }) {
     const preferred = options.libraryPath || './container-library';
-    const alt = './containers';
     try {
-      const p = require('path').join(process.cwd(), preferred);
+      const pathMod = require('path');
       const fs = require('fs');
-      const altp = require('path').join(process.cwd(), alt);
-      this.libraryPath = fs.existsSync(p) ? preferred : (fs.existsSync(altp) ? alt : preferred);
+      const candidates = [
+        'sharedmodule/libraries/containers',
+        './containers',
+        './container-library',
+        preferred
+      ];
+      this.libraryPath = candidates.find(pth => fs.existsSync(pathMod.join(process.cwd(), pth))) || preferred;
     } catch {
       this.libraryPath = preferred;
     }

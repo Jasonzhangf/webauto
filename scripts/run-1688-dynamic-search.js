@@ -8,7 +8,7 @@
 import fs from 'fs';
 import path from 'path';
 import { execSync } from 'child_process';
-import GBKEncoder from '../utils/gbk-encoder.js';
+import GBKEncoder from './utils/gbk-encoder.js';
 
 // 工作流模板
 const WORKFLOW_TEMPLATE = {

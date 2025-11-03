@@ -90,11 +90,13 @@ export class ContainerRegistry extends EventEmitter {
     super();
     // Fallback to ./containers if container-library is missing
     const preferred = libraryPath;
-    const alt = './containers';
+    const candidates = [
+      'sharedmodule/libraries/containers',
+      './containers',
+      './container-library'
+    ];
     try {
-      const p = path.join(process.cwd(), preferred);
-      const altp = path.join(process.cwd(), alt);
-      this.libraryPath = (fs.existsSync(p) ? preferred : (fs.existsSync(altp) ? alt : preferred));
+      this.libraryPath = candidates.find(pth => fs.existsSync(path.join(process.cwd(), pth))) || preferred;
     } catch {
       this.libraryPath = libraryPath;
     }
