@@ -88,7 +88,16 @@ export class ContainerRegistry extends EventEmitter {
 
   constructor(libraryPath: string = './container-library') {
     super();
-    this.libraryPath = libraryPath;
+    // Fallback to ./containers if container-library is missing
+    const preferred = libraryPath;
+    const alt = './containers';
+    try {
+      const p = path.join(process.cwd(), preferred);
+      const altp = path.join(process.cwd(), alt);
+      this.libraryPath = (fs.existsSync(p) ? preferred : (fs.existsSync(altp) ? alt : preferred));
+    } catch {
+      this.libraryPath = libraryPath;
+    }
     this.initializeLibrary();
   }
 

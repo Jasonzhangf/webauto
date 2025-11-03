@@ -173,7 +173,16 @@ class ContainerLibraryManager {
   private enableFileLibrary: boolean;
 
   constructor(options: { libraryPath?: string; cacheTimeout?: number; enableFileLibrary?: boolean }) {
-    this.libraryPath = options.libraryPath || './container-library';
+    const preferred = options.libraryPath || './container-library';
+    const alt = './containers';
+    try {
+      const p = require('path').join(process.cwd(), preferred);
+      const fs = require('fs');
+      const altp = require('path').join(process.cwd(), alt);
+      this.libraryPath = fs.existsSync(p) ? preferred : (fs.existsSync(altp) ? alt : preferred);
+    } catch {
+      this.libraryPath = preferred;
+    }
     this.cacheTimeout = options.cacheTimeout || 30000; // 30秒缓存
     this.enableFileLibrary = options.enableFileLibrary !== false;
     
