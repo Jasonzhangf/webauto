@@ -8,7 +8,10 @@ class WorkflowRunner {
   constructor() {
         this.engine = new WorkflowEngine();
         this.recordsDir = join(process.cwd(), 'archive', 'workflow-records');
-        this.preflowsConfigPath = join(process.cwd(), 'workflows', 'preflows', 'enabled.json');
+        // Detect preflows config path: prefer new location under sharedmodule/libraries/workflows
+        const preflowsOld = join(process.cwd(), 'workflows', 'preflows', 'enabled.json');
+        const preflowsNew = join(process.cwd(), 'sharedmodule', 'libraries', 'workflows', 'preflows', 'enabled.json');
+        this.preflowsConfigPath = existsSync(preflowsNew) ? preflowsNew : preflowsOld;
         // Basic logger for runner-level retries/errors
         this.logger = new Logger();
     }

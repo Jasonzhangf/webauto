@@ -10,9 +10,23 @@ async function main() {
     console.log('用法: node scripts/run-workflow.js <workflow.json>');
     process.exit(1);
   }
-  const workflowPath = args[0].startsWith('.') || args[0].startsWith('/')
-    ? join(process.cwd(), args[0])
-    : join(process.cwd(), args[0]);
+  const inputPath = args[0];
+  let workflowPath = (inputPath.startsWith('.') || inputPath.startsWith('/'))
+    ? join(process.cwd(), inputPath)
+    : join(process.cwd(), inputPath);
+
+  // Fallback to sharedmodule/libraries/workflows if path not found
+  if (!existsSync(workflowPath)) {
+    const librariesRoot = join(process.cwd(), 'sharedmodule', 'libraries');
+    if (inputPath.startsWith('workflows/')) {
+      const rest = inputPath.slice('workflows/'.length);
+      const alt = join(librariesRoot, 'workflows', rest);
+      if (existsSync(alt)) workflowPath = alt;
+    } else {
+      const alt2 = join(librariesRoot, 'workflows', inputPath);
+      if (existsSync(alt2)) workflowPath = alt2;
+    }
+  }
 
   if (!existsSync(workflowPath)) {
     console.error('❌ 工作流不存在:', workflowPath);
