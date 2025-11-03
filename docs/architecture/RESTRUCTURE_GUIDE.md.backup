@@ -18,7 +18,7 @@
 ├── workflows/records/ (126MB, 856个文件)
 ├── workflows/weibo-complete*
 ├── container-system/core/
-├── node-system/nodes/
+├── src/core/workflow/nodes/
 ├── workflows/engine/
 ├── src/core (空目录)
 └── 配置文件散落各处

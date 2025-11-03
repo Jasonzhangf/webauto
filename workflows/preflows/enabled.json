@@ -1,4 +1,4 @@
 [
-  "workflows/preflows/weibo-prelogin-staging-auto.json",
-  "workflows/preflows/1688-login-preflow.json"
+  "workflows/preflows/1688-login-cookie-verify.json"
 ]
+

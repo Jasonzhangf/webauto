@@ -1,0 +1,11 @@
+{
+  "name": "1688 Minimal Main",
+  "nodes": [
+    { "id": "start", "type": "StartNode", "name": "开始", "next": ["attach"] },
+    { "id": "attach", "type": "AttachSessionNode", "name": "接力现有会话", "config": {}, "next": ["anchor2"] },
+    { "id": "anchor2", "type": "AnchorPointNode", "name": "确认登录仍有效", "config": { "hostFilter": "1688.com", "selectors": [ ".userAvatarLogo img", ".user-avatar img", ".avatar img", ".user-info" ], "requireVisible": true, "highlight": true, "persistHighlight": false, "highlightColor": "#ff2d55", "highlightLabel": "READY" }, "next": ["end"] },
+    { "id": "end", "type": "EndNode", "name": "结束", "config": { "persistSession": true, "cleanup": false } }
+  ],
+  "globalConfig": { "timeout": 300000, "logLevel": "info" }
+}
+

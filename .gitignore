@@ -112,6 +112,10 @@ coverage/
 # Build artifacts
 dist/
 build/
+**/dist/
+
+# Large local models (avoid committing)
+sharedmodule/ui-recognition/python-service/models/
 
 # Test configuration files (contain sensitive information)
 **/config/*.config.js
@@ -133,6 +137,9 @@ test-results/
 *.results.json
 test-cookies/
 screenshots/
+workflows/records/
+archive/workflow-records/
+sharedmodule/operations-framework/cookies.json
 reports/
 artifacts/
 test-artifacts/

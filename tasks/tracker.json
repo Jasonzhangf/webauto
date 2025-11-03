@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "tasks": [
+    { "id": "DOCS-ARCH", "title": "架构文档与目录落盘", "status": "done", "owner": "ai", "path": "docs/ARCHITECTURE.md" },
+    { "id": "DOCS-API-WORKFLOW", "title": "Workflow API 文档", "status": "done", "owner": "ai", "path": "docs/APIS/WorkflowAPI.md" },
+    { "id": "DOCS-API-VISION", "title": "Vision Proxy API 文档", "status": "done", "owner": "ai", "path": "docs/APIS/VisionProxyAPI.md" },
+    { "id": "DOCS-API-ORCH", "title": "Orchestrator API 文档", "status": "done", "owner": "ai", "path": "docs/APIS/OrchestratorAPI.md" },
+    { "id": "DOCS-PORTS", "title": "端口与环境文档", "status": "done", "owner": "ai", "path": "docs/PORTS.md" },
+    { "id": "SVC-ORCH", "title": "实现 Orchestrator（端口 7700）", "status": "todo", "owner": "ai", "path": "sharedmodule/engines/orchestrator" },
+    { "id": "SVC-WORKFLOW", "title": "实现 Workflow API（端口 7701）", "status": "todo", "owner": "ai", "path": "sharedmodule/engines/api-gateway" },
+    { "id": "SVC-VISION", "title": "实现 Vision Proxy（端口 7702）", "status": "todo", "owner": "ai", "path": "sharedmodule/engines/vision-engine" }
+  ]
+}

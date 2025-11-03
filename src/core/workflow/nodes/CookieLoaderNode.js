@@ -34,7 +34,11 @@ class CookieLoaderNode extends BaseNode {
             }
 
             // 读取Cookie文件
-            const cookieData = JSON.parse(readFileSync(cookiePath, 'utf8'));
+            const raw = JSON.parse(readFileSync(cookiePath, 'utf8'));
+            const cookieData = Array.isArray(raw) ? raw : (Array.isArray(raw.cookies) ? raw.cookies : []);
+            if (!Array.isArray(cookieData)) {
+                throw new Error('Cookie文件格式不正确，应为数组或包含 cookies 数组');
+            }
 
             // 转换Cookie格式
             const cookies = cookieData.map(cookie => ({

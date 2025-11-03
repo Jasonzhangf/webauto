@@ -3,9 +3,9 @@
 ## Project Structure & Module Organization
 - `sharedmodule/operations-framework/` — Core detectors and event bus.
 - `sharedmodule/openai-compatible-providers/` — OpenAI‑compatible model adapters.
-- `node-system/` — Visual workflow engine (ComfyUI‑style).
+- `sharedmodule/engines/` — 服务引擎（orchestrator/api-gateway/vision-engine）。
 - `workflows/` — Workflows (Weibo + 1688), plus `preflows/`, `records/`, `sequences/`.
-- `src/` — Main TypeScript sources.
+- `src/core/workflow/` — 核心工作流引擎与节点实现。
 - `dist/` — Compiled JavaScript output.
 - `test-data/` — Sample data for testing.
 - `config/` — Configuration JSON files.
