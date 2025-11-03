@@ -13,9 +13,10 @@
     "actions:validate": "node scripts/actions-validate.cjs",
     "actions:run": "node scripts/run-action.cjs",
     "build:services": "tsc -p tsconfig.services.json",
+    "start": "node dist/src/server.js",
     "start:workflow-api": "node dist/sharedmodule/engines/api-gateway/server.js",
     "start:vision-proxy": "node dist/sharedmodule/engines/vision-engine/server.js",
-    "start:orchestrator": "node dist/sharedmodule/engines/orchestrator/server.js",
+    "start:orchestrator": "node dist/src/server.js",
     "test:services": "node scripts/service-tests/run-all.mjs"
   },
   "devDependencies": {
