@@ -43,6 +43,8 @@ import AttachHostPageNode from './nodes/AttachHostPageNode.js';
 import EventDrivenOptionalClickNode from './nodes/EventDrivenOptionalClickNode.js';
 import AnchorPointNode from './nodes/AnchorPointNode.js';
 import InjectContainerIndexNode from './nodes/InjectContainerIndexNode.js';
+import DevEvalNode from './nodes/DevEvalNode.js';
+import CloseHostPageNode from './nodes/CloseHostPageNode.js';
 
 class NodeRegistry {
     constructor() {
@@ -96,6 +98,8 @@ class NodeRegistry {
         this.registerNode('EventDrivenOptionalClickNode', new EventDrivenOptionalClickNode());
         this.registerNode('AnchorPointNode', new AnchorPointNode());
         this.registerNode('InjectContainerIndexNode', new InjectContainerIndexNode());
+        this.registerNode('DevEvalNode', new DevEvalNode());
+        this.registerNode('CloseHostPageNode', new CloseHostPageNode());
     }
 
     registerNode(type, handler) {

@@ -6,7 +6,8 @@
   "dependencies": {
     "camoufox": "^0.1.19",
     "iconv-lite": "^0.6.3",
-    "playwright": "^1.56.0"
+    "playwright": "^1.56.0",
+    "sharp": "^0.33.5"
   },
   "scripts": {
     "start:mcp:browser": "npx @browsermcp/mcp@latest",
@@ -17,7 +18,9 @@
     "start:workflow-api": "node dist/sharedmodule/engines/api-gateway/server.js",
     "start:vision-proxy": "node dist/sharedmodule/engines/vision-engine/server.js",
     "start:orchestrator": "node dist/src/server.js",
-    "test:services": "node scripts/service-tests/run-all.mjs"
+    "start:vision": "node dist/sharedmodule/engines/vision-engine/server.js",
+    "test:services": "node scripts/service-tests/run-all.mjs",
+    "test:vision": "node scripts/run-vision-tests.mjs"
   },
   "devDependencies": {
     "@modelcontextprotocol/sdk": "^1.20.1"

@@ -1,7 +1,7 @@
 // @ts-nocheck
 import express from 'express';
 import { health, run as runWorkflow, status as workflowStatus } from './controllers/workflowController.js';
-import { list as listSessions, start as startSession, close as closeSession } from './controllers/sessionController.js';
+import { listSessions, start as startSession, close as closeSession } from './controllers/sessionController.js';
 import { navigate, click, type as typeText, evalInPage, currentUrl, highlight, screenshot, checkLoginAnchor, waitLoginAnchorEndpoint } from './controllers/browserController.js';
 
 const app = express();
@@ -34,4 +34,3 @@ const port = Number(process.env.PORT_WORKFLOW || 7701);
 app.listen(port, () => {
   console.log(`Workflow API listening on http://localhost:${port}`);
 });
-

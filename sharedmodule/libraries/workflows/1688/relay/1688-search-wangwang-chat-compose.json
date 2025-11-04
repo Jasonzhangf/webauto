@@ -2,9 +2,18 @@
   "name": "1688 搜索-旺旺-聊天接力",
   "description": "预登录 → GBK关键词搜索 → 高亮候选旺旺 → 打开聊天页 → 输入‘你好’并发送（保留浏览器）",
   "version": "1.0.0",
+  "variables": {
+    "keyword": "冲锋衣"
+  },
   "anchor": {
     "hostFilter": "1688.com",
-    "selectors": [".userAvatarLogo img", "#alisearch-keywords", "input[name='keywords']"],
+    "selectors": [
+      ".userAvatarLogo img",
+      "#alisearch-keywords",
+      "input[name='keywords']",
+      "a[data-spm=dnick]",
+      "a[href*=\\/\\/work.1688.com/]"
+    ],
     "requireVisible": true,
     "maxWaitMs": 600000,
     "pollIntervalMs": 1500,
@@ -93,7 +102,16 @@
         "loginSelectors": [
           ".userAvatarLogo img",
           "[class*=userAvatarLogo] img",
-          "img[src*=\\\"alicdn.com/img/ibank/\\\"]"
+          "img[src*=\\\"alicdn.com/img/ibank/\\\"]",
+          "a[data-spm=dnick]",
+          "a[data-spm=dlevel]",
+          "a[data-spm=dcart]",
+          "a[data-spm=dcollection]",
+          "a[data-spm=dshop]",
+          "a[data-spm=dhistory]",
+          "a[href*=\\/\\/work.1688.com/]",
+          "a[href*=purchase.1688.com/favorites]",
+          "a[href*=cart.1688.com]"
         ],
         "requireVisible": true,
         "maxRetries": 20,
@@ -111,8 +129,9 @@
       "type": "CookieSaverNode",
       "name": "登录后保存Cookie",
       "config": { "cookiePath": "~/.webauto/cookies/1688-domestic.json" },
-      "next": ["build_gbk_url"]
+      "next": ["snapshot_home"]
     },
+    { "id": "snapshot_home", "type": "PageSnapshotNode", "name": "首页快照(已登录)", "config": { "maxHtmlLength": 400000 }, "next": ["build_gbk_url"] },
     {
       "id": "halt_on_login_fail",
       "type": "HaltNode",
@@ -181,10 +200,28 @@
         "maxMs": 4000
       },
       "next": [
-        "search_anchor"
+        "snapshot_search_results"
       ]
     },
-    { "id": "search_anchor", "type": "AnchorPointNode", "name": "搜索结果锚点", "config": { "selectors": [".sm-offer-list", ".sm-offer" , "#offer-list"], "requireVisible": true, "highlight": true, "persistHighlight": true }, "next": ["highlight_candidates"] },
+    { "id": "snapshot_search_results", "type": "PageSnapshotNode", "name": "搜索结果快照", "config": { "maxHtmlLength": 500000 }, "next": ["log_after_search"] },
+    { "id": "log_after_search", "type": "BehaviorLogNode", "name": "搜索阶段行为日志", "config": { "outputDir": "archive/workflow-records" }, "next": ["search_anchor"] },
+    { "id": "search_anchor", "type": "AnchorPointNode", "name": "搜索结果锚点", "config": {
+        "selectors": [
+          ".sm-offer-list",
+          ".sm-offer",
+          "#offer-list",
+          ".offer-list",
+          ".sm-offer-item",
+          ".input-button .input-button-text",
+          "span.input-button-text",
+          "#img-search-upload",
+          "input#img-search-upload"
+        ],
+        "textIncludes": ["搜索"],
+        "requireVisible": true,
+        "highlight": true,
+        "persistHighlight": true
+      }, "next": ["highlight_candidates"] },
     {
       "id": "highlight_candidates",
       "type": "JavaScriptExecutionNode",
@@ -194,9 +231,11 @@
         "saveScreenshots": false
       },
       "next": [
-        "open_chat"
+        "snapshot_before_open_chat"
       ]
     },
+    { "id": "snapshot_before_open_chat", "type": "PageSnapshotNode", "name": "打开聊天前快照", "config": { "maxHtmlLength": 500000 }, "next": ["log_before_open_chat"] },
+    { "id": "log_before_open_chat", "type": "BehaviorLogNode", "name": "打开聊天前行为日志", "config": { "outputDir": "archive/workflow-records" }, "next": ["open_chat"] },
     {
       "id": "open_chat",
       "type": "PopupTokenCaptureNode",
@@ -208,13 +247,19 @@
           "span.J_WangWang .ww-link.ww-online",
           "a.ww-link.ww-inline",
           "span.J_WangWang a.ww-link",
-          "a[href*=air.1688.com/app/]"
+          "span[class*=WangWang] a.ww-link",
+          "a.ww-link",
+          "a[href*=\"im.1688.com\"]",
+          "a[href*=\"air.1688.com\"]",
+          "a[href*=\"im.alibaba.com\"]",
+          "a[href*=\"ww.taobao.com\"]"
         ],
         "hostFilter": "air.1688.com",
         "maxItems": 1,
         "minClickDelay": 600,
         "maxClickDelay": 1500,
-        "afterPopupWaitMs": 1200,
+        "waitPopupMs": 12000,
+        "afterPopupWaitMs": 1800,
         "closePopup": false,
         "popupClickSelectors": [
           "body > div:nth-child(23)"
@@ -239,8 +284,11 @@
         "attach_chat"
       ]
     },
-    { "id": "attach_chat", "type": "AttachHostPageNode", "name": "附着聊天页", "config": { "urlPattern": "air\\.1688\\.com/.*", "bringToFront": true, "waitUntil": "domcontentloaded", "timeout": 15000 }, "next": ["chat_anchor"] },
-    { "id": "chat_anchor", "type": "AnchorPointNode", "name": "聊天页锚点", "config": { "frame": { "urlPattern": "def_cbu_web_im_core" }, "selectors": [".im-chat-input", "div[contenteditable]"], "requireVisible": true, "highlight": true, "persistHighlight": true }, "next": ["save_cookies_after_attach"] },
+    { "id": "attach_chat", "type": "AttachHostPageNode", "name": "附着聊天页", "config": { "urlPattern": "air\\.1688\\.com/.*", "bringToFront": true, "waitUntil": "domcontentloaded", "timeout": 15000 }, "next": ["pause_for_anchor"] },
+    { "id": "pause_for_anchor", "type": "GateOverlayNode", "name": "等待锚点交互确认", "config": { "title": "自动注入锚点探针", "message": "已自动标记输入/发送整块，继续执行。", "block": false }, "next": ["dev_probe"] },
+    { "id": "dev_probe", "type": "DevEvalNode", "name": "Dev 注入(整块标记)", "config": { "frame": { "urlPattern": "def_cbu_web_im_core" }, "filePath": "local-dev/chat-anchors-probe.js", "continueOnError": true }, "next": ["chat_anchor"] },
+    { "id": "chat_anchor", "type": "AnchorPointNode", "name": "聊天页锚点", "config": { "frame": { "urlPattern": "def_cbu_web_im_core" }, "selectors": ["[data-webauto-input-area='1']", ".im-chat-input", "div[contenteditable]"], "requireVisible": true, "highlight": true, "persistHighlight": true }, "next": ["snapshot_chat"] },
+    { "id": "snapshot_chat", "type": "PageSnapshotNode", "name": "聊天页快照", "config": { "maxHtmlLength": 500000 }, "next": ["save_cookies_after_attach"] },
     { "id": "save_cookies_after_attach", "type": "CookieSaverNode", "name": "聊天域保存Cookie", "config": { "cookiePath": "~/.webauto/cookies/1688-domestic.json" }, "next": ["compose"] },
     {
       "id": "compose",
@@ -257,6 +305,7 @@
         "sendHighlightColor": "#ff2d55",
         "sendHighlightLabel": "SEND",
         "inputSelectors": [
+          "[data-webauto-input='1']",
           "pre.edit[contenteditable=true]",
           ".im-chat-input [contenteditable]",
           ".msg-input [contenteditable]",
@@ -266,9 +315,10 @@
           "[role=textbox]"
         ],
         "sendSelectors": [
-          ".next-btn",
+          "[data-webauto-send='1']",
           ".im-chat-send-btn",
           ".send-btn",
+          ".next-btn",
           "button:has-text(发送)",
           "a:has-text(发送)",
           "[role=button]",
@@ -298,14 +348,15 @@
         "preset": "1688",
         "strategy": "prefer_mouse",
         "selector": "[data-webauto-send='1'], .im-chat-send-btn, .send-btn, .next-btn, button[atype='send'], button[type='submit']",
-        "frame": { "urlPattern": "air\\.1688\\.com/.*" },
+        "frame": { "urlPattern": "def_cbu_web_im_core" },
+        "containerSelector": "[data-webauto-send-area='1']",
         "scrollIntoView": true,
         "verifyVisibility": true,
-        "waitAfter": 1200,
+        "waitAfter": 1500,
         "verifyNavigation": false,
         "clickMethods": ["mouse_coordinates","event_simulation","playwright_click","javascript_click"],
         "preferChildTarget": true,
-        "childSelectors": ["button[atype=send]",".im-chat-send-btn",".send-btn",".next-btn","button","[role=button]","a"],
+        "childSelectors": ["button[atype=send]",".im-chat-send-btn",".send-btn",".next-btn","button","[role=button]","a","span"],
         "childTextIncludes": ["发送","发","send"],
         "mouseMoveSteps": 12,
         "hoverMs": 60,
@@ -324,10 +375,11 @@
       "config": {
         "title": "✅ 已尝试发送‘你好’",
         "message": "请检查聊天窗口中是否出现消息，如确认无误，点击‘下一步’保存结果。",
-        "block": true
+        "block": false
       },
       "next": ["save"]
     },
+    { "id": "log_before_save", "type": "BehaviorLogNode", "name": "保存前行为日志", "config": { "outputDir": "archive/workflow-records" }, "next": ["save"] },
     {
       "id": "save",
       "type": "ResultSaverNode",
@@ -339,9 +391,11 @@
         "mergeData": true
       },
       "next": [
-        "end"
+        "close_chat_tab"
       ]
     },
+    { "id": "close_chat_tab", "type": "CloseHostPageNode", "name": "关闭聊天Tab", "config": { "hostIncludes": "air.1688.com", "closeAll": false }, "next": ["attach_back_search"] },
+    { "id": "attach_back_search", "type": "AttachHostPageNode", "name": "切回搜索结果", "config": { "urlPattern": "s\\.1688\\.com/.*", "bringToFront": true, "waitUntil": "domcontentloaded", "timeout": 10000 }, "next": ["end"] },
     {
       "id": "end",
       "type": "EndNode",

@@ -8,7 +8,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 function parseArgs(argv) {
-  const args = { endpoint: process.env.LMSTUDIO_ENDPOINT || 'http://localhost:1234/v1', model: process.env.LMSTUDIO_MODEL || '' };
+  const args = { endpoint: process.env.LMSTUDIO_ENDPOINT || 'http://localhost:1234/v1', model: process.env.LMSTUDIO_MODEL || 'mradermacher/ui-ins-32b-gguf/ui-ins-32b.q4_k_s.gguf' };
   for (let i = 2; i < argv.length; i++) {
     const a = argv[i];
     if (!a.startsWith('--')) continue;
@@ -91,7 +91,7 @@ async function main() {
 
   const url = `${endpoint.replace(/\/$/,'')}/chat/completions`;
   const body = {
-    model: model || 'qwen2.5vl',
+    model: model || 'mradermacher/ui-ins-32b-gguf/ui-ins-32b.q4_k_s.gguf',
     messages,
     temperature: 0.0,
     max_tokens: 128
