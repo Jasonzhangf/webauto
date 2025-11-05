@@ -1,0 +1,11 @@
+{
+  "name": "Switch Demo - 聊天工作流",
+  "nodes": [
+    { "id": "start", "type": "StartNode", "name": "开始", "next": ["attach"] },
+    { "id": "attach", "type": "AttachSessionNode", "name": "会话接力", "config": {}, "next": ["note"] },
+    { "id": "note", "type": "GateOverlayNode", "name": "提示", "config": { "title": "聊天工作流（示例）", "message": "这里可接入真实聊天逻辑。", "block": false }, "next": ["end"] },
+    { "id": "end", "type": "EndNode", "name": "结束", "config": { "cleanup": false } }
+  ],
+  "globalConfig": { "timeout": 300000 }
+}
+

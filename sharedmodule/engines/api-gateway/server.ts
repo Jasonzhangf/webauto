@@ -14,6 +14,7 @@ import * as containerOps from './controllers/containerOpsController.ts';
 import { run as runSequence } from './controllers/workflowSequenceController.js';
 import { list as listRecords } from './controllers/workflowRecordsController.js';
 import { submitWorkflow as jobSubmitWorkflow, status as jobStatus } from './controllers/jobController.js';
+import { switchRun } from './controllers/demoSwitchController.js';
 
 const app = express();
 app.use(express.json({ limit: '20mb' }));
@@ -106,6 +107,9 @@ app.post('/v1/workflows/sequence/run', runSequence);
 app.get('/v1/workflows/records', listRecords);
 app.post('/v1/jobs/submit/workflow', jobSubmitWorkflow);
 app.get('/v1/jobs/:id', jobStatus);
+
+// demos
+app.post('/v1/demos/switch-run', switchRun);
 
 const port = Number(process.env.PORT_WORKFLOW || 7701);
 app.listen(port, () => {
