@@ -7,6 +7,13 @@ import { snapshot as pageSnapshot, html as pageHtml, scripts as pageScripts, tex
 import { list as listContainers, resolve as resolveContainer, validate as validateContainer, highlight as highlightContainer } from './controllers/containersController.js';
 import { runScript as extractRunScript, containerExtract as extractContainer, extract1688Search } from './controllers/extractController.js';
 import { tabClose, tabAttach } from './controllers/browserExtraController.js';
+import { evalFile as devEvalFile, evalCode as devEvalCode, installPicker as devInstallPicker } from './controllers/devController.js';
+import * as mouseCtl from './controllers/mouseController.js';
+import * as keyboardCtl from './controllers/keyboardController.js';
+import * as containerOps from './controllers/containerOpsController.ts';
+import { run as runSequence } from './controllers/workflowSequenceController.js';
+import { list as listRecords } from './controllers/workflowRecordsController.js';
+import { submitWorkflow as jobSubmitWorkflow, status as jobStatus } from './controllers/jobController.js';
 
 const app = express();
 app.use(express.json({ limit: '20mb' }));
@@ -68,6 +75,37 @@ app.post('/v1/containers/highlight', highlightContainer);
 app.post('/v1/extract/run-script', extractRunScript);
 app.post('/v1/extract/container', extractContainer);
 app.post('/v1/extract/1688/search', extract1688Search);
+
+// dev
+app.post('/v1/dev/eval-file', devEvalFile);
+app.post('/v1/dev/eval-code', devEvalCode);
+app.post('/v1/dev/picker/install', devInstallPicker);
+
+// mouse primitives
+app.post('/v1/mouse/move', mouseCtl.move);
+app.post('/v1/mouse/click', mouseCtl.click);
+app.post('/v1/mouse/wheel', mouseCtl.wheel);
+
+// keyboard primitives
+app.post('/v1/keyboard/type', keyboardCtl.type);
+app.post('/v1/keyboard/press', keyboardCtl.press);
+app.post('/v1/keyboard/down', keyboardCtl.down);
+app.post('/v1/keyboard/up', keyboardCtl.up);
+
+// container operations
+app.post('/v1/containers/actions/click', containerOps.click);
+app.post('/v1/containers/actions/type', containerOps.type);
+app.post('/v1/containers/actions/scroll', containerOps.scroll);
+app.post('/v1/containers/actions/hover', containerOps.hover);
+app.post('/v1/containers/actions/bbox', containerOps.bbox);
+app.post('/v1/containers/actions/screenshot', containerOps.screenshot);
+app.post('/v1/containers/actions/get', containerOps.get);
+
+// workflows sequence
+app.post('/v1/workflows/sequence/run', runSequence);
+app.get('/v1/workflows/records', listRecords);
+app.post('/v1/jobs/submit/workflow', jobSubmitWorkflow);
+app.get('/v1/jobs/:id', jobStatus);
 
 const port = Number(process.env.PORT_WORKFLOW || 7701);
 app.listen(port, () => {

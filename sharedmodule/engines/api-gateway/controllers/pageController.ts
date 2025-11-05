@@ -116,3 +116,22 @@ export async function text(req, res) {
   } catch (e) { return res.status(500).json({ success:false, error: e.message }); }
 }
 
+export async function element(req, res) {
+  const sessionId = req.query?.sessionId || req.body?.sessionId;
+  const selector = req.query?.selector || req.body?.selector;
+  const frame = req.query?.frame || req.body?.frame || {};
+  if (!sessionId || !selector) return res.status(400).json({ success:false, error:'sessionId and selector required' });
+  try {
+    const { page } = await getSafePage(sessionId);
+    const target = frame ? (resolveTargetFrame(page, frame) || page) : page;
+    const out = await target.evaluate((sel)=>{
+      const el = document.querySelector(sel);
+      if (!el) return { exists:false };
+      const r = el.getBoundingClientRect();
+      const text = (el.innerText||el.textContent||'').trim();
+      const html = el.outerHTML.slice(0, 1000);
+      return { exists:true, rect:{x:r.x,y:r.y,width:r.width,height:r.height}, text, html };
+    }, selector);
+    return res.json({ success:true, ...out });
+  } catch (e) { return res.status(500).json({ success:false, error:e.message }); }
+}

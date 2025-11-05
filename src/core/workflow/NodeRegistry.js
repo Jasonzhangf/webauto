@@ -45,6 +45,8 @@ import AnchorPointNode from './nodes/AnchorPointNode.js';
 import InjectContainerIndexNode from './nodes/InjectContainerIndexNode.js';
 import DevEvalNode from './nodes/DevEvalNode.js';
 import CloseHostPageNode from './nodes/CloseHostPageNode.js';
+import ConditionNode from './nodes/ConditionNode.js';
+import SwitchWorkflowNode from './nodes/SwitchWorkflowNode.js';
 
 class NodeRegistry {
     constructor() {
@@ -100,6 +102,8 @@ class NodeRegistry {
         this.registerNode('InjectContainerIndexNode', new InjectContainerIndexNode());
         this.registerNode('DevEvalNode', new DevEvalNode());
         this.registerNode('CloseHostPageNode', new CloseHostPageNode());
+        this.registerNode('ConditionNode', new ConditionNode());
+        this.registerNode('SwitchWorkflowNode', new SwitchWorkflowNode());
     }
 
     registerNode(type, handler) {
