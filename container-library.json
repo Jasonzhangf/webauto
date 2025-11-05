@@ -1,0 +1,16 @@
+{
+  "cbu": {
+    "website": "1688.com",
+    "containers": {
+      "search.list": { "selector": ".sm-offer-item, .offer-item, .sm-offer, [class*=offer]" },
+      "search.item.title": { "selector": "h4 a, [class*=title] a, a[title]" },
+      "search.item.price": { "selector": "[class*=price], [data-price]" },
+      "search.item.img": { "selector": "img" },
+      "search.item.offerUrl": { "selector": "a[href*='.1688.com/']" },
+      "search.item.wangwangSpan": { "selector": "span.J_WangWang, span[class*=WangWang]" },
+      "search.item.wangwangLink": { "selector": "span.J_WangWang a.ww-link" },
+      "search.item.shopLink": { "selector": "a[href*='company.1688.com'], a[href*='page/index.htm']" }
+    }
+  }
+}
+
