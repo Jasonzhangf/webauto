@@ -21,3 +21,15 @@ export function add1688(entry: { key?:string, uid?:string, offerId?:string, chat
   return rec;
 }
 
+export function list1688() {
+  ensure(); const db = load(file1688); return Array.isArray(db.entries) ? db.entries : [];
+}
+
+export function clear1688() { ensure(); save(file1688, { entries: [] }); return true; }
+
+export function remove1688(criteria: { key?:string, uid?:string, offerId?:string, chatUrl?:string }) {
+  ensure(); const db = load(file1688); const arr = Array.isArray(db.entries) ? db.entries : [];
+  const idx = arr.findIndex(e => (criteria.key && e.key===criteria.key) || (criteria.uid && e.uid===criteria.uid) || (criteria.offerId && e.offerId===criteria.offerId) || (criteria.chatUrl && e.chatUrl===criteria.chatUrl));
+  if (idx >= 0) { arr.splice(idx, 1); save(file1688, { entries: arr }); return true; }
+  return false;
+}

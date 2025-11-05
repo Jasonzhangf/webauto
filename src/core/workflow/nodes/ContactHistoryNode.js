@@ -1,6 +1,6 @@
 // 联系历史节点：检查或记录已发送对象，避免重复发送
 import BaseNode from './BaseNode.js';
-import { has1688, add1688 } from '../ContactStore.ts';
+import { has1688, add1688 } from '../ContactStore.js';
 
 export default class ContactHistoryNode extends BaseNode {
   constructor() {
@@ -59,4 +59,3 @@ export default class ContactHistoryNode extends BaseNode {
     };
   }
 }
-

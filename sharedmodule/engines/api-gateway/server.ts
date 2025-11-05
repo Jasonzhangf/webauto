@@ -15,6 +15,7 @@ import { run as runSequence } from './controllers/workflowSequenceController.js'
 import { list as listRecords } from './controllers/workflowRecordsController.js';
 import { submitWorkflow as jobSubmitWorkflow, status as jobStatus } from './controllers/jobController.js';
 import { switchRun } from './controllers/demoSwitchController.js';
+import * as contactCtl from './controllers/contactStoreController.js';
 
 const app = express();
 app.use(express.json({ limit: '20mb' }));
@@ -110,6 +111,13 @@ app.get('/v1/jobs/:id', jobStatus);
 
 // demos
 app.post('/v1/demos/switch-run', switchRun);
+
+// contact store (1688)
+app.get('/v1/contacts/1688/list', contactCtl.list);
+app.post('/v1/contacts/1688/check', contactCtl.check);
+app.post('/v1/contacts/1688/add', contactCtl.add);
+app.post('/v1/contacts/1688/remove', contactCtl.remove);
+app.post('/v1/contacts/1688/clear', contactCtl.clear);
 
 const port = Number(process.env.PORT_WORKFLOW || 7701);
 app.listen(port, () => {
