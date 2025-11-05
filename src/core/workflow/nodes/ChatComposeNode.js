@@ -11,7 +11,10 @@ export default class ChatComposeNode extends BaseNode {
   async execute(context) {
     const { context: browserContext, logger, config, engine, results, variables } = context;
     const hostFilter = config.hostFilter || 'air.1688.com';
-    const message = typeof config.message === 'string' ? config.message : '你好';
+    const preferVarMsg = (variables && (variables.get('chatMessage') || variables.get('message'))) || null;
+    const message = preferVarMsg != null
+      ? String(preferVarMsg)
+      : (typeof config.message === 'string' ? config.message : '你好');
     const messageVariants = (config.messageVariants && typeof config.messageVariants === 'object') ? config.messageVariants : {};
     const stepGate = config.stepGate === true; // 显式开启才显示步进
     const doSend = config.send !== false; // 默认发送，false 则不发送

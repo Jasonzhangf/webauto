@@ -45,7 +45,8 @@ export default class PopupTokenCaptureNode extends BaseNode {
     const clickSelectors = Array.isArray(config.clickSelectors) ? config.clickSelectors.filter(Boolean) : [];
     const hostFilter = config.hostFilter || 'air.1688.com';
     const maxItems = Number(config.maxItems || 10);
-    const startIndex = Math.max(0, Number(config.startIndex || 0));
+    const varStart = (context.variables && (context.variables.get('startIndex'))) ?? null;
+    const startIndex = Math.max(0, Number(varStart != null ? varStart : (config.startIndex || 0)));
     const waitPopupMs = Number(config.waitPopupMs || 8000);
     const minClickDelay = config.minClickDelay != null ? Number(config.minClickDelay) : (config.clickDelay != null ? Number(config.clickDelay) : 200);
     const maxClickDelay = config.maxClickDelay != null ? Number(config.maxClickDelay) : (config.clickDelay != null ? Number(config.clickDelay) : 600);

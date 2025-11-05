@@ -47,6 +47,7 @@ import DevEvalNode from './nodes/DevEvalNode.js';
 import CloseHostPageNode from './nodes/CloseHostPageNode.js';
 import ConditionNode from './nodes/ConditionNode.js';
 import SwitchWorkflowNode from './nodes/SwitchWorkflowNode.js';
+import ContactHistoryNode from './nodes/ContactHistoryNode.js';
 
 class NodeRegistry {
     constructor() {
@@ -104,6 +105,7 @@ class NodeRegistry {
         this.registerNode('CloseHostPageNode', new CloseHostPageNode());
         this.registerNode('ConditionNode', new ConditionNode());
         this.registerNode('SwitchWorkflowNode', new SwitchWorkflowNode());
+        this.registerNode('ContactHistoryNode', new ContactHistoryNode());
     }
 
     registerNode(type, handler) {

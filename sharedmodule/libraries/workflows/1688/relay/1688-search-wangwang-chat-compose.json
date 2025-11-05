@@ -231,9 +231,13 @@
         "saveScreenshots": false
       },
       "next": [
-        "snapshot_before_open_chat"
+        "resolve_contact_key"
       ]
     },
+    { "id": "resolve_contact_key", "type": "JavaScriptExecutionNode", "name": "解析候选身份", "config": { "script": "(function(){ try{ var mark=document.querySelector('[data-webauto-send=\\"1\\"]'); var anchor=mark; if(!anchor){ anchor=document.querySelector('span.J_WangWang a.ww-link, a.ww-link[href*=\\"im.1688.com\\"], a.ww-link[href*=\\"air.1688.com\\"]'); } if(!anchor) return {success:false,error:'no candidate anchor'}; var card = anchor.closest('.sm-offer-item, .offer-item, .sm-offer, [class*=offer]') || document; var span = card.querySelector('span.J_WangWang, span[class*=WangWang]'); var uid = span ? (span.getAttribute('data-nick')||'') : ''; var href = (anchor.getAttribute('href')||''); var offerId = null; try{ var m = href.match(/offer(Id)?[=\\/](\\d+)/i); if(m) offerId=m[2]; }catch(e){} var key = (uid||'') + ':' + (offerId||''); return { success:true, variables:{ contactUid: uid, contactOfferId: offerId, contactKey: key } }; }catch(e){ return { success:false, error:String(e) }; } })();", "saveScreenshots": false }, "next": ["check_history"] },
+    { "id": "check_history", "type": "ContactHistoryNode", "name": "历史去重检查", "config": { "action": "check", "site": "1688" }, "next": ["dedup_condition"] },
+    { "id": "dedup_condition", "type": "ConditionNode", "name": "是否已发送", "config": { "mode": "variable", "varName": "alreadySent", "operator": "==", "value": true }, "next": ["skip_open"], "error": ["snapshot_before_open_chat"] },
+    { "id": "skip_open", "type": "GateOverlayNode", "name": "跳过已发送对象", "config": { "title": "跳过已发送", "message": "该对象已发送过，跳过打开聊天。", "block": false }, "next": ["log_before_open_chat"] },
     { "id": "snapshot_before_open_chat", "type": "PageSnapshotNode", "name": "打开聊天前快照", "config": { "maxHtmlLength": 500000 }, "next": ["log_before_open_chat"] },
     { "id": "log_before_open_chat", "type": "BehaviorLogNode", "name": "打开聊天前行为日志", "config": { "outputDir": "archive/workflow-records" }, "next": ["open_chat"] },
     {
@@ -366,8 +370,9 @@
         "cursorColor": "#ff2d55",
         "highlightElement": false
       },
-      "next": ["post_send_gate"]
+      "next": ["record_contact"]
     },
+    { "id": "record_contact", "type": "ContactHistoryNode", "name": "记录发送对象", "config": { "action": "add", "site": "1688" }, "next": ["post_send_gate"] },
     {
       "id": "post_send_gate",
       "type": "GateOverlayNode",
