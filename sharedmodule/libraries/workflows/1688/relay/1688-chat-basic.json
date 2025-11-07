@@ -1,0 +1,14 @@
+{
+  "name": "1688 聊天容器-基本(可配置发送)",
+  "version": "1.0.0",
+  "variables": { "chatMessage": "你好", "send": false },
+  "nodes": [
+    { "id": "start", "type": "StartNode", "name": "开始", "next": ["attach_chat"] },
+    { "id": "attach_chat", "type": "AttachHostPageNode", "name": "附着聊天页", "config": { "urlPattern": "air\\.1688\\.com/.*", "bringToFront": true, "waitUntil": "domcontentloaded", "timeout": 15000 }, "next": ["anchor_chat"] },
+    { "id": "anchor_chat", "type": "AnchorPointNode", "name": "聊天锚点", "config": { "frame": { "urlPattern": "def_cbu_web_im_core" }, "selectors": ["pre.edit[contenteditable]", ".im-chat-input [contenteditable]", ".send-btn", "button:has-text(发送)"], "requireVisible": true, "highlight": true, "persistHighlight": false }, "next": ["compose"] },
+    { "id": "compose", "type": "ChatComposeNode", "name": "输入/可选发送", "config": { "hostFilter": "air.1688.com", "message": "{chatMessage}", "send": false, "sendViaEnter": false, "highlightMs": 3000, "persistSendHighlight": false }, "next": ["end"] },
+    { "id": "end", "type": "EndNode", "name": "结束", "config": { "cleanup": false, "saveLogs": true } }
+  ],
+  "globalConfig": { "timeout": 600000, "logLevel": "info" }
+}
+

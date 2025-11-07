@@ -13,9 +13,14 @@ class BrowserInitNode extends BaseNode {
     }
 
     async execute(context) {
-        const { config, logger } = context;
+        const { config, logger, variables } = context;
 
         try {
+            // 默认不允许新开浏览器，除非显式允许（allowLaunch=true）
+            const allowLaunch = variables?.get('allowLaunch') === true || config?.allowLaunch === true;
+            if (!allowLaunch) {
+                return { success: false, error: 'attach-only mode: BrowserInitNode blocked. Provide sessionId + AttachSessionNode or set allowLaunch=true explicitly.' };
+            }
             logger.info('🌐 初始化浏览器...');
             logger.info('配置信息:', JSON.stringify(config, null, 2));
 

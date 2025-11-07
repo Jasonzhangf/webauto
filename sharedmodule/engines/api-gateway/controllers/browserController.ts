@@ -1,5 +1,6 @@
 // @ts-nocheck
 import { getSession, saveSession } from '../lib/sessionAdapter.js';
+import { ensureCookiesForUrl } from '../lib/cookieManager.js';
 import { detectLoginAnchor, waitLoginAnchor } from '../lib/loginAnchor.js';
 
 async function getSafePage(sessionId) {
@@ -26,6 +27,7 @@ export async function navigate(req, res) {
   if (!sessionId || !url) return res.status(400).json({ success: false, error: 'sessionId and url required' });
   try {
     const page = await getSafePage(sessionId);
+    try { const s = await getSession(sessionId); if (s?.context) await ensureCookiesForUrl(s.context, url); } catch {}
     await page.goto(url, { waitUntil, timeout: timeoutMs });
     return res.json({ success: true, url: page.url() });
   } catch (e) {
@@ -107,7 +109,7 @@ export async function highlight(req, res) {
   const { sessionId, selector, bbox, color = '#ff2d55', label = 'TARGET', durationMs = 5000, requireLoginAnchor = true, platform } = req.body || {};
   if (!sessionId) return res.status(400).json({ success: false, error: 'sessionId required' });
   try {
-    const page = getSafePage(sessionId);
+    const page = await getSafePage(sessionId);
     if (requireLoginAnchor) {
       const r = await detectLoginAnchor(page, { platform });
       if (!r.ok) return res.status(412).json({ success: false, error: 'login anchor not detected; aborting risky action' });
@@ -142,7 +144,7 @@ export async function screenshot(req, res) {
   const { sessionId, fullPage = true } = req.body || {};
   if (!sessionId) return res.status(400).json({ success: false, error: 'sessionId required' });
   try {
-    const page = getSafePage(sessionId);
+    const page = await getSafePage(sessionId);
     const buf = await page.screenshot({ fullPage, type: 'png' });
     const base64 = `data:image/png;base64,${buf.toString('base64')}`;
     return res.json({ success: true, image: base64, timestamp: Date.now() });
@@ -155,7 +157,7 @@ export async function checkLoginAnchor(req, res) {
   const { sessionId, platform } = req.body || {};
   if (!sessionId) return res.status(400).json({ success: false, error: 'sessionId required' });
   try {
-    const page = getSafePage(sessionId);
+    const page = await getSafePage(sessionId);
     const r = await detectLoginAnchor(page, { platform });
     return res.json({ success: true, detected: r.ok, selector: r.selector, platform: r.platform });
   } catch (e) {
@@ -167,7 +169,7 @@ export async function waitLoginAnchorEndpoint(req, res) {
   const { sessionId, platform, timeoutMs, intervalMs } = req.body || {};
   if (!sessionId) return res.status(400).json({ success: false, error: 'sessionId required' });
   try {
-    const page = getSafePage(sessionId);
+    const page = await getSafePage(sessionId);
     const r = await waitLoginAnchor(page, { platform, timeoutMs, intervalMs });
     return res.json({ success: r.ok, detected: r.ok, selector: r.selector, platform: r.platform });
   } catch (e) {

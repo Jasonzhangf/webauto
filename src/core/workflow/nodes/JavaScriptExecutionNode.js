@@ -31,7 +31,9 @@ export default class JavaScriptExecutionNode extends BaseNode {
     const { page, logger, config, engine, results } = context;
     if (!page) return { success: false, error: 'no page available' };
 
-    const script = config?.script;
+    // 支持模板渲染，允许在脚本中使用 {varName} 注入变量
+    let script = config?.script;
+    try { script = this.renderTemplate(script, context.variables); } catch {}
     const timeout = Number(config?.timeout || 30000);
     const saveScreenshots = config?.saveScreenshots === true;
     const frameCfg = config?.frame || null;
@@ -105,6 +107,10 @@ export default class JavaScriptExecutionNode extends BaseNode {
       });
 
       if (scriptResult.success) {
+        const varBag = (scriptResult.result && scriptResult.result.variables && typeof scriptResult.result.variables === 'object')
+          ? scriptResult.result.variables
+          : null;
+        try { if (varBag) engine?.recordBehavior?.('js_exec_variables', { keys: Object.keys(varBag||{}) }); } catch {}
         logger.info('✅ JavaScript脚本执行成功');
 
         // 返回结果，确保数据能被下一个节点访问
@@ -114,6 +120,7 @@ export default class JavaScriptExecutionNode extends BaseNode {
           results: scriptResult.result,
           // 同时将结果存储到顶级属性中，确保变量解析能访问到
           ...scriptResult.result,
+          variables: varBag || undefined,
           timestamp: new Date().toISOString()
         };
       } else {

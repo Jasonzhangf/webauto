@@ -217,62 +217,44 @@
           "#img-search-upload",
           "input#img-search-upload"
         ],
-        "textIncludes": ["搜索"],
         "requireVisible": true,
+        "maxWaitMs": 5000,
+        "pollIntervalMs": 500,
         "highlight": true,
         "persistHighlight": true
-      }, "next": ["highlight_candidates"] },
+      }, "next": ["highlight_candidates"], "error": ["highlight_candidates"] },
     {
       "id": "highlight_candidates",
       "type": "JavaScriptExecutionNode",
       "name": "高亮旺旺候选(预跑,不消失)",
       "config": {
-        "script": "(function(){\n  function vis(el){ var s=getComputedStyle(el); if(s.display==='none'||s.visibility==='hidden'||Number(s.opacity)===0) return false; var r=el.getBoundingClientRect(); return r.width>8 && r.height>8; }\n  var list = Array.from(document.querySelectorAll('button,[role=\"button\"],.im-chat-send-btn,.next-btn,.send-btn,a'));\n  var scored=[];\n  for (var i=0;i<list.length;i++){ try{ var el=list[i]; if(!vis(el)) continue; var r=el.getBoundingClientRect(); var score=(r.width*r.height)+((r.y>(innerHeight-160))?5000:0)+((r.x>(innerWidth*0.5))?2500:0); scored.push({el:el,score:score}); }catch(e){} }\n  if(!scored.length){ return { success:false, error:'no candidate' }; }\n  scored.sort(function(a,b){ return b.score-a.score; });\n  var el=scored[0].el;\n  el.setAttribute('data-webauto-send','1');\n  el.scrollIntoView({behavior:'instant',block:'center'});\n  return { success:true, selector:\"[data-webauto-send='1']\" };\n})();",
+        "script": "(function(){\n  function vis(el){ var s=getComputedStyle(el); if(s.display==='none'||s.visibility==='hidden'||Number(s.opacity)===0) return false; var r=el.getBoundingClientRect(); return r.width>8 && r.height>8; }\n  var list = Array.from(document.querySelectorAll('a.ww-link, span.J_WangWang a.ww-link, a[href*=\\\"im.1688.com\\\"], a[href*=\\\"air.1688.com\\\"], button,[role=\\\"button\\\"],.next-btn,.send-btn'));\n  var scored=[];\n  for (var i=0;i<list.length;i++){ try{ var el=list[i]; if(!vis(el)) continue; var r=el.getBoundingClientRect(); var score=(r.width*r.height)+((r.y>(innerHeight-160))?5000:0)+((r.x>(innerWidth*0.5))?2500:0); scored.push({el:el,score:score}); }catch(e){} }\n  if(!scored.length){ return { success:true, info:'no candidate' }; }\n  scored.sort(function(a,b){ return b.score-a.score; });\n  var el=scored[0].el;\n  try{ el.setAttribute('data-webauto-send','1'); }catch(e){}\n  try{ el.scrollIntoView({behavior:'instant',block:'center'}); }catch(e){}\n  return { success:true, selector:\"[data-webauto-send='1']\" };\n})();",
         "saveScreenshots": false
       },
       "next": [
         "resolve_contact_key"
       ]
     },
-    { "id": "resolve_contact_key", "type": "JavaScriptExecutionNode", "name": "解析候选身份", "config": { "script": "(function(){ try{ var mark=document.querySelector('[data-webauto-send=\\"1\\"]'); var anchor=mark; if(!anchor){ anchor=document.querySelector('span.J_WangWang a.ww-link, a.ww-link[href*=\\"im.1688.com\\"], a.ww-link[href*=\\"air.1688.com\\"]'); } if(!anchor) return {success:false,error:'no candidate anchor'}; var card = anchor.closest('.sm-offer-item, .offer-item, .sm-offer, [class*=offer]') || document; var span = card.querySelector('span.J_WangWang, span[class*=WangWang]'); var uid = span ? (span.getAttribute('data-nick')||'') : ''; var href = (anchor.getAttribute('href')||''); var offerId = null; try{ var m = href.match(/offer(Id)?[=\\/](\\d+)/i); if(m) offerId=m[2]; }catch(e){} var key = (uid||'') + ':' + (offerId||''); return { success:true, variables:{ contactUid: uid, contactOfferId: offerId, contactKey: key } }; }catch(e){ return { success:false, error:String(e) }; } })();", "saveScreenshots": false }, "next": ["check_history"] },
-    { "id": "check_history", "type": "ContactHistoryNode", "name": "历史去重检查", "config": { "action": "check", "site": "1688" }, "next": ["dedup_condition"] },
+    { "id": "resolve_contact_key", "type": "JavaScriptExecutionNode", "name": "解析候选身份", "config": { "script": "(function(){ try{\n  function pickAnchor(){\n    var mark=document.querySelector('[data-webauto-send=\\\"1\\\"]');\n    var list=Array.from(document.querySelectorAll('span.J_WangWang a.ww-link, a.ww-link[href*=\\\"air.1688.com\\\"], a.ww-link[href*=\\\"im.1688.com\\\"]'));\n    if(!list.length) return null;\n    if(mark){ var card = mark.closest('.sm-offer-item, .offer-item, .sm-offer, [class*=offer]'); if(card){ var inCard=list.find(function(a){return card.contains(a);}); if(inCard) return inCard; } }\n    return list[0];\n  }\n  var a = pickAnchor();\n  if(!a) return {success:false,error:'no a.ww-link'};\n  var href=a.href||a.getAttribute('href')||'';\n  var uid='', offerId=null, fromid='';\n  try{ var u=new URL(href, location.href); var q=u.searchParams; uid = q.get('uid')||q.get('touid')||''; offerId = q.get('offerId')||q.get('offerid')||null; fromid = q.get('fromid')||''; }catch(e){}\n  if(!uid){ try{ var span=(a.closest('.sm-offer-item, .offer-item, .sm-offer, [class*=offer]')||document).querySelector('span.J_WangWang, span[class*=WangWang]'); uid=span?(span.getAttribute('data-nick')||''):''; }catch(e){} }\n  var key=(uid||'')+':'+(offerId||'');\n  // 搜索卡片中的公司名（如 .desc-text）\n  var card = a.closest('.sm-offer-item, .offer-item, .sm-offer, [class*=offer]') || document;\n  var cname='';\n  try{ var candSel=['.desc-text','.company-name','.shop-name','[data-spm*=company]']; for(var i=0;i<candSel.length;i++){ var el=card.querySelector(candSel[i]); if(el){ cname=(el.innerText||el.textContent||'').trim(); if(cname) break; } } }catch(e){}\n  return { success:true, variables:{ contactUid: uid, contactOfferId: offerId, contactKey: key, chatUrl: href, companyName: cname } };\n}catch(e){ return { success:false, error:String(e) }; } )();", "saveScreenshots": false }, "next": ["check_history"] },
+    { "id": "check_history", "type": "ContactHistoryNode", "name": "历史去重检查", "config": { "action": "check", "site": "1688", "keyVarName": "companyName" }, "next": ["dedup_condition"] },
     { "id": "dedup_condition", "type": "ConditionNode", "name": "是否已发送", "config": { "mode": "variable", "varName": "alreadySent", "operator": "==", "value": true }, "next": ["skip_open"], "error": ["snapshot_before_open_chat"] },
-    { "id": "skip_open", "type": "GateOverlayNode", "name": "跳过已发送对象", "config": { "title": "跳过已发送", "message": "该对象已发送过，跳过打开聊天。", "block": false }, "next": ["log_before_open_chat"] },
+    { "id": "skip_open", "type": "GateOverlayNode", "name": "跳过已发送对象", "config": { "title": "跳过已发送", "message": "该公司已发送过，跳过打开：{companyName}", "block": false }, "next": ["save"] },
     { "id": "snapshot_before_open_chat", "type": "PageSnapshotNode", "name": "打开聊天前快照", "config": { "maxHtmlLength": 500000 }, "next": ["log_before_open_chat"] },
-    { "id": "log_before_open_chat", "type": "BehaviorLogNode", "name": "打开聊天前行为日志", "config": { "outputDir": "archive/workflow-records" }, "next": ["open_chat"] },
+    { "id": "log_before_open_chat", "type": "BehaviorLogNode", "name": "打开聊天前行为日志", "config": { "outputDir": "archive/workflow-records" }, "next": ["has_chat_url"] },
+    { "id": "has_chat_url", "type": "ConditionNode", "name": "是否已有chatUrl", "config": { "mode": "variable", "varName": "chatUrl", "operator": "includes", "value": "air.1688.com" }, "next": ["navigate_chat"], "error": ["open_chat"] },
+    { "id": "navigate_chat", "type": "NavigationNode", "name": "直接导航到聊天页", "config": { "url": "{chatUrl}", "waitUntil": "domcontentloaded", "timeout": 30000 }, "next": ["wait_chat"] },
     {
       "id": "open_chat",
-      "type": "PopupTokenCaptureNode",
-      "name": "打开聊天(捕获token)",
+      "type": "JavaScriptExecutionNode",
+      "name": "直接打开旺旺聊天链接",
       "config": {
-        "containerSelector": "body",
-        "clickSelectors": [
-          ".offer-shop-row .ww-link.ww-online",
-          "span.J_WangWang .ww-link.ww-online",
-          "a.ww-link.ww-inline",
-          "span.J_WangWang a.ww-link",
-          "span[class*=WangWang] a.ww-link",
-          "a.ww-link",
-          "a[href*=\"im.1688.com\"]",
-          "a[href*=\"air.1688.com\"]",
-          "a[href*=\"im.alibaba.com\"]",
-          "a[href*=\"ww.taobao.com\"]"
-        ],
-        "hostFilter": "air.1688.com",
-        "maxItems": 1,
-        "minClickDelay": 600,
-        "maxClickDelay": 1500,
-        "waitPopupMs": 12000,
-        "afterPopupWaitMs": 1800,
-        "closePopup": false,
-        "popupClickSelectors": [
-          "body > div:nth-child(23)"
-        ],
-        "dryMode": false,
-        "enforceWebPreference": true,
-        "startIndex": 0
+        "script": "(function(){ try{\n  var a = document.querySelector('[data-webauto-send=\\\"1\\\"]') || document.querySelector('span.J_WangWang a.ww-link, a.ww-link[href*=\\\"air.1688.com\\\"], a.ww-link[href*=\\\"im.1688.com\\\"]');\n  if(!a) return { success:false, error:'no chat link' };\n  try { a.click(); } catch(e) { try{ var href=a.href||a.getAttribute('href'); if(href) window.open(href, '_blank'); }catch(e2){} }\n  return { success:true };\n}catch(e){ return { success:false, error:String(e) }; } })();",
+        "saveScreenshots": false
       },
       "next": [
+        "wait_chat"
+      ],
+      "error": [
         "wait_chat"
       ]
     },
@@ -288,10 +270,11 @@
         "attach_chat"
       ]
     },
-    { "id": "attach_chat", "type": "AttachHostPageNode", "name": "附着聊天页", "config": { "urlPattern": "air\\.1688\\.com/.*", "bringToFront": true, "waitUntil": "domcontentloaded", "timeout": 15000 }, "next": ["pause_for_anchor"] },
+    { "id": "attach_chat", "type": "AttachHostPageNode", "name": "附着聊天页", "config": { "urlPattern": "air\\.1688\\.com/.*", "bringToFront": true, "waitUntil": "domcontentloaded", "timeout": 15000 }, "next": ["pause_for_anchor"], "error": ["compose"] },
     { "id": "pause_for_anchor", "type": "GateOverlayNode", "name": "等待锚点交互确认", "config": { "title": "自动注入锚点探针", "message": "已自动标记输入/发送整块，继续执行。", "block": false }, "next": ["dev_probe"] },
     { "id": "dev_probe", "type": "DevEvalNode", "name": "Dev 注入(整块标记)", "config": { "frame": { "urlPattern": "def_cbu_web_im_core" }, "filePath": "local-dev/chat-anchors-probe.js", "continueOnError": true }, "next": ["chat_anchor"] },
-    { "id": "chat_anchor", "type": "AnchorPointNode", "name": "聊天页锚点", "config": { "frame": { "urlPattern": "def_cbu_web_im_core" }, "selectors": ["[data-webauto-input-area='1']", ".im-chat-input", "div[contenteditable]"], "requireVisible": true, "highlight": true, "persistHighlight": true }, "next": ["snapshot_chat"] },
+    { "id": "chat_anchor", "type": "AnchorPointNode", "name": "聊天页锚点", "config": { "frame": { "urlPattern": "def_cbu_web_im_core" }, "selectors": ["[data-webauto-input-area='1']", ".im-chat-input", "div[contenteditable]"], "requireVisible": true, "highlight": true, "persistHighlight": true }, "next": ["extract_company_chat"] },
+    { "id": "extract_company_chat", "type": "JavaScriptExecutionNode", "name": "提取聊天公司名", "config": { "frame": { "urlPattern": "def_cbu_web_im_core" }, "script": "(function(){ try{ var el=document.querySelector('.companyName'); var name=el? (el.innerText||el.textContent||'').trim():''; return { success:true, variables:{ companyNameChat: name } }; }catch(e){ return { success:false, error:String(e) }; } })();", "saveScreenshots": false }, "next": ["snapshot_chat"] },
     { "id": "snapshot_chat", "type": "PageSnapshotNode", "name": "聊天页快照", "config": { "maxHtmlLength": 500000 }, "next": ["save_cookies_after_attach"] },
     { "id": "save_cookies_after_attach", "type": "CookieSaverNode", "name": "聊天域保存Cookie", "config": { "cookiePath": "~/.webauto/cookies/1688-domestic.json" }, "next": ["compose"] },
     {
@@ -330,49 +313,11 @@
         ]
       },
       "next": [
-        "probe_send_button"
+        "record_contact"
       ]
     },
-    {
-      "id": "probe_send_button",
-      "type": "JavaScriptExecutionNode",
-      "name": "probe send button",
-      "config": {
-        "frame": { "urlPattern": "air\\.1688\\.com/.*" },
-        "script": "(function(){\n  function vis(el){ try{var s=getComputedStyle(el); if(s.display==='none'||s.visibility==='hidden'||Number(s.opacity)===0) return false; var r=el.getBoundingClientRect(); return r.width>8 && r.height>8;}catch(e){return false;} }\n  // 1) 如果 ChatCompose 已标记则直接使用\n  var pre = document.querySelector(\"[data-webauto-send='1']\");\n  if (pre && vis(pre)) { pre.scrollIntoView({behavior:'instant',block:'center'}); return { success:true, selector:\"[data-webauto-send='1']\", via:'pretag' }; }\n  // 2) 以输入框为锚点，限定附近区域查找\n  var input = document.querySelector(\"pre.edit[contenteditable=true], .im-chat-input [contenteditable], .msg-input [contenteditable], div[contenteditable=true], textarea\");\n  var scope = input ? (input.closest(\".im-chat-input, .msg-input, .im-chat, .chat, .footer, .ft, .toolbar, .opt, form\") || document) : document;\n  var excludeTexts = ['下载','安装','客户端','打开客户端','继续在客户端中打开'];\n  var cands = [];\n  var nodes = Array.from(scope.querySelectorAll(\".im-chat-send-btn, .send-btn, .next-btn, [class*='send' i], button, [role='button'], a\"));\n  for (var i=0;i<nodes.length;i++){ var el = nodes[i]; if(!vis(el)) continue; var t=(el.innerText||el.textContent||'').trim(); var cls=String(el.className||''); var title=el.getAttribute? (el.getAttribute('title')||''):''; var looks = (t && (t.includes('发送')||t==='发'||t==='发送')) || /send/i.test(cls) || /send/i.test(title) || el.getAttribute('atype')==='send' || ((el.getAttribute('data-spm')||'').toLowerCase().includes('send')); if(!looks) continue; if(excludeTexts.some(function(x){return t.includes(x);})){continue;} var r=el.getBoundingClientRect(); var score=(r.width*r.height)+((r.y>(innerHeight-220))?5000:0)+((r.x>(innerWidth*0.5))?2500:0); cands.push({el:el,score:score}); }\n  if(!cands.length){ return { success:false, error:'no candidate near input' }; }\n  cands.sort(function(a,b){ return b.score-a.score; });\n  var target = cands[0].el;\n  var clickable = target.closest(\".im-chat-send-btn, .send-btn, .next-btn, button, [role='button']\") || target;\n  try{ clickable.setAttribute('data-webauto-send','1'); }catch(e){}\n  try{ clickable.scrollIntoView({behavior:'instant',block:'center'}); }catch(e){}\n  return { success:true, selector:\"[data-webauto-send='1']\", via:'probe' };\n})();",
-        "saveScreenshots": false
-      },
-      "next": ["click_send"]
-    },
-    {
-      "id": "click_send",
-      "type": "AdvancedClickNode",
-      "name": "点击发送按钮",
-      "config": {
-        "preset": "1688",
-        "strategy": "prefer_mouse",
-        "selector": "[data-webauto-send='1'], .im-chat-send-btn, .send-btn, .next-btn, button[atype='send'], button[type='submit']",
-        "frame": { "urlPattern": "def_cbu_web_im_core" },
-        "containerSelector": "[data-webauto-send-area='1']",
-        "scrollIntoView": true,
-        "verifyVisibility": true,
-        "waitAfter": 1500,
-        "verifyNavigation": false,
-        "clickMethods": ["mouse_coordinates","event_simulation","playwright_click","javascript_click"],
-        "preferChildTarget": true,
-        "childSelectors": ["button[atype=send]",".im-chat-send-btn",".send-btn",".next-btn","button","[role=button]","a","span"],
-        "childTextIncludes": ["发送","发","send"],
-        "mouseMoveSteps": 12,
-        "hoverMs": 60,
-        "clickOffsetX": 0,
-        "clickOffsetY": 0,
-        "showCursorOverlay": true,
-        "cursorColor": "#ff2d55",
-        "highlightElement": false
-      },
-      "next": ["record_contact"]
-    },
-    { "id": "record_contact", "type": "ContactHistoryNode", "name": "记录发送对象", "config": { "action": "add", "site": "1688" }, "next": ["post_send_gate"] },
+    
+    { "id": "record_contact", "type": "ContactHistoryNode", "name": "记录发送对象", "config": { "action": "add", "site": "1688", "keyVarName": "companyName" }, "next": ["post_send_gate"] },
     {
       "id": "post_send_gate",
       "type": "GateOverlayNode",

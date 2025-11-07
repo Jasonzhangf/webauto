@@ -52,16 +52,63 @@ export default class ChatComposeNode extends BaseNode {
       let chatPages = pages.filter(p => { try { return (p.url() || '').includes(hostFilter); } catch { return false; } });
       let page = chatPages.length ? chatPages[chatPages.length - 1] : null;
 
-      // 若未找到现成页面，则用 token URL 打开一个
+      // 若未找到现成页面，则根据解析/捕获到的链接或 token 构建/选择一个明确的聊天链接打开
       if (!page) {
         try {
-          const tokens = (results && results.tokens) || [];
-          // 选取优先项：同时含 uid 与 offerId 的条目
-          let cand = tokens.find(t => t && t.raw && t.uid && (t.offerId || t.offerid));
-          if (!cand) cand = tokens.find(t => t && t.raw);
-          if (cand && cand.raw) {
+          // 0) 若上游已提供 chatUrl，直接使用
+          const vChat = (variables && variables.get && variables.get('chatUrl')) || null;
+          if (vChat) {
             page = await browserContext.newPage();
-            await page.goto(cand.raw, { waitUntil: 'domcontentloaded', timeout: 30000 });
+            await page.goto(String(vChat), { waitUntil: 'domcontentloaded', timeout: 30000 });
+          }
+          if (!page) {
+          const tokens = (results && results.tokens) || [];
+          // 选取优先项：同时含 uid 与 offerId 的条目；否则退化为含 uid 的条目
+          let cand = tokens.find(t => t && t.uid && (t.offerId || t.offerid));
+          if (!cand) cand = tokens.find(t => t && t.uid);
+          // 构建 1688 air 深链 (core 版本)，确保进入具体联系人会话
+          if (cand && cand.uid) {
+            const uid = String(cand.uid);
+            const site = String(cand.site || 'cnalichn');
+            const offer = cand.offerId || cand.offerid || null;
+            const fromid = cand.from || cand.fromid || null;
+            const qs = new URLSearchParams();
+            qs.set('uid', uid);
+            // 兼容部分入口使用 touid 参数
+            qs.set('touid', uid);
+            qs.set('site', site);
+            if (offer) qs.set('offerId', String(offer));
+            if (fromid) qs.set('fromid', String(fromid));
+            const deep = `https://air.1688.com/app/ocms-fusion-components-1688/def_cbu_web_im_core/index.html?${qs.toString()}`;
+            engine?.recordBehavior?.('chat_open_deeplink', { deep, uid, site, offer });
+            page = await browserContext.newPage();
+            await page.goto(deep, { waitUntil: 'domcontentloaded', timeout: 30000 });
+          } else if (variables && variables.get) {
+            // 使用前序解析得到的变量构建 deep link
+            const vUid = variables.get('contactUid');
+            const vOffer = variables.get('contactOfferId') || variables.get('offerId') || null;
+            if (vUid) {
+              const qs = new URLSearchParams();
+              qs.set('uid', String(vUid));
+              qs.set('touid', String(vUid));
+              qs.set('site', 'cnalichn');
+              if (vOffer) qs.set('offerId', String(vOffer));
+              const deep2 = `https://air.1688.com/app/ocms-fusion-components-1688/def_cbu_web_im_core/index.html?${qs.toString()}`;
+              engine?.recordBehavior?.('chat_open_deeplink_vars', { deep: deep2, uid: vUid, offer: vOffer });
+              page = await browserContext.newPage();
+              await page.goto(deep2, { waitUntil: 'domcontentloaded', timeout: 30000 });
+            }
+          } else {
+            // 兜底：使用任意可用 raw URL（可能为跳转页）
+            let raw = null;
+            const any = tokens.find(t => t && t.raw);
+            if (any) raw = any.raw;
+            if (raw) {
+              engine?.recordBehavior?.('chat_open_raw', { raw });
+              page = await browserContext.newPage();
+              await page.goto(raw, { waitUntil: 'domcontentloaded', timeout: 30000 });
+            }
+          }
           }
         } catch {}
       }
@@ -85,6 +132,32 @@ export default class ChatComposeNode extends BaseNode {
         if (!ok) {
           const btns = await page.$$('body > div:nth-child(23) button');
           for (const b of btns) { try { await b.click({ timeout: 200 }).catch(()=>b.evaluate(n=>n.click())); } catch {} }
+        }
+      } catch {}
+
+      // 若提示“请先选择联系人”，尝试在左侧联系人列表中优先激活目标联系人（按 expectUid/contactUid），否则激活第一个可见联系人
+      try {
+        const preferName = (variables?.get && (variables.get('contactUid') || variables.get('expectUid'))) || null;
+        const clicked = await page.evaluate((name) => {
+          function vis(el){ try{ const s=getComputedStyle(el); if(s.display==='none'||s.visibility==='hidden'||Number(s.opacity)===0) return false; const r=el.getBoundingClientRect(); return r.width>40 && r.height>24 && r.x < innerWidth*0.5; }catch{return false} }
+          function score(el){ const r=el.getBoundingClientRect(); let s= (r.height*r.width); s += Math.max(0, (innerWidth*0.5 - r.x))*2; const t=(el.innerText||'').trim(); if(name && t.includes(name)) s += 5000; return s; }
+          // 左侧区域粗定位：取页面左半区可见的行状元素
+          const nodes = Array.from(document.querySelectorAll('li, [role=listitem], .list-item, .recent, .contact, .session, .next-menu-item, a, div'));
+          const cands = [];
+          for (const el of nodes){ if (!vis(el)) continue; const t=(el.innerText||'').trim(); if(!t) continue; // 排除无文本
+            // 排除非会话项（明显的下载/设置等）
+            const low=t.toLowerCase(); if (/(下载|设置|客户端|插件)/.test(t)) continue; if (/(download|setting|client)/.test(low)) continue;
+            cands.push({ el, sc: score(el), t }); }
+          if (!cands.length) return { ok:false };
+          cands.sort((a,b)=>b.sc-a.sc);
+          const target = cands[0].el.closest('a,button,[role=button],li,div') || cands[0].el;
+          try { target.scrollIntoView({block:'center'}); } catch {}
+          try { (target instanceof HTMLElement) && target.click(); } catch {}
+          return { ok:true, text: (target.innerText||'').trim() };
+        }, preferName);
+        if (clicked && clicked.ok) {
+          engine?.recordBehavior?.('contact_activate_click', { preferName, picked: clicked.text });
+          try { await page.waitForFunction(() => !document.body.innerText.includes('请先选择联系人'), { timeout: 2500 }); } catch {}
         }
       } catch {}
 
@@ -122,6 +195,29 @@ export default class ChatComposeNode extends BaseNode {
           if (inputHandle) break;
         } catch {}
       }
+      // 再次确认联系人已选择：若仍显示提示语，则在目标 frame 内再做一次联系人激活
+      try {
+        const needPick = await page.evaluate(() => /请先选择联系人/.test(document.body.innerText||''));
+        if (needPick) {
+          const preferName = (variables?.get && (variables.get('contactUid') || variables.get('expectUid'))) || null;
+          const okInFrame = await target.evaluate((name) => {
+            function vis(el){ try{ const s=getComputedStyle(el); if(s.display==='none'||s.visibility==='hidden'||Number(s.opacity)===0) return false; const r=el.getBoundingClientRect(); return r.width>40 && r.height>24 && r.x < innerWidth*0.6; }catch{return false} }
+            function score(el){ const r=el.getBoundingClientRect(); let s=(r.height*r.width); s += Math.max(0,(innerWidth*0.6 - r.x))*2; const t=(el.innerText||'').trim(); if(name && t.includes(name)) s += 5000; return s; }
+            const nodes = Array.from(document.querySelectorAll('li,[role=listitem],.list-item,.recent,.contact,.session,.next-menu-item,a,div'));
+            const cands=[]; for (const el of nodes){ if(!vis(el)) continue; const t=(el.innerText||'').trim(); if(!t) continue; if(/(下载|设置|客户端|插件)/.test(t)) continue; cands.push({el,sc:score(el),t}); }
+            if(!cands.length) return false;
+            cands.sort((a,b)=>b.sc-a.sc);
+            const targetEl = cands[0].el.closest('a,button,[role=button],li,div') || cands[0].el;
+            try{ targetEl.scrollIntoView({block:'center'});}catch{}
+            try{ targetEl.dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true})); }catch{}
+            return true;
+          }, preferName).catch(()=>false);
+          if (okInFrame) {
+            engine?.recordBehavior?.('contact_activate_frame', { via:'frame', preferName });
+            try { await page.waitForFunction(() => !/请先选择联系人/.test(document.body.innerText||''), { timeout: 2500 }); } catch {}
+          }
+        }
+      } catch {}
       if (!inputHandle) {
         // 纯 evaluate 回退：直接向第一个 contenteditable/textarea 注入文本
         const injected = await target.evaluate((msg) => {

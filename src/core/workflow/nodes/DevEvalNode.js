@@ -44,13 +44,16 @@ export default class DevEvalNode extends BaseNode {
 
     const frameCfg = config?.frame || null;
     const filePath = config?.filePath || null;
-    const inlineScript = config?.inlineScript || null;
+    let inlineScript = config?.inlineScript || null;
     const continueOnError = config?.continueOnError !== false; // 默认不中断
 
     try {
       let code = null;
       if (filePath) code = this.readScript(filePath);
-      if (!code && inlineScript) code = String(inlineScript);
+      if (!code && inlineScript) {
+        try { inlineScript = this.renderTemplate(String(inlineScript), context.variables); } catch {}
+        code = String(inlineScript);
+      }
       if (!code) return { success: false, error: 'no script provided (filePath/inlineScript empty)' };
 
       const target = frameCfg ? (this.resolveTargetFrame(page, frameCfg) || page) : page;
@@ -77,7 +80,14 @@ export default class DevEvalNode extends BaseNode {
         return { success: true, results: { devEvalError: msg } };
       }
 
-      return { success: true, results: { devEval: result.val } };
+      let varBag = undefined;
+      try {
+        if (result && result.val && typeof result.val === 'object' && result.val.variables && typeof result.val.variables === 'object') {
+          varBag = result.val.variables;
+        }
+      } catch {}
+
+      return { success: true, results: { devEval: result.val }, variables: varBag };
     } catch (e) {
       logger.error('❌ DevEval 节点异常: ' + (e?.message || e));
       if (!continueOnError) return { success: false, error: e?.message || String(e) };
@@ -98,4 +108,3 @@ export default class DevEvalNode extends BaseNode {
     };
   }
 }
-

@@ -1,0 +1,43 @@
+{
+  "name": "1688 搜索容器→聊天 批量(去重/模拟输入/不发送)",
+  "version": "1.0.0",
+  "variables": { "startIndex": 0, "count": 3, "chatMessage": "你好", "delayMin": 1000, "delayMax": 5000 },
+  "preflows": ["1688-login-preflow"],
+  "nodes": [
+    { "id": "start", "type": "StartNode", "name": "开始", "next": ["attach"] },
+    { "id": "attach", "type": "AttachSessionNode", "name": "会话接力", "config": {}, "next": ["anchor_list"] },
+
+    { "id": "anchor_list", "type": "ContainerAnchorNode", "name": "列表容器锚点", "config": { "containerName": "search.listContainer", "highlight": true, "label": "LIST", "durationMs": 3000, "outScopeVar": "listScope" }, "next": ["init_idx"] },
+
+    { "id": "init_idx", "type": "JavaScriptExecutionNode", "name": "初始化索引", "config": { "script": "(function(){ try{ var s=arguments[0]||{}; var idx=Number(s.startIndex||0)||0; var cnt=Number(s.count||3)||3; var end=idx+cnt; return { success:true, variables:{ idx:idx, count:cnt, endIdx:end } }; }catch(e){ return { success:false, error:String(e) }; } })();" }, "next": ["loop_check"] },
+
+    { "id": "loop_check", "type": "ConditionNode", "name": "是否结束( idx >= endIdx )", "config": { "mode": "variable", "varName": "idx", "operator": ">=", "value": "{endIdx}" }, "next": ["end"], "error": ["select_item"] },
+
+    { "id": "select_item", "type": "ContainerSelectNode", "name": "选择第 idx 个结果项", "config": { "containerName": "search.item", "parentScopeVar": "listScope", "indexVar": "idx", "outScopeVar": "itemScope", "highlight": true, "label": "ITEM", "durationMs": 3000 }, "next": ["anchor_ww"], "error": ["inc_idx"] },
+
+    { "id": "anchor_ww", "type": "ContainerAnchorNode", "name": "锚定旺旺链接", "config": { "containerName": "search.item.wangwangLink", "scopeVar": "itemScope", "outScopeVar": "wwScope", "highlight": true, "label": "WW LINK", "durationMs": 3000 }, "next": ["extract_company"], "error": ["inc_idx"] },
+
+    { "id": "extract_company", "type": "JavaScriptExecutionNode", "name": "读取公司名(.desc-text)", "config": { "script": "(function(){ try{ var scopeSel=\"{itemScope}\"; var root=scopeSel?document.querySelector(scopeSel):document; var cname=''; if(root){ var el=root.querySelector('.desc-text'); if(el) cname=(el.innerText||el.textContent||'').trim(); } return { success:true, variables:{ companyName:cname } }; }catch(e){ return { success:false, error:String(e) }; } })();" }, "next": ["check_history"], "error": ["inc_idx"] },
+
+    { "id": "check_history", "type": "ContactHistoryNode", "name": "历史去重检查", "config": { "action": "check", "site": "1688", "keyVarName": "companyName" }, "next": ["dedup_condition"] },
+    { "id": "dedup_condition", "type": "ConditionNode", "name": "是否已发送", "config": { "mode": "variable", "varName": "alreadySent", "operator": "==", "value": true }, "next": ["skip_record"], "error": ["pre_close_before_open"] },
+    { "id": "pre_close_before_open", "type": "CloseHostPageNode", "name": "预关闭历史聊天Tab", "config": { "urlPattern": "(air|im)\\.1688\\.com/.*", "closeAll": true }, "next": ["open"] },
+
+    { "id": "skip_record", "type": "ResultSaverNode", "name": "记录跳过日志", "config": { "outputDir": "archive/workflow-records", "filenameTemplate": "1688-batch-skip-{timestamp}.json", "includeMetadata": true, "mergeData": true }, "next": ["inc_idx"] },
+
+    { "id": "open", "type": "ContainerActionNode", "name": "点击旺旺链接", "config": { "containerName": "search.item.wangwangLink", "scopeVar": "itemScope", "action": "click" }, "next": ["wait_chat"] },
+    { "id": "wait_chat", "type": "WaitNode", "name": "等待聊天页", "config": { "minMs": 1500, "maxMs": 2500 }, "next": ["attach_chat"] },
+    { "id": "attach_chat", "type": "AttachHostPageNode", "name": "附着聊天页", "config": { "urlPattern": "air\\.1688\\.com/.*", "bringToFront": true, "waitUntil": "domcontentloaded", "timeout": 15000 }, "next": ["anchor_chat"] },
+    { "id": "anchor_chat", "type": "AnchorPointNode", "name": "聊天锚点", "config": { "frame": { "urlPattern": "def_cbu_web_im_core" }, "selectors": ["pre.edit[contenteditable]", ".im-chat-input [contenteditable]", ".send-btn", "button:has-text(发送)"], "requireVisible": true, "highlight": true, "persistHighlight": false }, "next": ["compose"] },
+    { "id": "compose", "type": "ChatComposeNode", "name": "输入(不发送)", "config": { "hostFilter": "air.1688.com", "message": "{chatMessage}", "send": false, "sendViaEnter": false, "highlightMs": 1200 }, "next": ["record_contact"] },
+    { "id": "record_contact", "type": "ContactHistoryNode", "name": "记录发送对象", "config": { "action": "add", "site": "1688", "keyVarName": "companyName" }, "next": ["close_chat_tab"] },
+    { "id": "close_chat_tab", "type": "CloseHostPageNode", "name": "关闭聊天Tab", "config": { "urlPattern": "(air|im)\\.1688\\.com/.*", "closeAll": true }, "next": ["attach_back_search"] },
+    { "id": "attach_back_search", "type": "AttachHostPageNode", "name": "切回搜索页", "config": { "urlPattern": "s\\.1688\\.com/.*", "bringToFront": true, "waitUntil": "domcontentloaded", "timeout": 10000 }, "next": ["delay"] },
+
+    { "id": "delay", "type": "WaitNode", "name": "间隔(切换聊天)", "config": { "minMs": 3000, "maxMs": 3000 }, "next": ["inc_idx"] },
+    { "id": "inc_idx", "type": "JavaScriptExecutionNode", "name": "索引+1", "config": { "script": "(function(){ try{ var i=Number(arguments[0]&&arguments[0].idx||0)||0; i++; return { success:true, variables:{ idx:i } }; }catch(e){ return { success:false, error:String(e) }; } })();" }, "next": ["loop_check"] },
+
+    { "id": "end", "type": "EndNode", "name": "结束", "config": { "cleanup": false, "saveLogs": true } }
+  ],
+  "globalConfig": { "timeout": 600000, "logLevel": "info" }
+}

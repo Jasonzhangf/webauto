@@ -28,7 +28,11 @@ class WorkflowRunner {
             // 验证工作流配置
             this.validateWorkflow(workflowConfig);
 
-            // 统一会话ID（前置与主流程同一会话，便于 AttachSessionNode 接力）
+            // 强制 Attach 默认策略：若未提供 sessionId 且未显式允许新开，则直接报错
+            const allowLaunch = parameters.allowLaunch === true;
+            if (!parameters.sessionId && !allowLaunch) {
+                throw new Error('attach-only mode: sessionId required. Set parameters.sessionId or allowLaunch=true to create new.');
+            }
             const workingSessionId = parameters.sessionId || `sess-${Date.now()}-${Math.floor(Math.random()*1e6)}`;
 
             // 执行前置流程（若存在配置）

@@ -1,0 +1,30 @@
+{
+  "name": "1688 搜索-旺旺-聊天模拟(只过滤不发送)",
+  "version": "1.0.0",
+  "variables": { "keyword": "钢化膜", "startIndex": 0 },
+  "preflows": ["1688-login-preflow"],
+  "nodes": [
+    { "id": "start", "type": "StartNode", "name": "开始", "next": ["attach"] },
+    { "id": "attach", "type": "AttachSessionNode", "name": "会话接力", "config": {}, "next": ["attach_search"] },
+    { "id": "attach_search", "type": "AttachHostPageNode", "name": "附着搜索页", "config": { "urlPattern": "s\\.1688\\.com/.*", "bringToFront": true, "waitUntil": "domcontentloaded", "timeout": 15000 }, "next": ["search_anchor"] },
+    { "id": "search_anchor", "type": "AnchorPointNode", "name": "搜索结果锚点", "config": { "selectors": [".sm-offer-list",".sm-offer","#offer-list",".offer-list",".sm-offer-item",".input-button .input-button-text","span.input-button-text","#img-search-upload","input#img-search-upload"], "requireVisible": true, "maxWaitMs": 6000, "pollIntervalMs": 500, "highlight": true, "persistHighlight": true }, "next": ["extract_candidates"] },
+    { "id": "extract_candidates", "type": "DevEvalNode", "name": "提取候选公司名", "config": { "filePath": "local-dev/1688-extract-candidates.js" }, "next": ["set_chosen_from_start"] },
+    { "id": "set_chosen_from_start", "type": "DevEvalNode", "name": "候选索引=起始索引", "config": { "inlineScript": "(()=>({ variables:{ chosenIndex: Number('{startIndex}')||0 } }))();" }, "next": ["set_index_var"] },
+    { "id": "set_index_var", "type": "DevEvalNode", "name": "设置索引变量", "config": { "inlineScript": "(()=>{ window.__wwClickIndex=Number('{chosenIndex}')||0; return {ok:true}; })();" }, "next": ["mark_any"] },
+    { "id": "mark_any", "type": "DevEvalNode", "name": "标记一个可用旺旺(不打开)", "config": { "filePath": "local-dev/1688-mark-first-ww-link.js" }, "next": ["resolve_contact_key"] },
+    { "id": "resolve_contact_key", "type": "DevEvalNode", "name": "解析候选身份", "config": { "filePath": "local-dev/1688-resolve-contact-selected.js" }, "next": ["check_history"] },
+    { "id": "check_history", "type": "ContactHistoryNode", "name": "历史去重检查", "config": { "action": "check", "site": "1688", "keyVarName": "companyName" }, "next": ["dedup_condition"] },
+    { "id": "dedup_condition", "type": "ConditionNode", "name": "是否已发送", "config": { "mode": "variable", "varName": "alreadySent", "operator": "==", "value": true }, "next": ["log_skip"], "error": ["log_plan"] },
+    { "id": "log_skip", "type": "BehaviorLogNode", "name": "记录跳过", "config": { "outputDir": "archive/workflow-records" }, "next": ["save"] },
+    { "id": "log_plan", "type": "BehaviorLogNode", "name": "记录计划(模拟)", "config": { "outputDir": "archive/workflow-records" }, "next": ["open_chat"] },
+    { "id": "open_chat", "type": "DevEvalNode", "name": "点击旺旺链接(不发送)", "config": { "filePath": "local-dev/1688-open-selected-ww.js" }, "next": ["wait_chat"] },
+    { "id": "wait_chat", "type": "WaitNode", "name": "等待聊天页加载", "config": { "minMs": 1200, "maxMs": 2000 }, "next": ["attach_chat"] },
+    { "id": "attach_chat", "type": "AttachHostPageNode", "name": "附着聊天页", "config": { "urlPattern": "air\\.1688\\.com/.*", "bringToFront": true, "waitUntil": "domcontentloaded", "timeout": 15000 }, "next": ["chat_anchor"] },
+    { "id": "chat_anchor", "type": "AnchorPointNode", "name": "聊天页锚点(模拟)", "config": { "frame": { "urlPattern": "def_cbu_web_im_core" }, "selectors": ["pre.edit[contenteditable]", ".im-chat-input [contenteditable]", ".send-btn", "button:has-text(发送)"], "requireVisible": true, "highlight": true, "persistHighlight": true }, "next": ["close_tab"] },
+    { "id": "close_tab", "type": "CloseHostPageNode", "name": "关闭聊天Tab(模拟)", "config": { "hostIncludes": "air.1688.com", "closeAll": false }, "next": ["attach_back_search"] },
+    { "id": "attach_back_search", "type": "AttachHostPageNode", "name": "切回搜索结果", "config": { "urlPattern": "s\\.1688\\.com/.*", "bringToFront": true, "waitUntil": "domcontentloaded", "timeout": 10000 }, "next": ["save"] },
+    { "id": "save", "type": "ResultSaverNode", "name": "保存结果(不落历史)", "config": { "outputDir": "archive/workflow-records", "filenameTemplate": "1688-chat-simulate-{timestamp}.json", "includeMetadata": true, "mergeData": true }, "next": ["end"] },
+    { "id": "end", "type": "EndNode", "name": "结束", "config": { "cleanup": false, "saveLogs": true } }
+  ],
+  "globalConfig": { "logLevel": "info", "timeout": 600000 }
+}

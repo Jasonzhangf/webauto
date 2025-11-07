@@ -10,12 +10,14 @@ import { tabClose, tabAttach } from './controllers/browserExtraController.js';
 import { evalFile as devEvalFile, evalCode as devEvalCode, installPicker as devInstallPicker } from './controllers/devController.js';
 import * as mouseCtl from './controllers/mouseController.js';
 import * as keyboardCtl from './controllers/keyboardController.js';
-import * as containerOps from './controllers/containerOpsController.ts';
+import * as containerOps from './controllers/containerOpsController.js';
+import * as containerByName from './controllers/containerByNameController.js';
 import { run as runSequence } from './controllers/workflowSequenceController.js';
 import { list as listRecords } from './controllers/workflowRecordsController.js';
 import { submitWorkflow as jobSubmitWorkflow, status as jobStatus } from './controllers/jobController.js';
 import { switchRun } from './controllers/demoSwitchController.js';
 import * as contactCtl from './controllers/contactStoreController.js';
+import { launch as launchSession, overlayInstall as overlayInstall, cookiesInject, cookiesSave, listCookies } from './controllers/sessionLaunchController.js';
 
 const app = express();
 app.use(express.json({ limit: '20mb' }));
@@ -31,6 +33,11 @@ app.post('/sessions/close', closeSession);
 app.get('/v1/sessions', listSessions);
 app.post('/v1/sessions/start', startSession);
 app.post('/v1/sessions/close', closeSession);
+app.post('/v1/browser/session/launch', launchSession);
+app.post('/v1/browser/session/overlay/install', overlayInstall);
+app.post('/v1/browser/cookies/inject', cookiesInject);
+app.post('/v1/browser/cookies/save', cookiesSave);
+app.get('/v1/browser/cookies/list', listCookies);
 
 // workflow
 app.post('/workflow/run', runWorkflow);
@@ -102,6 +109,12 @@ app.post('/v1/containers/actions/hover', containerOps.hover);
 app.post('/v1/containers/actions/bbox', containerOps.bbox);
 app.post('/v1/containers/actions/screenshot', containerOps.screenshot);
 app.post('/v1/containers/actions/get', containerOps.get);
+
+// containers by-name (scope-aware)
+app.post('/v1/containers/by-name/validate', containerByName.validateByName);
+app.post('/v1/containers/by-name/highlight', containerByName.highlightByName);
+app.post('/v1/containers/by-name/select', containerByName.selectByName);
+app.post('/v1/containers/by-name/op-click', containerByName.clickByName);
 
 // workflows sequence
 app.post('/v1/workflows/sequence/run', runSequence);

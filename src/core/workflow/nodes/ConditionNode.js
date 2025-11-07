@@ -14,7 +14,16 @@ export default class ConditionNode extends BaseNode {
     let passed = false;
     try {
       if (mode === 'variable') {
-        const key = config?.varName; const op = (config?.operator || '==').toLowerCase(); const val = config?.value;
+        const key = config?.varName; const op = (config?.operator || '==').toLowerCase();
+        // 支持 {var} 模板形式的值解析
+        let rawVal = config?.value;
+        let val;
+        if (typeof rawVal === 'string' && /^\{[^}]+\}$/.test(rawVal)) {
+          const k = rawVal.slice(1, -1);
+          val = variables.get(k);
+        } else {
+          val = rawVal;
+        }
         const cur = variables.get(key);
         switch (op) {
           case '==': case '=': passed = (String(cur) === String(val)); break;
@@ -42,6 +51,11 @@ export default class ConditionNode extends BaseNode {
         passed = !!res;
       }
       logger.info(`✅ 条件判断: ${passed?'passed':'failed'}`);
+      // 若配置 routeOnFailToError=true，则不通过时走 error 分支
+      const routeOnFail = config?.routeOnFailToError !== false; // 默认 true
+      if (!passed && routeOnFail) {
+        return { success: false, error: 'condition failed' };
+      }
       return { success: true, variables: { conditionPassed: passed } };
     } catch (e) {
       logger.warn('⚠️ 条件判断异常: ' + (e?.message || e));
@@ -64,4 +78,3 @@ export default class ConditionNode extends BaseNode {
     };
   }
 }
-

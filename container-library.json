@@ -2,15 +2,68 @@
   "cbu": {
     "website": "1688.com",
     "containers": {
-      "search.list": { "selector": ".sm-offer-item, .offer-item, .sm-offer, [class*=offer]" },
-      "search.item.title": { "selector": "h4 a, [class*=title] a, a[title]" },
-      "search.item.price": { "selector": "[class*=price], [data-price]" },
-      "search.item.img": { "selector": "img" },
-      "search.item.offerUrl": { "selector": "a[href*='.1688.com/']" },
-      "search.item.wangwangSpan": { "selector": "span.J_WangWang, span[class*=WangWang]" },
-      "search.item.wangwangLink": { "selector": "span.J_WangWang a.ww-link" },
-      "search.item.shopLink": { "selector": "a[href*='company.1688.com'], a[href*='page/index.htm']" }
+      "home": {
+        "selector": "body, .home, #page",
+        "children": ["home.search"],
+        "description": "1688 首页根容器"
+      },
+      "home.search": {
+        "selector": ".ali-search-box",
+        "children": ["home.search.searchbox", "home.search.searchbutton"],
+        "description": "首页搜索区域"
+      },
+      "home.search.searchbox": {
+        "selector": ".ali-search-keywords input#alisearch-input, .ali-search-keywords input[name='keywords'], #alisearch-input, input[name='keywords'], input#alisearch-keywords",
+        "actions": { "type": true, "fill": true },
+        "description": "首页搜索输入框（位于 .ali-search-box 内）"
+      },
+      "home.search.searchbutton": {
+        "selector": ".ali-search-box .input-button, .ali-search-box .input-button .input-button-text, .input-button .input-button-text",
+        "actions": { "click": true },
+        "description": "首页搜索按钮（位于 .ali-search-box 内）"
+      },
+      "search.root": {
+        "selector": ".search-ui2024, .search-i18nUi, body",
+        "children": ["search.listContainer"],
+        "description": "搜索页根容器（新UI类名search-ui2024/i18nUi）"
+      },
+      "search.listContainer": {
+        "selector": ".space-common-offerlist",
+        "children": ["search.item"],
+        "description": "搜索结果列表容器（优先space-common-offerlist）"
+      },
+      "search.item": {
+        "selector": ".search-offer-item",
+        "children": ["search.item.wangwangLink", "search.item.title", "search.item.price", "search.item.img"],
+        "description": "单个结果卡片容器（包含标题、价格、图片、旺旺）"
+      },
+      "search.item.title": { "selector": "h4 a, [class*=title] a, a[title]", "description": "标题链接" },
+      "search.item.price": { "selector": "[class*=price], [data-price]", "description": "价格区域" },
+      "search.item.img": { "selector": "img", "description": "商品图片" },
+      "search.item.offerUrl": { "selector": "a[href*='.1688.com/']", "description": "商品/店铺链接" },
+      "search.item.wangwangSpan": { "selector": "span.J_WangWang, span[class*=WangWang]", "description": "旺旺容器Span" },
+      "search.item.wangwangLink": {
+        "selector": "span.J_WangWang a.ww-link, a.ww-link[href*='air.1688.com'], a.ww-link[href*='im.1688.com']",
+        "actions": { "click": true },
+        "description": "旺旺聊天链接（绑定点击操作）"
+      },
+      "search.item.shopLink": { "selector": "a[href*='company.1688.com'], a[href*='page/index.htm']", "description": "公司主页链接" }
+      ,
+      "chat.root": {
+        "selector": ".ww",
+        "children": ["chat.inputBox", "chat.sendButton"],
+        "description": "聊天页根容器（air.1688.com / im.1688.com）"
+      },
+      "chat.inputBox": {
+        "selector": ".editBox [contenteditable=true], .editBox pre.edit, .editBox",
+        "actions": { "type": true, "fill": true },
+        "description": "聊天输入区域（支持 type/fill）"
+      },
+      "chat.sendButton": {
+        "selector": ".btn-container, .send-btn, button",
+        "actions": { "click": true },
+        "description": "聊天发送按钮"
+      }
     }
   }
 }
-

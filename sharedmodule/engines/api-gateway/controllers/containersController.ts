@@ -59,7 +59,7 @@ export async function resolve(req, res) {
 }
 
 export async function validate(req, res) {
-  const { sessionId, containerSelector, frame } = req.body || {};
+  const { sessionId, containerSelector, frame, scopeSelector } = req.body || {};
   if (!sessionId || !containerSelector) return res.status(400).json({ success: false, error: 'sessionId and containerSelector required' });
   try {
     const page = await getPage(sessionId);
@@ -75,7 +75,13 @@ export async function validate(req, res) {
       })();
       target = f || page;
     }
-    const ok = await target.$(containerSelector);
+    let ok;
+    if (scopeSelector) {
+      const root = await target.$(scopeSelector);
+      ok = root ? await root.$(containerSelector) : null;
+    } else {
+      ok = await target.$(containerSelector);
+    }
     let rect = null;
     try { if (ok) rect = await ok.boundingBox(); } catch {}
     return res.json({ success: true, found: !!ok, rect });
@@ -83,7 +89,7 @@ export async function validate(req, res) {
 }
 
 export async function highlight(req, res) {
-  const { sessionId, containerSelector, frame, color = '#ff9500', label = 'CONTAINER', durationMs = 3000 } = req.body || {};
+  const { sessionId, containerSelector, frame, scopeSelector, color = '#ff9500', label = 'CONTAINER', durationMs = 3000 } = req.body || {};
   if (!sessionId || !containerSelector) return res.status(400).json({ success: false, error: 'sessionId and containerSelector required' });
   try {
     const page = await getPage(sessionId);
@@ -95,16 +101,18 @@ export async function highlight(req, res) {
       }catch{}
       return page;
     })();
-    const applied = await target.evaluate((sel, color, label, ms)=>{
-      const el=document.querySelector(sel); if(!el) return false;
+    const applied = await target.evaluate((sel, scopeSel, color, label, ms)=>{
+      const scope = scopeSel ? document.querySelector(scopeSel) : document;
+      if (!scope) return false;
+      const el = scope.querySelector(sel); if(!el) return false;
+      try{ el.scrollIntoView({behavior:'instant', block:'center'}); }catch{}
       const r=el.getBoundingClientRect();
       const box=document.createElement('div'); box.style.cssText='position:fixed;left:'+(r.x-3)+'px;top:'+(r.y-3)+'px;width:'+(r.width+6)+'px;height:'+(r.height+6)+'px;border:3px solid '+color+';border-radius:8px;background:rgba(255,149,0,0.08);pointer-events:none;z-index:2147483647';
       const tag=document.createElement('div'); tag.textContent=label; tag.style.cssText='position:fixed;left:'+r.x+'px;top:'+(r.y-18)+'px;padding:1px 4px;background:'+color+';color:#fff;border-radius:3px;font:12px -apple-system,system-ui;z-index:2147483647';
       document.body.appendChild(box); document.body.appendChild(tag);
       setTimeout(()=>{ try{box.remove(); tag.remove();}catch{} }, ms);
       return true;
-    }, containerSelector, color, label, durationMs);
+    }, containerSelector, scopeSelector||null, color, label, durationMs);
     return res.json({ success: !!applied });
   } catch (e) { return res.status(500).json({ success:false, error: e.message }); }
 }
-

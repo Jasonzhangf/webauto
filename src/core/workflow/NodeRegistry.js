@@ -48,6 +48,11 @@ import CloseHostPageNode from './nodes/CloseHostPageNode.js';
 import ConditionNode from './nodes/ConditionNode.js';
 import SwitchWorkflowNode from './nodes/SwitchWorkflowNode.js';
 import ContactHistoryNode from './nodes/ContactHistoryNode.js';
+import ContainerAnchorNode from './nodes/ContainerAnchorNode.js';
+import ContainerSelectNode from './nodes/ContainerSelectNode.js';
+import ContainerActionNode from './nodes/ContainerActionNode.js';
+import SelectNextUnsent1688Node from './nodes/SelectNextUnsent1688Node.js';
+import PickUnsentFromListNode from './nodes/PickUnsentFromListNode.js';
 
 class NodeRegistry {
     constructor() {
@@ -106,6 +111,11 @@ class NodeRegistry {
         this.registerNode('ConditionNode', new ConditionNode());
         this.registerNode('SwitchWorkflowNode', new SwitchWorkflowNode());
         this.registerNode('ContactHistoryNode', new ContactHistoryNode());
+        this.registerNode('ContainerAnchorNode', new ContainerAnchorNode());
+        this.registerNode('ContainerSelectNode', new ContainerSelectNode());
+        this.registerNode('ContainerActionNode', new ContainerActionNode());
+        this.registerNode('SelectNextUnsent1688Node', new SelectNextUnsent1688Node());
+        this.registerNode('PickUnsentFromListNode', new PickUnsentFromListNode());
     }
 
     registerNode(type, handler) {

@@ -3,6 +3,8 @@
 class SessionRegistry {
   constructor() {
     this.sessions = new Map(); // sessionId -> { browser, context, page, createdAt }
+    this._hooksInstalled = false;
+    this._installExitHooks();
   }
 
   save(sessionId, session) {
@@ -30,8 +32,27 @@ class SessionRegistry {
   list() {
     return Array.from(this.sessions.keys());
   }
+
+  async closeAll() {
+    const ids = Array.from(this.sessions.keys());
+    for (const id of ids) {
+      try { await this.close(id); } catch {}
+    }
+  }
+
+  _installExitHooks() {
+    if (this._hooksInstalled) return;
+    const safeClose = async () => {
+      try { await this.closeAll(); } catch {}
+    };
+    try { process.on('beforeExit', safeClose); } catch {}
+    try { process.on('exit', () => {}); } catch {}
+    try { process.on('SIGINT', async () => { await safeClose(); process.exit(0); }); } catch {}
+    try { process.on('SIGTERM', async () => { await safeClose(); process.exit(0); }); } catch {}
+    try { process.on('SIGQUIT', async () => { await safeClose(); process.exit(0); }); } catch {}
+    this._hooksInstalled = true;
+  }
 }
 
 const registry = new SessionRegistry();
 export default registry;
-

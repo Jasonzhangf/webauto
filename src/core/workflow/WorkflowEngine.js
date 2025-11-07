@@ -48,6 +48,60 @@ class WorkflowEngine {
     this.behaviorLog = [];
     this.recorder = null;
     this.highlightDefaults = { ...DEFAULT_HIGHLIGHT };
+
+    // Focus manager: unify focus scope + pulse highlight (no scroll by default)
+    const self = this;
+    this.focus = {
+      _current: null, // { scopeSelector, frameCfg, label, color }
+      _defaults: { enabled: true, pulseMs: 500, noScroll: true, color: '#34c759', label: 'FOCUS' },
+      setFocus(scopeSelector, frameCfg = null, meta = {}) {
+        try {
+          self.logger.info(`🎯 设置焦点: ${scopeSelector || '(null)'}`);
+          this._current = { scopeSelector, frameCfg, ...meta };
+        } catch {}
+      },
+      getFocus() { return this._current; },
+      clear() { this._current = null; },
+      async pulse(label, color, ms, opts = {}) {
+        try {
+          const f = this._current; if (!f) return false;
+          const page = self.page; if (!page) return false;
+          const { highlightInline } = await import('./ContainerResolver.js');
+          const usedLabel = label || f.label || this._defaults.label;
+          const usedColor = color || f.color || this._defaults.color;
+          const usedMs = typeof ms === 'number' ? ms : this._defaults.pulseMs;
+          const noScroll = (opts.noScroll !== undefined) ? !!opts.noScroll : this._defaults.noScroll;
+          if (!f.frameCfg) {
+            return await highlightInline(page, { selector: f.scopeSelector, scopeSelector: null, label: usedLabel, color: usedColor, durationMs: usedMs, noScroll });
+          } else {
+            // frame-aware inline highlight
+            const frames = page.frames();
+            let target = null;
+            try {
+              const cfg = f.frameCfg;
+              if (cfg.urlPattern) { const re=new RegExp(cfg.urlPattern); target = frames.find(fr=>re.test(fr.url())); }
+              else if (cfg.urlIncludes) { target = frames.find(fr=>fr.url().includes(cfg.urlIncludes)); }
+              else if (typeof cfg.index==='number' && frames[cfg.index]) target = frames[cfg.index];
+            } catch {}
+            target = target || page;
+            await target.evaluate((p)=>{
+              const el = document.querySelector(p.sel); if(!el) return false;
+              if(!p.noScroll){ try{ el.scrollIntoView({behavior:'instant', block:'center'});}catch{} }
+              if (!document.getElementById('__waHL_style')){
+                const st=document.createElement('style'); st.id='__waHL_style';
+                st.textContent = `.wa-hl-inline{ outline:2px solid var(--wa-color,#34c759)!important; outline-offset:2px!important; border-radius:6px!important; position:relative!important; } .wa-hl-inline[data-wa-label]:after{ content: attr(data-wa-label); position:absolute; left:0; top:-18px; background: var(--wa-color,#34c759); color:#fff; padding:1px 6px; border-radius:4px; font:12px -apple-system,system-ui; z-index:2147483647 }`;
+                document.head.appendChild(st);
+              }
+              el.classList.add('wa-hl-inline'); el.style.setProperty('--wa-color', p.color);
+              el.setAttribute('data-wa-label', p.label);
+              if (p.ms>0) setTimeout(()=>{ try{ el.classList.remove('wa-hl-inline'); el.removeAttribute('data-wa-label'); }catch{} }, p.ms);
+              return true;
+            }, { sel: f.scopeSelector, label: usedLabel, color: usedColor, ms: usedMs, noScroll });
+            return true;
+          }
+        } catch { return false; }
+      }
+    };
   }
 
   applyHighlightDefaults(overrides) {

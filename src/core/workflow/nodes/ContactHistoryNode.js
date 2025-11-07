@@ -1,6 +1,6 @@
 // 联系历史节点：检查或记录已发送对象，避免重复发送
 import BaseNode from './BaseNode.js';
-import { has1688, add1688 } from '../ContactStore.js';
+import { has1688, has1688Loose, add1688 } from '../ContactStore.mjs';
 
 export default class ContactHistoryNode extends BaseNode {
   constructor() {
@@ -29,11 +29,15 @@ export default class ContactHistoryNode extends BaseNode {
       };
 
       if (action === 'check') {
-        const exists = has1688(data);
+        // 宽松去重：公司名/uid 归一化匹配，offerId/chatUrl 精确匹配
+        const exists = has1688Loose(data) || has1688(data);
         logger.info(`📒 历史检查: ${exists ? '已发送' : '未发送'}`);
         return { success: true, variables: { alreadySent: exists } };
       } else if (action === 'add') {
-        const rec = add1688(data);
+        const msg = variables.get('chatMessage') || variables.get('message') || config?.message || null;
+        const companyName = variables.get('companyName') || null;
+        const companyNameChat = variables.get('companyNameChat') || null;
+        const rec = add1688({ ...data, extra: { message: msg, companyName, companyNameChat } });
         logger.info('📝 已记录发送对象');
         return { success: true, variables: { contactRecordedAt: rec.lastSentAt } };
       } else {
