@@ -5,6 +5,7 @@
  * 验证Cookie加载功能
  */
 
+// 注意：此文件为测试/诊断脚本，仍然保留直接使用 Playwright。
 import { chromium } from 'playwright';
 import * as fs from 'fs/promises';
 import * as path from 'path';

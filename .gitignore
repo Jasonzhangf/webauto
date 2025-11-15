@@ -116,6 +116,7 @@ build/
 
 # Large local models (avoid committing)
 sharedmodule/ui-recognition/python-service/models/
+libs/ui-recognition/python-service/models/ui-ins-7b/model-*.safetensors
 
 # Test configuration files (contain sensitive information)
 **/config/*.config.js
@@ -148,6 +149,7 @@ test-artifacts/
 *.cookies
 sessions/
 storage/
+cookies/
 
 # Playwright
 playwright-report/

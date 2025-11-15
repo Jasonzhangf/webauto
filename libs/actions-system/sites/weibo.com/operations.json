@@ -1,0 +1,157 @@
+{
+  "version": "1.0.0",
+  "operations": [
+    {
+      "key": "highlight-green",
+      "label": "高亮(绿色)",
+      "node": "JavaScriptExecutionNode",
+      "params": {
+        "script": "return (function(){ try{ const el=document.querySelector(window.__webautoTmpSelector||''); if(!el) return {ok:false}; window.__webautoHighlight?.createHighlight(el,{color:'#34c759',label:'PICK',duration:4000}); return {ok:true}; }catch(e){ return {ok:false,err:e.message}; } })();"
+      }
+    },
+    {
+      "key": "click-dom",
+      "label": "点击(DOM)",
+      "node": "EventDrivenOptionalClickNode",
+      "params": { "click": true, "highlight": true, "maxWaitMs": 8000 }
+    },
+    {
+      "key": "copy-selector",
+      "label": "复制选择器",
+      "node": "JavaScriptExecutionNode",
+      "params": {
+        "script": "return (async function(){ try{ const s=window.__webautoTmpSelector||''; await navigator.clipboard?.writeText(s); return {ok:true, selector:s}; }catch(e){ return {ok:false,err:e.message}; } })();"
+      }
+    },
+    {
+      "key": "action:expand",
+      "label": "展开回复",
+      "node": "EventDrivenOptionalClickNode",
+      "params": {
+        "click": true,
+        "highlight": true,
+        "method": "mouse",
+        "maxWaitMs": 8000,
+        "textIncludes": ["展开","更多回复"],
+        "descendantSelectors": ["button", "a", "[role=button]", ".expand"]
+      }
+    },
+    {
+      "key": "action:load-more",
+      "label": "加载更多",
+      "node": "EventDrivenOptionalClickNode",
+      "params": {
+        "click": true,
+        "highlight": true,
+        "method": "mouse",
+        "maxWaitMs": 8000,
+        "textIncludes": ["更多","加载更多","更多内容"],
+        "descendantSelectors": ["button", "a", "[role=button]", ".woo-box-flex.woo-box-alignCenter.woo-box-justifyCenter.morepop_moreIcon_1RvP9"]
+      }
+    },
+    {
+      "key": "action:open-comment",
+      "label": "打开评论",
+      "node": "EventDrivenOptionalClickNode",
+      "params": {
+        "click": true,
+        "highlight": true,
+        "method": "mouse",
+        "maxWaitMs": 8000,
+        "descendantSelectors": [".woo-font.woo-font--comment", "[aria-label*=评论]", "button", "a", "[role=button]"]
+      }
+    }
+    ,
+    {
+      "key": "click-playwright",
+      "label": "点击(Playwright)",
+      "node": "PlaywrightClickNode",
+      "params": {
+        "highlight": true,
+        "scrollIntoView": true,
+        "timeout": 8000
+      }
+    },
+    {
+      "key": "action:like",
+      "label": "点赞",
+      "node": "EventDrivenOptionalClickNode",
+      "params": {
+        "click": true,
+        "highlight": true,
+        "method": "mouse",
+        "maxWaitMs": 8000,
+        "textIncludes": ["赞"],
+        "descendantSelectors": [".woo-font.woo-font--like", "button", "a", "[role=button]", "[title*=赞]", "[aria-label*=赞]"]
+      }
+    },
+    {
+      "key": "action:repost",
+      "label": "转发",
+      "node": "EventDrivenOptionalClickNode",
+      "params": {
+        "click": true,
+        "highlight": true,
+        "method": "mouse",
+        "maxWaitMs": 8000,
+        "textIncludes": ["转发"],
+        "descendantSelectors": [".woo-font.woo-font--forward", "button", "a", "[role=button]", "[title*=转发]", "[aria-label*=转发]"]
+      }
+    },
+    {
+      "key": "action:follow",
+      "label": "关注",
+      "node": "EventDrivenOptionalClickNode",
+      "params": {
+        "click": true,
+        "highlight": true,
+        "method": "mouse",
+        "maxWaitMs": 8000,
+        "textIncludes": ["关注"],
+        "descendantSelectors": [".woo-btn-main", "button", "a", "[role=button]", "[aria-label*=关注]", "[title*=关注]"]
+      }
+    },
+    {
+      "key": "action:collect",
+      "label": "收藏",
+      "node": "EventDrivenOptionalClickNode",
+      "params": {
+        "click": true,
+        "highlight": true,
+        "method": "mouse",
+        "maxWaitMs": 8000,
+        "textIncludes": ["收藏"],
+        "descendantSelectors": ["button", "a", "[role=button]", "[aria-label*=收藏]", "[title*=收藏]"]
+      }
+    },
+    {
+      "key": "search:submit",
+      "label": "搜索提交",
+      "node": "EventDrivenOptionalClickNode",
+      "params": {
+        "click": true,
+        "highlight": true,
+        "method": "mouse",
+        "maxWaitMs": 8000,
+        "textIncludes": ["搜索","查找"],
+        "descendantSelectors": ["button[type=submit]", "button", "a", "[role=button]", "[aria-label*=搜索]"]
+      }
+    },
+    {
+      "key": "input:set-text",
+      "label": "输入文本",
+      "node": "JavaScriptExecutionNode",
+      "params": {
+        "script": "return (function(){ try{ const el=document.querySelector(window.__webautoTmpSelector||''); if(!el) return {ok:false,reason:'no element'}; const v=(window.__webautoTmpValue!=null? String(window.__webautoTmpValue):''); const proto=Object.getPrototypeOf(el); if ('value' in el){ el.focus(); el.value=v; el.dispatchEvent(new Event('input',{bubbles:true})); el.dispatchEvent(new Event('change',{bubbles:true})); return {ok:true, value:v}; } return {ok:false,reason:'not input-like'}; }catch(e){ return {ok:false,err:e.message}; } })();"
+      }
+    },
+    {
+      "key": "scroll:pagedown",
+      "label": "向下翻页",
+      "node": "JavaScriptExecutionNode",
+      "params": {
+        "script": "return (function(){ try{ window.scrollBy({ top: window.innerHeight*0.9, behavior: 'instant' }); return {ok:true}; }catch(e){ return {ok:false, err:e.message}; } })();"
+      }
+    }
+  ]
+}

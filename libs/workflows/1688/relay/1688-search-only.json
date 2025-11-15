@@ -1,0 +1,76 @@
+{
+  "name": "1688 搜索页就绪(仅到搜索页)",
+  "nodes": [
+    { "id": "start", "type": "StartNode", "name": "开始", "next": ["attach"] },
+    { "id": "attach", "type": "AttachSessionNode", "name": "会话接力", "config": {}, "next": ["build_gbk_url"] },
+    {
+      "id": "build_gbk_url",
+      "type": "GBKURLBuilderNode",
+      "name": "GBK编码搜索URL",
+      "config": {
+        "baseUrl": "https://s.1688.com/selloffer/offer_search.htm",
+        "paramName": "keywords",
+        "keywordVar": "keyword",
+        "extraParams": { "n": "y" }
+      },
+      "next": ["navigate_search"]
+    },
+    {
+      "id": "navigate_search",
+      "type": "NavigationNode",
+      "name": "导航到搜索页",
+      "config": { "url": "{targetUrl}", "waitUntil": "domcontentloaded", "timeout": 45000 },
+      "next": ["prefer_web_variant"]
+    },
+    {
+      "id": "prefer_web_variant",
+      "type": "EventDrivenOptionalClickNode",
+      "name": "优先使用网页版(事件驱动)",
+      "config": {
+        "selectors": [".next-btn", "button", "[role=button]", "a"],
+        "textIncludes": ["优先使用网页", "使用网页版", "继续使用网页版", "仍使用网页", "留在网页", "仅使用网页版"],
+        "excludeTexts": ["下载", "客户端", "安装"],
+        "maxWaitMs": 15000,
+        "pollIntervalMs": 400,
+        "highlight": true,
+        "persistHighlight": true,
+        "highlightColor": "#ff2d55",
+        "click": true,
+        "method": "mouse",
+        "mouseMoveSteps": 12,
+        "hoverMs": 60
+      },
+      "next": ["wait_search"]
+    },
+    { "id": "wait_search", "type": "WaitNode", "name": "等待搜索结果加载", "config": { "minMs": 2500, "maxMs": 4000 }, "next": ["search_anchor"] },
+    {
+      "id": "search_anchor",
+      "type": "AnchorPointNode",
+      "name": "搜索结果锚点",
+      "config": {
+        "selectors": [
+          ".sm-offer-list",
+          ".sm-offer",
+          "#offer-list",
+          ".offer-list",
+          ".sm-offer-item",
+          ".input-button .input-button-text",
+          "span.input-button-text",
+          "#img-search-upload",
+          "input#img-search-upload"
+        ],
+        "requireVisible": true,
+        "maxWaitMs": 8000,
+        "pollIntervalMs": 500,
+        "highlight": true,
+        "persistHighlight": true,
+        "highlightColor": "#34c759",
+        "highlightLabel": "SEARCH"
+      },
+      "next": ["end"]
+    },
+    { "id": "end", "type": "EndNode", "name": "结束", "config": { "cleanup": false, "saveLogs": true, "persistSession": true, "cleanupHighlights": false } }
+  ],
+  "globalConfig": { "timeout": 300000, "logLevel": "info" }
+}
+

@@ -1,0 +1,10 @@
+{
+  "id": "site_footer",
+  "name": "页脚",
+  "type": "footer",
+  "selectors": [ { "classes": ["site-footer"] } ],
+  "runMode": "sequential",
+  "operations": [ { "type": "find-child" } ],
+  "version": "2.0.0"
+}
+

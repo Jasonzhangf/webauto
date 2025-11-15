@@ -1,0 +1,68 @@
+{
+  "name": "1688针对性高亮测试",
+  "description": "专门高亮发现的旺旺元素和商家容器",
+  "version": "1.0.0",
+  "preflows": ["1688-login-preflow"],
+  "nodes": [
+    { "id": "start", "type": "StartNode", "name": "开始", "next": ["attach"] },
+    {
+      "id": "attach",
+      "type": "AttachSessionNode",
+      "name": "会话接力",
+      "config": {},
+      "next": ["navigate_search"]
+    },
+    {
+      "id": "navigate_search",
+      "type": "NavigationNode",
+      "name": "导航到搜索结果页",
+      "config": {
+        "url": "https://s.1688.com/selloffer/offer_search.htm?keywords=%B7%FE%D7%B0",
+        "waitUntil": "domcontentloaded",
+        "timeout": 30000
+      },
+      "next": ["wait_search"]
+    },
+    {
+      "id": "wait_search",
+      "type": "WaitNode",
+      "name": "等待搜索结果完全加载",
+      "config": { "minMs": 3000, "maxMs": 5000 },
+      "next": ["highlight_specific"]
+    },
+    {
+      "id": "highlight_specific",
+      "type": "PageSnapshotNode",
+      "name": "针对性高亮测试",
+      "config": {
+        "script": "console.log('🎯 开始针对性高亮测试...'); // 1. 测试发现的旺旺选择器 const wangwangElements = document.querySelectorAll('span.J_WangWang, span[class*=\"WangWang\"]'); console.log(`✅ 找到 J_WangWang 元素: ${wangwangElements.length} 个`); wangwangElements.forEach((el, index) => { console.log(`  旺旺元素 ${index + 1}: className=${el.className}, text=${el.textContent.trim()}`); }); // 2. 测试所有旺旺相关选择器 const allWangwangSelectors = ['span.J_WangWang', 'span[class*=\"WangWang\"]', '[class*=\"旺旺\"]', '[class*=\"wangwang\"]', '.ww-light', '.ww-static', '.ww-online']; let totalWangwang = 0; allWangwangSelectors.forEach(selector => { const elements = document.querySelectorAll(selector); if (elements.length > 0) { console.log(`✅ 选择器 ${selector}: 找到 ${elements.length} 个元素`); totalWangwang += elements.length; } }); console.log(`📊 旺旺元素总计: ${totalWangwang} 个`); // 3. 测试商家容器选择器 const merchantSelectors = ['.sm-offer-item', '.offer-item', '.sm-offer', '[class*=\"offer\"]']; let totalMerchants = 0; merchantSelectors.forEach(selector => { const elements = document.querySelectorAll(selector); if (elements.length > 0) { console.log(`✅ 商家选择器 ${selector}: 找到 ${elements.length} 个元素`); totalMerchants += elements.length; } }); console.log(`📊 商家容器总计: ${totalMerchants} 个`); // 4. 验证旺旺元素是否在商家容器内 let wangwangInMerchant = 0; wangwangElements.forEach(wangwang => { const merchant = wangwang.closest('.sm-offer-item, .offer-item, .sm-offer, [class*=\"offer\"]'); if (merchant) { wangwangInMerchant++; const merchantTitle = merchant.querySelector('h4, [class*=title], a[title]'); console.log(`  旺旺在商家内: ${merchantTitle ? merchantTitle.textContent.trim().substring(0, 30) : '未找到标题'}`); } }); console.log(`📊 旺旺在商家容器内: ${wangwangInMerchant} 个`); return { success: true, wangwangElements: wangwangElements.length, totalWangwang: totalWangwang, totalMerchants: totalMerchants, wangwangInMerchant: wangwangInMerchant, message: `发现 ${wangwangElements.length} 个J_WangWang元素, ${totalMerchants} 个商家容器`, timestamp: new Date().toISOString() };",
+        "saveScreenshots": true
+      },
+      "next": ["save_results"]
+    },
+    {
+      "id": "save_results",
+      "type": "ResultSaverNode",
+      "name": "保存验证结果",
+      "config": {
+        "outputDir": "archive/workflow-records",
+        "filenameTemplate": "1688-targeted-verification-{timestamp}.json",
+        "includeMetadata": true
+      },
+      "next": ["end"]
+    },
+    {
+      "id": "end",
+      "type": "EndNode",
+      "name": "结束验证",
+      "config": { "cleanup": false, "saveLogs": true }
+    }
+  ],
+  "globalConfig": {
+    "logLevel": "info",
+    "screenshotOnError": true,
+    "autoCleanup": false,
+    "parallelExecution": false,
+    "timeout": 300000
+  }
+}

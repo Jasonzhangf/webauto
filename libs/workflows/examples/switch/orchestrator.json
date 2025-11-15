@@ -1,0 +1,12 @@
+{
+  "name": "Switch Orchestrator Demo",
+  "nodes": [
+    { "id": "start", "type": "StartNode", "name": "开始", "next": ["attach"] },
+    { "id": "attach", "type": "AttachSessionNode", "name": "会话接力", "config": {}, "next": ["prompt"] },
+    { "id": "prompt", "type": "GateOverlayNode", "name": "选择下一步", "config": { "title": "选择下一步", "message": "点击‘下一步’进入搜索工作流；点击‘停止’进入聊天工作流", "block": true }, "next": ["switch"] },
+    { "id": "switch", "type": "SwitchWorkflowNode", "name": "切换工作流", "config": { "varName": "gateSignal", "mapping": { "next": "sharedmodule/libraries/workflows/examples/switch/search-demo.json", "stop": "sharedmodule/libraries/workflows/examples/switch/chat-demo.json" } }, "next": ["end"] },
+    { "id": "end", "type": "EndNode", "name": "结束", "config": { "cleanup": false } }
+  ],
+  "globalConfig": { "timeout": 600000 }
+}
+

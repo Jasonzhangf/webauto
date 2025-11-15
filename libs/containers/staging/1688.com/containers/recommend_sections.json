@@ -1,0 +1,11 @@
+{
+  "id": "recommend_sections",
+  "name": "推荐区块",
+  "type": "section",
+  "selectors": [ { "classes": ["recommend-section"] } ],
+  "children": ["recommend_card"],
+  "runMode": "sequential",
+  "operations": [ { "type": "find-child" } ],
+  "version": "2.0.0"
+}
+

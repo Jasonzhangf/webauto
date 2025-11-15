@@ -1,0 +1,26 @@
+{
+  "name": "1688 Cookie Login Preflow",
+  "nodes": [
+    { "id": "start", "type": "StartNode", "name": "开始", "next": ["browser"] },
+    { "id": "browser", "type": "BrowserInitNode", "name": "浏览器初始化", "config": { "headless": false, "viewport": { "width": 1440, "height": 900 } }, "next": ["cookies"] },
+    { "id": "cookies", "type": "CookieLoaderNode", "name": "加载Cookie", "config": { "cookiePath": "~/.webauto/cookies/1688-domestic.json" }, "next": ["nav"] },
+    { "id": "nav", "type": "NavigationNode", "name": "导航到首页", "config": { "url": "https://www.1688.com/", "waitUntil": "domcontentloaded", "timeout": 45000 }, "next": ["anchor"] },
+    { "id": "anchor", "type": "AnchorPointNode", "name": "锚点确认(已登录)", "config": { "hostFilter": "1688.com", "selectors": [
+      ".userAvatarLogo img",
+      ".user-avatar img",
+      ".avatar img",
+      ".user-info",
+      "a[data-spm=dnick]",
+      "a[data-spm=dlevel]",
+      "a[data-spm=dcart]",
+      "a[data-spm=dcollection]",
+      "a[data-spm=dshop]",
+      "a[data-spm=dhistory]",
+      "a[href*=\\/\\/work.1688.com/]",
+      "a[href*=purchase.1688.com/favorites]",
+      "a[href*=cart.1688.com]"
+    ], "requireVisible": true, "highlight": true, "persistHighlight": true, "highlightColor": "#34c759", "highlightLabel": "LOGIN" }, "next": ["end"] },
+    { "id": "end", "type": "EndNode", "name": "结束", "config": { "persistSession": true, "cleanup": false, "cleanupHighlights": false } }
+  ],
+  "globalConfig": { "timeout": 300000, "logLevel": "info" }
+}

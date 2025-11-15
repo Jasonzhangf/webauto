@@ -1,0 +1,28 @@
+{
+  "website": "weibo",
+  "generatedAt": "2025-10-27T07:43:00.274Z",
+  "containerCount": 1,
+  "containers": [
+    {
+      "id": "comment_content_area",
+      "fileName": "containers/comment-containers/comment_c989e3db_container.json",
+      "selector": "[class*='comment']:not(.toolbar_commentIcon_3o7HB)"
+    }
+  ],
+  "searchIndex": {
+    "byType": {
+      "container": [
+        "comment_content_area"
+      ]
+    },
+    "byPriority": {
+      "14": [
+        "comment_content_area"
+      ]
+    },
+    "byName": {
+      "comment_content_area": "comment_content_area",
+      "评论内容区域": "comment_content_area"
+    }
+  }
+}

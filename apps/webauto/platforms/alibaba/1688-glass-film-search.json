@@ -1,0 +1,124 @@
+{
+  "name": "1688钢化膜搜索与打开",
+  "description": "搜索钢化膜并打开第一条商家链接",
+  "version": "1.0.0",
+  "preflows": ["1688-login-preflow"],
+  "nodes": [
+    { "id": "start", "type": "StartNode", "name": "开始", "next": ["attach"] },
+    {
+      "id": "attach",
+      "type": "AttachSessionNode",
+      "name": "会话接力",
+      "config": {},
+      "next": ["navigate_search"]
+    },
+    {
+      "id": "navigate_search",
+      "type": "NavigationNode",
+      "name": "导航到钢化膜搜索页",
+      "config": {
+        "url": "https://s.1688.com/selloffer/offer_search.htm?keywords=%B8%DC%BB%AF%C4%AB",
+        "waitUntil": "domcontentloaded",
+        "timeout": 30000
+      },
+      "next": ["wait_search"]
+    },
+    {
+      "id": "wait_search",
+      "type": "WaitNode",
+      "name": "等待搜索结果加载",
+      "config": { "minMs": 3000, "maxMs": 5000 },
+      "next": ["extract_results"]
+    },
+    {
+      "id": "extract_results",
+      "type": "PageSnapshotNode",
+      "name": "提取搜索结果",
+      "config": {
+        "script": "console.log('🔍 提取1688钢化膜搜索结果...'); const merchants = []; const maxResults = 20; const offerItems = document.querySelectorAll('.sm-offer-item, .offer-item, .sm-offer, [class*=offer]'); console.log('找到 ' + offerItems.length + ' 个商品项'); for (let i = 0; i < Math.min(offerItems.length, maxResults); i++) { const item = offerItems[i]; const title = item.querySelector('h4, [class*=title], a[title]'); const link = item.querySelector('a[href*=\"1688.com\"]'); const price = item.querySelector('[class*=price], [data-price]'); const image = item.querySelector('img[src]'); const contactButton = item.querySelector('[class*=contact], [class*=chat], [class*=im], [class*=旺旺], .sm-im, .s-im'); const merchantName = item.querySelector('[class*=company], [class*=name], [class*=shop]'); const merchantLink = link ? link.href : null; const contactLink = contactButton ? contactButton.href || contactButton.getAttribute('data-href') || contactButton.getAttribute('onclick') : null; const merchantId = merchantLink ? (merchantLink.includes('member_id=') ? merchantLink.match(/member_id=(\\d+)/)?.[1] : merchantLink.match(/\\/(\\d+)\\.htm/)?.[1]) : null; const merchantData = { index: i, title: title ? title.textContent.trim() : '', merchantName: merchantName ? merchantName.textContent.trim() : '', price: price ? price.textContent.trim() : '', merchantLink: merchantLink, merchantId: merchantId, contactLink: contactLink, contactButton: contactButton ? { className: contactButton.className, text: contactButton.textContent, href: contactButton.href } : null, image: image ? image.src : null, isNew: true }; merchants.push(merchantData); } const pagination = document.querySelector('.ui-pagination, .pagination'); let paginationInfo = null; if (pagination) { const currentPage = pagination.querySelector('.ui-page-active, .active, .current'); const nextButton = pagination.querySelector('.ui-page-next, .next, [class*=next]:not(.disabled)'); paginationInfo = { hasPagination: true, currentPage: currentPage ? currentPage.textContent.trim() : '1', hasNextPage: !!nextButton && !nextButton.classList.contains('disabled') }; } else { paginationInfo = { hasPagination: false }; } console.log('✅ 提取完成，成功提取 ' + merchants.length + ' 个商家信息'); return { success: true, merchants: merchants, totalFound: offerItems.length, paginationInfo: paginationInfo, currentUrl: window.location.href, pageTitle: document.title, timestamp: new Date().toISOString() };",
+        "saveScreenshots": true
+      },
+      "next": ["check_results"]
+    },
+    {
+      "id": "check_results",
+      "type": "ConditionalNode",
+      "name": "检查是否有结果",
+      "config": {
+        "condition": "{{previous.merchants.length > 0}}",
+        "trueNext": ["log_results"],
+        "falseNext": ["no_results"]
+      }
+    },
+    {
+      "id": "log_results",
+      "type": "LogNode",
+      "name": "输出搜索结果",
+      "config": {
+        "level": "info",
+        "message": "🎯 找到 {{previous.merchants.length}} 个钢化膜商家\\n🔗 第一条链接: {{previous.merchants[0].merchantLink}}\\n📝 第一个商品: {{previous.merchants[0].title}}"
+      },
+      "next": ["open_first"]
+    },
+    {
+      "id": "open_first",
+      "type": "NavigationNode",
+      "name": "打开第一条商家链接",
+      "config": {
+        "url": "{{previous.merchants[0].merchantLink}}",
+        "waitUntil": "domcontentloaded",
+        "timeout": 30000
+      },
+      "next": ["wait_first_page"]
+    },
+    {
+      "id": "wait_first_page",
+      "type": "WaitNode",
+      "name": "等待商家页面加载",
+      "config": { "minMs": 2000, "maxMs": 3000 },
+      "next": ["analyze_first_page"]
+    },
+    {
+      "id": "analyze_first_page",
+      "type": "PageSnapshotNode",
+      "name": "分析商家页面",
+      "config": {
+        "script": "console.log('🔍 分析第一条商家页面...'); const pageInfo = { url: window.location.href, title: document.title, timestamp: new Date().toISOString() }; const isMerchantPage = window.location.href.includes('1688.com') && (window.location.href.includes('/offer/') || window.location.href.includes('/company/') || window.location.href.includes('member_id=')); const merchantInfo = {}; const companyTitle = document.querySelector('[class*=company], [class*=title], h1'); const contactInfo = document.querySelector('[class*=contact], [class*=phone], [class*=tel]'); const productImages = document.querySelectorAll('img[src*=\"1688\"]'); merchantInfo.companyName = companyTitle ? companyTitle.textContent.trim() : ''; merchantInfo.hasContact = !!contactInfo; merchantInfo.imageCount = productImages.length; console.log('📋 商家页面信息:', { isMerchantPage, url: pageInfo.url, title: pageInfo.title, merchantInfo }); return { success: true, pageInfo: pageInfo, merchantInfo: merchantInfo, isMerchantPage: isMerchantPage };",
+        "saveScreenshots": true
+      },
+      "next": ["save_results"]
+    },
+    {
+      "id": "no_results",
+      "type": "LogNode",
+      "name": "无搜索结果",
+      "config": { "level": "warn", "message": "⚠️ 未找到任何钢化膜搜索结果" },
+      "next": ["save_results"]
+    },
+    {
+      "id": "save_results",
+      "type": "ResultSaverNode",
+      "name": "保存完整结果",
+      "config": {
+        "outputDir": "archive/workflow-records",
+        "filenameTemplate": "1688-class-film-search-{timestamp}.json",
+        "includeMetadata": true,
+        "mergeData": true
+      },
+      "next": ["end"]
+    },
+    {
+      "id": "end",
+      "type": "EndNode",
+      "name": "结束",
+      "config": { "cleanup": false, "saveLogs": true }
+    }
+  ],
+  "globalConfig": {
+    "logLevel": "info",
+    "screenshotOnError": true,
+    "autoCleanup": false,
+    "parallelExecution": false,
+    "timeout": 180000
+  }
+}

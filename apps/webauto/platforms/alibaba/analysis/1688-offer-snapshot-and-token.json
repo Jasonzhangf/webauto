@@ -1,0 +1,19 @@
+{
+  "name": "1688 Offer Snapshot + Token",
+  "description": "会话接力 → 导航到搜索页 → 页面快照(HTML/JS) → 批量点击捕获 air.1688.com 动态 token",
+  "version": "1.0.0",
+  "nodes": [
+    { "id": "start", "type": "StartNode", "name": "开始", "next": ["attach"] },
+    { "id": "attach", "type": "AttachSessionNode", "name": "会话接力", "config": {}, "next": ["cookies"] },
+    { "id": "cookies", "type": "CookieLoaderNode", "name": "加载Cookie", "config": { "cookiePath": "~/.webauto/cookies/1688-domestic.json" }, "next": ["nav"] },
+    { "id": "nav", "type": "NavigationNode", "name": "导航搜索页", "config": { "url": "https://s.1688.com/selloffer/offer_search.htm?keywords=%B9%A4%D2%B5%B4%F3%B7%E7%C9%C8&spm=a260k.home2025.searchbox.0", "waitUntil": "domcontentloaded", "timeout": 30000 }, "next": ["wait"] },
+    { "id": "wait", "type": "WaitNode", "name": "等待渲染", "config": { "minMs": 1200, "maxMs": 2000 }, "next": ["dismiss"] },
+    { "id": "dismiss", "type": "ModalDismissNode", "name": "关闭模态", "config": { "maxAttempts": 4, "retryDelay": 400 }, "next": ["snapshot"] },
+    { "id": "snapshot", "type": "PageSnapshotNode", "name": "页面快照", "config": { "maxHtmlLength": 400000, "includeInlineScripts": true, "includeExternalScripts": true, "maxInlineScripts": 30, "maxInlineScriptLength": 16000 }, "next": ["capture"] },
+    { "id": "capture", "type": "PopupTokenCaptureNode", "name": "捕获动态Token", "config": { "containerSelector": ".space-pc-ui2024-content > div:nth-child(5)", "clickSelectors": ["a.ww-link.ww-inline", "span.J_WangWang a.ww-link", "a[href*=air.1688.com/app/]"] , "hostFilter": "air.1688.com", "maxItems": 1, "minClickDelay": 500, "maxClickDelay": 1500, "afterPopupWaitMs": 1000, "closePopup": false, "popupClickSelectors": ["body > div:nth-child(23)"], "dryMode": false, "enforceWebPreference": true, "popupStepGate": false }, "next": ["compose"] },
+    { "id": "compose", "type": "ChatComposeNode", "name": "输入并等待发送", "config": { "hostFilter": "air.1688.com", "message": "你好", "stepGate": true, "inputSelectors": ["textarea", "div[contenteditable=true]"], "sendSelectors": ["button:has-text(发送)", ".im-chat-send-btn"] }, "next": ["save"] },
+    { "id": "save", "type": "ResultSaverNode", "name": "保存结果", "config": { "outputDir": "archive/workflow-records", "filenameTemplate": "1688-offer-snapshot-token-{timestamp}.json", "includeMetadata": true }, "next": ["end"] },
+    { "id": "end", "type": "EndNode", "name": "结束", "config": { "cleanup": false, "saveLogs": true } }
+  ],
+  "globalConfig": { "logLevel": "info", "screenshotOnError": true, "autoCleanup": false, "parallelExecution": false, "timeout": 120000 }
+}

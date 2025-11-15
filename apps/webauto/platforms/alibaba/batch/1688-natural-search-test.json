@@ -1,0 +1,109 @@
+{
+  "name": "1688 自然搜索测试",
+  "description": "模拟自然用户行为：登录→访问主页→通过搜索框搜索→获取结果",
+  "version": "1.0.0",
+  "nodes": [
+    { "id": "start", "type": "StartNode", "name": "开始", "next": ["attach"] },
+    { "id": "attach", "type": "AttachSessionNode", "name": "会话接力", "config": {}, "next": ["ensure_homepage"] },
+
+    {
+      "id": "ensure_homepage",
+      "type": "NavigationNode",
+      "name": "确保访问主页",
+      "config": {
+        "url": "https://www.1688.com/",
+        "waitUntil": "domcontentloaded",
+        "timeout": 30000
+      },
+      "next": ["wait_stable"]
+    },
+
+    {
+      "id": "wait_stable",
+      "type": "WaitNode",
+      "name": "等待页面稳定",
+      "config": { "minMs": 2000, "maxMs": 3000 },
+      "next": ["search_input"]
+    },
+
+    {
+      "id": "search_input",
+      "type": "InputNode",
+      "name": "输入搜索关键词",
+      "config": {
+        "selector": "#q",
+        "value": "phone",
+        "clearFirst": true,
+        "delay": 100
+      },
+      "next": ["wait_after_input"]
+    },
+
+    {
+      "id": "wait_after_input",
+      "type": "WaitNode",
+      "name": "输入后等待",
+      "config": { "minMs": 1000, "maxMs": 2000 },
+      "next": ["search_submit"]
+    },
+
+    {
+      "id": "search_submit",
+      "type": "ClickNode",
+      "name": "点击搜索按钮",
+      "config": {
+        "selector": ".search-btn",
+        "waitBefore": 500,
+        "waitAfter": 3000
+      },
+      "next": ["wait_results"]
+    },
+
+    {
+      "id": "wait_results",
+      "type": "WaitNode",
+      "name": "等待搜索结果加载",
+      "config": { "minMs": 3000, "maxMs": 5000 },
+      "next": ["batch_chat"]
+    },
+
+    {
+      "id": "batch_chat",
+      "type": "MockBatchChatNode",
+      "name": "自然搜索批量聊天测试",
+      "config": {
+        "hostFilter": "1688.com",
+        "highlightOnly": true,
+        "maxChats": 2,
+        "messageTemplate": "Hello, we are interested in your products and would like to learn more details."
+      },
+      "next": ["save_results"]
+    },
+
+    {
+      "id": "save_results",
+      "type": "ResultSaverNode",
+      "name": "保存测试结果",
+      "config": {
+        "outputDir": "archive/workflow-records",
+        "filenameTemplate": "1688-natural-search-test-{timestamp}.json",
+        "includeMetadata": true
+      },
+      "next": ["end"]
+    },
+
+    {
+      "id": "end",
+      "type": "EndNode",
+      "name": "结束",
+      "config": { "cleanup": false, "saveLogs": true }
+    }
+  ],
+  "globalConfig": {
+    "logLevel": "info",
+    "screenshotOnError": true,
+    "autoCleanup": false,
+    "parallelExecution": false,
+    "timeout": 1800000
+  }
+}

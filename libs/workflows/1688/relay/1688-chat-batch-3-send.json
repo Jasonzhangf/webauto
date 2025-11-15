@@ -1,0 +1,12 @@
+{
+  "name": "1688 三个聊天顺序发送",
+  "description": "在同一会话内顺序处理3个候选，真实发送消息，每次关闭聊天Tab后返回搜索页",
+  "sharedParameters": { "keyword": "钢化膜", "chatMessage": "你好" },
+  "pauseBetweenMs": 1800,
+  "workflows": [
+    { "path": "sharedmodule/libraries/workflows/1688/relay/1688-search-wangwang-chat-send.json", "parameters": { "startIndex": 0, "skipPreflows": true } },
+    { "path": "sharedmodule/libraries/workflows/1688/relay/1688-search-wangwang-chat-send.json", "parameters": { "startIndex": 1, "skipPreflows": true } },
+    { "path": "sharedmodule/libraries/workflows/1688/relay/1688-search-wangwang-chat-send.json", "parameters": { "startIndex": 2, "skipPreflows": true } }
+  ]
+}
+

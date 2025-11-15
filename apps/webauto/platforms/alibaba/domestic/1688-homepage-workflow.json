@@ -1,0 +1,14 @@
+{
+  "name": "1688 Domestic Homepage Workflow",
+  "description": "1688 国内站主页基础工作流（占位）",
+  "version": "0.1.0",
+  "author": "WebAuto Team",
+  "nodes": [
+    { "id": "start", "type": "StartNode", "name": "开始", "next": ["browser_init"] },
+    { "id": "browser_init", "type": "BrowserInitNode", "name": "浏览器初始化", "config": { "headless": true }, "next": ["navigate_homepage"] },
+    { "id": "navigate_homepage", "type": "NavigationNode", "name": "导航首页", "config": { "url": "https://www.1688.com", "waitUntil": "domcontentloaded" }, "next": ["end"] },
+    { "id": "end", "type": "EndNode", "name": "结束", "config": { "cleanup": true } }
+  ],
+  "globalConfig": { "timeout": 180000, "autoCleanup": true }
+}
+

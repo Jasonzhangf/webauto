@@ -1,0 +1,54 @@
+{
+  "name": "1688 搜索容器-事件激活(容器化/不发送)",
+  "version": "1.0.1",
+  "variables": { "keyword": "钢化膜", "startIndex": 0 },
+  "preflows": ["1688-login-preflow"],
+  "nodes": [
+    { "id": "start", "type": "StartNode", "name": "开始", "next": ["attach"] },
+    { "id": "attach", "type": "AttachSessionNode", "name": "会话接力", "config": {}, "next": ["anchor_list"] },
+    {
+      "id": "anchor_list",
+      "type": "ContainerAnchorNode",
+      "name": "列表容器锚点",
+      "config": { "containerName": "search.listContainer", "highlight": true, "label": "LIST", "durationMs": 3000, "outScopeVar": "listScope" },
+      "next": ["select_item"]
+    },
+    {
+      "id": "select_item",
+      "type": "ContainerSelectNode",
+      "name": "选择第N个结果项",
+      "config": { "containerName": "search.item", "parentScopeVar": "listScope", "indexVar": "startIndex", "outScopeVar": "itemScope", "highlight": true, "label": "ITEM" },
+      "next": ["anchor_ww"]
+    },
+    {
+      "id": "anchor_ww",
+      "type": "ContainerAnchorNode",
+      "name": "锚定旺旺链接",
+      "config": { "containerName": "search.item.wangwangLink", "scopeVar": "itemScope", "outScopeVar": "wwScope", "highlight": true, "label": "WW LINK", "durationMs": 3000 },
+      "next": ["extract_company"]
+    },
+    {
+      "id": "extract_company",
+      "type": "JavaScriptExecutionNode",
+      "name": "读取公司名(.desc-text)",
+      "config": {
+        "script": "(function(){ try{ var scopeSel=\"{itemScope}\"; var root=scopeSel?document.querySelector(scopeSel):document; var cname=''; if(root){ var el=root.querySelector('.desc-text'); if(el) cname=(el.innerText||el.textContent||'').trim(); } return { success:true, variables:{ companyName:cname } }; }catch(e){ return { success:false, error:String(e) }; } })();"
+      },
+      "next": ["check_history"]
+    },
+    { "id": "check_history", "type": "ContactHistoryNode", "name": "历史去重检查", "config": { "action": "check", "site": "1688", "keyVarName": "companyName" }, "next": ["dedup_condition"] },
+    { "id": "dedup_condition", "type": "ConditionNode", "name": "是否已发送", "config": { "mode": "variable", "varName": "alreadySent", "operator": "==", "value": true }, "next": ["skip_open"], "error": ["open"] },
+    { "id": "skip_open", "type": "GateOverlayNode", "name": "跳过已发送对象", "config": { "title": "跳过已发", "message": "{companyName}", "block": false }, "next": ["end"] },
+    {
+      "id": "open",
+      "type": "ContainerActionNode",
+      "name": "点击旺旺链接",
+      "config": { "containerName": "search.item.wangwangLink", "scopeVar": "itemScope", "action": "click" },
+      "next": ["wait_chat"]
+    },
+    { "id": "wait_chat", "type": "WaitNode", "name": "等待聊天页", "config": { "minMs": 1200, "maxMs": 2000 }, "next": ["attach_chat"] },
+    { "id": "attach_chat", "type": "AttachHostPageNode", "name": "附着聊天页", "config": { "urlPattern": "air\\.1688\\.com/.*", "bringToFront": true, "waitUntil": "domcontentloaded", "timeout": 15000 }, "next": ["end"] },
+    { "id": "end", "type": "EndNode", "name": "结束", "config": { "cleanup": false, "saveLogs": true } }
+  ],
+  "globalConfig": { "timeout": 600000, "logLevel": "info" }
+}

@@ -1,0 +1,11 @@
+{
+  "id": "1688.home.avatar",
+  "name": "头像区（登录成功锚点）",
+  "selectors": [
+    { "classes": ["userAvatarLogo"] }
+  ],
+  "children": [],
+  "runMode": "sequential",
+  "operations": [ { "type": "find-child" } ]
+}
+

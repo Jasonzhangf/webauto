@@ -1,0 +1,74 @@
+{
+  "name": "1688 聊天界面精确DOM探测",
+  "description": "精确探测1688聊天界面的输入元素和发送按钮",
+  "version": "1.0.0",
+  "nodes": [
+    { "id": "start", "type": "StartNode", "name": "开始", "next": ["attach"] },
+    { "id": "attach", "type": "AttachSessionNode", "name": "会话接力", "config": {}, "next": ["navigate"] },
+    {
+      "id": "navigate",
+      "type": "NavigationNode",
+      "name": "导航到聊天页面",
+      "config": {
+        "url": "https://air.1688.com/app/ocms-fusion-components-1688/def_cbu_web_im/index.html?touid=cnalichn%E6%B8%A9%E5%B7%9E%E7%9F%97%E7%AB%8B%E8%B4%B8%E6%98%93%E6%9C%89%E9%99%90%E5%85%AC%E5%8F%B8%E7%89%9B&siteid=cnalichn&status=2&portalId=&gid=&offerId=&itemsId=&spmid=a26352.13672862.0#/",
+        "waitUntil": "domcontentloaded",
+        "timeout": 30000
+      },
+      "next": ["wait"]
+    },
+    {
+      "id": "wait",
+      "type": "WaitNode",
+      "name": "等待页面加载",
+      "config": { "minMs": 8000, "maxMs": 12000 },
+      "next": ["dismiss"]
+    },
+    {
+      "id": "dismiss",
+      "type": "ModalDismissNode",
+      "name": "关闭提示",
+      "config": { "maxAttempts": 3, "retryDelay": 1000 },
+      "next": ["probe"]
+    },
+    {
+      "id": "probe",
+      "type": "SelectorProbeNode",
+      "name": "深度DOM探测",
+      "config": {
+        "hostFilter": "air.1688.com",
+        "probeDepth": 5,
+        "scanStrategies": ["contenteditable", "input-elements", "react-components", "shadow-dom", "iframe-content"],
+        "saveScreenshots": true,
+        "saveResults": true,
+        "resultFilename": "1688-chat-precise-probe-{timestamp}.json"
+      },
+      "next": ["analyze"]
+    },
+    {
+      "id": "analyze",
+      "type": "GateOverlayNode",
+      "name": "探测结果分析",
+      "config": {
+        "hostFilter": "air.1688.com",
+        "title": "🔍 1688聊天界面DOM探测完成",
+        "message": "✅ DOM深度探测已完成！\\n\\n📋 探测结果：\\n\\n1️⃣ 输入元素检测：\\n- 检查contenteditable元素数量和位置\\n- 分析textarea和input元素\\n- 识别React组件输入框\\n\\n2️⃣ 发送按钮检测：\\n- 查找包含'发送'文字的按钮\\n- 识别可能的发送图标\\n- 分析按钮的点击事件\\n\\n3️⃣ 详细结果保存在：\\n- archive/workflow-records/1688-chat-precise-probe-*.json\\n- 包含完整的DOM结构和元素信息\\n\\n📸 已保存截图用于视觉分析\\n\\n点击'下一步'查看详细报告",
+        "stepGate": true,
+        "block": true
+      },
+      "next": ["end"]
+    },
+    {
+      "id": "end",
+      "type": "EndNode",
+      "name": "结束",
+      "config": { "cleanup": false, "saveLogs": true }
+    }
+  ],
+  "globalConfig": {
+    "logLevel": "info",
+    "screenshotOnError": true,
+    "autoCleanup": false,
+    "parallelExecution": false,
+    "timeout": 900000
+  }
+}

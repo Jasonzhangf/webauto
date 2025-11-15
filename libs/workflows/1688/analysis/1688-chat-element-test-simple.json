@@ -1,0 +1,153 @@
+{
+  "name": "1688 Chat Element Test Simple",
+  "description": "简单测试1688聊天界面元素定位，使用现有ChatComposeNode功能",
+  "version": "1.0.0",
+  "nodes": [
+    { "id": "start", "type": "StartNode", "name": "开始", "next": ["attach"] },
+    { "id": "attach", "type": "AttachSessionNode", "name": "会话接力", "config": {}, "next": ["navigate_search"] },
+    {
+      "id": "navigate_search",
+      "type": "NavigationNode",
+      "name": "导航到搜索页面",
+      "config": {
+        "url": "https://s.1688.com/selloffer/offer_search.htm?keywords=%B9%A4%D2%B5%B4%F3%B7%E7%C9%C8&spm=a260k.home2025.searchbox.0",
+        "waitUntil": "domcontentloaded",
+        "timeout": 30000
+      },
+      "next": ["wait_search"]
+    },
+    { "id": "wait_search", "type": "WaitNode", "name": "搜索页面等待", "config": { "minMs": 2000, "maxMs": 3000 }, "next": ["dismiss_modals"] },
+    { "id": "dismiss_modals", "type": "ModalDismissNode", "name": "关闭搜索页模态", "config": { "maxAttempts": 4, "retryDelay": 500 }, "next": ["open_chat"] },
+    {
+      "id": "open_chat",
+      "type": "PopupTokenCaptureNode",
+      "name": "打开聊天窗口",
+      "config": {
+        "containerSelector": ".space-pc-ui2024-content > div:nth-child(5)",
+        "clickSelectors": ["a.ww-link.ww-inline", "span.J_WangWang a.ww-link", "a[href*=air.1688.com/app/]"],
+        "hostFilter": "air.1688.com",
+        "maxItems": 1,
+        "minClickDelay": 500,
+        "maxClickDelay": 1500,
+        "afterPopupWaitMs": 2000,
+        "closePopup": false,
+        "popupClickSelectors": ["body > div:nth-child(23)"],
+        "dryMode": false,
+        "enforceWebPreference": true,
+        "popupStepGate": false
+      },
+      "next": ["test_input_elements"]
+    },
+    {
+      "id": "test_input_elements",
+      "type": "ChatComposeNode",
+      "name": "测试输入框和发送按钮",
+      "config": {
+        "hostFilter": "air.1688.com",
+        "message": "🔍测试消息 - 这是为了定位输入框和发送按钮",
+        "stepGate": true,
+        "send": false,
+        "inputSelectors": [
+          "textarea",
+          "div[contenteditable='true']",
+          "div[contenteditable]",
+          "input[type='text']",
+          ".im-chat-input",
+          ".msg-input",
+          ".chat-input",
+          ".message-input",
+          ".input-area",
+          ".editor-content",
+          ".rich-editor",
+          ".chat-editor",
+          "[class*='input']",
+          "[class*='editor']"
+        ],
+        "sendSelectors": [
+          "button:has-text('发送')",
+          ".send-btn",
+          ".btn-send",
+          ".im-chat-send-btn",
+          ".chat-send-btn",
+          "[class*='send']",
+          "[class*='Send']",
+          "button",
+          "input[type='button']",
+          "input[type='submit']",
+          ".chat-send",
+          ".msg-send",
+          "button[class*='primary']"
+        ],
+        "highlightMs": 10000,
+        "gateTitle": "🔍 聊天元素定位测试",
+        "gateMessage": "请查看聊天界面：\n1. ✅ 如果输入框内有文字，说明输入框定位成功\n2. 🔴 如果发送按钮有红色边框，说明发送按钮定位成功\n3. 📸 请截图保存结果\n4. 点击'下一步'继续测试"
+      },
+      "next": ["test_send_highlight_only"]
+    },
+    {
+      "id": "test_send_highlight_only",
+      "type": "ChatComposeNode",
+      "name": "仅测试发送按钮高亮",
+      "config": {
+        "hostFilter": "air.1688.com",
+        "message": "🎯 仅测试发送按钮定位",
+        "stepGate": true,
+        "send": false,
+        "inputSelectors": ["textarea"],
+        "sendSelectors": [
+          "button:has-text('发送')",
+          ".send-btn",
+          ".btn-send",
+          ".im-chat-send-btn",
+          ".chat-send-btn",
+          "[class*='send']",
+          "[class*='Send']",
+          "button[class*='primary']",
+          ".chat-send",
+          ".msg-send"
+        ],
+        "highlightMs": 15000,
+        "gateTitle": "🎯 发送按钮定位测试",
+        "gateMessage": "请查看发送按钮：\n🔴 红色边框的元素就是系统找到的发送按钮\n📸 请截图保存，记录选择器\n⚠️  注意：不要点击'下一步'发送消息，只观察按钮高亮\n✅ 确认后点击'下一步'完成测试"
+      },
+      "next": ["final_info"]
+    },
+    {
+      "id": "final_info",
+      "type": "GateOverlayNode",
+      "name": "显示总结信息",
+      "config": {
+        "hostFilter": "air.1688.com",
+        "title": "✅ 元素定位测试完成",
+        "message": "测试完成！现在请记录以下信息：\n\n📝 输入框信息：\n- 是否成功输入文字？\n- 输入框的类型（textarea/contenteditable/input）\n\n🎯 发送按钮信息：\n- 是否看到红色高亮的发送按钮？\n- 按钮的位置和样式\n\n💡 这些信息将用于优化ChatComposeNode配置。\n\n点击'下一步'结束测试。",
+        "stepGate": true,
+        "block": true
+      },
+      "next": ["save_results"]
+    },
+    {
+      "id": "save_results",
+      "type": "ResultSaverNode",
+      "name": "保存测试结果",
+      "config": {
+        "outputDir": "archive/workflow-records",
+        "filenameTemplate": "1688-chat-element-test-simple-{timestamp}.json",
+        "includeMetadata": true
+      },
+      "next": ["end"]
+    },
+    {
+      "id": "end",
+      "type": "EndNode",
+      "name": "结束",
+      "config": { "cleanup": false, "saveLogs": true }
+    }
+  ],
+  "globalConfig": {
+    "logLevel": "info",
+    "screenshotOnError": true,
+    "autoCleanup": false,
+    "parallelExecution": false,
+    "timeout": 600000
+  }
+}

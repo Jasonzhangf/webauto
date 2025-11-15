@@ -1,0 +1,14 @@
+{
+  "site": "weibo.com",
+  "pageUrl": "https://weibo.com/",
+  "timestamp": "2025-10-29T04-58-41-319Z",
+  "selector": "input.woo-input-main",
+  "classChoice": "woo-input-main",
+  "containerId": "",
+  "containerSelector": "input.woo-input-main",
+  "containerTree": [],
+  "operation": {
+    "prompt": ""
+  },
+  "snapshotPath": "/Users/fanzhang/Documents/github/webauto/containers/test/weibo/picks/snapshots/2025-10-29T04-58-41-319Z.png"
+}

@@ -1,0 +1,28 @@
+{
+  "name": "深度分析1688页面结构",
+  "description": "全面分析1688主页的搜索输入框和相关元素",
+  "version": "1.0.0",
+  "nodes": [
+    {
+      "id": "start",
+      "type": "StartNode",
+      "next": ["analyze_search_inputs"]
+    },
+    {
+      "id": "analyze_search_inputs",
+      "type": "JavaScriptExecutionNode",
+      "config": {
+        "script": "// 全面分析搜索输入框\nconsole.log('=== 开始分析1688页面搜索输入框 ===');\n\n// 1. 查找所有可能的输入框\nconst allInputs = document.querySelectorAll('input');\nconsole.log('页面中所有input元素数量:', allInputs.length);\n\nconst textInputs = [];\nallInputs.forEach((input, index) => {\n  const info = {\n    index,\n    type: input.type,\n    id: input.id,\n    className: input.className,\n    name: input.name,\n    placeholder: input.placeholder,\n    value: input.value,\n    isVisible: false,\n    rect: null\n  };\n  \n  try {\n    info.isVisible = input.offsetWidth > 0 && input.offsetHeight > 0;\n    if (info.isVisible) {\n      info.rect = input.getBoundingClientRect();\n    }\n  } catch (e) {}\n  \n  // 重点收集文本类型的输入框\n  if (input.type === 'text' || input.type === 'search' || \n      input.placeholder && (input.placeholder.includes('搜索') || input.placeholder.includes('找') || input.placeholder.includes('商品'))) {\n    textInputs.push(info);\n  }\n});\n\nconsole.log('文本相关输入框数量:', textInputs.length);\ntextInputs.forEach(input => {\n  console.log('文本输入框:', input);\n});\n\n// 2. 查找常见的搜索选择器\nconst searchSelectors = [\n  '#search-input',\n  '.search-input input',\n  '.search-box input',\n  '.search-field input',\n  '[data-role=\"search\"] input',\n  '.header-search input',\n  '.top-search input',\n  'input[name=\"keywords\"]',\n  'input[placeholder*=\"搜索\"]',\n  'input[placeholder*=\"找\"]',\n  'input[placeholder*=\"商品\"]'\n];\n\nconst foundSelectors = [];\nsearchSelectors.forEach(selector => {\n  try {\n    const elements = document.querySelectorAll(selector);\n    if (elements.length > 0) {\n      foundSelectors.push({ selector, count: elements.length });\n      console.log(`找到选择器 \"${selector}\": ${elements.length} 个元素`);\n    }\n  } catch (e) {}\n});\n\n// 3. 查找搜索按钮\nconst buttonSelectors = [\n  '.search-btn',\n  '.search-button',\n  'button[type=\"submit\"]',\n  '.btn-search',\n  '.search-box button',\n  '[data-role=\"search-btn\"]',\n  'button[aria-label*=\"搜索\"]'\n];\n\nconst foundButtons = [];\nbuttonSelectors.forEach(selector => {\n  try {\n    const elements = document.querySelectorAll(selector);\n    if (elements.length > 0) {\n      foundButtons.push({ selector, count: elements.length });\n      console.log(`找到按钮选择器 \"${selector}\": ${elements.length} 个元素`);\n    }\n  } catch (e) {}\n});\n\n// 4. 分析页面结构\nconst pageStructure = {\n  title: document.title,\n  url: window.location.href,\n  allInputCount: allInputs.length,\n  textInputCount: textInputs.length,\n  foundSelectors,\n  foundButtons,\n  textInputs: textInputs.slice(0, 3) // 最多返回3个文本输入框信息\n};\n\nconsole.log('=== 页面分析完成 ===');\nconsole.log('分析结果:', JSON.stringify(pageStructure, null, 2));\n\nreturn pageStructure;"
+      },
+      "next": ["end"]
+    },
+    {
+      "id": "end",
+      "type": "EndNode",
+      "config": {
+        "cleanupHighlights": false,
+        "persistSession": true
+      }
+    }
+  ]
+}

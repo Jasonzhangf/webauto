@@ -1,0 +1,88 @@
+{
+  "name": "1688 简化搜索测试",
+  "description": "使用现有节点类型：登录→主页→导航搜索→执行搜索",
+  "version": "1.0.0",
+  "nodes": [
+    { "id": "start", "type": "StartNode", "name": "开始", "next": ["attach"] },
+    { "id": "attach", "type": "AttachSessionNode", "name": "会话接力", "config": {}, "next": ["ensure_homepage"] },
+
+    {
+      "id": "ensure_homepage",
+      "type": "NavigationNode",
+      "name": "确保访问主页",
+      "config": {
+        "url": "https://www.1688.com/",
+        "waitUntil": "domcontentloaded",
+        "timeout": 30000
+      },
+      "next": ["wait_homepage"]
+    },
+
+    {
+      "id": "wait_homepage",
+      "type": "WaitNode",
+      "name": "等待主页稳定",
+      "config": { "minMs": 3000, "maxMs": 5000 },
+      "next": ["navigate_search"]
+    },
+
+    {
+      "id": "navigate_search",
+      "type": "NavigationNode",
+      "name": "导航到搜索页",
+      "config": {
+        "url": "https://s.1688.com/selloffer/offer_search.htm?keywords=phone",
+        "waitUntil": "domcontentloaded",
+        "timeout": 30000
+      },
+      "next": ["wait_search"]
+    },
+
+    {
+      "id": "wait_search",
+      "type": "WaitNode",
+      "name": "等待搜索结果",
+      "config": { "minMs": 5000, "maxMs": 7000 },
+      "next": ["batch_chat"]
+    },
+
+    {
+      "id": "batch_chat",
+      "type": "MockBatchChatNode",
+      "name": "简化搜索批量测试",
+      "config": {
+        "hostFilter": "1688.com",
+        "highlightOnly": true,
+        "maxChats": 2,
+        "messageTemplate": "Hello, we are interested in your products and would like to learn more details."
+      },
+      "next": ["save_results"]
+    },
+
+    {
+      "id": "save_results",
+      "type": "ResultSaverNode",
+      "name": "保存测试结果",
+      "config": {
+        "outputDir": "archive/workflow-records",
+        "filenameTemplate": "1688-simple-search-test-{timestamp}.json",
+        "includeMetadata": true
+      },
+      "next": ["end"]
+    },
+
+    {
+      "id": "end",
+      "type": "EndNode",
+      "name": "结束",
+      "config": { "cleanup": false, "saveLogs": true }
+    }
+  ],
+  "globalConfig": {
+    "logLevel": "info",
+    "screenshotOnError": true,
+    "autoCleanup": false,
+    "parallelExecution": false,
+    "timeout": 1800000
+  }
+}

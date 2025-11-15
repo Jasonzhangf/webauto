@@ -1,0 +1,12 @@
+{
+  "id": "1688.home.header",
+  "name": "顶部导航区",
+  "selectors": [
+    { "classes": ["header"] },
+    { "classes": ["site-nav"] }
+  ],
+  "children": [],
+  "runMode": "sequential",
+  "operations": [ { "type": "find-child" } ]
+}
+

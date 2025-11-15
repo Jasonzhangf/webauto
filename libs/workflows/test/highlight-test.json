@@ -1,0 +1,61 @@
+{
+  "name": "高亮调试测试",
+  "description": "测试锚点高亮功能",
+  "version": "1.0.0",
+  "anchor": {
+    "hostFilter": "1688.com",
+    "selectors": [".userAvatarLogo img", "[class*=userAvatarLogo] img"],
+    "requireVisible": true,
+    "maxWaitMs": 30000,
+    "pollIntervalMs": 2000,
+    "highlight": true,
+    "persistHighlight": true,
+    "highlightColor": "#34c759",
+    "highlightLabel": "TEST_ANCHOR",
+    "alias": "test"
+  },
+  "highlightDefaults": {
+    "enabled": true,
+    "persist": true,
+    "durationMs": 10000,
+    "anchor": { 
+      "enabled": true, 
+      "color": "#ff0000", 
+      "label": "DEBUG_ANCHOR", 
+      "persist": true, 
+      "durationMs": 10000 
+    }
+  },
+  "nodes": [
+    { "id": "start", "type": "StartNode", "name": "开始", "next": ["attach"] },
+    { "id": "attach", "type": "AttachSessionNode", "name": "会话接力", "config": {}, "next": ["test_anchor"] },
+    { 
+      "id": "test_anchor",
+      "type": "AnchorPointNode",
+      "name": "测试锚点高亮",
+      "config": {
+        "selectors": [".userAvatarLogo img", "[class*=userAvatarLogo] img"],
+        "requireVisible": true,
+        "highlight": true,
+        "persistHighlight": true,
+        "highlightColor": "#ff0000",
+        "highlightLabel": "DEBUG_ANCHOR",
+        "alias": "debug_test"
+      },
+      "next": ["end"]
+    },
+    { 
+      "id": "end",
+      "type": "EndNode",
+      "name": "结束",
+      "config": {
+        "cleanup": false,
+        "saveLogs": true
+      }
+    }
+  ],
+  "globalConfig": {
+    "logLevel": "debug",
+    "timeout": 60000
+  }
+}

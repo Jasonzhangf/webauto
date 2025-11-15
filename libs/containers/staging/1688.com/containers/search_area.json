@@ -1,0 +1,11 @@
+{
+  "id": "search_area",
+  "name": "搜索区域",
+  "type": "search",
+  "selectors": [ { "classes": ["search-box"] } ],
+  "children": ["search_input", "search_button", "hot_suggestions"],
+  "runMode": "sequential",
+  "operations": [ { "type": "find-child" } ],
+  "version": "2.0.0"
+}
+

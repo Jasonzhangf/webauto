@@ -4,7 +4,6 @@
   "version": "0.0.0",
   "type": "module",
   "dependencies": {
-    "camoufox": "^0.1.19",
     "iconv-lite": "^0.6.3",
     "playwright": "^1.56.0",
     "sharp": "^0.33.5"
@@ -20,9 +19,17 @@
     "start:orchestrator": "node dist/src/server.js",
     "start:vision": "node dist/sharedmodule/engines/vision-engine/server.js",
     "test:services": "node scripts/service-tests/run-all.mjs",
-    "test:vision": "node scripts/run-vision-tests.mjs"
+    "test:vision": "node scripts/run-vision-tests.mjs",
+    "browser:oneclick": "node utils/scripts/browser/one-click-browser.mjs",
+    "service:browser:start": "node utils/scripts/service/start-browser-service.mjs",
+    "service:browser:stop": "node utils/scripts/service/stop-browser-service.mjs",
+    "service:browser:restart": "node utils/scripts/service/restart-browser-service.mjs",
+    "service:kill-port": "node utils/scripts/service/kill-port.mjs",
+    "browser:camoufox:oneclick": "node utils/scripts/browser/one-click-camoufox.mjs",
+    "browser:camoufox:install": "python3 -m camoufox remove && python3 -m camoufox fetch"
   },
   "devDependencies": {
-    "@modelcontextprotocol/sdk": "^1.20.1"
+    "@modelcontextprotocol/sdk": "^1.20.1",
+    "camoufox": "^0.1.19"
   }
 }

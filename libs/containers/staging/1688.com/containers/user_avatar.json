@@ -1,0 +1,10 @@
+{
+  "id": "user_avatar",
+  "name": "用户头像",
+  "type": "avatar",
+  "selectors": [ { "classes": ["userAvatarLogo"] } ],
+  "runMode": "sequential",
+  "operations": [ { "type": "find-child" } ],
+  "version": "2.0.0"
+}
+

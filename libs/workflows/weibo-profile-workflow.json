@@ -1,0 +1,143 @@
+{
+  "name": "Weibo Profile Page Link Capture Workflow",
+  "description": "微博个人主页链接捕获工作流",
+  "version": "1.0.0",
+  "author": "WebAuto Team",
+  "parameters": {
+    "profileId": {
+      "type": "string",
+      "required": true,
+      "description": "用户ID"
+    }
+  },
+  "nodes": [
+    {
+      "id": "start",
+      "type": "StartNode",
+      "name": "开始节点",
+      "position": { "x": 100, "y": 100 },
+      "next": ["browser_init"]
+    },
+    {
+      "id": "browser_init",
+      "type": "BrowserInitNode",
+      "name": "浏览器初始化",
+      "config": {
+        "headless": true,
+        "viewport": { "width": 1920, "height": 1080 },
+        "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+      },
+      "position": { "x": 300, "y": 100 },
+      "next": ["load_cookies"]
+    },
+    {
+      "id": "load_cookies",
+      "type": "CookieLoaderNode",
+      "name": "加载Cookie",
+      "config": {
+        "cookiePath": "./cookies/weibo-cookies.json"
+      },
+      "position": { "x": 500, "y": 100 },
+      "next": ["build_profile_url"]
+    },
+    {
+      "id": "build_profile_url",
+      "type": "URLBuilderNode",
+      "name": "构建个人主页URL",
+      "config": {
+        "baseUrl": "https://weibo.com/u/",
+        "appendParameter": true
+      },
+      "position": { "x": 700, "y": 100 },
+      "next": ["navigate_profile"]
+    },
+    {
+      "id": "navigate_profile",
+      "type": "NavigationNode",
+      "name": "导航到个人主页",
+      "config": {
+        "waitUntil": "domcontentloaded",
+        "timeout": 30000
+      },
+      "position": { "x": 900, "y": 100 },
+      "next": ["verify_login"]
+    },
+    {
+      "id": "verify_login",
+      "type": "LoginVerificationNode",
+      "name": "验证登录状态",
+      "config": {
+        "loginSelector": "img[src*=\"tvax1.sinaimg.cn\"]",
+        "maxRetries": 3,
+        "retryDelay": 2000
+      },
+      "position": { "x": 1100, "y": 100 },
+      "next": ["scroll_capture"],
+      "error": ["save_results_failed"]
+    },
+    {
+      "id": "scroll_capture",
+      "type": "ScrollCaptureNode",
+      "name": "滚动捕获链接",
+      "config": {
+        "target": 50,
+        "postContainer": ".vue-recycle-scroller__item-view",
+        "maxScrollAttempts": 200,
+        "scrollStep": 3,
+        "scrollDelay": 1000,
+        "noNewLinksLimit": 5,
+        "linkPattern": "weibo\\.com\\/\\d+\\/[A-Za-z0-9_\\-]+"
+      },
+      "position": { "x": 1300, "y": 100 },
+      "next": ["save_results"]
+    },
+    {
+      "id": "save_results",
+      "type": "ResultSaverNode",
+      "name": "保存结果",
+      "config": {
+        "outputDir": "~/.webauto/weibo",
+        "filenameTemplate": "weibo-links-profile-{profileId}-{timestamp}.json",
+        "includeMetadata": true
+      },
+      "position": { "x": 1500, "y": 100 },
+      "next": ["end"]
+    },
+    {
+      "id": "save_results_failed",
+      "type": "ResultSaverNode",
+      "name": "保存失败结果",
+      "config": {
+        "outputDir": "~/.webauto/weibo",
+        "filenameTemplate": "weibo-links-profile-{profileId}-{timestamp}-failed.json",
+        "includeMetadata": true
+      },
+      "position": { "x": 1100, "y": 200 },
+      "next": ["end"]
+    },
+    {
+      "id": "end",
+      "type": "EndNode",
+      "name": "结束节点",
+      "config": {
+        "cleanup": true,
+        "saveLogs": true
+      },
+      "position": { "x": 1700, "y": 100 }
+    }
+  ],
+  "globalConfig": {
+    "logLevel": "info",
+    "screenshotOnError": true,
+    "autoCleanup": true,
+    "parallelExecution": false,
+    "timeout": 300000
+  },
+  "variables": {
+    "capturedLinks": [],
+    "scrollCount": 0,
+    "noNewLinksCount": 0,
+    "startTime": null,
+    "endTime": null
+  }
+}

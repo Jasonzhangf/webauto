@@ -1,0 +1,295 @@
+{
+  "name": "1688完整对话循环测试",
+  "description": "实现主页搜索-商家对话-发送的完整循环流程，支持多轮对话",
+  "version": "1.0.0",
+  "preflows": [
+    "1688-login-preflow"
+  ],
+  "nodes": [
+    {
+      "id": "start",
+      "type": "StartNode",
+      "config": {}
+    },
+    {
+      "id": "browser-init",
+      "type": "CamoufoxEnsureNode",
+      "config": {
+        "headless": false,
+        "viewport": {
+          "width": 1920,
+          "height": 1080
+        }
+      }
+    },
+    {
+      "id": "load-cookies",
+      "type": "CookieLoaderNode",
+      "config": {
+        "cookieFile": "../sharedmodule/operations-framework/cookies.json"
+      }
+    },
+    {
+      "id": "navigate-homepage",
+      "type": "NavigationNode",
+      "config": {
+        "url": "https://www.1688.com/",
+        "waitUntil": "networkidle"
+      }
+    },
+    {
+      "id": "loop-start",
+      "type": "LoopStartNode",
+      "config": {
+        "variableName": "chatLoop",
+        "maxIterations": 3,
+        "iterationKey": "iteration"
+      }
+    },
+    {
+      "id": "search-keyword",
+      "type": "PageActionNode",
+      "config": {
+        "actions": [
+          {
+            "type": "waitForSelector",
+            "selector": "input[placeholder*='搜索'], input[type='search'], #q",
+            "timeout": 5000
+          },
+          {
+            "type": "fill",
+            "selector": "input[placeholder*='搜索'], input[type='search'], #q",
+            "value": "${iteration == 1 ? '服装批发' : iteration == 2 ? '电子产品' : '家居用品'}"
+          },
+          {
+            "type": "press",
+            "selector": "input[placeholder*='搜索'], input[type='search'], #q",
+            "key": "Enter"
+          },
+          {
+            "type": "waitForLoadState",
+            "state": "networkidle"
+          },
+          {
+            "type": "waitForTimeout",
+            "timeout": 2000
+          }
+        ]
+      }
+    },
+    {
+      "id": "wait-for-results",
+      "type": "PageActionNode",
+      "config": {
+        "actions": [
+          {
+            "type": "waitForSelector",
+            "selector": ".sm-offer-item, .offer-item, .product-item",
+            "timeout": 5000
+          },
+          {
+            "type": "evaluate",
+            "script": "return document.querySelectorAll('.sm-offer-item, .offer-item, .product-item').length"
+          }
+        ]
+      }
+    },
+    {
+      "id": "select-product",
+      "type": "PageActionNode",
+      "config": {
+        "actions": [
+          {
+            "type": "click",
+            "selector": ".sm-offer-item, .offer-item, .product-item",
+            "index": 0
+          },
+          {
+            "type": "waitForTimeout",
+            "timeout": 2000
+          }
+        ]
+      }
+    },
+    {
+      "id": "find-contact-button",
+      "type": "PageActionNode",
+      "config": {
+        "actions": [
+          {
+            "type": "waitForSelector",
+            "selector": "a[href*='contact'], button[title*='联系'], .contact-btn, .chat-btn",
+            "timeout": 5000
+          },
+          {
+            "type": "click",
+            "selector": "a[href*='contact'], button[title*='联系'], .contact-btn, .chat-btn",
+            "timeout": 5000
+          },
+          {
+            "type": "waitForTimeout",
+            "timeout": 3000
+          }
+        ]
+      }
+    },
+    {
+      "id": "check-chat-page",
+      "type": "PageActionNode",
+      "config": {
+        "actions": [
+          {
+            "type": "evaluate",
+            "script": "return window.location.href.includes('air.1688.com')"
+          },
+          {
+            "type": "waitForSelector",
+            "selector": "[contenteditable='true'], .chat-input, textarea",
+            "timeout": 5000
+          }
+        ]
+      }
+    },
+    {
+      "id": "compose-message",
+      "type": "ChatComposeNodeFinalV2",
+      "config": {
+        "hostFilter": "air.1688.com",
+        "message": "${iteration == 1 ? '你好，请问这个产品有现货吗？' : iteration == 2 ? '价格怎么样？可以优惠吗？' : '谢谢，我考虑一下'}",
+        "send": true,
+        "highlightMs": 2000,
+        "mock": false
+      }
+    },
+    {
+      "id": "wait-for-response",
+      "type": "PageActionNode",
+      "config": {
+        "actions": [
+          {
+            "type": "waitForTimeout",
+            "timeout": 3000
+          },
+          {
+            "type": "evaluate",
+            "script": "return document.querySelectorAll('.chat-message, .message-item').length"
+          }
+        ]
+      }
+    },
+    {
+      "id": "log-conversation",
+      "type": "ResultSaverNode",
+      "config": {
+        "filename": "conversations-${iteration}.json",
+        "data": {
+          "iteration": "${iteration}",
+          "message": "${iteration == 1 ? '你好，请问这个产品有现货吗？' : iteration == 2 ? '价格怎么样？可以优惠吗？' : '谢谢，我考虑一下'}",
+          "timestamp": "${new Date().toISOString()}",
+          "url": "${window.location.href}"
+        }
+      }
+    },
+    {
+      "id": "loop-end",
+      "type": "LoopEndNode",
+      "config": {
+        "variableName": "chatLoop"
+      }
+    },
+    {
+      "id": "final-screenshot",
+      "type": "PageSnapshotNode",
+      "config": {
+        "path": "screenshots/1688-complete-chat-loop-test.png",
+        "fullPage": true
+      }
+    },
+    {
+      "id": "save-results",
+      "type": "ResultSaverNode",
+      "config": {
+        "filename": "complete-chat-loop-results.json",
+        "data": {
+          "totalLoops": 3,
+          "completedAt": "${new Date().toISOString()}",
+          "status": "success"
+        }
+      }
+    },
+    {
+      "id": "end",
+      "type": "EndNode",
+      "config": {
+        "cleanup": true,
+        "persistSession": false
+      }
+    }
+  ],
+  "edges": [
+    {
+      "from": "start",
+      "to": "browser-init"
+    },
+    {
+      "from": "browser-init",
+      "to": "load-cookies"
+    },
+    {
+      "from": "load-cookies",
+      "to": "navigate-homepage"
+    },
+    {
+      "from": "navigate-homepage",
+      "to": "loop-start"
+    },
+    {
+      "from": "loop-start",
+      "to": "search-keyword"
+    },
+    {
+      "from": "search-keyword",
+      "to": "wait-for-results"
+    },
+    {
+      "from": "wait-for-results",
+      "to": "select-product"
+    },
+    {
+      "from": "select-product",
+      "to": "find-contact-button"
+    },
+    {
+      "from": "find-contact-button",
+      "to": "check-chat-page"
+    },
+    {
+      "from": "check-chat-page",
+      "to": "compose-message"
+    },
+    {
+      "from": "compose-message",
+      "to": "wait-for-response"
+    },
+    {
+      "from": "wait-for-response",
+      "to": "log-conversation"
+    },
+    {
+      "from": "log-conversation",
+      "to": "loop-end"
+    },
+    {
+      "from": "loop-end",
+      "to": "final-screenshot"
+    },
+    {
+      "from": "final-screenshot",
+      "to": "save-results"
+    },
+    {
+      "from": "save-results",
+      "to": "end"
+    }
+  ]
+}

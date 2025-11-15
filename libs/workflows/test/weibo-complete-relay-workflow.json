@@ -1,0 +1,211 @@
+{
+  "name": "微博完整接力工作流",
+  "description": "预登录微博→搜索大模型→点击前五条帖子",
+  "version": "1.0.0",
+  "preflows": ["workflows/preflows/weibo-login-preflow.json"],
+  "nodes": [
+    { "id": "start", "type": "StartNode", "name": "开始", "next": ["check_login_status"] },
+    {
+      "id": "check_login_status",
+      "type": "JavaScriptExecutionNode",
+      "name": "检查登录状态",
+      "config": {
+        "script": "console.log('🔍 检查微博登录状态...');\n\n// 检查是否已经登录\nconst userInfo = document.querySelector('.gn_name') || document.querySelector('.name') || document.querySelector('.S_txt1');\nconst loginButton = document.querySelector('.gn_login') || document.querySelector('.login-btn') || document.querySelector('a[href*=\"login\"]');\n\nif (userInfo) {\n  console.log('✅ 用户已登录:', userInfo.textContent.trim());\n  return {\n    success: true,\n    isLoggedIn: true,\n    userInfo: userInfo.textContent.trim(),\n    action: 'already_logged_in',\n    pageUrl: window.location.href,\n    timestamp: new Date().toISOString()\n  };\n} else if (loginButton) {\n  console.log('⚠️ 用户未登录，需要登录');\n  return {\n    success: true,\n    isLoggedIn: false,\n    loginButtonSelector: '.gn_login, .login-btn, a[href*=\"login\"]',\n    action: 'need_login',\n    pageUrl: window.location.href,\n    timestamp: new Date().toISOString()\n  };\n} else {\n  console.log('⏳ 页面仍在加载中...');\n  return {\n    success: false,\n    error: '页面未完全加载，无法检测登录状态',\n    action: 'page_loading',\n    pageUrl: window.location.href,\n    timestamp: new Date().toISOString()\n  };\n}",
+        "saveScreenshots": true
+      },
+      "next": ["decide_search_action"]
+    },
+    {
+      "id": "decide_search_action",
+      "type": "ConditionalNode",
+      "name": "根据登录状态决定搜索策略",
+      "config": {
+        "condition": "previous.isLoggedIn === true",
+        "trueBranch": "navigate_search",
+        "falseBranch": "perform_login_and_search"
+      }
+    },
+    {
+      "id": "perform_login_and_search",
+      "type": "JavaScriptExecutionNode",
+      "name": "执行登录并准备搜索",
+      "config": {
+        "script": "console.log('🔐 执行登录流程并准备搜索...');\n\n// 查找登录按钮并点击\nconst loginSelectors = [\n  '.gn_login',\n  '.login-btn',\n  'a[href*=\"login\"]',\n  '.S_txt1',\n  'a[onclick*=\"login\"]'\n];\n\nlet loginButton = null;\nfor (const selector of loginSelectors) {\n  loginButton = document.querySelector(selector);\n  if (loginButton) {\n    console.log(`✅ 找到登录按钮: ${selector}`);\n    break;\n  }\n}\n\nif (loginButton) {\n  // 高亮显示登录按钮\n  const originalStyle = loginButton.style.cssText;\n  loginButton.style.border = '3px solid red';\n  loginButton.style.backgroundColor = 'yellow';\n  loginButton.style.boxShadow = '0 0 10px rgba(255,0,0,0.5)';\n  \n  setTimeout(() => {\n    loginButton.style.cssText = originalStyle;\n  }, 3000);\n  \n  // 点击登录按钮\n  loginButton.click();\n  \n  return {\n    success: true,\n    action: 'login_button_clicked',\n    selector: loginSelectors.find(s => document.querySelector(s)),\n    message: '已点击登录按钮，请手动完成登录并等待后续自动执行',\n    timestamp: new Date().toISOString()\n  };\n} else {\n  return {\n    success: false,\n    error: '未找到登录按钮，页面可能已经发生变化',\n    availableSelectors: loginSelectors,\n    timestamp: new Date().toISOString()\n  };\n}",
+        "saveScreenshots": true
+      },
+      "next": ["wait_for_login"]
+    },
+    {
+      "id": "wait_for_login",
+      "type": "WaitNode",
+      "name": "等待登录完成",
+      "config": { "minMs": 15000, "maxMs": 30000 },
+      "next": ["recheck_login"]
+    },
+    {
+      "id": "recheck_login",
+      "type": "JavaScriptExecutionNode",
+      "name": "重新检查登录状态",
+      "config": {
+        "script": "console.log('🔍 重新检查登录状态...');\n\n// 再次检查登录状态\nconst userInfo = document.querySelector('.gn_name') || document.querySelector('.name') || document.querySelector('.S_txt1');\n\nif (userInfo) {\n  console.log('✅ 登录成功:', userInfo.textContent.trim());\n  return {\n    success: true,\n    isLoggedIn: true,\n    userInfo: userInfo.textContent.trim(),\n    action: 'login_success',\n    pageUrl: window.location.href,\n    timestamp: new Date().toISOString()\n  };\n} else {\n  return {\n    success: false,\n    error: '登录失败或未完成，请手动完成登录后重试',\n    action: 'login_failed',\n    pageUrl: window.location.href,\n    timestamp: new Date().toISOString()\n  };\n}",
+        "saveScreenshots": true
+      },
+      "next": ["navigate_search"]
+    },
+    {
+      "id": "navigate_search",
+      "type": "JavaScriptExecutionNode",
+      "name": "导航到搜索功能",
+      "config": {
+        "script": "console.log('🔍 准备搜索功能...');\n\n// 查找搜索框\nconst searchInput = document.querySelector('#searchInput') || \n                      document.querySelector('.search-input') || \n                      document.querySelector('[placeholder*=\"搜索\"]') ||\n                      document.querySelector('input[type=\"search\"]') ||\n                      document.querySelector('.gn_search');\n\nif (searchInput) {\n  console.log('✅ 找到搜索框');\n  \n  // 高亮搜索框\n  const originalStyle = searchInput.style.cssText;\n  searchInput.style.border = '3px solid red';\n  searchInput.style.backgroundColor = 'yellow';\n  \n  setTimeout(() => {\n    searchInput.style.cssText = originalStyle;\n  }, 2000);\n  \n  return {\n    success: true,\n    action: 'search_input_found',\n    selector: '#searchInput, .search-input, [placeholder*=\"搜索\"], input[type=\"search\"], .gn_search',\n    searchInputPlaceholder: searchInput.placeholder || '搜索框',\n    timestamp: new Date().toISOString()\n  };\n} else {\n  // 尝试点击搜索图标或搜索按钮\n  const searchIcon = document.querySelector('.gn_search') || document.querySelector('.search-icon') || \n                  document.querySelector('a[href*=\"search\"]');\n  \n  if (searchIcon) {\n    console.log('🔍 找到搜索图标，准备点击');\n    searchIcon.click();\n    \n    return {\n      success: true,\n      action: 'search_icon_clicked',\n      message: '已点击搜索图标，等待搜索框出现',\n      timestamp: new Date().toISOString()\n    };\n  }\n  \n  return {\n    success: false,\n    error: '未找到搜索输入框或搜索按钮',\n    pageContent: document.title,\n    timestamp: new Date().toISOString()\n  };\n}",
+        "saveScreenshots": true
+      },
+      "next": ["click_search_box"]
+    },
+    {
+      "id": "click_search_box",
+      "type": "AdvancedClickNode",
+      "name": "点击搜索框",
+      "config": {
+        "selector": "{{previous.selector}}",
+        "strategy": "auto",
+        "clickMethods": ["playwright_click", "javascript_click"],
+        "maxRetries": 2,
+        "retryDelay": 800,
+        "waitAfter": 1000,
+        "timeout": 8000,
+        "verifyVisibility": true,
+        "scrollIntoView": true,
+        "highlight": true,
+        "highlightDuration": 1500,
+        "saveDebugInfo": true,
+        "takeScreenshots": true,
+        "logLevel": "info"
+      },
+      "next": ["input_search_keyword"]
+    },
+    {
+      "id": "input_search_keyword",
+      "type": "JavaScriptExecutionNode",
+      "name": "输入搜索关键词",
+      "config": {
+        "script": "console.log('🔤 输入搜索关键词：大模型');\n\n// 获取搜索框\nconst searchSelectors = [\n  '#searchInput',\n  '.search-input',\n  '[placeholder*=\"搜索\"]',\n  'input[type=\"search\"]',\n  '.gn_search input'\n];\n\nlet searchInput = null;\nfor (const selector of searchSelectors) {\n  searchInput = document.querySelector(selector);\n  if (searchInput) {\n    console.log(`✅ 找到搜索框: ${selector}`);\n    break;\n  }\n}\n\nif (searchInput) {\n  // 清空搜索框并输入关键词\n  searchInput.value = '';\n  searchInput.focus();\n  \n  // 模拟输入\n  const keyword = '大模型';\n  searchInput.value = keyword;\n  \n  // 触发输入事件\n  searchInput.dispatchEvent(new Event('input', { bubbles: true }));\n  searchInput.dispatchEvent(new Event('change', { bubbles: true }));\n  \n  console.log(`✅ 已输入搜索关键词: ${keyword}`);\n  \n  // 高亮搜索框\n  const originalStyle = searchInput.style.cssText;\n  searchInput.style.border = '3px solid green';\n  searchInput.style.backgroundColor = 'lightgreen';\n  \n  setTimeout(() => {\n    searchInput.style.cssText = originalStyle;\n  }, 2000);\n  \n  return {\n    success: true,\n    action: 'keyword_entered',\n    keyword: keyword,\n    searchValue: searchInput.value,\n    timestamp: new Date().toISOString()\n  };\n} else {\n  return {\n    success: false,\n    error: '未找到搜索输入框',\n    searchedSelectors: searchSelectors,\n    timestamp: new Date().toISOString()\n  };\n}",
+        "saveScreenshots": true
+      },
+      "next": ["click_search_button"]
+    },
+    {
+      "id": "click_search_button",
+      "type": "AdvancedClickNode",
+      "name": "点击搜索按钮",
+      "config": {
+        "selector": "#searchBtn, .search-btn, [type='submit'], .gn_search_btn, button[title*='搜索']",
+        "strategy": "auto",
+        "clickMethods": ["playwright_click", "javascript_click", "mouse_coordinates"],
+        "maxRetries": 2,
+        "retryDelay": 800,
+        "waitAfter": 3000,
+        "timeout": 10000,
+        "verifyVisibility": true,
+        "scrollIntoView": true,
+        "highlight": true,
+        "highlightDuration": 1500,
+        "verifyNavigation": true,
+        "expectedUrlPattern": ".*weibo.*search.*",
+        "saveDebugInfo": true,
+        "takeScreenshots": true,
+        "logLevel": "info"
+      },
+      "next": ["wait_for_search_results"]
+    },
+    {
+      "id": "wait_for_search_results",
+      "type": "WaitNode",
+      "name": "等待搜索结果加载",
+      "config": { "minMs": 3000, "maxMs": 5000 },
+      "next": ["find_search_results"]
+    },
+    {
+      "id": "find_search_results",
+      "type": "JavaScriptExecutionNode",
+      "name": "查找前五条搜索结果",
+      "config": {
+        "script": "console.log('🔍 查找前五条搜索结果...');\n\n// 等待搜索结果完全加载\nsetTimeout(() => {\n  // 查找搜索结果的各种可能选择器\n  const resultSelectors = [\n    '.card-wrap .content',\n    '.content',\n    '.feed_content',\n    '.card',\n    '[data-feed-id]',\n    '.WB_feed .WB_detail',\n    '.WB_feed',\n    '.feed_1st',\n    '.card-act',\n    '.m-con',\n    '.from',\n    '.info',\n    '.feed_list .card',\n    '.feed-item',\n    '.wb-feed .card',\n    '.comment-item',\n    '.detail-content'\n  ];\n  \n  let searchResults = [];\n  \n  // 尝试不同的选择器\n  for (const selector of resultSelectors) {\n    const elements = document.querySelectorAll(selector);\n    console.log(`尝试选择器 ${selector}: 找到 ${elements.length} 个元素`);\n    \n    if (elements.length > 0) {\n      for (let i = 0; i < Math.min(5, elements.length); i++) {\n        const element = elements[i];\n        \n        // 检查元素是否可见且包含内容\n        const isVisible = element.offsetParent !== null;\n        const text = element.textContent?.trim() || '';\n        \n        if (isVisible && text.length > 10) {\n          // 获取链接信息\n          const link = element.querySelector('a') || element.closest('a');\n          const href = link ? link.href : '无链接';\n          \n          // 高亮显示结果\n          const originalStyle = element.style.cssText;\n          element.style.border = '2px solid blue';\n          element.style.backgroundColor = 'lightblue';\n          element.style.boxShadow = '0 0 5px rgba(0,0,255,0.3)';\n          \n          setTimeout(() => {\n            element.style.cssText = originalStyle;\n          }, 3000);\n          \n          searchResults.push({\n            index: i + 1,\n            selector: selector,\n            element: element,\n            text: text.substring(0, 100),\n            href: href,\n            isVisible: true\n          });\n          \n          console.log(`✅ 找到第 ${i + 1} 条结果: ${text.substring(0, 50)}`);\n          \n          if (searchResults.length >= 5) {\n            break;\n          }\n        }\n      }\n      \n      if (searchResults.length >= 5) {\n        break;\n      }\n    }\n  }\n  \n  if (searchResults.length > 0) {\n    console.log(`🎯 成功找到 ${searchResults.length} 条搜索结果`);\n    \n    return {\n      success: true,\n      action: 'search_results_found',\n      resultsCount: searchResults.length,\n      results: searchResults,\n      pageUrl: window.location.href,\n      pageTitle: document.title,\n      timestamp: new Date().toISOString()\n    };\n  } else {\n    return {\n      success: false,\n      error: '未找到搜索结果，页面可能仍在加载或没有搜索结果',\n      pageUrl: window.location.href,\n      pageTitle: document.title,\n      triedSelectors: resultSelectors,\n      timestamp: new Date().toISOString()\n    };\n  }\n}, 3000);",
+        "saveScreenshots": true
+      },
+      "next": ["click_first_results"]
+    },
+    {
+      "id": "click_first_results",
+      "type": "LoopNode",
+      "name": "点击前五条结果",
+      "config": {
+        "iterations": 5,
+        "iteratorVariable": "resultIndex",
+        "startValue": 0,
+        "endValue": 4,
+        "step": 1"
+      },
+      "next": ["click_single_result"]
+    },
+    {
+      "id": "click_single_result",
+      "type": "AdvancedClickNode",
+      "name": "点击单条结果",
+      "config": {
+        "selector": "{{previous.results[{{resultIndex}}].selector}}",
+        "strategy": "auto",
+        "clickMethods": ["playwright_click", "javascript_click", "mouse_coordinates"],
+        "maxRetries": 2,
+        "retryDelay": 1000,
+        "waitAfter": 2000,
+        "timeout": 8000,
+        "verifyVisibility": true,
+        "scrollIntoView": true,
+        "highlight": true,
+        "highlightDuration": 2000,
+        "verifyNavigation": true,
+        "saveDebugInfo": true,
+        "takeScreenshots": true,
+        "logLevel": "info",
+        "resultIndex": "{{resultIndex}}"
+      },
+      "next": ["verify_click_result"]
+    },
+    {
+      "id": "verify_click_result",
+      "type": "JavaScriptExecutionNode",
+      "name": "验证点击结果",
+      "config": {
+        "script": "console.log('🔍 验证点击结果...');\n\nconst resultIndex = results?.resultIndex || 0;\nconst originalUrl = results?.pageUrl || window.location.href;\n\nconsole.log(`验证第 ${resultIndex + 1} 条结果的点击效果`);\n\n// 检查页面变化\nconst currentUrl = window.location.href;\nconst urlChanged = currentUrl !== originalUrl;\n\n// 检查是否有弹窗\nconst modalPresent = !!document.querySelector('.modal, .popup, .dialog, [role*=\"dialog\"]');\n\n// 检查是否有新标签页或窗口\nconst hasNewContent = document.body.textContent.includes('详情') || \n                       document.body.textContent.includes('展开') ||\n                       document.body.textContent.includes('更多');\n\nconst verificationResult = {\n  success: true,\n  action: 'click_verified',\n  resultIndex: resultIndex,\n  \n  currentUrl: currentUrl,\n  originalUrl: originalUrl,\n  urlChanged: urlChanged,\n  modalPresent: modalPresent,\n  hasNewContent: hasNewContent,\n  \n  currentTitle: document.title,\n  \n  clickEffect: urlChanged ? 'navigation' : (modalPresent ? 'modal_opened' : 'clicked_on_page'),\n  \n  timestamp: new Date().toISOString()\n};\n\nconsole.log(`点击效果: ${verificationResult.clickEffect}`);\nconsole.log('验证完成:', verificationResult);\n\nreturn verificationResult;",
+        "saveScreenshots": true
+      },
+      "next": ["save_results"]
+    },
+    {
+      "id": "save_results",
+      "type": "ResultSaverNode",
+      "name": "保存测试结果",
+      "config": {
+        "outputDir": "archive/workflow-records",
+        "filenameTemplate": "weibo-complete-relay-search-five-posts-{timestamp}.json",
+        "includeMetadata": true,
+        "mergeData": true
+      },
+      "next": ["end"]
+    },
+    {
+      "id": "end",
+      "type": "EndNode",
+      "name": "结束",
+      "config": { "cleanup": true, "saveLogs": true }
+    }
+  ],
+  "globalConfig": {
+    "logLevel": "info",
+    "screenshotOnError": true,
+    "autoCleanup": true,
+    "parallelExecution": false,
+    "timeout": 600000
+  }
+}

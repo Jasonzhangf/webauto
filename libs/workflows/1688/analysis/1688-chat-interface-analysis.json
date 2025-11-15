@@ -1,0 +1,192 @@
+{
+  "name": "1688 Chat Interface Analysis",
+  "description": "登录1688并分析聊天界面的HTML结构，找出正确的发送按钮选择器",
+  "version": "1.0.0",
+  "nodes": [
+    { "id": "start", "type": "StartNode", "name": "开始", "next": ["browser_init"] },
+    {
+      "id": "browser_init",
+      "type": "BrowserInitNode",
+      "name": "浏览器初始化",
+      "config": {
+        "engine": "firefox",
+        "headless": false,
+        "viewport": { "width": 1280, "height": 900 }
+      },
+      "next": ["wait_after_init"]
+    },
+    { "id": "wait_after_init", "type": "WaitNode", "name": "初始化等待", "config": { "minMs": 1000, "maxMs": 2000 }, "next": ["load_cookies"] },
+    {
+      "id": "load_cookies",
+      "type": "CookieLoaderNode",
+      "name": "加载Cookie",
+      "config": {
+        "cookiePath": "~/.webauto/cookies/1688-domestic.json"
+      },
+      "next": ["navigate_home"]
+    },
+    {
+      "id": "navigate_home",
+      "type": "NavigationNode",
+      "name": "导航到主页",
+      "config": {
+        "url": "https://www.1688.com/",
+        "waitUntil": "domcontentloaded",
+        "timeout": 30000
+      },
+      "next": ["wait_for_page"]
+    },
+    { "id": "wait_for_page", "type": "WaitNode", "name": "页面加载等待", "config": { "minMs": 2000, "maxMs": 3000 }, "next": ["dismiss_modals"] },
+    { "id": "dismiss_modals", "type": "ModalDismissNode", "name": "关闭模态", "config": { "maxAttempts": 5, "retryDelay": 500 }, "next": ["verify_login"] },
+    {
+      "id": "verify_login",
+      "type": "LoginVerificationNode",
+      "name": "验证登录状态",
+      "config": {
+        "loginSelectors": [
+          ".userAvatarLogo img",
+          "[class*=userAvatarLogo] img"
+        ],
+        "requireVisible": true,
+        "maxRetries": 3,
+        "retryDelay": 3000
+      },
+      "next": ["navigate_to_search"],
+      "error": ["manual_login_prompt"]
+    },
+    {
+      "id": "manual_login_prompt",
+      "type": "WaitNode",
+      "name": "等待手动登录",
+      "config": { "minMs": 30000, "maxMs": 30000 },
+      "next": ["navigate_to_search"]
+    },
+    {
+      "id": "navigate_to_search",
+      "type": "NavigationNode",
+      "name": "导航到搜索页面",
+      "config": {
+        "url": "https://s.1688.com/selloffer/offer_search.htm?keywords=%B9%A4%D2%B5%B4%F3%B7%E7%C9%C8&spm=a260k.home2025.searchbox.0",
+        "waitUntil": "domcontentloaded",
+        "timeout": 30000
+      },
+      "next": ["wait_search"]
+    },
+    { "id": "wait_search", "type": "WaitNode", "name": "搜索页面等待", "config": { "minMs": 2000, "maxMs": 3000 }, "next": ["dismiss_search_modals"] },
+    { "id": "dismiss_search_modals", "type": "ModalDismissNode", "name": "关闭搜索页模态", "config": { "maxAttempts": 4, "retryDelay": 500 }, "next": ["capture_chat_token"] },
+    {
+      "id": "capture_chat_token",
+      "type": "PopupTokenCaptureNode",
+      "name": "捕获聊天窗口Token",
+      "config": {
+        "containerSelector": ".space-pc-ui2024-content > div:nth-child(5)",
+        "clickSelectors": ["a.ww-link.ww-inline", "span.J_WangWang a.ww-link", "a[href*=air.1688.com/app/]"],
+        "hostFilter": "air.1688.com",
+        "maxItems": 1,
+        "minClickDelay": 500,
+        "maxClickDelay": 1500,
+        "afterPopupWaitMs": 1000,
+        "closePopup": false,
+        "popupClickSelectors": ["body > div:nth-child(23)"],
+        "dryMode": false,
+        "enforceWebPreference": true,
+        "popupStepGate": true,
+        "gateTitle": "聊天界面分析",
+        "gateMessage": "点击下一步开始分析聊天界面结构"
+      },
+      "next": ["analyze_interface"]
+    },
+    {
+      "id": "analyze_interface",
+      "type": "SelectorProbeNode",
+      "name": "分析聊天界面结构",
+      "config": {
+        "targetPopup": true,
+        "probes": [
+          {
+            "name": "发送按钮测试",
+            "selectors": [
+              "button:has-text('发送')",
+              ".send-btn",
+              ".im-chat-send-btn",
+              "[class*='send']",
+              "[class*='Send']",
+              "button[type='submit']",
+              ".chat-send",
+              ".msg-send",
+              "button[aria-label*='发送']",
+              "button[title*='发送']",
+              "span:has-text('发送')",
+              "div:has-text('发送')",
+              "a:has-text('发送')",
+              ".btn-send",
+              ".chat-sender",
+              "[data-testid*='send']",
+              "button[class*='primary']",
+              "div[class*='send-container'] button",
+              "textarea + button",
+              ".input-group button"
+            ]
+          },
+          {
+            "name": "输入框测试",
+            "selectors": [
+              "textarea",
+              "div[contenteditable='true']",
+              ".im-chat-input",
+              ".msg-input",
+              "[class*='input']",
+              "input[type='text']",
+              "input[placeholder*='输入']",
+              ".chat-textarea",
+              ".message-input",
+              "[contenteditable]",
+              ".editor-content",
+              ".chat-editor"
+            ]
+          }
+        ],
+        "saveScreenshots": true,
+        "outputDir": "archive/workflow-records"
+      },
+      "next": ["take_snapshot"]
+    },
+    {
+      "id": "take_snapshot",
+      "type": "PageSnapshotNode",
+      "name": "保存页面快照",
+      "config": {
+        "maxHtmlLength": 600000,
+        "includeInlineScripts": true,
+        "includeExternalScripts": true,
+        "maxInlineScripts": 50,
+        "maxInlineScriptLength": 20000
+      },
+      "next": ["save_results"]
+    },
+    {
+      "id": "save_results",
+      "type": "ResultSaverNode",
+      "name": "保存分析结果",
+      "config": {
+        "outputDir": "archive/workflow-records",
+        "filenameTemplate": "1688-chat-interface-analysis-{timestamp}.json",
+        "includeMetadata": true
+      },
+      "next": ["end"]
+    },
+    {
+      "id": "end",
+      "type": "EndNode",
+      "name": "结束",
+      "config": { "cleanup": false, "saveLogs": true }
+    }
+  ],
+  "globalConfig": {
+    "logLevel": "info",
+    "screenshotOnError": true,
+    "autoCleanup": false,
+    "parallelExecution": false,
+    "timeout": 300000
+  }
+}

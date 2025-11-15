@@ -1,0 +1,11 @@
+{
+  "id": "main_nav",
+  "name": "主导航",
+  "type": "nav",
+  "selectors": [ { "classes": ["site-nav"] } ],
+  "children": ["nav_category_list"],
+  "runMode": "sequential",
+  "operations": [ { "type": "find-child" } ],
+  "version": "2.0.0"
+}
+

@@ -1,0 +1,81 @@
+{
+  "name": "1688 主页自然搜索测试",
+  "description": "从主页开始，通过搜索框进行自然搜索，模拟真实用户行为",
+  "version": "1.0.0",
+  "nodes": [
+    { "id": "start", "type": "StartNode", "name": "开始", "next": ["attach"] },
+    { "id": "attach", "type": "AttachSessionNode", "name": "会话接力", "config": {}, "next": ["navigate_home"] },
+
+    {
+      "id": "navigate_home",
+      "type": "NavigationNode",
+      "name": "导航到主页",
+      "config": {
+        "url": "https://www.1688.com/",
+        "waitUntil": "domcontentloaded",
+        "timeout": 30000
+      },
+      "next": ["wait_home"]
+    },
+
+    {
+      "id": "wait_home",
+      "type": "WaitNode",
+      "name": "等待主页稳定",
+      "config": { "minMs": 3000, "maxMs": 5000 },
+      "next": ["check_search_box"]
+    },
+
+    {
+      "id": "check_search_box",
+      "type": "SelectorProbeNode",
+      "name": "检查搜索框是否存在",
+      "config": {
+        "selector": "#q",
+        "timeout": 10000,
+        "attribute": "placeholder"
+      },
+      "next": ["analyze_results"]
+    },
+
+    {
+      "id": "analyze_results",
+      "type": "GateOverlayNode",
+      "name": "分析主页访问结果",
+      "config": {
+        "hostFilter": "www.1688.com",
+        "title": "🔍 1688主页访问状态分析",
+        "message": "✅ 主页访问测试完成！\\n\\n📋 请检查以下页面状态：\\n\\n1️⃣ 主页访问状态：\\n- 主页是否成功加载？\\n- 页面标题是否正确？\\n- 登录状态是否正常？\\n\\n2️⃣ 搜索框检查：\\n- 是否找到了搜索框（#q）？\\n- 搜索框是否可交互？\\n- 搜索框占位符是什么？\\n\\n3️⃣ 下一步操作建议：\\n- 如果主页和搜索框都正常，可以尝试输入搜索关键词\\n- 如果找到搜索框，说明自然搜索路径可行\\n- 如果有问题，需要分析具体原因\\n\\n点击'下一步'查看详细分析结果",
+        "stepGate": true,
+        "block": true
+      },
+      "next": ["save_results"]
+    },
+
+    {
+      "id": "save_results",
+      "type": "ResultSaverNode",
+      "name": "保存测试结果",
+      "config": {
+        "outputDir": "archive/workflow-records",
+        "filenameTemplate": "1688-natural-search-from-homepage-{timestamp}.json",
+        "includeMetadata": true
+      },
+      "next": ["end"]
+    },
+
+    {
+      "id": "end",
+      "type": "EndNode",
+      "name": "结束",
+      "config": { "cleanup": false, "saveLogs": true }
+    }
+  ],
+  "globalConfig": {
+    "logLevel": "info",
+    "screenshotOnError": true,
+    "autoCleanup": false,
+    "parallelExecution": false,
+    "timeout": 900000
+  }
+}

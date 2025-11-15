@@ -1,0 +1,92 @@
+{
+  "name": "1688 Simple React Test",
+  "description": "简化版1688 React聊天测试，不依赖特定容器选择器",
+  "version": "1.0.0",
+  "nodes": [
+    { "id": "start", "type": "StartNode", "name": "开始", "next": ["attach"] },
+    { "id": "attach", "type": "AttachSessionNode", "name": "会话接力", "config": {}, "next": ["navigate_search"] },
+    {
+      "id": "navigate_search",
+      "type": "NavigationNode",
+      "name": "导航到搜索页面",
+      "config": {
+        "url": "https://s.1688.com/selloffer/offer_search.htm?keywords=%B9%A4%D2%B5%B4%F3%B7%E7%C9%C8&spm=a260k.home2025.searchbox.0",
+        "waitUntil": "domcontentloaded",
+        "timeout": 30000
+      },
+      "next": ["wait_search"]
+    },
+    { "id": "wait_search", "type": "WaitNode", "name": "搜索页面等待", "config": { "minMs": 2000, "maxMs": 3000 }, "next": ["dismiss_modals"] },
+    { "id": "dismiss_modals", "type": "ModalDismissNode", "name": "关闭搜索页模态", "config": { "maxAttempts": 4, "retryDelay": 500 }, "next": ["open_chat"] },
+    {
+      "id": "open_chat",
+      "type": "PopupTokenCaptureNode",
+      "name": "打开聊天窗口",
+      "config": {
+        "containerSelector": "body",
+        "clickSelectors": ["a.ww-link.ww-inline", "span.J_WangWang a.ww-link", "a[href*=air.1688.com/app/]"],
+        "hostFilter": "air.1688.com",
+        "maxItems": 1,
+        "minClickDelay": 500,
+        "maxClickDelay": 1500,
+        "afterPopupWaitMs": 5000,
+        "closePopup": false,
+        "dryMode": false,
+        "enforceWebPreference": true,
+        "popupStepGate": false
+      },
+      "next": ["react_chat_test"]
+    },
+    {
+      "id": "react_chat_test",
+      "type": "ChatComposeNode1688",
+      "name": "1688 React聊天测试",
+      "config": {
+        "hostFilter": "air.1688.com",
+        "message": "🚀 这是ChatComposeNode1688的简化测试消息",
+        "stepGate": true,
+        "send": false,
+        "highlightMs": 15000,
+        "stabilizeMs": 4000
+      },
+      "next": ["final_result"]
+    },
+    {
+      "id": "final_result",
+      "type": "GateOverlayNode",
+      "name": "显示测试结果",
+      "config": {
+        "hostFilter": "air.1688.com",
+        "title": "✅ 1688 Simple React测试完成",
+        "message": "测试已完成！\\n\\n📋 请检查：\\n1. 是否看到输入框中有测试消息？\\n2. 是否看到发送按钮有红色高亮？\\n3. 控制台是否有相关日志？\\n\\n💡 如果成功，说明ChatComposeNode1688可以处理1688 React界面。\\n\\n点击'下一步'保存结果",
+        "stepGate": true,
+        "block": true
+      },
+      "next": ["save_results"]
+    },
+    {
+      "id": "save_results",
+      "type": "ResultSaverNode",
+      "name": "保存测试结果",
+      "config": {
+        "outputDir": "archive/workflow-records",
+        "filenameTemplate": "1688-simple-react-test-{timestamp}.json",
+        "includeMetadata": true
+      },
+      "next": ["end"]
+    },
+    {
+      "id": "end",
+      "type": "EndNode",
+      "name": "结束",
+      "config": { "cleanup": false, "saveLogs": true }
+    }
+  ],
+  "globalConfig": {
+    "logLevel": "info",
+    "screenshotOnError": true,
+    "autoCleanup": false,
+    "parallelExecution": false,
+    "timeout": 900000
+  }
+}

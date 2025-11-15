@@ -1,0 +1,10 @@
+{
+  "name": "example-1688-sequence",
+  "pauseBetweenMs": 2000,
+  "sharedParameters": {},
+  "workflows": [
+    { "path": "workflows/1688/domestic/1688-homepage-workflow.json", "stopOnFailure": true },
+    { "path": "workflows/1688/abroad/1688-global-homepage-workflow.json", "stopOnFailure": false }
+  ]
+}
+

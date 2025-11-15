@@ -1,0 +1,10 @@
+{
+  "id": "search_input",
+  "name": "搜索输入框",
+  "type": "input",
+  "selectors": [ { "classes": ["search-input"] } ],
+  "runMode": "sequential",
+  "operations": [ { "type": "find-child" } ],
+  "version": "2.0.0"
+}
+

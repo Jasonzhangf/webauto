@@ -1,0 +1,14 @@
+{
+  "name": "@webauto/browser",
+  "version": "3.1.0",
+  "description": "WebAuto Browser Module - 统一浏览器接口",
+  "type": "module",
+  "main": "browser.js",
+  "exports": {
+    ".": "./browser.js",
+    "./api": "./api.js"
+  },
+  "dependencies": {
+    "playwright": "^1.56.0"
+  }
+}

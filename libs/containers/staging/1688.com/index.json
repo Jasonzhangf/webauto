@@ -1,0 +1,29 @@
+{
+  "website": "1688.com",
+  "generatedAt": "2025-01-01T00:00:00.000Z",
+  "containerCount": 17,
+  "containers": [
+    { "id": "home_root", "fileName": "containers/home_root.json", "selector": ".home" },
+    { "id": "header_root", "fileName": "containers/header_root.json", "selector": ".header" },
+    { "id": "search_area", "fileName": "containers/search_area.json", "selector": ".search-box" },
+    { "id": "search_input", "fileName": "containers/search_input.json", "selector": ".search-input" },
+    { "id": "search_button", "fileName": "containers/search_button.json", "selector": ".search-btn" },
+    { "id": "hot_suggestions", "fileName": "containers/hot_suggestions.json", "selector": ".hot-words" },
+    { "id": "main_nav", "fileName": "containers/main_nav.json", "selector": ".site-nav" },
+    { "id": "nav_category_list", "fileName": "containers/nav_category_list.json", "selector": ".nav-category" },
+    { "id": "banner_carousel", "fileName": "containers/banner_carousel.json", "selector": ".banner-carousel" },
+    { "id": "quick_entries", "fileName": "containers/quick_entries.json", "selector": ".quick-entry" },
+    { "id": "recommend_sections", "fileName": "containers/recommend_sections.json", "selector": ".recommend-section" },
+    { "id": "recommend_card", "fileName": "containers/recommend_card.json", "selector": ".offer-item" },
+    { "id": "user_area", "fileName": "containers/user_area.json", "selector": ".user-info" },
+    { "id": "user_avatar", "fileName": "containers/user_avatar.json", "selector": ".userAvatarLogo" },
+    { "id": "user_name", "fileName": "containers/user_name.json", "selector": ".member-nickname" },
+    { "id": "ww_link", "fileName": "containers/ww_link.json", "selector": ".ww-link" },
+    { "id": "site_footer", "fileName": "containers/site_footer.json", "selector": ".site-footer" }
+  ],
+  "searchIndex": {
+    "byType": {},
+    "byPriority": {},
+    "byName": {}
+  }
+}

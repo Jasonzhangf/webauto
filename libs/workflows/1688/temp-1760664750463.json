@@ -1,0 +1,217 @@
+{
+  "name": "1688通用搜索工作流模板",
+  "description": "支持任意商品搜索、自定义链接数量和第一步打开的通用1688搜索工作流",
+  "version": "1.0.0",
+  "parameters": {
+    "keyword": {
+      "type": "string",
+      "required": true,
+      "description": "搜索关键词，支持中文"
+    },
+    "maxResults": {
+      "type": "number",
+      "default": 20,
+      "description": "最大结果数量，默认20条"
+    },
+    "openFirstLink": {
+      "type": "boolean",
+      "default": true,
+      "description": "是否打开第一条链接"
+    },
+    "searchCategory": {
+      "type": "string",
+      "default": "selloffer",
+      "description": "搜索类别：selloffer(供应) / company(公司) / product(产品)"
+    }
+  },
+  "preflows": [
+    "1688-login-preflow"
+  ],
+  "nodes": [
+    {
+      "id": "start",
+      "type": "StartNode",
+      "name": "开始",
+      "next": [
+        "attach"
+      ]
+    },
+    {
+      "id": "attach",
+      "type": "AttachSessionNode",
+      "name": "会话接力",
+      "config": {},
+      "next": [
+        "prepare_search"
+      ]
+    },
+    {
+      "id": "prepare_search",
+      "type": "PageSnapshotNode",
+      "name": "准备搜索参数",
+      "config": {
+        "script": "console.log('🔍 准备1688搜索参数...'); const params = { keyword: '钢化膜', maxResults: 3, openFirstLink: true, searchCategory: 'selloffer' }; console.log('搜索参数:', params); // 将关键词转换为GBK编码 function toGBK(str) { const buffer = Buffer.from(str, 'utf8'); let gbkStr = ''; const gbkCodeMap = { '钢': '%B8%DC', '化': '%BB%AF', '膜': '%C4%AB', '服': '%B7%FE', '装': '%D7%B0', '手': '%CA%D6', '机': '%BB%FA', '电': '%B5%E7', '脑': '%C4%D4', '鞋': '%D0%AC', '子': '%D7%D3', '衣': '%D2%C2', '服': '%B7%FE', '裤': '%BF%E3', '童': '%CD%AF', '装': '%D7%B0' }; let result = str; for (const [utfChar, gbkCode] of Object.entries(gbkCodeMap)) { if (result.includes(utfChar)) { result = result.replace(new RegExp(utfChar, 'g'), gbkCode); } } // 对于未找到GBK编码的字符，使用简单近似 const simpleMap = { 'a': '%61', 'b': '%62', 'c': '%63', 'd': '%64', 'e': '%65', 'f': '%66', 'g': '%67', 'h': '%68', 'i': '%69', 'j': '%6A', 'k': '%6B', 'l': '%6C', 'm': '%6D', 'n': '%6E', 'o': '%6F', 'p': '%70', 'q': '%71', 'r': '%72', 's': '%73', 't': '%74', 'u': '%75', 'v': '%76', 'w': '%77', 'x': '%78', 'y': '%79', 'z': '%7A', '0': '%30', '1': '%31', '2': '%32', '3': '%33', '4': '%34', '5': '%35', '6': '%36', '7': '%37', '8': '%38', '9': '%39' }; for (const char of result) { if (!gbkCodeMap[char] && !simpleMap[char] && /[a-zA-Z0-9]/.test(char)) { result = result.replace(char, '%' + char.charCodeAt(0).toString(16).toUpperCase()); } } return result; } const gbkKeyword = toGBK(params.keyword); const searchUrl = `https://s.1688.com/${params.searchCategory}/offer_search.htm?keywords=${gbkKeyword}`; console.log('🔗 构建的搜索URL:', searchUrl); return { success: true, searchUrl: searchUrl, params: params, gbkKeyword: gbkKeyword };",
+        "saveScreenshots": false
+      },
+      "next": [
+        "navigate_search"
+      ]
+    },
+    {
+      "id": "navigate_search",
+      "type": "NavigationNode",
+      "name": "导航到搜索结果页",
+      "config": {
+        "url": "{{previous.searchUrl}}",
+        "waitUntil": "domcontentloaded",
+        "timeout": 30000
+      },
+      "next": [
+        "wait_search"
+      ]
+    },
+    {
+      "id": "wait_search",
+      "type": "WaitNode",
+      "name": "等待搜索结果加载",
+      "config": {
+        "minMs": 3000,
+        "maxMs": 5000
+      },
+      "next": [
+        "extract_results"
+      ]
+    },
+    {
+      "id": "extract_results",
+      "type": "PageSnapshotNode",
+      "name": "提取搜索结果和链接",
+      "config": {
+        "script": "console.log('📊 提取1688搜索结果...'); const merchants = []; const maxResults = {{previous.params.maxResults}}; const offerItems = document.querySelectorAll('.sm-offer-item, .offer-item, .sm-offer, [class*=offer]'); console.log('找到 ' + offerItems.length + ' 个商品项'); const extractedItems = []; for (let i = 0; i < Math.min(offerItems.length, maxResults); i++) { const item = offerItems[i]; const title = item.querySelector('h4, [class*=title], a[title]'); const link = item.querySelector('a[href*=\"1688.com\"]'); const price = item.querySelector('[class*=price], [data-price]'); const image = item.querySelector('img[src]'); const contactButton = item.querySelector('[class*=contact], [class*=chat], [class*=im], [class*=旺旺], .sm-im, .s-im'); const merchantName = item.querySelector('[class*=company], [class*=name], [class*=shop]'); const merchantLink = link ? link.href : null; const contactLink = contactButton ? contactButton.href || contactButton.getAttribute('data-href') || contactButton.getAttribute('onclick') : null; // 提取merchantId const merchantId = merchantLink ? (merchantLink.includes('member_id=') ? merchantLink.match(/member_id=(\\d+)/)?.[1] : merchantLink.match(/\\/(\\d+)\\.htm/)?.[1]) : null; const merchantData = { index: i, title: title ? title.textContent.trim() : '', merchantName: merchantName ? merchantName.textContent.trim() : '', price: price ? price.textContent.trim() : '', merchantLink: merchantLink, merchantId: merchantId, contactLink: contactLink, contactButton: contactButton ? { className: contactButton.className, text: contactButton.textContent, href: contactButton.href } : null, image: image ? image.src : null, isNew: true }; merchants.push(merchantData); extractedItems.push({ merchantId: merchantId, title: merchantData.title, merchantName: merchantData.merchantName, link: merchantLink }); } const pagination = document.querySelector('.ui-pagination, .pagination'); let paginationInfo = null; if (pagination) { const currentPage = pagination.querySelector('.ui-page-active, .active, .current'); const nextButton = pagination.querySelector('.ui-page-next, .next, [class*=next]:not(.disabled)'); paginationInfo = { hasPagination: true, currentPage: currentPage ? currentPage.textContent.trim() : '1', hasNextPage: !!nextButton && !nextButton.classList.contains('disabled') }; } else { paginationInfo = { hasPagination: false }; } console.log('✅ 提取完成，成功提取 ' + merchants.length + ' 个商家信息'); return { success: true, merchants: merchants, extractedItems: extractedItems, totalFound: offerItems.length, paginationInfo: paginationInfo, currentUrl: window.location.href, pageTitle: document.title, timestamp: new Date().toISOString(), params: {{previous.params}} };",
+        "saveScreenshots": true
+      },
+      "next": [
+        "process_results"
+      ]
+    },
+    {
+      "id": "process_results",
+      "type": "ConditionalNode",
+      "name": "处理搜索结果",
+      "config": {
+        "condition": "{{previous.merchants.length > 0}}",
+        "trueNext": [
+          "check_open_first"
+        ],
+        "falseNext": [
+          "no_results"
+        ]
+      }
+    },
+    {
+      "id": "check_open_first",
+      "type": "ConditionalNode",
+      "name": "检查是否需要打开第一条链接",
+      "config": {
+        "condition": "{{previous.params.openFirstLink}}",
+        "trueNext": [
+          "open_first_link"
+        ],
+        "falseNext": [
+          "save_results"
+        ]
+      }
+    },
+    {
+      "id": "open_first_link",
+      "type": "NavigationNode",
+      "name": "打开第一条商家链接",
+      "config": {
+        "url": "{{previous.merchants[0].merchantLink}}",
+        "waitUntil": "domcontentloaded",
+        "timeout": 30000
+      },
+      "next": [
+        "wait_first_page"
+      ]
+    },
+    {
+      "id": "wait_first_page",
+      "type": "WaitNode",
+      "name": "等待第一条页面加载",
+      "config": {
+        "minMs": 2000,
+        "maxMs": 3000
+      },
+      "next": [
+        "analyze_first_page"
+      ]
+    },
+    {
+      "id": "analyze_first_page",
+      "type": "PageSnapshotNode",
+      "name": "分析第一条商家页面",
+      "config": {
+        "script": "console.log('🔍 分析第一条商家页面...'); const pageInfo = { url: window.location.href, title: document.title, timestamp: new Date().toISOString() }; // 检查是否成功打开商家页面 const isMerchantPage = window.location.href.includes('1688.com') && (window.location.href.includes('/offer/') || window.location.href.includes('/company/') || window.location.href.includes('member_id=')); // 尝试提取页面关键信息 const merchantInfo = {}; const companyTitle = document.querySelector('[class*=company], [class*=title], h1'); const contactInfo = document.querySelector('[class*=contact], [class*=phone], [class*=tel]'); const productImages = document.querySelectorAll('img[src*=\"1688\"]'); merchantInfo.companyName = companyTitle ? companyTitle.textContent.trim() : ''; merchantInfo.hasContact = !!contactInfo; merchantInfo.imageCount = productImages.length; console.log('📋 商家页面信息:', { isMerchantPage, url: pageInfo.url, title: pageInfo.title, merchantInfo }); return { success: true, pageInfo: pageInfo, merchantInfo: merchantInfo, isMerchantPage: isMerchantPage, searchResults: {{previous.merchants}} };",
+        "saveScreenshots": true
+      },
+      "next": [
+        "save_results"
+      ]
+    },
+    {
+      "id": "no_results",
+      "type": "LogNode",
+      "name": "无搜索结果",
+      "config": {
+        "level": "warn",
+        "message": "⚠️ 未找到任何搜索结果"
+      },
+      "next": [
+        "end"
+      ]
+    },
+    {
+      "id": "save_results",
+      "type": "ResultSaverNode",
+      "name": "保存完整结果",
+      "config": {
+        "outputDir": "archive/workflow-records",
+        "filenameTemplate": "1688-universal-search-钢化膜-{timestamp}.json",
+        "includeMetadata": true,
+        "mergeData": true
+      },
+      "next": [
+        "summary"
+      ]
+    },
+    {
+      "id": "summary",
+      "type": "LogNode",
+      "name": "输出执行摘要",
+      "config": {
+        "level": "info",
+        "message": "🎯 1688通用搜索完成\\n📝 搜索关键词: 钢化膜\\n📊 提取结果: {extract_results.merchants.length} 条\\n🔗 首条链接: {extract_results.merchants[0]?.merchantLink || '无'}\\n⏰ 完成时间: {extract_results.timestamp}"
+      },
+      "next": [
+        "end"
+      ]
+    },
+    {
+      "id": "end",
+      "type": "EndNode",
+      "name": "结束",
+      "config": {
+        "cleanup": false,
+        "saveLogs": true
+      }
+    }
+  ],
+  "globalConfig": {
+    "logLevel": "info",
+    "screenshotOnError": true,
+    "autoCleanup": false,
+    "parallelExecution": false,
+    "timeout": 180000
+  }
+}

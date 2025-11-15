@@ -5,7 +5,9 @@
  * 基于事件驱动容器系统，正确检测微博登录状态
  */
 
-import { chromium, Browser, BrowserContext, Page } from 'playwright';
+// 不再在此处直接创建浏览器实例，而是通过浏览器管理模块获取 Page/Context
+import { Browser, BrowserContext, Page } from 'playwright';
+import { startSession, navigateInSession } from '../../../../libs/browser/api.js';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import { EventBus } from '../event-driven/EventBus.js';
@@ -98,28 +100,20 @@ class WeiboLoginDetector {
       description: '启动浏览器实例',
       when: 'detector:browser:launch' as any,
       then: async (data) => {
-        console.log('🚀 启动浏览器...');
-        const browser = await chromium.launch({
+        console.log('🚀 启动浏览器 (via libs/browser/api)...');
+
+        // 通过浏览器管理模块启动会话（使用统一配置）
+        const { browser } = await startSession({
+          profileId: 'weibo-login-detector',
           headless: this.headless,
-          args: [
-            '--no-sandbox',
-            '--disable-setuid-sandbox',
-            '--disable-dev-shm-usage',
-            '--disable-accelerated-2d-canvas',
-            '--no-first-run',
-            '--no-zygote',
-            '--disable-gpu'
-          ]
+          config: {
+            userAgent: this.userAgent,
+            viewport: this.viewport,
+          }
         });
 
-        const context = await browser.newContext({
-          userAgent: this.userAgent,
-          viewport: this.viewport,
-          javaScriptEnabled: true,
-          ignoreHTTPSErrors: true
-        });
-
-        const page = await context.newPage();
+        const context: BrowserContext = browser.context; // PlaywrightBrowser 封装保证存在 context
+        const page: Page = await context.newPage();
         page.setDefaultTimeout(this.timeout);
 
         // 设置调试监听器

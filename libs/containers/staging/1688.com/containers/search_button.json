@@ -1,0 +1,10 @@
+{
+  "id": "search_button",
+  "name": "搜索按钮",
+  "type": "button",
+  "selectors": [ { "classes": ["search-btn"] } ],
+  "runMode": "sequential",
+  "operations": [ { "type": "find-child" } ],
+  "version": "2.0.0"
+}
+

@@ -1,0 +1,101 @@
+{
+  "name": "1688 Camoufox主页测试",
+  "description": "使用camoufox浏览器测试1688主页访问，绕过风控检测",
+  "version": "1.0.0",
+  "nodes": [
+    { "id": "start", "type": "StartNode", "name": "开始", "next": ["ensure_camoufox"] },
+
+    {
+      "id": "ensure_camoufox",
+      "type": "CamoufoxEnsureNode",
+      "name": "确保Camoufox可用",
+      "config": {},
+      "next": ["init_camoufox"]
+    },
+
+    {
+      "id": "init_camoufox",
+      "type": "BrowserInitNode",
+      "name": "初始化Camoufox浏览器",
+      "config": {
+        "engine": "camoufox",
+        "headless": false,
+        "viewport": { "width": 1920, "height": 1080 },
+        "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "strictAutomationMitigation": true,
+        "extraHeaders": true
+      },
+      "next": ["attach_session"]
+    },
+
+    { "id": "attach_session", "type": "AttachSessionNode", "name": "会话接力", "config": {}, "next": ["navigate_home"] },
+
+    {
+      "id": "navigate_home",
+      "type": "NavigationNode",
+      "name": "导航到1688主页",
+      "config": {
+        "url": "https://www.1688.com/",
+        "waitUntil": "domcontentloaded",
+        "timeout": 30000
+      },
+      "next": ["wait_home"]
+    },
+
+    {
+      "id": "wait_home",
+      "type": "WaitNode",
+      "name": "等待主页稳定",
+      "config": { "minMs": 3000, "maxMs": 5000 },
+      "next": ["check_homepage"]
+    },
+
+    {
+      "id": "check_homepage",
+      "type": "PageSnapshotNode",
+      "name": "检查主页状态",
+      "config": {
+        "script": "console.log('🔍 检查1688主页状态（使用camoufox）...'); const pageTitle = document.title; const pageUrl = window.location.href; const isVerification = pageTitle.includes('验证码') || document.body.textContent.includes('验证码') || document.body.textContent.includes('verification'); const hasNormalContent = document.querySelectorAll('.search-box, .nav-menu, .banner, [class*=\"search\"]').length > 0; const hasProducts = document.querySelectorAll('.offer-item, .product-item, [class*=\"offer\"]').length > 0; console.log('页面标题:', pageTitle); console.log('当前URL:', pageUrl); console.log('是否被验证码拦截:', isVerification); console.log('是否有正常主页内容:', hasNormalContent); console.log('是否有产品内容:', hasProducts); return { success: !isVerification && (hasNormalContent || hasProducts), pageTitle, pageUrl, isVerification, hasNormalContent, hasProducts, isHomepage: pageUrl.includes('1688.com') && !pageUrl.includes('s.1688.com'), timestamp: new Date().toISOString() };",
+        "saveScreenshots": true
+      },
+      "next": ["antibot_check"]
+    },
+
+    {
+      "id": "antibot_check",
+      "type": "PageSnapshotNode",
+      "name": "反风控检查",
+      "config": {
+        "script": "console.log('🛡️ 检查camoufox反风控状态...'); const checks = { hasCanvas: !!document.createElement('canvas').getContext, hasWebGL: !!document.createElement('canvas').getContext('webgl'), navigatorPlugins: navigator.plugins.length, navigatorLanguage: navigator.language, navigatorPlatform: navigator.platform, navigatorUserAgent: navigator.userAgent, screenResolution: `${screen.width}x${screen.height}`, timezone: Intl.DateTimeFormat().resolvedOptions().timeZone }; console.log('浏览器指纹检查:', checks); return { success: true, checks, timestamp: new Date().toISOString() };",
+        "saveScreenshots": false
+      },
+      "next": ["save_results"]
+    },
+
+    {
+      "id": "save_results",
+      "type": "ResultSaverNode",
+      "name": "保存测试结果",
+      "config": {
+        "outputDir": "archive/workflow-records",
+        "filenameTemplate": "1688-camoufox-homepage-test-{timestamp}.json",
+        "includeMetadata": true
+      },
+      "next": ["end"]
+    },
+
+    {
+      "id": "end",
+      "type": "EndNode",
+      "name": "结束",
+      "config": { "cleanup": false, "saveLogs": true }
+    }
+  ],
+  "globalConfig": {
+    "logLevel": "info",
+    "screenshotOnError": true,
+    "autoCleanup": false,
+    "parallelExecution": false,
+    "timeout": 900000
+  }
+}

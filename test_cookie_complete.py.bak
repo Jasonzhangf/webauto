@@ -1,0 +1,84 @@
+#!/usr/bin/env python3
+"""
+完整的Cookie管理功能测试
+"""
+
+import time
+from browser_interface import (
+    create_browser, save_cookies, load_cookies, 
+    save_session, restore_session
+)
+
+def test_cookie_management():
+    print("=== 测试Cookie管理功能 ===")
+    
+    try:
+        with create_browser(headless=False) as browser:
+            # 1. 访问百度
+            print("1. 访问百度...")
+            page = browser.goto('https://www.baidu.com')
+            time.sleep(3)
+            print(f"   页面标题: {page.title()}")
+            
+            # 2. 保存Cookie
+            print("2. 保存Cookie...")
+            save_result = save_cookies(browser, 'baidu')
+            print(f"   保存结果: {'成功' if save_result['success'] else '失败'}")
+            if save_result['success']:
+                print(f"   Cookie数量: {save_result['cookie_count']}")
+                print(f"   保存文件: {save_result['file']}")
+            else:
+                print(f"   错误: {save_result['error']}")
+                return False
+            
+            # 3. 保存会话
+            print("3. 保存完整会话...")
+            session_result = save_session(browser, 'baidu_test')
+            print(f"   会话保存: {'成功' if session_result['success'] else '失败'}")
+            if session_result['success']:
+                print(f"   Cookies数量: {session_result['cookies_count']}")
+                print(f"   Origins数量: {session_result['origins_count']}")
+            
+            # 4. 测试新浏览器加载Cookie
+            print("4. 测试新浏览器加载Cookie...")
+            with create_browser(headless=False) as new_browser:
+                # 先访问百度以确保域名正确
+                new_page = new_browser.goto('https://www.baidu.com')
+                time.sleep(2)
+                
+                # 加载Cookie
+                load_result = load_cookies(new_browser, 'baidu', 'https://www.baidu.com')
+                print(f"   Cookie加载: {'成功' if load_result['success'] else '失败'}")
+                if load_result['success']:
+                    print(f"   加载数量: {load_result['loaded']}")
+                
+                # 刷新页面验证Cookie生效
+                new_page.goto('https://www.baidu.com')
+                time.sleep(2)
+                print(f"   刷新后标题: {new_page.title()}")
+            
+            # 5. 测试会话恢复
+            print("5. 测试会话恢复...")
+            with create_browser(headless=False) as session_browser:
+                restore_result = restore_session(session_browser, 'baidu_test')
+                print(f"   会话恢复: {'成功' if restore_result['success'] else '失败'}")
+                if restore_result['success']:
+                    print(f"   恢复的Cookies: {restore_result['cookies_loaded']}")
+                    print(f"   恢复的Origins: {restore_result['origins_loaded']}")
+                    
+                    # 验证会话恢复后的页面访问
+                    session_page = session_browser.goto('https://www.baidu.com')
+                    time.sleep(2)
+                    print(f"   会话恢复后标题: {session_page.title()}")
+            
+            return True
+            
+    except Exception as e:
+        print(f"Cookie管理测试失败: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+
+if __name__ == '__main__':
+    success = test_cookie_management()
+    print(f"\n=== 测试结果: {'✅ 成功' if success else '❌ 失败'} ===")

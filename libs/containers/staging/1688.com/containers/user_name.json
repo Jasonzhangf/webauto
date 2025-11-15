@@ -1,0 +1,10 @@
+{
+  "id": "user_name",
+  "name": "用户昵称",
+  "type": "text",
+  "selectors": [ { "classes": ["member-nickname"] } ],
+  "runMode": "sequential",
+  "operations": [ { "type": "find-child" } ],
+  "version": "2.0.0"
+}
+

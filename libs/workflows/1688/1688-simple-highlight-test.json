@@ -1,0 +1,88 @@
+{
+  "name": "1688简单锚点高亮测试",
+  "description": "最简单的锚点高亮基础节点测试",
+  "version": "1.0.0",
+  "nodes": [
+    { "id": "start", "type": "StartNode", "name": "开始", "next": ["ensure_camoufox"] },
+    { "id": "ensure_camoufox", "type": "CamoufoxEnsureNode", "name": "Camoufox 校验/安装", "config": {}, "next": ["browser_init"] },
+    {
+      "id": "browser_init",
+      "type": "BrowserInitNode",
+      "name": "浏览器初始化",
+      "config": {
+        "engine": "camoufox",
+        "headless": false,
+        "viewport": { "width": 1920, "height": 1080 }
+      },
+      "next": ["load_cookies"]
+    },
+    {
+      "id": "load_cookies",
+      "type": "CookieLoaderNode",
+      "name": "加载Cookie",
+      "config": {
+        "cookiePath": "~/.webauto/cookies/1688-domestic.json"
+      },
+      "next": ["navigate_search"]
+    },
+    {
+      "id": "navigate_search",
+      "type": "NavigationNode",
+      "name": "导航到1688搜索页",
+      "config": {
+        "url": "https://s.1688.com/selloffer/offer_search.htm?keywords=%B8%D6%BB%AF%C4%A4",
+        "waitUntil": "domcontentloaded",
+        "timeout": 30000
+      },
+      "next": ["wait_page"]
+    },
+    {
+      "id": "wait_page",
+      "type": "WaitNode",
+      "name": "等待页面加载",
+      "config": { "minMs": 3000, "maxMs": 5000 },
+      "next": ["simple_highlight"]
+    },
+    {
+      "id": "simple_highlight",
+      "type": "AnchorPointNode",
+      "name": "简单锚点高亮",
+      "config": {
+        "selectors": [".sm-offer-item", ".offer-item", "[class*=offer]"],
+        "requireVisible": true,
+        "maxWaitMs": 10000,
+        "pollIntervalMs": 1000,
+        "highlight": true,
+        "persistHighlight": true,
+        "highlightColor": "#ff0000",
+        "highlightLabel": "TARGET",
+        "highlightDurationMs": 30000,
+        "alias": "testTarget"
+      },
+      "next": ["verify_highlight"]
+    },
+    {
+      "id": "verify_highlight",
+      "type": "PageSnapshotNode",
+      "name": "验证高亮效果",
+      "config": {
+        "script": "console.log('🔍 验证锚点高亮效果...');\n\n// 检查是否有高亮元素\nconst overlays = document.querySelectorAll('.__webauto_anchor_overlay__');\nconst labels = document.querySelectorAll('[style*=\"position:fixed\"][style*=\"background:#ff0000\"]');\nconst outlined = document.querySelectorAll('[style*=\"outline\"][style*=\"#ff0000\"]');\n\nconsole.log(`高亮覆盖层: ${overlays.length}`);\nconsole.log(`标签元素: ${labels.length}`);\nconsole.log(`轮廓元素: ${outlined.length}`);\n\n// 创建验证结果面板\nconst resultPanel = document.createElement('div');\nresultPanel.innerHTML = `\n  <h2 style=\"color: #ff0000; margin: 0 0 10px 0;\">🎯 锚点高亮验证结果</h2>\n  <p><strong>高亮覆盖层:</strong> ${overlays.length} 个</p>\n  <p><strong>标签元素:</strong> ${labels.length} 个</p>\n  <p><strong>轮廓元素:</strong> ${outlined.length} 个</p>\n  <p><strong>总计:</strong> ${overlays.length + labels.length + outlined.length} 个高亮元素</p>\n  <hr style=\"margin: 10px 0;\">\n  <p style=\"color: #007aff;\">如果看到红色高亮效果，说明锚点高亮功能正常！</p>\n  <p style=\"color: #666; font-size: 11px;\">高亮将保持30秒后自动消失</p>\n`;\n\nresultPanel.style.cssText = `\n  position: fixed;\n  top: 50px;\n  right: 50px;\n  background: white;\n  border: 3px solid #ff0000;\n  padding: 20px;\n  border-radius: 10px;\n  box-shadow: 0 0 20px rgba(255, 0, 0, 0.5);\n  z-index: 2147483647;\n  font-family: Arial, sans-serif;\n  font-size: 14px;\n  min-width: 250px;\n`;\n\ndocument.body.appendChild(resultPanel);\n\n// 30秒后移除面板\nsetTimeout(() => {\n  try { resultPanel.remove(); } catch {}\n}, 30000);\n\nreturn {\n  success: true,\n  overlays: overlays.length,\n  labels: labels.length,\n  outlined: outlined.length,\n  total: overlays.length + labels.length + outlined.length,\n  timestamp: new Date().toISOString()\n};",
+        "saveScreenshots": true
+      },
+      "next": ["end"]
+    },
+    {
+      "id": "end",
+      "type": "EndNode",
+      "name": "结束",
+      "config": { "cleanup": false, "saveLogs": true }
+    }
+  ],
+  "globalConfig": {
+    "logLevel": "info",
+    "screenshotOnError": true,
+    "autoCleanup": false,
+    "parallelExecution": false,
+    "timeout": 120000
+  }
+}

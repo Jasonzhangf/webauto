@@ -5,11 +5,12 @@
  * 集成徽章检测、登录状态确认和Cookie管理流程
  */
 
-import { chromium, Browser, BrowserContext, Page } from 'playwright';
-import * as fs from 'fs/promises';
+import { Browser, BrowserContext, Page } from 'playwright';
 import * as path from 'path';
 import { EventBus } from '../event-driven/EventBus.js';
 import { WorkflowEngine } from '../event-driven/WorkflowEngine.js';
+import { startSession } from '../../../../libs/browser/api.js';
+import { CookieManager } from '../../../../libs/browser/cookie-manager.js';
 
 // 类型定义
 interface EventDrivenCookieManagerOptions {
@@ -88,6 +89,7 @@ class EventDrivenCookieManager {
   private eventBus: EventBus;
   private workflowEngine: WorkflowEngine;
   private state: CookieManagerState;
+  private cookieManager: CookieManager;
 
   constructor(options: EventDrivenCookieManagerOptions = {}) {
     this.headless = options.headless ?? false;
@@ -115,6 +117,9 @@ class EventDrivenCookieManager {
       saveHistory: []
     };
 
+    // 统一使用浏览器模块的 Cookie 管理器
+    this.cookieManager = new CookieManager();
+
     this.setupEventDrivenWorkflow();
   }
 
@@ -130,28 +135,17 @@ class EventDrivenCookieManager {
       when: 'cookie:browser:init' as any,
       then: async (data) => {
         console.log('🚀 初始化浏览器...');
-
-        const browser = await chromium.launch({
+        const { browser } = await startSession({
+          profileId: 'event-driven-cookie-manager',
           headless: this.headless,
-          args: [
-            '--no-sandbox',
-            '--disable-setuid-sandbox',
-            '--disable-dev-shm-usage',
-            '--disable-accelerated-2d-canvas',
-            '--no-first-run',
-            '--no-zygote',
-            '--disable-gpu'
-          ]
+          config: {
+            userAgent: this.userAgent,
+            viewport: this.viewport
+          }
         });
 
-        const context = await browser.newContext({
-          userAgent: this.userAgent,
-          viewport: this.viewport,
-          javaScriptEnabled: true,
-          ignoreHTTPSErrors: true
-        });
-
-        const page = await context.newPage();
+        const context: BrowserContext = browser.context;
+        const page: Page = await context.newPage();
         page.setDefaultTimeout(this.timeout);
 
         // 设置调试监听器
@@ -182,22 +176,24 @@ class EventDrivenCookieManager {
         console.log('🍪 加载Cookie文件...');
 
         try {
-          const cookieData = await fs.readFile(this.cookiesPath, 'utf8');
-          const cookies = JSON.parse(cookieData);
+          const injected = await this.cookieManager.injectCookiesForUrl(
+            this.state.context,
+            'https://weibo.com/',
+            'event-driven-cookie-manager'
+          );
 
-          if (Array.isArray(cookies) && cookies.length > 0) {
-            await this.state.context.addCookies(cookies);
-            this.state.cookies = cookies;
+          if (injected.success && injected.count > 0) {
+            this.state.cookies = await this.state.context.cookies();
 
             await this.eventBus.emit('cookie:load:success', {
-              count: cookies.length,
-              cookies: cookies,
-              source: 'file'
+              count: injected.count,
+              cookies: this.state.cookies,
+              source: 'profile'
             });
 
-            console.log(`✅ 成功加载 ${cookies.length} 个Cookie`);
+            console.log(`✅ 成功加载 ${injected.count} 个Cookie`);
           } else {
-            throw new Error('Cookie文件为空或格式错误');
+            throw new Error(injected.message || '未找到有效Cookie');
           }
         } catch (error) {
           await this.eventBus.emit('cookie:load:failed', {
@@ -573,13 +569,13 @@ class EventDrivenCookieManager {
     const currentCookies = await this.state.context.cookies();
     this.state.cookies = currentCookies;
 
-    // 与上次保存的Cookie进行对比
+    // 与上次保存的Cookie进行对比（从 profile 中加载）
     let oldCookies = [];
     try {
-      const oldCookieData = await fs.readFile(this.cookiesPath, 'utf8');
-      oldCookies = JSON.parse(oldCookieData);
-    } catch (error) {
-      console.log('📝 未找到历史Cookie文件，进行首次保存');
+      const loaded = await this.state.context.cookies();
+      oldCookies = loaded || [];
+    } catch {
+      console.log('📝 无历史 Cookie 状态，进行首次保存');
     }
 
     // 执行对比
@@ -624,14 +620,18 @@ class EventDrivenCookieManager {
    */
   async saveCookiesToFile() {
     try {
-      const cookies = await this.state.context.cookies();
-      const cookiesDir = path.dirname(this.cookiesPath);
+      const result = await this.cookieManager.saveCookiesForUrl(
+        this.state.context,
+        'https://weibo.com/',
+        'event-driven-cookie-manager'
+      );
 
-      await fs.mkdir(cookiesDir, { recursive: true });
-      await fs.writeFile(this.cookiesPath, JSON.stringify(cookies, null, 2));
-
-      console.log(`✅ Cookie已保存到: ${this.cookiesPath}`);
-      console.log(`📊 保存了 ${cookies.length} 个Cookie`);
+      if (result.success) {
+        console.log(`✅ Cookie已保存: ${result.path}`);
+        console.log(`📊 保存了 ${result.count || 0} 个Cookie`);
+      } else {
+        console.log('❌ 保存Cookie失败:', result.message || 'unknown');
+      }
 
       return true;
     } catch (error) {

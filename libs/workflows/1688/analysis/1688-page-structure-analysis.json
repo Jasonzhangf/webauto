@@ -1,0 +1,78 @@
+{
+  "name": "1688页面结构分析",
+  "description": "分析1688主页面的实际结构，找到搜索输入框",
+  "version": "1.0.0",
+  "preflows": ["workflows/preflows/1688-login-preflow.json"],
+  "anchor": {
+    "hostFilter": "1688.com",
+    "selectors": [
+      ".userAvatarLogo img",
+      ".username",
+      ".user-info",
+      ".header-user",
+      ".login-user",
+      "[data-spm-anchor-id*='user']",
+      ".member-nickname",
+      ".s-login-info",
+      ".ui-header",
+      ".head-user-info",
+      ".login-info",
+      ".header-avatar",
+      ".user-name",
+      ".avatar",
+      "img[alt*='用户']",
+      "img[alt*='头像']",
+      ".header",
+      ".top-header",
+      ".ui-header-wrapper"
+    ],
+    "requireVisible": false,
+    "maxWaitMs": 10000,
+    "pollIntervalMs": 1000,
+    "highlight": true,
+    "persistHighlight": true,
+    "highlightLabel": "ANCHOR",
+    "highlightColor": "#007AFF"
+  },
+  "nodes": [
+    {
+      "id": "start",
+      "type": "StartNode",
+      "next": ["navigate_home"]
+    },
+    {
+      "id": "navigate_home",
+      "type": "NavigationNode",
+      "config": {
+        "url": "https://www.1688.com/",
+        "waitUntil": "networkidle",
+        "timeout": 15000
+      },
+      "next": ["wait_page_load"]
+    },
+    {
+      "id": "wait_page_load",
+      "type": "WaitNode",
+      "config": {
+        "duration": 3000
+      },
+      "next": ["page_analysis"]
+    },
+    {
+      "id": "page_analysis",
+      "type": "JavaScriptExecutionNode",
+      "config": {
+        "script": "// 分析1688页面结构，找到搜索输入框\nconsole.log('=== 1688页面结构分析 ===');\n\nconst results = {\n  currentUrl: window.location.href,\n  pageTitle: document.title,\n  readyState: document.readyState,\n  allInputs: [],\n  searchInputs: [],\n  forms: [],\n  visibleElements: []\n};\n\n// 1. 查找所有输入框\nconst allInputs = document.querySelectorAll('input');\nresults.allInputs = Array.from(allInputs).map(input => ({\n  type: input.type,\n  name: input.name,\n  id: input.id,\n  className: input.className,\n  placeholder: input.placeholder,\n  value: input.value,\n  visible: input.offsetWidth > 0 && input.offsetHeight > 0 && window.getComputedStyle(input).display !== 'none',\n  tagName: input.tagName\n}));\n\n// 2. 查找可能的搜索输入框\nconst searchSelectors = [\n  'input[name=\"keywords\"]',\n  'input[placeholder*=\"搜索\"]',\n  'input[placeholder*=\"找商品\"]',\n  '.search-input input',\n  '.search-box input',\n  'input[data-spm-anchor-id*=\"search\"]',\n  'input[type=\"text\"]',\n  '.s-search-input',\n  '.search-input',\n  'input[data-spm=\"search\"]',\n  '.search-input-text',\n  'input[class*=\"search\"]',\n  'input[id*=\"search\"]'\n];\n\nsearchSelectors.forEach(selector => {\n  try {\n    const elements = document.querySelectorAll(selector);\n    if (elements.length > 0) {\n      results.searchInputs.push({\n        selector: selector,\n        count: elements.length,\n        elements: Array.from(elements).map(el => ({\n          type: el.type,\n          name: el.name,\n          id: el.id,\n          className: el.className,\n          placeholder: el.placeholder,\n          value: el.value,\n          visible: el.offsetWidth > 0 && el.offsetHeight > 0 && window.getComputedStyle(el).display !== 'none'\n        }))\n      });\n    }\n  } catch (e) {\n    console.error(`选择器 ${selector} 错误:`, e.message);\n  }\n});\n\n// 3. 查找所有表单\nconst forms = document.querySelectorAll('form');\nresults.forms = Array.from(forms).map(form => ({\n  action: form.action,\n  method: form.method,\n  className: form.className,\n  id: form.id,\n  inputCount: form.querySelectorAll('input').length,\n  visible: form.offsetWidth > 0 && form.offsetHeight > 0\n}));\n\n// 4. 查找页面顶部区域的可见元素（可能是搜索相关）\nconst topElements = document.querySelectorAll('header, .header, .top, .search, .nav');\nresults.visibleElements = Array.from(topElements).map(el => ({\n  tagName: el.tagName,\n  className: el.className,\n  id: el.id,\n  text: el.textContent?.substring(0, 100),\n  visible: el.offsetWidth > 0 && el.offsetHeight > 0,\n  childElementCount: el.children.length\n}));\n\n// 5. 高亮找到的搜索输入框\nlet highlightedCount = 0;\nresults.searchInputs.forEach(searchGroup => {\n  searchGroup.elements.forEach(input => {\n    if (input.visible) {\n      const element = document.querySelector(`${searchGroup.selector}[type=\"text\"], ${searchGroup.selector}[type=\"search\"]`);\n      if (element) {\n        element.style.setProperty('border', '3px solid #FF6B6B', 'important');\n        element.style.setProperty('background', 'rgba(255, 107, 107, 0.2)', 'important');\n        \n        // 添加标签\n        const label = document.createElement('div');\n        label.textContent = `SEARCH_INPUT_${highlightedCount + 1}`;\n        label.style.cssText = `\n          position: absolute;\n          top: ${element.getBoundingClientRect().top - 30}px;\n          left: ${element.getBoundingClientRect().left}px;\n          background: #FF6B6B;\n          color: white;\n          padding: 4px 8px;\n          font-size: 12px;\n          font-weight: bold;\n          z-index: 999999;\n          border-radius: 4px;\n        `;\n        document.body.appendChild(label);\n        highlightedCount++;\n      }\n    }\n  });\n});\n\nconsole.log('=== 分析结果 ===');\nconsole.log('搜索输入框组数:', results.searchInputs.length);\nconsole.log('高亮输入框数量:', highlightedCount);\nconsole.log('总输入框数量:', results.allInputs.length);\nconsole.log('表单数量:', results.forms.length);\n\nreturn results;"
+      },
+      "next": ["end"]
+    },
+    {
+      "id": "end",
+      "type": "EndNode",
+      "config": {
+        "cleanupHighlights": false,
+        "persistSession": false
+      }
+    }
+  ]
+}

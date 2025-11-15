@@ -1,0 +1,161 @@
+{
+  "name": "1688批量商家聊天自动化系统",
+  "description": "支持关键字搜索、商家信息提取、发送历史记录、去重功能和批量聊天",
+  "version": "1.0.0",
+  "author": "WebAuto Team",
+  "preflows": ["1688-login-preflow"],
+  "nodes": [
+    { "id": "start", "type": "StartNode", "name": "开始", "next": ["attach"] },
+    {
+      "id": "attach",
+      "type": "AttachSessionNode",
+      "name": "会话接力",
+      "config": {},
+      "next": ["load_history"]
+    },
+    {
+      "id": "load_history",
+      "type": "DataLoadNode",
+      "name": "加载发送历史记录",
+      "config": {
+        "historyFile": "~/.webauto/data/1688-sent-history.json",
+        "defaultHistory": {}
+      },
+      "next": ["search_keyword"]
+    },
+    {
+      "id": "search_keyword",
+      "type": "NavigationNode",
+      "name": "搜索关键字",
+      "config": {
+        "url": "https://s.1688.com/selloffer/offer_search.htm?keywords=%B7%FE%D7%B0",
+        "waitUntil": "domcontentloaded",
+        "timeout": 30000
+      },
+      "next": ["wait_search"]
+    },
+    {
+      "id": "wait_search",
+      "type": "WaitNode",
+      "name": "等待搜索结果加载",
+      "config": { "minMs": 3000, "maxMs": 5000 },
+      "next": ["extract_merchants"]
+    },
+    {
+      "id": "extract_merchants",
+      "type": "PageSnapshotNode",
+      "name": "提取商家信息",
+      "config": {
+        "script": "console.log('🔍 开始提取商家信息...'); const merchants = []; const offerItems = document.querySelectorAll('.sm-offer-item, .offer-item, .sm-offer, [class*=offer]'); console.log('找到 ' + offerItems.length + ' 个商家'); offerItems.forEach(function(item, index) { if (index < 20) { const title = item.querySelector('h4, [class*=title], a[title]'); const link = item.querySelector('a[href*=\"1688.com\"]'); const price = item.querySelector('[class*=price], [data-price]'); const image = item.querySelector('img[src]'); const contactButton = item.querySelector('[class*=contact], [class*=chat], [class*=im], [class*=旺旺], .sm-im, .s-im'); const merchantName = item.querySelector('[class*=company], [class*=name], [class*=shop]'); const merchantLink = link ? link.href : null; const contactLink = contactButton ? contactButton.href || contactButton.getAttribute('data-href') || contactButton.getAttribute('onclick') : null; const merchantId = merchantLink ? merchantLink.match(/member_id=([\\d]+)/) ? merchantLink.match(/member_id=([\\d]+)/)[1] : merchantLink.match(/\\/(\\d+)\\.htm/) ? merchantLink.match(/\\/(\\d+)\\.htm/)[1] : null; merchants.push({ index: index, title: title ? title.textContent.trim() : '', merchantName: merchantName ? merchantName.textContent.trim() : '', price: price ? price.textContent.trim() : '', merchantLink: merchantLink, merchantId: merchantId, contactLink: contactLink, contactButton: contactButton ? { className: contactButton.className, text: contactButton.textContent, href: contactButton.href } : null, image: image ? image.src : null, extractedAt: new Date().toISOString() }); } }); const pagination = document.querySelector('.ui-pagination, .pagination'); let paginationInfo = null; if (pagination) { const currentPage = pagination.querySelector('.ui-page-active, .active, .current'); const nextButton = pagination.querySelector('.ui-page-next, .next, [class*=next]:not(.disabled)'); paginationInfo = { hasPagination: true, currentPage: currentPage ? currentPage.textContent.trim() : '1', hasNextPage: !!nextButton && !nextButton.classList.contains('disabled') }; } else { paginationInfo = { hasPagination: false }; } console.log('提取完成，找到 ' + merchants.length + ' 个有效商家'); return { success: true, merchants: merchants, totalMerchants: offerItems.length, paginationInfo: paginationInfo, currentUrl: window.location.href, pageTitle: document.title, timestamp: new Date().toISOString() };",
+        "saveScreenshots": true
+      },
+      "next": ["filter_duplicates"]
+    },
+    {
+      "id": "filter_duplicates",
+      "type": "DataFilterNode",
+      "name": "去重处理",
+      "config": {
+        "duplicateCheck": ["merchantId", "merchantName"],
+        "historyKey": "sentHistory",
+        "keepLatest": true
+      },
+      "next": ["loop_start"]
+    },
+    {
+      "id": "loop_start",
+      "type": "LoopStartNode",
+      "name": "开始循环处理",
+      "config": {
+        "loopType": "merchants",
+        "maxIterations": 10,
+        "continueOnError": true
+      },
+      "next": ["process_merchant"]
+    },
+    {
+      "id": "process_merchant",
+      "type": "ProcessMerchantNode",
+      "name": "处理单个商家",
+      "config": {
+        "extractMerchantInfo": true,
+        "checkHistory": true,
+        "delayBetween": 2000
+      },
+      "next": ["open_chat"]
+    },
+    {
+      "id": "open_chat",
+      "type": "NavigationNode",
+      "name": "打开聊天页面",
+      "config": {
+        "urlTemplate": "{{merchantLink}}",
+        "waitUntil": "domcontentloaded",
+        "timeout": 15000
+      },
+      "next": ["wait_chat_load"]
+    },
+    {
+      "id": "wait_chat_load",
+      "type": "WaitNode",
+      "name": "等待聊天页面加载",
+      "config": { "minMs": 2000, "maxMs": 3000 },
+      "next": ["send_message"]
+    },
+    {
+      "id": "send_message",
+      "type": "ChatHighlightOnlyNode1688",
+      "name": "发送聊天消息",
+      "config": {
+        "hostFilter": "air.1688.com",
+        "message": "您好，请问这个产品有现货吗？",
+        "highlightMs": 3000,
+        "mock": true
+      },
+      "next": ["save_to_history"]
+    },
+    {
+      "id": "save_to_history",
+      "type": "DataSaveNode",
+      "name": "保存到历史记录",
+      "config": {
+        "historyFile": "~/.webauto/data/1688-sent-history.json",
+        "recordType": "merchant",
+        "fields": ["merchantId", "merchantName", "title", "sentAt", "message"]
+      },
+      "next": ["loop_check"]
+    },
+    {
+      "id": "loop_check",
+      "type": "LoopCheckNode",
+      "name": "检查循环状态",
+      "config": {},
+      "next": ["process_merchant"],
+      "break": ["save_results"]
+    },
+    {
+      "id": "save_results",
+      "type": "ResultSaverNode",
+      "name": "保存批量处理结果",
+      "config": {
+        "outputDir": "archive/workflow-records",
+        "filenameTemplate": "1688-batch-chat-results-{timestamp}.json",
+        "includeMetadata": true
+      },
+      "next": ["end"]
+    },
+    {
+      "id": "end",
+      "type": "EndNode",
+      "name": "结束",
+      "config": { "cleanup": false, "saveLogs": true }
+    }
+  ],
+  "globalConfig": {
+    "logLevel": "info",
+    "screenshotOnError": true,
+    "autoCleanup": false,
+    "parallelExecution": false,
+    "timeout": 600000
+  }
+}

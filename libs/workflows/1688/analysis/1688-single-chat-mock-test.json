@@ -1,0 +1,83 @@
+{
+  "name": "1688单个对话Mock测试（基于成功模式）",
+  "description": "使用ChatHighlightOnlyNode进行聊天输入mock测试，避免风控",
+  "version": "1.0.0",
+  "preflows": [
+    "1688-login-preflow"
+  ],
+  "nodes": [
+    { "id": "start", "type": "StartNode", "name": "开始", "next": ["attach"] },
+    { "id": "attach", "type": "AttachSessionNode", "name": "会话接力", "config": {}, "next": ["navigate_chat"] },
+    {
+      "id": "navigate_chat",
+      "type": "NavigationNode",
+      "name": "导航到聊天页面",
+      "config": {
+        "url": "https://air.1688.com/app/ocms-fusion-components-1688/def_cbu_web_im_core/index.html?uid=%E6%B8%A9%E5%B7%9D%E7%9F%97%E7%AB%8B%E8%B4%B8%E6%98%93%E6%9C%89%E9%99%90%E5%85%AC%E5%8F%B8%E7%89%9B&site=cnalichn&fromid=cnalichnviridite",
+        "waitUntil": "domcontentloaded",
+        "timeout": 30000
+      },
+      "next": ["wait_chat"]
+    },
+    {
+      "id": "wait_chat",
+      "type": "WaitNode",
+      "name": "等待页面完全加载",
+      "config": { "minMs": 10000, "maxMs": 12000 },
+      "next": ["dismiss_modal"]
+    },
+    {
+      "id": "dismiss_modal",
+      "type": "ModalDismissNode",
+      "name": "关闭客户端提示",
+      "config": { "maxAttempts": 3, "retryDelay": 1000 },
+      "next": ["highlight_chat"]
+    },
+    {
+      "id": "highlight_chat",
+      "type": "ChatHighlightOnlyNode1688",
+      "name": "1688聊天界面仅高亮识别测试",
+      "config": {
+        "hostFilter": "air.1688.com",
+        "message": "你好，请问这个产品有现货吗？",
+        "highlightMs": 5000,
+        "mock": true
+      },
+      "next": ["check_result"]
+    },
+    {
+      "id": "check_result",
+      "type": "PageSnapshotNode",
+      "name": "检查mock聊天结果",
+      "config": {
+        "script": "console.log('🔍 检查mock聊天结果...'); const pageTitle = document.title; const pageUrl = window.location.href; const isChatPage = pageUrl.includes('air.1688.com'); const hasHighlightedElement = document.querySelector('[style*=\"background-color\"][style*=\"lightgreen\"], [style*=\"border\"][style*=\"green\"], [style*=\"background-color\"][style*=\"yellow\"]') || document.querySelector('.chat-highlight, .mock-highlight'); console.log('页面标题:', pageTitle); console.log('当前URL:', pageUrl); console.log('是否为聊天页面:', isChatPage); console.log('是否有高亮元素:', !!hasHighlightedElement); const inputElements = document.querySelectorAll('div[contenteditable=\"true\"], textarea, input[type=\"text\"]'); const sendButtons = document.querySelectorAll('button[class*=\"send\"], [title*=\"发送\"], .send-btn'); return { success: isChatPage && hasHighlightedElement, pageTitle, pageUrl, isChatPage, hasHighlightedElement: !!hasHighlightedElement, inputCount: inputElements.length, sendButtonCount: sendButtons.length, timestamp: new Date().toISOString() };",
+        "saveScreenshots": true
+      },
+      "next": ["save_results"]
+    },
+    {
+      "id": "save_results",
+      "type": "ResultSaverNode",
+      "name": "保存测试结果",
+      "config": {
+        "outputDir": "archive/workflow-records",
+        "filenameTemplate": "1688-single-chat-mock-success-{timestamp}.json",
+        "includeMetadata": true
+      },
+      "next": ["end"]
+    },
+    {
+      "id": "end",
+      "type": "EndNode",
+      "name": "结束",
+      "config": { "cleanup": false, "saveLogs": true }
+    }
+  ],
+  "globalConfig": {
+    "logLevel": "info",
+    "screenshotOnError": true,
+    "autoCleanup": false,
+    "parallelExecution": false,
+    "timeout": 300000
+  }
+}

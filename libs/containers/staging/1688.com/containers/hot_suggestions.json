@@ -1,0 +1,10 @@
+{
+  "id": "hot_suggestions",
+  "name": "热词推荐",
+  "type": "list",
+  "selectors": [ { "classes": ["hot-words"] } ],
+  "runMode": "sequential",
+  "operations": [ { "type": "find-child" } ],
+  "version": "2.0.0"
+}
+

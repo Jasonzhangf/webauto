@@ -7,11 +7,12 @@
  * - 事件驱动工作流（EventBus + WorkflowEngine）防止级联故障
  */
 
-import { chromium, Browser, BrowserContext, Page } from 'playwright';
+import { Browser, BrowserContext, Page } from 'playwright';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import { EventBus } from '../event-driven/EventBus.js';
 import { WorkflowEngine } from '../event-driven/WorkflowEngine.js';
+import { startSession } from '../../../../libs/browser/api.js';
 
 // ==================== 类型定义 ====================
 
@@ -103,25 +104,16 @@ class Alibaba1688LoginDetector {
       name: '1688 浏览器启动',
       when: 'detector:browser:launch' as any,
       then: async () => {
-        const browser = await chromium.launch({
+        const { browser } = await startSession({
+          profileId: '1688-login-detector',
           headless: this.headless,
-          args: [
-            '--no-sandbox',
-            '--disable-setuid-sandbox',
-            '--disable-dev-shm-usage',
-            '--disable-accelerated-2d-canvas',
-            '--no-first-run',
-            '--no-zygote',
-            '--disable-gpu'
-          ]
+          config: {
+            userAgent: this.userAgent,
+            viewport: this.viewport
+          }
         });
-        const context = await browser.newContext({
-          userAgent: this.userAgent,
-          viewport: this.viewport,
-          javaScriptEnabled: true,
-          ignoreHTTPSErrors: true
-        });
-        const page = await context.newPage();
+        const context: BrowserContext = browser.context;
+        const page: Page = await context.newPage();
         page.setDefaultTimeout(this.timeout);
 
         if (this.debug) {
