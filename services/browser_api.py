@@ -115,6 +115,26 @@ def create_session():
     except Exception as e:
         return create_error_response(f"创建会话异常: {str(e)}")
 
+@app.route('/api/v1/sessions', methods=['GET'])
+def list_sessions():
+    """列出当前所有浏览器会话（用于一键脚本等上层管理）"""
+    try:
+        sessions_data = []
+        # 直接访问服务内部的会话映射
+        for session_id, session in browser_service.sessions.items():  # type: ignore[attr-defined]
+            sessions_data.append({
+                "session_id": session_id,
+                "profile_id": getattr(session.profile, "profile_id", "default"),
+                "status": session.status,
+                "created_at": session.created_at,
+                "last_activity": session.last_activity,
+                "page_count": session.page_count,
+                "cookie_count": session.cookie_count,
+            })
+        return create_success_response({"sessions": sessions_data})
+    except Exception as e:
+        return create_error_response(f"获取会话列表异常: {str(e)}")
+
 @app.route('/api/v1/sessions/<session_id>', methods=['GET'])
 def get_session(session_id: str):
     """获取会话信息"""

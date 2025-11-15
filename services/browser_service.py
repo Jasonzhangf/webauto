@@ -355,15 +355,28 @@ class BrowserService(AbstractBrowserService):
             raise BrowserServiceError("服务未运行，无法创建会话")
         
         try:
-            # 生成会话ID
-            session_id = str(uuid.uuid4())
-            
             # 使用默认配置或提供的配置
             if profile is None:
                 profile = BrowserProfile(
                     profile_id="default",
                     anti_detection_level=AntiDetectionLevel.ENHANCED
                 )
+
+            # 约束：同一 profile 同一时刻只允许一个会话
+            # 在创建新会话前，主动关闭所有使用相同 profile_id 的旧会话
+            try:
+                existing_ids = [
+                    sid for sid, sess in self.sessions.items()
+                    if getattr(sess.profile, "profile_id", None) == profile.profile_id
+                ]
+                for sid in existing_ids:
+                    self.close_session(sid)
+            except Exception:
+                # 清理失败不阻断后续创建流程
+                pass
+
+            # 生成会话ID
+            session_id = str(uuid.uuid4())
             
             # 创建会话对象
             session = BrowserSession(
@@ -402,10 +415,22 @@ class BrowserService(AbstractBrowserService):
             
             # 创建控制器
             controller = BrowserController(browser_wrapper, page)
-            
-            # 应用指纹配置
-            if profile.fingerprint:
-                self._apply_fingerprint_config(controller, profile.fingerprint)
+
+            # 按 profile 初始化 / 复用指纹配置，并应用到当前会话上下文
+            try:
+                # 如果该 profile 还没有指纹，则生成并持久化一份
+                fingerprint = self.fingerprint_manager.get_current_fingerprint(profile.profile_id)
+                if not fingerprint:
+                    result = self.fingerprint_manager.update_fingerprint(
+                        profile.profile_id,
+                        profile.anti_detection_level.value if isinstance(profile.anti_detection_level, AntiDetectionLevel) else str(profile.anti_detection_level),
+                    )
+                    fingerprint = result.get("fingerprint") or self.fingerprint_manager.get_current_fingerprint(profile.profile_id)
+                if fingerprint:
+                    self._apply_fingerprint_config(controller, fingerprint)
+            except Exception:
+                # 指纹配置失败不影响会话创建
+                pass
             
             # 更新会话状态
             session.status = "active"
@@ -686,6 +711,13 @@ class BrowserService(AbstractBrowserService):
         }
     
     def _apply_fingerprint_config(self, controller: BrowserController, fingerprint_config: Dict[str, Any]):
-        """应用指纹配置"""
-        # 这里应该实现具体的指纹应用逻辑
-        pass
+        """应用指纹配置到当前会话的浏览器上下文"""
+        try:
+            # Playwright/Camoufox 页面对象通常提供 context 属性
+            context = getattr(controller.page, "context", None)
+            if context is None:
+                return
+            self.fingerprint_manager.apply_fingerprint_to_context(context, fingerprint_config)
+        except Exception:
+            # 指纹应用失败不影响主流程
+            pass

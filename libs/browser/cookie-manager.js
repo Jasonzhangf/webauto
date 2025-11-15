@@ -13,10 +13,11 @@ import { homedir } from 'os';
 
 export class CookieManager {
     /**
-     * @param {string|null} storageRoot 根目录，默认 ~/.webauto/cookies
+     * @param {string|null} profileDir Profile目录，默认 ~/.webauto/cookies
      */
-    constructor(storageRoot = null) {
-        this.storageRoot = storageRoot || join(homedir(), '.webauto', 'cookies');
+    constructor(profileDir = null) {
+        this.profileDir = profileDir || join(homedir(), '.webauto', 'cookies');
+        this.storageRoot = this.profileDir;
     }
 
     // --------- 基础域级别 API（向后兼容） ---------
@@ -183,7 +184,7 @@ export class CookieManager {
      * @private
      */
     _profileDir(profileId) {
-        return join(this.storageRoot, this._sanitizeProfile(profileId));
+        return this.profileDir;
     }
 
     /**
@@ -213,7 +214,8 @@ export class CookieManager {
 
         if (hostname.includes('1688.com')) {
             // legacy 全局 1688 cookie 文件，保留兼容性
-            files.push(join(this.storageRoot, '1688-domestic.json'));
+            const legacyRoot = join(homedir(), '.webauto', 'cookies');
+            files.push(join(legacyRoot, '1688-domestic.json'));
         }
 
         return { baseDir, files, hostname };

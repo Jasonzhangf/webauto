@@ -16,6 +16,18 @@ const projectRoot = resolve(__dirname, '../../..');
 const HOST = process.env.BROWSER_SERVICE_HOST || '127.0.0.1';
 const PORT = Number(process.env.BROWSER_SERVICE_PORT || '8888');
 
+function resolveProfileId() {
+  const args = process.argv.slice(2);
+  const idx = args.indexOf('--profile');
+  if (idx !== -1 && args[idx + 1]) {
+    return String(args[idx + 1]);
+  }
+  if (process.env.BROWSER_PROFILE_ID) {
+    return String(process.env.BROWSER_PROFILE_ID);
+  }
+  return 'default';
+}
+
 async function isHealthy() {
   const url = `http://${HOST}:${PORT}/api/v1/health`;
   try {
@@ -64,6 +76,41 @@ async function ensureService() {
   throw new Error('Browser service did not become healthy within timeout');
 }
 
+async function listSessions() {
+  const url = `http://${HOST}:${PORT}/api/v1/sessions`;
+  const res = await fetch(url);
+  if (!res.ok) {
+    return [];
+  }
+  const j = await res.json().catch(() => ({}));
+  const data = j?.data || {};
+  const sessions = data.sessions || [];
+  return Array.isArray(sessions) ? sessions : [];
+}
+
+async function killSameProfileSessions(profileId) {
+  const sessions = await listSessions();
+  const targets = sessions.filter((s) => {
+    const pid = s.profile_id || s.profile?.profile_id;
+    return pid === profileId;
+  });
+  if (!targets.length) return;
+  console.log(`ℹ️ 检测到同 profile (${profileId}) 的历史会话 ${targets.length} 个，准备清理...`);
+  for (const s of targets) {
+    const sid = s.session_id || s.sessionId || s.id;
+    if (!sid) continue;
+    try {
+      const url = `http://${HOST}:${PORT}/api/v1/sessions/${encodeURIComponent(sid)}`;
+      const res = await fetch(url, { method: 'DELETE' });
+      if (res.ok) {
+        console.log(`   • 已关闭旧会话 ${sid}`);
+      }
+    } catch {
+      // 单个失败忽略
+    }
+  }
+}
+
 async function createSession(profileId = 'default') {
   const url = `http://${HOST}:${PORT}/api/v1/sessions`;
   const body = {
@@ -96,6 +143,8 @@ async function createSession(profileId = 'default') {
 async function main() {
   console.log('🚀 一键启动 Camoufox 浏览器服务并创建会话...');
 
+  const profileId = resolveProfileId();
+
   const pid = await ensureService();
   if (pid) {
     console.log(`✅ 浏览器服务已启动 (pid=${pid})，地址 http://${HOST}:${PORT}`);
@@ -103,12 +152,15 @@ async function main() {
     console.log(`ℹ️ 浏览器服务已在运行中，地址 http://${HOST}:${PORT}`);
   }
 
-  const sessionId = await createSession('default');
+  // 先清理同 profile 的旧会话，保留其他 profile 的实例
+  await killSameProfileSessions(profileId);
+
+  const sessionId = await createSession(profileId);
 
   console.log('');
   console.log('✅ 已创建浏览器会话:');
   console.log(`   session_id: ${sessionId}`);
-  console.log('   profile_id: default  (所有站点 Cookie 自动保存/恢复)');
+  console.log(`   profile_id: ${profileId}  (所有站点 Cookie 自动保存/恢复)`);
   console.log('');
   console.log('👀 请在前台确认 Camoufox 窗口已经弹出（about:blank）。');
   console.log('   后续浏览器控制请通过 /api/v1/sessions/{session_id}/... 这些 REST 接口完成。');
