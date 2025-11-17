@@ -81,6 +81,7 @@ def upsert_container_for_url(
   selector: str,
   description: str = "",
   parent_id: Optional[str] = None,
+  actions: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
   """
   为给定 URL 新增 / 更新一个容器定义，并在必要时更新父容器的 children 列表。
@@ -108,10 +109,13 @@ def upsert_container_for_url(
     "selector": selector,
     "description": description or existing.get("description") or "",
   }
-  # 保留已有 children / actions
+  # 保留已有 children
   if "children" in existing:
     merged["children"] = existing["children"]
-  if "actions" in existing:
+  # actions 如显式传入则覆盖，否则保留已有
+  if actions is not None:
+    merged["actions"] = actions
+  elif "actions" in existing:
     merged["actions"] = existing["actions"]
 
   containers[container_id] = merged
@@ -128,4 +132,3 @@ def upsert_container_for_url(
   _save_registry(registry)
 
   return site
-

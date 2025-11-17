@@ -210,6 +210,7 @@ def create_or_update_container():
         selector = data.get("selector") or ""
         description = data.get("title") or data.get("description") or ""
         parent_id = data.get("parentId") or data.get("parent_id")
+        actions = data.get("actions") or None
 
         if not url:
             return create_error_response("缺少 url 字段")
@@ -224,6 +225,7 @@ def create_or_update_container():
             selector=selector,
             description=description,
             parent_id=parent_id or None,
+            actions=actions,
         )
 
         return create_success_response({

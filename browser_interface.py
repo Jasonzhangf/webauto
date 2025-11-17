@@ -951,9 +951,13 @@ class CamoufoxBrowserWrapper(AbstractBrowser):
                     const tree = document.createElement('div');
                     tree.className = 'wa-tree';
 
+                    const DEBUG_BASE = 'http://127.0.0.1:8888';
+
                     // 容器树：从后端 /api/v1/containers?url=... 拉取当前页面的容器定义
                     let treeNodes = [];
                     let containersById = {};
+                    let currentContainerId = null;
+                    let currentOps = {};
 
                     function clearTreeSelection() {
                       treeNodes.forEach(n => n.classList.remove('wa-tree-node-selected'));
@@ -986,6 +990,51 @@ class CamoufoxBrowserWrapper(AbstractBrowser):
                         box.style.height = Math.max(rect.height + 4, 4) + 'px';
                         box.style.display = 'block';
                       } catch {}
+                    }
+
+                    function renderOpsForContainer(id) {
+                      const c = containersById[id] || {};
+                      currentContainerId = id;
+                      currentOps = Object.assign({}, c.actions || {});
+
+                      // 渲染已注册 Operation 列表
+                      opList.innerHTML = '';
+                      const activeKeys = Object.keys(currentOps).filter(k => currentOps[k]);
+                      if (!activeKeys.length) {
+                        const li = document.createElement('li');
+                        li.className = 'wa-op-item';
+                        li.innerHTML = '<span class="wa-op-name">暂无已注册 Operation</span>';
+                        opList.appendChild(li);
+                      } else {
+                        activeKeys.forEach(key => {
+                          const li = document.createElement('li');
+                          li.className = 'wa-op-item';
+                          li.innerHTML = '<span class="wa-op-handle">●</span><span class="wa-op-name">' + key + '</span>';
+                          opList.appendChild(li);
+                        });
+                      }
+
+                      // 渲染可添加 Operation 芯片
+                      const OPS = [
+                        { key: 'click', label: '点击 (click)' },
+                        { key: 'type', label: '输入 (type)' },
+                        { key: 'fill', label: '填充值 (fill)' },
+                      ];
+                      pal.innerHTML = '';
+                      OPS.forEach(op => {
+                        const chip = document.createElement('span');
+                        chip.className = 'wa-op-chip';
+                        const active = !!currentOps[op.key];
+                        chip.textContent = op.label;
+                        chip.style.background = active ? '#1d4ed8' : '#020617';
+                        chip.style.borderColor = active ? '#60a5fa' : '#374151';
+                        chip.style.color = active ? '#eff6ff' : '#d1d5db';
+                        chip.addEventListener('click', () => {
+                          currentOps[op.key] = !currentOps[op.key];
+                          renderOpsForContainer(id);
+                        });
+                        pal.appendChild(chip);
+                      });
                     }
 
                     function renderContainerTree(containers) {
@@ -1032,6 +1081,7 @@ class CamoufoxBrowserWrapper(AbstractBrowser):
                             f1v.textContent = c.description || id;
                             f2v.textContent = selector || '';
                             f3v.textContent = id;
+                            renderOpsForContainer(id);
                           } catch {}
                         });
 
@@ -1045,7 +1095,6 @@ class CamoufoxBrowserWrapper(AbstractBrowser):
 
                     // 首次加载容器树
                     try {
-                      const DEBUG_BASE = 'http://127.0.0.1:8888';
                       fetch(DEBUG_BASE + '/api/v1/containers?url=' + encodeURIComponent(window.location.href))
                         .then(r => r.json())
                         .then(j => {
@@ -1102,22 +1151,14 @@ class CamoufoxBrowserWrapper(AbstractBrowser):
                     sectionOps.className = 'wa-section';
                     const st2 = document.createElement('div');
                     st2.className = 'wa-section-title';
-                    st2.innerHTML = '已注册 Operation <span class="wa-section-sub">（仅样式，占位拖拽排序区）</span>';
+                    st2.innerHTML = '已注册 Operation <span class="wa-section-sub">（点击下方 Operation 芯片以开关，并保存）</span>';
                     sectionOps.appendChild(st2);
                     const opList = document.createElement('ul');
                     opList.className = 'wa-op-list';
-                    const op1 = document.createElement('li');
-                    op1.className = 'wa-op-item';
-                    op1.innerHTML = '<span class="wa-op-handle">⋮⋮</span><span class="wa-op-name">滚动加载商品</span><button class="wa-op-delete">删除</button>';
-                    const op2 = document.createElement('li');
-                    op2.className = 'wa-op-item';
-                    op2.innerHTML = '<span class="wa-op-handle">⋮⋮</span><span class="wa-op-name">提取列表数据</span><button class="wa-op-delete">删除</button>';
-                    opList.appendChild(op1);
-                    opList.appendChild(op2);
                     sectionOps.appendChild(opList);
                     const btnLink = document.createElement('button');
                     btnLink.className = 'wa-btn-link';
-                    btnLink.textContent = '＋ 添加 Operation';
+                    btnLink.textContent = '保存 Operation 配置';
                     sectionOps.appendChild(btnLink);
 
                     const sectionPalette = document.createElement('div');
@@ -1128,12 +1169,6 @@ class CamoufoxBrowserWrapper(AbstractBrowser):
                     sectionPalette.appendChild(st3);
                     const pal = document.createElement('div');
                     pal.className = 'wa-op-palette';
-                    ['批量选中商品','打开详情页','滚动到底部'].forEach(t => {
-                      const chip = document.createElement('span');
-                      chip.className = 'wa-op-chip';
-                      chip.textContent = t;
-                      pal.appendChild(chip);
-                    });
                     sectionPalette.appendChild(pal);
 
                     const sectionChildren = document.createElement('div');
@@ -1300,7 +1335,8 @@ class CamoufoxBrowserWrapper(AbstractBrowser):
             title,
             selector,
             url: window.location.href,
-            parentId: null
+            parentId: null,
+            actions: null
           };
           const DEBUG_BASE = 'http://127.0.0.1:8888';
           fetch(DEBUG_BASE + '/api/v1/containers', {
