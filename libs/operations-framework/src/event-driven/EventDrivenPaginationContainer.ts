@@ -5,7 +5,9 @@
 
 import { EventDrivenContainer, ContainerConfig, ContainerSharedSpace } from './EventDrivenContainer';
 import { CONTAINER_EVENTS } from './EventTypes';
-import { Page } from 'playwright';
+type Page = {
+  url(): string;
+};
 
 export interface PaginationConfig extends ContainerConfig {
   paginationMode?: 'button' | 'url' | 'load-more' | 'infinite';

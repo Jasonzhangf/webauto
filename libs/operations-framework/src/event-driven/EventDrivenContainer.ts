@@ -5,7 +5,9 @@
 
 import { EventBus, EventData } from './EventBus';
 import { CONTAINER_EVENTS, EventType, EventDataMap, EventHandler } from './EventTypes';
-import { Page } from 'playwright';
+type Page = {
+  url(): string;
+};
 
 export interface ContainerConfig {
   id: string;

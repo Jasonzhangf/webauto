@@ -74,7 +74,8 @@ node simple-test.js
 ## 项目规则 (Project Rules)
 
 - 应用层不得直接访问浏览器底层实现，必须通过浏览器应用模块的统一接口访问。禁止在应用代码中直接导入或使用底层库（如 `playwright`、`camoufox`、`selenium` 等）。
-- 每个功能模块必须有“全局唯一入口”。大模块（例如浏览器）只能通过其唯一入口进行访问与集成：浏览器模块唯一入口为 `libs/browser/browser.js`。严禁跨过入口直接引用模块内部文件。
+- 每个功能模块必须有"全局唯一入口"。大模块（例如浏览器）只能通过其唯一入口进行访问与集成：浏览器模块唯一入口为 `libs/browser/browser.js`。严禁跨过入口直接引用模块内部文件。
+- **CRITICAL**: 所有浏览器操作必须通过 `libs/browser/browser.js` 统一入口，禁止绕过直接使用任何底层实现。这是系统架构的核心要求。
 
 ### Python Components
 
@@ -100,10 +101,18 @@ from camoufox import NewBrowser
 ### Node.js Components
 
 **Browser Module** (`libs/browser/`):
-- `browser.js` - Main browser interface (JavaScript equivalent of Python interface)
-- `browser-manager.js` - Browser instance management
-- `cookie-manager.js` - Cookie handling
-- `browser-config.js` - Configuration management
+- `browser.js` - **UNIFIED ENTRY POINT** - Main browser interface and the only valid entry point
+- `browser-manager.js` - Browser instance management with singleton pattern
+- `playwright-browser.js` - Playwright browser implementation (internal use only)
+- `cookie-manager.js` - Cookie handling with URL-based auto-injection
+- `browser-config.js` - Configuration management with Chinese support
+- `fingerprint-manager.js` - Browser fingerprint generation and management
+- `remote-service.js` - HTTP+SSE remote control service
+- `browser-service-config.js` - Service configuration management
+- `abstract-browser.js` - Abstract base class with security enforcement
+- `default-profile.js` - Default profile creation and management
+- `browser-errors.js` - Comprehensive error definitions
+- `security/enforce-imports.js` - Runtime import security enforcement
 
 ### TypeScript Configuration
 - Target: ES2022
@@ -139,9 +148,11 @@ The project maintains comprehensive testing in both Python and Node.js:
 
 ### Access Control
 - **Forbidden Modules**: Playwright, Camoufox, Selenium cannot be imported directly
-- **Abstract Interface**: All browser operations must go through `browser_interface.py`
+- **Abstract Interface**: All browser operations must go through `browser_interface.py` (Python) or `libs/browser/browser.js` (Node.js)
 - **Resource Management**: Context managers enforced for proper cleanup
 - **Isolation**: Separate environments for different service components
+- **Runtime Enforcement**: `security/enforce-imports.js` prevents direct imports at runtime
+- **Critical Rule**: **All browser operations MUST go through `libs/browser/browser.js` unified entry point**
 
 ### Anti-Detection Measures
 - Custom user agents and browser fingerprints
@@ -216,6 +227,33 @@ All services expose `/health` endpoints for monitoring and orchestration.
 - Test anti-detection measures regularly
 - Monitor service health through provided endpoints
 - Follow the established error handling patterns
+
+### Camoufox Fingerprint Profiles (Memory)
+- Python 统一入口 `browser_interface.py` 已内置 **指纹模式**：
+  - `fingerprint_profile='fixed'`（默认）：为每个 `profile_id` 生成并缓存一套 Camoufox `launch_options`，后续启动复用同一指纹（适合 1688 等强绑定站点）。
+  - `fingerprint_profile='random'`：每次启动随机指纹，仅在显式传入时启用。
+- 固定指纹配置保存位置：`~/.webauto/camoufox-profiles/launch_options_<profile_id>.json`。
+- 一键启动浏览器时：
+  - 默认使用 `fingerprint_profile='fixed', profile_id='1688-main-v1'`（与 1688 登录场景共用同一指纹）。
+  - 推荐为 1688 场景显式传入独立的 `session_name`（例如 `1688-fixed-v1`），确保 cookie 与指纹一起可复用。
+- Camoufox 字体指纹已在入口层禁用，并在页面级自动注入中文字体 CSS，避免中文渲染为方框。
+
+### 交互式浏览器启动共识
+- **统一使用 `open_profile_browser(...)` 启动 Camoufox**，不要在新代码中直接调用 `CamoufoxBrowserWrapper._ensure_browser()` 或手动管理进程：
+  - 默认行为：
+    - 同一 `profile_id` 下 **互斥**：启动前自动尝试终止已有 Camoufox 进程；
+    - 使用固定指纹（`fingerprint_profile='fixed'`，默认 profile 为 `1688-main-v1`）+ 自动会话（`auto_session=True`）；
+    - 自动会话将通过后台线程每隔约 5 秒保存一次 `storage_state`，并在 `close()` 时再做最终保存；
+    - 启动后自动注入最小悬浮菜单（`install_overlay`）；
+    - 创建并前置一个 about:blank 空白标签页，同时尽可能关闭 Camoufox 自带启动页，**不自动打开任何业务 URL**。
+  - 示例：
+    ```python
+    from browser_interface import open_profile_browser
+
+    with open_profile_browser(profile_id='1688-main-v1') as browser:
+        page = browser.new_page()
+        page.goto('https://www.1688.com')
+    ```
 
 ### Language Preference
 The project uses both Chinese and English in documentation and code comments. Chinese is primarily used in:

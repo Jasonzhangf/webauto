@@ -3,7 +3,10 @@
  * 通过遍历DOM树发现潜在的容器元素
  */
 
-import { Page } from 'playwright';
+// 为避免直接依赖 Node 侧 Playwright，这里只定义最小 Page 接口
+type Page = {
+  url(): string;
+};
 import { DiscoveryStrategy, DiscoveredContainer, ContainerType } from '../types/index.js';
 
 export class DOMWalkStrategy implements DiscoveryStrategy {

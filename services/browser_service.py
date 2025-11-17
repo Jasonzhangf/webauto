@@ -398,9 +398,16 @@ class BrowserService(AbstractBrowserService):
                 "headless": False,
                 "locale": profile.locale or "zh-CN",
                 "cookie_dir": "./cookies",
+                # 同一 profile 下互斥：在底层包装器里启动前会尝试终止已有 Camoufox 实例
+                "kill_previous": True,
+                # 指纹策略：按 profile 固定指纹，保证 1688 等站点的“设备指纹 + Cookie”组合稳定
+                "fingerprint_profile": "fixed",
+                "profile_id": profile.profile_id or "default",
                 # 自动在关闭时保存会话，在下次启动时按 profile_id 恢复
                 "auto_session": True,
-                "session_name": profile.profile_id or "default"
+                "session_name": profile.profile_id or "default",
+                # 在浏览过程中周期性自动保存 storage_state，避免只在关闭时保存导致登录态丢失
+                "auto_save_interval": 5.0,
             }
             
             browser_wrapper = CamoufoxBrowserWrapper(browser_config)

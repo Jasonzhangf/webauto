@@ -3,7 +3,9 @@
  * 通过遍历DOM树发现潜在的容器元素
  */
 
-import { Page } from 'playwright';
+type Page = {
+  url(): string;
+};
 import { DiscoveryStrategy, DiscoveredContainer, ContainerType } from '../types/index.js';
 
 export class DOMWalkStrategy implements DiscoveryStrategy {

@@ -5,7 +5,10 @@
 
 import { EventBus } from './EventBus';
 import { ContainerRegistry, ContainerInfo } from '../containers/ContainerRegistry';
-import { Page } from 'playwright';
+// 为避免误用 Node 侧 Playwright，这里只定义一个最小 Page 接口
+type Page = {
+  url(): string;
+};
 
 // ==================== 接口定义 ====================
 

@@ -1,0 +1,402 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <title>WebAuto 容器编辑器（静态示例）</title>
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        padding: 0;
+        font-family: -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+        background: #0b1120;
+        color: #e5e7eb;
+        min-height: 100vh;
+      }
+      .wa-panel {
+        position: fixed;
+        top: 16px;
+        right: 16px;
+        width: 420px;
+        height: 560px;
+        background: #020617;
+        border-radius: 14px;
+        box-shadow: 0 18px 45px rgba(0, 0, 0, 0.7);
+        border: 1px solid #1e293b;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+      }
+      .wa-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 8px 10px;
+        border-bottom: 1px solid #1f2937;
+        background: linear-gradient(90deg, #020617, #0b1120);
+      }
+      .wa-header-left {
+        display: flex;
+        gap: 6px;
+        align-items: center;
+        font-size: 11px;
+      }
+      .wa-badge {
+        padding: 2px 8px;
+        border-radius: 999px;
+        background: rgba(59, 130, 246, 0.15);
+        border: 1px solid rgba(59, 130, 246, 0.4);
+        color: #bfdbfe;
+      }
+      .wa-header-actions {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+      }
+      .wa-icon-btn {
+        border: none;
+        background: transparent;
+        color: #6b7280;
+        font-size: 13px;
+        padding: 2px 4px;
+        border-radius: 4px;
+        cursor: default;
+      }
+      .wa-icon-btn:hover {
+        background: rgba(55, 65, 81, 0.6);
+        color: #e5e7eb;
+      }
+      .wa-close-btn {
+        font-size: 15px;
+      }
+      .wa-tabs {
+        display: flex;
+        padding: 6px 10px;
+        gap: 6px;
+        border-bottom: 1px solid #1f2937;
+        background: #020617;
+      }
+      .wa-tab {
+        padding: 4px 10px;
+        font-size: 12px;
+        border-radius: 999px;
+        border: 1px solid transparent;
+        background: transparent;
+        color: #9ca3af;
+        cursor: default;
+      }
+      .wa-tab-active {
+        background: rgba(59, 130, 246, 0.15);
+        border-color: rgba(59, 130, 246, 0.7);
+        color: #eff6ff;
+      }
+      .wa-body {
+        flex: 1;
+        display: flex;
+        min-height: 0;
+      }
+      .wa-left {
+        width: 46%;
+        border-right: 1px solid #1f2937;
+        padding: 8px;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        background: #020617;
+      }
+      .wa-right {
+        flex: 1;
+        padding: 10px 10px;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        background: #020617;
+      }
+      .wa-section-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        font-size: 12px;
+        color: #9ca3af;
+      }
+      .wa-search {
+        width: 140px;
+        padding: 3px 6px;
+        border-radius: 999px;
+        border: 1px solid #1f2937;
+        background: #020617;
+        color: #e5e7eb;
+        font-size: 11px;
+      }
+      .wa-search::placeholder {
+        color: #4b5563;
+      }
+      .wa-tree {
+        flex: 1;
+        border-radius: 8px;
+        background: #020617;
+        border: 1px solid #111827;
+        padding: 6px 4px;
+        font-size: 12px;
+        overflow: auto;
+      }
+      .wa-tree-node {
+        padding: 2px 6px;
+        border-radius: 4px;
+        color: #9ca3af;
+      }
+      .wa-tree-node-root {
+        font-weight: 500;
+        color: #e5e7eb;
+      }
+      .wa-tree-node-selected {
+        background: rgba(37, 99, 235, 0.32);
+        color: #eff6ff;
+      }
+      .wa-tree-node-child {
+        margin-left: 14px;
+      }
+      .wa-tree-children {
+        margin-top: 2px;
+        margin-left: 14px;
+      }
+      .wa-section {
+        border-radius: 10px;
+        background: rgba(15, 23, 42, 0.9);
+        border: 1px solid #1e293b;
+        padding: 8px 10px;
+        font-size: 12px;
+      }
+      .wa-section-title {
+        font-size: 12px;
+        color: #e5e7eb;
+        margin-bottom: 4px;
+        display: flex;
+        align-items: baseline;
+        gap: 6px;
+      }
+      .wa-section-sub {
+        font-size: 10px;
+        color: #6b7280;
+      }
+      .wa-field {
+        display: flex;
+        margin-bottom: 4px;
+      }
+      .wa-field label {
+        width: 72px;
+        color: #9ca3af;
+        font-size: 11px;
+      }
+      .wa-field-value {
+        flex: 1;
+        color: #e5e7eb;
+        font-size: 12px;
+      }
+      .wa-op-list {
+        list-style: none;
+        padding: 0;
+        margin: 4px 0 4px;
+      }
+      .wa-op-item {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 3px 6px;
+        border-radius: 6px;
+        background: #020617;
+        border: 1px solid #111827;
+        margin-bottom: 3px;
+      }
+      .wa-op-handle {
+        font-size: 11px;
+        color: #4b5563;
+        margin-right: 4px;
+      }
+      .wa-op-name {
+        flex: 1;
+      }
+      .wa-op-delete {
+        border: none;
+        background: transparent;
+        color: #f97373;
+        font-size: 11px;
+        cursor: default;
+      }
+      .wa-btn-link {
+        border: none;
+        background: transparent;
+        color: #93c5fd;
+        font-size: 11px;
+        padding: 0;
+        margin-top: 2px;
+        cursor: default;
+      }
+      .wa-op-palette {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        margin-top: 4px;
+      }
+      .wa-op-chip {
+        padding: 2px 8px;
+        border-radius: 999px;
+        background: #020617;
+        border: 1px solid #374151;
+        font-size: 11px;
+        color: #d1d5db;
+      }
+      .wa-subcontainer-list {
+        list-style: none;
+        padding: 0;
+        margin: 3px 0 6px;
+        font-size: 11px;
+        color: #d1d5db;
+      }
+      .wa-subcontainer-list li {
+        padding: 2px 0;
+      }
+      .wa-btn-primary {
+        border-radius: 999px;
+        border: none;
+        padding: 4px 10px;
+        font-size: 11px;
+        background: #2563eb;
+        color: white;
+        cursor: default;
+      }
+      .wa-footer {
+        border-top: 1px solid #1f2937;
+        padding: 4px 10px;
+        font-size: 11px;
+        color: #6b7280;
+        display: flex;
+        justify-content: space-between;
+        background: #020617;
+      }
+      .wa-resize-handle {
+        position: absolute;
+        bottom: 4px;
+        left: 6px;
+        font-size: 10px;
+        color: #4b5563;
+        user-select: none;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wa-panel">
+      <div class="wa-header">
+        <div class="wa-header-left">
+          <span class="wa-badge">SID: 1688-fixed-v1</span>
+          <span class="wa-badge">Profile: 1688-main-v1</span>
+        </div>
+        <div class="wa-header-actions">
+          <!-- 收起 / 展开图标（样式占位，无行为） -->
+          <button class="wa-icon-btn" title="折叠面板">▾</button>
+          <button class="wa-icon-btn wa-close-btn" title="关闭">×</button>
+        </div>
+      </div>
+
+      <div class="wa-tabs">
+        <button class="wa-tab wa-tab-active">容器树</button>
+        <button class="wa-tab">DOM 选取</button>
+      </div>
+
+      <div class="wa-body">
+        <div class="wa-left">
+          <div class="wa-section-header">
+            <span>容器树</span>
+            <input class="wa-search" placeholder="搜索容器…" />
+          </div>
+          <div class="wa-tree">
+            <div class="wa-tree-node wa-tree-node-root wa-tree-node-selected">
+              页面根容器 (#app-root)
+            </div>
+            <div class="wa-tree-node wa-tree-node-child">
+              顶部导航（nav）
+            </div>
+            <div class="wa-tree-node wa-tree-node-child">
+              侧边栏（sidebar）
+            </div>
+            <div class="wa-tree-node wa-tree-node-child">
+              <div>商品区域（product）</div>
+              <div class="wa-tree-children">
+                <div class="wa-tree-node">
+                  商品卡片（item-card）
+                </div>
+                <div class="wa-tree-node">
+                  价格区域（price-area）
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="wa-right">
+          <div class="wa-section">
+            <div class="wa-section-title">容器详情</div>
+            <div class="wa-field">
+              <label>标题</label>
+              <div class="wa-field-value">商品列表容器</div>
+            </div>
+            <div class="wa-field">
+              <label>Selector</label>
+              <div class="wa-field-value">.product-list</div>
+            </div>
+            <div class="wa-field">
+              <label>容器 ID</label>
+              <div class="wa-field-value">product_list</div>
+            </div>
+          </div>
+
+          <div class="wa-section">
+            <div class="wa-section-title">
+              已注册 Operation
+              <span class="wa-section-sub">（仅样式，占位拖拽排序区）</span>
+            </div>
+            <ul class="wa-op-list">
+              <li class="wa-op-item">
+                <span class="wa-op-handle">⋮⋮</span>
+                <span class="wa-op-name">滚动加载商品</span>
+                <button class="wa-op-delete">删除</button>
+              </li>
+              <li class="wa-op-item">
+                <span class="wa-op-handle">⋮⋮</span>
+                <span class="wa-op-name">提取列表数据</span>
+                <button class="wa-op-delete">删除</button>
+              </li>
+            </ul>
+            <button class="wa-btn-link">＋ 添加 Operation</button>
+          </div>
+
+          <div class="wa-section">
+            <div class="wa-section-title">可添加 Operation</div>
+            <div class="wa-op-palette">
+              <span class="wa-op-chip">批量选中商品</span>
+              <span class="wa-op-chip">打开详情页</span>
+              <span class="wa-op-chip">滚动到底部</span>
+            </div>
+          </div>
+
+          <div class="wa-section">
+            <div class="wa-section-title">子容器</div>
+            <ul class="wa-subcontainer-list">
+              <li>item-card（商品卡片）</li>
+              <li>price-area（价格区域）</li>
+            </ul>
+            <button class="wa-btn-primary">＋ 添加子容器</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="wa-footer">
+        <span>状态：浏览模式</span>
+        <span>F2 切换 DOM 选取 · ESC 取消</span>
+      </div>
+      <div class="wa-resize-handle">⋰ 拖动调整大小（占位）</div>
+    </div>
+  </body>
+</html>

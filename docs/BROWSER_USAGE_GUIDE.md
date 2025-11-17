@@ -54,7 +54,7 @@ with create_browser() as browser:
 ```python
 from browser_interface import create_browser
 
-# 基础使用
+# 基础使用（Python 侧统一入口）
 with create_browser() as browser:
     page = browser.new_page()
     page.goto('https://www.baidu.com')
@@ -126,15 +126,11 @@ with headless_mode() as browser:
 ```python
 from browser_interface import create_browser
 
-# 自定义配置
+# 自定义配置（不再推荐手动传入 --lang / 复杂指纹参数）
 config = {
     'headless': False,
-    'locale': 'zh-CN',
-    'args': [
-        '--lang=zh-CN',
-        '--window-size=1920,1080',
-        '--disable-gpu'
-    ]
+    # 如非必要，不要在这里直接设置 locale/args 等底层参数，
+    # 中文与指纹配置已经在 browser_interface 中统一封装。
 }
 
 with create_browser(config=config) as browser:
@@ -187,6 +183,33 @@ python3 -m camoufox fetch   # 自动下载并安装最新的 Camoufox 浏览器
 ```bash
 python3 -c "from browser_interface import quick_test; quick_test(headless=False)"
 ```
+
+### 2. 固定指纹 + 自动会话 + 空白页（推荐交互方式）
+
+为了兼容 1688 等强绑定站点，Python 侧已经在 `browser_interface` 中封装了固定指纹 + 自动会话的统一入口：
+
+```python
+from browser_interface import open_profile_browser
+
+# 默认使用 profile_id='1688-main-v1' + 固定指纹 + 自动会话 + 菜单注入
+with open_profile_browser() as browser:
+    # 此时浏览器：
+    # - 使用固定指纹（不会每次随机）
+    # - 复用 session_1688-fixed-v1.json 中的会话（如显式传入）
+    # - 默认只保留一个 about:blank 空白标签页
+    # - 已注入最小悬浮菜单，便于调试与标识
+    page = browser.new_page()
+    page.goto('https://www.1688.com')
+```
+
+**默认行为说明：**
+
+- 同一 `profile_id` 下启动前会尝试终止已有 Camoufox 实例（互斥，避免多个窗口竞争同一 profile）。
+- 默认指纹模式为 `fixed`，并将 `profile_id='1688-main-v1'` 作为默认 profile（可覆盖）。
+- 当 `auto_session=True` 时，会自动：
+  - **周期性保存会话**：后台线程每隔 5 秒调用一次 `save_session(session_name)` 持久化 `storage_state`（适配 1688 这类频繁变更 cookie 的站点）。
+  - 在 `close()` 时再做一次最终保存。
+- 启动后只保留一个 about:blank 空白标签页，业务页面由上层代码显式 `goto()` 控制，避免无意义的默认页面（如 zh-cn 错误页）。
 
 ### 2. 一键启动浏览器服务并创建会话（Node 端）
 

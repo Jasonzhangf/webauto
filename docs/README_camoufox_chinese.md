@@ -94,3 +94,48 @@ finally:
 1. 检查系统字体：`fc-list :lang=zh`
 2. 测试其他中文网站
 3. 确认使用的是 `camoufox_final_setup.py` 中的配置
+
+## 高级问题：中文变成「口口口」方框
+
+在部分版本的 Camoufox 中，浏览器会通过指纹系统动态修改字体列表（`update_fonts`），某些随机组合可能会 **去掉 CJK 字体**，导致页面编码是 UTF-8，标题也是中文，但页面上所有汉字渲染成「口口口」方框。
+
+### 现象特征
+
+- `document.characterSet == 'UTF-8'`
+- `page.title()` 输出正常中文
+- 页面绝大部分正文/链接文字显示为方框（尤其是百度首页）
+
+### WebAuto 中的解决方案
+
+在 `browser_interface.py` 中已经内置了专门的修复逻辑：
+
+- 启动时：
+  - 禁用 Camoufox 默认扩展下载与路径校验；
+  - Monkey patch `camoufox.utils.update_fonts`，**不再改动系统字体列表**，避免指纹算法把中文字体移除。
+- 页面级别：
+  - 在每次 `goto()` 后注入一段 CSS，强制使用常见中文字体栈：
+
+    ```python
+    html, body, * {
+        font-family: "PingFang SC", "Microsoft YaHei", "SimHei",
+                     system-ui, -apple-system, BlinkMacSystemFont,
+                     sans-serif !important;
+    }
+    ```
+
+只要通过统一入口使用浏览器，即可自动避开字体指纹带来的中文方框问题：
+
+```python
+from browser_interface import create_browser
+
+with create_browser({'headless': False}) as browser:
+    page = browser.new_page()
+    page.goto('https://www.baidu.com')
+    print(page.title())
+```
+
+### 使用建议
+
+- **不要** 在业务代码里直接调用 `camoufox.launch_options` / `update_fonts` / `custom_fonts_only` 等底层 API。
+- 始终通过 `browser_interface.create_browser` 创建 Camoufox 实例，让字体与语言配置由统一入口托管。
+- 如遇到旧 profile 仍然出现方框，可尝试关闭所有 Camoufox 进程后使用全新 profile 再次启动。

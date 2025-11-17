@@ -35,18 +35,12 @@ export class BrowserManager {
      * @returns {PlaywrightBrowser} 浏览器实例
      */
     getBrowser(config = null, kwargs = {}) {
-        // 如果有自定义配置，创建并设置为全局实例，确保后续调用复用
-        if (config) {
-            this._browser = new PlaywrightBrowser(config, kwargs.headless || false);
-            return this._browser;
-        }
-
-        // 使用默认配置的实例
-        if (!this._browser) {
-            this._browser = new PlaywrightBrowser(null, kwargs.headless || false);
-        }
-
-        return this._browser;
+        // Node 侧浏览器实现已封禁，任何直接 getBrowser 调用都应改为使用 Python BrowserService。
+        throw new BrowserError(
+            'BrowserManager.getBrowser() 已被禁用：\n' +
+            '请通过 Python BrowserService / libs/browser/remote-service.js 控制浏览器，\n' +
+            '不要在 Node 层直接启动 Playwright/Chromium。',
+        );
     }
 
     /**
@@ -56,14 +50,11 @@ export class BrowserManager {
      * @returns {Promise<CamoufoxBrowser>} 浏览器实例
      */
     async startBrowser(config = null, kwargs = {}) {
-        const browser = this.getBrowser(config, kwargs);
-        if (config && config.persistSession !== undefined) {
-            browser.config.persistSession = config.persistSession;
-        }
-        if (!browser.isStarted()) {
-            await browser.start();
-        }
-        return browser;
+        // 同样禁用 Node 直接启动浏览器
+        throw new BrowserError(
+            'BrowserManager.startBrowser() 已被禁用：\n' +
+            '统一改用 Python BrowserService 提供的会话创建接口。',
+        );
     }
 
     /**
@@ -74,11 +65,9 @@ export class BrowserManager {
      * @param {Object} config - 自定义配置
      */
     async quickTest(url = 'https://www.baidu.com', waitTime = 3, headless = false, config = null) {
-        const browser = this.getBrowser(config, { headless });
-        if (!browser.isStarted()) {
-            await browser.start();
-        }
-        await browser.quickTest(url, waitTime);
+        throw new BrowserError(
+            'BrowserManager.quickTest() 已被禁用：请使用 Python 侧 quick_test 或 BrowserService 的测试接口。',
+        );
     }
 
     /**
@@ -87,8 +76,9 @@ export class BrowserManager {
      * @returns {Promise<CamoufoxBrowser>} 浏览器实例
      */
     async stealthMode(headless = false) {
-        const config = BrowserConfig.getStealthConfig();
-        return await this.startBrowser(config, { headless });
+        throw new BrowserError(
+            'BrowserManager.stealthMode() 已被禁用：请改用 Python browser_interface.stealth_mode。',
+        );
     }
 
     /**
@@ -96,18 +86,17 @@ export class BrowserManager {
      * @returns {Promise<CamoufoxBrowser>} 浏览器实例
      */
     async headlessMode() {
-        const config = BrowserConfig.getHeadlessConfig();
-        return await this.startBrowser(config);
+        throw new BrowserError(
+            'BrowserManager.headlessMode() 已被禁用：请改用 Python browser_interface.headless_mode。',
+        );
     }
 
     /**
      * 关闭所有浏览器实例
      */
     async closeAll() {
-        if (this._browser) {
-            await this._browser.close();
-            this._browser = null;
-        }
+        // 这里保持幂等，不再尝试关闭 Node 侧浏览器（因为不会真正创建）
+        this._browser = null;
     }
 
     /**

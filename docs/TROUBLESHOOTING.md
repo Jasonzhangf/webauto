@@ -418,14 +418,12 @@ fc-list :lang=zh
 # brew install font-source-han-sans
 ```
 
-**方案2：强制中文配置**
+**方案2：最小中文配置（推荐）**
 ```python
 config = {
     'locale': 'zh-CN',
     'args': [
-        '--lang=zh-CN',
-        '--force-charset=UTF-8',
-        '--font-family="PingFang SC", "Microsoft YaHei", sans-serif'
+        '--lang=zh-CN'
     ]
 }
 
@@ -448,6 +446,17 @@ with create_browser\(\) as browser:
         }
     """\)
 ```
+
+**方案4：Camoufox 字体指纹导致中文方框**
+
+在部分环境中，Camoufox 的指纹系统会通过 `update_fonts` 修改字体列表，随机组合可能会去掉 CJK 字体，导致页面编码正常但所有中文显示为方框。
+
+- 在 WebAuto 中，`browser_interface` 已经对 Camoufox 做了封装：
+  - 禁用了 `camoufox.utils.update_fonts`，避免指纹系统改写字体列表；
+  - 在 `goto()` 之后自动注入中文字体 CSS（同方案3），覆盖异常字体设置。
+- 排查建议：
+  - 优先确认代码是通过 `from browser_interface import create_browser` 使用浏览器，而不是直接 `from camoufox import NewBrowser`；
+  - 如仍出现方框，关闭所有 Camoufox 进程后，用全新 profile 再次启动测试。
 
 ## 4. 安全问题
 

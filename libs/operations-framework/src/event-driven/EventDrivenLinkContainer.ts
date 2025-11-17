@@ -5,7 +5,9 @@
 
 import { EventDrivenContainer, ContainerConfig, ContainerSharedSpace } from './EventDrivenContainer';
 import { CONTAINER_EVENTS } from './EventTypes';
-import { Page } from 'playwright';
+type Page = {
+  url(): string;
+};
 
 export interface LinkConfig extends ContainerConfig {
   maxLinks?: number;
