@@ -26,6 +26,7 @@
     "service:kill-port": "node utils/scripts/service/kill-port.mjs",
     "browser:camoufox:oneclick": "node utils/scripts/browser/one-click-camoufox.mjs",
     "browser:camoufox:status": "node utils/scripts/browser/status-camoufox.mjs",
+    "browser:camoufox:navigate1688": "node utils/scripts/browser/navigate-1688.mjs",
     "browser:camoufox:install": "python3 -m camoufox remove && python3 -m camoufox fetch"
   },
   "devDependencies": {
