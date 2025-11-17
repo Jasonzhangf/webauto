@@ -742,10 +742,21 @@ class BrowserService(AbstractBrowserService):
                 }
             except Exception:
                 storage_info = {}
+
+        # 将 BrowserSession / BrowserProfile 转成 JSON 友好的结构（枚举转字符串）
+        from services.browser_service_interface import AntiDetectionLevel  # type: ignore
+        session_dict = asdict(session)
+        profile = session_dict.get("profile") or {}
+        level = profile.get("anti_detection_level")
+        if isinstance(level, AntiDetectionLevel):
+            profile["anti_detection_level"] = level.value
+        elif hasattr(level, "value"):
+            profile["anti_detection_level"] = level.value
+        session_dict["profile"] = profile
         
         return {
             "exists": True,
-            "session": asdict(session),
+            "session": session_dict,
             "page_info": page_info,
             "storage": storage_info,
             "controller_active": controller is not None
