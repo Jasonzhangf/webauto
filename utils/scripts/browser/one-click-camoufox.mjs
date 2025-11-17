@@ -140,6 +140,21 @@ async function createSession(profileId = 'default') {
   return data.session_id || data.sessionId || data.id;
 }
 
+async function maybeNavigateInitial(sessionId, profileId) {
+  // 针对 1688 场景：一键启动时默认直接打开 1688 首页
+  if (profileId !== '1688-main-v1') return;
+  const url = `http://${HOST}:${PORT}/api/v1/sessions/${encodeURIComponent(sessionId)}/navigate`;
+  try {
+    await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url: 'https://www.1688.com' }),
+    });
+  } catch {
+    // 默认导航失败不影响会话整体可用性
+  }
+}
+
 async function main() {
   console.log('🚀 一键启动 Camoufox 浏览器服务并创建会话...');
 
@@ -156,6 +171,9 @@ async function main() {
   await killSameProfileSessions(profileId);
 
   const sessionId = await createSession(profileId);
+
+  // 对于 1688 固定指纹 profile，创建完会话后默认导航到 1688 首页
+  await maybeNavigateInitial(sessionId, profileId);
 
   console.log('');
   console.log('✅ 已创建浏览器会话:');
