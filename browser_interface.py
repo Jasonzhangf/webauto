@@ -1084,14 +1084,14 @@ class CamoufoxBrowserWrapper(AbstractBrowser):
       const tabContentDom = document.createElement('div');
       tabContentDom.className = 'wa-tab-content dom-mode';
       tabContentDom.style.display = 'none';
-      tabContentDom.innerHTML = '<p>DOM 选取模式：</p><ol><li>按 F2 开启或关闭 DOM 选取模式。</li><li>鼠标移动到页面元素上会高亮该元素。</li><li>点击元素以选中，下面会显示对应 Selector。</li><li>ESC 退出 DOM 选取模式。</li></ol>';
+      tabContentDom.innerHTML = '<p>DOM 选取模式：</p><ol><li>切换到本标签或按 F2 开启 DOM 选取模式。</li><li>鼠标移动到页面元素上会高亮该元素。</li><li>点击元素以选中，下面会显示对应 Selector。</li><li>ESC 或切回容器树退出 DOM 选取模式。</li></ol>';
 
       const domInfo = document.createElement('div');
       domInfo.className = 'wa-dom-info';
       domInfo.style.marginTop = '6px';
       domInfo.style.fontSize = '11px';
       domInfo.style.color = '#d1d5db';
-      domInfo.textContent = '当前未选中任何元素（按 F2 开启 DOM 选取）';
+      domInfo.textContent = '当前未选中任何元素（切换到 DOM 选取标签或按 F2 开启）';
       tabContentDom.appendChild(domInfo);
 
       // 监听页面级 DOM 选取结果事件，并在 UI 中展示
@@ -1156,18 +1156,32 @@ class CamoufoxBrowserWrapper(AbstractBrowser):
                       root.style.display = 'none';
                     });
 
-                    tabTree.addEventListener('click', () => {
-                      tabTree.classList.add('active');
-                      tabDom.classList.remove('active');
-                      tabContentTree.style.display = 'flex';
-                      tabContentDom.style.display = 'none';
-                    });
-                    tabDom.addEventListener('click', () => {
-                      tabDom.classList.add('active');
-                      tabTree.classList.remove('active');
-                      tabContentTree.style.display = 'none';
-                      tabContentDom.style.display = 'block';
-                    });
+      tabTree.addEventListener('click', () => {
+        tabTree.classList.add('active');
+        tabDom.classList.remove('active');
+        tabContentTree.style.display = 'flex';
+        tabContentDom.style.display = 'none';
+        // 退出 DOM 选取模式，避免误选
+        try {
+          if (window.__webautoDomSelect && typeof window.__webautoDomSelect.disable === 'function') {
+            window.__webautoDomSelect.disable();
+          }
+          domInfo.textContent = '当前未选中任何元素（切换到 DOM 选取标签或按 F2 开启）';
+        } catch {}
+      });
+      tabDom.addEventListener('click', () => {
+        tabDom.classList.add('active');
+        tabTree.classList.remove('active');
+        tabContentTree.style.display = 'none';
+        tabContentDom.style.display = 'block';
+        // 进入 DOM 选取模式：自动开启选取
+        try {
+          if (window.__webautoDomSelect && typeof window.__webautoDomSelect.enable === 'function') {
+            window.__webautoDomSelect.enable();
+          }
+          domInfo.textContent = 'DOM 选取已开启：移动鼠标高亮元素，点击选中（ESC 或切回容器树退出）';
+        } catch {}
+      });
 
                     const allNodes = [rootNode, nodeNav, nodeSide, nodeProduct, child1, child2];
                     allNodes.forEach(node => {
