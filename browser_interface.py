@@ -1099,17 +1099,149 @@ class CamoufoxBrowserWrapper(AbstractBrowser):
       domInfo.textContent = '当前未选中任何元素（切换到 DOM 选取标签或按 F2 开启）';
       tabContentDom.appendChild(domInfo);
 
-      // 监听页面级 DOM 选取结果事件，并在 UI 中展示
+      // 容器创建区域（根容器/子容器）
+      const createBox = document.createElement('div');
+      createBox.className = 'wa-section';
+      createBox.style.marginTop = '8px';
+      const createTitle = document.createElement('div');
+      createTitle.className = 'wa-section-title';
+      createTitle.textContent = '创建容器';
+      createBox.appendChild(createTitle);
+
+      const fieldId = document.createElement('div');
+      fieldId.className = 'wa-field';
+      const fieldIdLabel = document.createElement('label');
+      fieldIdLabel.textContent = '容器 ID';
+      const fieldIdValue = document.createElement('input');
+      fieldIdValue.type = 'text';
+      fieldIdValue.style.flex = '1';
+      fieldIdValue.style.fontSize = '11px';
+      fieldIdValue.style.background = '#020617';
+      fieldIdValue.style.border = '1px solid #1f2937';
+      fieldIdValue.style.color = '#e5e7eb';
+      fieldIdValue.placeholder = '例如 home.root 或 auto_root_1';
+      fieldId.appendChild(fieldIdLabel);
+      fieldId.appendChild(fieldIdValue);
+      createBox.appendChild(fieldId);
+
+      const fieldTitle = document.createElement('div');
+      fieldTitle.className = 'wa-field';
+      const fieldTitleLabel = document.createElement('label');
+      fieldTitleLabel.textContent = '标题';
+      const fieldTitleValue = document.createElement('input');
+      fieldTitleValue.type = 'text';
+      fieldTitleValue.style.flex = '1';
+      fieldTitleValue.style.fontSize = '11px';
+      fieldTitleValue.style.background = '#020617';
+      fieldTitleValue.style.border = '1px solid #1f2937';
+      fieldTitleValue.style.color = '#e5e7eb';
+      fieldTitleValue.placeholder = '例如 1688 首页根容器';
+      fieldTitle.appendChild(fieldTitleLabel);
+      fieldTitle.appendChild(fieldTitleValue);
+      createBox.appendChild(fieldTitle);
+
+      const fieldSelector = document.createElement('div');
+      fieldSelector.className = 'wa-field';
+      const fieldSelectorLabel = document.createElement('label');
+      fieldSelectorLabel.textContent = 'Selector';
+      const fieldSelectorValue = document.createElement('textarea');
+      fieldSelectorValue.style.flex = '1';
+      fieldSelectorValue.style.fontSize = '11px';
+      fieldSelectorValue.style.background = '#020617';
+      fieldSelectorValue.style.border = '1px solid #1f2937';
+      fieldSelectorValue.style.color = '#e5e7eb';
+      fieldSelectorValue.style.height = '40px';
+      fieldSelectorValue.placeholder = '点击页面元素后，这里会自动填入其 selector';
+      fieldSelector.appendChild(fieldSelectorLabel);
+      fieldSelector.appendChild(fieldSelectorValue);
+      createBox.appendChild(fieldSelector);
+
+      const btnRow = document.createElement('div');
+      btnRow.style.display = 'flex';
+      btnRow.style.justifyContent = 'flex-end';
+      btnRow.style.gap = '6px';
+      const btnCancel = document.createElement('button');
+      btnCancel.className = 'wa-icon-btn';
+      btnCancel.textContent = '放弃';
+      const btnSave = document.createElement('button');
+      btnSave.className = 'wa-btn-primary';
+      btnSave.textContent = '保存容器';
+      btnRow.appendChild(btnCancel);
+      btnRow.appendChild(btnSave);
+      createBox.appendChild(btnRow);
+
+      tabContentDom.appendChild(createBox);
+
+      let lastPicked = null;
+
+      // 监听页面级 DOM 选取结果事件，并在 UI 中展示 + 预填容器表单
       try {
         window.addEventListener('__webauto_dom_picked', (ev) => {
           try {
             const detail = ev.detail || {};
             const sel = detail.selector || '(无)';
             const tag = detail.tagName || '';
+            lastPicked = detail;
             domInfo.textContent = '已选元素: ' + (tag ? tag + ' ' : '') + sel;
+
+            // 自动生成容器 ID / 标题 / selector
+            const cls = (detail.className || '').split(/\s+/).filter(Boolean)[0] || '';
+            const baseId = cls ? (tag.toLowerCase() + '.' + cls) : tag.toLowerCase() || 'container';
+            if (!fieldIdValue.value) {
+              fieldIdValue.value = baseId;
+            }
+            if (!fieldTitleValue.value) {
+              fieldTitleValue.value = '容器: ' + (tag || '') + (cls ? (' .' + cls) : '');
+            }
+            fieldSelectorValue.value = sel;
           } catch {}
         });
       } catch {}
+
+      // 放弃编辑：清空当前表单
+      btnCancel.addEventListener('click', () => {
+        lastPicked = null;
+        fieldIdValue.value = '';
+        fieldTitleValue.value = '';
+        fieldSelectorValue.value = '';
+        domInfo.textContent = '当前未选中任何元素（切换到 DOM 选取标签或按 F2 开启）';
+      });
+
+      // 保存容器：通过 BrowserService API 写入 container-library.json
+      btnSave.addEventListener('click', () => {
+        try {
+          const id = fieldIdValue.value.trim();
+          const title = fieldTitleValue.value.trim();
+          const selector = fieldSelectorValue.value.trim();
+          if (!id || !selector) {
+            domInfo.textContent = '保存失败：容器 ID 和 selector 不能为空';
+            return;
+          }
+          const payload = {
+            id,
+            title,
+            selector,
+            url: window.location.href,
+            parentId: null
+          };
+          const DEBUG_BASE = 'http://127.0.0.1:8888';
+          fetch(DEBUG_BASE + '/api/v1/containers', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+          }).then(r => r.json()).then(j => {
+            if (j && j.success) {
+              domInfo.textContent = '已保存容器: ' + id;
+            } else {
+              domInfo.textContent = '保存失败: ' + (j && j.error ? j.error : '未知错误');
+            }
+          }).catch(e => {
+            domInfo.textContent = '保存失败: ' + (e && e.message ? e.message : String(e));
+          });
+        } catch (e) {
+          domInfo.textContent = '保存失败: ' + (e && e.message ? e.message : String(e));
+        }
+      });
 
                     body.appendChild(tabContentTree);
                     body.appendChild(tabContentDom);

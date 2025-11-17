@@ -15,6 +15,7 @@ from services.browser_service_interface import (
     BrowserProfile, PageAction, PageTemplate, BrowserActionType, AntiDetectionLevel
 )
 from services.browser_service import BrowserService, BrowserServiceError
+from services import container_registry
 
 # 创建Flask应用
 app = Flask(__name__)
@@ -182,6 +183,56 @@ def close_session(session_id: str):
             
     except Exception as e:
         return create_error_response(f"关闭会话异常: {str(e)}")
+
+# 容器管理 API（简化版本，为 DOM 选取创建容器提供后端支持）
+
+@app.route('/api/v1/containers', methods=['GET'])
+def list_containers_for_url():
+    """根据 URL 返回对应站点下的容器定义"""
+    try:
+        url = request.args.get('url', '')
+        if not url:
+            return create_error_response("缺少 url 参数")
+
+        containers = container_registry.get_containers_for_url(url)
+        return create_success_response({"containers": containers})
+    except Exception as e:
+        return create_error_response(f"获取容器列表异常: {str(e)}")
+
+
+@app.route('/api/v1/containers', methods=['POST'])
+def create_or_update_container():
+    """创建 / 更新单个容器定义（由前端 DOM 选取触发）"""
+    try:
+        data = request.json or {}
+        url = data.get("url") or ""
+        container_id = data.get("id") or data.get("container_id")
+        selector = data.get("selector") or ""
+        description = data.get("title") or data.get("description") or ""
+        parent_id = data.get("parentId") or data.get("parent_id")
+
+        if not url:
+            return create_error_response("缺少 url 字段")
+        if not container_id:
+            return create_error_response("缺少容器 id 字段")
+        if not selector:
+            return create_error_response("缺少 selector 字段")
+
+        site = container_registry.upsert_container_for_url(
+            url=url,
+            container_id=container_id,
+            selector=selector,
+            description=description,
+            parent_id=parent_id or None,
+        )
+
+        return create_success_response({
+            "container_id": container_id,
+            "parent_id": parent_id,
+            "site": site,
+        })
+    except Exception as e:
+        return create_error_response(f"创建/更新容器异常: {str(e)}")
 
 # 浏览器控制API
 @app.route('/api/v1/sessions/<session_id>/navigate', methods=['POST'])
