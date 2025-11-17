@@ -462,7 +462,10 @@ def start_browser_api(host: str = "0.0.0.0", port: int = 8888, debug: bool = Fal
     print(f"📡 服务地址: http://{host}:{port}")
     print(f"📋 API文档: http://{host}:{port}/api/v1/health")
 
-    app.run(host=host, port=port, debug=debug)
+    # Playwright 同步 API 依赖 greenlet，只能在创建它的线程中调用。
+    # 为避免多线程 Flask 导致 “cannot switch to a different thread” 错误，
+    # 这里显式关闭多线程处理（threaded=False），所有请求在同一线程中执行。
+    app.run(host=host, port=port, debug=debug, threaded=False)
 
 if __name__ == "__main__":
     start_browser_api()
