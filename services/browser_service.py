@@ -743,16 +743,27 @@ class BrowserService(AbstractBrowserService):
             except Exception:
                 storage_info = {}
 
-        # 将 BrowserSession / BrowserProfile 转成 JSON 友好的结构（枚举转字符串）
-        from services.browser_service_interface import AntiDetectionLevel  # type: ignore
-        session_dict = asdict(session)
-        profile = session_dict.get("profile") or {}
-        level = profile.get("anti_detection_level")
-        if isinstance(level, AntiDetectionLevel):
-            profile["anti_detection_level"] = level.value
-        elif hasattr(level, "value"):
-            profile["anti_detection_level"] = level.value
-        session_dict["profile"] = profile
+        # 将 BrowserSession / BrowserProfile 转成 JSON 友好的结构（避免 Enum 直接出现在响应中）
+        profile = session.profile
+        level = getattr(profile, "anti_detection_level", None)
+        level_val = getattr(level, "value", str(level)) if level is not None else None
+        session_dict: Dict[str, Any] = {
+            "session_id": session.session_id,
+            "status": session.status,
+            "created_at": session.created_at,
+            "last_activity": session.last_activity,
+            "page_count": session.page_count,
+            "cookie_count": session.cookie_count,
+            "profile": {
+                "profile_id": getattr(profile, "profile_id", None),
+                "user_agent": getattr(profile, "user_agent", None),
+                "viewport": getattr(profile, "viewport", None),
+                "timezone": getattr(profile, "timezone", None),
+                "locale": getattr(profile, "locale", None),
+                "cookies_enabled": getattr(profile, "cookies_enabled", True),
+                "anti_detection_level": level_val,
+            },
+        }
         
         return {
             "exists": True,
