@@ -65,6 +65,25 @@ async function pickSessionId(preferredProfile = '1688-main-v1') {
   return last.session_id || last.id;
 }
 
+async function fetchSessionStatus(sessionId) {
+  const url = `http://${HOST}:${PORT}/api/v1/sessions/${encodeURIComponent(sessionId)}/status`;
+  try {
+    const j = await getJson(url);
+    return j?.data || {};
+  } catch {
+    return {};
+  }
+}
+
+async function shouldNavigate(sessionId) {
+  const st = await fetchSessionStatus(sessionId);
+  const pageInfo = st.page_info || {};
+  const url = pageInfo.url || '';
+  if (!url) return true;
+  // 如果当前已经在 1688 相关页面上，则不再重复导航，避免“多刷一次”的体验
+  return !/^https?:\/\/([^/]*\.)?1688\.com[\/]?/i.test(url);
+}
+
 async function navigate1688(sessionId) {
   const url = `http://${HOST}:${PORT}/api/v1/sessions/${encodeURIComponent(sessionId)}/navigate`;
   const body = { url: 'https://www.1688.com' };
@@ -102,6 +121,13 @@ async function main() {
   }
 
   console.log(`🎯 目标会话: ${sid}`);
+
+  const needNav = await shouldNavigate(sid);
+  if (!needNav) {
+    console.log('ℹ️ 当前会话已在 1688 页面上，跳过重复导航。');
+    return;
+  }
+
   await navigate1688(sid);
 }
 
@@ -109,4 +135,3 @@ main().catch((e) => {
   console.error('❌ 导航 1688 失败:', e?.message || String(e));
   process.exit(1);
 });
-
