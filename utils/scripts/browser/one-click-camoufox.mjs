@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 // 一键启动 Camoufox 浏览器服务并打开一个基础会话
 // - 启动 Python 浏览器服务 (BrowserService + CamoufoxBrowserWrapper)
-// - 通过 REST API 创建一个使用默认 profile 的会话
-// - 会话创建后，会在前台弹出一个 Camoufox 空白窗口（about:blank）
+// - 为避免复用旧代码，每次运行前都尝试按端口杀掉旧的 Python 服务
+// - 通过 REST API 创建一个使用指定 profile 的会话
 
-import { spawn } from 'node:child_process';
+import { spawn, execSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve, join } from 'node:path';
 import { setTimeout as wait } from 'node:timers/promises';
@@ -40,6 +40,25 @@ async function isHealthy() {
   }
 }
 
+function killPythonServiceIfAny() {
+  // 本地开发：每次一键启动前都清理占用目标端口的旧 Python BrowserService，避免复用旧代码
+  if (process.platform === 'win32') return;
+  try {
+    const out = execSync(`lsof -ti :${PORT} || true`, { encoding: 'utf8' });
+    const pids = out.split(/\s+/).map((s) => Number(s.trim())).filter(Boolean);
+    if (!pids.length) return;
+    for (const pid of pids) {
+      try {
+        process.kill(pid, 'SIGKILL');
+      } catch {
+        // 单个失败忽略
+      }
+    }
+  } catch {
+    // 端口检查失败不影响后续流程
+  }
+}
+
 function startPythonService() {
   // 优先使用环境变量，其次尝试 python3，最后退回 python
   let pythonBin = process.env.PYTHON_BIN;
@@ -59,9 +78,8 @@ function startPythonService() {
 }
 
 async function ensureService() {
-  if (await isHealthy()) {
-    return null;
-  }
+  // 每次运行都尝试清理旧的 BrowserService，避免复用旧代码
+  killPythonServiceIfAny();
 
   const pid = startPythonService();
 
