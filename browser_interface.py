@@ -950,33 +950,111 @@ class CamoufoxBrowserWrapper(AbstractBrowser):
                     leftHeader.appendChild(search);
                     const tree = document.createElement('div');
                     tree.className = 'wa-tree';
-                    const rootNode = document.createElement('div');
-                    rootNode.className = 'wa-tree-node wa-tree-node-root wa-tree-node-selected';
-                    rootNode.textContent = '页面根容器 (#app-root)';
-                    const nodeNav = document.createElement('div');
-                    nodeNav.className = 'wa-tree-node wa-tree-node-child';
-                    nodeNav.textContent = '顶部导航（nav）';
-                    const nodeSide = document.createElement('div');
-                    nodeSide.className = 'wa-tree-node wa-tree-node-child';
-                    nodeSide.textContent = '侧边栏（sidebar）';
-                    const nodeProduct = document.createElement('div');
-                    nodeProduct.className = 'wa-tree-node wa-tree-node-child';
-                    nodeProduct.textContent = '商品区域（product）';
-                    const childrenWrap = document.createElement('div');
-                    childrenWrap.className = 'wa-tree-children';
-                    const child1 = document.createElement('div');
-                    child1.className = 'wa-tree-node';
-                    child1.textContent = '商品卡片（item-card）';
-                    const child2 = document.createElement('div');
-                    child2.className = 'wa-tree-node';
-                    child2.textContent = '价格区域（price-area）';
-                    childrenWrap.appendChild(child1);
-                    childrenWrap.appendChild(child2);
-                    nodeProduct.appendChild(childrenWrap);
-                    tree.appendChild(rootNode);
-                    tree.appendChild(nodeNav);
-                    tree.appendChild(nodeSide);
-                    tree.appendChild(nodeProduct);
+
+                    // 容器树：从后端 /api/v1/containers?url=... 拉取当前页面的容器定义
+                    let treeNodes = [];
+                    let containersById = {};
+
+                    function clearTreeSelection() {
+                      treeNodes.forEach(n => n.classList.remove('wa-tree-node-selected'));
+                    }
+
+                    function highlightContainer(selector) {
+                      try {
+                        if (!selector) return;
+                        const target = document.querySelector(selector);
+                        if (!target) return;
+                        const rect = target.getBoundingClientRect();
+                        let box = document.getElementById('__wa_container_highlight__');
+                        if (!box) {
+                          box = document.createElement('div');
+                          box.id = '__wa_container_highlight__';
+                          box.style.position = 'absolute';
+                          box.style.zIndex = '2147483645';
+                          box.style.pointerEvents = 'none';
+                          box.style.border = '2px solid #22c55e';
+                          box.style.borderRadius = '4px';
+                          box.style.boxShadow = '0 0 0 1px rgba(22,163,74,0.6)';
+                          box.style.background = 'rgba(22,163,74,0.10)';
+                          document.documentElement.appendChild(box);
+                        }
+                        const scrollX = window.scrollX || window.pageXOffset || 0;
+                        const scrollY = window.scrollY || window.pageYOffset || 0;
+                        box.style.left = (rect.left + scrollX - 2) + 'px';
+                        box.style.top = (rect.top + scrollY - 2) + 'px';
+                        box.style.width = Math.max(rect.width + 4, 4) + 'px';
+                        box.style.height = Math.max(rect.height + 4, 4) + 'px';
+                        box.style.display = 'block';
+                      } catch {}
+                    }
+
+                    function renderContainerTree(containers) {
+                      containersById = containers || {};
+                      tree.innerHTML = '';
+                      treeNodes = [];
+
+                      const parentMap = {};
+                      Object.keys(containersById).forEach(id => {
+                        const c = containersById[id] || {};
+                        (c.children || []).forEach(childId => {
+                          parentMap[childId] = id;
+                        });
+                      });
+
+                      const roots = Object.keys(containersById).filter(id => !parentMap[id]);
+                      if (!roots.length) {
+                        const empty = document.createElement('div');
+                        empty.className = 'wa-tree-node';
+                        empty.textContent = '当前页面尚未创建任何容器';
+                        tree.appendChild(empty);
+                        treeNodes.push(empty);
+                        return;
+                      }
+
+                      function makeNode(id, depth) {
+                        const c = containersById[id] || {};
+                        const node = document.createElement('div');
+                        node.className = 'wa-tree-node' + (depth === 0 ? ' wa-tree-node-root' : ' wa-tree-node-child');
+                        node.textContent = (c.description || id);
+                        node.style.marginLeft = depth > 0 ? (14 * depth) + 'px' : '0';
+                        node.dataset.containerId = id;
+                        tree.appendChild(node);
+                        treeNodes.push(node);
+
+                        node.addEventListener('click', () => {
+                          clearTreeSelection();
+                          node.classList.add('wa-tree-node-selected');
+                          const selector = c.selector || '';
+                          highlightContainer(selector);
+                          domInfo.textContent = '已选容器: ' + id + ' (' + (selector || '无 selector') + ')';
+                          // 将当前容器信息回填到右侧“容器详情”区域
+                          try {
+                            f1v.textContent = c.description || id;
+                            f2v.textContent = selector || '';
+                            f3v.textContent = id;
+                          } catch {}
+                        });
+
+                        (c.children || []).forEach(childId => {
+                          makeNode(childId, depth + 1);
+                        });
+                      }
+
+                      roots.forEach(id => makeNode(id, 0));
+                    }
+
+                    // 首次加载容器树
+                    try {
+                      const DEBUG_BASE = 'http://127.0.0.1:8888';
+                      fetch(DEBUG_BASE + '/api/v1/containers?url=' + encodeURIComponent(window.location.href))
+                        .then(r => r.json())
+                        .then(j => {
+                          if (!j || !j.success) return;
+                          const containers = (j.data && j.data.containers) || {};
+                          renderContainerTree(containers);
+                        })
+                        .catch(() => {});
+                    } catch {}
                     left.appendChild(leftHeader);
                     left.appendChild(tree);
 
