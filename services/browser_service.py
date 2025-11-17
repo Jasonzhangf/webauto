@@ -722,11 +722,32 @@ class BrowserService(AbstractBrowserService):
         
         controller = self.controllers.get(session_id)
         page_info = controller.get_page_info() if controller else {}
+
+        # 额外状态：当前 storage_state 中的 Cookie / origins 信息，
+        # 以及是否已经存在 1688 相关 Cookie，方便快速判断登录保持情况。
+        storage_info: Dict[str, Any] = {}
+        if controller:
+            try:
+                state = controller.browser_wrapper.get_storage_state()
+                cookies = state.get("cookies", []) or []
+                origins = state.get("origins", []) or []
+                has_1688_cookie = any(
+                    "1688.com" in (c.get("domain") or "")
+                    for c in cookies
+                )
+                storage_info = {
+                    "cookies_count": len(cookies),
+                    "origins_count": len(origins),
+                    "has_1688_cookie": has_1688_cookie,
+                }
+            except Exception:
+                storage_info = {}
         
         return {
             "exists": True,
             "session": asdict(session),
             "page_info": page_info,
+            "storage": storage_info,
             "controller_active": controller is not None
         }
     

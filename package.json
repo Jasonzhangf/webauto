@@ -25,6 +25,7 @@
     "service:browser:restart": "node utils/scripts/service/restart-browser-service.mjs",
     "service:kill-port": "node utils/scripts/service/kill-port.mjs",
     "browser:camoufox:oneclick": "node utils/scripts/browser/one-click-camoufox.mjs",
+    "browser:camoufox:status": "node utils/scripts/browser/status-camoufox.mjs",
     "browser:camoufox:install": "python3 -m camoufox remove && python3 -m camoufox fetch"
   },
   "devDependencies": {
