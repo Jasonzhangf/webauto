@@ -249,13 +249,18 @@ class BrowserController(AbstractBrowserController):
     def get_page_info(self) -> Dict[str, Any]:
         """获取页面信息"""
         try:
-            page_info = {
-                "url": self.page.url(),
-                "title": self.page.title(),
-                "viewport": self.page.viewport_size,
+            info: Dict[str, Any] = {
                 "timestamp": time.time()
             }
-            return page_info
+            try:
+                info["url"] = self.page.url()
+            except Exception:
+                info["url"] = ""
+            try:
+                info["title"] = self.page.title()
+            except Exception:
+                info["title"] = ""
+            return info
         except Exception as e:
             return {
                 "error": str(e),
