@@ -411,11 +411,9 @@ class BrowserService(AbstractBrowserService):
                 # 自动在关闭时保存会话，在下次启动时按 profile_id 恢复
                 "auto_session": True,
                 "session_name": profile.profile_id or "default",
-                # 自动保存间隔（秒）：CamoufoxBrowserWrapper 内部通过
-                # Playwright binding + 前端 setInterval 每隔约 5 秒触发一次
-                # storage_state() 增量持久化（运行在 Playwright 事件循环线程中，
-                # 避免直接在 Python 线程里调用 storage_state 导致 greenlet 错误）。
-                "auto_save_interval": 5.0,
+                # 说明：增量自动保存改为通过 BrowserService 的 _auto_save_session +
+                # /heartbeat 接口触发，这里不再在包装器内部开启定时器线程。
+                "auto_save_interval": 0,
             }
             
             browser_wrapper = CamoufoxBrowserWrapper(browser_config)

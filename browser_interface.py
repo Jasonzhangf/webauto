@@ -1182,6 +1182,24 @@ class CamoufoxBrowserWrapper(AbstractBrowser):
                 // 首次执行，确保当前文档已有 overlay
                 ensureOverlay();
 
+                // 心跳上报：每 5 秒向本地 BrowserService 发送一次心跳，
+                // 用于触发服务端增量保存会话状态（storage_state / Cookie 等）。
+                try {
+                  const DEBUG_BASE = 'http://127.0.0.1:8888';
+                  const sid = __SID__;
+                  if (!window.__webautoHeartbeatTimer) {
+                    window.__webautoHeartbeatTimer = setInterval(() => {
+                      try {
+                        fetch(`${DEBUG_BASE}/api/v1/sessions/${encodeURIComponent(sid)}/heartbeat`, {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ source: 'overlay' })
+                        }).catch(() => {});
+                      } catch {}
+                    }, 5000);
+                  }
+                } catch {}
+
                 // DOM 变动时自动“自愈”，防止站点用 JS 重写页面把 overlay 干掉
                 try {
                   const target = document.documentElement || document.body || document;

@@ -209,6 +209,16 @@ def navigate(session_id: str):
     except Exception as e:
         return create_error_response(f"导航异常: {str(e)}")
 
+@app.route('/api/v1/sessions/<session_id>/heartbeat', methods=['POST'])
+def heartbeat(session_id: str):
+    """前端心跳：用于触发服务端增量保存会话（storage_state / Cookie 等）"""
+    try:
+        # 触发一次自动会话持久化（内部带时间/内容节流）
+        browser_service._auto_save_session(session_id)  # type: ignore[attr-defined]
+        return create_success_response({"session_id": session_id})
+    except Exception as e:
+        return create_error_response(f"心跳异常: {str(e)}")
+
 @app.route('/api/v1/sessions/<session_id>/click', methods=['POST'])
 def click(session_id: str):
     """点击操作"""
