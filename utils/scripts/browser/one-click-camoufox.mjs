@@ -140,21 +140,6 @@ async function createSession(profileId = 'default') {
   return data.session_id || data.sessionId || data.id;
 }
 
-async function maybeNavigateInitial(sessionId, profileId) {
-  // 针对 1688 场景：一键启动时默认直接打开 1688 首页
-  if (profileId !== '1688-main-v1') return;
-  const url = `http://${HOST}:${PORT}/api/v1/sessions/${encodeURIComponent(sessionId)}/navigate`;
-  try {
-    await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url: 'https://www.1688.com' }),
-    });
-  } catch {
-    // 默认导航失败不影响会话整体可用性
-  }
-}
-
 async function main() {
   console.log('🚀 一键启动 Camoufox 浏览器服务并创建会话...');
 
@@ -172,16 +157,13 @@ async function main() {
 
   const sessionId = await createSession(profileId);
 
-  // 对于 1688 固定指纹 profile，创建完会话后默认导航到 1688 首页
-  await maybeNavigateInitial(sessionId, profileId);
-
   console.log('');
   console.log('✅ 已创建浏览器会话:');
   console.log(`   session_id: ${sessionId}`);
   console.log(`   profile_id: ${profileId}  (所有站点 Cookie 自动保存/恢复)`);
   console.log('');
-  console.log('👀 请在前台确认 Camoufox 窗口已经弹出（about:blank）。');
-  console.log('   后续浏览器控制请通过 /api/v1/sessions/{session_id}/... 这些 REST 接口完成。');
+console.log('👀 请在前台确认 Camoufox 窗口已经弹出。');
+console.log('   如需访问 1688，请在地址栏手动打开 https://www.1688.com，登录过程不再由脚本自动导航干预。');
 }
 
 main().catch((e) => {
