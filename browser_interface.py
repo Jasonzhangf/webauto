@@ -482,10 +482,12 @@ class CamoufoxBrowserWrapper(AbstractBrowser):
             (function() {{
               try {{
                 if (window.__waSaveStateTimer) return;
-                if (typeof window['{binding_name}'] !== 'function') return;
                 window.__waSaveStateTimer = setInterval(function() {{
                   try {{
-                    window['{binding_name}']();
+                    var fn = window['{binding_name}'];
+                    if (typeof fn === 'function') {{
+                      fn();
+                    }}
                   }} catch (e) {{}}
                 }}, {interval_ms});
               }} catch (e) {{}}

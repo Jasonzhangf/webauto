@@ -426,6 +426,16 @@ class BrowserService(AbstractBrowserService):
             # 创建控制器
             controller = BrowserController(browser_wrapper, page)
 
+            # 针对 1688 场景的固定入口：
+            # - 使用 1688-main-v1 这个 profile 时，默认直接打开 1688 首页，
+            #   避免用户还需要手动输入 URL。
+            try:
+                if (profile.profile_id or "default") == "1688-main-v1":
+                    controller.navigate("https://www.1688.com")
+            except Exception:
+                # 默认导航失败不影响会话整体可用性
+                pass
+
             # 按 profile 初始化 / 复用指纹配置，并应用到当前会话上下文
             try:
                 # 如果该 profile 还没有指纹，则生成并持久化一份
