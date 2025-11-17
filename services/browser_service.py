@@ -406,8 +406,10 @@ class BrowserService(AbstractBrowserService):
                 # 自动在关闭时保存会话，在下次启动时按 profile_id 恢复
                 "auto_session": True,
                 "session_name": profile.profile_id or "default",
-                # 在浏览过程中周期性自动保存 storage_state，避免只在关闭时保存导致登录态丢失
-                "auto_save_interval": 5.0,
+                # 说明：Playwright 同步 API 在多线程下对 greenlet 不友好，
+                # 后台线程调用 storage_state() 会抛出跨线程切换错误。
+                # 因此，这里只依赖 close_session() 时的同步保存，不在服务端开启后台自动保存线程。
+                "auto_save_interval": 0,
             }
             
             browser_wrapper = CamoufoxBrowserWrapper(browser_config)
