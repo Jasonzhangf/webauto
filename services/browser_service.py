@@ -406,10 +406,11 @@ class BrowserService(AbstractBrowserService):
                 # 自动在关闭时保存会话，在下次启动时按 profile_id 恢复
                 "auto_session": True,
                 "session_name": profile.profile_id or "default",
-                # 说明：Playwright 同步 API 在多线程下对 greenlet 不友好，
-                # 后台线程调用 storage_state() 会抛出跨线程切换错误。
-                # 因此，这里只依赖 close_session() 时的同步保存，不在服务端开启后台自动保存线程。
-                "auto_save_interval": 0,
+                # 自动保存间隔（秒）：CamoufoxBrowserWrapper 内部通过
+                # Playwright binding + 前端 setInterval 每隔约 5 秒触发一次
+                # storage_state() 增量持久化（运行在 Playwright 事件循环线程中，
+                # 避免直接在 Python 线程里调用 storage_state 导致 greenlet 错误）。
+                "auto_save_interval": 5.0,
             }
             
             browser_wrapper = CamoufoxBrowserWrapper(browser_config)

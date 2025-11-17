@@ -10,6 +10,7 @@ import time
 import json
 import subprocess
 import threading
+import hashlib
 from typing import Optional, Dict, Any, Union, List
 from contextlib import contextmanager
 from abstract_browser import AbstractBrowser, AbstractPage
@@ -39,6 +40,7 @@ class CamoufoxBrowserWrapper(AbstractBrowser):
         self._auto_save_interval: Optional[float] = self.config.get('auto_save_interval', 5.0)
         self._auto_save_running: bool = False
         self._auto_save_thread: Optional[threading.Thread] = None
+        self._last_state_hash: Optional[str] = None
         # 指纹策略：'random' 为每次随机，'fixed' 为按 profile 固定指纹（适用于 1688 等强绑定站点）
         # 默认采用固定指纹，并将默认 profile 固定为 1688 场景使用的 profile
         self._fingerprint_profile: str = self.config.get('fingerprint_profile', 'fixed')
@@ -412,31 +414,90 @@ class CamoufoxBrowserWrapper(AbstractBrowser):
                 # DOM 选取脚本注入失败不影响主流程
                 pass
 
-            # 如启用自动会话 & 配置了自动保存间隔，则启动后台自动保存线程
+            # 如启用自动会话 & 配置了自动保存间隔，则通过前端定时器 + binding
+            # 周期性触发 storage_state 持久化（在 Playwright 的事件循环线程中执行，
+            # 避免直接在 Python 线程里调用 storage_state 产生 greenlet 错误）。
             if self._auto_session and self._auto_save_interval and self._auto_save_interval > 0:
-                self._start_auto_save_thread()
+                self._start_auto_save_thread(self._context)
         return self._context
 
-    def _start_auto_save_thread(self) -> None:
-        """启动后台自动保存会话线程，周期性调用 save_session"""
-        if self._auto_save_thread and self._auto_save_thread.is_alive():
+    def _save_session_if_changed(self) -> None:
+        """
+        在当前上下文中获取 storage_state，如有变化则增量写入 session 文件。
+        在 Playwright 暴露的 binding 回调中执行，以保证运行在正确的事件循环线程中。
+        """
+        try:
+            context = self._get_context()
+            state = context.storage_state()
+            serialized = json.dumps(
+                state,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":")
+            )
+            current_hash = hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+            if self._last_state_hash is not None and self._last_state_hash == current_hash:
+                return
+
+            os.makedirs(self._cookie_dir, exist_ok=True)
+            session_file = os.path.join(
+                self._cookie_dir,
+                f'session_{self._session_name}.json'
+            )
+            with open(session_file, 'w', encoding='utf-8') as f:
+                f.write(serialized)
+
+            self._last_state_hash = current_hash
+        except Exception:
+            # 自动保存失败不影响主流程
+            pass
+
+    def _start_auto_save_thread(self, context) -> None:
+        """
+        通过 Playwright binding + 前端 setInterval 周期性保存会话
+        （不再使用 Python 线程，避免 greenlet 跨线程错误）
+        """
+        if self._auto_save_running:
             return
 
-        def _worker():
-            # 简单的周期性保存：每隔一段时间写入一次 storage_state
-            while self._auto_save_running:
-                try:
-                    # 使用当前 session_name 持久化完整 storage_state
-                    self.save_session(self._session_name)
-                except Exception:
-                    # 自动保存失败不影响主流程
-                    pass
-                time.sleep(self._auto_save_interval or 5.0)
-
         self._auto_save_running = True
-        t = threading.Thread(target=_worker, name=f'camoufox-auto-save-{self._session_name}', daemon=True)
-        self._auto_save_thread = t
-        t.start()
+
+        try:
+            interval_ms = int((self._auto_save_interval or 5.0) * 1000)
+            binding_name = "__wa_save_state__"
+
+            def _binding(source) -> None:  # type: ignore[unused-argument]
+                if not self._auto_save_running:
+                    return
+                self._save_session_if_changed()
+
+            try:
+                context.expose_binding(binding_name, _binding)
+            except Exception:
+                # binding 注册失败则不再尝试自动保存
+                self._auto_save_running = False
+                return
+
+            script = f"""
+            (function() {{
+              try {{
+                if (window.__waSaveStateTimer) return;
+                if (typeof window['{binding_name}'] !== 'function') return;
+                window.__waSaveStateTimer = setInterval(function() {{
+                  try {{
+                    window['{binding_name}']();
+                  }} catch (e) {{}}
+                }}, {interval_ms});
+              }} catch (e) {{}}
+            }})();
+            """
+            try:
+                context.add_init_script(script)
+            except Exception:
+                # init script 注入失败则不再自动保存
+                self._auto_save_running = False
+        except Exception:
+            self._auto_save_running = False
 
     def install_overlay(self, session_id: str, profile_id: Optional[str] = None) -> None:
         """
