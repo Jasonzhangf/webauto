@@ -176,26 +176,31 @@ class CamoufoxBrowserWrapper(AbstractBrowser):
         if self._context is None:
             self._ensure_browser()
             
-            # 如启用自动会话恢复，则优先尝试加载上次会话状态
-            # 注意：不会在首次运行时预加载任何内置 Cookie，
-            # 只有在之前已经保存过会话文件时才会恢复。
+            # 如启用自动会话恢复，则优先尝试加载上次会话状态。
+            # 注意：即使恢复成功，也会继续对恢复后的 context 应用统一的
+            # 语言头 / 字体 / DOM 选取脚本等初始化逻辑。
             if self._auto_session:
-                restore_result = self.restore_session(self._session_name)
-                if restore_result.get('success'):
-                    return self._context
+                try:
+                    self.restore_session(self._session_name)
+                except Exception:
+                    # 恢复失败则退回到普通 new_context 流程
+                    pass
 
-            # 视口尺寸：优先使用外部传入的 viewport，其次使用一个较小的默认窗口尺寸，
-            # 避免每次启动都是 1920x1080 的大窗口。
-            default_viewport = {'width': 1440, 'height': 900}
-            viewport = self.config.get('viewport', default_viewport)
+            # 如恢复会话后仍未创建 context，则按正常流程创建新的 context
+            if self._context is None:
+                # 视口尺寸：优先使用外部传入的 viewport，其次使用一个较小的默认窗口尺寸，
+                # 避免每次启动都是 1920x1080 的大窗口。
+                default_viewport = {'width': 1440, 'height': 900}
+                viewport = self.config.get('viewport', default_viewport)
 
-            context_options = {
-                'viewport': viewport,
-                'user_agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36'
-            }
-            self._context = self._browser.new_context(**context_options)
+                context_options = {
+                    'viewport': viewport,
+                    'user_agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36'
+                }
+                self._context = self._browser.new_context(**context_options)
 
-            # 设置 Accept-Language，保持与手工验证脚本一致
+            # 到这里 self._context 一定已经存在（无论是恢复还是新建），
+            # 统一应用语言头、字体和 DOM 选取脚本。
             try:
                 locale = self.config.get('locale', 'zh-CN')
                 lang_header = '{0},{1};q=0.9,en;q=0.8'.format(
@@ -233,7 +238,7 @@ class CamoufoxBrowserWrapper(AbstractBrowser):
                     # 字体增强失败不应影响主流程
                     pass
 
-            # DOM 选取辅助脚本：在页面级提供 window.__webautoDomSelect（F2 开启 / ESC 关闭）
+            # DOM 选取辅助脚本：在页面级提供 window.__webautoDomSelect（F2 / DOM 选取标签开启 / ESC 关闭）
             try:
                 dom_select_script = """
                 (function() {
