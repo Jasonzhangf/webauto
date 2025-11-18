@@ -5,7 +5,6 @@
 
 import { EventDrivenContainer, ContainerConfig, ContainerSharedSpace } from './EventDrivenContainer';
 import { CONTAINER_EVENTS } from './EventTypes';
-import { Page } from 'playwright';
 
 export interface ScrollConfig extends ContainerConfig {
   scrollStrategy?: 'smart' | 'incremental' | 'continuous';

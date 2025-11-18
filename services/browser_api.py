@@ -211,6 +211,7 @@ def create_or_update_container():
         description = data.get("title") or data.get("description") or ""
         parent_id = data.get("parentId") or data.get("parent_id")
         actions = data.get("actions") or None
+        event_key = data.get("eventKey") or data.get("event_key") or None
 
         if not url:
             return create_error_response("缺少 url 字段")
@@ -226,6 +227,7 @@ def create_or_update_container():
             description=description,
             parent_id=parent_id or None,
             actions=actions,
+            event_key=event_key,
         )
 
         return create_success_response({
@@ -297,6 +299,9 @@ def input_text(session_id: str):
         data = request.json or {}
         selector = data.get('selector')
         text = data.get('text')
+        mode = (data.get('mode') or 'fill').lower()
+        if mode not in ('fill', 'type'):
+            mode = 'fill'
         
         if not selector or text is None:
             return create_error_response("必须提供selector和text参数")
@@ -304,7 +309,8 @@ def input_text(session_id: str):
         action = PageAction(
             action_type=BrowserActionType.INPUT,
             selector=selector,
-            value=text
+            value=text,
+            options={"mode": mode},
         )
         
         result = browser_service.execute_action(session_id, action)
@@ -316,6 +322,32 @@ def input_text(session_id: str):
             
     except Exception as e:
         return create_error_response(f"输入异常: {str(e)}")
+
+
+@app.route('/api/v1/sessions/<session_id>/key', methods=['POST'])
+def press_key(session_id: str):
+    """按键操作（Enter / Esc / Tab 等特殊键）"""
+    try:
+        data = request.json or {}
+        key = data.get('key')
+
+        if not key:
+            return create_error_response("必须提供 key 参数（例如 'Enter' / 'Escape'）")
+
+        action = PageAction(
+            action_type=BrowserActionType.KEY,
+            value=key,
+        )
+
+        result = browser_service.execute_action(session_id, action)
+
+        if result.get("success"):
+            return create_success_response(result)
+        else:
+            return create_error_response(result.get("error", "按键失败"))
+
+    except Exception as e:
+        return create_error_response(f"按键异常: {str(e)}")
 
 @app.route('/api/v1/sessions/<session_id>/screenshot', methods=['POST'])
 def screenshot(session_id: str):

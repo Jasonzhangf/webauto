@@ -40,6 +40,17 @@ async function isHealthy() {
   }
 }
 
+function killCamoufoxIfAny() {
+  // 清理可能残留的 Camoufox 进程，避免复用挂着旧 overlay / 旧上下文的实例
+  if (process.platform === 'win32') return;
+  try {
+    execSync('pkill -f Camoufox || true', { stdio: 'ignore' });
+    execSync('pkill -f camoufox || true', { stdio: 'ignore' });
+  } catch {
+    // 清理失败不影响后续流程
+  }
+}
+
 function killPythonServiceIfAny() {
   // 本地开发：每次一键启动前都清理占用目标端口的旧 Python BrowserService，避免复用旧代码
   if (process.platform === 'win32') return;
@@ -80,6 +91,8 @@ function startPythonService() {
 async function ensureService() {
   // 每次运行都尝试清理旧的 BrowserService，避免复用旧代码
   killPythonServiceIfAny();
+  // 同时清理旧的 Camoufox 进程，保证浏览器本身也是干净的
+  killCamoufoxIfAny();
 
   const pid = startPythonService();
 

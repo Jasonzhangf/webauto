@@ -1,9 +1,8 @@
 // @ts-nocheck
 import { chromium, firefox, webkit } from 'playwright';
 import { saveSession, getSession } from '../lib/sessionAdapter.js';
-// 使用全局浏览器模块的 Cookie 管理器和 UI Overlay 作为唯一入口
+// 使用全局浏览器模块的 Cookie 管理器作为唯一入口（UI Overlay 统一改由 Python/Camoufox 注入）
 import { CookieManager } from '../../../../libs/browser/cookie-manager.js';
-import { buildOverlayScript } from '../../../../libs/browser/ui-overlay.js';
 
 function genSessionId() {
   return `sess-${Date.now()}-${Math.floor(Math.random()*1e6)}`;
@@ -16,8 +15,7 @@ const _pageReloadOncePerHost = new WeakMap<any, Set<string>>();
 
 async function installPageWatches(sessionId: string, context, page) {
   try {
-    // Inject overlay early（由浏览器模块集中提供脚本）
-    await context.addInitScript(buildOverlayScript({ sessionId, profileId: 'default' }));
+    // 这里不再注入 Node 侧 Overlay，浏览器 UI 统一由 Python/Camoufox 注入
   } catch {}
 
   const attachHandlers = async (pg) => {
@@ -42,7 +40,6 @@ async function installPageWatches(sessionId: string, context, page) {
 
       // On DOM ready, ensure overlay exists and inject cookies
       pg.on('domcontentloaded', async () => {
-        try { await pg.evaluate(buildOverlayScript({ sessionId, profileId: 'default' })); } catch {}
         await ensureCookies();
       });
 

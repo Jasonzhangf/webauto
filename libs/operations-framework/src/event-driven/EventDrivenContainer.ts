@@ -38,6 +38,33 @@ export interface ContainerSharedSpace {
   monitoring: any;
 }
 
+export interface ContainerEventContext {
+  /**
+   * 当前处理事件的容器实例
+   */
+  container: EventDrivenContainer;
+  /**
+   * 共享空间（可能为 null，调用时需要判空）
+   */
+  sharedSpace: ContainerSharedSpace | null;
+  /**
+   * 容器内部事件总线
+   */
+  eventBus: EventBus;
+}
+
+export interface ContainerEventResult {
+  /**
+   * 当前 handler 是否“吃掉”消息，true 时不再向下级容器透传
+   */
+  consumed?: boolean;
+}
+
+export type ContainerEventHandler = (
+  payload: any,
+  ctx: ContainerEventContext
+) => void | ContainerEventResult | Promise<void | ContainerEventResult>;
+
 export abstract class EventDrivenContainer {
   protected eventBus: EventBus;
   protected config: ContainerConfig;
@@ -47,6 +74,10 @@ export abstract class EventDrivenContainer {
   protected eventHandlers: Map<string, EventHandler[]> = new Map();
   protected childContainers: Map<string, EventDrivenContainer> = new Map();
   protected parentContainer: EventDrivenContainer | null = null;
+  /**
+   * 容器级事件处理器（业务事件），键通常为 event.xxx 或 operation.xxx
+   */
+  protected containerEventHandlers: Map<string, ContainerEventHandler[]> = new Map();
 
   constructor(config: ContainerConfig) {
     this.config = { ...config, enabled: config.enabled ?? true };
@@ -291,6 +322,77 @@ export abstract class EventDrivenContainer {
    */
   getChildContainers(): EventDrivenContainer[] {
     return Array.from(this.childContainers.values());
+  }
+
+  // ==================== 容器级事件路由 ====================
+
+  /**
+   * 为当前容器注册一个业务事件处理器
+   * 事件命名推荐使用：
+   * - event.<containerId>.appear
+   * - operation.<containerId>.<opName>
+   */
+  registerContainerHandler(eventKey: string, handler: ContainerEventHandler): void {
+    if (!this.containerEventHandlers.has(eventKey)) {
+      this.containerEventHandlers.set(eventKey, []);
+    }
+    this.containerEventHandlers.get(eventKey)!.push(handler);
+  }
+
+  /**
+   * 从当前容器开始分发业务事件：
+   * 1. 先在当前容器按注册顺序处理；
+   * 2. 若未被“吃掉”，再按子容器顺序向下传递；
+   * 返回值表示是否有任意一层 handler 标记 consumed=true。
+   */
+  async dispatchContainerEvent(eventKey: string, payload: any): Promise<boolean> {
+    // 当前容器先处理
+    const consumedHere = await this.handleContainerEvent(eventKey, payload);
+    if (consumedHere) {
+      return true;
+    }
+
+    // 再向子容器传播
+    for (const child of this.childContainers.values()) {
+      const consumedByChild = await child.dispatchContainerEvent(eventKey, payload);
+      if (consumedByChild) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  /**
+   * 执行当前容器上注册的 handler 列表
+   */
+  protected async handleContainerEvent(eventKey: string, payload: any): Promise<boolean> {
+    const handlers = this.containerEventHandlers.get(eventKey);
+    if (!handlers || handlers.length === 0) {
+      return false;
+    }
+
+    const ctx: ContainerEventContext = {
+      container: this,
+      sharedSpace: this.sharedSpace,
+      eventBus: this.eventBus
+    };
+
+    for (const handler of handlers) {
+      try {
+        const result = await handler(payload, ctx);
+        if (result && (result as ContainerEventResult).consumed) {
+          return true;
+        }
+      } catch (error) {
+        console.error(
+          `[Container] 处理业务事件出错 (${eventKey}) in ${this.config.id}:`,
+          error
+        );
+      }
+    }
+
+    return false;
   }
 
   // ==================== 抽象方法 ====================

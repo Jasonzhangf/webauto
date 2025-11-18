@@ -8,7 +8,7 @@ import { EventDrivenLinkContainer, LinkConfig } from './EventDrivenLinkContainer
 import { EventDrivenScrollContainer, ScrollConfig } from './EventDrivenScrollContainer';
 import { EventDrivenPaginationContainer, PaginationConfig } from './EventDrivenPaginationContainer';
 import { CONTAINER_EVENTS } from './EventTypes';
-import { Page } from 'playwright';
+import { bindActionsFromContainerLibraryForUrl } from '../containers/ContainerLibraryActionsBinder';
 
 export interface PageContainerConfig extends ContainerConfig {
   pageType?: 'homepage' | 'search' | 'profile' | 'custom';
@@ -69,6 +69,7 @@ export class EventDrivenPageContainer extends EventDrivenContainer {
     this.setupPageEventHandlers();
     await this.createChildContainers();
     await this.initializeChildContainers();
+    await this.bindContainerLibraryActions();
   }
 
   protected async onStart(): Promise<void> {
@@ -113,6 +114,34 @@ export class EventDrivenPageContainer extends EventDrivenContainer {
       averageNavigationTime: 0,
       childContainerStats: {}
     };
+  }
+
+  /**
+   * 将 container-library.json 中的 actions 绑定为当前页面容器的业务事件处理器
+   * 约定：根据当前 page.url() 推断站点，并注册 event.<containerId>.appear handlers
+   */
+  private async bindContainerLibraryActions(): Promise<void> {
+    if (!this.sharedSpace?.page) {
+      return;
+    }
+
+    let currentUrl = '';
+    try {
+      // Playwright Page.url() 为同步方法，这里不使用 await
+      currentUrl = (this.sharedSpace.page as any).url?.() || '';
+    } catch {
+      currentUrl = '';
+    }
+
+    if (!currentUrl) {
+      return;
+    }
+
+    try {
+      bindActionsFromContainerLibraryForUrl(this, currentUrl);
+    } catch (error) {
+      console.warn('EventDrivenPageContainer: 绑定 container-library actions 失败:', error);
+    }
   }
 
   // ==================== 子容器管理方法 ====================

@@ -95,16 +95,38 @@ class BrowserController(AbstractBrowserController):
                 "coordinates": coordinates
             }
     
-    def input_text(self, selector: str, text: str) -> Dict[str, Any]:
-        """输入文本"""
+    def input_text(self, selector: str, text: str, mode: str = "fill") -> Dict[str, Any]:
+        """
+        输入文本
+
+        mode:
+        - "fill"：使用 Playwright 的 fill，直接设置 value；
+        - "type"：模拟键盘逐字输入（先聚焦再 type），触发键盘事件。
+        """
         try:
-            self.page.fill(selector, text)
+            if mode == "type":
+                # 先聚焦，再清空，再逐字输入
+                try:
+                    self.page.click(selector)
+                except Exception:
+                    # 聚焦失败不终止流程，继续尝试输入
+                    pass
+                try:
+                    # 尽量清空原有内容，避免残留
+                    self.page.fill(selector, "")
+                except Exception:
+                    pass
+                self.page.type(selector, text)
+            else:
+                # 默认行为：直接 fill，稳定快速
+                self.page.fill(selector, text)
             self._last_action_time = time.time()
             return {
                 "success": True,
                 "action": "input_text",
                 "selector": selector,
                 "text_length": len(text),
+                "mode": mode,
                 "timestamp": self._last_action_time
             }
         except Exception as e:
@@ -112,6 +134,25 @@ class BrowserController(AbstractBrowserController):
                 "success": False,
                 "error": str(e),
                 "selector": selector
+            }
+
+    def press_key(self, key: str) -> Dict[str, Any]:
+        """按下特殊按键（如 Enter / Esc）"""
+        try:
+            # Playwright 的 keyboard.press 支持 'Enter' / 'Escape' / 'Tab' 等
+            self.page.keyboard.press(key)
+            self._last_action_time = time.time()
+            return {
+                "success": True,
+                "action": "press_key",
+                "key": key,
+                "timestamp": self._last_action_time,
+            }
+        except Exception as e:
+            return {
+                "success": False,
+                "error": str(e),
+                "key": key,
             }
     
     def scroll(self, direction: str = "down", amount: Optional[int] = None) -> Dict[str, Any]:
@@ -566,7 +607,16 @@ class BrowserService(AbstractBrowserService):
                 else:
                     raise ValueError("点击操作需要提供selector或coordinates")
             elif action.action_type == BrowserActionType.INPUT:
-                result = controller.input_text(action.selector, action.value)
+                # options.mode: "fill"（默认）或 "type"
+                mode = "fill"
+                if action.options and isinstance(action.options, dict):
+                    mode = action.options.get("mode", "fill") or "fill"
+                result = controller.input_text(action.selector, action.value, mode=mode)
+            elif action.action_type == BrowserActionType.KEY:
+                key = action.value or ""
+                if not key:
+                    raise ValueError("按键操作需要提供 key（例如 'Enter' / 'Escape'）")
+                result = controller.press_key(key)
             elif action.action_type == BrowserActionType.SCROLL:
                 result = controller.scroll(
                     direction=action.options.get('direction', 'down') if action.options else 'down',

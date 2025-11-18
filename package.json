@@ -23,6 +23,7 @@
     "service:browser:start": "node utils/scripts/service/start-browser-service.mjs",
     "service:browser:stop": "node utils/scripts/service/stop-browser-service.mjs",
     "service:browser:restart": "node utils/scripts/service/restart-browser-service.mjs",
+    "service:browser:restart:python": "node utils/scripts/service/restart-python-browser-service.mjs",
     "service:kill-port": "node utils/scripts/service/kill-port.mjs",
     "browser:camoufox:oneclick": "node utils/scripts/browser/one-click-camoufox.mjs",
     "browser:camoufox:status": "node utils/scripts/browser/status-camoufox.mjs",

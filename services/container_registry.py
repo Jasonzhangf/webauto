@@ -82,6 +82,7 @@ def upsert_container_for_url(
   description: str = "",
   parent_id: Optional[str] = None,
   actions: Optional[Dict[str, Any]] = None,
+  event_key: Optional[str] = None,
 ) -> Dict[str, Any]:
   """
   为给定 URL 新增 / 更新一个容器定义，并在必要时更新父容器的 children 列表。
@@ -117,6 +118,12 @@ def upsert_container_for_url(
     merged["actions"] = actions
   elif "actions" in existing:
     merged["actions"] = existing["actions"]
+
+  # eventKey 如显式传入则覆盖，否则保留已有
+  if event_key is not None:
+    merged["eventKey"] = event_key
+  elif "eventKey" in existing:
+    merged["eventKey"] = existing["eventKey"]
 
   containers[container_id] = merged
 

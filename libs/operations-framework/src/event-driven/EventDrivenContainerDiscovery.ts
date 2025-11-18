@@ -5,6 +5,7 @@
 
 import { EventBus } from './EventBus';
 import { ContainerRegistry, ContainerInfo } from '../containers/ContainerRegistry';
+import { EventDrivenContainer } from './EventDrivenContainer';
 // 为避免误用 Node 侧 Playwright，这里只定义一个最小 Page 接口
 type Page = {
   url(): string;
@@ -74,10 +75,15 @@ export class EventDrivenContainerDiscovery {
   private isDiscovering: boolean = false;
   private discoveryCache: Map<string, DiscoveredContainer> = new Map();
   private discoveryHistory: DiscoveryResult[] = [];
+  /**
+   * 可选：根事件驱动容器，用于在发现容器后分发业务事件
+   */
+  private rootContainer: EventDrivenContainer | null = null;
 
-  constructor(eventBus: EventBus, containerRegistry: ContainerRegistry) {
+  constructor(eventBus: EventBus, containerRegistry: ContainerRegistry, rootContainer?: EventDrivenContainer) {
     this.eventBus = eventBus;
     this.containerRegistry = containerRegistry;
+    this.rootContainer = rootContainer || null;
     this.setupEventHandlers();
   }
 
@@ -207,6 +213,26 @@ export class EventDrivenContainerDiscovery {
       // 6. 自动注册容器（如果启用）
       if (config.enableAutoRegistration) {
         await this.autoRegisterContainers(config.website, result.containers);
+      }
+
+      // 6.5 向根容器发送“容器出现”业务事件（如果已注入）
+      if (this.rootContainer) {
+        for (const container of result.containers) {
+          try {
+            const eventKey = `event.${container.id}.appear`;
+            await this.rootContainer.dispatchContainerEvent(eventKey, {
+              containerId: container.id,
+              selector: container.selector,
+              rect: container.rect,
+              website: config.website
+            });
+          } catch (error) {
+            console.warn(
+              `EventDrivenContainerDiscovery: 分发 appear 事件失败 (${container.id}):`,
+              error
+            );
+          }
+        }
       }
 
       // 7. 发射完成事件

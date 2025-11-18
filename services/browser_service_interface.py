@@ -13,6 +13,7 @@ class BrowserActionType(Enum):
     NAVIGATE = "navigate"
     CLICK = "click"
     INPUT = "input"
+    KEY = "key"
     SCROLL = "scroll"
     WAIT = "wait"
     SCREENSHOT = "screenshot"
@@ -146,8 +147,19 @@ class AbstractBrowserController(ABC):
         pass
     
     @abstractmethod
-    def input_text(self, selector: str, text: str) -> Dict[str, Any]:
-        """输入文本"""
+    def input_text(self, selector: str, text: str, mode: str = "fill") -> Dict[str, Any]:
+        """
+        输入文本
+
+        mode 语义：
+        - "fill"：直接设置 input 的 value（无键盘事件，适合稳定快速输入）；
+        - "type"：模拟逐字键盘输入（触发 keydown/keyup，适合需要监听键盘事件的站点）。
+        """
+        pass
+
+    @abstractmethod
+    def press_key(self, key: str) -> Dict[str, Any]:
+        """按下特殊按键（如 Enter / Esc 等）"""
         pass
     
     @abstractmethod

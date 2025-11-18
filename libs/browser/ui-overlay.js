@@ -440,33 +440,177 @@ export function buildOverlayScript({ sessionId, profileId = 'default' }) {
       leftHeader.appendChild(search);
       const tree = document.createElement('div');
       tree.className = 'wa-tree';
-      const rootNode = document.createElement('div');
-      rootNode.className = 'wa-tree-node wa-tree-node-root wa-tree-node-selected';
-      rootNode.textContent = '页面根容器 (#app-root)';
-      const nodeNav = document.createElement('div');
-      nodeNav.className = 'wa-tree-node wa-tree-node-child';
-      nodeNav.textContent = '顶部导航（nav）';
-      const nodeSide = document.createElement('div');
-      nodeSide.className = 'wa-tree-node wa-tree-node-child';
-      nodeSide.textContent = '侧边栏（sidebar）';
-      const nodeProduct = document.createElement('div');
-      nodeProduct.className = 'wa-tree-node wa-tree-node-child';
-      nodeProduct.textContent = '商品区域（product）';
-      const childrenWrap = document.createElement('div');
-      childrenWrap.className = 'wa-tree-children';
-      const child1 = document.createElement('div');
-      child1.className = 'wa-tree-node';
-      child1.textContent = '商品卡片（item-card）';
-      const child2 = document.createElement('div');
-      child2.className = 'wa-tree-node';
-      child2.textContent = '价格区域（price-area）';
-      childrenWrap.appendChild(child1);
-      childrenWrap.appendChild(child2);
-      nodeProduct.appendChild(childrenWrap);
-      tree.appendChild(rootNode);
-      tree.appendChild(nodeNav);
-      tree.appendChild(nodeSide);
-      tree.appendChild(nodeProduct);
+
+      const DEBUG_BASE = 'http://127.0.0.1:8888';
+
+      // 容器树：从后端 /api/v1/containers?url=... 拉取当前页面的容器定义
+      let treeNodes = [];
+      let containersById = {};
+      let currentContainerId = null;
+      let currentOps = {};
+      let currentEventKey = '';
+
+      function clearTreeSelection() {
+        treeNodes.forEach((n) => n.classList.remove('wa-tree-node-selected'));
+      }
+
+      function highlightContainer(selector) {
+        try {
+          if (!selector) return;
+          const target = document.querySelector(selector);
+          if (!target) return;
+          const rect = target.getBoundingClientRect();
+          let box = document.getElementById('__wa_container_highlight__');
+          if (!box) {
+            box = document.createElement('div');
+            box.id = '__wa_container_highlight__';
+            box.style.position = 'absolute';
+            box.style.zIndex = '2147483645';
+            box.style.pointerEvents = 'none';
+            box.style.border = '2px solid #22c55e';
+            box.style.borderRadius = '4px';
+            box.style.boxShadow = '0 0 0 1px rgba(22,163,74,0.6)';
+            box.style.background = 'rgba(22,163,74,0.10)';
+            document.documentElement.appendChild(box);
+          }
+          const scrollX = window.scrollX || window.pageXOffset || 0;
+          const scrollY = window.scrollY || window.pageYOffset || 0;
+          box.style.left = rect.left + scrollX - 2 + 'px';
+          box.style.top = rect.top + scrollY - 2 + 'px';
+          box.style.width = Math.max(rect.width + 4, 4) + 'px';
+          box.style.height = Math.max(rect.height + 4, 4) + 'px';
+          box.style.display = 'block';
+        } catch {}
+      }
+
+      function renderOpsForContainer(id) {
+        const c = containersById[id] || {};
+        currentContainerId = id;
+        currentOps = Object.assign({}, c.actions || {});
+
+        // 更新当前事件 key（默认: event.<id>.appear）
+        try {
+          const msgInput = sectionOps && sectionOps.__waMsgInput;
+          const statusEl = sectionOps && sectionOps.__waOpStatus;
+          const defaultKey = c.eventKey || 'event.' + id + '.appear';
+          currentEventKey = defaultKey;
+          if (msgInput) {
+            msgInput.value = defaultKey;
+          }
+          if (statusEl) {
+            statusEl.textContent = '';
+          }
+        } catch {}
+
+        // 渲染已注册 Operation 列表
+        opList.innerHTML = '';
+        const activeKeys = Object.keys(currentOps).filter((k) => currentOps[k]);
+        if (!activeKeys.length) {
+          const li = document.createElement('li');
+          li.className = 'wa-op-item';
+          li.innerHTML = '<span class="wa-op-name">暂无已注册 Operation</span>';
+          opList.appendChild(li);
+        } else {
+          activeKeys.forEach((key) => {
+            const li = document.createElement('li');
+            li.className = 'wa-op-item';
+            li.innerHTML =
+              '<span class="wa-op-handle">●</span><span class="wa-op-name">' + key + '</span>';
+            opList.appendChild(li);
+          });
+        }
+
+        // 渲染可添加 Operation 芯片
+        const OPS = [
+          { key: 'click', label: '点击 (click)' },
+          { key: 'type', label: '输入 (type)' },
+          { key: 'fill', label: '填充值 (fill)' },
+        ];
+        pal.innerHTML = '';
+        OPS.forEach((op) => {
+          const chip = document.createElement('span');
+          chip.className = 'wa-op-chip';
+          const active = !!currentOps[op.key];
+          chip.textContent = op.label;
+          chip.style.background = active ? '#1d4ed8' : '#020617';
+          chip.style.borderColor = active ? '#60a5fa' : '#374151';
+          chip.style.color = active ? '#eff6ff' : '#d1d5db';
+          chip.addEventListener('click', () => {
+            currentOps[op.key] = !currentOps[op.key];
+            renderOpsForContainer(id);
+          });
+          pal.appendChild(chip);
+        });
+      }
+
+      function renderContainerTree(containers) {
+        containersById = containers || {};
+        tree.innerHTML = '';
+        treeNodes = [];
+
+        const parentMap = {};
+        Object.keys(containersById).forEach((id) => {
+          const c = containersById[id] || {};
+          (c.children || []).forEach((childId) => {
+            parentMap[childId] = id;
+          });
+        });
+
+        const roots = Object.keys(containersById).filter((id) => !parentMap[id]);
+        if (!roots.length) {
+          const empty = document.createElement('div');
+          empty.className = 'wa-tree-node';
+          empty.textContent = '当前页面尚未创建任何容器';
+          tree.appendChild(empty);
+          treeNodes.push(empty);
+          return;
+        }
+
+        function makeNode(id, depth) {
+          const c = containersById[id] || {};
+          const node = document.createElement('div');
+          node.className =
+            'wa-tree-node' + (depth === 0 ? ' wa-tree-node-root' : ' wa-tree-node-child');
+          node.textContent = c.description || id;
+          node.style.marginLeft = depth > 0 ? 14 * depth + 'px' : '0';
+          node.dataset.containerId = id;
+          tree.appendChild(node);
+          treeNodes.push(node);
+
+          node.addEventListener('click', () => {
+            clearTreeSelection();
+            node.classList.add('wa-tree-node-selected');
+            const selector = c.selector || '';
+            highlightContainer(selector);
+            // 将当前容器信息回填到右侧“容器详情”区域
+            try {
+              f1v.textContent = c.description || id;
+              f2v.textContent = selector || '';
+              f3v.textContent = id;
+              renderOpsForContainer(id);
+            } catch {}
+          });
+
+          (c.children || []).forEach((childId) => {
+            makeNode(childId, depth + 1);
+          });
+        }
+
+        roots.forEach((id) => makeNode(id, 0));
+      }
+
+      // 首次加载容器树
+      try {
+        fetch(DEBUG_BASE + '/api/v1/containers?url=' + encodeURIComponent(window.location.href))
+          .then((r) => r.json())
+          .then((j) => {
+            if (!j || !j.success) return;
+            const containers = (j.data && j.data.containers) || {};
+            renderContainerTree(containers);
+          })
+          .catch(() => {});
+      } catch {}
+
       left.appendChild(leftHeader);
       left.appendChild(tree);
 
@@ -514,23 +658,42 @@ export function buildOverlayScript({ sessionId, profileId = 'default' }) {
       sectionOps.className = 'wa-section';
       const st2 = document.createElement('div');
       st2.className = 'wa-section-title';
-      st2.innerHTML = '已注册 Operation <span class="wa-section-sub">（仅样式，占位拖拽排序区）</span>';
+      st2.innerHTML =
+        '已注册 Operation <span class="wa-section-sub">（为指定事件配置 click/type/fill，然后保存）</span>';
       sectionOps.appendChild(st2);
+      // 事件 key 编辑行
+      const msgRow = document.createElement('div');
+      msgRow.className = 'wa-field';
+      const msgLabel = document.createElement('label');
+      msgLabel.textContent = '事件 key';
+      const msgInput = document.createElement('input');
+      msgInput.type = 'text';
+      msgInput.style.flex = '1';
+      msgInput.style.fontSize = '11px';
+      msgInput.style.background = '#020617';
+      msgInput.style.border = '1px solid #1f2937';
+      msgInput.style.color = '#e5e7eb';
+      msgInput.placeholder = '如 event.home.search.searchbox.appear';
+      msgRow.appendChild(msgLabel);
+      msgRow.appendChild(msgInput);
+      sectionOps.appendChild(msgRow);
+      const opStatus = document.createElement('div');
+      opStatus.className = 'wa-section-sub';
+      opStatus.style.marginTop = '2px';
+      opStatus.style.fontSize = '10px';
+      opStatus.style.color = '#9ca3af';
+      opStatus.textContent = '';
+      sectionOps.appendChild(opStatus);
       const opList = document.createElement('ul');
       opList.className = 'wa-op-list';
-      const op1 = document.createElement('li');
-      op1.className = 'wa-op-item';
-      op1.innerHTML = '<span class="wa-op-handle">⋮⋮</span><span class="wa-op-name">滚动加载商品</span><button class="wa-op-delete">删除</button>';
-      const op2 = document.createElement('li');
-      op2.className = 'wa-op-item';
-      op2.innerHTML = '<span class="wa-op-handle">⋮⋮</span><span class="wa-op-name">提取列表数据</span><button class="wa-op-delete">删除</button>';
-      opList.appendChild(op1);
-      opList.appendChild(op2);
       sectionOps.appendChild(opList);
       const btnLink = document.createElement('button');
       btnLink.className = 'wa-btn-link';
-      btnLink.textContent = '＋ 添加 Operation';
+      btnLink.textContent = '保存 Operation 配置';
       sectionOps.appendChild(btnLink);
+      // 将元素挂到 sectionOps 上，方便渲染函数/保存逻辑访问
+      sectionOps.__waMsgInput = msgInput;
+      sectionOps.__waOpStatus = opStatus;
 
       const sectionPalette = document.createElement('div');
       sectionPalette.className = 'wa-section';
@@ -540,12 +703,6 @@ export function buildOverlayScript({ sessionId, profileId = 'default' }) {
       sectionPalette.appendChild(st3);
       const pal = document.createElement('div');
       pal.className = 'wa-op-palette';
-      ['批量选中商品','打开详情页','滚动到底部'].forEach(t => {
-        const chip = document.createElement('span');
-        chip.className = 'wa-op-chip';
-        chip.textContent = t;
-        pal.appendChild(chip);
-      });
       sectionPalette.appendChild(pal);
 
       const sectionChildren = document.createElement('div');
@@ -579,7 +736,8 @@ export function buildOverlayScript({ sessionId, profileId = 'default' }) {
       const tabContentDom = document.createElement('div');
       tabContentDom.className = 'wa-tab-content dom-mode';
       tabContentDom.style.display = 'none';
-      tabContentDom.innerHTML = '<p>DOM 选取模式（占位 UI）：</p><ol><li>将鼠标移动到页面元素上（未来会显示蓝色高亮）。</li><li>点击元素以选择为子容器。</li><li>在这里填写容器信息并保存。</li></ol>';
+      tabContentDom.innerHTML =
+        '<p>DOM 选取模式（占位 UI）：</p><ol><li>将鼠标移动到页面元素上（未来会显示蓝色高亮）。</li><li>点击元素以选择为子容器。</li><li>在这里填写容器信息并保存。</li></ol>';
 
       body.appendChild(tabContentTree);
       body.appendChild(tabContentDom);
@@ -587,7 +745,7 @@ export function buildOverlayScript({ sessionId, profileId = 'default' }) {
       const footer = document.createElement('div');
       footer.className = 'wa-footer';
       const fLeft = document.createElement('span');
-      fLeft.textContent = '状态：浏览模式（UI 雏形，无真实数据绑定）';
+      fLeft.textContent = '状态：容器编辑 v2（支持 Operation & 事件 key 配置）';
       const fRight = document.createElement('span');
       fRight.textContent = 'F2 切换 DOM 选取 · ESC 取消';
       footer.appendChild(fLeft);
