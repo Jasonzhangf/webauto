@@ -772,6 +772,42 @@
         let pal = null;
         let sectionOps = null;
 
+        function upsertBootstrapContainer(def, parentId) {
+          if (!def || !def.id) return null;
+          const payload = window.__webautoBootstrapContainers || { url: window.location.href, containers: {} };
+          payload.url = payload.url || window.location.href;
+          payload.containers = payload.containers || {};
+          payload.containers[def.id] = def;
+          if (parentId && payload.containers[parentId]) {
+            const children = payload.containers[parentId].children || [];
+            if (!children.includes(def.id)) {
+              children.push(def.id);
+              payload.containers[parentId].children = children;
+            }
+          }
+          window.__webautoBootstrapContainers = payload;
+          return payload;
+        }
+
+        function focusTreeNode(containerId) {
+          if (!containerId) return;
+          setTimeout(() => {
+            const node = tree.querySelector(`[data-container-id=\"${containerId}\"]`);
+            const container =
+              containersById[containerId] ||
+              (window.__webautoBootstrapContainers &&
+                window.__webautoBootstrapContainers.containers &&
+                window.__webautoBootstrapContainers.containers[containerId]);
+            if (!node || !container) return;
+            try {
+              selectContainer(node.classList.contains('wa-tree-root-container') ? node : node, containerId, container);
+              node.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+            } catch (error) {
+              console.warn('[overlay] focusTreeNode failed', error);
+            }
+          }, 120);
+        }
+
         function getContainerSelectors(container) {
           if (!container) return [];
           if (container.selector) {
@@ -2269,15 +2305,17 @@
           });
         } catch { }
 
-        // 放弃编辑：清空当前表单
-        btnCancel.addEventListener('click', () => {
+        const resetDomForm = () => {
           lastPicked = null;
           fieldIdValue.value = '';
           fieldTitleValue.value = '';
           fieldSelectorValue.value = '';
-          fieldParentIdValue.value = ''; // Clear parent ID
+          fieldParentIdValue.value = '';
           domInfo.textContent = '当前未选中任何元素（切换到 DOM 选取标签或按 F2 开启）';
-        });
+        };
+
+        // 放弃编辑：清空当前表单
+        btnCancel.addEventListener('click', resetDomForm);
 
         // 保存容器：通过 BrowserService API 写入 container-library.json
         btnSave.addEventListener('click', () => {
@@ -2285,6 +2323,7 @@
             const id = fieldIdValue.value.trim();
             const title = fieldTitleValue.value.trim();
             const selector = fieldSelectorValue.value.trim();
+            const parentId = fieldParentIdValue.value.trim() || null;
             if (!id || !selector) {
               domInfo.textContent = '保存失败：容器 ID 和 selector 不能为空';
               return;
@@ -2294,7 +2333,7 @@
               title,
               selector,
               url: window.location.href,
-              parentId: fieldParentIdValue.value.trim() || null, // Use the input value
+              parentId,
               actions: null
             };
             apiFetch('/api/v1/containers', {
@@ -2304,6 +2343,31 @@
             }).then(r => r.json()).then(j => {
               if (j && j.success) {
                 domInfo.textContent = '已保存容器: ' + id;
+                let bootstrapPayload = null;
+                const site = j.data && j.data.site;
+                if (site && site.containers) {
+                  bootstrapPayload = {
+                    url: window.location.href,
+                    containers: site.containers
+                  };
+                  window.__webautoBootstrapContainers = bootstrapPayload;
+                } else {
+                  bootstrapPayload = upsertBootstrapContainer({
+                    id,
+                    name: title || id,
+                    type: 'content',
+                    selectors: [{ variant: 'primary', score: 1, css: selector }],
+                    children: [],
+                    capabilities: [],
+                    operations: []
+                  }, parentId);
+                }
+                if (bootstrapPayload) {
+                  tryRenderBootstrap(bootstrapPayload, 'save');
+                }
+                tabTree.click();
+                focusTreeNode(id);
+                resetDomForm();
               } else {
                 domInfo.textContent = '保存失败: ' + (j && j.error ? j.error : '未知错误');
               }

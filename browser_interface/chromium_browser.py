@@ -261,8 +261,9 @@ class ChromiumBrowserWrapper(AbstractBrowser):
                     try {
                         window.__webautoBootstrapContainers = payload;
                         const emit = () => window.dispatchEvent(new CustomEvent('webauto:containers', { detail: payload }));
-                        window.setTimeout(emit, 500);
-                        window.setTimeout(emit, 1500);
+                        emit();
+                        window.setTimeout(emit, 600);
+                        window.setTimeout(emit, 1600);
                     } catch (error) {
                         console.warn('[overlay] bootstrap dispatch failed', error);
                     }
