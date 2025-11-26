@@ -772,6 +772,8 @@
         let pal = null;
         let sectionOps = null;
 
+        const getRootIds = () => Object.keys(containersById || {}).filter(id => !id.includes('.'));
+
         function upsertBootstrapContainer(def, parentId) {
           if (!def || !def.id) return null;
           const payload = window.__webautoBootstrapContainers || { url: window.location.href, containers: {} };
@@ -859,6 +861,7 @@
           if (!node || !container) return;
           clearTreeSelection();
           node.classList.add('wa-tree-node-selected');
+          currentContainerId = id;
           const selectors = getContainerSelectors(container);
           const selector = selectors[0] || '';
           highlightContainer(selector);
@@ -1509,6 +1512,7 @@
                 const cont = matchedData.matchedContainers[first];
                 if (domNode && cont) {
                   selectContainer(domNode.parentElement, first, cont);
+                  currentContainerId = first;
                 }
               }
             } catch {}
@@ -2296,10 +2300,18 @@
               }
               fieldSelectorValue.value = sel;
 
-              // Auto-detect root
-              const hasRoot = document.querySelector('.wa-tree-root-container');
-              if (!hasRoot && !fieldParentIdValue.value) {
+              // Auto-detect parent/root
+              const rootIds = getRootIds();
+              const defaultParent = currentContainerId || rootIds[0] || '';
+              if (!fieldParentIdValue.value && defaultParent) {
+                fieldParentIdValue.value = defaultParent;
+              }
+              if (!rootIds.length && !defaultParent) {
                 fieldParentIdValue.placeholder = '当前无根容器，此容器将作为根容器';
+              } else if (!fieldParentIdValue.value && defaultParent) {
+                fieldParentIdValue.placeholder = `父容器 ID（默认 ${defaultParent}）`;
+              } else {
+                fieldParentIdValue.placeholder = '父容器 ID';
               }
             } catch { }
           });
@@ -2311,6 +2323,7 @@
           fieldTitleValue.value = '';
           fieldSelectorValue.value = '';
           fieldParentIdValue.value = '';
+          fieldParentIdValue.placeholder = '留空则为根容器';
           domInfo.textContent = '当前未选中任何元素（切换到 DOM 选取标签或按 F2 开启）';
         };
 
@@ -2365,6 +2378,7 @@
                 if (bootstrapPayload) {
                   tryRenderBootstrap(bootstrapPayload, 'save');
                 }
+                currentContainerId = id;
                 tabTree.click();
                 focusTreeNode(id);
                 resetDomForm();
