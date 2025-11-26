@@ -2313,6 +2313,14 @@
               } else {
                 fieldParentIdValue.placeholder = '父容器 ID';
               }
+
+              // Disable DOM picking once we have a target so overlay can be interacted with
+              try {
+                if (window.__webautoDomSelect && window.__webautoDomSelect.isActive && typeof window.__webautoDomSelect.disable === 'function') {
+                  window.__webautoDomSelect.disable();
+                  domInfo.textContent += '（DOM 选取已暂停，按 F2 可再次开启）';
+                }
+              } catch { }
             } catch { }
           });
         } catch { }
