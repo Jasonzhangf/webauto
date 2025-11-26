@@ -1239,6 +1239,7 @@
 
           const rootElement = document.createElement('div');
           rootElement.className = 'wa-tree-root-container';
+          rootElement.dataset.containerId = id;
 
           // 根容器头部（可折叠）
           const header = document.createElement('div');
@@ -1456,11 +1457,10 @@
 
             const sortedRoots = rootScores
               .sort((a, b) => b.score - a.score)
-              .map(item => item.id);
+              .map(item => item.id)
+              .filter(id => !id.includes('.'));
 
             const expandedStates = {};
-
-            // 渲染根容器（只要根本身命中，或其子孙有命中，都应显示）
             sortedRoots.forEach(rootId => {
               renderRootContainer(rootId, matchedData.matchedContainers, 0, expandedStates);
             });
@@ -1469,7 +1469,7 @@
             try {
               if (sortedRoots.length) {
                 const first = sortedRoots[0];
-                const domNode = tree.querySelector('.wa-tree-root-container .wa-tree-root-header');
+                const domNode = tree.querySelector(`.wa-tree-root-container[data-container-id=\"${first}\"] .wa-tree-root-header`);
                 const cont = matchedData.matchedContainers[first];
                 if (domNode && cont) {
                   selectContainer(domNode.parentElement, first, cont);

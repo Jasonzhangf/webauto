@@ -10,7 +10,8 @@
     "weibo_login.login_button"
   ],
   "selectors": [
-    { "css": "#app", "variant": "primary", "score": 1.0 }
+    { "css": "div.LoginCard", "variant": "primary", "score": 1.0 },
+    { "css": "div[class*='LoginCard_']", "variant": "backup", "score": 0.8 }
   ],
   "metadata": {
     "required_descendants_any": [
