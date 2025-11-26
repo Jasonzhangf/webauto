@@ -791,6 +791,18 @@
           return payload;
         }
 
+        function ensureLocalContainer(containerId, title, selector, parentId) {
+          return upsertBootstrapContainer({
+            id: containerId,
+            name: title || containerId,
+            type: 'content',
+            selectors: [{ variant: 'primary', score: 1, css: selector }],
+            children: [],
+            capabilities: [],
+            operations: []
+          }, parentId);
+        }
+
         function focusTreeNode(containerId) {
           if (!containerId) return;
           setTimeout(() => {
@@ -2357,6 +2369,13 @@
               parentId,
               actions: null
             };
+            const finalizeSave = () => {
+              currentContainerId = id;
+              tabTree.click();
+              focusTreeNode(id);
+              resetDomForm();
+            };
+
             apiFetch('/api/v1/containers', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
@@ -2373,28 +2392,22 @@
                   };
                   window.__webautoBootstrapContainers = bootstrapPayload;
                 } else {
-                  bootstrapPayload = upsertBootstrapContainer({
-                    id,
-                    name: title || id,
-                    type: 'content',
-                    selectors: [{ variant: 'primary', score: 1, css: selector }],
-                    children: [],
-                    capabilities: [],
-                    operations: []
-                  }, parentId);
+                  bootstrapPayload = ensureLocalContainer(id, title, selector, parentId);
                 }
                 if (bootstrapPayload) {
                   tryRenderBootstrap(bootstrapPayload, 'save');
                 }
-                currentContainerId = id;
-                tabTree.click();
-                focusTreeNode(id);
-                resetDomForm();
+                finalizeSave();
               } else {
                 domInfo.textContent = '保存失败: ' + (j && j.error ? j.error : '未知错误');
               }
             }).catch(e => {
-              domInfo.textContent = '保存失败: ' + (e && e.message ? e.message : String(e));
+              domInfo.textContent = '保存失败（服务不可用，已在当前页面暂存）: ' + (e && e.message ? e.message : String(e));
+              const bootstrapPayload = ensureLocalContainer(id, title, selector, parentId);
+              if (bootstrapPayload) {
+                tryRenderBootstrap(bootstrapPayload, 'save-fallback');
+                finalizeSave();
+              }
             });
           } catch (e) {
             domInfo.textContent = '保存失败: ' + (e && e.message ? e.message : String(e));
