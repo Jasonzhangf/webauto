@@ -636,6 +636,7 @@
   padding: 10px;
   font-size: 12px;
   color: #d1d5db;
+  overflow-y: auto;
 }
 .wa-resize-handle {
   position: absolute;
@@ -2190,6 +2191,8 @@
         const tabContentDom = document.createElement('div');
         tabContentDom.className = 'wa-tab-content dom-mode';
         tabContentDom.style.display = 'none';
+        tabContentDom.style.flex = '1';
+        tabContentDom.style.overflowY = 'auto';
         tabContentDom.innerHTML = '<p>DOM 选取模式：</p><ol><li>切换到本标签或按 F2 开启 DOM 选取模式。</li><li>鼠标移动到页面元素上会高亮该元素。</li><li>点击元素以选中，下面会显示对应 Selector。</li><li>ESC 或切回容器树退出 DOM 选取模式。</li></ol>';
 
         const domInfo = document.createElement('div');

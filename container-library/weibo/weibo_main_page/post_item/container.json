@@ -8,6 +8,37 @@
   ],
   "capabilities": ["click", "highlight", "find-child"],
   "operations": [
-    { "type": "highlight", "config": { "style": "2px solid #5c6bc0", "duration": 800 } }
+    { "type": "highlight", "config": { "style": "2px solid #5c6bc0", "duration": 800 } },
+    {
+      "type": "extract",
+      "config": {
+        "target": "links",
+        "selector": "a",
+        "include_text": true,
+        "max_items": 20,
+        "whitelist": {
+          "prefix": ["https://", "http://"]
+        },
+        "blacklist": {
+          "contains": ["javascript:", "help.weibo.com", "passport.weibo.com"],
+          "suffix": ["#"]
+        }
+      }
+    },
+    {
+      "type": "extract",
+      "config": {
+        "target": "images",
+        "selector": "img",
+        "attribute": "src",
+        "max_items": 12,
+        "whitelist": {
+          "contains": ["sinaimg.cn", "wx", "tvax"]
+        },
+        "blacklist": {
+          "contains": ["vipimg", "icon", "avatar"]
+        }
+      }
+    }
   ]
 }

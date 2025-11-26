@@ -19,6 +19,7 @@ class OperationType(Enum):
     CUSTOM = "custom"
     HIGHLIGHT = "highlight"
     INPUT = "input"
+    EXTRACT = "extract"
 
 
 class SelectorVariant(Enum):

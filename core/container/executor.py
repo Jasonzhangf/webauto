@@ -180,6 +180,8 @@ class ContainerOperationExecutor:
                 result_data = await self._execute_highlight(operation, element_handle, context)
             elif operation.type == OperationType.CUSTOM:
                 result_data = await self._execute_custom(operation, element_handle, context)
+            elif operation.type == OperationType.EXTRACT:
+                result_data = await self._execute_extract(operation, element_handle, context)
             else:
                 raise ValueError(f"不支持的操作类型: {operation.type}")
 
@@ -395,6 +397,165 @@ class ContainerOperationExecutor:
             'style': style,
             'duration': duration
         }
+
+    async def _execute_extract(
+        self,
+        operation: OperationConfig,
+        element: Any,
+        context: ContainerExecutionContext
+    ) -> Dict[str, Any]:
+        """执行内容提取操作"""
+        config = operation.config or {}
+        target = (config.get('target') or 'links').lower()
+        selector = config.get('selector')
+        attribute = config.get('attribute')
+        include_text = config.get('include_text', True)
+        include_html = config.get('include_html', False)
+        text_strategy = config.get('text_strategy', 'innerText')
+        whitelist = config.get('whitelist') or {}
+        blacklist = config.get('blacklist') or {}
+
+        try:
+            max_items = int(config.get('max_items', 50))
+        except Exception:
+            max_items = 50
+        max_items = max(1, min(max_items, 500))
+
+        payload = {
+            "target": target,
+            "selector": selector,
+            "attribute": attribute,
+            "maxItems": max_items,
+            "includeText": include_text,
+            "includeHtml": include_html,
+            "textStrategy": text_strategy,
+            "whitelist": whitelist,
+            "blacklist": blacklist,
+        }
+
+        script = """
+        (root, cfg) => {
+          const toArray = (value) => Array.isArray(value) ? value.filter(Boolean) : (value ? [value] : []);
+          const normalizeFilters = (filters) => ({
+            contains: toArray(filters && filters.contains).map(v => String(v).toLowerCase()),
+            prefix: toArray(filters && filters.prefix).map(v => String(v).toLowerCase()),
+            suffix: toArray(filters && filters.suffix).map(v => String(v).toLowerCase())
+          });
+          const whitelist = normalizeFilters(cfg.whitelist || {});
+          const blacklist = normalizeFilters(cfg.blacklist || {});
+          const hasRules = (rules) => Boolean(rules.contains.length || rules.prefix.length || rules.suffix.length);
+          const matchesRules = (value, rules) => {
+            if (!value) return false;
+            const lower = value.toLowerCase();
+            if (rules.contains.some(rule => lower.includes(rule))) return true;
+            if (rules.prefix.some(rule => lower.startsWith(rule))) return true;
+            if (rules.suffix.some(rule => lower.endsWith(rule))) return true;
+            return false;
+          };
+          const passesFilters = (value) => {
+            if (!value) return false;
+            const trimmed = String(value).trim();
+            if (!trimmed) return false;
+            const lower = trimmed.toLowerCase();
+            if (hasRules(blacklist) && matchesRules(lower, blacklist)) return false;
+            if (hasRules(whitelist) && !matchesRules(lower, whitelist)) return false;
+            return true;
+          };
+
+          const target = (cfg.target || 'links').toLowerCase();
+          const defaultSelectors = { links: 'a', images: 'img' };
+          const selector = cfg.selector || defaultSelectors[target] || null;
+          let candidates = [];
+          if (selector) {
+            try {
+              candidates = Array.from(root.querySelectorAll(selector));
+            } catch (err) {
+              candidates = [];
+            }
+          } else {
+            candidates = [root];
+          }
+
+          const maxItems = Math.max(1, Math.min(cfg.maxItems || 50, 500));
+          const includeText = cfg.includeText !== false;
+          const includeHtml = !!cfg.includeHtml;
+          const attribute = cfg.attribute || (target === 'images' ? 'src' : target === 'links' ? 'href' : null);
+          const textProp = cfg.textStrategy === 'textContent' ? 'textContent' : 'innerText';
+
+          const buildPath = (el) => {
+            const chain = [];
+            let current = el;
+            while (current && current.nodeType === 1 && chain.length < 5) {
+              let part = current.tagName.toLowerCase();
+              if (current.id) {
+                part += '#' + current.id;
+              } else if (current.classList && current.classList.length) {
+                part += '.' + current.classList[0];
+              }
+              chain.push(part);
+              current = current.parentElement;
+            }
+            return chain.reverse().join(' > ');
+          };
+
+          const items = [];
+          for (const el of candidates) {
+            if (items.length >= maxItems) break;
+            if (target === 'links') {
+              const href = attribute ? (el.getAttribute(attribute) || '') : (el.href || '');
+              if (!href) continue;
+              if (!passesFilters(href)) continue;
+              const entry = {
+                type: 'link',
+                href,
+                text: includeText ? ((el[textProp] || '').trim()) : '',
+                title: el.title || '',
+                path: buildPath(el)
+              };
+              if (includeHtml) entry.html = el.outerHTML;
+              items.push(entry);
+            } else if (target === 'images') {
+              const src = attribute ? (el.getAttribute(attribute) || '') : (el.currentSrc || el.src || '');
+              if (!src) continue;
+              if ((hasRules(whitelist) || hasRules(blacklist)) && !passesFilters(src)) continue;
+              const entry = {
+                type: 'image',
+                src,
+                alt: el.alt || '',
+                path: buildPath(el)
+              };
+              if (includeHtml) entry.html = el.outerHTML;
+              items.push(entry);
+            } else {
+              const textValue = (el[textProp] || '').trim();
+              if (!textValue) continue;
+              const entry = {
+                type: 'text',
+                text: textValue,
+                path: buildPath(el)
+              };
+              if (includeHtml) entry.html = el.outerHTML;
+              items.push(entry);
+            }
+          }
+
+          return {
+            target,
+            items,
+            totalCandidates: candidates.length,
+            appliedFilters: {
+              whitelist: hasRules(whitelist),
+              blacklist: hasRules(blacklist)
+            }
+          };
+        }
+        """
+
+        try:
+            result = await element.evaluate(script, payload)
+            return result
+        except Exception as exc:
+            raise RuntimeError(f"提取操作执行失败: {exc}")
 
     async def _execute_custom(
         self,
