@@ -1,9 +1,66 @@
 // Playwright点击节点：使用真正的Playwright elementHandle.click() API实现点击导航
 import BaseNode from './BaseNode.js';
-import { readFileSync, existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { readFileSync, existsSync, readdirSync } from 'node:fs';
+import { join, relative } from 'node:path';
+
+function _listContainerJsonFiles(rootDir) {
+  const out = [];
+  try {
+    const items = readdirSync(rootDir, { withFileTypes: true });
+    for (const it of items) {
+      const abs = join(rootDir, it.name);
+      if (it.isDirectory()) out.push(..._listContainerJsonFiles(abs));
+      else if (it.isFile() && it.name === 'container.json') out.push(abs);
+    }
+  } catch {}
+  return out;
+}
+
+function _selectPrimarySelector(v2) {
+  try {
+    const arr = Array.isArray(v2.selectors) ? v2.selectors : [];
+    if (!arr.length) return null;
+    const pri = arr.find(s => String(s.variant||'primary').toLowerCase()==='primary') || arr[0];
+    if (pri && pri.css) return String(pri.css);
+    if (pri && pri.id) return `#${pri.id}`;
+    const classes = pri?.classes || [];
+    if (!classes.length) return null;
+    return '.' + classes.join('.');
+  } catch { return null; }
+}
 
 function resolveContainerSelectorFromLibrary(pageUrl, containerName, websiteHint = null) {
+  // 优先目录索引
+  try {
+    const idxPath = join(process.cwd(), 'container-library.index.json');
+    if (existsSync(idxPath)) {
+      const idx = JSON.parse(readFileSync(idxPath, 'utf8')) || {};
+      const url = new URL(pageUrl); const host = url.hostname || '';
+      let siteKey = websiteHint && idx[websiteHint] ? websiteHint : null;
+      if (!siteKey) {
+        for (const [k, info] of Object.entries(idx)) {
+          if (info?.website && host.endsWith(String(info.website))) { siteKey = k; break; }
+        }
+        if (!siteKey) siteKey = Object.keys(idx)[0];
+      }
+      if (siteKey) {
+        const siteRoot = join(process.cwd(), idx[siteKey].path || '');
+        const files = _listContainerJsonFiles(siteRoot);
+        for (const file of files) {
+          try {
+            const raw = JSON.parse(readFileSync(file, 'utf8')) || {};
+            const rel = relative(siteRoot, file).replace(/\\/g,'/');
+            const cid = rel.replace(/\/container\.json$/, '').split('/').join('.');
+            if (cid === containerName || (raw.id && raw.id === containerName)) {
+              return raw.selector || _selectPrimarySelector(raw) || null;
+            }
+          } catch {}
+        }
+      }
+    }
+  } catch {}
+
+  // 兼容 monolith
   try {
     const libPath = join(process.cwd(), 'container-library.json');
     if (!existsSync(libPath)) return null;
@@ -11,17 +68,13 @@ function resolveContainerSelectorFromLibrary(pageUrl, containerName, websiteHint
     let siteKey = null;
     const url = new URL(pageUrl);
     const host = url.hostname || '';
-    if (websiteHint && lib[websiteHint]) {
-      siteKey = websiteHint;
-    } else {
+    if (websiteHint && lib[websiteHint]) siteKey = websiteHint;
+    else {
       for (const key of Object.keys(lib)) {
         const site = lib[key];
         if (site?.website && host.includes(site.website)) { siteKey = key; break; }
       }
-      if (!siteKey) {
-        const keys = Object.keys(lib);
-        if (keys.length === 1) siteKey = keys[0];
-      }
+      if (!siteKey) { const keys = Object.keys(lib); if (keys.length === 1) siteKey = keys[0]; }
     }
     if (!siteKey) return null;
     const entry = lib[siteKey]?.containers?.[containerName];

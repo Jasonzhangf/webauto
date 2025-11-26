@@ -1,0 +1,56 @@
+{
+  "id": "search_form",
+  "name": "搜索表单",
+  "type": "search",
+  "capabilities": ["input", "click", "highlight", "find-child"],
+  "selectors": [
+    {
+      "classes": ["search-form", "search-box"],
+      "variant": "primary",
+      "score": 1.0
+    }
+  ],
+  "operations": [
+    {
+      "type": "highlight",
+      "config": {
+        "style": "2px solid #4285f4",
+        "duration": 2000
+      }
+    },
+    {
+      "type": "find-child",
+      "config": {
+        "container_id": "search_input"
+      }
+    },
+    {
+      "type": "type",
+      "config": {
+        "container_id": "search_input",
+        "text": "",
+        "human_typing": true,
+        "delay_between_chars": 0.1
+      }
+    },
+    {
+      "type": "find-child",
+      "config": {
+        "container_id": "search_button"
+      }
+    },
+    {
+      "type": "click",
+      "config": {
+        "container_id": "search_button",
+        "wait_before": 0.2
+      }
+    }
+  ],
+  "page_patterns": [],
+  "metadata": {
+    "example": "通用搜索表单",
+    "auto_complete": true,
+    "suggestions": true
+  }
+}

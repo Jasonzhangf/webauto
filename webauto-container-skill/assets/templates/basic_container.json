@@ -1,0 +1,19 @@
+{
+  "name": "BasicContainer",
+  "type": "generic",
+  "capabilities": ["highlight", "find-child"],
+  "operations": [
+    {
+      "type": "find-child",
+      "config": {}
+    },
+    {
+      "type": "highlight",
+      "config": {
+        "style": "2px solid #ff0000",
+        "duration": 3000
+      }
+    }
+  ],
+  "page_patterns": []
+}

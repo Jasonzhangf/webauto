@@ -1,0 +1,13 @@
+{
+  "id": "weibo_profile_page.post_item",
+  "name": "个人主页-单条内容",
+  "type": "content",
+  "selectors": [
+    { "css": "article[class*='Feed_wrap_']", "variant": "primary", "score": 1.0 },
+    { "css": "div[class*='Feed_body_']", "variant": "backup", "score": 0.8 }
+  ],
+  "capabilities": ["click", "highlight"],
+  "operations": [
+    { "type": "highlight", "config": { "style": "2px solid #f39c12", "duration": 800 } }
+  ]
+}

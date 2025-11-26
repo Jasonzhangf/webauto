@@ -1,0 +1,129 @@
+{
+  "logged_out": {
+    "登录按钮": {
+      "selector": "button:has-text('登录')",
+      "count": 1,
+      "exists": true
+    },
+    "登录卡片": {
+      "selector": ".LoginCard_wrap_18dK4",
+      "count": 1,
+      "exists": true
+    },
+    "访客模式": {
+      "selector": "[class*='visitor']",
+      "count": 0,
+      "exists": false
+    },
+    "新登录页": {
+      "selector": "[class*='newlogin']",
+      "count": 0,
+      "exists": false
+    },
+    "用户头像": {
+      "selector": "[class*='avatar']:not([class*='default'])",
+      "count": 25,
+      "exists": true
+    },
+    "用户菜单": {
+      "selector": "[class*='UserInfo'], [class*='user-info']",
+      "count": 0,
+      "exists": false
+    },
+    "发布按钮": {
+      "selector": "button:has-text('发布'), [class*='publish']",
+      "count": 0,
+      "exists": false
+    },
+    "侧边栏用户": {
+      "selector": "#__sidebar [class*='user']",
+      "count": 0,
+      "exists": false
+    },
+    "主体内容": {
+      "selector": ".woo-mod-main",
+      "count": 0,
+      "exists": false
+    },
+    "侧边栏": {
+      "selector": "#__sidebar",
+      "count": 1,
+      "exists": true
+    },
+    "顶部导航": {
+      "selector": "[class*='Nav'], [class*='nav']",
+      "count": 52,
+      "exists": true
+    },
+    "_url": "https://weibo.com/newlogin?tabtype=weibo&gid=102803&openLoginLayer=0&url=https%3A%2F%2Fweibo.com%2F",
+    "_is_visitor_url": true
+  },
+  "logged_in": {
+    "登录按钮": {
+      "selector": "button:has-text('登录')",
+      "count": 1,
+      "exists": true
+    },
+    "登录卡片": {
+      "selector": ".LoginCard_wrap_18dK4",
+      "count": 1,
+      "exists": true
+    },
+    "访客模式": {
+      "selector": "[class*='visitor']",
+      "count": 0,
+      "exists": false
+    },
+    "新登录页": {
+      "selector": "[class*='newlogin']",
+      "count": 0,
+      "exists": false
+    },
+    "用户头像": {
+      "selector": "[class*='avatar']:not([class*='default'])",
+      "count": 24,
+      "exists": true
+    },
+    "用户菜单": {
+      "selector": "[class*='UserInfo'], [class*='user-info']",
+      "count": 0,
+      "exists": false
+    },
+    "发布按钮": {
+      "selector": "button:has-text('发布'), [class*='publish']",
+      "count": 0,
+      "exists": false
+    },
+    "侧边栏用户": {
+      "selector": "#__sidebar [class*='user']",
+      "count": 0,
+      "exists": false
+    },
+    "主体内容": {
+      "selector": ".woo-mod-main",
+      "count": 0,
+      "exists": false
+    },
+    "侧边栏": {
+      "selector": "#__sidebar",
+      "count": 1,
+      "exists": true
+    },
+    "顶部导航": {
+      "selector": "[class*='Nav'], [class*='nav']",
+      "count": 52,
+      "exists": true
+    },
+    "_url": "https://weibo.com/newlogin?tabtype=weibo&gid=102803&openLoginLayer=0&url=https%3A%2F%2Fweibo.com%2F",
+    "_is_visitor_url": true
+  },
+  "exclusive_logout": [],
+  "exclusive_login": [],
+  "common": [
+    "侧边栏",
+    "用户头像",
+    "登录卡片",
+    "登录按钮",
+    "顶部导航"
+  ]
+}

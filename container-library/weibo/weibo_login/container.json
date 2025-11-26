@@ -1,0 +1,52 @@
+{
+  "id": "weibo_login",
+  "name": "微博登录容器",
+  "type": "login",
+  "capabilities": ["input", "click", "highlight", "find-child"],
+  "page_patterns": ["weibo.com", "passport.weibo.com"],
+  "children": [
+    "weibo_login.username_input",
+    "weibo_login.password_input",
+    "weibo_login.login_button"
+  ],
+  "selectors": [
+    { "css": "#app", "variant": "primary", "score": 1.0 }
+  ],
+  "metadata": {
+    "required_descendants_any": [
+      ".LoginCard",
+      "div[class*='LoginCard']",
+      "div[class*='login']",
+      "input[type='password']",
+      "form[action*='passport']"
+    ],
+    "excluded_descendants_any": []
+  },
+  "operations": [
+    {
+      "type": "highlight",
+      "config": {
+        "style": "2px solid #e6162d",
+        "duration": 3000
+      }
+    },
+    {
+      "type": "find-child",
+      "config": {
+        "container_id": "weibo_login.username_input"
+      }
+    },
+    {
+      "type": "find-child",
+      "config": {
+        "container_id": "weibo_login.password_input"
+      }
+    },
+    {
+      "type": "find-child",
+      "config": {
+        "container_id": "weibo_login.login_button"
+      }
+    }
+  ]
+}

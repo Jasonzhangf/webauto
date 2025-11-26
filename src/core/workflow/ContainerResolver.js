@@ -1,8 +1,74 @@
 // Simple container resolver for workflow nodes (JS)
-import { readFileSync, existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { readFileSync, existsSync, readdirSync, statSync } from 'node:fs';
+import { join, relative } from 'node:path';
+
+function _listContainerJsonFiles(rootDir) {
+  const out = [];
+  try {
+    const items = readdirSync(rootDir, { withFileTypes: true });
+    for (const it of items) {
+      const abs = join(rootDir, it.name);
+      if (it.isDirectory()) {
+        out.push(..._listContainerJsonFiles(abs));
+      } else if (it.isFile() && it.name === 'container.json') {
+        out.push(abs);
+      }
+    }
+  } catch {}
+  return out;
+}
+
+function _selectPrimarySelector(v2) {
+  try {
+    const arr = Array.isArray(v2.selectors) ? v2.selectors : [];
+    if (!arr.length) return null;
+    // 优先 primary
+    const pri = arr.find(s => String(s.variant||'primary').toLowerCase() === 'primary') || arr[0];
+    if (pri && pri.css) return String(pri.css);
+    if (pri && pri.id) return `#${pri.id}`;
+    const classes = pri?.classes || [];
+    if (!Array.isArray(classes) || !classes.length) return null;
+    return '.' + classes.join('.');
+  } catch { return null; }
+}
+
+function _loadFromIndex() {
+  const idxPath = join(process.cwd(), 'container-library.index.json');
+  if (!existsSync(idxPath)) return null;
+  try {
+    const idx = JSON.parse(readFileSync(idxPath, 'utf8')) || {};
+    const registry = {};
+    for (const [siteKey, info] of Object.entries(idx)) {
+      const sitePath = join(process.cwd(), info.path || '');
+      const website = info.website || '';
+      const files = _listContainerJsonFiles(sitePath);
+      const containers = {};
+      for (const file of files) {
+        try {
+          const raw = JSON.parse(readFileSync(file, 'utf8')) || {};
+          // 计算 containerId = 相对路径（去掉末尾 /container.json），路径分隔转点
+          const rel = relative(sitePath, file).replace(/\\/g, '/');
+          const containerId = rel.replace(/\/container\.json$/,'').split('/').join('.');
+          const selector = raw.selector || _selectPrimarySelector(raw) || '';
+          containers[containerId] = {
+            selector,
+            description: raw.name || containerId,
+            children: Array.isArray(raw.children) ? raw.children : [],
+            actions: raw.actions || undefined,
+          };
+        } catch {}
+      }
+      registry[siteKey] = { website, containers };
+    }
+    return registry;
+  } catch { return null; }
+}
 
 export function loadLibrary() {
+  // 优先从目录索引加载（统一库）
+  const v2 = _loadFromIndex();
+  if (v2) return v2;
+  // 兼容旧 monolith
   const p = join(process.cwd(), 'container-library.json');
   if (!existsSync(p)) return null;
   try { return JSON.parse(readFileSync(p, 'utf8')); } catch { return null; }

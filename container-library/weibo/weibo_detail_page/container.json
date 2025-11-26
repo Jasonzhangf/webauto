@@ -1,0 +1,18 @@
+{
+  "id": "weibo_detail_page",
+  "name": "微博详情页（独立内容页）",
+  "type": "page",
+  "page_patterns": ["weibo.com/*/*"],
+  "selectors": [
+    { "css": "div[class*='Detail_detail_']", "variant": "primary", "score": 1.0 }
+  ],
+  "children": [
+    "weibo_detail_page.post_content",
+    "weibo_detail_page.comment_list"
+  ],
+  "capabilities": ["scroll", "highlight", "find-child"],
+  "operations": [
+    { "type": "highlight", "config": { "style": "2px solid #8e44ad", "duration": 1000 } },
+    { "type": "find-child", "config": { "container_id": "weibo_detail_page.post_content" } }
+  ]
+}

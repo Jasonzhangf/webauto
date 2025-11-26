@@ -1,0 +1,27 @@
+{
+  "id": "weibo_login.login_button",
+  "name": "登录按钮",
+  "type": "button",
+  "capabilities": ["click", "highlight"],
+  "selectors": [
+    { "css": "#app button[type='submit']", "variant": "primary", "score": 1.0 },
+    { "css": "#app .woo-button-main[role='button'], #app .login_btn, #app .W_btn_a", "variant": "backup", "score": 0.8 }
+  ],
+  "operations": [
+    {
+      "type": "highlight",
+      "config": {
+        "style": "2px solid #34a853",
+        "duration": 2000
+      }
+    },
+    {
+      "type": "click",
+      "config": {
+        "scroll_to_view": true,
+        "wait_before": 0.5,
+        "wait_after": 2.0
+      }
+    }
+  ]
+}

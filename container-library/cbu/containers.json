@@ -1,0 +1,351 @@
+{
+  "website": "1688.com",
+  "containers": {
+    "banner_carousel": {
+      "selector": ".banner-carousel",
+      "description": "轮播横幅"
+    },
+    "home": {
+      "selector": "body, .home, #page",
+      "children": [
+        "home.search"
+      ],
+      "description": "1688 首页根容器"
+    },
+    "home.search": {
+      "selector": ".ali-search-box",
+      "children": [
+        "home.search.searchbox",
+        "home.search.searchbutton"
+      ],
+      "description": "首页搜索区域"
+    },
+    "home.search.searchbutton": {
+      "selector": ".ali-search-box .input-button, .ali-search-box .input-button .input-button-text, .input-button .input-button-text",
+      "actions": {
+        "click": true
+      },
+      "description": "首页搜索按钮（位于 .ali-search-box 内）"
+    },
+    "home.search.searchbox": {
+      "selector": ".ali-search-keywords input#alisearch-input, .ali-search-keywords input[name='keywords'], #alisearch-input, input[name='keywords'], input#alisearch-keywords",
+      "actions": {
+        "type": true,
+        "fill": true
+      },
+      "description": "首页搜索输入框（位于 .ali-search-box 内）"
+    },
+    "popup.promotion": {
+      "selector": ".promotion-popup, [class*='promo'], [class*='activity-dialog']",
+      "children": [
+        "popup.close"
+      ],
+      "description": "促销/活动弹窗"
+    },
+    "popup.guide": {
+      "selector": ".guide-popup, [class*='guide-dialog'], [class*='newbie']",
+      "children": [
+        "popup.close"
+      ],
+      "description": "新手引导弹窗"
+    },
+    "popup.close": {
+      "selector": ".close, .popup-close, [class*='dialog-close'], [class*='modal-close'], button[aria-label*='关闭'], .baxia-dialog-close",
+      "actions": {
+        "click": true
+      },
+      "description": "弹窗/对话框关闭按钮（自动点击）"
+    },
+    "popup.feedback": {
+      "selector": ".feedback-dialog, [class*='satisfaction'], [id*='feedback']",
+      "children": [
+        "popup.close"
+      ],
+      "description": "反馈/满意度弹窗"
+    },
+    "user_avatar": {
+      "selector": ".userAvatarLogo",
+      "description": "用户头像"
+    },
+    "site_footer": {
+      "selector": ".site-footer",
+      "description": "页脚"
+    },
+    "chat.messageItem": {
+      "selector": ".message-item, [class*='message-row'], [class*='chat-message']",
+      "description": "单条消息项（用于判断消息发送状态）"
+    },
+    "chat.closeTab": {
+      "selector": "button[aria-label*='关闭'], .close-btn, [class*='close-button']",
+      "actions": {
+        "click": true
+      },
+      "description": "关闭聊天窗口/Tab 按钮"
+    },
+    "chat.root": {
+      "selector": ".ww",
+      "children": [
+        "chat.inputBox",
+        "chat.sendButton"
+      ],
+      "description": "聊天页根容器（air.1688.com / im.1688.com）"
+    },
+    "chat.sendButton": {
+      "selector": ".btn-container, .send-btn, button",
+      "actions": {
+        "click": true
+      },
+      "description": "聊天发送按钮"
+    },
+    "chat.messageHistory": {
+      "selector": ".message-list, .chat-history, [class*='message-container']",
+      "description": "聊天历史记录容器（用于检查是否已发送过消息）"
+    },
+    "chat.inputBox": {
+      "selector": ".editBox [contenteditable=true], .editBox pre.edit, .editBox",
+      "actions": {
+        "type": true,
+        "fill": true
+      },
+      "description": "聊天输入区域（支持 type/fill）"
+    },
+    "recommend_card": {
+      "selector": ".offer-item",
+      "description": "推荐卡片"
+    },
+    "user_area": {
+      "selector": ".user-info",
+      "description": "用户区域",
+      "children": [
+        "user_avatar",
+        "user_name",
+        "ww_link"
+      ]
+    },
+    "quick_entries": {
+      "selector": ".quick-entry",
+      "description": "快捷入口"
+    },
+    "header_root": {
+      "selector": ".header",
+      "description": "页头",
+      "children": [
+        "logo_link",
+        "top_shortcuts"
+      ]
+    },
+    "nav_category_list": {
+      "selector": ".nav-category",
+      "description": "导航分类列表"
+    },
+    "main_nav": {
+      "selector": ".site-nav",
+      "description": "主导航",
+      "children": [
+        "nav_category_list"
+      ]
+    },
+    "search.listContainer": {
+      "selector": ".space-common-offerlist",
+      "children": [
+        "search.item"
+      ],
+      "description": "搜索结果列表容器（优先space-common-offerlist）"
+    },
+    "search.item": {
+      "selector": ".search-offer-item",
+      "children": [
+        "search.item.wangwangLink",
+        "search.item.title",
+        "search.item.price",
+        "search.item.img"
+      ],
+      "description": "单个结果卡片容器（包含标题、价格、图片、旺旺）"
+    },
+    "search.item.sentMarker": {
+      "selector": "[data-sent='true'], .sent-marker, [class*='contacted']",
+      "description": "已联系标记（用于去重已发送消息的卖家）"
+    },
+    "search.item.offerUrl": {
+      "selector": "a[href*='.1688.com/']",
+      "description": "商品/店铺链接"
+    },
+    "search.item.shopId": {
+      "selector": "[data-shop-id], [data-seller-id], [data-company-id]",
+      "description": "店铺/卖家 ID 标识（用于去重）"
+    },
+    "search.item.title": {
+      "selector": "h4 a, [class*=title] a, a[title]",
+      "description": "标题链接"
+    },
+    "search.item.img": {
+      "selector": "img",
+      "description": "商品图片"
+    },
+    "search.item.price": {
+      "selector": "[class*=price], [data-price]",
+      "description": "价格区域"
+    },
+    "search.item.shopLink": {
+      "selector": "a[href*='company.1688.com'], a[href*='page/index.htm']",
+      "description": "公司主页链接"
+    },
+    "search.item.wangwangLink": {
+      "selector": "span.J_WangWang a.ww-link, a.ww-link[href*='air.1688.com'], a.ww-link[href*='im.1688.com']",
+      "actions": {
+        "click": true
+      },
+      "description": "旺旺聊天链接（绑定点击操作）"
+    },
+    "search.item.wangwangSpan": {
+      "selector": "span.J_WangWang, span[class*=WangWang]",
+      "description": "旺旺容器Span"
+    },
+    "search.root": {
+      "selector": ".search-ui2024, .search-i18nUi",
+      "children": [
+        "search.listContainer"
+      ],
+      "description": "搜索页根容器（新UI类名search-ui2024/i18nUi）"
+    },
+    "home_root": {
+      "selector": ".home",
+      "description": "主页根",
+      "children": [
+        "header_root",
+        "search_area",
+        "main_nav",
+        "banner_carousel",
+        "quick_entries",
+        "recommend_sections",
+        "user_area",
+        "site_footer"
+      ]
+    },
+    "ww_link": {
+      "selector": ".ww-link",
+      "description": "旺旺链接"
+    },
+    "workflow.search_to_chat": {
+      "selector": "body",
+      "description": "搜索到聊天完整流程根容器",
+      "workflow": {
+        "steps": [
+          {
+            "action": "fill",
+            "container": "home.search.searchbox",
+            "value": "{{search_keyword}}"
+          },
+          {
+            "action": "click",
+            "container": "home.search.searchbutton"
+          },
+          {
+            "action": "wait",
+            "selector": "search.listContainer",
+            "timeout": 5000
+          },
+          {
+            "action": "forEach",
+            "container": "search.item",
+            "onEach": [
+              {
+                "action": "checkNotSent",
+                "container": "search.item.sentMarker"
+              },
+              {
+                "action": "click",
+                "container": "search.item.wangwangLink"
+              },
+              {
+                "action": "wait",
+                "selector": "chat.root",
+                "timeout": 5000
+              },
+              {
+                "action": "dismissPopups",
+                "containers": [
+                  "popup.close"
+                ]
+              },
+              {
+                "action": "fill",
+                "container": "chat.inputBox",
+                "value": "你好"
+              },
+              {
+                "action": "click",
+                "container": "chat.sendButton"
+              },
+              {
+                "action": "wait",
+                "duration": 2000
+              },
+              {
+                "action": "click",
+                "container": "chat.closeTab"
+              },
+              {
+                "action": "markAsSent",
+                "container": "search.item.shopId"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "user_name": {
+      "selector": ".member-nickname",
+      "description": "用户昵称"
+    },
+    "recommend_sections": {
+      "selector": ".recommend-section",
+      "description": "推荐区块",
+      "children": [
+        "recommend_card"
+      ]
+    },
+    "search_input": {
+      "selector": ".search-input",
+      "description": "搜索输入框"
+    },
+    "hot_suggestions": {
+      "selector": ".hot-words",
+      "description": "热词推荐"
+    },
+    "search_area": {
+      "selector": ".search-box",
+      "description": "搜索区域",
+      "children": [
+        "search_input",
+        "search_button",
+        "hot_suggestions"
+      ]
+    },
+    "1688.home.search": {
+      "selector": ".ali-search-box",
+      "description": "首页搜索区"
+    },
+    "1688.home.avatar": {
+      "selector": ".userAvatarLogo",
+      "description": "头像区（登录成功锚点）"
+    },
+    "1688.home.root": {
+      "selector": ".home",
+      "description": "1688主页-根容器",
+      "children": [
+        "1688.home.header",
+        "1688.home.avatar",
+        "1688.home.search"
+      ]
+    },
+    "1688.home.header": {
+      "selector": ".header",
+      "description": "顶部导航区"
+    },
+    "search_button": {
+      "selector": ".search-btn",
+      "description": "搜索按钮"
+    }
+  }
+}

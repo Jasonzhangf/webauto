@@ -1,0 +1,22 @@
+{
+  "name": "InputContainer",
+  "type": "input",
+  "capabilities": ["input", "highlight", "find-child"],
+  "operations": [
+    {
+      "type": "highlight",
+      "config": {
+        "style": "2px solid #0000ff",
+        "duration": 2000
+      }
+    },
+    {
+      "type": "type",
+      "config": {
+        "clear_first": false,
+        "human_typing": true
+      }
+    }
+  ],
+  "page_patterns": []
+}

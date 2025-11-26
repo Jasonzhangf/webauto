@@ -1,0 +1,35 @@
+{
+  "id": "weibo_main_page",
+  "name": "微博主页面（已登录）",
+  "type": "page",
+  "capabilities": ["scroll", "highlight", "find-child"],
+  "page_patterns": ["weibo.com", "!*login*", "!*passport*"],
+  "children": [
+    "weibo_main_page.weibo_feed"
+  ],
+  "selectors": [
+    { "css": "div[class*='Home_wrap_']", "variant": "primary", "score": 1.0 }
+  ],
+  "operations": [
+    {
+      "type": "highlight",
+      "config": {
+        "style": "2px solid #fbbc05",
+        "duration": 1500
+      }
+    },
+    {
+      "type": "find-child",
+      "config": {
+        "container_id": "weibo_main_page.weibo_feed"
+      }
+    },
+    {
+      "type": "scroll",
+      "config": {
+        "direction": "down",
+        "distance": 500
+      }
+    }
+  ]
+}

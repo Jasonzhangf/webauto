@@ -1,0 +1,17 @@
+{
+  "id": "weibo_profile_page",
+  "name": "微博个人主页",
+  "type": "page",
+  "page_patterns": ["weibo.com/u/", "weibo.com/n/"],
+  "selectors": [
+    { "css": "div.container", "variant": "primary", "score": 1.0 }
+  ],
+  "children": [
+    "weibo_profile_page.feed_list",
+    "weibo_profile_page.post_item"
+  ],
+  "capabilities": ["scroll", "highlight", "find-child"],
+  "operations": [
+    { "type": "highlight", "config": { "style": "2px solid #f39c12", "duration": 1000 } }
+  ]
+}

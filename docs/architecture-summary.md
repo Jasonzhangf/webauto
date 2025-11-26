@@ -21,6 +21,10 @@
 - **EVENT_DRIVEN_SYSTEM_DOCUMENTATION.md** - 事件驱动容器系统架构文档
 - **EVENT_DRIVEN_USAGE_GUIDE.md** - 事件驱动系统使用指南
 
+### 4. 浏览器CLI控制系统文档 🆕
+- **CLI_BROWSER_CONTROL_GUIDE.md** - 浏览器命令行控制工具完整指南
+- **DEVTOOLS_INTEGRATION_GUIDE.md** - DevTools集成与远程调试指南
+
 ## 🏗️ 架构概览
 
 ### 三层架构设计
@@ -121,6 +125,34 @@
 - **Week 10**: 任务编排系统完成
 - **Week 13**: 微博自动化完成
 - **Week 16**: 生产就绪版本
+
+## 🆕 浏览器CLI控制系统架构 🆕
+
+### 整体设计
+- **目标**: 提供完整的命令行浏览器控制能力
+- **架构**: CLI工具 → REST API → BrowserService → 浏览器实例
+- **特性**: 支持页面导航、DOM操作、脚本执行、截图、会话管理
+
+### 核心组件
+1. **CLI工具** (`utils/browser_cli.py`) - 命令行接口
+2. **API扩展** (`services/browser_api.py`) - RESTful API端点
+3. **控制器** (`services/browser_service.py`) - 页面操作实现
+4. **DevTools集成** (`browser_interface/chromium_browser.py`) - 远程调试支持
+
+### 技术特性
+- **多浏览器支持**: Chromium、Camoufox
+- **远程调试**: Chrome DevTools Protocol (端口9222)
+- **会话管理**: 多会话并行控制
+- **DOM操作**: CSS选择器查询和元素分析
+- **脚本执行**: 任意JavaScript执行
+- **截图能力**: 完整页面截图保存
+- **Cookie管理**: 完整的Cookie持久化
+
+### 使用场景
+1. **快速调试**: 通过命令行快速检查页面状态
+2. **数据抓取**: 脚本化数据提取和处理
+3. **自动化测试**: 页面功能验证和回归测试
+4. **开发辅助**: 实时DOM分析和样式调试
 
 ## 🎯 下一步行动
 

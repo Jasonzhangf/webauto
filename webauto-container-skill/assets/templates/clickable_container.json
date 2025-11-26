@@ -1,0 +1,23 @@
+{
+  "name": "ClickableContainer",
+  "type": "clickable",
+  "capabilities": ["click", "highlight", "find-child"],
+  "operations": [
+    {
+      "type": "highlight",
+      "config": {
+        "style": "2px solid #00ff00",
+        "duration": 2000
+      }
+    },
+    {
+      "type": "click",
+      "config": {
+        "scroll_to_view": true,
+        "wait_before": 0.1,
+        "wait_after": 0.3
+      }
+    }
+  ],
+  "page_patterns": []
+}

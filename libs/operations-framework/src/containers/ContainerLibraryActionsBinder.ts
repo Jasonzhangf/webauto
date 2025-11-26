@@ -56,13 +56,103 @@ let cachedLibrary: ParsedLibrary | null = null;
 let cachedMtime = 0;
 
 function getLibraryPath(customPath?: string): string {
-  if (customPath) {
-    return customPath;
-  }
+  if (customPath) return customPath;
   return path.resolve(process.cwd(), 'container-library.json');
 }
 
+function listContainerJsonFiles(rootDir: string): string[] {
+  const out: string[] = [];
+  try {
+    const items = fs.readdirSync(rootDir, { withFileTypes: true });
+    for (const it of items) {
+      const abs = path.join(rootDir, it.name);
+      if (it.isDirectory()) out.push(...listContainerJsonFiles(abs));
+      else if (it.isFile() && it.name === 'container.json') out.push(abs);
+    }
+  } catch {}
+  return out;
+}
+
+function selectPrimarySelector(v2: any): string | null {
+  try {
+    const arr = Array.isArray(v2.selectors) ? v2.selectors : [];
+    if (!arr.length) return null;
+    const pri = arr.find((s:any)=> String(s.variant||'primary').toLowerCase()==='primary') || arr[0];
+    if (pri && pri.css) return String(pri.css);
+    if (pri && pri.id) return `#${pri.id}`;
+    const classes = pri?.classes || [];
+    if (!Array.isArray(classes) || !classes.length) return null;
+    return '.' + classes.join('.');
+  } catch { return null; }
+}
+
+function buildRegistryFromIndex(): Record<string, RawSiteDef> | null {
+  const idxPath = path.resolve(process.cwd(), 'container-library.index.json');
+  if (!fs.existsSync(idxPath)) return null;
+  try {
+    const idx = JSON.parse(fs.readFileSync(idxPath, 'utf8')) || {};
+    const registry: Record<string, RawSiteDef> = {};
+    for (const [siteKey, info] of Object.entries(idx as any)) {
+      const siteRoot = path.resolve(process.cwd(), (info as any).path || '');
+      const website = (info as any).website || '';
+      const files = listContainerJsonFiles(siteRoot);
+      const containers: Record<string, RawContainerDef> = {};
+      for (const file of files) {
+        try {
+          const raw = JSON.parse(fs.readFileSync(file, 'utf8')) || {};
+          const rel = path.relative(siteRoot, file).replace(/\\/g,'/');
+          const cid = rel.replace(/\/container\.json$/,'').split('/').join('.');
+          const selector = raw.selector || selectPrimarySelector(raw) || '';
+          containers[cid] = {
+            selector,
+            description: raw.name || cid,
+            children: Array.isArray(raw.children) ? raw.children : [],
+            actions: raw.actions || undefined,
+            eventKey: (raw as any).eventKey,
+          };
+        } catch {}
+      }
+      registry[siteKey] = { website, containers };
+    }
+    return registry;
+  } catch { return null; }
+}
+
 function loadAndParseLibrary(libraryPath?: string): ParsedLibrary {
+  // 优先目录索引
+  const idxRegistry = buildRegistryFromIndex();
+  let statMtime = 0;
+  if (idxRegistry) {
+    const byId = new Map<string, ContainerActionsConfig>();
+    for (const [siteKey, siteDef] of Object.entries(idxRegistry)) {
+      const website = (siteDef.website || '').toString();
+      const containers = siteDef.containers || {};
+      const parents: Record<string, string | null> = {};
+      for (const [containerId, def] of Object.entries(containers)) {
+        if (!parents[containerId]) parents[containerId] = null;
+        const children = def.children || [];
+        for (const childId of children) if (!parents[childId]) parents[childId] = containerId;
+      }
+      for (const [containerId, def] of Object.entries(containers)) {
+        if (!def || typeof def !== 'object') continue;
+        if (!def.actions) continue; // 仅绑定声明了 actions 的容器
+        byId.set(containerId, {
+          id: containerId,
+          selector: def.selector,
+          description: def.description,
+          website,
+          actions: def.actions,
+          parentId: parents[containerId] ?? null,
+          eventKey: (def as any).eventKey
+        });
+      }
+    }
+    cachedLibrary = { byId };
+    cachedMtime = statMtime;
+    return cachedLibrary;
+  }
+
+  // 回退到 monolith
   const filePath = getLibraryPath(libraryPath);
 
   try {

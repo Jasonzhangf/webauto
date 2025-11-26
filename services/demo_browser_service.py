@@ -36,7 +36,7 @@ class BrowserServiceDemo:
         
         return result
     
-    def create_session(self, profile_config: Dict[str, Any] = None) -> str:
+    def create_session(self, profile_config: Dict[str, Any] = None, auto_restore: bool = True) -> str:
         """创建浏览器会话"""
         print("\n🔑 创建浏览器会话...")
         

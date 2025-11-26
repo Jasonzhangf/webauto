@@ -14,6 +14,7 @@ from .api import (
   stealth_mode,
 )
 from .camoufox_browser import CamoufoxBrowserWrapper
+from .chromium_browser import ChromiumBrowserWrapper
 from .errors import SecurityError
 from .page_wrapper import CamoufoxPageWrapper
 
@@ -29,5 +30,6 @@ __all__ = [
   "stealth_mode",
   "SecurityError",
   "CamoufoxBrowserWrapper",
+  "ChromiumBrowserWrapper",
   "CamoufoxPageWrapper",
 ]

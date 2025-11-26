@@ -1,0 +1,13 @@
+{
+  "id": "weibo_detail_page.post_content",
+  "name": "详情页-内容容器",
+  "type": "content",
+  "selectors": [
+    { "css": "article[class*='Detail_feed_']", "variant": "primary", "score": 1.0 },
+    { "css": "article[class*='Feed_wrap_']", "variant": "backup", "score": 0.7 }
+  ],
+  "capabilities": ["scroll", "click", "highlight"],
+  "operations": [
+    { "type": "highlight", "config": { "style": "2px solid #8e44ad", "duration": 800 } }
+  ]
+}

@@ -1,0 +1,75 @@
+{
+  "cookies": [
+    {
+      "name": "visitor",
+      "value": "anonymous",
+      "domain": "httpbin.org",
+      "path": "/",
+      "expires": -1,
+      "httpOnly": false,
+      "secure": false,
+      "sameSite": "Lax"
+    },
+    {
+      "name": "csrf",
+      "value": "ghi",
+      "domain": "httpbin.org",
+      "path": "/",
+      "expires": -1,
+      "httpOnly": false,
+      "secure": false,
+      "sameSite": "Lax"
+    },
+    {
+      "name": "auth_step",
+      "value": "2",
+      "domain": "httpbin.org",
+      "path": "/",
+      "expires": -1,
+      "httpOnly": false,
+      "secure": false,
+      "sameSite": "Lax"
+    },
+    {
+      "name": "session_id",
+      "value": "final_abc123",
+      "domain": "httpbin.org",
+      "path": "/",
+      "expires": -1,
+      "httpOnly": false,
+      "secure": false,
+      "sameSite": "Lax"
+    },
+    {
+      "name": "user_id",
+      "value": "12345",
+      "domain": "httpbin.org",
+      "path": "/",
+      "expires": -1,
+      "httpOnly": false,
+      "secure": false,
+      "sameSite": "Lax"
+    },
+    {
+      "name": "username",
+      "value": "testuser",
+      "domain": "httpbin.org",
+      "path": "/",
+      "expires": -1,
+      "httpOnly": false,
+      "secure": false,
+      "sameSite": "Lax"
+    },
+    {
+      "name": "logged_in",
+      "value": "true",
+      "domain": "httpbin.org",
+      "path": "/",
+      "expires": -1,
+      "httpOnly": false,
+      "secure": false,
+      "sameSite": "Lax"
+    }
+  ],
+  "origins": []
+}

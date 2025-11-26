@@ -1,0 +1,26 @@
+{
+  "id": "weibo_login.password_input",
+  "name": "密码输入框",
+  "type": "input",
+  "capabilities": ["input", "highlight"],
+  "selectors": [
+    { "css": "#app input[type='password']", "variant": "primary", "score": 1.0 },
+    { "css": "#app input[name='password']", "variant": "backup", "score": 0.8 }
+  ],
+  "operations": [
+    {
+      "type": "highlight",
+      "config": {
+        "style": "2px solid #ea4335",
+        "duration": 2000
+      }
+    },
+    {
+      "type": "type",
+      "config": {
+        "clear_first": true,
+        "human_typing": true
+      }
+    }
+  ]
+}

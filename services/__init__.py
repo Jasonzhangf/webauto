@@ -15,12 +15,12 @@ from .browser_service_interface import (
     AntiDetectionLevel
 )
 
-# 服务实现
-from .browser_service import (
-    BrowserService,
-    BrowserController,
-    BrowserServiceError
-)
+# 服务实现（注释掉以避免循环依赖）
+# from .browser_service import (
+#     BrowserService,
+#     BrowserController,
+#     BrowserServiceError
+# )
 
 # 指纹管理
 from .fingerprint_manager import (

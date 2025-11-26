@@ -1,0 +1,13 @@
+{
+  "id": "weibo_detail_page.comment_list",
+  "name": "详情页-评论列表",
+  "type": "list",
+  "selectors": [
+    { "css": "div[class*='Detail_box_']", "variant": "primary", "score": 1.0 },
+    { "css": "div[class*='RepostCommentList_']", "variant": "backup", "score": 0.7 }
+  ],
+  "capabilities": ["scroll", "highlight"],
+  "operations": [
+    { "type": "highlight", "config": { "style": "2px solid #8e44ad", "duration": 800 } }
+  ]
+}

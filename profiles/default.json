@@ -1,0 +1,24 @@
+{
+  "profile_id": "b4816033-54be-46fd-94f4-807fe9c322f5",
+  "created_at": 1763956919.952863,
+  "base_config": {
+    "headless": false,
+    "remote_debugging": false,
+    "viewport": {
+      "width": 1440,
+      "height": 900
+    }
+  },
+  "fingerprint": {
+    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "screen": {
+      "width": 1920,
+      "height": 1080
+    },
+    "timezone": "Asia/Shanghai",
+    "language": "zh-CN,zh;q=0.9,en;q=0.8",
+    "webgl": true,
+    "plugins": false,
+    "cookies_enabled": true
+  }
+}

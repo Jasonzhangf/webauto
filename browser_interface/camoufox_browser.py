@@ -30,16 +30,24 @@ class CamoufoxBrowserWrapper(AbstractBrowser):
     self._browser = None
     self._playwright = None
     self._context = None
-    self._cookie_dir = self.config.get("cookie_dir", "./cookies")
+    # 统一cookie存储路径到 ~/.webauto/cookies
+    home = os.path.expanduser("~")
+    self._cookie_dir = self.config.get("cookie_dir", os.path.join(home, ".webauto", "cookies"))
     self._auto_session: bool = bool(self.config.get("auto_session", False))
     self._session_name: str = self.config.get("session_name", "default")
     self._kill_previous: bool = bool(self.config.get("kill_previous", True))
-    self._auto_save_interval: Optional[float] = self.config.get("auto_save_interval", 5.0)
+    self._auto_save_interval: Optional[float] = self.config.get("auto_save_interval", 30.0)
     self._auto_save_running: bool = False
     self._auto_save_thread: Optional[threading.Thread] = None
-    self._last_state_hash: Optional[str] = None
     self._fingerprint_profile: str = self.config.get("fingerprint_profile", "fixed")
     self._profile_id: str = self.config.get("profile_id", "1688-main-v1")
+    # 防止重复保存的时间戳
+    self._last_save_time: float = 0
+    self._save_lock = threading.Lock()
+    # 延迟保存相关
+    self._pending_save_timer = None
+    self._last_cookie_state = None
+    self._cookie_change_count = 0
 
   # --- Browser/context lifecycle -------------------------------------------------
 
@@ -184,6 +192,9 @@ class CamoufoxBrowserWrapper(AbstractBrowser):
     except Exception:
       pass
 
+    # 只在明确启用auto_session时才启动自动保存
+    # 避免不必要的cookie保存导致的状态污染
+    # 但要确保在session恢复后才启动自动保存，防止立即保存刚恢复的session
     if self._auto_session and self._auto_save_interval and self._auto_save_interval > 0:
       self._start_auto_save_thread(self._context)
 
@@ -191,34 +202,104 @@ class CamoufoxBrowserWrapper(AbstractBrowser):
 
   # --- Auto save ---------------------------------------------------------------
 
-  def _save_session_if_changed(self) -> None:
+  def _schedule_delayed_save(self) -> None:
+    """调度延迟保存，等待cookie稳定"""
+    print(f"[COOKIE DEBUG] 调度延迟保存，当前时间: {time.time()}")
+    # 取消之前的延迟保存定时器
+    if self._pending_save_timer:
+      print(f"[COOKIE DEBUG] 取消之前的延迟保存定时器")
+      self._pending_save_timer.cancel()
+      self._pending_save_timer = None
+
+    # 创建新的延迟保存定时器（5秒延迟）
+    def delayed_save():
+      print(f"[COOKIE DEBUG] 执行延迟保存")
+      try:
+        self._save_session_if_changed(force_save=True)
+      finally:
+        self._pending_save_timer = None
+
+    self._pending_save_timer = threading.Timer(5.0, delayed_save)
+    self._pending_save_timer.daemon = True
+    self._pending_save_timer.start()
+
+  def _save_session_if_changed(self, force_save: bool = False) -> None:
+    # 使用锁防止并发保存冲突
+    if not self._save_lock.acquire(blocking=False):
+      return
+
     try:
       if self._context is None:
+        print('[COOKIE DEBUG] 跳过保存：context 不存在')
         return
+
+      # 限制保存频率，避免频繁磁盘写入
+      current_time = time.time()
+      if not force_save and current_time - self._last_save_time < 30:  # 30秒内最多保存一次
+        print(f"[COOKIE DEBUG] 跳过保存：距离上次保存仅 {current_time - self._last_save_time:.2f}s")
+        return
+
       storage_state = self._context.storage_state()
-      state_json = json.dumps(storage_state, sort_keys=True)
-      state_hash = hash(state_json)
-      if state_hash == self._last_state_hash:
-        return
-      self._last_state_hash = state_hash
-      os.makedirs(self._cookie_dir, exist_ok=True)
+      current_cookies = storage_state.get("cookies", [])
+
+      # 生成当前cookie状态的指纹
+      cookie_fingerprint = hash(json.dumps(sorted([
+        (c.get('name'), c.get('value'), c.get('domain'), c.get('path'))
+        for c in current_cookies
+      ], key=lambda x: (x[0], x[1], x[2], x[3]))))
+
+      # 检查cookie是否有变化
+      if not force_save and self._last_cookie_state == cookie_fingerprint:
+        print('[COOKIE DEBUG] 跳过保存：cookie 指纹未变化')
+        return  # cookie没有变化，不需要保存
+
+      # 检查是否有实质性变化（cookie数量或origin数量变化）
       session_file = os.path.join(self._cookie_dir, f"session_{self._session_name}.json")
-      with open(session_file, "w", encoding="utf-8") as f:
-        json.dump(storage_state, f, indent=2, ensure_ascii=False)
-    except Exception:
+      save_needed = True
+      if os.path.exists(session_file):
+        try:
+          with open(session_file, "r", encoding="utf-8") as f:
+            old_state = json.load(f)
+
+          old_cookies = len(old_state.get("cookies", []))
+          old_origins = len(old_state.get("origins", []))
+          new_cookies = len(current_cookies)
+          new_origins = len(storage_state.get("origins", []))
+
+          # 只有cookie或origin数量变化时才保存
+          if old_cookies == new_cookies and old_origins == new_origins:
+            print(f"[COOKIE DEBUG] 跳过保存：数量无变化 (cookies {old_cookies}->{new_cookies}, origins {old_origins}->{new_origins})")
+            save_needed = False
+        except Exception:
+          pass  # 读取失败时强制保存
+
+      if save_needed:
+        os.makedirs(self._cookie_dir, exist_ok=True)
+        with open(session_file, "w", encoding="utf-8") as f:
+          json.dump(storage_state, f, indent=2, ensure_ascii=False)
+        self._last_save_time = current_time
+        self._last_cookie_state = cookie_fingerprint
+        print(f"[COOKIE DEBUG] 保存session: {session_file}, cookies: {len(current_cookies)}, force_save: {force_save}")
+
+    except Exception as e:
+      print(f"[COOKIE ERROR] 保存session失败: {str(e)}")
       pass
+    finally:
+      self._save_lock.release()
 
   def _start_auto_save_thread(self, context) -> None:
     if self._auto_save_running:
       return
     self._auto_save_running = True
-    interval_ms = int((self._auto_save_interval or 5.0) * 1000)
+    interval_ms = int((self._auto_save_interval or 30.0) * 1000)
     binding_name = "__wa_save_state__"
 
     def _binding(_source) -> None:  # type: ignore[unused-argument]
       if not self._auto_save_running:
         return
-      self._save_session_if_changed()
+      # 触发延迟保存而不是立即保存
+      print(f"[COOKIE DEBUG] 接收到JS绑定保存请求")
+      self._schedule_delayed_save()
 
     try:
       context.expose_binding(binding_name, _binding)
@@ -230,15 +311,67 @@ class CamoufoxBrowserWrapper(AbstractBrowser):
     (function() {{
       try {{
         if (window.__waSaveStateTimer) return;
+
+        // 防止重复初始化标记
+        window.__waSaveStateInit = true;
+
+        // 添加调试日志
+        window.__waSaveStateLastUrl = window.location.href;
+        window.__waSaveStateLastCheck = Date.now();
+
         window.__waSaveStateTimer = setInterval(function() {{
           try {{
+            var now = Date.now();
+            var url = window.location.href;
+
+            // 检查页面是否仍在加载
+            if (document.readyState !== 'complete') {{
+              console.log('[COOKIE DEBUG] 页面未完全加载，跳过保存');
+              return; // 页面未完全加载，跳过保存
+            }}
+
+            // 检查是否有活动导航
+            if (url !== window.__waSaveStateLastUrl) {{
+              console.log('[COOKIE DEBUG] URL变化，跳过保存:', window.__waSaveStateLastUrl, '->', url);
+              window.__waSaveStateLastUrl = url;
+              window.__waSaveStateLastCheck = now;
+              return; // URL刚变化，等待稳定
+            }}
+
+            // 确保页面稳定至少5秒才触发保存
+            if (now - window.__waSaveStateLastCheck < 5000) {{
+              console.log('[COOKIE DEBUG] 页面未稳定足够时间，跳过保存');
+              return;
+            }}
+
+            // 只在页面稳定且非导航状态时检查保存
+            if (window.performance && window.performance.navigation) {{
+              if (window.performance.navigation.type !== 0) {{
+                console.log('[COOKIE DEBUG] 非正常加载导航，跳过保存');
+                return; // 不是正常加载，跳过保存
+              }}
+            }}
+
+            console.log('[COOKIE DEBUG] 触发保存检查');
             var fn = window['{binding_name}'];
             if (typeof fn === 'function') {{
               fn();
             }}
-          }} catch (e) {{}}
+
+            // 更新最后检查时间
+            window.__waSaveStateLastCheck = now;
+
+          }} catch (e) {{
+            console.log('[COOKIE DEBUG] 保存检查错误:', e);
+          }}
         }}, {interval_ms});
-      }} catch (e) {{}}
+
+        // 记录初始URL
+        window.__waSaveStateLastUrl = window.location.href;
+        console.log('[COOKIE DEBUG] 初始化自动保存检查器');
+      }} catch (e) {{
+        console.log('[COOKIE DEBUG] 初始化保存检查器错误:', e);
+      }}
     }})();
     """
     try:
@@ -338,23 +471,74 @@ class CamoufoxBrowserWrapper(AbstractBrowser):
       return {"success": False, "error": str(e)}
 
   def restore_session(self, session_name: str) -> Dict[str, Any]:
+    print(f"[COOKIE DEBUG] 开始恢复session: {session_name}")
     try:
       path = os.path.join(self._cookie_dir, f"session_{session_name}.json")
       if not os.path.exists(path):
         return {"success": False, "error": f"会话文件不存在: {path}"}
+
       with open(path, "r", encoding="utf-8") as f:
         state = json.load(f)
+
+      # 验证session文件数据完整性
+      cookies = state.get("cookies", [])
+      if not isinstance(cookies, list):
+        return {"success": False, "error": "Session文件格式错误：cookies不是数组"}
+
+      # 检查cookie是否过期
+      current_time = time.time()
+      valid_cookies = []
+      for cookie in cookies:
+        expires = cookie.get("expires")
+        if expires is None or expires == -1 or (isinstance(expires, (int, float)) and expires > current_time):
+          valid_cookies.append(cookie)
+
+      # 过滤掉过期cookie，避免登录状态异常
+      if len(valid_cookies) != len(cookies):
+        state["cookies"] = valid_cookies
+        print(f"[COOKIE DEBUG] 过滤过期cookie: {len(cookies)} -> {len(valid_cookies)}")
+
+      # 临时禁用自动保存，防止恢复过程中的循环保存
+      original_auto_save = self._auto_save_running
+      print(f"[COOKIE DEBUG] 原始自动保存状态: {original_auto_save}")
+      self._auto_save_running = False
+
+      # 关闭现有context
       if self._context:
+        print(f"[COOKIE DEBUG] 关闭现有context")
         self._context.close()
+
       self._ensure_browser()
+      print(f"[COOKIE DEBUG] 创建新context并加载storage state")
       self._context = self._browser.new_context(storage_state=state)
+
+      # 恢复自动保存状态（如果原本启用了）
+      if original_auto_save:
+        print(f"[COOKIE DEBUG] 恢复自动保存状态")
+        # 延迟重启自动保存，等待context稳定
+        def delayed_restart():
+          print(f"[COOKIE DEBUG] 延迟重启自动保存线程")
+          time.sleep(2.0)  # 等待2秒让context稳定
+          if self._context and not self._auto_save_running:
+            # 重置cookie状态以避免立即保存
+            self._last_cookie_state = None
+            self._last_save_time = time.time()
+            print(f"[COOKIE DEBUG] 重置cookie状态并启动自动保存线程")
+            self._start_auto_save_thread(self._context)
+
+        import threading
+        restart_thread = threading.Thread(target=delayed_restart, daemon=True)
+        restart_thread.start()
+
+      print(f"[COOKIE DEBUG] session恢复完成，加载了{len(valid_cookies)}个cookies")
       return {
         "success": True,
         "session": session_name,
-        "cookies_loaded": len(state.get("cookies", [])),
+        "cookies_loaded": len(valid_cookies),
         "origins_loaded": len(state.get("origins", [])),
       }
     except Exception as e:
+      print(f"[COOKIE ERROR] 恢复session失败: {str(e)}")
       return {"success": False, "error": str(e)}
 
   def get_storage_state(self) -> Dict[str, Any]:
@@ -362,6 +546,7 @@ class CamoufoxBrowserWrapper(AbstractBrowser):
     return context.storage_state()
 
   def close(self) -> None:
+    print(f"[COOKIE DEBUG] 开始关闭浏览器实例")
     try:
       self._auto_save_running = False
       if self._auto_save_thread and self._auto_save_thread.is_alive():
@@ -372,26 +557,36 @@ class CamoufoxBrowserWrapper(AbstractBrowser):
 
       if self._auto_session and self._context is not None:
         try:
-          state = self._context.storage_state()
-          os.makedirs(self._cookie_dir, exist_ok=True)
-          path = os.path.join(self._cookie_dir, f"session_{self._session_name}.json")
-          with open(path, "w", encoding="utf-8") as f:
-            json.dump(state, f, indent=2, ensure_ascii=False)
-        except Exception:
+          # 取消待处理的延迟保存
+          if self._pending_save_timer:
+            print(f"[COOKIE DEBUG] 关闭时取消待处理的延迟保存")
+            self._pending_save_timer.cancel()
+            self._pending_save_timer = None
+
+          # 强制保存最终状态
+          print(f"[COOKIE DEBUG] 关闭时强制保存最终状态")
+          self._save_session_if_changed(force_save=True)
+        except Exception as e:
+          print(f"[COOKIE ERROR] 关闭时保存状态失败: {str(e)}")
           pass
 
       if self._context:
+        print(f"[COOKIE DEBUG] 关闭context")
         self._context.close()
       if self._browser:
+        print(f"[COOKIE DEBUG] 关闭browser")
         self._browser.close()
       if self._playwright:
+        print(f"[COOKIE DEBUG] 停止playwright")
         self._playwright.stop()
-    except Exception:
+    except Exception as e:
+      print(f"[COOKIE ERROR] 关闭浏览器实例失败: {str(e)}")
       pass
     finally:
       self._browser = None
       self._playwright = None
       self._context = None
+      print(f"[COOKIE DEBUG] 浏览器实例关闭完成")
 
   def get_status(self) -> Dict[str, Any]:
     return {

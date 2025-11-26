@@ -1,0 +1,10 @@
+{
+  "cbu": {
+    "website": "1688.com",
+    "path": "container-library/cbu"
+  },
+  "weibo": {
+    "website": "weibo.com",
+    "path": "container-library/weibo"
+  }
+}

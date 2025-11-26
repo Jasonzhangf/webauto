@@ -128,6 +128,206 @@ import { startBrowserService } from './browser.js';
 await startBrowserService({ host: '0.0.0.0', port: 7704 });
 ```
 
+## CLI命令行工具
+
+### 概述
+
+WebAuto提供强大的CLI工具，支持通过命令行完全控制浏览器实例，包括页面导航、DOM操作、脚本执行、截图等功能。
+
+### 工具位置
+
+```bash
+utils/browser_cli.py  # 主CLI工具
+```
+
+### 核心功能
+
+#### 1. 服务管理
+```bash
+# 启动浏览器服务 (Chromium + DevTools支持)
+python utils/browser_cli.py start --type chromium
+
+# 启动无头模式
+python utils/browser_cli.py start --type chromium --headless
+
+# 启动Camoufox (指纹隐匿)
+python utils/browser_cli.py start --type camoufox
+```
+
+#### 2. 会话管理
+```bash
+# 创建默认会话
+python utils/browser_cli.py session --profile default
+
+# 创建指定配置会话
+python utils/browser_cli.py session --profile 1688-profile
+
+# 列出所有活跃会话
+python utils/browser_cli.py sessions
+
+# 关闭当前会话
+python utils/browser_cli.py close
+```
+
+#### 3. 页面操作
+```bash
+# 导航到URL
+python utils/browser_cli.py navigate https://www.1688.com
+
+# 获取页面信息
+python utils/browser_cli.py info
+
+# 执行JavaScript
+python utils/browser_cli.py script "document.title"
+
+# 页面截图
+python utils/browser_cli.py screenshot --filename homepage.png
+```
+
+#### 4. DOM检查和数据提取
+```bash
+# 检查所有DOM元素
+python utils/browser_cli.py dom
+
+# 使用CSS选择器检查特定元素
+python utils/browser_cli.py dom --selector ".content-title"
+
+# 检查表单元素
+python utils/browser_cli.py dom --selector "form input"
+
+# 获取Cookies
+python utils/browser_cli.py cookies
+```
+
+### 高级用法
+
+#### 完整工作流
+```bash
+# 1. 启动服务 (后台运行)
+python -m services.browser_api &
+
+# 2. 启动带调试的浏览器
+python utils/browser_cli.py start --type chromium
+
+# 3. 创建会话
+python utils/browser_cli.py session --profile 1688-crawler
+
+# 4. 导航到目标网站
+python utils/browser_cli.py navigate https://www.1688.com
+
+# 5. 检查页面加载状态
+python utils/browser_cli.py info
+
+# 6. 分析DOM结构
+python utils/browser_cli.py dom --selector ".product-list"
+
+# 7. 执行交互脚本
+python utils/browser_cli.py script "
+document.querySelectorAll('.product-item').forEach((item, index) => {
+  console.log(`商品${index + 1}: ${item.textContent.trim()}`);
+});
+"
+
+# 8. 截图保存结果
+python utils/browser_cli.py screenshot --filename 1688-products.png
+
+# 9. 关闭会话
+python utils/browser_cli.py close
+```
+
+#### DevTools集成
+```bash
+# 启动浏览器后，可通过Chrome DevTools连接
+# 访问: http://localhost:9222
+# 支持完整的Chrome DevTools调试功能
+```
+
+### API模式
+
+除了CLI命令，还可以直接使用REST API：
+
+```bash
+# 启动服务
+curl -X POST http://localhost:8888/api/v1/service/start \
+  -H "Content-Type: application/json" \
+  -d '{"browser_type": "chromium", "remote_debugging": true}'
+
+# 创建会话
+curl -X POST http://localhost:8888/api/v1/sessions \
+  -H "Content-Type: application/json" \
+  -d '{"profile": {"profile_id": "default"}}'
+
+# 导航页面
+curl -X POST http://localhost:8888/api/v1/sessions/{session_id}/actions \
+  -H "Content-Type: application/json" \
+  -d '{"type": "navigate", "url": "https://www.baidu.com"}'
+
+# DOM检查
+curl -X POST http://localhost:8888/api/v1/sessions/{session_id}/actions \
+  -H "Content-Type: application/json" \
+  -d '{"type": "inspect_dom", "selector": ".title"}'
+```
+
+### 配置选项
+
+```bash
+# 指定API服务地址
+python utils/browser_cli.py --api-base http://localhost:9999 <command>
+
+# 查看所有可用命令
+python utils/browser_cli.py --help
+
+# 查看特定命令帮助
+python utils/browser_cli.py navigate --help
+```
+
+### 实际应用场景
+
+#### 1. 网站数据抓取
+```bash
+# 启动和配置
+python utils/browser_cli.py start --type camoufox
+python utils/browser_cli.py session --profile web-crawler
+
+# 批量抓取
+for url in "https://site1.com" "https://site2.com"; do
+  python utils/browser_cli.py navigate $url
+  python utils/browser_cli.py script "
+    const data = Array.from(document.querySelectorAll('.item')).map(el => ({
+      title: el.querySelector('.title')?.textContent,
+      price: el.querySelector('.price')?.textContent
+    }));
+    console.log(JSON.stringify(data, null, 2));
+  "
+done
+```
+
+#### 2. 自动化测试
+```bash
+# 测试页面功能
+python utils/browser_cli.py navigate https://myapp.com/login
+python utils/browser_cli.py script "
+  const loginBtn = document.querySelector('#login-btn');
+  if (!loginBtn) {
+    throw new Error('登录按钮不存在');
+  }
+  console.log('✅ 登录按钮检测通过');
+"
+python utils/browser_cli.py screenshot --filename login-test.png
+```
+
+#### 3. 调试和问题排查
+```bash
+# 快速调试网站问题
+python utils/browser_cli.py navigate https://problem-site.com
+python utils/browser_cli.py script "
+  console.log('User Agent:', navigator.userAgent);
+  console.log('Cookies:', document.cookie);
+  console.log('Console Errors:', window.console.errors);
+"
+python utils/browser_cli.py dom --selector ".error"  # 检查错误元素
+```
+
 ## 配置参考
 
 ### 中文配置 (CHINESE_CONFIG)

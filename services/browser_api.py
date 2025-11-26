@@ -106,7 +106,8 @@ def create_session():
             )
         )
         
-        session_id = browser_service.create_session(profile)
+        auto_restore = bool((request.json or {}).get("options", {}).get("autoRestore", True))
+        session_id = browser_service.create_session(profile, auto_restore=auto_restore)
         
         return create_success_response({
             "session_id": session_id,
@@ -175,14 +176,81 @@ def close_session(session_id: str):
     """关闭浏览器会话"""
     try:
         result = browser_service.close_session(session_id)
-        
+
         if result["success"]:
             return create_success_response(result)
         else:
             return create_error_response(result.get("error", "关闭会话失败"))
-            
+
     except Exception as e:
         return create_error_response(f"关闭会话异常: {str(e)}")
+
+# 页面操作API
+@app.route('/api/v1/sessions/<session_id>/actions', methods=['POST'])
+def execute_page_action(session_id: str):
+    """执行页面操作"""
+    try:
+        action_data = request.json or {}
+        action_type = action_data.get('type')
+
+        controller = browser_service.get_controller(session_id)
+        if not controller:
+            return create_error_response("会话控制器不存在", 404)
+
+        result = {"success": False}
+
+        if action_type == "navigate":
+            url = action_data.get('url')
+            result = controller.navigate(url)
+        elif action_type == "execute_script":
+            script = action_data.get('script')
+            result = controller.execute_script(script)
+        elif action_type == "inspect_dom":
+            selector = action_data.get('selector')
+            result = controller.inspect_dom(selector)
+        elif action_type == "screenshot":
+            filename = action_data.get('filename', f'screenshot_{int(time.time())}.png')
+            result = controller.take_screenshot(filename)
+        else:
+            return create_error_response(f"不支持的操作类型: {action_type}")
+
+        if result.get("success"):
+            return create_success_response(result)
+        else:
+            return create_error_response(result.get("error", "操作失败"))
+
+    except Exception as e:
+        return create_error_response(f"执行页面操作异常: {str(e)}")
+
+@app.route('/api/v1/sessions/<session_id>/info', methods=['GET'])
+def get_page_info_api(session_id: str):
+    """获取页面信息"""
+    try:
+        controller = browser_service.get_controller(session_id)
+        if not controller:
+            return create_error_response("会话控制器不存在", 404)
+
+        result = controller.get_page_info()
+        if result.get("success"):
+            return create_success_response(result)
+        else:
+            return create_error_response(result.get("error", "获取页面信息失败"))
+
+    except Exception as e:
+        return create_error_response(f"获取页面信息异常: {str(e)}")
+
+@app.route('/api/v1/sessions/<session_id>/cookies', methods=['GET'])
+def get_cookies_api(session_id: str):
+    """获取Cookies"""
+    try:
+        result = browser_service.get_cookies(session_id)
+        if result.get("success"):
+            return create_success_response(result)
+        else:
+            return create_error_response(result.get("error", "获取Cookies失败"))
+
+    except Exception as e:
+        return create_error_response(f"获取Cookies异常: {str(e)}")
 
 # 容器管理 API（简化版本，为 DOM 选取创建容器提供后端支持）
 
@@ -263,6 +331,21 @@ def navigate(session_id: str):
             
     except Exception as e:
         return create_error_response(f"导航异常: {str(e)}")
+
+@app.route('/api/v1/sessions/<session_id>/restore', methods=['POST'])
+def restore_session_state(session_id: str):
+    """手动恢复指定会话的 Cookie/Storage 并可选重新导航"""
+    try:
+        data = request.json or {}
+        target_url = data.get('url')
+
+        result = browser_service.restore_session_state(session_id, target_url)
+        if result.get("success"):
+            return create_success_response(result)
+        else:
+            return create_error_response(result.get("error", "恢复失败"))
+    except Exception as e:
+        return create_error_response(f"恢复会话异常: {str(e)}")
 
 
 @app.route('/api/v1/sessions/<session_id>/click', methods=['POST'])

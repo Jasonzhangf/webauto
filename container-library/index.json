@@ -1,0 +1,16 @@
+{
+  "version": "1.0",
+  "updated": "2025-11-21",
+  "sites": {
+    "cbu": {
+      "website": "1688.com",
+      "container_file": "container-library/cbu/containers.json",
+      "description": "1688.com 容器定义"
+    },
+    "weibo": {
+      "website": "weibo.com",
+      "container_file": "container-library/weibo/containers.json",
+      "description": "weibo.com 容器定义"
+    }
+  }
+}

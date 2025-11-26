@@ -84,7 +84,7 @@ class AbstractBrowserService(ABC):
         pass
     
     @abstractmethod
-    def create_session(self, profile: Optional[BrowserProfile] = None) -> str:
+    def create_session(self, profile: Optional[BrowserProfile] = None, auto_restore: bool = True) -> str:
         """创建浏览器会话"""
         pass
     
@@ -190,4 +190,19 @@ class AbstractBrowserController(ABC):
     @abstractmethod
     def get_page_info(self) -> Dict[str, Any]:
         """获取页面信息"""
+        pass
+
+    @abstractmethod
+    def execute_script(self, script: str) -> Dict[str, Any]:
+        """执行JavaScript脚本"""
+        pass
+
+    @abstractmethod
+    def inspect_dom(self, selector: Optional[str] = None) -> Dict[str, Any]:
+        """检查DOM元素"""
+        pass
+
+    @abstractmethod
+    def take_screenshot(self, filename: str) -> Dict[str, Any]:
+        """页面截图并保存到文件"""
         pass

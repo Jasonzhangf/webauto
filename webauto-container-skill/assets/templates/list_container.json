@@ -1,0 +1,26 @@
+{
+  "name": "ListContainer",
+  "type": "scrollable",
+  "capabilities": ["scroll", "find-child", "highlight"],
+  "operations": [
+    {
+      "type": "find-child",
+      "config": {}
+    },
+    {
+      "type": "highlight",
+      "config": {
+        "style": "2px solid #ff00ff",
+        "duration": 1500
+      }
+    },
+    {
+      "type": "scroll",
+      "config": {
+        "direction": "down",
+        "distance": 500
+      }
+    }
+  ],
+  "page_patterns": []
+}

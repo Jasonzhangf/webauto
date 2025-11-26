@@ -16,6 +16,34 @@ const projectRoot = resolve(__dirname, '../../..');
 const HOST = process.env.BROWSER_SERVICE_HOST || '127.0.0.1';
 const PORT = Number(process.env.BROWSER_SERVICE_PORT || '8888');
 
+function shouldDelayRestore(_profileId) {
+  if (process.env.BROWSER_DELAYED_RESTORE) {
+    return process.env.BROWSER_DELAYED_RESTORE === '1';
+  }
+  return false; // 默认直接使用目标 profile 的 Cookie
+}
+
+function resolveInitialUrl(profileId) {
+  // CLI 优先：支持 --url 覆盖
+  const args = process.argv.slice(2);
+  const idx = args.indexOf('--url');
+  if (idx !== -1 && args[idx + 1]) {
+    return String(args[idx + 1]);
+  }
+
+  // 环境变量显式指定
+  if (process.env.BROWSER_INITIAL_URL) {
+    return process.env.BROWSER_INITIAL_URL;
+  }
+
+  // 默认：1688 主 profile 自动打开首页，方便手动登录
+  if (profileId === '1688-main-v1') {
+    return 'https://www.1688.com/';
+  }
+
+  return null;
+}
+
 function resolveProfileId() {
   const args = process.argv.slice(2);
   const idx = args.indexOf('--profile');
@@ -81,7 +109,7 @@ function startPythonService() {
   const child = spawn(pythonBin, [launcher, '--host', HOST, '--port', String(PORT)], {
     detached: true,
     stdio: 'ignore',
-    env: { ...process.env },
+    env: { ...process.env, PYTHONDONTWRITEBYTECODE: '1' },
   });
 
   child.unref();
@@ -89,10 +117,12 @@ function startPythonService() {
 }
 
 async function ensureService() {
-  // 每次运行都尝试清理旧的 BrowserService，避免复用旧代码
-  killPythonServiceIfAny();
-  // 同时清理旧的 Camoufox 进程，保证浏览器本身也是干净的
-  killCamoufoxIfAny();
+  if (process.env.SKIP_KILL !== '1') {
+    killPythonServiceIfAny();
+    killCamoufoxIfAny();
+  } else {
+    console.log('⚠️  跳过 killPythonServiceIfAny/killCamoufoxIfAny，根据 SKIP_KILL=1');
+  }
 
   const pid = startPythonService();
 
@@ -142,12 +172,15 @@ async function killSameProfileSessions(profileId) {
   }
 }
 
-async function createSession(profileId = 'default') {
+async function createSession(profileId = 'default', autoRestore = true) {
   const url = `http://${HOST}:${PORT}/api/v1/sessions`;
   const body = {
     profile: {
       profile_id: profileId,
       // 其他字段使用服务端默认配置（增强反检测 + zh-CN）
+    },
+    options: {
+      autoRestore
     },
   };
 
@@ -186,18 +219,57 @@ async function main() {
   // 先清理同 profile 的旧会话，保留其他 profile 的实例
   await killSameProfileSessions(profileId);
 
-  const sessionId = await createSession(profileId);
+  const delayedRestore = shouldDelayRestore(profileId);
+  const sessionId = await createSession(profileId, !delayedRestore);
 
   console.log('');
   console.log('✅ 已创建浏览器会话:');
   console.log(`   session_id: ${sessionId}`);
-  console.log(`   profile_id: ${profileId}  (所有站点 Cookie 自动保存/恢复)`);
+  console.log(`   profile_id: ${profileId}  (Cookie 自动恢复: ${!delayedRestore})`);
   console.log('');
-console.log('👀 请在前台确认 Camoufox 窗口已经弹出。');
-console.log('   如需访问 1688，请在地址栏手动打开 https://www.1688.com，登录过程不再由脚本自动导航干预。');
+  console.log('👀 请在前台确认 Camoufox 窗口已经弹出。');
+
+  const initialUrl = resolveInitialUrl(profileId);
+  if (initialUrl) {
+    console.log('');
+    console.log(`👉 自动导航至 ${initialUrl}...`);
+    await navigatePage(sessionId, initialUrl);
+    console.log('✅ 初始页面加载完毕（已加载 profile Cookie）。');
+  } else {
+    console.log('');
+    console.log('ℹ️ 未设置 BROWSER_INITIAL_URL，已跳过自动导航，请在窗口中手动打开目标站点。');
+  }
 }
 
 main().catch((e) => {
   console.error('❌ 一键启动 Camoufox 失败:', e?.message || String(e));
   process.exit(1);
 });
+
+async function navigatePage(sessionId, url) {
+  const endpoint = `http://${HOST}:${PORT}/api/v1/sessions/${encodeURIComponent(sessionId)}/navigate`;
+  const res = await fetch(endpoint, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url }),
+  });
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok || !j?.success) {
+    throw new Error(`导航 ${url} 失败: ${j?.error || res.statusText}`);
+  }
+  return j;
+}
+
+async function restoreSessionCookies(sessionId, url) {
+  const endpoint = `http://${HOST}:${PORT}/api/v1/sessions/${encodeURIComponent(sessionId)}/restore`;
+  const res = await fetch(endpoint, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url }),
+  });
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok || !j?.success) {
+    throw new Error(`恢复会话失败: ${j?.error || res.statusText}`);
+  }
+  return j;
+}

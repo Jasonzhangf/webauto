@@ -12,19 +12,15 @@ from datetime import datetime
 from dataclasses import asdict
 import threading
 from concurrent.futures import ThreadPoolExecutor
-import hashlib
+
+from flask import Flask, request, jsonify
+from flask_cors import CORS
 
 from services.browser_service_interface import (
-    AbstractBrowserService,
-    AbstractBrowserController,
-    BrowserProfile,
-    BrowserSession,
-    PageAction,
-    PageTemplate,
-    AntiDetectionLevel,
-    BrowserActionType,
+    BrowserProfile, PageAction, PageTemplate, BrowserActionType, AntiDetectionLevel
 )
-from services.fingerprint_manager import FingerprintManager
+# from services.browser_service import BrowserService, BrowserServiceError
+from services import container_registry
 # 使用现有的Cookie管理功能
 import sys
 import os
@@ -32,798 +28,254 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 # 导入现有的Cookie管理器（Node 侧实现不可直接在 Python 中使用，这里做最佳努力降级）
 try:
-    # 理论上这是 Node.js 实现，正常情况下无法在 Python 中直接导入
     from libs.browser.cookie_manager import CookieManager as ExistingCookieManager  # type: ignore
 except Exception:
     class ExistingCookieManager:  # 简化占位实现，仅保存目录信息
         def __init__(self, cookie_dir: str = "./cookies"):
             self.cookie_dir = cookie_dir
 
-class BrowserServiceError(Exception):
-    """浏览器服务错误"""
+class BrowserAPIError(Exception):
+    """浏览器API错误"""
     pass
 
-class BrowserController(AbstractBrowserController):
-    """浏览器控制器实现"""
-    
-    def __init__(self, browser_wrapper, page):
-        self.browser_wrapper = browser_wrapper
-        self.page = page
-        self._last_action_time = time.time()
-    
-    def navigate(self, url: str) -> Dict[str, Any]:
-        """页面导航"""
-        try:
-            self.page.goto(url)
-            self._last_action_time = time.time()
-            return {
-                "success": True,
-                "url": self.page.url(),
-                "title": self.page.title(),
-                "timestamp": self._last_action_time
-            }
-        except Exception as e:
-            return {
-                "success": False,
-                "error": str(e),
-                "url": url
-            }
-    
-    def click(self, selector: Optional[str] = None, coordinates: Optional[Dict[str, int]] = None) -> Dict[str, Any]:
-        """点击操作"""
-        try:
-            if selector:
-                self.page.click(selector)
-            elif coordinates:
-                self.page.mouse.click(coordinates['x'], coordinates['y'])
-            else:
-                raise ValueError("必须提供selector或coordinates")
-            
-            self._last_action_time = time.time()
-            return {
-                "success": True,
-                "action": "click",
-                "selector": selector,
-                "coordinates": coordinates,
-                "timestamp": self._last_action_time
-            }
-        except Exception as e:
-            return {
-                "success": False,
-                "error": str(e),
-                "selector": selector,
-                "coordinates": coordinates
-            }
-    
-    def input_text(self, selector: str, text: str, mode: str = "fill") -> Dict[str, Any]:
-        """
-        输入文本
+# 创建Flask应用
+app = Flask(__name__)
+CORS(app)
 
-        mode:
-        - "fill"：使用 Playwright 的 fill，直接设置 value；
-        - "type"：模拟键盘逐字输入（先聚焦再 type），触发键盘事件。
-        """
-        try:
-            if mode == "type":
-                # 先聚焦，再清空，再逐字输入
-                try:
-                    self.page.click(selector)
-                except Exception:
-                    # 聚焦失败不终止流程，继续尝试输入
-                    pass
-                try:
-                    # 尽量清空原有内容，避免残留
-                    self.page.fill(selector, "")
-                except Exception:
-                    pass
-                self.page.type(selector, text)
-            else:
-                # 默认行为：直接 fill，稳定快速
-                self.page.fill(selector, text)
-            self._last_action_time = time.time()
-            return {
-                "success": True,
-                "action": "input_text",
-                "selector": selector,
-                "text_length": len(text),
-                "mode": mode,
-                "timestamp": self._last_action_time
-            }
-        except Exception as e:
-            return {
-                "success": False,
-                "error": str(e),
-                "selector": selector
-            }
+# 全局浏览器服务实例
+browser_service = BrowserService()
 
-    def press_key(self, key: str) -> Dict[str, Any]:
-        """按下特殊按键（如 Enter / Esc）"""
-        try:
-            # Playwright 的 keyboard.press 支持 'Enter' / 'Escape' / 'Tab' 等
-            self.page.keyboard.press(key)
-            self._last_action_time = time.time()
-            return {
-                "success": True,
-                "action": "press_key",
-                "key": key,
-                "timestamp": self._last_action_time,
-            }
-        except Exception as e:
-            return {
-                "success": False,
-                "error": str(e),
-                "key": key,
-            }
-    
-    def scroll(self, direction: str = "down", amount: Optional[int] = None) -> Dict[str, Any]:
-        """滚动操作"""
-        try:
-            if direction == "down":
-                self.page.keyboard.press("PageDown")
-            elif direction == "up":
-                self.page.keyboard.press("PageUp")
-            else:
-                raise ValueError("方向必须是 'up' 或 'down'")
-            
-            self._last_action_time = time.time()
-            return {
-                "success": True,
-                "action": "scroll",
-                "direction": direction,
-                "amount": amount,
-                "timestamp": self._last_action_time
-            }
-        except Exception as e:
-            return {
-                "success": False,
-                "error": str(e),
-                "direction": direction
-            }
-    
-    def wait(self, milliseconds: int) -> Dict[str, Any]:
-        """等待操作"""
-        try:
-            self.page.wait_for_timeout(milliseconds)
-            self._last_action_time = time.time()
-            return {
-                "success": True,
-                "action": "wait",
-                "duration": milliseconds,
-                "timestamp": self._last_action_time
-            }
-        except Exception as e:
-            return {
-                "success": False,
-                "error": str(e),
-                "duration": milliseconds
-            }
-    
-    def screenshot(self, options: Optional[Dict[str, Any]] = None) -> bytes:
-        """截图操作"""
-        try:
-            screenshot_options = options or {}
-            return self.page.screenshot(**screenshot_options)
-        except Exception as e:
-            raise BrowserServiceError(f"截图失败: {e}")
-    
-    def highlight_element(self, selector: str, options: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        """高亮元素"""
-        try:
-            highlight_options = options or {}
-            color = highlight_options.get('color', '#FF0000')
-            duration = highlight_options.get('duration', 3000)
-            
-            # 注入高亮脚本
-            highlight_script = f"""
-                const element = document.querySelector('{selector}');
-                if (element) {{
-                    const originalStyle = element.style.cssText;
-                    element.style.border = '3px solid {color}';
-                    element.style.boxShadow = '0 0 10px {color}';
-                    element.style.transition = 'all 0.3s ease';
-                    
-                    setTimeout(() => {{
-                        element.style.cssText = originalStyle;
-                    }}, {duration});
-                    
-                    return {{
-                        success: true,
-                        elementFound: true,
-                        originalStyle: originalStyle
-                    }};
-                }} else {{
-                    return {{
-                        success: false,
-                        elementFound: false,
-                        error: 'Element not found'
-                    }};
-                }}
-            """
-            
-            result = self.page.evaluate(highlight_script)
-            self._last_action_time = time.time()
-            return result
-        except Exception as e:
-            return {
-                "success": False,
-                "error": str(e),
-                "selector": selector
-            }
-    
-    def extract_data(self, selectors: Dict[str, str]) -> Dict[str, Any]:
-        """提取数据"""
-        try:
-            extracted_data = {}
-            for key, selector in selectors.items():
-                try:
-                    element = self.page.locator(selector).first
-                    text = element.text_content()
-                    href = element.get_attribute('href')
-                    
-                    extracted_data[key] = {
-                        "text": text,
-                        "href": href,
-                        "selector": selector,
-                        "found": True
-                    }
-                except Exception as e:
-                    extracted_data[key] = {
-                        "text": None,
-                        "href": None,
-                        "selector": selector,
-                        "found": False,
-                        "error": str(e)
-                    }
-            
-            self._last_action_time = time.time()
-            return {
-                "success": True,
-                "data": extracted_data,
-                "timestamp": self._last_action_time
-            }
-        except Exception as e:
-            return {
-                "success": False,
-                "error": str(e)
-            }
-    
-    def get_page_info(self) -> Dict[str, Any]:
-        """获取页面信息"""
-        try:
-            info: Dict[str, Any] = {
-                "timestamp": time.time()
-            }
-            try:
-                info["url"] = self.page.url()
-            except Exception:
-                info["url"] = ""
-            try:
-                info["title"] = self.page.title()
-            except Exception:
-                info["title"] = ""
-            return info
-        except Exception as e:
-            return {
-                "error": str(e),
-                "timestamp": time.time()
-            }
+def create_error_response(message: str, code: int = 400) -> Dict[str, Any]:
+    """创建错误响应"""
+    return jsonify({
+        "success": False,
+        "error": message,
+        "timestamp": time.time()
+    }), code
 
-class BrowserService(AbstractBrowserService):
-    """浏览器服务实现"""
-    
-    def __init__(self):
-        self.sessions: Dict[str, BrowserSession] = {}
-        self.controllers: Dict[str, BrowserController] = {}
-        # 记录会话最近一次状态检查时间 & 状态哈希，用于“仅在变化时持久化”
-        self._session_last_state_ts: Dict[str, float] = {}
-        self._session_last_state_hash: Dict[str, str] = {}
-        self.cookie_manager = ExistingCookieManager()
-        self.fingerprint_manager = FingerprintManager()
-        self.service_status = "stopped"
-        self.executor = ThreadPoolExecutor(max_workers=10)
-        self._service_lock = threading.Lock()
-    
-    def start_service(self, config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        """启动浏览器服务"""
-        with self._service_lock:
-            if self.service_status == "running":
-                return {
-                    "success": True,
-                    "message": "服务已在运行中",
-                    "status": self.service_status
-                }
-            
-            try:
-                self.service_status = "starting"
-                
-                # 初始化配置
-                service_config = config or {}
-                
-                # 初始化Cookie管理器（当前仅记录目录，真正的自动 Cookie 行为由浏览器上下文负责）
-                cookie_dir = service_config.get('cookie_dir', './cookies')
-                self.cookie_manager = ExistingCookieManager(cookie_dir)
-                
-                self.service_status = "running"
-                
-                return {
-                    "success": True,
-                    "message": "浏览器服务启动成功",
-                    "status": self.service_status,
-                    "config": service_config
-                }
-                
-            except Exception as e:
-                self.service_status = "error"
-                return {
-                    "success": False,
-                    "error": str(e),
-                    "status": self.service_status
-                }
-    
-    def stop_service(self) -> Dict[str, Any]:
-        """停止浏览器服务"""
-        with self._service_lock:
-            if self.service_status != "running":
-                return {
-                    "success": True,
-                    "message": "服务未在运行",
-                    "status": self.service_status
-                }
-            
-            try:
-                # 关闭所有会话
-                session_ids = list(self.sessions.keys())
-                for session_id in session_ids:
-                    self.close_session(session_id)
-                
-                # 关闭线程池
-                self.executor.shutdown(wait=True)
-                
-                self.service_status = "stopped"
-                
-                return {
-                    "success": True,
-                    "message": "浏览器服务已停止",
-                    "status": self.service_status,
-                    "closed_sessions": len(session_ids)
-                }
-                
-            except Exception as e:
-                return {
-                    "success": False,
-                    "error": str(e),
-                    "status": self.service_status
-                }
-    
-    def create_session(self, profile: Optional[BrowserProfile] = None) -> str:
-        """创建浏览器会话"""
-        if self.service_status != "running":
-            raise BrowserServiceError("服务未运行，无法创建会话")
-        
-        try:
-            # 使用默认配置或提供的配置
-            if profile is None:
-                profile = BrowserProfile(
-                    profile_id="default",
-                    anti_detection_level=AntiDetectionLevel.ENHANCED
-                )
+def create_success_response(data: Dict[str, Any]) -> Dict[str, Any]:
+    """创建成功响应"""
+    return jsonify({
+        "success": True,
+        "data": data,
+        "timestamp": time.time()
+    })
 
-            # 约束：同一 profile 同一时刻只允许一个会话
-            # 在创建新会话前，主动关闭所有使用相同 profile_id 的旧会话
-            try:
-                existing_ids = [
-                    sid for sid, sess in self.sessions.items()
-                    if getattr(sess.profile, "profile_id", None) == profile.profile_id
-                ]
-                for sid in existing_ids:
-                    self.close_session(sid)
-            except Exception:
-                # 清理失败不阻断后续创建流程
-                pass
+# 服务管理API
+@app.route('/api/v1/service/start', methods=['POST'])
+def start_service():
+    """启动浏览器服务"""
+    try:
+        config = request.json or {}
+        result = browser_service.start_service(config)
 
-            # 生成会话ID
-            session_id = str(uuid.uuid4())
-            
-            # 创建会话对象
-            session = BrowserSession(
-                session_id=session_id,
-                profile=profile,
-                status="creating",
-                created_at=time.time(),
-                last_activity=time.time()
-            )
-            
-            # 延迟导入浏览器实现（避免循环依赖）
-            from browser_interface import CamoufoxBrowserWrapper
-            
-            # 创建浏览器实例
-            # 使用 Camoufox，并启用基于 profile_id 的自动会话保存/恢复
-            browser_config = {
-                # 服务默认使用可见窗口，便于交互与调试
-                # 如需无头模式，可在后续扩展 BrowserProfile 增加 headless 配置
-                "headless": False,
-                "locale": profile.locale or "zh-CN",
-                "cookie_dir": "./cookies",
-                # 同一 profile 下互斥：在底层包装器里启动前会尝试终止已有 Camoufox 实例
-                "kill_previous": True,
-                # 指纹策略：按 profile 固定指纹，保证 1688 等站点的“设备指纹 + Cookie”组合稳定
-                "fingerprint_profile": "fixed",
-                "profile_id": profile.profile_id or "default",
-                # 自动在关闭时保存会话，在下次启动时按 profile_id 恢复
-                "auto_session": True,
-                "session_name": profile.profile_id or "default",
-                # 说明：增量自动保存改为通过 BrowserService 的 _auto_save_session +
-                # /heartbeat 接口触发，这里不再在包装器内部开启定时器线程。
-                "auto_save_interval": 0,
-            }
-            
-            browser_wrapper = CamoufoxBrowserWrapper(browser_config)
-            # 在会话级别安装悬浮菜单（Shadow DOM 隔离）
-            try:
-                browser_wrapper.install_overlay(session_id, profile.profile_id or "default")
-            except Exception:
-                # UI 注入失败不影响会话创建
-                pass
+        if result["success"]:
+            return create_success_response(result)
+        else:
+            return create_error_response(result.get("error", "服务启动失败"))
 
-            page = browser_wrapper.new_page()
-            
-            # 创建控制器
-            controller = BrowserController(browser_wrapper, page)
+    except Exception as e:
+        return create_error_response(f"启动服务异常: {str(e)}")
 
-            # 按 profile 初始化 / 复用指纹配置，并应用到当前会话上下文
-            try:
-                # 如果该 profile 还没有指纹，则生成并持久化一份
-                fingerprint = self.fingerprint_manager.get_current_fingerprint(profile.profile_id)
-                if not fingerprint:
-                    result = self.fingerprint_manager.update_fingerprint(
-                        profile.profile_id,
-                        profile.anti_detection_level.value if isinstance(profile.anti_detection_level, AntiDetectionLevel) else str(profile.anti_detection_level),
-                    )
-                    fingerprint = result.get("fingerprint") or self.fingerprint_manager.get_current_fingerprint(profile.profile_id)
-                if fingerprint:
-                    self._apply_fingerprint_config(controller, fingerprint)
-            except Exception:
-                # 指纹配置失败不影响会话创建
-                pass
-            
-            # 更新会话状态
-            session.status = "active"
-            
-            # 保存会话和控制器
-            self.sessions[session_id] = session
-            self.controllers[session_id] = controller
-            
-            return session_id
-            
-        except Exception as e:
-            raise BrowserServiceError(f"创建会话失败: {e}")
-    
-    def get_session(self, session_id: str) -> Optional[BrowserSession]:
-        """获取会话信息"""
-        return self.sessions.get(session_id)
-    
-    def close_session(self, session_id: str) -> Dict[str, Any]:
-        """关闭浏览器会话"""
-        if session_id not in self.sessions:
-            return {
-                "success": False,
-                "error": "会话不存在"
-            }
-        
-        try:
-            session = self.sessions[session_id]
-            controller = self.controllers.get(session_id)
-            
-            if controller:
-                # 关闭浏览器
-                controller.browser_wrapper.close()
-                del self.controllers[session_id]
-            
-            # 删除会话
-            del self.sessions[session_id]
-            
-            return {
-                "success": True,
-                "message": f"会话 {session_id} 已关闭",
-                "session_id": session_id
-            }
-            
-        except Exception as e:
-            return {
-                "success": False,
-                "error": str(e),
-                "session_id": session_id
-            }
-    
-    def _auto_save_session(self, session_id: str) -> None:
-        """
-        自动持久化会话状态（profile 级别）
-        - 模拟普通浏览器的行为：在浏览过程中持续刷新 Cookie/存储状态
-        - 为避免过度写盘，增加简单节流（默认 5 秒一次），且仅在状态变化时写盘
-        """
-        try:
-            now = time.time()
-            last_ts = self._session_last_state_ts.get(session_id, 0.0)
-            if now - last_ts < 5:
-                return
-            # 记录本次检查时间（无论是否最终写盘）
-            self._session_last_state_ts[session_id] = now
-            
-            session = self.sessions.get(session_id)
-            controller = self.controllers.get(session_id)
-            if not session or not controller:
-                return
+@app.route('/api/v1/service/stop', methods=['POST'])
+def stop_service():
+    """停止浏览器服务"""
+    try:
+        result = browser_service.stop_service()
 
-            # 获取当前 storage_state 快照，并计算哈希用于变更检测
-            try:
-                state = controller.browser_wrapper.get_storage_state()
-            except Exception:
-                # 无法获取状态时，不进行持久化
-                return
+        if result["success"]:
+            return create_success_response(result)
+        else:
+            return create_error_response(result.get("error", "服务停止失败"))
 
-            try:
-                serialized = json.dumps(state, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-                current_hash = hashlib.sha256(serialized.encode("utf-8")).hexdigest()
-            except Exception:
-                return
+    except Exception as e:
+        return create_error_response(f"停止服务异常: {str(e)}")
 
-            last_hash = self._session_last_state_hash.get(session_id)
-            if last_hash is not None and last_hash == current_hash:
-                # 状态未变化，无需写盘
-                return
+@app.route('/api/v1/service/status', methods=['GET'])
+def get_service_status():
+    """获取服务状态"""
+    try:
+        status = browser_service.get_service_status()
+        return create_success_response(status)
 
-            profile_id = session.profile.profile_id or "default"
-            # 通过底层包装器保存完整 storage_state（包含所有站点 Cookie）
-            result = controller.browser_wrapper.save_session(profile_id)
-            if result.get("success"):
-                self._session_last_state_hash[session_id] = current_hash
-        except Exception:
-            # 自动保存失败不影响主流程
-            pass
-    
-    def execute_action(self, session_id: str, action: PageAction) -> Dict[str, Any]:
-        """执行页面操作"""
-        if session_id not in self.controllers:
-            return {
-                "success": False,
-                "error": "会话不存在或控制器未初始化"
-            }
-        
-        try:
-            controller = self.controllers[session_id]
-            session = self.sessions[session_id]
-            
-            # 更新会话活动时间
-            session.last_activity = time.time()
+    except Exception as e:
+        return create_error_response(f"获取服务状态异常: {str(e)}")
 
-            # 根据操作类型执行相应动作
-            if action.action_type == BrowserActionType.NAVIGATE:
-                result = controller.navigate(action.value)
-            elif action.action_type == BrowserActionType.CLICK:
-                if action.selector:
-                    result = controller.click(selector=action.selector)
-                elif action.coordinates:
-                    result = controller.click(coordinates=action.coordinates)
-                else:
-                    raise ValueError("点击操作需要提供selector或coordinates")
-            elif action.action_type == BrowserActionType.INPUT:
-                # options.mode: "fill"（默认）或 "type"
-                mode = "fill"
-                if action.options and isinstance(action.options, dict):
-                    mode = action.options.get("mode", "fill") or "fill"
-                result = controller.input_text(action.selector, action.value, mode=mode)
-            elif action.action_type == BrowserActionType.KEY:
-                key = action.value or ""
-                if not key:
-                    raise ValueError("按键操作需要提供 key（例如 'Enter' / 'Escape'）")
-                result = controller.press_key(key)
-            elif action.action_type == BrowserActionType.SCROLL:
-                result = controller.scroll(
-                    direction=action.options.get('direction', 'down') if action.options else 'down',
-                    amount=action.options.get('amount') if action.options else None
-                )
-            elif action.action_type == BrowserActionType.WAIT:
-                result = controller.wait(action.wait_time or 1000)
-            elif action.action_type == BrowserActionType.SCREENSHOT:
-                screenshot_data = controller.screenshot(action.options)
-                result = {
-                    "success": True,
-                    "screenshot": screenshot_data,
-                    "size": len(screenshot_data)
-                }
-            elif action.action_type == BrowserActionType.HIGHLIGHT:
-                result = controller.highlight_element(action.selector, action.options)
-            elif action.action_type == BrowserActionType.EXTRACT:
-                result = controller.extract_data(action.options.get('selectors', {}))
-            else:
-                raise ValueError(f"不支持的操作类型: {action.action_type}")
+# 会话管理API
+@app.route('/api/v1/sessions', methods=['POST'])
+def create_session():
+    """创建浏览器会话"""
+    try:
+        data = request.json or {}
 
-            # 在关键操作后自动持久化会话（profile 级 Cookie / storage 状态）
-            if result.get("success"):
-                self._auto_save_session(session_id)
+        # 构建浏览器配置文件
+        profile_data = data.get('profile', {})
+        profile = BrowserProfile(
+            profile_id=profile_data.get('profile_id', 'default'),
+            user_agent=profile_data.get('user_agent'),
+            viewport=profile_data.get('viewport'),
+            timezone=profile_data.get('timezone')
+        )
 
-            return result
-            
-        except Exception as e:
-            return {
-                "success": False,
-                "error": str(e),
-                "action_type": action.action_type.value
-            }
-    
-    def execute_template(self, session_id: str, template: PageTemplate, url: str) -> Dict[str, Any]:
-        """执行页面模板"""
-        try:
-            results = []
-            
-            # 导航到URL
-            navigate_action = PageAction(
-                action_type=BrowserActionType.NAVIGATE,
-                value=url
-            )
-            nav_result = self.execute_action(session_id, navigate_action)
-            results.append({"action": "navigate", "result": nav_result})
-            
-            if not nav_result.get("success"):
-                return {
-                    "success": False,
-                    "error": "导航失败",
-                    "results": results
-                }
-            
-            # 执行模板中的操作
-            for action in template.actions:
-                result = self.execute_action(session_id, action)
-                results.append({
-                    "action": action.action_type.value,
-                    "result": result
-                })
-            
-            return {
-                "success": True,
-                "template_id": template.template_id,
-                "results": results,
-                "total_actions": len(results)
-            }
-            
-        except Exception as e:
-            return {
-                "success": False,
-                "error": str(e),
-                "template_id": template.template_id
-            }
-    
-    def load_cookies(self, session_id: str, cookie_source: str) -> Dict[str, Any]:
-        """加载Cookie"""
-        try:
-            # 这里应该实现具体的Cookie加载逻辑
-            # 暂时返回成功状态
-            return {
-                "success": True,
-                "message": f"Cookie从 {cookie_source} 加载成功",
-                "session_id": session_id
-            }
-        except Exception as e:
-            return {
-                "success": False,
-                "error": str(e),
-                "session_id": session_id
-            }
-    
-    def save_cookies(self, session_id: str, cookie_target: str) -> Dict[str, Any]:
-        """保存Cookie"""
-        try:
-            # 这里应该实现具体的Cookie保存逻辑
-            # 暂时返回成功状态
-            return {
-                "success": True,
-                "message": f"Cookie保存到 {cookie_target} 成功",
-                "session_id": session_id
-            }
-        except Exception as e:
-            return {
-                "success": False,
-                "error": str(e),
-                "session_id": session_id
-            }
-    
-    def update_fingerprint(self, session_id: str, fingerprint_config: Dict[str, Any]) -> Dict[str, Any]:
-        """更新浏览器指纹"""
-        try:
-            # 这里应该实现具体的指纹更新逻辑
-            # 暂时返回成功状态
-            return {
-                "success": True,
-                "message": "指纹配置已更新",
+        result = browser_service.create_session(profile, auto_restore=True)
+
+        if result["success"]:
+            return create_success_response({"session_id": result})
+        else:
+            return create_error_response(result.get("error", "会话创建失败"))
+
+    except Exception as e:
+        return create_error_response(f"创建会话异常: {str(e)}")
+
+@app.route('/api/v1/sessions', methods=['GET'])
+def list_sessions():
+    """列出所有会话"""
+    try:
+        sessions = browser_service.get_all_sessions()
+        session_list = []
+
+        for session_id, session in sessions.items():
+            session_list.append({
                 "session_id": session_id,
-                "fingerprint_config": fingerprint_config
-            }
-        except Exception as e:
-            return {
-                "success": False,
-                "error": str(e),
-                "session_id": session_id
-            }
-    
-    def get_service_status(self) -> Dict[str, Any]:
-        """获取服务状态"""
-        return {
-            "status": self.service_status,
-            "active_sessions": len(self.sessions),
-            "total_sessions_created": len(self.sessions),
-            "uptime": time.time() if self.service_status == "running" else 0
-        }
-    
-    def get_session_status(self, session_id: str) -> Dict[str, Any]:
-        """获取会话状态"""
-        session = self.sessions.get(session_id)
-        if not session:
-            return {
-                "exists": False,
-                "error": "会话不存在"
-            }
-        
-        controller = self.controllers.get(session_id)
-        page_info = controller.get_page_info() if controller else {}
+                "profile": asdict(session.profile),
+                "status": session.status,
+                "created_at": session.created_at,
+                "last_activity": session.last_activity,
+                "page_count": session.page_count,
+                "cookie_count": session.cookie_count
+            })
 
-        # 额外状态：当前 storage_state 中的 Cookie / origins 信息，
-        # 以及是否已经存在 1688 相关 Cookie，方便快速判断登录保持情况。
-        storage_info: Dict[str, Any] = {}
-        if controller:
-            try:
-                state = controller.browser_wrapper.get_storage_state()
-                cookies = state.get("cookies", []) or []
-                origins = state.get("origins", []) or []
-                has_1688_cookie = any(
-                    "1688.com" in (c.get("domain") or "")
-                    for c in cookies
-                )
-                storage_info = {
-                    "cookies_count": len(cookies),
-                    "origins_count": len(origins),
-                    "has_1688_cookie": has_1688_cookie,
-                }
-            except Exception:
-                storage_info = {}
+        return create_success_response({"sessions": session_list})
 
-        # 将 BrowserSession / BrowserProfile 转成 JSON 友好的结构（避免 Enum 直接出现在响应中）
-        profile = session.profile
-        level = getattr(profile, "anti_detection_level", None)
-        level_val = getattr(level, "value", str(level)) if level is not None else None
-        session_dict: Dict[str, Any] = {
-            "session_id": session.session_id,
-            "status": session.status,
-            "created_at": session.created_at,
-            "last_activity": session.last_activity,
-            "page_count": session.page_count,
-            "cookie_count": session.cookie_count,
-            "profile": {
-                "profile_id": getattr(profile, "profile_id", None),
-                "user_agent": getattr(profile, "user_agent", None),
-                "viewport": getattr(profile, "viewport", None),
-                "timezone": getattr(profile, "timezone", None),
-                "locale": getattr(profile, "locale", None),
-                "cookies_enabled": getattr(profile, "cookies_enabled", True),
-                "anti_detection_level": level_val,
-            },
-        }
-        
-        return {
-            "exists": True,
-            "session": session_dict,
-            "page_info": page_info,
-            "storage": storage_info,
-            "controller_active": controller is not None
-        }
-    
-    def _apply_fingerprint_config(self, controller: BrowserController, fingerprint_config: Dict[str, Any]):
-        """应用指纹配置到当前会话的浏览器上下文"""
-        try:
-            # Playwright/Camoufox 页面对象通常提供 context 属性
-            context = getattr(controller.page, "context", None)
-            if context is None:
-                return
-            self.fingerprint_manager.apply_fingerprint_to_context(context, fingerprint_config)
-        except Exception:
-            # 指纹应用失败不影响主流程
-            pass
+    except Exception as e:
+        return create_error_response(f"获取会话列表异常: {str(e)}")
+
+@app.route('/api/v1/sessions/<session_id>', methods=['GET'])
+def get_session(session_id: str):
+    """获取会话信息"""
+    try:
+        session = browser_service.get_session(session_id)
+        if session:
+            return create_success_response({
+                "session_id": session_id,
+                "profile": asdict(session.profile),
+                "status": session.status,
+                "created_at": session.created_at,
+                "last_activity": session.last_activity,
+                "page_count": session.page_count,
+                "cookie_count": session.cookie_count
+            })
+        else:
+            return create_error_response("会话不存在", 404)
+
+    except Exception as e:
+        return create_error_response(f"获取会话异常: {str(e)}")
+
+@app.route('/api/v1/sessions/<session_id>', methods=['DELETE'])
+def close_session(session_id: str):
+    """关闭浏览器会话"""
+    try:
+        result = browser_service.close_session(session_id)
+
+        if result["success"]:
+            return create_success_response(result)
+        else:
+            return create_error_response(result.get("error", "关闭会话失败"))
+
+    except Exception as e:
+        return create_error_response(f"关闭会话异常: {str(e)}")
+
+@app.route('/api/v1/sessions/<session_id>/status', methods=['GET'])
+def get_session_status(session_id: str):
+    """获取会话状态"""
+    try:
+        status = browser_service.get_session_status(session_id)
+        return create_success_response(status)
+
+    except Exception as e:
+        return create_error_response(f"获取会话状态异常: {str(e)}")
+
+# 页面操作API
+@app.route('/api/v1/sessions/<session_id>/actions', methods=['POST'])
+def execute_page_action(session_id: str):
+    """执行页面操作"""
+    try:
+        action_data = request.json or {}
+        action_type = action_data.get('type')
+
+        controller = browser_service.get_controller(session_id)
+        if not controller:
+            return create_error_response("会话控制器不存在", 404)
+
+        result = {"success": False}
+
+        if action_type == "navigate":
+            url = action_data.get('url')
+            result = controller.navigate(url)
+        elif action_type == "execute_script":
+            script = action_data.get('script')
+            result = controller.execute_script(script)
+        elif action_type == "inspect_dom":
+            selector = action_data.get('selector')
+            result = controller.inspect_dom(selector)
+        elif action_type == "screenshot":
+            filename = action_data.get('filename', f'screenshot_{int(time.time())}.png')
+            result = controller.take_screenshot(filename)
+        else:
+            return create_error_response(f"不支持的操作类型: {action_type}")
+
+        if result.get("success"):
+            return create_success_response(result)
+        else:
+            return create_error_response(result.get("error", "操作失败"))
+
+    except Exception as e:
+        return create_error_response(f"执行页面操作异常: {str(e)}")
+
+@app.route('/api/v1/sessions/<session_id>/info', methods=['GET'])
+def get_page_info_api(session_id: str):
+    """获取页面信息"""
+    try:
+        controller = browser_service.get_controller(session_id)
+        if not controller:
+            return create_error_response("会话控制器不存在", 404)
+
+        result = controller.get_page_info()
+        if result.get("success"):
+            return create_success_response(result)
+        else:
+            return create_error_response(result.get("error", "获取页面信息失败"))
+
+    except Exception as e:
+        return create_error_response(f"获取页面信息异常: {str(e)}")
+
+@app.route('/api/v1/sessions/<session_id>/cookies', methods=['GET'])
+def get_cookies_api(session_id: str):
+    """获取Cookies"""
+    try:
+        result = browser_service.get_cookies(session_id)
+        if result.get("success"):
+            return create_success_response(result)
+        else:
+            return create_error_response(result.get("error", "获取Cookies失败"))
+
+    except Exception as e:
+        return create_error_response(f"获取Cookies异常: {str(e)}")
+
+# 容器管理 API（简化版本，为 DOM 选取创建容器提供后端支持）
+@app.route('/api/v1/containers', methods=['GET'])
+def list_containers_for_url():
+    """根据 URL 返回对应站点下的容器定义"""
+    try:
+        url = request.args.get('url', '')
+        if not url:
+            return create_error_response("缺少 url 参数")
+
+        containers = container_registry.get_containers_for_url(url)
+        return create_success_response({"containers": containers})
+
+    except Exception as e:
+        return create_error_response(f"获取容器失败: {str(e)}")
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=8888, debug=False)

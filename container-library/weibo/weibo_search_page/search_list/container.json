@@ -1,0 +1,13 @@
+{
+  "id": "weibo_search_page.search_list",
+  "name": "搜索页-列表容器",
+  "type": "list",
+  "selectors": [
+    { "css": "div.card-wrap", "variant": "primary", "score": 1.0 },
+    { "css": "div.card", "variant": "backup", "score": 0.7 }
+  ],
+  "capabilities": ["scroll", "click", "highlight", "find-child"],
+  "operations": [
+    { "type": "highlight", "config": { "style": "2px solid #26a69a", "duration": 800 } }
+  ]
+}

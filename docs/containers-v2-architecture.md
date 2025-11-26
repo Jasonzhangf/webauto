@@ -69,6 +69,7 @@ Dev Overlay
 - “容器树” reads from `window.__webautoContainerLibrary[site]` injected by dev-all.
 - Click node → local highlight of selector’s class matches.
 - Picking mode: hover → blue highlight; click → capture element’s class selector to preview.
+- API 地址：默认回落到 `http://127.0.0.1:8888`，也可通过 `window.__webautoApiBase`、`window.__WEB_AUTO_API_BASE` 或 `<meta name="webauto-api-base">` 自定义后端地址，方便在远程/容器环境中调试。
 
 How to Run (Local)
 - Launch everything and navigate:
@@ -83,4 +84,3 @@ How to Run (Local)
 Notes
 - We do not revert any previous behavior. We add persistence for SID and make highlight robust with a fallback eval overlay.
 - The overlay menu injects after anchors are satisfied to reduce risk; captcha presence suppresses injection until cleared.
-

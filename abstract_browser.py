@@ -1,78 +1,43 @@
 """
-抽象浏览器接口定义
-提供统一的浏览器操作接口，隐藏底层实现
+Abstract browser interfaces
 """
-
 from abc import ABC, abstractmethod
-from typing import Optional, Dict, Any, List
+from typing import Any, Dict, List, Optional, Union
 
-class AbstractBrowser(ABC):
-    """抽象浏览器接口"""
-    
-    @abstractmethod
-    def new_page(self) -> 'AbstractPage':
-        """创建新页面"""
-        pass
-    
-    @abstractmethod
-    def goto(self, url: str) -> 'AbstractPage':
-        """导航到URL并返回页面"""
-        pass
-    
-    @abstractmethod
-    def close(self) -> None:
-        """关闭浏览器"""
-        pass
-    
-    @abstractmethod
-    def get_status(self) -> Dict[str, Any]:
-        """获取浏览器状态"""
-        pass
 
 class AbstractPage(ABC):
-    """抽象页面接口"""
-    
+    """Abstract page interface"""
+
     @abstractmethod
-    def goto(self, url: str) -> None:
-        """导航到URL"""
+    def click(self, selector: str, **kwargs) -> Any:
+        """Click on element"""
         pass
-    
+
+    @abstractmethod
+    def fill(self, selector: str, value: str, **kwargs) -> Any:
+        """Fill form field"""
+        pass
+
+    @abstractmethod
+    def query_selector_all(self, selector: str) -> List[Any]:
+        """Query multiple elements"""
+        pass
+
     @abstractmethod
     def title(self) -> str:
-        """获取页面标题"""
+        """Get page title"""
         pass
-    
+
+
+class AbstractBrowser(ABC):
+    """Abstract browser interface"""
+
     @abstractmethod
-    def url(self) -> str:
-        """获取当前URL"""
+    def goto(self, url: str, **kwargs) -> AbstractPage:
+        """Navigate to URL"""
         pass
-    
-    @abstractmethod
-    def click(self, selector: str) -> None:
-        """点击元素"""
-        pass
-    
-    @abstractmethod
-    def fill(self, selector: str, value: str) -> None:
-        """填写输入框"""
-        pass
-    
-    @abstractmethod
-    def text_content(self, selector: str) -> str:
-        """获取元素文本"""
-        pass
-    
-    @abstractmethod
-    def screenshot(self, filename: str = None, full_page: bool = False) -> bytes:
-        """截图"""
-        pass
-    
-    @abstractmethod
-    def wait_for_selector(self, selector: str, timeout: int = 30000) -> None:
-        """等待选择器"""
-        pass
-    
+
     @abstractmethod
     def close(self) -> None:
-        """关闭页面"""
+        """Close browser"""
         pass

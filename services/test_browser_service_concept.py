@@ -67,7 +67,7 @@ def test_browser_service_concept():
     mock_sessions = {}
     
     # 模拟创建会话
-    def create_session(profile_id: str, anti_detection_level: str) -> str:
+    def create_session(profile_id: str, anti_detection_level: str, auto_restore: bool = True) -> str:
         session_id = f"session_{int(time.time())}_{profile_id}"
         session_data = {
             "session_id": session_id,

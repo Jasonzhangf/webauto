@@ -1,0 +1,248 @@
+{
+  "weibo_login": {
+    "id": "weibo_login_root",
+    "name": "微博登录容器",
+    "type": "login",
+    "capabilities": ["input", "click", "highlight", "find-child"],
+    "page_patterns": ["weibo.com/*login*", "weibo.com/newlogin*", "passport.weibo.com/*"],
+    "selectors": [
+      {
+        "classes": ["LoginCard_wrap_18dK4"],
+        "variant": "primary",
+        "score": 1.0
+      },
+      {
+        "classes": ["LoginCard", "login"],
+        "variant": "backup",
+        "score": 0.8
+      },
+      {
+        "classes": ["woo-box-flex"],
+        "variant": "fallback",
+        "score": 0.6
+      }
+    ],
+    "operations": [
+      {
+        "type": "highlight",
+        "config": {
+          "style": "2px solid #e6162d",
+          "duration": 3000
+        }
+      },
+      {
+        "type": "find-child",
+        "config": {
+          "container_id": "username_input"
+        }
+      },
+      {
+        "type": "find-child",
+        "config": {
+          "container_id": "password_input"
+        }
+      },
+      {
+        "type": "find-child",
+        "config": {
+          "container_id": "login_button"
+        }
+      }
+    ]
+  },
+  "weibo_username": {
+    "id": "username_input",
+    "name": "用户名输入框",
+    "type": "input",
+    "capabilities": ["input", "highlight"],
+    "selectors": [
+      {
+        "classes": ["input"],
+        "attributes": {"name": "username"},
+        "variant": "primary",
+        "score": 1.0
+      },
+      {
+        "classes": ["input"],
+        "attributes": {"placeholder": ["手机号", "邮箱"]},
+        "variant": "backup",
+        "score": 0.8
+      },
+      {
+        "classes": ["input"],
+        "attributes": {"type": "text"},
+        "variant": "fallback",
+        "score": 0.6
+      }
+    ],
+    "operations": [
+      {
+        "type": "highlight",
+        "config": {
+          "style": "2px solid #4285f4",
+          "duration": 2000
+        }
+      },
+      {
+        "type": "type",
+        "config": {
+          "clear_first": true,
+          "human_typing": true
+        }
+      }
+    ]
+  },
+  "weibo_password": {
+    "id": "password_input",
+    "name": "密码输入框",
+    "type": "input",
+    "capabilities": ["input", "highlight"],
+    "selectors": [
+      {
+        "classes": ["input"],
+        "attributes": {"name": "password"},
+        "variant": "primary",
+        "score": 1.0
+      },
+      {
+        "classes": ["input"],
+        "attributes": {"type": "password"},
+        "variant": "backup",
+        "score": 0.8
+      }
+    ],
+    "operations": [
+      {
+        "type": "highlight",
+        "config": {
+          "style": "2px solid #ea4335",
+          "duration": 2000
+        }
+      },
+      {
+        "type": "type",
+        "config": {
+          "clear_first": true,
+          "human_typing": true
+        }
+      }
+    ]
+  },
+  "weibo_login_button": {
+    "id": "login_button",
+    "name": "登录按钮",
+    "type": "button",
+    "capabilities": ["click", "highlight"],
+    "selectors": [
+      {
+        "classes": ["btn", "login", "submit"],
+        "variant": "primary",
+        "score": 1.0
+      },
+      {
+        "classes": ["woo-button-main"],
+        "attributes": {"type": "submit"},
+        "variant": "backup",
+        "score": 0.8
+      },
+      {
+        "classes": ["button"],
+        "attributes": {"type": "submit"},
+        "variant": "fallback",
+        "score": 0.6
+      }
+    ],
+    "operations": [
+      {
+        "type": "highlight",
+        "config": {
+          "style": "2px solid #34a853",
+          "duration": 2000
+        }
+      },
+      {
+        "type": "click",
+        "config": {
+          "scroll_to_view": true,
+          "wait_before": 0.5,
+          "wait_after": 2.0
+        }
+      }
+    ]
+  },
+  "weibo_logged_in": {
+    "id": "weibo_main_page",
+    "name": "微博主页面（已登录）",
+    "type": "page",
+    "capabilities": ["scroll", "highlight", "find-child"],
+    "page_patterns": ["weibo.com", "!*login*", "!*passport*"],
+    "selectors": [
+      {
+        "classes": ["main", "content"],
+        "variant": "primary",
+        "score": 1.0
+      },
+      {
+        "classes": ["woo-box-main"],
+        "variant": "backup",
+        "score": 0.8
+      }
+    ],
+    "operations": [
+      {
+        "type": "highlight",
+        "config": {
+          "style": "2px solid #fbbc05",
+          "duration": 1500
+        }
+      },
+      {
+        "type": "find-child",
+        "config": {
+          "container_id": "feed_container"
+        }
+      },
+      {
+        "type": "scroll",
+        "config": {
+          "direction": "down",
+          "distance": 500
+        }
+      }
+    ]
+  },
+  "weibo_feed": {
+    "id": "feed_container",
+    "name": "微博内容流",
+    "type": "content",
+    "capabilities": ["scroll", "click", "highlight", "find-child"],
+    "selectors": [
+      {
+        "classes": ["feed", "card", "list"],
+        "variant": "primary",
+        "score": 1.0
+      },
+      {
+        "classes": ["woo-box-item", "Card"],
+        "variant": "backup",
+        "score": 0.8
+      }
+    ],
+    "operations": [
+      {
+        "type": "highlight",
+        "config": {
+          "style": "2px solid #9b59b6",
+          "duration": 1000
+        }
+      },
+      {
+        "type": "scroll",
+        "config": {
+          "direction": "down",
+          "distance": 300
+        }
+      }
+    ]
+  }
+}
