@@ -238,32 +238,33 @@ async function main(){
   // 确保服务在后台运行
   let healthy = await waitHealth(`${base}/health`, 1000);
   let serviceChild = null;
-  if (!healthy){
-    killPort(port);
-    await wait(800);
-    const child = spawn(process.execPath, ['libs/browser/remote-service.js', '--host', String(host), '--port', String(port)], {
-      stdio: 'inherit',
-      env: { ...process.env, BROWSER_SERVICE_AUTO_EXIT: '1' },
-    });
-    serviceChild = child;
-    child.on('exit', (code) => {
-      if (serviceChild !== child) return;
-      if (code === 0) {
-        process.exit(0);
-      } else {
-        console.warn(`[one-click] browser service exited with code ${code}`);
-      }
-    });
-    child.on('error', (err) => {
-      console.warn('[one-click] browser service spawn failed:', err?.message || String(err));
-    });
-    serviceChild = child;
-    healthy = await waitHealth(`${base}/health`, 8000);
-  }
-  if (!healthy){
-    console.error(`[one-click] browser service not healthy on :${port}`);
-    process.exit(1);
-  }
+  const ensureBrowserService = async () => {
+    if (healthy) return;
+    for (let attempt = 0; attempt < 3 && !healthy; attempt++) {
+      killPort(port);
+      await wait(800);
+      const child = spawn(process.execPath, ['libs/browser/remote-service.js', '--host', String(host), '--port', String(port)], {
+        stdio: 'inherit',
+        env: { ...process.env, BROWSER_SERVICE_AUTO_EXIT: '1' },
+      });
+      serviceChild = child;
+      child.on('exit', (code) => {
+        if (serviceChild !== child) return;
+        if (code === 0) {
+          process.exit(0);
+        } else {
+          console.warn(`[one-click] browser service exited with code ${code}`);
+        }
+      });
+      child.on('error', (err) => {
+        console.warn('[one-click] browser service spawn failed:', err?.message || String(err));
+      });
+      healthy = await waitHealth(`${base}/health`, 4000);
+      if (healthy) return;
+    }
+    throw new Error(`[one-click] browser service not healthy on :${port}`);
+  };
+  await ensureBrowserService();
 
   // 启动浏览器会话
   const startRes = await post(`${base}/command`, { action:'start', args:{ headless, profileId: profile, url } });
