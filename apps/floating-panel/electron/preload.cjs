@@ -1,4 +1,12 @@
-const { contextBridge, ipcRenderer } = require('electron');
+const electron = require('electron');
+const contextBridge = electron?.contextBridge;
+const ipcRenderer = electron?.ipcRenderer;
+
+if (!contextBridge || !ipcRenderer) {
+  console.warn('[preload] electron APIs not available in this context');
+  module.exports = {};
+  return;
+}
 
 contextBridge.exposeInMainWorld('desktopAPI', {
   minimize: () => ipcRenderer.send('window-control', 'minimize'),
