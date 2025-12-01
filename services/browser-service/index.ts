@@ -196,7 +196,7 @@ function broadcast(event: string, data: any) {
   });
 }
 
-if (import.meta.url === process.argv[1] || process.argv[1]?.endsWith('remote-service.js')) {
+if (import.meta.url === process.argv[1]) {
   const hostArg = process.argv.indexOf('--host');
   const portArg = process.argv.indexOf('--port');
   const host = hostArg >= 0 ? process.argv[hostArg + 1] : '127.0.0.1';
