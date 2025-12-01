@@ -310,7 +310,9 @@ function disconnectClient() {
 function handleConnectionStatusChange(status) {
   state.connected = status === 'connected';
   updateConnectionStatus();
-  if (status !== 'connected') {
+  if (state.connected) {
+    refreshSessions();
+  } else {
     stopAutoRefresh();
   }
 }
@@ -568,18 +570,39 @@ function updatePinButton() {
 
 async function maybeAutoConnect() {
   if (autoConnectAttempted || state.connected) return;
-  if (!window.desktopAPI?.getMeta) return;
   autoConnectAttempted = true;
+
+  let autoUrl = '';
+  if (window.desktopAPI?.getMeta) {
+    try {
+      const meta = await window.desktopAPI.getMeta();
+      autoUrl = meta?.autoConnectUrl || '';
+    } catch (err) {
+      appendLog('error', err?.message || String(err));
+    }
+  }
+
+  if (autoUrl) {
+    try {
+      const parsed = new URL(autoUrl);
+      dom.protocolSelect.value = parsed.protocol.replace(':', '') || 'ws';
+      dom.hostInput.value = parsed.hostname || '127.0.0.1';
+      dom.portInput.value = parsed.port || (parsed.protocol === 'wss:' ? '443' : '80');
+      persistConfig();
+      await connectUsingCurrentConfig();
+      return;
+    } catch (err) {
+      appendLog('error', err?.message || String(err));
+    }
+  }
+
+  await connectUsingCurrentConfig();
+}
+
+async function connectUsingCurrentConfig() {
+  persistConfig();
+  dom.connectButton.disabled = true;
   try {
-    const meta = await window.desktopAPI.getMeta();
-    const autoUrl = meta?.autoConnectUrl;
-    if (!autoUrl) return;
-    const parsed = new URL(autoUrl);
-    dom.protocolSelect.value = parsed.protocol.replace(':', '') || 'ws';
-    dom.hostInput.value = parsed.hostname || '127.0.0.1';
-    dom.portInput.value = parsed.port || (parsed.protocol === 'wss:' ? '443' : '80');
-    persistConfig();
-    dom.connectButton.disabled = true;
     await establishClient();
     await refreshSessions();
   } catch (err) {
