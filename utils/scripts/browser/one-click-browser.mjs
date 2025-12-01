@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // 一键启动浏览器（后台服务 + 会话 + 可选导航，基于配置文件）
-import { spawn } from 'node:child_process';
+import { spawn, execSync } from 'node:child_process';
 import fs from 'node:fs';
 import net from 'node:net';
 import os from 'node:os';
@@ -239,13 +239,24 @@ async function main(){
   let healthy = await waitHealth(`${base}/health`, 1000);
   let serviceChild = null;
   if (!healthy){
-    serviceChild = spawn(process.execPath, ['libs/browser/remote-service.js', '--host', String(host), '--port', String(port)], {
+    killPort(port);
+    const child = spawn(process.execPath, ['libs/browser/remote-service.js', '--host', String(host), '--port', String(port)], {
       stdio: 'inherit',
       env: { ...process.env, BROWSER_SERVICE_AUTO_EXIT: '1' },
     });
-    serviceChild.on('exit', (code) => {
-      process.exit(code ?? 0);
+    serviceChild = child;
+    child.on('exit', (code) => {
+      if (serviceChild !== child) return;
+      if (code === 0) {
+        process.exit(0);
+      } else {
+        console.warn(`[one-click] browser service exited with code ${code}`);
+      }
     });
+    child.on('error', (err) => {
+      console.warn('[one-click] browser service spawn failed:', err?.message || String(err));
+    });
+    serviceChild = child;
     healthy = await waitHealth(`${base}/health`, 8000);
   }
   if (!healthy){
@@ -363,4 +374,13 @@ function provisionCookieSeed(seed) {
   } catch (err) {
     console.warn('[one-click] Cookie 种子复制失败:', err?.message || String(err));
   }
+}
+function killPort(port) {
+  try {
+    if (process.platform === 'win32') {
+      execSync(`for /f "tokens=5" %p in ('netstat -aon ^| find ":${port}" ^| find "LISTENING"') do taskkill /F /PID %p`, { stdio: 'ignore' });
+    } else {
+      execSync(`lsof -ti :${port} | xargs kill -9 || true`, { stdio: 'ignore' });
+    }
+  } catch {}
 }
