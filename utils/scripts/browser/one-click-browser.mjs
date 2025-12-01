@@ -11,8 +11,20 @@ import { loadBrowserServiceConfig } from '../../../libs/browser/browser-service-
 const ROOT_DIR = path.resolve(fileURLToPath(new URL('../../../', import.meta.url)));
 const FLOATING_APP_DIR = path.join(ROOT_DIR, 'apps', 'floating-panel');
 const WS_SERVER_SCRIPT = path.join(ROOT_DIR, 'scripts', 'start_websocket_server.py');
+const WORKFLOW_ENTRY = path.join(ROOT_DIR, 'dist', 'sharedmodule', 'engines', 'api-gateway', 'server.js');
+const WORKFLOW_REQUIRED_FILES = [
+  WORKFLOW_ENTRY,
+  path.join(ROOT_DIR, 'dist', 'libs', 'browser', 'cookie-manager.js'),
+];
 const DEFAULT_WS_HOST = '127.0.0.1';
 const DEFAULT_WS_PORT = 8765;
+const WORKFLOW_BASE = (() => {
+  const cfg = loadBrowserServiceConfig();
+  const base = cfg.backend?.baseUrl || 'http://127.0.0.1:7701';
+  return base.replace(/\/$/, '');
+})();
+const WORKFLOW_URL = new URL(WORKFLOW_BASE);
+const IS_LOCAL_WORKFLOW = ['localhost', '127.0.0.1', '::1'].includes(WORKFLOW_URL.hostname);
 
 function parseArgs(argv){
   const cfg = loadBrowserServiceConfig();
@@ -182,6 +194,7 @@ async function main(){
   const { port, host, headless, profile, url, restart, devConsole } = parseArgs(process.argv);
   const baseHost = host === '0.0.0.0' ? '127.0.0.1' : host;
   const base = `http://${baseHost}:${port}`;
+  await ensureWorkflowApi();
 
   if (restart) {
     await runNode('utils/scripts/service/restart-browser-service.mjs', []);
@@ -235,3 +248,51 @@ async function main(){
 }
 
 main().catch(e=>{ console.error('[one-click] failed:', e?.message||String(e)); process.exit(1); });
+
+function runNpmCommand(args = []) {
+  const npmCmd = process.platform === 'win32' ? 'npm.cmd' : 'npm';
+  return new Promise((resolve, reject) => {
+    const child = spawn(npmCmd, args, { cwd: ROOT_DIR, stdio: 'inherit' });
+    child.on('exit', code => {
+      if (code === 0) resolve();
+      else reject(new Error(`npm ${args.join(' ')} exited with ${code}`));
+    });
+    child.on('error', reject);
+  });
+}
+
+function workflowDistReady() {
+  return WORKFLOW_REQUIRED_FILES.every(file => fs.existsSync(file));
+}
+
+async function ensureWorkflowApi() {
+  const healthUrl = `${WORKFLOW_BASE}/health`;
+  const healthy = await waitHealth(healthUrl, 1000);
+  if (healthy) return;
+
+  if (!IS_LOCAL_WORKFLOW) {
+    throw new Error(`Workflow API (${WORKFLOW_BASE}) 不可用，请确认远程服务可访问`);
+  }
+
+  if (!workflowDistReady()) {
+    console.log('[one-click] Workflow API 构建缺失，自动执行 npm run build:services ...');
+    await runNpmCommand(['run', 'build:services']);
+    if (!workflowDistReady()) {
+      throw new Error('Workflow API 构建仍缺失，请手动执行 npm run build:services 并检查 dist 输出');
+    }
+  }
+
+  console.log(`[one-click] 启动 Workflow API (${WORKFLOW_BASE}) ...`);
+  const server = spawn(process.execPath, [WORKFLOW_ENTRY], {
+    cwd: ROOT_DIR,
+    stdio: 'ignore',
+    detached: true,
+    env: { ...process.env },
+  });
+  server.unref();
+
+  const ready = await waitHealth(healthUrl, 20000);
+  if (!ready) {
+    throw new Error(`Workflow API 未在 ${WORKFLOW_BASE} 就绪，检查 dist 产物或端口占用`);
+  }
+}
