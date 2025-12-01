@@ -241,6 +241,7 @@ async function main(){
   const ensureBrowserService = async () => {
     if (healthy) return;
     for (let attempt = 0; attempt < 3 && !healthy; attempt++) {
+      killBrowserServiceProcesses();
       killPort(port);
       await wait(800);
       const child = spawn(process.execPath, ['libs/browser/remote-service.js', '--host', String(host), '--port', String(port)], {
@@ -383,6 +384,17 @@ function killPort(port) {
       execSync(`for /f "tokens=5" %p in ('netstat -aon ^| find ":${port}" ^| find "LISTENING"') do taskkill /F /PID %p`, { stdio: 'ignore' });
     } else {
       execSync(`lsof -ti :${port} | xargs kill -9 || true`, { stdio: 'ignore' });
+    }
+  } catch {}
+}
+
+function killBrowserServiceProcesses() {
+  try {
+    if (process.platform === 'win32') {
+      execSync('taskkill /F /IM remote-service.exe || taskkill /F /IM node.exe /FI "WINDOWTITLE eq remote-service"', { stdio: 'ignore' });
+    } else {
+      execSync('pkill -f "libs/browser/remote-service.js" || true', { stdio: 'ignore' });
+      execSync('pkill -f "dist/services/browser-service/index.js" || true', { stdio: 'ignore' });
     }
   } catch {}
 }
