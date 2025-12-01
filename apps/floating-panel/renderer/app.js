@@ -629,6 +629,8 @@ function setupFloatingBallControl() {
   let pointerId = null;
   let offset = { x: 0, y: 0 };
   let moved = false;
+  let start = { x: 0, y: 0 };
+  const DRAG_THRESHOLD = 6;
 
   dom.floatingBall.addEventListener('pointerdown', async (event) => {
     if (!state.collapsed) return;
@@ -637,6 +639,7 @@ function setupFloatingBallControl() {
     pointerId = event.pointerId;
     dom.floatingBall.setPointerCapture(pointerId);
     dom.floatingBall.classList.add('dragging');
+    start = { x: event.screenX, y: event.screenY };
     const bounds = await window.desktopAPI?.getBounds();
     offset = {
       x: event.screenX - (bounds?.x || 0),
@@ -646,7 +649,12 @@ function setupFloatingBallControl() {
 
   dom.floatingBall.addEventListener('pointermove', async (event) => {
     if (!dragging) return;
-    moved = true;
+    const dx = Math.abs(event.screenX - start.x);
+    const dy = Math.abs(event.screenY - start.y);
+    if (!moved && (dx > DRAG_THRESHOLD || dy > DRAG_THRESHOLD)) {
+      moved = true;
+    }
+    if (!moved) return;
     const targetX = event.screenX - offset.x;
     const targetY = event.screenY - offset.y;
     await window.desktopAPI?.moveWindow(targetX, targetY);
@@ -671,6 +679,12 @@ function setupFloatingBallControl() {
 
   dom.floatingBall.addEventListener('pointerup', release);
   dom.floatingBall.addEventListener('pointercancel', release);
+  dom.floatingBall.addEventListener('dblclick', async (event) => {
+    event.preventDefault();
+    if (state.collapsed) {
+      await setCollapsedState(false);
+    }
+  });
 }
 
 async function snapFloatingBall() {
