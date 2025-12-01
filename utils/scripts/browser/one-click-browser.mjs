@@ -240,6 +240,7 @@ async function main(){
   let serviceChild = null;
   if (!healthy){
     killPort(port);
+    await wait(800);
     const child = spawn(process.execPath, ['libs/browser/remote-service.js', '--host', String(host), '--port', String(port)], {
       stdio: 'inherit',
       env: { ...process.env, BROWSER_SERVICE_AUTO_EXIT: '1' },
