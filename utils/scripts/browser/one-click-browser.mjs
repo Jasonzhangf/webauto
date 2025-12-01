@@ -16,6 +16,8 @@ const WORKFLOW_REQUIRED_FILES = [
   WORKFLOW_ENTRY,
   path.join(ROOT_DIR, 'dist', 'libs', 'browser', 'cookie-manager.js'),
 ];
+const LIB_BROWSER_SRC = path.join(ROOT_DIR, 'libs', 'browser');
+const LIB_BROWSER_DEST = path.join(ROOT_DIR, 'dist', 'libs', 'browser');
 const DEFAULT_WS_HOST = '127.0.0.1';
 const DEFAULT_WS_PORT = 8765;
 const WORKFLOW_BASE = (() => {
@@ -277,9 +279,12 @@ async function ensureWorkflowApi() {
   if (!workflowDistReady()) {
     console.log('[one-click] Workflow API 构建缺失，自动执行 npm run build:services ...');
     await runNpmCommand(['run', 'build:services']);
+    copyBrowserLibs();
     if (!workflowDistReady()) {
       throw new Error('Workflow API 构建仍缺失，请手动执行 npm run build:services 并检查 dist 输出');
     }
+  } else {
+    copyBrowserLibs();
   }
 
   console.log(`[one-click] 启动 Workflow API (${WORKFLOW_BASE}) ...`);
@@ -294,5 +299,15 @@ async function ensureWorkflowApi() {
   const ready = await waitHealth(healthUrl, 20000);
   if (!ready) {
     throw new Error(`Workflow API 未在 ${WORKFLOW_BASE} 就绪，检查 dist 产物或端口占用`);
+  }
+}
+
+function copyBrowserLibs() {
+  try {
+    if (!fs.existsSync(LIB_BROWSER_SRC)) return;
+    fs.mkdirSync(path.dirname(LIB_BROWSER_DEST), { recursive: true });
+    fs.cpSync(LIB_BROWSER_SRC, LIB_BROWSER_DEST, { recursive: true });
+  } catch (err) {
+    console.warn('[one-click] 复制 browser 库失败:', err?.message || String(err));
   }
 }
