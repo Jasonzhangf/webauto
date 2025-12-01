@@ -26,7 +26,7 @@ const createWindow = () => {
     backgroundColor: '#1b1b1bd8',
     alwaysOnTop: true,
     webPreferences: {
-      preload: path.join(__dirname, 'preload.js'),
+      preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
