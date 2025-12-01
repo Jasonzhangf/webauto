@@ -1,5 +1,6 @@
 const STORAGE_KEY = 'webauto-floating-config';
 const REFRESH_INTERVAL = 8000;
+let autoConnectAttempted = false;
 
 const dom = {
   connectionStatus: document.getElementById('connectionStatus'),
@@ -21,6 +22,8 @@ const dom = {
   pinButton: document.getElementById('pinButton'),
   minButton: document.getElementById('minButton'),
   closeButton: document.getElementById('closeButton'),
+  collapseButton: document.getElementById('collapseButton'),
+  floatingBall: document.getElementById('floatingBall'),
 };
 
 const state = {
@@ -36,6 +39,7 @@ const state = {
     port: '8765',
     protocol: 'ws',
   },
+  collapsed: false,
 };
 
 class ControlPlaneClient {
@@ -194,6 +198,8 @@ function init() {
   bindEventListeners();
   updateConnectionStatus();
   updatePinButton();
+  maybeAutoConnect();
+  setupFloatingBallControl();
 }
 
 function loadConfig() {
@@ -255,6 +261,9 @@ function bindEventListeners() {
 
   dom.minButton.addEventListener('click', () => window.desktopAPI?.minimize());
   dom.closeButton.addEventListener('click', () => window.desktopAPI?.close());
+  dom.collapseButton.addEventListener('click', async () => {
+    await setCollapsedState(true);
+  });
 }
 
 async function handleConnectToggle() {
@@ -555,6 +564,106 @@ function renderLogs() {
 function updatePinButton() {
   dom.pinButton.classList.toggle('active', state.pinned);
   dom.pinButton.textContent = state.pinned ? '📌' : '📍';
+}
+
+async function maybeAutoConnect() {
+  if (autoConnectAttempted || state.connected) return;
+  if (!window.desktopAPI?.getMeta) return;
+  autoConnectAttempted = true;
+  try {
+    const meta = await window.desktopAPI.getMeta();
+    const autoUrl = meta?.autoConnectUrl;
+    if (!autoUrl) return;
+    const parsed = new URL(autoUrl);
+    dom.protocolSelect.value = parsed.protocol.replace(':', '') || 'ws';
+    dom.hostInput.value = parsed.hostname || '127.0.0.1';
+    dom.portInput.value = parsed.port || (parsed.protocol === 'wss:' ? '443' : '80');
+    persistConfig();
+    dom.connectButton.disabled = true;
+    await establishClient();
+    await refreshSessions();
+  } catch (err) {
+    appendLog('error', err?.message || String(err));
+  } finally {
+    dom.connectButton.disabled = false;
+  }
+}
+
+async function setCollapsedState(collapsed) {
+  if (state.collapsed === collapsed) return;
+  state.collapsed = collapsed;
+  document.body.classList.toggle('is-collapsed', collapsed);
+  try {
+    await window.desktopAPI?.setCollapsed(collapsed);
+  } catch (err) {
+    appendLog('error', err?.message || String(err));
+  }
+}
+
+function setupFloatingBallControl() {
+  if (!dom.floatingBall) return;
+  let dragging = false;
+  let pointerId = null;
+  let offset = { x: 0, y: 0 };
+  let moved = false;
+
+  dom.floatingBall.addEventListener('pointerdown', async (event) => {
+    if (!state.collapsed) return;
+    dragging = true;
+    moved = false;
+    pointerId = event.pointerId;
+    dom.floatingBall.setPointerCapture(pointerId);
+    dom.floatingBall.classList.add('dragging');
+    const bounds = await window.desktopAPI?.getBounds();
+    offset = {
+      x: event.screenX - (bounds?.x || 0),
+      y: event.screenY - (bounds?.y || 0),
+    };
+  });
+
+  dom.floatingBall.addEventListener('pointermove', async (event) => {
+    if (!dragging) return;
+    moved = true;
+    const targetX = event.screenX - offset.x;
+    const targetY = event.screenY - offset.y;
+    await window.desktopAPI?.moveWindow(targetX, targetY);
+  });
+
+  const release = async (event) => {
+    if (!dragging) return;
+    if (pointerId !== null) {
+      try {
+        dom.floatingBall.releasePointerCapture(pointerId);
+      } catch {}
+    }
+    dom.floatingBall.classList.remove('dragging');
+    dragging = false;
+    pointerId = null;
+    if (moved) {
+      await snapFloatingBall();
+    } else {
+      await setCollapsedState(false);
+    }
+  };
+
+  dom.floatingBall.addEventListener('pointerup', release);
+  dom.floatingBall.addEventListener('pointercancel', release);
+}
+
+async function snapFloatingBall() {
+  const bounds = await window.desktopAPI?.getBounds();
+  const work = await window.desktopAPI?.getWorkArea();
+  if (!bounds || !work) return;
+  const padding = 16;
+  const centerX = bounds.x + bounds.width / 2;
+  const workCenter = work.x + work.width / 2;
+  const targetX = centerX < workCenter
+    ? work.x + padding
+    : work.x + work.width - bounds.width - padding;
+  const minY = work.y + padding;
+  const maxY = work.y + work.height - bounds.height - padding;
+  const targetY = Math.min(Math.max(bounds.y, minY), maxY);
+  await window.desktopAPI?.moveWindow(targetX, targetY);
 }
 
 init();

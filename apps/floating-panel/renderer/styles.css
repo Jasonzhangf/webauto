@@ -35,6 +35,7 @@ body {
   box-shadow: 0 30px 60px rgba(0, 0, 0, 0.45);
   position: relative;
   overflow: hidden;
+  transition: opacity 0.2s ease, transform 0.2s ease;
 }
 
 .window-shell > *:not(.drag-overlay) {
@@ -48,6 +49,53 @@ body {
   border-radius: 18px;
   pointer-events: none;
   -webkit-app-region: drag;
+}
+
+body.is-collapsed {
+  padding: 0;
+}
+
+body.is-collapsed .window-shell {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.floating-ball {
+  position: fixed;
+  inset: 0;
+  display: none;
+  width: 74px;
+  height: 74px;
+  margin: auto;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.88);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  box-shadow: 0 30px 60px rgba(0, 0, 0, 0.35);
+  color: var(--text);
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 4px;
+  cursor: grab;
+  -webkit-user-select: none;
+  user-select: none;
+  pointer-events: none;
+  padding: 8px;
+  text-align: center;
+  font-size: 11px;
+}
+
+.floating-ball .ball-icon {
+  font-size: 20px;
+}
+
+.floating-ball.dragging {
+  cursor: grabbing;
+}
+
+body.is-collapsed .floating-ball {
+  display: flex;
+  pointer-events: auto;
 }
 
 .title-bar {

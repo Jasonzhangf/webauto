@@ -17,6 +17,7 @@
         </div>
         <div class="status-pill" id="connectionStatus">未连接</div>
         <div class="window-buttons" data-no-drag>
+          <button id="collapseButton" class="icon-button" title="收起为浮球">⚪</button>
           <button id="pinButton" class="icon-button" title="置顶窗口">📌</button>
           <button id="minButton" class="icon-button" title="隐藏">—</button>
           <button id="closeButton" class="icon-button" title="关闭">✕</button>
@@ -104,6 +105,11 @@
           <div id="logStream" class="log-stream"></div>
         </section>
       </main>
+    </div>
+
+    <div class="floating-ball" id="floatingBall">
+      <div class="ball-icon">⚙️</div>
+      <div class="ball-label">WebAuto</div>
     </div>
 
     <script type="module" src="./app.js"></script>

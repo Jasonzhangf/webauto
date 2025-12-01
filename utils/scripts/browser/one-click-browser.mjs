@@ -3,6 +3,7 @@
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import net from 'node:net';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { setTimeout as wait } from 'node:timers/promises';
@@ -27,6 +28,16 @@ const WORKFLOW_BASE = (() => {
 })();
 const WORKFLOW_URL = new URL(WORKFLOW_BASE);
 const IS_LOCAL_WORKFLOW = ['localhost', '127.0.0.1', '::1'].includes(WORKFLOW_URL.hostname);
+const COOKIE_ROOT = path.join(os.homedir(), '.webauto', 'cookies');
+const COOKIE_SEEDS = [
+  {
+    matcher: /weibo\.com/i,
+    seedFile: path.join(ROOT_DIR, 'cookies', 'session_weibo-fresh.json'),
+    targetFilename: 'weibo.com.json',
+    defaultProfile: 'weibo-fresh',
+    label: 'weibo-cookie-seed',
+  },
+];
 
 function parseArgs(argv){
   const cfg = loadBrowserServiceConfig();
@@ -50,6 +61,19 @@ function parseArgs(argv){
     if (a === '--dev') { args.devConsole = true; continue; }
   }
   return args;
+}
+
+function matchCookieSeed(url) {
+  if (!url) return null;
+  return COOKIE_SEEDS.find((seed) => seed.matcher.test(url)) || null;
+}
+
+function applyCookieDefaults(args, seed) {
+  if (!seed) return;
+  if (args.profile === 'default' && seed.defaultProfile) {
+    args.profile = seed.defaultProfile;
+    console.log(`[one-click] URL 匹配 ${seed.label || seed.targetFilename}，自动使用 profile=${args.profile}`);
+  }
 }
 
 function runNode(file, args=[]) {
@@ -127,12 +151,13 @@ function spawnPython(args) {
   });
 }
 
-function spawnNpmDev() {
+function spawnNpmDev(extraEnv = {}) {
   const npmCmd = process.platform === 'win32' ? 'npm.cmd' : 'npm';
+  const env = { ...process.env, NODE_ENV: 'development', ...extraEnv };
   return spawn(npmCmd, ['run', 'dev'], {
     cwd: FLOATING_APP_DIR,
     stdio: 'inherit',
-    env: { ...process.env, NODE_ENV: 'development' },
+    env,
   });
 }
 
@@ -157,7 +182,8 @@ async function launchFloatingConsole() {
     console.warn(`[one-click] ws://${DEFAULT_WS_HOST}:${DEFAULT_WS_PORT} 未就绪，浮窗会自行重试连接`);
   }
 
-  const uiProc = spawnNpmDev();
+  const wsUrl = `ws://${DEFAULT_WS_HOST}:${DEFAULT_WS_PORT}`;
+  const uiProc = spawnNpmDev({ WEBAUTO_FLOATING_WS_URL: wsUrl });
   const cleanup = () => {
     if (uiProc && !uiProc.killed) {
       uiProc.kill();
@@ -193,10 +219,16 @@ async function launchFloatingConsole() {
 }
 
 async function main(){
-  const { port, host, headless, profile, url, restart, devConsole } = parseArgs(process.argv);
+  const args = parseArgs(process.argv);
+  const cookieSeed = matchCookieSeed(args.url);
+  applyCookieDefaults(args, cookieSeed);
+  const { port, host, headless, profile, url, restart, devConsole } = args;
   const baseHost = host === '0.0.0.0' ? '127.0.0.1' : host;
   const base = `http://${baseHost}:${port}`;
   await ensureWorkflowApi();
+  if (cookieSeed) {
+    provisionCookieSeed(cookieSeed);
+  }
 
   if (restart) {
     await runNode('utils/scripts/service/restart-browser-service.mjs', []);
@@ -309,5 +341,21 @@ function copyBrowserLibs() {
     fs.cpSync(LIB_BROWSER_SRC, LIB_BROWSER_DEST, { recursive: true });
   } catch (err) {
     console.warn('[one-click] 复制 browser 库失败:', err?.message || String(err));
+  }
+}
+
+function provisionCookieSeed(seed) {
+  if (!seed) return;
+  try {
+    if (!fs.existsSync(seed.seedFile)) {
+      console.warn('[one-click] 缺少 Cookie 种子文件:', seed.seedFile);
+      return;
+    }
+    fs.mkdirSync(COOKIE_ROOT, { recursive: true });
+    const target = path.join(COOKIE_ROOT, seed.targetFilename);
+    fs.copyFileSync(seed.seedFile, target);
+    console.log(`[one-click] 已加载 Cookie 种子 -> ${target}`);
+  } catch (err) {
+    console.warn('[one-click] Cookie 种子复制失败:', err?.message || String(err));
   }
 }
