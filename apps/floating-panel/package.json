@@ -1,0 +1,18 @@
+{
+  "name": "@webauto/floating-panel",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "electron/main.js",
+  "description": "Cross-platform floating control panel for WebAuto",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electronmon ."
+  },
+  "dependencies": {
+  },
+  "devDependencies": {
+    "electron": "^32.2.0",
+    "electronmon": "^2.0.2"
+  }
+}

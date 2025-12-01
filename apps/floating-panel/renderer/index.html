@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>WebAuto Floating Console</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="window-shell">
+      <div class="drag-overlay" data-drag-region></div>
+      <header class="title-bar" data-drag-region>
+        <div class="title-copy">
+          <div class="app-name">WebAuto Floating Console</div>
+          <div class="subtitle">跨平台容器控制面板</div>
+        </div>
+        <div class="status-pill" id="connectionStatus">未连接</div>
+        <div class="window-buttons" data-no-drag>
+          <button id="pinButton" class="icon-button" title="置顶窗口">📌</button>
+          <button id="minButton" class="icon-button" title="隐藏">—</button>
+          <button id="closeButton" class="icon-button" title="关闭">✕</button>
+        </div>
+      </header>
+
+      <main>
+        <section class="panel">
+          <div class="section-heading">
+            <div>
+              <div class="section-title">控制平面连接</div>
+              <p class="section-desc">连接到 Python WebSocket 服务 (默认 127.0.0.1:8765)</p>
+            </div>
+            <div class="mini-actions">
+              <button id="connectButton" class="primary">连接</button>
+            </div>
+          </div>
+          <div class="form-grid">
+            <label>
+              <span>Host</span>
+              <input id="hostInput" type="text" value="127.0.0.1" />
+            </label>
+            <label>
+              <span>Port</span>
+              <input id="portInput" type="number" value="8765" min="1" />
+            </label>
+            <label class="full">
+              <span>协议</span>
+              <select id="protocolSelect">
+                <option value="ws">ws://</option>
+                <option value="wss">wss://</option>
+              </select>
+            </label>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="section-heading">
+            <div>
+              <div class="section-title">浏览器会话</div>
+              <p class="section-desc">创建 / 刷新 / 删除自动化会话</p>
+            </div>
+            <div class="mini-actions">
+              <button id="refreshSessions" class="ghost">刷新</button>
+            </div>
+          </div>
+
+          <form id="createSessionForm" class="form-inline">
+            <input id="capabilityInput" type="text" placeholder="能力, 逗号分隔 (默认 dom)" />
+            <button type="submit" class="primary">新建会话</button>
+          </form>
+
+          <div id="sessionList" class="session-list"></div>
+        </section>
+
+        <section class="panel">
+          <div class="section-heading">
+            <div>
+              <div class="section-title">当前会话操作</div>
+              <p class="section-desc">选择一个会话后，可执行容器匹配等操作</p>
+            </div>
+            <div class="mini-actions" id="selectedSessionMeta"></div>
+          </div>
+
+          <div class="info-row" id="sessionInfoRow">未选择会话</div>
+
+          <form id="matchForm" class="form-inline">
+            <input id="urlInput" type="text" placeholder="输入要匹配的页面 URL" />
+            <button type="submit" class="primary">匹配根容器</button>
+          </form>
+
+          <div id="matchResult" class="result-box"></div>
+        </section>
+
+        <section class="panel log-panel">
+          <div class="section-heading">
+            <div>
+              <div class="section-title">实时日志</div>
+              <p class="section-desc">命令与响应结果</p>
+            </div>
+            <div class="mini-actions">
+              <button id="clearLogs" class="ghost">清空</button>
+            </div>
+          </div>
+          <div id="logStream" class="log-stream"></div>
+        </section>
+      </main>
+    </div>
+
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>
