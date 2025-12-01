@@ -16,6 +16,7 @@ const WORKFLOW_ENTRY = path.join(ROOT_DIR, 'dist', 'sharedmodule', 'engines', 'a
 const WORKFLOW_REQUIRED_FILES = [
   WORKFLOW_ENTRY,
   path.join(ROOT_DIR, 'dist', 'libs', 'browser', 'cookie-manager.js'),
+  path.join(ROOT_DIR, 'dist', 'services', 'browser-service', 'index.js'),
 ];
 const LIB_BROWSER_SRC = path.join(ROOT_DIR, 'libs', 'browser');
 const LIB_BROWSER_DEST = path.join(ROOT_DIR, 'dist', 'libs', 'browser');
@@ -236,11 +237,15 @@ async function main(){
 
   // 确保服务在后台运行
   let healthy = await waitHealth(`${base}/health`, 1000);
+  let serviceChild = null;
   if (!healthy){
-    const child = spawn(process.execPath, ['libs/browser/remote-service.js', '--host', String(host), '--port', String(port)], {
-      detached: true, stdio: 'ignore', env: { ...process.env }
+    serviceChild = spawn(process.execPath, ['libs/browser/remote-service.js', '--host', String(host), '--port', String(port)], {
+      stdio: 'inherit',
+      env: { ...process.env, BROWSER_SERVICE_AUTO_EXIT: '1' },
     });
-    child.unref();
+    serviceChild.on('exit', (code) => {
+      process.exit(code ?? 0);
+    });
     healthy = await waitHealth(`${base}/health`, 8000);
   }
   if (!healthy){

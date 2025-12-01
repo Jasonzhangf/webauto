@@ -21,12 +21,20 @@ const host = hostArgIndex !== -1 ? String(args[hostArgIndex + 1]) : String(cfg.h
 const runDir = join(os.homedir(), '.webauto', 'run');
 const pidFile = join(runDir, 'browser-service.pid');
 
+function ensureBrowserServiceBuild() {
+  const entry = join(projectRoot, 'dist', 'services', 'browser-service', 'index.js');
+  if (existsSync(entry)) return;
+  console.log('[browser-service] 构建缺失，自动执行 npm run build:services');
+  execSync('npm run build:services', { stdio: 'inherit', cwd: projectRoot });
+}
+
 function isProcessAlive(pid) {
   try { return process.kill(pid, 0), true; } catch { return false; }
 }
 
 function main() {
   mkdirSync(runDir, { recursive: true });
+  ensureBrowserServiceBuild();
 
   if (existsSync(pidFile)) {
     try {

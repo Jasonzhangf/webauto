@@ -8,6 +8,7 @@
   },
   "include": [
     "services/**/*.ts",
+    "services/**/*.d.ts",
     "sharedmodule/engines/**/*.ts",
     "src/server.ts"
   ],
