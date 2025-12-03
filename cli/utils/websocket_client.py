@@ -24,9 +24,16 @@ class WebSocketClient:
         self.message_handlers: Dict[str, Callable] = {}
         self._listener_task: Optional[asyncio.Task] = None
 
-        # 独立事件循环，避免CLI同步调用频繁创建/销毁loop导致连接中断
-        self._loop = asyncio.new_event_loop()
+        # 独立事件循环延迟创建，避免在无需WebSocket时也启动线程
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._loop_ready = threading.Event()
+        self._loop_thread: Optional[threading.Thread] = None
+
+    def _ensure_loop(self):
+        if self._loop and self._loop_thread and self._loop_thread.is_alive():
+            return
+        self._loop = asyncio.new_event_loop()
+        self._loop_ready.clear()
         self._loop_thread = threading.Thread(
             target=self._run_loop,
             name="WebSocketClientLoop",
@@ -38,10 +45,12 @@ class WebSocketClient:
     def _run_loop(self):
         asyncio.set_event_loop(self._loop)
         self._loop_ready.set()
-        self._loop.run_forever()
+        if self._loop:
+            self._loop.run_forever()
 
     def _run_coroutine(self, coro: Coroutine[Any, Any, T]) -> T:
         """在内部事件循环中执行协程并同步等待结果"""
+        self._ensure_loop()
         future = asyncio.run_coroutine_threadsafe(coro, self._loop)
         return future.result()
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-# Helper script to boot the Python WebSocket server and Electron floating console together.
+# Helper script to boot the TypeScript WebSocket server and Electron floating console together.
 
 set -euo pipefail
 
@@ -11,7 +11,7 @@ usage() {
   cat <<EOF
 Usage: $0 [--host 127.0.0.1] [--port 8765]
 
-Starts the Python WebSocket server and the floating Electron console.
+Starts the browser service (Node) WebSocket endpoint and the floating Electron console.
 Press Ctrl+C or close the Electron window to stop both processes.
 EOF
 }
@@ -41,18 +41,22 @@ done
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 APP_DIR="${ROOT_DIR}/apps/floating-panel"
 
-if ! command -v python3 >/dev/null 2>&1; then
-  echo "python3 not found in PATH" >&2
-  exit 1
-fi
-
 if ! command -v npm >/dev/null 2>&1; then
   echo "npm not found in PATH" >&2
   exit 1
 fi
 
-echo "🌐 Starting WebSocket server on ${HOST}:${PORT}..."
-python3 "${ROOT_DIR}/scripts/start_websocket_server.py" --host "${HOST}" --port "${PORT}" &
+if ! command -v node >/dev/null 2>&1; then
+  echo "node not found in PATH" >&2
+  exit 1
+fi
+
+echo "🌐 Starting browser service WebSocket on ${HOST}:${PORT}..."
+node "${ROOT_DIR}/libs/browser/remote-service.js" \
+  --host "127.0.0.1" \
+  --port "0" \
+  --ws-host "${HOST}" \
+  --ws-port "${PORT}" &
 SERVER_PID=$!
 
 cleanup() {
@@ -67,17 +71,17 @@ trap cleanup EXIT INT TERM
 
 echo "⏳ Waiting for server to become ready..."
 for _ in {1..30}; do
-  if python3 - <<PY >/dev/null 2>&1
-import socket
-s = socket.socket()
-try:
-    s.settimeout(0.5)
-    s.connect(("${HOST}", int("${PORT}")))
-except OSError:
-    raise SystemExit(1)
-finally:
-    s.close()
-PY
+  if node - <<NODE >/dev/null 2>&1
+const net = require('net');
+const socket = new net.Socket();
+socket.setTimeout(300);
+socket.once('error', () => process.exit(1));
+socket.once('timeout', () => process.exit(1));
+socket.connect(${PORT}, '${HOST}', () => {
+  socket.end();
+  process.exit(0);
+});
+NODE
   then
     break
   fi
@@ -89,5 +93,6 @@ if [[ ! -d "${APP_DIR}/node_modules" ]]; then
   (cd "${APP_DIR}" && npm install)
 fi
 
-echo "🖥  Launching floating console UI..."
+export WEBAUTO_FLOATING_WS_URL="ws://${HOST}:${PORT}"
+echo "🖥  Launching floating console UI (target: ${WEBAUTO_FLOATING_WS_URL})..."
 (cd "${APP_DIR}" && npm run dev)

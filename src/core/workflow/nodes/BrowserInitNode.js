@@ -28,6 +28,7 @@ class BrowserInitNode extends BaseNode {
             const headless = config?.headless !== false;
             const ua = config?.userAgent || 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
             const viewport = config?.viewport || { width: 1920, height: 1080 };
+            const dynamicViewport = config?.dynamicViewport !== false && !headless; // 无头模式下不启用动态viewport
             let browser;
             let contextObj;
 
@@ -145,10 +146,67 @@ class BrowserInitNode extends BaseNode {
                 } catch {}
             }
 
-            context.engine?.recordBehavior?.('browser_init', { engine, headless, viewport });
+            context.engine?.recordBehavior?.('browser_init', { engine, headless, viewport, dynamicViewport });
 
             const page = await contextObj.newPage();
             context.engine?.recorder?.attachPage?.(page);
+
+            // 启用动态视口调整（非无头模式下）
+            if (dynamicViewport) {
+                try {
+                    logger.info('🔄 启用动态视口调整');
+                    // 为窗口对象添加事件监听，使视口能够随窗口大小动态变化
+                    await contextObj.addInitScript(() => {
+                        // 监听窗口大小变化事件
+                        window.addEventListener('resize', () => {
+                            try {
+                                // 获取当前窗口的实际内尺寸
+                                const { innerWidth, innerHeight } = window;
+                                
+                                // 通过playwright的方式更新视口大小
+                                // 注意：这里我们使用一种特殊方式来通知playwright更新视口
+                                // 实际的视口更新会在下一次页面交互时生效
+                                if (window.innerWidth !== window.outerWidth) {
+                                    // 标记需要更新视口
+                                    window.__webauto_viewport_needs_update = true;
+                                    window.__webauto_viewport_width = innerWidth;
+                                    window.__webauto_viewport_height = innerHeight;
+                                }
+                            } catch (e) {
+                                console.error('更新视口失败:', e);
+                            }
+                        });
+                    });
+                    
+                    // 在Node.js端添加定期检查和更新视口的逻辑
+                    // 注意：由于Playwright限制，我们不能直接从页面获取事件来更新视口
+                    // 这里我们添加一个周期性检查的机制
+                    if (contextObj && !headless) {
+                        // 每500ms检查一次页面是否需要更新视口
+                        const viewportInterval = setInterval(async () => {
+                            try {
+                                const needsUpdate = await page.evaluate(() => window.__webauto_viewport_needs_update);
+                                if (needsUpdate) {
+                                    const width = await page.evaluate(() => window.__webauto_viewport_width || window.innerWidth);
+                                    const height = await page.evaluate(() => window.__webauto_viewport_height || window.innerHeight);
+                                    // 更新页面的视口大小
+                                    await page.setViewportSize({ width, height });
+                                    // 重置更新标志
+                                    await page.evaluate(() => { window.__webauto_viewport_needs_update = false; });
+                                }
+                            } catch (e) {
+                                // 页面可能已经关闭或导航，清除定时器
+                                clearInterval(viewportInterval);
+                            }
+                        }, 500);
+                        
+                        // 保存定时器引用，以便在必要时清除
+                        page._viewportInterval = viewportInterval;
+                    }
+                } catch (error) {
+                    logger.warn('⚠️ 动态视口调整初始化失败:', error.message);
+                }
+            }
 
             logger.info('✅ 浏览器初始化成功');
 
@@ -191,6 +249,11 @@ class BrowserInitNode extends BaseNode {
                         height: { type: 'number', default: 1080 }
                     },
                     description: '浏览器视窗大小'
+                },
+                dynamicViewport: {
+                    type: 'boolean',
+                    description: '是否启用视口动态调整（非无头模式下默认为true）',
+                    default: true
                 },
                 userAgent: {
                     type: 'string',

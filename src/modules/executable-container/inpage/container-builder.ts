@@ -10,6 +10,7 @@ export function buildExecutableContainer(selector: string, type: string = 'inter
       { key: 'highlight', label: '高亮', event: 'appear' },
       { key: 'click', label: '点击', event: 'action:click' },
       { key: 'copy-selector', label: '复制选择器', node: 'JavaScriptExecutionNode', params: { script: `navigator.clipboard?.writeText(${JSON.stringify(selector)}); return ${JSON.stringify(selector)};` } },
+      { key: 'save-container', label: '保存容器', node: 'JavaScriptExecutionNode', params: { script: `return 'save_container_requested';` } },
     ],
     flags: { }
   };

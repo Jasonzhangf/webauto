@@ -4,6 +4,7 @@ import { buildExecutableContainer } from './container-builder';
 import { pageRegistry } from './registry';
 import { resolveParentForElement } from './parent-resolver';
 import { InlineMenu } from './menu';
+import { containerTree } from './container-tree';
 import { StartOptions, PickerPublicAPI } from './types';
 
 const overlay = new OverlayController();
@@ -24,6 +25,12 @@ class ExecutableContainerPicker implements PickerPublicAPI {
     window.addEventListener('mousedown', this.onDown, true);
     window.addEventListener('mouseup', this.onUp, true);
     window.addEventListener('keydown', this.onKey, true);
+    
+    // 显示容器树
+    if (this.options.showContainerTree !== false) {
+      containerTree.show();
+    }
+    
     this.dispatch('picker:started', { options: this.options });
   }
 
@@ -36,6 +43,10 @@ class ExecutableContainerPicker implements PickerPublicAPI {
     window.removeEventListener('keydown', this.onKey, true);
     overlay.clear();
     menu.dispose();
+    
+    // 隐藏容器树
+    containerTree.hide();
+    
     this.dispatch('picker:stopped', {});
   }
 
@@ -67,6 +78,11 @@ class ExecutableContainerPicker implements PickerPublicAPI {
 
   private onKey = (e: KeyboardEvent) => {
     if (e.key === 'Escape') this.stop();
+    // 添加快捷键来切换容器树显示 (Ctrl+Shift+T)
+    if (e.ctrlKey && e.shiftKey && e.key === 'T') {
+      e.preventDefault();
+      containerTree.toggle();
+    }
   };
 
   private commitPick(el: Element) {
@@ -77,6 +93,9 @@ class ExecutableContainerPicker implements PickerPublicAPI {
 
       const parent = resolveParentForElement(el);
       const inst = pageRegistry.add(def, el, parent.parentInstanceId);
+
+      // 更新容器树
+      containerTree.update();
 
       // menu actions → dispatch to node bridge
       menu.showAt(el, def, (opKey) => {
@@ -109,6 +128,11 @@ const api = new ExecutableContainerPicker();
 if (typeof window !== 'undefined') {
   // expose api once
   if (!window.__webautoPicker) window.__webautoPicker = api;
+  
+  // 暴露容器树API
+  if (!window.__webautoContainerTree) {
+    window.__webautoContainerTree = containerTree;
+  }
 }
 
 export default api;

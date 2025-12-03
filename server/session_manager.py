@@ -14,7 +14,7 @@ from typing import Any, Callable, Dict, List, Optional
 from browser_interface.chromium_browser import ChromiumBrowserWrapper
 
 DEFAULT_BROWSER_CONFIG: Dict[str, Any] = {
-    "headless": True,  # 无头模式，避免前台弹窗
+    "headless": False,  # 前台模式，便于查看 overlay/容器菜单
     "auto_overlay": True,  # 启用自动注入overlay菜单
     # 启用自动会话（storage_state）加载，以便默认从 cookies/session_default.json 注入Cookie
     # 这有助于在创建会话后，直接进入已登录态（若对应站点Cookie有效）
@@ -192,6 +192,7 @@ class SessionManager:
         config = dict(self.default_browser_config)
         if browser_config:
             config.update(browser_config)
+        config["session_id"] = session_id
         config.setdefault("profile_id", session_id)
 
         session = BrowserSession(session_id, capabilities or ["dom"], config)

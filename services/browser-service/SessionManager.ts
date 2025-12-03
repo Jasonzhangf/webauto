@@ -2,6 +2,7 @@ import { BrowserSession, BrowserSessionOptions } from './BrowserSession.js';
 
 export interface CreateSessionPayload extends BrowserSessionOptions {
   initialUrl?: string;
+  sessionId?: string;
 }
 
 export const SESSION_CLOSED_EVENT = 'browser-service:session-closed';
@@ -10,7 +11,12 @@ export class SessionManager {
   private sessions = new Map<string, BrowserSession>();
 
   async createSession(options: CreateSessionPayload): Promise<{ sessionId: string }> {
-    const profileId = options.profileId || 'default';
+    const profileId = options.profileId || options.sessionId || `session_${Date.now().toString(36)}`;
+    options.profileId = profileId;
+    if (!options.sessionName) {
+      options.sessionName = profileId;
+    }
+
     const existing = this.sessions.get(profileId);
     if (existing) {
       existing.onExit = undefined;
@@ -39,8 +45,16 @@ export class SessionManager {
   listSessions() {
     return Array.from(this.sessions.values()).map((session) => ({
       profileId: session.id,
-      url: session.getCurrentUrl(),
+      session_id: session.id,
+      current_url: session.getCurrentUrl(),
+      mode: session.modeName,
     }));
+  }
+
+  async getSessionInfo(profileId: string) {
+    const session = this.getSession(profileId);
+    if (!session) return null;
+    return session.getInfo();
   }
 
   async deleteSession(profileId: string): Promise<boolean> {

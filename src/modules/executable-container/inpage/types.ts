@@ -4,6 +4,7 @@ export interface StartOptions {
   minTargetSize?: number;
   highlight?: { color?: string; duration?: number; label?: string };
   debug?: boolean;
+  showContainerTree?: boolean;
 }
 
 export interface ExecutableContainerRuntimeEvent {
@@ -71,6 +72,7 @@ declare global {
     __webautoPicker?: PickerPublicAPI;
     __webautoHighlight?: any;
     __containerIndex?: any;
+    __webautoContainerTree?: any;
     webauto_dispatch?: (evt: any) => void; // node bridge hook
   }
 }

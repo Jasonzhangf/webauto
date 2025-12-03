@@ -35,10 +35,10 @@ export class BrowserManager {
      * @returns {PlaywrightBrowser} 浏览器实例
      */
     getBrowser(config = null, kwargs = {}) {
-        // Node 侧浏览器实现已封禁，任何直接 getBrowser 调用都应改为使用 Python BrowserService。
+        // Node 侧浏览器实现已封禁，任何直接 getBrowser 调用都应改为使用 TypeScript BrowserService。
         throw new BrowserError(
             'BrowserManager.getBrowser() 已被禁用：\n' +
-            '请通过 Python BrowserService / libs/browser/remote-service.js 控制浏览器，\n' +
+            '请通过 TypeScript BrowserService (libs/browser/remote-service.js) 控制浏览器，\n' +
             '不要在 Node 层直接启动 Playwright/Chromium。',
         );
     }
@@ -53,7 +53,7 @@ export class BrowserManager {
         // 同样禁用 Node 直接启动浏览器
         throw new BrowserError(
             'BrowserManager.startBrowser() 已被禁用：\n' +
-            '统一改用 Python BrowserService 提供的会话创建接口。',
+            '统一改用 TypeScript BrowserService 提供的会话创建接口。',
         );
     }
 
@@ -66,7 +66,7 @@ export class BrowserManager {
      */
     async quickTest(url = 'https://www.baidu.com', waitTime = 3, headless = false, config = null) {
         throw new BrowserError(
-            'BrowserManager.quickTest() 已被禁用：请使用 Python 侧 quick_test 或 BrowserService 的测试接口。',
+            'BrowserManager.quickTest() 已被禁用：请使用 TS BrowserService 的测试接口。',
         );
     }
 
@@ -77,7 +77,7 @@ export class BrowserManager {
      */
     async stealthMode(headless = false) {
         throw new BrowserError(
-            'BrowserManager.stealthMode() 已被禁用：请改用 Python browser_interface.stealth_mode。',
+            'BrowserManager.stealthMode() 已被禁用：请改用 browser_interface.stealth_mode (Python low-level)。',
         );
     }
 
@@ -87,7 +87,7 @@ export class BrowserManager {
      */
     async headlessMode() {
         throw new BrowserError(
-            'BrowserManager.headlessMode() 已被禁用：请改用 Python browser_interface.headless_mode。',
+            'BrowserManager.headlessMode() 已被禁用：请改用 browser_interface.headless_mode (Python low-level)。',
         );
     }
 

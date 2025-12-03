@@ -2,13 +2,35 @@
   "id": "weibo_main_page",
   "name": "微博主页面（已登录）",
   "type": "page",
-  "capabilities": ["scroll", "highlight", "find-child"],
-  "page_patterns": ["weibo.com", "!*login*", "!*passport*"],
+  "capabilities": [
+    "scroll",
+    "highlight",
+    "find-child"
+  ],
+  "page_patterns": [
+    "weibo.com",
+    "!*login*",
+    "!*passport*"
+  ],
   "children": [
     "weibo_main_page.weibo_feed"
   ],
   "selectors": [
-    { "css": "div[class*='Home_wrap_']", "variant": "primary", "score": 1.0 }
+    {
+      "css": "#app > div[class*='Frame_wrap_']",
+      "variant": "primary",
+      "score": 1.0
+    },
+    {
+      "css": "div[class*='Frame_wrap_']",
+      "variant": "fallback",
+      "score": 0.8
+    },
+    {
+      "css": "#app",
+      "variant": "root",
+      "score": 0.5
+    }
   ],
   "operations": [
     {

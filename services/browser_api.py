@@ -252,6 +252,50 @@ def get_cookies_api(session_id: str):
     except Exception as e:
         return create_error_response(f"获取Cookies异常: {str(e)}")
 
+@app.route('/api/v1/sessions/<session_id>/navigate/direct', methods=['POST'])
+def navigate_with_controller(session_id: str):
+    """页面导航（直接控制器方式）"""
+    try:
+        data = request.json or {}
+        url = data.get('url')
+        
+        if not url:
+            return create_error_response("缺少URL参数")
+        
+        # 获取会话控制器
+        controller = browser_service.get_controller(session_id)
+        if not controller:
+            return create_error_response("会话控制器不存在", 404)
+        
+        # 执行导航
+        result = controller.navigate(url)
+        
+        if result.get("success"):
+            # 导航成功后尝试注入脚本
+            print(f"[DEBUG] Navigation successful, attempting to inject scripts for session {session_id}")
+            
+            # 检查浏览器服务是否有inject_scripts方法
+            if hasattr(browser_service, 'inject_scripts'):
+                try:
+                    # 尝试注入脚本
+                    injection_result = browser_service.inject_scripts(session_id)
+                    if injection_result:
+                        print(f"[DEBUG] Scripts successfully injected for session {session_id}")
+                        result["scripts_injected"] = True
+                    else:
+                        print(f"[WARNING] Failed to inject scripts for session {session_id}")
+                except Exception as injection_error:
+                    print(f"[ERROR] Error during script injection: {str(injection_error)}")
+            else:
+                print(f"[WARNING] Browser service does not have inject_scripts method")
+            
+            return create_success_response(result)
+        else:
+            return create_error_response(result.get("error", "导航失败"))
+            
+    except Exception as e:
+        return create_error_response(f"导航异常: {str(e)}")
+
 # 容器管理 API（简化版本，为 DOM 选取创建容器提供后端支持）
 
 @app.route('/api/v1/containers', methods=['GET'])
@@ -325,11 +369,30 @@ def navigate(session_id: str):
         result = browser_service.execute_action(session_id, action)
         
         if result.get("success"):
+            # 导航成功后尝试注入脚本
+            print(f"[DEBUG] Navigation successful, attempting to inject scripts for session {session_id}")
+            
+            # 检查浏览器服务是否有inject_scripts方法
+            if hasattr(browser_service, 'inject_scripts'):
+                try:
+                    # 尝试注入脚本
+                    injection_result = browser_service.inject_scripts(session_id)
+                    if injection_result:
+                        print(f"[DEBUG] Scripts successfully injected for session {session_id}")
+                        result["scripts_injected"] = True
+                    else:
+                        print(f"[WARNING] Failed to inject scripts for session {session_id}")
+                except Exception as injection_error:
+                    print(f"[ERROR] Error during script injection: {str(injection_error)}")
+            else:
+                print(f"[WARNING] Browser service does not have inject_scripts method")
+            
             return create_success_response(result)
         else:
             return create_error_response(result.get("error", "导航失败"))
             
     except Exception as e:
+        print(f"[ERROR] Navigation exception: {str(e)}")
         return create_error_response(f"导航异常: {str(e)}")
 
 @app.route('/api/v1/sessions/<session_id>/restore', methods=['POST'])

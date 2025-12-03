@@ -14,13 +14,28 @@ import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from utils.websocket_client import WebSocketClient
 from utils.config import load_config, save_config
 from commands.session import SessionCommands
 from commands.node import NodeCommands
 from commands.container import ContainerCommands
 from commands.dev import DevCommands
 from commands.workflow import WorkflowCommands
+
+class LazyWebSocketClient:
+    """Lazy loader to avoid importing websockets when未使用"""
+    def __init__(self, url: str):
+        self.url = url
+        self._client = None
+
+    def _ensure_client(self):
+        if self._client is None:
+            from utils.websocket_client import WebSocketClient
+            self._client = WebSocketClient(self.url)
+        return self._client
+
+    def __getattr__(self, item):
+        client = self._ensure_client()
+        return getattr(client, item)
 
 
 @click.group()
@@ -38,7 +53,7 @@ def cli(ctx, websocket_url: str, session: Optional[str], format: str, verbose: b
     ctx.obj['verbose'] = verbose
 
     # 初始化WebSocket客户端
-    ctx.obj['ws_client'] = WebSocketClient(websocket_url)
+    ctx.obj['ws_client'] = LazyWebSocketClient(websocket_url)
 
     # 初始化命令处理器
     ctx.obj['session_commands'] = SessionCommands(ctx.obj)
@@ -184,10 +199,110 @@ def container(ctx):
     pass
 
 # 绑定子命令到容器组
+@click.command('list')
+@click.option('--url', required=True, help='页面URL')
+@click.pass_context
+def container_list(ctx, url: str):
+    commands = ctx.obj['container_commands']
+    result = commands.list_by_url(url)
+    _output_result(ctx, result)
+
+@click.command('show')
+@click.option('--url', required=True)
+@click.option('--id', 'container_id', required=True)
+@click.pass_context
+def container_show(ctx, url: str, container_id: str):
+    commands = ctx.obj['container_commands']
+    result = commands.show_container(url, container_id)
+    _output_result(ctx, result)
+
+@click.command('upsert')
+@click.option('--url', required=True)
+@click.option('--id', 'container_id', required=True)
+@click.option('--selector', required=True)
+@click.option('--name')
+@click.option('--parent')
+@click.option('--event-key')
+@click.option('--actions', help='JSON字符串形式的actions')
+@click.pass_context
+def container_upsert(ctx, url: str, container_id: str, selector: str,
+                     name: str = None, parent: str = None,
+                     event_key: str = None, actions: str = None):
+    commands = ctx.obj['container_commands']
+    actions_payload = json.loads(actions) if actions else None
+    result = commands.upsert_container_cli(url, container_id, selector, name, parent, event_key, actions_payload)
+    _output_result(ctx, result)
+
+@click.command('delete')
+@click.option('--url', required=True)
+@click.option('--id', 'container_id', required=True)
+@click.pass_context
+def container_delete(ctx, url: str, container_id: str):
+    commands = ctx.obj['container_commands']
+    result = commands.delete_container_cli(url, container_id)
+    _output_result(ctx, result)
+
+@container.group()
+def ops():
+    """容器Operation管理"""
+    pass
+
+@ops.command('list')
+@click.option('--url', required=True)
+@click.option('--id', 'container_id', required=True)
+@click.pass_context
+def ops_list(ctx, url: str, container_id: str):
+    commands = ctx.obj['container_commands']
+    result = commands.list_operations(url, container_id)
+    _output_result(ctx, result)
+
+@ops.command('add')
+@click.option('--url', required=True)
+@click.option('--id', 'container_id', required=True)
+@click.option('--type', 'op_type', required=True)
+@click.option('--config', 'config_json', help='JSON字符串形式的配置')
+@click.option('--selector')
+@click.option('--target')
+@click.option('--attribute')
+@click.option('--include-text/--no-include-text', default=False)
+@click.option('--max-items', type=int)
+@click.pass_context
+def ops_add(ctx, url: str, container_id: str, op_type: str, config_json: str,
+            selector: str = None, target: str = None, attribute: str = None,
+            include_text: bool = False, max_items: int = None):
+    commands = ctx.obj['container_commands']
+    result = commands.add_operation_cli(
+        url=url,
+        container_id=container_id,
+        op_type=op_type,
+        config_json=config_json,
+        selector=selector,
+        target=target,
+        attribute=attribute,
+        include_text=include_text,
+        max_items=max_items
+    )
+    _output_result(ctx, result)
+
+@ops.command('remove')
+@click.option('--url', required=True)
+@click.option('--id', 'container_id', required=True)
+@click.argument('index', type=int)
+@click.pass_context
+def ops_remove(ctx, url: str, container_id: str, index: int):
+    commands = ctx.obj['container_commands']
+    result = commands.remove_operation(url, container_id, index)
+    _output_result(ctx, result)
+
 container.add_command(match)
 container.add_command(discover)
 container.add_command(save)
 container.add_command(test_container)
+container.add_command(container_list)
+container.add_command(container_show)
+container.add_command(container_upsert)
+container.add_command(container_delete)
+container.add_command(ops)
 
 
 # Dev模式调试子命令

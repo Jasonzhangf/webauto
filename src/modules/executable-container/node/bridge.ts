@@ -3,8 +3,11 @@ import loader from './loader';
 // @ts-ignore - cjs helper
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const actionExec = require('./action-executor.cjs');
-import path from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { join } from 'path';
+import { pathToFileURL } from 'url';
+import saveUtil from './save';
+
+// process类型已由@types/node提供
 
 export interface AttachOptions {
   site?: string;
@@ -38,7 +41,7 @@ async function attach(page: Page, opts: AttachOptions = {}) {
   if (opts.site) {
     try {
       const index = await loader.loadIndexForSite(opts.site);
-      await page.evaluate((idx) => { (window as any).__containerIndex = idx; }, index);
+      await page.evaluate((idx: any) => { (window as any).__containerIndex = idx; }, index);
     } catch {}
   }
 
@@ -94,7 +97,7 @@ async function attach(page: Page, opts: AttachOptions = {}) {
 }
 
 async function startPicker(page: Page, options: any = {}) {
-  await page.evaluate((opts) => { (window as any).__webautoPicker?.start(opts); }, options);
+  await page.evaluate((opts: any) => { (window as any).__webautoPicker?.start(opts); }, options);
 }
 
 async function stopPicker(page: Page) {
@@ -114,7 +117,7 @@ function resolveNodePath(nodeName: string): string | null {
 async function loadNodeClass(nodeName: string): Promise<any> {
   const rel = resolveNodePath(nodeName);
   if (!rel) throw new Error(`Unknown node: ${nodeName}`);
-  const abs = path.join(process.cwd(), rel);
+  const abs = join(process.cwd(), rel);
   const mod = await import(pathToFileURL(abs).toString());
   return mod?.default || mod;
 }
@@ -132,13 +135,38 @@ function pickOperation(def: any, opKey: string): { node: string; params: any } |
 }
 
 async function executeOperation(page: Page, def: any, opKey: string, opts: { engine?: any; recorder?: any } = {}) {
+  // 特殊处理保存容器操作
+  if (opKey === 'save-container') {
+    try {
+      opts.recorder?.record?.('operation_executing', { opKey, node: 'save-container' });
+      
+      // 确保定义有website属性
+      const website = def.website || (opts as any).site || 'unknown';
+      
+      // 调用saveDefinition函数保存容器
+      const filePath = await saveUtil.saveDefinition(def, { 
+        site: website,
+        fileName: `container_${Date.now()}.json` 
+      });
+      
+      opts.recorder?.record?.('operation_result', { opKey, node: 'save-container', res: { filePath } });
+      return { success: true, filePath, message: '容器保存成功' };
+    } catch (e:any) {
+      opts.recorder?.record?.('operation_error', { opKey, node: 'save-container', error: e?.message || String(e) });
+      return { success: false, error: e?.message || String(e) };
+    }
+  }
+  
+  // 常规操作处理
   const picked = pickOperation(def, opKey);
   if (!picked) return { success: false, error: 'operation not found' };
-  const NodeClass = await loadNodeClass(picked.node);
-  const node = new NodeClass();
-  const logger = console;
-  const context = { page, logger, config: picked.params, engine: opts.engine };
+  
   try {
+    const NodeClass = await loadNodeClass(picked.node);
+    const node = new NodeClass();
+    const logger = console;
+    const context = { page, logger, config: picked.params, engine: opts.engine };
+    
     opts.recorder?.record?.('operation_executing', { opKey, node: picked.node });
     const res = await node.execute(context);
     opts.recorder?.record?.('operation_result', { opKey, node: picked.node, res });

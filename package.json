@@ -5,13 +5,14 @@
   "type": "module",
   "dependencies": {
     "iconv-lite": "^0.6.3",
-    "sharp": "^0.33.5"
+    "sharp": "^0.33.5",
+    "ws": "^8.18.3"
   },
   "scripts": {
     "start:mcp:browser": "npx @browsermcp/mcp@latest",
     "actions:validate": "node scripts/actions-validate.cjs",
     "actions:run": "node scripts/run-action.cjs",
-    "build:services": "tsc -p tsconfig.services.json",
+    "build:services": "node scripts/build/run-services-build.mjs",
     "start": "node dist/src/server.js",
     "start:workflow-api": "node dist/sharedmodule/engines/api-gateway/server.js",
     "start:vision-proxy": "node dist/sharedmodule/engines/vision-engine/server.js",
@@ -32,6 +33,9 @@
   },
   "devDependencies": {
     "@modelcontextprotocol/sdk": "^1.20.1",
-    "camoufox": "^0.1.19"
+    "@types/node": "^24.10.1",
+    "@types/ws": "^8.18.1",
+    "camoufox": "^0.1.19",
+    "playwright": "^1.57.0"
   }
 }

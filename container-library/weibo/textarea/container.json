@@ -1,0 +1,30 @@
+{
+  "id": "textarea",
+  "selectors": [
+    {
+      "variant": "primary",
+      "score": 1.0,
+      "classes": [
+        "index_box_MkWee",
+        "index_box1_2btUY",
+        "wbpro-form",
+        "Form_input_2gtXx"
+      ]
+    }
+  ],
+  "name": "容器: TEXTAREA",
+  "operations": [
+    {
+      "type": "find-child",
+      "config": {}
+    }
+  ],
+  "metadata": {
+    "legacy_data": {
+      "id": "textarea",
+      "name": "容器: TEXTAREA",
+      "selector": "div.index_box_MkWee > div.index_box1_2btUY:nth-of-type(1) > div.wbpro-form > textarea.Form_input_2gtXx"
+    },
+    "converted_at": "2025-11-27T08:06:41.668622"
+  }
+}

@@ -99,6 +99,7 @@ ipcMain.handle('app:get-meta', () => ({
   isDev,
   platform: process.platform,
   autoConnectUrl: process.env.WEBAUTO_FLOATING_WS_URL || '',
+  autoMatchUrl: process.env.WEBAUTO_FLOATING_TARGET_URL || '',
 }));
 
 ipcMain.handle('window:set-collapsed', (_event, shouldCollapse) => {

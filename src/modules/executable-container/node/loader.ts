@@ -1,5 +1,7 @@
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { readFileSync } from 'fs';
+import { join } from 'path';
+
+// process类型已由@types/node提供
 
 function approvedIndexPath(site: string) {
   return join(process.cwd(), 'containers', 'approved', site, 'index.json');

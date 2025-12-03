@@ -44,6 +44,25 @@ export class PageContainerRegistry {
   get(id: string) { return this.instances.get(id) || null; }
   list() { return Array.from(this.instances.values()); }
   size() { return this.instances.size; }
+  
+  // 移除容器实例
+  remove(id: string): boolean {
+    if (!this.instances.has(id)) return false;
+    
+    // 获取要移除的实例
+    const instance = this.instances.get(id)!;
+    
+    // 从父容器的childrenIds中移除
+    if (instance.parentId && this.instances.has(instance.parentId)) {
+      const parent = this.instances.get(instance.parentId)!;
+      if (parent.childrenIds) {
+        parent.childrenIds = parent.childrenIds.filter(childId => childId !== id);
+      }
+    }
+    
+    // 移除实例本身
+    return this.instances.delete(id);
+  }
 }
 
 export const pageRegistry = new PageContainerRegistry();

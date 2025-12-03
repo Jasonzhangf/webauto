@@ -77,8 +77,8 @@ check_dependencies() {
         exit 1
     fi
 
-    if [ ! -f "browser_cli.py" ]; then
-        echo -e "${RED}错误: 未找到browser_cli.py${NC}"
+    if [ ! -f "utils/browser_cli.py" ]; then
+        echo -e "${RED}错误: 未找到utils/browser_cli.py${NC}"
         exit 1
     fi
 }
@@ -147,13 +147,28 @@ main() {
     # 确保profiles目录存在
     mkdir -p profiles
 
-    # 启动浏览器
-    echo -e "${YELLOW}正在启动浏览器...${NC}"
-    python3 browser_cli.py launch \
-        --profile "$PROFILE" \
-        --url "$URL" \
-        $HEADLESS \
-        --cookie-check-interval $COOKIE_CHECK_INTERVAL
+    echo -e "${YELLOW}正在启动 TypeScript 浏览器服务 (one-click)...${NC}"
+    CMD_ARGS=(
+        "node"
+        "utils/scripts/browser/one-click-browser.mjs"
+        "--profile" "$PROFILE"
+        "--url" "$URL"
+    )
+    
+    if [ -n "$HEADLESS" ]; then
+        CMD_ARGS+=("--headless")
+    fi
+    
+    echo -e "➡️  ${CMD_ARGS[*]}"
+    "${CMD_ARGS[@]}"
+    EXIT_CODE=$?
+    
+    if [ $EXIT_CODE -ne 0 ]; then
+        echo -e "${RED}❌ 浏览器执行失败 (exit ${EXIT_CODE})${NC}"
+        exit $EXIT_CODE
+    fi
+    
+    echo -e "${GREEN}✅ 浏览器工作流完成${NC}"
 }
 
 # 检查依赖

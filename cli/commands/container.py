@@ -15,8 +15,9 @@ sys.path.append(str(Path(__file__).parent.parent.parent))
 # 直接导入避免循环依赖
 sys.path.append(os.path.join(Path(__file__).parent.parent.parent, 'services'))
 from container_registry import (
-    get_containers_for_url_v2, save_container_v2, delete_container_v2,
-    list_all_sites_v2, get_container_hierarchy_v2, upsert_container_for_url
+    get_containers_for_url, get_containers_for_url_v2, save_container_v2, delete_container_v2,
+    list_all_sites_v2, get_container_hierarchy_v2, upsert_container_for_url,
+    _load_registry, _find_site_key_for_url
 )
 
 from core.container.models_v2 import (
@@ -32,6 +33,7 @@ class ContainerCommands:
     def __init__(self, cli_context: Dict[str, Any]):
         self.ws_client = cli_context['ws_client']
         self.executor = ContainerOperationExecutor()
+        self._cached_registry = None
 
     def match_root(self, session_id: str, url: str) -> Dict[str, Any]:
         """匹配根容器"""
@@ -66,6 +68,216 @@ class ContainerCommands:
                 'success': False,
                 'error': str(error)
             }
+
+    def list_by_url(self, url: str) -> Dict[str, Any]:
+        """列出指定URL对应站点的所有容器"""
+        try:
+            containers = get_containers_for_url_v2(url)
+            summary = []
+            for cid, container in containers.items():
+                summary.append({
+                    'id': cid,
+                    'name': container.name,
+                    'children': container.children,
+                    'selectors': [sel.to_dict() for sel in container.selectors]
+                })
+            return {
+                'success': True,
+                'url': url,
+                'data': summary,
+                'message': f'Found {len(summary)} containers for {url}'
+            }
+        except Exception as error:
+            return {'success': False, 'error': str(error)}
+
+    def show_container(self, url: str, container_id: str) -> Dict[str, Any]:
+        """展示指定容器详情"""
+        try:
+            container = self._get_container(url, container_id)
+            if not container:
+                return {'success': False, 'error': f'Container {container_id} not found for {url}'}
+            return {
+                'success': True,
+                'url': url,
+                'container': container.to_dict(),
+            }
+        except Exception as error:
+            return {'success': False, 'error': str(error)}
+
+    def dump_container_map(self, url: str) -> Dict[str, Any]:
+        """返回指定URL的容器完整映射"""
+        try:
+            containers = get_containers_for_url_v2(url)
+            payload = {cid: container.to_dict() for cid, container in containers.items()}
+            return {'success': True, 'url': url, 'containers': payload}
+        except Exception as error:
+            return {'success': False, 'error': str(error)}
+
+    def legacy_container_map(self, url: str) -> Dict[str, Any]:
+        """以旧 schema 返回容器映射，供 overlay 兼容"""
+        try:
+            containers = get_containers_for_url(url)
+            return {'success': True, 'data': {'containers': containers}}
+        except Exception as error:
+            return {'success': False, 'error': str(error)}
+
+    def upsert_container_cli(
+        self,
+        url: str,
+        container_id: str,
+        selector: str,
+        description: Optional[str],
+        parent_id: Optional[str],
+        event_key: Optional[str],
+        actions: Optional[Dict[str, Any]]
+    ) -> Dict[str, Any]:
+        """直接将容器写入容器库"""
+        try:
+            if not selector:
+                return {'success': False, 'error': 'Selector required'}
+            payload = upsert_container_for_url(
+                url=url,
+                container_id=container_id,
+                selector=selector,
+                description=description or container_id,
+                parent_id=parent_id,
+                actions=actions,
+                event_key=event_key
+            )
+            return {
+                'success': True,
+                'container_id': container_id,
+                'site': payload.get('website'),
+                'url': url,
+                'message': 'Container saved'
+            }
+        except Exception as error:
+            return {'success': False, 'error': str(error)}
+
+    def delete_container_cli(self, url: str, container_id: str) -> Dict[str, Any]:
+        """删除容器"""
+        try:
+            site_key, _ = self._resolve_site(url)
+            removed = delete_container_v2(site_key, container_id)
+            if not removed:
+                return {'success': False, 'error': f'Container {container_id} not found'}
+            return {'success': True, 'container_id': container_id, 'site_key': site_key}
+        except Exception as error:
+            return {'success': False, 'error': str(error)}
+
+    def list_operations(self, url: str, container_id: str) -> Dict[str, Any]:
+        """列出容器的所有操作"""
+        try:
+            container = self._get_container(url, container_id)
+            if not container:
+                return {'success': False, 'error': f'Container {container_id} not found for {url}'}
+            ops = []
+            for idx, op in enumerate(container.operations):
+                ops.append({
+                    'index': idx,
+                    'type': op.type.value,
+                    'config': op.config
+                })
+            return {'success': True, 'operations': ops, 'container_id': container_id}
+        except Exception as error:
+            return {'success': False, 'error': str(error)}
+
+    def add_operation_cli(
+        self,
+        url: str,
+        container_id: str,
+        op_type: str,
+        config_json: Optional[str],
+        selector: Optional[str],
+        target: Optional[str],
+        attribute: Optional[str],
+        include_text: bool,
+        max_items: Optional[int]
+    ) -> Dict[str, Any]:
+        """封装 CLI 参数，最终追加操作"""
+        try:
+            if config_json:
+                config = json.loads(config_json)
+            elif op_type == OperationType.EXTRACT.value:
+                config = self._build_extract_config(
+                    selector=selector or '',
+                    target=target or 'links',
+                    attribute=attribute,
+                    include_text=include_text,
+                    max_items=max_items,
+                    whitelist=None,
+                    blacklist=None
+                )
+            else:
+                config = {}
+                if selector:
+                    config['selector'] = selector
+        except json.JSONDecodeError as exc:
+            return {'success': False, 'error': f'Invalid JSON config: {exc}'}
+        return self.add_operation(url, container_id, op_type, config)
+
+    def add_operation(
+        self,
+        url: str,
+        container_id: str,
+        op_type: str,
+        config: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """为容器追加 operation"""
+        try:
+            container = self._get_container(url, container_id)
+            if not container:
+                return {'success': False, 'error': f'Container {container_id} not found'}
+            try:
+                op_enum = OperationType(op_type)
+            except ValueError:
+                return {'success': False, 'error': f'Unsupported operation type: {op_type}'}
+            container.operations = list(container.operations)
+            container.operations.append(OperationConfig(type=op_enum, config=config))
+            self._save_container_def(url, container)
+            return {'success': True, 'message': f'Operation {op_type} added', 'index': len(container.operations) - 1}
+        except Exception as error:
+            return {'success': False, 'error': str(error)}
+
+    def update_operation(
+        self,
+        url: str,
+        container_id: str,
+        index: int,
+        op_type: str,
+        config: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """更新指定位置的 operation 配置"""
+        try:
+            container = self._get_container(url, container_id)
+            if not container:
+                return {'success': False, 'error': f'Container {container_id} not found'}
+            if index < 0 or index >= len(container.operations):
+                return {'success': False, 'error': f'Index {index} out of range'}
+            try:
+                op_enum = OperationType(op_type)
+            except ValueError:
+                return {'success': False, 'error': f'Unsupported operation type: {op_type}'}
+            container.operations = list(container.operations)
+            container.operations[index] = OperationConfig(type=op_enum, config=config or {})
+            self._save_container_def(url, container)
+            return {'success': True, 'index': index, 'message': f'Operation {index} updated'}
+        except Exception as error:
+            return {'success': False, 'error': str(error)}
+
+    def remove_operation(self, url: str, container_id: str, index: int) -> Dict[str, Any]:
+        """删除容器中的 operation"""
+        try:
+            container = self._get_container(url, container_id)
+            if not container:
+                return {'success': False, 'error': f'Container {container_id} not found'}
+            if index < 0 or index >= len(container.operations):
+                return {'success': False, 'error': f'Index {index} out of range'}
+            removed = container.operations.pop(index)
+            self._save_container_def(url, container)
+            return {'success': True, 'removed': removed.to_dict()}
+        except Exception as error:
+            return {'success': False, 'error': str(error)}
 
     def discover_children(self, session_id: str, root_selector: Optional[str]) -> Dict[str, Any]:
         """发现子容器"""
@@ -259,6 +471,53 @@ class ContainerCommands:
         # 只允许字母、数字、下划线和短横线
         safe_name = re.sub(r'[^A-Za-z0-9_-]', '_', name)
         return safe_name[:100]
+
+    def _resolve_site(self, url: str) -> (str, Optional[str]):
+        """根据 URL 查找站点 key 和 website 名称"""
+        if not url:
+            raise ValueError("url required")
+        registry = self._cached_registry or _load_registry()
+        site_key = _find_site_key_for_url(url, registry)
+        if not site_key:
+            raise ValueError(f"无法根据 {url} 找到站点，请先保存容器")
+        info = registry.get(site_key, {})
+        self._cached_registry = registry
+        return site_key, info.get('website')
+
+    def _get_container(self, url: str, container_id: str) -> Optional[ContainerDefV2]:
+        containers = get_containers_for_url_v2(url)
+        return containers.get(container_id)
+
+    def _save_container_def(self, url: str, container: ContainerDefV2) -> None:
+        site_key, website = self._resolve_site(url)
+        save_container_v2(site_key, container, parent_id=None, website=website)
+
+    def _build_extract_config(
+        self,
+        selector: str,
+        target: str,
+        attribute: Optional[str],
+        include_text: bool,
+        max_items: Optional[int],
+        whitelist: Optional[Dict[str, List[str]]] = None,
+        blacklist: Optional[Dict[str, List[str]]] = None
+    ) -> Dict[str, Any]:
+        if not selector:
+            raise ValueError("extract operation requires --selector")
+        config: Dict[str, Any] = {
+            'selector': selector,
+            'target': target or 'links',
+            'include_text': include_text
+        }
+        if attribute:
+            config['attribute'] = attribute
+        if max_items is not None:
+            config['maxItems'] = max_items
+        if whitelist:
+            config['whitelist'] = {k: v for k, v in whitelist.items() if v}
+        if blacklist:
+            config['blacklist'] = {k: v for k, v in blacklist.items() if v}
+        return config
 
     def _send_command(self, session_id: str, command: Dict[str, Any]) -> Dict[str, Any]:
         """发送WebSocket命令"""

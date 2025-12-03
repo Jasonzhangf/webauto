@@ -348,6 +348,31 @@ class WebSocketServer:
                     return { "success": False, "error": "No active page" }
                 return { "success": True, "data": info }
 
+            elif node_type in ("eval", "evaluate_js", "evaluate"):
+                expression = parameters.get("expression") or parameters.get("script")
+                arg = parameters.get("arg")
+                if not expression:
+                    return {"success": False, "error": "Eval node requires 'expression'"}
+
+                def _eval(session_obj: BrowserSession, expr: str, arg_value: Any):
+                    page_wrapper = session_obj.current_page
+                    pw = getattr(page_wrapper, "page", None) if page_wrapper else None
+                    if pw is None:
+                        return None
+                    try:
+                        if arg_value is None:
+                            return pw.evaluate(expr)
+                        return pw.evaluate(expr, arg_value)
+                    except Exception as exc:
+                        return {"error": str(exc)}
+
+                result = await session.run(_eval, expression, arg)
+                if result is None:
+                    return {"success": False, "error": "No active page"}
+                if isinstance(result, dict) and result.get("error"):
+                    return {"success": False, "error": result["error"]}
+                return {"success": True, "data": {"result": result}}
+
             else:
                 return {
                     "success": False,

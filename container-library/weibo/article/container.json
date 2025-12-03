@@ -1,0 +1,30 @@
+{
+  "id": "article",
+  "selectors": [
+    {
+      "variant": "primary",
+      "score": 1.0,
+      "classes": [
+        "vue-recycle-scroller__item-wrapper",
+        "vue-recycle-scroller__item-view",
+        "wbpro-scroller-item",
+        "woo-panel-main"
+      ]
+    }
+  ],
+  "name": "容器: ARTICLE",
+  "operations": [
+    {
+      "type": "find-child",
+      "config": {}
+    }
+  ],
+  "metadata": {
+    "legacy_data": {
+      "id": "article",
+      "name": "容器: ARTICLE",
+      "selector": "div.vue-recycle-scroller__item-wrapper:nth-of-type(1) > div.vue-recycle-scroller__item-view:nth-of-type(1) > div.wbpro-scroller-item > article.woo-panel-main"
+    },
+    "converted_at": "2025-11-27T05:57:02.942754"
+  }
+}

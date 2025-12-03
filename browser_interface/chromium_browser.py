@@ -12,6 +12,7 @@ import time
 import sys
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
+from urllib.parse import parse_qs
 
 from abstract_browser import AbstractBrowser, AbstractPage
 from .errors import SecurityError
@@ -25,6 +26,17 @@ from .core.profile_lock import ProfileLockManager
 from .core.cookie_monitor import CookieMonitor
 from .core.cookie_manager import CookieManager
 from .core.sync_cookie_manager import SyncCookieManager
+
+from .container_cli_bridge import (
+    list_containers as cli_list_containers,
+    upsert_container as cli_upsert_container,
+    delete_container as cli_delete_container,
+    add_operation as cli_add_operation,
+    list_operations as cli_list_operations,
+    remove_operation as cli_remove_operation,
+    update_operation as cli_update_operation,
+)
+
 
 class AntiBotError(Exception):
     """Raised when risk control/anti-bot page is detected."""
@@ -58,6 +70,7 @@ class ChromiumBrowserWrapper(AbstractBrowser):
         self._risk_control_enabled = self.config.get("anti_bot_detection", True)
         self._human_delay_range = self.config.get("human_delay_range", (0.5, 2.0))  # Random delay range in seconds
         self._on_risk_control: Optional[Callable] = self.config.get("on_risk_control", None)
+        self._session_id: str = str(self.config.get("session_id") or "")
 
         # 实例检查 - 确保只有一个浏览器实例
         self._instance_id = f"chromium_{self._profile_id}_{os.getpid()}"
@@ -77,6 +90,7 @@ class ChromiumBrowserWrapper(AbstractBrowser):
         # Acquire profile lock (will kill existing instance if any)
         if not self._profile_lock_manager.acquire_lock(self._profile_id):
             raise RuntimeError(f"无法获取profile '{self._profile_id}' 的锁")
+        self._overlay_api_binding = False
 
     # --- Browser/context lifecycle -------------------------------------------------
 
@@ -146,6 +160,7 @@ class ChromiumBrowserWrapper(AbstractBrowser):
                 ctx_opts["storage_state"] = storage_state
 
             self._context = self._browser.new_context(**ctx_opts)
+        self._ensure_overlay_api_binding(self._context)
 
         # Inject DOM selection script
         try:
@@ -232,6 +247,8 @@ class ChromiumBrowserWrapper(AbstractBrowser):
             return
 
         playwright_page = getattr(page, "page", page)
+        if playwright_page is None:
+            return
         resolved_url = url
         if not resolved_url:
             try:
@@ -272,6 +289,198 @@ class ChromiumBrowserWrapper(AbstractBrowser):
             )
         except Exception as exc:
             print(f"⚠️ Overlay容器注入失败: {exc}")
+
+    def _ensure_overlay_api_binding(self, context) -> None:
+        if self._overlay_api_binding or context is None:
+            return
+        try:
+            def _bridge_callback(source, path, options=None):
+                target_page = getattr(source, "page", None)
+                if target_page is None:
+                    active = getattr(self, "_active_page", None)
+                    if active is not None:
+                        target_page = getattr(active, "page", active)
+                return self._handle_overlay_api(path, options or {}, target_page)
+
+            context.expose_binding("__webautoApiBridge", _bridge_callback)
+            self._overlay_api_binding = True
+        except Exception as exc:
+            print(f"⚠️ Overlay API通信桥注册失败: {exc}")
+
+    def _handle_overlay_api(self, raw_path: str, options: Dict[str, Any], page) -> Dict[str, Any]:
+        if page is None:
+            fallback = getattr(self, "_active_page", None)
+            if fallback is not None:
+                page = getattr(fallback, "page", fallback)
+        method = str((options.get("method") or "GET")).upper()
+        body = options.get("body")
+        payload = None
+        if body:
+            try:
+                payload = json.loads(body)
+            except Exception:
+                payload = None
+        rel_path, _, query = (raw_path or "").partition("?")
+        rel_path = rel_path or "/"
+        query_args = parse_qs(query)
+        try:
+            print(f"[overlay-api] {method} {rel_path} query={query_args}")
+        except Exception:
+            pass
+
+        try:
+            if rel_path == "/api/v1/containers":
+                if method == "GET":
+                    url = query_args.get("url", [None])[0] or getattr(page, "url", None)
+                    if not url:
+                        return self._api_error("缺少 url 参数")
+                    result = cli_list_containers(url)
+                    return self._cli_response(result)
+                if method == "POST":
+                    if not payload:
+                        return self._api_error("缺少请求体")
+                    url = payload.get("url") or getattr(page, "url", None)
+                    container_id = payload.get("id")
+                    selector = payload.get("selector")
+                    description = payload.get("title") or payload.get("description") or ""
+                    parent_id = payload.get("parentId") or payload.get("parent_id")
+                    actions = payload.get("actions")
+                    event_key = payload.get("eventKey") or payload.get("event_key")
+                    if not url or not container_id or not selector:
+                        return self._api_error("缺少必要字段(url/id/selector)")
+                    result = cli_upsert_container(
+                        url=url,
+                        container_id=container_id,
+                        selector=selector,
+                        name=description,
+                        parent_id=parent_id,
+                        event_key=event_key,
+                        actions=actions
+                    )
+                    if result.get("success"):
+                        return self._api_ok({"success": True, "data": result}, status=200)
+                    return self._api_error(result.get("error", "容器保存失败"))
+                return self._api_error("不支持的容器操作", 405)
+
+            if rel_path == "/api/v1/container_ops":
+                if method == "GET":
+                    container_id = query_args.get("containerId", [None])[0] or query_args.get("id", [None])[0]
+                    url = query_args.get("url", [None])[0] or getattr(page, "url", None)
+                    if not url or not container_id:
+                        return self._api_error("列出 Operation 需要 url 和 containerId")
+                    result = cli_list_operations(url, container_id)
+                    return self._cli_response(result)
+                if method == "POST":
+                    if not payload:
+                        return self._api_error("缺少请求体")
+                    container_id = payload.get("containerId") or payload.get("id")
+                    url = payload.get("url") or getattr(page, "url", None)
+                    op_type = payload.get("opType") or payload.get("type")
+                    config = payload.get("config") or {}
+                    if not url or not container_id or not op_type:
+                        return self._api_error("添加 Operation 需要 url/containerId/type")
+                    result = cli_add_operation(url, container_id, op_type, config)
+                    return self._cli_response(result)
+                if method in ("PUT", "PATCH"):
+                    if not payload:
+                        return self._api_error("缺少请求体")
+                    container_id = payload.get("containerId") or payload.get("id")
+                    url = payload.get("url") or getattr(page, "url", None)
+                    op_type = payload.get("opType") or payload.get("type")
+                    idx_raw = payload.get("index")
+                    config = payload.get("config") or {}
+                    if idx_raw is None:
+                        return self._api_error("更新 Operation 需要 index")
+                    try:
+                        index = int(idx_raw)
+                    except (ValueError, TypeError):
+                        return self._api_error("index 参数必须为整数")
+                    if not url or not container_id or not op_type:
+                        return self._api_error("更新 Operation 需要 url/containerId/type")
+                    result = cli_update_operation(url, container_id, index, op_type, config)
+                    return self._cli_response(result)
+                if method == "DELETE":
+                    container_id = query_args.get("containerId", [None])[0] or query_args.get("id", [None])[0]
+                    idx_raw = query_args.get("index", [None])[0]
+                    url = query_args.get("url", [None])[0] or getattr(page, "url", None)
+                    if idx_raw is None:
+                        idx_raw = payload.get("index") if payload else None
+                    if idx_raw is None:
+                        return self._api_error("删除 Operation 需要提供 index")
+                    try:
+                        index = int(idx_raw)
+                    except (ValueError, TypeError):
+                        return self._api_error("index 参数必须为整数")
+                    if not url or not container_id:
+                        return self._api_error("删除 Operation 需要 url 和 containerId")
+                    result = cli_remove_operation(url, container_id, index)
+                    return self._cli_response(result)
+                return self._api_error("不支持的 Operation 操作", 405)
+
+            if rel_path.startswith("/api/v1/containers/") and method == "DELETE":
+                container_id = rel_path.split("/")[-1]
+                url = query_args.get("url", [None])[0] or payload.get("url") if payload else None
+                if not url:
+                    return self._api_error("删除容器需要提供 url")
+                result = cli_delete_container(url, container_id)
+                return self._cli_response(result)
+
+            if rel_path.startswith("/api/v1/sessions/"):
+                parts = rel_path.strip("/").split("/")
+                if len(parts) < 5:
+                    return self._api_error("无效的会话操作路径", 404)
+                target_session = parts[3]
+                action = parts[4]
+                if self._session_id and target_session != self._session_id:
+                    return self._api_error("Session 不匹配", 403)
+                return self._handle_overlay_session_action(action, payload or {}, page)
+
+            return self._api_error("未知的 API 请求", 404)
+        except Exception as exc:
+            return self._api_error(f"API 调用失败: {exc}", 500)
+
+    def _handle_overlay_session_action(self, action: str, payload: Dict[str, Any], page):
+        if page is None:
+            return self._api_error("页面不可用", 500)
+        if action == "click":
+            selector = payload.get("selector")
+            if not selector:
+                return self._api_error("缺少 selector", 400)
+            page.click(selector, timeout=5000)
+            return self._api_ok({"success": True})
+
+        if action in ("input", "type", "fill"):
+            selector = payload.get("selector")
+            text = payload.get("text", "")
+            mode = payload.get("mode") or ("fill" if action == "fill" else "type")
+            if not selector:
+                return self._api_error("缺少 selector", 400)
+            if mode == "fill":
+                page.fill(selector, text, timeout=5000)
+            else:
+                page.click(selector, timeout=5000)
+                page.type(selector, text, timeout=5000)
+            return self._api_ok({"success": True})
+
+        if action == "key":
+            key = payload.get("key")
+            if not key:
+                return self._api_error("缺少 key", 400)
+            page.keyboard.press(key)
+            return self._api_ok({"success": True})
+
+        return self._api_error("不支持的会话操作", 405)
+
+    def _api_ok(self, body: Dict[str, Any], status: int = 200) -> Dict[str, Any]:
+        return {"ok": True, "status": status, "body": body}
+
+    def _api_error(self, message: str, status: int = 400) -> Dict[str, Any]:
+        return {"ok": False, "status": status, "body": {"success": False, "error": message}}
+
+    def _cli_response(self, result: Dict[str, Any], status_ok: int = 200) -> Dict[str, Any]:
+        if result.get("success"):
+            return self._api_ok(result, status=status_ok)
+        return self._api_error(result.get("error", "CLI 调用失败"), status=400)
 
     def install_overlay(self, session_id: str, profile_id: Optional[str] = None) -> None:
         try:

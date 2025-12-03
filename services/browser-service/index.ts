@@ -2,12 +2,16 @@ import http from 'http';
 import { IncomingMessage, ServerResponse } from 'http';
 import { setTimeout as delay } from 'timers/promises';
 import { SessionManager, CreateSessionPayload, SESSION_CLOSED_EVENT } from './SessionManager.js';
+import { BrowserWsServer } from './ws-server.js';
 
 type CommandPayload = { action: string; args?: any };
 
 interface BrowserServiceOptions {
   host?: string;
   port?: number;
+  enableWs?: boolean;
+  wsPort?: number;
+  wsHost?: string;
 }
 
 const clients = new Set<ServerResponse>();
@@ -17,6 +21,9 @@ export async function startBrowserService(opts: BrowserServiceOptions = {}) {
   const host = opts.host || '127.0.0.1';
   const port = Number(opts.port || 7704);
   const sessionManager = new SessionManager();
+  const enableWs = opts.enableWs ?? process.env.BROWSER_SERVICE_DISABLE_WS !== '1';
+  const wsHost = opts.wsHost || '127.0.0.1';
+  const wsPort = Number(opts.wsPort || 8765);
   const autoExit = process.env.BROWSER_SERVICE_AUTO_EXIT === '1';
 
   const server = http.createServer(async (req, res) => {
@@ -74,10 +81,22 @@ export async function startBrowserService(opts: BrowserServiceOptions = {}) {
     console.log(`BrowserService listening on http://${host}:${port}`);
   });
 
+  const wsServer = enableWs ? new BrowserWsServer({ host: wsHost, port: wsPort, sessionManager }) : null;
+  if (wsServer) {
+    try {
+      await wsServer.start();
+    } catch (err) {
+      console.warn('[browser-service] failed to start WebSocket server:', (err as Error).message);
+    }
+  }
+
   const shutdown = async () => {
     server.close();
     clients.forEach((client) => client.end());
     autoLoops.forEach((timer) => clearInterval(timer));
+    if (wsServer) {
+      await wsServer.stop().catch(() => {});
+    }
     await sessionManager.shutdown();
   };
 
@@ -199,7 +218,12 @@ function broadcast(event: string, data: any) {
 if (import.meta.url === process.argv[1]) {
   const hostArg = process.argv.indexOf('--host');
   const portArg = process.argv.indexOf('--port');
+  const wsPortArg = process.argv.indexOf('--ws-port');
+  const wsHostArg = process.argv.indexOf('--ws-host');
+  const disableWs = process.argv.includes('--no-ws');
   const host = hostArg >= 0 ? process.argv[hostArg + 1] : '127.0.0.1';
   const port = portArg >= 0 ? Number(process.argv[portArg + 1]) : 7704;
-  startBrowserService({ host, port });
+  const wsPort = wsPortArg >= 0 ? Number(process.argv[wsPortArg + 1]) : 8765;
+  const wsHost = wsHostArg >= 0 ? process.argv[wsHostArg + 1] : '127.0.0.1';
+  startBrowserService({ host, port, wsHost, wsPort, enableWs: !disableWs });
 }

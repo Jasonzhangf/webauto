@@ -40,6 +40,9 @@ const state = {
     protocol: 'ws',
   },
   collapsed: false,
+  autoMatchUrl: '',
+  autoMatchAttempts: 0,
+  autoMatchDone: false,
 };
 
 class ControlPlaneClient {
@@ -353,10 +356,24 @@ async function refreshSessions() {
     }
     renderSessions();
     renderSelectedSession();
+    await maybeAutoMatch();
   } catch (err) {
     appendLog('error', err?.message || String(err));
   } finally {
     dom.refreshSessions.disabled = false;
+  }
+}
+
+async function maybeAutoMatch() {
+  if (!state.autoMatchUrl || state.autoMatchDone) return;
+  if (!state.selectedSessionId) return;
+  if (state.autoMatchAttempts >= 3) return;
+
+  state.autoMatchAttempts += 1;
+  dom.urlInput.value = state.autoMatchUrl;
+  const success = await executeMatch(state.autoMatchUrl);
+  if (success) {
+    state.autoMatchDone = true;
   }
 }
 
@@ -391,15 +408,22 @@ async function handleCreateSession(event) {
 
 async function handleMatch(event) {
   event.preventDefault();
-  if (!state.client) return;
-  if (!state.selectedSessionId) {
-    dom.matchResult.textContent = '请先选择会话';
-    return;
-  }
   const url = dom.urlInput.value.trim();
   if (!url) {
     dom.matchResult.textContent = '请输入 URL';
     return;
+  }
+  const success = await executeMatch(url);
+  if (success) {
+    await refreshSessions();
+  }
+}
+
+async function executeMatch(url) {
+  if (!state.client) return false;
+  if (!state.selectedSessionId) {
+    dom.matchResult.textContent = '请先选择会话';
+    return false;
   }
 
   dom.matchResult.textContent = '匹配中...';
@@ -413,9 +437,10 @@ async function handleMatch(event) {
       state.selectedSessionId,
     );
     dom.matchResult.textContent = renderMatchResult(response);
-    await refreshSessions();
+    return Boolean(response?.data?.success);
   } catch (err) {
     dom.matchResult.textContent = err?.message || '匹配失败';
+    return false;
   }
 }
 
@@ -425,8 +450,8 @@ function renderMatchResult(response) {
     return response.data?.error || '未匹配到容器';
   }
   const payload = response.data.data || {};
-  const container = payload.matched_container;
-  const matchDetails = payload.match_details || {};
+  const container = payload.matched_container || payload.container;
+  const matchDetails = payload.match_details || payload.matchDetails || {};
   const selector = matchDetails.matched_selector || matchDetails.selector || '未返回选择器';
   const lines = [
     `容器: ${container?.name || container?.id || 'N/A'}`,
@@ -540,6 +565,9 @@ function appendLog(type, payload) {
   state.logs.unshift({ type, payload, timestamp });
   state.logs = state.logs.slice(0, 60);
   renderLogs();
+  if (type === 'response') {
+    maybeAutoApplyMatchResult(payload);
+  }
 }
 
 function renderLogs() {
@@ -549,7 +577,7 @@ function renderLogs() {
     return;
   }
 
-  state.logs.forEach((entry) => {
+  state.logs.forEach((entry, idx) => {
     const node = document.createElement('div');
     node.className = `log-entry ${entry.type.includes('error') ? 'error' : entry.type.includes('response') ? 'success' : ''}`;
     const title = document.createElement('div');
@@ -557,10 +585,42 @@ function renderLogs() {
     title.textContent = `${entry.timestamp.toLocaleTimeString()} · ${entry.type}`;
     const body = document.createElement('pre');
     body.textContent = typeof entry.payload === 'string' ? entry.payload : JSON.stringify(entry.payload, null, 2);
+    const copyBtn = document.createElement('button');
+    copyBtn.className = 'copy-btn';
+    copyBtn.textContent = '复制';
+    copyBtn.addEventListener('click', async () => {
+      const text = typeof entry.payload === 'string' ? entry.payload : JSON.stringify(entry.payload, null, 2);
+      try {
+        await navigator.clipboard.writeText(text);
+        copyBtn.textContent = '已复制';
+        setTimeout(() => (copyBtn.textContent = '复制'), 1200);
+      } catch (err) {
+        console.error('clipboard failed', err);
+      }
+    });
+    const actions = document.createElement('div');
+    actions.className = 'log-actions';
+    actions.appendChild(copyBtn);
     node.appendChild(title);
+    node.appendChild(actions);
     node.appendChild(body);
     dom.logStream.appendChild(node);
   });
+}
+
+function maybeAutoApplyMatchResult(response) {
+  const data = response?.data;
+  if (!data) return;
+  const matchPayload = data.data;
+  if (!matchPayload) return;
+  const hasMatchFields =
+    matchPayload.matched_container || matchPayload.container || matchPayload.match_details;
+  if (!hasMatchFields) return;
+  const sessionId = response.session_id || '';
+  if (state.selectedSessionId && sessionId && sessionId !== state.selectedSessionId) {
+    return;
+  }
+  dom.matchResult.textContent = renderMatchResult(response);
 }
 
 function updatePinButton() {
@@ -577,6 +637,14 @@ async function maybeAutoConnect() {
     try {
       const meta = await window.desktopAPI.getMeta();
       autoUrl = meta?.autoConnectUrl || '';
+      if (meta?.autoMatchUrl) {
+        state.autoMatchUrl = meta.autoMatchUrl;
+        state.autoMatchAttempts = 0;
+        state.autoMatchDone = false;
+        if (!dom.urlInput.value) {
+          dom.urlInput.value = meta.autoMatchUrl;
+        }
+      }
     } catch (err) {
       appendLog('error', err?.message || String(err));
     }

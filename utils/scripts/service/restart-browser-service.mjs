@@ -1,7 +1,5 @@
 #!/usr/bin/env node
-// 重启浏览器远程服务栈：
-// 1) Node 侧 remote-service (7704，libs/browser/remote-service.js)
-// 2) Python BrowserService (Camoufox 后端，默认 8888，services/browser_launcher.py)
+// 重启 TypeScript 浏览器远程服务栈（libs/browser/remote-service.js）
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
@@ -24,9 +22,6 @@ async function main(){
   const host = String(cfg.host || '0.0.0.0');
   await run(join(root,'utils/scripts/service/stop-browser-service.mjs'), []);
   await run(join(root,'utils/scripts/service/start-browser-service.mjs'), ['--host', host, '--port', String(port)]);
-
-  // 同时重启 Python BrowserService（Camoufox 后端），保证 browser_interface.py 等改动立即生效
-  await run(join(root,'utils/scripts/service/restart-python-browser-service.mjs'), []);
 }
 
 main().catch(e=>{ console.error('[restart] failed:', e?.message||String(e)); process.exit(1); });

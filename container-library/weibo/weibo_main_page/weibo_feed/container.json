@@ -2,11 +2,28 @@
   "id": "weibo_main_page.weibo_feed",
   "name": "微博内容流",
   "type": "content",
-  "capabilities": ["scroll", "click", "highlight", "find-child"],
-  "page_patterns": ["weibo.com", "!*login*", "!*passport*"],
+  "capabilities": [
+    "scroll",
+    "click",
+    "highlight",
+    "find-child"
+  ],
+  "page_patterns": [
+    "weibo.com",
+    "!*login*",
+    "!*passport*"
+  ],
   "selectors": [
-    { "css": "div[class*='Home_feed_']", "variant": "primary", "score": 1.0 },
-    { "css": "div[class*='Scroll_container_']", "variant": "backup", "score": 0.7 }
+    {
+      "css": "div[class*='Home_feed_']",
+      "variant": "primary",
+      "score": 1.0
+    },
+    {
+      "css": "div[class*='Scroll_container_']",
+      "variant": "backup",
+      "score": 0.7
+    }
   ],
   "operations": [
     {
@@ -23,5 +40,9 @@
         "distance": 300
       }
     }
+  ],
+  "children": [
+    "textarea",
+    "div"
   ]
 }

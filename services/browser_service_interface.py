@@ -4,9 +4,42 @@ WebAuto 应用层浏览器服务抽象层
 """
 
 from abc import ABC, abstractmethod
-from typing import Optional, Dict, Any, List, Union
+from typing import Optional, Dict, Any, List, Union, Set
 from dataclasses import dataclass
 from enum import Enum
+
+# 定义必要的数据类
+def dataclass_from_dict(cls, data):
+    """从字典创建数据类实例"""
+    return cls(**{k: v for k, v in data.items() if k in cls.__annotations__})
+
+@dataclass
+class BrowserProfile:
+    """浏览器配置信息"""
+    name: str = "default"
+    user_agent: Optional[str] = None
+    viewport: Optional[Dict[str, int]] = None
+    proxy: Optional[str] = None
+    cookies_dir: Optional[str] = None
+    headless: bool = False
+
+@dataclass
+class PageTemplate:
+    """页面模板信息"""
+    id: str
+    url: str
+    elements: List[Dict[str, Any]]
+    actions: Optional[List[Dict[str, Any]]] = None
+
+@dataclass
+class PageAction:
+    """页面操作信息"""
+    action_type: Any
+    value: Any = None
+    selector: Optional[str] = None
+    script: Optional[str] = None
+    wait_for: Optional[int] = None
+    timeout: Optional[int] = None
 
 class BrowserActionType(Enum):
     """浏览器操作类型"""
@@ -96,6 +129,11 @@ class AbstractBrowserService(ABC):
     @abstractmethod
     def close_session(self, session_id: str) -> Dict[str, Any]:
         """关闭浏览器会话"""
+        pass
+    
+    @abstractmethod
+    def execute_action(self, session_id: str, action: PageAction) -> Dict[str, Any]:
+        """执行页面操作"""
         pass
     
     @abstractmethod

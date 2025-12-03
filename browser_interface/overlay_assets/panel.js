@@ -30,6 +30,26 @@
     }
 
     function apiFetch(path, options) {
+      const hasBridge = typeof window !== 'undefined' && typeof window.__webautoApiBridge === 'function';
+      if (hasBridge) {
+        try {
+          const normalized = options || {};
+          const bridgeCall = window.__webautoApiBridge(path, normalized);
+          const bridgePromise = bridgeCall && typeof bridgeCall.then === 'function'
+            ? bridgeCall
+            : Promise.resolve(bridgeCall);
+          return bridgePromise.then((res) => {
+            const payload = res || {};
+            return {
+              ok: payload.ok !== false,
+              status: payload.status || 200,
+              json: async () => (payload.body !== undefined ? payload.body : payload)
+            };
+          });
+        } catch (error) {
+          console.warn('[overlay] api bridge fallback to fetch', error);
+        }
+      }
       return fetch(apiUrl(path), options);
     }
 
@@ -399,6 +419,7 @@
         min-width: 260px;
         max-width: 480px;
         box-sizing: border-box;
+        min-height: 0;
       }
       .wa-right {
         flex: 1 1 58%;
@@ -410,6 +431,7 @@
         background: #022c22;
         min-height: 0;
         box-sizing: border-box;
+        overflow-y: auto;
       }
       @media (max-width: 960px) {
         .wa-body {
@@ -452,11 +474,16 @@
   padding: 6px 4px;
   font-size: 12px;
   overflow: auto;
+  min-height: 0;
 }
 .wa-tree-node {
   padding: 2px 6px;
   border-radius: 4px;
   color: #9ca3af;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  cursor: pointer;
 }
 .wa-tree-node-root {
   font-weight: 500;
@@ -472,6 +499,22 @@
 .wa-tree-children {
   margin-top: 2px;
   margin-left: 14px;
+}
+.wa-tree-node-actions {
+  display: flex;
+  gap: 6px;
+  margin-left: auto;
+}
+.wa-tree-delete {
+  border: none;
+  background: transparent;
+  color: #f87171;
+  font-size: 11px;
+  cursor: pointer;
+  padding: 0;
+}
+.wa-tree-delete:hover {
+  text-decoration: underline;
 }
 .wa-section {
   border-radius: 10px;
@@ -520,6 +563,12 @@
   background: #020617;
   border: 1px solid #111827;
   margin-bottom: 3px;
+}
+.wa-op-summary {
+  font-size: 10px;
+  color: #9ca3af;
+  margin-left: 6px;
+  flex: 1.2;
 }
 .wa-op-handle {
   font-size: 11px;
@@ -661,6 +710,7 @@
         try {
           window.__webautoOverlaySessionId = __SID__;
           window.__webautoOverlayVersion = 'python-v2-operations-edit';
+          window.__waOverlayDebug = true;
         } catch (e) { }
 
         // 顶部 pill（SID/Profile + 打开编辑器按钮）
@@ -747,6 +797,8 @@
         // 容器树 tab 采用左右布局：左侧树，右侧编辑区
         tabContentTree.style.display = 'flex';
         tabContentTree.style.flexDirection = 'row';
+        tabContentTree.style.flex = '1';
+        tabContentTree.style.minHeight = '0';
 
         const left = document.createElement('div');
         left.className = 'wa-left';
@@ -802,6 +854,68 @@
             capabilities: [],
             operations: []
           }, parentId);
+        }
+
+        function extractContainerMap(payload) {
+          if (!payload) return {};
+          if (payload.containers) return payload.containers;
+          if (payload.data) {
+            if (payload.data.containers) return payload.data.containers;
+            if (payload.data.data && payload.data.data.containers) return payload.data.data.containers;
+          }
+          return payload;
+        }
+
+        function reloadContainers(statusMessage) {
+          const targetUrl = window.location.href;
+          apiFetch('/api/v1/containers?url=' + encodeURIComponent(targetUrl), { method: 'GET' })
+            .then(r => r.json())
+            .then(j => {
+              const containers = extractContainerMap(j) || {};
+              if (window.__waOverlayDebug) {
+                console.log('[overlay] 容器列表刷新结果', containers);
+              }
+              if (containers && typeof containers === 'object' && !Array.isArray(containers)) {
+                containersById = containers;
+                renderContainerTree(containersById);
+              }
+              if (statusMessage) {
+                setDomStatus(statusMessage);
+              }
+            })
+            .catch(error => {
+              const msg = '容器列表刷新失败: ' + (error && error.message ? error.message : String(error));
+              setDomStatus(msg);
+              if (window.__waOverlayDebug) {
+                console.error('[overlay] 刷新容器失败', error);
+              }
+            });
+        }
+
+        function deleteContainerById(containerId) {
+          if (!containerId) return;
+          setDomStatus('正在删除容器 ' + containerId + '...');
+          const targetUrl = encodeURIComponent(window.location.href);
+          apiFetch('/api/v1/containers/' + encodeURIComponent(containerId) + '?url=' + targetUrl, {
+            method: 'DELETE',
+            headers: { 'Content-Type': 'application/json' }
+          }).then(r => r.json()).then(j => {
+            if (window.__waOverlayDebug) {
+              console.log('[overlay] 删除容器响应', j);
+            }
+            if (j && j.success) {
+              setDomStatus('已删除容器: ' + containerId);
+              reloadContainers();
+            } else {
+              setDomStatus('删除失败: ' + (j && j.error ? j.error : '未知错误'));
+            }
+          }).catch(error => {
+            const msg = '删除失败: ' + (error && error.message ? error.message : String(error));
+            setDomStatus(msg);
+            if (window.__waOverlayDebug) {
+              console.error('[overlay] 删除容器异常', error);
+            }
+          });
         }
 
         function focusTreeNode(containerId) {
@@ -884,6 +998,14 @@
             f1v.textContent = container.description || id;
             f2v.textContent = selectorText || '';
             f3v.textContent = id;
+
+            // Update Parent ID in Create Form if it exists
+            try {
+              if (fieldParentIdValue) {
+                fieldParentIdValue.value = id;
+              }
+            } catch { }
+
             renderOpsForContainer(id);
           } catch { }
         }
@@ -942,6 +1064,99 @@
           return { mode: 'simple', text: rawText || 'webauto-test' };
         }
 
+        function sanitizeExtractConfig(raw, keyHint) {
+          const config = Object.assign({}, raw || {});
+          if (!config.selector && raw && raw.selector) {
+            config.selector = raw.selector;
+          }
+          delete config.type;
+          if (!config.target) {
+            if (keyHint && keyHint.includes('image')) {
+              config.target = 'images';
+            } else if (keyHint && keyHint.includes('video')) {
+              config.target = 'videos';
+            } else {
+              config.target = 'links';
+            }
+          }
+          if (typeof config.include_text === 'boolean' && config.include_text) {
+            config.include_text = true;
+          }
+          return config;
+        }
+
+        function collectExtractOperations(actions) {
+          const entries = [];
+          if (!actions) return entries;
+          Object.keys(actions).forEach(key => {
+            if (!key || !key.startsWith('extract')) return;
+            const value = actions[key];
+            if (!value || typeof value !== 'object') return;
+            const config = sanitizeExtractConfig(value, key);
+            if (!config.selector) return;
+            entries.push(config);
+          });
+          return entries;
+        }
+
+        async function syncExtractOperations(containerId, actions, statusEl) {
+          const extracts = collectExtractOperations(actions);
+          const pageUrl = normalizeUrl(window.location.href || '');
+          if (!containerId || !pageUrl) return;
+          const queryBase = `/api/v1/container_ops?url=${encodeURIComponent(pageUrl)}&containerId=${encodeURIComponent(containerId)}`;
+          const setStatus = (msg) => {
+            if (statusEl) statusEl.textContent = msg;
+          };
+          try {
+            const listResp = await apiFetch(queryBase, { method: 'GET' });
+            const listJson = await listResp.json();
+            const existing = (listJson && listJson.operations) || [];
+            const extractIndexes = existing
+              .filter(op => (op && op.type) === 'extract' && typeof op.index === 'number')
+              .map(op => op.index)
+              .sort((a, b) => b - a);
+            if (extractIndexes.length) {
+              setStatus('正在清理旧的提取 Operation...');
+              for (const idx of extractIndexes) {
+                const delResp = await apiFetch(`${queryBase}&index=${encodeURIComponent(idx)}`, { method: 'DELETE' });
+                const delJson = await delResp.json();
+                if (!delJson || !delJson.success) {
+                  throw new Error(delJson && delJson.error ? delJson.error : `删除 Operation ${idx} 失败`);
+                }
+              }
+            }
+            if (!extracts.length) {
+              if (extractIndexes.length) {
+                setStatus('已移除全部提取 Operation');
+              }
+              return;
+            }
+            let counter = 0;
+            for (const cfg of extracts) {
+              setStatus(`正在同步提取 Operation (${counter + 1}/${extracts.length})...`);
+              const payload = {
+                url: pageUrl,
+                containerId,
+                opType: 'extract',
+                config: cfg
+              };
+              const addResp = await apiFetch('/api/v1/container_ops', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+              });
+              const addJson = await addResp.json();
+              if (!addJson || !addJson.success) {
+                throw new Error(addJson && addJson.error ? addJson.error : '添加提取 Operation 失败');
+              }
+              counter += 1;
+            }
+            setStatus('提取 Operation 已同步');
+          } catch (error) {
+            setStatus('提取 Operation 同步失败: ' + (error && error.message ? error.message : String(error)));
+          }
+        }
+
         function renderOpsForContainer(id) {
           const c = containersById[id] || {};
           currentContainerId = id;
@@ -971,13 +1186,16 @@
           let dragKey = null;
 
           function rebuildOpsWithOrder(orderKeys) {
-            const next = [];
-            orderKeys.forEach(k => {
-              if (currentOps[k]) next.push(k);
+            const snapshot = {};
+            Object.keys(currentOps || {}).forEach(k => {
+              snapshot[k] = currentOps[k];
             });
-            // 清空并按新顺序写回同一引用
-            Object.keys(currentOps).forEach(k => delete currentOps[k]);
-            next.forEach(k => { currentOps[k] = true; });
+            Object.keys(currentOps || {}).forEach(k => delete currentOps[k]);
+            orderKeys.forEach(k => {
+              if (Object.prototype.hasOwnProperty.call(snapshot, k)) {
+                currentOps[k] = snapshot[k];
+              }
+            });
             containersById[id].actions = currentOps;
             renderOpsForContainer(id);
           }
@@ -1040,6 +1258,24 @@
               nameSpan.className = 'wa-op-name';
               nameSpan.textContent = key;
               nameSpan.style.color = '#f9fafb';
+              const infoWrap = document.createElement('div');
+              infoWrap.style.display = 'flex';
+              infoWrap.style.flexDirection = 'column';
+              infoWrap.style.flex = '1';
+              infoWrap.appendChild(nameSpan);
+              const opValue = currentOps[key];
+              let configBtn = null;
+              if (opValue && typeof opValue === 'object' && opValue.type === 'extract') {
+                const summary = document.createElement('span');
+                summary.className = 'wa-op-summary';
+                summary.textContent = `目标: ${opValue.target || 'links'} · 选择器: ${opValue.selector || ''}`;
+                infoWrap.appendChild(summary);
+                configBtn = document.createElement('button');
+                configBtn.className = 'wa-btn-link';
+                configBtn.textContent = '配置';
+                configBtn.style.marginRight = '4px';
+                configBtn.addEventListener('click', () => configureExtractOperation(id, key));
+              }
 
               const btnUp = document.createElement('button');
               btnUp.className = 'wa-btn-link';
@@ -1075,7 +1311,10 @@
               });
 
               li.appendChild(handleSpan);
-              li.appendChild(nameSpan);
+              li.appendChild(infoWrap);
+              if (configBtn) {
+                li.appendChild(configBtn);
+              }
               li.appendChild(btnUp);
               li.appendChild(btnDown);
               li.appendChild(removeBtn);
@@ -1090,6 +1329,44 @@
             { key: 'fill', label: '输入-填充值 (fill)' },
             { key: 'pressEnter', label: '按 Enter' },
             { key: 'pressEsc', label: '按 Esc' },
+            {
+              key: 'extract.links',
+              label: '提取链接 (extract links)',
+              type: 'extract',
+              config: {
+                target: 'links',
+                selector: "article a[href]",
+                attribute: 'href',
+                include_text: true,
+                maxItems: 20,
+                whitelist: {
+                  prefix: ['http://', 'https://'],
+                  contains: []
+                },
+                blacklist: {
+                  contains: ['javascript:', 'help.weibo.com', 'passport.weibo.com'],
+                  suffix: ['#']
+                }
+              }
+            },
+            {
+              key: 'extract.images',
+              label: '提取图片 (extract images)',
+              type: 'extract',
+              config: {
+                target: 'images',
+                selector: "article img",
+                attribute: 'src',
+                include_text: false,
+                maxItems: 12,
+                whitelist: {
+                  contains: ['sinaimg.cn', 'wx', 'tvax']
+                },
+                blacklist: {
+                  contains: ['avatar', 'icon', 'vipimg']
+                }
+              }
+            }
           ];
           pal.innerHTML = '';
           OPS.forEach(op => {
@@ -1103,6 +1380,13 @@
             testBtn.className = 'wa-btn-link';
             testBtn.textContent = '单项测试';
             testBtn.addEventListener('click', () => {
+              if (op.type === 'extract') {
+                const statusEl = sectionOps && sectionOps.__waOpStatus;
+                if (statusEl) {
+                  statusEl.textContent = '提取 Operation 需运行 Workflow 才能查看结果（暂不支持在 overlay 中直接测试）';
+                }
+                return;
+              }
               try {
                 const statusEl = sectionOps && sectionOps.__waOpStatus;
                 const c2 = containersById[currentContainerId] || {};
@@ -1174,7 +1458,25 @@
                 // 已在列表中，避免重复添加；如需移除请在上方列表里点“移除”
                 return;
               }
-              currentOps[op.key] = true;
+              if (op.type === 'extract') {
+                const cfg = JSON.parse(JSON.stringify(op.config || {}));
+                cfg.type = 'extract';
+                cfg.target = cfg.target || 'links';
+                const selectorInput = window.prompt('提取范围 Selector（留空使用默认）', cfg.selector || '');
+                if (selectorInput === null) return;
+                cfg.selector = selectorInput.trim() || cfg.selector || '';
+                if (!cfg.selector) {
+                  alert('Selector 不能为空');
+                  return;
+                }
+                const attrInput = window.prompt('提取属性 (href/src，可留空)', cfg.attribute || '');
+                if (attrInput !== null) {
+                  cfg.attribute = attrInput.trim() || cfg.attribute || undefined;
+                }
+                currentOps[op.key] = cfg;
+              } else {
+                currentOps[op.key] = true;
+              }
               containersById[id].actions = currentOps;
               renderOpsForContainer(id);
             });
@@ -1241,7 +1543,7 @@
               matchedContainers[rootId] = rootContainer;
               matchedRootIds.add(rootId);
               // 添加所有子容器
-              addSubtreeToMatched(rootId, containers, matchedContainers);
+              addSubtreeToMatched(rootId, containers, matchedContainers, new Set());
             }
           }
 
@@ -1256,15 +1558,32 @@
         }
 
         // 简化版：直接添加所有子容器
-        function addSubtreeToMatched(containerId, allContainers, matchedContainers) {
+        function addSubtreeToMatched(containerId, allContainers, matchedContainers, visited) {
+          visited = visited || new Set();
+          if (!containerId || visited.has(containerId)) {
+            if (window.__waOverlayDebug && visited.has(containerId)) {
+              console.warn('[overlay] 检测到循环引用: ' + containerId);
+            }
+            return;
+          }
+          visited.add(containerId);
+
           const container = allContainers[containerId];
           if (!container || !container.children) return;
 
           container.children.forEach(childId => {
+            if (!childId) {
+              return;
+            }
+            if (visited.has(childId)) {
+              if (window.__waOverlayDebug) {
+                console.warn('[overlay] 跳过循环子容器: ' + childId);
+              }
+              return;
+            }
             if (allContainers[childId]) {
               matchedContainers[childId] = allContainers[childId];
-              // 递归添加子容器的子容器
-              addSubtreeToMatched(childId, allContainers, matchedContainers);
+              addSubtreeToMatched(childId, allContainers, matchedContainers, visited);
             }
           });
         }
@@ -1283,11 +1602,11 @@
         }
 
         // 渲染根容器（带折叠功能）
-              function renderRootContainer(id, containers, depth, expandedStates) {
-                const container = containers[id];
-                // 若根本身未命中且也没有任何匹配的子孙，则跳过
-                const hasRootMatch = !!container;
-                if (!hasRootMatch) return;
+        function renderRootContainer(id, containers, depth, expandedStates) {
+          const container = containers[id];
+          // 若根本身未命中且也没有任何匹配的子孙，则跳过
+          const hasRootMatch = !!container;
+          if (!hasRootMatch) return;
 
           const rootElement = document.createElement('div');
           rootElement.className = 'wa-tree-root-container';
@@ -1308,10 +1627,10 @@
           title.textContent = container.description || id;
 
           // 匹配统计
-                const matchedCount = countMatchedDescendants(id, containers);
-                // 根容器本身命中即可展示；或者其子孙有命中
-                // 因为 containers 传入的是 matchedContainers，若根命中一定存在于 containers 中
-                // 因此这里不再因为 0 而过滤
+          const matchedCount = countMatchedDescendants(id, containers, new Set());
+          // 根容器本身命中即可展示；或者其子孙有命中
+          // 因为 containers 传入的是 matchedContainers，若根命中一定存在于 containers 中
+          // 因此这里不再因为 0 而过滤
           const stats = document.createElement('span');
           stats.className = 'wa-tree-root-stats';
           stats.textContent = `(${matchedCount} 匹配)`;
@@ -1355,7 +1674,15 @@
         }
 
         // 渲染子容器
-        function renderChildContainer(id, containers, parentElement, depth) {
+        function renderChildContainer(id, containers, parentElement, depth, visitedSet) {
+          const visited = visitedSet || new Set();
+          if (!id || visited.has(id)) {
+            if (window.__waOverlayDebug && visited.has(id)) {
+              console.warn('[overlay] 子容器循环: ' + id);
+            }
+            return;
+          }
+          visited.add(id);
           const container = containers[id];
           if (!container) return;
 
@@ -1380,7 +1707,7 @@
           label.className = 'wa-tree-node-label';
           label.textContent = container.description || id;
 
-          const childIds = (container.children || []).filter(childId => containers[childId]);
+          const childIds = (container.children || []).filter(childId => childId && containers[childId] && !visited.has(childId));
           let childWrapper = null;
           let expandIcon = null;
 
@@ -1421,7 +1748,7 @@
             childWrapper.className = 'wa-tree-children';
             childWrapper.style.marginLeft = '18px';
             childIds.forEach(childId => {
-              renderChildContainer(childId, containers, childWrapper, depth + 1);
+              renderChildContainer(childId, containers, childWrapper, depth + 1, new Set(visited));
             });
             node.appendChild(childWrapper);
           }
@@ -1431,15 +1758,22 @@
         }
 
         // 计算匹配的子容器数量
-        function countMatchedDescendants(containerId, containers) {
+        function countMatchedDescendants(containerId, containers, visitedSet) {
           const container = containers[containerId];
           if (!container || !container.children) return 0;
+          const visited = visitedSet || new Set();
+          if (visited.has(containerId)) {
+            return 0;
+          }
+          visited.add(containerId);
 
           let count = 0;
           const checkChildren = (children) => {
             children.forEach(childId => {
+              if (!childId || visited.has(childId)) return;
               if (containers[childId]) {
                 count++;
+                visited.add(childId);
                 const child = containers[childId];
                 if (child.children) {
                   checkChildren(child.children);
@@ -1477,7 +1811,9 @@
             const matchedData = await filterMatchedRootContainers(containers);
             // 用匹配结果作为当前容器源，便于右侧详情读取 selector/children
             containersById = matchedData.matchedContainers || {};
-            tree.removeChild(progressElement);
+            if (progressElement.parentNode === tree) {
+              tree.removeChild(progressElement);
+            }
 
             // 如果过滤后没有任何命中，等待 DOM 稳定后自动重试几次
             if (!matchedData.matchedRoots || matchedData.matchedRoots.length === 0) {
@@ -1528,12 +1864,14 @@
                   currentContainerId = first;
                 }
               }
-            } catch {}
+            } catch { }
 
             console.log(`渲染完成: ${matchedData.stats.rootCount} 个根容器, ${matchedData.stats.matched} 个匹配容器`);
           } catch (error) {
             console.error('容器树渲染失败:', error);
-            tree.removeChild(progressElement);
+            if (progressElement.parentNode === tree) {
+              tree.removeChild(progressElement);
+            }
             const errorNode = document.createElement('div');
             errorNode.className = 'wa-tree-node';
             errorNode.textContent = '渲染容器树时发生错误';
@@ -1542,70 +1880,167 @@
           }
         }
 
-        function renderContainerTree(containers) {
-          containersById = containers || {};
-          tree.innerHTML = '';
-          treeNodes = [];
+        function parseCsvList(raw) {
+          if (!raw || typeof raw !== 'string') return [];
+          return raw.split(',').map(part => part.trim()).filter(Boolean);
+        }
 
-          const parentMap = {};
-          Object.keys(containersById).forEach(id => {
-            const c = containersById[id] || {};
-            (c.children || []).forEach(childId => {
-              parentMap[childId] = id;
-            });
-          });
-
-          const roots = Object.keys(containersById).filter(id => !parentMap[id]);
-          if (!roots.length) {
-            const empty = document.createElement('div');
-            empty.className = 'wa-tree-node';
-            empty.textContent = '当前页面尚未创建任何容器';
-            tree.appendChild(empty);
-            treeNodes.push(empty);
+        function configureExtractOperation(containerId, opKey) {
+          const container = containersById[containerId];
+          if (!container || !container.actions || !container.actions[opKey] || container.actions[opKey].type !== 'extract') {
+            alert('当前 Operation 暂不支持配置（仅 extract 可编辑）');
             return;
           }
+          const current = { ...container.actions[opKey] };
+          const selector = window.prompt('提取范围 Selector', current.selector || '');
+          if (selector === null) return;
+          current.selector = selector.trim() || current.selector || '';
+          const attribute = window.prompt('提取属性 (href/src，可留空保持默认)', current.attribute || '');
+          if (attribute !== null) {
+            current.attribute = attribute.trim() || undefined;
+          }
+          const maxItemsInput = window.prompt('最大提取数量 (数字)', String(current.maxItems || current.max_items || ''));
+          if (maxItemsInput !== null) {
+            const parsed = parseInt(maxItemsInput, 10);
+            if (!Number.isNaN(parsed)) {
+              current.maxItems = parsed;
+            }
+          }
+          const whitelistContains = window.prompt('白名单包含（逗号分隔, 可留空）', (current.whitelist && current.whitelist.contains || []).join(', '));
+          if (whitelistContains !== null) {
+            current.whitelist = current.whitelist || {};
+            current.whitelist.contains = parseCsvList(whitelistContains);
+          }
+          const whitelistPrefix = window.prompt('白名单前缀（逗号分隔, 可留空）', (current.whitelist && current.whitelist.prefix || []).join(', '));
+          if (whitelistPrefix !== null) {
+            current.whitelist = current.whitelist || {};
+            current.whitelist.prefix = parseCsvList(whitelistPrefix);
+          }
+          const whitelistSuffix = window.prompt('白名单后缀（逗号分隔, 可留空）', (current.whitelist && current.whitelist.suffix || []).join(', '));
+          if (whitelistSuffix !== null) {
+            current.whitelist = current.whitelist || {};
+            current.whitelist.suffix = parseCsvList(whitelistSuffix);
+          }
+          const blacklistContains = window.prompt('黑名单包含（逗号分隔, 可留空）', (current.blacklist && current.blacklist.contains || []).join(', '));
+          if (blacklistContains !== null) {
+            current.blacklist = current.blacklist || {};
+            current.blacklist.contains = parseCsvList(blacklistContains);
+          }
+          const blacklistPrefix = window.prompt('黑名单前缀（逗号分隔, 可留空）', (current.blacklist && current.blacklist.prefix || []).join(', '));
+          if (blacklistPrefix !== null) {
+            current.blacklist = current.blacklist || {};
+            current.blacklist.prefix = parseCsvList(blacklistPrefix);
+          }
+          const blacklistSuffix = window.prompt('黑名单后缀（逗号分隔, 可留空）', (current.blacklist && current.blacklist.suffix || []).join(', '));
+          if (blacklistSuffix !== null) {
+            current.blacklist = current.blacklist || {};
+            current.blacklist.suffix = parseCsvList(blacklistSuffix);
+          }
+          container.actions[opKey] = current;
+          currentOps = container.actions;
+          renderOpsForContainer(containerId);
+        }
 
-          function makeNode(id, depth) {
-            const c = containersById[id] || {};
-            const node = document.createElement('div');
-            node.className = 'wa-tree-node' + (depth === 0 ? ' wa-tree-node-root' : ' wa-tree-node-child');
-            node.textContent = (c.description || id);
-            node.style.marginLeft = depth > 0 ? (14 * depth) + 'px' : '0';
-            node.dataset.containerId = id;
-            tree.appendChild(node);
-            treeNodes.push(node);
+        function renderContainerTree(containers) {
+          try {
+            containersById = containers || {};
+            tree.innerHTML = '';
+            treeNodes = [];
+            const visited = new Set();
 
-            node.addEventListener('click', () => {
+            const parentMap = {};
+            Object.keys(containersById).forEach(id => {
+              const c = containersById[id] || {};
+              (c.children || []).forEach(childId => {
+                parentMap[childId] = id;
+              });
+            });
+
+            const roots = Object.keys(containersById).filter(id => !parentMap[id]);
+            if (!roots.length) {
+              const empty = document.createElement('div');
+              empty.className = 'wa-tree-node';
+              empty.textContent = '当前页面尚未创建任何容器';
+              tree.appendChild(empty);
+              treeNodes.push(empty);
               clearTreeSelection();
-              node.classList.add('wa-tree-node-selected');
-              const selectors = getContainerSelectors(c);
-              const selector = selectors[0] || '';
-              highlightContainer(selector);
-              const selectorText = selectors.join(', ');
-              domInfo.textContent = '已选容器: ' + id + ' (' + (selectorText || '无 selector') + ')';
-              // 将当前容器信息回填到右侧"容器详情"区域
-              try {
-                f1v.value = c.description || id;
-                f2v.value = selectorText || '';
-                f3v.value = id;
+              return;
+            }
 
-                // Update Parent ID in Create Form if it exists
+            function makeNode(id, depth) {
+              if (!id || visited.has(id)) {
+                if (window.__waOverlayDebug && visited.has(id)) {
+                  console.warn('[overlay] 检测到循环子节点: ' + id);
+                }
+                return;
+              }
+              visited.add(id);
+              const c = containersById[id] || {};
+              const node = document.createElement('div');
+              node.className = 'wa-tree-node' + (depth === 0 ? ' wa-tree-node-root' : ' wa-tree-node-child');
+              node.style.marginLeft = depth > 0 ? (14 * depth) + 'px' : '0';
+              node.dataset.containerId = id;
+              tree.appendChild(node);
+              treeNodes.push(node);
+
+              const label = document.createElement('span');
+              label.className = 'wa-tree-node-label';
+              label.textContent = c.description || id;
+              node.appendChild(label);
+
+              const actions = document.createElement('div');
+              actions.className = 'wa-tree-node-actions';
+              const delBtn = document.createElement('button');
+              delBtn.className = 'wa-tree-delete';
+              delBtn.textContent = '删除';
+              delBtn.addEventListener('click', (evt) => {
+                evt.stopPropagation();
+                deleteContainerById(id);
+              });
+              actions.appendChild(delBtn);
+              node.appendChild(actions);
+
+              node.addEventListener('click', () => {
+                clearTreeSelection();
+                node.classList.add('wa-tree-node-selected');
+                currentContainerId = id;
+                const selectors = getContainerSelectors(c);
+                const selector = selectors[0] || '';
+                highlightContainer(selector);
+                const selectorText = selectors.join(', ');
+                domInfo.textContent = '已选容器: ' + id + ' (' + (selectorText || '无 selector') + ')';
                 try {
+                  f1v.value = c.description || id;
+                  f2v.value = selectorText || '';
+                  f3v.value = id;
                   if (fieldParentIdValue) {
                     fieldParentIdValue.value = id;
                   }
-                } catch { }
+                  renderOpsForContainer(id);
+                } catch (err) {
+                  if (window.__waOverlayDebug) {
+                    console.error('[overlay] 容器详情渲染失败', err);
+                  }
+                }
+              });
 
-                renderOpsForContainer(id);
-              } catch { }
-            });
+              (c.children || []).forEach(childId => {
+                makeNode(childId, depth + 1);
+              });
+            }
 
-            (c.children || []).forEach(childId => {
-              makeNode(childId, depth + 1);
-            });
+            roots.forEach(id => makeNode(id, 0));
+            if (currentContainerId && containersById[currentContainerId]) {
+              setTimeout(() => focusTreeNode(currentContainerId), 60);
+            } else {
+              clearTreeSelection();
+            }
+          } catch (error) {
+            setDomStatus('渲染容器树失败: ' + (error && error.message ? error.message : String(error)));
+            if (window.__waOverlayDebug) {
+              console.error('[overlay] 渲染容器树异常', error);
+            }
           }
-
-          roots.forEach(id => makeNode(id, 0));
         }
         window.__waRenderFilteredContainerTree = renderFilteredContainerTree;
         if (pendingContainerPayloads.length) {
@@ -1743,7 +2178,8 @@
           if (!currentContainerId) return;
           if (!confirm('确定要删除容器 ' + currentContainerId + ' 吗？')) return;
 
-          apiFetch('/api/v1/containers/' + encodeURIComponent(currentContainerId), {
+          const deleteUrl = '/api/v1/containers/' + encodeURIComponent(currentContainerId) + '?url=' + encodeURIComponent(window.location.href);
+          apiFetch(deleteUrl, {
             method: 'DELETE'
           }).then(r => r.json()).then(j => {
             if (j && j.success) {
@@ -2002,7 +2438,9 @@
               }
               return;
             }
-            if (!currentOps || (!currentOps.click && !currentOps.type && !currentOps.fill && !currentOps.pressEnter && !currentOps.pressEsc)) {
+            const interactiveOps = ['click', 'type', 'fill', 'pressEnter', 'pressEsc'];
+            const hasInteractive = currentOps && interactiveOps.some(key => !!currentOps[key]);
+            if (!hasInteractive) {
               if (statusEl) {
                 statusEl.textContent = '当前未启用任何 Operation（click/type/fill/pressKey），无法测试';
               }
@@ -2129,10 +2567,17 @@
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify(payload)
-            }).then(r => r.json()).then(j => {
+            }).then(r => r.json()).then(async (j) => {
               if (!statusEl) return;
               if (j && j.success) {
                 statusEl.textContent = '已保存 Operation: ' + currentContainerId;
+                try {
+                  await syncExtractOperations(currentContainerId, currentOps, statusEl);
+                } catch (errSync) {
+                  if (statusEl) {
+                    statusEl.textContent = '保存成功，但同步提取 Operation 失败: ' + (errSync && errSync.message ? errSync.message : String(errSync));
+                  }
+                }
               } else {
                 statusEl.textContent = '保存失败: ' + (j && j.error ? j.error : '未知错误');
               }
@@ -2192,6 +2637,7 @@
         tabContentDom.className = 'wa-tab-content dom-mode';
         tabContentDom.style.display = 'none';
         tabContentDom.style.flex = '1';
+        tabContentDom.style.minHeight = '0';
         tabContentDom.style.overflowY = 'auto';
         tabContentDom.innerHTML = '<p>DOM 选取模式：</p><ol><li>切换到本标签或按 F2 开启 DOM 选取模式。</li><li>鼠标移动到页面元素上会高亮该元素。</li><li>点击元素以选中，下面会显示对应 Selector。</li><li>ESC 或切回容器树退出 DOM 选取模式。</li></ol>';
 
@@ -2278,7 +2724,8 @@
 
         const btnRow = document.createElement('div');
         btnRow.style.display = 'flex';
-        btnRow.style.justifyContent = 'flex-end';
+        btnRow.style.justifyContent = 'space-between';
+        btnRow.style.alignItems = 'center';
         btnRow.style.gap = '6px';
         const btnCancel = document.createElement('button');
         btnCancel.className = 'wa-icon-btn';
@@ -2286,6 +2733,7 @@
         const btnSave = document.createElement('button');
         btnSave.className = 'wa-btn-primary';
         btnSave.textContent = '保存容器';
+        btnRow.appendChild(domStatus);
         btnRow.appendChild(btnCancel);
         btnRow.appendChild(btnSave);
         createBox.appendChild(btnRow);
@@ -2293,6 +2741,14 @@
         tabContentDom.appendChild(createBox);
 
         let lastPicked = null;
+        const setDomStatus = (message) => {
+          if (!domStatus) return;
+          domStatus.textContent = message || '';
+          domStatus.dataset.statusTs = String(Date.now());
+          if (window.__waOverlayDebug && message) {
+            console.log('[overlay][status]', message);
+          }
+        };
 
         // 监听页面级 DOM 选取结果事件，并在 UI 中展示 + 预填容器表单
         try {
@@ -2356,12 +2812,18 @@
         // 保存容器：通过 BrowserService API 写入 container-library.json
         btnSave.addEventListener('click', () => {
           try {
+            if (window.__waOverlayDebug) {
+              console.log('[overlay] 保存容器按钮点击');
+            }
             const id = fieldIdValue.value.trim();
             const title = fieldTitleValue.value.trim();
             const selector = fieldSelectorValue.value.trim();
             const parentId = fieldParentIdValue.value.trim() || null;
             if (!id || !selector) {
-              domInfo.textContent = '保存失败：容器 ID 和 selector 不能为空';
+              setDomStatus('保存失败：容器 ID 和 selector 不能为空');
+              if (window.__waOverlayDebug) {
+                console.warn('[overlay] 缺少必要字段', { id, selector });
+              }
               return;
             }
             const payload = {
@@ -2372,6 +2834,9 @@
               parentId,
               actions: null
             };
+            if (window.__waOverlayDebug) {
+              console.log('[overlay] 保存容器 payload', payload);
+            }
             const finalizeSave = () => {
               currentContainerId = id;
               tabTree.click();
@@ -2379,13 +2844,23 @@
               resetDomForm();
             };
 
+            setDomStatus('正在保存容器 ' + id + '...');
             apiFetch('/api/v1/containers', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify(payload)
-            }).then(r => r.json()).then(j => {
+            }).then(r => {
+              if (window.__waOverlayDebug) {
+                console.log('[overlay] 保存容器响应状态', r.status);
+              }
+              setDomStatus('保存容器中 (HTTP ' + r.status + ')...');
+              return r.json();
+            }).then(j => {
+              if (window.__waOverlayDebug) {
+                console.log('[overlay] 保存容器响应内容', j);
+              }
               if (j && j.success) {
-                domInfo.textContent = '已保存容器: ' + id;
+                setDomStatus('已保存容器: ' + id);
                 let bootstrapPayload = null;
                 const site = j.data && j.data.site;
                 if (site && site.containers) {
@@ -2401,11 +2876,19 @@
                   tryRenderBootstrap(bootstrapPayload, 'save');
                 }
                 finalizeSave();
+                reloadContainers();
               } else {
-                domInfo.textContent = '保存失败: ' + (j && j.error ? j.error : '未知错误');
+                setDomStatus('保存失败: ' + (j && j.error ? j.error : '未知错误'));
+                if (window.__waOverlayDebug) {
+                  console.warn('[overlay] 保存容器失败', j);
+                }
               }
             }).catch(e => {
-              domInfo.textContent = '保存失败（服务不可用，已在当前页面暂存）: ' + (e && e.message ? e.message : String(e));
+              const fallbackMsg = '保存失败（服务不可用，已在当前页面暂存）: ' + (e && e.message ? e.message : String(e));
+              setDomStatus(fallbackMsg);
+              if (window.__waOverlayDebug) {
+                console.error('[overlay] 保存容器异常', e);
+              }
               const bootstrapPayload = ensureLocalContainer(id, title, selector, parentId);
               if (bootstrapPayload) {
                 tryRenderBootstrap(bootstrapPayload, 'save-fallback');
@@ -2413,7 +2896,10 @@
               }
             });
           } catch (e) {
-            domInfo.textContent = '保存失败: ' + (e && e.message ? e.message : String(e));
+            setDomStatus('保存失败: ' + (e && e.message ? e.message : String(e)));
+            if (window.__waOverlayDebug) {
+              console.error('[overlay] 保存容器执行异常', e);
+            }
           }
         });
 

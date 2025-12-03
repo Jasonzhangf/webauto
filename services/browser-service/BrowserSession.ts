@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
+import crypto from 'node:crypto';
 import { chromium, BrowserContext, Page, Browser } from 'playwright';
 import { ProfileLock } from './ProfileLock.js';
 
@@ -19,6 +20,9 @@ export class BrowserSession {
   private lock: ProfileLock;
   private profileDir: string;
   private lastKnownUrl: string | null = null;
+  private mode: 'dev' | 'run' = 'dev';
+  private lastCookieSignature: string | null = null;
+  private lastCookieSaveTs = 0;
 
   onExit?: (profileId: string) => void;
   private exitNotified = false;
@@ -37,6 +41,24 @@ export class BrowserSession {
 
   get currentPage(): Page | undefined {
     return this.page;
+  }
+
+  get modeName(): 'dev' | 'run' {
+    return this.mode;
+  }
+
+  setMode(next: string = 'dev') {
+    this.mode = next === 'run' ? 'run' : 'dev';
+  }
+
+  getInfo() {
+    return {
+      session_id: this.options.profileId,
+      profileId: this.options.profileId,
+      current_url: this.getCurrentUrl(),
+      mode: this.mode,
+      headless: !!this.options.headless,
+    };
   }
 
   async start(initialUrl?: string): Promise<void> {
@@ -74,8 +96,70 @@ export class BrowserSession {
   private setupPageHooks(page: Page) {
   }
 
-  async saveCookiesForActivePage(): Promise<void> {
-    return;
+  private ensureContext(): BrowserContext {
+    if (!this.context) {
+      throw new Error('browser context not ready');
+    }
+    return this.context;
+  }
+
+  private async ensurePrimaryPage(): Promise<Page> {
+    const ctx = this.ensureContext();
+    if (!this.page || this.page.isClosed()) {
+      const pages = ctx.pages();
+      this.page = pages.length ? pages[0] : await ctx.newPage();
+      this.setupPageHooks(this.page);
+    }
+    return this.page;
+  }
+
+  async ensurePage(url?: string): Promise<Page> {
+    let page = await this.ensurePrimaryPage();
+    if (url) {
+      const current = this.getCurrentUrl();
+      if (!current || this.normalizeUrl(current) !== this.normalizeUrl(url)) {
+        await this.goto(url);
+        page = await this.ensurePrimaryPage();
+      }
+    }
+    return page;
+  }
+
+  async saveCookiesForActivePage(): Promise<{ path: string; count: number }[]> {
+    if (!this.context) return [];
+    const page = await this.ensurePrimaryPage();
+    const cookies = await this.context.cookies();
+    if (!cookies.length) return [];
+
+    const digest = this.hashCookies(cookies);
+    const now = Date.now();
+    if (digest === this.lastCookieSignature && now - this.lastCookieSaveTs < 2000) {
+      return [];
+    }
+
+    const targets = this.resolveCookieTargets(page.url());
+    if (!targets.length) return [];
+
+    const payload = JSON.stringify(
+      {
+        timestamp: now,
+        profileId: this.options.profileId,
+        url: page.url(),
+        cookies,
+      },
+      null,
+      2,
+    );
+    const results: { path: string; count: number }[] = [];
+    for (const target of targets) {
+      await fs.promises.mkdir(path.dirname(target), { recursive: true });
+      await fs.promises.writeFile(target, payload, 'utf-8');
+      results.push({ path: target, count: cookies.length });
+    }
+
+    this.lastCookieSignature = digest;
+    this.lastCookieSaveTs = now;
+    return results;
   }
 
   async getCookies(): Promise<any[]> {
@@ -100,14 +184,32 @@ export class BrowserSession {
   }
 
   async goto(url: string): Promise<void> {
-    if (!this.page) throw new Error('page not ready');
-    await this.page.goto(url, { waitUntil: 'domcontentloaded' });
+    const page = await this.ensurePrimaryPage();
+    await page.goto(url, { waitUntil: 'domcontentloaded' });
     this.lastKnownUrl = url;
   }
 
   async screenshot(fullPage = true) {
-    if (!this.page) throw new Error('page not ready');
-    return this.page.screenshot({ fullPage });
+    const page = await this.ensurePrimaryPage();
+    return page.screenshot({ fullPage });
+  }
+
+  async click(selector: string): Promise<void> {
+    const page = await this.ensurePrimaryPage();
+    await page.click(selector, { timeout: 20000 });
+  }
+
+  async fill(selector: string, text: string): Promise<void> {
+    const page = await this.ensurePrimaryPage();
+    await page.fill(selector, text, { timeout: 20000 });
+  }
+
+  async evaluate(expression: string, arg?: any) {
+    const page = await this.ensurePrimaryPage();
+    if (typeof arg === 'undefined') {
+      return page.evaluate(expression);
+    }
+    return page.evaluate(expression, arg);
   }
 
   getCurrentUrl(): string | null {
@@ -115,6 +217,55 @@ export class BrowserSession {
       return this.page.url() || this.lastKnownUrl;
     }
     return this.lastKnownUrl;
+  }
+
+  private resolveCookieTargets(currentUrl?: string | null): string[] {
+    const cookieDir = path.join(os.homedir(), '.webauto', 'cookies');
+    const targets = new Set<string>([path.join(cookieDir, `${this.options.profileId}.json`)]);
+
+    if (currentUrl) {
+      try {
+        const { hostname } = new URL(currentUrl);
+        const hostSegment = this.sanitizeHost(hostname);
+        if (hostSegment) {
+          targets.add(path.join(cookieDir, `${hostSegment}-latest.json`));
+        }
+        if (hostname && hostname.includes('weibo')) {
+          targets.add(path.join(cookieDir, 'weibo.com-latest.json'));
+        }
+      } catch {
+        targets.add(path.join(cookieDir, 'default-latest.json'));
+      }
+    }
+    return Array.from(targets);
+  }
+
+  private sanitizeHost(host?: string | null): string {
+    if (!host) return 'default';
+    return host.replace(/[^a-z0-9.-]/gi, '_');
+  }
+
+  private hashCookies(cookies: any[]): string {
+    const normalized = cookies
+      .map((c) => ({
+        name: c.name,
+        value: c.value,
+        domain: c.domain,
+        path: c.path,
+        expires: c.expires,
+        httpOnly: !!c.httpOnly,
+        secure: !!c.secure,
+      }))
+      .sort((a, b) => {
+        if (a.domain === b.domain) {
+          if (a.name === b.name) return (a.path || '').localeCompare(b.path || '');
+          return a.name.localeCompare(b.name);
+        }
+        return (a.domain || '').localeCompare(b.domain || '');
+      });
+    const hash = crypto.createHash('sha1');
+    hash.update(JSON.stringify(normalized));
+    return hash.digest('hex');
   }
 
   async close(): Promise<void> {
@@ -133,4 +284,12 @@ export class BrowserSession {
     this.onExit?.(this.options.profileId);
   }
 
+  private normalizeUrl(raw: string) {
+    try {
+      const url = new URL(raw);
+      return `${url.origin}${url.pathname}`;
+    } catch {
+      return raw;
+    }
+  }
 }

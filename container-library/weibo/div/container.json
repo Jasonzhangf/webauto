@@ -1,0 +1,30 @@
+{
+  "id": "div",
+  "selectors": [
+    {
+      "variant": "primary",
+      "score": 1.0,
+      "classes": [
+        "woo-panel-main",
+        "index_box_MkWee",
+        "index_box1_2btUY",
+        "wbpro-form"
+      ]
+    }
+  ],
+  "name": "容器: DIV",
+  "operations": [
+    {
+      "type": "find-child",
+      "config": {}
+    }
+  ],
+  "metadata": {
+    "legacy_data": {
+      "id": "div",
+      "name": "容器: DIV",
+      "selector": "div.woo-panel-main:nth-of-type(1) > div.index_box_MkWee > div.index_box1_2btUY:nth-of-type(1) > div.wbpro-form"
+    },
+    "converted_at": "2025-11-27T08:15:26.463002"
+  }
+}

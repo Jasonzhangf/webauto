@@ -1,5 +1,7 @@
-import { writeFileSync, mkdirSync } from 'node:fs';
-import { join, dirname } from 'node:path';
+import { writeFileSync, mkdirSync } from 'fs';
+import { join, dirname } from 'path';
+
+// process类型已由@types/node提供
 
 export interface SaveOptions {
   site: string;

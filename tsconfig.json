@@ -22,7 +22,8 @@
     "downlevelIteration": true
   },
   "include": [
-    "src/page-analyzer/**/*.ts"
+    "src/page-analyzer/**/*.ts",
+    "src/modules/executable-container/**/*.ts"
   ],
   "exclude": [
     "node_modules",

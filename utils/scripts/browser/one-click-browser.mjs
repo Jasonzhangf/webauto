@@ -7,11 +7,11 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { setTimeout as wait } from 'node:timers/promises';
+import WebSocket from 'ws';
 import { loadBrowserServiceConfig } from '../../../libs/browser/browser-service-config.js';
 
 const ROOT_DIR = path.resolve(fileURLToPath(new URL('../../../', import.meta.url)));
 const FLOATING_APP_DIR = path.join(ROOT_DIR, 'apps', 'floating-panel');
-const WS_SERVER_SCRIPT = path.join(ROOT_DIR, 'scripts', 'start_websocket_server.py');
 const WORKFLOW_ENTRY = path.join(ROOT_DIR, 'dist', 'sharedmodule', 'engines', 'api-gateway', 'server.js');
 const WORKFLOW_REQUIRED_FILES = [
   WORKFLOW_ENTRY,
@@ -39,7 +39,7 @@ function parseArgs(argv){
     profile: 'default',
     url: '',
     restart: false,
-    devConsole: false,
+    devConsole: true,
   };
   for (let i=2;i<argv.length;i++){
     const a = argv[i];
@@ -50,6 +50,7 @@ function parseArgs(argv){
     if (a === '--url') { args.url = argv[++i] || ''; continue; }
     if (a === '--restart' || a === '--force-restart') { args.restart = true; continue; }
     if (a === '--dev') { args.devConsole = true; continue; }
+    if (a === '--no-dev') { args.devConsole = false; continue; }
   }
   return args;
 }
@@ -99,37 +100,6 @@ function waitForSocket(host, port, timeoutMs=8000) {
   });
 }
 
-const PYTHON_CANDIDATES = process.platform === 'win32'
-  ? ['python', 'py', 'python3']
-  : ['python3', 'python'];
-
-function spawnPython(args) {
-  return new Promise((resolve, reject) => {
-    const queue = [...PYTHON_CANDIDATES];
-    const tryNext = () => {
-      const cmd = queue.shift();
-      if (!cmd) {
-        reject(new Error('未找到可用的 python 解释器，请安装 python3 或设置 PATH'));
-        return;
-      }
-      const child = spawn(cmd, args, { cwd: ROOT_DIR, stdio: 'inherit' });
-      let resolved = false;
-      child.once('error', (err) => {
-        if (!resolved && err && err.code === 'ENOENT') {
-          tryNext();
-        } else if (!resolved) {
-          reject(err);
-        }
-      });
-      child.once('spawn', () => {
-        resolved = true;
-        resolve(child);
-      });
-    };
-    tryNext();
-  });
-}
-
 function spawnNpmDev(extraEnv = {}) {
   const npmCmd = process.platform === 'win32' ? 'npm.cmd' : 'npm';
   const env = { ...process.env, NODE_ENV: 'development', ...extraEnv };
@@ -140,35 +110,27 @@ function spawnNpmDev(extraEnv = {}) {
   });
 }
 
-async function launchFloatingConsole() {
+async function launchFloatingConsole(targetUrl = '') {
   if (!fs.existsSync(path.join(FLOATING_APP_DIR, 'package.json'))) {
     console.warn('[one-click] floating console 未安装，跳过 --dev 浮窗启动');
     return;
   }
 
-  console.log('[one-click] --dev 模式：启动 WebSocket server 与浮窗控制台...');
-  let serverProc;
-  try {
-    const serverArgs = [WS_SERVER_SCRIPT, '--host', DEFAULT_WS_HOST, '--port', String(DEFAULT_WS_PORT)];
-    serverProc = await spawnPython(serverArgs);
-  } catch (error) {
-    console.warn('[one-click] 启动 WebSocket server 失败：', error?.message || String(error));
-    return;
-  }
-
+  console.log('[one-click] --dev 模式：启动浮窗控制台，使用 Node WebSocket 服务');
   const ready = await waitForSocket(DEFAULT_WS_HOST, DEFAULT_WS_PORT, 8000);
   if (!ready) {
     console.warn(`[one-click] ws://${DEFAULT_WS_HOST}:${DEFAULT_WS_PORT} 未就绪，浮窗会自行重试连接`);
   }
 
   const wsUrl = `ws://${DEFAULT_WS_HOST}:${DEFAULT_WS_PORT}`;
-  const uiProc = spawnNpmDev({ WEBAUTO_FLOATING_WS_URL: wsUrl });
+  const env = { WEBAUTO_FLOATING_WS_URL: wsUrl };
+  if (targetUrl) {
+    env.WEBAUTO_FLOATING_TARGET_URL = targetUrl;
+  }
+  const uiProc = spawnNpmDev(env);
   const cleanup = () => {
     if (uiProc && !uiProc.killed) {
       uiProc.kill();
-    }
-    if (serverProc && !serverProc.killed) {
-      serverProc.kill();
     }
   };
 
@@ -216,8 +178,15 @@ async function main(){
     for (let attempt = 0; attempt < 3 && !healthy; attempt++) {
       killBrowserServiceProcesses();
       killPort(port);
+      killPort(DEFAULT_WS_PORT);
       await wait(800);
-      const child = spawn(process.execPath, ['libs/browser/remote-service.js', '--host', String(host), '--port', String(port)], {
+      const child = spawn(process.execPath, [
+        'libs/browser/remote-service.js',
+        '--host', String(host),
+        '--port', String(port),
+        '--ws-host', DEFAULT_WS_HOST,
+        '--ws-port', String(DEFAULT_WS_PORT),
+      ], {
         stdio: 'inherit',
         env: { ...process.env, BROWSER_SERVICE_AUTO_EXIT: '1' },
       });
@@ -244,11 +213,13 @@ async function main(){
   const startRes = await post(`${base}/command`, { action:'start', args:{ headless, profileId: profile, url } });
   if (!(startRes && startRes.ok)) throw new Error('start failed');
   console.log(`[one-click] browser started: profile=${profile}, headless=${headless}`);
+  const sessionId = startRes.sessionId || startRes.profileId || profile;
 
   // 启用自动 Cookie 动态注入/保存
   try { await post(`${base}/command`, { action:'autoCookies:start', args:{ profileId: profile, intervalMs: 2500 } }); } catch {}
 
   // 可选导航
+  let matchResult = null;
   if (url){
     const gotoRes = await post(`${base}/command`, { action:'goto', args:{ url, profileId: profile, waitTime: 2, keepOpen: !headless } }).catch(e=>{ console.warn('[one-click] goto failed:', e?.message||String(e)); return null; });
     if (gotoRes && gotoRes.ok) {
@@ -263,13 +234,27 @@ async function main(){
       } catch (e) {
         console.warn('[one-click] saveCookies failed:', e?.message||String(e));
       }
+      try {
+        matchResult = await autoMatchRootContainer({
+          sessionId,
+          url,
+          wsHost: DEFAULT_WS_HOST,
+          wsPort: DEFAULT_WS_PORT,
+        });
+      } catch (err) {
+        console.warn('[one-click] auto match root failed:', err?.message || String(err));
+      }
     }
   }
 
   console.log(`[one-click] ready. Health: ${base}/health, Events: ${base}/events`);
+  if (!matchResult?.data?.success) {
+    console.error('[one-click] ERROR: root container matching failed. Inspect WS logs or container definitions.');
+    process.exitCode = 2;
+  }
 
-  if (devConsole) {
-    await launchFloatingConsole();
+  if (devConsole && !process.argv.includes('--no-dev')) {
+    await launchFloatingConsole(url);
   }
 }
 
@@ -355,4 +340,87 @@ function killBrowserServiceProcesses() {
       execSync('pkill -f "dist/services/browser-service/index.js" || true', { stdio: 'ignore' });
     }
   } catch {}
+}
+
+async function autoMatchRootContainer({ sessionId, url, wsHost, wsPort }) {
+  if (!sessionId || !url) return null;
+  const wsUrl = `ws://${wsHost}:${wsPort}`;
+  const payload = {
+    type: 'command',
+    session_id: sessionId,
+    data: {
+      command_type: 'container_operation',
+      action: 'match_root',
+      page_context: { url },
+    },
+  };
+  console.log(`[one-click] matching root container via ${wsUrl} (${url})`);
+  const response = await sendWsCommand(wsUrl, payload);
+  if (response?.data?.success) {
+    const match = response.data.data || {};
+    const container = match.matched_container || match.container;
+    console.log('[one-click] container match:', container?.name || container?.id || 'unknown');
+    return response;
+  } else {
+    console.warn('[one-click] container match failed:', response?.data?.error || response?.error || 'unknown');
+    throw new Error(response?.data?.error || response?.error || 'unknown container match result');
+  }
+}
+
+function sendWsCommand(wsUrl, payload, timeoutMs = 8000) {
+  return new Promise((resolve, reject) => {
+    const socket = new WebSocket(wsUrl);
+    let settled = false;
+    const timeout = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      socket.terminate();
+      reject(new Error('WebSocket command timeout'));
+    }, timeoutMs);
+
+    const cleanup = () => {
+      clearTimeout(timeout);
+      socket.removeAllListeners();
+    };
+
+    socket.once('open', () => {
+      try {
+        socket.send(JSON.stringify(payload));
+      } catch (err) {
+        cleanup();
+        if (!settled) {
+          settled = true;
+          reject(err);
+        }
+      }
+    });
+
+    socket.once('message', (data) => {
+      cleanup();
+      if (settled) return;
+      settled = true;
+      try {
+        resolve(JSON.parse(data.toString('utf-8')));
+      } catch (err) {
+        reject(err);
+      } finally {
+        socket.close();
+      }
+    });
+
+    socket.once('error', (err) => {
+      cleanup();
+      if (settled) return;
+      settled = true;
+      reject(err);
+    });
+
+    socket.once('close', () => {
+      cleanup();
+      if (!settled) {
+        settled = true;
+        resolve(null);
+      }
+    });
+  });
 }
