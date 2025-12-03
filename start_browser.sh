@@ -11,6 +11,7 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
+PROFILE_HOME="${HOME}/.webauto/profiles"
 
 # 显示logo
 show_logo() {
@@ -48,26 +49,31 @@ show_help() {
 list_profiles() {
     echo -e "${GREEN}📁 当前Profiles:${NC}"
 
-    if [ ! -d "profiles" ]; then
-        echo "   (暂无profiles目录)"
+    if [ ! -d "${PROFILE_HOME}" ]; then
+        echo "   (暂无profiles目录: ${PROFILE_HOME})"
         return
     fi
 
-    # 列出profile配置文件
-    for profile_file in profiles/*.json; do
-        if [ -f "$profile_file" ]; then
-            profile_name=$(basename "$profile_file" .json)
-            cookie_file="profiles/${profile_name}_cookies.json"
+    local has_profiles=0
+    shopt -s nullglob
+    for profile_file in "${PROFILE_HOME}"/*.json; do
+        has_profiles=1
+        profile_name=$(basename "$profile_file" .json)
+        cookie_file="${PROFILE_HOME}/${profile_name}_cookies.json"
 
-            if [ -f "$cookie_file" ]; then
-                cookie_status="✅ 有Cookie"
-                cookie_size=$(stat -c%s "$cookie_file" 2>/dev/null || echo "0")
-                echo -e "   📂 ${profile_name} - ${cookie_status} (${cookie_size} bytes)"
-            else
-                echo -e "   📂 ${profile_name} - ❌ 无Cookie"
-            fi
+        if [ -f "$cookie_file" ]; then
+            cookie_status="✅ 有Cookie"
+            cookie_size=$(wc -c < "$cookie_file" 2>/dev/null || echo "0")
+            echo -e "   📂 ${profile_name} - ${cookie_status} (${cookie_size} bytes)"
+        else
+            echo -e "   📂 ${profile_name} - ❌ 无Cookie"
         fi
     done
+    shopt -u nullglob
+
+    if [ $has_profiles -eq 0 ]; then
+        echo "   (暂无任何 profile 配置，路径: ${PROFILE_HOME})"
+    fi
 }
 
 # 检查依赖
@@ -77,9 +83,30 @@ check_dependencies() {
         exit 1
     fi
 
-    if [ ! -f "utils/browser_cli.py" ]; then
-        echo -e "${RED}错误: 未找到utils/browser_cli.py${NC}"
+    if ! command -v node &> /dev/null; then
+        echo -e "${RED}错误: 未找到node${NC}"
         exit 1
+    fi
+}
+
+# 设置 Python 模块搜索路径，确保重构后的 runtime/* 目录可被直接 import
+setup_pythonpath() {
+    local root
+    root="$(pwd)"
+    local paths=(
+        "$root/runtime"
+        "$root/runtime/browser"
+        "$root/runtime/containers"
+        "$root/runtime/ui"
+        "$root/runtime/vision"
+        "$root/runtime/infra"
+    )
+    local joined
+    joined=$(IFS=":"; echo "${paths[*]}")
+    if [ -n "${PYTHONPATH:-}" ]; then
+        export PYTHONPATH="${joined}:${PYTHONPATH}"
+    else
+        export PYTHONPATH="${joined}"
     fi
 }
 
@@ -144,13 +171,13 @@ main() {
     fi
     echo ""
 
-    # 确保profiles目录存在
-    mkdir -p profiles
+    # 确保运行时 profile 目录存在
+    mkdir -p "${PROFILE_HOME}"
 
     echo -e "${YELLOW}正在启动 TypeScript 浏览器服务 (one-click)...${NC}"
     CMD_ARGS=(
         "node"
-        "utils/scripts/browser/one-click-browser.mjs"
+        "runtime/browser/scripts/one-click-browser.mjs"
         "--profile" "$PROFILE"
         "--url" "$URL"
     )
@@ -171,8 +198,9 @@ main() {
     echo -e "${GREEN}✅ 浏览器工作流完成${NC}"
 }
 
-# 检查依赖
+# 检查依赖 & 环境
 check_dependencies
+setup_pythonpath
 
 # 运行主函数
 main "$@"

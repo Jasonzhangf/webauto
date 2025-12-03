@@ -13,13 +13,20 @@ from urllib.parse import urlparse
 
 # 导入v2模型
 import sys
-sys.path.append(str(Path(__file__).parent.parent))
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+RUNTIME_ROOT = REPO_ROOT / "runtime"
+if RUNTIME_ROOT.exists() and str(RUNTIME_ROOT) not in sys.path:
+    sys.path.insert(0, str(RUNTIME_ROOT))
+sys.path.append(str(REPO_ROOT))
 from core.container.models_v2 import ContainerDefV2, convert_legacy_container_to_v2
+from browser_interface.core.paths import CONTAINER_LIB_DIR
 
 
 PROJECT_ROOT = Path(__file__).parent.parent
 CONTAINER_LIB_PATH = PROJECT_ROOT / "container-library.json"
 CONTAINER_INDEX_PATH = PROJECT_ROOT / "container-library.index.json"
+USER_CONTAINER_ROOT = CONTAINER_LIB_DIR
 
 
 @dataclass
@@ -35,12 +42,15 @@ def _load_registry() -> Dict[str, Any]:
   if CONTAINER_INDEX_PATH.exists():
     return _load_registry_from_index()
   if not CONTAINER_LIB_PATH.exists():
-    return {}
+    return _merge_user_sites_into_registry({})
   try:
     with CONTAINER_LIB_PATH.open("r", encoding="utf-8") as f:
-      return json.load(f)
+      data = json.load(f)
+      if isinstance(data, dict):
+        return _merge_user_sites_into_registry(data)
+      return _merge_user_sites_into_registry({})
   except Exception:
-    return {}
+    return _merge_user_sites_into_registry({})
 
 
 def _load_registry_from_index() -> Dict[str, Any]:
@@ -52,42 +62,62 @@ def _load_registry_from_index() -> Dict[str, Any]:
   registry: Dict[str, Any] = {}
   for site_key, info in index.items():
     site_path = PROJECT_ROOT / info.get("path", "")
-    containers: Dict[str, Any] = {}
-
-    if site_path.exists():
-      # 1) 新结构：递归扫描 site_path 下的 container.json 文件
-      for container_file in site_path.rglob("container.json"):
-        rel = container_file.relative_to(site_path)
-        container_id = ".".join(rel.parent.parts)
-        if not container_id:
-          continue
-        try:
-          containers[container_id] = json.loads(
-            container_file.read_text(encoding="utf-8")
-          )
-        except Exception:
-          continue
-
-      # 2) 兼容旧结构：尝试读取 containers.json，并将其中的 containers 合并进当前站点
-      #    - 目前 cbu(1688) 使用的是 container-library/cbu/containers.json 扁平结构
-      #    - 若以后迁移到每容器一个 container.json，则上面的扫描会优先生效，
-      #      这里通过 setdefault() 避免覆盖新格式定义
-      legacy_file = site_path / "containers.json"
-      if legacy_file.exists():
-        try:
-          legacy_data = json.loads(legacy_file.read_text(encoding="utf-8"))
-          legacy_containers = legacy_data.get("containers") or {}
-          if isinstance(legacy_containers, dict):
-            for cid, cdata in legacy_containers.items():
-              containers.setdefault(cid, cdata)
-        except Exception:
-          # 兼容性读取失败时不影响其他站点
-          pass
-
+    containers = _collect_site_containers(site_path)
     registry[site_key] = {
       "website": info.get("website", ""),
       "containers": containers,
     }
+  return _merge_user_sites_into_registry(registry)
+
+
+def _collect_site_containers(site_path: Path) -> Dict[str, Any]:
+  containers: Dict[str, Any] = {}
+  if not site_path or not site_path.exists():
+    return containers
+
+  for container_file in site_path.rglob("container.json"):
+    try:
+      rel = container_file.relative_to(site_path)
+    except ValueError:
+      continue
+    container_id = ".".join(rel.parent.parts)
+    if not container_id:
+      continue
+    try:
+      containers[container_id] = json.loads(container_file.read_text(encoding="utf-8"))
+    except Exception:
+      continue
+
+  legacy_file = site_path / "containers.json"
+  if legacy_file.exists():
+    try:
+      legacy_data = json.loads(legacy_file.read_text(encoding="utf-8"))
+      legacy_containers = legacy_data.get("containers") or {}
+      if isinstance(legacy_containers, dict):
+        for cid, cdata in legacy_containers.items():
+          containers.setdefault(cid, cdata)
+    except Exception:
+      pass
+
+  return containers
+
+
+def _merge_user_sites_into_registry(registry: Dict[str, Any]) -> Dict[str, Any]:
+  if not USER_CONTAINER_ROOT.exists():
+    return registry
+
+  for user_site in USER_CONTAINER_ROOT.iterdir():
+    if not user_site.is_dir():
+      continue
+    site_key = user_site.name
+    site_entry = registry.setdefault(site_key, {
+      "website": site_key,
+      "containers": {}
+    })
+    user_containers = _collect_site_containers(user_site)
+    if user_containers:
+      site_entry.setdefault("containers", {})
+      site_entry["containers"].update(user_containers)
   return registry
 
 
@@ -172,6 +202,16 @@ def _ensure_site_path(site_key: str, website: Optional[str] = None) -> Path:
   site_path = PROJECT_ROOT / info["path"]
   site_path.mkdir(parents=True, exist_ok=True)
   return site_path
+
+
+def _get_user_site_path(site_key: str) -> Path:
+  return USER_CONTAINER_ROOT / site_key
+
+
+def _ensure_user_site_path(site_key: str) -> Path:
+  path = _get_user_site_path(site_key)
+  path.mkdir(parents=True, exist_ok=True)
+  return path
 
 
 def _container_file_path(site_path: Path, container_id: str) -> Path:
@@ -328,7 +368,7 @@ def save_container_v2(
   """保存ContainerDefV2格式的容器定义"""
   try:
     if CONTAINER_INDEX_PATH.exists():
-      site_path = _ensure_site_path(site_key, website)
+      site_path = _ensure_user_site_path(site_key)
       _write_container_file(site_path, container.id, container.to_dict())
       if parent_id:
         _add_child_reference(site_path, parent_id, container.id)
@@ -352,8 +392,8 @@ def delete_container_v2(site_key: str, container_id: str) -> bool:
   """删除ContainerDefV2格式的容器定义"""
   try:
     if CONTAINER_INDEX_PATH.exists():
-      site_path = _get_site_path(site_key)
-      if site_path and site_path.exists():
+      site_path = _get_user_site_path(site_key)
+      if site_path.exists():
         container_file = _container_file_path(site_path, container_id)
         if container_file.exists():
           container_file.unlink()

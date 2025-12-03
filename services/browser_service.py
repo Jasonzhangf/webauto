@@ -2,7 +2,7 @@
 Legacy BrowserService stub.
 
 历史上的 Python BrowserService/Flask API 已下线，浏览器会话统一由
-TypeScript 版本的 BrowserService 提供（见 utils/scripts/browser/one-click-browser.mjs
+TypeScript 版本的 BrowserService 提供（见 runtime/browser/scripts/one-click-browser.mjs
 或 npm run browser:oneclick）。此模块保留占位符，避免旧代码导入时报错。
 """
 
@@ -13,7 +13,7 @@ from typing import Any, Callable
 LEGACY_MESSAGE = (
     "Python BrowserService 已废弃。请使用 TypeScript BrowserService：\n"
     "  $ npm run browser:oneclick [-- --profile default --url https://weibo.com]\n"
-    "或直接运行 node utils/scripts/browser/one-click-browser.mjs。\n"
+    "或直接运行 node runtime/browser/scripts/one-click-browser.mjs。\n"
 )
 
 

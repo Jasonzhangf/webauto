@@ -2,7 +2,7 @@
 import { spawn } from 'node:child_process';
 
 export class PythonProcessManager {
-  constructor({ host = '127.0.0.1', port = 8899, pythonBin = process.env.PYTHON_BIN || 'python3', entry = process.env.PY_SERVICE_ENTRY || 'sharedmodule/ui-recognition/python-service/ui_ins_server.py' } = {}) {
+  constructor({ host = '127.0.0.1', port = 8899, pythonBin = process.env.PYTHON_BIN || 'python3', entry = process.env.PY_SERVICE_ENTRY || 'runtime/vision/ui-recognition/python-service/ui_ins_server.py' } = {}) {
     this.host = host;
     this.port = port;
     this.pythonBin = pythonBin;
@@ -25,4 +25,3 @@ export class PythonProcessManager {
     this.proc = null;
   }
 }
-

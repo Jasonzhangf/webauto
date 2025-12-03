@@ -35,7 +35,7 @@ Chrome DevTools (端口9222)
 - **功能**: 业务逻辑，浏览器生命周期，控制器管理
 - **特性**: 多会话支持，Cookie管理，错误处理
 
-#### 4. 浏览器接口 (`browser_interface/`)
+#### 4. 浏览器接口 (`runtime/browser/browser_interface/`)
 - **Chromium**: `chromium_browser.py` - 标准Chromium实现
 - **Camoufox**: `camoufox_browser.py` - 隐匿指纹实现
 - **DevTools**: 远程调试端口暴露 (9222)

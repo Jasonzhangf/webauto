@@ -1,7 +1,7 @@
 {
   "name": "webauto",
   "private": true,
-  "version": "0.0.0",
+  "version": "0.1.0",
   "type": "module",
   "dependencies": {
     "iconv-lite": "^0.6.3",
@@ -20,15 +20,15 @@
     "start:vision": "node dist/sharedmodule/engines/vision-engine/server.js",
     "test:services": "node scripts/service-tests/run-all.mjs",
     "test:vision": "node scripts/run-vision-tests.mjs",
-    "browser:oneclick": "node utils/scripts/browser/one-click-browser.mjs",
-    "service:browser:start": "node utils/scripts/service/start-browser-service.mjs",
-    "service:browser:stop": "node utils/scripts/service/stop-browser-service.mjs",
-    "service:browser:restart": "node utils/scripts/service/restart-browser-service.mjs",
-    "service:browser:restart:python": "node utils/scripts/service/restart-python-browser-service.mjs",
-    "service:kill-port": "node utils/scripts/service/kill-port.mjs",
-    "browser:camoufox:oneclick": "node utils/scripts/browser/one-click-camoufox.mjs",
-    "browser:camoufox:status": "node utils/scripts/browser/status-camoufox.mjs",
-    "browser:camoufox:navigate1688": "node utils/scripts/browser/navigate-1688.mjs",
+    "browser:oneclick": "node runtime/browser/scripts/one-click-browser.mjs",
+    "service:browser:start": "node runtime/infra/utils/scripts/service/start-browser-service.mjs",
+    "service:browser:stop": "node runtime/infra/utils/scripts/service/stop-browser-service.mjs",
+    "service:browser:restart": "node runtime/infra/utils/scripts/service/restart-browser-service.mjs",
+    "service:browser:restart:python": "node runtime/infra/utils/scripts/service/restart-python-browser-service.mjs",
+    "service:kill-port": "node runtime/infra/utils/scripts/service/kill-port.mjs",
+    "browser:camoufox:oneclick": "node runtime/browser/scripts/one-click-camoufox.mjs",
+    "browser:camoufox:status": "node runtime/browser/scripts/status-camoufox.mjs",
+    "browser:camoufox:navigate1688": "node runtime/browser/scripts/navigate-1688.mjs",
     "browser:camoufox:install": "python3 -m camoufox remove && python3 -m camoufox fetch"
   },
   "devDependencies": {

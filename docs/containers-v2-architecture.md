@@ -48,7 +48,7 @@ Persistent SID Panel
 - File: services/legacy/controllers/sessionLaunchController.ts
 
 Debugging and Logs
-- utils/scripts/service/dev-all.mjs writes detailed logs to `debug/dev-all-YYYY-MM-DDTHH-mm-ss-sssZ.log` (anchor hits, highlight attempts, injection).
+- runtime/infra/utils/scripts/service/dev-all.mjs writes detailed logs to `debug/dev-all-YYYY-MM-DDTHH-mm-ss-sssZ.log` (anchor hits, highlight attempts, injection).
 - Manual tools:
   - `npm run dev:highlight -- --sid=<sid> --type=captcha|login`
   - `npm run dev:show-sid -- --sid=<sid>`

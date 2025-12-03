@@ -26,7 +26,7 @@ Playwright/Camoufox API
 - **功能**: 页面调试、性能分析、网络监控
 
 #### 2. 浏览器启动器
-- **位置**: `browser_interface/chromium_browser.py`
+- **位置**: `runtime/browser/browser_interface/chromium_browser.py`
 - **功能**: 暴露远程调试端口
 - **配置**: `--remote-debugging-port=9222`
 - **安全**: 绑定地址和访问控制

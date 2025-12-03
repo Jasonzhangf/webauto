@@ -182,4 +182,4 @@ with ChromiumBrowserWrapper(config) as browser:
 ## 文件位置
 
 - **容器库**：`/Users/fanzhang/Documents/github/webauto/container-library.json`
-- **浏览器包装器**：`/Users/fanzhang/Documents/github/webauto/browser_interface/chromium_browser.py`
+- **浏览器包装器**：`/Users/fanzhang/Documents/github/webauto/runtime/browser/browser_interface/chromium_browser.py`

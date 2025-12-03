@@ -18,7 +18,7 @@ MESSAGE = dedent(
 
         npm run browser:oneclick -- --profile default --url https://weibo.com
         # 或
-        node utils/scripts/browser/one-click-browser.mjs
+        node runtime/browser/scripts/one-click-browser.mjs
 
     该脚本保留仅用于兼容旧调用，不再实际启动浏览器。
     """

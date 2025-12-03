@@ -15,7 +15,7 @@ export class PlaywrightBrowser {
   constructor() {
     throw new BrowserError(
       'PlaywrightBrowser 已被禁用：\n' +
-        'Node 侧不得直接启动浏览器内核，请通过 TypeScript BrowserService (utils/scripts/browser/one-click-browser.mjs)\n' +
+        'Node 侧不得直接启动浏览器内核，请通过 TypeScript BrowserService (runtime/browser/scripts/one-click-browser.mjs)\n' +
         '配合 Python browser_interface 访问浏览器。',
     );
   }

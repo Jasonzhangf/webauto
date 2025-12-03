@@ -137,7 +137,7 @@
 1. **CLI工具** (`utils/browser_cli.py`) - 命令行接口
 2. **API扩展** (`services/browser_api.py`) - RESTful API端点
 3. **控制器** (`services/browser_service.py`) - 页面操作实现
-4. **DevTools集成** (`browser_interface/chromium_browser.py`) - 远程调试支持
+4. **DevTools集成** (`runtime/browser/browser_interface/chromium_browser.py`) - 远程调试支持
 
 ### 技术特性
 - **多浏览器支持**: Chromium、Camoufox

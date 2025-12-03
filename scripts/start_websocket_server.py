@@ -13,7 +13,13 @@ from typing import Optional
 
 import sys
 import os
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+RUNTIME_ROOT = REPO_ROOT / 'runtime'
+sys.path.insert(0, str(REPO_ROOT))
+if RUNTIME_ROOT.exists():
+    sys.path.insert(0, str(RUNTIME_ROOT))
 
 from server.websocket_server import WebSocketServer
 

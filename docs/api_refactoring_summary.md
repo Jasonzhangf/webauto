@@ -28,7 +28,7 @@ apiFetch('/api/v1/sessions/' + encodeURIComponent(sid) + '/click', ...)
 ## 修改统计
 
 ### 替换的文件：
-- **文件**: `browser_interface/overlay_assets/panel.js`
+- **文件**: `runtime/browser/browser_interface/overlay_assets/panel.js`
 - **总行数**: 2,331 行
 - **修改次数**: 10+ 处
 
