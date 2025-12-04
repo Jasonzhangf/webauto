@@ -1,774 +1,564 @@
-const STORAGE_KEY = 'webauto-floating-config';
-const REFRESH_INTERVAL = 8000;
-let autoConnectAttempted = false;
-
-const dom = {
-  connectionStatus: document.getElementById('connectionStatus'),
-  connectButton: document.getElementById('connectButton'),
-  hostInput: document.getElementById('hostInput'),
-  portInput: document.getElementById('portInput'),
-  protocolSelect: document.getElementById('protocolSelect'),
-  capabilityInput: document.getElementById('capabilityInput'),
-  createSessionForm: document.getElementById('createSessionForm'),
+const ui = {
+  metaText: document.getElementById('connectionStatus'),
+  globalMessage: document.getElementById('globalMessage'),
+  browserPanel: document.getElementById('browserPanel'),
+  browserStatusText: document.getElementById('browserStatusText'),
+  browserDetails: document.getElementById('browserDetails'),
+  refreshBrowser: document.getElementById('refreshBrowser'),
+  sessionForm: document.getElementById('sessionCreateForm'),
+  profileInput: document.getElementById('profileInput'),
+  launchUrlInput: document.getElementById('launchUrlInput'),
+  headlessToggle: document.getElementById('headlessToggle'),
+  sessionPanel: document.getElementById('sessionPanel'),
   sessionList: document.getElementById('sessionList'),
   refreshSessions: document.getElementById('refreshSessions'),
-  matchForm: document.getElementById('matchForm'),
-  urlInput: document.getElementById('urlInput'),
-  matchResult: document.getElementById('matchResult'),
-  logStream: document.getElementById('logStream'),
+  containersPanel: document.getElementById('containersPanel'),
+  refreshContainers: document.getElementById('refreshContainers'),
+  openInspectorButton: document.getElementById('openInspector'),
+  containerTreePlaceholder: document.getElementById('containerTreePlaceholder'),
+  domMapPlaceholder: document.getElementById('domMapPlaceholder'),
+  operationChips: document.getElementById('operationChips'),
+  logPanel: document.getElementById('logPanel'),
+  logSourceSelect: document.getElementById('logSourceSelect'),
+  refreshLogs: document.getElementById('refreshLogs'),
   clearLogs: document.getElementById('clearLogs'),
-  sessionInfoRow: document.getElementById('sessionInfoRow'),
-  selectedSessionMeta: document.getElementById('selectedSessionMeta'),
-  pinButton: document.getElementById('pinButton'),
+  logStream: document.getElementById('logStream'),
+  collapseButton: document.getElementById('collapseButton'),
   minButton: document.getElementById('minButton'),
   closeButton: document.getElementById('closeButton'),
-  collapseButton: document.getElementById('collapseButton'),
-  floatingBall: document.getElementById('floatingBall'),
+  stickBrowserButton: document.getElementById('stickBrowserButton'),
+  collapsedStrip: document.getElementById('collapsedStrip'),
+  expandCollapsedButton: document.getElementById('expandCollapsedButton'),
 };
 
 const state = {
-  client: null,
-  connected: false,
+  browserStatus: null,
   sessions: [],
-  selectedSessionId: null,
   logs: [],
-  pinned: true,
-  refreshTimer: null,
-  config: {
-    host: '127.0.0.1',
-    port: '8765',
-    protocol: 'ws',
+  operations: [],
+  selectedSession: null,
+  containerSnapshot: null,
+  domTree: null,
+  messageTimer: null,
+  loading: {
+    browser: false,
+    sessions: false,
+    logs: false,
+    containers: false,
   },
-  collapsed: false,
-  autoMatchUrl: '',
-  autoMatchAttempts: 0,
-  autoMatchDone: false,
+  isCollapsed: false,
 };
 
-class ControlPlaneClient {
-  constructor(opts) {
-    this.url = opts.url;
-    this.onStatus = opts.onStatus;
-    this.onLog = opts.onLog;
-    this.socket = null;
-    this.connected = false;
-    this.queue = [];
-    this.intentionalClose = false;
-    this.lastSentAt = 0;
-    this.minDelay = 450;
-    this.timeoutMs = 20000;
-  }
+const layoutState = {
+  fitTimer: null,
+  resizeObserver: null,
+};
 
-  async connect() {
-    if (this.connected && this.socket?.readyState === WebSocket.OPEN) {
-      return;
-    }
-    this.intentionalClose = false;
-    await new Promise((resolve, reject) => {
-      const socket = new WebSocket(this.url);
-      this.socket = socket;
+const backend = window.backendAPI;
+const desktop = window.desktopAPI;
 
-      const cleanup = () => {
-        socket.removeEventListener('open', handleOpen);
-        socket.removeEventListener('close', handleClose);
-        socket.removeEventListener('error', handleError);
-        socket.removeEventListener('message', handleMessage);
-      };
-
-      const handleOpen = () => {
-        this.connected = true;
-        this._emitStatus('connected');
-        resolve();
-      };
-
-      const handleClose = (evt) => {
-        this.connected = false;
-        this._emitStatus('disconnected');
-        cleanup();
-        if (!this.intentionalClose && evt.code !== 1000) {
-          this._emitLog('connection-lost', { code: evt.code, reason: evt.reason });
-        }
-      };
-
-      const handleError = (err) => {
-        cleanup();
-        reject(err);
-      };
-
-      const handleMessage = (message) => {
-        const payload = this._safeParse(message.data);
-        const next = this.queue.shift();
-        if (next) {
-          clearTimeout(next.timeout);
-          next.resolve(payload);
-        } else {
-          this._emitLog('orphan-response', payload);
-        }
-      };
-
-      socket.addEventListener('open', handleOpen, { once: true });
-      socket.addEventListener('close', handleClose);
-      socket.addEventListener('error', handleError, { once: true });
-      socket.addEventListener('message', handleMessage);
-    });
-  }
-
-  disconnect() {
-    this.intentionalClose = true;
-    if (this.socket) {
-      this.socket.close(1000, 'manual-close');
-    }
-    this.connected = false;
-    this.queue.forEach((pending) => {
-      clearTimeout(pending.timeout);
-      pending.reject(new Error('connection closed'));
-    });
-    this.queue = [];
-    this._emitStatus('disconnected');
-  }
-
-  async send(command, sessionId = '') {
-    if (!this.socket || this.socket.readyState !== WebSocket.OPEN) {
-      throw new Error('WebSocket 未连接');
-    }
-    await this._throttle();
-    const payload = {
-      type: 'command',
-      session_id: sessionId || command.parameters?.sessionId || '',
-      data: command,
-      timestamp: Date.now(),
-    };
-    this._emitLog('request', payload);
-
-    return new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        this.queue = this.queue.filter((p) => p !== pending);
-        reject(new Error('请求超时'));
-      }, this.timeoutMs);
-
-      const pending = {
-        resolve: (response) => {
-          this._emitLog('response', response);
-          resolve(response);
-        },
-        reject: (error) => {
-          this._emitLog('error', { error: error?.message || String(error) });
-          reject(error);
-        },
-        timeout,
-      };
-
-      this.queue.push(pending);
-
-      try {
-        this.socket.send(JSON.stringify(payload));
-      } catch (err) {
-        clearTimeout(timeout);
-        this.queue = this.queue.filter((p) => p !== pending);
-        pending.reject(err);
-      }
-    });
-  }
-
-  _emitStatus(status) {
-    this.onStatus?.(status);
-  }
-
-  _emitLog(type, payload) {
-    this.onLog?.(type, payload);
-  }
-
-  _safeParse(raw) {
-    try {
-      return JSON.parse(raw);
-    } catch (err) {
-      this._emitLog('parse-error', raw);
-      return raw;
-    }
-  }
-
-  async _throttle() {
-    const elapsed = Date.now() - this.lastSentAt;
-    if (elapsed < this.minDelay) {
-      await new Promise((resolve) => setTimeout(resolve, this.minDelay - elapsed));
-    }
-    this.lastSentAt = Date.now();
-  }
+async function init() {
+  bindWindowControls();
+  bindEvents();
+  subscribeDesktopEvents();
+  setupAutoFit();
+  await loadOperations();
+  await refreshAll();
 }
 
-function init() {
-  loadConfig();
-  bindEventListeners();
-  updateConnectionStatus();
-  updatePinButton();
-  maybeAutoConnect();
-  setupFloatingBallControl();
-}
-
-function loadConfig() {
-  try {
-    const stored = localStorage.getItem(STORAGE_KEY);
-    if (stored) {
-      const parsed = JSON.parse(stored);
-      state.config = {
-        host: parsed.host || state.config.host,
-        port: parsed.port || state.config.port,
-        protocol: parsed.protocol || state.config.protocol,
-      };
-      state.pinned = parsed.pinned ?? state.pinned;
-    }
-  } catch (err) {
-    console.warn('配置解析失败', err);
-  }
-
-  dom.hostInput.value = state.config.host;
-  dom.portInput.value = state.config.port;
-  dom.protocolSelect.value = state.config.protocol;
-  dom.pinButton.dataset.state = state.pinned ? 'pinned' : 'unpinned';
-}
-
-function persistConfig() {
-  const snapshot = {
-    host: dom.hostInput.value.trim() || '127.0.0.1',
-    port: dom.portInput.value.trim() || '8765',
-    protocol: dom.protocolSelect.value || 'ws',
-    pinned: state.pinned,
-  };
-  state.config = snapshot;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(snapshot));
-}
-
-function bindEventListeners() {
-  dom.connectButton.addEventListener('click', handleConnectToggle);
-  dom.refreshSessions.addEventListener('click', (event) => {
+function bindWindowControls() {
+  ui.closeButton?.addEventListener('click', () => desktop?.close?.());
+  ui.minButton?.addEventListener('click', () => desktop?.minimize?.());
+  ui.collapseButton?.addEventListener('click', () => desktop?.toggleCollapse?.());
+  ui.collapsedStrip?.addEventListener('click', (event) => {
     event.preventDefault();
-    refreshSessions();
+    desktop?.toggleCollapse?.(false);
   });
-  dom.createSessionForm.addEventListener('submit', handleCreateSession);
-  dom.matchForm.addEventListener('submit', handleMatch);
-  dom.clearLogs.addEventListener('click', () => {
+  ui.expandCollapsedButton?.addEventListener('click', (event) => {
+    event.stopPropagation();
+    desktop?.toggleCollapse?.(false);
+  });
+  ui.stickBrowserButton?.addEventListener('click', () => {
+    invokeAction('window:stick-browser').catch((err) => {
+      showMessage(err.message || '浏览器贴边失败', 'error');
+    });
+  });
+}
+
+function subscribeDesktopEvents() {
+  desktop?.onCollapseState?.((payload = {}) => {
+    const collapsed = Boolean(payload?.isCollapsed);
+    state.isCollapsed = collapsed;
+    document.body.classList.toggle('is-collapsed', collapsed);
+    ui.collapsedStrip?.classList.toggle('hidden', !collapsed);
+    if (ui.collapseButton) {
+      ui.collapseButton.textContent = collapsed ? '▢' : '◻︎';
+      ui.collapseButton.title = collapsed ? '展开浮窗' : '贴边收起';
+    }
+    if (!collapsed) {
+      queueFitWindow();
+    }
+  });
+}
+
+function bindEvents() {
+  ui.refreshBrowser?.addEventListener('click', () => loadBrowserStatus());
+  ui.refreshSessions?.addEventListener('click', () => loadSessions());
+  ui.refreshLogs?.addEventListener('click', () => loadLogs());
+  ui.clearLogs?.addEventListener('click', () => {
     state.logs = [];
     renderLogs();
   });
-
-  dom.hostInput.addEventListener('change', persistConfig);
-  dom.portInput.addEventListener('change', persistConfig);
-  dom.protocolSelect.addEventListener('change', persistConfig);
-
-  dom.pinButton.addEventListener('click', async () => {
-    state.pinned = !state.pinned;
-    updatePinButton();
-    persistConfig();
-    await window.desktopAPI?.togglePin(state.pinned);
+  ui.refreshContainers?.addEventListener('click', () => loadContainerSnapshot());
+  ui.sessionForm?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    await handleCreateSession();
   });
-
-  dom.minButton.addEventListener('click', () => window.desktopAPI?.minimize());
-  dom.closeButton.addEventListener('click', () => window.desktopAPI?.close());
-  dom.collapseButton.addEventListener('click', async () => {
-    await setCollapsedState(true);
-  });
+  ui.openInspectorButton?.addEventListener('click', () => openInspectorView());
 }
 
-async function handleConnectToggle() {
-  if (state.connected) {
-    disconnectClient();
-    return;
+function setupAutoFit() {
+  const target = document.querySelector('.window-shell');
+  if (!target || !desktop?.fitContentHeight) return;
+  if (typeof ResizeObserver !== 'undefined') {
+    layoutState.resizeObserver = new ResizeObserver(() => queueFitWindow());
+    layoutState.resizeObserver.observe(target);
   }
+  window.addEventListener('load', () => queueFitWindow(), { once: true });
+  setTimeout(() => queueFitWindow(), 80);
+}
 
-  persistConfig();
+function queueFitWindow() {
+  if (!desktop?.fitContentHeight || state.isCollapsed) return;
+  clearTimeout(layoutState.fitTimer);
+  layoutState.fitTimer = setTimeout(() => {
+    const target = document.querySelector('.window-shell');
+    if (!target) return;
+    const height = target.scrollHeight;
+    if (height > 0) {
+      desktop.fitContentHeight(height);
+    }
+  }, 80);
+}
 
+async function refreshAll() {
+  await Promise.all([loadBrowserStatus(), loadSessions(), loadLogs()]);
+  renderContainers();
+  queueFitWindow();
+}
+
+async function loadBrowserStatus() {
+  setLoading('browser', true);
   try {
-    dom.connectButton.disabled = true;
-    await establishClient();
-    await refreshSessions();
+    const res = await invokeAction('browser:status');
+    state.browserStatus = res;
   } catch (err) {
-    appendLog('error', err?.message || String(err));
+    state.browserStatus = null;
+    showMessage(err.message || '获取浏览器状态失败', 'error');
   } finally {
-    dom.connectButton.disabled = false;
+    setLoading('browser', false);
+    renderBrowserPanel();
   }
 }
 
-async function establishClient() {
-  const url = `${state.config.protocol}://${state.config.host}:${state.config.port}`;
-  state.client = new ControlPlaneClient({
-    url,
-    onStatus: handleConnectionStatusChange,
-    onLog: appendLog,
-  });
-  await state.client.connect();
-  state.connected = true;
-  startAutoRefresh();
-  updateConnectionStatus();
-}
-
-function disconnectClient() {
-  stopAutoRefresh();
-  if (state.client) {
-    state.client.disconnect();
-  }
-  state.connected = false;
-  updateConnectionStatus();
-}
-
-function handleConnectionStatusChange(status) {
-  state.connected = status === 'connected';
-  updateConnectionStatus();
-  if (state.connected) {
-    refreshSessions();
-  } else {
-    stopAutoRefresh();
-  }
-}
-
-function startAutoRefresh() {
-  stopAutoRefresh();
-  state.refreshTimer = setInterval(() => {
-    if (state.connected) {
-      refreshSessions();
-    }
-  }, REFRESH_INTERVAL);
-}
-
-function stopAutoRefresh() {
-  if (state.refreshTimer) {
-    clearInterval(state.refreshTimer);
-    state.refreshTimer = null;
-  }
-}
-
-async function refreshSessions() {
-  if (!state.client || !state.connected) {
-    return;
-  }
-  dom.refreshSessions.disabled = true;
+async function loadSessions() {
+  setLoading('sessions', true);
   try {
-    const response = await state.client.send({
-      command_type: 'session_control',
-      action: 'list',
-    });
-    if (response?.data?.success) {
-      state.sessions = response.data.sessions || [];
-      if (state.sessions.length && !state.sessions.find((s) => s.session_id === state.selectedSessionId)) {
-        state.selectedSessionId = state.sessions[0].session_id;
-      }
-    } else {
-      appendLog('error', response?.data?.error || '会话列表获取失败');
+    const res = await invokeAction('session:list');
+    const data = res?.sessions || res?.data?.sessions || res?.data || [];
+    state.sessions = Array.isArray(data) ? data : [];
+    if (state.selectedSession && !state.sessions.some((s) => s.profileId === state.selectedSession)) {
+      state.selectedSession = null;
     }
+  } catch (err) {
+    state.sessions = [];
+    showMessage(err.message || '会话列表获取失败', 'error');
+  } finally {
+    setLoading('sessions', false);
     renderSessions();
-    renderSelectedSession();
-    await maybeAutoMatch();
-  } catch (err) {
-    appendLog('error', err?.message || String(err));
-  } finally {
-    dom.refreshSessions.disabled = false;
-  }
-}
-
-async function maybeAutoMatch() {
-  if (!state.autoMatchUrl || state.autoMatchDone) return;
-  if (!state.selectedSessionId) return;
-  if (state.autoMatchAttempts >= 3) return;
-
-  state.autoMatchAttempts += 1;
-  dom.urlInput.value = state.autoMatchUrl;
-  const success = await executeMatch(state.autoMatchUrl);
-  if (success) {
-    state.autoMatchDone = true;
-  }
-}
-
-async function handleCreateSession(event) {
-  event.preventDefault();
-  if (!state.client) return;
-  const capabilities = dom.capabilityInput.value.trim() || 'dom';
-  const capabilityList = capabilities
-    .split(',')
-    .map((item) => item.trim())
-    .filter(Boolean);
-
-  dom.capabilityInput.disabled = true;
-  try {
-    const response = await state.client.send({
-      command_type: 'session_control',
-      action: 'create',
-      capabilities: capabilityList,
-    });
-    if (response?.data?.success) {
-      state.selectedSessionId = response.data.session_id;
-      await refreshSessions();
-    } else {
-      appendLog('error', response?.data?.error || '会话创建失败');
+    if (state.selectedSession) {
+      loadContainerSnapshot(true);
     }
-  } catch (err) {
-    appendLog('error', err?.message || String(err));
-  } finally {
-    dom.capabilityInput.disabled = false;
   }
 }
 
-async function handleMatch(event) {
-  event.preventDefault();
-  const url = dom.urlInput.value.trim();
-  if (!url) {
-    dom.matchResult.textContent = '请输入 URL';
+async function loadLogs() {
+  setLoading('logs', true);
+  try {
+    const res = await invokeAction('logs:stream', {
+      source: ui.logSourceSelect?.value || 'browser',
+      lines: 120,
+    });
+    const data = res?.lines || res?.data?.lines || [];
+    state.logs = Array.isArray(data) ? data : [];
+  } catch (err) {
+    state.logs = [];
+    showMessage(err.message || '日志读取失败', 'error');
+  } finally {
+    setLoading('logs', false);
+    renderLogs();
+  }
+}
+
+async function handleCreateSession() {
+  const profile = (ui.profileInput?.value || '').trim() || `profile-${Date.now().toString(36)}`;
+  const url = (ui.launchUrlInput?.value || '').trim();
+  const headless = Boolean(ui.headlessToggle?.checked);
+  try {
+    await invokeAction('session:create', { profile, url, headless });
+    showMessage(`已创建/唤醒 ${profile}`, 'success');
+    ui.sessionForm?.reset();
+    await loadSessions();
+  } catch (err) {
+    showMessage(err.message || '创建会话失败', 'error');
+  }
+}
+
+async function handleDeleteSession(profileId) {
+  if (!profileId) return;
+  try {
+    await invokeAction('session:delete', { profile: profileId });
+    showMessage(`会话 ${profileId} 已停止`, 'success');
+    await loadSessions();
+  } catch (err) {
+    showMessage(err.message || '删除失败', 'error');
+  }
+}
+
+async function openInspectorView() {
+  if (!desktop?.openInspector) {
+    showMessage('当前环境暂不支持容器视图', 'warn');
     return;
   }
-  const success = await executeMatch(url);
-  if (success) {
-    await refreshSessions();
+  if (!state.selectedSession) {
+    showMessage('请选择会话后再打开容器视图', 'warn');
+    return;
   }
-}
-
-async function executeMatch(url) {
-  if (!state.client) return false;
-  if (!state.selectedSessionId) {
-    dom.matchResult.textContent = '请先选择会话';
-    return false;
-  }
-
-  dom.matchResult.textContent = '匹配中...';
+  const selected = state.sessions.find((s) => s.profileId === state.selectedSession);
+  const url = selected?.current_url || selected?.currentUrl;
   try {
-    const response = await state.client.send(
-      {
-        command_type: 'container_operation',
-        action: 'match_root',
-        page_context: { url },
-      },
-      state.selectedSessionId,
-    );
-    dom.matchResult.textContent = renderMatchResult(response);
-    return Boolean(response?.data?.success);
+    await desktop.openInspector({ profile: state.selectedSession, url });
   } catch (err) {
-    dom.matchResult.textContent = err?.message || '匹配失败';
-    return false;
+    showMessage(err?.message || '容器视图打开失败', 'error');
   }
 }
 
-function renderMatchResult(response) {
-  if (!response) return '无响应';
-  if (!response.data?.success) {
-    return response.data?.error || '未匹配到容器';
-  }
-  const payload = response.data.data || {};
-  const container = payload.matched_container || payload.container;
-  const matchDetails = payload.match_details || payload.matchDetails || {};
-  const selector = matchDetails.matched_selector || matchDetails.selector || '未返回选择器';
-  const lines = [
-    `容器: ${container?.name || container?.id || 'N/A'}`,
-    `ID: ${container?.id || '未知'}`,
-    `匹配选择器: ${selector}`,
-  ];
-  if (matchDetails?.confidence) {
-    lines.push(`得分: ${(matchDetails.confidence * 100).toFixed(1)}%`);
-  }
-  return lines.join('\n');
-}
-
-async function deleteSession(sessionId) {
-  if (!state.client) return;
+async function loadOperations() {
   try {
-    const response = await state.client.send(
-      {
-        command_type: 'session_control',
-        action: 'delete',
-        parameters: { sessionId },
-      },
-      sessionId,
-    );
-    if (!response?.data?.success) {
-      appendLog('error', response?.data?.error || '删除失败');
-    }
-    if (state.selectedSessionId === sessionId) {
-      state.selectedSessionId = null;
-    }
-    await refreshSessions();
-  } catch (err) {
-    appendLog('error', err?.message || String(err));
+    const res = await invokeAction('operations:list');
+    state.operations = Array.isArray(res) ? res : res?.data || [];
+  } catch {
+    state.operations = [];
   }
+  renderOperations();
+}
+
+function renderBrowserPanel() {
+  if (!ui.browserStatusText || !ui.browserDetails) return;
+  const status = state.browserStatus;
+  const healthy = status?.healthy;
+  ui.browserStatusText.textContent = healthy ? '服务就绪' : '服务未就绪';
+  ui.browserStatusText.dataset.state = healthy ? 'ok' : 'warn';
+  const sessionCount = status?.sessions?.length ?? 0;
+  ui.browserDetails.textContent = healthy
+    ? `活动会话 ${sessionCount} 个`
+    : '请先启动浏览器服务（端口 7704/8765）';
+  queueFitWindow();
 }
 
 function renderSessions() {
+  if (!ui.sessionList) return;
+  ui.sessionList.innerHTML = '';
   if (!state.sessions.length) {
-    dom.sessionList.innerHTML = '<div class="info-row">当前无活跃会话</div>';
+    const empty = document.createElement('div');
+    empty.className = 'placeholder';
+    empty.innerHTML = '<strong>暂无会话</strong><p>使用上方表单创建新的浏览器会话。</p>';
+    ui.sessionList.appendChild(empty);
     return;
   }
 
-  dom.sessionList.innerHTML = '';
   state.sessions.forEach((session) => {
-    const wrapper = document.createElement('div');
-    wrapper.className = `session-chip ${session.session_id === state.selectedSessionId ? 'active' : ''}`;
+    const card = document.createElement('div');
+    card.className = 'session-card';
+    if (state.selectedSession === session.profileId) {
+      card.classList.add('active');
+    }
+    const title = document.createElement('div');
+    title.textContent = session.profileId || session.session_id;
+    title.style.fontWeight = '600';
 
     const meta = document.createElement('div');
-    meta.className = 'meta';
-    meta.innerHTML = `
-      <span class="id">${session.session_id}</span>
-      <span class="mode">模式: ${session.mode || '未知'} · 状态: ${session.status || '未知'}</span>
-      <span class="hint">URL: ${session.current_url || 'N/A'}</span>
-    `;
+    meta.className = 'session-meta';
+    meta.innerHTML = `<span>${session.mode || session.modeName || '未知模式'}</span><span>${
+      session.current_url || session.currentUrl || '未导航'
+    }</span>`;
 
     const actions = document.createElement('div');
-    actions.className = 'actions';
-
+    actions.className = 'session-actions';
     const selectBtn = document.createElement('button');
     selectBtn.className = 'ghost';
-    selectBtn.textContent = '激活';
-    selectBtn.addEventListener('click', () => {
-      state.selectedSessionId = session.session_id;
+    selectBtn.textContent = state.selectedSession === session.profileId ? '已选' : '选择';
+    selectBtn.addEventListener('click', (event) => {
+      event.stopPropagation();
+      state.selectedSession = session.profileId;
       renderSessions();
-      renderSelectedSession();
+      loadContainerSnapshot();
     });
 
     const deleteBtn = document.createElement('button');
-    deleteBtn.className = 'ghost';
-    deleteBtn.textContent = '删除';
-    deleteBtn.addEventListener('click', () => deleteSession(session.session_id));
+    deleteBtn.textContent = '停止';
+    deleteBtn.addEventListener('click', (event) => {
+      event.stopPropagation();
+      handleDeleteSession(session.profileId);
+    });
 
     actions.appendChild(selectBtn);
     actions.appendChild(deleteBtn);
 
-    wrapper.appendChild(meta);
-    wrapper.appendChild(actions);
+    card.addEventListener('click', () => {
+      state.selectedSession = session.profileId;
+      renderSessions();
+      loadContainerSnapshot();
+    });
 
-    dom.sessionList.appendChild(wrapper);
+    card.appendChild(title);
+    card.appendChild(meta);
+    card.appendChild(actions);
+    ui.sessionList.appendChild(card);
   });
+  queueFitWindow();
 }
 
-function renderSelectedSession() {
-  if (!state.selectedSessionId) {
-    dom.sessionInfoRow.textContent = '未选择会话';
-    dom.selectedSessionMeta.textContent = '';
+async function loadContainerSnapshot(skipLoading = false) {
+  if (!state.selectedSession) {
+    state.containerSnapshot = null;
+    state.domTree = null;
+    renderContainers();
     return;
   }
-  const session = state.sessions.find((s) => s.session_id === state.selectedSessionId);
-  if (!session) {
-    dom.sessionInfoRow.textContent = '会话已失效或不存在';
-    dom.selectedSessionMeta.textContent = '';
+  if (!skipLoading) setLoading('containers', true);
+  try {
+    const selected = state.sessions.find((s) => s.profileId === state.selectedSession);
+    const url = selected?.current_url || selected?.currentUrl;
+    if (!url) throw new Error('会话没有 URL');
+    const res = await invokeAction('containers:inspect', { profile: state.selectedSession, url });
+    const snapshot = res?.snapshot || res?.containerSnapshot || res;
+    state.containerSnapshot = snapshot;
+    state.domTree = snapshot?.dom_tree || res?.domTree || null;
+    showMessage(`容器树已捕获 (${state.selectedSession})`, 'success');
+  } catch (err) {
+    state.containerSnapshot = null;
+    state.domTree = null;
+    showMessage(err.message || '容器树捕获失败', 'error');
+  } finally {
+    setLoading('containers', false);
+    renderContainers();
+  }
+}
+
+function renderContainers() {
+  const treeContainer = ui.containerTreePlaceholder;
+  const domContainer = ui.domMapPlaceholder;
+  if (ui.openInspectorButton) {
+    ui.openInspectorButton.disabled = !state.selectedSession || !desktop?.openInspector;
+  }
+  if (!state.selectedSession) {
+    if (treeContainer) {
+      treeContainer.innerHTML = '<strong>未选择会话</strong><p>请先选择会话后再生成容器树。</p>';
+    }
+    if (domContainer) {
+      domContainer.innerHTML = '<strong>等待会话</strong><p>DOM 映射依赖已捕获的容器树。</p>';
+    }
+    queueFitWindow();
     return;
   }
 
-  dom.sessionInfoRow.textContent = `当前会话: ${session.session_id}\n模式: ${session.mode} · URL: ${session.current_url || 'N/A'}`;
-  dom.selectedSessionMeta.textContent = session.capabilities ? session.capabilities.join(', ') : '';
+  if (state.containerSnapshot?.container_tree) {
+    treeContainer.innerHTML = '';
+    treeContainer.appendChild(buildContainerTree(state.containerSnapshot.container_tree));
+  } else {
+    treeContainer.innerHTML = '<strong>等待容器匹配</strong><p>点击“刷新面板”捕获容器树。</p>';
+  }
+
+  if (state.domTree) {
+    domContainer.innerHTML = '';
+    domContainer.appendChild(buildDomTree(state.domTree));
+  } else {
+    domContainer.innerHTML = '<strong>DOM 快照待捕获</strong><p>容器树捕获后自动生成 DOM 映射。</p>';
+  }
+  queueFitWindow();
 }
 
-function updateConnectionStatus() {
-  dom.connectionStatus.textContent = state.connected ? '已连接' : '未连接';
-  dom.connectionStatus.style.background = state.connected ? 'rgba(34,211,238,0.18)' : 'rgba(248,113,113,0.15)';
-  dom.connectionStatus.style.color = state.connected ? 'var(--accent)' : 'var(--danger)';
-  dom.connectButton.textContent = state.connected ? '断开' : '连接';
-  dom.matchForm.querySelector('button').disabled = !state.connected;
-  dom.createSessionForm.querySelector('button').disabled = !state.connected;
-  dom.capabilityInput.disabled = !state.connected;
+function buildContainerTree(node, depth = 0) {
+  const root = document.createElement('div');
+  root.className = 'tree-view';
+  const title = document.createElement('div');
+  title.className = 'tree-node-title';
+  const selectors = node.match?.selectors?.join(', ') || '无匹配';
+  title.innerHTML = `<strong>${node.name || node.id}</strong><span>${node.type || ''} · ${selectors}</span>`;
+  root.appendChild(title);
+  if (node.children && node.children.length) {
+    const list = document.createElement('div');
+    list.className = 'tree-children';
+    node.children.forEach((child) => list.appendChild(buildContainerTree(child, depth + 1)));
+    root.appendChild(list);
+  }
+  return root;
 }
 
-function appendLog(type, payload) {
-  const timestamp = new Date();
-  state.logs.unshift({ type, payload, timestamp });
-  state.logs = state.logs.slice(0, 60);
-  renderLogs();
-  if (type === 'response') {
-    maybeAutoApplyMatchResult(payload);
+function buildDomTree(node, depth = 0) {
+  if (depth > 2) return document.createTextNode('');
+  const container = document.createElement('div');
+  container.className = 'dom-node';
+  const title = document.createElement('div');
+  title.className = 'dom-node-title';
+  const label = [`<${node.tag.toLowerCase()}>`];
+  if (node.id) label.push(`#${node.id}`);
+  if (node.classes?.length) label.push(`.${node.classes.join('.')}`);
+  const mapped = (node.containers || []).map((c) => c.container_name || c.container_id);
+  title.innerHTML = `<strong>${label.join('')}</strong><span>${mapped.length ? mapped.join(', ') : ''}</span>`;
+  container.appendChild(title);
+  if (node.children && node.children.length) {
+    const list = document.createElement('div');
+    list.className = 'dom-children';
+    node.children.forEach((child) => {
+      const childNode = buildDomTree(child, depth + 1);
+      if (childNode) list.appendChild(childNode);
+    });
+    container.appendChild(list);
+  }
+  return container;
+}
+
+function renderOperations() {
+  if (!ui.operationChips) return;
+  ui.operationChips.innerHTML = '';
+  if (!state.operations.length) {
+    const chip = document.createElement('span');
+    chip.className = 'chip';
+    chip.textContent = '暂无操作';
+    ui.operationChips.appendChild(chip);
+    return;
+  }
+  state.operations.forEach((op) => {
+    const chip = document.createElement('span');
+    chip.className = 'chip';
+    chip.textContent = op.id;
+    if (op.description) chip.title = op.description;
+    chip.addEventListener('click', () => handleOperationRun(op));
+    ui.operationChips.appendChild(chip);
+  });
+  queueFitWindow();
+}
+
+async function handleOperationRun(op) {
+  if (!state.selectedSession) {
+    showMessage('请选择会话后再执行操作', 'warn');
+    return;
+  }
+  const config = getDefaultOperationConfig(op.id);
+  try {
+    const result = await invokeAction('operations:run', { op: op.id, config });
+    const ok = result?.success !== false;
+    showMessage(`操作 ${op.id} ${ok ? '执行成功' : '执行失败'}`, ok ? 'success' : 'error');
+  } catch (err) {
+    showMessage(err.message || `操作 ${op.id} 执行失败`, 'error');
+  }
+}
+
+function getDefaultOperationConfig(opId) {
+  switch (opId) {
+    case 'highlight':
+      return {
+        selector:
+          state.containerSnapshot?.root_match?.container?.matched_selector ||
+          state.containerSnapshot?.container_tree?.selectors?.[0]?.css ||
+          '#app',
+      };
+    case 'scroll':
+      return { distance: 400, direction: 'down' };
+    default:
+      return {};
   }
 }
 
 function renderLogs() {
-  dom.logStream.innerHTML = '';
-  if (!state.logs.length) {
-    dom.logStream.innerHTML = '<div class="log-entry">暂无日志</div>';
-    return;
-  }
-
-  state.logs.forEach((entry, idx) => {
-    const node = document.createElement('div');
-    node.className = `log-entry ${entry.type.includes('error') ? 'error' : entry.type.includes('response') ? 'success' : ''}`;
-    const title = document.createElement('div');
-    title.className = 'timestamp';
-    title.textContent = `${entry.timestamp.toLocaleTimeString()} · ${entry.type}`;
-    const body = document.createElement('pre');
-    body.textContent = typeof entry.payload === 'string' ? entry.payload : JSON.stringify(entry.payload, null, 2);
-    const copyBtn = document.createElement('button');
-    copyBtn.className = 'copy-btn';
-    copyBtn.textContent = '复制';
-    copyBtn.addEventListener('click', async () => {
-      const text = typeof entry.payload === 'string' ? entry.payload : JSON.stringify(entry.payload, null, 2);
-      try {
-        await navigator.clipboard.writeText(text);
-        copyBtn.textContent = '已复制';
-        setTimeout(() => (copyBtn.textContent = '复制'), 1200);
-      } catch (err) {
-        console.error('clipboard failed', err);
-      }
-    });
-    const actions = document.createElement('div');
-    actions.className = 'log-actions';
-    actions.appendChild(copyBtn);
-    node.appendChild(title);
-    node.appendChild(actions);
-    node.appendChild(body);
-    dom.logStream.appendChild(node);
-  });
+  if (!ui.logStream) return;
+  ui.logStream.textContent = state.logs.length ? state.logs.join('\n') : '暂无日志';
+  queueFitWindow();
 }
 
-function maybeAutoApplyMatchResult(response) {
-  const data = response?.data;
-  if (!data) return;
-  const matchPayload = data.data;
-  if (!matchPayload) return;
-  const hasMatchFields =
-    matchPayload.matched_container || matchPayload.container || matchPayload.match_details;
-  if (!hasMatchFields) return;
-  const sessionId = response.session_id || '';
-  if (state.selectedSessionId && sessionId && sessionId !== state.selectedSessionId) {
-    return;
-  }
-  dom.matchResult.textContent = renderMatchResult(response);
-}
-
-function updatePinButton() {
-  dom.pinButton.classList.toggle('active', state.pinned);
-  dom.pinButton.textContent = state.pinned ? '📌' : '📍';
-}
-
-async function maybeAutoConnect() {
-  if (autoConnectAttempted || state.connected) return;
-  autoConnectAttempted = true;
-
-  let autoUrl = '';
-  if (window.desktopAPI?.getMeta) {
-    try {
-      const meta = await window.desktopAPI.getMeta();
-      autoUrl = meta?.autoConnectUrl || '';
-      if (meta?.autoMatchUrl) {
-        state.autoMatchUrl = meta.autoMatchUrl;
-        state.autoMatchAttempts = 0;
-        state.autoMatchDone = false;
-        if (!dom.urlInput.value) {
-          dom.urlInput.value = meta.autoMatchUrl;
-        }
-      }
-    } catch (err) {
-      appendLog('error', err?.message || String(err));
-    }
-  }
-
-  if (autoUrl) {
-    try {
-      const parsed = new URL(autoUrl);
-      dom.protocolSelect.value = parsed.protocol.replace(':', '') || 'ws';
-      dom.hostInput.value = parsed.hostname || '127.0.0.1';
-      dom.portInput.value = parsed.port || (parsed.protocol === 'wss:' ? '443' : '80');
-      persistConfig();
-      await connectUsingCurrentConfig();
-      return;
-    } catch (err) {
-      appendLog('error', err?.message || String(err));
-    }
-  }
-
-  await connectUsingCurrentConfig();
-}
-
-async function connectUsingCurrentConfig() {
-  persistConfig();
-  dom.connectButton.disabled = true;
-  try {
-    await establishClient();
-    await refreshSessions();
-  } catch (err) {
-    appendLog('error', err?.message || String(err));
-  } finally {
-    dom.connectButton.disabled = false;
-  }
-}
-
-async function setCollapsedState(collapsed) {
-  if (state.collapsed === collapsed) return;
-  state.collapsed = collapsed;
-  document.body.classList.toggle('is-collapsed', collapsed);
-  try {
-    await window.desktopAPI?.setCollapsed(collapsed);
-  } catch (err) {
-    appendLog('error', err?.message || String(err));
-  }
-}
-
-function setupFloatingBallControl() {
-  if (!dom.floatingBall) return;
-  let dragging = false;
-  let pointerId = null;
-  let offset = { x: 0, y: 0 };
-  let moved = false;
-  let start = { x: 0, y: 0 };
-  const DRAG_THRESHOLD = 6;
-
-  dom.floatingBall.addEventListener('pointerdown', async (event) => {
-    if (!state.collapsed) return;
-    dragging = true;
-    moved = false;
-    pointerId = event.pointerId;
-    dom.floatingBall.setPointerCapture(pointerId);
-    dom.floatingBall.classList.add('dragging');
-    start = { x: event.screenX, y: event.screenY };
-    const bounds = await window.desktopAPI?.getBounds();
-    offset = {
-      x: event.screenX - (bounds?.x || 0),
-      y: event.screenY - (bounds?.y || 0),
-    };
-  });
-
-  dom.floatingBall.addEventListener('pointermove', async (event) => {
-    if (!dragging) return;
-    const dx = Math.abs(event.screenX - start.x);
-    const dy = Math.abs(event.screenY - start.y);
-    if (!moved && (dx > DRAG_THRESHOLD || dy > DRAG_THRESHOLD)) {
-      moved = true;
-    }
-    if (!moved) return;
-    const targetX = event.screenX - offset.x;
-    const targetY = event.screenY - offset.y;
-    await window.desktopAPI?.moveWindow(targetX, targetY);
-  });
-
-  const release = async (event) => {
-    if (!dragging) return;
-    if (pointerId !== null) {
-      try {
-        dom.floatingBall.releasePointerCapture(pointerId);
-      } catch {}
-    }
-    dom.floatingBall.classList.remove('dragging');
-    dragging = false;
-    pointerId = null;
-    if (moved) {
-      await snapFloatingBall();
-    } else {
-      await setCollapsedState(false);
-    }
+function setLoading(section, loading) {
+  state.loading[section] = loading;
+  const map = {
+    browser: ui.browserPanel,
+    sessions: ui.sessionPanel,
+    logs: ui.logPanel,
+    containers: ui.containersPanel,
   };
-
-  dom.floatingBall.addEventListener('pointerup', release);
-  dom.floatingBall.addEventListener('pointercancel', release);
-  dom.floatingBall.addEventListener('dblclick', async (event) => {
-    event.preventDefault();
-    if (state.collapsed) {
-      await setCollapsedState(false);
-    }
-  });
+  if (map[section]) {
+    map[section].dataset.loading = String(loading);
+  }
 }
 
-async function snapFloatingBall() {
-  const bounds = await window.desktopAPI?.getBounds();
-  const work = await window.desktopAPI?.getWorkArea();
-  if (!bounds || !work) return;
-  const padding = 16;
-  const centerX = bounds.x + bounds.width / 2;
-  const workCenter = work.x + work.width / 2;
-  const targetX = centerX < workCenter
-    ? work.x + padding
-    : work.x + work.width - bounds.width - padding;
-  const minY = work.y + padding;
-  const maxY = work.y + work.height - bounds.height - padding;
-  const targetY = Math.min(Math.max(bounds.y, minY), maxY);
-  await window.desktopAPI?.moveWindow(targetX, targetY);
+function showMessage(text, variant = 'info') {
+  if (!ui.globalMessage) return;
+  ui.globalMessage.textContent = text;
+  ui.globalMessage.dataset.variant = variant;
+  ui.globalMessage.classList.add('visible');
+  clearTimeout(state.messageTimer);
+  state.messageTimer = setTimeout(() => {
+    ui.globalMessage.classList.remove('visible');
+  }, 3500);
 }
 
-init();
+async function invokeAction(action, payload = {}) {
+  if (!backend?.invokeAction) {
+    return mockAction(action);
+  }
+  const result = await backend.invokeAction(action, payload);
+  if (result?.success === false) {
+    throw new Error(result?.error || `Action ${action} failed`);
+  }
+  return result?.data ?? result;
+}
+
+function mockAction(action) {
+  switch (action) {
+    case 'browser:status':
+      return { healthy: false, sessions: [] };
+    case 'session:list':
+      return { sessions: [] };
+    case 'logs:stream':
+      return { lines: ['[mock] backend 未连接'] };
+    case 'operations:list':
+      return [
+        { id: 'highlight', description: 'mock highlight' },
+        { id: 'scroll', description: 'mock scroll' },
+      ];
+    case 'containers:inspect':
+      return {
+        containerSnapshot: {
+          container_tree: {
+            id: 'mock_root',
+            name: '示例根容器',
+            type: 'page',
+            match: { selectors: ['#app'] },
+            children: [],
+          },
+        },
+        domTree: {
+          tag: 'DIV',
+          id: 'app',
+          childCount: 0,
+        },
+      };
+    default:
+      return {};
+  }
+}
+
+init().catch((err) => {
+  console.error('[ui] init failed', err);
+  showMessage(err?.message || 'UI 初始化失败', 'error');
+});

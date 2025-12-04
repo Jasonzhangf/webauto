@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>容器视图</title>
+    <link rel="stylesheet" href="./inspector.css" />
+  </head>
+  <body>
+    <header class="inspector-header">
+      <div class="inspector-meta">
+        <div class="session" id="inspectorSession">会话: -</div>
+        <div class="url" id="inspectorUrl">URL: -</div>
+      </div>
+      <div class="header-actions">
+        <button id="refreshInspector">刷新</button>
+        <button id="closeInspector">关闭</button>
+      </div>
+    </header>
+
+    <main>
+      <div id="inspectorWorkspace">
+        <section class="panel tree-panel">
+          <div class="panel-title">容器树</div>
+          <div id="containerTree" class="scrollable empty-state">等待匹配结果...</div>
+        </section>
+        <section class="panel dom-panel">
+          <div class="panel-title">DOM 映射</div>
+          <div id="domTree" class="scrollable empty-state">等待匹配结果...</div>
+        </section>
+        <svg id="linkLayer"></svg>
+      </div>
+    </main>
+
+    <section class="panel link-panel">
+      <div class="panel-title">匹配详情</div>
+      <div id="linkDetails" class="scrollable empty-state">选择一个容器查看关联元素</div>
+    </section>
+
+    <div id="toast"></div>
+
+    <script src="./inspector.js" type="module"></script>
+  </body>
+</html>

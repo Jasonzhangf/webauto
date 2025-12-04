@@ -79,6 +79,53 @@ async function post(url, body){
   try { return JSON.parse(text); } catch { return { ok: false, raw: text }; }
 }
 
+async function listActiveSessions(baseUrl) {
+  try {
+    const status = await post(`${baseUrl}/command`, { action: 'getStatus' });
+    const sessions = status?.sessions || [];
+    return Array.isArray(sessions) ? sessions : [];
+  } catch (err) {
+    console.warn('[one-click] 获取会话状态失败:', err?.message || String(err));
+    return [];
+  }
+}
+
+async function ensureExclusiveProfile(baseUrl, profileId) {
+  const MAX_ATTEMPTS = 4;
+  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+    const sessions = await listActiveSessions(baseUrl);
+    const duplicates = sessions.filter((session) => {
+      const pid = session.profileId || session.profile_id || session.session_id;
+      return pid === profileId;
+    });
+    if (!duplicates.length) {
+      return true;
+    }
+
+    if (attempt === 0) {
+      console.log(`[one-click] 检测到 profile=${profileId} 的历史会话 ${duplicates.length} 个，准备清理...`);
+    }
+
+    const targets = Array.from(new Set(duplicates.map((session) => session.profileId || session.profile_id || profileId)));
+    for (const target of targets) {
+      try {
+        await post(`${baseUrl}/command`, { action: 'stop', args: { profileId: target } });
+        console.log(`[one-click] 已关闭旧会话 profile=${target}`);
+      } catch (err) {
+        const message = err?.message || '';
+        if (message.includes('Unknown action: stop')) {
+          console.warn('[one-click] 当前浏览器服务版本较旧，无法执行 stop，准备重启服务...');
+          return false;
+        }
+        console.warn(`[one-click] 关闭旧会话 ${target} 失败:`, message || err);
+      }
+    }
+
+    await wait(600);
+  }
+  throw new Error(`[one-click] 无法清理 profile=${profileId} 的旧实例，请手动检查`);
+}
+
 function waitForSocket(host, port, timeoutMs=8000) {
   return new Promise((resolve) => {
     const start = Date.now();
@@ -102,7 +149,12 @@ function waitForSocket(host, port, timeoutMs=8000) {
 
 function spawnNpmDev(extraEnv = {}) {
   const npmCmd = process.platform === 'win32' ? 'npm.cmd' : 'npm';
-  const env = { ...process.env, NODE_ENV: 'development', ...extraEnv };
+  const env = {
+    ...process.env,
+    NODE_ENV: 'development',
+    WEBAUTO_FLOATING_DISABLE_DEVTOOLS: process.env.WEBAUTO_FLOATING_DISABLE_DEVTOOLS || '1',
+    ...extraEnv,
+  };
   return spawn(npmCmd, ['run', 'dev'], {
     cwd: FLOATING_APP_DIR,
     stdio: 'inherit',
@@ -116,6 +168,7 @@ async function launchFloatingConsole(targetUrl = '') {
     return;
   }
 
+  killFloatingPanelProcesses();
   console.log('[one-click] --dev 模式：启动浮窗控制台，使用 Node WebSocket 服务');
   const ready = await waitForSocket(DEFAULT_WS_HOST, DEFAULT_WS_PORT, 8000);
   if (!ready) {
@@ -188,7 +241,7 @@ async function main(){
         '--ws-port', String(DEFAULT_WS_PORT),
       ], {
         stdio: 'inherit',
-        env: { ...process.env, BROWSER_SERVICE_AUTO_EXIT: '1' },
+        env: { ...process.env, BROWSER_SERVICE_AUTO_EXIT: '0' },
       });
       serviceChild = child;
       child.on('exit', (code) => {
@@ -208,6 +261,16 @@ async function main(){
     throw new Error(`[one-click] browser service not healthy on :${port}`);
   };
   await ensureBrowserService();
+  const exclusivityReady = await ensureExclusiveProfile(base, profile);
+  if (exclusivityReady === false) {
+    killBrowserServiceProcesses();
+    killPort(port);
+    killPort(DEFAULT_WS_PORT);
+    await wait(800);
+    healthy = false;
+    await ensureBrowserService();
+    await ensureExclusiveProfile(base, profile);
+  }
 
   // 启动浏览器会话
   const startRes = await post(`${base}/command`, { action:'start', args:{ headless, profileId: profile, url } });
@@ -338,6 +401,18 @@ function killBrowserServiceProcesses() {
     } else {
       execSync('pkill -f "libs/browser/remote-service.js" || true', { stdio: 'ignore' });
       execSync('pkill -f "dist/services/browser-service/index.js" || true', { stdio: 'ignore' });
+    }
+  } catch {}
+}
+
+function killFloatingPanelProcesses() {
+  try {
+    if (process.platform === 'win32') {
+      execSync('taskkill /F /IM electron.exe /FI "WINDOWTITLE eq WebAuto Floating Console" || true', { stdio: 'ignore' });
+      execSync('taskkill /F /IM electronmon.exe || true', { stdio: 'ignore' });
+    } else {
+      execSync('pkill -f "apps/floating-panel/node_modules/electron/dist/Electron.app" || true', { stdio: 'ignore' });
+      execSync('pkill -f "electronmon" || true', { stdio: 'ignore' });
     }
   } catch {}
 }

@@ -19,7 +19,12 @@ RUNTIME_ROOT = REPO_ROOT / "runtime"
 if RUNTIME_ROOT.exists() and str(RUNTIME_ROOT) not in sys.path:
     sys.path.insert(0, str(RUNTIME_ROOT))
 sys.path.append(str(REPO_ROOT))
-from core.container.models_v2 import ContainerDefV2, convert_legacy_container_to_v2
+from core.container.models_v2 import (
+  ContainerDefV2,
+  SelectorByClass,
+  SelectorVariant,
+  convert_legacy_container_to_v2,
+)
 from browser_interface.core.paths import CONTAINER_LIB_DIR
 
 
@@ -442,3 +447,114 @@ def get_container_hierarchy_v2(url: str) -> Dict[str, Any]:
     }
 
   return hierarchy
+
+
+def _normalize_selector_inputs(raw_selectors: Any) -> List[SelectorByClass]:
+  """将字符串 / dict 形式的输入统一转换成 SelectorByClass 列表"""
+  selectors: List[SelectorByClass] = []
+  if raw_selectors is None:
+    return selectors
+  if isinstance(raw_selectors, (str, bytes)):
+    raw_items = [raw_selectors]
+  elif isinstance(raw_selectors, list):
+    raw_items = raw_selectors
+  else:
+    raw_items = [raw_selectors]
+
+  for idx, item in enumerate(raw_items):
+    if isinstance(item, str):
+      css = item.strip()
+      if not css:
+        continue
+      selectors.append(
+        SelectorByClass(
+          css=css,
+          variant=SelectorVariant.PRIMARY if idx == 0 else SelectorVariant.BACKUP,
+          score=1.0,
+        )
+      )
+    elif isinstance(item, dict):
+      try:
+        selectors.append(SelectorByClass.from_dict(item))
+      except Exception:
+        continue
+  return selectors
+
+
+def update_container_selectors_v2(
+  url: str,
+  container_id: str,
+  selectors: Any,
+) -> Dict[str, Any]:
+  """
+  更新指定容器的选择器定义（使用ContainerDefV2结构）
+  """
+  if not container_id:
+    raise ValueError("container_id is required")
+  normalized = _normalize_selector_inputs(selectors)
+  if not normalized:
+    raise ValueError("selectors 不能为空")
+
+  registry = _load_registry()
+  site_key = _find_site_key_for_url(url, registry)
+  if not site_key:
+    raise ValueError("未找到与 URL 对应的容器站点，请先创建容器")
+
+  containers = load_containers_for_site_v2(site_key)
+  container = containers.get(container_id)
+  if not container:
+    raise ValueError(f"容器 {container_id} 不存在")
+
+  container.selectors = normalized
+  if not save_container_v2(site_key, container):
+    raise RuntimeError("保存容器失败")
+  return container.to_dict()
+
+
+def create_child_container_v2(
+  url: str,
+  container_id: str,
+  selectors: Any,
+  *,
+  parent_id: Optional[str] = None,
+  name: Optional[str] = None,
+  container_type: Optional[str] = None,
+  capabilities: Optional[List[str]] = None,
+) -> Dict[str, Any]:
+  """
+  创建一个新的子容器定义（ContainerDefV2），自动接入父容器 children
+  """
+  if not container_id:
+    raise ValueError("container_id is required")
+
+  normalized = _normalize_selector_inputs(selectors)
+  if not normalized:
+    raise ValueError("至少需要一个有效的 selector")
+
+  registry = _load_registry()
+  site_key = _find_site_key_for_url(url, registry)
+  website = ""
+  if not site_key:
+    try:
+      parsed = urlparse(url)
+      website = (parsed.hostname or "").lower()
+    except Exception:
+      website = ""
+    site_key = _sanitize_site_key(website or "site_auto")
+  else:
+    site_entry = registry.get(site_key) or {}
+    website = site_entry.get("website", "")
+
+  container = ContainerDefV2(
+    id=container_id,
+    name=name or container_id,
+    type=container_type or "section",
+    capabilities=capabilities or [],
+    selectors=normalized,
+    children=[],
+  )
+
+  if not save_container_v2(site_key, container, parent_id=parent_id or None, website=website):
+    raise RuntimeError("保存容器失败")
+
+  return container.to_dict()

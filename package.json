@@ -5,6 +5,8 @@
   "type": "module",
   "dependencies": {
     "iconv-lite": "^0.6.3",
+    "linkedom": "^0.18.12",
+    "robotjs": "^0.6.0",
     "sharp": "^0.33.5",
     "ws": "^8.18.3"
   },
@@ -20,6 +22,16 @@
     "start:vision": "node dist/sharedmodule/engines/vision-engine/server.js",
     "test:services": "node scripts/service-tests/run-all.mjs",
     "test:vision": "node scripts/run-vision-tests.mjs",
+    "check:modules": "node scripts/test-modules.mjs",
+    "check:ts": "tsc --noEmit -p tsconfig.services.json",
+    "test:modules:unit": "tsx --test modules/**/*.test.ts",
+    "test": "npm run check:modules && npm run check:ts && npm run test:modules:unit",
+    "cli:browser-control": "tsx modules/browser-control/src/cli.ts",
+    "cli:session-manager": "tsx modules/session-manager/src/cli.ts",
+    "cli:logging": "tsx modules/logging/src/cli.ts",
+    "cli:operations": "tsx modules/operations/src/cli.ts",
+    "cli:container-registry": "tsx modules/container-registry/src/cli.ts",
+    "cli:container-matcher": "tsx modules/container-matcher/src/cli.ts",
     "browser:oneclick": "node runtime/browser/scripts/one-click-browser.mjs",
     "service:browser:start": "node runtime/infra/utils/scripts/service/start-browser-service.mjs",
     "service:browser:stop": "node runtime/infra/utils/scripts/service/stop-browser-service.mjs",
@@ -36,6 +48,8 @@
     "@types/node": "^24.10.1",
     "@types/ws": "^8.18.1",
     "camoufox": "^0.1.19",
-    "playwright": "^1.57.0"
+    "playwright": "^1.57.0",
+    "tsx": "^4.16.5",
+    "typescript": "^5.6.3"
   }
 }

@@ -1,0 +1,35 @@
+{
+  "id": "air_chat_root",
+  "name": "1688聊天根容器",
+  "type": "page",
+  "page_patterns": [
+    "air.1688.com",
+    "*app*"
+  ],
+  "selectors": [
+    {
+      "css": "#ice-container",
+      "variant": "primary",
+      "score": 1
+    },
+    {
+      "css": "div",
+      "variant": "fallback",
+      "score": 0.6
+    }
+  ],
+  "metadata": {
+    "required_descendants_any": [
+      "div.ww_bottom",
+      "section.next-shell.next-shell-desktop.next-shell-brand",
+      "iframe",
+      "div.right-column"
+    ]
+  },
+  "capabilities": [
+    "highlight",
+    "find-child",
+    "scroll"
+  ],
+  "children": []
+}

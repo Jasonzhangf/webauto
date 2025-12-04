@@ -32,6 +32,18 @@
       "score": 0.5
     }
   ],
+  "metadata": {
+    "required_descendants_any": [
+      "div[class*='Frame_top_']",
+      "div[class*='Frame_content_']",
+      "div[class*='Home_feed_']",
+      "main[class*='Main_wrap_']"
+    ],
+    "excluded_descendants_any": [
+      "div[class*='LoginCard']",
+      "div[class*='Passport_box']"
+    ]
+  },
   "operations": [
     {
       "type": "highlight",

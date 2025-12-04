@@ -4,7 +4,7 @@ Container operation handling for WebSocket server commands.
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 import time
 from urllib.parse import urlparse
 
@@ -37,6 +37,10 @@ class ContainerOperationHandler:
         if action == "match_root":
             page_context = command.get("page_context", {})
             return await self.match_root(session_id, page_context)
+        if action == "inspect_tree":
+            page_context = command.get("page_context", {})
+            parameters = command.get("parameters", {})
+            return await self.inspect_tree(session_id, page_context, parameters)
         return {
             "success": False,
             "error": f"Unsupported container action: {action}",
@@ -124,6 +128,77 @@ class ContainerOperationHandler:
             return {
                 "success": False,
                 "error": f"Match root error: {str(error)}",
+            }
+
+    async def inspect_tree(
+        self,
+        session_id: str,
+        page_context: Dict[str, Any],
+        parameters: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        import logging
+        logger = logging.getLogger(__name__)
+        params = parameters or {}
+
+        try:
+            session = self.session_manager.get_session(session_id)
+            if not session:
+                return {
+                    "success": False,
+                    "error": f"Session {session_id} not found",
+                }
+
+            url = page_context.get("url") or session.current_url or ""
+            if not url:
+                return {
+                    "success": False,
+                    "error": "page_context.url is required",
+                }
+
+            containers = get_containers_for_url_v2(url)
+            if not containers:
+                return {
+                    "success": False,
+                    "error": "No container definitions available for this URL",
+                }
+
+            try:
+                await session.ensure_page(url)
+            except AntiBotError as anti_bot_error:
+                logger.warning("Anti-bot detection triggered during inspect_tree: %s", anti_bot_error)
+                browser = getattr(session, "browser", None)
+                if browser is not None and hasattr(browser, "_risk_control_enabled"):
+                    try:
+                        browser._risk_control_enabled = False  # type: ignore[attr-defined]
+                        await session.ensure_page(url)
+                    except Exception:
+                        raise
+
+            snapshot = await session.run(
+                ContainerOperationHandler._capture_inspector_data,
+                containers,
+                page_context,
+                params,
+            )
+
+            if not snapshot:
+                return {
+                    "success": False,
+                    "error": "Unable to capture inspector snapshot",
+                }
+
+            return {
+                "success": True,
+                "data": snapshot,
+            }
+        except Exception as error:
+            logger = logging.getLogger(__name__)
+            logger.error("Error in inspect_tree: %s", error)
+            import traceback
+            logger.error(traceback.format_exc())
+            return {
+                "success": False,
+                "error": f"Inspector error: {str(error)}",
             }
 
     @staticmethod
@@ -321,3 +396,404 @@ class ContainerOperationHandler:
         if "." in container_id:
             return False
         return True
+
+    @staticmethod
+    def _capture_inspector_data(
+        session: BrowserSession,
+        containers: Dict[str, ContainerDefV2],
+        page_context: Dict[str, Any],
+        parameters: Dict[str, Any],
+    ) -> Optional[Dict[str, Any]]:
+        page = session.current_page
+        playwright_page = getattr(page, "page", None)
+        if playwright_page is None:
+            return None
+
+        url = page_context.get("url") or session.current_url or ""
+        path = urlparse(url).path
+        root_container_id = parameters.get("root_container_id") or parameters.get("root_id")
+        root_selector = parameters.get("root_selector")
+        try:
+            max_depth = int(parameters.get("max_depth", 4))
+        except Exception:
+            max_depth = 4
+        try:
+            max_children = int(parameters.get("max_children", 6))
+        except Exception:
+            max_children = 6
+        max_depth = max(1, min(max_depth, 6))
+        max_children = max(1, min(max_children, 12))
+
+        root_match = None
+        if root_container_id and root_container_id in containers:
+            root_match = ContainerOperationHandler._match_single_container(
+                playwright_page,
+                root_container_id,
+                containers[root_container_id],
+                url,
+                path,
+            )
+
+        if not root_match:
+            root_match = ContainerOperationHandler._match_containers_sync(
+                session,
+                containers,
+                page_context,
+            )
+
+        if not root_match:
+            return None
+
+        if not root_selector:
+            root_selector = root_match["container"].get("matched_selector")
+
+        root_container_id = root_match["container"]["id"]
+        match_map = ContainerOperationHandler._collect_container_matches(
+            playwright_page,
+            containers,
+            root_selector,
+        )
+        container_tree = ContainerOperationHandler._build_container_tree(
+            containers,
+            root_container_id,
+            match_map,
+        )
+        dom_tree = ContainerOperationHandler._capture_dom_outline(
+            playwright_page,
+            root_selector,
+            max_depth,
+            max_children,
+        )
+        annotations = ContainerOperationHandler._build_dom_annotation_map(match_map)
+        ContainerOperationHandler._attach_dom_annotations(dom_tree, annotations)
+
+        return {
+            "root_match": root_match,
+            "container_tree": container_tree,
+            "dom_tree": dom_tree,
+            "matches": match_map,
+            "metadata": {
+                "captured_at": time.time(),
+                "max_depth": max_depth,
+                "max_children": max_children,
+            },
+        }
+
+    @staticmethod
+    def _build_container_tree(
+        containers: Dict[str, ContainerDefV2],
+        root_id: Optional[str],
+        match_map: Dict[str, Any],
+    ) -> Optional[Dict[str, Any]]:
+        if not containers:
+            return None
+        target_root = root_id if root_id in containers else ContainerOperationHandler._infer_fallback_root(containers, root_id)
+        if target_root is None:
+            return None
+
+        def build(node_id: str) -> Optional[Dict[str, Any]]:
+            container = containers.get(node_id)
+            if not container:
+                return None
+            child_ids = ContainerOperationHandler._resolve_child_ids(node_id, container, containers)
+            node = {
+                "id": container.id,
+                "name": container.name,
+                "type": container.type,
+                "capabilities": container.capabilities,
+                "selectors": [selector.to_dict() for selector in container.selectors],
+                "match": ContainerOperationHandler._summarize_match_payload(node_id, match_map),
+                "children": [],
+            }
+            for child_id in child_ids:
+                child_node = build(child_id)
+                if child_node:
+                    node["children"].append(child_node)
+            return node
+
+        return build(target_root)
+
+    @staticmethod
+    def _infer_fallback_root(
+        containers: Dict[str, ContainerDefV2],
+        preferred_id: Optional[str] = None,
+    ) -> Optional[str]:
+        if preferred_id and preferred_id in containers:
+            return preferred_id
+        candidates = [cid for cid in containers.keys() if "." not in cid]
+        if candidates:
+            return sorted(candidates)[0]
+        # fallback to deterministic first key
+        return sorted(containers.keys())[0] if containers else None
+
+    @staticmethod
+    def _resolve_child_ids(
+        container_id: str,
+        container: ContainerDefV2,
+        containers: Dict[str, ContainerDefV2],
+    ) -> List[str]:
+        declared = container.children or []
+        child_ids = [child for child in declared if child in containers]
+        if child_ids:
+            return child_ids
+
+        prefix = f"{container_id}."
+        target_depth = container_id.count(".") + 1
+        fallback: List[str] = []
+        for candidate_id in containers.keys():
+            if not candidate_id.startswith(prefix):
+                continue
+            if candidate_id.count(".") != target_depth:
+                continue
+            fallback.append(candidate_id)
+        fallback.sort()
+        return fallback
+
+    @staticmethod
+    def _summarize_match_payload(container_id: str, match_map: Dict[str, Any]) -> Dict[str, Any]:
+        payload = match_map.get(container_id) or {}
+        return {
+            "match_count": payload.get("match_count", 0),
+            "selectors": payload.get("selectors", []),
+            "nodes": payload.get("nodes", []),
+        }
+
+    @staticmethod
+    def _extract_dom_outline(
+        playwright_page: Any,
+        root_selector: Optional[str],
+        max_depth: int,
+        max_children: int,
+    ) -> Optional[Dict[str, Any]]:
+        try:
+            return playwright_page.evaluate(
+                """
+                (options) => {
+                  const selector = options?.selector || null;
+                  const depthLimit = options?.depthLimit ?? 4;
+                  const childLimit = options?.childLimit ?? 6;
+                  const root = selector ? document.querySelector(selector) : document.body;
+                  if (!root) return null;
+
+                  const build = (element, path, depth) => {
+                    const meta = {
+                      path: path.join('/'),
+                      tag: element.tagName,
+                      id: element.id || null,
+                      classes: Array.from(element.classList || []),
+                      childCount: element.children ? element.children.length : 0,
+                      textSnippet: (element.textContent || '').trim().slice(0, 80),
+                      children: [],
+                    };
+                    if (depth >= depthLimit) {
+                      return meta;
+                    }
+                    const kids = Array.from(element.children || []).slice(0, childLimit);
+                    meta.children = kids.map((child, index) =>
+                      build(child, path.concat(index), depth + 1)
+                    );
+                    return meta;
+                  };
+
+                  return build(root, ['root'], 0);
+                }
+                """,
+                {
+                    "selector": root_selector,
+                    "depthLimit": max_depth,
+                    "childLimit": max_children,
+                },
+            )
+        except Exception:
+            return None
+
+    @staticmethod
+    def _capture_dom_outline(
+        playwright_page: Any,
+        preferred_selector: Optional[str],
+        max_depth: int,
+        max_children: int,
+    ) -> Optional[Dict[str, Any]]:
+        tried = set()
+        selector_order: List[Optional[str]] = []
+        if preferred_selector:
+            selector_order.append(preferred_selector)
+        selector_order.extend(["#app", "body", None])
+
+        for selector in selector_order:
+            if selector in tried:
+                continue
+            tried.add(selector)
+            attempts = 5 if selector == preferred_selector and selector is not None else 3
+            for _ in range(max(1, attempts)):
+                dom_tree = ContainerOperationHandler._extract_dom_outline(
+                    playwright_page,
+                    selector,
+                    max_depth,
+                    max_children,
+                )
+                if dom_tree:
+                    return dom_tree
+                time.sleep(0.25)
+
+        return ContainerOperationHandler._fallback_dom_outline(playwright_page)
+
+    @staticmethod
+    def _fallback_dom_outline(playwright_page: Any) -> Optional[Dict[str, Any]]:
+        try:
+            return playwright_page.evaluate(
+                """
+                () => {
+                  const body = document.body || document.documentElement;
+                  if (!body) return null;
+                  return {
+                    path: 'root',
+                    tag: (body.tagName || 'BODY'),
+                    id: body.id || null,
+                    classes: Array.from(body.classList || []),
+                    childCount: body.children ? body.children.length : 0,
+                    textSnippet: (body.innerText || body.textContent || '').trim().slice(0, 120),
+                    children: []
+                  };
+                }
+                """
+            )
+        except Exception:
+            return None
+
+    @staticmethod
+    def _collect_container_matches(
+        playwright_page: Any,
+        containers: Dict[str, ContainerDefV2],
+        root_selector: Optional[str],
+        max_nodes: int = 4,
+    ) -> Dict[str, Any]:
+        summary: Dict[str, Any] = {}
+        for container_id, container in containers.items():
+            selectors: List[str] = []
+            nodes: List[Dict[str, Any]] = []
+            total_matches = 0
+            for selector in container.selectors:
+                css = ContainerOperationHandler._selector_to_css(selector)
+                if not css:
+                    continue
+                try:
+                    handles = playwright_page.query_selector_all(css)
+                except Exception:
+                    continue
+                count = len(handles)
+                if count == 0:
+                    continue
+                selectors.append(css)
+                total_matches += count
+                for handle in handles[:max_nodes]:
+                    info = ContainerOperationHandler._describe_element(handle, root_selector)
+                    if not info:
+                        continue
+                    info["selector"] = css
+                    nodes.append(info)
+                if len(nodes) >= max_nodes:
+                    break
+
+            summary[container_id] = {
+                "container": {
+                    "id": container.id,
+                    "name": container.name,
+                    "type": container.type,
+                },
+                "selectors": selectors,
+                "match_count": total_matches,
+                "nodes": nodes,
+            }
+        return summary
+
+    @staticmethod
+    def _describe_element(handle: Any, root_selector: Optional[str]) -> Optional[Dict[str, Any]]:
+        try:
+            return handle.evaluate(
+                """
+                (element, options) => {
+                  const selector = options?.rootSelector || null;
+                  let root = selector ? document.querySelector(selector) : null;
+                  if (!root) {
+                    root = document.querySelector('#app') || document.body || document.documentElement;
+                  }
+                  const buildPath = () => {
+                    if (root && element === root) {
+                      return 'root';
+                    }
+                    const indices = [];
+                    let current = element;
+                    let guard = 0;
+                    while (current && guard < 80) {
+                      if (root && current === root) {
+                        break;
+                      }
+                      const parent = current.parentElement;
+                      if (!parent) {
+                        break;
+                      }
+                      const index = Array.prototype.indexOf.call(parent.children || [], current);
+                      indices.unshift(index);
+                      current = parent;
+                      guard += 1;
+                    }
+                    return ['root'].concat(indices).join('/');
+                  };
+                  const classes = Array.from(element.classList || []);
+                  const snippet = (element.innerText || element.textContent || '')
+                    .replace(/\\s+/g, ' ')
+                    .trim()
+                    .slice(0, 120);
+                  return {
+                    dom_path: buildPath(),
+                    tag: element.tagName,
+                    id: element.id || null,
+                    classes,
+                    textSnippet: snippet,
+                  };
+                }
+                """,
+                {"rootSelector": root_selector},
+            )
+        except Exception:
+            return None
+        finally:
+            try:
+                handle.dispose()
+            except Exception:
+                pass
+
+    @staticmethod
+    def _build_dom_annotation_map(match_map: Dict[str, Any]) -> Dict[str, List[Dict[str, Any]]]:
+        annotations: Dict[str, List[Dict[str, Any]]] = {}
+        for container_id, payload in match_map.items():
+            nodes = payload.get("nodes") or []
+            for node in nodes:
+                dom_path = node.get("dom_path")
+                if not dom_path:
+                    continue
+                annotations.setdefault(dom_path, []).append(
+                    {
+                        "container_id": container_id,
+                        "container_name": payload.get("container", {}).get("name"),
+                        "selector": node.get("selector"),
+                    }
+                )
+        return annotations
+
+    @staticmethod
+    def _attach_dom_annotations(
+        dom_tree: Optional[Dict[str, Any]],
+        annotations: Dict[str, List[Dict[str, Any]]],
+    ) -> None:
+        if not dom_tree:
+            return
+
+        def attach(node: Dict[str, Any]) -> None:
+            path = node.get("path")
+            node["containers"] = annotations.get(path, [])
+            for child in node.get("children") or []:
+                attach(child)
+
+        attach(dom_tree)

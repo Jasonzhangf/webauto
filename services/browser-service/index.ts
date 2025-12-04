@@ -163,6 +163,11 @@ async function handleCommand(payload: CommandPayload, manager: SessionManager) {
     case 'getStatus': {
       return { ok: true, body: { ok: true, sessions: manager.listSessions() } };
     }
+    case 'stop': {
+      const profileId = args.profileId || 'default';
+      const deleted = await manager.deleteSession(profileId);
+      return { ok: true, body: { ok: deleted } };
+    }
     case 'screenshot': {
       const profileId = args.profileId || 'default';
       const session = manager.getSession(profileId);

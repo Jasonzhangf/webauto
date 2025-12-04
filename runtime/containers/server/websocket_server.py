@@ -7,6 +7,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import sys
 import time
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -17,6 +18,16 @@ from websockets.server import WebSocketServerProtocol
 from .container_handler import ContainerOperationHandler
 from .session_manager import SessionManager
 
+CURRENT_DIR = Path(__file__).resolve().parent
+REPO_ROOT = CURRENT_DIR.parent.parent.parent
+SERVICES_DIR = REPO_ROOT / "services"
+if str(SERVICES_DIR) not in sys.path:
+    sys.path.append(str(SERVICES_DIR))
+
+from container_registry import (  # type: ignore  # noqa: E402
+    create_child_container_v2,
+    update_container_selectors_v2,
+)
 
 class WebSocketServer:
     """Receives CLI commands and routes them to the appropriate handlers."""
@@ -106,6 +117,8 @@ class WebSocketServer:
             if command_type == "dev_control":
                 self.logger.info(f"Delegating to dev handler")
                 return await self._handle_dev_control(session_id, command)
+            if command_type == "container_registry":
+                return await self._handle_container_registry(session_id, command)
 
             return {
                 "success": False,
@@ -378,6 +391,44 @@ class WebSocketServer:
                     "success": False,
                     "error": f"Unsupported node type: {node_type}",
                 }
+
+    async def _handle_container_registry(self, session_id: str, command: Dict[str, Any]) -> Dict[str, Any]:
+        """处理容器注册表更新操作"""
+        action = command.get("action")
+        parameters = command.get("parameters", {}) or {}
+        url = parameters.get("url") or command.get("page_context", {}).get("url")
+        if not url:
+            return {"success": False, "error": "url is required"}
+
+        try:
+            if action == "update_selector":
+                container_id = parameters.get("container_id")
+                selectors = parameters.get("selectors") or parameters.get("selector")
+                updated = update_container_selectors_v2(url, container_id, selectors)
+                return {"success": True, "data": {"container": updated}}
+
+            if action == "create_child":
+                container_id = parameters.get("container_id")
+                selectors = parameters.get("selectors") or parameters.get("selector")
+                parent_id = parameters.get("parent_id")
+                name = parameters.get("name")
+                container_type = parameters.get("container_type")
+                capabilities = parameters.get("capabilities")
+                created = create_child_container_v2(
+                    url,
+                    container_id,
+                    selectors,
+                    parent_id=parent_id,
+                    name=name,
+                    container_type=container_type,
+                    capabilities=capabilities,
+                )
+                return {"success": True, "data": {"container": created}}
+
+            return {"success": False, "error": f"Unknown container_registry action: {action}"}
+        except Exception as error:
+            self.logger.error("Container registry action failed: %s", error)
+            return {"success": False, "error": str(error)}
 
         except Exception as error:
             self.logger.error(f"Error executing node {node_type}: {error}")

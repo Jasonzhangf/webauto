@@ -1,0 +1,348 @@
+:root {
+  color-scheme: dark;
+  font-family: 'Inter', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: radial-gradient(circle at top, #11131d 0%, #05060a 55%);
+  color: #f4f4f5;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+button {
+  font: inherit;
+  border: none;
+  outline: none;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+}
+
+.inspector-header {
+  padding: 14px 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  backdrop-filter: blur(12px);
+  background: rgba(3, 7, 18, 0.85);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.inspector-meta .session {
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.inspector-meta .url {
+  font-size: 14px;
+  color: rgba(244, 244, 245, 0.7);
+  word-break: break-all;
+}
+
+.header-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.header-actions button {
+  padding: 6px 16px;
+  border-radius: 999px;
+  background: linear-gradient(120deg, #22d3ee, #3b82f6);
+  color: #050505;
+  font-weight: 600;
+}
+
+.header-actions button:last-child {
+  background: rgba(251, 113, 133, 0.12);
+  color: #fda4af;
+  border: 1px solid rgba(251, 113, 133, 0.4);
+}
+
+main {
+  flex: 1;
+  padding: 16px 24px 12px;
+  display: flex;
+  flex-direction: column;
+}
+
+#inspectorWorkspace {
+  flex: 1;
+  position: relative;
+  display: grid;
+  grid-template-columns: 0.9fr 1.1fr;
+  gap: 18px;
+  min-height: 0;
+}
+
+.panel {
+  background: rgba(12, 14, 23, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: 20px;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.panel-title {
+  font-size: 15px;
+  font-weight: 600;
+  margin-bottom: 10px;
+  color: rgba(244, 244, 245, 0.9);
+}
+
+.scrollable {
+  flex: 1;
+  overflow-y: auto;
+  padding-right: 6px;
+}
+
+.scrollable::-webkit-scrollbar {
+  width: 6px;
+}
+
+.scrollable::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.scrollable::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 999px;
+}
+
+.tree-panel .scrollable,
+.dom-panel .scrollable {
+  display: block;
+}
+
+.empty-state {
+  color: rgba(244, 244, 245, 0.55);
+  font-size: 14px;
+}
+
+#linkLayer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.link-line {
+  stroke: rgba(255, 255, 255, 0.3);
+  stroke-dasharray: 5 6;
+  stroke-width: 1.8px;
+  fill: none;
+}
+
+.link-line.active {
+  stroke: #fbbf24;
+  stroke-width: 2.4px;
+  stroke-dasharray: 2 4;
+  filter: drop-shadow(0 0 6px rgba(251, 191, 36, 0.5));
+}
+
+.link-panel {
+  margin: 0 24px 24px;
+  height: 200px;
+}
+
+.container-node {
+  border-radius: 14px;
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid transparent;
+  margin-bottom: 10px;
+}
+
+.container-node.selected {
+  border-color: rgba(251, 191, 36, 0.6);
+  background: rgba(251, 191, 36, 0.08);
+  box-shadow: 0 0 0 1px rgba(251, 191, 36, 0.2);
+}
+
+.node-head {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 10px;
+  align-items: center;
+}
+
+.collapse-toggle {
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.06);
+  font-weight: 600;
+}
+
+.node-info .title {
+  font-weight: 600;
+}
+
+.node-info .meta {
+  font-size: 12px;
+  color: rgba(244, 244, 245, 0.6);
+}
+
+.node-stats {
+  display: flex;
+  gap: 6px;
+  font-size: 12px;
+  color: rgba(244, 244, 245, 0.7);
+  align-items: center;
+}
+
+.match-count.success {
+  color: #bef264;
+}
+
+.node-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.node-actions button {
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  font-size: 12px;
+}
+
+.node-actions button:hover {
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.container-children {
+  margin-top: 10px;
+  padding-left: 16px;
+  border-left: 1px dashed rgba(255, 255, 255, 0.08);
+}
+
+.container-node.collapsed .container-children {
+  display: none;
+}
+
+.dom-node {
+  padding-left: 12px;
+  border-left: 2px solid rgba(255, 255, 255, 0.05);
+  margin-left: 6px;
+  margin-bottom: 6px;
+}
+
+.dom-node-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 8px;
+  border-radius: 10px;
+  cursor: pointer;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.dom-node.selected .dom-node-head {
+  background: rgba(37, 99, 235, 0.18);
+  border: 1px solid rgba(37, 99, 235, 0.35);
+}
+
+.dom-node .tag {
+  font-family: 'JetBrains Mono', 'SFMono-Regular', monospace;
+  color: #7dd3fc;
+  margin-right: 8px;
+}
+
+.dom-node .dom-meta {
+  font-size: 12px;
+  color: rgba(244, 244, 245, 0.65);
+}
+
+.dom-node .dom-actions button {
+  width: 24px;
+  height: 24px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.08);
+  font-weight: 600;
+}
+
+.dom-node.collapsed > .dom-children {
+  display: none;
+}
+
+.dom-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 6px 0 4px;
+}
+
+.dom-attachments button {
+  border-radius: 999px;
+  padding: 2px 10px;
+  background: rgba(251, 191, 36, 0.12);
+  color: #facc15;
+  font-size: 11px;
+}
+
+.link-panel .scrollable {
+  padding-right: 2px;
+}
+
+.link-row {
+  padding: 6px 0;
+  border-bottom: 1px dashed rgba(255, 255, 255, 0.08);
+  font-size: 13px;
+}
+
+.link-row:last-child {
+  border-bottom: none;
+}
+
+.link-row strong {
+  color: #7dd3fc;
+  font-family: 'JetBrains Mono', monospace;
+  margin-right: 6px;
+}
+
+.link-row button {
+  margin-top: 4px;
+  padding: 2px 8px;
+  border-radius: 8px;
+  background: rgba(37, 99, 235, 0.15);
+  font-size: 11px;
+}
+
+#toast {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  background: rgba(5, 6, 11, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 999px;
+  padding: 10px 16px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  opacity: 0;
+  transform: translateY(12px);
+  pointer-events: none;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+  font-size: 13px;
+}
+
+#toast.show {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+@media (max-width: 1100px) {
+  #inspectorWorkspace {
+    grid-template-columns: 1fr;
+    gap: 14px;
+  }
+}

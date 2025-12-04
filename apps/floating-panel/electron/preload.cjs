@@ -1,21 +1,48 @@
-const electron = require('electron');
-const contextBridge = electron?.contextBridge;
-const ipcRenderer = electron?.ipcRenderer;
+const { contextBridge, ipcRenderer } = require('electron');
 
-if (!contextBridge || !ipcRenderer) {
-  console.warn('[preload] electron APIs not available in this context');
-  module.exports = {};
-  return;
+function sendWindowControl(action, value) {
+  if (value === undefined) {
+    ipcRenderer.send('window-control', action);
+  } else {
+    ipcRenderer.send('window-control', { action, value });
+  }
 }
 
 contextBridge.exposeInMainWorld('desktopAPI', {
-  minimize: () => ipcRenderer.send('window-control', 'minimize'),
-  close: () => ipcRenderer.send('window-control', 'close'),
-  togglePin: (pinned) => ipcRenderer.invoke('window:set-pin', pinned),
-  getMeta: () => ipcRenderer.invoke('app:get-meta'),
-  toggleDevtools: () => ipcRenderer.send('window-control', 'toggle-devtools'),
-  setCollapsed: (collapsed) => ipcRenderer.invoke('window:set-collapsed', collapsed),
-  getBounds: () => ipcRenderer.invoke('window:get-bounds'),
-  moveWindow: (x, y) => ipcRenderer.invoke('window:set-position', { x, y }),
-  getWorkArea: () => ipcRenderer.invoke('window:get-workarea'),
+  close: () => sendWindowControl('close'),
+  minimize: () => sendWindowControl('minimize'),
+  toggleCollapse: (nextState) => sendWindowControl('toggle-collapse', nextState),
+  fitContentHeight: (height) => {
+    if (height && Number.isFinite(Number(height))) {
+      ipcRenderer.send('window:fit-height', Number(height));
+    }
+  },
+  openInspector: (payload) => ipcRenderer.invoke('inspector:open', payload),
+  sendInspectorCommand: (command) => ipcRenderer.send('inspector:command', command),
+  notifyInspectorReady: () => ipcRenderer.send('inspector:ready'),
+  onCollapseState: (callback) => {
+    if (typeof callback !== 'function') return () => {};
+    const channel = 'window:collapse-state';
+    const handler = (_event, payload) => callback(payload);
+    ipcRenderer.on(channel, handler);
+    return () => ipcRenderer.removeListener(channel, handler);
+  },
+  onInspectorData: (callback) => {
+    if (typeof callback !== 'function') return () => {};
+    const channel = 'inspector:data';
+    const handler = (_event, payload) => callback(payload);
+    ipcRenderer.on(channel, handler);
+    return () => ipcRenderer.removeListener(channel, handler);
+  },
+  onInspectorEvent: (callback) => {
+    if (typeof callback !== 'function') return () => {};
+    const channel = 'inspector:event';
+    const handler = (_event, payload) => callback(payload);
+    ipcRenderer.on(channel, handler);
+    return () => ipcRenderer.removeListener(channel, handler);
+  },
+});
+
+contextBridge.exposeInMainWorld('backendAPI', {
+  invokeAction: (action, payload) => ipcRenderer.invoke('ui:action', { action, payload }),
 });

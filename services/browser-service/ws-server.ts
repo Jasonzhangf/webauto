@@ -203,9 +203,6 @@ export class BrowserWsServer {
   }
 
   private async handleContainerOperation(sessionId: string, command: CommandPayload) {
-    if (command.action !== 'match_root') {
-      throw new Error(`Unsupported container action: ${command.action}`);
-    }
     if (!sessionId) {
       throw new Error('session_id required for container operations');
     }
@@ -217,20 +214,30 @@ export class BrowserWsServer {
       };
     }
     const pageContext = command.page_context || {};
-    const match = await this.matcher.matchRoot(session, pageContext);
-    if (!match) {
+    if (command.action === 'match_root') {
+      const match = await this.matcher.matchRoot(session, pageContext);
+      if (!match) {
+        return {
+          success: false,
+          error: 'No matching container found',
+        };
+      }
       return {
-        success: false,
-        error: 'No matching container found',
+        success: true,
+        data: {
+          ...match,
+          matched_container: match.container,
+        },
       };
     }
-    return {
-      success: true,
-      data: {
-        ...match,
-        matched_container: match.container,
-      },
-    };
+    if (command.action === 'inspect_tree') {
+      const snapshot = await this.matcher.inspectTree(session, pageContext, command.parameters || {});
+      return {
+        success: true,
+        data: snapshot,
+      };
+    }
+    throw new Error(`Unsupported container action: ${command.action}`);
   }
 
   private async handleNodeExecute(sessionId: string, command: CommandPayload) {

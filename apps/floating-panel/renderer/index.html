@@ -8,110 +8,130 @@
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
-    <div class="window-shell">
-      <div class="drag-overlay" data-drag-region></div>
+    <div class="window-shell" data-drag-region>
       <header class="title-bar" data-drag-region>
         <div class="title-copy">
           <div class="app-name">WebAuto Floating Console</div>
           <div class="subtitle">跨平台容器控制面板</div>
         </div>
-        <div class="status-pill" id="connectionStatus">未连接</div>
+        <div class="status-pill" id="connectionStatus">就绪</div>
         <div class="window-buttons" data-no-drag>
-          <button id="collapseButton" class="icon-button" title="收起为浮球">⚪</button>
-          <button id="pinButton" class="icon-button" title="置顶窗口">📌</button>
-          <button id="minButton" class="icon-button" title="隐藏">—</button>
+          <button id="stickBrowserButton" class="ghost icon" title="浏览器贴边">🪟</button>
+          <button id="collapseButton" class="icon-button" title="贴边收起">◻︎</button>
+          <button id="minButton" class="icon-button" title="最小化">—</button>
           <button id="closeButton" class="icon-button" title="关闭">✕</button>
         </div>
       </header>
+      <div class="collapsed-strip hidden" id="collapsedStrip" data-drag-region>
+        <div class="collapsed-strip-label">浮窗已贴边，点击展开继续操作</div>
+        <button id="expandCollapsedButton" class="ghost" data-no-drag>展开</button>
+      </div>
 
-      <main>
-        <section class="panel">
+      <main data-no-drag>
+        <section class="panel" id="browserPanel">
           <div class="section-heading">
             <div>
-              <div class="section-title">控制平面连接</div>
-              <p class="section-desc">连接到 Python WebSocket 服务 (默认 127.0.0.1:8765)</p>
+              <div class="section-title">浏览器控制</div>
+              <p class="section-desc">查看当前浏览器服务与会话状态</p>
             </div>
             <div class="mini-actions">
-              <button id="connectButton" class="primary">连接</button>
+              <button id="refreshBrowser" class="ghost">刷新</button>
             </div>
           </div>
-          <div class="form-grid">
-            <label>
-              <span>Host</span>
-              <input id="hostInput" type="text" value="127.0.0.1" />
-            </label>
-            <label>
-              <span>Port</span>
-              <input id="portInput" type="number" value="8765" min="1" />
-            </label>
-            <label class="full">
-              <span>协议</span>
-              <select id="protocolSelect">
-                <option value="ws">ws://</option>
-                <option value="wss">wss://</option>
-              </select>
-            </label>
+          <div class="panel-body">
+            <div class="stat" id="browserStatusText">未连接</div>
+            <div class="muted" id="browserDetails">等待查询...</div>
           </div>
+          <form id="sessionCreateForm" class="stack">
+            <div class="form-row">
+              <label>
+                <span>Profile</span>
+                <input id="profileInput" type="text" placeholder="weibo-fresh" autocomplete="off" />
+              </label>
+              <label>
+                <span>导航 URL</span>
+                <input id="launchUrlInput" type="text" placeholder="https://weibo.com/" autocomplete="off" />
+              </label>
+            </div>
+            <div class="form-row align-center">
+              <label class="checkbox">
+                <input id="headlessToggle" type="checkbox" />
+                <span>无头模式</span>
+              </label>
+              <div class="grow"></div>
+              <button type="submit" class="primary">创建/唤醒会话</button>
+            </div>
+          </form>
         </section>
 
-        <section class="panel">
+        <section class="panel" id="sessionPanel">
           <div class="section-heading">
             <div>
-              <div class="section-title">浏览器会话</div>
-              <p class="section-desc">创建 / 刷新 / 删除自动化会话</p>
+              <div class="section-title">会话列表</div>
+              <p class="section-desc">选择一个会话后可进行容器调试</p>
             </div>
             <div class="mini-actions">
               <button id="refreshSessions" class="ghost">刷新</button>
             </div>
           </div>
-
-          <form id="createSessionForm" class="form-inline">
-            <input id="capabilityInput" type="text" placeholder="能力, 逗号分隔 (默认 dom)" />
-            <button type="submit" class="primary">新建会话</button>
-          </form>
-
           <div id="sessionList" class="session-list"></div>
         </section>
 
-        <section class="panel">
+        <section class="panel" id="containersPanel">
           <div class="section-heading">
             <div>
-              <div class="section-title">当前会话操作</div>
-              <p class="section-desc">选择一个会话后，可执行容器匹配等操作</p>
-            </div>
-            <div class="mini-actions" id="selectedSessionMeta"></div>
-          </div>
-
-          <div class="info-row" id="sessionInfoRow">未选择会话</div>
-
-          <form id="matchForm" class="form-inline">
-            <input id="urlInput" type="text" placeholder="输入要匹配的页面 URL" />
-            <button type="submit" class="primary">匹配根容器</button>
-          </form>
-
-          <div id="matchResult" class="result-box"></div>
-        </section>
-
-        <section class="panel log-panel">
-          <div class="section-heading">
-            <div>
-              <div class="section-title">实时日志</div>
-              <p class="section-desc">命令与响应结果</p>
+              <div class="section-title">容器与 DOM</div>
+              <p class="section-desc">树状容器 + DOM 映射（只读）</p>
             </div>
             <div class="mini-actions">
+              <button id="openInspector" class="ghost">容器视图</button>
+              <button id="refreshContainers" class="ghost">刷新面板</button>
+            </div>
+          </div>
+          <div class="container-grid">
+            <div class="subpanel">
+              <div class="subpanel-title">容器树</div>
+              <div id="containerTreePlaceholder" class="placeholder">
+                <strong>等待匹配</strong>
+                <p>选择会话后，通过 CLI 捕获容器树。</p>
+              </div>
+            </div>
+            <div class="subpanel">
+              <div class="subpanel-title">DOM 映射</div>
+              <div id="domMapPlaceholder" class="placeholder">
+                <strong>等待会话</strong>
+                <p>容器树捕获后自动展示 DOM 信息。</p>
+              </div>
+            </div>
+          </div>
+          <div class="operations-card">
+            <div class="subpanel-title">可用操作</div>
+            <div class="operation-chips" id="operationChips"></div>
+          </div>
+        </section>
+
+        <section class="panel log-panel" id="logPanel">
+          <div class="section-heading">
+            <div>
+              <div class="section-title">日志面板</div>
+              <p class="section-desc">读取 ~/.webauto/logs 下的运行日志</p>
+            </div>
+            <div class="mini-actions">
+              <select id="logSourceSelect">
+                <option value="browser">浏览器</option>
+                <option value="service">服务</option>
+                <option value="orchestrator">编排器</option>
+              </select>
+              <button id="refreshLogs" class="ghost">刷新</button>
               <button id="clearLogs" class="ghost">清空</button>
             </div>
           </div>
-          <div id="logStream" class="log-stream"></div>
+          <pre id="logStream" class="log-stream">暂无日志</pre>
         </section>
       </main>
     </div>
 
-    <div class="floating-ball" id="floatingBall">
-      <div class="ball-icon">⚙️</div>
-      <div class="ball-label">WebAuto</div>
-    </div>
-
+    <div class="global-message hidden" id="globalMessage"></div>
     <script type="module" src="./app.js"></script>
   </body>
 </html>

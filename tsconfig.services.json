@@ -9,6 +9,8 @@
   "include": [
     "services/**/*.ts",
     "services/**/*.d.ts",
+    "modules/**/*.ts",
+    "modules/**/*.d.ts",
     "sharedmodule/engines/**/*.ts",
     "src/server.ts"
   ],
