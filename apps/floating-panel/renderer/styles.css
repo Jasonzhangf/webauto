@@ -288,12 +288,11 @@ select {
 }
 
 .tree-grid-body {
-  flex: 1;
   border-radius: 12px;
   border: 1px solid rgba(255, 255, 255, 0.08);
   background: rgba(6, 8, 18, 0.95);
-  overflow: hidden;
   position: relative;
+  overflow: hidden;
 }
 
 .graph-shell {
@@ -301,13 +300,25 @@ select {
   border-radius: 12px;
   background: rgba(4, 8, 18, 0.85);
   min-height: 360px;
-  overflow: auto;
+  overflow: hidden;
 }
 
 #graphCanvas {
   display: block;
   width: 100%;
   height: auto;
+}
+
+.tree-detail {
+  margin-top: 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(8, 10, 20, 0.9);
+  padding: 12px;
+  display: flex;
+  gap: 16px;
+  max-height: 260px;
+  overflow-y: auto;
 }
 
 .graph-overlay {

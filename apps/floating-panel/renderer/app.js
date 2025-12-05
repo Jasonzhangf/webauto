@@ -457,6 +457,9 @@ function applyContainerSnapshotData(result, options = {}) {
   }
   state.containerSnapshot = snapshot;
   state.domTree = snapshot?.dom_tree || result?.domTree || null;
+  if (state.domTree && !state.domTree.path) {
+    state.domTree.path = '__root__';
+  }
   if (snapshot?.container_tree?.id) {
     state.selectedContainerId = snapshot.container_tree.id;
   }
@@ -733,18 +736,16 @@ function resetDomVisibility(containerRows) {
     containerRows.map((row) => getContainerId(row.container)).filter((id) => typeof id === 'string' && id.length),
   );
   if (!containerIds.size) {
-    if (state.domTree.path) {
-      state.domDefaultVisible.add(state.domTree.path);
-    }
+    const rootPath = state.domTree.path || '__root__';
+    state.domDefaultVisible.add(rootPath);
     return;
   }
   markDomVisibility(state.domTree, state.domDefaultVisible, containerIds);
   if (state.selectedDomPath) {
     state.domDefaultVisible.add(state.selectedDomPath);
   }
-  if (state.domTree.path) {
-    state.domDefaultVisible.add(state.domTree.path);
-  }
+  const rootPath = state.domTree.path || '__root__';
+  state.domDefaultVisible.add(rootPath);
 }
 
 function markDomVisibility(node, allowed, containerIds) {
@@ -907,7 +908,7 @@ function getSelectedSessionMeta() {
 
 function findDomNodeByPath(root, targetPath) {
   if (!root || !targetPath) return null;
-  if (root.path === targetPath) return root;
+  if ((root.path || '__root__') === targetPath) return root;
   if (Array.isArray(root.children)) {
     for (const child of root.children) {
       const result = findDomNodeByPath(child, targetPath);
@@ -934,6 +935,9 @@ function findAllDomPathsForContainer(containerId, root, acc = []) {
     for (const child of root.children) {
       findAllDomPathsForContainer(containerId, child, acc);
     }
+  }
+  if (!acc.length && root.path) {
+    acc.push(root.path);
   }
   return acc;
 }
