@@ -463,6 +463,7 @@ function renderContainers() {
   if (ui.openInspectorButton) {
     ui.openInspectorButton.disabled = !state.selectedSession || !desktop?.openInspector;
   }
+  const rootId = getRootContainerId();
   const hasTree = Boolean(state.containerSnapshot?.container_tree);
   let containerRows = [];
   let domNodes = [];
@@ -480,6 +481,20 @@ function renderContainers() {
       });
       links = buildGraphLinks(containerRows, domNodesByContainer);
     }
+  }
+  if (rootId) {
+    const belongsToRoot = (id) => !id || id === rootId || id.startsWith(`${rootId}.`);
+    containerRows = containerRows.filter((row) => belongsToRoot(getContainerId(row.container)));
+    domNodes = domNodes.filter((node) => !node.containerId || belongsToRoot(node.containerId));
+    links = links.filter((link) => belongsToRoot(link.from));
+  }
+  const containerIdSet = new Set(containerRows.map((row) => getContainerId(row.container)).filter(Boolean));
+  if (state.selectedContainerId && !containerIdSet.has(state.selectedContainerId)) {
+    state.selectedContainerId = containerRows[0]?.container?.id || rootId || null;
+  }
+  const domPathSet = new Set(domNodes.map((node) => node.path).filter(Boolean));
+  if (state.selectedDomPath && !domPathSet.has(state.selectedDomPath)) {
+    state.selectedDomPath = domNodes[0]?.path || null;
   }
   if (state.domNeedsReset) {
     resetDomVisibility(containerRows);
@@ -544,11 +559,12 @@ function updateGraphVisualization(containerRows, domNodes, links) {
 }
 
 function renderTreeDetails() {
-  renderContainerTreeList(state.containerSnapshot?.container_tree);
+  const rootId = getRootContainerId();
+  renderContainerTreeList(state.containerSnapshot?.container_tree, rootId);
   renderDomTreeList(state.domTree);
 }
 
-function renderContainerTreeList(rootNode) {
+function renderContainerTreeList(rootNode, rootId) {
   if (!ui.treeContainerList) return;
   ui.treeContainerList.innerHTML = '';
   if (!rootNode) {
@@ -558,12 +574,18 @@ function renderContainerTreeList(rootNode) {
     ui.treeContainerList.appendChild(placeholder);
     return;
   }
-  buildContainerTreeRows(rootNode, 0, ui.treeContainerList);
+  buildContainerTreeRows(rootNode, 0, ui.treeContainerList, rootId);
 }
 
-function buildContainerTreeRows(node, depth, target) {
+function buildContainerTreeRows(node, depth, target, rootId) {
   if (!node) return;
   const containerId = getContainerId(node);
+  if (rootId && containerId && containerId !== rootId && !containerId.startsWith(`${rootId}.`)) {
+    if (Array.isArray(node.children)) {
+      node.children.forEach((child) => buildContainerTreeRows(child, depth, target, rootId));
+    }
+    return;
+  }
   const row = document.createElement('div');
   row.className = 'tree-line tree-line-container';
   row.style.paddingLeft = `${depth * 16}px`;
@@ -572,8 +594,15 @@ function buildContainerTreeRows(node, depth, target) {
   }
   const label = document.createElement('span');
   label.className = 'tree-label';
-  label.textContent = node.name || containerId || '容器';
+  const alias = getContainerAlias(node);
+  label.textContent = alias || node.name || containerId || '容器';
   row.appendChild(label);
+  if (node.name && alias && node.name !== alias) {
+    const aliasMeta = document.createElement('span');
+    aliasMeta.className = 'tree-meta';
+    aliasMeta.textContent = node.name;
+    row.appendChild(aliasMeta);
+  }
   const selector = containerId ? getContainerSelector(containerId, state.containerSnapshot?.container_tree) : null;
   if (selector) {
     const hint = document.createElement('code');
@@ -588,7 +617,7 @@ function buildContainerTreeRows(node, depth, target) {
   }
   target.appendChild(row);
   if (Array.isArray(node.children)) {
-    node.children.forEach((child) => buildContainerTreeRows(child, depth + 1, target));
+    node.children.forEach((child) => buildContainerTreeRows(child, depth + 1, target, rootId));
   }
 }
 
@@ -621,19 +650,15 @@ function buildDomTreeRows(node, depth, target) {
     row.classList.add('active');
   }
   const hasChildren = Array.isArray(node.children) && node.children.length > 0;
-  const expandBtn = document.createElement('button');
-  expandBtn.className = 'tree-expand-btn';
   if (hasChildren && path) {
-    const hasHiddenChildren =
-      !node.children.every((child) => child.path && state.domDefaultVisible.has(child.path)) || isExpanded;
-    if (hasHiddenChildren) {
-      expandBtn.textContent = isExpanded ? '−' : '+';
-      expandBtn.addEventListener('click', (event) => {
-        event.stopPropagation();
-        toggleDomNodeExpand(path);
-      });
-      row.appendChild(expandBtn);
-    }
+    const expandBtn = document.createElement('button');
+    expandBtn.className = 'tree-expand-btn';
+    expandBtn.textContent = isExpanded ? '−' : '+';
+    expandBtn.addEventListener('click', (event) => {
+      event.stopPropagation();
+      toggleDomNodeExpand(path);
+    });
+    row.appendChild(expandBtn);
   }
   const label = document.createElement('span');
   label.className = 'tree-label';
@@ -924,6 +949,44 @@ function getDomNodeSelector(node) {
     return getContainerSelector(containerId, state.containerSnapshot?.container_tree);
   }
   return null;
+}
+
+function getContainerAlias(node) {
+  if (!node) return '';
+  const definition = node.definition || {};
+  const alias =
+    node.alias ||
+    node.metadata?.alias ||
+    definition.alias ||
+    definition.metadata?.alias ||
+    definition.nickname ||
+    null;
+  if (alias) return alias;
+  const selectors = definition.selectors || node.selectors || [];
+  const selectorAlias = extractAliasFromSelectors(selectors);
+  if (selectorAlias) return selectorAlias;
+  return node.name || node.id || '';
+}
+
+function extractAliasFromSelectors(selectors = []) {
+  if (!Array.isArray(selectors)) return '';
+  const first = selectors.find((item) => item?.css);
+  if (!first?.css) return '';
+  const css = first.css.trim();
+  if (!css) return '';
+  if (css.startsWith('#') || css.startsWith('.')) {
+    return css;
+  }
+  const match = css.match(/([.#][\w-]+)/);
+  return match ? match[1] : css;
+}
+
+function getRootContainerId() {
+  return (
+    state.containerSnapshot?.container_tree?.id ||
+    state.containerSnapshot?.root_match?.container?.id ||
+    null
+  );
 }
 
 let highlightTimer = null;
