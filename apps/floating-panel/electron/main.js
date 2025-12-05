@@ -6,6 +6,7 @@ import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { spawn, execSync } from 'node:child_process';
 import { createRequire } from 'node:module';
+import WebSocket from 'ws';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -14,6 +15,9 @@ const windowStateKeeper = require('electron-window-state');
 const Positioner = require('electron-positioner');
 
 const repoRoot = path.resolve(__dirname, '../../..');
+const USER_CONTAINER_ROOT = path.join(os.homedir(), '.webauto', 'container-lib');
+const CONTAINER_INDEX_PATH = path.join(repoRoot, 'container-library.index.json');
+let containerIndexCache = null;
 const CLI_TARGETS = {
   'browser-control': path.join(repoRoot, 'modules/browser-control/src/cli.ts'),
   'session-manager': path.join(repoRoot, 'modules/session-manager/src/cli.ts'),
@@ -22,8 +26,11 @@ const CLI_TARGETS = {
   'container-matcher': path.join(repoRoot, 'modules/container-matcher/src/cli.ts'),
 };
 
-const NORMAL_SIZE = { width: 360, height: 500 };
+const NORMAL_SIZE = { width: 960, height: 640 };
 const COLLAPSED_SIZE = { width: 180, height: 80 };
+const DEFAULT_WS_HOST = process.env.WEBAUTO_WS_HOST || '127.0.0.1';
+const DEFAULT_WS_PORT = Number(process.env.WEBAUTO_WS_PORT || 8765);
+const AUTO_STICK_ENABLED = process.env.WEBAUTO_AUTO_STICK === '0' ? false : true;
 
 let mainWindow;
 let positioner;
@@ -34,6 +41,7 @@ let inspectorReady = false;
 let inspectorPendingPayload = null;
 let inspectorContext = null;
 let inspectorBusy = false;
+let autoStickScheduled = false;
 
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {
@@ -54,13 +62,16 @@ const createWindow = () => {
     defaultHeight: NORMAL_SIZE.height,
   });
 
+  const desiredWidth = Math.max(windowState.width || NORMAL_SIZE.width, NORMAL_SIZE.width);
+  const desiredHeight = Math.max(windowState.height || NORMAL_SIZE.height, NORMAL_SIZE.height);
+
   mainWindow = new BrowserWindow({
     x: windowState.x,
     y: windowState.y,
-    width: windowState.width,
-    height: windowState.height,
-    minWidth: 280,
-    minHeight: 320,
+    width: desiredWidth,
+    height: desiredHeight,
+    minWidth: Math.max(520, Math.floor(NORMAL_SIZE.width * 0.4)),
+    minHeight: 360,
     frame: false,
     transparent: true,
     resizable: true,
@@ -88,11 +99,13 @@ const createWindow = () => {
   mainWindow.loadFile(rendererPath);
   mainWindow.webContents.on('did-finish-load', () => {
     broadcastCollapseState();
+    scheduleAutoStick();
   });
 
   mainWindow.on('ready-to-show', () => {
     enforceWorkAreaBounds();
     snapToEdges();
+    scheduleAutoStick();
   });
 
   let snapTimer;
@@ -166,6 +179,51 @@ function snapToEdges() {
   }
   if (x !== bounds.x || y !== bounds.y) {
     mainWindow.setBounds({ ...bounds, x: Math.round(x), y: Math.round(y) }, false);
+  }
+}
+
+function scheduleAutoStick(delay = 800) {
+  if (!AUTO_STICK_ENABLED || autoStickScheduled || process.platform !== 'darwin') {
+    return;
+  }
+  autoStickScheduled = true;
+  setTimeout(() => {
+    alignWithFrontmostBrowser().catch((err) => {
+      console.warn('[floating] auto stick failed:', err?.message || err);
+    });
+  }, delay);
+}
+
+async function alignWithFrontmostBrowser() {
+  const display = screen.getPrimaryDisplay();
+  const area = display?.workArea || screen.getPrimaryDisplay().workArea;
+  const browserWidth = Math.round(area.width * 0.72);
+  const spacer = 12;
+  const floatWidth = Math.round(area.width * 0.28) - spacer;
+  const floatHeight = Math.min(NORMAL_SIZE.height, area.height - spacer * 2);
+  const floatX = area.x + browserWidth + spacer;
+  const floatY = area.y + spacer;
+
+  await resizeFrontmostWindow({
+    x: area.x,
+    y: area.y,
+    width: browserWidth,
+    height: area.height,
+  });
+
+  if (mainWindow) {
+    mainWindow.setBounds(
+      {
+        x: floatX,
+        y: floatY,
+        width: floatWidth,
+        height: floatHeight,
+      },
+      false,
+    );
+    lastNormalBounds = mainWindow.getBounds();
+    snapToEdges();
+    mainWindow.focus();
   }
 }
 
@@ -396,6 +454,8 @@ ipcMain.handle('ui:action', async (_event, request) => {
         return await handleOperationRun(payload);
       case 'containers:inspect':
         return await handleContainerInspect(payload);
+      case 'containers:remap':
+        return await handleContainerRemap(payload);
       case 'window:stick-browser':
         return await handleStickBrowser(payload);
       default:
@@ -463,6 +523,28 @@ async function handleContainerInspect(payload = {}) {
       domTree: snapshot?.dom_tree || null,
     },
   };
+}
+
+async function handleContainerRemap(payload = {}) {
+  const containerId = payload.containerId || payload.id;
+  const selector = (payload.selector || '').trim();
+  const definition = payload.definition || {};
+  if (!containerId) {
+    throw new Error('缺少容器 ID');
+  }
+  if (!selector) {
+    throw new Error('缺少新的 selector');
+  }
+  const siteKey = payload.siteKey || resolveSiteKeyFromUrl(payload.url) || inferSiteFromContainerId(containerId);
+  if (!siteKey) {
+    throw new Error('无法确定容器所属站点');
+  }
+  const normalizedDefinition = { ...definition, id: containerId };
+  const existingSelectors = Array.isArray(normalizedDefinition.selectors) ? normalizedDefinition.selectors : [];
+  const filtered = existingSelectors.filter((item) => (item?.css || '').trim() && (item.css || '').trim() !== selector);
+  normalizedDefinition.selectors = [{ css: selector, variant: 'primary', score: 1 }, ...filtered];
+  await writeUserContainerDefinition(siteKey, containerId, normalizedDefinition);
+  return handleContainerInspect({ profile: payload.profile, url: payload.url });
 }
 
 async function handleStickBrowser(payload = {}) {
@@ -595,46 +677,262 @@ function formatInspectorPayload(context) {
   };
 }
 
-async function captureInspectorSnapshot(options = {}) {
-  const profile = options.profile;
-  const sessions = await fetchSessions();
-  const targetSession = profile ? findSessionByProfile(sessions, profile) : null;
-  const sessionId = targetSession?.session_id || targetSession?.sessionId || profile || null;
-  const profileId = profile || targetSession?.profileId || targetSession?.profile_id || null;
-  const targetUrl = options.url || targetSession?.current_url || targetSession?.currentUrl;
-  if (!targetUrl) {
-    throw new Error('无法确定会话 URL，请先在浏览器中打开目标页面');
+function getBrowserWsUrl() {
+  if (process.env.WEBAUTO_WS_URL) {
+    return process.env.WEBAUTO_WS_URL;
   }
+  const host = process.env.WEBAUTO_WS_HOST || DEFAULT_WS_HOST;
+  const port = Number(process.env.WEBAUTO_WS_PORT || DEFAULT_WS_PORT);
+  return `ws://${host}:${port}`;
+}
 
-  const tmpDir = await fsPromises.mkdtemp(path.join(os.tmpdir(), 'webauto-inspector-'));
+function sendWsCommand(wsUrl, payload, timeoutMs = 15000) {
+  return new Promise((resolve, reject) => {
+    const socket = new WebSocket(wsUrl);
+    let settled = false;
+    const timeout = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      socket.terminate();
+      reject(new Error('WebSocket command timeout'));
+    }, timeoutMs);
+
+    const cleanup = () => {
+      clearTimeout(timeout);
+      socket.removeAllListeners();
+    };
+
+    socket.once('open', () => {
+      try {
+        socket.send(JSON.stringify(payload));
+      } catch (err) {
+        cleanup();
+        if (!settled) {
+          settled = true;
+          reject(err);
+        }
+      }
+    });
+
+    socket.once('message', (data) => {
+      cleanup();
+      if (settled) return;
+      settled = true;
+      try {
+        resolve(JSON.parse(data.toString('utf-8')));
+      } catch (err) {
+        reject(err);
+      } finally {
+        socket.close();
+      }
+    });
+
+    socket.once('error', (err) => {
+      cleanup();
+      if (settled) return;
+      settled = true;
+      reject(err);
+    });
+
+    socket.once('close', () => {
+      cleanup();
+      if (!settled) {
+        settled = true;
+        reject(new Error('WebSocket closed before response'));
+      }
+    });
+  });
+}
+
+async function fetchContainerSnapshotFromService({
+  sessionId,
+  url,
+  maxDepth,
+  maxChildren,
+}) {
+  if (!sessionId || !url) {
+    throw new Error('缺少 sessionId 或 URL');
+  }
+  const wsUrl = getBrowserWsUrl();
+  const payload = {
+    type: 'command',
+    session_id: sessionId,
+    data: {
+      command_type: 'container_operation',
+      action: 'inspect_tree',
+      page_context: { url },
+      parameters: {
+        ...(typeof maxDepth === 'number' ? { max_depth: maxDepth } : {}),
+        ...(typeof maxChildren === 'number' ? { max_children: maxChildren } : {}),
+      },
+    },
+  };
+  const response = await sendWsCommand(wsUrl, payload, 20000);
+  if (response?.data?.success) {
+    return response.data.data || response.data.snapshot || response.data;
+  }
+  throw new Error(response?.data?.error || response?.error || 'inspect_tree failed');
+}
+
+async function captureSnapshotFromFixture({
+  profileId,
+  url,
+  maxDepth,
+  maxChildren,
+}) {
+  const tmpDir = await fsPromises.mkdtemp(path.join(os.tmpdir(), 'webauto-ui-'));
   const fixturePath = path.join(tmpDir, 'dom.html');
   try {
-    const domArgs = ['dom-dump', '--url', targetUrl, '--headless', 'true', '--output', fixturePath];
+    const domArgs = ['dom-dump', '--url', url, '--headless', 'true', '--output', fixturePath];
     if (profileId) {
       domArgs.push('--profile', profileId);
     }
     await runCliCommand('browser-control', domArgs);
-    const treeArgs = ['inspect-tree', '--url', targetUrl, '--fixture', fixturePath];
-    if (typeof options.maxDepth === 'number') {
-      treeArgs.push('--max-depth', String(options.maxDepth));
+    const treeArgs = ['inspect-tree', '--url', url, '--fixture', fixturePath];
+    if (typeof maxDepth === 'number') {
+      treeArgs.push('--max-depth', String(maxDepth));
     }
-    if (typeof options.maxChildren === 'number') {
-      treeArgs.push('--max-children', String(options.maxChildren));
+    if (typeof maxChildren === 'number') {
+      treeArgs.push('--max-children', String(maxChildren));
     }
     const tree = await runCliCommand('container-matcher', treeArgs);
-    const snapshot = tree?.data || tree;
-    if (!snapshot || !snapshot.container_tree) {
-      throw new Error('容器树为空，检查容器定义或选择器是否正确');
-    }
-    return {
-      sessionId: sessionId || profileId || 'unknown-session',
-      profileId: profileId || 'default',
-      targetUrl,
-      snapshot,
-    };
+    return tree?.data || tree;
   } finally {
     fsPromises.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
   }
+}
+
+async function captureInspectorSnapshot(options = {}) {
+  const profile = options.profile;
+  const sessions = await fetchSessions();
+  const targetSession = profile ? findSessionByProfile(sessions, profile) : sessions[0] || null;
+  const sessionId = targetSession?.session_id || targetSession?.sessionId || profile || null;
+  const profileId = profile || targetSession?.profileId || targetSession?.profile_id || sessionId || null;
+  const targetUrl = options.url || targetSession?.current_url || targetSession?.currentUrl;
+  if (!targetUrl) {
+    throw new Error('无法确定会话 URL，请先在浏览器中打开目标页面');
+  }
+  let liveError = null;
+  let snapshot = null;
+  if (sessionId) {
+    try {
+      snapshot = await fetchContainerSnapshotFromService({
+        sessionId,
+        url: targetUrl,
+        maxDepth: options.maxDepth,
+        maxChildren: options.maxChildren,
+      });
+    } catch (err) {
+      liveError = err;
+      console.warn('[floating] live inspect_tree failed:', err?.message || err);
+    }
+  }
+  let fixtureSnapshot = null;
+  if (!snapshot) {
+    fixtureSnapshot = await captureSnapshotFromFixture({
+      profileId,
+      url: targetUrl,
+      maxDepth: options.maxDepth,
+      maxChildren: options.maxChildren,
+    });
+    snapshot = fixtureSnapshot;
+  } else if (!snapshot?.dom_tree) {
+    try {
+      fixtureSnapshot = await captureSnapshotFromFixture({
+        profileId,
+        url: targetUrl,
+        maxDepth: options.maxDepth,
+        maxChildren: options.maxChildren,
+      });
+      if (fixtureSnapshot?.dom_tree) {
+        snapshot.dom_tree = fixtureSnapshot.dom_tree;
+        if (!snapshot.matches && fixtureSnapshot.matches) {
+          snapshot.matches = fixtureSnapshot.matches;
+        }
+        const mergedMetadata = {
+          ...(fixtureSnapshot.metadata || {}),
+          ...(snapshot.metadata || {}),
+        };
+        if (!mergedMetadata.dom_source) {
+          mergedMetadata.dom_source = 'fixture';
+        }
+        snapshot.metadata = mergedMetadata;
+      }
+    } catch (fixtureError) {
+      console.warn('[floating] fixture DOM capture failed:', fixtureError?.message || fixtureError);
+    }
+  }
+  if (!snapshot || !snapshot.container_tree) {
+    const rootError = liveError || new Error('容器树为空，检查容器定义或选择器是否正确');
+    throw rootError;
+  }
+  return {
+    sessionId: sessionId || profileId || 'unknown-session',
+    profileId: profileId || 'default',
+    targetUrl,
+    snapshot,
+  };
+}
+
+async function writeUserContainerDefinition(siteKey, containerId, definition) {
+  const parts = containerId.split('.').filter(Boolean);
+  const targetDir = path.join(USER_CONTAINER_ROOT, siteKey, ...parts);
+  await fsPromises.mkdir(targetDir, { recursive: true });
+  const filePath = path.join(targetDir, 'container.json');
+  await fsPromises.writeFile(filePath, JSON.stringify(definition, null, 2), 'utf-8');
+}
+
+function resolveSiteKeyFromUrl(url) {
+  if (!url) return null;
+  let host = '';
+  try {
+    host = new URL(url).hostname.toLowerCase();
+  } catch {
+    return null;
+  }
+  const index = loadContainerIndex();
+  let bestKey = null;
+  let bestLen = -1;
+  for (const [key, meta] of Object.entries(index)) {
+    const domain = (meta?.website || '').toLowerCase();
+    if (!domain) continue;
+    if (host === domain || host.endsWith(`.${domain}`)) {
+      if (domain.length > bestLen) {
+        bestKey = key;
+        bestLen = domain.length;
+      }
+    }
+  }
+  return bestKey;
+}
+
+function loadContainerIndex() {
+  if (containerIndexCache) {
+    return containerIndexCache;
+  }
+  if (!fs.existsSync(CONTAINER_INDEX_PATH)) {
+    containerIndexCache = {};
+    return containerIndexCache;
+  }
+  try {
+    containerIndexCache = JSON.parse(fs.readFileSync(CONTAINER_INDEX_PATH, 'utf-8'));
+  } catch {
+    containerIndexCache = {};
+  }
+  return containerIndexCache;
+}
+
+function inferSiteFromContainerId(containerId) {
+  if (!containerId) return null;
+  const dotIdx = containerId.indexOf('.');
+  if (dotIdx > 0) {
+    return containerId.slice(0, dotIdx);
+  }
+  const underscoreIdx = containerId.indexOf('_');
+  if (underscoreIdx > 0) {
+    return containerId.slice(0, underscoreIdx);
+  }
+  return null;
 }
 
 async function ensureInspectorWindow() {

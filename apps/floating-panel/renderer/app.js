@@ -1,3 +1,6 @@
+import { ContainerDomGraphView } from './graph/graph-view.js';
+import { flattenContainerTree, collectDomTargets, buildGraphLinks, formatDomNodeLabel } from './graph/data-utils.js';
+
 const ui = {
   metaText: document.getElementById('connectionStatus'),
   globalMessage: document.getElementById('globalMessage'),
@@ -15,8 +18,13 @@ const ui = {
   containersPanel: document.getElementById('containersPanel'),
   refreshContainers: document.getElementById('refreshContainers'),
   openInspectorButton: document.getElementById('openInspector'),
-  containerTreePlaceholder: document.getElementById('containerTreePlaceholder'),
-  domMapPlaceholder: document.getElementById('domMapPlaceholder'),
+  containerDomGrid: document.getElementById('containerDomGrid'),
+  linkModeButton: document.getElementById('linkModeButton'),
+  linkModeIndicator: document.getElementById('linkModeIndicator'),
+  treeContainerList: document.getElementById('containerTreeView'),
+  treeDomList: document.getElementById('domTreeView'),
+  treeContainerCount: document.getElementById('treeContainerCount'),
+  treeDomCount: document.getElementById('treeDomCount'),
   operationChips: document.getElementById('operationChips'),
   logPanel: document.getElementById('logPanel'),
   logSourceSelect: document.getElementById('logSourceSelect'),
@@ -39,6 +47,16 @@ const state = {
   selectedSession: null,
   containerSnapshot: null,
   domTree: null,
+  selectedContainerId: null,
+  selectedDomPath: null,
+  domDefaultVisible: new Set(),
+  domExpandedPaths: new Set(),
+  domNeedsReset: false,
+  linkMode: {
+    active: false,
+    containerId: null,
+    busy: false,
+  },
   messageTimer: null,
   loading: {
     browser: false,
@@ -54,14 +72,18 @@ const layoutState = {
   resizeObserver: null,
 };
 
+let graphView = null;
+
 const backend = window.backendAPI;
 const desktop = window.desktopAPI;
 
 async function init() {
   bindWindowControls();
   bindEvents();
+  updateLinkModeUI();
   subscribeDesktopEvents();
   setupAutoFit();
+  setupGraphView();
   await loadOperations();
   await refreshAll();
 }
@@ -105,6 +127,7 @@ function bindEvents() {
   ui.refreshBrowser?.addEventListener('click', () => loadBrowserStatus());
   ui.refreshSessions?.addEventListener('click', () => loadSessions());
   ui.refreshLogs?.addEventListener('click', () => loadLogs());
+  ui.linkModeButton?.addEventListener('click', () => toggleLinkMode());
   ui.clearLogs?.addEventListener('click', () => {
     state.logs = [];
     renderLogs();
@@ -126,6 +149,47 @@ function setupAutoFit() {
   }
   window.addEventListener('load', () => queueFitWindow(), { once: true });
   setTimeout(() => queueFitWindow(), 80);
+}
+
+function setupGraphView() {
+  if (graphView || !ui.containerDomGrid) return;
+  graphView = new ContainerDomGraphView(ui.containerDomGrid);
+  graphView.setCallbacks({
+    onSelectContainer: (containerId) => handleContainerSelection(containerId),
+    onSelectDom: (domPath) => handleDomSelection(domPath),
+  });
+}
+
+function toggleLinkMode(forceState) {
+  const desired = typeof forceState === 'boolean' ? forceState : !state.linkMode.active;
+  if (!desired && state.linkMode.busy) {
+    return;
+  }
+  state.linkMode.active = desired;
+  if (!desired) {
+    state.linkMode.containerId = null;
+  }
+  updateLinkModeUI();
+}
+
+function updateLinkModeUI() {
+  if (ui.linkModeButton) {
+    ui.linkModeButton.textContent = state.linkMode.active ? '退出重连' : '重连容器';
+    ui.linkModeButton.classList.toggle('is-active', state.linkMode.active);
+    ui.linkModeButton.disabled = state.linkMode.busy;
+  }
+  if (ui.linkModeIndicator) {
+    let text = '';
+    if (state.linkMode.busy) {
+      text = '正在更新容器选择器，请稍候...';
+    } else if (state.linkMode.active && state.linkMode.containerId) {
+      text = `目标容器：${state.linkMode.containerId}，请选择新的 DOM 节点完成连线`;
+    } else if (state.linkMode.active) {
+      text = '重连模式已开启：先点击容器，再点击 DOM 节点完成连线';
+    }
+    ui.linkModeIndicator.textContent = text;
+    ui.linkModeIndicator.classList.toggle('hidden', !text);
+  }
 }
 
 function queueFitWindow() {
@@ -153,7 +217,7 @@ async function loadBrowserStatus() {
     const res = await invokeAction('browser:status');
     state.browserStatus = res;
   } catch (err) {
-    state.browserStatus = null;
+    state.browserStatus = { healthy: false, error: err.message || String(err) };
     showMessage(err.message || '获取浏览器状态失败', 'error');
   } finally {
     setLoading('browser', false);
@@ -167,8 +231,14 @@ async function loadSessions() {
     const res = await invokeAction('session:list');
     const data = res?.sessions || res?.data?.sessions || res?.data || [];
     state.sessions = Array.isArray(data) ? data : [];
-    if (state.selectedSession && !state.sessions.some((s) => s.profileId === state.selectedSession)) {
-      state.selectedSession = null;
+    const hasSelected =
+      state.selectedSession && state.sessions.some((s) => s.profileId === state.selectedSession);
+    if (!hasSelected) {
+      if (state.sessions.length === 1) {
+        state.selectedSession = state.sessions[0].profileId;
+      } else {
+        state.selectedSession = null;
+      }
     }
   } catch (err) {
     state.sessions = [];
@@ -176,6 +246,7 @@ async function loadSessions() {
   } finally {
     setLoading('sessions', false);
     renderSessions();
+    renderBrowserPanel();
     if (state.selectedSession) {
       loadContainerSnapshot(true);
     }
@@ -256,13 +327,23 @@ async function loadOperations() {
 function renderBrowserPanel() {
   if (!ui.browserStatusText || !ui.browserDetails) return;
   const status = state.browserStatus;
-  const healthy = status?.healthy;
-  ui.browserStatusText.textContent = healthy ? '服务就绪' : '服务未就绪';
+  const sessionCount = state.sessions.length;
+  const healthy = typeof status?.healthy === 'boolean' ? status.healthy : sessionCount > 0;
+  const label = healthy ? '服务就绪' : '服务未就绪';
+  if (ui.metaText) {
+    ui.metaText.textContent = healthy ? '就绪' : '未就绪';
+    ui.metaText.dataset.state = healthy ? 'ok' : 'warn';
+  }
+  ui.browserStatusText.textContent = label;
   ui.browserStatusText.dataset.state = healthy ? 'ok' : 'warn';
-  const sessionCount = status?.sessions?.length ?? 0;
-  ui.browserDetails.textContent = healthy
-    ? `活动会话 ${sessionCount} 个`
-    : '请先启动浏览器服务（端口 7704/8765）';
+  if (healthy) {
+    ui.browserDetails.textContent = `活动会话 ${sessionCount} 个`;
+  } else if (sessionCount > 0) {
+    ui.browserDetails.textContent = `检测到 ${sessionCount} 个会话，等待服务心跳`;
+  } else {
+    ui.browserDetails.textContent =
+      status?.error || '请先启动浏览器服务（端口 7704/8765）';
+  }
   queueFitWindow();
 }
 
@@ -342,13 +423,11 @@ async function loadContainerSnapshot(skipLoading = false) {
     const url = selected?.current_url || selected?.currentUrl;
     if (!url) throw new Error('会话没有 URL');
     const res = await invokeAction('containers:inspect', { profile: state.selectedSession, url });
-    const snapshot = res?.snapshot || res?.containerSnapshot || res;
-    state.containerSnapshot = snapshot;
-    state.domTree = snapshot?.dom_tree || res?.domTree || null;
-    showMessage(`容器树已捕获 (${state.selectedSession})`, 'success');
+    applyContainerSnapshotData(res, { toastMessage: `容器树已捕获 (${state.selectedSession})` });
   } catch (err) {
     state.containerSnapshot = null;
     state.domTree = null;
+    state.domNeedsReset = false;
     showMessage(err.message || '容器树捕获失败', 'error');
   } finally {
     setLoading('containers', false);
@@ -356,78 +435,508 @@ async function loadContainerSnapshot(skipLoading = false) {
   }
 }
 
+function applyContainerSnapshotData(result, options = {}) {
+  const snapshot = result?.snapshot || result?.containerSnapshot || result;
+  if (!snapshot || !snapshot.container_tree) {
+    throw new Error('容器树为空');
+  }
+  state.containerSnapshot = snapshot;
+  state.domTree = snapshot?.dom_tree || result?.domTree || null;
+  if (snapshot?.container_tree?.id) {
+    state.selectedContainerId = snapshot.container_tree.id;
+  }
+  if (state.domTree?.path) {
+    state.selectedDomPath = state.domTree.path;
+  }
+  const initialPaths = findAllDomPathsForContainer(state.selectedContainerId, state.domTree);
+  if (!state.selectedDomPath && initialPaths.length) {
+    state.selectedDomPath = initialPaths[0];
+  }
+  state.domNeedsReset = true;
+  if (options.toastMessage) {
+    showMessage(options.toastMessage, 'success');
+  }
+}
+
 function renderContainers() {
-  const treeContainer = ui.containerTreePlaceholder;
-  const domContainer = ui.domMapPlaceholder;
+  setupGraphView();
   if (ui.openInspectorButton) {
     ui.openInspectorButton.disabled = !state.selectedSession || !desktop?.openInspector;
   }
+  const hasTree = Boolean(state.containerSnapshot?.container_tree);
+  let containerRows = [];
+  let domNodes = [];
+  let links = [];
+  if (hasTree) {
+    containerRows = flattenContainerTree(state.containerSnapshot.container_tree);
+    if (containerRows.length) {
+      const domNodesByContainer = new Map();
+      containerRows.forEach((row) => {
+        const containerId = getContainerId(row.container);
+        if (!containerId) return;
+        const targets = collectDomTargets(state.domTree, containerId, [], 0);
+        domNodesByContainer.set(containerId, targets);
+        domNodes.push(...targets);
+      });
+      links = buildGraphLinks(containerRows, domNodesByContainer);
+    }
+  }
+  if (state.domNeedsReset) {
+    resetDomVisibility(containerRows);
+    state.domNeedsReset = false;
+  }
+  renderTreeDetails();
+
   if (!state.selectedSession) {
-    if (treeContainer) {
-      treeContainer.innerHTML = '<strong>未选择会话</strong><p>请先选择会话后再生成容器树。</p>';
-    }
-    if (domContainer) {
-      domContainer.innerHTML = '<strong>等待会话</strong><p>DOM 映射依赖已捕获的容器树。</p>';
-    }
+    updateTreeCounts(0, 0);
+    setGraphPlaceholder('未选择会话', '选择会话后生成容器树');
+    clearGraphData();
+    queueFitWindow();
+    return;
+  }
+  if (!hasTree) {
+    updateTreeCounts(0, 0);
+    setGraphPlaceholder('等待容器匹配', '点击“刷新面板”捕获容器树');
+    clearGraphData();
+    queueFitWindow();
+    return;
+  }
+  if (!containerRows.length) {
+    updateTreeCounts(0, 0);
+    setGraphPlaceholder('暂无容器', '检查容器库定义或容器匹配规则');
+    clearGraphData();
     queueFitWindow();
     return;
   }
 
-  if (state.containerSnapshot?.container_tree) {
-    treeContainer.innerHTML = '';
-    treeContainer.appendChild(buildContainerTree(state.containerSnapshot.container_tree));
-  } else {
-    treeContainer.innerHTML = '<strong>等待容器匹配</strong><p>点击“刷新面板”捕获容器树。</p>';
-  }
-
-  if (state.domTree) {
-    domContainer.innerHTML = '';
-    domContainer.appendChild(buildDomTree(state.domTree));
-  } else {
-    domContainer.innerHTML = '<strong>DOM 快照待捕获</strong><p>容器树捕获后自动生成 DOM 映射。</p>';
-  }
+  updateTreeCounts(containerRows.length, domNodes.length);
+  hideGraphPlaceholder();
+  updateGraphVisualization(containerRows, domNodes, links);
   queueFitWindow();
 }
 
-function buildContainerTree(node, depth = 0) {
-  const root = document.createElement('div');
-  root.className = 'tree-view';
-  const title = document.createElement('div');
-  title.className = 'tree-node-title';
-  const selectors = node.match?.selectors?.join(', ') || '无匹配';
-  title.innerHTML = `<strong>${node.name || node.id}</strong><span>${node.type || ''} · ${selectors}</span>`;
-  root.appendChild(title);
-  if (node.children && node.children.length) {
-    const list = document.createElement('div');
-    list.className = 'tree-children';
-    node.children.forEach((child) => list.appendChild(buildContainerTree(child, depth + 1)));
-    root.appendChild(list);
+function clearGraphData() {
+  try {
+    graphView?.setData({ containers: [], domNodes: [], links: [] });
+    graphView?.setSelection({ containerId: null, domPath: null });
+  } catch {
+    // ignore
   }
-  return root;
 }
 
-function buildDomTree(node, depth = 0) {
-  if (depth > 2) return document.createTextNode('');
-  const container = document.createElement('div');
-  container.className = 'dom-node';
-  const title = document.createElement('div');
-  title.className = 'dom-node-title';
-  const label = [`<${node.tag.toLowerCase()}>`];
-  if (node.id) label.push(`#${node.id}`);
-  if (node.classes?.length) label.push(`.${node.classes.join('.')}`);
-  const mapped = (node.containers || []).map((c) => c.container_name || c.container_id);
-  title.innerHTML = `<strong>${label.join('')}</strong><span>${mapped.length ? mapped.join(', ') : ''}</span>`;
-  container.appendChild(title);
-  if (node.children && node.children.length) {
-    const list = document.createElement('div');
-    list.className = 'dom-children';
-    node.children.forEach((child) => {
-      const childNode = buildDomTree(child, depth + 1);
-      if (childNode) list.appendChild(childNode);
+function updateTreeCounts(containerCount, domCount) {
+  if (ui.treeContainerCount) ui.treeContainerCount.textContent = String(containerCount || 0);
+  if (ui.treeDomCount) ui.treeDomCount.textContent = String(domCount || 0);
+}
+
+function updateGraphVisualization(containerRows, domNodes, links) {
+  if (!graphView) return;
+  try {
+    graphView.setData({ containers: containerRows, domNodes, links });
+    graphView.setSelection({
+      containerId: state.selectedContainerId,
+      domPath: state.selectedDomPath,
     });
-    container.appendChild(list);
+  } catch (err) {
+    console.warn('[ui] graph render failed', err);
+    showMessage(err?.message || '容器图渲染失败', 'error');
   }
-  return container;
+}
+
+function renderTreeDetails() {
+  renderContainerTreeList(state.containerSnapshot?.container_tree);
+  renderDomTreeList(state.domTree);
+}
+
+function renderContainerTreeList(rootNode) {
+  if (!ui.treeContainerList) return;
+  ui.treeContainerList.innerHTML = '';
+  if (!rootNode) {
+    const placeholder = document.createElement('div');
+    placeholder.className = 'tree-empty';
+    placeholder.textContent = '暂无容器数据';
+    ui.treeContainerList.appendChild(placeholder);
+    return;
+  }
+  buildContainerTreeRows(rootNode, 0, ui.treeContainerList);
+}
+
+function buildContainerTreeRows(node, depth, target) {
+  if (!node) return;
+  const containerId = getContainerId(node);
+  const row = document.createElement('div');
+  row.className = 'tree-line tree-line-container';
+  row.style.paddingLeft = `${depth * 16}px`;
+  if (containerId && state.selectedContainerId === containerId) {
+    row.classList.add('active');
+  }
+  const label = document.createElement('span');
+  label.className = 'tree-label';
+  label.textContent = node.name || containerId || '容器';
+  row.appendChild(label);
+  const selector = containerId ? getContainerSelector(containerId, state.containerSnapshot?.container_tree) : null;
+  if (selector) {
+    const hint = document.createElement('code');
+    hint.textContent = selector;
+    row.appendChild(hint);
+  }
+  if (containerId) {
+    row.addEventListener('click', (event) => {
+      event.stopPropagation();
+      handleContainerSelection(containerId);
+    });
+  }
+  target.appendChild(row);
+  if (Array.isArray(node.children)) {
+    node.children.forEach((child) => buildContainerTreeRows(child, depth + 1, target));
+  }
+}
+
+function renderDomTreeList(rootNode) {
+  if (!ui.treeDomList) return;
+  ui.treeDomList.innerHTML = '';
+  if (!rootNode) {
+    const placeholder = document.createElement('div');
+    placeholder.className = 'tree-empty';
+    placeholder.textContent = '暂无 DOM 数据';
+    ui.treeDomList.appendChild(placeholder);
+    return;
+  }
+  buildDomTreeRows(rootNode, 0, ui.treeDomList);
+}
+
+function buildDomTreeRows(node, depth, target) {
+  if (!node) return false;
+  const path = node.path || (depth === 0 ? '__root__' : '');
+  const isRoot = depth === 0;
+  const isDefaultVisible = isRoot || (path && state.domDefaultVisible.has(path));
+  const isExpanded = path && state.domExpandedPaths.has(path);
+  if (!isRoot && !isDefaultVisible && !isExpanded) {
+    return false;
+  }
+  const row = document.createElement('div');
+  row.className = 'tree-line tree-line-dom';
+  row.style.paddingLeft = `${Math.max(depth - 1, 0) * 18 + 12}px`;
+  if (path && state.selectedDomPath === path) {
+    row.classList.add('active');
+  }
+  const hasChildren = Array.isArray(node.children) && node.children.length > 0;
+  const expandBtn = document.createElement('button');
+  expandBtn.className = 'tree-expand-btn';
+  if (hasChildren && path) {
+    const hasHiddenChildren =
+      !node.children.every((child) => child.path && state.domDefaultVisible.has(child.path)) || isExpanded;
+    if (hasHiddenChildren) {
+      expandBtn.textContent = isExpanded ? '−' : '+';
+      expandBtn.addEventListener('click', (event) => {
+        event.stopPropagation();
+        toggleDomNodeExpand(path);
+      });
+      row.appendChild(expandBtn);
+    }
+  }
+  const label = document.createElement('span');
+  label.className = 'tree-label';
+  label.textContent = formatDomNodeLabel(node) || node.tag || path || '节点';
+  row.appendChild(label);
+  if (Array.isArray(node.containers) && node.containers.length) {
+    const meta = document.createElement('span');
+    meta.className = 'tree-meta';
+    meta.textContent = node.containers
+      .map((entry) => entry?.container_name || entry?.container_id || entry?.containerId)
+      .filter(Boolean)
+      .join(', ');
+    if (meta.textContent) {
+      row.appendChild(meta);
+    }
+  }
+  if (path && path !== '__root__') {
+    row.dataset.path = path;
+    row.addEventListener('click', (event) => {
+      event.stopPropagation();
+      handleDomSelection(path);
+    });
+    row.addEventListener('dblclick', (event) => {
+      event.stopPropagation();
+      toggleDomNodeExpand(path);
+    });
+  }
+  target.appendChild(row);
+  if (!hasChildren) {
+    return true;
+  }
+  const childNodes = node.children || [];
+  const shouldShowAll = path && state.domExpandedPaths.has(path);
+  const visibleChildren = shouldShowAll
+    ? childNodes
+    : childNodes.filter((child) => !child.path || state.domDefaultVisible.has(child.path));
+  visibleChildren.forEach((child) => buildDomTreeRows(child, depth + 1, target));
+  return true;
+}
+
+function toggleDomNodeExpand(path) {
+  if (!path || path === '__root__') return;
+  if (state.domExpandedPaths.has(path)) {
+    state.domExpandedPaths.delete(path);
+  } else {
+    state.domExpandedPaths.add(path);
+  }
+  renderTreeDetails();
+  queueFitWindow();
+}
+
+function resetDomVisibility(containerRows) {
+  state.domDefaultVisible = new Set();
+  state.domExpandedPaths = new Set();
+  if (!state.domTree) return;
+  const containerIds = new Set(
+    containerRows.map((row) => getContainerId(row.container)).filter((id) => typeof id === 'string' && id.length),
+  );
+  if (!containerIds.size) {
+    if (state.domTree.path) {
+      state.domDefaultVisible.add(state.domTree.path);
+    }
+    return;
+  }
+  markDomVisibility(state.domTree, state.domDefaultVisible, containerIds);
+  if (state.selectedDomPath) {
+    state.domDefaultVisible.add(state.selectedDomPath);
+  }
+  if (state.domTree.path) {
+    state.domDefaultVisible.add(state.domTree.path);
+  }
+}
+
+function markDomVisibility(node, allowed, containerIds) {
+  if (!node) return false;
+  const path = node.path;
+  let match = false;
+  if (Array.isArray(node.containers) && node.containers.length) {
+    match = node.containers.some((entry) => {
+      const containerId = entry?.container_id || entry?.containerId || entry?.container_name;
+      return containerId && containerIds.has(containerId);
+    });
+  }
+  let childHas = false;
+  if (Array.isArray(node.children)) {
+    for (const child of node.children) {
+      if (markDomVisibility(child, allowed, containerIds)) {
+        childHas = true;
+      }
+    }
+  }
+  if ((match || childHas) && path) {
+    allowed.add(path);
+    return true;
+  }
+  return match || childHas;
+}
+
+function setGraphPlaceholder(title, desc, options = {}) {
+  const overlay = ui.containerDomGrid?.querySelector('.graph-overlay');
+  if (!overlay) return;
+  overlay.innerHTML = `<div class="tree-placeholder"><strong>${title}</strong><p>${desc}</p></div>`;
+  overlay.classList.remove('hidden');
+  try {
+    graphView?.setData({ containers: [], domNodes: [], links: [] });
+    graphView?.setSelection({ containerId: null, domPath: null });
+  } catch (err) {
+    console.warn('[ui] set placeholder failed', err);
+  }
+  if (!options.preserveCounts) {
+    if (ui.treeContainerCount) ui.treeContainerCount.textContent = '0';
+    if (ui.treeDomCount) ui.treeDomCount.textContent = '0';
+  }
+}
+
+function hideGraphPlaceholder() {
+  const overlay = ui.containerDomGrid?.querySelector('.graph-overlay');
+  if (overlay) overlay.classList.add('hidden');
+}
+
+function handleContainerSelection(containerId) {
+  if (!containerId || !state.containerSnapshot) return;
+  state.selectedContainerId = containerId;
+  const domPaths = findAllDomPathsForContainer(containerId, state.domTree);
+  if (domPaths.length) {
+    state.selectedDomPath = domPaths[0];
+  }
+  const selector = getContainerSelector(containerId, state.containerSnapshot.container_tree);
+  if (selector) {
+    triggerHighlight(selector);
+  }
+  if (state.linkMode.active) {
+    state.linkMode.containerId = containerId;
+    updateLinkModeUI();
+  }
+  graphView?.setSelection({ containerId: state.selectedContainerId, domPath: state.selectedDomPath });
+  renderTreeDetails();
+  queueFitWindow();
+}
+
+function handleDomSelection(domPath) {
+  if (!domPath || !state.domTree) return;
+  state.selectedDomPath = domPath;
+  const node = findDomNodeByPath(state.domTree, domPath);
+  if (node?.containers?.length) {
+    const container = node.containers[0].container_id || node.containers[0].container_name;
+    if (container) {
+      state.selectedContainerId = container;
+    }
+  }
+  if (state.linkMode.active && state.linkMode.containerId && !state.linkMode.busy) {
+    remapContainerToDom(state.linkMode.containerId, domPath, node);
+    return;
+  }
+  const selector = getDomNodeSelector(node);
+  if (selector) {
+    triggerHighlight(selector);
+  }
+  graphView?.setSelection({ containerId: state.selectedContainerId, domPath: state.selectedDomPath });
+  renderTreeDetails();
+  queueFitWindow();
+}
+
+async function remapContainerToDom(containerId, domPath, domNode = null) {
+  if (!containerId || !domPath || state.linkMode.busy) return;
+  const containerNode = findContainerNode(state.containerSnapshot?.container_tree, containerId);
+  if (!containerNode) {
+    showMessage('找不到容器定义', 'error');
+    return;
+  }
+  const domTarget = domNode || findDomNodeByPath(state.domTree, domPath);
+  if (!domTarget) {
+    showMessage('找不到 DOM 节点', 'error');
+    return;
+  }
+  const selector = getDomNodeSelector(domTarget) || domTarget.selector || domTarget.path;
+  if (!selector) {
+    showMessage('DOM 节点缺少 selector，无法重连', 'error');
+    return;
+  }
+  const sessionMeta = getSelectedSessionMeta();
+  const url =
+    sessionMeta?.current_url ||
+    sessionMeta?.currentUrl ||
+    state.containerSnapshot?.metadata?.page_url ||
+    state.containerSnapshot?.target_url ||
+    '';
+  const payload = {
+    profile: state.selectedSession,
+    url,
+    containerId,
+    selector,
+    domPath,
+    definition: containerNode.definition || {
+      id: containerId,
+      selectors: containerNode.selectors || [],
+    },
+  };
+  try {
+    state.linkMode.busy = true;
+    updateLinkModeUI();
+    const res = await invokeAction('containers:remap', payload);
+    applyContainerSnapshotData(res, { toastMessage: '容器选择器已更新' });
+    toggleLinkMode(false);
+    renderContainers();
+  } catch (err) {
+    showMessage(err?.message || '容器重连失败', 'error');
+  } finally {
+    state.linkMode.busy = false;
+    updateLinkModeUI();
+  }
+}
+
+function getContainerId(container) {
+  if (!container) return '';
+  return container.id || container.container_id || container.containerId || '';
+}
+
+function getSelectedSessionMeta() {
+  if (!state.selectedSession) return null;
+  return state.sessions.find((s) => s.profileId === state.selectedSession) || null;
+}
+
+function findDomNodeByPath(root, targetPath) {
+  if (!root || !targetPath) return null;
+  if (root.path === targetPath) return root;
+  if (Array.isArray(root.children)) {
+    for (const child of root.children) {
+      const result = findDomNodeByPath(child, targetPath);
+      if (result) return result;
+    }
+  }
+  return null;
+}
+
+function findAllDomPathsForContainer(containerId, root, acc = []) {
+  if (!root || !containerId) return acc;
+  if (Array.isArray(root.containers)) {
+    const match = root.containers.some(
+      (item) =>
+        item?.container_id === containerId ||
+        item?.container_name === containerId ||
+        item?.containerId === containerId,
+    );
+    if (match && root.path) {
+      acc.push(root.path);
+    }
+  }
+  if (Array.isArray(root.children)) {
+    for (const child of root.children) {
+      findAllDomPathsForContainer(containerId, child, acc);
+    }
+  }
+  return acc;
+}
+
+function getContainerSelector(containerId, tree) {
+  const node = findContainerNode(tree, containerId);
+  if (!node) return null;
+  return (
+    node.match?.matched_selector ||
+    node.match?.selectors?.[0] ||
+    node.selectors?.find((sel) => sel?.css)?.css ||
+    node.selectors?.[0]?.css ||
+    null
+  );
+}
+
+function findContainerNode(node, containerId) {
+  if (!node || !containerId) return null;
+  if (node.id === containerId || node.container_id === containerId) {
+    return node;
+  }
+  if (Array.isArray(node.children)) {
+    for (const child of node.children) {
+      const result = findContainerNode(child, containerId);
+      if (result) return result;
+    }
+  }
+  return null;
+}
+
+function getDomNodeSelector(node) {
+  if (!node) return null;
+  if (node.selector) return node.selector;
+  if (Array.isArray(node.containers) && node.containers.length) {
+    const containerId = node.containers[0].container_id || node.containers[0].container_name;
+    return getContainerSelector(containerId, state.containerSnapshot?.container_tree);
+  }
+  return null;
+}
+
+let highlightTimer = null;
+function triggerHighlight(selector) {
+  if (!selector) return;
+  clearTimeout(highlightTimer);
+  highlightTimer = setTimeout(async () => {
+    try {
+      await invokeAction('operations:run', { op: 'highlight', config: { selector } });
+    } catch (err) {
+      console.warn('[ui] highlight failed', err?.message || err);
+    }
+  }, 120);
 }
 
 function renderOperations() {

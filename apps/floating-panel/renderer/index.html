@@ -85,25 +85,42 @@
             </div>
             <div class="mini-actions">
               <button id="openInspector" class="ghost">容器视图</button>
+              <button id="linkModeButton" class="ghost">重连容器</button>
               <button id="refreshContainers" class="ghost">刷新面板</button>
             </div>
           </div>
-          <div class="container-grid">
-            <div class="subpanel">
-              <div class="subpanel-title">容器树</div>
-              <div id="containerTreePlaceholder" class="placeholder">
-                <strong>等待匹配</strong>
-                <p>选择会话后，通过 CLI 捕获容器树。</p>
-              </div>
+          <div class="tree-grid">
+            <div class="tree-grid-header">
+              <span class="col-container">容器（<span id="treeContainerCount">0</span>）</span>
+              <span class="col-dom">DOM 节点（<span id="treeDomCount">0</span>）</span>
             </div>
-            <div class="subpanel">
-              <div class="subpanel-title">DOM 映射</div>
-              <div id="domMapPlaceholder" class="placeholder">
-                <strong>等待会话</strong>
-                <p>容器树捕获后自动展示 DOM 信息。</p>
+            <div class="tree-grid-body">
+              <div class="graph-shell" id="containerDomGrid">
+                <canvas id="graphCanvas" width="400" height="300"></canvas>
+                <div class="graph-overlay">
+                  <div class="tree-placeholder">
+                    <strong>等待匹配</strong>
+                    <p>选择会话后，通过 CLI 捕获容器树。</p>
+                  </div>
+                </div>
+                <div class="graph-tooltip hidden" id="graphTooltip">
+                  <div class="graph-tooltip-title"></div>
+                  <div class="graph-tooltip-body"></div>
+                </div>
+              </div>
+              <div class="tree-detail" id="treeDetail">
+                <div class="tree-column">
+                  <div class="tree-column-title">容器树</div>
+                  <div class="tree-view scrollable" id="containerTreeView"></div>
+                </div>
+                <div class="tree-column">
+                  <div class="tree-column-title">DOM Explorer</div>
+                  <div class="tree-view scrollable" id="domTreeView"></div>
+                </div>
               </div>
             </div>
           </div>
+          <div class="link-mode-banner hidden" id="linkModeIndicator"></div>
           <div class="operations-card">
             <div class="subpanel-title">可用操作</div>
             <div class="operation-chips" id="operationChips"></div>
