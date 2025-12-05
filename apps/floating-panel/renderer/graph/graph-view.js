@@ -35,9 +35,16 @@ export class ContainerDomGraphView {
     this.nodeMap = new Map();
     this.links = [];
     this.selection = { containerId: null, domPath: null };
-    this.callbacks = { onSelectContainer: null, onSelectDom: null };
+    this.callbacks = { onSelectContainer: null, onSelectDom: null, onLinkNodes: null };
     this.hoverNode = null;
     this.resizeObserver = null;
+    this.interaction = {
+      linkModeActive: false,
+      linkContainerId: null,
+      dragLink: null,
+      pointer: { x: 0, y: 0 },
+    };
+    this.boundWindowPointerUp = (event) => this.handlePointerUp(event);
     this.layout = {
       containerX: DEFAULTS.marginX,
       domX: DEFAULTS.marginX + DEFAULTS.columnGap,
@@ -50,6 +57,8 @@ export class ContainerDomGraphView {
     this.canvas.addEventListener('mousemove', (event) => this.handlePointerMove(event));
     this.canvas.addEventListener('mouseleave', () => this.handlePointerLeave());
     this.canvas.addEventListener('click', (event) => this.handlePointerClick(event));
+    this.canvas.addEventListener('mousedown', (event) => this.handlePointerDown(event));
+    window.addEventListener('mouseup', this.boundWindowPointerUp);
     if (typeof ResizeObserver !== 'undefined' && this.root) {
       this.resizeObserver = new ResizeObserver(() => this.draw());
       this.resizeObserver.observe(this.root);
@@ -61,10 +70,12 @@ export class ContainerDomGraphView {
       this.resizeObserver.disconnect();
       this.resizeObserver = null;
     }
+    window.removeEventListener('mouseup', this.boundWindowPointerUp);
     if (!this.canvas) return;
     this.canvas.removeEventListener('mousemove', this.handlePointerMove);
     this.canvas.removeEventListener('mouseleave', this.handlePointerLeave);
     this.canvas.removeEventListener('click', this.handlePointerClick);
+    this.canvas.removeEventListener('mousedown', this.handlePointerDown);
   }
 
   setCallbacks(callbacks = {}) {
@@ -82,6 +93,16 @@ export class ContainerDomGraphView {
 
   setSelection({ containerId, domPath }) {
     this.selection = { containerId: containerId || null, domPath: domPath || null };
+    this.draw();
+  }
+
+  setInteractionMode(options = {}) {
+    const link = options.linkMode || {};
+    this.interaction.linkModeActive = Boolean(link.active);
+    this.interaction.linkContainerId = link.containerId || null;
+    if (!this.interaction.linkModeActive) {
+      this.interaction.dragLink = null;
+    }
     this.draw();
   }
 
@@ -160,6 +181,7 @@ export class ContainerDomGraphView {
     this.ctx.clearRect(0, 0, width, height);
     this.drawLinks();
     this.drawNodes();
+    this.drawPendingLink();
     this.ctx.restore();
   }
 
@@ -293,6 +315,22 @@ export class ContainerDomGraphView {
     }
   }
 
+  drawPendingLink() {
+    if (!this.interaction.dragLink || !this.ctx) return;
+    const { startX, startY } = this.interaction.dragLink;
+    const pointer = this.interaction.pointer;
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.strokeStyle = 'rgba(250, 190, 90, 0.9)';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([6, 4]);
+    ctx.beginPath();
+    ctx.moveTo(startX, startY);
+    ctx.lineTo(pointer.x, pointer.y);
+    ctx.stroke();
+    ctx.restore();
+  }
+
   drawConnectorLine(startX, startY, endX, endY, highlight) {
     const ctx = this.ctx;
     const ctrlX = startX + (endX - startX) * 0.55;
@@ -316,12 +354,16 @@ export class ContainerDomGraphView {
   }
 
   handlePointerMove(event) {
+    this.updatePointerPosition(event);
     const node = this.hitTest(event);
     if (node !== this.hoverNode) {
       this.hoverNode = node;
       this.updateTooltip(node, event);
     } else if (node) {
       this.updateTooltipPosition(event);
+    }
+    if (this.interaction.dragLink) {
+      this.draw();
     }
   }
 
@@ -337,6 +379,37 @@ export class ContainerDomGraphView {
       this.callbacks.onSelectContainer(node.id);
     } else if (node.type === 'dom' && this.callbacks.onSelectDom) {
       this.callbacks.onSelectDom(node.id);
+    }
+  }
+
+  handlePointerDown(event) {
+    if (!this.interaction.linkModeActive) return;
+    const node = this.hitTest(event);
+    if (!node || node.type !== 'container') return;
+    if (this.interaction.linkContainerId && this.interaction.linkContainerId !== node.id) {
+      return;
+    }
+    const anchor = this.getContainerAnchor(node);
+    this.updatePointerPosition(event);
+    this.interaction.dragLink = {
+      containerId: node.id,
+      node,
+      startX: anchor.x,
+      startY: anchor.y,
+    };
+    this.interaction.linkContainerId = node.id;
+    this.draw();
+  }
+
+  handlePointerUp(event) {
+    if (!this.interaction.dragLink) return;
+    const dragLink = this.interaction.dragLink;
+    this.interaction.dragLink = null;
+    this.updatePointerPosition(event);
+    this.draw();
+    const node = this.hitTest(event);
+    if (node && node.type === 'dom' && this.callbacks.onLinkNodes) {
+      this.callbacks.onLinkNodes(dragLink.containerId, node.id);
     }
   }
 
@@ -380,6 +453,21 @@ export class ContainerDomGraphView {
     if (this.tooltip) {
       this.tooltip.classList.add('hidden');
     }
+  }
+
+  updatePointerPosition(event) {
+    if (!this.canvas) return;
+    const rect = this.canvas.getBoundingClientRect();
+    const x = event.clientX - rect.left;
+    const y = event.clientY - rect.top;
+    this.interaction.pointer = { x, y };
+  }
+
+  getContainerAnchor(node) {
+    const offsetX = node.depth * 18;
+    const baseX = node.x + offsetX + node.width / 2;
+    const baseY = node.y + node.height / 2;
+    return { x: baseX, y: baseY };
   }
 
   truncateText(text, maxWidth, font) {

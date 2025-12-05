@@ -157,7 +157,9 @@ function setupGraphView() {
   graphView.setCallbacks({
     onSelectContainer: (containerId) => handleContainerSelection(containerId),
     onSelectDom: (domPath) => handleDomSelection(domPath),
+    onLinkNodes: (containerId, domPath) => handleGraphLink(containerId, domPath),
   });
+  syncGraphInteractionMode();
 }
 
 function toggleLinkMode(forceState) {
@@ -168,6 +170,8 @@ function toggleLinkMode(forceState) {
   state.linkMode.active = desired;
   if (!desired) {
     state.linkMode.containerId = null;
+  } else if (!state.linkMode.containerId && state.selectedContainerId) {
+    state.linkMode.containerId = state.selectedContainerId;
   }
   updateLinkModeUI();
 }
@@ -190,6 +194,17 @@ function updateLinkModeUI() {
     ui.linkModeIndicator.textContent = text;
     ui.linkModeIndicator.classList.toggle('hidden', !text);
   }
+  syncGraphInteractionMode();
+}
+
+function syncGraphInteractionMode() {
+  if (!graphView) return;
+  graphView.setInteractionMode({
+    linkMode: {
+      active: state.linkMode.active,
+      containerId: state.linkMode.containerId,
+    },
+  });
 }
 
 function queueFitWindow() {
@@ -820,6 +835,14 @@ function handleDomSelection(domPath) {
   graphView?.setSelection({ containerId: state.selectedContainerId, domPath: state.selectedDomPath });
   renderTreeDetails();
   queueFitWindow();
+}
+
+function handleGraphLink(containerId, domPath) {
+  if (!containerId || !domPath) return;
+  if (!state.linkMode.active || state.linkMode.busy) return;
+  state.linkMode.containerId = containerId;
+  updateLinkModeUI();
+  remapContainerToDom(containerId, domPath);
 }
 
 async function remapContainerToDom(containerId, domPath, domNode = null) {
