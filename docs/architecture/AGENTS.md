@@ -33,7 +33,7 @@ Manual runners:
 - Naming: `*.test.js` or `*.spec.js`; co‑locate with modules or dedicated files.
 - Integration: follow `comprehensive-test-suite.js` style for complex workflows.
 - Run via `npm run test:all` or the targeted scripts above.
-- **黑盒 UI 约束**：所有 UI/Floating Console 相关功能必须用消息驱动的黑盒测试验证。交付前务必在 headless 模式运行 `npm run ui:test`，等待 `scripts/ui/dev-driver.mjs` 通过总线模拟用户行为，并确认成功。
+- **黑盒 UI 约束**：所有 UI/Floating Console 相关功能必须用消息驱动的黑盒测试验证。交付前务必运行 `npm run ui:test`（脚本会自动以 headless 模式启动 `browser:oneclick` 并调用 `scripts/ui/dev-driver.mjs`）确认通过；若已手动启动浮窗，可使用 `npm run ui:test:driver` 单测驱动器。
 - `npm run build` 会自动调用 `npm run ui:test`；任何黑盒测试失败都要先修复。
 
 ## Commit & Pull Request Guidelines

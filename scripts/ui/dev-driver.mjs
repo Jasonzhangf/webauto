@@ -51,6 +51,8 @@ async function main() {
     socket.once('error', reject);
   });
   console.log(`[dev-driver] connected ${BUS_URL}`);
+  console.log('[dev-driver] waiting for snapshot ready event...');
+  await waitForEvent(socket, watchers, (evt) => evt.topic === 'ui.graph.snapshotReady', 'snapshot ready', 25000);
 
   for (const step of scenario) {
     const waitPromise = waitForEvent(socket, watchers, step.expect, step.description);
@@ -61,12 +63,12 @@ async function main() {
   socket.close();
 }
 
-function waitForEvent(socket, watchers, predicate, label) {
+function waitForEvent(socket, watchers, predicate, label, timeoutMs = 8000) {
   return new Promise((resolve, reject) => {
     const timeout = setTimeout(() => {
       watchers.delete(handler);
       reject(new Error(`timeout: ${label}`));
-    }, 8000);
+    }, timeoutMs);
     const handler = (event) => {
       if (typeof predicate === 'function' && predicate(event)) {
         clearTimeout(timeout);

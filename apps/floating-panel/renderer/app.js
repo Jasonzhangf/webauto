@@ -719,6 +719,14 @@ function updateGraphVisualization(containerRows, domNodes, links) {
       containerId: state.selectedContainerId,
       domPath: state.selectedDomPath,
     });
+    if (containerRows.length || domNodes.length) {
+      bus.publish('ui.graph.snapshotReady', {
+        containerCount: containerRows.length,
+        domCount: domNodes.length,
+        selectedContainer: state.selectedContainerId,
+        selectedDomPath: state.selectedDomPath,
+      });
+    }
   } catch (err) {
     console.warn('[ui] graph render failed', err);
     showMessage(err?.message || '容器图渲染失败', 'error');

@@ -150,13 +150,34 @@ async function ensureSessionVisible() {
   return target;
 }
 
+async function captureCookieSnapshot(minTimestamp) {
+  const targetDir = path.join(os.homedir(), '.webauto', 'cookies');
+  const targetPath = path.join(targetDir, `${profileId}-verify.json`);
+  try {
+    await fs.mkdir(targetDir, { recursive: true });
+    await postCommand('saveCookies', { profileId, path: targetPath });
+    const stat = await fs.stat(targetPath).catch(() => null);
+    if (stat && stat.mtimeMs >= minTimestamp) {
+      console.log(`[verify-weibo] cookie snapshot saved -> ${targetPath}`);
+      return true;
+    }
+  } catch (err) {
+    console.warn('[verify-weibo] cookie snapshot failed:', err?.message || err);
+  }
+  return false;
+}
+
 async function ensureCookiesFileUpdated(startTime) {
   const stat = await fs.stat(cookiesDbPath).catch(() => null);
   if (!stat) {
     throw new Error('找不到 Chrome Cookies 数据库');
   }
-  if (stat.mtimeMs < startTime) {
-    throw new Error('Cookie 数据库未更新，疑似未正确保存 profile');
+  if (stat.mtimeMs >= startTime) {
+    return;
+  }
+  const snapped = await captureCookieSnapshot(startTime);
+  if (!snapped) {
+    throw new Error('Cookie 数据库未更新，且无法生成快照，疑似未正确保存 profile');
   }
 }
 

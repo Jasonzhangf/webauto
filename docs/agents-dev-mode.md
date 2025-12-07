@@ -45,7 +45,7 @@ npm run browser:oneclick -- --profile weibo-fresh --url https://weibo.com/ --dev
 所有 UI/代理相关测试必须通过“黑盒、消息驱动”的方式模拟真实用户行为：
 
 1. **浮窗总线**：浮窗会在 `WEBAUTO_FLOATING_BUS_PORT`（默认 8790）暴露一个 WebSocket，总线主题与 `window.bus` 一致。调试脚本只能通过该端口发送/订阅消息，不可直接调用内部函数。
-2. **脚本入口**：使用 `npm run ui:test`（`scripts/ui/dev-driver.mjs`）来驱动测试，它会发布 `ui.window.*`、`ui.graph.expandDom` 等消息并等待事件回执，确保行为与用户点击一致。
+2. **脚本入口**：使用 `npm run ui:test`（自动启动 headless 的 `browser:oneclick` + `scripts/ui/dev-driver.mjs`）来驱动测试，它会发布 `ui.window.*`、`ui.graph.expandDom` 等消息并等待事件回执，确保行为与用户点击一致。若你已经手动起好了浮窗，也可运行 `npm run ui:test:driver` 单独触发消息流。
 3. **扩展用例**：新增测试时，也必须拆解成“发布消息 → 等待对应总线事件”这一流程，禁止直接操作 DOM 或调用私有 API。
 
 ## 交付前的必跑流程
