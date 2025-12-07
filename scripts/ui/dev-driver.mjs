@@ -3,6 +3,8 @@ import WebSocket from 'ws';
 
 const BUS_URL = process.env.WEBAUTO_FLOATING_BUS_URL || 'ws://127.0.0.1:8790';
 
+const MAX_AUTO_EXPAND_PATHS = Number(process.env.WEBAUTO_UI_AUTO_EXPAND_LIMIT || '4');
+
 const scenario = [
   {
     topic: 'ui.window.shrinkToBall',
@@ -53,6 +55,10 @@ async function main() {
   console.log(`[dev-driver] connected ${BUS_URL}`);
   console.log('[dev-driver] waiting for snapshot ready event...');
   await waitForEvent(socket, watchers, (evt) => evt.topic === 'ui.graph.snapshotReady', 'snapshot ready', 25000);
+  console.log('[dev-driver] requesting initial graph report...');
+  let report = await requestGraphReport(socket, watchers, 'initial');
+  validateGraphReport(report);
+  report = await autoExpandGraph(socket, watchers, report);
 
   for (const step of scenario) {
     const waitPromise = waitForEvent(socket, watchers, step.expect, step.description);
@@ -79,6 +85,62 @@ function waitForEvent(socket, watchers, predicate, label, timeoutMs = 8000) {
     };
     watchers.add(handler);
   });
+}
+
+async function requestGraphReport(socket, watchers, label) {
+  const waitPromise = waitForEvent(
+    socket,
+    watchers,
+    (evt) => evt.topic === 'ui.graph.report',
+    `graph report (${label})`,
+    15000,
+  );
+  socket.send(JSON.stringify({ topic: 'ui.graph.requestReport', payload: { source: label } }));
+  const evt = await waitPromise;
+  return evt?.payload || {};
+}
+
+function validateGraphReport(report) {
+  if (!report || !Array.isArray(report.domNodes)) {
+    throw new Error('graph report missing dom nodes');
+  }
+  const mismatches = report.domNodes.filter((node) => node.expectedExpandable && !node.canExpand);
+  if (mismatches.length) {
+    const detail = mismatches
+      .slice(0, 5)
+      .map((node) => `${node.path}(child=${node.childCount}, rendered=${node.renderedChildren})`)
+      .join(', ');
+    throw new Error(`expand icon missing for nodes: ${detail}`);
+  }
+}
+
+async function expandDomPath(socket, watchers, path) {
+  const waitPromise = waitForEvent(
+    socket,
+    watchers,
+    (evt) => evt.topic === 'ui.graph.domExpanded' && evt.payload?.path === path,
+    `expand ${path}`,
+    15000,
+  );
+  socket.send(JSON.stringify({ topic: 'ui.graph.expandDom', payload: { path } }));
+  await waitPromise;
+}
+
+async function autoExpandGraph(socket, watchers, initialReport) {
+  let report = initialReport;
+  const expanded = new Set();
+  for (let i = 0; i < MAX_AUTO_EXPAND_PATHS; i += 1) {
+    const next = (report.domNodes || []).find(
+      (node) => node.path !== 'root' && node.canExpand && !expanded.has(node.path),
+    );
+    if (!next) break;
+    expanded.add(next.path);
+    console.log('[dev-driver] auto expand dom node', next.path);
+    await expandDomPath(socket, watchers, next.path);
+    report = await requestGraphReport(socket, watchers, `post-expand:${next.path}`);
+    validateGraphReport(report);
+  }
+  return report;
 }
 
 main().catch((err) => {

@@ -242,6 +242,7 @@ function subscribeBusEvents() {
   bus.subscribe('ui.test.ping', () => {
     bus.publish('ui.test.pong', { ts: Date.now(), ok: true });
   });
+  bus.subscribe('ui.graph.requestReport', () => publishGraphReport('request'));
 }
 
 function setupAutoFit() {
@@ -727,6 +728,7 @@ function updateGraphVisualization(containerRows, domNodes, links) {
         selectedDomPath: state.selectedDomPath,
       });
     }
+    publishGraphReport('snapshot');
   } catch (err) {
     console.warn('[ui] graph render failed', err);
     showMessage(err?.message || '容器图渲染失败', 'error');
@@ -1120,6 +1122,38 @@ function shouldDisplayDomNode(node) {
     return true;
   }
   return false;
+}
+
+function buildGraphReportPayload() {
+  const rootId = getRootContainerId();
+  const graphData = rootId ? buildGraphData(state.graphStore, rootId) : { containerRows: [], domNodes: [], links: [] };
+  const domReport = (graphData.domNodes || []).map((node) => {
+    const storeNode = getDomNode(state.graphStore, node.path) || {};
+    const renderedChildren = getDomChildren(state.graphStore, node.path).length;
+    const childCount = Number(storeNode.childCount || 0);
+    return {
+      path: node.path,
+      label: node.label,
+      containerId: node.containerId || null,
+      childCount,
+      renderedChildren,
+      expanded: Boolean(node.expanded),
+      canExpand: Boolean(node.canExpand),
+      expectedExpandable: childCount > renderedChildren,
+      visible: shouldDisplayDomNode(node),
+    };
+  });
+  return {
+    rootId,
+    containerCount: graphData.containerRows?.length || 0,
+    domCount: domReport.length,
+    domNodes: domReport,
+  };
+}
+
+function publishGraphReport(reason = 'manual') {
+  const payload = buildGraphReportPayload();
+  bus.publish('ui.graph.report', { ...payload, reason });
 }
 
 
