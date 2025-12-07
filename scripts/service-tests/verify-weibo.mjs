@@ -13,7 +13,9 @@ const wsPort = Number(process.env.WEBAUTO_VERIFY_WS_PORT || httpPort + 100);
 const host = '127.0.0.1';
 const httpBase = `http://${host}:${httpPort}`;
 const wsUrl = `ws://${host}:${wsPort}`;
-const cookiesDbPath = path.join(os.homedir(), '.webauto', 'profiles', profileId, 'Cookies');
+const profileDir = path.join(os.homedir(), '.webauto', 'profiles', profileId);
+const cookieCandidates = [path.join(profileDir, 'Cookies'), path.join(profileDir, 'Default', 'Cookies')];
+let cookiesDbPath = cookieCandidates[0];
 
 if (process.env.WEBAUTO_SKIP_VERIFY === '1') {
   console.log('[verify-weibo] skipped via WEBAUTO_SKIP_VERIFY=1');
@@ -21,11 +23,16 @@ if (process.env.WEBAUTO_SKIP_VERIFY === '1') {
 }
 
 async function ensureProfileExists() {
-  try {
-    await fs.access(cookiesDbPath);
-  } catch {
-    throw new Error(`预期的 profile(${profileId}) 缺失，先手动登录微博生成 ~/.webauto/profiles/${profileId}`);
+  for (const candidate of cookieCandidates) {
+    try {
+      await fs.access(candidate);
+      cookiesDbPath = candidate;
+      return;
+    } catch {}
   }
+  throw new Error(
+    `预期的 profile(${profileId}) 缺失，先手动登录微博生成 ~/.webauto/profiles/${profileId} (未找到 Cookies 文件)`,
+  );
 }
 
 async function waitHealth(url, timeoutMs = 30000) {

@@ -14,6 +14,7 @@
     "start:mcp:browser": "npx @browsermcp/mcp@latest",
     "actions:validate": "node scripts/actions-validate.cjs",
     "actions:run": "node scripts/run-action.cjs",
+    "build": "npm run build:services && npm run ui:test",
     "build:services": "node scripts/build/run-services-build.mjs",
     "start": "node dist/src/server.js",
     "start:workflow-api": "node dist/sharedmodule/engines/api-gateway/server.js",
@@ -32,6 +33,8 @@
     "cli:operations": "tsx modules/operations/src/cli.ts",
     "cli:container-registry": "tsx modules/container-registry/src/cli.ts",
     "cli:container-matcher": "tsx modules/container-matcher/src/cli.ts",
+    "cli:dom-branch": "node modules/dom-branch-fetcher/src/cli.ts",
+    "ui:test": "node scripts/ui/dev-driver.mjs",
     "browser:oneclick": "node runtime/browser/scripts/one-click-browser.mjs",
     "service:browser:start": "node runtime/infra/utils/scripts/service/start-browser-service.mjs",
     "service:browser:stop": "node runtime/infra/utils/scripts/service/stop-browser-service.mjs",
@@ -41,7 +44,10 @@
     "browser:camoufox:oneclick": "node runtime/browser/scripts/one-click-camoufox.mjs",
     "browser:camoufox:status": "node runtime/browser/scripts/status-camoufox.mjs",
     "browser:camoufox:navigate1688": "node runtime/browser/scripts/navigate-1688.mjs",
-    "browser:camoufox:install": "python3 -m camoufox remove && python3 -m camoufox fetch"
+    "browser:camoufox:install": "python3 -m camoufox remove && python3 -m camoufox fetch",
+    "test:graph-engine": "tsx --test modules/graph-engine/tests/**/*.ts",
+    "test:dom-branch": "tsx --test modules/dom-branch-fetcher/tests/**/*.ts",
+    "test:floating-orchestrator": "tsx apps/floating-panel/core/__tests__/orchestrator.test.mjs"
   },
   "devDependencies": {
     "@modelcontextprotocol/sdk": "^1.20.1",

@@ -55,8 +55,25 @@ export async function run(argv = process.argv.slice(2)): Promise<CliResult> {
     return { success: true, data: match };
   }
   if (command === 'inspect-tree') {
-    const snapshot = await matcher.inspectTree(session as any, { url }, {});
+    const options: Record<string, any> = {};
+    if (flags['root-container-id']) options.root_container_id = flags['root-container-id'];
+    if (flags['root-selector']) options.root_selector = flags['root-selector'];
+    if (flags['max-depth']) options.max_depth = Number(flags['max-depth']);
+    if (flags['max-children']) options.max_children = Number(flags['max-children']);
+    const snapshot = await matcher.inspectTree(session as any, { url }, options);
     return { success: true, data: snapshot };
+  }
+  if (command === 'inspect-branch') {
+    const path = requireFlag(flags, 'path');
+    const options: Record<string, any> = {
+      path,
+    };
+    if (flags['root-selector']) options.root_selector = flags['root-selector'];
+    if (flags['root-container-id']) options.root_container_id = flags['root-container-id'];
+    if (flags['max-depth']) options.max_depth = Number(flags['max-depth']);
+    if (flags['max-children']) options.max_children = Number(flags['max-children']);
+    const branch = await matcher.inspectDomBranch(session as any, { url }, options);
+    return { success: true, data: branch };
   }
   throw new Error(`Unknown command: ${command}`);
 }

@@ -59,6 +59,8 @@ export interface ServiceStatus {
 
 const ROOT_DIR = path.resolve(fileURLToPath(new URL('../../../../', import.meta.url)));
 const FLOATING_APP_DIR = path.join(ROOT_DIR, 'apps', 'floating-panel');
+const RUNTIME_DIR = path.join(os.homedir(), '.webauto');
+const FLOATING_PID_FILE = path.join(RUNTIME_DIR, 'floating-panel.pid');
 const WORKFLOW_ENTRY = path.join(ROOT_DIR, 'dist', 'sharedmodule', 'engines', 'api-gateway', 'server.js');
 const WORKFLOW_REQUIRED_FILES = [
   WORKFLOW_ENTRY,
@@ -415,10 +417,12 @@ async function launchFloatingConsole(wsHost: string, wsPort: number, targetUrl?:
     env.WEBAUTO_FLOATING_TARGET_URL = targetUrl;
   }
   const uiProc = spawnNpmDev(env);
+  registerFloatingPanelProcess(uiProc);
   const cleanup = () => {
     if (uiProc && !uiProc.killed) {
       uiProc.kill();
     }
+    clearFloatingPanelPid();
   };
   const signalHandler = () => {
     cleanup();
@@ -696,6 +700,12 @@ function killBrowserServiceProcesses() {
 
 function killFloatingPanelProcesses() {
   if (isTestMode()) return;
+  const pid = readFloatingPanelPid();
+  if (pid) {
+    try {
+      process.kill(pid, 'SIGTERM');
+    } catch {}
+  }
   try {
     if (process.platform === 'win32') {
       execSync(
@@ -704,10 +714,47 @@ function killFloatingPanelProcesses() {
       );
       execSync('taskkill /F /IM electronmon.exe || true', { stdio: 'ignore' });
     } else {
-      execSync('pkill -f "apps/floating-panel/node_modules/electron/dist/Electron.app" || true', {
-        stdio: 'ignore',
-      });
-      execSync('pkill -f "electronmon" || true', { stdio: 'ignore' });
+      const patterns = [
+        'apps/floating-panel/node_modules/electron/dist/Electron.app',
+        'apps/floating-panel/electron/main.js',
+        'WebAuto Floating Console',
+        'electronmon',
+      ];
+      for (const pattern of patterns) {
+        try {
+          execSync(`pkill -f "${pattern}" || true`, { stdio: 'ignore' });
+        } catch {}
+      }
     }
+  } catch {}
+  clearFloatingPanelPid();
+}
+
+function registerFloatingPanelProcess(child: ChildProcess) {
+  if (!child?.pid) return;
+  try {
+    fs.mkdirSync(path.dirname(FLOATING_PID_FILE), { recursive: true });
+    fs.writeFileSync(FLOATING_PID_FILE, String(child.pid));
+  } catch {}
+  child.once('exit', () => {
+    if (readFloatingPanelPid() === child.pid) {
+      clearFloatingPanelPid();
+    }
+  });
+}
+
+function readFloatingPanelPid(): number | null {
+  try {
+    const raw = fs.readFileSync(FLOATING_PID_FILE, 'utf-8').trim();
+    const pid = Number(raw);
+    return Number.isFinite(pid) ? pid : null;
+  } catch {
+    return null;
+  }
+}
+
+function clearFloatingPanelPid() {
+  try {
+    fs.unlinkSync(FLOATING_PID_FILE);
   } catch {}
 }

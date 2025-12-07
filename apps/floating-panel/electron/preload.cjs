@@ -1,4 +1,5 @@
 const { contextBridge, ipcRenderer } = require('electron');
+console.log('[preload] initializing context bridges');
 
 function sendWindowControl(action, value) {
   if (value === undefined) {
@@ -12,6 +13,7 @@ contextBridge.exposeInMainWorld('desktopAPI', {
   close: () => sendWindowControl('close'),
   minimize: () => sendWindowControl('minimize'),
   toggleCollapse: (nextState) => sendWindowControl('toggle-collapse', nextState),
+  setHeadlessMode: (enabled) => sendWindowControl('set-headless', Boolean(enabled)),
   fitContentHeight: (height) => {
     if (height && Number.isFinite(Number(height))) {
       ipcRenderer.send('window:fit-height', Number(height));
@@ -41,8 +43,40 @@ contextBridge.exposeInMainWorld('desktopAPI', {
     ipcRenderer.on(channel, handler);
     return () => ipcRenderer.removeListener(channel, handler);
   },
+  onHeadlessState: (callback) => {
+    if (typeof callback !== 'function') return () => {};
+    const channel = 'window:headless-state';
+    const handler = (_event, payload) => callback(payload);
+    ipcRenderer.on(channel, handler);
+    return () => ipcRenderer.removeListener(channel, handler);
+  },
+  publishMessage: (topic, payload) => {
+    if (!topic) return;
+    ipcRenderer.send('bus:publish', { topic, payload });
+  },
+  onMessage: (callback) => {
+    if (typeof callback !== 'function') return () => {};
+    const channel = 'bus:event';
+    const handler = (_event, payload) => callback(payload);
+    ipcRenderer.on(channel, handler);
+    return () => ipcRenderer.removeListener(channel, handler);
+  },
 });
 
 contextBridge.exposeInMainWorld('backendAPI', {
   invokeAction: (action, payload) => ipcRenderer.invoke('ui:action', { action, payload }),
+});
+
+contextBridge.exposeInMainWorld('floatingConfig', {
+  debug: process.env.WEBAUTO_FLOATING_DEBUG === '1',
+  headless: process.env.WEBAUTO_FLOATING_HEADLESS === '1',
+  autoExpandPaths: process.env.WEBAUTO_FLOATING_AUTO_EXPAND
+    ? process.env.WEBAUTO_FLOATING_AUTO_EXPAND.split(',').map((item) => item.trim()).filter(Boolean)
+    : [],
+});
+
+contextBridge.exposeInMainWorld('floatingLogger', {
+  log: (...args) => ipcRenderer.send('ui:log', { level: 'log', args }),
+  warn: (...args) => ipcRenderer.send('ui:log', { level: 'warn', args }),
+  error: (...args) => ipcRenderer.send('ui:log', { level: 'error', args }),
 });

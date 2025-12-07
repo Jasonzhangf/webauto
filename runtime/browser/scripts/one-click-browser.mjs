@@ -40,6 +40,7 @@ function parseArgs(argv){
     url: '',
     restart: false,
     devConsole: true,
+    devMode: false,
   };
   for (let i=2;i<argv.length;i++){
     const a = argv[i];
@@ -51,6 +52,11 @@ function parseArgs(argv){
     if (a === '--restart' || a === '--force-restart') { args.restart = true; continue; }
     if (a === '--dev') { args.devConsole = true; continue; }
     if (a === '--no-dev') { args.devConsole = false; continue; }
+    if (a === '--dev-mode') { args.devMode = true; continue; }
+  }
+  if (args.devMode) {
+    args.headless = true;
+    args.devConsole = false;
   }
   return args;
 }
@@ -153,6 +159,8 @@ function spawnNpmDev(extraEnv = {}) {
     ...process.env,
     NODE_ENV: 'development',
     WEBAUTO_FLOATING_DISABLE_DEVTOOLS: process.env.WEBAUTO_FLOATING_DISABLE_DEVTOOLS || '1',
+    WEBAUTO_FLOATING_BUS_PORT:
+      extraEnv.WEBAUTO_FLOATING_BUS_PORT || process.env.WEBAUTO_FLOATING_BUS_PORT || '8790',
     ...extraEnv,
   };
   return spawn(npmCmd, ['run', 'dev'], {
@@ -176,9 +184,15 @@ async function launchFloatingConsole(targetUrl = '') {
   }
 
   const wsUrl = `ws://${DEFAULT_WS_HOST}:${DEFAULT_WS_PORT}`;
-  const env = { WEBAUTO_FLOATING_WS_URL: wsUrl };
+  const env = {
+    WEBAUTO_FLOATING_WS_URL: wsUrl,
+    WEBAUTO_FLOATING_BUS_PORT: process.env.WEBAUTO_FLOATING_BUS_PORT || '8790',
+  };
   if (targetUrl) {
     env.WEBAUTO_FLOATING_TARGET_URL = targetUrl;
+  }
+  if (!('WEBAUTO_FLOATING_HEADLESS' in env)) {
+    env.WEBAUTO_FLOATING_HEADLESS = process.env.WEBAUTO_FLOATING_HEADLESS ?? '0';
   }
   const uiProc = spawnNpmDev(env);
   const cleanup = () => {
@@ -214,7 +228,11 @@ async function launchFloatingConsole(targetUrl = '') {
 
 async function main(){
   const args = parseArgs(process.argv);
-  const { port, host, headless, profile, url, restart, devConsole } = args;
+  const { port, host, headless, profile, url, restart, devConsole, devMode } = args;
+  if (devMode) {
+    process.env.WEBAUTO_DEV_MODE = '1';
+    console.log('[one-click] 开启 dev 模式：浏览器与浮窗均为 headless，不会弹出 UI');
+  }
   const baseHost = host === '0.0.0.0' ? '127.0.0.1' : host;
   const base = `http://${baseHost}:${port}`;
   await ensureWorkflowApi();

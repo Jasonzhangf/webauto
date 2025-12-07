@@ -124,6 +124,55 @@ export class ContainerMatcher {
         captured_at: Date.now(),
         max_depth: maxDepth,
         max_children: maxChildren,
+        root_selector: effectiveSelector || null,
+        root_container_id: rootMatch.container.id || null,
+      },
+    };
+  }
+
+  async inspectDomBranch(
+    session: AutomationSession,
+    pageContext: { url: string },
+    options: Record<string, any> = {},
+  ): Promise<Record<string, any>> {
+    const url = pageContext?.url;
+    if (!url) {
+      throw new Error('page_context.url is required');
+    }
+    const path = this.normalizeDomPath(options.path || options.dom_path || options.node_path);
+    if (!path) {
+      throw new Error('DOM path is required');
+    }
+    const page = await session.ensurePage(url);
+    await this.waitForStableDom(page);
+    const maxDepth = this.clampNumber(options.max_depth ?? options.maxDepth ?? 4, 1, 6);
+    const maxChildren = this.clampNumber(options.max_children ?? options.maxChildren ?? 6, 1, 20);
+    const containers = this.registry.getContainersForUrl(url);
+    const preferredRootId = options.root_container_id || options.root_id;
+    const rootSelector =
+      options.root_selector ||
+      (await this.resolveRootSelector(session, pageContext, containers, preferredRootId));
+    if (!rootSelector) {
+      throw new Error('无法确定根容器选择器');
+    }
+    const branch = await this.captureDomBranch(page, rootSelector, path, maxDepth, maxChildren);
+    if (!branch) {
+      throw new Error('无法捕获 DOM 分支');
+    }
+    let annotations: Record<string, any[]> = {};
+    if (containers && Object.keys(containers).length) {
+      const matchSummary = await this.collectContainerMatches(page, containers, rootSelector, 8);
+      annotations = this.buildDomAnnotations(matchSummary);
+    }
+    this.attachDomAnnotations(branch, annotations);
+    return {
+      path,
+      node: branch,
+      metadata: {
+        captured_at: Date.now(),
+        max_depth: maxDepth,
+        max_children: maxChildren,
+        root_selector: rootSelector,
       },
     };
   }
@@ -588,6 +637,75 @@ export class ContainerMatcher {
     visit(domTree);
   }
 
+  private async captureDomBranch(
+    page: AutomationPage,
+    selector: string,
+    path: string,
+    maxDepth: number,
+    maxChildren: number,
+  ) {
+    try {
+      return await page.evaluate(
+        (config) => {
+          const normalizePath = (raw: string) => {
+            if (!raw) return ['root'];
+            const tokens = raw.split('/').filter((token) => token.length);
+            if (!tokens.length || tokens[0] === '__root__') {
+              tokens[0] = 'root';
+            }
+            if (tokens[0] !== 'root') {
+              tokens.unshift('root');
+            }
+            return tokens;
+          };
+          const pathParts = normalizePath(config.path);
+          const root = document.querySelector(config.selector);
+          if (!root) return null;
+          const resolvePath = (node: Element | null, parts: string[], index: number): Element | null => {
+            if (!node) return null;
+            if (index >= parts.length) return node;
+            const targetIdx = Number(parts[index]);
+            const childNodes = Array.from(node.children ?? []);
+            if (!Number.isFinite(targetIdx) || targetIdx < 0 || targetIdx >= childNodes.length) {
+              return null;
+            }
+            return resolvePath(childNodes[targetIdx] as Element, parts, index + 1);
+          };
+          const startNode = resolvePath(root, pathParts, 1);
+          if (!startNode) return null;
+          const walk = (element: Element, pathTokens: string[], depth: number): any => {
+            const meta = {
+              path: pathTokens.join('/'),
+              tag: element.tagName,
+              id: element.id || null,
+              classes: Array.from(element.classList || []),
+              childCount: element.children?.length || 0,
+              textSnippet: (element.textContent || '').trim().slice(0, 80),
+              children: [] as any[],
+            };
+            if (depth >= config.maxDepth) {
+              return meta;
+            }
+            const children = Array.from(element.children || []).slice(0, config.maxChildren);
+            meta.children = children.map((child, idx) =>
+              walk(child, pathTokens.concat(String(idx)), depth + 1),
+            );
+            return meta;
+          };
+          return walk(startNode, pathParts, 0);
+        },
+        {
+          selector,
+          path,
+          maxDepth,
+          maxChildren,
+        },
+      );
+    } catch {
+      return null;
+    }
+  }
+
   private async describeElement(handle: AutomationElementHandle, rootSelector?: string) {
     try {
       return await handle.evaluate(
@@ -647,5 +765,45 @@ export class ContainerMatcher {
     } catch {
       return '';
     }
+  }
+
+  private normalizeDomPath(path?: string | null) {
+    if (!path) return null;
+    const tokens = path.split('/').filter((token) => token.length);
+    if (!tokens.length) return 'root';
+    if (tokens[0] === '__root__') {
+      tokens[0] = 'root';
+    }
+    if (tokens[0] !== 'root') {
+      tokens.unshift('root');
+    }
+    return tokens.join('/');
+  }
+
+  private async resolveRootSelector(
+    session: AutomationSession,
+    pageContext: { url: string },
+    containers: Record<string, ContainerDefinition> | null,
+    preferredId?: string,
+  ) {
+    if (!containers || !Object.keys(containers).length) {
+      const match = await this.matchRoot(session, pageContext);
+      return match?.container?.matched_selector || null;
+    }
+    if (preferredId && containers[preferredId]) {
+      const page = await session.ensurePage(pageContext.url);
+      const match = await this.matchContainer(
+        page,
+        preferredId,
+        containers[preferredId],
+        pageContext.url,
+        this.safePathname(pageContext.url),
+      );
+      if (match?.container?.matched_selector) {
+        return match.container.matched_selector;
+      }
+    }
+    const rootMatch = await this.matchRoot(session, pageContext);
+    return rootMatch?.container?.matched_selector || null;
   }
 }

@@ -237,6 +237,13 @@ export class BrowserWsServer {
         data: snapshot,
       };
     }
+    if (command.action === 'inspect_dom_branch') {
+      const branch = await this.matcher.inspectDomBranch(session, pageContext, command.parameters || {});
+      return {
+        success: true,
+        data: branch,
+      };
+    }
     throw new Error(`Unsupported container action: ${command.action}`);
   }
 

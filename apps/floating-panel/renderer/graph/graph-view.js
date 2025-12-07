@@ -1,3 +1,6 @@
+import { BaseControl } from '../ui/baseControl.js';
+import { registerControl, unregisterControl } from '../ui/controlRegistry.js';
+
 const DEFAULTS = {
   minWidth: 820,
   marginX: 120,
@@ -8,6 +11,7 @@ const DEFAULTS = {
   font: '11px "JetBrains Mono", "SFMono-Regular", monospace',
   containerWidth: 230,
   domWidth: 280,
+  domIndent: 26,
 };
 
 function drawRoundedRect(ctx, x, y, width, height, radius = 6) {
@@ -25,8 +29,9 @@ function drawRoundedRect(ctx, x, y, width, height, radius = 6) {
   ctx.closePath();
 }
 
-export class ContainerDomGraphView {
+export class ContainerDomGraphView extends BaseControl {
   constructor(rootEl) {
+    super('graph-view', rootEl);
     this.root = rootEl;
     this.canvas = rootEl?.querySelector('#graphCanvas') || null;
     this.tooltip = rootEl?.querySelector('#graphTooltip') || null;
@@ -35,7 +40,7 @@ export class ContainerDomGraphView {
     this.nodeMap = new Map();
     this.links = [];
     this.selection = { containerId: null, domPath: null };
-    this.callbacks = { onSelectContainer: null, onSelectDom: null, onLinkNodes: null };
+    this.callbacks = { onSelectContainer: null, onSelectDom: null, onLinkNodes: null, onExpandDom: null };
     this.hoverNode = null;
     this.resizeObserver = null;
     this.interaction = {
@@ -50,6 +55,7 @@ export class ContainerDomGraphView {
       domX: DEFAULTS.marginX + DEFAULTS.columnGap,
     };
     this.registerEvents();
+    registerControl(this);
   }
 
   registerEvents() {
@@ -66,6 +72,7 @@ export class ContainerDomGraphView {
   }
 
   destroy() {
+    unregisterControl(this);
     if (this.resizeObserver) {
       this.resizeObserver.disconnect();
       this.resizeObserver = null;
@@ -89,11 +96,13 @@ export class ContainerDomGraphView {
     this.nodeMap = new Map(this.nodes.map((node) => [node.id, node]));
     this.links = Array.isArray(links) ? links : [];
     this.draw();
+    this.emit('dev:update', this.inspect());
   }
 
   setSelection({ containerId, domPath }) {
     this.selection = { containerId: containerId || null, domPath: domPath || null };
     this.draw();
+    this.emit('dev:update', this.inspect());
   }
 
   setInteractionMode(options = {}) {
@@ -104,6 +113,7 @@ export class ContainerDomGraphView {
       this.interaction.dragLink = null;
     }
     this.draw();
+    this.emit('dev:update', this.inspect());
   }
 
   createContainerNode(row, order = 0) {
@@ -126,6 +136,7 @@ export class ContainerDomGraphView {
     return {
       id: node.path,
       type: 'dom',
+      parentId: node.parentPath || null,
       label: node.label,
       selector: node.selector || node.path,
       containerId: node.containerId,
@@ -133,6 +144,10 @@ export class ContainerDomGraphView {
       order,
       width: DEFAULTS.domWidth,
       height: DEFAULTS.nodeHeight,
+      expandable: Boolean(node.canExpand),
+      expanded: Boolean(node.expanded),
+      loading: Boolean(node.loading),
+      expandBounds: null,
     };
   }
 
@@ -158,7 +173,8 @@ export class ContainerDomGraphView {
       node.y = DEFAULTS.verticalSpacing + index * (DEFAULTS.nodeHeight + DEFAULTS.verticalSpacing + 6);
     });
     domNodes.forEach((node, index) => {
-      node.x = this.layout.domX;
+      const depthOffset = Math.max(node.depth || 0, 0) * DEFAULTS.domIndent;
+      node.x = this.layout.domX + depthOffset;
       node.y = DEFAULTS.verticalSpacing + index * (DEFAULTS.nodeHeight + DEFAULTS.verticalSpacing + 6);
     });
   }
@@ -183,10 +199,12 @@ export class ContainerDomGraphView {
     this.drawNodes();
     this.drawPendingLink();
     this.ctx.restore();
+    this.emit('dev:update', this.inspect());
   }
 
   drawNodes() {
     this.drawContainerTreeConnectors();
+    this.drawDomTreeConnectors();
     for (const node of this.nodes) {
       if (node.type === 'container') {
         this.drawContainerNode(node);
@@ -263,6 +281,34 @@ export class ContainerDomGraphView {
       ctx.font = '10px "JetBrains Mono", "SFMono-Regular", monospace';
       ctx.fillText(selectorText, node.x - node.width / 2 + padding, node.y + node.height / 2 + 8);
     }
+    if (node.expandable || node.loading) {
+      this.drawExpandIcon(node);
+    } else {
+      node.expandBounds = null;
+    }
+    ctx.restore();
+  }
+
+  drawExpandIcon(node) {
+    const ctx = this.ctx;
+    const size = 14;
+    const padding = 6;
+    const iconX = node.x - node.width / 2 - size - padding;
+    const iconY = node.y + node.height / 2 - size / 2;
+    node.expandBounds = { x: iconX, y: iconY, size };
+    ctx.save();
+    ctx.fillStyle = node.loading ? 'rgba(250,190,90,0.8)' : node.expanded ? 'rgba(80,140,200,0.85)' : 'rgba(80,200,155,0.8)';
+    ctx.strokeStyle = 'rgba(12,36,30,0.8)';
+    ctx.lineWidth = 1;
+    drawRoundedRect(ctx, iconX, iconY, size, size, 4);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = '#051a16';
+    ctx.font = '10px "JetBrains Mono", "SFMono-Regular", monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    const symbol = node.loading ? '…' : node.expanded ? '−' : '+';
+    ctx.fillText(symbol, iconX + size / 2, iconY + size / 2 + 1);
     ctx.restore();
   }
 
@@ -291,6 +337,34 @@ export class ContainerDomGraphView {
       ctx.beginPath();
       ctx.arc(childAnchorX, childAnchorY, 2.2, 0, Math.PI * 2);
       ctx.fillStyle = 'rgba(130, 170, 240, 0.8)';
+      ctx.fill();
+    });
+    ctx.restore();
+  }
+
+  drawDomTreeConnectors() {
+    if (!this.ctx) return;
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.strokeStyle = 'rgba(120, 210, 170, 0.35)';
+    ctx.lineWidth = 1;
+    const domNodes = this.nodes.filter((node) => node.type === 'dom');
+    domNodes.forEach((node) => {
+      if (!node.parentId) return;
+      const parent = this.nodeMap.get(node.parentId);
+      if (!parent || parent.type !== 'dom') return;
+      const parentAnchorX = parent.x - parent.width / 2 - 12;
+      const parentAnchorY = parent.y + parent.height / 2;
+      const childAnchorX = node.x - node.width / 2 - 12;
+      const childAnchorY = node.y + node.height / 2;
+      ctx.beginPath();
+      ctx.moveTo(parentAnchorX, parentAnchorY);
+      ctx.lineTo(parentAnchorX, childAnchorY);
+      ctx.lineTo(childAnchorX, childAnchorY);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(childAnchorX, childAnchorY, 2, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(160, 240, 210, 0.7)';
       ctx.fill();
     });
     ctx.restore();
@@ -373,8 +447,35 @@ export class ContainerDomGraphView {
   }
 
   handlePointerClick(event) {
-    const node = this.hitTest(event);
+    const hit = this.hitTestWithRegion(event);
+    const node = hit.node;
     if (!node) return;
+    if (hit.region === 'expand' && node.type === 'dom') {
+      if (this.callbacks.onExpandDom) {
+        this.callbacks.onExpandDom(node.id);
+      }
+      return;
+    }
+    if (this.interaction.linkModeActive) {
+      if (node.type === 'container') {
+        this.interaction.linkContainerId = node.id;
+        if (this.callbacks.onSelectContainer) {
+          this.callbacks.onSelectContainer(node.id);
+        }
+        this.draw();
+        return;
+      }
+      if (node.type === 'dom') {
+        if (this.interaction.linkContainerId && this.callbacks.onLinkNodes) {
+          this.callbacks.onLinkNodes(this.interaction.linkContainerId, node.id);
+          return;
+        }
+        if (this.callbacks.onSelectDom) {
+          this.callbacks.onSelectDom(node.id);
+        }
+        return;
+      }
+    }
     if (node.type === 'container' && this.callbacks.onSelectContainer) {
       this.callbacks.onSelectContainer(node.id);
     } else if (node.type === 'dom' && this.callbacks.onSelectDom) {
@@ -383,12 +484,11 @@ export class ContainerDomGraphView {
   }
 
   handlePointerDown(event) {
+    if (event.button !== 0) return;
     if (!this.interaction.linkModeActive) return;
-    const node = this.hitTest(event);
-    if (!node || node.type !== 'container') return;
-    if (this.interaction.linkContainerId && this.interaction.linkContainerId !== node.id) {
-      return;
-    }
+    const hit = this.hitTestWithRegion(event);
+    const node = hit.node;
+    if (!node || node.type !== 'container' || hit.region === 'expand') return;
     const anchor = this.getContainerAnchor(node);
     this.updatePointerPosition(event);
     this.interaction.dragLink = {
@@ -398,6 +498,9 @@ export class ContainerDomGraphView {
       startY: anchor.y,
     };
     this.interaction.linkContainerId = node.id;
+    if (this.callbacks.onSelectContainer) {
+      this.callbacks.onSelectContainer(node.id);
+    }
     this.draw();
   }
 
@@ -411,6 +514,18 @@ export class ContainerDomGraphView {
     if (node && node.type === 'dom' && this.callbacks.onLinkNodes) {
       this.callbacks.onLinkNodes(dragLink.containerId, node.id);
     }
+  }
+
+  hitTestWithRegion(event) {
+    const coords = this.getPointerPosition(event);
+    const expandNode =
+      this.nodes.find((candidate) => candidate.expandBounds && pointInBounds(coords, candidate.expandBounds)) || null;
+    if (expandNode) {
+      return { node: expandNode, region: 'expand' };
+    }
+    const node = this.hitTest(event);
+    if (!node) return { node: null, region: null };
+    return { node, region: 'body' };
   }
 
   hitTest(event) {
@@ -463,6 +578,14 @@ export class ContainerDomGraphView {
     this.interaction.pointer = { x, y };
   }
 
+  getPointerPosition(event) {
+    if (!this.canvas) return { x: 0, y: 0 };
+    const rect = this.canvas.getBoundingClientRect();
+    const x = event.clientX - rect.left;
+    const y = event.clientY - rect.top;
+    return { x, y };
+  }
+
   getContainerAnchor(node) {
     const offsetX = node.depth * 18;
     const baseX = node.x + offsetX + node.width / 2;
@@ -489,4 +612,23 @@ export class ContainerDomGraphView {
     ctx.restore();
     return truncated ? `${truncated}${ellipsis}` : ellipsis;
   }
+
+  inspect() {
+    return {
+      ...super.inspect(),
+      nodes: this.nodes.length,
+      links: this.links.length,
+      selection: this.selection,
+      linkMode: this.interaction.linkModeActive,
+    };
+  }
+}
+
+function pointInBounds(point, bounds) {
+  return (
+    point.x >= bounds.x &&
+    point.x <= bounds.x + bounds.size &&
+    point.y >= bounds.y &&
+    point.y <= bounds.y + bounds.size
+  );
 }

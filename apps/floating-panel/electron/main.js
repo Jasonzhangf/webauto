@@ -6,7 +6,8 @@ import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { spawn, execSync } from 'node:child_process';
 import { createRequire } from 'node:module';
-import WebSocket from 'ws';
+import WebSocket, { WebSocketServer } from 'ws';
+import { messageBus } from './messageBus.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -30,7 +31,10 @@ const NORMAL_SIZE = { width: 960, height: 640 };
 const COLLAPSED_SIZE = { width: 180, height: 80 };
 const DEFAULT_WS_HOST = process.env.WEBAUTO_WS_HOST || '127.0.0.1';
 const DEFAULT_WS_PORT = Number(process.env.WEBAUTO_WS_PORT || 8765);
-const AUTO_STICK_ENABLED = process.env.WEBAUTO_AUTO_STICK === '0' ? false : true;
+const AUTO_STICK_ENABLED = process.env.WEBAUTO_AUTO_STICK === '1';
+const FLOATING_HEADLESS = process.env.WEBAUTO_FLOATING_HEADLESS === '0' ? false : true;
+const BUS_BRIDGE_PORT = Number(process.env.WEBAUTO_FLOATING_BUS_PORT || 0);
+let headlessMode = FLOATING_HEADLESS;
 
 let mainWindow;
 let positioner;
@@ -42,12 +46,118 @@ let inspectorPendingPayload = null;
 let inspectorContext = null;
 let inspectorBusy = false;
 let autoStickScheduled = false;
+let busBridge;
+const busClients = new Set();
+
+registerBusHandlers();
+
+messageBus.on('__broadcast__', (event) => {
+  broadcastBusEvent(event);
+});
+
+function broadcastBusEvent(event) {
+  const targets = [mainWindow, inspectorWindow].filter((win) => win && !win.isDestroyed());
+  targets.forEach((win) => {
+    try {
+      win.webContents.send('bus:event', event);
+    } catch (err) {
+      console.warn('[bus] failed to forward event', err?.message || err);
+    }
+  });
+  if (busClients.size) {
+    const payload = JSON.stringify({ topic: event.topic, payload: event.payload });
+    busClients.forEach((socket) => {
+      if (socket.readyState === WebSocket.OPEN) {
+        socket.send(payload);
+      }
+    });
+  }
+}
+
+function registerBusHandlers() {
+  const topics = [
+    ['ui.window.shrinkToBall', () => toggleCollapse(true)],
+    ['ui.window.restoreFromBall', () => toggleCollapse(false)],
+    [
+      'ui.window.toggleHeadless',
+      (payload = {}) => {
+        if (typeof payload?.headless === 'boolean') {
+          applyHeadlessMode(payload.headless);
+        } else {
+          applyHeadlessMode(!headlessMode);
+        }
+      },
+    ],
+    [
+      'ui.window.setHeadless',
+      (payload = {}) => {
+        if (typeof payload?.headless === 'boolean') {
+          applyHeadlessMode(payload.headless);
+        }
+      },
+    ],
+    ['ui.ball.doubleClick', () => toggleCollapse(false)],
+    [
+      'ui.window.stickToBrowser',
+      async (payload = {}) => {
+        await handleStickBrowser(payload || {});
+      },
+    ],
+    ['ui.window.requestState', () => publishWindowState()],
+  ];
+  topics.forEach(([topic, handler]) => {
+    messageBus.subscribe(topic, async (payload) => {
+      try {
+        await handler(payload);
+      } catch (err) {
+        console.warn(`[bus] handler for ${topic} failed`, err);
+        messageBus.publish('ui.window.error', { topic, message: err?.message || String(err) });
+      }
+    });
+  });
+}
+
+function startBusBridge() {
+  if (!BUS_BRIDGE_PORT || busBridge) {
+    return;
+  }
+  try {
+    busBridge = new WebSocketServer({ port: BUS_BRIDGE_PORT, host: '127.0.0.1' });
+  } catch (err) {
+    console.warn('[bus] bridge start failed', err?.message || err);
+    return;
+  }
+  busBridge.on('connection', (socket) => {
+    busClients.add(socket);
+    socket.on('message', (raw) => {
+      try {
+        const payload = JSON.parse(raw.toString());
+        if (payload?.topic) {
+          messageBus.publish(payload.topic, payload.payload);
+        }
+      } catch (err) {
+        console.warn('[bus] invalid client message', err?.message || err);
+      }
+    });
+    socket.on('close', () => busClients.delete(socket));
+    socket.on('error', () => busClients.delete(socket));
+  });
+  busBridge.on('listening', () => {
+    console.log(`[bus] bridge listening on ws://127.0.0.1:${BUS_BRIDGE_PORT}`);
+  });
+  busBridge.on('error', (err) => {
+    console.warn('[bus] bridge error', err?.message || err);
+  });
+}
 
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {
   app.quit();
   process.exit(0);
 } else {
+  if (process.env.ELECTRON_ENABLE_LOGGING === '1') {
+    app.commandLine.appendSwitch('enable-logging');
+  }
   app.on('second-instance', () => {
     if (mainWindow) {
       if (mainWindow.isMinimized()) mainWindow.restore();
@@ -55,6 +165,8 @@ if (!gotLock) {
     }
   });
 }
+
+startBusBridge();
 
 const createWindow = () => {
   const windowState = windowStateKeeper({
@@ -73,12 +185,13 @@ const createWindow = () => {
     minWidth: Math.max(520, Math.floor(NORMAL_SIZE.width * 0.4)),
     minHeight: 360,
     frame: false,
-    transparent: true,
+    transparent: !FLOATING_HEADLESS,
     resizable: true,
     maximizable: false,
     fullscreenable: false,
-    backgroundColor: '#050711d0',
-    alwaysOnTop: true,
+    backgroundColor: FLOATING_HEADLESS ? '#050711' : '#050711d0',
+    show: !FLOATING_HEADLESS,
+    alwaysOnTop: !FLOATING_HEADLESS,
     skipTaskbar: false,
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
@@ -94,18 +207,44 @@ const createWindow = () => {
 
   windowState.manage(mainWindow);
   lastNormalBounds = mainWindow.getBounds();
-  mainWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  if (!FLOATING_HEADLESS) {
+    mainWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  } else {
+    mainWindow.setIgnoreMouseEvents(true, { forward: true });
+  }
   const rendererPath = path.resolve(__dirname, '../renderer/index.html');
   mainWindow.loadFile(rendererPath);
+  mainWindow.webContents.on('console-message', (_event, level, message, line, sourceId) => {
+    console.log(`[renderer][${level}] ${message} (${sourceId}:${line})`);
+  });
+  mainWindow.webContents.session.webRequest.onErrorOccurred((details) => {
+    if (!details?.url?.includes('app.js') && !details?.url?.includes('/renderer/')) return;
+    console.warn('[renderer] resource load error', details.url, details.error);
+  });
+  mainWindow.webContents.on('dom-ready', () => {
+    mainWindow.webContents
+      .executeJavaScript(
+        'console.log("[floating] scripts", Array.from(document.scripts).map(s => s.src || "inline"));',
+      )
+      .catch((err) => console.warn('[floating] dom-ready eval failed', err));
+  });
   mainWindow.webContents.on('did-finish-load', () => {
     broadcastCollapseState();
-    scheduleAutoStick();
+    if (!FLOATING_HEADLESS) {
+      scheduleAutoStick();
+    }
   });
 
   mainWindow.on('ready-to-show', () => {
     enforceWorkAreaBounds();
     snapToEdges();
-    scheduleAutoStick();
+    if (!FLOATING_HEADLESS) {
+      scheduleAutoStick();
+    }
+    if (FLOATING_HEADLESS) {
+      console.log('[floating] headless window ready');
+    }
+    broadcastHeadlessState();
   });
 
   let snapTimer;
@@ -183,7 +322,7 @@ function snapToEdges() {
 }
 
 function scheduleAutoStick(delay = 800) {
-  if (!AUTO_STICK_ENABLED || autoStickScheduled || process.platform !== 'darwin') {
+  if (!AUTO_STICK_ENABLED || FLOATING_HEADLESS || autoStickScheduled || process.platform !== 'darwin') {
     return;
   }
   autoStickScheduled = true;
@@ -242,9 +381,39 @@ function enforceWorkAreaBounds() {
   }
 }
 
+function publishWindowState() {
+  broadcastCollapseState();
+  broadcastHeadlessState();
+}
+
 function broadcastCollapseState() {
+  if (mainWindow) {
+    mainWindow.webContents.send('window:collapse-state', { isCollapsed });
+  }
+  messageBus.publish('ui.window.stateChanged', { collapsed: isCollapsed, mode: isCollapsed ? 'ball' : 'normal' });
+}
+
+function broadcastHeadlessState() {
+  if (mainWindow) {
+    mainWindow.webContents.send('window:headless-state', { headless: headlessMode });
+  }
+  messageBus.publish('ui.window.headlessChanged', { headless: headlessMode });
+}
+
+function applyHeadlessMode(enabled) {
+  headlessMode = Boolean(enabled);
   if (!mainWindow) return;
-  mainWindow.webContents.send('window:collapse-state', { isCollapsed });
+  if (headlessMode) {
+    mainWindow.hide();
+    mainWindow.setIgnoreMouseEvents(true, { forward: true });
+  } else {
+    mainWindow.setIgnoreMouseEvents(false);
+    mainWindow.show();
+    mainWindow.focus();
+    mainWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+    scheduleAutoStick();
+  }
+  broadcastHeadlessState();
 }
 
 function toggleCollapse(nextState) {
@@ -339,6 +508,7 @@ ipcMain.on('window-control', (_event, rawAction) => {
       : rawAction && typeof rawAction === 'object'
         ? rawAction
         : { action: undefined };
+  console.log('[window-control]', payload);
   const { action, value } = payload;
   switch (action) {
     case 'close':
@@ -350,7 +520,37 @@ ipcMain.on('window-control', (_event, rawAction) => {
     case 'toggle-collapse':
       toggleCollapse(typeof value === 'boolean' ? value : undefined);
       break;
+    case 'set-headless':
+      applyHeadlessMode(typeof value === 'boolean' ? value : !headlessMode);
+      break;
+    case 'publish':
+      if (payload?.topic) {
+        messageBus.publish(payload.topic, payload.payload);
+      }
+      break;
     default:
+      break;
+  }
+});
+
+ipcMain.on('bus:publish', (_event, payload = {}) => {
+  if (!payload?.topic) return;
+  messageBus.publish(payload.topic, payload.payload);
+});
+
+ipcMain.on('ui:log', (_event, payload = {}) => {
+  const level = payload.level;
+  const args = Array.isArray(payload.args) ? payload.args : [payload.args];
+  const prefix = '[floating-ui]';
+  switch (level) {
+    case 'warn':
+      console.warn(prefix, ...args);
+      break;
+    case 'error':
+      console.error(prefix, ...args);
+      break;
+    default:
+      console.log(prefix, ...args);
       break;
   }
 });
@@ -454,6 +654,10 @@ ipcMain.handle('ui:action', async (_event, request) => {
         return await handleOperationRun(payload);
       case 'containers:inspect':
         return await handleContainerInspect(payload);
+      case 'containers:inspect-container':
+        return await handleContainerInspectContainer(payload);
+      case 'containers:inspect-branch':
+        return await handleContainerInspectBranch(payload);
       case 'containers:remap':
         return await handleContainerRemap(payload);
       case 'window:stick-browser':
@@ -510,6 +714,8 @@ async function handleContainerInspect(payload = {}) {
     url: payload.url,
     maxDepth: payload.maxDepth,
     maxChildren: payload.maxChildren,
+    containerId: payload.containerId,
+    rootSelector: payload.rootSelector,
   });
   const snapshot = context.snapshot;
   return {
@@ -521,6 +727,28 @@ async function handleContainerInspect(payload = {}) {
       snapshot,
       containerSnapshot: snapshot,
       domTree: snapshot?.dom_tree || null,
+    },
+  };
+}
+
+async function handleContainerInspectContainer(payload = {}) {
+  if (!payload.profile) throw new Error('缺少 profile');
+  if (!payload.containerId) throw new Error('缺少 containerId');
+  const context = await captureInspectorSnapshot({
+    profile: payload.profile,
+    url: payload.url,
+    maxDepth: payload.maxDepth,
+    maxChildren: payload.maxChildren,
+    containerId: payload.containerId,
+    rootSelector: payload.rootSelector,
+  });
+  return {
+    success: true,
+    data: {
+      sessionId: context.sessionId,
+      profileId: context.profileId,
+      url: context.targetUrl,
+      snapshot: context.snapshot,
     },
   };
 }
@@ -749,6 +977,8 @@ async function fetchContainerSnapshotFromService({
   url,
   maxDepth,
   maxChildren,
+  rootContainerId,
+  rootSelector,
 }) {
   if (!sessionId || !url) {
     throw new Error('缺少 sessionId 或 URL');
@@ -764,6 +994,8 @@ async function fetchContainerSnapshotFromService({
       parameters: {
         ...(typeof maxDepth === 'number' ? { max_depth: maxDepth } : {}),
         ...(typeof maxChildren === 'number' ? { max_children: maxChildren } : {}),
+        ...(rootContainerId ? { root_container_id: rootContainerId } : {}),
+        ...(rootSelector ? { root_selector: rootSelector } : {}),
       },
     },
   };
@@ -774,11 +1006,47 @@ async function fetchContainerSnapshotFromService({
   throw new Error(response?.data?.error || response?.error || 'inspect_tree failed');
 }
 
+async function fetchDomBranchFromService({
+  sessionId,
+  url,
+  path,
+  rootSelector,
+  maxDepth,
+  maxChildren,
+}) {
+  if (!sessionId || !url || !path) {
+    throw new Error('缺少 sessionId / URL / DOM 路径');
+  }
+  const wsUrl = getBrowserWsUrl();
+  const payload = {
+    type: 'command',
+    session_id: sessionId,
+    data: {
+      command_type: 'container_operation',
+      action: 'inspect_dom_branch',
+      page_context: { url },
+      parameters: {
+        path,
+        ...(rootSelector ? { root_selector: rootSelector } : {}),
+        ...(typeof maxDepth === 'number' ? { max_depth: maxDepth } : {}),
+        ...(typeof maxChildren === 'number' ? { max_children: maxChildren } : {}),
+      },
+    },
+  };
+  const response = await sendWsCommand(wsUrl, payload, 20000);
+  if (response?.data?.success) {
+    return response.data.data || response.data.branch || response.data;
+  }
+  throw new Error(response?.data?.error || response?.error || 'inspect_dom_branch failed');
+}
+
 async function captureSnapshotFromFixture({
   profileId,
   url,
   maxDepth,
   maxChildren,
+  containerId,
+  rootSelector,
 }) {
   const tmpDir = await fsPromises.mkdtemp(path.join(os.tmpdir(), 'webauto-ui-'));
   const fixturePath = path.join(tmpDir, 'dom.html');
@@ -789,6 +1057,8 @@ async function captureSnapshotFromFixture({
     }
     await runCliCommand('browser-control', domArgs);
     const treeArgs = ['inspect-tree', '--url', url, '--fixture', fixturePath];
+    if (containerId) treeArgs.push('--root-container-id', containerId);
+    if (rootSelector) treeArgs.push('--root-selector', rootSelector);
     if (typeof maxDepth === 'number') {
       treeArgs.push('--max-depth', String(maxDepth));
     }
@@ -802,6 +1072,36 @@ async function captureSnapshotFromFixture({
   }
 }
 
+async function captureBranchFromFixture({
+  profileId,
+  url,
+  path,
+  rootSelector,
+  maxDepth,
+  maxChildren,
+}) {
+  if (!path) {
+    throw new Error('缺少 DOM 路径');
+  }
+  const tmpDir = await fsPromises.mkdtemp(path.join(os.tmpdir(), 'webauto-branch-'));
+  const fixturePath = path.join(tmpDir, 'dom.html');
+  try {
+    const domArgs = ['dom-dump', '--url', url, '--headless', 'true', '--output', fixturePath];
+    if (profileId) domArgs.push('--profile', profileId);
+    await runCliCommand('browser-control', domArgs);
+    const branchArgs = ['inspect-branch', '--url', url, '--fixture', fixturePath, '--path', path];
+    if (rootSelector) branchArgs.push('--root-selector', rootSelector);
+    if (typeof maxDepth === 'number') branchArgs.push('--max-depth', String(maxDepth));
+    if (typeof maxChildren === 'number') {
+      branchArgs.push('--max-children', String(maxChildren));
+    }
+    const result = await runCliCommand('container-matcher', branchArgs);
+    return result?.data || result;
+  } finally {
+    fsPromises.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
 async function captureInspectorSnapshot(options = {}) {
   const profile = options.profile;
   const sessions = await fetchSessions();
@@ -809,6 +1109,7 @@ async function captureInspectorSnapshot(options = {}) {
   const sessionId = targetSession?.session_id || targetSession?.sessionId || profile || null;
   const profileId = profile || targetSession?.profileId || targetSession?.profile_id || sessionId || null;
   const targetUrl = options.url || targetSession?.current_url || targetSession?.currentUrl;
+  const requestedContainerId = options.containerId || options.rootContainerId;
   if (!targetUrl) {
     throw new Error('无法确定会话 URL，请先在浏览器中打开目标页面');
   }
@@ -821,6 +1122,8 @@ async function captureInspectorSnapshot(options = {}) {
         url: targetUrl,
         maxDepth: options.maxDepth,
         maxChildren: options.maxChildren,
+        rootContainerId: requestedContainerId,
+        rootSelector: options.rootSelector,
       });
     } catch (err) {
       liveError = err;
@@ -834,6 +1137,8 @@ async function captureInspectorSnapshot(options = {}) {
       url: targetUrl,
       maxDepth: options.maxDepth,
       maxChildren: options.maxChildren,
+      containerId: requestedContainerId,
+      rootSelector: options.rootSelector,
     });
     snapshot = fixtureSnapshot;
   } else if (!snapshot?.dom_tree) {
@@ -843,6 +1148,8 @@ async function captureInspectorSnapshot(options = {}) {
         url: targetUrl,
         maxDepth: options.maxDepth,
         maxChildren: options.maxChildren,
+        containerId: requestedContainerId,
+        rootSelector: options.rootSelector,
       });
       if (fixtureSnapshot?.dom_tree) {
         snapshot.dom_tree = fixtureSnapshot.dom_tree;
@@ -866,11 +1173,87 @@ async function captureInspectorSnapshot(options = {}) {
     const rootError = liveError || new Error('容器树为空，检查容器定义或选择器是否正确');
     throw rootError;
   }
+  if (requestedContainerId) {
+    snapshot = focusSnapshotOnContainer(snapshot, requestedContainerId);
+  }
   return {
     sessionId: sessionId || profileId || 'unknown-session',
     profileId: profileId || 'default',
     targetUrl,
     snapshot,
+  };
+}
+
+async function handleContainerInspectBranch(payload = {}) {
+  if (!payload.profile) throw new Error('缺少 profile');
+  if (!payload.path) throw new Error('缺少 DOM 路径');
+  const context = await captureInspectorBranch({
+    profile: payload.profile,
+    url: payload.url,
+    path: payload.path,
+    rootSelector: payload.rootSelector,
+    maxDepth: payload.maxDepth,
+    maxChildren: payload.maxChildren,
+  });
+  return {
+    success: true,
+    data: {
+      sessionId: context.sessionId,
+      profileId: context.profileId,
+      url: context.targetUrl,
+      branch: context.branch,
+    },
+  };
+}
+
+async function captureInspectorBranch(options = {}) {
+  const profile = options.profile;
+  const path = options.path;
+  if (!profile) throw new Error('缺少 profile');
+  if (!path) throw new Error('缺少 DOM 路径');
+  const sessions = await fetchSessions();
+  const targetSession = profile ? findSessionByProfile(sessions, profile) : sessions[0] || null;
+  const sessionId = targetSession?.session_id || targetSession?.sessionId || profile || null;
+  const profileId = profile || targetSession?.profileId || targetSession?.profile_id || sessionId || null;
+  const targetUrl = options.url || targetSession?.current_url || targetSession?.currentUrl;
+  if (!targetUrl) {
+    throw new Error('无法确定会话 URL');
+  }
+  let branch = null;
+  let liveError = null;
+  if (sessionId) {
+    try {
+      branch = await fetchDomBranchFromService({
+        sessionId,
+        url: targetUrl,
+        path,
+        rootSelector: options.rootSelector,
+        maxDepth: options.maxDepth,
+        maxChildren: options.maxChildren,
+      });
+    } catch (err) {
+      liveError = err;
+      console.warn('[floating] live inspect_dom_branch failed:', err?.message || err);
+    }
+  }
+  if (!branch) {
+    branch = await captureBranchFromFixture({
+      profileId,
+      url: targetUrl,
+      path,
+      rootSelector: options.rootSelector,
+      maxDepth: options.maxDepth,
+      maxChildren: options.maxChildren,
+    });
+  }
+  if (!branch?.node) {
+    throw liveError || new Error('无法获取 DOM 分支');
+  }
+  return {
+    sessionId: sessionId || profileId || 'unknown-session',
+    profileId: profileId || 'default',
+    targetUrl,
+    branch,
   };
 }
 
@@ -880,6 +1263,52 @@ async function writeUserContainerDefinition(siteKey, containerId, definition) {
   await fsPromises.mkdir(targetDir, { recursive: true });
   const filePath = path.join(targetDir, 'container.json');
   await fsPromises.writeFile(filePath, JSON.stringify(definition, null, 2), 'utf-8');
+}
+
+function focusSnapshotOnContainer(snapshot, containerId) {
+  if (!containerId || !snapshot?.container_tree) {
+    return snapshot;
+  }
+  const target = cloneContainerSubtree(snapshot.container_tree, containerId);
+  if (!target) {
+    return snapshot;
+  }
+  const nextSnapshot = {
+    ...snapshot,
+    container_tree: target,
+    metadata: {
+      ...(snapshot.metadata || {}),
+      root_container_id: containerId,
+    },
+  };
+  if (!nextSnapshot.root_match || nextSnapshot.root_match?.container?.id !== containerId) {
+    nextSnapshot.root_match = {
+      container: {
+        id: containerId,
+        ...(target.name ? { name: target.name } : {}),
+      },
+      matched_selector: target.match?.matched_selector,
+    };
+  }
+  return nextSnapshot;
+}
+
+function cloneContainerSubtree(node, targetId) {
+  if (!node) return null;
+  if (node.id === targetId || node.container_id === targetId) {
+    return deepClone(node);
+  }
+  if (Array.isArray(node.children)) {
+    for (const child of node.children) {
+      const match = cloneContainerSubtree(child, targetId);
+      if (match) return match;
+    }
+  }
+  return null;
+}
+
+function deepClone(payload) {
+  return JSON.parse(JSON.stringify(payload));
 }
 
 function resolveSiteKeyFromUrl(url) {

@@ -8,7 +8,7 @@
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
-    <div class="window-shell" data-drag-region>
+    <div class="window-shell">
       <header class="title-bar" data-drag-region>
         <div class="title-copy">
           <div class="app-name">WebAuto Floating Console</div>
@@ -16,6 +16,7 @@
         </div>
         <div class="status-pill" id="connectionStatus">就绪</div>
         <div class="window-buttons" data-no-drag>
+          <button id="headlessButton" class="icon-button" title="隐藏浮窗">👁</button>
           <button id="stickBrowserButton" class="ghost icon" title="浏览器贴边">🪟</button>
           <button id="collapseButton" class="icon-button" title="贴边收起">◻︎</button>
           <button id="minButton" class="icon-button" title="最小化">—</button>
@@ -96,26 +97,28 @@
             </div>
             <div class="tree-grid-body">
               <div class="graph-shell" id="containerDomGrid">
-                <canvas id="graphCanvas" width="400" height="300"></canvas>
-                <div class="graph-overlay">
-                  <div class="tree-placeholder">
-                    <strong>等待匹配</strong>
-                    <p>选择会话后，通过 CLI 捕获容器树。</p>
+                <div class="graph-canvas">
+                  <canvas id="graphCanvas" width="400" height="300"></canvas>
+                  <div class="graph-overlay">
+                    <div class="tree-placeholder">
+                      <strong>等待匹配</strong>
+                      <p>选择会话后，通过 CLI 捕获容器树。</p>
+                    </div>
+                  </div>
+                  <div class="graph-tooltip hidden" id="graphTooltip">
+                    <div class="graph-tooltip-title"></div>
+                    <div class="graph-tooltip-body"></div>
                   </div>
                 </div>
-                <div class="graph-tooltip hidden" id="graphTooltip">
-                  <div class="graph-tooltip-title"></div>
-                  <div class="graph-tooltip-body"></div>
-                </div>
-              </div>
-              <div class="tree-detail" id="treeDetail">
-                <div class="tree-column">
-                  <div class="tree-column-title">容器树</div>
-                  <div class="tree-view scrollable" id="containerTreeView"></div>
-                </div>
-                <div class="tree-column">
-                  <div class="tree-column-title">DOM Explorer</div>
-                  <div class="tree-view scrollable" id="domTreeView"></div>
+                <div class="tree-detail" id="treeDetail">
+                  <div class="tree-column">
+                    <div class="tree-column-title">容器树</div>
+                    <div class="tree-view scrollable" id="containerTreeView"></div>
+                  </div>
+                  <div class="tree-column">
+                    <div class="tree-column-title">DOM Explorer</div>
+                    <div class="tree-view scrollable" id="domTreeView"></div>
+                  </div>
                 </div>
               </div>
             </div>
@@ -149,6 +152,14 @@
     </div>
 
     <div class="global-message hidden" id="globalMessage"></div>
-    <script type="module" src="./app.js"></script>
+    <script type="module">
+      import('./app.js')
+        .then(() => {
+          console.log('[floating] app.js loaded');
+        })
+        .catch((error) => {
+          console.error('[floating] failed to load app.js', error);
+        });
+    </script>
   </body>
 </html>

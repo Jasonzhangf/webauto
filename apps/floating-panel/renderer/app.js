@@ -1,6 +1,51 @@
 import { ContainerDomGraphView } from './graph/graph-view.js';
-import { flattenContainerTree, collectDomTargets, buildGraphLinks, formatDomNodeLabel } from './graph/data-utils.js';
+import {
+  createGraphStore,
+  resetGraphStore,
+  ingestContainerTree,
+  ingestDomTree,
+  ingestDomBranch,
+  buildGraphData,
+  getDomChildren,
+  getDomNode,
+  markExpanded,
+  markLoading,
+} from './graph/store.js';
+import {
+  createDomTreeStore,
+  setDomTreeSnapshot,
+  getDomTree,
+  resetDomVisibility,
+  findDomNodeByPath,
+  findAllDomPathsForContainer,
+  mergeDomBranchIntoTree,
+  normalizeDomPathString,
+  isDefaultVisible,
+  isPathExpanded,
+  setPathExpanded,
+  isBranchLoading,
+  setBranchLoading,
+  getDomNodeChildStats,
+  ensureDomPathExists,
+} from './dom-tree/store.js';
+import { createDomTreeView } from './dom-tree/view.js';
+import { bus } from './ui/messageBus.js';
+import './ui/devTools.js';
 
+const DOM_SNAPSHOT_OPTIONS = {
+  maxDepth: 8,
+  maxChildren: 80,
+};
+
+console.log('[floating] renderer booting');
+const config = window.floatingConfig || {};
+const DEBUG = Boolean(config.debug);
+const AUTO_EXPAND_PATHS = Array.isArray(config.autoExpandPaths) ? config.autoExpandPaths : [];
+const logger = window.floatingLogger || {
+  log: (...args) => console.log(...args),
+  warn: (...args) => console.warn(...args),
+  error: (...args) => console.error(...args),
+};
 const ui = {
   metaText: document.getElementById('connectionStatus'),
   globalMessage: document.getElementById('globalMessage'),
@@ -34,6 +79,7 @@ const ui = {
   collapseButton: document.getElementById('collapseButton'),
   minButton: document.getElementById('minButton'),
   closeButton: document.getElementById('closeButton'),
+  headlessButton: document.getElementById('headlessButton'),
   stickBrowserButton: document.getElementById('stickBrowserButton'),
   collapsedStrip: document.getElementById('collapsedStrip'),
   expandCollapsedButton: document.getElementById('expandCollapsedButton'),
@@ -46,17 +92,17 @@ const state = {
   operations: [],
   selectedSession: null,
   containerSnapshot: null,
-  domTree: null,
   selectedContainerId: null,
   selectedDomPath: null,
-  domDefaultVisible: new Set(),
-  domExpandedPaths: new Set(),
   domNeedsReset: false,
+  domTreeStore: createDomTreeStore(),
+  graphStore: createGraphStore(),
   linkMode: {
     active: false,
     containerId: null,
     busy: false,
   },
+  headless: Boolean(config.headless),
   messageTimer: null,
   loading: {
     browser: false,
@@ -65,6 +111,7 @@ const state = {
     containers: false,
   },
   isCollapsed: false,
+  pendingContainerDom: new Set(),
 };
 
 const layoutState = {
@@ -73,38 +120,75 @@ const layoutState = {
 };
 
 let graphView = null;
+let domTreeView = null;
+let autoExpandTriggered = false;
 
 const backend = window.backendAPI;
 const desktop = window.desktopAPI;
+const publishWindowCommand = (topic, payload, fallback) => {
+  const ok = bus.publish(topic, payload);
+  if (!ok && typeof fallback === 'function') {
+    try {
+      fallback();
+    } catch (err) {
+      console.warn('[floating] window command fallback failed', err);
+    }
+  }
+  return ok;
+};
+const debugLog = (...args) => {
+  if (DEBUG) {
+    logger.log('[floating-debug]', ...args);
+  }
+};
+if (DEBUG) {
+  debugLog('init config', config);
+  debugLog('backendAPI available:', Boolean(backend), 'desktopAPI available:', Boolean(desktop));
+}
 
 async function init() {
   bindWindowControls();
   bindEvents();
+  subscribeBusEvents();
   updateLinkModeUI();
   subscribeDesktopEvents();
+  bus.publish('ui.window.requestState');
   setupAutoFit();
   setupGraphView();
+  setupDomTreeView();
   await loadOperations();
   await refreshAll();
 }
 
 function bindWindowControls() {
+  debugLog('binding window controls');
   ui.closeButton?.addEventListener('click', () => desktop?.close?.());
   ui.minButton?.addEventListener('click', () => desktop?.minimize?.());
-  ui.collapseButton?.addEventListener('click', () => desktop?.toggleCollapse?.());
+  ui.collapseButton?.addEventListener('click', (event) => {
+    event.preventDefault();
+    if (state.isCollapsed) {
+      publishWindowCommand('ui.window.restoreFromBall', null, () => desktop?.toggleCollapse?.(false));
+    } else {
+      publishWindowCommand('ui.window.shrinkToBall', null, () => desktop?.toggleCollapse?.(true));
+    }
+  });
   ui.collapsedStrip?.addEventListener('click', (event) => {
     event.preventDefault();
-    desktop?.toggleCollapse?.(false);
+    publishWindowCommand('ui.window.restoreFromBall', null, () => desktop?.toggleCollapse?.(false));
   });
   ui.expandCollapsedButton?.addEventListener('click', (event) => {
     event.stopPropagation();
-    desktop?.toggleCollapse?.(false);
+    publishWindowCommand('ui.window.restoreFromBall', null, () => desktop?.toggleCollapse?.(false));
   });
+  ui.headlessButton?.addEventListener('click', () => toggleHeadlessMode());
   ui.stickBrowserButton?.addEventListener('click', () => {
-    invokeAction('window:stick-browser').catch((err) => {
-      showMessage(err.message || '浏览器贴边失败', 'error');
-    });
+    const fallback = () =>
+      invokeAction('window:stick-browser').catch((err) => {
+        showMessage(err.message || '浏览器贴边失败', 'error');
+      });
+    publishWindowCommand('ui.window.stickToBrowser', { browserWidthRatio: 0.68 }, fallback);
   });
+  updateHeadlessButton();
 }
 
 function subscribeDesktopEvents() {
@@ -120,6 +204,10 @@ function subscribeDesktopEvents() {
     if (!collapsed) {
       queueFitWindow();
     }
+  });
+  desktop?.onHeadlessState?.((payload = {}) => {
+    state.headless = Boolean(payload?.headless);
+    updateHeadlessButton();
   });
 }
 
@@ -140,6 +228,22 @@ function bindEvents() {
   ui.openInspectorButton?.addEventListener('click', () => openInspectorView());
 }
 
+function subscribeBusEvents() {
+  bus.subscribe('ui.window.error', (payload = {}) => {
+    const message = payload?.message || payload?.error || '窗口操作失败';
+    showMessage(message, 'error');
+  });
+  bus.subscribe('ui.graph.expandDom', (payload = {}) => {
+    const targetPath = payload?.path || payload?.domPath;
+    if (targetPath) {
+      toggleDomNodeExpand(targetPath);
+    }
+  });
+  bus.subscribe('ui.test.ping', () => {
+    bus.publish('ui.test.pong', { ts: Date.now(), ok: true });
+  });
+}
+
 function setupAutoFit() {
   const target = document.querySelector('.window-shell');
   if (!target || !desktop?.fitContentHeight) return;
@@ -158,8 +262,20 @@ function setupGraphView() {
     onSelectContainer: (containerId) => handleContainerSelection(containerId),
     onSelectDom: (domPath) => handleDomSelection(domPath),
     onLinkNodes: (containerId, domPath) => handleGraphLink(containerId, domPath),
+    onExpandDom: (domPath) => toggleDomNodeExpand(domPath),
   });
   syncGraphInteractionMode();
+}
+
+function setupDomTreeView() {
+  if (domTreeView || !ui.treeDomList) return;
+  domTreeView = createDomTreeView({
+    rootElement: ui.treeDomList,
+    store: state.domTreeStore,
+    getSelectedPath: () => state.selectedDomPath,
+    onSelectNode: (path) => handleDomSelection(path),
+    onToggleExpand: (path) => toggleDomNodeExpand(path),
+  });
 }
 
 function toggleLinkMode(forceState) {
@@ -197,6 +313,20 @@ function updateLinkModeUI() {
   syncGraphInteractionMode();
 }
 
+function toggleHeadlessMode(forceState) {
+  const desired = typeof forceState === 'boolean' ? forceState : !state.headless;
+  state.headless = desired;
+  updateHeadlessButton();
+  publishWindowCommand('ui.window.toggleHeadless', { headless: desired }, () => desktop?.setHeadlessMode?.(desired));
+}
+
+function updateHeadlessButton() {
+  if (!ui.headlessButton) return;
+  const hidden = state.headless;
+  ui.headlessButton.textContent = hidden ? '🙈' : '👁';
+  ui.headlessButton.title = hidden ? '显示浮窗' : '隐藏浮窗';
+}
+
 function syncGraphInteractionMode() {
   if (!graphView) return;
   graphView.setInteractionMode({
@@ -230,6 +360,7 @@ async function loadBrowserStatus() {
   setLoading('browser', true);
   try {
     const res = await invokeAction('browser:status');
+    debugLog('loadBrowserStatus result', res);
     state.browserStatus = res;
   } catch (err) {
     state.browserStatus = { healthy: false, error: err.message || String(err) };
@@ -245,6 +376,7 @@ async function loadSessions() {
   try {
     const res = await invokeAction('session:list');
     const data = res?.sessions || res?.data?.sessions || res?.data || [];
+    debugLog('loadSessions result', data);
     state.sessions = Array.isArray(data) ? data : [];
     const hasSelected =
       state.selectedSession && state.sessions.some((s) => s.profileId === state.selectedSession);
@@ -427,8 +559,10 @@ function renderSessions() {
 
 async function loadContainerSnapshot(skipLoading = false) {
   if (!state.selectedSession) {
+    debugLog('loadContainerSnapshot: no session selected');
     state.containerSnapshot = null;
-    state.domTree = null;
+    setDomTreeSnapshot(state.domTreeStore, null);
+    state.selectedDomPath = null;
     renderContainers();
     return;
   }
@@ -437,11 +571,17 @@ async function loadContainerSnapshot(skipLoading = false) {
     const selected = state.sessions.find((s) => s.profileId === state.selectedSession);
     const url = selected?.current_url || selected?.currentUrl;
     if (!url) throw new Error('会话没有 URL');
-    const res = await invokeAction('containers:inspect', { profile: state.selectedSession, url });
+    const res = await invokeAction('containers:inspect', {
+      profile: state.selectedSession,
+      url,
+      ...DOM_SNAPSHOT_OPTIONS,
+    });
+    debugLog('loadContainerSnapshot result', res);
     applyContainerSnapshotData(res, { toastMessage: `容器树已捕获 (${state.selectedSession})` });
   } catch (err) {
     state.containerSnapshot = null;
-    state.domTree = null;
+    setDomTreeSnapshot(state.domTreeStore, null);
+    state.selectedDomPath = null;
     state.domNeedsReset = false;
     showMessage(err.message || '容器树捕获失败', 'error');
   } finally {
@@ -456,17 +596,22 @@ function applyContainerSnapshotData(result, options = {}) {
     throw new Error('容器树为空');
   }
   state.containerSnapshot = snapshot;
-  state.domTree = snapshot?.dom_tree || result?.domTree || null;
-  if (state.domTree && !state.domTree.path) {
-    state.domTree.path = '__root__';
+  setDomTreeSnapshot(state.domTreeStore, snapshot?.dom_tree || result?.domTree || null);
+  const domTree = getDomTree(state.domTreeStore);
+  resetGraphStore(state.graphStore);
+  if (snapshot?.container_tree) {
+    ingestContainerTree(state.graphStore, snapshot.container_tree);
+  }
+  if (snapshot?.dom_tree) {
+    ingestDomTree(state.graphStore, snapshot.dom_tree);
   }
   if (snapshot?.container_tree?.id) {
     state.selectedContainerId = snapshot.container_tree.id;
   }
-  if (state.domTree?.path) {
-    state.selectedDomPath = state.domTree.path;
+  if (domTree?.path) {
+    state.selectedDomPath = domTree.path;
   }
-  const initialPaths = findAllDomPathsForContainer(state.selectedContainerId, state.domTree);
+  const initialPaths = findAllDomPathsForContainer(state.selectedContainerId, domTree);
   if (!state.selectedDomPath && initialPaths.length) {
     state.selectedDomPath = initialPaths[0];
   }
@@ -474,6 +619,13 @@ function applyContainerSnapshotData(result, options = {}) {
   if (options.toastMessage) {
     showMessage(options.toastMessage, 'success');
   }
+  if (state.selectedContainerId) {
+    ensureContainerDomMapping(state.selectedContainerId);
+  }
+  if (AUTO_EXPAND_PATHS.length) {
+    autoExpandTriggered = false;
+  }
+  scheduleAutoExpand();
 }
 
 function renderContainers() {
@@ -486,19 +638,12 @@ function renderContainers() {
   let containerRows = [];
   let domNodes = [];
   let links = [];
-  if (hasTree) {
-    containerRows = flattenContainerTree(state.containerSnapshot.container_tree);
-    if (containerRows.length) {
-      const domNodesByContainer = new Map();
-      containerRows.forEach((row) => {
-        const containerId = getContainerId(row.container);
-        if (!containerId) return;
-        const targets = collectDomTargets(state.domTree, containerId, [], 0);
-        domNodesByContainer.set(containerId, targets);
-        domNodes.push(...targets);
-      });
-      links = buildGraphLinks(containerRows, domNodesByContainer);
-    }
+  const domTree = getDomTree(state.domTreeStore);
+  if (hasTree && rootId) {
+    const graphData = buildGraphData(state.graphStore, rootId);
+    containerRows = graphData.containerRows || [];
+    domNodes = graphData.domNodes || [];
+    links = graphData.links || [];
   }
   if (rootId) {
     const belongsToRoot = (id) => !id || id === rootId || id.startsWith(`${rootId}.`);
@@ -506,6 +651,7 @@ function renderContainers() {
     domNodes = domNodes.filter((node) => !node.containerId || belongsToRoot(node.containerId));
     links = links.filter((link) => belongsToRoot(link.from));
   }
+  domNodes = domNodes.filter((node) => shouldDisplayDomNode(node));
   const containerIdSet = new Set(containerRows.map((row) => getContainerId(row.container)).filter(Boolean));
   if (state.selectedContainerId && !containerIdSet.has(state.selectedContainerId)) {
     state.selectedContainerId = containerRows[0]?.container?.id || rootId || null;
@@ -515,7 +661,10 @@ function renderContainers() {
     state.selectedDomPath = domNodes[0]?.path || null;
   }
   if (state.domNeedsReset) {
-    resetDomVisibility(containerRows);
+    const containerIdsForVisibility = new Set(
+      containerRows.map((row) => getContainerId(row.container)).filter((id) => typeof id === 'string' && id.length),
+    );
+    resetDomVisibility(state.domTreeStore, containerIdsForVisibility, state.selectedDomPath);
     state.domNeedsReset = false;
   }
   renderTreeDetails();
@@ -579,7 +728,7 @@ function updateGraphVisualization(containerRows, domNodes, links) {
 function renderTreeDetails() {
   const rootId = getRootContainerId();
   renderContainerTreeList(state.containerSnapshot?.container_tree, rootId);
-  renderDomTreeList(state.domTree);
+  domTreeView?.render();
 }
 
 function renderContainerTreeList(rootNode, rootId) {
@@ -639,139 +788,103 @@ function buildContainerTreeRows(node, depth, target, rootId) {
   }
 }
 
-function renderDomTreeList(rootNode) {
-  if (!ui.treeDomList) return;
-  ui.treeDomList.innerHTML = '';
-  if (!rootNode) {
-    const placeholder = document.createElement('div');
-    placeholder.className = 'tree-empty';
-    placeholder.textContent = '暂无 DOM 数据';
-    ui.treeDomList.appendChild(placeholder);
+async function toggleDomNodeExpand(path) {
+  if (!path) return;
+  debugLog('toggleDomNodeExpand', path);
+  if (isPathExpanded(state.domTreeStore, path)) {
+    setPathExpanded(state.domTreeStore, path, false);
+    markExpanded(state.graphStore, path, false);
+    domTreeView?.render();
+    renderContainers();
+    queueFitWindow();
+    bus.publish('ui.graph.domCollapsed', { path });
     return;
   }
-  buildDomTreeRows(rootNode, 0, ui.treeDomList);
+  bus.publish('ui.graph.domExpandRequested', { path });
+  setPathExpanded(state.domTreeStore, path, true);
+  markExpanded(state.graphStore, path, true);
+  domTreeView?.render();
+  queueFitWindow();
+  const domTree = getDomTree(state.domTreeStore);
+  const node = findDomNodeByPath(domTree, path);
+  if (!node) {
+    bus.publish('ui.graph.domExpandFailed', { path, error: 'node-missing' });
+    debugLog('toggleDomNodeExpand-missing', path);
+    return;
+  }
+  const stats = getDomNodeChildStats(node);
+  debugLog('toggleDomNodeExpand-stats', path, stats);
+  if (stats.needsLazyLoad) {
+    const loaded = await loadDomBranch(path);
+    if (!loaded) {
+      setPathExpanded(state.domTreeStore, path, false);
+      markExpanded(state.graphStore, path, false);
+      domTreeView?.render();
+      queueFitWindow();
+      bus.publish('ui.graph.domExpandFailed', { path, error: 'load-failed' });
+    }
+  } else {
+    renderContainers();
+    const childCount = getDomChildren(state.graphStore, path).length;
+    bus.publish('ui.graph.domExpanded', { path, childCount });
+  }
 }
 
-function buildDomTreeRows(node, depth, target) {
+async function loadDomBranch(path) {
+  const domTree = getDomTree(state.domTreeStore);
+  if (!path || !domTree || !state.selectedSession) return false;
+  if (isBranchLoading(state.domTreeStore, path)) return true;
+  const node = findDomNodeByPath(domTree, path);
   if (!node) return false;
-  const path = node.path || (depth === 0 ? '__root__' : '');
-  const isRoot = depth === 0;
-  const isDefaultVisible = isRoot || (path && state.domDefaultVisible.has(path));
-  const isExpanded = path && state.domExpandedPaths.has(path);
-  if (!isRoot && !isDefaultVisible && !isExpanded) {
+  const url = resolveCurrentPageUrl();
+  if (!url) {
+    showMessage('无法确定当前页面 URL', 'error');
     return false;
   }
-  const row = document.createElement('div');
-  row.className = 'tree-line tree-line-dom';
-  row.style.paddingLeft = `${Math.max(depth - 1, 0) * 18 + 12}px`;
-  if (path && state.selectedDomPath === path) {
-    row.classList.add('active');
-  }
-  const hasChildren = Array.isArray(node.children) && node.children.length > 0;
-  if (hasChildren && path) {
-    const expandBtn = document.createElement('button');
-    expandBtn.className = 'tree-expand-btn';
-    expandBtn.textContent = isExpanded ? '−' : '+';
-    expandBtn.addEventListener('click', (event) => {
-      event.stopPropagation();
-      toggleDomNodeExpand(path);
-    });
-    row.appendChild(expandBtn);
-  }
-  const label = document.createElement('span');
-  label.className = 'tree-label';
-  label.textContent = formatDomNodeLabel(node) || node.tag || path || '节点';
-  row.appendChild(label);
-  if (Array.isArray(node.containers) && node.containers.length) {
-    const meta = document.createElement('span');
-    meta.className = 'tree-meta';
-    meta.textContent = node.containers
-      .map((entry) => entry?.container_name || entry?.container_id || entry?.containerId)
-      .filter(Boolean)
-      .join(', ');
-    if (meta.textContent) {
-      row.appendChild(meta);
+  const payload = {
+    profile: state.selectedSession,
+    url,
+    path: normalizeDomPathString(path),
+    rootSelector: getRootDomSelector(),
+    ...DOM_SNAPSHOT_OPTIONS,
+  };
+  setBranchLoading(state.domTreeStore, path, true);
+  markLoading(state.graphStore, path, true);
+  domTreeView?.render();
+  renderContainers();
+  let success = false;
+  try {
+    const res = await invokeAction('containers:inspect-branch', payload);
+    const branchPayload = res?.branch || res;
+    const branchNode = branchPayload?.node;
+    if (!branchNode) {
+      throw new Error('分支数据为空');
     }
+    mergeDomBranchIntoTree(state.domTreeStore, branchNode);
+    ingestDomBranch(state.graphStore, branchNode, node.path);
+    success = true;
+  } catch (err) {
+    console.warn('[ui] dom branch load failed', err);
+    showMessage(err?.message || '加载 DOM 分支失败', 'error');
+    bus.publish('ui.graph.domBranchFailed', { path, error: err?.message || String(err) });
+  } finally {
+    setBranchLoading(state.domTreeStore, path, false);
+    markLoading(state.graphStore, path, false);
   }
-  if (path && path !== '__root__') {
-    row.dataset.path = path;
-    row.addEventListener('click', (event) => {
-      event.stopPropagation();
-      handleDomSelection(path);
-    });
-    row.addEventListener('dblclick', (event) => {
-      event.stopPropagation();
-      toggleDomNodeExpand(path);
-    });
-  }
-  target.appendChild(row);
-  if (!hasChildren) {
-    return true;
-  }
-  const childNodes = node.children || [];
-  const shouldShowAll = path && state.domExpandedPaths.has(path);
-  const visibleChildren = shouldShowAll
-    ? childNodes
-    : childNodes.filter((child) => !child.path || state.domDefaultVisible.has(child.path));
-  visibleChildren.forEach((child) => buildDomTreeRows(child, depth + 1, target));
-  return true;
-}
-
-function toggleDomNodeExpand(path) {
-  if (!path || path === '__root__') return;
-  if (state.domExpandedPaths.has(path)) {
-    state.domExpandedPaths.delete(path);
+  if (success) {
+    domTreeView?.render();
+    renderContainers();
+    const childCount = getDomChildren(state.graphStore, path).length;
+    bus.publish('ui.graph.domBranchLoaded', { path, childCount });
+    bus.publish('ui.graph.domExpanded', { path, childCount });
   } else {
-    state.domExpandedPaths.add(path);
+    domTreeView?.render();
+    renderContainers();
+    bus.publish('ui.graph.domBranchFailed', { path });
   }
-  renderTreeDetails();
-  queueFitWindow();
+  return success;
 }
 
-function resetDomVisibility(containerRows) {
-  state.domDefaultVisible = new Set();
-  state.domExpandedPaths = new Set();
-  if (!state.domTree) return;
-  const containerIds = new Set(
-    containerRows.map((row) => getContainerId(row.container)).filter((id) => typeof id === 'string' && id.length),
-  );
-  if (!containerIds.size) {
-    const rootPath = state.domTree.path || '__root__';
-    state.domDefaultVisible.add(rootPath);
-    return;
-  }
-  markDomVisibility(state.domTree, state.domDefaultVisible, containerIds);
-  if (state.selectedDomPath) {
-    state.domDefaultVisible.add(state.selectedDomPath);
-  }
-  const rootPath = state.domTree.path || '__root__';
-  state.domDefaultVisible.add(rootPath);
-}
-
-function markDomVisibility(node, allowed, containerIds) {
-  if (!node) return false;
-  const path = node.path;
-  let match = false;
-  if (Array.isArray(node.containers) && node.containers.length) {
-    match = node.containers.some((entry) => {
-      const containerId = entry?.container_id || entry?.containerId || entry?.container_name;
-      return containerId && containerIds.has(containerId);
-    });
-  }
-  let childHas = false;
-  if (Array.isArray(node.children)) {
-    for (const child of node.children) {
-      if (markDomVisibility(child, allowed, containerIds)) {
-        childHas = true;
-      }
-    }
-  }
-  if ((match || childHas) && path) {
-    allowed.add(path);
-    return true;
-  }
-  return match || childHas;
-}
 
 function setGraphPlaceholder(title, desc, options = {}) {
   const overlay = ui.containerDomGrid?.querySelector('.graph-overlay');
@@ -798,7 +911,7 @@ function hideGraphPlaceholder() {
 function handleContainerSelection(containerId) {
   if (!containerId || !state.containerSnapshot) return;
   state.selectedContainerId = containerId;
-  const domPaths = findAllDomPathsForContainer(containerId, state.domTree);
+  const domPaths = findAllDomPathsForContainer(containerId, getDomTree(state.domTreeStore));
   if (domPaths.length) {
     state.selectedDomPath = domPaths[0];
   }
@@ -813,12 +926,14 @@ function handleContainerSelection(containerId) {
   graphView?.setSelection({ containerId: state.selectedContainerId, domPath: state.selectedDomPath });
   renderTreeDetails();
   queueFitWindow();
+  ensureContainerDomMapping(containerId);
 }
 
 function handleDomSelection(domPath) {
-  if (!domPath || !state.domTree) return;
+  const domTree = getDomTree(state.domTreeStore);
+  if (!domPath || !domTree) return;
   state.selectedDomPath = domPath;
-  const node = findDomNodeByPath(state.domTree, domPath);
+  const node = findDomNodeByPath(domTree, domPath);
   if (node?.containers?.length) {
     const container = node.containers[0].container_id || node.containers[0].container_name;
     if (container) {
@@ -853,7 +968,7 @@ async function remapContainerToDom(containerId, domPath, domNode = null) {
     showMessage('找不到容器定义', 'error');
     return;
   }
-  const domTarget = domNode || findDomNodeByPath(state.domTree, domPath);
+  const domTarget = domNode || findDomNodeByPath(getDomTree(state.domTreeStore), domPath);
   if (!domTarget) {
     showMessage('找不到 DOM 节点', 'error');
     return;
@@ -882,12 +997,13 @@ async function remapContainerToDom(containerId, domPath, domNode = null) {
     },
   };
   try {
-    state.linkMode.busy = true;
-    updateLinkModeUI();
-    const res = await invokeAction('containers:remap', payload);
-    applyContainerSnapshotData(res, { toastMessage: '容器选择器已更新' });
-    toggleLinkMode(false);
-    renderContainers();
+  state.linkMode.busy = true;
+  updateLinkModeUI();
+  const res = await invokeAction('containers:remap', payload);
+  applyContainerSnapshotData(res, { toastMessage: '容器选择器已更新' });
+  bus.publish('ui.graph.containerRemapped', { containerId, domPath, selector });
+  toggleLinkMode(false);
+  renderContainers();
   } catch (err) {
     showMessage(err?.message || '容器重连失败', 'error');
   } finally {
@@ -906,41 +1022,98 @@ function getSelectedSessionMeta() {
   return state.sessions.find((s) => s.profileId === state.selectedSession) || null;
 }
 
-function findDomNodeByPath(root, targetPath) {
-  if (!root || !targetPath) return null;
-  if ((root.path || '__root__') === targetPath) return root;
-  if (Array.isArray(root.children)) {
-    for (const child of root.children) {
-      const result = findDomNodeByPath(child, targetPath);
-      if (result) return result;
-    }
-  }
-  return null;
+function resolveCurrentPageUrl() {
+  const sessionMeta = getSelectedSessionMeta();
+  return (
+    sessionMeta?.current_url ||
+    sessionMeta?.currentUrl ||
+    state.containerSnapshot?.metadata?.page_url ||
+    state.containerSnapshot?.target_url ||
+    ''
+  );
 }
 
-function findAllDomPathsForContainer(containerId, root, acc = []) {
-  if (!root || !containerId) return acc;
-  if (Array.isArray(root.containers)) {
-    const match = root.containers.some(
-      (item) =>
-        item?.container_id === containerId ||
-        item?.container_name === containerId ||
-        item?.containerId === containerId,
-    );
-    if (match && root.path) {
-      acc.push(root.path);
-    }
-  }
-  if (Array.isArray(root.children)) {
-    for (const child of root.children) {
-      findAllDomPathsForContainer(containerId, child, acc);
-    }
-  }
-  if (!acc.length && root.path) {
-    acc.push(root.path);
-  }
-  return acc;
+function getRootDomSelector() {
+  return (
+    state.containerSnapshot?.metadata?.root_selector ||
+    state.containerSnapshot?.root_match?.container?.matched_selector ||
+    state.containerSnapshot?.container_tree?.selectors?.[0]?.css ||
+    '#app'
+  );
 }
+
+function hasContainerDomPath(containerNode) {
+  if (!containerNode?.match?.nodes) return false;
+  return containerNode.match.nodes.some((entry) => entry?.dom_path);
+}
+
+async function ensureContainerDomMapping(containerId) {
+  if (!containerId || !state.selectedSession || state.pendingContainerDom.has(containerId)) {
+    return;
+  }
+  const containerNode = findContainerNode(state.containerSnapshot?.container_tree, containerId);
+  if (!containerNode) return;
+  if (hasContainerDomPath(containerNode)) return;
+  const url = resolveCurrentPageUrl();
+  if (!url) return;
+  state.pendingContainerDom.add(containerId);
+  try {
+    const res = await invokeAction('containers:inspect-container', {
+      profile: state.selectedSession,
+      url,
+      containerId,
+      ...DOM_SNAPSHOT_OPTIONS,
+    });
+    const snapshot = res?.data?.snapshot || res?.snapshot || res;
+    const targetTree = snapshot?.container_tree;
+    const match = targetTree?.match;
+    if (match) {
+      updateContainerMatch(containerId, match);
+    }
+    const domPath = match?.nodes?.find((entry) => entry?.dom_path)?.dom_path;
+    if (domPath) {
+      ensureDomPathExists(state.domTreeStore, domPath);
+      await loadDomBranch(domPath);
+    }
+  } catch (err) {
+    console.warn('[ui] ensureContainerDomMapping failed', err);
+  } finally {
+    state.pendingContainerDom.delete(containerId);
+  }
+}
+
+function scheduleAutoExpand() {
+  if (!AUTO_EXPAND_PATHS.length || autoExpandTriggered) return;
+  autoExpandTriggered = true;
+  setTimeout(() => {
+    AUTO_EXPAND_PATHS.forEach((path) => {
+      if (path) {
+        debugLog('auto-expand', path);
+        toggleDomNodeExpand(path);
+      }
+    });
+  }, 800);
+}
+
+function getDomParentPath(path) {
+  if (!path) return null;
+  const entry = getDomNode(state.graphStore, path);
+  return entry?.parentPath || null;
+}
+
+function shouldDisplayDomNode(node) {
+  if (!node) return false;
+  if (node.containerId) return true;
+  const path = node.path;
+  if (!path) return false;
+  if (isDefaultVisible(state.domTreeStore, path)) return true;
+  const parentPath = getDomParentPath(path);
+  if (parentPath && isPathExpanded(state.domTreeStore, parentPath)) {
+    return true;
+  }
+  return false;
+}
+
 
 function getContainerSelector(containerId, tree) {
   const node = findContainerNode(tree, containerId);
@@ -966,6 +1139,18 @@ function findContainerNode(node, containerId) {
     }
   }
   return null;
+}
+
+function updateContainerMatch(containerId, match) {
+  if (!containerId || !state.containerSnapshot?.container_tree) return;
+  const node = findContainerNode(state.containerSnapshot.container_tree, containerId);
+  if (node) {
+    node.match = match;
+  }
+  const storeNode = state.graphStore.containers.get(containerId);
+  if (storeNode) {
+    state.graphStore.containers.set(containerId, { ...storeNode, match });
+  }
 }
 
 function getDomNodeSelector(node) {
@@ -1113,12 +1298,18 @@ function showMessage(text, variant = 'info') {
 
 async function invokeAction(action, payload = {}) {
   if (!backend?.invokeAction) {
+    if (DEBUG) logger.warn('[floating-debug] backendAPI missing, fallback mock for action', action);
     return mockAction(action);
   }
-  const result = await backend.invokeAction(action, payload);
+  debugLog('invokeAction', action, payload);
+  const result = await backend.invokeAction(action, payload).catch((err) => {
+    logger.error('[floating-debug] invokeAction error', action, err);
+    throw err;
+  });
   if (result?.success === false) {
     throw new Error(result?.error || `Action ${action} failed`);
   }
+  debugLog('action result', action, result);
   return result?.data ?? result;
 }
 
