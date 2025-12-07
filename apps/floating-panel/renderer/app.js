@@ -1127,20 +1127,37 @@ function shouldDisplayDomNode(node) {
 function buildGraphReportPayload() {
   const rootId = getRootContainerId();
   const graphData = rootId ? buildGraphData(state.graphStore, rootId) : { containerRows: [], domNodes: [], links: [] };
+  const visibilityMap = new Map();
+  (graphData.domNodes || []).forEach((node) => {
+    const visible = shouldDisplayDomNode(node);
+    visibilityMap.set(node.path, visible);
+  });
+  const visibleChildCount = new Map();
+  (graphData.domNodes || []).forEach((node) => {
+    const parent = node.parentPath;
+    if (!parent) return;
+    if (!visibleChildCount.has(parent)) visibleChildCount.set(parent, 0);
+    if (visibilityMap.get(node.path)) {
+      visibleChildCount.set(parent, (visibleChildCount.get(parent) || 0) + 1);
+    }
+  });
   const domReport = (graphData.domNodes || []).map((node) => {
     const storeNode = getDomNode(state.graphStore, node.path) || {};
-    const renderedChildren = getDomChildren(state.graphStore, node.path).length;
-    const childCount = Number(storeNode.childCount || 0);
+    const totalChildren = typeof storeNode.childCount === 'number' ? storeNode.childCount : getDomChildren(state.graphStore, node.path).length;
+    const loadedChildren = getDomChildren(state.graphStore, node.path).length;
+    const visibleChildren = visibleChildCount.get(node.path) || 0;
+    const visible = visibilityMap.get(node.path) || false;
     return {
       path: node.path,
       label: node.label,
       containerId: node.containerId || null,
-      childCount,
-      renderedChildren,
+      childCount: totalChildren,
+      loadedChildren,
+      visibleChildren,
       expanded: Boolean(node.expanded),
       canExpand: Boolean(node.canExpand),
-      expectedExpandable: childCount > renderedChildren,
-      visible: shouldDisplayDomNode(node),
+      expectedExpandable: visible && totalChildren > 0,
+      visible,
     };
   });
   return {

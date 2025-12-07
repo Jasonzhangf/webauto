@@ -118,7 +118,12 @@ export function buildGraphData(store, rootContainerId) {
   }
   const domNodes = Array.from(store.domNodes.values()).map((node) => {
     const loaded = store.domChildren.get(node.path)?.size || 0;
-    const canExpand = (node.childCount || 0) > loaded;
+    const declaredChildren =
+      typeof node.childCount === 'number'
+        ? node.childCount
+        : loaded;
+    const hasChildren = declaredChildren > 0;
+    const needsLazyLoad = declaredChildren > loaded;
     const hasContainerChildren = node.containers?.some((entry) => {
       const containerId = entry?.container_id || entry?.container_name || entry?.containerId;
       return containerId && store.containerChildren.get(containerId)?.size;
@@ -131,7 +136,12 @@ export function buildGraphData(store, rootContainerId) {
       selector: node.selector,
       containerId: domContainerId,
       depth: node.depth,
-      canExpand: canExpand || Boolean(hasContainerChildren),
+      canExpand: hasChildren || Boolean(hasContainerChildren),
+      hasChildren,
+      needsLazyLoad,
+      expandable: hasChildren || Boolean(hasContainerChildren),
+      childCount: declaredChildren,
+      loadedChildren: loaded,
       hasContainerChildren: Boolean(hasContainerChildren),
       expanded: Boolean(node.expanded),
       loading: Boolean(node.loading),

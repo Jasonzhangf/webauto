@@ -53,10 +53,8 @@ async function main() {
     socket.once('error', reject);
   });
   console.log(`[dev-driver] connected ${BUS_URL}`);
-  console.log('[dev-driver] waiting for snapshot ready event...');
-  await waitForEvent(socket, watchers, (evt) => evt.topic === 'ui.graph.snapshotReady', 'snapshot ready', 25000);
-  console.log('[dev-driver] requesting initial graph report...');
-  let report = await requestGraphReport(socket, watchers, 'initial');
+  console.log('[dev-driver] waiting for graph snapshot via report polling...');
+  let report = await waitForGraphReport(socket, watchers, 30000);
   validateGraphReport(report);
   report = await autoExpandGraph(socket, watchers, report);
 
@@ -100,6 +98,19 @@ async function requestGraphReport(socket, watchers, label) {
   return evt?.payload || {};
 }
 
+async function waitForGraphReport(socket, watchers, timeoutMs = 30000) {
+  const deadline = Date.now() + timeoutMs;
+  let lastReport = null;
+  while (Date.now() < deadline) {
+    lastReport = await requestGraphReport(socket, watchers, 'bootstrap');
+    if ((lastReport?.domCount || 0) > 0) {
+      return lastReport;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+  throw new Error('graph snapshot not ready (domCount=0)');
+}
+
 function validateGraphReport(report) {
   if (!report || !Array.isArray(report.domNodes)) {
     throw new Error('graph report missing dom nodes');
@@ -129,10 +140,13 @@ async function expandDomPath(socket, watchers, path) {
 async function autoExpandGraph(socket, watchers, initialReport) {
   let report = initialReport;
   const expanded = new Set();
+  const depthOf = (path) => (path ? path.split('/').length - 1 : 0);
   for (let i = 0; i < MAX_AUTO_EXPAND_PATHS; i += 1) {
-    const next = (report.domNodes || []).find(
-      (node) => node.path !== 'root' && node.canExpand && !expanded.has(node.path),
-    );
+    const next = (report.domNodes || []).find((node) => {
+      if (!node.canExpand || expanded.has(node.path)) return false;
+      const depth = depthOf(node.path);
+      return depth >= 2; // skip root and immediate children used in scripted steps
+    });
     if (!next) break;
     expanded.add(next.path);
     console.log('[dev-driver] auto expand dom node', next.path);
