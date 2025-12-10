@@ -28,8 +28,9 @@
         <button id="expandCollapsedButton" class="ghost" data-no-drag>展开</button>
       </div>
 
-      <main data-no-drag>
-        <section class="panel" id="browserPanel">
+      <main class="app-layout" data-no-drag>
+        <div class="layout-sidebar">
+          <section class="panel compact" id="browserPanel">
           <div class="section-heading">
             <div>
               <div class="section-title">浏览器控制</div>
@@ -43,7 +44,7 @@
             <div class="stat" id="browserStatusText">未连接</div>
             <div class="muted" id="browserDetails">等待查询...</div>
           </div>
-          <form id="sessionCreateForm" class="stack">
+          <form id="sessionCreateForm" class="stack compact">
             <div class="form-row">
               <label>
                 <span>Profile</span>
@@ -63,9 +64,9 @@
               <button type="submit" class="primary">创建/唤醒会话</button>
             </div>
           </form>
-        </section>
+          </section>
 
-        <section class="panel" id="sessionPanel">
+          <section class="panel compact" id="sessionPanel">
           <div class="section-heading">
             <div>
               <div class="section-title">会话列表</div>
@@ -75,10 +76,15 @@
               <button id="refreshSessions" class="ghost">刷新</button>
             </div>
           </div>
-          <div id="sessionList" class="session-list"></div>
-        </section>
+          <div id="sessionList" class="session-list compact"></div>
+          <div class="sidebar-actions">
+            <button id="sidebarCaptureButton" class="ghost primary">捕获页面元素</button>
+          </div>
+          </section>
+        </div>
 
-        <section class="panel" id="containersPanel">
+        <div class="layout-main">
+          <section class="panel" id="containersPanel">
           <div class="section-heading">
             <div>
               <div class="section-title">容器与 DOM</div>
@@ -90,6 +96,91 @@
               <button id="refreshContainers" class="ghost">刷新面板</button>
             </div>
           </div>
+          <div class="containers-tools">
+            <div class="tool-tabs" role="tablist">
+              <button class="tool-tab is-active" data-tab="dom" id="tabDomTools" aria-controls="domToolPanel">DOM 操作</button>
+              <button class="tool-tab" data-tab="container" id="tabContainerTools" aria-controls="containerToolPanel">容器操作</button>
+            </div>
+            <div class="tool-panels">
+              <div class="tool-panel is-active" id="domToolPanel" role="tabpanel" aria-labelledby="tabDomTools">
+                <div class="dom-actions-panel" id="domActionsPanel">
+                <div class="dom-actions-head">
+                  <div>
+                    <div class="dom-actions-title">DOM 节点操作</div>
+                    <div class="dom-actions-target" id="domActionTarget">未选择 DOM 节点</div>
+                  </div>
+                <div class="dom-actions-status" id="domActionStatus"></div>
+              </div>
+                <div class="dom-actions-body">
+                  <div class="dom-actions-row">
+                    <label class="dom-actions-field">
+                      <span>目标容器</span>
+                      <select id="domActionContainerSelect"></select>
+                  </label>
+                  <button id="domActionReplace" class="ghost primary">替换容器选择器</button>
+                </div>
+                <div class="dom-actions-row">
+                  <label class="dom-actions-field">
+                    <span>新容器 ID</span>
+                    <input id="domNewContainerId" type="text" placeholder="root.section" autocomplete="off" />
+                  </label>
+                  <label class="dom-actions-field">
+                    <span>新容器别名</span>
+                    <input id="domNewContainerAlias" type="text" placeholder="模块名称" autocomplete="off" />
+                  </label>
+                  <button id="domActionCreate" class="ghost">创建子容器</button>
+                </div>
+                <div class="dom-actions-row dom-highlight-row">
+                  <label class="dom-actions-field">
+                    <span>当前容器别名</span>
+                    <input id="domAliasInput" type="text" placeholder="显示名称" autocomplete="off" />
+                  </label>
+                  <div class="dom-highlight-actions">
+                    <button id="domActionSaveAlias" class="ghost">保存别名</button>
+                    <label class="checkbox inline">
+                      <input id="domHighlightHoldToggle" type="checkbox" />
+                      <span>保持高亮</span>
+                    </label>
+                    <button id="domActionHighlight" class="ghost">高亮节点</button>
+                    <button id="domActionClearHighlight" class="ghost">清除高亮</button>
+                    <button id="domActionPick" class="ghost">拾取页面元素</button>
+                  </div>
+                </div>
+                <div class="dom-actions-foot" id="domActionFootnote"></div>
+                </div>
+              </div>
+                <div class="dom-secondary-actions">
+                  <button id="domActionPickSidebar" class="ghost">捕获页面元素</button>
+                </div>
+              </div>
+              <div class="tool-panel" id="containerToolPanel" role="tabpanel" aria-labelledby="tabContainerTools">
+                <div class="container-ops-panel" id="containerOpsPanel">
+                <div class="container-ops-head">
+                  <div>
+                    <div class="container-ops-title">容器操作配置</div>
+                    <div class="container-ops-target" id="containerOpsTarget">未选择容器</div>
+                  </div>
+                <div class="container-ops-status" id="containerOpsStatus"></div>
+              </div>
+              <div class="container-ops-list" id="containerOpsList"></div>
+                <div class="container-ops-actions">
+                  <div class="container-ops-action-group">
+                    <button id="containerOpsAddHighlight" class="ghost">+ 高亮操作</button>
+                    <button id="containerOpsAddExtract" class="ghost">+ 提取链接</button>
+                    <button id="containerOpsReset" class="ghost">重置</button>
+                  </div>
+                  <button id="containerOpsSave" class="primary">保存操作</button>
+                </div>
+                <textarea id="containerOpsEditor" class="container-ops-editor" spellcheck="false" placeholder="[]"></textarea>
+                </div>
+                <div class="operations-card">
+                  <div class="subpanel-title">可用操作</div>
+                  <div class="operation-chips" id="operationChips"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+
           <div class="tree-grid">
             <div class="tree-grid-header">
               <span class="col-container">容器（<span id="treeContainerCount">0</span>）</span>
@@ -124,13 +215,9 @@
             </div>
           </div>
           <div class="link-mode-banner hidden" id="linkModeIndicator"></div>
-          <div class="operations-card">
-            <div class="subpanel-title">可用操作</div>
-            <div class="operation-chips" id="operationChips"></div>
-          </div>
-        </section>
+          </section>
 
-        <section class="panel log-panel" id="logPanel">
+          <section class="panel log-panel" id="logPanel">
           <div class="section-heading">
             <div>
               <div class="section-title">日志面板</div>
@@ -147,7 +234,8 @@
             </div>
           </div>
           <pre id="logStream" class="log-stream">暂无日志</pre>
-        </section>
+          </section>
+        </div>
       </main>
     </div>
 

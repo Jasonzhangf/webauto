@@ -4,6 +4,7 @@ import os from 'os';
 import crypto from 'node:crypto';
 import { chromium, BrowserContext, Page, Browser } from 'playwright';
 import { ProfileLock } from './ProfileLock.js';
+import { ensurePageRuntime } from './pageRuntime.js';
 
 export interface BrowserSessionOptions {
   profileId: string;
@@ -94,6 +95,9 @@ export class BrowserSession {
   }
 
   private setupPageHooks(page: Page) {
+    ensurePageRuntime(page).catch((err) => {
+      console.warn('[session] failed to ensure page runtime', err?.message || err);
+    });
   }
 
   private ensureContext(): BrowserContext {

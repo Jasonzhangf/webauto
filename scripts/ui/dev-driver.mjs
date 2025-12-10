@@ -56,6 +56,7 @@ async function main() {
   console.log('[dev-driver] waiting for graph snapshot via report polling...');
   let report = await waitForGraphReport(socket, watchers, 30000);
   validateGraphReport(report);
+  validateCoverage(report);
   report = await autoExpandGraph(socket, watchers, report);
 
   for (const step of scenario) {
@@ -129,12 +130,19 @@ async function expandDomPath(socket, watchers, path) {
   const waitPromise = waitForEvent(
     socket,
     watchers,
-    (evt) => evt.topic === 'ui.graph.domExpanded' && evt.payload?.path === path,
+    (evt) =>
+      (evt.topic === 'ui.graph.domExpanded' && evt.payload?.path === path) ||
+      (evt.topic === 'ui.graph.domExpandFailed' && evt.payload?.path === path),
     `expand ${path}`,
     15000,
   );
   socket.send(JSON.stringify({ topic: 'ui.graph.expandDom', payload: { path } }));
-  await waitPromise;
+  const event = await waitPromise;
+  if (event.topic === 'ui.graph.domExpandFailed') {
+    console.warn('[dev-driver] expand failed', path, event.payload?.error || '');
+    return false;
+  }
+  return true;
 }
 
 async function autoExpandGraph(socket, watchers, initialReport) {
@@ -150,11 +158,22 @@ async function autoExpandGraph(socket, watchers, initialReport) {
     if (!next) break;
     expanded.add(next.path);
     console.log('[dev-driver] auto expand dom node', next.path);
-    await expandDomPath(socket, watchers, next.path);
+    const expandedOk = await expandDomPath(socket, watchers, next.path);
+    if (!expandedOk) {
+      continue;
+    }
     report = await requestGraphReport(socket, watchers, `post-expand:${next.path}`);
     validateGraphReport(report);
+    validateCoverage(report);
   }
   return report;
+}
+
+function validateCoverage(report) {
+  const missing = report?.containerCoverage?.missing || [];
+  if (missing.length) {
+    throw new Error(`container coverage incomplete: ${missing.join(', ')}`);
+  }
 }
 
 main().catch((err) => {

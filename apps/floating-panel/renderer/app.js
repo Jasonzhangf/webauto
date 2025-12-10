@@ -1,9 +1,6 @@
 import { ContainerDomGraphView } from './graph/graph-view.js';
+import { formatDomNodeLabel } from './graph/data-utils.js';
 import {
-  createGraphStore,
-  resetGraphStore,
-  ingestContainerTree,
-  ingestDomTree,
   ingestDomBranch,
   buildGraphData,
   getDomChildren,
@@ -12,8 +9,6 @@ import {
   markLoading,
 } from './graph/store.js';
 import {
-  createDomTreeStore,
-  setDomTreeSnapshot,
   getDomTree,
   resetDomVisibility,
   findDomNodeByPath,
@@ -31,218 +26,319 @@ import {
 import { createDomTreeView } from './dom-tree/view.js';
 import { bus } from './ui/messageBus.js';
 import './ui/devTools.js';
+import { collectUiElements } from './modules/state/ui-elements.js';
+import { createUiState, createLayoutState } from './modules/state/ui-state.js';
+import { createBackendBridge } from './modules/messaging/backend-bridge.js';
+import { initWindowControls, subscribeDesktopState } from './modules/controls/window-controls.js';
+import { bindCoreEvents } from './modules/controls/core-events.js';
+import { registerRendererBus } from './modules/messaging/bus-subscriptions.js';
+import { createDataLoaders } from './modules/state/data-loaders.js';
+import { createSnapshotManager } from './modules/containers/snapshot-manager.js';
+import { createContainerOpsManager } from './modules/containers/container-ops.js';
+import { createSessionPanel } from './modules/panels/session-panel.js';
+import { createDomActionsManager } from './modules/dom/dom-actions.js';
 
 const DOM_SNAPSHOT_OPTIONS = {
-  maxDepth: 8,
-  maxChildren: 80,
+  maxDepth: 1,
+  maxChildren: 4,
 };
+const DOM_BRANCH_OPTIONS = {
+  maxDepth: 5,
+  maxChildren: 12,
+};
+const DEFAULT_HIGHLIGHT_STYLE = '3px solid #34a853';
+const HOVER_DOM_STYLE = '2px dashed rgba(52, 168, 83, 0.85)';
+const HOVER_CONTAINER_STYLE = '2px dashed rgba(26, 115, 232, 0.85)';
+const HOVER_DOM_CHANNEL = 'hover-dom';
+const HOVER_CONTAINER_CHANNEL = 'hover-container';
+const DEFAULT_HIGHLIGHT_DURATION = 2200;
+const INITIAL_SESSION_RETRIES = 4;
+const INITIAL_SESSION_RETRY_DELAY_MS = 1200;
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, Math.max(0, ms)));
 
 console.log('[floating] renderer booting');
 const config = window.floatingConfig || {};
 const DEBUG = Boolean(config.debug);
+const AUTO_REFRESH_INTERVAL_MS = Math.max(
+  0,
+  Number(
+    config.autoRefreshIntervalMs ??
+      config.autoRefreshInterval ??
+      config.auto_refresh_interval_ms ??
+      config.auto_refresh_interval ??
+      8000,
+  ),
+);
+const AUTO_REFRESH_MAX_AGE_MS = Math.max(
+  Number(
+    config.autoRefreshMaxAgeMs ??
+      config.autoRefreshMaxAge ??
+      config.auto_refresh_max_age_ms ??
+      config.auto_refresh_max_age ??
+      20000,
+  ),
+  AUTO_REFRESH_INTERVAL_MS ? AUTO_REFRESH_INTERVAL_MS * 2 : 20000,
+);
 const AUTO_EXPAND_PATHS = Array.isArray(config.autoExpandPaths) ? config.autoExpandPaths : [];
 const logger = window.floatingLogger || {
   log: (...args) => console.log(...args),
   warn: (...args) => console.warn(...args),
   error: (...args) => console.error(...args),
 };
-const ui = {
-  metaText: document.getElementById('connectionStatus'),
-  globalMessage: document.getElementById('globalMessage'),
-  browserPanel: document.getElementById('browserPanel'),
-  browserStatusText: document.getElementById('browserStatusText'),
-  browserDetails: document.getElementById('browserDetails'),
-  refreshBrowser: document.getElementById('refreshBrowser'),
-  sessionForm: document.getElementById('sessionCreateForm'),
-  profileInput: document.getElementById('profileInput'),
-  launchUrlInput: document.getElementById('launchUrlInput'),
-  headlessToggle: document.getElementById('headlessToggle'),
-  sessionPanel: document.getElementById('sessionPanel'),
-  sessionList: document.getElementById('sessionList'),
-  refreshSessions: document.getElementById('refreshSessions'),
-  containersPanel: document.getElementById('containersPanel'),
-  refreshContainers: document.getElementById('refreshContainers'),
-  openInspectorButton: document.getElementById('openInspector'),
-  containerDomGrid: document.getElementById('containerDomGrid'),
-  linkModeButton: document.getElementById('linkModeButton'),
-  linkModeIndicator: document.getElementById('linkModeIndicator'),
-  treeContainerList: document.getElementById('containerTreeView'),
-  treeDomList: document.getElementById('domTreeView'),
-  treeContainerCount: document.getElementById('treeContainerCount'),
-  treeDomCount: document.getElementById('treeDomCount'),
-  operationChips: document.getElementById('operationChips'),
-  logPanel: document.getElementById('logPanel'),
-  logSourceSelect: document.getElementById('logSourceSelect'),
-  refreshLogs: document.getElementById('refreshLogs'),
-  clearLogs: document.getElementById('clearLogs'),
-  logStream: document.getElementById('logStream'),
-  collapseButton: document.getElementById('collapseButton'),
-  minButton: document.getElementById('minButton'),
-  closeButton: document.getElementById('closeButton'),
-  headlessButton: document.getElementById('headlessButton'),
-  stickBrowserButton: document.getElementById('stickBrowserButton'),
-  collapsedStrip: document.getElementById('collapsedStrip'),
-  expandCollapsedButton: document.getElementById('expandCollapsedButton'),
-};
-
-const state = {
-  browserStatus: null,
-  sessions: [],
-  logs: [],
-  operations: [],
-  selectedSession: null,
-  containerSnapshot: null,
-  selectedContainerId: null,
-  selectedDomPath: null,
-  domNeedsReset: false,
-  domTreeStore: createDomTreeStore(),
-  graphStore: createGraphStore(),
-  linkMode: {
-    active: false,
-    containerId: null,
-    busy: false,
-  },
-  headless: Boolean(config.headless),
-  messageTimer: null,
-  loading: {
-    browser: false,
-    sessions: false,
-    logs: false,
-    containers: false,
-  },
-  isCollapsed: false,
-  pendingContainerDom: new Set(),
-};
-
-const layoutState = {
-  fitTimer: null,
-  resizeObserver: null,
-};
+const ui = collectUiElements(document);
+const state = createUiState({ config });
+const layoutState = createLayoutState();
 
 let graphView = null;
 let domTreeView = null;
 let autoExpandTriggered = false;
+let unsubscribeBus = null;
+let containerOpsManager = null;
+let containerOpsSyncRef = () => {};
+let lastSessionWarningTs = 0;
+const hoverState = {
+  domPath: null,
+  containerId: null,
+};
 
-const backend = window.backendAPI;
-const desktop = window.desktopAPI;
-const publishWindowCommand = (topic, payload, fallback) => {
-  const ok = bus.publish(topic, payload);
-  if (!ok && typeof fallback === 'function') {
-    try {
-      fallback();
-    } catch (err) {
-      console.warn('[floating] window command fallback failed', err);
-    }
-  }
-  return ok;
-};
-const debugLog = (...args) => {
-  if (DEBUG) {
-    logger.log('[floating-debug]', ...args);
-  }
-};
+const { backend, desktop, publishWindowCommand, debugLog } = createBackendBridge({
+  bus,
+  logger,
+  debug: DEBUG,
+});
+let setSelectedSessionRef = () => {};
+let loadContainerSnapshotRef = () => {};
+const dataLoaders = createDataLoaders({
+  state,
+  ui,
+  invokeAction,
+  showMessage,
+  debugLog,
+  setLoading,
+  setSelectedSession: (...args) => setSelectedSessionRef?.(...args),
+  loadContainerSnapshot: (...args) => loadContainerSnapshotRef?.(...args),
+  ensureAutoRefreshTimer,
+});
+const { loadBrowserStatus, loadSessions, loadLogs } = dataLoaders;
+const { loadContainerSnapshot, applyContainerSnapshotData } = createSnapshotManager({
+  state,
+  ui,
+  domSnapshotOptions: DOM_SNAPSHOT_OPTIONS,
+  invokeAction,
+  debugLog,
+  showMessage,
+  setLoading,
+  annotateDomTreeWithMatches,
+  findAllDomPathsForContainer,
+  resetDomVisibility,
+  ensureContainerDomMapping,
+  scheduleAutoExpand,
+  syncContainerOpsEditor: (...args) => containerOpsSyncRef(...args),
+  ensureAutoRefreshTimer,
+  resolveCurrentPageUrl,
+  onSnapshotApplied: () => {
+    renderContainers();
+    updateSessionCaptureButtons();
+    updateDomCaptureButtons();
+  },
+  onSnapshotCleared: () => {
+    renderContainers();
+    updateSessionCaptureButtons();
+    updateDomCaptureButtons();
+  },
+  resetAutoExpandTrigger: resetAutoExpandFlag,
+});
+loadContainerSnapshotRef = loadContainerSnapshot;
+containerOpsManager = createContainerOpsManager({
+  state,
+  ui,
+  findContainerNode,
+  getContainerAlias,
+  getContainerOperationsFromNode,
+  showMessage,
+  invokeAction,
+  resolveCurrentPageUrl,
+  applyContainerSnapshotData,
+  defaultHighlightStyle: DEFAULT_HIGHLIGHT_STYLE,
+  defaultHighlightDuration: DEFAULT_HIGHLIGHT_DURATION,
+});
+containerOpsSyncRef = (...args) => containerOpsManager?.syncEditor?.(...args);
+const {
+  syncEditor: syncContainerOpsEditor,
+  renderPanel: renderContainerOperationsPanel,
+  handleEditorInput: containerOpsHandleInput,
+  addTemplate: containerOpsAddTemplate,
+  resetTemplate: containerOpsResetTemplate,
+  saveOperations: containerOpsSave,
+} = containerOpsManager;
+function handleContainerOpsInput(...args) {
+  return containerOpsHandleInput?.(...args);
+}
+function handleContainerOpsAddTemplate(kind) {
+  return containerOpsAddTemplate?.(kind);
+}
+function handleContainerOpsReset() {
+  return containerOpsResetTemplate?.();
+}
+async function handleContainerOpsSave() {
+  return containerOpsSave?.();
+}
+const sessionPanel = createSessionPanel({
+  state,
+  ui,
+  showMessage,
+  invokeAction,
+  loadContainerSnapshot,
+  ensureAutoRefreshTimer,
+  renderContainers,
+  queueFitWindow,
+  refreshSessions: () => loadSessions({ silent: false }),
+});
+const {
+  renderBrowserPanel,
+  renderSessions,
+  renderLogsPanel,
+  setSelectedSession,
+  updateSessionCaptureButtons,
+} = sessionPanel;
+setSelectedSessionRef = setSelectedSession;
+dataLoaders.attachRenderers({
+  renderBrowserPanel,
+  renderSessions,
+  renderLogs: renderLogsPanel,
+});
+let domActionsManager = null;
+domActionsManager = createDomActionsManager({
+  state,
+  ui,
+  showMessage,
+  invokeAction,
+  applyContainerSnapshotData,
+  renderContainers,
+  getSelectedDomNode,
+  getRootContainerId,
+  getContainerAlias,
+  findContainerNode,
+  findNearestContainerIdForDom,
+  buildDomNodeSelectors,
+  buildChildContainerId,
+  deriveDomAlias,
+  getDomNodeSelector,
+  formatDomNodeLabel,
+  triggerHighlight,
+  resolveCurrentPageUrl,
+  remapContainerToDom,
+  onHighlightCleared: () => resetPersistentHighlight(),
+});
+const {
+  renderPanel: renderDomActionPanel,
+  updateCaptureButtons: updateDomCaptureButtons,
+  handleContainerChange: handleDomActionContainerChange,
+  handleAliasInputChange,
+  handleHighlightToggle: handleHighlightHoldToggle,
+  highlightSelectedDom: highlightSelectedDomInternal,
+  clearHighlight: clearHighlightInternal,
+  handleReplace: handleDomActionReplace,
+  handleCreate: handleDomActionCreate,
+  handleSaveAlias: handleDomActionSaveAlias,
+  handleHighlightResult,
+  setHighlightFeedback,
+} = domActionsManager;
+
+const highlightSelectedDomNode = () => highlightSelectedDomInternal();
+
+const clearHighlightOverlays = () => clearHighlightInternal();
 if (DEBUG) {
   debugLog('init config', config);
   debugLog('backendAPI available:', Boolean(backend), 'desktopAPI available:', Boolean(desktop));
 }
 
 async function init() {
-  bindWindowControls();
-  bindEvents();
-  subscribeBusEvents();
+  initWindowControls({
+    ui,
+    desktop,
+    state,
+    publishWindowCommand,
+    toggleHeadlessMode,
+    updateHeadlessButton,
+    invokeAction,
+    showMessage,
+  });
+  bindCoreEvents(ui, {
+    onRefreshBrowser: () => loadBrowserStatus(),
+    onRefreshSessions: () => loadSessions(),
+    onRefreshLogs: () => loadLogs(),
+    onToggleLinkMode: () => toggleLinkMode(),
+    onClearLogs: () => {
+      state.logs = [];
+      renderLogsPanel();
+    },
+    onRefreshContainers: () => loadContainerSnapshot(),
+    onCreateSession: (event) => sessionPanel.handleCreateSessionSubmit(event),
+    onOpenInspector: () => openInspectorView(),
+    onDomReplace: () => handleDomActionReplace(),
+    onDomCreate: () => handleDomActionCreate(),
+    onDomHighlight: () => highlightSelectedDomNode(),
+    onDomClearHighlight: () => clearHighlightOverlays(),
+    onDomPick: () => startDomPicker(),
+    onDomSaveAlias: () => handleDomActionSaveAlias(),
+    onHighlightHoldToggle: () => handleHighlightHoldToggle(),
+    onDomActionContainerChange: () => handleDomActionContainerChange(),
+    onAliasInputChange: () => handleAliasInputChange(),
+    onContainerOpsInput: () => handleContainerOpsInput(),
+    onContainerOpsSave: () => handleContainerOpsSave(),
+    onContainerOpsReset: () => handleContainerOpsReset(),
+    onContainerOpsAddHighlight: () => handleContainerOpsAddTemplate('highlight'),
+    onContainerOpsAddExtract: () => handleContainerOpsAddTemplate('extract-links'),
+    onToolTabDom: () => setActiveToolPanel('dom'),
+    onToolTabContainer: () => setActiveToolPanel('container'),
+  });
+  window.addEventListener('keydown', handleGlobalKeydown);
+  if (typeof unsubscribeBus === 'function') {
+    unsubscribeBus();
+  }
+  unsubscribeBus = registerRendererBus(bus, {
+    onWindowError: (payload = {}) => {
+      const message = payload?.message || payload?.error || '窗口操作失败';
+      showMessage(message, 'error');
+    },
+    onGraphDomExpand: (payload = {}) => {
+      const targetPath = payload?.path || payload?.domPath;
+      if (targetPath) {
+        ensureDomNodeExpanded(targetPath).catch((err) => {
+          if (DEBUG) {
+            console.warn('[ui] ensureDomNodeExpanded failed', targetPath, err?.message || err);
+          }
+        });
+      }
+    },
+    onGraphDomHover: (payload = {}) => {
+      handleDomHover(payload?.path ?? payload?.domPath ?? null);
+    },
+    onGraphContainerHover: (payload = {}) => {
+      const targetId = payload?.containerId || payload?.id || payload?.container_id || null;
+      handleContainerHover(targetId);
+    },
+    onTestPing: () => {
+      bus.publish('ui.test.pong', { ts: Date.now(), ok: true });
+    },
+    onGraphReportRequest: () => publishGraphReport('request'),
+    onHighlightResult: (payload = {}) => handleHighlightResult(payload),
+    onSimulateAction: (payload = {}) => simulateUiAction(payload),
+  });
   updateLinkModeUI();
-  subscribeDesktopEvents();
+  subscribeDesktopState({ desktop, state, ui, queueFitWindow, updateHeadlessButton });
   bus.publish('ui.window.requestState');
   setupAutoFit();
   setupGraphView();
   setupDomTreeView();
-  await loadOperations();
+  setActiveToolPanel(state.uiPanels.activeTool);
+  updateSessionCaptureButtons();
+  updateDomCaptureButtons();
+  const operationsPromise = loadOperations();
   await refreshAll();
-}
-
-function bindWindowControls() {
-  debugLog('binding window controls');
-  ui.closeButton?.addEventListener('click', () => desktop?.close?.());
-  ui.minButton?.addEventListener('click', () => desktop?.minimize?.());
-  ui.collapseButton?.addEventListener('click', (event) => {
-    event.preventDefault();
-    if (state.isCollapsed) {
-      publishWindowCommand('ui.window.restoreFromBall', null, () => desktop?.toggleCollapse?.(false));
-    } else {
-      publishWindowCommand('ui.window.shrinkToBall', null, () => desktop?.toggleCollapse?.(true));
-    }
-  });
-  ui.collapsedStrip?.addEventListener('click', (event) => {
-    event.preventDefault();
-    publishWindowCommand('ui.window.restoreFromBall', null, () => desktop?.toggleCollapse?.(false));
-  });
-  ui.expandCollapsedButton?.addEventListener('click', (event) => {
-    event.stopPropagation();
-    publishWindowCommand('ui.window.restoreFromBall', null, () => desktop?.toggleCollapse?.(false));
-  });
-  ui.headlessButton?.addEventListener('click', () => toggleHeadlessMode());
-  ui.stickBrowserButton?.addEventListener('click', () => {
-    const fallback = () =>
-      invokeAction('window:stick-browser').catch((err) => {
-        showMessage(err.message || '浏览器贴边失败', 'error');
-      });
-    publishWindowCommand('ui.window.stickToBrowser', { browserWidthRatio: 0.68 }, fallback);
-  });
-  updateHeadlessButton();
-}
-
-function subscribeDesktopEvents() {
-  desktop?.onCollapseState?.((payload = {}) => {
-    const collapsed = Boolean(payload?.isCollapsed);
-    state.isCollapsed = collapsed;
-    document.body.classList.toggle('is-collapsed', collapsed);
-    ui.collapsedStrip?.classList.toggle('hidden', !collapsed);
-    if (ui.collapseButton) {
-      ui.collapseButton.textContent = collapsed ? '▢' : '◻︎';
-      ui.collapseButton.title = collapsed ? '展开浮窗' : '贴边收起';
-    }
-    if (!collapsed) {
-      queueFitWindow();
-    }
-  });
-  desktop?.onHeadlessState?.((payload = {}) => {
-    state.headless = Boolean(payload?.headless);
-    updateHeadlessButton();
-  });
-}
-
-function bindEvents() {
-  ui.refreshBrowser?.addEventListener('click', () => loadBrowserStatus());
-  ui.refreshSessions?.addEventListener('click', () => loadSessions());
-  ui.refreshLogs?.addEventListener('click', () => loadLogs());
-  ui.linkModeButton?.addEventListener('click', () => toggleLinkMode());
-  ui.clearLogs?.addEventListener('click', () => {
-    state.logs = [];
-    renderLogs();
-  });
-  ui.refreshContainers?.addEventListener('click', () => loadContainerSnapshot());
-  ui.sessionForm?.addEventListener('submit', async (event) => {
-    event.preventDefault();
-    await handleCreateSession();
-  });
-  ui.openInspectorButton?.addEventListener('click', () => openInspectorView());
-}
-
-function subscribeBusEvents() {
-  bus.subscribe('ui.window.error', (payload = {}) => {
-    const message = payload?.message || payload?.error || '窗口操作失败';
-    showMessage(message, 'error');
-  });
-  bus.subscribe('ui.graph.expandDom', (payload = {}) => {
-    const targetPath = payload?.path || payload?.domPath;
-    if (targetPath) {
-      toggleDomNodeExpand(targetPath);
-    }
-  });
-  bus.subscribe('ui.test.ping', () => {
-    bus.publish('ui.test.pong', { ts: Date.now(), ok: true });
-  });
-  bus.subscribe('ui.graph.requestReport', () => publishGraphReport('request'));
+  await operationsPromise;
+  ensureAutoRefreshTimer(true);
 }
 
 function setupAutoFit() {
@@ -264,6 +360,8 @@ function setupGraphView() {
     onSelectDom: (domPath) => handleDomSelection(domPath),
     onLinkNodes: (containerId, domPath) => handleGraphLink(containerId, domPath),
     onExpandDom: (domPath) => toggleDomNodeExpand(domPath),
+    onHoverDom: (domPath) => handleDomHover(domPath),
+    onHoverContainer: (containerId) => handleContainerHover(containerId),
   });
   syncGraphInteractionMode();
 }
@@ -276,6 +374,7 @@ function setupDomTreeView() {
     getSelectedPath: () => state.selectedDomPath,
     onSelectNode: (path) => handleDomSelection(path),
     onToggleExpand: (path) => toggleDomNodeExpand(path),
+    onHoverNode: (path) => handleDomHover(path),
   });
 }
 
@@ -328,6 +427,15 @@ function updateHeadlessButton() {
   ui.headlessButton.title = hidden ? '显示浮窗' : '隐藏浮窗';
 }
 
+function setActiveToolPanel(name = 'dom') {
+  const target = name === 'container' ? 'container' : 'dom';
+  state.uiPanels.activeTool = target;
+  ui.toolTabDom?.classList.toggle('is-active', target === 'dom');
+  ui.toolTabContainer?.classList.toggle('is-active', target === 'container');
+  ui.domToolPanel?.classList.toggle('is-active', target === 'dom');
+  ui.containerToolPanel?.classList.toggle('is-active', target === 'container');
+}
+
 function syncGraphInteractionMode() {
   if (!graphView) return;
   graphView.setInteractionMode({
@@ -352,95 +460,71 @@ function queueFitWindow() {
 }
 
 async function refreshAll() {
-  await Promise.all([loadBrowserStatus(), loadSessions(), loadLogs()]);
+  const parallelTasks = [loadBrowserStatus(), loadLogs()];
+  const ready = await ensureInitialSessionSnapshot();
+  await Promise.allSettled(parallelTasks);
+  if (!ready) {
+    debugLog('refreshAll session state', {
+      selected: state.selectedSession,
+      sessionCount: (state.sessions || []).length,
+      status: 'pending',
+    });
+  }
   renderContainers();
   queueFitWindow();
 }
 
-async function loadBrowserStatus() {
-  setLoading('browser', true);
-  try {
-    const res = await invokeAction('browser:status');
-    debugLog('loadBrowserStatus result', res);
-    state.browserStatus = res;
-  } catch (err) {
-    state.browserStatus = { healthy: false, error: err.message || String(err) };
-    showMessage(err.message || '获取浏览器状态失败', 'error');
-  } finally {
-    setLoading('browser', false);
-    renderBrowserPanel();
-  }
+function extractSessionProfileId(session) {
+  if (!session) return null;
+  return (
+    session.profileId ||
+    session.profile_id ||
+    session.session_id ||
+    session.sessionId ||
+    session.profile ||
+    null
+  );
 }
 
-async function loadSessions() {
-  setLoading('sessions', true);
-  try {
-    const res = await invokeAction('session:list');
-    const data = res?.sessions || res?.data?.sessions || res?.data || [];
-    debugLog('loadSessions result', data);
-    state.sessions = Array.isArray(data) ? data : [];
-    const hasSelected =
-      state.selectedSession && state.sessions.some((s) => s.profileId === state.selectedSession);
-    if (!hasSelected) {
-      if (state.sessions.length === 1) {
-        state.selectedSession = state.sessions[0].profileId;
-      } else {
-        state.selectedSession = null;
+async function ensureInitialSessionSnapshot() {
+  for (let attempt = 0; attempt < INITIAL_SESSION_RETRIES; attempt += 1) {
+    await loadSessions({ skipSnapshot: true, silent: attempt > 0 });
+    if (!state.selectedSession && Array.isArray(state.sessions) && state.sessions.length) {
+      const candidate = extractSessionProfileId(state.sessions[0]);
+      if (candidate) {
+        setSelectedSessionRef?.(candidate);
+        state.selectedSession = candidate;
       }
     }
-  } catch (err) {
-    state.sessions = [];
-    showMessage(err.message || '会话列表获取失败', 'error');
-  } finally {
-    setLoading('sessions', false);
-    renderSessions();
-    renderBrowserPanel();
+    debugLog('ensureInitialSessionSnapshot', {
+      attempt,
+      selected: state.selectedSession,
+      sessionCount: (state.sessions || []).length,
+    });
+    if (window?.floatingConfig?.debug) {
+      console.log('[floating-ui] ensureInitialSessionSnapshot', {
+        attempt,
+        selected: state.selectedSession,
+        sessionCount: (state.sessions || []).length,
+      });
+    }
     if (state.selectedSession) {
-      loadContainerSnapshot(true);
+      await loadContainerSnapshot();
+      return true;
+    }
+    if (attempt < INITIAL_SESSION_RETRIES - 1) {
+      const delay = INITIAL_SESSION_RETRY_DELAY_MS * Math.pow(1.4, attempt);
+      await sleep(delay);
     }
   }
+  return false;
 }
 
-async function loadLogs() {
-  setLoading('logs', true);
-  try {
-    const res = await invokeAction('logs:stream', {
-      source: ui.logSourceSelect?.value || 'browser',
-      lines: 120,
-    });
-    const data = res?.lines || res?.data?.lines || [];
-    state.logs = Array.isArray(data) ? data : [];
-  } catch (err) {
-    state.logs = [];
-    showMessage(err.message || '日志读取失败', 'error');
-  } finally {
-    setLoading('logs', false);
-    renderLogs();
-  }
-}
-
-async function handleCreateSession() {
-  const profile = (ui.profileInput?.value || '').trim() || `profile-${Date.now().toString(36)}`;
-  const url = (ui.launchUrlInput?.value || '').trim();
-  const headless = Boolean(ui.headlessToggle?.checked);
-  try {
-    await invokeAction('session:create', { profile, url, headless });
-    showMessage(`已创建/唤醒 ${profile}`, 'success');
-    ui.sessionForm?.reset();
-    await loadSessions();
-  } catch (err) {
-    showMessage(err.message || '创建会话失败', 'error');
-  }
-}
-
-async function handleDeleteSession(profileId) {
-  if (!profileId) return;
-  try {
-    await invokeAction('session:delete', { profile: profileId });
-    showMessage(`会话 ${profileId} 已停止`, 'success');
-    await loadSessions();
-  } catch (err) {
-    showMessage(err.message || '删除失败', 'error');
+function handleGlobalKeydown(event) {
+  if (!event) return;
+  if (event.key === 'Escape' && isDomPickerActive()) {
+    event.preventDefault();
+    cancelDomPickerSession({ silent: true, reason: 'escape' });
   }
 }
 
@@ -472,163 +556,6 @@ async function loadOperations() {
   renderOperations();
 }
 
-function renderBrowserPanel() {
-  if (!ui.browserStatusText || !ui.browserDetails) return;
-  const status = state.browserStatus;
-  const sessionCount = state.sessions.length;
-  const healthy = typeof status?.healthy === 'boolean' ? status.healthy : sessionCount > 0;
-  const label = healthy ? '服务就绪' : '服务未就绪';
-  if (ui.metaText) {
-    ui.metaText.textContent = healthy ? '就绪' : '未就绪';
-    ui.metaText.dataset.state = healthy ? 'ok' : 'warn';
-  }
-  ui.browserStatusText.textContent = label;
-  ui.browserStatusText.dataset.state = healthy ? 'ok' : 'warn';
-  if (healthy) {
-    ui.browserDetails.textContent = `活动会话 ${sessionCount} 个`;
-  } else if (sessionCount > 0) {
-    ui.browserDetails.textContent = `检测到 ${sessionCount} 个会话，等待服务心跳`;
-  } else {
-    ui.browserDetails.textContent =
-      status?.error || '请先启动浏览器服务（端口 7704/8765）';
-  }
-  queueFitWindow();
-}
-
-function renderSessions() {
-  if (!ui.sessionList) return;
-  ui.sessionList.innerHTML = '';
-  if (!state.sessions.length) {
-    const empty = document.createElement('div');
-    empty.className = 'placeholder';
-    empty.innerHTML = '<strong>暂无会话</strong><p>使用上方表单创建新的浏览器会话。</p>';
-    ui.sessionList.appendChild(empty);
-    return;
-  }
-
-  state.sessions.forEach((session) => {
-    const card = document.createElement('div');
-    card.className = 'session-card';
-    if (state.selectedSession === session.profileId) {
-      card.classList.add('active');
-    }
-    const title = document.createElement('div');
-    title.textContent = session.profileId || session.session_id;
-    title.style.fontWeight = '600';
-
-    const meta = document.createElement('div');
-    meta.className = 'session-meta';
-    meta.innerHTML = `<span>${session.mode || session.modeName || '未知模式'}</span><span>${
-      session.current_url || session.currentUrl || '未导航'
-    }</span>`;
-
-    const actions = document.createElement('div');
-    actions.className = 'session-actions';
-    const selectBtn = document.createElement('button');
-    selectBtn.className = 'ghost';
-    selectBtn.textContent = state.selectedSession === session.profileId ? '已选' : '选择';
-    selectBtn.addEventListener('click', (event) => {
-      event.stopPropagation();
-      state.selectedSession = session.profileId;
-      renderSessions();
-      loadContainerSnapshot();
-    });
-
-    const deleteBtn = document.createElement('button');
-    deleteBtn.textContent = '停止';
-    deleteBtn.addEventListener('click', (event) => {
-      event.stopPropagation();
-      handleDeleteSession(session.profileId);
-    });
-
-    actions.appendChild(selectBtn);
-    actions.appendChild(deleteBtn);
-
-    card.addEventListener('click', () => {
-      state.selectedSession = session.profileId;
-      renderSessions();
-      loadContainerSnapshot();
-    });
-
-    card.appendChild(title);
-    card.appendChild(meta);
-    card.appendChild(actions);
-    ui.sessionList.appendChild(card);
-  });
-  queueFitWindow();
-}
-
-async function loadContainerSnapshot(skipLoading = false) {
-  if (!state.selectedSession) {
-    debugLog('loadContainerSnapshot: no session selected');
-    state.containerSnapshot = null;
-    setDomTreeSnapshot(state.domTreeStore, null);
-    state.selectedDomPath = null;
-    renderContainers();
-    return;
-  }
-  if (!skipLoading) setLoading('containers', true);
-  try {
-    const selected = state.sessions.find((s) => s.profileId === state.selectedSession);
-    const url = selected?.current_url || selected?.currentUrl;
-    if (!url) throw new Error('会话没有 URL');
-    const res = await invokeAction('containers:inspect', {
-      profile: state.selectedSession,
-      url,
-      ...DOM_SNAPSHOT_OPTIONS,
-    });
-    debugLog('loadContainerSnapshot result', res);
-    applyContainerSnapshotData(res, { toastMessage: `容器树已捕获 (${state.selectedSession})` });
-  } catch (err) {
-    state.containerSnapshot = null;
-    setDomTreeSnapshot(state.domTreeStore, null);
-    state.selectedDomPath = null;
-    state.domNeedsReset = false;
-    showMessage(err.message || '容器树捕获失败', 'error');
-  } finally {
-    setLoading('containers', false);
-    renderContainers();
-  }
-}
-
-function applyContainerSnapshotData(result, options = {}) {
-  const snapshot = result?.snapshot || result?.containerSnapshot || result;
-  if (!snapshot || !snapshot.container_tree) {
-    throw new Error('容器树为空');
-  }
-  state.containerSnapshot = snapshot;
-  setDomTreeSnapshot(state.domTreeStore, snapshot?.dom_tree || result?.domTree || null);
-  const domTree = getDomTree(state.domTreeStore);
-  resetGraphStore(state.graphStore);
-  if (snapshot?.container_tree) {
-    ingestContainerTree(state.graphStore, snapshot.container_tree);
-  }
-  if (snapshot?.dom_tree) {
-    ingestDomTree(state.graphStore, snapshot.dom_tree);
-  }
-  if (snapshot?.container_tree?.id) {
-    state.selectedContainerId = snapshot.container_tree.id;
-  }
-  if (domTree?.path) {
-    state.selectedDomPath = domTree.path;
-  }
-  const initialPaths = findAllDomPathsForContainer(state.selectedContainerId, domTree);
-  if (!state.selectedDomPath && initialPaths.length) {
-    state.selectedDomPath = initialPaths[0];
-  }
-  state.domNeedsReset = true;
-  if (options.toastMessage) {
-    showMessage(options.toastMessage, 'success');
-  }
-  if (state.selectedContainerId) {
-    ensureContainerDomMapping(state.selectedContainerId);
-  }
-  if (AUTO_EXPAND_PATHS.length) {
-    autoExpandTriggered = false;
-  }
-  scheduleAutoExpand();
-}
-
 function renderContainers() {
   setupGraphView();
   if (ui.openInspectorButton) {
@@ -649,7 +576,11 @@ function renderContainers() {
   if (rootId) {
     const belongsToRoot = (id) => !id || id === rootId || id.startsWith(`${rootId}.`);
     containerRows = containerRows.filter((row) => belongsToRoot(getContainerId(row.container)));
-    domNodes = domNodes.filter((node) => !node.containerId || belongsToRoot(node.containerId));
+    domNodes = domNodes.filter((node) => {
+      const ids = Array.isArray(node.containerIds) && node.containerIds.length ? node.containerIds : node.containerId ? [node.containerId] : [];
+      if (!ids.length) return true;
+      return ids.some((id) => belongsToRoot(id));
+    });
     links = links.filter((link) => belongsToRoot(link.from));
   }
   domNodes = domNodes.filter((node) => shouldDisplayDomNode(node));
@@ -739,6 +670,8 @@ function renderTreeDetails() {
   const rootId = getRootContainerId();
   renderContainerTreeList(state.containerSnapshot?.container_tree, rootId);
   domTreeView?.render();
+  renderDomActionPanel();
+  renderContainerOperationsPanel();
 }
 
 function renderContainerTreeList(rootNode, rootId) {
@@ -798,6 +731,153 @@ function buildContainerTreeRows(node, depth, target, rootId) {
   }
 }
 
+function getSelectedDomNode() {
+  if (!state.selectedDomPath) return null;
+  const domTree = getDomTree(state.domTreeStore);
+  if (!domTree) return null;
+  return findDomNodeByPath(domTree, state.selectedDomPath) || null;
+}
+
+function buildChildContainerId(parentId, domNode) {
+  const slugSource = domNode?.id || domNode?.classes?.[0] || domNode?.tag || 'section';
+  const slug = (slugSource || '')
+    .toString()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 40) || 'section';
+  return parentId ? `${parentId}.${slug}` : slug;
+}
+
+function deriveDomAlias(domNode) {
+  if (!domNode) return '';
+  if (domNode.id) return domNode.id;
+  if (domNode.classes?.length) return domNode.classes[0];
+  return (domNode.tag || 'section').toLowerCase();
+}
+
+function getParentPathFromString(path) {
+  if (!path) return null;
+  const tokens = normalizeDomPathString(path)
+    .split('/')
+    .filter((token) => token.length);
+  if (tokens.length <= 1) {
+    return null;
+  }
+  return tokens.slice(0, -1).join('/');
+}
+
+function applyDomPickerResult(path, pickerData = {}) {
+  if (!path) return null;
+  const node = ensureDomPathExists(state.domTreeStore, path);
+  if (!node) return null;
+  if (pickerData.tag) {
+    node.tag = pickerData.tag;
+  }
+  if (Object.prototype.hasOwnProperty.call(pickerData, 'id')) {
+    node.id = pickerData.id || null;
+  }
+  if (Array.isArray(pickerData.classes)) {
+    node.classes = [...pickerData.classes];
+  }
+  if (pickerData.selector) {
+    node.selector = pickerData.selector;
+  }
+  if (pickerData.text) {
+    node.textSnippet = pickerData.text;
+  }
+  if (pickerData.bounding_rect) {
+    node.boundingRect = pickerData.bounding_rect;
+  }
+  if (typeof node.childCount !== 'number') {
+    node.childCount = 0;
+  }
+  if (!Array.isArray(node.containers)) {
+    node.containers = [];
+  }
+  syncGraphNodeWithDomNode(path, node);
+  return node;
+}
+
+function syncGraphNodeWithDomNode(path, domNode) {
+  if (!state?.graphStore) return null;
+  const existing = state.graphStore.domNodes.get(path) || {};
+  const parentPath =
+    existing.parentPath || getParentPathFromString(path) || null;
+  const parentDepth = parentPath
+    ? state.graphStore.domNodes.get(parentPath)?.depth || 0
+    : 0;
+  const merged = {
+    ...existing,
+    path,
+    tag: domNode?.tag || existing.tag,
+    id: domNode?.id ?? existing.id ?? null,
+    classes: Array.isArray(domNode?.classes)
+      ? [...domNode.classes]
+      : existing.classes || [],
+    selector: domNode?.selector || existing.selector || null,
+    parentPath,
+    depth: typeof existing.depth === 'number' ? existing.depth : parentDepth + 1,
+    childCount:
+      typeof domNode?.childCount === 'number'
+        ? domNode.childCount
+        : existing.childCount || 0,
+    containers: domNode?.containers || existing.containers || [],
+    loading: Boolean(existing.loading),
+  };
+  state.graphStore.domNodes.set(path, merged);
+  if (!state.graphStore.domChildren.has(path)) {
+    state.graphStore.domChildren.set(path, new Set());
+  }
+  if (merged.parentPath) {
+    if (!state.graphStore.domChildren.has(merged.parentPath)) {
+      state.graphStore.domChildren.set(merged.parentPath, new Set());
+    }
+    state.graphStore.domChildren.get(merged.parentPath)?.add(path);
+  }
+  return merged;
+}
+
+function buildDomNodeSelectors(node) {
+  if (!node) return [];
+  const selectors = [];
+  const seen = new Set();
+  const push = (css, variant, score) => {
+    if (!css || seen.has(css)) return;
+    seen.add(css);
+    selectors.push({ css, variant, score });
+  };
+  if (node.selector) push(node.selector, 'primary', 1);
+  if (node.id) push(`#${node.id}`, 'id', 0.95);
+  if (node.classes?.length) {
+    const classSelector = `${(node.tag || 'div').toLowerCase()}.${node.classes.join('.')}`;
+    push(classSelector, 'structure', 0.85);
+  }
+  if (node.tag) push(node.tag.toLowerCase(), 'tag', 0.5);
+  return selectors;
+}
+
+function deriveDomNodePrimarySelector(node) {
+  const selectors = buildDomNodeSelectors(node);
+  if (!selectors.length) return null;
+  return selectors[0].css || null;
+}
+
+function findNearestContainerIdForDom(path) {
+  if (!path) return getRootContainerId();
+  let current = path;
+  const domTree = getDomTree(state.domTreeStore);
+  while (current) {
+    const node = findDomNodeByPath(domTree, current);
+    if (node?.containers?.length) {
+      const best = pickBestContainerId(node.containers);
+      if (best) return best;
+    }
+    current = getDomParentPath(current);
+  }
+  return getRootContainerId();
+}
+
 async function toggleDomNodeExpand(path) {
   if (!path) return;
   debugLog('toggleDomNodeExpand', path);
@@ -840,6 +920,35 @@ async function toggleDomNodeExpand(path) {
   }
 }
 
+async function ensureDomNodeExpanded(path) {
+  if (!path) return;
+  if (!isPathExpanded(state.domTreeStore, path)) {
+    const ready = await waitForSessionReady();
+    if (!ready) {
+      bus.publish('ui.graph.domExpandFailed', { path, error: 'session-missing' });
+      return;
+    }
+    await toggleDomNodeExpand(path);
+    return;
+  }
+  const childCount = getDomChildren(state.graphStore, path).length;
+  bus.publish('ui.graph.domExpanded', { path, childCount });
+}
+
+async function waitForSessionReady(timeoutMs = 15000) {
+  if (state.selectedSession) {
+    return true;
+  }
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (state.selectedSession) {
+      return true;
+    }
+    await sleep(200);
+  }
+  return Boolean(state.selectedSession);
+}
+
 async function loadDomBranch(path) {
   const domTree = getDomTree(state.domTreeStore);
   if (!path || !domTree || !state.selectedSession) return false;
@@ -856,7 +965,7 @@ async function loadDomBranch(path) {
     url,
     path: normalizeDomPathString(path),
     rootSelector: getRootDomSelector(),
-    ...DOM_SNAPSHOT_OPTIONS,
+    ...DOM_BRANCH_OPTIONS,
   };
   setBranchLoading(state.domTreeStore, path, true);
   markLoading(state.graphStore, path, true);
@@ -907,6 +1016,7 @@ function setGraphPlaceholder(title, desc, options = {}) {
   } catch (err) {
     console.warn('[ui] set placeholder failed', err);
   }
+  syncContainerOpsEditor(null, { force: true });
   if (!options.preserveCounts) {
     if (ui.treeContainerCount) ui.treeContainerCount.textContent = '0';
     if (ui.treeDomCount) ui.treeDomCount.textContent = '0';
@@ -927,7 +1037,13 @@ function handleContainerSelection(containerId) {
   }
   const selector = getContainerSelector(containerId, state.containerSnapshot.container_tree);
   if (selector) {
-    triggerHighlight(selector);
+    triggerHighlight(selector, {
+      channel: 'container-select',
+      sticky: false,
+      duration: DEFAULT_HIGHLIGHT_DURATION,
+      feedback: false,
+      clearBefore: false,
+    });
   }
   if (state.linkMode.active) {
     state.linkMode.containerId = containerId;
@@ -935,6 +1051,8 @@ function handleContainerSelection(containerId) {
   }
   graphView?.setSelection({ containerId: state.selectedContainerId, domPath: state.selectedDomPath });
   renderTreeDetails();
+  renderDomActionPanel();
+  syncContainerOpsEditor(state.selectedContainerId);
   queueFitWindow();
   ensureContainerDomMapping(containerId);
 }
@@ -945,9 +1063,14 @@ function handleDomSelection(domPath) {
   state.selectedDomPath = domPath;
   const node = findDomNodeByPath(domTree, domPath);
   if (node?.containers?.length) {
-    const container = node.containers[0].container_id || node.containers[0].container_name;
-    if (container) {
-      state.selectedContainerId = container;
+    const best = pickBestContainerId(node.containers);
+    if (best) {
+      state.selectedContainerId = best;
+    }
+  } else {
+    const fallback = findNearestContainerIdForDom(domPath);
+    if (fallback) {
+      state.selectedContainerId = fallback;
     }
   }
   if (state.linkMode.active && state.linkMode.containerId && !state.linkMode.busy) {
@@ -956,11 +1079,265 @@ function handleDomSelection(domPath) {
   }
   const selector = getDomNodeSelector(node);
   if (selector) {
-    triggerHighlight(selector);
+    triggerHighlight(selector, {
+      channel: 'dom-selection',
+      sticky: true,
+      duration: 0,
+      clearBefore: true,
+      remember: true,
+    });
   }
   graphView?.setSelection({ containerId: state.selectedContainerId, domPath: state.selectedDomPath });
   renderTreeDetails();
+  renderDomActionPanel();
+  syncContainerOpsEditor(state.selectedContainerId);
   queueFitWindow();
+}
+
+function ensureActiveSession() {
+  if (state.selectedSession) return true;
+  const candidate = Array.isArray(state.sessions) && state.sessions.length ? extractSessionProfileId(state.sessions[0]) : null;
+  if (candidate) {
+    setSelectedSessionRef?.(candidate);
+    state.selectedSession = candidate;
+    return true;
+  }
+  const now = Date.now();
+  if (now - lastSessionWarningTs > 4000) {
+    lastSessionWarningTs = now;
+    showMessage('请选择会话后再操作 DOM 高亮', 'warn');
+  }
+  return false;
+}
+
+function clearHoverChannel(channelKey) {
+  if (!channelKey || typeof clearHighlightInternal !== 'function') {
+    return;
+  }
+  try {
+    const result = clearHighlightInternal({ silent: true, channel: channelKey });
+    if (result?.catch) {
+      result.catch((err) => {
+        if (DEBUG) {
+          console.warn('[ui] hover clear failed', channelKey, err?.message || err);
+        }
+      });
+    }
+  } catch (err) {
+    if (DEBUG) {
+      console.warn('[ui] hover clear threw', channelKey, err?.message || err);
+    }
+  }
+}
+
+function handleDomHover(domPath) {
+  const normalizedPath = domPath || null;
+  if (!normalizedPath) {
+    if (hoverState.domPath) {
+      hoverState.domPath = null;
+      clearHoverChannel(HOVER_DOM_CHANNEL);
+      try {
+        bus.publish('ui.graph.domHover', { path: null });
+      } catch {
+        /* noop */
+      }
+    }
+    return;
+  }
+  if (!state.selectedSession && !ensureActiveSession()) {
+    return;
+  }
+  if (hoverState.domPath === normalizedPath) {
+    return;
+  }
+  const domTree = getDomTree(state.domTreeStore);
+  if (!domTree) {
+    return;
+  }
+  const node = findDomNodeByPath(domTree, normalizedPath);
+  if (!node) {
+    return;
+  }
+  const selector = getDomNodeSelector(node);
+  if (!selector) {
+    hoverState.domPath = null;
+    clearHoverChannel(HOVER_DOM_CHANNEL);
+    try {
+      bus.publish('ui.graph.domHover', { path: null });
+    } catch {
+      /* noop */
+    }
+    return;
+  }
+  hoverState.domPath = normalizedPath;
+  triggerHighlight(selector, {
+    channel: HOVER_DOM_CHANNEL,
+    style: HOVER_DOM_STYLE,
+    sticky: true,
+    duration: 0,
+    feedback: false,
+    remember: false,
+    clearBefore: false,
+    delayMs: 0,
+  });
+  try {
+    bus.publish('ui.graph.domHover', { path: normalizedPath, selector });
+  } catch {
+    /* noop */
+  }
+}
+
+function handleContainerHover(containerId) {
+  const normalizedId = containerId || null;
+  if (!normalizedId) {
+    if (hoverState.containerId) {
+      hoverState.containerId = null;
+      clearHoverChannel(HOVER_CONTAINER_CHANNEL);
+      try {
+        bus.publish('ui.graph.containerHover', { containerId: null });
+      } catch {
+        /* noop */
+      }
+    }
+    return;
+  }
+  if (!state.selectedSession && !ensureActiveSession()) {
+    return;
+  }
+  if (hoverState.containerId === normalizedId) {
+    return;
+  }
+  const selector = getContainerSelector(normalizedId, state.containerSnapshot?.container_tree);
+  if (!selector) {
+    hoverState.containerId = null;
+    clearHoverChannel(HOVER_CONTAINER_CHANNEL);
+    try {
+      bus.publish('ui.graph.containerHover', { containerId: null });
+    } catch {
+      /* noop */
+    }
+    return;
+  }
+  hoverState.containerId = normalizedId;
+  triggerHighlight(selector, {
+    channel: HOVER_CONTAINER_CHANNEL,
+    style: HOVER_CONTAINER_STYLE,
+    sticky: true,
+    duration: 0,
+    feedback: false,
+    remember: false,
+    clearBefore: false,
+    delayMs: 0,
+  });
+  try {
+    bus.publish('ui.graph.containerHover', { containerId: normalizedId, selector });
+  } catch {
+    /* noop */
+  }
+}
+
+function resolveSimulateElement(payload = {}) {
+  const elementId = payload.elementId || payload.targetId || null;
+  if (elementId) {
+    const target = document.getElementById(elementId);
+    if (target) return target;
+  }
+  const selector = payload.selector || payload.querySelector;
+  if (selector) {
+    const target = document.querySelector(selector);
+    if (target) return target;
+  }
+  const controlId = payload.controlId || payload.target;
+  if (controlId) {
+    const target = document.querySelector(`[data-control-id="${controlId}"]`);
+    if (target) return target;
+  }
+  return null;
+}
+
+function reportSimulateResult({ success, requestId, error }) {
+  bus.publish('ui.simulate.result', {
+    requestId,
+    success,
+    error: success ? null : error || 'unknown error',
+    ts: Date.now(),
+  });
+}
+
+function simulateUiAction(payload = {}) {
+  const requestId = payload.requestId || payload.id || null;
+  const element = resolveSimulateElement(payload);
+  if (!element) {
+    reportSimulateResult({ success: false, requestId, error: 'element not found' });
+    return;
+  }
+  const type = (payload.type || 'click').toLowerCase();
+  const commonInit = { bubbles: true, cancelable: true, composed: true, ...(payload.eventInit || {}) };
+  try {
+    switch (type) {
+      case 'click':
+      case 'dblclick':
+      case 'contextmenu':
+      case 'mousedown':
+      case 'mouseup': {
+        const event = new MouseEvent(type, {
+          clientX: payload.clientX ?? 0,
+          clientY: payload.clientY ?? 0,
+          ...commonInit,
+        });
+        element.dispatchEvent(event);
+        if (type === 'click') {
+          element.click?.();
+        }
+        break;
+      }
+      case 'input': {
+        if (payload.value !== undefined && 'value' in element) {
+          element.value = payload.value;
+        }
+        element.dispatchEvent(new Event('input', commonInit));
+        break;
+      }
+      case 'change': {
+        if (payload.value !== undefined && 'value' in element) {
+          element.value = payload.value;
+        }
+        element.dispatchEvent(new Event('change', commonInit));
+        break;
+      }
+      case 'focus': {
+        element.focus?.();
+        break;
+      }
+      case 'blur': {
+        element.blur?.();
+        break;
+      }
+      case 'keydown':
+      case 'keyup':
+      case 'keypress': {
+        const event = new KeyboardEvent(type, {
+          key: payload.key || '',
+          code: payload.code || '',
+          ...commonInit,
+        });
+        element.dispatchEvent(event);
+        break;
+      }
+      default: {
+        const event = new Event(type, commonInit);
+        element.dispatchEvent(event);
+        break;
+      }
+    }
+    reportSimulateResult({ success: true, requestId });
+  } catch (err) {
+    reportSimulateResult({
+      success: false,
+      requestId,
+      error: err?.message || String(err),
+    });
+  }
 }
 
 function handleGraphLink(containerId, domPath) {
@@ -1007,13 +1384,13 @@ async function remapContainerToDom(containerId, domPath, domNode = null) {
     },
   };
   try {
-  state.linkMode.busy = true;
-  updateLinkModeUI();
-  const res = await invokeAction('containers:remap', payload);
-  applyContainerSnapshotData(res, { toastMessage: '容器选择器已更新' });
-  bus.publish('ui.graph.containerRemapped', { containerId, domPath, selector });
-  toggleLinkMode(false);
-  renderContainers();
+    state.linkMode.busy = true;
+    updateLinkModeUI();
+    const res = await invokeAction('containers:remap', payload);
+    applyContainerSnapshotData(res, { toastMessage: '容器选择器已更新' });
+    bus.publish('ui.graph.containerRemapped', { containerId, domPath, selector });
+    toggleLinkMode(false);
+    renderContainers();
   } catch (err) {
     showMessage(err?.message || '容器重连失败', 'error');
   } finally {
@@ -1041,6 +1418,53 @@ function resolveCurrentPageUrl() {
     state.containerSnapshot?.target_url ||
     ''
   );
+}
+
+function ensureAutoRefreshTimer(force = false) {
+  if (!AUTO_REFRESH_INTERVAL_MS) {
+    stopAutoRefreshTimer();
+    return;
+  }
+  if (state.autoRefreshTimer && !force) {
+    return;
+  }
+  stopAutoRefreshTimer();
+  state.autoRefreshTimer = setInterval(() => {
+    attemptAutoRefreshSnapshot().catch((err) => debugLog('auto refresh failed', err?.message || err));
+  }, AUTO_REFRESH_INTERVAL_MS);
+}
+
+function stopAutoRefreshTimer() {
+  if (state.autoRefreshTimer) {
+    clearInterval(state.autoRefreshTimer);
+    state.autoRefreshTimer = null;
+  }
+}
+
+async function attemptAutoRefreshSnapshot() {
+  if (state.loading.containers || state.autoRefreshBusy) return;
+  state.autoRefreshBusy = true;
+  try {
+    await loadSessions({ silent: true, skipSnapshot: true });
+    if (!state.selectedSession) {
+      return;
+    }
+    const meta = state.snapshotMeta || {};
+    const now = Date.now();
+    const currentUrl = resolveCurrentPageUrl();
+    const urlChanged = Boolean(currentUrl && meta.url && currentUrl !== meta.url);
+    const neverCaptured = !meta.capturedAt;
+    const stale = now - (meta.capturedAt || 0) >= AUTO_REFRESH_MAX_AGE_MS;
+    if (!urlChanged && !stale && !neverCaptured) {
+      return;
+    }
+    debugLog('auto refresh snapshot triggered', { urlChanged, stale, neverCaptured });
+    await loadContainerSnapshot(true);
+  } catch (err) {
+    debugLog('auto refresh snapshot failed', err?.message || err);
+  } finally {
+    state.autoRefreshBusy = false;
+  }
 }
 
 function getRootDomSelector() {
@@ -1072,7 +1496,7 @@ async function ensureContainerDomMapping(containerId) {
       profile: state.selectedSession,
       url,
       containerId,
-      ...DOM_SNAPSHOT_OPTIONS,
+      ...DOM_BRANCH_OPTIONS,
     });
     const snapshot = res?.data?.snapshot || res?.snapshot || res;
     const targetTree = snapshot?.container_tree;
@@ -1105,6 +1529,47 @@ function scheduleAutoExpand() {
   }, 800);
 }
 
+function resetAutoExpandFlag() {
+  if (AUTO_EXPAND_PATHS.length) {
+    autoExpandTriggered = false;
+  }
+}
+
+function annotateDomTreeWithMatches(matchMap = {}) {
+  const domTree = getDomTree(state.domTreeStore);
+  if (!domTree || !matchMap || typeof matchMap !== 'object') return;
+  Object.entries(matchMap).forEach(([containerId, payload]) => {
+    if (!containerId || !payload) return;
+    if (getContainerDepth(containerId) < 0) {
+      return;
+    }
+    const nodes = payload.nodes || [];
+    nodes.forEach((node) => {
+      const rawPath = node?.dom_path || node?.path;
+      if (!rawPath) return;
+      const normalized = normalizeDomPathString(rawPath);
+      const target = ensureDomPathExists(state.domTreeStore, normalized);
+      if (!target) return;
+      if (!Array.isArray(target.containers)) {
+        target.containers = [];
+      }
+      const exists = target.containers.some(
+        (entry) =>
+          entry?.container_id === containerId ||
+          entry?.container_name === containerId ||
+          entry?.containerId === containerId,
+      );
+      if (!exists) {
+        target.containers.push({
+          container_id: containerId,
+          container_name: payload?.container?.name || payload?.container?.id || containerId,
+          selector: node?.selector || null,
+        });
+      }
+    });
+  });
+}
+
 function getDomParentPath(path) {
   if (!path) return null;
   const entry = getDomNode(state.graphStore, path);
@@ -1114,6 +1579,7 @@ function getDomParentPath(path) {
 function shouldDisplayDomNode(node) {
   if (!node) return false;
   if (node.containerId) return true;
+  if (Array.isArray(node.containerIds) && node.containerIds.length) return true;
   const path = node.path;
   if (!path) return false;
   if (isDefaultVisible(state.domTreeStore, path)) return true;
@@ -1141,6 +1607,30 @@ function buildGraphReportPayload() {
       visibleChildCount.set(parent, (visibleChildCount.get(parent) || 0) + 1);
     }
   });
+  const linkCountByContainer = new Map();
+  (graphData.links || []).forEach((link) => {
+    if (!link?.from) return;
+    linkCountByContainer.set(link.from, (linkCountByContainer.get(link.from) || 0) + 1);
+  });
+  const visibleDomByContainer = new Map();
+  (graphData.domNodes || []).forEach((node) => {
+    const idList =
+      Array.isArray(node.containerIds) && node.containerIds.length
+        ? node.containerIds
+        : node.containerId
+          ? [node.containerId]
+          : [];
+    if (!idList.length) return;
+    const isVisible = visibilityMap.get(node.path) || false;
+    idList.forEach((containerId) => {
+      if (!visibleDomByContainer.has(containerId)) {
+        visibleDomByContainer.set(containerId, 0);
+      }
+      if (isVisible) {
+        visibleDomByContainer.set(containerId, (visibleDomByContainer.get(containerId) || 0) + 1);
+      }
+    });
+  });
   const domReport = (graphData.domNodes || []).map((node) => {
     const storeNode = getDomNode(state.graphStore, node.path) || {};
     const totalChildren = typeof storeNode.childCount === 'number' ? storeNode.childCount : getDomChildren(state.graphStore, node.path).length;
@@ -1151,6 +1641,7 @@ function buildGraphReportPayload() {
       path: node.path,
       label: node.label,
       containerId: node.containerId || null,
+      containerIds: Array.isArray(node.containerIds) ? node.containerIds : node.containerId ? [node.containerId] : [],
       childCount: totalChildren,
       loadedChildren,
       visibleChildren,
@@ -1165,14 +1656,52 @@ function buildGraphReportPayload() {
     containerCount: graphData.containerRows?.length || 0,
     domCount: domReport.length,
     domNodes: domReport,
+    containerCoverage: buildContainerCoverage(graphData, linkCountByContainer, visibleDomByContainer),
+  };
+}
+
+function buildContainerCoverage(graphData, linkCountByContainer, visibleDomByContainer) {
+  const stats = (graphData.containerRows || [])
+    .map((row) => {
+      const containerId = getContainerId(row?.container);
+      if (!containerId) return null;
+      const matchCount = Number(row?.container?.match?.match_count || 0);
+      const linkCount = linkCountByContainer.get(containerId) || 0;
+      const visibleDomNodes = visibleDomByContainer.get(containerId) || 0;
+      return {
+        containerId,
+        matchCount,
+        linkCount,
+        visibleDomNodes,
+        missingDom: matchCount > 0 && visibleDomNodes === 0,
+      };
+    })
+    .filter(Boolean);
+  const missing = stats.filter((entry) => entry.missingDom).map((entry) => entry.containerId);
+  return {
+    total: stats.length,
+    missing,
+    stats,
   };
 }
 
 function publishGraphReport(reason = 'manual') {
   const payload = buildGraphReportPayload();
+  handleCoverageDiagnostics(payload.containerCoverage);
   bus.publish('ui.graph.report', { ...payload, reason });
 }
 
+function handleCoverageDiagnostics(coverage = {}) {
+  const missing = Array.isArray(coverage?.missing) ? coverage.missing : [];
+  const key = missing.slice().sort().join('|');
+  if (key === state.coverage.lastMissingKey) {
+    return;
+  }
+  state.coverage.lastMissingKey = key;
+  if (missing.length) {
+    showMessage(`以下容器缺少 DOM 连接：${missing.join(', ')}`, 'warn');
+  }
+}
 
 function getContainerSelector(containerId, tree) {
   const node = findContainerNode(tree, containerId);
@@ -1200,6 +1729,60 @@ function findContainerNode(node, containerId) {
   return null;
 }
 
+function getContainerDepth(containerId) {
+  if (!containerId || !state.containerSnapshot?.container_tree) return -1;
+  if (!state.containerDepthCache) {
+    state.containerDepthCache = new Map();
+  }
+  if (state.containerDepthCache.has(containerId)) {
+    return state.containerDepthCache.get(containerId);
+  }
+  const depth = computeContainerDepth(state.containerSnapshot.container_tree, containerId, 0);
+  state.containerDepthCache.set(containerId, depth);
+  return depth;
+}
+
+function computeContainerDepth(node, targetId, depth) {
+  if (!node) return -1;
+  if (node.id === targetId || node.container_id === targetId) {
+    return depth;
+  }
+  if (Array.isArray(node.children)) {
+    for (const child of node.children) {
+      const result = computeContainerDepth(child, targetId, depth + 1);
+      if (result !== -1) {
+        return result;
+      }
+    }
+  }
+  return -1;
+}
+
+function pickBestContainerId(entries = []) {
+  if (!Array.isArray(entries) || !entries.length) return null;
+  let bestId = null;
+  let bestDepth = -1;
+  entries.forEach((entry) => {
+    const candidate = entry?.container_id || entry?.container_name || entry?.containerId;
+    if (!candidate) return;
+    const depth = getContainerDepth(candidate);
+    if (depth < 0) return;
+    if (depth > bestDepth) {
+      bestDepth = depth;
+      bestId = candidate;
+    }
+  });
+  if (!bestId) {
+    const rootId = getRootContainerId();
+    const rootMatch = entries.find((entry) => {
+      const candidate = entry?.container_id || entry?.container_name || entry?.containerId;
+      return candidate === rootId;
+    });
+    return rootMatch ? rootId : null;
+  }
+  return bestId;
+}
+
 function updateContainerMatch(containerId, match) {
   if (!containerId || !state.containerSnapshot?.container_tree) return;
   const node = findContainerNode(state.containerSnapshot.container_tree, containerId);
@@ -1218,6 +1801,10 @@ function getDomNodeSelector(node) {
   if (Array.isArray(node.containers) && node.containers.length) {
     const containerId = node.containers[0].container_id || node.containers[0].container_name;
     return getContainerSelector(containerId, state.containerSnapshot?.container_tree);
+  }
+  const inferredSelector = deriveDomNodePrimarySelector(node);
+  if (inferredSelector) {
+    return inferredSelector;
   }
   return null;
 }
@@ -1260,17 +1847,219 @@ function getRootContainerId() {
   );
 }
 
-let highlightTimer = null;
-function triggerHighlight(selector) {
-  if (!selector) return;
-  clearTimeout(highlightTimer);
-  highlightTimer = setTimeout(async () => {
+function getContainerOperationsFromNode(node) {
+  if (!node) return [];
+  if (Array.isArray(node.operations)) return node.operations;
+  if (Array.isArray(node.definition?.operations)) return node.definition.operations;
+  return [];
+}
+
+function ensureHighlightRuntime() {
+  if (!state.highlightRuntime) {
+    state.highlightRuntime = {
+      channelQueues: new Map(),
+      persistedSelector: null,
+    };
+  }
+  if (!(state.highlightRuntime.channelQueues instanceof Map)) {
+    state.highlightRuntime.channelQueues = new Map();
+  }
+  return state.highlightRuntime;
+}
+
+function rememberPersistentHighlight(selector) {
+  const runtime = ensureHighlightRuntime();
+  runtime.persistedSelector = selector || null;
+}
+
+function resetPersistentHighlight() {
+  rememberPersistentHighlight(null);
+}
+
+function queueHighlightTask(channel, task) {
+  const runtime = ensureHighlightRuntime();
+  const key = channel || 'default';
+  const current = runtime.channelQueues.get(key) || Promise.resolve();
+  const next = current.catch(() => {}).then(() => task());
+  runtime.channelQueues.set(key, next);
+  return next;
+}
+
+function triggerHighlight(selector, options = {}) {
+  if (!selector || !state.selectedSession) return;
+  const url = resolveCurrentPageUrl();
+  if (!url) {
+    console.warn('[ui] highlight missing page url, continue with session only');
+    showMessage('当前页面 URL 未上报，仍尝试高亮', 'warn');
+  }
+  const channel = options.channel || 'default';
+  const sticky = typeof options.sticky === 'boolean' ? options.sticky : Boolean(state.highlightOptions?.sticky);
+  const duration = typeof options.duration === 'number' ? options.duration : sticky ? 0 : DEFAULT_HIGHLIGHT_DURATION;
+  const style = options.style || DEFAULT_HIGHLIGHT_STYLE;
+  const delayMs = typeof options.delayMs === 'number' ? options.delayMs : 40;
+  const feedback = options.feedback !== false;
+  const remember = Boolean(options.remember);
+  const clearBefore = Boolean(options.clearBefore);
+  debugLog('triggerHighlight', { selector, session: state.selectedSession, url, sticky, channel });
+  if (feedback) {
+    setHighlightFeedback({ selector, status: 'pending', message: '正在高亮...', persistent: sticky });
+  }
+  bus.publish('ui.highlight.request', {
+    selector,
+    sessionId: state.selectedSession,
+    url,
+    sticky,
+    channel,
+    ts: Date.now(),
+  });
+  return queueHighlightTask(channel, async () => {
+    if (delayMs > 0) {
+      await sleep(delayMs);
+    }
+    if (clearBefore) {
+      try {
+        await clearHighlightInternal?.({ silent: true, channel });
+      } catch (err) {
+        console.warn('[ui] clear before highlight failed', err?.message || err);
+      }
+    }
     try {
-      await invokeAction('operations:run', { op: 'highlight', config: { selector } });
+      const result = await invokeAction('browser:highlight', {
+        profile: state.selectedSession,
+        selector,
+        ...(url ? { url } : {}),
+        rootSelector: getRootDomSelector(),
+        options: {
+          channel,
+          style,
+          duration,
+          sticky,
+          maxMatches: options.maxMatches,
+        },
+      });
+      if (remember) {
+        rememberPersistentHighlight(selector);
+      }
+      if (feedback) {
+        const count = result?.data?.details?.count ?? result?.data?.count ?? result?.details?.count ?? result?.count;
+        const message = count ? `已高亮 ${count} 个节点` : `已高亮 ${selector}`;
+        setHighlightFeedback({ selector, status: 'success', message, persistent: sticky });
+      }
+      bus.publish('ui.highlight.result', {
+        success: true,
+        selector,
+        channel,
+        details: result?.data || result || null,
+      });
     } catch (err) {
       console.warn('[ui] highlight failed', err?.message || err);
+      if (feedback) {
+        setHighlightFeedback({ selector, status: 'error', message: err?.message || '高亮指令发送失败' });
+      }
+      bus.publish('ui.highlight.result', {
+        success: false,
+        selector,
+        channel,
+        error: err?.message || String(err),
+      });
+      throw err;
     }
-  }, 120);
+  });
+}
+
+function setDomPickerState(updates = {}) {
+  const prev = state.domPicker || { status: 'idle', message: '', result: null, lastError: '' };
+  const next = {
+    status: updates.status ?? prev.status ?? 'idle',
+    message: updates.message ?? prev.message ?? '',
+    result: Object.prototype.hasOwnProperty.call(updates, 'result') ? updates.result : prev.result ?? null,
+    lastError: updates.lastError ?? prev.lastError ?? '',
+  };
+  if (next.status === 'error' && !updates.lastError && updates.message) {
+    next.lastError = updates.message;
+  }
+  state.domPicker = next;
+  renderDomActionPanel();
+  updateDomCaptureButtons();
+  updateSessionCaptureButtons();
+}
+
+function isDomPickerActive() {
+  return state.domPicker?.status === 'active';
+}
+
+async function startDomPicker() {
+  if (isDomPickerActive()) {
+    await cancelDomPickerSession({ silent: true, reason: 'restart' });
+  }
+  if (!state.selectedSession) {
+    showMessage('请选择会话后再拾取 DOM 元素', 'warn');
+    return;
+  }
+  const url = resolveCurrentPageUrl();
+  if (!url) {
+    showMessage('无法确定当前页面 URL', 'error');
+    return;
+  }
+  setDomPickerState({ status: 'active', message: '请在页面中点击目标元素（Esc 取消）' });
+  try {
+    const result = await invokeAction('browser:pick-dom', {
+      profile: state.selectedSession,
+      url,
+      rootSelector: getRootDomSelector(),
+      timeout: 25000,
+    });
+    const data = result?.data || result;
+    if (data?.cancelled) {
+      showMessage('元素拾取已取消', 'warn');
+      setDomPickerState({ status: 'idle', message: '' });
+      return;
+    }
+    if (data?.timeout) {
+      showMessage('元素拾取超时', 'warn');
+      setDomPickerState({ status: 'idle', message: '' });
+      return;
+    }
+    if (data?.dom_path) {
+      const normalizedPath = normalizeDomPathString(data.dom_path);
+      const pickerNode = applyDomPickerResult(normalizedPath, data);
+      state.selectedDomPath = normalizedPath;
+      domTreeView?.render();
+      renderContainers();
+      handleDomSelection(normalizedPath);
+      await loadDomBranch(normalizedPath);
+      bus.publish('ui.domPicker.selected', {
+        path: normalizedPath,
+        selector: pickerNode?.selector || data.selector || null,
+      });
+    } else if (data?.selector) {
+      showMessage(`已获取 selector: ${data.selector}`, 'success');
+    } else {
+      showMessage('未返回 DOM 信息', 'warn');
+    }
+    setDomPickerState({ status: 'idle', message: '' });
+  } catch (err) {
+    const message = err?.message || '元素拾取失败';
+    showMessage(message, 'error');
+    setDomPickerState({ status: 'idle', message: '', lastError: message });
+  }
+}
+
+async function cancelDomPickerSession(options = {}) {
+  if (!state.selectedSession) {
+    setDomPickerState({ status: 'idle', message: '' });
+    return;
+  }
+  try {
+    await invokeAction('browser:cancel-pick', { profile: state.selectedSession });
+  } catch (err) {
+    if (!options.silent) {
+      console.warn('[ui] cancel pick failed', err?.message || err);
+      showMessage(err?.message || '取消捕获失败', 'warn');
+    }
+  } finally {
+    setDomPickerState({ status: 'idle', message: '' });
+  }
 }
 
 function renderOperations() {
@@ -1323,12 +2112,6 @@ function getDefaultOperationConfig(opId) {
     default:
       return {};
   }
-}
-
-function renderLogs() {
-  if (!ui.logStream) return;
-  ui.logStream.textContent = state.logs.length ? state.logs.join('\n') : '暂无日志';
-  queueFitWindow();
 }
 
 function setLoading(section, loading) {

@@ -14,19 +14,30 @@ async function runHighlight(ctx: OperationContext, config: HighlightConfig) {
   const duration = config.duration ?? 1500;
   return ctx.page.evaluate(
     (data) => {
-      const el = document.querySelector(data.selector);
-      if (!el) {
-        return { success: false, error: 'element not found' };
+      const nodes = Array.from(document.querySelectorAll(data.selector));
+      if (!nodes.length) {
+        return { success: false, error: 'element not found', count: 0 };
       }
-      const originalOutline = el.style.outline;
-      el.style.outline = data.style;
+      const cleanups = nodes.map((el) => {
+        const originalOutline = el.style.outline;
+        el.style.outline = data.style;
+        return () => {
+          el.style.outline = originalOutline;
+        };
+      });
       const cleanup = () => {
-        el.style.outline = originalOutline;
+        cleanups.forEach((fn) => {
+          try {
+            fn();
+          } catch {
+            // ignore cleanup errors
+          }
+        });
       };
       if (data.duration > 0) {
         setTimeout(cleanup, data.duration);
       }
-      return { success: true };
+      return { success: true, count: nodes.length };
     },
     { selector: config.selector, style, duration },
   );

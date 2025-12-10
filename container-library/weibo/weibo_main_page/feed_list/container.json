@@ -1,0 +1,63 @@
+{
+  "id": "weibo_main_page.feed_list",
+  "name": "微博内容列表",
+  "type": "collection",
+  "capabilities": [
+    "scroll",
+    "highlight",
+    "find-child"
+  ],
+  "page_patterns": [
+    "weibo.com",
+    "!*login*",
+    "!*passport*"
+  ],
+  "selectors": [
+    {
+      "css": "main[class*='Main_wrap_'] div[class*='Home_feed_']",
+      "variant": "primary",
+      "score": 1.0
+    },
+    {
+      "css": "div[class*='Feed_container_']",
+      "variant": "structure",
+      "score": 0.85
+    },
+    {
+      "css": "section[class*='Main_wrap_']",
+      "variant": "fallback",
+      "score": 0.65
+    }
+  ],
+  "metadata": {
+    "required_descendants_any": [
+      "div[class*='Feed_body_']",
+      "article[class*='Feed_wrap_']"
+    ]
+  },
+  "children": [
+    "weibo_main_page.feed_post"
+  ],
+  "operations": [
+    {
+      "type": "highlight",
+      "config": {
+        "style": "3px solid #fbbc05",
+        "duration": 1800
+      }
+    },
+    {
+      "type": "find-child",
+      "config": {
+        "container_id": "weibo_main_page.feed_post"
+      }
+    },
+    {
+      "type": "scroll",
+      "config": {
+        "direction": "down",
+        "distance": 640
+      }
+    }
+  ]
+}

@@ -1,0 +1,82 @@
+{
+  "id": "weibo_main_page.feed_post",
+  "name": "微博单条帖子",
+  "type": "content",
+  "capabilities": [
+    "highlight",
+    "find-child",
+    "extract"
+  ],
+  "page_patterns": [
+    "weibo.com",
+    "!*login*",
+    "!*passport*"
+  ],
+  "selectors": [
+    {
+      "css": "article[class*='Feed_wrap_']",
+      "variant": "primary",
+      "score": 1.0
+    },
+    {
+      "css": "div[class*='Feed_body_']",
+      "variant": "structure",
+      "score": 0.85
+    },
+    {
+      "css": "section[class*='Feed_body_'] article",
+      "variant": "fallback",
+      "score": 0.7
+    }
+  ],
+  "metadata": {
+    "required_descendants_any": [
+      "a[href*='weibo.com']",
+      "header[class*='WB_feed_detail']"
+    ]
+  },
+  "operations": [
+    {
+      "type": "highlight",
+      "config": {
+        "style": "3px solid #fbbc05",
+        "duration": 1500
+      }
+    },
+    {
+      "type": "extract",
+      "config": {
+        "target": "links",
+        "selector": "a[href]",
+        "include_text": true,
+        "max_items": 32,
+        "whitelist": {
+          "prefix": [
+            "https://",
+            "http://"
+          ]
+        },
+        "blacklist": {
+          "contains": [
+            "javascript:",
+            "help.weibo.com",
+            "passport.weibo.com"
+          ],
+          "suffix": ["#"]
+        }
+      }
+    },
+    {
+      "type": "extract",
+      "config": {
+        "target": "summary",
+        "selector": "article",
+        "fields": {
+          "author": "header a[href*='weibo.com']",
+          "content": "div[class*='detail_wbtext']",
+          "timestamp": "time"
+        }
+      }
+    }
+  ]
+}

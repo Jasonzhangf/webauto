@@ -407,10 +407,11 @@ async function launchFloatingConsole(wsHost: string, wsPort: number, targetUrl?:
     return;
   }
   killFloatingPanelProcesses();
-  const ready = await waitForSocket(wsHost, wsPort, 8000);
-  if (!ready) {
-    console.warn(`[browser-control] ws://${wsHost}:${wsPort} not ready, UI will retry`);
-  }
+  waitForSocket(wsHost, wsPort, 2000).then((ready) => {
+    if (!ready) {
+      console.warn(`[browser-control] ws://${wsHost}:${wsPort} 未就绪，浮窗将自行重连`);
+    }
+  });
   const wsUrl = `ws://${wsHost}:${wsPort}`;
   const env: Record<string, string> = { WEBAUTO_FLOATING_WS_URL: wsUrl };
   if (targetUrl) {

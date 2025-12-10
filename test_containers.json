@@ -1,0 +1,40 @@
+{
+  "containers": {
+    "cc501630-c10c-4769-ba9e-748e47952981": {
+      "container_id": "cc501630-c10c-4769-ba9e-748e47952981",
+      "selector": "#main-content",
+      "page_url": "https://example.com",
+      "operation": "monitor",
+      "parent_id": null,
+      "children": [
+        "66c5eb9f-527a-495f-826d-8262fe23e399"
+      ],
+      "metadata": {
+        "created_at": "2025-12-08T16:50:06.410915",
+        "last_updated": "2025-12-08T16:50:06.411499",
+        "last_accessed": null,
+        "access_count": 0,
+        "status": "active"
+      }
+    },
+    "66c5eb9f-527a-495f-826d-8262fe23e399": {
+      "container_id": "66c5eb9f-527a-495f-826d-8262fe23e399",
+      "selector": ".header",
+      "page_url": "https://example.com",
+      "operation": "interact",
+      "parent_id": "cc501630-c10c-4769-ba9e-748e47952981",
+      "children": [],
+      "metadata": {
+        "created_at": "2025-12-08T16:50:06.411496",
+        "last_updated": "2025-12-08T16:50:06.411498",
+        "last_accessed": null,
+        "access_count": 0,
+        "status": "active"
+      }
+    }
+  },
+  "root_containers": [
+    "cc501630-c10c-4769-ba9e-748e47952981"
+  ],
+  "last_updated": "2025-12-08T16:50:06.411500"
+}

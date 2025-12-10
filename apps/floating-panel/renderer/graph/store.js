@@ -124,17 +124,33 @@ export function buildGraphData(store, rootContainerId) {
         : loaded;
     const hasChildren = declaredChildren > 0;
     const needsLazyLoad = declaredChildren > loaded;
+    const containerEntries = Array.isArray(node.containers)
+      ? node.containers
+          .map((entry) => {
+            const id = entry?.container_id || entry?.container_name || entry?.containerId || null;
+            if (!id) return null;
+            return {
+              id,
+              name: entry?.container_name || entry?.container_id || entry?.containerId || id,
+              selector: entry?.selector || entry?.css || null,
+            };
+          })
+          .filter(Boolean)
+      : [];
+    const containerIds = containerEntries.map((entry) => entry.id);
     const hasContainerChildren = node.containers?.some((entry) => {
       const containerId = entry?.container_id || entry?.container_name || entry?.containerId;
       return containerId && store.containerChildren.get(containerId)?.size;
     });
-    const domContainerId = node.containers?.[0]?.container_id || node.containers?.[0]?.container_name;
+    const domContainerId = containerIds[0] || null;
     return {
       path: node.path,
       parentPath: node.parentPath || null,
       label: formatDomLabel(node),
       selector: node.selector,
       containerId: domContainerId,
+      containerIds,
+      containerEntries,
       depth: node.depth,
       canExpand: hasChildren || Boolean(hasContainerChildren),
       hasChildren,
@@ -149,11 +165,19 @@ export function buildGraphData(store, rootContainerId) {
   });
   const domNodesByContainer = new Map();
   domNodes.forEach((node) => {
-    if (!node.containerId) return;
-    if (!domNodesByContainer.has(node.containerId)) {
-      domNodesByContainer.set(node.containerId, []);
-    }
-    domNodesByContainer.get(node.containerId)?.push(node);
+    const targets = Array.isArray(node.containerIds) && node.containerIds.length ? node.containerIds : node.containerId ? [node.containerId] : [];
+    targets.forEach((targetId) => {
+      if (!targetId) return;
+      if (!domNodesByContainer.has(targetId)) {
+        domNodesByContainer.set(targetId, []);
+      }
+      const bucket = domNodesByContainer.get(targetId);
+      if (!bucket) return;
+      const exists = bucket.some((existing) => existing.path === node.path);
+      if (!exists) {
+        bucket.push(node);
+      }
+    });
   });
   const links = [];
   containerRows.forEach((row) => {

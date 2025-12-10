@@ -6,7 +6,12 @@ const profile = process.env.WEBAUTO_UI_TEST_PROFILE || 'weibo-fresh';
 const targetUrl = process.env.WEBAUTO_UI_TEST_URL || 'https://weibo.com/';
 const busPort = Number(process.env.WEBAUTO_FLOATING_BUS_PORT || 8790);
 const busHost = process.env.WEBAUTO_FLOATING_BUS_HOST || '127.0.0.1';
+const browserServicePort = Number(process.env.WEBAUTO_BROWSER_SERVICE_PORT || 7704);
+const browserServiceHost = process.env.WEBAUTO_BROWSER_SERVICE_HOST || '127.0.0.1';
+const browserHealthPath = process.env.WEBAUTO_BROWSER_SERVICE_HEALTH || '/health';
+const browserHealthUrl = `http://${browserServiceHost}:${browserServicePort}${browserHealthPath}`;
 const npmCmd = process.platform === 'win32' ? 'npm.cmd' : 'npm';
+const driverStartDelayMs = Number(process.env.WEBAUTO_UI_TEST_DRIVER_DELAY || '10000');
 
 async function waitForPort(port, host, timeoutMs = 45000) {
   const start = Date.now();
@@ -29,6 +34,22 @@ async function waitForPort(port, host, timeoutMs = 45000) {
   });
 }
 
+async function waitForHealth(url, timeoutMs = 45000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      const res = await fetch(url, { cache: 'no-store' });
+      if (res.ok) {
+        return true;
+      }
+    } catch {
+      /* ignore failures */
+    }
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+  throw new Error(`waitForHealth timeout: ${url}`);
+}
+
 function runDevDriver() {
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, ['scripts/ui/dev-driver.mjs'], {
@@ -38,6 +59,44 @@ function runDevDriver() {
     child.on('exit', (code) => {
       if (code === 0) resolve(0);
       else reject(new Error(`dev-driver exited with code ${code}`));
+    });
+    child.on('error', reject);
+  });
+}
+
+function runHighlightSmoke(profileId) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, ['scripts/ui/highlight-smoke.mjs'], {
+      stdio: 'inherit',
+      env: {
+        ...process.env,
+        WEBAUTO_UI_TEST_PROFILE: profileId,
+        WEBAUTO_BROWSER_WS_HOST: process.env.WEBAUTO_BROWSER_WS_HOST || '127.0.0.1',
+        WEBAUTO_BROWSER_WS_PORT: process.env.WEBAUTO_BROWSER_WS_PORT || '8765',
+      },
+    });
+    child.on('exit', (code) => {
+      if (code === 0) resolve(0);
+      else reject(new Error(`highlight-smoke exited with code ${code}`));
+    });
+    child.on('error', reject);
+  });
+}
+
+function runHoverSmoke(profileId, busHost, busPort) {
+  const busUrl = process.env.WEBAUTO_FLOATING_BUS_URL || `ws://${busHost}:${busPort}`;
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, ['scripts/ui/hover-highlight-smoke.mjs'], {
+      stdio: 'inherit',
+      env: {
+        ...process.env,
+        WEBAUTO_UI_TEST_PROFILE: profileId,
+        WEBAUTO_FLOATING_BUS_URL: busUrl,
+      },
+    });
+    child.on('exit', (code) => {
+      if (code === 0) resolve(0);
+      else reject(new Error(`hover-highlight-smoke exited with code ${code}`));
     });
     child.on('error', reject);
   });
@@ -81,9 +140,18 @@ async function main() {
 
   try {
     await waitForPort(busPort, busHost, 45000);
+    await waitForHealth(browserHealthUrl, 45000);
+    if (driverStartDelayMs > 0) {
+      console.log(`[ui-test] waiting ${driverStartDelayMs}ms before starting driver...`);
+      await new Promise((resolve) => setTimeout(resolve, driverStartDelayMs));
+    }
     console.log('[ui-test] floating console bus ready, running driver...');
     await runDevDriver();
     console.log('[ui-test] driver completed');
+    await runHighlightSmoke(profile);
+    console.log('[ui-test] highlight smoke passed');
+    await runHoverSmoke(profile, busHost, busPort);
+    console.log('[ui-test] hover highlight smoke passed');
   } finally {
     cleanup();
   }

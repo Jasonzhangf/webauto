@@ -81,8 +81,12 @@ export class ContainerMatcher {
     if (!containers || !Object.keys(containers).length) {
       throw new Error('No container definitions available for this URL');
     }
+    const timings: Array<{ step: string; duration_ms: number }> = [];
+    const totalStart = Date.now();
     const page = await session.ensurePage(url);
+    const waitStart = Date.now();
     await this.waitForStableDom(page);
+    timings.push({ step: 'wait_for_dom', duration_ms: Date.now() - waitStart });
     const currentUrl = page.url() || url;
     const pagePath = this.safePathname(currentUrl);
 
@@ -92,6 +96,7 @@ export class ContainerMatcher {
     const preferredRootId = options.root_container_id || options.root_id;
     const preferredSelector = options.root_selector;
     let rootMatch: ContainerMatchResult | null = null;
+    const matchStart = Date.now();
     if (preferredRootId && containers[preferredRootId]) {
       rootMatch = await this.matchContainer(
         page,
@@ -107,13 +112,23 @@ export class ContainerMatcher {
     if (!rootMatch) {
       throw new Error('No DOM elements matched known containers');
     }
+    timings.push({ step: 'match_root', duration_ms: Date.now() - matchStart });
 
     const effectiveSelector = preferredSelector || rootMatch.container?.matched_selector;
+    const collectStart = Date.now();
     const matchMap = await this.collectContainerMatches(page, containers, effectiveSelector);
+    timings.push({ step: 'collect_container_matches', duration_ms: Date.now() - collectStart });
+    const buildTreeStart = Date.now();
     const containerTree = this.buildContainerTree(containers, rootMatch.container.id, matchMap);
+    timings.push({ step: 'build_container_tree', duration_ms: Date.now() - buildTreeStart });
+    const domCaptureStart = Date.now();
     const domTree = await this.captureDomTreeWithRetry(page, effectiveSelector, maxDepth, maxChildren);
+    timings.push({ step: 'capture_dom_tree', duration_ms: Date.now() - domCaptureStart });
+    const annotateStart = Date.now();
     const annotations = this.buildDomAnnotations(matchMap);
     this.attachDomAnnotations(domTree, annotations);
+    timings.push({ step: 'annotate_dom', duration_ms: Date.now() - annotateStart });
+    timings.push({ step: 'total', duration_ms: Date.now() - totalStart });
 
     return {
       root_match: rootMatch,
@@ -126,6 +141,9 @@ export class ContainerMatcher {
         max_children: maxChildren,
         root_selector: effectiveSelector || null,
         root_container_id: rootMatch.container.id || null,
+        page_url: currentUrl,
+        page_path: pagePath,
+        timings,
       },
     };
   }
@@ -541,10 +559,41 @@ export class ContainerMatcher {
         await page.waitForTimeout(250).catch(() => {});
       }
     }
-    return this.captureFallbackDomTree(page);
+    return this.captureFallbackDomTree(page, maxDepth, maxChildren);
   }
 
   private async captureDomTree(
+    page: AutomationPage,
+    selector: string | undefined,
+    maxDepth: number,
+    maxChildren: number,
+  ) {
+    const runtimeTree = await page
+      .evaluate(
+        (config: { selector?: string; maxDepth: number; maxChildren: number }): any => {
+          const runtime = (window as any).__webautoRuntime;
+          if (!runtime?.dom?.getBranch) {
+            return null;
+          }
+          return runtime.dom.getBranch('root', {
+            rootSelector: config.selector || null,
+            maxDepth: config.maxDepth,
+            maxChildren: config.maxChildren,
+          });
+        },
+        { selector, maxDepth, maxChildren },
+      )
+      .catch((): any => null);
+    if (runtimeTree?.node) {
+      const normalized = this.normalizeRuntimeNode(runtimeTree.node);
+      if (normalized) {
+        return normalized;
+      }
+    }
+    return this.captureDomTreeLegacy(page, selector, maxDepth, maxChildren);
+  }
+
+  private async captureDomTreeLegacy(
     page: AutomationPage,
     selector: string | undefined,
     maxDepth: number,
@@ -587,22 +636,36 @@ export class ContainerMatcher {
     }
   }
 
-  private async captureFallbackDomTree(page: AutomationPage) {
+  private async captureFallbackDomTree(page: AutomationPage, maxDepth: number, maxChildren: number) {
     try {
-      return await page.evaluate(() => {
-        const body = document.body || document.documentElement;
-        if (!body) return null;
-        const node = {
-          path: 'root',
-          tag: body.tagName || 'BODY',
-          id: body.id || null,
-          classes: Array.from(body.classList || []),
-          childCount: body.children?.length || 0,
-          textSnippet: (body.textContent || '').trim().slice(0, 120),
-          children: [] as any[],
-        };
-        return node;
-      });
+      return await page.evaluate(
+        (config) => {
+          const root = document.body || (document.documentElement as any);
+          if (!root) return null;
+          const walk = (element: any, path: string[], depth: number): any => {
+            const meta = {
+              path: path.join('/'),
+              tag: element.tagName,
+              id: element.id || null,
+              classes: Array.from(element.classList || []),
+              childCount: element.children?.length || 0,
+              textSnippet: (element.textContent || '').trim().slice(0, 80),
+              children: [] as any[],
+            };
+            if (depth >= config.maxDepth) {
+              return meta;
+            }
+            const kids = Array.from(element.children || []).slice(0, config.maxChildren);
+            meta.children = kids.map((child, idx) => walk(child, path.concat(String(idx)), depth + 1));
+            return meta;
+          };
+          return walk(root, ['root'], 0);
+        },
+        {
+          maxDepth: Math.max(1, Math.min(Number(maxDepth) || 4, 8)),
+          maxChildren: Math.max(1, Math.min(Number(maxChildren) || 8, 40)),
+        },
+      );
     } catch {
       return null;
     }
@@ -638,6 +701,35 @@ export class ContainerMatcher {
   }
 
   private async captureDomBranch(
+    page: AutomationPage,
+    selector: string,
+    path: string,
+    maxDepth: number,
+    maxChildren: number,
+  ) {
+    const runtimeBranch = await page
+      .evaluate(
+        (config: { selector: string; path: string; maxDepth: number; maxChildren: number }): any => {
+          const runtime = (window as any).__webautoRuntime;
+          if (!runtime?.dom?.getBranch) {
+            return null;
+          }
+          return runtime.dom.getBranch(config.path, {
+            rootSelector: config.selector,
+            maxDepth: config.maxDepth,
+            maxChildren: config.maxChildren,
+          });
+        },
+        { selector, path, maxDepth, maxChildren },
+      )
+      .catch((): any => null);
+    if (runtimeBranch?.node) {
+      return this.normalizeRuntimeNode(runtimeBranch.node);
+    }
+    return this.captureDomBranchLegacy(page, selector, path, maxDepth, maxChildren);
+  }
+
+  private async captureDomBranchLegacy(
     page: AutomationPage,
     selector: string,
     path: string,
@@ -778,6 +870,38 @@ export class ContainerMatcher {
       tokens.unshift('root');
     }
     return tokens.join('/');
+  }
+
+  private normalizeRuntimeNode(node: any): any {
+    if (!node) return null;
+    const normalizedPath = this.normalizeDomPath(node.path || 'root') || 'root';
+    const normalized: any = {
+      path: normalizedPath,
+      tag: node.tag ? String(node.tag).toUpperCase() : 'DIV',
+      id: node.id || null,
+      classes: Array.isArray(node.classes) ? [...node.classes] : [],
+      childCount:
+        typeof node.childCount === 'number'
+          ? node.childCount
+          : Array.isArray(node.children)
+            ? node.children.length
+            : 0,
+      textSnippet: node.textSnippet || node.text || '',
+      selector: node.selector || null,
+      containers: Array.isArray(node.containers) ? [...node.containers] : [],
+      children: [],
+    };
+    if (Array.isArray(node.children)) {
+      normalized.children = node.children
+        .map((child: any, index: number) => {
+          if (!child.path) {
+            child.path = `${normalizedPath}/${index}`;
+          }
+          return this.normalizeRuntimeNode(child);
+        })
+        .filter(Boolean);
+    }
+    return normalized;
   }
 
   private async resolveRootSelector(

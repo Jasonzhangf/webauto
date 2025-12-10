@@ -636,27 +636,48 @@ class ContainerOperationHandler:
                     return dom_tree
                 time.sleep(0.25)
 
-        return ContainerOperationHandler._fallback_dom_outline(playwright_page)
+        return ContainerOperationHandler._fallback_dom_outline(
+            playwright_page,
+            max_depth,
+            max_children,
+        )
 
     @staticmethod
-    def _fallback_dom_outline(playwright_page: Any) -> Optional[Dict[str, Any]]:
+    def _fallback_dom_outline(
+        playwright_page: Any,
+        max_depth: int = 4,
+        max_children: int = 8,
+    ) -> Optional[Dict[str, Any]]:
         try:
             return playwright_page.evaluate(
                 """
-                () => {
-                  const body = document.body || document.documentElement;
-                  if (!body) return null;
-                  return {
-                    path: 'root',
-                    tag: (body.tagName || 'BODY'),
-                    id: body.id || null,
-                    classes: Array.from(body.classList || []),
-                    childCount: body.children ? body.children.length : 0,
-                    textSnippet: (body.innerText || body.textContent || '').trim().slice(0, 120),
-                    children: []
+                (config) => {
+                  const root = document.body || document.documentElement;
+                  if (!root) return null;
+                  const walk = (element, path, depth) => {
+                    const meta = {
+                      path: path.join('/'),
+                      tag: element.tagName,
+                      id: element.id || null,
+                      classes: Array.from(element.classList || []),
+                      childCount: element.children ? element.children.length : 0,
+                      textSnippet: (element.textContent || '').trim().slice(0, 80),
+                      children: [],
+                    };
+                    if (depth >= config.maxDepth) {
+                      return meta;
+                    }
+                    const kids = Array.from(element.children || []).slice(0, config.maxChildren);
+                    meta.children = kids.map((child, index) => walk(child, path.concat(index), depth + 1));
+                    return meta;
                   };
+                  return walk(root, ['root'], 0);
                 }
-                """
+                """,
+                {
+                    "maxDepth": max(1, min(int(max_depth or 4), 8)),
+                    "maxChildren": max(1, min(int(max_children or 8), 40)),
+                },
             )
         except Exception:
             return None

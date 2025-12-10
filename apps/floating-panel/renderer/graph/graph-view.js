@@ -40,7 +40,14 @@ export class ContainerDomGraphView extends BaseControl {
     this.nodeMap = new Map();
     this.links = [];
     this.selection = { containerId: null, domPath: null };
-    this.callbacks = { onSelectContainer: null, onSelectDom: null, onLinkNodes: null, onExpandDom: null };
+    this.callbacks = {
+      onSelectContainer: null,
+      onSelectDom: null,
+      onLinkNodes: null,
+      onExpandDom: null,
+      onHoverContainer: null,
+      onHoverDom: null,
+    };
     this.hoverNode = null;
     this.resizeObserver = null;
     this.interaction = {
@@ -49,6 +56,28 @@ export class ContainerDomGraphView extends BaseControl {
       dragLink: null,
       pointer: { x: 0, y: 0 },
     };
+    this.view = {
+      offsetX: 0,
+      offsetY: 0,
+    };
+    this.panState = {
+      active: false,
+      startX: 0,
+      startY: 0,
+      originX: 0,
+      originY: 0,
+    };
+    this.nodeDrag = {
+      active: false,
+      nodeId: null,
+      offsetX: 0,
+      offsetY: 0,
+      pointerStartX: 0,
+      pointerStartY: 0,
+      moved: false,
+    };
+    this.dragSuppressClick = false;
+    this.customPositions = new Map();
     this.boundWindowPointerUp = (event) => this.handlePointerUp(event);
     this.layout = {
       containerX: DEFAULTS.marginX,
@@ -95,6 +124,7 @@ export class ContainerDomGraphView extends BaseControl {
     this.nodes = [...containerNodes, ...domList];
     this.nodeMap = new Map(this.nodes.map((node) => [node.id, node]));
     this.links = Array.isArray(links) ? links : [];
+    this.pruneCustomPositions();
     this.draw();
     this.emit('dev:update', this.inspect());
   }
@@ -140,6 +170,7 @@ export class ContainerDomGraphView extends BaseControl {
       label: node.label,
       selector: node.selector || node.path,
       containerId: node.containerId,
+      containerIds: Array.isArray(node.containerIds) ? [...node.containerIds] : node.containerId ? [node.containerId] : [],
       depth: node.depth || 0,
       order,
       width: DEFAULTS.domWidth,
@@ -177,6 +208,27 @@ export class ContainerDomGraphView extends BaseControl {
       node.x = this.layout.domX + depthOffset;
       node.y = DEFAULTS.verticalSpacing + index * (DEFAULTS.nodeHeight + DEFAULTS.verticalSpacing + 6);
     });
+    this.applyCustomPositions();
+  }
+
+  pruneCustomPositions() {
+    if (!this.customPositions) return;
+    const valid = new Set(this.nodes.map((node) => node.id));
+    Array.from(this.customPositions.keys()).forEach((key) => {
+      if (!valid.has(key)) {
+        this.customPositions.delete(key);
+      }
+    });
+  }
+
+  applyCustomPositions() {
+    if (!this.customPositions || !this.customPositions.size) return;
+    for (const node of this.nodes) {
+      const saved = this.customPositions.get(node.id);
+      if (!saved) continue;
+      node.x = saved.x;
+      node.y = saved.y;
+    }
   }
 
   draw() {
@@ -195,6 +247,7 @@ export class ContainerDomGraphView extends BaseControl {
     this.ctx.save();
     this.ctx.scale(dpr, dpr);
     this.ctx.clearRect(0, 0, width, height);
+    this.ctx.translate(this.view.offsetX, this.view.offsetY);
     this.drawLinks();
     this.drawNodes();
     this.drawPendingLink();
@@ -427,11 +480,92 @@ export class ContainerDomGraphView extends BaseControl {
     ctx.restore();
   }
 
+  startNodeDrag(node) {
+    if (!node) return;
+    const pointer = this.interaction.pointer || { x: 0, y: 0 };
+    const centerX = this.getNodeCenterX(node);
+    const centerY = node.y + node.height / 2;
+    this.nodeDrag = {
+      active: true,
+      nodeId: node.id,
+      offsetX: pointer.x - centerX,
+      offsetY: pointer.y - centerY,
+      pointerStartX: pointer.x,
+      pointerStartY: pointer.y,
+      moved: false,
+    };
+    if (this.canvas) {
+      this.canvas.style.cursor = 'grabbing';
+    }
+    this.hideTooltip();
+  }
+
+  updateNodeDrag() {
+    if (!this.nodeDrag.active) return;
+    const node = this.nodeMap.get(this.nodeDrag.nodeId);
+    if (!node) return;
+    const pointer = this.interaction.pointer || { x: 0, y: 0 };
+    const deltaX = Math.abs(pointer.x - this.nodeDrag.pointerStartX);
+    const deltaY = Math.abs(pointer.y - this.nodeDrag.pointerStartY);
+    if (!this.nodeDrag.moved && deltaX < 2 && deltaY < 2) {
+      return;
+    }
+    this.nodeDrag.moved = true;
+    const centerX = pointer.x - this.nodeDrag.offsetX;
+    const centerY = pointer.y - this.nodeDrag.offsetY;
+    this.setNodeCenter(node, centerX, centerY);
+    this.customPositions.set(node.id, { x: node.x, y: node.y });
+    this.dragSuppressClick = true;
+    this.draw();
+    this.emit('nodeMoved', { id: node.id, type: node.type, position: { x: node.x, y: node.y } });
+  }
+
+  finishNodeDrag() {
+    if (!this.nodeDrag.active) return false;
+    if (this.canvas) {
+      this.canvas.style.cursor = '';
+    }
+    const moved = this.nodeDrag.moved;
+    this.nodeDrag = {
+      active: false,
+      nodeId: null,
+      offsetX: 0,
+      offsetY: 0,
+      pointerStartX: 0,
+      pointerStartY: 0,
+      moved: false,
+    };
+    return moved;
+  }
+
+  getNodeCenterX(node) {
+    if (!node) return 0;
+    return node.type === 'container' ? node.x + node.depth * 18 : node.x;
+  }
+
+  setNodeCenter(node, centerX, centerY) {
+    if (!node) return;
+    if (node.type === 'container') {
+      node.x = centerX - node.depth * 18;
+    } else {
+      node.x = centerX;
+    }
+    node.y = Math.max(0, centerY - node.height / 2);
+  }
+
   handlePointerMove(event) {
     this.updatePointerPosition(event);
+    if (this.nodeDrag.active) {
+      this.updateNodeDrag();
+      return;
+    }
+    if (this.panState.active) {
+      this.updatePan(event);
+      return;
+    }
     const node = this.hitTest(event);
     if (node !== this.hoverNode) {
-      this.hoverNode = node;
+      this.updateHoverNode(node);
       this.updateTooltip(node, event);
     } else if (node) {
       this.updateTooltipPosition(event);
@@ -442,11 +576,15 @@ export class ContainerDomGraphView extends BaseControl {
   }
 
   handlePointerLeave() {
-    this.hoverNode = null;
+    this.updateHoverNode(null);
     this.hideTooltip();
   }
 
   handlePointerClick(event) {
+    if (this.dragSuppressClick) {
+      this.dragSuppressClick = false;
+      return;
+    }
     const hit = this.hitTestWithRegion(event);
     const node = hit.node;
     if (!node) return;
@@ -485,12 +623,22 @@ export class ContainerDomGraphView extends BaseControl {
 
   handlePointerDown(event) {
     if (event.button !== 0) return;
-    if (!this.interaction.linkModeActive) return;
+    this.updatePointerPosition(event);
     const hit = this.hitTestWithRegion(event);
     const node = hit.node;
+    if (!this.interaction.linkModeActive) {
+      if (!node || event.altKey) {
+        this.startPan(event);
+        return;
+      }
+      if (hit.region === 'expand') {
+        return;
+      }
+      this.startNodeDrag(node);
+      return;
+    }
     if (!node || node.type !== 'container' || hit.region === 'expand') return;
     const anchor = this.getContainerAnchor(node);
-    this.updatePointerPosition(event);
     this.interaction.dragLink = {
       containerId: node.id,
       node,
@@ -505,14 +653,67 @@ export class ContainerDomGraphView extends BaseControl {
   }
 
   handlePointerUp(event) {
-    if (!this.interaction.dragLink) return;
-    const dragLink = this.interaction.dragLink;
-    this.interaction.dragLink = null;
-    this.updatePointerPosition(event);
+    const dragged = this.finishNodeDrag();
+    if (this.panState.active) {
+      this.stopPan();
+    }
+    if (this.interaction.dragLink) {
+      const dragLink = this.interaction.dragLink;
+      this.interaction.dragLink = null;
+      this.updatePointerPosition(event);
+      this.draw();
+      const node = this.hitTest(event);
+      if (node && node.type === 'dom' && this.callbacks.onLinkNodes) {
+        this.callbacks.onLinkNodes(dragLink.containerId, node.id);
+      }
+    }
+    if (dragged) {
+      this.dragSuppressClick = true;
+    }
+  }
+
+  updateHoverNode(node) {
+    if (this.hoverNode && this.hoverNode.type === 'dom' && this.callbacks.onHoverDom) {
+      this.callbacks.onHoverDom(null);
+    } else if (this.hoverNode && this.hoverNode.type === 'container' && this.callbacks.onHoverContainer) {
+      this.callbacks.onHoverContainer(null);
+    }
+    this.hoverNode = node || null;
+    if (!this.hoverNode) return;
+    if (this.hoverNode.type === 'dom' && this.callbacks.onHoverDom) {
+      this.callbacks.onHoverDom(this.hoverNode.id);
+    } else if (this.hoverNode.type === 'container' && this.callbacks.onHoverContainer) {
+      this.callbacks.onHoverContainer(this.hoverNode.id);
+    }
+  }
+
+  startPan(event) {
+    if (!this.canvas) return;
+    this.panState.active = true;
+    const raw = this.getRawPointerPosition(event);
+    this.panState.startX = raw.x;
+    this.panState.startY = raw.y;
+    this.panState.originX = this.view.offsetX;
+    this.panState.originY = this.view.offsetY;
+    this.canvas.style.cursor = 'grabbing';
+    this.hideTooltip();
+  }
+
+  updatePan(event) {
+    if (!this.panState.active) return;
+    const raw = this.getRawPointerPosition(event);
+    const deltaX = raw.x - this.panState.startX;
+    const deltaY = raw.y - this.panState.startY;
+    this.view.offsetX = this.panState.originX + deltaX;
+    this.view.offsetY = this.panState.originY + deltaY;
     this.draw();
-    const node = this.hitTest(event);
-    if (node && node.type === 'dom' && this.callbacks.onLinkNodes) {
-      this.callbacks.onLinkNodes(dragLink.containerId, node.id);
+  }
+
+  stopPan() {
+    if (!this.panState.active) return;
+    this.panState.active = false;
+    if (this.canvas) {
+      this.canvas.style.cursor = '';
     }
   }
 
@@ -530,16 +731,14 @@ export class ContainerDomGraphView extends BaseControl {
 
   hitTest(event) {
     if (!this.canvas) return null;
-    const rect = this.canvas.getBoundingClientRect();
-    const x = event.clientX - rect.left;
-    const y = event.clientY - rect.top;
+    const coords = this.getPointerPosition(event);
     return (
       this.nodes.find((node) => {
         const left = (node.type === 'container' ? node.x + node.depth * 18 : node.x) - node.width / 2;
         const right = left + node.width;
         const top = node.y;
         const bottom = top + node.height;
-        return x >= left && x <= right && y >= top && y <= bottom;
+        return coords.x >= left && coords.x <= right && coords.y >= top && coords.y <= bottom;
       }) || null
     );
   }
@@ -572,13 +771,20 @@ export class ContainerDomGraphView extends BaseControl {
 
   updatePointerPosition(event) {
     if (!this.canvas) return;
-    const rect = this.canvas.getBoundingClientRect();
-    const x = event.clientX - rect.left;
-    const y = event.clientY - rect.top;
-    this.interaction.pointer = { x, y };
+    const coords = this.getPointerPosition(event);
+    this.interaction.pointer = coords;
   }
 
   getPointerPosition(event) {
+    if (!this.canvas) return { x: 0, y: 0 };
+    const { x, y } = this.getRawPointerPosition(event);
+    return {
+      x: x - this.view.offsetX,
+      y: y - this.view.offsetY,
+    };
+  }
+
+  getRawPointerPosition(event) {
     if (!this.canvas) return { x: 0, y: 0 };
     const rect = this.canvas.getBoundingClientRect();
     const x = event.clientX - rect.left;

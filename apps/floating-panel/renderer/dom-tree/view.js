@@ -8,7 +8,14 @@ import {
   DOM_ROOT_PATH,
 } from './store.js';
 
-export function createDomTreeView({ rootElement, store, getSelectedPath, onSelectNode, onToggleExpand }) {
+export function createDomTreeView({
+  rootElement,
+  store,
+  getSelectedPath,
+  onSelectNode,
+  onToggleExpand,
+  onHoverNode,
+}) {
   return {
     render() {
       renderDomTree({
@@ -17,12 +24,13 @@ export function createDomTreeView({ rootElement, store, getSelectedPath, onSelec
         selectedPath: getSelectedPath ? getSelectedPath() : null,
         onSelectNode,
         onToggleExpand,
+        onHoverNode,
       });
     },
   };
 }
 
-function renderDomTree({ rootElement, store, selectedPath, onSelectNode, onToggleExpand }) {
+function renderDomTree({ rootElement, store, selectedPath, onSelectNode, onToggleExpand, onHoverNode }) {
   if (!rootElement) return;
   rootElement.innerHTML = '';
   const rootNode = getDomTree(store);
@@ -41,16 +49,28 @@ function renderDomTree({ rootElement, store, selectedPath, onSelectNode, onToggl
     selectedPath,
     onSelectNode,
     onToggleExpand,
+    onHoverNode,
   });
 }
 
-function buildDomTreeRows({ node, depth, target, store, selectedPath, onSelectNode, onToggleExpand, parentExpanded = false }) {
+function buildDomTreeRows({
+  node,
+  depth,
+  target,
+  store,
+  selectedPath,
+  onSelectNode,
+  onToggleExpand,
+  onHoverNode,
+  parentExpanded = false,
+}) {
   if (!node) return false;
   const path = node.path || (depth === 0 ? DOM_ROOT_PATH : '');
   const isRoot = depth === 0;
   const expanded = path && isPathExpanded(store, path);
+  const autoVisible = false;
   const isVisible =
-    isRoot || parentExpanded || (path && isDefaultVisible(store, path)) || (path && expanded);
+    isRoot || autoVisible || parentExpanded || (path && isDefaultVisible(store, path)) || (path && expanded);
   if (!isVisible) {
     return false;
   }
@@ -120,6 +140,10 @@ function buildDomTreeRows({ node, depth, target, store, selectedPath, onSelectNo
         await onToggleExpand(path);
       }
     });
+    if (onHoverNode) {
+      row.addEventListener('mouseenter', () => onHoverNode(path));
+      row.addEventListener('mouseleave', () => onHoverNode(null, { from: path }));
+    }
   }
 
   target.appendChild(row);
@@ -136,24 +160,12 @@ function buildDomTreeRows({ node, depth, target, store, selectedPath, onSelectNo
         selectedPath,
         onSelectNode,
         onToggleExpand,
-        parentExpanded: true,
-      });
-    });
-  } else if (Array.isArray(node.children)) {
-    node.children.forEach((child) => {
-      buildDomTreeRows({
-        node: child,
-        depth: depth + 1,
-        target,
-        store,
-        selectedPath,
-        onSelectNode,
-        onToggleExpand,
-        parentExpanded: false,
+        onHoverNode,
+        parentExpanded: expanded,
       });
     });
   }
-  if (needsLazyLoad && expanded && (!node.children || !node.children.length)) {
+  if (!expanded && needsLazyLoad) {
     target.appendChild(createDomPlaceholderRow(depth + 1));
   }
   return true;

@@ -21,6 +21,9 @@ export function setDomTreeSnapshot(store, tree) {
   }
   store.defaultVisible = new Set();
   store.expandedPaths = new Set();
+  if (store.tree?.path) {
+    store.expandedPaths.add(store.tree.path);
+  }
   store.branchLoading = new Set();
 }
 
@@ -34,20 +37,10 @@ export function resetDomVisibility(store, containerIds = new Set(), selectedPath
   store.expandedPaths = new Set();
   const tree = store.tree;
   if (!tree) return;
-  if (!containerIds || !containerIds.size) {
-    const rootPath = tree.path || ROOT_PATH;
-    store.defaultVisible.add(rootPath);
-  } else {
-    markDomVisibility(tree, store.defaultVisible, containerIds);
-  }
-  if (DEFAULT_VISIBLE_DEPTH >= 0) {
-    addDepthVisibility(tree, store.defaultVisible, DEFAULT_VISIBLE_DEPTH);
-  }
-  if (selectedPath) {
-    store.defaultVisible.add(selectedPath);
-  }
   const rootPath = tree.path || ROOT_PATH;
   store.defaultVisible.add(rootPath);
+  store.expandedPaths.add(rootPath);
+  addPathAncestors(store, selectedPath);
 }
 
 export function isDefaultVisible(store, path) {
@@ -236,6 +229,19 @@ function markDomVisibility(node, allowed, containerIds) {
     return true;
   }
   return match || childHas;
+}
+
+function addPathAncestors(store, path) {
+  if (!store || !path) return;
+  const normalized = normalizeDomPathString(path);
+  const parts = normalized.split('/');
+  if (!parts.length) return;
+  let current = parts[0];
+  for (let i = 0; i < parts.length; i += 1) {
+    current = i === 0 ? parts[0] : `${current}/${parts[i]}`;
+    store.defaultVisible.add(current);
+    store.expandedPaths.add(current);
+  }
 }
 
 export const DOM_ROOT_PATH = ROOT_PATH;

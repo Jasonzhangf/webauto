@@ -1,18 +1,9 @@
-import { pathToFileURL, fileURLToPath } from 'node:url';
-import path from 'node:path';
-import fs from 'node:fs';
-import { execSync } from 'node:child_process';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const projectRoot = path.resolve(__dirname, '..', '..');
+import { pathToFileURL } from 'node:url';
+import { browserServiceDistEntry, ensureBrowserServiceBuild } from './service-build-utils.js';
 
 async function loadService() {
-  const distEntry = path.join(projectRoot, 'dist/services/browser-service/index.js');
-  if (!fs.existsSync(distEntry)) {
-    console.log('[browser-service] 构建缺失，自动执行 npm run build:services');
-    execSync('npm run build:services', { stdio: 'inherit', cwd: projectRoot });
-  }
+  const distEntry = browserServiceDistEntry();
+  ensureBrowserServiceBuild('browser-service');
   return import(pathToFileURL(distEntry).href);
 }
 

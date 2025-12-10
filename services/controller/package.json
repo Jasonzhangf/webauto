@@ -1,0 +1,10 @@
+{
+  "name": "webauto-controller",
+  "version": "0.1.0",
+  "description": "Floating UI 控制服务",
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "start": "node src/server.mjs"
+  }
+}

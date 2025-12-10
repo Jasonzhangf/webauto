@@ -4,7 +4,7 @@ import { execSync } from 'node:child_process';
 import { join } from 'node:path';
 import { existsSync, readFileSync, rmSync } from 'node:fs';
 import os from 'node:os';
-import { loadBrowserServiceConfig } from '../../../../libs/browser/browser-service-config.js';
+import { loadBrowserServiceConfig } from '../../../../../libs/browser/browser-service-config.js';
 
 const runDir = join(os.homedir(), '.webauto', 'run');
 const pidFile = join(runDir, 'browser-service.pid');

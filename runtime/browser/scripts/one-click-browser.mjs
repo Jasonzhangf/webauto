@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { setTimeout as wait } from 'node:timers/promises';
 import WebSocket from 'ws';
 import { loadBrowserServiceConfig } from '../../../libs/browser/browser-service-config.js';
+import { ensureBrowserServiceBuild as ensureBrowserServiceBuildArtifacts } from '../../../libs/browser/service-build-utils.js';
 
 const ROOT_DIR = path.resolve(fileURLToPath(new URL('../../../', import.meta.url)));
 const FLOATING_APP_DIR = path.join(ROOT_DIR, 'apps', 'floating-panel');
@@ -41,6 +42,8 @@ function parseArgs(argv){
     restart: false,
     devConsole: true,
     devMode: false,
+    consoleHeadless: undefined,
+    consoleDetached: true,
   };
   for (let i=2;i<argv.length;i++){
     const a = argv[i];
@@ -53,6 +56,10 @@ function parseArgs(argv){
     if (a === '--dev') { args.devConsole = true; continue; }
     if (a === '--no-dev') { args.devConsole = false; continue; }
     if (a === '--dev-mode') { args.devMode = true; continue; }
+    if (a === '--console-ui') { args.consoleHeadless = false; continue; }
+    if (a === '--console-headless') { args.consoleHeadless = true; continue; }
+    if (a === '--console-detach') { args.consoleDetached = true; continue; }
+    if (a === '--console-attach') { args.consoleDetached = false; continue; }
   }
   if (args.devMode) {
     args.headless = true;
@@ -153,7 +160,7 @@ function waitForSocket(host, port, timeoutMs=8000) {
   });
 }
 
-function spawnNpmDev(extraEnv = {}) {
+function spawnNpmDev(extraEnv = {}, options = {}) {
   const npmCmd = process.platform === 'win32' ? 'npm.cmd' : 'npm';
   const env = {
     ...process.env,
@@ -163,21 +170,30 @@ function spawnNpmDev(extraEnv = {}) {
       extraEnv.WEBAUTO_FLOATING_BUS_PORT || process.env.WEBAUTO_FLOATING_BUS_PORT || '8790',
     ...extraEnv,
   };
-  return spawn(npmCmd, ['run', 'dev'], {
+  const detached = Boolean(options.detached);
+  const child = spawn(npmCmd, ['run', 'dev'], {
     cwd: FLOATING_APP_DIR,
-    stdio: 'inherit',
+    stdio: detached ? 'ignore' : 'inherit',
+    detached,
     env,
   });
+  if (detached) {
+    child.unref();
+  }
+  return child;
 }
 
-async function launchFloatingConsole(targetUrl = '') {
+async function launchFloatingConsole(targetUrl = '', options = {}) {
+  const { headless = true, detached = true } = options;
   if (!fs.existsSync(path.join(FLOATING_APP_DIR, 'package.json'))) {
     console.warn('[one-click] floating console 未安装，跳过 --dev 浮窗启动');
     return;
   }
 
   killFloatingPanelProcesses();
-  console.log('[one-click] --dev 模式：启动浮窗控制台，使用 Node WebSocket 服务');
+  console.log(detached
+    ? '[one-click] --dev 模式：后台启动浮窗控制台'
+    : '[one-click] --dev 模式：启动浮窗控制台，使用 Node WebSocket 服务');
   const ready = await waitForSocket(DEFAULT_WS_HOST, DEFAULT_WS_PORT, 8000);
   if (!ready) {
     console.warn(`[one-click] ws://${DEFAULT_WS_HOST}:${DEFAULT_WS_PORT} 未就绪，浮窗会自行重试连接`);
@@ -192,15 +208,19 @@ async function launchFloatingConsole(targetUrl = '') {
     env.WEBAUTO_FLOATING_TARGET_URL = targetUrl;
   }
   if (!('WEBAUTO_FLOATING_HEADLESS' in env)) {
-    env.WEBAUTO_FLOATING_HEADLESS = process.env.WEBAUTO_FLOATING_HEADLESS ?? '0';
+    env.WEBAUTO_FLOATING_HEADLESS =
+      process.env.WEBAUTO_FLOATING_HEADLESS ?? (headless ? '1' : '0');
   }
-  const uiProc = spawnNpmDev(env);
+  const uiProc = spawnNpmDev(env, { detached });
   const cleanup = () => {
     if (uiProc && !uiProc.killed) {
       uiProc.kill();
     }
   };
-
+  if (detached) {
+    console.log(`[one-click] 浮窗控制台后台运行 (pid=${uiProc.pid})`);
+    return;
+  }
   const signalHandler = () => {
     cleanup();
     process.exit();
@@ -236,16 +256,19 @@ async function main(){
   const baseHost = host === '0.0.0.0' ? '127.0.0.1' : host;
   const base = `http://${baseHost}:${port}`;
   await ensureWorkflowApi();
-
+  const rebuilt = ensureBrowserServiceBuildArtifacts('one-click');
   if (restart) {
     await runNode('runtime/infra/utils/scripts/service/restart-browser-service.mjs', []);
   }
 
   // 确保服务在后台运行
   let healthy = await waitHealth(`${base}/health`, 1000);
+  let forceRestart = rebuilt;
   let serviceChild = null;
   const ensureBrowserService = async () => {
-    if (healthy) return;
+    if (healthy && !forceRestart) return;
+    forceRestart = false;
+    healthy = false;
     for (let attempt = 0; attempt < 3 && !healthy; attempt++) {
       killBrowserServiceProcesses();
       killPort(port);
@@ -258,21 +281,16 @@ async function main(){
         '--ws-host', DEFAULT_WS_HOST,
         '--ws-port', String(DEFAULT_WS_PORT),
       ], {
-        stdio: 'inherit',
+        stdio: 'ignore',
         env: { ...process.env, BROWSER_SERVICE_AUTO_EXIT: '0' },
-      });
-      serviceChild = child;
-      child.on('exit', (code) => {
-        if (serviceChild !== child) return;
-        if (code === 0) {
-          process.exit(0);
-        } else {
-          console.warn(`[one-click] browser service exited with code ${code}`);
-        }
+        detached: true,
       });
       child.on('error', (err) => {
         console.warn('[one-click] browser service spawn failed:', err?.message || String(err));
       });
+      child.unref();
+      serviceChild = child;
+      console.log(`[one-click] browser service 启动 (pid=${child.pid})`);
       healthy = await waitHealth(`${base}/health`, 4000);
       if (healthy) return;
     }
@@ -335,7 +353,11 @@ async function main(){
   }
 
   if (devConsole && !process.argv.includes('--no-dev')) {
-    await launchFloatingConsole(url);
+    const consoleHeadless = args.consoleHeadless ?? args.headless ?? true;
+    await launchFloatingConsole(url, {
+      headless: consoleHeadless,
+      detached: args.consoleDetached !== false,
+    });
   }
 }
 

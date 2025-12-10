@@ -1,7 +1,7 @@
 {
   "name": "webauto",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "module",
   "dependencies": {
     "iconv-lite": "^0.6.3",
@@ -37,15 +37,19 @@
     "ui:test": "node scripts/ui/run-headless-tests.mjs",
     "ui:test:driver": "node scripts/ui/dev-driver.mjs",
     "browser:oneclick": "node runtime/browser/scripts/one-click-browser.mjs",
+    "verify": "node scripts/check/self-verify.mjs",
     "service:browser:start": "node runtime/infra/utils/scripts/service/start-browser-service.mjs",
     "service:browser:stop": "node runtime/infra/utils/scripts/service/stop-browser-service.mjs",
     "service:browser:restart": "node runtime/infra/utils/scripts/service/restart-browser-service.mjs",
     "service:browser:restart:python": "node runtime/infra/utils/scripts/service/restart-python-browser-service.mjs",
+    "service:controller:start": "node services/controller/src/server.mjs",
     "service:kill-port": "node runtime/infra/utils/scripts/service/kill-port.mjs",
     "browser:camoufox:oneclick": "node runtime/browser/scripts/one-click-camoufox.mjs",
     "browser:camoufox:status": "node runtime/browser/scripts/status-camoufox.mjs",
     "browser:camoufox:navigate1688": "node runtime/browser/scripts/navigate-1688.mjs",
     "browser:camoufox:install": "python3 -m camoufox remove && python3 -m camoufox fetch",
+    "browser:highlight": "node scripts/ui/send-highlight-cli.mjs",
+    "browser:clear-highlight": "node scripts/ui/send-highlight-cli.mjs --clear",
     "test:graph-engine": "tsx --test modules/graph-engine/tests/**/*.ts",
     "test:dom-branch": "tsx --test modules/dom-branch-fetcher/tests/**/*.ts",
     "test:floating-orchestrator": "tsx apps/floating-panel/core/__tests__/orchestrator.test.mjs"

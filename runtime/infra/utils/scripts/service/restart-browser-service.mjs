@@ -3,11 +3,11 @@
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
-import { loadBrowserServiceConfig } from '../../../../libs/browser/browser-service-config.js';
+import { loadBrowserServiceConfig } from '../../../../../libs/browser/browser-service-config.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-const root = resolve(__dirname, '../../../..');
+const root = resolve(__dirname, '../../../../..');
 
 function run(cmd, args, env) {
   return new Promise((resolve) => {

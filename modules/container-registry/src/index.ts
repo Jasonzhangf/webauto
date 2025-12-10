@@ -10,6 +10,14 @@ const USER_CONTAINER_ROOT = path.join(os.homedir(), '.webauto', 'container-lib')
 const INDEX_PATH = path.join(PROJECT_ROOT, 'container-library.index.json');
 const LEGACY_PATH = path.join(PROJECT_ROOT, 'container-library.json');
 
+function isLegacyContainer(definition: any): boolean {
+  try {
+    return Boolean(definition?.metadata?.legacy_data);
+  } catch {
+    return false;
+  }
+}
+
 export interface SelectorDefinition {
   css?: string;
   id?: string;
@@ -125,6 +133,9 @@ export class ContainerRegistry {
           try {
             const raw = JSON.parse(fs.readFileSync(path.join(dir, entry.name), 'utf-8'));
             if (raw && typeof raw === 'object') {
+              if (isLegacyContainer(raw)) {
+                continue;
+              }
               const id = raw.id || containerId;
               output[id] = { id, ...raw };
             }
@@ -154,6 +165,9 @@ export class ContainerRegistry {
       if (containers && typeof containers === 'object') {
         for (const [key, value] of Object.entries(containers)) {
           if (!output[key] && value && typeof value === 'object') {
+            if (isLegacyContainer(value)) {
+              continue;
+            }
             output[key] = { id: key, ...(value as Record<string, any>) };
           }
         }

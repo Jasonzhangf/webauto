@@ -5,11 +5,11 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
-import { loadBrowserServiceConfig } from '../../../../libs/browser/browser-service-config.js';
+import { loadBrowserServiceConfig } from '../../../../../libs/browser/browser-service-config.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-const projectRoot = resolve(__dirname, '../../../..');
+const projectRoot = resolve(__dirname, '../../../../..');
 
 const args = process.argv.slice(2);
 const cfg = loadBrowserServiceConfig();

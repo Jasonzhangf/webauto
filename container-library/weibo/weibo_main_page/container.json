@@ -13,7 +13,7 @@
     "!*passport*"
   ],
   "children": [
-    "weibo_main_page.weibo_feed"
+    "weibo_main_page.feed_list"
   ],
   "selectors": [
     {
@@ -55,7 +55,7 @@
     {
       "type": "find-child",
       "config": {
-        "container_id": "weibo_main_page.weibo_feed"
+        "container_id": "weibo_main_page.feed_list"
       }
     },
     {
