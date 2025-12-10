@@ -944,17 +944,17 @@ async function ensureDomNodeExpanded(path) {
 }
 
 async function waitForSessionReady(timeoutMs = 15000) {
-  if (state.selectedSession) {
+  if (ensureActiveSession()) {
     return true;
   }
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    if (state.selectedSession) {
+    if (ensureActiveSession()) {
       return true;
     }
     await sleep(200);
   }
-  return Boolean(state.selectedSession);
+  return ensureActiveSession();
 }
 
 async function loadDomBranch(path) {

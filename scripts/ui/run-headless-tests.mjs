@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { spawn } from 'node:child_process';
 import net from 'node:net';
+import WebSocket from 'ws';
 
 const profile = process.env.WEBAUTO_UI_TEST_PROFILE || 'weibo-fresh';
 const targetUrl = process.env.WEBAUTO_UI_TEST_URL || 'https://weibo.com/';
@@ -32,6 +33,66 @@ async function waitForPort(port, host, timeoutMs = 45000) {
     };
     attempt();
   });
+}
+
+async function waitForBusReady(url, timeoutMs = 45000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      await pingBus(url);
+      return true;
+    } catch (err) {
+      await delay(500);
+    }
+  }
+  throw new Error(`waitForBusReady timeout: ${url}`);
+}
+
+function pingBus(url) {
+  return new Promise((resolve, reject) => {
+    const socket = new WebSocket(url);
+    const timeout = setTimeout(() => {
+      cleanup(new Error('bus ping timeout'));
+    }, 10000);
+
+    const cleanup = (err) => {
+      clearTimeout(timeout);
+      try {
+        socket.close();
+      } catch {}
+      if (err) {
+        reject(err);
+      } else {
+        resolve();
+      }
+    };
+
+    socket.on('message', (raw) => {
+      let payload;
+      try {
+        payload = JSON.parse(raw.toString());
+      } catch {
+        return;
+      }
+      if (payload?.topic === 'ui.test.pong') {
+        cleanup();
+      }
+    });
+
+    socket.once('open', () => {
+      try {
+        socket.send(JSON.stringify({ topic: 'ui.test.ping', payload: { ts: Date.now() } }));
+      } catch (err) {
+        cleanup(err);
+      }
+    });
+    socket.once('error', (err) => cleanup(err));
+    socket.once('close', () => cleanup(new Error('bus closed before pong')));
+  });
+}
+
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, Math.max(0, ms)));
 }
 
 async function waitForHealth(url, timeoutMs = 45000) {
@@ -140,6 +201,8 @@ async function main() {
 
   try {
     await waitForPort(busPort, busHost, 45000);
+    const busUrl = process.env.WEBAUTO_FLOATING_BUS_URL || `ws://${busHost}:${busPort}`;
+    await waitForBusReady(busUrl, 45000);
     await waitForHealth(browserHealthUrl, 45000);
     if (driverStartDelayMs > 0) {
       console.log(`[ui-test] waiting ${driverStartDelayMs}ms before starting driver...`);
