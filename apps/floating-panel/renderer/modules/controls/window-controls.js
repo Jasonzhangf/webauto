@@ -42,7 +42,7 @@ export function initWindowControls({
   updateHeadlessButton?.();
 }
 
-export function subscribeDesktopState({ desktop, state, ui, queueFitWindow, updateHeadlessButton }) {
+export function subscribeDesktopState({ desktop, state, ui, queueFitWindow, updateHeadlessButton, uiStateService }) {
   desktop?.onCollapseState?.((payload = {}) => {
     const collapsed = Boolean(payload?.isCollapsed);
     if (state) {
@@ -57,11 +57,24 @@ export function subscribeDesktopState({ desktop, state, ui, queueFitWindow, upda
     if (!collapsed) {
       queueFitWindow?.();
     }
+    uiStateService?.updateWindow(
+      {
+        mode: collapsed ? 'ball' : 'normal',
+        collapsed,
+      },
+      'window-collapse',
+    );
   });
   desktop?.onHeadlessState?.((payload = {}) => {
     if (state) {
       state.headless = Boolean(payload?.headless);
     }
     updateHeadlessButton?.();
+    uiStateService?.updateWindow(
+      {
+        headless: Boolean(payload?.headless),
+      },
+      'window-headless',
+    );
   });
 }

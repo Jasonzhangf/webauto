@@ -20,6 +20,7 @@ export function createDomActionsManager(options = {}) {
     resolveCurrentPageUrl,
     remapContainerToDom,
     onHighlightCleared,
+    uiStateService,
   } = options;
 
   function updateCaptureButtons() {
@@ -265,6 +266,18 @@ export function createDomActionsManager(options = {}) {
       message,
       persistent: success ? undefined : false,
     });
+    const channel = payload?.channel || state.highlightFeedback?.channel || 'dom-selection';
+    const normalizedCount = typeof count === 'number' ? count : payload?.count || 0;
+    uiStateService?.updateHighlight(
+      {
+        status: success ? 'success' : 'error',
+        selector: selector || null,
+        channel,
+        count: normalizedCount || 0,
+        lastUpdated: Date.now(),
+      },
+      'highlight-result',
+    );
     if (!success) {
       showMessage?.(message || '高亮失败', 'error');
     }
@@ -290,6 +303,16 @@ export function createDomActionsManager(options = {}) {
       } else {
         setHighlightFeedback({ status: 'success', message: '高亮已清除', selector: null, persistent: false });
       }
+      uiStateService?.updateHighlight(
+        {
+          status: 'cleared',
+          selector: null,
+          channel: channel || null,
+          count: 0,
+          lastUpdated: Date.now(),
+        },
+        'highlight-clear',
+      );
     } catch (err) {
       if (silent) {
         throw err;

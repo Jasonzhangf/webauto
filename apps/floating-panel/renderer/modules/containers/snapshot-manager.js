@@ -22,6 +22,7 @@ export function createSnapshotManager(options = {}) {
     onSnapshotApplied,
     onSnapshotCleared,
     resetAutoExpandTrigger,
+    uiStateService,
   } = options;
   if (!state || typeof invokeAction !== 'function') {
     throw new Error('snapshot manager requires state and invokeAction');
@@ -63,6 +64,16 @@ export function createSnapshotManager(options = {}) {
     setDomTreeSnapshot(state.domTreeStore, null);
     state.selectedDomPath = null;
     state.domNeedsReset = false;
+    uiStateService?.updateContainers(
+      {
+        rootId: null,
+        pageUrl: null,
+        capturedAt: 0,
+        containerCount: 0,
+        domCount: 0,
+      },
+      'snapshot-cleared',
+    );
   }
 
   function applyContainerSnapshotData(result, options = {}) {
@@ -117,10 +128,44 @@ export function createSnapshotManager(options = {}) {
     scheduleAutoExpand?.();
     syncContainerOpsEditor?.(state.selectedContainerId, { force: true });
     ensureAutoRefreshTimer?.();
+    const containerCount = countContainers(snapshot?.container_tree);
+    const domCount = countDomNodes(domTree);
+    uiStateService?.updateContainers(
+      {
+        rootId: snapshot?.container_tree?.id || null,
+        pageUrl: state.snapshotMeta?.url || null,
+        capturedAt,
+        containerCount,
+        domCount,
+      },
+      'snapshot-applied',
+    );
   }
 
   return {
     loadContainerSnapshot,
     applyContainerSnapshotData,
   };
+}
+
+function countContainers(node) {
+  if (!node) return 0;
+  let count = 1;
+  if (Array.isArray(node.children)) {
+    for (const child of node.children) {
+      count += countContainers(child);
+    }
+  }
+  return count;
+}
+
+function countDomNodes(node) {
+  if (!node) return 0;
+  let total = 1;
+  if (Array.isArray(node.children)) {
+    for (const child of node.children) {
+      total += countDomNodes(child);
+    }
+  }
+  return total;
 }

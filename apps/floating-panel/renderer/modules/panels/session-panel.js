@@ -9,6 +9,7 @@ export function createSessionPanel(options = {}) {
     renderContainers,
     queueFitWindow = () => {},
     refreshSessions = null,
+    uiStateService = null,
   } = options;
 
   function renderBrowserPanel() {
@@ -133,6 +134,13 @@ export function createSessionPanel(options = {}) {
       state.snapshotMeta = { url: null, capturedAt: 0 };
     }
     ensureAutoRefreshTimer?.(true);
+    uiStateService?.updateSessions(
+      {
+        selected: state.selectedSession,
+        lastUpdated: Date.now(),
+      },
+      'session-select',
+    );
   }
 
   async function handleCreateSession() {

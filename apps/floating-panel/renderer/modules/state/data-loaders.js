@@ -9,11 +9,24 @@ export function createDataLoaders(deps = {}) {
     setSelectedSession,
     loadContainerSnapshot,
     ensureAutoRefreshTimer,
+    uiStateService,
   } = deps;
   const renderHooks = {
     renderBrowserPanel: null,
     renderSessions: null,
     renderLogs: null,
+  };
+
+  const publishSessionState = (reason = 'sessions') => {
+    if (!uiStateService || !state) return;
+    uiStateService.updateSessions(
+      {
+        selected: state.selectedSession || null,
+        list: summarizeSessions(state.sessions || []),
+        lastUpdated: Date.now(),
+      },
+      reason,
+    );
   };
 
   async function loadBrowserStatus() {
@@ -25,11 +38,25 @@ export function createDataLoaders(deps = {}) {
       if (state) {
         state.browserStatus = res;
       }
+      uiStateService?.updateWindow(
+        {
+          serviceHealthy: Boolean(res?.healthy ?? (state?.sessions?.length || 0) > 0),
+          lastServiceCheckAt: Date.now(),
+        },
+        'browser-status',
+      );
     } catch (err) {
       if (state) {
         state.browserStatus = { healthy: false, error: err?.message || String(err) };
       }
       showMessage?.(err?.message || '获取浏览器状态失败', 'error');
+      uiStateService?.updateWindow(
+        {
+          serviceHealthy: false,
+          lastServiceCheckAt: Date.now(),
+        },
+        'browser-status-error',
+      );
     } finally {
       setLoading('browser', false);
       renderHooks.renderBrowserPanel?.();
@@ -76,6 +103,7 @@ export function createDataLoaders(deps = {}) {
     }
     renderHooks.renderSessions?.();
     renderHooks.renderBrowserPanel?.();
+    publishSessionState('sessions-load');
     const shouldLoadSnapshot = !skipSnapshot && !silent && state.selectedSession;
     debugLog?.('loadSessions snapshot check', {
       skipSnapshot,
@@ -124,4 +152,13 @@ export function createDataLoaders(deps = {}) {
     loadLogs,
     attachRenderers,
   };
+}
+
+function summarizeSessions(list = []) {
+  return list.map((session) => ({
+    id: session.profileId || session.session_id || 'unknown',
+    url: session.current_url || session.currentUrl || null,
+    mode: session.mode || session.modeName || null,
+    headless: Boolean(session.headless),
+  }));
 }

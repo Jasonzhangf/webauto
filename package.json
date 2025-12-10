@@ -36,6 +36,7 @@
     "cli:dom-branch": "node modules/dom-branch-fetcher/src/cli.ts",
     "ui:test": "node scripts/ui/run-headless-tests.mjs",
     "ui:test:driver": "node scripts/ui/dev-driver.mjs",
+    "ui:state": "node scripts/ui/get-ui-state.mjs",
     "browser:oneclick": "node runtime/browser/scripts/one-click-browser.mjs",
     "verify": "node scripts/check/self-verify.mjs",
     "service:browser:start": "node runtime/infra/utils/scripts/service/start-browser-service.mjs",

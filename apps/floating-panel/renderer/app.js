@@ -28,6 +28,7 @@ import { bus } from './ui/messageBus.js';
 import './ui/devTools.js';
 import { collectUiElements } from './modules/state/ui-elements.js';
 import { createUiState, createLayoutState } from './modules/state/ui-state.js';
+import { createUiStateService } from './modules/state/ui-state-service.js';
 import { createBackendBridge } from './modules/messaging/backend-bridge.js';
 import { initWindowControls, subscribeDesktopState } from './modules/controls/window-controls.js';
 import { bindCoreEvents } from './modules/controls/core-events.js';
@@ -88,6 +89,9 @@ const logger = window.floatingLogger || {
 const ui = collectUiElements(document);
 const state = createUiState({ config });
 const layoutState = createLayoutState();
+const uiStateService = createUiStateService({ bus, logger });
+uiStateService.updateWindow({ mode: 'boot', collapsed: false, headless: false }, 'init');
+uiStateService.updateSessions({ selected: null, list: [], lastUpdated: Date.now() }, 'init');
 
 let graphView = null;
 let domTreeView = null;
@@ -118,6 +122,7 @@ const dataLoaders = createDataLoaders({
   setSelectedSession: (...args) => setSelectedSessionRef?.(...args),
   loadContainerSnapshot: (...args) => loadContainerSnapshotRef?.(...args),
   ensureAutoRefreshTimer,
+  uiStateService,
 });
 const { loadBrowserStatus, loadSessions, loadLogs } = dataLoaders;
 const { loadContainerSnapshot, applyContainerSnapshotData } = createSnapshotManager({
@@ -147,6 +152,7 @@ const { loadContainerSnapshot, applyContainerSnapshotData } = createSnapshotMana
     updateDomCaptureButtons();
   },
   resetAutoExpandTrigger: resetAutoExpandFlag,
+  uiStateService,
 });
 loadContainerSnapshotRef = loadContainerSnapshot;
 containerOpsManager = createContainerOpsManager({
@@ -193,6 +199,7 @@ const sessionPanel = createSessionPanel({
   renderContainers,
   queueFitWindow,
   refreshSessions: () => loadSessions({ silent: false }),
+  uiStateService,
 });
 const {
   renderBrowserPanel,
@@ -229,6 +236,7 @@ domActionsManager = createDomActionsManager({
   resolveCurrentPageUrl,
   remapContainerToDom,
   onHighlightCleared: () => resetPersistentHighlight(),
+  uiStateService,
 });
 const {
   renderPanel: renderDomActionPanel,
@@ -327,7 +335,7 @@ async function init() {
     onSimulateAction: (payload = {}) => simulateUiAction(payload),
   });
   updateLinkModeUI();
-  subscribeDesktopState({ desktop, state, ui, queueFitWindow, updateHeadlessButton });
+  subscribeDesktopState({ desktop, state, ui, queueFitWindow, updateHeadlessButton, uiStateService });
   bus.publish('ui.window.requestState');
   setupAutoFit();
   setupGraphView();
@@ -1141,6 +1149,7 @@ function handleDomHover(domPath) {
       } catch {
         /* noop */
       }
+      uiStateService.updateHover({ domPath: null, lastUpdated: Date.now() }, 'hover-dom');
     }
     return;
   }
@@ -1167,6 +1176,7 @@ function handleDomHover(domPath) {
     } catch {
       /* noop */
     }
+    uiStateService.updateHover({ domPath: null, lastUpdated: Date.now() }, 'hover-dom');
     return;
   }
   hoverState.domPath = normalizedPath;
@@ -1185,6 +1195,7 @@ function handleDomHover(domPath) {
   } catch {
     /* noop */
   }
+  uiStateService.updateHover({ domPath: normalizedPath, lastUpdated: Date.now() }, 'hover-dom');
 }
 
 function handleContainerHover(containerId) {
@@ -1198,6 +1209,7 @@ function handleContainerHover(containerId) {
       } catch {
         /* noop */
       }
+      uiStateService.updateHover({ containerId: null, lastUpdated: Date.now() }, 'hover-container');
     }
     return;
   }
@@ -1216,6 +1228,7 @@ function handleContainerHover(containerId) {
     } catch {
       /* noop */
     }
+    uiStateService.updateHover({ containerId: null, lastUpdated: Date.now() }, 'hover-container');
     return;
   }
   hoverState.containerId = normalizedId;
@@ -1234,6 +1247,7 @@ function handleContainerHover(containerId) {
   } catch {
     /* noop */
   }
+  uiStateService.updateHover({ containerId: normalizedId, lastUpdated: Date.now() }, 'hover-container');
 }
 
 function resolveSimulateElement(payload = {}) {
