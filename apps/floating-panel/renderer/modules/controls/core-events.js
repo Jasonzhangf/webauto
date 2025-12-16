@@ -18,6 +18,7 @@ export function bindCoreEvents(ui, handlers = {}) {
   ui.openInspectorButton?.addEventListener('click', wrap(handlers.onOpenInspector));
   ui.domActionReplace?.addEventListener('click', wrap(handlers.onDomReplace));
   ui.domActionCreate?.addEventListener('click', wrap(handlers.onDomCreate));
+  ui.domActionAddFromDom?.addEventListener('click', wrap(handlers.onDomAddFromDom));
   ui.domActionHighlight?.addEventListener('click', wrap(handlers.onDomHighlight));
   ui.domActionClearHighlight?.addEventListener('click', wrap(handlers.onDomClearHighlight));
   ui.domActionPick?.addEventListener('click', wrap(handlers.onDomPick));

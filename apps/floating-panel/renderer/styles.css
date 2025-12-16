@@ -343,20 +343,23 @@ select {
   border-radius: 12px;
   background: rgba(4, 8, 18, 0.85);
   min-height: 360px;
+  height: min(70vh, 780px);
   overflow: hidden;
   display: flex;
+  flex-direction: column;
   gap: 16px;
 }
 
 .graph-canvas {
-  flex: 0 0 60%;
+  flex: 2 1 0;
   position: relative;
+  min-height: 360px;
 }
 
 #graphCanvas {
   display: block;
   width: 100%;
-  height: auto;
+  height: 100%;
 }
 
 .tree-detail {
@@ -366,7 +369,7 @@ select {
   padding: 12px;
   display: flex;
   gap: 16px;
-  flex: 1;
+  flex: 1 1 0;
   position: relative;
 }
 
@@ -391,13 +394,9 @@ select {
   filter: drop-shadow(0 0 6px rgba(251, 191, 36, 0.45));
 }
 
-/* The tree lists are the single source of truth; hide the legacy canvas view to avoid duplicate trees. */
-.graph-canvas {
+/* Match links are rendered in the canvas graph; keep SVG layer off by default. */
+.match-link-layer {
   display: none;
-}
-
-.graph-shell {
-  gap: 0;
 }
 
 .containers-tools {
@@ -409,6 +408,8 @@ select {
   flex-direction: column;
   gap: 12px;
   margin-bottom: 12px;
+  max-height: 240px;
+  overflow: auto;
 }
 
 .tool-tabs {
@@ -448,6 +449,11 @@ select {
 
 .tool-panel.is-active {
   display: flex;
+}
+
+/* Prioritize the mapping canvas; hide logs for now (can be restored later). */
+.log-panel {
+  display: none;
 }
 
 .dom-secondary-actions {
@@ -687,6 +693,20 @@ select {
   opacity: 0;
 }
 
+.graph-hint {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 12px;
+  pointer-events: none;
+  z-index: 4;
+}
+
 .graph-tooltip-title {
   font-weight: 600;
   margin-bottom: 2px;
@@ -837,6 +857,26 @@ select {
 .tree-line-container.active {
   border-color: rgba(130, 175, 255, 0.6);
   background: rgba(40, 60, 120, 0.25);
+}
+
+.tree-line-draft {
+  border-style: dashed;
+  border-color: rgba(96, 165, 250, 0.8);
+  background: rgba(96, 165, 250, 0.12);
+}
+
+.tree-draft-actions {
+  display: inline-flex;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+
+.tree-draft-actions .ghost {
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.06);
+  font-size: 12px;
 }
 
 .tree-line-dom {

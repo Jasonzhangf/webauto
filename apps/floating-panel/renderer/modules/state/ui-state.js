@@ -12,6 +12,7 @@ export function createUiState(options = {}) {
     containerSnapshot: null,
     selectedContainerId: null,
     selectedDomPath: null,
+    containerDraft: null,
     domNeedsReset: false,
     domTreeStore: createDomTreeStore(),
     graphStore: createGraphStore(),

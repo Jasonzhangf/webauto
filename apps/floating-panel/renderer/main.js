@@ -27,6 +27,7 @@ import {
   normalizeDomPathString,
 } from './dom-tree/store.js';
 import { ingestDomBranch, buildGraphData } from './graph/store.js';
+import { ContainerDomGraphView } from './graph/graph-view.js';
 
 const ui = collectUiElements(document);
 const state = createUiState({ config: { headless: Boolean(ui?.headlessToggle?.checked) } });
@@ -43,6 +44,19 @@ const invokeAction = async (action, payload = {}) => {
   // controller-client wraps {success, data}; we always return the data payload for renderer modules.
   return response?.data ?? response;
 };
+
+let graphView = null;
+let graphOverlay = null;
+try {
+  const graphHost = ui?.containerDomGrid?.querySelector?.('.graph-canvas') || null;
+  graphOverlay = graphHost?.querySelector?.('.graph-overlay') || null;
+  if (graphHost) {
+    graphView = new ContainerDomGraphView(graphHost);
+  }
+} catch (err) {
+  console.warn('[floating] graph view unavailable', err);
+  graphView = null;
+}
 
 function showMessage(message, level = 'info') {
   if (!ui?.globalMessage) return;
@@ -240,12 +254,63 @@ function buildContainerRows(node, depth, host) {
     containerOps.renderPanel();
     switchToolTab('container');
     scheduleMatchLinkDraw();
+    renderGraph();
   });
 
   host.appendChild(row);
   if (expanded && hasChildren) {
     node.children.forEach((child) => buildContainerRows(child, depth + 1, host));
   }
+
+  const draft = state.containerDraft;
+  if (draft?.parentId && node.id && draft.parentId === node.id) {
+    renderContainerDraftRow(draft, depth + 1, host);
+  }
+}
+
+function renderContainerDraftRow(draft, depth, host) {
+  const row = document.createElement('div');
+  row.className = 'tree-line tree-line-container tree-line-draft';
+  row.style.paddingLeft = `${Math.max(depth - 1, 0) * 18 + 12}px`;
+
+  const header = document.createElement('div');
+  header.className = 'tree-line-header';
+  const spacer = document.createElement('div');
+  spacer.style.width = '24px';
+  header.appendChild(spacer);
+
+  const label = document.createElement('span');
+  label.className = 'tree-label';
+  label.textContent = draft.alias ? `${draft.alias} · ${draft.containerId}` : draft.containerId;
+  header.appendChild(label);
+
+  const actions = document.createElement('div');
+  actions.className = 'tree-draft-actions';
+  const ok = document.createElement('button');
+  ok.className = 'ghost';
+  ok.textContent = '确定';
+  ok.addEventListener('click', (event) => {
+    event.stopPropagation();
+    confirmContainerDraft().catch((err) => showMessage(err?.message || '创建失败', 'error'));
+  });
+  const cancel = document.createElement('button');
+  cancel.className = 'ghost';
+  cancel.textContent = '取消';
+  cancel.addEventListener('click', (event) => {
+    event.stopPropagation();
+    cancelContainerDraft();
+  });
+  actions.appendChild(ok);
+  actions.appendChild(cancel);
+  header.appendChild(actions);
+  row.appendChild(header);
+
+  const meta = document.createElement('span');
+  meta.className = 'tree-meta';
+  meta.textContent = '待确认';
+  row.appendChild(meta);
+
+  host.appendChild(row);
 }
 
 function renderDomTree() {
@@ -451,11 +516,33 @@ function renderContainers() {
   renderDomTree();
   renderContainerSelectOptions();
   renderGraphCounts();
+  renderGraph();
   queueFitWindow();
   if (state.selectedDomPath) {
     setTimeout(() => scrollDomPathIntoView(state.selectedDomPath), 0);
   }
   scheduleMatchLinkDraw();
+}
+
+function renderGraph() {
+  if (!graphView) return;
+  const rootId = state.containerSnapshot?.container_tree?.id || null;
+  const graph = rootId ? buildGraphData(state.graphStore, rootId) : { containerRows: [], domNodes: [], links: [] };
+  const hasData = Boolean((graph.containerRows || []).length || (graph.domNodes || []).length);
+  if (graphOverlay) {
+    graphOverlay.classList.toggle('hidden', hasData);
+  }
+  if (state.graphDirty || state.graphLastRootId !== rootId) {
+    graphView.setData({
+      containers: graph.containerRows || [],
+      domNodes: graph.domNodes || [],
+      links: graph.links || [],
+    });
+    state.graphDirty = false;
+    state.graphLastRootId = rootId;
+  }
+  graphView.setSelection({ containerId: state.selectedContainerId, domPath: state.selectedDomPath });
+  graphView.setInteractionMode({ linkMode: state.linkMode });
 }
 
 async function expandDomPath(path, options = {}) {
@@ -720,6 +807,125 @@ async function handleDomClearHighlight() {
   await invokeAction('browser:clear-highlight', { profile: state.selectedSession, channel: 'dom-suggest' }).catch(() => {});
   await invokeAction('browser:clear-highlight', { profile: state.selectedSession, channel: 'hover-dom' }).catch(() => {});
   await invokeAction('browser:clear-highlight', { profile: state.selectedSession, channel: 'hover-container' }).catch(() => {});
+  await invokeAction('browser:clear-highlight', { profile: state.selectedSession, channel: 'dom-selection' }).catch(() => {});
+  await invokeAction('browser:clear-highlight', { profile: state.selectedSession, channel: 'dom-expand' }).catch(() => {});
+}
+
+async function highlightSelectedDom(path, channel = 'dom-selection', style = '2px solid rgba(34,197,94,0.95)') {
+  if (!state.selectedSession) return;
+  if (!path) {
+    await invokeAction('browser:clear-highlight', { profile: state.selectedSession, channel }).catch(() => {});
+    return;
+  }
+  await invokeAction('browser:highlight-dom-path', {
+    profile: state.selectedSession,
+    path,
+    options: { channel, style, sticky: true },
+  }).catch(() => {});
+}
+
+function suggestParentContainerForDomPath(domPath) {
+  if (!domPath || !state.containerSnapshot?.matches) {
+    return { parentId: state.containerSnapshot?.container_tree?.id || null, exactMatched: false };
+  }
+  const matches = state.containerSnapshot.matches || {};
+  let best = null;
+  let bestDepth = -1;
+  Object.entries(matches).forEach(([containerId, entry]) => {
+    (entry?.nodes || []).forEach((node) => {
+      const path = node?.dom_path;
+      if (!path || typeof path !== 'string') return;
+      if (!domPath.startsWith(path)) return;
+      const depth = path.split('/').length;
+      if (depth > bestDepth) {
+        bestDepth = depth;
+        best = { containerId, matchPath: path };
+      }
+    });
+  });
+  const parentId = best?.containerId || state.containerSnapshot.container_tree?.id || null;
+  const exactMatched = Boolean(best && best.matchPath === domPath);
+  return { parentId, exactMatched };
+}
+
+function sanitizeContainerId(raw) {
+  return String(raw || '')
+    .trim()
+    .replace(/[^a-zA-Z0-9._-]+/g, '_')
+    .replace(/_+/g, '_')
+    .replace(/^_+|_+$/g, '');
+}
+
+async function handleDomAddFromDom() {
+  if (!state.selectedSession) {
+    showMessage('请先选择会话', 'warn');
+    return;
+  }
+  const domPath = state.selectedDomPath;
+  if (!domPath) {
+    showMessage('请先在 DOM Explorer 选择一个节点', 'warn');
+    return;
+  }
+  await loadDomBranch(domPath, { maxDepth: 0, maxChildren: 0, force: true }).catch(() => {});
+  const node = findDomNodeByPath(getDomTree(state.domTreeStore), domPath);
+  const selector = typeof node?.selector === 'string' ? node.selector.trim() : '';
+  if (!selector) {
+    showMessage('该 DOM 节点缺少 selector，无法创建容器（先展开/刷新）', 'warn');
+    return;
+  }
+
+  const { parentId } = suggestParentContainerForDomPath(domPath);
+  if (!parentId) {
+    showMessage('无法确定父容器（请先捕获容器树）', 'warn');
+    return;
+  }
+  const tag = (node?.tag || 'container').toLowerCase();
+  const proposedId = sanitizeContainerId((ui?.domNewContainerId?.value || '').trim()) || sanitizeContainerId(`${parentId}.${tag}_${Math.random().toString(36).slice(2, 6)}`);
+  const proposedAlias = (ui?.domNewContainerAlias?.value || '').trim();
+
+  state.containerDraft = {
+    parentId,
+    domPath,
+    selector,
+    containerId: proposedId,
+    alias: proposedAlias,
+    createdAt: Date.now(),
+  };
+  if (ui?.domNewContainerId) ui.domNewContainerId.value = proposedId;
+  if (!state.containerTreeExpanded) state.containerTreeExpanded = new Set();
+  state.containerTreeExpanded.add(parentId);
+
+  showMessage('已生成新容器草稿：左侧容器树里点“确定”保存', 'info');
+  await highlightSelectedDom(domPath, 'dom-suggest', '2px dashed rgba(96,165,250,0.95)');
+  renderContainers();
+}
+
+async function confirmContainerDraft() {
+  const draft = state.containerDraft;
+  if (!draft) return;
+  if (!state.selectedSession) return;
+  const url = resolveCurrentPageUrl();
+  const res = await domService.createChildContainer({
+    profile: state.selectedSession,
+    url,
+    parentId: draft.parentId,
+    containerId: draft.containerId,
+    selector: draft.selector,
+    alias: draft.alias,
+    ...(draft.domPath ? { domPath: draft.domPath } : {}),
+  });
+  state.containerDraft = null;
+  await invokeAction('browser:clear-highlight', { profile: state.selectedSession, channel: 'dom-suggest' }).catch(() => {});
+  snapshotManager.applyContainerSnapshotData(res, { toastMessage: '容器已创建' });
+  renderContainers();
+}
+
+function cancelContainerDraft() {
+  state.containerDraft = null;
+  if (state.selectedSession) {
+    invokeAction('browser:clear-highlight', { profile: state.selectedSession, channel: 'dom-suggest' }).catch(() => {});
+  }
+  renderContainers();
 }
 
 async function handleDomReplace() {
@@ -848,11 +1054,15 @@ const domTreeView = createDomTreeView({
     if (ui.domActionTarget) ui.domActionTarget.textContent = `DOM: ${path}`;
     renderDomTree();
     scheduleMatchLinkDraw();
+    highlightSelectedDom(path).catch(() => {});
+    renderGraph();
   },
   onToggleExpand: async (path) => {
     try {
       await expandDomPath(path, { maxDepth: 1, maxChildren: 12 });
       bus.publish('ui.graph.domExpanded', { path });
+      await highlightSelectedDom(path, 'dom-expand').catch(() => {});
+      renderGraph();
     } catch (err) {
       bus.publish('ui.graph.domExpandFailed', { path, error: err?.message || String(err) });
       showMessage(err?.message || '展开失败', 'error');
@@ -959,6 +1169,7 @@ bindCoreEvents(ui, {
   onDomClearHighlight: () => handleDomClearHighlight().catch(() => {}),
   onDomReplace: () => handleDomReplace().catch((err) => showMessage(err?.message || '替换失败', 'error')),
   onDomCreate: () => handleDomCreate().catch((err) => showMessage(err?.message || '创建失败', 'error')),
+  onDomAddFromDom: () => handleDomAddFromDom().catch((err) => showMessage(err?.message || '创建草稿失败', 'error')),
   onDomSaveAlias: () => handleSaveAlias().catch((err) => showMessage(err?.message || '保存别名失败', 'error')),
   onToolTabDom: () => switchToolTab('dom'),
   onToolTabContainer: () => switchToolTab('container'),

@@ -129,6 +129,7 @@
                     <input id="domNewContainerAlias" type="text" placeholder="模块名称" autocomplete="off" />
                   </label>
                   <button id="domActionCreate" class="ghost">创建子容器</button>
+                  <button id="domActionAddFromDom" class="ghost">将选中 DOM 变容器</button>
                 </div>
                 <div class="dom-actions-row dom-highlight-row">
                   <label class="dom-actions-field">
@@ -190,6 +191,7 @@
               <div class="graph-shell" id="containerDomGrid">
                 <div class="graph-canvas">
                   <canvas id="graphCanvas" width="400" height="300"></canvas>
+                  <div class="graph-hint">拖动空白区域平移，拖动节点调整位置</div>
                   <div class="graph-overlay">
                     <div class="tree-placeholder">
                       <strong>等待匹配</strong>

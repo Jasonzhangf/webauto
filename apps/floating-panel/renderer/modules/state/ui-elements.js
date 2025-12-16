@@ -54,6 +54,7 @@ export function collectUiElements(doc = document) {
     domActionContainerSelect: doc.getElementById('domActionContainerSelect'),
     domActionReplace: doc.getElementById('domActionReplace'),
     domActionCreate: doc.getElementById('domActionCreate'),
+    domActionAddFromDom: doc.getElementById('domActionAddFromDom'),
     domActionHighlight: doc.getElementById('domActionHighlight'),
     domActionClearHighlight: doc.getElementById('domActionClearHighlight'),
     domActionPick: doc.getElementById('domActionPick'),
