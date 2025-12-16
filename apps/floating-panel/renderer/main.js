@@ -807,16 +807,18 @@ async function handleDomClearHighlight() {
   await invokeAction('browser:clear-highlight', { profile: state.selectedSession, channel: 'dom-suggest' }).catch(() => {});
   await invokeAction('browser:clear-highlight', { profile: state.selectedSession, channel: 'hover-dom' }).catch(() => {});
   await invokeAction('browser:clear-highlight', { profile: state.selectedSession, channel: 'hover-container' }).catch(() => {});
-  await invokeAction('browser:clear-highlight', { profile: state.selectedSession, channel: 'dom-selection' }).catch(() => {});
-  await invokeAction('browser:clear-highlight', { profile: state.selectedSession, channel: 'dom-expand' }).catch(() => {});
+  await invokeAction('browser:clear-highlight', { profile: state.selectedSession, channel: 'dom-focus' }).catch(() => {});
 }
 
-async function highlightSelectedDom(path, channel = 'dom-selection', style = '2px solid rgba(34,197,94,0.95)') {
+async function highlightDomFocus(path, style = '2px solid rgba(34,197,94,0.95)') {
   if (!state.selectedSession) return;
+  const channel = 'dom-focus';
   if (!path) {
     await invokeAction('browser:clear-highlight', { profile: state.selectedSession, channel }).catch(() => {});
     return;
   }
+  // Ensure focus highlight is unique: clear previous highlight before applying the new one.
+  await invokeAction('browser:clear-highlight', { profile: state.selectedSession, channel }).catch(() => {});
   await invokeAction('browser:highlight-dom-path', {
     profile: state.selectedSession,
     path,
@@ -896,7 +898,12 @@ async function handleDomAddFromDom() {
   state.containerTreeExpanded.add(parentId);
 
   showMessage('已生成新容器草稿：左侧容器树里点“确定”保存', 'info');
-  await highlightSelectedDom(domPath, 'dom-suggest', '2px dashed rgba(96,165,250,0.95)');
+  await invokeAction('browser:clear-highlight', { profile: state.selectedSession, channel: 'dom-suggest' }).catch(() => {});
+  await invokeAction('browser:highlight-dom-path', {
+    profile: state.selectedSession,
+    path: domPath,
+    options: { channel: 'dom-suggest', style: '2px dashed rgba(96,165,250,0.95)', sticky: true },
+  }).catch(() => {});
   renderContainers();
 }
 
@@ -1054,14 +1061,17 @@ const domTreeView = createDomTreeView({
     if (ui.domActionTarget) ui.domActionTarget.textContent = `DOM: ${path}`;
     renderDomTree();
     scheduleMatchLinkDraw();
-    highlightSelectedDom(path).catch(() => {});
+    highlightDomFocus(path).catch(() => {});
     renderGraph();
   },
   onToggleExpand: async (path) => {
     try {
       await expandDomPath(path, { maxDepth: 1, maxChildren: 12 });
       bus.publish('ui.graph.domExpanded', { path });
-      await highlightSelectedDom(path, 'dom-expand').catch(() => {});
+      // Expand implies user focus on this node; move focus highlight here.
+      state.selectedDomPath = path;
+      if (ui.domActionTarget) ui.domActionTarget.textContent = `DOM: ${path}`;
+      await highlightDomFocus(path).catch(() => {});
       renderGraph();
     } catch (err) {
       bus.publish('ui.graph.domExpandFailed', { path, error: err?.message || String(err) });
