@@ -386,6 +386,13 @@ class WebSocketServer:
                     return {"success": False, "error": result["error"]}
                 return {"success": True, "data": {"result": result}}
 
+            elif node_type == "dom_pick_loopback":
+                # Legacy Python path removed; TS browser service owns dom pick loopback.
+                return {
+                    "success": False,
+                    "error": "dom_pick_loopback unavailable in python service; use TS browser service",
+                }
+
             else:
                 return {
                     "success": False,

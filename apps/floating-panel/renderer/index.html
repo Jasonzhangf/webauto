@@ -210,6 +210,7 @@
                     <div class="tree-column-title">DOM Explorer</div>
                     <div class="tree-view scrollable" id="domTreeView"></div>
                   </div>
+                  <svg id="matchLinkLayer" class="match-link-layer"></svg>
                 </div>
               </div>
             </div>
@@ -241,13 +242,7 @@
 
     <div class="global-message hidden" id="globalMessage"></div>
     <script type="module">
-      import('./app.js')
-        .then(() => {
-          console.log('[floating] app.js loaded');
-        })
-        .catch((error) => {
-          console.error('[floating] failed to load app.js', error);
-        });
+      import('./main.js');
     </script>
   </body>
 </html>

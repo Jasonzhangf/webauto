@@ -67,14 +67,6 @@ contextBridge.exposeInMainWorld('backendAPI', {
   invokeAction: (action, payload) => ipcRenderer.invoke('ui:action', { action, payload }),
 });
 
-contextBridge.exposeInMainWorld('floatingConfig', {
-  debug: process.env.WEBAUTO_FLOATING_DEBUG === '1',
-  headless: process.env.WEBAUTO_FLOATING_HEADLESS === '1',
-  autoExpandPaths: process.env.WEBAUTO_FLOATING_AUTO_EXPAND
-    ? process.env.WEBAUTO_FLOATING_AUTO_EXPAND.split(',').map((item) => item.trim()).filter(Boolean)
-    : [],
-});
-
 contextBridge.exposeInMainWorld('floatingLogger', {
   log: (...args) => ipcRenderer.send('ui:log', { level: 'log', args }),
   warn: (...args) => ipcRenderer.send('ui:log', { level: 'warn', args }),

@@ -1,49 +1,43 @@
-import { bus } from './messageBus.js';
-
-const listeners = new WeakMap();
-
 export class BaseControl {
-  constructor(id, element) {
-    this.id = id;
-    this.element = element || null;
-    this.state = {};
-    listeners.set(this, new Map());
-  }
-
-  on(event, handler) {
-    const map = listeners.get(this);
-    if (!map.has(event)) {
-      map.set(event, new Set());
-    }
-    map.get(event).add(handler);
-    return () => {
-      map.get(event)?.delete(handler);
-    };
-  }
-
-  emit(event, payload) {
-    const map = listeners.get(this);
-    map.get(event)?.forEach((handler) => handler(payload));
-  }
-
-  render() {}
-
-  update(nextState) {
-    this.state = { ...this.state, ...nextState };
-    const snapshot = this.inspect();
-    this.emit('dev:update', snapshot);
-    bus?.publish('ui.control.devReport', snapshot);
+  constructor(id, rootEl) {
+    this.id = id || 'control';
+    this.rootEl = rootEl || null;
+    this._listeners = new Map();
   }
 
   inspect() {
     return {
       id: this.id,
-      state: this.state,
-      bounds: this.element ? this.element.getBoundingClientRect() : null,
+      hasRoot: Boolean(this.rootEl),
     };
   }
 
-  destroy() {
-    listeners.get(this)?.clear();
+  on(event, handler) {
+    if (!event || typeof handler !== 'function') return;
+    if (!this._listeners.has(event)) {
+      this._listeners.set(event, new Set());
+    }
+    this._listeners.get(event).add(handler);
+  }
+
+  off(event, handler) {
+    if (!event || !this._listeners.has(event)) return;
+    if (!handler) {
+      this._listeners.delete(event);
+      return;
+    }
+    this._listeners.get(event)?.delete(handler);
+  }
+
+  emit(event, payload) {
+    const handlers = this._listeners.get(event);
+    if (!handlers || !handlers.size) return;
+    handlers.forEach((handler) => {
+      try {
+        handler(payload);
+      } catch {
+        // ignore listener errors
+      }
+    });
   }
 }

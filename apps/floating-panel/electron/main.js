@@ -127,6 +127,12 @@ function registerBusHandlers() {
       },
     ],
     ['ui.window.requestState', () => publishWindowState()],
+    ["dom:highlight_request", async (payload = {}) => {
+      await controllerClient.call("highlight_element", { selector: payload.selector, options: { persistent: payload.persistent, channel: payload.channel } });
+    }],
+    ["dom:highlight_cleared", async (payload = {}) => {
+      await controllerClient.call("clear_highlight", { channel: payload.channel });
+    }]
   ];
   topics.forEach(([topic, handler]) => {
     messageBus.subscribe(topic, async (payload) => {

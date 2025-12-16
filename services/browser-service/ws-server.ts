@@ -64,304 +64,239 @@ export class BrowserWsServer {
 
   private async handleDomPick(session: any, parameters: Record<string, any>) {
     const timeoutMs = Math.min(Math.max(Number(parameters?.timeout) || 25000, 3000), 60000);
-    const rootSelector = parameters?.root_selector || parameters?.rootSelector || null;
     const page = await session.ensurePage();
     const sessionId = session?.id || 'unknown';
-    appendDomPickerLog('start', { sessionId, timeoutMs, rootSelector });
-    const logFunctionName = `__webautoDomPickerLog_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
+    appendDomPickerLog('start', { sessionId, timeoutMs });
+
+    await ensurePageRuntime(page);
     try {
-      await page.exposeFunction(logFunctionName, (entry: any) => {
-        appendDomPickerLog('page-event', { sessionId, ...entry });
-      });
-    } catch (err) {
-      appendDomPickerLog('expose-error', { sessionId, error: (err as Error)?.message || String(err) });
+      await page.bringToFront();
+    } catch {
+      /* ignore */
     }
-    const result = await page.evaluate(
-      ({ timeoutMs: timeout, rootSelector: selector, logFn }: { timeoutMs: number; rootSelector: string | null; logFn: string }) =>
-        new Promise((resolve) => {
-          const resolveRoot = () => {
-            if (selector) {
-              try {
-                const target = document.querySelector(selector);
-                if (target) return target;
-              } catch {
-                /* ignore invalid selector */
-              }
-            }
-            return document.getElementById('app') || document.body || document.documentElement;
-          };
-          const isElement = (node: any) => !!node && typeof node === 'object' && node.nodeType === 1;
-          const rootEl = resolveRoot();
-          const runtimeHighlight = (window as any).__webautoRuntime?.highlight || null;
-          if (!runtimeHighlight?.highlightElements) {
-            resolve({ success: false, error: 'runtime highlight unavailable' });
-            return;
-          }
-          const highlightChannel = '__webauto_dom_picker';
-          const cleanupHighlight = () => {
-            if (runtimeHighlight?.clear) {
-              try {
-                runtimeHighlight.clear(highlightChannel);
-              } catch {
-                /* ignore */
-              }
-            }
-          };
-          let active = true;
-          let lastHover: any = null;
-          const cleanup = (payload: any) => {
-            if (!active) return;
-            active = false;
-            document.removeEventListener('mousemove', onMove, true);
-            document.removeEventListener('mousedown', onDown, true);
-            document.removeEventListener('click', blockClick, true);
-            document.removeEventListener('keydown', onKeyDown, true);
-            document.removeEventListener('mouseleave', onMouseLeave, true);
-            window.removeEventListener('scroll', onScroll, true);
-            window.removeEventListener('blur', cancelOnBlur, true);
-            window.removeEventListener('mouseout', onWindowMouseOut, true);
-            clearTimeout(timer);
-            cleanupHighlight();
-            try {
-              const cancelFn = (window as any).__webautoDomPickerCancel;
-              if (cancelFn && cancelFn === globalCancelRef) {
-                (window as any).__webautoDomPickerCancel = null;
-              }
-            } catch {
-              /* ignore */
-            }
-            resolve(payload);
-          };
-          let globalCancelRef: (() => void) | null = null;
-          try {
-            const previous = (window as any).__webautoDomPickerCancel;
-            if (typeof previous === 'function') {
-              try {
-                previous();
-              } catch {
-                /* ignore */
-              }
-            }
-          } catch {
-            /* noop */
-          }
-          const registerGlobalCancel = () => {
-            globalCancelRef = () => cleanup({ success: false, cancelled: true, reason: 'force-cancelled' });
-            (window as any).__webautoDomPickerCancel = globalCancelRef;
-          };
-          registerGlobalCancel();
-          const timer = window.setTimeout(() => cleanup({ success: false, timeout: true }), timeout);
-          const buildDomPath = (el: any) => {
-            if (!el) return null;
-            const indices: string[] = [];
-            let current: any = el;
-            let guard = 0;
-            while (current && guard < 120) {
-              if (rootEl && current === rootEl) {
-                break;
-              }
-              const parent = current.parentElement;
-              if (!parent) break;
-              const idx = Array.prototype.indexOf.call(parent.children || [], current);
-              indices.unshift(String(idx));
-              current = parent;
-              guard += 1;
-            }
-            return ['root'].concat(indices).join('/');
-          };
-          const buildSelector = (el: any) => {
-            if (!el) return '';
-            if (el.id) return `#${el.id}`;
-            if (el.classList && el.classList.length) {
-              return `${el.tagName.toLowerCase()}.${Array.from(el.classList).join('.')}`;
-            }
-            return el.tagName ? el.tagName.toLowerCase() : '';
-          };
-          const emitLog = (payload: Record<string, any>) => {
-            try {
-              if (logFn && typeof (window as any)[logFn] === 'function') {
-                (window as any)[logFn](payload);
-              }
-            } catch {
-              /* noop */
-            }
-          };
-          const highlight = (el: any) => {
-            if (!runtimeHighlight?.highlightElements) {
-              return;
-            }
-            if (!el) {
-              runtimeHighlight.clear(highlightChannel);
-              emitLog({ type: 'highlight', state: 'none' });
-              return;
-            }
-            runtimeHighlight.highlightElements([el], {
-              channel: highlightChannel,
-              style: '2px dashed #fbbc05',
-              duration: 0,
-              sticky: true,
-            });
-            const rect = el.getBoundingClientRect();
-            emitLog({ type: 'highlight', state: 'visible', rect: { x: rect.left, y: rect.top, w: rect.width, h: rect.height } });
-          };
-          const extractText = (el: any) => {
-            if (!el) return '';
-            return (el.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 160);
-          };
-          const findElement = (event: any) => {
-            const rejectList = new Set<Element>();
-            const pickFromList = (list: any[]) => {
-              if (!Array.isArray(list)) return null;
-              for (const entry of list) {
-                if (isElement(entry) && !rejectList.has(entry)) {
-                  return entry;
-                }
-              }
-              return null;
-            };
-            const fromComposedPath = () => {
-              if (event?.composedPath) {
-                const pathList: any[] = event.composedPath();
-                const candidate = pickFromList(pathList);
-                if (candidate) return candidate;
-              }
-              return null;
-            };
-            const fromPoint = () => {
-              if (typeof event?.clientX === 'number' && typeof event?.clientY === 'number') {
-                if (typeof document.elementsFromPoint === 'function') {
-                  const stack = document.elementsFromPoint(event.clientX, event.clientY);
-                  const candidate = pickFromList(stack);
-                  if (candidate) return candidate;
-                }
-                const fallback = document.elementFromPoint(event.clientX, event.clientY);
-                if (isElement(fallback) && !rejectList.has(fallback)) {
-                  return fallback;
-                }
-              }
-              return null;
-            };
-            const directTarget = () => {
-              let target = event?.target || event;
-              while (target && !isElement(target)) {
-                target = target?.parentElement;
-              }
-              if (isElement(target) && !rejectList.has(target)) {
-                return target;
-              }
-              return null;
-            };
-            const candidate = fromComposedPath() || fromPoint() || directTarget();
-            if (candidate) {
-              emitLog({ type: 'hover-candidate', tag: candidate.tagName, id: candidate.id || null, classes: Array.from(candidate.classList || []) });
-            }
-            return candidate;
-          };
-          const finalizeSelection = (el: any) => {
-            if (!el) {
-              cleanup({ success: false, error: '未选中元素' });
-              return;
-            }
-            const rect = el.getBoundingClientRect();
-            emitLog({ type: 'finalize', tag: el.tagName, id: el.id || null, classes: Array.from(el.classList || []) });
-            cleanup({
-              success: true,
-              dom_path: buildDomPath(el),
-              selector: buildSelector(el),
-              tag: el.tagName,
-              id: el.id || null,
-              classes: Array.from(el.classList || []),
-              text: extractText(el),
-              bounding_rect: {
-                x: Math.round(rect.left),
-                y: Math.round(rect.top),
-                width: Math.round(rect.width),
-                height: Math.round(rect.height),
-              },
-            });
-          };
-          const onMove = (event: any) => {
-            if (!active) return;
-            const target = findElement(event);
-            if (target) {
-              lastHover = target;
-              highlight(target);
-            } else {
-              lastHover = null;
-              highlight(null);
-            }
-          };
-          const onScroll = () => {
-            if (lastHover) {
-              highlight(lastHover);
-            }
-          };
-          const onDown = (event: any) => {
-            if (!active) return;
-            if (typeof event.button === 'number' && event.button !== 0) {
-              return;
-            }
-            event.preventDefault();
-            event.stopPropagation();
-            emitLog({ type: 'mouse-down' });
-            finalizeSelection(findElement(event));
-          };
-          const blockClick = (event: any) => {
-            event.preventDefault();
-            event.stopPropagation();
-          };
-          const onKeyDown = (event: any) => {
-            if (!active) return;
-            if (event.key === 'Escape') {
-              event.preventDefault();
-              event.stopPropagation();
-              emitLog({ type: 'escape' });
-              cleanup({ success: false, cancelled: true });
-            }
-          };
-          const cancelOnBlur = () => {
-            emitLog({ type: 'blur-cancel' });
-            cleanup({ success: false, cancelled: true });
-          };
-          const onMouseLeave = () => {
-            if (!active) return;
-            lastHover = null;
-            highlight(null);
-            emitLog({ type: 'mouseleave' });
-          };
-          const onWindowMouseOut = (event: any) => {
-            if (!active) return;
-            const nextTarget = event?.relatedTarget || event?.toElement;
-            const shouldClear = !nextTarget || nextTarget === window || nextTarget === document;
-            if (shouldClear) {
-              onMouseLeave();
-            }
-          };
-          document.addEventListener('mousemove', onMove, true);
-          document.addEventListener('mousedown', onDown, true);
-          document.addEventListener('click', blockClick, true);
-          document.addEventListener('keydown', onKeyDown, true);
-          window.addEventListener('scroll', onScroll, true);
-          window.addEventListener('blur', cancelOnBlur, true);
-          window.addEventListener('mouseout', onWindowMouseOut, true);
-        }),
-      { timeoutMs, rootSelector, logFn: logFunctionName },
-    );
-    appendDomPickerLog('result', { sessionId, success: result?.success !== false });
-    await page.evaluate((fnName: string) => {
+
+    const hasRuntime = await page.evaluate(() => {
+      const w: any = window as any;
+      return Boolean(w.__domPicker && typeof w.__domPicker.startSession === 'function' && typeof w.__domPicker.getLastState === 'function');
+    });
+
+    if (!hasRuntime) {
+      appendDomPickerLog('runtime-missing', { sessionId });
+      return {
+        success: false,
+        error: 'domPicker runtime unavailable',
+        cancelled: false,
+        timeout: false,
+      };
+    }
+
+    await page.evaluate((opts: { timeoutMs: number }) => {
+      const w: any = window as any;
       try {
-        delete (window as any)[fnName];
-      } catch {
-        /* noop */
+        w.__domPicker.startSession({ mode: 'hover-select', timeoutMs: opts.timeoutMs });
+      } catch (err) {
+        // swallow, polling below will observe error/idle state
+        // eslint-disable-next-line no-console
+        console.warn('[dom-picker] startSession error', err);
       }
-    }, logFunctionName).catch(() => {});
-    return result;
+    }, { timeoutMs });
+
+    const startedState = await page.evaluate(() => {
+      const w: any = window as any;
+      return w.__domPicker ? w.__domPicker.getLastState() : null;
+    });
+    appendDomPickerLog('started', { sessionId, state: startedState });
+
+    const startedAt = Date.now();
+    const hardTimeout = timeoutMs + 2000;
+
+    // Poll state until selected / cancelled / timeout
+    // We keep polling even after logical timeoutMs so that page-side timeout can mark phase = 'timeout'.
+    while (true) {
+      const elapsed = Date.now() - startedAt;
+      if (elapsed > hardTimeout) {
+        appendDomPickerLog('hard-timeout', { sessionId, elapsed });
+        return {
+          success: false,
+          error: 'domPicker hard timeout',
+          cancelled: false,
+          timeout: true,
+        };
+      }
+
+      const state: any = await page.evaluate(() => {
+        const w: any = window as any;
+        return w.__domPicker ? w.__domPicker.getLastState() : null;
+      });
+
+      if (!state) {
+        appendDomPickerLog('state-missing', { sessionId });
+        return {
+          success: false,
+          error: 'domPicker state unavailable',
+          cancelled: false,
+          timeout: false,
+        };
+      }
+
+      const phase = state.phase;
+
+      if (phase === 'selected' && state.selection) {
+        const sel: {
+          path?: string;
+          selector?: string;
+          rect?: { x: number; y: number; width: number; height: number };
+          tag?: string;
+          id?: string | null;
+          text?: string;
+          classes?: string[];
+        } = state.selection;
+        appendDomPickerLog('selected', { sessionId, selection: sel });
+        return {
+          success: true,
+          dom_path: sel.path || '',
+          selector: sel.selector || '',
+          bounding_rect: sel.rect || { x: 0, y: 0, width: 0, height: 0 },
+          tag: sel.tag || '',
+          id: sel.id || null,
+          classes: Array.isArray(sel.classes) ? sel.classes : [],
+          text: sel.text || '',
+          cancelled: false,
+          timeout: false,
+        };
+      }
+
+      if (phase === 'cancelled') {
+        appendDomPickerLog('cancelled', { sessionId });
+        return {
+          success: false as const,
+          error: state.error || 'cancelled',
+          dom_path: null as string | null,
+          selector: null as string | null,
+          bounding_rect: null as { x: number; y: number; width: number; height: number } | null,
+          tag: null as string | null,
+          id: null as string | null,
+          classes: [] as string[],
+          text: '' as string,
+          cancelled: true as const,
+          timeout: false as const,
+        };
+      }
+
+      if (phase === 'timeout') {
+        appendDomPickerLog('timeout', { sessionId });
+        return {
+          success: false as const,
+          error: state.error || 'timeout',
+          dom_path: null as string | null,
+          selector: null as string | null,
+          bounding_rect: null as { x: number; y: number; width: number; height: number } | null,
+          tag: null as string | null,
+          id: null as string | null,
+          classes: [] as string[],
+          text: '' as string,
+          cancelled: false as const,
+          timeout: true as const,
+        };
+      }
+
+      await new Promise((r) => setTimeout(r, 100));
+    }
   }
 
   async stop() {
     if (!this.wss) return;
     await new Promise<void>((resolve) => this.wss?.close(() => resolve()));
     this.wss = undefined;
+  }
+
+  private async handleDomPickerLoopback(session: any, parameters: Record<string, any>) {
+    const page = await session.ensurePage();
+    const selector = parameters.selector || 'body';
+    const timeoutMs = Math.min(Math.max(Number(parameters?.timeout) || 10000, 1000), 60000);
+    const settleMs = Math.min(Math.max(Number(parameters?.settle_ms) || 32, 0), 2000);
+    const sessionId = session?.id || 'unknown';
+    appendDomPickerLog('loopback_start', { sessionId, selector, timeoutMs, settleMs });
+
+    await ensurePageRuntime(page);
+
+    // Real loopback: compute element center, move the real browser mouse, then read picker state.
+    const prep = await page.evaluate((sel: string) => {
+      const runtime: any = (window as any).__webautoRuntime;
+      const picker: any = (window as any).__domPicker;
+      if (!runtime || !runtime.ready) {
+        return { ok: false, error: '__webautoRuntime not ready' };
+      }
+      if (!picker || typeof picker.startSession !== 'function' || typeof picker.getLastState !== 'function') {
+        return { ok: false, error: '__domPicker unavailable' };
+      }
+      const info = picker.findElementCenter ? picker.findElementCenter(sel) : null;
+      const el = typeof sel === 'string' ? document.querySelector(sel) : null;
+      if (!info || !info.found || !el) {
+        return { ok: false, error: 'selector_not_found' };
+      }
+      const point = { x: Math.round(info.x), y: Math.round(info.y) };
+      const rect = info.rect;
+      const buildPath = runtime?.dom?.buildPathForElement;
+      const targetPath = buildPath && el instanceof Element ? buildPath(el, null) : null;
+      const fromPoint = document.elementFromPoint(point.x, point.y);
+      const fromPointPath = buildPath && fromPoint instanceof Element ? buildPath(fromPoint, null) : null;
+      const before = picker.getLastState();
+      if (!before?.phase || before.phase === 'idle') {
+        picker.startSession({ timeoutMs: 8000 });
+      }
+      return {
+        ok: true,
+        selector: sel,
+        point,
+        targetRect: rect,
+        targetPath,
+        fromPointPath,
+        stateBefore: before,
+      };
+    }, selector);
+
+    if (!prep?.ok) {
+      appendDomPickerLog('loopback_runtime_missing', { sessionId, selector, error: prep?.error });
+      return { success: false, error: prep?.error || 'loopback_prep_failed' };
+    }
+
+    await page.mouse.move(prep.point.x, prep.point.y);
+    if (settleMs > 0) {
+      await new Promise((r) => setTimeout(r, settleMs));
+    }
+
+    const after = await page.evaluate(() => {
+      const picker: any = (window as any).__domPicker;
+      return picker?.getLastState?.() || null;
+    });
+
+    await page.evaluate((sel: string) => {
+      const runtime: any = (window as any).__webautoRuntime;
+      runtime?.highlight?.highlightSelector?.(sel, { persistent: true, channel: 'dom-picker-loopback' });
+    }, prep.selector);
+
+    const result = {
+      selector: prep.selector,
+      point: prep.point,
+      targetRect: prep.targetRect,
+      hoveredPath: after?.selection?.path || after?.hovered?.path || after?.selected?.path || after?.path || null,
+      targetPath: prep.targetPath,
+      fromPointPath: prep.fromPointPath,
+      overlayRect: after?.selection?.rect || after?.hovered?.rect || after?.selected?.rect || after?.rect || null,
+      stateBefore: prep.stateBefore,
+      stateAfter: after,
+      matches:
+        Boolean(prep.targetPath) &&
+        (after?.selection?.path || after?.hovered?.path || after?.selected?.path || after?.path) === prep.targetPath &&
+        Boolean(after?.selection?.rect || after?.hovered?.rect || after?.selected?.rect || after?.rect),
+    };
+
+    appendDomPickerLog('loopback_result', { sessionId, selector, result });
+    return {
+      success: true,
+      data: result,
+    };
   }
 
   private async handleMessage(socket: WebSocket, raw: RawData) {
@@ -718,6 +653,13 @@ export class BrowserWsServer {
           data: result,
         };
       }
+      case 'dom_pick_loopback': {
+        const result = await this.handleDomPickerLoopback(session, parameters);
+        return {
+          success: true,
+          data: result,
+        };
+      }
       default:
         throw new Error(`Unsupported node type: ${nodeType}`);
     }
@@ -754,38 +696,109 @@ export class BrowserWsServer {
     const parameters = command.parameters || {};
     switch (action) {
       case 'highlight_element': {
-        const selector = parameters.selector || parameters.css;
+        const selector = (parameters.selector || '').trim();
         if (!selector) {
-          throw new Error('highlight_element requires selector');
+          return { success: false, error: 'selector required' };
         }
-        const channel = parameters.channel || 'default';
-        const style = parameters.style || '2px solid #34a853';
-        const duration = typeof parameters.duration === 'number' ? parameters.duration : 2000;
-        const sticky = Boolean(parameters.sticky);
-        const maxMatches = Math.min(Math.max(Number(parameters.max_matches) || 20, 1), 200);
-        appendHighlightLog('request', { sessionId, selector, style, duration, channel, sticky, maxMatches });
-        const data = await this.highlightViaRuntime(session, {
-          selector,
-          channel,
-          style,
-          duration,
-          sticky,
-          maxMatches,
-        });
-        appendHighlightLog('result', { sessionId, selector, channel, count: data?.count ?? 0 });
-        return {
-          success: true,
-          data,
-        };
+        const channel = (parameters.channel || 'ui-action').trim() || 'ui-action';
+        const style = typeof parameters.style === 'string' ? parameters.style : undefined;
+        const duration = typeof parameters.duration === 'number' ? parameters.duration : Number(parameters.duration || 0);
+        const sticky = typeof parameters.sticky === 'boolean' ? parameters.sticky : Boolean(parameters.hold || false);
+        const rootSelector = parameters.root_selector || parameters.rootSelector || null;
+
+        appendHighlightLog('request', { sessionId, channel, selector, style, duration, sticky, rootSelector });
+        const page = await session.ensurePage();
+        const result = await page.evaluate(
+          (config) => {
+            if (!(window as any).__webautoRuntime?.highlight?.highlightSelector) {
+              throw new Error('highlight runtime unavailable');
+            }
+            const res = (window as any).__webautoRuntime.highlight.highlightSelector(config.selector, {
+              channel: config.channel,
+              ...(config.style ? { style: config.style } : {}),
+              ...(Number.isFinite(config.duration) && config.duration > 0 ? { duration: config.duration } : {}),
+              ...(typeof config.sticky === 'boolean' ? { sticky: config.sticky } : {}),
+              ...(config.rootSelector ? { rootSelector: config.rootSelector } : {}),
+            });
+            const count = typeof res === 'number' ? res : Number(res?.count || res?.matched || 0);
+            return { count: Number.isFinite(count) ? count : 0, channel: config.channel };
+          },
+          { selector, channel, style, duration: Number.isFinite(duration) ? duration : 0, sticky, rootSelector },
+        );
+        appendHighlightLog('result', { sessionId, channel, selector, count: result?.count || 0 });
+        return { success: true, data: result };
       }
       case 'clear_highlight': {
-        const channel = parameters.channel || null;
+        const channel = (parameters.channel || 'ui-action').trim() || 'ui-action';
         appendHighlightLog('clear', { sessionId, channel });
-        const result = await this.clearHighlightOverlays(session, channel);
+        const page = await session.ensurePage();
+        await page.evaluate((ch) => {
+          (window as any).__webautoRuntime?.highlight?.clear?.(ch);
+        }, channel);
         return {
           success: true,
-          data: result,
+          data: { cleared: true },
         };
+      }
+      case 'highlight_dom_path': {
+        const path = (parameters.path || parameters.dom_path || '').trim();
+        if (!path) {
+          return { success: false, error: 'path required' };
+        }
+        const channel = (parameters.channel || 'ui-action').trim() || 'ui-action';
+        const style = typeof parameters.style === 'string' ? parameters.style : undefined;
+        const duration = typeof parameters.duration === 'number' ? parameters.duration : Number(parameters.duration || 0);
+        const sticky = typeof parameters.sticky === 'boolean' ? parameters.sticky : Boolean(parameters.hold || false);
+        const rootSelector = parameters.root_selector || parameters.rootSelector || null;
+        appendHighlightLog('request', { sessionId, channel, path, style, duration, sticky, rootSelector });
+        const page = await session.ensurePage();
+        const result = await page.evaluate(
+          (config) => {
+            const runtime: any = (window as any).__webautoRuntime;
+            if (!runtime?.highlight?.highlightElements) {
+              throw new Error('highlight runtime unavailable');
+            }
+            const resolveRoot = (sel: string | null) => {
+              if (!sel) return document.body || document.documentElement;
+              return document.querySelector(sel) || document.body || document.documentElement;
+            };
+            const normalizePath = (raw: string) => {
+              const tokens = String(raw || '')
+                .split('/')
+                .filter((t) => t.length);
+              if (!tokens.length) return ['root'];
+              if (tokens[0] !== 'root') tokens.unshift('root');
+              return tokens;
+            };
+            const parts = normalizePath(config.path);
+            let node = resolveRoot(config.rootSelector);
+            if (!node) return { count: 0, channel: config.channel };
+            if (parts.length > 1) {
+              for (let i = 1; i < parts.length; i += 1) {
+                const idx = Number(parts[i]);
+                const children = node.children ? Array.from(node.children) : [];
+                if (!Number.isFinite(idx) || idx < 0 || idx >= children.length) {
+                  node = null;
+                  break;
+                }
+                node = children[idx];
+                if (!node) break;
+              }
+            }
+            if (!node) return { count: 0, channel: config.channel };
+            runtime.highlight.highlightElements([node], {
+              channel: config.channel,
+              ...(config.style ? { style: config.style } : {}),
+              ...(Number.isFinite(config.duration) && config.duration > 0 ? { duration: config.duration } : {}),
+              ...(typeof config.sticky === 'boolean' ? { sticky: config.sticky } : {}),
+              ...(config.rootSelector ? { rootSelector: config.rootSelector } : {}),
+            });
+            return { count: 1, channel: config.channel };
+          },
+          { path, channel, style, duration: Number.isFinite(duration) ? duration : 0, sticky, rootSelector },
+        );
+        appendHighlightLog('result', { sessionId, channel, path, count: result?.count || 0 });
+        return { success: true, data: result };
       }
       case 'cancel_dom_pick': {
         const result = await this.cancelDomPicker(session);
@@ -802,38 +815,12 @@ export class BrowserWsServer {
     }
   }
 
-  private async highlightViaRuntime(
-    session: any,
-    options: { selector: string; channel: string; style: string; duration: number; sticky: boolean; maxMatches: number },
-  ) {
-    const page = await session.ensurePage();
-    await ensurePageRuntime(page);
-    return page.evaluate((payload: { selector: string; channel: string; style: string; duration: number; sticky: boolean; maxMatches: number }) => {
-      const runtime = (window as any).__webautoRuntime;
-      if (!runtime || !runtime.highlight) {
-        throw new Error('runtime highlight unavailable');
-      }
-      return runtime.highlight.highlightSelector(payload.selector, {
-        channel: payload.channel,
-        style: payload.style,
-        duration: payload.duration,
-        sticky: payload.sticky,
-        maxMatches: payload.maxMatches,
-      });
-    }, options);
+  private async highlightViaRuntime() {
+    return { count: 0 };
   }
 
-  private async clearHighlightOverlays(session: any, channel?: string | null) {
-    const page = await session.ensurePage();
-    await ensurePageRuntime(page);
-    return page.evaluate((targetChannel: string | null) => {
-      const runtime = (window as any).__webautoRuntime;
-      if (!runtime || !runtime.highlight) {
-        return { cleared: 0 };
-      }
-      runtime.highlight.clear(targetChannel || null);
-      return { cleared: targetChannel ? 1 : -1 };
-    }, channel || null);
+  private async clearHighlightOverlays() {
+    return { cleared: 0 };
   }
 
   private async cancelDomPicker(session: any) {

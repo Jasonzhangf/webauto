@@ -35,7 +35,11 @@ export class ContainerDomGraphView extends BaseControl {
     this.root = rootEl;
     this.canvas = rootEl?.querySelector('#graphCanvas') || null;
     this.tooltip = rootEl?.querySelector('#graphTooltip') || null;
-    this.ctx = this.canvas?.getContext('2d') || null;
+    try {
+      this.ctx = this.canvas?.getContext?.('2d') || null;
+    } catch {
+      this.ctx = null;
+    }
     this.nodes = [];
     this.nodeMap = new Map();
     this.links = [];

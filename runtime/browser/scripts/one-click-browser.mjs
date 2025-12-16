@@ -36,13 +36,13 @@ function parseArgs(argv){
   const args = {
     port: Number(cfg.port || 7704),
     host: String(cfg.host || '0.0.0.0'),
-    headless: false,
+    headless: true,
     profile: 'default',
     url: '',
     restart: false,
     devConsole: true,
     devMode: false,
-    consoleHeadless: undefined,
+    consoleHeadless: true,
     consoleDetached: true,
   };
   for (let i=2;i<argv.length;i++){
@@ -59,7 +59,14 @@ function parseArgs(argv){
     if (a === '--console-ui') { args.consoleHeadless = false; continue; }
     if (a === '--console-headless') { args.consoleHeadless = true; continue; }
     if (a === '--console-detach') { args.consoleDetached = true; continue; }
-    if (a === '--console-attach') { args.consoleDetached = false; continue; }
+  if (a === '--console-attach') { args.consoleDetached = false; continue; }
+  }
+  // 显式 --headless=false 支持
+  for (let i = 2; i < argv.length; i++) {
+    if (argv[i] === '--headless=false') {
+      args.headless = false;
+      break;
+    }
   }
   if (args.devMode) {
     args.headless = true;

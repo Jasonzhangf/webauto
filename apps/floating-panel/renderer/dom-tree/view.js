@@ -175,6 +175,6 @@ function createDomPlaceholderRow(depth) {
   const placeholder = document.createElement('div');
   placeholder.className = 'tree-line tree-placeholder';
   placeholder.style.paddingLeft = `${Math.max(depth - 1, 0) * 18 + 28}px`;
-  placeholder.textContent = '加载中…';
+  placeholder.textContent = '点击 + 展开以加载子节点';
   return placeholder;
 }

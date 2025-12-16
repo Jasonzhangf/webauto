@@ -47,3 +47,26 @@ webauto/
 4. **扩展 CI 流程**：在 `npm run ui:test` 中新增对 controller 消息的断言；CLI 测试记录在 `docs/testing/ui-loop.md`。
 
 完成以上拆分后，就可以删除旧的耦合实现，只保留模块化、可测试的代码。
+
+## 高亮闭环设计（新增）
+
+1. **事件流概览**
+   - UI 按钮点击 → `ui.action.highlight` / `ui.action.clearHighlight` / `ui.action.togglePersistent`
+   - `highlight-service` 将事件转换为 `dom:highlight_request` / `dom:highlight_cleared`
+   - WebSocket 服务 (`ws-server.ts`) 接收请求，调用 Runtime 的 `highlight_selector` / `clear`
+   - Runtime 在页面内高亮元素，广播 `dom:highlight_feedback` / `dom:highlight_error`
+   - UI 订阅反馈事件，更新状态区域与“保持高亮”勾选框。
+
+2. **模块职责**
+   | 层 | 文件 | 职责 |
+   | --- | --- | --- |
+   | Actions | `renderer/modules/actions/highlight-actions.js` | 将 UI 操作映射为 bus 事件 |
+   | Service | `renderer/modules/services/highlight-service.js` | 维护高亮状态，转发请求与反馈 |
+   | Runtime | `runtime/browser/page-runtime/runtime.js` | 注入高亮/DOM 脚本，实现元素 hover/清除 |
+   | Backend | `services/browser-service/ws-server.ts` | 将 `highlight_element`/`clear_highlight` 分发到 Runtime |
+   | Tests | `scripts/ui/highlight-smoke.mjs` 等 | 端到端验证 |
+
+3. **扩展方向**
+   - 为 CLI 提供 `npm run browser:highlight -- --selector ...` 入口。
+   - 在 Controller 服务 (`services/controller`) 中记录 `highlight` 事件，供 Web UI 或远程调试使用。
+   - 为 Runtime 暴露更多钩子（如 `window.__webautoHighlightHook`）以便第三方脚本接入。

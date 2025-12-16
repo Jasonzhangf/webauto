@@ -43,10 +43,6 @@ export function registerRendererBus(bus, handlers = {}) {
     handlers.onSimulateAction?.(payload);
   });
 
-  subscribe('ui.highlight.result', (payload = {}) => {
-    handlers.onHighlightResult?.(payload);
-  });
-
   return () => {
     while (unsubscribers.length) {
       try {

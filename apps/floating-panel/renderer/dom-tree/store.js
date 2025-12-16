@@ -173,6 +173,13 @@ function ensureDomPathNode(store, path) {
       };
       current.children.push(next);
     }
+    // Ensure intermediate placeholders remain traversable in the tree renderer:
+    // it relies on `childCount` to decide whether a node has children.
+    if (typeof current.childCount !== 'number') {
+      current.childCount = current.children.length;
+    } else {
+      current.childCount = Math.max(current.childCount, current.children.length);
+    }
     current = next;
   }
   return current;

@@ -77,9 +77,6 @@ export function createDataLoaders(deps = {}) {
       const data = res?.sessions || res?.data?.sessions || res?.data || [];
       debugLog?.('loadSessions result', data);
       state.sessions = Array.isArray(data) ? data : [];
-      if (window?.floatingConfig?.debug) {
-        console.log('[floating-ui] sessions payload', state.sessions);
-      }
       const hasSelected =
         state.selectedSession && state.sessions.some((s) => s.profileId === state.selectedSession);
       if (!hasSelected) {

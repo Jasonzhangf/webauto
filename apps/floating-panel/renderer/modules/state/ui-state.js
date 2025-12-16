@@ -38,6 +38,13 @@ export function createUiState(options = {}) {
       parentContainerId: null,
       busy: false,
       lastSuggestionDomPath: null,
+      highlight: {
+        status: 'idle',
+        selector: null,
+        count: 0,
+        error: null,
+        updatedAt: 0,
+      },
     },
     highlightFeedback: {
       selector: null,

@@ -115,7 +115,7 @@ function managerIsIdle(manager: SessionManager) {
 
 async function handleCommand(payload: CommandPayload, manager: SessionManager) {
   const action = payload.action;
-  const args = payload.args || {};
+  const args = payload.args ?? (payload as any);
 
   switch (action) {
     case 'start': {
@@ -174,6 +174,15 @@ async function handleCommand(payload: CommandPayload, manager: SessionManager) {
       if (!session) throw new Error(`session for profile ${profileId} not started`);
       const buffer = await session.screenshot(!!args.fullPage);
       return { ok: true, body: { success: true, data: buffer.toString('base64') } };
+    }
+    case 'evaluate': {
+      const profileId = args.profileId || 'default';
+      const session = manager.getSession(profileId);
+      if (!session) throw new Error(`session for profile ${profileId} not started`);
+      const script = args.script;
+      if (!script || typeof script !== 'string') throw new Error('script (string) is required');
+      const result = await session.evaluate(script);
+      return { ok: true, body: { ok: true, result } };
     }
     case 'newPage':
     case 'switchControl':

@@ -1,4 +1,457 @@
 /* eslint-disable no-var */
+// __DOM_PICKER_INLINE_START
+/* DOM picker runtime: window.__domPicker
+ * Responsible for pointer -> DOM -> highlight -> selection.
+ */
+(() => {
+  if (typeof window === 'undefined') return;
+
+  const DEFAULT_TIMEOUT = 25000;
+  const HOVER_STYLE = '2px dashed #fbbc05';
+  const HIGHLIGHT_CHANNEL = '__webauto_dom_picker';
+
+  const domPickerState = {
+    active: false,
+    phase: 'idle', // 'idle' | 'hovering' | 'selected' | 'cancelled' | 'timeout'
+    lastHover: null,
+    selection: null,
+    error: null,
+    updatedAt: Date.now(),
+  };
+
+  const overlayApi = () => {
+    const runtime = window.__webautoRuntime;
+    if (!runtime || !runtime.highlight || !runtime.highlight.highlightElements) {
+      return null;
+    }
+    return runtime.highlight;
+  };
+
+  const setState = (patch) => {
+    Object.assign(domPickerState, patch, { updatedAt: Date.now() });
+  };
+
+  const core = {
+    _session: null,
+
+    _ensureStopped() {
+      if (!this._session) return;
+      try {
+        this._session.stop();
+      } catch {}
+      this._session = null;
+    },
+
+    startSession(options) {
+      const mode = (options && options.mode) || 'hover-select';
+      const timeoutMs = Math.min(Math.max(Number(options && options.timeoutMs) || DEFAULT_TIMEOUT, 1000), 60000);
+
+      this._ensureStopped();
+
+      const session = createSession({ mode, timeoutMs });
+      this._session = session;
+      session.start();
+      return this.getLastState();
+    },
+
+    cancel() {
+      if (this._session) {
+        this._session.cancel('cancelled-by-host');
+      }
+      return this.getLastState();
+    },
+
+    getLastState() {
+      // return shallow-cloned, read-only-ish snapshot
+      return JSON.parse(JSON.stringify(domPickerState));
+    },
+  };
+
+  function createSession(config) {
+    const mode = config.mode || 'hover-select';
+    const timeoutMs = config.timeoutMs || DEFAULT_TIMEOUT;
+
+    let active = false;
+    let timeoutToken = null;
+
+    let lastHoverEl = null;
+
+    const listeners = [];
+
+    const addListener = (target, type, handler, options) => {
+      target.addEventListener(type, handler, options || true);
+      listeners.push(() => {
+        try {
+          target.removeEventListener(type, handler, options || true);
+        } catch {}
+      });
+    };
+
+    const clearHighlight = () => {
+      const api = overlayApi();
+      if (!api || !api.clear) return;
+      try {
+        api.clear(HIGHLIGHT_CHANNEL);
+      } catch {}
+    };
+
+    const highlightEl = (el) => {
+      const api = overlayApi();
+      if (!api || !api.highlightElements) return;
+      if (!el) {
+        clearHighlight();
+        return;
+      }
+      try {
+        api.highlightElements([el], {
+          channel: HIGHLIGHT_CHANNEL,
+          style: HOVER_STYLE,
+          duration: 0,
+          sticky: true,
+          maxMatches: 1,
+        });
+      } catch {}
+    };
+
+    const isRootLike = (el) => {
+      if (!el || !el.tagName) return false;
+      const tag = el.tagName.toLowerCase();
+      if (tag === 'html' || tag === 'body') return true;
+      if (el.id && el.id.toLowerCase() === 'app') return true;
+      return false;
+    };
+
+    const extractSelector = (el) => {
+      if (!el) return null;
+      if (el.id) return `#${el.id}`;
+      if (el.classList && el.classList.length) {
+        return `${el.tagName.toLowerCase()}.${Array.from(el.classList).join('.')}`;
+      }
+      return el.tagName ? el.tagName.toLowerCase() : null;
+    };
+
+    const extractPath = (el) => {
+      if (!el) return null;
+      try {
+        const runtime = window.__webautoRuntime;
+        if (!runtime || !runtime.dom || !runtime.dom.buildPathForElement) return null;
+        // Path is root-based; container/rootSelector concerns are outside runtime.
+        return runtime.dom.buildPathForElement(el, null);
+      } catch {
+        return null;
+      }
+    };
+
+    const extractRect = (el) => {
+      if (!el || !el.getBoundingClientRect) return null;
+      const rect = el.getBoundingClientRect();
+      return {
+        x: Math.round(rect.left),
+        y: Math.round(rect.top),
+        width: Math.round(rect.width),
+        height: Math.round(rect.height),
+      };
+    };
+
+    const extractText = (el) => {
+      if (!el) return '';
+      return (el.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 160);
+    };
+
+    const pickElementFromPoint = (x, y, event) => {
+      const elements = (typeof document.elementsFromPoint === 'function'
+        ? document.elementsFromPoint(x, y)
+        : []);
+      const stack = Array.isArray(elements) ? elements : [];
+
+      const rejectSet = new Set();
+
+      // Exclude overlays created by our highlight layer
+      const overlayLayer = document.getElementById('__webauto_highlight_layer');
+      if (overlayLayer && overlayLayer.contains) {
+        stack.forEach((el) => {
+          if (overlayLayer.contains(el)) rejectSet.add(el);
+        });
+      }
+
+      for (let i = 0; i < stack.length; i += 1) {
+        const el = stack[i];
+        if (!(el instanceof Element)) continue;
+        if (rejectSet.has(el)) continue;
+        if (isRootLike(el)) continue;
+        return el;
+      }
+
+      // Fallback using elementFromPoint
+      const fallback = document.elementFromPoint(x, y);
+      if (fallback instanceof Element && !isRootLike(fallback)) {
+        if (!rejectSet.has(fallback)) return fallback;
+      }
+
+      // Last resort: event target
+      if (event && event.target && event.target instanceof Element && !isRootLike(event.target)) {
+        return event.target;
+      }
+
+      return null;
+    };
+
+    const updateHover = (el) => {
+      lastHoverEl = el;
+      if (!el) {
+        setState({ phase: active ? 'hovering' : domPickerState.phase, lastHover: null });
+        clearHighlight();
+        return;
+      }
+      const path = extractPath(el);
+      const selector = extractSelector(el);
+      setState({
+        phase: 'hovering',
+        lastHover: {
+          path: path || null,
+          selector: selector || null,
+        },
+      });
+      highlightEl(el);
+    };
+
+    const finalize = (result) => {
+      if (!active) return;
+      active = false;
+      if (timeoutToken) {
+        clearTimeout(timeoutToken);
+        timeoutToken = null;
+      }
+      listeners.forEach((fn) => {
+        try {
+          fn();
+        } catch {}
+      });
+      clearHighlight();
+
+      if (result && result.type === 'timeout') {
+        setState({ phase: 'timeout', error: null, active: false });
+        return;
+      }
+      if (result && result.type === 'cancel') {
+        setState({ phase: 'cancelled', error: null, active: false });
+        return;
+      }
+      if (result && result.type === 'error') {
+        setState({ phase: 'cancelled', error: result.error || 'unknown-error', active: false });
+        return;
+      }
+      if (result && result.type === 'select' && result.element) {
+        const el = result.element;
+        const path = extractPath(el);
+        const selector = extractSelector(el);
+        const rect = extractRect(el);
+        const text = extractText(el);
+        const tag = el.tagName ? el.tagName.toLowerCase() : '';
+        const id = el.id || null;
+        const classes = Array.from(el.classList || []);
+
+        setState({
+          phase: 'selected',
+          active: false,
+          selection: {
+            path: path || '',
+            selector: selector || '',
+            rect: rect || { x: 0, y: 0, width: 0, height: 0 },
+            text,
+            tag,
+            id,
+            classes,
+          },
+        });
+        return;
+      }
+
+      // default: cancelled
+      setState({ phase: 'cancelled', active: false });
+    };
+
+    const onPointerMove = (event) => {
+      if (!active) return;
+      const x = event.clientX;
+      const y = event.clientY;
+      const el = pickElementFromPoint(x, y, event);
+      updateHover(el);
+    };
+
+    const onMouseDown = (event) => {
+      if (!active) return;
+      if (event.button !== 0) return; // left button only
+      event.preventDefault();
+      event.stopPropagation();
+      const x = event.clientX;
+      const y = event.clientY;
+      const el = pickElementFromPoint(x, y, event) || lastHoverEl;
+      if (!el) {
+        finalize({ type: 'error', error: 'no-element' });
+        return;
+      }
+      finalize({ type: 'select', element: el });
+    };
+
+    const onKeyDown = (event) => {
+      if (!active) return;
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        event.stopPropagation();
+        finalize({ type: 'cancel' });
+      }
+    };
+
+    const onWindowBlur = () => {
+      if (!active) return;
+      finalize({ type: 'cancel' });
+    };
+
+    const onWindowMouseOut = (event) => {
+      if (!active) return;
+      const next = event.relatedTarget || event.toElement;
+      if (!next || next === window || next === document) {
+        updateHover(null);
+      }
+    };
+
+    const onScroll = () => {
+      if (!active) return;
+      if (lastHoverEl) highlightEl(lastHoverEl);
+    };
+
+    return {
+      start() {
+        active = true;
+        setState({
+          active: true,
+          phase: 'hovering',
+          lastHover: null,
+          selection: null,
+          error: null,
+        });
+
+        addListener(document, 'pointermove', onPointerMove, true);
+        addListener(document, 'mousedown', onMouseDown, true);
+        addListener(document, 'keydown', onKeyDown, true);
+        addListener(window, 'blur', onWindowBlur, true);
+        addListener(window, 'scroll', onScroll, true);
+        addListener(window, 'mouseout', onWindowMouseOut, true);
+
+        timeoutToken = window.setTimeout(() => {
+          finalize({ type: 'timeout' });
+        }, timeoutMs);
+      },
+      cancel(reason) {
+        if (!active) return;
+        finalize({ type: 'cancel', reason: reason || 'cancelled' });
+      },
+      stop() {
+        if (!active) return;
+        finalize({ type: 'cancel', reason: 'stopped' });
+      },
+    };
+  }
+
+  const api = {
+    startSession: (options) => core.startSession(options || {}),
+    cancel: () => core.cancel(),
+    getLastState: () => core.getLastState(),
+  };
+
+  Object.defineProperty(window, '__domPicker', {
+    value: api,
+    configurable: true,
+    enumerable: false,
+    writable: false,
+  });
+})();
+
+// __DOM_PICKER_INLINE_END
+(function attachDomPickerLoopback() {
+  if (typeof window === 'undefined') return;
+
+  function delay(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  function findElementCenter(selector) {
+    const el = typeof selector === 'string' ? document.querySelector(selector) : selector;
+    if (!el) return null;
+    const rect = el.getBoundingClientRect();
+    if (!rect || !Number.isFinite(rect.left)) return null;
+    const vw = Math.max(1, window.innerWidth || document.documentElement.clientWidth || 1);
+    const vh = Math.max(1, window.innerHeight || document.documentElement.clientHeight || 1);
+    const inset = 6;
+    const clamp = (v, min, max) => Math.min(Math.max(v, min), max);
+    const safeLeft = Math.max(rect.left + inset, inset);
+    const safeRight = Math.min(rect.right - inset, vw - inset);
+    const safeTop = Math.max(rect.top + inset, inset);
+    const safeBottom = Math.min(rect.bottom - inset, vh - inset);
+    const cx = safeRight >= safeLeft ? (safeLeft + safeRight) / 2 : rect.left + rect.width / 2;
+    const cy = safeBottom >= safeTop ? (safeTop + safeBottom) / 2 : rect.top + rect.height / 2;
+    return {
+      x: Math.round(clamp(cx, inset, vw - inset)),
+      y: Math.round(clamp(cy, inset, vh - inset)),
+      rect,
+      element: el,
+    };
+  }
+
+  async function hoverLoopCheck(selector, options = {}) {
+    const picker = window.__domPicker;
+    if (!picker || typeof picker.startSession !== 'function') {
+      return { error: 'domPicker unavailable' };
+    }
+    const center = findElementCenter(selector);
+    if (!center) return { error: 'element_not_found', selector };
+    const runtime = window.__webautoRuntime;
+    const buildPath = runtime?.dom?.buildPathForElement;
+    const targetPath = buildPath && center.element instanceof Element ? buildPath(center.element, null) : null;
+    const fromPoint = document.elementFromPoint(center.x, center.y);
+    const fromPointPath = buildPath && fromPoint instanceof Element ? buildPath(fromPoint, null) : null;
+    // NOTE: Real mouse move should be triggered by Playwright (page.mouse.move).
+    // Here we only start the session and wait for it to pick up the hover.
+    const before = picker.getLastState?.();
+    if (!before?.phase || before.phase === 'idle') {
+      picker.startSession?.({ timeoutMs: options.timeoutMs || 8000 });
+      await delay(16);
+    }
+    await delay(options.settleMs || 32);
+    const after = picker.getLastState?.();
+    const hoveredPath = after?.selection?.path || after?.hovered?.path || after?.selected?.path || after?.path || null;
+    const overlayRect = after?.selection?.rect || after?.hovered?.rect || after?.selected?.rect || after?.rect || null;
+    const matches = Boolean(targetPath && hoveredPath && hoveredPath === targetPath && overlayRect);
+    return {
+      selector,
+      point: { x: center.x, y: center.y },
+      targetRect: center.rect,
+      hoveredPath,
+      targetPath,
+      fromPointPath,
+      overlayRect,
+      stateBefore: before,
+      stateAfter: after,
+      matches,
+    };
+  }
+
+  // Expose loopback helper as part of domPicker runtime for system use.
+  function ensureDomPickerRuntime() {
+    if (!window.__domPicker) return;
+    const picker = window.__domPicker;
+    picker.hoverLoopCheck = hoverLoopCheck;
+    picker.findElementCenter = findElementCenter;
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', ensureDomPickerRuntime, { once: true });
+  } else {
+    ensureDomPickerRuntime();
+  }
+})();
+
 (() => {
   if (typeof window === 'undefined') {
     return;
@@ -7,8 +460,10 @@
     return;
   }
 
+  window.__webautoRuntimeBootCount = (window.__webautoRuntimeBootCount || 0) + 1;
+
   const VERSION = '0.1.0';
-  const DEFAULT_STYLE = '3px solid #34a853';
+  const DEFAULT_STYLE = null;
   const registry = new Map();
 
   const domUtils = {
@@ -112,181 +567,125 @@
 
   function ensureOverlayLayer() {
     let layer = document.getElementById('__webauto_highlight_layer');
+    if (layer && layer.parentElement === document.body) return layer;
     if (!layer) {
       layer = document.createElement('div');
       layer.id = '__webauto_highlight_layer';
-      layer.setAttribute(
-        'style',
-        [
-          'position:fixed',
-          'left:0',
-          'top:0',
-          'width:100%',
-          'height:100%',
-          'pointer-events:none',
-          'z-index:2147483646',
-        ].join(';'),
-      );
-      document.documentElement.appendChild(layer);
+    }
+    Object.assign(layer.style, {
+      position: 'fixed',
+      left: '0',
+      top: '0',
+      width: '100%',
+      height: '100%',
+      pointerEvents: 'none',
+      zIndex: '2147483646',
+    });
+    if (!layer.parentElement) {
+      document.body.appendChild(layer);
     }
     return layer;
   }
 
-  function createOverlay(el, styleText) {
-    const rect = el.getBoundingClientRect();
-    const overlay = document.createElement('div');
-    overlay.dataset.webautoHighlight = '1';
-    overlay.style.position = 'fixed';
-    overlay.style.left = `${Math.round(rect.left)}px`;
-    overlay.style.top = `${Math.round(rect.top)}px`;
-    overlay.style.width = `${Math.max(1, Math.round(rect.width))}px`;
-    overlay.style.height = `${Math.max(1, Math.round(rect.height))}px`;
-    overlay.style.border = styleText || DEFAULT_STYLE;
-    overlay.style.boxSizing = 'border-box';
-    overlay.style.pointerEvents = 'none';
-    overlay.style.borderRadius = '4px';
-    overlay.style.transition = 'opacity 120ms ease-out';
-    overlay.style.opacity = '1';
-    overlay.style.background = 'rgba(0,0,0,0)';
-    overlay.dataset.webautoHighlightTs = String(Date.now());
-    ensureOverlayLayer().appendChild(overlay);
-    return overlay;
+  function createOverlay(rect, style) {
+    const layer = ensureOverlayLayer();
+    const el = document.createElement('div');
+    el.className = '__webauto_highlight_box';
+    Object.assign(el.style, {
+      position: 'absolute',
+      boxSizing: 'border-box',
+      left: `${Math.round(rect.x)}px`,
+      top: `${Math.round(rect.y)}px`,
+      width: `${Math.max(0, Math.round(rect.width))}px`,
+      height: `${Math.max(0, Math.round(rect.height))}px`,
+      pointerEvents: 'none',
+      ...style,
+    });
+    layer.appendChild(el);
+    return el;
   }
 
-  function removeOverlay(node) {
-    if (!node) return;
-    try {
-      node.style.opacity = '0';
-      setTimeout(() => {
-        try {
-          node.remove();
-        } catch {
-          /* noop */
-        }
-      }, 100);
-    } catch {
-      /* noop */
+  function removeOverlay(overlay) {
+    if (overlay && overlay.parentElement) {
+      overlay.parentElement.removeChild(overlay);
     }
   }
 
   function clearChannel(channel) {
-    const runCleanup = (record) => {
-      if (!record) return;
-      try {
-        record.cleanup?.();
-      } catch {
-        /* ignore */
-      }
-    };
-    if (channel) {
-      const target = registry.get(channel);
-      runCleanup(target);
-      registry.delete(channel);
-      return;
+    const key = channel || 'default';
+    const entry = registry.get(key);
+    if (entry && Array.isArray(entry.overlays)) {
+      entry.overlays.forEach((ov) => {
+        try {
+          removeOverlay(ov);
+        } catch {}
+      });
     }
-    registry.forEach((record) => runCleanup(record));
-    registry.clear();
+    registry.delete(key);
   }
 
   function highlightNodes(nodes, options = {}) {
     const channel = options.channel || 'default';
-    const style = options.style || DEFAULT_STYLE;
-    const sticky = Boolean(options.sticky);
-    const duration = typeof options.duration === 'number' ? options.duration : sticky ? 0 : 2000;
-    const limit = Math.min(Math.max(Number(options.maxMatches) || nodes.length || 20, 1), 200);
-    const elements = (Array.isArray(nodes) ? nodes : []).filter((node) => node instanceof Element).slice(0, limit);
-    if (registry.has(channel)) {
-      const record = registry.get(channel);
-      record.overlays.forEach((entry) => removeOverlay(entry.overlay));
-    }
-    if (!elements.length) {
-      registry.delete(channel);
-      return { selector: options.selector || null, count: 0, channel };
-    }
-    const overlays = [];
-    const overlayEntries = [];
-    const cleanups = [];
-    const updateOverlay = (overlay, el) => {
-      if (!el || !el.getBoundingClientRect) {
-        overlay.style.opacity = '0';
-        return;
-      }
-      const rect = el.getBoundingClientRect();
-      overlay.style.left = `${Math.round(rect.left)}px`;
-      overlay.style.top = `${Math.round(rect.top)}px`;
-      overlay.style.width = `${Math.max(1, Math.round(rect.width))}px`;
-      overlay.style.height = `${Math.max(1, Math.round(rect.height))}px`;
-      overlay.style.opacity = '1';
-    };
-    const createEntry = (el) => {
-      const overlay = createOverlay(el, style);
-      overlays.push({ element: el, overlay });
-      const updater = () => updateOverlay(overlay, el);
-      overlayEntries.push({ overlay, update: updater });
-      updater();
-      cleanups.push(() => removeOverlay(overlay));
-    };
-    elements.forEach((el) => {
-      try {
-        createEntry(el);
-      } catch {
-        /* ignore */
-      }
-    });
-    let rafToken = null;
-    const scheduleUpdate = () => {
-      if (rafToken !== null) return;
-      rafToken = window.requestAnimationFrame(() => {
-        rafToken = null;
-        overlayEntries.forEach((entry) => {
-          try {
-            entry.update();
-          } catch {
-            /* ignore */
-          }
-        });
-      });
-    };
-    const scrollHandler = () => scheduleUpdate();
-    const resizeHandler = () => scheduleUpdate();
-    window.addEventListener('scroll', scrollHandler, true);
-    window.addEventListener('resize', resizeHandler);
-    cleanups.push(() => {
-      window.removeEventListener('scroll', scrollHandler, true);
-      window.removeEventListener('resize', resizeHandler);
-      if (rafToken !== null) {
-        window.cancelAnimationFrame(rafToken);
-      }
-    });
-    cleanups.push(() => overlays.forEach((entry) => removeOverlay(entry.overlay)));
-    const cleanup = () => {
-      cleanups.forEach((fn) => {
+    const style = options.style || '2px solid rgba(255, 193, 7, 0.9)';
+    const borderStyle = typeof style === 'string' ? { border: style, borderRadius: '4px' } : style;
+
+    const prev = registry.get(channel);
+    if (prev && Array.isArray(prev.overlays)) {
+      prev.overlays.forEach((ov) => {
         try {
-          fn();
-        } catch {
-          /* ignore */
-        }
+          removeOverlay(ov);
+        } catch {}
       });
-    };
-    registry.set(channel, { overlays, sticky, cleanup });
-    if (duration > 0 && !sticky) {
-      window.setTimeout(() => {
-        clearChannel(channel);
-      }, duration);
     }
-    return {
-      selector: options.selector || null,
-      count: overlays.length,
-      channel,
-    };
+
+    const overlays = [];
+    const list = Array.isArray(nodes) ? nodes : [];
+    list.forEach((node) => {
+      if (!(node instanceof Element)) return;
+      const rect = node.getBoundingClientRect();
+      if (!rect || !rect.width || !rect.height) return;
+      overlays.push(createOverlay(rect, borderStyle));
+    });
+
+    registry.set(channel, {
+      overlays,
+      sticky: Boolean(options.sticky || options.hold),
+      cleanup: () => {
+        overlays.forEach((ov) => {
+          try {
+            removeOverlay(ov);
+          } catch {}
+        });
+      },
+    });
+
+    if (!options.sticky && !options.hold) {
+      const duration = Number(options.duration || 0);
+      if (duration > 0) {
+        setTimeout(() => {
+          clearChannel(channel);
+        }, duration);
+      }
+    }
+
+    return { selector: options.selector || null, count: overlays.length, channel };
   }
 
   function highlightSelector(selector, options = {}) {
-    if (!selector) {
-      return { count: 0, channel: options.channel || 'default' };
+    const root = domUtils.resolveRoot(options.rootSelector);
+    if (!root || !selector) {
+      clearChannel(options.channel);
+      return { selector: selector || null, count: 0, channel: options.channel || 'default' };
     }
-    const maxMatches = Math.min(Math.max(Number(options.maxMatches) || 20, 1), 200);
-    const nodes = Array.from(document.querySelectorAll(selector)).slice(0, maxMatches);
+    let nodes = [];
+    try {
+      if (typeof root.matches === 'function' && root.matches(selector)) {
+        nodes.push(root);
+      }
+      nodes = nodes.concat(Array.from(root.querySelectorAll(selector)));
+    } catch {
+      nodes = [];
+    }
     return highlightNodes(nodes, { ...options, selector });
   }
 
@@ -333,6 +732,11 @@
   }
 
   function bootRuntime() {
+    // dom-picker bootstrap: ensure __domPicker is loaded if bundled separately
+    try {
+      // noop; domPicker.runtime.js attaches itself to window when included by loader
+    } catch { /* ignore */ }
+
     const runtime = {
       version: VERSION,
       ready: true,
@@ -348,6 +752,9 @@
       },
       ping() {
         return { ts: Date.now(), href: window.location.href };
+      },
+      get domPicker() {
+        return window.__domPicker || null;
       },
     };
     Object.defineProperty(window, '__webautoRuntime', {

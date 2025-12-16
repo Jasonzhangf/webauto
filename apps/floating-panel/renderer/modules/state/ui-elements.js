@@ -1,4 +1,15 @@
 export function collectUiElements(doc = document) {
+  const resolveTreeView = (title) => {
+    try {
+      const columns = Array.from(doc.querySelectorAll('.tree-column'));
+      const hit = columns.find((col) => col.querySelector('.tree-column-title')?.textContent?.includes(title));
+      return hit?.querySelector('.tree-view') || null;
+    } catch {
+      return null;
+    }
+  };
+  const containerTreeView = resolveTreeView('容器树') || doc.getElementById('containerTreeView');
+  const domTreeView = resolveTreeView('DOM Explorer') || doc.getElementById('domTreeView');
   return {
     metaText: doc.getElementById('connectionStatus'),
     globalMessage: doc.getElementById('globalMessage'),
@@ -19,8 +30,8 @@ export function collectUiElements(doc = document) {
     containerDomGrid: doc.getElementById('containerDomGrid'),
     linkModeButton: doc.getElementById('linkModeButton'),
     linkModeIndicator: doc.getElementById('linkModeIndicator'),
-    treeContainerList: doc.getElementById('containerTreeView'),
-    treeDomList: doc.getElementById('domTreeView'),
+    treeContainerList: containerTreeView,
+    treeDomList: domTreeView,
     treeContainerCount: doc.getElementById('treeContainerCount'),
     treeDomCount: doc.getElementById('treeDomCount'),
     operationChips: doc.getElementById('operationChips'),

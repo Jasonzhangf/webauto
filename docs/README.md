@@ -25,6 +25,28 @@ Comprehensive documentation for the web automation platform, including architect
 - **task-orchestration-architecture.md** - Task orchestration system
 - **implementation-roadmap.md** - Development roadmap and milestones
 
+## 高亮闭环实现计划（UI/Runtime/服务）
+
+1. **前端事件流（Floating Panel）**
+   - 模块：`apps/floating-panel/renderer/modules/actions/highlight-actions.js`
+   - 功能：将 UI 按钮点击转成 `ui.action.highlight` / `ui.action.clearHighlight` / `ui.action.togglePersistent` 事件；通过 `highlight-service` 发布 `dom:highlight_request`。
+   - 状态：已拆分自 `app.js`，并绑定在 `modules/boot.js` 入口。
+
+2. **消息与服务层**
+   - `apps/floating-panel/renderer/modules/services/highlight-service.js`：监听 DOM 事件，统一发布 `dom:highlight_*`；转发后端反馈为 `ui.highlight.*`。
+   - `services/browser-service/ws-server.ts`：新增 `highlight_element`/`clear_highlight` 实际逻辑，调用 Runtime 的 `window.__webautoRuntime.highlight`。
+
+3. **浏览器 Runtime 注入**
+   - `runtime/browser/page-runtime/runtime.js`：负责 DOM picker + 高亮脚本；暴露 `__domPicker`、`__webautoRuntime.highlight`，支持选择器/鼠标 hover 高亮与清除。
+
+4. **测试与验证**
+   - `scripts/ui/send-highlight-cli.mjs`：通过 WebSocket 8765 下发 `highlight_element`/`clear_highlight`。
+   - `scripts/ui/highlight-smoke.mjs`：自动执行高亮→清除→校验日志。
+   - `docs/testing/ui-loop.md`：记录 `npm run ui:test` 中的高亮回环测试流程。
+
+5. **文档与扩展**
+   - 后续在 `docs/architecture/ui-modularization.md` 与 `docs/architecture/floating-panel-refactor.md` 中补充高亮/DOM 拾取模块的独立说明。
+
 ### Platform-Specific Guides
 - **1688-workflow-architecture-analysis.md** - 1688 platform analysis
 - **1688-workflow-optimization-report.md** - 1688 optimization strategies

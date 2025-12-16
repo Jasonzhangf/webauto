@@ -95,9 +95,29 @@ export class BrowserSession {
   }
 
   private setupPageHooks(page: Page) {
-    ensurePageRuntime(page).catch((err) => {
-      console.warn('[session] failed to ensure page runtime', err?.message || err);
+    const profileTag = `[session:${this.options.profileId}]`;
+    const ensure = (reason: string) => {
+      ensurePageRuntime(page).catch((err) => {
+        console.warn(`${profileTag} ensure runtime failed (${reason})`, err?.message || err);
+      });
+    };
+
+    page.on('domcontentloaded', () => ensure('domcontentloaded'));
+    page.on('framenavigated', (frame) => {
+      if (frame === page.mainFrame()) {
+        ensure('framenavigated');
+      }
     });
+    page.on('pageerror', (error) => {
+      console.warn(`${profileTag} pageerror`, error?.message || error);
+    });
+    page.on('console', (msg) => {
+      if (msg.type() === 'error') {
+        console.warn(`${profileTag} console.error`, msg.text());
+      }
+    });
+
+    ensure('initial');
   }
 
   private ensureContext(): BrowserContext {
@@ -190,6 +210,7 @@ export class BrowserSession {
   async goto(url: string): Promise<void> {
     const page = await this.ensurePrimaryPage();
     await page.goto(url, { waitUntil: 'domcontentloaded' });
+    await ensurePageRuntime(page);
     this.lastKnownUrl = url;
   }
 

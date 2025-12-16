@@ -54,6 +54,8 @@ export class UiController {
         return this.handleBrowserHighlight(payload);
       case 'browser:clear-highlight':
         return this.handleBrowserClearHighlight(payload);
+      case 'browser:highlight-dom-path':
+        return this.handleBrowserHighlightDomPath(payload);
       case 'browser:cancel-pick':
         return this.handleBrowserCancelDomPick(payload);
       case 'browser:pick-dom':
@@ -381,6 +383,44 @@ export class UiController {
     }
   }
 
+  async handleBrowserHighlightDomPath(payload = {}) {
+    const profile = payload.profile || payload.sessionId;
+    const domPath = (payload.path || payload.domPath || payload.dom_path || '').trim();
+    if (!profile) {
+      throw new Error('缺少会话/ profile 信息');
+    }
+    if (!domPath) {
+      throw new Error('缺少 DOM 路径');
+    }
+    const options = payload.options || {};
+    const channel = options.channel || payload.channel || 'hover-dom';
+    const style = options.style || '2px solid rgba(96, 165, 250, 0.95)';
+    const sticky = typeof options.sticky === 'boolean' ? options.sticky : true;
+    try {
+      const result = await this.sendHighlightDomPathViaWs(profile, domPath, {
+        channel,
+        style,
+        sticky,
+        duration: options.duration,
+        rootSelector: options.rootSelector || payload.rootSelector || payload.root_selector || null,
+      });
+      this.messageBus?.publish?.('ui.highlight.result', {
+        success: true,
+        selector: null,
+        details: result?.details || null,
+      });
+      return { success: true, data: result };
+    } catch (err) {
+      const errorMessage = err?.message || 'DOM 路径高亮失败';
+      this.messageBus?.publish?.('ui.highlight.result', {
+        success: false,
+        selector: null,
+        error: errorMessage,
+      });
+      throw err;
+    }
+  }
+
   async handleBrowserCancelDomPick(payload = {}) {
     const profile = payload.profile || payload.sessionId;
     if (!profile) {
@@ -456,6 +496,37 @@ export class UiController {
     if (!success) {
       const err = data?.error || response?.error;
       throw new Error(err || 'highlight_element failed');
+    }
+    return {
+      success: true,
+      source: 'ws',
+      details: data?.data || data,
+    };
+  }
+
+  async sendHighlightDomPathViaWs(sessionId, domPath, options = {}) {
+    const payload = {
+      type: 'command',
+      session_id: sessionId,
+      data: {
+        command_type: 'dev_command',
+        action: 'highlight_dom_path',
+        parameters: {
+          path: domPath,
+          ...(options.style ? { style: options.style } : {}),
+          ...(typeof options.duration === 'number' ? { duration: options.duration } : {}),
+          ...(options.channel ? { channel: options.channel } : {}),
+          ...(typeof options.sticky === 'boolean' ? { sticky: options.sticky } : {}),
+          ...(options.rootSelector ? { root_selector: options.rootSelector } : {}),
+        },
+      },
+    };
+    const response = await this.sendWsCommand(this.getBrowserWsUrl(), payload, 20000);
+    const data = response?.data || response;
+    const success = data?.success !== false;
+    if (!success) {
+      const err = data?.error || response?.error;
+      throw new Error(err || 'highlight_dom_path failed');
     }
     return {
       success: true,
