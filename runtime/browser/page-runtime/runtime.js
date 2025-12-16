@@ -45,10 +45,11 @@
     startSession(options) {
       const mode = (options && options.mode) || 'hover-select';
       const timeoutMs = Math.min(Math.max(Number(options && options.timeoutMs) || DEFAULT_TIMEOUT, 1000), 60000);
+      const rootSelector = (options && (options.rootSelector || options.root_selector)) || null;
 
       this._ensureStopped();
 
-      const session = createSession({ mode, timeoutMs });
+      const session = createSession({ mode, timeoutMs, rootSelector });
       this._session = session;
       session.start();
       return this.getLastState();
@@ -70,6 +71,7 @@
   function createSession(config) {
     const mode = config.mode || 'hover-select';
     const timeoutMs = config.timeoutMs || DEFAULT_TIMEOUT;
+    const rootSelector = config.rootSelector || null;
 
     let active = false;
     let timeoutToken = null;
@@ -135,8 +137,7 @@
       try {
         const runtime = window.__webautoRuntime;
         if (!runtime || !runtime.dom || !runtime.dom.buildPathForElement) return null;
-        // Path is root-based; container/rootSelector concerns are outside runtime.
-        return runtime.dom.buildPathForElement(el, null);
+        return runtime.dom.buildPathForElement(el, rootSelector);
       } catch {
         return null;
       }

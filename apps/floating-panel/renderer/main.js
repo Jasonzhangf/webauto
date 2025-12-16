@@ -101,6 +101,11 @@ function resolveCurrentPageUrl() {
   return selected?.current_url || selected?.currentUrl || null;
 }
 
+function resolveSnapshotRootSelector() {
+  const meta = state.containerSnapshot?.metadata || {};
+  return meta.root_selector || meta.rootSelector || null;
+}
+
 function toggleHeadlessMode(next) {
   const current = Boolean(state.headless);
   const desired = typeof next === 'boolean' ? next : !current;
@@ -550,6 +555,7 @@ async function expandDomPath(path, options = {}) {
     throw new Error('expandDomPath requires path and selected session');
   }
   const url = resolveCurrentPageUrl();
+  const rootSelector = resolveSnapshotRootSelector();
   const node = findDomNodeByPath(getDomTree(state.domTreeStore), path);
   const stats = node ? getDomNodeChildStats(node) : { needsLazyLoad: true };
   const expanded = isPathExpanded(state.domTreeStore, path);
@@ -570,6 +576,7 @@ async function expandDomPath(path, options = {}) {
       profile: state.selectedSession,
       url,
       path,
+      ...(rootSelector ? { rootSelector } : {}),
       maxDepth: typeof options.maxDepth === 'number' ? options.maxDepth : 1,
       maxChildren: typeof options.maxChildren === 'number' ? options.maxChildren : 12,
     });
@@ -593,6 +600,7 @@ async function loadDomBranch(path, options = {}) {
     throw new Error('loadDomBranch requires path and selected session');
   }
   const url = resolveCurrentPageUrl();
+  const rootSelector = resolveSnapshotRootSelector();
   setPathExpanded(state.domTreeStore, path, true);
   const node = findDomNodeByPath(getDomTree(state.domTreeStore), path);
   const stats = node ? getDomNodeChildStats(node) : { needsLazyLoad: true };
@@ -610,6 +618,7 @@ async function loadDomBranch(path, options = {}) {
       profile: state.selectedSession,
       url,
       path,
+      ...(rootSelector ? { rootSelector } : {}),
       maxDepth: typeof options.maxDepth === 'number' ? options.maxDepth : 1,
       maxChildren: typeof options.maxChildren === 'number' ? options.maxChildren : 12,
     });
@@ -696,8 +705,13 @@ async function handleDomPick() {
   sessionPanel.updateSessionCaptureButtons();
   showMessage(state.domPicker.message, 'info');
   try {
+    const rootSelector = resolveSnapshotRootSelector();
     await invokeAction('browser:clear-highlight', { profile: state.selectedSession, channel: 'hover-dom' }).catch(() => {});
-    const res = await invokeAction('browser:pick-dom', { profile: state.selectedSession, timeout: 30000 });
+    const res = await invokeAction('browser:pick-dom', {
+      profile: state.selectedSession,
+      timeout: 30000,
+      ...(rootSelector ? { rootSelector } : {}),
+    });
     const result = res?.data || res;
     const domPath = result?.dom_path || result?.domPath || null;
     const selector = result?.selector || null;
@@ -708,6 +722,7 @@ async function handleDomPick() {
       ensureDomPathExists(state.domTreeStore, domPath);
       resetDomVisibility(state.domTreeStore, new Set(), domPath);
       await loadDomBranch(domPath, { maxDepth: 1, maxChildren: 16, force: true }).catch(() => {});
+      await highlightDomFocus(domPath).catch(() => {});
     }
     if (ui.domActionTarget) {
       ui.domActionTarget.textContent = domPath ? `DOM: ${domPath}` : '已捕获（无 domPath）';
@@ -813,6 +828,7 @@ async function handleDomClearHighlight() {
 async function highlightDomFocus(path, style = '2px solid rgba(34,197,94,0.95)') {
   if (!state.selectedSession) return;
   const channel = 'dom-focus';
+  const rootSelector = resolveSnapshotRootSelector();
   if (!path) {
     await invokeAction('browser:clear-highlight', { profile: state.selectedSession, channel }).catch(() => {});
     return;
@@ -822,7 +838,7 @@ async function highlightDomFocus(path, style = '2px solid rgba(34,197,94,0.95)')
   await invokeAction('browser:highlight-dom-path', {
     profile: state.selectedSession,
     path,
-    options: { channel, style, sticky: true },
+    options: { channel, style, sticky: true, ...(rootSelector ? { rootSelector } : {}) },
   }).catch(() => {});
 }
 
@@ -899,10 +915,16 @@ async function handleDomAddFromDom() {
 
   showMessage('已生成新容器草稿：左侧容器树里点“确定”保存', 'info');
   await invokeAction('browser:clear-highlight', { profile: state.selectedSession, channel: 'dom-suggest' }).catch(() => {});
+  const rootSelector = resolveSnapshotRootSelector();
   await invokeAction('browser:highlight-dom-path', {
     profile: state.selectedSession,
     path: domPath,
-    options: { channel: 'dom-suggest', style: '2px dashed rgba(96,165,250,0.95)', sticky: true },
+    options: {
+      channel: 'dom-suggest',
+      style: '2px dashed rgba(96,165,250,0.95)',
+      sticky: true,
+      ...(rootSelector ? { rootSelector } : {}),
+    },
   }).catch(() => {});
   renderContainers();
 }
@@ -1021,6 +1043,7 @@ async function handleOpenInspector() {
 
 async function handleHoverDom(path) {
   if (!state.selectedSession) return;
+  const rootSelector = resolveSnapshotRootSelector();
   if (!path) {
     await invokeAction('browser:clear-highlight', { profile: state.selectedSession, channel: 'hover-dom' }).catch(() => {});
     return;
@@ -1028,7 +1051,12 @@ async function handleHoverDom(path) {
   await invokeAction('browser:highlight-dom-path', {
     profile: state.selectedSession,
     path,
-    options: { channel: 'hover-dom', style: '2px solid rgba(250, 204, 21, 0.95)', sticky: true },
+    options: {
+      channel: 'hover-dom',
+      style: '2px solid rgba(250, 204, 21, 0.95)',
+      sticky: true,
+      ...(rootSelector ? { rootSelector } : {}),
+    },
   });
 }
 

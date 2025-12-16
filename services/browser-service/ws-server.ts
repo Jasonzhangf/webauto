@@ -90,16 +90,17 @@ export class BrowserWsServer {
       };
     }
 
-    await page.evaluate((opts: { timeoutMs: number }) => {
+    const rootSelector = parameters.root_selector || parameters.rootSelector || null;
+    await page.evaluate((opts: { timeoutMs: number; rootSelector: string | null }) => {
       const w: any = window as any;
       try {
-        w.__domPicker.startSession({ mode: 'hover-select', timeoutMs: opts.timeoutMs });
+        w.__domPicker.startSession({ mode: 'hover-select', timeoutMs: opts.timeoutMs, rootSelector: opts.rootSelector });
       } catch (err) {
         // swallow, polling below will observe error/idle state
         // eslint-disable-next-line no-console
         console.warn('[dom-picker] startSession error', err);
       }
-    }, { timeoutMs });
+    }, { timeoutMs, rootSelector });
 
     const startedState = await page.evaluate(() => {
       const w: any = window as any;

@@ -120,6 +120,20 @@ export class BrowserSession {
     ensure('initial');
   }
 
+  private getActivePage(): Page | null {
+    if (this.page && !this.page.isClosed()) {
+      return this.page;
+    }
+    if (!this.context) return null;
+    const alive = this.context.pages().find((p) => !p.isClosed());
+    if (alive) {
+      this.page = alive;
+      return alive;
+    }
+    this.page = undefined;
+    return null;
+  }
+
   private ensureContext(): BrowserContext {
     if (!this.context) {
       throw new Error('browser context not ready');
@@ -129,11 +143,12 @@ export class BrowserSession {
 
   private async ensurePrimaryPage(): Promise<Page> {
     const ctx = this.ensureContext();
-    if (!this.page || this.page.isClosed()) {
-      const pages = ctx.pages();
-      this.page = pages.length ? pages[0] : await ctx.newPage();
-      this.setupPageHooks(this.page);
+    const existing = this.getActivePage();
+    if (existing) {
+      return existing;
     }
+    this.page = await ctx.newPage();
+    this.setupPageHooks(this.page);
     return this.page;
   }
 
@@ -151,7 +166,8 @@ export class BrowserSession {
 
   async saveCookiesForActivePage(): Promise<{ path: string; count: number }[]> {
     if (!this.context) return [];
-    const page = await this.ensurePrimaryPage();
+    const page = this.getActivePage();
+    if (!page) return [];
     const cookies = await this.context.cookies();
     if (!cookies.length) return [];
 
@@ -238,8 +254,9 @@ export class BrowserSession {
   }
 
   getCurrentUrl(): string | null {
-    if (this.page) {
-      return this.page.url() || this.lastKnownUrl;
+    const page = this.getActivePage();
+    if (page) {
+      return page.url() || this.lastKnownUrl;
     }
     return this.lastKnownUrl;
   }
