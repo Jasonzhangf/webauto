@@ -482,8 +482,10 @@ export class BrowserWsServer {
       return {
         success: true,
         data: {
-          ...match,
-          matched_container: match.container,
+          container: match.container,
+          selector: match.container?.matched_selector || match.match_details?.selector,
+          domPath: match.match_details?.dom_path || null,
+          match_details: match.match_details,
         },
       };
     }

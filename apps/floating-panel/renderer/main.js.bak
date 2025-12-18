@@ -1,0 +1,889 @@
+// 导入必要的模块
+import { bus } from './modules/messaging/bus.js';
+import { collectUiElements } from './modules/state/ui-elements.js';
+import { createUiState, createLayoutState } from './modules/state/ui-state.js';
+import { createUiStateService } from './modules/state/ui-state-service.js';
+import { createBackendBridge } from './modules/messaging/backend-bridge.js';
+import { ContainerDomGraphView } from './graph/graph-view.js';
+import { createDomService } from './modules/services/dom-service.js';
+import { createSnapshotManager } from './modules/containers/snapshot-manager.js';
+import { createSessionPanel } from './modules/panels/session-panel.js';
+import { createDataLoaders } from './modules/state/data-loaders.js';
+import { createContainerOpsManager } from './modules/containers/container-ops.js';
+import { bindCoreEvents } from './modules/controls/core-events.js';
+import { initWindowControls, subscribeDesktopState } from './modules/controls/window-controls.js';
+import { registerRendererBus } from './modules/messaging/bus-subscriptions.js';
+
+// ============================================================================
+// Missing Function Definitions - Shims for runtime error prevention
+// ============================================================================
+
+// DOM tree store functions (legacy compatibility)
+let domTreeStore = {
+  tree: null,
+  matches: null,
+  visibility: new Set(),
+  expanded: new Set()
+};
+
+function getDomTree(store) {
+  return store?.tree || null;
+}
+
+function setDomTreeSnapshot(store, tree) {
+  if (store) {
+    store.tree = tree;
+  }
+}
+
+// Annotation functions
+function annotateDomTreeWithMatches(matches) {
+  if (!domTreeStore) return;
+  domTreeStore.matches = matches || [];
+  // In a real implementation, this would annotate the DOM tree with match information
+  console.debug('[floating] Annotated DOM tree with matches:', matches?.length || 0);
+}
+
+function findAllDomPathsForContainer(containerId, domTree) {
+  if (!containerId || !domTree) return [];
+  
+  const paths = [];
+  
+  function traverse(node, currentPath = []) {
+    if (!node) return;
+    
+    // Check if this node's containers include our target container
+    if (node.containers && Array.isArray(node.containers)) {
+      const hasMatch = node.containers.some(c => 
+        c.container_id === containerId || 
+        c.containerId === containerId ||
+        c.container_name === containerId
+      );
+      if (hasMatch && node.path) {
+        paths.push(node.path);
+      }
+    }
+    
+    // Continue traversal
+    if (node.children && Array.isArray(node.children)) {
+      for (const child of node.children) {
+        traverse(child, [...currentPath, node.path || node.tag]);
+      }
+    }
+  }
+  
+  traverse(domTree);
+  return paths;
+}
+
+function resetDomVisibility(store, visiblePaths = new Set(), selectedPath = null) {
+  if (!store) return;
+  
+  store.visibility = new Set(visiblePaths);
+  if (selectedPath) {
+    store.visibility.add(selectedPath);
+  }
+  
+  // In a real implementation, this would update DOM element visibility
+  console.debug('[floating] Reset DOM visibility for', store.visibility.size, 'paths');
+}
+
+
+// Container operations manager
+let containerOps = null;
+
+// DOM branch loading
+async function loadDomBranch(path, options = {}) {
+  if (!state.selectedSession) throw new Error('No session');
+  if (!path) throw new Error('No path');
+  const url = resolveCurrentPageUrl();
+  const rootSelector = resolveSnapshotRootSelector();
+  try {
+    const res = await invokeAction('dom:branch:2', {
+      profile: state.selectedSession,
+      url,
+      path,
+      maxDepth: typeof options.maxDepth === 'number' ? options.maxDepth : 1,
+      maxChildren: typeof options.maxChildren === 'number' ? options.maxChildren : 12,
+      ...(rootSelector ? { rootSelector } : {}),
+    });
+    const branch = res?.data || res;
+    if (!branch) throw new Error('No branch data');
+    // TODO: merge branch into graphStore and render
+    return branch;
+  } catch (err) {
+    console.warn('[floating] loadDomBranch failed:', err?.message || err);
+    throw err;
+  }
+}
+
+// DOM manipulation functions
+async function handleDomPick() {
+  if (!state.selectedSession) {
+    showMessage('请先选择会话', 'warn');
+    return;
+  }
+  state.domPicker.status = 'active';
+  state.domPicker.message = '请在页面 hover 并点击选择元素（ESC 取消）';
+  if (ui?.domActionStatus) {
+    ui.domActionStatus.textContent = state.domPicker.message;
+  }
+  if (ui?.domActionPick) {
+    ui.domActionPick.disabled = true;
+  }
+  if (ui?.domActionPickSidebar) {
+    ui.domActionPickSidebar.disabled = true;
+  }
+  sessionPanel.updateSessionCaptureButtons();
+  showMessage(state.domPicker.message, 'info');
+  try {
+    const rootSelector = resolveSnapshotRootSelector();
+    await invokeAction('browser:clear-highlight', { profile: state.selectedSession, channel: 'hover-dom' }).catch(() => {});
+    const res = await invokeAction('dom:pick:2', {
+      profile: state.selectedSession,
+      timeout: 30000,
+      ...(rootSelector ? { rootSelector } : {}),
+    });
+    const result = res?.data || res;
+    const domPath = result?.domPath || result?.dom_path || null;
+    const selector = result?.selector || null;
+    state.domPicker.status = 'idle';
+    state.domPicker.result = { domPath, selector, raw: result };
+    if (domPath) {
+      state.selectedDomPath = domPath;
+      ensureDomPathExists(state.domTreeStore, domPath);
+      resetDomVisibility(state.domTreeStore, new Set(), domPath);
+      await loadDomBranch(domPath, { maxDepth: 1, maxChildren: 16, force: true }).catch(() => {});
+      await highlightDomFocus(domPath).catch(() => {});
+    }
+    if (ui.domActionTarget) {
+      ui.domActionTarget.textContent = domPath ? `DOM: ${domPath}` : '已捕获（无 domPath）';
+    }
+    if (selector) {
+      showMessage(`已选中元素 (${selector})`, 'success');
+    } else {
+      showMessage('已选中元素', 'success');
+    }
+    if (ui?.domActionStatus) {
+      ui.domActionStatus.textContent = selector ? `已选中: ${selector}` : '已选中元素';
+    }
+    suggestContainerForPickedNode();
+    renderContainers();
+  } catch (err) {
+    state.domPicker.status = 'idle';
+    state.domPicker.lastError = err?.message || '捕获失败';
+    showMessage(state.domPicker.lastError, 'error');
+    if (ui?.domActionStatus) {
+      ui.domActionStatus.textContent = state.domPicker.lastError;
+    }
+  } finally {
+    sessionPanel.updateSessionCaptureButtons();
+    if (ui?.domActionPick) {
+      ui.domActionPick.disabled = false;
+    }
+    if (ui?.domActionPickSidebar) {
+      ui.domActionPickSidebar.disabled = false;
+    }
+  }
+}
+
+async function handleDomHighlight() {
+  console.log('[floating] DOM highlight requested');
+  if (!state.selectedDomPath) {
+    showMessage('请先选择DOM节点', 'warn');
+    return;
+  }
+  
+  try {
+    await invokeAction('browser:highlight-dom-path', {
+      profile: state.selectedSession,
+      path: state.selectedDomPath,
+      options: {
+        channel: 'manual-dom',
+        style: '2px solid rgba(255, 0, 0, 0.8)',
+        sticky: true
+      }
+    });
+    showMessage('DOM节点已高亮', 'success');
+  } catch (err) {
+    showMessage('高亮失败: ' + (err.message || '未知错误'), 'error');
+  }
+}
+
+async function handleDomClearHighlight() {
+  if (!state.selectedSession) return;
+  
+  try {
+    await invokeAction('browser:clear-highlight', { 
+      profile: state.selectedSession, 
+      channel: 'manual-dom' 
+    });
+    showMessage('高亮已清除', 'info');
+  } catch (err) {
+    console.warn('清除高亮失败:', err);
+  }
+}
+
+async function handleDomReplace() {
+  console.log('[floating] DOM replace requested');
+  showMessage('DOM替换功能开发中', 'info');
+}
+
+async function handleDomCreate() {
+  console.log('[floating] DOM create requested');
+  showMessage('DOM创建功能开发中', 'info');
+}
+
+async function handleDomAddFromDom() {
+  console.log('[floating] DOM add from DOM requested');
+  showMessage('从DOM添加功能开发中', 'info');
+}
+
+// Graph functions
+function buildGraphReport() {
+  const report = {
+    timestamp: Date.now(),
+    session: state.selectedSession,
+    containers: state.containerSnapshot?.container_tree ? countContainers(state.containerSnapshot.container_tree) : 0,
+    domNodes: state.containerSnapshot?.dom_tree ? countDomNodes(state.containerSnapshot.dom_tree) : 0,
+    selectedContainer: state.selectedContainerId,
+    selectedDomPath: state.selectedDomPath
+  };
+  return report;
+}
+
+async function ensureDomExpanded(path, options = {}) {
+  if (!state.selectedSession || !path) return;
+  console.log('[floating] Ensure DOM expanded for path:', path, options);
+  try {
+    await invokeAction('dom:branch:2', {
+      profile: state.selectedSession,
+      url: resolveCurrentPageUrl(),
+      path,
+      maxDepth: typeof options.maxDepth === 'number' ? options.maxDepth : 1,
+      maxChildren: typeof options.maxChildren === 'number' ? options.maxChildren : 12,
+      rootSelector: resolveSnapshotRootSelector(),
+    });
+    bus.publish('ui.graph.domExpanded', { path });
+  } catch (err) {
+    console.warn('[floating] ensureDomExpanded failed:', err?.message || err);
+    showMessage(err?.message || 'DOM展开失败', 'error');
+  }
+}
+
+// Render function
+function renderContainers() {
+  // Render container select options
+  renderContainerSelectOptions();
+  
+  // Update container ops if available
+  if (containerOps && state.selectedContainerId) {
+    containerOps.syncEditor(state.selectedContainerId);
+  }
+  
+  console.debug('[floating] Containers rendered');
+}
+
+// Match link overlay variables
+let treeDetailEl = null;
+let matchLinkLayer = null;
+let matchLinkResizeObserver = null;
+
+function scheduleMatchLinkDraw() {
+  // Placeholder for match link drawing logic
+  console.debug('[floating] Schedule match link draw');
+}
+
+// Helper functions
+function countContainers(node) {
+  if (!node) return 0;
+  let count = 1;
+  if (Array.isArray(node.children)) {
+    for (const child of node.children) {
+      count += countContainers(child);
+    }
+  }
+  return count;
+}
+
+function countDomNodes(node) {
+  if (!node) return 0;
+  let total = 1;
+  if (Array.isArray(node.children)) {
+    for (const child of node.children) {
+      total += countDomNodes(child);
+    }
+  }
+  return total;
+}
+
+// ============================================================================
+// Main Application Code
+// ============================================================================
+
+const ui = collectUiElements(document);
+const state = createUiState({ config: { headless: Boolean(ui?.headlessToggle?.checked) } });
+const layout = createLayoutState();
+const uiStateService = createUiStateService({ bus, logger: console });
+
+// Initialize DOM tree store reference in state for compatibility
+state.domTreeStore = domTreeStore;
+
+const { backend, desktop, publishWindowCommand, debugLog } = createBackendBridge({ bus, logger: console, debug: false });
+
+const invokeAction = async (action, payload = {}) => {
+  const response = await backend?.invokeAction?.(action, payload);
+  if (response?.success === false) {
+    throw new Error(response?.error || `action failed: ${action}`);
+  }
+  // controller-client wraps {success, data}; we always return the data payload for renderer modules.
+  return response?.data ?? response;
+};
+
+let graphView = null;
+let graphOverlay = null;
+try {
+  const graphHost = ui?.containerDomGrid?.querySelector?.('.graph-canvas') || null;
+  graphOverlay = graphHost?.querySelector?.('.graph-overlay') || null;
+  if (graphHost) {
+    graphView = new ContainerDomGraphView(graphHost);
+  }
+} catch (err) {
+  console.warn('[floating] graph view unavailable', err);
+  graphView = null;
+}
+
+function showMessage(message, level = 'info') {
+  if (!ui?.globalMessage) return;
+  const variant = level === 'error' ? 'error' : level === 'success' ? 'success' : level === 'warn' ? 'warn' : 'info';
+  ui.globalMessage.textContent = message || '';
+  ui.globalMessage.dataset.variant = variant;
+  ui.globalMessage.classList.toggle('visible', Boolean(message));
+  ui.globalMessage.classList.toggle('hidden', !message);
+  if (state.messageTimer) {
+    clearTimeout(state.messageTimer);
+  }
+  if (message) {
+    state.messageTimer = setTimeout(() => {
+      ui.globalMessage?.classList.remove('visible');
+      ui.globalMessage?.classList.add('hidden');
+    }, 2600);
+  }
+}
+
+function setLoading(section, loading) {
+  state.loading = state.loading || {};
+  state.loading[section] = Boolean(loading);
+}
+
+function queueFitWindow() {
+  if (layout.fitTimer) {
+    clearTimeout(layout.fitTimer);
+  }
+  layout.fitTimer = setTimeout(() => {
+    try {
+      const height = document.body?.scrollHeight || 0;
+      desktop?.fitContentHeight?.(height);
+    } catch {
+      /* ignore */
+    }
+  }, 40);
+}
+
+function resolveCurrentPageUrl() {
+  if (state.snapshotMeta?.url) return state.snapshotMeta.url;
+  const selected = state.sessions.find((s) => s.profileId === state.selectedSession);
+  return selected?.current_url || selected?.currentUrl || null;
+}
+
+function resolveSnapshotRootSelector() {
+  const meta = state.containerSnapshot?.metadata || {};
+  return meta.root_selector || meta.rootSelector || null;
+}
+
+function toggleHeadlessMode(next) {
+  const current = Boolean(state.headless);
+  const desired = typeof next === 'boolean' ? next : !current;
+  state.headless = desired;
+  publishWindowCommand?.('ui.window.setHeadless', { headless: desired }, () => desktop?.setHeadlessMode?.(desired));
+}
+
+function updateHeadlessButton() {
+  if (!ui?.headlessButton) return;
+  ui.headlessButton.textContent = state.headless ? '🕶' : '🪟';
+  ui.headlessButton.title = state.headless ? '当前: headless (点击切换)' : '当前: 有 UI (点击切换)';
+}
+
+function findContainerNode(root, containerId) {
+  if (!root || !containerId) return null;
+  if (root.id === containerId) return root;
+  if (Array.isArray(root.children)) {
+    for (const child of root.children) {
+      const hit = findContainerNode(child, containerId);
+      if (hit) return hit;
+    }
+  }
+  return null;
+}
+
+function getContainerAlias(node) {
+  if (!node) return '';
+  const metaAlias = node?.metadata?.alias;
+  return metaAlias || node.alias || node.nickname || node.name || node.id || '';
+}
+
+function getContainerOperationsFromNode(node) {
+  if (!node) return [];
+  return Array.isArray(node.operations) ? node.operations : [];
+}
+
+function collectContainerIds(root, acc = []) {
+  if (!root?.id) return acc;
+  acc.push(root.id);
+  (root.children || []).forEach((child) => collectContainerIds(child, acc));
+  return acc;
+}
+
+function renderContainerSelectOptions() {
+  if (!ui?.domActionContainerSelect) return;
+  const root = state.containerSnapshot?.container_tree;
+  ui.domActionContainerSelect.innerHTML = '';
+  if (!root) {
+    const opt = document.createElement('option');
+    opt.value = '';
+    opt.textContent = '暂无容器';
+    ui.domActionContainerSelect.appendChild(opt);
+    return;
+  }
+  const ids = collectContainerIds(root, []);
+  ids.forEach((id) => {
+    const node = findContainerNode(root, id);
+    const opt = document.createElement('option');
+    opt.value = id;
+    const alias = getContainerAlias(node);
+    opt.textContent = alias && alias !== id ? `${alias} · ${id}` : id;
+    ui.domActionContainerSelect.appendChild(opt);
+  });
+  const target = state.domActions?.selectedContainerId || state.selectedContainerId || root.id;
+  ui.domActionContainerSelect.value = target || '';
+}
+
+function switchToolTab(tab) {
+  state.uiPanels.activeTool = tab === 'container' ? 'container' : 'dom';
+  ui.toolTabDom?.classList.toggle('is-active', state.uiPanels.activeTool === 'dom');
+  ui.toolTabContainer?.classList.toggle('is-active', state.uiPanels.activeTool === 'container');
+  ui.domToolPanel?.classList.toggle('is-active', state.uiPanels.activeTool === 'dom');
+  ui.containerToolPanel?.classList.toggle('is-active', state.uiPanels.activeTool === 'container');
+}
+
+function renderContainerTree() {
+  // Tree rendering now happens only inside the canvas graph.
+  // Keep this as a no-op so call sites remain stable.
+}
+
+async function handleHoverDom(path) {
+  if (!state.selectedSession) return;
+  const rootSelector = resolveSnapshotRootSelector();
+  if (!path) {
+    await invokeAction('browser:clear-highlight', { profile: state.selectedSession, channel: 'hover-dom' }).catch(() => {});
+    return;
+  }
+  await invokeAction('browser:highlight-dom-path', {
+    profile: state.selectedSession,
+    path,
+    options: {
+      channel: 'hover-dom',
+      style: '2px solid rgba(250, 204, 21, 0.95)',
+      sticky: true,
+      ...(rootSelector ? { rootSelector } : {}),
+    },
+  });
+}
+
+async function handleHoverContainer(containerId) {
+  if (!state.selectedSession) return;
+  if (!containerId) {
+    await invokeAction('browser:clear-highlight', { profile: state.selectedSession, channel: 'hover-container' }).catch(() => {});
+    return;
+  }
+  const root = state.containerSnapshot?.container_tree;
+  const node = root ? findContainerNode(root, containerId) : null;
+  const css = (node?.selectors || [])[0]?.css || (node?.selectors || [])[0] || null;
+  if (!css || typeof css !== 'string') {
+    await invokeAction('browser:clear-highlight', { profile: state.selectedSession, channel: 'hover-container' }).catch(() => {});
+    return;
+  }
+  await invokeAction('browser:highlight', {
+    profile: state.selectedSession,
+    selector: css,
+    options: { channel: 'hover-container', style: '2px solid rgba(52, 211, 153, 0.95)', sticky: true },
+  }).catch(() => {});
+}
+
+async function handleSaveAlias() {
+  if (!state.selectedSession) return;
+  const containerId = state.selectedContainerId || ui?.domActionContainerSelect?.value;
+  const alias = (ui?.domAliasInput?.value || '').trim();
+  if (!containerId) {
+    showMessage('请选择容器', 'warn');
+    return;
+  }
+  const url = resolveCurrentPageUrl();
+  const res = await domService.updateContainerAlias({ profile: state.selectedSession, url, containerId, alias });
+  snapshotManager.applyContainerSnapshotData(res, { toastMessage: '别名已保存' });
+  renderContainers();
+}
+
+async function handleOpenInspector() {
+  if (!desktop?.openInspector) {
+    showMessage('当前运行环境不支持独立容器视图窗口', 'warn');
+    return;
+  }
+  if (!state.selectedSession) {
+    showMessage('请先选择会话', 'warn');
+    return;
+  }
+  const url = resolveCurrentPageUrl();
+  await desktop.openInspector({ profile: state.selectedSession, url, maxDepth: 1, maxChildren: 6 });
+}
+
+const domService = createDomService({ invokeAction, resolveCurrentPageUrl });
+
+// Initialize container operations manager
+containerOps = createContainerOpsManager({
+  state,
+  ui,
+  findContainerNode,
+  getContainerAlias,
+  getContainerOperationsFromNode,
+  showMessage,
+  invokeAction,
+  resolveCurrentPageUrl,
+  applyContainerSnapshotData: (res, options) => {
+    if (snapshotManager) {
+      snapshotManager.applyContainerSnapshotData(res, options);
+    }
+  },
+});
+
+const snapshotManager = createSnapshotManager({
+  state,
+  ui,
+  domSnapshotOptions: { maxDepth: 1, maxChildren: 6 },
+  invokeAction,
+  debugLog: (...args) => debugLog?.(...args),
+  showMessage,
+  setLoading,
+  annotateDomTreeWithMatches,
+  findAllDomPathsForContainer,
+  resetDomVisibility: (...args) => resetDomVisibility(domTreeStore, ...args),
+  ensureContainerDomMapping: (containerId) => {
+    const tree = getDomTree(domTreeStore);
+    const paths = tree ? findAllDomPathsForContainer(containerId, tree) : [];
+    if (paths.length) {
+      state.selectedDomPath = paths[0];
+      resetDomVisibility(domTreeStore, new Set(), state.selectedDomPath);
+    }
+  },
+  scheduleAutoExpand: () => {},
+  syncContainerOpsEditor: (containerId, options) => containerOps.syncEditor(containerId, options),
+  ensureAutoRefreshTimer: () => {},
+  resolveCurrentPageUrl,
+  onSnapshotApplied: () => {
+    state.graphDirty = true;
+    renderContainers();
+    bus.publish('containers:snapshot_updated', { ts: Date.now(), session: state.selectedSession });
+  },
+  onSnapshotCleared: () => renderContainers(),
+  resetAutoExpandTrigger: () => {},
+  uiStateService,
+});
+
+const sessionPanel = createSessionPanel({
+  state,
+  ui,
+  showMessage,
+  invokeAction,
+  loadContainerSnapshot: snapshotManager.loadContainerSnapshot,
+  ensureAutoRefreshTimer: () => {},
+  renderContainers,
+  queueFitWindow,
+  refreshSessions: null,
+  uiStateService,
+});
+
+const dataLoaders = createDataLoaders({
+  state,
+  ui,
+  invokeAction,
+  showMessage,
+  debugLog: (...args) => debugLog?.(...args),
+  setLoading,
+  setSelectedSession: (profileId) => sessionPanel.setSelectedSession(profileId),
+  loadContainerSnapshot: snapshotManager.loadContainerSnapshot,
+  ensureAutoRefreshTimer: () => {},
+  uiStateService,
+});
+
+dataLoaders.attachRenderers({
+  renderBrowserPanel: sessionPanel.renderBrowserPanel,
+  renderSessions: sessionPanel.renderSessions,
+  renderLogs: sessionPanel.renderLogsPanel,
+});
+
+bindCoreEvents(ui, {
+  onRefreshBrowser: () => dataLoaders.loadBrowserStatus(),
+  onRefreshSessions: () => dataLoaders.loadSessions(),
+  onRefreshLogs: () => {
+    state.logs = [];
+    sessionPanel.renderLogsPanel();
+  },
+  onRefreshContainers: () => snapshotManager.loadContainerSnapshot(),
+  onOpenInspector: () => handleOpenInspector(),
+  onDomPick: () => handleDomPick(),
+  onDomHighlight: () => handleDomHighlight().catch((err) => showMessage(err?.message || '高亮失败', 'error')),
+  onDomClearHighlight: () => handleDomClearHighlight().catch(() => {}),
+  onDomReplace: () => handleDomReplace().catch((err) => showMessage(err?.message || '替换失败', 'error')),
+  onDomCreate: () => handleDomCreate().catch((err) => showMessage(err?.message || '创建失败', 'error')),
+  onDomAddFromDom: () => handleDomAddFromDom().catch((err) => showMessage(err?.message || '创建草稿失败', 'error')),
+  onDomSaveAlias: () => handleSaveAlias().catch((err) => showMessage(err?.message || '保存别名失败', 'error')),
+  onToolTabDom: () => switchToolTab('dom'),
+  onToolTabContainer: () => switchToolTab('container'),
+});
+
+initWindowControls({
+  ui,
+  desktop,
+  state,
+  publishWindowCommand,
+  toggleHeadlessMode,
+  updateHeadlessButton,
+  invokeAction,
+  showMessage,
+});
+
+subscribeDesktopState({ desktop, state, ui, queueFitWindow, updateHeadlessButton, uiStateService });
+
+registerRendererBus(bus, {
+  onTestPing: () => bus.publish('ui.test.pong', { ts: Date.now(), ok: true }),
+  onGraphReportRequest: () => {
+    bus.publish('ui.graph.report', buildGraphReport());
+  },
+  onGraphDomExpand: (payload = {}) => {
+    const path = payload.path;
+    if (!path) return;
+    // Acknowledge immediately for black-box tests; actual branch load happens in background.
+    bus.publish('ui.graph.domExpanded', { path });
+    ensureDomExpanded(path, { maxDepth: 1, maxChildren: 12 }).catch((err) => {
+      bus.publish('ui.graph.domExpanded', { path, error: err?.message || String(err) });
+      showMessage(err?.message || '展开失败', 'error');
+    });
+  },
+  onGraphDomHover: async (payload = {}) => {
+    await handleHoverDom(payload.path || null).catch(() => {});
+  },
+  onGraphContainerHover: async (payload = {}) => {
+    await handleHoverContainer(payload.containerId || null).catch(() => {});
+  },
+  onWindowError: (payload = {}) => showMessage(payload?.message || payload?.error || '窗口错误', 'error'),
+});
+
+function bootstrapPreferredSession() {
+  // Renderer is sandboxed; env is not guaranteed. Prefer auto-selection from session list.
+}
+
+function initMatchLinkOverlay() {
+  // Initialize DOM elements for match link overlay
+  treeDetailEl = ui?.treeDetail || ui?.treeContainerList || null;
+  matchLinkLayer = ui?.matchLinkLayer || null;
+  
+  if (!treeDetailEl || !matchLinkLayer) return;
+  try {
+    if (typeof ResizeObserver !== 'undefined') {
+      matchLinkResizeObserver = new ResizeObserver(() => scheduleMatchLinkDraw());
+      matchLinkResizeObserver.observe(treeDetailEl);
+    }
+  } catch {
+    // ignore
+  }
+  try {
+    ui?.treeContainerList?.addEventListener?.('scroll', scheduleMatchLinkDraw);
+    ui?.treeDomList?.addEventListener?.('scroll', scheduleMatchLinkDraw);
+    window.addEventListener('resize', scheduleMatchLinkDraw);
+  } catch {
+    // ignore
+  }
+}
+
+// 健康状态监控初始化
+function initHealthMonitor() {
+  if (!window.healthAPI) {
+    console.warn('[health] healthAPI not available');
+    return;
+  }
+
+  const healthUI = document.getElementById('health-status');
+  const healthIndicator = document.getElementById('health-indicator');
+  const healthDetails = document.getElementById('health-details');
+  const reconnectBtn = document.getElementById('reconnect-btn');
+
+  if (!healthUI || !healthIndicator) {
+    console.warn('[health] health UI elements not found');
+    return;
+  }
+
+  // 显示健康状态UI
+  function showHealthUI() {
+    healthUI.style.display = 'block';
+    healthUI.classList.add('health-monitor-active');
+  }
+
+  // 更新健康指示器
+  function updateHealthIndicator(status) {
+    const { wsConnected, controllerConnected, containerMatched } = status;
+    
+    // 更新指示器样式
+    if (wsConnected && controllerConnected) {
+      healthIndicator.className = 'health-indicator health-healthy';
+      healthIndicator.textContent = '✅';
+      healthIndicator.title = '系统健康';
+    } else if (wsConnected || controllerConnected) {
+      healthIndicator.className = 'health-indicator health-warning';
+      healthIndicator.textContent = '⚠️';
+      healthIndicator.title = '部分服务异常';
+    } else {
+      healthIndicator.className = 'health-indicator health-error';
+      healthIndicator.textContent = '❌';
+      healthIndicator.title = '系统异常';
+    }
+
+    // 更新详细信息
+    if (healthDetails) {
+      const wsStatus = wsConnected ? '✅ WS' : '❌ WS';
+      const ctrlStatus = controllerConnected ? '✅ Ctrl' : '❌ Ctrl';
+      const matchStatus = containerMatched ? '🧩 Match' : '🧩 NoMatch';
+      healthDetails.textContent = `${wsStatus} | ${ctrlStatus} | ${matchStatus}`;
+    }
+
+    // 显示重连按钮如果异常
+    if (reconnectBtn) {
+      const shouldShow = !wsConnected || !controllerConnected;
+      reconnectBtn.style.display = shouldShow ? 'inline-block' : 'none';
+    }
+  }
+
+  // 显示健康错误
+  function showHealthError(error) {
+    console.error('[health] 系统异常:', error);
+    if (window.floatingLogger) {
+      window.floatingLogger.error('健康检查发现异常:', error.message);
+    }
+    
+    // 在UI上显示错误提示
+    if (ui?.globalMessage) {
+      showMessage(`系统异常: ${error.message}`, 'error');
+    }
+  }
+
+  // 监听健康报告
+  const unsubReport = window.healthAPI.onHealthReport((report) => {
+    console.log('[health] 收到健康报告:', report);
+    
+    const status = {
+      wsConnected: report.ws?.connected || false,
+      controllerConnected: report.controller?.connected || false,
+      containerMatched: report.container?.matched || false
+    };
+
+    updateHealthIndicator(status);
+  });
+
+  // 监听健康错误
+  const unsubError = window.healthAPI.onHealthError((error) => {
+    showHealthError(error);
+  });
+
+  // 监听状态响应
+  const unsubStatus = window.healthAPI.onHealthStatusResponse((status) => {
+    console.log('[health] 状态响应:', status);
+    updateHealthIndicator(status);
+  });
+
+  // 监听重连响应
+  const unsubReconnect = window.healthAPI.onReconnectResponse((result) => {
+    if (result.success) {
+      showMessage('重连成功', 'success');
+    } else {
+      showMessage('重连失败，请手动检查服务', 'error');
+    }
+  });
+
+  // 绑定重连按钮
+  if (reconnectBtn) {
+    reconnectBtn.onclick = () => {
+      showMessage('尝试重连...', 'info');
+      window.healthAPI.attemptReconnect();
+    };
+  }
+
+  // 立即请求一次健康检查
+  setTimeout(() => {
+    window.healthAPI.requestHealthReport();
+    window.healthAPI.getHealthStatus();
+  }, 1000);
+
+  // 定期检查（每15秒）
+  const interval = setInterval(() => {
+    if (healthUI.style.display !== 'none') {
+      window.healthAPI.requestHealthReport();
+    }
+  }, 15000);
+
+  // 显示健康UI
+  showHealthUI();
+
+  // 清理函数
+  return () => {
+    clearInterval(interval);
+    unsubReport();
+    unsubError();
+    unsubStatus();
+    unsubReconnect();
+    if (reconnectBtn) {
+      reconnectBtn.onclick = null;
+    }
+  };
+}
+
+async function init() {
+  switchToolTab('dom');
+  updateHeadlessButton();
+  initMatchLinkOverlay();
+  await dataLoaders.loadBrowserStatus();
+  await dataLoaders.loadSessions({ silent: false, skipSnapshot: false });
+  await dataLoaders.loadLogs();
+  renderContainers();
+  queueFitWindow();
+  
+  // 初始化健康监控
+  try {
+    initHealthMonitor();
+  } catch (err) {
+    console.warn('[health] 健康监控初始化失败:', err);
+  }
+  
+  // Signal that renderer is ready and bus is connected for UI tests
+  if (desktop?.notifyInspectorReady) {
+    desktop.notifyInspectorReady();
+  }
+  await dataLoaders.loadLogs();
+  renderContainers();
+  queueFitWindow();
+}
+
+init().catch((err) => {
+  console.error('[floating] init failed', err);
+  showMessage(err?.message || '初始化失败', 'error');
+});
+
+window.__debug = { bus, state, ui, invokeAction };

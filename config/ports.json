@@ -1,0 +1,8 @@
+{
+  "browser_service": 7704,
+  "workflow_api": 7701,
+  "vision_service": 7702,
+  "websocket": 8765,
+  "devtools": 9222,
+  "floating_console": 8790
+}

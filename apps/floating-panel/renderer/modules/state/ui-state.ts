@@ -1,7 +1,7 @@
 import { createGraphStore } from '../../graph/store.js';
 
-export function createUiState(options = {}) {
-  const config = options.config || {};
+export function createUiState(options: any = {}) {
+  const config = options.config || options;
   return {
     browserStatus: null,
     sessions: [],

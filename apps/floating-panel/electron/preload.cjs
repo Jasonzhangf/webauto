@@ -72,3 +72,56 @@ contextBridge.exposeInMainWorld('floatingLogger', {
   warn: (...args) => ipcRenderer.send('ui:log', { level: 'warn', args }),
   error: (...args) => ipcRenderer.send('ui:log', { level: 'error', args }),
 });
+
+contextBridge.exposeInMainWorld('healthAPI', {
+  // 请求健康检查报告
+  requestHealthReport: () => {
+    ipcRenderer.send('bus:publish', { topic: 'health.request', payload: {} });
+  },
+  
+  // 获取当前健康状态
+  getHealthStatus: () => {
+    ipcRenderer.send('bus:publish', { topic: 'health.status', payload: {} });
+  },
+  
+  // 尝试重连
+  attemptReconnect: () => {
+    ipcRenderer.send('bus:publish', { topic: 'health.reconnect', payload: {} });
+  },
+  
+  // 监听健康报告
+  onHealthReport: (callback) => {
+    if (typeof callback !== 'function') return () => {};
+    const channel = 'health:report';
+    const handler = (_event, payload) => callback(payload);
+    ipcRenderer.on(channel, handler);
+    return () => ipcRenderer.removeListener(channel, handler);
+  },
+  
+  // 监听健康错误
+  onHealthError: (callback) => {
+    if (typeof callback !== 'function') return () => {};
+    const channel = 'health:error';
+    const handler = (_event, payload) => callback(payload);
+    ipcRenderer.on(channel, handler);
+    return () => ipcRenderer.removeListener(channel, handler);
+  },
+  
+  // 监听健康状态响应
+  onHealthStatusResponse: (callback) => {
+    if (typeof callback !== 'function') return () => {};
+    const channel = 'health.status.response';
+    const handler = (_event, payload) => callback(payload);
+    ipcRenderer.on(channel, handler);
+    return () => ipcRenderer.removeListener(channel, handler);
+  },
+  
+  // 监听重连响应
+  onReconnectResponse: (callback) => {
+    if (typeof callback !== 'function') return () => {};
+    const channel = 'health.reconnect.response';
+    const handler = (_event, payload) => callback(payload);
+    ipcRenderer.on(channel, handler);
+    return () => ipcRenderer.removeListener(channel, handler);
+  }
+});

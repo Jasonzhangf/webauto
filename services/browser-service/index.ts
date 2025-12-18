@@ -209,9 +209,22 @@ async function handleCommand(payload: CommandPayload, manager: SessionManager) {
       autoLoops.delete(profileId);
       return { ok: true, body: { ok: true } };
     }
-    case 'autoCookies:status': {
-      const profileId = args.profileId || 'default';
-      return { ok: true, body: { ok: !!autoLoops.get(profileId) } };
+   case 'autoCookies:status': {
+     const profileId = args.profileId || 'default';
+     return { ok: true, body: { ok: !!autoLoops.get(profileId) } };
+   }
+    case 'dom:pick:2': {
+      // For now DOM pick is handled by controller via WS, not directly here.
+      throw new Error('dom:pick:2 is handled by controller, /command should not call it directly');
+    }
+    case 'dom:branch:2': {
+      const profileId = (args.profile as string) || (args.profileId as string) || 'default';
+      const session = manager.getSession(profileId);
+      if (!session) {
+        throw new Error(`session for profile ${profileId} not started`);
+      }
+      // Forward to controller via WS for DOM branch loading
+      throw new Error('dom:branch:2 is handled via controller; call controller ui:action dom:branch:2 instead');
     }
     default:
       throw new Error(`Unknown action: ${action}`);

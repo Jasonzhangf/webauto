@@ -1,5 +1,11 @@
 {
   "host": "0.0.0.0",
   "port": 7704,
-  "backend": { "baseUrl": "http://127.0.0.1:7701" }
+  "backend": { "baseUrl": "http://127.0.0.1:7701" },
+  "healthCheck": {
+    "autoCheck": true,
+    "strictMode": false,
+    "skipOnFirstSuccess": true,
+    "timeout": 30000
+  }
 }

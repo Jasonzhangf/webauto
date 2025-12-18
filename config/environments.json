@@ -1,0 +1,12 @@
+{
+  "development": {
+    "NODE_ENV": "development",
+    "WEBAUTO_DEBUG": "1",
+    "WEBAUTO_LOG_LEVEL": "debug"
+  },
+  "production": {
+    "NODE_ENV": "production",
+    "WEBAUTO_DEBUG": "0",
+    "WEBAUTO_LOG_LEVEL": "info"
+  }
+}

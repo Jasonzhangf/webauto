@@ -36,30 +36,34 @@ export class UiController {
         return this.runCliCommand('operations', ['list']);
       case 'operations:run':
         return this.handleOperationRun(payload);
-      case 'containers:inspect':
-        return this.handleContainerInspect(payload);
-      case 'containers:inspect-container':
-        return this.handleContainerInspectContainer(payload);
-      case 'containers:inspect-branch':
-        return this.handleContainerInspectBranch(payload);
-      case 'containers:remap':
-        return this.handleContainerRemap(payload);
-      case 'containers:create-child':
-        return this.handleContainerCreateChild(payload);
-      case 'containers:update-alias':
-        return this.handleContainerUpdateAlias(payload);
-      case 'containers:update-operations':
-        return this.handleContainerUpdateOperations(payload);
-      case 'browser:highlight':
-        return this.handleBrowserHighlight(payload);
-      case 'browser:clear-highlight':
-        return this.handleBrowserClearHighlight(payload);
+     case 'containers:inspect':
+       return this.handleContainerInspect(payload);
+     case 'containers:inspect-container':
+       return this.handleContainerInspectContainer(payload);
+     case 'containers:inspect-branch':
+       return this.handleContainerInspectBranch(payload);
+     case 'containers:remap':
+       return this.handleContainerRemap(payload);
+     case 'containers:create-child':
+       return this.handleContainerCreateChild(payload);
+     case 'containers:update-alias':
+       return this.handleContainerUpdateAlias(payload);
+     case 'containers:update-operations':
+       return this.handleContainerUpdateOperations(payload);
+     case 'browser:highlight':
+       return this.handleBrowserHighlight(payload);
+     case 'browser:clear-highlight':
+       return this.handleBrowserClearHighlight(payload);
       case 'browser:highlight-dom-path':
         return this.handleBrowserHighlightDomPath(payload);
       case 'browser:cancel-pick':
         return this.handleBrowserCancelDomPick(payload);
       case 'browser:pick-dom':
         return this.handleBrowserPickDom(payload);
+      case 'dom:branch:2':
+        return this.handleDomBranch2(payload);
+      case 'dom:pick:2':
+        return this.handleDomPick2(payload);
       default:
         return { success: false, error: `Unknown action: ${action}` };
     }
@@ -473,6 +477,26 @@ export class UiController {
     }
   }
 
+  // v2 DOM pick：直接暴露 dom_path + selector 给 UI
+  async handleDomPick2(payload = {}) {
+    const profile = payload.profile || payload.sessionId;
+    if (!profile) {
+      throw new Error('缺少会话/ profile 信息');
+    }
+    const timeout = Math.min(Math.max(Number(payload.timeout) || 25000, 3000), 60000);
+    const rootSelector = payload.rootSelector || payload.root_selector || null;
+    const result = await this.sendDomPickerViaWs(profile, { timeout, rootSelector });
+    // 统一输出结构：domPath + selector
+    return {
+      success: true,
+      data: {
+        domPath: result?.dom_path || null,
+        selector: result?.selector || null,
+        raw: result,
+      },
+    };
+  }
+
   async sendHighlightViaWs(sessionId, selector, options = {}) {
     const payload = {
       type: 'command',
@@ -647,6 +671,29 @@ export class UiController {
       return response.data.data || response.data.branch || response.data;
     }
     throw new Error(response?.data?.error || response?.error || 'inspect_dom_branch failed');
+  }
+
+  // v2 DOM branch：按 domPath + depth 获取局部树
+  async handleDomBranch2(payload = {}) {
+    const profile = payload.profile || payload.sessionId;
+    const url = payload.url;
+    const path = payload.path || payload.domPath;
+    if (!profile) throw new Error('缺少会话/ profile 信息');
+    if (!url) throw new Error('缺少 URL');
+    if (!path) throw new Error('缺少 DOM 路径');
+    const maxDepth = typeof payload.maxDepth === 'number' ? payload.maxDepth : payload.depth;
+    const maxChildren = typeof payload.maxChildren === 'number' ? payload.maxChildren : (payload.maxChildren || 12);
+    const rootSelector = payload.rootSelector || payload.root_selector || null;
+    const sessionId = profile;
+    const branch = await this.fetchDomBranchFromService({
+      sessionId,
+      url,
+      path,
+      rootSelector,
+      maxDepth: typeof maxDepth === 'number' ? maxDepth : undefined,
+      maxChildren: typeof maxChildren === 'number' ? maxChildren : undefined,
+    });
+    return { success: true, data: branch };
   }
 
   async captureSnapshotFromFixture({ profileId, url, maxDepth, maxChildren, containerId, rootSelector }) {
