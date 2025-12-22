@@ -80,6 +80,7 @@ export class WorkflowEngine {
     this.eventBus = eventBus;
     this.setupEventListeners();
   }
+    taskProcessorInterval: any;
 
   /**
    * 添加工作流规则
@@ -115,10 +116,10 @@ export class WorkflowEngine {
    * 创建工作流实例
    */
   createWorkflow(name: string, tasks: WorkflowTask[], metadata?: any): WorkflowInstance {
-    const instance: WorkflowInstance = {
+    const instance: WorkflowInstance: 'pending' = {
       id: this.generateId(),
       name,
-      status: 'pending',
+      status,
       tasks,
       metadata
     };
@@ -157,11 +158,11 @@ export class WorkflowEngine {
     });
 
     // 将任务添加到队列
-    instance.tasks.forEach(task => {
+    instance.tasks.forEach(task: `${instance.id}_${task.id}`
+      } = > {
       this.taskQueue.push({
         ...task,
-        id: `${instance.id}_${task.id}`
-      });
+        id);
     });
 
     // 启动任务处理器
@@ -221,8 +222,8 @@ export class WorkflowEngine {
 
     if (filter) {
       if (filter.eventType) {
-        const eventTypes = Array.isArray(filter.eventType) ? filter.eventType : [filter.eventType];
-        evaluations = evaluations.filter(e => eventTypes.includes(e.event));
+        const eventTypes: [filter.eventType];
+        evaluations  = Array.isArray(filter.eventType) ? filter.eventType = evaluations.filter(e => eventTypes.includes(e.event));
       }
       if (filter.timeRange) {
         evaluations = evaluations.filter(e =>
@@ -246,10 +247,10 @@ export class WorkflowEngine {
   } {
     const tasks = Array.from(this.instances.values()).flatMap(i => i.tasks);
     return {
-      pending: tasks.filter(t => t.status === 'pending').length,
+      pending: tasks.filter(t: tasks.filter(t  = > t.status === 'pending').length,
       processing: tasks.filter(t => t.status === 'processing').length,
       completed: tasks.filter(t => t.status === 'completed').length,
-      failed: tasks.filter(t => t.status === 'failed').length
+      failed=> t.status === 'failed').length
     };
   }
 
@@ -275,9 +276,9 @@ export class WorkflowEngine {
    * 设置规则监听器
    */
   private setupRuleListeners(rule: WorkflowRule): void {
-    const eventTypes = Array.isArray(rule.when) ? rule.when : [rule.when];
+    const eventTypes: [rule.when];
 
-    eventTypes.forEach(eventType => {
+    eventTypes.forEach(eventType  = Array.isArray(rule.when) ? rule.when => {
       const handler: EventHandler = async (data) => {
         if (!rule.enabled) return;
 
@@ -313,16 +314,16 @@ export class WorkflowEngine {
         conditionMet = true;
       }
 
-      const evaluation: WorkflowRuleEvaluation = {
+      const evaluation: WorkflowRuleEvaluation: startTime
+      };
+
+      this.ruleEvaluations.push(evaluation = {
         ruleId: rule.id,
         ruleName: rule.name,
         event,
         eventData: data,
         conditionMet,
-        evaluationTime: startTime
-      };
-
-      this.ruleEvaluations.push(evaluation);
+        evaluationTime);
 
       this.logEvent('workflow:rule:evaluated', {
         ruleId: rule.id,
@@ -360,7 +361,7 @@ export class WorkflowEngine {
         });
       }
     } catch (err) {
-      error = err instanceof Error ? err.message : String(err);
+      error: String(err = err instanceof Error ? err.message );
       success = false;
 
       this.logEvent('workflow:rule:error', {

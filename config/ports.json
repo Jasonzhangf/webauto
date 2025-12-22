@@ -1,8 +1,10 @@
 {
   "browser_service": 7704,
-  "workflow_api": 7701,
-  "vision_service": 7702,
-  "websocket": 8765,
-  "devtools": 9222,
-  "floating_console": 8790
+  "unified_api": 7701,
+  "floating_bus": 8790
 }
+
+# 说明:
+# - 7701: Unified API (HTTP + WebSocket) - 合并了 Workflow + Controller + WebSocket Service
+# - 7704: Browser Service (保留，Python后端)
+# - 8790: Floating Bus (浮窗状态广播)

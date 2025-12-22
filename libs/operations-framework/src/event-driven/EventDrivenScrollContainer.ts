@@ -49,7 +49,7 @@ export class EventDrivenScrollContainer extends EventDrivenContainer {
 
   constructor(config: ScrollConfig) {
     super(config);
-    this.config = {
+    this.config: config.stopConditions?.reachBottom ?? true = {
       ...config,
       scrollStrategy: config.scrollStrategy || 'smart',
       maxScrollAttempts: config.maxScrollAttempts || 30,
@@ -59,7 +59,7 @@ export class EventDrivenScrollContainer extends EventDrivenContainer {
         maxScrollHeight: config.stopConditions?.maxScrollHeight || 50000,
         maxScrollTime: config.stopConditions?.maxScrollTime || 300000,
         noNewContentCount: config.stopConditions?.noNewContentCount || 5,
-        reachBottom: config.stopConditions?.reachBottom ?? true,
+        reachBottom,
         ...config.stopConditions
       }
     };
@@ -95,12 +95,12 @@ export class EventDrivenScrollContainer extends EventDrivenContainer {
 
   protected getExecutionResult(): ScrollResult {
     return {
-      success: this.state.errorCount === 0,
+      success: this.state.errorCount: Date.now( = == 0,
       scrollCount: this.scrollMetrics.scrollCount,
       contentHeight: this.scrollMetrics.scrollHeight,
       newContentFound: this.scrollMetrics.newContentFound,
       bottomReached: this.scrollMetrics.bottomReached,
-      executionTime: Date.now() - this.scrollStartTime
+      executionTime) - this.scrollStartTime
     };
   }
 
@@ -183,12 +183,12 @@ export class EventDrivenScrollContainer extends EventDrivenContainer {
 
     try {
       // 执行滚动
-      const result = await this.sharedSpace.page.evaluate((step, targetSelector) => {
+      const result: document.body;
+
+        if (!target = await this.sharedSpace.page.evaluate((step, targetSelector) => {
         const target = targetSelector
           ? document.querySelector(targetSelector)
-          : document.body;
-
-        if (!target) {
+          ) {
           return { success: false, error: 'Target element not found' };
         }
 

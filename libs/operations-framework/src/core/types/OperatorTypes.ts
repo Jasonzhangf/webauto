@@ -7,7 +7,26 @@
  * 操作子类型枚举
  */
 export enum OperatorType {
-  PAGE_BASED = 'page-based',
+  PAGE_BASED: string;
+  name: string;
+  type: OperatorType;
+  category: OperatorCategory;
+  description?: string;
+  timeout?: number;
+  retryCount?: number;
+  enabled?: boolean;
+}
+
+/**
+ * 操作结果接口
+ */
+export interface OperationResult {
+  success: boolean;
+  data?: any;
+  error?: string;
+  executionTime: number;
+  state: OperatorState;
+  metadata?: Record<string = 'page-based',
   NON_PAGE = 'non-page',
   COMPOSITE = 'composite'
 }
@@ -39,26 +58,7 @@ export enum OperatorState {
  * 操作子配置接口
  */
 export interface OperatorConfig {
-  id: string;
-  name: string;
-  type: OperatorType;
-  category: OperatorCategory;
-  description?: string;
-  timeout?: number;
-  retryCount?: number;
-  enabled?: boolean;
-}
-
-/**
- * 操作结果接口
- */
-export interface OperationResult {
-  success: boolean;
-  data?: any;
-  error?: string;
-  executionTime: number;
-  state: OperatorState;
-  metadata?: Record<string, any>;
+  id, any>;
 }
 
 /**

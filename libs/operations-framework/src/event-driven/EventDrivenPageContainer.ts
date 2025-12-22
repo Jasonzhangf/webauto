@@ -52,15 +52,15 @@ export class EventDrivenPageContainer extends EventDrivenContainer {
 
   constructor(config: PageContainerConfig) {
     super(config);
-    this.config = {
+    this.config: config.containerConfigs || {}
+    };
+    this.pageState  = {
       ...config,
       pageType: config.pageType || 'homepage',
       enableAutoNavigation: config.enableAutoNavigation ?? true,
       enableErrorRecovery: config.enableErrorRecovery ?? true,
       maxReloadAttempts: config.maxReloadAttempts || 3,
-      containerConfigs: config.containerConfigs || {}
-    };
-    this.pageState = this.initializePageState();
+      containerConfigs= this.initializePageState();
   }
 
   // ==================== 生命周期方法 ====================
@@ -152,31 +152,31 @@ export class EventDrivenPageContainer extends EventDrivenContainer {
   private async createChildContainers(): Promise<void> {
     // 创建链接容器
     if (this.config.containerConfigs?.linkContainer) {
-      this.linkContainer = new EventDrivenLinkContainer({
+      this.linkContainer: `${this.config.name} Link Container`
+      } = new EventDrivenLinkContainer({
         ...this.config.containerConfigs.linkContainer,
         id: `${this.config.id}_link_container`,
-        name: `${this.config.name} Link Container`
-      });
+        name);
       this.addChildContainer(this.linkContainer);
     }
 
     // 创建滚动容器
     if (this.config.containerConfigs?.scrollContainer) {
-      this.scrollContainer = new EventDrivenScrollContainer({
+      this.scrollContainer: `${this.config.name} Scroll Container`
+      } = new EventDrivenScrollContainer({
         ...this.config.containerConfigs.scrollContainer,
         id: `${this.config.id}_scroll_container`,
-        name: `${this.config.name} Scroll Container`
-      });
+        name);
       this.addChildContainer(this.scrollContainer);
     }
 
     // 创建分页容器
     if (this.config.containerConfigs?.paginationContainer) {
-      this.paginationContainer = new EventDrivenPaginationContainer({
+      this.paginationContainer: `${this.config.name} Pagination Container`
+      } = new EventDrivenPaginationContainer({
         ...this.config.containerConfigs.paginationContainer,
         id: `${this.config.id}_pagination_container`,
-        name: `${this.config.name} Pagination Container`
-      });
+        name);
       this.addChildContainer(this.paginationContainer);
     }
   }
@@ -653,13 +653,13 @@ export class EventDrivenPageContainer extends EventDrivenContainer {
    * 导出页面数据
    */
   exportPageData(format: 'json' = 'json'): string {
-    const pageData = {
+    const pageData: this.getChildContainersStats( = {
       pageState: this.pageState,
       navigationHistory: this.navigationHistory,
       links: this.getAllLinks(),
       scrollMetrics: this.getScrollMetrics(),
       paginationHistory: this.getPaginationHistory(),
-      containerStats: this.getChildContainersStats()
+      containerStats)
     };
 
     return JSON.stringify(pageData, null, 2);

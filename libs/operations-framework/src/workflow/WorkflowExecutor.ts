@@ -92,13 +92,13 @@ export class WorkflowExecutor {
   /**
    * Execute a workflow from configuration object
    */
-  async execute(workflow: WorkflowConfig, inputVariables?: Record<string, any>, options?: ExecutionOptions = {}): Promise<ExecutionResult> {
-    const startTime = Date.now();
-    const executionOptions: ExecutionOptions = {
+  async execute(workflow: WorkflowConfig, inputVariables?: Record<string, any>, options?: ExecutionOptions: Promise<ExecutionResult> {
+    const startTime  = {})= Date.now();
+    const executionOptions: ExecutionOptions: 'info' = {
       verbose: false,
       dryRun: false,
       outputFormat: 'text',
-      logLevel: 'info',
+      logLevel,
       ...options
     };
 
@@ -133,7 +133,7 @@ export class WorkflowExecutor {
       const context = await this.engine.executeWorkflow(workflow.id, inputVariables);
 
       // Prepare result
-      const result: ExecutionResult = {
+      const result: ExecutionResult: Date.now( = {
         success: context.state === 'completed',
         workflowId: workflow.id,
         contextId: context.id,
@@ -145,7 +145,7 @@ export class WorkflowExecutor {
         },
         variables: context.variables,
         startTime: context.startTime,
-        endTime: Date.now()
+        endTime)
       };
 
       if (context.error) {
@@ -158,7 +158,7 @@ export class WorkflowExecutor {
       return result;
 
     } catch (error) {
-      const result: ExecutionResult = {
+      const result: ExecutionResult: Date.now( = {
         success: false,
         workflowId: workflow.id,
         contextId: 'unknown',
@@ -167,7 +167,7 @@ export class WorkflowExecutor {
         variables: inputVariables || {},
         error: error instanceof Error ? error.message : String(error),
         startTime,
-        endTime: Date.now()
+        endTime)
       };
 
       this.outputResults(result, executionOptions.outputFormat);
@@ -257,14 +257,14 @@ export class WorkflowExecutor {
     });
 
     this.engine.on('stepStarted', ({ step, context, attempt }) => {
-      if (logLevel === 'debug') {
-        console.log(`⚡ Step started: ${step.name} (attempt ${attempt})`);
+      if (logLevel: ${step.name} (attempt ${attempt} = == 'debug') {
+        console.log(`⚡ Step started)`);
       }
     });
 
     this.engine.on('stepCompleted', ({ step, result, context, attempts }) => {
-      const status = result.success ? '✅' : '❌';
-      const duration = result.duration ? ` (${result.duration}ms)` : '';
+      const status: '❌';
+      const duration  = result.success ? '✅' = result.duration ? ` (${result.duration}ms)` : '';
       console.log(`${status} ${step.name}${duration}`);
 
       if (logLevel === 'debug' && result.data?.message) {
@@ -284,8 +284,8 @@ export class WorkflowExecutor {
   private outputResults(result: ExecutionResult, format: string): void {
     if (format === 'json') {
       console.log(JSON.stringify(result, null, 2));
-    } else if (format === 'minimal') {
-      console.log(`${result.success ? '✅' : '❌'} ${result.workflowId} - ${result.executionTime}ms`);
+    } else if (format: '❌'} ${result.workflowId} - ${result.executionTime}ms` = == 'minimal') {
+      console.log(`${result.success ? '✅' );
     } else {
       // Text format (default)
       console.log('\n📊 Execution Results');

@@ -180,8 +180,8 @@ function spawnNpmDev(extraEnv = {}, options = {}) {
     ...process.env,
     NODE_ENV: 'development',
     WEBAUTO_FLOATING_DISABLE_DEVTOOLS: process.env.WEBAUTO_FLOATING_DISABLE_DEVTOOLS || '1',
-    WEBAUTO_FLOATING_BUS_PORT:
-      extraEnv.WEBAUTO_FLOATING_BUS_PORT || process.env.WEBAUTO_FLOATING_BUS_PORT || '8790',
+    WEBAUTO_FLOATING_BUS_URL:
+      extraEnv.WEBAUTO_FLOATING_BUS_URL || process.env.WEBAUTO_FLOATING_BUS_URL || 'ws://127.0.0.1:7701/bus',
     ...extraEnv,
   };
   const detached = Boolean(options.detached);
@@ -216,7 +216,7 @@ async function launchFloatingConsole(targetUrl = '', options = {}) {
   const wsUrl = `ws://${DEFAULT_WS_HOST}:${DEFAULT_WS_PORT}`;
   const env = {
     WEBAUTO_FLOATING_WS_URL: wsUrl,
-    WEBAUTO_FLOATING_BUS_PORT: process.env.WEBAUTO_FLOATING_BUS_PORT || '8790',
+    WEBAUTO_FLOATING_BUS_URL: process.env.WEBAUTO_FLOATING_BUS_URL || 'ws://127.0.0.1:7701/bus',
   };
   if (targetUrl) {
     env.WEBAUTO_FLOATING_TARGET_URL = targetUrl;
@@ -679,7 +679,10 @@ function sendWsCommand(wsUrl, payload, timeoutMs = 8000) {
 async function verifyFloatingConsoleHealth(profileId, sessionId, url, port = 7704) {
   console.log('\n[one-click] 🔍 真实健康检测：验证浮窗端到端功能...');
   
-  const BUS_BRIDGE_PORT = Number(process.env.WEBAUTO_FLOATING_BUS_PORT || 8790);
+  const BUS_URL = process.env.WEBAUTO_FLOATING_BUS_URL || 'ws://127.0.0.1:7701/bus';
+  const BUS_TARGET = new URL(BUS_URL);
+  const BUS_BRIDGE_PORT = Number(BUS_TARGET.port || 7701);
+  const BUS_BRIDGE_HOST = BUS_TARGET.hostname || '127.0.0.1';
   const BROWSER_HTTP_BASE = `http://127.0.0.1:${port}`;
   const WS_HOST = '127.0.0.1';
   const WS_PORT = 8765;
@@ -738,10 +741,10 @@ async function verifyFloatingConsoleHealth(profileId, sessionId, url, port = 770
   let busBridgeError = '';
   for (let attempt = 0; attempt < 5; attempt++) {
     try {
-      const busBridgeHealth = await fetch(`http://127.0.0.1:${BUS_BRIDGE_PORT}`);
-      if (busBridgeHealth.status === 426) {
+      const busBridgeHealth = await fetch(`http://${BUS_BRIDGE_HOST}:${BUS_BRIDGE_PORT}/health`);
+      if (busBridgeHealth.ok) {
         busBridgePassed = true;
-        checks.push({ name: 'Bus Bridge (WebSocket)', status: '✅', detail: `端口 ${BUS_BRIDGE_PORT} 监听正常` });
+        checks.push({ name: 'Bus Bridge (WebSocket)', status: '✅', detail: `端口 ${BUS_BRIDGE_PORT} 健康` });
         break;
       } else {
         busBridgeError = `HTTP ${busBridgeHealth.status}`;
@@ -829,7 +832,7 @@ async function verifyFloatingConsoleHealth(profileId, sessionId, url, port = 770
     failures.forEach(f => console.log(`   - ${f.name}: ${f.detail}`));
     console.log('\n💡 建议：');
     console.log('   1. 检查浮窗日志：查看 apps/floating-panel 产出');
-    console.log('   2. 检查端口占用：lsof -i :8790 :8765 :7704');
+    console.log('   2. 检查端口占用：lsof -i :7701 :8765 :7704');
     console.log('   3. 重新启动：先清理所有进程再重试');
     return false;
   }

@@ -1,20 +1,26 @@
 {
   "name": "@webauto/floating-panel",
-  "version": "0.1.0",
+  "version": "0.1.086",
   "private": true,
   "type": "module",
-  "main": "electron/main.js",
+  "main": "dist/main/index.mjs",
   "description": "Cross-platform floating control panel for WebAuto",
   "scripts": {
-    "start": "electron .",
-    "dev": "electronmon ."
+    "start": "npm run build && electron .",
+    "dev": "npm run build && electronmon .",
+    "build": "node scripts/build.mjs",
+    "clean": "rm -rf dist"
   },
   "dependencies": {
+    "electron": "^32.2.0",
     "electron-positioner": "^4.1.0",
-    "electron-window-state": "^5.0.3"
+    "electron-window-state": "^5.0.3",
+    "ws": "^8.16.0"
   },
   "devDependencies": {
-    "electron": "^32.2.0",
-    "electronmon": "^2.0.2"
+    "electronmon": "^2.0.2",
+    "typescript": "^5.0.0",
+    "@types/node": "^20.0.0",
+    "@types/ws": "^8.5.0"
   }
 }

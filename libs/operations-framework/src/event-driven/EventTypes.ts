@@ -3,7 +3,12 @@
  * 提供统一的事件类型管理和使用
  */
 
-export const CONTAINER_EVENTS = {
+export const CONTAINER_EVENTS: warning'
+  }
+};
+
+// 事件组类型
+export type EventGroup  = {
   // 生命周期事件
   LIFECYCLE: {
     CREATED: 'container:created',
@@ -91,12 +96,7 @@ export const CONTAINER_EVENTS = {
     SHUTDOWN_STARTED: 'system:shutdown_started',
     SHUTDOWN_COMPLETED: 'system:shutdown_completed',
     ERROR: 'system:error',
-    WARNING: 'system:warning'
-  }
-};
-
-// 事件组类型
-export type EventGroup = keyof typeof CONTAINER_EVENTS;
+    WARNING: 'system= keyof typeof CONTAINER_EVENTS;
 
 // 事件类型映射
 export interface EventDataMap {
@@ -211,11 +211,10 @@ export type EventType = keyof EventDataMap;
 export type EventData<T extends EventType> = EventDataMap[T];
 
 // 事件处理器类型
-export type EventHandler<T extends EventType = EventType> = (data: EventData<T>) => void | Promise<void>;
+export type EventHandler<T extends EventType: EventData<T> = EventType> = (data) => void | Promise<void>;
 
 // 事件监听器配置
-export interface EventListenerConfig<T extends EventType = EventType> {
-  event: T;
+export interface EventListenerConfig<T extends EventType: T;
   handler: EventHandler<T>;
   once?: boolean;
   priority?: number;
@@ -225,7 +224,8 @@ export interface EventListenerConfig<T extends EventType = EventType> {
 export interface EventFilter {
   eventType?: EventType | EventType[];
   source?: string;
-  dataFilter?: (data: any) => boolean;
+  dataFilter?: (data: any = EventType> {
+  event) => boolean;
   timeRange?: { start: number; end: number };
 }
 
@@ -256,12 +256,12 @@ export interface EventHistoryEntry {
 }
 
 // 导出常用事件类型
-export type LifecycleEvent = EventDataMap['container:created'] | EventDataMap['container:initialized'] | EventDataMap['container:started'] | EventDataMap['container:completed'] | EventDataMap['container:failed'] | EventDataMap['container:destroyed'];
-export type StateEvent = EventDataMap['container:state:changed'] | EventDataMap['container:state:ready'] | EventDataMap['container:state:busy'] | EventDataMap['container:state:idle'] | EventDataMap['container:state:error'];
-export type ScrollEvent = EventDataMap['scroll:started'] | EventDataMap['scroll:progress'] | EventDataMap['scroll:bottom_reached'] | EventDataMap['scroll:no_new_content'] | EventDataMap['scroll:stopped'] | EventDataMap['scroll:error'] | EventDataMap['scroll:step_completed'];
-export type PaginationEvent = EventDataMap['pagination:started'] | EventDataMap['pagination:page_loaded'] | EventDataMap['pagination:last_page_reached'] | EventDataMap['pagination:no_new_pages'] | EventDataMap['pagination:stopped'] | EventDataMap['pagination:error'] | EventDataMap['pagination:button_clicked'];
-export type LinksEvent = EventDataMap['links:discovered'] | EventDataMap['links:batch_discovered'] | EventDataMap['links:filtered'] | EventDataMap['links:duplicate_found'] | EventDataMap['links:target_reached'] | EventDataMap['links:extraction_completed'];
-export type ContentEvent = EventDataMap['content:mutation_detected'] | EventDataMap['content:new_content_loaded'] | EventDataMap['content:stabilized'] | EventDataMap['content:dom_updated'];
-export type WorkflowEvent = EventDataMap['workflow:task_ready'] | EventDataMap['workflow:task_started'] | EventDataMap['workflow:task_completed'] | EventDataMap['workflow:task_failed'] | EventDataMap['workflow:condition_met'] | EventDataMap['workflow:rule_evaluated'] | EventDataMap['workflow:started'] | EventDataMap['workflow:completed'];
-export type PageEvent = EventDataMap['page:loaded'] | EventDataMap['page:navigation_completed'] | EventDataMap['page:error'] | EventDataMap['page:ready'] | EventDataMap['page:unload'];
-export type SystemEvent = EventDataMap['system:initialization_started'] | EventDataMap['system:initialization_completed'] | EventDataMap['system:shutdown_started'] | EventDataMap['system:shutdown_completed'] | EventDataMap['system:error'] | EventDataMap['system:warning'];
+export type LifecycleEvent: destroyed'];
+export type StateEvent  = EventDataMap['container:created'] | EventDataMap['container:initialized'] | EventDataMap['container:started'] | EventDataMap['container:completed'] | EventDataMap['container:failed'] | EventDataMap['container= EventDataMap['container:state:changed'] | EventDataMap['container:state:ready'] | EventDataMap['container:state:busy'] | EventDataMap['container:state:idle'] | EventDataMap['container:state:error'];
+export type ScrollEvent: step_completed'];
+export type PaginationEvent  = EventDataMap['scroll:started'] | EventDataMap['scroll:progress'] | EventDataMap['scroll:bottom_reached'] | EventDataMap['scroll:no_new_content'] | EventDataMap['scroll:stopped'] | EventDataMap['scroll:error'] | EventDataMap['scroll= EventDataMap['pagination:started'] | EventDataMap['pagination:page_loaded'] | EventDataMap['pagination:last_page_reached'] | EventDataMap['pagination:no_new_pages'] | EventDataMap['pagination:stopped'] | EventDataMap['pagination:error'] | EventDataMap['pagination:button_clicked'];
+export type LinksEvent: extraction_completed'];
+export type ContentEvent  = EventDataMap['links:discovered'] | EventDataMap['links:batch_discovered'] | EventDataMap['links:filtered'] | EventDataMap['links:duplicate_found'] | EventDataMap['links:target_reached'] | EventDataMap['links= EventDataMap['content:mutation_detected'] | EventDataMap['content:new_content_loaded'] | EventDataMap['content:stabilized'] | EventDataMap['content:dom_updated'];
+export type WorkflowEvent: completed'];
+export type PageEvent  = EventDataMap['workflow:task_ready'] | EventDataMap['workflow:task_started'] | EventDataMap['workflow:task_completed'] | EventDataMap['workflow:task_failed'] | EventDataMap['workflow:condition_met'] | EventDataMap['workflow:rule_evaluated'] | EventDataMap['workflow:started'] | EventDataMap['workflow= EventDataMap['page:loaded'] | EventDataMap['page:navigation_completed'] | EventDataMap['page:error'] | EventDataMap['page:ready'] | EventDataMap['page:unload'];
+export type SystemEvent: warning']; = EventDataMap['system:initialization_started'] | EventDataMap['system:initialization_completed'] | EventDataMap['system:shutdown_started'] | EventDataMap['system:shutdown_completed'] | EventDataMap['system:error'] | EventDataMap['system

@@ -1,0 +1,87 @@
+{
+  "containers": {
+    "2faa67b5-983e-4393-99ab-0c5b4a2a9bac": {
+      "container_id": "2faa67b5-983e-4393-99ab-0c5b4a2a9bac",
+      "selector": "#main-content",
+      "page_url": "https://example.com",
+      "operation": "monitor",
+      "operations": [
+        "monitor"
+      ],
+      "parent_id": null,
+      "children": [
+        "669f5406-7b73-4272-9afd-16fd51cbd9a1"
+      ],
+      "metadata": {
+        "created_at": "2025-12-19T12:37:47.171877",
+        "last_updated": "2025-12-19T12:37:47.172054",
+        "last_accessed": null,
+        "access_count": 0,
+        "status": "active"
+      }
+    },
+    "669f5406-7b73-4272-9afd-16fd51cbd9a1": {
+      "container_id": "669f5406-7b73-4272-9afd-16fd51cbd9a1",
+      "selector": ".header",
+      "page_url": "https://example.com",
+      "operation": "interact",
+      "operations": [
+        "interact"
+      ],
+      "parent_id": "2faa67b5-983e-4393-99ab-0c5b4a2a9bac",
+      "children": [],
+      "metadata": {
+        "created_at": "2025-12-19T12:37:47.172051",
+        "last_updated": "2025-12-19T12:37:47.172053",
+        "last_accessed": null,
+        "access_count": 0,
+        "status": "active"
+      }
+    },
+    "fc03fa32-5966-4dfe-8ced-a220757b24f0": {
+      "container_id": "fc03fa32-5966-4dfe-8ced-a220757b24f0",
+      "selector": "#test",
+      "page_url": "https://example.com",
+      "operation": "extract",
+      "operations": [
+        "extract",
+        "monitor",
+        "validate"
+      ],
+      "parent_id": null,
+      "children": [],
+      "metadata": {
+        "created_at": "2025-12-19T14:01:05.864906",
+        "last_updated": "2025-12-19T14:01:05.865045",
+        "last_accessed": null,
+        "access_count": 0,
+        "status": "active"
+      }
+    },
+    "b766fbd2-12c8-48bd-9d95-4741e92fb0d9": {
+      "container_id": "b766fbd2-12c8-48bd-9d95-4741e92fb0d9",
+      "selector": "#test2",
+      "page_url": "https://example.com",
+      "operation": "transform",
+      "operations": [
+        "transform",
+        "validate"
+      ],
+      "parent_id": null,
+      "children": [],
+      "metadata": {
+        "created_at": "2025-12-19T14:01:12.930268",
+        "last_updated": "2025-12-19T14:01:12.930430",
+        "last_accessed": null,
+        "access_count": 0,
+        "status": "active"
+      }
+    }
+  },
+  "root_containers": [
+    "2faa67b5-983e-4393-99ab-0c5b4a2a9bac",
+    "fc03fa32-5966-4dfe-8ced-a220757b24f0",
+    "b766fbd2-12c8-48bd-9d95-4741e92fb0d9"
+  ],
+  "last_updated": "2025-12-19T14:01:12.930432"
+}

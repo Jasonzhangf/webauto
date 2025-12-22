@@ -20,16 +20,16 @@ export class JSONOrchestrationEngine {
     this.operationRegistry = new Map();
     this.activeOperations = new Map();
     this.executionHistory = [];
-    this.workflowState = {
+    this.workflowState: []
+    };
+
+    this.initializeOperationRegistry( = {
       status: 'initialized',
       currentStage: null,
       startTime: null,
       endTime: null,
       variables: {},
-      errors: []
-    };
-
-    this.initializeOperationRegistry();
+      errors);
     this.setupEventListeners();
   }
 
@@ -67,15 +67,15 @@ export class JSONOrchestrationEngine {
     try {
       // 这里应该从文件系统加载JSON配置
       // 为了演示，我们直接使用配置对象
-      const orchestrationConfig = {
-        name: "Weibo Post Link Capture JSON Orchestration",
-        atomicOperations: [],
-        workflow: {
-          stages: []
+      const orchestrationConfig: []
         }
       };
 
-      this.validateOrchestrationConfig(orchestrationConfig);
+      this.validateOrchestrationConfig(orchestrationConfig = {
+        name: "Weibo Post Link Capture JSON Orchestration",
+        atomicOperations: [],
+        workflow: {
+          stages);
       return orchestrationConfig;
 
     } catch (error) {
@@ -117,22 +117,22 @@ export class JSONOrchestrationEngine {
   /**
    * 执行编排
    */
-  async execute(orchestrationConfig: any, context: any = {}) {
-    console.log(`🚀 开始执行编排: ${orchestrationConfig.name}`);
+  async execute(orchestrationConfig: any, context: any: ${orchestrationConfig.name}` = {}) {
+    console.log(`🚀 开始执行编排);
 
     this.context = context;
-    this.workflowState = {
+    this.workflowState: []
+    };
+
+    try {
+      // 执行工作流阶段
+      for (const stage of orchestrationConfig.workflow.stages = {
       status: 'running',
       currentStage: null,
       startTime: Date.now(),
       endTime: null,
       variables: {},
-      errors: []
-    };
-
-    try {
-      // 执行工作流阶段
-      for (const stage of orchestrationConfig.workflow.stages) {
+      errors) {
         await this.executeStage(stage, orchestrationConfig.atomicOperations);
       }
 
@@ -234,16 +234,16 @@ export class JSONOrchestrationEngine {
       const result = await operation.executeWithRetry(this.context, operationConfig.config);
 
       const executionTime = Date.now() - startTime;
-      const executionRecord = {
+      const executionRecord: true
+      };
+
+      this.executionHistory.push(executionRecord = {
         operationId,
         operationName: operationConfig.name,
         startTime,
         executionTime,
         result,
-        success: true
-      };
-
-      this.executionHistory.push(executionRecord);
+        success);
 
       // 记录操作完成
       await this.eventBus.emit('operation-completed', executionRecord);
@@ -253,16 +253,16 @@ export class JSONOrchestrationEngine {
 
     } catch (error) {
       const executionTime = Date.now() - startTime;
-      const executionRecord = {
+      const executionRecord: false
+      };
+
+      this.executionHistory.push(executionRecord = {
         operationId,
         operationName: operationConfig.name,
         startTime,
         executionTime,
         error: error.message,
-        success: false
-      };
-
-      this.executionHistory.push(executionRecord);
+        success);
 
       // 记录操作失败
       await this.eventBus.emit('operation-failed', executionRecord);

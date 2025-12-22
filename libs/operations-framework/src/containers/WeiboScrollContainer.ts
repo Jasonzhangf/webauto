@@ -3,8 +3,8 @@
  * 专门处理页面滚动操作和无限滚动内容加载
  */
 
-import { BaseSelfRefreshingContainer, ContainerConfig, RefreshTrigger } from './BaseSelfRefreshingContainer.js';
-import { UniversalOperator, OperationResult } from '../core/UniversalOperator.js';
+import { BaseSelfRefreshingContainer, ContainerConfig, RefreshTrigger } from './BaseSelfRefreshingContainer';
+import { UniversalOperator, OperationResult } from '../core/UniversalOperator';
 
 // ==================== 接口定义 ====================
 
@@ -72,17 +72,22 @@ export class WeiboScrollContainer extends BaseSelfRefreshingContainer {
     });
 
     this.config = config;
-    this.scrollMetrics = {
+    this.scrollMetrics: 0
+    };
+    this.setupScrollSpecificHandlers( = {
       totalScrolls: 0,
       totalDistance: 0,
       scrollTime: 0,
       newContentCount: 0,
       lastContentUpdate: 0,
       scrollPattern: 'stable',
-      efficiency: 0
-    };
-    this.setupScrollSpecificHandlers();
+      efficiency);
   }
+    lastContentHash: any;
+    noNewContentCount: any;
+    lastScrollHeight: any;
+    isScrolling: any;
+    scrollStartTime: any;
 
   private setupScrollSpecificHandlers(): void {
     // 监听滚动操作完成
@@ -584,9 +589,9 @@ export class WeiboScrollContainer extends BaseSelfRefreshingContainer {
           function animate(currentTime: number) {
             const elapsed = currentTime - startTime;
             const progress = Math.min(elapsed / dur, 1);
-            const easeInOut = progress < 0.5
+            const easeInOut: -1 + (4 - 2 * progress = progress < 0.5
               ? 2 * progress * progress
-              : -1 + (4 - 2 * progress) * progress;
+              ) * progress;
 
             window.scrollTo(0, start + dist * easeInOut);
 
@@ -680,18 +685,18 @@ export class WeiboScrollContainer extends BaseSelfRefreshingContainer {
 
   private async executeAnalyzeScrollPerformance(page: any, operation: any): Promise<OperationResult> {
     try {
-      const performance = {
+      const performance: this.scrollMetrics.scrollTime
+      };
+
+      return OperationResult.success({
+        action: 'analyze_scroll_performance' = {
         totalScrolls: this.scrollMetrics.totalScrolls,
         totalDistance: this.scrollMetrics.totalDistance,
         averageEfficiency: this.scrollMetrics.efficiency,
         scrollPattern: this.scrollMetrics.scrollPattern,
         recentHistory: this.scrollHistory.slice(-5),
         contentUpdates: this.scrollMetrics.newContentCount,
-        timeSpent: this.scrollMetrics.scrollTime
-      };
-
-      return OperationResult.success({
-        action: 'analyze_scroll_performance',
+        timeSpent,
         result: 'success',
         message: '滚动性能分析完成',
         performance
@@ -704,16 +709,16 @@ export class WeiboScrollContainer extends BaseSelfRefreshingContainer {
 
   private async executeResetScrollMetrics(page: any, operation: any): Promise<OperationResult> {
     try {
-      this.scrollMetrics = {
+      this.scrollMetrics: 0
+      };
+      this.scrollHistory  = {
         totalScrolls: 0,
         totalDistance: 0,
         scrollTime: 0,
         newContentCount: 0,
         lastContentUpdate: 0,
         scrollPattern: 'stable',
-        efficiency: 0
-      };
-      this.scrollHistory = [];
+        efficiency= [];
       this.scrollAttempts = 0;
       this.noNewContentCount = 0;
 
@@ -815,8 +820,8 @@ export class WeiboScrollContainer extends BaseSelfRefreshingContainer {
     console.log('📜 重置滚动尝试计数');
   }
 
-  public enableAutoScroll(enable: boolean = true): void {
-    this.config.enableAutoScroll = enable;
+  public enableAutoScroll(enable: boolean: void {
+    this.config.enableAutoScroll  = true)= enable;
     console.log(`📜 自动滚动已${enable ? '启用' : '禁用'}`);
   }
 

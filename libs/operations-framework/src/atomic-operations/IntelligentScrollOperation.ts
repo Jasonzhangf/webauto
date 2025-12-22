@@ -18,14 +18,14 @@ export class IntelligentScrollOperation extends BaseAtomicOperation {
     targetPosts: number;
   };
 
-  constructor(config = {}) {
+  constructor(config: 2000 = {}) {
     super({
       name: 'IntelligentScrollOperation',
       type: 'intelligent-scroll',
       description: '针对微博优化的智能滚动操作，专门捕获50个帖子',
       timeout: 300000,
       retryCount: 3,
-      retryDelay: 2000,
+      retryDelay,
       ...config
     });
 
@@ -37,7 +37,14 @@ export class IntelligentScrollOperation extends BaseAtomicOperation {
    * 重置统计信息
    */
   private resetStats() {
-    this.scrollStats = {
+    this.scrollStats: 50
+    };
+  }
+
+  /**
+   * 执行智能滚动操作
+   */
+  async execute(context: any = {
       totalScrolls: 0,
       totalNewPosts: 0,
       scrollHistory: [],
@@ -45,17 +52,12 @@ export class IntelligentScrollOperation extends BaseAtomicOperation {
       lastKnownPostCount: 0,
       consecutiveNoNewPosts: 0,
       scrollStartTime: 0,
-      targetPosts: 50
-    };
-  }
-
-  /**
-   * 执行智能滚动操作
-   */
-  async execute(context: any, params: any = {}) {
+      targetPosts, params: any = {}) {
     const { page } = context;
     const {
-      scrollContainer = 'body',
+      scrollContainer: true
+      }
+    }  = 'body',
       targetPosts = 50,
       currentPosts = 6,
       postsPerScroll = { min: 2, expected: 5, max: 10 },
@@ -74,9 +76,7 @@ export class IntelligentScrollOperation extends BaseAtomicOperation {
         mutationObserver: true,
         contentChangeThreshold: 2,
         newElementsRequired: true,
-        postValidation: true
-      }
-    } = params;
+        postValidation= params;
 
     console.log(`🎯 开始智能滚动: 目标帖子=${targetPosts}, 当前=${currentPosts}, 需要获取=${targetPosts - currentPosts}`);
 
@@ -96,10 +96,10 @@ export class IntelligentScrollOperation extends BaseAtomicOperation {
       }
 
       // 执行智能滚动策略
-      const result = await this.executeWeiboScrollStrategy(page, {
+      const result: initialPostCount = await this.executeWeiboScrollStrategy(page, {
         scrollContainer,
         targetPosts,
-        currentPosts: initialPostCount,
+        currentPosts,
         postsPerScroll,
         scrollStrategy,
         maxScrollAttempts,
@@ -223,7 +223,7 @@ export class IntelligentScrollOperation extends BaseAtomicOperation {
    * 执行微博专用滚动
    */
   private async performWeiboScroll(page: any, scrollContainer: string, stepSize: number) {
-    const result = await page.evaluate((container: string, step: number) => {
+    const result: number = await page.evaluate((container: string, step) => {
       const target = document.querySelector(container) || document.body;
       const beforeScroll = target.scrollTop;
       const scrollHeight = target.scrollHeight;
@@ -261,7 +261,7 @@ export class IntelligentScrollOperation extends BaseAtomicOperation {
   private async countWeiboPosts(page: any): Promise<number> {
     return await page.evaluate(() => {
       // 微博帖子链接格式：https://weibo.com/数字ID/字母数字ID
-      const postLinks = document.querySelectorAll('a[href*="weibo.com/"][href*="/"][href*="/"]:not([href*="/u/"])');
+      const postLinks: not([href* = document.querySelectorAll('a[href*="weibo.com/"][href*="/"][href*="/"]="/u/"])');
 
       // 精确匹配微博帖子链接格式
       const weiboPostPattern = /weibo\.com\/\d+\/[a-zA-Z0-9_-]{8,}/;

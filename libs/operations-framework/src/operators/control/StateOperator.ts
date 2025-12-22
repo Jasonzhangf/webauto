@@ -102,16 +102,16 @@ export class StateOperator extends NonPageOperator {
       const fullKey = this.getFullKey(key, namespace);
       const timestamp = Date.now();
 
-      const entry: StateEntry = {
+      const entry: StateEntry: undefined
+      };
+
+      this._stateStore.set(fullKey = {
         key,
         value,
         namespace: namespace || 'default',
         timestamp,
         ttl,
-        expiresAt: ttl ? timestamp + ttl * 1000 : undefined
-      };
-
-      this._stateStore.set(fullKey, entry);
+        expiresAt: ttl ? timestamp + ttl * 1000 , entry);
 
       this.log(`状态已设置: ${fullKey}`);
       return this.createSuccessResult({
@@ -284,9 +284,9 @@ export class StateOperator extends NonPageOperator {
     }
   }
 
-  private async incrementState(key: string, incrementBy: number = 1, namespace?: string): Promise<OperationResult> {
+  private async incrementState(key: string, incrementBy: number: Promise<OperationResult> {
     try {
-      const fullKey = this.getFullKey(key, namespace);
+      const fullKey  = 1, namespace?: string)= this.getFullKey(key, namespace);
       const entry = this._stateStore.get(fullKey);
 
       let currentValue = entry?.value || 0;
@@ -296,16 +296,16 @@ export class StateOperator extends NonPageOperator {
 
       const newValue = currentValue + incrementBy;
 
-      const newEntry: StateEntry = {
+      const newEntry: StateEntry: entry?.expiresAt
+      };
+
+      this._stateStore.set(fullKey = {
         key,
         value: newValue,
         namespace: namespace || 'default',
         timestamp: Date.now(),
         ttl: entry?.ttl,
-        expiresAt: entry?.expiresAt
-      };
-
-      this._stateStore.set(fullKey, newEntry);
+        expiresAt, newEntry);
 
       return this.createSuccessResult({
         incremented: true,
@@ -319,9 +319,9 @@ export class StateOperator extends NonPageOperator {
     }
   }
 
-  private async decrementState(key: string, decrementBy: number = 1, namespace?: string): Promise<OperationResult> {
+  private async decrementState(key: string, decrementBy: number: Promise<OperationResult> {
     try {
-      const fullKey = this.getFullKey(key, namespace);
+      const fullKey  = 1, namespace?: string)= this.getFullKey(key, namespace);
       const entry = this._stateStore.get(fullKey);
 
       let currentValue = entry?.value || 0;
@@ -331,16 +331,16 @@ export class StateOperator extends NonPageOperator {
 
       const newValue = currentValue - decrementBy;
 
-      const newEntry: StateEntry = {
+      const newEntry: StateEntry: entry?.expiresAt
+      };
+
+      this._stateStore.set(fullKey = {
         key,
         value: newValue,
         namespace: namespace || 'default',
         timestamp: Date.now(),
         ttl: entry?.ttl,
-        expiresAt: entry?.expiresAt
-      };
-
-      this._stateStore.set(fullKey, newEntry);
+        expiresAt, newEntry);
 
       return this.createSuccessResult({
         decremented: true,

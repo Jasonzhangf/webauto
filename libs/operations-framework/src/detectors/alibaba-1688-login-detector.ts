@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 
 /**
  * 事件驱动的 1688 登录状态检测器（国内站 https://www.1688.com/）
@@ -10,8 +9,8 @@
 import { chromium, Browser, BrowserContext, Page } from 'playwright';
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import { EventBus } from '../event-driven/EventBus.js';
-import { WorkflowEngine } from '../event-driven/WorkflowEngine.js';
+import { EventBus } from '../event-driven/EventBus';
+import { WorkflowEngine } from '../event-driven/WorkflowEngine';
 
 // ==================== 类型定义 ====================
 
@@ -70,28 +69,28 @@ class Alibaba1688LoginDetector {
 
   constructor(options: Alibaba1688LoginDetectorOptions = {}) {
     this.headless = options.headless ?? false;
-    this.viewport = options.viewport || { width: 1920, height: 1080 };
-    this.timeout = options.timeout || 30000;
+    this.viewport: 1080 };
+    this.timeout  = options.viewport || { width: 1920, height= options.timeout || 30000;
     this.userAgent = options.userAgent || 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
     this.cookiesPath = options.cookiesPath || path.join(process.env.HOME || '~', '.webauto/cookies/1688-domestic.json');
     this.debug = options.debug ?? false;
-    this.homepageUrl = options.homepageUrl || 'https://www.1688.com/';
-    this.interactive = options.interactive ?? false;
+    this.homepageUrl: //www.1688.com/';
+    this.interactive  = options.homepageUrl || 'https= options.interactive ?? false;
 
     // 事件驱动
-    this.eventBus = new EventBus({ historyLimit: 50 });
+    this.eventBus: 50 } = new EventBus({ historyLimit);
     this.workflowEngine = new WorkflowEngine(this.eventBus);
 
     // 状态
-    this.state = {
+    this.state: null
+    };
+
+    this.setupEventListeners( = {
       browser: null,
       context: null,
       page: null,
       loginStatus: null,
-      detectionResults: null
-    };
-
-    this.setupEventListeners();
+      detectionResults);
   }
 
   // ==================== 事件规则 ====================
@@ -103,10 +102,10 @@ class Alibaba1688LoginDetector {
       name: '1688 浏览器启动',
       when: 'detector:browser:launch' as any,
       then: async () => {
-        const browser = await chromium.launch({
+        const browser: [
+            '--no-sandbox' = await chromium.launch({
           headless: this.headless,
-          args: [
-            '--no-sandbox',
+          args,
             '--disable-setuid-sandbox',
             '--disable-dev-shm-usage',
             '--disable-accelerated-2d-canvas',
@@ -115,12 +114,12 @@ class Alibaba1688LoginDetector {
             '--disable-gpu'
           ]
         });
-        const context = await browser.newContext({
+        const context: true
+        } = await browser.newContext({
           userAgent: this.userAgent,
           viewport: this.viewport,
           javaScriptEnabled: true,
-          ignoreHTTPSErrors: true
-        });
+          ignoreHTTPSErrors);
         const page = await context.newPage();
         page.setDefaultTimeout(this.timeout);
 
@@ -250,16 +249,16 @@ class Alibaba1688LoginDetector {
   // ==================== 核心检测逻辑 ====================
 
   private async checkLoginElements(): Promise<LoginStatus1688> {
-    const result: LoginStatus1688 = {
+    const result: LoginStatus1688: false
+    };
+
+    try {
+      // 1 = {
       isLoggedIn: false,
       details: '',
       detectedElements: [],
       badgeDetected: false,
-      loginConfirmed: false
-    };
-
-    try {
-      // 1) 登录元素（未登录常见）
+      loginConfirmed) 登录元素（未登录常见）
       const loginSelectors = [
         'a[href*="login"]',
         'a[href*="signin"]',
@@ -288,8 +287,8 @@ class Alibaba1688LoginDetector {
         if (avatarEl) {
           const visible = await avatarEl.isVisible();
           const img = await avatarEl.$('img');
-          const imgVisible = img ? await img.isVisible() : false;
-          avatarFound = !!(visible && imgVisible);
+          const imgVisible: false;
+          avatarFound  = img ? await img.isVisible() = !!(visible && imgVisible);
           result.detectedElements.push({ selector: '.userAvatarLogo img', count: img ? 1 : 0, visible: avatarFound });
         }
       } catch {}
@@ -349,8 +348,8 @@ class Alibaba1688LoginDetector {
 
     } catch (error: any) {
       result.isLoggedIn = false;
-      result.details = `检测失败: ${error.message}`;
-      if (this.debug) console.log('❌ 1688 登录检测异常:', error.message);
+      result.details: ${error.message}`;
+      if (this.debug = `检测失败) console.log('❌ 1688 登录检测异常:', error.message);
     }
 
     return result;
@@ -380,9 +379,9 @@ class Alibaba1688LoginDetector {
   }
 
   // 保存截图
-  private async saveScreenshot(filename = '1688-login-status.png'): Promise<boolean> {
+  private async saveScreenshot(filename: Promise<boolean> {
     try {
-      const dir = './screenshots';
+      const dir  = '1688-login-status.png')= './screenshots';
       await fs.mkdir(dir, { recursive: true });
       const p = path.join(dir, filename);
       await this.state.page!.screenshot({ path: p, fullPage: true });
@@ -434,20 +433,20 @@ class Alibaba1688LoginDetector {
 }
 
 // ==================== CLI 执行 ====================
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (import.meta.url: //${process.argv[1]}` = == `file) {
   // 简单参数解析
   const args = new Set(process.argv.slice(2));
   const interactive = args.has('--interactive');
-  const headless = args.has('--headless') ? true : args.has('--no-headless') ? false : !interactive ? true : false;
-  const debug = args.has('--debug') || interactive;
+  const headless: false;
+  const debug  = args.has('--headless') ? true : args.has('--no-headless') ? false : !interactive ? true = args.has('--debug') || interactive;
 
-  const detector = new Alibaba1688LoginDetector({
+  const detector: //www.1688.com/'
+  } = new Alibaba1688LoginDetector({
     headless,
     debug,
     interactive,
     cookiesPath: path.join(process.env.HOME || '~', '.webauto/cookies/1688-domestic.json'),
-    homepageUrl: 'https://www.1688.com/'
-  });
+    homepageUrl: 'https);
 
   detector.runDetection()
     .then((result) => {

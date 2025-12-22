@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>WebAuto Float</title>
+  <style>
+    body{font-family:monospace;margin:0;padding:10px;font-size:12px;background:#0f0f0f;color:#d1f7d1;display:flex;flex-direction:column;height:100vh;gap:8px;}
+    .panel{border:1px solid #2a2a2a;border-radius:6px;padding:8px;background:#121212;}
+    .panel h3{margin:0 0 6px 0;font-size:12px;color:#9aff9a;}
+    #status{font-weight:bold;}
+    #health{margin-top:4px;color:#a0ffa0;}
+    #events{max-height:80px;overflow:auto;border-top:1px dashed #333;padding-top:6px;}
+    #containerTree,#domTree{max-height:100px;overflow:auto;white-space:pre-wrap;}
+    #graphPanel{height:280px;border:1px solid #333;border-radius:4px;background:#1a1a1a;}
+    .log{margin:0 0 2px 0;}
+    .ok{color:#72ff72;}
+    .bad{color:#ff7a7a;}
+    .btn{background:#1d1d1d;color:#d1f7d1;border:1px solid #2a2a2a;border-radius:4px;padding:4px 6px;cursor:pointer;margin-right:6px;}
+    .btn:hover{background:#2a2a2a;}
+    .row{display:flex;align-items:center;gap:8px;}
+    .label{color:#9aff9a;}
+    .title-bar{background:#1a1a1a;padding:4px 8px;border-radius:4px;margin-bottom:8px;cursor:grab;user-select:none;}
+    .title-bar:active{cursor:grabbing;}
+  </style>
+</head>
+<body>
+  <div class="title-bar">🚀 WebAuto 浮窗 - 拖拽移动</div>
+  
+  <div class="panel">
+    <h3>状态栏</h3>
+    <div class="row">
+      <div id="status" class="bad">检测中</div>
+      <div id="mode" class="label">mode: -</div>
+    </div>
+    <div id="health">健康检查中...</div>
+  </div>
+  
+  <div class="panel">
+    <h3>容器树</h3>
+    <div id="containerTree">等待容器树...</div>
+  </div>
+  
+  <div class="panel">
+    <h3>DOM 树</h3>
+    <div id="domTree">等待 DOM 树...</div>
+  </div>
+  
+  <div class="panel">
+    <h3>可视化图</h3>
+    <div id="graphPanel"></div>
+  </div>
+  
+  <div class="panel">
+    <h3>操作面板</h3>
+    <button id="btnHealth" class="btn">检查健康</button>
+    <button id="btnClear" class="btn">清空日志</button>
+  </div>
+  
+  <div class="panel">
+    <h3>事件日志</h3>
+    <div id="events"></div>
+  </div>
+  
+  <script type="module" src="./index.mjs"></script>
+</body>
+</html>

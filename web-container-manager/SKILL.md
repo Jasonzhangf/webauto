@@ -1,6 +1,6 @@
 ---
 name: web-container-manager
-description: This skill should be used when users want to manage and map web page DOM elements to container hierarchies interactively. It provides tools for browser automation, DOM element selection, container creation/modification/deletion, and maintaining mapping relationships between page elements and local container structures.
+description: This skill should be used when users want to manage and map web page DOM elements to container hierarchies interactively. It provides tools for browser automation, DOM element selection, container creation/modification/deletion, and maintaining mapping relationships between page elements and a local container library stored under container-library/.
 license: Complete terms in LICENSE.txt
 ---
 
@@ -12,7 +12,7 @@ This skill enables interactive management of web page DOM elements and their map
 
 Use this skill when:
 - Opening a web page and analyzing its DOM structure
-- Creating or modifying container mappings between DOM elements and local storage
+- Creating or modifying container mappings between DOM elements and the local container library (`container-library/`)
 - Interactively selecting page elements with mouse hover and click
 - Managing container hierarchies (create, modify, delete operations)
 - Comparing selectors against existing container mappings
@@ -98,18 +98,17 @@ Use this skill when:
 
 ### Container Storage Structure
 
-Use `references/container_schema.md` for container data structure specifications:
-```yaml
-root_containers:
-  - container_id: unique_identifier
-    selector: "css_selector"
-    page_url: "source_page_url"
-    operations: [operation_list]
-    children: [child_container_ids]
-    metadata:
-      created_at: timestamp
-      last_updated: timestamp
-```
+Use `references/container_schema.md` for container data structure specifications. At runtime, data is stored in a directory + index based local container library:
+
+- Global index: `container-library/index.json`
+  - Maps logical site keys (e.g. `cbu`, `weibo`) to per-site container files.
+- Per-site container file: `container-library/<site>/containers.json`
+  - Holds `containers` and `root_containers` with the schema defined in `container_schema.md`.
+
+`ContainerManager` automatically:
+- Resolves site keys from `page_url` via simple substring match on the `website` field in `index.json` (e.g. `1688.com`, `weibo.com`).
+- Falls back to a `default` site key when no match is found and creates `container-library/default/containers.json` as needed.
+- Keeps its public API (`create_container`, `update_container`, `delete_container`, `list_containers`, etc.) stable so callers do not need to know about the storage layout.
 
 ### Browser Integration
 

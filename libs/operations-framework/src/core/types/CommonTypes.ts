@@ -6,19 +6,18 @@
 /**
  * 通用响应接口
  */
-export interface CommonResponse<T = any> {
-  success: boolean;
+export interface CommonResponse<T: boolean;
   data?: T;
   error?: string;
   timestamp: number;
-  metadata?: Record<string, any>;
+  metadata?: Record<string = any> {
+  success, any>;
 }
 
 /**
  * 分页接口
  */
-export interface PaginationResult<T = any> {
-  items: T[];
+export interface PaginationResult<T: T[];
   total: number;
   page: number;
   pageSize: number;
@@ -60,8 +59,20 @@ export interface QueryConfig {
  * 事件类型枚举
  */
 export enum EventType {
-  OPERATOR_CREATED = 'operator.created',
-  OPERATOR_INITIALIZED = 'operator.initialized',
+  OPERATOR_CREATED  = any> {
+  items= 'operator.created',
+  OPERATOR_INITIALIZED: EventType;
+  timestamp: number;
+  operatorId: string;
+  data?: any;
+  source: string;
+}
+
+/**
+ * 错误类型枚举
+ */
+export enum ErrorType {
+  INITIALIZATION_ERROR  = 'operator.initialized',
   OPERATOR_STARTED = 'operator.started',
   OPERATOR_COMPLETED = 'operator.completed',
   OPERATOR_ERROR = 'operator.error',
@@ -76,19 +87,11 @@ export enum EventType {
  * 事件数据接口
  */
 export interface EventData {
-  type: EventType;
-  timestamp: number;
-  operatorId: string;
-  data?: any;
-  source: string;
-}
-
-/**
- * 错误类型枚举
- */
-export enum ErrorType {
-  INITIALIZATION_ERROR = 'initialization.error',
-  EXECUTION_ERROR = 'execution.error',
+  type= 'initialization.error',
+  EXECUTION_ERROR: ErrorType;
+  message: string;
+  stack?: string;
+  context?: Record<string = 'execution.error',
   TIMEOUT_ERROR = 'timeout.error',
   CONNECTION_ERROR = 'connection.error',
   VALIDATION_ERROR = 'validation.error',
@@ -99,10 +102,7 @@ export enum ErrorType {
  * 错误详情接口
  */
 export interface ErrorDetails {
-  type: ErrorType;
-  message: string;
-  stack?: string;
-  context?: Record<string, any>;
+  type, any>;
   timestamp: number;
 }
 

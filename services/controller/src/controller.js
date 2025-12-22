@@ -23,7 +23,7 @@ export class UiController {
   async handleAction(action, payload = {}) {
     switch (action) {
       case 'browser:status':
-        return this.runCliCommand('browser-control', ['status']);
+        return this.fetchBrowserStatus();
       case 'session:list':
         return this.runCliCommand('session-manager', ['list']);
       case 'session:create':
@@ -64,8 +64,48 @@ export class UiController {
         return this.handleDomBranch2(payload);
       case 'dom:pick:2':
         return this.handleDomPick2(payload);
+      case 'browser:inspect_tree':
+        return this.fetchInspectTree(payload);
       default:
         return { success: false, error: `Unknown action: ${action}` };
+    }
+  }
+
+  async fetchBrowserStatus() {
+    try {
+      const url = `${this.getBrowserHttpBase()}/health`;
+      const res = await fetch(url);
+      if (!res.ok) return { success: false, error: `HTTP ${res.status}` };
+      return { success: true, data: await res.json() };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  }
+
+  async fetchInspectTree(payload) {
+    try {
+      const wsUrl = this.getBrowserWsUrl();
+      const command = {
+        type: 'command',
+        session_id: payload?.profile || 'default',
+        data: {
+          command_type: 'container_operation',
+          action: 'inspect_tree',
+          page_context: { url: payload?.url || 'https://example.com' },
+          parameters: {
+            ...(payload?.rootSelector ? { root_selector: payload.rootSelector } : {}),
+            ...(typeof payload?.maxDepth === 'number' ? { max_depth: payload.maxDepth } : {}),
+            ...(typeof payload?.maxChildren === 'number' ? { max_children: payload.maxChildren } : {}),
+          },
+        },
+      };
+      const wsResult = await this.sendWsCommand(wsUrl, command, 15000);
+      if (wsResult?.data?.success !== true) {
+        return { success: false, error: wsResult?.data?.error || 'inspect_tree failed' };
+      }
+      return { success: true, data: wsResult.data.data };
+    } catch (err) {
+      return { success: false, error: err.message };
     }
   }
 

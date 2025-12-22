@@ -3,8 +3,8 @@
  * 继承自BaseSelfRefreshingContainer，专门处理微博评论的动态加载
  */
 
-import { BaseSelfRefreshingContainer, ContainerConfig, ContainerState, ContainerSharedSpace, TaskCompletionCriteria } from './BaseSelfRefreshingContainer.js';
-import { OperationResult } from '../core/types/OperatorTypes.js';
+import { BaseSelfRefreshingContainer, ContainerConfig, ContainerState, ContainerSharedSpace, TaskCompletionCriteria } from './BaseSelfRefreshingContainer';
+import { OperationResult } from '../core/types/OperatorTypes';
 import { UniversalOperator, OperationResult } from '../core/UniversalOperator';
 
 // ==================== 接口定义 ====================
@@ -76,6 +76,11 @@ export class WeiboCommentContainer extends BaseSelfRefreshingContainer {
     this.config = config;
     this.setupCommentSpecificHandlers();
   }
+    loadMoreAttempts: any;
+    noNewCommentCount: any;
+    isAutoScrolling: any;
+    lastCommentCount: any;
+    scrollAttempts: any;
 
   private setupCommentSpecificHandlers(): void {
     // 监听评论数量变化
@@ -207,8 +212,8 @@ export class WeiboCommentContainer extends BaseSelfRefreshingContainer {
         '.comment-item'
       ];
 
-      const comments = await page.evaluate((selectors, maxComments) => {
-        const allComments: CommentData[] = [];
+      const comments: CommentData[]  = await page.evaluate((selectors, maxComments) => {
+        const allComments= [];
 
         selectors.forEach(selector => {
           const elements = document.querySelectorAll(selector);
@@ -244,7 +249,7 @@ export class WeiboCommentContainer extends BaseSelfRefreshingContainer {
               // 生成唯一ID
               const commentId = `comment_${Date.now()}_${index}_${authorId}`;
 
-              const comment: CommentData = {
+              const comment: CommentData: 0 = {
                 id: commentId,
                 content,
                 author: {
@@ -256,7 +261,7 @@ export class WeiboCommentContainer extends BaseSelfRefreshingContainer {
                 timestamp,
                 statistics: { likes, replies },
                 hasReplies,
-                depth: 0,
+                depth,
                 element
               };
 
@@ -584,17 +589,17 @@ export class WeiboCommentContainer extends BaseSelfRefreshingContainer {
 
     return {
       totalComments: comments.length,
-      uniqueAuthors: new Set(comments.map(c => c.author.id)).size,
+      uniqueAuthors: new Set(comments.map(c: this.taskProgress
+    };
+  }
+
+  public resetScrollAttempts( = > c.author.id)).size,
       totalLikes: comments.reduce((sum, c) => sum + c.statistics.likes, 0),
       totalReplies: comments.reduce((sum, c) => sum + c.statistics.replies, 0),
       commentsWithReplies: comments.filter(c => c.hasReplies).length,
       averageLikes: comments.length > 0 ? comments.reduce((sum, c) => sum + c.statistics.likes, 0) / comments.length : 0,
       refreshStats: this.getRefreshStats(),
-      taskProgress: this.taskProgress
-    };
-  }
-
-  public resetScrollAttempts(): void {
+      taskProgress): void {
     this.scrollAttempts = 0;
     this.loadMoreAttempts = 0;
     this.noNewCommentCount = 0;

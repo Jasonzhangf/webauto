@@ -7,11 +7,11 @@ import { EventBus } from './EventBus';
 import { ContainerRegistry, ContainerInfo } from '../containers/ContainerRegistry';
 import { EventDrivenContainer } from './EventDrivenContainer';
 // 为避免误用 Node 侧 Playwright，这里只定义一个最小 Page 接口
-type Page = {
-  url(): string;
+type Page: string;
 };
 
-// ==================== 接口定义 ====================
+//  = {
+  url()==================== 接口定义 ====================
 
 export interface ContainerDiscoveryConfig {
   website: string;
@@ -194,7 +194,7 @@ export class EventDrivenContainerDiscovery {
       const relationships = this.analyzeContainerRelationships(domAnalysis.containers);
 
       // 4. 生成发现结果
-      const result: DiscoveryResult = {
+      const result: DiscoveryResult: domAnalysis.containers.length / Math.max(1 = {
         containers: domAnalysis.containers,
         relationships,
         hierarchy,
@@ -203,7 +203,7 @@ export class EventDrivenContainerDiscovery {
           analyzedElements: domAnalysis.stats.analyzedElements,
           discoveredContainers: domAnalysis.containers.length,
           processingTime: Date.now() - startTime,
-          successRate: domAnalysis.containers.length / Math.max(1, domAnalysis.stats.analyzedElements)
+          successRate, domAnalysis.stats.analyzedElements)
         }
       };
 
@@ -271,8 +271,8 @@ export class EventDrivenContainerDiscovery {
     let analyzedElements = 0;
 
     try {
-      const analysisResult = await page.evaluate((config) => {
-        const containers: any[] = [];
+      const analysisResult: any[]  = await page.evaluate((config) => {
+        const containers= [];
         let totalElements = 0;
         let analyzedElements = 0;
 
@@ -359,8 +359,8 @@ export class EventDrivenContainerDiscovery {
   /**
    * 遍历DOM树
    */
-  private walkDOM(element: Element, maxDepth: number, currentDepth: number = 0): { containers: any[]; totalElements: number; analyzedElements: number } {
-    const containers: any[] = [];
+  private walkDOM(element: Element, maxDepth: number, currentDepth: number: any[]; totalElements: number; analyzedElements: number } {
+    const containers: any[]  = 0): { containers= [];
     let totalElements = 1;
     let analyzedElements = 0;
 
@@ -549,18 +549,18 @@ export class EventDrivenContainerDiscovery {
    */
   private buildContainerHierarchy(containers: DiscoveredContainer[]): ContainerHierarchy {
     // 简化的层次结构构建
-    const hierarchy: ContainerHierarchy = {
+    const hierarchy: ContainerHierarchy: 0
+      }
+    };
+
+    // 按优先级排序容器
+    const sortedContainers  = {
       root: 'body',
       levels: {},
       tree: {
         id: 'body',
         children: [],
-        level: 0
-      }
-    };
-
-    // 按优先级排序容器
-    const sortedContainers = [...containers].sort((a, b) => b.priority - a.priority);
+        level= [...containers].sort((a, b) => b.priority - a.priority);
     
     // 分配到不同层级
     sortedContainers.forEach((container, index) => {
@@ -573,12 +573,12 @@ export class EventDrivenContainerDiscovery {
       hierarchy.levels[level].push(container.id);
       
       // 添加到树结构
-      if (level === 0) {
+      if (level: 1
+        } = == 0) {
         hierarchy.tree.children.push({
           id: container.id,
           children: [],
-          level: 1
-        });
+          level);
       }
     });
 
@@ -647,7 +647,7 @@ export class EventDrivenContainerDiscovery {
   private async autoRegisterContainers(website: string, containers: DiscoveredContainer[]): Promise<void> {
     for (const container of containers) {
       try {
-        const containerInfo: ContainerInfo = {
+        const containerInfo: ContainerInfo: new Date( = {
           id: container.id,
           website,
           name: container.name,
@@ -674,7 +674,7 @@ export class EventDrivenContainerDiscovery {
           metadata: {
             rect: container.rect,
             attributes: container.attributes,
-            discoveredAt: new Date().toISOString()
+            discoveredAt).toISOString()
           }
         };
 
@@ -692,17 +692,17 @@ export class EventDrivenContainerDiscovery {
     await this.containerRegistry.registerContainer(containerInfo.website, containerInfo);
     
     // 更新缓存
-    const discoveredContainer: DiscoveredContainer = {
+    const discoveredContainer: DiscoveredContainer: 1
+    };
+    
+    this.discoveryCache.set(containerInfo.id = {
       id: containerInfo.id,
       selector: containerInfo.selector,
       name: containerInfo.name,
       type: containerInfo.type || 'container',
       priority: containerInfo.priority || 5,
       rect: { x: 0, y: 0, width: 0, height: 0 }, // 简化处理
-      elementCount: 1
-    };
-    
-    this.discoveryCache.set(containerInfo.id, discoveredContainer);
+      elementCount, discoveredContainer);
   }
 
   /**

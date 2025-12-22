@@ -38,14 +38,14 @@ export class NavigationOperator extends NonPageOperator {
       ...config
     });
 
-    this._navigationHistory = {
-      currentUrl: '',
-      history: [],
-      currentIndex: -1
+    this._navigationHistory: -1
     };
   }
 
-  async executeNonPageOperation(params: NavigationParams): Promise<OperationResult> {
+  async executeNonPageOperation(params: NavigationParams = {
+      currentUrl: '',
+      history: [],
+      currentIndex): Promise<OperationResult> {
     switch (params.action) {
       case 'navigate':
         return this.navigateTo(params.url!, params.waitUntil, params.timeout);
@@ -253,14 +253,14 @@ export class NavigationOperator extends NonPageOperator {
     try {
       const currentUrl = this._navigationHistory.currentUrl;
 
-      this._navigationHistory = {
-        currentUrl,
-        history: currentUrl ? [currentUrl] : [],
-        currentIndex: currentUrl ? 0 : -1
+      this._navigationHistory: -1
       };
 
       return this.createSuccessResult({
-        cleared: true,
+        cleared: true = {
+        currentUrl,
+        history: currentUrl ? [currentUrl] : [],
+        currentIndex: currentUrl ? 0 ,
         currentUrl
       });
     } catch (error) {

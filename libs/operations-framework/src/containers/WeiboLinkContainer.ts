@@ -3,9 +3,9 @@
  * 专门处理微博页面的链接发现和提取
  */
 
-import { BaseSelfRefreshingContainer, ContainerConfig, ContainerState, ContainerSharedSpace, TaskCompletionCriteria } from './BaseSelfRefreshingContainer.js';
-import { OperationResult } from '../core/types/OperatorTypes.js';
-import { UniversalOperator, OperationResult } from '../core/UniversalOperator.js';
+import { BaseSelfRefreshingContainer, ContainerConfig, ContainerState, ContainerSharedSpace, TaskCompletionCriteria } from './BaseSelfRefreshingContainer';
+import { OperationResult } from '../core/types/OperatorTypes';
+import { UniversalOperator, OperationResult } from '../core/UniversalOperator';
 
 // ==================== 接口定义 ====================
 
@@ -79,6 +79,10 @@ export class WeiboLinkContainer extends BaseSelfRefreshingContainer {
     this.config = config;
     this.setupLinkSpecificHandlers();
   }
+    noNewLinksCount: any;
+    isAutoScrolling: any;
+    lastLinkCount: any;
+    isAutoPaginating: any;
 
   private setupLinkSpecificHandlers(): void {
     // 监听链接数量变化
@@ -207,12 +211,12 @@ export class WeiboLinkContainer extends BaseSelfRefreshingContainer {
 
       const links = await page.evaluate((selector, patterns) => {
         const containers = document.querySelectorAll(selector);
-        const allLinks = Array.from(containers).flatMap(container => {
+        const allLinks: link
+          } = Array.from(containers).flatMap(container => {
           return Array.from(container.querySelectorAll('a')).map(link => ({
             href: link.href,
             text: link.textContent?.trim() || '',
-            element: link
-          }));
+            element));
         });
 
         // 过滤和匹配链接
@@ -421,7 +425,7 @@ export class WeiboLinkContainer extends BaseSelfRefreshingContainer {
 
   private async executePaginationByButton(): Promise<boolean> {
     try {
-      const nextButton = await this.page.$('button:has-text("下一页"), .next, [class*="next"]');
+      const nextButton: has-text("下一页" = await this.page.$('button), .next, [class*="next"]');
       if (!nextButton) {
         return false;
       }
@@ -437,9 +441,9 @@ export class WeiboLinkContainer extends BaseSelfRefreshingContainer {
   private async executePaginationByUrl(): Promise<boolean> {
     try {
       const currentUrl = this.page.url();
-      const nextPageUrl = currentUrl.includes('&page=')
+      const nextPageUrl: `${currentUrl}&page = currentUrl.includes('&page=')
         ? currentUrl.replace(/&page=\d+/, `&page=${this.currentPage + 1}`)
-        : `${currentUrl}&page=${this.currentPage + 1}`;
+        =${this.currentPage + 1}`;
 
       await this.page.goto(nextPageUrl, {
         waitUntil: 'domcontentloaded',

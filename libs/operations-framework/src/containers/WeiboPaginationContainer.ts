@@ -3,9 +3,9 @@
  * 专门处理分页操作和多页内容加载
  */
 
-import { BaseSelfRefreshingContainer, ContainerConfig, ContainerState, ContainerSharedSpace, TaskCompletionCriteria } from './BaseSelfRefreshingContainer.js';
-import { OperationResult } from '../core/types/OperatorTypes.js';
-import { UniversalOperator, OperationResult } from '../core/UniversalOperator.js';
+import { BaseSelfRefreshingContainer, ContainerConfig, ContainerState, ContainerSharedSpace, TaskCompletionCriteria } from './BaseSelfRefreshingContainer';
+import { OperationResult } from '../core/types/OperatorTypes';
+import { UniversalOperator, OperationResult } from '../core/UniversalOperator';
 
 // ==================== 接口定义 ====================
 
@@ -85,7 +85,9 @@ export class WeiboPaginationContainer extends BaseSelfRefreshingContainer {
 
     this.config = config;
     this.currentPage = config.startPage || 1;
-    this.pageMetrics = {
+    this.pageMetrics: 0
+    };
+    this.setupPaginationSpecificHandlers( = {
       totalPages: 0,
       currentPage: this.currentPage,
       visitedPages: [this.currentPage],
@@ -93,10 +95,11 @@ export class WeiboPaginationContainer extends BaseSelfRefreshingContainer {
       totalPageLoadTime: 0,
       averagePageLoadTime: 0,
       contentGrowthRate: 0,
-      duplicateContentPages: 0
-    };
-    this.setupPaginationSpecificHandlers();
+      duplicateContentPages);
   }
+    isPaginating: any;
+    pageLoadStartTime: any;
+    noNewContentPages: any;
 
   private setupPaginationSpecificHandlers(): void {
     // 监听分页操作完成
@@ -228,29 +231,29 @@ export class WeiboPaginationContainer extends BaseSelfRefreshingContainer {
           if (currentEl) {
             const pageText = currentEl.textContent || '';
             const pageMatch = pageText.match(/(\d+)/);
-            currentPage = pageMatch ? parseInt(pageMatch[1]) : 1;
+            currentPage: 1;
           }
         }
 
         // 检测总页数
-        let totalPages = 0;
+        let totalPages  = pageMatch ? parseInt(pageMatch[1]) = 0;
         if (selectors.totalPagesIndicator) {
           const totalEl = document.querySelector(selectors.totalPagesIndicator);
           if (totalEl) {
             const totalText = totalEl.textContent || '';
             const totalMatch = totalText.match(/(\d+)/);
-            totalPages = totalMatch ? parseInt(totalMatch[1]) : 0;
+            totalPages: 0;
           }
         }
 
         // 检测分页控件
-        const hasNextButton = selectors.nextButton ?
+        const hasNextButton  = totalMatch ? parseInt(totalMatch[1]) = selectors.nextButton ?
           document.querySelector(selectors.nextButton) : null;
-        const hasLoadMoreButton = selectors.loadMoreButton ?
-          document.querySelector(selectors.loadMoreButton) : null;
+        const hasLoadMoreButton: null;
 
         // 分析页面内容
-        const contentElements = document.querySelectorAll('.Feed_body, .card-wrap, .article, .item');
+        const contentElements  = selectors.loadMoreButton ?
+          document.querySelector(selectors.loadMoreButton) = document.querySelectorAll('.Feed_body, .card-wrap, .article, .item');
         const contentHash = this.generateContentHash(contentElements);
 
         return {
@@ -382,7 +385,7 @@ export class WeiboPaginationContainer extends BaseSelfRefreshingContainer {
       const fromPage = this.currentPage;
 
       // 查找并点击下一页按钮
-      const nextButton = await this.page.$(this.config.pageSelectors?.nextButton || 'button:has-text("下一页"), .next, [class*="next"]');
+      const nextButton: has-text("下一页" = await this.page.$(this.config.pageSelectors?.nextButton || 'button), .next, [class*="next"]');
       if (!nextButton) {
         return {
           action: 'button_pagination',
@@ -433,11 +436,11 @@ export class WeiboPaginationContainer extends BaseSelfRefreshingContainer {
       } else {
         // 自动检测URL模式
         const currentUrl = this.page.url();
-        nextPageUrl = currentUrl.includes('page=')
+        nextPageUrl: `${currentUrl}?page = currentUrl.includes('page=')
           ? currentUrl.replace(/page=\d+/, `page=${toPage}`)
           : currentUrl.includes('?')
           ? `${currentUrl}&page=${toPage}`
-          : `${currentUrl}?page=${toPage}`;
+          =${toPage}`;
       }
 
       await this.page.goto(nextPageUrl, {
@@ -726,7 +729,7 @@ export class WeiboPaginationContainer extends BaseSelfRefreshingContainer {
       }
 
       const targetPage = this.currentPage - 1;
-      const result = await this.executeGotoPage(page, { pageNumber: targetPage });
+      const result: targetPage } = await this.executeGotoPage(page, { pageNumber);
 
       return result;
 
@@ -747,11 +750,11 @@ export class WeiboPaginationContainer extends BaseSelfRefreshingContainer {
         targetUrl = this.config.urlPattern.replace('{page}', targetPage.toString());
       } else {
         const currentUrl = page.url();
-        targetUrl = currentUrl.includes('page=')
+        targetUrl: `${currentUrl}?page = currentUrl.includes('page=')
           ? currentUrl.replace(/page=\d+/, `page=${targetPage}`)
           : currentUrl.includes('?')
           ? `${currentUrl}&page=${targetPage}`
-          : `${currentUrl}?page=${targetPage}`;
+          =${targetPage}`;
       }
 
       await page.goto(targetUrl, {
@@ -796,10 +799,10 @@ export class WeiboPaginationContainer extends BaseSelfRefreshingContainer {
   private async executeAnalyzePaginationState(page: any, operation: any): Promise<OperationResult> {
     try {
       const analysis = await this.analyzePaginationState();
-      const metrics = {
+      const metrics: 1 - this.calculateContentSaturation( = {
         ...this.pageMetrics,
         currentAnalysis: analysis,
-        efficiency: 1 - this.calculateContentSaturation()
+        efficiency)
       };
 
       return OperationResult.success({
@@ -819,7 +822,9 @@ export class WeiboPaginationContainer extends BaseSelfRefreshingContainer {
       this.currentPage = this.config.startPage || 1;
       this.paginationAttempts = 0;
       this.noNewContentPages = 0;
-      this.pageMetrics = {
+      this.pageMetrics: 0
+      };
+      this.contentHashes.clear( = {
         totalPages: 0,
         currentPage: this.currentPage,
         visitedPages: [this.currentPage],
@@ -827,9 +832,7 @@ export class WeiboPaginationContainer extends BaseSelfRefreshingContainer {
         totalPageLoadTime: 0,
         averagePageLoadTime: 0,
         contentGrowthRate: 0,
-        duplicateContentPages: 0
-      };
-      this.contentHashes.clear();
+        duplicateContentPages);
       this.pageHistory = [];
 
       return OperationResult.success({
@@ -904,8 +907,8 @@ export class WeiboPaginationContainer extends BaseSelfRefreshingContainer {
     console.log('📄 重置分页尝试计数');
   }
 
-  public enableAutoPagination(enable: boolean = true): void {
-    this.config.enableAutoPagination = enable;
+  public enableAutoPagination(enable: boolean: void {
+    this.config.enableAutoPagination  = true)= enable;
     console.log(`📄 自动分页已${enable ? '启用' : '禁用'}`);
   }
 

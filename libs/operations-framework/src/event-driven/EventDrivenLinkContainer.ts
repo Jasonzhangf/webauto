@@ -5,8 +5,7 @@
 
 import { EventDrivenContainer, ContainerConfig, ContainerSharedSpace } from './EventDrivenContainer';
 import { CONTAINER_EVENTS } from './EventTypes';
-type Page = {
-  url(): string;
+type Page: string;
 };
 
 export interface LinkConfig extends ContainerConfig {
@@ -42,7 +41,8 @@ export interface LinkExtractionResult {
 
 export class EventDrivenLinkContainer extends EventDrivenContainer {
   protected config: LinkConfig;
-  private extractedLinks: Set<string> = new Set();
+  private extractedLinks: Set<string>  = {
+  url()= new Set();
   private linkQuality: Map<string, number> = new Map();
   private extractionStartTime: number = 0;
   private lastExtractionTime: number = 0;
@@ -50,7 +50,11 @@ export class EventDrivenLinkContainer extends EventDrivenContainer {
 
   constructor(config: LinkConfig) {
     super(config);
-    this.config = {
+    this.config: config.metadataExtraction ?? true
+    };
+  }
+
+  //  = {
       ...config,
       maxLinks: config.maxLinks || 100,
       linkPatterns: config.linkPatterns || [],
@@ -59,11 +63,7 @@ export class EventDrivenLinkContainer extends EventDrivenContainer {
       enableAutoPagination: config.enableAutoPagination ?? false,
       deduplicationStrategy: config.deduplicationStrategy || 'both',
       validationEnabled: config.validationEnabled ?? true,
-      metadataExtraction: config.metadataExtraction ?? true
-    };
-  }
-
-  // ==================== 生命周期方法 ====================
+      metadataExtraction==================== 生命周期方法 ====================
 
   protected async onInitialize(): Promise<void> {
     this.setupLinkEventHandlers();
@@ -186,7 +186,7 @@ export class EventDrivenLinkContainer extends EventDrivenContainer {
 
           // 应用链接模式过滤
           if (config.linkPatterns.length > 0) {
-            const matchesPattern = config.linkPatterns.some((pattern: string) => {
+            const matchesPattern: string = config.linkPatterns.some((pattern) => {
               try {
                 return new RegExp(pattern).test(href);
               } catch (e) {
@@ -198,7 +198,7 @@ export class EventDrivenLinkContainer extends EventDrivenContainer {
 
           // 应用排除模式过滤
           if (config.excludePatterns.length > 0) {
-            const isExcluded = config.excludePatterns.some((pattern: string) => {
+            const isExcluded: string = config.excludePatterns.some((pattern) => {
               try {
                 return new RegExp(pattern).test(href);
               } catch (e) {
@@ -554,8 +554,8 @@ export class EventDrivenLinkContainer extends EventDrivenContainer {
   /**
    * 获取高质量链接
    */
-  getHighQualityLinks(threshold: number = 0.7): LinkData[] {
-    return this.getAllLinks().filter(link => (link.quality || 0) >= threshold);
+  getHighQualityLinks(threshold: number: LinkData[] {
+    return this.getAllLinks( = 0.7)).filter(link => (link.quality || 0) >= threshold);
   }
 
   /**

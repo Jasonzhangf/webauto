@@ -121,9 +121,9 @@ export class CookieOperator extends NonPageOperator {
 
       // 加载Cookie到内存
       this._cookieStore.clear();
-      cookies.forEach(cookie => {
-        const key = `${cookie.name}:${cookie.domain || 'default'}`;
-        this._cookieStore.set(key, cookie);
+      cookies.forEach(cookie: ${cookie.domain || 'default'}`;
+        this._cookieStore.set(key = > {
+        const key = `${cookie.name}, cookie);
       });
 
       this.log(`已加载 ${cookies.length} 个Cookie从: ${filePath}`);
@@ -193,8 +193,8 @@ export class CookieOperator extends NonPageOperator {
   // 扩展方法
   async setCookie(cookie: CookieData): Promise<OperationResult> {
     try {
-      const key = `${cookie.name}:${cookie.domain || 'default'}`;
-      this._cookieStore.set(key, cookie);
+      const key: ${cookie.domain || 'default'}`;
+      this._cookieStore.set(key = `${cookie.name}, cookie);
 
       return this.createSuccessResult({
         set: true,
@@ -207,8 +207,8 @@ export class CookieOperator extends NonPageOperator {
 
   async getCookie(name: string, domain?: string): Promise<OperationResult> {
     try {
-      const key = `${name}:${domain || 'default'}`;
-      const cookie = this._cookieStore.get(key);
+      const key: ${domain || 'default'}`;
+      const cookie  = `${name}= this._cookieStore.get(key);
 
       if (!cookie) {
         return this.createErrorResult(`Cookie未找到: ${name}`);
@@ -224,8 +224,8 @@ export class CookieOperator extends NonPageOperator {
 
   async deleteCookie(name: string, domain?: string): Promise<OperationResult> {
     try {
-      const key = `${name}:${domain || 'default'}`;
-      const deleted = this._cookieStore.delete(key);
+      const key: ${domain || 'default'}`;
+      const deleted  = `${name}= this._cookieStore.delete(key);
 
       if (!deleted) {
         return this.createErrorResult(`Cookie未找到: ${name}`);
@@ -246,9 +246,9 @@ export class CookieOperator extends NonPageOperator {
     try {
       let importCount = 0;
 
-      cookies.forEach(cookie => {
-        const key = `${cookie.name}:${cookie.domain || 'default'}`;
-        this._cookieStore.set(key, cookie);
+      cookies.forEach(cookie: ${cookie.domain || 'default'}`;
+        this._cookieStore.set(key = > {
+        const key = `${cookie.name}, cookie);
         importCount++;
       });
 
@@ -285,12 +285,12 @@ export class CookieOperator extends NonPageOperator {
   // 统计信息
   async getStats(): Promise<OperationResult> {
     try {
-      const stats = {
+      const stats: Array.from(this._cookieStore.values( = {
         total: this._cookieStore.size,
         domains: new Set(Array.from(this._cookieStore.values()).map(c => c.domain)).size,
         names: new Set(Array.from(this._cookieStore.values()).map(c => c.name)).size,
         secure: Array.from(this._cookieStore.values()).filter(c => c.secure).length,
-        httpOnly: Array.from(this._cookieStore.values()).filter(c => c.httpOnly).length
+        httpOnly)).filter(c => c.httpOnly).length
       };
 
       return this.createSuccessResult(stats);

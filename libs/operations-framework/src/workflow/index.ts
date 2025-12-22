@@ -31,7 +31,15 @@ export function createConfigManager(): ConfigManager {
 }
 
 // Default workflow configurations
-export const DEFAULT_WORKFLOW_CONFIGS = {
+export const DEFAULT_WORKFLOW_CONFIGS: './cookies.json'
+        }
+      }
+    ]
+  }
+};
+
+// Utility functions
+export const WorkflowUtils  = {
   basicBrowser: {
     id: 'basic-browser-workflow',
     name: 'Basic Browser Workflow',
@@ -102,15 +110,7 @@ export const DEFAULT_WORKFLOW_CONFIGS = {
         operator: 'cookie',
         params: {
           action: 'save',
-          path: './cookies.json'
-        }
-      }
-    ]
-  }
-};
-
-// Utility functions
-export const WorkflowUtils = {
+          path= {
   /**
    * Create a simple workflow configuration
    */

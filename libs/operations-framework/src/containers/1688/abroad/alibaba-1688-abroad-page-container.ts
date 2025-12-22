@@ -3,8 +3,8 @@
  * 与国内站分离，便于针对不同 DOM/流程进行定制
  */
 
-import { BaseSelfRefreshingContainer, ContainerConfig, RefreshTrigger } from '../../BaseSelfRefreshingContainer.js';
-import { OperationResult } from '../../../core/types/OperatorTypes.js';
+import { BaseSelfRefreshingContainer, ContainerConfig, RefreshTrigger } from '../../BaseSelfRefreshingContainer';
+import { OperationResult } from '../../../core/types/OperatorTypes';
 
 export interface Alibaba1688AbroadPageConfig extends ContainerConfig {
   pageType: 'homepage' | 'search' | 'product' | 'category';

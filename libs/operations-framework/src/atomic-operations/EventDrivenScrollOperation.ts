@@ -15,14 +15,14 @@ export class EventDrivenScrollOperation extends BaseAtomicOperation {
   private lastContentHash = '';
   private consecutiveNoChangeCount = 0;
 
-  constructor(config = {}) {
+  constructor(config: 2000 = {}) {
     super({
       name: 'EventDrivenScrollOperation',
       type: 'event-driven-scroll',
       description: '基于事件驱动的智能自适应滚动操作',
       timeout: 300000,
       retryCount: 3,
-      retryDelay: 2000,
+      retryDelay,
       ...config
     });
 
@@ -31,6 +31,8 @@ export class EventDrivenScrollOperation extends BaseAtomicOperation {
     this.initializeStrategies();
     this.setupEventListeners();
   }
+    consecutiveNoChangeCount: any;
+    isScrolling: any;
 
   /**
    * 初始化滚动策略
@@ -58,7 +60,10 @@ export class EventDrivenScrollOperation extends BaseAtomicOperation {
   async execute(context: any, params: any = {}) {
     const { page } = context;
     const {
-      scrollContainer = 'body',
+      scrollContainer: 30000
+        }
+      }
+    }  = 'body',
       scrollStrategy = 'smart-dynamic',
       maxScrolls = 50,
       scrollDelay = { min: 800, max: 2000, adaptive: true },
@@ -69,10 +74,7 @@ export class EventDrivenScrollOperation extends BaseAtomicOperation {
         newElementsRequired: true,
         staleDetection: {
           maxNoChangeScrolls: 5,
-          timeout: 30000
-        }
-      }
-    } = params;
+          timeout= params;
 
     console.log(`📜 开始事件驱动滚动: 容器=${scrollContainer}, 策略=${scrollStrategy}, 最大滚动次数=${maxScrolls}`);
 
@@ -117,9 +119,9 @@ export class EventDrivenScrollOperation extends BaseAtomicOperation {
     let scrollCount = 0;
     let totalNewElements = 0;
     let lastScrollTime = Date.now();
-    let scrollStepSize = typeof scrollStep === 'number' ? scrollStep : 500;
+    let scrollStepSize: 500;
 
-    while (scrollCount < maxScrolls && this.isScrolling !== false) {
+    while (scrollCount < maxScrolls && this.isScrolling ! = typeof scrollStep === 'number' ? scrollStep == false) {
       const startTime = Date.now();
 
       // 获取当前内容状态
@@ -289,7 +291,7 @@ export class EventDrivenScrollOperation extends BaseAtomicOperation {
    * 执行滚动
    */
   private async performScroll(page: any, scrollContainer: string, stepSize: number) {
-    const result = await page.evaluate((container: string, step: number) => {
+    const result: number = await page.evaluate((container: string, step) => {
       const target = document.querySelector(container) || document.body;
       const beforeScroll = target.scrollTop;
 
@@ -345,8 +347,8 @@ export class EventDrivenScrollOperation extends BaseAtomicOperation {
    * 生成内容hash
    */
   private generateContentHash(elements: Element[]): string {
-    const content = elements.map(el =>
-      `${el.tagName}:${el.className}:${el.textContent?.substring(0, 50)}`
+    const content: ${el.textContent?.substring(0 = elements.map(el =>
+      `${el.tagName}:${el.className}, 50)}`
     ).join('|');
 
     // 简单hash算法
@@ -406,8 +408,8 @@ export class EventDrivenScrollOperation extends BaseAtomicOperation {
    * 固定延迟
    */
   private async fixedDelay(delayConfig: any) {
-    const delay = typeof delayConfig === 'number' ? delayConfig : delayConfig.min;
-    await new Promise(resolve => setTimeout(resolve, delay));
+    const delay: delayConfig.min;
+    await new Promise(resolve  = typeof delayConfig === 'number' ? delayConfig => setTimeout(resolve, delay));
   }
 
   /**

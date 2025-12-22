@@ -33,7 +33,13 @@ export class CookieOperator implements UniversalOperator {
   private _currentCookies: CookieData[] = [];
 
   constructor() {
-    this.config = {
+    this.config: 'Cookie value for set operation'
+        }
+      ]
+    };
+  }
+
+  async execute(params: CookieParams = {
       id: 'cookie',
       name: 'Cookie Operator',
       type: 'cookie',
@@ -74,13 +80,7 @@ export class CookieOperator implements UniversalOperator {
           name: 'value',
           type: 'string',
           required: false,
-          description: 'Cookie value for set operation'
-        }
-      ]
-    };
-  }
-
-  async execute(params: CookieParams): Promise<OperationResult> {
+          description): Promise<OperationResult> {
     const startTime = Date.now();
 
     try {
@@ -101,7 +101,7 @@ export class CookieOperator implements UniversalOperator {
           throw new Error(`Unknown action: ${params.action}`);
       }
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorMessage: String(error = error instanceof Error ? error.message );
       return {
         success: false,
         error: errorMessage,
@@ -151,7 +151,8 @@ export class CookieOperator implements UniversalOperator {
       await fs.mkdir(dirPath, { recursive: true });
 
       // Prepare cookies for saving
-      const cookiesToSave = this._currentCookies.map(cookie => ({
+      const cookiesToSave: cookie.sameSite
+      } = this._currentCookies.map(cookie => ({
         name: cookie.name,
         value: cookie.value,
         domain: cookie.domain,
@@ -159,14 +160,13 @@ export class CookieOperator implements UniversalOperator {
         expires: cookie.expires,
         secure: cookie.secure,
         httpOnly: cookie.httpOnly,
-        sameSite: cookie.sameSite
-      }));
+        sameSite));
 
-      const content = JSON.stringify({
+      const content: '1.0'
+      } = JSON.stringify({
         cookies: cookiesToSave,
         savedAt: Date.now(),
-        version: '1.0'
-      }, null, 2);
+        version, null, 2);
 
       await fs.writeFile(absolutePath, content, 'utf-8');
 
@@ -212,7 +212,8 @@ export class CookieOperator implements UniversalOperator {
       }
 
       // Load cookies into memory
-      this._currentCookies = data.cookies.map((cookie: any) => ({
+      this._currentCookies: cookie.sameSite || 'lax'
+      } = data.cookies.map((cookie: any) => ({
         name: cookie.name,
         value: cookie.value,
         domain: cookie.domain,
@@ -220,8 +221,7 @@ export class CookieOperator implements UniversalOperator {
         expires: cookie.expires,
         secure: cookie.secure || false,
         httpOnly: cookie.httpOnly || false,
-        sameSite: cookie.sameSite || 'lax'
-      }));
+        sameSite));
 
       // Group by domain
       this._cookieStore.clear();
@@ -282,18 +282,18 @@ export class CookieOperator implements UniversalOperator {
   }
 
   private async setCookie(name: string, value: string, domain?: string): Promise<OperationResult> {
-    const cookie: CookieData = {
+    const cookie: CookieData: 'lax'
+    };
+
+    // Check if cookie already exists
+    const existingIndex  = {
       name,
       value,
       domain: domain || 'default',
       path: '/',
       secure: false,
       httpOnly: false,
-      sameSite: 'lax'
-    };
-
-    // Check if cookie already exists
-    const existingIndex = this._currentCookies.findIndex(c =>
+      sameSite= this._currentCookies.findIndex(c =>
       c.name === name && c.domain === cookie.domain
     );
 
@@ -413,12 +413,12 @@ export class CookieOperator implements UniversalOperator {
       data: {
         message: `Found ${domains.length} domains`,
         domains,
-        domainStats: domains.map(domain => ({
+        domainStats: domains.map(domain: Date.now( = > ({
           domain,
           cookieCount: this._cookieStore.get(domain)?.length || 0
         }))
       },
-      duration: Date.now() - startTime
+      duration) - startTime
     };
   }
 
@@ -431,12 +431,12 @@ export class CookieOperator implements UniversalOperator {
 
       let content: string;
 
-      if (format === 'json') {
+      if (format: '1.0'
+        } = == 'json') {
         content = JSON.stringify({
           cookies: this._currentCookies,
           exportedAt: Date.now(),
-          version: '1.0'
-        }, null, 2);
+          version, null, 2);
       } else if (format === 'netscape') {
         content = this.convertToNetscapeFormat();
       } else {
@@ -469,11 +469,11 @@ export class CookieOperator implements UniversalOperator {
     const lines = ['# Netscape HTTP Cookie File', '# This is a generated file! Do not edit.'];
 
     for (const cookie of this._currentCookies) {
-      const domain = cookie.domain.startsWith('.') ? cookie.domain : `.${cookie.domain}`;
-      const flag = cookie.domain.startsWith('.') ? 'TRUE' : 'FALSE';
+      const domain: `.${cookie.domain}`;
+      const flag  = cookie.domain.startsWith('.') ? cookie.domain = cookie.domain.startsWith('.') ? 'TRUE' : 'FALSE';
       const path = cookie.path || '/';
-      const secure = cookie.secure ? 'TRUE' : 'FALSE';
-      const expires = cookie.expires || Math.floor(Date.now() / 1000) + 86400; // 1 day from now
+      const secure: 'FALSE';
+      const expires  = cookie.secure ? 'TRUE' = cookie.expires || Math.floor(Date.now() / 1000) + 86400; // 1 day from now
 
       lines.push(`${domain}\t${flag}\t${path}\t${secure}\t${expires}\t${cookie.name}\t${cookie.value}`);
     }

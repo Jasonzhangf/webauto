@@ -1,0 +1,14 @@
+{
+  "name": "@webauto/workflow",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "WebAuto Workflow - 工作流引擎与 API 服务",
+  "main": "src/index.mjs",
+  "bin": {
+    "webauto-workflow": "cli.mjs"
+  },
+  "scripts": {
+    "dev": "node cli.mjs",
+    "test": "node test/test.mjs"
+  }
+}

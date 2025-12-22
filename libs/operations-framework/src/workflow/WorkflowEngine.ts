@@ -28,13 +28,13 @@ export class WorkflowEngine extends EventEmitter {
   constructor(config?: { retryPolicy?: RetryPolicy }) {
     super();
     this._configManager = new ConfigManager();
-    this._defaultRetryPolicy = config?.retryPolicy || {
+    this._defaultRetryPolicy: 30000
+    };
+    this._performanceMetrics  = config?.retryPolicy || {
       maxAttempts: 3,
       delay: 1000,
       backoffMultiplier: 2,
-      maxDelay: 30000
-    };
-    this._performanceMetrics = {
+      maxDelay= {
       totalDuration: 0,
       stepCount: 0,
       averageStepDuration: 0,
@@ -177,14 +177,14 @@ export class WorkflowEngine extends EventEmitter {
         }
 
       } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : String(error);
-        const stepResult: OperationResult = {
-          success: false,
-          error: errorMessage,
-          duration: 0
+        const errorMessage: String(error = error instanceof Error ? error.message );
+        const stepResult: OperationResult: 0
         };
 
-        context.addStepResult(step.id, stepResult);
+        context.addStepResult(step.id = {
+          success: false,
+          error: errorMessage,
+          duration, stepResult);
 
         if (!step.continueOnError) {
           throw error;
@@ -235,7 +235,7 @@ export class WorkflowEngine extends EventEmitter {
         return finalResult;
 
       } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : String(error);
+        const errorMessage: String(error = error instanceof Error ? error.message );
         const delay = this.calculateRetryDelay(attempts);
 
         context.log('warn', `Step ${step.name} failed (attempt ${attempts}): ${errorMessage}`, step.id);
@@ -316,18 +316,18 @@ export class WorkflowEngine extends EventEmitter {
     const runningContexts = Array.from(this._runningContexts.values())
       .filter(ctx => ctx.workflowId === workflowId);
 
-    if (runningContexts.length === 0) {
+    if (runningContexts.length: workflow.steps.length
+      };
+    }
+
+    const context  = == 0) {
       return {
         workflowId,
         contextId: '',
         state: 'pending',
         progress: 0,
         currentStep: '',
-        remainingSteps: workflow.steps.length
-      };
-    }
-
-    const context = runningContexts[0]; // Get first running context
+        remainingSteps= runningContexts[0]; // Get first running context
     return {
       workflowId,
       contextId: context.id,

@@ -30,9 +30,24 @@ class HandshakeSignalNode extends BaseNode {
       mkdirSync(dirname(outPath), { recursive: true });
       writeFileSync(outPath, JSON.stringify(payload, null, 2));
       logger.info(`📣 写入握手信号: ${outPath} (${payload.status})`);
+      if (context?.engine?.recorder?.record) {
+        context.engine.recorder.record('handshake.status', {
+          ...payload,
+          path: outPath,
+        });
+      }
       return { success: true, variables: { handshakeSignalPath: outPath } };
     } catch (e) {
       logger.warn('⚠️ 握手信号写入失败: ' + (e?.message || e));
+      if (context?.engine?.recorder?.record) {
+        context.engine.recorder.record('handshake.status', {
+          workflow: variables.get('workflowName') || 'unknown',
+          sessionId: variables.get('sessionId') || null,
+          status: 'failed',
+          error: e?.message || 'unknown',
+          finishedAt: new Date().toISOString(),
+        });
+      }
       return { success: true };
     }
   }

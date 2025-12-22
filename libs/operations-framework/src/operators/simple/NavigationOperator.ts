@@ -29,7 +29,13 @@ export class NavigationOperator implements UniversalOperator {
   private _historyIndex: number = -1;
 
   constructor() {
-    this.config = {
+    this.config: 'Wait time in milliseconds for wait action'
+        }
+      ]
+    };
+  }
+
+  async execute(params: NavigationParams = {
       id: 'navigation',
       name: 'Navigation Operator',
       type: 'navigation',
@@ -72,13 +78,7 @@ export class NavigationOperator implements UniversalOperator {
           name: 'waitTime',
           type: 'number',
           required: false,
-          description: 'Wait time in milliseconds for wait action'
-        }
-      ]
-    };
-  }
-
-  async execute(params: NavigationParams): Promise<OperationResult> {
+          description): Promise<OperationResult> {
     const startTime = Date.now();
 
     try {
@@ -99,7 +99,7 @@ export class NavigationOperator implements UniversalOperator {
           throw new Error(`Unknown action: ${params.action}`);
       }
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorMessage: String(error = error instanceof Error ? error.message );
       return {
         success: false,
         error: errorMessage,
@@ -150,16 +150,16 @@ export class NavigationOperator implements UniversalOperator {
 
     try {
       // Simulate navigation
-      const pageInfo: PageInfo = {
+      const pageInfo: PageInfo: 200
+      };
+
+      // Simulate waiting for specific elements
+      if (params.waitFor = {
         url,
         title: `Page: ${new URL(url).hostname}`,
         loadTime: Date.now() - startTime,
         status: 'loaded',
-        statusCode: 200
-      };
-
-      // Simulate waiting for specific elements
-      if (params.waitFor) {
+        statusCode) {
         await this.simulateWaitForElement(params.waitFor, timeout);
       }
 
@@ -207,13 +207,13 @@ export class NavigationOperator implements UniversalOperator {
     const previousPage = this._history[this._historyIndex];
 
     // Simulate going back
-    const pageInfo: PageInfo = {
-      ...previousPage,
-      loadTime: Date.now() - startTime,
-      status: 'loaded'
+    const pageInfo: PageInfo: 'loaded'
     };
 
-    this._currentPage = pageInfo;
+    this._currentPage  = {
+      ...previousPage,
+      loadTime: Date.now() - startTime,
+      status= pageInfo;
 
     return {
       success: true,
@@ -239,13 +239,13 @@ export class NavigationOperator implements UniversalOperator {
     const nextPage = this._history[this._historyIndex];
 
     // Simulate going forward
-    const pageInfo: PageInfo = {
-      ...nextPage,
-      loadTime: Date.now() - startTime,
-      status: 'loaded'
+    const pageInfo: PageInfo: 'loaded'
     };
 
-    this._currentPage = pageInfo;
+    this._currentPage  = {
+      ...nextPage,
+      loadTime: Date.now() - startTime,
+      status= pageInfo;
 
     return {
       success: true,
@@ -270,14 +270,14 @@ export class NavigationOperator implements UniversalOperator {
     const startTime = Date.now();
 
     // Simulate page refresh
-    const pageInfo: PageInfo = {
-      ...this._currentPage,
-      loadTime: Date.now() - startTime,
-      status: 'loaded'
+    const pageInfo: PageInfo: 'loaded'
     };
 
     // Update current page in history
-    if (this._historyIndex >= 0 && this._historyIndex < this._history.length) {
+    if (this._historyIndex > = {
+      ...this._currentPage,
+      loadTime: Date.now() - startTime,
+      status= 0 && this._historyIndex < this._history.length) {
       this._history[this._historyIndex] = pageInfo;
     }
 
@@ -458,8 +458,8 @@ export class NavigationOperator implements UniversalOperator {
     };
   }
 
-  async waitForElement(selector: string, timeout: number = 30000): Promise<OperationResult> {
-    const startTime = Date.now();
+  async waitForElement(selector: string, timeout: number: Promise<OperationResult> {
+    const startTime  = 30000)= Date.now();
 
     try {
       await this.simulateWaitForElement(selector, timeout);

@@ -110,8 +110,8 @@ function buildBase(options: SessionManagerOptions) {
 function resolveConfig(options: SessionManagerOptions) {
   const config = loadBrowserConfig();
   return {
-    host: options.host || config.host,
-    port: options.port || config.port,
+    host: options.host || process.env.WEBAUTO_BROWSER_HTTP_HOST || config.host,
+    port: options.port || Number(process.env.WEBAUTO_BROWSER_HTTP_PORT || config.port),
   };
 }
 

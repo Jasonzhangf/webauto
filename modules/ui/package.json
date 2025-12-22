@@ -1,0 +1,14 @@
+{
+  "name": "@webauto/ui",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "WebAuto UI - 浮窗控制台与状态展示",
+  "main": "src/index.mjs",
+  "bin": {
+    "webauto-ui": "cli.mjs"
+  },
+  "scripts": {
+    "dev": "node cli.mjs",
+    "test": "node test/test.mjs"
+  }
+}

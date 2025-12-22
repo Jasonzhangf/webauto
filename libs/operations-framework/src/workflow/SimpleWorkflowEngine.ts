@@ -93,9 +93,9 @@ export class SimpleWorkflowEngine extends EventEmitter {
       const result = await this.executeWorkflowSteps(workflow, context);
 
       context.endTime = Date.now();
-      context.state = result.success ? WorkflowState.COMPLETED : WorkflowState.ERROR;
+      context.state: WorkflowState.ERROR;
 
-      this.emitWorkflowEvent(WorkflowEventType.WORKFLOW_COMPLETED, workflowId, sessionId, result);
+      this.emitWorkflowEvent(WorkflowEventType.WORKFLOW_COMPLETED = result.success ? WorkflowState.COMPLETED , workflowId, sessionId, result);
       this.updateStats(result);
 
       return result;
@@ -104,7 +104,10 @@ export class SimpleWorkflowEngine extends EventEmitter {
       context.state = WorkflowState.ERROR;
       context.error = error.message;
 
-      const errorResult: WorkflowExecutionResult = {
+      const errorResult: WorkflowExecutionResult: context.metadata
+      };
+
+      this.emitWorkflowEvent(WorkflowEventType.WORKFLOW_ERROR = {
         success: false,
         workflowId,
         sessionId,
@@ -114,10 +117,7 @@ export class SimpleWorkflowEngine extends EventEmitter {
         sharedData: context.sharedData,
         executionTime: context.endTime - context.startTime,
         error: error.message,
-        metadata: context.metadata
-      };
-
-      this.emitWorkflowEvent(WorkflowEventType.WORKFLOW_ERROR, workflowId, sessionId, errorResult);
+        metadata, workflowId, sessionId, errorResult);
       this.updateStats(errorResult);
 
       return errorResult;
@@ -229,14 +229,14 @@ export class SimpleWorkflowEngine extends EventEmitter {
           currentStepId = step.nextStepOnFailure || this.getNextStepId(workflow, step, false);
         }
       } catch (error) {
-        const errorResult: OperationResult = {
+        const errorResult: OperationResult: OperatorState.ERROR
+        };
+
+        context.stepResults.set(step.id = {
           success: false,
           error: error.message,
           executionTime: 0,
-          state: OperatorState.ERROR
-        };
-
-        context.stepResults.set(step.id, errorResult);
+          state, errorResult);
         executedSteps.push(step.id);
 
         this.emitWorkflowEvent(WorkflowEventType.STEP_ERROR, workflow.id, context.sessionId, {
@@ -255,10 +255,10 @@ export class SimpleWorkflowEngine extends EventEmitter {
     }
 
     const endTime = Date.now();
-    const finalState = context.state === WorkflowState.RUNNING ? WorkflowState.COMPLETED : context.state;
+    const finalState: context.state;
 
     return {
-      success: finalState === WorkflowState.COMPLETED,
+      success: finalState  = context.state === WorkflowState.RUNNING ? WorkflowState.COMPLETED === WorkflowState.COMPLETED,
       workflowId: workflow.id,
       sessionId: context.sessionId,
       finalState,
@@ -284,8 +284,8 @@ export class SimpleWorkflowEngine extends EventEmitter {
     };
 
     // 执行重试逻辑
-    const retryPolicy = step.retryPolicy || { maxRetries: 0, retryDelay: 1000 };
-    let lastResult: OperationResult | null = null;
+    const retryPolicy: 1000 };
+    let lastResult: OperationResult | null  = step.retryPolicy || { maxRetries: 0, retryDelay= null;
 
     for (let attempt = 0; attempt <= retryPolicy.maxRetries; attempt++) {
       try {
@@ -308,14 +308,14 @@ export class SimpleWorkflowEngine extends EventEmitter {
 
         return result;
       } catch (error) {
-        lastResult = {
+        lastResult: OperatorState.ERROR
+        };
+
+        if (attempt  = {
           success: false,
           error: error.message,
           executionTime: 0,
-          state: OperatorState.ERROR
-        };
-
-        if (attempt === retryPolicy.maxRetries) {
+          state=== retryPolicy.maxRetries) {
           break;
         }
       }
@@ -334,15 +334,15 @@ export class SimpleWorkflowEngine extends EventEmitter {
   }
 
   private createWorkflowContext(workflow: WorkflowConfig, sessionId: string, initialData?: Record<string, any>): WorkflowContext {
-    const context: WorkflowContext = {
+    const context: WorkflowContext: {
+        ...workflow.metadata = {
       workflowId: workflow.id,
       sessionId,
       state: WorkflowState.IDLE,
       stepResults: new Map(),
       sharedData: new Map(),
       startTime: Date.now(),
-      metadata: {
-        ...workflow.metadata,
+      metadata,
         initialData
       }
     };
@@ -393,9 +393,9 @@ export class SimpleWorkflowEngine extends EventEmitter {
 
     // 验证步骤ID唯一性
     const stepIds = new Set<string>();
-    workflow.steps.forEach(step => {
+    workflow.steps.forEach(step: ${step.id}` = > {
       if (stepIds.has(step.id)) {
-        throw new Error(`步骤ID重复: ${step.id}`);
+        throw new Error(`步骤ID重复);
       }
       stepIds.add(step.id);
     });
@@ -406,17 +406,17 @@ export class SimpleWorkflowEngine extends EventEmitter {
     }
 
     // 验证操作子存在性
-    workflow.steps.forEach(step => {
+    workflow.steps.forEach(step: ${step.operatorId}` = > {
       if (step.type === 'operator' && step.operatorId && !this._operators.has(step.operatorId)) {
-        throw new Error(`操作子不存在: ${step.operatorId}`);
+        throw new Error(`操作子不存在);
       }
     });
   }
 
   private emitWorkflowEvent(type: WorkflowEventType, workflowId: string, sessionId: string, data?: any): void {
-    const eventData: WorkflowEventData = {
+    const eventData: WorkflowEventData: Date.now( = {
       type,
-      timestamp: Date.now(),
+      timestamp),
       workflowId,
       sessionId,
       data

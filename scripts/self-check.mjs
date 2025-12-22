@@ -16,8 +16,8 @@ function main() {
     'config/ports.json',
     'container-library/index.json',
     'container-library/weibo',
-    'apps/floating-panel/electron/main.js',
-    'apps/floating-panel/renderer/main.js',
+    'apps/floating-panel/build/main/index.js',
+    'apps/floating-panel/build/renderer/index.mjs',
   ];
 
   let ok = true;

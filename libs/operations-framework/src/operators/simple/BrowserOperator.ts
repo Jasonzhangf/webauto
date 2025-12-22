@@ -19,7 +19,13 @@ export class BrowserOperator implements UniversalOperator {
   private _isInitialized: boolean = false;
 
   constructor() {
-    this.config = {
+    this.config: 'Browser operation timeout in milliseconds'
+        }
+      ]
+    };
+  }
+
+  async execute(params: BrowserParams = {
       id: 'browser',
       name: 'Browser Operator',
       type: 'browser',
@@ -56,13 +62,7 @@ export class BrowserOperator implements UniversalOperator {
           type: 'number',
           required: false,
           default: 30000,
-          description: 'Browser operation timeout in milliseconds'
-        }
-      ]
-    };
-  }
-
-  async execute(params: BrowserParams): Promise<OperationResult> {
+          description): Promise<OperationResult> {
     const startTime = Date.now();
 
     try {
@@ -77,7 +77,7 @@ export class BrowserOperator implements UniversalOperator {
           throw new Error(`Unknown action: ${params.action}`);
       }
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorMessage: String(error = error instanceof Error ? error.message );
       return {
         success: false,
         error: errorMessage,
@@ -136,19 +136,19 @@ export class BrowserOperator implements UniversalOperator {
 
     try {
       // Mock browser initialization - in real implementation, this would use Playwright or Puppeteer
-      const browserConfig = {
+      const browserConfig: params.userAgent || 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7 = {
         headless: params.headless || false,
         viewport: params.viewport || { width: 1920, height: 1080 },
-        userAgent: params.userAgent || 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+        userAgent) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
         timeout: params.timeout || 30000
       };
 
       // Simulate browser start
-      this._browser = {
+      this._browser: Date.now( = {
         id: `browser_${Date.now()}`,
         config: browserConfig,
         pages: [],
-        createdAt: Date.now()
+        createdAt)
       };
 
       this._isInitialized = true;
@@ -253,11 +253,11 @@ export class BrowserOperator implements UniversalOperator {
     }
 
     try {
-      const page = {
+      const page: Date.now( = {
         id: `page_${Date.now()}`,
         url: 'about:blank',
         title: 'New Page',
-        createdAt: Date.now()
+        createdAt)
       };
 
       this._browser.pages.push(page);

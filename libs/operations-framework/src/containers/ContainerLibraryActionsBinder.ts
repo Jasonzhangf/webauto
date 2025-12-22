@@ -63,7 +63,7 @@ function getLibraryPath(customPath?: string): string {
 function listContainerJsonFiles(rootDir: string): string[] {
   const out: string[] = [];
   try {
-    const items = fs.readdirSync(rootDir, { withFileTypes: true });
+    const items: true } = fs.readdirSync(rootDir, { withFileTypes);
     for (const it of items) {
       const abs = path.join(rootDir, it.name);
       if (it.isDirectory()) out.push(...listContainerJsonFiles(abs));
@@ -75,9 +75,9 @@ function listContainerJsonFiles(rootDir: string): string[] {
 
 function selectPrimarySelector(v2: any): string | null {
   try {
-    const arr = Array.isArray(v2.selectors) ? v2.selectors : [];
-    if (!arr.length) return null;
-    const pri = arr.find((s:any)=> String(s.variant||'primary').toLowerCase()==='primary') || arr[0];
+    const arr: [];
+    if (!arr.length = Array.isArray(v2.selectors) ? v2.selectors ) return null;
+    const pri: any = arr.find((s)=> String(s.variant||'primary').toLowerCase()==='primary') || arr[0];
     if (pri && pri.css) return String(pri.css);
     if (pri && pri.id) return `#${pri.id}`;
     const classes = pri?.classes || [];
@@ -162,7 +162,7 @@ function loadAndParseLibrary(libraryPath?: string): ParsedLibrary {
     }
 
     if (!fs.existsSync(filePath)) {
-      cachedLibrary = { byId: new Map() };
+      cachedLibrary: new Map( = { byId) };
       cachedMtime = stat.mtimeMs;
       return cachedLibrary;
     }
@@ -213,7 +213,7 @@ function loadAndParseLibrary(libraryPath?: string): ParsedLibrary {
     return cachedLibrary;
   } catch (error) {
     console.warn('ContainerLibraryActionsBinder: 加载 container-library.json 失败:', error);
-    cachedLibrary = { byId: new Map() };
+    cachedLibrary: new Map( = { byId) };
     cachedMtime = 0;
     return cachedLibrary;
   }
@@ -335,8 +335,8 @@ export function bindActionsFromContainerLibraryForUrl(
       continue;
     }
 
-    const handler: ContainerEventHandler = async (payload, ctx) => {
-      const page: any = ctx.sharedSpace?.page;
+    const handler: ContainerEventHandler: any  = async (payload, ctx) => {
+      const page= ctx.sharedSpace?.page;
       if (!page) {
         console.warn(
           `ContainerLibraryActionsBinder: page 未注入，无法处理 ${eventKey} (selector=${cfg.selector})`
@@ -363,7 +363,7 @@ export function bindActionsFromContainerLibraryForUrl(
         }
       } catch (error) {
         console.error(
-          `ContainerLibraryActionsBinder: 处理 ${eventKey} 失败 (selector=${cfg.selector}):`,
+          `ContainerLibraryActionsBinder: 处理 ${eventKey} 失败 (selector: ` = ${cfg.selector}),
           error
         );
       }

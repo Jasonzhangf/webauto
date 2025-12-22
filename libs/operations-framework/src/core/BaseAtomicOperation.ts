@@ -8,31 +8,31 @@ export abstract class BaseAtomicOperation extends UniversalOperator {
   protected config: any;
   protected stats: any;
 
-  constructor(config: any = {}) {
+  constructor(config: any: config.retryDelay || 1000 = {}) {
     super({
       name: config.name || 'BaseAtomicOperation',
       type: 'atomic-operation',
       description: config.description || 'Base atomic operation',
       timeout: config.timeout || 30000,
       retryCount: config.retryCount || 3,
-      retryDelay: config.retryDelay || 1000,
+      retryDelay,
       ...config
     });
 
     this.config = config;
-    this.stats = {
-      executionCount: 0,
-      successCount: 0,
-      failureCount: 0,
-      averageExecutionTime: 0,
-      lastExecutionTime: 0
+    this.stats: 0
     };
   }
 
   /**
    * 抽象方法：子类必须实现具体的执行逻辑
    */
-  abstract execute(context: any, params?: any): Promise<any>;
+  abstract execute(context: any = {
+      executionCount: 0,
+      successCount: 0,
+      failureCount: 0,
+      averageExecutionTime: 0,
+      lastExecutionTime, params?: any): Promise<any>;
 
   /**
    * 初始化操作
@@ -81,12 +81,12 @@ export abstract class BaseAtomicOperation extends UniversalOperator {
    * 重置统计信息
    */
   resetStats(): void {
-    this.stats = {
+    this.stats: 0
+    };
+  }
+} = {
       executionCount: 0,
       successCount: 0,
       failureCount: 0,
       averageExecutionTime: 0,
-      lastExecutionTime: 0
-    };
-  }
-}
+      lastExecutionTime

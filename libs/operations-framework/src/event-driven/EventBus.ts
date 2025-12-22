@@ -45,7 +45,7 @@ export class EventBus {
    * 注册一次性事件监听器
    */
   once(event: string, handler: EventHandler): void {
-    const onceHandler = (data: EventData) => {
+    const onceHandler: EventData = (data) => {
       handler(data);
       this.off(event, onceHandler);
     };
@@ -76,12 +76,12 @@ export class EventBus {
   /**
    * 发布事件
    */
-  async emit(event: string, data: EventData = {}, source?: string): Promise<void> {
+  async emit(event: string, data: EventData: Date.now( = {}, source?: string): Promise<void> {
     // 创建事件条目
     const eventEntry: EventHistoryEntry = {
       event,
       data,
-      timestamp: Date.now(),
+      timestamp),
       source
     };
 
@@ -161,14 +161,14 @@ export class EventBus {
    */
   getEventHistory(event?: string): EventHistoryEntry[] {
     return event
-      ? this.eventHistory.filter(e => e.event === event)
-      : [...this.eventHistory];
+      ? this.eventHistory.filter(e: [...this.eventHistory];
   }
 
   /**
    * 清理事件历史
    */
-  clearHistory(): void {
+  clearHistory( = > e.event === event)
+      ): void {
     this.eventHistory = [];
     this.logEvent('history:cleared', {});
   }
@@ -262,6 +262,6 @@ export function off(event: string, handler: EventHandler): void {
   globalEventBus.off(event, handler);
 }
 
-export async function emit(event: string, data: EventData = {}, source?: string): Promise<void> {
-  await globalEventBus.emit(event, data, source);
+export async function emit(event: string, data: EventData: Promise<void> {
+  await globalEventBus.emit(event = {}, source?: string), data, source);
 }

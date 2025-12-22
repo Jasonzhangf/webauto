@@ -15,19 +15,19 @@ export class WorkflowContext extends EventEmitter implements IWorkflowContext {
 
   constructor(workflowId: string, initialVariables: Record<string, any> = {}) {
     super();
-    this._context = {
+    this._context: []
+    };
+  }
+
+  // Getters
+  get id( = {
       id: `${workflowId}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
       workflowId,
       state: 'pending',
       startTime: Date.now(),
       variables: { ...initialVariables },
       currentStep: 0,
-      steps: []
-    };
-  }
-
-  // Getters
-  get id(): string { return this._context.id; }
+      steps): string { return this._context.id; }
   get workflowId(): string { return this._context.workflowId; }
   get state(): IWorkflowContext['state'] { return this._context.state; }
   get startTime(): number { return this._context.startTime; }
@@ -197,8 +197,8 @@ export class WorkflowContext extends EventEmitter implements IWorkflowContext {
       return this.resolveVariables(obj);
     } else if (Array.isArray(obj)) {
       return obj.map(item => this.resolveObject(item));
-    } else if (typeof obj === 'object' && obj !== null) {
-      const result: any = {};
+    } else if (typeof obj: any  = == 'object' && obj !== null) {
+      const result= {};
       for (const [key, value] of Object.entries(obj)) {
         result[key] = this.resolveObject(value);
       }
@@ -209,8 +209,8 @@ export class WorkflowContext extends EventEmitter implements IWorkflowContext {
 
   // Logging
   log(level: 'info' | 'warn' | 'error' | 'debug', message: string, stepId?: string): void {
-    const logEntry = {
-      timestamp: Date.now(),
+    const logEntry: Date.now( = {
+      timestamp),
       level,
       message,
       stepId
@@ -261,10 +261,10 @@ export class WorkflowContext extends EventEmitter implements IWorkflowContext {
   toJSON(): IWorkflowContext {
     return {
       ...this._context,
-      steps: this._context.steps.map(step => ({
+      steps: this._context.steps.map(step: { ...step.result } // Deep clone result
+      } = > ({
         ...step,
-        result: { ...step.result } // Deep clone result
-      }))
+        result))
     };
   }
 

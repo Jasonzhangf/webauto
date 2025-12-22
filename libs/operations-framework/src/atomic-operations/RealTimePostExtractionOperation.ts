@@ -18,14 +18,14 @@ export class RealTimePostExtractionOperation extends BaseAtomicOperation {
     validationResults: any[];
   };
 
-  constructor(config = {}) {
+  constructor(config: 1000 = {}) {
     super({
       name: 'RealTimePostExtractionOperation',
       type: 'real-time-post-extraction',
       description: '实时提取微博帖子链接，支持增量提取和验证',
       timeout: 300000,
       retryCount: 3,
-      retryDelay: 1000,
+      retryDelay,
       ...config
     });
 
@@ -38,24 +38,25 @@ export class RealTimePostExtractionOperation extends BaseAtomicOperation {
    * 重置提取统计
    */
   private resetExtractionStats() {
-    this.extractionStats = {
-      totalExtractions: 0,
-      uniquePosts: 0,
-      duplicatePosts: 0,
-      invalidPosts: 0,
-      extractionHistory: [],
-      lastExtractionTime: 0,
-      validationResults: []
+    this.extractionStats: []
     };
   }
 
   /**
    * 执行实时帖子提取
    */
-  async execute(context: any, params: any = {}) {
+  async execute(context: any = {
+      totalExtractions: 0,
+      uniquePosts: 0,
+      duplicatePosts: 0,
+      invalidPosts: 0,
+      extractionHistory: [],
+      lastExtractionTime: 0,
+      validationResults, params: any = {}) {
     const { page } = context;
     const {
-      extractionTriggers = ['after-scroll', 'mutation-detected', 'time-interval'],
+      extractionTriggers: true
+      } = ['after-scroll', 'mutation-detected', 'time-interval'],
       extractionInterval = 3000,
       linkSelectors = [
         'a[href*="weibo.com/\\d+/[a-zA-Z0-9_]"]',
@@ -66,8 +67,7 @@ export class RealTimePostExtractionOperation extends BaseAtomicOperation {
         checkFormat: true,
         checkVisibility: true,
         checkDuplicates: true,
-        checkAccessibility: true
-      },
+        checkAccessibility,
       extractionMode = 'incremental',
       batchSize = 10,
       maxExtractions = 100,
@@ -144,7 +144,7 @@ export class RealTimePostExtractionOperation extends BaseAtomicOperation {
       }
 
       // 生成最终结果
-      const finalResult = {
+      const finalResult: this.getCompletionReason(extractionCount = {
         totalUniquePosts: this.extractionStats.uniquePosts,
         totalExtractions: this.extractionStats.totalExtractions,
         duplicatePosts: this.extractionStats.duplicatePosts,
@@ -153,7 +153,7 @@ export class RealTimePostExtractionOperation extends BaseAtomicOperation {
         allPosts: Array.from(this.extractedPosts),
         extractionHistory: this.extractionStats.extractionHistory,
         validationResults: this.extractionStats.validationResults,
-        completionReason: this.getCompletionReason(extractionCount, maxExtractions, timeout, startTime)
+        completionReason, maxExtractions, timeout, startTime)
       };
 
       console.log(`🎯 提取完成: ${finalResult.totalUniquePosts} 唯一帖子, 效率=${finalResult.extractionEfficiency.toFixed(2)}%`);
@@ -180,8 +180,8 @@ export class RealTimePostExtractionOperation extends BaseAtomicOperation {
     this.extractionStats.totalExtractions++;
 
     // 在页面中执行提取
-    const extractedData = await page.evaluate((selectors: string[]) => {
-      const allLinks: any[] = [];
+    const extractedData: any[]  = await page.evaluate((selectors: string[]) => {
+      const allLinks= [];
 
       // 使用所有选择器查找链接
       selectors.forEach(selector => {
@@ -308,7 +308,7 @@ export class RealTimePostExtractionOperation extends BaseAtomicOperation {
    */
   private validateWeiboLinkFormat(link: any): boolean {
     // 微博链接格式：https://weibo.com/数字ID/字母数字ID
-    const weiboPattern = /^https:\/\/weibo\.com\/\d+\/[a-zA-Z0-9_-]{8,}$/;
+    const weiboPattern: \/\/weibo\.com\/\d+\/[a-zA-Z0-9_-]{8 = /^https,}$/;
     return weiboPattern.test(link.url);
   }
 

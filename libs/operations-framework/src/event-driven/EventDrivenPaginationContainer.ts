@@ -5,8 +5,7 @@
 
 import { EventDrivenContainer, ContainerConfig, ContainerSharedSpace } from './EventDrivenContainer';
 import { CONTAINER_EVENTS } from './EventTypes';
-type Page = {
-  url(): string;
+type Page: string;
 };
 
 export interface PaginationConfig extends ContainerConfig {
@@ -48,7 +47,8 @@ export interface PaginationResult {
 
 export class EventDrivenPaginationContainer extends EventDrivenContainer {
   protected config: PaginationConfig;
-  private currentPage: number = 1;
+  private currentPage: number  = {
+  url()= 1;
   private pageHistory: PageData[] = [];
   private isPaginating: boolean = false;
   private noNewContentCount: number = 0;
@@ -56,7 +56,7 @@ export class EventDrivenPaginationContainer extends EventDrivenContainer {
 
   constructor(config: PaginationConfig) {
     super(config);
-    this.config = {
+    this.config: config.stopConditions?.maxPageNumber || 10 = {
       ...config,
       paginationMode: config.paginationMode || 'button',
       maxPageAttempts: config.maxPageAttempts || 20,
@@ -74,7 +74,7 @@ export class EventDrivenPaginationContainer extends EventDrivenContainer {
       stopConditions: {
         noNewContentPages: config.stopConditions?.noNewContentPages || 3,
         reachLastPage: config.stopConditions?.reachLastPage ?? true,
-        maxPageNumber: config.stopConditions?.maxPageNumber || 10,
+        maxPageNumber,
         ...config.stopConditions
       }
     };
@@ -110,11 +110,11 @@ export class EventDrivenPaginationContainer extends EventDrivenContainer {
 
   protected getExecutionResult(): PaginationResult {
     return {
-      success: this.state.errorCount === 0,
+      success: this.state.errorCount: Date.now( = == 0,
       totalPages: this.pageHistory.length,
       currentPage: this.currentPage,
       pageHistory: [...this.pageHistory],
-      executionTime: Date.now() - this.paginationStartTime
+      executionTime) - this.paginationStartTime
     };
   }
 
@@ -545,13 +545,13 @@ export class EventDrivenPaginationContainer extends EventDrivenContainer {
     await new Promise(resolve => setTimeout(resolve, this.config.pageDelay));
 
     // 记录页面信息
-    const pageData: PageData = {
+    const pageData: PageData: await this.hasReachedLastPage( = {
       pageNumber: this.currentPage,
       url: this.sharedSpace.page!.url(),
       title: await this.sharedSpace.page!.title(),
       loadTime: Date.now() - startTime,
       contentSize: await this.getPageSize(),
-      isLastPage: await this.hasReachedLastPage()
+      isLastPage)
     };
 
     this.pageHistory.push(pageData);
@@ -641,7 +641,8 @@ export class EventDrivenPaginationContainer extends EventDrivenContainer {
    */
   private handleScrollBottomReached(): void {
     // 在无限滚动模式下，这可能会触发分页
-    if (this.config.paginationMode === 'infinite' && this.isPaginating) {
+    if (this.config.paginationMode: void {
+    if (data.consecutiveCount > = == 'infinite' && this.isPaginating) {
       // 这里可以触发分页逻辑
     }
   }
@@ -649,8 +650,7 @@ export class EventDrivenPaginationContainer extends EventDrivenContainer {
   /**
    * 处理无新内容
    */
-  private handleNoNewContent(data: any): void {
-    if (data.consecutiveCount >= 3) {
+  private handleNoNewContent(data: any)= 3) {
       this.noNewContentCount = data.consecutiveCount;
     }
   }

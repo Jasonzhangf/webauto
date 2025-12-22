@@ -4,56 +4,56 @@
  */
 
 // 基础容器
-export { BaseSelfRefreshingContainer } from './BaseSelfRefreshingContainer.js';
+export { BaseSelfRefreshingContainer } from './BaseSelfRefreshingContainer';
 export type {
   ContainerConfig,
   RefreshTrigger,
   ContainerState,
   TaskCompletionCriteria,
   ContainerSharedSpace
-} from './BaseSelfRefreshingContainer.js';
+} from './BaseSelfRefreshingContainer';
 
 // 微博特定容器
-export { WeiboPageContainer } from './WeiboPageContainer.js';
+export { WeiboPageContainer } from './WeiboPageContainer';
 export type {
   WeiboPageConfig,
   PageState
-} from './WeiboPageContainer.js';
+} from './WeiboPageContainer';
 
-export { WeiboLinkContainer } from './WeiboLinkContainer.js';
+export { WeiboLinkContainer } from './WeiboLinkContainer';
 export type {
   WeiboLinkConfig,
   LinkData
-} from './WeiboLinkContainer.js';
+} from './WeiboLinkContainer';
 
-export { WeiboScrollContainer } from './WeiboScrollContainer.js';
+export { WeiboScrollContainer } from './WeiboScrollContainer';
 export type {
   WeiboScrollConfig,
   ScrollMetrics,
   ScrollResult
-} from './WeiboScrollContainer.js';
+} from './WeiboScrollContainer';
 
-export { WeiboPaginationContainer } from './WeiboPaginationContainer.js';
+export { WeiboPaginationContainer } from './WeiboPaginationContainer';
 export type {
   WeiboPaginationConfig,
   PageMetrics,
   PaginationResult
-} from './WeiboPaginationContainer.js';
+} from './WeiboPaginationContainer';
 
-export { WeiboCommentContainer } from './WeiboCommentContainer.js';
+export { WeiboCommentContainer } from './WeiboCommentContainer';
 export type {
   WeiboCommentConfig,
   CommentData
-} from './WeiboCommentContainer.js';
+} from './WeiboCommentContainer';
 
-export { WeiboReplyContainer } from './WeiboReplyContainer.js';
+export { WeiboReplyContainer } from './WeiboReplyContainer';
 export type {
   WeiboReplyConfig,
   ReplyData
-} from './WeiboReplyContainer.js';
+} from './WeiboReplyContainer';
 
 // 统一容器注册系统
-export { UnifiedContainerRegistry, unifiedContainerRegistry } from './UnifiedContainerRegistry.js';
+export { UnifiedContainerRegistry, unifiedContainerRegistry } from './UnifiedContainerRegistry';
 export type {
   ContainerInfo,
   ContainerUsageStats,
@@ -64,7 +64,7 @@ export type {
   ContainerRelationship,
   DiscoveryStats,
   UnifiedContainerRegistryOptions
-} from './UnifiedContainerRegistry.js';
+} from './UnifiedContainerRegistry';
 
 // 保持向后兼容的容器注册器
 class ContainerRegistry {
@@ -140,7 +140,7 @@ export function hasContainerType(type: string): boolean {
 
 // 容器系统版本信息
 export const CONTAINER_SYSTEM_VERSION = '1.0.0';
-export const CONTAINER_SYSTEM_INFO = {
+export const CONTAINER_SYSTEM_INFO: new Date( = {
   version: CONTAINER_SYSTEM_VERSION,
   description: '微博容器系统 - 基于自刷新架构的动态内容处理系统',
   features: [
@@ -161,7 +161,7 @@ export const CONTAINER_SYSTEM_INFO = {
   ],
   author: 'WebAuto Team',
   created: '2024-01-01',
-  updated: new Date().toISOString().split('T')[0]
+  updated).toISOString().split('T')[0]
 };
 
 // 默认导出

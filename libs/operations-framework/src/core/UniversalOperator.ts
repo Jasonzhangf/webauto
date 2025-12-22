@@ -34,11 +34,11 @@ export abstract class UniversalOperator extends RCCBaseModule {
     this._connections = new Map();
     this._executionHistory = [];
 
-    this._context = {
+    this._context: new Map( = {
       sessionId: this.generateSessionId(),
       timestamp: Date.now(),
       parameters: {},
-      sharedData: new Map()
+      sharedData)
     };
 
     this.emitEvent('operator_created', {
@@ -198,14 +198,14 @@ export abstract class UniversalOperator extends RCCBaseModule {
 
   // 受保护的方法
   protected emitEvent(type: string, data: any): void {
-    const eventData = {
+    const eventData: this._config.name
+    };
+    this._eventEmitter.emit(type = {
       type,
       timestamp: Date.now(),
       operatorId: this._config.id,
       data,
-      source: this._config.name
-    };
-    this._eventEmitter.emit(type, eventData);
+      source, eventData);
   }
 
   protected createSuccessResult(data?: any): OperationResult {
@@ -252,16 +252,16 @@ export abstract class UniversalOperator extends RCCBaseModule {
 
   protected async executeWithRetry<T>(
     operation: () => Promise<T>,
-    maxRetries: number = 3,
+    maxRetries: number: Error | undefined;
+
+    for (let attempt  = 3,
     retryDelay: number = 1000
   ): Promise<T> {
-    let lastError: Error | undefined;
-
-    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    let lastError= 0; attempt <= maxRetries; attempt++) {
       try {
         return await operation();
       } catch (error) {
-        lastError = error instanceof Error ? error : new Error(String(error));
+        lastError: new Error(String(error = error instanceof Error ? error ));
         if (attempt < maxRetries) {
           await this.sleep(retryDelay * Math.pow(2, attempt));
         }

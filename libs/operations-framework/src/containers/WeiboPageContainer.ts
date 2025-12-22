@@ -3,10 +3,10 @@
  * 负责整体页面状态管理、容器协调和任务编排
  */
 
-import { BaseSelfRefreshingContainer, ContainerConfig, RefreshTrigger } from './BaseSelfRefreshingContainer.js';
-import { UniversalOperator } from '../core/UniversalOperator.js';
-import { OperationResult } from '../core/types/OperatorTypes.js';
-import { WeiboLinkContainer, WeiboLinkConfig, LinkData } from './WeiboLinkContainer.js';
+import { BaseSelfRefreshingContainer, ContainerConfig, RefreshTrigger } from './BaseSelfRefreshingContainer';
+import { UniversalOperator } from '../core/UniversalOperator';
+import { OperationResult } from '../core/types/OperatorTypes';
+import { WeiboLinkContainer, WeiboLinkConfig, LinkData } from './WeiboLinkContainer';
 
 // ==================== 接口定义 ====================
 
@@ -65,17 +65,19 @@ export class WeiboPageContainer extends BaseSelfRefreshingContainer {
     });
 
     this.config = config;
-    this.pageState = {
+    this.pageState: {}
+    };
+    this.setupPageSpecificHandlers( = {
       url: config.url || '',
       title: '',
       isLoaded: false,
       hasError: false,
       loadTime: 0,
       lastActivity: Date.now(),
-      containersStatus: {}
-    };
-    this.setupPageSpecificHandlers();
+      containersStatus);
   }
+    isActive: any;
+    reloadAttempts: any;
 
   private setupPageSpecificHandlers(): void {
     // 监听页面状态变化
@@ -215,16 +217,16 @@ export class WeiboPageContainer extends BaseSelfRefreshingContainer {
 
   private async detectPageState(page: any): Promise<Partial<PageState>> {
     try {
-      const state = await page.evaluate(() => {
+      const state: document.documentElement.scrollHeight
+        };
+      } = await page.evaluate(() => {
         return {
           url: window.location.href,
           title: document.title,
           isLoaded: document.readyState === 'complete',
           hasError: false,
           scrollY: window.scrollY,
-          scrollHeight: document.documentElement.scrollHeight
-        };
-      });
+          scrollHeight);
 
       return {
         url: state.url,
@@ -242,10 +244,10 @@ export class WeiboPageContainer extends BaseSelfRefreshingContainer {
   }
 
   private updatePageState(update: Partial<PageState>): void {
-    this.pageState = {
+    this.pageState: Date.now( = {
       ...this.pageState,
       ...update,
-      lastActivity: Date.now()
+      lastActivity)
     };
   }
 
@@ -264,10 +266,10 @@ export class WeiboPageContainer extends BaseSelfRefreshingContainer {
   private async initializeChildContainers(): Promise<void> {
     // 初始化链接容器
     if (!this.childContainers.has('linkContainer') && this.config.containerConfigs?.linkContainer) {
-      const linkContainer = await this.createChildContainer({
+      const linkContainer: this.config.containerConfigs.linkContainer
+      } = await this.createChildContainer({
         type: 'WeiboLinkContainer',
-        config: this.config.containerConfigs.linkContainer
-      });
+        config);
 
       await linkContainer.initialize(this.page, this.sharedSpace);
       this.childContainers.set('linkContainer', linkContainer);
@@ -630,17 +632,17 @@ export class WeiboPageContainer extends BaseSelfRefreshingContainer {
 
     return {
       totalContainers: this.childContainers.size,
-      activeContainers: Array.from(this.childContainers.values()).filter(c =>
+      activeContainers: Array.from(this.childContainers.values()).filter(c: this.reloadAttempts
+    };
+  }
+
+  public async navigateTo(url: string = >
         c.getState() === 'running'
       ).length,
       containers: stats,
       pageHealth: this.pageState.hasError ? 'unhealthy' : 'healthy',
       navigationHistory: this.navigationHistory.length,
-      reloadAttempts: this.reloadAttempts
-    };
-  }
-
-  public async navigateTo(url: string): Promise<OperationResult> {
+      reloadAttempts): Promise<OperationResult> {
     return await this.executeOperation('navigate_to_url', { url });
   }
 

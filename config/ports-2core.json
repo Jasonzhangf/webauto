@@ -1,0 +1,8 @@
+{
+  "unified_api": 7701,
+  "browser_service": 7704
+}
+
+# 说明:
+# - 7701: Unified API (HTTP + WebSocket + Bus) - 合并了所有核心服务
+# - 7704: Browser Service (保留，Python后端)

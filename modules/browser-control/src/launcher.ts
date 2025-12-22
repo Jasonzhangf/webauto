@@ -101,6 +101,14 @@ const cfg = loadLocalBrowserConfig();
 const WORKFLOW_BASE = (cfg.backend?.baseUrl || 'http://127.0.0.1:7701').replace(/\/$/, '');
 const WORKFLOW_URL = new URL(WORKFLOW_BASE);
 const IS_LOCAL_WORKFLOW = ['localhost', '127.0.0.1', '::1'].includes(WORKFLOW_URL.hostname);
+const WORKFLOW_BUS_URL = (() => {
+  const busUrl = new URL(WORKFLOW_BASE);
+  busUrl.protocol = busUrl.protocol === 'https:' ? 'wss:' : 'ws:';
+  busUrl.pathname = '/bus';
+  busUrl.search = '';
+  busUrl.hash = '';
+  return busUrl.toString();
+})();
 
 function isTestMode() {
   return process.env.BROWSER_CONTROL_TEST_MODE === '1';
@@ -412,8 +420,17 @@ async function launchFloatingConsole(wsHost: string, wsPort: number, targetUrl?:
       console.warn(`[browser-control] ws://${wsHost}:${wsPort} 未就绪，浮窗将自行重连`);
     }
   });
+  // 等待 unified-api bus 端口就绪
+  waitForSocket(new URL(WORKFLOW_BUS_URL).hostname, Number(new URL(WORKFLOW_BUS_URL).port), 3000).then(busReady => {
+    if (!busReady) {
+      console.warn(`[browser-control] unified bus ${WORKFLOW_BUS_URL} 未就绪，浮窗 bus:status 可能延迟`);
+    }
+  });
   const wsUrl = `ws://${wsHost}:${wsPort}`;
-  const env: Record<string, string> = { WEBAUTO_FLOATING_WS_URL: wsUrl };
+  const env: Record<string, string> = {
+    WEBAUTO_FLOATING_WS_URL: wsUrl,
+    WEBAUTO_FLOATING_BUS_URL: WORKFLOW_BUS_URL,
+  };
   if (targetUrl) {
     env.WEBAUTO_FLOATING_TARGET_URL = targetUrl;
   }

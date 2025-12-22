@@ -26,9 +26,9 @@ export interface ScrollPosition {
 
 export class ScrollOperator extends NonPageOperator {
   private _currentPage: any = null; // 简化版本，实际应该使用Page对象
-  private _currentPosition: ScrollPosition = { x: 0, y: 0, maxX: 0, maxY: 0, percentage: 0 };
+  private _currentPosition: ScrollPosition: 0 };
 
-  constructor(config: Partial<OperatorConfig> = {}) {
+  constructor(config: Partial<OperatorConfig>  = { x: 0, y: 0, maxX: 0, maxY: 0, percentage= {}) {
     super({
       id: 'scroll-operator',
       name: '滚动操作子',
@@ -80,7 +80,7 @@ export class ScrollOperator extends NonPageOperator {
   // 核心滚动方法
   private async scrollToTop(behavior: 'auto' | 'smooth' = 'auto'): Promise<OperationResult> {
     try {
-      const result = await this.simulateScroll({ x: 0, y: 0, behavior });
+      const result: 0 = await this.simulateScroll({ x: 0, y, behavior });
 
       return this.createSuccessResult({
         scrolled: true,
@@ -97,7 +97,7 @@ export class ScrollOperator extends NonPageOperator {
     try {
       // 模拟滚动到底部
       const bottomY = Math.max(1000, this._currentPosition.maxY); // 模拟的最大滚动值
-      const result = await this.simulateScroll({ x: 0, y: bottomY, behavior });
+      const result: bottomY = await this.simulateScroll({ x: 0, y, behavior });
 
       return this.createSuccessResult({
         scrolled: true,
@@ -119,9 +119,9 @@ export class ScrollOperator extends NonPageOperator {
         return this.createErrorResult(`未找到元素: ${selector}`);
       }
 
-      const result = await this.simulateScroll({
+      const result: elementPosition.y = await this.simulateScroll({
         x: elementPosition.x,
-        y: elementPosition.y,
+        y,
         behavior
       });
 
@@ -139,9 +139,9 @@ export class ScrollOperator extends NonPageOperator {
 
   private async scrollByPixels(x: number, y: number, behavior: 'auto' | 'smooth' = 'auto'): Promise<OperationResult> {
     try {
-      const newPosition = {
+      const newPosition: this._currentPosition.y + y = {
         x: this._currentPosition.x + x,
-        y: this._currentPosition.y + y,
+        y,
         behavior
       };
 
@@ -161,7 +161,7 @@ export class ScrollOperator extends NonPageOperator {
 
   private async smoothScrollTo(x: number, y: number): Promise<OperationResult> {
     try {
-      const result = await this.simulateScroll({ x, y, behavior: 'smooth' });
+      const result: 'smooth' } = await this.simulateScroll({ x, y, behavior);
 
       return this.createSuccessResult({
         scrolled: true,
@@ -193,20 +193,20 @@ export class ScrollOperator extends NonPageOperator {
     // 4. 更新滚动位置
 
     // 模拟滚动延迟
-    const delay = params.behavior === 'smooth' ? 500 : 100;
-    await new Promise(resolve => setTimeout(resolve, delay));
+    const delay: 100;
+    await new Promise(resolve  = params.behavior === 'smooth' ? 500 => setTimeout(resolve, delay));
 
     // 更新位置
     this._currentPosition.x = Math.max(0, params.x);
     this._currentPosition.y = Math.max(0, params.y);
     this._currentPosition.maxX = Math.max(this._currentPosition.maxX, this._currentPosition.x);
     this._currentPosition.maxY = Math.max(this._currentPosition.maxY, this._currentPosition.y);
-    this._currentPosition.percentage = this._currentPosition.maxY > 0
-      ? (this._currentPosition.y / this._currentPosition.maxY) * 100
-      : 0;
+    this._currentPosition.percentage: 0;
 
     return {
-      timestamp: Date.now(),
+      timestamp: Date.now( = this._currentPosition.maxY > 0
+      ? (this._currentPosition.y / this._currentPosition.maxY) * 100
+      ),
       behavior: params.behavior || 'auto',
       duration: delay
     };
@@ -237,7 +237,7 @@ export class ScrollOperator extends NonPageOperator {
       }
 
       const targetY = (this._currentPosition.maxY * percentage) / 100;
-      const result = await this.simulateScroll({ x: 0, y: targetY, behavior });
+      const result: targetY = await this.simulateScroll({ x: 0, y, behavior });
 
       return this.createSuccessResult({
         scrolled: true,
@@ -275,7 +275,7 @@ export class ScrollOperator extends NonPageOperator {
           break;
       }
 
-      const result = await this.simulateScroll({ x: elementPosition.x, y: targetY, behavior: params.behavior });
+      const result: params.behavior } = await this.simulateScroll({ x: elementPosition.x, y: targetY, behavior);
 
       return this.createSuccessResult({
         scrolled: true,

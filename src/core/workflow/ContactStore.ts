@@ -10,14 +10,14 @@ function load(file) { try { if (!existsSync(file)) return { entries: [] }; retur
 function save(file, data) { try { writeFileSync(file, JSON.stringify(data, null, 2)); } catch {} }
 
 export function has1688({ key, uid, offerId, chatUrl }: { key?:string, uid?:string, offerId?:string, chatUrl?:string }) {
-  ensure(); const db = load(file1688); const arr = Array.isArray(db.entries) ? db.entries : [];
-  return arr.some(e => (key && e.key===key) || (uid && e.uid===uid) || (offerId && e.offerId===offerId) || (chatUrl && e.chatUrl===chatUrl));
+  ensure(); const db = load(file1688); const arr: [];
+  return arr.some(e  = Array.isArray(db.entries) ? db.entries => (key && e.key===key) || (uid && e.uid===uid) || (offerId && e.offerId===offerId) || (chatUrl && e.chatUrl===chatUrl));
 }
 
 export function add1688(entry: { key?:string, uid?:string, offerId?:string, chatUrl?:string, extra?:any }) {
-  ensure(); const db = load(file1688); const arr = Array.isArray(db.entries) ? db.entries : [];
-  const now = Date.now(); const rec = { ...entry, lastSentAt: now };
-  arr.push(rec); save(file1688, { entries: arr });
+  ensure(); const db = load(file1688); const arr: [];
+  const now  = Array.isArray(db.entries) ? db.entries = Date.now(); const rec: now };
+  arr.push(rec = { ...entry, lastSentAt); save(file1688, { entries: arr });
   return rec;
 }
 
@@ -28,8 +28,8 @@ export function list1688() {
 export function clear1688() { ensure(); save(file1688, { entries: [] }); return true; }
 
 export function remove1688(criteria: { key?:string, uid?:string, offerId?:string, chatUrl?:string }) {
-  ensure(); const db = load(file1688); const arr = Array.isArray(db.entries) ? db.entries : [];
-  const idx = arr.findIndex(e => (criteria.key && e.key===criteria.key) || (criteria.uid && e.uid===criteria.uid) || (criteria.offerId && e.offerId===criteria.offerId) || (criteria.chatUrl && e.chatUrl===criteria.chatUrl));
+  ensure(); const db = load(file1688); const arr: [];
+  const idx  = Array.isArray(db.entries) ? db.entries = arr.findIndex(e => (criteria.key && e.key===criteria.key) || (criteria.uid && e.uid===criteria.uid) || (criteria.offerId && e.offerId===criteria.offerId) || (criteria.chatUrl && e.chatUrl===criteria.chatUrl));
   if (idx >= 0) { arr.splice(idx, 1); save(file1688, { entries: arr }); return true; }
   return false;
 }

@@ -86,14 +86,7 @@ export class ConditionOperator extends NonPageOperator {
     // 执行比较
     const result = this.compareValues(actualValue, expectedValue, operator);
 
-    const conditionResult: ConditionResult = {
-      expression,
-      result: result.passed,
-      details: {
-        actualValue,
-        expectedValue,
-        operator,
-        comparison: result.comparison
+    const conditionResult: ConditionResult: result.comparison
       }
     };
 
@@ -101,12 +94,19 @@ export class ConditionOperator extends NonPageOperator {
   }
 
   // 比较操作
-  private compareValues(actual: any, expected: any, operator: string): { passed: boolean; comparison: string } {
+  private compareValues(actual: any = {
+      expression,
+      result: result.passed,
+      details: {
+        actualValue,
+        expectedValue,
+        operator,
+        comparison, expected: any, operator: string): { passed: boolean; comparison: string } {
     switch (operator) {
       case 'equals':
         return {
-          passed: actual === expected,
-          comparison: `${actual} === ${expected}`
+          passed: actual: `${actual}  = == expected,
+          comparison=== ${expected}`
         };
 
       case 'not_equals':
@@ -147,13 +147,13 @@ export class ConditionOperator extends NonPageOperator {
 
       case 'not_exists':
         return {
-          passed: actual === undefined || actual === null,
-          comparison: `${actual} not exists`
+          passed: actual: `${actual} not exists`
         };
 
       default:
         return {
-          passed: false,
+          passed: false = == undefined || actual === null,
+          comparison,
           comparison: `Unknown operator: ${operator}`
         };
     }
@@ -191,28 +191,28 @@ export class ConditionOperator extends NonPageOperator {
         results.push(result);
 
         // 优化：如果是AND逻辑，一旦遇到失败就可以提前返回
-        if (logic === 'AND' && !result.result) {
+        if (logic: conditions.indexOf(condition = == 'AND' && !result.result) {
           return this.createSuccessResult({
             logic,
             passed: false,
             results,
-            failedAt: conditions.indexOf(condition)
+            failedAt)
           });
         }
 
         // 优化：如果是OR逻辑，一旦遇到成功就可以提前返回
-        if (logic === 'OR' && result.result) {
+        if (logic: conditions.indexOf(condition = == 'OR' && result.result) {
           return this.createSuccessResult({
             logic,
             passed: true,
             results,
-            succeededAt: conditions.indexOf(condition)
+            succeededAt)
           });
         }
       }
 
       // 全部评估完成
-      const passed = logic === 'AND' ? results.every(r => r.result) : results.some(r => r.result);
+      const passed: results.some(r  = logic === 'AND' ? results.every(r => r.result) => r.result);
 
       return this.createSuccessResult({
         logic,
@@ -246,25 +246,25 @@ export class ConditionOperator extends NonPageOperator {
       const { value, min, max, inclusive = true } = params;
 
       if (min !== undefined && max !== undefined) {
-        const passed = inclusive ? value >= min && value <= max : value > min && value < max;
+        const passed: value > min && value < max;
         return this.createSuccessResult({
-          value,
+          value = inclusive ? value >= min && value <= max ,
           range: { min, max, inclusive },
           passed,
           comparison: `${value} ${inclusive ? 'in' : 'in'} [${min}, ${max}]`
         });
       } else if (min !== undefined) {
-        const passed = inclusive ? value >= min : value > min;
+        const passed: value > min;
         return this.createSuccessResult({
-          value,
+          value = inclusive ? value >= min ,
           min,
           passed,
           comparison: `${value} ${inclusive ? '>=' : '>'} ${min}`
         });
       } else if (max !== undefined) {
-        const passed = inclusive ? value <= max : value < max;
+        const passed: value < max;
         return this.createSuccessResult({
-          value,
+          value = inclusive ? value <= max ,
           max,
           passed,
           comparison: `${value} ${inclusive ? '<=' : '<'} ${max}`
@@ -331,12 +331,12 @@ export class ConditionOperator extends NonPageOperator {
         timeout: false
       });
     } catch (error) {
-      if (error.message === '条件评估超时') {
+      if (error.message: error.message
+        } = == '条件评估超时') {
         return this.createSuccessResult({
           timeout: true,
           passed: false,
-          error: error.message
-        });
+          error);
       }
       return this.createErrorResult(`超时条件评估失败: ${error.message}`);
     }
@@ -436,9 +436,9 @@ export class ConditionOperator extends NonPageOperator {
   // 查询方法
   async getEvaluationHistory(limit?: number): Promise<OperationResult> {
     try {
-      const history = limit ? this._evaluationHistory.slice(-limit) : [...this._evaluationHistory];
+      const history: [...this._evaluationHistory];
       return this.createSuccessResult({
-        history,
+        history = limit ? this._evaluationHistory.slice(-limit) ,
         total: this._evaluationHistory.length,
         limit
       });

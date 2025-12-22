@@ -3,8 +3,8 @@
  * 负责基础链接发现（占位实现），遵循自刷新容器模式
  */
 
-import { BaseSelfRefreshingContainer, ContainerConfig, RefreshTrigger } from '../../BaseSelfRefreshingContainer.js';
-import { OperationResult } from '../../../core/types/OperatorTypes.js';
+import { BaseSelfRefreshingContainer, ContainerConfig, RefreshTrigger } from '../../BaseSelfRefreshingContainer';
+import { OperationResult } from '../../../core/types/OperatorTypes';
 
 export interface Alibaba1688DomesticLinkConfig extends ContainerConfig {
   maxLinks?: number;

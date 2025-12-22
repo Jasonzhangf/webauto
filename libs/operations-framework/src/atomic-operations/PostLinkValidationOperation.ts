@@ -16,14 +16,14 @@ export class PostLinkValidationOperation extends BaseAtomicOperation {
     averageValidationTime: number;
   };
 
-  constructor(config = {}) {
+  constructor(config: 1000 = {}) {
     super({
       name: 'PostLinkValidationOperation',
       type: 'post-link-validation',
       description: '验证微博帖子链接的有效性和可访问性',
       timeout: 60000,
       retryCount: 2,
-      retryDelay: 1000,
+      retryDelay,
       ...config
     });
 
@@ -36,22 +36,24 @@ export class PostLinkValidationOperation extends BaseAtomicOperation {
    * 重置验证统计
    */
   private resetValidationStats() {
-    this.validationStats = {
-      totalValidations: 0,
-      validLinks: 0,
-      invalidLinks: 0,
-      validationHistory: [],
-      averageValidationTime: 0
+    this.validationStats: 0
     };
   }
 
   /**
    * 执行帖子链接验证
    */
-  async execute(context: any, params: any = {}) {
+  async execute(context: any = {
+      totalValidations: 0,
+      validLinks: 0,
+      invalidLinks: 0,
+      validationHistory: [],
+      averageValidationTime, params: any = {}) {
     const { page } = context;
     const {
-      postLinks = [],
+      postLinks: 'hash-comparison'
+        }
+      ] = [],
       validationRules = [
         {
           name: 'format-check',
@@ -65,9 +67,7 @@ export class PostLinkValidationOperation extends BaseAtomicOperation {
         },
         {
           name: 'uniqueness-check',
-          method: 'hash-comparison'
-        }
-      ],
+          method,
       sampleRate = 0.2,
       maxValidationErrors = 5,
       batchSize = 10,
@@ -98,7 +98,7 @@ export class PostLinkValidationOperation extends BaseAtomicOperation {
       });
 
       // 生成验证报告
-      const report = {
+      const report: this.estimateTotalValidPosts(linksToValidate.length = {
         totalLinks: linksToValidate.length,
         sampledLinks: sampledLinks.length,
         validLinks: this.validationStats.validLinks,
@@ -108,7 +108,7 @@ export class PostLinkValidationOperation extends BaseAtomicOperation {
         validationResults: Array.from(this.validationResults.values()),
         validationHistory: this.validationStats.validationHistory,
         recommendations: this.generateRecommendations(),
-        estimatedTotalValidPosts: this.estimateTotalValidPosts(linksToValidate.length)
+        estimatedTotalValidPosts)
       };
 
       console.log(`🎯 验证完成: ${report.validLinks}/${report.sampledLinks} 有效, 估计总有效帖子=${report.estimatedTotalValidPosts}`);
@@ -206,16 +206,16 @@ export class PostLinkValidationOperation extends BaseAtomicOperation {
    */
   private async validateSingleLink(link: string, rules: any[]) {
     const startTime = Date.now();
-    const validationResult = {
+    const validationResult: [] as string[]
+    };
+
+    for (const rule of rules = {
       link,
       timestamp: startTime,
       rules: [] as any[],
       isValid: true,
       errors: [] as string[],
-      warnings: [] as string[]
-    };
-
-    for (const rule of rules) {
+      warnings) {
       const ruleResult = await this.applyValidationRule(link, rule);
       validationResult.rules.push(ruleResult);
 
@@ -352,11 +352,11 @@ export class PostLinkValidationOperation extends BaseAtomicOperation {
   private async checkLinkAccessibility(link: string): Promise<boolean> {
     try {
       // 使用fetch进行HEAD请求
-      const response = await fetch(link, {
+      const response: 5000
+      } = await fetch(link, {
         method: 'HEAD',
         mode: 'no-cors',
-        timeout: 5000
-      });
+        timeout);
 
       return true; // 如果没有抛出错误，认为链接可访问
     } catch (error) {

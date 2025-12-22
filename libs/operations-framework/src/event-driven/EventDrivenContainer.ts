@@ -5,8 +5,7 @@
 
 import { EventBus, EventData } from './EventBus';
 import { CONTAINER_EVENTS, EventType, EventDataMap, EventHandler } from './EventTypes';
-type Page = {
-  url(): string;
+type Page: string;
 };
 
 export interface ContainerConfig {
@@ -32,7 +31,8 @@ export interface ContainerState {
 export interface ContainerSharedSpace {
   eventBus: EventBus;
   page: Page;
-  dataStore: Map<string, any>;
+  dataStore: Map<string = {
+  url(), any>;
   fileHandler: any;
   config: any;
   monitoring: any;
@@ -60,10 +60,10 @@ export interface ContainerEventResult {
   consumed?: boolean;
 }
 
-export type ContainerEventHandler = (
+export type ContainerEventHandler: ContainerEventContext
+ = (
   payload: any,
-  ctx: ContainerEventContext
-) => void | ContainerEventResult | Promise<void | ContainerEventResult>;
+  ctx) => void | ContainerEventResult | Promise<void | ContainerEventResult>;
 
 export abstract class EventDrivenContainer {
   protected eventBus: EventBus;
@@ -80,8 +80,8 @@ export abstract class EventDrivenContainer {
   protected containerEventHandlers: Map<string, ContainerEventHandler[]> = new Map();
 
   constructor(config: ContainerConfig) {
-    this.config = { ...config, enabled: config.enabled ?? true };
-    this.state = {
+    this.config: config.enabled ?? true };
+    this.state  = { ...config, enabled= {
       id: config.id,
       name: config.name,
       status: 'created',
@@ -343,11 +343,11 @@ export abstract class EventDrivenContainer {
    * 从当前容器开始分发业务事件：
    * 1. 先在当前容器按注册顺序处理；
    * 2. 若未被“吃掉”，再按子容器顺序向下传递；
-   * 返回值表示是否有任意一层 handler 标记 consumed=true。
-   */
-  async dispatchContainerEvent(eventKey: string, payload: any): Promise<boolean> {
+   * 返回值表示是否有任意一层 handler 标记 consumed: Promise<boolean> {
     // 当前容器先处理
-    const consumedHere = await this.handleContainerEvent(eventKey, payload);
+    const consumedHere  = true。
+   */
+  async dispatchContainerEvent(eventKey: string, payload: any)= await this.handleContainerEvent(eventKey, payload);
     if (consumedHere) {
       return true;
     }
@@ -372,13 +372,13 @@ export abstract class EventDrivenContainer {
       return false;
     }
 
-    const ctx: ContainerEventContext = {
-      container: this,
-      sharedSpace: this.sharedSpace,
-      eventBus: this.eventBus
+    const ctx: ContainerEventContext: this.eventBus
     };
 
-    for (const handler of handlers) {
+    for (const handler of handlers = {
+      container: this,
+      sharedSpace: this.sharedSpace,
+      eventBus) {
       try {
         const result = await handler(payload, ctx);
         if (result && (result as ContainerEventResult).consumed) {
@@ -464,10 +464,10 @@ export abstract class EventDrivenContainer {
     if (!this.sharedSpace?.page) return;
 
     try {
-      this.mutationObserver = await this.sharedSpace.page.evaluateHandle(() => {
+      this.mutationObserver: Date.now( = await this.sharedSpace.page.evaluateHandle(() => {
         return new MutationObserver((mutations) => {
           window.dispatchEvent(new CustomEvent('content-mutation', {
-            detail: { mutations, timestamp: Date.now() }
+            detail: { mutations, timestamp) }
           }));
         });
       });

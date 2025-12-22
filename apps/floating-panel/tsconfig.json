@@ -7,21 +7,18 @@
     "skipLibCheck": true,
     "esModuleInterop": true,
     "allowSyntheticDefaultImports": true,
-    "strict": false,
-    "forceConsistentCasingInFileNames": false,
+    "strict": true,
+    "forceConsistentCasingInFileNames": true,
     "moduleResolution": "node",
     "resolveJsonModule": true,
-    "isolatedModules": false,
+    "isolatedModules": true,
     "noEmit": false,
     "declaration": false,
     "sourceMap": true,
     "outDir": "./dist",
-    "rootDir": "./",
+    "rootDir": "./src",
     "baseUrl": "./"
   },
-  "include": [
-    "electron/**/*.ts",
-    "renderer/**/*.ts"
-  ],
-  "exclude": ["node_modules", "dist", "**/*.bak"]
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist"]
 }

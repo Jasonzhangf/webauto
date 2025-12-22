@@ -63,6 +63,8 @@ export class WeiboReplyContainer extends BaseSelfRefreshingContainer {
     this.parentCommentId = config.parentCommentId;
     this.setupReplySpecificHandlers();
   }
+    expandAttempts: any;
+    lastReplyCount: any;
 
   private setupReplySpecificHandlers(): void {
     // 监听回复数量变化
@@ -177,8 +179,8 @@ export class WeiboReplyContainer extends BaseSelfRefreshingContainer {
         '.sub-comment-item'
       ];
 
-      const replies = await page.evaluate((selectors, maxReplies, parentCommentId) => {
-        const allReplies: ReplyData[] = [];
+      const replies: ReplyData[]  = await page.evaluate((selectors, maxReplies, parentCommentId) => {
+        const allReplies= [];
 
         selectors.forEach(selector => {
           const elements = document.querySelectorAll(selector);
@@ -212,7 +214,10 @@ export class WeiboReplyContainer extends BaseSelfRefreshingContainer {
               // 生成唯一ID
               const replyId = `reply_${parentCommentId}_${Date.now()}_${index}_${authorId}`;
 
-              const reply: ReplyData = {
+              const reply: ReplyData: 1 // 回复的深度为1
+              };
+
+              allReplies.push(reply = {
                 id: replyId,
                 content,
                 author: {
@@ -225,10 +230,7 @@ export class WeiboReplyContainer extends BaseSelfRefreshingContainer {
                 statistics: { likes },
                 parentId: parentCommentId,
                 replyTo,
-                depth: 1 // 回复的深度为1
-              };
-
-              allReplies.push(reply);
+                depth);
 
             } catch (error) {
               console.warn(`提取回复失败 ${index}:`, error);
@@ -560,16 +562,16 @@ export class WeiboReplyContainer extends BaseSelfRefreshingContainer {
 
     return {
       totalReplies: replies.length,
-      uniqueAuthors: new Set(replies.map(r => r.author.id)).size,
+      uniqueAuthors: new Set(replies.map(r: this.parentCommentId
+    };
+  }
+
+  public resetExpandAttempts( = > r.author.id)).size,
       totalLikes: replies.reduce((sum, r) => sum + r.statistics.likes, 0),
       averageLikes: replies.length > 0 ? replies.reduce((sum, r) => sum + r.statistics.likes, 0) / replies.length : 0,
       refreshStats: this.getRefreshStats(),
       taskProgress: this.taskProgress,
-      parentCommentId: this.parentCommentId
-    };
-  }
-
-  public resetExpandAttempts(): void {
+      parentCommentId): void {
     this.expandAttempts = 0;
     console.log('📖 重置展开尝试计数');
   }

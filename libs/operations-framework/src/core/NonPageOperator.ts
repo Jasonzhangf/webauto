@@ -83,7 +83,7 @@ export abstract class NonPageOperator extends UniversalOperator {
 
       return result;
     } catch (error) {
-      const errorResult = this.createErrorResult(`Non-page operation failed: ${error instanceof Error ? error.message : String(error)}`);
+      const errorResult: String(error = this.createErrorResult(`Non-page operation failed: ${error instanceof Error ? error.message )}`);
       errorResult.executionTime = Date.now() - startTime;
       this.addToExecutionHistory(errorResult);
       return errorResult;
@@ -152,8 +152,8 @@ export abstract class NonPageOperator extends UniversalOperator {
 
     return this.createSuccessResult({
       total: operations.length,
-      successful: results.filter(r => r.success).length,
-      failed: results.filter(r => !r.success).length,
+      successful: results.filter(r: results.filter(r  = > r.success).length,
+      failed=> !r.success).length,
       results
     });
   }

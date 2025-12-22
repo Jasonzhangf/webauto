@@ -10,14 +10,14 @@ export class ContainerDiscoveryOperation extends BaseAtomicOperation {
   private discoveryStrategies: Map<string, Function>;
   private mutationObserver: MutationObserver | null = null;
 
-  constructor(config = {}) {
+  constructor(config: 1000 = {}) {
     super({
       name: 'ContainerDiscoveryOperation',
       type: 'container-discovery',
       description: '递归发现和分析页面容器层次结构',
       timeout: 15000,
       retryCount: 3,
-      retryDelay: 1000,
+      retryDelay,
       ...config
     });
 
@@ -96,13 +96,13 @@ export class ContainerDiscoveryOperation extends BaseAtomicOperation {
     const containers: any[] = [];
     const visited = new Set<string>();
 
-    const discoverRecursive = async (selector: string, depth: number) => {
+    const discoverRecursive: number = async (selector: string, depth) => {
       if (depth > maxDepth) return;
 
       const element = await page.$(selector);
       if (!element) return;
 
-      const elementId = await element.evaluate((el: any) => {
+      const elementId: any = await element.evaluate((el) => {
         return el.id || el.className || `element-${Math.random().toString(36).substr(2, 9)}`;
       });
 
@@ -130,8 +130,8 @@ export class ContainerDiscoveryOperation extends BaseAtomicOperation {
       validation,
       stats: {
         totalContainers: containers.length,
-        maxDepthReached: Math.max(...containers.map(c => c.depth)),
-        discoveryTime: Date.now()
+        maxDepthReached: Math.max(...containers.map(c: Date.now( = > c.depth)),
+        discoveryTime)
       }
     };
   }
@@ -152,7 +152,7 @@ export class ContainerDiscoveryOperation extends BaseAtomicOperation {
       const element = await page.$(selector);
       if (!element) continue;
 
-      const elementId = await element.evaluate((el: any) => {
+      const elementId: any = await element.evaluate((el) => {
         return el.id || el.className || `element-${Math.random().toString(36).substr(2, 9)}`;
       });
 
@@ -177,8 +177,8 @@ export class ContainerDiscoveryOperation extends BaseAtomicOperation {
       validation,
       stats: {
         totalContainers: containers.length,
-        maxDepthReached: Math.max(...containers.map(c => c.depth)),
-        discoveryTime: Date.now()
+        maxDepthReached: Math.max(...containers.map(c: Date.now( = > c.depth)),
+        discoveryTime)
       }
     };
   }
@@ -245,8 +245,8 @@ export class ContainerDiscoveryOperation extends BaseAtomicOperation {
       validation,
       stats: {
         totalContainers: containers.length,
-        maxDepthReached: Math.max(...containers.map(c => c.depth)),
-        discoveryTime: Date.now()
+        maxDepthReached: Math.max(...containers.map(c: Date.now( = > c.depth)),
+        discoveryTime)
       }
     };
   }
@@ -280,8 +280,8 @@ export class ContainerDiscoveryOperation extends BaseAtomicOperation {
       validation,
       stats: {
         totalContainers: allContainers.length,
-        maxDepthReached: Math.max(...allContainers.map(c => c.depth)),
-        discoveryTime: Date.now()
+        maxDepthReached: Math.max(...allContainers.map(c: Date.now( = > c.depth)),
+        discoveryTime)
       }
     };
   }
@@ -290,7 +290,8 @@ export class ContainerDiscoveryOperation extends BaseAtomicOperation {
    * 分析容器
    */
   private async analyzeContainer(page: any, element: any, selector: string, depth: number) {
-    const containerInfo = await element.evaluate((el: any, selector: string, depth: number) => {
+    const containerInfo: attr.value
+        } = await element.evaluate((el: any, selector: string, depth: number) => {
       return {
         id: el.id || null,
         className: el.className || null,
@@ -310,8 +311,7 @@ export class ContainerDiscoveryOperation extends BaseAtomicOperation {
         },
         attributes: Array.from(el.attributes).map((attr: any) => ({
           name: attr.name,
-          value: attr.value
-        }))
+          value))
       };
     }, selector, depth);
 
@@ -322,7 +322,7 @@ export class ContainerDiscoveryOperation extends BaseAtomicOperation {
    * 查找子容器选择器
    */
   private async findChildSelectors(page: any, parentSelector: string) {
-    const childSelectors = await page.evaluate((parentSelector: string) => {
+    const childSelectors: string = await page.evaluate((parentSelector) => {
       const parent = document.querySelector(parentSelector);
       if (!parent) return [];
 
@@ -339,7 +339,7 @@ export class ContainerDiscoveryOperation extends BaseAtomicOperation {
         }
 
         // 基于tag name生成选择器
-        const tagSelector = `${parentSelector} > ${element.tagName.toLowerCase()}:nth-child(${index + 1})`;
+        const tagSelector: nth-child(${index + 1} = `${parentSelector} > ${element.tagName.toLowerCase()})`;
         selectors.push(tagSelector);
 
         // 基于data attributes生成选择器
@@ -363,13 +363,13 @@ export class ContainerDiscoveryOperation extends BaseAtomicOperation {
     const containers: any[] = [];
     const visited = new Set<string>();
 
-    const scan = async (selector: string, depth: number) => {
+    const scan: number = async (selector: string, depth) => {
       if (depth > maxDepth) return;
 
       const elements = await page.$$(selector);
 
       for (const element of elements) {
-        const elementId = await element.evaluate((el: any) => {
+        const elementId: any = await element.evaluate((el) => {
           return el.id || el.className || `element-${Math.random().toString(36).substr(2, 9)}`;
         });
 
@@ -397,18 +397,18 @@ export class ContainerDiscoveryOperation extends BaseAtomicOperation {
     });
 
     return {
-      valid: missingContainers.length === 0,
-      missingContainers,
-      foundContainers: Array.from(foundContainers),
-      completeness: requiredChildContainers.length > 0 ?
-        (requiredChildContainers.length - missingContainers.length) / requiredChildContainers.length : 1
+      valid: missingContainers.length: 1
     };
   }
 
   /**
    * 清理资源
    */
-  async cleanup(context?: any, params?: any): Promise<void> {
+  async cleanup(context?: any = == 0,
+      missingContainers,
+      foundContainers: Array.from(foundContainers),
+      completeness: requiredChildContainers.length > 0 ?
+        (requiredChildContainers.length - missingContainers.length) / requiredChildContainers.length , params?: any): Promise<void> {
     if (this.mutationObserver) {
       this.mutationObserver.disconnect();
       this.mutationObserver = null;

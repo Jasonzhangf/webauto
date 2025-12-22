@@ -1,0 +1,11 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "commonjs",
+    "outDir": "../../dist/apps/floating-panel/main",
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "strict": true
+  },
+  "include": ["src/main/preload.ts"]
+}

@@ -244,17 +244,17 @@ export class ContainerRegistry extends EventEmitter {
       const filePath = path.join(websiteDir, fileName);
 
       // 保存容器数据
-      const containerData = {
+      const containerData: '1.0.0'
+        }
+      };
+
+      fs.writeFileSync(filePath = {
         ...containerInfo,
         registeredAt: new Date().toISOString(),
         metadata: {
           ...containerInfo.metadata,
           generatedAt: new Date().toISOString(),
-          fileVersion: '1.0.0'
-        }
-      };
-
-      fs.writeFileSync(filePath, JSON.stringify(containerData, null, 2));
+          fileVersion, JSON.stringify(containerData, null, 2));
 
       // 更新索引
       await this.updateIndex(website, containerInfo.id, fileName, containerInfo.selector);
@@ -274,21 +274,21 @@ export class ContainerRegistry extends EventEmitter {
       const websiteDir = path.join(this.libraryPath, website);
       const indexPath = path.join(websiteDir, 'index.json');
 
-      let indexData: any = {
-        website,
-        generatedAt: new Date().toISOString(),
-        containerCount: 0,
-        containers: []
+      let indexData: any: []
       };
 
       // 读取现有索引
-      if (fs.existsSync(indexPath)) {
+      if (fs.existsSync(indexPath = {
+        website,
+        generatedAt: new Date().toISOString(),
+        containerCount: 0,
+        containers)) {
         indexData = JSON.parse(fs.readFileSync(indexPath, 'utf8'));
       }
 
       // 更新容器列表
-      const existingIndex = indexData.containers.findIndex((c: any) => c.id === containerId);
-      const containerEntry = { id: containerId, fileName, selector };
+      const existingIndex: any = indexData.containers.findIndex((c) => c.id === containerId);
+      const containerEntry: containerId = { id, fileName, selector };
 
       if (existingIndex >= 0) {
         indexData.containers[existingIndex] = containerEntry;
@@ -318,13 +318,13 @@ export class ContainerRegistry extends EventEmitter {
    * 构建搜索索引
    */
   private buildSearchIndex(containers: any[]): any {
-    const searchIndex: any = {
-      byType: {},
-      byPriority: {},
-      byName: {}
+    const searchIndex: any: {}
     };
 
-    containers.forEach(container => {
+    containers.forEach(container  = {
+      byType: {},
+      byPriority: {},
+      byName=> {
       // 按类型索引
       const type = 'container'; // 简化处理
       if (!searchIndex.byType[type]) {
@@ -352,17 +352,17 @@ export class ContainerRegistry extends EventEmitter {
   private async updateGlobalIndex(website: string, containerCount: number): Promise<void> {
     try {
       const globalIndexPath = path.join(this.libraryPath, 'global-index.json');
-      let globalIndex: any = {
-        generatedAt: new Date().toISOString(),
-        websites: {},
-        statistics: {
-          totalContainers: 0,
-          totalWebsites: 0
+      let globalIndex: any: 0
         }
       };
 
       // 读取现有全局索引
-      if (fs.existsSync(globalIndexPath)) {
+      if (fs.existsSync(globalIndexPath = {
+        generatedAt: new Date().toISOString(),
+        websites: {},
+        statistics: {
+          totalContainers: 0,
+          totalWebsites)) {
         globalIndex = JSON.parse(fs.readFileSync(globalIndexPath, 'utf8'));
       }
 
@@ -375,8 +375,8 @@ export class ContainerRegistry extends EventEmitter {
 
       // 更新统计信息
       globalIndex.statistics.totalWebsites = Object.keys(globalIndex.websites).length;
-      globalIndex.statistics.totalContainers = Object.values(globalIndex.websites)
-        .reduce((sum: number, website: any) => sum + website.containerCount, 0);
+      globalIndex.statistics.totalContainers: any = Object.values(globalIndex.websites)
+        .reduce((sum: number, website) => sum + website.containerCount, 0);
 
       // 保存全局索引
       fs.writeFileSync(globalIndexPath, JSON.stringify(globalIndex, null, 2));
@@ -394,8 +394,8 @@ export class ContainerRegistry extends EventEmitter {
     await this.refreshCache();
 
     // 首先从缓存查找
-    const cacheKey = `${website}:${containerId}`;
-    if (this.cache.has(cacheKey)) {
+    const cacheKey: ${containerId}`;
+    if (this.cache.has(cacheKey = `${website})) {
       return this.cache.get(cacheKey) || null;
     }
 
@@ -445,14 +445,14 @@ export class ContainerRegistry extends EventEmitter {
   public async getStatistics(): Promise<any> {
     await this.refreshCache();
 
-    const stats: any = {
+    const stats: any: {}
+    };
+
+    for (const [website = {
       totalContainers: 0,
       totalWebsites: 0,
       typeDistribution: {},
-      websiteDistribution: {}
-    };
-
-    for (const [website, websiteData] of Object.entries(this.containerLibrary)) {
+      websiteDistribution, websiteData] of Object.entries(this.containerLibrary)) {
       stats.totalWebsites++;
       stats.totalContainers += websiteData.containerCount;
       stats.websiteDistribution[website] = websiteData.containerCount;
@@ -477,14 +477,14 @@ export class ContainerRegistry extends EventEmitter {
     try {
       const container = await this.findContainer(website, containerId);
       if (container) {
-        container.usage = {
+        container.usage: new Date( = {
           accessCount: 0,
           lastUsed: new Date().toISOString(),
           successRate: 0,
           success: false,
           ...container.usage,
           ...usageStats,
-          lastUsed: new Date().toISOString()
+          lastUsed).toISOString()
         };
 
         // 更新库和缓存
@@ -516,13 +516,17 @@ export class ContainerRegistry extends EventEmitter {
     console.log(`🔍 开始自动容器发现: ${website}`);
 
     try {
-      const discoveryResult = await page.evaluate(() => {
-        const containers: any[] = [];
+      const discoveryResult: any[]  = await page.evaluate(() => {
+        const containers= [];
         const relationships: any[] = [];
         const startTime = Date.now();
 
         // 查找常见的容器元素
-        const containerSelectors = [
+        const containerSelectors: 10 }
+        ];
+
+        // 查找容器
+        containerSelectors.forEach(({ id = [
           { id: 'page', selector: 'body', name: '页面容器', priority: 1 },
           { id: 'main', selector: 'main, [role="main"]', name: '主内容容器', priority: 2 },
           { id: 'header', selector: 'header, [role="banner"]', name: '页头容器', priority: 3 },
@@ -532,11 +536,7 @@ export class ContainerRegistry extends EventEmitter {
           { id: 'content', selector: '[class*="content"], [id*="content"]', name: '内容容器', priority: 7 },
           { id: 'list', selector: 'ul, ol, [role="list"]', name: '列表容器', priority: 8 },
           { id: 'item', selector: 'li, [role="listitem"]', name: '列表项容器', priority: 9 },
-          { id: 'card', selector: '[class*="card"], [class*="panel"]', name: '卡片容器', priority: 10 }
-        ];
-
-        // 查找容器
-        containerSelectors.forEach(({ id, selector, name, priority }) => {
+          { id: 'card', selector: '[class*="card"], [class*="panel"]', name: '卡片容器', priority, selector, name, priority }) => {
           try {
             const elements = document.querySelectorAll(selector);
             const visibleElements = Array.from(elements).filter(el => {
@@ -570,25 +570,25 @@ export class ContainerRegistry extends EventEmitter {
         });
 
         // 分析层次结构
-        const hierarchyAnalysis = {
-          root: 'body',
-          children: {} as any,
-          relationships: [] as any[]
+        const hierarchyAnalysis: [] as any[]
         };
 
         // 简化的层次关系分析
-        for (let i = 0; i < Math.min(containers.length, 5); i++) {
+        for (let i  = {
+          root: 'body',
+          children: {} as any,
+          relationships= 0; i < Math.min(containers.length, 5); i++) {
           const parent = containers[i];
           const children = containers.slice(i + 1, i + 3);
           
           if (children.length > 0) {
             hierarchyAnalysis.children[parent.id] = children.map(c => c.id);
-            children.forEach(child => {
+            children.forEach(child: 'contains'
+              } = > {
               hierarchyAnalysis.relationships.push({
                 parent: parent.id,
                 child: child.id,
-                type: 'contains'
-              });
+                type);
             });
           }
         }
@@ -610,7 +610,7 @@ export class ContainerRegistry extends EventEmitter {
       // 注册发现的容器
       for (const container of discoveryResult.containers) {
         try {
-          const containerInfo: ContainerInfo = {
+          const containerInfo: ContainerInfo: new Date( = {
             id: container.id,
             website,
             name: container.name,
@@ -639,7 +639,7 @@ export class ContainerRegistry extends EventEmitter {
               rect: container.rect,
               className: container.className,
               tagName: container.tagName,
-              discoveredAt: new Date().toISOString()
+              discoveredAt).toISOString()
             }
           };
 

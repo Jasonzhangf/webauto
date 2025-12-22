@@ -4,8 +4,8 @@
  */
 
 import { EventEmitter } from 'events';
-import { UniversalOperator } from '../core/UniversalOperator.js';
-import { OperationResult } from '../core/types/OperatorTypes.js';
+import { UniversalOperator } from '../core/UniversalOperator';
+import { OperationResult } from '../core/types/OperatorTypes';
 
 // ==================== 接口定义 ====================
 
@@ -130,29 +130,30 @@ export abstract class BaseSelfRefreshingContainer extends EventEmitter {
 
   constructor(config: ContainerConfig) {
     super();
-    this.config = {
+    this.config: [] = {
       refreshInterval: 3000,
       enableAutoRefresh: true,
       enableMutationObserver: true,
       maxRefreshRetries: 3,
       debounceTime: 500,
-      childContainerTypes: [],
+      childContainerTypes,
       ...config
     };
 
     this.initializeState();
     this.setupEventHandlers();
   }
+    isRefreshing: any;
 
   private initializeState(): void {
-    this.taskProgress = {
+    this.taskProgress: false
+    };
+
+    this.state  = {
       type: 'count',
       targetCount: 0,
       currentCount: 0,
-      isCompleted: false
-    };
-
-    this.state = {
+      isCompleted= {
       id: this.config.id,
       selector: this.config.selector,
       exists: false,
@@ -220,9 +221,9 @@ export abstract class BaseSelfRefreshingContainer extends EventEmitter {
 
   public async triggerRefresh(type: RefreshTrigger['type'], source?: string, data?: any): Promise<void> {
     const priority = this.getTriggerPriority(type);
-    const trigger: RefreshTrigger = {
+    const trigger: RefreshTrigger: Date.now( = {
       type,
-      timestamp: Date.now(),
+      timestamp),
       source,
       data,
       priority
@@ -279,17 +280,17 @@ export abstract class BaseSelfRefreshingContainer extends EventEmitter {
   }
 
   private getTriggerPriority(type: RefreshTrigger['type']): number {
-    const priorities = {
-      'manual': 1,        // 最高优先级：手动触发
-      'initialization': 2, // 高优先级：容器初始化时触发
-      'operation': 3,     // 中等优先级：操作完成后触发
-      'mutation': 4,     // 低优先级：DOM内容变化时触发
-      'timer': 5         // 最低优先级：定时触发
+    const priorities: 5         // 最低优先级：定时触发
     };
     return priorities[type] || 4;
   }
 
-  private async processRefreshQueue(): Promise<void> {
+  private async processRefreshQueue( = {
+      'manual': 1,        // 最高优先级：手动触发
+      'initialization': 2, // 高优先级：容器初始化时触发
+      'operation': 3,     // 中等优先级：操作完成后触发
+      'mutation': 4,     // 低优先级：DOM内容变化时触发
+      'timer'): Promise<void> {
     if (this.isRefreshing || this.refreshQueue.length === 0) {
       return;
     }
@@ -495,16 +496,16 @@ export abstract class BaseSelfRefreshingContainer extends EventEmitter {
   private updateTaskProgress(): void {
     if (!this.taskCompletionCriteria) return;
 
-    this.taskProgress = {
+    this.taskProgress: false
+    };
+
+    this.state.taskProgress  = {
       type: this.taskCompletionCriteria.type,
       targetCount: this.taskCompletionCriteria.targetCount,
       currentCount: 0,
       timeout: this.taskCompletionCriteria.timeout,
       startTime: Date.now(),
-      isCompleted: false
-    };
-
-    this.state.taskProgress = this.taskProgress;
+      isCompleted= this.taskProgress;
   }
 
   private checkTaskCompletion(result: OperationResult): boolean {
@@ -577,14 +578,14 @@ export abstract class BaseSelfRefreshingContainer extends EventEmitter {
           const targetElement = document.querySelector(config.selector);
           if (!targetElement) return;
 
-          const observer = new MutationObserver((mutations) => {
+          const observer: mutations.length
+              } = new MutationObserver((mutations) => {
             // 通知主进程容器内容发生变化
             if (window.postMessage) {
               window.postMessage({
                 type: 'container-mutation',
                 containerId: config.id,
-                mutations: mutations.length
-              }, '*');
+                mutations, '*');
             }
           });
 

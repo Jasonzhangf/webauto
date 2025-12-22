@@ -9,7 +9,11 @@ import { OperationResult, OperatorState } from '../../core/types/OperatorTypes';
  * 工作流步骤类型
  */
 export enum WorkflowStepType {
-  OPERATOR = 'operator',
+  OPERATOR: string;
+  name: string;
+  type: WorkflowStepType;
+  operatorId?: string;
+  params?: Record<string = 'operator',
   CONDITION = 'condition',
   LOOP = 'loop',
   PARALLEL = 'parallel',
@@ -33,11 +37,7 @@ export enum WorkflowState {
  * 工作流步骤接口
  */
 export interface WorkflowStep {
-  id: string;
-  name: string;
-  type: WorkflowStepType;
-  operatorId?: string;
-  params?: Record<string, any>;
+  id, any>;
   condition?: string;
   nextStepOnSuccess?: string;
   nextStepOnFailure?: string;
@@ -156,24 +156,7 @@ export interface ErrorHandlerParams {
  * 工作流事件枚举
  */
 export enum WorkflowEventType {
-  WORKFLOW_STARTED = 'workflow.started',
-  WORKFLOW_COMPLETED = 'workflow.completed',
-  WORKFLOW_ERROR = 'workflow.error',
-  WORKFLOW_STOPPED = 'workflow.stopped',
-  WORKFLOW_PAUSED = 'workflow.paused',
-  WORKFLOW_RESUMED = 'workflow.resumed',
-  STEP_STARTED = 'step.started',
-  STEP_COMPLETED = 'step.completed',
-  STEP_ERROR = 'step.error',
-  STEP_RETRY = 'step.retry',
-  CONDITION_EVALUATED = 'condition.evaluated'
-}
-
-/**
- * 工作流事件数据接口
- */
-export interface WorkflowEventData {
-  type: WorkflowEventType;
+  WORKFLOW_STARTED: WorkflowEventType;
   timestamp: number;
   workflowId: string;
   sessionId: string;
@@ -194,4 +177,21 @@ export interface WorkflowStats {
   averageStepsPerWorkflow: number;
   retryCount: number;
   errorCount: number;
+} = 'workflow.started',
+  WORKFLOW_COMPLETED = 'workflow.completed',
+  WORKFLOW_ERROR = 'workflow.error',
+  WORKFLOW_STOPPED = 'workflow.stopped',
+  WORKFLOW_PAUSED = 'workflow.paused',
+  WORKFLOW_RESUMED = 'workflow.resumed',
+  STEP_STARTED = 'step.started',
+  STEP_COMPLETED = 'step.completed',
+  STEP_ERROR = 'step.error',
+  STEP_RETRY = 'step.retry',
+  CONDITION_EVALUATED = 'condition.evaluated'
 }
+
+/**
+ * 工作流事件数据接口
+ */
+export interface WorkflowEventData {
+  type

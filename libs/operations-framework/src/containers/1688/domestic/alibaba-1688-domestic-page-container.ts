@@ -3,8 +3,8 @@
  * 事件驱动 + 自刷新容器模式，作为站点适配骨架
  */
 
-import { BaseSelfRefreshingContainer, ContainerConfig, RefreshTrigger } from '../../BaseSelfRefreshingContainer.js';
-import { OperationResult } from '../../../core/types/OperatorTypes.js';
+import { BaseSelfRefreshingContainer, ContainerConfig, RefreshTrigger } from '../../BaseSelfRefreshingContainer';
+import { OperationResult } from '../../../core/types/OperatorTypes';
 
 export interface Alibaba1688DomesticPageConfig extends ContainerConfig {
   pageType: 'homepage' | 'search' | 'product' | 'category';
