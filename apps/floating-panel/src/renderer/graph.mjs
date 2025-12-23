@@ -7,6 +7,7 @@ let dragStart = { x: 0, y: 0 };
 let graphOffset = { x: 0, y: 0 };
 let selectedContainer = null;
 let selectedDom = null;
+const domNodePositions = new Map();
 
 export function initGraph(canvasEl) {
   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
@@ -48,6 +49,11 @@ export function initGraph(canvasEl) {
 export function updateContainerTree(data) {
   if (!canvas) return;
   containerData = data;
+  // Default expand root
+  if (data && (data.id || data.name)) {
+    const rootId = data.id || data.name || 'root';
+    expandedNodes.add(rootId);
+  }
   renderGraph();
 }
 
@@ -67,8 +73,9 @@ function renderGraph() {
   mainGroup.setAttribute('transform', `translate(${graphOffset.x + 10}, ${graphOffset.y + 10})`);
 
   const domNodesMap = new Map();
+  domNodePositions.clear();
   if (domData) {
-    collectDomNodes(domData, domNodesMap);
+    collectDomNodes(domData, domNodesMap, 0);
   }
 
   if (containerData) {
@@ -88,12 +95,17 @@ function renderGraph() {
   canvas.appendChild(mainGroup);
 }
 
-function collectDomNodes(node, map) {
+function collectDomNodes(node, map, currentY) {
   if (!node || typeof node !== 'object') return;
   const path = node.path || node.id || node.selectors?.[0] || `node-${Math.random()}`;
-  if (path) map.set(path, node);
+  map.set(path, node);
+  domNodePositions.set(path, currentY);
   if (node.children && Array.isArray(node.children)) {
-    node.children.forEach(child => collectDomNodes(child, map));
+    let y = currentY + 28;
+    node.children.forEach(child => {
+      collectDomNodes(child, map, y);
+      y += 32;
+    });
   }
 }
 
@@ -143,8 +155,8 @@ function renderContainerNode(parent, node, x, y, depth, domNodesMap) {
     }
     
     if (node.selectors && node.selectors.length > 0 && window.api) {
-      window.api.highlightElement(node.selectors[0], 'green').catch(e => {
-        console.error('Failed to highlight:', e);
+      window.api.highlightElement(node.selectors[0], 'green').catch(err => {
+        console.error('Failed to highlight:', err);
       });
     }
     
@@ -186,14 +198,13 @@ function renderContainerNode(parent, node, x, y, depth, domNodesMap) {
   g.appendChild(text);
   parent.appendChild(g);
 
-  let totalHeight = 28;
-
+  // Draw connections to matched DOM nodes
   if (node.match && node.match.selector) {
-    const domNode = domNodesMap.get(node.match.selector);
-    if (domNode) {
-      drawConnectionToDom(parent, node, domNode, depth, x, y);
-    }
+    const domNodeY = domNodePositions.get(node.match.selector) || 0;
+    drawConnectionToDom(parent, x + depth * 20 + 180, y + 14, 410, domNodeY + 12);
   }
+
+  let totalHeight = 28;
 
   if (hasChildren && isExpanded) {
     let currentY = y + 32;
@@ -274,8 +285,8 @@ function renderDomNodeRecursive(parent, node, x, y) {
     
     const selector = node.id ? `#${node.id}` : (node.path || '');
     if (selector && window.api) {
-      window.api.highlightElement(selector, 'blue').catch(e => {
-        console.error('Failed to highlight:', e);
+      window.api.highlightElement(selector, 'blue').catch(err => {
+        console.error('Failed to highlight:', err);
       });
     }
     
@@ -354,17 +365,10 @@ function renderDomNodeRecursive(parent, node, x, y) {
   return totalHeight;
 }
 
-function drawConnectionToDom(parent, containerNode, domNode, depth, containerX, containerY) {
-  const domY = 0;
-  
-  const startX = containerX + depth * 20 + 10;
-  const startY = containerY + 14;
-  const endX = 400 + 10;
-  const endY = domY + 12;
-  
+function drawConnectionToDom(parent, startX, startY, endX, endY) {
   const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
   const midX = (startX + endX) / 2;
-  path.setAttribute('d', `M ${startX} ${startY} C ${startX + 100} ${startY}, ${endX - 100} ${endY}, ${endX} ${endY}`);
+  path.setAttribute('d', `M ${startX} ${startY} C ${midX} ${startY}, ${midX} ${endY}, ${endX} ${endY}`);
   path.setAttribute('stroke', '#4CAF50');
   path.setAttribute('stroke-width', '2');
   path.setAttribute('fill', 'none');
