@@ -8,13 +8,13 @@ declare global {
       onBusEvent(cb: (msg: unknown) => void): void;
       onBusStatus(cb: (status: { connected: boolean }) => void): void;
       invokeAction(action: string, payload?: any): Promise<any>;
+      highlightElement(selector: string, color?: string): Promise<any>;
     };
     lastSnapshot?: any;
   }
 }
 
 import { initGraph, updateContainerTree, updateDomTree } from './graph.mjs';
-import { initDrag } from './drag.mjs';
 
 const statusEl   = document.getElementById('status')   as HTMLSpanElement;
 const healthEl   = document.getElementById('health')   as HTMLDivElement;
@@ -25,6 +25,9 @@ const domTreeEl  = document.getElementById('domTree')  as HTMLDivElement;
 const graphEl     = document.getElementById('graphPanel') as HTMLDivElement;
 const btnHealth  = document.getElementById('btnHealth') as HTMLButtonElement;
 const btnClear   = document.getElementById('btnClear')  as HTMLButtonElement;
+
+let healthInterval: number | null = null;
+let isHealthy = false;
 
 function log(...args: any[]) {
   const line = args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ');
@@ -39,7 +42,7 @@ function log(...args: any[]) {
 }
 
 function setStatus(text: string, ok: boolean) {
-  // log('setStatus', text, ok);  /* Don't log status updates to reduce noise */
+  // log('setStatus', text, ok);
   if (statusEl) {
     statusEl.textContent = text;
     statusEl.className = ok ? 'ok' : 'bad';
@@ -51,9 +54,10 @@ if (graphEl) {
   initGraph(graphEl);
 }
 
-// Enable drag for the Electron window
+// Enable drag for Electron window
 const dragArea = document.getElementById('drag-area') as HTMLElement | null;
 if (dragArea) {
+  const { initDrag } = await import('./drag.mjs');
   initDrag(dragArea);
 } else {
   console.warn('[ui-renderer] drag-area not found, drag disabled');
@@ -97,8 +101,9 @@ if (!window.api) {
           log("Updated DOM tree in graph");
         } else {
           log("警告: 未收到 dom_tree 数据");
+        }
       return;
-    }        setStatus('匹配失败', false);
+        setStatus('匹配失败', false);
         if (healthEl) healthEl.textContent = '❌ 容器匹配失败';
       }
       return;
@@ -169,20 +174,32 @@ async function checkHealth() {
     if (res.ok) {
       if (healthEl) healthEl.textContent = '✅ 服务健康';
       setStatus('已连接', true);
+      
+      // Stop health checks if healthy
+      if (!isHealthy) {
+        isHealthy = true;
+        if (healthInterval) {
+          clearInterval(healthInterval);
+          healthInterval = null;
+          log('Health checks stopped after successful check');
+        }
+      }
     } else {
       if (healthEl) healthEl.textContent = '❌ 服务异常';
       setStatus('未连接', false);
+      isHealthy = false;
     }
   } catch (e) {
     log('health error', e);
     if (healthEl) healthEl.textContent = '❌ 健康检查失败';
     setStatus('未连接', false);
+    isHealthy = false;
   }
 }
 
 log('ui init complete');
 checkHealth();
-setInterval(checkHealth, 5000);
+healthInterval = setInterval(checkHealth, 5000);
 
 btnHealth?.addEventListener('click', checkHealth);
 btnClear?.addEventListener('click', () => {
