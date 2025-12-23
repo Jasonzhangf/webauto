@@ -2,16 +2,46 @@ let canvas = null;
 let containerData = null;
 let domData = null;
 const expandedNodes = new Set();
+let isDraggingGraph = false;
+let dragStart = { x: 0, y: 0 };
+let graphOffset = { x: 0, y: 0 };
 
 // SVG-based graph rendering with improved styling
 export function initGraph(canvasEl) {
   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
   svg.setAttribute('width', '100%');
   svg.setAttribute('height', '100%');
-  svg.style.overflow = 'auto';
+  svg.style.overflow = 'visible';
   svg.style.backgroundColor = '#1e1e1e';
+  svg.style.cursor = 'grab';
   canvasEl.appendChild(svg);
   canvas = svg;
+  
+  // Enable drag for the entire canvas
+  svg.addEventListener('mousedown', (e) => {
+    if (e.target.tagName === 'svg') {
+      isDraggingGraph = true;
+      dragStart.x = e.clientX - graphOffset.x;
+      dragStart.y = e.clientY - graphOffset.y;
+      svg.style.cursor = 'grabbing';
+      e.preventDefault();
+    }
+  });
+  
+  window.addEventListener('mousemove', (e) => {
+    if (isDraggingGraph) {
+      graphOffset.x = e.clientX - dragStart.x;
+      graphOffset.y = e.clientY - dragStart.y;
+      renderGraph();
+    }
+  });
+  
+  window.addEventListener('mouseup', () => {
+    if (isDraggingGraph) {
+      isDraggingGraph = false;
+      svg.style.cursor = 'grab';
+    }
+  });
 }
 
 export function updateContainerTree(data) {
@@ -34,21 +64,37 @@ function renderGraph() {
     canvas.removeChild(canvas.firstChild);
   }
 
+  // Create main container group with offset
+  const mainGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+  mainGroup.setAttribute('transform', `translate(${graphOffset.x + 10}, ${graphOffset.y + 10})`);
+
   // Render container tree (left panel)
+  let containerHeight = 0;
   if (containerData) {
-    const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
-    g.setAttribute('transform', 'translate(10, 10)');
-    renderContainerNode(g, containerData, 0, 0, 0);
-    canvas.appendChild(g);
+    containerHeight = renderContainerNode(mainGroup, containerData, 0, 0, 0);
   }
 
   // Render DOM tree (right panel)
+  let domHeight = 0;
   if (domData) {
-    const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
-    g.setAttribute('transform', 'translate(250, 10)');
-    renderDomNodeRecursive(g, domData, 0, 0);
-    canvas.appendChild(g);
+    const domGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+    domGroup.setAttribute('transform', 'translate(250, 0)');
+    domHeight = renderDomNodeRecursive(domGroup, domData, 0, 0);
+    mainGroup.appendChild(domGroup);
+    
+    // Draw connection from container to DOM
+    if (containerData) {
+      const connection = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      connection.setAttribute('d', `M 150 14 C 200 14, 200 14, 250 14`);
+      connection.setAttribute('stroke', '#666');
+      connection.setAttribute('stroke-width', '2');
+      connection.setAttribute('fill', 'none');
+      connection.setAttribute('stroke-dasharray', '5,5');
+      mainGroup.appendChild(connection);
+    }
   }
+
+  canvas.appendChild(mainGroup);
 }
 
 function renderContainerNode(parent, node, x, y, depth) {
@@ -63,7 +109,7 @@ function renderContainerNode(parent, node, x, y, depth) {
   const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
   rect.setAttribute('x', '0');
   rect.setAttribute('y', '0');
-  rect.setAttribute('width', '200');
+  rect.setAttribute('width', '150');
   rect.setAttribute('height', '28');
   rect.setAttribute('fill', '#2d2d30');
   rect.setAttribute('stroke', '#555');
@@ -82,7 +128,8 @@ function renderContainerNode(parent, node, x, y, depth) {
   });
   
   // Toggle expansion on click
-  rect.addEventListener('click', () => {
+  rect.addEventListener('click', (e) => {
+    e.stopPropagation();
     if (hasChildren) {
       if (isExpanded) {
         expandedNodes.delete(nodeId);
@@ -98,80 +145,73 @@ function renderContainerNode(parent, node, x, y, depth) {
   text.setAttribute('x', '8');
   text.setAttribute('y', '19');
   text.setAttribute('fill', '#cccccc');
-  text.setAttribute('font-size', '13');
+  text.setAttribute('font-size', '12');
   text.setAttribute('font-family', '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif');
+  text.setAttribute('pointer-events', 'none');
   text.textContent = node.name || node.id || 'Unknown';
-
-  // Type badge
-  const typeBadge = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-  typeBadge.setAttribute('x', '170');
-  typeBadge.setAttribute('y', '4');
-  typeBadge.setAttribute('width', '24');
-  typeBadge.setAttribute('height', '20');
-  typeBadge.setAttribute('fill', '#007acc');
-  typeBadge.setAttribute('rx', '3');
-
-  const typeText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-  typeText.setAttribute('x', '182');
-  typeText.setAttribute('y', '17');
-  typeText.setAttribute('text-anchor', 'middle');
-  typeText.setAttribute('fill', '#ffffff');
-  typeText.setAttribute('font-size', '9');
-  typeText.setAttribute('font-weight', 'bold');
-  typeText.textContent = node.type ? node.type.slice(0, 2).toUpperCase() : 'PG';
 
   // Expand/collapse indicator
   const indicatorBg = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-  indicatorBg.setAttribute('cx', '155');
+  indicatorBg.setAttribute('cx', '135');
   indicatorBg.setAttribute('cy', '14');
   indicatorBg.setAttribute('r', '7');
   indicatorBg.setAttribute('fill', hasChildren ? '#4CAF50' : '#666');
 
   const indicatorText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-  indicatorText.setAttribute('x', '155');
+  indicatorText.setAttribute('x', '135');
   indicatorText.setAttribute('y', '17');
   indicatorText.setAttribute('text-anchor', 'middle');
   indicatorText.setAttribute('fill', '#fff');
   indicatorText.setAttribute('font-size', '10');
   indicatorText.setAttribute('font-weight', 'bold');
+  indicatorText.setAttribute('pointer-events', 'none');
   indicatorText.textContent = hasChildren ? (isExpanded ? '-' : '+') : '•';
 
   g.appendChild(rect);
   g.appendChild(text);
- g.appendChild(typeBadge);
- g.appendChild(typeText);
- g.appendChild(indicatorBg);
- g.appendChild(indicatorText);
- parent.appendChild(g);
+  g.appendChild(indicatorBg);
+  g.appendChild(indicatorText);
+  parent.appendChild(g);
 
- // Draw children if expanded
- if (hasChildren && isExpanded) {
-    let currentY = y + 28 + 7;
-    node.children.forEach((child) => {
-      // Connection line
-      const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-      line.setAttribute('x1', String(10 + depth * 20));
-      line.setAttribute('y1', String(y + 28));
-      line.setAttribute('x2', String(10 + (depth + 1) * 20));
-      line.setAttribute('y2', String(currentY + 14));
-      line.setAttribute('stroke', '#666');
-      line.setAttribute('stroke-width', '1');
-      parent.appendChild(line);
+  let totalHeight = 28;
+
+  // Draw children if expanded
+  if (hasChildren && isExpanded) {
+    let currentY = y + 35;
+    node.children.forEach((child, index) => {
+      // Vertical line from parent to children
+      const vertLine = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+      vertLine.setAttribute('x1', String(135));
+      vertLine.setAttribute('y1', String(y + 28));
+      vertLine.setAttribute('x2', String(135));
+      vertLine.setAttribute('y2', String(currentY + 14));
+      vertLine.setAttribute('stroke', '#666');
+      vertLine.setAttribute('stroke-width', '1');
+      parent.appendChild(vertLine);
       
-      renderContainerNode(parent, child, x, currentY, depth + 1);
-      currentY += 35;
+      // Horizontal line to child
+      const horizLine = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+      horizLine.setAttribute('x1', String(135));
+      horizLine.setAttribute('y1', String(currentY + 14));
+      horizLine.setAttribute('x2', String(depth + 1 * 20 + 135));
+      horizLine.setAttribute('y2', String(currentY + 14));
+      horizLine.setAttribute('stroke', '#666');
+      horizLine.setAttribute('stroke-width', '1');
+      parent.appendChild(horizLine);
+      
+      const childHeight = renderContainerNode(parent, child, x, currentY, depth + 1);
+      currentY += childHeight + 7;
+      totalHeight = currentY - y;
     });
-  } else {
-    return 28;
   }
 
-  return currentY - (y + 28 + 7);
+  return totalHeight;
 }
 
 function renderDomNodeRecursive(parent, node, x, y) {
-  if (!node || typeof node !== 'object') return y;
+  if (!node || typeof node !== 'object') return 0;
 
-  const nodeId = node.path || node.id || `dom-${Math.random()}`;
+  const nodeId = node.path || node.id || `dom-${x}-${y}`;
   const isExpanded = expandedNodes.has(nodeId);
   const hasChildren = node.children && node.children.length > 0;
 
@@ -182,7 +222,7 @@ function renderDomNodeRecursive(parent, node, x, y) {
   const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
   rect.setAttribute('x', '0');
   rect.setAttribute('y', '0');
-  rect.setAttribute('width', '220');
+  rect.setAttribute('width', '200');
   rect.setAttribute('height', '24');
   rect.setAttribute('fill', '#252526');
   rect.setAttribute('stroke', '#3e3e42');
@@ -201,7 +241,8 @@ function renderDomNodeRecursive(parent, node, x, y) {
   });
 
   // Toggle on click
-  rect.addEventListener('click', () => {
+  rect.addEventListener('click', (e) => {
+    e.stopPropagation();
     if (hasChildren) {
       if (isExpanded) {
         expandedNodes.delete(nodeId);
@@ -220,6 +261,7 @@ function renderDomNodeRecursive(parent, node, x, y) {
   tagText.setAttribute('font-size', '11');
   tagText.setAttribute('font-family', '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif');
   tagText.setAttribute('font-weight', 'bold');
+  tagText.setAttribute('pointer-events', 'none');
   tagText.textContent = node.tag || 'DIV';
 
   // ID or classes
@@ -230,52 +272,54 @@ function renderDomNodeRecursive(parent, node, x, y) {
   infoText.setAttribute('fill', '#9cdcfe');
   infoText.setAttribute('font-size', '10');
   infoText.setAttribute('font-family', 'monospace');
+  infoText.setAttribute('pointer-events', 'none');
   infoText.textContent = label.substring(0, 25);
 
   // Expand/collapse indicator
   const indicatorBg = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-  indicatorBg.setAttribute('cx', '210');
+  indicatorBg.setAttribute('cx', '190');
   indicatorBg.setAttribute('cy', '12');
   indicatorBg.setAttribute('r', '6');
   indicatorBg.setAttribute('fill', hasChildren ? '#4CAF50' : '#666');
 
   const indicatorText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-  indicatorText.setAttribute('x', '210');
+  indicatorText.setAttribute('x', '190');
   indicatorText.setAttribute('y', '15');
   indicatorText.setAttribute('text-anchor', 'middle');
   indicatorText.setAttribute('fill', '#fff');
   indicatorText.setAttribute('font-size', '10');
   indicatorText.setAttribute('font-weight', 'bold');
+  indicatorText.setAttribute('pointer-events', 'none');
   indicatorText.textContent = hasChildren ? (isExpanded ? '-' : '+') : '•';
 
   g.appendChild(rect);
   g.appendChild(tagText);
   g.appendChild(infoText);
- g.appendChild(indicatorBg);
- g.appendChild(indicatorText);
- parent.appendChild(g);
+  g.appendChild(indicatorBg);
+  g.appendChild(indicatorText);
+  parent.appendChild(g);
 
- // Draw children if expanded
- if (hasChildren && isExpanded) {
-   let currentY = y + 30;
-   node.children.forEach((child) => {
-     // Connection line
-     const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-     line.setAttribute('x1', '10');
-     line.setAttribute('y1', String(y + 24));
-     line.setAttribute('x2', '15');
-     line.setAttribute('y2', String(currentY + 12));
-     line.setAttribute('stroke', '#555');
-     line.setAttribute('stroke-width', '1');
-     parent.appendChild(line);
+  let totalHeight = 24;
 
-     renderDomNodeRecursive(parent, child, x + 15, currentY);
-     currentY += 30;
-   });
+  // Draw children if expanded
+  if (hasChildren && isExpanded) {
+    let currentY = y + 30;
+    node.children.forEach((child) => {
+      // Vertical line from parent to children
+      const vertLine = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+      vertLine.setAttribute('x1', '10');
+      vertLine.setAttribute('y1', String(y + 24));
+      vertLine.setAttribute('x2', '10');
+      vertLine.setAttribute('y2', String(currentY + 12));
+      vertLine.setAttribute('stroke', '#555');
+      vertLine.setAttribute('stroke-width', '1');
+      parent.appendChild(vertLine);
 
-  } else {
-    return 24;
+      const childHeight = renderDomNodeRecursive(parent, child, x + 15, currentY);
+      currentY += childHeight + 6;
+      totalHeight = currentY - y;
+    });
   }
 
-  return currentY - (y + 30);
+  return totalHeight;
 }
