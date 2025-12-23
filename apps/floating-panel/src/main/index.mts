@@ -250,6 +250,22 @@ ipcMain.handle('health', async () => {
     log(`Health check error: ${e}`);
     return { ok: false };
   }
+
+ipcMain.handle('ui:highlight', async (_evt, { selector, color }) => {
+  try {
+    log(`Highlight element: ${selector}, color: ${color}`);
+    const res = await fetch('http://127.0.0.1:7701/v1/browser/highlight', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ selector, color })
+    });
+    return await res.json();
+  } catch (e) {
+    log(`Highlight error: ${e}`);
+    return { success: false, error: String(e) };
+  }
+});
+
 });
 
 ipcMain.handle('ui:action', async (_evt, { action, payload }) => {

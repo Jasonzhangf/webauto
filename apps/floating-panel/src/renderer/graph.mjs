@@ -5,6 +5,8 @@ const expandedNodes = new Set();
 let isDraggingGraph = false;
 let dragStart = { x: 0, y: 0 };
 let graphOffset = { x: 0, y: 0 };
+let selectedContainer = null;
+let selectedDom = null;
 
 // SVG-based graph rendering with improved styling
 export function initGraph(canvasEl) {
@@ -68,98 +70,130 @@ function renderGraph() {
   const mainGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
   mainGroup.setAttribute('transform', `translate(${graphOffset.x + 10}, ${graphOffset.y + 10})`);
 
-  // Render container tree (left panel)
-  let containerHeight = 0;
-  if (containerData) {
-    containerHeight = renderContainerNode(mainGroup, containerData, 0, 0, 0);
-  }
-
-  // Render DOM tree (right panel)
-  let domHeight = 0;
+  // Find all DOM nodes by their path/selector
+  const domNodesMap = new Map();
   if (domData) {
-    const domGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
-    domGroup.setAttribute('transform', 'translate(250, 0)');
-    domHeight = renderDomNodeRecursive(domGroup, domData, 0, 0);
-    mainGroup.appendChild(domGroup);
-    
-    // Draw connection from container to DOM
-    if (containerData) {
-      const connection = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-      connection.setAttribute('d', `M 150 14 C 200 14, 200 14, 250 14`);
-      connection.setAttribute('stroke', '#666');
-      connection.setAttribute('stroke-width', '2');
-      connection.setAttribute('fill', 'none');
-      connection.setAttribute('stroke-dasharray', '5,5');
-      mainGroup.appendChild(connection);
-    }
+    collectDomNodes(domData, domNodesMap);
   }
 
-  canvas.appendChild(mainGroup);
+  // Render container tree (left panel)
+  if (containerData) {
+    const containerGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+    containerGroup.setAttribute('transform', 'translate(0, 0)');
+    renderContainerNode(containerGroup, containerData, 0, 0, 0, domNodesMap);
+    mainGroup.appendChild(containerGroup);
+  }
 }
 
-function renderContainerNode(parent, node, x, y, depth) {
+function collectDomNodes(node, map) {
+  if (!node || typeof node !== 'object') return;
+  
+  const path = node.path || node.id || node.selectors?.[0];
+  if (path) {
+    map.set(path, node);
+  }
+  
+  if (node.children && Array.isArray(node.children)) {
+    node.children.forEach(child => collectDomNodes(child, map));
+  }
+}
+
+function renderContainerNode(parent, node, x, y, depth, domNodesMap) {
   const nodeId = node.id || node.name || 'root';
   const isExpanded = expandedNodes.has(nodeId);
   const hasChildren = node.children && node.children.length > 0;
+  const isSelected = selectedContainer === nodeId;
 
   const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
   g.setAttribute('transform', `translate(${x + depth * 20}, ${y})`);
+  g.dataset.containerId = nodeId;
 
   // Background rectangle with improved colors
   const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
   rect.setAttribute('x', '0');
   rect.setAttribute('y', '0');
-  rect.setAttribute('width', '150');
-  rect.setAttribute('height', '28');
-  rect.setAttribute('fill', '#2d2d30');
-  rect.setAttribute('stroke', '#555');
-  rect.setAttribute('stroke-width', '1');
+  rect.setAttribute('width', '180');
+  rect.setAttribute('height', '32');
+  rect.setAttribute('fill', isSelected ? '#264f36' : '#2d2d30');
+  rect.setAttribute('stroke', isSelected ? '#4CAF50' : '#555');
+  rect.setAttribute('stroke-width', isSelected ? '2' : '1');
   rect.setAttribute('rx', '4');
   rect.style.cursor = 'pointer';
 
   // Hover effect
   rect.addEventListener('mouseenter', () => {
-    rect.setAttribute('fill', '#3e3e42');
-    rect.setAttribute('stroke', '#007acc');
+    if (selectedContainer !== nodeId) {
+      rect.setAttribute('fill', '#3e3e42');
+      rect.setAttribute('stroke', '#007acc');
+    }
   });
   rect.addEventListener('mouseleave', () => {
-    rect.setAttribute('fill', '#2d2d30');
-    rect.setAttribute('stroke', '#555');
+    if (selectedContainer !== nodeId) {
+      rect.setAttribute('fill', '#2d2d30');
+      rect.setAttribute('stroke', '#555');
+    }
   });
   
   // Toggle expansion on click
   rect.addEventListener('click', (e) => {
     e.stopPropagation();
+    selectedContainer = nodeId;
+    selectedDom = null;
     if (hasChildren) {
       if (isExpanded) {
         expandedNodes.delete(nodeId);
       } else {
         expandedNodes.add(nodeId);
       }
-      renderGraph();
     }
+    
+    // Highlight in browser
+    if (node.selectors && node.selectors.length > 0) {
+      window.api?.highlightElement(node.selectors[0], 'green');
+    }
+    
+    renderGraph();
   });
 
-  // Node text with better readability
+  // Node text
   const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
   text.setAttribute('x', '8');
-  text.setAttribute('y', '19');
+  text.setAttribute('y', '21');
   text.setAttribute('fill', '#cccccc');
-  text.setAttribute('font-size', '12');
+  text.setAttribute('font-size', '13');
   text.setAttribute('font-family', '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif');
   text.setAttribute('pointer-events', 'none');
   text.textContent = node.name || node.id || 'Unknown';
 
+  // Type badge
+  const typeBadge = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+  typeBadge.setAttribute('x', '150');
+  typeBadge.setAttribute('y', '6');
+  typeBadge.setAttribute('width', '24');
+  typeBadge.setAttribute('height', '20');
+  typeBadge.setAttribute('fill', '#007acc');
+  typeBadge.setAttribute('rx', '3');
+
+  const typeText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+  typeText.setAttribute('x', '162');
+  typeText.setAttribute('text-anchor', 'middle');
+  typeText.setAttribute('y', '19');
+  typeText.setAttribute('fill', '#ffffff');
+  typeText.setAttribute('font-size', '9');
+  typeText.setAttribute('font-weight', 'bold');
+  typeText.setAttribute('pointer-events', 'none');
+  typeText.textContent = node.type ? node.type.slice(0, 2).toUpperCase() : 'PG';
+
   // Expand/collapse indicator
   const indicatorBg = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-  indicatorBg.setAttribute('cx', '135');
-  indicatorBg.setAttribute('cy', '14');
+  indicatorBg.setAttribute('cx', '175');
+  indicatorBg.setAttribute('cy', '16');
   indicatorBg.setAttribute('r', '7');
   indicatorBg.setAttribute('fill', hasChildren ? '#4CAF50' : '#666');
 
   const indicatorText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-  indicatorText.setAttribute('x', '135');
-  indicatorText.setAttribute('y', '17');
+  indicatorText.setAttribute('x', '175');
+  indicatorText.setAttribute('y', '19');
   indicatorText.setAttribute('text-anchor', 'middle');
   indicatorText.setAttribute('fill', '#fff');
   indicatorText.setAttribute('font-size', '10');
@@ -169,37 +203,47 @@ function renderContainerNode(parent, node, x, y, depth) {
 
   g.appendChild(rect);
   g.appendChild(text);
+  g.appendChild(typeBadge);
+  g.appendChild(typeText);
   g.appendChild(indicatorBg);
   g.appendChild(indicatorText);
   parent.appendChild(g);
 
-  let totalHeight = 28;
+  let totalHeight = 32;
+
+  // Draw connection lines to matched DOM nodes
+  if (node.match && node.match.selector) {
+    const domNode = domNodesMap.get(node.match.selector);
+    if (domNode) {
+      drawConnectionToDom(parent, node, domNode, depth, x, y);
+    }
+  }
 
   // Draw children if expanded
   if (hasChildren && isExpanded) {
-    let currentY = y + 35;
+    let currentY = y + 39;
     node.children.forEach((child, index) => {
       // Vertical line from parent to children
       const vertLine = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-      vertLine.setAttribute('x1', String(135));
-      vertLine.setAttribute('y1', String(y + 28));
-      vertLine.setAttribute('x2', String(135));
-      vertLine.setAttribute('y2', String(currentY + 14));
+      vertLine.setAttribute('x1', '175');
+      vertLine.setAttribute('y1', String(y + 32));
+      vertLine.setAttribute('x2', '175');
+      vertLine.setAttribute('y2', String(currentY + 16));
       vertLine.setAttribute('stroke', '#666');
       vertLine.setAttribute('stroke-width', '1');
       parent.appendChild(vertLine);
       
       // Horizontal line to child
       const horizLine = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-      horizLine.setAttribute('x1', String(135));
-      horizLine.setAttribute('y1', String(currentY + 14));
-      horizLine.setAttribute('x2', String(depth + 1 * 20 + 135));
-      horizLine.setAttribute('y2', String(currentY + 14));
+      horizLine.setAttribute('x1', '175');
+      horizLine.setAttribute('y1', String(currentY + 16));
+      horizLine.setAttribute('x2', String((depth + 1) * 20 + 175));
+      horizLine.setAttribute('y2', String(currentY + 16));
       horizLine.setAttribute('stroke', '#666');
       horizLine.setAttribute('stroke-width', '1');
       parent.appendChild(horizLine);
       
-      const childHeight = renderContainerNode(parent, child, x, currentY, depth + 1);
+      const childHeight = renderContainerNode(parent, child, x, currentY, depth + 1, domNodesMap);
       currentY += childHeight + 7;
       totalHeight = currentY - y;
     });
@@ -208,118 +252,33 @@ function renderContainerNode(parent, node, x, y, depth) {
   return totalHeight;
 }
 
-function renderDomNodeRecursive(parent, node, x, y) {
-  if (!node || typeof node !== 'object') return 0;
-
-  const nodeId = node.path || node.id || `dom-${x}-${y}`;
-  const isExpanded = expandedNodes.has(nodeId);
-  const hasChildren = node.children && node.children.length > 0;
-
-  const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
-  g.setAttribute('transform', `translate(${x}, ${y})`);
-
-  // DOM node background
-  const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-  rect.setAttribute('x', '0');
-  rect.setAttribute('y', '0');
-  rect.setAttribute('width', '200');
-  rect.setAttribute('height', '24');
-  rect.setAttribute('fill', '#252526');
-  rect.setAttribute('stroke', '#3e3e42');
-  rect.setAttribute('stroke-width', '1');
-  rect.setAttribute('rx', '3');
-  rect.style.cursor = 'pointer';
-
-  // Hover effect
-  rect.addEventListener('mouseenter', () => {
-    rect.setAttribute('fill', '#2d2d30');
-    rect.setAttribute('stroke', '#007acc');
-  });
-  rect.addEventListener('mouseleave', () => {
-    rect.setAttribute('fill', '#252526');
-    rect.setAttribute('stroke', '#3e3e42');
-  });
-
-  // Toggle on click
-  rect.addEventListener('click', (e) => {
-    e.stopPropagation();
-    if (hasChildren) {
-      if (isExpanded) {
-        expandedNodes.delete(nodeId);
-      } else {
-        expandedNodes.add(nodeId);
-      }
-      renderGraph();
-    }
-  });
-
-  // Tag label
-  const tagText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-  tagText.setAttribute('x', '8');
-  tagText.setAttribute('y', '16');
-  tagText.setAttribute('fill', '#4ec9b0');
-  tagText.setAttribute('font-size', '11');
-  tagText.setAttribute('font-family', '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif');
-  tagText.setAttribute('font-weight', 'bold');
-  tagText.setAttribute('pointer-events', 'none');
-  tagText.textContent = node.tag || 'DIV';
-
-  // ID or classes
-  const infoText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-  const label = node.id ? `#${node.id}` : (node.classes?.[0] ? `.${node.classes[0]}` : '');
-  infoText.setAttribute('x', '60');
-  infoText.setAttribute('y', '16');
-  infoText.setAttribute('fill', '#9cdcfe');
-  infoText.setAttribute('font-size', '10');
-  infoText.setAttribute('font-family', 'monospace');
-  infoText.setAttribute('pointer-events', 'none');
-  infoText.textContent = label.substring(0, 25);
-
-  // Expand/collapse indicator
-  const indicatorBg = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-  indicatorBg.setAttribute('cx', '190');
-  indicatorBg.setAttribute('cy', '12');
-  indicatorBg.setAttribute('r', '6');
-  indicatorBg.setAttribute('fill', hasChildren ? '#4CAF50' : '#666');
-
-  const indicatorText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-  indicatorText.setAttribute('x', '190');
-  indicatorText.setAttribute('y', '15');
-  indicatorText.setAttribute('text-anchor', 'middle');
-  indicatorText.setAttribute('fill', '#fff');
-  indicatorText.setAttribute('font-size', '10');
-  indicatorText.setAttribute('font-weight', 'bold');
-  indicatorText.setAttribute('pointer-events', 'none');
-  indicatorText.textContent = hasChildren ? (isExpanded ? '-' : '+') : '•';
-
-  g.appendChild(rect);
-  g.appendChild(tagText);
-  g.appendChild(infoText);
-  g.appendChild(indicatorBg);
-  g.appendChild(indicatorText);
-  parent.appendChild(g);
-
-  let totalHeight = 24;
-
-  // Draw children if expanded
-  if (hasChildren && isExpanded) {
-    let currentY = y + 30;
-    node.children.forEach((child) => {
-      // Vertical line from parent to children
-      const vertLine = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-      vertLine.setAttribute('x1', '10');
-      vertLine.setAttribute('y1', String(y + 24));
-      vertLine.setAttribute('x2', '10');
-      vertLine.setAttribute('y2', String(currentY + 12));
-      vertLine.setAttribute('stroke', '#555');
-      vertLine.setAttribute('stroke-width', '1');
-      parent.appendChild(vertLine);
-
-      const childHeight = renderDomNodeRecursive(parent, child, x + 15, currentY);
-      currentY += childHeight + 6;
-      totalHeight = currentY - y;
-    });
-  }
-
-  return totalHeight;
+function drawConnectionToDom(parent, containerNode, domNode, depth, containerX, containerY) {
+  // Find DOM node position (assume all DOM nodes rendered at x=250)
+  const domX = 250;
+  // Calculate approximate Y position based on DOM tree structure
+  const domY = calculateDomNodeY(domNode, 0) * 30;
+  
+  const startX = containerX + depth * 20 + 175;
+  const startY = containerY + 16;
+  const endX = domX;
+  const endY = domY + 12;
+  
+  // Draw curved connection line
+  const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  const midX = (startX + endX) / 2;
+  path.setAttribute('d', `M ${startX} ${startY} C ${midX} ${startY}, ${midX} ${endY}, ${endX} ${endY}`);
+  path.setAttribute('stroke', '#4CAF50');
+  path.setAttribute('stroke-width', '2');
+  path.setAttribute('fill', 'none');
+  path.setAttribute('stroke-dasharray', '4,2');
+  path.setAttribute('opacity', '0.7');
+  parent.appendChild(path);
 }
+
+function calculateDomNodeY(node, currentY) {
+  if (!node) return currentY;
+  return currentY + 1;
+}
+
+// Note: Full DOM tree rendering is handled by the container tree connections
+// The DOM tree is rendered separately in the original implementation

@@ -19,6 +19,10 @@ const api = {
     console.log('[preload] invokeAction called:', action);
     return ipcRenderer.invoke('ui:action', { action, payload });
   },
+  highlightElement: (selector, color = 'green') => {
+    console.log('[preload] highlightElement called:', selector, color);
+    return ipcRenderer.invoke('ui:highlight', { selector, color });
+  },
   onBusEvent: (cb) => {
     console.log('[preload] onBusEvent registered');
     return ipcRenderer.on('bus:event', (_, msg) => {
