@@ -13,9 +13,10 @@ export function initGraph(canvasEl) {
   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
   svg.setAttribute('width', '100%');
   svg.setAttribute('height', '100%');
-  svg.style.overflow = 'visible';
+  svg.style.overflow = 'hidden';
   svg.style.backgroundColor = '#1e1e1e';
   svg.style.cursor = 'grab';
+  canvasEl.style.overflow = 'hidden';
   canvasEl.appendChild(svg);
   canvas = svg;
   
@@ -83,12 +84,22 @@ function renderGraph() {
     renderContainerNode(containerGroup, containerData, 0, 0, 0, domNodesMap);
     mainGroup.appendChild(containerGroup);
   }
+
+  // Render DOM tree (right panel)
+  if (domData) {
+    const domGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+    domGroup.setAttribute('transform', 'translate(400, 0)');
+    const domHeight = renderDomNodeRecursive(domGroup, domData, 0, 0);
+    mainGroup.appendChild(domGroup);
+  }
+
+  canvas.appendChild(mainGroup);
 }
 
 function collectDomNodes(node, map) {
   if (!node || typeof node !== 'object') return;
   
-  const path = node.path || node.id || node.selectors?.[0];
+  const path = node.path || node.id || node.selectors?.[0] || `node-${Math.random()}`;
   if (path) {
     map.set(path, node);
   }
@@ -108,7 +119,7 @@ function renderContainerNode(parent, node, x, y, depth, domNodesMap) {
   g.setAttribute('transform', `translate(${x + depth * 20}, ${y})`);
   g.dataset.containerId = nodeId;
 
-  // Background rectangle with improved colors
+  // Background rectangle
   const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
   rect.setAttribute('x', '0');
   rect.setAttribute('y', '0');
@@ -134,7 +145,7 @@ function renderContainerNode(parent, node, x, y, depth, domNodesMap) {
     }
   });
   
-  // Toggle expansion on click
+  // Toggle expansion and highlight on click
   rect.addEventListener('click', (e) => {
     e.stopPropagation();
     selectedContainer = nodeId;
@@ -148,8 +159,10 @@ function renderContainerNode(parent, node, x, y, depth, domNodesMap) {
     }
     
     // Highlight in browser
-    if (node.selectors && node.selectors.length > 0) {
-      window.api?.highlightElement(node.selectors[0], 'green');
+    if (node.selectors && node.selectors.length > 0 && window.api) {
+      window.api.highlightElement(node.selectors[0], 'green').catch(e => {
+        console.error('Failed to highlight:', e);
+      });
     }
     
     renderGraph();
@@ -252,16 +265,148 @@ function renderContainerNode(parent, node, x, y, depth, domNodesMap) {
   return totalHeight;
 }
 
+function renderDomNodeRecursive(parent, node, x, y) {
+  if (!node || typeof node !== 'object') return 0;
+
+  const nodeId = node.path || node.id || `dom-${x}-${y}`;
+  const isExpanded = expandedNodes.has(nodeId);
+  const hasChildren = node.children && node.children.length > 0;
+  const isSelected = selectedDom === nodeId;
+
+  const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+  g.setAttribute('transform', `translate(${x}, ${y})`);
+
+  // DOM node background
+  const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+  rect.setAttribute('x', '0');
+  rect.setAttribute('y', '0');
+  rect.setAttribute('width', '220');
+  rect.setAttribute('height', '28');
+  rect.setAttribute('fill', isSelected ? '#264f36' : '#252526');
+  rect.setAttribute('stroke', isSelected ? '#007acc' : '#3e3e42');
+  rect.setAttribute('stroke-width', isSelected ? '2' : '1');
+  rect.setAttribute('rx', '3');
+  rect.style.cursor = 'pointer';
+
+  // Hover effect
+  rect.addEventListener('mouseenter', () => {
+    if (selectedDom !== nodeId) {
+      rect.setAttribute('fill', '#2d2d30');
+      rect.setAttribute('stroke', '#007acc');
+    }
+  });
+  rect.addEventListener('mouseleave', () => {
+    if (selectedDom !== nodeId) {
+      rect.setAttribute('fill', '#252526');
+      rect.setAttribute('stroke', '#3e3e42');
+    }
+  });
+
+  // Toggle on click and highlight
+  rect.addEventListener('click', (e) => {
+    e.stopPropagation();
+    selectedDom = nodeId;
+    selectedContainer = null;
+    if (hasChildren) {
+      if (isExpanded) {
+        expandedNodes.delete(nodeId);
+      } else {
+        expandedNodes.add(nodeId);
+      }
+    }
+    
+    // Highlight in browser
+    const selector = node.id ? `#${node.id}` : (node.path || '');
+    if (selector && window.api) {
+      window.api.highlightElement(selector, 'blue').catch(e => {
+        console.error('Failed to highlight:', e);
+      });
+    }
+    
+    renderGraph();
+  });
+
+  // Tag label
+  const tagText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+  tagText.setAttribute('x', '8');
+  tagText.setAttribute('y', '18');
+  tagText.setAttribute('fill', '#4ec9b0');
+  tagText.setAttribute('font-size', '12');
+  tagText.setAttribute('font-family', '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif');
+  tagText.setAttribute('font-weight', 'bold');
+  tagText.setAttribute('pointer-events', 'none');
+  tagText.textContent = node.tag || 'DIV';
+
+  // ID or classes
+  const infoText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+  const label = node.id ? `#${node.id}` : (node.classes?.[0] ? `.${node.classes[0]}` : '');
+  infoText.setAttribute('x', '60');
+  infoText.setAttribute('y', '18');
+  infoText.setAttribute('fill', '#9cdcfe');
+  infoText.setAttribute('font-size', '10');
+  infoText.setAttribute('font-family', 'monospace');
+  infoText.setAttribute('pointer-events', 'none');
+  infoText.textContent = label.substring(0, 30);
+
+  // Expand/collapse indicator
+  const indicatorBg = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+  indicatorBg.setAttribute('cx', '210');
+  indicatorBg.setAttribute('cy', '14');
+  indicatorBg.setAttribute('r', '6');
+  indicatorBg.setAttribute('fill', hasChildren ? '#007acc' : '#666');
+
+  const indicatorText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+  indicatorText.setAttribute('x', '210');
+  indicatorText.setAttribute('y', '17');
+  indicatorText.setAttribute('text-anchor', 'middle');
+  indicatorText.setAttribute('fill', '#fff');
+  indicatorText.setAttribute('font-size', '10');
+  indicatorText.setAttribute('font-weight', 'bold');
+  indicatorText.setAttribute('pointer-events', 'none');
+  indicatorText.textContent = hasChildren ? (isExpanded ? '-' : '+') : '•';
+
+  g.appendChild(rect);
+  g.appendChild(tagText);
+  g.appendChild(infoText);
+  g.appendChild(indicatorBg);
+  g.appendChild(indicatorText);
+  parent.appendChild(g);
+
+  let totalHeight = 28;
+
+  // Draw children if expanded
+  if (hasChildren && isExpanded) {
+    let currentY = y + 34;
+    node.children.forEach((child) => {
+      // Vertical line
+      const vertLine = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+      vertLine.setAttribute('x1', '10');
+      vertLine.setAttribute('y1', String(y + 28));
+      vertLine.setAttribute('x2', '10');
+      vertLine.setAttribute('y2', String(currentY + 14));
+      vertLine.setAttribute('stroke', '#555');
+      vertLine.setAttribute('stroke-width', '1');
+      parent.appendChild(vertLine);
+
+      const childHeight = renderDomNodeRecursive(parent, child, x + 15, currentY);
+      currentY += childHeight + 6;
+      totalHeight = currentY - y;
+    });
+  } else {
+    return 28;
+  }
+
+  return totalHeight;
+}
+
 function drawConnectionToDom(parent, containerNode, domNode, depth, containerX, containerY) {
-  // Find DOM node position (assume all DOM nodes rendered at x=250)
-  const domX = 250;
   // Calculate approximate Y position based on DOM tree structure
-  const domY = calculateDomNodeY(domNode, 0) * 30;
+  const domY = calculateDomNodeY(domNode, 0) * 34;
   
   const startX = containerX + depth * 20 + 175;
   const startY = containerY + 16;
-  const endX = domX;
-  const endY = domY + 12;
+  const endX = 400 + 10; // DOM tree start at x=400
+  const endY = domY + 14;
   
   // Draw curved connection line
   const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
@@ -276,9 +421,5 @@ function drawConnectionToDom(parent, containerNode, domNode, depth, containerX, 
 }
 
 function calculateDomNodeY(node, currentY) {
-  if (!node) return currentY;
   return currentY + 1;
 }
-
-// Note: Full DOM tree rendering is handled by the container tree connections
-// The DOM tree is rendered separately in the original implementation
