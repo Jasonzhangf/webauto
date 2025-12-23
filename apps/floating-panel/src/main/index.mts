@@ -265,6 +265,35 @@ ipcMain.handle('ui:highlight', async (_evt, { selector, color }) => {
 
 ipcMain.handle('window:minimize', async (_evt) => {
   if (win) {
+
+ipcMain.handle('ui:highlight', async (_evt, { selector, color }) => {
+  try {
+    log(`Highlight element: ${selector}, color: ${color}`);
+    const res = await fetch('http://127.0.0.1:7701/v1/browser/highlight', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ selector, color })
+    });
+    return await res.json();
+  } catch (e) {
+    log(`Highlight error: ${e}`);
+    return { success: false, error: String(e) };
+  }
+});
+
+ipcMain.handle('window:minimize', async (_evt) => {
+  if (win) {
+    log('Minimizing window');
+    win.minimize();
+  }
+});
+
+ipcMain.handle('window:close', async (_evt) => {
+  if (win) {
+    log('Closing window');
+    win.close();
+  }
+});
     log('Minimizing window');
     win.minimize();
   }

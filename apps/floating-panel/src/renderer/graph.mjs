@@ -115,7 +115,6 @@ function renderGraph() {
     renderDomNodeRecursive(domGroup, domData, 0, 0);
     mainGroup.appendChild(domGroup);
     
-    // Draw connections from containers to DOM
     drawAllConnections(mainGroup);
   }
 
@@ -226,6 +225,11 @@ function renderContainerNode(parent, node, x, y, depth, domNodesMap) {
   g.appendChild(indicatorText);
   g.appendChild(text);
   parent.appendChild(g);
+
+  if (node.match && node.match.selector) {
+    const domNodeY = domNodePositions.get(node.match.selector) || 0;
+    drawConnectionToDom(parent, x + depth * 20 + 180, y + 14, 410, domNodeY + 12);
+  }
 
   let totalHeight = 28;
 
@@ -389,16 +393,30 @@ function renderDomNodeRecursive(parent, node, x, y) {
 }
 
 function drawAllConnections(parent) {
-  if (!containerData || !domData) return;
+  if (!containerData || !domData) {
+    console.log('[drawAllConnections] Missing data');
+    return;
+  }
+
+  console.log('[drawAllConnections] Starting connection drawing');
 
   function drawConnectionsForNode(node) {
     if (!node || typeof node !== 'object') return;
     
+    console.log('[drawConnectionsForNode] Checking node:', node.id || node.name, 'has match:', !!node.match, 'match selector:', node.match?.selector);
+    
     if (node.match && node.match.selector) {
-      const domNodeY = domNodePositions.get(node.match.selector) || 0;
+      const domNodeY = domNodePositions.get(node.match.selector);
       const containerPos = containerNodePositions.get(node.id || node.name);
       
-      if (containerPos && domNodeY >= 0) {
+      console.log('[drawConnectionsForNode] Connection data:', {
+        containerId: node.id || node.name,
+        containerPos,
+        domNodeSelector: node.match.selector,
+        domNodeY
+      });
+      
+      if (containerPos && domNodeY !== undefined && domNodeY >= 0) {
         const startX = containerPos.x;
         const startY = containerPos.y;
         const endX = 410;
@@ -413,6 +431,9 @@ function drawAllConnections(parent) {
         path.setAttribute('stroke-dasharray', '4,2');
         path.setAttribute('opacity', '0.7');
         parent.appendChild(path);
+        console.log('[drawConnectionsForNode] Drew connection from', node.id, 'to', node.match.selector);
+      } else {
+        console.log('[drawConnectionsForNode] Cannot draw: missing positions or invalid Y');
       }
     }
     
@@ -422,4 +443,17 @@ function drawAllConnections(parent) {
   }
 
   drawConnectionsForNode(containerData);
+  console.log('[drawAllConnections] Complete, connections drawn');
+}
+
+function drawConnectionToDom(parent, startX, startY, endX, endY) {
+  const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  const midX = (startX + endX) / 2;
+  path.setAttribute('d', `M ${startX} ${startY} C ${midX} ${startY}, ${midX} ${endY}, ${endX} ${endY}`);
+  path.setAttribute('stroke', '#4CAF50');
+  path.setAttribute('stroke-width', '2');
+  path.setAttribute('fill', 'none');
+  path.setAttribute('stroke-dasharray', '4,2');
+  path.setAttribute('opacity', '0.7');
+  parent.appendChild(path);
 }
