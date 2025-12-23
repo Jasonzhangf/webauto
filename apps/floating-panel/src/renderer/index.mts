@@ -39,7 +39,7 @@ function log(...args: any[]) {
 }
 
 function setStatus(text: string, ok: boolean) {
-  log('setStatus', text, ok);
+  // log('setStatus', text, ok);  /* Don't log status updates to reduce noise */
   if (statusEl) {
     statusEl.textContent = text;
     statusEl.className = ok ? 'ok' : 'bad';
@@ -162,10 +162,10 @@ if (!window.api) {
 }
 
 async function checkHealth() {
-  log('health check >>>');
+  // log('health check >>>'); /* Don't log every health check */
   try {
     const res = await window.api!.health();
-    log('health result', res);
+    // log('health result', res);  /* Don't log successful health results */
     if (res.ok) {
       if (healthEl) healthEl.textContent = '✅ 服务健康';
       setStatus('已连接', true);
