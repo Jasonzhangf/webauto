@@ -49,10 +49,10 @@ export function initGraph(canvasEl) {
 export function updateContainerTree(data) {
   if (!canvas) return;
   containerData = data;
-  // Default expand root
   if (data && (data.id || data.name)) {
     const rootId = data.id || data.name || 'root';
     expandedNodes.add(rootId);
+    expandAllContainers(data);
   }
   renderGraph();
 }
@@ -61,6 +61,17 @@ export function updateDomTree(data) {
   if (!canvas) return;
   domData = data;
   renderGraph();
+}
+
+function expandAllContainers(node) {
+  if (!node || typeof node !== 'object') return;
+  const nodeId = node.id || node.name;
+  if (nodeId) {
+    expandedNodes.add(nodeId);
+  }
+  if (node.children && Array.isArray(node.children)) {
+    node.children.forEach(child => expandAllContainers(child));
+  }
 }
 
 function renderGraph() {
