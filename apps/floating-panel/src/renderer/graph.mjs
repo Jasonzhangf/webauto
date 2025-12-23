@@ -8,6 +8,7 @@ let graphOffset = { x: 0, y: 0 };
 let selectedContainer = null;
 let selectedDom = null;
 const domNodePositions = new Map();
+const containerNodePositions = new Map();
 
 export function initGraph(canvasEl) {
   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
@@ -60,6 +61,7 @@ export function updateContainerTree(data) {
 export function updateDomTree(data) {
   if (!canvas) return;
   domData = data;
+  expandAllDomNodes(data);
   renderGraph();
 }
 
@@ -74,6 +76,15 @@ function expandAllContainers(node) {
   }
 }
 
+function expandAllDomNodes(node) {
+  if (!node || typeof node !== 'object') return;
+  const nodeId = node.path || node.id || `dom-${Math.random()}`;
+  expandedNodes.add(nodeId);
+  if (node.children && Array.isArray(node.children)) {
+    node.children.forEach(child => expandAllDomNodes(child));
+  }
+}
+
 function renderGraph() {
   if (!canvas) return;
   while (canvas.firstChild) {
@@ -85,6 +96,8 @@ function renderGraph() {
 
   const domNodesMap = new Map();
   domNodePositions.clear();
+  containerNodePositions.clear();
+  
   if (domData) {
     collectDomNodes(domData, domNodesMap, 0);
   }
@@ -101,6 +114,9 @@ function renderGraph() {
     domGroup.setAttribute('transform', 'translate(400, 0)');
     renderDomNodeRecursive(domGroup, domData, 0, 0);
     mainGroup.appendChild(domGroup);
+    
+    // Draw connections from containers to DOM
+    drawAllConnections(mainGroup);
   }
 
   canvas.appendChild(mainGroup);
@@ -125,6 +141,8 @@ function renderContainerNode(parent, node, x, y, depth, domNodesMap) {
   const isExpanded = expandedNodes.has(nodeId);
   const hasChildren = node.children && node.children.length > 0;
   const isSelected = selectedContainer === nodeId;
+
+  containerNodePositions.set(nodeId, { x: x + depth * 20 + 180, y: y + 14 });
 
   const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
   g.setAttribute('transform', `translate(${x + depth * 20}, ${y})`);
@@ -165,7 +183,7 @@ function renderContainerNode(parent, node, x, y, depth, domNodesMap) {
       }
     }
     
-    if (node.selectors && node.selectors.length > 0 && window.api) {
+    if (node.selectors && node.selectors.length > 0 && typeof window.api?.highlightElement === 'function') {
       window.api.highlightElement(node.selectors[0], 'green').catch(err => {
         console.error('Failed to highlight:', err);
       });
@@ -208,12 +226,6 @@ function renderContainerNode(parent, node, x, y, depth, domNodesMap) {
   g.appendChild(indicatorText);
   g.appendChild(text);
   parent.appendChild(g);
-
-  // Draw connections to matched DOM nodes
-  if (node.match && node.match.selector) {
-    const domNodeY = domNodePositions.get(node.match.selector) || 0;
-    drawConnectionToDom(parent, x + depth * 20 + 180, y + 14, 410, domNodeY + 12);
-  }
 
   let totalHeight = 28;
 
@@ -295,7 +307,7 @@ function renderDomNodeRecursive(parent, node, x, y) {
     }
     
     const selector = node.id ? `#${node.id}` : (node.path || '');
-    if (selector && window.api) {
+    if (selector && typeof window.api?.highlightElement === 'function') {
       window.api.highlightElement(selector, 'blue').catch(err => {
         console.error('Failed to highlight:', err);
       });
@@ -376,14 +388,38 @@ function renderDomNodeRecursive(parent, node, x, y) {
   return totalHeight;
 }
 
-function drawConnectionToDom(parent, startX, startY, endX, endY) {
-  const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-  const midX = (startX + endX) / 2;
-  path.setAttribute('d', `M ${startX} ${startY} C ${midX} ${startY}, ${midX} ${endY}, ${endX} ${endY}`);
-  path.setAttribute('stroke', '#4CAF50');
-  path.setAttribute('stroke-width', '2');
-  path.setAttribute('fill', 'none');
-  path.setAttribute('stroke-dasharray', '4,2');
-  path.setAttribute('opacity', '0.7');
-  parent.appendChild(path);
+function drawAllConnections(parent) {
+  if (!containerData || !domData) return;
+
+  function drawConnectionsForNode(node) {
+    if (!node || typeof node !== 'object') return;
+    
+    if (node.match && node.match.selector) {
+      const domNodeY = domNodePositions.get(node.match.selector) || 0;
+      const containerPos = containerNodePositions.get(node.id || node.name);
+      
+      if (containerPos && domNodeY >= 0) {
+        const startX = containerPos.x;
+        const startY = containerPos.y;
+        const endX = 410;
+        const endY = domNodeY + 12;
+        
+        const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        const midX = (startX + endX) / 2;
+        path.setAttribute('d', `M ${startX} ${startY} C ${midX} ${startY}, ${midX} ${endY}, ${endX} ${endY}`);
+        path.setAttribute('stroke', '#4CAF50');
+        path.setAttribute('stroke-width', '2');
+        path.setAttribute('fill', 'none');
+        path.setAttribute('stroke-dasharray', '4,2');
+        path.setAttribute('opacity', '0.7');
+        parent.appendChild(path);
+      }
+    }
+    
+    if (node.children && Array.isArray(node.children)) {
+      node.children.forEach(child => drawConnectionsForNode(child));
+    }
+  }
+
+  drawConnectionsForNode(containerData);
 }
