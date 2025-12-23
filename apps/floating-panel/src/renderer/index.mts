@@ -201,7 +201,26 @@ log('ui init complete');
 checkHealth();
 healthInterval = setInterval(checkHealth, 5000);
 
+const btnMinimize = document.getElementById('btnMinimize') as HTMLButtonElement;
+const btnClose = document.getElementById('btnClose') as HTMLButtonElement;
+
 btnHealth?.addEventListener('click', checkHealth);
 btnClear?.addEventListener('click', () => {
   if (eventsEl) eventsEl.innerHTML = '';
 });
+
+if (btnMinimize && window.api) {
+  btnMinimize.addEventListener('click', () => {
+    window.api.invokeAction('window:minimize', {}).catch(err => {
+      console.error('Failed to minimize:', err);
+    });
+  });
+}
+
+if (btnClose && window.api) {
+  btnClose.addEventListener('click', () => {
+    window.api.invokeAction('window:close', {}).catch(err => {
+      console.error('Failed to close:', err);
+    });
+  });
+}

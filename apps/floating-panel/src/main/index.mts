@@ -262,6 +262,21 @@ ipcMain.handle('ui:highlight', async (_evt, { selector, color }) => {
     return await res.json();
   } catch (e) {
     log(`Highlight error: ${e}`);
+
+ipcMain.handle('window:minimize', async (_evt) => {
+  if (win) {
+    log('Minimizing window');
+    win.minimize();
+  }
+});
+
+ipcMain.handle('window:close', async (_evt) => {
+  if (win) {
+    log('Closing window');
+    win.close();
+  }
+});
+
     return { success: false, error: String(e) };
   }
 });

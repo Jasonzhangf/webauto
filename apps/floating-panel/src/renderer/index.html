@@ -18,7 +18,11 @@
     #health { flex: 1; font-size: 11px; }
     #mode { font-size: 10px; color: #888; }
     button { padding: 3px 8px; font-size: 11px; background: #3c3c3c; border: 1px solid #555; color: #ccc; border-radius: 2px; cursor: pointer; -webkit-app-region: no-drag; }
-    button:hover { background: #4a4a4a; }
+   button:hover { background: #4a4a4a; }
+    .window-controls { display: flex; gap: 4px; }
+    .control-btn { padding: 2px 6px; font-size: 12px; background: transparent; border: none; color: #ccc; cursor: pointer; -webkit-app-region: no-drag; width: 20px; height: 20px; display: flex; align-items: center; justify-content: center; border-radius: 2px; }
+    .control-btn:hover { background: #3c3c3c; }
+    .control-btn.close:hover { background: #c42b1c; }
     #graphPanel { flex: 1; overflow: auto; padding: 8px; }
     .tree-node { padding-left: 12px; }
     .tree-label { display: flex; align-items: center; gap: 4px; padding: 2px 4px; cursor: pointer; border-radius: 2px; }
@@ -143,6 +147,10 @@
 <body>
   <div id="drag-area">
     <span class="title">WebAuto</span>
+    <div class="window-controls">
+      <button id="btnMinimize" class="control-btn minimize">−</button>
+      <button id="btnClose" class="control-btn close">×</button>
+    </div>
     <div class="status">
       <span id="status" class="bad">未连接</span>
     </div>
