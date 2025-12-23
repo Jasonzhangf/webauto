@@ -149,15 +149,23 @@ async function handleCommand(payload: CommandPayload, manager: SessionManager) {
       const session = manager.getSession(profileId);
       if (!session) throw new Error(`session for profile ${profileId} not started`);
       if (!args.path) throw new Error('path required');
-      const result = await session.saveCookiesToFile(args.path);
+      const result = await session.saveCookiesToFile(args.path); // Profile 自动管理，不建议手动调用
       return { ok: true, body: { ok: true, ...result } };
+    }
+    case 'saveCookiesIfStable': {
+      const profileId = args.profileId || 'default';
+      const session = manager.getSession(profileId);
+      if (!session) throw new Error(`session for profile ${profileId} not started`);
+      if (!args.path) throw new Error('path required');
+      const result = await session.saveCookiesIfStable(args.path, { minDelayMs: args.minDelayMs }); // Profile 自动管理，不建议手动调用
+      return { ok: true, body: { ok: true, saved: !!result, ...result } };
     }
     case 'loadCookies': {
       const profileId = args.profileId || 'default';
       const session = manager.getSession(profileId);
       if (!session) throw new Error(`session for profile ${profileId} not started`);
       if (!args.path) throw new Error('path required');
-      const result = await session.injectCookiesFromFile(args.path);
+      const result = await session.injectCookiesFromFile(args.path); // Profile 自动管理，不建议手动调用
       return { ok: true, body: { ok: true, ...result } };
     }
     case 'getStatus': {

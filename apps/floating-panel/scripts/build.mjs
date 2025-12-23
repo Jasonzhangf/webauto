@@ -19,12 +19,31 @@ const distRendererDir = path.join(distDir, 'renderer');
 console.log('[floating-panel] cleaning dist...');
 execSync('rm -rf dist', { stdio: 'inherit' });
 
-console.log('[floating-panel] building TypeScript...');
-execSync('tsc', { stdio: 'inherit' });
+// 1. 构建 main 进程 (ESM)
+console.log('[floating-panel] building main process (ESM)...');
+execSync('npx esbuild src/main/index.mts --bundle --platform=node --format=esm --outfile=dist/main/index.mjs --sourcemap --external:electron --external:ws --external:electron-window-state', { stdio: 'inherit' });
 
+// 2. 复制 preload.cjs
+fs.mkdirSync(path.join(distDir, 'main'), { recursive: true });
+fs.copyFileSync(path.resolve(process.cwd(), 'src/main/preload.cjs'), path.join(distDir, 'main', 'preload.cjs'));
+
+// 3. 先构建 renderer (ESM) - 这会生成 index.js
+console.log('[floating-panel] building renderer process (ESM)...');
+execSync('npx esbuild src/renderer/index.mts --bundle --platform=browser --format=esm --outfile=dist/renderer/index.js --sourcemap --target=es2022', { stdio: 'inherit' });
+
+// 4. 构建诊断模块 (ESM)
+console.log('[floating-panel] building diag module (ESM)...');
+execSync('npx esbuild src/renderer/diag.ts --bundle --platform=browser --format=esm --outfile=dist/renderer/diag.js --sourcemap --target=es2022', { stdio: 'inherit' });
+
+// 5. 复制静态 JS 文件 (这些已经存在)
+console.log('[floating-panel] copying static JS files...');
+fs.mkdirSync(distRendererDir, { recursive: true });
+fs.copyFileSync(path.resolve(process.cwd(), 'src/renderer/drag.mjs'), path.join(distRendererDir, 'drag.mjs'));
+fs.copyFileSync(path.resolve(process.cwd(), 'src/renderer/graph.mjs'), path.join(distRendererDir, 'graph.mjs'));
+
+// 6. 复制 HTML
 console.log('[floating-panel] copying renderer assets...');
 fs.mkdirSync(distRendererDir, { recursive: true });
 fs.copyFileSync(path.resolve(process.cwd(), 'src/renderer/index.html'), path.join(distRendererDir, 'index.html'));
-fs.copyFileSync(path.resolve(process.cwd(), 'dist/renderer/index.mjs'), path.join(distRendererDir, 'index.mjs'));
 
-console.log('[floating-panel] build complete');
+console.log('[floating-panel] build complete (fixed order)');

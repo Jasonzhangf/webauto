@@ -45,6 +45,8 @@ export function ensureBrowserServiceBuild(label = 'browser-service') {
     return false;
   }
   console.log(`[${label}] 源码发生变化，执行 npm run build:services`);
-  execSync('npm run build:services', { stdio: 'inherit', cwd: projectRoot });
+  // 设置环境变量跳过健康检查以避免循环依赖
+  const env = { ...process.env, WEBAUTO_SKIP_HEALTH_CHECK: '1' };
+  execSync('npm run build:services', { stdio: 'inherit', cwd: projectRoot, env });
   return true;
 }

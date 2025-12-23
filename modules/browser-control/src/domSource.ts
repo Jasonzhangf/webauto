@@ -65,21 +65,50 @@ export async function fetchDomHtml(options: DomFetchOptions): Promise<string> {
     return fs.readFileSync(resolved, 'utf-8');
   }
   const profileDir = resolveProfileDirectory(options.profileDir);
+  const profileId = path.basename(profileDir);
+  const serviceHtml = await fetchDomHtmlFromService(options.url, profileId);
+  if (serviceHtml) {
+    return serviceHtml;
+  }
   const headless = options.headless ?? true;
   const waitFor = options.waitFor ?? 8000;
 
-  const context = await chromium.launchPersistentContext(profileDir, {
-    headless,
-    viewport: { width: 1280, height: 800 },
-  });
+  const browser = await chromium.launch({ headless });
+  const context = await browser.newContext({ viewport: { width: 1280, height: 800 } });
   try {
     await syncCookies(context, profileDir);
-    const page = context.pages()[0] || (await context.newPage());
+    const page = await context.newPage();
     await page.goto(options.url, { waitUntil: 'domcontentloaded', timeout: waitFor });
     await page.waitForLoadState('networkidle', { timeout: waitFor }).catch(() => {});
     const html = await page.content();
     return html;
   } finally {
-    await context.close();
+    await context.close().catch(() => {});
+    await browser.close().catch(() => {});
+  }
+}
+
+async function fetchDomHtmlFromService(url: string, profileId: string): Promise<string | null> {
+  const baseUrl = process.env.WEBAUTO_BROWSER_SERVICE_URL || 'http://127.0.0.1:7704';
+  try {
+    const res = await fetch(`${baseUrl}/command`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        action: 'evaluate',
+        args: { profileId, script: 'document.documentElement.outerHTML' },
+      }),
+    });
+    if (!res.ok) {
+      return null;
+    }
+    const data = await res.json();
+    const result = data?.result ?? data?.body?.result ?? data?.data?.result;
+    if (typeof result === 'string') {
+      return result;
+    }
+    return null;
+  } catch {
+    return null;
   }
 }

@@ -1,66 +1,189 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
-  <title>WebAuto Float</title>
+  <title>WebAuto Floating UI</title>
   <style>
-    body{font-family:monospace;margin:0;padding:10px;font-size:12px;background:#0f0f0f;color:#d1f7d1;display:flex;flex-direction:column;height:100vh;gap:8px;}
-    .panel{border:1px solid #2a2a2a;border-radius:6px;padding:8px;background:#121212;}
-    .panel h3{margin:0 0 6px 0;font-size:12px;color:#9aff9a;}
-    #status{font-weight:bold;}
-    #health{margin-top:4px;color:#a0ffa0;}
-    #events{max-height:80px;overflow:auto;border-top:1px dashed #333;padding-top:6px;}
-    #containerTree,#domTree{max-height:100px;overflow:auto;white-space:pre-wrap;}
-    #graphPanel{height:280px;border:1px solid #333;border-radius:4px;background:#1a1a1a;}
-    .log{margin:0 0 2px 0;}
-    .ok{color:#72ff72;}
-    .bad{color:#ff7a7a;}
-    .btn{background:#1d1d1d;color:#d1f7d1;border:1px solid #2a2a2a;border-radius:4px;padding:4px 6px;cursor:pointer;margin-right:6px;}
-    .btn:hover{background:#2a2a2a;}
-    .row{display:flex;align-items:center;gap:8px;}
-    .label{color:#9aff9a;}
-    .title-bar{background:#1a1a1a;padding:4px 8px;border-radius:4px;margin-bottom:8px;cursor:grab;user-select:none;}
-    .title-bar:active{cursor:grabbing;}
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font: 11px/1.4 system-ui, sans-serif; background: #1e1e1e; color: #ccc; overflow: hidden; }
+    #drag-area { height: 24px; background: #2d2d2d; border-bottom: 1px solid #3e3e3e; cursor: grab; display: flex; align-items: center; padding: 0 8px; user-select: none; -webkit-app-region: drag; }
+    #drag-area:active { cursor: grabbing; }
+    .title { font-weight: 600; font-size: 12px; }
+    .status { margin-left: auto; display: flex; align-items: center; gap: 6px; font-size: 11px; }
+    .status span { padding: 2px 6px; border-radius: 3px; }
+    .status .ok { background: #0e3d0e; color: #7ebd7e; }
+    .status .bad { background: #3d0e0e; color: #bd7e7e; }
+    #container { height: calc(100vh - 24px); display: flex; flex-direction: column; }
+    #top-bar { padding: 6px; background: #252526; border-bottom: 1px solid #3e3e3e; display: flex; gap: 6px; align-items: center; }
+    #health { flex: 1; font-size: 11px; }
+    #mode { font-size: 10px; color: #888; }
+    button { padding: 3px 8px; font-size: 11px; background: #3c3c3c; border: 1px solid #555; color: #ccc; border-radius: 2px; cursor: pointer; -webkit-app-region: no-drag; }
+    button:hover { background: #4a4a4a; }
+    #graphPanel { flex: 1; overflow: auto; padding: 8px; }
+    .tree-node { padding-left: 12px; }
+    .tree-label { display: flex; align-items: center; gap: 4px; padding: 2px 4px; cursor: pointer; border-radius: 2px; }
+    .tree-label:hover { background: #2a2d2e; }
+    .tree-label.expanded > .toggle::before { content: '▼'; font-size: 8px; }
+    .tree-label.collapsed > .toggle::before { content: '▶'; font-size: 8px; }
+    .toggle { width: 10px; height: 12px; display: flex; align-items: center; justify-content: center; }
+    .tree-children { display: none; margin-left: 12px; border-left: 1px solid #3e3e3e; padding-left: 4px; }
+    .tree-children.visible { display: block; }
+    .node-tag { background: #007acc; color: white; padding: 1px 4px; border-radius: 2px; font-size: 10px; }
+    .node-id { color: #6a9955; font-size: 10px; }
+    .node-role { color: #dcdcaa; font-size: 10px; }
+    #bottom-panel { height: 160px; border-top: 1px solid #3e3e3e; display: flex; flex-direction: column; }
+    #panel-tabs { display: flex; border-bottom: 1px solid #3e3e3e; background: #252526; }
+    .tab { padding: 4px 10px; font-size: 11px; cursor: pointer; border-right: 1px solid #3e3e3e; }
+    .tab:hover { background: #2d2d2d; }
+    .tab.active { background: #1e1e1e; }
+    .tab-content { display: none; flex: 1; overflow: auto; padding: 6px; font-family: monospace; font-size: 10px; white-space: pre-wrap; }
+    .tab-content.active { display: block; }
+    .log { padding: 2px 0; border-bottom: 1px solid #2a2a2a; }
+    .diag-report { color: #9cdcfe; }
+    
+    /* 状态面板样式 */
+    #status-panel {
+      position: absolute;
+      top: 0;
+      right: 0;
+      width: 120px;
+      background: #252526;
+      border-left: 1px solid #3e3e3e;
+      border-bottom: 1px solid #3e3e3e;
+      z-index: 1000;
+      max-height: 100vh;
+      overflow-y: auto;
+    }
+    
+    #status-panel .panel-header {
+      padding: 8px;
+      font-weight: 600;
+      font-size: 11px;
+      border-bottom: 1px solid #3e3e3e;
+      background: #2d2d2d;
+    }
+    
+    #status-panel .status-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 2px;
+    }
+    
+    #status-panel .status-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px;
+      cursor: pointer;
+      border-bottom: 1px solid #2a2a2a;
+    }
+    
+    #status-panel .status-item:hover {
+      background: #2a2a2a;
+    }
+    
+    #status-panel .status-icon {
+      width: 12px;
+      height: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 14px;
+    }
+    
+    #status-panel .status-info {
+      flex: 1;
+      min-width: 0;
+    }
+    
+    #status-panel .status-name {
+      font-size: 10px;
+      color: #888;
+      margin-bottom: 2px;
+    }
+    
+    #status-panel .status-message {
+      font-size: 11px;
+      color: #ccc;
+    margin-bottom: 2px;
+    }
+    
+    #status-panel .status-time {
+      font-size: 9px;
+      color: #666;
+    }
+    
+    #status-panel .status-loading {
+      animation: pulse 1.5s ease-in-out infinite;
+    }
+    
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
+    }
+    
+    #status-panel .status-ok { color: #7ebd7e; }
+    #status-panel .status-error { color: #bd7e7e; }
+    #status-panel .status-unknown { color: #e5b507; }
+    
+    #status-panel .status-ok { font-weight: 600; }
+    #status-panel .status-error { font-weight: 600; }
+    #status-panel .status-unknown { font-weight: 600; }
+    
+    #status-panel .status-all-ok {
+      grid-column: 1 / -1;
+      text-align: center;
+      padding: 4px;
+      color: #7ebd7e;
+      font-weight: 600;
+      font-size: 12px;
+    }
   </style>
 </head>
 <body>
-  <div class="title-bar">🚀 WebAuto 浮窗 - 拖拽移动</div>
-  
-  <div class="panel">
-    <h3>状态栏</h3>
-    <div class="row">
-      <div id="status" class="bad">检测中</div>
-      <div id="mode" class="label">mode: -</div>
+  <div id="drag-area">
+    <span class="title">WebAuto</span>
+    <div class="status">
+      <span id="status" class="bad">未连接</span>
     </div>
-    <div id="health">健康检查中...</div>
   </div>
-  
-  <div class="panel">
-    <h3>容器树</h3>
-    <div id="containerTree">等待容器树...</div>
-  </div>
-  
-  <div class="panel">
-    <h3>DOM 树</h3>
-    <div id="domTree">等待 DOM 树...</div>
-  </div>
-  
-  <div class="panel">
-    <h3>可视化图</h3>
+  <div id="container">
+    <div id="top-bar">
+      <div id="health">未连接</div>
+      <div id="mode"></div>
+      <button id="btnHealth">健康检查</button>
+      <button id="btnClear">清除日志</button>
+      <button id="btnDiag">诊断</button>
+      <button id="btnAutoDiag">自动诊断</button>
+    </div>
     <div id="graphPanel"></div>
+    <div id="bottom-panel">
+      <div id="panel-tabs">
+        <div class="tab active" data-tab="events">事件日志</div>
+        <div class="tab" data-tab="containerTree">容器树</div>
+        <div class="tab" data-tab="domTree">DOM 树</div>
+      </div>
+      <div id="events" class="tab-content active"></div>
+      <div id="containerTree" class="tab-content"></div>
+      <div id="domTree" class="tab-content"></div>
+      <div id="status-panel">
+        <div class="panel-header">组件状态</div>
+        <div class="status-grid" id="statusGrid"></div>
+      </div>
+    </div>
   </div>
-  
-  <div class="panel">
-    <h3>操作面板</h3>
-    <button id="btnHealth" class="btn">检查健康</button>
-    <button id="btnClear" class="btn">清空日志</button>
-  </div>
-  
-  <div class="panel">
-    <h3>事件日志</h3>
-    <div id="events"></div>
-  </div>
-  
-  <script type="module" src="./index.mjs"></script>
+  <script>
+    // Tab switching
+    document.querySelectorAll('.tab').forEach(tab => {
+      tab.addEventListener('click', () => {
+        document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+        document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+        tab.classList.add('active');
+        const tabId = tab.getAttribute('data-tab');
+        document.getElementById(tabId)?.classList.add('active');
+      });
+    });
+  </script>
+  <script type="module" src="./index.js"></script>
 </body>
 </html>

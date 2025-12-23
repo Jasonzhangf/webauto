@@ -1,40 +1,39 @@
 #!/usr/bin/env node
 /**
  * 启动脚本外壳 - 仅负责 CLI 解析并调用 launcher
- * 业务逻辑全部在 launcher/headful-launcher.mjs 中
+ * 业务逻辑全部在 launcher/core/launcher.mjs 中
  */
 
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
 import path from 'node:path';
+import { parseArgs } from 'node:util';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const launcherPath = path.resolve(__dirname, '../launcher/headful-launcher.mjs');
+const launcherPath = path.resolve(__dirname, '../launcher/core/launcher.mjs');
 
 function main() {
-  const args = process.argv.slice(2);
-  
-  // 参数解析并透传给 launcher
-  const launchArgs = [];
-  if (args.includes('--profile')) {
-    const idx = args.indexOf('--profile');
-    if (args[idx+1]) launchArgs.push('--profile=' + args[idx+1]);
-  }
-  if (args.includes('--url')) {
-    const idx = args.indexOf('--url');
-    if (args[idx+1]) launchArgs.push('--url=' + args[idx+1]);
-  }
-  if (args.includes('--headless')) {
-    launchArgs.push('--headless');
-  }
-  
-  // 调用真正的启动器
-  const child = spawn('node', [launcherPath, ...launchArgs], {
-    stdio: 'inherit',
-    shell: true
+  const { values } = parseArgs({
+    options: {
+      profile: { type: 'string', short: 'p' },
+      url:     { type: 'string', short: 'u' },
+      headless:{ type: 'boolean', short: 'h' }
+    }
   });
-  
+
+  const profile = values.profile || 'weibo_fresh';
+  const url     = values.url     || 'https://weibo.com';
+  const headless= !!values.headless;
+
+  const child = spawn('node', [launcherPath, profile, url], {
+    stdio: 'inherit',
+    env: {
+      ...process.env,
+      WEBAUTO_HEADLESS: headless ? '1' : '0'
+    }
+  });
+
   child.on('exit', (code) => {
     process.exit(code);
   });

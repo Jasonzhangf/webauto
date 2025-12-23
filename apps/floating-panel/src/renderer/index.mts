@@ -51,12 +51,12 @@ if (graphEl) {
   initGraph(graphEl);
 }
 
-// Initialize drag for Electron window
-if (typeof window.require !== 'undefined') {
-  const { remote } = window.require('electron');
-  if (remote && remote.getCurrentWindow) {
-    initDrag(remote.getCurrentWindow());
-  }
+// Enable drag for the Electron window
+const dragArea = document.getElementById('drag-area') as HTMLElement | null;
+if (dragArea) {
+  initDrag(dragArea);
+} else {
+  console.warn('[ui-renderer] drag-area not found, drag disabled');
 }
 
 if (!window.api) {
@@ -71,26 +71,34 @@ if (!window.api) {
     if (!msg || typeof msg !== 'object') return;
     const data = msg as any;
     
-    if (data.topic === 'containers.matched') {
+    if (data.topic === "containers.matched") {
+      log("收到 containers.matched 事件", data);
       const ok = data.payload?.success === true || data.payload?.matched === true;
+      log("匹配检查结果:", { ok, success: data.payload?.success, matched: data.payload?.matched });
       if (ok) {
-        setStatus('已识别', true);
-        if (healthEl) healthEl.textContent = '✅ 容器匹配成功';
+        setStatus("已识别", true);
+        if (healthEl) healthEl.textContent = "✅ 容器匹配成功";
         window.lastSnapshot = data.payload?.snapshot || {};
+        log("设置 snapshot:", window.lastSnapshot);
         
         // Update graph with container tree
         if (window.lastSnapshot?.container_tree) {
+          log("准备更新容器树:", window.lastSnapshot.container_tree);
           updateContainerTree(window.lastSnapshot.container_tree);
-          log('Updated container tree in graph');
+          log("Updated container tree in graph");
+        } else {
+          log("警告: 未收到 container_tree 数据");
         }
         
         // Update DOM tree if available
         if (window.lastSnapshot?.dom_tree) {
+          log("准备更新DOM树:", window.lastSnapshot.dom_tree);
           updateDomTree(window.lastSnapshot.dom_tree);
-          log('Updated DOM tree in graph');
-        }
-      } else {
-        setStatus('匹配失败', false);
+          log("Updated DOM tree in graph");
+        } else {
+          log("警告: 未收到 dom_tree 数据");
+      return;
+    }        setStatus('匹配失败', false);
         if (healthEl) healthEl.textContent = '❌ 容器匹配失败';
       }
       return;
@@ -135,6 +143,22 @@ if (!window.api) {
     log('bus status >>>', status);
     setStatus(status.connected ? '已连接' : '未连接', status.connected);
   });
+
+  if (typeof window.api.invokeAction === 'function') {
+    window.api
+      .invokeAction('containers:match', {
+        profile: 'weibo_fresh',
+        url: 'https://weibo.com',
+        maxDepth: 2,
+        maxChildren: 5
+      })
+      .then((res) => {
+        log('containers:match invokeAction result', res);
+      })
+      .catch((err) => {
+        log('containers:match invokeAction error', err);
+      });
+  }
 }
 
 async function checkHealth() {

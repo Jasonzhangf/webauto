@@ -1,6 +1,6 @@
 {
   "name": "@webauto/floating-panel",
-  "version": "0.1.086",
+  "version": "0.1.192",
   "private": true,
   "type": "module",
   "main": "dist/main/index.mjs",

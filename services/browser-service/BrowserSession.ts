@@ -214,6 +214,27 @@ export class BrowserSession {
     return { path: filePath, count: cookies.length };
   }
 
+  async saveCookiesIfStable(filePath: string, opts: { minDelayMs?: number } = {}): Promise<{ path: string; count: number } | null> {
+    const minDelayMs = Math.max(1000, Number(opts.minDelayMs) || 2000);
+    const page = this.getActivePage();
+    if (!page) return null;
+    const html = await page.content();
+    const isLoggedIn = html.includes('Frame_wrap_') && !html.includes('LoginCard') && !html.includes('passport');
+    if (!isLoggedIn) return null;
+    const cookies = await this.getCookies();
+    if (!cookies.length) return null;
+    const digest = this.hashCookies(cookies);
+    const now = Date.now();
+    if (digest === this.lastCookieSignature && now - this.lastCookieSaveTs < minDelayMs) {
+      return null;
+    }
+    await fs.promises.mkdir(path.dirname(filePath), { recursive: true });
+    await fs.promises.writeFile(filePath, JSON.stringify({ timestamp: now, cookies }, null, 2), 'utf-8');
+    this.lastCookieSignature = digest;
+    this.lastCookieSaveTs = now;
+    return { path: filePath, count: cookies.length };
+  }
+
   async injectCookiesFromFile(filePath: string): Promise<{ count: number }> {
     if (!this.context) throw new Error('context not ready');
     const raw = JSON.parse(await fs.promises.readFile(filePath, 'utf-8'));

@@ -1,15 +1,11 @@
 let isDragging = false;
 let dragOffset = { x: 0, y: 0 };
+let dragArea = null;
 
-export function initDrag(window) {
-  window.addEventListener('mousedown', startDrag);
-  window.addEventListener('mousemove', drag);
-  window.addEventListener('mouseup', stopDrag);
-  
-  // Prevent text selection during drag
-  window.addEventListener('selectstart', (e) => {
-    if (isDragging) e.preventDefault();
-  });
+export function initDrag(element) {
+  dragArea = element;
+  if (!dragArea) return;
+  // Native Electron drag region handles the dragging, no JS needed
 }
 
 function startDrag(e) {
@@ -22,15 +18,17 @@ function startDrag(e) {
     return;
   }
   
+  if (!dragArea) return;
+
   isDragging = true;
-  const rect = window.getBoundingClientRect();
+  const rect = dragArea.getBoundingClientRect();
   dragOffset.x = e.clientX - rect.left;
   dragOffset.y = e.clientY - rect.top;
   
-  window.style.cursor = 'grabbing';
+  dragArea.style.cursor = 'grabbing';
   
   // Bring window to front
-  window.style.zIndex = '9999';
+  dragArea.style.zIndex = '9999';
 }
 
 function drag(e) {
@@ -38,17 +36,7 @@ function drag(e) {
   
   const x = e.clientX - dragOffset.x;
   const y = e.clientY - dragOffset.y;
-  
-  // Constrain to screen bounds
-  const screenWidth = window.screen.availWidth;
-  const screenHeight = window.screen.availHeight;
-  const windowWidth = window.outerWidth;
-  const windowHeight = window.outerHeight;
-  
-  const constrainedX = Math.max(0, Math.min(x, screenWidth - windowWidth));
-  const constrainedY = Math.max(0, Math.min(y, screenHeight - windowHeight));
-  
-  window.moveTo(constrainedX, constrainedY);
+  window.moveTo(x, y);
   
   // Prevent default to avoid text selection
   e.preventDefault();
@@ -58,10 +46,12 @@ function stopDrag(e) {
   if (!isDragging) return;
   
   isDragging = false;
-  window.style.cursor = 'default';
+  if (!dragArea) return;
+
+  dragArea.style.cursor = 'default';
   
   // Reset z-index after a short delay
   setTimeout(() => {
-    window.style.zIndex = '1000';
+    dragArea.style.zIndex = '1000';
   }, 100);
 }
