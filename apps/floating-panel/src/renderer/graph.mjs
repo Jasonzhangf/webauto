@@ -7,9 +7,7 @@ let dragStart = { x: 0, y: 0 };
 let graphOffset = { x: 0, y: 0 };
 let selectedContainer = null;
 let selectedDom = null;
-let connectionStart = null;
 
-// SVG-based graph rendering with Windows Registry style
 export function initGraph(canvasEl) {
   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
   svg.setAttribute('width', '100%');
@@ -21,7 +19,6 @@ export function initGraph(canvasEl) {
   canvasEl.appendChild(svg);
   canvas = svg;
   
-  // Enable drag for the entire canvas
   svg.addEventListener('mousedown', (e) => {
     if (e.target.tagName === 'svg') {
       isDraggingGraph = true;
@@ -62,23 +59,18 @@ export function updateDomTree(data) {
 
 function renderGraph() {
   if (!canvas) return;
-  
-  // Clear previous content
   while (canvas.firstChild) {
     canvas.removeChild(canvas.firstChild);
   }
 
-  // Create main container group with offset
   const mainGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
   mainGroup.setAttribute('transform', `translate(${graphOffset.x + 10}, ${graphOffset.y + 10})`);
 
-  // Find all DOM nodes by their path/selector
   const domNodesMap = new Map();
   if (domData) {
     collectDomNodes(domData, domNodesMap);
   }
 
-  // Render container tree (left panel)
   if (containerData) {
     const containerGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
     containerGroup.setAttribute('transform', 'translate(0, 0)');
@@ -86,7 +78,6 @@ function renderGraph() {
     mainGroup.appendChild(containerGroup);
   }
 
-  // Render DOM tree (right panel)
   if (domData) {
     const domGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
     domGroup.setAttribute('transform', 'translate(400, 0)');
@@ -99,12 +90,8 @@ function renderGraph() {
 
 function collectDomNodes(node, map) {
   if (!node || typeof node !== 'object') return;
-  
   const path = node.path || node.id || node.selectors?.[0] || `node-${Math.random()}`;
-  if (path) {
-    map.set(path, node);
-  }
-  
+  if (path) map.set(path, node);
   if (node.children && Array.isArray(node.children)) {
     node.children.forEach(child => collectDomNodes(child, map));
   }
@@ -118,9 +105,7 @@ function renderContainerNode(parent, node, x, y, depth, domNodesMap) {
 
   const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
   g.setAttribute('transform', `translate(${x + depth * 20}, ${y})`);
-  g.dataset.containerId = nodeId;
 
-  // Background rectangle with Windows Registry style
   const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
   rect.setAttribute('x', '0');
   rect.setAttribute('y', '0');
@@ -132,7 +117,6 @@ function renderContainerNode(parent, node, x, y, depth, domNodesMap) {
   rect.setAttribute('rx', '2');
   rect.style.cursor = 'pointer';
 
-  // Hover effect
   rect.addEventListener('mouseenter', () => {
     if (selectedContainer !== nodeId) {
       rect.setAttribute('fill', '#3e3e42');
@@ -146,7 +130,6 @@ function renderContainerNode(parent, node, x, y, depth, domNodesMap) {
     }
   });
   
-  // Toggle expansion and highlight on click
   rect.addEventListener('click', (e) => {
     e.stopPropagation();
     selectedContainer = nodeId;
@@ -159,7 +142,6 @@ function renderContainerNode(parent, node, x, y, depth, domNodesMap) {
       }
     }
     
-    // Highlight in browser
     if (node.selectors && node.selectors.length > 0 && window.api) {
       window.api.highlightElement(node.selectors[0], 'green').catch(e => {
         console.error('Failed to highlight:', e);
@@ -169,17 +151,15 @@ function renderContainerNode(parent, node, x, y, depth, domNodesMap) {
     renderGraph();
   });
 
-  // Node text
   const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
   text.setAttribute('x', '24');
   text.setAttribute('y', '18');
   text.setAttribute('fill', '#cccccc');
   text.setAttribute('font-size', '12');
-  text.setAttribute('font-family', 'Consolas, "Courier New", monospace');
+  text.setAttribute('font-family', 'Consolas, monospace');
   text.setAttribute('pointer-events', 'none');
   text.textContent = node.name || node.id || 'Unknown';
 
-  // Windows-style expand indicator
   const indicatorBg = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
   indicatorBg.setAttribute('x', '4');
   indicatorBg.setAttribute('y', '8');
@@ -208,7 +188,6 @@ function renderContainerNode(parent, node, x, y, depth, domNodesMap) {
 
   let totalHeight = 28;
 
-  // Draw connection lines to matched DOM nodes
   if (node.match && node.match.selector) {
     const domNode = domNodesMap.get(node.match.selector);
     if (domNode) {
@@ -216,11 +195,9 @@ function renderContainerNode(parent, node, x, y, depth, domNodesMap) {
     }
   }
 
-  // Draw children if expanded
   if (hasChildren && isExpanded) {
     let currentY = y + 32;
     node.children.forEach((child, index) => {
-      // Vertical line from parent to children
       const vertLine = document.createElementNS('http://www.w3.org/2000/svg', 'line');
       vertLine.setAttribute('x1', '10');
       vertLine.setAttribute('y1', String(y + 28));
@@ -230,7 +207,6 @@ function renderContainerNode(parent, node, x, y, depth, domNodesMap) {
       vertLine.setAttribute('stroke-width', '1');
       parent.appendChild(vertLine);
       
-      // Horizontal line to child
       const horizLine = document.createElementNS('http://www.w3.org/2000/svg', 'line');
       horizLine.setAttribute('x1', '10');
       horizLine.setAttribute('y1', String(currentY + 14));
@@ -260,7 +236,6 @@ function renderDomNodeRecursive(parent, node, x, y) {
   const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
   g.setAttribute('transform', `translate(${x}, ${y})`);
 
-  // DOM node background with Windows Registry style
   const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
   rect.setAttribute('x', '0');
   rect.setAttribute('y', '0');
@@ -272,7 +247,6 @@ function renderDomNodeRecursive(parent, node, x, y) {
   rect.setAttribute('rx', '2');
   rect.style.cursor = 'pointer';
 
-  // Hover effect
   rect.addEventListener('mouseenter', () => {
     if (selectedDom !== nodeId) {
       rect.setAttribute('fill', '#2d2d30');
@@ -286,7 +260,6 @@ function renderDomNodeRecursive(parent, node, x, y) {
     }
   });
 
-  // Toggle on click and highlight
   rect.addEventListener('click', (e) => {
     e.stopPropagation();
     selectedDom = nodeId;
@@ -299,7 +272,6 @@ function renderDomNodeRecursive(parent, node, x, y) {
       }
     }
     
-    // Highlight in browser
     const selector = node.id ? `#${node.id}` : (node.path || '');
     if (selector && window.api) {
       window.api.highlightElement(selector, 'blue').catch(e => {
@@ -307,48 +279,29 @@ function renderDomNodeRecursive(parent, node, x, y) {
       });
     }
     
-    // Fetch sub-containers if this DOM element has them
-    if (window.api && node.selectors && node.selectors[0]) {
-      window.api.invokeAction('containers:match', {
-        profile: 'weibo_fresh',
-        url: window.location.href,
-        maxDepth: 1,
-        maxChildren: 5,
-        rootSelector: node.selectors[0]
-      }).then((res) => {
-        console.log('Sub-container match result:', res);
-        // TODO: Handle sub-container response
-      }).catch(e => {
-        console.error('Failed to fetch sub-containers:', e);
-      });
-    }
-    
     renderGraph();
   });
 
-  // Tag label
   const tagText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
   tagText.setAttribute('x', '24');
   tagText.setAttribute('y', '16');
   tagText.setAttribute('fill', '#4ec9b0');
   tagText.setAttribute('font-size', '11');
-  tagText.setAttribute('font-family', 'Consolas, "Courier New", monospace');
+  tagText.setAttribute('font-family', 'Consolas, monospace');
   tagText.setAttribute('font-weight', 'bold');
   tagText.setAttribute('pointer-events', 'none');
   tagText.textContent = node.tag || 'DIV';
 
-  // ID or classes
   const infoText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
   const label = node.id ? `#${node.id}` : (node.classes?.[0] ? `.${node.classes[0]}` : '');
   infoText.setAttribute('x', '70');
   infoText.setAttribute('y', '16');
   infoText.setAttribute('fill', '#9cdcfe');
   infoText.setAttribute('font-size', '10');
-  infoText.setAttribute('font-family', 'Consolas, "Courier New", monospace');
+  infoText.setAttribute('font-family', 'Consolas, monospace');
   infoText.setAttribute('pointer-events', 'none');
   infoText.textContent = label.substring(0, 30);
 
-  // Windows-style expand indicator
   const indicatorBg = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
   indicatorBg.setAttribute('x', '4');
   indicatorBg.setAttribute('y', '6');
@@ -378,11 +331,9 @@ function renderDomNodeRecursive(parent, node, x, y) {
 
   let totalHeight = 24;
 
-  // Draw children if expanded
   if (hasChildren && isExpanded) {
     let currentY = y + 28;
     node.children.forEach((child) => {
-      // Vertical line
       const vertLine = document.createElementNS('http://www.w3.org/2000/svg', 'line');
       vertLine.setAttribute('x1', '10');
       vertLine.setAttribute('y1', String(y + 24));
@@ -404,16 +355,15 @@ function renderDomNodeRecursive(parent, node, x, y) {
 }
 
 function drawConnectionToDom(parent, containerNode, domNode, depth, containerX, containerY) {
-  // Calculate approximate Y position based on DOM tree structure
-  const domY = calculateDomNodeY(domNode, 0) * 28;
+  const domY = 0;
   
   const startX = containerX + depth * 20 + 10;
   const startY = containerY + 14;
-  const endX = 400 + 10; // DOM tree start at x=400
+  const endX = 400 + 10;
   const endY = domY + 12;
   
-  // Draw straight connection line
   const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  const midX = (startX + endX) / 2;
   path.setAttribute('d', `M ${startX} ${startY} C ${startX + 100} ${startY}, ${endX - 100} ${endY}, ${endX} ${endY}`);
   path.setAttribute('stroke', '#4CAF50');
   path.setAttribute('stroke-width', '2');
@@ -421,8 +371,4 @@ function drawConnectionToDom(parent, containerNode, domNode, depth, containerX, 
   path.setAttribute('stroke-dasharray', '4,2');
   path.setAttribute('opacity', '0.7');
   parent.appendChild(path);
-}
-
-function calculateDomNodeY(node, currentY) {
-  return currentY + 1;
 }
