@@ -154,8 +154,8 @@ if (!window.api) {
       .invokeAction('containers:match', {
         profile: 'weibo_fresh',
         url: 'https://weibo.com',
-        maxDepth: 2,
-        maxChildren: 5
+        maxDepth: 6,
+        maxChildren: 20
       })
       .then((res) => {
         log('containers:match invokeAction result', res);

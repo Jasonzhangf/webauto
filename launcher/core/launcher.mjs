@@ -59,21 +59,35 @@ async function startProcess(cmd, args = [], opts = {}) {
       reject(new Error(`子进程异常退出: ${cmd} ${args.join(' ')} code=${code} signal=${signal} cost=${cost}ms`));
     });
 
-    // 子进程存活即可继续，健康检查负责确认就绪
+    // 子进程启动后，1s 内无异常即视为成功
     setTimeout(() => {
-      clearTimeout(timer);
       resolve(p);
-    }, 500);
+    }, 1000);
   });
 }
 
 async function ensurePortFree(port, name) {
-  log(`检查 ${name} 端口 ${port} ...`);
-  // 1. 先尝试“软”关闭：向本仓库已知服务发 /shutdown 或 SIGTERM
+  // 1. 先尝试 0.5s 内正常关闭可能残留的进程
   try {
-    await fetch(`http://127.0.0.1:${port}/shutdown`, { method: 'POST', timeout: 2000 });
-    log(`已向 ${name} 发送关闭请求，等待 1s ...`);
-    await sleep(1000);
+    const list = execSync(`lsof -ti :${port}`, { encoding: 'utf8' }).trim().split('\n').filter(Boolean);
+    if (list.length) {
+      log(`${name} 端口 ${port} 被占用，准备清理以下进程:`);
+      for (const pid of list) {
+        try {
+          execSync(`kill -TERM ${pid}`);
+          log(`已发送 SIGTERM 给 PID ${pid}`);
+        } catch {}
+      }
+      await sleep(500);
+      const remain = execSync(`lsof -ti :${port}`, { encoding: 'utf8' }).trim().split('\n').filter(Boolean);
+      for (const pid of remain) {
+        try {
+          execSync(`kill -KILL ${pid}`);
+          log(`已强制杀掉 PID ${pid}`);
+        } catch {}
+      }
+      await sleep(1000);
+    }
   } catch {}
   // 2. 如仍被占用，仅杀掉该端口的进程（精确匹配）
   try {
@@ -176,7 +190,7 @@ async function verifyContainerMatch(profile, url) {
     ws.send(JSON.stringify({
       type: 'action',
       action: 'containers:match',
-      payload: { profile, url, maxDepth: 2, maxChildren: 5 }
+      payload: { profile, url, maxDepth: 6, maxChildren: 20 }
     }));
   });
   ws.close();
@@ -247,23 +261,18 @@ export async function startAll({ profile, url, headless }) {
   if (!loggedIn) {
     console.log('\n[等待用户登录...]');
     console.log('请在浏览器中完成登录，每15秒检查一次登录状态');
-    
     while (!loggedIn) {
       await sleep(15000);
-      const currentLoggedIn = await isLoggedIn(profile);
-      if (currentLoggedIn) {
-        console.log('\n✅ 检测到登录成功！');
-        loggedIn = true;
-        break;
-      }
-      console.log(`[${new Date().toLocaleTimeString()}] 等待登录中...`);
+      loggedIn = await isLoggedIn(profile);
+      console.log(`[launcher] 登录状态: ${loggedIn ? '已登录' : '未登录'}`);
     }
   }
 
   console.log('\n[启动浮窗 UI]');
-  const floating = spawn('npm', ['run', 'start'], {
-    cwd: path.resolve('apps/floating-panel'),
-    stdio: 'inherit',
+  const floating = await startProcess('node', [
+    'apps/floating-panel/scripts/start-headful.mjs'
+  ], {
+    cwd: __dirname,
     env: {
       ...process.env,
       WEBAUTO_FLOATING_WS_URL: `ws://127.0.0.1:${CONFIG.ports.unified}/ws`,
@@ -276,9 +285,8 @@ export async function startAll({ profile, url, headless }) {
   });
   registerPid(floating.pid);
 
-  await sleep(3000);
-
-  // Cookie 由 profile 自身管理，无需手动注入/保存
+  // 等待浮窗启动后，立即发起匹配
+  await sleep(1500);
 
   try {
     await fetch(`http://127.0.0.1:${CONFIG.ports.unified}/v1/internal/events/browser-mode`, {
@@ -296,9 +304,9 @@ export async function startAll({ profile, url, headless }) {
   console.log('💡 容器匹配功能正常');
   console.log('💡 按 Ctrl+C 退出');
 
-  // 统一生命周期：父进程退出时，所有子进程自杀
+  // 优雅退出
   const cleanup = () => {
-    console.log('\n[launcher] 收到退出信号，清理子进程...');
+    console.log('\n[launcher] 收到退出信号，正在清理...');
     cleanupPids();
     process.exit(0);
   };

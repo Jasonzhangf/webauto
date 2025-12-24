@@ -27,23 +27,12 @@ function log(msg: string) {
   const timestamp = new Date().toISOString().split('T')[1].slice(0, 12);
   const line = `[${timestamp}] [floating-main] ${msg}`;
 
-  if (!consoleLoggingBroken) {
-    try {
-      console.log(line);
-      return;
-    } catch (error) {
-      const err = error as NodeJS.ErrnoException;
-      if (err?.code !== 'EIO') {
-        throw error;
-      }
-      consoleLoggingBroken = true;
-    }
-  }
-
+  // Skip console.log entirely to avoid EIO errors
+  // Only write to log file
   try {
     fs.appendFileSync(LOG_FILE_PATH, `${line}\n`, 'utf8');
   } catch {
-    // Swallow errors when writing logs to prevent crash loops
+    // Completely swallow errors - no logging at all if file fails
   }
 }
 
@@ -250,21 +239,7 @@ ipcMain.handle('health', async () => {
     log(`Health check error: ${e}`);
     return { ok: false };
   }
-
-ipcMain.handle('ui:highlight', async (_evt, { selector, color }) => {
-  try {
-    log(`Highlight element: ${selector}, color: ${color}`);
-    const res = await fetch('http://127.0.0.1:7701/v1/browser/highlight', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ selector, color })
-    });
-    return await res.json();
-  } catch (e) {
-    log(`Highlight error: ${e}`);
-
-ipcMain.handle('window:minimize', async (_evt) => {
-  if (win) {
+});
 
 ipcMain.handle('ui:highlight', async (_evt, { selector, color }) => {
   try {
@@ -293,23 +268,6 @@ ipcMain.handle('window:close', async (_evt) => {
     log('Closing window');
     win.close();
   }
-});
-    log('Minimizing window');
-    win.minimize();
-  }
-});
-
-ipcMain.handle('window:close', async (_evt) => {
-  if (win) {
-    log('Closing window');
-    win.close();
-  }
-});
-
-    return { success: false, error: String(e) };
-  }
-});
-
 });
 
 ipcMain.handle('ui:action', async (_evt, { action, payload }) => {

@@ -1,37 +1,78 @@
 #!/usr/bin/env node
 /**
- * 启动脚本外壳 - 仅负责 CLI 解析并调用 launcher
- * 业务逻辑全部在 launcher/core/launcher.mjs 中
+ * 启动脚本 - 支持命令行参数
+ * 用法：node scripts/start-headful.mjs [--profile <name>] [--url <url>]
+ *       node scripts/start-headful.mjs                  # 使用默认配置（weibo_fresh, weibo.com）
+ *       node scripts/start-headful.mjs --profile weibo_fresh https://weibo.com
+ *       node scripts/start-headful.mjs --url https://weibo.com
  */
 
-import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
 import path from 'node:path';
-import { parseArgs } from 'node:util';
+import { fileURLToPath } from 'node:url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const launcherPath = path.resolve(__dirname, '../launcher/core/launcher.mjs');
 
+/**
+ * 解析命令行参数
+ * 支持：--profile <name> 和 --url <url>
+ */
+function parseArgs() {
+  const args = process.argv.slice(2);
+  const result = {
+    profile: null,
+    url: null
+  };
+  
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    
+    if (arg === '--profile' || arg === '-p') {
+      if (i + 1 < args.length) {
+        result.profile = args[i + 1];
+        i++; // 跳过参数值
+      }
+    } else if (arg === '--url' || arg === '-u') {
+      if (i + 1 < args.length) {
+        result.url = args[i + 1];
+        i++; // 跳过参数值
+      }
+    } else if (arg === '--headless' || arg === '-h') {
+      // headless 参数传递给 launcher
+      // 不在 parseArgs 中处理，直接传递所有剩余参数
+      break;
+    }
+  }
+  
+  result.headless = args.includes('--headless') || args.includes('-h');
+  return result;
+}
+
 function main() {
-  const { values } = parseArgs({
-    options: {
-      profile: { type: 'string', short: 'p' },
-      url:     { type: 'string', short: 'u' },
-      headless:{ type: 'boolean', short: 'h' }
-    }
-  });
-
-  const profile = values.profile || 'weibo_fresh';
-  const url     = values.url     || 'https://weibo.com';
-  const headless= !!values.headless;
-
-  const child = spawn('node', [launcherPath, profile, url], {
+  const { profile, url, headless } = parseArgs();
+  
+  const defaultProfile = 'weibo_fresh';
+  const defaultUrl = 'https://weibo.com';
+  
+  const profileName = profile || defaultProfile;
+  const targetUrl = url || defaultUrl;
+  
+  // 将所有剩余参数传递给 launcher（包括 --headless）
+  const extraArgs = process.argv.slice(2).filter(arg => arg !== '--profile' && arg !== '-p' && arg !== '--url' && arg !== '-u' && arg !== '-h');
+  
+  const args = [launcherPath, profileName, targetUrl, ...(headless ? ['--headless'] : [])];
+  
+  console.log('🚀 WebAuto 一键启动');
+  console.log(`  Profile: ${profileName}`);
+  console.log(`  URL: ${targetUrl}`);
+  console.log(`  参数: ${extraArgs.join(' ')}`);
+  console.log();
+  
+  const child = spawn('node', args, {
     stdio: 'inherit',
-    env: {
-      ...process.env,
-      WEBAUTO_HEADLESS: headless ? '1' : '0'
-    }
+    env: process.env
   });
 
   child.on('exit', (code) => {

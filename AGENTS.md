@@ -40,3 +40,38 @@ curl http://127.0.0.1:7704/health
 5. 构建脚本、CLI 统一使用 CommonJS，Node ≥ 14 原生支持。
 6. 违反上述规则即视为阻塞性 Bug，立即回滚或修复。
 7. 浮窗UI（apps/floating-panel）必须使用纯CJS架构，禁止混用ESM以避免Electron加载错误。
+
+## 新增规则（2025-12-24）
+
+### 1. 代码修改禁止使用 Python 自动化脚本
+
+禁止使用 Python 自动化脚本进行代码修改（如 `sed`, `awk` 配合 `python3 << 'EOF'`）。
+
+**原因：** 自动化脚本容易出现语法错误和结构破坏，导致代码无法正常运行。
+
+**替代方案：**
+- 手动使用 `apply_patch` 工具
+- 对于复杂修改，先分析代码结构，然后精确修改
+- 小型修改使用简单的 sed 命令
+
+### 2. 代码修改统一使用 TypeScript
+
+除了必要的浏览器底层修改，所有代码修改必须使用 TypeScript/TS。
+
+**原因：** 保持代码类型安全，利用 TypeScript 的类型系统。
+
+**范围：**
+- apps/floating-panel/src/renderer/ - 使用 TypeScript/TS
+- modules/ 目录下的源码 - 使用 TypeScript
+
+### 3. 浏览器 CLI 封装后禁止在应用层修改
+
+浏览器 CLI 的修改应该通过命令行接口进行，禁止在应用层直接修改浏览器 CLI 以下的代码。
+
+**原因：** 保持代码分层清晰，避免跨层修改导致的维护问题。
+
+**范围：**
+- apps/floating-panel/ 中的所有代码
+- services/ 目录下的所有代码
+
+---

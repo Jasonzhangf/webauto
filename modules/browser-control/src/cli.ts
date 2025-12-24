@@ -148,8 +148,14 @@ export async function run(argv = process.argv.slice(2)): Promise<CliResult> {
     return handleStop(flags);
   }
   if (command === 'status') {
-    return handleStatus(flags);
-  }
+        return handleStatus(flags);
+    }
+    if (command === 'highlight') {
+        return handleHighlight(flags);
+    }
+    if (command === 'highlight-dom-path') {
+        return handleHighlightDomPath(flags);
+    }
   throw new Error(`Unknown command: ${command}`);
 }
 
@@ -169,4 +175,82 @@ if (path.resolve(process.argv[1] || '') === currentFile) {
     console.error(err?.message || err);
     process.exit(1);
   });
+}
+
+async function handleHighlight(flags: Record<string, string>): Promise<CliResult> {
+    const url = flags.url;
+    if (!url && !flags.fixture) {
+        throw new Error('Either --url or --fixture must be provided');
+    }
+    const selector = assertFlag(flags, 'selector');
+    const color = flags.color || 'green';
+    const duration = Number(flags.duration || 1500);
+
+    // 复用 dom-dump 的 session 打开逻辑
+    const fetchOptions: DomFetchOptions = {
+        url: url || 'about:blank',
+        profileDir: flags.profile,
+        headless: flags.headless ? flags.headless !== 'false' : true,
+        fixture: flags.fixture,
+    };
+    const html = await fetchDomHtml(fetchOptions);
+    // 上面只是拿到 session，下面真正高亮
+    const page = (global as any).__browserPage; // 复用全局 page
+    if (!page) throw new Error('no active page');
+
+    const result = await page.evaluate((data: any) => {
+        const nodes = Array.from(document.querySelectorAll(data.selector));
+        if (!nodes.length) return { success: false, error: 'element not found', count: 0 };
+        const cleanups = nodes.map((el: any) => {
+            const orig = el.style.outline;
+            el.style.outline = data.style;
+            return () => { el.style.outline = orig; };
+        });
+        const cleanup = () => cleanups.forEach((fn: any) => { try { fn(); } catch {} });
+        if (data.duration > 0) setTimeout(cleanup, data.duration);
+        return { success: true, count: nodes.length };
+    }, { selector, style: `4px solid ${color}`, duration });
+
+    return { success: result.success !== false, data: result };
+}
+
+async function handleHighlightDomPath(flags: Record<string, string>): Promise<CliResult> {
+    const url = flags.url;
+    if (!url && !flags.fixture) {
+        throw new Error('Either --url or --fixture must be provided');
+    }
+    const path = assertFlag(flags, 'dom-path');
+    const color = flags.color || 'green';
+    const duration = Number(flags.duration || 1500);
+
+    const fetchOptions: DomFetchOptions = {
+        url: url || 'about:blank',
+        profileDir: flags.profile,
+        headless: flags.headless ? flags.headless !== 'false' : true,
+        fixture: flags.fixture,
+    };
+    await fetchDomHtml(fetchOptions); // 打开 session
+    const page = (global as any).__browserPage;
+    if (!page) throw new Error('no active page');
+
+    const result = await page.evaluate((data: any) => {
+        const parts = data.path.split('/').filter((t: string) => t.length);
+        if (parts[0] !== 'root') parts.unshift('root');
+        let node = document.body || document.documentElement;
+        for (let i = 1; i < parts.length; i++) {
+            const idx = Number(parts[i]);
+            const children = node.children ? Array.from(node.children) : [];
+            if (!Number.isFinite(idx) || idx < 0 || idx >= children.length) {
+                return { success: false, error: 'dom path not found', count: 0 };
+            }
+            node = children[idx] as any;
+            if (!node) return { success: false, error: 'dom path not found', count: 0 };
+        }
+        const orig = (node as any).style.outline;
+        (node as any).style.outline = data.style;
+        if (data.duration > 0) setTimeout(() => { (node as any).style.outline = orig; }, data.duration);
+        return { success: true, count: 1 };
+    }, { path, style: `4px solid ${color}`, duration });
+
+    return { success: result.success !== false, data: result };
 }

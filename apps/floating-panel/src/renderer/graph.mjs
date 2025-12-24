@@ -9,6 +9,42 @@ let selectedContainer = null;
 let selectedDom = null;
 const domNodePositions = new Map();
 const containerNodePositions = new Map();
+const selectorMap = new Map();
+
+
+function populateSelectorMap(containerData) {
+  selectorMap.clear();
+  if (!containerData) return;
+  
+  function traverse(node) {
+    if (!node || typeof node !== 'object') return;
+    
+    // Map selectors to DOM paths
+    if (node.selectors && Array.isArray(node.selectors)) {
+      node.selectors.forEach(selector => {
+        if (selector.css) {
+          // Find matching DOM nodes
+          const domNodes = Array.from(domNodePositions.keys());
+          const matchedNode = domNodes.find(path => {
+            // Simple heuristic: if the DOM path contains the selector class/id
+            return selector.css.includes('#') ? false : true;
+          });
+          if (matchedNode) {
+            selectorMap.set(selector.css, matchedNode);
+          }
+        }
+      });
+    }
+    
+    // Process children recursively
+    if (node.children && Array.isArray(node.children)) {
+      node.children.forEach(child => traverse(child));
+    }
+  }
+  
+  traverse(containerData);
+}
+
 
 export function initGraph(canvasEl) {
   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
@@ -50,10 +86,11 @@ export function initGraph(canvasEl) {
 export function updateContainerTree(data) {
   if (!canvas) return;
   containerData = data;
+  // Only expand root, not all children - implement on-demand loading
   if (data && (data.id || data.name)) {
     const rootId = data.id || data.name || 'root';
-    expandedNodes.add(rootId);
-    expandAllContainers(data);
+    expandedNodes.clear(); // Clear all expansions
+    expandedNodes.add(rootId); // Only expand root
   }
   renderGraph();
 }
@@ -61,7 +98,8 @@ export function updateContainerTree(data) {
 export function updateDomTree(data) {
   if (!canvas) return;
   domData = data;
-  expandAllDomNodes(data);
+  // Don't expand all DOM nodes - expand based on visibility only
+  // expandAllDomNodes(data); // REMOVED: Implement on-demand loading
   renderGraph();
 }
 
@@ -170,22 +208,29 @@ function renderContainerNode(parent, node, x, y, depth, domNodesMap) {
     }
   });
   
+  // 点击容器主体：选择和高亮，不展开/折叠
   rect.addEventListener('click', (e) => {
     e.stopPropagation();
     selectedContainer = nodeId;
     selectedDom = null;
-    if (hasChildren) {
-      if (isExpanded) {
-        expandedNodes.delete(nodeId);
-      } else {
-        expandedNodes.add(nodeId);
-      }
-    }
     
-    if (node.selectors && node.selectors.length > 0 && typeof window.api?.highlightElement === 'function') {
-      window.api.highlightElement(node.selectors[0], 'green').catch(err => {
-        console.error('Failed to highlight:', err);
-      });
+    // 使用 match 信息中的 selector 来高亮
+    if (node.match && node.match.nodes && node.match.nodes.length > 0) {
+      const selector = node.match.nodes[0].selector;
+      console.log('[Container] Highlighting with selector:', selector);
+      if (selector && typeof window.api?.highlightElement === 'function') {
+        window.api.highlightElement(selector, 'green').catch(err => {
+          console.error('Failed to highlight:', err);
+        });
+      }
+    } else if (node.selectors && node.selectors.length > 0) {
+      // 回退使用容器定义中的 selector
+      console.log('[Container] Fallback highlighting with selector:', node.selectors[0]);
+      if (typeof window.api?.highlightElement === 'function') {
+        window.api.highlightElement(node.selectors[0], 'green').catch(err => {
+          console.error('Failed to highlight:', err);
+        });
+      }
     }
     
     renderGraph();
@@ -226,10 +271,19 @@ function renderContainerNode(parent, node, x, y, depth, domNodesMap) {
   g.appendChild(text);
   parent.appendChild(g);
 
-  if (node.match && node.match.selector) {
-    const domNodeY = domNodePositions.get(node.match.selector) || 0;
-    drawConnectionToDom(parent, x + depth * 20 + 180, y + 14, 410, domNodeY + 12);
-  }
+  // 点击 +/- 指示器：展开/折叠
+  indicatorBg.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (hasChildren) {
+      const nodeId = node.id || node.name;
+      if (expandedNodes.has(nodeId)) {
+        expandedNodes.delete(nodeId);
+      } else {
+        expandedNodes.add(nodeId);
+      }
+      renderGraph();
+    }
+  });
 
   let totalHeight = 28;
 
@@ -258,6 +312,9 @@ function renderContainerNode(parent, node, x, y, depth, domNodesMap) {
       currentY += childHeight + 4;
       totalHeight = currentY - y;
     });
+  } else {
+    // If not expanded but has children, still return a height to show the + indicator
+    return 24;
   }
 
   return totalHeight;
@@ -298,20 +355,15 @@ function renderDomNodeRecursive(parent, node, x, y) {
     }
   });
 
+  // 点击 DOM 节点主体：选择和高亮，不展开/折叠
   rect.addEventListener('click', (e) => {
     e.stopPropagation();
     selectedDom = nodeId;
     selectedContainer = null;
-    if (hasChildren) {
-      if (isExpanded) {
-        expandedNodes.delete(nodeId);
-      } else {
-        expandedNodes.add(nodeId);
-      }
-    }
     
     const selector = node.id ? `#${node.id}` : (node.path || '');
     if (selector && typeof window.api?.highlightElement === 'function') {
+      console.log('[DOM Node] Highlighting:', selector);
       window.api.highlightElement(selector, 'blue').catch(err => {
         console.error('Failed to highlight:', err);
       });
@@ -386,6 +438,7 @@ function renderDomNodeRecursive(parent, node, x, y) {
       totalHeight = currentY - y;
     });
   } else {
+    // If not expanded but has children, still return a height to show the + indicator
     return 24;
   }
 
@@ -393,52 +446,102 @@ function renderDomNodeRecursive(parent, node, x, y) {
 }
 
 function drawAllConnections(parent) {
+  console.log('[drawAllConnections] Called');
+  console.log('[drawAllConnections] containerData:', !!containerData, 'domData:', !!domData);
+  
   if (!containerData || !domData) {
-    console.log('[drawAllConnections] Missing data');
+    console.log('[drawAllConnections] Missing data - containerData:', containerData, 'domData:', domData);
     return;
   }
 
   console.log('[drawAllConnections] Starting connection drawing');
+  console.log('[drawAllConnections] containerData.keys:', containerData ? Object.keys(containerData) : 'N/A');
+  console.log('[drawAllConnections] domData has children:', domData ? (domData.children?.length || 0) : 'N/A');
+
+  // Populate selector map from container data
+  populateSelectorMap(containerData);
+  console.log('[drawAllConnections] selectorMap populated with', selectorMap.size, 'entries');
 
   function drawConnectionsForNode(node) {
-    if (!node || typeof node !== 'object') return;
-    
-    console.log('[drawConnectionsForNode] Checking node:', node.id || node.name, 'has match:', !!node.match, 'match selector:', node.match?.selector);
-    
-    if (node.match && node.match.selector) {
-      const domNodeY = domNodePositions.get(node.match.selector);
-      const containerPos = containerNodePositions.get(node.id || node.name);
-      
-      console.log('[drawConnectionsForNode] Connection data:', {
-        containerId: node.id || node.name,
-        containerPos,
-        domNodeSelector: node.match.selector,
-        domNodeY
-      });
-      
-      if (containerPos && domNodeY !== undefined && domNodeY >= 0) {
-        const startX = containerPos.x;
-        const startY = containerPos.y;
-        const endX = 410;
-        const endY = domNodeY + 12;
-        
-        const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-        const midX = (startX + endX) / 2;
-        path.setAttribute('d', `M ${startX} ${startY} C ${midX} ${startY}, ${midX} ${endY}, ${endX} ${endY}`);
-        path.setAttribute('stroke', '#4CAF50');
-        path.setAttribute('stroke-width', '2');
-        path.setAttribute('fill', 'none');
-        path.setAttribute('stroke-dasharray', '4,2');
-        path.setAttribute('opacity', '0.7');
-        parent.appendChild(path);
-        console.log('[drawConnectionsForNode] Drew connection from', node.id, 'to', node.match.selector);
-      } else {
-        console.log('[drawConnectionsForNode] Cannot draw: missing positions or invalid Y');
-      }
+    if (!node || typeof node !== 'object') {
+      console.log('[drawConnectionsForNode] Invalid node or not object');
+      return;
     }
     
+    console.log('[drawConnectionsForNode] Checking node:', node.id || node.name, 'has match:', !!node.match, 'match exists:', !!node.match?.nodes, 'nodes length:', node.match?.nodes?.length || 0);
+    
+    // Use pre-built node mappings from container.match.nodes first
+    if (node.match && node.match.nodes && node.match.nodes.length > 0) {
+      console.log('[drawConnectionsForNode] Using match nodes for:', node.id || node.name);
+      const containerPos = containerNodePositions.get(node.id || node.name);
+      
+      for (const matchNode of node.match.nodes) {
+        const domPath = matchNode.dom_path;
+        const domNodeY = domNodePositions.get(domPath);
+        const selector = matchNode.selector;
+        
+        console.log('[drawConnectionsForNode] Drawing connection:', {
+          containerId: node.id || node.name,
+          domPath,
+          selector,
+          domNodeY
+        });
+        
+        if (containerPos && domNodeY !== undefined && domNodeY >= 0) {
+          const startX = containerPos.x;
+          const startY = containerPos.y;
+          const endX = 410;
+          const endY = domNodeY + 12;
+          
+          const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+          const midX = (startX + endX) / 2;
+          path.setAttribute('d', `M ${startX} ${startY} C ${midX} ${startY}, ${midX} ${endY}, ${endX} ${endY}`);
+          path.setAttribute('stroke', '#4CAF50');
+          path.setAttribute('stroke-width', '2');
+          path.setAttribute('fill', 'none');
+          path.setAttribute('stroke-dasharray', '4,2');
+          path.setAttribute('opacity', '0.7');
+          parent.appendChild(path);
+          console.log('[drawConnectionsForNode] Drew connection from', node.id || node.name, 'to', domPath);
+        } else {
+          console.log('[drawConnectionsForNode] Cannot draw to', domPath, ': missing positions or invalid Y');
+        }
+      }
+    } else if (node.match && node.match.selectors && node.match.selectors.length > 0) {
+      console.log('[drawConnectionsForNode] Using selectors for:', node.id || node.name);
+      const containerPos = containerNodePositions.get(node.id || node.name);
+      
+      for (const selector of node.match.selectors) {
+        const domPath = selectorMap.get(selector);
+        const domNodeY = domNodePositions.get(domPath);
+        
+        if (containerPos && domNodeY !== undefined && domNodeY >= 0) {
+          const startX = containerPos.x;
+          const startY = containerPos.y;
+          const endX = 410;
+          const endY = domNodeY + 12;
+          
+          const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+          const midX = (startX + endX) / 2;
+          path.setAttribute('d', `M ${startX} ${startY} C ${midX} ${startY}, ${midX} ${endY}, ${endX} ${endY}`);
+          path.setAttribute('stroke', '#4CAF50');
+          path.setAttribute('stroke-width', '2');
+          path.setAttribute('fill', 'none');
+          path.setAttribute('stroke-dasharray', '4,2');
+          path.setAttribute('opacity', '0.7');
+          parent.appendChild(path);
+        }
+      }
+    } else {
+      console.log('[drawConnectionsForNode] No match data for:', node.id || node.name);
+    }
+    
+    console.log('[drawConnectionsForNode] Checking children for:', node.id || node.name, 'children count:', node.children?.length || 0);
     if (node.children && Array.isArray(node.children)) {
-      node.children.forEach(child => drawConnectionsForNode(child));
+      node.children.forEach((child, index) => {
+        console.log('[drawConnectionsForNode] Processing child', index, 'of', node.id || node.name);
+        drawConnectionsForNode(child);
+      });
     }
   }
 
