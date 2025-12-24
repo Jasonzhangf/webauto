@@ -9,6 +9,8 @@ declare global {
       onBusStatus(cb: (status: { connected: boolean }) => void): void;
       invokeAction(action: string, payload?: any): Promise<any>;
       highlightElement(selector: string, color?: string): Promise<any>;
+      minimize(): Promise<void>;
+      close(): Promise<void>;
     };
     lastSnapshot?: any;
   }
@@ -211,7 +213,7 @@ btnClear?.addEventListener('click', () => {
 
 if (btnMinimize && window.api) {
   btnMinimize.addEventListener('click', () => {
-    window.api.invokeAction('window:minimize', {}).catch(err => {
+    window.api.minimize().catch(err => {
       console.error('Failed to minimize:', err);
     });
   });
@@ -219,7 +221,7 @@ if (btnMinimize && window.api) {
 
 if (btnClose && window.api) {
   btnClose.addEventListener('click', () => {
-    window.api.invokeAction('window:close', {}).catch(err => {
+    window.api.close().catch(err => {
       console.error('Failed to close:', err);
     });
   });

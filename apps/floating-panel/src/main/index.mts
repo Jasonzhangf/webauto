@@ -68,8 +68,8 @@ function createWindow() {
   const { width, height } = screen.getPrimaryDisplay().workAreaSize;
   const defaultWidth = 320;
   const defaultHeight = 480;
-  const fallbackX = Math.max(0, width - defaultWidth - 20);
-  const fallbackY = 60;
+  const fallbackX = Math.max(0, Math.round((width - defaultWidth) / 2));
+  const fallbackY = Math.max(0, Math.round((height - defaultHeight) / 2));
 
   const mainWindowState = windowStateKeeper({
     defaultWidth,
@@ -91,14 +91,14 @@ function createWindow() {
     x: windowBounds.x,
     y: windowBounds.y,
     frame: false,
-    alwaysOnTop: true,
-    skipTaskbar: true,
+    alwaysOnTop: false,
+    skipTaskbar: false,
     resizable: true,
     minWidth: 280,
     minHeight: 200,
     show: true,
     webPreferences: {
-      preload: path.join(MAIN_DIR, 'preload.cjs'),
+      preload: path.join(MAIN_DIR, 'preload.mjs'),
       contextIsolation: true,
       nodeIntegration: false,
       webSecurity: false
