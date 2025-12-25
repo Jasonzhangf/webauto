@@ -1,14 +1,7 @@
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+const { app, BrowserWindow } = require('electron');
+const path = require('node:path');
 
-const electron = await import('electron');
-const { app, BrowserWindow } = electron;
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-const preloadPath = process.env.PRELOAD_PATH || path.resolve(__dirname, '../dist/main/preload.mjs');
-const preloadUrl = preloadPath;
+const preloadPath = process.env.PRELOAD_PATH || path.resolve(__dirname, '../dist/main/preload.cjs');
 
 const html = `<!doctype html>
 <html>
@@ -33,7 +26,6 @@ const logResult = (ok, detail = '') => {
 };
 
 const runTest = async () => {
-  app.commandLine.appendSwitch('enable-features', 'PreloadESM');
   const win = new BrowserWindow({
     width: 300,
     height: 200,
@@ -41,8 +33,7 @@ const runTest = async () => {
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: true,
-      preload: preloadUrl
+      preload: preloadPath
     }
   });
 
@@ -59,10 +50,7 @@ const runTest = async () => {
   const dataUrl = `data:text/html;charset=utf-8,${encodeURIComponent(html)}`;
   await win.loadURL(dataUrl);
 
-  const hasApi = await win.webContents.executeJavaScript(
-    'Boolean(window.api)',
-    true
-  );
+  const hasApi = await win.webContents.executeJavaScript('Boolean(window.api)', true);
 
   if (hasApi && !sawPreloadError) {
     logResult(true);

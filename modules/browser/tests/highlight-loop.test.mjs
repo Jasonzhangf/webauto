@@ -56,9 +56,14 @@ async function run() {
         ? list.data
         : [];
   if (!list.success || sessions.length === 0) {
-    throw new Error('无活跃会话，请先运行 scripts/test-weibo-profile.mjs');
+    console.log("[ensure] 创建会话");
+    const create = await fetch(`${BASE}/v1/session/create`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ profile: PROFILE, url: "https://weibo.com" })
+    }).then(r => r.json());
+    if (!create.success) throw new Error("无法创建会话");
   }
-
   // 1. selector 高亮
   console.log('[1] 高亮 selector: body');
   const h1 = await highlightSelector('body', 'green');

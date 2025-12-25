@@ -30,9 +30,10 @@ const steps = [
   },
   {
     name: 'floating-panel:preload-loop',
-    cmd: 'node',
-    args: [path.join(repoRoot, 'apps/floating-panel/scripts/test-preload.mjs')],
-    env: { PRELOAD_PATH: path.join(repoRoot, 'apps/floating-panel/dist/main/preload.mjs') },
+    cmd: 'npx',
+    args: ['electron', 'scripts/test-preload.cjs'],
+    cwd: path.join(repoRoot, 'apps/floating-panel'),
+    env: { PRELOAD_PATH: path.join(repoRoot, 'apps/floating-panel/dist/main/preload.cjs') },
   },
   {
     name: 'floating-panel:ui-window-loop',
@@ -41,6 +42,61 @@ const steps = [
     cwd: path.join(repoRoot, 'apps/floating-panel'),
   },
 ];
+
+const services = [
+  {
+    name: 'unified-api',
+    health: 'http://127.0.0.1:7701/health',
+    cmd: 'node',
+    args: [path.join(repoRoot, 'services/unified-api/server.mjs')],
+  },
+  {
+    name: 'browser-service',
+    health: 'http://127.0.0.1:7704/health',
+    cmd: 'node',
+    args: [path.join(repoRoot, 'libs/browser/remote-service.js'), '--host', '127.0.0.1', '--port', '7704', '--wsPort', '8765', '--wsHost', '127.0.0.1', '--enableWs'],
+  },
+];
+
+const running = new Map();
+
+async function waitForHealth(url, retries = 20, delayMs = 500) {
+  for (let i = 0; i < retries; i += 1) {
+    try {
+      const res = await fetch(url);
+      if (res.ok) return true;
+    } catch {
+      // ignore
+    }
+    await new Promise((r) => setTimeout(r, delayMs));
+  }
+  return false;
+}
+
+async function ensureService(service) {
+  const ok = await waitForHealth(service.health, 2, 200);
+  if (ok) return;
+
+  console.log(`[loop] 启动服务: ${service.name}`);
+  const proc = spawn(service.cmd, service.args, {
+    cwd: repoRoot,
+    env: { ...process.env },
+    stdio: ['ignore', 'inherit', 'inherit'],
+  });
+  running.set(service.name, proc);
+
+  const ready = await waitForHealth(service.health, 30, 500);
+  if (!ready) {
+    throw new Error(`${service.name} 启动失败: ${service.health}`);
+  }
+}
+
+function shutdownServices() {
+  for (const [name, proc] of running.entries()) {
+    console.log(`[loop] 停止服务: ${name}`);
+    proc.kill('SIGTERM');
+  }
+}
 
 function runStep(step) {
   return new Promise((resolve, reject) => {
@@ -59,6 +115,9 @@ function runStep(step) {
 
 async function run() {
   console.log('=== 全局回环测试开始 ===');
+  for (const service of services) {
+    await ensureService(service);
+  }
   for (const step of steps) {
     console.log(`\n[loop] ${step.name}`);
     await runStep(step);
@@ -66,7 +125,8 @@ async function run() {
   console.log('\n✅ 全局回环测试完成');
 }
 
-run().catch((err) => {
+run().then(() => shutdownServices()).catch((err) => {
+  shutdownServices();
   console.error(`\n❌ 全局回环测试失败: ${err.message}`);
   process.exit(1);
 });
