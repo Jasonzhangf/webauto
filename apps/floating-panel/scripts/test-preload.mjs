@@ -5,7 +5,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const preloadPath = path.resolve(__dirname, '../dist/main/preload.cjs');
+const preloadPath = process.env.PRELOAD_PATH || path.resolve(__dirname, '../dist/main/preload.cjs');
 const preloadUrl = preloadPath;
 
 const html = `<!doctype html>
