@@ -134,6 +134,7 @@ export class UiController {
     this.defaultHttpPort = Number(options.defaultHttpPort || 7704);
     this.defaultHttpProtocol = options.defaultHttpProtocol || 'http';
     this._containerIndexCache = null;
+    this.cliTargets = options.cliTargets || {};
   }
 
   async handleAction(action: string, payload: ActionPayload = {}) {

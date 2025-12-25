@@ -194,13 +194,15 @@ async function verifyContainerMatch(profile, url) {
     }));
   });
   ws.close();
-  if (!result?.success) {
+  if (result?.success === false) {
     throw new Error(`容器匹配失败: ${result?.error || 'unknown error'}`);
   }
-  if (!result?.data?.container_tree || !result?.data?.dom_tree) {
+  const data = result?.data || result || {};
+  const snapshot = data.snapshot || data;
+  if (!snapshot?.container_tree || !snapshot?.dom_tree) {
     throw new Error('容器匹配失败: 缺少 container_tree 或 dom_tree');
   }
-  const rootId = result?.data?.metadata?.root_container_id;
+  const rootId = snapshot?.metadata?.root_container_id;
   if (!rootId || !String(rootId).startsWith('weibo_')) {
     throw new Error(`容器匹配失败: root_container_id=${rootId || 'unknown'}`);
   }
@@ -235,7 +237,6 @@ export async function startAll({ profile, url, headless }) {
   log('=== 启动 Browser Service ===');
   const browser = await startProcess('node', ['libs/browser/remote-service.js',
     '--host', '127.0.0.1', '--port', CONFIG.ports.browser,
-    '--no-ws'
   ], {
     env: { ...process.env, WEBAUTO_SKIP_HEALTH_CHECK: '1' }
   });

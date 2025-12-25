@@ -48,28 +48,30 @@ export class UiController {
        return this.handleContainerCreateChild(payload);
      case 'containers:update-alias':
        return this.handleContainerUpdateAlias(payload);
-     case 'containers:update-operations':
-       return this.handleContainerUpdateOperations(payload);
-     case 'browser:highlight':
-       return this.handleBrowserHighlight(payload);
-     case 'browser:clear-highlight':
-       return this.handleBrowserClearHighlight(payload);
-      case 'browser:highlight-dom-path':
-        return this.handleBrowserHighlightDomPath(payload);
-      case 'browser:cancel-pick':
-        return this.handleBrowserCancelDomPick(payload);
-      case 'browser:pick-dom':
-        return this.handleBrowserPickDom(payload);
-      case 'dom:branch:2':
-        return this.handleDomBranch2(payload);
-      case 'dom:pick:2':
-        return this.handleDomPick2(payload);
-      case 'browser:inspect_tree':
-        return this.fetchInspectTree(payload);
-      default:
-        return { success: false, error: `Unknown action: ${action}` };
-    }
-  }
+    case 'containers:update-operations':
+      return this.handleContainerUpdateOperations(payload);
+    case 'browser:highlight':
+      return this.handleBrowserHighlight(payload);
+    case 'browser:clear-highlight':
+      return this.handleBrowserClearHighlight(payload);
+     case 'browser:highlight-dom-path':
+       return this.handleBrowserHighlightDomPath(payload);
+     case 'browser:cancel-pick':
+       return this.handleBrowserCancelDomPick(payload);
+     case 'browser:pick-dom':
+       return this.handleBrowserPickDom(payload);
+     case 'dom:branch:2':
+       return this.handleDomBranch2(payload);
+     case 'dom:pick:2':
+       return this.handleDomPick2(payload);
+     case 'browser:inspect_tree':
+       return this.fetchInspectTree(payload);
+     case 'containers:match':
+       return this.handleContainerMatch(payload);
+     default:
+       return { success: false, error: `Unknown action: ${action}` };
+   }
+ }
 
   async fetchBrowserStatus() {
     try {
@@ -364,6 +366,36 @@ export class UiController {
     };
     await this.writeUserContainerDefinition(siteKey, containerId, next);
     return this.handleContainerInspect({ profile: payload.profile, url: payload.url, containerId });
+  }
+
+  async handleContainerMatch(payload = {}) {
+    const profile = payload.profileId || payload.profile;
+    const url = payload.url;
+    if (!profile) throw new Error('缺少 profile');
+    if (!url) throw new Error('缺少 URL');
+    try {
+      const context = await this.captureInspectorSnapshot({
+        profile,
+        url,
+        maxDepth: payload.maxDepth || 2,
+        maxChildren: payload.maxChildren || 5,
+        rootSelector: payload.rootSelector,
+      });
+      const snapshot = context.snapshot;
+      const rootContainer = snapshot?.root_match?.container || snapshot?.container_tree?.container || snapshot?.container_tree?.containers?.[0];
+      const matchPayload = {
+        sessionId: context.sessionId,
+        profileId: context.profileId,
+        url: context.targetUrl,
+        matched: !!rootContainer,
+        container: rootContainer || null,
+        snapshot,
+      };
+      this.messageBus?.publish?.('containers.matched', matchPayload);
+      return { success: true, data: matchPayload };
+    } catch (err) {
+      throw new Error(`容器匹配失败: ${err?.message || String(err)}`);
+    }
   }
 
   async handleBrowserHighlight(payload = {}) {
