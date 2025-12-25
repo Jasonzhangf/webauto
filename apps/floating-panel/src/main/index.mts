@@ -98,9 +98,10 @@ function createWindow() {
     minHeight: 200,
     show: true,
     webPreferences: {
-      preload: path.join(MAIN_DIR, 'preload.cjs'),
+      preload: path.join(MAIN_DIR, 'preload.mjs'),
       contextIsolation: true,
       nodeIntegration: false,
+      sandbox: false, // 保持 sandbox: false 以允许 Node.js 集成和 ESM preload (参考文档)
       webSecurity: false
     }
   });

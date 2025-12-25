@@ -36,7 +36,7 @@ curl http://127.0.0.1:7704/health
 1. 全仓库统一使用 ES Module（`"type": "module"`），禁止混用 CommonJS。
 2. 所有源码文件扩展名：`.ts`、`.mts`、`.js`、`.mjs` 均为 ES 模块；禁止使用 `.cjs`。
 3. 禁止在 ES 模块中使用 `require`、`module.exports`、`__dirname`、`__filename`；统一改用 `import`、`export`、`import.meta.url`、`fileURLToPath`。
-4. Electron preload 脚本必须使用 ESM（`.mjs`/`.mts`/`.js`）；主进程显式加载 ESM 入口。
+4. Electron preload 脚本必须使用 ESM（`.mjs`/`.mts`/`.js`），禁止生成 `.cjs` 版本；主进程与构建流程必须确保全链路 ESM。执行流程：升级 Electron ≥ 39，预加载脚本保持 `.mjs` 后缀，主进程 `webPreferences.preload` 直接指向 `.mjs`，测试用例必须走 ESM preload 回环。
 5. 构建脚本、CLI 统一使用 ESM。
 6. 违反上述规则即视为阻塞性 Bug，立即回滚或修复。
 7. 浮窗 UI（apps/floating-panel）必须使用纯 ESM 架构，禁止混用 CJS。

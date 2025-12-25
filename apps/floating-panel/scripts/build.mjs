@@ -23,9 +23,10 @@ execSync('rm -rf dist', { stdio: 'inherit' });
 console.log('[floating-panel] building main process (ESM)...');
 execSync('npx esbuild src/main/index.mts --bundle --platform=node --format=esm --outfile=dist/main/index.mjs --sourcemap --external:electron --external:ws --external:electron-window-state', { stdio: 'inherit' });
 
-// 2. 复制 preload.mjs
-fs.mkdirSync(path.join(distDir, 'main'), { recursive: true });
-fs.copyFileSync(path.resolve(process.cwd(), 'src/main/preload.mjs'), path.join(distDir, 'main', 'preload.mjs'));
+// 2. 复制 preload.mjs (全链路 ESM)
+const preloadDir = path.join(distDir, 'main');
+fs.mkdirSync(preloadDir, { recursive: true });
+fs.copyFileSync(path.resolve(process.cwd(), 'src/main/preload.mjs'), path.join(preloadDir, 'preload.mjs'));
 
 // 3. 先构建 renderer (ESM) - 这会生成 index.js
 console.log('[floating-panel] building renderer process (ESM)...');
