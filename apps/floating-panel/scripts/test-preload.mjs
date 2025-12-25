@@ -1,11 +1,11 @@
-import { app, BrowserWindow } from 'electron';
+import pkg from 'electron';
 import path from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 
+const { app, BrowserWindow } = pkg;
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const preloadPath = process.env.PRELOAD_PATH || path.resolve(__dirname, '../dist/main/preload.mjs');
-const preloadUrl = pathToFileURL(preloadPath).toString();
 
 const log = (msg) => console.log(`[preload-test] ${msg}`);
 
@@ -15,7 +15,7 @@ app.whenReady().then(async () => {
     height: 200,
     show: false,
     webPreferences: {
-      preload: preloadUrl,
+      preload: preloadPath,
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,

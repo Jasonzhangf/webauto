@@ -248,7 +248,7 @@ ipcMain.handle('ui:highlight', async (_evt, { selector, color }) => {
     const res = await fetch('http://127.0.0.1:7701/v1/browser/highlight', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ selector, color })
+      body: JSON.stringify({ selector, color, profile: "weibo_fresh" })
     });
     return await res.json();
   } catch (e) {

@@ -31,9 +31,9 @@ const steps = [
   {
     name: 'floating-panel:preload-loop',
     cmd: 'npx',
-    args: ['electron', 'scripts/test-preload.cjs'],
+    args: ['electron', 'scripts/test-preload.mjs'],
     cwd: path.join(repoRoot, 'apps/floating-panel'),
-    env: { PRELOAD_PATH: path.join(repoRoot, 'apps/floating-panel/dist/main/preload.cjs') },
+    env: { PRELOAD_PATH: path.join(repoRoot, 'apps/floating-panel/dist/main/preload.mjs') },
   },
   {
     name: 'floating-panel:ui-window-loop',

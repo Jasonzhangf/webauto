@@ -71,7 +71,16 @@ curl http://127.0.0.1:7704/health
 **原因：** 保持代码分层清晰，避免跨层修改导致的维护问题。
 
 **范围：**
-- apps/floating-panel/ 中的所有代码
-- services/ 目录下的所有代码
+  - apps/floating-panel/ 中的所有代码
+  - services/ 目录下的所有代码
 
 ---
+8. ESM preload 实施计划：
+   - 浮窗 preload 源文件：apps/floating-panel/src/main/preload.mjs（ESM）
+   - 构建仅复制源文件到 dist/main/preload.mjs；禁止生成 .cjs 或使用 babel 转译
+   - 主进程：webPreferences.preload = path.join(MAIN_DIR, 'preload.mjs')
+   - Electron 版本 ≥ 39；contextIsolation: true，sandbox: false，nodeIntegration: false
+  - 测试入口：apps/floating-panel/scripts/test-preload.mjs 必须输出 [preload-test] window.api OK
+  - 全局回环：scripts/test-loop-all.mjs 的 floating-panel:preload-loop 使用 npx electron 执行 ESM 测试脚本
+  - 历史遗留 CJS 测试脚本（如 test-preload.cjs、*_wrapper.cjs）立即删除
+  - 其它模块的 CJS 残留逐步按最小回环替换，每一步都通过回环验证后再继续

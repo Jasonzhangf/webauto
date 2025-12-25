@@ -163,12 +163,12 @@ function collectDomNodes(node, map, currentY) {
   if (!node || typeof node !== 'object') return;
   const path = node.path || node.id || node.selectors?.[0] || `node-${Math.random()}`;
   map.set(path, node);
-  domNodePositions.set(path, currentY);
+  console.log("[collectDomNodes] path:", path, "currentY:", currentY, "node:", node.tag, node.id, node.classes?.[0]);  domNodePositions.set(path, currentY);
   if (node.children && Array.isArray(node.children)) {
     let y = currentY + 28;
     node.children.forEach(child => {
       collectDomNodes(child, map, y);
-      y += 32;
+      y += 28;
     });
   }
 }

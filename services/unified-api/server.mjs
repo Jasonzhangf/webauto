@@ -139,6 +139,25 @@ class UnifiedApiServer {
         return;
       }
 
+      if (req.method === 'POST' && url.pathname === '/v1/controller/action') {
+        try {
+          const payload = await this.readJsonBody(req);
+          const action = payload?.action;
+          if (!action) {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: false, error: 'Missing action' }));
+            return;
+          }
+          const result = await this.controller.handleAction(action, payload.payload || {});
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify(this.normalizeResult(result)));
+        } catch (err) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: false, error: err?.message || String(err) }));
+        }
+        return;
+      }
+
       // WebSocket 端点
       if (url.pathname === '/ws' || url.pathname === '/bus') {
         res.writeHead(426, { 'Content-Type': 'text/plain' });
