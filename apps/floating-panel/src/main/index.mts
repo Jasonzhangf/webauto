@@ -98,7 +98,7 @@ function createWindow() {
     minHeight: 200,
     show: true,
     webPreferences: {
-      preload: path.join(MAIN_DIR, 'preload.mjs'),
+      preload: path.join(MAIN_DIR, 'preload.cjs'),
       contextIsolation: true,
       nodeIntegration: false,
       webSecurity: false
