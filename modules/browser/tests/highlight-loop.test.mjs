@@ -32,9 +32,15 @@ async function highlightDomPath(path, color = 'red') {
 }
 
 async function screenshot() {
-  const res = await fetch('http://127.0.0.1:7704/screenshot');
+  const res = await fetch('http://127.0.0.1:7704/command', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'screenshot', profileId: PROFILE })
+  });
   if (!res.ok) throw new Error('screenshot failed');
-  return Buffer.from(await res.arrayBuffer());
+  const payload = await res.json();
+  if (!payload.success || !payload.data) throw new Error('screenshot failed');
+  return Buffer.from(payload.data, 'base64');
 }
 
 async function run() {
