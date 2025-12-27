@@ -242,9 +242,9 @@ ipcMain.handle('health', async () => {
   }
 });
 
-ipcMain.handle('ui:highlight', async (_evt, { selector, color }) => {
+ipcMain.handle('ui:highlight', async (_evt, { selector, color, options = {} }) => {
   try {
-    log(`Highlight request: ${selector}, color: ${color}`);
+    log(`Highlight request: ${selector}, color: ${color}, options: ${JSON.stringify(options)}`);
     
     // 自动识别是否为 DOM 路径 (以 root 开头或包含 /)
     const isPath = selector && (selector.startsWith('root') || selector.includes('/'));
@@ -253,7 +253,8 @@ ipcMain.handle('ui:highlight', async (_evt, { selector, color }) => {
     const body = { 
       color, 
       profile: "weibo_fresh",
-      ...(isPath ? { path: selector } : { selector })
+      ...(isPath ? { path: selector } : { selector }),
+      options: options || {}
     };
 
     const res = await fetch(`http://127.0.0.1:7701${endpoint}`, {

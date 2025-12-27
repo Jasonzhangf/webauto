@@ -332,7 +332,7 @@ function renderContainerNode(parent, node, x, y, depth, domNodesMap) {
       const selector = node.match.nodes[0].selector;
       console.log('[Container] Highlighting with selector:', selector);
       if (selector && typeof window.api?.highlightElement === 'function') {
-        window.api.highlightElement(selector, 'green').catch(err => {
+        window.api.highlightElement(selector, 'green', { channel: 'container' }).catch(err => {
           console.error('Failed to highlight:', err);
         });
       }
@@ -340,7 +340,7 @@ function renderContainerNode(parent, node, x, y, depth, domNodesMap) {
       // 回退使用容器定义中的 selector
       console.log('[Container] Fallback highlighting with selector:', node.selectors[0]);
       if (typeof window.api?.highlightElement === 'function') {
-        window.api.highlightElement(node.selectors[0], 'green').catch(err => {
+        window.api.highlightElement(node.selectors[0], 'green', { channel: 'container' }).catch(err => {
           console.error('Failed to highlight:', err);
         });
       }
@@ -485,7 +485,7 @@ function renderDomNodeRecursive(parent, node, x, y) {
     const selector = node.id ? `#${node.id}` : (node.path || '');
     if (selector && typeof window.api?.highlightElement === 'function') {
       console.log('[DOM Node] Highlighting:', selector);
-      window.api.highlightElement(selector, 'blue').catch(err => {
+      window.api.highlightElement(selector, 'blue', { channel: 'dom' }).catch(err => {
         console.error('Failed to highlight:', err);
       });
     }

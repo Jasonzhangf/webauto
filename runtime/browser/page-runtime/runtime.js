@@ -527,6 +527,7 @@
         depth: 0,
         depthLimit,
         childLimit,
+        forcePaths: options.forcePaths || []
       });
     },
     collectNode(el, ctx) {
@@ -541,10 +542,43 @@
         childCount: el.children ? el.children.length : 0,
         children: [],
       };
-      if (ctx.depth < ctx.depthLimit && el.children && el.children.length) {
+
+      // Check if current path needs to be expanded (depthLimit override)
+      let shouldExpand = ctx.depth < ctx.depthLimit;
+      if (!shouldExpand && ctx.forcePaths && ctx.forcePaths.length > 0) {
+        for (const fp of ctx.forcePaths) {
+          if (fp.startsWith(ctx.path + '/')) {
+            shouldExpand = true;
+            break;
+          }
+        }
+      }
+
+      if (shouldExpand && el.children && el.children.length) {
         const maxChildren = Math.max(1, ctx.childLimit);
-        const len = Math.min(el.children.length, maxChildren);
-        for (let i = 0; i < len; i += 1) {
+        const totalChildren = el.children.length;
+        const defaultCount = Math.min(totalChildren, maxChildren);
+        const indices = new Set();
+
+        for (let i = 0; i < defaultCount; i += 1) {
+          indices.add(i);
+        }
+
+        if (ctx.forcePaths && ctx.forcePaths.length > 0) {
+          const prefix = `${ctx.path}/`;
+          for (const fp of ctx.forcePaths) {
+            if (!fp.startsWith(prefix)) continue;
+            const rest = fp.slice(prefix.length);
+            const next = rest.split('/')[0];
+            const idx = Number(next);
+            if (!Number.isNaN(idx) && idx >= 0 && idx < totalChildren) {
+              indices.add(idx);
+            }
+          }
+        }
+
+        const ordered = Array.from(indices).sort((a, b) => a - b);
+        for (const i of ordered) {
           const child = el.children[i];
           const childPath = `${ctx.path}/${i}`;
           const result = domUtils.collectNode(child, {
@@ -552,6 +586,7 @@
             depth: ctx.depth + 1,
             depthLimit: ctx.depthLimit,
             childLimit: ctx.childLimit,
+            forcePaths: ctx.forcePaths
           });
           if (result) {
             node.children.push(result);
@@ -615,50 +650,105 @@
   function clearChannel(channel) {
     const key = channel || 'default';
     const entry = registry.get(key);
-    if (entry && Array.isArray(entry.overlays)) {
-      entry.overlays.forEach((ov) => {
-        try {
-          removeOverlay(ov);
-        } catch {}
-      });
+    if (entry) {
+      if (Array.isArray(entry.items)) {
+        entry.items.forEach((item) => {
+          try { removeOverlay(item.overlay); } catch {}
+        });
+      } else if (Array.isArray(entry.overlays)) {
+        entry.overlays.forEach((ov) => {
+          try { removeOverlay(ov); } catch {}
+        });
+      }
     }
     registry.delete(key);
   }
+  let scrollListenerInitialized = false;
 
-  function highlightNodes(nodes, options = {}) {
+  function updateAllOverlays() {
+    registry.forEach((entry) => {
+      if (entry && Array.isArray(entry.items)) {
+        entry.items.forEach(({ overlay, element }) => {
+          if (!element || !element.isConnected || !overlay) return;
+          const rect = element.getBoundingClientRect();
+          if (rect.width > 0 && rect.height > 0) {
+             Object.assign(overlay.style, {
+                left: `${Math.round(rect.x)}px`,
+                top: `${Math.round(rect.y)}px`,
+                width: `${Math.round(rect.width)}px`,
+                height: `${Math.round(rect.height)}px`,
+                display: 'block'
+             });
+          } else {
+             overlay.style.display = 'none';
+          }
+        });
+      }
+    });
+  }
+
+  function setupScrollListener() {
+    if (scrollListenerInitialized) return;
+    scrollListenerInitialized = true;
+    
+    let ticking = false;
+    const handler = () => {
+       if (!ticking) {
+         window.requestAnimationFrame(() => {
+           updateAllOverlays();
+           ticking = false;
+         });
+         ticking = true;
+       }
+    };
+    
+    window.addEventListener('scroll', handler, { capture: true, passive: true });
+    window.addEventListener('resize', handler, { passive: true });
+  }
+    function highlightNodes(nodes, options = {}) {
     const channel = options.channel || 'default';
     const style = options.style || '2px solid rgba(255, 193, 7, 0.9)';
     const borderStyle = typeof style === 'string' ? { border: style, borderRadius: '4px' } : style;
 
     const prev = registry.get(channel);
-    if (prev && Array.isArray(prev.overlays)) {
-      prev.overlays.forEach((ov) => {
-        try {
-          removeOverlay(ov);
-        } catch {}
-      });
+    if (prev) {
+      if (Array.isArray(prev.items)) {
+        prev.items.forEach((item) => {
+          try { removeOverlay(item.overlay); } catch {}
+        });
+      } else if (Array.isArray(prev.overlays)) {
+        prev.overlays.forEach((ov) => {
+          try { removeOverlay(ov); } catch {}
+        });
+      }
     }
 
+    const items = [];
     const overlays = [];
     const list = Array.isArray(nodes) ? nodes : [];
     list.forEach((node) => {
       if (!(node instanceof Element)) return;
       const rect = node.getBoundingClientRect();
       if (!rect || !rect.width || !rect.height) return;
-      overlays.push(createOverlay(rect, borderStyle));
+      const overlay = createOverlay(rect, borderStyle);
+      items.push({ overlay, element: node });
+      overlays.push(overlay);
     });
 
     registry.set(channel, {
+      items,
       overlays,
       sticky: Boolean(options.sticky || options.hold),
       cleanup: () => {
-        overlays.forEach((ov) => {
+        items.forEach((item) => {
           try {
-            removeOverlay(ov);
+            removeOverlay(item.overlay);
           } catch {}
         });
       },
     });
+    
+    setupScrollListener();
 
     if (!options.sticky && !options.hold) {
       const duration = Number(options.duration || 0);
@@ -669,7 +759,7 @@
       }
     }
 
-    return { selector: options.selector || null, count: overlays.length, channel };
+    return { selector: options.selector || null, count: items.length, channel };
   }
 
   function highlightSelector(selector, options = {}) {
@@ -702,7 +792,10 @@
     if (path && path !== 'root') {
       target = domUtils.resolveByPath(path, options.rootSelector) || root;
     }
-    const node = domUtils.snapshotNode(target, options);
+    // Extract forcePaths if provided
+    const forcePaths = Array.isArray(options.forcePaths) ? options.forcePaths : [];
+
+    const node = domUtils.snapshotNode(target, { ...options, forcePaths });
     return {
       node,
       path: node?.path || 'root',

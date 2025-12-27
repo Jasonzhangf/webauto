@@ -26,9 +26,9 @@ const api = {
     console.log('[preload] close() called');
     return ipcRenderer.invoke('window:close');
   },
-  highlightElement: (selector, color = 'green') => {
+  highlightElement: (selector, color = "green", options = {}) => {
     console.log('[preload] highlightElement called:', selector, color);
-    return ipcRenderer.invoke('ui:highlight', { selector, color });
+    return ipcRenderer.invoke("ui:highlight", { selector, color, options });
   },
   debugLog: (module, event, data = {}) => {
     return ipcRenderer.invoke('ui:debug-log', { module, event, data });

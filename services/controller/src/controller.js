@@ -398,7 +398,7 @@ export class UiController {
     }
   }
 
-  async handleBrowserHighlight(payload = {}) {
+      async handleBrowserHighlight(payload = {}) {
     const profile = payload.profile || payload.sessionId;
     const selector = (payload.selector || '').trim();
     if (!profile) {
@@ -408,8 +408,20 @@ export class UiController {
       throw new Error('缺少 selector');
     }
     const options = payload.options || {};
+    
+    // 处理颜色
+    let style = options.style;
+    const color = payload.color;
+    if (!style) {
+        if (color === 'green') style = '2px solid rgba(76, 175, 80, 0.95)';
+        else if (color === 'blue') style = '2px solid rgba(33, 150, 243, 0.95)';
+        else if (color === 'red') style = '2px solid rgba(244, 67, 54, 0.95)';
+        else if (color && /^[a-z]+$/i.test(color)) style = `2px solid ${color}`;
+        else style = '2px solid rgba(255, 0, 0, 0.8)';
+    }
+
     const highlightOpts = {
-      style: options.style,
+      style,
       duration: options.duration,
       channel: options.channel || payload.channel,
       sticky: options.sticky,
@@ -431,9 +443,61 @@ export class UiController {
         selector,
         error: errorMessage,
       });
-      throw err || new Error(errorMessage);
+      return { success: false, error: errorMessage };
     }
   }
+
+
+    async handleBrowserHighlightDomPath(payload = {}) {
+    const profile = payload.profile || payload.sessionId;
+    const domPath = (payload.path || payload.domPath || payload.dom_path || '').trim();
+    if (!profile) {
+      throw new Error('缺少会话/ profile 信息');
+    }
+    if (!domPath) {
+      throw new Error('缺少 DOM 路径');
+    }
+    const options = payload.options || {};
+    const channel = options.channel || payload.channel || 'hover-dom';
+    
+    // 处理颜色
+    let style = options.style;
+    const color = payload.color;
+    if (!style) {
+        if (color === 'green') style = '2px solid rgba(76, 175, 80, 0.95)';
+        else if (color === 'blue') style = '2px solid rgba(33, 150, 243, 0.95)';
+        else if (color === 'red') style = '2px solid rgba(244, 67, 54, 0.95)';
+        else if (color && /^[a-z]+$/i.test(color)) style = `2px solid ${color}`;
+        else style = '2px solid rgba(96, 165, 250, 0.95)';
+    }
+
+    const sticky = typeof options.sticky === 'boolean' ? options.sticky : true;
+    try {
+      const result = await this.sendHighlightDomPathViaWs(profile, domPath, {
+        channel,
+        style,
+        sticky,
+        duration: options.duration,
+        rootSelector: options.rootSelector || payload.rootSelector || payload.root_selector || null,
+      });
+      this.messageBus?.publish?.('ui.highlight.result', {
+        success: true,
+        selector: null,
+        details: result?.details || null,
+      });
+      return { success: true, data: result };
+    } catch (err) {
+      const errorMessage = err?.message || 'DOM 路径高亮失败';
+      this.messageBus?.publish?.('ui.highlight.result', {
+        success: false,
+        selector: null,
+        error: errorMessage,
+      });
+      return { success: false, error: errorMessage };
+    }
+  }
+
+
 
   async handleBrowserClearHighlight(payload = {}) {
     const profile = payload.profile || payload.sessionId;
