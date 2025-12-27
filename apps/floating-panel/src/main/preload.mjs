@@ -30,6 +30,9 @@ const api = {
     console.log('[preload] highlightElement called:', selector, color);
     return ipcRenderer.invoke('ui:highlight', { selector, color });
   },
+  debugLog: (module, event, data = {}) => {
+    return ipcRenderer.invoke('ui:debug-log', { module, event, data });
+  },
   onBusEvent: (cb) => {
     console.log('[preload] onBusEvent registered');
     return ipcRenderer.on('bus:event', (_, msg) => {
@@ -48,4 +51,5 @@ const api = {
 
 console.log('[preload] Exposing api to renderer');
 contextBridge.exposeInMainWorld('api', api);
+contextBridge.exposeInMainWorld('DEBUG', process.env.DEBUG || '0');
 console.log('[preload] Preload script completed');

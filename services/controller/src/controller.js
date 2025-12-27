@@ -723,26 +723,23 @@ export class UiController {
     if (!sessionId || !url || !path) {
       throw new Error('缺少 sessionId / URL / DOM 路径');
     }
-    const payload = {
-      type: 'command',
-      session_id: sessionId,
-      data: {
-        command_type: 'container_operation',
-        action: 'inspect_dom_branch',
-        page_context: { url },
-        parameters: {
-          path,
-          ...(rootSelector ? { root_selector: rootSelector } : {}),
-          ...(typeof maxDepth === 'number' ? { max_depth: maxDepth } : {}),
-          ...(typeof maxChildren === 'number' ? { max_children: maxChildren } : {}),
-        },
-      },
-    };
-    const response = await this.sendWsCommand(this.getBrowserWsUrl(), payload, 20000);
-    if (response?.data?.success) {
-      return response.data.data || response.data.branch || response.data;
+    
+    // 使用 CLI 命令而不是 WebSocket
+    const args = [
+      'inspect-branch',
+      '--profile', sessionId,
+      '--url', url,
+      '--path', path,
+      ...(rootSelector ? ['--root-selector', rootSelector] : []),
+      ...(maxDepth ? ['--max-depth', String(maxDepth)] : []),
+      ...(maxChildren ? ['--max-children', String(maxChildren)] : []),
+    ];
+
+    const result = await this.runCliCommand('container-matcher', args);
+    if (result.success) {
+      return result.data;
     }
-    throw new Error(response?.data?.error || response?.error || 'inspect_dom_branch failed');
+    throw new Error(result.error || 'inspect-branch CLI failed');
   }
 
   // v2 DOM branch：按 domPath + depth 获取局部树

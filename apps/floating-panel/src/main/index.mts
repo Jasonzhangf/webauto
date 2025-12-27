@@ -244,17 +244,34 @@ ipcMain.handle('health', async () => {
 
 ipcMain.handle('ui:highlight', async (_evt, { selector, color }) => {
   try {
-    log(`Highlight element: ${selector}, color: ${color}`);
-    const res = await fetch('http://127.0.0.1:7701/v1/browser/highlight', {
+    log(`Highlight request: ${selector}, color: ${color}`);
+    
+    // 自动识别是否为 DOM 路径 (以 root 开头或包含 /)
+    const isPath = selector && (selector.startsWith('root') || selector.includes('/'));
+    const endpoint = isPath ? '/v1/browser/highlight-dom-path' : '/v1/browser/highlight';
+    
+    const body = { 
+      color, 
+      profile: "weibo_fresh",
+      ...(isPath ? { path: selector } : { selector })
+    };
+
+    const res = await fetch(`http://127.0.0.1:7701${endpoint}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ selector, color, profile: "weibo_fresh" })
+      body: JSON.stringify(body)
     });
     return await res.json();
   } catch (e) {
     log(`Highlight error: ${e}`);
     return { success: false, error: String(e) };
   }
+});
+
+ipcMain.handle('ui:debug-log', async (_evt, { module, event, data }) => {
+  logDebug(module || 'floating-panel', event || 'renderer', data || {});
+  log(`[renderer-debug] ${module}:${event} ${JSON.stringify(data)}`);
+  return { success: true };
 });
 
 ipcMain.handle('window:minimize', async (_evt) => {

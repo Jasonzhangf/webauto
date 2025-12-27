@@ -11,14 +11,21 @@ const domNodePositions = new Map();
 const containerNodePositions = new Map();
 const selectorMap = new Map();
 
+// 按需拉取 DOM 分支所需的状态
+const loadedPaths = new Set(['root']); // 初始只有 root 被加载
+let currentProfile = null;
+let currentUrl = null;
+let isLoadingBranch = false;
+
+
 
 function populateSelectorMap(containerData) {
   selectorMap.clear();
   if (!containerData) return;
-  
+
   function traverse(node) {
     if (!node || typeof node !== 'object') return;
-    
+
     // Map selectors to DOM paths
     if (node.selectors && Array.isArray(node.selectors)) {
       node.selectors.forEach(selector => {
@@ -35,13 +42,13 @@ function populateSelectorMap(containerData) {
         }
       });
     }
-    
+
     // Process children recursively
     if (node.children && Array.isArray(node.children)) {
       node.children.forEach(child => traverse(child));
     }
   }
-  
+
   traverse(containerData);
 }
 
@@ -56,7 +63,7 @@ export function initGraph(canvasEl) {
   canvasEl.style.overflow = 'hidden';
   canvasEl.appendChild(svg);
   canvas = svg;
-  
+
   svg.addEventListener('mousedown', (e) => {
     if (e.target.tagName === 'svg') {
       isDraggingGraph = true;
@@ -66,7 +73,7 @@ export function initGraph(canvasEl) {
       e.preventDefault();
     }
   });
-  
+
   window.addEventListener('mousemove', (e) => {
     if (isDraggingGraph) {
       graphOffset.x = e.clientX - dragStart.x;
@@ -74,7 +81,7 @@ export function initGraph(canvasEl) {
       renderGraph();
     }
   });
-  
+
   window.addEventListener('mouseup', () => {
     if (isDraggingGraph) {
       isDraggingGraph = false;
@@ -86,20 +93,60 @@ export function initGraph(canvasEl) {
 export function updateContainerTree(data) {
   if (!canvas) return;
   containerData = data;
-  // Only expand root, not all children - implement on-demand loading
+
   if (data && (data.id || data.name)) {
     const rootId = data.id || data.name || 'root';
-    expandedNodes.clear(); // Clear all expansions
-    expandedNodes.add(rootId); // Only expand root
+    expandedNodes.add(rootId); // 展开根容器
+
+    // 展开第一层子容器
+    if (data.children && Array.isArray(data.children)) {
+      data.children.forEach(child => {
+        const childId = child.id || child.name;
+        if (childId) {
+          expandedNodes.add(childId); expandMatchedContainers(child);
+
+          // 递归检查并展开所有匹配到 DOM 的子容器
+          expandMatchedContainers(child);
+        }
+      });
+    }
   }
+
   renderGraph();
 }
 
-export function updateDomTree(data) {
+function expandMatchedContainers(node) {
+  if (!node) return;
+
+  // 如果当前容器有匹配结果，或者是中间节点，继续检查子节点
+  if (node.children && Array.isArray(node.children)) {
+    node.children.forEach(child => {
+      const childId = child.id || child.name;
+      if (childId) {
+        expandedNodes.add(childId); expandMatchedContainers(child); // 激进策略：展开所有子容器以���示完整树结构
+        expandMatchedContainers(child);
+      }
+    });
+  }
+}
+
+export function updateDomTree(data, metadata = {}) {
   if (!canvas) return;
   domData = data;
+
+  // 提取会话信息用于按需拉取
+  if (metadata.profile) {
+    currentProfile = metadata.profile;
+  }
+  if (metadata.page_url) {
+    currentUrl = metadata.page_url;
+  }
+
+  // 重置已加载路径（新的 DOM 树）
+  loadedPaths.clear();
+  loadedPaths.add('root');
+
   // Don't expand all DOM nodes - expand based on visibility only
-  // expandAllDomNodes(data); // REMOVED: Implement on-demand loading
   renderGraph();
 }
 
@@ -123,8 +170,91 @@ function expandAllDomNodes(node) {
   }
 }
 
-function renderGraph() {
+// 按需拉取 DOM 分支
+async function fetchDomBranch(path, maxDepth = 5, maxChildren = 6) {
+  if (!currentProfile || !currentUrl) {
+    console.warn('[fetchDomBranch] Missing profile or URL, cannot fetch branch');
+    return null;
+  }
+
+  if (isLoadingBranch) {
+    console.log('[fetchDomBranch] Already loading a branch, skipping');
+    return null;
+  }
+
+  console.log('[fetchDomBranch] Fetching branch for path:', path);
+  isLoadingBranch = true;
+
+  try {
+    const result = await window.api.invokeAction('dom:branch:2', {
+      profile: currentProfile,
+      url: currentUrl,
+      path: path,
+      maxDepth: maxDepth,
+      maxChildren: maxChildren,
+    });
+
+    if (result?.success && result?.data?.node) {
+      console.log('[fetchDomBranch] Successfully fetched branch:', result.data.node.path);
+      return result.data.node;
+    } else {
+      console.warn('[fetchDomBranch] Failed to fetch branch:', result);
+      return null;
+    }
+  } catch (err) {
+    console.error('[fetchDomBranch] Error fetching branch:', err);
+    return null;
+  } finally {
+    isLoadingBranch = false;
+  }
+}
+
+// 在 DOM 树中查找指定 path 的节点
+function findDomNodeByPath(root, targetPath) {
+  if (!root || typeof root !== 'object') return null;
+  if (root.path === targetPath) return root;
+
+  if (root.children && Array.isArray(root.children)) {
+    for (const child of root.children) {
+      const found = findDomNodeByPath(child, targetPath);
+      if (found) return found;
+    }
+  }
+
+  return null;
+}
+
+// 合并拉取的分支到现有 DOM 树
+export function mergeDomBranch(branchNode) {
+  if (!branchNode || !domData) return false;
+
+  const targetNode = findDomNodeByPath(domData, branchNode.path);
+  if (!targetNode) {
+    console.warn('[mergeDomBranch] Cannot find target node for path:', branchNode.path);
+    return false;
+  }
+
+  // 合并子节点（覆盖现有的）
+  targetNode.children = branchNode.children || [];
+  targetNode.childCount = branchNode.childCount || targetNode.childCount;
+
+  console.log('[mergeDomBranch] Merged branch into path:', branchNode.path,
+    'with', targetNode.children.length, 'children');
+
+  return true;
+}
+
+
+export function renderGraph() {
   if (!canvas) return;
+  if (window.api?.debugLog && window.DEBUG === '1') {
+    window.api.debugLog('floating-panel-graph', 'renderGraph', {
+      hasDom: Boolean(domData),
+      hasContainer: Boolean(containerData),
+      expandedNodesCount: expandedNodes.size,
+      expandedNodesSample: Array.from(expandedNodes).slice(0, 5)
+    }).catch(() => {});
+  }
   while (canvas.firstChild) {
     canvas.removeChild(canvas.firstChild);
   }
@@ -135,10 +265,6 @@ function renderGraph() {
   const domNodesMap = new Map();
   domNodePositions.clear();
   containerNodePositions.clear();
-  
-  if (domData) {
-    collectDomNodes(domData, domNodesMap, 0);
-  }
 
   if (containerData) {
     const containerGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
@@ -152,31 +278,18 @@ function renderGraph() {
     domGroup.setAttribute('transform', 'translate(400, 0)');
     renderDomNodeRecursive(domGroup, domData, 0, 0);
     mainGroup.appendChild(domGroup);
-    
+
     drawAllConnections(mainGroup);
   }
 
   canvas.appendChild(mainGroup);
 }
 
-function collectDomNodes(node, map, currentY) {
-  if (!node || typeof node !== 'object') return;
-  const path = node.path || node.id || node.selectors?.[0] || `node-${Math.random()}`;
-  map.set(path, node);
-  console.log("[collectDomNodes] path:", path, "currentY:", currentY, "node:", node.tag, node.id, node.classes?.[0]);  domNodePositions.set(path, currentY);
-  if (node.children && Array.isArray(node.children)) {
-    let y = currentY + 28;
-    node.children.forEach(child => {
-      collectDomNodes(child, map, y);
-      y += 28;
-    });
-  }
-}
 
 function renderContainerNode(parent, node, x, y, depth, domNodesMap) {
   const nodeId = node.id || node.name || 'root';
   const isExpanded = expandedNodes.has(nodeId);
-  const hasChildren = node.children && node.children.length > 0;
+  const hasChildren = (node.children && node.children.length > 0) || (node.childCount > 0);
   const isSelected = selectedContainer === nodeId;
 
   containerNodePositions.set(nodeId, { x: x + depth * 20 + 180, y: y + 14 });
@@ -207,13 +320,13 @@ function renderContainerNode(parent, node, x, y, depth, domNodesMap) {
       rect.setAttribute('stroke', '#555');
     }
   });
-  
+
   // 点击容器主体：选择和高亮，不展开/折叠
   rect.addEventListener('click', (e) => {
     e.stopPropagation();
     selectedContainer = nodeId;
     selectedDom = null;
-    
+
     // 使用 match 信息中的 selector 来高亮
     if (node.match && node.match.nodes && node.match.nodes.length > 0) {
       const selector = node.match.nodes[0].selector;
@@ -232,7 +345,7 @@ function renderContainerNode(parent, node, x, y, depth, domNodesMap) {
         });
       }
     }
-    
+
     renderGraph();
   });
 
@@ -298,7 +411,7 @@ function renderContainerNode(parent, node, x, y, depth, domNodesMap) {
       vertLine.setAttribute('stroke', '#666');
       vertLine.setAttribute('stroke-width', '1');
       parent.appendChild(vertLine);
-      
+
       const horizLine = document.createElementNS('http://www.w3.org/2000/svg', 'line');
       horizLine.setAttribute('x1', '10');
       horizLine.setAttribute('y1', String(currentY + 14));
@@ -307,7 +420,7 @@ function renderContainerNode(parent, node, x, y, depth, domNodesMap) {
       horizLine.setAttribute('stroke', '#666');
       horizLine.setAttribute('stroke-width', '1');
       parent.appendChild(horizLine);
-      
+
       const childHeight = renderContainerNode(parent, child, x, currentY, depth + 1, domNodesMap);
       currentY += childHeight + 4;
       totalHeight = currentY - y;
@@ -323,9 +436,17 @@ function renderContainerNode(parent, node, x, y, depth, domNodesMap) {
 function renderDomNodeRecursive(parent, node, x, y) {
   if (!node || typeof node !== 'object') return 0;
 
+  // Record actual rendered position for this DOM node
+  if (node.path) {
+    domNodePositions.set(node.path, { x: 400 + x, y: y + 12, indicatorX: 400 + x + 10, indicatorY: y + 12 });
+    if (node.path.split('/').length > 5 && window.DEBUG === '1') {
+       console.log(`[renderDomNodeRecursive] Registered deep node: ${node.path} at y=${y}`);
+    }
+  }
+
   const nodeId = node.path || node.id || `dom-${x}-${y}`;
   const isExpanded = expandedNodes.has(nodeId);
-  const hasChildren = node.children && node.children.length > 0;
+  const hasChildren = (node.children && node.children.length > 0) || (node.childCount > 0);
   const isSelected = selectedDom === nodeId;
 
   const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
@@ -360,7 +481,7 @@ function renderDomNodeRecursive(parent, node, x, y) {
     e.stopPropagation();
     selectedDom = nodeId;
     selectedContainer = null;
-    
+
     const selector = node.id ? `#${node.id}` : (node.path || '');
     if (selector && typeof window.api?.highlightElement === 'function') {
       console.log('[DOM Node] Highlighting:', selector);
@@ -368,7 +489,7 @@ function renderDomNodeRecursive(parent, node, x, y) {
         console.error('Failed to highlight:', err);
       });
     }
-    
+
     renderGraph();
   });
 
@@ -419,9 +540,58 @@ function renderDomNodeRecursive(parent, node, x, y) {
   g.appendChild(infoText);
   parent.appendChild(g);
 
-  let totalHeight = 24;
+  // 点击 +/- 指示器：展开/折叠 DOM 节点，按需拉取子树
+  indicatorBg.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    if (!hasChildren && node.childCount <= 0) {
+      // 没有子节点，不做任何操作
+      return;
+    }
 
-  if (hasChildren && isExpanded) {
+    const path = node.path;
+    if (!path) {
+      console.warn('[DOM indicatorBg] Node has no path, cannot expand');
+      return;
+    }
+
+    // 检查是否需要按需拉取
+    const needsFetch = node.childCount > node.children.length && !loadedPaths.has(path);
+
+    if (expandedNodes.has(nodeId)) {
+      // 已展开 -> 折叠
+      expandedNodes.delete(nodeId);
+      renderGraph();
+    } else {
+      // 折叠 -> 展开
+      if (needsFetch) {
+        console.log('[DOM indicatorBg] Fetching branch for path:', path);
+        console.log(`  childCount=${node.childCount}, loaded=${node.children.length}`);
+
+        const branch = await fetchDomBranch(path, 5, 6);
+        if (branch) {
+          // 合并到 DOM 树
+          if (mergeDomBranch(branch)) {
+            loadedPaths.add(path);
+            expandedNodes.add(nodeId);
+            renderGraph();
+            console.log('[DOM indicatorBg] Branch loaded and expanded');
+          } else {
+            console.warn('[DOM indicatorBg] Failed to merge branch');
+          }
+        } else {
+          console.warn('[DOM indicatorBg] Failed to fetch branch');
+        }
+      } else {
+        // 子节点已加载，直接展开
+        expandedNodes.add(nodeId);
+        renderGraph();
+      }
+    }
+  });
+
+
+  let totalHeight = 24;
+  if (isExpanded && node.children && node.children.length > 0) {
     let currentY = y + 28;
     node.children.forEach((child) => {
       const vertLine = document.createElementNS('http://www.w3.org/2000/svg', 'line');
@@ -435,11 +605,8 @@ function renderDomNodeRecursive(parent, node, x, y) {
 
       const childHeight = renderDomNodeRecursive(parent, child, x + 15, currentY);
       currentY += childHeight + 4;
-      totalHeight = currentY - y;
     });
-  } else {
-    // If not expanded but has children, still return a height to show the + indicator
-    return 24;
+    totalHeight = currentY - y;
   }
 
   return totalHeight;
@@ -448,7 +615,14 @@ function renderDomNodeRecursive(parent, node, x, y) {
 function drawAllConnections(parent) {
   console.log('[drawAllConnections] Called');
   console.log('[drawAllConnections] containerData:', !!containerData, 'domData:', !!domData);
-  
+
+  if (window.api?.debugLog && window.DEBUG === '1') {
+    window.api.debugLog('floating-panel-graph', 'drawAllConnections', {
+      hasContainer: Boolean(containerData),
+      hasDom: Boolean(domData)
+    }).catch(() => {});
+  }
+
   if (!containerData || !domData) {
     console.log('[drawAllConnections] Missing data - containerData:', containerData, 'domData:', domData);
     return;
@@ -467,60 +641,84 @@ function drawAllConnections(parent) {
       console.log('[drawConnectionsForNode] Invalid node or not object');
       return;
     }
-    
+
     console.log('[drawConnectionsForNode] Checking node:', node.id || node.name, 'has match:', !!node.match, 'match exists:', !!node.match?.nodes, 'nodes length:', node.match?.nodes?.length || 0);
-    
+
     // Use pre-built node mappings from container.match.nodes first
     if (node.match && node.match.nodes && node.match.nodes.length > 0) {
       console.log('[drawConnectionsForNode] Using match nodes for:', node.id || node.name);
       const containerPos = containerNodePositions.get(node.id || node.name);
-      
+
       for (const matchNode of node.match.nodes) {
-        const domPath = matchNode.dom_path;
-        const domNodeY = domNodePositions.get(domPath);
-        const selector = matchNode.selector;
+        // Try to use dom_path first, fallback to finding by selector if needed (though matchNode should have path)
+        let domPath = matchNode.dom_path;
         
+        // If domPath is missing but we have a selector, try to look it up in our map (fallback)
+        if (!domPath && matchNode.selector) {
+           domPath = selectorMap.get(matchNode.selector);
+        }
+
+        const domPos = domNodePositions.get(domPath);
+        const selector = matchNode.selector;
+
         console.log('[drawConnectionsForNode] Drawing connection:', {
           containerId: node.id || node.name,
           domPath,
           selector,
-          domNodeY
+          domPos
         });
-        
-        if (containerPos && domNodeY !== undefined && domNodeY >= 0) {
+
+        if (containerPos && domPos) {
           const startX = containerPos.x;
           const startY = containerPos.y;
-          const endX = 410;
-          const endY = domNodeY + 12;
-          
+          const endX = domPos.indicatorX;
+          const endY = domPos.indicatorY;
+
           const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
           const midX = (startX + endX) / 2;
-          path.setAttribute('d', `M ${startX} ${startY} C ${midX} ${startY}, ${midX} ${endY}, ${endX} ${endY}`);
+          path.setAttribute('d', `M ${startX} ${startY} L ${midX} ${startY} L ${midX} ${endY} L ${endX} ${endY}`);
           path.setAttribute('stroke', '#4CAF50');
-          path.setAttribute('stroke-width', '2');
+          path.setAttribute('stroke-width', '1.5');
           path.setAttribute('fill', 'none');
-          path.setAttribute('stroke-dasharray', '4,2');
-          path.setAttribute('opacity', '0.7');
+          // path.setAttribute('stroke-dasharray', '4,2'); // 使用实线
+          path.setAttribute('opacity', '0.8');
           parent.appendChild(path);
           console.log('[drawConnectionsForNode] Drew connection from', node.id || node.name, 'to', domPath);
+          if (window.api?.debugLog && window.DEBUG === '1') {
+            window.api.debugLog('floating-panel-graph', 'drawConnectionsForNode', { 
+              containerId: node.id || node.name, 
+              domPath, 
+              status: 'drawn' 
+            }).catch(() => {});
+          }
         } else {
           console.log('[drawConnectionsForNode] Cannot draw to', domPath, ': missing positions or invalid Y');
+          if (window.api?.debugLog && window.DEBUG === '1') {
+            window.api.debugLog('floating-panel-graph', 'drawConnectionsForNode', { 
+              containerId: node.id || node.name, 
+              domPath, 
+              status: 'failed',
+              reason: 'missing positions or invalid Y',
+              positionInMap: domNodePositions.has(domPath),
+              mapKeysSample: Array.from(domNodePositions.keys()).slice(0, 5)
+            }).catch(() => {});
+          }
         }
       }
     } else if (node.match && node.match.selectors && node.match.selectors.length > 0) {
       console.log('[drawConnectionsForNode] Using selectors for:', node.id || node.name);
       const containerPos = containerNodePositions.get(node.id || node.name);
-      
+
       for (const selector of node.match.selectors) {
         const domPath = selectorMap.get(selector);
-        const domNodeY = domNodePositions.get(domPath);
-        
-        if (containerPos && domNodeY !== undefined && domNodeY >= 0) {
+        const domPos = domNodePositions.get(domPath);
+
+        if (containerPos && domPos) {
           const startX = containerPos.x;
           const startY = containerPos.y;
-          const endX = 410;
-          const endY = domNodeY + 12;
-          
+          const endX = domPos.indicatorX;
+          const endY = domPos.indicatorY;
+
           const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
           const midX = (startX + endX) / 2;
           path.setAttribute('d', `M ${startX} ${startY} C ${midX} ${startY}, ${midX} ${endY}, ${endX} ${endY}`);
@@ -535,7 +733,7 @@ function drawAllConnections(parent) {
     } else {
       console.log('[drawConnectionsForNode] No match data for:', node.id || node.name);
     }
-    
+
     console.log('[drawConnectionsForNode] Checking children for:', node.id || node.name, 'children count:', node.children?.length || 0);
     if (node.children && Array.isArray(node.children)) {
       node.children.forEach((child, index) => {
@@ -552,11 +750,28 @@ function drawAllConnections(parent) {
 function drawConnectionToDom(parent, startX, startY, endX, endY) {
   const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
   const midX = (startX + endX) / 2;
-  path.setAttribute('d', `M ${startX} ${startY} C ${midX} ${startY}, ${midX} ${endY}, ${endX} ${endY}`);
+  path.setAttribute('d', `M ${startX} ${startY} L ${midX} ${startY} L ${midX} ${endY} L ${endX} ${endY}`);
   path.setAttribute('stroke', '#4CAF50');
   path.setAttribute('stroke-width', '2');
   path.setAttribute('fill', 'none');
   path.setAttribute('stroke-dasharray', '4,2');
   path.setAttribute('opacity', '0.7');
   parent.appendChild(path);
+}
+
+export function expandDomPath(path) {
+  if (!path) return;
+  // Split path (e.g., "root/1/2") and expand all segments
+  const parts = path.split('/');
+  let currentPath = '';
+  
+  parts.forEach((part, index) => {
+    currentPath = index === 0 ? part : `${currentPath}/${part}`;
+    expandedNodes.add(currentPath);
+  });
+}
+
+export function markPathLoaded(path) {
+  if (!path) return;
+  loadedPaths.add(path);
 }
