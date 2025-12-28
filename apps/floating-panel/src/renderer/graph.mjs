@@ -340,11 +340,11 @@ function renderContainerNode(parent, node, x, y, depth, domNodesMap) {
       window.api.clearHighlight('dom').catch((err) => { logger.error('clear-highlight', 'Failed to clear DOM highlight', err); });
     }
 
-    // 优先使用 match.nodes 的 dom_path 精准高亮，避免 selector 多匹配
+    // 优先使用 selector 以高亮所有匹配项，如果 selector 不可用则使用 dom_path
     if (node.match && node.match.nodes && node.match.nodes.length > 0) {
       const domPath = node.match.nodes[0].dom_path;
       const selector = node.match.nodes[0].selector;
-      const target = domPath || selector;
+      const target = selector || domPath;
       console.log('[Container] Highlighting with match target:', target);
       if (target && typeof window.api?.highlightElement === 'function') {
         window.api.highlightElement(
