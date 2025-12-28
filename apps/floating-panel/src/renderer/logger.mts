@@ -9,7 +9,7 @@ const logToMain = (level: string, module: string, message: string, data?: any) =
   };
   
   if ((window as any).api?.debugLog) {
-    (window as any).api.debugLog(`renderer-${module}`, message, data || {}).catch(() => {});
+    (window as any).api.debugLog(`renderer-${module}`, message, { level, ...data }).catch(() => {});
   }
   
   // 同时输出到控制台

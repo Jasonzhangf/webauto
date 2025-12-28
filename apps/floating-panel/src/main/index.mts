@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import WebSocket from 'ws';
 import windowStateKeeper from 'electron-window-state';
+import { getErrorHandler } from '../../../../modules/core/src/error-handler.mjs';
 
 // 使用 process.cwd() 获取项目根目录
 const PROJECT_ROOT = process.cwd();
@@ -17,6 +18,7 @@ let busConnected = false;
 let pendingStatus: any = null;
 let pendingEvents: any[] = [];
 let consoleLoggingBroken = false;
+let errorHandlerPromise: Promise<any> | null = null;
 
 const WS_URL = process.env.WEBAUTO_FLOATING_WS_URL || 'ws://127.0.0.1:7701/ws';
 const BUS_URL = process.env.WEBAUTO_FLOATING_BUS_URL || 'ws://127.0.0.1:7701/bus';
@@ -47,6 +49,19 @@ function logDebug(module: string, event: string, data: any) {
   }
 }
 
+async function reportError(module: string, err: unknown, context: any = {}) {
+  try {
+    if (!errorHandlerPromise) {
+      errorHandlerPromise = getErrorHandler();
+    }
+    const handler = await errorHandlerPromise;
+    const errorObj = err instanceof Error ? err : new Error(String(err));
+    await handler.log(module, errorObj, context);
+  } catch (innerErr) {
+    log(`ErrorHandler failed: ${innerErr}`);
+  }
+}
+
 function flushPendingMessages() {
   if (!win || !win.isVisible()) {
     return;
@@ -56,7 +71,7 @@ function flushPendingMessages() {
     try {
       win.webContents.send('bus:event', event);
     } catch (err) {
-      log(`ERROR sending event: ${err}`);
+      reportError('bus-event', err, { event });
     }
   }
   pendingEvents = [];
@@ -65,7 +80,7 @@ function flushPendingMessages() {
     try {
       win.webContents.send('bus:status', pendingStatus);
     } catch (err) {
-      log(`ERROR sending status: ${err}`);
+      reportError('bus-status', err, { status: pendingStatus });
     }
     pendingStatus = null;
   }
@@ -248,7 +263,7 @@ ipcMain.handle('health', async () => {
     log(`Health check result: ${res.ok}`);
     return { ok: res.ok };
   } catch (e) {
-    log(`Health check error: ${e}`);
+    reportError('health-check', e, { endpoint: 'http://127.0.0.1:7701/health' });
     return { ok: false };
   }
 });
@@ -283,7 +298,8 @@ ipcMain.handle('ui:highlight', async (_evt, { selector, color, options = {}, pro
     });
     return await res.json();
   } catch (e) {
-    log(`Highlight error: ${e}`);
+    reportError('highlight-api', e, { selector, color, isPath: typeof isPath !== 'undefined' ? isPath : false, endpoint: typeof endpoint !== 'undefined' ? endpoint : '' });
+    return { success: false, error: String(e) };
   }
 });
 
@@ -303,7 +319,7 @@ ipcMain.handle('ui:clearHighlight', async (_evt, channel = null) => {
     });
     return await res.json();
   } catch (e) {
-    log(`Clear highlight error: ${e}`);
+    reportError('clear-highlight-api', e, { channel });
     return { success: false, error: String(e) };
   }
 });

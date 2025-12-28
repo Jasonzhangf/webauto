@@ -1,3 +1,5 @@
+import { logger } from './logger.mts';
+
 let canvas = null;
 let containerData = null;
 let domData = null;
@@ -209,7 +211,7 @@ async function fetchDomBranch(path, maxDepth = 5, maxChildren = 6) {
       return null;
     }
   } catch (err) {
-    console.error('[fetchDomBranch] Error fetching branch:', err);
+    logger.error('fetchDomBranch', 'Error fetching branch', err);
     return null;
   } finally {
     isLoadingBranch = false;
@@ -259,8 +261,7 @@ export function renderGraph() {
       hasDom: Boolean(domData),
       hasContainer: Boolean(containerData),
       expandedNodesCount: expandedNodes.size,
-      expandedNodesSample: Array.from(expandedNodes).slice(0, 5)
-    }).catch(() => {});
+    }).catch((err) => { logger.error("graph-render", "Failed to send debug log", err); });
   }
   while (canvas.firstChild) {
     canvas.removeChild(canvas.firstChild);
@@ -336,7 +337,7 @@ function renderContainerNode(parent, node, x, y, depth, domNodesMap) {
 
     // Clear previous DOM highlights when clicking container
     if (typeof window.api?.clearHighlight === 'function') {
-      window.api.clearHighlight('dom').catch(() => {});
+      window.api.clearHighlight('dom').catch((err) => { logger.error('clear-highlight', 'Failed to clear DOM highlight', err); });
     }
 
     // 优先使用 match.nodes 的 dom_path 精准高亮，避免 selector 多匹配
@@ -352,7 +353,7 @@ function renderContainerNode(parent, node, x, y, depth, domNodesMap) {
           { channel: 'container', rootSelector: currentRootSelector },
           currentProfile
         ).catch(err => {
-          console.error('Failed to highlight:', err);
+          logger.error("highlight", "Failed to highlight container", err);
         });
       }
     } else if (node.selectors && node.selectors.length > 0) {
@@ -508,7 +509,7 @@ function renderDomNodeRecursive(parent, node, x, y) {
 
    // Clear previous container highlights
    if (typeof window.api?.clearHighlight === 'function') {
-     window.api.clearHighlight('container').catch(() => {});
+     window.api.clearHighlight('container').catch((err) => { logger.error('clear-highlight', 'Failed to clear container highlight', err); });
    }
 
    const selector = node.path ? node.path : (node.id ? `#${node.id}` : '');
@@ -653,8 +654,7 @@ function drawAllConnections(parent) {
   if (window.api?.debugLog && window.DEBUG === '1') {
     window.api.debugLog('floating-panel-graph', 'drawAllConnections', {
       hasContainer: Boolean(containerData),
-      hasDom: Boolean(domData)
-    }).catch(() => {});
+    }).catch((err) => { logger.error("graph-render", "Failed to log connection drawing", err); });
   }
 
   if (!containerData || !domData) {
@@ -723,7 +723,7 @@ function drawAllConnections(parent) {
               containerId: node.id || node.name, 
               domPath, 
               status: 'drawn' 
-            }).catch(() => {});
+            }).catch((err) => { logger.error("graph-render", "Failed to log connection success", err); });
           }
         } else {
           console.log('[drawConnectionsForNode] Cannot draw to', domPath, ': missing positions or invalid Y');
@@ -735,7 +735,7 @@ function drawAllConnections(parent) {
               reason: 'missing positions or invalid Y',
               positionInMap: domNodePositions.has(domPath),
               mapKeysSample: Array.from(domNodePositions.keys()).slice(0, 5)
-            }).catch(() => {});
+            }).catch((err) => { logger.error("graph-render", "Failed to log connection failure", err); });
           }
         }
       }

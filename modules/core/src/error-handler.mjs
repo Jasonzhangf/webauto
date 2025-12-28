@@ -80,7 +80,7 @@ class ErrorHandler {
 
   // 记录调试
   async debug(module, message, context = {}) {
-    if (process.env.NODE_ENV !== 'development') return;
+    if (process.env.DEBUG !== '1' && process.env.debug !== '1') return;
     const entry = {
       ts: Date.now(),
       sessionId: this.sessionId,

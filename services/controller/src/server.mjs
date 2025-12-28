@@ -44,6 +44,7 @@ const controller = new UiController({
 });
 
 const serverOptions = parseArgs(process.argv.slice(2));
+await controller.init();
 const controllerHost = serverOptions.host || DEFAULT_HOST;
 const controllerPort = Number(serverOptions.port || DEFAULT_PORT);
 

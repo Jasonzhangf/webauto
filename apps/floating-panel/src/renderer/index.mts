@@ -7,6 +7,7 @@ import {
   expandDomPath, 
   markPathLoaded 
 } from './graph.mjs';
+import { logger } from './logger.mts';
 
 const log = (...args: any[]) => {
   console.log('[ui-renderer]', ...args);
@@ -113,7 +114,7 @@ if (!(window as any).api) {
         log('Health check OK');
       }
     } catch (e) {
-      log('Health check failed', e);
+      logger.error('health-check', 'Health check failed', e);
     }
   })();
 }

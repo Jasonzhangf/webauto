@@ -18,6 +18,7 @@ export class UiController {
     this.defaultHttpPort = Number(options.defaultHttpPort || 7704);
     this.defaultHttpProtocol = options.defaultHttpProtocol || 'http';
     this._containerIndexCache = null;
+    this.errorHandler = null;
   }
 
   async handleAction(action, payload = {}) {
@@ -947,6 +948,8 @@ export class UiController {
           snapshot.metadata = mergedMetadata;
         }
       } catch (fixtureError) {
+        if (this.errorHandler) this.errorHandler.warn('controller', 'fixture DOM capture failed', { error: fixtureError?.message || fixtureError });
+        else console.warn('[controller] fixture DOM capture failed:', fixtureError?.message || fixtureError);
         console.warn('[controller] fixture DOM capture failed:', fixtureError?.message || fixtureError);
       }
     }
@@ -1061,7 +1064,9 @@ export class UiController {
     if (match) {
       try {
         return JSON.parse(match[1]);
-      } catch {
+      } catch (e) {
+        // ignore read error, file might be corrupted or empty
+        if (this.errorHandler) this.errorHandler.debug('controller', 'read container file failed', { error: e.message });
         // ignore
       }
     }
@@ -1200,7 +1205,9 @@ export class UiController {
       try {
         const raw = await fsPromises.readFile(userFile, 'utf-8');
         return JSON.parse(raw);
-      } catch {
+      } catch (e) {
+        // ignore read error, file might be corrupted or empty
+        if (this.errorHandler) this.errorHandler.debug('controller', 'read container file failed', { error: e.message });
         // ignore
       }
     }
@@ -1210,7 +1217,9 @@ export class UiController {
       try {
         const raw = await fsPromises.readFile(builtinFile, 'utf-8');
         return JSON.parse(raw);
-      } catch {
+      } catch (e) {
+        // ignore read error, file might be corrupted or empty
+        if (this.errorHandler) this.errorHandler.debug('controller', 'read container file failed', { error: e.message });
         // ignore
       }
     }
