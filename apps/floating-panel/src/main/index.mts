@@ -36,6 +36,17 @@ function log(msg: string) {
   }
 }
 
+function logDebug(module: string, event: string, data: any) {
+  const timestamp = new Date().toISOString().split('T')[1].slice(0, 12);
+  const line = `[${timestamp}] [debug-${module}] ${event}: ${JSON.stringify(data)}`;
+
+  try {
+    fs.appendFileSync(LOG_FILE_PATH, `${line}\n`, 'utf8');
+  } catch {
+    // Ignore errors
+  }
+}
+
 function flushPendingMessages() {
   if (!win || !win.isVisible()) {
     return;
@@ -242,19 +253,27 @@ ipcMain.handle('health', async () => {
   }
 });
 
-ipcMain.handle('ui:highlight', async (_evt, { selector, color, options = {} }) => {
+ipcMain.handle('ui:highlight', async (_evt, { selector, color, options = {}, profile = null }) => {
   try {
     log(`Highlight request: ${selector}, color: ${color}, options: ${JSON.stringify(options)}`);
-    
+    if (!profile) {
+      throw new Error('缺少会话/ profile 信息');
+    }
+
     // 自动识别是否为 DOM 路径 (以 root 开头或包含 /)
     const isPath = selector && (selector.startsWith('root') || selector.includes('/'));
     const endpoint = isPath ? '/v1/browser/highlight-dom-path' : '/v1/browser/highlight';
-    
-    const body = { 
-      color, 
-      profile: "weibo_fresh",
+
+    // 对于 DOM 路径高亮，需要将 color 转换为 style
+    const finalOptions = isPath && color
+      ? { ...options, style: `2px solid ${color}` }
+      : options || {};
+
+    const body = {
+      profile,
       ...(isPath ? { path: selector } : { selector }),
-      options: options || {}
+      ...(!isPath && color ? { color } : {}),  // selector 高亮保留 color
+      options: finalOptions
     };
 
     const res = await fetch(`http://127.0.0.1:7701${endpoint}`, {
@@ -265,7 +284,6 @@ ipcMain.handle('ui:highlight', async (_evt, { selector, color, options = {} }) =
     return await res.json();
   } catch (e) {
     log(`Highlight error: ${e}`);
-    return { success: false, error: String(e) };
   }
 });
 
@@ -273,6 +291,21 @@ ipcMain.handle('ui:debug-log', async (_evt, { module, event, data }) => {
   logDebug(module || 'floating-panel', event || 'renderer', data || {});
   log(`[renderer-debug] ${module}:${event} ${JSON.stringify(data)}`);
   return { success: true };
+});
+
+ipcMain.handle('ui:clearHighlight', async (_evt, channel = null) => {
+  try {
+    log(`Clear highlight request: ${channel || 'all'}`);
+    const res = await fetch(`http://127.0.0.1:7701/v1/browser/clear-highlight`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ profile: 'weibo_fresh', channel: channel || undefined })
+    });
+    return await res.json();
+  } catch (e) {
+    log(`Clear highlight error: ${e}`);
+    return { success: false, error: String(e) };
+  }
 });
 
 ipcMain.handle('window:minimize', async (_evt) => {

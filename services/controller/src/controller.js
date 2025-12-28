@@ -54,6 +54,8 @@ export class UiController {
       return this.handleBrowserHighlight(payload);
     case 'browser:clear-highlight':
       return this.handleBrowserClearHighlight(payload);
+    case 'browser:execute':
+      return this.handleBrowserExecute(payload);
      case 'browser:highlight-dom-path':
        return this.handleBrowserHighlightDomPath(payload);
      case 'browser:cancel-pick':
@@ -448,57 +450,6 @@ export class UiController {
   }
 
 
-    async handleBrowserHighlightDomPath(payload = {}) {
-    const profile = payload.profile || payload.sessionId;
-    const domPath = (payload.path || payload.domPath || payload.dom_path || '').trim();
-    if (!profile) {
-      throw new Error('缺少会话/ profile 信息');
-    }
-    if (!domPath) {
-      throw new Error('缺少 DOM 路径');
-    }
-    const options = payload.options || {};
-    const channel = options.channel || payload.channel || 'hover-dom';
-    
-    // 处理颜色
-    let style = options.style;
-    const color = payload.color;
-    if (!style) {
-        if (color === 'green') style = '2px solid rgba(76, 175, 80, 0.95)';
-        else if (color === 'blue') style = '2px solid rgba(33, 150, 243, 0.95)';
-        else if (color === 'red') style = '2px solid rgba(244, 67, 54, 0.95)';
-        else if (color && /^[a-z]+$/i.test(color)) style = `2px solid ${color}`;
-        else style = '2px solid rgba(96, 165, 250, 0.95)';
-    }
-
-    const sticky = typeof options.sticky === 'boolean' ? options.sticky : true;
-    try {
-      const result = await this.sendHighlightDomPathViaWs(profile, domPath, {
-        channel,
-        style,
-        sticky,
-        duration: options.duration,
-        rootSelector: options.rootSelector || payload.rootSelector || payload.root_selector || null,
-      });
-      this.messageBus?.publish?.('ui.highlight.result', {
-        success: true,
-        selector: null,
-        details: result?.details || null,
-      });
-      return { success: true, data: result };
-    } catch (err) {
-      const errorMessage = err?.message || 'DOM 路径高亮失败';
-      this.messageBus?.publish?.('ui.highlight.result', {
-        success: false,
-        selector: null,
-        error: errorMessage,
-      });
-      return { success: false, error: errorMessage };
-    }
-  }
-
-
-
   async handleBrowserClearHighlight(payload = {}) {
     const profile = payload.profile || payload.sessionId;
     if (!profile) {
@@ -534,7 +485,20 @@ export class UiController {
     }
     const options = payload.options || {};
     const channel = options.channel || payload.channel || 'hover-dom';
-    const style = options.style || '2px solid rgba(96, 165, 250, 0.95)';
+    const rootSelector = options.rootSelector || payload.rootSelector || payload.root_selector || null;
+
+    let style = options.style;
+    if (!style && payload.color) {
+      const color = payload.color;
+      if (color === 'green') style = '2px solid rgba(76, 175, 80, 0.95)';
+      else if (color === 'blue') style = '2px solid rgba(33, 150, 243, 0.95)';
+      else if (color === 'red') style = '2px solid rgba(244, 67, 54, 0.95)';
+      else if (color && /^[a-z]+$/i.test(color)) style = `2px solid ${color}`;
+    }
+    if (!style) {
+      style = '2px solid rgba(96, 165, 250, 0.95)';
+    }
+
     const sticky = typeof options.sticky === 'boolean' ? options.sticky : true;
     try {
       const result = await this.sendHighlightDomPathViaWs(profile, domPath, {
@@ -542,7 +506,7 @@ export class UiController {
         style,
         sticky,
         duration: options.duration,
-        rootSelector: options.rootSelector || payload.rootSelector || payload.root_selector || null,
+        rootSelector,
       });
       this.messageBus?.publish?.('ui.highlight.result', {
         success: true,
@@ -558,6 +522,24 @@ export class UiController {
         error: errorMessage,
       });
       throw err;
+    }
+  }
+
+  async handleBrowserExecute(payload = {}) {
+    const profile = payload.profile || payload.sessionId;
+    const script = payload.script || payload.code || '';
+    if (!profile) {
+      throw new Error('缺少会话/ profile 信息');
+    }
+    if (!script) {
+      throw new Error('缺少 script 参数');
+    }
+    try {
+      const result = await this.sendExecuteViaWs(profile, script);
+      return { success: true, data: result };
+    } catch (err) {
+      const errorMessage = err?.message || '执行脚本失败';
+      throw new Error(errorMessage);
     }
   }
 
@@ -731,6 +713,26 @@ export class UiController {
     return data?.data || data || { cancelled: false };
   }
 
+  async sendExecuteViaWs(sessionId, script) {
+    const payload = {
+      type: 'command',
+      session_id: sessionId,
+      data: {
+        command_type: 'node_execute',
+        node_type: 'evaluate',
+        parameters: {
+          script,
+        },
+      },
+    };
+    const response = await this.sendWsCommand(this.getBrowserWsUrl(), payload, 10000);
+    const data = response?.data || response;
+    if (data?.success === false) {
+      throw new Error(data?.error || 'execute failed');
+    }
+    return data?.data || data || { result: null };
+  }
+
   async sendDomPickerViaWs(sessionId, options = {}) {
     const timeout = Math.min(Math.max(Number(options.timeout) || 25000, 3000), 60000);
     const payload = {
@@ -788,22 +790,27 @@ export class UiController {
       throw new Error('缺少 sessionId / URL / DOM 路径');
     }
     
-    // 使用 CLI 命令而不是 WebSocket
-    const args = [
-      'inspect-branch',
-      '--profile', sessionId,
-      '--url', url,
-      '--path', path,
-      ...(rootSelector ? ['--root-selector', rootSelector] : []),
-      ...(maxDepth ? ['--max-depth', String(maxDepth)] : []),
-      ...(maxChildren ? ['--max-children', String(maxChildren)] : []),
-    ];
-
-    const result = await this.runCliCommand('container-matcher', args);
-    if (result.success) {
-      return result.data;
+    // 使用 WebSocket 而不是 CLI（避免 fixture 依赖）
+    const payload = {
+      type: 'command',
+      session_id: sessionId,
+      data: {
+        command_type: 'container_operation',
+        action: 'inspect_dom_branch',
+        page_context: { url },
+        parameters: {
+          path,
+          ...(rootSelector ? { root_selector: rootSelector } : {}),
+          ...(typeof maxDepth === 'number' ? { max_depth: maxDepth } : {}),
+          ...(typeof maxChildren === 'number' ? { max_children: maxChildren } : {}),
+        },
+      },
+    };
+    const response = await this.sendWsCommand(this.getBrowserWsUrl(), payload, 20000);
+    if (response?.data?.success) {
+      return response.data.data || response.data.branch || response.data;
     }
-    throw new Error(result.error || 'inspect-branch CLI failed');
+    throw new Error(response?.data?.error || response?.error || 'inspect_dom_branch failed');
   }
 
   // v2 DOM branch：按 domPath + depth 获取局部树

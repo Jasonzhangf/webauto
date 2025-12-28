@@ -16,6 +16,7 @@ const loadedPaths = new Set(['root']); // 初始只有 root 被加载
 let currentProfile = null;
 let currentUrl = null;
 let isLoadingBranch = false;
+let currentRootSelector = null;
 
 
 
@@ -93,6 +94,7 @@ export function initGraph(canvasEl) {
 export function updateContainerTree(data) {
   if (!canvas) return;
   containerData = data;
+  containerNodePositions.clear();
 
   if (data && (data.id || data.name)) {
     const rootId = data.id || data.name || 'root';
@@ -133,6 +135,7 @@ function expandMatchedContainers(node) {
 export function updateDomTree(data, metadata = {}) {
   if (!canvas) return;
   domData = data;
+  domNodePositions.clear();
 
   // 提取会话信息用于按需拉取
   if (metadata.profile) {
@@ -140,6 +143,9 @@ export function updateDomTree(data, metadata = {}) {
   }
   if (metadata.page_url) {
     currentUrl = metadata.page_url;
+  }
+  if (metadata.root_selector) {
+    currentRootSelector = metadata.root_selector;
   }
 
   // 重置已加载路径（新的 DOM 树）
@@ -192,6 +198,7 @@ async function fetchDomBranch(path, maxDepth = 5, maxChildren = 6) {
       path: path,
       maxDepth: maxDepth,
       maxChildren: maxChildren,
+      rootSelector: currentRootSelector,
     });
 
     if (result?.success && result?.data?.node) {
@@ -327,12 +334,24 @@ function renderContainerNode(parent, node, x, y, depth, domNodesMap) {
     selectedContainer = nodeId;
     selectedDom = null;
 
-    // 使用 match 信息中的 selector 来高亮
+    // Clear previous DOM highlights when clicking container
+    if (typeof window.api?.clearHighlight === 'function') {
+      window.api.clearHighlight('dom').catch(() => {});
+    }
+
+    // 优先使用 match.nodes 的 dom_path 精准高亮，避免 selector 多匹配
     if (node.match && node.match.nodes && node.match.nodes.length > 0) {
+      const domPath = node.match.nodes[0].dom_path;
       const selector = node.match.nodes[0].selector;
-      console.log('[Container] Highlighting with selector:', selector);
-      if (selector && typeof window.api?.highlightElement === 'function') {
-        window.api.highlightElement(selector, 'green', { channel: 'container' }).catch(err => {
+      const target = domPath || selector;
+      console.log('[Container] Highlighting with match target:', target);
+      if (target && typeof window.api?.highlightElement === 'function') {
+        window.api.highlightElement(
+          target,
+          'green',
+          { channel: 'container', rootSelector: currentRootSelector },
+          currentProfile
+        ).catch(err => {
           console.error('Failed to highlight:', err);
         });
       }
@@ -340,7 +359,12 @@ function renderContainerNode(parent, node, x, y, depth, domNodesMap) {
       // 回退使用容器定义中的 selector
       console.log('[Container] Fallback highlighting with selector:', node.selectors[0]);
       if (typeof window.api?.highlightElement === 'function') {
-        window.api.highlightElement(node.selectors[0], 'green', { channel: 'container' }).catch(err => {
+        window.api.highlightElement(
+          node.selectors[0],
+          'green',
+          { channel: 'container', rootSelector: currentRootSelector },
+          currentProfile
+        ).catch(err => {
           console.error('Failed to highlight:', err);
         });
       }
@@ -477,21 +501,31 @@ function renderDomNodeRecursive(parent, node, x, y) {
   });
 
   // 点击 DOM 节点主体：选择和高亮，不展开/折叠
-  rect.addEventListener('click', (e) => {
-    e.stopPropagation();
-    selectedDom = nodeId;
-    selectedContainer = null;
+ rect.addEventListener('click', (e) => {
+  e.stopPropagation();
+  selectedDom = nodeId;
+  selectedContainer = null;
 
-    const selector = node.id ? `#${node.id}` : (node.path || '');
-    if (selector && typeof window.api?.highlightElement === 'function') {
-      console.log('[DOM Node] Highlighting:', selector);
-      window.api.highlightElement(selector, 'blue', { channel: 'dom' }).catch(err => {
-        console.error('Failed to highlight:', err);
-      });
-    }
+   // Clear previous container highlights
+   if (typeof window.api?.clearHighlight === 'function') {
+     window.api.clearHighlight('container').catch(() => {});
+   }
 
-    renderGraph();
-  });
+   const selector = node.path ? node.path : (node.id ? `#${node.id}` : '');
+   if (selector && typeof window.api?.highlightElement === 'function') {
+     console.log('[DOM Node] Highlighting:', selector);
+     window.api.highlightElement(
+       selector,
+       'blue',
+       { channel: 'dom', rootSelector: currentRootSelector },
+       currentProfile
+     ).catch(err => {
+       console.error('Failed to highlight:', err);
+     });
+   }
+
+   renderGraph();
+ });
 
   const tagText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
   tagText.setAttribute('x', '24');

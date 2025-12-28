@@ -88,9 +88,14 @@ if (!(window as any).api) {
         });
         
         // 3. 更新 DOM 树
-        const profile = data.profileId || 'default';
+        const profile = data.profileId;
+        if (!profile) {
+          log('Missing profile in containers.matched payload');
+          return;
+        }
         const url = data.url;
-        updateDomTree(snapshot.dom_tree, { profile, page_url: url });
+        const rootSelector = snapshot?.metadata?.root_selector || null;
+        updateDomTree(snapshot.dom_tree, { profile, page_url: url, root_selector: rootSelector });
         
         // 4. 渲染
         renderGraph();
@@ -116,4 +121,30 @@ if (!(window as any).api) {
 const canvas = document.getElementById('graphPanel');
 if (canvas) {
   initGraph(canvas);
+}
+
+// 绑定窗口控制按钮
+const btnMinimize = document.getElementById('btnMinimize');
+const btnClose = document.getElementById('btnClose');
+
+if (btnMinimize) {
+  btnMinimize.addEventListener('click', () => {
+    log('Minimize button clicked');
+    if ((window as any).api?.minimize) {
+      (window as any).api.minimize().catch((err: any) => {
+        log('Minimize failed:', err);
+      });
+    }
+  });
+}
+
+if (btnClose) {
+  btnClose.addEventListener('click', () => {
+    log('Close button clicked');
+    if ((window as any).api?.close) {
+      (window as any).api.close().catch((err: any) => {
+        log('Close failed:', err);
+      });
+    }
+  });
 }
