@@ -32,6 +32,8 @@ export async function handlePickerResult(domPath) {
   // 2. 展开并高亮 DOM 树中的节点
   await expandDomPath(domPath);
   selectedDom = domPath; // 选中该 DOM 节点
+  // 先渲染一次以计算节点位置
+  renderGraph();
  
   // 自动滚动到选中的DOM节点
   const domPos = domNodePositions.get(domPath);
