@@ -9,10 +9,11 @@
 4. 服务端：扩展 user_action 支持 move/down/up/key 操作类型
 5. 工具：添加客户端请求schema生成器（JSON Schema验证）
 6. 调试：服务端添加 debug 开关和日志记录
-7. 验证：回环测试通过 (dom.updated, user_action.completed)
+7. 验证：WS 通信回环测试通过 (session/subscribe/command/event)
 
-### ⚠️ Known Issues
-- Picker loopback test unstable in headless/clean environment (selector_not_found), likely due to timing or element visibility in blank pages.
+### ⚠️ Recommendations
+- The `dom_pick_loopback` test is unstable in headless automated environments due to page rendering/timing issues. Recommended to verify picker UI manually or with a more robust integration test suite.
+- Consider adding retry logic for `ensurePageRuntime` injection on slow-loading pages.
 
 ## Implementation Details
 
