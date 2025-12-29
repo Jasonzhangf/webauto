@@ -160,6 +160,16 @@ export class BrowserWsServer {
           classes?: string[];
         } = state.selection;
         appendDomPickerLog('selected', { sessionId, selection: sel });
+        this.broadcastEvent('dom.picker.result', sessionId, {
+          success: true,
+          dom_path: sel.path || '',
+          selector: sel.selector || '',
+          bounding_rect: sel.rect || { x: 0, y: 0, width: 0, height: 0 },
+          tag: sel.tag || '',
+          id: sel.id || null,
+          classes: Array.isArray(sel.classes) ? sel.classes : [],
+          text: sel.text || '',
+        });
         return {
           success: true,
           dom_path: sel.path || '',
@@ -1151,36 +1161,10 @@ export class BrowserWsServer {
             if (!runtime?.highlight?.highlightElements) {
               throw new Error('highlight runtime unavailable');
             }
-           const resolveRoot = (sel: string | null) => {
-             if (sel) {
-               const explicit = document.querySelector(sel);
-               if (explicit) return explicit;
-             }
-              return document.body || document.documentElement;
-           };
-            const normalizePath = (raw: string) => {
-              const tokens = String(raw || '')
-                .split('/')
-                .filter((t) => t.length);
-              if (!tokens.length) return ['root'];
-              if (tokens[0] !== 'root') tokens.unshift('root');
-              return tokens;
-            };
-            const parts = normalizePath(config.path);
-            let node = resolveRoot(config.rootSelector);
-            if (!node) return { count: 0, channel: config.channel };
-            if (parts.length > 1) {
-              for (let i = 1; i < parts.length; i += 1) {
-                const idx = Number(parts[i]);
-                const children = node.children ? Array.from(node.children) : [];
-                if (!Number.isFinite(idx) || idx < 0 || idx >= children.length) {
-                  node = null;
-                  break;
-                }
-                node = children[idx];
-                if (!node) break;
-              }
+            if (!runtime?.dom?.resolveByPath) {
+              throw new Error('dom resolveByPath unavailable');
             }
+            const node = runtime.dom.resolveByPath(config.path, config.rootSelector || null);
             if (!node) return { count: 0, channel: config.channel };
             runtime.highlight.highlightElements([node], {
               channel: config.channel,

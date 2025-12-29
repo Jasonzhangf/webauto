@@ -49,7 +49,7 @@ export async function handlePickerResult(domPath) {
       domPath,
       '#fbbc05', // 橙色（IPC层会添加 2px solid）
       { channel: 'dom', rootSelector: currentRootSelector, sticky: true },
-      currentProfile
+      { profile: currentProfile, url: currentUrl }
     ).catch(err => {
       logger.error('picker', 'Failed to highlight picked element', err);
     });
@@ -499,25 +499,25 @@ function renderContainerNode(parent, node, x, y, depth, domNodesMap) {
           target,
           'green',
           { channel: 'container', rootSelector: currentRootSelector },
-          currentProfile
+          { profile: currentProfile, url: currentUrl }
         ).catch(err => {
           logger.error("highlight", "Failed to highlight container", err);
         });
-      }
-    } else if (node.selectors && node.selectors.length > 0) {
-      // 回退使用容器定义中的 selector
-      console.log('[Container] Fallback highlighting with selector:', node.selectors[0]);
-      if (typeof window.api?.highlightElement === 'function') {
+     }
+   } else if (node.selectors && node.selectors.length > 0) {
+     // 回退使用容器定义中的 selector
+     console.log('[Container] Fallback highlighting with selector:', node.selectors[0]);
+     if (typeof window.api?.highlightElement === 'function') {
         window.api.highlightElement(
           node.selectors[0],
           'green',
           { channel: 'container', rootSelector: currentRootSelector },
-          currentProfile
+          { profile: currentProfile, url: currentUrl }
         ).catch(err => {
           console.error('Failed to highlight:', err);
         });
       }
-    }
+   }
 
     renderGraph();
   });

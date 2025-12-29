@@ -110,6 +110,16 @@ if (!(window as any).api) {
         log('容器树和DOM树更新完成，已自动展开', matchedDomPaths.size, '个匹配路径');
       }
     }
+
+    if (msg.topic === 'ui.domPicker.result') {
+      log('收到 ui.domPicker.result 事件');
+      const data = msg.payload;
+      if (data?.success && data?.domPath) {
+        handlePickerResult(data.domPath);
+      } else {
+        log('domPicker result missing domPath:', data);
+      }
+    }
   });
 
   // 初始健康检查

@@ -591,6 +591,24 @@ export class UiController {
     if (!domPath) {
       throw new Error('缺少 DOM 路径');
     }
+    
+    // 先加载 DOM 分支确保元素存在
+    if (domPath !== 'root' && payload.url) {
+      try {
+        await this.fetchDomBranchFromService({
+          sessionId: profile,
+          url: payload.url,
+          path: domPath,
+          rootSelector: payload.rootSelector || payload.root_selector,
+          maxDepth: 2,
+          maxChildren: 10,
+        });
+        logDebug('controller', 'highlight-dom-path', { message: 'DOM branch loaded', path: domPath });
+      } catch (err: any) {
+        logDebug('controller', 'highlight-dom-path', { message: 'Failed to load DOM branch', path: domPath, error: err.message });
+      }
+    }
+
     const options = payload.options || {};
     const channel = options.channel || payload.channel || 'hover-dom';
     const style = options.style || '2px solid rgba(96, 165, 250, 0.95)';
