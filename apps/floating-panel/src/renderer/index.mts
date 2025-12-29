@@ -181,7 +181,7 @@ if (btnPicker) {
 
       if (result.success && result.data) {
         // 处理选中结果
-        const { domPath, selector } = result.data;
+        const { dom_path: domPath, selector } = result.data;
         if (domPath) {
           handlePickerResult(domPath);
         } else {

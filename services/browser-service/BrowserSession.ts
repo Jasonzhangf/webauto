@@ -97,7 +97,7 @@ export class BrowserSession {
   private setupPageHooks(page: Page) {
     const profileTag = `[session:${this.options.profileId}]`;
     const ensure = (reason: string) => {
-      ensurePageRuntime(page).catch((err) => {
+      ensurePageRuntime(page, true).catch((err) => {
         console.warn(`${profileTag} ensure runtime failed (${reason})`, err?.message || err);
       });
     };
