@@ -21,7 +21,7 @@ execSync('rm -rf dist', { stdio: 'inherit' });
 
 // 1. 构建 main 进程 (ESM)
 console.log('[floating-panel] building main process (ESM)...');
-execSync('npx esbuild src/main/index.mts --bundle --platform=node --format=esm --outfile=dist/main/index.mjs --sourcemap --external:electron --external:ws --external:electron-window-state', { stdio: 'inherit' });
+execSync('npx esbuild src/main/index.mts --bundle --platform=node --format=esm --outfile=dist/main/index.mjs --sourcemap --external:electron --external:ws --external:electron-window-state --loader:.ts=ts', { stdio: 'inherit' });
 
 // 2. 复制 preload.mjs (全链路 ESM)
 const preloadDir = path.join(distDir, 'main');

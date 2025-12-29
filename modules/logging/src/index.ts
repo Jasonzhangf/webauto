@@ -18,11 +18,46 @@ export interface StreamResult {
 }
 
 const HOME_LOG_ROOT = path.join(os.homedir(), '.webauto', 'logs');
+export const DEBUG_LOG_FILE = path.join(HOME_LOG_ROOT, 'debug.jsonl');
 const DEFAULT_SOURCES: Record<string, string> = {
   browser: path.join(HOME_LOG_ROOT, 'browser.log'),
   service: path.join(HOME_LOG_ROOT, 'service.log'),
   orchestrator: path.join(HOME_LOG_ROOT, 'orchestrator.log'),
 };
+
+let debugReady = false;
+
+function isDebugEnabled(): boolean {
+  return process.env.DEBUG === '1' || process.env.debug === '1';
+}
+
+function ensureDebugLogDir(): void {
+  if (debugReady) return;
+  try {
+    fs.mkdirSync(path.dirname(DEBUG_LOG_FILE), { recursive: true });
+    debugReady = true;
+  } catch {
+    // ignore
+  }
+}
+
+export function logDebug(module: string, event: string, data: Record<string, any> = {}): void {
+  if (!isDebugEnabled()) return;
+  ensureDebugLogDir();
+  const entry = {
+    ts: Date.now(),
+    level: 'debug',
+    module,
+    event,
+    data,
+  };
+  try {
+    fs.appendFileSync(DEBUG_LOG_FILE, `${JSON.stringify(entry)}\n`);
+  } catch {
+    // ignore
+  }
+}
+
 
 export function resolveLogFile(options: LogSourceOptions): string {
   if (options.file) {
@@ -51,8 +86,8 @@ export async function flushLog(options: LogSourceOptions = {}, truncate = false)
     await fs.promises
       .truncate(file, 0)
       .catch(() => Promise.resolve());
-  }
-  return { file, lines };
+ }
+ return { file, lines };
 }
 
 async function readTailLines(file: string, maxLines: number): Promise<string[]> {

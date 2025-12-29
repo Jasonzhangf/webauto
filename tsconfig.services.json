@@ -1,14 +1,16 @@
 {
-  "extends": "./tsconfig.json",
+ "extends": "./tsconfig.json",
   "compilerOptions": {
     "outDir": "./dist",
     "noEmit": false,
     "allowJs": false,
+    "allowImportingTsExtensions": false,
     "rootDir": "."
   },
   "include": [
     "services/**/*.ts",
     "services/**/*.d.ts",
+    "services/shared/**/*.d.ts",
     "modules/**/*.ts",
     "modules/**/*.d.ts",
     "sharedmodule/engines/**/*.ts",

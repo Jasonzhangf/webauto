@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
- * 全局回环测试脚本（按模块整理）
- * 依赖：请先启动 Unified API(7701) 与 Browser Service(7704)
+ * 全局回环测试 - 按模块组织
+ * 确保所有基础能力都正常工作
  */
 
 import { spawn } from 'node:child_process';
@@ -12,121 +12,84 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const repoRoot = path.resolve(__dirname, '..');
 
-const steps = [
+const log = (msg) => console.log(`[loop-all] ${msg}`);
+
+const tests = [
   {
-    name: 'browser:highlight-loop',
-    cmd: 'node',
-    args: [path.join(repoRoot, 'modules/browser/tests/highlight-loop.test.mjs')],
-  },
-  {
-    name: 'browser:container-match-loop',
-    cmd: 'node',
-    args: [path.join(repoRoot, 'modules/browser/tests/container-match-loop.test.mjs')],
-  },
-  {
-    name: 'dom-branch-fetcher:loop',
-    cmd: 'node',
-    args: [path.join(repoRoot, 'modules/dom-branch-fetcher/tests/fetchBranch-loop.test.mjs')],
-  },
-  {
-    name: 'floating-panel:preload-loop',
+    name: 'preload:esm',
+    desc: 'ESM Preload 回环',
     cmd: 'npx',
     args: ['electron', 'scripts/test-preload.mjs'],
-    cwd: path.join(repoRoot, 'apps/floating-panel'),
-    env: { PRELOAD_PATH: path.join(repoRoot, 'apps/floating-panel/dist/main/preload.mjs') },
+    cwd: path.join(repoRoot, 'apps/floating-panel')
   },
   {
-    name: 'floating-panel:ui-window-loop',
-    cmd: 'npx',
-    args: ['electron', 'scripts/test-ui-window-entry.mjs'],
-    cwd: path.join(repoRoot, 'apps/floating-panel'),
+    name: 'browser:profile',
+    desc: '浏览器 Profile 恢复',
+    cmd: 'node',
+    args: ['scripts/test-weibo-profile.mjs'],
+    cwd: repoRoot
   },
+  {
+    name: 'highlight:complete',
+    desc: '高亮完整回环（selector + dom_path + 容器）',
+    cmd: 'node',
+    args: ['scripts/test-highlight-complete.mjs'],
+    cwd: repoRoot
+  }
 ];
 
-const services = [
-  {
-    name: 'unified-api',
-    health: 'http://127.0.0.1:7701/health',
-    cmd: 'node',
-    args: [path.join(repoRoot, 'services/unified-api/server.mjs')],
-  },
-  {
-    name: 'browser-service',
-    health: 'http://127.0.0.1:7704/health',
-    cmd: 'node',
-    args: [path.join(repoRoot, 'libs/browser/remote-service.js'), '--host', '127.0.0.1', '--port', '7704', '--wsPort', '8765', '--wsHost', '127.0.0.1', '--enableWs'],
-  },
-];
-
-const running = new Map();
-
-async function waitForHealth(url, retries = 20, delayMs = 500) {
-  for (let i = 0; i < retries; i += 1) {
-    try {
-      const res = await fetch(url);
-      if (res.ok) return true;
-    } catch {
-      // ignore
-    }
-    await new Promise((r) => setTimeout(r, delayMs));
-  }
-  return false;
-}
-
-async function ensureService(service) {
-  const ok = await waitForHealth(service.health, 2, 200);
-  if (ok) return;
-
-  console.log(`[loop] 启动服务: ${service.name}`);
-  const proc = spawn(service.cmd, service.args, {
-    cwd: repoRoot,
-    env: { ...process.env },
-    stdio: ['ignore', 'inherit', 'inherit'],
-  });
-  running.set(service.name, proc);
-
-  const ready = await waitForHealth(service.health, 30, 500);
-  if (!ready) {
-    throw new Error(`${service.name} 启动失败: ${service.health}`);
-  }
-}
-
-function shutdownServices() {
-  for (const [name, proc] of running.entries()) {
-    console.log(`[loop] 停止服务: ${name}`);
-    proc.kill('SIGTERM');
-  }
-}
-
-function runStep(step) {
+function runTest(test) {
   return new Promise((resolve, reject) => {
-    const proc = spawn(step.cmd, step.args, {
-      cwd: step.cwd || repoRoot,
-      env: { ...process.env, ...(step.env || {}) },
-      stdio: ['ignore', 'inherit', 'inherit'],
+    log(`开始测试: ${test.name} - ${test.desc}`);
+    const start = Date.now();
+    const proc = spawn(test.cmd, test.args, {
+      cwd: test.cwd,
+      stdio: 'inherit',
+      shell: false
     });
-    proc.on('error', reject);
-    proc.on('close', (code) => {
-      if (code !== 0) return reject(new Error(`${step.name} failed (exit ${code})`));
-      resolve();
+
+    proc.on('exit', (code) => {
+      const duration = Date.now() - start;
+      if (code === 0) {
+        log(`✅ ${test.name} 通过 (${duration}ms)`);
+        resolve({ name: test.name, ok: true, duration });
+      } else {
+        log(`❌ ${test.name} 失败 code=${code} (${duration}ms)`);
+        resolve({ name: test.name, ok: false, duration, code });
+      }
+    });
+
+    proc.on('error', (err) => {
+      log(`❌ ${test.name} 错误: ${err.message}`);
+      resolve({ name: test.name, ok: false, error: err.message });
     });
   });
 }
 
-async function run() {
-  console.log('=== 全局回环测试开始 ===');
-  for (const service of services) {
-    await ensureService(service);
+async function main() {
+  log('='.repeat(60));
+  log('全局回环测试开始');
+  log('='.repeat(60));
+
+  const results = [];
+  for (const test of tests) {
+    const result = await runTest(test);
+    results.push(result);
+    await new Promise(resolve => setTimeout(resolve, 1000));
   }
-  for (const step of steps) {
-    console.log(`\n[loop] ${step.name}`);
-    await runStep(step);
+
+  log('='.repeat(60));
+  log('测试汇总:');
+  for (const r of results) {
+    const status = r.ok ? '✅ PASS' : '❌ FAIL';
+    log(`  ${status} ${r.name} ${r.duration ? `(${r.duration}ms)` : ''}`);
   }
-  console.log('\n✅ 全局回环测试完成');
+  
+  const passCount = results.filter(r => r.ok).length;
+  log(`总计: ${passCount}/${results.length} 通过`);
+  log('='.repeat(60));
+
+  process.exit(passCount === results.length ? 0 : 1);
 }
 
-run().then(() => shutdownServices()).catch((err) => {
-  shutdownServices();
-  console.error(`\n❌ 全局回环测试失败: ${err.message}`);
-  process.exit(1);
-});
+main();

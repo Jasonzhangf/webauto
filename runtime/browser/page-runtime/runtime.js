@@ -477,7 +477,7 @@
           /* ignore invalid selector */
         }
       }
-      return document.querySelector('#app') || document.body || document.documentElement;
+      return document.body || document.documentElement;
     },
     resolveByPath(path, selector) {
       if (!path || typeof path !== 'string') return null;
@@ -663,6 +663,7 @@
     }
     registry.delete(key);
   }
+
   let scrollListenerInitialized = false;
 
   function updateAllOverlays() {
@@ -705,7 +706,9 @@
     window.addEventListener('scroll', handler, { capture: true, passive: true });
     window.addEventListener('resize', handler, { passive: true });
   }
-    function highlightNodes(nodes, options = {}) {
+
+
+  function highlightNodes(nodes, options = {}) {
     const channel = options.channel || 'default';
     const style = options.style || '2px solid rgba(255, 193, 7, 0.9)';
     const borderStyle = typeof style === 'string' ? { border: style, borderRadius: '4px' } : style;
@@ -763,17 +766,19 @@
   }
 
   function highlightSelector(selector, options = {}) {
-    const root = domUtils.resolveRoot(options.rootSelector);
+    const rootSelector = options.rootSelector || null;
+    const root = domUtils.resolveRoot(rootSelector);
     if (!root || !selector) {
       clearChannel(options.channel);
       return { selector: selector || null, count: 0, channel: options.channel || 'default' };
     }
     let nodes = [];
     try {
-      if (typeof root.matches === 'function' && root.matches(selector)) {
+      const scope = rootSelector ? root : document;
+      if (scope === root && typeof root.matches === 'function' && root.matches(selector)) {
         nodes.push(root);
       }
-      nodes = nodes.concat(Array.from(root.querySelectorAll(selector)));
+      nodes = nodes.concat(Array.from(scope.querySelectorAll(selector)));
     } catch {
       nodes = [];
     }

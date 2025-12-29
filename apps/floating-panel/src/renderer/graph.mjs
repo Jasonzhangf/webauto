@@ -19,7 +19,89 @@ let currentProfile = null;
 let currentUrl = null;
 let isLoadingBranch = false;
 let currentRootSelector = null;
+let suggestedNode = null; // { parentId, domPath, tempId }
 
+export async function handlePickerResult(domPath) {
+  if (!domPath) return;
+  logger.info('picker', 'Received DOM path', domPath);
+  
+  // 1. 展开并高亮 DOM 树中的节点
+  await expandDomPath(domPath);
+  selectedDom = domPath; // 选中该 DOM 节点
+  
+  // 发送实线高亮请求（覆盖之前的虚线）
+  if (typeof window.api?.highlightElement === 'function') {
+    window.api.highlightElement(
+      domPath,
+      '#fbbc05', // 橙色（IPC层会添加 2px solid）
+      { channel: 'dom', rootSelector: currentRootSelector, sticky: true },
+      currentProfile
+    ).catch(err => {
+      logger.error('picker', 'Failed to highlight picked element', err);
+    });
+  }
+  
+  // 2. 在容器树中找到最近的父容器
+  const nearestContainer = findNearestContainer(domPath);
+  if (nearestContainer) {
+    logger.info('picker', 'Found nearest container', nearestContainer.id);
+    
+    // 3. 创建建议节点
+    suggestedNode = {
+      parentId: nearestContainer.id,
+      domPath: domPath,
+      tempId: `suggest-${Date.now()}`
+    };
+    
+    // 展开父容器
+    expandAllContainers(containerData); // 简化处理，展开所有，或者只展开路径
+    
+    renderGraph();
+  } else {
+    logger.warn('picker', 'No suitable parent container found for', domPath);
+  }
+}
+
+function findNearestContainer(domPath) {
+  if (!containerData || !domPath) return null;
+  
+  // 简单的路径匹配：找到 domPath 是其子路径的最深容器
+  // 注意：容器的 domPath 可能存储在 match.nodes[0].dom_path 中
+  
+  let bestMatch = null;
+  let bestLength = 0;
+  
+  function traverse(node) {
+    // 检查当前容器是否匹配
+    // 这里假设容器有 dom_path 信息。如果没有，可能需要依赖 selector 或其他机制
+    // 现有的 graph 数据中，node.match.nodes[0].dom_path 是比较可靠的来源
+    
+    let containerPath = null;
+    if (node.match && node.match.nodes && node.match.nodes.length > 0) {
+      containerPath = node.match.nodes[0].dom_path;
+    }
+    
+    if (containerPath && domPath.startsWith(containerPath)) {
+      if (containerPath.length > bestLength) {
+        bestMatch = node;
+        bestLength = containerPath.length;
+      }
+    }
+    
+    if (node.children) {
+      node.children.forEach(child => traverse(child));
+    }
+  }
+  
+  traverse(containerData);
+  
+  // 如果没有找到（比如根容器 path 不匹配），默认返回根容器
+  if (!bestMatch && containerData) {
+    return containerData;
+  }
+  
+  return bestMatch;
+}
 
 
 function populateSelectorMap(containerData) {
@@ -427,6 +509,94 @@ function renderContainerNode(parent, node, x, y, depth, domNodesMap) {
 
   if (hasChildren && isExpanded) {
     let currentY = y + 32;
+
+    // 渲染建议节点（如果有）
+    if (suggestedNode && suggestedNode.parentId === nodeId) {
+      const vertLine = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+      vertLine.setAttribute('x1', '10');
+      vertLine.setAttribute('y1', String(y + 28));
+      vertLine.setAttribute('x2', '10');
+      vertLine.setAttribute('y2', String(currentY + 14));
+      vertLine.setAttribute('stroke', '#fbbc05'); // 橙色连接线
+      vertLine.setAttribute('stroke-width', '1');
+      vertLine.setAttribute('stroke-dasharray', '4 2'); // 虚线
+      parent.appendChild(vertLine);
+
+      const horizLine = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+      horizLine.setAttribute('x1', '10');
+      horizLine.setAttribute('y1', String(currentY + 14));
+      horizLine.setAttribute('x2', String((depth + 1) * 20 + 10));
+      horizLine.setAttribute('y2', String(currentY + 14));
+      horizLine.setAttribute('stroke', '#fbbc05');
+      horizLine.setAttribute('stroke-width', '1');
+      horizLine.setAttribute('stroke-dasharray', '4 2');
+      parent.appendChild(horizLine);
+
+      // 绘制建议节点框
+      const gSuggest = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+      gSuggest.setAttribute('transform', `translate(${x + (depth + 1) * 20}, ${currentY})`);
+      
+      const rectSuggest = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+      rectSuggest.setAttribute('x', '0');
+      rectSuggest.setAttribute('y', '0');
+      rectSuggest.setAttribute('width', '180');
+      rectSuggest.setAttribute('height', '28');
+      rectSuggest.setAttribute('fill', '#2d2d30');
+      rectSuggest.setAttribute('stroke', '#fbbc05');
+      rectSuggest.setAttribute('stroke-width', '2');
+      rectSuggest.setAttribute('stroke-dasharray', '4 2');
+      rectSuggest.setAttribute('rx', '2');
+      rectSuggest.style.cursor = 'pointer';
+      
+      const textSuggest = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+      textSuggest.setAttribute('x', '24');
+      textSuggest.setAttribute('y', '18');
+      textSuggest.setAttribute('fill', '#fbbc05');
+      textSuggest.setAttribute('font-size', '12');
+      textSuggest.setAttribute('font-family', 'Consolas, monospace');
+      textSuggest.setAttribute('pointer-events', 'none');
+      textSuggest.textContent = '+ 确认添加子容器';
+
+      gSuggest.appendChild(rectSuggest);
+      gSuggest.appendChild(textSuggest);
+      parent.appendChild(gSuggest);
+
+      // 点击确认添加
+      rectSuggest.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        logger.info('picker', 'Confirm adding sub-container', suggestedNode);
+        
+        // 发送创建请求
+        try {
+          const result = await window.api.invokeAction('containers:create-child', {
+            profile: currentProfile,
+            parentId: suggestedNode.parentId,
+            domPath: suggestedNode.domPath,
+            name: `NewContainer-${Date.now().toString().slice(-4)}`
+          });
+          
+          if (result.success) {
+            logger.info('picker', 'Container created', result.data);
+            suggestedNode = null; // 清除建议
+            // 刷新容器树？后端应该会推送更新，或者我们需要手动刷新
+            // 这里假设后端推送 'containers.matched' 或类似事件会刷新 UI
+            // 如果没有，可能需要重新 match
+            await window.api.invokeAction('containers:match', {
+              profile: currentProfile,
+              url: currentUrl
+            });
+          } else {
+            logger.error('picker', 'Failed to create container', result.error);
+          }
+        } catch (err) {
+          logger.error('picker', 'Error creating container', err);
+        }
+      });
+
+      currentY += 32;
+      totalHeight = currentY - y;
+    }
+
     node.children.forEach((child, index) => {
       const vertLine = document.createElementNS('http://www.w3.org/2000/svg', 'line');
       vertLine.setAttribute('x1', '10');

@@ -122,7 +122,19 @@ export class ContainerMatcher {
     const containerTree = this.buildContainerTree(containers, rootMatch.container.id, matchMap);
     timings.push({ step: 'build_container_tree', duration_ms: Date.now() - buildTreeStart });
     const domCaptureStart = Date.now();
-    const domTree = await this.captureDomTreeWithRetry(page, effectiveSelector, maxDepth, maxChildren);
+
+    const matchedPaths: string[] = [];
+    if (matchMap) {
+      for (const result of Object.values(matchMap) as any[]) {
+        if (result.nodes && Array.isArray(result.nodes)) {
+          for (const node of result.nodes) {
+            if (node.dom_path) matchedPaths.push(node.dom_path);
+          }
+        }
+      }
+    }
+
+    const domTree = await this.captureDomTreeWithRetry(page, effectiveSelector, maxDepth, maxChildren, matchedPaths);
     timings.push({ step: 'capture_dom_tree', duration_ms: Date.now() - domCaptureStart });
     const annotateStart = Date.now();
     const annotations = this.buildDomAnnotations(matchMap);
@@ -541,6 +553,7 @@ export class ContainerMatcher {
     selector: string | undefined,
     maxDepth: number,
     maxChildren: number,
+    forcePaths?: string[],
   ) {
     const attempts: Array<string | null> = [];
     if (selector) attempts.push(selector);
@@ -552,7 +565,7 @@ export class ContainerMatcher {
       tried.add(key);
       const retries = candidate && candidate === selector ? 5 : 3;
       for (let i = 0; i < retries; i++) {
-        const outline = await this.captureDomTree(page, candidate || undefined, maxDepth, maxChildren);
+        const outline = await this.captureDomTree(page, candidate || undefined, maxDepth, maxChildren, forcePaths);
         if (outline) {
           return outline;
         }
@@ -567,10 +580,11 @@ export class ContainerMatcher {
     selector: string | undefined,
     maxDepth: number,
     maxChildren: number,
+    forcePaths?: string[],
   ) {
     const runtimeTree = await page
       .evaluate(
-        (config: { selector?: string; maxDepth: number; maxChildren: number }): any => {
+        (config: { selector?: string; maxDepth: number; maxChildren: number, forcePaths?: string[] }): any => {
           const runtime = (window as any).__webautoRuntime;
           if (!runtime?.dom?.getBranch) {
             return null;
@@ -579,9 +593,10 @@ export class ContainerMatcher {
             rootSelector: config.selector || null,
             maxDepth: config.maxDepth,
             maxChildren: config.maxChildren,
+            forcePaths: config.forcePaths,
           });
         },
-        { selector, maxDepth, maxChildren },
+        { selector, maxDepth, maxChildren, forcePaths },
       )
       .catch((): any => null);
     if (runtimeTree?.node) {
@@ -802,14 +817,16 @@ export class ContainerMatcher {
     try {
       return await handle.evaluate(
         (element, selector) => {
-          const root = selector ? document.querySelector(selector) : null;
-          const computePath = () => {
+          const resolvedRoot = selector ? document.querySelector(selector) : null;
+          const computePath = (root: Element | null) => {
             const indices: string[] = [];
             let current: Element | null = element;
             let guard = 0;
+            let foundRoot = false;
             while (current && guard < 80) {
               if (root && current === root) {
-                return ['root', ...indices].join('/');
+                foundRoot = true;
+                break;
               }
               const parent = current.parentElement;
               if (!parent) break;
@@ -818,12 +835,20 @@ export class ContainerMatcher {
               current = parent;
               guard += 1;
             }
-            return ['root', ...indices].join('/');
+            return {
+              path: ['root', ...indices].join('/'),
+              foundRoot,
+            };
           };
+
+          const rootPathInfo = resolvedRoot ? computePath(resolvedRoot) : null;
+          const useRoot = Boolean(rootPathInfo?.foundRoot);
+          const domPath = useRoot ? rootPathInfo?.path : null;
           const classes = Array.from(element.classList || []);
           const snippet = (element.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 120);
           return {
-            dom_path: computePath(),
+            dom_path: domPath,
+            dom_root_selector: useRoot ? selector : null,
             tag: element.tagName,
             id: element.id || null,
             classes,

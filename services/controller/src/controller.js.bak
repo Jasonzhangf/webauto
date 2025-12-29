@@ -48,74 +48,66 @@ export class UiController {
        return this.handleContainerCreateChild(payload);
      case 'containers:update-alias':
        return this.handleContainerUpdateAlias(payload);
-     case 'containers:update-operations':
-       return this.handleContainerUpdateOperations(payload);
-     case 'browser:highlight':
-       return this.handleBrowserHighlight(payload);
-     case 'browser:clear-highlight':
-       return this.handleBrowserClearHighlight(payload);
-      case 'browser:highlight-dom-path':
-        return this.handleBrowserHighlightDomPath(payload);
-      case 'browser:cancel-pick':
-        return this.handleBrowserCancelDomPick(payload);
-      case 'browser:pick-dom':
-        return this.handleBrowserPickDom(payload);
-      case 'dom:branch:2':
-        return this.handleDomBranch2(payload);
-      case 'dom:pick:2':
-        return this.handleDomPick2(payload);
-      case 'browser:inspect_tree':
-        return this.fetchInspectTree(payload);
-      default:
-        return { success: false, error: `Unknown action: ${action}` };
-    }
-  }
- async fetchBrowserStatus() {
-   try {
-      const url = `${this.getBrowserHttpBase()}/health`;
-     const res = await fetch(url);
-     if (!res.ok) return { success: false, error: `HTTP ${res.status}` };
-     return { success: true, data: await res.json() };
-   } catch (err) {
-     return { success: false, error: err.message };
+    case 'containers:update-operations':
+      return this.handleContainerUpdateOperations(payload);
+    case 'browser:highlight':
+      return this.handleBrowserHighlight(payload);
+    case 'browser:clear-highlight':
+      return this.handleBrowserClearHighlight(payload);
+    case 'browser:execute':
+      return this.handleBrowserExecute(payload);
+     case 'browser:highlight-dom-path':
+       return this.handleBrowserHighlightDomPath(payload);
+     case 'browser:cancel-pick':
+       return this.handleBrowserCancelDomPick(payload);
+     case 'browser:pick-dom':
+       return this.handleBrowserPickDom(payload);
+     case 'dom:branch:2':
+       return this.handleDomBranch2(payload);
+     case 'dom:pick:2':
+       return this.handleDomPick2(payload);
+     case 'browser:inspect_tree':
+       return this.fetchInspectTree(payload);
+     case 'containers:match':
+       return this.handleContainerMatch(payload);
+     default:
+       return { success: false, error: `Unknown action: ${action}` };
    }
  }
- async fetchInspectTree(payload) {
-   try {
-      // Use WebSocket instead of HTTP for container operations
-      const commandUrl = `${this.getBrowserHttpBase()}/command`;
+
+  async fetchBrowserStatus() {
+    try {
+      const url = `${this.getBrowserHttpBase()}/health`;
+      const res = await fetch(url);
+      if (!res.ok) return { success: false, error: `HTTP ${res.status}` };
+      return { success: true, data: await res.json() };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  }
+
+  async fetchInspectTree(payload) {
+    try {
+      const wsUrl = this.getBrowserWsUrl();
       const command = {
-        action: 'container_operation',
-        args: {
+        type: 'command',
+        session_id: payload?.profile || 'default',
+        data: {
+          command_type: 'container_operation',
           action: 'inspect_tree',
-          profileId: payload?.profile || 'default',
           page_context: { url: payload?.url || 'https://example.com' },
           parameters: {
             ...(payload?.rootSelector ? { root_selector: payload.rootSelector } : {}),
             ...(typeof payload?.maxDepth === 'number' ? { max_depth: payload.maxDepth } : {}),
             ...(typeof payload?.maxChildren === 'number' ? { max_children: payload.maxChildren } : {}),
-          }
-        }
+          },
+        },
       };
-      const res = await fetch(commandUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(command)
-      });
-      if (!res.ok) return { success: false, error: `HTTP ${res.status}` };
-      const result = await res.json();
-      if (!result.ok) return { success: false, error: result.error || 'Command failed' };
-      return { success: true, data: result.body };
-   } catch (err) {
-     return { success: false, error: err.message };
-   }
- }
-  async fetchBrowserStatus() {
-    try {
-      const url = `${this.getBrowserHttpBase()}/status`;
-      const res = await fetch(url);
-      if (!res.ok) return { success: false, error: `HTTP ${res.status}` };
-      return { success: true, data: await res.json() };
+      const wsResult = await this.sendWsCommand(wsUrl, command, 15000);
+      if (wsResult?.data?.success !== true) {
+        return { success: false, error: wsResult?.data?.error || 'inspect_tree failed' };
+      }
+      return { success: true, data: wsResult.data.data };
     } catch (err) {
       return { success: false, error: err.message };
     }
@@ -378,7 +370,37 @@ export class UiController {
     return this.handleContainerInspect({ profile: payload.profile, url: payload.url, containerId });
   }
 
-  async handleBrowserHighlight(payload = {}) {
+  async handleContainerMatch(payload = {}) {
+    const profile = payload.profileId || payload.profile;
+    const url = payload.url;
+    if (!profile) throw new Error('缺少 profile');
+    if (!url) throw new Error('缺少 URL');
+    try {
+      const context = await this.captureInspectorSnapshot({
+        profile,
+        url,
+        maxDepth: payload.maxDepth || 2,
+        maxChildren: payload.maxChildren || 5,
+        rootSelector: payload.rootSelector,
+      });
+      const snapshot = context.snapshot;
+      const rootContainer = snapshot?.root_match?.container || snapshot?.container_tree?.container || snapshot?.container_tree?.containers?.[0];
+      const matchPayload = {
+        sessionId: context.sessionId,
+        profileId: context.profileId,
+        url: context.targetUrl,
+        matched: !!rootContainer,
+        container: rootContainer || null,
+        snapshot,
+      };
+      this.messageBus?.publish?.('containers.matched', matchPayload);
+      return { success: true, data: matchPayload };
+    } catch (err) {
+      throw new Error(`容器匹配失败: ${err?.message || String(err)}`);
+    }
+  }
+
+      async handleBrowserHighlight(payload = {}) {
     const profile = payload.profile || payload.sessionId;
     const selector = (payload.selector || '').trim();
     if (!profile) {
@@ -388,8 +410,20 @@ export class UiController {
       throw new Error('缺少 selector');
     }
     const options = payload.options || {};
+    
+    // 处理颜色
+    let style = options.style;
+    const color = payload.color;
+    if (!style) {
+        if (color === 'green') style = '2px solid rgba(76, 175, 80, 0.95)';
+        else if (color === 'blue') style = '2px solid rgba(33, 150, 243, 0.95)';
+        else if (color === 'red') style = '2px solid rgba(244, 67, 54, 0.95)';
+        else if (color && /^[a-z]+$/i.test(color)) style = `2px solid ${color}`;
+        else style = '2px solid rgba(255, 0, 0, 0.8)';
+    }
+
     const highlightOpts = {
-      style: options.style,
+      style,
       duration: options.duration,
       channel: options.channel || payload.channel,
       sticky: options.sticky,
@@ -411,9 +445,10 @@ export class UiController {
         selector,
         error: errorMessage,
       });
-      throw err || new Error(errorMessage);
+      return { success: false, error: errorMessage };
     }
   }
+
 
   async handleBrowserClearHighlight(payload = {}) {
     const profile = payload.profile || payload.sessionId;
@@ -450,7 +485,20 @@ export class UiController {
     }
     const options = payload.options || {};
     const channel = options.channel || payload.channel || 'hover-dom';
-    const style = options.style || '2px solid rgba(96, 165, 250, 0.95)';
+    const rootSelector = options.rootSelector || payload.rootSelector || payload.root_selector || null;
+
+    let style = options.style;
+    if (!style && payload.color) {
+      const color = payload.color;
+      if (color === 'green') style = '2px solid rgba(76, 175, 80, 0.95)';
+      else if (color === 'blue') style = '2px solid rgba(33, 150, 243, 0.95)';
+      else if (color === 'red') style = '2px solid rgba(244, 67, 54, 0.95)';
+      else if (color && /^[a-z]+$/i.test(color)) style = `2px solid ${color}`;
+    }
+    if (!style) {
+      style = '2px solid rgba(96, 165, 250, 0.95)';
+    }
+
     const sticky = typeof options.sticky === 'boolean' ? options.sticky : true;
     try {
       const result = await this.sendHighlightDomPathViaWs(profile, domPath, {
@@ -458,7 +506,7 @@ export class UiController {
         style,
         sticky,
         duration: options.duration,
-        rootSelector: options.rootSelector || payload.rootSelector || payload.root_selector || null,
+        rootSelector,
       });
       this.messageBus?.publish?.('ui.highlight.result', {
         success: true,
@@ -474,6 +522,24 @@ export class UiController {
         error: errorMessage,
       });
       throw err;
+    }
+  }
+
+  async handleBrowserExecute(payload = {}) {
+    const profile = payload.profile || payload.sessionId;
+    const script = payload.script || payload.code || '';
+    if (!profile) {
+      throw new Error('缺少会话/ profile 信息');
+    }
+    if (!script) {
+      throw new Error('缺少 script 参数');
+    }
+    try {
+      const result = await this.sendExecuteViaWs(profile, script);
+      return { success: true, data: result };
+    } catch (err) {
+      const errorMessage = err?.message || '执行脚本失败';
+      throw new Error(errorMessage);
     }
   }
 
@@ -647,6 +713,26 @@ export class UiController {
     return data?.data || data || { cancelled: false };
   }
 
+  async sendExecuteViaWs(sessionId, script) {
+    const payload = {
+      type: 'command',
+      session_id: sessionId,
+      data: {
+        command_type: 'node_execute',
+        node_type: 'evaluate',
+        parameters: {
+          script,
+        },
+      },
+    };
+    const response = await this.sendWsCommand(this.getBrowserWsUrl(), payload, 10000);
+    const data = response?.data || response;
+    if (data?.success === false) {
+      throw new Error(data?.error || 'execute failed');
+    }
+    return data?.data || data || { result: null };
+  }
+
   async sendDomPickerViaWs(sessionId, options = {}) {
     const timeout = Math.min(Math.max(Number(options.timeout) || 25000, 3000), 60000);
     const payload = {
@@ -703,6 +789,8 @@ export class UiController {
     if (!sessionId || !url || !path) {
       throw new Error('缺少 sessionId / URL / DOM 路径');
     }
+    
+    // 使用 WebSocket 而不是 CLI（避免 fixture 依赖）
     const payload = {
       type: 'command',
       session_id: sessionId,
@@ -723,6 +811,7 @@ export class UiController {
       return response.data.data || response.data.branch || response.data;
     }
     throw new Error(response?.data?.error || response?.error || 'inspect_dom_branch failed');
+  }
   }
 
   // v2 DOM branch：按 domPath + depth 获取局部树

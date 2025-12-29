@@ -4,6 +4,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import os from 'node:os';
 import WebSocket from 'ws';
+import { logDebug } from '../../modules/logging/src/index.ts';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIG = {
@@ -22,6 +23,7 @@ async function sleep(ms) {
 
 function log(msg) {
   console.log(`[launcher] ${msg}`);
+  logDebug('launcher', 'log', { message: msg });
 }
 
 function registerPid(pid) {

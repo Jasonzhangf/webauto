@@ -64,6 +64,9 @@ function main() {
   
   const args = [launcherPath, profileName, targetUrl, ...(headless ? ['--headless'] : [])];
   
+  // Enable debug logging
+  process.env.DEBUG = '1';
+
   console.log('🚀 WebAuto 一键启动');
   console.log(`  Profile: ${profileName}`);
   console.log(`  URL: ${targetUrl}`);

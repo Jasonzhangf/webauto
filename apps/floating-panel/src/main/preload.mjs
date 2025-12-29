@@ -26,13 +26,17 @@ const api = {
     console.log('[preload] close() called');
     return ipcRenderer.invoke('window:close');
   },
-  highlightElement: (selector, color = "green", options = {}) => {
-    console.log('[preload] highlightElement called:', selector, color);
-    return ipcRenderer.invoke("ui:highlight", { selector, color, options });
-  },
-  debugLog: (module, event, data = {}) => {
-    return ipcRenderer.invoke('ui:debug-log', { module, event, data });
-  },
+highlightElement: (selector, color = "green", options = {}, profile = null) => {
+  console.log('[preload] highlightElement called:', selector, color, 'profile:', profile);
+  return ipcRenderer.invoke("ui:highlight", { selector, color, options, profile });
+},
+ clearHighlight: (channel) => {
+   console.log('[preload] clearHighlight called:', channel);
+   return ipcRenderer.invoke("ui:clearHighlight", channel);
+ },
+debugLog: (module, event, data = {}) => {
+   return ipcRenderer.invoke('ui:debug-log', { module, event, data });
+ },
   onBusEvent: (cb) => {
     console.log('[preload] onBusEvent registered');
     return ipcRenderer.on('bus:event', (_, msg) => {

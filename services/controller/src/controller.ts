@@ -4,6 +4,7 @@ import { promises as fsPromises } from 'node:fs';
 import os from 'node:os';
 import { spawn } from 'node:child_process';
 import WebSocket from 'ws';
+import { logDebug } from '../../../modules/logging/src/index.js';
 
 interface UiControllerOptions {
   repoRoot?: string;
@@ -135,9 +136,16 @@ export class UiController {
     this.defaultHttpProtocol = options.defaultHttpProtocol || 'http';
     this._containerIndexCache = null;
     this.cliTargets = options.cliTargets || {};
+    logDebug('controller', 'init', {
+      wsHost: this.defaultWsHost,
+      wsPort: this.defaultWsPort,
+      httpHost: this.defaultHttpHost,
+      httpPort: this.defaultHttpPort
+    });
   }
 
   async handleAction(action: string, payload: ActionPayload = {}) {
+    logDebug('controller', 'handleAction', { action, payload });
     switch (action) {
       case 'browser:status':
         return this.runCliCommand('browser-control', ['status']);
@@ -169,14 +177,16 @@ export class UiController {
        return this.handleContainerUpdateOperations(payload);
      case 'containers:match':
        return this.handleContainerMatch(payload);
-     case 'browser:highlight':
-       return this.handleBrowserHighlight(payload);
-     case 'browser:clear-highlight':
-       return this.handleBrowserClearHighlight(payload);
-      case 'browser:highlight-dom-path':
-        return this.handleBrowserHighlightDomPath(payload);
-      case 'browser:cancel-pick':
-        return this.handleBrowserCancelDomPick(payload);
+    case 'browser:highlight':
+      return this.handleBrowserHighlight(payload);
+    case 'browser:clear-highlight':
+      return this.handleBrowserClearHighlight(payload);
+     case 'browser:highlight-dom-path':
+       return this.handleBrowserHighlightDomPath(payload);
+     case 'browser:execute':
+       return this.handleBrowserExecute(payload);
+     case 'browser:cancel-pick':
+       return this.handleBrowserCancelDomPick(payload);
       case 'browser:pick-dom':
         return this.handleBrowserPickDom(payload);
       case 'dom:branch:2':
@@ -192,6 +202,7 @@ export class UiController {
     if (!payload.profile) {
       throw new Error('缺少 profile');
     }
+    logDebug('controller', 'session:create', { payload });
     const args = ['create', '--profile', payload.profile];
     if (payload.url) args.push('--url', payload.url);
     if (payload.headless !== undefined) args.push('--headless', String(payload.headless));
@@ -227,6 +238,7 @@ export class UiController {
   async handleContainerInspect(payload: ActionPayload = {}) {
     const profile = payload.profile;
     if (!profile) throw new Error('缺少 profile');
+    logDebug('controller', 'containers:inspect', { profile, payload });
     const context = await this.captureInspectorSnapshot({
       profile,
       url: payload.url,
@@ -274,6 +286,7 @@ export class UiController {
   async handleContainerInspectBranch(payload: ActionPayload = {}) {
     if (!payload.profile) throw new Error('缺少 profile');
     if (!payload.path) throw new Error('缺少 DOM 路径');
+    logDebug('controller', 'containers:inspect:branch', { profile: payload.profile, path: payload.path, payload });
     const context = await this.captureInspectorBranch({
       profile: payload.profile,
       url: payload.url,
@@ -451,6 +464,8 @@ export class UiController {
     const url = payload.url;
     if (!profile) throw new Error('缺少 profile');
     if (!url) throw new Error('缺少 URL');
+
+    logDebug('controller', 'containers:match', { profile, url, payload });
     
     try {
       const context = await this.captureInspectorSnapshot({
@@ -472,6 +487,13 @@ export class UiController {
         snapshot,
       };
       this.messageBus?.publish?.('containers.matched', matchPayload);
+      logDebug('controller', 'containers.matched', {
+        profileId: matchPayload.profileId,
+        matched: matchPayload.matched,
+        containerId: matchPayload.container?.id,
+        childrenCount: matchPayload.container?.children?.length,
+        nodesCount: matchPayload.container?.match?.nodes?.length
+      });
       
       return {
         success: true,
@@ -538,7 +560,25 @@ export class UiController {
         selector: null,
         error: message,
       });
-      throw err;
+     throw err;
+   }
+ }
+
+  async handleBrowserExecute(payload: ActionPayload = {}) {
+    const profile = payload.profile || payload.sessionId;
+    const script = payload.script || payload.code || '';
+    if (!profile) {
+      throw new Error('缺少会话/ profile 信息');
+    }
+    if (!script) {
+      throw new Error('缺少 script 参数');
+    }
+    try {
+      const result = await this.sendExecuteViaWs(profile, script);
+      return { success: true, data: result };
+    } catch (err: any) {
+      const errorMessage = err?.message || '执行脚本失败';
+      throw new Error(errorMessage);
     }
   }
 
@@ -773,7 +813,27 @@ export class UiController {
     if (!result) {
       throw new Error('picker result missing');
     }
-    return result;
+   return result;
+ }
+
+  async sendExecuteViaWs(sessionId: string, script: string) {
+    const payload: WsCommandPayload = {
+      type: 'command',
+      session_id: sessionId,
+      data: {
+        command_type: 'node_execute',
+        node_type: 'evaluate',
+        parameters: {
+          script,
+        },
+      },
+    };
+    const response = await this.sendWsCommand(this.getBrowserWsUrl(), payload, 10000);
+    const data = response?.data || response;
+    if (data?.success === false) {
+      throw new Error(data?.error || 'execute failed');
+    }
+    return data?.data || data || { result: null };
   }
 
   async fetchContainerSnapshotFromService({ sessionId, url, maxDepth, maxChildren, rootContainerId, rootSelector }: { sessionId: string; url: string; maxDepth?: number; maxChildren?: number; rootContainerId?: string; rootSelector?: string }) {
@@ -836,6 +896,7 @@ export class UiController {
     if (!profile) throw new Error('缺少会话/ profile 信息');
     if (!url) throw new Error('缺少 URL');
     if (!path) throw new Error('缺少 DOM 路径');
+    logDebug('controller', 'dom:branch:2', { profile, url, path, payload });
     const maxDepth = typeof payload.maxDepth === 'number' ? payload.maxDepth : payload.depth;
     const maxChildren = typeof payload.maxChildren === 'number' ? payload.maxChildren : (payload.maxChildren || 12);
     const rootSelector = payload.rootSelector || payload.root_selector || null;

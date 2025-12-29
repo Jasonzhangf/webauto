@@ -1,5 +1,6 @@
 // 1688聊天界面DOM结构深度分析
 import { firefox } from 'playwright';
+import fs from 'node:fs';
 
 async function analyze1688ChatDOMStructure() {
   console.log('🔍 开始深度分析1688聊天界面DOM结构...');
@@ -16,7 +17,6 @@ async function analyze1688ChatDOMStructure() {
 
   // 加载Cookie
   try {
-    const fs = require('fs');
     const cookiePath = '/Users/fanzhang/.webauto/cookies/1688-domestic.json';
     if (fs.existsSync(cookiePath)) {
       const cookies = JSON.parse(fs.readFileSync(cookiePath, 'utf8'));
@@ -371,7 +371,6 @@ async function analyze1688ChatDOMStructure() {
     });
 
     // 保存分析结果
-    const fs = require('fs');
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
     const resultPath = `/Users/fanzhang/Documents/github/webauto/archive/workflow-records/1688-dom-structure-analysis-${timestamp}.json`;
     fs.writeFileSync(resultPath, JSON.stringify(analysis, null, 2));

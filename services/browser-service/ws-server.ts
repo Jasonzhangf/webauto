@@ -6,6 +6,7 @@ import type { RawData } from 'ws';
 import { SessionManager } from './SessionManager.js';
 import { ContainerMatcher } from './ContainerMatcher.js';
 import { ensurePageRuntime } from './pageRuntime.js';
+import { logDebug } from '../../modules/logging/src/index.js';
 
 interface WsServerOptions {
   host?: string;
@@ -312,6 +313,8 @@ export class BrowserWsServer {
       return;
     }
 
+    logDebug('browser-service', 'wsMessage', { payload });
+
     if (payload?.type !== 'command') {
       this.send(socket, {
         type: 'error',
@@ -470,6 +473,7 @@ export class BrowserWsServer {
         error: `Session ${sessionId} not found`,
       };
     }
+    logDebug('browser-service', 'containerOperation', { sessionId, command });
     const pageContext = command.page_context || {};
     if (command.action === 'match_root') {
       const match = await this.matcher.matchRoot(session, pageContext);
@@ -761,10 +765,13 @@ export class BrowserWsServer {
             if (!runtime?.highlight?.highlightElements) {
               throw new Error('highlight runtime unavailable');
             }
-            const resolveRoot = (sel: string | null) => {
-              if (!sel) return document.body || document.documentElement;
-              return document.querySelector(sel) || document.body || document.documentElement;
-            };
+           const resolveRoot = (sel: string | null) => {
+             if (sel) {
+               const explicit = document.querySelector(sel);
+               if (explicit) return explicit;
+             }
+              return document.body || document.documentElement;
+           };
             const normalizePath = (raw: string) => {
               const tokens = String(raw || '')
                 .split('/')

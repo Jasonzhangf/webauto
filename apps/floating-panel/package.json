@@ -1,12 +1,12 @@
 {
   "name": "@webauto/floating-panel",
-  "version": "0.1.414",
+  "version": "0.1.450",
   "private": true,
   "type": "module",
   "main": "dist/main/index.mjs",
   "description": "Cross-platform floating control panel for WebAuto",
   "scripts": {
-    "start": "npm run build && electron .",
+    "start": "electron .",
     "dev": "npm run build && electronmon .",
     "build": "node scripts/build.mjs",
     "clean": "rm -rf dist"

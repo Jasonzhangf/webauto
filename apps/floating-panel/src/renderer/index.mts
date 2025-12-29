@@ -33,6 +33,7 @@ function debugLog(module: string, action: string, data: any) {
 }
 
 let currentProfile: string | null = null;
+let currentRootSelector: string | null = null;
 
 if (dragArea) {
   log('drag-area found, enabling drag');
@@ -100,6 +101,7 @@ if (!(window as any).api) {
         }
         const url = data.url;
         const rootSelector = snapshot?.metadata?.root_selector || null;
+        currentRootSelector = rootSelector;
         updateDomTree(snapshot.dom_tree, { profile, page_url: url, root_selector: rootSelector });
         
         // 4. 渲染
@@ -163,6 +165,7 @@ if (btnPicker) {
 
       const result = await (window.api as any).invokeAction('browser:pick-dom', {
         profile: currentProfile,
+        rootSelector: currentRootSelector,
         timeout: 60000,
         mode: 'hover-select'
       });
@@ -179,7 +182,7 @@ if (btnPicker) {
         const { domPath, selector } = result.data;
         if (domPath) {
           handlePickerResult(domPath);
-        } else if (selector) {
+        } else {
           log('Picker returned selector but no domPath:', selector);
         }
       }

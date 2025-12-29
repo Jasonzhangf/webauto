@@ -3,6 +3,7 @@ import { IncomingMessage, ServerResponse } from 'http';
 import { setTimeout as delay } from 'timers/promises';
 import { SessionManager, CreateSessionPayload, SESSION_CLOSED_EVENT } from './SessionManager.js';
 import { BrowserWsServer } from './ws-server.js';
+import { logDebug } from '../../modules/logging/src/index.js';
 
 type CommandPayload = { action: string; args?: any };
 
@@ -25,6 +26,8 @@ export async function startBrowserService(opts: BrowserServiceOptions = {}) {
   const wsHost = opts.wsHost || '127.0.0.1';
   const wsPort = Number(opts.wsPort || 8765);
   const autoExit = process.env.BROWSER_SERVICE_AUTO_EXIT === '1';
+
+  logDebug('browser-service', 'start', { host, port, wsHost, wsPort, enableWs, autoExit });
 
   const server = http.createServer(async (req, res) => {
     const url = new URL(req.url || '/', `http://${req.headers.host}`);
