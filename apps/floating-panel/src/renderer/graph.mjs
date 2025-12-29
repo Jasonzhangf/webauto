@@ -26,9 +26,12 @@ export async function handlePickerResult(domPath) {
   if (!domPath) return;
   logger.info('picker', 'Received DOM path', domPath);
   
-  // 1. 展开并高亮 DOM 树中的节点
- await expandDomPath(domPath);
- selectedDom = domPath; // 选中该 DOM 节点
+  // 1. 确保DOM路径完整加载
+  await ensureDomPathLoaded(domPath);
+
+  // 2. 展开并高亮 DOM 树中的节点
+  await expandDomPath(domPath);
+  selectedDom = domPath; // 选中该 DOM 节点
  
   // 自动滚动到选中的DOM节点
   const domPos = domNodePositions.get(domPath);
@@ -52,25 +55,70 @@ export async function handlePickerResult(domPath) {
     });
   }
   
-  // 2. 在容器树中找到最近的父容器
+  // 3. 在容器树中找到最近的父容器
   const nearestContainer = findNearestContainer(domPath);
   if (nearestContainer) {
     logger.info('picker', 'Found nearest container', nearestContainer.id);
     
-    // 3. 创建建议节点
+    // 4. 创建建议节点
     suggestedNode = {
       parentId: nearestContainer.id,
       domPath: domPath,
       tempId: `suggest-${Date.now()}`
     };
     
-    // 展开父容器
-    expandAllContainers(containerData); // 简化处理，展开所有，或者只展开路径
+    // 5. 展开到容器节点的路径
+    expandPathToNode(containerData, nearestContainer.id);
     
     renderGraph();
+    logger.info('picker', 'Suggested node created', { suggestedNode });
   } else {
     logger.warn('picker', 'No suitable parent container found for', domPath);
   }
+}
+
+// 确保DOM路径完整加载
+async function ensureDomPathLoaded(path) {
+  if (!path || !currentProfile || !currentUrl) return;
+  const parts = path.split('/');
+  if (parts.length <= 1) return;
+  for (let i = 1; i < parts.length; i++) {
+    const partialPath = parts.slice(0, i + 1).join('/');
+    if (!loadedPaths.has(partialPath)) {
+      try {
+        const result = await window.api.invokeAction('dom:branch:2', {
+          profile: currentProfile,
+          path: partialPath,
+          depth: 2,
+          maxChildren: 10
+        });
+        if (result.success && result.data?.node) {
+          mergeDomBranch(result.data.node);
+          loadedPaths.add(partialPath);
+        }
+      } catch (err) {
+        logger.error('ensureDomPathLoaded', 'Failed to load branch', { path: partialPath, error: err.message });
+      }
+    }
+  }
+}
+
+// 展开路径到指定节点
+function expandPathToNode(node, targetId) {
+  if (!node || !targetId) return false;
+  if (node.id === targetId || node.name === targetId) {
+    expandedNodes.add(node.id || node.name);
+    return true;
+  }
+  if (node.children) {
+    for (const child of node.children) {
+      if (expandPathToNode(child, targetId)) {
+        expandedNodes.add(node.id || node.name);
+        return true;
+      }
+    }
+  }
+  return false;
 }
 
 function findNearestContainer(domPath) {
