@@ -7,6 +7,7 @@ const expandedNodes = new Set();
 let isDraggingGraph = false;
 let dragStart = { x: 0, y: 0 };
 let graphOffset = { x: 0, y: 0 };
+let graphScale = 1;
 let selectedContainer = null;
 let selectedDom = null;
 const domNodePositions = new Map();
@@ -26,9 +27,19 @@ export async function handlePickerResult(domPath) {
   logger.info('picker', 'Received DOM path', domPath);
   
   // 1. 展开并高亮 DOM 树中的节点
-  await expandDomPath(domPath);
-  selectedDom = domPath; // 选中该 DOM 节点
-  
+ await expandDomPath(domPath);
+ selectedDom = domPath; // 选中该 DOM 节点
+ 
+  // 自动滚动到选中的DOM节点
+  const domPos = domNodePositions.get(domPath);
+  if (domPos && canvas) {
+    const svgRect = canvas.getBoundingClientRect();
+    const targetY = domPos.y - svgRect.height / 2;
+    graphOffset.y = Math.max(0, -targetY);
+    renderGraph();
+    logger.info('picker', 'Scrolled to DOM node', { domPath, domPos, graphOffset });
+  }
+
   // 发送实线高亮请求（覆盖之前的虚线）
   if (typeof window.api?.highlightElement === 'function') {
     window.api.highlightElement(
@@ -146,6 +157,13 @@ export function initGraph(canvasEl) {
   svg.style.backgroundColor = '#1e1e1e';
   svg.style.cursor = 'grab';
   canvasEl.style.overflow = 'hidden';
+  canvasEl.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    const delta = e.deltaY;
+    const scaleChange = delta > 0 ? 0.9 : 1.1;
+    graphScale = Math.max(0.5, Math.min(2, graphScale * scaleChange));
+    renderGraph();
+  });
   canvasEl.appendChild(svg);
   canvas = svg;
 
@@ -349,8 +367,8 @@ export function renderGraph() {
     canvas.removeChild(canvas.firstChild);
   }
 
-  const mainGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
-  mainGroup.setAttribute('transform', `translate(${graphOffset.x + 10}, ${graphOffset.y + 10})`);
+ const mainGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+  mainGroup.setAttribute('transform', `translate(${graphOffset.x + 10}, ${graphOffset.y + 10}) scale(${graphScale})`);
 
   const domNodesMap = new Map();
   domNodePositions.clear();
