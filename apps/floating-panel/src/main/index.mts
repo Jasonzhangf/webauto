@@ -338,18 +338,18 @@ ipcMain.handle('window:close', async (_evt) => {
   }
 });
 
-ipcMain.handle('ui:action', async (_evt, { action, payload }) => {
+ipcMain.handle('ui:action', async (_evt, { action, payload, request_id }) => {
   try {
-    log(`UI action: ${action}`);
+    log(`UI action: ${action} requestId=${request_id || 'n/a'}`);
     const res = await fetch(`http://127.0.0.1:7701/v1/controller/action`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action, payload })
+      body: JSON.stringify({ action, payload, request_id })
     });
     return await res.json();
   } catch (e) {
     log(`UI action error: ${e}`);
-    return { success: false, error: String(e) };
+    return { success: false, error: String(e), request_id };
   }
 });
 

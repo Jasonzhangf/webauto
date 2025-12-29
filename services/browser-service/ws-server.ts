@@ -324,17 +324,23 @@ export class BrowserWsServer {
     }
 
     const sessionId = String(payload.session_id || '');
+    const requestId = String(payload.request_id || '');
     const command: CommandPayload = payload.data || {};
+
+    logDebug('browser-service', 'ws-command', { type: 'command', request_id: requestId, session_id: sessionId, data: command });
+
     try {
       const data = await this.dispatchCommand(sessionId, command);
       this.send(socket, {
         type: 'response',
+        request_id: requestId,
         session_id: sessionId,
         data,
       });
     } catch (err) {
       this.send(socket, {
         type: 'response',
+        request_id: requestId,
         session_id: sessionId,
         data: {
           success: false,
@@ -347,6 +353,19 @@ export class BrowserWsServer {
   private async dispatchCommand(sessionId: string, command: CommandPayload) {
     const type = command.command_type;
     switch (type) {
+      case 'browser_state':
+        return this.handleSessionControl(sessionId, {
+          ...command,
+          action: command.action || 'list',
+        });
+      case 'page_control':
+        return this.handlePageControl(sessionId, command);
+      case 'dom_operation':
+        return this.handleDomOperation(sessionId, command);
+      case 'user_action':
+        return this.handleUserAction(sessionId, command);
+      case 'highlight':
+        return this.handleHighlight(sessionId, command);
       case 'session_control':
         return this.handleSessionControl(sessionId, command);
       case 'mode_switch':
@@ -362,6 +381,91 @@ export class BrowserWsServer {
       default:
         throw new Error(`Unknown command_type: ${type}`);
     }
+  }
+
+  private async handlePageControl(sessionId: string, command: CommandPayload) {
+    const action = command.action;
+    const parameters = command.parameters || {};
+    if (!sessionId) throw new Error('session_id required');
+    const session = this.options.sessionManager.getSession(sessionId);
+    if (!session) {
+      return { success: false, error: `Session ${sessionId} not found` };
+    }
+
+    if (action === 'navigate') {
+      const url = parameters.url;
+      if (!url) throw new Error('navigate requires url');
+      await session.goto(url);
+      return { success: true, data: { action: 'navigated', url } };
+    }
+
+    if (action === 'screenshot') {
+      const filename = parameters.filename || `screenshot_${Date.now()}.png`;
+      const fullPage = parameters.full_page !== false;
+      const dir = path.resolve(process.cwd(), 'screenshots');
+      await fs.promises.mkdir(dir, { recursive: true });
+      const target = path.join(dir, filename);
+      const buffer = await session.screenshot(fullPage);
+      await fs.promises.writeFile(target, buffer);
+      return { success: true, data: { action: 'screenshot', screenshot_path: target, full_page: fullPage } };
+    }
+
+    throw new Error(`Unknown page_control action: ${action}`);
+  }
+
+  private async handleDomOperation(sessionId: string, command: CommandPayload) {
+    const action = command.action;
+    const parameters = command.parameters || {};
+    if (action === 'pick_dom') {
+      const session = this.options.sessionManager.getSession(sessionId);
+      if (!session) {
+        return { success: false, error: `Session ${sessionId} not found` };
+      }
+      return this.handleDomPick(session, parameters);
+    }
+    if (action === 'query') {
+      return this.handleNodeExecute(sessionId, { node_type: 'query', parameters });
+    }
+    throw new Error(`Unknown dom_operation action: ${action}`);
+  }
+
+  private async handleUserAction(sessionId: string, command: CommandPayload) {
+    const action = command.action;
+    const parameters = command.parameters || {};
+    if (action !== 'operation') {
+      throw new Error(`Unknown user_action action: ${action}`);
+    }
+    const op = parameters.operation_type;
+    if (!op) throw new Error('operation_type required');
+    if (op === 'click') {
+      return this.handleNodeExecute(sessionId, { node_type: 'click', parameters: parameters.target || parameters });
+    }
+    if (op === 'type') {
+      return this.handleNodeExecute(sessionId, { node_type: 'type', parameters: parameters.target || parameters });
+    }
+    if (op === 'scroll') {
+      const session = this.options.sessionManager.getSession(sessionId);
+      if (!session) {
+        return { success: false, error: `Session ${sessionId} not found` };
+      }
+      const page = await session.ensurePage();
+      const deltaY = Number(parameters.deltaY || parameters.delta_y || 0);
+      await page.mouse.wheel(0, deltaY);
+      return { success: true, data: { action: 'scroll', deltaY } };
+    }
+    throw new Error(`Unsupported operation_type: ${op}`);
+  }
+
+  private async handleHighlight(sessionId: string, command: CommandPayload) {
+    const action = command.action;
+    const parameters = command.parameters || {};
+    if (action === 'element') {
+      return this.handleDevCommand(sessionId, { action: 'highlight_element', parameters });
+    }
+    if (action === 'dom_path') {
+      return this.handleDevCommand(sessionId, { action: 'highlight_dom_path', parameters });
+    }
+    throw new Error(`Unknown highlight action: ${action}`);
   }
 
   private async handleSessionControl(sessionId: string, command: CommandPayload) {

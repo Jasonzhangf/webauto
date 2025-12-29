@@ -15,8 +15,9 @@ const api = {
     return ipcRenderer.invoke('health');
   },
   invokeAction: (action, payload) => {
-    console.log('[preload] invokeAction called:', action);
-    return ipcRenderer.invoke('ui:action', { action, payload });
+    const requestId = `req-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+    console.log('[preload] invokeAction called:', action, 'requestId:', requestId);
+    return ipcRenderer.invoke('ui:action', { action, payload, request_id: requestId });
   },
   minimize: () => {
     console.log('[preload] minimize() called');
