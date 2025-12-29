@@ -136,9 +136,16 @@
       if (!el) return null;
       try {
         const runtime = window.__webautoRuntime;
-        if (!runtime || !runtime.dom || !runtime.dom.buildPathForElement) return null;
-        return runtime.dom.buildPathForElement(el, rootSelector);
-      } catch {
+        if (!runtime || !runtime.dom || !runtime.dom.buildPathForElement) {
+          console.warn('[dom-picker] buildPathForElement missing');
+          return null;
+        }
+        console.debug('[dom-picker] extractPath rootSelector:', rootSelector);
+        const path = runtime.dom.buildPathForElement(el, rootSelector);
+        console.debug('[dom-picker] extractPath result:', path);
+        return path;
+      } catch (err) {
+        console.warn('[dom-picker] extractPath error', err);
         return null;
       }
     };
@@ -217,6 +224,7 @@
     };
 
     const finalize = (result) => {
+      console.debug('[dom-picker] finalize called', result);
       if (!active) return;
       active = false;
       if (timeoutToken) {
@@ -244,7 +252,9 @@
       }
       if (result && result.type === 'select' && result.element) {
         const el = result.element;
+        console.debug('[dom-picker] finalize select element', el);
         const path = extractPath(el);
+        console.debug('[dom-picker] finalize path', path);
         const selector = extractSelector(el);
         const rect = extractRect(el);
         const text = extractText(el);

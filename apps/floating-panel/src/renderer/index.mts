@@ -149,6 +149,8 @@ if (btnMinimize) {
 if (btnPicker) {
   btnPicker.addEventListener('click', async () => {
     log('Picker button clicked');
+    log('🔍 [DEBUG] currentProfile:', currentProfile);
+    log('🔍 [DEBUG] currentRootSelector:', currentRootSelector);
     try {
       // 设置按钮状态
       btnPicker.textContent = '捕获中...';
@@ -170,7 +172,7 @@ if (btnPicker) {
         mode: 'hover-select'
       });
       
-      log('Picker result:', result);
+      log('🔍 [DEBUG] Picker result:', result);
       
       // 恢复按钮状态
       btnPicker.textContent = '捕获元素';
