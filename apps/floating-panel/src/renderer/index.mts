@@ -5,7 +5,8 @@ import {
   mergeDomBranch, 
   renderGraph, 
   expandDomPath, 
-  markPathLoaded 
+  markPathLoaded,
+  handlePickerResult
 } from './graph.mjs';
 import { logger } from './logger.mts';
 
@@ -30,6 +31,8 @@ function debugLog(module: string, action: string, data: any) {
     (window as any).api.debugLog(module, action, data).catch(() => {});
   }
 }
+
+let currentProfile: string | null = null;
 
 if (dragArea) {
   log('drag-area found, enabling drag');
@@ -90,6 +93,7 @@ if (!(window as any).api) {
         
         // 3. 更新 DOM 树
         const profile = data.profileId;
+        currentProfile = profile;
         if (!profile) {
           log('Missing profile in containers.matched payload');
           return;
@@ -127,6 +131,7 @@ if (canvas) {
 // 绑定窗口控制按钮
 const btnMinimize = document.getElementById('btnMinimize');
 const btnClose = document.getElementById('btnClose');
+const btnPicker = document.getElementById('btnPicker');
 
 if (btnMinimize) {
   btnMinimize.addEventListener('click', () => {
@@ -135,6 +140,54 @@ if (btnMinimize) {
       (window as any).api.minimize().catch((err: any) => {
         log('Minimize failed:', err);
       });
+    }
+  });
+}
+
+if (btnPicker) {
+  btnPicker.addEventListener('click', async () => {
+    log('Picker button clicked');
+    try {
+      // 设置按钮状态
+      btnPicker.textContent = '捕获中...';
+      btnPicker.style.background = '#e5b507';
+      btnPicker.style.color = '#000';
+
+      if (!currentProfile) {
+        log('Error: No profile set. Please connect to a page first.');
+        btnPicker.textContent = '捕获元素';
+        btnPicker.style.background = '';
+        btnPicker.style.color = '';
+        return;
+      }
+
+      const result = await (window.api as any).invokeAction('browser:pick-dom', {
+        profile: currentProfile,
+        timeout: 60000,
+        mode: 'hover-select'
+      });
+      
+      log('Picker result:', result);
+      
+      // 恢复按钮状态
+      btnPicker.textContent = '捕获元素';
+      btnPicker.style.background = '';
+      btnPicker.style.color = '';
+
+      if (result.success && result.data) {
+        // 处理选中结果
+        const { domPath, selector } = result.data;
+        if (domPath) {
+          handlePickerResult(domPath);
+        } else if (selector) {
+          log('Picker returned selector but no domPath:', selector);
+        }
+      }
+    } catch (err) {
+      log('Picker failed:', err);
+      btnPicker.textContent = '捕获元素';
+      btnPicker.style.background = '';
+      btnPicker.style.color = '';
     }
   });
 }
