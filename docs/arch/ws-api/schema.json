@@ -5,7 +5,9 @@
   "oneOf": [
     { "$ref": "#/definitions/command" },
     { "$ref": "#/definitions/response" },
-    { "$ref": "#/definitions/event" }
+    { "$ref": "#/definitions/event" },
+    { "$ref": "#/definitions/subscribe" },
+    { "$ref": "#/definitions/unsubscribe" }
   ],
   "definitions": {
     "command": {
@@ -60,6 +62,44 @@
         "data": { "type": "object" }
       },
       "additionalProperties": true
+    },
+    "subscribe": {
+      "type": "object",
+      "required": ["type", "request_id", "session_id", "data"],
+      "properties": {
+        "type": { "const": "subscribe" },
+        "request_id": { "type": "string" },
+        "session_id": { "type": "string" },
+        "data": {
+          "type": "object",
+          "required": ["topics"],
+          "properties": {
+            "topics": {
+              "type": "array",
+              "items": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+    "unsubscribe": {
+      "type": "object",
+      "required": ["type", "request_id", "session_id", "data"],
+      "properties": {
+        "type": { "const": "unsubscribe" },
+        "request_id": { "type": "string" },
+        "session_id": { "type": "string" },
+        "data": {
+          "type": "object",
+          "required": ["topics"],
+          "properties": {
+            "topics": {
+              "type": "array",
+              "items": { "type": "string" }
+            }
+          }
+        }
+      }
     }
   }
 }

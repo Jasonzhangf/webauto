@@ -44,6 +44,8 @@ export class BrowserWsServer {
   private wss?: WebSocketServer;
   private matcher = new ContainerMatcher();
   private capabilityMap = new Map<string, string[]>();
+  private subscriptions = new Map<WebSocket, Set<string>>();
+  private sessionSubscribers = new Map<string, Set<WebSocket>>();
 
   constructor(private options: WsServerOptions) {}
 
@@ -53,7 +55,11 @@ export class BrowserWsServer {
     const port = Number(this.options.port || 8765);
     this.wss = new WebSocketServer({ host, port });
     this.wss.on('connection', (socket) => {
+      this.subscriptions.set(socket, new Set());
       socket.on('message', (data) => this.handleMessage(socket, data));
+      socket.on('close', () => {
+        this.handleSocketClose(socket);
+      });
     });
     this.wss.on('listening', () => {
       console.log(`[browser-ws] listening on ws://${host}:${port}`);
@@ -315,6 +321,15 @@ export class BrowserWsServer {
 
     logDebug('browser-service', 'wsMessage', { payload });
 
+    if (payload?.type === 'subscribe') {
+      await this.handleSubscribe(socket, payload);
+      return;
+    }
+    if (payload?.type === 'unsubscribe') {
+      await this.handleUnsubscribe(socket, payload);
+      return;
+    }
+
     if (payload?.type !== 'command') {
       this.send(socket, {
         type: 'error',
@@ -331,14 +346,16 @@ export class BrowserWsServer {
 
     try {
       const data = await this.dispatchCommand(sessionId, command);
-      this.send(socket, {
+      const response = {
         type: 'response',
         request_id: requestId,
         session_id: sessionId,
         data,
-      });
+      };
+      logDebug('browser-service', 'wsResponse', { response });
+      this.send(socket, response);
     } catch (err) {
-      this.send(socket, {
+      const errorResponse = {
         type: 'response',
         request_id: requestId,
         session_id: sessionId,
@@ -346,7 +363,9 @@ export class BrowserWsServer {
           success: false,
           error: (err as Error).message,
         },
-      });
+      };
+      logDebug('browser-service', 'wsError', { errorResponse });
+      this.send(socket, errorResponse);
     }
   }
 
@@ -381,6 +400,101 @@ export class BrowserWsServer {
       default:
         throw new Error(`Unknown command_type: ${type}`);
     }
+  }
+
+  private async handleSubscribe(socket: WebSocket, payload: any) {
+    const requestId = String(payload.request_id || '');
+    const sessionId = String(payload.session_id || '');
+    const topics: string[] = Array.isArray(payload.data?.topics) ? payload.data.topics : [];
+
+    if (!sessionId) {
+      this.send(socket, {
+        type: 'error',
+        request_id: requestId,
+        message: 'session_id required for subscribe',
+      });
+      return;
+    }
+
+    const clientTopics = this.subscriptions.get(socket) || new Set();
+    const sessionClients = this.sessionSubscribers.get(sessionId) || new Set();
+
+    topics.forEach((topic) => {
+      clientTopics.add(topic);
+      sessionClients.add(socket);
+    });
+
+    this.subscriptions.set(socket, clientTopics);
+    this.sessionSubscribers.set(sessionId, sessionClients);
+
+    this.send(socket, {
+      type: 'response',
+      request_id: requestId,
+      session_id: sessionId,
+      data: { success: true, subscribed: topics },
+    });
+  }
+
+  private async handleUnsubscribe(socket: WebSocket, payload: any) {
+    const requestId = String(payload.request_id || '');
+    const sessionId = String(payload.session_id || '');
+    const topics: string[] = Array.isArray(payload.data?.topics) ? payload.data.topics : [];
+
+    const clientTopics = this.subscriptions.get(socket);
+    if (!clientTopics) {
+      this.send(socket, {
+        type: 'response',
+        request_id: requestId,
+        session_id: sessionId,
+        data: { success: true, unsubscribed: [] },
+      });
+      return;
+    }
+
+    topics.forEach((topic) => clientTopics.delete(topic));
+    if (clientTopics.size === 0) {
+      this.subscriptions.delete(socket);
+    }
+
+    this.send(socket, {
+      type: 'response',
+      request_id: requestId,
+      session_id: sessionId,
+      data: { success: true, unsubscribed: topics },
+    });
+  }
+
+  private handleSocketClose(socket: WebSocket) {
+    this.subscriptions.delete(socket);
+    for (const [sessionId, clients] of this.sessionSubscribers.entries()) {
+      clients.delete(socket);
+      if (clients.size === 0) {
+        this.sessionSubscribers.delete(sessionId);
+      }
+    }
+  }
+
+  private broadcastEvent(topic: string, sessionId: string, data: any) {
+    const clients = this.sessionSubscribers.get(sessionId);
+    if (!clients) return;
+
+    const payload = {
+      type: 'event',
+      topic,
+      session_id: sessionId,
+      data,
+    };
+
+    clients.forEach((socket) => {
+      const clientTopics = this.subscriptions.get(socket);
+      if (clientTopics?.has(topic)) {
+        try {
+          socket.send(JSON.stringify(payload));
+        } catch (err) {
+          console.warn('[browser-ws] failed to broadcast event:', err);
+        }
+      }
+    });
   }
 
   private async handlePageControl(sessionId: string, command: CommandPayload) {
@@ -424,9 +538,94 @@ export class BrowserWsServer {
       return this.handleDomPick(session, parameters);
     }
     if (action === 'query') {
-      return this.handleNodeExecute(sessionId, { node_type: 'query', parameters });
+      return this.handleNodeExecute(sessionId, { command_type: 'node_execute', node_type: 'query', parameters });
+    }
+    if (action === 'dom_full') {
+      return this.handleDomFull(sessionId, parameters);
+    }
+    if (action === 'dom_branch') {
+      return this.handleDomBranch(sessionId, parameters);
     }
     throw new Error(`Unknown dom_operation action: ${action}`);
+  }
+
+  private async handleDomFull(sessionId: string, parameters: Record<string, any>) {
+    const session = this.options.sessionManager.getSession(sessionId);
+    if (!session) {
+      return { success: false, error: 'Session ' + sessionId + ' not found' };
+    }
+
+    const page = await session.ensurePage();
+    const rootSelector = parameters.root_selector || parameters.rootSelector || null;
+    const maxDepth = Number(parameters.max_depth || parameters.maxDepth || 8);
+
+    await ensurePageRuntime(page);
+
+    const domTree = await page.evaluate((config) => {
+      const runtime: any = (window as any).__webautoRuntime;
+      if (!runtime?.getDomBranch) {
+        throw new Error('runtime.getDomBranch unavailable');
+      }
+      return runtime.getDomBranch('root', {
+        rootSelector: config.rootSelector,
+        maxDepth: config.maxDepth,
+        maxChildren: 100,
+      });
+    }, { rootSelector, maxDepth });
+
+    const node = domTree.node || {};
+    const nodeCount = node.childCount || 0;
+
+    this.broadcastEvent('dom.updated', sessionId, {
+      root_path: domTree.path || 'root',
+      node_count: nodeCount,
+    });
+
+    return {
+      success: true,
+      data: {
+        root_path: domTree.path || 'root',
+        node_count: nodeCount,
+        snapshot: node,
+      },
+    };
+  }
+
+  private async handleDomBranch(sessionId: string, parameters: Record<string, any>) {
+    const session = this.options.sessionManager.getSession(sessionId);
+    if (!session) {
+      return { success: false, error: 'Session ' + sessionId + ' not found' };
+    }
+
+    const page = await session.ensurePage();
+    const domPath = String(parameters.dom_path || parameters.domPath || '');
+    const depth = Number(parameters.depth || 3);
+    const rootSelector = parameters.root_selector || parameters.rootSelector || null;
+
+    await ensurePageRuntime(page);
+
+    const snapshot = await page.evaluate((config) => {
+      const runtime: any = (window as any).__webautoRuntime;
+      if (!runtime?.getDomBranch) {
+        throw new Error('runtime.getDomBranch unavailable');
+      }
+      return runtime.getDomBranch(config.domPath, {
+        rootSelector: config.rootSelector,
+        maxDepth: config.depth,
+        maxChildren: 100,
+      });
+    }, { domPath, depth, rootSelector });
+
+    const node = snapshot.node || {};
+
+    return {
+      success: true,
+      data: {
+        path: snapshot.path || domPath,
+        node_count: node.childCount || 0,
+        children: node.children || [],
+      },
+    };
   }
 
   private async handleUserAction(sessionId: string, command: CommandPayload) {
@@ -437,33 +636,116 @@ export class BrowserWsServer {
     }
     const op = parameters.operation_type;
     if (!op) throw new Error('operation_type required');
-    if (op === 'click') {
-      return this.handleNodeExecute(sessionId, { node_type: 'click', parameters: parameters.target || parameters });
-    }
-    if (op === 'type') {
-      return this.handleNodeExecute(sessionId, { node_type: 'type', parameters: parameters.target || parameters });
-    }
-    if (op === 'scroll') {
-      const session = this.options.sessionManager.getSession(sessionId);
-      if (!session) {
-        return { success: false, error: `Session ${sessionId} not found` };
-      }
-      const page = await session.ensurePage();
-      const deltaY = Number(parameters.deltaY || parameters.delta_y || 0);
-      await page.mouse.wheel(0, deltaY);
-      return { success: true, data: { action: 'scroll', deltaY } };
-    }
-    throw new Error(`Unsupported operation_type: ${op}`);
-  }
+   if (op === 'click') {
+     return this.handleNodeExecute(sessionId, { command_type: 'node_execute', node_type: 'click', parameters: parameters.target || parameters });
+   }
+   if (op === 'type') {
+     return this.handleNodeExecute(sessionId, { command_type: 'node_execute', node_type: 'type', parameters: parameters.target || parameters });
+   }
+   if (op === 'scroll') {
+     const session = this.options.sessionManager.getSession(sessionId);
+     if (!session) {
+       return { success: false, error: `Session ${sessionId} not found` };
+     }
+     const page = await session.ensurePage();
+     const deltaY = Number(parameters.deltaY || parameters.delta_y || 0);
+     await page.mouse.wheel(0, deltaY);
+     this.broadcastEvent('user_action.completed', sessionId, {
+       action: 'scroll',
+       target: '',
+       duration_ms: 0,
+       deltaY,
+     });
+     return { success: true, data: { action: 'scroll', deltaY } };
+   }
+   if (op === 'move' || op === 'down' || op === 'up' || op === 'key') {
+     return this.handleExtendedUserAction(sessionId, op, parameters.target || {}, parameters);
+   }
+   throw new Error(`Unsupported operation_type: ${op}`);
+ }
+
+ private async handleExtendedUserAction(sessionId: string, opType: string, target: any, params: Record<string, any>) {
+   const session = this.options.sessionManager.getSession(sessionId);
+   if (!session) {
+     return { success: false, error: 'Session ' + sessionId + ' not found' };
+   }
+
+   const page = await session.ensurePage();
+   const startedAt = Date.now();
+
+   const offset = target.offset || { x: 0, y: 0 };
+   const domPath = target.dom_path || null;
+   const selector = target.selector || null;
+
+   let coords = null;
+
+   if (domPath) {
+     await ensurePageRuntime(page);
+     const result = await page.evaluate((config) => {
+       const runtime: any = (window as any).__webautoRuntime;
+       if (!runtime?.dom?.resolveByPath) return null;
+       const el = runtime.dom.resolveByPath(config.path, config.rootSelector);
+       if (!el) return null;
+       const rect = el.getBoundingClientRect();
+       return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+     }, { path: domPath, rootSelector: null });
+     if (result) {
+       coords = { x: result.x + offset.x, y: result.y + offset.y };
+     }
+   } else if (selector) {
+     const element = await page.$(selector);
+     if (element) {
+       const box = await element.boundingBox();
+       if (box) {
+         coords = { x: box.x + box.width / 2 + offset.x, y: box.y + box.height / 2 + offset.y };
+       }
+     }
+   }
+
+   if (opType === 'move') {
+     if (coords) {
+       await page.mouse.move(coords.x, coords.y);
+     }
+   } else if (opType === 'down') {
+     if (coords) {
+       await page.mouse.move(coords.x, coords.y);
+       await page.mouse.down();
+     }
+   } else if (opType === 'up') {
+     await page.mouse.up();
+   } else if (opType === 'key') {
+     const key = params.key || '';
+     if (key) {
+       await page.keyboard.press(key);
+     }
+   }
+
+   const duration = Date.now() - startedAt;
+   this.broadcastEvent('user_action.completed', sessionId, {
+     action: opType,
+     target: domPath || selector || '',
+     duration_ms: duration,
+     ...(coords ? { x: coords.x, y: coords.y } : {}),
+   });
+
+   return {
+     success: true,
+     data: {
+       action: opType,
+       target: domPath || selector || '',
+       duration_ms: duration,
+     },
+   };
+ }
 
   private async handleHighlight(sessionId: string, command: CommandPayload) {
     const action = command.action;
     const parameters = command.parameters || {};
     if (action === 'element') {
-      return this.handleDevCommand(sessionId, { action: 'highlight_element', parameters });
+      return this.handleDevCommand(sessionId, { command_type: 'dev_command', action: 'highlight_element', parameters });
     }
     if (action === 'dom_path') {
-      return this.handleDevCommand(sessionId, { action: 'highlight_dom_path', parameters });
+      return this.handleDevCommand(sessionId, { command_type: 'dev_command', action: 'highlight_dom_path', parameters });
     }
     throw new Error(`Unknown highlight action: ${action}`);
   }

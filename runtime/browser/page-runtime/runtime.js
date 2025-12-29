@@ -858,7 +858,9 @@
         getBranch: getDomBranch,
         getNodeDetails,
         buildPathForElement: domUtils.buildPathForElement,
+        resolveByPath: domUtils.resolveByPath,
       },
+      getDomBranch,
       ping() {
         return { ts: Date.now(), href: window.location.href };
       },
