@@ -650,7 +650,38 @@ function renderContainerNode(parent, node, x, y, depth, domNodesMap) {
           
           if (result.success) {
             logger.info('picker', 'Container created', result.data);
-            // 本地立即更新容器树，避免等待异步匹配结果
+
+            // 优先使用后端返回的 snapshot 刷新容器树和 DOM 树
+            const snapshot = result.data?.snapshot || result.data?.containerSnapshot || null;
+            if (snapshot && snapshot.container_tree && snapshot.dom_tree) {
+              try {
+                logger.info('picker', 'Refreshing graph from snapshot', {
+                  rootId: snapshot.container_tree.id,
+                  profileId: result.data.profileId,
+                  url: result.data.url,
+                });
+                updateContainerTree(snapshot.container_tree);
+                const meta = snapshot.metadata || {};
+                updateDomTree(
+                  snapshot.dom_tree,
+                  {
+                    profile: result.data.profileId || currentProfile,
+                    page_url: result.data.url,
+                    root_selector: meta.root_selector || meta.rootSelector || null,
+                  },
+                  { deferRender: false }
+                );
+                selectedContainer = containerId;
+                suggestedNode = null;
+                return;
+              } catch (err) {
+                logger.warn('picker', 'Failed to refresh graph from snapshot, fallback to local patch', {
+                  error: err?.message || String(err),
+                });
+              }
+            }
+
+            // 如果 snapshot 不可用，则本地立即更新容器树，避免等待异步匹配结果
             if (containerData && suggestedNode && suggestedNode.parentId) {
               const parentNode = findContainerById(containerData, suggestedNode.parentId);
               if (parentNode) {
@@ -681,6 +712,7 @@ function renderContainerNode(parent, node, x, y, depth, domNodesMap) {
                 renderGraph();
               }
             }
+
             suggestedNode = null; // 清除建议提示
             // 刷新容器树？后端应该会推送更新，或者我们需要手动刷新
             // 这里假设后端推送 'containers.matched' 或类似事件会刷新 UI
