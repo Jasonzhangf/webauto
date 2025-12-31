@@ -124,7 +124,7 @@ if (!(window as any).api) {
           preloadDomPaths(matchedDomPaths, 'containers.matched');
         }
         
-        // 3. 更新 DOM 树
+        // 3. 更新 DOM 树（延迟渲染，等待关键 DOM path 准备好）
         const profile = data.profileId;
         currentProfile = profile;
         if (!profile) {
@@ -134,8 +134,12 @@ if (!(window as any).api) {
         const url = data.url;
         const rootSelector = snapshot?.metadata?.root_selector || null;
         currentRootSelector = rootSelector;
-        updateDomTree(snapshot.dom_tree, { profile, page_url: url, root_selector: rootSelector });
-        
+        updateDomTree(snapshot.dom_tree, { profile, page_url: url, root_selector: rootSelector }, { deferRender: true });
+
+        if (matchedDomPaths.size > 0) {
+          await preloadDomPaths(matchedDomPaths, 'containers.matched', { wait: true });
+        }
+
         // 4. 渲染
         renderGraph();
         

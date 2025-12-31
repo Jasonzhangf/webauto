@@ -98,6 +98,20 @@ export async function handlePickerResult(domPath, selector = null) {
 
   const nearestContainer = findNearestContainer(domPath);
   if (nearestContainer) {
+    const siblingPaths = new Set();
+    if (Array.isArray(nearestContainer.children)) {
+      nearestContainer.children.forEach(child => {
+        if (child?.match?.nodes) {
+          child.match.nodes.forEach((n) => {
+            if (n?.dom_path) siblingPaths.add(n.dom_path);
+          });
+        }
+      });
+    }
+    if (siblingPaths.size) {
+      preloadDomPaths(siblingPaths, 'container-children');
+    }
+
     suggestedNode = {
       parentId: nearestContainer.id,
       domPath,
@@ -343,7 +357,7 @@ async function fetchAndMergeDomBranch(targetPath, { depth, maxChildren, label })
   }
 }
 
-export function updateDomTree(data, metadata = {}) {
+export function updateDomTree(data, metadata = {}, options = {}) {
   if (!canvas) return;
   domData = data;
   domNodePositions.clear();
@@ -356,7 +370,9 @@ export function updateDomTree(data, metadata = {}) {
   loadedPaths.add('root');
 
   // Don't expand all DOM nodes - expand based on visibility only
-  renderGraph();
+  if (!options?.deferRender) {
+    renderGraph();
+  }
 }
 
 function expandAllContainers(node) {
@@ -1161,9 +1177,17 @@ function queueDomPathPreload(path, reason = 'manual') {
   return task;
 }
 
-export function preloadDomPaths(paths, reason = 'bulk') {
-  if (!paths) return;
-  for (const path of paths) {
-    queueDomPathPreload(path, reason);
+export function preloadDomPaths(paths, reason = 'bulk', options = {}) {
+  if (!paths) {
+    return Promise.resolve();
   }
+  const tasks = [];
+  for (const path of paths) {
+    const task = queueDomPathPreload(path, reason);
+    if (task) tasks.push(task);
+  }
+  if (options?.wait && tasks.length) {
+    return Promise.allSettled(tasks).then(() => undefined);
+  }
+  return Promise.resolve();
 }
