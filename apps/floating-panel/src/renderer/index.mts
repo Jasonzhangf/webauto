@@ -6,7 +6,9 @@ import {
   renderGraph, 
   expandDomPath, 
   markPathLoaded,
-  handlePickerResult
+  handlePickerResult,
+  updatePageContext,
+  preloadDomPaths
 } from './graph.mjs';
 import { logger } from './logger.mts';
 
@@ -17,11 +19,31 @@ const log = (...args: any[]) => {
 const statusEl = document.getElementById('status');
 const healthEl = document.getElementById('health');
 const dragArea = document.getElementById('drag-area');
+const loadingIndicator = document.getElementById('loadingIndicator');
+const loadingLabel = loadingIndicator?.querySelector('.loading-label') as HTMLElement | null;
 
 function setStatus(text: string, ok: boolean) {
   if (statusEl) {
     statusEl.textContent = text;
     statusEl.style.color = ok ? '#4CAF50' : '#f44336';
+  }
+}
+
+function setLoadingState(pending: number, detail?: Record<string, any>) {
+  if (!loadingIndicator) return;
+  if (pending > 0) {
+    loadingIndicator.classList.add('active');
+    if (loadingLabel) {
+      const reason = typeof detail?.reason === 'string' ? detail.reason : '加载中';
+      const friendly = reason.replace(/[_-]/g, ' ').trim() || '加载中';
+      const suffix = pending > 1 ? ` (${pending})` : '';
+      loadingLabel.textContent = `${friendly}${suffix}`;
+    }
+  } else {
+    loadingIndicator.classList.remove('active');
+    if (loadingLabel) {
+      loadingLabel.textContent = '加载中...';
+    }
   }
 }
 
@@ -38,6 +60,12 @@ let currentRootSelector: string | null = null;
 if (dragArea) {
   log('drag-area found, enabling drag');
 }
+
+window.addEventListener('webauto:graph-loading', ((evt: Event) => {
+  const detail = (evt as CustomEvent<any>).detail || {};
+  const pending = Number(detail.pending || 0);
+  setLoadingState(pending, detail);
+}) as EventListener);
 
 if (!(window as any).api) {
   log('fatal: window.api missing from preload');
@@ -91,6 +119,10 @@ if (!(window as any).api) {
           expandDomPath(path);
           log('已展开路径:', path);
         });
+
+        if (matchedDomPaths.size > 0) {
+          preloadDomPaths(matchedDomPaths, 'containers.matched');
+        }
         
         // 3. 更新 DOM 树
         const profile = data.profileId;
@@ -115,9 +147,27 @@ if (!(window as any).api) {
       log('收到 ui.domPicker.result 事件');
       const data = msg.payload;
       if (data?.success && data?.domPath) {
-        handlePickerResult(data.domPath);
+        handlePickerResult(data.domPath, data.selector || null);
       } else {
         log('domPicker result missing domPath:', data);
+      }
+    }
+
+    if (msg.topic === 'handshake.status') {
+      const payload = msg.payload;
+      if (payload?.profileId) {
+        currentProfile = payload.profileId;
+      }
+      updatePageContext({
+        profile: payload?.profileId,
+        url: payload?.url,
+      });
+    }
+
+    if (msg.topic === 'browser.runtime.event' || (msg.topic?.startsWith && msg.topic.startsWith('browser.runtime.'))) {
+      const payload = msg.payload;
+      if (payload?.pageUrl) {
+        updatePageContext({ url: payload.pageUrl });
       }
     }
   });
@@ -193,7 +243,7 @@ if (btnPicker) {
         // 处理选中结果
         const { dom_path: domPath, selector } = result.data;
         if (domPath) {
-          handlePickerResult(domPath);
+          handlePickerResult(domPath, selector || null);
         } else {
           log('Picker returned selector but no domPath:', selector);
         }

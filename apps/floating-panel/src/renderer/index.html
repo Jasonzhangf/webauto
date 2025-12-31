@@ -17,6 +17,30 @@
     #top-bar { padding: 6px; background: #252526; border-bottom: 1px solid #3e3e3e; display: flex; gap: 6px; align-items: center; }
     #health { flex: 1; font-size: 11px; }
     #mode { font-size: 10px; color: #888; }
+    .loading-indicator {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      font-size: 10px;
+      color: #e5b507;
+      visibility: hidden;
+      min-width: 90px;
+    }
+    .loading-indicator.active {
+      visibility: visible;
+    }
+    .loading-indicator .spinner {
+      width: 10px;
+      height: 10px;
+      border: 2px solid rgba(229, 181, 7, 0.4);
+      border-top-color: #e5b507;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+    @keyframes spin {
+      from { transform: rotate(0deg); }
+      to { transform: rotate(360deg); }
+    }
     button { padding: 3px 8px; font-size: 11px; background: #3c3c3c; border: 1px solid #555; color: #ccc; border-radius: 2px; cursor: pointer; -webkit-app-region: no-drag; }
    button:hover { background: #4a4a4a; }
     .window-controls { display: flex; gap: 4px; }
@@ -159,6 +183,10 @@
     <div id="top-bar">
       <div id="health">未连接</div>
       <div id="mode"></div>
+      <div id="loadingIndicator" class="loading-indicator">
+        <div class="spinner"></div>
+        <span class="loading-label">加载中...</span>
+      </div>
       <button id="btnHealth">健康检查</button>
       <button id="btnClear">清除日志</button>
       <button id="btnDiag">诊断</button>

@@ -13,6 +13,9 @@ let selectedDom = null;
 const domNodePositions = new Map();
 const containerNodePositions = new Map();
 const selectorMap = new Map();
+const pendingDomPathPreloads = new Map();
+const loadingState = { pending: 0 };
+const domPathLoadTasks = new Map();
 
 // 按需拉取 DOM 分支所需的状态
 const loadedPaths = new Set(['root']); // 初始只有 root 被加载
@@ -20,60 +23,90 @@ let currentProfile = null;
 let currentUrl = null;
 let isLoadingBranch = false;
 let currentRootSelector = null;
-let suggestedNode = null; // { parentId, domPath, tempId }
+let suggestedNode = null; // { parentId, domPath, selector, name }
 
-export async function handlePickerResult(domPath) {
+function updateLoadingState(delta, meta = {}) {
+  loadingState.pending = Math.max(0, loadingState.pending + delta);
+  const detail = {
+    pending: loadingState.pending,
+    ts: Date.now(),
+    ...meta,
+  };
+  try {
+    window.dispatchEvent(new CustomEvent('webauto:graph-loading', { detail }));
+  } catch {}
+  if (window.DEBUG === '1') {
+    console.log('[graph-loading]', detail);
+  }
+}
+
+export function updatePageContext(metadata = {}) {
+  if (metadata.profile) {
+    currentProfile = metadata.profile;
+  }
+  if (metadata.page_url || metadata.url) {
+    currentUrl = metadata.page_url || metadata.url;
+  }
+  if (metadata.root_selector) {
+    currentRootSelector = metadata.root_selector;
+  }
+}
+
+export async function handlePickerResult(domPath, selector = null) {
   if (!domPath) return;
+  console.log('[handlePickerResult] domPath:', domPath);
   logger.info('picker', 'Received DOM path', domPath);
-  
-  // 1. 确保DOM路径完整加载
-  await ensureDomPathLoaded(domPath);
 
-  // 2. 展开并高亮 DOM 树中的节点
-  await expandDomPath(domPath);
-  selectedDom = domPath; // 选中该 DOM 节点
-  // 先渲染一次以计算节点位置
+  // 找到最近已有节点，跳过中间层加载
+  const ancestor = findNearestExistingPath(domPath);
+  if (!findDomNodeByPath(domData, domPath)) {
+    updateLoadingState(1, { reason: 'picker', path: domPath, ancestor });
+    try {
+      if (ancestor && ancestor !== domPath) {
+        await fetchAndMergeDomBranch(ancestor, { depth: 4, maxChildren: 20, label: 'picker-ancestor' });
+      }
+      if (!findDomNodeByPath(domData, domPath)) {
+        await fetchAndMergeDomBranch(domPath, { depth: 3, maxChildren: 8, label: 'picker-target' });
+      }
+    } finally {
+      updateLoadingState(-1, { reason: 'picker', path: domPath });
+    }
+  }
+
+  expandDomPath(domPath);
+  selectedDom = domPath;
   renderGraph();
- 
-  // 自动滚动到选中的DOM节点
+
   const domPos = domNodePositions.get(domPath);
   if (domPos && canvas) {
     const svgRect = canvas.getBoundingClientRect();
     const targetY = domPos.y - svgRect.height / 2;
     graphOffset.y = Math.max(0, -targetY);
     renderGraph();
-    logger.info('picker', 'Scrolled to DOM node', { domPath, domPos, graphOffset });
   }
 
-  // 发送实线高亮请求（覆盖之前的虚线）
   if (typeof window.api?.highlightElement === 'function') {
     window.api.highlightElement(
       domPath,
-      '#fbbc05', // 橙色（IPC层会添加 2px solid）
-      { channel: 'dom', rootSelector: currentRootSelector, sticky: true },
-      { profile: currentProfile, url: currentUrl }
+      '#fbbc05',
+      { channel: 'dom', rootSelector: currentRootSelector, sticky: true, url: currentUrl },
+      currentProfile
     ).catch(err => {
       logger.error('picker', 'Failed to highlight picked element', err);
     });
   }
-  
-  // 3. 在容器树中找到最近的父容器
+
   const nearestContainer = findNearestContainer(domPath);
   if (nearestContainer) {
-    logger.info('picker', 'Found nearest container', nearestContainer.id);
-    
-    // 4. 创建建议节点
     suggestedNode = {
       parentId: nearestContainer.id,
-      domPath: domPath,
-      tempId: `suggest-${Date.now()}`
+      domPath,
+      selector: selector,
+      name: nearestContainer.name ? `${nearestContainer.name}-child` : '新增容器',
     };
-    
-    // 5. 展开到容器节点的路径
     expandPathToNode(containerData, nearestContainer.id);
-    
     renderGraph();
-    logger.info('picker', 'Suggested node created', { suggestedNode });
+    logger.info('picker', 'Suggested node ready', { suggestedNode });
   } else {
     logger.warn('picker', 'No suitable parent container found for', domPath);
   }
@@ -81,28 +114,42 @@ export async function handlePickerResult(domPath) {
 
 // 确保DOM路径完整加载
 async function ensureDomPathLoaded(path) {
-  if (!path || !currentProfile || !currentUrl) return;
+  if (!path || path === 'root' || !currentProfile || !currentUrl) return;
+  if (findDomNodeByPath(domData, path)) return;
+  if (domPathLoadTasks.has(path)) {
+    return domPathLoadTasks.get(path);
+  }
+
+  const task = (async () => {
+    console.log('[ensureDomPathLoaded] Loading path:', path);
+    const ancestor = findNearestExistingPath(path);
+    if (ancestor && ancestor !== 'root' && ancestor !== path) {
+      await fetchAndMergeDomBranch(ancestor, { depth: 6, maxChildren: 20, label: 'ancestor' });
+    }
+    if (!findDomNodeByPath(domData, path)) {
+      await fetchAndMergeDomBranch(path, { depth: 4, maxChildren: 12, label: 'direct' });
+    }
+  })();
+
+  domPathLoadTasks.set(path, task);
+  try {
+    await task;
+  } finally {
+    domPathLoadTasks.delete(path);
+  }
+}
+
+function findNearestExistingPath(path) {
+  if (!path || !domData) return null;
   const parts = path.split('/');
-  if (parts.length <= 1) return;
-  for (let i = 1; i < parts.length; i++) {
-    const partialPath = parts.slice(0, i + 1).join('/');
-    if (!loadedPaths.has(partialPath)) {
-      try {
-        const result = await window.api.invokeAction('dom:branch:2', {
-          profile: currentProfile,
-          path: partialPath,
-          depth: 2,
-          maxChildren: 10
-        });
-        if (result.success && result.data?.node) {
-          mergeDomBranch(result.data.node);
-          loadedPaths.add(partialPath);
-        }
-      } catch (err) {
-        logger.error('ensureDomPathLoaded', 'Failed to load branch', { path: partialPath, error: err.message });
-      }
+  while (parts.length > 1) {
+    parts.pop();
+    const candidate = parts.join('/');
+    if (candidate && findDomNodeByPath(domData, candidate)) {
+      return candidate;
     }
   }
+  return 'root';
 }
 
 // 展开路径到指定节点
@@ -160,7 +207,7 @@ function findNearestContainer(domPath) {
   if (!bestMatch && containerData) {
     return containerData;
   }
-  
+
   return bestMatch;
 }
 
@@ -284,21 +331,25 @@ function expandMatchedContainers(node) {
   }
 }
 
+async function fetchAndMergeDomBranch(targetPath, { depth, maxChildren, label }) {
+  if (!targetPath || !currentProfile || !currentUrl) return;
+  console.log('[fetchAndMergeDomBranch] loading', targetPath, label);
+  const branch = await fetchDomBranch(targetPath, depth, maxChildren);
+  if (branch && mergeDomBranch(branch)) {
+    loadedPaths.add(branch.path || targetPath);
+    console.log('[fetchAndMergeDomBranch] merged', branch.path || targetPath, label);
+  } else {
+    logger.warn('fetchAndMergeDomBranch', 'Failed to merge branch', { targetPath, label });
+  }
+}
+
 export function updateDomTree(data, metadata = {}) {
   if (!canvas) return;
   domData = data;
   domNodePositions.clear();
 
   // 提取会话信息用于按需拉取
-  if (metadata.profile) {
-    currentProfile = metadata.profile;
-  }
-  if (metadata.page_url) {
-    currentUrl = metadata.page_url;
-  }
-  if (metadata.root_selector) {
-    currentRootSelector = metadata.root_selector;
-  }
+  updatePageContext(metadata);
 
   // 重置已加载路径（新的 DOM 树）
   loadedPaths.clear();
@@ -387,13 +438,17 @@ function findDomNodeByPath(root, targetPath) {
 export function mergeDomBranch(branchNode) {
   if (!branchNode || !domData) return false;
 
+  console.log('[mergeDomBranch] Looking for path:', branchNode.path);
   const targetNode = findDomNodeByPath(domData, branchNode.path);
+  console.log('[mergeDomBranch] Found target node?', Boolean(targetNode));
   if (!targetNode) {
     console.warn('[mergeDomBranch] Cannot find target node for path:', branchNode.path);
     return false;
   }
 
   // 合并子节点（覆盖现有的）
+  console.log('[mergeDomBranch] targetNode.children before:', targetNode.children?.length || 0);
+  console.log('[mergeDomBranch] branchNode.children:', branchNode.children?.length || 0);
   targetNode.children = branchNode.children || [];
   targetNode.childCount = branchNode.childCount || targetNode.childCount;
 
@@ -438,6 +493,21 @@ export function renderGraph() {
     mainGroup.appendChild(domGroup);
 
     drawAllConnections(mainGroup);
+
+    if (suggestedNode) {
+      const containerPos = containerNodePositions.get(suggestedNode.parentId);
+      const domPos = domNodePositions.get(suggestedNode.domPath);
+      if (containerPos && domPos) {
+        drawConnectionToDom(
+          mainGroup,
+          containerPos.x,
+          containerPos.y,
+          domPos.indicatorX,
+          domPos.indicatorY,
+          '#fbbc05'
+        );
+      }
+    }
   }
 
   canvas.appendChild(mainGroup);
@@ -500,8 +570,8 @@ function renderContainerNode(parent, node, x, y, depth, domNodesMap) {
         window.api.highlightElement(
           target,
           'green',
-          { channel: 'container', rootSelector: currentRootSelector },
-          { profile: currentProfile, url: currentUrl }
+          { channel: 'container', rootSelector: currentRootSelector, url: currentUrl },
+          currentProfile
         ).catch(err => {
           logger.error("highlight", "Failed to highlight container", err);
         });
@@ -513,8 +583,8 @@ function renderContainerNode(parent, node, x, y, depth, domNodesMap) {
         window.api.highlightElement(
           node.selectors[0],
           'green',
-          { channel: 'container', rootSelector: currentRootSelector },
-          { profile: currentProfile, url: currentUrl }
+          { channel: 'container', rootSelector: currentRootSelector, url: currentUrl },
+          currentProfile
         ).catch(err => {
           console.error('Failed to highlight:', err);
         });
@@ -636,12 +706,27 @@ function renderContainerNode(parent, node, x, y, depth, domNodesMap) {
         
         // 发送创建请求
         try {
-          const result = await window.api.invokeAction('containers:create-child', {
+          if (!suggestedNode.selector) {
+            logger.error('picker', 'Missing selector for suggested node, abort');
+            return;
+          }
+
+          const containerId = suggestedNode.containerId || `picker_${Date.now().toString(36)}`;
+          const payload = {
             profile: currentProfile,
             parentId: suggestedNode.parentId,
-            domPath: suggestedNode.domPath,
-            name: `NewContainer-${Date.now().toString().slice(-4)}`
-          });
+            containerId,
+            selectors: [
+              { css: suggestedNode.selector, variant: 'primary', score: 1 },
+            ],
+            definition: {
+              name: suggestedNode.name || `AutoContainer-${containerId.slice(-4)}`,
+              metadata: { suggestedDomPath: suggestedNode.domPath },
+            },
+            url: currentUrl,
+          };
+
+          const result = await window.api.invokeAction('containers:create-child', payload);
           
           if (result.success) {
             logger.info('picker', 'Container created', result.data);
@@ -965,6 +1050,7 @@ function drawAllConnections(parent) {
           }
         } else {
           console.log('[drawConnectionsForNode] Cannot draw to', domPath, ': missing positions or invalid Y');
+          queueDomPathPreload(domPath, 'connection-miss');
           if (window.api?.debugLog && window.DEBUG === '1') {
             window.api.debugLog('floating-panel-graph', 'drawConnectionsForNode', { 
               containerId: node.id || node.name, 
@@ -1019,11 +1105,11 @@ function drawAllConnections(parent) {
   console.log('[drawAllConnections] Complete, connections drawn');
 }
 
-function drawConnectionToDom(parent, startX, startY, endX, endY) {
+function drawConnectionToDom(parent, startX, startY, endX, endY, color = '#4CAF50') {
   const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
   const midX = (startX + endX) / 2;
   path.setAttribute('d', `M ${startX} ${startY} L ${midX} ${startY} L ${midX} ${endY} L ${endX} ${endY}`);
-  path.setAttribute('stroke', '#4CAF50');
+  path.setAttribute('stroke', color);
   path.setAttribute('stroke-width', '2');
   path.setAttribute('fill', 'none');
   path.setAttribute('stroke-dasharray', '4,2');
@@ -1046,4 +1132,38 @@ export function expandDomPath(path) {
 export function markPathLoaded(path) {
   if (!path) return;
   loadedPaths.add(path);
+}
+
+function queueDomPathPreload(path, reason = 'manual') {
+  if (!path || path === 'root') return null;
+  if (!currentProfile || !currentUrl) return null;
+  if (pendingDomPathPreloads.has(path)) {
+    return pendingDomPathPreloads.get(path);
+  }
+  updateLoadingState(1, { reason, path, action: 'start' });
+  logger.debug('dom-path-preload', 'Queue path', { path, reason });
+  const task = ensureDomPathLoaded(path)
+    .then(() => {
+      updateLoadingState(-1, { reason, path, action: 'done' });
+      logger.debug('dom-path-preload', 'Path ready', { path, reason });
+      if (canvas) {
+        renderGraph();
+      }
+    })
+    .catch((err) => {
+      updateLoadingState(-1, { reason, path, action: 'error' });
+      logger.warn('dom-path-preload', 'Failed to preload DOM path', { path, error: err?.message || err, reason });
+    })
+    .finally(() => {
+      pendingDomPathPreloads.delete(path);
+    });
+  pendingDomPathPreloads.set(path, task);
+  return task;
+}
+
+export function preloadDomPaths(paths, reason = 'bulk') {
+  if (!paths) return;
+  for (const path of paths) {
+    queueDomPathPreload(path, reason);
+  }
 }
