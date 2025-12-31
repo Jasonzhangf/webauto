@@ -412,9 +412,23 @@ export function renderGraph() {
           domPos.indicatorY,
           '#fbbc05'
         );
-      }
     }
   }
+}
+
+function findContainerById(node, targetId) {
+  if (!node || !targetId) return null;
+  if (node.id === targetId || node.name === targetId) {
+    return node;
+  }
+  if (Array.isArray(node.children)) {
+    for (const child of node.children) {
+      const found = findContainerById(child, targetId);
+      if (found) return found;
+    }
+  }
+  return null;
+}
 
   canvas.appendChild(mainGroup);
 }
@@ -636,7 +650,38 @@ function renderContainerNode(parent, node, x, y, depth, domNodesMap) {
           
           if (result.success) {
             logger.info('picker', 'Container created', result.data);
-            suggestedNode = null; // 清除建议
+            // 本地立即更新容器树，避免等待异步匹配结果
+            if (containerData && suggestedNode && suggestedNode.parentId) {
+              const parentNode = findContainerById(containerData, suggestedNode.parentId);
+              if (parentNode) {
+                const newChild = {
+                  id: containerId,
+                  name: payload.definition?.name || containerId,
+                  selectors: payload.selectors,
+                  match: {
+                    nodes: [
+                      {
+                        dom_path: suggestedNode.domPath,
+                        selector: suggestedNode.selector,
+                      },
+                    ],
+                  },
+                  children: [],
+                };
+                if (!Array.isArray(parentNode.children)) {
+                  parentNode.children = [];
+                }
+                const exists = parentNode.children.some((c) => c.id === containerId || c.name === containerId);
+                if (!exists) {
+                  parentNode.children.push(newChild);
+                }
+                expandedNodes.add(parentNode.id || parentNode.name);
+                expandedNodes.add(containerId);
+                selectedContainer = containerId;
+                renderGraph();
+              }
+            }
+            suggestedNode = null; // 清除建议提示
             // 刷新容器树？后端应该会推送更新，或者我们需要手动刷新
             // 这里假设后端推送 'containers.matched' 或类似事件会刷新 UI
             // 如果没有，可能需要重新 match
