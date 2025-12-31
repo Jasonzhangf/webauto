@@ -5,6 +5,11 @@ import crypto from 'node:crypto';
 import { chromium, BrowserContext, Page, Browser } from 'playwright';
 import { ProfileLock } from './ProfileLock.js';
 import { ensurePageRuntime } from './pageRuntime.js';
+import { logDebug } from '../../modules/logging/src/index.js';
+import { getStateBus } from '../../modules/core/src/index.mjs';
+import { globalEventBus } from '../../libs/operations-framework/src/event-driven/EventBus.js';
+
+const stateBus = getStateBus();
 
 export interface BrowserSessionOptions {
   profileId: string;
@@ -24,6 +29,8 @@ export class BrowserSession {
   private mode: 'dev' | 'run' = 'dev';
   private lastCookieSignature: string | null = null;
   private lastCookieSaveTs = 0;
+  private runtimeObservers = new Set<(event: any) => void>();
+  private bridgedPages = new WeakSet<Page>();
 
   onExit?: (profileId: string) => void;
   private exitNotified = false;
@@ -101,7 +108,7 @@ export class BrowserSession {
         console.warn(`${profileTag} ensure runtime failed (${reason})`, err?.message || err);
       });
     };
-
+    this.bindRuntimeBridge(page);
     page.on('domcontentloaded', () => ensure('domcontentloaded'));
     page.on('framenavigated', (frame) => {
       if (frame === page.mainFrame()) {
@@ -118,6 +125,86 @@ export class BrowserSession {
     });
 
     ensure('initial');
+  }
+
+  addRuntimeEventObserver(observer: (event: any) => void): () => void {
+    this.runtimeObservers.add(observer);
+    logDebug('browser-service', 'runtimeObserver:add', { sessionId: this.id, total: this.runtimeObservers.size });
+    return () => {
+      this.runtimeObservers.delete(observer);
+      logDebug('browser-service', 'runtimeObserver:remove', { sessionId: this.id, total: this.runtimeObservers.size });
+    };
+  }
+
+  private emitRuntimeEvent(event: any) {
+    const payload = {
+      ts: Date.now(),
+      sessionId: this.id,
+      ...event,
+    };
+    logDebug('browser-service', 'runtimeEvent', {
+      sessionId: this.id,
+      type: event?.type || 'unknown',
+      observers: this.runtimeObservers.size,
+    });
+    this.runtimeObservers.forEach((observer) => {
+      try {
+        observer(payload);
+      } catch (err) {
+        console.warn('[BrowserSession] runtime observer error', err);
+      }
+    });
+    this.publishRuntimeState(payload);
+    void this.dispatchRuntimeEvent(payload);
+  }
+
+  private publishRuntimeState(payload: any) {
+    try {
+      stateBus.setState(`browser-session:${this.id}`, {
+        status: 'running',
+        lastRuntimeEvent: payload?.type || 'unknown',
+        lastUrl: payload?.pageUrl || this.getCurrentUrl(),
+        lastUpdate: payload?.ts || Date.now(),
+      });
+      stateBus.publish('browser.runtime.event', payload);
+    } catch (err) {
+      logDebug('browser-service', 'runtimeEvent:stateBus:error', {
+        sessionId: this.id,
+        error: (err as Error)?.message || err,
+      });
+    }
+  }
+
+  private async dispatchRuntimeEvent(payload: any) {
+    try {
+      await globalEventBus.emit('browser.runtime.event', payload, 'browser-session');
+      if (payload?.type) {
+        await globalEventBus.emit(this.formatRuntimeTopic(payload.type), payload, 'browser-session');
+      }
+    } catch (err) {
+      logDebug('browser-service', 'runtimeEvent:eventBus:error', {
+        sessionId: this.id,
+        error: (err as Error)?.message || err,
+      });
+    }
+  }
+
+  private formatRuntimeTopic(type: string) {
+    const safe = (type || 'unknown').replace(/[^a-zA-Z0-9_.-]/g, '_').toLowerCase();
+    return `browser.runtime.${safe}`;
+  }
+
+  private bindRuntimeBridge(page: Page) {
+    if (this.bridgedPages.has(page)) return;
+    this.bridgedPages.add(page);
+    page.exposeFunction('webauto_dispatch', (evt: any) => {
+      this.emitRuntimeEvent({
+        ...evt,
+        pageUrl: page.url(),
+      });
+    }).catch((err) => {
+      console.warn(`[session:${this.id}] failed to expose webauto_dispatch`, err?.message || err);
+    });
   }
 
   private getActivePage(): Page | null {
@@ -337,6 +424,7 @@ export class BrowserSession {
     } finally {
       await this.browser?.close();
       this.lock.release();
+      this.runtimeObservers.clear();
       this.notifyExit();
     }
   }

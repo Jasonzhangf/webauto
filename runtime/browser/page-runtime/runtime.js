@@ -31,6 +31,308 @@
     Object.assign(domPickerState, patch, { updatedAt: Date.now() });
   };
 
+  const pickerShield = createPickerShield();
+
+  function createPickerShield() {
+    if (typeof window === 'undefined') return null;
+    const SHIELD_CLASS = '__webauto_picker_shield__';
+    const instances = new Map();
+    const observers = new Map();
+    const frameLoadListeners = new Map();
+    let callbacksRef = null;
+
+    class ShieldInstance {
+      constructor(frameWindow, frameElement, callbacks) {
+        this.frameWindow = frameWindow;
+        this.frameElement = frameElement || null;
+        this.callbacks = callbacks || {};
+        this.layer = null;
+        this.bindings = null;
+      }
+
+      mount() {
+        const doc = this.getDocument();
+        if (!doc) return;
+        if (this.layer && doc.contains(this.layer)) {
+          return;
+        }
+        this.destroy();
+        if (doc.readyState === 'loading') {
+          doc.addEventListener('DOMContentLoaded', () => this.createLayer(doc), { once: true });
+        } else {
+          this.createLayer(doc);
+        }
+      }
+
+      destroy() {
+        this.unbindEvents();
+        if (this.layer && this.layer.parentNode) {
+          this.layer.parentNode.removeChild(this.layer);
+        }
+        this.layer = null;
+      }
+
+      getDocument() {
+        try {
+          return this.frameWindow.document;
+        } catch {
+          return null;
+        }
+      }
+
+      createLayer(doc) {
+        const host = doc.body || doc.documentElement;
+        if (!host) return;
+        const layer = doc.createElement('div');
+        layer.className = SHIELD_CLASS;
+        const style = layer.style;
+        style.setProperty('position', 'fixed', 'important');
+        style.setProperty('inset', '0', 'important');
+        style.setProperty('width', '100vw', 'important');
+        style.setProperty('height', '100vh', 'important');
+        style.setProperty('z-index', '2147483646', 'important');
+        style.setProperty('pointer-events', 'auto', 'important');
+        style.setProperty('background', 'transparent', 'important');
+        style.setProperty('cursor', 'crosshair', 'important');
+        style.setProperty('touch-action', 'none', 'important');
+        style.setProperty('user-select', 'none', 'important');
+        style.setProperty('contain', 'strict', 'important');
+        host.appendChild(layer);
+        this.layer = layer;
+        this.bindEvents();
+      }
+
+      bindEvents() {
+        if (!this.layer) return;
+        const win = this.frameWindow;
+        const pointerMove = (e) => {
+          this.consumeEvent(e);
+          const target = this.resolveTarget(e);
+          this.callbacks.onHover?.({
+            target,
+            event: e,
+            frameWindow: this.frameWindow,
+            frameElement: this.frameElement,
+          });
+        };
+        const pointerDown = (e) => {
+          this.consumeEvent(e);
+          const target = this.resolveTarget(e);
+          this.callbacks.onPointerDown?.({
+            target,
+            event: e,
+            frameWindow: this.frameWindow,
+            frameElement: this.frameElement,
+          });
+        };
+        const pointerUp = (e) => {
+          this.consumeEvent(e);
+          const target = this.resolveTarget(e);
+          this.callbacks.onPointerUp?.({
+            target,
+            event: e,
+            frameWindow: this.frameWindow,
+            frameElement: this.frameElement,
+          });
+        };
+        const click = (e) => {
+          this.consumeEvent(e);
+          const target = this.resolveTarget(e);
+          this.callbacks.onClick?.({
+            target,
+            event: e,
+            frameWindow: this.frameWindow,
+            frameElement: this.frameElement,
+          });
+        };
+        const contextMenu = (e) => {
+          this.consumeEvent(e);
+        };
+        win.addEventListener('pointermove', pointerMove, true);
+        win.addEventListener('pointerdown', pointerDown, true);
+        win.addEventListener('pointerup', pointerUp, true);
+        win.addEventListener('pointercancel', pointerUp, true);
+        win.addEventListener('click', click, true);
+        win.addEventListener('contextmenu', contextMenu, true);
+        this.bindings = { pointerMove, pointerDown, pointerUp, click, contextMenu };
+      }
+
+      unbindEvents() {
+        if (!this.bindings) return;
+        const { pointerMove, pointerDown, pointerUp, click, contextMenu } = this.bindings;
+        const win = this.frameWindow;
+        win.removeEventListener('pointermove', pointerMove, true);
+        win.removeEventListener('pointerdown', pointerDown, true);
+        win.removeEventListener('pointerup', pointerUp, true);
+        win.removeEventListener('pointercancel', pointerUp, true);
+        win.removeEventListener('click', click, true);
+        win.removeEventListener('contextmenu', contextMenu, true);
+        this.bindings = null;
+      }
+
+      consumeEvent(e) {
+        if (!e) return;
+        try {
+          e.preventDefault();
+          e.stopPropagation();
+          if (typeof e.stopImmediatePropagation === 'function') {
+            e.stopImmediatePropagation();
+          }
+        } catch {
+          /* ignore */
+        }
+      }
+
+      resolveTarget(e) {
+        if (!e) return null;
+        const path = typeof e.composedPath === 'function' ? e.composedPath() : [];
+        let fallbackCandidate = null;
+        for (const node of path) {
+          if (node instanceof Element && !this.isShieldElement(node)) {
+            if (!fallbackCandidate) {
+              fallbackCandidate = node;
+            }
+            const tag = node.tagName ? node.tagName.toLowerCase() : '';
+            if (tag && tag !== 'html' && tag !== 'body') {
+              return node;
+            }
+          }
+        }
+        const maybeTarget = e.target instanceof Element ? e.target : null;
+        if (maybeTarget && !this.isShieldElement(maybeTarget)) {
+          const tag = maybeTarget.tagName ? maybeTarget.tagName.toLowerCase() : '';
+          if (tag && tag !== 'html' && tag !== 'body') {
+            return maybeTarget;
+          }
+          if (!fallbackCandidate) {
+            fallbackCandidate = maybeTarget;
+          }
+        }
+        const alt = this.elementFromPointSafely(e);
+        if (alt && !this.isShieldElement(alt)) {
+          return alt;
+        }
+        return fallbackCandidate;
+      }
+
+      isShieldElement(el) {
+        if (!(el instanceof Element)) return false;
+        return el.classList.contains(SHIELD_CLASS);
+      }
+
+      elementFromPointSafely(e) {
+        const doc = this.getDocument();
+        if (!doc || typeof e.clientX !== 'number' || typeof e.clientY !== 'number') return null;
+        const originalDisplay = this.layer ? this.layer.style.display : '';
+        if (this.layer) {
+          this.layer.style.display = 'none';
+        }
+        let result = null;
+        try {
+          const candidate = doc.elementFromPoint(e.clientX, e.clientY);
+          if (candidate instanceof Element && !this.isShieldElement(candidate)) {
+            result = candidate;
+          }
+        } catch {
+          result = null;
+        } finally {
+          if (this.layer) {
+            this.layer.style.display = originalDisplay || '';
+          }
+        }
+        return result;
+      }
+    }
+
+    const attachToWindow = (targetWindow, frameElement) => {
+      if (!callbacksRef || instances.has(targetWindow)) return;
+      const instance = new ShieldInstance(targetWindow, frameElement, callbacksRef);
+      instances.set(targetWindow, instance);
+      instance.mount();
+      observeFrames(targetWindow);
+    };
+
+    const observeFrames = (targetWindow) => {
+      const doc = getDocumentSafe(targetWindow);
+      if (!doc) return;
+      const observer = new MutationObserver(() => scanFrames(targetWindow));
+      observer.observe(doc.documentElement || doc, { childList: true, subtree: true });
+      observers.set(targetWindow, observer);
+      scanFrames(targetWindow);
+    };
+
+    const scanFrames = (targetWindow) => {
+      const doc = getDocumentSafe(targetWindow);
+      if (!doc) return;
+      const frames = Array.from(doc.querySelectorAll('iframe'));
+      frames.forEach((frame) => tryAttachFrame(frame));
+    };
+
+    const tryAttachFrame = (frame) => {
+      if (!frame || !frame.contentWindow) return;
+      const childWindow = frame.contentWindow;
+      if (instances.has(childWindow)) {
+        instances.get(childWindow)?.mount();
+        return;
+      }
+      try {
+        // eslint-disable-next-line no-unused-expressions
+        childWindow.document;
+      } catch {
+        markFrameUnavailable(frame);
+        return;
+      }
+      attachToWindow(childWindow, frame);
+      frame.dataset.__webautoPickerAttached = 'true';
+      const reloadHandler = () => tryAttachFrame(frame);
+      frame.addEventListener('load', reloadHandler);
+      frameLoadListeners.set(frame, reloadHandler);
+    };
+
+    const markFrameUnavailable = (frame) => {
+      frame.dataset.__webautoPickerBlocked = 'true';
+      if (callbacksRef?.onFrameBlocked) {
+        try {
+          callbacksRef.onFrameBlocked(frame);
+        } catch {
+          /* ignore */
+        }
+      }
+    };
+
+    const detachAll = () => {
+      instances.forEach((instance) => instance.destroy());
+      instances.clear();
+      observers.forEach((observer) => observer.disconnect());
+      observers.clear();
+      frameLoadListeners.forEach((listener, frame) => {
+        frame.removeEventListener('load', listener);
+      });
+      frameLoadListeners.clear();
+    };
+
+    const getDocumentSafe = (targetWindow) => {
+      try {
+        return targetWindow.document;
+      } catch {
+        return null;
+      }
+    };
+
+    return {
+      attach(cb) {
+        detachAll();
+        callbacksRef = cb || null;
+        if (!callbacksRef) return;
+        attachToWindow(window, null);
+      },
+      detach() {
+        detachAll();
+        callbacksRef = null;
+      },
+    };
+  }
+
   const core = {
     _session: null,
 
@@ -77,8 +379,20 @@
     let timeoutToken = null;
 
     let lastHoverEl = null;
+    let shieldActive = false;
 
     const listeners = [];
+
+    const detachShield = () => {
+      if (pickerShield && shieldActive) {
+        try {
+          pickerShield.detach();
+        } catch {
+          /* ignore */
+        }
+        shieldActive = false;
+      }
+    };
 
     const addListener = (target, type, handler, options) => {
       target.addEventListener(type, handler, options || true);
@@ -231,6 +545,7 @@
         clearTimeout(timeoutToken);
         timeoutToken = null;
       }
+      detachShield();
       listeners.forEach((fn) => {
         try {
           fn();
@@ -282,27 +597,67 @@
       setState({ phase: 'cancelled', active: false });
     };
 
-    const onPointerMove = (event) => {
+    const onPointerMove = (event, forcedTarget) => {
       if (!active) return;
-      const x = event.clientX;
-      const y = event.clientY;
-      const el = pickElementFromPoint(x, y, event);
-      updateHover(el);
+      if (forcedTarget) {
+        updateHover(forcedTarget);
+        return;
+      }
+      const x = event?.clientX;
+      const y = event?.clientY;
+      if (typeof x === 'number' && typeof y === 'number') {
+        const el = pickElementFromPoint(x, y, event);
+        updateHover(el);
+      } else {
+        updateHover(null);
+      }
     };
 
-    const onMouseDown = (event) => {
+    const commitElement = (el, event) => {
+      const target = el || lastHoverEl;
+      if (!target && event) {
+        const fallback = pickElementFromPoint(event.clientX, event.clientY, event);
+        if (fallback) {
+          finalize({ type: 'select', element: fallback });
+          return;
+        }
+      }
+      if (!target) {
+        finalize({ type: 'error', error: 'no-element' });
+        return;
+      }
+      finalize({ type: 'select', element: target });
+    };
+
+    const commitFromEvent = (event, forcedTarget) => {
+      if (!event && !forcedTarget) {
+        commitElement(null, null);
+        return;
+      }
+      if (forcedTarget) {
+        commitElement(forcedTarget, event || null);
+        return;
+      }
+      const x = event?.clientX;
+      const y = event?.clientY;
+      const el = typeof x === 'number' && typeof y === 'number' ? pickElementFromPoint(x, y, event) : null;
+      commitElement(el, event || null);
+    };
+
+    const onPointerDown = (event, forcedTarget) => {
+      if (!active) return;
+      if (event.button !== undefined && event.button !== 0) return;
+      event.preventDefault();
+      event.stopPropagation();
+      commitFromEvent(event, forcedTarget || null);
+    };
+
+    const onMouseDown = (event, forcedTarget) => {
       if (!active) return;
       if (event.button !== 0) return; // left button only
       event.preventDefault();
       event.stopPropagation();
-      const x = event.clientX;
-      const y = event.clientY;
-      const el = pickElementFromPoint(x, y, event) || lastHoverEl;
-      if (!el) {
-        finalize({ type: 'error', error: 'no-element' });
-        return;
-      }
-      finalize({ type: 'select', element: el });
+      commitFromEvent(event, forcedTarget || null);
     };
 
     const onKeyDown = (event) => {
@@ -343,8 +698,55 @@
           error: null,
         });
 
-        addListener(document, 'pointermove', onPointerMove, true);
-        addListener(document, 'mousedown', onMouseDown, true);
+        if (pickerShield) {
+          let attached = false;
+          try {
+            pickerShield.attach({
+            onHover: ({ target, event }) => {
+              onPointerMove(event || null, target || null);
+            },
+            onPointerDown: ({ target, event }) => {
+              onPointerDown(event || { button: 0 }, target || null);
+            },
+            onPointerUp: () => {
+              /* no-op */
+            },
+            onClick: ({ target, event }) => {
+              if (event) {
+                try {
+                  event.preventDefault();
+                  event.stopPropagation();
+                } catch {
+                  /* ignore */
+                }
+              }
+              commitFromEvent(event || null, target || null);
+            },
+            onFrameBlocked: (frame) => {
+              try {
+                // eslint-disable-next-line no-console
+                console.warn('[dom-picker] frame blocked for shield', frame?.src || frame?.id || 'unknown');
+              } catch {
+                /* ignore */
+              }
+            },
+          });
+            attached = true;
+          } catch (err) {
+            // eslint-disable-next-line no-console
+            console.warn('[dom-picker] pickerShield attach failed', err);
+          }
+          shieldActive = attached;
+          if (!attached) {
+            addListener(document, 'pointermove', onPointerMove, true);
+            addListener(document, 'pointerdown', onPointerDown, true);
+            addListener(document, 'mousedown', onMouseDown, true);
+          }
+        } else {
+          addListener(document, 'pointermove', onPointerMove, true);
+          addListener(document, 'pointerdown', onPointerDown, true);
+          addListener(document, 'mousedown', onMouseDown, true);
+        }
         addListener(document, 'keydown', onKeyDown, true);
         addListener(window, 'blur', onWindowBlur, true);
         addListener(window, 'scroll', onScroll, true);
@@ -476,6 +878,30 @@
   const VERSION = '0.1.0';
   const DEFAULT_STYLE = null;
   const registry = new Map();
+
+  function dispatchBridgeEvent(type, data = {}) {
+    try {
+      if (typeof window.webauto_dispatch === 'function') {
+        window.webauto_dispatch({ ts: Date.now(), type, data });
+      }
+      window.dispatchEvent(new CustomEvent(`webauto:${type}`, { detail: data }));
+    } catch {
+      /* ignore bridge errors */
+    }
+  }
+
+  let handshakeNotified = false;
+  function notifyHandshakeStatus(status) {
+    if (handshakeNotified) return;
+    handshakeNotified = true;
+    dispatchBridgeEvent('handshake.status', {
+      status,
+      href: window.location.href,
+      hostname: window.location.hostname,
+      runtimeVersion: VERSION,
+      bootCount: window.__webautoRuntimeBootCount || 1,
+    });
+  }
 
   const domUtils = {
     resolveRoot(selector) {
@@ -874,6 +1300,7 @@
       enumerable: false,
       writable: false,
     });
+    notifyHandshakeStatus('ready');
   }
 
   if (document.readyState === 'loading') {

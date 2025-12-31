@@ -395,6 +395,16 @@ export class UiController {
         snapshot,
       };
       this.messageBus?.publish?.('containers.matched', matchPayload);
+      this.messageBus?.publish?.('handshake.status', {
+        status: matchPayload.matched ? 'ready' : 'pending',
+        profileId: matchPayload.profileId,
+        sessionId: matchPayload.sessionId,
+        url: matchPayload.url,
+        matched: matchPayload.matched,
+        containerId: matchPayload.container?.id || null,
+        source: 'containers:match',
+        ts: Date.now(),
+      });
       return { success: true, data: matchPayload };
     } catch (err) {
       throw new Error(`容器匹配失败: ${err?.message || String(err)}`);
@@ -809,7 +819,20 @@ export class UiController {
     };
     const response = await this.sendWsCommand(this.getBrowserWsUrl(), payload, 20000);
     if (response?.data?.success) {
-      return response.data.data || response.data.branch || response.data;
+      const data = response.data.data || response.data.branch || response.data;
+      // 适配：确保返回结构包含 path 和 node 字段
+      if (data && !data.node && data.path) {
+        const nodeData = { 
+          path: data.path, 
+          children: data.children || [], 
+          childCount: data.node_count || (data.children?.length || 0) 
+        };
+        if (data.tag) nodeData.tag = data.tag;
+        if (data.id) nodeData.id = data.id;
+        if (data.classes) nodeData.classes = data.classes;
+        return { path: data.path, node: nodeData };
+      }
+      return data;
     }
     throw new Error(response?.data?.error || response?.error || 'inspect_dom_branch failed');
   }

@@ -1,15 +1,10 @@
 #!/usr/bin/env node
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { registerOperation, getOperation, listOperations, type OperationContext } from './registry.js';
-import { highlightOperation } from './operations/highlight.js';
-import { scrollOperation } from './operations/scroll.js';
-import { mouseMoveOperation, mouseClickOperation } from './system/mouse.js';
+import { getOperation, listOperations, type OperationContext } from './registry.js';
+import { ensureBuiltinOperations } from './builtin.js';
 
-registerOperation(highlightOperation);
-registerOperation(scrollOperation);
-registerOperation(mouseMoveOperation);
-registerOperation(mouseClickOperation);
+ensureBuiltinOperations();
 
 interface CliResult {
   success: boolean;

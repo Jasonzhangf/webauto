@@ -8,6 +8,8 @@ import { OperationQueue, Scheduler } from './OperationQueue.js';
 import { FocusManager } from './FocusManager.js';
 
 export interface RuntimeDeps {
+  // EventBus injection (optional)
+  eventBus?: any;
   highlight: (bboxOrHandle: any, opts?: HighlightOptions) => Promise<void>;
   wait: (ms: number) => Promise<void>;
   perform: (node: ContainerNodeRuntime, op: OperationInstance) => Promise<any>; // executes non-discovery ops
@@ -32,6 +34,17 @@ export class RuntimeController {
     const root = this.graph.nodes.get(rootId)!;
     root.opQueue = OperationQueue.buildDefaultQueue(this.def(rootId)?.operations);
     await this.loop(rootId, mode);
+  }
+
+  /**
+   * Emit event to EventBus if available
+   */
+  private async emitEvent(event: string, data: any): Promise<void> {
+    if (this.deps.eventBus?.emit) {
+      await this.deps.eventBus.emit(event, data, 'RuntimeController');
+    } else {
+      // Fallback: log to console if no EventBus
+    }
   }
 
   private def(id: string) { return this.defs.find(d => d.id === id); }
@@ -72,11 +85,33 @@ export class RuntimeController {
           });
           this.rel.addParentChild(node.defId, c.defId);
           node.feedback.hits += 1;
+          
+          // Emit container:discovered event
+          await this.emitEvent(`container:${c.defId}:discovered`, {
+            containerId: c.defId,
+            parentId: node.defId,
+            bbox: c.bbox,
+            visible: c.visible,
+            score: c.score
+          });
         }
         OperationQueue.markDone(first, { discovered: node.children.length });
+
+        // Emit container:children_discovered event
+        await this.emitEvent(`container:${node.defId}:children_discovered`, {
+          containerId: node.defId,
+          childCount: node.children.length
+        });
       } else {
         const r = await this.deps.perform(node, first).catch(e => { throw e; });
         OperationQueue.markDone(first, r);
+
+        // Emit operation:completed event
+        await this.emitEvent(`container:${node.defId}:operation:completed`, {
+          containerId: node.defId,
+          operationType: first.def.type,
+          result: r
+        });
       }
     }
   }

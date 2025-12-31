@@ -3,10 +3,12 @@ import express from 'express';
 import { TreeDiscoveryEngine } from '../../../libs/containers/src/engine/TreeDiscoveryEngine.js';
 import { RootDetector } from '../../../libs/containers/src/engine/RootDetector.js';
 import { RuntimeController } from '../../../libs/containers/src/engine/RuntimeController.js';
+import { EventBus } from '../../../libs/operations-framework/src/event-driven/EventBus.js';
+
 import { applyWorkflowOverlay } from '../../../libs/containers/src/engine/WorkflowOverlay.js';
 import { readFileSync, writeFileSync, readdirSync, mkdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
-
+const globalEventBus = new EventBus();
 const PORT = Number(process.env.PORT_CONTAINER || 7703);
 const WF_PORT = Number(process.env.PORT_WORKFLOW || 7701);
 
@@ -72,39 +74,6 @@ function depsFor(sessionId: string) {
   };
 }
 
-function runtimeDeps(sessionId: string) {
-  return {
-    highlight: async (handleOrBBox: any, opts?: any) => {
-      // if handle, convert to bbox; else use provided bbox
-      let bbox = handleOrBBox;
-      if (!(bbox && typeof bbox.x1 === 'number')) {
-        const h = handleOrBBox;
-        bbox = await depsFor(sessionId).bboxOf(h);
-      }
-      return wfHighlight(sessionId, bbox, opts?.label, opts?.color || '#00C853');
-    },
-    wait: async (ms: number) => new Promise(r => setTimeout(r, ms)),
-    perform: async (node: any, op: any) => {
-      if (op.def.type === 'click') {
-        const bbox = await depsFor(sessionId).bboxOf(node.handle);
-        if (!bbox) throw new Error('no bbox');
-        const cx = Math.floor((bbox.x1 + bbox.x2)/2);
-        const cy = Math.floor((bbox.y1 + bbox.y2)/2);
-        await fetch(`http://127.0.0.1:${WF_PORT}/v1/mouse/click`, { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({ sessionId, x: cx, y: cy, button: 'left' }) });
-        return { success: true };
-      }
-      if (op.def.type === 'scroll') {
-        const dy = Number(op.def.config?.distance ?? 800);
-        await wfEval(sessionId, `window.scrollBy(0, ${dy}); true`);
-        return { success: true };
-      }
-      if (op.def.type === 'type') {
-        // no-op placeholder: integrate with keyboard controller if selector available
-        return { success: true };
-      }
-      return { success: true };
-    }
-  };
 }
 
 // ---------- Debug endpoints (picker + save + library) ----------
@@ -376,3 +345,39 @@ app.use('/devtools', express.static(join(process.cwd(), 'services/engines/contai
 app.listen(PORT, () => {
   console.log(`Container Engine listening on http://localhost:${PORT}`);
 });
+
+function runtimeDeps(sessionId: string) {
+  return {
+    eventBus: globalEventBus,
+    highlight: async (handleOrBBox: any, opts?: any) => {
+      // if handle, convert to bbox; else use provided bbox
+      let bbox = handleOrBBox;
+      if (!(bbox && typeof bbox.x1 === 'number')) {
+        const h = handleOrBBox;
+        bbox = await depsFor(sessionId).bboxOf(h);
+      }
+      return wfHighlight(sessionId, bbox, opts?.label, opts?.color || '#00C853');
+    },
+    wait: async (ms: number) => new Promise(r => setTimeout(r, ms)),
+    perform: async (node: any, op: any) => {
+      if (op.def.type === 'click') {
+        const bbox = await depsFor(sessionId).bboxOf(node.handle);
+        if (!bbox) throw new Error('no bbox');
+        const cx = Math.floor((bbox.x1 + bbox.x2)/2);
+        const cy = Math.floor((bbox.y1 + bbox.y2)/2);
+        await fetch(`http://127.0.0.1:${WF_PORT}/v1/mouse/click`, { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({ sessionId, x: cx, y: cy, button: 'left' }) });
+        return { success: true };
+      }
+      if (op.def.type === 'scroll') {
+        const dy = Number(op.def.config?.distance ?? 800);
+        await wfEval(sessionId, `window.scrollBy(0, ${dy}); true`);
+        return { success: true };
+      }
+      if (op.def.type === 'type') {
+        // no-op placeholder: integrate with keyboard controller if selector available
+        return { success: true };
+      }
+      return { success: true };
+    }
+  };
+}

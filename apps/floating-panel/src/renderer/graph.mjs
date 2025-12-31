@@ -1,4 +1,6 @@
 import { logger } from './logger.mts';
+import { findDomNodeByPath, findNearestExistingPath, mergeDomBranch as mergeDomBranchImpl } from './graph/dom-helpers.mts';
+import { expandPathToNode as expandPathToNodeImpl, findNearestContainer as findNearestContainerImpl, populateSelectorMap as populateSelectorMapImpl } from './graph/container-helpers.mts';
 
 let canvas = null;
 let containerData = null;
@@ -58,7 +60,7 @@ export async function handlePickerResult(domPath, selector = null) {
   logger.info('picker', 'Received DOM path', domPath);
 
   // 找到最近已有节点，跳过中间层加载
-  const ancestor = findNearestExistingPath(domPath);
+  const ancestor = findNearestExistingPath(domData, domPath);
   if (!findDomNodeByPath(domData, domPath)) {
     updateLoadingState(1, { reason: 'picker', path: domPath, ancestor });
     try {
@@ -136,7 +138,7 @@ async function ensureDomPathLoaded(path) {
 
   const task = (async () => {
     console.log('[ensureDomPathLoaded] Loading path:', path);
-    const ancestor = findNearestExistingPath(path);
+    const ancestor = findNearestExistingPath(domData, path);
     if (ancestor && ancestor !== 'root' && ancestor !== path) {
       await fetchAndMergeDomBranch(ancestor, { depth: 6, maxChildren: 20, label: 'ancestor' });
     }
@@ -153,110 +155,20 @@ async function ensureDomPathLoaded(path) {
   }
 }
 
-function findNearestExistingPath(path) {
-  if (!path || !domData) return null;
-  const parts = path.split('/');
-  while (parts.length > 1) {
-    parts.pop();
-    const candidate = parts.join('/');
-    if (candidate && findDomNodeByPath(domData, candidate)) {
-      return candidate;
-    }
-  }
-  return 'root';
-}
-
-// 展开路径到指定节点
+// 展开路径到指定节点（委托给 container-helpers）
 function expandPathToNode(node, targetId) {
-  if (!node || !targetId) return false;
-  if (node.id === targetId || node.name === targetId) {
-    expandedNodes.add(node.id || node.name);
-    return true;
-  }
-  if (node.children) {
-    for (const child of node.children) {
-      if (expandPathToNode(child, targetId)) {
-        expandedNodes.add(node.id || node.name);
-        return true;
-      }
-    }
-  }
-  return false;
+  return expandPathToNodeImpl(node, targetId, expandedNodes);
 }
 
+// 在容器树中查找与 domPath 最接近的容器（委托给 container-helpers）
 function findNearestContainer(domPath) {
   if (!containerData || !domPath) return null;
-  
-  // 简单的路径匹配：找到 domPath 是其子路径的最深容器
-  // 注意：容器的 domPath 可能存储在 match.nodes[0].dom_path 中
-  
-  let bestMatch = null;
-  let bestLength = 0;
-  
-  function traverse(node) {
-    // 检查当前容器是否匹配
-    // 这里假设容器有 dom_path 信息。如果没有，可能需要依赖 selector 或其他机制
-    // 现有的 graph 数据中，node.match.nodes[0].dom_path 是比较可靠的来源
-    
-    let containerPath = null;
-    if (node.match && node.match.nodes && node.match.nodes.length > 0) {
-      containerPath = node.match.nodes[0].dom_path;
-    }
-    
-    if (containerPath && domPath.startsWith(containerPath)) {
-      if (containerPath.length > bestLength) {
-        bestMatch = node;
-        bestLength = containerPath.length;
-      }
-    }
-    
-    if (node.children) {
-      node.children.forEach(child => traverse(child));
-    }
-  }
-  
-  traverse(containerData);
-  
-  // 如果没有找到（比如根容器 path 不匹配），默认返回根容器
-  if (!bestMatch && containerData) {
-    return containerData;
-  }
-
-  return bestMatch;
+  return findNearestContainerImpl(containerData, domPath);
 }
 
-
-function populateSelectorMap(containerData) {
-  selectorMap.clear();
-  if (!containerData) return;
-
-  function traverse(node) {
-    if (!node || typeof node !== 'object') return;
-
-    // Map selectors to DOM paths
-    if (node.selectors && Array.isArray(node.selectors)) {
-      node.selectors.forEach(selector => {
-        if (selector.css) {
-          // Find matching DOM nodes
-          const domNodes = Array.from(domNodePositions.keys());
-          const matchedNode = domNodes.find(path => {
-            // Simple heuristic: if the DOM path contains the selector class/id
-            return selector.css.includes('#') ? false : true;
-          });
-          if (matchedNode) {
-            selectorMap.set(selector.css, matchedNode);
-          }
-        }
-      });
-    }
-
-    // Process children recursively
-    if (node.children && Array.isArray(node.children)) {
-      node.children.forEach(child => traverse(child));
-    }
-  }
-
-  traverse(containerData);
+// 根据容器定义填充 selector 到 DOM path 的映射表
+function populateSelectorMap(containerRoot) {
+  populateSelectorMapImpl(containerRoot, selectorMap, domNodePositions);
 }
 
 
@@ -435,43 +347,21 @@ async function fetchDomBranch(path, maxDepth = 5, maxChildren = 6) {
   }
 }
 
-// 在 DOM 树中查找指定 path 的节点
-function findDomNodeByPath(root, targetPath) {
-  if (!root || typeof root !== 'object') return null;
-  if (root.path === targetPath) return root;
-
-  if (root.children && Array.isArray(root.children)) {
-    for (const child of root.children) {
-      const found = findDomNodeByPath(child, targetPath);
-      if (found) return found;
-    }
-  }
-
-  return null;
-}
-
-// 合并拉取的分支到现有 DOM 树
+// 合并拉取的分支到现有 DOM 树（委托给 dom-helpers 模块）
 export function mergeDomBranch(branchNode) {
   if (!branchNode || !domData) return false;
-
   console.log('[mergeDomBranch] Looking for path:', branchNode.path);
-  const targetNode = findDomNodeByPath(domData, branchNode.path);
-  console.log('[mergeDomBranch] Found target node?', Boolean(targetNode));
-  if (!targetNode) {
-    console.warn('[mergeDomBranch] Cannot find target node for path:', branchNode.path);
-    return false;
+  const merged = mergeDomBranchImpl(domData, branchNode);
+  if (merged) {
+    console.log(
+      '[mergeDomBranch] Merged branch into path:',
+      branchNode.path,
+      'with',
+      (findDomNodeByPath(domData, branchNode.path)?.children || []).length,
+      'children'
+    );
   }
-
-  // 合并子节点（覆盖现有的）
-  console.log('[mergeDomBranch] targetNode.children before:', targetNode.children?.length || 0);
-  console.log('[mergeDomBranch] branchNode.children:', branchNode.children?.length || 0);
-  targetNode.children = branchNode.children || [];
-  targetNode.childCount = branchNode.childCount || targetNode.childCount;
-
-  console.log('[mergeDomBranch] Merged branch into path:', branchNode.path,
-    'with', targetNode.children.length, 'children');
-
-  return true;
+  return merged;
 }
 
 

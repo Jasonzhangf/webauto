@@ -1,6 +1,7 @@
 
 import { UiController } from '../../services/controller/src/controller.js';
 import { WebSocketServer, WebSocket } from 'ws';
+import { EventBus, globalEventBus } from '../../libs/operations-framework/src/event-driven/EventBus.js';
 import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -28,7 +29,12 @@ const cliTargets = {
 
 class UnifiedApiServer {
   private controller: UiController;
-  private clients: Set<WebSocket>;
+  private wsClients: Set<WebSocket>;
+  private busClients: Set<WebSocket>;
+  private subscriptions: Map<WebSocket, Set<string>>;
+  private eventBus: EventBus;
+  private containerSubscriptions: Map<string, Set<WebSocket>> = new Map();
+  private lastHandshakePayload: any = null;
 
   constructor() {
     this.controller = new UiController({
@@ -48,7 +54,167 @@ class UnifiedApiServer {
       },
     });
 
-    this.clients = new Set();
+
+    this.wsClients = new Set();
+    this.busClients = new Set();
+    this.subscriptions = new Map();
+    this.eventBus = globalEventBus;
+    this.setupEventBridge();
+  }
+
+  private setupEventBridge(): void {
+    // Listen for all container events and forward
+    this.eventBus.on('container:*', (data) => {
+      this.broadcastEvent('container:event', data);
+    });
+
+    // Listen for operation events
+    this.eventBus.on('operation:*', (data) => {
+      this.broadcastEvent('operation:event', data);
+    });
+
+    // Listen for system events
+    this.eventBus.on('system:*', (data) => {
+      this.broadcastEvent('system:event', data);
+    });
+
+    this.eventBus.on('browser.runtime.event', (data) => {
+      this.forwardRuntimeEvent('browser.runtime.event', data);
+      if (data?.type === 'handshake.status') {
+        this.broadcastBusEvent('handshake.status', data);
+      }
+    });
+
+    this.eventBus.on('browser.runtime.handshake.status', (data) => {
+      this.forwardRuntimeEvent('browser.runtime.handshake.status', data);
+      this.broadcastBusEvent('handshake.status', data);
+    });
+  }
+
+  private forwardRuntimeEvent(topic: string, payload: any): void {
+    this.broadcastEvent(topic, payload);
+    this.broadcastBusEvent(topic, payload);
+  }
+
+  private broadcastEvent(topic: string, payload: any): void {
+    const message = {
+      type: 'event',
+      topic,
+      payload,
+      timestamp: Date.now()
+    };
+    
+    this.wsClients.forEach((socket) => {
+      if (socket.readyState === WebSocket.OPEN) {
+        this.safeSend(socket, message);
+      }
+    });
+  }
+
+  private addSubscription(socket: WebSocket, topic: string) {
+    const current = this.subscriptions.get(socket) || new Set();
+    current.add(topic);
+    this.subscriptions.set(socket, current);
+    
+    // Handle container specific subscription logic if needed
+    if (topic.startsWith('container:')) {
+      const containerId = topic.replace('container:', '');
+      this.handleContainerSubscription(containerId, socket);
+    }
+    
+    this.safeSend(socket, { type: 'subscription:confirmed', topic });
+  }
+
+  private removeSubscription(socket: WebSocket, topic?: string) {
+    if (!topic) {
+      // Remove all subscriptions for this socket
+      this.subscriptions.delete(socket);
+      // Also clean up from container subscriptions
+      for (const [cid, subs] of this.containerSubscriptions.entries()) {
+        subs.delete(socket);
+        if (subs.size === 0) this.containerSubscriptions.delete(cid);
+      }
+      return;
+    }
+
+    const current = this.subscriptions.get(socket);
+    if (!current) return;
+    current.delete(topic);
+    
+    if (topic.startsWith('container:')) {
+      const containerId = topic.replace('container:', '');
+      this.removeContainerSubscription(containerId, socket);
+    }
+
+    if (current.size === 0) {
+      this.subscriptions.delete(socket);
+    } else {
+      this.subscriptions.set(socket, current);
+    }
+    this.safeSend(socket, { type: 'subscription:removed', topic });
+  }
+
+  private handleContainerSubscription(containerId: string, socket: WebSocket | null): void {
+    // If socket is null, it's just an HTTP registration without immediate WebSocket attachment
+    // In a real implementation, we might want to store pending subscriptions
+    if (!socket) return;
+
+    if (!this.containerSubscriptions.has(containerId)) {
+      this.containerSubscriptions.set(containerId, new Set());
+    }
+    this.containerSubscriptions.get(containerId)!.add(socket);
+    
+    // Acknowledge container subscription via WebSocket
+    this.safeSend(socket, {
+      type: 'subscription:confirmed',
+      containerId,
+      timestamp: Date.now()
+    });
+  }
+
+  private removeContainerSubscription(containerId: string, socket: WebSocket): void {
+    const subscriptions = this.containerSubscriptions.get(containerId);
+    if (subscriptions) {
+      subscriptions.delete(socket);
+      if (subscriptions.size === 0) {
+        this.containerSubscriptions.delete(containerId);
+      }
+    }
+  }
+
+  private pushContainerState(containerId: string, state: any): void {
+    const subscribers = this.containerSubscriptions.get(containerId);
+    if (subscribers) {
+      const message = {
+        type: 'container:state:updated',
+        containerId,
+        state,
+        timestamp: Date.now()
+      };
+      
+      subscribers.forEach(socket => {
+        if (socket.readyState === WebSocket.OPEN) {
+          this.safeSend(socket, message);
+        }
+      });
+    }
+  }
+
+  private matchesTopic(pattern: string, topic: string) {
+    const regexPattern = pattern
+      .replace(/[.+^${}()|[\]\\]/g, '\\$&')
+      .replace(/\*/g, '.*')
+      .replace(/\?/g, '.');
+    return new RegExp(`^${regexPattern}$`).test(topic);
+  }
+
+  private shouldDeliver(socket: WebSocket, topic: string) {
+    const subs = this.subscriptions.get(socket);
+    if (!subs || subs.size === 0) return false;
+    for (const pattern of subs) {
+      if (this.matchesTopic(pattern, topic)) return true;
+    }
+    return false;
   }
 
   async readJsonBody(req: any) {
@@ -168,6 +334,30 @@ class UnifiedApiServer {
         return;
       }
 
+      // Container state subscription (Step 3)
+      if (req.method === 'POST' && url.pathname.match(/\/v1\/container\/[^\/]+\/subscribe/)) {
+         try {
+            // Extract container ID from URL
+            const match = url.pathname.match(/\/v1\/container\/([^\/]+)\/subscribe/);
+            const containerId = match ? match[1] : null;
+            if (!containerId) throw new Error('Container ID not found');
+
+            const payload = await this.readJsonBody(req);
+            
+            // Register to subscription manager
+            // Note: WebSocket session needs to be retrieved from context if possible, 
+            // otherwise client should subscribe via WebSocket directly
+            this.handleContainerSubscription(containerId, null);
+
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: true, message: `Subscribed to container ${containerId} status`, containerId }));
+         } catch (err) {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: false, error: err?.message || String(err) }));
+         }
+         return;
+      }
+
       if (req.method === 'POST' && url.pathname === '/v1/controller/action') {
         try {
           const payload = await this.readJsonBody(req);
@@ -204,17 +394,46 @@ class UnifiedApiServer {
       const url = new URL(request.url, `http://${request.headers.host}`);
       
       if (url.pathname === '/ws') {
-        this.clients.add(socket);
-        socket.on('message', (raw) => this.handleMessage(socket, raw instanceof Buffer ? raw : Buffer.from(raw as any)));
-        socket.on('close', () => this.clients.delete(socket));
-        socket.on('error', () => this.clients.delete(socket));
+        this.wsClients.add(socket);
+        socket.on('message', (raw) => {
+          let message: any;
+          try {
+            message = JSON.parse(raw.toString());
+          } catch {
+            this.safeSend(socket, { type: 'error', error: 'Invalid JSON payload' });
+            return;
+          }
+
+          if (message?.type === 'subscribe' && message.topic) {
+            this.addSubscription(socket, message.topic);
+            return;
+          }
+
+          if (message?.type === 'unsubscribe' && message.topic) {
+            this.removeSubscription(socket, message.topic);
+            return;
+          }
+
+          this.handleMessage(socket, raw instanceof Buffer ? raw : Buffer.from(raw as any));
+        });
+        socket.on('close', () => {
+          this.wsClients.delete(socket);
+          this.removeSubscription(socket);
+        });
+        socket.on('error', () => {
+          this.wsClients.delete(socket);
+          this.removeSubscription(socket);
+        });
         this.safeSend(socket, { type: 'ready' });
       } else if (url.pathname === '/bus') {
-        this.clients.add(socket);
+        this.busClients.add(socket);
         socket.on('message', (raw) => this.handleBusMessage(socket, raw instanceof Buffer ? raw : Buffer.from(raw as any)));
-        socket.on('close', () => this.clients.delete(socket));
-        socket.on('error', () => this.clients.delete(socket));
+        socket.on('close', () => this.busClients.delete(socket));
+        socket.on('error', () => this.busClients.delete(socket));
         this.safeSend(socket, { type: 'ready' });
+        if (this.lastHandshakePayload) {
+          this.safeSend(socket, { type: 'event', topic: 'handshake.status', payload: this.lastHandshakePayload });
+        }
       }
     });
 
@@ -275,11 +494,19 @@ class UnifiedApiServer {
   }
 
   broadcastBusEvent(topic: string, payload: any) {
-    const message = JSON.stringify({ type: 'event', topic, payload });
-    this.clients.forEach((socket) => {
+    if (topic === 'handshake.status') {
+      this.lastHandshakePayload = payload;
+    }
+    this.busClients.forEach((socket) => {
       if (socket.readyState === WebSocket.OPEN) {
         this.safeSend(socket, { type: 'event', topic, payload });
       }
+    });
+
+    this.wsClients.forEach((socket) => {
+      if (socket.readyState !== WebSocket.OPEN) return;
+      if (!this.shouldDeliver(socket, topic)) return;
+      this.safeSend(socket, { type: 'event', topic, payload });
     });
   }
 

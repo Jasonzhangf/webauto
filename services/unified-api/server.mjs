@@ -46,6 +46,7 @@ class UnifiedApiServer {
     });
 
     this.clients = new Set();
+    this.lastHandshakePayload = null;
   }
 
   async readJsonBody(req) {
@@ -212,6 +213,9 @@ class UnifiedApiServer {
         socket.on('close', () => this.clients.delete(socket));
         socket.on('error', () => this.clients.delete(socket));
         this.safeSend(socket, { type: 'ready' });
+        if (this.lastHandshakePayload) {
+          this.safeSend(socket, { type: 'event', topic: 'handshake.status', payload: this.lastHandshakePayload });
+        }
       }
     });
 
@@ -272,6 +276,9 @@ class UnifiedApiServer {
   }
 
   broadcastBusEvent(topic, payload) {
+    if (topic === 'handshake.status') {
+      this.lastHandshakePayload = payload;
+    }
     const message = JSON.stringify({ type: 'event', topic, payload });
     this.clients.forEach((socket) => {
       if (socket.readyState === WebSocket.OPEN) {

@@ -1,4 +1,6 @@
 export interface OperationContext {
+  containerId?: string;
+  node?: any; // ContainerNodeRuntime or similar reference
   page: {
     evaluate(fn: (...args: any[]) => any, ...args: any[]): Promise<any>;
   };

@@ -61,19 +61,25 @@ export interface RegistryState {
   instances: Map<string, ContainerInstance>;
 }
 
+export interface PickerShieldPublicAPI {
+  attach: (callbacks: any) => void;
+  detach: () => void;
+}
+
 export interface PickerPublicAPI {
   start: (options?: StartOptions) => void;
   stop: () => void;
   getState: () => { picking: boolean; instances: number };
+  shield?: PickerShieldPublicAPI;
 }
 
 declare global {
   interface Window {
     __webautoPicker?: PickerPublicAPI;
+    __webautoPickerShield?: PickerShieldPublicAPI;
     __webautoHighlight?: any;
     __containerIndex?: any;
     __webautoContainerTree?: any;
     webauto_dispatch?: (evt: any) => void; // node bridge hook
   }
 }
-

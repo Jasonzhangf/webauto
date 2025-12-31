@@ -3,7 +3,7 @@ import path from 'path';
 import os from 'os';
 import { WebSocketServer, WebSocket } from 'ws';
 import type { RawData } from 'ws';
-import { SessionManager } from './SessionManager.js';
+import { SessionManager, SESSION_CLOSED_EVENT } from './SessionManager.js';
 import { ContainerMatcher } from './ContainerMatcher.js';
 import { ensurePageRuntime } from './pageRuntime.js';
 import { logDebug } from '../../modules/logging/src/index.js';
@@ -46,8 +46,13 @@ export class BrowserWsServer {
   private capabilityMap = new Map<string, string[]>();
   private subscriptions = new Map<WebSocket, Set<string>>();
   private sessionSubscribers = new Map<string, Set<WebSocket>>();
+  private runtimeBridgeUnsub = new Map<string, () => void>();
 
-  constructor(private options: WsServerOptions) {}
+  constructor(private options: WsServerOptions) {
+    process.on(SESSION_CLOSED_EVENT, (sessionId: string) => {
+      this.teardownRuntimeEventBridge(sessionId);
+    });
+  }
 
   async start() {
     if (this.wss) return;
@@ -429,6 +434,8 @@ export class BrowserWsServer {
     const clientTopics = this.subscriptions.get(socket) || new Set();
     const sessionClients = this.sessionSubscribers.get(sessionId) || new Set();
 
+    const requiresRuntimeBridge = topics.some((topic) => topic === 'browser.runtime.event' || topic.startsWith('browser.runtime.event.'));
+
     topics.forEach((topic) => {
       clientTopics.add(topic);
       sessionClients.add(socket);
@@ -436,6 +443,9 @@ export class BrowserWsServer {
 
     this.subscriptions.set(socket, clientTopics);
     this.sessionSubscribers.set(sessionId, sessionClients);
+    if (requiresRuntimeBridge) {
+      this.ensureRuntimeEventBridge(sessionId);
+    }
 
     this.send(socket, {
       type: 'response',
@@ -494,6 +504,7 @@ export class BrowserWsServer {
       session_id: sessionId,
       data,
     };
+    logDebug('browser-service', 'runtimeEvent:broadcast', { topic, sessionId, listeners: clients.size });
 
     clients.forEach((socket) => {
       const clientTopics = this.subscriptions.get(socket);
@@ -505,6 +516,35 @@ export class BrowserWsServer {
         }
       }
     });
+  }
+
+  private ensureRuntimeEventBridge(sessionId: string) {
+    if (this.runtimeBridgeUnsub.has(sessionId)) return;
+    const session = this.options.sessionManager.getSession(sessionId);
+    if (!session) return;
+    const unsub = session.addRuntimeEventObserver((event: any) => {
+      const data = { event, received_at: Date.now() };
+      this.broadcastEvent('browser.runtime.event', sessionId, data);
+      if (event?.type) {
+        this.broadcastEvent(this.formatRuntimeTopic(event.type), sessionId, data);
+      }
+    });
+    this.runtimeBridgeUnsub.set(sessionId, unsub);
+  }
+
+  private teardownRuntimeEventBridge(sessionId: string) {
+    const unsub = this.runtimeBridgeUnsub.get(sessionId);
+    if (unsub) {
+      try {
+        unsub();
+      } catch {}
+      this.runtimeBridgeUnsub.delete(sessionId);
+    }
+  }
+
+  private formatRuntimeTopic(type: string) {
+    const safe = (type || 'unknown').replace(/[^a-zA-Z0-9_.-]/g, '_').toLowerCase();
+    return `browser.runtime.event.${safe}`;
   }
 
   private async handlePageControl(sessionId: string, command: CommandPayload) {

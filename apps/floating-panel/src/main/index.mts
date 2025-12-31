@@ -281,7 +281,7 @@ ipcMain.handle('ui:highlight', async (_evt, { selector, color, options = {}, pro
 
     // 对于 DOM 路径高亮，需要将 color 转换为 style
     const finalOptions = isPath && color
-      ? { ...options, style: `2px solid ${color}` }
+      ? { ...options, style: `2px dashed ${color}` }
       : options || {};
 
     const body = {

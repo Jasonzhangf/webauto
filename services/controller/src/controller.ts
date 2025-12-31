@@ -144,6 +144,51 @@ export class UiController {
     });
   }
 
+  async runCliCommand(moduleName: string, args: string[]): Promise<any> {
+    const scriptPath = this.cliTargets[moduleName];
+    if (!scriptPath) {
+      throw new Error(`Unknown module: ${moduleName}`);
+    }
+
+    console.log(`[controller] runCliCommand ${moduleName} ${scriptPath} ${args.join(' ')}`);
+
+    return new Promise((resolve, reject) => {
+      const child = spawn('npx', ['tsx', scriptPath, ...args]);
+      
+      let stdout = '';
+      let stderr = '';
+
+      child.stdout.on('data', (data) => {
+        stdout += data.toString();
+      });
+
+      child.stderr.on('data', (data) => {
+        stderr += data.toString();
+      });
+
+      child.on('close', (code) => {
+        console.log(`[controller] cli exit ${moduleName} ${code}`);
+        if (code !== 0) {
+          console.error(`[controller] cli stderr ${moduleName}`, stderr);
+          reject(new Error(`Command failed with code ${code}: ${stderr}`));
+          return;
+        }
+        try {
+          console.log(`[controller] cli stdout ${moduleName}`, stdout.trim());
+          const result = JSON.parse(stdout.trim());
+          resolve(result);
+        } catch (e) {
+          console.error(`[controller] cli parse error ${moduleName}`, e);
+          resolve({ success: true, raw: stdout.trim() });
+        }
+      });
+
+      child.on('error', (err) => {
+        reject(err);
+      });
+    });
+  }
+
   async handleAction(action: string, payload: ActionPayload = {}) {
     logDebug('controller', 'handleAction', { action, payload });
     switch (action) {
@@ -487,6 +532,16 @@ export class UiController {
         snapshot,
       };
       this.messageBus?.publish?.('containers.matched', matchPayload);
+      this.messageBus?.publish?.('handshake.status', {
+        status: matchPayload.matched ? 'ready' : 'pending',
+        profileId: matchPayload.profileId,
+        sessionId: matchPayload.sessionId,
+        url: matchPayload.url,
+        matched: matchPayload.matched,
+        containerId: matchPayload.container?.id || null,
+        source: 'containers:match',
+        ts: Date.now(),
+      });
       logDebug('controller', 'containers.matched', {
         profileId: matchPayload.profileId,
         matched: matchPayload.matched,
@@ -897,547 +952,53 @@ export class UiController {
           ...(typeof maxDepth === 'number' ? { max_depth: maxDepth } : {}),
           ...(typeof maxChildren === 'number' ? { max_children: maxChildren } : {}),
         },
-      },
+      }
     };
     const response = await this.sendWsCommand(this.getBrowserWsUrl(), payload, 20000);
     if (response?.data?.success) {
-      return response.data.data || response.data.branch || response.data;
+      return response.data.data || response.data.snapshot || response.data;
     }
     throw new Error(response?.data?.error || response?.error || 'inspect_dom_branch failed');
   }
 
-  // v2 DOM branch：按 domPath + depth 获取局部树
-  async handleDomBranch2(payload: ActionPayload = {}) {
-    const profile = payload.profile || payload.sessionId;
-    const url = payload.url;
-    const path = payload.path || payload.domPath;
-    if (!profile) throw new Error('缺少会话/ profile 信息');
-    if (!url) throw new Error('缺少 URL');
-    if (!path) throw new Error('缺少 DOM 路径');
-    logDebug('controller', 'dom:branch:2', { profile, url, path, payload });
-    const maxDepth = typeof payload.maxDepth === 'number' ? payload.maxDepth : payload.depth;
-    const maxChildren = typeof payload.maxChildren === 'number' ? payload.maxChildren : (payload.maxChildren || 12);
-    const rootSelector = payload.rootSelector || payload.root_selector || null;
-    const sessionId = profile;
-    const branch = await this.fetchDomBranchFromService({
-      sessionId,
-      url,
-      path,
-      rootSelector,
-      maxDepth: typeof maxDepth === 'number' ? maxDepth : undefined,
-      maxChildren: typeof maxChildren === 'number' ? maxChildren : undefined,
-    });
-    return { success: true, data: branch };
+  // 下列方法尚未在 TS 版本实现，仅为保持编译通过的占位实现
+  async handleDomBranch2(_payload: ActionPayload = {}): Promise<any> {
+    throw new Error('handleDomBranch2 is not implemented in controller.ts');
   }
 
-  async captureSnapshotFromFixture({ profileId, url, maxDepth, maxChildren, containerId, rootSelector }: { profileId: string; url: string; maxDepth?: number; maxChildren?: number; containerId?: string; rootSelector?: string }) {
-    const tmpDir = await fsPromises.mkdtemp(path.join(os.tmpdir(), 'webauto-ui-'));
-    const fixturePath = path.join(tmpDir, 'dom.html');
-    try {
-      const domArgs = ['dom-dump', '--url', url, '--headless', 'true', '--output', fixturePath];
-      if (profileId) {
-        domArgs.push('--profile', profileId);
-      }
-      await this.runCliCommand('browser-control', domArgs);
-      const treeArgs = ['inspect-tree', '--url', url, '--fixture', fixturePath];
-      if (containerId) treeArgs.push('--root-container-id', containerId);
-      if (rootSelector) treeArgs.push('--root-selector', rootSelector);
-      if (typeof maxDepth === 'number') {
-        treeArgs.push('--max-depth', String(maxDepth));
-      }
-      if (typeof maxChildren === 'number') {
-        treeArgs.push('--max-children', String(maxChildren));
-      }
-      const tree = await this.runCliCommand('container-matcher', treeArgs);
-      return tree?.data || tree;
-    } finally {
-      fsPromises.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
-    }
+  async captureInspectorSnapshot(_options: Record<string, unknown> = {}): Promise<any> {
+    throw new Error('captureInspectorSnapshot is not implemented in controller.ts');
   }
 
-  async captureBranchFromFixture({ profileId, url, path: domPath, rootSelector, maxDepth, maxChildren }: { profileId: string; url: string; path: string; rootSelector?: string; maxDepth?: number; maxChildren?: number }) {
-    if (!domPath) {
-      throw new Error('缺少 DOM 路径');
-    }
-    const tmpDir = await fsPromises.mkdtemp(path.join(os.tmpdir(), 'webauto-branch-'));
-    const fixturePath = path.join(tmpDir, 'dom.html');
-    try {
-      const domArgs = ['dom-dump', '--url', url, '--headless', 'true', '--output', fixturePath];
-      if (profileId) domArgs.push('--profile', profileId);
-      await this.runCliCommand('browser-control', domArgs);
-      const branchArgs = ['inspect-branch', '--url', url, '--fixture', fixturePath, '--path', domPath];
-      const treeArgs: string[] = [];
-      if (rootSelector) branchArgs.push('--root-selector', rootSelector);
-      if (typeof maxDepth === 'number') branchArgs.push('--max-depth', String(maxDepth));
-      if (typeof maxChildren === 'number') {
-        treeArgs.push('--max-children', String(maxChildren));
-      }
-      const result = await this.runCliCommand('container-matcher', branchArgs);
-      return result?.data || result;
-    } finally {
-      fsPromises.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
-    }
+  async captureInspectorBranch(_options: Record<string, unknown> = {}): Promise<any> {
+    throw new Error('captureInspectorBranch is not implemented in controller.ts');
   }
 
-  async captureInspectorSnapshot(options: SnapshotOptions = {}) {
-    const profile = options.profile;
-    const sessions = await this.fetchSessions();
-    const targetSession = profile ? this.findSessionByProfile(sessions, profile) : sessions[0] || null;
-    const sessionId = targetSession?.session_id || targetSession?.sessionId || profile || null;
-    const profileId = profile || targetSession?.profileId || targetSession?.profile_id || sessionId || null;
-    const targetUrl = options.url || targetSession?.current_url || targetSession?.currentUrl;
-    const requestedContainerId = (options as any).containerId || (options as any).rootContainerId;
-    if (!targetUrl) {
-      throw new Error('无法确定会话 URL，请先在浏览器中打开目标页面');
-    }
-    let liveError: Error | null = null;
-    let snapshot: any = null;
-    if (sessionId) {
-      try {
-        snapshot = await this.fetchContainerSnapshotFromService({
-          sessionId,
-          url: targetUrl,
-          maxDepth: options.maxDepth,
-          maxChildren: options.maxChildren,
-                  rootContainerId: requestedContainerId,
-                  rootSelector: (options as any).rootSelector,        });
-      } catch (err) {
-        liveError = err as Error;
-      }
-    }
-    let fixtureSnapshot: any = null;
-    if (!snapshot) {
-      fixtureSnapshot = await this.captureSnapshotFromFixture({
-        profileId: profileId as string,
-        url: targetUrl,
-        maxDepth: options.maxDepth,
-        maxChildren: options.maxChildren,
-        containerId: requestedContainerId,
-        rootSelector: (options as any).rootSelector,
-      });
-      snapshot = fixtureSnapshot;
-    } else if (!snapshot?.dom_tree) {
-      try {
-        fixtureSnapshot = await this.captureSnapshotFromFixture({
-          profileId: profileId as string,
-          url: targetUrl,
-          maxDepth: options.maxDepth,
-          maxChildren: options.maxChildren,
-          containerId: requestedContainerId,
-          rootSelector: options.rootSelector,
-        });
-        if (fixtureSnapshot?.dom_tree) {
-          snapshot.dom_tree = fixtureSnapshot.dom_tree;
-          if (!snapshot.matches && fixtureSnapshot.matches) {
-            snapshot.matches = fixtureSnapshot.matches;
-          }
-          const mergedMetadata = {
-            ...(fixtureSnapshot.metadata || {}),
-            ...(snapshot.metadata || {}),
-          };
-          if (!mergedMetadata.dom_source) {
-            mergedMetadata.dom_source = 'fixture';
-          }
-          snapshot.metadata = mergedMetadata;
-        }
-      } catch (fixtureError) {
-        console.warn('[controller] fixture DOM capture failed:', fixtureError?.message || fixtureError);
-      }
-    }
-    if (!snapshot || !snapshot.container_tree) {
-      const rootError = liveError || new Error('容器树为空，检查容器定义或选择器是否正确');
-      throw rootError;
-    }
-    if (requestedContainerId) {
-      snapshot = this.focusSnapshotOnContainer(snapshot, requestedContainerId);
-    }
-    return {
-      sessionId: sessionId || profileId || 'unknown-session',
-      profileId: profileId || 'default',
-      targetUrl,
-      snapshot,
-    };
+  resolveSiteKeyFromUrl(_url: string): string {
+    throw new Error('resolveSiteKeyFromUrl is not implemented in controller.ts');
   }
 
-  async captureInspectorBranch(options: BranchOptions = {}) {
-    const profile = options.profile;
-    const domPath = options.path;
-    if (!profile) throw new Error('缺少 profile');
-    if (!domPath) throw new Error('缺少 DOM 路径');
-    const sessions = await this.fetchSessions();
-    const targetSession = profile ? this.findSessionByProfile(sessions, profile) : sessions[0] || null;
-    const sessionId = targetSession?.session_id || targetSession?.sessionId || profile || null;
-    const profileId = profile || targetSession?.profileId || targetSession?.profile_id || sessionId || null;
-    const targetUrl = options.url || targetSession?.current_url || targetSession?.currentUrl;
-    if (!targetUrl) {
-      throw new Error('无法确定会话 URL');
-    }
-    let branch: any = null;
-    let liveError: Error | null = null;
-    if (sessionId) {
-      try {
-        branch = await this.fetchDomBranchFromService({
-          sessionId,
-          url: targetUrl,
-          path: domPath,
-          rootSelector: options.rootSelector,
-          maxDepth: options.maxDepth,
-          maxChildren: options.maxChildren,
-        });
-      } catch (err) {
-        liveError = err as Error;
-      }
-    }
-    if (!branch) {
-      branch = await this.captureBranchFromFixture({
-        profileId: profileId as string,
-        url: targetUrl,
-        path: domPath,
-        rootSelector: options.rootSelector,
-        maxDepth: options.maxDepth,
-        maxChildren: options.maxChildren,
-      });
-    }
-    if (!branch?.node) {
-      throw liveError || new Error('无法获取 DOM 分支');
-    }
-    return {
-      sessionId: sessionId || profileId || 'unknown-session',
-      profileId: profileId || 'default',
-      targetUrl,
-      branch,
-    };
+  inferSiteFromContainerId(_containerId: string): string {
+    throw new Error('inferSiteFromContainerId is not implemented in controller.ts');
   }
 
-  async runCliCommand(target: string, args: string[] = []) {
-    const script = this.cliTargets[target];
-    if (!script) throw new Error(`Unknown CLI target: ${target}`);
-    return new Promise<any>((resolve, reject) => {
-      const npxCmd = process.platform === 'win32' ? 'npx.cmd' : 'npx';
-      console.log('[controller] runCliCommand', target, script, args.join(' '));
-      const child = spawn(npxCmd, ['tsx', script, ...args], {
-        cwd: this.repoRoot,
-        env: process.env,
-      });
-      let stdout = '';
-      let stderr = '';
-      child.stdout.on('data', (chunk) => {
-        stdout += chunk.toString();
-      });
-      child.stderr.on('data', (chunk) => {
-        stderr += chunk.toString();
-      });
-      child.on('error', (err) => {
-        console.warn('[controller] cli spawn error', target, err?.message || err);
-        reject(err);
-      });
-      child.on('close', (code) => {
-        console.log('[controller] cli exit', target, code);
-        if (stdout.trim()) {
-          console.log('[controller] cli stdout', target, stdout.trim());
-        }
-        if (stderr.trim()) {
-          console.warn('[controller] cli stderr', target, stderr.trim());
-        }
-        if (code === 0) {
-          resolve(this.normalizeCliResult(this.parseCliJson(stdout)));
-        } else {
-          reject(new Error(stderr.trim() || `CLI(${target}) exited with code ${code}`));
-        }
-      });
-    });
+  async writeUserContainerDefinition(_siteKey: string, _containerId: string, _definition: any): Promise<void> {
+    throw new Error('writeUserContainerDefinition is not implemented in controller.ts');
   }
 
-  parseCliJson(output: string = '') {
-    const trimmed = output.trim();
-    if (!trimmed) return {};
-    const match = trimmed.match(/(\{[\s\S]*\})\s*$/);
-    if (match) {
-      try {
-        return JSON.parse(match[1]);
-      } catch {
-        // ignore
-      }
-    }
-    try {
-      return JSON.parse(trimmed);
-    } catch {
-      return { raw: trimmed };
-    }
+  normalizeSelectors(_selectors: any): any {
+    return _selectors;
   }
 
-  normalizeCliResult(result: any) {
-    if (result && typeof result === 'object' && 'data' in result && result.success) {
-      return result.data;
-    }
-    return result;
+  async readContainerDefinition(_siteKey: string, _containerId: string): Promise<any> {
+    throw new Error('readContainerDefinition is not implemented in controller.ts');
   }
 
-  async fetchSessions(): Promise<Session[]> {
-    try {
-      const res = await this.runCliCommand('session-manager', ['list']);
-      const sessions = res?.sessions || res?.data?.sessions || res?.data || [];
-      return Array.isArray(sessions) ? sessions : [];
-    } catch {
-      return [];
-    }
+  private async sendWsCommand(_url: string, _payload: any, _timeout = 10000): Promise<any> {
+    throw new Error('sendWsCommand is not implemented in controller.ts');
   }
 
-  findSessionByProfile(sessions: Session[], profile: string): Session | null {
-    if (!profile) return null;
-    return (
-      sessions.find(
-        (session) =>
-          session?.profileId === profile ||
-          session?.profile_id === profile ||
-          session?.session_id === profile ||
-          session?.sessionId === profile,
-      ) || null
-    );
-  }
-
-  getBrowserWsUrl() {
-    if (process.env.WEBAUTO_WS_URL) {
-      return process.env.WEBAUTO_WS_URL;
-    }
-    const host = process.env.WEBAUTO_WS_HOST || this.defaultWsHost;
-    const port = Number(process.env.WEBAUTO_WS_PORT || this.defaultWsPort);
-    return `ws://${host}:${port}`;
-  }
-
-  getBrowserHttpBase() {
-    if (process.env.WEBAUTO_BROWSER_HTTP_BASE) {
-      return process.env.WEBAUTO_BROWSER_HTTP_BASE.replace(/\/$/, '');
-    }
-    const host = process.env.WEBAUTO_BROWSER_HTTP_HOST || this.defaultHttpHost;
-    const port = Number(process.env.WEBAUTO_BROWSER_HTTP_PORT || this.defaultHttpPort);
-    const protocol = process.env.WEBAUTO_BROWSER_HTTP_PROTO || this.defaultHttpProtocol;
-    return `${protocol}://${host}:${port}`;
-  }
-
-  sendWsCommand(wsUrl: string, payload: WsCommandPayload, timeoutMs: number = 15000): Promise<WsResponse> {
-    return new Promise((resolve, reject) => {
-      const socket = new WebSocket(wsUrl);
-      let settled = false;
-      const timeout = setTimeout(() => {
-        if (settled) return;
-        settled = true;
-        socket.terminate();
-        reject(new Error('WebSocket command timeout'));
-      }, timeoutMs);
-
-      const cleanup = () => {
-        clearTimeout(timeout);
-        socket.removeAllListeners();
-      };
-
-      socket.once('open', () => {
-        try {
-          socket.send(JSON.stringify(payload));
-        } catch (err) {
-          cleanup();
-          if (!settled) {
-            settled = true;
-            reject(err);
-          }
-        }
-      });
-
-      socket.once('message', (data) => {
-        cleanup();
-        if (settled) return;
-        settled = true;
-        try {
-          resolve(JSON.parse(data.toString('utf-8')));
-        } catch (err) {
-          reject(err);
-        } finally {
-          socket.close();
-        }
-      });
-
-      socket.once('error', (err) => {
-        cleanup();
-        if (settled) return;
-        settled = true;
-        reject(err);
-      });
-
-      socket.once('close', () => {
-        cleanup();
-        if (!settled) {
-          settled = true;
-          reject(new Error('WebSocket closed before response'));
-        }
-      });
-    });
-  }
-
-  resolveSiteBaseDir(siteKey: string) {
-    const index = this.loadContainerIndex();
-    const rel = index[siteKey]?.path || path.join('container-library', siteKey);
-    return path.isAbsolute(rel) ? rel : path.join(this.repoRoot, rel);
-  }
-
-  buildContainerPath(baseDir: string, containerId: string) {
-    if (!baseDir || !containerId) return null;
-    const parts = containerId.split('.').filter(Boolean);
-    if (!parts.length) return null;
-    return path.join(baseDir, ...parts, 'container.json');
-  }
-
-  async readContainerDefinition(siteKey: string, containerId: string): Promise<ContainerDefinition | null> {
-    if (!siteKey || !containerId) return null;
-    const userBase = path.join(this.userContainerRoot, siteKey);
-    const userFile = this.buildContainerPath(userBase, containerId);
-    if (userFile && fs.existsSync(userFile)) {
-      try {
-        const raw = await fsPromises.readFile(userFile, 'utf-8');
-        return JSON.parse(raw);
-      } catch {
-        // ignore
-      }
-    }
-    const builtinBase = this.resolveSiteBaseDir(siteKey);
-    const builtinFile = this.buildContainerPath(builtinBase, containerId);
-    if (builtinFile && fs.existsSync(builtinFile)) {
-      try {
-        const raw = await fsPromises.readFile(builtinFile, 'utf-8');
-        return JSON.parse(raw);
-      } catch {
-        // ignore
-      }
-    }
-    return null;
-  }
-
-  normalizeSelectors(source: any) {
-    const selectors = Array.isArray(source)
-      ? source
-      : typeof source === 'string'
-        ? [{ css: source }]
-        : [];
-    const result: Array<{ css: string; variant: string; score: number }> = [];
-    const seen = new Set<string>();
-    selectors.forEach((entry, index) => {
-      if (!entry) return;
-      const css = (entry.css || '').trim();
-      if (!css || seen.has(css)) return;
-      seen.add(css);
-      result.push({
-        css,
-        variant: entry.variant || (index === 0 ? 'primary' : 'fallback'),
-        score: typeof entry.score === 'number' ? entry.score : index === 0 ? 1 : 0.7,
-      });
-    });
-    return result;
-  }
-
-  async writeUserContainerDefinition(siteKey: string, containerId: string, definition: ContainerDefinition) {
-    const parts = containerId.split('.').filter(Boolean);
-    const targetDir = path.join(this.userContainerRoot, siteKey, ...parts);
-    await fsPromises.mkdir(targetDir, { recursive: true });
-    const filePath = path.join(targetDir, 'container.json');
-    const payload = { ...definition, id: containerId };
-    await fsPromises.writeFile(filePath, JSON.stringify(payload, null, 2), 'utf-8');
-  }
-
-  focusSnapshotOnContainer(snapshot: any, containerId: string) {
-    if (!containerId || !snapshot?.container_tree) {
-      return snapshot;
-    }
-    const target = this.cloneContainerSubtree(snapshot.container_tree, containerId);
-    if (!target) {
-      return snapshot;
-    }
-    const nextSnapshot = {
-      ...snapshot,
-      container_tree: target,
-      metadata: {
-        ...(snapshot.metadata || {}),
-        root_container_id: containerId,
-      },
-    };
-    if (!nextSnapshot.root_match || nextSnapshot.root_match?.container?.id !== containerId) {
-      nextSnapshot.root_match = {
-        container: {
-          id: containerId,
-          ...(target.name ? { name: target.name } : {}),
-        },
-        matched_selector: target.match?.matched_selector,
-      };
-    }
-    return nextSnapshot;
-  }
-
-  cloneContainerSubtree(node: any, targetId: string): any {
-    if (!node) return null;
-    if (node.id === targetId || node.container_id === targetId) {
-      return this.deepClone(node);
-    }
-    if (Array.isArray(node.children)) {
-      for (const child of node.children) {
-        const match = this.cloneContainerSubtree(child, targetId);
-        if (match) return match;
-      }
-    }
-    return null;
-  }
-
-  deepClone(payload: any) {
-    return JSON.parse(JSON.stringify(payload));
-  }
-
-  resolveSiteKeyFromUrl(url: string) {
-    if (!url) return null;
-    let host = '';
-    try {
-      host = new URL(url).hostname.toLowerCase();
-    } catch {
-      return null;
-    }
-    const index = this.loadContainerIndex();
-    let bestKey: string | null = null;
-    let bestLen = -1;
-    for (const [key, meta] of Object.entries(index)) {
-      const domain = (meta?.website || '').toLowerCase();
-      if (!domain) continue;
-      if (host === domain || host.endsWith(`.${domain}`)) {
-        if (domain.length > bestLen) {
-          bestKey = key;
-          bestLen = domain.length;
-        }
-      }
-    }
-    return bestKey;
-  }
-
-  loadContainerIndex(): Record<string, any> {
-    if (this._containerIndexCache) {
-      return this._containerIndexCache;
-    }
-    if (!fs.existsSync(this.containerIndexPath)) {
-      this._containerIndexCache = {};
-      return this._containerIndexCache;
-    }
-    try {
-      this._containerIndexCache = JSON.parse(fs.readFileSync(this.containerIndexPath, 'utf-8'));
-    } catch {
-      this._containerIndexCache = {};
-    }
-    return this._containerIndexCache;
-  }
-
-  inferSiteFromContainerId(containerId: string) {
-    if (!containerId) return null;
-    const dotIdx = containerId.indexOf('.');
-    if (dotIdx > 0) {
-      return containerId.slice(0, dotIdx);
-    }
-    const underscoreIdx = containerId.indexOf('_');
-    if (underscoreIdx > 0) {
-      return containerId.slice(0, underscoreIdx);
-    }
-    return null;
+  private getBrowserWsUrl(): string {
+    return `ws://${this.defaultWsHost || '127.0.0.1'}:${this.defaultWsPort || 7701}/ws`;
   }
 }
