@@ -310,7 +310,14 @@ export class UiController {
     nextParent.children = childList;
     await this.writeUserContainerDefinition(siteKey, containerId, normalizedChild);
     await this.writeUserContainerDefinition(siteKey, parentId, nextParent);
-    return this.handleContainerInspect({ profile: payload.profile, url: payload.url });
+    // 正确流程：写入定义后立即进行容器匹配，并通过 containers.matched 事件推送最新树
+    return this.handleContainerMatch({
+      profile: payload.profile,
+      url: payload.url,
+      maxDepth: payload.maxDepth,
+      maxChildren: payload.maxChildren,
+      rootSelector: payload.rootSelector,
+    });
   }
 
   async handleContainerUpdateAlias(payload = {}) {
