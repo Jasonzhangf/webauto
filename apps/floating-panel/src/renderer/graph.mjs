@@ -619,8 +619,7 @@ function renderContainerNode(parent, node, x, y, depth, domNodesMap) {
       gSuggest.appendChild(textSuggest);
       parent.appendChild(gSuggest);
 
-      // 点击确认添加
-      rectSuggest.addEventListener('click', async (e) => {
+      const handleConfirmClick = async (e) => {
         e.stopPropagation();
         logger.info('picker', 'Confirm adding sub-container', suggestedNode);
         
@@ -727,7 +726,11 @@ function renderContainerNode(parent, node, x, y, depth, domNodesMap) {
         } catch (err) {
           logger.error('picker', 'Error creating container', err);
         }
-      });
+      };
+
+      // 点击整行任意位置都触发确认，避免点击不到 rect
+      rectSuggest.addEventListener('click', handleConfirmClick);
+      gSuggest.addEventListener('click', handleConfirmClick);
 
       currentY += 32;
       totalHeight = currentY - y;
