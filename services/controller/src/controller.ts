@@ -1001,10 +1001,63 @@ export class UiController {
     throw new Error('readContainerDefinition is not implemented in controller.ts');
   }
 
-  private async sendWsCommand(_url: string, _payload: any, _timeout = 10000): Promise<any> {
-    throw new Error('sendWsCommand is not implemented in controller.ts');
-  }
+  private async sendWsCommand(_url: string, _payload: any, _timeout = 15000): Promise<any> {
+    return new Promise((resolve, reject) => {
+      const socket = new WebSocket(_url);
+      let settled = false;
+      const timeout = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        socket.terminate();
+        reject(new Error("WebSocket command timeout"));
+      }, _timeout);
 
+      const cleanup = () => {
+        clearTimeout(timeout);
+        socket.removeAllListeners();
+      };
+
+      socket.once("open", () => {
+        try {
+          socket.send(JSON.stringify(_payload));
+        } catch (err) {
+          cleanup();
+          if (!settled) {
+            settled = true;
+            reject(err);
+          }
+        }
+      });
+
+      socket.once("message", (data) => {
+        cleanup();
+        if (settled) return;
+        settled = true;
+        try {
+          resolve(JSON.parse(data.toString("utf-8")));
+        } catch (err) {
+          reject(err);
+        } finally {
+          socket.close();
+        }
+      });
+
+      socket.once("error", (err) => {
+        cleanup();
+        if (settled) return;
+        settled = true;
+        reject(err);
+      });
+
+      socket.once("close", () => {
+        cleanup();
+        if (!settled) {
+          settled = true;
+          reject(new Error("WebSocket closed before response"));
+        }
+      });
+    });
+  }
   private getBrowserWsUrl(): string {
     return `ws://${this.defaultWsHost || '127.0.0.1'}:${this.defaultWsPort || 7701}/ws`;
   }

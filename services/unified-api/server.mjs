@@ -1,6 +1,9 @@
 #!/usr/bin/env node
 import { UiController } from '../../services/controller/src/controller.js';
 import { WebSocketServer, WebSocket } from 'ws';
+// 使用构建后的 ESM 版本，避免直接引用 TS 源文件
+import { EventBus } from '../../libs/operations-framework/dist/event-driven/EventBus.js';
+import { BindingRegistry } from '../../libs/containers/src/binding/BindingRegistry.js';
 import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -28,6 +31,10 @@ const cliTargets = {
 
 class UnifiedApiServer {
   constructor() {
+    // Create EventBus and BindingRegistry
+    this.eventBus = new EventBus({ historyLimit: 1000 });
+    this.bindingRegistry = new BindingRegistry(this.eventBus);
+
     this.controller = new UiController({
       repoRoot,
       userContainerRoot,
@@ -40,11 +47,20 @@ class UnifiedApiServer {
       defaultHttpProtocol,
       messageBus: {
         publish: (topic, payload) => {
+          // Emit to EventBus
+          this.eventBus.emit(topic, payload, 'UiController').catch(err => {
+            console.error('[unified-api] EventBus emit failed:', err);
+          });
+          
+          // Broadcast to WebSocket clients
           this.broadcastBusEvent(topic, payload);
         },
       },
     });
 
+    // Setup event listeners for container operations
+    this.setupEventListeners();
+    
     this.clients = new Set();
     this.lastHandshakePayload = null;
   }
@@ -58,6 +74,44 @@ class UnifiedApiServer {
     const raw = Buffer.concat(chunks).toString('utf8').trim();
     if (!raw) return {};
     return JSON.parse(raw);
+  }
+
+  setupEventListeners() {
+    // Listen to container:discovered events and execute bound operations
+    this.eventBus.on('container:*:discovered', async (data) => {
+      console.log('[unified-api] Container discovered:', data.containerId);
+      
+      // Find and execute binding rules
+      const rules = this.bindingRegistry.findRulesByTrigger('event', 'container:*:discovered');
+      for (const rule of rules) {
+        try {
+          await this.bindingRegistry.executeRule(rule, { 
+            ...data,
+            graph: { lastDiscoveredId: data.containerId }
+          });
+        } catch (err) {
+          console.error('[unified-api] Failed to execute binding rule:', err);
+        }
+      }
+    });
+
+    // Listen to operation:execute events
+    this.eventBus.on('operation:*:execute', async (data) => {
+      console.log('[unified-api] Operation execute request:', data.operationType, 'on', data.containerId);
+      
+      // Execute the operation via controller
+      try {
+        const result = await this.controller.handleAction('operations:run', {
+          op: data.operationType,
+          config: data.config,
+          containerId: data.containerId,
+          sessionId: data.sessionId
+        });
+        console.log('[unified-api] Operation executed:', result);
+      } catch (err) {
+        console.error('[unified-api] Operation execution failed:', err);
+      }
+    });
   }
 
   async start() {
@@ -248,8 +302,19 @@ class UnifiedApiServer {
 
     if (envelope.type === 'action' || envelope.action) {
       const action = envelope.action;
-      const payload = envelope.payload || {};
+      const payload = { ...(envelope.payload || {}) };
       const requestId = envelope.requestId || envelope.id;
+      
+      // 兼容 WebSocket 调用使用 session_id / profile_id 的情况，
+      // 统一归一到 controller 期望的字段名。
+      if (payload && typeof payload === 'object') {
+        if (payload.session_id && !payload.sessionId) {
+          payload.sessionId = payload.session_id;
+        }
+        if (payload.profile_id && !payload.profile && !payload.profileId) {
+          payload.profile = payload.profile_id;
+        }
+      }
       
       if (!action) {
         this.safeSend(socket, { type: 'response', requestId, success: false, error: 'Missing action' });

@@ -5,6 +5,7 @@ import {
   applyMatchSnapshot,
 } from './graph.mjs';
 import { logger } from './logger.mts';
+import { FLOATING_PANEL_VERSION } from './version.mts';
 
 const log = (...args: any[]) => {
   console.log('[ui-renderer]', ...args);
@@ -15,11 +16,15 @@ const healthEl = document.getElementById('health');
 const dragArea = document.getElementById('drag-area');
 const loadingIndicator = document.getElementById('loadingIndicator');
 const loadingLabel = loadingIndicator?.querySelector('.loading-label') as HTMLElement | null;
+const versionLabel = document.getElementById('versionLabel');
 
 function setStatus(text: string, ok: boolean) {
   if (statusEl) {
     statusEl.textContent = text;
     statusEl.style.color = ok ? '#4CAF50' : '#f44336';
+  }
+  if (versionLabel) {
+    versionLabel.textContent = `v${FLOATING_PANEL_VERSION}`;
   }
 }
 
@@ -59,6 +64,17 @@ window.addEventListener('webauto:graph-loading', ((evt: Event) => {
   const detail = (evt as CustomEvent<any>).detail || {};
   const pending = Number(detail.pending || 0);
   setLoadingState(pending, detail);
+}) as EventListener);
+
+window.addEventListener('webauto:graph-status', ((evt: Event) => {
+  const detail = (evt as CustomEvent<any>).detail || {};
+  const phase = detail.phase as string | undefined;
+
+  if (phase === 'error') {
+    setStatus(detail.reason || detail.message || '图谱加载失败', false);
+  } else if (phase === 'snapshot:ready' || phase === 'ready') {
+    setStatus('图谱已更新', true);
+  }
 }) as EventListener);
 
 if (!(window as any).api) {

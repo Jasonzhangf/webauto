@@ -1,7 +1,7 @@
 {
   "name": "webauto",
   "private": true,
-  "version": "0.1.002",
+  "version": "0.1.003",
   "type": "module",
   "dependencies": {
     "esbuild-register": "^3.6.0",
@@ -15,7 +15,7 @@
     "start:mcp:browser": "npx @browsermcp/mcp@latest",
     "actions:validate": "node scripts/actions-validate.cjs",
     "actions:run": "node scripts/run-action.cjs",
-    "build": "npm run prebuild && npm run build:services && npm run self-check:post-build && npm run ui:test",
+    "build": "npm run prebuild && npm run build:services && npm run test:floating-panel:logic && npm run self-check:post-build && npm run ui:test",
     "build:services": "node scripts/build/run-services-build.mjs",
     "self-check:post-build": "node scripts/self-check.mjs --quick --post-build",
     "start": "node dist/src/server.js",
@@ -58,6 +58,7 @@
     "test:graph-engine": "tsx --test modules/graph-engine/tests/**/*.ts",
     "test:dom-branch": "tsx --test modules/dom-branch-fetcher/tests/**/*.ts",
     "test:floating-orchestrator": "tsx apps/floating-panel/core/__tests__/orchestrator.test.mjs",
+    "test:floating-panel:logic": "cd apps/floating-panel && npm run test:logic",
     "prebuild": "node scripts/self-check.mjs --quick",
     "self-check": "node scripts/self-check.mjs",
     "self-check:quick": "node scripts/self-check.mjs --quick",

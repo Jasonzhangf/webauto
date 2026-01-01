@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Simple Test Page</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      padding: 20px;
+    }
+    .container {
+      border: 2px solid #333;
+      padding: 20px;
+      margin: 10px 0;
+    }
+    .item {
+      border: 1px solid #999;
+      padding: 10px;
+      margin: 5px 0;
+    }
+    a {
+      color: #0066cc;
+      text-decoration: none;
+    }
+    a:hover {
+      text-decoration: underline;
+    }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <h1>Test Page</h1>
+    
+    <div id="main-container" class="container">
+      <h2>Main Container</h2>
+      
+      <div id="list-container" class="container">
+        <h3>List Container</h3>
+        
+        <div class="item" data-id="item-1">
+          <h4>Item 1</h4>
+          <p>This is item 1</p>
+          <a href="https://example.com/1">Link 1</a>
+        </div>
+        
+        <div class="item" data-id="item-2">
+          <h4>Item 2</h4>
+          <p>This is item 2</p>
+          <a href="https://example.com/2">Link 2</a>
+        </div>
+        
+        <div class="item" data-id="item-3">
+          <h4>Item 3</h4>
+          <p>This is item 3</p>
+          <a href="https://example.com/3">Link 3</a>
+        </div>
+      </div>
+    </div>
+  </div>
+  
+  <script>
+    // Add some dynamic behavior for testing
+    document.addEventListener('DOMContentLoaded', () => {
+      console.log('Test page loaded');
+    });
+  </script>
+</body>
+</html>

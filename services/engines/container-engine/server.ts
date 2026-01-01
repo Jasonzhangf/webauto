@@ -74,8 +74,6 @@ function depsFor(sessionId: string) {
   };
 }
 
-}
-
 // ---------- Debug endpoints (picker + save + library) ----------
 async function wfEvalJSONRaw(sessionId: string, code: string) {
   const r = await fetch(`http://127.0.0.1:${WF_PORT}/v1/dev/eval-code`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ sessionId, code }) });

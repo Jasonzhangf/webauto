@@ -44,37 +44,3 @@ export function findNearestContainer(root: any, domPath: string | null): any | n
   traverse(root);
   return bestMatch || root;
 }
-
-export function populateSelectorMap(
-  containerData: any,
-  selectorMap: Map<string, string>,
-  domNodePositions: Map<string, any>,
-): void {
-  selectorMap.clear();
-  if (!containerData) return;
-
-  function traverse(node: any): void {
-    if (!node || typeof node !== 'object') return;
-
-    if (node.selectors && Array.isArray(node.selectors)) {
-      node.selectors.forEach((selector: any) => {
-        if (selector.css) {
-          const domNodes = Array.from(domNodePositions.keys());
-          const matchedNode = domNodes.find(() => {
-            return selector.css.includes('#') ? false : true;
-          });
-          if (matchedNode) {
-            selectorMap.set(selector.css, matchedNode);
-          }
-        }
-      });
-    }
-
-    if (node.children && Array.isArray(node.children)) {
-      node.children.forEach((child: any) => traverse(child));
-    }
-  }
-
-  traverse(containerData);
-}
-

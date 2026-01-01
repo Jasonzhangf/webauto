@@ -1,4 +1,5 @@
 import { logger } from '../logger.mts';
+import { computeContainerDomConnections } from './matcher.mts';
 
 export interface GraphRenderState {
   canvas: SVGSVGElement | null;
@@ -75,6 +76,15 @@ export function renderGraph(state: GraphRenderState, deps: GraphRenderDeps): voi
   if (containerData) {
     const containerGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
     containerGroup.setAttribute('transform', 'translate(0, 0)');
+
+    // 每次渲染前清理建议节点的锚点坐标，由 renderContainerNode 在实际绘制时写入。
+    if (suggestedNode) {
+      try {
+        delete (suggestedNode as any).anchorX;
+        delete (suggestedNode as any).anchorY;
+      } catch {}
+    }
+
     renderContainerNode(
       {
         parent: containerGroup,
@@ -89,6 +99,7 @@ export function renderGraph(state: GraphRenderState, deps: GraphRenderDeps): voi
         suggestedNode,
         currentProfile,
         currentUrl,
+        currentRootSelector,
       },
     );
     mainGroup.appendChild(containerGroup);
@@ -114,7 +125,7 @@ export function renderGraph(state: GraphRenderState, deps: GraphRenderDeps): voi
     );
     mainGroup.appendChild(domGroup);
 
-    drawAllConnections(
+      drawAllConnections(
       {
         parent: mainGroup,
         containerData,
@@ -127,13 +138,25 @@ export function renderGraph(state: GraphRenderState, deps: GraphRenderDeps): voi
     );
 
     if (suggestedNode) {
-      const containerPos = containerNodePositions.get(suggestedNode.parentId);
       const domPos = domNodePositions.get(suggestedNode.domPath);
-      if (containerPos && domPos) {
+
+      // 优先使用 renderContainerNode 在建议卡片上写入的锚点坐标，
+      // 若不存在则回退到父容器中心点，避免旧数据导致崩溃。
+      const parentPos = containerNodePositions.get(suggestedNode.parentId || suggestedNode.containerId || '');
+      const anchorX =
+        typeof suggestedNode.anchorX === 'number'
+          ? suggestedNode.anchorX
+          : parentPos?.x ?? null;
+      const anchorY =
+        typeof suggestedNode.anchorY === 'number'
+          ? suggestedNode.anchorY
+          : parentPos?.y ?? null;
+
+      if (domPos && anchorX !== null && anchorY !== null) {
         drawConnectionToDom(
           mainGroup,
-          containerPos.x,
-          containerPos.y,
+          anchorX,
+          anchorY,
           domPos.indicatorX,
           domPos.indicatorY,
           '#fbbc05',
@@ -158,6 +181,7 @@ interface RenderContainerNodeParams {
   suggestedNode: any;
   currentProfile: string | null;
   currentUrl: string | null;
+  currentRootSelector: string | null;
 }
 
 function renderContainerNode(params: RenderContainerNodeParams): number {
@@ -167,12 +191,14 @@ function renderContainerNode(params: RenderContainerNodeParams): number {
     x,
     y,
     depth,
+    domNodePositions,
     containerNodePositions,
     expandedNodes,
     selectedContainer,
     suggestedNode,
     currentProfile,
     currentUrl,
+    currentRootSelector,
   } = params;
 
   const nodeId = node.id || node.name || 'root';
@@ -180,7 +206,27 @@ function renderContainerNode(params: RenderContainerNodeParams): number {
   const hasChildren = (node.children && node.children.length > 0) || (node.childCount > 0);
   const isSelected = selectedContainer === nodeId;
 
-  containerNodePositions.set(nodeId, { x: x + depth * 20 + 180, y: y + 14 });
+  // 行高与矩形高度保持一致，便于连线完全居中
+  const ROW_HEIGHT = 28;
+  const VERTICAL_GAP = 8;
+
+  containerNodePositions.set(nodeId, {
+    x: x + depth * 20 + 180,
+    y: y + ROW_HEIGHT / 2,
+  });
+
+  if ((window as any).api?.debugLog) {
+    (window as any).api
+      .debugLog('floating-panel-graph', 'container-layout', {
+        id: nodeId,
+        depth,
+        x,
+        y,
+        hasChildren,
+        isExpanded,
+      })
+      .catch(() => {});
+  }
 
   const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
   g.setAttribute('transform', `translate(${x + depth * 20}, ${y})`);
@@ -211,14 +257,36 @@ function renderContainerNode(params: RenderContainerNodeParams): number {
 
   rect.addEventListener('click', (e) => {
     e.stopPropagation();
-    // 容器点击的行为仍然由调用方管理（当前模块只负责渲染）
-    // 这里保留事件绑定，实际状态更新在外层完成
-    if ((window as any).api?.highlightContainer && node.id) {
-      (window as any).api
-        .highlightContainer(
-          node.id,
+
+    const api = (window as any).api;
+    if (!api) return;
+
+    // 清除旧的 DOM 高亮
+    if (typeof api.clearHighlight === 'function') {
+      api
+        .clearHighlight('dom')
+        .catch((err: unknown) => {
+          logger.error('clear-highlight', 'Failed to clear DOM highlight', err);
+        });
+    }
+
+    // 优先使用匹配结果中的 dom_path / selector
+    let target: string | null = null;
+    if (node.match && Array.isArray(node.match.nodes) && node.match.nodes.length > 0) {
+      const matchNode = node.match.nodes[0];
+      target = matchNode.selector || matchNode.dom_path || null;
+    } else if (Array.isArray(node.selectors) && node.selectors.length > 0) {
+      const first = node.selectors[0];
+      target = (typeof first === 'string' ? first : first?.css) || null;
+    }
+
+    if (target && typeof api.highlightElement === 'function') {
+      api
+        .highlightElement(
+          target,
+          'green',
+          { channel: 'container', rootSelector: currentRootSelector, url: currentUrl },
           currentProfile,
-          { url: currentUrl },
         )
         .catch((err: unknown) => {
           logger.error('container-highlight', 'Failed to highlight container', err);
@@ -261,28 +329,33 @@ function renderContainerNode(params: RenderContainerNodeParams): number {
   g.appendChild(nameText);
   parent.appendChild(g);
 
-  let totalHeight = 28;
+  let totalHeight = ROW_HEIGHT;
 
-  if (hasChildren && isExpanded) {
-    let currentY = y + 32;
+  // 只要当前节点是展开状态，就渲染“建议子容器”和真实子容器；
+  // 即使当前还没有 children，也允许出现确认框。
+  if (isExpanded) {
+    let currentY = y + ROW_HEIGHT + VERTICAL_GAP;
 
     if (suggestedNode && suggestedNode.parentId === nodeId) {
       const vertLine = document.createElementNS('http://www.w3.org/2000/svg', 'line');
       vertLine.setAttribute('x1', '10');
-      vertLine.setAttribute('y1', String(y + 28));
+      // 从父节点垂直居中位置开始连线，避免与容器中心错位
+      vertLine.setAttribute('y1', String(y + ROW_HEIGHT / 2));
       vertLine.setAttribute('x2', '10');
-      vertLine.setAttribute('y2', String(currentY + 14));
-      vertLine.setAttribute('stroke', '#fbbc05');
+      vertLine.setAttribute('y2', String(currentY + ROW_HEIGHT / 2));
+      // 建议子容器与父节点之间仍然保留树结构连线，
+      // 但使用普通树线颜色，避免与「建议→DOM」橙色连线混淆。
+      vertLine.setAttribute('stroke', '#666');
       vertLine.setAttribute('stroke-width', '1');
       vertLine.setAttribute('stroke-dasharray', '4 2');
       parent.appendChild(vertLine);
 
       const horizLine = document.createElementNS('http://www.w3.org/2000/svg', 'line');
       horizLine.setAttribute('x1', '10');
-      horizLine.setAttribute('y1', String(currentY + 14));
+      horizLine.setAttribute('y1', String(currentY + ROW_HEIGHT / 2));
       horizLine.setAttribute('x2', String((depth + 1) * 20 + 10));
-      horizLine.setAttribute('y2', String(currentY + 14));
-      horizLine.setAttribute('stroke', '#fbbc05');
+      horizLine.setAttribute('y2', String(currentY + ROW_HEIGHT / 2));
+      horizLine.setAttribute('stroke', '#666');
       horizLine.setAttribute('stroke-width', '1');
       horizLine.setAttribute('stroke-dasharray', '4 2');
       parent.appendChild(horizLine);
@@ -315,35 +388,67 @@ function renderContainerNode(params: RenderContainerNodeParams): number {
       gSuggest.appendChild(textSuggest);
       parent.appendChild(gSuggest);
 
-      currentY += 32;
-      totalHeight = currentY - y;
+      // 记录“确认添加子容器”卡片的中心坐标，供连线使用（起点从当前建议节点出发）。
+      try {
+        if (suggestedNode) {
+          (suggestedNode as any).anchorX = x + (depth + 1) * 20 + 90; // 180 / 2
+          (suggestedNode as any).anchorY = currentY + ROW_HEIGHT / 2;
+        }
+      } catch {}
+
+      const handleConfirmClick = async (event: MouseEvent) => {
+        event.stopPropagation();
+        logger.info('picker', 'Confirm adding sub-container', suggestedNode);
+
+        try {
+          // 将“确认添加”转交给 graph.mjs，由其在本地构建虚拟子容器节点
+          const detail = {
+            parentId: suggestedNode.parentId,
+            domPath: suggestedNode.domPath,
+            selector: suggestedNode.selector,
+            name: suggestedNode.name,
+          };
+          window.dispatchEvent(
+            new CustomEvent('webauto:container-confirm-add', { detail }),
+          );
+        } catch (err) {
+          logger.error('picker', 'Error dispatching virtual child event', err);
+        }
+      };
+
+      rectSuggest.addEventListener('click', handleConfirmClick);
+      gSuggest.addEventListener('click', handleConfirmClick);
+
+	      currentY += ROW_HEIGHT + VERTICAL_GAP;
+	      totalHeight = currentY - y;
     }
 
     if (Array.isArray(node.children)) {
       node.children.forEach((child) => {
         const vertLine = document.createElementNS('http://www.w3.org/2000/svg', 'line');
         vertLine.setAttribute('x1', '10');
-        vertLine.setAttribute('y1', String(y + 28));
+        // 使用父节点垂直中心点作为树连线起点
+        vertLine.setAttribute('y1', String(y + ROW_HEIGHT / 2));
         vertLine.setAttribute('x2', '10');
-        vertLine.setAttribute('y2', String(currentY + 14));
+        vertLine.setAttribute('y2', String(currentY + ROW_HEIGHT / 2));
         vertLine.setAttribute('stroke', '#666');
         vertLine.setAttribute('stroke-width', '1');
         parent.appendChild(vertLine);
 
         const horizLine = document.createElementNS('http://www.w3.org/2000/svg', 'line');
         horizLine.setAttribute('x1', '10');
-        horizLine.setAttribute('y1', String(currentY + 14));
+        horizLine.setAttribute('y1', String(currentY + ROW_HEIGHT / 2));
         horizLine.setAttribute('x2', String((depth + 1) * 20 + 10));
-        horizLine.setAttribute('y2', String(currentY + 14));
+        horizLine.setAttribute('y2', String(currentY + ROW_HEIGHT / 2));
         horizLine.setAttribute('stroke', '#666');
         horizLine.setAttribute('stroke-width', '1');
         parent.appendChild(horizLine);
 
-        const childHeight = renderContainerNode({
-          parent,
-          node: child,
-          x,
-          y: currentY,
+	        const childHeight = renderContainerNode({
+	          parent,
+	          node: child,
+	          x,
+	          y: currentY,
           depth: depth + 1,
           domNodePositions,
           containerNodePositions,
@@ -352,15 +457,16 @@ function renderContainerNode(params: RenderContainerNodeParams): number {
           suggestedNode,
           currentProfile,
           currentUrl,
+          currentRootSelector,
         });
 
-        currentY += childHeight + 4;
-        totalHeight = currentY - y;
-      });
-    }
-  } else {
-    return 24;
-  }
+	        currentY += childHeight + VERTICAL_GAP;
+	        totalHeight = currentY - y;
+	      });
+	    }
+	  } else {
+	    return ROW_HEIGHT;
+	  }
 
   return totalHeight;
 }
@@ -583,7 +689,7 @@ interface DrawConnectionsParams {
 }
 
 function drawAllConnections(params: DrawConnectionsParams, deps: GraphRenderDeps): void {
-  const { parent, containerData, domData, containerNodePositions, domNodePositions, selectorMap } = params;
+  const { parent, containerData, domData, containerNodePositions, domNodePositions } = params;
 
   console.log('[drawAllConnections] Called');
   console.log('[drawAllConnections] containerData:', !!containerData, 'domData:', !!domData);
@@ -613,8 +719,10 @@ function drawAllConnections(params: DrawConnectionsParams, deps: GraphRenderDeps
     domData ? domData.children?.length || 0 : 'N/A',
   );
 
-  populateSelectorMap(containerData, selectorMap, domNodePositions);
-  console.log('[drawAllConnections] selectorMap populated with', selectorMap.size, 'entries');
+  // 1) 使用通用匹配函数，仅依赖 container_tree 与 dom_tree 本身的数据，
+  //    产生「容器 → DOM 路径」的映射。
+  const connections = computeContainerDomConnections(containerData, domData);
+  console.log('[drawAllConnections] computed connections:', connections.length);
 
   function drawConnectionsForNode(node: any): void {
     if (!node || typeof node !== 'object') {
@@ -622,34 +730,23 @@ function drawAllConnections(params: DrawConnectionsParams, deps: GraphRenderDeps
       return;
     }
 
-    console.log(
-      '[drawConnectionsForNode] Checking node:',
-      node.id || node.name,
-      'has match:',
-      !!node.match,
-      'match exists:',
-      !!node.match?.nodes,
-      'nodes length:',
-      node.match?.nodes?.length || 0,
-    );
+    const nodeId = node.id || node.name;
+    if (!nodeId) {
+      console.log('[drawConnectionsForNode] Node without id/name, skipping');
+      return;
+    }
 
-    if (node.match && node.match.nodes && node.match.nodes.length > 0) {
-      console.log('[drawConnectionsForNode] Using match nodes for:', node.id || node.name);
-      const containerPos = containerNodePositions.get(node.id || node.name);
+    // 2) 从预先计算好的 connections 中筛选出当前容器的所有 domPath。
+    const targets = connections.filter((c) => c.containerId === nodeId);
+    const containerPos = containerNodePositions.get(nodeId);
 
-      for (const matchNode of node.match.nodes) {
-        let domPath = matchNode.dom_path;
-        if (!domPath && matchNode.selector) {
-          domPath = selectorMap.get(matchNode.selector);
-        }
-
+    if (targets.length > 0) {
+      for (const { domPath } of targets) {
         const domPos = domNodePositions.get(domPath);
-        const selector = matchNode.selector;
 
-        console.log('[drawConnectionsForNode] Drawing connection:', {
-          containerId: node.id || node.name,
+        console.log('[drawConnectionsForNode] Drawing connection (pure-match):', {
+          containerId: nodeId,
           domPath,
-          selector,
           domPos,
         });
 
@@ -671,23 +768,13 @@ function drawAllConnections(params: DrawConnectionsParams, deps: GraphRenderDeps
           path.setAttribute('opacity', '0.8');
           parent.appendChild(path);
 
-          console.log(
-            '[drawConnectionsForNode] Drew connection from',
-            node.id || node.name,
-            'to',
-            domPath,
-          );
-
-          if ((window as any).api?.debugLog && (window as any).DEBUG === '1') {
-            (window as any).api
-              .debugLog('floating-panel-graph', 'drawConnectionsForNode', {
-                containerId: node.id || node.name,
-                domPath,
-                status: 'drawn',
-              })
-              .catch((err: unknown) => {
-                logger.error('graph-render', 'Failed to log connection success', err);
-              });
+          if ((window as any).DEBUG === '1') {
+            console.log(
+              '[drawConnectionsForNode] Drew connection from',
+              nodeId,
+              'to',
+              domPath,
+            );
           }
         } else if (domPath) {
           console.log(
@@ -696,49 +783,6 @@ function drawAllConnections(params: DrawConnectionsParams, deps: GraphRenderDeps
             ': missing positions or invalid Y',
           );
           deps.queueDomPathPreload(domPath, 'connection-miss');
-
-          if ((window as any).api?.debugLog && (window as any).DEBUG === '1') {
-            (window as any).api
-              .debugLog('floating-panel-graph', 'drawConnectionsForNode', {
-                containerId: node.id || node.name,
-                domPath,
-                status: 'failed',
-                reason: 'missing positions or invalid Y',
-                positionInMap: domNodePositions.has(domPath),
-                mapKeysSample: Array.from(domNodePositions.keys()).slice(0, 5),
-              })
-              .catch((err: unknown) => {
-                logger.error('graph-render', 'Failed to log connection failure', err);
-              });
-          }
-        }
-      }
-    } else if (node.match && node.match.selectors && node.match.selectors.length > 0) {
-      console.log('[drawConnectionsForNode] Using selectors for:', node.id || node.name);
-      const containerPos = containerNodePositions.get(node.id || node.name);
-
-      for (const selector of node.match.selectors) {
-        const domPath = selectorMap.get(selector);
-        const domPos = domNodePositions.get(domPath);
-
-        if (containerPos && domPos) {
-          const startX = containerPos.x;
-          const startY = containerPos.y;
-          const endX = domPos.indicatorX;
-          const endY = domPos.indicatorY;
-
-          const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-          const midX = (startX + endX) / 2;
-          path.setAttribute(
-            'd',
-            `M ${startX} ${startY} C ${midX} ${startY}, ${midX} ${endY}, ${endX} ${endY}`,
-          );
-          path.setAttribute('stroke', '#4CAF50');
-          path.setAttribute('stroke-width', '2');
-          path.setAttribute('fill', 'none');
-          path.setAttribute('stroke-dasharray', '4,2');
-          path.setAttribute('opacity', '0.7');
-          parent.appendChild(path);
         }
       }
     } else {
@@ -788,35 +832,10 @@ function drawConnectionToDom(
 }
 
 function populateSelectorMap(
-  containerData: any,
+  _containerData: any,
   selectorMap: Map<string, string>,
-  domNodePositions: GraphRenderState['domNodePositions'],
+  _domNodePositions: GraphRenderState['domNodePositions'],
 ): void {
+  // 硬编码 selector → DOM 的映射已废弃，这里仅清空旧数据，避免误用。
   selectorMap.clear();
-  if (!containerData) return;
-
-  function traverse(node: any): void {
-    if (!node || typeof node !== 'object') return;
-
-    if (Array.isArray(node.selectors)) {
-      node.selectors.forEach((selector: any) => {
-        if (selector.css) {
-          const domNodes = Array.from(domNodePositions.keys());
-          const matchedNode = domNodes.find(() => {
-            return selector.css.includes('#') ? false : true;
-          });
-          if (matchedNode) {
-            selectorMap.set(selector.css, matchedNode);
-          }
-        }
-      });
-    }
-
-    if (node.children && Array.isArray(node.children)) {
-      node.children.forEach((child: any) => traverse(child));
-    }
-  }
-
-  traverse(containerData);
 }
-

@@ -587,29 +587,52 @@ export class EventDrivenContainerDiscovery {
 
   /**
    * 分析容器关系
+   *
+   * 目标：每个子容器只连到“最近的父容器”（面积最小且包裹它的容器），
+   * 避免所有新容器都挂在同一个高层父节点上。
    */
   private analyzeContainerRelationships(containers: DiscoveredContainer[]): ContainerRelationship[] {
     const relationships: ContainerRelationship[] = [];
-    
-    // 简化的关系分析
-    for (let i = 0; i < Math.min(containers.length, 10); i++) {
-      const parent = containers[i];
-      
-      // 查找可能的子容器
-      for (let j = i + 1; j < Math.min(i + 4, containers.length); j++) {
-        const child = containers[j];
-        
-        // 简单的位置关系检查
-        if (this.isContained(parent.rect, child.rect)) {
-          relationships.push({
-            parent: parent.id,
-            child: child.id,
-            type: 'contains'
-          });
+
+    if (!containers.length) {
+      return relationships;
+    }
+
+    // 预先计算面积，方便比较“最近的父容器”
+    const areas = new Map<string, number>();
+    for (const c of containers) {
+      const rect = c.rect || { width: 0, height: 0 };
+      const area = Math.max(0, (rect.width || 0) * (rect.height || 0));
+      areas.set(c.id, area);
+    }
+
+    for (const child of containers) {
+      let bestParent: DiscoveredContainer | null = null;
+      let bestArea = Number.POSITIVE_INFINITY;
+
+      for (const candidate of containers) {
+        if (candidate.id === child.id) {
+          continue;
+        }
+        if (!this.isContained(candidate.rect, child.rect)) {
+          continue;
+        }
+        const candidateArea = areas.get(candidate.id) ?? Number.POSITIVE_INFINITY;
+        if (candidateArea < bestArea) {
+          bestArea = candidateArea;
+          bestParent = candidate;
         }
       }
+
+      if (bestParent) {
+        relationships.push({
+          parent: bestParent.id,
+          child: child.id,
+          type: 'contains'
+        });
+      }
     }
-    
+
     return relationships;
   }
 

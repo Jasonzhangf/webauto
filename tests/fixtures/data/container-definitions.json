@@ -1,0 +1,67 @@
+{
+  "test_page": {
+    "id": "test_page",
+    "name": "Test Page",
+    "type": "page",
+    "selectors": [
+      {
+        "css": "#app",
+        "variant": "primary",
+        "score": 1.0
+      }
+    ],
+    "capabilities": ["highlight", "find-child"],
+    "children": ["test_page.main_container"]
+  },
+  "test_page.main_container": {
+    "id": "test_page.main_container",
+    "name": "Main Container",
+    "type": "section",
+    "selectors": [
+      {
+        "css": "#main-container",
+        "variant": "primary",
+        "score": 1.0
+      }
+    ],
+    "capabilities": ["highlight", "find-child"],
+    "children": ["test_page.list_container"]
+  },
+  "test_page.list_container": {
+    "id": "test_page.list_container",
+    "name": "List Container",
+    "type": "collection",
+    "selectors": [
+      {
+        "css": "#list-container",
+        "variant": "primary",
+        "score": 1.0
+      }
+    ],
+    "capabilities": ["highlight", "find-child", "scroll"],
+    "children": ["test_page.item"]
+  },
+  "test_page.item": {
+    "id": "test_page.item",
+    "name": "List Item",
+    "type": "content",
+    "selectors": [
+      {
+        "css": ".item",
+        "variant": "primary",
+        "score": 1.0
+      }
+    ],
+    "capabilities": ["highlight", "extract"],
+    "operations": [
+      {
+        "type": "extract",
+        "config": {
+          "target": "links",
+          "selector": "a[href]",
+          "include_text": true
+        }
+      }
+    ]
+  }
+}

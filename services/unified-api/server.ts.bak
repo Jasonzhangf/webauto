@@ -1,9 +1,11 @@
-#!/usr/bin/env node
 import { UiController } from '../../services/controller/src/controller.js';
+import { setupContainerOperationsRoutes } from './container-operations.mjs';
 import { WebSocketServer, WebSocket } from 'ws';
+import { EventBus, globalEventBus } from '../../libs/operations-framework/src/event-driven/EventBus.js';
 import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
+import { SessionManager } from '../browser-service/SessionManager.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -27,6 +29,14 @@ const cliTargets = {
 };
 
 class UnifiedApiServer {
+  private controller: UiController;
+  private wsClients: Set<WebSocket>;
+  private busClients: Set<WebSocket>;
+  private subscriptions: Map<WebSocket, Set<string>>;
+  private eventBus: EventBus;
+  private containerSubscriptions: Map<string, Set<WebSocket>> = new Map();
+  private bindingRules: any;
+
   constructor() {
     this.controller = new UiController({
       repoRoot,
@@ -39,16 +49,149 @@ class UnifiedApiServer {
       defaultHttpPort,
       defaultHttpProtocol,
       messageBus: {
-        publish: (topic, payload) => {
-          this.broadcastBusEvent(topic, payload);
+        publish: (topic: string, payload: any) => {
+          this.broadcastEvent(topic, payload);
         },
       },
     });
 
-    this.clients = new Set();
+    this.wsClients = new Set();
+    this.busClients = new Set();
+    this.subscriptions = new Map();
+    this.eventBus = globalEventBus;
+    this.setupEventBridge();
   }
 
-  async readJsonBody(req) {
+  private setupEventBridge(): void {
+    this.eventBus.on('container:*', (data) => {
+      this.broadcastEvent('container:event', data);
+    });
+
+    this.eventBus.on('operation:*', (data) => {
+      this.broadcastEvent('operation:event', data);
+    });
+
+    this.eventBus.on('system:*', (data) => {
+      this.broadcastEvent('system:event', data);
+    });
+  }
+
+  private broadcastEvent(topic: string, payload: any): void {
+    const message = {
+      type: 'event',
+      topic,
+      payload,
+      timestamp: Date.now()
+    };
+
+    this.wsClients.forEach((socket) => {
+      if (socket.readyState === WebSocket.OPEN) {
+        this.safeSend(socket, message);
+      }
+    });
+  }
+
+  private addSubscription(socket: WebSocket, topic: string) {
+    const current = this.subscriptions.get(socket) || new Set();
+    current.add(topic);
+    this.subscriptions.set(socket, current);
+    
+    if (topic.startsWith('container:')) {
+      const containerId = topic.replace('container:', '');
+      this.handleContainerSubscription(containerId, socket);
+    }
+    
+    this.safeSend(socket, { type: 'subscription:confirmed', topic });
+  }
+
+  private removeSubscription(socket: WebSocket, topic?: string) {
+    if (!topic) {
+      this.subscriptions.delete(socket);
+      for (const [cid, subs] of this.containerSubscriptions.entries()) {
+        subs.delete(socket);
+        if (subs.size === 0) this.containerSubscriptions.delete(cid);
+      }
+      return;
+    }
+
+    const current = this.subscriptions.get(socket);
+    if (!current) return;
+    current.delete(topic);
+    
+    if (topic.startsWith('container:')) {
+      const containerId = topic.replace('container:', '');
+      this.removeContainerSubscription(containerId, socket);
+    }
+
+    if (current.size === 0) {
+      this.subscriptions.delete(socket);
+    } else {
+      this.subscriptions.set(socket, current);
+    }
+    this.safeSend(socket, { type: 'subscription:removed', topic });
+  }
+
+  private handleContainerSubscription(containerId: string, socket: WebSocket | null): void {
+    if (!socket) return;
+
+    if (!this.containerSubscriptions.has(containerId)) {
+      this.containerSubscriptions.set(containerId, new Set());
+    }
+    this.containerSubscriptions.get(containerId)!.add(socket);
+    
+    this.safeSend(socket, {
+      type: 'subscription:confirmed',
+      containerId,
+      timestamp: Date.now()
+    });
+  }
+
+  private removeContainerSubscription(containerId: string, socket: WebSocket): void {
+    const subscriptions = this.containerSubscriptions.get(containerId);
+    if (subscriptions) {
+      subscriptions.delete(socket);
+      if (subscriptions.size === 0) {
+        this.containerSubscriptions.delete(containerId);
+      }
+    }
+  }
+
+  private pushContainerState(containerId: string, state: any): void {
+    const subscribers = this.containerSubscriptions.get(containerId);
+    if (subscribers) {
+      const message = {
+        type: 'container:state:updated',
+        containerId,
+        state,
+        timestamp: Date.now()
+      };
+      
+      subscribers.forEach(socket => {
+        if (socket.readyState === WebSocket.OPEN) {
+          this.safeSend(socket, message);
+        }
+      });
+    }
+  }
+
+  private matchesTopic(pattern: string, topic: string) {
+    const regexPattern = pattern
+      .replace(/[.+^${}()|[\]\\]/g, '\\$&')
+      .replace(/\*/g, '.*')
+      .replace(/\?/g, '.');
+    return new RegExp(`^${regexPattern}$`).test(topic);
+  }
+
+  private shouldDeliver(socket: WebSocket, topic: string) {
+    const subs = this.subscriptions.get(socket);
+    if (!subs || subs.size === 0) return false;
+    for (const pattern of subs) {
+      if (this.matchesTopic(pattern, topic)) return true;
+    }
+    return false;
+  }
+
+  async readJsonBody(req: any) {
     const chunks = [];
     for await (const chunk of req) {
       chunks.push(chunk);
@@ -64,7 +207,18 @@ class UnifiedApiServer {
     const server = createServer();
     const wss = new WebSocketServer({ server });
 
-    // HTTP 路由
+    // Session manager for container operations
+    const sessionManager = new SessionManager({
+      host: defaultHttpHost,
+      port: defaultHttpPort,
+      wsHost: defaultWsHost,
+      wsPort: defaultWsPort
+    });
+
+    // Setup container operations routes
+    this.bindingRules = setupContainerOperationsRoutes(server, sessionManager);
+
+    // HTTP routes
     server.on('request', async (req, res) => {
       const url = new URL(req.url, `http://${req.headers.host}`);
       
@@ -75,96 +229,7 @@ class UnifiedApiServer {
         return;
       }
 
-      if (req.method === 'POST' && url.pathname === '/v1/browser/highlight') {
-        try {
-          const payload = await this.readJsonBody(req);
-          const result = await this.controller.handleAction('browser:highlight', payload);
-          res.writeHead(200, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify(this.normalizeResult(result)));
-        } catch (err) {
-          res.writeHead(400, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ success: false, error: err?.message || String(err) }));
-        }
-        return;
-      }
-
-     if (req.method === 'POST' && url.pathname === '/v1/browser/highlight-dom-path') {
-       try {
-         const payload = await this.readJsonBody(req);
-         const result = await this.controller.handleAction('browser:highlight-dom-path', payload);
-         res.writeHead(200, { 'Content-Type': 'application/json' });
-         res.end(JSON.stringify(this.normalizeResult(result)));
-       } catch (err) {
-         res.writeHead(400, { 'Content-Type': 'application/json' });
-         res.end(JSON.stringify({ success: false, error: err?.message || String(err) }));
-       }
-       return;
-     }
-
-      if (req.method === 'POST' && url.pathname === '/v1/browser/clear-highlight') {
-        try {
-          const payload = await this.readJsonBody(req);
-          const result = await this.controller.handleAction('browser:clear-highlight', payload);
-          res.writeHead(200, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify(this.normalizeResult(result)));
-        } catch (err) {
-          res.writeHead(400, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ success: false, error: err?.message || String(err) }));
-        }
-        return;
-      }
-
-      if (req.method === 'POST' && url.pathname === '/v1/browser/execute') {
-        try {
-          const payload = await this.readJsonBody(req);
-          const result = await this.controller.handleAction('browser:execute', payload);
-          res.writeHead(200, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify(this.normalizeResult(result)));
-        } catch (err) {
-          res.writeHead(400, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ success: false, error: err?.message || String(err) }));
-        }
-        return;
-      }
-
-     if (req.method === 'POST' && url.pathname === '/v1/session/create') {
-        try {
-          const payload = await this.readJsonBody(req);
-          const result = await this.controller.handleAction('session:create', payload);
-          res.writeHead(200, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify(this.normalizeResult(result)));
-        } catch (err) {
-          res.writeHead(400, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ success: false, error: err?.message || String(err) }));
-        }
-        return;
-      }
-
-      if (req.method === 'GET' && url.pathname === '/v1/session/list') {
-        try {
-          const result = await this.controller.handleAction('session:list', {});
-          res.writeHead(200, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify(this.normalizeResult(result)));
-        } catch (err) {
-          res.writeHead(400, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ success: false, error: err?.message || String(err) }));
-        }
-        return;
-      }
-
-      if (req.method === 'POST' && url.pathname === '/v1/container/match') {
-        try {
-          const payload = await this.readJsonBody(req);
-          const result = await this.controller.handleAction('containers:match', payload);
-          res.writeHead(200, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify(this.normalizeResult(result)));
-        } catch (err) {
-          res.writeHead(400, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ success: false, error: err?.message || String(err) }));
-        }
-        return;
-      }
-
+      // Controller actions
       if (req.method === 'POST' && url.pathname === '/v1/controller/action') {
         try {
           const payload = await this.readJsonBody(req);
@@ -184,38 +249,77 @@ class UnifiedApiServer {
         return;
       }
 
-      // WebSocket 端点
+      // Health check for browser service
+      if (req.method === 'GET' && url.pathname === '/v1/browser/health') {
+        try {
+          const result = await this.controller.handleAction('browser:status', {});
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify(result));
+        } catch (err) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: false, error: err?.message || String(err) }));
+        }
+        return;
+      }
+
+      // WebSocket endpoints
       if (url.pathname === '/ws' || url.pathname === '/bus') {
         res.writeHead(426, { 'Content-Type': 'text/plain' });
         res.end('Upgrade Required');
         return;
       }
 
-      // 未找到
+      // Not found
       res.writeHead(404, { 'Content-Type': 'text/plain' });
       res.end('Not Found');
     });
 
-    // WebSocket 事件处理
+    // WebSocket event handling
     wss.on('connection', (socket, request) => {
       const url = new URL(request.url, `http://${request.headers.host}`);
       
       if (url.pathname === '/ws') {
-        this.clients.add(socket);
-        socket.on('message', (raw) => this.handleMessage(socket, raw));
-        socket.on('close', () => this.clients.delete(socket));
-        socket.on('error', () => this.clients.delete(socket));
+        this.wsClients.add(socket);
+        socket.on('message', (raw) => {
+          let message: any;
+          try {
+            message = JSON.parse(raw.toString());
+          } catch {
+            this.safeSend(socket, { type: 'error', error: 'Invalid JSON payload' });
+            return;
+          }
+
+          if (message?.type === 'subscribe' && message.topic) {
+            this.addSubscription(socket, message.topic);
+            return;
+          }
+
+          if (message?.type === 'unsubscribe' && message.topic) {
+            this.removeSubscription(socket, message.topic);
+            return;
+          }
+
+          this.handleMessage(socket, raw instanceof Buffer ? raw : Buffer.from(raw as any));
+        });
+        socket.on('close', () => {
+          this.wsClients.delete(socket);
+          this.removeSubscription(socket);
+        });
+        socket.on('error', () => {
+          this.wsClients.delete(socket);
+          this.removeSubscription(socket);
+        });
         this.safeSend(socket, { type: 'ready' });
       } else if (url.pathname === '/bus') {
-        this.clients.add(socket);
-        socket.on('message', (raw) => this.handleBusMessage(socket, raw));
-        socket.on('close', () => this.clients.delete(socket));
-        socket.on('error', () => this.clients.delete(socket));
+        this.busClients.add(socket);
+        socket.on('message', (raw) => this.handleBusMessage(socket, raw instanceof Buffer ? raw : Buffer.from(raw as any)));
+        socket.on('close', () => this.busClients.delete(socket));
+        socket.on('error', () => this.busClients.delete(socket));
         this.safeSend(socket, { type: 'ready' });
       }
     });
 
-    // 启动服务器
+    // Start server
     const host = DEFAULT_HOST;
     const port = DEFAULT_PORT;
     server.listen(port, host, () => {
@@ -225,7 +329,7 @@ class UnifiedApiServer {
     });
   }
 
-  async handleMessage(socket, raw) {
+  async handleMessage(socket: WebSocket, raw: Buffer) {
     let envelope;
     try {
       envelope = JSON.parse(raw.toString());
@@ -266,21 +370,11 @@ class UnifiedApiServer {
     this.safeSend(socket, { type: 'error', requestId: envelope.requestId, error: 'Unsupported message type' });
   }
 
-  async handleBusMessage(socket, raw) {
-    // Bus 消息直接转发到所有客户端
-    this.broadcastBusEvent('bus.message', { data: raw.toString(), timestamp: new Date().toISOString() });
+  async handleBusMessage(socket: WebSocket, raw: Buffer) {
+    this.broadcastEvent('bus.message', { data: raw.toString(), timestamp: new Date().toISOString() });
   }
 
-  broadcastBusEvent(topic, payload) {
-    const message = JSON.stringify({ type: 'event', topic, payload });
-    this.clients.forEach((socket) => {
-      if (socket.readyState === WebSocket.OPEN) {
-        this.safeSend(socket, { type: 'event', topic, payload });
-      }
-    });
-  }
-
-  safeSend(socket, payload) {
+  safeSend(socket: WebSocket, payload: any) {
     if (!socket || socket.readyState !== WebSocket.OPEN) return;
     try {
       socket.send(JSON.stringify(payload));
@@ -289,14 +383,13 @@ class UnifiedApiServer {
     }
   }
 
-  normalizeResult(result) {
+  normalizeResult(result: any) {
     if (!result || typeof result !== 'object') return { success: true, data: result };
     if (typeof result.success === 'boolean') return result;
     return { success: true, data: result };
   }
 }
 
-// 启动服务器
 const server = new UnifiedApiServer();
 server.start().catch(err => {
   console.error('[unified-api] Server failed to start:', err);

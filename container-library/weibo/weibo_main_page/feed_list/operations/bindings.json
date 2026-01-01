@@ -1,0 +1,71 @@
+{
+  "container_id": "weibo_main_page.feed_list",
+  "bindings": [
+    {
+      "id": "weibo-feed-scroll-down",
+      "trigger": {
+        "type": "event",
+        "pattern": "weibo_feed:scroll_request"
+      },
+      "action": {
+        "operationType": "scroll",
+        "config": {
+          "direction": "down",
+          "distance": 640
+        }
+      }
+    },
+    {
+      "id": "weibo-feed-highlight-all",
+      "trigger": {
+        "type": "event",
+        "pattern": "weibo_feed:highlight_request"
+      },
+      "action": {
+        "operationType": "highlight",
+        "config": {
+          "style": "3px solid #fbbc05",
+          "duration": 1800
+        }
+      }
+    },
+    {
+      "id": "weibo-feed-extract-links",
+      "trigger": {
+        "type": "event",
+        "pattern": "weibo_feed:extract_links"
+      },
+      "action": {
+        "operationType": "extract",
+        "config": {
+          "target": "child_links",
+          "selector": "article[class*='Feed_wrap_'] a[href]",
+          "include_text": true,
+          "max_items": 100,
+          "whitelist": {
+            "prefix": ["https://", "http://"]
+          },
+          "blacklist": {
+            "contains": ["javascript:", "help.weibo.com", "passport.weibo.com"],
+            "suffix": ["#"]
+          }
+        }
+      }
+    },
+    {
+      "id": "weibo-feed-auto-scroll",
+      "trigger": {
+        "type": "event",
+        "pattern": "weibo_feed:children_discovered"
+      },
+      "condition": "(context) => context.childCount < 50",
+      "action": {
+        "operationType": "scroll",
+        "config": {
+          "direction": "down",
+          "distance": 640
+        }
+      }
+    }
+  ]
+}

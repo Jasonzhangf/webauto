@@ -16,6 +16,14 @@ console.log(`[floating-panel] bumped version to ${pkg.version}`);
 const distDir = path.resolve(process.cwd(), 'dist');
 const distRendererDir = path.join(distDir, 'renderer');
 
+// 同步写入前端版本模块，方便在浮窗 UI 中直接展示当前构建版本
+const versionModulePath = path.resolve(process.cwd(), 'src/renderer/version.mts');
+fs.writeFileSync(
+  versionModulePath,
+  `// 此文件由 scripts/build.mjs 自动生成\n` +
+    `export const FLOATING_PANEL_VERSION = '${pkg.version}';\n`,
+);
+
 console.log('[floating-panel] cleaning dist...');
 execSync('rm -rf dist', { stdio: 'inherit' });
 

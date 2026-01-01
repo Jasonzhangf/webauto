@@ -489,6 +489,8 @@ export class ContainerMatcher {
         name: container.name,
         type: container.type,
         capabilities: container.capabilities || [],
+        // 保留容器定义中的 metadata，供上层 UI 使用（例如 source_dom_path / 设计时信息）
+        metadata: container.metadata ? { ...container.metadata } : undefined,
         selectors: (container.selectors || []).map((sel) => ({
           ...sel,
         })),

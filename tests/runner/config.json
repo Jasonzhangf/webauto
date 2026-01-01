@@ -1,0 +1,54 @@
+{
+  "suites": [
+    {
+      "name": "unit",
+      "path": "tests/unit",
+      "type": "unit",
+      "timeout": 5000,
+      "parallel": true,
+      "stopOnFailure": false
+    },
+    {
+      "name": "integration",
+      "path": "tests/integration",
+      "type": "integration",
+      "timeout": 30000,
+      "parallel": false,
+      "stopOnFailure": false
+    },
+    {
+      "name": "e2e",
+      "path": "tests/e2e",
+      "type": "e2e",
+      "timeout": 60000,
+      "parallel": false,
+      "stopOnFailure": false,
+      "requires": ["unit", "integration"]
+    }
+  ],
+  "services": {
+    "unifiedApi": {
+      "host": "127.0.0.1",
+      "port": 7701,
+      "startupTimeout": 10000
+    },
+    "browserService": {
+      "host": "127.0.0.1",
+      "port": 7704,
+      "startupTimeout": 15000
+    }
+  },
+  "profiles": {
+    "test": {
+      "url": "http://localhost:8080/test-page.html"
+    },
+    "weibo_fresh": {
+      "url": "https://weibo.com"
+    }
+  },
+  "reporting": {
+    "outputDir": "tests/reports",
+    "includeScreenshots": true,
+    "includeConsoleLogs": true
+  }
+}

@@ -1,5 +1,8 @@
 {
   "id": "div",
+  "name": "容器: DIV",
+  "type": "container",
+  "capabilities": ["find-child", "highlight"],
   "selectors": [
     {
       "variant": "primary",
@@ -12,8 +15,14 @@
       ]
     }
   ],
-  "name": "容器: DIV",
   "operations": [
+    {
+      "type": "highlight",
+      "config": {
+        "style": "2px solid #8e44ad",
+        "duration": 3000
+      }
+    },
     {
       "type": "find-child",
       "config": {}

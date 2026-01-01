@@ -1,5 +1,8 @@
 {
   "id": "textarea",
+  "name": "容器: TEXTAREA",
+  "type": "container",
+  "capabilities": ["find-child", "highlight"],
   "selectors": [
     {
       "variant": "primary",
@@ -12,8 +15,14 @@
       ]
     }
   ],
-  "name": "容器: TEXTAREA",
   "operations": [
+    {
+      "type": "highlight",
+      "config": {
+        "style": "2px solid #8e44ad",
+        "duration": 3000
+      }
+    },
     {
       "type": "find-child",
       "config": {}

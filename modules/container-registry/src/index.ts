@@ -42,7 +42,6 @@ type RegistryIndex = Record<string, { website?: string; path?: string }>;
 
 export class ContainerRegistry {
   private indexCache: RegistryIndex | null = null;
-  private cache = new Map<string, Record<string, ContainerDefinition>>();
   private legacyCache: Record<string, any> | null = null;
 
   listSites() {
@@ -77,12 +76,9 @@ export class ContainerRegistry {
   }
 
   private fetchContainersForSite(siteKey: string, site: { path?: string }) {
-    if (this.cache.has(siteKey)) {
-      return this.cache.get(siteKey)!;
-    }
-    const containers = this.loadSiteContainers(siteKey, site?.path);
-    this.cache.set(siteKey, containers);
-    return containers;
+    // 不做内存级别缓存，确保用户容器定义变更后，每次调用都能读取到最新文件。
+    // 内部会同时加载内置容器与用户容器目录并合并。
+    return this.loadSiteContainers(siteKey, site?.path);
   }
 
   private ensureIndex(): RegistryIndex {

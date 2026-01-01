@@ -1,6 +1,6 @@
 {
   "name": "@webauto/floating-panel",
-  "version": "0.1.489",
+  "version": "0.1.518",
   "private": true,
   "type": "module",
   "main": "dist/main/index.mjs",
@@ -8,7 +8,8 @@
   "scripts": {
     "start": "electron .",
     "dev": "npm run build && electronmon .",
-    "build": "node scripts/build.mjs",
+    "test:logic": "node scripts/test-container-match-loop.mjs",
+    "build": "npm run test:logic && node scripts/build.mjs",
     "clean": "rm -rf dist"
   },
   "dependencies": {

@@ -10,6 +10,9 @@ export const SESSION_CLOSED_EVENT = 'browser-service:session-closed';
 export class SessionManager {
   private sessions = new Map<string, BrowserSession>();
 
+  // Optional options are currently not used, but allowed for future extensions
+  constructor(_options?: { host?: string; port?: number; wsHost?: string; wsPort?: number }) {}
+
   async createSession(options: CreateSessionPayload): Promise<{ sessionId: string }> {
     const profileId = options.profileId || options.sessionId || `session_${Date.now().toString(36)}`;
     options.profileId = profileId;

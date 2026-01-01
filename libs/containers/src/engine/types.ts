@@ -126,3 +126,24 @@ export interface HighlightOptions {
   label?: string;       // optional label text
   persistent?: boolean; // true means do not auto-remove
 }
+
+// UI Rendering Events - for UI/Logic separation
+export type UiRenderStyle = 'executing' | 'discovered' | 'completed' | 'failed' | 'matched' | 'focused';
+
+export interface UiRenderEvent {
+  type: 'highlight' | 'connection' | 'clear' | 'focus' | 'tree_update';
+  data: {
+    containerId?: string;
+    containerName?: string;
+    style?: UiRenderStyle;
+    bbox?: BBox;
+    handle?: any;
+    label?: string;
+    color?: string;
+    from?: string;
+    to?: string;
+    persistent?: boolean;
+    duration?: number;
+    channel?: string;
+  };
+}
