@@ -1,14 +1,8 @@
-import { 
-  initGraph, 
-  updateContainerTree, 
-  updateDomTree, 
-  mergeDomBranch, 
-  renderGraph, 
-  expandDomPath, 
-  markPathLoaded,
+import {
+  initGraph,
   handlePickerResult,
   updatePageContext,
-  preloadDomPaths
+  applyMatchSnapshot,
 } from './graph.mjs';
 import { logger } from './logger.mts';
 
@@ -91,59 +85,31 @@ if (!(window as any).api) {
       log("收到 containers.matched 事件");
       const data = msg.payload;
       if (data && data.matched) {
-        setStatus("已识别", true);
+        setStatus('已识别', true);
         const snapshot = data.snapshot;
-        
-        // 1. 更新容器树
-        updateContainerTree(snapshot.container_tree);
-        
-        // 2. 收集所有匹配的 DOM 路径并自动展开
-        const matchedDomPaths = new Set<string>();
-        function collectMatchedPaths(node: any) {
-          if (node.match?.nodes) {
-            node.match.nodes.forEach((m: any) => {
-              if (m.dom_path) {
-                matchedDomPaths.add(m.dom_path);
-                log('发现匹配路径:', m.dom_path);
-              }
-            });
-          }
-          if (node.children) {
-            node.children.forEach((c: any) => collectMatchedPaths(c));
-          }
-        }
-        collectMatchedPaths(snapshot.container_tree);
-        
-        // 自动展开所有匹配的路径
-        matchedDomPaths.forEach(path => {
-          expandDomPath(path);
-          log('已展开路径:', path);
-        });
-
-        if (matchedDomPaths.size > 0) {
-          preloadDomPaths(matchedDomPaths, 'containers.matched');
-        }
-        
-        // 3. 更新 DOM 树（延迟渲染，等待关键 DOM path 准备好）
         const profile = data.profileId;
+        const url = data.url;
+        const rootSelector = snapshot?.metadata?.root_selector || null;
+
         currentProfile = profile;
+        currentRootSelector = rootSelector;
+
         if (!profile) {
           log('Missing profile in containers.matched payload');
           return;
         }
-        const url = data.url;
-        const rootSelector = snapshot?.metadata?.root_selector || null;
-        currentRootSelector = rootSelector;
-        updateDomTree(snapshot.dom_tree, { profile, page_url: url, root_selector: rootSelector }, { deferRender: true });
 
-        if (matchedDomPaths.size > 0) {
-          await preloadDomPaths(matchedDomPaths, 'containers.matched', { wait: true });
-        }
+        // 统一交给 graph 模块处理：
+        // 1) 覆盖容器/DOM 树
+        // 2) 自动展开匹配路径并预拉取
+        // 3) 等待关键路径加载后统一重绘
+        await applyMatchSnapshot(snapshot, {
+          profile,
+          url,
+          rootSelector,
+        });
 
-        // 4. 渲染
-        renderGraph();
-        
-        log('容器树和DOM树更新完成，已自动展开', matchedDomPaths.size, '个匹配路径');
+        log('容器树和DOM树更新完成（统一快照刷新）');
       }
     }
 

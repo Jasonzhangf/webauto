@@ -54,6 +54,91 @@ export function updatePageContext(metadata = {}) {
   }
 }
 
+// 统一处理 containers.matched 快照：
+// 1) 覆盖容器树/DOM 树
+// 2) 自动展开匹配到的容器/DOM 路径
+// 3) 触发按需 DOM 预拉取
+// 4) 最终统一重绘一次图
+export async function applyMatchSnapshot(snapshot, context = {}) {
+  if (!snapshot || !snapshot.container_tree) return;
+
+  const profile = context.profile || currentProfile || null;
+  const url = context.url || currentUrl || null;
+  const rootSelector =
+    context.rootSelector ||
+    snapshot?.metadata?.root_selector ||
+    null;
+
+  updatePageContext({
+    profile,
+    page_url: url,
+    root_selector: rootSelector,
+  });
+
+  // 覆盖基础数据
+  containerData = snapshot.container_tree || null;
+  domData = snapshot.dom_tree || null;
+
+  // 重置绘制相关状态
+  domNodePositions.clear();
+  containerNodePositions.clear();
+  loadedPaths.clear();
+  loadedPaths.add('root');
+
+  // 重置交互状态，避免旧选中/建议节点干扰新树
+  selectedContainer = null;
+  selectedDom = null;
+  suggestedNode = null;
+
+  // 重新计算展开的容器节点（根 + 递归展开）
+  expandedNodes.clear();
+  if (containerData && (containerData.id || containerData.name)) {
+    const rootId = containerData.id || containerData.name || 'root';
+    expandedNodes.add(rootId);
+    expandMatchedContainers(containerData);
+  }
+
+  // 收集所有匹配到 DOM 的路径
+  const matchedDomPaths = new Set();
+  function collectMatchedPaths(node) {
+    if (!node || typeof node !== 'object') return;
+    if (node.match && Array.isArray(node.match.nodes)) {
+      node.match.nodes.forEach((m) => {
+        if (m && m.dom_path) {
+          matchedDomPaths.add(m.dom_path);
+        }
+      });
+    }
+    if (Array.isArray(node.children)) {
+      node.children.forEach((child) => collectMatchedPaths(child));
+    }
+  }
+  if (containerData) {
+    collectMatchedPaths(containerData);
+  }
+
+  // 先标记需要展开的 DOM 路径，并启动预拉取
+  if (matchedDomPaths.size > 0) {
+    matchedDomPaths.forEach((p) => expandDomPath(p));
+    // 启动异步预拉取（不阻塞）
+    preloadDomPaths(matchedDomPaths, 'containers.matched');
+  }
+
+  // 覆盖 DOM 树（延迟渲染，等待关键路径预拉取完成后再统一绘制）
+  updateDomTree(
+    snapshot.dom_tree,
+    { profile, page_url: url, root_selector: rootSelector },
+    { deferRender: true },
+  );
+
+  // 等待关键路径加载完成后，再统一重绘
+  if (matchedDomPaths.size > 0) {
+    await preloadDomPaths(matchedDomPaths, 'containers.matched', { wait: true });
+  }
+
+  renderGraph();
+}
+
 export async function handlePickerResult(domPath, selector = null) {
   if (!domPath) return;
   console.log('[handlePickerResult] domPath:', domPath);
@@ -216,7 +301,7 @@ export function initGraph(canvasEl) {
   });
 }
 
-export function updateContainerTree(data) {
+export function updateContainerTree(data, options = {}) {
   if (!canvas) return;
   containerData = data;
   containerNodePositions.clear();
@@ -230,8 +315,7 @@ export function updateContainerTree(data) {
       data.children.forEach(child => {
         const childId = child.id || child.name;
         if (childId) {
-          expandedNodes.add(childId); expandMatchedContainers(child);
-
+          expandedNodes.add(childId);
           // 递归检查并展开所有匹配到 DOM 的子容器
           expandMatchedContainers(child);
         }
@@ -239,20 +323,23 @@ export function updateContainerTree(data) {
     }
   }
 
-  renderGraph();
+  if (options.render !== false) {
+    renderGraph();
+  }
 }
 
 function expandMatchedContainers(node) {
   if (!node) return;
 
-  // 如果当前容器有匹配结果，或者是中间节点，继续检查子节点
-  if (node.children && Array.isArray(node.children)) {
+  const nodeId = node.id || node.name;
+  if (nodeId) {
+    expandedNodes.add(nodeId);
+  }
+
+  // 激进策略：递归展开所有子容器，以展示完整树结构
+  if (Array.isArray(node.children)) {
     node.children.forEach(child => {
-      const childId = child.id || child.name;
-      if (childId) {
-        expandedNodes.add(childId); expandMatchedContainers(child); // 激进策略：展开所有子容器以���示完整树结构
-        expandMatchedContainers(child);
-      }
+      expandMatchedContainers(child);
     });
   }
 }
@@ -629,6 +716,8 @@ function renderContainerNode(parent, node, x, y, depth, domNodesMap) {
               metadata: { suggestedDomPath: suggestedNode.domPath },
             },
             url: currentUrl,
+            rootSelector: currentRootSelector,
+            domPath: suggestedNode.domPath,
           };
 
           const result = await window.api.invokeAction('containers:create-child', payload);
@@ -638,6 +727,7 @@ function renderContainerNode(parent, node, x, y, depth, domNodesMap) {
             // 正确流程：后端在 create-child 后会进行匹配并通过 containers.matched 事件推送最新树，
             // 浮窗仅依赖总线事件刷新 UI，这里不直接改动本地容器树
             suggestedNode = null;
+            renderGraph();
           } else {
             logger.error('picker', 'Failed to create container', result.error);
           }

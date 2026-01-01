@@ -8,6 +8,7 @@
 
 import { spawn } from 'node:child_process';
 import { setTimeout as wait } from 'node:timers/promises';
+import WebSocket from 'ws';
 
 const UNIFIED = 'http://127.0.0.1:7701';
 const WS = 'ws://127.0.0.1:7701/ws';
