@@ -1,4 +1,5 @@
 import { AIProvider } from './AIProvider.js';
+import { HTMLSimplifier } from './HTMLSimplifier.js';
 import type {
   InteractiveDOMBuilderConfig,
   BuildStep,
@@ -148,10 +149,20 @@ export class InteractiveDOMBuilder {
     this.log('正在获取页面 HTML...', 'info');
     this.currentHTML = await this.fetchPageHTML();
 
-    // 调用 AI 分析
+    // 调用 AI 分析（使用智能简化）
     this.log('正在调用 AI 分析...', 'info');
+    this.log('正在简化 HTML...', 'info');
+    
+    const simplifiedHTML = HTMLSimplifier.extractRelevantFragment(
+      this.currentHTML,
+      description,
+      40000
+    );
+    
+    this.log(`HTML 大小: ${this.currentHTML.length} -> ${simplifiedHTML.length}`, 'info');
+    
     const request: DOMAnalysisRequest = {
-      html: this.currentHTML.substring(0, 50000), // 限制长度
+      html: simplifiedHTML,
       targetDescription: description,
       examples: [
         '使用 [class*=\'xxx\'] 来匹配动态 class 名',

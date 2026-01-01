@@ -9,7 +9,11 @@ export class UiController {
   constructor(options = {}) {
     this.repoRoot = options.repoRoot || process.cwd();
     this.messageBus = options.messageBus;
-    this.userContainerRoot = options.userContainerRoot || path.join(os.homedir(), '.webauto', 'container-lib');
+    // 外置容器树：新的路径优先（~/.webauto/container-lib），其次兼容历史路径（~/.routecodex/container-lib）。
+    this.userContainerRoot =
+      options.userContainerRoot || path.join(os.homedir(), '.webauto', 'container-lib');
+    this.legacyUserContainerRoot =
+      options.legacyUserContainerRoot || path.join(os.homedir(), '.routecodex', 'container-lib');
     this.containerIndexPath = options.containerIndexPath || path.join(this.repoRoot, 'container-library.index.json');
     this.cliTargets = options.cliTargets || {};
     this.defaultWsHost = options.defaultWsHost || '127.0.0.1';
@@ -1229,6 +1233,8 @@ export class UiController {
 
   async readContainerDefinition(siteKey, containerId) {
     if (!siteKey || !containerId) return null;
+
+    // 1) 新的外置容器树 (~/.webauto/container-lib)
     const userBase = path.join(this.userContainerRoot, siteKey);
     const userFile = this.buildContainerPath(userBase, containerId);
     if (userFile && fs.existsSync(userFile)) {
@@ -1236,11 +1242,31 @@ export class UiController {
         const raw = await fsPromises.readFile(userFile, 'utf-8');
         return JSON.parse(raw);
       } catch (e) {
-        // ignore read error, file might be corrupted or empty
-        if (this.errorHandler) this.errorHandler.debug('controller', 'read container file failed', { error: e.message });
-        // ignore
+        if (this.errorHandler) {
+          this.errorHandler.debug('controller', 'read container file failed', { error: e.message });
+        }
+        // ignore read error, fall through to legacy/builtin
       }
     }
+
+    // 2) 兼容历史外置容器树 (~/.routecodex/container-lib)
+    if (this.legacyUserContainerRoot) {
+      const legacyBase = path.join(this.legacyUserContainerRoot, siteKey);
+      const legacyFile = this.buildContainerPath(legacyBase, containerId);
+      if (legacyFile && fs.existsSync(legacyFile)) {
+        try {
+          const raw = await fsPromises.readFile(legacyFile, 'utf-8');
+          return JSON.parse(raw);
+        } catch (e) {
+          if (this.errorHandler) {
+            this.errorHandler.debug('controller', 'read container file failed', { error: e.message });
+          }
+          // ignore read error, fall through to builtin
+        }
+      }
+    }
+
+    // 3) 内置容器树（仓库中的 container-library/*）
     const builtinBase = this.resolveSiteBaseDir(siteKey);
     const builtinFile = this.buildContainerPath(builtinBase, containerId);
     if (builtinFile && fs.existsSync(builtinFile)) {

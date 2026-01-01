@@ -484,7 +484,7 @@ export class ContainerMatcher {
       const container = containers[containerId];
       if (!container) return null;
       const childIds = this.resolveChildIds(containerId, container, containers);
-      const node = {
+      const node: any = {
         id: container.id || containerId,
         name: container.name,
         type: container.type,
@@ -494,6 +494,10 @@ export class ContainerMatcher {
         selectors: (container.selectors || []).map((sel) => ({
           ...sel,
         })),
+        // 将容器定义中的 operations 透传给前端，用于浮窗编辑和演练。
+        operations: Array.isArray((container as any).operations)
+          ? (container as any).operations.map((op: any) => ({ ...op }))
+          : [],
         match: this.summarizeMatchPayload(containerId, matchMap),
         children: [] as any[],
       };

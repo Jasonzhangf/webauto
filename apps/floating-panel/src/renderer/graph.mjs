@@ -43,28 +43,142 @@ let suggestedNode = null; // { parentId, domPath, selector, name }
 
 let renderScheduled = false;
 
+function updateRootTransform() {
+  if (!canvas) return;
+  const root = canvas.firstElementChild;
+  if (!root || root.tagName !== 'g') return;
+  root.setAttribute(
+    'transform',
+    `translate(${graphOffset.x + 10}, ${graphOffset.y + 10}) scale(${graphScale})`,
+  );
+}
+
+function generateChildContainerId(parentId, name) {
+  const safeParent = (parentId && String(parentId).trim()) || 'container';
+  let slug = '';
+  if (typeof name === 'string' && name.trim()) {
+    slug = name
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '_')
+      .replace(/^_+|_+$/g, '');
+  }
+  if (!slug) {
+    slug = 'child';
+  }
+  const suffix = Date.now().toString(36);
+  return `${safeParent}.${slug}_${suffix}`;
+}
+
+async function persistVirtualChildContainer({ parentId, childId, domPath, selector, name }) {
+  try {
+    const api = window.api;
+    if (!api || typeof api.invokeAction !== 'function') {
+      logger.warn('create-child', 'window.api.invokeAction not available');
+      return;
+    }
+    if (!currentProfile || !currentUrl) {
+      logger.warn('create-child', 'Missing profile/url, skip persist', {
+        profile: currentProfile,
+        url: currentUrl,
+      });
+      return;
+    }
+
+    let domMeta = null;
+    try {
+      const node = findDomNodeByPath(domData, domPath);
+      if (node) {
+        domMeta = {
+          tag: node.tag,
+          id: node.id,
+          classes: Array.isArray(node.classes) ? [...node.classes] : [],
+          textSnippet: node.textSnippet || '',
+        };
+      }
+    } catch {}
+
+    let selectorToUse = null;
+    if (typeof selector === 'string' && selector.trim()) {
+      selectorToUse = selector.trim();
+    } else if (domMeta?.id) {
+      selectorToUse = `#${domMeta.id}`;
+    } else if (domMeta?.classes && domMeta.classes.length) {
+      selectorToUse = `.${domMeta.classes[0]}`;
+    }
+
+    if (!selectorToUse) {
+      logger.warn('create-child', 'Cannot determine selector for new child', {
+        parentId,
+        domPath,
+      });
+      return;
+    }
+
+    const alias = typeof name === 'string' && name.trim() ? name.trim() : '';
+
+    logger.info('create-child', 'Persisting new child container', {
+      parentId,
+      childId,
+      domPath,
+      selector: selectorToUse,
+      alias,
+    });
+
+    await api.invokeAction('containers:create-child', {
+      profile: currentProfile,
+      url: currentUrl,
+      parentId,
+      containerId: childId,
+      selector: selectorToUse,
+      domPath,
+      domMeta,
+      alias,
+      rootSelector: currentRootSelector || null,
+    });
+  } catch (err) {
+    logger.error('create-child', 'Failed to persist child container', err);
+  }
+}
+
 function addVirtualChildContainer({ parentId, domPath, selector, name }) {
   if (!containerData || !parentId || !domPath) return;
 
-  const { childId } = addVirtualChildContainerPure(containerData, {
+  const childId = generateChildContainerId(parentId, name);
+
+  const { childId: createdId } = addVirtualChildContainerPure(containerData, {
     parentId,
     domPath,
     selector,
     name,
+    childId,
   });
 
-  if (!childId) return;
+  const effectiveChildId = createdId || childId;
 
   // 展开父节点与虚拟子节点
   const parentNode = parentId;
   if (parentNode) {
     expandedNodes.add(parentNode);
   }
-  expandedNodes.add(childId);
+  if (effectiveChildId) {
+    expandedNodes.add(effectiveChildId);
+  }
 
   // 清理候选高亮，转入“虚拟子容器”状态
   suggestedNode = null;
   renderGraph();
+
+  // 后台持久化到容器库（~/.webauto/container-lib），由服务层完成 containers:match 刷新。
+  persistVirtualChildContainer({
+    parentId,
+    childId: effectiveChildId,
+    domPath,
+    selector,
+    name,
+  }).catch((err) => {
+    logger.error('create-child', 'Persist child container rejected', err);
+  });
 }
 
 // 监听来自 view 层的“确认添加子容器”事件，在本地构建虚拟容器树
@@ -317,6 +431,40 @@ export async function handlePickerResult(domPath, selector = null) {
 
   const nearestContainer = findNearestContainer(domPath);
   if (nearestContainer) {
+    // 如果当前 DOM 路径已经被最近容器直接命中，则认为映射已存在：
+    // 仅选中该容器并滚动/高亮，不再建议创建新的子容器（避免重复“新增容器”）。
+    try {
+      const nodes = (nearestContainer.match && Array.isArray(nearestContainer.match.nodes))
+        ? nearestContainer.match.nodes
+        : [];
+      const alreadyMapped = nodes.some((m) => m && m.dom_path === domPath);
+      if (alreadyMapped) {
+        const containerId = nearestContainer.id || nearestContainer.name || null;
+        if (containerId) {
+          selectedContainer = containerId;
+          expandPathToNode(containerData, containerId);
+
+          try {
+            window.dispatchEvent(
+              new CustomEvent('webauto:container-selected', {
+                detail: {
+                  containerId,
+                  container: nearestContainer,
+                },
+              }),
+            );
+          } catch {}
+
+          renderGraph();
+        }
+        logger.info('picker', 'DOM path already mapped to container, skip suggestion', {
+          domPath,
+          containerId,
+        });
+        return;
+      }
+    } catch {}
+
     const siblingPaths = new Set();
     if (Array.isArray(nearestContainer.children)) {
       nearestContainer.children.forEach(child => {
@@ -331,11 +479,37 @@ export async function handlePickerResult(domPath, selector = null) {
       preloadDomPaths(siblingPaths, 'container-children');
     }
 
+    // 基于 DOM 节点信息生成一个更有意义的默认名称：
+    // 优先使用 textSnippet（页面显示文本），其次 #id / .class / tag[index]。
+    let defaultName = '新增容器';
+    try {
+      const domNode = findDomNodeByPath(domData, domPath);
+      if (domNode) {
+        const textSnippet =
+          typeof domNode.textSnippet === 'string'
+            ? domNode.textSnippet.replace(/\s+/g, ' ').trim()
+            : '';
+        if (textSnippet) {
+          defaultName = textSnippet.length > 16 ? `${textSnippet.slice(0, 16)}…` : textSnippet;
+        } else if (domNode.id) {
+          defaultName = `#${domNode.id}`;
+        } else if (Array.isArray(domNode.classes) && domNode.classes.length > 0) {
+          defaultName = `.${domNode.classes[0]}`;
+        } else if (domNode.tag) {
+          const parts = String(domPath).split('/');
+          const last = parts.length > 1 ? parts[parts.length - 1] : '';
+          defaultName = `${String(domNode.tag).toLowerCase()}[${last}]`;
+        }
+      }
+    } catch {
+      // 保底使用“新增容器”
+    }
+
     suggestedNode = {
       parentId: nearestContainer.id,
       domPath,
       selector: selector,
-      name: nearestContainer.name ? `${nearestContainer.name}-child` : '新增容器',
+      name: defaultName,
     };
     expandPathToNode(containerData, nearestContainer.id);
     renderGraph();
@@ -396,7 +570,7 @@ export function initGraph(canvasEl) {
     const delta = e.deltaY;
     const scaleChange = delta > 0 ? 0.9 : 1.1;
     graphScale = Math.max(0.5, Math.min(2, graphScale * scaleChange));
-    renderGraph();
+    updateRootTransform();
   });
   canvasEl.appendChild(svg);
   canvas = svg;
@@ -415,7 +589,7 @@ export function initGraph(canvasEl) {
     if (isDraggingGraph) {
       graphOffset.x = e.clientX - dragStart.x;
       graphOffset.y = e.clientY - dragStart.y;
-      renderGraph();
+      updateRootTransform();
     }
   });
 

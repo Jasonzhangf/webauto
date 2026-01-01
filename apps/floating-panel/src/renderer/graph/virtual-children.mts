@@ -5,6 +5,7 @@ interface VirtualChildParams {
   domPath: string;
   selector?: string | null;
   name?: string | null;
+  childId?: string | null;
 }
 
 function findContainerById(node: any, targetId: string | null): any | null {
@@ -48,7 +49,7 @@ export function addVirtualChildContainerPure(
     (child: any) => !(child && child.metadata && child.metadata.isVirtual),
   );
 
-  const childId = `${parentId}.virtual_${Date.now().toString(36)}`;
+  const childId = params.childId || `${parentId}.virtual_${Date.now().toString(36)}`;
 
   // 新语义：父容器保留自己的 match，不再“转移”原有连线；
   // 虚拟子容器直接绑定到本次拾取得到的 domPath，

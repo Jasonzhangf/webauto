@@ -1,3 +1,4 @@
+import { HTMLSimplifier } from './HTMLSimplifier.js';
 import type {
   AIProviderConfig,
   DOMAnalysisRequest,
@@ -80,11 +81,18 @@ export class AIProvider {
   ]
 }`;
 
+      // 智能提取相关 HTML 片段
+      const relevantHTML = HTMLSimplifier.extractRelevantFragment(
+        request.html,
+        request.targetDescription,
+        40000 // 限制在 40k 以内
+      );
+
       const userPrompt = `目标描述：${request.targetDescription}
 
 HTML 片段：
 \`\`\`html
-${request.html}
+${relevantHTML}
 \`\`\`
 
 ${request.examples ? `示例：\n${request.examples.join('\n')}` : ''}

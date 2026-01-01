@@ -292,6 +292,20 @@ function renderContainerNode(params: RenderContainerNodeParams): number {
           logger.error('container-highlight', 'Failed to highlight container', err);
         });
     }
+
+    // 将当前选中的容器节点广播给渲染层其它模块（例如“容器详情”面板）。
+    try {
+      window.dispatchEvent(
+        new CustomEvent('webauto:container-selected', {
+          detail: {
+            containerId: nodeId,
+            container: node,
+          },
+        }),
+      );
+    } catch (err) {
+      logger.warn('container-select', 'Failed to dispatch container-selected event', err as Error);
+    }
   });
 
   const nameText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
@@ -376,16 +390,39 @@ function renderContainerNode(params: RenderContainerNodeParams): number {
       rectSuggest.style.cursor = 'pointer';
 
       const textSuggest = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-      textSuggest.setAttribute('x', '24');
+      textSuggest.setAttribute('x', '10');
       textSuggest.setAttribute('y', '18');
       textSuggest.setAttribute('fill', '#fbbc05');
-      textSuggest.setAttribute('font-size', '12');
+      textSuggest.setAttribute('font-size', '10');
       textSuggest.setAttribute('font-family', 'Consolas, monospace');
       textSuggest.setAttribute('pointer-events', 'none');
-      textSuggest.textContent = '+ 确认添加子容器';
+      textSuggest.textContent = '新子容器名称';
+
+      const foreign = document.createElementNS('http://www.w3.org/2000/svg', 'foreignObject');
+      foreign.setAttribute('x', '70');
+      foreign.setAttribute('y', '4');
+      foreign.setAttribute('width', '104');
+      foreign.setAttribute('height', '20');
+
+      // 使用 HTML input 作为名称编辑框，默认值为建议名称；按回车触发确认。
+      const input = document.createElement('input');
+      input.setAttribute('xmlns', 'http://www.w3.org/1999/xhtml');
+      input.value = (suggestedNode && (suggestedNode as any).name) || '新增容器';
+      input.style.width = '100%';
+      input.style.height = '100%';
+      input.style.fontSize = '10px';
+      input.style.padding = '1px 4px';
+      input.style.borderRadius = '2px';
+      input.style.border = '1px solid #555';
+      input.style.background = '#1e1e1e';
+      input.style.color = '#fbbc05';
+      input.style.boxSizing = 'border-box';
+
+      foreign.appendChild(input);
 
       gSuggest.appendChild(rectSuggest);
       gSuggest.appendChild(textSuggest);
+      gSuggest.appendChild(foreign);
       parent.appendChild(gSuggest);
 
       // 记录“确认添加子容器”卡片的中心坐标，供连线使用（起点从当前建议节点出发）。
@@ -396,8 +433,18 @@ function renderContainerNode(params: RenderContainerNodeParams): number {
         }
       } catch {}
 
-      const handleConfirmClick = async (event: MouseEvent) => {
+      const handleConfirmClick = async (event: MouseEvent | KeyboardEvent) => {
         event.stopPropagation();
+
+        const rawName = input.value || '';
+        const trimmedName = rawName.trim();
+        if (suggestedNode) {
+          (suggestedNode as any).name =
+            trimmedName ||
+            ((suggestedNode as any).name as string) ||
+            '新增容器';
+        }
+
         logger.info('picker', 'Confirm adding sub-container', suggestedNode);
 
         try {
@@ -418,6 +465,22 @@ function renderContainerNode(params: RenderContainerNodeParams): number {
 
       rectSuggest.addEventListener('click', handleConfirmClick);
       gSuggest.addEventListener('click', handleConfirmClick);
+      input.addEventListener('keydown', (ev: KeyboardEvent) => {
+        if (ev.key === 'Enter') {
+          ev.preventDefault();
+          handleConfirmClick(ev);
+        }
+      });
+
+      // 默认聚焦到名称输入框，进入编辑状态；直接回车等价于接受当前默认名。
+      setTimeout(() => {
+        try {
+          input.focus();
+          input.select();
+        } catch {
+          // ignore focus error
+        }
+      }, 0);
 
 	      currentY += ROW_HEIGHT + VERTICAL_GAP;
 	      totalHeight = currentY - y;

@@ -6,7 +6,13 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const PROJECT_ROOT = resolveProjectRoot(__dirname);
-const USER_CONTAINER_ROOT = path.join(os.homedir(), '.webauto', 'container-lib');
+// 新的外置容器树根目录（开发用）：~/.webauto/container-lib
+const PRIMARY_USER_CONTAINER_ROOT =
+  process.env.WEBAUTO_CONTAINER_ROOT ||
+  process.env.ROUTECODEX_CONTAINER_ROOT ||
+  path.join(os.homedir(), '.webauto', 'container-lib');
+// 兼容旧路径：~/.routecodex/container-lib（仅用于读取，写入统一走 PRIMARY_USER_CONTAINER_ROOT）
+const LEGACY_USER_CONTAINER_ROOT = path.join(os.homedir(), '.routecodex', 'container-lib');
 const INDEX_PATH = path.join(PROJECT_ROOT, 'container-library.index.json');
 const LEGACY_PATH = path.join(PROJECT_ROOT, 'container-library.json');
 
@@ -109,7 +115,14 @@ export class ContainerRegistry {
       Object.assign(containers, fallback);
     }
 
-    const userPath = path.join(USER_CONTAINER_ROOT, siteKey);
+    // 先加载旧路径，最后加载新的 PRIMARY_USER_CONTAINER_ROOT，保证新容器定义覆盖旧定义与内置定义。
+    const legacyUserPath = path.join(LEGACY_USER_CONTAINER_ROOT, siteKey);
+    if (fs.existsSync(legacyUserPath)) {
+      this.walkSite(legacyUserPath, containers);
+      this.loadLegacyFile(legacyUserPath, containers);
+    }
+
+    const userPath = path.join(PRIMARY_USER_CONTAINER_ROOT, siteKey);
     if (fs.existsSync(userPath)) {
       this.walkSite(userPath, containers);
       this.loadLegacyFile(userPath, containers);

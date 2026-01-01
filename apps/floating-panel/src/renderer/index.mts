@@ -55,6 +55,218 @@ function debugLog(module: string, action: string, data: any) {
 
 let currentProfile: string | null = null;
 let currentRootSelector: string | null = null;
+let currentUrl: string | null = null;
+let currentContainer: any | null = null;
+
+const containerDetailsEl = document.getElementById('containerDetailsContent');
+const containerDetailsTab = document.querySelector('.tab[data-tab="containerDetails"]') as HTMLElement | null;
+
+function renderContainerDetails(container: any | null) {
+  if (!containerDetailsEl) return;
+
+  if (!container) {
+    containerDetailsEl.innerHTML = `
+      <div style="margin-bottom:4px;color:#777;">未选择任何容器节点</div>
+      <div style="font-size:10px;color:#555;">在左侧图中点击一个容器节点以查看详情和操作列表。</div>
+    `;
+    return;
+  }
+
+  const id = container.id || container.name || 'unknown';
+  const name = container.name || container.id || '未命名容器';
+  const type = container.type || 'container';
+  const capabilities = Array.isArray(container.capabilities) ? container.capabilities : [];
+  const operations = Array.isArray(container.operations) ? container.operations : [];
+  const alias =
+    (container.metadata && (container.metadata.alias as string)) ||
+    (container.alias as string) ||
+    (container.nickname as string) ||
+    '';
+
+  const matchNode = container.match && Array.isArray(container.match.nodes) && container.match.nodes.length
+    ? container.match.nodes[0]
+    : null;
+
+  const domPath = matchNode?.dom_path || null;
+  const selector = matchNode?.selector || null;
+  const matchCount = container.match?.match_count ?? (matchNode ? 1 : 0);
+
+  const opsHtml = operations.length
+    ? operations
+        .map((op: any, index: number) => {
+          const key = op.id || op.type || `op-${index + 1}`;
+          const configPreview = op.config ? JSON.stringify(op.config).slice(0, 60) : '{}';
+          return `<div style="display:flex;align-items:center;justify-content:space-between;padding:3px 0;border-bottom:1px solid #2a2a2a;">
+            <div style="flex:1;min-width:0;">
+              <span style="color:#ffd700;font-size:11px;">${key}</span>
+              <span style="color:#888;font-size:10px;margin-left:4px;">${op.type || ''}</span>
+              <span style="color:#555;font-size:10px;margin-left:6px;">${configPreview}</span>
+            </div>
+            <div style="display:flex;gap:4px;">
+              <button data-op-index="${index}" data-op-action="rehearse" style="font-size:10px;padding:2px 4px;">演练</button>
+            </div>
+          </div>`;
+        })
+        .join('')
+    : `<div style="font-size:10px;color:#666;">无操作定义（operations 为空）</div>`;
+
+  containerDetailsEl.innerHTML = `
+    <div style="margin-bottom:6px;">
+      <div style="font-size:12px;color:#fff;margin-bottom:2px;">
+        ${name} <span style="color:#666;font-size:10px;">(${id})</span>
+      </div>
+      <div style="font-size:10px;color:#999;margin-bottom:2px;">
+        类型: <span style="color:#dcdcaa;">${type}</span>
+        ${container.metadata?.isVirtual ? '<span style="margin-left:6px;color:#fbbc05;">[虚拟容器]</span>' : ''}
+      </div>
+      <div style="font-size:10px;color:#999;">
+        能力: ${
+          capabilities.length
+            ? capabilities.map((c: string) => `<span style="margin-right:4px;color:#7ebd7e;">${c}</span>`).join('')
+            : '<span style="color:#555;">无</span>'
+        }
+      </div>
+      <div style="margin-top:4px;font-size:10px;color:#999;display:flex;align-items:center;gap:4px;">
+        <span>别名/显示名:</span>
+        <input id="containerAliasInput" type="text" style="flex:1;min-width:0;font-size:10px;padding:2px 4px;border-radius:2px;border:1px solid #3e3e3e;background:#1e1e1e;color:#ccc;" />
+        <button id="btnSaveAlias" style="font-size:10px;padding:2px 6px;">保存名称</button>
+      </div>
+    </div>
+    <div style="margin-bottom:6px;font-size:10px;color:#999;">
+      <div>匹配 DOM 路径: <span style="color:#9cdcfe;">${domPath || '未记录'}</span></div>
+      <div>匹配 selector: <span style="color:#9cdcfe;">${selector || '未记录'}</span></div>
+      <div>匹配计数: <span style="color:#9cdcfe;">${matchCount}</span></div>
+    </div>
+    <div style="margin-bottom:4px;font-size:11px;color:#ccc;font-weight:600;">默认 Operation 列表（按顺序执行）</div>
+    <div id="containerOperationsList">
+      ${opsHtml}
+    </div>
+    <div style="margin-top:6px;font-size:10px;color:#999;">Operation 配置（JSON，可编辑）</div>
+    <textarea
+      id="containerOpsEditor"
+      style="width:100%;height:120px;margin-top:2px;background:#1e1e1e;color:#ccc;border:1px solid #3e3e3e;border-radius:2px;font-family:Consolas,monospace;font-size:10px;padding:4px;resize:vertical;"
+    ></textarea>
+    <div style="margin-top:4px;display:flex;justify-content:flex-end;gap:6px;">
+      <button id="btnSaveOps" style="font-size:10px;padding:2px 6px;">保存 Operation 列表</button>
+    </div>
+    <div style="margin-top:6px;font-size:10px;color:#666;">
+      提示：当前 Operation 编辑会直接写入外置容器库（~/.webauto/container-lib）；演练按钮暂仅记录日志，不会实际执行操作。
+    </div>
+  `;
+
+  const aliasInput = containerDetailsEl.querySelector('#containerAliasInput') as HTMLInputElement | null;
+  if (aliasInput) {
+    aliasInput.value = alias || name || id;
+  }
+
+  const opsEditor = containerDetailsEl.querySelector('#containerOpsEditor') as HTMLTextAreaElement | null;
+  if (opsEditor) {
+    try {
+      opsEditor.value = JSON.stringify(operations, null, 2);
+    } catch {
+      opsEditor.value = '[]';
+    }
+  }
+
+  const btnSaveAlias = containerDetailsEl.querySelector('#btnSaveAlias') as HTMLButtonElement | null;
+  if (btnSaveAlias && aliasInput) {
+    btnSaveAlias.addEventListener('click', async () => {
+      const nextAlias = aliasInput.value.trim();
+      debugLog('floating-panel', 'update-alias-clicked', { containerId: id, alias: nextAlias });
+      if (!currentProfile || !currentUrl) {
+        logger.warn('container-alias', 'Missing profile/url; skip update', {
+          profile: currentProfile,
+          url: currentUrl,
+        });
+        return;
+      }
+      try {
+        const api = (window as any).api;
+        if (!api?.invokeAction) {
+          logger.warn('container-alias', 'invokeAction not available');
+          return;
+        }
+        await api.invokeAction('containers:update-alias', {
+          profile: currentProfile,
+          url: currentUrl,
+          containerId: id,
+          alias: nextAlias,
+        });
+        await api.invokeAction('containers:match', {
+          profile: currentProfile,
+          url: currentUrl,
+          rootSelector: currentRootSelector || undefined,
+        });
+      } catch (err) {
+        logger.error('container-alias', 'Failed to update alias', err);
+      }
+    });
+  }
+
+  const btnSaveOps = containerDetailsEl.querySelector('#btnSaveOps') as HTMLButtonElement | null;
+  if (btnSaveOps && opsEditor) {
+    btnSaveOps.addEventListener('click', async () => {
+      if (!currentProfile || !currentUrl) {
+        logger.warn('container-operations', 'Missing profile/url; skip update', {
+          profile: currentProfile,
+          url: currentUrl,
+        });
+        return;
+      }
+      let nextOperations: any[] = [];
+      try {
+        const raw = opsEditor.value || '[]';
+        const parsed = JSON.parse(raw);
+        if (!Array.isArray(parsed)) {
+          throw new Error('operations JSON must be an array');
+        }
+        nextOperations = parsed;
+      } catch (err: any) {
+        logger.error('container-operations', 'Invalid operations JSON', err);
+        debugLog('floating-panel', 'operations-parse-error', {
+          containerId: id,
+          error: err?.message || String(err),
+        });
+        return;
+      }
+      try {
+        const api = (window as any).api;
+        if (!api?.invokeAction) {
+          logger.warn('container-operations', 'invokeAction not available');
+          return;
+        }
+        await api.invokeAction('containers:update-operations', {
+          profile: currentProfile,
+          url: currentUrl,
+          containerId: id,
+          operations: nextOperations,
+        });
+        await api.invokeAction('containers:match', {
+          profile: currentProfile,
+          url: currentUrl,
+          rootSelector: currentRootSelector || undefined,
+        });
+      } catch (err) {
+        logger.error('container-operations', 'Failed to update operations', err);
+      }
+    });
+  }
+
+  // 为演练按钮挂载简单的占位行为（后续可以接入真正的后台 action）。
+  const listEl = containerDetailsEl.querySelector('#containerOperationsList');
+  if (listEl) {
+    listEl.querySelectorAll('button[data-op-action="rehearse"]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const indexAttr = (btn as HTMLElement).getAttribute('data-op-index');
+        const index = typeof indexAttr === 'string' ? Number(indexAttr) : NaN;
+        if (!Number.isFinite(index)) return;
+        const op = operations[index];
+        debugLog('floating-panel', 'op-rehearse-clicked', { containerId: id, opIndex: index, op });
+        // 这里暂时仅记录日志，不做实际执行，避免影响现有流程。
+      });
+    });
+  }
+}
 
 if (dragArea) {
   log('drag-area found, enabling drag');
@@ -74,6 +286,22 @@ window.addEventListener('webauto:graph-status', ((evt: Event) => {
     setStatus(detail.reason || detail.message || '图谱加载失败', false);
   } else if (phase === 'snapshot:ready' || phase === 'ready') {
     setStatus('图谱已更新', true);
+  }
+}) as EventListener);
+
+// 监听容器节点选中事件，更新“容器详情”面板。
+window.addEventListener('webauto:container-selected', ((evt: Event) => {
+  const detail = (evt as CustomEvent<any>).detail || {};
+  currentContainer = detail.container || null;
+  renderContainerDetails(currentContainer);
+
+  // 自动切换到底部“容器详情”标签，方便查看。
+  try {
+    if (containerDetailsTab) {
+      containerDetailsTab.click();
+    }
+  } catch {
+    // ignore
   }
 }) as EventListener);
 
@@ -109,6 +337,7 @@ if (!(window as any).api) {
 
         currentProfile = profile;
         currentRootSelector = rootSelector;
+        currentUrl = url || currentUrl;
 
         if (!profile) {
           log('Missing profile in containers.matched payload');
@@ -126,6 +355,11 @@ if (!(window as any).api) {
         });
 
         log('容器树和DOM树更新完成（统一快照刷新）');
+
+        // 每次刷新快照后，如当前选中容器不再存在，重置详情面板。
+        if (!currentContainer) {
+          renderContainerDetails(null);
+        }
       }
     }
 
@@ -148,11 +382,15 @@ if (!(window as any).api) {
         profile: payload?.profileId,
         url: payload?.url,
       });
+      if (payload?.url) {
+        currentUrl = payload.url;
+      }
     }
 
     if (msg.topic === 'browser.runtime.event' || (msg.topic?.startsWith && msg.topic.startsWith('browser.runtime.'))) {
       const payload = msg.payload;
       if (payload?.pageUrl) {
+        currentUrl = payload.pageUrl;
         updatePageContext({ url: payload.pageUrl });
       }
     }
