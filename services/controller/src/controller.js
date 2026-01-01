@@ -281,6 +281,24 @@ export class UiController {
           ? payload.definition.capabilities
           : ['highlight', 'find-child', 'scroll'],
     };
+    // 为新建子容器注入一组默认 Operation，避免出现“空容器”难以编辑的情况。
+    // 仅当调用方未显式提供 operations 时生效。
+    const primarySelector = selectorEntries[0]?.css || '';
+    if ((!Array.isArray(normalizedChild.operations) || !normalizedChild.operations.length) && primarySelector) {
+      normalizedChild.operations = [
+        {
+          id: `${containerId}.appear.highlight`,
+          type: 'highlight',
+          triggers: ['appear'],
+          enabled: true,
+          config: {
+            selector: primarySelector,
+            style: '2px solid #fbbc05',
+            duration: 1500,
+          },
+        },
+      ];
+    }
     const alias = typeof payload.alias === 'string' ? payload.alias.trim() : '';
     const metadata = { ...(normalizedChild.metadata || {}) };
     if (alias) {

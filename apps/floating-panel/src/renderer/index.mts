@@ -91,24 +91,64 @@ function renderContainerDetails(container: any | null) {
   const selector = matchNode?.selector || null;
   const matchCount = container.match?.match_count ?? (matchNode ? 1 : 0);
 
-  const opsHtml = operations.length
-    ? operations
-        .map((op: any, index: number) => {
-          const key = op.id || op.type || `op-${index + 1}`;
-          const configPreview = op.config ? JSON.stringify(op.config).slice(0, 60) : '{}';
-          return `<div style="display:flex;align-items:center;justify-content:space-between;padding:3px 0;border-bottom:1px solid #2a2a2a;">
-            <div style="flex:1;min-width:0;">
-              <span style="color:#ffd700;font-size:11px;">${key}</span>
-              <span style="color:#888;font-size:10px;margin-left:4px;">${op.type || ''}</span>
-              <span style="color:#555;font-size:10px;margin-left:6px;">${configPreview}</span>
-            </div>
-            <div style="display:flex;gap:4px;">
-              <button data-op-index="${index}" data-op-action="rehearse" style="font-size:10px;padding:2px 4px;">演练</button>
-            </div>
-          </div>`;
-        })
-        .join('')
-    : `<div style="font-size:10px;color:#666;">无操作定义（operations 为空）</div>`;
+  // 将 operations 按消息触发分组：默认触发为 appear。
+  const DEFAULT_TRIGGER = 'appear';
+  const preferredOrder = ['appear', 'click', 'manual:rehearsal'];
+  const grouped = new Map<string, Array<{ op: any; index: number }>>();
+  operations.forEach((op: any, index: number) => {
+    const triggers = Array.isArray(op.triggers) && op.triggers.length ? op.triggers : [DEFAULT_TRIGGER];
+    triggers.forEach((raw) => {
+      const key = String(raw || '').trim() || DEFAULT_TRIGGER;
+      if (!grouped.has(key)) grouped.set(key, []);
+      grouped.get(key)!.push({ op, index });
+    });
+  });
+  const triggerOrder: string[] = [];
+  preferredOrder.forEach((t) => {
+    if (grouped.has(t)) triggerOrder.push(t);
+  });
+  Array.from(grouped.keys()).forEach((t) => {
+    if (!triggerOrder.includes(t)) triggerOrder.push(t);
+  });
+
+  const renderTriggerLabel = (trigger: string) => {
+    if (trigger === 'appear') return 'appear（出现）';
+    if (trigger === 'click') return 'click（点击）';
+    if (trigger === 'manual:rehearsal') return 'manual:rehearsal（演练）';
+    return trigger;
+  };
+
+  const messageOpsHtml =
+    operations.length && triggerOrder.length
+      ? triggerOrder
+          .map((trigger) => {
+            const rows = grouped.get(trigger) || [];
+            const rowsHtml = rows
+              .map(({ op, index }) => {
+                const key = op.id || op.type || `op-${index + 1}`;
+                const configPreview = op.config ? JSON.stringify(op.config).slice(0, 48) : '{}';
+                const enabled = op.enabled !== false;
+                return `<div style="display:flex;align-items:center;justify-content:space-between;padding:2px 0;">
+                  <div style="flex:1;min-width:0;">
+                    <span style="color:${enabled ? '#ffd700' : '#777'};font-size:11px;">${key}</span>
+                    <span style="color:#888;font-size:10px;margin-left:4px;">${op.type || ''}</span>
+                    <span style="color:#555;font-size:10px;margin-left:6px;">${configPreview}</span>
+                  </div>
+                  <div style="display:flex;gap:4px;">
+                    <button data-op-index="${index}" data-op-action="rehearse" style="font-size:10px;padding:2px 4px;">演练</button>
+                  </div>
+                </div>`;
+              })
+              .join('');
+            return `<div style="display:flex;align-items:flex-start;padding:4px 0;border-bottom:1px solid #2a2a2a;">
+              <div style="width:96px;font-size:10px;color:#9cdcfe;padding-top:2px;">${renderTriggerLabel(trigger)}</div>
+              <div style="flex:1;min-width:0;">${
+                rowsHtml || `<div style="font-size:10px;color:#666;">当前消息下暂无操作</div>`
+              }</div>
+            </div>`;
+          })
+          .join('')
+      : `<div style="font-size:10px;color:#666;">无操作定义（operations 为空）</div>`;
 
   containerDetailsEl.innerHTML = `
     <div style="margin-bottom:6px;">
@@ -137,11 +177,11 @@ function renderContainerDetails(container: any | null) {
       <div>匹配 selector: <span style="color:#9cdcfe;">${selector || '未记录'}</span></div>
       <div>匹配计数: <span style="color:#9cdcfe;">${matchCount}</span></div>
     </div>
-    <div style="margin-bottom:4px;font-size:11px;color:#ccc;font-weight:600;">默认 Operation 列表（按顺序执行）</div>
+    <div style="margin-bottom:4px;font-size:11px;color:#ccc;font-weight:600;">消息与 Operation 列表</div>
     <div id="containerOperationsList">
-      ${opsHtml}
+      ${messageOpsHtml}
     </div>
-    <div style="margin-top:6px;font-size:10px;color:#999;">Operation 配置（JSON，可编辑）</div>
+    <div style="margin-top:6px;font-size:10px;color:#999;">高级：Operation 配置（JSON，可编辑）</div>
     <textarea
       id="containerOpsEditor"
       style="width:100%;height:120px;margin-top:2px;background:#1e1e1e;color:#ccc;border:1px solid #3e3e3e;border-radius:2px;font-family:Consolas,monospace;font-size:10px;padding:4px;resize:vertical;"
