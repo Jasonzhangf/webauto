@@ -76,7 +76,7 @@ function renderContainerDetails(container: any | null) {
   const name = container.name || container.id || '未命名容器';
   const type = container.type || 'container';
   const capabilities = Array.isArray(container.capabilities) ? container.capabilities : [];
-  const operations = Array.isArray(container.operations) ? container.operations : [];
+  const rawOperations = Array.isArray(container.operations) ? container.operations : [];
   const alias =
     (container.metadata && (container.metadata.alias as string)) ||
     (container.alias as string) ||
@@ -90,6 +90,37 @@ function renderContainerDetails(container: any | null) {
   const domPath = matchNode?.dom_path || null;
   const selector = matchNode?.selector || null;
   const matchCount = container.match?.match_count ?? (matchNode ? 1 : 0);
+
+  // 若旧容器尚未定义 operations，则基于 selector 合成一条默认的 "appear → highlight" 操作，便于直接编辑。
+  const synthesizedOperations: any[] = [];
+  if (!rawOperations.length) {
+    let primarySelector: string | null = null;
+    if (typeof selector === 'string' && selector.trim()) {
+      primarySelector = selector.trim();
+    } else if (Array.isArray((container as any).selectors) && (container as any).selectors.length) {
+      const firstSel = (container as any).selectors[0];
+      if (typeof firstSel === 'string' && firstSel.trim()) {
+        primarySelector = firstSel.trim();
+      } else if (firstSel && typeof firstSel.css === 'string' && firstSel.css.trim()) {
+        primarySelector = firstSel.css.trim();
+      }
+    }
+    if (primarySelector) {
+      synthesizedOperations.push({
+        id: `${id}.appear.highlight`,
+        type: 'highlight',
+        triggers: ['appear'],
+        enabled: true,
+        config: {
+          selector: primarySelector,
+          style: '2px solid #fbbc05',
+          duration: 1500,
+        },
+      });
+    }
+  }
+
+  const operations: any[] = (rawOperations.length ? rawOperations : synthesizedOperations).map((op: any) => ({ ...op }));
 
   // 将 operations 按消息触发分组：默认触发为 appear。
   const DEFAULT_TRIGGER = 'appear';
