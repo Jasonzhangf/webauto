@@ -6,8 +6,7 @@ import { OperationExecutor } from '../../libs/containers/src/engine/OperationExe
 import { logDebug } from '../../modules/logging/src/index.js';
 import { UiController } from '../../services/controller/src/controller.js';
 // TS 类型声明通过本地 d.ts 提供，这里忽略实现文件的扩展名校验
-// @ts-ignore
-import { setupContainerOperationsRoutes } from './container-operations.mjs';
+import { setupContainerOperationsRoutes } from './container-operations.js';
 import { WebSocketServer, WebSocket } from 'ws';
 import { EventBus, globalEventBus } from '../../libs/operations-framework/src/event-driven/EventBus.js';
 import path from 'node:path';
@@ -515,4 +514,4 @@ server.start().catch(err => {
   console.error('[unified-api] Server failed to start:', err);
   process.exit(1);
 });
-import { handleContainerOperationRequest } from './container-operations.mjs';
+import { handleContainerOperationRequest } from './container-operations.js';
