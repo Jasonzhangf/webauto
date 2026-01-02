@@ -54,6 +54,15 @@ async function testHighlightSelector(selector = '#app', desc = '根元素') {
       }
     }
   };
+  const payload = {
+    profile: PROFILE,
+    selector,
+    options: {
+      style: '3px solid red',
+      duration: 1500,
+      sticky: false
+    }
+  };
   
   log(`测试 selector 高亮 (${desc}): ${selector}`);
   const resp = await fetch(url, {
@@ -69,17 +78,14 @@ async function testHighlightSelector(selector = '#app', desc = '根元素') {
 }
 
 async function testHighlightDomPath(path = 'root/0', desc = '第一个子元素') {
-  const url = `${UNIFIED_API}/v1/controller/action`;
+  const url = `${UNIFIED_API}/v1/browser/highlight-dom-path`;
   const payload = {
-    action: 'browser:highlight-dom-path',
-    payload: {
-      profile: PROFILE,
-      path,
-      options: {
-        style: '3px solid blue',
-        duration: 1500,
-        sticky: false
-      }
+    profile: PROFILE,
+    path,
+    options: {
+      style: '3px solid blue',
+      duration: 1500,
+      sticky: false
     }
   };
   

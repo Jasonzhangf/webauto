@@ -993,7 +993,92 @@ export class UiController {
   }
 
   async captureInspectorSnapshot(_options: Record<string, unknown> = {}): Promise<any> {
-    throw new Error('captureInspectorSnapshot is not implemented in controller.ts');
+    const options = _options as any;
+    const profile = options.profile;
+    const sessions = await this.fetchSessionsInternal();
+    const targetSession = profile ? this.findSessionByProfile(sessions, profile) : sessions[0] || null;
+    const sessionId = targetSession?.session_id || targetSession?.sessionId || profile || null;
+    const profileId = profile || targetSession?.profileId || targetSession?.profile_id || sessionId || null;
+    const targetUrl = options.url || targetSession?.current_url || targetSession?.currentUrl;
+    const requestedContainerId = options.containerId || options.rootContainerId;
+
+    if (!targetUrl) {
+      throw new Error('无法确定会话 URL，请先在浏览器中打开目标页面');
+    }
+
+    let liveError: Error | null = null;
+    let snapshot: any = null;
+
+    if (sessionId) {
+      try {
+        snapshot = await this.fetchContainerSnapshotFromService({
+          sessionId,
+          url: targetUrl,
+          maxDepth: options.maxDepth,
+          maxChildren: options.maxChildren,
+          rootContainerId: requestedContainerId,
+          rootSelector: options.rootSelector,
+        });
+      } catch (err) {
+        liveError = err as Error;
+      }
+    }
+
+    let fixtureSnapshot: any = null;
+    if (!snapshot) {
+      fixtureSnapshot = await this.captureSnapshotFromFixture({
+        profileId,
+        url: targetUrl,
+        maxDepth: options.maxDepth,
+        maxChildren: options.maxChildren,
+        containerId: requestedContainerId,
+        rootSelector: options.rootSelector,
+      });
+      snapshot = fixtureSnapshot;
+    } else if (!snapshot?.dom_tree) {
+      try {
+        fixtureSnapshot = await this.captureSnapshotFromFixture({
+          profileId,
+          url: targetUrl,
+          maxDepth: options.maxDepth,
+          maxChildren: options.maxChildren,
+          containerId: requestedContainerId,
+          rootSelector: options.rootSelector,
+        });
+        if (fixtureSnapshot?.dom_tree) {
+          snapshot.dom_tree = fixtureSnapshot.dom_tree;
+          if (!snapshot.matches && fixtureSnapshot.matches) {
+            snapshot.matches = fixtureSnapshot.matches;
+          }
+          const mergedMetadata = {
+            ...(fixtureSnapshot.metadata || {}),
+            ...(snapshot.metadata || {}),
+          };
+          if (!mergedMetadata.dom_source) {
+            mergedMetadata.dom_source = 'fixture';
+          }
+          snapshot.metadata = mergedMetadata;
+        }
+      } catch (fixtureError: any) {
+        console.warn('[controller] fixture DOM capture failed:', fixtureError?.message || fixtureError);
+      }
+    }
+
+    if (!snapshot || !snapshot.container_tree) {
+      const rootError = liveError || new Error('容器树为空，检查容器定义或选择器是否正确');
+      throw rootError;
+    }
+
+    if (requestedContainerId) {
+      snapshot = this.focusSnapshotOnContainer(snapshot, requestedContainerId);
+    }
+
+    return {
+      sessionId: sessionId || profileId || 'unknown-session',
+      profileId: profileId || 'default',
+      targetUrl,
+      snapshot,
+    };
   }
 
   async captureInspectorBranch(_options: Record<string, unknown> = {}): Promise<any> {
@@ -1079,5 +1164,99 @@ export class UiController {
   }
   private getBrowserWsUrl(): string {
     return `ws://${this.defaultWsHost || '127.0.0.1'}:${this.defaultWsPort || 7701}/ws`;
+  }
+
+  private async fetchSessionsInternal(): Promise<any[]> {
+    try {
+      const res = await this.runCliCommand('session-manager', ['list']);
+      const sessions = res?.sessions || res?.data?.sessions || res?.data || [];
+      return Array.isArray(sessions) ? sessions : [];
+    } catch {
+      return [];
+    }
+  }
+
+  private findSessionByProfile(sessions: any[], profile: string): any | null {
+    if (!profile) return null;
+    return (
+      sessions.find(
+        (session) =>
+          session?.profileId === profile ||
+          session?.profile_id === profile ||
+          session?.session_id === profile ||
+          session?.sessionId === profile,
+      ) || null
+    );
+  }
+
+  private async captureSnapshotFromFixture({ profileId, url, maxDepth, maxChildren, containerId, rootSelector }: { profileId: string; url: string; maxDepth?: number; maxChildren?: number; containerId?: string; rootSelector?: string }): Promise<any> {
+    const { promises: fsPromises } = await import('node:fs');
+    const path = await import('node:path');
+    const os = await import('node:os');
+
+    const tmpDir = await fsPromises.mkdtemp(path.join(os.tmpdir(), 'webauto-ui-'));
+    const fixturePath = path.join(tmpDir, 'dom.html');
+    try {
+      const domArgs = ['dom-dump', '--url', url, '--headless', 'true', '--output', fixturePath];
+      if (profileId) {
+        domArgs.push('--profile', profileId);
+      }
+      await this.runCliCommand('browser-control', domArgs);
+      const treeArgs = ['inspect-tree', '--url', url, '--fixture', fixturePath];
+      if (containerId) treeArgs.push('--root-container-id', containerId);
+      if (rootSelector) treeArgs.push('--root-selector', rootSelector);
+      if (typeof maxDepth === 'number') {
+        treeArgs.push('--max-depth', String(maxDepth));
+      }
+      if (typeof maxChildren === 'number') {
+        treeArgs.push('--max-children', String(maxChildren));
+      }
+      const tree = await this.runCliCommand('container-matcher', treeArgs);
+      return tree?.data || tree;
+    } finally {
+      fsPromises.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+    }
+  }
+
+  private focusSnapshotOnContainer(snapshot: any, containerId: string): any {
+    if (!containerId || !snapshot?.container_tree) {
+      return snapshot;
+    }
+    const target = this.cloneContainerSubtree(snapshot.container_tree, containerId);
+    if (!target) {
+      return snapshot;
+    }
+    const nextSnapshot = {
+      ...snapshot,
+      container_tree: target,
+      metadata: {
+        ...(snapshot.metadata || {}),
+        root_container_id: containerId,
+      },
+    };
+    if (!nextSnapshot.root_match || nextSnapshot.root_match?.container?.id !== containerId) {
+      nextSnapshot.root_match = {
+        container: {
+          id: containerId,
+          ...(target.name ? { name: target.name } : {}),
+        },
+        matched_selector: target.match?.matched_selector,
+      };
+    }
+    return nextSnapshot;
+  }
+
+  private cloneContainerSubtree(root: any, targetId: string): any | null {
+    if (!root || typeof root !== 'object') return null;
+    if (root.id === targetId || root.name === targetId) {
+      return JSON.parse(JSON.stringify(root));
+    }
+    if (Array.isArray(root.children)) {
+      for (const child of root.children) {
+        const found = this.cloneContainerSubtree(child, targetId);
+        if (found) return found;
+      }
+    }
+    return null;
   }
 }

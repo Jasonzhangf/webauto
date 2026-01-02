@@ -63,7 +63,7 @@ async function reportError(module: string, err: unknown, context: any = {}) {
 }
 
 function flushPendingMessages() {
-  if (!win || !win.isVisible()) {
+  if (!win || win.isDestroyed() || win.webContents.isDestroyed() || !win.isVisible()) {
     return;
   }
   
@@ -215,8 +215,12 @@ function connectBus() {
     busConnected = false;
     pendingStatus = { connected: false };
     
-    if (win && win.isVisible()) {
-      win.webContents.send('bus:status', { connected: false });
+    if (win && !win.isDestroyed() && !win.webContents.isDestroyed() && win.isVisible()) {
+      try {
+        win.webContents.send('bus:status', { connected: false });
+      } catch (err) {
+        reportError('bus-status', err, { status: { connected: false } });
+      }
     }
     
     log('Reconnecting in 3s...');
@@ -228,8 +232,12 @@ function connectBus() {
     busConnected = false;
     pendingStatus = { connected: false };
     
-    if (win && win.isVisible()) {
-      win.webContents.send('bus:status', { connected: false });
+    if (win && !win.isDestroyed() && !win.webContents.isDestroyed() && win.isVisible()) {
+      try {
+        win.webContents.send('bus:status', { connected: false });
+      } catch (sendErr) {
+        reportError('bus-status', sendErr, { status: { connected: false } });
+      }
     }
   });
 }
@@ -350,6 +358,22 @@ ipcMain.handle('ui:action', async (_evt, { action, payload, request_id }) => {
   } catch (e) {
     log(`UI action error: ${e}`);
     return { success: false, error: String(e), request_id };
+  }
+});
+
+ipcMain.handle('ui:bus-send', async (_evt, { topic, payload }) => {
+  try {
+    log(`Sending bus event: ${topic}`);
+    
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ topic, payload }));
+      return { success: true };
+    } else {
+      return { success: false, error: 'Bus WebSocket not connected' };
+    }
+  } catch (e) {
+    log(`Bus send error: ${e}`);
+    return { success: false, error: String(e) };
   }
 });
 
