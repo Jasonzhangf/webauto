@@ -743,17 +743,46 @@ if (!(window as any).api) {
     }
   });
 
-  // 初始健康检查
+  // 初始健康检查和UI初始化验证
   (async () => {
     try {
+      // 等待UI元素加载
+      await new Promise((resolve) => {
+        if (document.readyState === 'loading') {
+          document.addEventListener('DOMContentLoaded', () => resolve(null), { once: true });
+        } else {
+          resolve(null);
+        }
+      });
+      
+      // 检查关键UI元素是否存在
+      const criticalElements = {
+        status: !!statusEl,
+        health: !!healthEl,
+        dragArea: !!dragArea,
+        canvas: !!document.getElementById('graphPanel'),
+        loadingIndicator: !!loadingIndicator
+      };
+      
+      const allElementsReady = Object.values(criticalElements).every(Boolean);
+      if (!allElementsReady) {
+        logger.warn('ui-health', 'Missing critical UI elements', criticalElements);
+      }
+      
+      // 执行健康检查
       const res = await (window.api as any).invokeAction('health', {});
       if (res.ok) {
         log('Health check OK');
+        if (healthEl) healthEl.textContent = '✅ 健康检查通过';
+      } else {
+        if (healthEl) healthEl.textContent = '❌ 健康检查失败';
       }
     } catch (e) {
       logger.error('health-check', 'Health check failed', e);
+      if (healthEl) healthEl.textContent = '❌ 健康检查异常';
     }
   })();
+
 }
 
 const canvas = document.getElementById('graphPanel');
