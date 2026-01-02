@@ -11,10 +11,3 @@ export function setupContainerOperationsRoutes(
   sessionManager: any
 ): ContainerOperationsBindingState;
 
-export function handleContainerOperationRequest(
-  url: URL,
-  req: any,
-  res: any,
-  routes: ContainerOperationsBindingState,
-  readJsonBody: (req: any) => Promise<any>
-): Promise<boolean>;

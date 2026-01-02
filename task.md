@@ -1,85 +1,91 @@
-# WebAuto 系统修复与验证计划（2026-01-02更新）
+# WebAuto DOM Picker 修复任务 - 当前状态
 
-## 当前状态总览
+## 核心问题分析
 
-### 已完成的修复
-- ✅ CI 类型检查问题修复（container-operations.mjs.d.ts）
-- ✅ 识别并修复 CI 盲区（缺少端到端启动测试）
-- ✅ 修复 PROJECT_ROOT 路径问题（使用 import.meta.url）
-- ✅ 添加浮窗启动测试到 CI（test:floating-startup）
-- ✅ 基本浮窗启动验证通过
+### 问题1：picker捕获时点击被截获 ✅
+- runtime.js 中已经有 `preventDefault()` 和 `stopPropagation()`
+- 应该是工作的，需要验证
 
-### 待完善：系统健康检查层次
+### 问题2：DOM元素没有被绘制和连线 ❌ 
+**现象**：
+- 建议的子容器（橙色虚线框）显示了 ✅
+- DOM元素（橙色虚线框）没有显示 ❌
+- 两者之间没有连线 ❌
 
-当前测试只验证了**浮窗进程启动**，但完整的系统健康应包含：
+**根本原因**：
+1. `ensureDomPathLoaded` 成功加载了DOM分支（有日志证明）✅
+2. `mergeDomBranch` 成功合并了分支到 domData ✅
+3. `expandDomPath` 展开了路径到 expandedNodes ✅
+4. **但是** `renderDomNodeRecursive` 在渲染时，新加载的深层节点可能没有被渲染，因为：
+   - 初始 DOM tree 只有浅层节点（depth=8）
+   - `mergeDomBranch` 只是替换了 targetNode.children
+   - 但如果 targetNode 本身在初始 tree 中不存在，就无法合并
+   - 需要检查 `findDomNodeByPath` 是否能找到目标节点
 
-1. **服务层健康**
-   - Unified API (7701) 启动并响应
-   - Browser Service (7704) 启动并响应
-   - Controller (8970) 启动并响应
+**解决方案**：
+1. 在 `handlePickerResult` 中添加详细日志，确认：
+   - DOM分支加载是否成功
+   - DOM节点是否被合并到 domData
+   - DOM节点是否在 domNodePositions 中注册
+2. 检查 `renderDomNodeRecursive` 是否正确遍历了新合并的节点
+3. 添加橙色虚线高亮到选中的DOM节点
+4. 在 `drawAllConnections` 中添加建议节点到DOM节点的连线
 
-2. **连接层健康**
-   - WebSocket 总线连接 (ws://127.0.0.1:7701/bus)
-   - 浮窗 UI 与总线成功握手
-   - 各服务间消息传递正常
+## 修复步骤
 
-3. **功能层健康**
-   - 页面信息获取成功
-   - 容器匹配功能正常（有匹配锚点，即使为空）
-   - DOM 树拉取功能正常
-   - UI 元素正确初始化（图谱、详情面板等）
+### 步骤1：添加详细日志
+```javascript
+// 在 handlePickerResult 中
+console.log('[handlePickerResult] domPath:', domPath);
+console.log('[handlePickerResult] After ensureDomPathLoaded, domData:', domData);
+console.log('[handlePickerResult] After renderGraph, domNodePositions.has(domPath):', domNodePositions.has(domPath));
+console.log('[handlePickerResult] domNodePositions.get(domPath):', domNodePositions.get(domPath));
+```
 
-4. **数据层健康**
-   - Session/Profile 管理正常
-   - 容器库读写正常
-   - 操作配置读写正常
+### 步骤2：检查 mergeDomBranch
+```javascript
+// 在 mergeDomBranch 中添加日志
+console.log('[mergeDomBranch] Looking for path:', branchNode.path);
+console.log('[mergeDomBranch] Found targetNode:', !!targetNode);
+console.log('[mergeDomBranch] targetNode.children before:', targetNode?.children?.length || 0);
+console.log('[mergeDomBranch] branchNode.children:', branchNode.children?.length || 0);
+```
 
-## 执行计划
+### 步骤3：在 drawAllConnections 中添加建议节点连线
+```javascript
+// 在 drawAllConnections 的末尾
+if (suggestedNode) {
+  const containerPos = containerNodePositions.get(suggestedNode.parentId);
+  const domPos = domNodePositions.get(suggestedNode.domPath);
+  
+  if (containerPos && domPos) {
+    // 绘制橙色虚线从建议容器到DOM节点
+    drawConnectionToDom(parent, containerPos.x, containerPos.y, domPos.indicatorX, domPos.indicatorY, '#fbbc05');
+  }
+}
+```
 
-### 阶段 1：完善健康检查基础设施 ✅
-- [x] 1.1 修复 PROJECT_ROOT 路径问题
-- [x] 1.2 添加基本启动测试
-- [ ] 1.3 扩展健康检查到多层次验证
+### 步骤4：修改 drawConnectionToDom 支持自定义颜色
+```javascript
+function drawConnectionToDom(parent, startX, startY, endX, endY, color = '#4CAF50') {
+  const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  const midX = (startX + endX) / 2;
+  path.setAttribute('d', `M ${startX} ${startY} L ${midX} ${startY} L ${midX} ${endY} L ${endX} ${endY}`);
+  path.setAttribute('stroke', color);
+  path.setAttribute('stroke-width', '2');
+  path.setAttribute('fill', 'none');
+  path.setAttribute('stroke-dasharray', '4,2');
+  path.setAttribute('opacity', '0.7');
+  parent.appendChild(path);
+}
+```
 
-### 阶段 2：服务层健康验证
-- [ ] 2.1 添加 Unified API 健康检查端点测试
-- [ ] 2.2 添加 Browser Service 健康检查端点测试
-- [ ] 2.3 添加 Controller 健康检查端点测试
-- [ ] 2.4 验证服务间依赖关系
-
-### 阶段 3：连接层健康验证
-- [ ] 3.1 验证 WebSocket 总线连接
-- [ ] 3.2 验证浮窗 ping/pong 机制
-- [ ] 3.3 验证消息传递完整性
-- [ ] 3.4 验证事件订阅机制
-
-### 阶段 4：功能层健康验证
-- [ ] 4.1 验证容器匹配功能（有匹配锚点）
-- [ ] 4.2 验证 DOM 树获取功能
-- [ ] 4.3 验证 UI 初始化完整性
-- [ ] 4.4 验证操作配置读写
-
-### 阶段 5：集成测试
-- [ ] 5.1 实现端到端健康检查脚本
-- [ ] 5.2 将完整健康检查集成到 CI
-- [ ] 5.3 验证完整工作流（启动 → 匹配 → 操作）
-
-## 技术债务记录
-
-### 已修复
-- ✅ 2026-01-02: 修复 PROJECT_ROOT 使用 process.cwd() 导致路径错误
-- ✅ 2026-01-02: 修复 server.ts import 路径错误（.js → .mjs）
-- ✅ 2026-01-02: 添加 container-operations.mjs 类型声明
-- ✅ 2026-01-02: 实现 flushPendingMessages 安全检查避免 "Render frame disposed"
-
-### 待修复
-- ⚠️  浮窗 UI 初始化验证不完整（只检查日志，未验证功能）
-- ⚠️  缺少服务依赖关系验证
-- ⚠️  缺少数据层健康检查
-- ⚠️  缺少端到端功能测试
-
-## 执行记录
-- 2026-01-02 13:00: 识别 CI 盲区，启动测试缺失导致路径问题未被发现
-- 2026-01-02 13:30: 修复 PROJECT_ROOT 路径问题，使用 import.meta.url
-- 2026-01-02 13:45: 实现浮窗启动测试脚本，验证基本启动成功
-- 2026-01-02 13:50: 将 test:floating-startup 添加到 CI 测试链
+## 待办事项
+- [ ] 添加详细日志到 handlePickerResult
+- [ ] 添加日志到 mergeDomBranch
+- [ ] 修改 drawConnectionToDom 支持颜色参数
+- [ ] 在 drawAllConnections 中添加建议节点连线
+- [ ] 重启服务测试
+- [ ] 检查浏览器控制台日志
+- [ ] 确认DOM节点和建议节点都被正确绘制
+- [ ] 确认连线正确绘制

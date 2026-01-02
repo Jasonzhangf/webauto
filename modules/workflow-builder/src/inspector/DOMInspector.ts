@@ -4,25 +4,9 @@
 export class DOMInspector {
   private profile: string;
   private isActive: boolean = false;
-  private ws: WebSocket | null = null;
-  private onElementSelected: ((data: any) => void) | null = null;
 
   constructor(profile: string) {
     this.profile = profile;
-  }
-
-  /**
-   * 设置 WebSocket 连接
-   */
-  setWebSocket(ws: WebSocket): void {
-    this.ws = ws;
-  }
-
-  /**
-   * 设置元素选择回调
-   */
-  setOnElementSelected(callback: (data: any) => void): void {
-    this.onElementSelected = callback;
   }
 
   /**
@@ -76,6 +60,9 @@ export class DOMInspector {
                 highlight.style.top = rect.top + 'px';
                 highlight.style.width = rect.width + 'px';
                 highlight.style.height = rect.height + 'px';
+                
+                // 发送 Hover 事件到后端（可选，如果需要实时反馈）
+                // window.waBridge.emit('inspector:hover', { ... });
               }, true);
               
               // 点击处理（拦截）
@@ -99,40 +86,17 @@ export class DOMInspector {
                   return selector;
                 }
                 
-                // 获取元素信息
-                const rect = el.getBoundingClientRect();
-                const elementData = {
+                // 发送选择事件
+                // 这里我们通过 console.log 模拟，实际应该通过 WebSocket 发送
+                console.log('__WA_INSPECTOR_SELECT__', JSON.stringify({
                   tagName: el.tagName.toLowerCase(),
                   selector: getSelector(el),
-                  rect: {
-                    left: rect.left,
-                    top: rect.top,
-                    width: rect.width,
-                    height: rect.height
-                  },
-                  textContent: (el.textContent || '').substring(0, 50),
-                  className: el.className || '',
-                  id: el.id || ''
-                };
-                
-                // 发送到 WebSocket（如果可用）
-                if (window.__waInspectorWs && window.__waInspectorWs.readyState === WebSocket.OPEN) {
-                  window.__waInspectorWs.send(JSON.stringify({
-                    type: 'inspector:select',
-                    payload: elementData
-                  }));
-                }
-                
-                // 也通过 console.log 发送（备用）
-                console.log('__WA_INSPECTOR_SELECT__', JSON.stringify(elementData));
+                  rect: el.getBoundingClientRect(),
+                  textContent: (el.textContent || '').substring(0, 50)
+                }));
                 
                 return false;
               }, true);
-              
-              // 存储 WebSocket 引用
-              if (window.__waInspectorWs) {
-                window.__waInspectorWs.ws = window.__waInspectorWs;
-              }
               
               console.log('Inspector started');
             })()
@@ -142,7 +106,6 @@ export class DOMInspector {
     });
     
     this.isActive = true;
-    
   }
 
   /**
@@ -173,85 +136,5 @@ export class DOMInspector {
     });
     
     this.isActive = false;
-    
-  }
-  
-  /**
-   * 高亮指定元素
-   */
-  async highlightElement(selector: string, style: string): Promise<boolean> {
-    const UNIFIED_API = 'http://127.0.0.1:7701';
-    
-    try {
-      const result = await fetch(`${UNIFIED_API}/v1/controller/action`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'browser:execute',
-          payload: {
-            profile: this.profile,
-            script: `
-              (function() {
-                const el = document.querySelector('${selector}');
-                if (!el) return false;
-                
-                // 创建高亮元素
-                const existing = document.getElementById('wa-inspector-highlight-temp');
-                if (existing) existing.remove();
-                
-                const highlight = document.createElement('div');
-                highlight.id = 'wa-inspector-highlight-temp';
-                highlight.style.cssText = '${style};position:fixed;z-index:999992;pointer-events:none;';
-                
-                const rect = el.getBoundingClientRect();
-                highlight.style.left = rect.left + 'px';
-                highlight.style.top = rect.top + 'px';
-                highlight.style.width = rect.width + 'px';
-                highlight.style.height = rect.height + 'px';
-                
-                document.body.appendChild(highlight);
-                return true;
-              })()
-            `
-          }
-        })
-      });
-      
-      return result.ok;
-    } catch (error) {
-      console.error('[DOMInspector] Failed to highlight element:', error);
-      return false;
-    }
-  }
-
-  /**
-   * 清除高亮
-   */
-  async clearHighlight(): Promise<boolean> {
-    const UNIFIED_API = 'http://127.0.0.1:7701';
-    
-    try {
-      const result = await fetch(`${UNIFIED_API}/v1/controller/action`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'browser:execute',
-          payload: {
-            profile: this.profile,
-            script: `
-              (function() {
-                document.getElementById('wa-inspector-highlight-temp')?.remove();
-                return true;
-              })()
-            `
-          }
-        })
-      });
-      
-      return result.ok;
-    } catch (error) {
-      console.error('[DOMInspector] Failed to clear highlight:', error);
-      return false;
-    }
   }
 }

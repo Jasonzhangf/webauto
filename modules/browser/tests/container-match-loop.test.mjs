@@ -12,24 +12,13 @@ const BASE = 'http://127.0.0.1:7701';
 const PROFILE = 'weibo_fresh';
 
 async function ensureSession() {
-  let list;
-  try {
-    list = await fetch(`${BASE}/v1/session/list`).then(r => r.json());
-  } catch (e) {
-    console.log('[ensure] 无法连接到服务，跳过测试');
-    process.exit(0);
-  }
-  
+  const list = await fetch(`${BASE}/v1/session/list`).then(r => r.json());
   const sessions = Array.isArray(list.sessions)
     ? list.sessions
     : Array.isArray(list.data?.sessions)
       ? list.data.sessions
       : [];
-  
-  // Check if target session exists
-  const targetSession = sessions.find(s => s.profileId === PROFILE || s.session_id === PROFILE);
-  
-  if (!list.success || !targetSession) {
+  if (!list.success || sessions.length === 0) {
     console.log('[ensure] 创建会话');
     const create = await fetch(`${BASE}/v1/session/create`, {
       method: 'POST',
@@ -37,8 +26,6 @@ async function ensureSession() {
       body: JSON.stringify({ profile: PROFILE, url: 'https://weibo.com' })
     }).then(r => r.json());
     if (!create.success) throw new Error('无法创建会话');
-  } else {
-    console.log('[ensure] 会话已存在');
   }
 }
 

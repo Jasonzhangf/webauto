@@ -8,50 +8,20 @@
  * 4. 容器高亮（容器selector）
  */
 
-import { spawn } from 'node:child_process';
-
 const UNIFIED_API = process.env.UNIFIED_API_URL || 'http://127.0.0.1:7701';
 const PROFILE = process.env.TEST_PROFILE || 'weibo_fresh';
 
 const log = (msg) => console.log(`[highlight-complete] ${msg}`);
 
-let launcherProc;
-
-async function startLauncher() {
-  log('启动 Launcher...');
-  launcherProc = spawn('node', ['launcher/headful-launcher.mjs', '--profile', PROFILE, '--url', 'https://weibo.com', '--headless'], {
-    stdio: 'ignore', // 忽略输出，避免干扰测试日志
-    detached: false
-  });
-  
-  // 等待服务就绪
-  const start = Date.now();
-  while (Date.now() - start < 30000) {
-    try {
-      const res = await fetch(`${UNIFIED_API}/health`);
-      if (res.ok) {
-        log('Launcher 已就绪');
-        return true;
-      }
-    } catch {}
-    await new Promise(r => setTimeout(r, 1000));
-  }
-  log('Launcher 启动超时');
-  return false;
-}
-
 async function testHighlightSelector(selector = '#app', desc = '根元素') {
-  const url = `${UNIFIED_API}/v1/controller/action`;
+  const url = `${UNIFIED_API}/v1/browser/highlight`;
   const payload = {
-    action: 'browser:highlight',
-    payload: {
-      profile: PROFILE,
-      selector,
-      options: {
-        style: '3px solid red',
-        duration: 1500,
-        sticky: false
-      }
+    profile: PROFILE,
+    selector,
+    options: {
+      style: '3px solid red',
+      duration: 1500,
+      sticky: false
     }
   };
   
@@ -69,17 +39,14 @@ async function testHighlightSelector(selector = '#app', desc = '根元素') {
 }
 
 async function testHighlightDomPath(path = 'root/0', desc = '第一个子元素') {
-  const url = `${UNIFIED_API}/v1/controller/action`;
+  const url = `${UNIFIED_API}/v1/browser/highlight-dom-path`;
   const payload = {
-    action: 'browser:highlight-dom-path',
-    payload: {
-      profile: PROFILE,
-      path,
-      options: {
-        style: '3px solid blue',
-        duration: 1500,
-        sticky: false
-      }
+    profile: PROFILE,
+    path,
+    options: {
+      style: '3px solid blue',
+      duration: 1500,
+      sticky: false
     }
   };
   
@@ -116,24 +83,14 @@ async function testContainersMatch() {
   const result = await resp.json();
   const matched = result.success && result.data?.matched;
   const containerName = result.data?.container?.name || 'unknown';
-  log(`容器匹配 ${matched ? '✅' : '❌'} container=${containerName}`);
+  log(`容器匹配 ${matched ? '���' : '❌'} container=${containerName}`);
   return { ok: matched, container: result.data?.container };
 }
 
 async function main() {
   try {
     log('开始高亮完整回环测试...');
-    
-    // 如果无法连接，尝试启动 launcher
-    try {
-      await fetch(`${UNIFIED_API}/health`);
-    } catch {
-       if (!await startLauncher()) {
-        throw new Error('无法启动基础服务');
-      }
-    }
-
-    await new Promise(resolve => setTimeout(resolve, 5000)); // 等待页面加载
+    await new Promise(resolve => setTimeout(resolve, 1000));
     
     const results = [];
     
@@ -160,23 +117,12 @@ async function main() {
     const allOk = results.every(r => r === true);
     log('='.repeat(50));
     log(`测试结果: ${results.filter(r => r).length}/${results.length} 通过`);
-    log(allOk ? '✅ 高亮完整回环测试通过' : '❌ 高亮完整回环测试失败');
-    
-    if (launcherProc) {
-        launcherProc.kill();
-        // 确保清理子进程
-        try { process.kill(launcherProc.pid); } catch {}
-    }
+    log(allOk ? '✅ 高亮完整回���测试通过' : '❌ 高亮完整回环测试失败');
     process.exit(allOk ? 0 : 1);
   } catch (err) {
     log(`ERROR: ${err.message}`);
-    if (launcherProc) {
-        launcherProc.kill();
-        try { process.kill(launcherProc.pid); } catch {}
-    }
     process.exit(1);
   }
 }
 
 main();
-

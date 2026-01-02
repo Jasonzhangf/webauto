@@ -158,56 +158,6 @@ async function isLoggedIn(profile) {
   return result === true;
 }
 
-async function verifyFloatingPanelHealth(profile, url) {
-  log('\n[浮窗UI健康检查]');
-  
-  // 1. 检查浮窗进程是否存活（通过等待确保Electron已启动）
-  await sleep(2000);
-  
-  // 2. 通过总线发送ping消息，验证浮窗渲染器是否连接
-  const busWs = new WebSocket(`ws://127.0.0.1:${CONFIG.ports.unified}/bus`);
-  await new Promise((r, j) => {
-    busWs.on('open', r);
-    busWs.on('error', j);
-    setTimeout(() => j(new Error('浮窗总线连接超时')), 5000);
-  });
-  
-  let pongReceived = false;
-  const pongPromise = new Promise((resolve) => {
-    const onMessage = (data) => {
-      try {
-        const msg = JSON.parse(data.toString());
-        if (msg.topic === 'floating-panel.pong') {
-          pongReceived = true;
-          busWs.off('message', onMessage);
-          resolve();
-        }
-      } catch {}
-    };
-    busWs.on('message', onMessage);
-    setTimeout(() => {
-      if (!pongReceived) {
-        log('[WARNING] 浮窗未响应ping（可能渲染器未连接总线，但不阻塞启动）');
-        resolve();
-      }
-    }, 3000);
-  });
-  
-  busWs.send(JSON.stringify({
-    topic: 'floating-panel.ping',
-    payload: { timestamp: Date.now() }
-  }));
-  
-  await pongPromise;
-  busWs.close();
-  
-  if (pongReceived) {
-    log('✅ 浮窗UI总线连接正常');
-  } else {
-    log('⚠️  浮窗UI未响应ping（请检查浮窗是否显示DOM树）');
-  }
-}
-
 async function verifyContainerMatch(profile, url) {
   log('\n[容器匹配验证]');
   const ws = new WebSocket(`ws://127.0.0.1:${CONFIG.ports.unified}/ws`);
@@ -275,9 +225,7 @@ export async function startAll({ profile, url, headless }) {
   await ensurePortFree(CONFIG.ports.browser, 'Browser Service');
 
   log('=== 启动 Unified API ===');
-  // For development, we can use tsx to run TS directly
-  // const unified = await startProcess('node', ['services/unified-api/server.mjs']);
-  const unified = await startProcess('npx', ['tsx', 'services/unified-api/server.ts']);
+  const unified = await startProcess('node', ['services/unified-api/server.mjs']);
   log('=== Unified API 进程启动，等待健康检查 ===');
   await waitForHealth(CONFIG.ports.unified, 'Unified API');
   try {
@@ -352,13 +300,11 @@ export async function startAll({ profile, url, headless }) {
   } catch {}
 
   await verifyContainerMatch(profile, url);
-  await verifyFloatingPanelHealth(profile, url);
 
   console.log('\n🎉 启动完成！');
   console.log('💡 浏览器窗口已打开');
   console.log('💡 浮窗UI已连接');
   console.log('💡 容器匹配功能正常');
-  console.log('💡 浮窗UI健康检查完成');
   console.log('💡 按 Ctrl+C 退出');
 
   // 优雅退出

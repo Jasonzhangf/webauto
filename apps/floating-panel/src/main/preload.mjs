@@ -51,10 +51,6 @@ debugLog: (module, event, data = {}) => {
       console.log('[preload] Bus status received:', status);
       cb(status);
     });
-  },
-  sendBusEvent: (topic, payload) => {
-    console.log('[preload] sendBusEvent called:', topic);
-    return ipcRenderer.invoke('ui:bus-send', { topic, payload });
   }
 };
 

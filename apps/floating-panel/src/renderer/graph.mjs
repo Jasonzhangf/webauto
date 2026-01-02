@@ -558,69 +558,47 @@ function findNearestContainer(domPath) {
 }
 
 export function initGraph(canvasEl) {
-  if (!canvasEl) {
-    logger.error('graph-init', 'Canvas element is required', { canvasEl });
-    return { success: false, error: 'Canvas element is required' };
-  }
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('width', '100%');
+  svg.setAttribute('height', '100%');
+  svg.style.overflow = 'hidden';
+  svg.style.backgroundColor = '#1e1e1e';
+  svg.style.cursor = 'grab';
+  canvasEl.style.overflow = 'hidden';
+  canvasEl.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    const delta = e.deltaY;
+    const scaleChange = delta > 0 ? 0.9 : 1.1;
+    graphScale = Math.max(0.5, Math.min(2, graphScale * scaleChange));
+    updateRootTransform();
+  });
+  canvasEl.appendChild(svg);
+  canvas = svg;
 
-  try {
-    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-    svg.setAttribute('width', '100%');
-    svg.setAttribute('height', '100%');
-    svg.style.overflow = 'hidden';
-    svg.style.backgroundColor = '#1e1e1e';
-    svg.style.cursor = 'grab';
-    canvasEl.style.overflow = 'hidden';
-    
-    canvasEl.addEventListener('wheel', (e) => {
+  svg.addEventListener('mousedown', (e) => {
+    if (e.target.tagName === 'svg') {
+      isDraggingGraph = true;
+      dragStart.x = e.clientX - graphOffset.x;
+      dragStart.y = e.clientY - graphOffset.y;
+      svg.style.cursor = 'grabbing';
       e.preventDefault();
-      const delta = e.deltaY;
-      const scaleChange = delta > 0 ? 0.9 : 1.1;
-      graphScale = Math.max(0.5, Math.min(2, graphScale * scaleChange));
+    }
+  });
+
+  window.addEventListener('mousemove', (e) => {
+    if (isDraggingGraph) {
+      graphOffset.x = e.clientX - dragStart.x;
+      graphOffset.y = e.clientY - dragStart.y;
       updateRootTransform();
-    });
-    
-    canvasEl.appendChild(svg);
-    canvas = svg;
+    }
+  });
 
-    svg.addEventListener('mousedown', (e) => {
-      if (e.target.tagName === 'svg') {
-        isDraggingGraph = true;
-        dragStart.x = e.clientX - graphOffset.x;
-        dragStart.y = e.clientY - graphOffset.y;
-        svg.style.cursor = 'grabbing';
-        e.preventDefault();
-      }
-    });
-
-    window.addEventListener('mousemove', (e) => {
-      if (isDraggingGraph) {
-        graphOffset.x = e.clientX - dragStart.x;
-        graphOffset.y = e.clientY - dragStart.y;
-        updateRootTransform();
-      }
-    });
-
-    window.addEventListener('mouseup', () => {
-      if (isDraggingGraph) {
-        isDraggingGraph = false;
-        svg.style.cursor = 'grab';
-      }
-    });
-    
-    // 发送初始化完成事件
-    window.dispatchEvent(new CustomEvent('webauto:graph-status', {
-      detail: { phase: 'init:complete', success: true }
-    }));
-    
-    return { success: true, canvas: svg };
-  } catch (err) {
-    logger.error('graph-init', 'Failed to initialize graph', err);
-    window.dispatchEvent(new CustomEvent('webauto:graph-status', {
-      detail: { phase: 'init:error', error: err.message }
-    }));
-    return { success: false, error: err.message };
-  }
+  window.addEventListener('mouseup', () => {
+    if (isDraggingGraph) {
+      isDraggingGraph = false;
+      svg.style.cursor = 'grab';
+    }
+  });
 }
 
 export function updateContainerTree(data, options = {}) {

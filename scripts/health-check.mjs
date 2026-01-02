@@ -1,325 +1,104 @@
 #!/usr/bin/env node
-
 /**
- * 系统启动健康检查
- * 检查项：
- * - WS 连接
- * - 各模块健康状态
- * - 页面信息获取
- * - 登录信息
- * - 匹配信息（UI/DOM 锚点）
+ * build health check - headful launch + bus/ws/health
+ * 1) start unified-api + browser-service (headful)
+ * 2) check ws/bus health endpoints
+ * 3) check bus event reception (ready + health.status)
  */
 
-import { spawn } from 'child_process';
+import { spawn } from 'node:child_process';
+import { setTimeout as wait } from 'node:timers/promises';
 import WebSocket from 'ws';
-import { fileURLToPath } from 'url';
-import { dirname, join } from 'path';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
-const PROJECT_ROOT = join(__dirname, '..');
+const UNIFIED = 'http://127.0.0.1:7701';
+const WS = 'ws://127.0.0.1:7701/ws';
+const BUS = 'ws://127.0.0.1:7701/bus';
+const BROWSER = 'http://127.0.0.1:7704';
+const MATCH_TIMEOUT = Number(process.env.WEBAUTO_HEALTHCHECK_MATCH_TIMEOUT || 25000);
+const HANDSHAKE_TIMEOUT = Number(process.env.WEBAUTO_HEALTHCHECK_HANDSHAKE_TIMEOUT || 8000);
+const EARLY_TOPICS = ['health.status', 'ui.domPicker.result', 'browser.runtime.event'];
 
-const HEALTH_CHECK_TIMEOUT = 30000; // 30s
-const WS_CONNECT_TIMEOUT = 10000;   // 10s
-
-let electronProcess = null;
-let testFailed = false;
-
-async function sleep(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
-}
-
-async function waitForWebSocket(url, timeout = WS_CONNECT_TIMEOUT) {
-  const startTime = Date.now();
-  
-  while (Date.now() - startTime < timeout) {
+async function waitHealth(url, timeoutMs=20000){
+  const t0 = Date.now();
+  while (Date.now() - t0 < timeoutMs) {
     try {
-      const ws = new WebSocket(url);
-      await new Promise((resolve, reject) => {
-        ws.on('open', () => {
-          ws.close();
-          resolve();
-        });
-        ws.on('error', reject);
-        setTimeout(() => reject(new Error('WS connect timeout')), 5000);
-      });
-      return true;
-    } catch (err) {
-      await sleep(500);
-    }
+      const r = await fetch(url);
+      if (r.ok) return true;
+    } catch {}
+    await wait(300);
   }
-  throw new Error(`WebSocket not available at ${url} after ${timeout}ms`);
+  return false;
 }
 
-async function checkModulesHealth(wsUrl) {
-  const ws = new WebSocket(wsUrl);
-  
+async function waitBusEvent(topic, predicate, timeoutMs=18000, earlyTopics=['health.status']){
   return new Promise((resolve, reject) => {
-    const timeout = setTimeout(() => {
-      ws.close();
-      reject(new Error('Health check timeout'));
-    }, 15000);
-
-    ws.on('open', () => {
-      console.log('✓ WS connected successfully');
-      
-      // 发送健康检查命令
-      ws.send(JSON.stringify({
-        type: 'health_check',
-        timestamp: Date.now()
-      }));
-    });
-
-    ws.on('message', (data) => {
+    const ws = new WebSocket(BUS);
+    let resetTimer = null;
+    const done = (result) => {
+      clearTimeout(resetTimer);
+      try { ws.close(); } catch {}
+      resolve(result);
+    };
+    const fail = (msg) => {
+      clearTimeout(resetTimer);
+      try { ws.close(); } catch {}
+      reject(new Error(msg));
+    };
+    let timer = setTimeout(() => fail(`bus event timeout: ${topic}`), timeoutMs);
+    ws.onmessage = (evt) => {
       try {
-        const msg = JSON.parse(data.toString());
-        
-        if (msg.type === 'health_check_response') {
-          clearTimeout(timeout);
-          
-          console.log('✓ Health check response received');
-          console.log('  Modules:', Object.keys(msg.modules || {}).join(', '));
-          
-          // 检查关键模块
-          const requiredModules = ['controller', 'browser', 'dom'];
-          const availableModules = Object.keys(msg.modules || {});
-          
-          const allPresent = requiredModules.every(mod => 
-            availableModules.some(am => am.includes(mod))
-          );
-          
-          if (allPresent) {
-            console.log('✓ All required modules present');
-          } else {
-            console.warn('⚠ Some modules missing:', requiredModules.filter(mod => 
-              !availableModules.some(am => am.includes(mod))
-            ));
-          }
-          
-          ws.close();
-          resolve(msg);
+        const msg = JSON.parse(evt.data.toString());
+        if (msg?.type === 'event' && earlyTopics.includes(msg.topic)) {
+          // 收到预热消息，重置计时器
+          clearTimeout(timer);
+          timer = setTimeout(() => fail(`bus event timeout: ${topic}`), timeoutMs);
         }
-      } catch (err) {
-        // 忽略解析错误，等待正确的消息
-      }
-    });
-
-    ws.on('error', (err) => {
-      clearTimeout(timeout);
-      ws.close();
-      reject(err);
-    });
+        if (msg?.topic !== topic) return;
+        if (typeof predicate === 'function' && !predicate(msg?.payload)) return;
+        done(msg);
+      } catch {}
+    };
+    ws.onerror = (err) => fail(`bus connect error: ${err?.message || err}`);
   });
 }
 
-async function checkPageInfo(wsUrl) {
-  const ws = new WebSocket(wsUrl);
-  
-  return new Promise((resolve, reject) => {
-    const timeout = setTimeout(() => {
-      ws.close();
-      reject(new Error('Page info check timeout'));
-    }, 10000);
-
-    ws.on('open', () => {
-      // 请求页面信息
-      ws.send(JSON.stringify({
-        type: 'get_page_info',
-        timestamp: Date.now()
-      }));
-    });
-
-    ws.on('message', (data) => {
-      try {
-        const msg = JSON.parse(data.toString());
-        
-        if (msg.type === 'page_info' || msg.url || msg.title) {
-          clearTimeout(timeout);
-          console.log('✓ Page info received');
-          console.log('  URL:', msg.url || 'N/A');
-          console.log('  Title:', msg.title || 'N/A');
-          ws.close();
-          resolve(msg);
-        }
-      } catch (err) {
-        // 忽略
-      }
-    });
-
-    ws.on('error', (err) => {
-      clearTimeout(timeout);
-      ws.close();
-      // 页面信息不是关键错误，警告即可
-      console.warn('⚠ Page info check failed:', err.message);
-      resolve({ warning: err.message });
-    });
+async function main(){
+  console.log('[health-check] start services (headful)');
+  const child = spawn('node', ['scripts/start-headful.mjs', '--profile', 'weibo_fresh', '--url', 'https://weibo.com'], { stdio: 'inherit' });
+  let childClosed = false;
+  child.on('exit', () => {
+    childClosed = true;
   });
+
+  const okUnified = await waitHealth(`${UNIFIED}/health`, 20000);
+  if (!okUnified) throw new Error('unified-api not healthy');
+
+  const okBrowser = await waitHealth(`${BROWSER}/health`, 20000);
+  if (!okBrowser) throw new Error('browser-service not healthy');
+
+  // 等待容器匹配完成（实际检测成功判定）
+  console.log('[health-check] waiting for containers.matched (timeout=%dms)', MATCH_TIMEOUT);
+  const matchStarted = Date.now();
+  const containerMatch = await waitBusEvent('containers.matched', payload => payload?.matched, MATCH_TIMEOUT, EARLY_TOPICS);
+  console.log('[health-check] containers.matched received in %dms', Date.now() - matchStarted);
+  if (!containerMatch) throw new Error('container matching failed');
+
+  // 等待握手状态（可选项，至少一条即算成功）
+  try {
+    const handshake = await waitBusEvent('handshake.status', payload => payload?.status, HANDSHAKE_TIMEOUT, EARLY_TOPICS);
+    console.log('[health-check] handshake status:', handshake?.payload?.status);
+  } catch (err) {
+    console.warn('[health-check] handshake timeout, continue');
+  }
+
+  console.log('[health-check] ok');
+  if (!childClosed) {
+    child.kill('SIGINT');
+  }
+  process.exit(0);
 }
 
-async function checkUIAnchors(wsUrl) {
-  const ws = new WebSocket(wsUrl);
-  
-  return new Promise((resolve, reject) => {
-    const timeout = setTimeout(() => {
-      ws.close();
-      reject(new Error('UI anchor check timeout'));
-    }, 10000);
-
-    ws.on('open', () => {
-      // 请求 UI 状态
-      ws.send(JSON.stringify({
-        type: 'get_ui_state',
-        timestamp: Date.now()
-      }));
-    });
-
-    ws.on('message', (data) => {
-      try {
-        const msg = JSON.parse(data.toString());
-        
-        if (msg.type === 'ui_state' || msg.rendered !== undefined) {
-          clearTimeout(timeout);
-          console.log('✓ UI state received');
-          console.log('  Rendered:', msg.rendered ? 'Yes' : 'No');
-          ws.close();
-          resolve(msg);
-        }
-      } catch (err) {
-        // 忽略
-      }
-    });
-
-    ws.on('error', (err) => {
-      clearTimeout(timeout);
-      ws.close();
-      // UI 锚点不是关键错误
-      console.warn('⚠ UI anchor check failed:', err.message);
-      resolve({ warning: err.message });
-    });
-  });
-}
-
-async function runHealthChecks() {
-  console.log('Starting system health check...\n');
-  
-  // 1. 启动 Electron 应用
-  console.log('1. Starting Electron application...');
-  electronProcess = spawn('electron', ['apps/floating-panel'], {
-    cwd: PROJECT_ROOT,
-    env: {
-      ...process.env,
-      NODE_ENV: 'test',
-      ELECTRON_ENABLE_LOGGING: '1'
-    },
-    stdio: ['ignore', 'pipe', 'pipe']
-  });
-
-  let startupLogs = '';
-  
-  electronProcess.stdout?.on('data', (data) => {
-    startupLogs += data.toString();
-  });
-  
-  electronProcess.stderr?.on('data', (data) => {
-    startupLogs += data.toString();
-  });
-
-  electronProcess.on('exit', (code) => {
-    if (code !== 0 && code !== null && !testFailed) {
-      console.error('✗ Electron process exited unexpectedly with code:', code);
-      console.error('Startup logs:\n', startupLogs);
-      process.exit(1);
-    }
-  });
-
-  // 等待应用启动
-  await sleep(3000);
-  
-  // 2. 检查 WebSocket 连接
-  console.log('\n2. Checking WebSocket connection...');
-  const wsUrl = 'ws://localhost:9223';
-  
-  try {
-    await waitForWebSocket(wsUrl);
-    console.log('✓ WebSocket server is available');
-  } catch (err) {
-    console.error('✗ WebSocket connection failed:', err.message);
-    console.error('Startup logs:\n', startupLogs);
-    testFailed = true;
-    throw err;
-  }
-
-  // 3. 检查模块健康
-  console.log('\n3. Checking modules health...');
-  try {
-    await checkModulesHealth(wsUrl);
-  } catch (err) {
-    console.error('✗ Modules health check failed:', err.message);
-    testFailed = true;
-    throw err;
-  }
-
-  // 4. 检查页面信息（非关键）
-  console.log('\n4. Checking page info...');
-  try {
-    await checkPageInfo(wsUrl);
-  } catch (err) {
-    console.warn('⚠ Page info check failed (non-critical):', err.message);
-  }
-
-  // 5. 检查 UI 锚点（非关键）
-  console.log('\n5. Checking UI anchors...');
-  try {
-    await checkUIAnchors(wsUrl);
-  } catch (err) {
-    console.warn('⚠ UI anchor check failed (non-critical):', err.message);
-  }
-
-  console.log('\n✓ All critical health checks passed!');
-}
-
-// 清理函数
-function cleanup() {
-  if (electronProcess && !electronProcess.killed) {
-    electronProcess.kill('SIGTERM');
-    setTimeout(() => {
-      if (!electronProcess.killed) {
-        electronProcess.kill('SIGKILL');
-      }
-    }, 2000);
-  }
-}
-
-// 主流程
-(async () => {
-  process.on('SIGINT', () => {
-    cleanup();
-    process.exit(130);
-  });
-
-  process.on('SIGTERM', () => {
-    cleanup();
-    process.exit(143);
-  });
-
-  const timeout = setTimeout(() => {
-    console.error('✗ Health check timeout after', HEALTH_CHECK_TIMEOUT, 'ms');
-    testFailed = true;
-    cleanup();
-    process.exit(1);
-  }, HEALTH_CHECK_TIMEOUT);
-
-  try {
-    await runHealthChecks();
-    clearTimeout(timeout);
-    cleanup();
-    await sleep(1000);
-    process.exit(0);
-  } catch (err) {
-    clearTimeout(timeout);
-    console.error('✗ Health check failed:', err.message);
-    cleanup();
-    await sleep(1000);
-    process.exit(1);
-  }
-})();
+main().catch(err => {
+  console.error('[health-check] failed:', err?.message || String(err));
+  process.exit(1);
+});
