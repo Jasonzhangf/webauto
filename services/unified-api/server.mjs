@@ -119,6 +119,26 @@ class UnifiedApiServer {
     const server = createServer();
     const wss = new WebSocketServer({ server });
 
+    // Session manager for container operations
+    const { SessionManager: SM } = await import('../browser-service/SessionManager.ts');
+    const sessionManager = new SM({
+      host: defaultHttpHost,
+      port: defaultHttpPort,
+      wsHost: defaultWsHost,
+      wsPort: defaultWsPort
+    });
+
+    // Dynamic import for containers modules
+    const { ContainerDefinitionLoader } = await import('../../libs/containers/src/loader/ContainerDefinitionLoader.ts');
+    const { BrowserDiscoveryAdapter } = await import('../../libs/containers/src/adapter/BrowserDiscoveryAdapter.ts');
+    const { RuntimeController } = await import('../../libs/containers/src/engine/RuntimeController.ts');
+    const { TreeDiscoveryEngine } = await import('../../libs/containers/src/engine/TreeDiscoveryEngine.ts');
+
+    // Runtime controllers map
+    if (!this.runtimeControllers) {
+      this.runtimeControllers = new Map();
+    }
+
     // HTTP 路由
     server.on('request', async (req, res) => {
       const url = new URL(req.url, `http://${req.headers.host}`);
@@ -179,10 +199,10 @@ class UnifiedApiServer {
           res.writeHead(400, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ success: false, error: err?.message || String(err) }));
         }
-        return;
-      }
+      return;
+    }
 
-     if (req.method === 'POST' && url.pathname === '/v1/session/create') {
+    if (req.method === 'POST' && url.pathname === '/v1/session/create') {
         try {
           const payload = await this.readJsonBody(req);
           const result = await this.controller.handleAction('session:create', payload);
@@ -192,10 +212,110 @@ class UnifiedApiServer {
           res.writeHead(400, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ success: false, error: err?.message || String(err) }));
         }
+      return;
+    }
+
+      // Runtime controller endpoints
+      if (req.method === "POST" && url.pathname === "/v1/runtime/start") {
+        try {
+          const payload = await this.readJsonBody(req);
+          const { containerId, sessionId, website } = payload;
+
+          if (!sessionId || !website) {
+            res.writeHead(400, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ success: false, error: "sessionId and website required" }));
+            return;
+          }
+
+          // Check if runtime already exists
+          if (this.runtimeControllers.has(sessionId)) {
+            res.writeHead(200, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ success: true, runtimeId: sessionId, message: "Runtime already exists" }));
+            return;
+          }
+
+          // Load container definitions
+          const defs = await ContainerDefinitionLoader.loadForWebsite(website);
+          console.log(`[UnifiedApi] Loaded ${defs.length} container definitions for ${website}`);
+
+          // Create discovery engine with browser adapter
+          const browserAdapter = new BrowserDiscoveryAdapter(sessionManager, sessionId);
+          const discovery = new TreeDiscoveryEngine(defs, browserAdapter);
+
+          // Create runtime controller with event bus
+          const runtimeController = new RuntimeController(
+            defs,
+            discovery,
+            {
+              eventBus: this.eventBus,
+              wait: (ms) => new Promise(r => setTimeout(r, ms)),
+              highlight: async (handle, opts) => {
+                this.eventBus.emit("ui:render:highlight", { handle, opts });
+              },
+              operationExecutor: {
+                execute: async (cid, oid, config, handle) => {
+                  console.log(`[Runtime] Execute ${oid} on ${cid}`);
+                  return { success: true };
+                }
+              }
+            },
+            this.bindingRules
+          );
+
+          this.runtimeControllers.set(sessionId, runtimeController);
+
+          // Start runtime in background
+          runtimeController.start(containerId || `${website}_main_page`, "root", "sequential").catch(err => {
+            console.error(`[UnifiedApi] Runtime error:`, err);
+          });
+
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ success: true, runtimeId: sessionId }));
+        } catch (err) {
+          res.writeHead(500, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ success: false, error: err?.message || String(err) }));
+        }
         return;
       }
 
-      if (req.method === 'GET' && url.pathname === '/v1/session/list') {
+      if (req.method === "POST" && url.pathname === "/v1/runtime/discover") {
+        try {
+          const payload = await this.readJsonBody(req);
+          const { containerId, sessionId, website, rootSelector } = payload;
+
+          if (!sessionId || !website) {
+            res.writeHead(400, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ success: false, error: "sessionId and website required" }));
+            return;
+          }
+
+          // Load container definitions
+          const defs = await ContainerDefinitionLoader.loadForWebsite(website);
+
+          // Create discovery engine with browser adapter
+          const browserAdapter = new BrowserDiscoveryAdapter(sessionManager, sessionId);
+          const discovery = new TreeDiscoveryEngine(defs, browserAdapter);
+
+          // Run discovery
+          const rootId = containerId || `${website}_main_page`;
+          const rootHandle = rootSelector ? { selector: rootSelector, type: "selector" } : "root";
+          
+          const graph = await discovery.discoverFromRoot(rootId, rootHandle);
+
+          // Convert Map to object for JSON response
+          const nodes = Object.fromEntries(graph.nodes);
+          const edges = graph.edges;
+
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ success: true, graph: { nodes, edges } }));
+        } catch (err) {
+          res.writeHead(500, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ success: false, error: err?.message || String(err) }));
+        }
+        return;
+      }
+
+     if (req.method === 'GET' && url.pathname === '/v1/session/list') {
         try {
           const result = await this.controller.handleAction('session:list', {});
           res.writeHead(200, { 'Content-Type': 'application/json' });

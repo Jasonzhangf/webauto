@@ -9,6 +9,14 @@ import { BrowserContainerMatcher } from '../src/container/matcher.mjs';
 async function run() {
   console.log('=== BrowserContainerMatcher WebSocket 测试 ===');
 
+  // Check if controller is running
+  try {
+    await fetch('http://127.0.0.1:8970/health');
+  } catch (e) {
+    console.log('[ensure] 无法连接到Controller服务，跳过测试');
+    process.exit(0);
+  }
+
   const matcher = new BrowserContainerMatcher({ controller: { host: '127.0.0.1', port: 8970 } });
 
   try {

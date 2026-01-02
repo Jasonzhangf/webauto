@@ -1,1 +1,2 @@
-export { DOMInspector } from './DOMInspector.js';
+export * from './DOMInspector.js';
+export * from './ContainerManager.js';

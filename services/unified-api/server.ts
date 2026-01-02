@@ -226,54 +226,29 @@ class UnifiedApiServer {
     });
 
     // Setup container operations routes
-    this.bindingRules = setupContainerOperationsRoutes(server, sessionManager);
+    const containerOpRoutes = setupContainerOperationsRoutes(server, sessionManager);
 
-    // Runtime controller endpoints
+    // Unified HTTP routes handler
     server.on("request", async (req, res) => {
       const url = new URL(req.url!, `http://${req.headers.host}`);
 
+      // Health check
+      if (url.pathname === '/health') {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true, service: 'unified-api', timestamp: new Date().toISOString() }));
+        return;
+      }
+
+      // Container operations endpoints
+      if (await handleContainerOperationRequest(url, req, res, containerOpRoutes, this.readJsonBody.bind(this))) {
+        return;
+      }
+
+      // Runtime controller endpoints
       if (req.method === "POST" && url.pathname === "/v1/runtime/start") {
         try {
           const payload = await this.readJsonBody(req);
           const { containerId, sessionId, website } = payload;
-
-      if (req.method === "POST" && url.pathname === "/v1/runtime/discover") {
-        try {
-          const payload = await this.readJsonBody(req);
-          const { containerId, sessionId, website, rootSelector } = payload;
-
-          if (!sessionId || !website) {
-            res.writeHead(400, { "Content-Type": "application/json" });
-            res.end(JSON.stringify({ success: false, error: "sessionId and website required" }));
-            return;
-          }
-
-          // Load container definitions
-          const defs = await this.containerLoader.loadForWebsite(website);
-
-          // Create discovery engine with browser adapter
-          const browserAdapter = new BrowserDiscoveryAdapter(sessionManager, sessionId);
-          const discovery = new TreeDiscoveryEngine(defs, browserAdapter);
-
-          // Run discovery
-          const rootId = containerId || `${website}_main_page`;
-          // Use selector from payload or root handle if needed
-          const rootHandle = rootSelector ? { selector: rootSelector, type: "selector" } : "root";
-          
-          const graph = await discovery.discoverFromRoot(rootId, rootHandle);
-
-          // Convert Map to object for JSON response
-          const nodes = Object.fromEntries(graph.nodes);
-          const edges = graph.edges;
-
-          res.writeHead(200, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ success: true, graph: { nodes, edges } }));
-        } catch (err: any) {
-          res.writeHead(500, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ success: false, error: err?.message || String(err) }));
-        }
-        return;
-      }
 
           if (!sessionId || !website) {
             res.writeHead(400, { "Content-Type": "application/json" });
@@ -335,15 +310,42 @@ class UnifiedApiServer {
         }
         return;
       }
-    });
-    // HTTP routes
-    server.on('request', async (req, res) => {
-      const url = new URL(req.url, `http://${req.headers.host}`);
-      
-      // 健康检查
-      if (url.pathname === '/health') {
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ ok: true, service: 'unified-api', timestamp: new Date().toISOString() }));
+
+      if (req.method === "POST" && url.pathname === "/v1/runtime/discover") {
+        try {
+          const payload = await this.readJsonBody(req);
+          const { containerId, sessionId, website, rootSelector } = payload;
+
+          if (!sessionId || !website) {
+            res.writeHead(400, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ success: false, error: "sessionId and website required" }));
+            return;
+          }
+
+          // Load container definitions
+          const defs = await this.containerLoader.loadForWebsite(website);
+
+          // Create discovery engine with browser adapter
+          const browserAdapter = new BrowserDiscoveryAdapter(sessionManager, sessionId);
+          const discovery = new TreeDiscoveryEngine(defs, browserAdapter);
+
+          // Run discovery
+          const rootId = containerId || `${website}_main_page`;
+          // Use selector from payload or root handle if needed
+          const rootHandle = rootSelector ? { selector: rootSelector, type: "selector" } : "root";
+          
+          const graph = await discovery.discoverFromRoot(rootId, rootHandle);
+
+          // Convert Map to object for JSON response
+          const nodes = Object.fromEntries(graph.nodes);
+          const edges = graph.edges;
+
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ success: true, graph: { nodes, edges } }));
+        } catch (err: any) {
+          res.writeHead(500, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ success: false, error: err?.message || String(err) }));
+        }
         return;
       }
 
@@ -513,3 +515,4 @@ server.start().catch(err => {
   console.error('[unified-api] Server failed to start:', err);
   process.exit(1);
 });
+import { handleContainerOperationRequest } from './container-operations.mjs';
