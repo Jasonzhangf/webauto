@@ -1,84 +1,85 @@
-# Floating Panel UI 改善计划（MVP → 完整）
+# WebAuto 系统修复与验证计划（2026-01-02更新）
 
-目标：完善浮窗 UI 绘制、用户交互与编辑容器流程，解决无 operation 时不显示内容的问题，并支持从无到有创建 operation。
+## 当前状态总览
 
-## 当前状态
-- 评审完成：已阅读 `apps/floating-panel/src/renderer/index.mts`、`graph.mjs`、`graph/view.mts` 等核心实现。
-- 关键问题：空容器时缺少明确引导；operation 编辑能力存在但 UI 不够直观；“从无到有”缺少可视化入口与可理解反馈。
+### 已完成的修复
+- ✅ CI 类型检查问题修复（container-operations.mjs.d.ts）
+- ✅ 识别并修复 CI 盲区（缺少端到端启动测试）
+- ✅ 修复 PROJECT_ROOT 路径问题（使用 import.meta.url）
+- ✅ 添加浮窗启动测试到 CI（test:floating-startup）
+- ✅ 基本浮窗启动验证通过
 
-## MVP 阶段（优先落地）
-- [x] MVP-1：优化空状态 UI（无 operation 时的引导与默认内容）。
-- [x] MVP-2：空容器一键生成默认 operation（基于主 selector）。
-- [x] MVP-3：改善 operation 添加表单的视觉层次与交互提示。
+### 待完善：系统健康检查层次
 
-## 完整功能阶段（迭代跟进）
-- [x] FULL-1：可视化 operation 卡片列表（替代纯 JSON 预览）。
-- [x] FULL-2：operation 内联编辑（卡片展开编辑）。
-- [x] FULL-3：operation 删除/禁用（删除按钮+toggle启用禁用）。
-- [ ] FULL-4：operation 配置智能提示与 JSON 校验。
-- [ ] FULL-5：operation 实时预览（highlight/scroll/extract）。
-- [ ] FULL-6：operation 模板库 + 新手向导。
+当前测试只验证了**浮窗进程启动**，但完整的系统健康应包含：
+
+1. **服务层健康**
+   - Unified API (7701) 启动并响应
+   - Browser Service (7704) 启动并响应
+   - Controller (8970) 启动并响应
+
+2. **连接层健康**
+   - WebSocket 总线连接 (ws://127.0.0.1:7701/bus)
+   - 浮窗 UI 与总线成功握手
+   - 各服务间消息传递正常
+
+3. **功能层健康**
+   - 页面信息获取成功
+   - 容器匹配功能正常（有匹配锚点，即使为空）
+   - DOM 树拉取功能正常
+   - UI 元素正确初始化（图谱、详情面板等）
+
+4. **数据层健康**
+   - Session/Profile 管理正常
+   - 容器库读写正常
+   - 操作配置读写正常
+
+## 执行计划
+
+### 阶段 1：完善健康检查基础设施 ✅
+- [x] 1.1 修复 PROJECT_ROOT 路径问题
+- [x] 1.2 添加基本启动测试
+- [ ] 1.3 扩展健康检查到多层次验证
+
+### 阶段 2：服务层健康验证
+- [ ] 2.1 添加 Unified API 健康检查端点测试
+- [ ] 2.2 添加 Browser Service 健康检查端点测试
+- [ ] 2.3 添加 Controller 健康检查端点测试
+- [ ] 2.4 验证服务间依赖关系
+
+### 阶段 3：连接层健康验证
+- [ ] 3.1 验证 WebSocket 总线连接
+- [ ] 3.2 验证浮窗 ping/pong 机制
+- [ ] 3.3 验证消息传递完整性
+- [ ] 3.4 验证事件订阅机制
+
+### 阶段 4：功能层健康验证
+- [ ] 4.1 验证容器匹配功能（有匹配锚点）
+- [ ] 4.2 验证 DOM 树获取功能
+- [ ] 4.3 验证 UI 初始化完整性
+- [ ] 4.4 验证操作配置读写
+
+### 阶段 5：集成测试
+- [ ] 5.1 实现端到端健康检查脚本
+- [ ] 5.2 将完整健康检查集成到 CI
+- [ ] 5.3 验证完整工作流（启动 → 匹配 → 操作）
+
+## 技术债务记录
+
+### 已修复
+- ✅ 2026-01-02: 修复 PROJECT_ROOT 使用 process.cwd() 导致路径错误
+- ✅ 2026-01-02: 修复 server.ts import 路径错误（.js → .mjs）
+- ✅ 2026-01-02: 添加 container-operations.mjs 类型声明
+- ✅ 2026-01-02: 实现 flushPendingMessages 安全检查避免 "Render frame disposed"
+
+### 待修复
+- ⚠️  浮窗 UI 初始化验证不完整（只检查日志，未验证功能）
+- ⚠️  缺少服务依赖关系验证
+- ⚠️  缺少数据层健康检查
+- ⚠️  缺少端到端功能测试
 
 ## 执行记录
-- 2025-01-02：计划建立；完成 MVP-1 / MVP-2（空状态引导 + 一键默认 operation）。
-- 2025-01-02：完成 MVP-3（operation 添加表单分组与提示）。
-- 2025-01-02：完成 FULL-1（operation 可视化卡片 + 图标）、FULL-2（编辑按钮聚焦 JSON 编辑器）。
-- 2025-01-02：完成 FULL-3（operation 删除/禁用按钮，支持状态切换与确认删除）。
-
-## 技术问题修复记录
-- 2025-01-02：修复 TypeScript 返回值类型错误（DOMInspector.ts 的 start/stop 方法）。
-- 2025-01-02：重构 container-operations.mjs，从 Express 风格改为原生 HTTP 处理器，适配 unified-api 统一路由架构。
-- 2025-01-02：实现 controller.ts 中的 captureInspectorSnapshot 方法（从 .js 迁移逻辑到 .ts）。
-- 2025-01-02：添加 controller.ts 缺失的辅助方法（fetchSessionsInternal/findSessionByProfile/captureSnapshotFromFixture/focusSnapshotOnContainer/cloneContainerSubtree）。
-
-## 暂挂测试
-- ✅ 所有修复已验证通过，服务正常启动：
-  - Unified API: http://127.0.0.1:7701 ✅
-  - Browser Service: http://127.0.0.1:7704 ✅
-  - 浮窗UI已连接 ✅
-  - 容器匹配功能正常 ✅
-
-## 测试验证记录
-- 2025-01-02：直接运行 `node scripts/start-headful.mjs` 启动成功，所有服务健康。
-- controller.ts 的 captureInspectorSnapshot 实现正确，容器匹配验证通过。
-- 2025-01-02：修复浮窗UI构建错误（重复的.join()调用、缺少async关键字），重新构建成功。
-  - 新构建时间：2026-01-02 13:31:41
-  - 准备重启浮窗测试UI改进功能
-- 2025-01-02：增强启动健康检查，新增浮窗UI健康验证：
-  - launcher 增加 verifyFloatingPanelHealth() 函数
-  - 浮窗渲染器响应 ping/pong 机制
-  - 验证浮窗总线连接和事件接收能力
-  - 构建成功，准备完整重启验证
-
-
-## 2026-01-02 当前实际状态
-
-### 已修复的问题
-- ✅ server.ts 中 import 路径错误（.js 改为 .mjs）
-- ✅ test-preload.mjs 测试脚本缺失
-- ✅ test-highlight-complete.mjs 使用错误的API路径（改为action接口）
-
-### 当前存在的核心问题
-1. **浮窗UI无法显示DOM连接**
-   - 现象：容器匹配成功，但浮窗没有画出DOM连接
-   - 根因待查：可能是UI初始化问题或数据未正确传递
-
-2. **渲染帧错误**
-   - 错误："Render frame was disposed before WebFrameMain could be accessed"
-   - 影响：主进程向渲染进程发送消息失败
-   - 需要修复：apps/floating-panel/src/main/index.mts
-
-3. **高亮功能部分失败**
-   - 容器匹配：✅ 成功
-   - selector高亮：❌ count=0
-   - dom_path高亮：❌ count=0
-   - 可能原因：selector不匹配或页面未加载完成
-
-### 优先级修复顺序
-1. 修复渲染帧错误（阻塞性bug）
-2. 确保浮窗UI能正确初始化并显示DOM连接
-3. 完善健康检查机制
-4. 修复高亮功能
-5. 实现UI改善功能
-
-
+- 2026-01-02 13:00: 识别 CI 盲区，启动测试缺失导致路径问题未被发现
+- 2026-01-02 13:30: 修复 PROJECT_ROOT 路径问题，使用 import.meta.url
+- 2026-01-02 13:45: 实现浮窗启动测试脚本，验证基本启动成功
+- 2026-01-02 13:50: 将 test:floating-startup 添加到 CI 测试链

@@ -6,11 +6,16 @@ import WebSocket from 'ws';
 import windowStateKeeper from 'electron-window-state';
 import { getErrorHandler } from '../../../../modules/core/src/error-handler.mjs';
 
-// 使用 process.cwd() 获取项目根目录
-const PROJECT_ROOT = process.cwd();
+// 使用 import.meta.url 获取当前文件的绝对路径
+// 无论从哪里启动 electron，这个路径都是正确的
+const __filename = new URL(import.meta.url).pathname;
+const __dirname = path.dirname(__filename);
+// 从 dist/main/index.mjs 向上两级到达 apps/floating-panel
+const PROJECT_ROOT = path.resolve(__dirname, '..', '..');
 const DIST_DIR = path.join(PROJECT_ROOT, 'dist');
 const MAIN_DIR = path.join(DIST_DIR, 'main');
 const LOG_FILE_PATH = path.join(os.tmpdir(), 'webauto-floating-panel.log');
+
 
 let win: BrowserWindow | null = null;
 let ws: WebSocket | null = null;

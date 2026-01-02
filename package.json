@@ -28,7 +28,7 @@
     "check:modules": "echo \"skip check:modules (script removed)\"",
     "check:ts": "tsc --noEmit -p tsconfig.services.json",
     "test:modules:unit": "tsx --test modules/**/tests/**/*.test.{ts,mts,js,mjs}",
-    "test": "npm run check:modules && npm run check:ts && npm run test:modules:unit",
+    "test": "npm run check:modules && npm run check:ts && npm run test:modules:unit && npm run test:floating-startup",
     "cli:browser-control": "tsx modules/browser-control/src/cli.ts",
     "cli:session-manager": "tsx modules/session-manager/src/cli.ts",
     "cli:logging": "tsx modules/logging/src/cli.ts",
@@ -70,7 +70,8 @@
     "health-check:runtime:watch": "node scripts/health-check-runtime.mjs --watch",
     "launch:diagnose": "node scripts/launch-with-diagnostics.mjs",
     "launch:diagnose:ui": "node scripts/launch-with-diagnostics.mjs --headless=false",
-    "launch:diagnose:dev": "node scripts/launch-with-diagnostics.mjs --dev"
+    "launch:diagnose:dev": "node scripts/launch-with-diagnostics.mjs --dev",
+    "test:floating-startup": "node apps/floating-panel/scripts/test-floating-startup.mjs"
   },
   "devDependencies": {
     "@modelcontextprotocol/sdk": "^1.20.1",
