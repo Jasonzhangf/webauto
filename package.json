@@ -7,7 +7,6 @@
     "esbuild-register": "^3.6.0",
     "iconv-lite": "^0.6.3",
     "linkedom": "^0.18.12",
-    "robotjs": "^0.6.0",
     "sharp": "^0.33.5",
     "ws": "^8.18.3"
   },
@@ -28,7 +27,8 @@
     "check:modules": "echo \"skip check:modules (script removed)\"",
     "check:ts": "tsc --noEmit -p tsconfig.services.json",
     "test:modules:unit": "tsx --test modules/**/tests/**/*.test.{ts,mts,js,mjs}",
-    "test": "npm run check:modules && npm run check:ts && npm run test:modules:unit && npm run test:floating-startup",
+    "test:health": "node scripts/health-check.mjs",
+    "test": "npm run check:modules && npm run check:ts && npm run test:modules:unit && npm run test:health",
     "cli:browser-control": "tsx modules/browser-control/src/cli.ts",
     "cli:session-manager": "tsx modules/session-manager/src/cli.ts",
     "cli:logging": "tsx modules/logging/src/cli.ts",
