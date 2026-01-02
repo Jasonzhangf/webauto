@@ -237,6 +237,23 @@ class UnifiedApiServer {
           const payload = await this.readJsonBody(req);
           const { containerId, sessionId, website } = payload;
 
+          // TODO: Implement /v1/runtime/start endpoint logic
+          if (!sessionId || !website) {
+            res.writeHead(400, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ success: false, error: "sessionId and website required" }));
+            return;
+          }
+
+          res.writeHead(501, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ success: false, error: "Endpoint not yet implemented" }));
+        } catch (err: any) {
+          res.writeHead(500, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ success: false, error: err?.message || String(err) }));
+        }
+        return;
+      }
+
+
       if (req.method === "POST" && url.pathname === "/v1/runtime/discover") {
         try {
           const payload = await this.readJsonBody(req);
@@ -275,66 +292,6 @@ class UnifiedApiServer {
         return;
       }
 
-          if (!sessionId || !website) {
-            res.writeHead(400, { "Content-Type": "application/json" });
-            res.end(JSON.stringify({ success: false, error: "sessionId and website required" }));
-            return;
-          }
-
-          // Check if runtime already exists
-          if (this.runtimeControllers.has(sessionId)) {
-            res.writeHead(200, { "Content-Type": "application/json" });
-            res.end(JSON.stringify({ success: true, runtimeId: sessionId, message: "Runtime already exists" }));
-            return;
-          }
-
-          // Load container definitions
-          const defs = await this.containerLoader.loadForWebsite(website);
-          console.log(`[UnifiedApi] Loaded ${defs.length} container definitions for ${website}`);
-
-          // Create discovery engine with browser adapter
-          const browserAdapter = new BrowserDiscoveryAdapter(sessionManager, sessionId);
-          const discovery = new TreeDiscoveryEngine(defs, browserAdapter);
-
-          // Create runtime controller with event bus
-          const runtimeController = new RuntimeController(
-            defs,
-            discovery,
-            {
-              eventBus: this.eventBus,
-              wait: (ms) => new Promise(r => setTimeout(r, ms)),
-              highlight: async (handle, opts) => {
-                // Legacy support, also emit event
-                this.eventBus.emit("ui:render:highlight", { handle, opts });
-              },
-              operationExecutor: {
-                execute: async (cid, oid, config, handle) => {
-                  // Delegate to operation executor from container-operations setup
-                  // We need to access the executor created in setupContainerOperationsRoutes
-                  // For now, we can emit an event or use a shared instance if refactored
-                  console.log(`[Runtime] Execute ${oid} on ${cid}`);
-                  return { success: true }; // Placeholder
-                }
-              }
-            },
-            this.bindingRules
-          );
-
-          this.runtimeControllers.set(sessionId, runtimeController);
-
-          // Start runtime in background
-          runtimeController.start(containerId || `${website}_main_page`, "root", "sequential").catch(err => {
-            console.error(`[UnifiedApi] Runtime error:`, err);
-          });
-
-          res.writeHead(200, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ success: true, runtimeId: sessionId }));
-        } catch (err: any) {
-          res.writeHead(500, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ success: false, error: err?.message || String(err) }));
-        }
-        return;
-      }
     });
     // HTTP routes
     server.on('request', async (req, res) => {

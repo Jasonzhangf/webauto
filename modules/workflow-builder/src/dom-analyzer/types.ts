@@ -93,5 +93,12 @@ export interface VisualAnalysisResponse {
     };
     confidence: number;
   }>;
+  boundingBoxes?: Array<{
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    label?: string;
+  }>;
   error?: string;
 }

@@ -15,7 +15,8 @@ test('operations cli run works with mock page context', async () => {
   assert.equal(result.data.mock, true);
 });
 
-test('operations cli run supports system mouse', async () => {
+// Skipped: robotjs has been removed from dependencies
+test.skip('operations cli run supports system mouse', async () => {
   const result = await runCli(['run', '--op', 'system:mouse-move', '--config', '{"x":10,"y":20}']);
   assert.equal(result.success, true);
 });
