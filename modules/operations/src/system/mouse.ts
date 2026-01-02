@@ -17,26 +17,10 @@ async function ensureRobot(ctx: OperationContext) {
   if (ctx.systemInput?.mouseMove && ctx.systemInput.mouseClick) {
     return ctx.systemInput;
   }
-  let robot;
-  try {
-    robot = await import('robotjs');
-  } catch {
-    throw new Error('robotjs 未安装，无法执行全局输入。请运行 npm install robotjs');
-  }
-  const move = robot.moveMouse || robot.default?.moveMouse;
-  const click = robot.mouseClick || robot.default?.mouseClick;
-  if (typeof move !== 'function' || typeof click !== 'function') {
-    throw new Error('robotjs 不支持当前平台或 API 变动，无法执行全局输入');
-  }
-  return {
-    mouseMove: async (x: number, y: number) => move.call(robot, x, y),
-    mouseClick: async (x: number, y: number, button = 'left', clicks = 1) => {
-      move.call(robot, x, y);
-      for (let i = 0; i < clicks; i += 1) {
-        click.call(robot, button as any);
-      }
-    },
-  };
+  
+  // robotjs has been removed due to CI build issues on Linux
+  // TODO: Replace with a cross-platform alternative or implement platform-specific solutions
+  throw new Error('robotjs removed from dependencies. System-level mouse operations are currently unavailable.');
 }
 
 export const mouseMoveOperation: OperationDefinition<MouseMoveConfig> = {
