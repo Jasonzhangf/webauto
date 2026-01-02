@@ -71,8 +71,7 @@
     "launch:diagnose": "node scripts/launch-with-diagnostics.mjs",
     "launch:diagnose:ui": "node scripts/launch-with-diagnostics.mjs --headless=false",
     "launch:diagnose:dev": "node scripts/launch-with-diagnostics.mjs --dev",
-    "test:floating-startup": "node apps/floating-panel/scripts/test-floating-startup.mjs",
-    "test:system-health": "node scripts/verify-system-health.mjs"
+    "test:floating-startup": "node apps/floating-panel/scripts/test-floating-startup.mjs"
   },
   "devDependencies": {
     "@modelcontextprotocol/sdk": "^1.20.1",
