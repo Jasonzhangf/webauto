@@ -1,91 +1,108 @@
-# WebAuto DOM Picker 修复任务 - 当前状态
+# WebAuto 浮窗 UI 完善实施计划
 
-## 核心问题分析
+## 背景
 
-### 问题1：picker捕获时点击被截获 ✅
-- runtime.js 中已经有 `preventDefault()` 和 `stopPropagation()`
-- 应该是工作的，需要验证
+已成功恢复到稳定版本（commit 91c1ebb），系统可以正常启动，容器匹配功能正常。
+现在的目标是完善浮窗 UI 的绘制、用户交互和容器编辑功能。
 
-### 问题2：DOM元素没有被绘制和连线 ❌ 
-**现象**：
-- 建议的子容器（橙色虚线框）显示了 ✅
-- DOM元素（橙色虚线框）没有显示 ❌
-- 两者之间没有连线 ❌
+## 当前状态
 
-**根本原因**：
-1. `ensureDomPathLoaded` 成功加载了DOM分支（有日志证明）✅
-2. `mergeDomBranch` 成功合并了分支到 domData ✅
-3. `expandDomPath` 展开了路径到 expandedNodes ✅
-4. **但是** `renderDomNodeRecursive` 在渲染时，新加载的深层节点可能没有被渲染，因为：
-   - 初始 DOM tree 只有浅层节点（depth=8）
-   - `mergeDomBranch` 只是替换了 targetNode.children
-   - 但如果 targetNode 本身在初始 tree 中不存在，就无法合并
-   - 需要检查 `findDomNodeByPath` 是否能找到目标节点
+- ✅ Unified API 服务正常运行 (7701)
+- ✅ Browser Service 服务正常运行 (7704)  
+- ✅ 容器匹配功能正常
+- ✅ 浮窗 UI 已启动并连接
+- ✅ 系统可以创建容器并进行编辑
+- ✅ DOM-DOM 图形显示正常
+- ✅ 容器-DOM 关联正常
 
-**解决方案**：
-1. 在 `handlePickerResult` 中添加详细日志，确认：
-   - DOM分支加载是否成功
-   - DOM节点是否被合并到 domData
-   - DOM节点是否在 domNodePositions 中注册
-2. 检查 `renderDomNodeRecursive` 是否正确遍历了新合并的节点
-3. 添加橙色虚线高亮到选中的DOM节点
-4. 在 `drawAllConnections` 中添加建议节点到DOM节点的连线
+## 实施计划
 
-## 修复步骤
+### 阶段 1: 基础功能验证（MVP）
 
-### 步骤1：添加详细日志
-```javascript
-// 在 handlePickerResult 中
-console.log('[handlePickerResult] domPath:', domPath);
-console.log('[handlePickerResult] After ensureDomPathLoaded, domData:', domData);
-console.log('[handlePickerResult] After renderGraph, domNodePositions.has(domPath):', domNodePositions.has(domPath));
-console.log('[handlePickerResult] domNodePositions.get(domPath):', domNodePositions.get(domPath));
-```
+#### 1.1 完善旧容器显示问题
+- [ ] 验证没有 operation 的容器是否正确显示内容
+- [ ] 添加默认 operation 生成机制
+- [ ] 确保 UI 能正确渲染空状态
 
-### 步骤2：检查 mergeDomBranch
-```javascript
-// 在 mergeDomBranch 中添加日志
-console.log('[mergeDomBranch] Looking for path:', branchNode.path);
-console.log('[mergeDomBranch] Found targetNode:', !!targetNode);
-console.log('[mergeDomBranch] targetNode.children before:', targetNode?.children?.length || 0);
-console.log('[mergeDomBranch] branchNode.children:', branchNode.children?.length || 0);
-```
+#### 1.2 完善 UI 组件功能
+- [ ] 测试 CapturePanel 组件是否正常工作
+- [ ] 测试 ContainerTree 组件是否正常工作
+- [ ] 验证容器详情面板的交互
 
-### 步骤3：在 drawAllConnections 中添加建议节点连线
-```javascript
-// 在 drawAllConnections 的末尾
-if (suggestedNode) {
-  const containerPos = containerNodePositions.get(suggestedNode.parentId);
-  const domPos = domNodePositions.get(suggestedNode.domPath);
-  
-  if (containerPos && domPos) {
-    // 绘制橙色虚线从建议容器到DOM节点
-    drawConnectionToDom(parent, containerPos.x, containerPos.y, domPos.indicatorX, domPos.indicatorY, '#fbbc05');
-  }
-}
-```
+#### 1.3 容器操作编辑功能
+- [ ] 验证添加新 operation 的功能
+- [ ] 验证编辑现有 operation 的功能
+- [ ] 验证删除 operation 的功能
+- [ ] 验证启用/禁用 operation 的功能
 
-### 步骤4：修改 drawConnectionToDom 支持自定义颜色
-```javascript
-function drawConnectionToDom(parent, startX, startY, endX, endY, color = '#4CAF50') {
-  const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-  const midX = (startX + endX) / 2;
-  path.setAttribute('d', `M ${startX} ${startY} L ${midX} ${startY} L ${midX} ${endY} L ${endX} ${endY}`);
-  path.setAttribute('stroke', color);
-  path.setAttribute('stroke-width', '2');
-  path.setAttribute('fill', 'none');
-  path.setAttribute('stroke-dasharray', '4,2');
-  path.setAttribute('opacity', '0.7');
-  parent.appendChild(path);
-}
-```
+### 阶段 2: 功能完善
 
-## 待办事项
-- [ ] 添加详细日志到 handlePickerResult
-- [ ] 添加日志到 mergeDomBranch
-- [ ] 修改 drawConnectionToDom 支持颜色参数
-- [ ] 在 drawAllConnections 中添加建议节点连线
-- [ ] 重启服务测试
-- [ ] 检查浏览器控制台日志
-- [ ] 确认DOM节点和建议节点都被正确绘制
-- [ ] 确认连线正确绘制
+#### 2.1 UI 绘制增强
+- [ ] 优化 DOM 树的渲染性能
+- [ ] 改进容器-DOM 连线的显示效果
+- [ ] 添加选中高亮效果
+
+#### 2.2 用户交互优化
+- [ ] 添加快捷键支持
+- [ ] 优化拖拽体验
+- [ ] 添加撤销/重做功能
+
+#### 2.3 容器编辑完善
+- [ ] 添加 operation 模板库
+- [ ] 支持 operation 的复制粘贴
+- [ ] 添加批量编辑功能
+
+### 阶段 3: 高级功能
+
+#### 3.1 自动化增强
+- [ ] 添加智能 operation 推荐
+- [ ] 自动生成默认 operations
+- [ ] AI 辅助编辑
+
+#### 3.2 数据持久化
+- [ ] 优化保存机制
+- [ ] 添加版本历史
+- [ ] 支持导入导出
+
+#### 3.3 调试工具
+- [ ] 添加 operation 执行调试
+- [ ] 实时预览功能
+- [ ] 性能分析工具
+
+## 当前重点
+
+### 立即执行任务（阶段 1.1）
+
+1. **验证旧容器显示问题**
+   - 检查没有 operation 的容器渲染
+   - 添加空状态提示
+   - 生成默认 operation 建议
+
+2. **完善 UI 组件验证**
+   - 测试 CapturePanel
+   - 测试 ContainerTree  
+   - 验证交互流程
+
+3. **容器操作编辑**
+   - 添加新 operation
+   - 编辑现有 operation
+   - 删除 operation
+
+## 进度跟踪
+
+- [ ] 阶段 1.1: 完善旧容器显示问题
+- [ ] 阶段 1.2: 完善 UI 组件功能
+- [ ] 阶段 1.3: 容器操作编辑功能
+- [ ] 阶段 2.1: UI 绘制增强
+- [ ] 阶段 2.2: 用户交互优化
+- [ ] 阶段 2.3: 容器编辑完善
+- [ ] 阶段 3.1: 自动化增强
+- [ ] 阶段 3.2: 数据持久化
+- [ ] 阶段 3.3: 调试工具
+
+## 注意事项
+
+- 所有修改使用 TypeScript/TS
+- 禁止使用 Python 自动化脚本
+- 禁止使用模糊匹配的进程终止命令
+- 保持 ESM 架构一致性
