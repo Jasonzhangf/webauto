@@ -374,11 +374,11 @@ export async function startAll({ profile, url, headless }) {
 const [,, profile = 'weibo_fresh', url = 'https://weibo.com'] = process.argv;
 const headless = process.env.WEBAUTO_HEADLESS === '1';
 
-
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   startAll({ profile, url, headless }).catch(err => {
-    console.error(`启动失败: ${err.message}`);
-    cleanupPids();
-    process.exit(1);
-  });
-}
+  console.error(`启动失败: ${err.message}`);
+  cleanupPids();
+  process.exit(1);
+});
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  startAll({ profile, url, headless }).catch(err => {

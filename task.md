@@ -83,3 +83,13 @@
 - 2026-01-02 13:30: 修复 PROJECT_ROOT 路径问题，使用 import.meta.url
 - 2026-01-02 13:45: 实现浮窗启动测试脚本，验证基本启动成功
 - 2026-01-02 13:50: 将 test:floating-startup 添加到 CI 测试链
+- 2026-01-02 14:00: 实现多层次系统健康检查脚本 (verify-system-health.mjs)
+  - 服务层：Unified API, Browser Service, Controller
+  - 连接层：WebSocket 事件总线
+  - 功能层：容器匹配、DOM 获取（需要完整系统运行）
+  - 添加 test:system-health 脚本
+
+## 下一步计划
+1. 将系统健康检查集成到完整的端到端测试中
+2. 实现启动服务 → 健康检查 → 关闭服务的完整测试流程
+3. 添加浮窗 UI 功能验证（ping/pong, 图谱绘制等）
