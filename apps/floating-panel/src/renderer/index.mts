@@ -107,7 +107,7 @@ function renderContainerDetails(container: any | null) {
     </div>
     ${renderAddOperationPanel(selector, domPath)}
     <div style="margin-top:6px;font-size:10px;color:#666;">
-      提示：当前 Operation 编辑会直接写入外置容器库（~/.webauto/container-lib）；演练按钮暂仅记录日志，不会实际执行操作。
+      提示：当前 Operation 编辑会直接写入外置容器库（~/.webauto/container-lib）；演练按钮会在浏览器中实际执行操作。
     </div>
       `;
 
@@ -222,6 +222,8 @@ function bindOperationEventListeners(containerId: string, operations: any[], isR
       if (!Number.isFinite(index)) return;
       const op = operations[index];
       debugLog('floating-panel', 'op-rehearse-clicked', { containerId, opIndex: index, op });
+      // 执行操作演练
+      executeOperation(containerId, op, index);
     });
   });
 
@@ -408,6 +410,118 @@ async function updateContainerOperations(containerId: string, operations: any[])
     });
   } catch (err) {
     logger.error('container-operations', 'Failed to update operations', err);
+  }
+}
+
+async function executeOperation(containerId: string, operation: any, index: number) {
+  if (!currentProfile || !currentUrl) {
+    logger.warn('operation-execute', 'Missing profile/url; skip execute', {
+      profile: currentProfile,
+      url: currentUrl,
+    });
+    return;
+  }
+
+  try {
+    const api = (window as any).api;
+    if (!api?.invokeAction) {
+      logger.warn('operation-execute', 'invokeAction not available');
+      return;
+    }
+
+    debugLog('floating-panel', 'executing-operation', {
+      containerId,
+      operationIndex: index,
+      operationType: operation.type,
+      operationId: operation.id
+    });
+
+    // 调用 unified-api 的 operations:run 接口
+    const result = await api.invokeAction('operations:run', {
+      profile: currentProfile,
+      url: currentUrl,
+      containerId: containerId,
+      op: operation.type,
+      config: operation.config || {},
+      sessionId: currentProfile // 使用 profile 作为 sessionId
+    });
+
+    if (result?.success) {
+      debugLog('floating-panel', 'operation-executed-success', {
+        containerId,
+        operationIndex: index,
+        result: result.data
+      });
+      // 显示成功提示
+      showOperationResult(operation, true, result.data);
+    } else {
+      debugLog('floating-panel', 'operation-executed-failed', {
+        containerId,
+        operationIndex: index,
+        error: result?.error || 'Unknown error'
+      });
+      // 显示失败提示
+      showOperationResult(operation, false, result?.error || 'Unknown error');
+    }
+  } catch (err) {
+    logger.error('operation-execute', 'Failed to execute operation', err);
+    debugLog('floating-panel', 'operation-execute-exception', {
+      containerId,
+      operationIndex: index,
+      error: (err as Error).message
+    });
+    // 显示错误提示
+    showOperationResult(operation, false, (err as Error).message);
+  }
+}
+
+function showOperationResult(operation: any, success: boolean, data: any) {
+  const resultContainer = document.getElementById('operationResultContainer');
+  if (!resultContainer) {
+    // 创建结果显示容器
+    const container = document.createElement('div');
+    container.id = 'operationResultContainer';
+    container.style.cssText = `
+      position: fixed;
+      bottom: 20px;
+      right: 20px;
+      z-index: 10001;
+      background: ${success ? '#0e3d0e' : '#3d0e0e'};
+      border: 1px solid ${success ? '#7ebd7e' : '#bd7e7e'};
+      border-radius: 4px;
+      padding: 12px;
+      max-width: 400px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+    `;
+    document.body.appendChild(container);
+
+    const title = document.createElement('div');
+    title.style.cssText = `
+      font-size: 12px;
+      font-weight: 600;
+      color: ${success ? '#7ebd7e' : '#bd7e7e'};
+      margin-bottom: 6px;
+    `;
+    title.textContent = success ? `✓ 操作执行成功: ${operation.id}` : `✗ 操作执行失败: ${operation.id}`;
+    container.appendChild(title);
+
+    const content = document.createElement('div');
+    content.style.cssText = `
+      font-size: 10px;
+      color: #ccc;
+      font-family: Consolas, monospace;
+      max-height: 200px;
+      overflow-y: auto;
+    `;
+    content.textContent = typeof data === 'string' ? data : JSON.stringify(data, null, 2);
+    container.appendChild(content);
+
+    // 3秒后自动关闭
+    setTimeout(() => {
+      if (container.parentNode) {
+        container.parentNode.removeChild(container);
+      }
+    }, 3000);
   }
 }
 
