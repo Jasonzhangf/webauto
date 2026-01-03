@@ -2,7 +2,7 @@ let containerTree: any = null;// @ts-nocheck
 let capturePanel: any = null;// NOTE: Temporarily disable TypeScript checks during refactoring integration
 // Will be removed after complete TypeScript migration
 
-import { renderOperationsList, renderAddOperationPanel, buildDefaultOperations } from './operation-ui.mts';
+import { setupOperationListDelegation } from './operation-interactions.mts';import { renderOperationsList, renderAddOperationPanel, buildDefaultOperations } from './operation-ui.mts';
 import { renderOperationEditor } from './operation-helpers.ts';
 import { isRootContainer } from './operation-types.ts';
 import {
@@ -13,7 +13,7 @@ import {
 } from './graph.mjs';
 import { logger } from './logger.mts';
 import { FLOATING_PANEL_VERSION } from './version.mts';
-import { CapturePanel, ContainerTree, OperationDragHandler } from './ui-components.js';
+import { CapturePanel, ContainerTree, OperationDragHandler, injectUIStyles } from './ui-components.js';
 
 
 // UI logging helper
@@ -21,20 +21,18 @@ const log = (...args: any[]) => {
   console.log('[ui-renderer]', ...args);
 };
 
-const statusEl = document.getElementById('status');
-const healthEl = document.getElementById('health');
+// Inject new UI styles
+injectUIStyles();
+
+const statusEl = document.getElementById('status-icon');
 const dragArea = document.getElementById('drag-area');
 const loadingIndicator = document.getElementById('loadingIndicator');
-const loadingLabel = loadingIndicator?.querySelector('.loading-label') as HTMLElement | null;
-const versionLabel = document.getElementById('versionLabel');
 
 function setStatus(text: string, ok: boolean) {
   if (statusEl) {
-    statusEl.textContent = text;
-    statusEl.style.color = ok ? '#4CAF50' : '#f44336';
-  }
-  if (versionLabel) {
-    versionLabel.textContent = `v${FLOATING_PANEL_VERSION}`;
+    statusEl.title = text;
+    if (ok) statusEl.classList.add('connected');
+    else statusEl.classList.remove('connected');
   }
 }
 
@@ -42,17 +40,9 @@ function setLoadingState(pending: number, detail?: Record<string, any>) {
   if (!loadingIndicator) return;
   if (pending > 0) {
     loadingIndicator.classList.add('active');
-    if (loadingLabel) {
-      const reason = typeof detail?.reason === 'string' ? detail.reason : '加载中';
-      const friendly = reason.replace(/[_-]/g, ' ').trim() || '加载中';
-      const suffix = pending > 1 ? ` (${pending})` : '';
-      loadingLabel.textContent = `${friendly}${suffix}`;
-    }
+    loadingIndicator.textContent = `Loading (${pending})...`;
   } else {
     loadingIndicator.classList.remove('active');
-    if (loadingLabel) {
-      loadingLabel.textContent = '加载中...';
-    }
   }
 }
 
@@ -69,7 +59,6 @@ let currentUrl: string | null = null;
 let currentContainer: any | null = null;
 
 const containerDetailsEl = document.getElementById('containerDetailsContent');
-const containerDetailsTab = document.querySelector('.tab[data-tab="containerDetails"]') as HTMLElement | null;
 const splitterHandle = document.getElementById('splitterHandle');
 const bottomPanel = document.getElementById('bottom-panel');
 const graphPanel = document.getElementById('graphPanel');
@@ -82,27 +71,17 @@ function renderContainerDetails(container: any | null) {
 
   if (!container) {
     containerDetailsEl.innerHTML = `
-    <div style="margin-bottom:6px;">
-      <div style="font-size:12px;color:#fff;margin-bottom:2px;">
-        未选择容器
+      <div style="padding:20px;text-align:center;color:#666;font-size:10px;">
+        Select a container in the graph
       </div>
-      <div style="font-size:10px;color:#999;margin-bottom:2px;">请在左侧图中选择一个容器节点。</div>
-    </div>
-      `;
-
+    `;
     return;
   }
 
   const id = container.id || container.name || 'unknown';
-  const name = container.name || container.id || '未命名容器';
+  const name = container.name || container.id || 'Unnamed';
   const type = container.type || 'container';
-  const capabilities = Array.isArray(container.capabilities) ? container.capabilities : [];
   const operations = Array.isArray(container.operations) ? container.operations : [];
-  const alias =
-    (container.metadata && (container.metadata.alias as string)) ||
-    (container.alias as string) ||
-    (container.nickname as string) ||
-    '';
 
   const matchNode = container.match && Array.isArray(container.match.nodes) && container.match.nodes.length
     ? container.match.nodes[0]
@@ -114,7 +93,7 @@ function renderContainerDetails(container: any | null) {
   const isRoot = isRootContainer(container);
 
   // 使用新的 operation UI 渲染函数
-  const { html: operationsHtml, hasSuggested } = renderOperationsList({
+  const { html: operationsHtml, hasSuggested } = renderOperationsList({ isRoot: isRoot,
     containerId: id,
     operations: operations,
     primarySelector: selector,
@@ -122,220 +101,55 @@ function renderContainerDetails(container: any | null) {
     hasRawOperations: operations.length > 0
   });
 
-  containerDetailsEl.innerHTML = `
-    <div style="margin-bottom:3px;">
-      <div style="font-size:11px;color:#fff;margin-bottom:3px;">
-        ${name} <span style="color:#666;font-size:9px;">(${id})</span>
+  // 渲染 Meta Header 和 Grid
+  const metaHtml = `
+    <div style="padding:4px 8px;border-bottom:1px solid #3e3e3e;display:flex;justify-content:space-between;align-items:center;background:#2d2d2d;">
+      <div>
+        <span style="font-weight:600;color:#eee;">${name}</span>
+        <span style="color:#666;font-family:monospace;margin-left:4px;font-size:10px;">#${id}</span>
       </div>
-      <div class="container-meta-grid">
-        <div class="meta-item">
-          <span class="meta-label">类型</span>
-          <span class="meta-value">${type}${container.metadata?.isVirtual ? ' [虚拟]' : ''}</span>
-        </div>
-        <div class="meta-item">
-          <span class="meta-label">匹配</span>
-          <span class="meta-value">${matchCount}</span>
-        </div>
-        <div class="meta-item">
-          <span class="meta-label">能力</span>
-          <span class="meta-value">${capabilities.length ? capabilities.join(', ') : '无'}</span>
-        </div>
-        <div class="meta-item">
-          <span class="meta-label">selector</span>
-          <span class="meta-value">${selector || '未记录'}</span>
-        </div>
-        <div class="meta-item" style="grid-column:1/-1;">
-          <span class="meta-label">DOM路径</span>
-          <span class="meta-value">${domPath || '未记录'}</span>
-        </div>
-        <div class="meta-item" style="grid-column:1/-1;align-items:center;">
-          <span class="meta-label">别名</span>
-          <input id="containerAliasInput" type="text" style="flex:1;font-size:9px;padding:2px 4px;border-radius:2px;border:1px solid #3e3e3e;background:#1e1e1e;color:#ccc;" />
-          <button id="btnSaveAlias" style="font-size:9px;padding:2px 6px;margin-left:4px;">保存</button>
-        </div>
-      </div>
+      <div style="font-size:9px;color:#555;">Match: ${matchCount}</div>
     </div>
-    <div style="margin-bottom:2px;font-size:10px;color:#ccc;font-weight:600;">Operation 列表</div>
-    <div id="containerOperationsList" style="margin-bottom:6px;">
-      ${operationsHtml}
-    </div>
-    ${renderAddOperationPanel(selector, domPath)}
-    <div style="margin-top:4px;font-size:8px;color:#666;">
-      提示：当前 Operation 编辑会直接写入外置容器库（~/.webauto/container-lib）；演练按钮会在浏览器中实际执行操作。
+    
+    <div style="display:grid;grid-template-columns:auto 1fr auto 1fr;gap:2px 8px;padding:4px 8px;font-size:10px;border-bottom:1px solid #3e3e3e;background:#252526;">
+      <span style="color:#888;text-align:right;">Type:</span>
+      <span style="color:#dcdcaa;font-family:monospace;">${type}</span>
+      <span style="color:#888;text-align:right;">Path:</span>
+      <span style="color:#dcdcaa;font-family:monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100px;" title="${domPath || ''}">${domPath || '-'}</span>
+      <span style="color:#888;text-align:right;">Selector:</span>
+      <span style="color:#dcdcaa;font-family:monospace;grid-column:span 3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="${selector || ''}">${selector || '-'}</span>
     </div>
   `;
 
-  const aliasInput = containerDetailsEl.querySelector('#containerAliasInput') as HTMLInputElement | null;
-  if (aliasInput) {
-    aliasInput.value = alias || name || id;
-  }
+  containerDetailsEl.innerHTML = `
+    ${metaHtml}
+    ${operationsHtml}
+    ${renderAddOperationPanel(selector, domPath, isRoot)}
+  `;
 
   // 为操作按钮绑定事件
   bindOperationEventListeners(id, operations, isRoot);
-
-  // 初始化拖拽排序
-  const listEl = containerDetailsEl.querySelector('#containerOperationsList');
-  if (listEl) {
-    new OperationDragHandler(listEl as HTMLElement, operations, (newOps) => {
-      updateContainerOperations(id, newOps);
-    });
-  }
-
   // 为快速添加操作面板绑定事件
   bindAddOperationPanelEvents(id, selector, domPath);
-
-  // 如果有建议的操作，自动展开编辑器
-  if (hasSuggested) {
-    debugLog('floating-panel', 'suggested operations detected, showing editor', { containerId: id });
-  }
 }
-
-
 
 // Helper functions for operation UI event binding
 
 function bindOperationEventListeners(containerId: string, operations: any[], isRoot: boolean) {
-  const listEl = containerDetailsEl?.querySelector('#containerOperationsList');
+  const listEl = containerDetailsEl?.querySelector('.op-list-wrapper');
   if (!listEl) return;
-
-  // 绑定演练按钮
-  listEl.querySelectorAll('button[data-op-action="rehearse"]').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      const indexAttr = (btn as HTMLElement).getAttribute('data-op-index');
-      const index = typeof indexAttr === 'string' ? Number(indexAttr) : NaN;
-      if (!Number.isFinite(index)) return;
-      const op = operations[index];
-      debugLog('floating-panel', 'op-rehearse-clicked', { containerId, opIndex: index, op });
-      // 执行操作演练
-      executeOperation(containerId, op, index);
-    });
+  
+  setupOperationListDelegation(listEl as HTMLElement, operations, {
+    isRoot,
+    onUpdate: (newOps) => updateContainerOperations(containerId, newOps),
+    onExecute: (op, index) => executeOperation(containerId, op, index)
   });
-
-  // 绑定编辑按钮
-  listEl.querySelectorAll('button[data-op-action="edit"]').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      const indexAttr = (btn as HTMLElement).getAttribute('data-op-index');
-      const index = typeof indexAttr === 'string' ? Number(indexAttr) : NaN;
-      if (!Number.isFinite(index)) return;
-      const op = operations[index];
-      debugLog('floating-panel', 'op-edit-clicked', { containerId, opIndex: index, op });
-      showOperationEditor(containerId, op, index, isRoot, operations);
-    });
-  });
-
-  // 绑定删除按钮
-  listEl.querySelectorAll('button[data-op-action="delete"]').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      const indexAttr = (btn as HTMLElement).getAttribute('data-op-index');
-      const index = typeof indexAttr === 'string' ? Number(indexAttr) : NaN;
-      if (!Number.isFinite(index)) return;
-      const op = operations[index];
-      debugLog('floating-panel', 'op-delete-clicked', { containerId, opIndex: index, op });
-      const newOps = [...operations];
-      newOps.splice(index, 1);
-      updateContainerOperations(containerId, newOps);
-    });
-  });
-
-  // 绑定启用/禁用按钮
-  listEl.querySelectorAll('button[data-op-action="toggle"]').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      const indexAttr = (btn as HTMLElement).getAttribute('data-op-index');
-      const index = typeof indexAttr === 'string' ? Number(indexAttr) : NaN;
-      if (!Number.isFinite(index)) return;
-      const op = operations[index];
-      if (op) {
-        op.enabled = !op.enabled;
-        debugLog('floating-panel', 'op-toggle-clicked', { containerId, opIndex: index, op, enabled: op.enabled });
-        updateContainerOperations(containerId, operations);
-      }
-    });
-  });
-}
-
-function showOperationEditor(containerId: string, op: any, index: number, isRoot: boolean, operations: any[]) {
-  const editorHtml = renderOperationEditor(op, index, isRoot);
-  const editorContainer = document.createElement('div');
-  editorContainer.id = 'opEditorContainer';
-  editorContainer.innerHTML = editorHtml;
-  editorContainer.style.cssText = `
-    position: fixed;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-    z-index: 10000;
-    background: #2d2d2d;
-    border: 1px solid #444;
-    border-radius: 4px;
-    padding: 12px;
-    width: 500px;
-    max-height: 80vh;
-    overflow-y: auto;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.5);
-  `;
-  document.body.appendChild(editorContainer);
-
-  const saveBtn = editorContainer.querySelector(`button[data-op-action="save"]`) as HTMLButtonElement;
-  const cancelBtn = editorContainer.querySelector(`button[data-op-action="cancel"]`) as HTMLButtonElement;
-
-  if (saveBtn) {
-    saveBtn.addEventListener('click', () => {
-      const typeSelect = editorContainer.querySelector(`select[data-op-edit-type="${index}"]`) as HTMLSelectElement;
-      const configTextarea = editorContainer.querySelector(`textarea[data-op-config="${index}"]`) as HTMLTextAreaElement;
-      const checkboxes = editorContainer.querySelectorAll(`input[data-op-trigger="${index}"]`) as NodeListOf<HTMLInputElement>;
-      const customTriggerInput = editorContainer.querySelector(`input[data-op-custom-trigger="${index}"]`) as HTMLInputElement;
-
-      if (typeSelect && configTextarea) {
-        const newType = typeSelect.value;
-        let newConfig = {};
-        try {
-          newConfig = JSON.parse(configTextarea.value);
-        } catch (e) {
-          debugLog('floating-panel', 'invalid-json-config', { error: (e as Error).message });
-          alert('配置JSON格式错误，请修正后重试');
-          return;
-        }
-
-        const triggers: string[] = [];
-        checkboxes.forEach(checkbox => {
-          if (checkbox.checked) {
-            triggers.push(checkbox.value);
-          }
-        });
-
-        if (customTriggerInput && customTriggerInput.value.trim()) {
-          const customTrigger = customTriggerInput.value.trim();
-          if (!triggers.includes(customTrigger)) {
-            triggers.push(customTrigger);
-          }
-        }
-
-        const updatedOp = {
-          ...op,
-          type: newType,
-          config: newConfig,
-          triggers: triggers.length > 0 ? triggers : ['appear']
-        };
-        operations[index] = updatedOp;
-
-        updateContainerOperations(containerId, operations);
-        document.body.removeChild(editorContainer);
-      }
-    });
-  }
-
-  if (cancelBtn) {
-    cancelBtn.addEventListener('click', () => {
-      document.body.removeChild(editorContainer);
-    });
-  }
 }
 
 function bindAddOperationPanelEvents(containerId: string, primarySelector: string | null, domPath: string | null) {
   const addBtn = containerDetailsEl?.querySelector('#btnAddOp') as HTMLButtonElement;
   const triggerSelect = containerDetailsEl?.querySelector('#opTriggerSelect') as HTMLSelectElement;
   const typeSelect = containerDetailsEl?.querySelector('#opTypeSelect') as HTMLSelectElement;
-  const seedBtn = containerDetailsEl?.querySelector('#btnSeedOps') as HTMLButtonElement;
 
   if (addBtn && triggerSelect && typeSelect) {
     addBtn.addEventListener('click', () => {
@@ -356,13 +170,6 @@ function bindAddOperationPanelEvents(containerId: string, primarySelector: strin
       const currentOps = Array.isArray(currentContainer?.operations) ? [...currentContainer.operations] : [];
       currentOps.push(newOp);
       updateContainerOperations(containerId, currentOps);
-    });
-  }
-
-  if (seedBtn) {
-    seedBtn.addEventListener('click', () => {
-      const defaultOps = buildDefaultOperations(containerId, primarySelector, domPath);
-      updateContainerOperations(containerId, defaultOps);
     });
   }
 }
@@ -387,6 +194,7 @@ async function updateContainerOperations(containerId: string, operations: any[])
       containerId: containerId,
       operations: operations,
     });
+    // Trigger graph refresh
     await api.invokeAction('containers:match', {
       profile: currentProfile,
       url: currentUrl,
@@ -398,204 +206,44 @@ async function updateContainerOperations(containerId: string, operations: any[])
 }
 
 async function executeOperation(containerId: string, operation: any, index: number) {
-  if (!currentProfile || !currentUrl) {
-    logger.warn('operation-execute', 'Missing profile/url; skip execute', {
-      profile: currentProfile,
-      url: currentUrl,
-    });
-    return;
-  }
+  if (!currentProfile || !currentUrl) return;
 
   try {
     const api = (window as any).api;
-    if (!api?.invokeAction) {
-      logger.warn('operation-execute', 'invokeAction not available');
-      return;
-    }
+    if (!api?.invokeAction) return;
 
     debugLog('floating-panel', 'executing-operation', {
       containerId,
       operationIndex: index,
-      operationType: operation.type,
-      operationId: operation.id
+      operationType: operation.type
     });
 
-    // 调用 unified-api 的 operations:run 接口
     const result = await api.invokeAction('operations:run', {
       profile: currentProfile,
       url: currentUrl,
       containerId: containerId,
       op: operation.type,
       config: operation.config || {},
-      sessionId: currentProfile // 使用 profile 作为 sessionId
+      sessionId: currentProfile
     });
 
     if (result?.success) {
-      debugLog('floating-panel', 'operation-executed-success', {
-        containerId,
-        operationIndex: index,
-        result: result.data
-      });
-      // 显示成功提示
-      showOperationResult(operation, true, result.data);
+      log('Operation executed successfully');
     } else {
-      debugLog('floating-panel', 'operation-executed-failed', {
-        containerId,
-        operationIndex: index,
-        error: result?.error || 'Unknown error'
-      });
-      // 显示失败提示
-      showOperationResult(operation, false, result?.error || 'Unknown error');
+      log('Operation execution failed', result?.error);
     }
   } catch (err) {
     logger.error('operation-execute', 'Failed to execute operation', err);
-    debugLog('floating-panel', 'operation-execute-exception', {
-      containerId,
-      operationIndex: index,
-      error: (err as Error).message
-    });
-    // 显示错误提示
-    showOperationResult(operation, false, (err as Error).message);
   }
 }
-
-function showOperationResult(operation: any, success: boolean, data: any) {
-  const resultContainer = document.getElementById('operationResultContainer');
-  if (!resultContainer) {
-    // 创建结果显示容器
-    const container = document.createElement('div');
-    container.id = 'operationResultContainer';
-    container.style.cssText = `
-      position: fixed;
-      bottom: 20px;
-      right: 20px;
-      z-index: 10001;
-      background: ${success ? '#0e3d0e' : '#3d0e0e'};
-      border: 1px solid ${success ? '#7ebd7e' : '#bd7e7e'};
-      border-radius: 4px;
-      padding: 12px;
-      max-width: 400px;
-      box-shadow: 0 4px 12px rgba(0,0,0,0.5);
-    `;
-    document.body.appendChild(container);
-
-    const title = document.createElement('div');
-    title.style.cssText = `
-      font-size: 12px;
-      font-weight: 600;
-      color: ${success ? '#7ebd7e' : '#bd7e7e'};
-      margin-bottom: 6px;
-    `;
-    title.textContent = success ? `✓ 操作执行成功: ${operation.id}` : `✗ 操作执行失败: ${operation.id}`;
-    container.appendChild(title);
-
-    const content = document.createElement('div');
-    content.style.cssText = `
-      font-size: 10px;
-      color: #ccc;
-      font-family: Consolas, monospace;
-      max-height: 200px;
-      overflow-y: auto;
-    `;
-    content.textContent = typeof data === 'string' ? data : JSON.stringify(data, null, 2);
-    container.appendChild(content);
-
-    // 3秒后自动关闭
-    setTimeout(() => {
-      if (container.parentNode) {
-        container.parentNode.removeChild(container);
-      }
-    }, 3000);
-  }
-}
-
-
-
-import { CapturePanel } from './ui-components.js';
-import { ContainerTree } from './ui-components.js';
-
-
-
-// Initialize components
-document.addEventListener('DOMContentLoaded', () => {
-  // Initialize CapturePanel
-  capturePanel = new CapturePanel();
-  capturePanel.setCallbacks(
-    (state) => {
-      console.log('[capture-panel] start capture', state);
-      // TODO: Start DOM capture mode
-    },
-    () => {
-      console.log('[capture-panel] stop capture');
-      // TODO: Stop DOM capture mode
-    }
-  );
-  
-  // Initialize ContainerTree
-  containerTree = new ContainerTree();
-  containerTree.setContainers([]);
-  containerTree.setOnSelect((id) => {
-    console.log('[container-tree] selected', id);
-  });
-  
-  // Add elements to DOM
-  const capturePanelContainer = document.getElementById('capturePanel');
-  const containerTreeContainer = document.getElementById('containerTree');
-  const statusPanel = document.getElementById('statusPanel');
-  
-  if (capturePanelContainer) {
-    capturePanelContainer.appendChild(capturePanel.getElement());
-    capturePanel.show();
-  }
-  
-  if (containerTreeContainer) {
-    containerTreeContainer.appendChild(containerTree.getElement());
-  }
-  
-  if (statusPanel) {
-    // Remove statusPanel and replace with component grid
-    statusPanel.style.display = 'none';
-  }
-  
-  console.log('[components] initialized');
-});
-
-
 
 // Initialize UI components when DOM is ready
 document.addEventListener('DOMContentLoaded', () => {
   // Capture Panel
-  const captureEl = document.getElementById('capture');
-  if (captureEl) {
-    capturePanel = new CapturePanel();
-    capturePanel.setCallbacks(
-      (state) => {
-        console.log('[capture] started', state);
-        if ((window as any).api?.invokeAction) {
-          (window as any).api.invokeAction('browser:capture-mode', { enabled: true, ...state });
-        }
-      },
-      () => {
-        console.log('[capture] stopped');
-        if ((window as any).api?.invokeAction) {
-          (window as any).api.invokeAction('browser:capture-mode', { enabled: false });
-        }
-      }
-    );
-    captureEl.appendChild(capturePanel.getElement());
-    capturePanel.show();
-  }
-
+  const captureEl = document.getElementById('capture'); // If exists
+  
   // Container Tree
-  const treeEl = document.getElementById('containerTree');
-  if (treeEl) {
-    containerTree = new ContainerTree();
-    containerTree.setOnSelect((id) => {
-      console.log('[tree] selected', id);
-      // Trigger selection in graph if needed
-    });
-    treeEl.appendChild(containerTree.getElement());
-  }
+  const treeEl = document.getElementById('containerTree'); // If exists
 });
 
 
@@ -614,9 +262,9 @@ window.addEventListener('webauto:graph-status', ((evt: Event) => {
   const phase = detail.phase as string | undefined;
 
   if (phase === 'error') {
-    setStatus(detail.reason || detail.message || '图谱加载失败', false);
+    setStatus('Error loading graph', false);
   } else if (phase === 'snapshot:ready' || phase === 'ready') {
-    setStatus('图谱已更新', true);
+    setStatus('Ready', true);
   }
 }) as EventListener);
 
@@ -625,15 +273,6 @@ window.addEventListener('webauto:container-selected', ((evt: Event) => {
   const detail = (evt as CustomEvent<any>).detail || {};
   currentContainer = detail.container || null;
   renderContainerDetails(currentContainer);
-
-  // 自动切换到底部“容器详情”标签，方便查看。
-  try {
-    if (containerDetailsTab) {
-      containerDetailsTab.click();
-    }
-  } catch {
-    // ignore
-  }
 }) as EventListener);
 
 if (!(window as any).api) {
@@ -645,13 +284,7 @@ if (!(window as any).api) {
   if ((window as any).api.onBusStatus) {
     (window as any).api.onBusStatus((status: any) => {
       log('Bus status:', status);
-      if (status.connected) {
-        if (healthEl) healthEl.textContent = "Bus 已连接";
-        setStatus('已连接', true);
-      } else {
-        if (healthEl) healthEl.textContent = "Bus 断开";
-        setStatus('未连接', false);
-      }
+      setStatus(status.connected ? 'Connected' : 'Disconnected', status.connected);
     });
   }
 
@@ -660,7 +293,7 @@ if (!(window as any).api) {
       log("收到 containers.matched 事件");
       const data = msg.payload;
       if (data && data.matched) {
-        setStatus('已识别', true);
+        setStatus('Matched', true);
         const snapshot = data.snapshot;
         const profile = data.profileId;
         const url = data.url;
@@ -670,22 +303,11 @@ if (!(window as any).api) {
         currentRootSelector = rootSelector;
         currentUrl = url || currentUrl;
 
-        if (!profile) {
-          log('Missing profile in containers.matched payload');
-          return;
-        }
-
-        // 统一交给 graph 模块处理：
-        // 1) 覆盖容器/DOM 树
-        // 2) 自动展开匹配路径并预拉取
-        // 3) 等待关键路径加载后统一重绘
         await applyMatchSnapshot(snapshot, {
           profile,
           url,
           rootSelector,
         });
-
-        log('容器树和DOM树更新完成（统一快照刷新）');
 
         // 每次刷新快照后，如当前选中容器不再存在，重置详情面板。
         if (!currentContainer) {
@@ -699,30 +321,6 @@ if (!(window as any).api) {
       const data = msg.payload;
       if (data?.success && data?.domPath) {
         handlePickerResult(data.domPath, data.selector || null);
-      } else {
-        log('domPicker result missing domPath:', data);
-      }
-    }
-
-    if (msg.topic === 'handshake.status') {
-      const payload = msg.payload;
-      if (payload?.profileId) {
-        currentProfile = payload.profileId;
-      }
-      updatePageContext({
-        profile: payload?.profileId,
-        url: payload?.url,
-      });
-      if (payload?.url) {
-        currentUrl = payload.url;
-      }
-    }
-
-    if (msg.topic === 'browser.runtime.event' || (msg.topic?.startsWith && msg.topic.startsWith('browser.runtime.'))) {
-      const payload = msg.payload;
-      if (payload?.pageUrl) {
-        currentUrl = payload.pageUrl;
-        updatePageContext({ url: payload.pageUrl });
       }
     }
   });
@@ -759,8 +357,8 @@ if (splitterHandle && bottomPanel && graphPanel) {
     if (!isResizing) return;
     const delta = e.clientY - startY;
     const newHeight = Math.min(
-      window.innerHeight - 200,
-      Math.max(220, startBottomHeight - delta)
+      window.innerHeight - 100,
+      Math.max(100, startBottomHeight - delta)
     );
     bottomPanel.style.height = `${newHeight}px`;
   });
@@ -780,11 +378,8 @@ const btnPicker = document.getElementById('btnPicker');
 
 if (btnMinimize) {
   btnMinimize.addEventListener('click', () => {
-    log('Minimize button clicked');
     if ((window as any).api?.minimize) {
-      (window as any).api.minimize().catch((err: any) => {
-        log('Minimize failed:', err);
-      });
+      (window as any).api.minimize().catch(() => {});
     }
   });
 }
@@ -792,19 +387,14 @@ if (btnMinimize) {
 if (btnPicker) {
   btnPicker.addEventListener('click', async () => {
     log('Picker button clicked');
-    log('🔍 [DEBUG] currentProfile:', currentProfile);
-    log('🔍 [DEBUG] currentRootSelector:', currentRootSelector);
     try {
-      // 设置按钮状态
-      btnPicker.textContent = '捕获中...';
+      btnPicker.textContent = '...';
       btnPicker.style.background = '#e5b507';
-      btnPicker.style.color = '#000';
 
       if (!currentProfile) {
-        log('Error: No profile set. Please connect to a page first.');
+        log('Error: No profile set.');
         btnPicker.textContent = '捕获元素';
         btnPicker.style.background = '';
-        btnPicker.style.color = '';
         return;
       }
 
@@ -815,38 +405,27 @@ if (btnPicker) {
         mode: 'hover-select'
       });
       
-      log('🔍 [DEBUG] Picker result:', result);
-      
-      // 恢复按钮状态
       btnPicker.textContent = '捕获元素';
       btnPicker.style.background = '';
-      btnPicker.style.color = '';
 
       if (result.success && result.data) {
-        // 处理选中结果
         const { dom_path: domPath, selector } = result.data;
         if (domPath) {
           handlePickerResult(domPath, selector || null);
-        } else {
-          log('Picker returned selector but no domPath:', selector);
         }
       }
     } catch (err) {
       log('Picker failed:', err);
       btnPicker.textContent = '捕获元素';
       btnPicker.style.background = '';
-      btnPicker.style.color = '';
     }
   });
 }
 
 if (btnClose) {
   btnClose.addEventListener('click', () => {
-    log('Close button clicked');
     if ((window as any).api?.close) {
-      (window as any).api.close().catch((err: any) => {
-        log('Close failed:', err);
-      });
+      (window as any).api.close().catch(() => {});
     }
   });
 }

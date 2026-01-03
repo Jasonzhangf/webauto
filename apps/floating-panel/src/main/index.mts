@@ -25,6 +25,36 @@ const BUS_URL = process.env.WEBAUTO_FLOATING_BUS_URL || 'ws://127.0.0.1:7701/bus
 const HEADLESS = process.env.WEBAUTO_FLOATING_HEADLESS === '1';
 const DEVTOOLS = process.env.WEBAUTO_FLOATING_DEVTOOLS === '1';
 
+const STATE_FILE = path.join(os.homedir(), '.webauto', 'floating-window-state.json');
+
+function ensureWebAutoDir() {
+  const dir = path.dirname(STATE_FILE);
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+  }
+}
+
+function loadWindowState() {
+  try {
+    if (fs.existsSync(STATE_FILE)) {
+      const data = fs.readFileSync(STATE_FILE, 'utf8');
+      return JSON.parse(data);
+    }
+  } catch (e) {
+    log('Failed to load window state: ' + e);
+  }
+  return null;
+}
+
+function saveWindowState(bounds: any) {
+  try {
+    ensureWebAutoDir();
+    fs.writeFileSync(STATE_FILE, JSON.stringify(bounds), 'utf8');
+  } catch (e) {
+    log('Failed to save window state: ' + e);
+  }
+}
+
 function log(msg: string) {
   const timestamp = new Date().toISOString().split('T')[1].slice(0, 12);
   const line = `[${timestamp}] [floating-main] ${msg}`;
@@ -86,22 +116,53 @@ function flushPendingMessages() {
   }
 }
 
+function saveCurrentWindowState() {
+  if (!win) return;
+  try {
+    const bounds = win.getBounds();
+    saveWindowState(bounds);
+    log(`Saved window state: ${JSON.stringify(bounds)}`);
+  } catch (e) {
+    log(`Failed to save window state: ${e}`);
+  }
+}
+
+let saveStateTimeout: NodeJS.Timeout | null = null;
+function scheduleSaveState() {
+  if (saveStateTimeout) clearTimeout(saveStateTimeout);
+  saveStateTimeout = setTimeout(saveCurrentWindowState, 1000);
+}
+
 function createWindow() {
   log(`Creating window (HEADLESS=${HEADLESS}, DEVTOOLS=${DEVTOOLS})`);
   log(`PROJECT_ROOT: ${PROJECT_ROOT}`);
   log(`DIST_DIR: ${DIST_DIR}`);
   
-  const { width, height } = screen.getPrimaryDisplay().workAreaSize;
-  const defaultWidth = 320;
-  const defaultHeight = 480;
-  const x = Math.max(0, Math.round((width - defaultWidth) / 2));
-  const y = Math.max(0, Math.round((height - defaultHeight) / 2));
 
-  log(`Window geometry: ${defaultWidth}x${defaultHeight} at (${x}, ${y})`);
+  const { width: screenW, height: screenH } = screen.getPrimaryDisplay().workAreaSize;
+  const savedState = loadWindowState();
+  
+  let width = 320;
+  let height = 480;
+  let x = Math.max(0, Math.round((screenW - width) / 2));
+  let y = Math.max(0, Math.round((screenH - height) / 2));
+
+  if (savedState) {
+    if (savedState.width && savedState.height) {
+      width = savedState.width;
+      height = savedState.height;
+    }
+    if (typeof savedState.x === 'number' && typeof savedState.y === 'number') {
+      x = savedState.x;
+      y = savedState.y;
+    }
+  }
+
+  log(`Window geometry: ${width}x${height} at (${x}, ${y})`);
   
   win = new BrowserWindow({
-    width: defaultWidth,
-    height: defaultHeight,
+    width: width,
+    height: height,
     x: x,
     y: y,
     frame: false,
@@ -183,11 +244,16 @@ function createWindow() {
   });
   
   win.on('moved', () => {
-    log('Window moved event');
+    scheduleSaveState();
+  });
+  
+  win.on('resized', () => {
+    scheduleSaveState();
   });
   
   win.on('closed', () => { 
     log('Window closed');
+    saveCurrentWindowState();
     win = null; 
   });
 }

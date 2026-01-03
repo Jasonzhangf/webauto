@@ -5,562 +5,126 @@
   <title>WebAuto Floating UI</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { font: 11px/1.4 system-ui, sans-serif; background: #1e1e1e; color: #ccc; overflow: hidden; }
-    #drag-area { height: 24px; background: #2d2d2d; border-bottom: 1px solid #3e3e3e; cursor: grab; display: flex; align-items: center; padding: 0 8px; user-select: none; -webkit-app-region: drag; }
+    body { font: 11px/1.4 system-ui, sans-serif; background: var(--bg-primary); color: var(--text-primary); overflow: hidden; }
+    
+    /* 顶部拖拽栏 - 紧凑设计 */
+    #drag-area { 
+      height: 22px; 
+      background: #2d2d2d; 
+      border-bottom: 1px solid #3e3e3e; 
+      cursor: grab; 
+      display: flex; 
+      align-items: center; 
+      padding: 0 8px; 
+      user-select: none; 
+      -webkit-app-region: drag; 
+      justify-content: space-between;
+    }
     #drag-area:active { cursor: grabbing; }
-    .title { font-weight: 600; font-size: 12px; }
-    .status { margin-left: auto; display: flex; align-items: center; gap: 6px; font-size: 11px; }
-    .status span { padding: 2px 6px; border-radius: 3px; }
-    .status .ok { background: #0e3d0e; color: #7ebd7e; }
-    .status .bad { background: #3d0e0e; color: #bd7e7e; }
-    #container { height: calc(100vh - 24px); display: flex; flex-direction: column; }
-    #top-bar { padding: 6px; background: #252526; border-bottom: 1px solid #3e3e3e; display: flex; gap: 6px; align-items: center; }
-    #health { flex: 1; font-size: 10px; display: flex; align-items: center; }
-    #mode { font-size: 9px; color: #888; margin-left: auto; }
-    .loading-indicator {
-      display: flex;
-      align-items: center;
-      gap: 4px;
-      font-size: 10px;
-      color: #e5b507;
-      visibility: hidden;
-      min-width: 70px;
-      font-size: 9px;
+    .title { font-weight: 600; font-size: 11px; color: #ccc; }
+    .window-controls { display: flex; gap: 6px; }
+    .control-btn { 
+      width: 12px; height: 12px; border-radius: 50%; border: none; cursor: pointer; -webkit-app-region: no-drag;
     }
-    .loading-indicator.active {
-      visibility: visible;
+    .control-btn.minimize { background: #ffbd2e; }
+    .control-btn.close { background: #ff5f56; }
+    .control-btn:hover { opacity: 0.8; }
+
+    /* 状态指示 - 仅图标 */
+    #status-icon {
+      width: 8px; height: 8px; border-radius: 50%; background: #bd7e7e; margin-left: 8px;
     }
-    .loading-indicator .spinner {
-      width: 10px;
-      height: 10px;
-      border: 2px solid rgba(229, 181, 7, 0.4);
-      border-top-color: #e5b507;
-      border-radius: 50%;
-      animation: spin 0.8s linear infinite;
-    }
-    @keyframes spin {
-      from { transform: rotate(0deg); }
-      to { transform: rotate(360deg); }
-    }
-    button { padding: 3px 8px; font-size: 11px; background: #3c3c3c; border: 1px solid #555; color: #ccc; border-radius: 2px; cursor: pointer; -webkit-app-region: no-drag; }
-   button:hover { background: #4a4a4a; }
-    .window-controls { display: flex; gap: 4px; }
-    .control-btn { padding: 2px 6px; font-size: 12px; background: transparent; border: none; color: #ccc; cursor: pointer; -webkit-app-region: no-drag; width: 20px; height: 20px; display: flex; align-items: center; justify-content: center; border-radius: 2px; }
-    .control-btn:hover { background: #3c3c3c; }
-    .control-btn.close:hover { background: #c42b1c; }
-    #graphPanel { flex: 1; min-height: 200px; overflow: auto; padding: 8px; }
-    .tree-node { padding-left: 12px; }
-    .tree-label { display: flex; align-items: center; gap: 4px; padding: 2px 4px; cursor: pointer; border-radius: 2px; }
-    .tree-label:hover { background: #2a2d2e; }
-    .tree-label.expanded > .toggle::before { content: '▼'; font-size: 8px; }
-    .tree-label.collapsed > .toggle::before { content: '▶'; font-size: 8px; }
-    .toggle { width: 10px; height: 12px; display: flex; align-items: center; justify-content: center; }
-    .tree-children { display: none; margin-left: 12px; border-left: 1px solid #3e3e3e; padding-left: 4px; }
-    .tree-children.visible { display: block; }
-    .node-tag { background: #007acc; color: white; padding: 1px 4px; border-radius: 2px; font-size: 10px; }
-    .node-id { color: #6a9955; font-size: 10px; }
-    .node-role { color: #dcdcaa; font-size: 10px; }
+    #status-icon.connected { background: #7ebd7e; box-shadow: 0 0 4px #7ebd7e; }
+
+    /* 主布局 */
+    #container { height: calc(100vh - 22px); display: flex; flex-direction: column; }
+    
+    /* 图谱区域 */
+    #graphPanel { flex: 1; min-height: 100px; overflow: hidden; background: #1e1e1e; position: relative; }
+    
+    /* 分割线 */
     #splitterHandle {
-      height: 6px;
-      background: #2c2c2c;
+      height: 4px;
+      background: #252526;
       border-top: 1px solid #3e3e3e;
       border-bottom: 1px solid #3e3e3e;
       cursor: row-resize;
     }
-    #bottom-panel { flex: none; height: 40vh; min-height: 240px; border-top: 1px solid #3e3e3e; display: flex; flex-direction: column; }
-    #panel-tabs { display: flex; border-bottom: 1px solid #3e3e3e; background: #252526; }
-    .tab { padding: 4px 10px; font-size: 11px; cursor: pointer; border-right: 1px solid #3e3e3e; }
-    .tab:hover { background: #2d2d2d; }
-    .tab.active { background: #1e1e1e; }
-    .tab-content { display: none; flex: 1; overflow: auto; padding: 6px; font-family: monospace; font-size: 10px; white-space: pre-wrap; }
-    .tab-content.active { display: block; }
-    #containerDetails.tab-content { overflow: auto; font-family: system-ui, sans-serif; font-size: 11px; padding: 10px; }
-    #containerDetailsContent { display: flex; flex-direction: column; gap: 10px; }
-    .log { padding: 2px 0; border-bottom: 1px solid #2a2a2a; }
-    .diag-report { color: #9cdcfe; }
-    .container-meta-grid {
-      display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 4px 12px;
-      margin-bottom: 8px;
-    }
-    .meta-item { display: flex; gap: 4px; font-size: 10px; line-height: 1.2; }
-    .meta-label { color: #888; min-width: 48px; text-transform: uppercase; font-size: 9px; }
-    .meta-value { color: #dcdcaa; flex: 1; word-break: break-all; }
     
-    /* 状态面板样式 */
-    #status-panel {
-      background: #1e1e1e;
-      border: 1px solid #2f2f2f;
-      border-radius: 4px;
-      padding: 8px;
-    }
-    
-    #status-panel .panel-header {
-      padding: 8px;
-      font-weight: 600;
-      font-size: 11px;
-      border-bottom: 1px solid #3e3e3e;
-      background: #2d2d2d;
-    }
-    
-    #status-panel .status-grid {
-      display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 6px;
-    }
-    
-    #status-panel .status-item {
-      display: flex;
-      flex-direction: column;
-      gap: 3px;
-      padding: 6px;
-      border: 1px solid #2a2a2a;
-      border-radius: 3px;
-      background: #1c1c1c;
-    }
-    
-    #status-panel .status-icon {
-      width: 12px;
-      height: 12px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 14px;
-    }
-    
-    #status-panel .status-info {
-      width: 100%;
-    }
-    
-    #status-panel .status-name {
-      font-size: 10px;
-      color: #d0d0d0;
-    }
-    
-    #status-panel .status-message {
-      font-size: 11px;
-      color: #ccc;
-      margin-bottom: 2px;
-    }
-    
-    #status-panel .status-time {
-      font-size: 9px;
-      color: #666;
-    }
-    
-    #status-panel .status-loading {
-      animation: pulse 1.5s ease-in-out infinite;
-    }
-    
-    @keyframes pulse {
-      0%, 100% { opacity: 1; }
-      50% { opacity: 0.5; }
-    }
-    
-    #status-panel .status-ok { color: #7ebd7e; }
-    #status-panel .status-error { color: #bd7e7e; }
-    #status-panel .status-unknown { color: #e5b507; }
-    
-    #status-panel .status-ok { font-weight: 600; }
-    #status-panel .status-error { font-weight: 600; }
-    #status-panel .status-unknown { font-weight: 600; }
-    
-    #status-panel .status-all-ok {
-      grid-column: 1 / -1;
-      text-align: center;
-      padding: 4px;
-      color: #7ebd7e;
-      font-weight: 600;
-      font-size: 12px;
+    /* 底部详情面板 */
+    #bottom-panel { 
+      flex: none; 
+      height: 240px; 
+      min-height: 150px; 
+      background: #252526; 
+      display: flex; 
+      flex-direction: column; 
     }
 
-    .operation-group {
-      border: 1px solid #2a2a2a;
-      border-radius: 4px;
-      background: #171717;
-    }
-
-    .operation-group + .operation-group {
-      margin-top: 8px;
-    }
-
-    .operation-group-header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 6px 10px;
-      border-bottom: 1px solid #2a2a2a;
-      font-size: 10px;
-      text-transform: uppercase;
-      letter-spacing: 0.3px;
-      color: #999;
-    }
-
-    .operation-group-body {
-      display: flex;
-      flex-direction: column;
-      gap: 6px;
-      padding: 8px;
-    }
-
-    .operation-card {
-      display: flex;
-      gap: 8px;
-      border: 1px solid #2c2c2c;
-      border-radius: 4px;
-      padding: 8px;
-      background: #1e1e1e;
-      cursor: grab;
-    }
-    .operation-card-hover {
-      border-color: #0e639c;
-      background: #1b2733;
-    }
-
-    .operation-card-main {
+    /* 详情内容容器 */
+    #containerDetailsContent {
       flex: 1;
-      min-width: 0;
-    }
-
-    .operation-card-title {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      font-size: 11px;
-    }
-
-    .operation-name {
-      color: #f5f5f5;
-      font-weight: 600;
-      max-width: 240px;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
-
-    .operation-type-badge {
-      font-size: 9px;
-      color: #ccc;
-      border: 1px solid #3e3e3e;
-      padding: 1px 6px;
-      border-radius: 2px;
-    }
-
-    .operation-disabled {
-      font-size: 9px;
-      color: #bd7e7e;
-      background: #3d0e0e;
-      padding: 1px 6px;
-      border-radius: 2px;
-    }
-
-    .operation-card-meta {
-      display: flex;
-      gap: 12px;
-      margin-top: 4px;
-      font-size: 9px;
-      color: #8f8f8f;
-    }
-
-    .operation-card-config {
-      background: #141414;
-      border: 1px solid #262626;
-      border-radius: 3px;
-      padding: 6px;
-      margin-top: 6px;
-      font-size: 9px;
-      color: #a9a9a9;
-      white-space: pre-wrap;
-      max-height: 120px;
-      overflow: auto;
-    }
-
-    .operation-card-actions {
-      display: flex;
-      flex-direction: column;
-      gap: 4px;
-      min-width: 70px;
-    }
-
-    .operation-card-actions button {
-      font-size: 9px;
-      padding: 2px 6px;
-    }
-
-    .operation-empty-row {
-      padding: 8px;
-      font-size: 10px;
-      color: #888;
-      text-align: center;
-    }
-
-    .operation-quick-add {
-      border-top: 1px dashed #3e3e3e;
-      padding-top: 8px;
-      font-size: 10px;
-      display: flex;
-      flex-direction: column;
-      gap: 6px;
-    }
-
-    .operation-quick-add-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      color: #ccc;
-      font-weight: 600;
-    }
-
-    .operation-quick-add-header .hint {
-      font-size: 9px;
-      padding: 2px 6px;
-      border-radius: 2px;
-    }
-    .operation-quick-add-header .hint.ok {
-      background: #0e3d0e;
-      color: #7ebd7e;
-    }
-    .operation-quick-add-header .hint.warn {
-      background: #3d2e0e;
-      color: #e5b507;
-    }
-
-    .operation-quick-add-body {
-      display: flex;
-      gap: 8px;
-      align-items: flex-end;
-      flex-wrap: wrap;
-    }
-    .operation-quick-add-body label {
-      display: flex;
-      flex-direction: column;
-      font-size: 9px;
-      color: #888;
-      gap: 2px;
-    }
-    .operation-quick-add-body select {
-      background: #1e1e1e;
-      border: 1px solid #3e3e3e;
-      color: #ccc;
-      border-radius: 2px;
-      padding: 2px 6px;
-      font-size: 10px;
-    }
-    .operation-quick-add-body button {
-      padding: 4px 12px;
-      font-size: 10px;
-    }
-    .operation-quick-add-footer {
-      font-size: 9px;
-      color: #777;
-      background: #1a1a1a;
-      border: 1px dashed #333;
-      border-radius: 2px;
-      padding: 4px 6px;
-    }
-
-    .operation-group {
-      border: 1px solid #2a2a2a;
-      border-radius: 4px;
-      margin-bottom: 8px;
-      background: #171717;
-    }
-
-    .operation-group-header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 6px 10px;
-      border-bottom: 1px solid #2a2a2a;
-      font-size: 10px;
-      text-transform: uppercase;
-      letter-spacing: 0.3px;
-      color: #999;
-    }
-
-    .operation-group-body {
-      display: flex;
-      flex-direction: column;
-      gap: 6px;
-      padding: 8px;
-    }
-
-    .operation-card {
-      display: flex;
-      gap: 8px;
-      border: 1px solid #2c2c2c;
-      border-radius: 4px;
-      padding: 8px;
-      background: #1d1d1d;
-    }
-
-    .operation-card-main {
-      flex: 1;
-      min-width: 0;
-    }
-
-    .operation-card-title {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      font-size: 11px;
-    }
-
-    .operation-name {
-      color: #f5f5f5;
-      font-weight: 600;
-      max-width: 220px;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
-
-    .operation-type-badge {
-      font-size: 9px;
-      color: #ccc;
-      border: 1px solid #3e3e3e;
-      padding: 1px 6px;
-      border-radius: 2px;
-    }
-
-    .operation-disabled {
-      font-size: 9px;
-      color: #bd7e7e;
-      background: #3d0e0e;
-      padding: 1px 6px;
-      border-radius: 2px;
-    }
-
-    .operation-card-meta {
-      display: flex;
-      gap: 12px;
-      margin-top: 2px;
-      font-size: 9px;
-      color: #8f8f8f;
-    }
-
-    .operation-card-config {
-      background: #141414;
-      border: 1px solid #262626;
-      border-radius: 3px;
-      padding: 6px;
-      margin-top: 6px;
-      font-size: 9px;
-      color: #a9a9a9;
-      white-space: pre-wrap;
-      max-height: 120px;
-      overflow: auto;
-    }
-
-    .operation-card-actions {
-      display: flex;
-      flex-direction: column;
-      gap: 4px;
-      min-width: 70px;
-    }
-
-    .operation-card-actions button {
-      font-size: 9px;
-      padding: 2px 6px;
-    }
-
-    .operation-empty-row {
-      padding: 8px;
-      font-size: 10px;
-      color: #888;
+      overflow-y: auto;
+      padding: 0;
     }
     
-    .container-details-section { margin-bottom: 8px; }
+    /* Loading 指示器 */
+    .loading-overlay {
+      position: absolute; top: 4px; right: 4px; 
+      background: rgba(0,0,0,0.7); color: #e5b507; 
+      font-size: 9px; padding: 2px 6px; border-radius: 2px;
+      display: none; pointer-events: none;
+    }
+    .loading-overlay.active { display: block; }
+
+    /* 捕获按钮 - 浮动在图谱右下角 */
+    #btnPicker {
+      position: absolute; bottom: 8px; right: 8px;
+      padding: 4px 8px; background: #0e639c; color: white;
+      border: none; border-radius: 2px; cursor: pointer;
+      font-size: 10px; opacity: 0.8;
+    }
+    #btnPicker:hover { opacity: 1; }
+    
+    /* 兼容旧 CSS 变量 */
+    :root {
+      --bg-primary: #1e1e1e;
+      --text-primary: #cccccc;
+      --border-color: #3e3e3e;
+    }
   </style>
 </head>
 <body>
   <div id="drag-area">
-    <span class="title">WebAuto</span>
-    <span id="versionLabel" style="margin-left:8px;font-size:10px;color:#888;"></span>
+    <div style="display:flex;align-items:center;">
+      <span class="title">WebAuto</span>
+      <div id="status-icon" title="Bus Status"></div>
+    </div>
     <div class="window-controls">
-      <button id="btnMinimize" class="control-btn minimize">−</button>
-      <button id="btnClose" class="control-btn close">×</button>
-    </div>
-    <div class="status">
-      <span id="status" class="bad">未连接</span>
+      <button id="btnMinimize" class="control-btn minimize" title="Minimize"></button>
+      <button id="btnClose" class="control-btn close" title="Close"></button>
     </div>
   </div>
+
   <div id="container">
-    <div id="top-bar">
-      <div id="health">未连接</div>
-      <div id="mode"></div>
-      <div id="loadingIndicator" class="loading-indicator">
-        <div class="spinner"></div>
-        <span class="loading-label">加载中...</span>
-      </div>
-        <button id="btnPicker" style="margin-left:8px;">捕获元素</button>
+    <div id="graphPanel">
+      <div id="loadingIndicator" class="loading-overlay">Loading...</div>
+      <button id="btnPicker">捕获元素</button>
     </div>
-    <div id="graphPanel"></div>
+    
     <div id="splitterHandle"></div>
+    
     <div id="bottom-panel">
-      <div id="panel-tabs">
-        <div class="tab active" data-tab="events">事件日志</div>
-        <div class="tab" data-tab="containerDetails">容器详情</div>
-        <div class="tab" data-tab="statusPanel">组件状态</div>
-      </div>
-      <div id="events" class="tab-content active"></div>
-      <div id="containerDetails" class="tab-content">
-        <div id="containerDetailsContent" style="font-family: system-ui, sans-serif; font-size: 11px; color: #ccc;">
-          <div style="margin-bottom: 4px; color:#777;">未选择任何容器节点</div>
-          <div style="font-size:10px;color:#555;">在左侧图中点击一个容器节点以查看详情和操作列表。</div>
-        </div>
-      </div>
-      <div id="statusPanel" class="tab-content">
-        <div id="status-panel">
-          <div class="panel-header">组件状态</div>
-          <div class="status-grid" id="statusGrid"></div>
+      <!-- 只有这一个 Tab 内容，移除 Tab 栏节省空间 -->
+      <div id="containerDetailsContent">
+        <!-- JS 动态渲染内容 -->
+        <div style="padding:10px; color:#777; text-align:center; font-size:10px;">
+          Select a container in the graph
         </div>
       </div>
     </div>
   </div>
-  <script>
-    // Tab switching
-    document.querySelectorAll('.tab').forEach(tab => {
-      tab.addEventListener('click', () => {
-        document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-        document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
-        tab.classList.add('active');
-        const tabId = tab.getAttribute('data-tab');
-        document.getElementById(tabId)?.classList.add('active');
-      });
-    });
-  </script>
+
   <script type="module" src="./index.js"></script>
 </body>
 </html>
-    /* 容器详情紧凑布局 */
-    .container-meta-grid {
-      display: grid;
-      grid-template-columns: repeat(2, 1fr);
-      gap: 0px 6px;
-      font-size: 10px;
-      line-height: 1.1;
-      margin-bottom: 4px;
-    }
-    .meta-item { 
-      display: flex; 
-      gap: 3px; 
-      align-items: baseline;
-      padding: 0;
-      line-height: 1.1;
-    }
-    .meta-label { 
-      color: #888; 
-      min-width: 42px; 
-      flex-shrink: 0; 
-      font-size: 9px;
-      line-height: 1.1;
-    }
-    .meta-value { 
-      color: #dcdcaa; 
-      flex: 1; 
-      word-break: break-all; 
-      font-size: 9px;
-      line-height: 1.1;
-    }

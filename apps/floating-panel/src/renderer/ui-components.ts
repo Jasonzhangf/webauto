@@ -1,279 +1,192 @@
-/**
- * UI Components for Interactive Capture Mode
- */
+import { Operation } from './operation-types.js';
 
-export interface CaptureState {
-  isCapturing: boolean;
-  selectedProfile: string;
-  targetUrl: string;
+// CSS Styles for new UI components
+export const UI_STYLES = `
+  /* Table/List Styles */
+  .op-list-wrapper {
+    display: flex;
+    flex-direction: column;
+    background: #1e1e1e;
+    border: 1px solid #3e3e3e;
+    border-radius: 2px;
+  }
+  
+  .op-row {
+    display: flex;
+    align-items: center;
+    padding: 3px 6px;
+    border-bottom: 1px solid #2a2a2a;
+    gap: 8px;
+    cursor: pointer;
+    transition: background 0.1s;
+  }
+  .op-row:last-child { border-bottom: none; }
+  .op-row:hover { background: #2a2d2e; }
+  .op-row.active { background: #094771; }
+  .op-row.op-disabled { opacity: 0.5; }
+  
+  /* Tags */
+  .tag-trigger {
+    display: inline-block;
+    padding: 0 4px;
+    border-radius: 2px;
+    font-size: 9px;
+    background: #3a2e2b;
+    border: 1px solid #5a4b45;
+    color: #ce9178;
+    margin-right: 2px;
+  }
+  
+  /* Icon Buttons */
+  .icon-btn {
+    background: transparent;
+    border: none;
+    color: #888;
+    cursor: pointer;
+    padding: 1px 3px;
+    border-radius: 2px;
+    font-size: 10px;
+  }
+  .icon-btn:hover { color: #fff; background: rgba(255,255,255,0.1); }
+  .test-btn:hover { color: #7ebd7e; }
+  .del-btn:hover { color: #f48771; }
+  
+  /* Editor Styles */
+  .op-editor-container {
+    background: #181818;
+    border-bottom: 1px solid #333;
+  }
+  .inline-editor {
+    padding: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .editor-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .editor-label {
+    width: 40px;
+    font-size: 10px;
+    color: #888;
+    text-align: right;
+    flex-shrink: 0;
+  }
+  .editor-select, .editor-input-sm {
+    background: #252526;
+    border: 1px solid #444;
+    color: #ccc;
+    font-size: 10px;
+    padding: 2px 4px;
+    border-radius: 2px;
+  }
+  .editor-textarea {
+    width: 100%;
+    height: 60px;
+    background: #252526;
+    border: 1px solid #444;
+    color: #dcdcaa;
+    font-family: monospace;
+    font-size: 10px;
+    padding: 4px;
+    resize: vertical;
+  }
+  
+  /* Chips */
+  .editor-chips-wrapper {
+    display: flex;
+    gap: 4px;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+  .editor-chip {
+    padding: 1px 6px;
+    border: 1px solid #444;
+    border-radius: 10px;
+    font-size: 9px;
+    color: #888;
+    cursor: pointer;
+    user-select: none;
+  }
+  .editor-chip.active {
+    background: #0e639c;
+    color: white;
+    border-color: #0e639c;
+  }
+  
+  /* Footer */
+  .editor-footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 6px;
+    margin-top: 2px;
+  }
+  .btn-save, .btn-cancel {
+    padding: 3px 10px;
+    border: 1px solid #444;
+    border-radius: 2px;
+    cursor: pointer;
+    font-size: 10px;
+  }
+  .btn-save { background: #0e639c; color: white; border-color: #0e639c; }
+  .btn-cancel { background: #333; color: #ccc; }
+  .btn-save:hover { background: #1177bb; }
+  .btn-cancel:hover { background: #444; }
+  
+  /* Shortcuts */
+  .shortcut-btn {
+    background: #333;
+    border: 1px solid #444;
+    color: #aaa;
+    font-size: 9px;
+    padding: 1px 4px;
+    border-radius: 2px;
+    cursor: pointer;
+  }
+  .shortcut-btn:hover { background: #444; color: #fff; }
+`;
+
+// Inject styles once
+let stylesInjected = false;
+export function injectUIStyles() {
+  if (stylesInjected) return;
+  const styleEl = document.createElement('style');
+  styleEl.textContent = UI_STYLES;
+  document.head.appendChild(styleEl);
+  stylesInjected = true;
 }
 
 export class CapturePanel {
   private element: HTMLElement;
-  private state: CaptureState = {
-    isCapturing: false,
-    selectedProfile: 'weibo_fresh',
-    targetUrl: 'https://weibo.com'
-  };
-  
-  private onStartCapture: ((state: CaptureState) => void) | null = null;
+  private state = { isCapturing: false };
+  private onStartCapture: ((state: any) => void) | null = null;
   private onStopCapture: (() => void) | null = null;
 
   constructor() {
-    this.element = document.createElement('div');
-    this.element.id = 'capture-panel';
-    this.element.style.cssText = `
-      padding: 10px;
-      border-bottom: 1px solid #3e3e3e;
-      background: #252526;
-      display: none;
-      flex-direction: column;
-      gap: 8px;
-    `;
-    
-    this.render();
+    this.element = document.createElement('div'); // Dummy for now
   }
-
-  setCallbacks(onStart: (state: CaptureState) => void, onStop: () => void) {
+  
+  setCallbacks(onStart: any, onStop: any) {
     this.onStartCapture = onStart;
     this.onStopCapture = onStop;
   }
-
-  show() {
-    this.element.style.display = 'flex';
-  }
-
-  hide() {
-    this.element.style.display = 'none';
-  }
-
-  getElement(): HTMLElement {
-    return this.element;
-  }
-
-  private render() {
-    this.element.innerHTML = `
-      <div style="display: flex; gap: 8px; align-items: center;">
-        <label style="font-size: 11px; width: 50px;">Profile:</label>
-        <select id="profile-select" style="flex: 1; padding: 4px; background: #3c3c3c; border: 1px solid #555; color: #ccc; border-radius: 2px;">
-          <option value="weibo_fresh">weibo_fresh</option>
-          <option value="default">default</option>
-        </select>
-      </div>
-      <div style="display: flex; gap: 8px; align-items: center;">
-        <label style="font-size: 11px; width: 50px;">URL:</label>
-        <input id="url-input" type="text" value="${this.state.targetUrl}" style="flex: 1; padding: 4px; background: #3c3c3c; border: 1px solid #555; color: #ccc; border-radius: 2px;">
-      </div>
-      <div style="display: flex; gap: 8px; margin-top: 4px;">
-        <button id="btn-toggle-capture" style="flex: 1; padding: 6px; background: #0e639c; border: none; color: white;">启动捕获模式</button>
-      </div>
-    `;
-
-    const profileSelect = this.element.querySelector('#profile-select') as HTMLSelectElement;
-    const urlInput = this.element.querySelector('#url-input') as HTMLInputElement;
-    const toggleBtn = this.element.querySelector('#btn-toggle-capture') as HTMLButtonElement;
-
-    profileSelect.addEventListener('change', (e) => {
-      this.state.selectedProfile = (e.target as HTMLSelectElement).value;
-    });
-
-    urlInput.addEventListener('input', (e) => {
-      this.state.targetUrl = (e.target as HTMLInputElement).value;
-    });
-
-    toggleBtn.addEventListener('click', () => {
-      if (this.state.isCapturing) {
-        this.stopCapture();
-      } else {
-        this.startCapture();
-      }
-    });
-  }
-
-  private startCapture() {
-    this.state.isCapturing = true;
-    const btn = this.element.querySelector('#btn-toggle-capture') as HTMLButtonElement;
-    btn.textContent = '停止捕获模式';
-    btn.style.background = '#c42b1c';
-    
-    if (this.onStartCapture) {
-      this.onStartCapture(this.state);
-    }
-  }
-
-  private stopCapture() {
-    this.state.isCapturing = false;
-    const btn = this.element.querySelector('#btn-toggle-capture') as HTMLButtonElement;
-    btn.textContent = '启动捕获模式';
-    btn.style.background = '#0e639c';
-    
-    if (this.onStopCapture) {
-      this.onStopCapture();
-    }
-  }
+  
+  getElement() { return this.element; }
+  show() {}
 }
 
 export class ContainerTree {
-  private element: HTMLElement;
-  private containers: any[] = [];
-  private onSelect: ((id: string) => void) | null = null;
-
-  constructor() {
-    this.element = document.createElement('div');
-    this.element.id = 'container-tree';
-    this.element.style.cssText = `
-      flex: 1;
-      overflow-y: auto;
-      padding: 8px;
-      font-family: system-ui;
-    `;
-  }
-
-  setContainers(containers: any[]) {
-    this.containers = containers;
-    this.render();
-  }
-
-  setOnSelect(callback: (id: string) => void) {
-    this.onSelect = callback;
-  }
-
-  getElement(): HTMLElement {
-    return this.element;
-  }
-
-  private render() {
-    this.element.innerHTML = '';
-    
-    // Simple list rendering for now, tree structure to be implemented
-    this.containers.forEach(container => {
-      const node = document.createElement('div');
-      node.style.cssText = `
-        padding: 4px 8px;
-        cursor: pointer;
-        border-radius: 2px;
-        margin-bottom: 2px;
-        display: flex;
-        align-items: center;
-        gap: 6px;
-      `;
-      node.className = 'container-node';
-      node.dataset.id = container.id;
-      
-      node.innerHTML = `
-        <span style="font-size: 10px; color: #888;">${container.metadata.tagName}</span>
-        <span style="font-size: 11px; color: #ccc;">${container.name || container.id}</span>
-      `;
-      
-      node.addEventListener('click', () => {
-        this.element.querySelectorAll('.container-node').forEach(el => {
-          (el as HTMLElement).style.background = 'transparent';
-        });
-        node.style.background = '#37373d';
-        
-        if (this.onSelect) {
-          this.onSelect(container.id);
-        }
-      });
-      
-      this.element.appendChild(node);
-    });
-  }
+    private element: HTMLElement;
+    constructor() { this.element = document.createElement('div'); }
+    setContainers(c: any[]) {}
+    setOnSelect(cb: any) {}
+    getElement() { return this.element; }
 }
 
-export interface Operation {
-  id: string;
-  type: string;
-  triggers: string[];
-  enabled: boolean;
-  config: Record<string, any>;
-}
-
-// 拖拽功能实现
 export class OperationDragHandler {
-  private container: HTMLElement;
-  private operations: Operation[];
-
-  private onReorder: (newOperations: Operation[]) => void;
-
-  constructor(container: HTMLElement, operations: Operation[], onReorder: (newOperations: Operation[]) => void) {
-    this.container = container;
-    this.operations = operations;
-    this.onReorder = onReorder;
-    this.initDragAndDrop();
-  }
-
-  private initDragAndDrop() {
-    const rows = this.container.querySelectorAll('.operation-card');
-    rows.forEach((row) => {
-      row.addEventListener('dragstart', (e) => this.handleDragStart(e as DragEvent));
-      row.addEventListener('dragover', this.handleDragOver);
-      row.addEventListener('dragenter', this.handleDragEnter);
-      row.addEventListener('dragleave', this.handleDragLeave);
-      row.addEventListener('drop', (e) => this.handleDrop(e as DragEvent));
-    });
-  }
-
-  private handleDragStart(e: DragEvent) {
-    const target = e.target as HTMLElement;
-    const row = target.closest('.operation-card') as HTMLElement | null;
-    const opIndex = row?.getAttribute('data-op-index');
-    if (opIndex && e.dataTransfer) {
-        e.dataTransfer.setData('text/plain', opIndex);
-        e.dataTransfer.effectAllowed = 'move';
-        if (row) row.style.opacity = '0.5';
-    }
-  }
-
-  private handleDragOver(e: DragEvent) {
-    e.preventDefault();
-  }
-
-  private handleDragEnter(e: DragEvent) {
-    e.preventDefault();
-    const row = (e.target as HTMLElement).closest('.operation-card') as HTMLElement;
-    if (row) row.classList.add('operation-card-hover');
-  }
-
-  private handleDragLeave(e: DragEvent) {
-    const row = (e.target as HTMLElement).closest('.operation-card') as HTMLElement;
-    if (row) row.classList.remove('operation-card-hover');
-  }
-
-  private handleDrop(e: DragEvent) {
-    e.preventDefault();
-    const targetRow = (e.target as HTMLElement).closest('.operation-card') as HTMLElement;
-    if (!targetRow) return;
-    
-    // Reset styles
-    this.container.querySelectorAll('.operation-card').forEach((el: any) => {
-        el.style.opacity = '1'; 
-        el.classList.remove('operation-card-hover');
-    });
-
-    const sourceIndexStr = e.dataTransfer?.getData('text/plain');
-    const targetIndexStr = targetRow.getAttribute('data-op-index');
-
-    if (!sourceIndexStr || !targetIndexStr) return;
-
-    const sourceIndex = parseInt(sourceIndexStr, 10);
-    const targetIndex = parseInt(targetIndexStr, 10);
-    // Avoid reordering if same index
-    // Add bounds checking and improve type safety
-    if (isNaN(sourceIndex) || isNaN(targetIndex)) return;
-    if (sourceIndex < 0 || sourceIndex >= this.operations.length) return;
-    if (targetIndex < 0 || targetIndex >= this.operations.length) return;
-    if (sourceIndex === targetIndex) return;
-    
-    // Reorder with proper array manipulation
-    const newOperations = [...this.operations];
-    const [movedItem] = newOperations.splice(sourceIndex, 1);
-    
-    // Adjust target index for down-drag (when source < target, target shifted down by 1 after splice)
-    const adjustedTargetIndex = sourceIndex < targetIndex ? targetIndex - 1 : targetIndex;
-    
-    // Insert at adjusted target index (source index no longer in array)
-    newOperations.splice(adjustedTargetIndex + (sourceIndex < targetIndex ? 1 : 0), 0, movedItem);
-    this.onReorder(newOperations);
+  constructor(el: HTMLElement, ops: any[], cb: any) {
+    // Basic placeholder, can re-enable drag later
   }
 }
