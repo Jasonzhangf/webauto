@@ -132,7 +132,6 @@ function saveEditor(index: number, operations: any[], callbacks: InteractionCall
   const editor = document.getElementById(`opEditor-${index}`);
   if (!editor) return;
 
-  const typeSelect = editor.querySelector(`#edit-type-${index}`) as HTMLSelectElement;
   const configTextarea = editor.querySelector(`#edit-config-${index}`) as HTMLTextAreaElement;
   const customTriggerInput = editor.querySelector(`#edit-custom-trigger-${index}`) as HTMLInputElement;
   const valueInput = editor.querySelector(`#edit-value-${index}`) as HTMLInputElement;
@@ -161,7 +160,7 @@ function saveEditor(index: number, operations: any[], callbacks: InteractionCall
 
   // Update Op
   const op = operations[index];
-  op.type = typeSelect.value;
+  // Type is fixed, not updated from UI
   op.triggers = triggers;
   op.config = newConfig;
 

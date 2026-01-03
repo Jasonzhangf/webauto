@@ -117,15 +117,18 @@ export function renderOperationEditor(op: any, index: number, isRoot: boolean): 
     return `<span class="editor-chip ${active}" data-action="toggle-trigger" data-val="${evt}">${evt}</span>`;
   }).join('');
 
+  // Fixed type display
+  const typeLabel = OPERATION_TYPES.find(t => t.value === op.type)?.label || op.type;
+
   return `
     <div class="inline-editor" id="opEditor-${index}">
       
       <!-- Row 1: Type & Triggers -->
       <div class="editor-row">
         <span class="editor-label">Type</span>
-        <select class="editor-select" id="edit-type-${index}" style="width:100px;">
-          ${OPERATION_TYPES.map(t => `<option value="${t.value}" ${op.type === t.value ? 'selected' : ''}>${t.label}</option>`).join('')}
-        </select>
+        <span style="font-size:10px;color:#dcdcaa;padding:2px 4px;background:#333;border-radius:2px;min-width:60px;">
+          ${typeLabel}
+        </span>
         
         <span class="editor-label" style="margin-left:8px;">Triggers</span>
         <div class="editor-chips-wrapper">
