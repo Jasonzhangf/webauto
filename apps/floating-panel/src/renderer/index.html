@@ -185,6 +185,8 @@
     <div id="top-bar">
       <div id="health">未连接</div>
       <div id="mode"></div>
+        <button id="btnCapture" style="font-size:10px;padding:2px 6px;margin-left:4px;">捕获面板</button>
+        <button id="btnTree" style="font-size:10px;padding:2px 6px;margin-left:4px;">容器树</button>
       <div id="loadingIndicator" class="loading-indicator">
         <div class="spinner"></div>
         <span class="loading-label">加载中...</span>
@@ -193,7 +195,11 @@
       <button id="btnClear">清除日志</button>
       <button id="btnDiag">诊断</button>
       <button id="btnAutoDiag">自动诊断</button>
-      <button id="btnPicker">捕获元素</button>
+      <button id="btnCapture" style="font-size:10px;padding:2px 6px;margin-left:4px;">捕获面板</button>
+        <button id="btnTree" style="font-size:10px;padding:2px 6px;margin-left:4px;">容器树</button>
+        <div class="tab" data-tab="capture">捕获面板</div>
+        <div class="tab" data-tab="containerTree">容器树</div>
+        <button id="btnPicker" style="margin-left:8px;">捕获元素</button>
     </div>
     <div id="graphPanel"></div>
     <div id="bottom-panel">
@@ -202,6 +208,8 @@
         <div class="tab" data-tab="containerDetails">容器详情</div>
       </div>
       <div id="events" class="tab-content active"></div>
+      <div id="capture" class="tab-content"></div>
+      <div id="containerTree" class="tab-content"></div>
       <div id="containerDetails" class="tab-content">
         <div id="containerDetailsContent" style="font-family: system-ui, sans-serif; font-size: 11px; color: #ccc;">
           <div style="margin-bottom: 4px; color:#777;">未选择任何容器节点</div>

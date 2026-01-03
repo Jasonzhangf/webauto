@@ -1,5 +1,5 @@
-// @ts-nocheck
-// NOTE: Temporarily disable TypeScript checks during refactoring integration
+let containerTree: any = null;// @ts-nocheck
+let capturePanel: any = null;// NOTE: Temporarily disable TypeScript checks during refactoring integration
 // Will be removed after complete TypeScript migration
 
 import { renderOperationsList, renderAddOperationPanel, buildDefaultOperations } from './operation-ui.mts';
@@ -13,6 +13,8 @@ import {
 } from './graph.mjs';
 import { logger } from './logger.mts';
 import { FLOATING_PANEL_VERSION } from './version.mts';
+import { CapturePanel, ContainerTree } from './ui-components.js';
+
 
 // UI logging helper
 const log = (...args: any[]) => {
@@ -524,6 +526,96 @@ function showOperationResult(operation: any, success: boolean, data: any) {
     }, 3000);
   }
 }
+
+
+
+// Initialize UI Components
+import { CapturePanel } from './ui-components.js';
+import { ContainerTree } from './ui-components.js';
+
+
+
+// Initialize components
+document.addEventListener('DOMContentLoaded', () => {
+  // Initialize CapturePanel
+  capturePanel = new CapturePanel();
+  capturePanel.setCallbacks(
+    (state) => {
+      console.log('[capture-panel] start capture', state);
+      // TODO: Start DOM capture mode
+    },
+    () => {
+      console.log('[capture-panel] stop capture');
+      // TODO: Stop DOM capture mode
+    }
+  );
+  
+  // Initialize ContainerTree
+  containerTree = new ContainerTree();
+  containerTree.setContainers([]);
+  containerTree.setOnSelect((id) => {
+    console.log('[container-tree] selected', id);
+  });
+  
+  // Add elements to DOM
+  const capturePanelContainer = document.getElementById('capturePanel');
+  const containerTreeContainer = document.getElementById('containerTree');
+  const statusPanel = document.getElementById('statusPanel');
+  
+  if (capturePanelContainer) {
+    capturePanelContainer.appendChild(capturePanel.getElement());
+    capturePanel.show();
+  }
+  
+  if (containerTreeContainer) {
+    containerTreeContainer.appendChild(containerTree.getElement());
+  }
+  
+  if (statusPanel) {
+    // Remove statusPanel and replace with component grid
+    statusPanel.style.display = 'none';
+  }
+  
+  console.log('[components] initialized');
+});
+
+
+
+// Initialize UI components when DOM is ready
+document.addEventListener('DOMContentLoaded', () => {
+  // Capture Panel
+  const captureEl = document.getElementById('capture');
+  if (captureEl) {
+    capturePanel = new CapturePanel();
+    capturePanel.setCallbacks(
+      (state) => {
+        console.log('[capture] started', state);
+        if ((window as any).api?.invokeAction) {
+          (window as any).api.invokeAction('browser:capture-mode', { enabled: true, ...state });
+        }
+      },
+      () => {
+        console.log('[capture] stopped');
+        if ((window as any).api?.invokeAction) {
+          (window as any).api.invokeAction('browser:capture-mode', { enabled: false });
+        }
+      }
+    );
+    captureEl.appendChild(capturePanel.getElement());
+    capturePanel.show();
+  }
+
+  // Container Tree
+  const treeEl = document.getElementById('containerTree');
+  if (treeEl) {
+    containerTree = new ContainerTree();
+    containerTree.setOnSelect((id) => {
+      console.log('[tree] selected', id);
+      // Trigger selection in graph if needed
+    });
+    treeEl.appendChild(containerTree.getElement());
+  }
+});
 
 
 if (dragArea) {
