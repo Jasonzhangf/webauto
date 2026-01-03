@@ -204,7 +204,7 @@ export class OperationDragHandler {
   }
 
   private initDragAndDrop() {
-    const rows = this.container.querySelectorAll('.operation-row');
+    const rows = this.container.querySelectorAll('.operation-card');
     rows.forEach((row) => {
       row.addEventListener('dragstart', (e) => this.handleDragStart(e as DragEvent));
       row.addEventListener('dragover', this.handleDragOver);
@@ -216,11 +216,12 @@ export class OperationDragHandler {
 
   private handleDragStart(e: DragEvent) {
     const target = e.target as HTMLElement;
-    const opIndex = target.getAttribute('data-op-index');
+    const row = target.closest('.operation-card') as HTMLElement | null;
+    const opIndex = row?.getAttribute('data-op-index');
     if (opIndex && e.dataTransfer) {
         e.dataTransfer.setData('text/plain', opIndex);
         e.dataTransfer.effectAllowed = 'move';
-        target.style.opacity = '0.5';
+        if (row) row.style.opacity = '0.5';
     }
   }
 
@@ -230,24 +231,24 @@ export class OperationDragHandler {
 
   private handleDragEnter(e: DragEvent) {
     e.preventDefault();
-    const row = (e.target as HTMLElement).closest('.operation-row') as HTMLElement;
-    if (row) row.style.background = '#333';
+    const row = (e.target as HTMLElement).closest('.operation-card') as HTMLElement;
+    if (row) row.classList.add('operation-card-hover');
   }
 
   private handleDragLeave(e: DragEvent) {
-    const row = (e.target as HTMLElement).closest('.operation-row') as HTMLElement;
-    if (row) row.style.background = '#222';
+    const row = (e.target as HTMLElement).closest('.operation-card') as HTMLElement;
+    if (row) row.classList.remove('operation-card-hover');
   }
 
   private handleDrop(e: DragEvent) {
     e.preventDefault();
-    const targetRow = (e.target as HTMLElement).closest('.operation-row') as HTMLElement;
+    const targetRow = (e.target as HTMLElement).closest('.operation-card') as HTMLElement;
     if (!targetRow) return;
     
     // Reset styles
-    this.container.querySelectorAll('.operation-row').forEach((el: any) => {
+    this.container.querySelectorAll('.operation-card').forEach((el: any) => {
         el.style.opacity = '1'; 
-        el.style.background = '#222'; 
+        el.classList.remove('operation-card-hover');
     });
 
     const sourceIndexStr = e.dataTransfer?.getData('text/plain');

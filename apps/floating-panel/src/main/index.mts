@@ -1,9 +1,9 @@
-import { app, BrowserWindow, ipcMain, screen } from 'electron';
+import electron from 'electron';
+const { app, BrowserWindow, ipcMain, screen } = electron;
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import WebSocket from 'ws';
-import windowStateKeeper from 'electron-window-state';
 import { getErrorHandler } from '../../../../modules/core/src/error-handler.mjs';
 
 // 使用 process.cwd() 获取项目根目录
@@ -94,28 +94,16 @@ function createWindow() {
   const { width, height } = screen.getPrimaryDisplay().workAreaSize;
   const defaultWidth = 320;
   const defaultHeight = 480;
-  const fallbackX = Math.max(0, Math.round((width - defaultWidth) / 2));
-  const fallbackY = Math.max(0, Math.round((height - defaultHeight) / 2));
+  const x = Math.max(0, Math.round((width - defaultWidth) / 2));
+  const y = Math.max(0, Math.round((height - defaultHeight) / 2));
 
-  const mainWindowState = windowStateKeeper({
-    defaultWidth,
-    defaultHeight
-  });
-
-  const windowBounds = {
-    width: mainWindowState.width,
-    height: mainWindowState.height,
-    x: typeof mainWindowState.x === 'number' ? mainWindowState.x : fallbackX,
-    y: typeof mainWindowState.y === 'number' ? mainWindowState.y : fallbackY
-  };
-
-  log(`Window geometry: ${windowBounds.width}x${windowBounds.height} at (${windowBounds.x}, ${windowBounds.y})`);
+  log(`Window geometry: ${defaultWidth}x${defaultHeight} at (${x}, ${y})`);
   
   win = new BrowserWindow({
-    width: windowBounds.width,
-    height: windowBounds.height,
-    x: windowBounds.x,
-    y: windowBounds.y,
+    width: defaultWidth,
+    height: defaultHeight,
+    x: x,
+    y: y,
     frame: false,
     alwaysOnTop: false,
     skipTaskbar: false,
@@ -125,14 +113,12 @@ function createWindow() {
     show: true,
     webPreferences: {
       preload: path.join(MAIN_DIR, 'preload.mjs'),
-      contextIsolation: true,
-      nodeIntegration: false,
+      contextIsolation: false,
+      nodeIntegration: true,
       sandbox: false, // 保持 sandbox: false 以允许 Node.js 集成和 ESM preload (参考文档)
       webSecurity: false
     }
   });
-
-  mainWindowState.manage(win);
   
   const htmlPath = path.join(DIST_DIR, 'renderer', 'index.html');
   log(`Loading HTML from: ${htmlPath}`);
@@ -154,10 +140,43 @@ function createWindow() {
     log(`Failed to load HTML: ${err}`);
   });
   
+
+  // 监听渲染进程控制台输出
+  win.webContents.on('console-message', (event, level, message, line, sourceId) => {
+    const levelStr = ['verbose', 'info', 'warning', 'error'][level] || 'log';
+    log(`[renderer-${levelStr}] ${message} (${sourceId}:${line})`);
+  });
+
+  // 监听加载失败事件
+  win.webContents.on('did-fail-load', (event, errorCode, errorDescription, validatedURL) => {
+    log(`[did-fail-load] ${errorCode}: ${errorDescription} (${validatedURL})`);
+  });
+
+  // 监听崩溃事件
+  win.webContents.on('render-process-gone', (event, details) => {
+    log(`[render-process-gone] ${details.reason} (exitCode: ${details.exitCode})`);
+  });
   if (DEVTOOLS) {
     win.webContents.openDevTools({ mode: 'detach' });
     log('DevTools opened');
   }
+
+  win.webContents.on('did-finish-load', async () => {
+    log('did-finish-load');
+    try {
+      const info = await win.webContents.executeJavaScript(
+        `({
+          title: document.title,
+          bg: getComputedStyle(document.body).backgroundColor,
+          hasContainer: !!document.getElementById('container')
+        })`,
+        true,
+      );
+      log(`[renderer-state] ${JSON.stringify(info)}`);
+    } catch (err) {
+      log(`[renderer-state] error: ${err}`);
+    }
+  });
   
   win.on('ready-to-show', () => {
     log('Window ready-to-show event');

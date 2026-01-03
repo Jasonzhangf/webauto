@@ -1,6 +1,6 @@
 /**
  * Operation UI 渲染辅助函数
- * 负责生成 operation 列表的 HTML
+ * 负责生成 operation 列表的 HTML（紧凑布局）
  */
 
 export interface OperationRenderOptions {
@@ -75,13 +75,16 @@ export function renderOperationsList(options: OperationRenderOptions): { html: s
   const messageOpsHtml = triggerOrder
     .map((trigger) => {
       const rows = grouped.get(trigger) || [];
-      const rowsHtml = rows
-        .map(({ op, index }) => renderOperationRow(op, index))
-        .join('');
-      return `<div style="display:flex;align-items:flex-start;padding:4px 0;border-bottom:1px solid #2a2a2a;">
-        <div style="width:96px;font-size:10px;color:#9cdcfe;padding-top:2px;">${renderTriggerLabel(trigger)}</div>
-        <div style="flex:1;min-width:0;">${rowsHtml || '<div style="font-size:10px;color:#666;">当前事件下暂无操作</div>'}</div>
-      </div>`;
+      const rowsHtml = rows.length
+        ? rows.map(({ op, index }) => renderOperationRow(op, index)).join('')
+        : `<div class="operation-empty-row">当前事件下暂无操作</div>`;
+      return `<section class="operation-group">
+        <header class="operation-group-header">
+          <span>${renderTriggerLabel(trigger)}</span>
+          <span>${rows.length} 个操作</span>
+        </header>
+        <div class="operation-group-body">${rowsHtml}</div>
+      </section>`;
     })
     .join('');
 
@@ -93,12 +96,12 @@ export function renderOperationsList(options: OperationRenderOptions): { html: s
 
 function renderEmptyState(): string {
   return `
-    <div style="padding:6px;border:1px dashed #3e3e3e;border-radius:4px;background:#222;">
-      <div style="font-size:11px;color:#ccc;font-weight:600;">暂无 Operation</div>
-      <div style="font-size:10px;color:#777;margin-top:2px;">该容器尚未配置任何操作，可从零开始创建。</div>
-      <div style="margin-top:6px;display:flex;gap:6px;align-items:center;">
-        <button id="btnSeedOps" style="font-size:10px;padding:2px 6px;">生成默认 Operation</button>
-        <span style="font-size:9px;color:#666;">基于 selector / DOM 路径生成</span>
+    <div style="padding:4px;border:1px dashed #3e3e3e;border-radius:3px;background:#222;">
+      <div style="font-size:10px;color:#ccc;font-weight:600;">暂无 Operation</div>
+      <div style="font-size:9px;color:#777;margin-top:2px;">该容器尚未配置任何操作，可从零开始创建。</div>
+      <div style="margin-top:4px;display:flex;gap:4px;align-items:center;">
+        <button id="btnSeedOps" style="font-size:9px;padding:2px 6px;">生成默认 Operation</button>
+        <span style="font-size:8px;color:#666;">基于 selector / DOM 路径生成</span>
       </div>
     </div>
   `;
@@ -106,73 +109,81 @@ function renderEmptyState(): string {
 
 function renderOperationRow(op: any, index: number): string {
   const key = op.id || `${op.type || 'unknown'}`;
-  const configPreview = op.config ? JSON.stringify(op.config).slice(0, 40) : '{}';
   const enabled = op.enabled !== false;
   const opIcon =
     op.type === 'highlight' ? '💡'
       : op.type === 'scroll' ? '📜'
         : op.type === 'extract' ? '📋'
           : '⚙️';
+  const triggers = Array.isArray(op.triggers) && op.triggers.length ? op.triggers.join(', ') : 'appear';
+  const configPreview = formatConfigPreview(op.config);
 
-  return `<div class="operation-row" draggable="true" data-op-index="${index}" style="display:flex;align-items:flex-start;justify-content:space-between;padding:4px;margin-bottom:4px;background:#222;border-radius:3px;border:1px solid #333;cursor:grab;">
-    <div style="flex:1;min-width:0;">
-      <div style="display:flex;align-items:center;gap:4px;margin-bottom:2px;">
-        <span style="font-size:12px;">${opIcon}</span>
-        <span style="color:${enabled ? '#ffd700' : '#777'};font-size:11px;font-weight:600;">${key}</span>
-        <span style="font-size:9px;color:#aaa;background:#333;padding:0 4px;border-radius:2px;">${op.type || 'unknown'}</span>
-        ${!enabled ? '<span style="font-size:9px;color:#bd7e7e;background:#3d0e0e;padding:0 4px;border-radius:2px;">已禁用</span>' : ''}
+  return `<div class="operation-card" draggable="true" data-op-index="${index}">
+    <div class="operation-card-main">
+      <div class="operation-card-title">
+        <span>${opIcon}</span>
+        <span class="operation-name" title="${key}">${key}</span>
+        <span class="operation-type-badge">${op.type || 'unknown'}</span>
+        ${!enabled ? '<span class="operation-disabled">已禁用</span>' : ''}
       </div>
-      <div style="font-size:9px;color:#777;font-family:Consolas,monospace;margin-left:18px;">${configPreview}</div>
+      <div class="operation-card-meta">
+        <span>触发：${triggers}</span>
+        <span>ID：${op.id || '未定义'}</span>
+      </div>
+      <pre class="operation-card-config">${configPreview}</pre>
     </div>
-    <div style="display:flex;gap:4px;align-items:center;">
-      <button data-op-index="${index}" data-op-action="toggle" style="font-size:9px;padding:2px 5px;background:#2a2a2a;border:1px solid #444;color:${enabled ? '#e5b507' : '#7ebd7e'};border-radius:2px;">${enabled ? '禁用' : '启用'}</button>
-      <button data-op-index="${index}" data-op-action="delete" style="font-size:9px;padding:2px 5px;background:#2a2a2a;border:1px solid #444;color:#bd7e7e;border-radius:2px;">删除</button>
-      <button data-op-index="${index}" data-op-action="edit" style="font-size:9px;padding:2px 5px;background:#2a2a2a;border:1px solid #444;color:#ccc;border-radius:2px;">编辑</button>
-      <button data-op-index="${index}" data-op-action="rehearse" style="font-size:9px;padding:2px 5px;background:#2a2a2a;border:1px solid #444;color:#ccc;border-radius:2px;">演练</button>
+    <div class="operation-card-actions">
+      <button data-op-index="${index}" data-op-action="toggle">${enabled ? '禁用' : '启用'}</button>
+      <button data-op-index="${index}" data-op-action="edit">编辑</button>
+      <button data-op-index="${index}" data-op-action="rehearse">演练</button>
+      <button data-op-index="${index}" data-op-action="delete">删除</button>
     </div>
   </div>`;
 }
 
 function renderTriggerLabel(trigger: string): string {
-  if (trigger === 'appear') return 'appear（出现）';
-  if (trigger === 'click') return 'click（点击）';
-  if (trigger === 'manual:rehearsal') return 'manual:rehearsal（演练）';
+  if (trigger === 'appear') return 'appear';
+  if (trigger === 'click') return 'click';
+  if (trigger === 'manual:rehearsal') return 'rehearsal';
   return trigger;
 }
 
 export function renderAddOperationPanel(primarySelector: string | null, domPath: string | null): string {
   return `
-    <div style="margin-top:8px;padding-top:6px;border-top:1px dashed #3e3e3e;">
-      <div style="font-size:11px;color:#ccc;font-weight:600;display:flex;justify-content:space-between;align-items:center;">
+    <div class="operation-quick-add">
+      <div class="operation-quick-add-header">
         <span>快速添加 Operation</span>
         ${primarySelector
-      ? '<span style="font-size:9px;color:#7ebd7e;background:#0e3d0e;padding:1px 4px;border-radius:2px;">✓ 有主 selector</span>'
-      : '<span style="font-size:9px;color:#e5b507;background:#3d2e0e;padding:1px 4px;border-radius:2px;">⚠ 无 selector</span>'
+      ? '<span class="hint ok">✓ 已定位主 selector</span>'
+      : '<span class="hint warn">⚠ 未提供 selector，将使用 DOM Path</span>'
     }
       </div>
-      ${!primarySelector && typeof domPath === 'string' && domPath.trim()
-      ? '<div style="margin-top:2px;font-size:9px;color:#e5b507;">将使用 DOM 路径作为配置目标</div>'
-      : ''
-    }
-    </div>
-    <div style="margin-top:2px;display:flex;gap:4px;align-items:center;font-size:10px;">
-      <div style="font-size:9px;color:#777;min-width:48px;">触发事件</div>
-      <select id="opTriggerSelect" style="flex:1;font-size:10px;padding:2px 4px;background:#1e1e1e;color:#ccc;border:1px solid #3e3e3e;border-radius:2px;">
-        <option value="appear">appear（出现）</option>
-        <option value="click">click（点击）</option>
-        <option value="manual:rehearsal">manual:rehearsal（演练）</option>
-      </select>
-      <div style="font-size:9px;color:#777;min-width:36px;">类型</div>
-      <select id="opTypeSelect" style="flex:1;font-size:10px;padding:2px 4px;background:#1e1e1e;color:#ccc;border:1px solid #3e3e3e;border-radius:2px;">
-        <option value="highlight">highlight</option>
-        <option value="scroll">scroll</option>
-        <option value="extract">extract</option>
-      </select>
-      <button id="btnAddOp" style="font-size:10px;padding:2px 8px;">添加</button>
-    </div>
-    <div style="margin-top:2px;padding:4px;background:#222;border-radius:2px;font-size:9px;color:#888;">
-      <span style="color:#888;">💡 提示：</span>
-      <span style="color:#aaa;">highlight 用于高亮显示，scroll 自动滚动到视图，extract 提取内容数据。新增操作后可在下方 JSON 中微调配置。</span>
+      <div class="operation-quick-add-body">
+        <label>触发
+          <select id="opTriggerSelect">
+            <option value="appear">appear</option>
+            <option value="click">click</option>
+            <option value="manual:rehearsal">rehearsal</option>
+          </select>
+        </label>
+        <label>类型
+          <select id="opTypeSelect">
+            <option value="highlight">highlight</option>
+            <option value="scroll">scroll</option>
+            <option value="extract">extract</option>
+          </select>
+        </label>
+        <button id="btnAddOp">添加</button>
+      </div>
+      <div class="operation-quick-add-footer">
+        highlight 用于高亮显示，scroll 自动滚动到视图，extract 提取内容数据。新增操作后可在上方列表中调整。
+      </div>
     </div>
   `;
+}
+
+function formatConfigPreview(config: any): string {
+  if (!config) return '{}';
+  const json = JSON.stringify(config, null, 2);
+  return json.length > 240 ? `${json.slice(0, 240)}…` : json;
 }

@@ -70,46 +70,23 @@ let currentContainer: any | null = null;
 
 const containerDetailsEl = document.getElementById('containerDetailsContent');
 const containerDetailsTab = document.querySelector('.tab[data-tab="containerDetails"]') as HTMLElement | null;
+const splitterHandle = document.getElementById('splitterHandle');
+const bottomPanel = document.getElementById('bottom-panel');
+const graphPanel = document.getElementById('graphPanel');
+let isResizing = false;
+let startY = 0;
+let startBottomHeight = 0;
 
 function renderContainerDetails(container: any | null) {
   if (!containerDetailsEl) return;
 
   if (!container) {
-    containerDetailsEl.innerHTML =         `
+    containerDetailsEl.innerHTML = `
     <div style="margin-bottom:6px;">
       <div style="font-size:12px;color:#fff;margin-bottom:2px;">
-        ${name} <span style="color:#666;font-size:10px;">(${id})</span>
-        ${isRoot ? '<span style="color:#fbbc05;font-size:10px;margin-left:6px;">[根容器]</span>' : ''}
+        未选择容器
       </div>
-      <div style="font-size:10px;color:#999;margin-bottom:2px;">
-        类型: <span style="color:#dcdcaa;">${type}</span>
-        ${container.metadata?.isVirtual ? '<span style="margin-left:6px;color:#fbbc05;">[虚拟容器]</span>' : ''}
-      </div>
-      <div style="font-size:10px;color:#999;">
-        能力: ${
-          capabilities.length
-            ? capabilities.map((c: string) => `<span style=\"margin-right:4px;color:#7ebd7e;\">${c}</span>`).join('')
-            : '<span style="color:#555;">无</span>'
-        }
-      </div>
-      <div style="margin-top:4px;font-size:10px;color:#999;display:flex;align-items:center;gap:4px;">
-        <span>别名/显示名:</span>
-        <input id="containerAliasInput" type="text" style="flex:1;min-width:0;font-size:10px;padding:2px 4px;border-radius:2px;border:1px solid #3e3e3e;background:#1e1e1e;color:#ccc;" />
-        <button id="btnSaveAlias" style="font-size:10px;padding:2px 6px;">保存名称</button>
-      </div>
-    </div>
-    <div style="margin-bottom:6px;font-size:10px;color:#999;">
-      <div>匹配 DOM 路径: <span style="color:#9cdcfe;">${domPath || '未记录'}</span></div>
-      <div>匹配 selector: <span style="color:#9cdcfe;">${selector || '未记录'}</span></div>
-      <div>匹配计数: <span style="color:#9cdcfe;">${matchCount}</span></div>
-    </div>
-    <div style="margin-bottom:4px;font-size:11px;color:#ccc;font-weight:600;">Operation 列表（按触发事件分组）</div>
-    <div id="containerOperationsList" style="margin-bottom:8px;">
-      ${operationsHtml}
-    </div>
-    ${renderAddOperationPanel(selector, domPath)}
-    <div style="margin-top:6px;font-size:10px;color:#666;">
-      提示：当前 Operation 编辑会直接写入外置容器库（~/.webauto/container-lib）；演练按钮会在浏览器中实际执行操作。
+      <div style="font-size:10px;color:#999;margin-bottom:2px;">请在左侧图中选择一个容器节点。</div>
     </div>
       `;
 
@@ -145,49 +122,46 @@ function renderContainerDetails(container: any | null) {
     hasRawOperations: operations.length > 0
   });
 
-
-
   containerDetailsEl.innerHTML = `
-    <div style="margin-bottom:6px;">
-      <div style="font-size:12px;color:#fff;margin-bottom:2px;">
-        ${name} <span style="color:#666;font-size:10px;">(${id})</span>
+    <div style="margin-bottom:3px;">
+      <div style="font-size:11px;color:#fff;margin-bottom:3px;">
+        ${name} <span style="color:#666;font-size:9px;">(${id})</span>
       </div>
-      <div style="font-size:10px;color:#999;margin-bottom:2px;">
-        类型: <span style="color:#dcdcaa;">${type}</span>
-        ${container.metadata?.isVirtual ? '<span style="margin-left:6px;color:#fbbc05;">[虚拟容器]</span>' : ''}
-      </div>
-      <div style="font-size:10px;color:#999;">
-        能力: ${
-          capabilities.length
-            ? capabilities.map((c: string) => `<span style="margin-right:4px;color:#7ebd7e;">${c}</span>`).join('')
-            : '<span style="color:#555;">无</span>'
-        }
-      </div>
-      <div style="margin-top:4px;font-size:10px;color:#999;display:flex;align-items:center;gap:4px;">
-        <span>别名/显示名:</span>
-        <input id="containerAliasInput" type="text" style="flex:1;min-width:0;font-size:10px;padding:2px 4px;border-radius:2px;border:1px solid #3e3e3e;background:#1e1e1e;color:#ccc;" />
-        <button id="btnSaveAlias" style="font-size:10px;padding:2px 6px;">保存名称</button>
+      <div class="container-meta-grid">
+        <div class="meta-item">
+          <span class="meta-label">类型</span>
+          <span class="meta-value">${type}${container.metadata?.isVirtual ? ' [虚拟]' : ''}</span>
+        </div>
+        <div class="meta-item">
+          <span class="meta-label">匹配</span>
+          <span class="meta-value">${matchCount}</span>
+        </div>
+        <div class="meta-item">
+          <span class="meta-label">能力</span>
+          <span class="meta-value">${capabilities.length ? capabilities.join(', ') : '无'}</span>
+        </div>
+        <div class="meta-item">
+          <span class="meta-label">selector</span>
+          <span class="meta-value">${selector || '未记录'}</span>
+        </div>
+        <div class="meta-item" style="grid-column:1/-1;">
+          <span class="meta-label">DOM路径</span>
+          <span class="meta-value">${domPath || '未记录'}</span>
+        </div>
+        <div class="meta-item" style="grid-column:1/-1;align-items:center;">
+          <span class="meta-label">别名</span>
+          <input id="containerAliasInput" type="text" style="flex:1;font-size:9px;padding:2px 4px;border-radius:2px;border:1px solid #3e3e3e;background:#1e1e1e;color:#ccc;" />
+          <button id="btnSaveAlias" style="font-size:9px;padding:2px 6px;margin-left:4px;">保存</button>
+        </div>
       </div>
     </div>
-    <div style="margin-bottom:6px;font-size:10px;color:#999;">
-      <div>匹配 DOM 路径: <span style="color:#9cdcfe;">${domPath || '未记录'}</span></div>
-      <div>匹配 selector: <span style="color:#9cdcfe;">${selector || '未记录'}</span></div>
-      <div>匹配计数: <span style="color:#9cdcfe;">${matchCount}</span></div>
+    <div style="margin-bottom:2px;font-size:10px;color:#ccc;font-weight:600;">Operation 列表</div>
+    <div id="containerOperationsList" style="margin-bottom:6px;">
+      ${operationsHtml}
     </div>
-    <div style="margin-bottom:4px;font-size:11px;color:#ccc;font-weight:600;">默认 Operation 列表（按顺序执行）</div>
-    <div id="containerOperationsList">
-      ${opsHtml}
-    </div>
-    <div style="margin-top:6px;font-size:10px;color:#999;">Operation 配置（JSON，可编辑）</div>
-    <textarea
-      id="containerOpsEditor"
-      style="width:100%;height:120px;margin-top:2px;background:#1e1e1e;color:#ccc;border:1px solid #3e3e3e;border-radius:2px;font-family:Consolas,monospace;font-size:10px;padding:4px;resize:vertical;"
-    ></textarea>
-    <div style="margin-top:4px;display:flex;justify-content:flex-end;gap:6px;">
-      <button id="btnSaveOps" style="font-size:10px;padding:2px 6px;">保存 Operation 列表</button>
-    </div>
-    <div style="margin-top:6px;font-size:10px;color:#666;">
-      提示：当前 Operation 编辑会直接写入外置容器库（~/.webauto/container-lib）；演练按钮暂仅记录日志，不会实际执行操作。
+    ${renderAddOperationPanel(selector, domPath)}
+    <div style="margin-top:4px;font-size:8px;color:#666;">
+      提示：当前 Operation 编辑会直接写入外置容器库（~/.webauto/container-lib）；演练按钮会在浏览器中实际执行操作。
     </div>
   `;
 
@@ -199,43 +173,21 @@ function renderContainerDetails(container: any | null) {
   // 为操作按钮绑定事件
   bindOperationEventListeners(id, operations, isRoot);
 
+  // 初始化拖拽排序
+  const listEl = containerDetailsEl.querySelector('#containerOperationsList');
+  if (listEl) {
+    new OperationDragHandler(listEl as HTMLElement, operations, (newOps) => {
+      updateContainerOperations(id, newOps);
+    });
+  }
+
   // 为快速添加操作面板绑定事件
   bindAddOperationPanelEvents(id, selector, domPath);
 
   // 如果有建议的操作，自动展开编辑器
   if (hasSuggested) {
     debugLog('floating-panel', 'suggested operations detected, showing editor', { containerId: id });
-  // 初始化 Operation 拖拽处理器
-  if (containerOperationsList) {
-    const dragHandler = new OperationDragHandler(
-      containerOperationsList,
-      operations,
-      async (newOperations: Operation[]) => {
-        if (currentProfile && currentUrl) {
-          try {
-            const api = (window as any).api;
-            if (!api?.invokeAction) {
-              logger.warn("container-operations", "invokeAction not available");
-              return;
-            }
-            await api.invokeAction("containers:update-operations", {
-              profile: currentProfile,
-              url: currentUrl,
-              containerId: id,
-              operations: newOperations,
-            });
-            await api.invokeAction("containers:match", {
-              profile: currentProfile,
-              url: currentUrl,
-              rootSelector: currentRootSelector || undefined,
-            });
-          } catch (err) {
-            logger.error("container-operations", "Failed to update operations order", err);
-          }
-        }
-      }
-    );
-  }  }
+  }
 }
 
 
@@ -694,10 +646,10 @@ if (!(window as any).api) {
     (window as any).api.onBusStatus((status: any) => {
       log('Bus status:', status);
       if (status.connected) {
-        if (healthEl) healthEl.textContent = '✅ 已连接总线';
+        if (healthEl) healthEl.textContent = "Bus 已连接";
         setStatus('已连接', true);
       } else {
-        if (healthEl) healthEl.textContent = '❌ 总线断开';
+        if (healthEl) healthEl.textContent = "Bus 断开";
         setStatus('未连接', false);
       }
     });
@@ -791,6 +743,34 @@ if (!(window as any).api) {
 const canvas = document.getElementById('graphPanel');
 if (canvas) {
   initGraph(canvas);
+}
+
+if (splitterHandle && bottomPanel && graphPanel) {
+  splitterHandle.addEventListener('mousedown', (e) => {
+    isResizing = true;
+    startY = e.clientY;
+    const rect = bottomPanel.getBoundingClientRect();
+    startBottomHeight = rect.height;
+    document.body.style.cursor = 'row-resize';
+    e.preventDefault();
+  });
+
+  window.addEventListener('mousemove', (e) => {
+    if (!isResizing) return;
+    const delta = e.clientY - startY;
+    const newHeight = Math.min(
+      window.innerHeight - 200,
+      Math.max(220, startBottomHeight - delta)
+    );
+    bottomPanel.style.height = `${newHeight}px`;
+  });
+
+  window.addEventListener('mouseup', () => {
+    if (isResizing) {
+      isResizing = false;
+      document.body.style.cursor = 'default';
+    }
+  });
 }
 
 // 绑定窗口控制按钮

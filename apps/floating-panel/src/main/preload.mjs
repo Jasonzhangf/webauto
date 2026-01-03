@@ -1,7 +1,8 @@
 // Preload 脚本 - 在 Node.js 上下文中运行
 // 需要加载 electron 模块
 
-import { contextBridge, ipcRenderer } from 'electron';
+import electron from 'electron';
+const { contextBridge, ipcRenderer } = electron;
 
 console.log('[preload] Starting preload script');
 console.log('[preload] Electron modules loaded:', {
@@ -28,33 +29,34 @@ const api = {
     return ipcRenderer.invoke('window:close');
   },
 highlightElement: (selector, color = "green", options = {}, profile = null) => {
-  console.log('[preload] highlightElement called:', selector, color, 'profile:', profile);
-  return ipcRenderer.invoke("ui:highlight", { selector, color, options, profile });
-},
- clearHighlight: (channel) => {
-   console.log('[preload] clearHighlight called:', channel);
-   return ipcRenderer.invoke("ui:clearHighlight", channel);
- },
-debugLog: (module, event, data = {}) => {
-   return ipcRenderer.invoke('ui:debug-log', { module, event, data });
- },
-  onBusEvent: (cb) => {
-    console.log('[preload] onBusEvent registered');
-    return ipcRenderer.on('bus:event', (_, msg) => {
-      console.log('[preload] Bus event received:', msg?.topic);
-      cb(msg);
-    });
+    console.log('[preload] highlightElement() called:', selector);
+    return ipcRenderer.invoke('ui:highlight', { selector, color, options, profile });
   },
-  onBusStatus: (cb) => {
-    console.log('[preload] onBusStatus registered');
-    return ipcRenderer.on('bus:status', (_, status) => {
-      console.log('[preload] Bus status received:', status);
-      cb(status);
-    });
+  clearHighlight: (profile = null) => {
+    console.log('[preload] clearHighlight() called');
+    return ipcRenderer.invoke('ui:clearHighlight', { profile });
+  },
+  debugLog: (module, action, data) => {
+    console.log('[preload] debugLog:', module, action, data);
+    return ipcRenderer.invoke('ui:debug-log', { module, action, data });
+  },
+  onBusStatus: (callback) => {
+    console.log('[preload] onBusStatus listener registered');
+    ipcRenderer.on('bus:status', (event, status) => callback(status));
+  },
+  onBusEvent: (callback) => {
+    console.log('[preload] onBusEvent listener registered');
+    ipcRenderer.on('bus:event', (event, msg) => callback(msg));
   }
 };
 
-console.log('[preload] Exposing api to renderer');
-contextBridge.exposeInMainWorld('api', api);
-contextBridge.exposeInMainWorld('DEBUG', process.env.DEBUG || '0');
-console.log('[preload] Preload script completed');
+const isContextIsolationEnabled = typeof process !== 'undefined' && process.contextIsolated;
+if (isContextIsolationEnabled) {
+  console.log('[preload] Exposing API to renderer via contextBridge');
+  contextBridge.exposeInMainWorld('api', api);
+  console.log('[preload] API exposed successfully');
+} else {
+  // Fallback for contextIsolation=false
+  console.log('[preload] contextBridge unavailable, attaching to window');
+  globalThis.api = api;
+}
