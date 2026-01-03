@@ -24,6 +24,7 @@ export const UI_STYLES = `
   .op-row:hover { background: #2a2d2e; }
   .op-row.active { background: #094771; }
   .op-row.op-disabled { opacity: 0.5; }
+  .op-row.dragging { opacity: 0.4; background: #333; }
   
   /* Tags */
   .tag-trigger {
@@ -186,7 +187,69 @@ export class ContainerTree {
 }
 
 export class OperationDragHandler {
-  constructor(el: HTMLElement, ops: any[], cb: any) {
-    // Basic placeholder, can re-enable drag later
+  private container: HTMLElement;
+  private operations: any[];
+  private onReorder: (newOps: any[]) => void;
+  private draggedIndex: number = -1;
+
+  constructor(el: HTMLElement, ops: any[], cb: (newOps: any[]) => void) {
+    this.container = el;
+    this.operations = ops;
+    this.onReorder = cb;
+    this.init();
+  }
+
+  private init() {
+    const rows = this.container.querySelectorAll('.op-row');
+    rows.forEach(row => {
+      row.addEventListener('dragstart', this.handleDragStart.bind(this));
+      row.addEventListener('dragover', this.handleDragOver.bind(this));
+      row.addEventListener('drop', this.handleDrop.bind(this));
+      row.addEventListener('dragend', this.handleDragEnd.bind(this));
+    });
+  }
+
+  private handleDragStart(e: Event) {
+    const target = (e.target as HTMLElement).closest('.op-row');
+    if (!target) return;
+    
+    this.draggedIndex = parseInt(target.getAttribute('data-op-index') || '-1', 10);
+    target.classList.add('dragging');
+    
+    if (e instanceof DragEvent && e.dataTransfer) {
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', String(this.draggedIndex));
+    }
+  }
+
+  private handleDragOver(e: Event) {
+    if (e instanceof DragEvent) {
+      e.preventDefault(); // Necessary for drop to work
+      e.dataTransfer!.dropEffect = 'move';
+    }
+  }
+
+  private handleDrop(e: Event) {
+    e.preventDefault();
+    const target = (e.target as HTMLElement).closest('.op-row');
+    if (!target) return;
+
+    const targetIndex = parseInt(target.getAttribute('data-op-index') || '-1', 10);
+    
+    if (this.draggedIndex !== -1 && targetIndex !== -1 && this.draggedIndex !== targetIndex) {
+      const newOps = [...this.operations];
+      const [movedItem] = newOps.splice(this.draggedIndex, 1);
+      newOps.splice(targetIndex, 0, movedItem);
+      
+      this.onReorder(newOps);
+    }
+  }
+
+  private handleDragEnd(e: Event) {
+    const target = (e.target as HTMLElement).closest('.op-row');
+    if (target) {
+      target.classList.remove('dragging');
+    }
+    this.draggedIndex = -1;
   }
 }

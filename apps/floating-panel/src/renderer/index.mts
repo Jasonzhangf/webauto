@@ -144,6 +144,9 @@ function bindOperationEventListeners(containerId: string, operations: any[], isR
     onUpdate: (newOps) => updateContainerOperations(containerId, newOps),
     onExecute: (op, index) => executeOperation(containerId, op, index)
   });
+  new OperationDragHandler(listEl as HTMLElement, operations, (newOps) => {
+    updateContainerOperations(containerId, newOps);
+  });
 }
 
 function bindAddOperationPanelEvents(containerId: string, primarySelector: string | null, domPath: string | null) {

@@ -15,6 +15,7 @@ export function renderOperationList(operations: any[], isRoot: boolean): string 
   // 表头
   const headerHtml = `
     <div class="op-header-row" style="display:flex;gap:4px;padding:2px 6px;background:#222;color:#666;font-size:9px;font-weight:600;border-bottom:1px solid #333;">
+      <div style="width:20px;"></div>
       <div style="width:70px;">TRIGGER</div>
       <div style="width:60px;">ACTION</div>
       <div style="flex:1;">CONFIG</div>
@@ -32,7 +33,7 @@ export function renderOperationList(operations: any[], isRoot: boolean): string 
     if (op.config) {
       if (op.type === 'highlight') {
         configSummary = op.config.style || op.config.color || 'default';
-      } else if (op.type === 'fill') {
+      } else if (op.type === 'fill' || op.type === 'input') {
         configSummary = `"${op.config.value || ''}"`;
       } else if (op.type === 'click') {
         configSummary = op.config.selector ? `-> ${op.config.selector}` : '-';
@@ -50,7 +51,12 @@ export function renderOperationList(operations: any[], isRoot: boolean): string 
     const enabledClass = op.enabled !== false ? '' : 'op-disabled';
     
     return `
-      <div class="op-row ${enabledClass}" id="op-row-${index}" data-op-index="${index}" onclick="document.dispatchEvent(new CustomEvent('op-row-click', {detail: {index: ${index}}}))">
+      <div class="op-row ${enabledClass}" id="op-row-${index}" draggable="true" data-op-index="${index}" onclick="document.dispatchEvent(new CustomEvent('op-row-click', {detail: {index: ${index}}}))">
+        <!-- Drag Handle -->
+        <div class="col-drag" style="width:20px;color:#555;cursor:grab;display:flex;align-items:center;justify-content:center;">
+          ⋮⋮
+        </div>
+
         <!-- Trigger Column -->
         <div class="col-trigger" style="width:70px;overflow:hidden;white-space:nowrap;">
           ${triggerHtml}
@@ -90,7 +96,7 @@ export function renderOperationEditor(op: any, index: number, isRoot: boolean): 
   const eventOptions = [...BASIC_EVENTS, ...(isRoot ? PAGE_EVENTS : [])];
   const triggers = Array.isArray(op.triggers) ? op.triggers : ['appear'];
   const configValue = op.config ? JSON.stringify(op.config, null, 2) : '{}';
-  const isFill = op.type === 'fill';
+  const isInput = op.type === 'fill' || op.type === 'input';
 
   // Trigger 选择器 HTML
   const triggerChips = eventOptions.map(evt => {
@@ -115,12 +121,12 @@ export function renderOperationEditor(op: any, index: number, isRoot: boolean): 
         </div>
       </div>
 
-      <!-- Row 2: Config JSON -->
+      <!-- Row 2: Config JSON & Virtual Keys -->
       <div class="editor-row" style="align-items:flex-start;">
         <span class="editor-label">Config</span>
         <div style="flex:1;">
           <textarea class="editor-textarea" id="edit-config-${index}" spellcheck="false">${configValue}</textarea>
-          ${isFill ? renderFillShortcuts(index) : ''}
+          ${isInput ? renderInputControls(index) : ''}
         </div>
       </div>
 
@@ -134,13 +140,18 @@ export function renderOperationEditor(op: any, index: number, isRoot: boolean): 
   `;
 }
 
-function renderFillShortcuts(index: number) {
+function renderInputControls(index: number) {
+  // 虚拟按键列表
+  const keys = ['Enter', 'Tab', 'Esc', 'Backspace', 'ArrowDown', 'ArrowUp'];
+  
   return `
-    <div style="margin-top:2px;display:flex;gap:4px;">
-      <span style="font-size:9px;color:#666;">Insert:</span>
-      <button class="shortcut-btn" data-action="insert-key" data-target="edit-config-${index}" data-val="{Enter}">Enter</button>
-      <button class="shortcut-btn" data-action="insert-key" data-target="edit-config-${index}" data-val="{Tab}">Tab</button>
-      <button class="shortcut-btn" data-action="insert-key" data-target="edit-config-${index}" data-val="{Esc}">Esc</button>
+    <div style="margin-top:4px;border-top:1px dashed #333;padding-top:4px;">
+      <div style="display:flex;align-items:center;gap:4px;margin-bottom:2px;">
+        <span style="font-size:9px;color:#aaa;">Special Keys (Click to append):</span>
+      </div>
+      <div style="display:flex;flex-wrap:wrap;gap:2px;">
+        ${keys.map(k => `<button class="shortcut-btn" data-action="insert-key" data-target="edit-config-${index}" data-val="{${k}}">${k}</button>`).join('')}
+      </div>
     </div>
   `;
 }

@@ -6,6 +6,7 @@
 export type OperationType = 
   | 'highlight' 
   | 'click' 
+  | 'input' 
   | 'scroll' 
   | 'extract' 
   | 'wait'
@@ -15,6 +16,7 @@ export type OperationType =
 export type TriggerType = 
   | 'appear' 
   | 'click' 
+  | 'input' 
   | 'change'
   | 'page:load'
   | 'page:scroll'
@@ -45,6 +47,7 @@ export const PAGE_EVENTS: TriggerType[] = ['page:load', 'page:scroll', 'page:nav
 export const OPERATION_TYPES: { value: OperationType; label: string }[] = [
   { value: 'highlight', label: '高亮显示' },
   { value: 'click', label: '点击操作' },
+  { value: 'input', label: '输入操作' },
   { value: 'scroll', label: '滚动' },
   { value: 'extract', label: '提取数据' },
   { value: 'wait', label: '等待' },
