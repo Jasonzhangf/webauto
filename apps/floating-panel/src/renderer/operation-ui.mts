@@ -80,7 +80,7 @@ export function renderOperationsList(options: OperationRenderOptions): { html: s
         .join('');
       return `<div style="display:flex;align-items:flex-start;padding:4px 0;border-bottom:1px solid #2a2a2a;">
         <div style="width:96px;font-size:10px;color:#9cdcfe;padding-top:2px;">${renderTriggerLabel(trigger)}</div>
-        <div style="flex:1;min-width:0;">${rowsHtml || '<div style="font-size:10px;color:#666;">当前消息下暂无操作</div>'}</div>
+        <div style="flex:1;min-width:0;">${rowsHtml || '<div style="font-size:10px;color:#666;">当前事件下暂无操作</div>'}</div>
       </div>`;
     })
     .join('');
@@ -114,7 +114,7 @@ function renderOperationRow(op: any, index: number): string {
         : op.type === 'extract' ? '📋'
           : '⚙️';
 
-  return `<div style="display:flex;align-items:flex-start;justify-content:space-between;padding:4px;margin-bottom:4px;background:#222;border-radius:3px;border:1px solid #333;">
+  return `<div class="operation-row" draggable="true" data-op-index="${index}" style="display:flex;align-items:flex-start;justify-content:space-between;padding:4px;margin-bottom:4px;background:#222;border-radius:3px;border:1px solid #333;cursor:grab;">
     <div style="flex:1;min-width:0;">
       <div style="display:flex;align-items:center;gap:4px;margin-bottom:2px;">
         <span style="font-size:12px;">${opIcon}</span>
@@ -156,7 +156,7 @@ export function renderAddOperationPanel(primarySelector: string | null, domPath:
     }
     </div>
     <div style="margin-top:2px;display:flex;gap:4px;align-items:center;font-size:10px;">
-      <div style="font-size:9px;color:#777;min-width:48px;">触发消息</div>
+      <div style="font-size:9px;color:#777;min-width:48px;">触发事件</div>
       <select id="opTriggerSelect" style="flex:1;font-size:10px;padding:2px 4px;background:#1e1e1e;color:#ccc;border:1px solid #3e3e3e;border-radius:2px;">
         <option value="appear">appear（出现）</option>
         <option value="click">click（点击）</option>

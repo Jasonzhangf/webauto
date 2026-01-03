@@ -1,5 +1,5 @@
 import { logger } from '../logger.mts';
-import { computeContainerDomConnections } from './matcher.mts';
+import { computeContainerDomConnections, ContainerDomConnection } from './matcher.mts';
 
 export interface GraphRenderState {
   canvas: SVGSVGElement | null;
@@ -48,6 +48,25 @@ export function renderGraph(state: GraphRenderState, deps: GraphRenderDeps): voi
 
   if (!canvas) return;
 
+  // 1. 预计算连接关系和关联节点
+  const connections = (containerData && domData) 
+    ? computeContainerDomConnections(containerData, domData) 
+    : [];
+
+  const relatedContainers = new Set<string>();
+  const relatedDoms = new Set<string>();
+
+  if (selectedContainer) {
+    connections
+      .filter(c => c.containerId === selectedContainer)
+      .forEach(c => relatedDoms.add(c.domPath));
+  }
+  if (selectedDom) {
+    connections
+      .filter(c => c.domPath === selectedDom)
+      .forEach(c => relatedContainers.add(c.containerId));
+  }
+
   if ((window as any).api?.debugLog && (window as any).DEBUG === '1') {
     (window as any).api
       .debugLog('floating-panel-graph', 'renderGraph', {
@@ -63,6 +82,28 @@ export function renderGraph(state: GraphRenderState, deps: GraphRenderDeps): voi
   while (canvas.firstChild) {
     canvas.removeChild(canvas.firstChild);
   }
+
+  // 添加滤镜定义
+  const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
+  
+  // 选中态发光滤镜 (Green)
+  const glowFilter = document.createElementNS('http://www.w3.org/2000/svg', 'filter');
+  glowFilter.setAttribute('id', 'selected-glow');
+  glowFilter.setAttribute('x', '-50%');
+  glowFilter.setAttribute('y', '-50%');
+  glowFilter.setAttribute('width', '200%');
+  glowFilter.setAttribute('height', '200%');
+  glowFilter.innerHTML = `
+    <feGaussianBlur in="SourceAlpha" stdDeviation="2" result="blur"/>
+    <feFlood flood-color="#4CAF50" flood-opacity="0.5" result="glowColor"/>
+    <feComposite in="glowColor" in2="blur" operator="in" result="coloredBlur"/>
+    <feMerge>
+      <feMergeNode in="coloredBlur"/>
+      <feMergeNode in="SourceGraphic"/>
+    </feMerge>
+  `;
+  defs.appendChild(glowFilter);
+  canvas.appendChild(defs);
 
   const mainGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
   mainGroup.setAttribute(
@@ -100,6 +141,7 @@ export function renderGraph(state: GraphRenderState, deps: GraphRenderDeps): voi
         currentProfile,
         currentUrl,
         currentRootSelector,
+        relatedContainers,
       },
     );
     mainGroup.appendChild(containerGroup);
@@ -120,6 +162,7 @@ export function renderGraph(state: GraphRenderState, deps: GraphRenderDeps): voi
         loadedPaths,
         currentProfile,
         currentRootSelector,
+        relatedDoms,
       },
       deps,
     );
@@ -133,6 +176,7 @@ export function renderGraph(state: GraphRenderState, deps: GraphRenderDeps): voi
         containerNodePositions,
         domNodePositions,
         selectorMap,
+        connections,
       },
       deps,
     );
@@ -182,6 +226,7 @@ interface RenderContainerNodeParams {
   currentProfile: string | null;
   currentUrl: string | null;
   currentRootSelector: string | null;
+  relatedContainers: Set<string>;
 }
 
 function renderContainerNode(params: RenderContainerNodeParams): number {
@@ -199,12 +244,14 @@ function renderContainerNode(params: RenderContainerNodeParams): number {
     currentProfile,
     currentUrl,
     currentRootSelector,
+    relatedContainers,
   } = params;
 
   const nodeId = node.id || node.name || 'root';
   const isExpanded = expandedNodes.has(nodeId);
   const hasChildren = (node.children && node.children.length > 0) || (node.childCount > 0);
   const isSelected = selectedContainer === nodeId;
+  const isRelated = relatedContainers.has(nodeId);
 
   // 行高与矩形高度保持一致，便于连线完全居中
   const ROW_HEIGHT = 28;
@@ -236,9 +283,19 @@ function renderContainerNode(params: RenderContainerNodeParams): number {
   rect.setAttribute('y', '0');
   rect.setAttribute('width', '180');
   rect.setAttribute('height', '28');
-  rect.setAttribute('fill', isSelected ? '#264f36' : '#2d2d30');
-  rect.setAttribute('stroke', isSelected ? '#4CAF50' : '#555');
-  rect.setAttribute('stroke-width', isSelected ? '2' : '1');
+  
+  // 样式逻辑
+  if (isSelected) {
+    rect.setAttribute('fill', '#264f36');
+    rect.setAttribute('stroke', '#4CAF50');
+    rect.setAttribute('stroke-width', '2');
+    rect.setAttribute('filter', 'url(#selected-glow)');
+  } else {
+    rect.setAttribute('fill', isRelated ? '#2d3330' : '#2d2d30');
+    rect.setAttribute('stroke', isRelated ? '#3a663e' : '#555');
+    rect.setAttribute('stroke-width', isRelated ? '1.5' : '1');
+  }
+
   rect.setAttribute('rx', '2');
   rect.style.cursor = 'pointer';
 
@@ -250,8 +307,8 @@ function renderContainerNode(params: RenderContainerNodeParams): number {
   });
   rect.addEventListener('mouseleave', () => {
     if (!isSelected) {
-      rect.setAttribute('fill', '#2d2d30');
-      rect.setAttribute('stroke', '#555');
+      rect.setAttribute('fill', isRelated ? '#2d3330' : '#2d2d30');
+      rect.setAttribute('stroke', isRelated ? '#3a663e' : '#555');
     }
   });
 
@@ -521,6 +578,7 @@ function renderContainerNode(params: RenderContainerNodeParams): number {
           currentProfile,
           currentUrl,
           currentRootSelector,
+          relatedContainers,
         });
 
 	        currentY += childHeight + VERTICAL_GAP;
@@ -545,6 +603,7 @@ interface RenderDomNodeParams {
   loadedPaths: Set<string>;
   currentProfile: string | null;
   currentRootSelector: string | null;
+  relatedDoms: Set<string>;
 }
 
 function renderDomNodeRecursive(params: RenderDomNodeParams, deps: GraphRenderDeps): number {
@@ -559,6 +618,7 @@ function renderDomNodeRecursive(params: RenderDomNodeParams, deps: GraphRenderDe
     loadedPaths,
     currentProfile,
     currentRootSelector,
+    relatedDoms,
   } = params;
 
   if (!node || typeof node !== 'object') return 0;
@@ -579,6 +639,7 @@ function renderDomNodeRecursive(params: RenderDomNodeParams, deps: GraphRenderDe
   const isExpanded = expandedNodes.has(nodeId);
   const hasChildren = (node.children && node.children.length > 0) || (node.childCount > 0);
   const isSelected = selectedDom === nodeId;
+  const isRelated = relatedDoms.has(node.path);
 
   const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
   g.setAttribute('transform', `translate(${x}, ${y})`);
@@ -588,9 +649,18 @@ function renderDomNodeRecursive(params: RenderDomNodeParams, deps: GraphRenderDe
   rect.setAttribute('y', '0');
   rect.setAttribute('width', '220');
   rect.setAttribute('height', '24');
-  rect.setAttribute('fill', isSelected ? '#264f36' : '#252526');
-  rect.setAttribute('stroke', isSelected ? '#007acc' : '#3e3e42');
-  rect.setAttribute('stroke-width', isSelected ? '2' : '1');
+  
+  if (isSelected) {
+    rect.setAttribute('fill', '#264f36');
+    rect.setAttribute('stroke', '#4CAF50'); // Keep consistent green for selected match
+    rect.setAttribute('stroke-width', '2');
+    rect.setAttribute('filter', 'url(#selected-glow)');
+  } else {
+    rect.setAttribute('fill', isRelated ? '#2d3330' : '#252526');
+    rect.setAttribute('stroke', isRelated ? '#3a663e' : '#3e3e42');
+    rect.setAttribute('stroke-width', isRelated ? '1.5' : '1');
+  }
+
   rect.setAttribute('rx', '2');
   rect.style.cursor = 'pointer';
 
@@ -602,8 +672,8 @@ function renderDomNodeRecursive(params: RenderDomNodeParams, deps: GraphRenderDe
   });
   rect.addEventListener('mouseleave', () => {
     if (!isSelected) {
-      rect.setAttribute('fill', '#252526');
-      rect.setAttribute('stroke', '#3e3e42');
+      rect.setAttribute('fill', isRelated ? '#2d3330' : '#252526');
+      rect.setAttribute('stroke', isRelated ? '#3a663e' : '#3e3e42');
     }
   });
 
@@ -731,6 +801,7 @@ function renderDomNodeRecursive(params: RenderDomNodeParams, deps: GraphRenderDe
           loadedPaths,
           currentProfile,
           currentRootSelector,
+          relatedDoms,
         },
         deps,
       );
@@ -749,10 +820,11 @@ interface DrawConnectionsParams {
   containerNodePositions: GraphRenderState['containerNodePositions'];
   domNodePositions: GraphRenderState['domNodePositions'];
   selectorMap: Map<string, string>;
+  connections: ContainerDomConnection[];
 }
 
 function drawAllConnections(params: DrawConnectionsParams, deps: GraphRenderDeps): void {
-  const { parent, containerData, domData, containerNodePositions, domNodePositions } = params;
+  const { parent, containerData, domData, containerNodePositions, domNodePositions, connections } = params;
 
   console.log('[drawAllConnections] Called');
   console.log('[drawAllConnections] containerData:', !!containerData, 'domData:', !!domData);
@@ -782,9 +854,6 @@ function drawAllConnections(params: DrawConnectionsParams, deps: GraphRenderDeps
     domData ? domData.children?.length || 0 : 'N/A',
   );
 
-  // 1) 使用通用匹配函数，仅依赖 container_tree 与 dom_tree 本身的数据，
-  //    产生「容器 → DOM 路径」的映射。
-  const connections = computeContainerDomConnections(containerData, domData);
   console.log('[drawAllConnections] computed connections:', connections.length);
 
   function drawConnectionsForNode(node: any): void {

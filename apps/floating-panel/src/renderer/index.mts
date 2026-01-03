@@ -13,7 +13,7 @@ import {
 } from './graph.mjs';
 import { logger } from './logger.mts';
 import { FLOATING_PANEL_VERSION } from './version.mts';
-import { CapturePanel, ContainerTree } from './ui-components.js';
+import { CapturePanel, ContainerTree, OperationDragHandler } from './ui-components.js';
 
 
 // UI logging helper
@@ -205,7 +205,37 @@ function renderContainerDetails(container: any | null) {
   // 如果有建议的操作，自动展开编辑器
   if (hasSuggested) {
     debugLog('floating-panel', 'suggested operations detected, showing editor', { containerId: id });
-  }
+  // 初始化 Operation 拖拽处理器
+  if (containerOperationsList) {
+    const dragHandler = new OperationDragHandler(
+      containerOperationsList,
+      operations,
+      async (newOperations: Operation[]) => {
+        if (currentProfile && currentUrl) {
+          try {
+            const api = (window as any).api;
+            if (!api?.invokeAction) {
+              logger.warn("container-operations", "invokeAction not available");
+              return;
+            }
+            await api.invokeAction("containers:update-operations", {
+              profile: currentProfile,
+              url: currentUrl,
+              containerId: id,
+              operations: newOperations,
+            });
+            await api.invokeAction("containers:match", {
+              profile: currentProfile,
+              url: currentUrl,
+              rootSelector: currentRootSelector || undefined,
+            });
+          } catch (err) {
+            logger.error("container-operations", "Failed to update operations order", err);
+          }
+        }
+      }
+    );
+  }  }
 }
 
 
@@ -529,7 +559,6 @@ function showOperationResult(operation: any, success: boolean, data: any) {
 
 
 
-// Initialize UI Components
 import { CapturePanel } from './ui-components.js';
 import { ContainerTree } from './ui-components.js';
 

@@ -180,3 +180,99 @@ export class ContainerTree {
     });
   }
 }
+
+export interface Operation {
+  id: string;
+  type: string;
+  triggers: string[];
+  enabled: boolean;
+  config: Record<string, any>;
+}
+
+// 拖拽功能实现
+export class OperationDragHandler {
+  private container: HTMLElement;
+  private operations: Operation[];
+
+  private onReorder: (newOperations: Operation[]) => void;
+
+  constructor(container: HTMLElement, operations: Operation[], onReorder: (newOperations: Operation[]) => void) {
+    this.container = container;
+    this.operations = operations;
+    this.onReorder = onReorder;
+    this.initDragAndDrop();
+  }
+
+  private initDragAndDrop() {
+    const rows = this.container.querySelectorAll('.operation-row');
+    rows.forEach((row) => {
+      row.addEventListener('dragstart', (e) => this.handleDragStart(e as DragEvent));
+      row.addEventListener('dragover', this.handleDragOver);
+      row.addEventListener('dragenter', this.handleDragEnter);
+      row.addEventListener('dragleave', this.handleDragLeave);
+      row.addEventListener('drop', (e) => this.handleDrop(e as DragEvent));
+    });
+  }
+
+  private handleDragStart(e: DragEvent) {
+    const target = e.target as HTMLElement;
+    const opIndex = target.getAttribute('data-op-index');
+    if (opIndex && e.dataTransfer) {
+        e.dataTransfer.setData('text/plain', opIndex);
+        e.dataTransfer.effectAllowed = 'move';
+        target.style.opacity = '0.5';
+    }
+  }
+
+  private handleDragOver(e: DragEvent) {
+    e.preventDefault();
+  }
+
+  private handleDragEnter(e: DragEvent) {
+    e.preventDefault();
+    const row = (e.target as HTMLElement).closest('.operation-row') as HTMLElement;
+    if (row) row.style.background = '#333';
+  }
+
+  private handleDragLeave(e: DragEvent) {
+    const row = (e.target as HTMLElement).closest('.operation-row') as HTMLElement;
+    if (row) row.style.background = '#222';
+  }
+
+  private handleDrop(e: DragEvent) {
+    e.preventDefault();
+    const targetRow = (e.target as HTMLElement).closest('.operation-row') as HTMLElement;
+    if (!targetRow) return;
+    
+    // Reset styles
+    this.container.querySelectorAll('.operation-row').forEach((el: any) => {
+        el.style.opacity = '1'; 
+        el.style.background = '#222'; 
+    });
+
+    const sourceIndexStr = e.dataTransfer?.getData('text/plain');
+    const targetIndexStr = targetRow.getAttribute('data-op-index');
+
+    if (!sourceIndexStr || !targetIndexStr) return;
+
+    const sourceIndex = parseInt(sourceIndexStr, 10);
+    const targetIndex = parseInt(targetIndexStr, 10);
+    // Avoid reordering if same index
+    // Add bounds checking and improve type safety
+    if (isNaN(sourceIndex) || isNaN(targetIndex)) return;
+    if (sourceIndex < 0 || sourceIndex >= this.operations.length) return;
+    if (targetIndex < 0 || targetIndex >= this.operations.length) return;
+    if (sourceIndex === targetIndex) return;
+    
+    // Reorder with proper array manipulation
+    const newOperations = [...this.operations];
+    const [movedItem] = newOperations.splice(sourceIndex, 1);
+    
+    // Adjust target index for down-drag (when source < target, target shifted down by 1 after splice)
+    const adjustedTargetIndex = sourceIndex < targetIndex ? targetIndex - 1 : targetIndex;
+    
+    // Insert at adjusted target index (source index no longer in array)
+    newOperations.splice(adjustedTargetIndex + (sourceIndex < targetIndex ? 1 : 0), 0, movedItem);
+    this.onReorder(newOperations);
+  }
+}
