@@ -56,7 +56,7 @@ export function setupOperationListDelegation(
          const targetId = shortcutBtn.getAttribute('data-target');
          const val = shortcutBtn.getAttribute('data-val');
          if (targetId && val) {
-           const textarea = document.getElementById(targetId) as HTMLTextAreaElement;
+           const textarea = document.getElementById(targetId) as HTMLInputElement | HTMLTextAreaElement;
            if (textarea) insertAtCursor(textarea, val);
          }
        }
@@ -135,6 +135,7 @@ function saveEditor(index: number, operations: any[], callbacks: InteractionCall
   const typeSelect = editor.querySelector(`#edit-type-${index}`) as HTMLSelectElement;
   const configTextarea = editor.querySelector(`#edit-config-${index}`) as HTMLTextAreaElement;
   const customTriggerInput = editor.querySelector(`#edit-custom-trigger-${index}`) as HTMLInputElement;
+  const valueInput = editor.querySelector(`#edit-value-${index}`) as HTMLInputElement;
 
   // Gather active triggers
   const activeChips = editor.querySelectorAll(`.editor-chip.active`);
@@ -145,12 +146,17 @@ function saveEditor(index: number, operations: any[], callbacks: InteractionCall
   }
 
   // Parse Config
-  let newConfig = {};
+  let newConfig: any = {};
   try {
     newConfig = JSON.parse(configTextarea.value);
   } catch (e) {
     alert('Invalid JSON Config');
     return;
+  }
+
+  // Sync Value Input if present
+  if (valueInput) {
+    newConfig['value'] = valueInput.value;
   }
 
   // Update Op
@@ -163,14 +169,17 @@ function saveEditor(index: number, operations: any[], callbacks: InteractionCall
   callbacks.onUpdate([...operations]);
 }
 
-function insertAtCursor(myField: HTMLTextAreaElement, myValue: string) {
+function insertAtCursor(myField: HTMLInputElement | HTMLTextAreaElement, myValue: string) {
   if (myField.selectionStart || myField.selectionStart === 0) {
-    const startPos = myField.selectionStart;
-    const endPos = myField.selectionEnd;
+    const startPos = myField.selectionStart || 0;
+    const endPos = myField.selectionEnd || 0;
     myField.value = myField.value.substring(0, startPos) + myValue + myField.value.substring(endPos, myField.value.length);
     myField.selectionStart = startPos + myValue.length;
     myField.selectionEnd = startPos + myValue.length;
   } else {
     myField.value += myValue;
   }
+  
+  // Trigger input event if needed for listeners (optional)
+  myField.dispatchEvent(new Event('input', { bubbles: true }));
 }

@@ -12,59 +12,69 @@ export function renderOperationList(operations: any[], isRoot: boolean): string 
     `;
   }
 
-  // 表头
-  const headerHtml = `
-    <div class="op-header-row" style="display:flex;gap:4px;padding:2px 6px;background:#222;color:#666;font-size:9px;font-weight:600;border-bottom:1px solid #333;">
-      <div style="width:20px;"></div>
-      <div style="width:70px;">TRIGGER</div>
-      <div style="width:60px;">ACTION</div>
-      <div style="flex:1;">CONFIG</div>
-      <div style="width:40px;text-align:right;">OP</div>
-    </div>
-  `;
+  // Group operations by primary trigger
+  const groups: Record<string, any[]> = {};
+  operations.forEach((op, index) => {
+    const trigger = (op.triggers && op.triggers.length > 0) ? op.triggers[0] : 'unknown';
+    if (!groups[trigger]) groups[trigger] = [];
+    groups[trigger].push({ op, index });
+  });
 
-  // 列表内容
-  const rowsHtml = operations.map((op: any, index: number) => {
-    const triggers = Array.isArray(op.triggers) ? op.triggers : ['appear'];
-    const triggerHtml = triggers.map(t => `<span class="tag-trigger">${t}</span>`).join('');
+  const sortedTriggers = Object.keys(groups).sort();
+
+  let listHtml = '';
+
+  sortedTriggers.forEach(trigger => {
+    // Group Header
+    listHtml += `
+      <div class="op-group-header" style="background:#252526;padding:4px 8px;font-size:10px;font-weight:600;color:#aaa;border-bottom:1px solid #333;display:flex;align-items:center;">
+        <span style="text-transform:uppercase;">${trigger}</span>
+        <span style="margin-left:auto;font-size:9px;color:#666;">${groups[trigger].length} ops</span>
+      </div>
+      <div class="op-group-container" data-trigger="${trigger}">
+    `;
+
+    groups[trigger].forEach(({ op, index }) => {
+      const triggers = Array.isArray(op.triggers) ? op.triggers : ['appear'];
+      // Only show secondary triggers if any
+      const otherTriggers = triggers.slice(1);
+      const triggerHtml = otherTriggers.length > 0 
+        ? otherTriggers.map(t => `<span class="tag-trigger">${t}</span>`).join('')
+        : '';
     
-    // Config 摘要
-    let configSummary = '{}';
-    if (op.config) {
-      if (op.type === 'highlight') {
-        configSummary = op.config.style || op.config.color || 'default';
-      } else if (op.type === 'fill' || op.type === 'input') {
-        configSummary = `"${op.config.value || ''}"`;
-      } else if (op.type === 'click') {
-        configSummary = op.config.selector ? `-> ${op.config.selector}` : '-';
-      } else {
-        // 简略显示 JSON
-        const keys = Object.keys(op.config).filter(k => k !== 'selector' && k !== 'dom_path');
-        if (keys.length > 0) {
-          configSummary = keys.map(k => `${k}:${op.config[k]}`).join(', ');
+      // Config 摘要
+      let configSummary = '{}';
+      if (op.config) {
+        if (op.type === 'highlight') {
+          configSummary = op.config.style || op.config.color || 'default';
+        } else if (op.type === 'fill' || op.type === 'input') {
+          configSummary = `"${op.config.value || ''}"`;
+        } else if (op.type === 'click') {
+          configSummary = op.config.selector ? `-> ${op.config.selector}` : '-';
         } else {
-          configSummary = '-';
+          // 简略显示 JSON
+          const keys = Object.keys(op.config).filter(k => k !== 'selector' && k !== 'dom_path');
+          if (keys.length > 0) {
+            configSummary = keys.map(k => `${k}:${op.config[k]}`).join(', ');
+          } else {
+            configSummary = '-';
+          }
         }
       }
-    }
 
-    const enabledClass = op.enabled !== false ? '' : 'op-disabled';
+      const enabledClass = op.enabled !== false ? '' : 'op-disabled';
     
-    return `
+      listHtml += `
       <div class="op-row ${enabledClass}" id="op-row-${index}" draggable="true" data-op-index="${index}" onclick="document.dispatchEvent(new CustomEvent('op-row-click', {detail: {index: ${index}}}))">
         <!-- Drag Handle -->
         <div class="col-drag" style="width:20px;color:#555;cursor:grab;display:flex;align-items:center;justify-content:center;">
           ⋮⋮
         </div>
 
-        <!-- Trigger Column -->
-        <div class="col-trigger" style="width:70px;overflow:hidden;white-space:nowrap;">
-          ${triggerHtml}
-        </div>
-        
         <!-- Type Column -->
-        <div class="col-type" style="width:60px;color:#4ec9b0;font-weight:500;">
+        <div class="col-type" style="width:80px;color:#4ec9b0;font-weight:500;">
           ${op.type}
+          ${triggerHtml}
         </div>
         
         <!-- Config Column -->
@@ -82,10 +92,13 @@ export function renderOperationList(operations: any[], isRoot: boolean): string 
       
       <!-- Editor Container (Hidden by default) -->
       <div id="op-editor-container-${index}" class="op-editor-container" style="display:none;"></div>
-    `;
-  }).join('');
+      `;
+    });
 
-  return `<div class="op-list-wrapper">${headerHtml}${rowsHtml}</div>`;
+    listHtml += `</div>`; // End group container
+  });
+
+  return `<div class="op-list-wrapper">${listHtml}</div>`;
 }
 
 /**
@@ -116,26 +129,43 @@ export function renderOperationEditor(op: any, index: number, isRoot: boolean): 
         
         <span class="editor-label" style="margin-left:8px;">Triggers</span>
         <div class="editor-chips-wrapper">
-          ${triggerChips}
-          <input class="editor-input-sm" id="edit-custom-trigger-${index}" placeholder="+ custom" style="width:60px;">
+          ${triggerChips} 
+          <!-- We only allow editing the primary trigger via grouping implicitly, but here we can add secondaries -->
         </div>
       </div>
 
-      <!-- Row 2: Config JSON & Virtual Keys -->
+      <!-- Row 2: Value Input (for Input/Fill) -->
+      ${isInput ? renderValueInput(index, op.config?.value || '') : ''}
+
+      <!-- Row 3: Config JSON & Virtual Keys -->
       <div class="editor-row" style="align-items:flex-start;">
         <span class="editor-label">Config</span>
         <div style="flex:1;">
-          <textarea class="editor-textarea" id="edit-config-${index}" spellcheck="false">${configValue}</textarea>
-          ${isInput ? renderInputControls(index) : ''}
+          <textarea class="editor-textarea" id="edit-config-${index}" spellcheck="false" style="${isInput ? 'display:none;' : ''}">${configValue}</textarea>
+          ${isInput ? '<div style="font-size:9px;color:#666;margin-top:2px;">Raw config hidden. Use Value field above.</div>' : ''}
         </div>
       </div>
 
       <!-- Footer Buttons -->
       <div class="editor-footer">
+        <button class="btn-cancel" style="font-size:9px;" onclick="document.getElementById('edit-config-${index}').style.display = document.getElementById('edit-config-${index}').style.display === 'none' ? 'block' : 'none'">Toggle JSON</button>
+        <div style="flex:1"></div>
         <button class="btn-cancel" data-op-action="cancel" data-op-index="${index}">Cancel</button>
         <button class="btn-save" data-op-action="save" data-op-index="${index}">Save</button>
       </div>
 
+    </div>
+  `;
+}
+
+function renderValueInput(index: number, value: string) {
+  return `
+    <div class="editor-row">
+      <span class="editor-label">Value</span>
+      <div style="flex:1;">
+        <input type="text" class="editor-input-sm" id="edit-value-${index}" value="${value}" style="width:100%;font-family:monospace;">
+        ${renderInputControls(index)}
+      </div>
     </div>
   `;
 }
@@ -145,12 +175,12 @@ function renderInputControls(index: number) {
   const keys = ['Enter', 'Tab', 'Esc', 'Backspace', 'ArrowDown', 'ArrowUp'];
   
   return `
-    <div style="margin-top:4px;border-top:1px dashed #333;padding-top:4px;">
+    <div style="margin-top:4px;">
       <div style="display:flex;align-items:center;gap:4px;margin-bottom:2px;">
-        <span style="font-size:9px;color:#aaa;">Special Keys (Click to append):</span>
+        <span style="font-size:9px;color:#aaa;">Special Keys:</span>
       </div>
       <div style="display:flex;flex-wrap:wrap;gap:2px;">
-        ${keys.map(k => `<button class="shortcut-btn" data-action="insert-key" data-target="edit-config-${index}" data-val="{${k}}">${k}</button>`).join('')}
+        ${keys.map(k => `<button class="shortcut-btn" data-action="insert-key" data-target="edit-value-${index}" data-val="{${k}}">${k}</button>`).join('')}
       </div>
     </div>
   `;
