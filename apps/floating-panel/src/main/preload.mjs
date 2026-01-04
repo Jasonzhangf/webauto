@@ -47,6 +47,14 @@ highlightElement: (selector, color = "green", options = {}, profile = null) => {
   onBusEvent: (callback) => {
     console.log('[preload] onBusEvent listener registered');
     ipcRenderer.on('bus:event', (event, msg) => callback(msg));
+  },
+  saveLayoutState: (layoutState) => {
+    console.log('[preload] saveLayoutState() called:', layoutState);
+    return ipcRenderer.invoke('layout:save', layoutState);
+  },
+  loadLayoutState: () => {
+    console.log('[preload] loadLayoutState() called');
+    return ipcRenderer.invoke('layout:load');
   }
 };
 

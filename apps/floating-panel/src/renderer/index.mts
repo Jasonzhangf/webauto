@@ -74,6 +74,73 @@ let isResizing = false;
 let startY = 0;
 let startBottomHeight = 0;
 
+// 布局状态
+interface LayoutState {
+  bottomPanelHeight: number;
+  version: number;
+}
+
+const LAYOUT_VERSION = 1;
+let layoutState: LayoutState | null = null;
+
+async function loadLayoutState() {
+  try {
+    const api = (window as any).api;
+    if (!api?.loadLayoutState) {
+      log('loadLayoutState API not available');
+      return;
+    }
+    const result = await api.loadLayoutState();
+    if (result?.success && result.data) {
+      layoutState = result.data;
+      log('Layout state loaded:', layoutState);
+      applyLayoutState();
+    }
+  } catch (err) {
+    log('Failed to load layout state:', err);
+  }
+}
+
+function applyLayoutState() {
+  if (!layoutState || !bottomPanel) return;
+
+  if (layoutState.version === LAYOUT_VERSION && layoutState.bottomPanelHeight) {
+    bottomPanel.style.height = `${layoutState.bottomPanelHeight}px`;
+    log(`Applied layout: bottomPanelHeight=${layoutState.bottomPanelHeight}px`);
+  }
+}
+
+async function saveLayoutState() {
+  try {
+    if (!bottomPanel) return;
+
+    const rect = bottomPanel.getBoundingClientRect();
+    const newState: LayoutState = {
+      bottomPanelHeight: rect.height,
+      version: LAYOUT_VERSION
+    };
+
+    const api = (window as any).api;
+    if (!api?.saveLayoutState) {
+      log('saveLayoutState API not available');
+      return;
+    }
+
+    await api.saveLayoutState(newState);
+    layoutState = newState;
+    log('Layout state saved');
+  } catch (err) {
+    log('Failed to save layout state:', err);
+  }
+}
+
+let saveLayoutTimeout: NodeJS.Timeout | null = null;
+function scheduleSaveLayout() {
+  if (saveLayoutTimeout) clearTimeout(saveLayoutTimeout);
+  saveLayoutTimeout = setTimeout(saveLayoutState, 1000);
+}
+
+
 function renderContainerDetails(container: any | null) {
   if (!containerDetailsEl) return;
 
@@ -309,9 +376,12 @@ async function executeOperation(containerId: string, operation: any, index: numb
 document.addEventListener('DOMContentLoaded', () => {
   // Capture Panel
   const captureEl = document.getElementById('capture'); // If exists
-  
+
   // Container Tree
   const treeEl = document.getElementById('containerTree'); // If exists
+
+  // Load saved layout state
+  loadLayoutState();
 });
 
 
@@ -470,6 +540,7 @@ if (splitterHandle && bottomPanel && graphPanel) {
     if (isResizing) {
       isResizing = false;
       document.body.style.cursor = 'default';
+      scheduleSaveLayout();
     }
   });
 }

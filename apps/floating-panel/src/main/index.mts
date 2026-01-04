@@ -26,6 +26,7 @@ const HEADLESS = process.env.WEBAUTO_FLOATING_HEADLESS === '1';
 const DEVTOOLS = process.env.WEBAUTO_FLOATING_DEVTOOLS === '1';
 
 const STATE_FILE = path.join(os.homedir(), '.webauto', 'floating-window-state.json');
+const LAYOUT_STATE_FILE = path.join(os.homedir(), '.webauto', 'floating-layout-state.json');
 
 function ensureWebAutoDir() {
   const dir = path.dirname(STATE_FILE);
@@ -52,6 +53,28 @@ function saveWindowState(bounds: any) {
     fs.writeFileSync(STATE_FILE, JSON.stringify(bounds), 'utf8');
   } catch (e) {
     log('Failed to save window state: ' + e);
+  }
+}
+
+function loadLayoutState() {
+  try {
+    if (fs.existsSync(LAYOUT_STATE_FILE)) {
+      const data = fs.readFileSync(LAYOUT_STATE_FILE, 'utf8');
+      return JSON.parse(data);
+    }
+  } catch (e) {
+    log('Failed to load layout state: ' + e);
+  }
+  return null;
+}
+
+function saveLayoutState(layoutState: any) {
+  try {
+    ensureWebAutoDir();
+    fs.writeFileSync(LAYOUT_STATE_FILE, JSON.stringify(layoutState), 'utf8');
+    log('Layout state saved');
+  } catch (e) {
+    log('Failed to save layout state: ' + e);
   }
 }
 
@@ -435,6 +458,28 @@ ipcMain.handle('ui:action', async (_evt, { action, payload, request_id }) => {
   } catch (e) {
     log(`UI action error: ${e}`);
     return { success: false, error: String(e), request_id };
+  }
+});
+
+ipcMain.handle('layout:save', async (_evt, layoutState) => {
+  try {
+    log(`Saving layout state`);
+    saveLayoutState(layoutState);
+    return { success: true };
+  } catch (e) {
+    log(`Layout save error: ${e}`);
+    return { success: false, error: String(e) };
+  }
+});
+
+ipcMain.handle('layout:load', async (_evt) => {
+  try {
+    log(`Loading layout state`);
+    const state = loadLayoutState();
+    return { success: true, data: state };
+  } catch (e) {
+    log(`Layout load error: ${e}`);
+    return { success: false, error: String(e) };
   }
 });
 
