@@ -1,3 +1,4 @@
+import { ElementRegistry } from './ElementRegistry.js';
 import { RemoteMessageBusClient } from '../../libs/operations-framework/src/event-driven/RemoteMessageBusClient.js';
 import { SessionManager } from './SessionManager.js';
 import {
@@ -22,12 +23,14 @@ import {
  * 返回 RES_BROWSER_* 响应消息
  */
 export class BrowserMessageHandler {
+  private elementRegistry: ElementRegistry;
   private messageBus: RemoteMessageBusClient;
   private sessionManager: SessionManager;
 
   constructor(messageBus: RemoteMessageBusClient, sessionManager: SessionManager) {
     this.messageBus = messageBus;
     this.sessionManager = sessionManager;
+    this.elementRegistry = new ElementRegistry();
   }
 
   public async start(): Promise<void> {
@@ -97,11 +100,24 @@ export class BrowserMessageHandler {
     }
 
     try {
-      const page = await session.ensurePage();
+      let rootHandle: any;
+      
+      // 如果指定了 rootElementId，从注册表获取
+      if (rootElementId) {
+        rootHandle = this.elementRegistry.get(rootElementId);
+        if (!rootHandle) {
+          throw new Error(`Root element ${rootElementId} not found or expired`);
+        }
+      } else {
+        // 否则使用 page
+        rootHandle = await session.ensurePage();
+      }
       
       // 查询 DOM 元素
-      const elements = await page.$$(selector);
-      const elementIds = elements.map((_, index) => `element_${Date.now()}_${index}`);
+      const elements = await rootHandle.$(selector);
+      
+      // 注册并返回 ID
+      const elementIds = elements.map(el => this.elementRegistry.register(el, profileId));
 
       await this.messageBus.publish(RES_BROWSER_DOM_QUERY, {
         requestId,
@@ -124,17 +140,67 @@ export class BrowserMessageHandler {
     }
 
     try {
-      const page = await session.ensurePage();
-      
-      // 执行 DOM 操作 (简化实现，实际需要维护 elementId -> ElementHandle 的映射)
-      // 这里我们假设 params 中有 selector
+      // 优先从注册表获取元素
+      let elementHandle = elementId ? this.elementRegistry.get(elementId) : null;
+      let page;
+
+      // 如果找不到 handle，尝试回退到 page + selector 模式 (为了兼容性)
+      if (!elementHandle) {
+        page = await session.ensurePage();
+        if (params?.selector) {
+           elementHandle = await page.$(params.selector);
+        }
+      }
+
+      if (!elementHandle && !page) {
+         // 甚至没有 page (不太可能，除非 session 刚建立)
+         page = await session.ensurePage();
+      }
+
+      // 如果有 handle，直接操作 handle
+      if (elementHandle) {
+        let resultData: any = null;
+        switch (action) {
+          case 'click':
+            await elementHandle.click();
+            break;
+          case 'fill':
+          case 'input':
+            await elementHandle.fill(params?.value || '');
+            break;
+          case 'focus':
+            await elementHandle.focus();
+            break;
+          case 'extract':
+            if (params?.attribute) {
+              resultData = await elementHandle.getAttribute(params.attribute);
+            } else {
+              resultData = await elementHandle.textContent();
+            }
+            break;
+          default:
+            throw new Error(`Unknown action: ${action}`);
+        }
+        
+        await this.messageBus.publish(RES_BROWSER_DOM_ACTION, {
+          requestId,
+          success: true,
+          data: resultData
+        }, { component: 'BrowserService' });
+        
+        return;
+      }
+
+      // 回退到 Page 级操作 (针对没有 elementId 的情况)
+      // 这部分保留旧逻辑，或者是对视口级操作(scroll)的支持
+      page = await session.ensurePage();
       const selector = params?.selector;
+      
       if (!selector) {
-        throw new Error('Missing selector in params');
+         throw new Error(`Element ${elementId} not found and no selector provided`);
       }
 
       let resultData: any = null;
-
       switch (action) {
         case 'click':
           await page.click(selector);
@@ -163,11 +229,6 @@ export class BrowserMessageHandler {
         data: resultData
       }, { component: 'BrowserService' });
 
-      await this.messageBus.publish(RES_BROWSER_DOM_ACTION, {
-        requestId,
-        success: true,
-        data: { action, selector, status: 'completed' }
-      }, { component: 'BrowserService' });
     } catch (err: any) {
       await this.sendError(RES_BROWSER_DOM_ACTION, requestId, err.message);
     }
