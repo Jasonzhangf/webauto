@@ -6,6 +6,8 @@ import {
   MSG_CONTAINER_OPERATION_START,
   MSG_CONTAINER_OPERATION_COMPLETE,
   MSG_CONTAINER_OPERATION_FAILED,
+  MSG_CONTAINER_FOCUSED,
+  MSG_CONTAINER_DEFOCUSED,
   MSG_CONTAINER_ROOT_OPERATIONS_BATCH_COMPLETE,
   CMD_BROWSER_DOM_ACTION,
   RES_BROWSER_DOM_ACTION
@@ -134,14 +136,34 @@ export class ContainerOperationExecutor {
       throw new Error(`Container ${container.id} has no element reference`);
     }
 
-    const response = await this.rpcClient.call(CMD_BROWSER_DOM_ACTION, {
-      elementId,
-      action: op.type,
-      params: op.params
-    });
+    // Focus
+    await this.messageBus.publish(MSG_CONTAINER_FOCUSED, {
+      containerId: container.id,
+      operationId: op.id
+    }, { component: 'ContainerOperationExecutor' });
 
-    if (!response.success) {
-      throw new Error(response.error || 'Browser action failed');
+    try {
+      const response = await this.rpcClient.call(CMD_BROWSER_DOM_ACTION, {
+        elementId,
+        action: op.type,
+        params: op.params
+      });
+
+      if (!response.success) {
+        throw new Error(response.error || 'Browser action failed');
+      }
+      
+      // Handle extract specifically
+      if (op.type === 'extract' && response.data) {
+         // Store extracted data? For now just log or put in message
+      }
+
+    } finally {
+      // Defocus
+      await this.messageBus.publish(MSG_CONTAINER_DEFOCUSED, {
+        containerId: container.id,
+        operationId: op.id
+      }, { component: 'ContainerOperationExecutor' });
     }
   }
 }

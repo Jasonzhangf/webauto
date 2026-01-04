@@ -8,6 +8,7 @@ import { ContainerStatusTracker } from './ContainerStatusTracker.js';
 import {
   MSG_CONTAINER_ROOT_PAGE_LOAD,
   MSG_CONTAINER_ROOT_SCROLL_START,
+  MSG_CONTAINER_ROOT_SCROLL_PROGRESS,
   MSG_CONTAINER_ROOT_SCROLL_COMPLETE,
   MSG_CONTAINER_ROOT_ALL_OPERATIONS_COMPLETE,
   MSG_CONTAINER_ROOT_DISCOVER_COMPLETE,
@@ -70,6 +71,11 @@ export class RootContainerDriver {
     
     this.variableManager.setRootContainerId(this.config.definition.id);
     this.statusTracker.setRootContainerId(this.config.definition.id);
+    
+    // 发送页面加载消息
+    await this.messageBus.publish(MSG_CONTAINER_ROOT_PAGE_LOAD, {
+      rootContainerId: this.config.definition.id
+    }, { component: 'RootContainerDriver' });
     
     // 初始化根变量
     this.variableManager.initContainerVariables(this.config.definition.id, [], {
@@ -174,6 +180,12 @@ export class RootContainerDriver {
       console.warn('[RootContainerDriver] Scroll RPC failed:', error);
       // 降级处理或终止流程？这里选择继续，但可能需要更好的错误处理
     }
+
+    
+    await this.messageBus.publish(MSG_CONTAINER_ROOT_SCROLL_PROGRESS, {
+        count: this.scrollCount,
+        progress: 100
+    }, { component: 'RootContainerDriver' });
 
     await this.messageBus.publish(MSG_CONTAINER_ROOT_SCROLL_COMPLETE, {
       count: this.scrollCount

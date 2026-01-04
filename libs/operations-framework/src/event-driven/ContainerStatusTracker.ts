@@ -79,6 +79,7 @@ export class ContainerStatusTracker {
         operationsCompleted: 0,
        lastUpdateTime: Date.now()
      });
+       this.totalDiscovered++;
    }
  });
 

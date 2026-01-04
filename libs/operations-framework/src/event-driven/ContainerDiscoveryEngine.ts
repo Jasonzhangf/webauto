@@ -10,6 +10,7 @@ import {
   MSG_CONTAINER_MATCH_START,
   MSG_CONTAINER_MATCH_SUCCESS,
   MSG_CONTAINER_MATCH_FAILED,
+  MSG_CONTAINER_APPEAR,
   CMD_BROWSER_DOM_QUERY,
   RES_BROWSER_DOM_QUERY
 } from './MessageConstants.js';
@@ -194,6 +195,14 @@ export class ContainerDiscoveryEngine {
       element,
       parentId
     };
+
+    
+    await this.messageBus.publish(MSG_CONTAINER_APPEAR, {
+      containerId: id,
+      definitionId: def.id,
+      parentId: parentId,
+      index: index
+    }, { component: 'ContainerDiscoveryEngine' });
 
     return instance;
   }
