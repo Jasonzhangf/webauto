@@ -85,7 +85,13 @@ export function renderAddOperationPanel(primarySelector: string | null, domPath:
   const optionsHtml = types.map(t => `<option value="${t.value}">${t.label}</option>`).join('');
   
   const commonTriggers = ['appear', 'click', 'focused', 'defocused'];
-  const triggerOptionsHtml = commonTriggers.map(t => `<option value="${t}">${t}</option>`).join('');
+  const rootTriggers = [
+    'MSG_CONTAINER_ROOT_SCROLL_COMPLETE',
+    'MSG_CONTAINER_ROOT_ALL_OPERATIONS_COMPLETE'
+  ];
+  
+  const triggers = isRoot ? [...commonTriggers, ...rootTriggers] : commonTriggers;
+  const triggerOptionsHtml = triggers.map(t => `<option value="${t}">${t}</option>`).join('');
 
   return `
     <div class="quick-add-bar" style="display:flex;gap:4px;align-items:center;padding:4px;background:#252526;border-top:1px solid #3e3e3e;margin-top:auto;">

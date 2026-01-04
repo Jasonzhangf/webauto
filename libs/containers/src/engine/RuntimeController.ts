@@ -16,6 +16,9 @@ export interface RuntimeDeps {
   operationExecutor?: {
     execute: (containerId: string, operationId: string, config: any, handle: any) => Promise<any>;
   };
+  // New dependencies
+  discoveryEngine?: any;
+  statusTracker?: any;
 }
 
 export class RuntimeController {
@@ -25,6 +28,9 @@ export class RuntimeController {
   private scheduler = new Scheduler();
   private running = false;
   private bindingRegistry?: any;
+  private discoveryEngine?: any; // New discovery engine
+  private operationExecutor?: any; // New operation executor
+  private statusTracker?: any; // New status tracker
 
   constructor(
     private defs: ContainerDefV2[],
@@ -33,11 +39,24 @@ export class RuntimeController {
     bindingRegistry?: any
   ) {
     this.bindingRegistry = bindingRegistry;
-    
+    this.discoveryEngine = deps.discoveryEngine;
+    this.operationExecutor = deps.operationExecutor;
+    this.statusTracker = deps.statusTracker;
+
     // Subscribe to external operation execution events
     if (this.bindingRegistry && this.deps.eventBus) {
       this.deps.eventBus.on('operation:*:execute', async (data: any) => {
         await this.handleExternalOperation(data);
+      });
+    }
+
+    // Subscribe to new message system events
+    if (this.deps.eventBus?.subscribe) {
+      this.deps.eventBus.subscribe('MSG_CONTAINER_OPERATION_COMPLETE', (msg: any) => {
+        this.statusTracker?.setCompleted(msg.payload.containerId, msg.payload.result);
+      });
+      this.deps.eventBus.subscribe('MSG_CONTAINER_OPERATION_FAILED', (msg: any) => {
+        this.statusTracker?.setFailed(msg.payload.containerId, msg.payload.error);
       });
     }
   }
@@ -45,6 +64,11 @@ export class RuntimeController {
   async start(rootId: string, rootHandle: any, mode: RunMode = 'sequential') {
     this.graph = await this.discovery.discoverFromRoot(rootId, rootHandle);
     this.rel = new RelationshipRegistry(this.graph);
+
+    // Initialize status tracker if available
+    if (this.statusTracker) {
+      this.statusTracker.initialize(Array.from(this.graph.nodes.keys()));
+    }
     
     // seed op queues
     const root = this.graph.nodes.get(rootId)!;

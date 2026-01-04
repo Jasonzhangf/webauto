@@ -973,12 +973,155 @@ export class UiController {
     throw new Error('handleDomBranch2 is not implemented in controller.ts');
   }
 
-  async captureInspectorSnapshot(_options: Record<string, unknown> = {}): Promise<any> {
-    throw new Error('captureInspectorSnapshot is not implemented in controller.ts');
+  async fetchSessions(): Promise<Session[]> {
+    try {
+      const res = await this.runCliCommand('session-manager', ['list']);
+      const sessions = res?.sessions || res?.data?.sessions || res?.data || [];
+      return Array.isArray(sessions) ? sessions : [];
+    } catch {
+      return [];
+    }
   }
 
-  async captureInspectorBranch(_options: Record<string, unknown> = {}): Promise<any> {
-    throw new Error('captureInspectorBranch is not implemented in controller.ts');
+  findSessionByProfile(sessions: Session[], profile: string): Session | null {
+    if (!profile) return null;
+    return (
+      sessions.find(
+        (session) =>
+          session?.profileId === profile ||
+          session?.profile_id === profile ||
+          session?.session_id === profile ||
+          session?.sessionId === profile,
+      ) || null
+    );
+  }
+
+  focusSnapshotOnContainer(snapshot: any, containerId: string) {
+    if (!containerId || !snapshot?.container_tree) {
+      return snapshot;
+    }
+    const target = this.cloneContainerSubtree(snapshot.container_tree, containerId);
+    if (!target) {
+      return snapshot;
+    }
+    const nextSnapshot = {
+      ...snapshot,
+      container_tree: target,
+      metadata: {
+        ...(snapshot.metadata || {}),
+        root_container_id: containerId,
+      },
+    };
+    if (!nextSnapshot.root_match || nextSnapshot.root_match?.container?.id !== containerId) {
+      nextSnapshot.root_match = {
+        container: {
+          id: containerId,
+          ...(target.name ? { name: target.name } : {}),
+        },
+        matched_selector: target.match?.matched_selector,
+      };
+    }
+    return nextSnapshot;
+  }
+
+  cloneContainerSubtree(node: any, targetId: string): any {
+    if (!node) return null;
+    if (node.id === targetId || node.container_id === targetId) {
+      return this.deepClone(node);
+    }
+    if (Array.isArray(node.children)) {
+      for (const child of node.children) {
+        const match = this.cloneContainerSubtree(child, targetId);
+        if (match) return match;
+      }
+    }
+    return null;
+  }
+
+  deepClone(payload: any) {
+    return JSON.parse(JSON.stringify(payload));
+  }
+
+  async captureInspectorSnapshot(options: SnapshotOptions = {}) {
+    const profile = options.profile;
+    const sessions = await this.fetchSessions();
+    const targetSession = profile ? this.findSessionByProfile(sessions, profile) : sessions[0] || null;
+    const sessionId = targetSession?.session_id || targetSession?.sessionId || profile || null;
+    const profileId = profile || targetSession?.profileId || targetSession?.profile_id || sessionId || null;
+    const targetUrl = options.url || targetSession?.current_url || targetSession?.currentUrl;
+    const requestedContainerId = (options as any).containerId || (options as any).rootContainerId;
+    if (!targetUrl) {
+      throw new Error('无法确定会话 URL，请先在浏览器中打开目标页面');
+    }
+    let liveError: Error | null = null;
+    let snapshot: any = null;
+    if (sessionId) {
+      try {
+        snapshot = await this.fetchContainerSnapshotFromService({
+          sessionId,
+          url: targetUrl,
+          maxDepth: options.maxDepth,
+          maxChildren: options.maxChildren,
+          rootContainerId: requestedContainerId,
+          rootSelector: (options as any).rootSelector,
+        });
+      } catch (err) {
+        liveError = err as Error;
+      }
+    }
+    if (!snapshot || !snapshot.container_tree) {
+      const rootError = liveError || new Error('容器树为空，检查容器定义或选择器是否正确');
+      throw rootError;
+    }
+    if (requestedContainerId) {
+      snapshot = this.focusSnapshotOnContainer(snapshot, requestedContainerId);
+    }
+    return {
+      sessionId: sessionId || profileId || 'unknown-session',
+      profileId: profileId || 'default',
+      targetUrl,
+      snapshot,
+    };
+  }
+
+  async captureInspectorBranch(options: BranchOptions = {}) {
+    const profile = options.profile;
+    const domPath = options.path;
+    if (!profile) throw new Error('缺少 profile');
+    if (!domPath) throw new Error('缺少 DOM 路径');
+    const sessions = await this.fetchSessions();
+    const targetSession = profile ? this.findSessionByProfile(sessions, profile) : sessions[0] || null;
+    const sessionId = targetSession?.session_id || targetSession?.sessionId || profile || null;
+    const profileId = profile || targetSession?.profileId || targetSession?.profile_id || sessionId || null;
+    const targetUrl = options.url || targetSession?.current_url || targetSession?.currentUrl;
+    if (!targetUrl) {
+      throw new Error('无法确定会话 URL');
+    }
+    let branch: any = null;
+    let liveError: Error | null = null;
+    if (sessionId) {
+      try {
+        branch = await this.fetchDomBranchFromService({
+          sessionId,
+          url: targetUrl,
+          path: domPath,
+          rootSelector: options.rootSelector,
+          maxDepth: options.maxDepth,
+          maxChildren: options.maxChildren,
+        });
+      } catch (err) {
+        liveError = err as Error;
+      }
+    }
+    if (!branch?.node) {
+      throw liveError || new Error('无法获取 DOM 分支');
+    }
+    return {
+      sessionId: sessionId || profileId || 'unknown-session',
+      profileId: profileId || 'default',
+      targetUrl,
+      branch,
+    };
   }
 
   resolveSiteKeyFromUrl(_url: string): string {

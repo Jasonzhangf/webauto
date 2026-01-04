@@ -3,11 +3,11 @@
  * 协调多个子容器的工作，提供整体页面管理
  */
 
-import { EventDrivenContainer, ContainerConfig, ContainerSharedSpace } from './EventDrivenContainer';
-import { EventDrivenLinkContainer, LinkConfig } from './EventDrivenLinkContainer';
-import { EventDrivenScrollContainer, ScrollConfig } from './EventDrivenScrollContainer';
-import { EventDrivenPaginationContainer, PaginationConfig } from './EventDrivenPaginationContainer';
-import { CONTAINER_EVENTS } from './EventTypes';
+import { EventDrivenContainer, ContainerConfig, ContainerSharedSpace } from './EventDrivenContainer.js';
+import { EventDrivenLinkContainer, LinkConfig } from './EventDrivenLinkContainer.js';
+import { EventDrivenScrollContainer, ScrollConfig } from './EventDrivenScrollContainer.js';
+import { EventDrivenPaginationContainer, PaginationConfig } from './EventDrivenPaginationContainer.js';
+import { CONTAINER_EVENTS } from './EventTypes.js';
 import { bindActionsFromContainerLibraryForUrl } from '../containers/ContainerLibraryActionsBinder';
 
 export interface PageContainerConfig extends ContainerConfig {

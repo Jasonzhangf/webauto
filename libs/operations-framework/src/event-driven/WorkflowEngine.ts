@@ -3,8 +3,8 @@
  * 基于事件驱动的容器编排和任务调度系统
  */
 
-import { EventBus, EventData, EventHandler } from './EventBus';
-import { CONTAINER_EVENTS, EventType, EventDataMap, EventFilter } from './EventTypes';
+import { EventBus, EventData, EventHandler } from './EventBus.js';
+import { CONTAINER_EVENTS, EventType, EventDataMap, EventFilter } from './EventTypes.js';
 
 export interface WorkflowRule {
   id: string;

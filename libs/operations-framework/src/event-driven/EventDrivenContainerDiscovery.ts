@@ -3,9 +3,9 @@
  * 提供统一的容器注册、发现和管理功能
  */
 
-import { EventBus } from './EventBus';
+import { EventBus } from './EventBus.js';
 import { ContainerRegistry, ContainerInfo } from '../containers/ContainerRegistry';
-import { EventDrivenContainer } from './EventDrivenContainer';
+import { EventDrivenContainer } from './EventDrivenContainer.js';
 // 为避免误用 Node 侧 Playwright，这里只定义一个最小 Page 接口
 type Page: string;
 };

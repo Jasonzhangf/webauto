@@ -1,4 +1,4 @@
-import { findDomNodeByPath } from './dom-helpers.mts';
+import { findDomNodeByPath } from './dom-helpers.mjs';
 
 export interface ContainerDomConnection {
   containerId: string;

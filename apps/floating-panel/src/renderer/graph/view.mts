@@ -1,5 +1,5 @@
 import { logger } from '../logger.mts';
-import { computeContainerDomConnections, ContainerDomConnection } from './matcher.mts';
+import { computeContainerDomConnections, ContainerDomConnection } from './matcher.mjs';
 
 export interface GraphRenderState {
   canvas: SVGSVGElement | null;

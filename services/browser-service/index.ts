@@ -3,6 +3,8 @@ import { IncomingMessage, ServerResponse } from 'http';
 import { setTimeout as delay } from 'timers/promises';
 import { SessionManager, CreateSessionPayload, SESSION_CLOSED_EVENT } from './SessionManager.js';
 import { BrowserWsServer } from './ws-server.js';
+import { RemoteMessageBusClient } from '../../libs/operations-framework/src/event-driven/RemoteMessageBusClient.js';
+import { BrowserMessageHandler } from './BrowserMessageHandler.js';
 import { logDebug } from '../../modules/logging/src/index.js';
 
 type CommandPayload = { action: string; args?: any };
@@ -13,6 +15,7 @@ interface BrowserServiceOptions {
   enableWs?: boolean;
   wsPort?: number;
   wsHost?: string;
+  busUrl?: string;
 }
 
 const clients = new Set<ServerResponse>();
@@ -26,8 +29,9 @@ export async function startBrowserService(opts: BrowserServiceOptions = {}) {
   const wsHost = opts.wsHost || '127.0.0.1';
   const wsPort = Number(opts.wsPort || 8765);
   const autoExit = process.env.BROWSER_SERVICE_AUTO_EXIT === '1';
+  const busUrl = opts.busUrl || process.env.WEBAUTO_BUS_URL || 'ws://127.0.0.1:7701/bus';
 
-  logDebug('browser-service', 'start', { host, port, wsHost, wsPort, enableWs, autoExit });
+  logDebug('browser-service', 'start', { host, port, wsHost, wsPort, enableWs, autoExit, busUrl });
 
   const server = http.createServer(async (req, res) => {
     const url = new URL(req.url || '/', `http://${req.headers.host}`);
@@ -93,12 +97,31 @@ export async function startBrowserService(opts: BrowserServiceOptions = {}) {
     }
   }
 
+  // Connect to message bus
+  let messageBusClient: RemoteMessageBusClient | null = null;
+  let messageHandler: BrowserMessageHandler | null = null;
+
+  if (busUrl) {
+    messageBusClient = new RemoteMessageBusClient(busUrl);
+    try {
+      await messageBusClient.connect();
+      messageHandler = new BrowserMessageHandler(messageBusClient, sessionManager);
+      await messageHandler.start();
+      console.log('[browser-service] Connected to message bus');
+    } catch (err) {
+      console.warn('[browser-service] Failed to connect to message bus:', (err as Error).message);
+    }
+  }
+
   const shutdown = async () => {
     server.close();
     clients.forEach((client) => client.end());
     autoLoops.forEach((timer) => clearInterval(timer));
     if (wsServer) {
       await wsServer.stop().catch(() => {});
+    }
+    if (messageHandler) {
+      // Clean up message handler if needed
     }
     await sessionManager.shutdown();
   };
@@ -152,7 +175,7 @@ async function handleCommand(payload: CommandPayload, manager: SessionManager) {
       const session = manager.getSession(profileId);
       if (!session) throw new Error(`session for profile ${profileId} not started`);
       if (!args.path) throw new Error('path required');
-      const result = await session.saveCookiesToFile(args.path); // Profile 自动管理，不建议手动调用
+      const result = await session.saveCookiesToFile(args.path);
       return { ok: true, body: { ok: true, ...result } };
     }
     case 'saveCookiesIfStable': {
@@ -160,7 +183,7 @@ async function handleCommand(payload: CommandPayload, manager: SessionManager) {
       const session = manager.getSession(profileId);
       if (!session) throw new Error(`session for profile ${profileId} not started`);
       if (!args.path) throw new Error('path required');
-      const result = await session.saveCookiesIfStable(args.path, { minDelayMs: args.minDelayMs }); // Profile 自动管理，不建议手动调用
+      const result = await session.saveCookiesIfStable(args.path, { minDelayMs: args.minDelayMs });
       return { ok: true, body: { ok: true, saved: !!result, ...result } };
     }
     case 'loadCookies': {
@@ -168,7 +191,7 @@ async function handleCommand(payload: CommandPayload, manager: SessionManager) {
       const session = manager.getSession(profileId);
       if (!session) throw new Error(`session for profile ${profileId} not started`);
       if (!args.path) throw new Error('path required');
-      const result = await session.injectCookiesFromFile(args.path); // Profile 自动管理，不建议手动调用
+      const result = await session.injectCookiesFromFile(args.path);
       return { ok: true, body: { ok: true, ...result } };
     }
     case 'getStatus': {
@@ -224,19 +247,6 @@ async function handleCommand(payload: CommandPayload, manager: SessionManager) {
      const profileId = args.profileId || 'default';
      return { ok: true, body: { ok: !!autoLoops.get(profileId) } };
    }
-    case 'dom:pick:2': {
-      // For now DOM pick is handled by controller via WS, not directly here.
-      throw new Error('dom:pick:2 is handled by controller, /command should not call it directly');
-    }
-    case 'dom:branch:2': {
-      const profileId = (args.profile as string) || (args.profileId as string) || 'default';
-      const session = manager.getSession(profileId);
-      if (!session) {
-        throw new Error(`session for profile ${profileId} not started`);
-      }
-      // Forward to controller via WS for DOM branch loading
-      throw new Error('dom:branch:2 is handled via controller; call controller ui:action dom:branch:2 instead');
-    }
     default:
       throw new Error(`Unknown action: ${action}`);
   }
@@ -258,10 +268,12 @@ if (import.meta.url === process.argv[1]) {
   const portArg = process.argv.indexOf('--port');
   const wsPortArg = process.argv.indexOf('--ws-port');
   const wsHostArg = process.argv.indexOf('--ws-host');
+  const busUrlArg = process.argv.indexOf('--bus-url');
   const disableWs = process.argv.includes('--no-ws');
   const host = hostArg >= 0 ? process.argv[hostArg + 1] : '127.0.0.1';
   const port = portArg >= 0 ? Number(process.argv[portArg + 1]) : 7704;
   const wsPort = wsPortArg >= 0 ? Number(process.argv[wsPortArg + 1]) : 8765;
   const wsHost = wsHostArg >= 0 ? process.argv[wsHostArg + 1] : '127.0.0.1';
-  startBrowserService({ host, port, wsHost, wsPort, enableWs: !disableWs });
+  const busUrl = busUrlArg >= 0 ? process.argv[busUrlArg + 1] : undefined;
+  startBrowserService({ host, port, wsHost, wsPort, enableWs: !disableWs, busUrl });
 }

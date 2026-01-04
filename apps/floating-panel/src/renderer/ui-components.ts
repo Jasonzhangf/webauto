@@ -1,7 +1,16 @@
 import { Operation } from './operation-types.js';
+import { ROOT_CONFIG_STYLES } from './root-config-ui.mts';
+import { MONITOR_STYLES } from './message-monitor-ui.mts';
+import { STATUS_PANEL_STYLES } from './operation-status-panel.mts';
+import { VARIABLE_VIEWER_STYLES } from './root-variable-viewer.mts';
 
 // CSS Styles for new UI components
 export const UI_STYLES = `
+  ${ROOT_CONFIG_STYLES}
+  ${MONITOR_STYLES}
+  ${STATUS_PANEL_STYLES}
+  ${VARIABLE_VIEWER_STYLES}
+
   /* Table/List Styles */
   .op-list-wrapper {
     display: flex;
@@ -139,7 +148,7 @@ export const UI_STYLES = `
   /* Shortcuts */
   .shortcut-btn {
     background: #333;
-    border: 1px solid #444;
+    border:1px solid #444;
     color: #aaa;
     font-size: 9px;
     padding: 1px 4px;

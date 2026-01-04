@@ -1,0 +1,266 @@
+import { RemoteMessageBusClient } from '../../libs/operations-framework/src/event-driven/RemoteMessageBusClient.js';
+import { SessionManager } from './SessionManager.js';
+import {
+  CMD_BROWSER_DOM_QUERY,
+  CMD_BROWSER_DOM_ACTION,
+  CMD_BROWSER_PAGE_SCROLL,
+  CMD_BROWSER_PAGE_NAVIGATE,
+  CMD_BROWSER_SNAPSHOT,
+  CMD_BROWSER_EVALUATE,
+  RES_BROWSER_DOM_QUERY,
+  RES_BROWSER_DOM_ACTION,
+  RES_BROWSER_PAGE_SCROLL,
+  RES_BROWSER_PAGE_NAVIGATE,
+  RES_BROWSER_SNAPSHOT,
+  RES_BROWSER_EVALUATE,
+  MSG_BROWSER_SERVICE_READY
+} from '../../libs/operations-framework/src/event-driven/MessageConstants.js';
+
+/**
+ * Browser Message Handler
+ * 订阅 CMD_BROWSER_* 消息并通过 SessionManager 执行浏览器操作
+ * 返回 RES_BROWSER_* 响应消息
+ */
+export class BrowserMessageHandler {
+  private messageBus: RemoteMessageBusClient;
+  private sessionManager: SessionManager;
+
+  constructor(messageBus: RemoteMessageBusClient, sessionManager: SessionManager) {
+    this.messageBus = messageBus;
+    this.sessionManager = sessionManager;
+  }
+
+  public async start(): Promise<void> {
+    // 订阅所有浏览器命令
+    this.messageBus.subscribe('CMD_BROWSER_*', async (message) => {
+      await this.handleCommand(message);
+    });
+
+    // 发布服务就绪消息
+    await this.messageBus.publish(MSG_BROWSER_SERVICE_READY, {
+      status: 'ready',
+      timestamp: Date.now()
+    }, { component: 'BrowserService' });
+
+    console.log('[BrowserMessageHandler] Started and subscribed to CMD_BROWSER_*');
+  }
+
+  private async handleCommand(message: any): Promise<void> {
+    const { type, payload } = message;
+    const requestId = payload?.requestId;
+
+    if (!requestId) {
+      console.warn('[BrowserMessageHandler] Message without requestId:', type);
+      return;
+    }
+
+    console.log(`[BrowserMessageHandler] Handling ${type} (requestId: ${requestId})`);
+
+    try {
+      switch (type) {
+        case CMD_BROWSER_DOM_QUERY:
+          await this.handleDomQuery(requestId, payload);
+          break;
+        case CMD_BROWSER_DOM_ACTION:
+          await this.handleDomAction(requestId, payload);
+          break;
+        case CMD_BROWSER_PAGE_SCROLL:
+          await this.handlePageScroll(requestId, payload);
+          break;
+        case CMD_BROWSER_PAGE_NAVIGATE:
+          await this.handlePageNavigate(requestId, payload);
+          break;
+        case CMD_BROWSER_SNAPSHOT:
+          await this.handleSnapshot(requestId, payload);
+          break;
+        case CMD_BROWSER_EVALUATE:
+          await this.handleEvaluate(requestId, payload);
+          break;
+        default:
+          console.warn(`[BrowserMessageHandler] Unknown command: ${type}`);
+          await this.sendError(type.replace('CMD_', 'RES_'), requestId, 'Unknown command');
+      }
+    } catch (err: any) {
+      console.error(`[BrowserMessageHandler] Error handling ${type}:`, err);
+      await this.sendError(type.replace('CMD_', 'RES_'), requestId, err.message || String(err));
+    }
+  }
+
+  private async handleDomQuery(requestId: string, payload: any): Promise<void> {
+    const { selector, rootElementId, sessionId } = payload;
+    const profileId = sessionId || 'default';
+    
+    const session = this.sessionManager.getSession(profileId);
+    if (!session) {
+      await this.sendError(RES_BROWSER_DOM_QUERY, requestId, `Session ${profileId} not found`);
+      return;
+    }
+
+    try {
+      const page = await session.ensurePage();
+      
+      // 查询 DOM 元素
+      const elements = await page.$$(selector);
+      const elementIds = elements.map((_, index) => `element_${Date.now()}_${index}`);
+
+      await this.messageBus.publish(RES_BROWSER_DOM_QUERY, {
+        requestId,
+        success: true,
+        data: elementIds
+      }, { component: 'BrowserService' });
+    } catch (err: any) {
+      await this.sendError(RES_BROWSER_DOM_QUERY, requestId, err.message);
+    }
+  }
+
+  private async handleDomAction(requestId: string, payload: any): Promise<void> {
+    const { elementId, action, params, sessionId } = payload;
+    const profileId = sessionId || 'default';
+    
+    const session = this.sessionManager.getSession(profileId);
+    if (!session) {
+      await this.sendError(RES_BROWSER_DOM_ACTION, requestId, `Session ${profileId} not found`);
+      return;
+    }
+
+    try {
+      const page = await session.ensurePage();
+      
+      // 执行 DOM 操作 (简化实现，实际需要维护 elementId -> ElementHandle 的映射)
+      // 这里我们假设 params 中有 selector
+      const selector = params?.selector;
+      if (!selector) {
+        throw new Error('Missing selector in params');
+      }
+
+      switch (action) {
+        case 'click':
+          await page.click(selector);
+          break;
+        case 'fill':
+        case 'input':
+          await page.fill(selector, params?.value || '');
+          break;
+        case 'focus':
+          await page.focus(selector);
+          break;
+        default:
+          throw new Error(`Unknown action: ${action}`);
+      }
+
+      await this.messageBus.publish(RES_BROWSER_DOM_ACTION, {
+        requestId,
+        success: true,
+        data: { action, selector, status: 'completed' }
+      }, { component: 'BrowserService' });
+    } catch (err: any) {
+      await this.sendError(RES_BROWSER_DOM_ACTION, requestId, err.message);
+    }
+  }
+
+  private async handlePageScroll(requestId: string, payload: any): Promise<void> {
+    const { x, y, sessionId } = payload;
+    const profileId = sessionId || 'default';
+    
+    const session = this.sessionManager.getSession(profileId);
+    if (!session) {
+      await this.sendError(RES_BROWSER_PAGE_SCROLL, requestId, `Session ${profileId} not found`);
+      return;
+    }
+
+    try {
+      const page = await session.ensurePage();
+      
+      // 执行滚动
+      await page.evaluate((pos) => {
+        window.scrollTo(pos.x, pos.y);
+      }, { x: x || 0, y: y || 0 });
+
+      await this.messageBus.publish(RES_BROWSER_PAGE_SCROLL, {
+        requestId,
+        success: true,
+        data: { x, y, scrolled: true }
+      }, { component: 'BrowserService' });
+    } catch (err: any) {
+      await this.sendError(RES_BROWSER_PAGE_SCROLL, requestId, err.message);
+    }
+  }
+
+  private async handlePageNavigate(requestId: string, payload: any): Promise<void> {
+    const { url, sessionId } = payload;
+    const profileId = sessionId || 'default';
+    
+    const session = this.sessionManager.getSession(profileId);
+    if (!session) {
+      await this.sendError(RES_BROWSER_PAGE_NAVIGATE, requestId, `Session ${profileId} not found`);
+      return;
+    }
+
+    try {
+      await session.goto(url);
+
+      await this.messageBus.publish(RES_BROWSER_PAGE_NAVIGATE, {
+        requestId,
+        success: true,
+        data: { url, loaded: true }
+      }, { component: 'BrowserService' });
+    } catch (err: any) {
+      await this.sendError(RES_BROWSER_PAGE_NAVIGATE, requestId, err.message);
+    }
+  }
+
+  private async handleSnapshot(requestId: string, payload: any): Promise<void> {
+    const { fullPage, sessionId } = payload;
+    const profileId = sessionId || 'default';
+    
+    const session = this.sessionManager.getSession(profileId);
+    if (!session) {
+      await this.sendError(RES_BROWSER_SNAPSHOT, requestId, `Session ${profileId} not found`);
+      return;
+    }
+
+    try {
+      const buffer = await session.screenshot(!!fullPage);
+      const base64 = buffer.toString('base64');
+
+      await this.messageBus.publish(RES_BROWSER_SNAPSHOT, {
+        requestId,
+        success: true,
+        data: base64
+      }, { component: 'BrowserService' });
+    } catch (err: any) {
+      await this.sendError(RES_BROWSER_SNAPSHOT, requestId, err.message);
+    }
+  }
+
+  private async handleEvaluate(requestId: string, payload: any): Promise<void> {
+    const { script, sessionId } = payload;
+    const profileId = sessionId || 'default';
+    
+    const session = this.sessionManager.getSession(profileId);
+    if (!session) {
+      await this.sendError(RES_BROWSER_EVALUATE, requestId, `Session ${profileId} not found`);
+      return;
+    }
+
+    try {
+      const result = await session.evaluate(script);
+
+      await this.messageBus.publish(RES_BROWSER_EVALUATE, {
+        requestId,
+        success: true,
+        data: { result }
+      }, { component: 'BrowserService' });
+    } catch (err: any) {
+      await this.sendError(RES_BROWSER_EVALUATE, requestId, err.message);
+    }
+  }
+
+  private async sendError(responseType: string, requestId: string, error: string): Promise<void> {
+    await this.messageBus.publish(responseType, {
+      requestId,
+      success: false,
+      error
+    }, { component: 'BrowserService' });
+  }
+}

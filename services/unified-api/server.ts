@@ -5,8 +5,7 @@ import { TreeDiscoveryEngine } from '../../libs/containers/src/engine/TreeDiscov
 import { OperationExecutor } from '../../libs/containers/src/engine/OperationExecutor.js';
 import { logDebug } from '../../modules/logging/src/index.js';
 import { UiController } from '../../services/controller/src/controller.js';
-// TS 类型声明通过本地 d.ts 提供，这里忽略实现文件的扩展名校验
-// @ts-ignore
+import { handleContainerOperations } from './container-operations-handler.mts';
 import { setupContainerOperationsRoutes } from './container-operations.mjs';
 import { WebSocketServer, WebSocket } from 'ws';
 import { EventBus, globalEventBus } from '../../libs/operations-framework/src/event-driven/EventBus.js';
@@ -14,6 +13,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { SessionManager } from '../browser-service/SessionManager.js';
+import { ensureBuiltinOperations } from '../../modules/operations/src/builtin.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -43,9 +43,10 @@ class UnifiedApiServer {
   private subscriptions: Map<WebSocket, Set<string>>;
   private eventBus: EventBus;
   private containerSubscriptions: Map<string, Set<WebSocket>> = new Map();
-  private bindingRules: any;
   private containerLoader: any;
   private runtimeControllers: Map<string, RuntimeController> = new Map();
+  private containerExecutor: any;
+  private sessionManager: any;
   constructor() {
     this.controller = new UiController({
       repoRoot,
@@ -86,7 +87,7 @@ class UnifiedApiServer {
     });
   }
 
-  private broadcastEvent(topic: string, payload: any): void {
+    private broadcastEvent(topic: string, payload: any): void {
     const message = {
       type: 'event',
       topic,
@@ -95,6 +96,13 @@ class UnifiedApiServer {
     };
 
     this.wsClients.forEach((socket) => {
+      if (socket.readyState === WebSocket.OPEN) {
+        this.safeSend(socket, message);
+      }
+    });
+    
+    // Also broadcast to bus clients so they receive events
+    this.busClients.forEach((socket) => {
       if (socket.readyState === WebSocket.OPEN) {
         this.safeSend(socket, message);
       }
@@ -217,6 +225,9 @@ class UnifiedApiServer {
     const server = createServer();
     const wss = new WebSocketServer({ server });
 
+    // Initialize builtin operations
+    ensureBuiltinOperations();
+
     // Session manager for container operations
     const sessionManager = new SessionManager({
       host: defaultHttpHost,
@@ -224,79 +235,30 @@ class UnifiedApiServer {
       wsHost: defaultWsHost,
       wsPort: defaultWsPort
     });
+    this.sessionManager = sessionManager;
 
-    // Setup container operations routes
-    this.bindingRules = setupContainerOperationsRoutes(server, sessionManager);
-
-    // Runtime controller endpoints
-    server.on("request", async (req, res) => {
-      const url = new URL(req.url!, `http://${req.headers.host}`);
-
-      if (req.method === "POST" && url.pathname === "/v1/runtime/start") {
-        try {
-          const payload = await this.readJsonBody(req);
-          const { containerId, sessionId, website } = payload;
-
-          // TODO: Implement /v1/runtime/start endpoint logic
-          if (!sessionId || !website) {
-            res.writeHead(400, { "Content-Type": "application/json" });
-            res.end(JSON.stringify({ success: false, error: "sessionId and website required" }));
-            return;
-          }
-
-          res.writeHead(501, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ success: false, error: "Endpoint not yet implemented" }));
-        } catch (err: any) {
-          res.writeHead(500, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ success: false, error: err?.message || String(err) }));
+    // Create OperationExecutor
+    this.containerExecutor = new OperationExecutor(
+      (sessionId) => {
+        const session = sessionManager.getSession(sessionId);
+        if (!session) {
+          throw new Error(`Session not found`);
         }
-        return;
-      }
+        return session.ensurePage();
+      },
+      { info: (...args) => logDebug('container-ops', 'info', args),
+        warn: (...args) => logDebug('container-ops', 'warn', args),
+        error: (...args) => logDebug('container-ops', 'error', args) }
+    );
 
-
-      if (req.method === "POST" && url.pathname === "/v1/runtime/discover") {
-        try {
-          const payload = await this.readJsonBody(req);
-          const { containerId, sessionId, website, rootSelector } = payload;
-
-          if (!sessionId || !website) {
-            res.writeHead(400, { "Content-Type": "application/json" });
-            res.end(JSON.stringify({ success: false, error: "sessionId and website required" }));
-            return;
-          }
-
-          // Load container definitions
-          const defs = await this.containerLoader.loadForWebsite(website);
-
-          // Create discovery engine with browser adapter
-          const browserAdapter = new BrowserDiscoveryAdapter(sessionManager, sessionId);
-          const discovery = new TreeDiscoveryEngine(defs, browserAdapter);
-
-          // Run discovery
-          const rootId = containerId || `${website}_main_page`;
-          // Use selector from payload or root handle if needed
-          const rootHandle = rootSelector ? { selector: rootSelector, type: "selector" } : "root";
-          
-          const graph = await discovery.discoverFromRoot(rootId, rootHandle);
-
-          // Convert Map to object for JSON response
-          const nodes = Object.fromEntries(graph.nodes);
-          const edges = graph.edges;
-
-          res.writeHead(200, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ success: true, graph: { nodes, edges } }));
-        } catch (err: any) {
-          res.writeHead(500, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ success: false, error: err?.message || String(err) }));
-        }
-        return;
-      }
-
-    });
-    // HTTP routes
+    // HTTP routes - unified request handler
     server.on('request', async (req, res) => {
       const url = new URL(req.url, `http://${req.headers.host}`);
-      
+
+      // Container operations endpoints
+      const containerHandled = await handleContainerOperations(req, res, sessionManager, this.containerExecutor);
+      if (containerHandled) return;
+
       // 健康检查
       if (url.pathname === '/health') {
         res.writeHead(200, { 'Content-Type': 'application/json' });

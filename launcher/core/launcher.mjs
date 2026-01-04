@@ -238,7 +238,7 @@ export async function startAll({ profile, url, headless }) {
 
   log('=== 启动 Browser Service ===');
   const browser = await startProcess('node', ['libs/browser/remote-service.js',
-    '--host', '127.0.0.1', '--port', CONFIG.ports.browser,
+    '--host', '127.0.0.1', '--port', CONFIG.ports.browser, '--bus-url', `ws://127.0.0.1:${CONFIG.ports.unified}/bus`,
   ], {
     env: { ...process.env, WEBAUTO_SKIP_HEALTH_CHECK: '1' }
   });

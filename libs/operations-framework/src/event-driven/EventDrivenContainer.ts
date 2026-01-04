@@ -3,8 +3,8 @@
  * 提供统一的事件驱动容器接口和功能
  */
 
-import { EventBus, EventData } from './EventBus';
-import { CONTAINER_EVENTS, EventType, EventDataMap, EventHandler } from './EventTypes';
+import { EventBus, EventData } from './EventBus.js';
+import { CONTAINER_EVENTS, EventType, EventDataMap, EventHandler } from './EventTypes.js';
 type Page: string;
 };
 

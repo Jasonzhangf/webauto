@@ -3,8 +3,8 @@
  * 通过事件机制控制页面分页和导航
  */
 
-import { EventDrivenContainer, ContainerConfig, ContainerSharedSpace } from './EventDrivenContainer';
-import { CONTAINER_EVENTS } from './EventTypes';
+import { EventDrivenContainer, ContainerConfig, ContainerSharedSpace } from './EventDrivenContainer.js';
+import { CONTAINER_EVENTS } from './EventTypes.js';
 type Page: string;
 };
 

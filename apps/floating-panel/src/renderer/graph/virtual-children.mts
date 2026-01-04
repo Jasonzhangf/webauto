@@ -1,4 +1,4 @@
-import { findDomNodeByPath } from './dom-helpers.mts';
+import { findDomNodeByPath } from './dom-helpers.mjs';
 
 interface VirtualChildParams {
   parentId: string;

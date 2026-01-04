@@ -21,6 +21,8 @@ export type TriggerType =
   | 'page:load'
   | 'page:scroll'
   | 'page:navigate'
+  | 'MSG_CONTAINER_ROOT_SCROLL_COMPLETE'
+  | 'MSG_CONTAINER_ROOT_ALL_OPERATIONS_COMPLETE'
   | string; // Allow custom events like 'custom:myevent'
 
 export interface Operation {
@@ -39,7 +41,13 @@ export const BASIC_EVENTS: TriggerType[] = ['appear', 'click', 'change'];
 /**
  * 页面级事件列表（仅根容器）
  */
-export const PAGE_EVENTS: TriggerType[] = ['page:load', 'page:scroll', 'page:navigate'];
+export const PAGE_EVENTS: TriggerType[] = [
+  'page:load', 
+  'page:scroll', 
+  'page:navigate',
+  'MSG_CONTAINER_ROOT_SCROLL_COMPLETE',
+  'MSG_CONTAINER_ROOT_ALL_OPERATIONS_COMPLETE'
+];
 
 /**
  * 所有操作类型选项

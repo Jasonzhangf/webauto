@@ -2,18 +2,22 @@ let containerTree: any = null;// @ts-nocheck
 let capturePanel: any = null;// NOTE: Temporarily disable TypeScript checks during refactoring integration
 // Will be removed after complete TypeScript migration
 
-import { setupOperationListDelegation } from './operation-interactions.mts';import { renderOperationsList, renderAddOperationPanel, buildDefaultOperations } from './operation-ui.mts';
-import { renderOperationEditor } from './operation-helpers.ts';
-import { isRootContainer } from './operation-types.ts';
+import { setupOperationListDelegation } from './operation-interactions.mts';import { renderOperationsList, renderAddOperationPanel, buildDefaultOperations } from './operation-ui.mjs';
+import { renderOperationEditor } from './operation-helpers.js';
+import { isRootContainer } from './operation-types.js';
 import {
   initGraph,
   handlePickerResult,
   updatePageContext,
   applyMatchSnapshot,
 } from './graph.mjs';
-import { logger } from './logger.mts';
-import { FLOATING_PANEL_VERSION } from './version.mts';
+import { logger } from './logger.mjs';
+import { FLOATING_PANEL_VERSION } from './version.mjs';
 import { CapturePanel, ContainerTree, OperationDragHandler, injectUIStyles } from './ui-components.js';
+import { RootConfigPanel } from './root-config-ui.mjs';
+import { MessageMonitorPanel } from './message-monitor-ui.mjs';
+import { OperationStatusPanel } from './operation-status-panel.mts';
+import { RootVariableViewer } from './root-variable-viewer.mts';
 
 
 // UI logging helper
@@ -57,6 +61,10 @@ let currentProfile: string | null = null;
 let currentRootSelector: string | null = null;
 let currentUrl: string | null = null;
 let currentContainer: any | null = null;
+let rootConfigPanel: RootConfigPanel | null = null;
+let messageMonitor: MessageMonitorPanel | null = null;
+let operationStatusPanel: OperationStatusPanel | null = null;
+let rootVariableViewer: RootVariableViewer | null = null;
 
 const containerDetailsEl = document.getElementById('containerDetailsContent');
 const splitterHandle = document.getElementById('splitterHandle');
@@ -92,6 +100,19 @@ function renderContainerDetails(container: any | null) {
   const matchCount = container.match?.match_count ?? (matchNode ? 1 : 0);
   const isRoot = isRootContainer(container);
 
+  // If it's a root container, we can render the config panel
+  let rootConfigHtml = '';
+  let monitorHtml = '';
+  let statusHtml = '';
+  let variableHtml = '';
+  if (isRoot) {
+    // Prepare options for RootConfigPanel
+    rootConfigHtml = `<div id="rootConfigContainer" style="height: 200px;"></div>`;
+    monitorHtml = `<div id="messageMonitorContainer" style="height: 150px;"></div>`;
+    statusHtml = `<div id="operationStatusContainer" style="height: 150px;"></div>`;
+    variableHtml = `<div id="rootVariableContainer" style="height: 150px;"></div>`;
+  }
+
   // 使用新的 operation UI 渲染函数
   const { html: operationsHtml, hasSuggested } = renderOperationsList({ isRoot: isRoot,
     containerId: id,
@@ -123,9 +144,53 @@ function renderContainerDetails(container: any | null) {
 
   containerDetailsEl.innerHTML = `
     ${metaHtml}
+    ${rootConfigHtml}
+    ${monitorHtml}
+    ${statusHtml}
+    ${variableHtml}
     ${operationsHtml}
     ${renderAddOperationPanel(selector, domPath, isRoot)}
   `;
+
+  if (isRoot) {
+    const configContainer = containerDetailsEl.querySelector('#rootConfigContainer');
+    if (configContainer) {
+      // Mock data for now, should come from container definition
+      const mockMessages = container.messages || [];
+      const mockVariables = container.variables || {};
+      
+      rootConfigPanel = new RootConfigPanel({
+        containerId: id,
+        messages: mockMessages,
+        variables: mockVariables,
+        onUpdate: (type, data) => {
+          console.log(`Updated ${type}:`, data);
+          // TODO: Save back to container definition via API
+        }
+      });
+      configContainer.appendChild(rootConfigPanel.getElement());
+    }
+
+    const monitorContainer = containerDetailsEl.querySelector('#messageMonitorContainer');
+    if (monitorContainer) {
+      messageMonitor = new MessageMonitorPanel({
+        containerId: id
+      });
+      monitorContainer.appendChild(messageMonitor.getElement());
+    }
+
+    const statusContainer = containerDetailsEl.querySelector('#operationStatusContainer');
+    if (statusContainer) {
+      operationStatusPanel = new OperationStatusPanel();
+      statusContainer.appendChild(operationStatusPanel.getElement());
+    }
+
+    const variableContainer = containerDetailsEl.querySelector('#rootVariableContainer');
+    if (variableContainer) {
+      rootVariableViewer = new RootVariableViewer();
+      variableContainer.appendChild(rootVariableViewer.getElement());
+    }
+  }
 
   // 为操作按钮绑定事件
   bindOperationEventListeners(id, operations, isRoot);
@@ -292,6 +357,41 @@ if (!(window as any).api) {
   }
 
   window.api.onBusEvent(async (msg: any) => {
+    // Feed messages to monitor if active
+    if (messageMonitor && msg.topic.startsWith('MSG_')) {
+      messageMonitor.addMessage({
+        type: msg.topic,
+        payload: msg.payload,
+        timestamp: msg.timestamp || Date.now()
+      });
+    }
+
+    // Feed operation updates to status panel
+    if (operationStatusPanel && (
+      msg.topic === 'MSG_CONTAINER_OPERATION_START' ||
+      msg.topic === 'MSG_CONTAINER_OPERATION_COMPLETE' ||
+      msg.topic === 'MSG_CONTAINER_OPERATION_FAILED'
+    )) {
+      operationStatusPanel.updateStatus({
+        id: msg.payload.operationId,
+        containerId: msg.payload.containerId,
+        type: msg.payload.type,
+        status: msg.topic.includes('START') ? 'running' : msg.topic.includes('COMPLETE') ? 'completed' : 'failed',
+        startTime: msg.topic.includes('START') ? msg.timestamp : undefined,
+        endTime: msg.topic.includes('COMPLETE') || msg.topic.includes('FAILED') ? msg.timestamp : undefined,
+        error: msg.payload.error
+      });
+    }
+
+    // Feed variable updates to variable viewer
+    if (rootVariableViewer && msg.topic === 'MSG_CONTAINER_ROOT_VAR_CHANGED') {
+      rootVariableViewer.updateVariable({
+        name: msg.payload.name,
+        value: msg.payload.value,
+        type: typeof msg.payload.value
+      });
+    }
+
     if (msg.topic === "containers.matched") {
       log("收到 containers.matched 事件");
       const data = msg.payload;
