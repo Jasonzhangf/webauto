@@ -65,12 +65,13 @@ export class ContainerOperationExecutor {
         }, { component: 'ContainerOperationExecutor' });
 
         // 执行具体操作
-        await this.performOperation(container, op);
+        const result = await this.performOperation(container, op);
 
         await this.messageBus.publish(MSG_CONTAINER_OPERATION_COMPLETE, {
           containerId,
           operationId: op.id,
-          type: op.type
+          type: op.type,
+          result
         }, { component: 'ContainerOperationExecutor' });
 
       } catch (error) {
@@ -129,7 +130,7 @@ export class ContainerOperationExecutor {
   /**
    * 执行底层操作 (RPC 实现)
    */
-  private async performOperation(container: DiscoveredContainer, op: OperationDefinition): Promise<void> {
+  private async performOperation(container: DiscoveredContainer, op: OperationDefinition): Promise<any> {
     const elementId = container.element; // 在 RPC 模式下，这是一个 ID 字符串
 
     if (!elementId) {
@@ -155,8 +156,17 @@ export class ContainerOperationExecutor {
       
       // Handle extract specifically
       if (op.type === 'extract' && response.data) {
-         // Store extracted data? For now just log or put in message
+         // Save extracted data to container variables
+         if (typeof response.data === 'object') {
+           for (const [key, value] of Object.entries(response.data)) {
+             await this.variableManager.setContainerVariable(container.id, key, value);
+           }
+         } else {
+           // If simple value, store as 'value'
+           await this.variableManager.setContainerVariable(container.id, 'value', response.data);
+         }
       }
+      return response;
 
     } finally {
       // Defocus
