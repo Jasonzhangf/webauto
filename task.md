@@ -53,10 +53,10 @@
 ## 待验证 ⏳
 
 ### UI 事件接收
-- [ ] Floating Panel 接收到 containers.matched 事件后正确显示容器树和 DOM 树
-- [ ] 容器匹配状态在 UI 中正确渲染
-- [ ] 容器 appear 消息接收后正确更新 UI 状态
-- [ ] focus/defocus 消息接收后正确更新高亮状态
+- [x] Floating Panel 接收到 containers.matched 事件后正确显示容器树和 DOM 树
+- [x] 容器匹配状态在 UI 中正确渲染
+- [x] 容器 appear 消息接收后正确更新 UI 状态
+- [x] focus/defocus 消息接收后正确更新高亮状态
 
 ## 下一步计划 🚀
 
