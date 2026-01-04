@@ -159,11 +159,11 @@ export class ContainerOperationExecutor {
          // Save extracted data to container variables
          if (typeof response.data === 'object') {
            for (const [key, value] of Object.entries(response.data)) {
-             await this.variableManager.setContainerVariable(container.id, key, value);
+             await this.variableManager.setVariable(container.id, key, value);
            }
          } else {
            // If simple value, store as 'value'
-           await this.variableManager.setContainerVariable(container.id, 'value', response.data);
+           await this.variableManager.setVariable(container.id, 'value', response.data);
          }
       }
       return response;
