@@ -5,7 +5,8 @@ import { TreeDiscoveryEngine } from '../../libs/containers/src/engine/TreeDiscov
 import { OperationExecutor } from '../../libs/containers/src/engine/OperationExecutor.js';
 import { logDebug } from '../../modules/logging/src/index.js';
 import { UiController } from '../../services/controller/src/controller.js';
-import { handleContainerOperations } from './container-operations-handler.mts';
+import { handleContainerOperations } from './container-operations-handler.js';
+// @ts-ignore
 import { setupContainerOperationsRoutes } from './container-operations.mjs';
 import { WebSocketServer, WebSocket } from 'ws';
 import { EventBus, globalEventBus } from '../../libs/operations-framework/src/event-driven/EventBus.js';
@@ -246,9 +247,9 @@ class UnifiedApiServer {
         }
         return session.ensurePage();
       },
-      { info: (...args) => logDebug('container-ops', 'info', args),
-        warn: (...args) => logDebug('container-ops', 'warn', args),
-        error: (...args) => logDebug('container-ops', 'error', args) }
+      { info: (...args: any[]) => logDebug('container-ops', 'info', args),
+        warn: (...args: any[]) => logDebug('container-ops', 'warn', args),
+        error: (...args: any[]) => logDebug('container-ops', 'error', args) }
     );
 
     // HTTP routes - unified request handler

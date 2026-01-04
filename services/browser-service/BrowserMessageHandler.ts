@@ -117,7 +117,7 @@ export class BrowserMessageHandler {
       const elements = await rootHandle.$(selector);
       
       // 注册并返回 ID
-      const elementIds = elements.map(el => this.elementRegistry.register(el, profileId));
+      const elementIds = elements.map((el: any) => this.elementRegistry.register(el, profileId));
 
       await this.messageBus.publish(RES_BROWSER_DOM_QUERY, {
         requestId,
