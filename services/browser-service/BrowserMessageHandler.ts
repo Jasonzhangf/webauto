@@ -133,6 +133,8 @@ export class BrowserMessageHandler {
         throw new Error('Missing selector in params');
       }
 
+      let resultData: any = null;
+
       switch (action) {
         case 'click':
           await page.click(selector);
@@ -144,9 +146,22 @@ export class BrowserMessageHandler {
         case 'focus':
           await page.focus(selector);
           break;
+        case 'extract':
+          if (params?.attribute) {
+            resultData = await page.getAttribute(selector, params.attribute);
+          } else {
+            resultData = await page.textContent(selector);
+          }
+          break;
         default:
           throw new Error(`Unknown action: ${action}`);
       }
+
+      await this.messageBus.publish(RES_BROWSER_DOM_ACTION, {
+        requestId,
+        success: true,
+        data: resultData
+      }, { component: 'BrowserService' });
 
       await this.messageBus.publish(RES_BROWSER_DOM_ACTION, {
         requestId,
