@@ -752,6 +752,17 @@ export function mergeDomBranch(branchNode) {
 }
 
 
+
+export function setFocusedContainer(containerId) {
+  if (selectedContainer !== containerId) {
+    selectedContainer = containerId;
+    renderGraph();
+    
+    // If container node exists, maybe scroll to it?
+    // For now just re-render to show selection highlight
+  }
+}
+
 export function renderGraph() {
   if (!canvas) return;
 

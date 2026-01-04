@@ -10,6 +10,8 @@ import {
   handlePickerResult,
   updatePageContext,
   applyMatchSnapshot,
+  setFocusedContainer,
+
 } from './graph.mjs';
 import { logger } from './logger.mjs';
 import { FLOATING_PANEL_VERSION } from './version.mjs';
@@ -468,6 +470,7 @@ if (!(window as any).api) {
       // TODO: Implement graph highlighting for focused container
       // For now, we can update the status
       setStatus(`Focus: ${msg.payload.containerId}`, true);
+      setFocusedContainer(msg.payload.containerId);
     }
 
     // Handle scroll progress
