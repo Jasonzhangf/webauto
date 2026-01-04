@@ -462,6 +462,20 @@ if (!(window as any).api) {
       });
     }
 
+    
+    // Handle container focus for highlighting
+    if (msg.topic === 'MSG_CONTAINER_FOCUSED' && msg.payload?.containerId) {
+      // TODO: Implement graph highlighting for focused container
+      // For now, we can update the status
+      setStatus(`Focus: ${msg.payload.containerId}`, true);
+    }
+
+    // Handle scroll progress
+    if (msg.topic === 'MSG_CONTAINER_ROOT_SCROLL_PROGRESS') {
+      const { count, progress } = msg.payload;
+      setStatus(`Scrolling: ${count} (${progress}%)`, true);
+    }
+    
     if (msg.topic === "containers.matched") {
       log("收到 containers.matched 事件");
       const data = msg.payload;
