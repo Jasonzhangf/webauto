@@ -2,7 +2,8 @@ let containerTree: any = null;// @ts-nocheck
 let capturePanel: any = null;// NOTE: Temporarily disable TypeScript checks during refactoring integration
 // Will be removed after complete TypeScript migration
 
-import { setupOperationListDelegation } from './operation-interactions.mts';import { renderOperationsList, renderAddOperationPanel, buildDefaultOperations } from './operation-ui.mjs';
+import { setupOperationListDelegation } from './operation-interactions.mts';
+import { renderOperationsList, renderAddOperationPanel } from './operation-ui.mjs';
 import { renderOperationEditor } from './operation-helpers.js';
 import { isRootContainer } from './operation-types.js';
 import {
@@ -142,6 +143,50 @@ function scheduleSaveLayout() {
   saveLayoutTimeout = setTimeout(saveLayoutState, 1000);
 }
 
+// 辅助函数：从快照中查找容器
+function findContainerInSnapshot(snapshot: any, containerId: string): any | null {
+  if (!snapshot) {
+    log('findContainerInSnapshot: snapshot is null');
+    return null;
+  }
+
+  log('findContainerInSnapshot: 查找容器', containerId);
+  log('findContainerInSnapshot: snapshot结构', Object.keys(snapshot));
+
+  // 查找根容器 - 兼容多种结构
+  const root = snapshot.root_match?.container || snapshot.container_tree?.container;
+  if (root) {
+    log('findContainerInSnapshot: root容器', root.id);
+    if (root.id === containerId) {
+      log('findContainerInSnapshot: 找到根容器');
+      return root;
+    }
+  }
+
+  // 递归查找子容器
+  function searchInContainer(container: any): any | null {
+    if (!container) return null;
+    if (container.id === containerId) {
+      log('findContainerInSnapshot: 在子树中找到容器');
+      return container;
+    }
+
+    // 搜索 children
+    if (Array.isArray(container.children)) {
+      for (const child of container.children) {
+        const found = searchInContainer(child);
+        if (found) return found;
+      }
+    }
+
+    return null;
+  }
+
+  const result = searchInContainer(root);
+  log('findContainerInSnapshot: 搜索结果', result ? result.id : 'null');
+  return result;
+}
+
 
 function renderContainerDetails(container: any | null) {
   if (!containerDetailsEl) return;
@@ -169,21 +214,9 @@ function renderContainerDetails(container: any | null) {
   const matchCount = container.match?.match_count ?? (matchNode ? 1 : 0);
   const isRoot = isRootContainer(container);
 
-  // If it's a root container, we can render the config panel
-  let rootConfigHtml = '';
-  let monitorHtml = '';
-  let statusHtml = '';
-  let variableHtml = '';
-  if (isRoot) {
-    // Prepare options for RootConfigPanel
-    rootConfigHtml = `<div id="rootConfigContainer" style="height: 200px;"></div>`;
-    monitorHtml = `<div id="messageMonitorContainer" style="height: 150px;"></div>`;
-    statusHtml = `<div id="operationStatusContainer" style="height: 150px;"></div>`;
-    variableHtml = `<div id="rootVariableContainer" style="height: 150px;"></div>`;
-  }
-
   // 使用新的 operation UI 渲染函数
-  const { html: operationsHtml, hasSuggested } = renderOperationsList({ isRoot: isRoot,
+  const { html: operationsHtml, hasSuggested } = renderOperationsList({
+    isRoot: isRoot,
     containerId: id,
     operations: operations,
     primarySelector: selector,
@@ -200,7 +233,7 @@ function renderContainerDetails(container: any | null) {
       </div>
       <div style="font-size:9px;color:#555;">Match: ${matchCount}</div>
     </div>
-    
+
     <div style="display:grid;grid-template-columns:auto 1fr auto 1fr;gap:2px 8px;padding:4px 8px;font-size:10px;border-bottom:1px solid #3e3e3e;background:#252526;">
       <span style="color:#888;text-align:right;">Type:</span>
       <span style="color:#dcdcaa;font-family:monospace;">${type}</span>
@@ -213,52 +246,13 @@ function renderContainerDetails(container: any | null) {
 
   containerDetailsEl.innerHTML = `
     ${metaHtml}
-    ${rootConfigHtml}
-    ${monitorHtml}
-    ${statusHtml}
-    ${variableHtml}
     ${operationsHtml}
     ${renderAddOperationPanel(selector, domPath, isRoot)}
   `;
 
+  // 根容器特殊面板（如需要，在operations之后动态插入）
   if (isRoot) {
-    const configContainer = containerDetailsEl.querySelector('#rootConfigContainer');
-    if (configContainer) {
-      // Mock data for now, should come from container definition
-      const mockMessages = container.messages || [];
-      const mockVariables = container.variables || {};
-      
-      rootConfigPanel = new RootConfigPanel({
-        containerId: id,
-        messages: mockMessages,
-        variables: mockVariables,
-        onUpdate: (type, data) => {
-          console.log(`Updated ${type}:`, data);
-          // TODO: Save back to container definition via API
-        }
-      });
-      configContainer.appendChild(rootConfigPanel.getElement());
-    }
-
-    const monitorContainer = containerDetailsEl.querySelector('#messageMonitorContainer');
-    if (monitorContainer) {
-      messageMonitor = new MessageMonitorPanel({
-        containerId: id
-      });
-      monitorContainer.appendChild(messageMonitor.getElement());
-    }
-
-    const statusContainer = containerDetailsEl.querySelector('#operationStatusContainer');
-    if (statusContainer) {
-      operationStatusPanel = new OperationStatusPanel();
-      statusContainer.appendChild(operationStatusPanel.getElement());
-    }
-
-    const variableContainer = containerDetailsEl.querySelector('#rootVariableContainer');
-    if (variableContainer) {
-      rootVariableViewer = new RootVariableViewer();
-      variableContainer.appendChild(rootVariableViewer.getElement());
-    }
+    // 可以在这里插入特殊面板，暂时不处理
   }
 
   // 为操作按钮绑定事件
@@ -289,9 +283,17 @@ function bindAddOperationPanelEvents(containerId: string, primarySelector: strin
   const typeSelect = containerDetailsEl?.querySelector('#opTypeSelect') as HTMLSelectElement;
 
   if (addBtn && triggerSelect && typeSelect) {
-    addBtn.addEventListener('click', () => {
+    // 移除旧的事件监听器
+    const oldHandler = (addBtn as any)._clickHandler;
+    if (oldHandler) {
+      addBtn.removeEventListener('click', oldHandler);
+    }
+
+    const handler = () => {
       const trigger = triggerSelect.value;
       const type = typeSelect.value;
+
+      log('添加新 operation:', { trigger, type, containerId });
 
       const newOp = {
         id: `${containerId}.${Date.now()}.${type}`,
@@ -306,12 +308,22 @@ function bindAddOperationPanelEvents(containerId: string, primarySelector: strin
 
       const currentOps = Array.isArray(currentContainer?.operations) ? [...currentContainer.operations] : [];
       currentOps.push(newOp);
+
+      log('更新 operations:', currentOps);
       updateContainerOperations(containerId, currentOps);
-    });
+    };
+
+    // 保存引用以便后续清理
+    (addBtn as any)._clickHandler = handler;
+    addBtn.addEventListener('click', handler);
+  } else {
+    log('绑定添加操作面板事件失败:', { addBtn: !!addBtn, triggerSelect: !!triggerSelect, typeSelect: !!typeSelect });
   }
 }
 
 async function updateContainerOperations(containerId: string, operations: any[]) {
+  log('updateContainerOperations 调用:', { containerId, operationsCount: operations.length, currentProfile, currentUrl });
+
   if (!currentProfile || !currentUrl) {
     logger.warn('container-operations', 'Missing profile/url; skip update', {
       profile: currentProfile,
@@ -325,18 +337,26 @@ async function updateContainerOperations(containerId: string, operations: any[])
       logger.warn('container-operations', 'invokeAction not available');
       return;
     }
-    await api.invokeAction('containers:update-operations', {
+
+    log('调用 containers:update-operations API...');
+    const updateResult = await api.invokeAction('containers:update-operations', {
       profile: currentProfile,
       url: currentUrl,
       containerId: containerId,
       operations: operations,
     });
+
+    log('containers:update-operations 结果:', updateResult);
+
     // Trigger graph refresh
-    await api.invokeAction('containers:match', {
+    log('调用 containers:match 刷新图形...');
+    const matchResult = await api.invokeAction('containers:match', {
       profile: currentProfile,
       url: currentUrl,
       rootSelector: currentRootSelector || undefined,
     });
+
+    log('containers:match 结果:', matchResult);
   } catch (err) {
     logger.error('container-operations', 'Failed to update operations', err);
   }
@@ -480,7 +500,7 @@ if (!(window as any).api) {
     }
     
     if (msg.topic === "containers.matched") {
-      log("收到 containers.matched 事件");
+      log("收到 containers.matched 事件", msg.payload);
       const data = msg.payload;
       if (data && data.matched) {
         setStatus('Matched', true);
@@ -499,8 +519,20 @@ if (!(window as any).api) {
           rootSelector,
         });
 
-        // 每次刷新快照后，如当前选中容器不再存在，重置详情面板。
-        if (!currentContainer) {
+        // 如果当前有选中容器，刷新该容器的详情面板
+        if (currentContainer) {
+          log('刷新当前选中容器的详情面板:', currentContainer.id);
+          // 从新快照中找到更新后的容器
+          const updatedContainer = findContainerInSnapshot(snapshot, currentContainer.id);
+          log('findContainerInSnapshot 返回:', updatedContainer);
+          if (updatedContainer) {
+            log('更新后容器 operations:', JSON.stringify(updatedContainer.operations, null, 2));
+            currentContainer = updatedContainer;
+            renderContainerDetails(currentContainer);
+          } else {
+            log('警告：当前容器在新快照中未找到');
+          }
+        } else {
           renderContainerDetails(null);
         }
       }

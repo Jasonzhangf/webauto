@@ -9,60 +9,16 @@ export interface OperationRenderOptions {
   isRoot?: boolean;
 }
 
-export function buildDefaultOperations(containerId: string, primarySelector: string | null, domPath: string | null, isRoot: boolean = false): any[] {
-  const baseConfig: Record<string, any> = {};
-  if (primarySelector) {
-    baseConfig.selector = primarySelector;
-  } else if (typeof domPath === 'string' && domPath.trim()) {
-    baseConfig.dom_path = domPath.trim();
-  }
-  
-  const ops = [];
-
-  // Default operations for focused/defocused
-  ops.push({
-    id: `${containerId}.focused`,
-    type: 'highlight',
-    triggers: ['focused'],
-    enabled: true,
-    config: {
-      ...baseConfig,
-      style: '2px solid #007acc', // Blue for focused
-      duration: 0
-    }
-  });
-
-  ops.push({
-    id: `${containerId}.defocused`,
-    type: 'highlight',
-    triggers: ['defocused'],
-    enabled: true,
-    config: {
-      ...baseConfig,
-      style: 'none', // Remove highlight
-      duration: 0
-    }
-  });
-
-  return ops;
-}
-
 export function renderOperationsList(options: OperationRenderOptions): { html: string; hasSuggested: boolean } {
   const { containerId, operations, primarySelector, domPath, hasRawOperations, isRoot } = options;
 
-  // If no operations, suggest defaults
-  const synthesizedOperations: any[] = !hasRawOperations 
-    ? buildDefaultOperations(containerId, primarySelector, domPath, !!isRoot) 
-    : [];
-    
-  const hasSuggestedOperations = !hasRawOperations && synthesizedOperations.length > 0;
-  const opsToRender: any[] = (hasRawOperations ? operations : synthesizedOperations).map((op: any) => ({ ...op }));
-
+  // No default operations - user must explicitly add
+  const opsToRender: any[] = operations.map((op: any) => ({ ...op }));
   const html = renderListHelper(opsToRender, !!isRoot);
 
   return {
     html,
-    hasSuggested: hasSuggestedOperations,
+    hasSuggested: false,
   };
 }
 
@@ -84,13 +40,16 @@ export function renderAddOperationPanel(primarySelector: string | null, domPath:
   const types = isRoot ? [...rootTypes, ...commonTypes] : commonTypes;
   const optionsHtml = types.map(t => `<option value="${t.value}">${t.label}</option>`).join('');
   
-  const commonTriggers = ['appear', 'click', 'focused', 'defocused'];
+  const commonTriggers = ['appear', 'click', 'input', 'change', 'focused', 'defocused'];
   const rootTriggers = [
+    'page:load',
+    'page:scroll',
+    'page:navigate',
     'MSG_CONTAINER_ROOT_SCROLL_COMPLETE',
     'MSG_CONTAINER_ROOT_ALL_OPERATIONS_COMPLETE'
   ];
-  
-  const triggers = isRoot ? [...commonTriggers, ...rootTriggers] : commonTriggers;
+
+  const triggers = isRoot ? [...rootTriggers, ...commonTriggers] : commonTriggers;
   const triggerOptionsHtml = triggers.map(t => `<option value="${t}">${t}</option>`).join('');
 
   return `

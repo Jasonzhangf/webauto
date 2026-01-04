@@ -1,4 +1,4 @@
-import { BASIC_EVENTS, PAGE_EVENTS, OPERATION_TYPES, isRootContainer } from './operation-types.js';
+import { BASIC_EVENTS, PAGE_EVENTS, OPERATION_TYPES, isRootContainer, formatTrigger, getTriggerMessage } from './operation-types.js';
 
 /**
  * 渲染 Operation 列表 (表格样式)
@@ -12,34 +12,41 @@ export function renderOperationList(operations: any[], isRoot: boolean): string 
     `;
   }
 
-  // Group operations by primary trigger
+  // Group operations by primary trigger message
   const groups: Record<string, any[]> = {};
   operations.forEach((op, index) => {
-    const trigger = (op.triggers && op.triggers.length > 0) ? op.triggers[0] : 'unknown';
-    if (!groups[trigger]) groups[trigger] = [];
-    groups[trigger].push({ op, index });
+    // Skip operations without triggers
+    if (!op.triggers || op.triggers.length === 0) {
+      console.warn(`Operation at index ${index} has no triggers, skipping`, op);
+      return;
+    }
+
+    const triggerMsg = getTriggerMessage(op.triggers[0]);
+    if (!groups[triggerMsg]) groups[triggerMsg] = [];
+    groups[triggerMsg].push({ op, index });
   });
 
   const sortedTriggers = Object.keys(groups).sort();
 
   let listHtml = '';
 
-  sortedTriggers.forEach(trigger => {
+  sortedTriggers.forEach(triggerMsg => {
     // Group Header
     listHtml += `
       <div class="op-group-header" style="background:#252526;padding:4px 8px;font-size:10px;font-weight:600;color:#aaa;border-bottom:1px solid #333;display:flex;align-items:center;">
-        <span style="text-transform:uppercase;">${trigger}</span>
-        <span style="margin-left:auto;font-size:9px;color:#666;">${groups[trigger].length} ops</span>
+        <span style="text-transform:uppercase;">${triggerMsg}</span>
+        <span style="margin-left:auto;font-size:9px;color:#666;">${groups[triggerMsg].length} ops</span>
       </div>
-      <div class="op-group-container" data-trigger="${trigger}">
+      <div class="op-group-container" data-trigger="${triggerMsg}">
     `;
 
-    groups[trigger].forEach(({ op, index }) => {
-      const triggers = Array.isArray(op.triggers) ? op.triggers : ['appear'];
-      // Only show secondary triggers if any
+    groups[triggerMsg].forEach(({ op, index }) => {
+      const triggers = Array.isArray(op.triggers) ? op.triggers : [];
+
+      // Show secondary triggers if any
       const otherTriggers = triggers.slice(1);
-      const triggerHtml = otherTriggers.length > 0 
-        ? otherTriggers.map(t => `<span class="tag-trigger">${t}</span>`).join('')
+      const triggerHtml = otherTriggers.length > 0
+        ? otherTriggers.map(t => `<span class="tag-trigger">${formatTrigger(t)}</span>`).join('')
         : '';
     
       // Config 摘要
@@ -107,40 +114,42 @@ export function renderOperationList(operations: any[], isRoot: boolean): string 
 export function renderOperationEditor(op: any, index: number, isRoot: boolean): string {
   if (!op) return "";
   const eventOptions = [...BASIC_EVENTS, ...(isRoot ? PAGE_EVENTS : [])];
-  const triggers = Array.isArray(op.triggers) ? op.triggers : ['appear'];
+  const triggers = Array.isArray(op.triggers) ? op.triggers : [];
   const configValue = op.config ? JSON.stringify(op.config, null, 2) : '{}';
   const isInput = op.type === 'fill' || op.type === 'input';
-
-  // Trigger 选择器 HTML
-  const triggerChips = eventOptions.map(evt => {
-    const active = triggers.includes(evt) ? 'active' : '';
-    return `<span class="editor-chip ${active}" data-action="toggle-trigger" data-val="${evt}">${evt}</span>`;
-  }).join('');
 
   // Fixed type display
   const typeLabel = OPERATION_TYPES.find(t => t.value === op.type)?.label || op.type;
 
+  // Render triggers with condition support
+  const triggersHtml = renderTriggersList(triggers, index);
+
   return `
     <div class="inline-editor" id="opEditor-${index}">
-      
+
       <!-- Row 1: Type & Triggers -->
       <div class="editor-row">
         <span class="editor-label">Type</span>
         <span style="font-size:10px;color:#dcdcaa;padding:2px 4px;background:#333;border-radius:2px;min-width:60px;">
           ${typeLabel}
         </span>
-        
-        <span class="editor-label" style="margin-left:8px;">Triggers</span>
-        <div class="editor-chips-wrapper">
-          ${triggerChips} 
-          <!-- We only allow editing the primary trigger via grouping implicitly, but here we can add secondaries -->
+      </div>
+
+      <!-- Row 2: Triggers List with Conditions -->
+      <div class="editor-row" style="align-items:flex-start;">
+        <span class="editor-label">Triggers</span>
+        <div style="flex:1;">
+          <div id="triggers-list-${index}" class="triggers-list">
+            ${triggersHtml}
+          </div>
+          <button class="btn-add-trigger" data-op-index="${index}" style="margin-top:4px;font-size:9px;padding:2px 6px;background:#0e639c;color:#fff;border:none;border-radius:2px;cursor:pointer;">+ Add Trigger</button>
         </div>
       </div>
 
-      <!-- Row 2: Value Input (for Input/Fill) -->
+      <!-- Row 3: Value Input (for Input/Fill) -->
       ${isInput ? renderValueInput(index, op.config?.value || '') : ''}
 
-      <!-- Row 3: Config JSON & Virtual Keys -->
+      <!-- Row 4: Config JSON & Virtual Keys -->
       <div class="editor-row" style="align-items:flex-start;">
         <span class="editor-label">Config</span>
         <div style="flex:1;">
@@ -159,6 +168,30 @@ export function renderOperationEditor(op: any, index: number, isRoot: boolean): 
 
     </div>
   `;
+}
+
+/**
+ * 渲染 triggers 列表，支持条件编辑
+ */
+function renderTriggersList(triggers: any[], opIndex: number): string {
+  if (!triggers.length) {
+    return '<div style="color:#666;font-size:9px;">No triggers</div>';
+  }
+
+  return triggers.map((trigger, triggerIndex) => {
+    const formatted = formatTrigger(trigger);
+    const isObject = typeof trigger === 'object' && trigger.message;
+    const message = isObject ? trigger.message : trigger;
+    const condition = isObject ? trigger.condition : null;
+
+    return `
+      <div class="trigger-item" data-trigger-index="${triggerIndex}" style="display:flex;align-items:center;gap:4px;margin-bottom:4px;padding:4px;background:#1e1e1e;border:1px solid #333;border-radius:2px;">
+        <span style="flex:1;font-size:10px;color:#dcdcaa;">${formatted}</span>
+        <button class="btn-edit-trigger" data-op-index="${opIndex}" data-trigger-index="${triggerIndex}" style="font-size:9px;padding:1px 4px;background:#444;color:#fff;border:none;border-radius:2px;cursor:pointer;">Edit</button>
+        <button class="btn-delete-trigger" data-op-index="${opIndex}" data-trigger-index="${triggerIndex}" style="font-size:9px;padding:1px 4px;background:#c41e3a;color:#fff;border:none;border-radius:2px;cursor:pointer;">×</button>
+      </div>
+    `;
+  }).join('');
 }
 
 function renderValueInput(index: number, value: string) {

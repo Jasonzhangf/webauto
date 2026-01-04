@@ -1124,24 +1124,87 @@ export class UiController {
     };
   }
 
-  resolveSiteKeyFromUrl(_url: string): string {
-    throw new Error('resolveSiteKeyFromUrl is not implemented in controller.ts');
+  resolveSiteKeyFromUrl(url: string): string | null {
+    if (!url) return null;
+    let host = '';
+    try {
+      host = new URL(url).hostname.toLowerCase();
+    } catch {
+      return null;
+    }
+    const index = this.loadContainerIndex();
+    let bestKey: string | null = null;
+    let bestLen = -1;
+    for (const [key, meta] of Object.entries(index)) {
+      const domain = ((meta as any)?.website || '').toLowerCase();
+      if (!domain) continue;
+      if (host === domain || host.endsWith(`.${domain}`)) {
+        if (domain.length > bestLen) {
+          bestKey = key;
+          bestLen = domain.length;
+        }
+      }
+    }
+    return bestKey;
   }
 
-  inferSiteFromContainerId(_containerId: string): string {
-    throw new Error('inferSiteFromContainerId is not implemented in controller.ts');
+  loadContainerIndex(): any {
+    if (this._containerIndexCache) {
+      return this._containerIndexCache;
+    }
+    if (!fs.existsSync(this.containerIndexPath)) {
+      this._containerIndexCache = {};
+      return this._containerIndexCache;
+    }
+    try {
+      this._containerIndexCache = JSON.parse(fs.readFileSync(this.containerIndexPath, 'utf-8'));
+    } catch {
+      this._containerIndexCache = {};
+    }
+    return this._containerIndexCache;
   }
 
-  async writeUserContainerDefinition(_siteKey: string, _containerId: string, _definition: any): Promise<void> {
-    throw new Error('writeUserContainerDefinition is not implemented in controller.ts');
+  inferSiteFromContainerId(containerId: string): string | null {
+    if (!containerId) return null;
+    const dotIdx = containerId.indexOf('.');
+    if (dotIdx > 0) {
+      return containerId.slice(0, dotIdx);
+    }
+    const underscoreIdx = containerId.indexOf('_');
+    if (underscoreIdx > 0) {
+      return containerId.slice(0, underscoreIdx);
+    }
+    return null;
+  }
+
+  async writeUserContainerDefinition(siteKey: string, containerId: string, definition: any): Promise<void> {
+    const parts = containerId.split('.').filter(Boolean);
+    const targetDir = path.join(this.userContainerRoot, siteKey, ...parts);
+    await fsPromises.mkdir(targetDir, { recursive: true });
+    const filePath = path.join(targetDir, 'container.json');
+    const payload = { ...definition, id: containerId };
+    await fsPromises.writeFile(filePath, JSON.stringify(payload, null, 2), 'utf-8');
   }
 
   normalizeSelectors(_selectors: any): any {
     return _selectors;
   }
 
-  async readContainerDefinition(_siteKey: string, _containerId: string): Promise<any> {
-    throw new Error('readContainerDefinition is not implemented in controller.ts');
+  async readContainerDefinition(siteKey: string, containerId: string): Promise<any> {
+    const parts = containerId.split('.').filter(Boolean);
+    const targetDir = path.join(this.userContainerRoot, siteKey, ...parts);
+    const filePath = path.join(targetDir, 'container.json');
+
+    if (!fs.existsSync(filePath)) {
+      return null;
+    }
+
+    try {
+      const content = await fsPromises.readFile(filePath, 'utf-8');
+      return JSON.parse(content);
+    } catch {
+      return null;
+    }
   }
 
   private async sendWsCommand(_url: string, _payload: any, _timeout = 15000): Promise<any> {
