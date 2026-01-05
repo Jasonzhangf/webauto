@@ -156,18 +156,48 @@ function addVirtualChildContainer({ parentId, domPath, selector, name }) {
 
   const effectiveChildId = createdId || childId;
 
-  // 展开父节点与虚拟子节点
+    // 展开父节点与虚拟子节点
   const parentNode = parentId;
   if (parentNode) {
     expandedNodes.add(parentNode);
   }
   if (effectiveChildId) {
     expandedNodes.add(effectiveChildId);
+    // 自动选中新创建的子容器
+    selectedContainer = effectiveChildId;
   }
 
   // 清理候选高亮，转入“虚拟子容器”状态
   suggestedNode = null;
   renderGraph();
+
+  // 触发选中事件，通知 UI 面板更新
+  if (effectiveChildId) {
+    // 构造一个临时的容器对象用于立即显示
+    const tempContainer = {
+      id: effectiveChildId,
+      name: name || 'container_child',
+      type: 'section',
+      children: [],
+      operations: [], // 空操作列表
+      match: {
+        nodes: [{ dom_path: domPath, selector: selector }]
+      }
+    };
+    
+    try {
+      window.dispatchEvent(
+        new CustomEvent('webauto:container-selected', {
+          detail: {
+            containerId: effectiveChildId,
+            container: tempContainer,
+          },
+        }),
+      );
+    } catch (err) {
+      logger.error('create-child', 'Failed to dispatch container-selected', err);
+    }
+  }
 
   // 后台持久化到容器库（~/.webauto/container-lib），由服务层完成 containers:match 刷新。
   persistVirtualChildContainer({
@@ -479,9 +509,9 @@ export async function handlePickerResult(domPath, selector = null) {
       preloadDomPaths(siblingPaths, 'container-children');
     }
 
-    // 基于 DOM 节点信息生成一个更有意义的默认名称：
+        // 基于 DOM 节点信息生成一个更有意义的默认名称：
     // 优先使用 textSnippet（页面显示文本），其次 #id / .class / tag[index]。
-    let defaultName = '新增容器';
+    let defaultName = 'NewContainer';
     try {
       const domNode = findDomNodeByPath(domData, domPath);
       if (domNode) {
@@ -490,19 +520,22 @@ export async function handlePickerResult(domPath, selector = null) {
             ? domNode.textSnippet.replace(/\s+/g, ' ').trim()
             : '';
         if (textSnippet) {
-          defaultName = textSnippet.length > 16 ? `${textSnippet.slice(0, 16)}…` : textSnippet;
+          // 截取前 15 个字符，去除特殊符号
+          defaultName = textSnippet.slice(0, 15).replace(/[^\w\u4e00-\u9fa5]/g, '_');
         } else if (domNode.id) {
           defaultName = `#${domNode.id}`;
         } else if (Array.isArray(domNode.classes) && domNode.classes.length > 0) {
-          defaultName = `.${domNode.classes[0]}`;
+          // 取第一个 class，并清理
+          defaultName = `.${domNode.classes[0].replace(/[^\w-]/g, '_')}`;
         } else if (domNode.tag) {
           const parts = String(domPath).split('/');
           const last = parts.length > 1 ? parts[parts.length - 1] : '';
-          defaultName = `${String(domNode.tag).toLowerCase()}[${last}]`;
+          defaultName = `${String(domNode.tag).toLowerCase()_${last}}`;
         }
       }
     } catch {
-      // 保底使用“新增容器”
+      // 保底
+      defaultName = `child_${Date.now().toString(36).slice(-4)}`;
     }
 
     suggestedNode = {

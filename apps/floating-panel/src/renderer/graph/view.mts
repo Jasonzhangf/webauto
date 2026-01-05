@@ -181,6 +181,7 @@ export function renderGraph(state: GraphRenderState, deps: GraphRenderDeps): voi
       deps,
     );
 
+
     if (suggestedNode) {
       const domPos = domNodePositions.get(suggestedNode.domPath);
 
@@ -197,19 +198,21 @@ export function renderGraph(state: GraphRenderState, deps: GraphRenderDeps): voi
           : parentPos?.y ?? null;
 
       if (domPos && anchorX !== null && anchorY !== null) {
+        // 使用更明显的连线样式连接建议容器与 DOM
         drawConnectionToDom(
           mainGroup,
           anchorX,
           anchorY,
           domPos.indicatorX,
           domPos.indicatorY,
-          '#fbbc05',
+          '#fbbc05', // Gold color for suggestion
         );
       }
     }
   }
 
   canvas.appendChild(mainGroup);
+}
 }
 
 interface RenderContainerNodeParams {
@@ -462,9 +465,11 @@ function renderContainerNode(params: RenderContainerNodeParams): number {
       foreign.setAttribute('height', '20');
 
       // 使用 HTML input 作为名称编辑框，默认值为建议名称；按回车触发确认。
+            // 使用 HTML input 作为名称编辑框，默认值为建议名称；按回车触发确认。
       const input = document.createElement('input');
       input.setAttribute('xmlns', 'http://www.w3.org/1999/xhtml');
-      input.value = (suggestedNode && (suggestedNode as any).name) || '新增容器';
+      input.value = (suggestedNode && (suggestedNode as any).name) || '';
+      input.placeholder = '输入名称 (Enter确认)';
       input.style.width = '100%';
       input.style.height = '100%';
       input.style.fontSize = '10px';
@@ -474,6 +479,7 @@ function renderContainerNode(params: RenderContainerNodeParams): number {
       input.style.background = '#1e1e1e';
       input.style.color = '#fbbc05';
       input.style.boxSizing = 'border-box';
+      input.addEventListener('focus', () => input.select());
 
       foreign.appendChild(input);
 
@@ -485,7 +491,9 @@ function renderContainerNode(params: RenderContainerNodeParams): number {
       // 记录“确认添加子容器”卡片的中心坐标，供连线使用（起点从当前建议节点出发）。
       try {
         if (suggestedNode) {
-          (suggestedNode as any).anchorX = x + (depth + 1) * 20 + 90; // 180 / 2
+          // 修正锚点位置：从卡片右侧边缘发出
+          // x + (depth + 1) * 20 是卡片左边缘，+ 180 是宽度
+          (suggestedNode as any).anchorX = x + (depth + 1) * 20 + 180; 
           (suggestedNode as any).anchorY = currentY + ROW_HEIGHT / 2;
         }
       } catch {}
@@ -495,11 +503,10 @@ function renderContainerNode(params: RenderContainerNodeParams): number {
 
         const rawName = input.value || '';
         const trimmedName = rawName.trim();
+        const finalName = trimmedName || (suggestedNode as any).name || 'container_child';
+
         if (suggestedNode) {
-          (suggestedNode as any).name =
-            trimmedName ||
-            ((suggestedNode as any).name as string) ||
-            '新增容器';
+          (suggestedNode as any).name = finalName;
         }
 
         logger.info('picker', 'Confirm adding sub-container', suggestedNode);
@@ -510,7 +517,7 @@ function renderContainerNode(params: RenderContainerNodeParams): number {
             parentId: suggestedNode.parentId,
             domPath: suggestedNode.domPath,
             selector: suggestedNode.selector,
-            name: suggestedNode.name,
+            name: finalName,
           };
           window.dispatchEvent(
             new CustomEvent('webauto:container-confirm-add', { detail }),

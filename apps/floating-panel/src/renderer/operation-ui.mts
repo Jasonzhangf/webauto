@@ -53,20 +53,20 @@ export function renderAddOperationPanel(primarySelector: string | null, domPath:
   const triggerOptionsHtml = triggers.map(t => `<option value="${t}">${t}</option>`).join('');
 
   return `
-    <div class="quick-add-bar" style="display:flex;gap:4px;align-items:center;padding:4px;background:#252526;border-top:1px solid #3e3e3e;margin-top:auto;">
-      <span style="font-size:10px;color:#666;">Add:</span>
+    <div class="quick-add-bar" style="display:flex;gap:6px;align-items:center;padding:8px;background:#252526;border-top:1px solid #3e3e3e;margin-top:auto;">
+      <span style="font-size:10px;color:#aaa;font-weight:600;">ADD OP:</span>
       
-      <select id="opTriggerSelect" class="qa-select" style="background:#1e1e1e;border:1px solid #444;color:#ccc;font-size:10px;height:20px;width:70px;">
+      <select id="opTriggerSelect" class="qa-select" style="background:#1e1e1e;border:1px solid #444;color:#ccc;font-size:10px;height:22px;border-radius:2px;outline:none;">
         ${triggerOptionsHtml}
       </select>
       
       <span style="color:#555;font-size:10px;">➜</span>
       
-      <select id="opTypeSelect" class="qa-select" style="flex:1;background:#1e1e1e;border:1px solid #444;color:#ccc;font-size:10px;height:20px;">
+      <select id="opTypeSelect" class="qa-select" style="flex:1;background:#1e1e1e;border:1px solid #444;color:#ccc;font-size:10px;height:22px;border-radius:2px;outline:none;">
         ${optionsHtml}
       </select>
       
-      <button id="btnAddOp" class="qa-btn" style="background:#0e639c;color:#fff;border:none;padding:0 8px;height:20px;border-radius:2px;cursor:pointer;">+</button>
+      <button id="btnAddOp" class="qa-btn" style="background:#0e639c;color:#fff;border:none;padding:0 10px;height:22px;border-radius:2px;cursor:pointer;font-weight:bold;">+</button>
     </div>
   `;
 }
