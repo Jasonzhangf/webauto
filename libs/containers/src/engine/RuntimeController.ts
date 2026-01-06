@@ -6,6 +6,8 @@ import { TreeDiscoveryEngine } from './TreeDiscoveryEngine.js';
 import { RelationshipRegistry } from './RelationshipRegistry.js';
 import { OperationQueue, Scheduler } from './OperationQueue.js';
 import { FocusManager } from './FocusManager.js';
+import { ContainerEventDispatcher } from './ContainerEventDispatcher.js';
+import { ContainerAutoClickHandler } from './ContainerAutoClickHandler.js';
 
 export interface RuntimeDeps {
   eventBus?: any;
@@ -31,6 +33,8 @@ export class RuntimeController {
   private discoveryEngine?: any; // New discovery engine
   private operationExecutor?: any; // New operation executor
   private statusTracker?: any; // New status tracker
+  private eventDispatcher?: ContainerEventDispatcher; // New event dispatcher
+  private autoClickHandler?: ContainerAutoClickHandler; // New auto click handler
 
   constructor(
     private defs: ContainerDefV2[],
@@ -42,6 +46,11 @@ export class RuntimeController {
     this.discoveryEngine = deps.discoveryEngine;
     this.operationExecutor = deps.operationExecutor;
     this.statusTracker = deps.statusTracker;
+    // Initialize event dispatcher if eventBus is available
+    if (this.deps.eventBus) {
+      this.eventDispatcher = new ContainerEventDispatcher(this.deps.eventBus);
+      this.autoClickHandler = new ContainerAutoClickHandler(this.deps.eventBus, defs);
+    }
 
     // Subscribe to external operation execution events
     if (this.bindingRegistry && this.deps.eventBus) {
@@ -70,6 +79,11 @@ export class RuntimeController {
       this.statusTracker.initialize(Array.from(this.graph.nodes.keys()));
     }
     
+    // Process initial match result to dispatch appear events
+    if (this.eventDispatcher) {
+      await this.eventDispatcher.processMatchResult(this.graph);
+    }
+    
     // seed op queues
     const root = this.graph.nodes.get(rootId)!;
     root.opQueue = OperationQueue.buildDefaultQueue(this.def(rootId)?.operations);
@@ -79,6 +93,7 @@ export class RuntimeController {
 
   async stop() {
     this.running = false;
+    this.autoClickHandler?.cleanup();
   }
 
   /**
@@ -171,6 +186,11 @@ export class RuntimeController {
       
       this.rel.addParentChild(node.defId, c.defId);
       node.feedback.hits += 1;
+      
+      // Dispatch appear event for newly discovered container
+      if (this.eventDispatcher) {
+        await this.eventDispatcher.processMatchResult(this.graph);
+      }
       
       await this.emitEvent(`container:${c.defId}:discovered`, {
         containerId: c.defId,

@@ -1,0 +1,189 @@
+{
+  "name": "微博Feed提取工作流",
+  "version": "1.0.0",
+  "description": "事件驱动的微博帖子提取工作流，支持自动点击展开按钮",
+  
+  "config": {
+    "profile": "weibo_fresh",
+    "url": "https://weibo.com/",
+    "targetCount": 150,
+    "maxScrolls": 120,
+    "scrollDistance": 800,
+    "waitAfterScroll": 3000,
+    "heightCheckCount": 3,
+    "expandWait": 1000
+  },
+  
+  "triggers": [
+    {
+      "event": "container.appear",
+      "filter": {
+        "containerIdPattern": "weibo_main_page.feed_post.expand_button"
+      },
+      "actions": [
+        {
+          "type": "container.operation",
+          "operationId": "click",
+          "config": {
+            "wait_after": 1000
+          }
+        }
+      ]
+    },
+    {
+      "event": "container.operation.complete",
+      "filter": {
+        "operationId": "click",
+        "containerIdPattern": "weibo_main_page.feed_post.expand_button"
+      },
+      "actions": [
+        {
+          "type": "extract",
+          "containerId": "parent",
+          "config": {
+            "fields": {
+              "author": "header a[href*='weibo.com']",
+              "content": "div[class*='detail_wbtext']",
+              "timestamp": "time",
+              "url": "a[href*='weibo.com'][href*='/status/']",
+              "authorUrl": "a[href*='weibo.com/u/']"
+            },
+            "include_text": true
+          }
+        }
+      ]
+    },
+    {
+      "event": "container.appear",
+      "filter": {
+        "containerType": "content",
+        "containerIdPattern": "weibo_main_page.feed_post.*"
+      },
+      "actions": [
+        {
+          "type": "extract",
+          "config": {
+            "fields": {
+              "author": "header a[href*='weibo.com']",
+              "content": "div[class*='detail_wbtext']",
+              "timestamp": "time",
+              "url": "a[href*='weibo.com'][href*='/status/']",
+              "authorUrl": "a[href*='weibo.com/u/']"
+            },
+            "include_text": true
+          }
+        }
+      ]
+    }
+  ],
+  
+  "steps": [
+    {
+      "name": "初始化",
+      "id": "init",
+      "status": "idle",
+      "actions": [
+        {
+          "type": "session.ensure",
+          "config": {
+            "profile": "{{config.profile}}",
+            "url": "{{config.url}}"
+          }
+        },
+        {
+          "type": "container.match",
+          "config": {
+            "profile": "{{config.profile}}",
+            "url": "{{config.url}}"
+          }
+        },
+        {
+          "type": "variable.set",
+          "containerId": "root",
+          "variable": "scrollCount",
+          "value": 0
+        },
+        {
+          "type": "variable.set",
+          "containerId": "root",
+          "variable": "extractedCount",
+          "value": 0
+        }
+      ]
+    },
+    {
+      "name": "展开和提取",
+      "id": "expand-and-extract",
+      "status": "idle",
+      "enter": { "when": { "step": "init", "status": "completed" } },
+      "condition": {
+        "variable": "extractedCount",
+        "scope": "root",
+        "operator": "lt",
+        "value": "{{config.targetCount}}"
+      },
+      "repeat": {
+        "max": "{{config.maxScrolls}}",
+        "until": {
+          "condition": {
+            "variable": "extractedCount",
+            "scope": "root",
+            "operator": "gte",
+            "value": "{{config.targetCount}}"
+          }
+        }
+      },
+      "actions": [
+        {
+          "type": "container.operation",
+          "containerId": "weibo_main_page.feed_list",
+          "operationId": "scroll",
+          "config": {
+            "direction": "down",
+            "distance": "{{config.scrollDistance}}"
+          },
+          "delay": "{{config.waitAfterScroll}}"
+        },
+        {
+          "type": "variable.increment",
+          "containerId": "root",
+          "variable": "scrollCount"
+        }
+      ]
+    },
+    {
+      "name": "生成输出",
+      "id": "output",
+      "status": "idle",
+      "enter": { "when": { "step": "expand-and-extract", "status": "completed" } },
+      "actions": [
+        {
+          "type": "format.output",
+          "config": {
+            "format": "markdown",
+            "file": "weibo_posts_150_event_driven.md",
+            "fields": [
+              "author",
+              "content",
+              "url",
+              "authorUrl",
+              "timestamp"
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  
+  "outputs": {
+    "format": "markdown",
+    "file": "weibo_posts_150_event_driven.md",
+    "fields": [
+      "author",
+      "content",
+      "url",
+      "authorUrl",
+      "timestamp"
+    ]
+  }
+}

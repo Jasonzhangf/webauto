@@ -1,0 +1,64 @@
+{
+  "id": "xiaohongshu_login",
+  "name": "小红书登录页",
+  "type": "page",
+  "capabilities": [
+    "highlight",
+    "find-child"
+  ],
+  "page_patterns": [
+    "xiaohongshu.com/login*",
+    "passport.xiaohongshu.com*"
+  ],
+  "children": [
+    "xiaohongshu_login.login_guard",
+    "xiaohongshu_login.username_input",
+    "xiaohongshu_login.password_input",
+    "xiaohongshu_login.login_button"
+  ],
+  "selectors": [
+    {
+      "css": ".login-container, .login-card",
+      "variant": "primary",
+      "score": 1.0
+    },
+    {
+      "css": "#login-root",
+      "variant": "backup",
+      "score": 0.8
+    }
+  ],
+  "operations": [
+    {
+      "type": "highlight",
+      "config": {
+        "style": "2px solid #ea4335",
+        "duration": 1500
+      }
+    },
+    {
+      "type": "find-child",
+      "config": {
+        "container_id": "xiaohongshu_login.login_guard"
+      }
+    },
+    {
+      "type": "find-child",
+      "config": {
+        "container_id": "xiaohongshu_login.username_input"
+      }
+    },
+    {
+      "type": "find-child",
+      "config": {
+        "container_id": "xiaohongshu_login.password_input"
+      }
+    },
+    {
+      "type": "find-child",
+      "config": {
+        "container_id": "xiaohongshu_login.login_button"
+      }
+    }
+  ]
+}

@@ -1,0 +1,30 @@
+{
+  "id": "xiaohongshu_login.login_guard",
+  "name": "登录头像锚点",
+  "type": "section",
+  "capabilities": [
+    "highlight",
+    "extract"
+  ],
+  "selectors": [
+    {
+      "css": ".login-container img.avatar, .login-card img.avatar",
+      "variant": "primary",
+      "score": 1.0
+    },
+    {
+      "css": "#login-root img",
+      "variant": "backup",
+      "score": 0.7
+    }
+  ],
+  "operations": [
+    {
+      "type": "highlight",
+      "config": {
+        "style": "2px solid #ea4335",
+        "duration": 1200
+      }
+    }
+  ]
+}

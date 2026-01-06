@@ -14,19 +14,19 @@
   ],
   "selectors": [
     {
-      "css": "main[class*='Main_wrap_'] div[class*='Home_feed_']",
+      "css": "div[class*='Home_feed_']",
       "variant": "primary",
-      "score": 1.0
+      "score": 1
     },
     {
-      "css": "div[class*='Feed_container_']",
-      "variant": "structure",
-      "score": 0.85
-    },
-    {
-      "css": "section[class*='Main_wrap_']",
+      "css": "main[class*='Main_wrap_'] div[class*='Home_feed_']",
       "variant": "fallback",
-      "score": 0.65
+      "score": 0.8
+    },
+    {
+      "css": "div[class*='vue-recycle-scroller']",
+      "variant": "structure",
+      "score": 0.7
     }
   ],
   "metadata": {

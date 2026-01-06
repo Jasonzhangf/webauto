@@ -16,17 +16,17 @@
     {
       "css": "article[class*='Feed_wrap_']",
       "variant": "primary",
-      "score": 1.0
+      "score": 1
     },
     {
-      "css": "div[class*='Feed_body_']",
+      "css": "div[class*='wbpro-scroller-item']",
       "variant": "structure",
-      "score": 0.85
+      "score": 0.8
     },
     {
-      "css": "section[class*='Feed_body_'] article",
+      "css": "div[class*='vue-recycle-scroller__item-view']",
       "variant": "fallback",
-      "score": 0.7
+      "score": 0.6
     }
   ],
   "metadata": {
@@ -47,22 +47,29 @@
       "type": "extract",
       "config": {
         "target": "links",
-        "selector": "a[href]",
+        "selector": "a[href*='weibo.com']",
         "include_text": true,
         "max_items": 32,
         "whitelist": {
-          "prefix": [
-            "https://",
-            "http://"
+          "pattern": [
+            "^https://weibo\\.com/\\d+/[A-Z][A-Za-z0-9]+$"
           ]
         },
         "blacklist": {
           "contains": [
             "javascript:",
             "help.weibo.com",
+            "passport.weibo.com",
+            "javascript:",
+            "help.weibo.com",
             "passport.weibo.com"
           ],
-          "suffix": ["#"]
+          "suffix": [
+            "#"
+          ],
+          "pattern": [
+            "^https://weibo\\.com/u/"
+          ]
         }
       }
     },
@@ -78,5 +85,8 @@
         }
       }
     }
+  ],
+  "children": [
+    "weibo_main_page.feed_post.expand_button"
   ]
 }

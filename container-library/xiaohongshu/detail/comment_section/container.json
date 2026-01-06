@@ -1,0 +1,80 @@
+{
+  "id": "xiaohongshu_detail.comment_section",
+  "name": "评论区域",
+  "type": "list",
+  "capabilities": [
+    "scroll",
+    "highlight",
+    "find-child"
+  ],
+  "children": [
+    "xiaohongshu_detail.comment_section.show_more_button",
+    "xiaohongshu_detail.comment_section.comment_item",
+    "xiaohongshu_detail.comment_section.end_marker",
+    "xiaohongshu_detail.comment_section.empty_state"
+  ],
+  "selectors": [
+    {
+      "css": ".comment-list",
+      "variant": "primary",
+      "score": 1.0
+    },
+    {
+      "css": ".note-scroller, .comments-container, [class*='comment-section']",
+      "variant": "backup",
+      "score": 0.85
+    }
+  ],
+  "metadata": {
+    "required_descendants_any": [
+      ".comment-item",
+      ".show-more",
+      ".reply-expand"
+    ],
+    "end_markers": [
+      ".end-container",
+      ".comment-footer"
+    ]
+  ],
+  "operations": [
+    {
+      "type": "highlight",
+      "config": {
+        "style": "2px solid #34a853",
+        "duration": 1500
+      }
+    },
+    {
+      "type": "scroll",
+      "config": {
+        "direction": "down",
+        "distance": 600,
+        "repeat": 1
+      }
+    },
+    {
+      "type": "find-child",
+      "config": {
+        "container_id": "xiaohongshu_detail.comment_section.show_more_button"
+      }
+    },
+    {
+      "type": "find-child",
+      "config": {
+        "container_id": "xiaohongshu_detail.comment_section.comment_item"
+      }
+    },
+    {
+      "type": "find-child",
+      "config": {
+        "container_id": "xiaohongshu_detail.comment_section.end_marker"
+      }
+    },
+    {
+      "type": "find-child",
+      "config": {
+        "container_id": "xiaohongshu_detail.comment_section.empty_state"
+      }
+    }
+  ]
+}

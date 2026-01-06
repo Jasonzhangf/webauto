@@ -1,0 +1,59 @@
+{
+  "id": "xiaohongshu_home",
+  "name": "小红书主页",
+  "type": "page",
+  "capabilities": [
+    "scroll",
+    "highlight",
+    "find-child"
+  ],
+  "page_patterns": [
+    "xiaohongshu.com",
+    "xiaohongshu.com/explore*"
+  ],
+  "children": [
+    "xiaohongshu_home.login_anchor",
+    "xiaohongshu_home.feed_list"
+  ],
+  "selectors": [
+    {
+      "css": ".feeds-page",
+      "variant": "primary",
+      "score": 1.0
+    }
+  ],
+  "metadata": {
+    "required_descendants_any": [
+      ".note-item",
+      "[class*=\"feed\"]"
+    ]
+  },
+  "operations": [
+    {
+      "type": "highlight",
+      "config": {
+        "style": "2px solid #fbbc05",
+        "duration": 1500
+      }
+    },
+    {
+      "type": "find-child",
+      "config": {
+        "container_id": "xiaohongshu_home.login_anchor"
+      }
+    },
+    {
+      "type": "find-child",
+      "config": {
+        "container_id": "xiaohongshu_home.feed_list"
+      }
+    },
+    {
+      "type": "scroll",
+      "config": {
+        "direction": "down",
+        "distance": 500
+      }
+    }
+  ]
+}

@@ -1,0 +1,53 @@
+{
+  "id": "weibo_main_page.feed_post.expand_button",
+  "name": "微博帖子展开按钮",
+  "type": "ui-element",
+  "capabilities": [
+    "highlight",
+    "click"
+  ],
+  "page_patterns": [
+    "weibo.com",
+    "!*login*",
+    "!*passport*"
+  ],
+  "selectors": [
+    {
+      "css": "a[class*='WB_textmore']",
+      "variant": "primary",
+      "score": 1.0
+    },
+    {
+      "css": "a[class*='expand']",
+      "variant": "fallback",
+      "score": 0.8
+    },
+    {
+      "css": "span[class*='more']",
+      "variant": "structure",
+      "score": 0.7
+    }
+  ],
+  "metadata": {
+    "required_descendants_any": [
+      "展开",
+      "全文"
+    ],
+    "auto_click": true
+  },
+  "operations": [
+    {
+      "type": "highlight",
+      "config": {
+        "style": "2px solid #00ff00",
+        "duration": 1000
+      }
+    },
+    {
+      "type": "click",
+      "config": {
+        "wait_after": 500
+      }
+    }
+  ]
+}

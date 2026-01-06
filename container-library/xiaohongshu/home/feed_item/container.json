@@ -1,0 +1,57 @@
+{
+  "id": "xiaohongshu_home.feed_item",
+  "name": "笔记卡片",
+  "type": "item",
+  "capabilities": [
+    "highlight",
+    "extract"
+  ],
+  "selectors": [
+    {
+      "css": ".note-item",
+      "variant": "primary",
+      "score": 1.0
+    }
+  ],
+  "extractors": {
+    "title": {
+      "selectors": [
+        "[class*=\"title\"]",
+        "[class*=\"content\"]"
+      ]
+    },
+    "link": {
+      "selectors": [
+        "a"
+      ],
+      "attr": "href"
+    },
+    "image": {
+      "selectors": [
+        "img"
+      ],
+      "attr": "src"
+    },
+    "text": {
+      "selectors": [
+        ".note-item"
+      ],
+      "attr": "textContent"
+    }
+  },
+  "operations": [
+    {
+      "type": "highlight",
+      "config": {
+        "style": "2px solid #ea4335",
+        "duration": 1500
+      }
+    },
+    {
+      "type": "extract",
+      "config": {
+        "fields": ["title", "link", "image", "text"]
+      }
+    }
+  ]
+}

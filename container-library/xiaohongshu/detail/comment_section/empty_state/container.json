@@ -1,0 +1,38 @@
+{
+  "id": "xiaohongshu_detail.comment_section.empty_state",
+  "name": "评论空状态",
+  "type": "section",
+  "capabilities": [
+    "highlight",
+    "extract"
+  ],
+  "selectors": [
+    {
+      "css": ".comment-empty, .empty-comment, .note-comment-empty",
+      "variant": "primary",
+      "score": 1.0
+    },
+    {
+      "css": ".empty-state, [class*='empty'][class*='comment']",
+      "variant": "backup",
+      "score": 0.7
+    }
+  ],
+  "operations": [
+    {
+      "type": "highlight",
+      "config": {
+        "style": "2px dashed #9c27b0",
+        "duration": 1200
+      }
+    },
+    {
+      "type": "extract",
+      "config": {
+        "selector": ".comment-empty, .empty-comment, .note-comment-empty, .empty-state",
+        "include_text": true,
+        "max_items": 1
+      }
+    }
+  ]
+}

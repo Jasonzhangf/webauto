@@ -1,0 +1,37 @@
+{
+  "id": "xiaohongshu_login.username_input",
+  "name": "用户名/邮箱/手机号输入框",
+  "type": "input",
+  "capabilities": [
+    "input",
+    "highlight"
+  ],
+  "selectors": [
+    {
+      "css": "input[name='username'], input[type='text'][placeholder*='手机号'], input[type='text'][placeholder*='邮箱']",
+      "variant": "primary",
+      "score": 1.0
+    },
+    {
+      "css": ".login-container input[type='text']",
+      "variant": "backup",
+      "score": 0.7
+    }
+  ],
+  "operations": [
+    {
+      "type": "highlight",
+      "config": {
+        "style": "2px solid #4285f4",
+        "duration": 1500
+      }
+    },
+    {
+      "type": "type",
+      "config": {
+        "clear_first": true,
+        "human_typing": true
+      }
+    }
+  ]
+}

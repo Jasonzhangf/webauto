@@ -1,0 +1,56 @@
+{
+  "id": "xiaohongshu_detail.header",
+  "name": "详情页作者信息",
+  "type": "section",
+  "capabilities": [
+    "highlight",
+    "extract"
+  ],
+  "selectors": [
+    {
+      "css": ".author-container",
+      "variant": "primary",
+      "score": 1.0
+    },
+    {
+      "css": ".author-wrapper, .user-info",
+      "variant": "backup",
+      "score": 0.8
+    }
+  ],
+  "extractors": {
+    "author_name": {
+      "selectors": [
+        ".name",
+        ".author-name",
+        ".user-name"
+      ],
+      "attr": "textContent"
+    },
+    "author_link": {
+      "selectors": [
+        "a[href*='/user/profile/']",
+        ".author-container a"
+      ],
+      "attr": "href"
+    }
+  },
+  "operations": [
+    {
+      "type": "highlight",
+      "config": {
+        "style": "2px solid #ea4335",
+        "duration": 1500
+      }
+    },
+    {
+      "type": "extract",
+      "config": {
+        "fields": [
+          "author_name",
+          "author_link"
+        ]
+      }
+    }
+  ]
+}

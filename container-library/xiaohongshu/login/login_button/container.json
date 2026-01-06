@@ -1,0 +1,37 @@
+{
+  "id": "xiaohongshu_login.login_button",
+  "name": "登录按钮",
+  "type": "button",
+  "capabilities": [
+    "click",
+    "highlight"
+  ],
+  "selectors": [
+    {
+      "css": ".login-container button[type='submit']",
+      "variant": "primary",
+      "score": 1.0
+    },
+    {
+      "css": ".login-card button, button.login-btn",
+      "variant": "backup",
+      "score": 0.8
+    }
+  ],
+  "operations": [
+    {
+      "type": "highlight",
+      "config": {
+        "style": "2px solid #ea4335",
+        "duration": 1000
+      }
+    },
+    {
+      "type": "click",
+      "config": {
+        "scroll_to_view": true,
+        "wait_after": 2000
+      }
+    }
+  ]
+}

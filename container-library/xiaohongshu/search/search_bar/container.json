@@ -1,0 +1,50 @@
+{
+  "id": "xiaohongshu_search.search_bar",
+  "name": "搜索输入框",
+  "type": "input",
+  "capabilities": [
+    "input",
+    "highlight"
+  ],
+  "selectors": [
+    {
+      "css": "#search-input",
+      "variant": "primary",
+      "score": 1.0
+    },
+    {
+      "css": "input[type='search']",
+      "variant": "backup",
+      "score": 0.8
+    },
+    {
+      "css": "input[placeholder*='搜索'], input[placeholder*='关键字']",
+      "variant": "fallback",
+      "score": 0.6
+    }
+  ],
+  "operations": [
+    {
+      "type": "highlight",
+      "config": {
+        "style": "2px solid #34a853",
+        "duration": 1800
+      }
+    },
+    {
+      "type": "type",
+      "config": {
+        "clear_first": true,
+        "human_typing": true,
+        "pause_after": 300
+      }
+    },
+    {
+      "type": "key",
+      "config": {
+        "key": "Enter",
+        "wait_after": 800
+      }
+    }
+  ]
+}

@@ -1,0 +1,44 @@
+{
+  "id": "xiaohongshu_detail.comment_section.end_marker",
+  "name": "评论结尾标记",
+  "type": "section",
+  "capabilities": [
+    "highlight",
+    "extract"
+  ],
+  "selectors": [
+    {
+      "css": ".end-container",
+      "variant": "primary",
+      "score": 1.0
+    },
+    {
+      "css": ".comment-footer, .comment-end, [data-v-4a19279a][class*='end']",
+      "variant": "backup",
+      "score": 0.8
+    }
+  ],
+  "metadata": {
+    "required_descendants_any": [
+      ".end-container",
+      ".comment-footer"
+    ]
+  },
+  "operations": [
+    {
+      "type": "highlight",
+      "config": {
+        "style": "2px solid #ff8c00",
+        "duration": 1200
+      }
+    },
+    {
+      "type": "extract",
+      "config": {
+        "selector": ".end-container, .comment-footer",
+        "include_text": true,
+        "max_items": 1
+      }
+    }
+  ]
+}

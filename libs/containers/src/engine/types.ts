@@ -7,6 +7,7 @@ export interface SelectorByClass {
   classes: string[]; // class names only (no XPath)
   variant?: 'primary' | 'backup';
   score?: number; // optional priority hint
+  css?: string;
 }
 
 export interface OperationDef {
@@ -44,6 +45,7 @@ export interface ContainerDefV2 {
   version?: string;
   replacedBy?: string;
   reliability?: number; // 0..1
+  metadata?: Record<string, any>; // Add metadata field
 }
 
 export type ContainerState = 'unknown' | 'located' | 'stable' | 'failed';

@@ -1,0 +1,81 @@
+{
+  "id": "xiaohongshu_detail.comment_section.comment_item",
+  "name": "评论项",
+  "type": "item",
+  "capabilities": [
+    "highlight",
+    "extract"
+  ],
+  "selectors": [
+    {
+      "css": ".comment-item",
+      "variant": "primary",
+      "score": 1.0
+    },
+    {
+      "css": "[class*='comment-item'], .Comment_item",
+      "variant": "backup",
+      "score": 0.8
+    }
+  ],
+  "extractors": {
+    "user_name": {
+      "selectors": [
+        ".username",
+        ".user-name",
+        ".name"
+      ],
+      "attr": "textContent"
+    },
+    "user_link": {
+      "selectors": [
+        "a[href*='/user/profile/']"
+      ],
+      "attr": "href"
+    },
+    "user_id": {
+      "selectors": [
+        "[data-user-id]",
+        ".username"
+      ],
+      "attr": "data-user-id"
+    },
+    "text": {
+      "selectors": [
+        ".content",
+        ".comment-content",
+        "p"
+      ],
+      "attr": "textContent"
+    },
+    "timestamp": {
+      "selectors": [
+        ".date",
+        ".time",
+        "[class*='time']"
+      ],
+      "attr": "textContent"
+    }
+  },
+  "operations": [
+    {
+      "type": "highlight",
+      "config": {
+        "style": "2px solid #ea4335",
+        "duration": 1000
+      }
+    },
+    {
+      "type": "extract",
+      "config": {
+        "fields": [
+          "user_name",
+          "user_link",
+          "user_id",
+          "text",
+          "timestamp"
+        ]
+      }
+    }
+  ]
+}

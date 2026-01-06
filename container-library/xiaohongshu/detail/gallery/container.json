@@ -1,0 +1,49 @@
+{
+  "id": "xiaohongshu_detail.gallery",
+  "name": "详情图片区域",
+  "type": "section",
+  "capabilities": [
+    "highlight",
+    "extract"
+  ],
+  "selectors": [
+    {
+      "css": ".note-slider-list",
+      "variant": "primary",
+      "score": 1.0
+    },
+    {
+      "css": ".note-slider, .image-list, .note-img, [class*='slider']",
+      "variant": "backup",
+      "score": 0.8
+    }
+  ],
+  "extractors": {
+    "images": {
+      "selectors": [
+        ".note-slider-list img",
+        ".note-img img",
+        "img[src*='sns-img']"
+      ],
+      "attr": "src",
+      "multiple": true
+    }
+  },
+  "operations": [
+    {
+      "type": "highlight",
+      "config": {
+        "style": "2px solid #bdc1c6",
+        "duration": 1500
+      }
+    },
+    {
+      "type": "extract",
+      "config": {
+        "fields": [
+          "images"
+        ]
+      }
+    }
+  ]
+}

@@ -4,3 +4,4 @@
 - **扩展性**：每个 Operation 通过 `operationId` 注册描述（输入/输出/依赖能力），以便与容器和 selector 配合；
 - **CLI 计划**：`bin/operation run --op <operationId> --payload <json>`。
 - **状态**：规划阶段，将结合现有浮窗命令与容器 `operations` 字段逐步实现。
+- **内置操作**：`highlight`、`scroll`、`click`、`mouseMove`、`mouseClick`、`extract`、`find-child`、`navigate`（基于 selector/URL 执行 `window.location` 跳转）。

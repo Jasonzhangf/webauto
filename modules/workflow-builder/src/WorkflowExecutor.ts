@@ -1,5 +1,7 @@
-import { WorkflowEventEmitter } from './WorkflowEmitter.js';
-import { WorkflowLogger } from './WorkflowLogger.js';
+import { WorkflowEventEmitter } from './WorkflowEmitter.ts';
+import { WorkflowLogger } from './WorkflowLogger.ts';
+import WebSocket from 'ws';
+import { AutoScrollStrategy } from '../../../libs/containers/src/strategies/AutoScrollStrategy.ts';
 import type {
   WorkflowPhase,
   WorkflowStatus,
@@ -27,6 +29,7 @@ export class WorkflowExecutor {
   private extractedPosts: ExtractedPost[] = [];
   private eventQueue: Array<() => Promise<void>> = [];
   private isProcessing = false;
+  private autoScroll?: AutoScrollStrategy;
 
   constructor() {
     this.eventEmitter = new WorkflowEventEmitter();
@@ -299,59 +302,28 @@ export class WorkflowExecutor {
     // 通过 WebSocket 订阅容器事件
     const ws = new WebSocket('ws://127.0.0.1:7701/ws');
 
-    // 检查 WebSocket 是否支持 addEventListener（现代浏览器）或 onopen（Node.js）
-    if ('addEventListener' in ws) {
-      // 浏览器环境
-      (ws as any).addEventListener('open', () => {
-        this.logger.info('WebSocket connected for container events');
-      });
+    ws.on('open', () => {
+      this.logger.info('WebSocket connected for container events');
+    });
 
-      (ws as any).addEventListener('message', (event: MessageEvent) => {
-        try {
-          const msg = JSON.parse(event.data as string);
-          if (msg.type === 'event' && msg.topic?.startsWith('container:')) {
-            this.handleContainerEvent(msg);
-          }
-        } catch (error) {
-          this.logger.warn(`Failed to parse WebSocket message: ${error}`);
+    ws.on('message', (data: Buffer | string) => {
+      try {
+        const msg = JSON.parse(data.toString());
+        if (msg.type === 'event' && msg.topic?.startsWith('container:')) {
+          this.handleContainerEvent(msg);
         }
-      });
+      } catch (error) {
+        this.logger.warn(`Failed to parse WebSocket message: ${error}`);
+      }
+    });
 
-      (ws as any).addEventListener('error', (error: Event) => {
-        this.logger.error(`WebSocket error: ${error}`);
-      });
+    ws.on('error', (error: Error) => {
+      this.logger.error(`WebSocket error: ${error}`);
+    });
 
-      (ws as any).addEventListener('close', () => {
-        this.logger.warn('WebSocket connection closed');
-      });
-    } else {
-      // Node.js 环境 - 需要导入 ws 库
-      const WebSocketNode = require('ws');
-      const nodeWs = new WebSocketNode('ws://127.0.0.1:7701/ws');
-
-      nodeWs.on('open', () => {
-        this.logger.info('WebSocket connected for container events');
-      });
-
-      nodeWs.on('message', (data: string) => {
-        try {
-          const msg = JSON.parse(data.toString());
-          if (msg.type === 'event' && msg.topic?.startsWith('container:')) {
-            this.handleContainerEvent(msg);
-          }
-        } catch (error) {
-          this.logger.warn(`Failed to parse WebSocket message: ${error}`);
-        }
-      });
-
-      nodeWs.on('error', (error: Error) => {
-        this.logger.error(`WebSocket error: ${error}`);
-      });
-
-      nodeWs.on('close', () => {
-        this.logger.warn('WebSocket connection closed');
-      });
-    }
+    ws.on('close', () => {
+      this.logger.warn('WebSocket connection closed');
+    });
   }
 
   /**
@@ -380,7 +352,32 @@ export class WorkflowExecutor {
       this.subscribeToContainerEvents(options.profile);
       await this.sleep(1000);
 
-      // Step 2: 初始容器匹配，触发容器发现
+      // Step 2: 创建自动滚动策略
+      this.autoScroll = new AutoScrollStrategy(
+        async (distance) => {
+          await this.executeAction('containers:execute', {
+            containerId: 'weibo_main_page.feed_list',
+            operationId: 'scroll',
+            config: { distance, direction: 'down' }
+          });
+        },
+        async () => {
+          const result = await this.executeAction('browser:evaluate', {
+            script: 'Math.max(document.documentElement.scrollHeight, document.body.scrollHeight)'
+          });
+          return result.data as number;
+        },
+        async (ms) => this.sleep(ms),
+        {
+          trigger: { type: 'on-boundary', boundaryThreshold: 0.8 },
+          scrollDistance: 800,
+          waitAfterScroll: 3000,
+          maxScrolls: options.scrollLimit || 50,
+          stopOnNoChange: true
+        }
+      );
+
+      // Step 3: 初始容器匹配，触发容器发现
       this.setPhase('matching', 'match-containers', 'Matching containers');
       const matchResult = await this.executeAction<ContainerMatchResponse['data']>('containers:match', {
         profile: options.profile,
@@ -393,20 +390,27 @@ export class WorkflowExecutor {
         throw new Error('Container match failed');
       }
 
-      // Step 3: 等待事件处理完成
-      let scrollCount = 0;
-      const maxScrolls = options.scrollLimit;
-
-      while (this.extractedPosts.length < options.targetCount && scrollCount < maxScrolls) {
+      // Step 4: 主循环 - 监听事件并执行滚动
+      while (this.extractedPosts.length < options.targetCount && !this.shouldStop()) {
         if (this.shouldStop()) break;
 
         await this.sleep(5000); // 等待事件处理
 
-        // 如果没有新内容，触发滚动
-        if (this.extractedPosts.length === 0 || scrollCount > 0) {
-          const feedListId = 'weibo_main_page.feed_list';
-          await this.scrollContainer(feedListId, 800);
-          scrollCount++;
+        // 检查是否应该开始滚动
+        const visibleCount = await this.countVisibleContainers();
+        const shouldScroll = this.autoScroll.shouldStartScrolling({
+          discoveredContainers: this.extractedPosts.length,
+          visibleContainers: visibleCount
+        });
+
+        if (shouldScroll) {
+          this.logger.info('🔄 Starting auto-scroll...');
+          const scrollResult = await this.autoScroll.execute();
+          
+          if (scrollResult.hasReachedBottom) {
+            this.logger.info('🏁 Reached bottom, stopping workflow');
+            break;
+          }
         }
       }
 
@@ -417,7 +421,7 @@ export class WorkflowExecutor {
       this.logger.info('Workflow completed', {
         totalPosts: this.extractedPosts.length,
         uniqueLinks: this.extractedLinks.size,
-        scrollCount
+        finalPhase: this.currentPhase
       });
 
       return {
@@ -430,6 +434,26 @@ export class WorkflowExecutor {
       this.logger.error(`Workflow failed: ${error}`);
       throw error;
     }
+  }
+
+  /**
+   * 计算当前页面可见容器数量
+   */
+  private async countVisibleContainers(): Promise<number> {
+    const result = await this.executeAction('browser:evaluate', {
+      script: `
+        const containers = document.querySelectorAll('.Feed_body_3R0rO, .card, .post-item');
+        let visibleCount = 0;
+        containers.forEach(el => {
+          const rect = el.getBoundingClientRect();
+          if (rect.top < window.innerHeight && rect.bottom > 0) {
+            visibleCount++;
+          }
+        });
+        visibleCount;
+      `
+    });
+    return result.data as number || 0;
   }
 
   /**

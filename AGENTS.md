@@ -32,6 +32,34 @@ curl http://127.0.0.1:7704/health
 
 ---
 
+## Agent 调试工具与能力
+
+- **浏览器 CLI / WebSocket 控制**：复用 `xiaohongshu_fresh` profile，通过 Unified API `POST /v1/controller/action` 的 `browser:*` 指令以及 `ws://127.0.0.1:7701/ws` 获取当前页面、URL、截图、DOM 摘要等所有浏览器侧信息。
+- **容器 CLI 控制容器**：`/v1/container/<containerId>/execute` 结合 `modules/operations`，可直接触发高亮、滚动、自动点击、导航等行为；容器结构/字段定义参考 `container-library/README.md` 与 `container-library/xiaohongshu/README.md`。
+- **事件订阅**：通过 Bus `ws://127.0.0.1:7701/bus` 订阅 `container:*`、`ui:*` 反馈，实时获取 auto-click、highlight、workflow execution 的状态；CLI 端也可监听 `MSG_*` 事件闭环调试。
+- **高亮 & 定位**：`ui:highlight` IPC / `highlight` operation 用于视觉确认；workflow 注入器支持 overlay 渲染，可与 DOM picker 联动确认定位精准度。
+- **容器目录规范**：所有容器以“根容器 → 子容器”递归结构组织，根容器 selector 必须覆盖整页主区域，子容器仅能挂在对应父目录下，禁止跨层；详细格式、字段及示例记录在 `container-library/README.md` 与 `container-library/xiaohongshu/README.md`，调试或扩展容器前先对照该文档确认根容器是否存在并匹配 DOM。
+- **Session 命名规则**：所有浏览器会话统一以 `{platform}_{variant}` 命名，platform 例如 `xiaohongshu`/`weibo`，variant 例如 `fresh`/`prod`/`dev`；若需要多实例则在末尾追加两位序号（如 `xiaohongshu_fresh_01`）。脚本中严禁创建临时 profile 名，确保 headful 会话可长时间复用并避免风控。
+- **单平台单会话**：同一平台在任意时刻只允许存在一个会话。启动新脚本前必须先调用 `node scripts/xiaohongshu/tests/status.mjs`（或对应平台 status 脚本）确认会话状态，若 `profile` 已存在则只能复用；若不存在再运行 Phase1 脚本创建。所有测试脚本都应该先读取状态再执行，以便随时回到统一的测试起点。
+- **安全搜索流程**：严禁通过构造搜索结果 URL 直接导航；必须在页面内聚焦搜索框，通过模拟输入 + 回车触发搜索，避免触发风控。
+
+> 容器以“根容器 → 子容器”目录递归组织，与页面 DOM 结构一致；根容器 selector 必须可靠匹配页面顶层区域，子容器仅在对应根目录下出现，避免跨层级引用。
+
+### 登录锚点模型（小红书）
+
+- 登录态判断必须基于 **容器 ID**，禁止在脚本 / workflow 中硬编码 DOM 选择器（如 `a[title="我"]`、`.channel` 等）。
+- 小红书登录约定（详细见 `container-library/xiaohongshu/README.md`）：
+  - 已登录：任意根容器下命中 `*.login_anchor`（如 `xiaohongshu_home.login_anchor`、`xiaohongshu_search.login_anchor`、`xiaohongshu_detail.login_anchor`）。
+  - 未登录：登录页根容器下命中 `xiaohongshu_login.login_guard`。
+  - 不确定：两类容器都未命中，需由上层 workflow 决定是否跳转登录页或重试。
+- 推荐参考实现：
+  - `scripts/xiaohongshu/tests/status-v2.mjs`：容器驱动的登录状态检查脚本。
+  - `scripts/xiaohongshu/tests/phase1-session-login.mjs`：Phase1 登录调试脚本，仅依赖登录锚点容器。
+  - `modules/workflow/blocks/EnsureLoginBlock.ts`：通用 EnsureLogin Block，通过 Unified API `containers:match` 判定登录态。
+- 启动脚本 `scripts/start-headful.mjs` / `launcher/core/launcher.mjs` 已接入该模型，对 `xiaohongshu_*` profile 统一使用容器驱动登录检测。
+
+---
+
 ## Browser Service（重点）
 
 ### 职责与边界
@@ -251,3 +279,29 @@ apps/floating-panel/
 - docs/arch/PORTS.md：端口与环境变量
 - docs/arch/LAUNCHER.md：启动器架构
 - docs/arch/AGENTS.md：完整设计原则
+
+---
+
+## 新增规则（2025-01-06）
+
+### 4. 调试脚本必须保持浏览器会话不被破坏
+
+**原则：**
+- 调试脚本必须复用现有浏览器会话（如 `xiaohongshu_fresh`），禁止每次运行脚本都重启或杀掉浏览器
+- 脚本应设计为 "unattached" 模式，即在现有会话上执行操作而不影响会话状态
+- 避免频繁请求连接到同一页面，优先使用页面刷新或导航而非完全重启
+
+**原因：** 
+- 保持会话状态（登录态、Cookie、页面状态）对调试连续性至关重要
+- 频繁重启浏览器会破坏调试流程，降低开发效率
+- 避免因重复启动导致的资源浪费和潜在错误
+
+**范围：**
+- 所有调试脚本（如 `scripts/debug-*.mjs`）
+- 阶段性功能测试脚本
+- 容器匹配和操作验证脚本
+
+**替代方案：**
+- 使用 `controllerAction('browser:execute', { script: 'location.reload()' })` 刷新页面
+- 使用 `controllerAction('browser:execute', { script: 'window.location.href = "..." })` 导航
+- 复用现有 `sessionId` 而非创建新会话

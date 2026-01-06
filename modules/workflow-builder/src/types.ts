@@ -79,6 +79,10 @@ export type WorkflowExecutionOptions = {
   url: string;
   targetCount: number;
   scrollLimit: number;
+  autoScrollTrigger?: 'immediate' | 'on-boundary' | 'on-condition';
+  boundaryThreshold?: number;
+  scrollDistance?: number;
+  waitAfterScroll?: number;
   highlight?: {
     containerStyle: string;
     postStyle: string;

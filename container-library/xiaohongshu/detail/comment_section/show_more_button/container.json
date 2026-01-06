@@ -1,0 +1,44 @@
+{
+  "id": "xiaohongshu_detail.comment_section.show_more_button",
+  "name": "展开回复按钮",
+  "type": "button",
+  "capabilities": [
+    "click",
+    "highlight"
+  ],
+  "selectors": [
+    {
+      "css": ".show-more",
+      "variant": "primary",
+      "score": 1.0
+    },
+    {
+      "css": ".reply-expand, [class*='expand']",
+      "variant": "backup",
+      "score": 0.8
+    }
+  ],
+  "metadata": {
+    "auto_click": true,
+    "required_descendants_any": [
+      "展开",
+      "回复"
+    ]
+  },
+  "operations": [
+    {
+      "type": "highlight",
+      "config": {
+        "style": "2px solid #fbbc05",
+        "duration": 800
+      }
+    },
+    {
+      "type": "click",
+      "config": {
+        "wait_after": 500,
+        "scroll_to_view": true
+      }
+    }
+  ]
+}

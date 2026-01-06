@@ -1,0 +1,164 @@
+/**
+ * Step 2: 小红书搜索验证脚本
+ * 功能：验证搜索功能，轮换关键字
+ */
+
+const UNIFIED_API = 'http://127.0.0.1:7701';
+const PROFILE = 'xiaohongshu_fresh';
+
+const KEYWORDS = ['oppo小平板', '手机膜', '雷军', '小米', '华为', '鸿蒙'];
+
+async function httpPost(endpoint, payload) {
+  const res = await fetch(`${UNIFIED_API}${endpoint}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+  if (!res.ok) {
+    throw new Error(`HTTP ${res.status}: ${await res.text()}`);
+  }
+  return await res.json();
+}
+
+async function controllerAction(action, payload) {
+  return httpPost('/v1/controller/action', { action, payload });
+}
+
+async function getCurrentUrl() {
+  const result = await controllerAction('browser:execute', {
+    profile: PROFILE,
+    script: 'location.href'
+  });
+  return result.data?.result || '';
+}
+
+async function ensureSearchPage() {
+  const url = await getCurrentUrl();
+  if (!url.includes('/search_result') && !url.includes('xiaohongshu.com')) {
+    console.log('   ⚠️  不在小红书页面，跳转到首页...');
+    await controllerAction('browser:execute', {
+      profile: PROFILE,
+      script: `window.location.href = 'https://www.xiaohongshu.com'`
+    });
+    await new Promise(r => setTimeout(r, 3000));
+  }
+}
+
+async function performSearch(keyword) {
+  console.log(`   🔎 搜索关键字: ${keyword}`);
+  
+  // 尝试使用搜索框
+  const searchBoxUsed = await controllerAction('browser:execute', {
+    profile: PROFILE,
+    script: `(() => {
+      const input = document.querySelector('#search-input, input[type="search"]');
+      if (input) {
+        input.value = '${keyword.replace(/'/g, "\\'")}';
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true }));
+        return true;
+      }
+      return false;
+    })()`
+  });
+  
+  if (searchBoxUsed.data?.result) {
+    console.log('   ✅ 使用搜索框输入');
+  } else {
+    console.log('   ⚠️  搜索框未找到，直接 URL 跳转');
+    await controllerAction('browser:execute', {
+      profile: PROFILE,
+      script: `window.location.href = 'https://www.xiaohongshu.com/search_result?keyword=${encodeURIComponent(keyword)}&source=web_search_result_notes'`
+    });
+  }
+  
+  await new Promise(r => setTimeout(r, 3500));
+}
+
+async function highlightSearchBox() {
+  const result = await controllerAction('browser:execute', {
+    profile: PROFILE,
+    script: `(() => {
+      const el = document.querySelector('#search-input, input[type="search"]');
+      if (el) {
+        el.style.outline = '3px solid #4285f4';
+        setTimeout(() => el.style.outline = '', 2000);
+        return true;
+      }
+      return false;
+    })()`
+  });
+  return result.data?.result || false;
+}
+
+async function waitForResults() {
+  console.log('   ⏳ 等待结果加载...');
+  let lastCount = 0;
+  let stableChecks = 0;
+  
+  for (let i = 0; i < 10; i++) {
+    const result = await controllerAction('browser:execute', {
+      profile: PROFILE,
+      script: `document.querySelectorAll('.note-item').length`
+    });
+    
+    const currentCount = result.data?.result || 0;
+    console.log(`   📊 当前笔记数: ${currentCount}`);
+    
+    if (currentCount === lastCount && currentCount > 0) {
+      stableChecks++;
+      if (stableChecks >= 2) {
+        console.log('   ✅ 结果稳定');
+        return currentCount;
+      }
+    } else {
+      stableChecks = 0;
+    }
+    
+    lastCount = currentCount;
+    await new Promise(r => setTimeout(r, 1000));
+  }
+  
+  return lastCount;
+}
+
+async function main() {
+  console.log('🔎 小红书搜索验证开始...\n');
+
+  try {
+    // 1. 确保在搜索页
+    console.log('1️⃣ 检查当前页面...');
+    await ensureSearchPage();
+    const url = await getCurrentUrl();
+    console.log(`   ✅ URL: ${url}\n`);
+
+    // 2. 高亮搜索框
+    console.log('2️⃣ 高亮搜索框...');
+    const highlighted = await highlightSearchBox();
+    console.log(`   ${highlighted ? '✅' : '❌'} 搜索框高亮: ${highlighted}\n`);
+    await new Promise(r => setTimeout(r, 2000));
+
+    // 3. 随机选择关键字
+    const keyword = KEYWORDS[Math.floor(Math.random() * KEYWORDS.length)];
+    console.log(`3️⃣ 执行搜索 - 关键字: "${keyword}"`);
+    await performSearch(keyword);
+    console.log('');
+
+    // 4. 等待并检查结果
+    console.log('4️⃣ 检查搜索结果...');
+    const count = await waitForResults();
+    console.log('');
+
+    // 5. 总结
+    console.log('📊 搜索验证完成！');
+    console.log(`   - 关键字：${keyword}`);
+    console.log(`   - 结果数量：${count}`);
+    console.log(`   - 状态：${count > 0 ? '✅ 成功' : '❌ 失败'}`);
+
+  } catch (error) {
+    console.error('❌ 错误:', error.message);
+    process.exit(1);
+  }
+}
+
+main();

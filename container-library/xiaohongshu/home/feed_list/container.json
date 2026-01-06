@@ -1,0 +1,28 @@
+{
+  "id": "xiaohongshu_home.feed_list",
+  "name": "笔记流列表",
+  "type": "list",
+  "capabilities": [
+    "scroll",
+    "highlight"
+  ],
+  "children": [
+    "xiaohongshu_home.feed_item"
+  ],
+  "selectors": [
+    {
+      "css": ".feeds-page",
+      "variant": "primary",
+      "score": 1.0
+    }
+  ],
+  "operations": [
+    {
+      "type": "highlight",
+      "config": {
+        "style": "2px solid #4285f4",
+        "duration": 1500
+      }
+    }
+  ]
+}

@@ -238,6 +238,8 @@ export class UiController {
         return this.handleDomBranch2(payload);
       case 'dom:pick:2':
         return this.handleDomPick2(payload);
+      case 'container:operation':
+        return this.handleContainerOperation(payload);
       default:
         return { success: false, error: `Unknown action: ${action}` };
     }
@@ -513,16 +515,14 @@ export class UiController {
 
   async handleContainerMatch(payload: ActionPayload = {}) {
     const profile = payload.profileId || payload.profile;
-    const url = payload.url;
     if (!profile) throw new Error('缺少 profile');
-    if (!url) throw new Error('缺少 URL');
 
-    logDebug('controller', 'containers:match', { profile, url, payload });
+    logDebug('controller', 'containers:match', { profile, url: payload.url, payload });
     
     try {
       const context = await this.captureInspectorSnapshot({
         profile,
-        url,
+        url: payload.url,
         maxDepth: payload.maxDepth || 2,
         maxChildren: payload.maxChildren || 5,
         rootSelector: payload.rootSelector,
@@ -539,6 +539,9 @@ export class UiController {
         snapshot,
       };
       this.messageBus?.publish?.('containers.matched', matchPayload);
+      if (matchPayload.container) {
+        this.emitContainerAppearEvents(snapshot.container_tree, matchPayload);
+      }
       this.messageBus?.publish?.('handshake.status', {
         status: matchPayload.matched ? 'ready' : 'pending',
         profileId: matchPayload.profileId,
@@ -1266,5 +1269,96 @@ export class UiController {
   }
   private getBrowserWsUrl(): string {
     return `ws://${this.defaultWsHost || '127.0.0.1'}:${this.defaultWsPort || 7701}/ws`;
+  }
+
+  async handleContainerOperation(payload: ActionPayload = {}) {
+    const { containerId, operationId, config, sessionId } = payload;
+    
+    if (!sessionId) return { success: false, error: 'sessionId required' };
+    if (!containerId) return { success: false, error: 'containerId required' };
+    if (!operationId) return { success: false, error: 'operationId required' };
+
+    // Determine target URL for HTTP post to container endpoint
+    const port = process.env.WEBAUTO_UNIFIED_PORT || 7701;
+    const host = '127.0.0.1';
+    
+    try {
+      const response = await fetch(`http://${host}:${port}/v1/container/${containerId}/execute`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          operationId,
+          config,
+          sessionId
+        })
+      });
+      
+      if (!response.ok) {
+        return { success: false, error: await response.text() };
+      }
+      
+      return await response.json();
+    } catch (error: any) {
+      return { success: false, error: error.message };
+    }
+  }
+
+  private emitContainerAppearEvents(containerTree: any, context: { sessionId?: string; profileId?: string; url?: string; snapshot?: any }) {
+    if (!this.messageBus?.publish) return;
+    if (!containerTree || !containerTree.id) {
+      logDebug('controller', 'emitContainerAppearEvents', 'No valid container tree provided');
+      return;
+    }
+
+    const visited = new Set<string>();
+    
+    // Emit for root container (the containerTree itself)
+    this.emitSingleContainerAppear(containerTree, context, visited);
+
+    // Emit for all child containers in tree
+    if (containerTree.children && Array.isArray(containerTree.children)) {
+      for (const child of containerTree.children) {
+        this.emitTreeContainerAppear(child, context, visited);
+      }
+    }
+  }
+
+  private emitSingleContainerAppear(container: any, context: { sessionId?: string; profileId?: string; url?: string }, visited: Set<string>) {
+    if (!container || !container.id) return;
+    const containerId = String(container.id);
+    if (visited.has(containerId)) return;
+    visited.add(containerId);
+
+    const payload = {
+      containerId,
+      containerName: container.name || null,
+      sessionId: context.sessionId,
+      profileId: context.profileId,
+      url: context.url,
+      bbox: container.match?.bbox || container.bbox || null,
+      visible: container.match?.visible ?? container.visible ?? null,
+      score: container.match?.score ?? container.score ?? null,
+      timestamp: Date.now(),
+      source: 'containers:match',
+    };
+
+    this.messageBus?.publish?.('container:appear', payload);
+    this.messageBus?.publish?.(`container:${containerId}:appear`, payload);
+    
+    logDebug('controller', 'container:appear', { containerId, containerName: container.name });
+  }
+
+  private emitTreeContainerAppear(node: any, context: { sessionId?: string; profileId?: string; url?: string }, visited: Set<string>) {
+    if (!node || !node.id) return;
+    
+    // Emit for this node (node itself is a container object)
+    this.emitSingleContainerAppear(node, context, visited);
+    
+    // Recursively emit for children
+    if (node.children && Array.isArray(node.children)) {
+      for (const child of node.children) {
+        this.emitTreeContainerAppear(child, context, visited);
+      }
+    }
   }
 }

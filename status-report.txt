@@ -1,5 +1,0 @@
-状态异常：services/unified-api/index.ts:303 | 缺少 headful/headless 模式广播 | 未在 buildHealthStatus 中区分模式 | 在 buildHealthStatus 中增加 browserMode 字段，由 launcher 启动时传入
-状态异常：launcher/core/launcher.mjs:185 | 浏览器会话创建未广播模式 | 未向任何总线发布 headless 状态 | 在 start 成功后 publish('browser.mode', { headless })
-状态异常：apps/floating-panel/src/renderer/index.ts:42 | 健康检查未感知模式差异 | UI 未显示当前处于 headful/headless | 在 UI 中增加模式指示，读取 browser.mode 事件
-状态异常：services/controller/src/controller.ts:857,885 | dom-dump 强制 headless=true | 与 launcher 传入的 headless 不一致 | 使用 payload.headless ?? true 保持一致性
-差异缺失：launcher/core/launcher.mjs:228 | 容器匹配验证未等待 UI 就绪 | 浮窗可能尚未完成首次渲染 | 在 verifyContainerMatch 前等待 bus 收到 ready 事件

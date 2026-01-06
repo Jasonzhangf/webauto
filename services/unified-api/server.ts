@@ -7,13 +7,14 @@ import { logDebug } from '../../modules/logging/src/index.js';
 import { UiController } from '../../services/controller/src/controller.js';
 import { handleContainerOperations } from './container-operations-handler.js';
 // @ts-ignore
-import { setupContainerOperationsRoutes } from './container-operations.mjs';
+// import { setupContainerOperationsRoutes } from './container-operations.mjs';
 import { WebSocketServer, WebSocket } from 'ws';
 import { EventBus, globalEventBus } from '../../libs/operations-framework/src/event-driven/EventBus.js';
 import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
-import { SessionManager } from '../browser-service/SessionManager.js';
+// import { SessionManager } from '../browser-service/SessionManager.js';
+import { RemoteSessionManager } from './RemoteSessionManager.js';
 import { ensureBuiltinOperations } from '../../modules/operations/src/builtin.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -230,7 +231,10 @@ class UnifiedApiServer {
     ensureBuiltinOperations();
 
     // Session manager for container operations
-    const sessionManager = new SessionManager({
+    // 使用 RemoteSessionManager 代理对 Browser Service 的调用
+    const browserServiceUrl = `${defaultHttpProtocol}://${defaultHttpHost}:${defaultHttpPort}`;
+    console.log(`[unified-api] Using remote browser service at ${browserServiceUrl}`);
+    const sessionManager = new RemoteSessionManager({
       host: defaultHttpHost,
       port: defaultHttpPort,
       wsHost: defaultWsHost,

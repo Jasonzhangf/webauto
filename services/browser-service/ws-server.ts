@@ -724,12 +724,16 @@ export class BrowserWsServer {
    const startedAt = Date.now();
 
    const offset = target.offset || { x: 0, y: 0 };
+    const coordinates = target.coordinates || null;
    const domPath = target.dom_path || null;
    const selector = target.selector || null;
 
    let coords = null;
 
-   if (domPath) {
+    // Support direct coordinates
+    if (coordinates && typeof coordinates.x === 'number' && typeof coordinates.y === 'number') {
+      coords = { x: coordinates.x + offset.x, y: coordinates.y + offset.y };
+    } else if (domPath) {
      await ensurePageRuntime(page);
      const result = await page.evaluate((config) => {
        const runtime: any = (window as any).__webautoRuntime;
@@ -773,7 +777,7 @@ export class BrowserWsServer {
    const duration = Date.now() - startedAt;
    this.broadcastEvent('user_action.completed', sessionId, {
      action: opType,
-     target: domPath || selector || '',
+     target: domPath || selector || (coordinates ? `coordinates(${coordinates.x}, ${coordinates.y})` : ''),
      duration_ms: duration,
      ...(coords ? { x: coords.x, y: coords.y } : {}),
    });
@@ -782,7 +786,7 @@ export class BrowserWsServer {
      success: true,
      data: {
        action: opType,
-       target: domPath || selector || '',
+       target: domPath || selector || (coordinates ? `coordinates(${coordinates.x}, ${coordinates.y})` : ''),
        duration_ms: duration,
      },
    };

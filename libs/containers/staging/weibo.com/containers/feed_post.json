@@ -1,0 +1,51 @@
+{
+  "id": "feed_post",
+  "name": "微博帖子卡片",
+  "website": "weibo.com",
+  "selectors": [
+    {
+      "classes": ["Feed_body_3R0rO"],
+      "variant": "primary",
+      "score": 0.9
+    },
+    {
+      "classes": ["woo-item-flex"],
+      "variant": "backup",
+      "score": 0.7
+    }
+  ],
+  "children": ["expand_button", "post_link"],
+  "capabilities": ["extract"],
+  "operations": [
+    {
+      "type": "find-child"
+    },
+    {
+      "type": "extract",
+      "config": {
+        "fields": {
+          "url": "a[href*='weibo.com'][href*='status']",
+          "author": ".head_nick_24eEB, .woo-box-flex.woo-box-alignCenter a",
+          "authorUrl": ".head_nick_24eEB, .woo-box-flex.woo-box-alignCenter a",
+          "content": ".detail_wbtext_4CRf9",
+          "timestamp": ".head_info_3WfbI time, .woo-box-flex time",
+          "likes": ".toolbar_item_2-iTa[title*='赞']",
+          "comments": ".toolbar_item_2-iTa[title*='评论']",
+          "reposts": ".toolbar_item_2-iTa[title*='转发']"
+        },
+        "include_text": true,
+        "max_items": 1,
+        "whitelist": {
+          "prefix": ["https://weibo.com/"]
+        },
+        "blacklist": {
+          "contains": ["/u/", "/hot", "/search", "/profile", "/login"],
+          "suffix": ["/home", "/explore"]
+        }
+      }
+    }
+  ],
+  "runMode": "sequential",
+  "version": "1.0.0",
+  "priority": 10
+}

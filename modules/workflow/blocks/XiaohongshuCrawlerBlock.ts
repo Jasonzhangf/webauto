@@ -1,5 +1,4 @@
 import fs from 'node:fs/promises';
-import { existsSync } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 
@@ -7,7 +6,7 @@ export interface XiaohongshuCrawlerInput {
   sessionId: string;
   keyword: string;
   targetCount: number;
-  serviceUrl?: string; // Unified API URL (http://127.0.0.1:7701)
+  serviceUrl?: string;
   maxNoNew?: number;
   savePath?: string;
 }
@@ -19,383 +18,579 @@ export interface XiaohongshuCrawlerOutput {
   error?: string;
 }
 
-// 辅助函数
+type ControllerResponse<T> = {
+  success: boolean;
+  data?: T;
+  error?: string;
+};
+
+type ContainerTreeSnapshot = {
+  id?: string;
+  defId?: string;
+  type?: string;
+  name?: string;
+  children?: ContainerTreeSnapshot[];
+};
+
+type ContainerMatchSnapshot = {
+  container_tree?: ContainerTreeSnapshot;
+};
+
+type ContainerMatchPayload = {
+  sessionId: string;
+  profileId: string;
+  url: string;
+  matched: boolean;
+  container: ContainerTreeSnapshot | null;
+  snapshot: ContainerMatchSnapshot;
+};
+
+type ExtractResult = {
+  extracted?: Array<Record<string, any>>;
+  [key: string]: any;
+};
+
+const SEARCH_ROOT_ID = 'xiaohongshu_search';
+const SEARCH_LIST_ID = 'xiaohongshu_search.search_result_list';
+const SEARCH_ITEM_ID = 'xiaohongshu_search.search_result_item';
+const DETAIL_ROOT_ID = 'xiaohongshu_detail';
+const DETAIL_MODAL_ID = 'xiaohongshu_detail.modal_shell';
+const DETAIL_HEADER_ID = 'xiaohongshu_detail.header';
+const DETAIL_CONTENT_ID = 'xiaohongshu_detail.content';
+const DETAIL_GALLERY_ID = 'xiaohongshu_detail.gallery';
+const DETAIL_COMMENT_SECTION_ID = 'xiaohongshu_detail.comment_section';
+const DETAIL_COMMENT_ITEM_ID = 'xiaohongshu_detail.comment_section.comment_item';
+const DETAIL_SHOW_MORE_ID = 'xiaohongshu_detail.comment_section.show_more_button';
+const DETAIL_COMMENT_END_ID = 'xiaohongshu_detail.comment_section.end_marker';
+const DETAIL_COMMENT_EMPTY_ID = 'xiaohongshu_detail.comment_section.empty_state';
+
 function sanitizeName(name: string) {
   return (name || 'untitled').replace(/[\\/:*?"<>|.\s]/g, '_').trim().slice(0, 60);
 }
 
 async function delay(ms: number) {
-  return new Promise(r => setTimeout(r, ms));
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-// 核心执行逻辑
+function mapSnapshot(node: ContainerTreeSnapshot | undefined | null): ContainerTreeSnapshot | null {
+  if (!node) return null;
+  const mapped: ContainerTreeSnapshot = {
+    id: node.id,
+    defId: node.defId || node.name || node.id,
+    type: node.type,
+    name: node.name,
+    children: [],
+  };
+  const children = Array.isArray(node.children) ? node.children : [];
+  mapped.children = children
+    .map((child) =>
+      mapSnapshot({
+        id: child.id,
+        defId: child.defId || child.name || child.id,
+        type: child.type,
+        name: child.name,
+        children: child.children || [],
+      }),
+    )
+    .filter(Boolean) as ContainerTreeSnapshot[];
+  return mapped;
+}
+
+function findNodeByDefId(root: ContainerTreeSnapshot | null, defId: string): ContainerTreeSnapshot | null {
+  if (!root) return null;
+  if (root.defId === defId) return root;
+  for (const child of root.children || []) {
+    const match = findNodeByDefId(child, defId);
+    if (match) return match;
+  }
+  return null;
+}
+
+function collectNodesByDefId(root: ContainerTreeSnapshot | null, defId: string): ContainerTreeSnapshot[] {
+  if (!root) return [];
+  const matches: ContainerTreeSnapshot[] = [];
+  if (root.defId === defId) {
+    matches.push(root);
+  }
+  for (const child of root.children || []) {
+    matches.push(...collectNodesByDefId(child, defId));
+  }
+  return matches;
+}
+
+function normalizeExtraction(result: ExtractResult | undefined | null): Array<Record<string, any>> {
+  if (!result) return [];
+  if (Array.isArray(result.extracted)) return result.extracted;
+  if (Array.isArray((result as any).data?.extracted)) return (result as any).data.extracted;
+  if (Array.isArray((result as any).result?.extracted)) return (result as any).result.extracted;
+  return [];
+}
+
 export async function execute(input: XiaohongshuCrawlerInput): Promise<XiaohongshuCrawlerOutput> {
   const {
-    sessionId, // 这里的 sessionId 实际上是 profileId
+    sessionId,
     keyword,
     targetCount = 50,
     serviceUrl = 'http://127.0.0.1:7701',
     maxNoNew = 10,
-    savePath
+    savePath,
   } = input;
 
   const profile = sessionId;
-  const basePath = savePath 
+  const basePath = savePath
     ? path.resolve(savePath)
     : path.join(os.homedir(), '.webauto', 'download', 'xiaohongshu', sanitizeName(keyword));
 
-  // Helper for API calls
-  async function post(endpoint: string, data: any) {
+  async function httpPost<T>(endpoint: string, payload: Record<string, any>): Promise<T> {
     const res = await fetch(`${serviceUrl}${endpoint}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data)
+      body: JSON.stringify(payload),
     });
-    if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`);
-    return res.json();
+    if (!res.ok) {
+      throw new Error(`HTTP ${res.status}: ${await res.text()}`);
+    }
+    return (await res.json()) as T;
   }
 
-  async function executeScript(script: string | (() => any)) {
-    const scriptStr = typeof script === 'function' ? `(${script.toString()})()` : script;
-    const res = await post('/v1/controller/action', {
-      action: 'browser:execute',
-      payload: {
-        profile,
-        script: scriptStr
+  function unwrapData(payload: any): any {
+    if (!payload || typeof payload !== 'object') return payload;
+    if ('snapshot' in payload || 'sessions' in payload || 'result' in payload || 'matched' in payload) {
+      return payload;
+    }
+    if ('data' in payload && payload.data) {
+      return unwrapData(payload.data);
+    }
+    return payload;
+  }
+
+  async function controllerAction<T>(action: string, payload: Record<string, any>): Promise<T> {
+    const response = await httpPost<ControllerResponse<T>>('/v1/controller/action', {
+      action,
+      payload,
+    });
+    if (response && typeof response === 'object' && 'success' in response && response.success === false) {
+      throw new Error((response as any).error || `controller action ${action} failed`);
+    }
+    const raw = response?.data ?? response;
+    return unwrapData(raw) as T;
+  }
+
+  async function executeContainerOperation(
+    containerId: string,
+    operationId: string,
+    config: Record<string, any> = {},
+  ): Promise<any> {
+    return controllerAction<any>('container:operation', {
+      containerId,
+      operationId,
+      config,
+      sessionId: profile,
+    });
+  }
+
+  async function inspectContainer(containerId: string, maxChildren = 50): Promise<ContainerTreeSnapshot | null> {
+    const snapshot = await controllerAction<{ snapshot?: ContainerMatchSnapshot }>('containers:inspect-container', {
+      profile,
+      containerId,
+      maxChildren,
+    });
+    return mapSnapshot(snapshot?.snapshot?.container_tree);
+  }
+
+  async function matchContainers(): Promise<{ match: ContainerMatchPayload; tree: ContainerTreeSnapshot | null }> {
+    const currentUrl = await getCurrentUrl();
+    const match = await controllerAction<ContainerMatchPayload>('containers:match', {
+      profile,
+      url: currentUrl,
+      maxDepth: 3,
+      maxChildren: 8,
+    });
+    const tree = mapSnapshot(match?.snapshot?.container_tree);
+    return { match, tree };
+  }
+
+  async function getCurrentUrl(): Promise<string> {
+    const result = await controllerAction<{ result?: string }>('browser:execute', {
+      profile,
+      script: 'location.href',
+    });
+    return (result as any)?.result || '';
+  }
+
+  async function runSearch(keywordText: string) {
+    await controllerAction('browser:execute', {
+      profile,
+      script: `(() => {
+        const input = document.querySelector('#search-input, input[type="search"]');
+        if (input) {
+          input.value = '${keywordText.replace(/'/g, "\\'")}';
+          input.dispatchEvent(new Event('input', { bubbles: true }));
+          input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true }));
+        }
+      })();`,
+    });
+    await delay(3500);
+  }
+
+  async function ensureLoginState() {
+    const url = await getCurrentUrl();
+    if (!url.includes('/login')) {
+      return;
+    }
+    console.warn('[XiaohongshuCrawler] 当前处于登录页，等待人工登录...');
+    while (true) {
+      await delay(3000);
+      const curr = await getCurrentUrl();
+      if (!curr.includes('/login')) {
+        console.log('[XiaohongshuCrawler] 登录完成，继续执行。');
+        break;
       }
+      process.stdout.write('.');
+    }
+  }
+
+  async function ensureSearchPageContext() {
+    await runSearch(keyword);
+  }
+
+  async function waitForDetailContext(): Promise<ContainerTreeSnapshot | null> {
+    for (let i = 0; i < 10; i++) {
+      const { tree } = await matchContainers();
+      if (!tree) {
+        await delay(800);
+        continue;
+      }
+      if (tree.defId === DETAIL_ROOT_ID || findNodeByDefId(tree, DETAIL_MODAL_ID)) {
+        return tree;
+      }
+      await delay(800);
+    }
+    return null;
+  }
+
+  async function closeDetailModal() {
+    await controllerAction('browser:execute', {
+      profile,
+      script: `(() => {
+        const closeBtn = document.querySelector('.note-detail-mask [class*="close"], .note-detail .close');
+        if (closeBtn) {
+          closeBtn.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+          return 'close-button';
+        }
+        window.history.back();
+        return 'history-back';
+      })();`,
     });
-    return res.data?.result;
+    await delay(2000);
   }
 
-  async function jsClick(selector: string, index = 0) {
-    return executeScript(`() => {
-      const els = document.querySelectorAll('${selector}');
-      const el = els[${index}];
-      if (el) { el.click(); return true; }
-      return false;
-    }`);
+  async function scrollSearchPage() {
+    await controllerAction('browser:execute', {
+      profile,
+      script: 'window.scrollBy(0, 800);',
+    });
+    await delay(2000);
   }
 
-  async function getCurrentUrl() {
-    return executeScript(() => location.href);
+  async function fetchBrowserHeaders() {
+    const info = await controllerAction<{ result?: { ua?: string; cookie?: string } }>('browser:execute', {
+      profile,
+      script: `({ ua: navigator.userAgent, cookie: document.cookie })`,
+    });
+    const payload = (info as any)?.result || {};
+    return {
+      'User-Agent': payload.ua || 'Mozilla/5.0',
+      Cookie: payload.cookie || '',
+      Referer: 'https://www.xiaohongshu.com/',
+    };
   }
 
-  async function downloadFile(url: string, dest: string, headers: any) {
+  async function downloadFile(url: string, dest: string, headers: Record<string, string>) {
     try {
       const res = await fetch(url, { headers });
       if (!res.ok) throw new Error(`Status ${res.status}`);
       const buffer = await res.arrayBuffer();
       await fs.writeFile(dest, Buffer.from(buffer));
       return true;
-    } catch (err: any) {
-      console.warn(`[XiaohongshuCrawler] Download failed (${url}): ${err.message}`);
+    } catch (err) {
+      console.warn(`[XiaohongshuCrawler] 图片下载失败 (${url}): ${(err as Error).message}`);
       return false;
     }
   }
 
-  try {
-    console.log(`[XiaohongshuCrawler] Starting crawler for "${keyword}"`);
-    console.log(`[XiaohongshuCrawler] Save path: ${basePath}`);
-    await fs.mkdir(basePath, { recursive: true });
-
-    // 扫描已下载内容进行去重
-    const collectedIds = new Set<string>();
-    try {
-      const existingDirs = await fs.readdir(basePath);
-      existingDirs.forEach(dir => {
-        const parts = dir.split('_');
-        const possibleId = parts[parts.length - 1];
-        if (possibleId && possibleId.length > 10) {
-          collectedIds.add(possibleId);
+  async function collectSearchItems(existingNotes: Set<string>) {
+    const { tree } = await matchContainers();
+    if (!tree) return [];
+    if (tree.defId !== SEARCH_ROOT_ID) {
+      await ensureSearchPageContext();
+      const refreshed = await matchContainers();
+      if (!refreshed.tree || refreshed.tree.defId !== SEARCH_ROOT_ID) {
+        return [];
+      }
+      return collectSearchItems(existingNotes);
+    }
+    const listNode = findNodeByDefId(tree, SEARCH_LIST_ID);
+    if (!listNode) return [];
+    const inspected = await inspectContainer(listNode.id!, 80);
+    const effectiveList = inspected || listNode;
+    const itemNodes = collectNodesByDefId(effectiveList, SEARCH_ITEM_ID);
+    const items: Array<{ nodeId: string; meta: Record<string, any> }> = [];
+    for (const node of itemNodes) {
+      if (!node.id) continue;
+      try {
+        const result = await executeContainerOperation(node.id, 'extract');
+        const extracted = normalizeExtraction(result);
+        const meta = extracted[0] || {};
+        const noteId = meta.note_id || meta.noteId;
+        if (!noteId || existingNotes.has(noteId)) {
+          continue;
         }
-      });
-      console.log(`[XiaohongshuCrawler] Found ${collectedIds.size} already downloaded notes.`);
-    } catch {}
+        items.push({ nodeId: node.id, meta });
+      } catch (err) {
+        console.warn(`[XiaohongshuCrawler] 列表项提取失败: ${(err as Error).message}`);
+      }
+    }
+    return items;
+  }
 
-    // 获取 Headers
-    const browserData: any = await executeScript(() => ({
-      ua: navigator.userAgent,
-      cookie: document.cookie
-    }));
-    const headers = {
-      'User-Agent': browserData?.ua || 'Mozilla/5.0',
-      'Cookie': browserData?.cookie || '',
-      'Referer': 'https://www.xiaohongshu.com/'
+  async function openDetailFromItem(item: { nodeId: string; meta: Record<string, any> }) {
+    await executeContainerOperation(item.nodeId, 'highlight', {
+      style: '2px solid #ea4335',
+      duration: 1000,
+    });
+    await executeContainerOperation(item.nodeId, 'navigate', {
+      wait_after_ms: 1200,
+    });
+    const detailTree = await waitForDetailContext();
+    return detailTree;
+  }
+
+  async function scrollComments(sectionId: string) {
+    for (let i = 0; i < 6; i++) {
+      await executeContainerOperation(sectionId, 'scroll', {
+        direction: 'down',
+        distance: 600,
+      });
+      await delay(600);
+      await executeContainerOperation(sectionId, 'find-child', {
+        container_id: DETAIL_SHOW_MORE_ID,
+      });
+      await delay(600);
+    }
+  }
+
+  async function collectDetailData(noteMeta: Record<string, any>) {
+    const tree = await waitForDetailContext();
+    if (!tree) {
+      console.warn('[XiaohongshuCrawler] 无法匹配详情容器，跳过该笔记');
+      return null;
+    }
+    const modalNode = findNodeByDefId(tree, DETAIL_MODAL_ID) || tree;
+    const headerNode = findNodeByDefId(modalNode, DETAIL_HEADER_ID);
+    const contentNode = findNodeByDefId(modalNode, DETAIL_CONTENT_ID);
+    const galleryNode = findNodeByDefId(modalNode, DETAIL_GALLERY_ID);
+    const commentSectionNode = findNodeByDefId(modalNode, DETAIL_COMMENT_SECTION_ID);
+
+    const headerData = headerNode ? await executeContainerOperation(headerNode.id!, 'extract') : null;
+    const contentData = contentNode ? await executeContainerOperation(contentNode.id!, 'extract') : null;
+    const galleryData = galleryNode ? await executeContainerOperation(galleryNode.id!, 'extract') : null;
+
+    const headerInfo = normalizeExtraction(headerData)[0] || {};
+    const contentInfo = normalizeExtraction(contentData)[0] || {};
+    const galleryInfo = normalizeExtraction(galleryData)[0] || {};
+
+    let commentRecords: Array<Record<string, any>> = [];
+    let reachedEnd = false;
+    let isEmpty = false;
+
+    if (commentSectionNode && commentSectionNode.id) {
+      await scrollComments(commentSectionNode.id);
+      const inspected = await inspectContainer(commentSectionNode.id, 160);
+      const effective = inspected || commentSectionNode;
+      const commentNodes = collectNodesByDefId(effective, DETAIL_COMMENT_ITEM_ID);
+      const endMarkerNode = findNodeByDefId(effective, DETAIL_COMMENT_END_ID);
+      const emptyNode = findNodeByDefId(effective, DETAIL_COMMENT_EMPTY_ID);
+      reachedEnd = Boolean(endMarkerNode);
+      isEmpty = Boolean(emptyNode);
+      const temp: Array<Record<string, any>> = [];
+      for (const node of commentNodes) {
+        if (!node.id) continue;
+        try {
+          const result = await executeContainerOperation(node.id, 'extract');
+          const info = normalizeExtraction(result)[0];
+          if (info) temp.push(info);
+        } catch (err) {
+          console.warn(`[XiaohongshuCrawler] 评论提取失败: ${(err as Error).message}`);
+        }
+      }
+      commentRecords = temp;
+    }
+
+    const detail = {
+      title: contentInfo.title || noteMeta.title || '未命名笔记',
+      text: contentInfo.text || '',
+      author: {
+        name: headerInfo.author_name || '未知作者',
+        link: headerInfo.author_link || '',
+      },
+      images: Array.isArray(galleryInfo.images) ? galleryInfo.images : [],
+      comments: commentRecords,
+      commentsEndReached: reachedEnd,
+      commentsEmpty: isEmpty,
     };
 
-    let processedIndex = 0;
-    let noNewCount = 0;
-    let sessionCollectedCount = 0;
+    return detail;
+  }
 
-    // 搜索列表获取脚本
-    const getSearchItemsScript = (startIndex: number) => `() => {
-      const items = [];
-      const els = document.querySelectorAll('.note-item');
-      for (let i = ${startIndex}; i < els.length; i++) {
-        const el = els[i];
-        const linkEl = el.querySelector('a');
-        const href = linkEl ? linkEl.href : '';
-        let noteId = '';
-        if (href) {
-          const match = href.match(/\\/explore\\/([a-f0-9]+)/);
-          if (match) noteId = match[1];
-        }
-        if (noteId) {
-          let title = el.textContent.replace(/\\n/g, ' ').trim().substring(0, 50);
-          items.push({ index: i, noteId, title });
-        }
+  async function saveNoteData(
+    noteId: string,
+    detail: {
+      title: string;
+      text: string;
+      author: { name: string; link?: string };
+      images: string[];
+      comments: Array<Record<string, any>>;
+      commentsEndReached: boolean;
+      commentsEmpty: boolean;
+    },
+    headers: Record<string, string>,
+  ) {
+    const dirName = `${sanitizeName(detail.title)}_${noteId}`;
+    const noteDir = path.join(basePath, dirName);
+    const imagesDir = path.join(noteDir, 'images');
+    await fs.mkdir(imagesDir, { recursive: true });
+
+    const savedImages: string[] = [];
+    for (let i = 0; i < detail.images.length; i++) {
+      let imgUrl: string = detail.images[i];
+      if (!imgUrl) continue;
+      if (imgUrl.startsWith('//')) imgUrl = 'https:' + imgUrl;
+      const ext = imgUrl.includes('.png') ? '.png' : '.jpg';
+      const filename = `${i + 1}${ext}`;
+      const destPath = path.join(imagesDir, filename);
+      let success = false;
+      for (let retry = 0; retry < 3; retry++) {
+        success = await downloadFile(imgUrl, destPath, headers);
+        if (success) break;
+        await delay(1000);
       }
-      return items;
-    }`;
+      savedImages.push(success ? `./images/${filename}` : imgUrl);
+    }
 
-    while (sessionCollectedCount < targetCount && noNewCount < maxNoNew) {
-      const items: any[] = await executeScript(getSearchItemsScript(processedIndex));
+    const commentSection = detail.comments
+      .map((c, idx) => {
+        const name = c.user_name || c.user || '匿名用户';
+        const id = c.user_id || c.userId || '';
+        const text = c.text || '';
+        const timestamp = c.timestamp || '';
+        return `### ${idx + 1}. ${name}${id ? ` (${id})` : ''}\n- 时间：${timestamp}\n\n${text}\n`;
+      })
+      .join('\n');
 
-      if (!items || items.length === 0) {
-        noNewCount++;
-        console.log(`[XiaohongshuCrawler] No new items, scrolling (${noNewCount}/${maxNoNew})`);
-        await post('/v1/controller/action', {
-          action: 'user_action',
-          payload: { profile, operation_type: 'scroll', target: { deltaY: 800 } }
-        });
-        await delay(2000);
+    const metadataLines = [
+      `- **关键字**: ${keyword}`,
+      `- **作者**: ${detail.author.name}${detail.author.link ? ` ｜ [主页](${detail.author.link})` : ''}`,
+      `- **Note ID**: ${noteId}`,
+      `- **评论统计**: ${detail.comments.length} 条 / 结尾标记：${detail.commentsEndReached ? '是' : '否'} / 空状态：${
+        detail.commentsEmpty ? '是' : '否'
+      }`,
+    ];
+
+    const markdown = [
+      `# ${detail.title}`,
+      '',
+      metadataLines.join('\n'),
+      '',
+      '## 正文',
+      '',
+      detail.text || '（正文为空）',
+      '',
+      '## 图片',
+      '',
+      savedImages.map((img) => `![](${img})`).join('\n') || '（无图片）',
+      '',
+      `## 评论（${detail.comments.length}）`,
+      '',
+      commentSection || '（暂无评论）',
+    ].join('\n');
+
+    await fs.writeFile(path.join(noteDir, 'content.md'), markdown, 'utf-8');
+    console.log(`[XiaohongshuCrawler] Saved: ${dirName}`);
+  }
+
+  try {
+    await fs.mkdir(basePath, { recursive: true });
+    const existingDirs = await fs.readdir(basePath).catch(() => []);
+    const collectedIds = new Set<string>();
+    for (const dir of existingDirs) {
+      const parts = dir.split('_');
+      const possibleId = parts[parts.length - 1];
+      if (possibleId && possibleId.length > 10) {
+        collectedIds.add(possibleId);
+      }
+    }
+
+    await ensureLoginState();
+    await ensureSearchPageContext();
+    const headers = await fetchBrowserHeaders();
+
+    let sessionCollectedCount = 0;
+    let noNewCycles = 0;
+
+    while (sessionCollectedCount < targetCount && noNewCycles < maxNoNew) {
+      const items = await collectSearchItems(collectedIds);
+      if (!items.length) {
+        noNewCycles++;
+        await scrollSearchPage();
         continue;
       }
-
-      noNewCount = 0;
+      noNewCycles = 0;
 
       for (const item of items) {
         if (sessionCollectedCount >= targetCount) break;
-        processedIndex = Math.max(processedIndex, item.index + 1);
-
-        if (collectedIds.has(item.noteId)) {
+        const noteId = item.meta.note_id || item.meta.noteId;
+        if (!noteId || collectedIds.has(noteId)) {
           continue;
         }
-
-        console.log(`[XiaohongshuCrawler] Processing [${sessionCollectedCount + 1}/${targetCount}] ${item.title}`);
-
-        // 点击进入详情
-        const clicked = await jsClick('.note-item a', item.index);
-        if (!clicked) {
-          console.warn('[XiaohongshuCrawler] Click failed');
+        console.log(
+          `[XiaohongshuCrawler] 处理第 ${sessionCollectedCount + 1}/${targetCount} 条：${item.meta.title || noteId}`,
+        );
+        const detailTree = await openDetailFromItem(item);
+        if (!detailTree) {
+          console.warn('[XiaohongshuCrawler] 打开详情失败，跳过该笔记');
           continue;
         }
-
-        await delay(3000);
-
-        const url: string = await getCurrentUrl();
-        if (!url.includes('/explore/')) {
-          console.warn('[XiaohongshuCrawler] Not in detail page, skipping');
+        const detailData = await collectDetailData(item.meta);
+        if (!detailData) {
+          await closeDetailModal();
+          await ensureSearchPageContext();
           continue;
         }
-
-        // 评论深度加载逻辑
-        await executeScript(async () => {
-          const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
-          
-          let scroller = document.querySelector('.note-scroller') || 
-                         document.querySelector('#noteContainer') || 
-                         document.querySelector('.note-content-container');
-          
-          if (!scroller && document.querySelector('.note-detail-mask')) {
-             const commentsEl = document.querySelector('.comments-container');
-             if (commentsEl) scroller = commentsEl.parentElement;
-          }
-          
-          const target = scroller || window;
-          const isWindow = !scroller;
-          
-          const scrollBottom = () => {
-            if (isWindow) window.scrollTo(0, document.body.scrollHeight);
-            else target.scrollTop = target.scrollHeight;
-          };
-
-          let noChangeCount = 0;
-          let prevHeight = 0;
-          let prevCommentCount = 0;
-          const MAX_CYCLES = 20;
-
-          for (let i = 0; i < MAX_CYCLES; i++) {
-            scrollBottom();
-            await sleep(1000);
-
-            const expandBtns = Array.from(document.querySelectorAll('.reply-expand, .show-more, .expand-btn'));
-            let clickedCount = 0;
-            for (const btn of expandBtns) {
-              if (btn.offsetParent !== null && !(btn as any).dataset.clicked) {
-                (btn as HTMLElement).click();
-                (btn as any).dataset.clicked = 'true';
-                clickedCount++;
-                await sleep(300);
-              }
-            }
-
-            const currentHeight = isWindow ? document.body.scrollHeight : target.scrollHeight;
-            const currentCommentCount = document.querySelectorAll('.comment-item').length;
-            
-            if (currentHeight === prevHeight && clickedCount === 0 && currentCommentCount === prevCommentCount) {
-              noChangeCount++;
-              if (noChangeCount >= 3) break;
-            } else {
-              noChangeCount = 0;
-            }
-            
-            prevHeight = currentHeight;
-            prevCommentCount = currentCommentCount;
-            await sleep(500 + Math.random() * 500);
-          }
-        });
-
-        // 提取数据
-        const data: any = await executeScript(() => {
-          const getText = (sel: string) => {
-            const el = document.querySelector(sel);
-            return el ? (el as HTMLElement).innerText.trim() : '';
-          };
-
-          const d: any = {
-            title: getText('.note-detail-title, .title, h1') || '无标题',
-            content: getText('.note-content, .desc, .content, #detail-desc'),
-            date: getText('.date, .bottom-container .time'),
-            author: { name: 'Unknown', id: '', link: '' },
-            images: [],
-            comments: []
-          };
-
-          const authorNameEl = document.querySelector('.author-container .name, .author-wrapper .name');
-          if (authorNameEl) d.author.name = (authorNameEl as HTMLElement).innerText.trim();
-          
-          const authorLinkEl = document.querySelector('.author-container .info, .author-wrapper');
-          if (authorLinkEl && (authorLinkEl as HTMLAnchorElement).href) {
-            d.author.link = (authorLinkEl as HTMLAnchorElement).href;
-            const match = d.author.link.match(/\/user\/profile\/([a-f0-9]+)/);
-            if (match) d.author.id = match[1];
-          }
-
-          document.querySelectorAll('.note-slider-image').forEach(div => {
-            const bg = window.getComputedStyle(div).backgroundImage;
-            const match = bg.match(/url\(["']?([^"']+)["']?\)/);
-            if (match) d.images.push(match[1]);
-          });
-          document.querySelectorAll('.note-slider-image img, .note-content img').forEach(img => {
-            const src = (img as HTMLImageElement).src;
-            if (src && !d.images.includes(src)) d.images.push(src);
-          });
-
-          const commentItems = document.querySelectorAll('.comment-item');
-          commentItems.forEach(item => {
-            const extractOne = (el: Element) => {
-              const userEl = el.querySelector('.name, .user-name');
-              const contentEl = el.querySelector('.content, .comment-content');
-              const linkEl = el.querySelector('a.avatar, a.name');
-              if (!userEl || !contentEl) return null;
-              
-              let userId = '';
-              if (linkEl && (linkEl as HTMLAnchorElement).href) {
-                const match = (linkEl as HTMLAnchorElement).href.match(/\/user\/profile\/([a-f0-9]+)/);
-                if (match) userId = match[1];
-              }
-              
-              return {
-                user: (userEl as HTMLElement).innerText.trim(),
-                userId: userId,
-                text: (contentEl as HTMLElement).innerText.trim()
-              };
-            };
-
-            const rootComment: any = extractOne(item);
-            if (rootComment) {
-              const replies: any[] = [];
-              const replyEls = item.querySelectorAll('.reply-list .comment-item, .reply-container .comment-item');
-              replyEls.forEach(replyEl => {
-                const reply = extractOne(replyEl);
-                if (reply) replies.push(reply);
-              });
-              rootComment.replies = replies;
-              d.comments.push(rootComment);
-            }
-          });
-          return d;
-        });
-
-        data.link = url;
-
-        // 保存文件
-        const dirName = `${sanitizeName(data.title)}_${item.noteId}`;
-        const noteDir = path.join(basePath, dirName);
-        const imagesDir = path.join(noteDir, 'images');
-        await fs.mkdir(imagesDir, { recursive: true });
-
-        const savedImages: string[] = [];
-        for (let i = 0; i < data.images.length; i++) {
-          let imgUrl = data.images[i];
-          if (imgUrl.startsWith('//')) imgUrl = 'https:' + imgUrl;
-          const ext = imgUrl.includes('png') ? '.png' : '.jpg';
-          const filename = `${i + 1}${ext}`;
-          const destPath = path.join(imagesDir, filename);
-          
-          let success = false;
-          for (let r = 0; r < 3; r++) {
-            success = await downloadFile(imgUrl, destPath, headers);
-            if (success) break;
-            await delay(1000);
-          }
-          if (success) savedImages.push(`./images/${filename}`);
-          else savedImages.push(imgUrl);
-          await delay(200);
-        }
-
-        let md = `# ${data.title}\n\n`;
-        md += `- **作者**: ${data.author.name} (ID: ${data.author.id}) [主页](${data.author.link})\n`;
-        md += `- **发布时间**: ${data.date}\n`;
-        md += `- **原文链接**: ${data.link}\n`;
-        md += `- **Note ID**: ${item.noteId}\n\n`;
-        md += `## 正文\n\n${data.content}\n\n`;
-        md += `## 图片\n\n${savedImages.map(img => `![](${img})`).join('\n')}\n\n`;
-        md += `## 评论 (${data.comments.length})\n\n`;
-        data.comments.forEach((c: any, idx: number) => {
-          md += `### ${idx + 1}. ${c.user} (ID: ${c.userId})\n${c.text}\n\n`;
-          if (c.replies && c.replies.length) {
-            c.replies.forEach((r: any) => md += `> **${r.user}** (${r.userId}): ${r.text}\n>\n`);
-          }
-          md += `\n`;
-        });
-
-        await fs.writeFile(path.join(noteDir, 'content.md'), md, 'utf-8');
-        console.log(`[XiaohongshuCrawler] Saved: ${dirName}`);
-        
-        collectedIds.add(item.noteId);
+        await saveNoteData(noteId, detailData, headers);
+        collectedIds.add(noteId);
         sessionCollectedCount++;
-
-        // 关闭弹窗
-        await post('/v1/controller/action', {
-          action: 'user_action',
-          payload: { profile, operation_type: 'key', target: { key: 'Escape' } }
-        });
-        await delay(1500);
+        await closeDetailModal();
+        await ensureSearchPageContext();
       }
 
-      // 翻页
-      await post('/v1/controller/action', {
-        action: 'user_action',
-        payload: { profile, operation_type: 'scroll', target: { deltaY: 800 } }
-      });
-      await delay(2000);
+      if (sessionCollectedCount < targetCount) {
+        await scrollSearchPage();
+      }
     }
 
     return {
       success: true,
       collectedCount: sessionCollectedCount,
-      savePath: basePath
+      savePath: basePath,
     };
-
   } catch (err: any) {
     console.error(`[XiaohongshuCrawler] Error: ${err.message}`);
     return {
       success: false,
       collectedCount: 0,
       savePath: basePath,
-      error: err.message
+      error: err.message,
     };
   }
 }

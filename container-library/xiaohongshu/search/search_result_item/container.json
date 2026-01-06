@@ -1,0 +1,115 @@
+{
+  "id": "xiaohongshu_search.search_result_item",
+  "name": "搜索结果项",
+  "type": "item",
+  "capabilities": [
+    "highlight",
+    "extract",
+    "click",
+    "navigate"
+  ],
+  "children": [],
+  "selectors": [
+    {
+      "css": ".note-item",
+      "variant": "primary",
+      "score": 1.0
+    }
+  ],
+  "metadata": {
+    "fields": [
+      "title",
+      "link",
+      "detail_url",
+      "image",
+      "text",
+      "note_id",
+      "xsec_token"
+    ],
+    "navigation": {
+      "scope_selector": ".note-item",
+      "anchor_selector": "a[href*='/explore/']",
+      "attribute": "href",
+      "mode": "href"
+    }
+  },
+  "extractors": {
+    "title": {
+      "selectors": [
+        "[class*=\"title\"]",
+        "[class*=\"content\"]"
+      ]
+    },
+    "link": {
+      "selectors": [
+        "a"
+      ],
+      "attr": "href"
+    },
+    "detail_url": {
+      "selectors": [
+        "a[href*='/explore/']"
+      ],
+      "attr": "href"
+    },
+    "image": {
+      "selectors": [
+        "img"
+      ],
+      "attr": "src"
+    },
+    "text": {
+      "selectors": [
+        ".note-item"
+      ],
+      "attr": "textContent"
+    },
+    "note_id": {
+      "selectors": [
+        "a"
+      ],
+      "attr": "href",
+      "transform": "extractNoteId"
+    },
+    "xsec_token": {
+      "selectors": [
+        "a[href*='xsec_token=']",
+        "a[href*='/explore/']"
+      ],
+      "attr": "href",
+      "transform": "extractXsecToken"
+    }
+  },
+  "operations": [
+    {
+      "type": "highlight",
+      "config": {
+        "style": "2px solid #ea4335",
+        "duration": 1500
+      }
+    },
+    {
+      "type": "click",
+      "config": {
+        "target": "img",
+        "comment": "点击图片以获取带xtoken的URL"
+      }
+    },
+    {
+      "type": "extract",
+      "config": {
+        "fields": ["title", "link", "detail_url", "image", "text", "note_id", "xsec_token"]
+      }
+    },
+    {
+      "type": "navigate",
+      "config": {
+        "scope_selector": ".note-item",
+        "anchor_selector": "a[href*='/explore/']",
+        "attribute": "href",
+        "mode": "href",
+        "wait_after_ms": 300
+      }
+    }
+  ]
+}

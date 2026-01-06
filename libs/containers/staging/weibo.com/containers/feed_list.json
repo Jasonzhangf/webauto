@@ -1,0 +1,27 @@
+{
+  "id": "feed_list",
+  "name": "微博信息流列表容器",
+  "website": "weibo.com",
+  "selectors": [
+    {
+      "classes": ["vue-recycle-scroller__item-wrapper"],
+      "variant": "primary",
+      "score": 0.9
+    },
+    {
+      "classes": ["Main_full_7mHvO"],
+      "variant": "backup",
+      "score": 0.8
+    }
+  ],
+  "children": ["feed_post"],
+  "capabilities": ["scroll"],
+  "operations": [
+    {
+      "type": "find-child"
+    }
+  ],
+  "runMode": "sequential",
+  "version": "1.0.0",
+  "priority": 5
+}

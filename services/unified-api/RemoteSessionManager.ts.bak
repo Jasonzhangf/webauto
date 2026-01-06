@@ -1,0 +1,139 @@
+/**
+ * RemoteSessionManager - 远程会话管理器
+ *
+ * 作用：在 Unified API (7701) 中管理对 Browser Service (7704) 的远程会话
+ * 核心职责：创建/销毁/查询远程会话，并返回 RemoteBrowserSession 适配器
+ */
+
+import { RemoteBrowserSession } from './RemoteBrowserSession.js';
+import fetch from 'node-fetch';
+
+export interface RemoteSessionManagerOptions {
+  browserServiceUrl: string; // http://127.0.0.1:7704
+}
+
+export interface CreateRemoteSessionPayload {
+  sessionId?: string;
+  profileId?: string;
+  headless?: boolean;
+  url?: string;
+}
+
+export class RemoteSessionManager {
+  private sessions = new Map<string, RemoteBrowserSession>();
+  private browserServiceUrl: string;
+
+  constructor(options: any) {
+    // 支持两种构造方式：
+    // 1. { browserServiceUrl: string }
+    // 2. { host: string, port: number, ... } (兼容原 SessionManager)
+    const url = options.browserServiceUrl || `http://${options.host || '127.0.0.1'}:${options.port || 7704}`;
+    this.browserServiceUrl = options.browserServiceUrl;
+  }
+
+  /**
+   * 创建远程会话
+   */
+  async createSession(options: CreateRemoteSessionPayload): Promise<{ sessionId: string }> {
+    const sessionId = options.sessionId || options.profileId || `session_${Date.now().toString(36)}`;
+
+    // 通过 HTTP 调用 Browser Service 创建会话
+    const response = await fetch(`${this.browserServiceUrl}/command`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'start',
+        args: {
+          profileId: sessionId,
+          headless: options.headless,
+          url: options.url
+        }
+      })
+    });
+
+    if (!response.ok) {
+      throw new Error(`Failed to create remote session: ${response.statusText}`);
+    }
+
+    const result: any = await response.json();
+    if (!result.success) {
+      throw new Error(result.error || 'Failed to create remote session');
+    }
+
+    // 创建本地代理对象
+    const remoteSession = new RemoteBrowserSession({
+      sessionId,
+      browserServiceUrl: this.browserServiceUrl
+    });
+
+    this.sessions.set(sessionId, remoteSession);
+
+    return { sessionId };
+  }
+
+  /**
+   * 获取会话
+   */
+  getSession(sessionId: string): RemoteBrowserSession | undefined {
+    return this.sessions.get(sessionId);
+  }
+
+  /**
+   * 列出所有会话
+   */
+  async listSessions(): Promise<any[]> {
+    // 从 Browser Service 查询会话列表
+    const response = await fetch(`${this.browserServiceUrl}/command`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'getStatus'
+      })
+    });
+
+    if (!response.ok) {
+      return [];
+    }
+
+    const result: any = await response.json();
+    return result.data || [];
+  }
+
+  /**
+   * 获取会话信息
+   */
+  async getSessionInfo(sessionId: string): Promise<any | null> {
+    const session = this.getSession(sessionId);
+    if (!session) return null;
+
+    return session.getInfo();
+  }
+
+  /**
+   * 删除会话
+   */
+  async deleteSession(sessionId: string): Promise<boolean> {
+    const session = this.sessions.get(sessionId);
+    if (!session) return false;
+
+    try {
+      await session.close();
+      this.sessions.delete(sessionId);
+      return true;
+    } catch (error) {
+      console.warn(`[RemoteSessionManager] Failed to delete session ${sessionId}:`, error);
+      return false;
+    }
+  }
+
+  /**
+   * 关闭所有会话
+   */
+  async shutdown(): Promise<void> {
+    const jobs = Array.from(this.sessions.values()).map((session) =>
+      session.close().catch(() => {})
+    );
+    await Promise.all(jobs);
+    this.sessions.clear();
+  }
+}

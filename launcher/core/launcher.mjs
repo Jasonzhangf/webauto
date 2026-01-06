@@ -148,8 +148,112 @@ async function sendBrowserCommand(payload) {
   return await res.json();
 }
 
+async function controllerAction(action, payload) {
+  const res = await fetch(`http://127.0.0.1:${CONFIG.ports.unified}/v1/controller/action`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action, payload })
+  });
+  if (!res.ok) {
+    throw new Error(`controller action ${action} failed: HTTP ${res.status}`);
+  }
+  return await res.json();
+}
+
+function unwrapData(payload) {
+  if (!payload || typeof payload !== 'object') return payload;
+  if ('snapshot' in payload || 'result' in payload || 'sessions' in payload || 'matched' in payload) {
+    return payload;
+  }
+  if ('data' in payload && payload.data) {
+    return unwrapData(payload.data);
+  }
+  return payload;
+}
+
+function findContainer(tree, pattern) {
+  if (!tree) return null;
+  if (pattern.test(tree.id || tree.defId || '')) return tree;
+  if (tree.children) {
+    for (const child of tree.children) {
+      const found = findContainer(child, pattern);
+      if (found) return found;
+    }
+  }
+  return null;
+}
+
+async function checkLoginStateByContainer(profile) {
+  try {
+    const result = await controllerAction('containers:match', {
+      profile,
+      maxDepth: 3,
+      maxChildren: 8
+    });
+    const data = unwrapData(result);
+    const tree = data?.snapshot?.container_tree || data?.container_tree;
+    if (!tree) {
+      return { status: 'uncertain', reason: 'no_container_tree' };
+    }
+
+    const loginAnchor = findContainer(tree, /\.login_anchor$/);
+    if (loginAnchor) {
+      return {
+        status: 'logged_in',
+        container: loginAnchor.id || loginAnchor.defId,
+        method: 'container_match'
+      };
+    }
+
+    const loginGuard = findContainer(tree, /xiaohongshu_login\.login_guard$/);
+    if (loginGuard) {
+      return {
+        status: 'not_logged_in',
+        container: loginGuard.id || loginGuard.defId,
+        method: 'container_match'
+      };
+    }
+
+    return {
+      status: 'uncertain',
+      reason: 'no_login_anchor_or_guard',
+      method: 'container_match'
+    };
+  } catch (err) {
+    console.warn(`[launcher] 容器驱动登录检测异常: ${err.message}`);
+    return { status: 'error', error: err.message };
+  }
+}
+
 async function isLoggedIn(profile) {
-  const script = "(() => { const loginAnchor = document.querySelector('.woo-badge-box'); return !!loginAnchor; })()";
+  // Xiaohongshu：使用容器驱动的登录锚点模型
+  if (profile && profile.startsWith('xiaohongshu')) {
+    const state = await checkLoginStateByContainer(profile);
+    if (state.status === 'logged_in') {
+      log(`[登录检测] 容器匹配：已登录（${state.container || 'login_anchor'}）`);
+      return true;
+    }
+    if (state.status === 'not_logged_in') {
+      log(`[登录检测] 容器匹配：未登录（${state.container || 'login_guard'}）`);
+      return false;
+    }
+    log(`[登录检测] 容器匹配：状态不确定（${state.reason || state.status}）`);
+    return false;
+  }
+
+  // 其他平台（如 Weibo）：暂时保留旧的 DOM 逻辑
+  const script = `(() => {
+    try {
+      const host = (location.hostname || '').toLowerCase();
+      if (host.includes('weibo.com')) {
+        const weiboBadge = document.querySelector('.woo-badge-box');
+        if (weiboBadge) return true;
+      }
+      return false;
+    } catch (err) {
+      return false;
+    }
+  })();`;
   const res = await sendBrowserCommand({
     action: 'evaluate',
     args: { profileId: profile, script }
@@ -192,23 +296,28 @@ async function verifyContainerMatch(profile, url) {
     ws.send(JSON.stringify({
       type: 'action',
       action: 'containers:match',
-      payload: { profile, url, maxDepth: 6, maxChildren: 20 }
+      payload: { profile, maxDepth: 6, maxChildren: 20 }
     }));
   });
   ws.close();
   if (result?.success === false) {
-    throw new Error(`容器匹配失败: ${result?.error || 'unknown error'}`);
+    console.warn(`容器匹配失败: ${result?.error || 'unknown error'}（仅记录，不中断启动）`);
+    return;
   }
   const data = result?.data || result || {};
   const snapshot = data.snapshot || data;
   if (!snapshot?.container_tree || !snapshot?.dom_tree) {
-    throw new Error('容器匹配失败: 缺少 container_tree 或 dom_tree');
+    console.warn('容器匹配结果缺少 container_tree 或 dom_tree（仅记录，不中断启动）');
+    return;
   }
   const rootId = snapshot?.metadata?.root_container_id;
-  if (!rootId || !String(rootId).startsWith('weibo_')) {
-    throw new Error(`容器匹配失败: root_container_id=${rootId || 'unknown'}`);
+  const rootIdStr = String(rootId || '');
+  if (!rootIdStr) {
+    console.warn('容器匹配结果缺少 root_container_id（仅记录，不中断启动）');
+    return;
   }
-  log('✅ 容器匹配成功');
+  // Weibo/Xiaohongshu 等平台仅用于日志，不再因 rootId 不匹配而中止启动
+  log(`容器匹配完成，root_container_id=${rootIdStr}`);
 }
 
 export async function startAll({ profile, url, headless }) {
@@ -255,7 +364,8 @@ export async function startAll({ profile, url, headless }) {
   }
 
   console.log('\n[刷新页面应用 Cookie]');
-  await sendBrowserCommand({ action: 'goto', args: { url, waitUntil: 'networkidle', profileId: profile } });
+  // 之前这里会再执行一次 goto(url)，导致重复导航和多次刷新。
+  // 现在依赖会话创建时的 initialUrl 导航，避免额外刷新，减少对目标站点的压力。
 
   console.log('\n[检查登录状态]');
   let loggedIn = await isLoggedIn(profile);
@@ -272,21 +382,28 @@ export async function startAll({ profile, url, headless }) {
   }
 
   console.log('\n[启动浮窗 UI]');
-  const floating = await startProcess('node', [
+  // 检查是否有 --dev 参数来决定是否启动浮窗
+  const args = process.argv.slice(2);
+  const hasDevFlag = args.includes('--dev');
+  if (hasDevFlag) {
+    const floating = await startProcess('node', [
     'apps/floating-panel/scripts/start-headful.mjs'
-  ], {
-    cwd: __dirname,
-    env: {
-      ...process.env,
-      WEBAUTO_FLOATING_WS_URL: `ws://127.0.0.1:${CONFIG.ports.unified}/ws`,
-      WEBAUTO_FLOATING_BUS_URL: `ws://127.0.0.1:${CONFIG.ports.unified}/bus`,
-      WEBAUTO_FLOATING_BUS_PORT: `${CONFIG.ports.unified}`,
-      WEBAUTO_CONTROLLER_WS_URL: `ws://127.0.0.1:${CONFIG.ports.unified}/ws`,
-      WEBAUTO_FLOATING_HEADLESS: headless ? '1' : '0',
-      WEBAUTO_FLOATING_DEVTOOLS: '1'
-    }
-  });
+    ], {
+      cwd: __dirname,
+      env: {
+        ...process.env,
+        WEBAUTO_FLOATING_WS_URL: `ws://127.0.0.1:${CONFIG.ports.unified}/ws`,
+        WEBAUTO_FLOATING_BUS_URL: `ws://127.0.0.1:${CONFIG.ports.unified}/bus`,
+        WEBAUTO_FLOATING_BUS_PORT: `${CONFIG.ports.unified}`,
+        WEBAUTO_CONTROLLER_WS_URL: `ws://127.0.0.1:${CONFIG.ports.unified}/ws`,
+        WEBAUTO_FLOATING_HEADLESS: headless ? '1' : '0',
+        WEBAUTO_FLOATING_DEVTOOLS: '1'
+      }
+    });
   registerPid(floating.pid);
+  } else {
+    console.log('  → 非dev模式，跳过浮窗启动');
+  }
 
   // 等待浮窗启动后，立即发起匹配
   await sleep(1500);
@@ -311,17 +428,60 @@ export async function startAll({ profile, url, headless }) {
   const cleanup = () => {
     console.log('\n[launcher] 收到退出信号，正在清理...');
     cleanupPids();
+    // 防止子进程/交互脚本把终端留在 raw 模式，导致上下键等行为异常
+    try {
+      execSync('stty sane', { stdio: 'ignore' });
+    } catch {}
     process.exit(0);
   };
   process.on('SIGINT', cleanup);
   process.on('SIGTERM', cleanup);
 }
 
-const [,, profile = 'weibo_fresh', url = 'https://weibo.com'] = process.argv;
-const headless = process.env.WEBAUTO_HEADLESS === '1';
+function parseArgs(argv) {
+  let profile = 'weibo_fresh';
+  let url = 'https://weibo.com';
+  let headless = process.env.WEBAUTO_HEADLESS === '1';
+
+  for (let i = 2; i < argv.length; i += 1) {
+    const arg = argv[i];
+    if (arg === '--profile' && argv[i + 1]) {
+      profile = argv[i + 1];
+      i += 1;
+      continue;
+    }
+    if (arg === '--url' && argv[i + 1]) {
+      url = argv[i + 1];
+      i += 1;
+      continue;
+    }
+    if (arg === '--headless') {
+      headless = true;
+      continue;
+    }
+    if (arg === '--headful') {
+      headless = false;
+      continue;
+    }
+    if (!arg.startsWith('--') && i === 2) {
+      profile = arg;
+      continue;
+    }
+    if (!arg.startsWith('--') && i === 3) {
+      url = arg;
+      continue;
+    }
+  }
+
+  return { profile, url, headless };
+}
+
+const { profile, url, headless } = parseArgs(process.argv);
 
 startAll({ profile, url, headless }).catch(err => {
   console.error(`启动失败: ${err.message}`);
   cleanupPids();
   process.exit(1);
 });
+
+export { parseArgs };

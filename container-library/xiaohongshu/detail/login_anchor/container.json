@@ -1,0 +1,35 @@
+{
+  "id": "xiaohongshu_detail.login_anchor",
+  "name": "详情页登录锚点",
+  "type": "section",
+  "capabilities": [
+    "highlight",
+    "extract"
+  ],
+  "selectors": [
+    {
+      "css": "a.link-wrapper[title='我'] img",
+      "variant": "primary",
+      "score": 1.0
+    },
+    {
+      "css": ".header-avatar img",
+      "variant": "backup",
+      "score": 0.9
+    },
+    {
+      "css": "[class*='avatar'] img",
+      "variant": "fallback",
+      "score": 0.8
+    }
+  ],
+  "operations": [
+    {
+      "type": "highlight",
+      "config": {
+        "style": "2px solid #34a853",
+        "duration": 1200
+      }
+    }
+  ]
+}
