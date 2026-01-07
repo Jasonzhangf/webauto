@@ -386,3 +386,142 @@ npx tsx scripts/run-xiaohongshu-workflow-v2.ts --keyword "手机膜" --count 5
   - 整个过程为“先聚焦评论区，再 PageDown 滚动”，滚动行为为用户可见。
 
 > 后续若需要继续提高“展开 N 条回复”的命中率，再以容器 `appear` 事件 + DOM 兜底的方式优化，但不再改动“聚焦 + PageDown”的基础滚动模型。
+
+---
+
+## 【新增】Phase 5：collect-100-workflow-v2 可靠性设计（2025-01-06）
+
+### 背景
+
+当前 `collect-100-workflow-v2.mjs` 存在结构性缺陷：
+- 无持久化任务状态 → 崩溃后需从头开始
+- 无去重机制 → 可能重复采集同一 noteId
+- 无阶段回环验证 → 失败后无法恢复到安全起点
+- 登录状态无强制检查 → 未登录时继续采集会触发风控
+
+### 设计目标
+
+1. **持久性任务状态保存**：进程崩溃/中断后可恢复
+2. **去重执行**：基于 noteId 幂等采集，避免重复写入
+3. **阶段进入/离开锚点**：每个阶段必须有明确的进入和离开验证
+4. **错误恢复**：失败后回到主页面/搜索页，恢复到安全起点继续执行
+5. **视口安全**：所有操作均在可见元素范围内，模拟用户行为
+
+### 核心机制
+
+#### 1. 持久化任务状态
+
+**状态文件**：`xiaohongshu_data/.progress_<sessionId>.json`
+
+```json
+{
+  "version": 1,
+  "sessionId": "xiaohongshu_fresh",
+  "updatedAt": "2025-01-06T15:00:00.000Z",
+  "keywordIndex": 2,
+  "searchRound": 5,
+  "collectedCount": 37,
+  "seenNoteIds": ["<noteId1>", "<noteId2>"]
+}
+```
+
+**保存时机**：
+- 每采集 5 条保存一次
+- 每完成一个 keyword 搜索后保存一次
+- 发生异常前写入当前阶段状态
+
+#### 2. 去重执行
+
+**去重依据**：noteId（从 URL 或 detail container 中提取）
+
+**规则**：
+- 采集前：若 noteId 已存在 → 直接跳过
+- 写入前：再次检查 seenNoteIds，确保幂等
+
+#### 3. 阶段进入/离开锚点
+
+| 阶段 | 进入锚点 | 离开锚点 | 说明 |
+|------|----------|----------|------|
+| Phase2 Search | `xiaohongshu_search.search_bar` | `xiaohongshu_search.search_result_list` | 搜索框输入 → 搜索结果容器出现 |
+| Phase3 Detail | `xiaohongshu_detail.modal_shell` | `xiaohongshu_search.search_result_list` | 详情 modal 打开 → 关闭回列表 |
+| Phase4 Comments | `xiaohongshu_detail.comment_section` | `xiaohongshu_detail.modal_shell` | 评论区域出现 → 仍保持在详情页 |
+
+**验证要求**：
+- 进入：容器存在 + rect 可见
+- 离开：目标锚点出现，前一锚点消失
+
+#### 4. 错误恢复机制
+
+**恢复策略**：
+
+| 错误类型 | 恢复策略 |
+|----------|----------|
+| SearchGate 超时 | 等待窗口 + 重试搜索 |
+| Search 失败 | 回到首页 → 重新进入搜索 |
+| Detail 失败 | 关闭 modal → 回搜索列表 |
+| Comment 失败 | 保持详情页 → 跳过评论 |
+| Session 失效 | 调用 Phase1 登录恢复 |
+
+**恢复流程**：
+```ts
+try {
+  await openDetail(...);
+  await extractDetail(...);
+} catch (err) {
+  await closeDetail(...).catch(() => ({}));
+  const ok = await verifyAnchor('xiaohongshu_search.search_result_list');
+  if (!ok) await navigateHome();
+}
+```
+
+### 5. 视口安全约束
+
+所有操作必须满足：
+- `rect.y < window.innerHeight`
+- `rect.width > 0 && rect.height > 0`
+- 仅操作可见元素
+
+详见：`docs/arch/VIEWPORT_SAFETY.md`
+
+### 实施计划
+
+#### 阶段1：P0 阻塞性修复（立即）
+- [ ] 添加登录状态强制检查
+- [ ] 实现会话健康监控
+- [ ] 添加 SearchGate 智能重试（非直接终止）
+
+#### 阶段2：P1 高优先级（1-2周）
+- [ ] 实现断点续采机制（进度持久化）
+- [ ] 添加错误分类与重试策略
+- [ ] 实现阶段进入/离开锚点验证
+
+#### 阶段3：P2 长期优化（2-4周）
+- [ ] 优雅降级策略（功能降级）
+- [ ] 行为模式随机化（延迟、轨迹）
+- [ ] 错误监控和告警机制
+
+### 验证清单
+
+- [ ] 断点续采可恢复（Ctrl+C后重跑）
+- [ ] 采集过程无重复 noteId
+- [ ] 每阶段进入/离开锚点均验证成功
+- [ ] 失败后能回到搜索页
+- [ ] SearchGate 节流正常
+- [ ] 操作均在视口内
+
+### 相关文件
+
+- `scripts/xiaohongshu/tests/collect-100-workflow-v2.mjs`
+- `modules/workflow/blocks/WaitSearchPermitBlock.ts`
+- `modules/workflow/blocks/GoToSearchBlock.ts`
+- `modules/workflow/blocks/OpenDetailBlock.ts`
+- `modules/workflow/blocks/ExtractDetailBlock.ts`
+- `modules/workflow/blocks/ExpandCommentsBlock.ts`
+- `modules/workflow/blocks/CloseDetailBlock.ts`
+- `docs/arch/VIEWPORT_SAFETY.md`
+- `docs/arch/COLLECT_WORKFLOW_RELIABILITY.md`
+
+---
+
+**状态**：设计中（2025-01-06）  
+**目标**：达到"无人值守、可恢复、可监控"的生产级标准
