@@ -361,3 +361,87 @@ apps/floating-panel/
 
 **参考文档：**
 - `docs/arch/SEARCH_GATE.md`：SearchGate 完整设计与使用说明
+
+### 6. 【新增】所有容器操作必须约束在视口内，模拟用户可见行为
+
+**原则：**
+- 所有点击、滚动、输入等操作必须基于当前视口内**可见元素**
+- 禁止操作离屏（off-screen）或不可见（display:none/visibility:hidden）元素
+- 每个操作前必须通过 **容器匹配 + Rect 验证** 确认元素在视口内
+- 滚动操作仅用于将元素带入视口，而非直接操作离屏元素
+
+**落地要求：**
+1. **可见性验证**：
+   - 通过 `containers:match` 获取元素坐标
+   - 验证 `rect.y < window.innerHeight` 且 `rect.width > 0 && rect.height > 0`
+   - 高亮 1-2 秒供视觉确认（`container:operation highlight`）
+
+2. **滚动约束**：
+   - 滚动距离不超过 800px（单次用户手势范围）
+   - 滚动后重新验证元素可见性
+   - 禁止连续滚动（需间隔 >500ms）
+
+3. **点击约束**：
+   - 仅点击当前视口内元素
+   - 使用 `element.click()` 而非 `dispatchEvent`（除非必要）
+   - 点击前确保元素未被其他元素遮挡（z-index 检查）
+
+4. **输入约束**：
+   - 先聚焦（`element.focus()`）再输入
+   - 模拟真实输入节奏（每字符间隔 50-200ms）
+   - 输入后触发 `input` 和 `change` 事件
+
+**代码示例（正确做法）：**
+```js
+// ✅ 正确：先验证可见性，再操作
+const rect = await verifyAnchor(containerId);
+if (!rect || rect.y > window.innerHeight) {
+  // 元素不在视口，先滚动
+  await scrollToElement(containerId);
+  // 重新验证
+  const newRect = await verifyAnchor(containerId);
+  if (!newRect) throw new Error('元素不可见');
+}
+// 高亮确认
+await highlight(containerId);
+await delay(1000); // 视觉确认时间
+// 执行操作
+await click(containerId);
+```
+
+**反例（禁止做法）：**
+```js
+// ❌ 错误：直接操作可能不可见元素
+document.querySelector('.hidden-button').click();
+// ❌ 错误：大跨度滚动后直接操作
+window.scrollTo(0, 3000);
+document.querySelector('.far-away-element').click();
+```
+
+**原因：**
+- 小红书等平台通过 **视口行为检测** 识别爬虫
+- 真实用户不会点击离屏元素或进行非自然滚动
+- 可见性验证可显著降低被风控概率
+
+**范围：**
+- 所有 Phase 脚本（1-4）
+- 所有 Workflow Block（GoToSearch/OpenDetail/ExpandComments等）
+- 所有容器操作（highlight/scroll/click/input）
+
+**检测方式：**
+- 每个 Block 返回 `anchor.rect` 必须满足 `rect.y < window.innerHeight`
+- 调试时通过 `scripts/debug-container-tree-*.mjs` 验证可见性
+- 生产环境通过日志监控离屏操作告警
+
+**违规处理：**
+- 发现离屏操作立即标记为 **阻塞性 Bug**
+- 必须修复并通过 Rect 验证后方可合并
+
+---
+
+**审查标准**：
+- A级：所有操作基于可见元素 + Rect 验证闭环
+- B级：大部分操作可见，少量离屏但有合理滚动
+- C级：存在直接离屏操作，需立即整改
+
+**当前状态**：Phase 1-4 已达到 **A级** 标准（详见视口安全审查报告）
