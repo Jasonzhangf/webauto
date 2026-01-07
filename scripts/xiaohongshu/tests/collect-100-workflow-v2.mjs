@@ -8,6 +8,8 @@
  * - 列表 / 详情 / 评论全部走容器驱动 Block
  * - 评论为空的帖子通过 empty_state 容器闭环，视为合法结果
  * - 任务必须支持断点续采（进度持久化 + 去重）
+ * - 每阶段必须进入/离开锚点验证（回环校验）
+ * - 支持优雅降级和行为随机化（P2 新增）
  */
 
 import minimist from 'minimist';
@@ -27,6 +29,12 @@ import { execute as closeDetail } from '../../../modules/workflow/blocks/CloseDe
 import { execute as loginRecovery } from '../../../modules/workflow/blocks/LoginRecoveryBlock.ts';
 import { execute as sessionHealth } from '../../../modules/workflow/blocks/SessionHealthBlock.ts';
 import { createProgressTracker } from '../../../modules/workflow/blocks/ProgressTracker.ts';
+import { execute as verifyAnchor } from '../../../modules/workflow/blocks/AnchorVerificationBlock.ts';
+import { execute as errorRecovery } from '../../../modules/workflow/blocks/ErrorRecoveryBlock.ts';
+import { retryWithBackoff } from '../../../modules/workflow/blocks/ErrorClassifier.ts';
+import { randomDelay } from '../../../modules/workflow/blocks/BehaviorRandomizer.ts';
+import { createDetailExtractFallback, createCommentExpandFallback, execute as gracefulFallback } from '../../../modules/workflow/blocks/GracefulFallbackBlock.ts';
+import { recordSuccess, recordFailure, execute as monitoring } from '../../../modules/workflow/blocks/MonitoringBlock.ts';
 
 const DEFAULT_PROFILE = 'xiaohongshu_fresh';
 const UNIFIED_API = 'http://127.0.0.1:7701';
@@ -80,10 +88,6 @@ async function getCurrentNoteIdFromLocation(profile) {
   }
 }
 
-async function delay(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
 async function checkSessionHealth(sessionId) {
   const health = await sessionHealth({ sessionId }).catch((e) => ({
     success: false,
@@ -102,6 +106,15 @@ async function ensureHealthySession(sessionId) {
   const health = await checkSessionHealth(sessionId);
   if (!health.success || !health.healthy) {
     console.warn('[Collect100] Session unhealthy:', health.error || JSON.stringify(health.checks));
+    return false;
+  }
+  return true;
+}
+
+async function verifyStageAnchor(sessionId, containerId, operation) {
+  const result = await verifyAnchor({ sessionId, containerId, operation });
+  if (!result.success) {
+    console.warn(`[Collect100] Anchor verification failed: ${containerId} (${operation})`, result.error);
     return false;
   }
   return true;
@@ -183,6 +196,9 @@ async function main() {
       `\n🔄 Search round #${searchRound} keyword="${keyword}" (collected=${collected.length}/${targetCount})`,
     );
 
+    // 随机延迟（行为模拟）
+    await randomDelay({ minMs: 500, maxMs: 1500 });
+
     // 3. 会话健康检查（每轮搜索前）
     const healthy = await ensureHealthySession(sessionId);
     if (!healthy) {
@@ -194,8 +210,8 @@ async function main() {
       }
     }
 
-    // 4. SearchGate 授权
-    const permit = await waitSearchPermit({ sessionId });
+    // 4. SearchGate 授权（带重试）
+    const permit = await retryWithBackoff(() => waitSearchPermit({ sessionId }), 2, 5000);
     if (!permit.success || !permit.granted) {
       console.error('[Collect100] WaitSearchPermit failed:', permit.error);
       console.warn('[Collect100] 将等待 60s 后继续下一轮搜索');
@@ -204,9 +220,20 @@ async function main() {
     }
 
     // 5. 执行搜索（对话框）
+    const startTime = Date.now();
     const searchRes = await goToSearch({ sessionId, keyword });
     if (!searchRes.success) {
       console.error('[Collect100] GoToSearchBlock failed:', searchRes.error);
+      recordFailure(sessionId, `Search failed: ${searchRes.error}`);
+      await errorRecovery({ sessionId, fromStage: 'search', targetStage: 'home' });
+      continue;
+    }
+    recordSuccess(sessionId, Date.now() - startTime);
+
+    // 5.1 进入锚点验证（搜索结果列表）
+    const searchEntered = await verifyStageAnchor(sessionId, 'xiaohongshu_search.search_result_list', 'enter');
+    if (!searchEntered) {
+      await errorRecovery({ sessionId, fromStage: 'search', targetStage: 'home' });
       continue;
     }
 
@@ -241,9 +268,18 @@ async function main() {
       );
 
       // 6.2 打开详情
+      const detailStartTime = Date.now();
       const openRes = await openDetail({ sessionId, containerId: item.containerId });
       if (!openRes.success) {
         console.warn('[Collect100] OpenDetailBlock 失败:', openRes.error);
+        recordFailure(sessionId, `OpenDetail failed: ${openRes.error}`);
+        continue;
+      }
+
+      // 6.2.1 进入锚点验证（详情 modal）
+      const detailEntered = await verifyStageAnchor(sessionId, 'xiaohongshu_detail.modal_shell', 'enter');
+      if (!detailEntered) {
+        await errorRecovery({ sessionId, fromStage: 'detail', targetStage: 'search' });
         continue;
       }
 
@@ -251,6 +287,7 @@ async function main() {
       if (!noteId) {
         console.warn('[Collect100] 无法从当前 URL 提取 noteId，跳过该条');
         await closeDetail({ sessionId }).catch(() => ({}));
+        await errorRecovery({ sessionId, fromStage: 'detail', targetStage: 'search' });
         continue;
       }
       if (seenNoteIds.has(noteId)) {
@@ -260,18 +297,22 @@ async function main() {
       }
       seenNoteIds.add(noteId);
 
-      // 6.3 提取详情
-      const detailRes = await extractDetail({ sessionId });
+      // 6.3 提取详情（支持优雅降级）
+      const detailFallback = createDetailExtractFallback(sessionId);
+      const detailRes = await gracefulFallback(detailFallback);
+      
       if (!detailRes.success) {
         console.warn('[Collect100] ExtractDetailBlock 失败:', detailRes.error);
+      } else if (detailRes.usedFallback) {
+        console.warn('[Collect100] ExtractDetailBlock 降级:', detailRes.error);
       }
 
-      const detail = detailRes.detail || {};
+      const detail = detailRes.result?.detail || {};
       const header = detail.header || {};
       const content = detail.content || {};
       const gallery = detail.gallery || {};
 
-      // 6.4 评论 Warmup + 提取
+      // 6.4 评论 Warmup + 提取（支持优雅降级）
       const warmupRes = await warmupComments({ sessionId, maxRounds: 8 }).catch((e) => ({
         success: false,
         finalCount: 0,
@@ -279,16 +320,18 @@ async function main() {
         error: e.message || String(e),
       }));
 
-      const commentsRes = await expandComments({ sessionId }).catch((e) => ({
-        success: false,
-        comments: [],
-        reachedEnd: false,
-        emptyState: false,
-        error: e.message || String(e),
-      }));
+      const commentFallback = createCommentExpandFallback(sessionId);
+      const commentsRes = await gracefulFallback(commentFallback);
 
       // 6.5 关闭详情
       await closeDetail({ sessionId }).catch(() => ({}));
+      recordSuccess(sessionId, Date.now() - detailStartTime);
+
+      // 6.5.1 离开锚点验证（回搜索列表）
+      const detailExited = await verifyStageAnchor(sessionId, 'xiaohongshu_search.search_result_list', 'enter');
+      if (!detailExited) {
+        await errorRecovery({ sessionId, fromStage: 'detail', targetStage: 'search' });
+      }
 
       const images = Array.isArray(gallery.images) ? gallery.images : [];
 
@@ -305,9 +348,9 @@ async function main() {
         author: header.author || header.user_name || header.nickname || '',
         contentText: content.text || content.desc || content.content || '',
         images,
-        comments: Array.isArray(commentsRes.comments) ? commentsRes.comments : [],
-        commentsEmpty: !!commentsRes.emptyState,
-        commentsReachedEnd: !!commentsRes.reachedEnd,
+        comments: Array.isArray(commentsRes.result?.comments) ? commentsRes.result.comments : [],
+        commentsEmpty: !!commentsRes.result?.emptyState,
+        commentsReachedEnd: !!commentsRes.result?.reachedEnd,
         commentsWarmupCount: warmupRes.finalCount ?? 0,
         commentsTotalFromHeader: warmupRes.totalFromHeader ?? null,
       };
@@ -325,11 +368,23 @@ async function main() {
           lastKeyword: keyword,
           lastNoteId: noteId
         });
+        
+        // 监控告警检查
+        const monitorRes = await monitoring({
+          sessionId,
+          metric: 'error_rate',
+          windowSize: 20,
+          alertThresholds: { errorRate: 0.2 }
+        });
+        if (monitorRes.alert?.triggered) {
+          console.warn(`[Monitor] ⚠️ ${monitorRes.alert.message}`);
+        }
       }
 
-      // 6.7 下载图片（可选，失败不影响主流程）
+      // 6.7 下载图片（随机延迟 + 失败不影响）
       let imgIndex = 0;
       for (const url of images) {
+        await randomDelay({ minMs: 200, maxMs: 500 });
         imgIndex += 1;
         await downloadImage(url, imageDir, noteId, imgIndex);
       }
