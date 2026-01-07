@@ -14,7 +14,7 @@ const UNIFIED_API = 'http://127.0.0.1:7701';
 const BROWSER_SERVICE = 'http://127.0.0.1:7704';
 const PROFILE = 'xiaohongshu_fresh';
 const DEFAULT_KEYWORD = '手机膜';
-const START_URL = buildSearchUrl(DEFAULT_KEYWORD);
+const START_URL = 'https://www.xiaohongshu.com';
 const LOGIN_URL = 'https://www.xiaohongshu.com/login';
 const SESSION_WAIT_TIMEOUT = 90_000;
 const LOGIN_WAIT_TIMEOUT = 180_000;
@@ -26,9 +26,6 @@ const startScript = path.join(repoRoot, 'scripts', 'start-headful.mjs');
 
 let launchPromise = null;
 
-function buildSearchUrl(keyword) {
-  return `https://www.xiaohongshu.com/search_result?keyword=${encodeURIComponent(keyword)}&source=web_search_result_notes&type=51`;
-}
 
 function log(step, message) {
   const time = new Date().toLocaleTimeString();
@@ -40,6 +37,8 @@ async function post(endpoint, data) {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
+    // 避免 controller action（特别是 containers:match）长时间挂起
+    signal: AbortSignal.timeout ? AbortSignal.timeout(10000) : undefined,
   });
   if (!res.ok) {
     throw new Error(`HTTP ${res.status}: ${await res.text()}`);

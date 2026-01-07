@@ -20,7 +20,7 @@
       "score": 1.0
     },
     {
-      "css": ".note-detail, .detail-container",
+      "css": ".note-detail, .detail-container, .media-container",
       "variant": "backup",
       "score": 0.85
     }
@@ -29,6 +29,8 @@
     "required_descendants_any": [
       ".note-content",
       ".content",
+      ".media-container",
+      ".comments-el",
       ".comment-item"
     ]
   },

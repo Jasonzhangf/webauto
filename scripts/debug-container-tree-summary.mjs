@@ -1,6 +1,9 @@
 #!/usr/bin/env node
 const UNIFIED_API = 'http://127.0.0.1:7701';
-const PROFILE = 'weibo_fresh';
+
+const args = process.argv.slice(2);
+const PROFILE = args[0] || process.env.WEBAUTO_PROFILE || null;
+const TARGET_URL = args[1] || process.env.WEBAUTO_URL || null;
 
 async function post(endpoint, data) {
   const res = await fetch(`${UNIFIED_API}${endpoint}`, {
@@ -21,11 +24,17 @@ function summarizeTree(tree) {
 }
 
 async function main() {
+  if (!PROFILE) {
+    console.error('Usage: debug-container-tree-summary.mjs <profile> [url]');
+    console.error('  - profile 必须显式传入或通过 WEBAUTO_PROFILE 提供');
+    process.exit(1);
+  }
+
   const matchResult = await post('/v1/controller/action', {
     action: 'containers:match',
     payload: {
       profile: PROFILE,
-      url: 'https://weibo.com/'
+      ...(TARGET_URL ? { url: TARGET_URL } : {})
     }
   });
   const snapshot = matchResult.data?.snapshot;

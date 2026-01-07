@@ -51,7 +51,9 @@ export async function execute(input: EnsureLoginInput): Promise<EnsureLoginOutpu
             maxDepth: 3,
             maxChildren: 8
           }
-        })
+        }),
+        // 为 containers:match 增加超时，避免长时间挂起
+        signal: (AbortSignal as any).timeout ? (AbortSignal as any).timeout(10000) : undefined
       });
 
       if (!response.ok) {

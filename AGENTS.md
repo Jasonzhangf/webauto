@@ -42,6 +42,29 @@ curl http://127.0.0.1:7704/health
 - **Session 命名规则**：所有浏览器会话统一以 `{platform}_{variant}` 命名，platform 例如 `xiaohongshu`/`weibo`，variant 例如 `fresh`/`prod`/`dev`；若需要多实例则在末尾追加两位序号（如 `xiaohongshu_fresh_01`）。脚本中严禁创建临时 profile 名，确保 headful 会话可长时间复用并避免风控。
 - **单平台单会话**：同一平台在任意时刻只允许存在一个会话。启动新脚本前必须先调用 `node scripts/xiaohongshu/tests/status.mjs`（或对应平台 status 脚本）确认会话状态，若 `profile` 已存在则只能复用；若不存在再运行 Phase1 脚本创建。所有测试脚本都应该先读取状态再执行，以便随时回到统一的测试起点。
 - **安全搜索流程**：严禁通过构造搜索结果 URL 直接导航；必须在页面内聚焦搜索框，通过模拟输入 + 回车触发搜索，避免触发风控。
+  - （新增）所有自动搜索必须经过 SearchGate 节流服务授权：
+    - SearchGate 默认规则：同一 key（通常是 profileId，例如 `xiaohongshu_fresh`）在任意 60s 窗口内最多允许 2 次搜索；
+    - 入口脚本：`node scripts/search-gate-server.mjs`（监听 `WEBAUTO_SEARCH_GATE_PORT`，默认 7790）；
+    - Workflow 侧的 `GoToSearchBlock` 在真正执行“对话框搜索”前会调用 SearchGate `/permit`，未获许可会阻塞等待或报错提示先启动服务。
+- **通用容器调试工具**：所有基础容器调试脚本不得硬编码平台，统一通过参数或环境变量指定 `profile`/`url`：
+  - `node scripts/debug-container-tree-summary.mjs <profile> [url]`：打印 `containers:match` 的摘要（根容器 ID、子节点数量等），例如小红书可传 `xiaohongshu_fresh https://www.xiaohongshu.com`。
+  - `node scripts/debug-container-tree-full.mjs <profile> [url]`：打印完整的 container_tree 结构，用于检查根/子容器连线。
+  - `node scripts/test-container-events-direct.mjs <profile> [url]`：订阅 Bus `container:*` 事件并触发一次 `containers:match`，用于验证容器事件派发链路。
+  - `node scripts/build-container.mjs <profile> <url>`：交互式容器构建工具，支持任意站点（weibo/xiaohongshu 等），默认不再绑定具体平台。
+- **Workflow 驱动调试（推荐入口）**：平台相关脚本一律通过 Workflow + Block 调用能力，脚本只做 CLI/参数解析：
+  - 小红书登录与状态：`modules/workflow/workflows/XiaohongshuLoginWorkflow.ts` + `scripts/xiaohongshu/tests/phase1-session-login.mjs`。
+  - 小红书采集主流程：`modules/workflow/definitions/xiaohongshu-collect-workflow-v2.ts` + `node scripts/run-xiaohongshu-workflow-v2.ts --keyword "手机膜" --count 5`。
+  - 所有小红书 Block（搜索 / 列表 / 详情 / 评论 / 关闭）均返回 `anchor` 字段（containerId + Rect），配合高亮可完整回环每一步是否命中正确元素。
+- **锚点 + 高亮 + Rect 回环**：调试时优先使用容器锚点而不是硬编码 DOM 选择器：
+  - 通过 `container:operation highlight` 或 `scripts/container-op.mjs <profile> <containerId> highlight` 在页面上高亮容器。
+  - 通过 `modules/workflow/blocks/helpers/anchorVerify.ts` / `containerAnchors.ts` 读取容器定义的 selector，并在页面内执行 `getBoundingClientRect()` 反查坐标。
+  - 小红书相关 Block 的输出中都带有 `anchor.rect`，配合终端日志和浮窗高亮即可确认每个小步骤的定位是否准确。
+- **统一日志与 Workflow 日志**：所有服务与 Workflow 的结构化日志统一落在 `~/.webauto/logs`：
+  - 基础日志：`logging` 模块提供 `logs:stream` 控制器动作和 `modules/logging/src/cli.ts`，支持按 `--source browser|service|debug` 或 `--session <profile>` tail 日志；
+  - 调试/Workflow 事件：设置 `DEBUG=1` 后，`logDebug` / `logWorkflowEvent` 会将 JSON 行写入 `debug.jsonl`，可通过 `cli.ts stream --source debug --lines 200` 或 `logs:stream` 读取；
+  - Workflow 执行：`WorkflowExecutor` 已自动在每个步骤的 start/success/error 时写入一条日志（包含 workflowId/name、stepName、sessionId 以及 Block 返回的 `anchor` 信息），用于小红书采集 Workflow 的完整回放与追踪。
+  - `node scripts/browser-status.mjs <profile> [--site xiaohongshu|weibo] [--url URL]`：通用浏览器状态检查（Session/URL/Cookie），对小红书支持基于容器的登录探针。
+  - `node scripts/container-op.mjs <profile> <containerId> <operationId> [--config JSON]`：直接对指定容器执行 `highlight` / `extract` / `click` / `navigate` / `scroll` 等操作。
 
 > 容器以“根容器 → 子容器”目录递归组织，与页面 DOM 结构一致；根容器 selector 必须可靠匹配页面顶层区域，子容器仅在对应根目录下出现，避免跨层级引用。
 
@@ -305,3 +328,36 @@ apps/floating-panel/
 - 使用 `controllerAction('browser:execute', { script: 'location.reload()' })` 刷新页面
 - 使用 `controllerAction('browser:execute', { script: 'window.location.href = "..." })` 导航
 - 复用现有 `sessionId` 而非创建新会话
+
+### 5. 【新增】所有搜索必须通过 SearchGate 节流
+
+**原则：**
+- 所有涉及搜索的 Workflow/Block 必须先向 `WaitSearchPermitBlock` 申请许可
+- 禁止绕过 SearchGate 直接执行搜索操作
+- 禁止通过构造 URL（如 `/search_result?keyword=...`）直达搜索结果页，必须在页面内通过对话框交互触发（模拟人工输入 + 回车）
+
+**SearchGate 机制：**
+- 独立后台服务（`scripts/search-gate-server.mjs`），端口 7790
+- 默认速率限制：**同一 profile 每分钟最多 2 次搜索**
+- Phase1 启动脚本（`scripts/xiaohongshu/tests/phase1-session-login-with-gate.mjs`）负责在登录成功后自动拉起 SearchGate
+
+**落地执行：**
+1. **申请许可**：Workflow 中必须包含 `WaitSearchPermitBlock` 步骤，指定 `sessionId`。
+2. **执行搜索**：只有当 `WaitSearchPermitBlock` 返回成功后，才执行 `GoToSearchBlock`。
+3. **对话框交互**：`GoToSearchBlock` 必须使用"点击输入框 -> 输入 -> 回车"的模拟操作，严禁 URL 跳转。
+
+**原因：**
+- 平台风控对频繁搜索高度敏感，直跳 URL 或高频搜索会立即触发验证码
+- 集中化流速控制比分散在各个脚本中更可靠
+- 模拟人工操作（对话框搜索）比 URL 跳转更安全
+
+**范围：**
+- 所有涉及搜索的 Workflow（如 `xiaohongshu-collect-workflow-v2`）
+- 所有自定义搜索脚本
+
+**调试工具：**
+- `scripts/search-gate-cli.mjs status`：查看节流器状态
+- `scripts/xiaohongshu/tests/test-search-gate.mjs`：验证速率限制
+
+**参考文档：**
+- `docs/arch/SEARCH_GATE.md`：SearchGate 完整设计与使用说明

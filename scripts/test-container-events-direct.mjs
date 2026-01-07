@@ -8,7 +8,10 @@
 
 const UNIFIED_API = 'http://127.0.0.1:7701';
 const UNIFIED_WS = 'ws://127.0.0.1:7701/bus';
-const PROFILE = 'weibo_fresh';
+
+const args = process.argv.slice(2);
+const PROFILE = args[0] || process.env.WEBAUTO_PROFILE || null;
+const TARGET_URL = args[1] || process.env.WEBAUTO_URL || null;
 
 function log(step, msg) {
   const time = new Date().toLocaleTimeString();
@@ -26,6 +29,12 @@ async function post(endpoint, data) {
 }
 
 async function testContainerEvents() {
+  if (!PROFILE) {
+    log('ERROR', 'Usage: test-container-events-direct.mjs <profile> [url]');
+    log('ERROR', '  - profile 必须显式传入或通过 WEBAUTO_PROFILE 提供');
+    process.exit(1);
+  }
+  
   log('TEST', 'Starting container events test');
   
   // Connect to event bus
@@ -78,7 +87,7 @@ async function testContainerEvents() {
       action: 'containers:match',
       payload: {
         profile: PROFILE,
-        url: 'https://weibo.com/'
+        ...(TARGET_URL ? { url: TARGET_URL } : {})
       }
     });
     

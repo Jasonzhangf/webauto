@@ -23,6 +23,7 @@ const DEFAULT_SOURCES: Record<string, string> = {
   browser: path.join(HOME_LOG_ROOT, 'browser.log'),
   service: path.join(HOME_LOG_ROOT, 'service.log'),
   orchestrator: path.join(HOME_LOG_ROOT, 'orchestrator.log'),
+  debug: DEBUG_LOG_FILE,
 };
 
 let debugReady = false;
@@ -58,6 +59,22 @@ export function logDebug(module: string, event: string, data: Record<string, any
   }
 }
 
+export interface WorkflowLogEvent {
+  workflowId?: string;
+  workflowName?: string;
+  stepIndex?: number;
+  stepName?: string;
+  status: 'start' | 'success' | 'error';
+  sessionId?: string;
+  profileId?: string;
+  error?: string;
+  anchor?: any;
+  meta?: Record<string, any>;
+}
+
+export function logWorkflowEvent(event: WorkflowLogEvent): void {
+  logDebug('workflow', event.status, event as Record<string, any>);
+}
 
 export function resolveLogFile(options: LogSourceOptions): string {
   if (options.file) {

@@ -1,5 +1,8 @@
 /**
  * 小红书关键词采集 Workflow v2（容器驱动版）
+ * 
+ * 新增：
+ * - WaitSearchPermitBlock：在执行搜索前先向 SearchGate 申请许可
  */
 
 export const xiaohongshuCollectWorkflowV2 = {
@@ -19,6 +22,12 @@ export const xiaohongshuCollectWorkflowV2 = {
         sessionId: '$sessionId',
         maxWaitMs: 180000,
         checkIntervalMs: 5000
+      }
+    },
+    {
+      blockName: 'WaitSearchPermitBlock',
+      input: {
+        sessionId: '$sessionId'
       }
     },
     {
@@ -49,10 +58,16 @@ export const xiaohongshuCollectWorkflowV2 = {
       }
     },
     {
-      blockName: 'ExpandCommentsBlock',
+      blockName: 'WarmupCommentsBlock',
       input: {
         sessionId: '$sessionId',
-        maxRounds: 6
+        maxRounds: 8
+      }
+    },
+    {
+      blockName: 'ExpandCommentsBlock',
+      input: {
+        sessionId: '$sessionId'
       }
     },
     {

@@ -23,32 +23,28 @@
       "detail_url",
       "image",
       "text",
-      "note_id",
-      "xsec_token"
-    ],
-    "navigation": {
-      "scope_selector": ".note-item",
-      "anchor_selector": "a[href*='/explore/']",
-      "attribute": "href",
-      "mode": "href"
-    }
+      "note_id"
+    ]
   },
   "extractors": {
     "title": {
       "selectors": [
-        "[class*=\"title\"]",
-        "[class*=\"content\"]"
-      ]
+        ".footer .title span",
+        ".footer .title"
+      ],
+      "attr": "textContent"
     },
     "link": {
       "selectors": [
+        "a.cover",
         "a"
       ],
       "attr": "href"
     },
     "detail_url": {
       "selectors": [
-        "a[href*='/explore/']"
+        "a.cover",
+        "a"
       ],
       "attr": "href"
     },
@@ -58,26 +54,11 @@
       ],
       "attr": "src"
     },
-    "text": {
-      "selectors": [
-        ".note-item"
-      ],
-      "attr": "textContent"
-    },
     "note_id": {
       "selectors": [
         "a"
       ],
-      "attr": "href",
-      "transform": "extractNoteId"
-    },
-    "xsec_token": {
-      "selectors": [
-        "a[href*='xsec_token=']",
-        "a[href*='/explore/']"
-      ],
-      "attr": "href",
-      "transform": "extractXsecToken"
+      "attr": "href"
     }
   },
   "operations": [
@@ -92,23 +73,13 @@
       "type": "click",
       "config": {
         "target": "img",
-        "comment": "点击图片以获取带xtoken的URL"
+        "comment": "点击图片"
       }
     },
     {
       "type": "extract",
       "config": {
-        "fields": ["title", "link", "detail_url", "image", "text", "note_id", "xsec_token"]
-      }
-    },
-    {
-      "type": "navigate",
-      "config": {
-        "scope_selector": ".note-item",
-        "anchor_selector": "a[href*='/explore/']",
-        "attribute": "href",
-        "mode": "href",
-        "wait_after_ms": 300
+        "fields": ["title", "detail_url", "note_id"]
       }
     }
   ]

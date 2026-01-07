@@ -11,7 +11,7 @@
   ],
   "selectors": [
     {
-      "css": ".feeds-page",
+      "css": ".feeds-container",
       "variant": "primary",
       "score": 1.0
     }

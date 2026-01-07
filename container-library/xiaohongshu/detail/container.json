@@ -8,11 +8,12 @@
     "find-child"
   ],
   "page_patterns": [
-    "xiaohongshu.com/explore*"
+    "/explore/*"
   ],
   "children": [
     "xiaohongshu_detail.login_anchor",
-    "xiaohongshu_detail.modal_shell"
+    "xiaohongshu_detail.modal_shell",
+    "xiaohongshu_detail.comment_section"
   ],
   "selectors": [
     {
@@ -29,10 +30,10 @@
   "metadata": {
     "required_descendants_any": [
       ".note-detail-mask",
-      ".note-content",
-      ".comment-item"
+      ".media-container",
+      ".comments-el"
     ]
-  ],
+  },
   "operations": [
     {
       "type": "highlight",

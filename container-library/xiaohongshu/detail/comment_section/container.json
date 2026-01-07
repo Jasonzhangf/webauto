@@ -15,18 +15,19 @@
   ],
   "selectors": [
     {
-      "css": ".comment-list",
+      "css": ".comments-el",
       "variant": "primary",
       "score": 1.0
     },
     {
-      "css": ".note-scroller, .comments-container, [class*='comment-section']",
+      "css": ".comment-list, .note-scroller, .comments-container, [class*='comment-section']",
       "variant": "backup",
       "score": 0.85
     }
   ],
   "metadata": {
     "required_descendants_any": [
+      ".comments-el",
       ".comment-item",
       ".show-more",
       ".reply-expand"
@@ -35,7 +36,7 @@
       ".end-container",
       ".comment-footer"
     ]
-  ],
+  },
   "operations": [
     {
       "type": "highlight",

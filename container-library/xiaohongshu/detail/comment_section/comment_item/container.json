@@ -21,9 +21,9 @@
   "extractors": {
     "user_name": {
       "selectors": [
+        ".name",
         ".username",
-        ".user-name",
-        ".name"
+        ".user-name"
       ],
       "attr": "textContent"
     },
@@ -35,8 +35,8 @@
     },
     "user_id": {
       "selectors": [
-        "[data-user-id]",
-        ".username"
+        "a[data-user-id]",
+        "[data-user-id]"
       ],
       "attr": "data-user-id"
     },

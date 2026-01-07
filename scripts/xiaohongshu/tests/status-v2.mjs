@@ -15,7 +15,9 @@ async function httpPost(endpoint, payload) {
   const res = await fetch(`${UNIFIED_API}${endpoint}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload)
+    body: JSON.stringify(payload),
+    // 避免 containers:match 等长时间挂起
+    signal: AbortSignal.timeout ? AbortSignal.timeout(10000) : undefined
   });
   if (!res.ok) {
     throw new Error(`HTTP ${res.status}: ${await res.text()}`);

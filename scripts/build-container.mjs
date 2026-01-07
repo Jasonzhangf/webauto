@@ -9,8 +9,16 @@ import { InteractiveDOMBuilder } from '../modules/workflow-builder/src/dom-analy
 async function main() {
   const args = process.argv.slice(2);
   
-  const profile = args[0] || 'weibo_fresh';
-  const url = args[1] || 'https://weibo.com';
+  const profile = args[0] || process.env.WEBAUTO_PROFILE || null;
+  const url = args[1] || process.env.WEBAUTO_URL || null;
+
+  if (!profile || !url) {
+    console.error('用法: node scripts/build-container.mjs <profile> <url>');
+    console.error('示例:');
+    console.error('  node scripts/build-container.mjs weibo_fresh https://weibo.com');
+    console.error('  node scripts/build-container.mjs xiaohongshu_fresh https://www.xiaohongshu.com');
+    process.exit(1);
+  }
   
   console.log(`
 ╔════════════════════════════════════════════════════════════╗
@@ -18,10 +26,11 @@ async function main() {
 ╚════════════════════════════════════════════════════════════╝
 
 使用方法:
-  node scripts/build-container.mjs [profile] [url]
+  node scripts/build-container.mjs <profile> <url>
 
 示例:
   node scripts/build-container.mjs weibo_fresh https://weibo.com
+  node scripts/build-container.mjs xiaohongshu_fresh https://www.xiaohongshu.com
 
 前置条件:
   1. 启动服务: node scripts/start-headful.mjs

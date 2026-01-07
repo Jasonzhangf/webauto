@@ -8,7 +8,8 @@
     "find-child"
   ],
   "page_patterns": [
-    "xiaohongshu.com/search_result*"
+    "/search_result*",
+    "*/search_result*"
   ],
   "children": [
     "xiaohongshu_search.login_anchor",
@@ -17,7 +18,7 @@
   ],
   "selectors": [
     {
-      "css": ".feeds-page",
+      "css": "#app",
       "variant": "primary",
       "score": 1.0
     }

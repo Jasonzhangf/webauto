@@ -6,6 +6,7 @@
 |------|------|------|----------|
 | 7701 | Unified API | HTTP + WebSocket + Bus | services/unified-api/index.ts |
 | 7704 | Browser Service | 浏览器会话管理 | services/browser-service/index.ts |
+| 7790 | SearchGate | 搜索节流服务（每 key 60s 最多 2 次） | scripts/search-gate-server.mjs |
 
 ## 环境变量
 
@@ -18,6 +19,10 @@
 - `--profile <name>`：Profile 名称（默认：weibo_fresh）
 - `--url <url>`：目标 URL（默认：https://weibo.com）
 - `--headless`：无头模式（仅用于调试，无可见窗口）
+
+### 搜索节流
+- `WEBAUTO_SEARCH_GATE_PORT`：SearchGate 监听端口（默认：7790）；
+- `WEBAUTO_SEARCH_GATE_URL`：Workflow 侧调用 SearchGate `/permit` 的完整 URL（默认：`http://127.0.0.1:7790/permit`）。
 
 ### 移除的端口
 以下端口已合并到 7701，不再使用：

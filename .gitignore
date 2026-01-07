@@ -1,3 +1,9 @@
+# Build artifacts & backups to ignore
+.iflow/
+*.bak
+*.bak2
+README-SEARCH-GATE.md
+SUMMARY.md
 # Dependencies
 node_modules/
 npm-debug.log*
@@ -163,3 +169,14 @@ playwright/.cache/
 *.db
 *.sqlite
 *.sqlite3
+# SearchGate & Build artifacts
+modules/search-gate/
+*.log
+node_modules/
+dist/
+*.pid
+screenshot.*
+output/
+tmp/
+xiaohongshu_data/
+xiaohongshu_images/

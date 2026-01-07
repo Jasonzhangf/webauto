@@ -698,15 +698,35 @@ export class BrowserWsServer {
        return { success: false, error: `Session ${sessionId} not found` };
      }
      const page = await session.ensurePage();
-     const deltaY = Number(parameters.deltaY || parameters.delta_y || 0);
+
+     const target = parameters.target || {};
+     const coordinates = target.coordinates || null;
+     const deltaY = Number(
+       parameters.deltaY ?? target.deltaY ?? parameters.delta_y ?? target.delta_y ?? 0,
+     );
+
+     if (coordinates && typeof coordinates.x === 'number' && typeof coordinates.y === 'number') {
+       await page.mouse.move(coordinates.x, coordinates.y);
+     }
+
      await page.mouse.wheel(0, deltaY);
+
      this.broadcastEvent('user_action.completed', sessionId, {
        action: 'scroll',
-       target: '',
+       target: coordinates
+         ? `coordinates(${coordinates.x}, ${coordinates.y})`
+         : '',
        duration_ms: 0,
        deltaY,
      });
-     return { success: true, data: { action: 'scroll', deltaY } };
+     return {
+       success: true,
+       data: {
+         action: 'scroll',
+         deltaY,
+         ...(coordinates ? { x: coordinates.x, y: coordinates.y } : {}),
+       },
+     };
    }
    if (op === 'move' || op === 'down' || op === 'up' || op === 'key') {
      return this.handleExtendedUserAction(sessionId, op, parameters.target || {}, parameters);

@@ -8,8 +8,7 @@
     "find-child"
   ],
   "page_patterns": [
-    "xiaohongshu.com",
-    "xiaohongshu.com/explore*"
+    "xiaohongshu.com/explore"
   ],
   "children": [
     "xiaohongshu_home.login_anchor",

@@ -4,6 +4,8 @@
  * 编排和执行 workflow blocks
  */
 
+import { logWorkflowEvent } from '../../logging/src/index.js';
+
 export interface BlockExecutor {
   execute(input: any): Promise<any>;
 }
@@ -14,6 +16,8 @@ export interface WorkflowStep {
 }
 
 export interface WorkflowDefinitionInput {
+  id?: string;
+  name?: string;
   steps: WorkflowStep[];
 }
 
@@ -37,29 +41,77 @@ export class WorkflowExecutor {
     const results: any[] = [];
     const errors: string[] = [];
     let context: any = {};
+    const workflowId = definition.id || 'anonymous-workflow';
+    const workflowName = definition.name || workflowId;
 
-    for (const step of definition.steps) {
+    for (let index = 0; index < definition.steps.length; index += 1) {
+      const step = definition.steps[index];
       const block = this.blocks.get(step.blockName);
 
       if (!block) {
         const error = `Block not found: ${step.blockName}`;
         errors.push(error);
+        logWorkflowEvent({
+          workflowId,
+          workflowName,
+          stepIndex: index,
+          stepName: step.blockName,
+          status: 'error',
+          error,
+        });
         continue;
       }
 
-      try {
-        const input = this.resolveInput(step.input, context);
-        const result = await block.execute(input);
+      const resolvedInput = this.resolveInput(step.input, context);
+      const sessionId = resolvedInput.sessionId || resolvedInput.profileId || context.sessionId;
 
-        if (result.error) {
+      logWorkflowEvent({
+        workflowId,
+        workflowName,
+        stepIndex: index,
+        stepName: step.blockName,
+        status: 'start',
+        sessionId,
+        profileId: resolvedInput.profileId,
+      });
+
+      try {
+        const result = await block.execute(resolvedInput);
+
+        if (result?.error) {
           errors.push(`${step.blockName}: ${result.error}`);
         }
 
         results.push(result);
         context = { ...context, ...result };
+
+        logWorkflowEvent({
+          workflowId,
+          workflowName,
+          stepIndex: index,
+          stepName: step.blockName,
+          status: result?.error ? 'error' : 'success',
+          sessionId,
+          profileId: resolvedInput.profileId,
+          error: result?.error,
+          anchor: result?.anchor,
+          meta: {
+            success: !result?.error,
+          },
+        });
       } catch (error: any) {
         const errorMsg = `${step.blockName} execution failed: ${error.message}`;
         errors.push(errorMsg);
+        logWorkflowEvent({
+          workflowId,
+          workflowName,
+          stepIndex: index,
+          stepName: step.blockName,
+          status: 'error',
+          sessionId,
+          profileId: resolvedInput.profileId,
+          error: errorMsg,
+        });
       }
     }
 

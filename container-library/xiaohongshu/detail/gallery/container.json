@@ -8,12 +8,12 @@
   ],
   "selectors": [
     {
-      "css": ".note-slider-list",
+      "css": ".media-container",
       "variant": "primary",
       "score": 1.0
     },
     {
-      "css": ".note-slider, .image-list, .note-img, [class*='slider']",
+      "css": ".note-slider-list, .note-slider, .image-list, .note-img, [class*='slider']",
       "variant": "backup",
       "score": 0.8
     }

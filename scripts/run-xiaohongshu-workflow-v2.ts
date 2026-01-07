@@ -1,6 +1,7 @@
 import { WorkflowExecutor } from '../modules/workflow/blocks/WorkflowExecutor';
 import * as EnsureSession from '../modules/workflow/blocks/EnsureSession';
 import * as EnsureLoginBlock from '../modules/workflow/blocks/EnsureLoginBlock';
+import * as WaitSearchPermitBlock from '../modules/workflow/blocks/WaitSearchPermitBlock';
 import * as GoToSearchBlock from '../modules/workflow/blocks/GoToSearchBlock';
 import * as CollectSearchListBlock from '../modules/workflow/blocks/CollectSearchListBlock';
 import * as OpenDetailBlock from '../modules/workflow/blocks/OpenDetailBlock';
@@ -21,6 +22,7 @@ async function main() {
   const executor = new WorkflowExecutor();
   executor.registerBlock('EnsureSession', { execute: EnsureSession.execute });
   executor.registerBlock('EnsureLoginBlock', { execute: EnsureLoginBlock.execute });
+  executor.registerBlock('WaitSearchPermitBlock', { execute: WaitSearchPermitBlock.execute });
   executor.registerBlock('GoToSearchBlock', { execute: GoToSearchBlock.execute });
   executor.registerBlock('CollectSearchListBlock', { execute: CollectSearchListBlock.execute });
   executor.registerBlock('OpenDetailBlock', { execute: OpenDetailBlock.execute });

@@ -9,6 +9,13 @@ export interface ExtractDetailInput {
   serviceUrl?: string;
 }
 
+export interface Rect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
 export interface DetailData {
   header?: Record<string, any>;
   content?: Record<string, any>;
@@ -18,6 +25,15 @@ export interface DetailData {
 export interface ExtractDetailOutput {
   success: boolean;
   detail?: DetailData;
+  anchor?: {
+    headerContainerId?: string;
+    headerRect?: Rect;
+    contentContainerId?: string;
+    contentRect?: Rect;
+    galleryContainerId?: string;
+    galleryRect?: Rect;
+    verified?: boolean;
+  };
   error?: string;
 }
 
@@ -40,7 +56,9 @@ export async function execute(input: ExtractDetailInput): Promise<ExtractDetailO
     const response = await fetch(controllerUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action, payload })
+      body: JSON.stringify({ action, payload }),
+      // 防御性超时，避免 containers:match / operation 长时间挂起
+      signal: (AbortSignal as any).timeout ? (AbortSignal as any).timeout(10000) : undefined
     });
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}: ${await response.text()}`);
@@ -73,6 +91,8 @@ export async function execute(input: ExtractDetailInput): Promise<ExtractDetailO
   }
 
   try {
+    const { verifyAnchorByContainerId } = await import('./helpers/containerAnchors.ts');
+
     // 1. 匹配详情容器树
     const matchResult = await controllerAction('containers:match', {
       profile,
@@ -93,21 +113,104 @@ export async function execute(input: ExtractDetailInput): Promise<ExtractDetailO
     // 3. 提取数据
     const detail: DetailData = {};
 
+    let headerRect: Rect | undefined;
+    let contentRect: Rect | undefined;
+    let galleryRect: Rect | undefined;
+
+    // 3.1 header：高亮 + Rect + 数据
     if (headerNode?.id) {
+      try {
+        const anchor = await verifyAnchorByContainerId(
+          headerNode.id,
+          profile,
+          serviceUrl,
+          '2px solid #ff8800',
+          1500
+        );
+        if (anchor.found && anchor.rect) {
+          headerRect = anchor.rect;
+          console.log(`[ExtractDetail] header rect: ${JSON.stringify(anchor.rect)}`);
+        } else {
+          console.warn(
+            `[ExtractDetail] header anchor verify failed: ${anchor.error || 'not found'}`
+          );
+        }
+      } catch (e: any) {
+        console.warn(`[ExtractDetail] header anchor verify error: ${e.message}`);
+      }
       detail.header = await extractContainer(headerNode.id);
     }
 
+    // 3.2 content：高亮 + Rect + 数据
     if (contentNode?.id) {
+      try {
+        const anchor = await verifyAnchorByContainerId(
+          contentNode.id,
+          profile,
+          serviceUrl,
+          '2px solid #00aa00',
+          1500
+        );
+        if (anchor.found && anchor.rect) {
+          contentRect = anchor.rect;
+          console.log(`[ExtractDetail] content rect: ${JSON.stringify(anchor.rect)}`);
+        } else {
+          console.warn(
+            `[ExtractDetail] content anchor verify failed: ${anchor.error || 'not found'}`
+          );
+        }
+      } catch (e: any) {
+        console.warn(`[ExtractDetail] content anchor verify error: ${e.message}`);
+      }
       detail.content = await extractContainer(contentNode.id);
     }
 
+    // 3.3 gallery：高亮 + Rect + 数据
     if (galleryNode?.id) {
+      try {
+        const anchor = await verifyAnchorByContainerId(
+          galleryNode.id,
+          profile,
+          serviceUrl,
+          '2px solid #0088ff',
+          1500
+        );
+        if (anchor.found && anchor.rect) {
+          galleryRect = anchor.rect;
+          console.log(`[ExtractDetail] gallery rect: ${JSON.stringify(anchor.rect)}`);
+        } else {
+          console.warn(
+            `[ExtractDetail] gallery anchor verify failed: ${anchor.error || 'not found'}`
+          );
+        }
+      } catch (e: any) {
+        console.warn(`[ExtractDetail] gallery anchor verify error: ${e.message}`);
+      }
       detail.gallery = await extractContainer(galleryNode.id);
+    }
+
+    // 4. Rect 规则验证：header 在顶部，content 在中部，gallery 在下方
+    let verified = false;
+    if (headerRect && contentRect && galleryRect) {
+      const headerOk = headerRect.y < 300 && headerRect.height > 0;
+      const contentOk = contentRect.y > headerRect.y && contentRect.height > 0;
+      const galleryOk = galleryRect.y > contentRect.y && galleryRect.height > 0;
+      verified = headerOk && contentOk && galleryOk;
+      console.log(`[ExtractDetail] Rect validation: header=${headerOk}, content=${contentOk}, gallery=${galleryOk}`);
     }
 
     return {
       success: true,
-      detail
+      detail,
+      anchor: {
+        headerContainerId: headerNode?.id,
+        headerRect,
+        contentContainerId: contentNode?.id,
+        contentRect,
+        galleryContainerId: galleryNode?.id,
+        galleryRect,
+        verified
+      }
     };
 
   } catch (error: any) {

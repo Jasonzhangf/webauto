@@ -2,18 +2,110 @@
 /**
  * Phase 2: 小红书搜索验证（容器驱动版）
  * 目标：验证搜索输入 + 列表容器是否可用
+ * 约束：
+ *   1. 所有搜索必须通过对话框搜索（GoToSearchBlock 内部已保证）。
+ *   2. 所有搜索必须先经过 SearchGate 节流服务授权（本脚本启动/检测 SearchGate）。
  */
 
-import { execute as goToSearch } from '../../../modules/workflow/blocks/GoToSearchBlock.js';
-import { execute as collectSearchList } from '../../../modules/workflow/blocks/CollectSearchListBlock.js';
+import { spawn } from 'node:child_process';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { execute as goToSearch } from '../../../modules/workflow/blocks/GoToSearchBlock.ts';
+import { execute as collectSearchList } from '../../../modules/workflow/blocks/CollectSearchListBlock.ts';
 
 const PROFILE = 'xiaohongshu_fresh';
 const KEYWORDS = ['手机膜', '雷军', '小米', '华为', '鸿蒙'];
+const UNIFIED_API = 'http://127.0.0.1:7701';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const repoRoot = path.resolve(__dirname, '..', '..', '..');
+const DEFAULT_SEARCH_GATE_PORT = process.env.WEBAUTO_SEARCH_GATE_PORT || '7790';
+const DEFAULT_SEARCH_GATE_BASE = `http://127.0.0.1:${DEFAULT_SEARCH_GATE_PORT}`;
+const DEFAULT_SEARCH_GATE_URL = `${DEFAULT_SEARCH_GATE_BASE}/permit`;
+
+async function printBrowserStatus(tag) {
+  try {
+    const res = await fetch(`${UNIFIED_API}/v1/controller/action`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'browser:execute',
+        payload: { profile: PROFILE, script: 'location.href' }
+      }),
+      signal: AbortSignal.timeout ? AbortSignal.timeout(5000) : undefined
+    });
+    const data = await res.json().catch(() => ({}));
+    const url = data?.data?.result || data?.result || '';
+    console.log(`\n[BrowserStatus:${tag}] current URL: ${url || '未知'}`);
+  } catch (err) {
+    console.log(`\n[BrowserStatus:${tag}] 获取失败: ${err.message}`);
+  }
+}
+
+async function ensureSearchGate() {
+  const gateUrl = process.env.WEBAUTO_SEARCH_GATE_URL || DEFAULT_SEARCH_GATE_URL;
+  const healthUrl = gateUrl.replace(/\/permit$/, '/health');
+
+  async function checkHealth() {
+    try {
+      const res = await fetch(healthUrl, {
+        method: 'GET',
+        signal: AbortSignal.timeout ? AbortSignal.timeout(2000) : undefined
+      });
+      if (!res.ok) return false;
+      const data = await res.json().catch(() => ({}));
+      return !!data?.ok;
+    } catch {
+      return false;
+    }
+  }
+
+  // 如果已经在跑，直接返回
+  if (await checkHealth()) {
+    console.log(`[SearchGate] 已在线: ${healthUrl}`);
+    return;
+  }
+
+  // 仅在使用默认本地地址时尝试自动启动；如果用户自定义了远程 URL，则由用户自行管理
+  if (process.env.WEBAUTO_SEARCH_GATE_URL && process.env.WEBAUTO_SEARCH_GATE_URL !== DEFAULT_SEARCH_GATE_URL) {
+    console.warn(`[SearchGate] 检测到自定义 WEBAUTO_SEARCH_GATE_URL，但健康检查失败: ${healthUrl}`);
+    console.warn('[SearchGate] 请手动启动或修复自定义 SearchGate 服务');
+    return;
+  }
+
+  const scriptPath = path.join(repoRoot, 'scripts', 'search-gate-server.mjs');
+  console.log(`[SearchGate] 未检测到服务，准备启动: node ${scriptPath}`);
+
+  try {
+    const child = spawn('node', [scriptPath], {
+      cwd: repoRoot,
+      stdio: 'ignore',
+      detached: true
+    });
+    child.unref();
+    console.log(`[SearchGate] 已后台启动，pid=${child.pid}`);
+  } catch (err) {
+    console.error('[SearchGate] 启动失败:', err?.message || err);
+    return;
+  }
+
+  // 简单等待一小段时间再做一次健康检查
+  await new Promise((r) => setTimeout(r, 1500));
+  if (await checkHealth()) {
+    console.log(`[SearchGate] 启动成功: ${healthUrl}`);
+  } else {
+    console.warn('[SearchGate] 启动后健康检查仍然失败，请在另一个终端手动检查 node scripts/search-gate-server.mjs');
+  }
+}
 
 async function main() {
   console.log('🔍 Phase 2: 搜索验证（容器驱动版）\n');
   
   try {
+    // 0. 确保 SearchGate 已启动（用于控制搜索频率）
+    await ensureSearchGate();
+
     // 1. 选择关键字
     const keyword = KEYWORDS[Math.floor(Math.random() * KEYWORDS.length)];
     console.log(`1️⃣ 选择关键字: ${keyword}`);
@@ -27,7 +119,8 @@ async function main() {
 
     if (!searchResult.success) {
       console.error(`❌ 搜索失败: ${searchResult.error}`);
-      process.exit(1);
+      await printBrowserStatus('phase2-search:goToSearch');
+      return;
     }
 
     console.log(`   ✅ 搜索完成`);
@@ -44,7 +137,8 @@ async function main() {
 
     if (!listResult.success) {
       console.error(`❌ 列表收集失败: ${listResult.error}`);
-      process.exit(1);
+      await printBrowserStatus('phase2-search:collectList');
+      return;
     }
 
     console.log(`   ✅ 收集成功: ${listResult.count} 条`);
@@ -57,7 +151,7 @@ async function main() {
 
   } catch (error) {
     console.error('❌ 错误:', error.message);
-    process.exit(1);
+    await printBrowserStatus('phase2-search:exception');
   }
 }
 
