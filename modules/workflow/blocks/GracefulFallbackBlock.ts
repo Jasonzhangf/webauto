@@ -1,13 +1,3 @@
-/**
- * Workflow Block: GracefulFallbackBlock
- *
- * 职责：
- * - 提供优雅降级策略
- * - 主功能失败时自动切换到备选方案
- * - 保持任务继续运行，仅降低功能级别
- * - 适用于非关键功能（图片下载、评论展开等）
- */
-
 export interface GracefulFallbackInput<T = any> {
   primaryFn: () => Promise<T>;
   fallbackFn: () => Promise<T>;
@@ -80,23 +70,13 @@ export function createImageDownloadFallback(
 ) {
   return {
     primaryFn: async () => {
-      // 主功能：批量下载图片
-      const results = await Promise.allSettled(
-        imageUrls.map((url, index) => downloadImage(url, sessionId, index))
-      );
-      return results
-        .filter(r => r.status === 'fulfilled' && r.value)
-        .map(r => (r as PromiseFulfilledResult<string>).value);
+      // 主功能：目前仅返回全部 URL，由调用方负责下载
+      // （占位实现，避免依赖不存在的 downloadImage 辅助函数）
+      return imageUrls;
     },
     fallbackFn: async () => {
-      // 降级方案：只下载前3张图片
-      const urls = imageUrls.slice(0, 3);
-      const results = await Promise.allSettled(
-        urls.map((url, index) => downloadImage(url, sessionId, index))
-      );
-      return results
-        .filter(r => r.status === 'fulfilled' && r.value)
-        .map(r => (r as PromiseFulfilledResult<string>).value);
+      // 降级方案：只返回前 3 张 URL
+      return imageUrls.slice(0, 3);
     }
   };
 }
@@ -109,8 +89,9 @@ export function createCommentExpandFallback(
 ) {
   return {
     primaryFn: async () => {
-      // 主功能：完整评论展开
-      return await expandComments({ sessionId });
+      // 主功能：完整评论展开（调用真实 ExpandCommentsBlock）
+      const { execute: expandComments } = await import('./ExpandCommentsBlock.ts');
+      return await expandComments({ sessionId } as any);
     },
     fallbackFn: async () => {
       // 降级方案：只展开基础评论（不展开回复）
@@ -127,17 +108,19 @@ export function createCommentExpandFallback(
 
 /**
  * 便捷函数：创建详情提取降级
+ *
+ * 主路径走完整的 ExtractDetailBlock（包含 gallery.images 等字段）；
+ * 只有在“可降级错误”时才返回一个仅含基础 header/content 的占位 detail，gallery.images 为空。
  */
 export function createDetailExtractFallback(
   sessionId: string
 ) {
   return {
     primaryFn: async () => {
-      // 主功能：完整详情提取
-      return await extractDetail({ sessionId });
+      const { execute: extractDetail } = await import('./ExtractDetailBlock.ts');
+      return await extractDetail({ sessionId } as any);
     },
     fallbackFn: async () => {
-      // 降级方案：只提取基础信息（标题、作者）
       return {
         success: true,
         detail: {
@@ -149,20 +132,4 @@ export function createDetailExtractFallback(
       };
     }
   };
-}
-
-// 模拟辅助函数（实际实现中会调用真实函数）
-async function downloadImage(url: string, sessionId: string, index: number): Promise<string> {
-  // 实际实现中会调用下载逻辑
-  return `image_${index}.jpg`;
-}
-
-async function expandComments(input: { sessionId: string }) {
-  // 实际实现中会调用评论展开逻辑
-  return { success: true, comments: [], reachedEnd: false, emptyState: false };
-}
-
-async function extractDetail(input: { sessionId: string }) {
-  // 实际实现中会调用详情提取逻辑
-  return { success: true, detail: { header: {}, content: {}, gallery: {} } };
 }

@@ -13,6 +13,14 @@ import os from 'node:os';
 export interface ContainerDefinition {
   id: string;
   selectors?: Array<{ css?: string; variant?: string; score?: number }>;
+  // 这里保留 extractors 结构，供评论/详情等 Block 构建通用 extract 配置
+  extractors?: Record<
+    string,
+    {
+      selectors?: string[];
+      attr?: string;
+    }
+  >;
 }
 
 export interface AnchorRect {
@@ -146,6 +154,26 @@ function pickPrimarySelector(container: ContainerDefinition): string | null {
   if (!selectors.length) return null;
   const primary = selectors.find((item: any) => item.variant === 'primary') || selectors[0];
   return primary?.css || null;
+}
+
+export async function getPrimarySelectorByContainerId(
+  containerId: string,
+): Promise<string | null> {
+  const container = await findContainerDefinition(containerId);
+  if (!container) {
+    return null;
+  }
+  return pickPrimarySelector(container);
+}
+
+export async function getContainerExtractorsById(
+  containerId: string,
+): Promise<ContainerDefinition['extractors'] | null> {
+  const container = await findContainerDefinition(containerId);
+  if (!container || !container.extractors || typeof container.extractors !== 'object') {
+    return null;
+  }
+  return container.extractors;
 }
 
 export async function verifyAnchorByContainerId(

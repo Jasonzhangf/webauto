@@ -91,7 +91,7 @@ export async function execute(input: ExpandCommentsInput): Promise<ExpandComment
   }
 
   try {
-    const { verifyAnchorByContainerId } = await import('./helpers/containerAnchors.ts');
+    const { verifyAnchorByContainerId, getPrimarySelectorByContainerId, getContainerExtractorsById } = await import('./helpers/containerAnchors.ts');
 
     // 1. 基于容器 ID 锚定评论区（不依赖 container_tree 是否挂在 detail 下）
     const commentSection = { id: 'xiaohongshu_detail.comment_section' };
@@ -113,14 +113,36 @@ export async function execute(input: ExpandCommentsInput): Promise<ExpandComment
         console.warn(
           `[ExpandComments] comment_section anchor verify failed: ${anchor.error || 'not found'}`,
         );
+        return {
+          success: false,
+          comments: [],
+          reachedEnd: false,
+          emptyState: false,
+          anchor: {
+            commentSectionContainerId: commentSection.id,
+            commentSectionRect: undefined,
+          },
+          error: anchor.error || 'comment_section anchor not found',
+        };
       }
     } catch (e: any) {
       console.warn(`[ExpandComments] comment_section anchor verify error: ${e.message}`);
+      return {
+        success: false,
+        comments: [],
+        reachedEnd: false,
+        emptyState: false,
+        anchor: {
+          commentSectionContainerId: commentSection.id,
+          commentSectionRect: undefined,
+        },
+        error: `comment_section anchor verify error: ${e.message}`,
+      };
     }
 
-    // 2. 直接在当前 DOM 状态下提取（不再点击「展开」），滚动由本 Block 自行控制，WarmupCommentsBlock 负责提前展开回复
+    // 2. 基于容器 inspect 结果 + comment_item 容器定义提取评论列表
 
-    // 2.1 重新 inspect 评论区域，供锚点与终止标记使用
+    // 2.1 重新 inspect 评论区域，供锚点与终止标记 / 样本评论锚点使用
     const inspected = await controllerAction('containers:inspect-container', {
       profile,
       containerId: commentSection.id,
@@ -129,12 +151,87 @@ export async function execute(input: ExpandCommentsInput): Promise<ExpandComment
 
     const effectiveTree = inspected.snapshot?.container_tree || inspected.container_tree || commentSection;
 
-    // 3. 收集评论项（用于锚点校验）
-    const commentNodes = collectContainers(effectiveTree, /xiaohongshu_detail\.comment_section\.comment_item$/);
+    // 3. 收集评论项节点 / empty_state 节点（用于锚点兜底与样本评论锚点校验）
+    const emptyStateNode = findContainer(
+      effectiveTree,
+      /xiaohongshu_detail\.comment_section\.empty_state$/,
+    );
+    const commentNodes = collectContainers(
+      effectiveTree,
+      /xiaohongshu_detail\.comment_section\.comment_item$/,
+    );
+
+    // 3.0 锚点兜底：
+    // - 只有 empty_state 且没有 comment_item -> 视为合法“无评论”结果，直接返回，不再做 DOM 扫描；
+    // - 既没有 comment_item，也没有 empty_state -> 视为锚点缺失，返回错误，避免在无锚点情况下盲目提取。
+    if (commentNodes.length === 0) {
+      if (emptyStateNode?.id) {
+        let emptyRect: Rect | undefined;
+        try {
+          const anchor = await verifyAnchorByContainerId(
+            emptyStateNode.id,
+            profile,
+            serviceUrl,
+            '2px dashed #888888',
+            2000,
+          );
+          if (anchor.found && anchor.rect) {
+            emptyRect = anchor.rect;
+            console.log(
+              `[ExpandComments] empty_state rect: ${JSON.stringify(anchor.rect)}`,
+            );
+          } else {
+            console.warn(
+              `[ExpandComments] empty_state anchor verify failed: ${
+                anchor.error || 'not found'
+              }`,
+            );
+          }
+        } catch (e: any) {
+          console.warn(
+            `[ExpandComments] empty_state anchor verify error: ${e.message}`,
+          );
+        }
+
+        return {
+          success: true,
+          comments: [],
+          reachedEnd: true,
+          emptyState: true,
+          anchor: {
+            commentSectionContainerId: commentSection.id,
+            commentSectionRect,
+            sampleCommentContainerId: undefined,
+            sampleCommentRect: undefined,
+            endMarkerContainerId: emptyStateNode.id,
+            endMarkerRect: emptyRect,
+            verified: Boolean(
+              commentSectionRect && (!emptyRect || emptyRect.height > 0),
+            ),
+          },
+        };
+      }
+
+      console.warn(
+        '[ExpandComments] no comment_item or empty_state anchors found, aborting expand',
+      );
+      return {
+        success: false,
+        comments: [],
+        reachedEnd: false,
+        emptyState: false,
+        anchor: {
+          commentSectionContainerId: commentSection.id,
+          commentSectionRect,
+        },
+        error: 'comment_item & empty_state anchors not found',
+      };
+    }
+
     const comments: Array<Record<string, any>> = [];
     const seenKeys = new Set<string>();
 
-    // 5.1 选一个样本评论做高亮 + Rect 回环
+    // 3.1 选一个样本评论做高亮 + Rect 回环
     let sampleCommentRect: Rect | undefined;
     let sampleCommentContainerId: string | undefined;
     if (commentNodes.length > 0) {
@@ -163,79 +260,138 @@ export async function execute(input: ExpandCommentsInput): Promise<ExpandComment
       }
     }
 
-    // 3.2 实际评论内容提取：只做一次 DOM 聚合，不做任何 JS 滚动（滚动完全由 WarmupCommentsBlock 负责）
+    // 3.2 实际评论内容提取：基于 comment_item 容器定义构造 DOM 提取脚本（selectors/attr 均来自容器配置）
     try {
-      const script = `(() => {
-        const root = document.querySelector('.comments-el') ||
-          document.querySelector('.comment-list') ||
-          document.querySelector('.comments-container') ||
-          document.querySelector('[class*=\"comment-section\"]');
-        if (!root) return { found: false, comments: [] };
+      const itemContainerId = 'xiaohongshu_detail.comment_section.comment_item';
+      const itemSelector = await getPrimarySelectorByContainerId(itemContainerId);
+      const extractors = await getContainerExtractorsById(itemContainerId);
 
-        const items = Array.from(root.querySelectorAll('.comment-item'));
-        const comments = items.map((el) => {
-          const pickText = (selList) => {
-            for (const sel of selList) {
-              const n = el.querySelector(sel);
-              if (n && n.textContent) return n.textContent.trim();
+      if (!itemSelector || !extractors) {
+        console.warn('[ExpandComments] missing selector or extractors for comment_item container');
+      } else {
+        const domConfig: {
+          rootSelectors: string[];
+          itemSelector: string;
+          fields: Record<string, { selectors: string[]; attr?: string }>;
+        } = {
+          rootSelectors: [
+            // 优先使用 comment_section 容器 selector
+            (await getPrimarySelectorByContainerId(commentSection.id)) || '',
+            '.comments-el',
+            '.comment-list',
+            '.comments-container',
+            '[class*=\"comment-section\"]',
+          ].filter((s) => s && typeof s === 'string'),
+          itemSelector,
+          fields: {},
+        };
+
+        for (const [field, def] of Object.entries(extractors)) {
+          const selectors = Array.isArray(def?.selectors) ? def.selectors : [];
+          if (!selectors.length) continue;
+          domConfig.fields[field] = {
+            selectors,
+            attr: def?.attr,
+          };
+        }
+
+        const script = `(() => {
+          const cfg = ${JSON.stringify(domConfig)};
+          const pickRoot = () => {
+            const roots = cfg.rootSelectors || [];
+            for (const sel of roots) {
+              try {
+                const el = document.querySelector(sel);
+                if (el) return el;
+              } catch (_) {}
             }
-            return '';
+            return null;
           };
-          const profileLink = el.querySelector('a[href*=\"/user/profile/\"]');
-          const userLink = profileLink ? profileLink.getAttribute('href') || '' : '';
-          const userId = profileLink ? profileLink.getAttribute('data-user-id') || '' : '';
 
-          const userName = pickText(['.name', '.username', '.user-name']);
-          const text = pickText(['.content', '.comment-content', 'p']);
-          const timestamp = pickText(['.date', '.time', '[class*=\"time\"]']);
+          const root = pickRoot();
+          if (!root) {
+            return { found: false, comments: [] };
+          }
 
-          const isReply = !!el.closest('.reply-container');
+          const items = Array.from(root.querySelectorAll(cfg.itemSelector || '.comment-item'));
+          const comments = items.map((el) => {
+            const item = {};
+            const fields = cfg.fields || {};
 
-          return {
-            user_name: userName,
-            user_link: userLink,
-            user_id: userId,
-            text,
-            timestamp,
-            is_reply: isReply
-          };
+            const getAttrValue = (node, attr) => {
+              if (!node) return '';
+              if (!attr || attr === 'textContent') {
+                return (node.textContent || '').trim();
+              }
+              if (attr === 'href') {
+                return (node.href || node.getAttribute('href') || '').trim();
+              }
+              const v = node.getAttribute(attr);
+              return v ? v.trim() : '';
+            };
+
+            for (const fieldName of Object.keys(fields)) {
+              const fieldCfg = fields[fieldName] || {};
+              const sels = Array.isArray(fieldCfg.selectors) ? fieldCfg.selectors : [];
+              let value = '';
+              for (const sel of sels) {
+                try {
+                  const node = el.querySelector(sel);
+                  if (!node) continue;
+                  value = getAttrValue(node, fieldCfg.attr);
+                  if (value) break;
+                } catch (_) {}
+              }
+              item[fieldName] = value;
+            }
+
+            // 额外标记是否为回复
+            item.is_reply = !!el.closest('.reply-container');
+            return item;
+          });
+
+          return { found: true, comments };
+        })()`;
+
+        const domResult = await controllerAction('browser:execute', {
+          profile,
+          script,
         });
 
-        return { found: true, comments };
-      })()`;
-
-      const domResult = await controllerAction('browser:execute', {
-        profile,
-        script
-      });
-
-      const payload = domResult.result || domResult.data?.result || domResult;
-      if (!payload?.found || !Array.isArray(payload.comments)) {
-        console.warn('[ExpandComments] DOM scan returned no comments');
-      } else {
-        let newCount = 0;
-        for (const c of payload.comments) {
-          if (!c || Object.keys(c).length === 0) continue;
-          const key = `${c.user_id || ''}||${c.user_name || ''}||${c.text || ''}||${c.timestamp || ''}`;
-          if (seenKeys.has(key)) continue;
-          seenKeys.add(key);
-          comments.push(c);
-          newCount++;
+        const payload = (domResult as any)?.result || (domResult as any)?.data?.result || domResult;
+        if (!payload?.found || !Array.isArray(payload.comments)) {
+          console.warn('[ExpandComments] DOM-based container extraction returned no comments');
+        } else {
+          const rawList = payload.comments as Array<Record<string, any>>;
+          for (const c of rawList) {
+            if (!c || typeof c !== 'object') continue;
+            const hasContent =
+              Boolean((c as any).text && String((c as any).text).trim()) ||
+              Boolean((c as any).user_name && String((c as any).user_name).trim());
+            if (!hasContent) continue;
+            const key = `${(c as any).user_id || ''}||${(c as any).user_name || ''}||${(c as any).text || ''}||${(c as any).timestamp || ''}`;
+            if (seenKeys.has(key)) continue;
+            seenKeys.add(key);
+            comments.push(c);
+          }
+          console.log(`[ExpandComments] container-driven DOM comments=${comments.length}`);
         }
-        console.log(`[ExpandComments] single scan comments=${comments.length} new=${newCount}`);
       }
     } catch (e: any) {
-      console.warn(`[ExpandComments] DOM-based comment aggregation error: ${e.message}`);
+      console.warn(`[ExpandComments] DOM-based comment aggregation (via container definitions) error: ${e.message}`);
     }
 
-    // 4. 检查终止条件
-    const endMarker = findContainer(effectiveTree, /xiaohongshu_detail\.comment_section\.end_marker$/);
-    const emptyState = findContainer(effectiveTree, /xiaohongshu_detail\.comment_section\.empty_state$/);
+    // 4. 检查终止条件（含“空评论”场景）
+    const endMarker = findContainer(
+      effectiveTree,
+      /xiaohongshu_detail\.comment_section\.end_marker$/,
+    );
 
     let endMarkerRect: Rect | undefined;
     let endMarkerContainerId: string | undefined;
 
-    if (endMarker?.id) {
+    // 优先：有评论时按 end_marker 判断；无评论时优先按 empty_state / comment_section 判空
+    if (endMarker?.id && comments.length > 0) {
       endMarkerContainerId = endMarker.id;
       try {
         const anchor = await verifyAnchorByContainerId(
@@ -256,12 +412,13 @@ export async function execute(input: ExpandCommentsInput): Promise<ExpandComment
       } catch (e: any) {
         console.warn(`[ExpandComments] end_marker anchor verify error: ${e.message}`);
       }
-    } else if (emptyState?.id) {
-      // 如果是空状态，也可以把空状态当作终止锚点
-      endMarkerContainerId = emptyState.id;
+    } else if (emptyStateNode?.id || comments.length === 0) {
+      // 空状态：优先使用 empty_state 容器；若未命中，则退回到 comment_section 本身作为“空评论锚点”
+      endMarkerContainerId = emptyStateNode?.id || commentSection.id;
       try {
+        const anchorTargetId = emptyStateNode?.id || commentSection.id;
         const anchor = await verifyAnchorByContainerId(
-          emptyState.id,
+          anchorTargetId,
           profile,
           serviceUrl,
           '2px dashed #888888',
@@ -269,7 +426,11 @@ export async function execute(input: ExpandCommentsInput): Promise<ExpandComment
         );
         if (anchor.found && anchor.rect) {
           endMarkerRect = anchor.rect;
-          console.log(`[ExpandComments] empty_state rect: ${JSON.stringify(anchor.rect)}`);
+          console.log(
+            `[ExpandComments] empty_state rect: ${JSON.stringify(anchor.rect)}, using=${
+              emptyStateNode?.id ? 'empty_state' : 'comment_section'
+            }`,
+          );
         } else {
           console.warn(
             `[ExpandComments] empty_state anchor verify failed: ${anchor.error || 'not found'}`,
@@ -282,19 +443,32 @@ export async function execute(input: ExpandCommentsInput): Promise<ExpandComment
 
     // Rect 规则验证：评论区在中下部，样本评论/终止标记可见
     let verified = false;
-    if (commentSectionRect && sampleCommentRect) {
+    if (commentSectionRect) {
       const sectionOk = commentSectionRect.height > 0;
-      const sampleOk = sampleCommentRect.height > 0;
+      const sampleOk = comments.length > 0 ? !!(sampleCommentRect && sampleCommentRect.height > 0) : true;
       const endOk = endMarkerRect ? endMarkerRect.height > 0 : true;
       verified = sectionOk && sampleOk && endOk;
-      console.log(`[ExpandComments] Rect validation: section=${sectionOk}, sample=${sampleOk}, end=${endOk}`);
+      console.log(
+        `[ExpandComments] Rect validation: section=${sectionOk}, sample=${sampleOk}, end=${endOk}, hasComments=${
+          comments.length > 0
+        }`,
+      );
     }
+
+    // reachedEnd 更严格：
+    // - 有评论时：必须命中 end_marker 且能拿到 Rect，才视为滚到底
+    // - 无评论时：命中 empty_state（或退回 comment_section）才视为 reachedEnd
+    const reachedEnd =
+      comments.length === 0
+        ? Boolean(emptyStateNode)
+        : Boolean(endMarker && endMarkerRect);
 
     return {
       success: true,
       comments,
-      reachedEnd: Boolean(endMarker),
-      emptyState: Boolean(emptyState),
+      reachedEnd,
+      // 只有“确实无评论且命中 empty_state”时才视为空评论
+      emptyState: comments.length === 0 && Boolean(emptyStateNode),
       anchor: {
         commentSectionContainerId: commentSection.id,
         commentSectionRect,

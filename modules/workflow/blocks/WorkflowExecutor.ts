@@ -21,10 +21,20 @@ export interface WorkflowDefinitionInput {
   steps: WorkflowStep[];
 }
 
+export interface WorkflowStepTrace {
+  index: number;
+  blockName: string;
+  input: any;
+  output: any;
+  error?: string;
+  contextAfterStep: any;
+}
+
 export interface WorkflowExecutionResult {
   results: any[];
   errors: string[];
   success: boolean;
+  steps: WorkflowStepTrace[];
 }
 
 /**
@@ -37,10 +47,11 @@ export class WorkflowExecutor {
     this.blocks.set(name, executor);
   }
 
-  async execute(definition: WorkflowDefinitionInput): Promise<WorkflowExecutionResult> {
+  async execute(definition: WorkflowDefinitionInput, initialContext: any = {}): Promise<WorkflowExecutionResult> {
     const results: any[] = [];
     const errors: string[] = [];
-    let context: any = {};
+    const steps: WorkflowStepTrace[] = [];
+    let context: any = { ...(initialContext || {}) };
     const workflowId = definition.id || 'anonymous-workflow';
     const workflowName = definition.name || workflowId;
 
@@ -64,6 +75,8 @@ export class WorkflowExecutor {
 
       const resolvedInput = this.resolveInput(step.input, context);
       const sessionId = resolvedInput.sessionId || resolvedInput.profileId || context.sessionId;
+      let stepOutput: any = undefined;
+      let stepError: string | undefined;
 
       logWorkflowEvent({
         workflowId,
@@ -77,9 +90,11 @@ export class WorkflowExecutor {
 
       try {
         const result = await block.execute(resolvedInput);
+        stepOutput = result;
 
         if (result?.error) {
-          errors.push(`${step.blockName}: ${result.error}`);
+          stepError = `${step.blockName}: ${result.error}`;
+          errors.push(stepError);
         }
 
         results.push(result);
@@ -97,10 +112,12 @@ export class WorkflowExecutor {
           anchor: result?.anchor,
           meta: {
             success: !result?.error,
+            inputSummary: this.buildInputSummary(resolvedInput),
           },
         });
       } catch (error: any) {
-        const errorMsg = `${step.blockName} execution failed: ${error.message}`;
+        const errorMsg = `${step.blockName} execution failed: ${error?.message || String(error)}`;
+        stepError = errorMsg;
         errors.push(errorMsg);
         logWorkflowEvent({
           workflowId,
@@ -112,13 +129,23 @@ export class WorkflowExecutor {
           profileId: resolvedInput.profileId,
           error: errorMsg,
         });
+      } finally {
+        steps.push({
+          index,
+          blockName: step.blockName,
+          input: resolvedInput,
+          output: stepOutput,
+          error: stepError,
+          contextAfterStep: { ...context },
+        });
       }
     }
 
     return {
       results,
       errors,
-      success: errors.length === 0
+      success: errors.length === 0,
+      steps,
     };
   }
 
@@ -137,5 +164,24 @@ export class WorkflowExecutor {
     }
 
     return input;
+  }
+
+  private buildInputSummary(input: any): any {
+    if (input == null || typeof input !== 'object') return input;
+    const summary: any = {};
+    for (const [key, value] of Object.entries(input)) {
+      if (value == null) {
+        summary[key] = value;
+      } else if (Array.isArray(value)) {
+        summary[key] = { type: 'array', length: value.length };
+      } else if (typeof value === 'string') {
+        summary[key] = value.length > 200 ? `${value.slice(0, 200)}…` : value;
+      } else if (typeof value === 'object') {
+        summary[key] = { type: 'object', keys: Object.keys(value) };
+      } else {
+        summary[key] = value;
+      }
+    }
+    return summary;
   }
 }

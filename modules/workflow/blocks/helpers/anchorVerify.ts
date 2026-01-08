@@ -206,7 +206,14 @@ export async function getContainerRect(
     }
 
     const execData = await execResponse.json();
-    return execData.data?.result || execData.result || null;
+    const result = execData.data?.result || execData.result || null;
+
+    // 兼容 promise 结果为 { ok, rect } 的脚本返回格式
+    if (result && typeof result === 'object' && 'rect' in result && !('x' in result)) {
+      return (result as any).rect || null;
+    }
+
+    return result;
   } catch (error: any) {
     console.error(`[getContainerRect] Error:`, error.message);
     return null;

@@ -110,32 +110,33 @@ export async function execute(input: OpenDetailInput): Promise<OpenDetailOutput>
         return { ready: false };
       }
 
-      const matchResult = await controllerAction('containers:match', {
-        profile,
-        maxDepth: 4,
-        maxChildren: 20
-      });
-
-      const tree = matchResult.snapshot?.container_tree || matchResult.container_tree;
-      if (!tree) {
-        await new Promise(r => setTimeout(r, 1000));
-        continue;
-      }
-
-      const rootIds = collectIds(tree);
-      console.log(`[OpenDetail] Container tree: ${rootIds.join(', ')}`);
-
-      const modal = findContainer(tree, /xiaohongshu_detail\.modal_shell$/);
-      const detailRoot = findContainer(tree, /^xiaohongshu_detail$/);
-      
-      if (modal || detailRoot) {
-        console.log(`[OpenDetail] Detail container matched: ${modal ? 'modal' : 'root'}`);
-        // 进入详情视图后，从 location.href 中解析 noteId + xsec_token
-        const url = await getCurrentUrl();
-        safeUrl = url && /[?&]xsec_token=/.test(url) ? url : undefined;
-        const m = url?.match(/\/explore\/([0-9a-z]+)/i);
-        noteId = m ? m[1] : undefined;
-        return { ready: true, safeUrl, noteId };
+      // 通过 DOM 直接判断详情是否就绪，避免在等待阶段频繁调用 containers:match
+      try {
+        const domResult = await controllerAction('browser:execute', {
+          profile,
+          script: `(() => {
+            const hasModal =
+              document.querySelector('.note-detail-mask') ||
+              document.querySelector('.note-detail-page') ||
+              document.querySelector('.note-detail-dialog');
+            const hasComments =
+              document.querySelector('.comments-el') ||
+              document.querySelector('.comment-list') ||
+              document.querySelector('.comments-container');
+            return { hasModal: !!hasModal, hasComments: !!hasComments };
+          })()`
+        });
+        const payload = domResult.result || domResult.data?.result || domResult;
+        if (payload?.hasModal || payload?.hasComments) {
+          const url = currentUrl || (await getCurrentUrl());
+          safeUrl = url && /[?&]xsec_token=/.test(url) ? url : undefined;
+          const m = url?.match(/\/explore\/([0-9a-z]+)/i);
+          noteId = m ? m[1] : undefined;
+          console.log('[OpenDetail] Detail DOM ready (hasModal/hasComments)');
+          return { ready: true, safeUrl, noteId };
+        }
+      } catch (e: any) {
+        console.warn(`[OpenDetail] DOM readiness check failed (retry ${i}): ${e.message}`);
       }
 
       await new Promise(r => setTimeout(r, 1000));
@@ -149,7 +150,7 @@ export async function execute(input: OpenDetailInput): Promise<OpenDetailOutput>
     const startUrl = await getCurrentUrl();
     console.log(`[OpenDetail] Start URL: ${startUrl}`);
 
-    // 0. 点击前：对选中的 search_result_item 做锚点高亮（方便你肉眼确认卡片）
+    // 0. 点击前：对选中的卡片容器（search_result_item / feed_item）做锚点高亮 + Rect 回环
     let clickedItemRect: Rect | undefined;
     try {
       const highlighted = await highlightContainer(containerId, profile, serviceUrl, {
@@ -158,30 +159,60 @@ export async function execute(input: OpenDetailInput): Promise<OpenDetailOutput>
       });
       if (!highlighted) {
         console.warn('[OpenDetail] Failed to highlight clicked item');
+      } else {
+        const rect = await getContainerRect(containerId, profile, serviceUrl);
+        if (rect) {
+          clickedItemRect = rect;
+          console.log(`[OpenDetail] clicked item rect: ${JSON.stringify(rect)}`);
+        }
       }
     } catch (e: any) {
       console.warn(`[OpenDetail] Pre-click anchor verify error: ${e.message}`);
     }
 
     // 1. 打开详情
-    //   安全策略：直接在当前卡片内部点击可见的图片/封面链接（你提供的 .cover.mask 节点），不做任何 URL 拼接：
-    //   - 优先点击 .feeds-container 下第一条 note-item 内的 a.cover.mask
-    //   - 如无 cover.mask，则退回点击 note-item 内第一个可见 img
+    //   安全策略：仅在当前卡片 Rect 内查找可见的封面/图片元素并点击，不做任何 URL 拼接：
+    //   - 以 containerId 对应卡片的中心点为锚点，通过 elementFromPoint 找到所属 note-item；
+    //   - 在该 note-item 内优先寻找 a.cover.mask / a[href*="/explore/"] / a[href*="/search_result/"]，退化为第一个可见 img。
     try {
+      if (!clickedItemRect) {
+        console.warn('[OpenDetail] clickedItemRect missing, fallback to first note-item click (less precise)');
+      }
+
+      const cx = clickedItemRect ? clickedItemRect.x + clickedItemRect.width / 2 : 0;
+      const cy = clickedItemRect ? clickedItemRect.y + clickedItemRect.height / 2 : 0;
+
       const clickResult = await controllerAction('browser:execute', {
         profile,
         script: `(() => {
-          const card = document.querySelector('.feeds-container .note-item');
+          const hasRect = ${clickedItemRect ? 'true' : 'false'};
+          let card = null;
+
+          if (hasRect) {
+            const centerX = ${clickedItemRect ? cx.toFixed(2) : '0'};
+            const centerY = ${clickedItemRect ? cy.toFixed(2) : '0'};
+            const el = document.elementFromPoint(centerX, centerY);
+            if (el && typeof el.closest === 'function') {
+              card = el.closest('.note-item');
+            }
+          }
+
+          if (!card) {
+            // 兜底：退回到首个 note-item（精度降低，但仍在视口内）
+            card = document.querySelector('.feeds-container .note-item');
+          }
+
           if (!card) return { ok: false, reason: 'no card' };
+
           let anchor = card.querySelector('a.cover.mask');
           if (!anchor) {
-            anchor = card.querySelector('a[href*=\"/search_result/\"]');
+            anchor = card.querySelector('a[href*="/explore/"], a[href*="/search_result/"]');
           }
           let target = anchor;
           if (!target) {
             target = card.querySelector('img');
           }
-          if (!target || !(target instanceof HTMLElement)) {
+          if (!target || typeof target.click !== 'function') {
             return { ok: false, reason: 'no clickable element' };
           }
           target.click();
@@ -215,52 +246,37 @@ export async function execute(input: OpenDetailInput): Promise<OpenDetailOutput>
 
     if (detailReady) {
       try {
-        const matchResult = await controllerAction('containers:match', {
-          profile,
-          maxDepth: 6,
-          maxChildren: 30
-        });
+        const { verifyAnchorByContainerId } = await import('./helpers/containerAnchors.ts');
 
-        const tree = matchResult.snapshot?.container_tree || matchResult.container_tree;
+        // 优先尝试 modal_shell，其次回退到根容器 xiaohongshu_detail
+        const candidateIds = ['xiaohongshu_detail.modal_shell', 'xiaohongshu_detail'];
 
-        function findContainer(node: any, pattern: RegExp): any {
-          if (!node) return null;
-          if (pattern.test(node.id || node.defId || '')) return node;
-          if (Array.isArray(node.children)) {
-            for (const child of node.children) {
-              const found = findContainer(child, pattern);
-              if (found) return found;
-            }
+        for (const cid of candidateIds) {
+          const anchor = await verifyAnchorByContainerId(
+            cid,
+            profile,
+            serviceUrl,
+            '3px solid #ff4444',
+            2000,
+          );
+          if (!anchor.found || !anchor.rect) {
+            continue;
           }
-          return null;
+
+          detailContainerId = cid;
+          detailRect = anchor.rect as Rect;
+          console.log(`[OpenDetail] Detail container rect: ${JSON.stringify(detailRect)}`);
+
+          // 验证：详情模态应覆盖视口大部分区域
+          verified =
+            detailRect.width > 400 &&
+            detailRect.height > 400 &&
+            detailRect.y < 200;
+          break;
         }
 
-        const modal = findContainer(tree, /xiaohongshu_detail\.modal_shell$/);
-        const detailRoot = findContainer(tree, /^xiaohongshu_detail$/);
-        const target = modal || detailRoot;
-
-        if (target?.id) {
-          detailContainerId = target.id;
-          const highlighted = await highlightContainer(target.id, profile, serviceUrl, {
-            style: '3px solid #ff4444',
-            duration: 2000
-          });
-          if (!highlighted) {
-            console.warn('[OpenDetail] Failed to highlight detail container');
-          }
-
-          const rect = await getContainerRect(target.id, profile, serviceUrl);
-          if (rect) {
-            detailRect = rect;
-            console.log(`[OpenDetail] Detail container rect: ${JSON.stringify(rect)}`);
-            // 验证：详情模态应覆盖视口大部分区域
-            verified =
-              rect.width > 400 &&
-              rect.height > 400 &&
-              rect.y < 200;
-          } else {
-            console.warn('[OpenDetail] Failed to get rect for detail container');
-          }
+        if (!detailContainerId) {
+          console.warn('[OpenDetail] Detail anchor verify failed: no modal_shell/detail container visible');
         }
       } catch (e: any) {
         console.warn(`[OpenDetail] Detail anchor verify error: ${e.message}`);

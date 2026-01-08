@@ -105,6 +105,22 @@ export async function execute(input: CloseDetailInput): Promise<CloseDetailOutpu
       console.warn(`[CloseDetail] pre-close anchor verify error: ${e.message}`);
     }
 
+    // 若无法命中任何详情页容器锚点，则直接返回错误，避免在错误页面上执行 history.back / mask 点击。
+    if (!detailContainerId) {
+      return {
+        success: false,
+        method: 'unknown',
+        anchor: {
+          detailContainerId,
+          detailRect,
+          searchListContainerId: undefined,
+          searchListRect: undefined,
+          verified: false
+        },
+        error: 'detail modal anchor not found, abort CloseDetail'
+      };
+    }
+
     // 1. 尝试点击遮罩层关闭
     let method: 'history_back' | 'esc_key' | 'mask_click' | 'unknown' = 'unknown';
     let closeError: string | undefined;
@@ -149,7 +165,9 @@ export async function execute(input: CloseDetailInput): Promise<CloseDetailOutpu
         maxChildren: 30
       });
       const treeAfter = matchResultAfter.snapshot?.container_tree || matchResultAfter.container_tree;
-      const searchList = findContainer(treeAfter, /xiaohongshu_search\.search_result_list$/);
+      const searchList =
+        findContainer(treeAfter, /xiaohongshu_search\.search_result_list$/) ||
+        findContainer(treeAfter, /xiaohongshu_home\.feed_list$/);
 
       if (searchList?.id) {
         searchListContainerId = searchList.id;
@@ -160,7 +178,7 @@ export async function execute(input: CloseDetailInput): Promise<CloseDetailOutpu
         const rect = await getContainerRect(searchList.id, profile, serviceUrl);
         if (rect) {
           searchListRect = rect;
-          console.log(`[CloseDetail] search_result_list rect: ${JSON.stringify(rect)}`);
+          console.log(`[CloseDetail] search/list rect: ${JSON.stringify(rect)}`);
 
           // 验证：详情 Rect 不再覆盖视口中心，列表出现在中部区域
           const listOk = searchListRect.y > 100 && searchListRect.height > 0;
@@ -169,12 +187,14 @@ export async function execute(input: CloseDetailInput): Promise<CloseDetailOutpu
           verified = listOk && detailGoneOrTop;
           console.log(`[CloseDetail] Rect validation: listOk=${listOk}, detailGoneOrTop=${detailGoneOrTop}`);
         }
+      } else {
+        console.warn('[CloseDetail] post-close containers:match did not find search_result_list or home.feed_list');
       }
     } catch (e: any) {
       console.warn(`[CloseDetail] post-close anchor verify error: ${e.message}`);
     }
 
-    if (closeError) {
+    if (closeError || !searchListContainerId) {
       return {
         success: false,
         method: 'unknown',

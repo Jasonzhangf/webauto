@@ -21,9 +21,12 @@
   "extractors": {
     "images": {
       "selectors": [
+        ".media-container img",
+        ".xhs-slider-container img",
+        ".note-slider-img img",
+        ".img-container img",
         ".note-slider-list img",
-        ".note-img img",
-        "img[src*='sns-img']"
+        ".note-img img"
       ],
       "attr": "src",
       "multiple": true

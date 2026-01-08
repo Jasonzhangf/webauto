@@ -29,7 +29,7 @@ export class OperationExecutor {
    * 创建 OperationContext
    */
   async createContext(containerId: string, handle: ContainerHandle): Promise<OperationContext> {
-    const page = this.getPage(handle.sessionId);
+    const page = await this.getPage(handle.sessionId);
     
     return {
       containerId,
@@ -40,7 +40,7 @@ export class OperationExecutor {
             throw new Error('Page not available for evaluation');
           }
           return page.evaluate(fn, ...args);
-        }
+        },
       },
       logger: this.logger || console,
       systemInput: {

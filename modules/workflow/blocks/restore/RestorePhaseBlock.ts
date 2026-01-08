@@ -1,0 +1,1 @@
+export interface RestorePhaseInput { sessionId: string; phase: 1 | 2 | 3 | 4; } export interface RestorePhaseOutput { success: boolean; restored: boolean; finalPhase: 1 | 2 | 3 | 4; } export async function execute(input: RestorePhaseInput): Promise<RestorePhaseOutput> { return { success: true, restored: false, finalPhase: input.phase }; }

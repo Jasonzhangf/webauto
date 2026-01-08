@@ -97,3 +97,43 @@ Unified API 与 Browser Service 使用远程会话代理架构，通过 HTTP 通
 
 ## 新增规则（2025-12-24）
 ...
+
+### 7. 【新增 2025-01-07】Phase3/4 错误恢复机制：ESC 退出再进入
+
+**原则：**
+- Phase3（详情页提取）和 Phase4（评论展开）出错时，使用 ESC 退出方法恢复到搜索页
+- **不是回到初始页面（首页），而是回到当前阶段的起始状态（搜索结果页）**
+- 恢复成功后重新获取搜索列表并进入详情页，继续执行原操作
+- 最多重试 1 次，避免无限循环
+
+**ESC 恢复流程：**
+```
+Phase3/4 出错 
+  → 调用 ErrorRecoveryBlock({ recoveryMode: 'esc' })
+  → 关闭详情页（容器关闭 → 点击按钮 → history.back() 降级）
+  → 返回搜索结果页
+  → 验证容器状态
+  → 重新获取搜索列表
+  → 重新进入详情页
+  → 继续执行 Phase3/4 逻辑
+```
+
+**实现位置：**
+- `modules/workflow/blocks/ErrorRecoveryBlock.ts`：新增 `recoveryMode: 'esc'` 参数和 `recoverWithEsc()` 函数
+- `scripts/xiaohongshu/tests/phase3-detail.mjs`：catch 块中集成 ESC 恢复逻辑
+- `scripts/xiaohongshu/tests/phase4-comments.mjs`：catch 块中集成 ESC 恢复逻辑
+
+**技术验证：**
+- ✅ ESC 退出方法可行（history.back() 可成功退出详情页）
+- ✅ 可以重新进入详情页恢复 Phase3 状态
+- ✅ 评论展开不需要特殊处理，直接使用 Phase3 状态即可
+- ✅ 无风控触发风险
+
+**注意事项：**
+- Phase2（搜索）出错不使用 ESC 恢复，因为已经在搜索页
+- Phase3/4 最多重试 1 次（`attempt >= 2` 时放弃）
+- 恢复失败时打印明确的错误信息和建议
+
+**调试验证：**
+- 测试脚本：`/tmp/test_esc_recovery*.mjs`（已验证 history.back() 可行）
+- 可行性分析：`/tmp/esc_recovery_conclusion.md`

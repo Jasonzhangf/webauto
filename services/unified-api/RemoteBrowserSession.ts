@@ -80,11 +80,26 @@ export class RemoteBrowserSession {
     }
 
     const result: any = await response.json();
-    if (!result.success) {
+
+    // Browser Service 使用 { ok: boolean, body?: any, error?: string } 结构，
+    // 旧代码使用 { success: boolean, data?: any, error?: string }。
+    const isError =
+      result?.success === false ||
+      result?.ok === false;
+
+    if (isError) {
+      // 打印原始返回，便于定位协议不一致问题
+      // 注意：这里是 Unified API 侧日志，不会泄露页面内容
+      // eslint-disable-next-line no-console
+      console.error('[RemoteBrowserSession] sendCommand error payload', action, result);
       throw new Error(result.error || 'Unknown error');
     }
 
-    return result.data || result;
+    // 统一返回 data/body/result 中的有效字段
+    if (result.data !== undefined) return result.data;
+    if (result.body !== undefined) return result.body;
+    if (result.result !== undefined) return result.result;
+    return result;
   }
 
   async goto(url: string): Promise<void> {

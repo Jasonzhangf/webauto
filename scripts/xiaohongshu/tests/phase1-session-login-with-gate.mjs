@@ -412,13 +412,24 @@ async function main() {
   await ensureStartUrl();
   await reportCookieCount();
 
-  if (await isLoggedIn()) {
-    log('LOGIN', '已检测到登录态，无需人工操作');
-  } else {
-    log('LOGIN', '未检测到登录，跳转登录页等待人工操作');
+  const loginState = await checkLoginStateByContainer();
+  if (loginState.status === 'logged_in') {
+    log('LOGIN', `容器检测：已登录（${loginState.container || 'login_anchor'}）`);
+  } else if (loginState.status === 'not_logged_in') {
+    log(
+      'LOGIN',
+      `容器检测：未登录（${loginState.container || 'login_guard'}），跳转登录页等待人工操作`,
+    );
     await navigateToLogin();
     await waitForLogin();
     await reportCookieCount('COOKIE-FINAL');
+  } else {
+    log(
+      'LOGIN',
+      `容器检测：状态不确定（${
+        loginState.reason || loginState.error || loginState.status
+      }），暂不触发登录流程`,
+    );
   }
 
   // 登录成功后，自动启动 SearchGate

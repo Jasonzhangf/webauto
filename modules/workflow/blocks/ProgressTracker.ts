@@ -3,6 +3,8 @@
  * 
  * 功能：
  * 1. 保存采集进度（已采集 noteId、关键词索引、搜索轮次）
+ *    - P2.1: 增加容器维度去重（noteId + containerId），避免多容器路径指向同一 note 时重复采集
+ *    - 向后兼容：旧版本进度文件只有 seenNoteIds，新版本增加 seenKeys
  * 2. 支持断点续采（进程崩溃后可恢复）
  * 3. 提供去重依据（seenNoteIds 集合）
  * 4. 成功完成后自动清理进度文件
@@ -18,9 +20,17 @@ export interface ProgressState {
   keywordIndex: number;
   searchRound: number;
   collectedCount: number;
-  seenNoteIds: string[];
+  seenNoteIds: string[];  // 向后兼容保留
+  seenKeys?: string[];    // 新增：noteId||containerId 去重键
   lastKeyword?: string;
   lastNoteId?: string;
+  lastContainerId?: string;  // 新增：最后处理的容器 ID
+}
+
+export interface DedupeEntry {
+  noteId: string;
+  containerId: string;
+  key: string;  // noteId||containerId
 }
 
 export class ProgressTracker {
@@ -37,18 +47,30 @@ export class ProgressTracker {
   /**
    * 保存当前进度
    */
-  async save(state: Omit<ProgressState, 'version' | 'updatedAt'>): Promise<void> {
+  async save(
+    state: Omit<ProgressState, 'version' | 'updatedAt'> & {
+      seenKeys?: string[];
+    }
+  ): Promise<void> {
     const fullState: ProgressState = {
       version: 1,
       updatedAt: new Date().toISOString(),
       ...state
     };
     await fs.writeFile(this.progressPath, JSON.stringify(fullState, null, 2), 'utf-8');
-    console.log(`[ProgressTracker] 进度已保存: ${state.collectedCount} 条, keywordIndex=${state.keywordIndex}, searchRound=${state.searchRound}`);
+    console.log(
+      `[ProgressTracker] 进度已保存: ${state.collectedCount} 条, ` +
+      `keys=${state.seenKeys?.length || state.seenNoteIds?.length || 0}, ` +
+      `keywordIndex=${state.keywordIndex}, searchRound=${state.searchRound}`
+    );
   }
 
   /**
    * 加载保存的进度
+   * 
+   * 向后兼容策略：
+   * - 旧版本进度文件只有 seenNoteIds，新版本会自动填充 seenKeys（假设 containerId 为空）
+   * - 新版本进度文件同时保存 seenNoteIds 和 seenKeys
    */
   async load(): Promise<ProgressState | null> {
     try {
@@ -61,6 +83,14 @@ export class ProgressTracker {
         return null;
       }
       
+      // 向后兼容：如果没有 seenKeys，从 seenNoteIds 生成
+      if (!state.seenKeys && state.seenNoteIds) {
+        state.seenKeys = state.seenNoteIds.map(noteId => `${noteId}||`);
+        console.log(
+          `[ProgressTracker] 兼容旧版本进度文件，从 seenNoteIds 生成 ${state.seenKeys.length} 个 seenKeys`
+        );
+      }
+      
       console.log(`[ProgressTracker] 发现保存的进度: ${state.collectedCount} 条, 最后更新: ${state.updatedAt}`);
       return state;
     } catch (err: any) {
@@ -71,6 +101,32 @@ export class ProgressTracker {
       console.warn(`[ProgressTracker] 加载进度失败: ${err.message}`);
       return null;
     }
+  }
+
+  /**
+   * 生成去重键
+   * 
+   * @param noteId - 笔记 ID
+   * @param containerId - 容器 ID（可选）
+   * @returns 去重键：noteId||containerId
+   */
+  static makeDedupeKey(noteId: string, containerId?: string): string {
+    return `${noteId}||${containerId || ''}`;
+  }
+
+  /**
+   * 解析去重键
+   * 
+   * @param key - 去重键
+   * @returns DedupeEntry
+   */
+  static parseDedupeKey(key: string): DedupeEntry {
+    const [noteId, containerId] = key.split('||');
+    return {
+      noteId: noteId || '',
+      containerId: containerId || '',
+      key
+    };
   }
 
   /**

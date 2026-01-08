@@ -72,6 +72,28 @@ export async function execute(input: GoToSearchInput): Promise<GoToSearchOutput>
     }
   }
 
+  async function verifySearchResultListAnchor() {
+    try {
+      const { verifyAnchorByContainerId } = await import('./helpers/containerAnchors.ts');
+      const anchor = await verifyAnchorByContainerId('xiaohongshu_search.search_result_list', profile, serviceUrl);
+      if (!anchor.found) {
+        return {
+          found: false,
+          error: anchor.error || 'anchor_not_found',
+          selector: anchor.selector,
+          rect: anchor.rect
+        };
+      }
+      return {
+        found: true,
+        selector: anchor.selector,
+        rect: anchor.rect
+      };
+    } catch (error: any) {
+      return { found: false, error: error.message };
+    }
+  }
+
   async function getCurrentUrl(): Promise<string> {
     const response = await fetch(controllerUrl, {
       method: 'POST',
@@ -248,14 +270,6 @@ export async function execute(input: GoToSearchInput): Promise<GoToSearchOutput>
 
       console.log('[GoToSearch] Search triggered, waiting for results...');
       await wait(5000);
-      
-      // 验证是否跳转到了搜索结果页
-      const finalUrl = await getCurrentUrl();
-      if (!finalUrl.includes('/search_result')) {
-        console.warn('[GoToSearch] Warning: URL did not change to /search_result. Current:', finalUrl);
-        // 可能还在原页面（如果就是搜索页），或者跳转失败
-      }
-      
       return true;
     } catch (error) {
       console.error(`[GoToSearch] Search failed: ${error.message}`);
@@ -314,8 +328,41 @@ export async function execute(input: GoToSearchInput): Promise<GoToSearchOutput>
     // 2. 执行搜索（模拟输入）
     const searchExecuted = await executeSearch();
     const finalUrl = await getCurrentUrl();
+
+    // 如果搜索输入阶段本身失败，直接返回错误
+    if (!searchExecuted) {
+      return {
+        success: false,
+        searchPageReady: false,
+        searchExecuted,
+        url: finalUrl,
+        error: `Search input/trigger failed, current url=${finalUrl || 'unknown'}`,
+      };
+    }
+
+    // 2.5 通过容器锚点验证搜索结果列表是否出现
+    const listAnchor = await verifySearchResultListAnchor();
+    if (!listAnchor.found) {
+      console.warn(
+        '[GoToSearch] Search result list anchor not found after search:',
+        listAnchor.error || 'unknown error'
+      );
+      return {
+        success: false,
+        searchPageReady: false,
+        searchExecuted,
+        url: finalUrl,
+        anchor: {
+          containerId: 'xiaohongshu_search.search_result_list',
+          selector: listAnchor.selector,
+          rect: listAnchor.rect,
+          verified: false
+        },
+        error: `Search result list anchor not found: ${listAnchor.error || 'unknown error'}`,
+      };
+    }
     
-    // 3. 检查是否出现验证码
+    // 3. 检查是否出现验证码（依然用 URL 作为风控信号，但不作为阶段判断条件）
     if (finalUrl.includes('captcha') || finalUrl.includes('verify')) {
       return {
         success: false,
@@ -328,7 +375,7 @@ export async function execute(input: GoToSearchInput): Promise<GoToSearchOutput>
 
     return {
       success: true,
-      searchPageReady: finalUrl.includes('/search_result'),
+      searchPageReady: true,
       searchExecuted,
       url: finalUrl,
       anchor: {

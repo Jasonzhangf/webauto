@@ -1,11 +1,16 @@
 #!/usr/bin/env node
 /**
  * Phase 3: 详情页正文/图片提取（容器驱动版）
+ *
+ * 要求：
+ * - 只通过容器点击进入详情页，禁止手动构造 URL 导航
+ * - 出错时优先通过 ESC/关闭按钮恢复到搜索列表，再重试一次
  */
 
 import { execute as collectSearchList } from '../../../modules/workflow/blocks/CollectSearchListBlock.ts';
 import { execute as openDetail } from '../../../modules/workflow/blocks/OpenDetailBlock.ts';
 import { execute as extractDetail } from '../../../modules/workflow/blocks/ExtractDetailBlock.ts';
+import { execute as errorRecovery } from '../../../modules/workflow/blocks/ErrorRecoveryBlock.ts';
 
 const PROFILE = 'xiaohongshu_fresh';
 const UNIFIED_API = 'http://127.0.0.1:7701';
@@ -46,55 +51,42 @@ function printAnchor(tag, anchor) {
 
 async function detectPageState() {
   try {
-    const matchResult = await postController('containers:match', {
-      profile: PROFILE
-    });
-    const snapshot = matchResult.data?.snapshot || matchResult.snapshot || {};
-    const tree = snapshot.container_tree;
-    const rootId = snapshot.root_match?.container?.id || tree?.id || null;
-
-    const ids = [];
-    const collect = (node) => {
-      if (!node) return;
-      if (node.id) ids.push(node.id);
-      if (Array.isArray(node.children)) {
-        node.children.forEach(collect);
-      }
-    };
-    collect(tree);
-
-    const hasDetail = ids.includes('xiaohongshu_detail');
-    const hasSearch = ids.includes('xiaohongshu_search');
-    const hasHome = ids.includes('xiaohongshu_home');
+    // 优先用 URL 做轻量级判定，避免 containers:match 超时把脚本直接打死
+    const data = await postController('browser:execute', {
+      profile: PROFILE,
+      script: 'location.href'
+    }).catch(() => ({}));
+    const url = data?.data?.result || data?.result || '';
 
     let pageType = 'unknown';
-    if (hasDetail) pageType = 'detail';
-    else if (hasSearch) pageType = 'search';
-    else if (hasHome) pageType = 'home';
+    if (typeof url === 'string') {
+      if (url.includes('/explore/')) {
+        pageType = 'detail';
+      } else if (url.includes('/search_result')) {
+        pageType = 'search';
+      } else if (url.includes('xiaohongshu.com')) {
+        // 对于 /explore 主页，我们按 home 处理（当前版本搜索结果也复用该页面）
+        pageType = 'home';
+      }
+    }
 
-    return { pageType, rootId, ids };
+    return { pageType, rootId: null, ids: [] };
   } catch (err) {
     console.warn('[phase3] detectPageState failed:', err.message);
     return { pageType: 'unknown', rootId: null, ids: [] };
   }
 }
 
-async function main() {
-  console.log('📄 Phase 3: 详情页提取测试（容器驱动版）\n');
+async function runPhase3(attempt = 1) {
+  console.log(`📄 Phase 3: 详情页提取测试（容器驱动版）｜尝试 #${attempt}\n`);
 
   try {
     console.log('0️⃣ 检查当前页面状态...');
     const state = await detectPageState();
     console.log(`   页面类型: ${state.pageType} (root=${state.rootId || '未知'})`);
 
-    if (state.pageType === 'home') {
-      console.error('❌ 当前在主页，请先通过 Phase 2 进入搜索页并点击打开一条详情');
-      await printBrowserStatus('phase3-detail:wrong-state-home');
-      return;
-    }
-
-    if (state.pageType === 'search') {
-      // 从搜索页自动选一条，点击进入详情
+    if (state.pageType === 'search' || state.pageType === 'home') {
+      // 从搜索/主页（当前版本搜索结果也落在 /explore feed）自动选一条，点击进入详情
       console.log('1️⃣ 获取搜索结果...');
       const listResult = await collectSearchList({
         sessionId: PROFILE,
@@ -160,7 +152,43 @@ async function main() {
   } catch (error) {
     console.error('❌ 错误:', error.message);
     await printBrowserStatus('phase3-detail:exception');
+
+    if (attempt >= 2) {
+      console.error('❌ ESC 恢复后重试仍失败，放弃本次 Phase 3');
+      return;
+    }
+
+    console.log('🔄 尝试通过 ESC / 关闭按钮恢复到搜索列表...');
+    const recovery = await errorRecovery({
+      sessionId: PROFILE,
+      fromStage: 'detail',
+      targetStage: 'search',
+      recoveryMode: 'esc',
+      maxRetries: 2
+    });
+
+    if (!recovery.success) {
+      console.error('❌ ESC 恢复失败，当前无法安全回到搜索列表');
+      if (recovery.currentUrl) {
+        console.error('   当前 URL:', recovery.currentUrl);
+      }
+      return;
+    }
+
+    console.log(
+      `✅ ESC 恢复成功，最终阶段=${recovery.finalStage}，method=${recovery.method || 'unknown'}`,
+    );
+    await printBrowserStatus('phase3-detail:after-esc-recovery');
+
+    // 恢复成功后，从搜索列表重新开始当前 Phase（只重试一次）
+    return runPhase3(attempt + 1);
   }
 }
 
-main();
+async function main() {
+  await runPhase3(1);
+}
+
+main().catch((err) => {
+  console.error('❌ Phase3 未捕获异常:', err.message || err);
+});

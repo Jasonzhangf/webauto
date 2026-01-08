@@ -1,145 +1,137 @@
 #!/usr/bin/env node
 /**
- * Phase 4: 评论展开验证（容器驱动版 v2 - 使用简化的锚点验证）
- * 目标：验证评论区 + 展开更多 + 评论项
+ * Phase 4: 评论展开验证（Workflow 版）
+ *
+ * 目标：
+ * - 在当前详情页上，通过 CollectCommentsBlock 走完整的
+ *   WarmupCommentsBlock（预热滚动+展开）+ ExpandCommentsBlock（提取）链路
+ * - 不再在脚本里写任何 DOM 操作，仅做 Block 编排和结果打印
  */
 
+import minimist from 'minimist';
+import { execute as collectComments } from '../../../modules/workflow/blocks/CollectCommentsBlock.ts';
+import { execute as verifyAnchor } from '../../../modules/workflow/blocks/AnchorVerificationBlock.ts';
+
 const UNIFIED_API = 'http://127.0.0.1:7701';
-const PROFILE = 'xiaohongshu_fresh';
-
-async function verifyAnchor(selector, name) {
-  console.log(`\n🔍 验证锚点: ${name} (${selector})`);
-  
-  const script = `
-    (() => {
-      const el = document.querySelector('${selector.replace(/'/g, "\\'")}');
-      if (!el) return { found: false, error: 'Element not found' };
-      
-      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      el.style.outline = '3px solid #ff4444';
-      setTimeout(() => { el.style.outline = ''; }, 2000);
-      
-      const rect = el.getBoundingClientRect();
-      return { 
-        found: true, 
-        rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height }
-      };
-    })()
-  `;
-
-  const response = await fetch(`${UNIFIED_API}/v1/controller/action`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      action: 'browser:execute',
-      payload: { profile: PROFILE, script }
-    })
-  });
-
-  const data = await response.json();
-  const result = data.data?.result || data.result;
-
-  if (!result || !result.found) {
-    console.log(`   ❌ 未找到: ${result?.error || '未知错误'}`);
-    return null;
-  }
-
-  console.log(`   ✅ 找到元素`);
-  console.log(`      Rect: x=${result.rect.x.toFixed(1)}, y=${result.rect.y.toFixed(1)}, w=${result.rect.width.toFixed(1)}, h=${result.rect.height.toFixed(1)}`);
-  return result.rect;
-}
 
 async function main() {
-  console.log('💬 Phase 4: 评论展开验证（简化版）\n');
+  const args = minimist(process.argv.slice(2));
+  const sessionId = args.sessionId || args.session || 'xiaohongshu_fresh';
+  const serviceUrl = args.serviceUrl || UNIFIED_API;
+
+  console.log('💬 Phase 4: 评论展开验证（Workflow 版）\n');
+  console.log(`Session: ${sessionId}\n`);
 
   try {
-    // 1. 验证评论区
-    console.log('1️⃣ 验证评论区...');
-    const commentsRect = await verifyAnchor('.comments-container, .comment-list', '评论列表容器');
-    if (!commentsRect) {
-      console.error('❌ 评论区未找到，请确认是否已打开详情页');
+    // 1. 验证当前处于详情页（modal_shell 锚点）
+    console.log('1️⃣ 验证详情页锚点 (xiaohongshu_detail.modal_shell)...');
+    const detailAnchor = await verifyAnchor({
+      sessionId,
+      containerId: 'xiaohongshu_detail.modal_shell',
+      operation: 'enter',
+      serviceUrl,
+    });
+
+    if (!detailAnchor.success) {
+      console.error(
+        `   ❌ 详情锚点验证失败: ${detailAnchor.error || 'unknown'}（请确认当前在详情 modal 页面）`,
+      );
       process.exit(1);
     }
 
-    // 2. 验证评论项
-    console.log('\n2️⃣ 验证初始评论项...');
-    const itemRect = await verifyAnchor('.comment-item', '第一条评论');
-    if (!itemRect) {
-      console.log('   ⚠️ 未找到评论项（可能是空评论或未加载）');
+    if (detailAnchor.rect) {
+      const r = detailAnchor.rect;
+      console.log(
+        `   ✅ 详情 modal Rect: x=${r.x.toFixed(1)}, y=${r.y.toFixed(1)}, w=${r.width.toFixed(
+          1,
+        )}, h=${r.height.toFixed(1)}`,
+      );
     }
 
-    // 3. 尝试展开更多（如果有）
-    console.log('\n3️⃣ 检查展开按钮...');
-    const showMoreScript = `
-      (() => {
-        const btn = document.querySelector('.show-more, .reply-expand, [class*="expand"]');
-        if (!btn) return { found: false };
-        
-        btn.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        btn.style.outline = '3px solid #fbbc05';
-        setTimeout(() => { btn.style.outline = ''; }, 1000);
-        
-        btn.click();
-        return { found: true };
-      })()
-    `;
-
-    const showMoreResponse = await fetch(`${UNIFIED_API}/v1/controller/action`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        action: 'browser:execute',
-        payload: { profile: PROFILE, script: showMoreScript }
-      })
+    // 2. 调用 CollectCommentsBlock：内部完成 Warmup + Expand
+    console.log('\n2️⃣ 执行 CollectCommentsBlock（Warmup + Expand）...');
+    const result = await collectComments({
+      sessionId,
+      serviceUrl,
     });
-    
-    const showMoreData = await showMoreResponse.json();
-    const showMoreResult = showMoreData.data?.result || showMoreData.result;
-    
-    if (showMoreResult?.found) {
-      console.log('   ✅ 点击了展开按钮，等待加载...');
-      await new Promise(resolve => setTimeout(resolve, 2000));
+
+    if (!result.success) {
+      console.error(
+        `   ❌ CollectCommentsBlock 失败: ${result.error || 'unknown error'}`,
+      );
+      if (result.anchor?.commentSectionRect) {
+        const r = result.anchor.commentSectionRect;
+        console.log(
+          `   ℹ️ comment_section Rect (fallback): x=${r.x.toFixed(
+            1,
+          )}, y=${r.y.toFixed(1)}, w=${r.width.toFixed(1)}, h=${r.height.toFixed(1)}`,
+        );
+      }
+      process.exit(1);
+    }
+
+    const totalFromHeader =
+      typeof result.totalFromHeader === 'number' ? result.totalFromHeader : null;
+    const commentsCount = Array.isArray(result.comments)
+      ? result.comments.length
+      : 0;
+
+    console.log('\n3️⃣ 结果统计');
+    console.log(
+      `   ✅ Warmup 轮次: ${result.warmupCount}，header 总数: ${
+        totalFromHeader !== null ? totalFromHeader : '未知'
+      }`,
+    );
+    console.log(
+      `   ✅ 实际抓取评论数: ${commentsCount}，reachedEnd=${result.reachedEnd ? '是' : '否'}，emptyState=${
+        result.emptyState ? '是' : '否'
+      }`,
+    );
+
+    if (result.anchor?.commentSectionRect) {
+      const r = result.anchor.commentSectionRect;
+      console.log(
+        `   ℹ️ comment_section Rect: x=${r.x.toFixed(1)}, y=${r.y.toFixed(
+          1,
+        )}, w=${r.width.toFixed(1)}, h=${r.height.toFixed(1)}`,
+      );
+    }
+
+    if (result.anchor?.sampleCommentRect) {
+      const r = result.anchor.sampleCommentRect;
+      console.log(
+        `   ℹ️ sample comment Rect: x=${r.x.toFixed(1)}, y=${r.y.toFixed(
+          1,
+        )}, w=${r.width.toFixed(1)}, h=${r.height.toFixed(1)}`,
+      );
+    }
+
+    if (totalFromHeader !== null && commentsCount < totalFromHeader) {
+      console.log(
+        `   ⚠️ 抓取条数 (${commentsCount}) 小于 header 总数 (${totalFromHeader})，后续可针对 WarmupCommentsBlock 的循环策略进一步调优。`,
+      );
+    }
+
+    // 4. 打印少量示例评论，确认字段齐全（用户名 / 用户ID / 文本）
+    if (commentsCount > 0) {
+      const sampleSize = Math.min(5, commentsCount);
+      console.log(`\n4️⃣ 示例评论（前 ${sampleSize} 条）：`);
+      for (let i = 0; i < sampleSize; i += 1) {
+        const c = result.comments[i] || {};
+        console.log(
+          `   - ${c.user_name || c.username || '未知用户'} (${c.user_id || 'no-id'})：${(c.text || '').slice(
+            0,
+            60,
+          )}`,
+        );
+      }
     } else {
-      console.log('   ℹ️ 未找到展开按钮（可能已全部加载或无评论）');
+      console.log('\n4️⃣ 当前页面未抓到任何评论（可能为空评论页或锚点配置有误）');
     }
 
-    // 4. 关闭详情页
-    console.log('\n4️⃣ 关闭详情页...');
-    const closeScript = `
-      (() => {
-        const mask = document.querySelector('.note-detail-mask');
-        const closeBtn = document.querySelector('.close, .close-circle, [class*="close"]');
-        
-        if (closeBtn) {
-          closeBtn.click();
-          return { method: 'close_btn' };
-        } else if (mask) {
-          mask.click();
-          return { method: 'mask_click' };
-        } else {
-          history.back();
-          return { method: 'history_back' };
-        }
-      })()
-    `;
-    
-    const closeResponse = await fetch(`${UNIFIED_API}/v1/controller/action`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        action: 'browser:execute',
-        payload: { profile: PROFILE, script: closeScript }
-      })
-    });
-
-    const closeData = await closeResponse.json();
-    const closeResult = closeData.data?.result || closeData.result;
-    console.log(`   ✅ 关闭操作执行: ${closeResult?.method || 'unknown'}`);
-
-    console.log('\n✅ Phase 4 完成');
-
+    console.log('\n✅ Phase 4（Workflow 版）完成');
   } catch (error) {
-    console.error('❌ 错误:', error.message);
+    console.error('❌ 错误:', error && error.message ? error.message : error);
     process.exit(1);
   }
 }

@@ -362,6 +362,28 @@ apps/floating-panel/
 **参考文档：**
 - `docs/arch/SEARCH_GATE.md`：SearchGate 完整设计与使用说明
 
+### 6. 【一级违规】禁止访问无 xsec_token 的小红书链接
+
+**原则：**
+- 任何脚本 / Workflow / Block / 调试代码 **严禁** 通过构造不带 `xsec_token` 的小红书 URL 进行导航或访问（例如：`https://www.xiaohongshu.com/explore/{noteId}`、`/search_result?keyword=...` 等）。
+- 严禁在小红书域名下直接通过 `window.location.href = "..."`、`location.assign(...)`、`history.pushState(...)` 等方式构造 URL 跳转，而绕过平台正常入口与 SearchGate。
+- 访问无 `xsec_token` 的链接视为**一级违规**，一旦发现必须立即回滚改动并停止相关脚本。
+
+**仅允许的访问方式：**
+- 通过已有容器 / Workflow 在页面内模拟真实用户行为（点击搜索结果、点击帖子卡片、点击“更多评论”等），由页面自身生成带 `xsec_token` 的 URL。
+- 所有搜索必须走 `WaitSearchPermitBlock + GoToSearchBlock`，通过输入框 + 回车触发，由页面生成搜索结果链接。
+- 详情页、评论页等只能通过容器点击从当前页面进入，**禁止**手动拼接详情链接。
+
+**禁止示例（均为一级违规）：**
+- 在任何脚本中出现：
+  - `window.location.href = "https://www.xiaohongshu.com/explore/xxxxxx"`（无 `xsec_token`）
+  - `fetch("https://www.xiaohongshu.com/explore/xxxxxx")` 直接抓取页面
+  - 人为拼接 `/explore/{noteId}`、`/search_result?keyword=...` 之类 URL 并导航
+
+**原因：**
+- 小红书对直连 / 非正常入口访问有严格风控，访问不带 `xsec_token` 的详情 / 搜索链接极易触发 404 / 风控。
+- SearchGate + 对话框搜索 + 容器点击已经提供安全路径，任何绕过这些机制的 URL 导航都会破坏整体风控策略。
+
 ### 6. 【新增】所有容器操作必须约束在视口内，模拟用户可见行为
 
 **原则：**
@@ -445,3 +467,41 @@ document.querySelector('.far-away-element').click();
 - C级：存在直接离屏操作，需立即整改
 
 **当前状态**：Phase 1-4 已达到 **A级** 标准（详见视口安全审查报告）
+
+---
+
+## 新增规则（2026-01-07）下载与持久化
+
+### 7. 爬取结果的统一落盘规范
+
+**根目录约束：**
+- 所有爬取/下载结果必须统一落在用户目录下的 `~/.webauto/download/`，禁止写入仓库根目录下的临时 JSON/图片文件作为最终输出。
+- 根路径规范：`~/.webauto/download/{platform}/...`，其中 `{platform}` 如 `xiaohongshu`、`weibo` 等。
+
+**任务/关键字目录结构：**
+- 对于按搜索关键字驱动的任务，目录结构统一为：
+  - `~/.webauto/download/{platform}/{env}/{keyword}/...`
+  - `{env}` 用于区分环境/用途，例如：
+    - `debug`：阶段性测试脚本（Phase1–4、collect-100 调试版等）
+    - `prod`：正式量产采集
+  - 例如小红书采集：`~/.webauto/download/xiaohongshu/debug/华为续签难/`。
+
+**帖子级目录结构（以小红书为例）：**
+- 每个帖子一个子目录：
+  - `~/.webauto/download/xiaohongshu/{env}/{keyword}/{noteId}/`
+  - 目录内至少包含：
+    - `README.md`：帖子主体内容（标题、正文、发布时间、作者信息、原始链接等），正文内引用图片需使用相对路径。
+    - `images/`：图片实际文件目录，文件名建议使用 `{index}.jpg` 或保留扩展名的 `{index}.{ext}`。
+    - （可选）`comments.md`：评论列表（用户名、用户 ID、时间、评论内容）按 Markdown 或纯文本落盘。
+- Phase3/Phase4 调试脚本之前写入仓库根目录下的 `xiaohongshu_data/*.json` 仅作为过渡方案，后续必须迁移到上述目录结构；新代码禁止再引入类似仓库级 JSON 作为“主结果”的写盘路径。
+
+**格式约束：**
+- 结果文件应以目录 + 文本文件（`.md` / `.txt`）为主，**禁止仅依赖统一 JSON 文件作为对外可用的主结果**。
+- 如确有需要，可在帖子目录内附带结构化文件（例如 `meta.json`、`comments.jsonl`），但这些只能作为内部调试或二次处理的辅助，不得取代 README.md / 目录结构本身。
+
+**测试与量产的一致性：**
+- 测试脚本与量产 Workflow 必须共用同一个根路径 `~/.webauto/download/`，仅通过 `{env}` 或其他明确的子目录前缀来区分，不允许为测试单独发明新的根目录（例如 `xiaohongshu_data/`）。
+- 所有新增加的 Workflow/脚本在设计时必须先确定：
+  - 对应的 `{platform}`、`{env}`、`{keyword}` 目录；
+  - 帖子级目录命名（优先使用稳定的业务 ID，如 noteId）；
+  - 图片/评论/元信息的文件名和相对路径约定。

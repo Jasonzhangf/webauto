@@ -315,6 +315,18 @@
 
 ---
 
+### P0 追加修复（2026-01-07）
+
+- [x] 将 `AnchorVerificationBlock` 改为基于 `container-library` + `verifyAnchorByContainerId` 的锚点验证，不再在该 Block 内调用 `containers:match`，避免阶段性超时影响整条采集链路；
+- [x] 调整 `SessionHealthBlock`：会话健康只依赖浏览器可响应 + 页面可访问，不再把 `containers:match` 作为硬性失败条件，`containersMatchable` 仅作为诊断字段；
+- [x] 调整 `ErrorRecoveryBlock`：恢复阶段改用锚点 `xiaohongshu_search.search_result_list` / `xiaohongshu_home` 的 Rect 校验（同样通过 `verifyAnchorByContainerId`），彻底去掉内部的 `containers:match` 调用；
+- [x] 调整 `LoginRecoveryBlock`：登录检测显式区分 `logged_in / not_logged_in / uncertain / error`，仅在命中 `login_guard` 时才自动触发 Phase1 登录恢复；`uncertain` 状态直接向上抛出，由集成脚本（如 `collect-100-workflow-v2.mjs`）提示用户手动运行 Phase1 或 `status-v2.mjs` 检查；对于 `error`（典型是 `containers:match` 超时）场景，若当前 URL 仍在小红书非登录页，则按“已登录（弱判断）”继续执行，并给出额外提示，避免因单次超时阻塞长任务；
+- [x] 修复 `scripts/xiaohongshu/tests/collect-100-workflow-v2.mjs` 中缺失的 `delay()` 实现，确保 SearchGate 超时时可以按预期“等待 60s 再继续下一轮搜索”而不会抛出运行时错误。
+
+> 以上改动的目标是把 `containers:match` 的不稳定性收敛到少数必要位置，并在登录/恢复/健康检查等 P0 路径上提供明确的“降级 + 提示”，避免因为单次容器匹配超时就导致整条采集流程退出或反复误触发 Phase1。
+
+---
+
 ## 【新增】P0+：搜索节流机制（SearchGate）- 2025-01-06
 
 ### 背景
@@ -525,3 +537,399 @@ try {
 
 **状态**：设计中（2025-01-06）  
 **目标**：达到"无人值守、可恢复、可监控"的生产级标准
+
+---
+
+## 五、当前问题总结与优先级（2026-01-07）
+
+> 仅针对“小红书 100 条采集 Workflow”这一条链路，结合近期 Phase2–Phase4 与 collect-100 调试情况整理。
+
+### P0：必须优先修复的问题
+
+1. **CollectSearchListBlock 不支持滚动加载**
+   - 现状（已部分修复）：`CollectSearchListBlock` 已改为基于列表容器（`xiaohongshu_search.search_result_list` / `xiaohongshu_home.feed_list`）的滚动 + 采集循环，会按 containerId 去重并记录 `scrollRounds`，但在搜索结果页上当前的滚动步长有限，部分场景仍只拿到首屏 1 条。
+   - 影响：在 SearchGate 已限制“60 秒 2 次搜索”的前提下，每轮搜索只吃一屏结果，严重浪费搜索配额，无法在有限搜索次数内凑够 100 条。
+   - 动作：
+     - ✅ 已实现：
+       - 将 `CollectSearchListBlock` 重构为“滚动 + 采集”循环，列表容器支持 `search_result_list` + `home.feed_list` 双路径，按 containerId 去重增量追加 item，并在输出中返回 `scrollRounds`；
+     - ⏳ 待观察：
+       - 在 `/search_result` 场景下，根据后续实测调整滚动步长与终止条件，确保单关键词能吃到一屏以上结果（必要时引入“连续 N 轮无新 item”作为强终止条件）。
+
+2. **OpenDetailBlock 点击定位不够精确**
+   - 现状（已修复）：已经改为“以传入的 `containerId` 为锚点，通过 `getContainerRect` 计算卡片中心点，再在该卡片 DOM 内查找可见封面/图片元素点击”，详情锚点也改为基于 `verifyAnchorByContainerId('xiaohongshu_detail.modal_shell' \| 'xiaohongshu_detail')` 的高亮 + Rect 校验，不再依赖 `containers:match`。
+   - 影响：列表/Feed 共用页面时理论上存在点错卡片的风险，一旦发生，noteId → 详情数据将被污染。
+   - 动作：
+     - ✅ 已实现：
+       - OpenDetail 在点击前高亮并回读 `clickedItemRect`，点击时仅在该 Rect 所在卡片内查找 `a.cover.mask`/安全链接/img 并点击，打开后通过容器锚点验证详情模态 Rect；
+     - ⏳ 待观察：
+       - 在 `/search_result` 和 `/explore` feed 两种入口下，进一步验证不会点错卡片（通过 Phase3/Phase4 + 高亮回环人工确认）。
+
+### P1：影响稳定性与风控风险的问题
+
+1. **视口外操作风险仍存在**
+   - 现状：大部分 Block 已有 Rect 校验，但仍有少量滚动/点击没有完全遵守 `docs/arch/VIEWPORT_SAFETY.md`（例如：列表 Rect.y 为 0 的情况下仍尝试操作，评论锚点缺失时继续滚动）。
+   - 影响：存在在视口外 click/scroll 的情况，可能触发风控。
+   - 动作：
+     - 在搜索列表、详情、评论等 Block 中统一收紧：
+       - 所有 click/scroll 前必须基于锚点 Rect 判定是否在 viewport 内，不在时先小步滚动将元素带入视口，再操作；
+       - 禁止在 Rect 不可见（height/width=0 或 y > window.innerHeight）时继续进行任何用户行为模拟。
+
+2. **Warmup / Expand 职责边界不清**
+   - 现状（已部分收敛）：`WarmupCommentsBlock` 和 `ExpandCommentsBlock` 在锚点缺失时现在会直接返回失败，不再继续滚动/扫描；新增了 `CollectCommentsBlock` 用于聚合 warmup+expand，但部分脚本仍直接调用旧的两个 Block。
+   - 影响：评论不完整时，很难判断是滚动展开没做好，还是提取逻辑有 bug，调试成本高。
+   - 动作：
+     - ✅ 已实现：
+       - 新增 `CollectCommentsBlock`，内部依次调用 `WarmupCommentsBlock` 和 `ExpandCommentsBlock`，对 warmup/expand 失败直接向上抛错，并在输出中统一返回 `comments[] + reachedEnd + emptyState + warmupCount + totalFromHeader + anchor`；
+       - `scripts/xiaohongshu/tests/phase4-comments.mjs` 与 `scripts/xiaohongshu/tests/collect-100-workflow-v2.mjs` 已切换为只调用 `CollectCommentsBlock`，不再在脚本层手工串 warmup+expand。
+     - ⏳ 待观察：
+       - 后续 P1/P2 中根据实测补强 `CollectCommentsBlock` 的视口安全和展开命中率（特别是“展开 N 条回复”的深层级），并在旧 Block 稳定后考虑对外标记为“内部使用”。
+
+### P2：结果质量与恢复策略优化
+
+1. **ProgressTracker 去重粒度不够**
+   - 现状：当前只基于 `noteId` 去重，`seenNoteIds` 已经避免了明显的重复采集，但在多容器路径指向同一 note 的边缘场景仍可能产生少量重复。
+   - 动作：
+     - 在 `ProgressTracker` 与 collect-100 中增加容器维度的去重键，例如：`seenKeys.add(\`\${noteId}||\${containerId}\`)`，确保同一 noteId + containerId 只处理一次。
+
+2. **错误恢复策略偏激进**
+   - 现状：部分错误一律走“回首页 + 重试”的重型路径，即使只是临时超时或锚点验证失败，也会导致多余的导航与重试。
+   - 动作：
+     - 细化 `ErrorClassifier` 与 `ErrorRecoveryBlock`：
+       - 对临时性错误（超时/网络抖动）仅停止当前 note，记录日志并继续下一条，不必立即回首页；
+       - 对系统性错误（session 失效、频繁风控）才触发回首页/终止任务；
+       - 对纯降级可接受的错误（如评论展开部分失败）通过 `GracefulFallbackBlock` 做功能降级，而不是一律重试。
+
+---
+
+## P2 追加改进（2025-01-07）
+
+### 已完成
+
+- [x] **ProgressTracker 容器维度去重**（`modules/workflow/blocks/ProgressTracker.ts`）
+  - 新增 `seenKeys` 字段（格式：`noteId||containerId`），支持容器维度去重
+  - 新增静态方法 `makeDedupeKey()` / `parseDedupeKey()`
+  - 向后兼容旧版本进度文件（自动转换 `seenNoteIds` → `seenKeys`）
+  - **影响**：解决同一 noteId 通过不同容器路径访问时被误判为重复的问题
+
+- [x] **ErrorClassifier 细化错误分类与恢复策略**（`modules/workflow/blocks/ErrorClassifier.ts`）
+  - 细化错误类型：`TEMPORARY` / `PERMANENT` / `SYSTEMIC` / `DEGRADED`
+  - 细化恢复动作：`RETRY` / `SKIP_ITEM` / `GRACEFUL_DEGRADE` / `ABORT_TASK`
+  - 上下文感知分类：支持 'search' / 'detail' / 'comment' / 'login' 上下文
+  - 新增 `getRecoveryAction(error, context)` 工具函数，返回结构化恢复建议
+  - **影响**：
+    - 避免临时错误触发"回首页"等重型恢复
+    - 永久性错误（404）直接跳过，不浪费重试次数
+    - 系统性错误立即终止，避免无效尝试
+    - 可降级错误保存部分数据，不丢失已采集内容
+
+### 待执行
+
+- [x] **更新 collect-100-workflow-v2.mjs 应用新策略**
+  - 导入并使用 `ProgressTracker.makeDedupeKey()` / `parseDedupeKey()`
+  - 使用 `seenKeys` 替代 `seenNoteIds`（7 处修改）
+  - 应用细化错误策略（5 处修改）
+  - 优化错误恢复流程（移除对临时错误的重型恢复）
+
+> 以上改动的目标是在 P0（降低 containers:match 依赖）的基础上，进一步提高采集任务的去重精度与错误恢复智能度，减少因误判错误类型导致的任务中断或数据丢失。
+
+
+---
+
+## P2：持久化节点 + 离线仿真测试（设计与落地）
+
+> 目标：把“小红书详情 + 评论采集 + 本地写盘”收敛为标准 Workflow 节点，并通过离线仿真页稳定回放，不再依赖线上 URL。
+
+### P2.1 Workflow 节点与执行模型
+
+- [x] 设计 Workflow 节点模型与统一执行入口（文档：`docs/arch/WORKFLOW_EXECUTION_NODE_MODEL.md`）
+  - WorkflowExecutor 支持 `initialContext`，返回 `steps[]` trace（每步包含 `input/output/error/contextAfterStep`）；
+  - Block 与子 Workflow 统一抽象为“节点”，通过 `CallWorkflowBlock` 串联；
+  - 新增 `runWorkflowById(workflowId, initialContext)` 统一入口，脚本只做参数解析与调用。
+- [x] 初步框架落地
+  - 在 `modules/workflow/blocks/WorkflowExecutor.ts` 中扩展返回结构并接入 `steps[]` 记录；
+  - 在 `modules/workflow/blocks/CallWorkflowBlock.ts` 中实现子 Workflow 调用节点；
+  - 在 `modules/workflow/config/workflowRegistry.ts`/`modules/workflow/src/runner.ts` 中实现 workflow 注册与 `runWorkflowById`。
+
+### P2.2 PersistXhsNoteBlock 设计与实现
+
+- [x] 设计持久化节点（文档：`docs/arch/XIAOHONGSHU_OFFLINE_MOCK_DESIGN.md`）
+  - 定义 `PersistXhsNoteBlock` 输入/输出结构；
+  - 统一目录结构：`~/.webauto/download/xiaohongshu/{env}/{keyword}/{noteId}/content.md + images/`；
+  - 内容格式与现有 collect-100 markdown 规范对齐（标题、元信息、正文、图片引用、评论列表）。
+- [x] 在 `modules/workflow/blocks/` 下实现 `PersistXhsNoteBlock.ts`
+  - 从 `detail` + `commentsResult` 生成 markdown 内容；
+  - 使用 fetch 下载图片到 `images/`，对单张失败做降级（跳过但不整体失败）。
+- [x] 将 `PersistXhsNoteBlock` 接入单 Note Workflow（`xiaohongshu-note-collect`）并注册到 workflowRegistry（可通过 `runWorkflowById` 调用）。
+
+### P2.3 在线数据 → fixture JSON
+
+- [x] 抽象通用 fixture 录制 Block（`RecordFixtureBlock`）
+  - 输入：`platform/category/id/data`，输出到 `~/.webauto/fixtures/{platform}/{category}-{id}.json`；
+  - 结构中统一包含 `capturedAt` 字段，方便后续回放与演化；
+  - 可被小红书、微博等多个平台共用。
+- [ ] 在在线调试路径（Phase3/Phase4 或专用脚本）中录制小红书 note fixture
+  - 在 `ExtractDetailBlock` 与 `CollectCommentsBlock` 完成后，将输出聚合为 `XhsNoteFixture`；
+  - 写入 `~/.webauto/fixtures/xiaohongshu/note-{noteId}.json`（仅在 DEBUG/测试模式或显式开启时启用，例如 `--recordFixture`）。
+- [ ] 为 fixture 定义最小字段集合与演化策略
+  - 明确 fixture 结构（noteId/keyword/detailUrl/detail/commentsResult/capturedAt）；
+  - 保证后续 Persist/仿真工具对字段变更具备向后兼容能力。
+
+### P2.4 fixture JSON → 仿真 HTML 详情页
+
+- [x] 设计仿真页结构（文档：`docs/arch/XIAOHONGSHU_OFFLINE_MOCK_DESIGN.md`）
+  - DOM 结构与 `xiaohongshu_detail.*` / `comment_section.*` 容器 selector 对齐；
+  - 模拟 `.show-more` 展开更多评论按钮与简单点击脚本；
+  - 图片区域按 gallery 容器定义生成 `<img>` 列表。
+- [x] 新增脚本 `scripts/xiaohongshu/tests/generate-detail-mock-page.mjs`
+  - 输入 fixture JSON，输出本地 HTML 仿真页；
+  - 默认路径：`~/.webauto/fixtures/xiaohongshu/detail-{noteId}.html`。
+
+### P2.5 基于仿真页的离线测试
+
+- [x] PersistXhsNoteBlock 单块测试脚本
+  - 已添加 `scripts/xiaohongshu/tests/test-persist-from-fixture.mjs`，使用 fixture JSON 作为输入直接调用 `PersistXhsNoteBlock`；
+  - 本地已通过离线 demo fixture（note-offline-demo）验证写盘路径与 `content.md` 生成逻辑，图片下载在网络失败时按设计降级为告警不报错；
+  - 仍建议后续结合真实小红书 fixture（由 RecordFixtureBlock 录制）再做一次人工复核。
+- [ ] 单 Note Workflow 离线 E2E 脚本
+  - 已添加 `scripts/xiaohongshu/tests/run-note-workflow-offline.mjs`，通过 `runWorkflowById('xiaohongshu-note-collect', ...)` 在当前 session 上执行单 note workflow；
+  - 需要后续配合本地仿真 HTML 与 Browser Service 手动验证 ExtractDetail/CollectComments/PersistXhsNoteBlock 在仿真 DOM 上的表现。
+- [ ] 整链路集成（可选 debug 模式）
+  - 在 debug 环境下，将搜索阶段替换为“直接进入本地仿真详情页”的简化 Workflow；
+  - 验证顶层 Workflow + CallWorkflowBlock 串联与写盘结果稳定性。
+
+
+## P1.1 追加修复（2025-01-07）：CollectSearchListBlock containers:match 超时保护
+
+### 问题
+- `run-xiaohongshu-workflow-v2.ts` 在 Phase2 搜索完成后卡住
+- 根本原因：`CollectSearchListBlock` 第一步调用 `containers:match` 超时（10 秒+）
+- 虽然 P0 已修复其他 Block（Login/SessionHealth/ErrorRecovery/AnchorVerification），但 `CollectSearchListBlock` 遗漏
+
+### 解决方案（方案 A）
+为 `containers:match` 添加 5 秒超时 + 降级方案：
+
+```typescript
+// 1. 尝试 containers:match（带 5 秒超时）
+try {
+  const matchResult = await Promise.race([
+    controllerAction('containers:match', {...}),
+    new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 5000))
+  ]);
+  tree = matchResult.snapshot?.container_tree || matchResult.container_tree;
+} catch (err) {
+  matchTimeout = true;
+}
+
+// 2. 降级方案：使用固定容器 ID（基于 URL 判断）
+if (matchTimeout || !tree) {
+  if (currentUrl.includes('/search_result')) {
+    listContainerId = 'xiaohongshu_search.search_result_list';
+  } else {
+    listContainerId = 'xiaohongshu_home.feed_list';
+  }
+  listContainer = { id: listContainerId };
+}
+```
+
+### 验证结果
+✅ 超时保护已生效：
+- containers:match 5 秒超时后正常降级
+- 使用固定容器 ID 成功获取列表 Rect
+- 进入滚动采集循环
+
+### 后续观察
+- `containers:inspect-container` 也可能超时，需要根据实测情况添加类似保护
+
+
+---
+
+## P1.1 追加修复（2025-01-07 第 2 轮）：CollectSearchListBlock DOM 提取兜底
+
+### 根本问题
+`container:operation extract` 返回 `"Page not available for evaluation"`：
+- Browser Service 的 page 对象不可用或被销毁
+- 导致所有依赖页面 DOM 查询的容器操作失败
+- 提取结果为空对象，noteId/title/detailUrl 全为 undefined
+
+### 解决方案
+为 `CollectSearchListBlock` 添加 DOM 提取兜底逻辑：
+
+```typescript
+try {
+  const extractResult = await controllerAction('container:operation', {
+    containerId: id,
+    operationId: 'extract',
+    config: { fields: ['title', 'link'] },
+    sessionId: profile
+  });
+  
+  if (extractResult.success) {
+    extracted = extractResult.data?.extracted?.[0] || ...;
+  } else {
+    throw new Error(extractResult.error);
+  }
+} catch (err) {
+  // DOM 提取兜底
+  const domResult = await controllerAction('browser:execute', {
+    profile,
+    script: `(() => {
+      const card = document.querySelector('.note-item');
+      const titleEl = card.querySelector('[class*="title"]');
+      const linkEl = card.querySelector('a');
+      return {
+        title: titleEl?.textContent?.trim() || '',
+        link: linkEl?.getAttribute('href') || ''
+      };
+    })()`
+  });
+  extracted = domResult.result || {};
+}
+```
+
+### 验证结果
+✅ DOM 兜底成功：
+- noteId: `69597373000000001e002e3c`
+- title: `🌐 DeepSeek-Coder-V2开源支持338种编程语`
+- detailUrl: `/explore/69597373000000001e002e3c`
+
+### 遗留问题
+❌ 滚动后只能找到 1 个 item（目标 3-5 条）：
+- `containers:inspect-container` 返回的 container_tree 不包含新加载的 item
+- 需要后续优化：完全移除对 `containers:inspect-container` 的依赖，改用纯 DOM 扫描
+
+
+## P1.2 错误恢复机制（2025-01-07）
+
+### 问题
+Phase3/4 出错时缺乏状态恢复机制，导致：
+- 出错后必须从首页重新开始
+- 搜索结果丢失，需重新搜索（触发 SearchGate）
+- 影响采集效率
+
+### 解决方案
+为 Phase3/4 增加 ESC 恢复模式：
+- ErrorRecoveryBlock 新增 `recoveryMode: 'esc'` 参数
+- 使用 `history.back()` 退出详情页返回搜索页
+- 恢复成功后重新进入详情页继续执行
+- 最多重试 1 次（避免无限循环）
+
+### 技术验证
+✅ `history.back()` 可成功退出详情页  
+✅ 可返回搜索页并重新进入详情页  
+✅ 评论展开不需要特殊处理（直接使用 Phase3 状态）  
+✅ 无风控触发
+
+### ESC 恢复流程
+```
+Phase3/4 出错 
+  → 调用 ErrorRecoveryBlock({ recoveryMode: 'esc' })
+  → 关闭详情页（容器关闭 → 点击按钮 → history.back() 降级）
+  → 返回搜索结果页
+  → 验证容器状态
+  → 重新获取搜索列表
+  → 重新进入详情页
+  → 继续执行 Phase3/4 逻辑
+```
+
+### 实现文件
+- `modules/workflow/blocks/ErrorRecoveryBlock.ts`：新增 `recoverWithEsc()` 函数
+- `scripts/xiaohongshu/tests/phase3-detail.mjs`：catch 块集成 ESC 恢复
+- `scripts/xiaohongshu/tests/phase4-comments.mjs`：catch 块集成 ESC 恢复
+- `docs/arch/AGENTS.md`：新增第 7 条规则（ESC 恢复机制）
+
+### 验证脚本
+- `/tmp/test_esc_recovery*.mjs`：ESC 退出再进入可行性验证
+- `/tmp/esc_recovery_conclusion.md`：技术可行性分析报告
+- `/tmp/FINAL_SUMMARY.md`：完整实施总结
+
+### 状态
+✅ 已完成所有代码实现  
+✅ 已完成技术验证  
+✅ 已完成文档更新  
+⏳ 等待真实场景测试验证
+
+---
+
+## P1.3 锚点收紧补充（2026-01-07）：ExpandComments / WarmupComments / CloseDetail / ErrorRecovery
+
+### 目标
+- 将评论展开、评论预热、详情关闭与 ESC 恢复全部统一到“锚点优先、无锚不动”的安全策略下，彻底消除无锚点滚动/点击带来的风控风险。
+
+### 1）ExpandCommentsBlock：comment_item / empty_state 锚点兜底
+- 文件：`modules/workflow/blocks/ExpandCommentsBlock.ts`
+- 关键收紧点：
+  - 在 `containers:inspect-container` 得到的 `container_tree` 上同时查找：
+    - `xiaohongshu_detail.comment_section.comment_item`（评论项容器）；
+    - `xiaohongshu_detail.comment_section.empty_state`（空状态容器）。
+  - 新增“3.0 锚点兜底”逻辑：
+    - 若 `comment_item` 为空 && 命中 `empty_state`：
+      - 通过 `verifyAnchorByContainerId(empty_state)` 做一次高亮 + Rect 回环；
+      - 直接返回 `success=true, comments=[], reachedEnd=true, emptyState=true`，不再执行任何 DOM 扫描脚本；
+      - `anchor` 中带上 `commentSectionRect + endMarkerContainerId=end_state`，用于后续日志与 UI 高亮。
+    - 若 `comment_item` 为空 && 未命中 `empty_state`：
+      - 视为“评论区锚点缺失”，直接返回
+        `success=false, error='comment_item & empty_state anchors not found'`；
+      - 不再执行 DOM 级提取脚本，彻底避免“无锚点盲扫 DOM”的行为。
+- 保留原有基于容器定义（selector + extractors）的 DOM 提取逻辑，但前提变为：
+  - 必须先命中至少一个 `comment_item` 容器节点；
+  - 之后才允许运行 container-driven DOM 聚合脚本。
+
+### 2）WarmupCommentsBlock：首帧“无评论+无展开”直接停机
+- 文件：`modules/workflow/blocks/WarmupCommentsBlock.ts`
+- 新增逻辑：
+  - 在进入滚动循环之前，对 `getCommentStats()` 的首帧结果做一次判断：
+    - 若 `count=0 && total=null && hasMore=false`：
+      - 认为当前详情页不存在可见评论，也不存在“展开 N 条回复”控件；
+      - 直接返回：
+        - `success=true, reachedEnd=true, totalFromHeader=null, finalCount=0`；
+        - `anchor.commentSectionRect` 来自前面的 `verifyAnchorByContainerId(comment_section)`。
+      - 不再执行任何 `scrollTop` 操作或 `user_action` 滚动，避免在完全无锚点的情况下反复滚动详情页。
+- 其余逻辑保持不变：
+  - 仍然优先尝试基于容器运行时的 `show_more_button` click；
+  - 仅在存在 `.show-more` 等元素时才执行 DOM 级兜底点击；
+  - 当一轮中 `clicked=0 && total in {0,-1} && allButtons` 为假时，立即停止后续滚动。
+
+### 3）CloseDetailBlock：无详情锚点不关闭 + 回到 search/feed 必须有锚点
+- 文件：`modules/workflow/blocks/CloseDetailBlock.ts`
+- 收紧点：
+  - 关闭前：
+    - 使用 `containers:match` 在 `container_tree` 中查找：
+      - `xiaohongshu_detail.modal_shell`（优先）；
+      - `xiaohongshu_detail` 根容器（兜底）。
+    - 若两者都未命中，直接返回：
+      - `success=false, error='detail modal anchor not found, abort CloseDetail'`；
+      - 不再尝试任何 `browser:execute`（遮罩 click / history.back），避免在非详情页上误操作。
+  - 关闭后：
+    - 再次调用 `containers:match`，在新树上查找：
+      - `xiaohongshu_search.search_result_list`；
+      - 或 `xiaohongshu_home.feed_list`（回到首页 feed 的兜底场景）。
+    - 若二者之一命中：
+      - 高亮 + `getContainerRect`，校验“列表在中部区域，详情不再覆盖视口中心”，写入 `anchor.searchListRect` 与 `verified`；
+    - 若二者均未命中：
+      - 视为关闭失败（即便没有抛异常），返回 `success=false`，并带上 pre-close 的 `detailRect`，方便日志排查。
+
+### 4）ErrorRecoveryBlock：ESC 恢复完全基于详情锚点 + 容器 close
+- 文件：`modules/workflow/blocks/ErrorRecoveryBlock.ts`
+- `recoverWithEsc()` 的新行为：
+  - 步骤 0：锚点前置
+    - 先通过 `verifyAnchorByContainerId('xiaohongshu_detail.modal_shell')` 确认当前确实在详情 modal 上；
+    - 若未命中或 Rect 异常，直接返回 `{ success:false, method:'no-detail-anchor' }`，不做任何关闭/回退动作。
+  - 步骤 1：容器运行时关闭
+    - 调用 `container:operation { containerId: modal_shell, operationId: 'close' }`；
+    - 等待 1.5s 后读取 `location.href`，若包含 `/search_result`：
+      - 认为通过容器 close 已成功返回搜索页，返回 `{ success:true, method:'container-close' }`。
+  - 步骤 2：history.back 单次兜底
+    - 若容器 close 抛错或未回到 `/search_result`，记录 warning 后执行：
+      - `browser:execute { script: 'window.history.back()' }`；
+      - 等待 2s，再次读取 `location.href`，根据是否包含 `/search_result` 返回 `{ success, method:'history-back' }` 或 `{ success:false, method:'history-back-error' }`。
+  - 彻底移除原有在浏览器内拼 DOM selector (`.note-detail .close` / `.note-detail-mask`) 自己发 click 的逻辑，遵守“用容器运行时解决关闭问题”的约束。
+- 顶层 `execute()` 仍保持：
+  - 当 `recoveryMode='esc' && fromStage='detail' && targetStage='search'` 时优先走 `recoverWithEsc()`；
+  - 在 `escResult.success=true` 的前提下，再用 `verifyStage('search')` 做一次容器级锚点验证，双重保证恢复落在 search_result 页面。
+
+### 状态
+- [x] ExpandCommentsBlock：已完成 comment_item/empty_state 锚点兜底与“无锚不动”逻辑；
+- [x] WarmupCommentsBlock：已完成首帧“无评论+无展开”直接停机逻辑；
+- [x] CloseDetailBlock：已完成“无详情锚点不关闭 + 必须命中 search_result_list/home.feed_list 才算成功”的收紧；
+- [x] ErrorRecoveryBlock：已完成 ESC 模式基于详情锚点 + 容器 close + 单次 history.back 的重写；
+- [ ] 后续仍需在真实采集流程中多轮回放日志，确认所有错误分支都能正确停在“安全但不动”的状态。
