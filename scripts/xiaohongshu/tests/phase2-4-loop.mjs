@@ -21,8 +21,10 @@ import { execute as collectSearchList } from '../../../dist/modules/workflow/blo
 import { execute as openDetail } from '../../../dist/modules/workflow/blocks/OpenDetailBlock.js';
 import { execute as collectComments } from '../../../dist/modules/workflow/blocks/CollectCommentsBlock.js';
 import { execute as errorRecovery } from '../../../dist/modules/workflow/blocks/ErrorRecoveryBlock.js';
+import { execute as persistXhsNote } from '../../../dist/modules/workflow/blocks/PersistXhsNoteBlock.js';
 
 const PROFILE = 'xiaohongshu_fresh';
+const PLATFORM = 'xiaohongshu';
 const KEYWORDS = ['小米', '雷军', 'iphone', '手机膜', '华为', '中国制造', '美国贸易'];
 const UNIFIED_API = 'http://127.0.0.1:7701';
 
@@ -52,6 +54,15 @@ function resolveTargetCount() {
   const n = Number(raw);
   if (Number.isFinite(n) && n > 0) return Math.floor(n);
   return 3;
+}
+
+function resolveEnv() {
+  const argv = minimist(process.argv.slice(2));
+  const fromFlag = argv.env || argv.e;
+  if (fromFlag && typeof fromFlag === 'string' && fromFlag.trim()) {
+    return fromFlag.trim();
+  }
+  return 'debug';
 }
 
 async function printBrowserStatus(tag) {
@@ -173,8 +184,11 @@ async function main() {
 
   const keyword = resolveKeyword();
   const targetCount = resolveTargetCount();
+  const env = resolveEnv();
 
-  console.log(`配置: keyword="${keyword}" targetCount=${targetCount}\n`);
+  console.log(`配置: keyword="${keyword}" targetCount=${targetCount} env=${env}\n`);
+
+  const seenNoteIds = new Set();
 
   try {
     // 0. 确保 SearchGate 已启动（用于控制搜索频率）
@@ -234,6 +248,18 @@ async function main() {
     const maxItems = Math.min(targetCount, listResult.items.length);
     for (let idx = 0; idx < maxItems; idx++) {
       const item = listResult.items[idx];
+
+      // 基于 noteId 的去重：同一批次内不重复采集同一个帖子
+      const listNoteId = item.noteId;
+      if (listNoteId && seenNoteIds.has(listNoteId)) {
+        console.log(
+          `\n📝 Note #${idx + 1}/${maxItems}: 跳过重复 noteId=${listNoteId} (${
+            item.title || '无标题'
+          })`,
+        );
+        continue;
+      }
+
       console.log(
         `\n📝 Note #${idx + 1}/${maxItems}: ${item.title || '无标题'} (${
           item.noteId || '无ID'
@@ -298,6 +324,39 @@ async function main() {
         if (commentsResult.comments.length > 0) {
           const preview = commentsResult.comments[0]?.text || '';
           console.log(`   ✅ 示例评论: ${preview.substring(0, 50)}`);
+        }
+      }
+
+      // 3.2.1 本地持久化：~/.webauto/download/xiaohongshu/{env}/{keyword}/{noteId}/
+      const finalNoteId = noteIdFromUrl || item.noteId || '';
+      if (!finalNoteId) {
+        console.warn('   ⚠️ 无法确定 noteId，跳过本地持久化');
+      } else {
+        if (seenNoteIds.has(finalNoteId)) {
+          console.log(`   ⚠️ noteId=${finalNoteId} 已处理过，本轮仅复用评论结果，不再写盘`);
+        } else {
+          seenNoteIds.add(finalNoteId);
+          const persistRes = await persistXhsNote({
+            sessionId: PROFILE,
+            env,
+            platform: PLATFORM,
+            keyword,
+            noteId: finalNoteId,
+            detailUrl: currentUrl,
+            detail: {}, // Phase2-4 loop 主要验证评论能力，详情正文可后续通过 ExtractDetailBlock 补齐
+            commentsResult
+          });
+          if (!persistRes.success) {
+            console.warn(
+              `   ⚠️ PersistXhsNote 失败 noteId=${finalNoteId}: ${persistRes.error}`,
+            );
+          } else {
+            console.log(
+              `   💾 已落盘 noteId=${finalNoteId} 到目录: ${
+                persistRes.outputDir || persistRes.contentPath || '未知路径'
+              }`,
+            );
+          }
         }
       }
 

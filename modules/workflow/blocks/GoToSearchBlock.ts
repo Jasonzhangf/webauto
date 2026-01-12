@@ -500,42 +500,41 @@ export async function execute(input: GoToSearchInput): Promise<GoToSearchOutput>
     if (!listAnchor.found) {
       console.warn(
         '[GoToSearch] Search result list anchor not found after search:',
-        listAnchor.error || 'unknown error'
+        listAnchor.error || 'unknown error',
       );
-      return {
-        success: false,
-        searchPageReady: false,
-        searchExecuted,
-        url: finalUrl,
-        entryAnchor,
-        exitAnchor: undefined,
-        steps,
+      // 记录失败步骤，但不让整个 Block 失败，由 CollectSearchListBlock 继续通过容器/URL fallback 采集列表
+      pushStep({
+        id: 'wait_search_result_list',
+        status: 'failed',
+        error: listAnchor.error || 'anchor_not_found',
         anchor: {
           containerId: 'xiaohongshu_search.search_result_list',
           selector: listAnchor.selector,
           rect: listAnchor.rect,
-          verified: false
+          verified: false,
         },
-        error: `Search result list anchor not found: ${listAnchor.error || 'unknown error'}`,
+        meta: { url: finalUrl },
+      });
+      exitAnchor = undefined;
+    } else {
+      exitAnchor = {
+        containerId: 'xiaohongshu_search.search_result_list',
+        selector: listAnchor.selector,
+        rect: listAnchor.rect,
+        verified: Boolean(
+          listAnchor.rect &&
+            listAnchor.rect.height > 0 &&
+            listAnchor.rect.y < (listAnchor.rect.height + (listAnchor.rect.y || 0)),
+        ),
       };
+      console.log('[GoToSearch][exitAnchor]', JSON.stringify(exitAnchor, null, 2));
+      pushStep({
+        id: 'wait_search_result_list',
+        status: 'success',
+        anchor: exitAnchor,
+        meta: { url: finalUrl },
+      });
     }
-
-    exitAnchor = {
-      containerId: 'xiaohongshu_search.search_result_list',
-      selector: listAnchor.selector,
-      rect: listAnchor.rect,
-      verified: Boolean(listAnchor.rect && listAnchor.rect.height > 0 && listAnchor.rect.y < (listAnchor.rect.height + (listAnchor.rect.y || 0))),
-    };
-    console.log(
-      '[GoToSearch][exitAnchor]',
-      JSON.stringify(exitAnchor, null, 2),
-    );
-    pushStep({
-      id: 'wait_search_result_list',
-      status: 'success',
-      anchor: exitAnchor,
-      meta: { url: finalUrl },
-    });
     
     // 3. 检查是否出现验证码（依然用 URL 作为风控信号，但不作为阶段判断条件）
     if (finalUrl.includes('captcha') || finalUrl.includes('verify')) {
@@ -550,7 +549,7 @@ export async function execute(input: GoToSearchInput): Promise<GoToSearchOutput>
 
     return {
       success: true,
-      searchPageReady: true,
+      searchPageReady: Boolean(exitAnchor),
       searchExecuted,
       url: finalUrl,
       entryAnchor,
@@ -560,8 +559,8 @@ export async function execute(input: GoToSearchInput): Promise<GoToSearchOutput>
         containerId: 'xiaohongshu_search.search_bar',
         selector: anchorResult.selector,
         rect,
-        verified: rectVerified
-      }
+        verified: rectVerified,
+      },
     };
   } catch (error: any) {
     return {

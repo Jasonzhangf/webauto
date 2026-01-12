@@ -11,6 +11,8 @@ import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import minimist from 'minimist';
+import { execute as detectPageState } from '../../../dist/modules/workflow/blocks/DetectPageStateBlock.js';
+import { execute as errorRecovery } from '../../../dist/modules/workflow/blocks/ErrorRecoveryBlock.js';
 import { execute as goToSearch } from '../../../dist/modules/workflow/blocks/GoToSearchBlock.js';
 import { execute as collectSearchList } from '../../../dist/modules/workflow/blocks/CollectSearchListBlock.js';
 
@@ -115,10 +117,58 @@ async function ensureSearchGate() {
 
 async function main() {
   console.log('🔍 Phase 2: 搜索验证（容器驱动版）\n');
+
+  const argv = minimist(process.argv.slice(2));
+  const targetCountRaw = argv.target ?? argv.t;
+  const targetCount = Number.isFinite(Number(targetCountRaw)) && Number(targetCountRaw) > 0
+    ? Math.floor(Number(targetCountRaw))
+    : 10;
   
   try {
     // 0. 确保 SearchGate 已启动（用于控制搜索频率）
     await ensureSearchGate();
+
+    // 0.1 检测当前页面阶段，如果在详情页则先回退到搜索/首页
+    const state = await detectPageState({
+      sessionId: PROFILE,
+      platform: 'xiaohongshu',
+      serviceUrl: UNIFIED_API,
+    });
+
+    console.log(
+      `0️⃣ 当前阶段: stage=${state.stage}, platform=${state.platform}, url=${state.url || '未知'}`,
+    );
+
+    if (!state.success) {
+      console.warn(`   ⚠️ DetectPageState 失败: ${state.error || 'unknown error'}`);
+    } else if (state.stage === 'detail') {
+      console.log('   当前在详情页，先通过 ESC 回退到搜索/首页...');
+      const recovery = await errorRecovery({
+        sessionId: PROFILE,
+        fromStage: 'detail',
+        targetStage: 'search',
+        recoveryMode: 'esc',
+        maxRetries: 2,
+      });
+
+      if (!recovery.success) {
+        console.error('   ❌ ESC 回退失败，无法安全回到搜索阶段');
+        if (recovery.currentUrl) {
+          console.error('      当前 URL:', recovery.currentUrl);
+        }
+        await printBrowserStatus('phase2-search:pre-search-recovery-failed');
+        return;
+      }
+
+      console.log(
+        `   ✅ 回退成功，finalStage=${recovery.finalStage}, method=${recovery.method || 'unknown'}`,
+      );
+      await printBrowserStatus('phase2-search:after-pre-search-recovery');
+    } else if (state.stage === 'login' || state.stage === 'unknown') {
+      console.error('   ❌ 当前处于登录页或未知状态，请先运行 Phase1 完成登录 / 导航到首页');
+      await printBrowserStatus('phase2-search:invalid-stage');
+      return;
+    }
 
     // 1. 选择关键字
     const keyword = resolveKeyword();
@@ -166,10 +216,10 @@ async function main() {
     console.log(`      - currentUrl: ${searchResult.url}\n`);
 
     // 3. 收集搜索列表
-    console.log('3️⃣ 收集搜索结果列表...');
+    console.log(`3️⃣ 收集搜索结果列表 (target=${targetCount})...`);
     const listResult = await collectSearchList({
       sessionId: PROFILE,
-      targetCount: 10
+      targetCount
     });
 
     if (!listResult.success) {

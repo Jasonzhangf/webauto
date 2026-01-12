@@ -202,14 +202,16 @@ export async function execute(input: CollectSearchListInput): Promise<CollectSea
     }
   }
 
-  async function scrollPageFallback(): Promise<boolean> {
+  async function scrollPageFallback(direction: 'down' | 'up' = 'down'): Promise<boolean> {
     try {
       const scrollResult = await controllerAction('browser:execute', {
         profile,
         script: `(() => {
           const beforeScroll = window.scrollY || document.documentElement.scrollTop || 0;
           const scrollAmount = Math.min(window.innerHeight * 0.8, 800);
-          window.scrollBy({ top: scrollAmount, behavior: 'smooth' });
+          const direction = '${direction}';
+          const delta = direction === 'up' ? -scrollAmount : scrollAmount;
+          window.scrollBy({ top: delta, behavior: 'smooth' });
 
           return new Promise(resolve => {
             setTimeout(() => {
@@ -232,7 +234,7 @@ export async function execute(input: CollectSearchListInput): Promise<CollectSea
       }
 
       console.log(
-        `[CollectSearchList] Page scrolled: ${result.beforeScroll} -> ${result.afterScroll} (+${result.scrolled}px)`
+        `[CollectSearchList] Page scrolled (${direction}): ${result.beforeScroll} -> ${result.afterScroll} (+${result.scrolled}px)`,
       );
 
       await new Promise((resolve) => setTimeout(resolve, 1000));
@@ -345,11 +347,15 @@ export async function execute(input: CollectSearchListInput): Promise<CollectSea
     const seenContainerIds = new Set<string>();
     let scrollRound = 0;
     let consecutiveNoNewItems = 0;
+    let bounceAttempts = 0;
 
-    while (items.length < targetCount && scrollRound < maxScrollRounds) {
+    // 滚动-采集循环：
+    // - 达到 targetCount 退出
+    // - 或连续 5 轮无新增（包含尝试过向上/向下 bounce）退出
+    while (items.length < targetCount) {
       scrollRound += 1;
       console.log(
-        `[CollectSearchList] Round ${scrollRound}/${maxScrollRounds}, collected=${items.length}/${targetCount}`,
+        `[CollectSearchList] Round ${scrollRound}, collected=${items.length}/${targetCount}`,
       );
 
 
@@ -436,14 +442,46 @@ export async function execute(input: CollectSearchListInput): Promise<CollectSea
         `[CollectSearchList] Round ${scrollRound}: +${newItemsCount} items (total ${items.length})`,
       );
 
-      // 3.3 终止条件判断
+      // 3.3 终止条件 + bounce 滚动策略
       if (newItemsCount === 0) {
         consecutiveNoNewItems += 1;
-        if (consecutiveNoNewItems >= 3) {
-          console.log('[CollectSearchList] No new items for 3 rounds, stopping');
+
+        // 连续 5 轮都没有新增，视为已经耗尽
+        if (consecutiveNoNewItems >= 5) {
+          console.log('[CollectSearchList] No new items for 5 rounds, stopping');
           break;
         }
+
+        // 连续 2 轮无新增且还有目标缺口时，尝试一次“先向上再向下”的 bounce 滚动
+        if (consecutiveNoNewItems >= 2 && bounceAttempts < 2 && items.length < targetCount) {
+          bounceAttempts += 1;
+          console.log(
+            `[CollectSearchList] No new items for ${consecutiveNoNewItems} rounds, bounce attempt #${bounceAttempts}`,
+          );
+
+          // 先向上滚动 2 次（小幅回拉）
+          for (let i = 0; i < 2; i += 1) {
+            const upScrolled = await scrollPageFallback('up');
+            if (!upScrolled) {
+              console.warn('[CollectSearchList] Upward bounce scroll failed or reached top');
+              break;
+            }
+          }
+
+          // 再向下滚动 4 次（继续加载后续内容）
+          for (let i = 0; i < 4; i += 1) {
+            const downScrolled = await scrollPageFallback('down');
+            if (!downScrolled) {
+              console.warn('[CollectSearchList] Downward bounce scroll failed or reached bottom');
+              break;
+            }
+          }
+
+          // 进行了一轮 bounce 后，继续下一轮采集（不在本轮再做普通滚动）
+          continue;
+        }
       } else {
+        // 一旦出现新增，重置无新增计数
         consecutiveNoNewItems = 0;
       }
 
@@ -452,13 +490,15 @@ export async function execute(input: CollectSearchListInput): Promise<CollectSea
         break;
       }
 
-      // 3.4 仅在收集数量不足且 DOM 中无更多可见元素时滚动
-      // （当前已经一次性获取了 DOM 中所有 items，如果不够 targetCount 才滚动）
-      if (items.length < targetCount && scrollRound < maxScrollRounds) {
-        console.log(`[CollectSearchList] Need more items (${items.length}/${targetCount}), scrolling...`);
-        const scrolled = await scrollPageFallback();
+      // 3.4 正常向下滚动（单步），持续拉新
+      if (items.length < targetCount) {
+        console.log(
+          `[CollectSearchList] Need more items (${items.length}/${targetCount}), scrolling down...`,
+        );
+        const scrolled = await scrollPageFallback('down');
         if (!scrolled) {
           console.warn('[CollectSearchList] Page scroll failed or reached bottom');
+          // 如果已经连续多轮没有新增并且滚不动了，可以提前退出
           if (consecutiveNoNewItems >= 2) {
             break;
           }

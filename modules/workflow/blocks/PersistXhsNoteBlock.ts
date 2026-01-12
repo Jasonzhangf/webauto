@@ -102,6 +102,24 @@ export async function execute(input: PersistXhsNoteInput): Promise<PersistXhsNot
     const imagesDir = path.join(postDir, 'images');
 
     await ensureDir(keywordDir);
+
+    // 磁盘级去重：如果帖子目录已存在（说明之前已落盘），直接跳过写入
+    try {
+      const stat = await fs.stat(postDir);
+      if (stat.isDirectory()) {
+        const contentPath = path.join(postDir, 'content.md');
+        const imagesDirExisting = path.join(postDir, 'images');
+        return {
+          success: true,
+          outputDir: postDir,
+          contentPath,
+          imagesDir: imagesDirExisting,
+        };
+      }
+    } catch {
+      // 目录不存在，继续后续写入流程
+    }
+
     await ensureDir(postDir);
     await ensureDir(imagesDir);
 
