@@ -11,8 +11,8 @@
   },
   "xiaohongshu": {
     "website": "xiaohongshu.com",
-    "container_file": "container-library/xiaohongshu/search/container.json",
-    "description": "xiaohongshu.com 容器定义（搜索页入口）"
+    "container_file": "container-library/xiaohongshu/home/container.json",
+    "description": "xiaohongshu.com 容器定义（首页入口）"
   },
   "default": {
     "website": "default",

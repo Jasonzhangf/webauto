@@ -70,10 +70,16 @@ export async function execute(input: WaitSearchPermitInput): Promise<WaitSearchP
     }
 
     if (result.ok && !result.allowed) {
-      const waitTime = Math.max(result.waitMs || 1000, 2000);
-      console.log(`[WaitSearchPermit] ⏳ Throttled, waiting ${waitTime / 1000}s...`);
-      await new Promise(resolve => setTimeout(resolve, waitTime));
-      continue;
+      // 只在服务端真正计算出需要等待时才等待
+      if (result.waitMs > 0) {
+        console.log(`[WaitSearchPermit] ⏳ Throttled, waiting ${result.waitMs / 1000}s...`);
+        await new Promise(resolve => setTimeout(resolve, result.waitMs));
+        continue;
+      } else {
+        // waitMs=0 说明服务端逻辑错误或未达上限，立即重试
+        console.warn(`[WaitSearchPermit] ⚠️ Gate denied but waitMs=0, retrying immediately...`);
+        continue;
+      }
     }
 
     if (!result.ok && result.retry) {

@@ -1,0 +1,45 @@
+{
+  "id": "xiaohongshu_home.search_input",
+  "name": "主页搜索输入框",
+  "type": "input",
+  "description": "主页搜索输入框（#search-input），用于输入搜索关键词",
+  "parent": "xiaohongshu_home",
+  "capabilities": [
+    "highlight",
+    "input"
+  ],
+  "selectors": [
+    {
+      "css": "#search-input",
+      "variant": "primary",
+      "score": 1.0
+    },
+    {
+      "css": "input.search-input",
+      "variant": "backup",
+      "score": 0.9
+    }
+  ],
+  "operations": [
+    {
+      "type": "highlight",
+      "config": {
+        "style": "2px solid #34a853",
+        "duration": 1800
+      }
+    },
+    {
+      "type": "type",
+      "config": {
+        "clear_first": true,
+        "human_typing": true,
+        "pause_after": 300
+      }
+    }
+  ],
+  "metadata": {
+    "role": "search_input",
+    "stable": true,
+    "comment": "主页搜索输入框，与搜索页同结构"
+  }
+}

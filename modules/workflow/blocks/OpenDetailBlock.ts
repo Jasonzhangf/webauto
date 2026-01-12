@@ -7,6 +7,7 @@
 export interface OpenDetailInput {
   sessionId: string;
   containerId: string; // search_result_item 容器 ID
+  domIndex?: number; // DOM 序号（用于精确定位当前卡片）
   // detailUrl?: string;  // 预留：带 xsec_token 的安全链接（当前版本不再直接使用，统一改为“点击后从 location.href 读取”）
   serviceUrl?: string;
 }
@@ -21,6 +22,28 @@ export interface Rect {
 export interface OpenDetailOutput {
   success: boolean;
   detailReady: boolean;
+  entryAnchor?: {
+    containerId: string;
+    clickedItemRect?: Rect;
+    verified?: boolean;
+  };
+  exitAnchor?: {
+    containerId: string;
+    detailRect?: Rect;
+    verified?: boolean;
+  };
+  steps?: Array<{
+    id: string;
+    status: 'pending' | 'running' | 'success' | 'failed' | 'skipped';
+    error?: string;
+    anchor?: {
+      containerId?: string;
+      clickedItemRect?: Rect;
+      detailRect?: Rect;
+      verified?: boolean;
+    };
+    meta?: Record<string, any>;
+  }>;
   anchor?: {
     clickedItemContainerId: string;
     clickedItemRect?: Rect;
@@ -43,11 +66,37 @@ export async function execute(input: OpenDetailInput): Promise<OpenDetailOutput>
   const {
     sessionId,
     containerId,
+    domIndex,
     serviceUrl = 'http://127.0.0.1:7701'
   } = input;
 
   const profile = sessionId;
   const controllerUrl = `${serviceUrl}/v1/controller/action`;
+  const steps: NonNullable<OpenDetailOutput['steps']> = [];
+  let entryAnchor: OpenDetailOutput['entryAnchor'];
+  let exitAnchor: OpenDetailOutput['exitAnchor'];
+
+  function pushStep(step: NonNullable<OpenDetailOutput['steps']>[number]) {
+    steps.push(step);
+    try {
+      console.log(
+        '[OpenDetail][step]',
+        JSON.stringify(
+          {
+            id: step.id,
+            status: step.status,
+            error: step.error,
+            anchor: step.anchor,
+            meta: step.meta,
+          },
+          null,
+          2,
+        ),
+      );
+    } catch {
+      console.log('[OpenDetail][step]', step.id, step.status);
+    }
+  }
 
   async function controllerAction(action: string, payload: any = {}) {
     const response = await fetch(controllerUrl, {
@@ -93,7 +142,7 @@ export async function execute(input: OpenDetailInput): Promise<OpenDetailOutput>
     if (!tree) return result;
     result.push(tree.id || tree.defId || 'unknown');
     if (Array.isArray(tree.children)) {
-      tree.children.forEach(c => collectIds(c, result));
+      tree.children.forEach((c: any) => collectIds(c, result));
     }
     return result;
   }
@@ -145,38 +194,171 @@ export async function execute(input: OpenDetailInput): Promise<OpenDetailOutput>
   }
 
   try {
-    const { highlightContainer, getContainerRect } = await import('./helpers/anchorVerify.ts');
+    const { highlightContainer, getContainerRect } = await import('./helpers/anchorVerify.js');
 
     const startUrl = await getCurrentUrl();
     console.log(`[OpenDetail] Start URL: ${startUrl}`);
 
     // 0. 点击前：对选中的卡片容器（search_result_item / feed_item）做锚点高亮 + Rect 回环
     let clickedItemRect: Rect | undefined;
-    try {
-      const highlighted = await highlightContainer(containerId, profile, serviceUrl, {
-        style: '3px solid #ff9900',
-        duration: 2000
-      });
-      if (!highlighted) {
-        console.warn('[OpenDetail] Failed to highlight clicked item');
-      } else {
-        const rect = await getContainerRect(containerId, profile, serviceUrl);
-        if (rect) {
-          clickedItemRect = rect;
-          console.log(`[OpenDetail] clicked item rect: ${JSON.stringify(rect)}`);
-        }
+    
+    // 如果传入了 domIndex，使用专用高亮逻辑
+    if (typeof domIndex === 'number') {
+      try {
+        await controllerAction('browser:execute', {
+          profile,
+          script: `(() => {
+            const items = document.querySelectorAll('.feeds-container .note-item');
+            const el = items[${domIndex}];
+            if (el) {
+              el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+              el.style.outline = '3px solid #ff9900';
+              setTimeout(() => el.style.outline = '', 2000);
+            }
+          })()`
+        });
+        
+        // 等待滚动和高亮
+        await new Promise(r => setTimeout(r, 1000));
+        
+        // 获取 Rect
+        const rectResult = await controllerAction('browser:execute', {
+          profile,
+          script: `(() => {
+            const items = document.querySelectorAll('.feeds-container .note-item');
+            const el = items[${domIndex}];
+            return el ? el.getBoundingClientRect() : null;
+          })()`
+        });
+        
+        clickedItemRect = rectResult.result || rectResult.data?.result || undefined;
+      } catch (e: any) {
+        console.warn(`[OpenDetail] Pre-click highlight by domIndex failed: ${e.message}`);
       }
-    } catch (e: any) {
-      console.warn(`[OpenDetail] Pre-click anchor verify error: ${e.message}`);
+    } else {
+      // 旧逻辑：基于容器 ID
+      try {
+        const highlighted = await highlightContainer(containerId, profile, serviceUrl, {
+          style: '3px solid #ff9900',
+          duration: 2000
+        });
+        if (!highlighted) {
+          console.warn('[OpenDetail] Failed to highlight clicked item');
+        } else {
+          const rect = await getContainerRect(containerId, profile, serviceUrl);
+          if (rect) {
+            clickedItemRect = rect;
+            console.log(`[OpenDetail] clicked item rect: ${JSON.stringify(rect)}`);
+          }
+        }
+      } catch (e: any) {
+        console.warn(`[OpenDetail] Pre-click anchor verify error: ${e.message}`);
+      }
+    }
+
+    // 0.1 入口锚点：只要能拿到合法 Rect，就认为进入阶段；否则直接失败
+    if (clickedItemRect && clickedItemRect.width > 0 && clickedItemRect.height > 0) {
+      entryAnchor = {
+        containerId,
+        clickedItemRect,
+        verified: true,
+      };
+      console.log('[OpenDetail][entryAnchor]', JSON.stringify(entryAnchor, null, 2));
+      pushStep({
+        id: 'verify_result_item_anchor',
+        status: 'success',
+        anchor: {
+          containerId,
+          clickedItemRect,
+          verified: true,
+        },
+      });
+    } else {
+      entryAnchor = {
+        containerId,
+        clickedItemRect,
+        verified: false,
+      };
+      console.warn('[OpenDetail] clickedItemRect missing or invalid, aborting detail open');
+      pushStep({
+        id: 'verify_result_item_anchor',
+        status: 'failed',
+        anchor: {
+          containerId,
+          clickedItemRect,
+          verified: false,
+        },
+        error: 'invalid_or_missing_clickedItemRect',
+      });
+      return {
+        success: false,
+        detailReady: false,
+        entryAnchor,
+        exitAnchor: undefined,
+        steps,
+        anchor: {
+          clickedItemContainerId: containerId,
+          clickedItemRect,
+          detailContainerId: undefined,
+          detailRect: undefined,
+          verified: false,
+        },
+        error: 'Result item anchor not ready',
+      };
     }
 
     // 1. 打开详情
-    //   安全策略：仅在当前卡片 Rect 内查找可见的封面/图片元素并点击，不做任何 URL 拼接：
-    //   - 以 containerId 对应卡片的中心点为锚点，通过 elementFromPoint 找到所属 note-item；
-    //   - 在该 note-item 内优先寻找 a.cover.mask / a[href*="/explore/"] / a[href*="/search_result/"]，退化为第一个可见 img。
+    //   首选：使用容器运行时 + 系统点击（Playwright mouse）基于 bbox 点击结果卡片中心；
+    //   降级：仅在系统点击失败时，才退回 DOM 脚本点击封面元素。
     try {
+      // 1.1 尝试通过容器 operation + bbox 使用系统点击
+      const bbox = {
+        x1: clickedItemRect.x,
+        y1: clickedItemRect.y,
+        x2: clickedItemRect.x + clickedItemRect.width,
+        y2: clickedItemRect.y + clickedItemRect.height,
+      };
+
+      const opResp = await controllerAction('container:operation', {
+        containerId,
+        operationId: 'click',
+        config: {
+          bbox,
+        },
+        sessionId: profile,
+      });
+
+      if (opResp?.success) {
+        console.log('[OpenDetail] System click on result item executed via container:operation');
+        pushStep({
+          id: 'system_click_detail_item',
+          status: 'success',
+          anchor: {
+            containerId,
+            clickedItemRect,
+            verified: true,
+          },
+          meta: { via: 'container:operation:bbox' },
+        });
+      } else {
+        console.warn('[OpenDetail] container:operation click returned non-success, will try DOM fallback');
+        pushStep({
+          id: 'system_click_detail_item',
+          status: 'failed',
+          anchor: {
+            containerId,
+            clickedItemRect,
+            verified: true,
+          },
+          error: opResp?.error || 'container_operation_failed',
+        });
+        throw new Error(opResp?.error || 'container_operation_failed');
+      }
+    } catch (e: any) {
+      console.warn('[OpenDetail] container:operation system click failed, fallback to DOM click:', e.message || e);
+      // 1.2 DOM 降级路径：保持原有 “elementFromPoint + inner anchor” 策略（仅作为兜底）
       if (!clickedItemRect) {
-        console.warn('[OpenDetail] clickedItemRect missing, fallback to first note-item click (less precise)');
+        console.warn('[OpenDetail] clickedItemRect missing, fallback to DOM index click');
       }
 
       const cx = clickedItemRect ? clickedItemRect.x + clickedItemRect.width / 2 : 0;
@@ -185,10 +367,16 @@ export async function execute(input: OpenDetailInput): Promise<OpenDetailOutput>
       const clickResult = await controllerAction('browser:execute', {
         profile,
         script: `(() => {
+          const domIndex = ${typeof domIndex === 'number' ? domIndex : 'null'};
           const hasRect = ${clickedItemRect ? 'true' : 'false'};
           let card = null;
 
-          if (hasRect) {
+          if (typeof domIndex === 'number') {
+            const cards = document.querySelectorAll('.feeds-container .note-item');
+            card = cards[domIndex] || null;
+          }
+
+          if (!card && hasRect) {
             const centerX = ${clickedItemRect ? cx.toFixed(2) : '0'};
             const centerY = ${clickedItemRect ? cy.toFixed(2) : '0'};
             const el = document.elementFromPoint(centerX, centerY);
@@ -206,7 +394,7 @@ export async function execute(input: OpenDetailInput): Promise<OpenDetailOutput>
 
           let anchor = card.querySelector('a.cover.mask');
           if (!anchor) {
-            anchor = card.querySelector('a[href*="/explore/"], a[href*="/search_result/"]');
+            anchor = card.querySelector('a[href*="/explore/"][href*="xsec_token"], a[href*="/search_result/"][href*="xsec_token"]');
           }
           let target = anchor;
           if (!target) {
@@ -214,6 +402,12 @@ export async function execute(input: OpenDetailInput): Promise<OpenDetailOutput>
           }
           if (!target || typeof target.click !== 'function') {
             return { ok: false, reason: 'no clickable element' };
+          }
+          if (target.tagName === 'A') {
+            const href = target.getAttribute('href') || '';
+            if (!href.includes('xsec_token=')) {
+              return { ok: false, reason: 'missing xsec_token' };
+            }
           }
           target.click();
           return { ok: true };
@@ -224,9 +418,17 @@ export async function execute(input: OpenDetailInput): Promise<OpenDetailOutput>
         console.warn('[OpenDetail] DOM click returned:', clickRes);
       } else {
         console.log('[OpenDetail] DOM click on visible cover/image executed');
+        pushStep({
+          id: 'fallback_dom_click_detail_item',
+          status: 'success',
+          anchor: {
+            containerId,
+            clickedItemRect,
+            verified: true,
+          },
+          meta: { via: 'dom_script', reason: clickRes?.reason || null },
+        });
       }
-    } catch (e: any) {
-      console.warn('[OpenDetail] DOM click script error:', e.message);
     }
 
     // 点击后稍等一会儿让前端完成路由/模态切换
@@ -239,6 +441,22 @@ export async function execute(input: OpenDetailInput): Promise<OpenDetailOutput>
     const detailState = await waitForDetail();
     const detailReady = detailState.ready;
 
+    pushStep({
+      id: 'wait_detail_dom_ready',
+      status: detailReady ? 'success' : 'failed',
+      anchor: {
+        containerId,
+        clickedItemRect,
+        verified: detailReady,
+      },
+      meta: {
+        safeDetailUrl: detailState.safeUrl || null,
+        noteId: detailState.noteId || null,
+        url: midUrl,
+      },
+      error: detailReady ? undefined : 'detail_not_ready',
+    });
+
     // 3. 详情出现后，对 modal_shell 做锚点高亮 + Rect 回环
     let detailContainerId: string | undefined;
     let detailRect: Rect | undefined;
@@ -246,7 +464,7 @@ export async function execute(input: OpenDetailInput): Promise<OpenDetailOutput>
 
     if (detailReady) {
       try {
-        const { verifyAnchorByContainerId } = await import('./helpers/containerAnchors.ts');
+        const { verifyAnchorByContainerId } = await import('./helpers/containerAnchors.js');
 
         // 优先尝试 modal_shell，其次回退到根容器 xiaohongshu_detail
         const candidateIds = ['xiaohongshu_detail.modal_shell', 'xiaohongshu_detail'];
@@ -283,9 +501,47 @@ export async function execute(input: OpenDetailInput): Promise<OpenDetailOutput>
       }
     }
 
+    if (detailContainerId && detailRect) {
+      exitAnchor = {
+        containerId: detailContainerId,
+        detailRect,
+        verified,
+      };
+      console.log('[OpenDetail][exitAnchor]', JSON.stringify(exitAnchor, null, 2));
+      pushStep({
+        id: 'verify_detail_anchor',
+        status: verified ? 'success' : 'success',
+        anchor: {
+          containerId: detailContainerId,
+          detailRect,
+          verified,
+        },
+        meta: {
+          safeDetailUrl: detailState.safeUrl || null,
+          noteId: detailState.noteId || null,
+        },
+      });
+    } else {
+      pushStep({
+        id: 'verify_detail_anchor',
+        status: 'failed',
+        anchor: detailContainerId
+          ? {
+              containerId: detailContainerId,
+              detailRect,
+              verified: false,
+            }
+          : undefined,
+        error: 'detail_anchor_not_found',
+      });
+    }
+
     return {
       success: true,
       detailReady,
+      entryAnchor,
+      exitAnchor,
+      steps,
       safeDetailUrl: detailState.safeUrl,
       noteId: detailState.noteId,
       anchor: {

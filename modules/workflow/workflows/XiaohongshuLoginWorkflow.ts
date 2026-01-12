@@ -12,10 +12,10 @@
  *   - EnsureLoginBlock：Unified API controller 层的容器驱动登录检测
  */
 
-import type { EnsureSessionInput, EnsureSessionOutput } from '../blocks/EnsureSession.ts';
-import { execute as ensureSessionExecute } from '../blocks/EnsureSession.ts';
-import type { EnsureLoginInput, EnsureLoginOutput } from '../blocks/EnsureLoginBlock.ts';
-import { execute as ensureLoginExecute } from '../blocks/EnsureLoginBlock.ts';
+import type { EnsureSessionInput, EnsureSessionOutput } from '../blocks/EnsureSession.js';
+import { execute as ensureSessionExecute } from '../blocks/EnsureSession.js';
+import type { EnsureLoginInput, EnsureLoginOutput } from '../blocks/EnsureLoginBlock.js';
+import { execute as ensureLoginExecute } from '../blocks/EnsureLoginBlock.js';
 
 export interface XiaohongshuLoginWorkflowInput {
   profileId: string;
@@ -58,8 +58,8 @@ export async function execute(
         error: 'Missing profileId',
       },
       login: {
-        profileId: '',
-        status: 'error',
+        isLoggedIn: false,
+        loginMethod: 'manual_wait',
         error: 'Missing profileId',
       },
       error: 'Missing profileId',
@@ -82,8 +82,8 @@ export async function execute(
         profileId,
         session: sessionResult,
         login: {
-          profileId,
-          status: 'error',
+          isLoggedIn: false,
+          loginMethod: 'manual_wait',
           error: 'EnsureSession failed',
         },
         error: sessionResult.error,
@@ -91,22 +91,22 @@ export async function execute(
     }
 
     // Step 2: 基于容器的登录检测（Unified API / containers:match）
-    const loginInput: EnsureLoginInput = {
-      profileId,
+const loginInput: EnsureLoginInput = {
+      sessionId: profileId,
       serviceUrl: unifiedApiUrl || 'http://127.0.0.1:7701',
     };
 
     const loginResult: EnsureLoginOutput = await ensureLoginExecute(loginInput);
 
     // Workflow 本身不负责自动登录，仅把状态透出给上层
-    const success = loginResult.status === 'logged_in';
+const success = loginResult.isLoggedIn;
 
     return {
       success,
       profileId,
       session: sessionResult,
       login: loginResult,
-      error: success ? undefined : loginResult.error || loginResult.reason,
+error: success ? undefined : loginResult.error,
     };
   } catch (error: any) {
     return {
@@ -119,12 +119,11 @@ export async function execute(
         error: error.message || String(error),
       },
       login: {
-        profileId,
-        status: 'error',
+        isLoggedIn: false,
+        loginMethod: 'manual_wait',
         error: error.message || String(error),
       },
       error: error.message || String(error),
     };
   }
 }
-

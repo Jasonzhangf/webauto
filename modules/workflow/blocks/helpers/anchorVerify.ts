@@ -112,6 +112,29 @@ export async function getContainerRect(
   serviceUrl: string = 'http://127.0.0.1:7701'
 ): Promise<{ x: number; y: number; width: number; height: number } | null> {
   try {
+    // 先获取当前页面 URL，避免 containers:match 依赖 session-manager CLI 查询会话
+    let currentUrl: string | null = null;
+    try {
+      const urlResp = await fetch(`${serviceUrl}/v1/controller/action`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'browser:execute',
+          payload: {
+            profile: sessionId,
+            script: 'location.href',
+          },
+        }),
+        signal: (AbortSignal as any).timeout ? (AbortSignal as any).timeout(8000) : undefined,
+      });
+      if (urlResp.ok) {
+        const urlData = await urlResp.json();
+        currentUrl = urlData.data?.result || urlData.result || null;
+      }
+    } catch (e: any) {
+      console.warn('[getContainerRect] failed to read current url:', e?.message || e);
+    }
+
     // 先通过 containers:match 获取容器的 selector
     const matchResponse = await fetch(`${serviceUrl}/v1/controller/action`, {
       method: 'POST',
@@ -120,6 +143,7 @@ export async function getContainerRect(
         action: 'containers:match',
         payload: {
           profile: sessionId,
+          ...(currentUrl ? { url: currentUrl } : {}),
           maxDepth: 5,
           maxChildren: 20
         }

@@ -21,7 +21,7 @@ export async function execute<T>(input: GracefulFallbackInput<T>): Promise<Grace
   } = input;
 
   try {
-    const result = await primaryFn(context);
+    const result = await primaryFn();
     return {
       success: true,
       result,
@@ -41,7 +41,7 @@ export async function execute<T>(input: GracefulFallbackInput<T>): Promise<Grace
     console.log(`[GracefulFallback] 主功能失败，启用降级方案: ${errorMsg}`);
     
     try {
-      const fallbackResult = await fallbackFn(context);
+      const fallbackResult = await fallbackFn();
       return {
         success: true,
         result: fallbackResult,
@@ -90,14 +90,14 @@ export function createCommentExpandFallback(
   return {
     primaryFn: async () => {
       // 主功能：完整评论展开（调用真实 ExpandCommentsBlock）
-      const { execute: expandComments } = await import('./ExpandCommentsBlock.ts');
+      const { execute: expandComments } = await import('./ExpandCommentsBlock.js');
       return await expandComments({ sessionId } as any);
     },
     fallbackFn: async () => {
       // 降级方案：只展开基础评论（不展开回复）
       return {
         success: true,
-        comments: [],
+        comments: [] as any[],
         reachedEnd: false,
         emptyState: true,
         message: '降级：基础评论采集'
@@ -117,7 +117,7 @@ export function createDetailExtractFallback(
 ) {
   return {
     primaryFn: async () => {
-      const { execute: extractDetail } = await import('./ExtractDetailBlock.ts');
+      const { execute: extractDetail } = await import('./ExtractDetailBlock.js');
       return await extractDetail({ sessionId } as any);
     },
     fallbackFn: async () => {
@@ -126,7 +126,7 @@ export function createDetailExtractFallback(
         detail: {
           header: { title: '基础标题', author: '基础作者' },
           content: { text: '' },
-          gallery: { images: [] }
+          gallery: { images: [] as any[] }
         },
         message: '降级：基础详情提取'
       };

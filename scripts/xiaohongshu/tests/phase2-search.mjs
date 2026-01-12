@@ -10,11 +10,13 @@
 import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { execute as goToSearch } from '../../../modules/workflow/blocks/GoToSearchBlock.ts';
-import { execute as collectSearchList } from '../../../modules/workflow/blocks/CollectSearchListBlock.ts';
+import minimist from 'minimist';
+import { execute as goToSearch } from '../../../dist/modules/workflow/blocks/GoToSearchBlock.js';
+import { execute as collectSearchList } from '../../../dist/modules/workflow/blocks/CollectSearchListBlock.js';
 
 const PROFILE = 'xiaohongshu_fresh';
-const KEYWORDS = ['手机膜', '雷军', '小米', '华为', '鸿蒙'];
+// 允许使用的搜索关键词白名单
+const KEYWORDS = ['小米', '雷军', 'iphone', '手机膜', '华为', '中国制造', '美国贸易'];
 const UNIFIED_API = 'http://127.0.0.1:7701';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -23,6 +25,18 @@ const repoRoot = path.resolve(__dirname, '..', '..', '..');
 const DEFAULT_SEARCH_GATE_PORT = process.env.WEBAUTO_SEARCH_GATE_PORT || '7790';
 const DEFAULT_SEARCH_GATE_BASE = `http://127.0.0.1:${DEFAULT_SEARCH_GATE_PORT}`;
 const DEFAULT_SEARCH_GATE_URL = `${DEFAULT_SEARCH_GATE_BASE}/permit`;
+
+function resolveKeyword() {
+  const argv = minimist(process.argv.slice(2));
+  const fromFlag = argv.keyword || argv.k;
+  const fromPositional =
+    Array.isArray(argv._) && argv._.length > 0 ? argv._[argv._.length - 1] : undefined;
+  const candidate = fromFlag || fromPositional;
+  if (candidate && typeof candidate === 'string' && candidate.trim()) {
+    return candidate.trim();
+  }
+  return KEYWORDS[0];
+}
 
 async function printBrowserStatus(tag) {
   try {
@@ -107,7 +121,7 @@ async function main() {
     await ensureSearchGate();
 
     // 1. 选择关键字
-    const keyword = KEYWORDS[Math.floor(Math.random() * KEYWORDS.length)];
+    const keyword = resolveKeyword();
     console.log(`1️⃣ 选择关键字: ${keyword}`);
 
     // 2. 执行搜索
@@ -116,6 +130,29 @@ async function main() {
       sessionId: PROFILE,
       keyword
     });
+
+    // 打印入口锚点 / 出口锚点 / steps 状态
+    console.log('\n[GoToSearch:entryAnchor]');
+    console.log(JSON.stringify(searchResult.entryAnchor || searchResult.anchor || null, null, 2));
+
+    console.log('\n[GoToSearch:exitAnchor]');
+    console.log(JSON.stringify(searchResult.exitAnchor || null, null, 2));
+
+    if (Array.isArray(searchResult.steps)) {
+      console.log('\n[GoToSearch:steps]');
+      for (const step of searchResult.steps) {
+        console.log(
+          `  - ${step.id}: ${step.status}`,
+          step.error ? `error=${step.error}` : '',
+        );
+        if (step.anchor) {
+          console.log(
+            '    anchor=',
+            JSON.stringify(step.anchor),
+          );
+        }
+      }
+    }
 
     if (!searchResult.success) {
       console.error(`❌ 搜索失败: ${searchResult.error}`);

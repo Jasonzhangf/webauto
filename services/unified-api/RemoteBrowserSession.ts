@@ -38,16 +38,36 @@ export class RemoteBrowserSession {
   private createPageProxy(): any {
     return {
       evaluate: async (fn: any, ...args: any[]) => {
-        return this.evaluate(fn.toString(), ...args);
+        return this.evaluate(fn, ...args);
       },
       url: () => this.getCurrentUrl() || '',
       mouse: {
         move: async (x: number, y: number, options?: any) => {
-          return this.sendCommand('mouseMove', { x, y, ...options });
+          return this.sendCommand('mouse:move', { x, y, steps: options?.steps || 3 });
         },
         click: async (x: number, y: number, options?: any) => {
-          return this.sendCommand('mouseClick', { x, y, ...options });
-        }
+          // 注意：options可能包含button、clicks、delay
+          return this.sendCommand('mouse:click', { x, y,
+            button: options?.button || 'left',
+            clicks: options?.clickCount || 1,
+            delay: options?.delay || 50
+          });
+        },
+      },
+      keyboard: {
+        type: async (text: string, options?: { delay?: number; submit?: boolean }) => {
+          return this.sendCommand('keyboard:type', {
+            text,
+            delay: options?.delay,
+            submit: options?.submit,
+          });
+        },
+        press: async (key: string, options?: { delay?: number }) => {
+          return this.sendCommand('keyboard:press', {
+            key,
+            delay: options?.delay,
+          });
+        },
       }
     };
   }
@@ -69,7 +89,7 @@ export class RemoteBrowserSession {
       }
     };
 
-    const response = await fetch(url, {
+    const response = await fetch(url as string, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
@@ -111,10 +131,11 @@ export class RemoteBrowserSession {
     return this.lastKnownUrl;
   }
 
-  async evaluate(expression: string, arg?: any): Promise<any> {
-    const script = typeof expression === 'function'
-      ? `(${expression.toString()})(${JSON.stringify(arg)})`
-      : expression;
+  async evaluate(expression: string | ((arg?: any) => any), arg?: any): Promise<any> {
+    const script =
+      typeof expression === 'function'
+        ? `(${expression.toString()})(${JSON.stringify(arg)})`
+        : expression;
 
     return this.sendCommand('evaluate', { script });
   }

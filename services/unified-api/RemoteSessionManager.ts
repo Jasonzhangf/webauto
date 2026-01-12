@@ -7,6 +7,7 @@
 
 import { RemoteBrowserSession } from './RemoteBrowserSession.js';
 import { fetch } from 'undici';
+import { getStateRegistry } from './state-registry.js';
 
 export interface RemoteSessionManagerOptions {
   browserServiceUrl: string; // http://127.0.0.1:7704
@@ -22,12 +23,14 @@ export interface CreateRemoteSessionPayload {
 export class RemoteSessionManager {
   private sessions = new Map<string, RemoteBrowserSession>();
   private browserServiceUrl: string;
+  private stateRegistry: any;
 
   constructor(options: any) {
     // 支持两种构造方式：
     // 1. { browserServiceUrl: string }
     // 2. { host: string, port: number, ... } (兼容原 SessionManager)
     this.browserServiceUrl = options.browserServiceUrl || `http://${options.host || '127.0.0.1'}:${options.port || 7704}`;
+    this.stateRegistry = getStateRegistry();
   }
 
   /**
@@ -67,6 +70,12 @@ export class RemoteSessionManager {
 
     this.sessions.set(sessionId, remoteSession);
 
+    this.stateRegistry.updateSessionState(sessionId, {
+      profileId: sessionId,
+      sessionId,
+      currentUrl: options.url || '',
+    });
+
     return { sessionId };
   }
 
@@ -101,11 +110,30 @@ export class RemoteSessionManager {
     });
 
     if (!response.ok) {
+      console.warn('[RemoteSessionManager] Failed to fetch sessions:', response.statusText);
       return [];
     }
 
     const result: any = await response.json();
-    return result.data || [];
+    // BrowserService returns { ok: true, body: { ok: true, sessions: [...] } }
+    // or { ok: true, sessions: [...] } (depending on how it's wrapped)
+    const sessions = result.body?.sessions || result.sessions || result.data?.sessions || result.data || [];
+
+    if (Array.isArray(sessions)) {
+      sessions.forEach((session: any) => {
+        const profileId = session.profileId || session.profile_id || session.sessionId || session.session_id;
+        if (!profileId) return;
+        this.stateRegistry.updateSessionState(profileId, {
+          profileId,
+          sessionId: session.sessionId || session.session_id || profileId,
+          currentUrl: session.currentUrl || session.current_url || '',
+        });
+      });
+    }
+
+    this.stateRegistry.flush();
+
+    return sessions;
   }
 
   /**
@@ -128,6 +156,7 @@ export class RemoteSessionManager {
     try {
       await session.close();
       this.sessions.delete(sessionId);
+      this.stateRegistry.removeSessionState(sessionId);
       return true;
     } catch (error) {
       console.warn(`[RemoteSessionManager] Failed to delete session ${sessionId}:`, error);
@@ -139,10 +168,12 @@ export class RemoteSessionManager {
    * 关闭所有会话
    */
   async shutdown(): Promise<void> {
-    const jobs = Array.from(this.sessions.values()).map((session) =>
+    const entries = Array.from(this.sessions.entries());
+    const jobs = entries.map(([, session]) =>
       session.close().catch(() => {})
     );
     await Promise.all(jobs);
+    entries.forEach(([sessionId]) => this.stateRegistry.removeSessionState(sessionId));
     this.sessions.clear();
   }
 }

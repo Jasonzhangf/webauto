@@ -41,7 +41,7 @@ export async function execute(input: AnchorVerificationInput): Promise<AnchorVer
 
     // 通过 container-library 定义获取 selector，并在页面内高亮 + 读取 Rect。
     // 注意：这里不再调用 containers:match，避免复用阶段性 P0 问题。
-    const { verifyAnchorByContainerId } = await import('./helpers/containerAnchors.ts');
+    const { verifyAnchorByContainerId } = await import('./helpers/containerAnchors.js');
 
     const anchor = await verifyAnchorByContainerId(
       containerId,

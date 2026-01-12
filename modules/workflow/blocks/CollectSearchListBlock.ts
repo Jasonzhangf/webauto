@@ -18,6 +18,7 @@ export interface CollectSearchListInput {
 
 export interface SearchItem {
   containerId: string;
+  domIndex?: number;
   noteId?: string;
   title?: string;
   detailUrl?: string;
@@ -123,7 +124,7 @@ export async function execute(input: CollectSearchListInput): Promise<CollectSea
    */
   async function scrollListContainer(containerId: string): Promise<boolean> {
     try {
-      const { verifyAnchorByContainerId } = await import('./helpers/containerAnchors.ts');
+      const { verifyAnchorByContainerId } = await import('./helpers/containerAnchors.js');
       const anchor = await verifyAnchorByContainerId(containerId, profile, serviceUrl);
 
       if (!anchor.found || !anchor.rect) {
@@ -197,6 +198,48 @@ export async function execute(input: CollectSearchListInput): Promise<CollectSea
       return result.scrolled > 0;
     } catch (error: any) {
       console.warn(`[CollectSearchList] Scroll error: ${error.message}`);
+      return false;
+    }
+  }
+
+  async function scrollPageFallback(): Promise<boolean> {
+    try {
+      const scrollResult = await controllerAction('browser:execute', {
+        profile,
+        script: `(() => {
+          const beforeScroll = window.scrollY || document.documentElement.scrollTop || 0;
+          const scrollAmount = Math.min(window.innerHeight * 0.8, 800);
+          window.scrollBy({ top: scrollAmount, behavior: 'smooth' });
+
+          return new Promise(resolve => {
+            setTimeout(() => {
+              const afterScroll = window.scrollY || document.documentElement.scrollTop || 0;
+              resolve({
+                ok: true,
+                beforeScroll,
+                afterScroll,
+                scrolled: afterScroll - beforeScroll
+              });
+            }, 800);
+          });
+        })()`
+      });
+
+      const result = scrollResult.result || scrollResult.data?.result;
+      if (!result?.ok) {
+        console.warn('[CollectSearchList] Page scroll failed:', result?.reason);
+        return false;
+      }
+
+      console.log(
+        `[CollectSearchList] Page scrolled: ${result.beforeScroll} -> ${result.afterScroll} (+${result.scrolled}px)`
+      );
+
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+
+      return result.scrolled > 0;
+    } catch (error: any) {
+      console.warn(`[CollectSearchList] Page scroll error: ${error.message}`);
       return false;
     }
   }
@@ -287,7 +330,7 @@ export async function execute(input: CollectSearchListInput): Promise<CollectSea
     // 2.2 获取列表 Rect
     let listRect: { x: number; y: number; width: number; height: number } | undefined;
     try {
-      const { verifyAnchorByContainerId } = await import('./helpers/containerAnchors.ts');
+      const { verifyAnchorByContainerId } = await import('./helpers/containerAnchors.js');
       const anchor = await verifyAnchorByContainerId(listContainerId, profile, serviceUrl);
       if (anchor.found && anchor.rect) {
         listRect = anchor.rect;
@@ -309,179 +352,83 @@ export async function execute(input: CollectSearchListInput): Promise<CollectSea
         `[CollectSearchList] Round ${scrollRound}/${maxScrollRounds}, collected=${items.length}/${targetCount}`,
       );
 
-      // 3.1 检查当前列表下的 item 容器
-      let inspected: any;
-      try {
-        // 检查列表容器下的子容器结构，这里允许更长的超时时间（10s）
-        inspected = await Promise.race([
-          controllerAction('containers:inspect-container', {
-            profile,
-            containerId: listContainer.id,
-            maxChildren: 120,
-          }),
-          new Promise((_, reject) =>
-            setTimeout(() => reject(new Error('inspect-container timeout')), 10000),
-          ),
-        ]);
-      } catch (err: any) {
-        console.warn(
-          `[CollectSearchList] inspect-container timeout or error: ${err.message}`,
-        );
-        return {
-          success: false,
-          items: [],
-          count: 0,
-          scrollRounds: scrollRound - 1,
-          usedFallback: matchTimeout,
-          anchor: {
-            listContainerId: listContainer.id,
-            listRect,
-          },
-          error: 'inspect-container failed',
-        };
-      }
-
-      const listTree =
-        inspected.snapshot?.container_tree || inspected.container_tree || listContainer;
-      let itemNodes = collectContainers(listTree, /xiaohongshu_search\.search_result_item$/);
-
-      if (!itemNodes.length && /xiaohongshu_home\.feed_list$/.test(listContainerId)) {
-        itemNodes = collectContainers(listTree, /xiaohongshu_home\.feed_item$/);
-      }
 
       const beforeCount = items.length;
 
-      // 3.2 提取新出现的 item（按 containerId 去重）
-      for (const node of itemNodes) {
-        if (!node.id) continue;
-        if (seenContainerIds.has(node.id)) continue;
+      // 3.2 批量从 DOM 提取所有 .note-item 的信息（一次性查询）
+      try {
+        const batchExtractResult = await controllerAction('browser:execute', {
+          profile,
+          script: `
+            var cards = Array.from(document.querySelectorAll('.note-item'));
+            cards.map(function(card, idx) {
+              var titleEl = card.querySelector('.footer .title span') || card.querySelector('.footer .title') || card.querySelector('[class*="title"]');
+              var linkEl = card.querySelector('a.cover') || card.querySelector('a[href*="/explore/"]') || card.querySelector('a[href*="/search_result/"]');
+              var href = linkEl ? linkEl.getAttribute('href') : '';
+              var match = href.match(/\\/(explore|search_result)\\/([^?]+)/);
+              var noteId = match ? match[2] : '';
+              
+              return {
+                index: idx,
+                title: titleEl ? titleEl.textContent.trim() : '',
+                detail_url: href,
+                note_id: noteId,
+                hasToken: href.indexOf('xsec_token=') !== -1
+              };
+            });
+          `
+        });
 
-        seenContainerIds.add(node.id);
-        const id = String(node.id);
-        const isHomeFeedItem = /xiaohongshu_home\.feed_item$/.test(id);
+        const extractedItems = batchExtractResult.result || batchExtractResult.data?.result || [];
+        
+        if (!Array.isArray(extractedItems)) {
+          console.warn('[CollectSearchList] Batch extract returned non-array');
+        } else {
+          for (const extracted of extractedItems) {
+            const uniqueKey = extracted.note_id || `idx_${extracted.index}`;
+            if (seenContainerIds.has(uniqueKey)) continue;
+            
+            seenContainerIds.add(uniqueKey);
+            
+            const detailUrl = extracted.detail_url || '';
+            const hasToken = /[?&]xsec_token=/.test(detailUrl);
+        const safeDetailUrl = hasToken ? detailUrl : undefined;
 
+        // 即使没有 token 也可以收集（后续通过 OpenDetail 点击触发，而不是直接 URL 导航）
+        // 只要有 domIndex 和 noteId/title 即可
+
+        // 可视化：高亮当前处理的 item
         try {
-          let extracted: any = {};
-
-          if (isHomeFeedItem) {
-            // 优先尝试容器提取
-            try {
-              const extractResult = await controllerAction('container:operation', {
-                containerId: id,
-                operationId: 'extract',
-                config: { fields: ['title', 'link'] },
-                sessionId: profile,
-              });
-
-              if (extractResult.success) {
-                extracted =
-                  extractResult.data?.extracted?.[0] || extractResult.extracted?.[0] || {};
-              } else {
-                throw new Error(extractResult.error || 'extract failed');
+          await controllerAction('browser:execute', {
+            profile,
+            script: `(() => {
+              const el = document.querySelectorAll('.feeds-container .note-item')[${extracted.index}];
+              if (el) {
+                el.style.outline = '2px solid #ff00ff';
+                setTimeout(() => el.style.outline = '', 1000);
               }
-            } catch (err: any) {
-              // 降级：直接 DOM 提取（仍然只定位当前页面内的 note-item，避免 URL 导航）
-              console.warn(
-                `[CollectSearchList] container extract failed (${err.message}), using DOM fallback`,
-              );
-
-              const domResult = await controllerAction('browser:execute', {
-                profile,
-                script: `(() => {
-                  const cards = document.querySelectorAll('.note-item');
-                  if (!cards || cards.length === 0) return {};
-                  
-                  // 取第一个可见卡片（简化逻辑）
-                  const card = cards[0];
-                  const titleEl = card.querySelector('[class*="title"], [class*="content"]');
-                  const linkEl = card.querySelector('a');
-                  
-                  return {
-                    title: titleEl?.textContent?.trim() || '',
-                    link: linkEl?.getAttribute('href') || ''
-                  };
-                })()`,
-              });
-
-              extracted = domResult.result || domResult.data?.result || {};
-              console.log(
-                `[CollectSearchList] DOM extract result:`,
-                JSON.stringify(extracted),
-              );
-            }
-          } else {
-            // search_result_item 同样添加兜底
-            try {
-              const extractResult = await controllerAction('container:operation', {
-                containerId: id,
-                operationId: 'extract',
-                config: { fields: ['title', 'detail_url', 'note_id'] },
-                sessionId: profile,
-              });
-
-              if (extractResult.success) {
-                extracted =
-                  extractResult.data?.extracted?.[0] || extractResult.extracted?.[0] || {};
-              } else {
-                throw new Error(extractResult.error || 'extract failed');
-              }
-            } catch (err: any) {
-              console.warn(
-                `[CollectSearchList] container extract failed, using DOM fallback`,
-              );
-
-              const domResult = await controllerAction('browser:execute', {
-                profile,
-                script: `(() => {
-                  const cards = document.querySelectorAll('.note-item');
-                  if (!cards || cards.length === 0) return {};
-                  
-                  const card = cards[0];
-                  const titleEl = card.querySelector('[class*="title"]');
-                  const linkEl = card.querySelector('a[href*="/search_result/"], a[href*="/explore/"]');
-                  
-                  return {
-                    title: titleEl?.textContent?.trim() || '',
-                    detail_url: linkEl?.getAttribute('href') || '',
-                    note_id: linkEl?.href?.match(/\\/(search_result|explore)\\/([^?]+)/)?.[2] || ''
-                  };
-                })()`,
-              });
-
-              extracted = domResult.result || domResult.data?.result || {};
-            }
-          }
-
-          const detailUrlRaw = isHomeFeedItem
-            ? extracted.link || extracted.href
-            : extracted.detail_url || extracted.detailUrl;
-
-          const detailUrl = typeof detailUrlRaw === 'string' ? detailUrlRaw : undefined;
-          const hasToken =
-            typeof detailUrl === 'string' && /[?&]xsec_token=/.test(detailUrl);
-          const safeDetailUrl = hasToken ? detailUrl : undefined;
-
-          let noteId = extracted.note_id || extracted.noteId;
-          if (!noteId) {
-            noteId = deriveNoteIdFromUrl(safeDetailUrl || detailUrl);
-          }
-
-          items.push({
-            containerId: id,
-            noteId,
-            title: extracted.title || extracted.text || '',
-            detailUrl,
-            safeDetailUrl,
-            hasToken,
-            raw: extracted,
+            })()`
           });
+        } catch {}
 
-          if (items.length >= targetCount) break;
-        } catch (error: any) {
-          console.warn(
-            `[CollectSearchList] Extract failed for ${id}: ${error.message}`,
-          );
+        items.push({
+          containerId: 'xiaohongshu_search.search_result_item',
+          domIndex: extracted.index,
+              noteId: extracted.note_id,
+              title: extracted.title,
+              detailUrl: safeDetailUrl,
+              safeDetailUrl,
+              hasToken,
+              raw: extracted,
+            });
+
+            if (items.length >= targetCount) break;
+          }
+          
+          console.log(`[CollectSearchList] Batch extracted ${extractedItems.length} items from DOM`);
         }
+      } catch (error: any) {
+        console.warn(`[CollectSearchList] Batch extract failed: ${error.message}`);
       }
 
       const newItemsCount = items.length - beforeCount;
@@ -505,12 +452,16 @@ export async function execute(input: CollectSearchListInput): Promise<CollectSea
         break;
       }
 
-      // 3.4 滚动列表（只在还需要更多 item 时）
-      if (scrollRound < maxScrollRounds) {
-        const scrolled = await scrollListContainer(listContainerId);
+      // 3.4 仅在收集数量不足且 DOM 中无更多可见元素时滚动
+      // （当前已经一次性获取了 DOM 中所有 items，如果不够 targetCount 才滚动）
+      if (items.length < targetCount && scrollRound < maxScrollRounds) {
+        console.log(`[CollectSearchList] Need more items (${items.length}/${targetCount}), scrolling...`);
+        const scrolled = await scrollPageFallback();
         if (!scrolled) {
-          console.warn('[CollectSearchList] Scroll failed or reached bottom');
-          break;
+          console.warn('[CollectSearchList] Page scroll failed or reached bottom');
+          if (consecutiveNoNewItems >= 2) {
+            break;
+          }
         }
       }
     }
@@ -529,7 +480,7 @@ export async function execute(input: CollectSearchListInput): Promise<CollectSea
         });
         console.log(`[CollectSearchList] Highlighted first item: ${firstItemContainerId}`);
 
-        const { verifyAnchorByContainerId } = await import('./helpers/containerAnchors.ts');
+        const { verifyAnchorByContainerId } = await import('./helpers/containerAnchors.js');
         const itemAnchor = await verifyAnchorByContainerId(firstItemContainerId, profile, serviceUrl);
         if (itemAnchor.found && itemAnchor.rect) {
           firstItemRect = itemAnchor.rect;

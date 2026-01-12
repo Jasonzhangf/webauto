@@ -12,6 +12,7 @@
   ],
   "children": [
     "xiaohongshu_login.login_guard",
+    "xiaohongshu_login.qrcode_guard",
     "xiaohongshu_login.username_input",
     "xiaohongshu_login.password_input",
     "xiaohongshu_login.login_button"

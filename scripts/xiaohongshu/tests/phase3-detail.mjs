@@ -5,12 +5,14 @@
  * 要求：
  * - 只通过容器点击进入详情页，禁止手动构造 URL 导航
  * - 出错时优先通过 ESC/关闭按钮恢复到搜索列表，再重试一次
+ *
+ * 注意：运行时必须使用 dist 产物，禁止直接引用 TS 源文件。
  */
 
-import { execute as collectSearchList } from '../../../modules/workflow/blocks/CollectSearchListBlock.ts';
-import { execute as openDetail } from '../../../modules/workflow/blocks/OpenDetailBlock.ts';
-import { execute as extractDetail } from '../../../modules/workflow/blocks/ExtractDetailBlock.ts';
-import { execute as errorRecovery } from '../../../modules/workflow/blocks/ErrorRecoveryBlock.ts';
+import { execute as collectSearchList } from '../../../dist/modules/workflow/blocks/CollectSearchListBlock.js';
+import { execute as openDetail } from '../../../dist/modules/workflow/blocks/OpenDetailBlock.js';
+import { execute as extractDetail } from '../../../dist/modules/workflow/blocks/ExtractDetailBlock.js';
+import { execute as errorRecovery } from '../../../dist/modules/workflow/blocks/ErrorRecoveryBlock.js';
 
 const PROFILE = 'xiaohongshu_fresh';
 const UNIFIED_API = 'http://127.0.0.1:7701';
@@ -108,6 +110,25 @@ async function runPhase3(attempt = 1) {
         sessionId: PROFILE,
         containerId: item.containerId
       });
+
+      // 打印 OpenDetail 的入口/出口锚点与步骤状态，方便对齐后续 workflow 规范
+      if (openResult.entryAnchor) {
+        console.log('\n[OpenDetail:entryAnchor]');
+        console.log(JSON.stringify(openResult.entryAnchor, null, 2));
+      }
+      if (openResult.exitAnchor) {
+        console.log('\n[OpenDetail:exitAnchor]');
+        console.log(JSON.stringify(openResult.exitAnchor, null, 2));
+      }
+      if (Array.isArray(openResult.steps)) {
+        console.log('\n[OpenDetail:steps]');
+        for (const step of openResult.steps) {
+          console.log(
+            `  - ${step.id}: ${step.status}`,
+            step.error ? `error=${step.error}` : '',
+          );
+        }
+      }
 
       if (!openResult.success || !openResult.detailReady) {
         console.error(`❌ 打开详情页失败: ${openResult.error || 'detail not ready'}`);

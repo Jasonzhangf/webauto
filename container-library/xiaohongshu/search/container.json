@@ -14,13 +14,19 @@
   "children": [
     "xiaohongshu_search.login_anchor",
     "xiaohongshu_search.search_bar",
-    "xiaohongshu_search.search_result_list"
+    "xiaohongshu_search.search_result_list",
+    "xiaohongshu_search.discover_button"
   ],
   "selectors": [
     {
-      "css": "#app",
+      "css": "#search-result",
       "variant": "primary",
       "score": 1.0
+    },
+    {
+      "css": "[class*=\"search-result\"]",
+      "variant": "backup",
+      "score": 0.8
     }
   ],
   "metadata": {

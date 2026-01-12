@@ -2,9 +2,9 @@
 /**
  * 启动脚本 - 支持命令行参数
  * 用法：node scripts/start-headful.mjs [--profile <name>] [--url <url>]
- *       node scripts/start-headful.mjs                  # 使用默认配置（weibo_fresh, weibo.com）
- *       node scripts/start-headful.mjs --profile weibo_fresh https://weibo.com
- *       node scripts/start-headful.mjs --url https://weibo.com
+ *       node scripts/start-headful.mjs                  # 使用默认配置（xiaohongshu_fresh, www.xiaohongshu.com）
+ *       node scripts/start-headful.mjs --profile xiaohongshu_fresh https://www.xiaohongshu.com
+ *       node scripts/start-headful.mjs --url https://www.xiaohongshu.com
  */
 
 import { spawn } from 'node:child_process';
@@ -53,8 +53,8 @@ function parseArgs() {
 function main() {
   const { profile, url, headless } = parseArgs();
   
-  const defaultProfile = 'weibo_fresh';
-  const defaultUrl = 'https://weibo.com';
+  const defaultProfile = 'xiaohongshu_fresh';
+  const defaultUrl = 'https://www.xiaohongshu.com';
   
   const profileName = profile || defaultProfile;
   const targetUrl = url || defaultUrl;

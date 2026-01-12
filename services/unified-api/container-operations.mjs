@@ -5,7 +5,7 @@
  * - POST /v1/container/:containerId/execute - 执行容器的操作
  */
 
-import { OperationExecutor } from '../../libs/containers/src/engine/OperationExecutor.js';
+import { getContainerExecutor } from '../../modules/operations/src/executor.js';
 import { ensureBuiltinOperations } from '../../modules/operations/src/builtin.js';
 import { getOperation } from '../../modules/operations/src/registry.js';
 import { logDebug } from '../../modules/logging/src/index.js';
@@ -17,18 +17,7 @@ export function setupContainerOperationsRoutes(server, sessionManager) {
   ensureBuiltinOperations();
 
   // Create OperationExecutor
-  const executor = new OperationExecutor(
-    (sessionId) => {
-      const session = sessionManager.getSession(sessionId);
-      if (!session) {
-        throw new Error(`Session not found`);
-      }
-      return session.ensurePage();
-    },
-    { info: (...args) => logDebug('container-ops', 'info', args),
-      warn: (...args) => logDebug('container-ops', 'warn', args),
-      error: (...args) => logDebug('container-ops', 'error', args) }
-  );
+  const executor = getContainerExecutor();
 
   // Store executor for later use
   // We'll add it to the server object

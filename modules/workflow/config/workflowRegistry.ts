@@ -1,7 +1,7 @@
-import type { WorkflowDefinitionInput } from '../blocks/WorkflowExecutor';
-import { xiaohongshuCollectWorkflowV2 } from '../definitions/xiaohongshu-collect-workflow-v2';
-import { xiaohongshuCollectWorkflow } from '../definitions/xiaohongshu-collect-workflow';
-import { xiaohongshuNoteCollectWorkflow } from '../definitions/xiaohongshu-note-collect';
+import type { WorkflowDefinitionInput } from '../blocks/WorkflowExecutor.js';
+import { xiaohongshuCollectWorkflowV2 } from '../definitions/xiaohongshu-collect-workflow-v2.js';
+import { xiaohongshuCollectWorkflow } from '../definitions/xiaohongshu-collect-workflow.js';
+import { xiaohongshuNoteCollectWorkflow } from '../definitions/xiaohongshu-note-collect.js';
 
 const registry = new Map<string, WorkflowDefinitionInput>();
 

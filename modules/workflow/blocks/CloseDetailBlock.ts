@@ -72,7 +72,7 @@ export async function execute(input: CloseDetailInput): Promise<CloseDetailOutpu
   }
 
   try {
-    const { highlightContainer, getContainerRect } = await import('./helpers/anchorVerify.ts');
+    const { highlightContainer, getContainerRect } = await import('./helpers/anchorVerify.js');
 
     // 0. 关闭前：尝试找到详情容器并高亮 + Rect
     let detailContainerId: string | undefined;

@@ -8,7 +8,7 @@ import {
   type CreateSessionOptions,
   type DeleteSessionOptions,
   type SessionManagerOptions,
-} from './index.ts';
+} from './index.js';
 
 interface CliResult {
   success: boolean;

@@ -13,12 +13,11 @@ import { fileURLToPath } from 'node:url';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 
-import { execute as collectSearchList } from '../../../modules/workflow/blocks/CollectSearchListBlock.ts';
-import { execute as openDetail } from '../../../modules/workflow/blocks/OpenDetailBlock.ts';
-import { execute as collectComments } from '../../../modules/workflow/blocks/CollectCommentsBlock.ts';
-import { execute as closeDetail } from '../../../modules/workflow/blocks/CloseDetailBlock.ts';
-import { execute as errorRecovery } from '../../../modules/workflow/blocks/ErrorRecoveryBlock.ts';
-import { execute as recordFixture } from '../../../modules/workflow/blocks/RecordFixtureBlock.ts';
+import { execute as collectSearchList } from '../../../dist/modules/workflow/blocks/CollectSearchListBlock.js';
+import { execute as openDetail } from '../../../dist/modules/workflow/blocks/OpenDetailBlock.js';
+import { execute as collectComments } from '../../../dist/modules/workflow/blocks/CollectCommentsBlock.js';
+import { execute as errorRecovery } from '../../../dist/modules/workflow/blocks/ErrorRecoveryBlock.js';
+import { execute as recordFixture } from '../../../dist/modules/workflow/blocks/RecordFixtureBlock.js';
 
 const PROFILE = 'xiaohongshu_fresh';
 const UNIFIED_API = 'http://127.0.0.1:7701';
@@ -166,6 +165,25 @@ async function runPhase4(attempt = 1) {
     }
 
     printAnchor('CollectComments', commentsResult.anchor);
+
+    // 打印 CollectComments 的入口/出口锚点与步骤状态，便于对齐 workflow 规范
+    if (commentsResult.entryAnchor) {
+      console.log('\n[CollectComments:entryAnchor]');
+      console.log(JSON.stringify(commentsResult.entryAnchor, null, 2));
+    }
+    if (commentsResult.exitAnchor) {
+      console.log('\n[CollectComments:exitAnchor]');
+      console.log(JSON.stringify(commentsResult.exitAnchor, null, 2));
+    }
+    if (Array.isArray(commentsResult.steps)) {
+      console.log('\n[CollectComments:steps]');
+      for (const step of commentsResult.steps) {
+        console.log(
+          `  - ${step.id}: ${step.status}`,
+          step.error ? `error=${step.error}` : '',
+        );
+      }
+    }
     console.log(`   ✅ 评论数: ${commentsResult.comments.length}`);
     console.log(
       `   ✅ 终止条件: ${
@@ -222,21 +240,31 @@ async function runPhase4(attempt = 1) {
       }
     }
 
-    // 5. 关闭详情页
-    console.log('5️⃣ 关闭详情页...');
-    const closeResult = await closeDetail({
-      sessionId: PROFILE
+    // 5. 使用 ESC 模式退出详情页，回到搜索列表
+    console.log('5️⃣ ESC 退出详情页，返回搜索列表...');
+    const recovery = await errorRecovery({
+      sessionId: PROFILE,
+      fromStage: 'detail',
+      targetStage: 'search',
+      recoveryMode: 'esc',
+      maxRetries: 2
     });
 
-    if (!closeResult.success) {
-      console.error(`❌ 关闭详情页失败: ${closeResult.error}`);
-      printAnchor('CloseDetail', closeResult.anchor);
-      await printBrowserStatus('phase4-comments:closeDetail');
+    if (!recovery.success) {
+      console.error('❌ ESC 恢复失败，当前无法安全回到搜索列表');
+      if (recovery.currentUrl) {
+        console.error('   当前 URL:', recovery.currentUrl);
+      }
+      await printBrowserStatus('phase4-comments:esc-exit-failed');
       return;
     }
 
-    printAnchor('CloseDetail', closeResult.anchor);
-    console.log(`   ✅ 关闭方式: ${closeResult.method}\n`);
+    console.log(
+      `   ✅ ESC 恢复成功，最终阶段=${recovery.finalStage}，method=${
+        recovery.method || 'unknown'
+      }`,
+    );
+    await printBrowserStatus('phase4-comments:after-esc-exit');
 
     console.log('✅ Phase 4 完成');
 

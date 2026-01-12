@@ -1,5 +1,5 @@
-import { WorkflowExecutor, type WorkflowExecutionResult } from './WorkflowExecutor';
-import { getWorkflowDefinition } from '../config/workflowRegistry';
+import { WorkflowExecutor, type WorkflowExecutionResult } from './WorkflowExecutor.js';
+import { getWorkflowDefinition } from '../config/workflowRegistry.js';
 
 export interface CallWorkflowInput {
   workflowId: string;
@@ -54,4 +54,3 @@ export async function execute(input: CallWorkflowInput): Promise<CallWorkflowOut
     contextPatch,
   };
 }
-

@@ -179,8 +179,9 @@ async function ensureStartUrl() {
     profile: PROFILE,
     script: `(() => {
       if (!location.href.includes('xiaohongshu.com')) {
-        window.location.href = '${START_URL}';
+        return { ok: false, reason: 'not_on_xiaohongshu' };
       }
+      return { ok: true };
     })();`,
   });
   await delay(4000);
@@ -191,8 +192,9 @@ async function navigateToLogin() {
     profile: PROFILE,
     script: `(() => {
       if (!location.href.includes('/login')) {
-        window.location.href = '${LOGIN_URL}';
+        return { ok: false, reason: 'not_on_login_page' };
       }
+      return { ok: true };
     })();`,
   });
 }

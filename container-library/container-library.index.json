@@ -1,0 +1,217 @@
+{
+  "cbu": [
+    {
+      "id": "cbu_air_chat_root",
+      "path": "cbu/air_chat_root/container.json"
+    }
+  ],
+  "default": [],
+  "weibo": [
+    {
+      "id": "weibo_article",
+      "path": "weibo/article/container.json"
+    },
+    {
+      "id": "weibo_div",
+      "path": "weibo/div/container.json"
+    },
+    {
+      "id": "weibo_textarea",
+      "path": "weibo/textarea/container.json"
+    },
+    {
+      "id": "weibo_weibo_detail_page.comment_list",
+      "path": "weibo/weibo_detail_page/comment_list/container.json"
+    },
+    {
+      "id": "weibo_weibo_detail_page",
+      "path": "weibo/weibo_detail_page/container.json"
+    },
+    {
+      "id": "weibo_weibo_detail_page.post_content",
+      "path": "weibo/weibo_detail_page/post_content/container.json"
+    },
+    {
+      "id": "weibo_weibo_login",
+      "path": "weibo/weibo_login/container.json"
+    },
+    {
+      "id": "weibo_weibo_login.login_button",
+      "path": "weibo/weibo_login/login_button/container.json"
+    },
+    {
+      "id": "weibo_weibo_login.password_input",
+      "path": "weibo/weibo_login/password_input/container.json"
+    },
+    {
+      "id": "weibo_weibo_login.username_input",
+      "path": "weibo/weibo_login/username_input/container.json"
+    },
+    {
+      "id": "weibo_weibo_main_page",
+      "path": "weibo/weibo_main_page/container.json"
+    },
+    {
+      "id": "weibo_weibo_main_page.feed_list",
+      "path": "weibo/weibo_main_page/feed_list/container.json"
+    },
+    {
+      "id": "weibo_weibo_main_page.feed_post",
+      "path": "weibo/weibo_main_page/feed_post/container.json"
+    },
+    {
+      "id": "weibo_weibo_main_page.feed_post.expand_button",
+      "path": "weibo/weibo_main_page/feed_post/expand_button/container.json"
+    },
+    {
+      "id": "weibo_weibo_profile_page",
+      "path": "weibo/weibo_profile_page/container.json"
+    },
+    {
+      "id": "weibo_weibo_profile_page.feed_list",
+      "path": "weibo/weibo_profile_page/feed_list/container.json"
+    },
+    {
+      "id": "weibo_weibo_profile_page.post_item",
+      "path": "weibo/weibo_profile_page/post_item/container.json"
+    },
+    {
+      "id": "weibo_weibo_search_page",
+      "path": "weibo/weibo_search_page/container.json"
+    },
+    {
+      "id": "weibo_weibo_search_page.search_item",
+      "path": "weibo/weibo_search_page/search_item/container.json"
+    },
+    {
+      "id": "weibo_weibo_search_page.search_list",
+      "path": "weibo/weibo_search_page/search_list/container.json"
+    }
+  ],
+  "xiaohongshu": [
+    {
+      "id": "xiaohongshu_detail.comment_section.comment_item",
+      "path": "xiaohongshu/detail/comment_section/comment_item/container.json"
+    },
+    {
+      "id": "xiaohongshu_detail.comment_section",
+      "path": "xiaohongshu/detail/comment_section/container.json"
+    },
+    {
+      "id": "xiaohongshu_detail.comment_section.empty_state",
+      "path": "xiaohongshu/detail/comment_section/empty_state/container.json"
+    },
+    {
+      "id": "xiaohongshu_detail.comment_section.end_marker",
+      "path": "xiaohongshu/detail/comment_section/end_marker/container.json"
+    },
+    {
+      "id": "xiaohongshu_detail.comment_section.show_more_button",
+      "path": "xiaohongshu/detail/comment_section/show_more_button/container.json"
+    },
+    {
+      "id": "xiaohongshu_detail",
+      "path": "xiaohongshu/detail/container.json"
+    },
+    {
+      "id": "xiaohongshu_detail.content",
+      "path": "xiaohongshu/detail/content/container.json"
+    },
+    {
+      "id": "xiaohongshu_detail.discover_button",
+      "path": "xiaohongshu/detail/discover_button/container.json"
+    },
+    {
+      "id": "xiaohongshu_detail.gallery",
+      "path": "xiaohongshu/detail/gallery/container.json"
+    },
+    {
+      "id": "xiaohongshu_detail.header",
+      "path": "xiaohongshu/detail/header/container.json"
+    },
+    {
+      "id": "xiaohongshu_detail.login_anchor",
+      "path": "xiaohongshu/detail/login_anchor/container.json"
+    },
+    {
+      "id": "xiaohongshu_detail.modal_shell",
+      "path": "xiaohongshu/detail/modal_shell/container.json"
+    },
+    {
+      "id": "xiaohongshu_home",
+      "path": "xiaohongshu/home/container.json"
+    },
+    {
+      "id": "xiaohongshu_home.discover_button",
+      "path": "xiaohongshu/home/discover_button/container.json"
+    },
+    {
+      "id": "xiaohongshu_home.feed_item",
+      "path": "xiaohongshu/home/feed_item/container.json"
+    },
+    {
+      "id": "xiaohongshu_home.feed_list",
+      "path": "xiaohongshu/home/feed_list/container.json"
+    },
+    {
+      "id": "xiaohongshu_home.login_anchor",
+      "path": "xiaohongshu/home/login_anchor/container.json"
+    },
+    {
+      "id": "xiaohongshu_home.search_button",
+      "path": "xiaohongshu/home/search_button/container.json"
+    },
+    {
+      "id": "xiaohongshu_home.search_input",
+      "path": "xiaohongshu/home/search_input/container.json"
+    },
+    {
+      "id": "xiaohongshu_login",
+      "path": "xiaohongshu/login/container.json"
+    },
+    {
+      "id": "xiaohongshu_login.login_button",
+      "path": "xiaohongshu/login/login_button/container.json"
+    },
+    {
+      "id": "xiaohongshu_login.login_guard",
+      "path": "xiaohongshu/login/login_guard/container.json"
+    },
+    {
+      "id": "xiaohongshu_login.password_input",
+      "path": "xiaohongshu/login/password_input/container.json"
+    },
+    {
+      "id": "xiaohongshu_login.qrcode_guard",
+      "path": "xiaohongshu/login/qrcode_guard/container.json"
+    },
+    {
+      "id": "xiaohongshu_login.username_input",
+      "path": "xiaohongshu/login/username_input/container.json"
+    },
+    {
+      "id": "xiaohongshu_search",
+      "path": "xiaohongshu/search/container.json"
+    },
+    {
+      "id": "xiaohongshu_search.discover_button",
+      "path": "xiaohongshu/search/discover_button/container.json"
+    },
+    {
+      "id": "xiaohongshu_search.login_anchor",
+      "path": "xiaohongshu/search/login_anchor/container.json"
+    },
+    {
+      "id": "xiaohongshu_search.search_bar",
+      "path": "xiaohongshu/search/search_bar/container.json"
+    },
+    {
+      "id": "xiaohongshu_search.search_result_item",
+      "path": "xiaohongshu/search/search_result_item/container.json"
+    },
+    {
+      "id": "xiaohongshu_search.search_result_list",
+      "path": "xiaohongshu/search/search_result_list/container.json"
+    }
+  ]
+}

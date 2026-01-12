@@ -1,0 +1,41 @@
+{
+  "id": "xiaohongshu_search.discover_button",
+  "name": "发现按钮",
+  "type": "button",
+  "description": "搜索页导航栏中的'发现'按钮，用于返回主页/推荐流",
+  "parent": "xiaohongshu_search",
+  "capabilities": [
+    "highlight",
+    "click"
+  ],
+  "selectors": [
+    {
+      "css": "a[href='/explore?channel_id=homefeed_recommend'].channel",
+      "variant": "primary",
+      "score": 1.0,
+      "comment": "发现按钮文字元素"
+    },
+    {
+      "css": "a[href='/explore?channel_id=homefeed_recommend']",
+      "variant": "backup",
+      "score": 0.9,
+      "comment": "发现按钮父链接"
+    }
+  ],
+  "operations": [
+    {
+      "type": "highlight",
+      "config": {
+        "style": "2px solid #4285f4",
+        "duration": 1500
+      }
+    },
+    {
+      "type": "click",
+      "config": {
+        "target": "self",
+        "comment": "点击返回主页"
+      }
+    }
+  ]
+}

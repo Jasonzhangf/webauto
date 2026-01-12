@@ -1,9 +1,13 @@
 #!/usr/bin/env node
 /**
- * build health check - headful launch + bus/ws/health
- * 1) start unified-api + browser-service (headful)
- * 2) check ws/bus health endpoints
- * 3) check bus event reception (ready + health.status)
+ * build health check
+ *
+ * 默认模式：headful 启动 + bus/ws/health 全链路验证（用于手动诊断）
+ * quick 模式：仅检查服务 /health，不启动浏览器、不访问小红书（用于 CI / build:services）
+ *
+ * 用法：
+ *   node scripts/health-check.mjs           # 完整 headful 校验（可能打开小红书）
+ *   node scripts/health-check.mjs --quick   # 仅校验服务健康，不启动浏览器
  */
 
 import { spawn } from 'node:child_process';
@@ -62,9 +66,22 @@ async function waitBusEvent(topic, predicate, timeoutMs=18000, earlyTopics=['hea
   });
 }
 
-async function main(){
+async function runQuickHealthCheck() {
+  console.log('[health-check] quick mode: service-only health check (no browser)');
+
+  const okUnified = await waitHealth(`${UNIFIED}/health`, 20000);
+  if (!okUnified) throw new Error('unified-api not healthy');
+
+  const okBrowser = await waitHealth(`${BROWSER}/health`, 20000);
+  if (!okBrowser) throw new Error('browser-service not healthy');
+
+  console.log('[health-check] ok (quick)');
+  process.exit(0);
+}
+
+async function runHeadfulHealthCheck(){
   console.log('[health-check] start services (headful)');
-  const child = spawn('node', ['scripts/start-headful.mjs', '--profile', 'weibo_fresh', '--url', 'https://weibo.com'], { stdio: 'inherit' });
+  const child = spawn('node', ['scripts/start-headful.mjs', '--profile', 'xiaohongshu_fresh', '--url', 'https://www.xiaohongshu.com/explore'], { stdio: 'inherit' });
   let childClosed = false;
   child.on('exit', () => {
     childClosed = true;
@@ -96,6 +113,17 @@ async function main(){
     child.kill('SIGINT');
   }
   process.exit(0);
+}
+
+async function main(){
+  const args = process.argv.slice(2);
+  const quick = args.includes('--quick');
+
+  if (quick) {
+    return runQuickHealthCheck();
+  }
+
+  return runHeadfulHealthCheck();
 }
 
 main().catch(err => {

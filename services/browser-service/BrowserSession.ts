@@ -353,6 +353,64 @@ export class BrowserSession {
     await page.fill(selector, text, { timeout: 20000 });
   }
 
+  /**
+   * 基于屏幕坐标的系统级鼠标点击（Playwright 原生）
+   * @param opts 屏幕坐标及点击选项
+   */
+  async mouseClick(opts: { x: number; y: number; button?: 'left' | 'right' | 'middle'; clicks?: number; delay?: number }): Promise<void> {
+    const page = await this.ensurePrimaryPage();
+    const { x, y, button = 'left', clicks = 1, delay = 50 } = opts;
+
+    // 移动鼠标到目标位置（模拟轨迹）
+    await page.mouse.move(x, y, { steps: 3 });
+
+    // 执行点击（支持多次、间隔随机抖动）
+    for (let i = 0; i < clicks; i++) {
+      if (i > 0) {
+        // 多次点击间隔 100-200ms
+        await new Promise(r => setTimeout(r, 100 + Math.random() * 100));
+      }
+      await page.mouse.click(x, y, {
+        button,
+        clickCount: 1,
+        delay // 按键间隔
+      });
+    }
+  }
+
+  /**
+   * 基于屏幕坐标的鼠标移动（Playwright 原生）
+   * @param opts 目标坐标及移动选项
+   */
+  async mouseMove(opts: { x: number; y: number; steps?: number }): Promise<void> {
+    const page = await this.ensurePrimaryPage();
+    const { x, y, steps = 3 } = opts;
+
+    await page.mouse.move(x, y, { steps });
+  }
+
+  /**
+   * 基于键盘的系统输入（Playwright keyboard）
+   */
+  async keyboardType(opts: { text: string; delay?: number; submit?: boolean }): Promise<void> {
+    const page = await this.ensurePrimaryPage();
+    const { text, delay = 80, submit } = opts;
+
+    if (text && text.length > 0) {
+      await page.keyboard.type(text, { delay });
+    }
+
+    if (submit) {
+      await page.keyboard.press('Enter');
+    }
+  }
+
+  async keyboardPress(opts: { key: string; delay?: number }): Promise<void> {
+    const page = await this.ensurePrimaryPage();
+    const { key, delay } = opts;
+    await page.keyboard.press(key, typeof delay === 'number' ? { delay } : undefined);
+  }
+
   async evaluate(expression: string, arg?: any) {
     const page = await this.ensurePrimaryPage();
     if (typeof arg === 'undefined') {

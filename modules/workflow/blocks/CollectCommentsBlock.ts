@@ -26,6 +26,25 @@ export interface CollectCommentsOutput {
   emptyState: boolean;
   warmupCount: number;
   totalFromHeader: number | null;
+  entryAnchor?: {
+    commentSectionContainerId?: string;
+    commentSectionRect?: Rect;
+    verified?: boolean;
+  };
+  exitAnchor?: {
+    commentSectionContainerId?: string;
+    commentSectionRect?: Rect;
+    endMarkerContainerId?: string;
+    endMarkerRect?: Rect;
+    verified?: boolean;
+  };
+  steps?: Array<{
+    id: string;
+    status: 'pending' | 'running' | 'success' | 'failed' | 'skipped';
+    error?: string;
+    anchor?: any;
+    meta?: Record<string, any>;
+  }>;
   anchor?: {
     commentSectionContainerId?: string;
     commentSectionRect?: Rect;
@@ -46,8 +65,34 @@ export async function execute(input: CollectCommentsInput): Promise<CollectComme
   } = input;
 
   try {
-    const { execute: warmupComments } = await import('./WarmupCommentsBlock.ts');
-    const { execute: expandComments } = await import('./ExpandCommentsBlock.ts');
+    const { execute: warmupComments } = await import('./WarmupCommentsBlock.js');
+    const { execute: expandComments } = await import('./ExpandCommentsBlock.js');
+
+    const steps: NonNullable<CollectCommentsOutput['steps']> = [];
+    let entryAnchor: CollectCommentsOutput['entryAnchor'];
+    let exitAnchor: CollectCommentsOutput['exitAnchor'];
+
+    function pushStep(step: NonNullable<CollectCommentsOutput['steps']>[number]) {
+      steps.push(step);
+      try {
+        console.log(
+          '[CollectComments][step]',
+          JSON.stringify(
+            {
+              id: step.id,
+              status: step.status,
+              error: step.error,
+              anchor: step.anchor,
+              meta: step.meta,
+            },
+            null,
+            2,
+          ),
+        );
+      } catch {
+        console.log('[CollectComments][step]', step.id, step.status);
+      }
+    }
 
     const warmup = await warmupComments({
       sessionId,
@@ -56,6 +101,53 @@ export async function execute(input: CollectCommentsInput): Promise<CollectComme
         ? { maxRounds: maxWarmupRounds }
         : {})
     } as any);
+
+    // 入口锚点：评论区根容器 + rect
+    if (warmup.anchor?.commentSectionContainerId) {
+      entryAnchor = {
+        commentSectionContainerId: warmup.anchor.commentSectionContainerId,
+        commentSectionRect: warmup.anchor.commentSectionRect,
+        verified: Boolean(warmup.anchor.commentSectionRect && warmup.anchor.commentSectionRect.height > 0),
+      };
+      console.log('[CollectComments][entryAnchor]', JSON.stringify(entryAnchor, null, 2));
+    }
+
+    if (!warmup.success) {
+      pushStep({
+        id: 'warmup_comments',
+        status: 'failed',
+        anchor: warmup.anchor,
+        error: warmup.error || 'warmup failed',
+        meta: {
+          finalCount: warmup.finalCount ?? 0,
+          totalFromHeader: warmup.totalFromHeader ?? null,
+        },
+      });
+      return {
+        success: false,
+        comments: [],
+        reachedEnd: false,
+        emptyState: false,
+        warmupCount: warmup.finalCount ?? 0,
+        totalFromHeader: warmup.totalFromHeader ?? null,
+        entryAnchor,
+        exitAnchor: undefined,
+        steps,
+        anchor: warmup.anchor,
+        error: warmup.error || 'warmup failed'
+      };
+    }
+
+    pushStep({
+      id: 'warmup_comments',
+      status: 'success',
+      anchor: warmup.anchor,
+      meta: {
+        finalCount: warmup.finalCount ?? 0,
+        totalFromHeader: warmup.totalFromHeader ?? null,
+        reachedEnd: warmup.reachedEnd ?? false,
+      },
+    });
 
     if (!warmup.success) {
       return {
@@ -76,6 +168,17 @@ export async function execute(input: CollectCommentsInput): Promise<CollectComme
     } as any);
 
     if (!expanded.success) {
+      pushStep({
+        id: 'expand_comments',
+        status: 'failed',
+        anchor: expanded.anchor,
+        error: expanded.error || 'expand failed',
+        meta: {
+          commentsCount: Array.isArray(expanded.comments) ? expanded.comments.length : 0,
+          reachedEnd: expanded.reachedEnd ?? false,
+          emptyState: expanded.emptyState ?? false,
+        },
+      });
       return {
         success: false,
         comments: [],
@@ -83,10 +186,24 @@ export async function execute(input: CollectCommentsInput): Promise<CollectComme
         emptyState: false,
         warmupCount: warmup.finalCount ?? 0,
         totalFromHeader: warmup.totalFromHeader ?? null,
+        entryAnchor,
+        exitAnchor: undefined,
+        steps,
         anchor: expanded.anchor,
         error: expanded.error || 'expand failed'
       };
     }
+
+    pushStep({
+      id: 'expand_comments',
+      status: 'success',
+      anchor: expanded.anchor,
+      meta: {
+        commentsCount: Array.isArray(expanded.comments) ? expanded.comments.length : 0,
+        reachedEnd: expanded.reachedEnd ?? false,
+        emptyState: expanded.emptyState ?? false,
+      },
+    });
 
     const comments = Array.isArray(expanded.comments) ? expanded.comments : [];
     const totalFromHeader = warmup.totalFromHeader ?? null;
@@ -100,6 +217,17 @@ export async function execute(input: CollectCommentsInput): Promise<CollectComme
       reachedEnd = Boolean(warmup.reachedEnd || expanded.reachedEnd);
     }
 
+    if (expanded.anchor) {
+      exitAnchor = {
+        commentSectionContainerId: expanded.anchor.commentSectionContainerId,
+        commentSectionRect: expanded.anchor.commentSectionRect,
+        endMarkerContainerId: expanded.anchor.endMarkerContainerId,
+        endMarkerRect: expanded.anchor.endMarkerRect,
+        verified: expanded.anchor.verified ?? false,
+      };
+      console.log('[CollectComments][exitAnchor]', JSON.stringify(exitAnchor, null, 2));
+    }
+
     return {
       success: true,
       comments,
@@ -107,6 +235,9 @@ export async function execute(input: CollectCommentsInput): Promise<CollectComme
       emptyState: expanded.emptyState,
       warmupCount: warmup.finalCount ?? 0,
       totalFromHeader,
+      entryAnchor,
+      exitAnchor,
+      steps,
       anchor: expanded.anchor
     };
   } catch (error: any) {

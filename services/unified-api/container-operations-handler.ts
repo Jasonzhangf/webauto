@@ -1,5 +1,9 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { logDebug } from '../../modules/logging/src/index.js';
+import { ensureBuiltinOperations } from '../../modules/operations/src/builtin.js';
+
+// Ensure builtin operations are registered before handling any requests
+ensureBuiltinOperations();
 
 export async function handleContainerOperations(
   req: IncomingMessage,
@@ -29,17 +33,8 @@ export async function handleContainerOperations(
 
     logDebug('container-ops', 'execute', { containerId, operationId, sessionId });
 
-    const session = sessionManager.getSession(sessionId);
-    if (!session) {
-      res.writeHead(404, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ success: false, error: 'Session not found' }));
-      return true;
-    }
-
     try {
-      const page = await session.ensurePage();
-      const handle = { sessionId, element: null, bbox: null };
-      const result = await executor.execute(containerId, operationId, config || {}, handle);
+      const result = await executor.execute(containerId, operationId, config || {}, { sessionId });
 
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ success: true, data: result }));

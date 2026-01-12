@@ -71,6 +71,12 @@ export class ContainerRegistry {
     return this.findSiteKey(url, registry);
   }
 
+  async load() {
+    // 兼容异步加载，但当前是同步实现
+    this.ensureIndex();
+    return;
+  }
+
   getContainersForUrl(url: string): Record<string, ContainerDefinition> {
     const registry = this.ensureIndex();
     const siteKey = this.findSiteKey(url, registry);

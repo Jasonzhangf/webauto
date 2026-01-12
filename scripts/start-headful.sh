@@ -49,8 +49,20 @@ cd "$PROJECT_ROOT"
 echo "1️⃣  清理旧进程..."
 echo ""
 
-# 停止旧的 floating panel
-pkill -f "electron.*floating-panel" 2>/dev/null && echo "   已停止旧的 Floating Panel" || echo "   没有运行中的 Floating Panel"
+# 停止旧的 floating panel（通过 PID 文件精确终止）
+FLOATING_PID_FILE="$HOME/.webauto/floating-panel.pid"
+if [ -f "$FLOATING_PID_FILE" ]; then
+    FLOATING_PID=$(cat "$FLOATING_PID_FILE")
+    if [ -n "$FLOATING_PID" ] && kill -0 "$FLOATING_PID" 2>/dev/null; then
+        kill "$FLOATING_PID" 2>/dev/null && echo "   已停止旧的 Floating Panel (PID: $FLOATING_PID)" || echo "   无法停止 Floating Panel"
+        rm -f "$FLOATING_PID_FILE"
+    else
+        echo "   Floating Panel PID 文件存在但进程不在运行"
+        rm -f "$FLOATING_PID_FILE"
+    fi
+else
+    echo "   没有运行中的 Floating Panel"
+fi
 
 echo ""
 echo "2️⃣  检查服务状态..."

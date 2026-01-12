@@ -221,10 +221,11 @@ export class WeiboEventDrivenWorkflowRunner extends EventEmitter {
 
   private parseValue(value: string | number): number {
     if (typeof value === 'number') return value;
-    if (value.startsWith('{{') && value.endsWith('}}')) {
+    if (typeof value === 'string' && value.startsWith('{{') && value.endsWith('}}')) {
       const key = value.slice(2, -2).trim();
       if (key.startsWith('config.')) {
-        return this.config.config[key.split('.')[1] as keyof typeof this.config.config];
+        const val = this.config.config[key.split('.')[1] as keyof typeof this.config.config];
+        return typeof val === 'number' ? val : Number(val);
       }
     }
     return Number(value);

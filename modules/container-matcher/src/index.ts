@@ -116,7 +116,9 @@ export class ContainerMatcher {
 
     const effectiveSelector = preferredSelector || rootMatch.container?.matched_selector;
     const collectStart = Date.now();
-    const matchMap = await this.collectContainerMatches(page, containers, effectiveSelector);
+    // 仅收集以根容器为起点的子树内的匹配结果，避免对当前页面无关的容器做全量扫描
+    const subtreeIds = this.collectSubtreeIds(containers, rootMatch.container.id);
+    const matchMap = await this.collectContainerMatches(page, containers, effectiveSelector, undefined, subtreeIds);
     timings.push({ step: 'collect_container_matches', duration_ms: Date.now() - collectStart });
     const buildTreeStart = Date.now();
     const containerTree = this.buildContainerTree(containers, rootMatch.container.id, matchMap);
@@ -422,9 +424,13 @@ export class ContainerMatcher {
     containers: Record<string, ContainerDefinition>,
     rootSelector?: string,
     maxNodes = 4,
+    onlyContainerIds?: Set<string>,
   ) {
     const summary: Record<string, any> = {};
     for (const [containerId, container] of Object.entries(containers)) {
+      if (onlyContainerIds && !onlyContainerIds.has(containerId)) {
+        continue;
+      }
       const selectors: string[] = [];
       const nodes: Record<string, any>[] = [];
       let matchCount = 0;
@@ -469,6 +475,25 @@ export class ContainerMatcher {
       };
     }
     return summary;
+  }
+
+  private collectSubtreeIds(
+    containers: Record<string, ContainerDefinition>,
+    rootId: string,
+  ): Set<string> {
+    const result = new Set<string>();
+    const visit = (containerId: string) => {
+      if (result.has(containerId)) return;
+      const container = containers[containerId];
+      if (!container) return;
+      result.add(containerId);
+      const childIds = this.resolveChildIds(containerId, container, containers);
+      for (const childId of childIds) {
+        visit(childId);
+      }
+    };
+    visit(rootId);
+    return result;
   }
 
   private buildContainerTree(

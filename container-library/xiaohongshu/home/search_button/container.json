@@ -1,0 +1,53 @@
+{
+  "id": "xiaohongshu_home.search_button",
+  "name": "主页搜索按钮",
+  "type": "button",
+  "description": "主页搜索框右侧的搜索图标按钮，点击触发搜索",
+  "parent": "xiaohongshu_home",
+  "capabilities": [
+    "highlight",
+    "click"
+  ],
+  "selectors": [
+    {
+      "css": ".input-button .search-icon",
+      "variant": "primary",
+      "score": 1.0,
+      "comment": "搜索图标容器"
+    },
+    {
+      "css": ".input-button",
+      "variant": "backup",
+      "score": 0.9,
+      "comment": "搜索按钮父容器"
+    },
+    {
+      "css": "svg use[xlink:href='#search']",
+      "variant": "fallback",
+      "score": 0.7,
+      "comment": "搜索图标 SVG 元素"
+    }
+  ],
+  "operations": [
+    {
+      "type": "highlight",
+      "config": {
+        "style": "3px solid #ff9800",
+        "duration": 2000
+      }
+    },
+    {
+      "type": "click",
+      "config": {
+        "target": "self",
+        "comment": "点击搜索图标触发搜索"
+      }
+    }
+  ],
+  "metadata": {
+    "role": "search_trigger",
+    "stable": true,
+    "comment": "这是真正的搜索触发按钮，比回车更符合用户行为",
+    "exampleText": "搜索图标"
+  }
+}

@@ -69,7 +69,7 @@ export async function startBrowserService(opts: BrowserServiceOptions = {}) {
       req.on('end', async () => {
         try {
           const payload: CommandPayload = JSON.parse(Buffer.concat(chunks).toString('utf-8'));
-          const result = await handleCommand(payload, sessionManager);
+          const result = await handleCommand(payload, sessionManager, wsServer);
           res.writeHead(result.ok ? 200 : 500, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify(result.body));
         } catch (err) {
@@ -88,8 +88,9 @@ export async function startBrowserService(opts: BrowserServiceOptions = {}) {
     console.log(`BrowserService listening on http://${host}:${port}`);
   });
 
-  const wsServer = enableWs ? new BrowserWsServer({ host: wsHost, port: wsPort, sessionManager }) : null;
-  if (wsServer) {
+  let wsServer: BrowserWsServer | null = null;
+  if (enableWs) {
+    wsServer = new BrowserWsServer({ host: wsHost, port: wsPort, sessionManager });
     try {
       await wsServer.start();
     } catch (err) {
@@ -113,13 +114,16 @@ export async function startBrowserService(opts: BrowserServiceOptions = {}) {
     }
   }
 
+  const stopWsServer = async () => {
+    if (!wsServer) return;
+    await wsServer.stop().catch(() => {});
+  };
+
   const shutdown = async () => {
     server.close();
     clients.forEach((client) => client.end());
     autoLoops.forEach((timer) => clearInterval(timer));
-    if (wsServer) {
-      await wsServer.stop().catch(() => {});
-    }
+    await stopWsServer();
     if (messageHandler) {
       // Clean up message handler if needed
     }
@@ -139,7 +143,7 @@ function managerIsIdle(manager: SessionManager) {
   return manager.listSessions().length === 0;
 }
 
-async function handleCommand(payload: CommandPayload, manager: SessionManager) {
+async function handleCommand(payload: CommandPayload, manager: SessionManager, wsServer: BrowserWsServer | null) {
   const action = payload.action;
   const args = payload.args ?? (payload as any);
 
@@ -202,6 +206,28 @@ async function handleCommand(payload: CommandPayload, manager: SessionManager) {
       const deleted = await manager.deleteSession(profileId);
       return { ok: true, body: { ok: deleted } };
     }
+    case 'service:shutdown': {
+      console.log('[BrowserService] Received shutdown command, gracefully terminating...');
+
+      const response = { ok: true, body: { message: 'Browser service shutting down' } };
+
+      // 内联关闭 wsServer，避免作用域问题
+      setImmediate(async () => {
+        try {
+          if (wsServer) {
+            await wsServer.stop().catch(() => {});
+          }
+          await manager.shutdown();
+          console.log('[BrowserService] Shutdown complete');
+          process.exit(0);
+        } catch (err) {
+          console.error('[BrowserService] Error during shutdown:', err);
+          process.exit(1);
+        }
+      });
+
+      return response;
+    }
     case 'screenshot': {
       const profileId = args.profileId || 'default';
       const session = manager.getSession(profileId);
@@ -247,6 +273,45 @@ async function handleCommand(payload: CommandPayload, manager: SessionManager) {
      const profileId = args.profileId || 'default';
      return { ok: true, body: { ok: !!autoLoops.get(profileId) } };
    }
+    case 'mouse:click': {
+      const profileId = args.profileId || 'default';
+      const session = manager.getSession(profileId);
+      if (!session) throw new Error(`session for profile ${profileId} not started`);
+      const { x, y, button, clicks, delay } = args;
+      await session.mouseClick({ x: Number(x), y: Number(y), button, clicks, delay });
+      return { ok: true, body: { ok: true } };
+    }
+    case 'mouse:move': {
+      const profileId = args.profileId || 'default';
+      const session = manager.getSession(profileId);
+      if (!session) throw new Error(`session for profile ${profileId} not started`);
+      const { x, y, steps } = args;
+      await session.mouseMove({ x: Number(x), y: Number(y), steps });
+      return { ok: true, body: { ok: true } };
+    }
+    case 'keyboard:type': {
+      const profileId = args.profileId || 'default';
+      const session = manager.getSession(profileId);
+      if (!session) throw new Error(`session for profile ${profileId} not started`);
+      const { text, delay, submit } = args;
+      await session.keyboardType({
+        text: String(text ?? ''),
+        delay: typeof delay === 'number' ? delay : undefined,
+        submit: !!submit,
+      });
+      return { ok: true, body: { ok: true } };
+    }
+    case 'keyboard:press': {
+      const profileId = args.profileId || 'default';
+      const session = manager.getSession(profileId);
+      if (!session) throw new Error(`session for profile ${profileId} not started`);
+      const { key, delay } = args;
+      await session.keyboardPress({
+        key: String(key ?? 'Enter'),
+        delay: typeof delay === 'number' ? delay : undefined,
+      });
+      return { ok: true, body: { ok: true } };
+    }
     default:
       throw new Error(`Unknown action: ${action}`);
   }

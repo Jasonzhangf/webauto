@@ -273,13 +273,15 @@ export async function execute(input: XiaohongshuCrawlerInput): Promise<Xiaohongs
     await controllerAction('browser:execute', {
       profile,
       script: `(() => {
+        // 优先尝试关闭按钮
         const closeBtn = document.querySelector('.note-detail-mask [class*="close"], .note-detail .close');
         if (closeBtn) {
           closeBtn.dispatchEvent(new MouseEvent('click', { bubbles: true }));
           return 'close-button';
         }
-        window.history.back();
-        return 'history-back';
+        // 兜底使用 ESC 键，禁止使用 history.back()
+        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', keyCode: 27, which: 27, bubbles: true }));
+        return 'esc-key';
       })();`,
     });
     await delay(2000);
@@ -521,7 +523,7 @@ export async function execute(input: XiaohongshuCrawlerInput): Promise<Xiaohongs
 
   try {
     await fs.mkdir(basePath, { recursive: true });
-    const existingDirs = await fs.readdir(basePath).catch(() => []);
+    const existingDirs = await fs.readdir(basePath).catch((): string[] => []);
     const collectedIds = new Set<string>();
     for (const dir of existingDirs) {
       const parts = dir.split('_');

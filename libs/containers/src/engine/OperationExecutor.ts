@@ -30,7 +30,7 @@ export class OperationExecutor {
    */
   async createContext(containerId: string, handle: ContainerHandle): Promise<OperationContext> {
     const page = await this.getPage(handle.sessionId);
-    
+
     return {
       containerId,
       node: handle,
@@ -41,6 +41,29 @@ export class OperationExecutor {
           }
           return page.evaluate(fn, ...args);
         },
+        keyboard: page && (page as any).keyboard
+          ? {
+              type: async (text: string, options?: { delay?: number; submit?: boolean }) => {
+                const kbd = (page as any).keyboard;
+                if (kbd && typeof kbd.type === 'function') {
+                  await kbd.type(text, { delay: options?.delay });
+                  if (options?.submit && typeof kbd.press === 'function') {
+                    await kbd.press('Enter');
+                  }
+                  return;
+                }
+                throw new Error('Keyboard input not available');
+              },
+              press: async (key: string, options?: { delay?: number }) => {
+                const kbd = (page as any).keyboard;
+                if (kbd && typeof kbd.press === 'function') {
+                  await kbd.press(key, { delay: options?.delay });
+                  return;
+                }
+                throw new Error('Keyboard input not available');
+              },
+            }
+          : undefined,
       },
       logger: this.logger || console,
       systemInput: {

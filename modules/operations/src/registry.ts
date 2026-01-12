@@ -3,6 +3,10 @@ export interface OperationContext {
   node?: any; // ContainerNodeRuntime or similar reference
   page: {
     evaluate(fn: (...args: any[]) => any, ...args: any[]): Promise<any>;
+    keyboard?: {
+      type(text: string, options?: { delay?: number; submit?: boolean }): Promise<void>;
+      press?(key: string, options?: { delay?: number }): Promise<void>;
+    };
   };
   logger?: {
     info: (...args: any[]) => void;

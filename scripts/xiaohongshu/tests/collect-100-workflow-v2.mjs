@@ -306,7 +306,11 @@ async function main() {
 
       // 6.2 打开详情
       const detailStartTime = Date.now();
-      const openRes = await openDetail({ sessionId, containerId: item.containerId });
+      const openRes = await openDetail({
+        sessionId,
+        containerId: item.containerId,
+        domIndex: item.raw?.index ?? item.domIndex // 传递 domIndex 确保精确定位
+      });
       if (!openRes.success) {
         console.warn('[Collect100] OpenDetailBlock 失败:', openRes.error);
         recordFailure(sessionId, `OpenDetail failed: ${openRes.error}`);

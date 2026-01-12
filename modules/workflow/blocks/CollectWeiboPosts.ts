@@ -9,7 +9,7 @@ import fs from 'fs/promises';
 
 const UNIFIED_API = 'http://127.0.0.1:7701';
 
-async function executeScript(script) {
+async function executeScript(script: string) {
   const response = await fetch(`${UNIFIED_API}/v1/controller/action`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -26,7 +26,7 @@ async function executeScript(script) {
   return result.data?.result ?? result.data;
 }
 
-async function collectWeiboPosts(targetCount) {
+async function collectWeiboPosts(targetCount: number) {
   console.log('🔄 Starting Weibo Collection');
   console.log('========================================');
   console.log(`📊 Target: ${targetCount} posts`);
@@ -120,7 +120,7 @@ async function collectWeiboPosts(targetCount) {
     // 去重并收集
     if (Array.isArray(posts)) {
       let newPosts = 0;
-      posts.forEach(post => {
+      posts.forEach((post: any, index: number) => {
         // 使用内容作为唯一标识，避免重复
         const uniqueKey = post.url || (post.content ? post.content.substring(0, 50) : index);
         if (uniqueKey && !collectedPosts.has(uniqueKey)) {
@@ -163,7 +163,7 @@ async function collectWeiboPosts(targetCount) {
   return Array.from(collectedPosts.values());
 }
 
-async function generateMarkdown(posts, filename) {
+async function generateMarkdown(posts: any[], filename: string) {
   const lines = [
     '# 微博采集结果',
     '',
@@ -174,7 +174,7 @@ async function generateMarkdown(posts, filename) {
     ''
   ];
 
-  posts.forEach((post, index) => {
+  posts.forEach((post: any, index: number) => {
     lines.push(`## ${index + 1}. ${post.author || '未知作者'}`);
     lines.push('');
 
@@ -207,7 +207,7 @@ async function generateMarkdown(posts, filename) {
   console.log(`✅ Markdown saved to: ${filename}`);
 }
 
-async function main(input) {
+async function main(input: { count?: number; output?: string }) {
   const { count = 250, output = 'weibo_posts_250.md' } = input;
 
   try {

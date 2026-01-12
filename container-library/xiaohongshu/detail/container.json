@@ -13,7 +13,8 @@
   "children": [
     "xiaohongshu_detail.login_anchor",
     "xiaohongshu_detail.modal_shell",
-    "xiaohongshu_detail.comment_section"
+    "xiaohongshu_detail.comment_section",
+    "xiaohongshu_detail.discover_button"
   ],
   "selectors": [
     {

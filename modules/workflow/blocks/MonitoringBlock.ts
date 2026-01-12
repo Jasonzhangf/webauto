@@ -188,7 +188,7 @@ export async function execute(input: MonitoringInput): Promise<MonitoringOutput>
         success: false,
         metric,
         value: 0,
-        error: `未知的指标类型: ${metric}`
+        details: `未知的指标类型: ${metric}`
       };
   }
 

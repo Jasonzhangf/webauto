@@ -1,12 +1,11 @@
 #!/usr/bin/env node
 /**
  * Phase 1：启动/复用 xiaohongshu_fresh 会话，并确保登录成功。
- * - 如果会话不存在，自动调用 start-headful.mjs（headful + unattached）。
+ * - 如果会话不存在，提示先手动启动 start-headful.mjs。
  * - 登录状态完全基于容器匹配：*.login_anchor / xiaohongshu_login.login_guard。
  * - 循环高亮登录相关容器，等待人工登录完成。
  */
 
-import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -15,17 +14,30 @@ const BROWSER_SERVICE = 'http://127.0.0.1:7704';
 const PROFILE = 'xiaohongshu_fresh';
 const DEFAULT_KEYWORD = '手机膜';
 const START_URL = 'https://www.xiaohongshu.com';
+const DISCOVER_URL = 'https://www.xiaohongshu.com/explore';
 const LOGIN_URL = 'https://www.xiaohongshu.com/login';
 const SESSION_WAIT_TIMEOUT = 90_000;
 const LOGIN_WAIT_TIMEOUT = 180_000;
+
+async function checkDaemonHealth() {
+  try {
+    const res = await fetch(`${UNIFIED_API}/health`, {
+      signal: AbortSignal.timeout ? AbortSignal.timeout(5000) : undefined,
+    });
+    if (!res.ok) {
+      throw new Error(`Unified API unhealthy (${res.status})`);
+    }
+  } catch (err) {
+    log('DAEMON', `❌ Unified API 不可用：${err.message}`);
+    log('DAEMON', '请先启动 core-daemon：node scripts/core-daemon.mjs start');
+    process.exit(1);
+  }
+}
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const repoRoot = path.resolve(__dirname, '..', '..', '..');
 const startScript = path.join(repoRoot, 'scripts', 'start-headful.mjs');
-
-let launchPromise = null;
-
 
 function log(step, message) {
   const time = new Date().toLocaleTimeString();
@@ -38,7 +50,7 @@ async function post(endpoint, data) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
     // 避免 controller action（特别是 containers:match）长时间挂起
-    signal: AbortSignal.timeout ? AbortSignal.timeout(10000) : undefined,
+    signal: AbortSignal.timeout ? AbortSignal.timeout(30000) : undefined,
   });
   if (!res.ok) {
     throw new Error(`HTTP ${res.status}: ${await res.text()}`);
@@ -63,6 +75,23 @@ async function controllerAction(action, payload = {}) {
     throw new Error(result.error || `controller action ${action} failed`);
   }
   return unwrapData(result);
+}
+
+async function controllerActionWithRetry(action, payload = {}, maxRetries = 3) {
+  for (let i = 0; i < maxRetries; i++) {
+    try {
+      return await controllerAction(action, payload);
+    } catch (err) {
+      if (err.message.includes('aborted') || err.message.includes('timeout')) {
+        log('WARN', `请求超时 (${i + 1}/${maxRetries})，重试中...`);
+        if (i < maxRetries - 1) {
+          await delay(2000);
+          continue;
+        }
+      }
+      throw err;
+    }
+  }
 }
 
 async function browserCommand(action, args = {}, timeout = 15_000) {
@@ -100,99 +129,231 @@ function normalizeSession(session) {
   };
 }
 
-async function listSessions() {
-  const raw = await controllerAction('session:list', {});
-  return extractSessions(raw);
+async function getBrowserServiceSession() {
+  try {
+    const status = await browserCommand('getStatus', {}, 5000);
+    const sessions = Array.isArray(status?.sessions) ? status.sessions : [];
+    const found = sessions
+      .map(normalizeSession)
+      .find((s) => s?.profileId === PROFILE);
+    return found || null;
+  } catch {
+    return null;
+  }
+}
+
+async function getSystemSessionState() {
+  try {
+    const res = await fetch(
+      `${UNIFIED_API}/v1/system/sessions?profileId=${encodeURIComponent(PROFILE)}`,
+      {
+        method: 'GET',
+        signal: AbortSignal.timeout ? AbortSignal.timeout(5000) : undefined,
+      },
+    );
+    if (!res.ok) return null;
+    const data = await res.json().catch(() => null);
+    const list = Array.isArray(data?.data) ? data.data : [];
+    if (!list.length) return null;
+    return normalizeSession(list[0]);
+  } catch {
+    return null;
+  }
 }
 
 async function ensureSession() {
-  const sessions = await listSessions().catch(() => []);
-  const existing = sessions.map(normalizeSession).find((s) => s?.profileId === PROFILE);
-  if (existing) {
-    log('SESSION', `已存在 ${PROFILE} ｜ URL: ${existing.currentUrl || '未知'}`);
-    return existing;
-  }
-  await startSession();
-  return waitForSessionReady();
-}
+  const registrySession = await getSystemSessionState();
+  const browserSession = await getBrowserServiceSession();
 
-async function startSession() {
-  if (launchPromise) return launchPromise;
-  log('SESSION', `未检测到 ${PROFILE}，触发 start-headful -> ${START_URL}`);
-  launchPromise = new Promise((resolve) => {
-    try {
-      const child = spawn('node', [startScript, '--profile', PROFILE, '--url', START_URL], {
-        cwd: repoRoot,
-        env: process.env,
-        detached: true,
-        stdio: 'ignore',
-      });
-      child.unref();
-      log('SESSION', '已以 detached 模式拉起 start-headful（窗口会常驻，需人工关闭）');
-    } catch (err) {
-      log('ERROR', `启动脚本失败：${err.message}`);
-    } finally {
-      resolve();
-    }
-  }).finally(() => {
-    launchPromise = null;
-  });
-  return launchPromise;
+  // 1. Browser Service 已有真实会话，直接复用
+  if (browserSession) {
+    log(
+      'SESSION',
+      `已存在 ${PROFILE}（browser-service）｜ URL: ${browserSession.currentUrl || '未知'}`,
+    );
+    return browserSession;
+  }
+
+  // 2. StateRegistry 有记录但 Browser Service 没有，会话已丢失，视为脏数据，仅做提示
+  if (registrySession && !browserSession) {
+    log(
+      'SESSION',
+      `StateRegistry 记录了 ${PROFILE}，但 Browser Service 无会话，按无会话处理（可能是历史残留）`,
+    );
+  } else {
+    log('SESSION', `未检测到 ${PROFILE} 会话，准备通过 Browser Service 启动浏览器...`);
+  }
+
+  // 3. 通过 Browser Service 真正拉起会话（不依赖 session-manager CLI）
+  try {
+    await browserCommand(
+      'start',
+      {
+        profileId: PROFILE,
+        headless: false,
+        url: START_URL,
+      },
+      30_000,
+    );
+  } catch (err) {
+    log('SESSION', `Browser Service 启动会话失败：${err.message}`);
+    throw err;
+  }
+
+  return waitForSessionReady();
 }
 
 async function waitForSessionReady() {
   const start = Date.now();
   while (Date.now() - start < SESSION_WAIT_TIMEOUT) {
     await delay(3000);
-    const sessions = await listSessions().catch(() => []);
-    const existing = sessions.map(normalizeSession).find((s) => s?.profileId === PROFILE);
-    if (existing) {
-      log('SESSION', `检测到 ${PROFILE} ｜ URL: ${existing.currentUrl || '未知'}`);
-      return existing;
+
+    // 同时检查 StateRegistry 与 Browser Service 任意一方
+    const [registrySession, browserSession] = await Promise.all([
+      getSystemSessionState(),
+      getBrowserServiceSession(),
+    ]);
+    const session = browserSession || registrySession;
+
+    if (session) {
+      log('SESSION', `检测到 ${PROFILE} ｜ URL: ${session.currentUrl || '未知'}`);
+      return session;
     }
   }
   throw new Error(`等待 ${PROFILE} 会话超时 (${SESSION_WAIT_TIMEOUT / 1000}s)`);
 }
 
 async function getCurrentUrl() {
-  const result = await controllerAction('browser:execute', {
-    profile: PROFILE,
-    script: 'location.href',
-  });
-  return result?.result || result || '';
+  // 1. 优先从 StateRegistry 读取会话当前 URL，避免频繁调 session-manager CLI
+  const registrySession = await getSystemSessionState();
+  if (registrySession?.currentUrl) {
+    return registrySession.currentUrl;
+  }
+
+  // 2. 回退到直接在浏览器内读取 location.href
+  try {
+    const result = await controllerAction('browser:execute', {
+      profile: PROFILE,
+      script: 'location.href',
+    });
+    return result?.result || result || '';
+  } catch {
+    return '';
+  }
 }
 
 async function ensureStartUrl() {
   const current = await getCurrentUrl();
-  if (current && current.includes('xiaohongshu.com')) return;
+  if (current && current.includes('xiaohongshu.com')) {
+    log('SESSION', '已在小红书站点');
+    return;
+  }
+  log('WARN', '不在小红书站点，导航到主页');
   await controllerAction('browser:execute', {
     profile: PROFILE,
-    script: `(() => {
-      const input = document.querySelector('#search-input, input[type="search"]');
-      if (input) {
-        input.focus();
-        input.value = '${DEFAULT_KEYWORD}';
-        input.dispatchEvent(new Event('input', { bubbles: true }));
-        input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true }));
-        return true;
-      }
-      const home = document.querySelector('a[href*="xiaohongshu.com"]');
-      if (home) home.click();
-      return false;
-    })();`,
+    script: `window.location.href = '${START_URL}'`,
   });
-  await delay(4000);
+  await delay(3000);
+}
+
+async function returnToDiscover() {
+  log('RECOVER', '返回发现页重置状态');
+  await controllerAction('container:operation', {
+    containerId: 'xiaohongshu_home.discover_button',
+    operationId: 'click',
+    sessionId: PROFILE,
+  }).catch(async () => {
+    await controllerAction('browser:execute', {
+      profile: PROFILE,
+      script: `window.location.href = '${DISCOVER_URL}'`,
+    });
+  });
+  await delay(3000);
+}
+
+async function detectRiskControl() {
+  try {
+    const result = await controllerAction('containers:match', {
+      profile: PROFILE,
+      url: await getCurrentUrl(),
+      maxDepth: 3,
+      maxChildren: 8,
+    });
+    const tree = result?.snapshot?.container_tree || result?.container_tree;
+    if (!tree) return false;
+    const hasRisk = tree.children?.some((child) =>
+      (child.id || '').includes('qrcode_guard') || (child.defId || '').includes('qrcode_guard')
+    );
+    if (hasRisk) {
+      log('RISK', '🚨 检测到风控容器');
+    }
+    return hasRisk;
+  } catch (err) {
+    log('WARN', `风控检测失败：${err.message}`);
+    return false;
+  }
+}
+
+async function ensureSafeState() {
+  const current = await getCurrentUrl();
+  log('CHECK', `当前 URL: ${current}`);
+
+  if (!current || !current.includes('xiaohongshu.com') || current.includes('zhaoshang')) {
+    log('CHECK', '不在小红书主站，导航到主页');
+    await controllerAction('browser:execute', {
+      profile: PROFILE,
+      script: `window.location.href = '${START_URL}'`,
+    });
+    await delay(3000);
+    return;
+  }
+
+  if (await detectRiskControl()) {
+    log('CHECK', '检测到风控，尝试返回发现页');
+    await returnToDiscover();
+    await delay(2000);
+    if (await detectRiskControl()) {
+      log('ERROR', '❌ 风控未解除，请手动处理');
+      process.exit(1);
+    }
+  }
+
+  const finalUrl = await getCurrentUrl();
+  if (!finalUrl.includes('/explore') && !finalUrl.includes('/search')) {
+    log('CHECK', '不在发现页或搜索页，返回发现页');
+    await returnToDiscover();
+  }
 }
 
 async function navigateToLogin() {
+  const current = await getCurrentUrl();
+  if (current && current.includes('/login')) {
+    log('LOGIN', '已在登录页');
+    return;
+  }
+
+  // 如果不在发现页，先回到发现页（因为登录入口在侧边栏）
+  if (!current.includes('/explore')) {
+    log('LOGIN', '不在发现页，先返回发现页');
+    await returnToDiscover();
+    await delay(2000);
+  }
+
   await controllerAction('browser:execute', {
     profile: PROFILE,
     script: `(() => {
-      if (!location.href.includes('/login')) {
-        window.location.href = '${LOGIN_URL}';
+      // 优先点击侧边栏登录按钮
+      const loginBtn = document.querySelector('.side-bar .login-container');
+      if (loginBtn) {
+        loginBtn.click();
+        return { method: 'click_sidebar_login' };
       }
+      // 降级到直接导航
+      window.location.href = 'https://www.xiaohongshu.com/login';
+      return { method: 'direct_navigate' };
     })();`,
   });
+  await delay(3000);
 }
 
 async function reportCookieCount(tag = 'COOKIE') {
@@ -361,17 +522,26 @@ async function delay(ms) {
 
 async function main() {
   log('PHASE1', '启动阶段：Session + 登录检测');
+  await checkDaemonHealth();
   await ensureSession();
   await ensureStartUrl();
+  await ensureSafeState();
   await reportCookieCount();
 
-  if (await isLoggedIn()) {
-    log('LOGIN', '已检测到登录态，无需人工操作');
-    return;
+  // 先尝试判断登录态，避免不必要的跳转
+  try {
+    if (await isLoggedIn()) {
+      log('LOGIN', '已检测到登录态，无需人工操作');
+      return;
+    }
+  } catch (e) {
+    // 忽略检测错误，继续流程
   }
 
-  log('LOGIN', '未检测到登录，跳转登录页等待人工操作');
+  log('LOGIN', '未检测到登录，尝试跳转登录页');
   await navigateToLogin();
+  
+  // 跳转后等待人工登录
   await waitForLogin();
   await reportCookieCount('COOKIE-FINAL');
   log('PHASE1', '完成，下一阶段可执行搜索调试脚本');

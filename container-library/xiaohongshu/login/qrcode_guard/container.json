@@ -1,0 +1,50 @@
+{
+  "id": "xiaohongshu_login.qrcode_guard",
+  "name": "风控二维码页",
+  "type": "page",
+  "description": "小红书风控页面，要求使用App扫码查看",
+  "parent": "xiaohongshu_login",
+  "capabilities": [
+    "highlight",
+    "detect"
+  ],
+  "page_patterns": [
+    "*xsec_token*",
+    "*error_code*",
+    "*qrcode*"
+  ],
+  "selectors": [
+    {
+      "css": ".qrcode-box",
+      "variant": "primary",
+      "score": 1.0,
+      "comment": "风控二维码容器"
+    },
+    {
+      "css": ".qrcode-img",
+      "variant": "backup",
+      "score": 0.9,
+      "comment": "二维码图片"
+    },
+    {
+      "css": ".tip-text",
+      "variant": "fallback",
+      "score": 0.8,
+      "comment": "提示文字"
+    }
+  ],
+  "metadata": {
+    "risk_level": "high",
+    "recovery_strategy": "manual",
+    "description": "触发了平台风控，需要App扫码或等待冷却期"
+  },
+  "operations": [
+    {
+      "type": "highlight",
+      "config": {
+        "style": "3px solid #ff0000",
+        "duration": 3000
+      }
+    }
+  ]
+}

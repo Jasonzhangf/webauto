@@ -6,7 +6,7 @@
 
 const UNIFIED_API = 'http://127.0.0.1:7701';
 const PROFILE = 'xiaohongshu_fresh';
-const KEYWORDS = ['手机膜', '雷军', '小米', '华为', '鸿蒙'];
+const KEYWORDS = ['小米', '雷军', 'iphone', '手机膜', '华为', '中国制造', '美国贸易'];
 
 async function verifyAnchor(selector, name) {
   console.log(`\n🔍 验证锚点: ${name} (${selector})`);

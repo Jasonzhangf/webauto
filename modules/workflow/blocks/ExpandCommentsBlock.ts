@@ -65,6 +65,22 @@ export async function execute(input: ExpandCommentsInput): Promise<ExpandComment
     return data.data || data;
   }
 
+  async function getCurrentUrl(): Promise<string> {
+    const response = await fetch(controllerUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'browser:execute',
+        payload: {
+          profile,
+          script: 'location.href',
+        },
+      }),
+    });
+    const data = await response.json();
+    return data.data?.result || data.result || '';
+  }
+
   function findContainer(tree: any, pattern: RegExp): any {
     if (!tree) return null;
     if (pattern.test(tree.id || tree.defId || '')) return tree;
@@ -91,7 +107,7 @@ export async function execute(input: ExpandCommentsInput): Promise<ExpandComment
   }
 
   try {
-    const { verifyAnchorByContainerId, getPrimarySelectorByContainerId, getContainerExtractorsById } = await import('./helpers/containerAnchors.ts');
+    const { verifyAnchorByContainerId, getPrimarySelectorByContainerId, getContainerExtractorsById } = await import('./helpers/containerAnchors.js');
 
     // 1. 基于容器 ID 锚定评论区（不依赖 container_tree 是否挂在 detail 下）
     const commentSection = { id: 'xiaohongshu_detail.comment_section' };
@@ -141,11 +157,18 @@ export async function execute(input: ExpandCommentsInput): Promise<ExpandComment
     }
 
     // 2. 基于容器 inspect 结果 + comment_item 容器定义提取评论列表
-
+  
     // 2.1 重新 inspect 评论区域，供锚点与终止标记 / 样本评论锚点使用
+    // 为避免 Controller 侧再次依赖 session-manager CLI，这里显式传入当前 URL
+    const currentUrl = await getCurrentUrl();
+    if (!currentUrl || typeof currentUrl !== 'string') {
+      throw new Error('无法确定当前页面 URL，ExpandComments 需要在详情页内运行');
+    }
+
     const inspected = await controllerAction('containers:inspect-container', {
       profile,
       containerId: commentSection.id,
+      url: currentUrl,
       maxChildren: 200
     });
 

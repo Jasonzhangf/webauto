@@ -201,7 +201,7 @@ export async function execute(input: ExtractDetailInput): Promise<ExtractDetailO
   }
 
   try {
-    const { verifyAnchorByContainerId, getPrimarySelectorByContainerId } = await import('./helpers/containerAnchors.ts');
+    const { verifyAnchorByContainerId, getPrimarySelectorByContainerId } = await import('./helpers/containerAnchors.js');
 
     // 1. 直接使用固定的详情子容器 ID（避免依赖 containers:match）
     const headerNode = { id: 'xiaohongshu_detail.header' };

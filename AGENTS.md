@@ -243,7 +243,57 @@ apps/floating-panel/
 6. 违反上述规则即视为阻塞性 Bug，立即回滚或修复。
 7. 浮窗 UI（apps/floating-panel）必须使用纯 ESM 架构，禁止混用 CJS。
 
+## 新增规则（2026-01-11）构建与注入约束
+
+### 8. 仅浏览器注入可用 JS，其余代码必须使用 TS 并走编译产物
+
+**原则：**
+- 除了必须注入浏览器运行时的脚本（例如 runtime 注入、页面 execute 脚本），其余业务代码一律使用 TypeScript 编写
+- 所有非注入代码必须通过编译产物执行，禁止直接在运行时引用 `.ts` 源文件
+- JS 文件仅允许出现在浏览器注入、构建产物或第三方依赖中
+**原因：**
+- 保持类型安全与可维护性
+- 统一构建链路，避免运行时 TS 解析差异
+
+**范围：**
+- services/、modules/、apps/ 的业务逻辑均须使用 TS 源码
+- runtime 注入、页面 evaluate 脚本等允许 JS（或模板字符串）
+- 任何 CLI/服务启动仅允许加载编译后的 `.js` 文件（dist/build）
+
+### 9. 服务编译入口与产物路径约束
+
+**原则：**
+- 服务构建唯一入口：`npm run build:services`（脚本：`scripts/build/run-services-build.mjs`）
+- 编译配置以 `tsconfig.services.json` 为准，产物输出目录为 `dist/`
+- 运行时只能加载编译后的 `dist` 产物，禁止直接执行 `.ts` 源文件
+
+**产物路径：**
+- services → `dist/services/*`
+- modules → `dist/modules/*`
+- sharedmodule → `dist/sharedmodule/*`
+
+**备注：**
+- `services/unified-api/register-core-usage.ts` 编译为 `dist/services/unified-api/register-core-usage.js`
+- `services/unified-api/server.ts` 必须引用 `./register-core-usage.js` 以保证运行时走 dist 产物
+
 ## 新增规则（2025-12-24）
+
+### 10. 【禁止使用 Chrome MCP】
+
+**原则：**
+- 禁止使用 Chrome DevTools MCP（chrome-devtools MCP）进行浏览器操作
+- 所有截图功能必须使用 Unified API 的 `browser:screenshot` 或容器系统自带的截图能力
+- 调试时使用 `controllerAction('browser:screenshot')` 或 `scripts/container-op.mjs <profile> <containerId> highlight` 进行可视化确认
+
+**原因：**
+- Chrome MCP 需要独立的浏览器实例，会与 WebAuto 的 Playwright 浏览器冲突
+- 使用系统自带的截图功能可以确保在同一个浏览器实例内操作
+- 避免多浏览器实例导致的资源浪费和状态不一致问题
+
+**范围：**
+- 所有调试脚本
+- 所有需要截图验证的操作
+- 所有需要视觉确认的步骤
 
 ### 0. 【最高优先级】永远禁止使用模糊匹配的进程终止命令
 
@@ -458,6 +508,31 @@ document.querySelector('.far-away-element').click();
 **违规处理：**
 - 发现离屏操作立即标记为 **阻塞性 Bug**
 - 必须修复并通过 Rect 验证后方可合并
+
+### 9. 【新增】禁止通过代码构建或抽取链接进行导航
+
+**原则：**
+- 允许模拟用户行为的点击/输入/回车等交互；
+- 禁止通过代码构建 URL 或抽取链接后直接导航；
+- 禁止在脚本/Block 中读取 href 后用 `window.location.*` 或 `goto` 访问；
+- 详情页只能通过页面内点击进入，由页面自然生成带 token 的 URL；
+- 搜索结果页只能通过搜索框输入 + 回车触发，禁止拼接 `/search_result` URL；
+- 登录页跳转由浏览器/页面自身行为触发，自动化脚本不得主动构造登录 URL。
+
+**允许：**
+- 在页面内 **点击** 搜索结果卡片或封面；
+- 在页面内 **点击** “更多评论/展开回复” 等可见按钮；
+- 通过输入框模拟人工输入并触发回车。
+
+**禁止示例：**
+```js
+// ❌ 构建搜索结果页
+window.location.href = `https://www.xiaohongshu.com/search_result?keyword=${kw}`;
+
+// ❌ 读取 href 后直接访问详情
+const link = el.getAttribute('href');
+window.location.assign(link);
+```
 
 ---
 

@@ -225,7 +225,7 @@ export async function execute(input: WarmupCommentsInput): Promise<WarmupComment
   }
 
   try {
-    const { verifyAnchorByContainerId, getPrimarySelectorByContainerId } = await import('./helpers/containerAnchors.ts');
+    const { verifyAnchorByContainerId, getPrimarySelectorByContainerId } = await import('./helpers/containerAnchors.js');
 
     const commentSectionId = 'xiaohongshu_detail.comment_section';
     const showMoreContainerId = 'xiaohongshu_detail.comment_section.show_more_button';
@@ -368,7 +368,7 @@ export async function execute(input: WarmupCommentsInput): Promise<WarmupComment
             clientHeight: scrollContainer.clientHeight
           };
         })()`,
-      }).catch(() => null);
+      }).catch((): null => null);
 
       const refreshedFocus =
         (refreshFocusResult as any)?.result || (refreshFocusResult as any)?.data?.result || refreshFocusResult;
@@ -383,7 +383,7 @@ export async function execute(input: WarmupCommentsInput): Promise<WarmupComment
           const opResult = await controllerAction('container:operation', {
             containerId: showMoreContainerId,
             operationId: 'click',
-            config: { selector: showMoreSelector },
+            config: { selector: showMoreSelector, useSystemMouse: true },
             sessionId: profile,
           });
           const opPayload = (opResult as any).data || opResult;

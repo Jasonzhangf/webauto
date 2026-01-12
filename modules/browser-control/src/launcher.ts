@@ -710,8 +710,9 @@ function killBrowserServiceProcesses() {
         { stdio: 'ignore' },
       );
     } else {
-      execSync('pkill -f "libs/browser/remote-service.js" || true', { stdio: 'ignore' });
-      execSync('pkill -f "dist/services/browser-service/index.js" || true', { stdio: 'ignore' });
+      // 通过端口精确清理，避免误杀其他 node 进程
+      // Browser Service 运行在 7704 端口
+      killPort(7704);
     }
   } catch {}
 }
@@ -732,17 +733,9 @@ function killFloatingPanelProcesses() {
       );
       execSync('taskkill /F /IM electronmon.exe || true', { stdio: 'ignore' });
     } else {
-      const patterns = [
-        'apps/floating-panel/node_modules/electron/dist/Electron.app',
-        'apps/floating-panel/electron/main.js',
-        'WebAuto Floating Console',
-        'electronmon',
-      ];
-      for (const pattern of patterns) {
-        try {
-          execSync(`pkill -f "${pattern}" || true`, { stdio: 'ignore' });
-        } catch {}
-      }
+      // 不再使用 pkill -f 模糊匹配，仅依赖 PID 文件精确终止
+      // 如果 PID 文件不存在或无效，则放弃清理，避免误杀
+      console.log('Floating Panel 进程已通过 PID 文件清理（如存在）');
     }
   } catch {}
   clearFloatingPanelPid();

@@ -69,54 +69,28 @@ async function startProcess(cmd, args = [], opts = {}) {
 }
 
 async function ensurePortFree(port, name) {
-  // 1. 先尝试 0.5s 内正常关闭可能残留的进程
+  // 仅复用：端口健康即视为已运行；禁止自动 kill
   try {
-    const list = execSync(`lsof -ti :${port}`, { encoding: 'utf8' }).trim().split('\n').filter(Boolean);
-    if (list.length) {
-      log(`${name} 端口 ${port} 被占用，准备清理以下进程:`);
-      for (const pid of list) {
-        try {
-          execSync(`kill -TERM ${pid}`);
-          log(`已发送 SIGTERM 给 PID ${pid}`);
-        } catch {}
-      }
-      await sleep(500);
-      const remain = execSync(`lsof -ti :${port}`, { encoding: 'utf8' }).trim().split('\n').filter(Boolean);
-      for (const pid of remain) {
-        try {
-          execSync(`kill -KILL ${pid}`);
-          log(`已强制杀掉 PID ${pid}`);
-        } catch {}
-      }
-      await sleep(1000);
+    const res = await fetch(`http://127.0.0.1:${port}/health`);
+    if (res.ok) {
+      log(`✅ ${name} (:${port}) 已运行且健康，跳过启动`);
+      return 'running';
     }
   } catch {}
-  // 2. 如仍被占用，仅杀掉该端口的进程（精确匹配）
+
+  // 未监听则视为可用；被占用但不健康则报错
   try {
     const list = execSync(`lsof -ti :${port}`, { encoding: 'utf8' }).trim().split('\n').filter(Boolean);
-    if (list.length) {
-      log(`${name} 端口 ${port} 被占用，准备清理以下进程:`);
-      for (const pid of list) {
-        try {
-          execSync(`kill -TERM ${pid}`);
-          log(`已发送 SIGTERM 给 PID ${pid}`);
-        } catch {}
-      }
-      await sleep(1500);
-      const remain = execSync(`lsof -ti :${port}`, { encoding: 'utf8' }).trim().split('\n').filter(Boolean);
-      for (const pid of remain) {
-        try {
-          execSync(`kill -KILL ${pid}`);
-          log(`已强制杀掉 PID ${pid}`);
-        } catch {}
-      }
-      await sleep(500);
+    if (list.length > 0) {
+      throw new Error(`${name} 端口 ${port} 已被占用但健康检查失败，请手动处理后重试。`);
     }
-  } catch {}
-  try {
-    execSync(`lsof -ti :${port}`, { encoding: 'utf8' });
-    throw new Error(`${name} 端口 ${port} 仍被占用，且未识别为本仓库进程。`);
-  } catch {}
+  } catch (err) {
+    if (err instanceof Error && err.message.includes('已被占用')) {
+      throw err;
+    }
+  }
+
+  return 'free';
 }
 
 async function waitForHealth(port, name) {
@@ -327,16 +301,14 @@ export async function startAll({ profile, url, headless }) {
   console.log('╚══════════════════════════════════════╝');
   console.log(`参数: profile=${profile} url=${url} headless=${headless}`);
 
-  // 在真正启动前，先清理可能残留的“本仓库”子进程
-  cleanupPids();
+  // daemon 模式：不再在 launcher 内部启动服务
+  const unifiedStatus = await ensurePortFree(CONFIG.ports.unified, 'Unified API');
+  const browserStatus = await ensurePortFree(CONFIG.ports.browser, 'Browser Service');
 
-  await ensurePortFree(CONFIG.ports.unified, 'Unified API');
-  await ensurePortFree(CONFIG.ports.browser, 'Browser Service');
+  if (unifiedStatus !== 'running' || browserStatus !== 'running') {
+    throw new Error('核心服务未启动，请先运行: node scripts/core-daemon.mjs start');
+  }
 
-  log('=== 启动 Unified API ===');
-  const unified = await startProcess('node', ['services/unified-api/server.mjs']);
-  log('=== Unified API 进程启动，等待健康检查 ===');
-  await waitForHealth(CONFIG.ports.unified, 'Unified API');
   try {
     await fetch(`http://127.0.0.1:${CONFIG.ports.unified}/v1/internal/events/browser-mode`, {
       method: 'POST',
@@ -344,15 +316,6 @@ export async function startAll({ profile, url, headless }) {
       body: JSON.stringify({ headless })
     }).catch(() => {});
   } catch {}
-
-  log('=== 启动 Browser Service ===');
-  const browser = await startProcess('node', ['libs/browser/remote-service.js',
-    '--host', '127.0.0.1', '--port', CONFIG.ports.browser, '--bus-url', `ws://127.0.0.1:${CONFIG.ports.unified}/bus`,
-  ], {
-    env: { ...process.env, WEBAUTO_SKIP_HEALTH_CHECK: '1' }
-  });
-  log('=== Browser Service 进程启动，等待健康检查 ===');
-  await waitForHealth(CONFIG.ports.browser, 'Browser Service');
 
   console.log('\n[创建浏览器会话]');
   const startResult = await sendBrowserCommand({
@@ -427,8 +390,7 @@ export async function startAll({ profile, url, headless }) {
   // 优雅退出
   const cleanup = () => {
     console.log('\n[launcher] 收到退出信号，正在清理...');
-    cleanupPids();
-    // 防止子进程/交互脚本把终端留在 raw 模式，导致上下键等行为异常
+    // 不再主动杀掉子进程，保持 detached session
     try {
       execSync('stty sane', { stdio: 'ignore' });
     } catch {}
@@ -480,7 +442,7 @@ const { profile, url, headless } = parseArgs(process.argv);
 
 startAll({ profile, url, headless }).catch(err => {
   console.error(`启动失败: ${err.message}`);
-  cleanupPids();
+  // 不再主动杀掉子进程，保持 detached session
   process.exit(1);
 });
 

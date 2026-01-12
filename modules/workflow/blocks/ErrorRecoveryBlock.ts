@@ -63,7 +63,7 @@ export async function execute(input: ErrorRecoveryInput): Promise<ErrorRecoveryO
 
   async function verifyStage(stage: 'search' | 'home'): Promise<boolean> {
     try {
-      const { verifyAnchorByContainerId } = await import('./helpers/containerAnchors.ts');
+      const { verifyAnchorByContainerId } = await import('./helpers/containerAnchors.js');
 
       const targetContainerId =
         stage === 'search'
@@ -94,7 +94,7 @@ export async function execute(input: ErrorRecoveryInput): Promise<ErrorRecoveryO
 
     // 0. 只有在确认命中详情 modal 锚点的前提下，才允许执行关闭/回退操作，避免在错误页面上盲动。
     try {
-      const { verifyAnchorByContainerId } = await import('./helpers/containerAnchors.ts');
+      const { verifyAnchorByContainerId } = await import('./helpers/containerAnchors.js');
       const detailAnchor = await verifyAnchorByContainerId(
         'xiaohongshu_detail.modal_shell',
         sessionId,
@@ -126,7 +126,7 @@ export async function execute(input: ErrorRecoveryInput): Promise<ErrorRecoveryO
 
       // 1.1 关闭后直接通过搜索结果列表锚点判断是否已回到安全阶段
       try {
-        const { verifyAnchorByContainerId } = await import('./helpers/containerAnchors.ts');
+        const { verifyAnchorByContainerId } = await import('./helpers/containerAnchors.js');
         const anchor = await verifyAnchorByContainerId(
           'xiaohongshu_search.search_result_list',
           sessionId,
@@ -151,16 +151,16 @@ export async function execute(input: ErrorRecoveryInput): Promise<ErrorRecoveryO
       );
     }
 
-    // 2) 兜底：在已确认处于详情页的前提下，仅执行一次 history.back()，
-    // 成功与否完全由“搜索结果列表锚点是否出现”决定，不再依赖 URL 中的 /search_result。
+    // 2) 兜底：再次发送 ESC 键关闭详情页
     try {
       await controllerAction('browser:execute', {
         profile: sessionId,
-        script: 'window.history.back()',
+        script:
+          'document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", code: "Escape", keyCode: 27, which: 27, bubbles: true }))',
       });
-      await new Promise((resolve) => setTimeout(resolve, 2000));
+      await new Promise((resolve) => setTimeout(resolve, 1500));
 
-      const { verifyAnchorByContainerId } = await import('./helpers/containerAnchors.ts');
+      const { verifyAnchorByContainerId } = await import('./helpers/containerAnchors.js');
       const anchor = await verifyAnchorByContainerId(
         'xiaohongshu_search.search_result_list',
         sessionId,
@@ -169,35 +169,42 @@ export async function execute(input: ErrorRecoveryInput): Promise<ErrorRecoveryO
         1000,
       );
       const ok = anchor.found && anchor.rect && anchor.rect.width > 0 && anchor.rect.height > 0;
-      return { success: ok, method: 'history-back' };
+      return { success: ok, method: 'esc-key-double' };
     } catch (err: any) {
       console.warn(
-        `[ErrorRecovery] history.back() fallback failed: ${err?.message || err}`,
+        `[ErrorRecovery] second ESC fallback failed: ${err?.message || err}`,
       );
-      return { success: false, method: 'history-back-error' };
+      return { success: false, method: 'esc-key-double-error' };
     }
   }
 
   async function navigateTo(target: 'search' | 'home'): Promise<void> {
+    // 禁止使用 history.back() 或 URL 构造进行导航
+    // 要求通过容器点击或用户交互完成页面切换
     if (target === 'search') {
-      await controllerAction('browser:execute', {
-        profile: sessionId,
-        script: 'history.back()'
-      });
-      await new Promise(resolve => setTimeout(resolve, 3000));
+      // 尝试通过点击搜索框重新进入搜索状态
+      try {
+        await controllerAction('browser:execute', {
+          profile: sessionId,
+          script: `
+            const searchBox = document.querySelector('.search-input, input[placeholder*="搜索"]');
+            if (searchBox) {
+              searchBox.focus();
+              searchBox.click();
+              'search-box-focused';
+            }
+            'search-box-not-found';
+          `
+        });
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      } catch (err) {
+        console.warn('[ErrorRecovery] failed to focus search box:', err);
+      }
       return;
     }
 
-    await controllerAction('browser:execute', {
-      profile: sessionId,
-      script: `(() => {
-        if (!location.href.includes('xiaohongshu.com')) {
-          window.location.href = 'https://www.xiaohongshu.com';
-        }
-      })();`
-    });
-
-    await new Promise(resolve => setTimeout(resolve, 3000));
+    // 禁止脚本直接导航回首页，要求人工确认/操作
+    console.warn('[ErrorRecovery] Skip auto navigation to home (manual action required).');
   }
 
   console.log(`[ErrorRecovery] 从 ${fromStage} 恢复到 ${targetStage}...`);

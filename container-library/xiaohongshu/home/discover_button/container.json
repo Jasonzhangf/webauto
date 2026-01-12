@@ -1,0 +1,47 @@
+{
+  "id": "xiaohongshu_home.discover_button",
+  "name": "发现按钮",
+  "type": "button",
+  "description": "主页导航栏中的'发现'按钮，用于返回主页/推荐流",
+  "parent": "xiaohongshu_home",
+  "capabilities": [
+    "highlight",
+    "click"
+  ],
+  "operations": [
+    {
+      "type": "highlight",
+      "config": {
+        "style": "2px solid #4285f4",
+        "duration": 1500
+      }
+    },
+    {
+      "type": "click",
+      "config": {
+        "target": "self",
+        "comment": "点击发现按钮返回主页"
+      }
+    }
+  ],
+  "selectors": [
+    {
+      "css": "a[href*='/explore?channel_id=homefeed_recommend']",
+      "variant": "primary",
+      "score": 1.0,
+      "comment": "发现按钮完整链接"
+    },
+    {
+      "css": "ul.channel-list a[href^='/explore'], #side-bar a[href^='/explore']",
+      "variant": "backup",
+      "score": 0.9,
+      "comment": "侧边栏发现链接"
+    }
+  ],
+  "metadata": {
+    "role": "navigation",
+    "stable": true,
+    "comment": "这是小红书最可靠的回退方式之一，比 history.back() 更稳定",
+    "exampleText": "发现"
+  }
+}

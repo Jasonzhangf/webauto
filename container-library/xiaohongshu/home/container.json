@@ -12,7 +12,10 @@
   ],
   "children": [
     "xiaohongshu_home.login_anchor",
-    "xiaohongshu_home.feed_list"
+    "xiaohongshu_home.feed_list",
+    "xiaohongshu_home.discover_button",
+    "xiaohongshu_home.search_button",
+    "xiaohongshu_home.search_input"
   ],
   "selectors": [
     {

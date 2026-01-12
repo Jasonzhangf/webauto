@@ -165,7 +165,7 @@ export async function execute(input: LoginRecoveryInput): Promise<LoginRecoveryO
           
           // 重新验证登录状态
           const loggedIn = await checkLoginByContainer();
-          resolve(loggedIn);
+          resolve(loggedIn.status === 'logged_in');
         } else {
           console.error('[LoginRecovery] Phase1 登录脚本失败，退出码:', code);
           resolve(false);

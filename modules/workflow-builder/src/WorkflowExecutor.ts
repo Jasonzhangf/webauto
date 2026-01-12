@@ -1,7 +1,7 @@
-import { WorkflowEventEmitter } from './WorkflowEmitter.ts';
-import { WorkflowLogger } from './WorkflowLogger.ts';
+import { WorkflowEventEmitter } from './WorkflowEmitter.js';
+import { WorkflowLogger } from './WorkflowLogger.js';
 import WebSocket from 'ws';
-import { AutoScrollStrategy } from '../../../libs/containers/src/strategies/AutoScrollStrategy.ts';
+import { AutoScrollStrategy } from '../../../libs/containers/src/strategies/AutoScrollStrategy.js';
 import type {
   WorkflowPhase,
   WorkflowStatus,

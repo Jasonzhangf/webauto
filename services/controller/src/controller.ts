@@ -5,6 +5,10 @@ import os from 'node:os';
 import { spawn } from 'node:child_process';
 import WebSocket from 'ws';
 import { logDebug } from '../../../modules/logging/src/index.js';
+import {
+  normalizePayload,
+  type NormalizedPayload
+} from './payload-normalizer.js';
 
 interface UiControllerOptions {
   repoRoot?: string;
@@ -153,7 +157,15 @@ export class UiController {
     console.log(`[controller] runCliCommand ${moduleName} ${scriptPath} ${args.join(' ')}`);
 
     return new Promise((resolve, reject) => {
-      const child = spawn('npx', ['tsx', scriptPath, ...args]);
+      // Check if scriptPath ends with .js, if so run with node directly
+      const isJs = scriptPath.endsWith('.js');
+      const cmd = isJs ? 'node' : 'npx';
+      const cmdArgs = isJs ? [scriptPath, ...args] : ['tsx', scriptPath, ...args];
+      
+      const child = spawn(cmd, cmdArgs, {
+        cwd: this.repoRoot,
+        env: process.env
+      });
       
       let stdout = '';
       let stderr = '';
@@ -207,8 +219,10 @@ export class UiController {
       case 'operations:run':
         return this.handleOperationRun(payload);
      case 'containers:inspect':
+     case 'containers:get':
        return this.handleContainerInspect(payload);
      case 'containers:inspect-container':
+     case 'containers:get-container':
        return this.handleContainerInspectContainer(payload);
      case 'containers:inspect-branch':
        return this.handleContainerInspectBranch(payload);
@@ -221,6 +235,7 @@ export class UiController {
      case 'containers:update-operations':
        return this.handleContainerUpdateOperations(payload);
      case 'containers:match':
+     case 'containers:status':
        return this.handleContainerMatch(payload);
     case 'browser:highlight':
       return this.handleBrowserHighlight(payload);
@@ -246,22 +261,18 @@ export class UiController {
   }
 
   async handleSessionCreate(payload: ActionPayload = {}) {
-    if (!payload.profile) {
-      throw new Error('缺少 profile');
-    }
+    const { profile, url, headless, keepOpen } = normalizePayload(payload, { required: ['profile'] });
     logDebug('controller', 'session:create', { payload });
-    const args = ['create', '--profile', payload.profile];
-    if (payload.url) args.push('--url', payload.url);
-    if (payload.headless !== undefined) args.push('--headless', String(payload.headless));
-    if (payload.keepOpen !== undefined) args.push('--keep-open', String(payload.keepOpen));
+    const args = ['create', '--profile', profile];
+    if (url) args.push('--url', url);
+    if (headless !== undefined) args.push('--headless', String(headless));
+    if (keepOpen !== undefined) args.push('--keep-open', String(keepOpen));
     return this.runCliCommand('session-manager', args);
   }
 
   async handleSessionDelete(payload: ActionPayload = {}) {
-    if (!payload.profile) {
-      throw new Error('缺少 profile');
-    }
-    return this.runCliCommand('session-manager', ['delete', '--profile', payload.profile]);
+    const { profile } = normalizePayload(payload, { required: ['profile'] });
+    return this.runCliCommand('session-manager', ['delete', '--profile', profile]);
   }
 
   async handleLogsStream(payload: ActionPayload = {}) {
@@ -283,16 +294,15 @@ export class UiController {
   }
 
   async handleContainerInspect(payload: ActionPayload = {}) {
-    const profile = payload.profile;
-    if (!profile) throw new Error('缺少 profile');
+    const { profile, url, maxDepth, maxChildren, containerId, rootSelector } = normalizePayload(payload, { required: ['profile'] });
     logDebug('controller', 'containers:inspect', { profile, payload });
     const context = await this.captureInspectorSnapshot({
       profile,
-      url: payload.url,
-      maxDepth: payload.maxDepth,
-      maxChildren: payload.maxChildren,
-      containerId: payload.containerId,
-      rootSelector: payload.rootSelector,
+      url,
+      maxDepth,
+      maxChildren,
+      containerId,
+      rootSelector,
     });
     const snapshot = context.snapshot;
     return {
@@ -309,15 +319,14 @@ export class UiController {
   }
 
   async handleContainerInspectContainer(payload: ActionPayload = {}) {
-    if (!payload.profile) throw new Error('缺少 profile');
-    if (!payload.containerId) throw new Error('缺少 containerId');
+    const { profile, containerId, url, maxDepth, maxChildren, rootSelector } = normalizePayload(payload, { required: ['profile', 'containerId'] });
     const context = await this.captureInspectorSnapshot({
-      profile: payload.profile,
-      url: payload.url,
-      maxDepth: payload.maxDepth,
-      maxChildren: payload.maxChildren,
-      containerId: payload.containerId,
-      rootSelector: payload.rootSelector,
+      profile,
+      url,
+      maxDepth,
+      maxChildren,
+      containerId,
+      rootSelector,
     });
     return {
       success: true,
@@ -331,16 +340,15 @@ export class UiController {
   }
 
   async handleContainerInspectBranch(payload: ActionPayload = {}) {
-    if (!payload.profile) throw new Error('缺少 profile');
-    if (!payload.path) throw new Error('缺少 DOM 路径');
-    logDebug('controller', 'containers:inspect:branch', { profile: payload.profile, path: payload.path, payload });
+    const { profile, path, url, maxDepth, maxChildren, rootSelector } = normalizePayload(payload, { required: ['profile', 'path'] });
+    logDebug('controller', 'containers:inspect:branch', { profile, path, payload });
     const context = await this.captureInspectorBranch({
-      profile: payload.profile,
-      url: payload.url,
-      path: payload.path,
-      rootSelector: payload.rootSelector,
-      maxDepth: payload.maxDepth,
-      maxChildren: payload.maxChildren,
+      profile,
+      url,
+      path,
+      rootSelector,
+      maxDepth,
+      maxChildren,
     });
     return {
       success: true,
@@ -375,7 +383,8 @@ export class UiController {
     const filtered = existingSelectors.filter((item: any) => (item?.css || '').trim() && (item.css || '').trim() !== selector);
     normalizedDefinition.selectors = [{ css: selector, variant: 'primary', score: 1 }, ...filtered];
     await this.writeUserContainerDefinition(siteKey, containerId, normalizedDefinition);
-    return this.handleContainerInspect({ profile: payload.profile, url: payload.url });
+    const { profile, url } = normalizePayload(payload, { required: ['profile'] });
+    return this.handleContainerInspect({ profile, url });
   }
 
   async handleContainerCreateChild(payload: ActionPayload = {}) {
@@ -445,12 +454,13 @@ export class UiController {
     await this.writeUserContainerDefinition(siteKey, containerId, normalizedChild);
     await this.writeUserContainerDefinition(siteKey, parentId, nextParent);
     // 正确流程：写入定义后立即进行容器匹配，并通过 containers.matched 事件推送最新树
+    const { profile, url, maxDepth, maxChildren, rootSelector } = normalizePayload(payload, { required: ['profile'] });
     return this.handleContainerMatch({
-      profile: payload.profile,
-      url: payload.url,
-      maxDepth: payload.maxDepth,
-      maxChildren: payload.maxChildren,
-      rootSelector: payload.rootSelector,
+      profile,
+      url,
+      maxDepth,
+      maxChildren,
+      rootSelector,
     });
   }
 
@@ -487,7 +497,8 @@ export class UiController {
       delete next.nickname;
     }
     await this.writeUserContainerDefinition(siteKey, containerId, next);
-    return this.handleContainerInspect({ profile: payload.profile, url: payload.url });
+    const { profile, url } = normalizePayload(payload, { required: ['profile'] });
+    return this.handleContainerInspect({ profile, url });
   }
 
   async handleContainerUpdateOperations(payload: ActionPayload = {}) {
@@ -509,23 +520,23 @@ export class UiController {
       operations,
     };
     await this.writeUserContainerDefinition(siteKey, containerId, next);
-    return this.handleContainerInspect({ profile: payload.profile, url: payload.url, containerId });
+    const { profile, url } = normalizePayload(payload, { required: ['profile'] });
+    return this.handleContainerInspect({ profile, url, containerId });
   }
 
 
   async handleContainerMatch(payload: ActionPayload = {}) {
-    const profile = payload.profileId || payload.profile;
-    if (!profile) throw new Error('缺少 profile');
+    const { profile, url, maxDepth, maxChildren, rootSelector } = normalizePayload(payload, { required: ['profile'] });
 
-    logDebug('controller', 'containers:match', { profile, url: payload.url, payload });
+    logDebug('controller', 'containers:match', { profile, url, payload });
     
     try {
       const context = await this.captureInspectorSnapshot({
         profile,
-        url: payload.url,
-        maxDepth: payload.maxDepth || 2,
-        maxChildren: payload.maxChildren || 5,
-        rootSelector: payload.rootSelector,
+        url,
+        maxDepth: maxDepth || 2,
+        maxChildren: maxChildren || 5,
+        rootSelector,
       });
       
       const snapshot = context.snapshot;
@@ -569,21 +580,13 @@ export class UiController {
     }
   }
   async handleBrowserHighlight(payload: ActionPayload = {}) {
-    const profile = payload.profile || payload.sessionId;
-    const selector = (payload.selector || '').trim();
-    if (!profile) {
-      throw new Error('缺少会话/ profile 信息');
-    }
-    if (!selector) {
-      throw new Error('缺少 selector');
-    }
-    const options = payload.options || {};
+    const { profile, selector, style, duration, channel, sticky, maxMatches } = normalizePayload(payload, { required: ['profile', 'selector'] });
     const highlightOpts: HighlightOptions = {
-      style: options.style,
-      duration: options.duration,
-      channel: options.channel || payload.channel,
-      sticky: options.sticky,
-      maxMatches: options.maxMatches,
+      style,
+      duration,
+      channel,
+      sticky,
+      maxMatches,
     };
     try {
       const result = await this.sendHighlightViaWs(profile, selector, highlightOpts);
@@ -606,12 +609,9 @@ export class UiController {
   }
 
   async handleBrowserClearHighlight(payload: ActionPayload = {}) {
-    const profile = payload.profile || payload.sessionId;
-    if (!profile) {
-      throw new Error('缺少会话/ profile 信息');
-    }
+    const { profile, channel } = normalizePayload(payload, { required: ['profile'] });
     try {
-      const result = await this.sendClearHighlightViaWs(profile, payload.channel || payload.options?.channel || null);
+      const result = await this.sendClearHighlightViaWs(profile, channel || null);
       this.messageBus?.publish?.('ui.highlight.result', {
         success: true,
         selector: null,
@@ -630,16 +630,9 @@ export class UiController {
  }
 
   async handleBrowserExecute(payload: ActionPayload = {}) {
-    const profile = payload.profile || payload.sessionId;
-    const script = payload.script || payload.code || '';
-    if (!profile) {
-      throw new Error('缺少会话/ profile 信息');
-    }
-    if (!script) {
-      throw new Error('缺少 script 参数');
-    }
+    const { profile, script } = normalizePayload(payload, { required: ['profile', 'script'] });
     try {
-      const result = await this.sendExecuteViaWs(profile, script);
+      const result = await this.sendExecuteViaWs(profile, script!);
       return { success: true, data: result };
     } catch (err: any) {
       const errorMessage = err?.message || '执行脚本失败';
@@ -648,43 +641,35 @@ export class UiController {
   }
 
   async handleBrowserHighlightDomPath(payload: ActionPayload = {}) {
-    const profile = payload.profile || payload.sessionId;
-    const domPath = (payload.path || payload.domPath || payload.dom_path || '').trim();
-    if (!profile) {
-      throw new Error('缺少会话/ profile 信息');
-    }
-    if (!domPath) {
-      throw new Error('缺少 DOM 路径');
-    }
+    const { profile, path, url, rootSelector, style, sticky, duration, channel } = normalizePayload(payload, { required: ['profile', 'path'] });
     
     // 先加载 DOM 分支确保元素存在
-    if (domPath !== 'root' && payload.url) {
+    if (path !== 'root' && url) {
       try {
         await this.fetchDomBranchFromService({
           sessionId: profile,
-          url: payload.url,
-          path: domPath,
-          rootSelector: payload.rootSelector || payload.root_selector,
+          url,
+          path,
+          rootSelector,
           maxDepth: 2,
           maxChildren: 10,
         });
-        logDebug('controller', 'highlight-dom-path', { message: 'DOM branch loaded', path: domPath });
+        logDebug('controller', 'highlight-dom-path', { message: 'DOM branch loaded', path });
       } catch (err: any) {
-        logDebug('controller', 'highlight-dom-path', { message: 'Failed to load DOM branch', path: domPath, error: err.message });
+        logDebug('controller', 'highlight-dom-path', { message: 'Failed to load DOM branch', path, error: err.message });
       }
     }
 
-    const options = payload.options || {};
-    const channel = options.channel || payload.channel || 'hover-dom';
-    const style = options.style || '2px solid rgba(96, 165, 250, 0.95)';
-    const sticky = typeof options.sticky === 'boolean' ? options.sticky : true;
+    const finalChannel = channel || 'hover-dom';
+    const finalStyle = style || '2px solid rgba(96, 165, 250, 0.95)';
+    const finalSticky = typeof sticky === 'boolean' ? sticky : true;
     try {
-      const result = await this.sendHighlightDomPathViaWs(profile, domPath, {
-        channel,
-        style,
-        sticky,
-        duration: options.duration,
-        rootSelector: options.rootSelector || payload.rootSelector || payload.root_selector || null,
+      const result = await this.sendHighlightDomPathViaWs(profile, path!, {
+        channel: finalChannel,
+        style: finalStyle,
+        sticky: finalSticky,
+        duration,
+        rootSelector: rootSelector || null,
       } as any);
       this.messageBus?.publish?.('ui.highlight.result', {
         success: true,
@@ -704,10 +689,7 @@ export class UiController {
   }
 
   async handleBrowserCancelDomPick(payload: ActionPayload = {}) {
-    const profile = payload.profile || payload.sessionId;
-    if (!profile) {
-      throw new Error('缺少会话/ profile 信息');
-    }
+    const { profile } = normalizePayload(payload, { required: ['profile'] });
     try {
       const data = await this.sendCancelDomPickViaWs(profile);
       this.messageBus?.publish?.('ui.domPicker.result', {
@@ -729,16 +711,12 @@ export class UiController {
   }
 
   async handleBrowserPickDom(payload: ActionPayload = {}) {
-    const profile = payload.profile || payload.sessionId;
-    if (!profile) {
-      throw new Error('缺少会话/ profile 信息');
-    }
-    const timeout = Math.min(Math.max(Number(payload.timeout) || 25000, 3000), 60000);
-    const rootSelector = payload.rootSelector || payload.root_selector || null;
+    const { profile, timeout, rootSelector } = normalizePayload(payload, { required: ['profile'] });
+    const finalTimeout = Math.min(Math.max(Number(timeout) || 25000, 3000), 60000);
     const startedAt = Date.now();
     try {
       const result = await this.sendDomPickerViaWs(profile, {
-        timeout,
+        timeout: finalTimeout,
         rootSelector,
       });
       this.messageBus?.publish?.('ui.domPicker.result', {
@@ -757,13 +735,9 @@ export class UiController {
 
   // v2 DOM pick：直接暴露 dom_path + selector 给 UI
   async handleDomPick2(payload: ActionPayload = {}) {
-    const profile = payload.profile || payload.sessionId;
-    if (!profile) {
-      throw new Error('缺少会话/ profile 信息');
-    }
-    const timeout = Math.min(Math.max(Number(payload.timeout) || 25000, 3000), 60000);
-    const rootSelector = payload.rootSelector || payload.root_selector || null;
-    const result = await this.sendDomPickerViaWs(profile, { timeout, rootSelector });
+    const { profile, timeout, rootSelector } = normalizePayload(payload, { required: ['profile'] });
+    const finalTimeout = Math.min(Math.max(Number(timeout) || 25000, 3000), 60000);
+    const result = await this.sendDomPickerViaWs(profile, { timeout: finalTimeout, rootSelector });
     // 统一输出结构：domPath + selector
     return {
       success: true,
@@ -1047,9 +1021,18 @@ export class UiController {
 
   async captureInspectorSnapshot(options: SnapshotOptions = {}) {
     const profile = options.profile;
-    const sessions = await this.fetchSessions();
-    const targetSession = profile ? this.findSessionByProfile(sessions, profile) : sessions[0] || null;
-    const sessionId = targetSession?.session_id || targetSession?.sessionId || profile || null;
+
+    // 优先使用调用方提供的 URL，避免为了 containers:match 再额外跑一次 session-manager CLI
+    // 只有在 URL 缺失时才回退到 CLI 查询当前会话列表。
+    let targetSession: Session | null = null;
+    let sessions: Session[] = [];
+
+    if (!options.url) {
+      sessions = await this.fetchSessions();
+      targetSession = profile ? this.findSessionByProfile(sessions, profile) : sessions[0] || null;
+    }
+
+    const sessionId = profile || targetSession?.session_id || targetSession?.sessionId || null;
     const profileId = profile || targetSession?.profileId || targetSession?.profile_id || sessionId || null;
     const targetUrl = options.url || targetSession?.current_url || targetSession?.currentUrl;
     const requestedContainerId = (options as any).containerId || (options as any).rootContainerId;
@@ -1272,12 +1255,8 @@ export class UiController {
   }
 
   async handleContainerOperation(payload: ActionPayload = {}) {
-    const { containerId, operationId, config, sessionId } = payload;
+    const { containerId, operationId, config, profile } = normalizePayload(payload, { required: ['containerId', 'operationId', 'profile'] });
     
-    if (!sessionId) return { success: false, error: 'sessionId required' };
-    if (!containerId) return { success: false, error: 'containerId required' };
-    if (!operationId) return { success: false, error: 'operationId required' };
-
     // Determine target URL for HTTP post to container endpoint
     const port = process.env.WEBAUTO_UNIFIED_PORT || 7701;
     const host = '127.0.0.1';
@@ -1289,8 +1268,8 @@ export class UiController {
         body: JSON.stringify({
           operationId,
           config,
-          sessionId
-        })
+          sessionId: profile
+        } as Record<string, any>)
       });
       
       if (!response.ok) {
@@ -1306,7 +1285,7 @@ export class UiController {
   private emitContainerAppearEvents(containerTree: any, context: { sessionId?: string; profileId?: string; url?: string; snapshot?: any }) {
     if (!this.messageBus?.publish) return;
     if (!containerTree || !containerTree.id) {
-      logDebug('controller', 'emitContainerAppearEvents', 'No valid container tree provided');
+      logDebug('controller', 'emitContainerAppearEvents', { message: 'No valid container tree provided' });
       return;
     }
 

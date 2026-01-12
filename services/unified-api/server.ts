@@ -13,9 +13,14 @@ import { EventBus, globalEventBus } from '../../libs/operations-framework/src/ev
 import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
-// import { SessionManager } from '../browser-service/SessionManager.js';
+import { getActionUsage, getAllUsages } from '../../modules/api-usage/src/index.js';
+import registerCoreUsage from './register-core-usage.js';
 import { RemoteSessionManager } from './RemoteSessionManager.js';
 import { ensureBuiltinOperations } from '../../modules/operations/src/builtin.js';
+
+// Ensure builtin operations are registered BEFORE creating OperationExecutor
+ensureBuiltinOperations();
+import { getStateRegistry } from './state-registry.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -31,11 +36,11 @@ const defaultHttpHost = process.env.WEBAUTO_BROWSER_HTTP_HOST || '127.0.0.1';
 const defaultHttpPort = Number(process.env.WEBAUTO_BROWSER_HTTP_PORT || 7704);
 const defaultHttpProtocol = process.env.WEBAUTO_BROWSER_HTTP_PROTO || 'http';
 const cliTargets = {
-  'browser-control': path.join(repoRoot, 'modules/browser-control/src/cli.ts'),
-  'session-manager': path.join(repoRoot, 'modules/session-manager/src/cli.ts'),
-  logging: path.join(repoRoot, 'modules/logging/src/cli.ts'),
-  operations: path.join(repoRoot, 'modules/operations/src/cli.ts'),
-  'container-matcher': path.join(repoRoot, 'modules/container-matcher/src/cli.ts'),
+  'browser-control': path.join(repoRoot, 'dist/modules/browser-control/src/cli.js'),
+  'session-manager': path.join(repoRoot, 'dist/modules/session-manager/src/cli.js'),
+  logging: path.join(repoRoot, 'dist/modules/logging/src/cli.js'),
+  operations: path.join(repoRoot, 'dist/modules/operations/src/cli.js'),
+  'container-matcher': path.join(repoRoot, 'dist/modules/container-matcher/src/cli.js'),
 };
 
 class UnifiedApiServer {
@@ -49,6 +54,8 @@ class UnifiedApiServer {
   private runtimeControllers: Map<string, RuntimeController> = new Map();
   private containerExecutor: any;
   private sessionManager: any;
+  private stateRegistry: any;
+
   constructor() {
     this.controller = new UiController({
       repoRoot,
@@ -73,6 +80,12 @@ class UnifiedApiServer {
     this.eventBus = globalEventBus;
     this.containerLoader = ContainerDefinitionLoader;
     this.setupEventBridge();
+
+    // Register core usage definitions
+    registerCoreUsage();
+
+    // Initialize state registry
+    this.stateRegistry = getStateRegistry();
   }
 
   private setupEventBridge(): void {
@@ -223,6 +236,13 @@ class UnifiedApiServer {
   }
 
   async start() {
+    // Start state registry periodic cleanup
+    const registry = this.stateRegistry;
+    if (registry) {
+      setInterval(() => {
+        registry.cleanupOldSessions();
+      }, 5 * 60 * 1000); // 5 minutes
+    }
     const { createServer } = await import('node:http');
     const server = createServer();
     const wss = new WebSocketServer({ server });
@@ -241,6 +261,26 @@ class UnifiedApiServer {
       wsPort: defaultWsPort
     });
     this.sessionManager = sessionManager;
+
+    // Sync sessions to state registry
+    try {
+      const sessions = await sessionManager.listSessions();
+      console.log('[unified-api] Initial session sync:', sessions);
+      if (Array.isArray(sessions)) {
+        sessions.forEach((session: any) => {
+          const profileId = session.profileId || session.profile_id || session.sessionId || session.session_id;
+          if (!profileId) return;
+          this.stateRegistry.updateSessionState(profileId, {
+            profileId,
+            sessionId: session.sessionId || session.session_id || profileId,
+            currentUrl: session.currentUrl || session.current_url || '',
+          });
+        });
+        this.stateRegistry.flush();
+      }
+    } catch (err) {
+      console.warn('[unified-api] session sync failed:', err?.message || err);
+    }
 
     // Create OperationExecutor
     this.containerExecutor = new OperationExecutor(
@@ -292,11 +332,62 @@ class UnifiedApiServer {
       }
 
       // Health check for browser service
+      // Usage endpoints
+      if (req.method === 'GET' && url.pathname === '/v1/usage') {
+        const action = url.searchParams.get('action');
+        const usage = action ? getActionUsage(action) : getAllUsages();
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: true, data: usage }));
+        return;
+      }
+
       if (req.method === 'GET' && url.pathname === '/v1/browser/health') {
         try {
           const result = await this.controller.handleAction('browser:status', {});
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify(result));
+        } catch (err) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: false, error: err?.message || String(err) }));
+        }
+        return;
+      }
+
+      // System state endpoints
+      if (req.method === 'GET' && url.pathname === '/v1/system/state') {
+        const state = this.stateRegistry.getState();
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: true, data: state }));
+        return;
+      }
+
+      if (req.method === 'GET' && url.pathname === '/v1/system/sessions') {
+        const profileId = url.searchParams.get('profileId');
+        const sessions = this.stateRegistry.getAllSessionStates();
+        if (profileId) {
+          const session = sessions[profileId];
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: true, data: session ? [session] : [] }));
+          return;
+        }
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: true, data: Object.values(sessions) }));
+        return;
+      }
+
+      if (req.method === 'POST' && url.pathname === '/v1/system/sessionPhase') {
+        try {
+          const payload = await this.readJsonBody(req);
+          const profileId = payload?.profileId;
+          const phase = payload?.phase;
+          if (!profileId || !phase) {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: false, error: 'Missing profileId or phase' }));
+            return;
+          }
+          this.stateRegistry.updateSessionState(profileId, { lastPhase: phase });
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: true }));
         } catch (err) {
           res.writeHead(400, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ success: false, error: err?.message || String(err) }));
