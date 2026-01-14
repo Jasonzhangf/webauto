@@ -16,9 +16,9 @@
  */
 
 import minimist from 'minimist';
-import { execute as extractDetail } from '../../../modules/workflow/blocks/ExtractDetailBlock.ts';
-import { execute as collectComments } from '../../../modules/workflow/blocks/CollectCommentsBlock.ts';
-import { execute as persistXhsNote } from '../../../modules/workflow/blocks/PersistXhsNoteBlock.ts';
+import { execute as extractDetail } from '../../../dist/modules/workflow/blocks/ExtractDetailBlock.js';
+import { execute as collectComments } from '../../../dist/modules/workflow/blocks/CollectCommentsBlock.js';
+import { execute as persistXhsNote } from '../../../dist/modules/workflow/blocks/PersistXhsNoteBlock.js';
 
 const UNIFIED_API = 'http://127.0.0.1:7701';
 
@@ -142,4 +142,3 @@ main().catch((err) => {
   console.error('❌ Unexpected error:', err);
   process.exit(1);
 });
-

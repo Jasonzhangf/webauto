@@ -120,10 +120,11 @@ export async function execute(input: OpenDetailInput): Promise<OpenDetailOutput>
       body: JSON.stringify({
         action: 'browser:execute',
         payload: { profile, script: 'location.href' }
-      })
+      }),
+      signal: (AbortSignal as any).timeout ? (AbortSignal as any).timeout(5000) : undefined
     });
-    const data = await response.json();
-    return data.data?.result || '';
+    const data = await response.json().catch(() => ({}));
+    return data?.data?.result || data?.result || '';
   }
 
   function findContainer(tree: any, pattern: RegExp): any {
@@ -147,19 +148,35 @@ export async function execute(input: OpenDetailInput): Promise<OpenDetailOutput>
     return result;
   }
 
-  async function waitForDetail(maxRetries = 10): Promise<{ ready: boolean; safeUrl?: string; noteId?: string }> {
+  async function waitForDetail(
+    maxRetries = 10,
+  ): Promise<{ ready: boolean; safeUrl?: string; noteId?: string }> {
     let safeUrl: string | undefined;
     let noteId: string | undefined;
 
     for (let i = 0; i < maxRetries; i++) {
       const currentUrl = await getCurrentUrl();
-      // 404 / 当前笔记暂时无法浏览 → 立即判定为失败
+
+      // 0. 404 / 当前笔记暂时无法浏览 → 立即判定为失败
       if (currentUrl.includes('/404') && currentUrl.includes('error_code=300031')) {
         console.warn('[OpenDetail] Detected 404 note page, aborting detail wait');
         return { ready: false };
       }
 
-      // 通过 DOM 直接判断详情是否就绪，避免在等待阶段频繁调用 containers:match
+      // 1. 先用 URL 做一次快速检测：/explore/{noteId}?...xsec_token=... 视为详情已经就绪
+      if (
+        currentUrl &&
+        /\/explore\/[0-9a-z]+/i.test(currentUrl) &&
+        /[?&]xsec_token=/.test(currentUrl)
+      ) {
+        safeUrl = currentUrl;
+        const m = currentUrl.match(/\/explore\/([0-9a-z]+)/i);
+        noteId = m ? m[1] : undefined;
+        console.log('[OpenDetail] Detail URL ready (explore + xsec_token)');
+        return { ready: true, safeUrl, noteId };
+      }
+
+      // 2. 再用 DOM 结构做一次检查（模态或评论区命中任意一个即可）
       try {
         const domResult = await controllerAction('browser:execute', {
           profile,
@@ -167,13 +184,16 @@ export async function execute(input: OpenDetailInput): Promise<OpenDetailOutput>
             const hasModal =
               document.querySelector('.note-detail-mask') ||
               document.querySelector('.note-detail-page') ||
-              document.querySelector('.note-detail-dialog');
+              document.querySelector('.note-detail-dialog') ||
+              document.querySelector('.note-detail') ||
+              document.querySelector('.detail-container') ||
+              document.querySelector('.media-container');
             const hasComments =
               document.querySelector('.comments-el') ||
               document.querySelector('.comment-list') ||
               document.querySelector('.comments-container');
             return { hasModal: !!hasModal, hasComments: !!hasComments };
-          })()`
+          })()`,
         });
         const payload = domResult.result || domResult.data?.result || domResult;
         if (payload?.hasModal || payload?.hasComments) {
@@ -184,11 +204,17 @@ export async function execute(input: OpenDetailInput): Promise<OpenDetailOutput>
           console.log('[OpenDetail] Detail DOM ready (hasModal/hasComments)');
           return { ready: true, safeUrl, noteId };
         }
+
+        console.log(
+          `[OpenDetail] Detail not ready yet (iter=${i}, url=${currentUrl || 'unknown'})`,
+        );
       } catch (e: any) {
-        console.warn(`[OpenDetail] DOM readiness check failed (retry ${i}): ${e.message}`);
+        console.warn(
+          `[OpenDetail] DOM readiness check failed (retry ${i}): ${e.message}`,
+        );
       }
 
-      await new Promise(r => setTimeout(r, 1000));
+      await new Promise((r) => setTimeout(r, 1000));
     }
     return { ready: false };
   }

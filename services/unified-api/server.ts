@@ -27,7 +27,9 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_PORT = Number(process.env.WEBAUTO_UNIFIED_PORT || 7701);
 const DEFAULT_HOST = process.env.WEBAUTO_UNIFIED_HOST || '127.0.0.1';
 
-const repoRoot = path.resolve(__dirname, '../..');
+// 注意：运行时 server.js 位于 dist/services/unified-api/，因此需要回退三级到仓库根目录
+// 源码构建时同样兼容（__dirname 为 services/unified-api/），此写法在两种场景下都能得到仓库根目录
+const repoRoot = path.resolve(__dirname, '../../..');
 const userContainerRoot = process.env.WEBAUTO_USER_CONTAINER_ROOT || path.join(os.homedir(), '.webauto', 'container-lib');
 const containerIndexPath = process.env.WEBAUTO_CONTAINER_INDEX || path.join(repoRoot, 'container-library.index.json');
 const defaultWsHost = process.env.WEBAUTO_WS_HOST || '127.0.0.1';

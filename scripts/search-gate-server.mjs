@@ -3,7 +3,7 @@
  * SearchGate 后台节流服务
  *
  * 职责：
- *   - 控制搜索频率（默认：同一 key 每 60s 最多 2 次）
+ *   - 控制搜索频率（默认：同一 key 每 60s 最多 5 次）
  *   - 所有搜索 Block 在真正触发“对话框搜索”前，必须先向本服务申请许可
  *
  * 接口：
@@ -28,6 +28,8 @@ import { URL } from 'node:url';
 
 const HOST = '127.0.0.1';
 const PORT = Number(process.env.WEBAUTO_SEARCH_GATE_PORT || 7790);
+const DEFAULT_WINDOW_MS = Number(process.env.WEBAUTO_SEARCH_GATE_WINDOW_MS || 60_000);
+const DEFAULT_MAX_COUNT = Number(process.env.WEBAUTO_SEARCH_GATE_MAX_COUNT || 5);
 
 /**
  * 每个 key 的时间窗口内搜索记录
@@ -122,8 +124,8 @@ const server = http.createServer(async (req, res) => {
 
       const profileId = (body.profileId || body.key || 'default').toString();
       const key = profileId || 'default';
-      const windowMs = Number(body.windowMs || 60_000);
-      const maxCount = Number(body.maxCount || 2);
+      const windowMs = Number(body.windowMs || DEFAULT_WINDOW_MS);
+      const maxCount = Number(body.maxCount || DEFAULT_MAX_COUNT);
 
       const result = computePermit(key, windowMs, maxCount);
 
@@ -148,7 +150,6 @@ const server = http.createServer(async (req, res) => {
 server.listen(PORT, HOST, () => {
   // eslint-disable-next-line no-console
   console.log(
-    `[SearchGate] listening on http://${HOST}:${PORT} (window: 60s, max: 2 searches per key)`
+    `[SearchGate] listening on http://${HOST}:${PORT} (window: ${DEFAULT_WINDOW_MS / 1000}s, max: ${DEFAULT_MAX_COUNT} searches per key)`
   );
 });
-

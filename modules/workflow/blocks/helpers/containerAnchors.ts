@@ -193,15 +193,43 @@ export async function verifyAnchorByContainerId(
     return { found: false, highlighted: false, error: `Container not found: ${containerId}` };
   }
 
-  const selector = pickPrimarySelector(container);
-  if (!selector) {
+  const selectors = (container.selectors || [])
+    .map((s: any) => s?.css)
+    .filter((css: any) => typeof css === 'string' && css.trim().length > 0);
+
+  if (!selectors.length) {
     return { found: false, highlighted: false, error: `No selector defined for: ${containerId}` };
   }
 
   try {
+    const selectorsJson = JSON.stringify(selectors);
     const script = `(() => {
-      const el = document.querySelector('${selector.replace(/'/g, "\\'")}');
-      if (!el) return { found: false, error: 'Element not found' };
+      const selectors = ${selectorsJson};
+
+      const isVisible = (el) => {
+        if (!el) return false;
+        const style = window.getComputedStyle(el);
+        if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false;
+        const r = el.getBoundingClientRect();
+        if (!r.width || !r.height) return false;
+        if (r.bottom <= 0 || r.top >= window.innerHeight) return false;
+        return true;
+      };
+
+      let el = null;
+      let usedSelector = null;
+      for (const sel of selectors) {
+        const candidate = document.querySelector(sel);
+        if (candidate && isVisible(candidate)) {
+          el = candidate;
+          usedSelector = sel;
+          break;
+        }
+      }
+
+      if (!el) {
+        return { found: false, error: 'Element not found' };
+      }
 
       // 创建或复用一个 overlay 高亮框，避免被页面样式覆盖
       let overlay = document.getElementById('webauto-anchor-highlight');
@@ -228,7 +256,11 @@ export async function verifyAnchorByContainerId(
         }
       }, ${highlightDuration});
       const rect = el.getBoundingClientRect();
-      return { found: true, rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height } };
+      return {
+        found: true,
+        selector: usedSelector,
+        rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height }
+      };
     })()`;
 
     const response = await fetch(`${serviceUrl}/v1/controller/action`, {
@@ -246,17 +278,35 @@ export async function verifyAnchorByContainerId(
     });
 
     if (!response.ok) {
-      return { found: false, highlighted: false, selector, error: `HTTP ${response.status}: ${await response.text()}` };
+      return {
+        found: false,
+        highlighted: false,
+        error: `HTTP ${response.status}: ${await response.text()}`,
+      };
     }
 
     const data = await response.json();
     const result = data.data?.result || data.result;
     if (!result?.found) {
-      return { found: false, highlighted: false, selector, error: result?.error || 'Element not found' };
+      return {
+        found: false,
+        highlighted: false,
+        selector: result?.selector,
+        error: result?.error || 'Element not found',
+      };
     }
 
-    return { found: true, highlighted: true, rect: result.rect, selector };
+    return {
+      found: true,
+      highlighted: true,
+      rect: result.rect,
+      selector: result.selector,
+    };
   } catch (error: any) {
-    return { found: false, highlighted: false, selector, error: `verifyAnchor failed: ${error.message}` };
+    return {
+      found: false,
+      highlighted: false,
+      error: `verifyAnchor failed: ${error.message}`,
+    };
   }
 }

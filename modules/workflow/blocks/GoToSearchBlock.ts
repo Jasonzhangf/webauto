@@ -260,25 +260,77 @@ export async function execute(input: GoToSearchInput): Promise<GoToSearchOutput>
 
   async function ensureHomePage(): Promise<boolean> {
     const url = await getCurrentUrl();
-    
-    // 如果已经在搜索结果页，且关键词不同，我们优先回到首页重新搜索（模拟真实用户）
-    // 或者直接清空搜索框输入
+
+    // 入口锚点 1：URL 必须在小红书站内
+    if (!url.includes('xiaohongshu.com')) {
+      throw new Error(
+        `Not on xiaohongshu.com (current url=${url || 'unknown'}), please navigate manually before searching.`,
+      );
+    }
+
+    // 入口锚点 2：页面必须不是“可见的”详情态（存在可见的 .note-detail-mask / 详情容器 时视为详情页）
+    try {
+      const detailState = await fetch(controllerUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'browser:execute',
+          payload: {
+            profile,
+            script: `(() => {
+              const selectors = [
+                '.note-detail-mask',
+                '.note-detail-page',
+                '.note-detail-dialog',
+                '.note-detail',
+                '.detail-container',
+                '.media-container'
+              ];
+              const isVisible = (el) => {
+                if (!el) return false;
+                const style = window.getComputedStyle(el);
+                if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false;
+                const r = el.getBoundingClientRect();
+                if (!r.width || !r.height) return false;
+                if (r.bottom <= 0 || r.top >= window.innerHeight) return false;
+                return true;
+              };
+              let visibleOverlay = null;
+              for (const sel of selectors) {
+                const el = document.querySelector(sel);
+                if (el && isVisible(el)) {
+                  visibleOverlay = el;
+                  break;
+                }
+              }
+              return { hasDetailOverlayVisible: !!visibleOverlay };
+            })()`,
+          },
+        }),
+      }).then((r) => r.json());
+      const payload = detailState.data?.result ?? detailState.result ?? {};
+      if (payload.hasDetailOverlayVisible) {
+        throw new Error('Currently in visible detail overlay, please exit detail before searching.');
+      }
+    } catch (err: any) {
+      if (err?.message?.includes('Currently in detail overlay')) {
+        throw err;
+      }
+      console.warn('[GoToSearch] ensureHomePage detail-overlay check failed:', err?.message || err);
+    }
+
+    // 如果已经在搜索结果页，且关键词不同，可以直接在当前结果页继续搜索
     if (url.includes('/search_result')) {
-      console.log('[GoToSearch] Currently on search page, going to clear input...');
-      // 这里不强制回首页，直接在当前页搜也是合理的
+      console.log('[GoToSearch] Currently on search page (no detail overlay), ready for new search.');
       return true;
     }
-    
+
     // 如果在验证码页面，抛出错误请求人工介入
     if (url.includes('captcha') || url.includes('verify')) {
       throw new Error('Detected CAPTCHA page, please solve it manually.');
     }
 
-    // 如果不在小红书，要求人工切回站内（禁止代码构造/跳转 URL）
-    if (!url.includes('xiaohongshu.com')) {
-      throw new Error('Not on xiaohongshu.com, please navigate manually before searching.');
-    }
-
+    // 其他情况（首页 / 发现页 / 其它小红书站内页）视为可执行搜索的起点
     return true;
   }
 

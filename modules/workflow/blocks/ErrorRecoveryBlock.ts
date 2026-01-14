@@ -82,7 +82,54 @@ export async function execute(input: ErrorRecoveryInput): Promise<ErrorRecoveryO
         return false;
       }
 
-      return anchor.rect.width > 0 && anchor.rect.height > 0;
+      const rectOk = anchor.rect.width > 0 && anchor.rect.height > 0;
+      if (!rectOk) {
+        return false;
+      }
+
+      // 额外约束：确认“可见的”详情 overlay 已完全消失，避免在仍有详情 overlay 时误判为 search/home
+      try {
+        const domState = await controllerAction('browser:execute', {
+          profile: sessionId,
+          script: `(() => {
+            const selectors = [
+              '.note-detail-mask',
+              '.note-detail-page',
+              '.note-detail-dialog',
+              '.note-detail',
+              '.detail-container',
+              '.media-container'
+            ];
+            const isVisible = (el) => {
+              if (!el) return false;
+              const style = window.getComputedStyle(el);
+              if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false;
+              const r = el.getBoundingClientRect();
+              if (!r.width || !r.height) return false;
+              if (r.bottom <= 0 || r.top >= window.innerHeight) return false;
+              return true;
+            };
+            let visibleOverlay = null;
+            for (const sel of selectors) {
+              const el = document.querySelector(sel);
+              if (el && isVisible(el)) {
+                visibleOverlay = el;
+                break;
+              }
+            }
+            return { hasDetailOverlayVisible: !!visibleOverlay };
+          })()`,
+        });
+        const payload = domState.result || domState.data?.result || domState;
+        if (payload?.hasDetailOverlayVisible) {
+          console.warn('[ErrorRecovery] verifyStage: visible detail overlay still present, stage not stable');
+          return false;
+        }
+      } catch (e: any) {
+        console.warn('[ErrorRecovery] verifyStage DOM check error:', e.message);
+      }
+
+      return true;
     } catch (error: any) {
       console.warn('[ErrorRecovery] verifyStage 锚点验证异常:', error.message);
       return false;
@@ -92,7 +139,59 @@ export async function execute(input: ErrorRecoveryInput): Promise<ErrorRecoveryO
   async function recoverWithEsc(): Promise<{ success: boolean; method: string }> {
     console.log('[ErrorRecovery] 使用ESC模式恢复...');
 
-    // 0. 只有在确认命中详情 modal 锚点的前提下，才允许执行关闭/回退操作，避免在错误页面上盲动。
+    // 0. 入口锚点：先确认当前确实处于“详情态”（存在“可见的” detail overlay），避免在错误页面上盲动。
+    let hasDetailOverlay = false;
+    try {
+      const domState = await controllerAction('browser:execute', {
+        profile: sessionId,
+        script: `(() => {
+          const selectors = [
+            '.note-detail-mask',
+            '.note-detail-page',
+            '.note-detail-dialog',
+            '.note-detail',
+            '.detail-container',
+            '.media-container'
+          ];
+          const isVisible = (el) => {
+            if (!el) return false;
+            const style = window.getComputedStyle(el);
+            if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false;
+            const r = el.getBoundingClientRect();
+            if (!r.width || !r.height) return false;
+            if (r.bottom <= 0 || r.top >= window.innerHeight) return false;
+            return true;
+          };
+          let visibleOverlay = null;
+          for (const sel of selectors) {
+            const el = document.querySelector(sel);
+            if (el && isVisible(el)) {
+              visibleOverlay = el;
+              break;
+            }
+          }
+          return { hasDetailOverlayVisible: !!visibleOverlay };
+        })()`,
+      });
+      const payload = domState.result || domState.data?.result || domState;
+      hasDetailOverlay = Boolean(payload?.hasDetailOverlayVisible);
+    } catch (e: any) {
+      console.warn(
+        `[ErrorRecovery] detail-overlay DOM probe failed before ESC recovery: ${e.message}`,
+      );
+    }
+
+    if (!hasDetailOverlay) {
+      console.warn(
+        '[ErrorRecovery] detail overlay not detected before ESC recovery, continue ESC path based on stage hint',
+      );
+      // 这里不再直接返回失败：
+      // - 来到 ErrorRecoveryBlock 且 fromStage=detail 时，调用方已经认为当前处于详情态
+      // - DOM 预探测只是辅助信号，可能因为样式/结构变化导致误判
+      // 因此即便未检测到 overlay，也继续尝试容器关闭与 ESC 按键，由后续 verifyStage 严格确认结果
+    }
+
+    // 0.1 次级锚点（非强制）：尝试命中详情 modal 容器，用于高亮确认；失败不再视为致命，仅记录日志。
     try {
       const { verifyAnchorByContainerId } = await import('./helpers/containerAnchors.js');
       const detailAnchor = await verifyAnchorByContainerId(
@@ -104,27 +203,37 @@ export async function execute(input: ErrorRecoveryInput): Promise<ErrorRecoveryO
       );
 
       if (!detailAnchor.found || !detailAnchor.rect) {
-        console.warn('[ErrorRecovery] detail modal anchor not found, abort ESC recovery');
-        return { success: false, method: 'no-detail-anchor' };
+        console.warn(
+          '[ErrorRecovery] detail modal anchor not found, continue ESC recovery based on DOM overlay only',
+        );
       }
     } catch (e: any) {
       console.warn(
         `[ErrorRecovery] verify detail anchor failed before ESC recovery: ${e.message}`,
       );
-      return { success: false, method: 'anchor-verify-error' };
+      // 容器锚点只是次级信号，这里不再直接失败，后续依赖 DOM + search_result_list 锚点确认恢复效果
     }
 
-    // 1) 优先通过容器运行时关闭详情 modal
+    // 1) 优先通过容器运行时 + 系统点击关闭详情 modal（点击右上角关闭按钮）
     try {
-      await controllerAction('container:operation', {
+      const clickResult = await controllerAction('container:operation', {
         containerId: 'xiaohongshu_detail.modal_shell',
-        operationId: 'close',
-        sessionId,
+        operationId: 'click',
+        config: {
+          selector: '.note-detail-mask .close-box, .note-detail-mask .close-circle',
+          useSystemMouse: true,
+          retries: 1,
+        },
+        sessionId
       });
+      console.log(
+        '[ErrorRecovery] container-close click result:',
+        JSON.stringify(clickResult),
+      );
 
       await new Promise((resolve) => setTimeout(resolve, 1500));
 
-      // 1.1 关闭后直接通过搜索结果列表锚点判断是否已回到安全阶段
+      // 1.1 关闭后通过搜索结果列表锚点 + DOM overlay 检查判断是否已回到安全阶段
       try {
         const { verifyAnchorByContainerId } = await import('./helpers/containerAnchors.js');
         const anchor = await verifyAnchorByContainerId(
@@ -134,9 +243,61 @@ export async function execute(input: ErrorRecoveryInput): Promise<ErrorRecoveryO
           '2px solid #4caf50',
           1000,
         );
-        if (anchor.found && anchor.rect && anchor.rect.width > 0 && anchor.rect.height > 0) {
-          console.log('[ErrorRecovery] ✅ detail closed via container operation (anchor matched)');
+        const anchorOk =
+          anchor.found && anchor.rect && anchor.rect.width > 0 && anchor.rect.height > 0;
+
+        let overlayGone = true;
+        try {
+          const domState = await controllerAction('browser:execute', {
+            profile: sessionId,
+            script: `(() => {
+              const selectors = [
+                '.note-detail-mask',
+                '.note-detail-page',
+                '.note-detail-dialog',
+                '.note-detail',
+                '.detail-container',
+                '.media-container'
+              ];
+              const isVisible = (el) => {
+                if (!el) return false;
+                const style = window.getComputedStyle(el);
+                if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false;
+                const r = el.getBoundingClientRect();
+                if (!r.width || !r.height) return false;
+                if (r.bottom <= 0 || r.top >= window.innerHeight) return false;
+                return true;
+              };
+              let visibleOverlay = null;
+              for (const sel of selectors) {
+                const el = document.querySelector(sel);
+                if (el && isVisible(el)) {
+                  visibleOverlay = el;
+                  break;
+                }
+              }
+              return { hasDetailOverlayVisible: !!visibleOverlay };
+            })()`,
+          });
+          const payload = domState.result || domState.data?.result || domState;
+          overlayGone = !Boolean(payload?.hasDetailOverlayVisible);
+        } catch (e: any) {
+          console.warn(
+            `[ErrorRecovery] overlay DOM check after container-close failed: ${e.message}`,
+          );
+        }
+
+        if (anchorOk && overlayGone) {
+          console.log(
+            '[ErrorRecovery] ✅ detail closed via container operation (anchor matched, overlay gone)',
+          );
           return { success: true, method: 'container-close' };
+        }
+
+        if (anchorOk && !overlayGone) {
+          console.warn(
+            '[ErrorRecovery] search_result_list visible but detail overlay still present after container-close, will fallback to ESC key',
+          );
         }
       } catch (err: any) {
         console.warn(

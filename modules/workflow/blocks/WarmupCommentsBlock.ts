@@ -256,6 +256,12 @@ export async function execute(input: WarmupCommentsInput): Promise<WarmupComment
       if (anchor.found && anchor.rect) {
         commentSectionRect = anchor.rect;
         console.log(`[WarmupComments] comment_section rect: ${JSON.stringify(anchor.rect)}`);
+
+        // 默认使用评论区锚点中心作为系统滚动焦点，保证滚轮事件一定落在评论区域内
+        focusPoint = {
+          x: commentSectionRect.x + commentSectionRect.width / 2,
+          y: commentSectionRect.y + commentSectionRect.height / 2,
+        };
       } else {
         console.warn(
           `[WarmupComments] comment_section anchor verify failed: ${anchor.error || 'not found'}`,
@@ -373,8 +379,14 @@ export async function execute(input: WarmupCommentsInput): Promise<WarmupComment
       const refreshedFocus =
         (refreshFocusResult as any)?.result || (refreshFocusResult as any)?.data?.result || refreshFocusResult;
       if (refreshedFocus && typeof refreshedFocus.x === 'number' && typeof refreshedFocus.y === 'number') {
-        focusPoint = { x: refreshedFocus.x, y: refreshedFocus.y };
-        console.log(`[WarmupComments] round=${i} refreshed focus: (${focusPoint.x}, ${focusPoint.y}), scrollTop=${refreshedFocus.scrollTop}/${refreshedFocus.scrollHeight}`);
+        // 如果之前还没有确定滚动焦点，则使用 DOM 计算出的滚动容器中心点作为兜底；
+        // 否则优先保留基于锚点计算出的 focusPoint，避免焦点漂移到错误区域。
+        if (!focusPoint) {
+          focusPoint = { x: refreshedFocus.x, y: refreshedFocus.y };
+        }
+        console.log(
+          `[WarmupComments] round=${i} refreshed focus: (${refreshedFocus.x}, ${refreshedFocus.y}), scrollTop=${refreshedFocus.scrollTop}/${refreshedFocus.scrollHeight}`,
+        );
       }
 
       // 2.2 使用容器运行时触发一次 show_more_button 的 click（基于容器的 JS click）
@@ -399,7 +411,7 @@ export async function execute(input: WarmupCommentsInput): Promise<WarmupComment
         }
       }
 
-      // 2.3 查找并点击展开按钮（DOM 层兜底逻辑，先暴露真实统计信息）
+      // 2.3 查找展开按钮数量（仅做统计，不再在 DOM 层触发 JS 点击）
       let clickPayload: any;
       try {
         const clickResult = await controllerAction('browser:execute', {
@@ -414,101 +426,11 @@ export async function execute(input: WarmupCommentsInput): Promise<WarmupComment
               return { clicked: [], total: 0, all: 0, error: 'no root' };
             }
 
-            // 找到滚动容器
-            let scrollContainer = null;
-            let current = root.parentElement;
-            while (current && current !== document.body) {
-              const style = window.getComputedStyle(current);
-              if (style.overflowY === 'scroll' || style.overflowY === 'auto') {
-                scrollContainer = current;
-                break;
-              }
-              current = current.parentElement;
-            }
-
             // 使用CSS选择器直接查找展开按钮: .show-more
             const expandElements = Array.from(root.querySelectorAll('.show-more'));
-            const expandButtons = [];
-
-            for (const el of expandElements) {
-              if (!(el instanceof HTMLElement)) continue;
-              if (el.offsetParent === null) continue; // 必须可见
-              if (el.dataset && el.dataset.webautoExpandClicked === '1') continue;
-
-              const rect = el.getBoundingClientRect();
-              if (rect.width <= 0 || rect.height <= 0) continue;
-
-              const text = (el.textContent || '').trim();
-              const baseRect = scrollContainer ? scrollContainer.getBoundingClientRect() : { y: 0 };
-
-              expandButtons.push({
-                element: el,
-                text: text.substring(0, 30),
-                rect,
-                relativeY: rect.y - baseRect.y,
-              });
-            }
-
-            // 按相对位置排序,从上到下处理
-            expandButtons.sort((a, b) => a.relativeY - b.relativeY);
-
-            // 最多处理3个按钮
-            const maxButtons = 3;
-            const toClick = expandButtons.slice(0, maxButtons);
-
-            const clickedLogs = [];
-
-            for (const btn of toClick) {
-              const el = btn.element;
-
-              // 先保证按钮在 viewport 内（约束行为在可见区域内）
-              if (scrollContainer) {
-                const containerRect = scrollContainer.getBoundingClientRect();
-                const targetTop = Math.max(
-                  0,
-                  scrollContainer.scrollTop + btn.rect.y - containerRect.y - 200,
-                );
-                scrollContainer.scrollTo({ top: targetTop, behavior: 'auto' });
-              } else if (el.scrollIntoView) {
-                el.scrollIntoView({ behavior: 'auto', block: 'center' });
-              }
-
-              // 更新一次 rect，确保坐标在 viewport 里
-              const rect = el.getBoundingClientRect();
-
-              if (el.dataset) {
-                el.dataset.webautoExpandClicked = '1';
-              }
-              el.style.outline = '3px solid orange';
-
-              // 先派发一组鼠标事件，再直接调用 click()
-              const events = ['mouseover', 'mousemove', 'mousedown', 'mouseup', 'click'];
-              for (const type of events) {
-                const ev = new MouseEvent(type, {
-                  bubbles: true,
-                  cancelable: true,
-                  view: window,
-                });
-                el.dispatchEvent(ev);
-              }
-              if (typeof el.click === 'function') {
-                el.click();
-              }
-
-              clickedLogs.push({
-                text: btn.text,
-                rect: {
-                  x: rect.x,
-                  y: rect.y,
-                  width: rect.width,
-                  height: rect.height,
-                },
-              });
-            }
-
             return {
-              clicked: clickedLogs,
-              total: expandButtons.length,
+              clicked: [],
+              total: expandElements.length,
               all: expandElements.length,
             };
           })()`,
@@ -539,91 +461,74 @@ export async function execute(input: WarmupCommentsInput): Promise<WarmupComment
       // 许多帖子评论本身就是纯列表滚动，没有「展开 N 条回复」控件；
       // 这种情况下仍然需要继续向下滚动，直到 header 总数或滚动容器真正到达底部。
 
-      // 2.3 使用JS直接操作scrollTop进行滚动,模拟真实用户滚动行为
+      // 2.3 使用 JS 在真实滚动容器上执行 scrollBy（基于 DOM 自动识别滚动容器）
       await new Promise((r) => setTimeout(r, 400));
 
-      // 关键改进:不使用mouse.wheel,而是直接操作scrollContainer.scrollTop
-      // 这样更可靠,能确保滚动生效并触发懒加载
-      const scrollResult = await controllerAction('browser:execute', {
-        profile,
-        script: `(() => {
-          const root =
-            document.querySelector('.comments-el') ||
-            document.querySelector('.comment-list') ||
-            document.querySelector('.comments-container') ||
-            document.querySelector('[class*="comment-section"]');
-          if (!root) return { scrolled: false, error: 'no root' };
+      try {
+        const deltaY = 320 + Math.floor(Math.random() * 280); // 320–599 之间的随机滚动距离
+        const scrollResult = await controllerAction('browser:execute', {
+          profile,
+          script: `(() => {
+            const root =
+              document.querySelector('.comments-el') ||
+              document.querySelector('.comment-list') ||
+              document.querySelector('.comments-container') ||
+              document.querySelector('[class*="comment-section"]');
+            if (!root) return { success: false, reason: 'no_root' };
 
-          let scrollContainer = null;
-          let current = root.parentElement;
-          while (current && current !== document.body) {
-            const style = window.getComputedStyle(current);
-            if (style.overflowY === 'scroll' || style.overflowY === 'auto') {
-              scrollContainer = current;
-              break;
+            // 寻找真实滚动容器：优先父级 overflow 可滚动元素，其次 document.scrollingElement
+            let scrollContainer = null;
+            let current = root.parentElement;
+            while (current && current !== document.body) {
+              const style = window.getComputedStyle(current);
+              if (style.overflowY === 'scroll' || style.overflowY === 'auto') {
+                scrollContainer = current;
+                break;
+              }
+              current = current.parentElement;
             }
-            current = current.parentElement;
-          }
 
-          if (!scrollContainer) return { scrolled: false, error: 'no scroll container' };
+            if (!scrollContainer) {
+              scrollContainer =
+                document.scrollingElement || document.documentElement || document.body;
+            }
+            if (!scrollContainer) {
+              return { success: false, reason: 'no_scroll_container' };
+            }
 
-          const before = scrollContainer.scrollTop;
-          const viewport = scrollContainer.clientHeight || 800;
-          const delta = Math.min(600, Math.max(200, viewport * 0.7));
-          const maxTop = scrollContainer.scrollHeight - viewport;
+            const before = scrollContainer.scrollTop || 0;
+            const delta = ${deltaY};
+            try {
+              scrollContainer.scrollBy({ top: delta, behavior: 'smooth' });
+            } catch {
+              try {
+                scrollContainer.scrollTop = before + delta;
+              } catch {}
+            }
+            const after = scrollContainer.scrollTop || 0;
 
-          const nearBottom = before >= maxTop - 200;
+            return {
+              success: true,
+              before,
+              after,
+              delta,
+              moved: after !== before
+            };
+          })()`,
+        });
+        const payload =
+          (scrollResult as any).result || (scrollResult as any).data?.result || scrollResult;
+        console.log(
+          `[WarmupComments] round=${i} js scroll payload: ${JSON.stringify(payload)}`,
+        );
+      } catch (err: any) {
+        console.warn(
+          `[WarmupComments] round=${i} js scroll failed: ${err?.message || err}`,
+        );
+      }
 
-          // 接近底部时，先向上回滚一小段，再向下滚，模拟人工“回滚再往下”行为
-          if (nearBottom) {
-            const up = Math.max(0, before - delta);
-            const down = Math.min(up + delta, scrollContainer.scrollHeight);
-
-            scrollContainer.scrollTo({ top: up, behavior: 'smooth' });
-            return new Promise(resolve => {
-              setTimeout(() => {
-                scrollContainer.scrollTo({ top: down, behavior: 'smooth' });
-                setTimeout(() => {
-                  resolve({
-                    scrolled: true,
-                    before,
-                    after: scrollContainer.scrollTop,
-                    mode: 'bounce',
-                    up,
-                    down,
-                    scrollHeight: scrollContainer.scrollHeight
-                  });
-                }, 400);
-              }, 300);
-            });
-          }
-
-          const target = Math.min(before + delta, scrollContainer.scrollHeight);
-
-          scrollContainer.scrollTo({
-            top: target,
-            behavior: 'smooth'
-          });
-
-          return new Promise(resolve => {
-            setTimeout(() => {
-              resolve({
-                scrolled: true,
-                before,
-                after: scrollContainer.scrollTop,
-                mode: 'down',
-                target,
-                scrollHeight: scrollContainer.scrollHeight
-              });
-            }, 300);
-          });
-        })()`,
-      }).catch(() => ({ result: { scrolled: false } }));
-
-      const scrollData = (scrollResult as any)?.result || (scrollResult as any)?.data?.result || scrollResult;
-      console.log(`[WarmupComments] round=${i} scrolled: ${JSON.stringify(scrollData)}`);
-
-      await new Promise((r) => setTimeout(r, 1200)); // 增加等待时间,确保平滑滚动完成+懒加载触发
+      // 随机等待 0.8–1.6 秒，让滚动+懒加载完成
+      await new Promise((r) => setTimeout(r, 800 + Math.random() * 800));
 
       const stats = await getCommentStats();
       const currentCount = stats.count;

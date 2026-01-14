@@ -1,6 +1,7 @@
 import http from 'http';
 import { IncomingMessage, ServerResponse } from 'http';
 import { setTimeout as delay } from 'timers/promises';
+import { fileURLToPath } from 'node:url';
 import { SessionManager, CreateSessionPayload, SESSION_CLOSED_EVENT } from './SessionManager.js';
 import { BrowserWsServer } from './ws-server.js';
 import { RemoteMessageBusClient } from '../../libs/operations-framework/src/event-driven/RemoteMessageBusClient.js';
@@ -328,7 +329,7 @@ function broadcast(event: string, data: any) {
   });
 }
 
-if (import.meta.url === process.argv[1]) {
+if (fileURLToPath(import.meta.url) === process.argv[1]) {
   const hostArg = process.argv.indexOf('--host');
   const portArg = process.argv.indexOf('--port');
   const wsPortArg = process.argv.indexOf('--ws-port');

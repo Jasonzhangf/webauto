@@ -263,9 +263,10 @@ async function returnToDiscover() {
     operationId: 'click',
     sessionId: PROFILE,
   }).catch(async () => {
+    // 降级只允许回到主页，由站点自动跳转到发现页，禁止构造 /explore URL
     await controllerAction('browser:execute', {
       profile: PROFILE,
-      script: `window.location.href = '${DISCOVER_URL}'`,
+      script: `window.location.href = '${START_URL}'`,
     });
   });
   await delay(3000);
@@ -348,9 +349,8 @@ async function navigateToLogin() {
         loginBtn.click();
         return { method: 'click_sidebar_login' };
       }
-      // 降级到直接导航
-      window.location.href = 'https://www.xiaohongshu.com/login';
-      return { method: 'direct_navigate' };
+      // 降级不再直接构造登录 URL，交给人工处理
+      return { method: 'no_automatic_login_navigate' };
     })();`,
   });
   await delay(3000);

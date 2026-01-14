@@ -43,6 +43,13 @@
       }
     },
     {
+      "type": "click",
+      "config": {
+        "selector": ".note-detail-mask .close-box, .note-detail-mask .close-circle",
+        "comment": "点击详情模态右上角关闭按钮"
+      }
+    },
+    {
       "type": "scroll",
       "config": {
         "direction": "down",

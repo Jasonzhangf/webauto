@@ -352,6 +352,7 @@ export async function execute(input: CollectSearchListInput): Promise<CollectSea
     // 滚动-采集循环：
     // - 达到 targetCount 退出
     // - 或连续 5 轮无新增（包含尝试过向上/向下 bounce）退出
+    // - 或达到 maxScrollRounds（用于“仅采集当前视口”模式，如 maxScrollRounds=1）
     while (items.length < targetCount) {
       scrollRound += 1;
       console.log(
@@ -441,6 +442,14 @@ export async function execute(input: CollectSearchListInput): Promise<CollectSea
       console.log(
         `[CollectSearchList] Round ${scrollRound}: +${newItemsCount} items (total ${items.length})`,
       );
+
+      // 如果设置了 maxScrollRounds，则在达到轮数后不再继续滚动，由上层决定是否滚动页面
+      if (maxScrollRounds > 0 && scrollRound >= maxScrollRounds) {
+        console.log(
+          `[CollectSearchList] Reached maxScrollRounds=${maxScrollRounds}, stop further scrolling`,
+        );
+        break;
+      }
 
       // 3.3 终止条件 + bounce 滚动策略
       if (newItemsCount === 0) {

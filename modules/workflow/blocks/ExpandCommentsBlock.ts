@@ -81,6 +81,85 @@ export async function execute(input: ExpandCommentsInput): Promise<ExpandComment
     return data.data?.result || data.result || '';
   }
 
+  async function locateRectBySelectors(selectors: string[]): Promise<Rect | null> {
+    const filtered = selectors.filter((sel) => typeof sel === 'string' && sel.trim().length > 0);
+    if (!filtered.length) return null;
+    try {
+      const response = await controllerAction('browser:execute', {
+        profile,
+        script: `(() => {
+          const selectors = ${JSON.stringify(filtered)};
+          for (const sel of selectors) {
+            try {
+              const el = document.querySelector(sel);
+              if (!el) continue;
+              const rect = el.getBoundingClientRect();
+              if (!rect || !rect.width || !rect.height) continue;
+              return { x: rect.left, y: rect.top, width: rect.width, height: rect.height, selector: sel };
+            } catch (_) {}
+          }
+          return null;
+        })()`,
+      });
+      const payload =
+        (response as any)?.result || (response as any)?.data?.result || response;
+      if (
+        payload &&
+        ['x', 'y', 'width', 'height'].every(
+          (key) => typeof payload[key] === 'number' && Number.isFinite(payload[key]),
+        )
+      ) {
+        return {
+          x: Number(payload.x),
+          y: Number(payload.y),
+          width: Number(payload.width),
+          height: Number(payload.height),
+        };
+      }
+    } catch (err: any) {
+      console.warn(`[ExpandComments] locateRectBySelectors error: ${err?.message || err}`);
+    }
+    return null;
+  }
+
+  async function locateCommentSectionRectFallback(): Promise<Rect | null> {
+    try {
+      const response = await controllerAction('browser:execute', {
+        profile,
+        script: `(() => {
+          const root =
+            document.querySelector('.comments-el') ||
+            document.querySelector('.comment-list') ||
+            document.querySelector('.comments-container') ||
+            document.querySelector('[class*="comment-section"]');
+          if (!root) return null;
+          const rect = root.getBoundingClientRect();
+          return { x: rect.left, y: rect.top, width: rect.width, height: rect.height };
+        })()`,
+      });
+      const payload =
+        (response as any)?.result || (response as any)?.data?.result || response;
+      if (
+        payload &&
+        ['x', 'y', 'width', 'height'].every(
+          (key) => typeof payload[key] === 'number' && Number.isFinite(payload[key]),
+        )
+      ) {
+        return {
+          x: Number(payload.x),
+          y: Number(payload.y),
+          width: Number(payload.width),
+          height: Number(payload.height),
+        };
+      }
+    } catch (err: any) {
+      console.warn(
+        `[ExpandComments] fallback comment_section rect error: ${err?.message || err}`,
+      );
+    }
+    return null;
+  }
+
   function findContainer(tree: any, pattern: RegExp): any {
     if (!tree) return null;
     if (pattern.test(tree.id || tree.defId || '')) return tree;
@@ -109,11 +188,24 @@ export async function execute(input: ExpandCommentsInput): Promise<ExpandComment
   try {
     const { verifyAnchorByContainerId, getPrimarySelectorByContainerId, getContainerExtractorsById } = await import('./helpers/containerAnchors.js');
 
+    const safeGetPrimarySelectorById = async (containerId: string): Promise<string | null> => {
+      try {
+        return await getPrimarySelectorByContainerId(containerId);
+      } catch (err: any) {
+        console.warn(
+          `[ExpandComments] getPrimarySelectorByContainerId error (${containerId}): ${err?.message || err}`,
+        );
+        return null;
+      }
+    };
+
     // 1. 基于容器 ID 锚定评论区（不依赖 container_tree 是否挂在 detail 下）
     const commentSection = { id: 'xiaohongshu_detail.comment_section' };
 
     // 1.1 对评论区根容器做一次高亮 + Rect 回环（优先用容器定义 selector）
     let commentSectionRect: Rect | undefined;
+    let commentSectionLocated = false;
+    let lastAnchorError: string | null = null;
     try {
       const anchor = await verifyAnchorByContainerId(
         commentSection.id,
@@ -124,11 +216,29 @@ export async function execute(input: ExpandCommentsInput): Promise<ExpandComment
       );
       if (anchor.found && anchor.rect) {
         commentSectionRect = anchor.rect;
+        commentSectionLocated = true;
         console.log(`[ExpandComments] comment_section rect: ${JSON.stringify(anchor.rect)}`);
       } else {
+        lastAnchorError = anchor.error || 'not found';
+      }
+    } catch (e: any) {
+      lastAnchorError = e.message || String(e);
+    }
+
+    if (!commentSectionLocated) {
+      if (lastAnchorError) {
         console.warn(
-          `[ExpandComments] comment_section anchor verify failed: ${anchor.error || 'not found'}`,
+          `[ExpandComments] comment_section anchor verify failed: ${lastAnchorError}`,
         );
+      }
+      const fallbackRect = await locateCommentSectionRectFallback();
+      if (fallbackRect) {
+        commentSectionRect = fallbackRect;
+        commentSectionLocated = true;
+        console.log(
+          `[ExpandComments] fallback comment_section rect: ${JSON.stringify(fallbackRect)}`,
+        );
+      } else {
         return {
           success: false,
           comments: [],
@@ -138,22 +248,11 @@ export async function execute(input: ExpandCommentsInput): Promise<ExpandComment
             commentSectionContainerId: commentSection.id,
             commentSectionRect: undefined,
           },
-          error: anchor.error || 'comment_section anchor not found',
+          error:
+            lastAnchorError ||
+            'comment_section anchor not found',
         };
       }
-    } catch (e: any) {
-      console.warn(`[ExpandComments] comment_section anchor verify error: ${e.message}`);
-      return {
-        success: false,
-        comments: [],
-        reachedEnd: false,
-        emptyState: false,
-        anchor: {
-          commentSectionContainerId: commentSection.id,
-          commentSectionRect: undefined,
-        },
-        error: `comment_section anchor verify error: ${e.message}`,
-      };
     }
 
     // 2. 基于容器 inspect 结果 + comment_item 容器定义提取评论列表
@@ -276,9 +375,39 @@ export async function execute(input: ExpandCommentsInput): Promise<ExpandComment
             console.warn(
               `[ExpandComments] sample comment anchor verify failed: ${anchor.error || 'not found'}`,
             );
+            const primarySelector = await safeGetPrimarySelectorById(sample.id);
+            const fallbackSelectors = [
+              primarySelector || '',
+              '.comments-el .comment-item',
+              '.comment-list .comment-item',
+              '.comments-container .comment-item',
+              '.comment-item',
+            ];
+            const fallbackRect = await locateRectBySelectors(fallbackSelectors);
+            if (fallbackRect) {
+              sampleCommentRect = fallbackRect;
+              console.log(
+                `[ExpandComments] fallback sample comment rect: ${JSON.stringify(fallbackRect)}`,
+              );
+            }
           }
         } catch (e: any) {
           console.warn(`[ExpandComments] sample comment anchor verify error: ${e.message}`);
+          const primarySelector = await safeGetPrimarySelectorById(sample.id);
+          const fallbackSelectors = [
+            primarySelector || '',
+            '.comments-el .comment-item',
+            '.comment-list .comment-item',
+            '.comments-container .comment-item',
+            '.comment-item',
+          ];
+          const fallbackRect = await locateRectBySelectors(fallbackSelectors);
+          if (fallbackRect) {
+            sampleCommentRect = fallbackRect;
+            console.log(
+              `[ExpandComments] fallback sample comment rect after error: ${JSON.stringify(fallbackRect)}`,
+            );
+          }
         }
       }
     }
@@ -414,6 +543,22 @@ export async function execute(input: ExpandCommentsInput): Promise<ExpandComment
     let endMarkerContainerId: string | undefined;
 
     // 优先：有评论时按 end_marker 判断；无评论时优先按 empty_state / comment_section 判空
+    async function resolveEndMarkerRectViaSelectors(
+      containerId: string | undefined,
+      includeLastCommentFallback = false,
+    ): Promise<Rect | null> {
+      const selectors: string[] = [];
+      if (containerId) {
+        const primary = await safeGetPrimarySelectorById(containerId);
+        if (primary) selectors.push(primary);
+      }
+      selectors.push('.comment-end', '.comments-end', '.comment-list .end');
+      if (includeLastCommentFallback) {
+        selectors.push('.comments-el .comment-item:last-of-type', '.comment-item:last-of-type');
+      }
+      return locateRectBySelectors(selectors);
+    }
+
     if (endMarker?.id && comments.length > 0) {
       endMarkerContainerId = endMarker.id;
       try {
@@ -431,9 +576,23 @@ export async function execute(input: ExpandCommentsInput): Promise<ExpandComment
           console.warn(
             `[ExpandComments] end_marker anchor verify failed: ${anchor.error || 'not found'}`,
           );
+          const fallbackRect = await resolveEndMarkerRectViaSelectors(endMarker.id, true);
+          if (fallbackRect) {
+            endMarkerRect = fallbackRect;
+            console.log(
+              `[ExpandComments] fallback end_marker rect: ${JSON.stringify(fallbackRect)}`,
+            );
+          }
         }
       } catch (e: any) {
         console.warn(`[ExpandComments] end_marker anchor verify error: ${e.message}`);
+        const fallbackRect = await resolveEndMarkerRectViaSelectors(endMarker.id, true);
+        if (fallbackRect) {
+          endMarkerRect = fallbackRect;
+          console.log(
+            `[ExpandComments] fallback end_marker rect after error: ${JSON.stringify(fallbackRect)}`,
+          );
+        }
       }
     } else if (emptyStateNode?.id || comments.length === 0) {
       // 空状态：优先使用 empty_state 容器；若未命中，则退回到 comment_section 本身作为“空评论锚点”
@@ -458,9 +617,23 @@ export async function execute(input: ExpandCommentsInput): Promise<ExpandComment
           console.warn(
             `[ExpandComments] empty_state anchor verify failed: ${anchor.error || 'not found'}`,
           );
+          const fallbackRect = await resolveEndMarkerRectViaSelectors(endMarkerContainerId, comments.length > 0);
+          if (fallbackRect) {
+            endMarkerRect = fallbackRect;
+            console.log(
+              `[ExpandComments] fallback empty_state/end_marker rect: ${JSON.stringify(fallbackRect)}`,
+            );
+          }
         }
       } catch (e: any) {
         console.warn(`[ExpandComments] empty_state anchor verify error: ${e.message}`);
+        const fallbackRect = await resolveEndMarkerRectViaSelectors(endMarkerContainerId, comments.length > 0);
+        if (fallbackRect) {
+          endMarkerRect = fallbackRect;
+          console.log(
+            `[ExpandComments] fallback empty_state/end_marker rect after error: ${JSON.stringify(fallbackRect)}`,
+          );
+        }
       }
     }
 

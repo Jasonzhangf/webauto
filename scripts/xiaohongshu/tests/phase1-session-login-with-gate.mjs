@@ -114,11 +114,42 @@ async function listSessions() {
   return extractSessions(raw);
 }
 
+async function listBrowserServiceSessions() {
+  try {
+    const status = await browserCommand('getStatus', {}, 5_000);
+    return extractSessions(status);
+  } catch (err) {
+    log('WARN', `BrowserService 会话列表获取失败：${err.message}`);
+    return [];
+  }
+}
+
+async function findExistingSession() {
+  // 1) 优先通过 Unified API 的 session:list 检查（标准路径）
+  const managerSessions = await listSessions().catch(() => []);
+  const fromManager = managerSessions.map(normalizeSession).find((s) => s?.profileId === PROFILE);
+  if (fromManager) {
+    log('SESSION', `已存在 ${PROFILE}（via session:list）｜ URL: ${fromManager.currentUrl || '未知'}`);
+    return fromManager;
+  }
+
+  // 2) 退化路径：直接从 Browser Service 读取会话状态，避免“浏览器已起但未同步到 SessionManager”的假空状态
+  const browserSessions = await listBrowserServiceSessions();
+  const fromBrowser = browserSessions.map(normalizeSession).find((s) => s?.profileId === PROFILE);
+  if (fromBrowser) {
+    log(
+      'SESSION',
+      `检测到 ${PROFILE}（via browser-service:getStatus）｜ URL: ${fromBrowser.currentUrl || '未知'}`,
+    );
+    return fromBrowser;
+  }
+
+  return null;
+}
+
 async function ensureSession() {
-  const sessions = await listSessions().catch(() => []);
-  const existing = sessions.map(normalizeSession).find((s) => s?.profileId === PROFILE);
+  const existing = await findExistingSession();
   if (existing) {
-    log('SESSION', `已存在 ${PROFILE} ｜ URL: ${existing.currentUrl || '未知'}`);
     return existing;
   }
   await startSession();
@@ -153,10 +184,8 @@ async function waitForSessionReady() {
   const start = Date.now();
   while (Date.now() - start < SESSION_WAIT_TIMEOUT) {
     await delay(3000);
-    const sessions = await listSessions().catch(() => []);
-    const existing = sessions.map(normalizeSession).find((s) => s?.profileId === PROFILE);
+    const existing = await findExistingSession();
     if (existing) {
-      log('SESSION', `检测到 ${PROFILE} ｜ URL: ${existing.currentUrl || '未知'}`);
       return existing;
     }
   }
