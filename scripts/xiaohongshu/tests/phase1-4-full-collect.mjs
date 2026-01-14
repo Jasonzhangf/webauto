@@ -338,6 +338,26 @@ async function checkLoginStateByContainer() {
     const url = await getCurrentUrl();
     const tree = await matchContainers(url);
     if (!tree) {
+      // 当容器树不可用时，退回到 URL 级别的登录态启发式判断：
+      // 1. 明确命中登录域名 /login* → not_logged_in
+      // 2. 处于 explore/search 等业务页面，且 URL 带有 xsec_token → 认为已经登录
+      const safeUrl = url || '';
+      const loginUrlPattern = /xiaohongshu\.com\/login|passport\.xiaohongshu\.com/;
+      if (loginUrlPattern.test(safeUrl)) {
+        return { status: 'not_logged_in', reason: 'login_url' };
+      }
+
+      const detailOrSearchPattern =
+        /xiaohongshu\.com\/(explore|search_result|search|home|discovery)/;
+      const hasToken = /xsec_token=/.test(safeUrl);
+      if (detailOrSearchPattern.test(safeUrl) || hasToken) {
+        return {
+          status: 'logged_in',
+          container: null,
+          reason: 'no_container_tree_but_url_looks_logged_in',
+        };
+      }
+
       return { status: 'unknown', reason: 'no_container_tree' };
     }
 
@@ -704,10 +724,17 @@ async function ensureSearchStage(keyword, maxAttempts = 3) {
       );
 
       if (!rec.success) {
-        break;
+        console.warn(
+          '[FullCollect][StageCheck] ESC 恢复失败，尝试直接通过 GoToSearch 纠正到搜索结果页...',
+        );
+        // 不再提前中止本轮循环，后续将按“未知阶段”路径走 GoToSearch 纠正；
+        // 保持 stage===detail，使下面的分支把它当作异常阶段处理。
       }
 
-      continue;
+      if (rec.success) {
+        // 锚点验证由 ErrorRecoveryBlock 完成，这里直接进入下一轮状态检测
+        continue;
+      }
     }
 
     if (stage === 'home') {
