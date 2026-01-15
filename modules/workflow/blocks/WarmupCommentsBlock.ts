@@ -776,10 +776,15 @@ export async function execute(input: WarmupCommentsInput): Promise<WarmupComment
 
           // 找到真正的滚动容器
           let scrollContainer = null;
-          let current = root.parentElement;
+          // 注意：部分页面的滚动容器就是 root 自身（例如 comments-el 本身 overflow-y: auto），不能从 parentElement 开始找。
+          let current = root;
           while (current && current !== document.body) {
             const style = window.getComputedStyle(current);
-            if (style.overflowY === 'scroll' || style.overflowY === 'auto') {
+            const overflowY = style.overflowY || '';
+            const canScroll =
+              (overflowY === 'scroll' || overflowY === 'auto' || overflowY === 'overlay') &&
+              current.scrollHeight - current.clientHeight > 12;
+            if (canScroll) {
               scrollContainer = current;
               break;
             }
@@ -848,7 +853,7 @@ export async function execute(input: WarmupCommentsInput): Promise<WarmupComment
         }
       }
 
-      // 2.3 查找展开按钮数量（仅做统计，不再在 DOM 层触发 JS 点击）
+      // 2.3 展开回复：用系统点击可见的「展开更多」按钮（避免 JS click）
       let clickPayload: any;
       try {
         const clickResult = await controllerAction('browser:execute', {
@@ -860,15 +865,48 @@ export async function execute(input: WarmupCommentsInput): Promise<WarmupComment
               document.querySelector('.comments-container') ||
               document.querySelector('[class*="comment-section"]');
             if (!root) {
-              return { clicked: [], total: 0, all: 0, error: 'no root' };
+              return { targets: [], total: 0, all: 0, error: 'no root' };
             }
 
             // 使用CSS选择器直接查找展开按钮: .show-more
             const expandElements = Array.from(root.querySelectorAll('.show-more'));
+            const viewportH = window.innerHeight || 0;
+            const viewportW = window.innerWidth || 0;
+
+            const maxTargets = 2;
+            const targets = [];
+            let visibleCount = 0;
+            let candidateCount = 0;
+
+            for (const el of expandElements) {
+              if (targets.length >= maxTargets) break;
+              if (!(el instanceof HTMLElement)) continue;
+              if (el.getAttribute('data-webauto-expand-clicked') === '1') continue;
+
+              const rect = el.getBoundingClientRect();
+              if (!rect || rect.width < 6 || rect.height < 6) continue;
+              if (!(rect.bottom > 0 && rect.top < viewportH)) continue;
+              if (!(rect.right > 0 && rect.left < viewportW)) continue;
+              visibleCount += 1;
+
+              const style = window.getComputedStyle(el);
+              if (style.display === 'none' || style.visibility === 'hidden' || style.pointerEvents === 'none') {
+                continue;
+              }
+
+              // 只点击视口内安全区域，避免顶部标题栏/底部输入框
+              const x = Math.min(Math.max(rect.left + rect.width / 2, 30), viewportW - 30);
+              const y = Math.min(Math.max(rect.top + rect.height / 2, 140), viewportH - 140);
+              candidateCount += 1;
+              el.setAttribute('data-webauto-expand-clicked', '1');
+              targets.push({ x, y });
+            }
+
             return {
-              clicked: [],
-              total: expandElements.length,
+              targets,
+              total: visibleCount,
               all: expandElements.length,
+              candidates: candidateCount,
             };
           })()`,
         });
@@ -881,18 +919,42 @@ export async function execute(input: WarmupCommentsInput): Promise<WarmupComment
         console.warn(
           `[WarmupComments] round=${i} expand script error: ${err?.message || err}`,
         );
-        clickPayload = { clicked: [], total: 0, all: 0, error: err?.message || String(err) };
+        clickPayload = { targets: [], total: 0, all: 0, error: err?.message || String(err) };
       }
 
-      const clickedButtons = Array.isArray(clickPayload?.clicked) ? clickPayload.clicked : [];
+      const targets = Array.isArray(clickPayload?.targets) ? clickPayload.targets : [];
       const totalButtons =
         typeof clickPayload?.total === 'number' ? clickPayload.total : -1;
       const allButtons =
         typeof clickPayload?.all === 'number' ? clickPayload.all : undefined;
+      const candidates =
+        typeof clickPayload?.candidates === 'number' ? clickPayload.candidates : undefined;
 
       console.log(
-        `[WarmupComments] round=${i} expand buttons: clicked=${clickedButtons.length}, total=${totalButtons}, all=${allButtons}`,
+        `[WarmupComments] round=${i} expand buttons: clickTargets=${targets.length}, visible=${totalButtons}, candidates=${candidates}, all=${allButtons}`,
       );
+
+      // 系统点击展开（最多 2 个），避免长评论帖里“回复未展开”导致评论总数对不齐
+      if (Array.isArray(targets) && targets.length > 0) {
+        for (const t of targets) {
+          if (!t || typeof t !== 'object') continue;
+          const x = Number((t as any).x);
+          const y = Number((t as any).y);
+          if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+          try {
+            await systemClickAt(Math.floor(x), Math.floor(y));
+            await new Promise((r) => setTimeout(r, 280 + Math.random() * 320));
+          } catch {
+            // ignore
+          }
+        }
+
+        // 展开后重新 hover 到滚动容器焦点，避免焦点落到输入框导致滚轮无效
+        if (focusPoint) {
+          await systemHoverAt(Math.floor(focusPoint.x), Math.floor(focusPoint.y));
+          await new Promise((r) => setTimeout(r, 180));
+        }
+      }
 
       // 注意：不再因为“本轮没有任何可点击的展开按钮”而提前终止 warmup。
       // 许多帖子评论本身就是纯列表滚动，没有「展开 N 条回复」控件；
@@ -937,10 +999,15 @@ export async function execute(input: WarmupCommentsInput): Promise<WarmupComment
               document.querySelector('[class*="comment-section"]');
             if (!root) return null;
             let scrollContainer = null;
-            let current = root.parentElement;
+            // 同上：滚动容器可能就是 root 自己
+            let current = root;
             while (current && current !== document.body) {
               const style = window.getComputedStyle(current);
-              if (style.overflowY === 'scroll' || style.overflowY === 'auto') {
+              const overflowY = style.overflowY || '';
+              const canScroll =
+                (overflowY === 'scroll' || overflowY === 'auto' || overflowY === 'overlay') &&
+                current.scrollHeight - current.clientHeight > 12;
+              if (canScroll) {
                 scrollContainer = current;
                 break;
               }
