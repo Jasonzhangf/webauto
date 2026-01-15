@@ -2470,15 +2470,15 @@ async function runPhase3And4FromIndex(keyword, targetCount, env) {
     return;
   }
 
-  // 1. 磁盘级去重：已有目录的一律视为已完成 note，当前轮不再处理
+  // 1. 磁盘级去重：仅当 comments.md 已落盘才视为该 note 评论已完成（content.md 仅代表已采到正文/图片）
   const seenNoteIds = new Set();
   try {
     const entries = await fs.promises.readdir(baseDir, { withFileTypes: true }).catch(() => []);
     for (const dirent of entries) {
       if (!dirent.isDirectory()) continue;
       const noteId = dirent.name;
-      const contentPath = path.join(baseDir, noteId, 'content.md');
-      const stat = await fs.promises.stat(contentPath).catch(() => null);
+      const commentsPath = path.join(baseDir, noteId, 'comments.md');
+      const stat = await fs.promises.stat(commentsPath).catch(() => null);
       if (stat && stat.isFile()) {
         seenNoteIds.add(noteId);
       }
@@ -2546,9 +2546,22 @@ async function runPhase3And4FromIndex(keyword, targetCount, env) {
     return;
   }
 
-  const MAX_GROUP_SIZE = 4;
-  const MAX_NEW_COMMENTS_PER_ROUND = 100;
-  const MAX_ROUNDS_PER_NOTE = 10;
+  const MAX_GROUP_SIZE = Math.max(
+    1,
+    Number(argv.groupSize || argv['group-size'] || 4) || 4,
+  );
+  const MAX_NEW_COMMENTS_PER_ROUND = Math.max(
+    1,
+    Number(argv.commentsPerRound || argv['comments-per-round'] || 50) || 50,
+  );
+  const MAX_ROUNDS_PER_NOTE = Math.max(
+    1,
+    Number(argv.maxRoundsPerNote || argv['max-rounds-per-note'] || 10) || 10,
+  );
+  const MAX_WARMUP_ROUNDS = Math.max(
+    1,
+    Number(argv.commentWarmupRounds || argv['comment-warmup-rounds'] || 8) || 8,
+  );
 
   function buildCommentKey(c) {
     if (!c || typeof c !== 'object') return '';
@@ -2557,6 +2570,22 @@ async function runPhase3And4FromIndex(keyword, targetCount, env) {
     const text = (c.text || c.content || '').toString();
     const ts = c.timestamp || c.time || '';
     return `${userId}||${userName}||${text.substring(0, 64)}||${ts}`;
+  }
+
+  function buildLastPairFromArray(arr) {
+    const list = Array.isArray(arr) ? arr : [];
+    if (list.length < 2) return null;
+    const c1 = list[list.length - 2];
+    const c2 = list[list.length - 1];
+    const key1 = buildCommentKey(c1);
+    const key2 = buildCommentKey(c2);
+    if (!key1 && !key2) return null;
+    return {
+      key1,
+      key2,
+      preview1: ((c1 && (c1.text || c1.content || '')) || '').toString().substring(0, 80),
+      preview2: ((c2 && (c2.text || c2.content || '')) || '').toString().substring(0, 80),
+    };
   }
 
   function computeNewCommentsForRound(allComments, prevLastPair, maxNew) {
@@ -2783,7 +2812,7 @@ async function runPhase3And4FromIndex(keyword, targetCount, env) {
         console.log('4️⃣ Phase4: 预热并采集评论（增量模式）...');
         const commentsResult = await collectComments({
           sessionId: PROFILE,
-          maxWarmupRounds: 12,
+          maxWarmupRounds: MAX_WARMUP_ROUNDS,
         }).catch((e) => ({
           success: false,
           comments: [],
@@ -2825,13 +2854,47 @@ async function runPhase3And4FromIndex(keyword, targetCount, env) {
         const allComments = Array.isArray(commentsResult.comments)
           ? commentsResult.comments
           : [];
-        const diff = computeNewCommentsForRound(
+        let diff = computeNewCommentsForRound(
           allComments,
           state.lastPair,
           MAX_NEW_COMMENTS_PER_ROUND,
         );
 
-        const used = diff.used;
+        let used = diff.used;
+        // 兜底：如果 lastPair 匹配导致误判“无新增”，但页面评论数明显增加，则用 key 去重做增量
+        if (
+          (!Array.isArray(used) || used.length === 0) &&
+          state.totalSeen > 0 &&
+          allComments.length > state.totalSeen
+        ) {
+          try {
+            const seenKeys = new Set(
+              state.collectedComments.map((c) => buildCommentKey(c)).filter(Boolean),
+            );
+            const appended = [];
+            for (const c of allComments) {
+              const k = buildCommentKey(c);
+              if (!k) continue;
+              if (seenKeys.has(k)) continue;
+              seenKeys.add(k);
+              appended.push(c);
+              if (appended.length >= MAX_NEW_COMMENTS_PER_ROUND) break;
+            }
+            if (appended.length > 0) {
+              console.warn(
+                `   [Note ${noteId}] lastPair 定位疑似失效（oldTotalSeen=${state.totalSeen}, currentDomCount=${allComments.length}），已启用 key 去重兜底，新增=${appended.length}`,
+              );
+              used = appended;
+              diff = {
+                used: appended,
+                newPair: buildLastPairFromArray([...state.collectedComments, ...appended]) || diff.newPair,
+                totalNew: appended.length,
+              };
+            }
+          } catch {
+            // ignore fallback failure
+          }
+        }
         state.rounds += 1;
         state.headerTotal =
           typeof commentsResult.totalFromHeader === 'number' &&

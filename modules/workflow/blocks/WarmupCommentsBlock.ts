@@ -40,6 +40,9 @@ export async function execute(input: WarmupCommentsInput): Promise<WarmupComment
   const profile = sessionId;
   const controllerUrl = `${serviceUrl}/v1/controller/action`;
   let focusPoint: { x: number; y: number } | null = null;
+  const browserServiceUrl =
+    process.env.WEBAUTO_BROWSER_SERVICE_URL || 'http://127.0.0.1:7704';
+  const browserWsUrl = process.env.WEBAUTO_BROWSER_WS_URL || 'ws://127.0.0.1:8765';
 
   async function controllerAction(action: string, payload: any = {}) {
     const response = await fetch(controllerUrl, {
@@ -53,6 +56,108 @@ export async function execute(input: WarmupCommentsInput): Promise<WarmupComment
     }
     const data = await response.json();
     return data.data || data;
+  }
+
+  async function browserServiceCommand(action: string, args: any = {}, timeoutMs = 15000) {
+    const response = await fetch(`${browserServiceUrl}/command`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action, args }),
+      signal: (AbortSignal as any).timeout ? (AbortSignal as any).timeout(timeoutMs) : undefined,
+    });
+    if (!response.ok) {
+      throw new Error(`browser-service HTTP ${response.status}: ${await response.text()}`);
+    }
+    const data = await response.json().catch(() => ({} as any));
+    if (data?.ok === false || data?.success === false) {
+      throw new Error(data?.error || 'browser-service command failed');
+    }
+    return data?.body || data?.data || data;
+  }
+
+  async function browserServiceWsScroll(deltaY: number, coordinates?: { x: number; y: number } | null) {
+    const { default: WebSocket } = await import('ws');
+    const requestId = `${Date.now().toString(36)}_${Math.random().toString(36).slice(2)}`;
+    return new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        try {
+          ws.close();
+        } catch {}
+        reject(new Error('browser-service ws timeout'));
+      }, 15000);
+
+      const ws = new WebSocket(browserWsUrl);
+
+      const cleanup = () => {
+        clearTimeout(timer);
+        try {
+          ws.close();
+        } catch {}
+      };
+
+      ws.on('open', () => {
+        try {
+          ws.send(
+            JSON.stringify({
+              type: 'command',
+              request_id: requestId,
+              session_id: profile,
+              data: {
+                command_type: 'user_action',
+                action: 'operation',
+                parameters: {
+                  operation_type: 'scroll',
+                  ...(coordinates ? { target: { coordinates } } : {}),
+                  deltaY,
+                },
+              },
+            }),
+          );
+        } catch (err) {
+          cleanup();
+          reject(err);
+        }
+      });
+
+      ws.on('message', (buf: any) => {
+        try {
+          const msg = JSON.parse(String(buf || ''));
+          if (msg?.type !== 'response') return;
+          if (String(msg?.request_id || '') !== requestId) return;
+          const payload = msg?.data || {};
+          if (payload?.success === false) {
+            cleanup();
+            reject(new Error(payload?.error || 'browser-service ws scroll failed'));
+            return;
+          }
+          cleanup();
+          resolve();
+        } catch (err) {
+          cleanup();
+          reject(err);
+        }
+      });
+
+      ws.on('error', (err: any) => {
+        cleanup();
+        reject(err);
+      });
+    });
+  }
+
+  async function systemMouseWheel(deltaY: number) {
+    const coords = focusPoint ? { x: focusPoint.x, y: focusPoint.y } : null;
+    try {
+      if (coords) {
+        await browserServiceCommand('mouse:move', { profileId: profile, x: coords.x, y: coords.y, steps: 3 }, 8000);
+      }
+      await browserServiceCommand('mouse:wheel', { profileId: profile, deltaX: 0, deltaY }, 8000);
+      return;
+    } catch (err: any) {
+      console.warn('[WarmupComments] browser-service mouse:wheel failed, fallback to ws:', err?.message || err);
+    }
+
+    await browserServiceWsScroll(deltaY, coords);
   }
 
   async function nativeClick(x: number, y: number) {
@@ -552,91 +657,14 @@ export async function execute(input: WarmupCommentsInput): Promise<WarmupComment
       // 许多帖子评论本身就是纯列表滚动，没有「展开 N 条回复」控件；
       // 这种情况下仍然需要继续向下滚动，直到 header 总数或滚动容器真正到达底部。
 
-      // 2.4 优先使用容器运行时的系统滚动（scroll operation），仅在必要时再使用 JS fallback
+      // 2.4 系统滚动：用真实鼠标滚轮事件滚动（禁止 JS scrollBy 兜底）
       const deltaY = 320 + Math.floor(Math.random() * 280); // 320–599 之间的随机滚动距离
-      let containerScrollOk = false;
       try {
-        const opResult = await controllerAction('container:operation', {
-          containerId: commentSectionId,
-          operationId: 'scroll',
-          config: { direction: 'down', distance: deltaY },
-          sessionId: profile,
-        });
-        const opPayload = (opResult as any).data || opResult;
-        containerScrollOk = opPayload?.ok !== false;
-        console.log(
-          `[WarmupComments] round=${i} container scroll payload: ${JSON.stringify(
-            opPayload,
-          )}`,
-        );
+        await systemMouseWheel(deltaY);
+        console.log(`[WarmupComments] round=${i} system wheel deltaY=${deltaY}`);
       } catch (err: any) {
         console.warn(
-          `[WarmupComments] round=${i} container scroll failed: ${err?.message || err}`,
-        );
-      }
-
-      // 2.5 使用 JS 在真实滚动容器上执行 scrollBy（基于 DOM 自动识别滚动容器）作为兜底
-      await new Promise((r) => setTimeout(r, 400));
-
-      try {
-        const scrollResult = await controllerAction('browser:execute', {
-          profile,
-          script: `(() => {
-            const root =
-              document.querySelector('.comments-el') ||
-              document.querySelector('.comment-list') ||
-              document.querySelector('.comments-container') ||
-              document.querySelector('[class*="comment-section"]');
-            if (!root) return { success: false, reason: 'no_root' };
-
-            // 寻找真实滚动容器：优先父级 overflow 可滚动元素，其次 document.scrollingElement
-            let scrollContainer = null;
-            let current = root.parentElement;
-            while (current && current !== document.body) {
-              const style = window.getComputedStyle(current);
-              if (style.overflowY === 'scroll' || style.overflowY === 'auto') {
-                scrollContainer = current;
-                break;
-              }
-              current = current.parentElement;
-            }
-
-            if (!scrollContainer) {
-              scrollContainer =
-                document.scrollingElement || document.documentElement || document.body;
-            }
-            if (!scrollContainer) {
-              return { success: false, reason: 'no_scroll_container' };
-            }
-
-            const before = scrollContainer.scrollTop || 0;
-            const delta = ${deltaY};
-            try {
-              scrollContainer.scrollBy({ top: delta, behavior: 'smooth' });
-            } catch {
-              try {
-                scrollContainer.scrollTop = before + delta;
-              } catch {}
-            }
-            const after = scrollContainer.scrollTop || 0;
-
-            return {
-              success: true,
-              before,
-              after,
-              delta,
-              moved: after !== before
-            };
-          })()`,
-        });
-        const payload =
-          (scrollResult as any).result || (scrollResult as any).data?.result || scrollResult;
-        console.log(
-          `[WarmupComments] round=${i} js scroll payload: ${JSON.stringify(payload)}`,
-        );
-      } catch (err: any) {
-        console.warn(
-          `[WarmupComments] round=${i} js scroll failed: ${err?.message || err}`,
+          `[WarmupComments] round=${i} system wheel failed: ${err?.message || err}`,
         );
       }
 
