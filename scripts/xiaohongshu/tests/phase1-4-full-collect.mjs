@@ -3781,7 +3781,11 @@ async function runPhase3And4FromIndex(keyword, targetCount, env) {
               state.lastPair = null;
             }
 
-            const used = appendUnseenComments(state, allComments, need);
+            // 关键规则：
+            // - 正常轮转时：每次最多新增 N 条（commentsPerRound）再切换 tab
+            // - 一旦命中“到底/空评论”锚点：本次必须把页面上已渲染的评论全部落盘，避免“已到底但因为 need 限制导致缺评论 -> 永远不对齐”
+            const appendLimit = endHit || emptyHit ? Number.MAX_SAFE_INTEGER : need;
+            const used = appendUnseenComments(state, allComments, appendLimit);
             if (Array.isArray(used) && used.length > 0) {
               await appendNoteCommentsJsonl(noteId, used);
             }
