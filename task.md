@@ -51,11 +51,9 @@
 
 ### ✅ 最新实测记录（2026-01-15）
 
-- Phase2(ListOnly) 续传验证：在 `keyword=雷军` 的 search_result 页面，从已有 20 条续跑到 50 条成功（`loopRound=7`）。
-- 系统滚动实测：日志确认触发 `WS user_action.scroll` 回退路径，且锚点 rect `y` 变为负数，表示滚动已生效并进入下一屏采集。
-- Phase3-4(Tab 模式) 验证：已将“键盘新建 tab”改为 browser-service `page:new/page:switch/page:close` 方式（需要 build+重启 browser-service 后实测）。
-- 视口高度增强：脚本支持 `--viewport-height/--viewport-width` 并会尝试通过 `browser-service page:setViewport` 增大可见区域，提升长正文页面评论区定位稳定性。
-- 评论数量对齐小样验证：`keyword=外贸_mismatch_test target=1` 基于 `safe-detail-urls.jsonl` 直跑 Phase3-4，最终 `totalFromHeader=67` 与 `collected=67` 对齐，生成 `summary.comments.md`，并落盘 `comments.done.json`。
+- Phase2(ListOnly) 目标达成：`keyword=外贸 target=200 env=debug` 已跑满 200 条 `xsec_token` 链接（耗时约 13 分钟），落盘 `~/.webauto/download/xiaohongshu/debug/外贸/safe-detail-urls.jsonl`（`phase2-detail-failures.jsonl` 记录 1 条点击进详情失败）。
+- Phase3/4 评论滚动与对齐验证：`noteId=691ef02d000000000d03b9cd` 已完成并对齐（`headerTotal=67 collected=67`），落盘 `comments.jsonl/comments.md/comments.done.json`。
+- 关键修复：命中 `end_marker/empty_state` 时，不再受 `commentsPerRound` 限制，本次会把“页面已渲染但尚未落盘”的评论一次性写入，避免“已到底但永远缺评论导致不对齐”的死循环。
 
 ---
 
