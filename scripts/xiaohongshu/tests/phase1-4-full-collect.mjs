@@ -2802,6 +2802,11 @@ async function runPhase3And4FromIndex(keyword, targetCount, env) {
   console.log('\n3️⃣ Phase3-4: 基于 safe-detail-urls.jsonl 的详情 + 评论采集（4 帖接力，多轮增量）...');
 
   const baseDir = getKeywordBaseDir(env, keyword);
+  const summaryRunId = runContext?.runId || createRunId();
+  const commentsSummaryJsonlPath = path.join(baseDir, `summary.comments.${summaryRunId}.jsonl`);
+  const commentsSummaryMdPath = path.join(baseDir, `summary.comments.${summaryRunId}.md`);
+  const commentsSummaryLatestJsonlPath = path.join(baseDir, 'summary.comments.jsonl');
+  const commentsSummaryLatestMdPath = path.join(baseDir, 'summary.comments.md');
   const safeEntries = await loadSafeDetailEntries(keyword, env);
   if (!Array.isArray(safeEntries) || safeEntries.length === 0) {
     console.warn(
@@ -2818,8 +2823,17 @@ async function runPhase3And4FromIndex(keyword, targetCount, env) {
       if (!dirent.isDirectory()) continue;
       const noteId = dirent.name;
       const commentsPath = path.join(baseDir, noteId, 'comments.md');
+      const donePath = path.join(baseDir, noteId, 'comments.done.json');
+      const partialPath = path.join(baseDir, noteId, 'comments.jsonl');
+      const doneStat = await fs.promises.stat(donePath).catch(() => null);
+      if (doneStat && doneStat.isFile()) {
+        seenNoteIds.add(noteId);
+        continue;
+      }
+      const partialStat = await fs.promises.stat(partialPath).catch(() => null);
+      const hasPartial = Boolean(partialStat && partialStat.isFile());
       const stat = await fs.promises.stat(commentsPath).catch(() => null);
-      if (stat && stat.isFile()) {
+      if (stat && stat.isFile() && !hasPartial) {
         seenNoteIds.add(noteId);
       }
     }
@@ -2863,6 +2877,43 @@ async function runPhase3And4FromIndex(keyword, targetCount, env) {
     const entry = candidates[i];
     const noteId = entry.noteId;
     const prevState = commentStateMap[noteId] || { totalSeen: 0, lastPair: null };
+    const disk = await loadNoteCommentsJsonl(noteId);
+    const diskComments = Array.isArray(disk?.comments) ? disk.comments : [];
+    const diskKeys = disk?.keys instanceof Set ? disk.keys : new Set();
+    let resumedFromDisk = diskComments.length > 0;
+    const stableCount = resumedFromDisk
+      ? diskComments.filter((c) => {
+          if (!c || typeof c !== 'object') return false;
+          const cid = c.comment_id || c.commentId || c.id || '';
+          if (cid) return true;
+          return typeof c._idx === 'number' && Number.isFinite(c._idx);
+        }).length
+      : 0;
+    const stableRatio =
+      resumedFromDisk && diskComments.length > 0 ? stableCount / diskComments.length : 0;
+    const treatLegacy = resumedFromDisk && stableRatio < 0.8;
+    if (treatLegacy) {
+      console.warn(
+        `[FullCollect][Resume] noteId=${noteId} 检测到低质量 comments.jsonl（stableRatio=${stableRatio.toFixed(
+          2,
+        )}，缺少 comment_id/_idx），为避免误去重/重复计数，本轮将忽略该文件并重新采集`,
+      );
+      try {
+        const legacyPath = typeof disk?.path === 'string' && disk.path ? `${disk.path}.legacy.${Date.now()}` : '';
+        if (legacyPath) {
+          await fs.promises.rename(disk.path, legacyPath).catch(() => null);
+        }
+      } catch {
+        // ignore
+      }
+      resumedFromDisk = false;
+    }
+
+    const collectedComments = resumedFromDisk ? diskComments : [];
+    const collectedKeys = resumedFromDisk ? diskKeys : new Set();
+    const lastPairFromDisk = resumedFromDisk ? buildLastPairFromArray(collectedComments) : null;
+    const lastPair = lastPairFromDisk || prevState.lastPair || null;
+    const totalSeen = resumedFromDisk ? collectedComments.length : Number(prevState.totalSeen) || 0;
     noteStates.set(noteId, {
       entry,
       noteId,
@@ -2870,13 +2921,15 @@ async function runPhase3And4FromIndex(keyword, targetCount, env) {
       stalledRounds: 0,
       done: false,
       headerTotal: null,
-      totalSeen: Number(prevState.totalSeen) || 0,
-      lastPair: prevState.lastPair || null,
-      collectedComments: [],
+      totalSeen,
+      lastPair,
+      collectedComments,
+      collectedKeys,
       lastDetailUrl: '',
       detailFetched: false,
       detailData: null,
       commentsActivated: false,
+      resumedFromDisk,
     });
   }
 
@@ -2916,6 +2969,127 @@ async function runPhase3And4FromIndex(keyword, targetCount, env) {
     const text = (c.text || c.content || '').toString();
     const ts = c.timestamp || c.time || '';
     return `${userId}||${userName}||${text.substring(0, 64)}||${ts}`;
+  }
+
+  function buildCommentDedupKey(c) {
+    if (!c || typeof c !== 'object') return '';
+    const commentId = c.comment_id || c.commentId || c.id || '';
+    if (commentId) return `id:${commentId}`;
+    const contentKey = buildCommentKey(c);
+    if (!contentKey) return '';
+    const idx = typeof c._idx === 'number' && Number.isFinite(c._idx) ? c._idx : null;
+    if (idx !== null) return `idx:${idx}||${contentKey}`;
+    return `content:${contentKey}`;
+  }
+
+  function getNoteDir(noteId) {
+    return path.join(baseDir, String(noteId || ''));
+  }
+
+  function getNoteCommentsJsonlPath(noteId) {
+    return path.join(getNoteDir(noteId), 'comments.jsonl');
+  }
+
+  async function loadNoteCommentsJsonl(noteId) {
+    const id = String(noteId || '').trim();
+    if (!id) return { comments: [], keys: new Set(), path: '' };
+    const filePath = getNoteCommentsJsonlPath(id);
+    const comments = [];
+    const keys = new Set();
+    try {
+      const raw = await fs.promises.readFile(filePath, 'utf8');
+      const lines = raw
+        .split(/\r?\n/)
+        .map((l) => l.trim())
+        .filter(Boolean);
+      for (const line of lines) {
+        try {
+          const obj = JSON.parse(line);
+          const k = buildCommentDedupKey(obj);
+          if (!k) continue;
+          if (keys.has(k)) continue;
+          keys.add(k);
+          comments.push(obj);
+        } catch {
+          // ignore bad line
+        }
+      }
+    } catch {
+      // ignore missing file
+    }
+    return { comments, keys, path: filePath };
+  }
+
+  async function appendNoteCommentsJsonl(noteId, newComments) {
+    const id = String(noteId || '').trim();
+    if (!id) return 0;
+    const list = Array.isArray(newComments) ? newComments : [];
+    if (list.length === 0) return 0;
+    const noteDir = getNoteDir(id);
+    const filePath = getNoteCommentsJsonlPath(id);
+    try {
+      await fs.promises.mkdir(noteDir, { recursive: true });
+      const payload = list.map((c) => JSON.stringify(c)).join('\n') + '\n';
+      await fs.promises.appendFile(filePath, payload, 'utf8');
+      return list.length;
+    } catch {
+      return 0;
+    }
+  }
+
+  async function writeNoteCommentsDoneMarker(noteId, payload) {
+    const id = String(noteId || '').trim();
+    if (!id) return false;
+    const noteDir = getNoteDir(id);
+    const filePath = path.join(noteDir, 'comments.done.json');
+    try {
+      await fs.promises.mkdir(noteDir, { recursive: true });
+      await fs.promises.writeFile(filePath, JSON.stringify(payload, null, 2), 'utf8');
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  async function resetNoteCommentsStorage(noteId, reason) {
+    const id = String(noteId || '').trim();
+    if (!id) return null;
+    const filePath = getNoteCommentsJsonlPath(id);
+    try {
+      const stat = await fs.promises.stat(filePath).catch(() => null);
+      if (!(stat && stat.isFile())) return null;
+      const backupPath = `${filePath}.corrupt.${Date.now()}`;
+      await fs.promises.rename(filePath, backupPath).catch(() => null);
+      console.warn(`[FullCollect][Resume] noteId=${id} 已重置 comments.jsonl（reason=${reason} backup=${backupPath}）`);
+      return backupPath;
+    } catch {
+      return null;
+    }
+  }
+
+  function appendUnseenComments(state, allComments, maxToAppend) {
+    const arr = Array.isArray(allComments) ? allComments : [];
+    const need = typeof maxToAppend === 'number' && maxToAppend > 0 ? maxToAppend : 0;
+    if (!need || arr.length === 0) return [];
+    if (!(state.collectedKeys instanceof Set)) state.collectedKeys = new Set();
+
+    const appended = [];
+    for (const c of arr) {
+      const k = buildCommentDedupKey(c);
+      if (!k) continue;
+      if (state.collectedKeys.has(k)) continue;
+      state.collectedKeys.add(k);
+      appended.push(c);
+      if (appended.length >= need) break;
+    }
+
+    if (appended.length > 0) {
+      state.collectedComments.push(...appended);
+      state.totalSeen = state.collectedComments.length;
+      state.lastPair = buildLastPairFromArray(state.collectedComments) || state.lastPair;
+    }
+
+    return appended;
   }
 
   function buildLastPairFromArray(arr) {
@@ -2981,6 +3155,61 @@ async function runPhase3And4FromIndex(keyword, targetCount, env) {
     }
 
     return { used, newPair, totalNew: allNew.length };
+  }
+
+  async function appendCommentsSummaryLine(lineObj) {
+    try {
+      await fs.promises.appendFile(commentsSummaryJsonlPath, `${JSON.stringify(lineObj)}\n`, 'utf8');
+    } catch {
+      // ignore
+    }
+  }
+
+  async function writeCommentsSummaryMdFromJsonl() {
+    try {
+      const raw = await fs.promises.readFile(commentsSummaryJsonlPath, 'utf8').catch(() => '');
+      const rows = raw
+        .split('\n')
+        .map((l) => l.trim())
+        .filter(Boolean)
+        .map((l) => {
+          try {
+            return JSON.parse(l);
+          } catch {
+            return null;
+          }
+        })
+        .filter(Boolean);
+
+      const lines = [];
+      lines.push(`# 评论数量对齐汇总`);
+      lines.push('');
+      lines.push(`- keyword: ${keyword}`);
+      lines.push(`- env: ${env}`);
+      lines.push(`- generatedAt: ${new Date().toISOString()}`);
+      lines.push('');
+      lines.push(`| noteId | 标题 | 检测评论数(totalFromHeader) | 实际获取评论数(collected) | delta | doneReason |`);
+      lines.push(`|---|---|---:|---:|---:|---|`);
+      for (const r of rows) {
+        const noteId = String(r.noteId || '');
+        const title = String(r.title || '').replace(/\|/g, ' ');
+        const headerTotal =
+          typeof r.headerTotal === 'number' && Number.isFinite(r.headerTotal) ? r.headerTotal : '';
+        const collected =
+          typeof r.collected === 'number' && Number.isFinite(r.collected) ? r.collected : '';
+        const delta =
+          typeof r.delta === 'number' && Number.isFinite(r.delta) ? r.delta : '';
+        const doneReason = String(r.doneReason || '');
+        lines.push(`| ${noteId} | ${title} | ${headerTotal} | ${collected} | ${delta} | ${doneReason} |`);
+      }
+
+      const md = lines.join('\n') + '\n';
+      await fs.promises.writeFile(commentsSummaryMdPath, md, 'utf8');
+      await fs.promises.writeFile(commentsSummaryLatestMdPath, md, 'utf8').catch(() => {});
+      await fs.promises.copyFile(commentsSummaryJsonlPath, commentsSummaryLatestJsonlPath).catch(() => {});
+    } catch (err) {
+      console.warn('[FullCollect][Summary] write md failed:', err?.message || String(err));
+    }
   }
 
   const useTabs =
@@ -3127,6 +3356,7 @@ async function runPhase3And4FromIndex(keyword, targetCount, env) {
     const phaseStartAtMs = Date.now();
     let completedNotes = 0;
     let riskDetectionCount = 0;
+    let commentCountMismatch = 0;
 
     console.log(
       `[FullCollect][Tabs] 启用 4-tab 接力模式：groupSize=${MAX_GROUP_SIZE} commentsPerRound=${MAX_NEW_COMMENTS_PER_ROUND} maxRoundsPerNote=${MAX_ROUNDS_PER_NOTE} openIntervalMs=${OPEN_INTERVAL_MS}`,
@@ -3152,6 +3382,9 @@ async function runPhase3And4FromIndex(keyword, targetCount, env) {
       const FIXED_TAB_START_INDEX = 1; // 固定第2个 tab（0-based index=1）
       const FIXED_TAB_MAX_SLOTS = 4; // 固定第2-5个 tab 共 4 个
       const desiredFixedSlots = Math.min(MAX_GROUP_SIZE, FIXED_TAB_MAX_SLOTS);
+      let phaseErr = null;
+
+      try {
 
       function getNextNoteId() {
         while (nextCursor < noteIds.length) {
@@ -3535,65 +3768,43 @@ async function runPhase3And4FromIndex(keyword, targetCount, env) {
             const endHit = String(exitId).endsWith('.end_marker') && exitRectOk;
             const emptyHit = String(exitId).endsWith('.empty_state') && exitRectOk;
 
-            let diff = computeNewCommentsForRound(allComments, state.lastPair, need);
-            let used = diff.used;
+            const headerTotalNow =
+              typeof commentsResult.totalFromHeader === 'number' &&
+              Number.isFinite(commentsResult.totalFromHeader)
+                ? commentsResult.totalFromHeader
+                : null;
+            if (typeof headerTotalNow === 'number' && headerTotalNow > 0 && state.totalSeen > headerTotalNow * 1.3) {
+              await resetNoteCommentsStorage(noteId, 'over_collected');
+              state.collectedComments = [];
+              state.collectedKeys = new Set();
+              state.totalSeen = 0;
+              state.lastPair = null;
+            }
 
-            if (
-              (!Array.isArray(used) || used.length === 0) &&
-              state.totalSeen > 0 &&
-              allComments.length > state.totalSeen
-            ) {
-              try {
-                const seenKeys = new Set(
-                  state.collectedComments.map((c) => buildCommentKey(c)).filter(Boolean),
-                );
-                const appended = [];
-                for (const c of allComments) {
-                  const k = buildCommentKey(c);
-                  if (!k) continue;
-                  if (seenKeys.has(k)) continue;
-                  seenKeys.add(k);
-                  appended.push(c);
-                  if (appended.length >= need) break;
-                }
-                if (appended.length > 0) {
-                  console.warn(
-                    `   [Note ${noteId}] lastPair 定位疑似失效（oldTotalSeen=${state.totalSeen}, currentDomCount=${allComments.length}），已启用 key 去重兜底，新增=${appended.length}`,
-                  );
-                  used = appended;
-                  diff = {
-                    used: appended,
-                    newPair:
-                      buildLastPairFromArray([...state.collectedComments, ...appended]) || diff.newPair,
-                    totalNew: appended.length,
-                  };
-                }
-              } catch {
-                // ignore
-              }
+            const used = appendUnseenComments(state, allComments, need);
+            if (Array.isArray(used) && used.length > 0) {
+              await appendNoteCommentsJsonl(noteId, used);
             }
 
             state.rounds += 1;
             state.headerTotal =
-              typeof commentsResult.totalFromHeader === 'number' && commentsResult.totalFromHeader > 0
+              typeof commentsResult.totalFromHeader === 'number' &&
+              Number.isFinite(commentsResult.totalFromHeader) &&
+              commentsResult.totalFromHeader >= 0
                 ? commentsResult.totalFromHeader
                 : state.headerTotal;
 
             if (Array.isArray(used) && used.length > 0) {
-              state.collectedComments.push(...used);
-              state.totalSeen += used.length;
               visitAdded += used.length;
               cycleNewComments += used.length;
               noNewStreak = 0;
               console.log(
-                `   [Note ${noteId}] 本次访问新增评论=${used.length}（visitAdded=${visitAdded}/${MAX_NEW_COMMENTS_PER_ROUND}），累计=${state.collectedComments.length}`,
+                `   [Note ${noteId}] 本次访问新增评论=${used.length}（visitAdded=${visitAdded}/${MAX_NEW_COMMENTS_PER_ROUND}），累计=${state.totalSeen}`,
               );
             } else {
               noNewStreak += 1;
-              console.log(`   [Note ${noteId}] 本次访问未发现新的评论（totalNew=${diff.totalNew}）`);
+              console.log(`   [Note ${noteId}] 本次访问未发现新的评论（noNewStreak=${noNewStreak}）`);
             }
-
-            state.lastPair = diff.newPair;
 
             try {
               await updateCollectState((draft) => {
@@ -3631,6 +3842,15 @@ async function runPhase3And4FromIndex(keyword, targetCount, env) {
               noteDone = true;
               doneReason = 'empty_state';
             } else if (endHit) {
+              const total =
+                typeof state.headerTotal === 'number' && Number.isFinite(state.headerTotal)
+                  ? state.headerTotal
+                  : null;
+              if (typeof total === 'number' && total >= 0 && state.totalSeen !== total) {
+                console.warn(
+                  `   [Note ${noteId}] ⚠️ 已命中 end_marker 但评论数量未对齐：headerTotal=${total} collected=${state.totalSeen}（将继续流程，但最终以对齐校验结果为准）`,
+                );
+              }
               noteDone = true;
               doneReason = 'reached_end';
             } else if (exhaustedRounds) {
@@ -3679,12 +3899,35 @@ async function runPhase3And4FromIndex(keyword, targetCount, env) {
                 ? state.lastDetailUrl.match(/\/explore\/([^/?#]+)/)?.[1]
                 : '') || noteId;
 
+            const headerTotal =
+              typeof aggregatedResult.totalFromHeader === 'number' &&
+              Number.isFinite(aggregatedResult.totalFromHeader)
+                ? aggregatedResult.totalFromHeader
+                : null;
+            const collectedCount = Array.isArray(state.collectedComments) ? state.collectedComments.length : 0;
+            const mismatch =
+              typeof headerTotal === 'number' && headerTotal >= 0 && collectedCount !== headerTotal;
+            if (mismatch) commentCountMismatch += 1;
+
+            await appendCommentsSummaryLine({
+              ts: new Date().toISOString(),
+              noteId: finalNoteId || noteId,
+              title: state.entry?.title || state.detailData?.header?.title || '',
+              url: state.lastDetailUrl || '',
+              headerTotal,
+              collected: collectedCount,
+              delta: typeof headerTotal === 'number' ? collectedCount - headerTotal : null,
+              doneReason,
+              mismatch,
+              slotIndex: slot.slotIndex + 1,
+              rounds: state.rounds,
+            });
+
             if (!finalNoteId) {
               console.warn('   ⚠️ 无法确定 noteId，跳过本地持久化');
             } else if (seenNoteIds.has(finalNoteId)) {
               console.log(`   ⚠️ noteId=${finalNoteId} 已处理过，本轮仅复用评论结果，不再写盘`);
-            } else {
-              seenNoteIds.add(finalNoteId);
+            } else if (doneReason === 'reached_end' || doneReason === 'empty_state') {
               const persistRes = await persistXhsNote({
                 sessionId: PROFILE,
                 env,
@@ -3698,13 +3941,32 @@ async function runPhase3And4FromIndex(keyword, targetCount, env) {
               if (!persistRes.success) {
                 console.warn(`   ⚠️ PersistXhsNote 失败 noteId=${finalNoteId}: ${persistRes.error}`);
               } else {
+                seenNoteIds.add(finalNoteId);
                 console.log(
                   `   💾 已落盘 noteId=${finalNoteId} 到目录: ${
                     persistRes.outputDir || persistRes.contentPath || '未知路径'
                   }`,
                 );
                 emitRunEvent('note_persisted', { noteId: finalNoteId, outputDir: persistRes.outputDir || null });
+                if (!mismatch) {
+                  await writeNoteCommentsDoneMarker(finalNoteId, {
+                    noteId: finalNoteId,
+                    headerTotal,
+                    collected: collectedCount,
+                    doneReason,
+                    url: state.lastDetailUrl || '',
+                    finishedAt: new Date().toISOString(),
+                  });
+                } else {
+                  console.warn(
+                    `   ⚠️ noteId=${finalNoteId} 评论数量未对齐（headerTotal=${headerTotal} collected=${collectedCount}），不写 comments.done.json 以便后续复跑`,
+                  );
+                }
               }
+            } else {
+              console.warn(
+                `   ⚠️ noteId=${finalNoteId} 未完成（doneReason=${doneReason}），仅保留增量 comments.jsonl，跳过写入 comments.md`,
+              );
             }
 
           slot.noteId = null;
@@ -3764,6 +4026,18 @@ async function runPhase3And4FromIndex(keyword, targetCount, env) {
       });
       if (completedNotes === 0 && maxNotesToProcess > 0) {
         throw new Error('phase3_no_notes_completed');
+      }
+      } catch (err) {
+        phaseErr = err;
+      }
+
+      await writeCommentsSummaryMdFromJsonl();
+      if (phaseErr) throw phaseErr;
+      if (commentCountMismatch > 0) {
+        console.warn(
+          `[FullCollect][Summary] 评论数量不对齐 noteCount=${commentCountMismatch}，将以非零退出码结束（summary=${commentsSummaryLatestMdPath}）`,
+        );
+        throw new Error('phase4_comment_count_mismatch');
       }
       return;
     }
@@ -4011,7 +4285,9 @@ async function runPhase3And4FromIndex(keyword, targetCount, env) {
 
           state.rounds += 1;
           state.headerTotal =
-            typeof commentsResult.totalFromHeader === 'number' && commentsResult.totalFromHeader > 0
+            typeof commentsResult.totalFromHeader === 'number' &&
+            Number.isFinite(commentsResult.totalFromHeader) &&
+            commentsResult.totalFromHeader >= 0
               ? commentsResult.totalFromHeader
               : state.headerTotal;
 
@@ -5375,9 +5651,20 @@ async function main() {
       for (const e of Array.isArray(entries) ? entries : []) {
         const noteId = e?.noteId || '';
         if (!noteId) continue;
+        const donePath = path.join(baseDir, noteId, 'comments.done.json');
+        const doneStat = await fs.promises.stat(donePath).catch(() => null);
+        if (doneStat && doneStat.isFile()) continue;
+
+        const partialPath = path.join(baseDir, noteId, 'comments.jsonl');
+        const partialStat = await fs.promises.stat(partialPath).catch(() => null);
+        const hasPartial = Boolean(partialStat && partialStat.isFile());
+
         const commentsPath = path.join(baseDir, noteId, 'comments.md');
         const stat = await fs.promises.stat(commentsPath).catch(() => null);
-        if (!(stat && stat.isFile())) pending += 1;
+        const hasCommentsMd = Boolean(stat && stat.isFile());
+
+        const isLegacyDone = hasCommentsMd && !hasPartial;
+        if (!isLegacyDone) pending += 1;
       }
       return pending;
     } catch {
@@ -5456,6 +5743,8 @@ main().catch((err) => {
     ['phase3_open_tabs_failed', 31],
     ['phase3_risk_or_tab_error_stop', 32],
     ['phase3_no_notes_completed', 33],
+    // Phase4
+    ['phase4_comment_count_mismatch', 41],
     // Infra / services
     ['search_gate_unhealthy', 11],
     ['search_gate_unhealthy_custom', 13],

@@ -477,7 +477,7 @@ export async function execute(input: ExpandCommentsInput): Promise<ExpandComment
           const items = Array.from(
             root.querySelectorAll(cfg.itemSelector || '.comment-item, [class*="comment-item"]'),
           );
-          const comments = items.map((el) => {
+          const comments = items.map((el, idx) => {
             const item = {};
             const fields = cfg.fields || {};
 
@@ -508,6 +508,21 @@ export async function execute(input: ExpandCommentsInput): Promise<ExpandComment
               item[fieldName] = value;
             }
 
+            // 稳定去重标识：优先使用 DOM 自带的 comment id，其次退回到 DOM 顺序 idx
+            item._idx = idx;
+            item.comment_id =
+              el.getAttribute('data-id') ||
+              el.getAttribute('data-comment-id') ||
+              el.getAttribute('data-commentid') ||
+              el.getAttribute('data-comment-id') ||
+              el.getAttribute('id') ||
+              '';
+
+            // 兜底：有的 comment_item 结构不一致，字段抽取失败时用整体文本兜底，避免漏计数
+            if (!item.text) {
+              item.text = (el.textContent || '').trim();
+            }
+
             // 额外标记是否为回复
             item.is_reply = !!el.closest('.reply-container');
             return item;
@@ -532,7 +547,11 @@ export async function execute(input: ExpandCommentsInput): Promise<ExpandComment
               Boolean((c as any).text && String((c as any).text).trim()) ||
               Boolean((c as any).user_name && String((c as any).user_name).trim());
             if (!hasContent) continue;
-            const key = `${(c as any).user_id || ''}||${(c as any).user_name || ''}||${(c as any).text || ''}||${(c as any).timestamp || ''}`;
+            const cid = (c as any).comment_id || (c as any).commentId || (c as any).id || '';
+            const idx = typeof (c as any)._idx === 'number' ? String((c as any)._idx) : '';
+            const key = cid
+              ? `id:${cid}`
+              : `idx:${idx}||${(c as any).user_id || ''}||${(c as any).user_name || ''}||${(c as any).text || ''}||${(c as any).timestamp || ''}`;
             if (seenKeys.has(key)) continue;
             seenKeys.add(key);
             comments.push(c);

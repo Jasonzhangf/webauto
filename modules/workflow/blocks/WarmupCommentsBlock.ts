@@ -348,7 +348,27 @@ export async function execute(input: WarmupCommentsInput): Promise<WarmupComment
           document.querySelector('.comment-list') ||
           document.querySelector('.comments-container') ||
           document.querySelector('[class*=\"comment-section\"]');
-        if (!root) return { hasRoot: false, count: 0, hasMore: false, total: null };
+        if (!root) {
+          const chatCountEl =
+            document.querySelector('.chat-wrapper .count') ||
+            document.querySelector('[class*=\"chat-wrapper\"] .count') ||
+            document.querySelector('.chat-wrapper [class*=\"count\"]');
+          const parseCount = (raw) => {
+            const t = (raw || '').toString().trim();
+            if (!t) return null;
+            const mWan = t.match(/^([0-9]+(?:\\.[0-9]+)?)\\s*万/);
+            if (mWan) {
+              const v = Number.parseFloat(mWan[1]);
+              if (!Number.isFinite(v)) return null;
+              return Math.round(v * 10000);
+            }
+            const digits = t.replace(/[^0-9]/g, '');
+            if (!digits.length) return null;
+            return Number(digits);
+          };
+          const parsed = parseCount(chatCountEl?.textContent || '');
+          return { hasRoot: false, count: 0, hasMore: false, total: parsed };
+        }
 
         const items = Array.from(root.querySelectorAll('.comment-item, [class*="comment-item"]'));
 
@@ -387,6 +407,31 @@ export async function execute(input: WarmupCommentsInput): Promise<WarmupComment
           if (m) {
             total = Number(m[1]) || null;
             break;
+          }
+        }
+
+        // 3) 兜底：评论按钮（chat-wrapper）上的计数，例如「5」「1.2万」
+        if (total === null) {
+          const chatCountEl =
+            document.querySelector('.chat-wrapper .count') ||
+            document.querySelector('[class*=\"chat-wrapper\"] .count') ||
+            document.querySelector('.chat-wrapper [class*=\"count\"]');
+          const parseCount = (raw) => {
+            const t = (raw || '').toString().trim();
+            if (!t) return null;
+            const mWan = t.match(/^([0-9]+(?:\\.[0-9]+)?)\\s*万/);
+            if (mWan) {
+              const v = Number.parseFloat(mWan[1]);
+              if (!Number.isFinite(v)) return null;
+              return Math.round(v * 10000);
+            }
+            const digits = t.replace(/[^0-9]/g, '');
+            if (!digits.length) return null;
+            return Number(digits);
+          };
+          const parsed = parseCount(chatCountEl?.textContent || '');
+          if (typeof parsed === 'number' && Number.isFinite(parsed)) {
+            total = parsed;
           }
         }
 
@@ -684,7 +729,7 @@ export async function execute(input: WarmupCommentsInput): Promise<WarmupComment
     // 则直接视为无需预热，避免在没有任何锚点信号的情况下盲目滚动。
     if (
       initialStats.count === 0 &&
-      initialStats.total === null &&
+      (initialStats.total === null || initialStats.total === 0) &&
       !initialStats.hasMore
     ) {
       console.log(

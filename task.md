@@ -41,6 +41,13 @@
 4. [ ] Phase2 “无 token”处理：打开详情后如果 URL 没有 `xsec_token`，立刻停在详情页（给人工检查）+ 生成截图/DOM 快照 + 明确退出原因/退出码。
 5. [ ] Phase2 速度度量：把“每条详情打开耗时、总耗时、平均耗时”写入 JSONL（便于确认慢在哪里）。
 6. [ ] Phase3 4-tab 接力稳定性：必须确保“打开新 tab → 进入详情 → 评论滚动生效 → 增量落盘”，任何阶段失败都需要 `debug snapshot + 非零退出码`。
+7. [x] 评论数量对齐验证（交付必测）：
+   - 每个 note 记录 `totalFromHeader`（详情页评论按钮/头部统计）与 `collected`（本地抓取的评论条数）；
+   - 生成 `summary.comments.jsonl` + `summary.comments.md`（每个 note 一行）；
+   - 任意 note 出现不对齐（`collected !== totalFromHeader`）则全流程以非零退出码结束（并保留 summary 供排查）。
+8. [x] 评论断点续传落盘：
+   - 评论增量写入 `{noteId}/comments.jsonl`（每次只 append 新评论，支持 crash 后恢复）；
+   - 完成后写 `{noteId}/comments.done.json` 作为“已完成”标记（兼容历史仅 `comments.md` 的旧数据）。
 
 ### ✅ 最新实测记录（2026-01-15）
 
@@ -48,6 +55,7 @@
 - 系统滚动实测：日志确认触发 `WS user_action.scroll` 回退路径，且锚点 rect `y` 变为负数，表示滚动已生效并进入下一屏采集。
 - Phase3-4(Tab 模式) 验证：已将“键盘新建 tab”改为 browser-service `page:new/page:switch/page:close` 方式（需要 build+重启 browser-service 后实测）。
 - 视口高度增强：脚本支持 `--viewport-height/--viewport-width` 并会尝试通过 `browser-service page:setViewport` 增大可见区域，提升长正文页面评论区定位稳定性。
+- 评论数量对齐小样验证：`keyword=外贸_mismatch_test target=1` 基于 `safe-detail-urls.jsonl` 直跑 Phase3-4，最终 `totalFromHeader=67` 与 `collected=67` 对齐，生成 `summary.comments.md`，并落盘 `comments.done.json`。
 
 ---
 
