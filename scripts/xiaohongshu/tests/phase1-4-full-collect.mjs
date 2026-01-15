@@ -1983,7 +1983,10 @@ async function runPhase2ListOnly(keyword, targetCount, env, searchUrl = '') {
     console.error(
       '[Phase2(ListOnly)] 当前页面不在搜索结果页，已尝试恢复失败，为避免在错误页面采集，终止本次列表采集',
     );
-    return { count: 0 };
+    // 这里必须抛错：
+    // - 否则 main() 会继续进入 Phase3/4，最终错误地标记 run_success(code=0)
+    // - Fresh 模式下会导致“删除历史目录后啥也没采到却显示成功”的假成功
+    throw new Error('stage_guard_not_search');
   }
 
   const canonicalSearchUrl = await getCurrentUrl().catch(() => '');
