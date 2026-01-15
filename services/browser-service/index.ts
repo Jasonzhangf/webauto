@@ -290,6 +290,14 @@ async function handleCommand(payload: CommandPayload, manager: SessionManager, w
       await session.mouseMove({ x: Number(x), y: Number(y), steps });
       return { ok: true, body: { ok: true } };
     }
+    case 'mouse:wheel': {
+      const profileId = args.profileId || 'default';
+      const session = manager.getSession(profileId);
+      if (!session) throw new Error(`session for profile ${profileId} not started`);
+      const { deltaY, deltaX } = args;
+      await session.mouseWheel({ deltaY: Number(deltaY) || 0, deltaX: Number(deltaX) || 0 });
+      return { ok: true, body: { ok: true } };
+    }
     case 'keyboard:type': {
       const profileId = args.profileId || 'default';
       const session = manager.getSession(profileId);

@@ -224,6 +224,96 @@ export async function execute(input: WarmupCommentsInput): Promise<WarmupComment
     };
   }
 
+  /**
+   * 获取当前视口内第一条可见评论，用于校验滚动是否真正改变了评论区内容。
+   * 返回 key/top/bottom 等信息，仅用于日志与调试，不参与业务判断。
+   */
+  async function getViewportFirstComment() {
+    try {
+      const result = await controllerAction('browser:execute', {
+        profile,
+        script: `(() => {
+          const root =
+            document.querySelector('.comments-el') ||
+            document.querySelector('.comment-list') ||
+            document.querySelector('.comments-container') ||
+            document.querySelector('[class*="comment-section"]');
+          if (!root) return null;
+
+          const viewTop = 0;
+          const viewBottom = window.innerHeight || document.documentElement.clientHeight || 0;
+          const items = Array.from(root.querySelectorAll('.comment-item'));
+
+          let picked = null;
+          let pickedRect = null;
+
+          for (const el of items) {
+            if (!(el instanceof HTMLElement)) continue;
+            const rect = el.getBoundingClientRect();
+            const top = rect.top;
+            const bottom = rect.bottom;
+            const visibleTop = Math.max(top, viewTop);
+            const visibleBottom = Math.min(bottom, viewBottom);
+            if (visibleBottom <= visibleTop) continue;
+            picked = el;
+            pickedRect = rect;
+            break;
+          }
+
+          if (!picked || !pickedRect) return null;
+
+          const userEl =
+            picked.querySelector('[class*="name"],[class*="username"],.user-name') ||
+            picked.querySelector('[class*="author"]');
+          const contentEl =
+            picked.querySelector('[class*="content"],[class*=\"text\"],.comment-content') ||
+            picked;
+
+          const id =
+            picked.getAttribute('data-id') ||
+            picked.getAttribute('data-comment-id') ||
+            picked.getAttribute('id') ||
+            '';
+          const userText = (userEl?.textContent || '').trim();
+          const contentText = (contentEl?.textContent || '').trim();
+
+          const keyBase =
+            id ||
+            (userText ? userText.slice(0, 16) : '') + '|' + contentText.slice(0, 32);
+          const key = keyBase || contentText.slice(0, 24) || 'unknown';
+
+          return {
+            key,
+            top: pickedRect.top,
+            bottom: pickedRect.bottom,
+            user: userText.slice(0, 24),
+            textSample: contentText.slice(0, 50)
+          };
+        })()`,
+      });
+
+      const payload =
+        (result as any).result || (result as any).data?.result || result;
+      if (!payload || typeof payload !== 'object') return null;
+      if (typeof (payload as any).key !== 'string') return null;
+      return {
+        key: String((payload as any).key),
+        top: Number((payload as any).top ?? 0),
+        bottom: Number((payload as any).bottom ?? 0),
+        user:
+          typeof (payload as any).user === 'string'
+            ? ((payload as any).user as string)
+            : '',
+        textSample:
+          typeof (payload as any).textSample === 'string'
+            ? ((payload as any).textSample as string)
+            : '',
+      };
+    } catch {
+      return null;
+    }
+  }
+
   try {
     const { verifyAnchorByContainerId, getPrimarySelectorByContainerId } = await import('./helpers/containerAnchors.js');
 
@@ -337,6 +427,7 @@ export async function execute(input: WarmupCommentsInput): Promise<WarmupComment
         : 64;
 
     for (let i = 0; i < dynamicMaxRounds; i++) {
+      const viewportBefore = await getViewportFirstComment();
       // 2.1 每轮开始时,找到真正的滚动容器(.note-scroller)并使用其坐标作为滚动焦点
       // 这是关键:滚动容器是 .note-scroller,而不是 .comments-el
       const refreshFocusResult = await controllerAction('browser:execute', {
@@ -461,11 +552,33 @@ export async function execute(input: WarmupCommentsInput): Promise<WarmupComment
       // 许多帖子评论本身就是纯列表滚动，没有「展开 N 条回复」控件；
       // 这种情况下仍然需要继续向下滚动，直到 header 总数或滚动容器真正到达底部。
 
-      // 2.3 使用 JS 在真实滚动容器上执行 scrollBy（基于 DOM 自动识别滚动容器）
+      // 2.4 优先使用容器运行时的系统滚动（scroll operation），仅在必要时再使用 JS fallback
+      const deltaY = 320 + Math.floor(Math.random() * 280); // 320–599 之间的随机滚动距离
+      let containerScrollOk = false;
+      try {
+        const opResult = await controllerAction('container:operation', {
+          containerId: commentSectionId,
+          operationId: 'scroll',
+          config: { direction: 'down', distance: deltaY },
+          sessionId: profile,
+        });
+        const opPayload = (opResult as any).data || opResult;
+        containerScrollOk = opPayload?.ok !== false;
+        console.log(
+          `[WarmupComments] round=${i} container scroll payload: ${JSON.stringify(
+            opPayload,
+          )}`,
+        );
+      } catch (err: any) {
+        console.warn(
+          `[WarmupComments] round=${i} container scroll failed: ${err?.message || err}`,
+        );
+      }
+
+      // 2.5 使用 JS 在真实滚动容器上执行 scrollBy（基于 DOM 自动识别滚动容器）作为兜底
       await new Promise((r) => setTimeout(r, 400));
 
       try {
-        const deltaY = 320 + Math.floor(Math.random() * 280); // 320–599 之间的随机滚动距离
         const scrollResult = await controllerAction('browser:execute', {
           profile,
           script: `(() => {
@@ -532,6 +645,15 @@ export async function execute(input: WarmupCommentsInput): Promise<WarmupComment
 
       const stats = await getCommentStats();
       const currentCount = stats.count;
+
+      const viewportAfter = await getViewportFirstComment();
+      if (viewportBefore || viewportAfter) {
+        console.log(
+          `[WarmupComments] round=${i} viewportFirst before=${JSON.stringify(
+            viewportBefore,
+          )} after=${JSON.stringify(viewportAfter)}`,
+        );
+      }
 
       const headerKnown = targetTotal !== null && targetTotal > 0;
       const reachedTarget = headerKnown && currentCount >= (targetTotal as number);

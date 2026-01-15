@@ -2,29 +2,43 @@
 
 > 目标：基于容器驱动的 Workflow 完成小红书搜索 + 详情 + 评论采集（当前全流程目标：200 条）。
 
-## 当前执行任务（2026-01-14）
+## 当前执行任务（2026-01-15）
 
-### 🎯 本轮聚焦：Phase3 评论区系统滚动修复
+### 🎯 主线目标（按你的最新流程）
 
-> 目标：保证 WarmupCommentsBlock 在详情页中能够可靠地驱动“评论区”滚动，而不是只发滚动事件但评论列表不动。
+1. Phase1：启动守门人（按依赖顺序确保 `Unified API(7701)` → `Browser Service(7704)` → 会话存在 → 已登录）。
+2. Phase2：只搜索一次 → **只滚动搜索结果页** → 每次只处理“视口内卡片”：
+   - 系统点击卡片进入详情；
+   - 在详情页拿到带 `xsec_token` 的安全链接；
+   - 同时抽取“正文/图片/作者”等基础信息；
+   - 落盘：写入 `safe-detail-urls.jsonl`（以及 Phase2 详情基础数据，供后续评论阶段使用）。
+3. Phase3（可选）：基于 Phase2 的列表，按 **4 帖一组** 轮转采集评论（每帖每轮最多 100 条），避免单帖连续滚动。
+4. Phase4：落盘（续传 + 去重）：中断后按 step 恢复；本地已有内容必须可跳过/可增量更新。
 
-1. **为评论区滚动增加可视化与坐标校验（单帖调试）**
-   - 在 WarmupCommentsBlock 中：
-     - 基于 `xiaohongshu_detail.comment_section` 锚点拿到评论区 rect，计算滚动焦点 `focusPoint`。
-     - 在每一轮滚动前，高亮视口内第一条评论（outline），并记录其 key + `getBoundingClientRect().top`。
-     - 滚动后再次获取第一条可见评论的 key/top，打印 `before/after/moved` 日志，用于判断滚动是否真正改变了视口内容。
-   - 自测脚本：`node scripts/xiaohongshu/tests/persist-current-detail.mjs --env debug`，在一条长评论帖子上验证日志行为。
+### ✅ 已完成（稳定部分）
 
-2. **修正系统滚动的目标与事件链路**
-   - 确保滚动前先在评论区中心做一次系统点击（`user_action`），把焦点落在评论区域。
-   - 使用评论区容器的 `container:operation scroll` 来执行系统滚动，避免直接操作 DOM `scrollTop`。
-   - 如发现 scroll 依然不生效，进一步检查真正滚动的 DOM 容器（例如 `.note-scroller` 或页面根滚动容器），必要时调整容器定义或滚动目标。
+- [x] Phase1 基础服务守门人：脚本可自动拉起 `unified-api`/`browser-service`，复用已存在的 `xiaohongshu_fresh` 会话；未找到会话时可后台启动 `start-headful` 并等待会话出现。
+- [x] 登录态检测：支持通过容器锚点（`login_anchor/login_guard/qrcode_guard`）识别“已登录/未登录/风控”并阻断未登录。
+- [x] SearchGate 在线检测与自启动（Phase3/4 节流入口）。
+- [x] 失败退出码与理由：脚本失败时输出 `[Exit] code=<number> reason=<string>`，并按阶段粗粒度映射（`phase2_* → 20+`, `phase3_* → 30+`, `phase4_* → 40+`；未知错误为 `1`）。
 
-3. **在 Phase3 集成并回归**
-   - 将通过单帖脚本验证过的 Warmup 行为，回收至 `CollectCommentsBlock` / `phase1-4-full-collect.mjs` 的 Phase3 流程。
-   - 选择一个关键字（如“雷军自动化测试”）跑少量目标（3–5 条），确认：
-     - 每条 note 在评论采集阶段有有效滚动（日志中 `viewport-moved=true` 或第一条评论 key/top 有变化）。
-     - 评论数量随多轮滚动逐步增长，而不是停留在首屏 20+ 条。
+### 🧨 当前阻塞（需要复现 + 修复）
+
+> 目标：Phase2 必须做到“只搜索一次 + 系统滚动（禁止 JS fallback）+ 关键字不漂移 + 视口内点击”，并能在高量词下快速跑满目标数。
+
+1. [ ] Phase2 禁止重复 GoToSearch：循环内只允许“回退/ESC”恢复到搜索页，禁止再次触发搜索（避免重复刷新与死循环）。
+2. [x] Phase2 系统滚动：已移除 JS scroll 兜底；滚动改为“系统滚轮”：
+   - 优先走 `browser-service(7704) /command mouse:wheel`（服务重启后生效）；
+   - 若当前服务版本未包含 `mouse:wheel`，脚本自动回退到 `browser-service(8765) WS user_action.scroll`（仍是 Playwright mouse.wheel，非 JS 滚动）；
+   - 每次滚动后记录并验证 `scrollY/scrollTop/visibleSig`，无变化则停下避免死循环。
+3. [ ] Phase2 关键字漂移检测：一旦 URL keyword 与首次搜索 canonical keyword 不一致，必须停下（或仅允许一次“后退”恢复），避免在错误关键词下继续采集。
+4. [ ] Phase2 “无 token”处理：打开详情后如果 URL 没有 `xsec_token`，立刻停在详情页（给人工检查）+ 生成截图/DOM 快照 + 明确退出原因/退出码。
+5. [ ] Phase2 速度度量：把“每条详情打开耗时、总耗时、平均耗时”写入 JSONL（便于确认慢在哪里）。
+
+### ✅ 最新实测记录（2026-01-15）
+
+- Phase2(ListOnly) 续传验证：在 `keyword=雷军` 的 search_result 页面，从已有 20 条续跑到 50 条成功（`loopRound=7`）。
+- 系统滚动实测：日志确认触发 `WS user_action.scroll` 回退路径，且锚点 rect `y` 变为负数，表示滚动已生效并进入下一屏采集。
 
 ---
 
@@ -229,11 +243,12 @@
 
 ## 当前执行任务（2026-01-14）
 
-### 🎯 本轮目标：重构 Phase2-4 节奏（列表 → 分组接力评论）
+### 🎯 本轮目标：按“服务 → 搜索 + 链接 → 分组接力评论”三段式重构 Phase1-4
 
-> 在不破坏现有登录 / 搜索 / 容器锚点体系的前提下，把 Phase2-4 改造成：  
-> 1）Phase2 只负责安全地“爬列表 + 生成 safe-detail-urls.jsonl”；  
-> 2）Phase3/4 基于该列表按组轮询帖子，分批（每轮最多 100 条）采集评论，并为断点续传打好状态基础。
+> 统一约束：  
+> 1）Phase1 负责启动/检测所有服务（unified-api / browser-service / search-gate）和登录态，失败必须有非 0 退出码和明确原因；  
+> 2）Phase2 只负责“搜索 + 收集目标数量的安全链接 + 下载正文/图片”，不再在 Phase3/4 里点搜索结果卡片；  
+> 3）Phase3/4 完全基于 Phase2 产出的安全链接列表，按 4 帖一组、每轮每帖最多 100 条评论的节奏接力爬取评论，并支持断点续传。
 
 ### ✅ 已完成（本轮相关）
 
@@ -243,42 +258,64 @@
   - `sample comment` / `end_marker` 在容器锚点失败时尝试 DOM fallback，不再直接导致整块失败；  
   - Phase1-4 全流程在 keyword="测试" 场景下完成 1 条 note 的评论采集 + 落盘，并输出 entry/exit anchors。
 
-### 🔧 正在设计 / 待实现：Phase2-4 流程重构
+### 🔧 正在设计 / 待实现：按三段式改造 Phase1-4
 
-1. **Phase2 列表阶段独立化（安全爬列表 + safe-detail-urls.jsonl）**
-   - [ ] 把当前 `runPhase2To4` 拆分为：  
-     - `runPhase2ListOnly`：只负责搜索 + 列表滚动 + 收集带 xsec_token 的 note 列表；  
-     - 后续 Phase3/4：基于列表做详情 / 评论采集。  
-   - [ ] Phase2 结束时：  
-     - 写入 `~/.webauto/download/xiaohongshu/<env>/<keyword>/safe-detail-urls.jsonl`；  
-     - 在 `.collect-state.json` 中记录 `currentStep.phase = 'list'`、`safeDetailIndexSize` 等元信息，供后续续传使用。  
-   - [ ] 验证：对某个 keyword 清空下载目录，只跑 Phase2，确认 safe-detail-urls.jsonl 内容正确且可续传。
+1. **Phase1：服务启动守门人（Service → Session → Login → Gate）**
+   - [x] 把 Phase1 明确定义为“服务层 ready 守门人”：  
+     - 顺序：先检查/启动 `unified-api`，再检查/启动 `browser-service`，最后检查/启动 `search-gate`（`ensureBaseServices` + `ensureSearchGate` 已落地）；  
+     - 若服务启动或 health 检测失败，通过抛出错误并在 `main().catch` 中设置 `process.exitCode = 1` 退出，并打印明确原因。  
+   - [x] 在 Phase1 内完成会话和登录态校验：  
+     - 如 `xiaohongshu_fresh` 会话不存在，则通过 `start-headful` 启动浏览器并等待会话 ready（`ensureSessionPresence` + `startSession` + `waitForSessionReady`）；  
+     - 使用容器锚点 + URL 启发式检测登录状态（`detectLoginStateWithRetry`），未登录或风控（login_guard / qrcode_guard）时，同样以非 0 退出码 + 明确 reason 退出。  
+   - [x] 后续 Phase2/3/4 一律依赖 Phase1，不再各自重复启动/检测服务（当前 `phase1-4-full-collect.mjs` 中 Phase2/3/4 均假定服务和会话已经由 Phase1 准备完成）。
+
+2. **Phase2：搜索 + 收集目标数量链接 + 正文/图片落盘**
+   - [x] Phase2 的唯一职责：在已登录会话中，通过关键字搜索并收集“至少 target 条”目标帖子：  
+     - 使用容器驱动的 `GoToSearchBlock` 进入搜索结果页；  
+     - 在搜索结果页滚动视口，收集 noteId 列表，直到候选数 ≥ target 或确认没有更多结果（`runPhase2ListOnly` + `CollectSearchListBlock` + `scrollSearchPage`）。  
+   - [x] 对每一个候选帖子：  
+     - 通过当前稳定方式打开详情页（仅在 Phase2 中通过系统点击搜索结果卡片，Phase3/4 禁止再点卡片）；  
+     - 获取带 `xsec_token` 的安全详情 URL（如无 token 依然记录原始 URL，以便后续点击修正）；  
+     - 同时抓取正文 + 图片 + 作者信息，并在 Phase3/4 中通过 `PersistXhsNoteBlock` 落盘到  
+       `~/.webauto/download/xiaohongshu/<env>/<keyword>/<noteId>/content.md` + `images/`。  
+   - [x] Phase2 结束时：  
+     - 写出完整的 `safe-detail-urls.jsonl` 索引，至少包含 `noteId`、`title`、`safeDetailUrl`、`hasToken`、作者/头部信息等；  
+     - 若 `safe-detail-urls` 数量 `< target`，抛出 `phase2_safe_detail_target_not_reached`，由入口脚本以非 0 退出码终止，并在日志中明确打印“目标条数未达成 + 实际数量”；  
+     - 更新 `.collect-state.json`：`currentStep.phase = 'list'`，记录 `safeDetailIndexSize`、`target`、`resumeToken` 等元信息，支持后续续传。
 
 2. **为每个 note 设计评论进度 `commentState`（两条连续评论作为锚点）**
-   - [ ] 在 `.collect-state.json` 中设计并落地 per-note `commentState` 结构，建议包含：  
+   - [x] 在 `.collect-state.json` 中设计并落地 per-note `commentState` 结构，包含：  
      - `noteId`、`totalSeen`（已采集评论数）、`lastPair`（两条连续评论的特征 key + 调试用文本片段）、`updatedAt`。  
-   - [ ] 在 `CollectCommentsBlock` 结束时（无论是否滚到底）：  
+   - [x] 在 Phase3/4 中每轮处理完某个 note 的评论后：  
      - 选取一对“相对稳定”的连续评论（例如当前批次中间的两条）作为锚点，写入 `commentState.lastPair`；  
      - 更新 `totalSeen`，为下一轮增量采集提供起点。  
-   - [ ] 设计 DOM 侧锚点查找逻辑：基于 `lastPair` 在 `.comments-el/.comment-list/.comments-container` 下重建当前 index，并从该位置之后继续提取新评论。
+   - [ ] 设计 DOM 侧锚点查找逻辑：基于 `lastPair` 在 `.comments-el/.comment-list/.comments-container` 下重建当前 index，并从该位置之后继续提取新评论（目前已通过 `computeNewCommentsForRound` 在提取结果层利用 `lastPair` 做增量去重，后续可视情况补充 DOM 定位优化）。
 
-3. **Phase3/4：按组轮询帖子做“分批评论采集”（每轮每帖最多 100 条）**
-   - [ ] 基于 Phase2 的列表，构建 note 队列，并按组（每组最多 4 个 note）进行调度：  
-     - 第一轮：顺序处理组内 4 个帖子，每个帖子调用 `CollectCommentsBlock` 一次，限制 `maxNewCommentsPerRound = 100`；  
-     - 后续轮次：根据各自 `commentState.totalSeen/reachedEnd` 决定是否继续对该 note 做下一轮 100 条，直到达到评论总数或业务阈值。  
-   - [ ] 在当前浏览器能力约束下，先以“同一窗口按顺序打开/返回”的方式验证这一节奏（最小侵入版本）：  
-     - 第一次打开某帖详情页时执行 Warmup + 首轮 100 条；  
-     - 回列表后按顺序处理下一个帖子；  
-     - 后续轮次仍按组轮询，但不做多 tab 复杂控制。  
-   - [ ] 在日志中明确打印：组号、轮次编号、每个帖子本轮新增评论数，以及 `commentState.totalSeen` 的累积变化。
+3. **Phase3/4：基于安全链接，按组接力评论采集（4 帖一组，每轮每帖最多 100 条）**
+   - [x] Phase3/4 完全基于 Phase2 生成的 `safe-detail-urls.jsonl`：  
+     - 禁止再在搜索结果页点卡片打开详情；  
+     - 统一使用 `browser-service.goto(safeDetailUrl)` 打开详情页（带 `xsec_token`），并等待详情锚点 ready。  
+   - [x] 组调度策略：  
+     - 从索引中按顺序选取 note 队列，按组划分：每组最多 4 个 note；  
+     - 第一轮：对组内 4 个帖子依次执行一次 `CollectCommentsBlock`，限制 `maxNewCommentsPerRound = 100`；  
+     - 后续轮次：根据各自 `commentState.totalSeen` 与 `reachedEnd` 决定是否继续对该 note 做下一轮 100 条；  
+     - 轮询直到该组所有 note 都 `reachedEnd` 或达到业务阈值，然后进入下一组。  
+   - [x] 在当前浏览器能力约束下，先用“同一窗口顺序打开详情页”的最小侵入方案验证节奏：  
+     - 每次只打开一个 safeDetailUrl，Warmup + 采集当前轮评论；  
+     - 结束后直接 `goto` 下一个 safeDetailUrl；  
+     - 不做多 tab 复杂控制，先保证节奏正确、状态可续传。  
+   - [x] 日志要求：  
+     - 打印组号、轮次编号、组内每个帖子的 `noteId`；  
+     - 每轮输出每个帖子本轮新增评论数、本轮结束后的 `commentState.totalSeen`；  
+     - 当某轮所有帖子 `roundNewComments = 0` 时，明确打印“本轮无新增评论，提前终止多轮以避免死循环”。
 
 4. **中断续传（列表 + 评论双层级）**
-   - [ ] 列表级续传：  
-     - 若 `safe-detail-urls.jsonl` 和 `currentStep.phase='list'` 已存在且完整，重新运行脚本时可选择跳过 Phase2，仅打印提示并直接进入 Phase3/4。  
-   - [ ] 评论级续传：  
+   - [x] 列表级续传：  
+     - 若 `safe-detail-urls.jsonl` 和 `currentStep.phase='list'` 已存在且完整，重新运行脚本时会跳过 Phase2，仅打印提示并直接进入 Phase3/4（当前 `phase1-4-full-collect.mjs` 已按此行为运行）。  
+   - [x] 评论级续传：  
      - 重启脚本时，从 `.collect-state.json` 中读取每个 note 的 `commentState`；  
-     - 在下一轮调用 `CollectCommentsBlock` 前，先用 `lastPair` 在 DOM 中定位起点，从锚点之后继续采集，避免从头 Warmup；  
-     - 保证目录级去重仍然生效：已经落盘的评论不会重复写入。
+     - 在下一轮调用 Phase3/4 时，通过 `lastPair` 与 `computeNewCommentsForRound` 在提取结果层做增量去重，从逻辑上实现“从断点之后继续采集”；  
+     - 保证目录级去重仍然生效：已经落盘的 note 不会重复写入（目录存在时直接跳过，见 Phase3/4 中对 `seenNoteIds` 的处理）。
 
 > 注：多 tab 并行（一次打开 4 个 tab，各自保持滚动位置不变）作为后续增强选项；当前迭代先在“单窗口按组轮询 + 分批评论采集 + commentState 续传”模式下打稳基础，再评估浏览器服务对多 tab 的支持能力。
 

@@ -362,65 +362,83 @@ export async function execute(input: CollectSearchListInput): Promise<CollectSea
 
       const beforeCount = items.length;
 
-      // 3.2 批量从 DOM 提取所有 .note-item 的信息（一次性查询）
+      // 3.2 批量从 DOM 提取所有 .note-item 的信息（一次性查询），并标记是否在当前视口内
       try {
         const batchExtractResult = await controllerAction('browser:execute', {
           profile,
           script: `
-            var cards = Array.from(document.querySelectorAll('.note-item'));
-            cards.map(function(card, idx) {
-              var titleEl = card.querySelector('.footer .title span') || card.querySelector('.footer .title') || card.querySelector('[class*="title"]');
-              var linkEl = card.querySelector('a.cover') || card.querySelector('a[href*="/explore/"]') || card.querySelector('a[href*="/search_result/"]');
-              var href = linkEl ? linkEl.getAttribute('href') : '';
-              var match = href.match(/\\/(explore|search_result)\\/([^?]+)/);
-              var noteId = match ? match[2] : '';
-              
-              return {
-                index: idx,
-                title: titleEl ? titleEl.textContent.trim() : '',
-                detail_url: href,
-                note_id: noteId,
-                hasToken: href.indexOf('xsec_token=') !== -1
-              };
-            });
+            (function () {
+              var viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0;
+              var cards = Array.from(document.querySelectorAll('.note-item'));
+              return cards.map(function(card, idx) {
+                var rect = card.getBoundingClientRect();
+                var titleEl = card.querySelector('.footer .title span') || card.querySelector('.footer .title') || card.querySelector('[class*="title"]');
+                var linkEl = card.querySelector('a.cover') || card.querySelector('a[href*="/explore/"]') || card.querySelector('a[href*="/search_result/"]');
+                var href = linkEl ? linkEl.getAttribute('href') || '' : '';
+                var match = href.match(/\\/(explore|search_result)\\/([^?]+)/);
+                var noteId = match ? match[2] : '';
+                // 仅采集**完全处于视口内**的卡片，避免点击到离屏或半离屏元素
+                var inViewport = rect.top >= 0 && rect.bottom <= viewportHeight;
+                return {
+                  index: idx,
+                  title: titleEl ? titleEl.textContent.trim() : '',
+                  detail_url: href,
+                  note_id: noteId,
+                  hasToken: href.indexOf('xsec_token=') !== -1,
+                  rect: {
+                    x: rect.x,
+                    y: rect.y,
+                    width: rect.width,
+                    height: rect.height
+                  },
+                  inViewport: inViewport
+                };
+              });
+            })();
           `
         });
 
         const extractedItems = batchExtractResult.result || batchExtractResult.data?.result || [];
-        
+
         if (!Array.isArray(extractedItems)) {
           console.warn('[CollectSearchList] Batch extract returned non-array');
         } else {
           for (const extracted of extractedItems) {
+            // 只关心当前视口内的卡片
+            if (extracted && extracted.inViewport === false) {
+              continue;
+            }
+
             const uniqueKey = extracted.note_id || `idx_${extracted.index}`;
             if (seenContainerIds.has(uniqueKey)) continue;
-            
+
             seenContainerIds.add(uniqueKey);
-            
+
             const detailUrl = extracted.detail_url || '';
             const hasToken = /[?&]xsec_token=/.test(detailUrl);
-        const safeDetailUrl = hasToken ? detailUrl : undefined;
+            const safeDetailUrl = hasToken ? detailUrl : undefined;
 
-        // 即使没有 token 也可以收集（后续通过 OpenDetail 点击触发，而不是直接 URL 导航）
-        // 只要有 domIndex 和 noteId/title 即可
+            // 即使没有 token 也可以收集（后续通过 OpenDetail 点击触发，而不是直接 URL 导航）
+            // 只要有 domIndex 和 noteId/title 即可
 
-        // 可视化：高亮当前处理的 item
-        try {
-          await controllerAction('browser:execute', {
-            profile,
-            script: `(() => {
-              const el = document.querySelectorAll('.feeds-container .note-item')[${extracted.index}];
-              if (el) {
-                el.style.outline = '2px solid #ff00ff';
-                setTimeout(() => el.style.outline = '', 1000);
-              }
-            })()`
-          });
-        } catch {}
+            // 可视化：高亮当前处理的 item（与 OpenDetailBlock 保持相同选择器）
+            try {
+              await controllerAction('browser:execute', {
+                profile,
+                script: `(() => {
+                  const cards = document.querySelectorAll('.note-item');
+                  const el = cards[${extracted.index}];
+                  if (el) {
+                    el.style.outline = '2px solid #ff00ff';
+                    setTimeout(() => { try { el.style.outline = ''; } catch (_) {} }, 1000);
+                  }
+                })()`
+              });
+            } catch {}
 
-        items.push({
-          containerId: 'xiaohongshu_search.search_result_item',
-          domIndex: extracted.index,
+            items.push({
+              containerId: 'xiaohongshu_search.search_result_item',
+              domIndex: extracted.index,
               noteId: extracted.note_id,
               title: extracted.title,
               detailUrl: safeDetailUrl,
@@ -431,8 +449,10 @@ export async function execute(input: CollectSearchListInput): Promise<CollectSea
 
             if (items.length >= targetCount) break;
           }
-          
-          console.log(`[CollectSearchList] Batch extracted ${extractedItems.length} items from DOM`);
+
+          console.log(
+            `[CollectSearchList] Batch extracted ${extractedItems.length} items from DOM（viewport items=${items.length}）`,
+          );
         }
       } catch (error: any) {
         console.warn(`[CollectSearchList] Batch extract failed: ${error.message}`);

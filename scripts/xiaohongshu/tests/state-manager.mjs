@@ -80,6 +80,16 @@ export class CollectStateManager {
         ...(diskState?.history || {}),
       },
     };
+
+    // global 信息以“本次运行参数”为准，避免 target/keyword/env 变更后仍沿用旧值导致逻辑偏离预期。
+    // 续传所需信息保留在 history/currentStep 中。
+    merged.global = {
+      ...merged.global,
+      keyword: base.global.keyword,
+      env: base.global.env,
+      target: base.global.target,
+    };
+
     merged.version = DEFAULT_VERSION;
     merged.resumeToken = merged.resumeToken || generateResumeToken();
     merged.lastUpdatedAt = Date.now();

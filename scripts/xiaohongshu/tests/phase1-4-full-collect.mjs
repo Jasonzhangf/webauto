@@ -32,6 +32,7 @@ const PROFILE = 'xiaohongshu_fresh';
 const PLATFORM = 'xiaohongshu';
 const UNIFIED_API = 'http://127.0.0.1:7701';
 const BROWSER_SERVICE = process.env.WEBAUTO_BROWSER_SERVICE_URL || 'http://127.0.0.1:7704';
+const BROWSER_WS = process.env.WEBAUTO_BROWSER_WS_URL || 'ws://127.0.0.1:8765';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const repoRoot = path.resolve(__dirname, '..', '..', '..');
@@ -178,9 +179,20 @@ async function browserServiceCommand(action, args = {}, timeoutMs = 20000) {
     body: JSON.stringify({ action, args }),
     signal: AbortSignal.timeout ? AbortSignal.timeout(timeoutMs) : undefined,
   });
-  const data = await res.json().catch(() => ({}));
+  const raw = await res.text();
+  const data = raw ? JSON.parse(raw) : {};
+  if (!res.ok) {
+    throw new Error(
+      data?.error ||
+        data?.body?.error ||
+        `browser-service command "${action}" HTTP ${res.status}`,
+    );
+  }
   if (data && data.ok === false) {
     throw new Error(data.error || `browser-service command "${action}" failed`);
+  }
+  if (data && data.error) {
+    throw new Error(data.error);
   }
   return data;
 }
@@ -223,6 +235,138 @@ function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+async function browserServiceWsCommand(sessionId, data, timeoutMs = 15000) {
+  const { default: WebSocket } = await import('ws');
+  const requestId = `${Date.now().toString(36)}_${Math.random().toString(36).slice(2)}`;
+
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      try {
+        ws.close();
+      } catch {
+        // ignore
+      }
+      reject(new Error(`browser-service ws timeout (${timeoutMs}ms)`));
+    }, timeoutMs);
+
+    const ws = new WebSocket(BROWSER_WS);
+
+    const cleanup = () => {
+      clearTimeout(timer);
+      try {
+        ws.close();
+      } catch {
+        // ignore
+      }
+    };
+
+    ws.on('open', () => {
+      try {
+        ws.send(
+          JSON.stringify({
+            type: 'command',
+            request_id: requestId,
+            session_id: sessionId,
+            data,
+          }),
+        );
+      } catch (err) {
+        cleanup();
+        reject(err);
+      }
+    });
+
+    ws.on('message', (buf) => {
+      try {
+        const msg = JSON.parse(String(buf || ''));
+        if (msg?.type !== 'response') return;
+        if (String(msg?.request_id || '') !== requestId) return;
+        const payload = msg?.data || {};
+        if (payload?.success === false) {
+          cleanup();
+          reject(new Error(payload?.error || 'browser-service ws command failed'));
+          return;
+        }
+        cleanup();
+        resolve(payload);
+      } catch (err) {
+        cleanup();
+        reject(err);
+      }
+    });
+
+    ws.on('error', (err) => {
+      cleanup();
+      reject(err);
+    });
+  });
+}
+
+function normalizePlaywrightKey(key) {
+  const k = String(key || '').trim();
+  if (!k) return '';
+  // Playwright key combos use "Meta+BracketLeft" instead of "Meta+["
+  if (k === 'Meta+[') return 'Meta+BracketLeft';
+  if (k === 'Meta+]') return 'Meta+BracketRight';
+  if (k === 'Ctrl+[') return 'Control+BracketLeft';
+  if (k === 'Ctrl+]') return 'Control+BracketRight';
+  if (k === 'Esc') return 'Escape';
+  return k;
+}
+
+async function systemKeyPress(key) {
+  if (!key) return;
+  const normalized = normalizePlaywrightKey(key);
+  await browserServiceCommand('keyboard:press', { profileId: PROFILE, key: normalized });
+}
+
+async function systemMouseWheel(deltaY, coordinates = null) {
+  const dy = Number(deltaY) || 0;
+  if (!dy) return;
+
+  // 优先尝试 browser-service HTTP（若服务未重启可能不存在该 action），失败则回退到 WS user_action.scroll。
+  try {
+    if (coordinates) {
+      await browserServiceCommand('mouse:move', {
+        profileId: PROFILE,
+        x: coordinates.x,
+        y: coordinates.y,
+        steps: 3,
+      });
+      await delay(80 + Math.random() * 120);
+    }
+    await browserServiceCommand('mouse:wheel', { profileId: PROFILE, deltaX: 0, deltaY: dy });
+    return;
+  } catch (err) {
+    console.warn(
+      '[FullCollect][SystemScroll] HTTP mouse:wheel 不可用，回退到 WS user_action.scroll:',
+      err?.message || String(err),
+    );
+  }
+
+  await browserServiceWsCommand(PROFILE, {
+    command_type: 'user_action',
+    action: 'operation',
+    parameters: {
+      operation_type: 'scroll',
+      ...(coordinates ? { target: { coordinates } } : {}),
+      deltaY: dy,
+    },
+  });
+}
+
+async function getWindowScrollY() {
+  try {
+    const result = await controllerAction('browser:execute', {
+      profile: PROFILE,
+      script: 'window.scrollY || document.documentElement.scrollTop || 0',
+    });
+    return Number(result?.result ?? result?.scrollY ?? 0) || 0;
+  } catch {
+    return 0;
+  }
+}
+
 async function getCurrentUrl() {
   try {
     const result = await controllerAction('browser:execute', {
@@ -233,6 +377,95 @@ async function getCurrentUrl() {
   } catch {
     return '';
   }
+}
+
+async function systemClickAt(coordinates) {
+  if (!coordinates || typeof coordinates.x !== 'number' || typeof coordinates.y !== 'number') {
+    throw new Error('invalid_click_coordinates');
+  }
+  await browserServiceCommand('mouse:move', {
+    profileId: PROFILE,
+    x: coordinates.x,
+    y: coordinates.y,
+    steps: 3,
+  });
+  await delay(80 + Math.random() * 140);
+  await browserServiceCommand('mouse:click', {
+    profileId: PROFILE,
+    x: coordinates.x,
+    y: coordinates.y,
+    clicks: 1,
+    delay: 40 + Math.floor(Math.random() * 60),
+  });
+  await delay(180 + Math.random() * 260);
+}
+
+function clampNumber(n, min, max) {
+  if (!Number.isFinite(n)) return min;
+  return Math.min(Math.max(n, min), max);
+}
+
+function normalizeClickablePoint(point, viewport, { safeTop = 140, safeBottom = 80 } = {}) {
+  const w = Number(viewport?.w || 0) || 0;
+  const h = Number(viewport?.h || 0) || 0;
+  if (!w || !h) return point;
+  const x = clampNumber(point.x, 40, w - 40);
+  const y = clampNumber(point.y, safeTop, h - safeBottom);
+  return { x, y };
+}
+
+async function waitForDetailReady(maxRetries = 12) {
+  let safeUrl = '';
+  let noteId = '';
+  for (let i = 0; i < maxRetries; i += 1) {
+    const currentUrl = await getCurrentUrl().catch(() => '');
+
+    if (
+      currentUrl &&
+      /\/explore\/[0-9a-z]+/i.test(currentUrl) &&
+      /[?&]xsec_token=/.test(currentUrl)
+    ) {
+      safeUrl = currentUrl;
+      const m = currentUrl.match(/\/explore\/([0-9a-z]+)/i);
+      noteId = m && m[1] ? m[1] : '';
+      return { ready: true, safeUrl, noteId };
+    }
+
+    try {
+      const domResult = await controllerAction('browser:execute', {
+        profile: PROFILE,
+        script: `(() => {
+          const hasModal =
+            document.querySelector('.note-detail-mask') ||
+            document.querySelector('.note-detail-page') ||
+            document.querySelector('.note-detail-dialog') ||
+            document.querySelector('.note-detail') ||
+            document.querySelector('.detail-container') ||
+            document.querySelector('.media-container');
+          const hasComments =
+            document.querySelector('.comments-el') ||
+            document.querySelector('.comment-list') ||
+            document.querySelector('.comments-container');
+          return { hasModal: !!hasModal, hasComments: !!hasComments };
+        })()`,
+      });
+      const payload = domResult?.result || domResult?.data?.result || domResult;
+      if (payload?.hasModal || payload?.hasComments) {
+        const url = currentUrl || (await getCurrentUrl().catch(() => ''));
+        if (typeof url === 'string') {
+          safeUrl = url;
+          const m = url.match(/\/explore\/([0-9a-z]+)/i);
+          noteId = m && m[1] ? m[1] : '';
+        }
+        return { ready: true, safeUrl, noteId };
+      }
+    } catch {
+      // ignore
+    }
+
+    await delay(900 + Math.random() * 500);
+  }
+  return { ready: false, safeUrl: '', noteId: '' };
 }
 
 function mapTree(node) {
@@ -282,6 +515,69 @@ async function verifySearchListAnchor() {
   } catch (err) {
     console.warn('[FullCollect][AnchorCheck] 验证搜索列表锚点失败:', err.message || err);
     return { found: false, error: err.message || String(err) };
+  }
+}
+
+async function getSearchScrollState() {
+  try {
+    const result = await controllerAction('browser:execute', {
+      profile: PROFILE,
+      script: `(() => {
+        const winY = window.scrollY || document.documentElement.scrollTop || 0;
+        const viewport = { w: window.innerWidth || 0, h: window.innerHeight || 0 };
+        const viewportHeight = viewport.h || 0;
+        const cards = Array.from(document.querySelectorAll('.note-item'));
+        const visible = cards
+          .map((el) => {
+            const rect = el.getBoundingClientRect();
+            if (!(rect.top >= 0 && rect.bottom <= viewportHeight)) return null;
+            const linkEl = el.querySelector('a.cover') || el.querySelector('a[href*="/explore/"]') || el.querySelector('a[href*="/search_result/"]');
+            const href = linkEl ? (linkEl.getAttribute('href') || '') : '';
+            const m = href.match(/\\/(explore|search_result)\\/([^?]+)/);
+            const noteId = m && m[2] ? m[2] : '';
+            const titleEl = el.querySelector('.footer .title span') || el.querySelector('.footer .title') || el.querySelector('[class*="title"]');
+            const title = titleEl ? (titleEl.textContent || '').trim() : '';
+            return noteId || title || '';
+          })
+          .filter(Boolean);
+        const visibleSig = visible.slice(0, 3).join('||');
+        const root =
+          document.querySelector('.feeds-container') ||
+          document.querySelector('.note-item')?.parentElement ||
+          null;
+
+        const isScrollable = (el) => {
+          if (!el) return false;
+          const style = window.getComputedStyle(el);
+          const overflowY = style.overflowY || '';
+          if (!(overflowY.includes('auto') || overflowY.includes('scroll'))) return false;
+          return (el.scrollHeight || 0) > (el.clientHeight || 0);
+        };
+
+        let scrollEl = root;
+        while (scrollEl && scrollEl !== document.body && !isScrollable(scrollEl)) {
+          scrollEl = scrollEl.parentElement;
+        }
+        if (!scrollEl) {
+          scrollEl = document.scrollingElement || document.documentElement;
+        }
+        return {
+          winY,
+          viewport,
+          visibleSig,
+          list: scrollEl
+            ? {
+                scrollTop: scrollEl.scrollTop || 0,
+                scrollHeight: scrollEl.scrollHeight || 0,
+                clientHeight: scrollEl.clientHeight || 0,
+              }
+            : null,
+        };
+      })()`,
+    });
+    return result?.result || result?.data?.result || result;
+  } catch {
+    return { winY: 0, viewport: { w: 0, h: 0 }, visibleSig: '', list: null };
   }
 }
 
@@ -513,7 +809,7 @@ async function ensureSearchGate() {
       `[FullCollect] 检测到自定义 WEBAUTO_SEARCH_GATE_URL，但健康检查失败: ${healthUrl}`,
     );
     console.warn('[FullCollect] 请手动启动或修复自定义 SearchGate 服务');
-    return;
+    throw new Error('search_gate_unhealthy_custom');
   }
 
   const scriptPath = path.join(repoRoot, 'scripts', 'search-gate-server.mjs');
@@ -535,11 +831,13 @@ async function ensureSearchGate() {
   await new Promise((r) => setTimeout(r, 1500));
   if (await checkHealth()) {
     console.log(`[FullCollect] SearchGate 启动成功: ${healthUrl}`);
-  } else {
-    console.warn(
-      '[FullCollect] SearchGate 启动后健康检查仍然失败，请在另一个终端手动检查 node scripts/search-gate-server.mjs',
-    );
+    return;
   }
+
+  console.error(
+    '[FullCollect] SearchGate 启动后健康检查仍然失败，请在另一个终端手动检查 node scripts/search-gate-server.mjs',
+  );
+  throw new Error('search_gate_unhealthy');
 }
 
 async function requestGatePermit(
@@ -571,38 +869,80 @@ async function requestGatePermit(
 }
 
 async function scrollSearchPage(direction = 'down', keywordForRecovery = null) {
-  const delta = direction === 'up' ? -600 : 600;
-  try {
-    await controllerAction('user_action', {
-      profile: PROFILE,
-      operation_type: 'scroll',
-      target: { deltaY: delta },
-    });
-    await delay(1200);
-  } catch (err) {
-    console.warn('[FullCollect][ScrollSearchPage] 系统滚动失败:', err.message || err);
+  const sign = direction === 'up' ? -1 : 1;
+  const before = await getSearchScrollState();
+
+  // 通过列表锚点定位滚动落点（坐标），使用系统滚轮事件；禁止 JS scroll 兜底
+  const anchorBefore = await verifySearchListAnchor();
+  let coordinates = null;
+  if (anchorBefore?.found && anchorBefore.rect) {
+    const rect = anchorBefore.rect;
+    const viewportH = Number(before?.viewport?.h) || 0;
+    const viewportW = Number(before?.viewport?.w) || 0;
+    const rawX = rect.x + rect.width / 2;
+    const rawY = rect.y + rect.height / 2;
+    const x = viewportW ? Math.min(Math.max(40, rawX), viewportW - 40) : rawX;
+    const y = viewportH ? Math.min(Math.max(120, rawY), viewportH - 120) : rawY;
+    coordinates = { x, y };
+  }
+
+  let after = before;
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
+    const deltaMagnitude = 320 + Math.floor(Math.random() * 380); // 320-700
+    const deltaY = sign * deltaMagnitude;
+    try {
+      if (coordinates) {
+        await browserServiceCommand('mouse:move', {
+          profileId: PROFILE,
+          x: coordinates.x,
+          y: coordinates.y,
+          steps: 3,
+        });
+        await delay(200 + Math.random() * 250);
+      }
+
+      await systemMouseWheel(deltaY, coordinates);
+
+      await delay(800 + Math.random() * 700);
+      after = await getSearchScrollState();
+      const winDelta = Number(after?.winY || 0) - Number(before?.winY || 0);
+      const listDelta =
+        Number(after?.list?.scrollTop || 0) - Number(before?.list?.scrollTop || 0);
+      const sigBefore = String(before?.visibleSig || '');
+      const sigAfter = String(after?.visibleSig || '');
+      if (winDelta !== 0 || listDelta !== 0) break;
+      if (sigBefore && sigAfter && sigBefore !== sigAfter) break;
+    } catch (err) {
+      console.warn(
+        `[FullCollect][ScrollSearchPage] 系统滚动失败 attempt=${attempt}:`,
+        err.message || err,
+      );
+      await delay(700);
+    }
+  }
+
+  const winDelta = Number(after?.winY || 0) - Number(before?.winY || 0);
+  const listDelta =
+    Number(after?.list?.scrollTop || 0) - Number(before?.list?.scrollTop || 0);
+  const sigBefore = String(before?.visibleSig || '');
+  const sigAfter = String(after?.visibleSig || '');
+  const sigChanged = sigBefore && sigAfter && sigBefore !== sigAfter;
+  if (winDelta === 0 && listDelta === 0 && !sigChanged) {
+    console.warn(
+      '[FullCollect][ScrollSearchPage] ⚠️ window/list scrollTop 均未变化，认为系统滚动未生效，停止以避免在同一屏死循环',
+    );
     return false;
   }
 
   const anchor = await verifySearchListAnchor();
   if (!anchor?.found) {
     console.error(
-      '[FullCollect][ScrollSearchPage] 滚动后未找到搜索列表锚点，可能已跳转到异常页面（但不直接认为是风控）',
+      '[FullCollect][ScrollSearchPage] 滚动后未找到搜索列表锚点，可能已跳转到异常页面',
     );
-
-    // 仅在真正检测到风控锚点时，才触发“发现页 + 重新搜索”的恢复流程
     const isRisk = await detectRiskControl();
-    if (isRisk && keywordForRecovery) {
-      console.log(
-        '[FullCollect][ScrollSearchPage] 检测到风控锚点，进入风控恢复流程（发现页 → 上下滚动 → 重新搜索）',
-      );
-      const recovered = await handleRiskRecovery(keywordForRecovery);
-      return recovered;
+    if (isRisk) {
+      console.error('[FullCollect][ScrollSearchPage] 🚨 检测到风控锚点（qrcode_guard）');
     }
-
-    console.warn(
-      '[FullCollect][ScrollSearchPage] 未检测到风控锚点，本次仅停止滚动，不做发现页跳转与重新搜索',
-    );
     return false;
   }
 
@@ -635,7 +975,112 @@ async function detectRiskControl() {
   }
 }
 
+function extractSearchKeywordFromUrl(url) {
+  if (!url || typeof url !== 'string') return null;
+  try {
+    const u = new URL(url);
+    const kw = u.searchParams.get('keyword');
+    if (!kw) return null;
+    try {
+      return decodeURIComponent(kw);
+    } catch {
+      return kw;
+    }
+  } catch {
+    return null;
+  }
+}
+
+function normalizeKeywordForCompare(kw) {
+  return (kw || '').toString().trim();
+}
+
+async function tryRecoverSearchKeywordDrift(canonicalKw, { maxTries = 2 } = {}) {
+  const target = normalizeKeywordForCompare(canonicalKw);
+  if (!target) return { ok: true, reason: 'no_canonical' };
+  for (let i = 1; i <= maxTries; i += 1) {
+    const url = await getCurrentUrl().catch(() => '');
+    const current = normalizeKeywordForCompare(extractSearchKeywordFromUrl(url) || '');
+    if (current && current === target) return { ok: true, reason: 'already_match' };
+    console.warn(
+      `[Phase2] keyword 漂移 detected (current="${current || '空'}" canonical="${target}"), 尝试后退恢复 (${i}/${maxTries})...`,
+    );
+    try {
+      await systemKeyPress('Meta+[');
+    } catch {
+      // ignore
+    }
+    await delay(1200 + Math.random() * 600);
+  }
+  const finalUrl = await getCurrentUrl().catch(() => '');
+  const finalKw = normalizeKeywordForCompare(extractSearchKeywordFromUrl(finalUrl) || '');
+  return { ok: finalKw && finalKw === target, reason: 'back_exhausted', finalKw, finalUrl };
+}
+
+async function appendSafeDetailIndexLine(indexPath, env, keyword, entry) {
+  if (!entry || !entry.noteId) return;
+  try {
+    const firstSeenAtMs =
+      typeof entry.firstSeenAtMs === 'number' && Number.isFinite(entry.firstSeenAtMs)
+        ? entry.firstSeenAtMs
+        : Date.now();
+    const firstSeenAtIso =
+      typeof entry.firstSeenAtIso === 'string' && entry.firstSeenAtIso
+        ? entry.firstSeenAtIso
+        : new Date(firstSeenAtMs).toISOString();
+    const lastUpdatedAtMs =
+      typeof entry.lastUpdatedAtMs === 'number' && Number.isFinite(entry.lastUpdatedAtMs)
+        ? entry.lastUpdatedAtMs
+        : firstSeenAtMs;
+    const lastUpdatedAtIso =
+      typeof entry.lastUpdatedAtIso === 'string' && entry.lastUpdatedAtIso
+        ? entry.lastUpdatedAtIso
+        : new Date(lastUpdatedAtMs).toISOString();
+
+    const line = JSON.stringify({
+      platform: PLATFORM,
+      env,
+      keyword,
+      noteId: entry.noteId,
+      title: entry.title,
+      safeDetailUrl: entry.safeDetailUrl,
+      hasToken: entry.hasToken,
+      containerId: entry.containerId || null,
+      domIndex:
+        typeof entry.domIndex === 'number' && Number.isFinite(entry.domIndex) ? entry.domIndex : null,
+      header: entry.header || null,
+      author: entry.author || null,
+      firstSeenAtMs,
+      firstSeenAtIso,
+      lastUpdatedAtMs,
+      lastUpdatedAtIso,
+    });
+
+    await fs.promises.appendFile(indexPath, `${line}\n`, 'utf8');
+  } catch {
+    // best-effort append; full rewrite will still happen at end
+  }
+}
+
+function detectStageFromUrl(url) {
+  if (!url || typeof url !== 'string') return 'unknown';
+  const u = url.toLowerCase();
+  if (u.includes('passport.xiaohongshu.com') || u.includes('/login')) return 'login';
+  if (u.includes('/explore/')) return 'detail';
+  if (u.includes('/search_result')) return 'search';
+  if (
+    u.includes('/explore') ||
+    u === 'https://www.xiaohongshu.com/' ||
+    u.includes('/home') ||
+    u.includes('/discovery')
+  ) {
+    return 'home';
+  }
+  return 'unknown';
+}
+
 async function ensureSearchStage(keyword, maxAttempts = 3) {
+  let didGoToSearch = false;
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     let state = null;
     try {
@@ -658,40 +1103,56 @@ async function ensureSearchStage(keyword, maxAttempts = 3) {
     );
 
     if (stage === 'search') {
-      let keywordOk = true;
-      const trimmedKeyword = typeof keyword === 'string' ? keyword.trim() : '';
-      if (trimmedKeyword && typeof url === 'string' && url.includes('search_result')) {
-        try {
-          const parsed = new URL(url);
-          const rawParam = parsed.searchParams.get('keyword');
-          if (rawParam) {
-            const candidates = [rawParam];
-            try {
-              const d1 = decodeURIComponent(rawParam);
-              if (d1 && !candidates.includes(d1)) candidates.push(d1);
-              const d2 = decodeURIComponent(d1);
-              if (d2 && !candidates.includes(d2)) candidates.push(d2);
-            } catch {
-              // ignore decode errors,保留已有 candidates
-            }
-            const targetLower = trimmedKeyword.toLowerCase();
-            const matched = candidates.some(
-              (c) => typeof c === 'string' && c.toLowerCase() === targetLower,
-            );
-            keywordOk = matched;
-          }
-        } catch {
-          // URL 解析失败时不强制重搜，保持 keywordOk=true
-        }
-      }
+      const currentKwRaw = extractSearchKeywordFromUrl(url) || '';
+      const currentKw = currentKwRaw.trim();
+      const targetKw = (keyword || '').trim();
 
-      if (keywordOk) {
+      // 没有目标关键字时，只要在搜索结果页即可接受
+      if (!targetKw) {
+        console.log(
+          `[FullCollect][StageCheck] 当前已在搜索结果页（keyword="${currentKw || '未知'}"），无显式目标关键字，直接继续`,
+        );
         return true;
       }
 
-      console.log(
-        '[FullCollect][StageCheck] 当前在搜索结果页但关键字不匹配，尝试通过 GoToSearch 更换关键字...',
+      if (currentKw && currentKw === targetKw) {
+        console.log(
+          `[FullCollect][StageCheck] 当前已在搜索结果页，关键字已匹配（keyword="${currentKw}"）`,
+        );
+        return true;
+      }
+
+      if (!didGoToSearch) {
+        console.log(
+          `[FullCollect][StageCheck] 当前在搜索结果页，但关键字不匹配（current="${currentKw || '空'}" target="${targetKw}"），通过 GoToSearch 重新输入关键字...`,
+        );
+
+        const searchResult = await goToSearch({
+          sessionId: PROFILE,
+          keyword,
+        });
+
+        didGoToSearch = true;
+
+        if (!searchResult.success) {
+          console.error(
+            `[FullCollect][StageCheck] GoToSearch 在 search 阶段更新关键字失败: ${searchResult.error}`,
+          );
+          break;
+        }
+
+        console.log(
+          `[FullCollect][StageCheck] GoToSearch 在 search 阶段更新关键字成功，url=${searchResult.url}`,
+        );
+        // 关键字已重输，下一轮循环重新检测阶段与 URL
+        continue;
+      }
+
+      // 已尝试 GoToSearch 纠正，仍不匹配：视为平台纠偏/同义词映射，避免死循环，接受当前关键字继续。
+      console.warn(
+        `[FullCollect][StageCheck] 当前在搜索结果页，但关键字仍不匹配（current="${currentKw || '空'}" target="${targetKw}"），已尝试 GoToSearch，接受当前关键字继续（避免死循环）`,
       );
+      return true;
     }
 
     if (stage === 'login') {
@@ -770,6 +1231,83 @@ async function ensureSearchStage(keyword, maxAttempts = 3) {
   return false;
 }
 
+/**
+ * 阶段守卫：强制确保当前处于「搜索结果页」阶段。
+ *
+ * 语义：
+ * - 调用 ensureSearchStage 做一次纠正（含必要的 GoToSearch / ESC 恢复）；
+ * - 若仍无法确认处于 search 阶段，则抛出错误，阻止后续任何「滚动 / 点击卡片」动作，
+ *   避免在详情页或异常页面继续误操作。
+ */
+async function ensureSearchStageGuarded(keyword, env, contextLabel = '') {
+  const ok = await ensureSearchStage(keyword, 2);
+  if (ok) return;
+  console.error(
+    `[FullCollect][StageGuard] ensureSearchStage 失败，context=${contextLabel || 'unknown'}，为避免在错误页面继续采集，将终止当前阶段`,
+  );
+  throw new Error('stage_guard_not_search');
+}
+
+/**
+ * 阶段守卫（禁止重复搜索版）：
+ * - 只允许在 detail 时做 ESC 恢复
+ * - 只允许在 search_result 内继续
+ * - 禁止触发 GoToSearch（避免 Phase2 循环里重复搜索）
+ */
+async function ensureSearchStageOnlyGuarded(env, contextLabel = '') {
+  let state = null;
+  try {
+    state = await detectPageState({
+      sessionId: PROFILE,
+      platform: 'xiaohongshu',
+      serviceUrl: UNIFIED_API,
+    });
+  } catch (err) {
+    console.warn(
+      `[FullCollect][StageGuardNoSearch] DetectPageState 失败 context=${contextLabel || 'unknown'}:`,
+      err?.message || String(err),
+    );
+  }
+
+  const url = state?.url || (await getCurrentUrl().catch(() => ''));
+  const stage = state?.stage || detectStageFromUrl(url);
+
+  if (stage === 'search') return;
+
+  if (stage === 'detail') {
+    const rec = await errorRecovery({
+      sessionId: PROFILE,
+      fromStage: 'detail',
+      targetStage: 'search',
+      serviceUrl: UNIFIED_API,
+      maxRetries: 2,
+      recoveryMode: 'esc',
+    }).catch((e) => ({
+      success: false,
+      recovered: false,
+      error: e.message || String(e),
+    }));
+    if (rec?.success && rec?.recovered) return;
+  }
+
+  // 尝试一次“后退”回到搜索页（不计为搜索）
+  for (let i = 0; i < 2; i += 1) {
+    try {
+      await systemKeyPress('Meta+[');
+    } catch {
+      // ignore
+    }
+    await delay(900 + Math.random() * 500);
+    const u = await getCurrentUrl().catch(() => '');
+    if (detectStageFromUrl(u) === 'search') return;
+  }
+
+  console.error(
+    `[FullCollect][StageGuardNoSearch] stage=${stage} context=${contextLabel || 'unknown'}，禁止触发 GoToSearch，终止以避免重复搜索/状态乱跑`,
+  );
+  throw new Error('stage_guard_not_search_no_search');
+}
+
 async function returnToDiscoverViaSidebar() {
   console.log('[FullCollect][Risk] 尝试通过侧边栏返回发现页...');
   try {
@@ -826,6 +1364,90 @@ function getMetaPath(env, keyword) {
   return path.join(getKeywordBaseDir(env, keyword), '.collect-meta.json');
 }
 
+async function captureDebugSnapshot(env, keyword, label, extra = {}) {
+  try {
+    const baseDir = getKeywordBaseDir(env, keyword);
+    const debugDir = path.join(baseDir, 'debug');
+    await fs.promises.mkdir(debugDir, { recursive: true });
+
+    const now = new Date();
+    const ts = now.toISOString().replace(/[:.]/g, '-');
+    const safeLabel =
+      (label || 'snapshot')
+        .toString()
+        .replace(/[^a-zA-Z0-9_-]+/g, '_')
+        .slice(0, 80) || 'snapshot';
+
+    const pngPath = path.join(debugDir, `${ts}-${safeLabel}.png`);
+    const jsonPath = path.join(debugDir, `${ts}-${safeLabel}.json`);
+
+    let stageInfo = null;
+    try {
+      stageInfo = await detectPageState({
+        sessionId: PROFILE,
+        platform: 'xiaohongshu',
+        serviceUrl: UNIFIED_API,
+      });
+    } catch {
+      // ignore
+    }
+
+    let screenshotPath = null;
+    try {
+      const shot = await controllerAction('browser:screenshot', {
+        profile: PROFILE,
+        fullPage: false,
+      });
+      const b64 = shot?.screenshot || shot?.data?.screenshot || shot?.result?.screenshot;
+      if (typeof b64 === 'string' && b64.length > 0) {
+        const buf = Buffer.from(b64, 'base64');
+        await fs.promises.writeFile(pngPath, buf);
+        screenshotPath = pngPath;
+      }
+    } catch {
+      // ignore
+    }
+
+    let domSummary = null;
+    try {
+      const domRes = await controllerAction('browser:execute', {
+        profile: PROFILE,
+        script: `(() => {
+          const noteItems = document.querySelectorAll('.note-item');
+          const searchInput = document.querySelector('#search-input, input[type="search"]');
+          return {
+            title: document.title,
+            url: location.href,
+            noteItems: noteItems.length,
+            hasSearchInput: !!searchInput
+          };
+        })()`,
+      });
+      domSummary = domRes?.result || domRes?.data?.result || domRes;
+    } catch {
+      // ignore
+    }
+
+    const payload = {
+      label,
+      createdAt: now.toISOString(),
+      stageInfo: stageInfo || null,
+      screenshotPath,
+      domSummary,
+      extra,
+    };
+    await fs.promises.writeFile(jsonPath, JSON.stringify(payload, null, 2), 'utf8');
+    console.log(
+      `[DebugSnapshot] label=${label} png=${screenshotPath || 'none'} json=${jsonPath}`,
+    );
+  } catch (err) {
+    console.warn(
+      '[DebugSnapshot] 创建调试快照失败:',
+      err?.message || String(err),
+    );
+  }
+}
+
 async function readMeta(env, keyword) {
   const metaPath = getMetaPath(env, keyword);
   try {
@@ -866,6 +1488,11 @@ function isPhase2ListOnlyMode() {
       argv.listOnly ||
       argv['list-only'],
   );
+}
+
+function isFreshMode() {
+  if (!argv || typeof argv !== 'object') return false;
+  return Boolean(argv.fresh || argv.reset || argv['fresh-run'] || argv['reset-run']);
 }
 
 function getCollectState() {
@@ -975,6 +1602,78 @@ async function resolveResumeContext(keyword, env, targetCount) {
   };
 }
 
+async function persistSafeDetailIndexJsonl(
+  safeUrlIndex,
+  indexPath,
+  env,
+  keyword,
+  { quiet = false } = {},
+) {
+  try {
+    const lines = [];
+    for (const entry of safeUrlIndex.values()) {
+      const firstSeenAtMs =
+        typeof entry.firstSeenAtMs === 'number' && Number.isFinite(entry.firstSeenAtMs)
+          ? entry.firstSeenAtMs
+          : Date.now();
+      const firstSeenAtIso =
+        typeof entry.firstSeenAtIso === 'string' && entry.firstSeenAtIso
+          ? entry.firstSeenAtIso
+          : new Date(firstSeenAtMs).toISOString();
+      const lastUpdatedAtMs =
+        typeof entry.lastUpdatedAtMs === 'number' && Number.isFinite(entry.lastUpdatedAtMs)
+          ? entry.lastUpdatedAtMs
+          : firstSeenAtMs;
+      const lastUpdatedAtIso =
+        typeof entry.lastUpdatedAtIso === 'string' && entry.lastUpdatedAtIso
+          ? entry.lastUpdatedAtIso
+          : new Date(lastUpdatedAtMs).toISOString();
+
+      lines.push(
+        JSON.stringify({
+          platform: PLATFORM,
+          env,
+          keyword,
+          noteId: entry.noteId,
+          title: entry.title,
+          safeDetailUrl: entry.safeDetailUrl,
+          hasToken: entry.hasToken,
+          containerId: entry.containerId || null,
+          domIndex:
+            typeof entry.domIndex === 'number' && Number.isFinite(entry.domIndex)
+              ? entry.domIndex
+              : null,
+          header: entry.header || null,
+          author: entry.author || null,
+          firstSeenAtMs,
+          firstSeenAtIso,
+          lastUpdatedAtMs,
+          lastUpdatedAtIso,
+        }),
+      );
+    }
+
+    const tmpPath = `${indexPath}.tmp`;
+    await fs.promises.writeFile(
+      tmpPath,
+      lines.join('\n') + (lines.length ? '\n' : ''),
+      'utf8',
+    );
+    await fs.promises.rename(tmpPath, indexPath);
+
+    if (!quiet) {
+      console.log(
+        `\n[Phase2(ListOnly)] ✅ 已写入 ${safeUrlIndex.size} 条带 xsec_token 的详情链接到: ${indexPath}`,
+      );
+    }
+  } catch (err) {
+    console.warn(
+      '[Phase2(ListOnly)] ⚠️ 写入 safe-detail-urls.jsonl 失败:',
+      err?.message || String(err),
+    );
+  }
+}
+
 async function runPhase2ListOnly(keyword, targetCount, env, searchUrl = '') {
   console.log(
     '\n2️⃣ Phase2(ListOnly): 搜索结果列表 + 逐条打开详情（获取 xsec_token + 主体内容/图片/作者）...',
@@ -988,11 +1687,22 @@ async function runPhase2ListOnly(keyword, targetCount, env, searchUrl = '') {
     return { count: 0 };
   }
 
+  const canonicalSearchUrl = await getCurrentUrl().catch(() => '');
+  const canonicalKeyword = normalizeKeywordForCompare(
+    extractSearchKeywordFromUrl(canonicalSearchUrl) || keyword,
+  );
+  console.log(
+    `[Phase2(ListOnly)] canonical keyword="${canonicalKeyword || keyword}" url=${canonicalSearchUrl || 'unknown'}`,
+  );
+
   const baseDir = getKeywordBaseDir(env, keyword);
   const indexPath = getSafeDetailIndexPath(env, keyword);
+  const failedDetailPath = path.join(baseDir, 'phase2-detail-failures.jsonl');
   await fs.promises.mkdir(baseDir, { recursive: true });
 
   const safeUrlIndex = new Map();
+  const allListNoteIds = new Set();
+  const failedDetailIndex = new Map();
 
   // 预加载已有 safe-detail-urls，避免对已完成的 note 重复打开详情
   try {
@@ -1011,7 +1721,7 @@ async function runPhase2ListOnly(keyword, targetCount, env, searchUrl = '') {
           (typeof safeDetailUrl === 'string' && safeDetailUrl.includes('xsec_token='));
         if (!noteId || !safeDetailUrl || !hasToken) continue;
         if (safeUrlIndex.has(noteId)) continue;
-        safeUrlIndex.set(noteId, {
+        const entry = {
           noteId,
           title: obj.title || '',
           safeDetailUrl,
@@ -1024,7 +1734,28 @@ async function runPhase2ListOnly(keyword, targetCount, env, searchUrl = '') {
           // 保留可能存在的详情补充信息（例如作者/发布时间），供后续使用
           header: obj.header || null,
           author: obj.author || null,
-        });
+        };
+        const firstSeenAtMs =
+          typeof obj.firstSeenAtMs === 'number' && Number.isFinite(obj.firstSeenAtMs)
+            ? obj.firstSeenAtMs
+            : Date.now();
+        const firstSeenAtIso =
+          typeof obj.firstSeenAtIso === 'string' && obj.firstSeenAtIso
+            ? obj.firstSeenAtIso
+            : new Date(firstSeenAtMs).toISOString();
+        const lastUpdatedAtMs =
+          typeof obj.lastUpdatedAtMs === 'number' && Number.isFinite(obj.lastUpdatedAtMs)
+            ? obj.lastUpdatedAtMs
+            : firstSeenAtMs;
+        const lastUpdatedAtIso =
+          typeof obj.lastUpdatedAtIso === 'string' && obj.lastUpdatedAtIso
+            ? obj.lastUpdatedAtIso
+            : new Date(lastUpdatedAtMs).toISOString();
+        entry.firstSeenAtMs = firstSeenAtMs;
+        entry.firstSeenAtIso = firstSeenAtIso;
+        entry.lastUpdatedAtMs = lastUpdatedAtMs;
+        entry.lastUpdatedAtIso = lastUpdatedAtIso;
+        safeUrlIndex.set(noteId, entry);
       } catch {
         // ignore bad line
       }
@@ -1050,40 +1781,107 @@ async function runPhase2ListOnly(keyword, targetCount, env, searchUrl = '') {
   }
 
   // 仅在 safe-detail-urls 不足目标数量时：
-  // 1）执行一次 CollectSearchListBlock 获取当前视口的搜索结果条目；
-  // 2）对每一个新的 item：通过容器点击打开详情 → 提取正文/图片/作者 → 记录带 token 的 safeDetailUrl。
+  // 使用“视口驱动”的方式循环：
+  // 1）每一轮只收集当前视口内的卡片（CollectSearchListBlock, maxScrollRounds=1，不滚动页面）；
+  // 2）只对这一视口内的卡片逐条打开详情 → 提取正文/图片/作者 → 记录带 token 的 safeDetailUrl；
+  // 3）视口内没有新的可处理卡片后，再使用系统滚动向下加载下一屏内容。
   let loopRound = 0;
+  let noNewSafeRounds = 0;
+  // Phase2：只搜索一次（ensureSearchStage 已处理好当前 search_result）
   if (safeUrlIndex.size < targetCount) {
-    loopRound = 1;
-    console.log(
-      `\n[Phase2(ListOnly)][Loop] Round ${loopRound}, collected=${safeUrlIndex.size}/${targetCount}`,
-    );
+    console.log('[Phase2(ListOnly)] 搜索阶段就绪，开始滚动采集循环（禁止重复搜索）');
+    const timingPath = path.join(baseDir, 'phase2-timing.jsonl');
+    const phase2StartAtMs = Date.now();
+    while (safeUrlIndex.size < targetCount) {
+      loopRound += 1;
+      console.log(`\n[Phase2(ListOnly)][Loop] Round ${loopRound}, collected=${safeUrlIndex.size}/${targetCount}`);
 
-    const desiredViewportTarget = targetCount * 3;
-    const listResult = await collectSearchList({
-      sessionId: PROFILE,
-      // 为了覆盖“只有部分条目带 token”的情况，这里放大 targetCount
-      targetCount: desiredViewportTarget,
-      // 允许 Block 内部最多滚动 10 轮，由它自己决定何时停止
-      maxScrollRounds: 10,
-    });
+      // Phase2 循环内：只允许 ESC/后退恢复，禁止再次触发 GoToSearch
+      const currentUrl = await getCurrentUrl().catch(() => '');
+      const currentStage = detectStageFromUrl(currentUrl);
+      if (currentStage !== 'search') {
+        console.warn(
+          `[Phase2(ListOnly)] 当前不在搜索页（stage=${currentStage}），尝试恢复（禁止重复搜索）...`,
+        );
+        try {
+          await ensureSearchStageOnlyGuarded(env, `phase2-list-loop-${loopRound}-recover`);
+        } catch (err) {
+          await captureDebugSnapshot(env, keyword, 'phase2_stage_drift_not_search', {
+            stage: currentStage,
+            url: currentUrl || '',
+            error: err?.message || String(err),
+          });
+          throw err;
+        }
+      }
 
-    if (!listResult.success || !Array.isArray(listResult.items)) {
-      console.error(
-        `[Phase2(ListOnly)] ❌ CollectSearchList 失败: success=${listResult.success}, error=${listResult.error}`,
-      );
-    } else {
+      // keyword 漂移检测：只允许后退恢复，禁止重新搜索
+      if (canonicalKeyword) {
+        const currentKw = normalizeKeywordForCompare(extractSearchKeywordFromUrl(currentUrl) || '');
+        if (currentKw && currentKw !== canonicalKeyword) {
+          const recovered = await tryRecoverSearchKeywordDrift(canonicalKeyword, { maxTries: 6 });
+          if (!recovered.ok) {
+            await captureDebugSnapshot(env, keyword, 'phase2_keyword_drift', {
+              canonicalKeyword,
+              currentKeyword: currentKw,
+              finalKeyword: recovered.finalKw || '',
+              finalUrl: recovered.finalUrl || currentUrl || '',
+            });
+            throw new Error('phase2_keyword_drift');
+          }
+        }
+      }
+
+      const listResult = await collectSearchList({
+        sessionId: PROFILE,
+        // 当前视口内一般不超过 30 条，适当放大一点即可
+        targetCount: 60,
+        // 禁止 Block 内部滚动，只采集当前视口
+        maxScrollRounds: 1,
+      });
+
+      if (!listResult.success || !Array.isArray(listResult.items)) {
+        console.error(
+          `[Phase2(ListOnly)] ❌ CollectSearchList 失败: success=${listResult.success}, error=${listResult.error}`,
+        );
+        break;
+      }
+
+      if (!listResult.items.length) {
+        console.warn('[Phase2(ListOnly)] ⚠️ 当前视口无可见 note-item，停止本次 Phase2');
+        break;
+      }
+
       console.log(
         `   ✅ CollectSearchList 返回条目: ${listResult.items.length}（当前 safe-detail-urls=${safeUrlIndex.size}/${targetCount}）`,
       );
+
+      const scrollState = await getSearchScrollState().catch(() => null);
+      const viewport = scrollState?.viewport || { w: 0, h: 0 };
+      const viewportH = Number(viewport?.h || 0) || 0;
 
       let newlyAdded = 0;
 
       for (const item of listResult.items) {
         const rawNoteId = item.noteId;
-        const rawUrl = item.safeDetailUrl || item.detailUrl || '';
+        const itemStartAtMs = Date.now();
         if (!rawNoteId) continue;
-        if (safeUrlIndex.has(rawNoteId)) continue;
+
+        allListNoteIds.add(rawNoteId);
+
+        if (failedDetailIndex.has(rawNoteId)) {
+          console.log(
+            `\n📝 Note (跳过已标记失败): noteId=${rawNoteId} (${item.title || '无标题'})`,
+          );
+          continue;
+        }
+
+        if (safeUrlIndex.has(rawNoteId)) {
+          console.log(
+            `\n📝 Note (跳过重复): noteId=${rawNoteId} (${item.title || '无标题'})`,
+          );
+          continue;
+        }
         if (safeUrlIndex.size >= targetCount) break;
 
         const domIndex =
@@ -1099,75 +1897,128 @@ async function runPhase2ListOnly(keyword, targetCount, env, searchUrl = '') {
           } (${rawNoteId})`,
         );
 
-        // 详情访问频率控制：通过 SearchGate 作为统一的节流入口
-        const gateKey = `${PROFILE}:detail_phase2`;
-        const permit = await requestGatePermit(gateKey, {
-          windowMs: DEFAULT_WINDOW_MS,
-          maxCount: DEFAULT_MAX_COUNT,
-        }).catch(() => ({ ok: false, allowed: true, waitMs: 0 }));
+        // Phase2 仅负责“点开一次获取 safeDetailUrl + 主体内容”，不做评论滚动；
+        // SearchGate 也只在 Phase3/4 对真正的「爬详情+评论」做限速，这里不节流。
 
-        if (permit && permit.allowed === false) {
-          const waitMs = Math.max(permit.waitMs || 0, 1000);
-          console.log(
-            `[Phase2(ListOnly)][Gate] 详情访问触发节流，等待 ${Math.round(waitMs)}ms 后继续...`,
-          );
-          await delay(waitMs);
-        }
-
-        if (!item.containerId) {
+        const rect = item.raw?.rect || null;
+        if (!rect || typeof rect.x !== 'number' || typeof rect.y !== 'number') {
           console.warn(
-            `   ⚠️ 当前条目缺少 containerId，无法通过容器点击打开详情，跳过 noteId=${rawNoteId}`,
+            `   ⚠️ 当前条目缺少 rect（非视口内卡片或采集异常），跳过 noteId=${rawNoteId}`,
           );
           continue;
         }
 
-        // 通过 OpenDetailBlock 在搜索结果页里点击卡片，进入详情页
-        const openResult = await openDetail({
-          sessionId: PROFILE,
-          containerId: item.containerId,
-          domIndex: typeof domIndex === 'number' && Number.isFinite(domIndex) ? domIndex : undefined,
-        }).catch((e) => ({
-          success: false,
-          detailReady: false,
-          error: e.message || String(e),
-          anchor: null,
-          safeDetailUrl: null,
-          noteId: null,
-        }));
-
-        if (!openResult.success || !openResult.detailReady) {
-          console.error(
-            `   ❌ 通过卡片点击打开详情失败: ${openResult.error || 'detail not ready'}`,
+        const safeTop = 140;
+        const safeBottom = 80;
+        if (viewportH && rect.y < safeTop) {
+          console.warn(
+            `   ⚠️ 卡片过靠近顶部（rect.y=${Math.round(rect.y)} < ${safeTop}），为避免误点/风控，跳过 noteId=${rawNoteId}`,
           );
-          console.log(
-            '[Phase2(ListOnly)][Anchor:OpenDetailFromList]',
-            JSON.stringify(openResult.anchor || null),
+          continue;
+        }
+        if (viewportH && rect.y + rect.height > viewportH) {
+          console.warn(
+            `   ⚠️ 卡片底部超出视口（rect.bottom=${Math.round(rect.y + rect.height)} > ${viewportH}），跳过 noteId=${rawNoteId}`,
           );
           continue;
         }
 
-        console.log(
-          '[Phase2(ListOnly)][Anchor:OpenDetailFromList]',
-          JSON.stringify(openResult.anchor || null),
-        );
+        const rawClickPoint = {
+          x: rect.x + rect.width / 2,
+          y: rect.y + Math.min(rect.height * 0.35, Math.max(rect.height - 24, 24)),
+        };
+        const clickPoint = normalizeClickablePoint(rawClickPoint, viewport, { safeTop, safeBottom });
 
         let safeDetailUrl = '';
-        if (typeof openResult.safeDetailUrl === 'string') {
-          safeDetailUrl = openResult.safeDetailUrl;
+        let openedNoteId = '';
+
+        try {
+          await systemClickAt(clickPoint);
+          await delay(1800 + Math.random() * 900);
+          const ready = await waitForDetailReady(12);
+          if (!ready.ready) {
+            throw new Error('detail_not_ready_after_system_click');
+          }
+          safeDetailUrl = ready.safeUrl || '';
+          openedNoteId = ready.noteId || '';
+          console.log(
+            '[Phase2(ListOnly)][Anchor:SystemClick]',
+            JSON.stringify({ clickPoint, listItemRect: rect }),
+          );
+        } catch (e) {
+          const errorMsg = e?.message || String(e);
+          console.error(`   ❌ 系统点击后未进入详情: ${errorMsg}`);
+          await captureDebugSnapshot(env, keyword, 'phase2_openDetail_failed', {
+            noteId: rawNoteId,
+            title: item.title || '无标题',
+            error: errorMsg,
+            clickPoint,
+            rect,
+          });
+
+          const currentAfterClick = await getCurrentUrl().catch(() => '');
+          const stillOnSearchPage =
+            typeof currentAfterClick === 'string' &&
+            currentAfterClick.includes('/search_result');
+
+          failedDetailIndex.set(rawNoteId, {
+            noteId: rawNoteId,
+            title: item.title || '无标题',
+            error: errorMsg,
+            stageUrl: currentAfterClick || '',
+            containerId: item.containerId || null,
+            domIndex:
+              typeof domIndex === 'number' && Number.isFinite(domIndex) ? domIndex : null,
+          });
+
+          if (stillOnSearchPage) {
+            console.warn(
+              '   ⚠️ 点击后仍停留在搜索结果页，视为“搜索跳转卡片/点击无效”，跳过该条 note',
+            );
+            try {
+              await ensureSearchStageOnlyGuarded(env, `phase2-open-detail-skip-${loopRound}`);
+            } catch (guardErr) {
+              console.warn(
+                '[Phase2(ListOnly)] ensureSearchStageOnlyGuarded 在点击失败后校验失败:',
+                guardErr?.message || String(guardErr),
+              );
+            }
+
+            if (canonicalKeyword) {
+              const recovered = await tryRecoverSearchKeywordDrift(canonicalKeyword, { maxTries: 6 });
+              if (!recovered.ok) {
+                await captureDebugSnapshot(env, keyword, 'phase2_keyword_drift_after_click_fail', {
+                  canonicalKeyword,
+                  finalKeyword: recovered.finalKw || '',
+                  finalUrl: recovered.finalUrl || currentAfterClick || '',
+                  noteId: rawNoteId,
+                });
+                throw new Error('phase2_keyword_drift');
+              }
+            }
+
+            continue;
+          }
+
+          throw new Error('phase2_open_detail_not_ready');
         }
 
-        // 兜底：如 Block 未能返回 safeDetailUrl，则从当前 URL 中尝试抽取
+        let currentAfterOpen = '';
+        // 兜底：如果未拿到 safeDetailUrl，则从当前 URL 中抽取（此时应处于详情页）
         if (!safeDetailUrl) {
-          const currentAfterOpen = await getCurrentUrl();
-          if (typeof currentAfterOpen === 'string') {
-            safeDetailUrl = currentAfterOpen;
+          const urlAfterOpen = await getCurrentUrl().catch(() => '');
+          if (typeof urlAfterOpen === 'string') {
+            currentAfterOpen = urlAfterOpen;
+            safeDetailUrl = urlAfterOpen;
           }
+        } else {
+          currentAfterOpen = safeDetailUrl;
         }
 
         const hasToken =
           typeof safeDetailUrl === 'string' && safeDetailUrl.includes('xsec_token=');
 
-        // 从详情页提取正文 + 图片 + 作者等信息（不在 Phase2 落盘，仅写入索引供后续使用）
+        // 从详情页提取正文 + 图片 + 作者等信息（Phase2 需落盘基础信息，Phase3/4 再增量落盘评论）
         let detailData = null;
         const detailRes = await extractDetail({
           sessionId: PROFILE,
@@ -1189,32 +2040,81 @@ async function runPhase2ListOnly(keyword, targetCount, env, searchUrl = '') {
           );
         }
 
-        // 归一化 noteId：优先使用详情页识别出的 noteId，其次为列表 noteId
-        let finalNoteId = openResult.noteId || rawNoteId;
+        // 归一化 noteId：优先使用详情页识别出的 noteId（URL），其次为列表 noteId
+        let finalNoteId = openedNoteId || rawNoteId;
         if (!finalNoteId && typeof safeDetailUrl === 'string') {
           const match = safeDetailUrl.match(/\/explore\/([^/?#]+)/);
           if (match && match[1]) finalNoteId = match[1];
         }
         if (!finalNoteId) finalNoteId = rawNoteId;
 
-        // 将当前 note 写入索引（即使当前 URL 暂未包含 xsec_token，也记录下来供后续补全）
+        // 调试阶段：如果当前详情 URL 中未检测到 xsec_token，则停在详情页，交给人工检查
         if (!hasToken) {
-          console.warn(
-            `   ⚠️ 当前详情 URL 中未检测到 xsec_token，noteId=${finalNoteId}，本轮仅记录原始 URL，后续 Phase3 将继续通过卡片点击方式补全`,
+          console.error(
+            `   ❌ 当前详情 URL 中未检测到 xsec_token，noteId=${finalNoteId}，url=${
+              safeDetailUrl || currentAfterOpen || 'unknown'
+            }`,
           );
+          console.error(
+            '   已停留在当前详情页，请在浏览器中检查 URL / DOM / 登录态后再重新运行脚本（Phase2 将不再继续后续条目）',
+          );
+          // 故意不做 ESC 恢复，保留当前详情页供手动排查
+          throw new Error('detail_without_xsec_token');
         }
 
+        const nowMs = Date.now();
+        const nowIso = new Date(nowMs).toISOString();
+        const existing = safeUrlIndex.get(finalNoteId);
+        const firstSeenAtMs =
+          existing && typeof existing.firstSeenAtMs === 'number' && Number.isFinite(existing.firstSeenAtMs)
+            ? existing.firstSeenAtMs
+            : nowMs;
+        const firstSeenAtIso =
+          existing && typeof existing.firstSeenAtIso === 'string' && existing.firstSeenAtIso
+            ? existing.firstSeenAtIso
+            : new Date(firstSeenAtMs).toISOString();
+        const lastUpdatedAtMs = nowMs;
+        const lastUpdatedAtIso = nowIso;
         safeUrlIndex.set(finalNoteId, {
           noteId: finalNoteId,
           title: item.title || detailData?.header?.title || '',
-          safeDetailUrl: safeDetailUrl || rawUrl || '',
+          safeDetailUrl: safeDetailUrl || '',
           hasToken,
           containerId: item.containerId || null,
           domIndex,
           header: detailData?.header || null,
           author: detailData?.header?.author || null,
+          firstSeenAtMs,
+          firstSeenAtIso,
+          lastUpdatedAtMs,
+          lastUpdatedAtIso,
         });
         newlyAdded += 1;
+        await appendSafeDetailIndexLine(indexPath, env, keyword, safeUrlIndex.get(finalNoteId));
+
+        // Phase2 落盘基础信息（正文/图片/作者等），不写评论；Phase3/4 再增量写 comments.md
+        try {
+          const persistRes = await persistXhsNote({
+            sessionId: PROFILE,
+            env,
+            platform: PLATFORM,
+            keyword,
+            noteId: finalNoteId,
+            detailUrl: safeDetailUrl,
+            detail: detailData || {},
+            commentsResult: null,
+            persistMode: 'detail',
+          });
+          if (!persistRes.success) {
+            console.warn(
+              `   ⚠️ Phase2 PersistXhsNote(detail) 失败 noteId=${finalNoteId}: ${persistRes.error}`,
+            );
+          }
+        } catch (err) {
+          console.warn(
+            `   ⚠️ Phase2 PersistXhsNote(detail) 异常 noteId=${finalNoteId}: ${err?.message || String(err)}`,
+          );
+        }
 
         // 每处理完一个详情，尝试通过 ESC 恢复到搜索列表，以便继续处理下一条
         const recovery = await errorRecovery({
@@ -1232,16 +2132,52 @@ async function runPhase2ListOnly(keyword, targetCount, env, searchUrl = '') {
 
         if (!recovery.success || !recovery.recovered) {
           console.warn(
-            `   ⚠️ 通过 ESC 从详情页恢复到搜索列表失败（Phase2 将依赖 ensureSearchStage 在后续运行中纠正）: ${
+            `   ⚠️ 通过 ESC 从详情页恢复到搜索列表失败（Phase2 禁止重复搜索，将直接终止）: ${
               recovery.error || 'unknown'
             }`,
           );
+          await captureDebugSnapshot(env, keyword, 'phase2_recovery_failed', {
+            noteId: finalNoteId,
+            error: recovery.error || 'unknown',
+          });
+          throw new Error('phase2_recovery_failed');
         } else {
           console.log(
             `   ✅ 通过 ESC 恢复到搜索列表: finalStage=${recovery.finalStage}, method=${
               recovery.method || 'esc'
             }`,
           );
+          // 详情 → 搜索恢复后，再做一次阶段守卫（禁止 GoToSearch）
+          try {
+            await ensureSearchStageOnlyGuarded(
+              env,
+              `phase2-list-loop-${loopRound}-after-detail-recovery`,
+            );
+          } catch (err) {
+            await captureDebugSnapshot(env, keyword, 'phase2_recovery_guard_failed', {
+              noteId: finalNoteId,
+              error: err?.message || String(err),
+            });
+            throw err;
+          }
+        }
+
+        // timing（每条详情：从“准备点击”到“恢复回搜索页”）
+        try {
+          const durationMs = Date.now() - itemStartAtMs;
+          const line = JSON.stringify({
+            ts: new Date().toISOString(),
+            keyword,
+            env,
+            loopRound,
+            noteId: finalNoteId,
+            durationMs,
+            collected: safeUrlIndex.size,
+            target: targetCount,
+          });
+          await fs.promises.appendFile(timingPath, `${line}\n`, 'utf8');
+        } catch {
+          // ignore
         }
 
         if (safeUrlIndex.size >= targetCount) break;
@@ -1250,44 +2186,145 @@ async function runPhase2ListOnly(keyword, targetCount, env, searchUrl = '') {
       console.log(
         `   💾 本轮新增 safe-detail-urls 条目: ${newlyAdded}，累计=${safeUrlIndex.size}/${targetCount}`,
       );
+
+      if (newlyAdded === 0) {
+        noNewSafeRounds += 1;
+        console.log(
+          `   ⚠️ 本轮未新增任何 safe-detail-urls（连续无新增轮次=${noNewSafeRounds}）`,
+        );
+      } else {
+        noNewSafeRounds = 0;
+      }
+
+      if (safeUrlIndex.size >= targetCount) {
+        break;
+      }
+
+      // 每一轮列表采集结束后，增量持久化 safe-detail-urls 索引 + 当前列表步骤状态，支持中断续传
+      try {
+        await persistSafeDetailIndexJsonl(safeUrlIndex, indexPath, env, keyword, {
+          quiet: true,
+        });
+      } catch {
+        // 中途持久化失败不阻断流程，最终总结阶段还有一次总写入
+      }
+
+      try {
+        await updateCollectState((draft) => {
+          draft.currentStep = createListStepState({
+            keyword,
+            env,
+            target: targetCount,
+            searchUrl: canonicalSearchUrl || searchUrl || draft.currentStep?.searchUrl || '',
+            processedCount: safeUrlIndex.size,
+            scrollRound: loopRound,
+            pendingItems: [],
+            activeItem: null,
+            lastViewportCount: Array.isArray(listResult.items)
+              ? listResult.items.length
+              : 0,
+          });
+          draft.history = draft.history || {};
+          draft.history.safeDetailIndexSize = safeUrlIndex.size;
+          return draft;
+        }, `phase2-list-loop-${loopRound}`);
+      } catch (err) {
+        console.warn(
+          '[Phase2(ListOnly)][State] ⚠️ 更新列表步骤状态失败:',
+          err?.message || String(err),
+        );
+      }
+
+      // 当前视口内没有任何新增（要么都已经采过，要么全部点击失败），再向下滚动一屏；
+      // 如果已经连续多轮都没有新增，则认为当前搜索结果已耗尽，提前结束 Phase2(ListOnly)。
+      if (newlyAdded === 0) {
+        console.log(
+          '   ⚠️ 当前视口内没有新增 safe-detail-urls，尝试向下滚动一屏加载新内容...',
+        );
+
+        if (noNewSafeRounds >= 5) {
+          console.warn(
+            `   ⚠️ 连续 ${noNewSafeRounds} 轮均未新增 safe-detail-urls，认为当前搜索结果已耗尽，提前结束 Phase2(ListOnly)`,
+          );
+          break;
+        }
+      }
+
+      const scrolled = await scrollSearchPage('down', keyword);
+      if (!scrolled) {
+        console.warn(
+          '   ⚠️ 系统滚动失败或已到底，停止 Phase2(ListOnly) further loops',
+        );
+        break;
+      }
+      // 滚动后等待内容稳定，避免重复抓取同一视口
+      await delay(1100 + Math.random() * 800);
+    }
+
+    // timing summary
+    try {
+      const elapsedMs = Date.now() - phase2StartAtMs;
+      const summary = JSON.stringify({
+        ts: new Date().toISOString(),
+        keyword,
+        env,
+        type: 'phase2_summary',
+        elapsedMs,
+        collected: safeUrlIndex.size,
+        target: targetCount,
+      });
+      await fs.promises.appendFile(timingPath, `${summary}\n`, 'utf8');
+    } catch {
+      // ignore
     }
   }
 
   // 写入 safe-detail-urls.jsonl（覆盖式写入，保持 JSONL 结构）
-  try {
-    const lines = [];
-    for (const entry of safeUrlIndex.values()) {
-      lines.push(
-        JSON.stringify({
-          platform: PLATFORM,
-          env,
-          keyword,
-          noteId: entry.noteId,
-          title: entry.title,
-          safeDetailUrl: entry.safeDetailUrl,
-          hasToken: entry.hasToken,
-          containerId: entry.containerId || null,
-          domIndex:
-            typeof entry.domIndex === 'number' && Number.isFinite(entry.domIndex)
-              ? entry.domIndex
-              : null,
-           header: entry.header || null,
-           author: entry.author || null,
-        }),
-      );
-    }
+  await persistSafeDetailIndexJsonl(safeUrlIndex, indexPath, env, keyword, {
+    quiet: false,
+  });
 
-    await fs.promises.writeFile(
-      indexPath,
-      lines.join('\n') + (lines.length ? '\n' : ''),
-      'utf8',
-    );
-    console.log(
-      `\n[Phase2(ListOnly)] ✅ 已写入 ${safeUrlIndex.size} 条带 xsec_token 的详情链接到: ${indexPath}`,
-    );
+  // 写入本轮失败的详情打开记录，便于后续人工排查 / 调参
+  try {
+    if (failedDetailIndex.size > 0) {
+      const lines = [];
+      for (const entry of failedDetailIndex.values()) {
+        lines.push(
+          JSON.stringify({
+            platform: PLATFORM,
+            env,
+            keyword,
+            noteId: entry.noteId,
+            title: entry.title,
+            error: entry.error,
+            stageUrl: entry.stageUrl || '',
+            containerId: entry.containerId || null,
+            domIndex:
+              typeof entry.domIndex === 'number' && Number.isFinite(entry.domIndex)
+                ? entry.domIndex
+                : null,
+          }),
+        );
+      }
+      await fs.promises.writeFile(
+        failedDetailPath,
+        lines.join('\n') + (lines.length ? '\n' : ''),
+        'utf8',
+      );
+      console.log(
+        `[Phase2(ListOnly)] ⚠️ 本轮共有 ${failedDetailIndex.size} 条 note 打开详情失败，已写入: ${failedDetailPath}`,
+      );
+    } else {
+      try {
+        await fs.promises.rm(failedDetailPath, { force: true });
+      } catch {
+        // ignore
+      }
+      console.log('[Phase2(ListOnly)] 本轮未记录到任何详情打开失败的 note（已清理旧的 failures 文件）');
+    }
   } catch (err) {
     console.warn(
-      '[Phase2(ListOnly)] ⚠️ 写入 safe-detail-urls.jsonl 失败:',
+      '[Phase2(ListOnly)] ⚠️ 写入 phase2-detail-failures.jsonl 失败:',
       err?.message || String(err),
     );
   }
@@ -1313,7 +2350,7 @@ async function runPhase2ListOnly(keyword, targetCount, env, searchUrl = '') {
         keyword,
         env,
         target: targetCount,
-        searchUrl: searchUrl || draft.currentStep?.searchUrl || '',
+        searchUrl: canonicalSearchUrl || searchUrl || draft.currentStep?.searchUrl || '',
         processedCount: safeUrlIndex.size,
         scrollRound: loopRound,
         pendingItems: [],
@@ -1334,6 +2371,14 @@ async function runPhase2ListOnly(keyword, targetCount, env, searchUrl = '') {
   console.log(
     `\n[Phase2(ListOnly)] 总结：safe-detail-urls=${safeUrlIndex.size} / target=${targetCount}（loopRound=${loopRound}）`,
   );
+
+  if (safeUrlIndex.size < targetCount) {
+    console.error(
+      `[Phase2(ListOnly)] ❌ 目标 safe-detail-urls 数量未达成: target=${targetCount}, actual=${safeUrlIndex.size}`,
+    );
+    throw new Error('phase2_safe_detail_target_not_reached');
+  }
+
   return {
     count: safeUrlIndex.size,
   };
@@ -2667,6 +3712,16 @@ async function main() {
   console.log('🚀 Phase1-4 全流程采集（小红书）\n');
   console.log(`配置: keyword="${keyword}" target=${target} env=${env}\n`);
 
+  if (isFreshMode()) {
+    const dir = getKeywordBaseDir(env, keyword);
+    console.log(`[FullCollect] --fresh 开启：将删除历史目录后重新采集: ${dir}`);
+    try {
+      await fs.promises.rm(dir, { recursive: true, force: true });
+    } catch (err) {
+      console.warn('[FullCollect] 删除历史目录失败（继续执行）:', err?.message || String(err));
+    }
+  }
+
   await initCollectState(keyword, env, target);
 
   // 0. 确保核心服务已启动（Unified API + Browser Service）
@@ -2718,6 +3773,30 @@ async function main() {
 }
 
 main().catch((err) => {
-  console.error('❌ Phase1-4 全流程失败:', err.message || err);
-  process.exitCode = 1;
+  const reasonRaw = err?.message || String(err || '');
+  const reason = String(reasonRaw || '').trim() || 'unknown_error';
+
+  const explicit = new Map([
+    // Phase2
+    ['phase2_keyword_drift', 21],
+    ['phase2_open_detail_not_ready', 22],
+    ['phase2_recovery_failed', 23],
+    ['phase2_safe_detail_target_not_reached', 24],
+    ['stage_guard_not_search', 25],
+    ['stage_guard_not_search_no_search', 26],
+    // Infra / services
+    ['search_gate_unhealthy', 11],
+    ['session_start_timeout', 12],
+  ]);
+
+  const mapped =
+    explicit.get(reason) ??
+    (reason.startsWith('phase2_') ? 20 : null) ??
+    (reason.startsWith('phase3_') ? 30 : null) ??
+    (reason.startsWith('phase4_') ? 40 : null) ??
+    1;
+
+  console.error('❌ Phase1-4 全流程失败:', reason);
+  console.error(`[Exit] code=${mapped} reason=${reason}`);
+  process.exitCode = mapped;
 });

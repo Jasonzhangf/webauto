@@ -411,6 +411,16 @@ export class BrowserSession {
     await page.keyboard.press(key, typeof delay === 'number' ? { delay } : undefined);
   }
 
+  /**
+   * 基于鼠标滚轮的系统滚动（Playwright mouse.wheel）
+   * @param opts deltaY 为垂直滚动（正=向下，负=向上），deltaX 可选
+   */
+  async mouseWheel(opts: { deltaY: number; deltaX?: number }): Promise<void> {
+    const page = await this.ensurePrimaryPage();
+    const { deltaX = 0, deltaY } = opts;
+    await page.mouse.wheel(Number(deltaX) || 0, Number(deltaY) || 0);
+  }
+
   async evaluate(expression: string, arg?: any) {
     const page = await this.ensurePrimaryPage();
     if (typeof arg === 'undefined') {

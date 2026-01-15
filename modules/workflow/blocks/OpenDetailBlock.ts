@@ -67,7 +67,7 @@ export async function execute(input: OpenDetailInput): Promise<OpenDetailOutput>
     sessionId,
     containerId,
     domIndex,
-    serviceUrl = 'http://127.0.0.1:7701'
+    serviceUrl = 'http://127.0.0.1:7701',
   } = input;
 
   const profile = sessionId;
@@ -75,6 +75,7 @@ export async function execute(input: OpenDetailInput): Promise<OpenDetailOutput>
   const steps: NonNullable<OpenDetailOutput['steps']> = [];
   let entryAnchor: OpenDetailOutput['entryAnchor'];
   let exitAnchor: OpenDetailOutput['exitAnchor'];
+  let clickedItemRect: Rect | undefined;
 
   function pushStep(step: NonNullable<OpenDetailOutput['steps']>[number]) {
     steps.push(step);
@@ -219,6 +220,52 @@ export async function execute(input: OpenDetailInput): Promise<OpenDetailOutput>
     return { ready: false };
   }
 
+  async function dumpViewportDiagnostics() {
+    try {
+      const result = await controllerAction('browser:execute', {
+        profile,
+        script: `(() => {
+          const scrollY = window.scrollY || document.documentElement.scrollTop || 0;
+          const innerHeight = window.innerHeight || 0;
+          const items = Array.from(document.querySelectorAll('.note-item'));
+          const summary = items.map((el, idx) => {
+            const rect = el.getBoundingClientRect();
+            const titleEl = el.querySelector('.note-title, .title, [data-role="note-title"]');
+            const titleText = titleEl ? (titleEl.textContent || '').trim() : '';
+            let href = '';
+            const link = el.querySelector('a[href*="/explore/"], a[href*="/search_result/"]');
+            if (link instanceof HTMLAnchorElement) {
+              href = link.href || link.getAttribute('href') || '';
+            }
+            return {
+              index: idx,
+              rect: {
+                x: rect.x,
+                y: rect.y,
+                width: rect.width,
+                height: rect.height,
+              },
+              title: titleText,
+              href,
+              inViewport: rect.top >= 0 && rect.top < innerHeight,
+            };
+          });
+          return {
+            scrollY,
+            innerHeight,
+            totalItems: items.length,
+            visibleItems: summary.filter(i => i.inViewport).length,
+            items: summary.slice(0, 40),
+          };
+        })()`,
+      });
+      const diag = result.result || result.data?.result || result;
+      console.log('[OpenDetail][diagnostic] viewport summary:', JSON.stringify(diag));
+    } catch (e: any) {
+      console.warn('[OpenDetail][diagnostic] dump viewport failed:', e.message || String(e));
+    }
+  }
+
   try {
     const { highlightContainer, getContainerRect } = await import('./helpers/anchorVerify.js');
 
@@ -226,15 +273,13 @@ export async function execute(input: OpenDetailInput): Promise<OpenDetailOutput>
     console.log(`[OpenDetail] Start URL: ${startUrl}`);
 
     // 0. 点击前：对选中的卡片容器（search_result_item / feed_item）做锚点高亮 + Rect 回环
-    let clickedItemRect: Rect | undefined;
-    
     // 如果传入了 domIndex，使用专用高亮逻辑
     if (typeof domIndex === 'number') {
       try {
         await controllerAction('browser:execute', {
           profile,
           script: `(() => {
-            const items = document.querySelectorAll('.feeds-container .note-item');
+            const items = document.querySelectorAll('.note-item');
             const el = items[${domIndex}];
             if (el) {
               el.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -251,7 +296,7 @@ export async function execute(input: OpenDetailInput): Promise<OpenDetailOutput>
         const rectResult = await controllerAction('browser:execute', {
           profile,
           script: `(() => {
-            const items = document.querySelectorAll('.feeds-container .note-item');
+            const items = document.querySelectorAll('.note-item');
             const el = items[${domIndex}];
             return el ? el.getBoundingClientRect() : null;
           })()`
@@ -334,8 +379,8 @@ export async function execute(input: OpenDetailInput): Promise<OpenDetailOutput>
     }
 
     // 1. 打开详情
-    //   首选：使用容器运行时 + 系统点击（Playwright mouse）基于 bbox 点击结果卡片中心；
-    //   降级：仅在系统点击失败时，才退回 DOM 脚本点击封面元素。
+    //   仅使用容器运行时 + 系统点击（Playwright mouse）基于 bbox 点击结果卡片中心；
+    //   不再使用任何 DOM click 兜底逻辑，失败时通过日志 + 诊断信息排查。
     try {
       // 1.1 尝试通过容器 operation + bbox 使用系统点击
       const bbox = {
@@ -367,7 +412,7 @@ export async function execute(input: OpenDetailInput): Promise<OpenDetailOutput>
           meta: { via: 'container:operation:bbox' },
         });
       } else {
-        console.warn('[OpenDetail] container:operation click returned non-success, will try DOM fallback');
+        console.warn('[OpenDetail] container:operation click returned non-success');
         pushStep({
           id: 'system_click_detail_item',
           status: 'failed',
@@ -378,110 +423,50 @@ export async function execute(input: OpenDetailInput): Promise<OpenDetailOutput>
           },
           error: opResp?.error || 'container_operation_failed',
         });
-        throw new Error(opResp?.error || 'container_operation_failed');
+        console.warn(
+          '[OpenDetail] System click failed via container:operation (no DOM fallback):',
+          opResp?.error || 'container_operation_failed',
+        );
       }
     } catch (e: any) {
-      console.warn('[OpenDetail] container:operation system click failed, fallback to DOM click:', e.message || e);
-      // 1.2 DOM 降级路径：保持原有 “elementFromPoint + inner anchor” 策略（仅作为兜底）
-      if (!clickedItemRect) {
-        console.warn('[OpenDetail] clickedItemRect missing, fallback to DOM index click');
-      }
-
-      const cx = clickedItemRect ? clickedItemRect.x + clickedItemRect.width / 2 : 0;
-      const cy = clickedItemRect ? clickedItemRect.y + clickedItemRect.height / 2 : 0;
-
-      const clickResult = await controllerAction('browser:execute', {
-        profile,
-        script: `(() => {
-          const domIndex = ${typeof domIndex === 'number' ? domIndex : 'null'};
-          const hasRect = ${clickedItemRect ? 'true' : 'false'};
-          let card = null;
-
-          if (typeof domIndex === 'number') {
-            const cards = document.querySelectorAll('.feeds-container .note-item');
-            card = cards[domIndex] || null;
-          }
-
-          if (!card && hasRect) {
-            const centerX = ${clickedItemRect ? cx.toFixed(2) : '0'};
-            const centerY = ${clickedItemRect ? cy.toFixed(2) : '0'};
-            const el = document.elementFromPoint(centerX, centerY);
-            if (el && typeof el.closest === 'function') {
-              card = el.closest('.note-item');
-            }
-          }
-
-          if (!card) {
-            // 兜底：退回到首个 note-item（精度降低，但仍在视口内）
-            card = document.querySelector('.feeds-container .note-item');
-          }
-
-          if (!card) return { ok: false, reason: 'no card' };
-
-          let anchor = card.querySelector('a.cover.mask');
-          if (!anchor) {
-            anchor = card.querySelector('a[href*="/explore/"][href*="xsec_token"], a[href*="/search_result/"][href*="xsec_token"]');
-          }
-          let target = anchor;
-          if (!target) {
-            target = card.querySelector('img');
-          }
-          if (!target || typeof target.click !== 'function') {
-            return { ok: false, reason: 'no clickable element' };
-          }
-          if (target.tagName === 'A') {
-            const href = target.getAttribute('href') || '';
-            if (!href.includes('xsec_token=')) {
-              return { ok: false, reason: 'missing xsec_token' };
-            }
-          }
-          target.click();
-          return { ok: true };
-        })()`
-      });
-      const clickRes = clickResult.result || clickResult.data?.result || clickResult;
-      if (!clickRes?.ok) {
-        console.warn('[OpenDetail] DOM click returned:', clickRes);
-      } else {
-        console.log('[OpenDetail] DOM click on visible cover/image executed');
-        pushStep({
-          id: 'fallback_dom_click_detail_item',
-          status: 'success',
-          anchor: {
-            containerId,
-            clickedItemRect,
-            verified: true,
-          },
-          meta: { via: 'dom_script', reason: clickRes?.reason || null },
-        });
-      }
+      console.warn(
+        '[OpenDetail] container:operation system click threw error (no DOM fallback):',
+        e.message || e,
+      );
     }
 
-    // 点击后稍等一会儿让前端完成路由/模态切换
-    await new Promise((r) => setTimeout(r, 3000));
+	    // 点击后稍等一会儿让前端完成路由/模态切换
+	    await new Promise((r) => setTimeout(r, 3000));
+	
+	    let midUrl = await getCurrentUrl();
+	    console.log(`[OpenDetail] Post-click URL: ${midUrl}`);
+	
+	    // 2. 等待详情模态出现（或完整详情页），并尝试读取带 xsec_token 的安全 URL
+    let detailState = await waitForDetail();
+    let detailReady = detailState.ready;
 
-    const midUrl = await getCurrentUrl();
-    console.log(`[OpenDetail] Post-click URL: ${midUrl}`);
-
-    // 2. 等待详情模态出现（或完整详情页），并尝试读取带 xsec_token 的安全 URL
-    const detailState = await waitForDetail();
-    const detailReady = detailState.ready;
+    if (!detailReady) {
+      console.warn(
+        '[OpenDetail] detail not ready after system click, dumping viewport diagnostics for analysis',
+      );
+      await dumpViewportDiagnostics();
+    }
 
     pushStep({
-      id: 'wait_detail_dom_ready',
-      status: detailReady ? 'success' : 'failed',
-      anchor: {
-        containerId,
-        clickedItemRect,
-        verified: detailReady,
-      },
-      meta: {
-        safeDetailUrl: detailState.safeUrl || null,
-        noteId: detailState.noteId || null,
-        url: midUrl,
-      },
-      error: detailReady ? undefined : 'detail_not_ready',
-    });
+	      id: 'wait_detail_dom_ready',
+	      status: detailReady ? 'success' : 'failed',
+	      anchor: {
+	        containerId,
+	        clickedItemRect,
+	        verified: detailReady,
+	      },
+	      meta: {
+	        safeDetailUrl: detailState.safeUrl || null,
+	        noteId: detailState.noteId || null,
+	        url: midUrl,
+	      },
+	      error: detailReady ? undefined : 'detail_not_ready',
+	    });
 
     // 3. 详情出现后，对 modal_shell 做锚点高亮 + Rect 回环
     let detailContainerId: string | undefined;
