@@ -245,9 +245,54 @@ async function handleCommand(payload: CommandPayload, manager: SessionManager, w
       const result = await session.evaluate(script);
       return { ok: true, body: { ok: true, result } };
     }
-    case 'newPage':
-    case 'switchControl':
-      return { ok: false, body: { error: 'not supported in TS service' } };
+    case 'page:list': {
+      const profileId = args.profileId || 'default';
+      const session = manager.getSession(profileId);
+      if (!session) throw new Error(`session for profile ${profileId} not started`);
+      const pages = session.listPages();
+      const activeIndex = pages.find((p) => p.active)?.index ?? 0;
+      return { ok: true, body: { ok: true, pages, activeIndex } };
+    }
+    case 'page:new':
+    case 'newPage': {
+      const profileId = args.profileId || 'default';
+      const session = manager.getSession(profileId);
+      if (!session) throw new Error(`session for profile ${profileId} not started`);
+      const url = args.url ? String(args.url) : undefined;
+      const result = await session.newPage(url);
+      broadcast('page:created', { profileId, index: result.index, url: result.url });
+      return { ok: true, body: { ok: true, ...result } };
+    }
+    case 'page:switch':
+    case 'switchControl': {
+      const profileId = args.profileId || 'default';
+      const session = manager.getSession(profileId);
+      if (!session) throw new Error(`session for profile ${profileId} not started`);
+      const index = Number(args.index);
+      const result = await session.switchPage(index);
+      broadcast('page:switched', { profileId, index: result.index, url: result.url });
+      return { ok: true, body: { ok: true, ...result } };
+    }
+    case 'page:close': {
+      const profileId = args.profileId || 'default';
+      const session = manager.getSession(profileId);
+      if (!session) throw new Error(`session for profile ${profileId} not started`);
+      const hasIndex = typeof args.index !== 'undefined' && args.index !== null;
+      const index = hasIndex ? Number(args.index) : undefined;
+      const result = await session.closePage(index);
+      broadcast('page:closed', { profileId, closedIndex: result.closedIndex, activeIndex: result.activeIndex });
+      return { ok: true, body: { ok: true, ...result } };
+    }
+    case 'page:setViewport': {
+      const profileId = args.profileId || 'default';
+      const session = manager.getSession(profileId);
+      if (!session) throw new Error(`session for profile ${profileId} not started`);
+      const width = Number(args.width);
+      const height = Number(args.height);
+      const size = await session.setViewportSize({ width, height });
+      broadcast('page:viewport', { profileId, ...size });
+      return { ok: true, body: { ok: true, ...size } };
+    }
     case 'autoCookies:start': {
       const profileId = args.profileId || 'default';
       const interval = Math.max(1000, Number(args.intervalMs) || 2500);

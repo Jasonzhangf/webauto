@@ -315,23 +315,24 @@ export async function execute(input: ExpandCommentsInput): Promise<ExpandComment
           );
         }
 
-        return {
-          success: true,
-          comments: [],
-          reachedEnd: true,
-          emptyState: true,
-          anchor: {
-            commentSectionContainerId: commentSection.id,
-            commentSectionRect,
-            sampleCommentContainerId: undefined,
-            sampleCommentRect: undefined,
-            endMarkerContainerId: emptyStateNode.id,
-            endMarkerRect: emptyRect,
-            verified: Boolean(
-              commentSectionRect && (!emptyRect || emptyRect.height > 0),
-            ),
-          },
-        };
+        // 只有“空评论锚点”确实存在（拿到 rect）时才判定为空评论；否则继续后续 DOM 提取，避免误判。
+        if (emptyRect && emptyRect.height > 0) {
+          return {
+            success: true,
+            comments: [],
+            reachedEnd: true,
+            emptyState: true,
+            anchor: {
+              commentSectionContainerId: commentSection.id,
+              commentSectionRect,
+              sampleCommentContainerId: undefined,
+              sampleCommentRect: undefined,
+              endMarkerContainerId: emptyStateNode.id,
+              endMarkerRect: emptyRect,
+              verified: Boolean(commentSectionRect),
+            },
+          };
+        }
       }
 
       console.warn(
@@ -382,6 +383,10 @@ export async function execute(input: ExpandCommentsInput): Promise<ExpandComment
               '.comment-list .comment-item',
               '.comments-container .comment-item',
               '.comment-item',
+              '.comments-el [class*="comment-item"]',
+              '.comment-list [class*="comment-item"]',
+              '.comments-container [class*="comment-item"]',
+              '[class*="comment-item"]',
             ];
             const fallbackRect = await locateRectBySelectors(fallbackSelectors);
             if (fallbackRect) {
@@ -400,6 +405,10 @@ export async function execute(input: ExpandCommentsInput): Promise<ExpandComment
             '.comment-list .comment-item',
             '.comments-container .comment-item',
             '.comment-item',
+            '.comments-el [class*="comment-item"]',
+            '.comment-list [class*="comment-item"]',
+            '.comments-container [class*="comment-item"]',
+            '[class*="comment-item"]',
           ];
           const fallbackRect = await locateRectBySelectors(fallbackSelectors);
           if (fallbackRect) {
@@ -465,7 +474,9 @@ export async function execute(input: ExpandCommentsInput): Promise<ExpandComment
             return { found: false, comments: [] };
           }
 
-          const items = Array.from(root.querySelectorAll(cfg.itemSelector || '.comment-item'));
+          const items = Array.from(
+            root.querySelectorAll(cfg.itemSelector || '.comment-item, [class*="comment-item"]'),
+          );
           const comments = items.map((el) => {
             const item = {};
             const fields = cfg.fields || {};
@@ -541,11 +552,12 @@ export async function execute(input: ExpandCommentsInput): Promise<ExpandComment
 
     let endMarkerRect: Rect | undefined;
     let endMarkerContainerId: string | undefined;
+    let endMarkerHit = false;
+    let emptyStateHit = false;
 
     // 优先：有评论时按 end_marker 判断；无评论时优先按 empty_state / comment_section 判空
     async function resolveEndMarkerRectViaSelectors(
       containerId: string | undefined,
-      includeLastCommentFallback = false,
     ): Promise<Rect | null> {
       const selectors: string[] = [];
       if (containerId) {
@@ -553,9 +565,6 @@ export async function execute(input: ExpandCommentsInput): Promise<ExpandComment
         if (primary) selectors.push(primary);
       }
       selectors.push('.comment-end', '.comments-end', '.comment-list .end');
-      if (includeLastCommentFallback) {
-        selectors.push('.comments-el .comment-item:last-of-type', '.comment-item:last-of-type');
-      }
       return locateRectBySelectors(selectors);
     }
 
@@ -571,14 +580,16 @@ export async function execute(input: ExpandCommentsInput): Promise<ExpandComment
         );
         if (anchor.found && anchor.rect) {
           endMarkerRect = anchor.rect;
+          endMarkerHit = true;
           console.log(`[ExpandComments] end_marker rect: ${JSON.stringify(anchor.rect)}`);
         } else {
           console.warn(
             `[ExpandComments] end_marker anchor verify failed: ${anchor.error || 'not found'}`,
           );
-          const fallbackRect = await resolveEndMarkerRectViaSelectors(endMarker.id, true);
+          const fallbackRect = await resolveEndMarkerRectViaSelectors(endMarker.id);
           if (fallbackRect) {
             endMarkerRect = fallbackRect;
+            endMarkerHit = true;
             console.log(
               `[ExpandComments] fallback end_marker rect: ${JSON.stringify(fallbackRect)}`,
             );
@@ -586,19 +597,20 @@ export async function execute(input: ExpandCommentsInput): Promise<ExpandComment
         }
       } catch (e: any) {
         console.warn(`[ExpandComments] end_marker anchor verify error: ${e.message}`);
-        const fallbackRect = await resolveEndMarkerRectViaSelectors(endMarker.id, true);
+        const fallbackRect = await resolveEndMarkerRectViaSelectors(endMarker.id);
         if (fallbackRect) {
           endMarkerRect = fallbackRect;
+          endMarkerHit = true;
           console.log(
             `[ExpandComments] fallback end_marker rect after error: ${JSON.stringify(fallbackRect)}`,
           );
         }
       }
-    } else if (emptyStateNode?.id || comments.length === 0) {
-      // 空状态：优先使用 empty_state 容器；若未命中，则退回到 comment_section 本身作为“空评论锚点”
-      endMarkerContainerId = emptyStateNode?.id || commentSection.id;
+    } else if (emptyStateNode?.id && comments.length === 0) {
+      // 空状态：只认 empty_state 锚点（不再退回 comment_section，避免误判）
+      endMarkerContainerId = emptyStateNode.id;
       try {
-        const anchorTargetId = emptyStateNode?.id || commentSection.id;
+        const anchorTargetId = emptyStateNode.id;
         const anchor = await verifyAnchorByContainerId(
           anchorTargetId,
           profile,
@@ -608,6 +620,7 @@ export async function execute(input: ExpandCommentsInput): Promise<ExpandComment
         );
         if (anchor.found && anchor.rect) {
           endMarkerRect = anchor.rect;
+          emptyStateHit = true;
           console.log(
             `[ExpandComments] empty_state rect: ${JSON.stringify(anchor.rect)}, using=${
               emptyStateNode?.id ? 'empty_state' : 'comment_section'
@@ -617,9 +630,10 @@ export async function execute(input: ExpandCommentsInput): Promise<ExpandComment
           console.warn(
             `[ExpandComments] empty_state anchor verify failed: ${anchor.error || 'not found'}`,
           );
-          const fallbackRect = await resolveEndMarkerRectViaSelectors(endMarkerContainerId, comments.length > 0);
+          const fallbackRect = await resolveEndMarkerRectViaSelectors(endMarkerContainerId);
           if (fallbackRect) {
             endMarkerRect = fallbackRect;
+            emptyStateHit = true;
             console.log(
               `[ExpandComments] fallback empty_state/end_marker rect: ${JSON.stringify(fallbackRect)}`,
             );
@@ -627,9 +641,10 @@ export async function execute(input: ExpandCommentsInput): Promise<ExpandComment
         }
       } catch (e: any) {
         console.warn(`[ExpandComments] empty_state anchor verify error: ${e.message}`);
-        const fallbackRect = await resolveEndMarkerRectViaSelectors(endMarkerContainerId, comments.length > 0);
+        const fallbackRect = await resolveEndMarkerRectViaSelectors(endMarkerContainerId);
         if (fallbackRect) {
           endMarkerRect = fallbackRect;
+          emptyStateHit = true;
           console.log(
             `[ExpandComments] fallback empty_state/end_marker rect after error: ${JSON.stringify(fallbackRect)}`,
           );
@@ -656,15 +671,15 @@ export async function execute(input: ExpandCommentsInput): Promise<ExpandComment
     // - 无评论时：命中 empty_state（或退回 comment_section）才视为 reachedEnd
     const reachedEnd =
       comments.length === 0
-        ? Boolean(emptyStateNode)
-        : Boolean(endMarker && endMarkerRect);
+        ? Boolean(emptyStateHit && endMarkerRect)
+        : Boolean(endMarkerHit && endMarkerRect);
 
     return {
       success: true,
       comments,
       reachedEnd,
       // 只有“确实无评论且命中 empty_state”时才视为空评论
-      emptyState: comments.length === 0 && Boolean(emptyStateNode),
+      emptyState: comments.length === 0 && Boolean(emptyStateHit && endMarkerRect),
       anchor: {
         commentSectionContainerId: commentSection.id,
         commentSectionRect,

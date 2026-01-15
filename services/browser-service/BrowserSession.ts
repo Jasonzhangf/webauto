@@ -251,6 +251,89 @@ export class BrowserSession {
     return page;
   }
 
+  listPages(): { index: number; url: string; active: boolean }[] {
+    if (!this.context) return [];
+    const pages = this.context.pages().filter((p) => !p.isClosed());
+    const active = this.getActivePage();
+    return pages.map((p, index) => ({
+      index,
+      url: p.url(),
+      active: active === p,
+    }));
+  }
+
+  async newPage(url?: string): Promise<{ index: number; url: string }> {
+    const ctx = this.ensureContext();
+    const page = await ctx.newPage();
+    this.setupPageHooks(page);
+    this.page = page;
+    try {
+      await page.bringToFront();
+    } catch {
+      /* ignore */
+    }
+    if (url) {
+      await page.goto(url, { waitUntil: 'domcontentloaded' });
+      await ensurePageRuntime(page);
+      this.lastKnownUrl = url;
+    }
+    const pages = ctx.pages().filter((p) => !p.isClosed());
+    return { index: Math.max(0, pages.indexOf(page)), url: page.url() };
+  }
+
+  async switchPage(index: number): Promise<{ index: number; url: string }> {
+    const ctx = this.ensureContext();
+    const pages = ctx.pages().filter((p) => !p.isClosed());
+    const idx = Number(index);
+    if (!Number.isFinite(idx) || idx < 0 || idx >= pages.length) {
+      throw new Error(`invalid_page_index: ${index}`);
+    }
+    const page = pages[idx];
+    this.page = page;
+    try {
+      await page.bringToFront();
+    } catch {
+      /* ignore */
+    }
+    await ensurePageRuntime(page, true).catch(() => {});
+    this.lastKnownUrl = page.url();
+    return { index: idx, url: page.url() };
+  }
+
+  async closePage(index?: number): Promise<{ closedIndex: number; activeIndex: number; total: number }> {
+    const ctx = this.ensureContext();
+    const pages = ctx.pages().filter((p) => !p.isClosed());
+    if (pages.length === 0) {
+      return { closedIndex: -1, activeIndex: -1, total: 0 };
+    }
+    const active = this.getActivePage();
+    const requested = typeof index === 'number' && Number.isFinite(index) ? index : null;
+    const closedIndex =
+      requested !== null ? requested : Math.max(0, pages.findIndex((p) => p === active));
+    if (closedIndex < 0 || closedIndex >= pages.length) {
+      throw new Error(`invalid_page_index: ${index}`);
+    }
+    const page = pages[closedIndex];
+    await page.close().catch(() => {});
+
+    const remaining = ctx.pages().filter((p) => !p.isClosed());
+    const nextIndex = remaining.length === 0 ? -1 : Math.min(Math.max(0, closedIndex - 1), remaining.length - 1);
+    if (nextIndex >= 0) {
+      const nextPage = remaining[nextIndex];
+      this.page = nextPage;
+      try {
+        await nextPage.bringToFront();
+      } catch {
+        /* ignore */
+      }
+      await ensurePageRuntime(nextPage, true).catch(() => {});
+      this.lastKnownUrl = nextPage.url();
+    } else {
+      this.page = undefined;
+    }
+    return { closedIndex, activeIndex: nextIndex, total: remaining.length };
+  }
+
   async saveCookiesForActivePage(): Promise<{ path: string; count: number }[]> {
     if (!this.context) return [];
     const page = this.getActivePage();
@@ -419,6 +502,17 @@ export class BrowserSession {
     const page = await this.ensurePrimaryPage();
     const { deltaX = 0, deltaY } = opts;
     await page.mouse.wheel(Number(deltaX) || 0, Number(deltaY) || 0);
+  }
+
+  async setViewportSize(opts: { width: number; height: number }): Promise<{ width: number; height: number }> {
+    const page = await this.ensurePrimaryPage();
+    const width = Math.max(800, Math.floor(Number(opts.width) || 0));
+    const height = Math.max(700, Math.floor(Number(opts.height) || 0));
+    if (!width || !height) {
+      throw new Error('invalid_viewport_size');
+    }
+    await page.setViewportSize({ width, height });
+    return { width, height };
   }
 
   async evaluate(expression: string, arg?: any) {

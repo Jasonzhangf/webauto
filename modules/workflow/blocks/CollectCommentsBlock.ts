@@ -10,6 +10,7 @@ export interface CollectCommentsInput {
   sessionId: string;
   serviceUrl?: string;
   maxWarmupRounds?: number;
+  allowClickCommentButton?: boolean;
 }
 
 export interface Rect {
@@ -61,7 +62,8 @@ export async function execute(input: CollectCommentsInput): Promise<CollectComme
   const {
     sessionId,
     serviceUrl = 'http://127.0.0.1:7701',
-    maxWarmupRounds
+    maxWarmupRounds,
+    allowClickCommentButton,
   } = input;
 
   try {
@@ -97,6 +99,7 @@ export async function execute(input: CollectCommentsInput): Promise<CollectComme
     const warmup = await warmupComments({
       sessionId,
       serviceUrl,
+      ...(allowClickCommentButton === false ? { allowClickCommentButton: false } : {}),
       ...(typeof maxWarmupRounds === 'number' && maxWarmupRounds > 0
         ? { maxRounds: maxWarmupRounds }
         : {})
@@ -208,14 +211,9 @@ export async function execute(input: CollectCommentsInput): Promise<CollectComme
     const comments = Array.isArray(expanded.comments) ? expanded.comments : [];
     const totalFromHeader = warmup.totalFromHeader ?? null;
 
-    // 若能从页面头部解析出“共 N 条评论”，优先用该总数判断是否到达结尾
-    let reachedEnd: boolean;
-    if (typeof totalFromHeader === 'number' && totalFromHeader > 0) {
-      reachedEnd = comments.length >= totalFromHeader;
-    } else {
-      // 否则退回到 Warmup/Expand 的内部终止信号
-      reachedEnd = Boolean(warmup.reachedEnd || expanded.reachedEnd);
-    }
+    // 结尾判定：只认 ExpandCommentsBlock 的锚点信号（end_marker / empty_state），避免 header 总数/滚动推断误判
+    const reachedEnd = Boolean(expanded.reachedEnd);
+    const emptyState = Boolean(expanded.emptyState);
 
     if (expanded.anchor) {
       exitAnchor = {
@@ -232,7 +230,7 @@ export async function execute(input: CollectCommentsInput): Promise<CollectComme
       success: true,
       comments,
       reachedEnd,
-      emptyState: expanded.emptyState,
+      emptyState,
       warmupCount: warmup.finalCount ?? 0,
       totalFromHeader,
       entryAnchor,

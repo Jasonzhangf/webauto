@@ -1,0 +1,34 @@
+{
+  "id": "xiaohongshu_detail.comment_button",
+  "name": "评论按钮（chat-wrapper）",
+  "type": "button",
+  "capabilities": [
+    "highlight"
+  ],
+  "selectors": [
+    {
+      "css": ".chat-wrapper",
+      "variant": "primary",
+      "score": 1.0
+    },
+    {
+      "css": "[class*='chat-wrapper']",
+      "variant": "backup",
+      "score": 0.85
+    },
+    {
+      "css": "span[class*='chat'][class*='wrapper']",
+      "variant": "backup2",
+      "score": 0.7
+    }
+  ],
+  "operations": [
+    {
+      "type": "highlight",
+      "config": {
+        "style": "2px solid #ff00ff",
+        "duration": 1200
+      }
+    }
+  ]
+}

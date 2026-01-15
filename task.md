@@ -12,7 +12,10 @@
    - 在详情页拿到带 `xsec_token` 的安全链接；
    - 同时抽取“正文/图片/作者”等基础信息；
    - 落盘：写入 `safe-detail-urls.jsonl`（以及 Phase2 详情基础数据，供后续评论阶段使用）。
-3. Phase3（可选）：基于 Phase2 的列表，按 **4 帖一组** 轮转采集评论（每帖每轮最多 100 条），避免单帖连续滚动。
+   - 运行策略（续传 vs 追加）：
+     - 若历史 `safe-detail-urls` 中仍存在未落盘的 note（缺 `comments.md`），优先续传 Phase3-4，不重复搜索；
+     - 若历史 `safe-detail-urls` 已全部落盘，则进入“追加采集”模式：在现有 safeCount 基础上再追加 `target` 条新链接（避免 `safeCount>=target` 时无事可做）。
+3. Phase3（可选）：基于 Phase2 的列表，使用 **N 个 tab 常驻补位** 轮转采集评论（默认 4；每帖每轮最多 100 条），避免单帖连续滚动。
 4. Phase4：落盘（续传 + 去重）：中断后按 step 恢复；本地已有内容必须可跳过/可增量更新。
 
 ### ✅ 已完成（稳定部分）
@@ -21,6 +24,9 @@
 - [x] 登录态检测：支持通过容器锚点（`login_anchor/login_guard/qrcode_guard`）识别“已登录/未登录/风控”并阻断未登录。
 - [x] SearchGate 在线检测与自启动（Phase3/4 节流入口）。
 - [x] 失败退出码与理由：脚本失败时输出 `[Exit] code=<number> reason=<string>`，并按阶段粗粒度映射（`phase2_* → 20+`, `phase3_* → 30+`, `phase4_* → 40+`；未知错误为 `1`）。
+- [x] Run-level 日志与时间线：每次运行会生成 `run.<runId>.log` 与 `run-events.<runId>.jsonl`，用于回放和定位卡点（目录在 `~/.webauto/download/xiaohongshu/{env}/{keyword}/`）。
+- [x] 评论区激活与 hover：对“正文很长导致评论区不在视口 / 需先点评论按钮”的页面，WarmupComments 会先点击 `xiaohongshu_detail.comment_button`（`.chat-wrapper`）再重新定位 `comment_section`，并在滚动前强制 hover/click 到评论区，避免焦点停在输入框导致滚动无效。
+- [x] Phase3-4 Tab 常驻补位：不再“4 帖一组整体关闭”，改为 **N 个 tab 常驻**（默认 4），当检测到 `reachedEnd` 或 `emptyState`（或达到 `maxRoundsPerNote`）即判定该帖完成，并在同一个 tab 内执行 `goto` 导航到下一条链接补位（队列耗尽则保持空闲）。
 
 ### 🧨 当前阻塞（需要复现 + 修复）
 
@@ -34,11 +40,14 @@
 3. [ ] Phase2 关键字漂移检测：一旦 URL keyword 与首次搜索 canonical keyword 不一致，必须停下（或仅允许一次“后退”恢复），避免在错误关键词下继续采集。
 4. [ ] Phase2 “无 token”处理：打开详情后如果 URL 没有 `xsec_token`，立刻停在详情页（给人工检查）+ 生成截图/DOM 快照 + 明确退出原因/退出码。
 5. [ ] Phase2 速度度量：把“每条详情打开耗时、总耗时、平均耗时”写入 JSONL（便于确认慢在哪里）。
+6. [ ] Phase3 4-tab 接力稳定性：必须确保“打开新 tab → 进入详情 → 评论滚动生效 → 增量落盘”，任何阶段失败都需要 `debug snapshot + 非零退出码`。
 
 ### ✅ 最新实测记录（2026-01-15）
 
 - Phase2(ListOnly) 续传验证：在 `keyword=雷军` 的 search_result 页面，从已有 20 条续跑到 50 条成功（`loopRound=7`）。
 - 系统滚动实测：日志确认触发 `WS user_action.scroll` 回退路径，且锚点 rect `y` 变为负数，表示滚动已生效并进入下一屏采集。
+- Phase3-4(Tab 模式) 验证：已将“键盘新建 tab”改为 browser-service `page:new/page:switch/page:close` 方式（需要 build+重启 browser-service 后实测）。
+- 视口高度增强：脚本支持 `--viewport-height/--viewport-width` 并会尝试通过 `browser-service page:setViewport` 增大可见区域，提升长正文页面评论区定位稳定性。
 
 ---
 

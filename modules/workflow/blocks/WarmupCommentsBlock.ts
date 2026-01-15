@@ -9,6 +9,7 @@ export interface WarmupCommentsInput {
   sessionId: string;
   maxRounds?: number;
   serviceUrl?: string;
+  allowClickCommentButton?: boolean;
 }
 
 export interface Rect {
@@ -35,11 +36,13 @@ export async function execute(input: WarmupCommentsInput): Promise<WarmupComment
     sessionId,
     maxRounds,
     serviceUrl = 'http://127.0.0.1:7701',
+    allowClickCommentButton,
   } = input;
 
   const profile = sessionId;
   const controllerUrl = `${serviceUrl}/v1/controller/action`;
   let focusPoint: { x: number; y: number } | null = null;
+  const canClickCommentButton = allowClickCommentButton !== false;
   const browserServiceUrl =
     process.env.WEBAUTO_BROWSER_SERVICE_URL || 'http://127.0.0.1:7704';
   const browserWsUrl = process.env.WEBAUTO_BROWSER_WS_URL || 'ws://127.0.0.1:8765';
@@ -160,6 +163,24 @@ export async function execute(input: WarmupCommentsInput): Promise<WarmupComment
     await browserServiceWsScroll(deltaY, coords);
   }
 
+  async function systemHoverAt(x: number, y: number) {
+    try {
+      await browserServiceCommand('mouse:move', { profileId: profile, x, y, steps: 3 }, 8000);
+    } catch {
+      // ignore
+    }
+  }
+
+  async function systemClickAt(x: number, y: number) {
+    await browserServiceCommand('mouse:move', { profileId: profile, x, y, steps: 3 }, 8000);
+    await new Promise((r) => setTimeout(r, 80));
+    await browserServiceCommand(
+      'mouse:click',
+      { profileId: profile, x, y, clicks: 1, delay: 40 + Math.floor(Math.random() * 60) },
+      8000,
+    );
+  }
+
   async function nativeClick(x: number, y: number) {
     try {
       await controllerAction('user_action', {
@@ -196,7 +217,7 @@ export async function execute(input: WarmupCommentsInput): Promise<WarmupComment
     }
   }
 
-  async function focusCommentsArea() {
+  async function focusCommentsArea(): Promise<boolean> {
     try {
       const focusResult = await controllerAction('browser:execute', {
         profile,
@@ -246,16 +267,75 @@ export async function execute(input: WarmupCommentsInput): Promise<WarmupComment
       const posPayload =
         (focusResult as any).result || (focusResult as any).data?.result || focusResult;
       if (!posPayload || typeof posPayload.x !== 'number' || typeof posPayload.y !== 'number') {
-        return;
+        return false;
       }
 
       const coordinates = { x: posPayload.x, y: posPayload.y };
 
       focusPoint = coordinates;
-      await nativeClick(coordinates.x, coordinates.y);
+      // 重要：评论按钮点击后焦点会落在输入框；这里强制把鼠标 hover/click 到评论列表中
+      // 以确保后续滚轮事件作用在评论区，而不是输入框。
+      await systemClickAt(Math.floor(coordinates.x), Math.floor(coordinates.y));
       await new Promise((r) => setTimeout(r, 500));
+      return true;
     } catch {
       // 聚焦失败不致命，后续 PageDown 仍然可以作为兜底
+      return false;
+    }
+  }
+
+  function clamp(n: number, min: number, max: number) {
+    return Math.min(Math.max(n, min), max);
+  }
+
+  async function getViewport() {
+    try {
+      const result = await controllerAction('browser:execute', {
+        profile,
+        script: `(() => ({ w: window.innerWidth || 0, h: window.innerHeight || 0 }))()`,
+      });
+      const payload = (result as any).result || (result as any).data?.result || result;
+      const w = Number(payload?.w || 0) || 0;
+      const h = Number(payload?.h || 0) || 0;
+      return { w, h };
+    } catch {
+      return { w: 0, h: 0 };
+    }
+  }
+
+  function computeVisibleFocusPoint(rect: Rect, viewport: { w: number; h: number }) {
+    const w = Number(viewport?.w || 0) || 0;
+    const h = Number(viewport?.h || 0) || 0;
+    const xCenter = rect.x + rect.width / 2;
+    const x = w ? clamp(xCenter, 20, w - 20) : xCenter;
+
+    const rectTop = rect.y;
+    const rectBottom = rect.y + rect.height;
+    const safeTop = 160;
+    const safeBottom = 120;
+    const topVisible = Math.max(rectTop, safeTop);
+    const bottomVisible = h ? Math.min(rectBottom, h - safeBottom) : rectBottom;
+    if (bottomVisible <= topVisible) return null;
+    const y = (topVisible + bottomVisible) / 2;
+    return { x, y };
+  }
+
+  async function isInputFocused() {
+    try {
+      const result = await controllerAction('browser:execute', {
+        profile,
+        script: `(() => {
+          const el = document.activeElement;
+          const tag = el && el.tagName ? el.tagName.toLowerCase() : '';
+          const type = (el && (el as any).type) ? String((el as any).type) : '';
+          const isInput = tag === 'input' || tag === 'textarea' || (el && (el as any).isContentEditable);
+          return { tag, type, isInput };
+        })()`,
+      });
+      const payload = (result as any).result || (result as any).data?.result || result;
+      return Boolean(payload?.isInput);
+    } catch {
+      return false;
     }
   }
 
@@ -270,7 +350,7 @@ export async function execute(input: WarmupCommentsInput): Promise<WarmupComment
           document.querySelector('[class*=\"comment-section\"]');
         if (!root) return { hasRoot: false, count: 0, hasMore: false, total: null };
 
-        const items = Array.from(root.querySelectorAll('.comment-item'));
+        const items = Array.from(root.querySelectorAll('.comment-item, [class*="comment-item"]'));
 
         // 1) 优先在评论区附近找“共 N 条评论 / 全部 N 条评论”文本
         const candidates = [];
@@ -347,7 +427,7 @@ export async function execute(input: WarmupCommentsInput): Promise<WarmupComment
 
           const viewTop = 0;
           const viewBottom = window.innerHeight || document.documentElement.clientHeight || 0;
-          const items = Array.from(root.querySelectorAll('.comment-item'));
+          const items = Array.from(root.querySelectorAll('.comment-item, [class*="comment-item"]'));
 
           let picked = null;
           let pickedRect = null;
@@ -423,9 +503,39 @@ export async function execute(input: WarmupCommentsInput): Promise<WarmupComment
     const { verifyAnchorByContainerId, getPrimarySelectorByContainerId } = await import('./helpers/containerAnchors.js');
 
     const commentSectionId = 'xiaohongshu_detail.comment_section';
+    const commentButtonId = 'xiaohongshu_detail.comment_button';
     const showMoreContainerId = 'xiaohongshu_detail.comment_section.show_more_button';
     let commentSectionRect: Rect | undefined;
     let showMoreSelector: string | null = null;
+    const viewport = await getViewport();
+    let clickedCommentButton = false;
+
+    async function tryClickCommentButton(reason: string) {
+      if (!canClickCommentButton) {
+        console.log(`[WarmupComments] skip comment_button click (disabled) reason=${reason}`);
+        return;
+      }
+      if (clickedCommentButton) return;
+      try {
+        const btnAnchor = await verifyAnchorByContainerId(
+          commentButtonId,
+          profile,
+          serviceUrl,
+          '2px solid #ff00ff',
+          1200,
+        );
+        if (btnAnchor.found && btnAnchor.rect && viewport.w && viewport.h) {
+          const bx = clamp(btnAnchor.rect.x + btnAnchor.rect.width / 2, 30, viewport.w - 30);
+          const by = clamp(btnAnchor.rect.y + btnAnchor.rect.height / 2, 120, viewport.h - 120);
+          console.log(`[WarmupComments] click comment_button (${reason}) @(${Math.floor(bx)},${Math.floor(by)})`);
+          await systemClickAt(Math.floor(bx), Math.floor(by));
+          clickedCommentButton = true;
+          await new Promise((r) => setTimeout(r, 800));
+        }
+      } catch {
+        // ignore
+      }
+    }
 
     // 0. 预先读取展开按钮容器的 primary selector（用于容器运行时 click 操作）
     try {
@@ -441,22 +551,93 @@ export async function execute(input: WarmupCommentsInput): Promise<WarmupComment
 
     // 1. 锚定评论区根容器（只做一次高亮 + Rect 回环）
     try {
-      const anchor = await verifyAnchorByContainerId(
+      let anchor = await verifyAnchorByContainerId(
         commentSectionId,
         profile,
         serviceUrl,
         '2px solid #ffaa00',
         2000,
       );
+      // 有的帖子点击评论按钮后才渲染/挂载评论区 DOM：允许在 anchor 缺失时再尝试一次
+      if (!anchor?.found) {
+        await tryClickCommentButton('comment_section_not_found');
+        anchor = await verifyAnchorByContainerId(
+          commentSectionId,
+          profile,
+          serviceUrl,
+          '2px solid #ffaa00',
+          2000,
+        );
+      }
       if (anchor.found && anchor.rect) {
         commentSectionRect = anchor.rect;
         console.log(`[WarmupComments] comment_section rect: ${JSON.stringify(anchor.rect)}`);
 
-        // 默认使用评论区锚点中心作为系统滚动焦点，保证滚轮事件一定落在评论区域内
-        focusPoint = {
-          x: commentSectionRect.x + commentSectionRect.width / 2,
-          y: commentSectionRect.y + commentSectionRect.height / 2,
-        };
+        // 重要：正文很长时，评论区可能不在视口内/未激活，需要先点“评论按钮”再重算焦点
+        const maybeFocus = computeVisibleFocusPoint(commentSectionRect, viewport);
+        const likelyNotVisible =
+          !maybeFocus ||
+          (viewport.h > 0 &&
+            (commentSectionRect.y > viewport.h - 80 || commentSectionRect.y + commentSectionRect.height < 80));
+
+        if (likelyNotVisible) {
+          console.log(
+            '[WarmupComments] comment_section 可能不在可视区域，先尝试聚焦评论列表（不点评论按钮）...',
+          );
+          const focused = await focusCommentsArea();
+          if (!focused) {
+            console.log('[WarmupComments] 聚焦评论列表失败，才尝试点击评论按钮激活评论区...');
+            // 仅在“评论区不在视口/不可见”且“允许点击评论按钮”时，才点击评论按钮做激活
+            await tryClickCommentButton('comment_section_not_visible');
+            const anchor2 = await verifyAnchorByContainerId(
+              commentSectionId,
+              profile,
+              serviceUrl,
+              '2px solid #ffaa00',
+              2000,
+            );
+            if (anchor2.found && anchor2.rect) {
+              commentSectionRect = anchor2.rect;
+              console.log(`[WarmupComments] comment_section rect(after click): ${JSON.stringify(anchor2.rect)}`);
+            }
+          } else {
+            const anchor2 = await verifyAnchorByContainerId(
+              commentSectionId,
+              profile,
+              serviceUrl,
+              '2px solid #ffaa00',
+              2000,
+            );
+            if (anchor2.found && anchor2.rect) {
+              commentSectionRect = anchor2.rect;
+              console.log(`[WarmupComments] comment_section rect(after focus): ${JSON.stringify(anchor2.rect)}`);
+            }
+          }
+        }
+
+        const focus = commentSectionRect ? computeVisibleFocusPoint(commentSectionRect, viewport) : null;
+        if (focus) {
+          focusPoint = { x: focus.x, y: focus.y };
+        }
+
+        // 评论按钮点击后通常会把焦点放到输入框：仅 hover 到评论区即可让滚轮生效，避免误触输入框
+        if (focusPoint) {
+          await systemHoverAt(Math.floor(focusPoint.x), Math.floor(focusPoint.y));
+          await new Promise((r) => setTimeout(r, 200));
+        }
+
+        // 若评论按钮点击后焦点在输入框，强制点击评论列表区域以确保滚轮作用
+        if (focusPoint) {
+          const inputFocused = await isInputFocused();
+          if (inputFocused) {
+            console.log('[WarmupComments] 检测到输入框焦点，点击评论区以切换焦点...');
+            await systemClickAt(Math.floor(focusPoint.x), Math.floor(focusPoint.y));
+            await new Promise((r) => setTimeout(r, 350));
+          }
+        }
+
+        // 最后再执行一次“聚焦评论区域”的定位（包含高亮），确保滚轮坐标落在评论区内
+        await focusCommentsArea();
       } else {
         console.warn(
           `[WarmupComments] comment_section anchor verify failed: ${anchor.error || 'not found'}`,
@@ -531,6 +712,8 @@ export async function execute(input: WarmupCommentsInput): Promise<WarmupComment
         ? Math.min(Math.max(Math.ceil(targetTotal / 20) * 3, 16), 512)
         : 64;
 
+    let noEffectStreak = 0;
+
     for (let i = 0; i < dynamicMaxRounds; i++) {
       const viewportBefore = await getViewportFirstComment();
       // 2.1 每轮开始时,找到真正的滚动容器(.note-scroller)并使用其坐标作为滚动焦点
@@ -575,15 +758,28 @@ export async function execute(input: WarmupCommentsInput): Promise<WarmupComment
       const refreshedFocus =
         (refreshFocusResult as any)?.result || (refreshFocusResult as any)?.data?.result || refreshFocusResult;
       if (refreshedFocus && typeof refreshedFocus.x === 'number' && typeof refreshedFocus.y === 'number') {
-        // 如果之前还没有确定滚动焦点，则使用 DOM 计算出的滚动容器中心点作为兜底；
-        // 否则优先保留基于锚点计算出的 focusPoint，避免焦点漂移到错误区域。
-        if (!focusPoint) {
-          focusPoint = { x: refreshedFocus.x, y: refreshedFocus.y };
-        }
+        // 每轮都以滚动容器中心点刷新焦点，避免“正文很长/输入框抢焦点”导致滚轮作用到错误区域
+        const w = Number(viewport?.w || 0) || 0;
+        const h = Number(viewport?.h || 0) || 0;
+        const fx = w ? clamp(refreshedFocus.x, 20, w - 20) : refreshedFocus.x;
+        const fy = h ? clamp(refreshedFocus.y, 120, h - 120) : refreshedFocus.y;
+        focusPoint = { x: fx, y: fy };
         console.log(
           `[WarmupComments] round=${i} refreshed focus: (${refreshedFocus.x}, ${refreshedFocus.y}), scrollTop=${refreshedFocus.scrollTop}/${refreshedFocus.scrollHeight}`,
         );
+        await systemHoverAt(Math.floor(focusPoint.x), Math.floor(focusPoint.y));
       }
+
+      const scrollTopBefore =
+        refreshedFocus && typeof refreshedFocus.scrollTop === 'number' ? refreshedFocus.scrollTop : null;
+      const scrollHeightBefore =
+        refreshedFocus && typeof refreshedFocus.scrollHeight === 'number'
+          ? refreshedFocus.scrollHeight
+          : null;
+      const clientHeightBefore =
+        refreshedFocus && typeof refreshedFocus.clientHeight === 'number'
+          ? refreshedFocus.clientHeight
+          : null;
 
       // 2.2 使用容器运行时触发一次 show_more_button 的 click（基于容器的 JS click）
       if (showMoreSelector) {
@@ -681,6 +877,80 @@ export async function execute(input: WarmupCommentsInput): Promise<WarmupComment
             viewportBefore,
           )} after=${JSON.stringify(viewportAfter)}`,
         );
+      }
+
+      // 校验滚动是否真正生效：scrollTop 或 视口内第一条评论 key/位置发生变化
+      let scrolled = null as null | boolean;
+      try {
+        const afterFocusResult = await controllerAction('browser:execute', {
+          profile,
+          script: `(() => {
+            const root =
+              document.querySelector('.comments-el') ||
+              document.querySelector('.comment-list') ||
+              document.querySelector('.comments-container') ||
+              document.querySelector('[class*="comment-section"]');
+            if (!root) return null;
+            let scrollContainer = null;
+            let current = root.parentElement;
+            while (current && current !== document.body) {
+              const style = window.getComputedStyle(current);
+              if (style.overflowY === 'scroll' || style.overflowY === 'auto') {
+                scrollContainer = current;
+                break;
+              }
+              current = current.parentElement;
+            }
+            if (!scrollContainer) return null;
+            return {
+              scrollTop: scrollContainer.scrollTop,
+              scrollHeight: scrollContainer.scrollHeight,
+              clientHeight: scrollContainer.clientHeight
+            };
+          })()`,
+        }).catch((): null => null);
+
+        const afterPayload =
+          (afterFocusResult as any)?.result || (afterFocusResult as any)?.data?.result || afterFocusResult;
+
+        const scrollTopAfter =
+          afterPayload && typeof afterPayload.scrollTop === 'number' ? afterPayload.scrollTop : null;
+        const scrollHeightAfter =
+          afterPayload && typeof afterPayload.scrollHeight === 'number' ? afterPayload.scrollHeight : null;
+        const clientHeightAfter =
+          afterPayload && typeof afterPayload.clientHeight === 'number' ? afterPayload.clientHeight : null;
+
+        const canScroll =
+          (scrollHeightAfter ?? scrollHeightBefore ?? 0) - (clientHeightAfter ?? clientHeightBefore ?? 0) > 12;
+
+        if (canScroll && scrollTopBefore !== null && scrollTopAfter !== null) {
+          scrolled = Math.abs(scrollTopAfter - scrollTopBefore) > 2;
+        }
+      } catch {
+        // ignore
+      }
+
+      const keyBefore = viewportBefore?.key || '';
+      const keyAfter = viewportAfter?.key || '';
+      const firstChanged = Boolean(keyBefore && keyAfter && keyBefore !== keyAfter);
+
+      if (scrolled === false && !firstChanged && currentCount <= lastCount) {
+        noEffectStreak += 1;
+        console.warn(
+          `[WarmupComments] round=${i} ⚠️ scroll seems ineffective (streak=${noEffectStreak})`,
+        );
+        // 轻量恢复：hover + click 到评论区，再试一次小滚动
+        if (noEffectStreak >= 2 && focusPoint) {
+          await systemHoverAt(Math.floor(focusPoint.x), Math.floor(focusPoint.y));
+          await new Promise((r) => setTimeout(r, 150));
+          await systemClickAt(Math.floor(focusPoint.x), Math.floor(focusPoint.y));
+          await new Promise((r) => setTimeout(r, 220));
+          await systemMouseWheel(260 + Math.floor(Math.random() * 180));
+          await new Promise((r) => setTimeout(r, 800 + Math.random() * 600));
+          noEffectStreak = 0;
+        }
+      } else {
+        noEffectStreak = 0;
       }
 
       const headerKnown = targetTotal !== null && targetTotal > 0;

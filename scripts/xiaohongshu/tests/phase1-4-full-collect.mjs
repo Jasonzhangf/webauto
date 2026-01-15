@@ -55,6 +55,157 @@ let collectState = null;
 
 const argv = minimist(process.argv.slice(2));
 
+let runContext = null;
+
+function createRunId() {
+  const now = new Date();
+  const pad = (n) => String(n).padStart(2, '0');
+  const ts = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(
+    now.getHours(),
+  )}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+  const rand = Math.random().toString(36).slice(2, 8);
+  return `${ts}-${rand}`;
+}
+
+function safeStringify(v) {
+  if (typeof v === 'string') return v;
+  if (v instanceof Error) return v.stack || v.message || String(v);
+  try {
+    return JSON.stringify(v);
+  } catch {
+    try {
+      return String(v);
+    } catch {
+      return '[unstringifiable]';
+    }
+  }
+}
+
+function formatConsoleArgs(args) {
+  return args
+    .map((a) => {
+      if (typeof a === 'string') return a;
+      return safeStringify(a);
+    })
+    .join(' ');
+}
+
+function initRunLogging({ env, keyword }) {
+  const baseDir = getKeywordBaseDir(env, keyword);
+  const runId = createRunId();
+  const logPath = path.join(baseDir, `run.${runId}.log`);
+  const eventsPath = path.join(baseDir, `run-events.${runId}.jsonl`);
+
+  fs.mkdirSync(baseDir, { recursive: true });
+
+  const logStream = fs.createWriteStream(logPath, { flags: 'a' });
+  const eventStream = fs.createWriteStream(eventsPath, { flags: 'a' });
+
+  const original = {
+    log: console.log.bind(console),
+    warn: console.warn.bind(console),
+    error: console.error.bind(console),
+    info: console.info ? console.info.bind(console) : console.log.bind(console),
+  };
+
+  const writeLine = (level, args) => {
+    const line = `${new Date().toISOString()} [${level}] ${formatConsoleArgs(args)}\n`;
+    try {
+      logStream.write(line);
+    } catch {
+      // ignore
+    }
+  };
+
+  console.log = (...args) => {
+    original.log(...args);
+    writeLine('INFO', args);
+  };
+  console.warn = (...args) => {
+    original.warn(...args);
+    writeLine('WARN', args);
+  };
+  console.error = (...args) => {
+    original.error(...args);
+    writeLine('ERROR', args);
+  };
+  console.info = (...args) => {
+    original.info(...args);
+    writeLine('INFO', args);
+  };
+
+  const emitEvent = (type, data = {}) => {
+    const payload = {
+      ts: new Date().toISOString(),
+      runId,
+      type,
+      env,
+      keyword,
+      ...data,
+    };
+    try {
+      eventStream.write(`${JSON.stringify(payload)}\n`);
+    } catch {
+      // ignore
+    }
+  };
+
+  runContext = {
+    runId,
+    env,
+    keyword,
+    baseDir,
+    logPath,
+    eventsPath,
+    startedAtMs: Date.now(),
+    emitEvent,
+    close: () => {
+      try {
+        logStream.end();
+      } catch {}
+      try {
+        eventStream.end();
+      } catch {}
+      console.log = original.log;
+      console.warn = original.warn;
+      console.error = original.error;
+      console.info = original.info;
+    },
+  };
+
+  emitEvent('run_start', { logPath, eventsPath });
+
+  process.on('uncaughtException', (err) => {
+    try {
+      emitEvent('uncaught_exception', { error: safeStringify(err) });
+    } catch {}
+  });
+  process.on('unhandledRejection', (reason) => {
+    try {
+      emitEvent('unhandled_rejection', { error: safeStringify(reason) });
+    } catch {}
+  });
+  process.on('exit', (code) => {
+    try {
+      emitEvent('run_exit', { code });
+    } catch {}
+    try {
+      runContext?.close?.();
+    } catch {}
+  });
+
+  console.log(`[Run] runId=${runId}`);
+  console.log(`[Run] log=${logPath}`);
+  console.log(`[Run] events=${eventsPath}`);
+  return runContext;
+}
+
+function emitRunEvent(type, data = {}) {
+  if (runContext && typeof runContext.emitEvent === 'function') {
+    runContext.emitEvent(type, data);
+  }
+}
+
 const SERVICE_SPECS = [
   {
     key: 'unified-api',
@@ -98,6 +249,20 @@ function resolveEnv() {
     return fromFlag.trim();
   }
   return DEFAULT_ENV;
+}
+
+function resolveViewportHeight() {
+  const raw = argv.viewportHeight ?? argv['viewport-height'];
+  const n = Number(raw);
+  if (Number.isFinite(n) && n >= 700) return Math.floor(n);
+  return 1200;
+}
+
+function resolveViewportWidth() {
+  const raw = argv.viewportWidth ?? argv['viewport-width'];
+  const n = Number(raw);
+  if (Number.isFinite(n) && n >= 800) return Math.floor(n);
+  return 1440;
 }
 
 function serviceLabel(spec) {
@@ -235,6 +400,16 @@ function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function formatDuration(ms) {
+  const total = Math.max(0, Math.floor((Number(ms) || 0) / 1000));
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = total % 60;
+  const pad = (n) => String(n).padStart(2, '0');
+  if (h > 0) return `${h}:${pad(m)}:${pad(s)}`;
+  return `${m}:${pad(s)}`;
+}
+
 async function browserServiceWsCommand(sessionId, data, timeoutMs = 15000) {
   const { default: WebSocket } = await import('ws');
   const requestId = `${Date.now().toString(36)}_${Math.random().toString(36).slice(2)}`;
@@ -320,13 +495,22 @@ async function systemKeyPress(key) {
   await browserServiceCommand('keyboard:press', { profileId: PROFILE, key: normalized });
 }
 
+async function systemTypeText(text, { delayMs = 20 } = {}) {
+  const safeText = String(text ?? '');
+  await browserServiceCommand('keyboard:type', {
+    profileId: PROFILE,
+    text: safeText,
+    delay: typeof delayMs === 'number' ? delayMs : undefined,
+  });
+}
+
 async function systemMouseWheel(deltaY, coordinates = null) {
   const dy = Number(deltaY) || 0;
   if (!dy) return;
 
-  // 优先尝试 browser-service HTTP（若服务未重启可能不存在该 action），失败则回退到 WS user_action.scroll。
-  try {
-    if (coordinates) {
+  // 优先走 browser-service 的 mouse:wheel（同样是 Playwright mouse.wheel，非 JS scroll），避免 controller 参数差异。
+  if (coordinates) {
+    try {
       await browserServiceCommand('mouse:move', {
         profileId: PROFILE,
         x: coordinates.x,
@@ -334,24 +518,31 @@ async function systemMouseWheel(deltaY, coordinates = null) {
         steps: 3,
       });
       await delay(80 + Math.random() * 120);
+    } catch (err) {
+      console.warn(
+        '[FullCollect][SystemScroll] mouse:move 失败，继续滚动:',
+        err?.message || String(err),
+      );
     }
-    await browserServiceCommand('mouse:wheel', { profileId: PROFILE, deltaX: 0, deltaY: dy });
+  }
+
+  try {
+    await browserServiceCommand('mouse:wheel', {
+      profileId: PROFILE,
+      deltaX: 0,
+      deltaY: dy,
+    });
     return;
   } catch (err) {
     console.warn(
-      '[FullCollect][SystemScroll] HTTP mouse:wheel 不可用，回退到 WS user_action.scroll:',
+      '[FullCollect][SystemScroll] browser-service mouse:wheel 失败，fallback 到 controller browser:execute:',
       err?.message || String(err),
     );
   }
 
-  await browserServiceWsCommand(PROFILE, {
-    command_type: 'user_action',
-    action: 'operation',
-    parameters: {
-      operation_type: 'scroll',
-      ...(coordinates ? { target: { coordinates } } : {}),
-      deltaY: dy,
-    },
+  await controllerAction('browser:execute', {
+    profile: PROFILE,
+    script: `page.mouse.wheel(0, ${dy})`,
   });
 }
 
@@ -526,11 +717,12 @@ async function getSearchScrollState() {
         const winY = window.scrollY || document.documentElement.scrollTop || 0;
         const viewport = { w: window.innerWidth || 0, h: window.innerHeight || 0 };
         const viewportHeight = viewport.h || 0;
-        const cards = Array.from(document.querySelectorAll('.note-item'));
+        const cards = Array.from(document.querySelectorAll('.note-item, [class*="note-item"]'));
         const visible = cards
           .map((el) => {
             const rect = el.getBoundingClientRect();
-            if (!(rect.top >= 0 && rect.bottom <= viewportHeight)) return null;
+            // 只要与视口有交集就视为可见（用于滚动签名变化检测）
+            if (!(rect.bottom > 0 && rect.top < viewportHeight)) return null;
             const linkEl = el.querySelector('a.cover') || el.querySelector('a[href*="/explore/"]') || el.querySelector('a[href*="/search_result/"]');
             const href = linkEl ? (linkEl.getAttribute('href') || '') : '';
             const m = href.match(/\\/(explore|search_result)\\/([^?]+)/);
@@ -541,10 +733,37 @@ async function getSearchScrollState() {
           })
           .filter(Boolean);
         const visibleSig = visible.slice(0, 3).join('||');
-        const root =
-          document.querySelector('.feeds-container') ||
-          document.querySelector('.note-item')?.parentElement ||
-          null;
+
+        // 更可靠的滚动有效性判定：记录“当前视口第一条卡片”的 key + top/bottom
+        let firstVisible = null;
+        try {
+          const first = cards.find((el) => {
+            const rect = el.getBoundingClientRect();
+            return rect.bottom > 0 && rect.top < viewportHeight;
+          });
+          if (first) {
+            const rect = first.getBoundingClientRect();
+            const linkEl =
+              first.querySelector('a.cover') ||
+              first.querySelector('a[href*="/explore/"]') ||
+              first.querySelector('a[href*="/search_result/"]');
+            const href = linkEl ? (linkEl.getAttribute('href') || '') : '';
+            const m = href.match(/\\/(explore|search_result)\\/([^?]+)/);
+            const noteId = m && m[2] ? m[2] : '';
+            const titleEl =
+              first.querySelector('.footer .title span') ||
+              first.querySelector('.footer .title') ||
+              first.querySelector('[class*="title"]');
+            const title = titleEl ? (titleEl.textContent || '').trim() : '';
+            firstVisible = {
+              key: noteId || title || '',
+              top: rect.top,
+              bottom: rect.bottom,
+            };
+          }
+        } catch {
+          // ignore
+        }
 
         const isScrollable = (el) => {
           if (!el) return false;
@@ -554,17 +773,50 @@ async function getSearchScrollState() {
           return (el.scrollHeight || 0) > (el.clientHeight || 0);
         };
 
-        let scrollEl = root;
+        // 优先从可见 card 反推真正的滚动容器（小红书常为内部容器滚动）
+        const firstVisibleCard = cards.find((el) => {
+          try {
+            const r = el.getBoundingClientRect();
+            return r.bottom > 0 && r.top < viewportHeight;
+          } catch {
+            return false;
+          }
+        }) || null;
+
+        let scrollEl = firstVisibleCard ? firstVisibleCard.parentElement : null;
         while (scrollEl && scrollEl !== document.body && !isScrollable(scrollEl)) {
           scrollEl = scrollEl.parentElement;
         }
+
+        if (!scrollEl) {
+          const root =
+            document.querySelector('.feeds-container') ||
+            document.querySelector('.note-item')?.parentElement ||
+            null;
+          scrollEl = root;
+          while (scrollEl && scrollEl !== document.body && !isScrollable(scrollEl)) {
+            scrollEl = scrollEl.parentElement;
+          }
+        }
+
         if (!scrollEl) {
           scrollEl = document.scrollingElement || document.documentElement;
         }
+
+        const listRect = scrollEl && scrollEl.getBoundingClientRect
+          ? (() => {
+              const r = scrollEl.getBoundingClientRect();
+              return { x: r.x, y: r.y, width: r.width, height: r.height };
+            })()
+          : null;
         return {
           winY,
           viewport,
           visibleSig,
+          firstVisible,
+          scrollElTag: scrollEl ? (scrollEl.tagName || '') : '',
+          scrollElClass: scrollEl ? (scrollEl.className || '') : '',
+          listRect,
           list: scrollEl
             ? {
                 scrollTop: scrollEl.scrollTop || 0,
@@ -577,7 +829,7 @@ async function getSearchScrollState() {
     });
     return result?.result || result?.data?.result || result;
   } catch {
-    return { winY: 0, viewport: { w: 0, h: 0 }, visibleSig: '', list: null };
+    return { winY: 0, viewport: { w: 0, h: 0 }, visibleSig: '', listRect: null, list: null };
   }
 }
 
@@ -875,21 +1127,41 @@ async function scrollSearchPage(direction = 'down', keywordForRecovery = null) {
   // 通过列表锚点定位滚动落点（坐标），使用系统滚轮事件；禁止 JS scroll 兜底
   const anchorBefore = await verifySearchListAnchor();
   let coordinates = null;
+  const viewportH = Number(before?.viewport?.h) || 0;
+  const viewportW = Number(before?.viewport?.w) || 0;
   if (anchorBefore?.found && anchorBefore.rect) {
     const rect = anchorBefore.rect;
-    const viewportH = Number(before?.viewport?.h) || 0;
-    const viewportW = Number(before?.viewport?.w) || 0;
     const rawX = rect.x + rect.width / 2;
     const rawY = rect.y + rect.height / 2;
     const x = viewportW ? Math.min(Math.max(40, rawX), viewportW - 40) : rawX;
     const y = viewportH ? Math.min(Math.max(120, rawY), viewportH - 120) : rawY;
+    // 仅当锚点中心点落在可视区域内才使用（避免 rect 异常导致滚动落点漂移）
+    if (!viewportH || (rawY >= 0 && rawY <= viewportH)) {
+      coordinates = { x, y };
+    }
+  }
+
+  // 若锚点 rect 异常，则尝试使用 scroll container 的 rect（来自 getSearchScrollState）
+  if (!coordinates && before?.listRect && viewportH && viewportW) {
+    const r = before.listRect;
+    const rawX = r.x + r.width / 2;
+    const rawY = r.y + r.height / 2;
+    const x = Math.min(Math.max(40, rawX), viewportW - 40);
+    const y = Math.min(Math.max(160, rawY), viewportH - 160);
     coordinates = { x, y };
   }
 
+  // 最后兜底：使用视口中心偏下的落点（系统滚轮，非 JS）
+  if (!coordinates && viewportH && viewportW) {
+    coordinates = { x: Math.floor(viewportW * 0.55), y: Math.floor(viewportH * 0.7) };
+  }
+
   let after = before;
+  let lastDeltaY = 0;
   for (let attempt = 1; attempt <= 2; attempt += 1) {
     const deltaMagnitude = 320 + Math.floor(Math.random() * 380); // 320-700
     const deltaY = sign * deltaMagnitude;
+    lastDeltaY = deltaY;
     try {
       if (coordinates) {
         await browserServiceCommand('mouse:move', {
@@ -910,8 +1182,15 @@ async function scrollSearchPage(direction = 'down', keywordForRecovery = null) {
         Number(after?.list?.scrollTop || 0) - Number(before?.list?.scrollTop || 0);
       const sigBefore = String(before?.visibleSig || '');
       const sigAfter = String(after?.visibleSig || '');
+      const firstTopBefore = Number(before?.firstVisible?.top);
+      const firstTopAfter = Number(after?.firstVisible?.top);
+      const firstTopDelta =
+        Number.isFinite(firstTopBefore) && Number.isFinite(firstTopAfter)
+          ? firstTopAfter - firstTopBefore
+          : 0;
       if (winDelta !== 0 || listDelta !== 0) break;
       if (sigBefore && sigAfter && sigBefore !== sigAfter) break;
+      if (Math.abs(firstTopDelta) > 8) break;
     } catch (err) {
       console.warn(
         `[FullCollect][ScrollSearchPage] 系统滚动失败 attempt=${attempt}:`,
@@ -927,7 +1206,17 @@ async function scrollSearchPage(direction = 'down', keywordForRecovery = null) {
   const sigBefore = String(before?.visibleSig || '');
   const sigAfter = String(after?.visibleSig || '');
   const sigChanged = sigBefore && sigAfter && sigBefore !== sigAfter;
-  if (winDelta === 0 && listDelta === 0 && !sigChanged) {
+  const firstTopBefore = Number(before?.firstVisible?.top);
+  const firstTopAfter = Number(after?.firstVisible?.top);
+  const firstTopDelta =
+    Number.isFinite(firstTopBefore) && Number.isFinite(firstTopAfter)
+      ? firstTopAfter - firstTopBefore
+      : 0;
+  const firstKeyBefore = String(before?.firstVisible?.key || '');
+  const firstKeyAfter = String(after?.firstVisible?.key || '');
+  const firstKeyChanged = Boolean(firstKeyBefore && firstKeyAfter && firstKeyBefore !== firstKeyAfter);
+
+  if (winDelta === 0 && listDelta === 0 && !sigChanged && !firstKeyChanged && Math.abs(firstTopDelta) <= 8) {
     console.warn(
       '[FullCollect][ScrollSearchPage] ⚠️ window/list scrollTop 均未变化，认为系统滚动未生效，停止以避免在同一屏死循环',
     );
@@ -948,7 +1237,9 @@ async function scrollSearchPage(direction = 'down', keywordForRecovery = null) {
 
   if (anchor.rect) {
     console.log(
-      `[FullCollect][ScrollSearchPage] ${direction} scroll rect: y=${anchor.rect.y} height=${anchor.rect.height}`,
+      `[FullCollect][ScrollSearchPage] ${direction} scroll: deltaY=${lastDeltaY} | winYDelta=${winDelta} listDelta=${listDelta} firstTopDelta=${Math.round(
+        firstTopDelta,
+      )} firstKeyChanged=${firstKeyChanged} sigChanged=${sigChanged} rect.y=${anchor.rect.y}`,
     );
   }
 
@@ -1440,12 +1731,20 @@ async function captureDebugSnapshot(env, keyword, label, extra = {}) {
     console.log(
       `[DebugSnapshot] label=${label} png=${screenshotPath || 'none'} json=${jsonPath}`,
     );
+    emitRunEvent('debug_snapshot', {
+      label,
+      png: screenshotPath || null,
+      json: jsonPath,
+      extra,
+    });
+    return { screenshotPath, jsonPath };
   } catch (err) {
     console.warn(
       '[DebugSnapshot] 创建调试快照失败:',
       err?.message || String(err),
     );
   }
+  return { screenshotPath: null, jsonPath: null };
 }
 
 async function readMeta(env, keyword) {
@@ -1792,9 +2091,35 @@ async function runPhase2ListOnly(keyword, targetCount, env, searchUrl = '') {
     console.log('[Phase2(ListOnly)] 搜索阶段就绪，开始滚动采集循环（禁止重复搜索）');
     const timingPath = path.join(baseDir, 'phase2-timing.jsonl');
     const phase2StartAtMs = Date.now();
+    emitRunEvent('phase2_start', {
+      already: alreadyCount,
+      target: targetCount,
+      canonicalKeyword,
+      canonicalSearchUrl: canonicalSearchUrl || '',
+    });
     while (safeUrlIndex.size < targetCount) {
       loopRound += 1;
-      console.log(`\n[Phase2(ListOnly)][Loop] Round ${loopRound}, collected=${safeUrlIndex.size}/${targetCount}`);
+      console.log(
+        `\n[Phase2(ListOnly)][Loop] Round ${loopRound}, collected=${safeUrlIndex.size}/${targetCount}`,
+      );
+
+      const elapsedMs = Date.now() - phase2StartAtMs;
+      const gained = Math.max(0, safeUrlIndex.size - alreadyCount);
+      const avgMs = gained > 0 ? elapsedMs / gained : null;
+      const remaining = Math.max(0, targetCount - safeUrlIndex.size);
+      const etaMs = avgMs ? avgMs * remaining : null;
+      console.log(
+        `[Phase2(ListOnly)][Progress] elapsed=${formatDuration(elapsedMs)} gained=${gained} avg=${avgMs ? Math.round(avgMs) : 'NA'}ms eta=${etaMs ? formatDuration(etaMs) : 'NA'}`,
+      );
+      emitRunEvent('phase2_progress', {
+        loopRound,
+        collected: safeUrlIndex.size,
+        target: targetCount,
+        gained,
+        elapsedMs,
+        avgMs: avgMs ? Math.round(avgMs) : null,
+        etaMs: etaMs ? Math.round(etaMs) : null,
+      });
 
       // Phase2 循环内：只允许 ESC/后退恢复，禁止再次触发 GoToSearch
       const currentUrl = await getCurrentUrl().catch(() => '');
@@ -1910,12 +2235,6 @@ async function runPhase2ListOnly(keyword, targetCount, env, searchUrl = '') {
 
         const safeTop = 140;
         const safeBottom = 80;
-        if (viewportH && rect.y < safeTop) {
-          console.warn(
-            `   ⚠️ 卡片过靠近顶部（rect.y=${Math.round(rect.y)} < ${safeTop}），为避免误点/风控，跳过 noteId=${rawNoteId}`,
-          );
-          continue;
-        }
         if (viewportH && rect.y + rect.height > viewportH) {
           console.warn(
             `   ⚠️ 卡片底部超出视口（rect.bottom=${Math.round(rect.y + rect.height)} > ${viewportH}），跳过 noteId=${rawNoteId}`,
@@ -1928,6 +2247,16 @@ async function runPhase2ListOnly(keyword, targetCount, env, searchUrl = '') {
           y: rect.y + Math.min(rect.height * 0.35, Math.max(rect.height - 24, 24)),
         };
         const clickPoint = normalizeClickablePoint(rawClickPoint, viewport, { safeTop, safeBottom });
+        if (
+          typeof rect.height === 'number' &&
+          Number.isFinite(rect.height) &&
+          (clickPoint.y < rect.y || clickPoint.y > rect.y + rect.height)
+        ) {
+          console.warn(
+            `   ⚠️ clickPoint 不在卡片 rect 内（clickY=${Math.round(clickPoint.y)} rect=[${Math.round(rect.y)},${Math.round(rect.y + rect.height)}]），跳过 noteId=${rawNoteId}`,
+          );
+          continue;
+        }
 
         let safeDetailUrl = '';
         let openedNoteId = '';
@@ -2186,6 +2515,12 @@ async function runPhase2ListOnly(keyword, targetCount, env, searchUrl = '') {
       console.log(
         `   💾 本轮新增 safe-detail-urls 条目: ${newlyAdded}，累计=${safeUrlIndex.size}/${targetCount}`,
       );
+      emitRunEvent('phase2_round_end', {
+        loopRound,
+        newlyAdded,
+        collected: safeUrlIndex.size,
+        target: targetCount,
+      });
 
       if (newlyAdded === 0) {
         noNewSafeRounds += 1;
@@ -2274,6 +2609,11 @@ async function runPhase2ListOnly(keyword, targetCount, env, searchUrl = '') {
         target: targetCount,
       });
       await fs.promises.appendFile(timingPath, `${summary}\n`, 'utf8');
+      emitRunEvent('phase2_end', {
+        elapsedMs,
+        collected: safeUrlIndex.size,
+        target: targetCount,
+      });
     } catch {
       // ignore
     }
@@ -2527,6 +2867,7 @@ async function runPhase3And4FromIndex(keyword, targetCount, env) {
       entry,
       noteId,
       rounds: 0,
+      stalledRounds: 0,
       done: false,
       headerTotal: null,
       totalSeen: Number(prevState.totalSeen) || 0,
@@ -2535,6 +2876,7 @@ async function runPhase3And4FromIndex(keyword, targetCount, env) {
       lastDetailUrl: '',
       detailFetched: false,
       detailData: null,
+      commentsActivated: false,
     });
   }
 
@@ -2561,6 +2903,10 @@ async function runPhase3And4FromIndex(keyword, targetCount, env) {
   const MAX_WARMUP_ROUNDS = Math.max(
     1,
     Number(argv.commentWarmupRounds || argv['comment-warmup-rounds'] || 8) || 8,
+  );
+  const MAX_VISIT_OPS_PER_TAB = Math.max(
+    1,
+    Number(argv.visitOpsPerTab || argv['visit-ops-per-tab'] || 20) || 20,
   );
 
   function buildCommentKey(c) {
@@ -2635,6 +2981,1194 @@ async function runPhase3And4FromIndex(keyword, targetCount, env) {
     }
 
     return { used, newPair, totalNew: allNew.length };
+  }
+
+  const useTabs =
+    (argv.useTabs ?? argv['use-tabs'] ?? true) !== false &&
+    (argv.noTabs ?? argv['no-tabs'] ?? false) !== true;
+
+  if (useTabs) {
+    const OPEN_INTERVAL_MS = Math.max(
+      500,
+      Number(argv.openIntervalMs || argv['open-interval-ms'] || 10_000) || 10_000,
+    );
+    const TAB_SWITCH_DELAY_MS = Math.max(
+      150,
+      Number(argv.tabSwitchDelayMs || argv['tab-switch-delay-ms'] || 650) || 650,
+    );
+
+    async function openDetailInNewTab(url) {
+      const safeUrl = String(url || '').trim();
+      if (!safeUrl) return { ok: false, error: 'empty_url' };
+      if (!safeUrl.includes('xsec_token=')) return { ok: false, error: 'url_missing_xsec_token' };
+      try {
+        // 直接由 browser-service 创建并激活新页面，避免键盘快捷键导致的“active page 不跟随”问题
+        const created = await browserServiceCommand('page:new', { profileId: PROFILE, url: safeUrl });
+        try {
+          const vw = resolveViewportWidth();
+          const vh = resolveViewportHeight();
+          await browserServiceCommand('page:setViewport', { profileId: PROFILE, width: vw, height: vh });
+        } catch {
+          // ignore
+        }
+        let pageIndex = Number(created?.index);
+        await delay(900 + Math.random() * 600);
+        const ready = await waitForDetailReady(12);
+        if (!ready.ready) return { ok: false, error: 'detail_not_ready' };
+        // index 不是稳定标识：若发生“页面关闭/索引重排”，后续切 tab 会失败；此处尽量用当前 page:list 纠偏一次
+        try {
+          const listed = await browserServiceCommand('page:list', { profileId: PROFILE });
+          const pages = Array.isArray(listed?.pages) ? listed.pages : [];
+          if (!Number.isFinite(pageIndex) || pageIndex < 0 || pageIndex >= pages.length) {
+            const hint = ready.safeUrl || safeUrl;
+            const m = String(hint).match(/\/explore\/([^/?#]+)/);
+            const noteIdHint = m ? m[1] : '';
+            const found = pages.find((p) =>
+              noteIdHint ? String(p?.url || '').includes(`/explore/${noteIdHint}`) : false,
+            );
+            if (found && Number.isFinite(found.index)) {
+              pageIndex = Number(found.index);
+            }
+          }
+        } catch {
+          // ignore
+        }
+        return { ok: true, pageIndex, url: ready.safeUrl || safeUrl, noteId: ready.noteId || '' };
+      } catch (err) {
+        return { ok: false, error: err?.message || String(err) };
+      }
+    }
+
+    async function switchToPageIndex(index) {
+      const idx = Number(index);
+      if (!Number.isFinite(idx) || idx < 0) return { ok: false, error: 'invalid_page_index' };
+      try {
+        const res = await browserServiceCommand('page:switch', { profileId: PROFILE, index: idx });
+        await delay(TAB_SWITCH_DELAY_MS + Math.random() * 220);
+        return { ok: true, url: res?.url || '' };
+      } catch (err) {
+        return { ok: false, error: err?.message || String(err) };
+      }
+    }
+
+    function extractNoteIdFromUrl(url) {
+      const u = String(url || '');
+      const m = u.match(/\/explore\/([^/?#]+)/);
+      return m ? m[1] : '';
+    }
+
+    async function listPages() {
+      try {
+        const res = await browserServiceCommand('page:list', { profileId: PROFILE });
+        const pages = Array.isArray(res?.pages) ? res.pages : [];
+        return { ok: true, pages, activeIndex: Number(res?.activeIndex ?? 0) };
+      } catch (err) {
+        return { ok: false, pages: [], activeIndex: 0, error: err?.message || String(err) };
+      }
+    }
+
+    async function resolvePageIndexByHint({ noteId, url }) {
+      const hintNoteId = String(noteId || '').trim() || extractNoteIdFromUrl(url);
+      const hintUrl = String(url || '').trim();
+      const listed = await listPages();
+      if (!listed.ok) return null;
+      const pages = Array.isArray(listed.pages) ? listed.pages : [];
+      if (!pages.length) return null;
+
+      // 1) 优先按 noteId 识别（最稳定）
+      if (hintNoteId) {
+        const found = pages.find((p) => String(p?.url || '').includes(`/explore/${hintNoteId}`));
+        if (found && Number.isFinite(found.index)) return Number(found.index);
+      }
+
+      // 2) 退化：按 url 前缀匹配（去掉 query，避免 token 差异）
+      if (hintUrl) {
+        const urlNoQuery = hintUrl.split('?')[0] || hintUrl;
+        const found = pages.find((p) => String(p?.url || '').startsWith(urlNoQuery));
+        if (found && Number.isFinite(found.index)) return Number(found.index);
+      }
+
+      return null;
+    }
+
+    async function safeSwitchToSlot(slot, noteIdHint, urlHint) {
+      // 固定 tab 槽位模式：严格绑定固定 index（第2-5个 tab），不做自动补 tab/索引漂移修复，
+      // 避免运行中产生大量空白 tab 或导致槽位漂移。
+      if (slot && typeof slot.fixedIndex === 'number' && Number.isFinite(slot.fixedIndex)) {
+        slot.pageIndex = slot.fixedIndex;
+        return await switchToPageIndex(slot.fixedIndex);
+      }
+
+      const first = await switchToPageIndex(slot.pageIndex);
+      if (first.ok) return first;
+      const errMsg = String(first.error || '');
+      if (!/invalid_page_index/i.test(errMsg)) return first;
+
+      const resolved = await resolvePageIndexByHint({ noteId: noteIdHint, url: urlHint });
+      if (resolved === null) return first;
+      slot.pageIndex = resolved;
+      const retry = await switchToPageIndex(resolved);
+      if (retry.ok) return retry;
+      return retry;
+    }
+
+    async function closePageIndex(index) {
+      const idx = Number(index);
+      if (!Number.isFinite(idx) || idx < 0) return false;
+      try {
+        await browserServiceCommand('page:close', { profileId: PROFILE, index: idx });
+        await delay(420 + Math.random() * 320);
+        return true;
+      } catch {
+        return false;
+      }
+    }
+
+    const phaseStartAtMs = Date.now();
+    let completedNotes = 0;
+    let riskDetectionCount = 0;
+
+    console.log(
+      `[FullCollect][Tabs] 启用 4-tab 接力模式：groupSize=${MAX_GROUP_SIZE} commentsPerRound=${MAX_NEW_COMMENTS_PER_ROUND} maxRoundsPerNote=${MAX_ROUNDS_PER_NOTE} openIntervalMs=${OPEN_INTERVAL_MS}`,
+    );
+    emitRunEvent('phase3_4_tabs_start', {
+      groupSize: MAX_GROUP_SIZE,
+      commentsPerRound: MAX_NEW_COMMENTS_PER_ROUND,
+      maxRoundsPerNote: MAX_ROUNDS_PER_NOTE,
+      openIntervalMs: OPEN_INTERVAL_MS,
+    });
+
+    const useLegacyGroupTabs =
+      (argv.legacyGroupTabs ?? argv['legacy-group-tabs'] ?? false) === true;
+
+    if (!useLegacyGroupTabs) {
+      const gateKey = `${PROFILE}:detail`;
+      const slots = [];
+      let nextCursor = 0;
+      let riskStop = false;
+      const fixedTabSlots =
+        (argv.fixedTabSlots ?? argv['fixed-tab-slots'] ?? true) !== false &&
+        (argv.noFixedTabSlots ?? argv['no-fixed-tab-slots'] ?? false) !== true;
+      const FIXED_TAB_START_INDEX = 1; // 固定第2个 tab（0-based index=1）
+      const FIXED_TAB_MAX_SLOTS = 4; // 固定第2-5个 tab 共 4 个
+      const desiredFixedSlots = Math.min(MAX_GROUP_SIZE, FIXED_TAB_MAX_SLOTS);
+
+      function getNextNoteId() {
+        while (nextCursor < noteIds.length) {
+          const id = noteIds[nextCursor];
+          nextCursor += 1;
+          const st = noteStates.get(id);
+          if (!st || st.done) continue;
+          return id;
+        }
+        return null;
+      }
+
+      async function waitGatePermit() {
+        while (true) {
+          const permit = await requestGatePermit(gateKey, {
+            windowMs: DEFAULT_WINDOW_MS,
+            maxCount: DEFAULT_MAX_COUNT,
+          }).catch(() => ({ ok: false, allowed: true, waitMs: 0 }));
+          if (permit && permit.allowed === false) {
+            const waitMs = Math.max(permit.waitMs || 0, 1000);
+            console.log(
+              `[FullCollect][Gate] 详情访问触发节流，等待 ${waitMs}ms 后继续（key=${gateKey}）`,
+            );
+            await delay(waitMs + Math.random() * 500);
+            continue;
+          }
+          break;
+        }
+      }
+
+      async function gotoDetailInCurrentTab(url) {
+        const safeUrl = String(url || '').trim();
+        if (!safeUrl) return { ok: false, error: 'empty_url' };
+        try {
+          console.log(`[FullCollect][Tabs][Goto] 在当前 tab 内导航到: ${safeUrl}`);
+          await browserServiceCommand('goto', { profileId: PROFILE, url: safeUrl });
+          try {
+            const vw = resolveViewportWidth();
+            const vh = resolveViewportHeight();
+            await browserServiceCommand('page:setViewport', { profileId: PROFILE, width: vw, height: vh });
+          } catch {
+            // ignore
+          }
+          await delay(2500 + Math.random() * 1500);
+          const ready = await waitForDetailReady(12);
+          console.log(
+            `[FullCollect][Tabs][Goto] detailReady=${Boolean(ready.ready)} noteId=${ready.noteId || ''} url=${ready.safeUrl || ''}`,
+          );
+          if (!ready.ready) return { ok: false, error: 'detail_not_ready_after_goto' };
+          return { ok: true, url: ready.safeUrl || safeUrl, noteId: ready.noteId || '' };
+        } catch (err) {
+          return { ok: false, error: err?.message || String(err) };
+        }
+      }
+
+      async function ensureAtLeastPages(minTotal) {
+        const target = Math.max(1, Number(minTotal) || 1);
+        for (let attempt = 0; attempt < 8; attempt += 1) {
+          const listed = await listPages();
+          const pages = Array.isArray(listed.pages) ? listed.pages : [];
+          if (pages.length >= target) return true;
+          const missing = target - pages.length;
+          for (let i = 0; i < missing; i += 1) {
+            try {
+              await browserServiceCommand('page:new', { profileId: PROFILE });
+              await delay(250 + Math.random() * 250);
+            } catch {
+              // ignore
+            }
+          }
+        }
+        return false;
+      }
+
+      async function openSlotNewTab(slotIndex, noteId) {
+        const state = noteStates.get(noteId);
+        if (!state || state.done) return { ok: false, error: 'note_state_missing' };
+        if (!state.entry?.safeDetailUrl || !String(state.entry.safeDetailUrl).includes('xsec_token=')) {
+          return { ok: false, error: 'safe_detail_url_missing_token' };
+        }
+
+        console.log(
+          `[FullCollect][Tabs][Open] slot=${slotIndex + 1} noteId=${noteId} title=${state.entry.title || '无标题'}`,
+        );
+        await waitGatePermit();
+
+        if (fixedTabSlots) {
+          const pageIndex = FIXED_TAB_START_INDEX + slotIndex;
+          const sw = await switchToPageIndex(pageIndex);
+          if (!sw.ok) {
+            return { ok: false, error: `switch_tab_failed:${sw.error || 'unknown'}` };
+          }
+
+          const nav = await gotoDetailInCurrentTab(state.entry.safeDetailUrl);
+          if (!nav.ok) {
+            await captureDebugSnapshot(env, keyword, 'phase3_fixed_tab_goto_failed', {
+              noteId,
+              pageIndex,
+              url: state.entry.safeDetailUrl || '',
+              error: nav.error,
+            });
+            return { ok: false, error: nav.error || 'fixed_tab_goto_failed' };
+          }
+
+          state.lastDetailUrl = nav.url || state.entry.safeDetailUrl || '';
+          slots.push({ slotIndex, fixedIndex: pageIndex, pageIndex, noteId, urlHint: state.lastDetailUrl });
+          emitRunEvent('note_tab_opened', { slotIndex: slotIndex + 1, noteId, url: state.lastDetailUrl });
+          return { ok: true, pageIndex };
+        }
+
+        const openRes = await openDetailInNewTab(state.entry.safeDetailUrl);
+        if (!openRes.ok) {
+          console.error(
+            `[FullCollect][Tabs][Open] ❌ 打开详情新 tab 失败 noteId=${noteId}: ${openRes.error}`,
+          );
+          await captureDebugSnapshot(env, keyword, 'phase3_open_tab_failed', {
+            noteId,
+            url: state.entry.safeDetailUrl || '',
+            error: openRes.error,
+          });
+          return { ok: false, error: openRes.error || 'open_tab_failed' };
+        }
+
+        state.lastDetailUrl = openRes.url || state.entry.safeDetailUrl || '';
+        slots.push({ slotIndex, fixedIndex: null, pageIndex: openRes.pageIndex, noteId, urlHint: state.lastDetailUrl });
+        emitRunEvent('note_tab_opened', { slotIndex: slotIndex + 1, noteId, url: state.lastDetailUrl });
+        return { ok: true, pageIndex: openRes.pageIndex };
+      }
+
+      async function refillSlot(slot) {
+        const nextNoteId = getNextNoteId();
+        if (!nextNoteId) {
+          slot.noteId = null;
+          return false;
+        }
+
+        const nextState = noteStates.get(nextNoteId);
+        if (!nextState || nextState.done) {
+          slot.noteId = null;
+          return false;
+        }
+        if (!nextState.entry?.safeDetailUrl || !String(nextState.entry.safeDetailUrl).includes('xsec_token=')) {
+          console.warn(
+            `[FullCollect][Tabs][Refill] slot=${slot.slotIndex + 1} nextNoteId=${nextNoteId} 缺少 token URL，跳过`,
+          );
+          slot.noteId = null;
+          return false;
+        }
+
+        console.log(
+          `[FullCollect][Tabs][Refill] slot=${slot.slotIndex + 1} 补位 -> noteId=${nextNoteId} title=${nextState.entry.title || '无标题'}`,
+        );
+        const sw = await safeSwitchToSlot(slot, slot.noteId || '', slot.urlHint || '');
+        if (!sw.ok) {
+          await captureDebugSnapshot(env, keyword, 'phase3_switch_tab_failed', {
+            noteId: nextNoteId,
+            pageIndex: slot.pageIndex,
+            error: sw.error,
+          });
+          return false;
+        }
+
+        await waitGatePermit();
+        const nav = await gotoDetailInCurrentTab(nextState.entry.safeDetailUrl);
+        if (!nav.ok) {
+          await captureDebugSnapshot(env, keyword, 'phase3_refill_goto_failed', {
+            noteId: nextNoteId,
+            pageIndex: slot.pageIndex,
+            url: nextState.entry.safeDetailUrl || '',
+            error: nav.error,
+          });
+          return false;
+        }
+
+        // 防止“看起来补位但实际没切换页面”的状态错乱：校验 noteId 与目标一致
+        if (nav.noteId && nav.noteId !== nextNoteId) {
+          console.warn(
+            `[FullCollect][Tabs][Refill] ⚠️ 补位后 noteId 不一致：expected=${nextNoteId} got=${nav.noteId}，将生成快照并停止`,
+          );
+          await captureDebugSnapshot(env, keyword, 'phase3_refill_noteid_mismatch', {
+            expectedNoteId: nextNoteId,
+            gotNoteId: nav.noteId,
+            pageIndex: slot.pageIndex,
+            url: nav.url || '',
+          });
+          return false;
+        }
+
+        nextState.lastDetailUrl = nav.url || nextState.entry.safeDetailUrl || '';
+        slot.noteId = nextNoteId;
+        slot.urlHint = nextState.lastDetailUrl || nextState.entry.safeDetailUrl || '';
+        emitRunEvent('note_tab_refilled', {
+          slotIndex: slot.slotIndex + 1,
+          noteId: nextNoteId,
+          url: nextState.lastDetailUrl,
+        });
+        return true;
+      }
+
+      if (fixedTabSlots) {
+        const before = await listPages();
+        const beforePages = Array.isArray(before.pages) ? before.pages : [];
+        const using = Array.from({ length: desiredFixedSlots }, (_, i) => FIXED_TAB_START_INDEX + i);
+        console.log(
+          `[FullCollect][Tabs][Fixed] 检测到当前 pages=${beforePages.length} activeIndex=${before.activeIndex}；固定使用 tab index=${using.join(',')}`,
+        );
+        const ok = await ensureAtLeastPages(FIXED_TAB_START_INDEX + desiredFixedSlots);
+        const after = await listPages();
+        const afterPages = Array.isArray(after.pages) ? after.pages : [];
+        console.log(
+          `[FullCollect][Tabs][Fixed] ensureAtLeastPages=${ok ? 'ok' : 'failed'} pages(after)=${afterPages.length}`,
+        );
+      }
+
+      for (let slotIndex = 0; slotIndex < MAX_GROUP_SIZE; slotIndex += 1) {
+        if (slots.length >= MAX_GROUP_SIZE) break;
+        const noteId = getNextNoteId();
+        if (!noteId) break;
+        const opened = await openSlotNewTab(slotIndex, noteId);
+        if (!opened.ok) {
+          throw new Error('phase3_open_tabs_failed');
+        }
+        if (slotIndex < MAX_GROUP_SIZE - 1) {
+          await delay(OPEN_INTERVAL_MS + Math.random() * 500);
+        }
+      }
+
+      if (slots.length === 0) {
+        throw new Error('phase3_open_tabs_failed');
+      }
+
+      let cycle = 1;
+      let noProgressCycles = 0;
+
+      while (completedNotes < maxNotesToProcess && !riskStop) {
+        let cycleNewComments = 0;
+        const completedBefore = completedNotes;
+        let cycleRefills = 0;
+        let anyActive = false;
+
+        console.log(
+          `\n[FullCollect][Tabs][Cycle] #${cycle} slots=${slots.length} completed=${completedNotes}/${maxNotesToProcess}`,
+        );
+        emitRunEvent('tabs_cycle_start', { cycle, slotCount: slots.length, completedNotes });
+
+        for (const slot of slots) {
+          const noteId = slot.noteId;
+          if (!noteId) continue;
+          const state = noteStates.get(noteId);
+          if (!state || state.done) {
+            slot.noteId = null;
+            continue;
+          }
+          anyActive = true;
+
+          const sw = await safeSwitchToSlot(slot, noteId, state.lastDetailUrl || slot.urlHint || '');
+          if (!sw.ok) {
+            await captureDebugSnapshot(env, keyword, 'phase3_switch_tab_failed', {
+              noteId,
+              pageIndex: slot.pageIndex,
+              error: sw.error,
+            });
+            riskStop = true;
+            break;
+          }
+
+          const detailReady = await waitForDetailReady(10);
+          if (!detailReady.ready) {
+            console.warn(
+              `[FullCollect][Tabs][Cycle] ⚠️ slot=${slot.slotIndex + 1} noteId=${noteId} 未检测到详情就绪，停止以避免状态错乱`,
+            );
+            await captureDebugSnapshot(env, keyword, 'phase3_tab_not_detail', { noteId, pageIndex: slot.pageIndex });
+            riskStop = true;
+            break;
+          }
+          state.lastDetailUrl = detailReady.safeUrl || state.lastDetailUrl || '';
+
+          if (!state.detailFetched) {
+            console.log(`[Note ${noteId}] Phase3: 提取详情正文与图片...`);
+            const detailRes = await extractDetail({ sessionId: PROFILE }).catch((e) => ({
+              success: false,
+              detail: {},
+              error: e.message || String(e),
+            }));
+            if (!detailRes.success) {
+              console.warn(`   ⚠️ ExtractDetailBlock 失败（不阻塞评论采集）: ${detailRes.error}`);
+            } else {
+              state.detailData = detailRes.detail || {};
+              console.log(`   ✅ 详情提取成功，包含字段: ${Object.keys(state.detailData).join(', ')}`);
+            }
+            state.detailFetched = true;
+          }
+
+          const riskDetected = await detectRiskControl();
+          if (riskDetected) {
+            console.warn(`   🚨 noteId=${noteId} 当前 tab 命中风控页面，停止 Phase3-4`);
+            riskDetectionCount += 1;
+            emitRunEvent('risk_detected', { noteId, slotIndex: slot.slotIndex + 1, cycle });
+            riskStop = true;
+            break;
+          }
+
+          // 单个 tab 内尽量一次拿够 N 条（默认 50）再切换到下一个 tab，提升效率
+          let visitAdded = 0;
+          let visitOps = 0;
+          let noNewStreak = 0;
+          let noteDone = false;
+          let doneReason = 'unknown';
+          let lastCommentsResult = null;
+          let exhaustedRounds = false;
+
+          while (
+            visitAdded < MAX_NEW_COMMENTS_PER_ROUND &&
+            visitOps < MAX_VISIT_OPS_PER_TAB &&
+            !riskStop
+          ) {
+            const need = Math.max(0, MAX_NEW_COMMENTS_PER_ROUND - visitAdded);
+            visitOps += 1;
+
+            console.log(
+              `[Note ${noteId}] Phase4: 预热并采集评论（增量模式）... need=${need} op=${visitOps}`,
+            );
+            const commentsResult = await collectComments({
+              sessionId: PROFILE,
+              maxWarmupRounds: MAX_WARMUP_ROUNDS,
+              allowClickCommentButton: state.commentsActivated ? false : true,
+            }).catch((e) => ({
+              success: false,
+              comments: [],
+              reachedEnd: false,
+              emptyState: false,
+              warmupCount: 0,
+              totalFromHeader: null,
+              error: e.message || String(e),
+              anchor: null,
+              exitAnchor: null,
+            }));
+
+            lastCommentsResult = commentsResult;
+
+            if (!commentsResult.success) {
+              console.error(`❌ 评论采集失败: ${commentsResult.error}`);
+              console.log(
+                '[FullCollect][Anchor:CollectComments]',
+                JSON.stringify(commentsResult.anchor || null),
+              );
+              await captureDebugSnapshot(env, keyword, 'phase3_collect_comments_failed', {
+                noteId,
+                pageIndex: slot.pageIndex,
+                url: state.lastDetailUrl || '',
+                error: commentsResult.error || 'collect comments failed',
+              });
+              state.rounds += 1;
+              if (state.rounds >= MAX_ROUNDS_PER_NOTE) {
+                console.warn(`   ⚠️ noteId=${noteId} 多次评论采集失败，标记为完成以避免死循环`);
+                noteDone = true;
+                doneReason = 'max_rounds';
+              }
+              break;
+            }
+
+            console.log(
+              '[FullCollect][Anchor:CollectComments]',
+              JSON.stringify(commentsResult.anchor || null),
+            );
+            const allComments = Array.isArray(commentsResult.comments) ? commentsResult.comments : [];
+            console.log(
+              `   ✅ 当前 tab 评论总数（页面上）: ${allComments.length} reachedEnd=${commentsResult.reachedEnd} emptyState=${commentsResult.emptyState}`,
+            );
+            if (!state.commentsActivated) state.commentsActivated = true;
+
+            const exitId =
+              commentsResult.exitAnchor?.endMarkerContainerId ||
+              commentsResult.anchor?.endMarkerContainerId ||
+              '';
+            const exitRect =
+              commentsResult.exitAnchor?.endMarkerRect ||
+              commentsResult.anchor?.endMarkerRect ||
+              null;
+            const exitRectOk = Boolean(exitRect && Number(exitRect.height) > 0);
+            const endHit = String(exitId).endsWith('.end_marker') && exitRectOk;
+            const emptyHit = String(exitId).endsWith('.empty_state') && exitRectOk;
+
+            let diff = computeNewCommentsForRound(allComments, state.lastPair, need);
+            let used = diff.used;
+
+            if (
+              (!Array.isArray(used) || used.length === 0) &&
+              state.totalSeen > 0 &&
+              allComments.length > state.totalSeen
+            ) {
+              try {
+                const seenKeys = new Set(
+                  state.collectedComments.map((c) => buildCommentKey(c)).filter(Boolean),
+                );
+                const appended = [];
+                for (const c of allComments) {
+                  const k = buildCommentKey(c);
+                  if (!k) continue;
+                  if (seenKeys.has(k)) continue;
+                  seenKeys.add(k);
+                  appended.push(c);
+                  if (appended.length >= need) break;
+                }
+                if (appended.length > 0) {
+                  console.warn(
+                    `   [Note ${noteId}] lastPair 定位疑似失效（oldTotalSeen=${state.totalSeen}, currentDomCount=${allComments.length}），已启用 key 去重兜底，新增=${appended.length}`,
+                  );
+                  used = appended;
+                  diff = {
+                    used: appended,
+                    newPair:
+                      buildLastPairFromArray([...state.collectedComments, ...appended]) || diff.newPair,
+                    totalNew: appended.length,
+                  };
+                }
+              } catch {
+                // ignore
+              }
+            }
+
+            state.rounds += 1;
+            state.headerTotal =
+              typeof commentsResult.totalFromHeader === 'number' && commentsResult.totalFromHeader > 0
+                ? commentsResult.totalFromHeader
+                : state.headerTotal;
+
+            if (Array.isArray(used) && used.length > 0) {
+              state.collectedComments.push(...used);
+              state.totalSeen += used.length;
+              visitAdded += used.length;
+              cycleNewComments += used.length;
+              noNewStreak = 0;
+              console.log(
+                `   [Note ${noteId}] 本次访问新增评论=${used.length}（visitAdded=${visitAdded}/${MAX_NEW_COMMENTS_PER_ROUND}），累计=${state.collectedComments.length}`,
+              );
+            } else {
+              noNewStreak += 1;
+              console.log(`   [Note ${noteId}] 本次访问未发现新的评论（totalNew=${diff.totalNew}）`);
+            }
+
+            state.lastPair = diff.newPair;
+
+            try {
+              await updateCollectState((draft) => {
+                draft.history = draft.history || {};
+                draft.history.commentStates = draft.history.commentStates || {};
+                draft.history.commentStates[noteId] = {
+                  noteId,
+                  totalSeen: state.totalSeen,
+                  lastPair: state.lastPair,
+                  updatedAt: Date.now(),
+                };
+                return draft;
+              }, `comment-state:${noteId}`);
+            } catch (err) {
+              console.warn(
+                `[FullCollect][CommentState] 更新评论状态失败 noteId=${noteId}:`,
+                err?.message || String(err),
+              );
+            }
+
+            exhaustedRounds = state.rounds >= MAX_ROUNDS_PER_NOTE;
+            // 只认两个底部标记：end / 空评论（empty_state），作为重定向入口锚点
+            if (Boolean(commentsResult.emptyState) && !emptyHit) {
+              console.warn(
+                `   [Note ${noteId}] ⚠️ commentsResult.emptyState=true 但未命中 empty_state 锚点，忽略该信号（exitId=${exitId || 'null'}）`,
+              );
+            }
+            if (Boolean(commentsResult.reachedEnd) && !endHit) {
+              console.warn(
+                `   [Note ${noteId}] ⚠️ commentsResult.reachedEnd=true 但未命中 end_marker 锚点，忽略该信号（exitId=${exitId || 'null'}）`,
+              );
+            }
+
+            if (emptyHit) {
+              noteDone = true;
+              doneReason = 'empty_state';
+            } else if (endHit) {
+              noteDone = true;
+              doneReason = 'reached_end';
+            } else if (exhaustedRounds) {
+              noteDone = true;
+              doneReason = 'max_rounds';
+            }
+
+            if (noteDone) break;
+            // 没抓到新评论且未到 end/empty，则最多再尝试 2 次推进；仍无新增则切换到下一个 tab，避免在单帖里死磕
+            if (!Array.isArray(used) || used.length === 0) {
+              if (noNewStreak >= 2) break;
+              await delay(450 + Math.random() * 350);
+            } else {
+              await delay(380 + Math.random() * 320);
+            }
+          }
+
+        emitRunEvent('note_round', {
+          cycle,
+          slotIndex: slot.slotIndex + 1,
+          noteId,
+          roundAdded: visitAdded,
+          totalSeen: state.totalSeen,
+          rounds: state.rounds,
+          reachedEnd: doneReason === 'reached_end',
+          emptyState: doneReason === 'empty_state',
+          exhaustedRounds,
+          done: Boolean(noteDone),
+        });
+
+        if (noteDone) {
+          state.done = true;
+          completedNotes += 1;
+
+            const aggregatedResult = {
+              success: true,
+              comments: state.collectedComments,
+              reachedEnd: doneReason === 'reached_end',
+              emptyState: doneReason === 'empty_state',
+              warmupCount: lastCommentsResult?.warmupCount ?? 0,
+              totalFromHeader: state.headerTotal ?? lastCommentsResult?.totalFromHeader ?? null,
+            };
+
+            const finalNoteId =
+              (typeof state.lastDetailUrl === 'string'
+                ? state.lastDetailUrl.match(/\/explore\/([^/?#]+)/)?.[1]
+                : '') || noteId;
+
+            if (!finalNoteId) {
+              console.warn('   ⚠️ 无法确定 noteId，跳过本地持久化');
+            } else if (seenNoteIds.has(finalNoteId)) {
+              console.log(`   ⚠️ noteId=${finalNoteId} 已处理过，本轮仅复用评论结果，不再写盘`);
+            } else {
+              seenNoteIds.add(finalNoteId);
+              const persistRes = await persistXhsNote({
+                sessionId: PROFILE,
+                env,
+                platform: PLATFORM,
+                keyword,
+                noteId: finalNoteId,
+                detailUrl: state.lastDetailUrl,
+                detail: state.detailData || {},
+                commentsResult: aggregatedResult,
+              });
+              if (!persistRes.success) {
+                console.warn(`   ⚠️ PersistXhsNote 失败 noteId=${finalNoteId}: ${persistRes.error}`);
+              } else {
+                console.log(
+                  `   💾 已落盘 noteId=${finalNoteId} 到目录: ${
+                    persistRes.outputDir || persistRes.contentPath || '未知路径'
+                  }`,
+                );
+                emitRunEvent('note_persisted', { noteId: finalNoteId, outputDir: persistRes.outputDir || null });
+              }
+            }
+
+          slot.noteId = null;
+          console.log(
+            `[FullCollect][Tabs][Complete] slot=${slot.slotIndex + 1} noteId=${noteId} doneReason=${doneReason} -> 尝试补位`,
+          );
+          emitRunEvent('tab_note_completed', { slotIndex: slot.slotIndex + 1, noteId, doneReason });
+          const okRefill = await refillSlot(slot);
+          cycleRefills += 1;
+          if (!okRefill) {
+            console.log(
+              `[FullCollect][Tabs][Refill] slot=${slot.slotIndex + 1} 已无可补位的 note（队列耗尽或补位失败）`,
+            );
+            emitRunEvent('tab_refill_exhausted', { slotIndex: slot.slotIndex + 1 });
+          }
+        }
+      }
+
+      if (riskStop) break;
+      if (!anyActive) break;
+
+      const completedDelta = completedNotes - completedBefore;
+      const progressed = cycleNewComments > 0 || completedDelta > 0 || cycleRefills > 0;
+
+      if (!progressed) {
+        noProgressCycles += 1;
+        console.log(
+          `[FullCollect][Tabs][Cycle] 本轮无进展（无新增评论/无完成/无补位） noProgressCycles=${noProgressCycles}`,
+        );
+        if (noProgressCycles >= 2) {
+          console.warn('[FullCollect][Tabs][Cycle] 连续两轮无新增评论，停止以避免死循环');
+          break;
+        }
+      } else {
+        noProgressCycles = 0;
+      }
+
+        cycle += 1;
+      }
+
+      if (riskStop) {
+        console.warn(
+          `\n[FullCollect] Phase3-4 因风控/异常中断：已完成 note=${completedNotes}/${maxNotesToProcess}，风控命中次数=${riskDetectionCount}`,
+        );
+        throw new Error('phase3_risk_or_tab_error_stop');
+      }
+
+      const relayElapsedMs = Date.now() - phaseStartAtMs;
+      console.log(
+        `\n[FullCollect] Phase3-4 总结：完成 note 数量=${completedNotes}（目标=${maxNotesToProcess}，风控命中次数=${riskDetectionCount}，elapsed=${formatDuration(relayElapsedMs)}）`,
+      );
+      emitRunEvent('phase3_4_tabs_end', {
+        completedNotes,
+        target: maxNotesToProcess,
+        riskDetectionCount,
+        elapsedMs: relayElapsedMs,
+      });
+      if (completedNotes === 0 && maxNotesToProcess > 0) {
+        throw new Error('phase3_no_notes_completed');
+      }
+      return;
+    }
+
+    const groups = [];
+    for (let i = 0; i < noteIds.length; i += MAX_GROUP_SIZE) {
+      groups.push(noteIds.slice(i, i + MAX_GROUP_SIZE));
+    }
+
+    for (let groupIndex = 0; groupIndex < groups.length; groupIndex += 1) {
+      if (completedNotes >= maxNotesToProcess) break;
+      let riskStop = false;
+
+      const groupAll = groups[groupIndex] || [];
+      const group = groupAll.filter((id) => {
+        const st = noteStates.get(id);
+        return st && !st.done;
+      });
+      if (group.length === 0) continue;
+
+      console.log(
+        `\n[FullCollect][Group] #${groupIndex + 1}/${groups.length} 开始：openTabs=${group.length} completed=${completedNotes}/${maxNotesToProcess}`,
+      );
+      emitRunEvent('group_start', { groupIndex: groupIndex + 1, groupSize: group.length, noteIds: group });
+
+      const opened = [];
+      const openedPageIndices = [];
+      for (let i = 0; i < group.length; i += 1) {
+        const noteId = group[i];
+        const state = noteStates.get(noteId);
+        if (!state || state.done) continue;
+
+        console.log(
+          `[FullCollect][GroupOpen] (${i + 1}/${group.length}) noteId=${noteId} title=${state.entry.title || '无标题'}`,
+        );
+
+        const gateKey = `${PROFILE}:detail`;
+        while (true) {
+          const permit = await requestGatePermit(gateKey, {
+            windowMs: DEFAULT_WINDOW_MS,
+            maxCount: DEFAULT_MAX_COUNT,
+          }).catch(() => ({ ok: false, allowed: true, waitMs: 0 }));
+          if (permit && permit.allowed === false) {
+            const waitMs = Math.max(permit.waitMs || 0, 1000);
+            console.log(
+              `[FullCollect][Gate] 详情访问触发节流，等待 ${waitMs}ms 后继续（key=${gateKey}）`,
+            );
+            await delay(waitMs + Math.random() * 500);
+            continue;
+          }
+          break;
+        }
+
+        const openRes = await openDetailInNewTab(state.entry.safeDetailUrl);
+        if (!openRes.ok) {
+          console.error(
+            `[FullCollect][GroupOpen] ❌ 打开详情新 tab 失败 noteId=${noteId}: ${openRes.error}`,
+          );
+          await captureDebugSnapshot(env, keyword, 'phase3_open_tab_failed', {
+            noteId,
+            url: state.entry.safeDetailUrl || '',
+            error: openRes.error,
+          });
+          riskStop = true;
+          break;
+        }
+
+        state.lastDetailUrl = openRes.url || state.entry.safeDetailUrl || '';
+        opened.push(noteId);
+        openedPageIndices.push(openRes.pageIndex);
+        emitRunEvent('note_tab_opened', { groupIndex: groupIndex + 1, noteId, url: state.lastDetailUrl });
+
+        if (i < group.length - 1) {
+          await delay(OPEN_INTERVAL_MS + Math.random() * 500);
+        }
+      }
+
+      const tabCount = opened.length;
+      if (riskStop || tabCount === 0) {
+        console.warn(
+          `[FullCollect][Group] ⚠️ Group #${groupIndex + 1} 未能打开任何详情 tab，停止 Phase3-4`,
+        );
+        throw new Error('phase3_open_tabs_failed');
+      }
+
+      // 切到第一条的 tab 开始轮询
+      await switchToPageIndex(openedPageIndices[0]);
+
+      let groupRound = 1;
+      while (true) {
+        if (completedNotes >= maxNotesToProcess) break;
+        let roundNewComments = 0;
+        let anyPending = false;
+
+        console.log(
+          `\n[FullCollect][GroupRound] group=${groupIndex + 1}/${groups.length} round=${groupRound} tabs=${tabCount} completed=${completedNotes}/${maxNotesToProcess}`,
+        );
+        emitRunEvent('group_round_start', { groupIndex: groupIndex + 1, groupRound, tabCount, completedNotes });
+
+        for (let i = 0; i < tabCount; i += 1) {
+          const noteId = opened[i];
+          const pageIndex = openedPageIndices[i];
+          const state = noteStates.get(noteId);
+          if (!state || state.done) {
+            if (i < tabCount - 1) await switchToPageIndex(openedPageIndices[i + 1]);
+            continue;
+          }
+          anyPending = true;
+
+          const sw = await switchToPageIndex(pageIndex);
+          if (!sw.ok) {
+            await captureDebugSnapshot(env, keyword, 'phase3_switch_tab_failed', {
+              noteId,
+              pageIndex,
+              error: sw.error,
+            });
+            riskStop = true;
+            break;
+          }
+
+          const detailReady = await waitForDetailReady(10);
+          if (!detailReady.ready) {
+            console.warn(
+              `[FullCollect][GroupRound] ⚠️ 切换 tab 后未检测到详情就绪 noteId=${noteId}，停止以避免状态错乱`,
+            );
+            await captureDebugSnapshot(env, keyword, 'phase3_tab_not_detail', { noteId });
+            riskStop = true;
+            break;
+          }
+          state.lastDetailUrl = detailReady.safeUrl || state.lastDetailUrl || '';
+
+          if (!state.detailFetched) {
+            console.log(`[Note ${noteId}] Phase3: 提取详情正文与图片...`);
+            const detailRes = await extractDetail({ sessionId: PROFILE }).catch((e) => ({
+              success: false,
+              detail: {},
+              error: e.message || String(e),
+            }));
+            if (!detailRes.success) {
+              console.warn(
+                `   ⚠️ ExtractDetailBlock 失败（不阻塞评论采集）: ${detailRes.error}`,
+              );
+            } else {
+              state.detailData = detailRes.detail || {};
+              console.log(
+                `   ✅ 详情提取成功，包含字段: ${Object.keys(state.detailData).join(', ')}`,
+              );
+            }
+            state.detailFetched = true;
+          }
+
+          const riskDetected = await detectRiskControl();
+          if (riskDetected) {
+            console.warn(`   🚨 noteId=${noteId} 当前 tab 命中风控页面，停止 Phase3-4`);
+            riskDetectionCount += 1;
+            emitRunEvent('risk_detected', { noteId, groupIndex: groupIndex + 1, groupRound });
+            riskStop = true;
+            break;
+          }
+
+          console.log(`[Note ${noteId}] Phase4: 预热并采集评论（增量模式）...`);
+          const commentsResult = await collectComments({
+            sessionId: PROFILE,
+            maxWarmupRounds: MAX_WARMUP_ROUNDS,
+          }).catch((e) => ({
+            success: false,
+            comments: [],
+            reachedEnd: false,
+            emptyState: false,
+            warmupCount: 0,
+            totalFromHeader: null,
+            error: e.message || String(e),
+            anchor: null,
+          }));
+
+          if (!commentsResult.success) {
+            console.error(`[Note ${noteId}] ❌ 评论采集失败: ${commentsResult.error}`);
+            console.log(
+              '[FullCollect][Anchor:CollectComments]',
+              JSON.stringify(commentsResult.anchor || null),
+            );
+            state.rounds += 1;
+            emitRunEvent('note_round_error', {
+              noteId,
+              error: commentsResult.error || 'collect_comments_failed',
+              rounds: state.rounds,
+            });
+            if (state.rounds >= MAX_ROUNDS_PER_NOTE) {
+              console.warn(
+                `   ⚠️ noteId=${noteId} 多次评论采集失败，标记为完成以避免死循环`,
+              );
+              state.done = true;
+              completedNotes += 1;
+            }
+            if (i < tabCount - 1) await switchToPageIndex(openedPageIndices[i + 1]);
+            continue;
+          }
+
+          console.log(
+            '[FullCollect][Anchor:CollectComments]',
+            JSON.stringify(commentsResult.anchor || null),
+          );
+          const allComments = Array.isArray(commentsResult.comments) ? commentsResult.comments : [];
+          console.log(
+            `   ✅ 当前 tab 评论总数（页面上）: ${allComments.length} reachedEnd=${commentsResult.reachedEnd} emptyState=${commentsResult.emptyState}`,
+          );
+
+          let diff = computeNewCommentsForRound(allComments, state.lastPair, MAX_NEW_COMMENTS_PER_ROUND);
+          let used = diff.used;
+
+          if (
+            (!Array.isArray(used) || used.length === 0) &&
+            state.totalSeen > 0 &&
+            allComments.length > state.totalSeen
+          ) {
+            try {
+              const seenKeys = new Set(
+                state.collectedComments.map((c) => buildCommentKey(c)).filter(Boolean),
+              );
+              const appended = [];
+              for (const c of allComments) {
+                const k = buildCommentKey(c);
+                if (!k) continue;
+                if (seenKeys.has(k)) continue;
+                seenKeys.add(k);
+                appended.push(c);
+                if (appended.length >= MAX_NEW_COMMENTS_PER_ROUND) break;
+              }
+              if (appended.length > 0) {
+                console.warn(
+                  `   [Note ${noteId}] lastPair 定位疑似失效（oldTotalSeen=${state.totalSeen}, currentDomCount=${allComments.length}），已启用 key 去重兜底，新增=${appended.length}`,
+                );
+                used = appended;
+                diff = {
+                  used: appended,
+                  newPair:
+                    buildLastPairFromArray([...state.collectedComments, ...appended]) || diff.newPair,
+                  totalNew: appended.length,
+                };
+              }
+            } catch {
+              // ignore
+            }
+          }
+
+          state.rounds += 1;
+          state.headerTotal =
+            typeof commentsResult.totalFromHeader === 'number' && commentsResult.totalFromHeader > 0
+              ? commentsResult.totalFromHeader
+              : state.headerTotal;
+
+          if (Array.isArray(used) && used.length > 0) {
+            state.collectedComments.push(...used);
+            state.totalSeen += used.length;
+            roundNewComments += used.length;
+            console.log(
+              `   [Note ${noteId}] 本轮新增评论=${used.length}，累计=${state.collectedComments.length}`,
+            );
+          } else {
+            console.log(`   [Note ${noteId}] 本轮未发现新的评论（totalNew=${diff.totalNew}）`);
+          }
+
+          state.lastPair = diff.newPair;
+
+          try {
+            await updateCollectState((draft) => {
+              draft.history = draft.history || {};
+              draft.history.commentStates = draft.history.commentStates || {};
+              draft.history.commentStates[noteId] = {
+                noteId,
+                totalSeen: state.totalSeen,
+                lastPair: state.lastPair,
+                updatedAt: Date.now(),
+              };
+              return draft;
+            }, `comment-state:${noteId}`);
+          } catch (err) {
+            console.warn(
+              `[FullCollect][CommentState] 更新评论状态失败 noteId=${noteId}:`,
+              err?.message || String(err),
+            );
+          }
+
+          const reachedEndByHeader =
+            typeof state.headerTotal === 'number' &&
+            state.headerTotal > 0 &&
+            allComments.length >= state.headerTotal;
+          const noMoreNew = diff.totalNew === 0;
+          const exhaustedRounds = state.rounds >= MAX_ROUNDS_PER_NOTE;
+          const noteDone = reachedEndByHeader || noMoreNew || exhaustedRounds;
+
+          emitRunEvent('note_round', {
+            groupIndex: groupIndex + 1,
+            groupRound,
+            noteId,
+            roundAdded: Array.isArray(used) ? used.length : 0,
+            totalSeen: state.totalSeen,
+            rounds: state.rounds,
+            reachedEndByHeader,
+            noMoreNew,
+            exhaustedRounds,
+            done: noteDone,
+          });
+
+          if (noteDone) {
+            state.done = true;
+            completedNotes += 1;
+
+            const aggregatedResult = {
+              success: true,
+              comments: state.collectedComments,
+              reachedEnd: reachedEndByHeader || commentsResult.reachedEnd || noMoreNew,
+              emptyState: state.collectedComments.length === 0,
+              warmupCount: commentsResult.warmupCount ?? 0,
+              totalFromHeader: state.headerTotal ?? commentsResult.totalFromHeader ?? null,
+            };
+
+            const finalNoteId =
+              (typeof state.lastDetailUrl === 'string'
+                ? state.lastDetailUrl.match(/\/explore\/([^/?#]+)/)?.[1]
+                : '') || noteId;
+
+            if (!finalNoteId) {
+              console.warn('   ⚠️ 无法确定 noteId，跳过本地持久化');
+            } else if (seenNoteIds.has(finalNoteId)) {
+              console.log(`   ⚠️ noteId=${finalNoteId} 已处理过，本轮仅复用评论结果，不再写盘`);
+            } else {
+              seenNoteIds.add(finalNoteId);
+              const persistRes = await persistXhsNote({
+                sessionId: PROFILE,
+                env,
+                platform: PLATFORM,
+                keyword,
+                noteId: finalNoteId,
+                detailUrl: state.lastDetailUrl,
+                detail: state.detailData || {},
+                commentsResult: aggregatedResult,
+              });
+              if (!persistRes.success) {
+                console.warn(`   ⚠️ PersistXhsNote 失败 noteId=${finalNoteId}: ${persistRes.error}`);
+              } else {
+                console.log(
+                  `   💾 已落盘 noteId=${finalNoteId} 到目录: ${
+                    persistRes.outputDir || persistRes.contentPath || '未知路径'
+                  }`,
+                );
+                emitRunEvent('note_persisted', {
+                  noteId: finalNoteId,
+                  outputDir: persistRes.outputDir || null,
+                });
+              }
+            }
+          }
+
+          if (i < tabCount - 1) await switchToPageIndex(openedPageIndices[i + 1]);
+        }
+
+        if (riskStop) break;
+
+        if (!anyPending) {
+          console.log('[FullCollect][GroupRound] 当前组内已无待处理 note，结束该组');
+          break;
+        }
+
+        if (roundNewComments === 0) {
+          console.log('[FullCollect][GroupRound] 当前轮未获取到任何新评论，结束该组以避免死循环');
+          break;
+        }
+
+        groupRound += 1;
+        await switchToPageIndex(openedPageIndices[0]);
+      }
+
+      try {
+        // 关闭该组打开的 pages：按 index 从大到小关，避免 index 移位导致关错
+        const indicesDesc = openedPageIndices
+          .map((n) => Number(n))
+          .filter((n) => Number.isFinite(n))
+          .sort((a, b) => b - a);
+        for (const idx of indicesDesc) {
+          await closePageIndex(idx);
+        }
+      } catch (err) {
+        console.warn('[FullCollect][Group] 关闭 tabs 失败（继续）:', err?.message || String(err));
+      }
+
+      emitRunEvent('group_end', { groupIndex: groupIndex + 1, completedNotes, riskDetectionCount });
+
+      if (riskStop) {
+        console.warn(
+          `\n[FullCollect] Phase3-4 因风控/异常中断：已完成 note=${completedNotes}/${maxNotesToProcess}，风控命中次数=${riskDetectionCount}`,
+        );
+        throw new Error('phase3_risk_or_tab_error_stop');
+      }
+    }
+
+    const elapsedMs = Date.now() - phaseStartAtMs;
+    console.log(
+      `\n[FullCollect] Phase3-4 总结：完成 note 数量=${completedNotes}（目标=${maxNotesToProcess}，风控命中次数=${riskDetectionCount}，elapsed=${formatDuration(elapsedMs)}）`,
+    );
+    emitRunEvent('phase3_4_tabs_end', { completedNotes, target: maxNotesToProcess, riskDetectionCount, elapsedMs });
+    if (completedNotes === 0 && maxNotesToProcess > 0) {
+      throw new Error('phase3_no_notes_completed');
+    }
+    return;
   }
 
   let completedNotes = 0;
@@ -3771,9 +5305,8 @@ async function main() {
   const keyword = resolveKeyword();
   const target = resolveTarget();
   const env = resolveEnv();
-
-  console.log('🚀 Phase1-4 全流程采集（小红书）\n');
-  console.log(`配置: keyword="${keyword}" target=${target} env=${env}\n`);
+  const viewportWidth = resolveViewportWidth();
+  const viewportHeight = resolveViewportHeight();
 
   if (isFreshMode()) {
     const dir = getKeywordBaseDir(env, keyword);
@@ -3785,17 +5318,45 @@ async function main() {
     }
   }
 
+  initRunLogging({ env, keyword });
+  emitRunEvent('config', { target, argv });
+
+  console.log('🚀 Phase1-4 全流程采集（小红书）\n');
+  console.log(`配置: keyword="${keyword}" target=${target} env=${env}\n`);
+  console.log(`浏览器视口: ${viewportWidth}x${viewportHeight}\n`);
+
   await initCollectState(keyword, env, target);
 
   // 0. 确保核心服务已启动（Unified API + Browser Service）
+  emitRunEvent('phase_start', { phase: 'phase1_base_services' });
   await ensureBaseServices();
+  emitRunEvent('phase_end', { phase: 'phase1_base_services' });
 
   console.log('1️⃣ Phase1: 确保会话 + 登录态...');
+  emitRunEvent('phase_start', { phase: 'phase1_session_login' });
   await ensureSessionAndLogin();
+  emitRunEvent('phase_end', { phase: 'phase1_session_login' });
+
+  // 1.2 尝试增大视口高度，提升长正文 + 评论区可见性（失败不阻断）
+  try {
+    const res = await browserServiceCommand('page:setViewport', {
+      profileId: PROFILE,
+      width: viewportWidth,
+      height: viewportHeight,
+    });
+    console.log(
+      `[FullCollect][Viewport] 已设置视口大小: ${res?.width || viewportWidth}x${res?.height || viewportHeight}`,
+    );
+    emitRunEvent('viewport_set', { width: res?.width || viewportWidth, height: res?.height || viewportHeight });
+  } catch (err) {
+    console.warn('[FullCollect][Viewport] 设置视口失败（继续）:', err?.message || String(err));
+  }
 
   // 1.5 SearchGate：无论是否跑 Phase2/3/4，都需要保证 SearchGate 在线
   console.log('1️⃣ Phase1.5: 确认 SearchGate 在线或尝试启动...');
+  emitRunEvent('phase_start', { phase: 'phase1_search_gate' });
   await ensureSearchGate();
+  emitRunEvent('phase_end', { phase: 'phase1_search_gate' });
 
   // 2. Phase2：只在 safe-detail-urls 不足目标数量时执行列表采集
   const safeEntriesBefore = await loadSafeDetailEntries(keyword, env);
@@ -3803,11 +5364,34 @@ async function main() {
     ? safeEntriesBefore.length
     : 0;
 
+  // 当历史 safe-detail-urls 已经很多时：
+  // - 若仍有未落盘的 note（comments.md 缺失），优先“续传”跑 Phase3-4，不重复搜索；
+  // - 若历史已全部落盘，则进入“追加采集”模式：在现有 safeCount 基础上再追加 target 条新链接，
+  //   避免出现“safeCount>=target 就什么也不做”的体验问题。
+  async function countPendingNotes(entries) {
+    try {
+      const baseDir = getKeywordBaseDir(env, keyword);
+      let pending = 0;
+      for (const e of Array.isArray(entries) ? entries : []) {
+        const noteId = e?.noteId || '';
+        if (!noteId) continue;
+        const commentsPath = path.join(baseDir, noteId, 'comments.md');
+        const stat = await fs.promises.stat(commentsPath).catch(() => null);
+        if (!(stat && stat.isFile())) pending += 1;
+      }
+      return pending;
+    } catch {
+      return 0;
+    }
+  }
+
   if (isPhase2ListOnlyMode()) {
     console.log(
       `\n[FullCollect] 进入 Phase2(ListOnly) 调试模式：当前已有 safe-detail-urls=${safeCountBefore} 条`,
     );
+    emitRunEvent('phase_start', { phase: 'phase2_list_only', already: safeCountBefore, target });
     await runPhase2ListOnly(keyword, target, env);
+    emitRunEvent('phase_end', { phase: 'phase2_list_only' });
     console.log('\n✅ Phase1-2（ListOnly）执行完成（未进入详情/评论阶段）');
     console.log(
       `   safe-detail-urls 输出目录: ~/.webauto/download/xiaohongshu/${env}/${keyword}/safe-detail-urls.jsonl`,
@@ -3815,24 +5399,44 @@ async function main() {
     return;
   }
 
-  if (safeCountBefore < target) {
+  let phase2TargetTotal = target;
+  if (safeCountBefore >= target) {
+    const pending = await countPendingNotes(safeEntriesBefore);
+    if (pending === 0 && safeCountBefore > 0) {
+      phase2TargetTotal = safeCountBefore + target;
+      console.log(
+        `\n[FullCollect] 检测到历史 safe-detail-urls=${safeCountBefore} 且均已落盘（pending=0），进入“追加采集”模式：将再追加 ${target} 条（phase2TargetTotal=${phase2TargetTotal}）`,
+      );
+    } else if (pending > 0) {
+      console.log(
+        `\n[FullCollect] 检测到 safe-detail-urls.jsonl 已有 ${safeCountBefore} 条（>= target=${target}），且存在未落盘 note=${pending}，本次跳过 Phase2 列表采集（续传优先）`,
+      );
+    } else {
+      console.log(
+        `\n[FullCollect] 检测到 safe-detail-urls.jsonl 已有 ${safeCountBefore} 条（>= target=${target}），本次跳过 Phase2 列表采集`,
+      );
+    }
+  }
+
+  if (safeCountBefore < phase2TargetTotal) {
     console.log(
-      `\n2️⃣ Phase2: 搜索结果列表采集（safe-detail-urls 续采）... 当前已有=${safeCountBefore}, 目标=${target}`,
+      `\n2️⃣ Phase2: 搜索结果列表采集（safe-detail-urls 续采）... 当前已有=${safeCountBefore}, 目标=${phase2TargetTotal}`,
     );
-    await runPhase2ListOnly(keyword, target, env);
-  } else {
-    console.log(
-      `\n[FullCollect] 检测到 safe-detail-urls.jsonl 已有 ${safeCountBefore} 条（>= target=${target}），本次跳过 Phase2 列表采集`,
-    );
+    emitRunEvent('phase_start', { phase: 'phase2_list_only', already: safeCountBefore, target: phase2TargetTotal });
+    await runPhase2ListOnly(keyword, phase2TargetTotal, env);
+    emitRunEvent('phase_end', { phase: 'phase2_list_only' });
   }
 
   // 3. Phase3-4：完全基于 safe-detail-urls.jsonl 做详情 + 评论采集
+  emitRunEvent('phase_start', { phase: 'phase3_4_comments', target });
   await runPhase3And4FromIndex(keyword, target, env);
+  emitRunEvent('phase_end', { phase: 'phase3_4_comments' });
 
   console.log('\n✅ Phase1-4 全流程采集完成（基于 safe-detail-urls.jsonl）');
   console.log(
     `   输出目录: ~/.webauto/download/xiaohongshu/${env}/${keyword}/<noteId>/`,
   );
+  emitRunEvent('run_success', { target });
 }
 
 main().catch((err) => {
@@ -3847,8 +5451,14 @@ main().catch((err) => {
     ['phase2_safe_detail_target_not_reached', 24],
     ['stage_guard_not_search', 25],
     ['stage_guard_not_search_no_search', 26],
+    ['detail_without_xsec_token', 27],
+    // Phase3
+    ['phase3_open_tabs_failed', 31],
+    ['phase3_risk_or_tab_error_stop', 32],
+    ['phase3_no_notes_completed', 33],
     // Infra / services
     ['search_gate_unhealthy', 11],
+    ['search_gate_unhealthy_custom', 13],
     ['session_start_timeout', 12],
   ]);
 
@@ -3861,5 +5471,6 @@ main().catch((err) => {
 
   console.error('❌ Phase1-4 全流程失败:', reason);
   console.error(`[Exit] code=${mapped} reason=${reason}`);
+  emitRunEvent('run_failed', { reason, code: mapped });
   process.exitCode = mapped;
 });
