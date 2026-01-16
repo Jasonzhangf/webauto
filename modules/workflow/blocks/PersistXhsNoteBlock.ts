@@ -21,6 +21,8 @@ export interface PersistXhsNoteInput {
   detail?: any;
   commentsResult?: any;
   persistMode?: 'detail' | 'comments' | 'both';
+  downloadImages?: boolean;
+  maxImagesToDownload?: number;
 }
 
 export interface PersistXhsNoteOutput {
@@ -114,6 +116,8 @@ export async function execute(input: PersistXhsNoteInput): Promise<PersistXhsNot
     detail,
     commentsResult,
     persistMode = 'both',
+    downloadImages = true,
+    maxImagesToDownload,
   } = input;
 
   if (!env || !keyword || !noteId) {
@@ -133,7 +137,9 @@ export async function execute(input: PersistXhsNoteInput): Promise<PersistXhsNot
 
     await ensureDir(keywordDir);
     await ensureDir(postDir);
-    await ensureDir(imagesDir);
+    if (downloadImages) {
+      await ensureDir(imagesDir);
+    }
 
     const wantDetail = persistMode === 'detail' || persistMode === 'both';
     const wantComments = persistMode === 'comments' || persistMode === 'both';
@@ -166,15 +172,17 @@ export async function execute(input: PersistXhsNoteInput): Promise<PersistXhsNot
 
     // 1) 详情（正文/图片）
     if (wantDetail) {
-      const existingDetail = await fs.stat(detailPath).catch(() => null);
+      const existingDetail = await fs.stat(detailPath).catch((): null => null);
 
       // 图片下载：如果 images 目录已有文件则不重复下载
       let hasAnyImage = false;
-      try {
-        const existing = await fs.readdir(imagesDir).catch(() => []);
-        hasAnyImage = Array.isArray(existing) && existing.length > 0;
-      } catch {
-        hasAnyImage = false;
+      if (downloadImages) {
+        try {
+          const existing = await fs.readdir(imagesDir).catch((): string[] => []);
+          hasAnyImage = Array.isArray(existing) && existing.length > 0;
+        } catch {
+          hasAnyImage = false;
+        }
       }
 
       const localImages: string[] = [];
@@ -182,12 +190,16 @@ export async function execute(input: PersistXhsNoteInput): Promise<PersistXhsNot
         ? detailData.gallery.images
         : [];
 
-      if (!hasAnyImage && images.length > 0) {
-        const MAX_IMAGES_TO_DOWNLOAD = 6;
+      const maxImages =
+        typeof maxImagesToDownload === 'number' && Number.isFinite(maxImagesToDownload)
+          ? Math.max(0, Math.floor(maxImagesToDownload))
+          : 6;
+
+      if (downloadImages && !hasAnyImage && images.length > 0 && maxImages > 0) {
         let imgIndex = 0;
         for (const url of images) {
           imgIndex += 1;
-          if (imgIndex > MAX_IMAGES_TO_DOWNLOAD) break;
+          if (imgIndex > maxImages) break;
           const rel = await downloadImage(url, imagesDir, imgIndex);
           if (rel) localImages.push(rel);
         }

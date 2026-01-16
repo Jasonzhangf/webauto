@@ -725,6 +725,30 @@ export async function execute(input: WarmupCommentsInput): Promise<WarmupComment
     lastCount = initialStats.count;
     targetTotal = initialStats.total;
 
+    // 关键修复：部分长正文/特殊布局的详情页，评论区容器可见但评论列表不会自动加载，
+    // 需要先点击“评论按钮（chat-wrapper）”触发加载，否则会出现：
+    // - headerTotal > 0，但 count 始终为 0，滚动也不会生效
+    if (
+      initialStats.count === 0 &&
+      typeof initialStats.total === 'number' &&
+      Number.isFinite(initialStats.total) &&
+      initialStats.total > 0
+    ) {
+      console.log(
+        `[WarmupComments] count=0 but headerTotal=${initialStats.total}, try click comment_button to activate comments`,
+      );
+      await tryClickCommentButton('count_zero_but_total_positive');
+      // 点击评论按钮后焦点可能落在输入框，重新聚焦到评论列表并刷新一次统计
+      await focusCommentsArea();
+      await new Promise((r) => setTimeout(r, 600));
+      const afterClickStats = await getCommentStats();
+      console.log(
+        `[WarmupComments] after comment_button click: count=${afterClickStats.count} total=${afterClickStats.total} hasMore=${afterClickStats.hasMore}`,
+      );
+      lastCount = afterClickStats.count;
+      targetTotal = afterClickStats.total;
+    }
+
     // 若一开始就检测到“无评论 + 无展开控件”（count=0 && total=null && !hasMore），
     // 则直接视为无需预热，避免在没有任何锚点信号的情况下盲目滚动。
     if (

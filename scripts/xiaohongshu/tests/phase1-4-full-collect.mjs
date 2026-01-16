@@ -57,6 +57,50 @@ const argv = minimist(process.argv.slice(2));
 
 let runContext = null;
 
+function resolveBoolFlag(value, defaultValue) {
+  if (value === undefined || value === null) return defaultValue;
+  if (typeof value === 'boolean') return value;
+  const s = String(value).trim().toLowerCase();
+  if (s === 'true' || s === '1' || s === 'yes' || s === 'y') return true;
+  if (s === 'false' || s === '0' || s === 'no' || s === 'n') return false;
+  return defaultValue;
+}
+
+function isHeadlessMode() {
+  return resolveBoolFlag(argv.headless ?? argv['headless'], false);
+}
+
+function isRestartSessionMode() {
+  return resolveBoolFlag(argv.restartSession ?? argv['restart-session'], false);
+}
+
+function resolvePhase2ImagePolicy() {
+  const skip =
+    resolveBoolFlag(argv.phase2SkipImages ?? argv['phase2-skip-images'], false) ||
+    resolveBoolFlag(argv.skipImagesPhase2 ?? argv['skip-images-phase2'], false);
+
+  const downloadImages =
+    !skip &&
+    resolveBoolFlag(argv.phase2DownloadImages ?? argv['phase2-download-images'], true);
+
+  const rawMax =
+    argv.phase2MaxImages ??
+    argv['phase2-max-images'] ??
+    argv.maxImagesPhase2 ??
+    argv['max-images-phase2'];
+  const maxImagesToDownload =
+    rawMax === undefined || rawMax === null || rawMax === ''
+      ? 6
+      : Number.isFinite(Number(rawMax))
+        ? Math.max(0, Math.floor(Number(rawMax)))
+        : 6;
+
+  return {
+    downloadImages: Boolean(downloadImages && maxImagesToDownload > 0),
+    maxImagesToDownload,
+  };
+}
+
 function createRunId() {
   const now = new Date();
   const pad = (n) => String(n).padStart(2, '0');
@@ -848,17 +892,22 @@ async function waitForSessionReady(timeoutMs = 60000) {
 
 async function startSession() {
   if (launchPromise) return launchPromise;
-  console.log(`[FullCollect] 会话 ${PROFILE} 不存在，准备通过 start-headful 启动浏览器...`);
+  console.log(`[FullCollect] 准备通过 start-headful 启动浏览器会话 profile=${PROFILE}...`);
   launchPromise = new Promise((resolve) => {
     try {
-      const child = spawn('node', [startScript, '--profile', PROFILE, '--url', 'https://www.xiaohongshu.com'], {
+      const headless = isHeadlessMode();
+      const args = [startScript, '--profile', PROFILE, '--url', 'https://www.xiaohongshu.com'];
+      if (headless) args.push('--headless');
+      const child = spawn('node', args, {
         cwd: repoRoot,
         env: process.env,
         detached: true,
         stdio: 'ignore',
       });
       child.unref();
-      console.log(`[FullCollect] 已后台启动 start-headful（pid=${child.pid}），等待会话就绪...`);
+      console.log(
+        `[FullCollect] 已后台启动 start-headful（pid=${child.pid} headless=${headless}），等待会话就绪...`,
+      );
     } catch (err) {
       console.error('[FullCollect] 启动浏览器失败:', err?.message || err);
     } finally {
@@ -942,6 +991,8 @@ async function checkLoginStateByContainer() {
 
 async function ensureSessionAndLogin() {
   console.log('[FullCollect] Phase1: 检查会话 + 登录状态（容器锚点）...');
+  const wantHeadless = isHeadlessMode();
+  const restartSession = isRestartSessionMode();
 
   async function detectLoginStateWithRetry(maxAttempts = 3) {
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
@@ -960,7 +1011,7 @@ async function ensureSessionAndLogin() {
     }
   }
 
-async function ensureSessionPresence() {
+  async function ensureSessionPresence() {
     let sessions = [];
     try {
       sessions = await listSessions();
@@ -972,11 +1023,25 @@ async function ensureSessionPresence() {
     }
     const normalized = sessions.map(normalizeSession).filter(Boolean);
     const existing = normalized.find((s) => s.profileId === PROFILE);
-    if (existing) {
+    if (existing && !restartSession) {
       console.log(
         `[FullCollect] 检测到会话 ${PROFILE}，当前 URL: ${existing.currentUrl || '未知'}`,
       );
       return true;
+    }
+    if (existing && restartSession) {
+      console.warn(
+        `[FullCollect] --restart-session 已开启：将重建会话 profile=${PROFILE}（headless=${wantHeadless}）`,
+      );
+      try {
+        await browserServiceCommand('stop', { profileId: PROFILE });
+        await delay(800);
+      } catch (err) {
+        console.warn(
+          '[FullCollect] stop session 失败（继续尝试重建）:',
+          err?.message || String(err),
+        );
+      }
     }
     console.warn(
       `[FullCollect] 未在 Unified API session:list 中找到会话 ${PROFILE}，将尝试自动启动浏览器...`,
@@ -1996,6 +2061,11 @@ async function runPhase2ListOnly(keyword, targetCount, env, searchUrl = '') {
   console.log(
     `[Phase2(ListOnly)] canonical keyword="${canonicalKeyword || keyword}" url=${canonicalSearchUrl || 'unknown'}`,
   );
+  const phase2ImagePolicy = resolvePhase2ImagePolicy();
+  console.log(
+    `[Phase2(ListOnly)] imagePolicy: downloadImages=${phase2ImagePolicy.downloadImages} maxImagesToDownload=${phase2ImagePolicy.maxImagesToDownload}`,
+  );
+  emitRunEvent('phase2_image_policy', phase2ImagePolicy);
 
   const baseDir = getKeywordBaseDir(env, keyword);
   const indexPath = getSafeDetailIndexPath(env, keyword);
@@ -2436,6 +2506,8 @@ async function runPhase2ListOnly(keyword, targetCount, env, searchUrl = '') {
             detail: detailData || {},
             commentsResult: null,
             persistMode: 'detail',
+            downloadImages: phase2ImagePolicy.downloadImages,
+            maxImagesToDownload: phase2ImagePolicy.maxImagesToDownload,
           });
           if (!persistRes.success) {
             console.warn(
@@ -3705,14 +3777,18 @@ async function runPhase3And4FromIndex(keyword, targetCount, env) {
             !riskStop
           ) {
             const need = Math.max(0, MAX_NEW_COMMENTS_PER_ROUND - visitAdded);
+            const warmupRoundsThisOp = Math.min(
+              MAX_WARMUP_ROUNDS,
+              Math.max(2, Math.ceil(need / 25) * 4),
+            );
             visitOps += 1;
 
             console.log(
-              `[Note ${noteId}] Phase4: 预热并采集评论（增量模式）... need=${need} op=${visitOps}`,
+              `[Note ${noteId}] Phase4: 预热并采集评论（增量模式）... need=${need} op=${visitOps} warmupRounds=${warmupRoundsThisOp}`,
             );
             const commentsResult = await collectComments({
               sessionId: PROFILE,
-              maxWarmupRounds: MAX_WARMUP_ROUNDS,
+              maxWarmupRounds: warmupRoundsThisOp,
               allowClickCommentButton: state.commentsActivated ? false : true,
             }).catch((e) => ({
               success: false,
@@ -3757,7 +3833,20 @@ async function runPhase3And4FromIndex(keyword, targetCount, env) {
             console.log(
               `   ✅ 当前 tab 评论总数（页面上）: ${allComments.length} reachedEnd=${commentsResult.reachedEnd} emptyState=${commentsResult.emptyState}`,
             );
-            if (!state.commentsActivated) state.commentsActivated = true;
+            if (!state.commentsActivated) {
+              const totalFromHeader =
+                typeof commentsResult.totalFromHeader === 'number' &&
+                Number.isFinite(commentsResult.totalFromHeader)
+                  ? commentsResult.totalFromHeader
+                  : null;
+              const loadedAny = allComments.length > 0 || visitAdded > 0 || commentsResult.warmupCount > 0;
+              const definitelyEmpty =
+                (typeof totalFromHeader === 'number' && totalFromHeader === 0) ||
+                Boolean(commentsResult.emptyState);
+              // 只有在“确实已激活并加载出评论/明确为空”时，才关闭后续的 comment_button 点击
+              // 避免出现“headerTotal>0 但实际未加载出任何评论 -> 下一轮不再允许点击 comment_button，永远卡死”的情况。
+              if (loadedAny || definitelyEmpty) state.commentsActivated = true;
+            }
 
             const exitId =
               commentsResult.exitAnchor?.endMarkerContainerId ||
@@ -3935,6 +4024,14 @@ async function runPhase3And4FromIndex(keyword, targetCount, env) {
             } else if (seenNoteIds.has(finalNoteId)) {
               console.log(`   ⚠️ noteId=${finalNoteId} 已处理过，本轮仅复用评论结果，不再写盘`);
             } else if (doneReason === 'reached_end' || doneReason === 'empty_state') {
+              let persistMode = 'both';
+              try {
+                const contentPath = path.join(baseDir, finalNoteId, 'content.md');
+                const stat = await fs.promises.stat(contentPath).catch(() => null);
+                if (stat && stat.isFile()) persistMode = 'comments';
+              } catch {
+                // ignore
+              }
               const persistRes = await persistXhsNote({
                 sessionId: PROFILE,
                 env,
@@ -3944,6 +4041,7 @@ async function runPhase3And4FromIndex(keyword, targetCount, env) {
                 detailUrl: state.lastDetailUrl,
                 detail: state.detailData || {},
                 commentsResult: aggregatedResult,
+                persistMode,
               });
               if (!persistRes.success) {
                 console.warn(`   ⚠️ PersistXhsNote 失败 noteId=${finalNoteId}: ${persistRes.error}`);
@@ -5602,7 +5700,12 @@ async function main() {
   }
 
   initRunLogging({ env, keyword });
-  emitRunEvent('config', { target, argv });
+  emitRunEvent('config', {
+    target,
+    argv,
+    headless: isHeadlessMode(),
+    restartSession: isRestartSessionMode(),
+  });
 
   console.log('🚀 Phase1-4 全流程采集（小红书）\n');
   console.log(`配置: keyword="${keyword}" target=${target} env=${env}\n`);
