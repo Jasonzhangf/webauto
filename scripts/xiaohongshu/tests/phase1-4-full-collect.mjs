@@ -15,6 +15,17 @@ import { spawn } from 'node:child_process';
 import path from 'node:path';
 import os from 'node:os';
 import fs from 'node:fs';
+// 确保脚本可以脱离终端运行（nohup效果）
+if (process.stdin.isTTY) {
+  try {
+    // 将stdin重定向到/dev/null以避免SIGHUP
+    require('child_process').spawn('true', [], { stdio: 'ignore', detached: true });
+    // 忽略SIGHUP信号
+    process.on('SIGHUP', () => {});
+  } catch {
+    // 忽略错误，继续执行
+  }
+}
 import { fileURLToPath } from 'node:url';
 import minimist from 'minimist';
 
@@ -99,6 +110,10 @@ function resolvePhase2ImagePolicy() {
     downloadImages: Boolean(downloadImages && maxImagesToDownload > 0),
     maxImagesToDownload,
   };
+}
+
+function isDaemonMode() {
+  return resolveBoolFlag(argv.daemon ?? argv['daemon'], false);
 }
 
 function createRunId() {
@@ -758,7 +773,8 @@ async function getSearchScrollState() {
     const result = await controllerAction('browser:execute', {
       profile: PROFILE,
       script: `(() => {
-        const winY = window.scrollY || document.documentElement.scrollTop || 0;
+        const scrollingEl = document.scrollingElement || document.documentElement;
+        const winY = window.scrollY || (scrollingEl ? scrollingEl.scrollTop : 0) || 0;
         const viewport = { w: window.innerWidth || 0, h: window.innerHeight || 0 };
         const viewportHeight = viewport.h || 0;
         const cards = Array.from(document.querySelectorAll('.note-item, [class*="note-item"]'));
@@ -853,6 +869,39 @@ async function getSearchScrollState() {
               return { x: r.x, y: r.y, width: r.width, height: r.height };
             })()
           : null;
+        const windowPayload = scrollingEl
+          ? {
+              scrollTop: scrollingEl.scrollTop || 0,
+              scrollHeight: scrollingEl.scrollHeight || 0,
+              clientHeight: scrollingEl.clientHeight || 0,
+            }
+          : null;
+        const windowCanScroll = !!(
+          windowPayload &&
+          (windowPayload.scrollHeight || 0) - (windowPayload.clientHeight || 0) > 12
+        );
+        const windowEndGap = windowPayload
+          ? (windowPayload.scrollHeight || 0) - (windowPayload.clientHeight || 0) - (windowPayload.scrollTop || 0)
+          : null;
+        const windowIsAtEnd = Boolean(windowCanScroll && typeof windowEndGap === 'number' && windowEndGap <= 24);
+        const windowIsAtTop = Boolean(windowCanScroll && windowPayload && (windowPayload.scrollTop || 0) <= 2);
+
+        const listPayload = scrollEl
+          ? {
+              scrollTop: scrollEl.scrollTop || 0,
+              scrollHeight: scrollEl.scrollHeight || 0,
+              clientHeight: scrollEl.clientHeight || 0,
+            }
+          : null;
+        const canScroll = !!(
+          listPayload &&
+          (listPayload.scrollHeight || 0) - (listPayload.clientHeight || 0) > 12
+        );
+        const endGap = listPayload
+          ? (listPayload.scrollHeight || 0) - (listPayload.clientHeight || 0) - (listPayload.scrollTop || 0)
+          : null;
+        const isAtEnd = Boolean(canScroll && typeof endGap === 'number' && endGap <= 24);
+        const isAtTop = Boolean(canScroll && listPayload && (listPayload.scrollTop || 0) <= 2);
         return {
           winY,
           viewport,
@@ -861,11 +910,22 @@ async function getSearchScrollState() {
           scrollElTag: scrollEl ? (scrollEl.tagName || '') : '',
           scrollElClass: scrollEl ? (scrollEl.className || '') : '',
           listRect,
-          list: scrollEl
+          windowScroll: windowPayload
             ? {
-                scrollTop: scrollEl.scrollTop || 0,
-                scrollHeight: scrollEl.scrollHeight || 0,
-                clientHeight: scrollEl.clientHeight || 0,
+                ...windowPayload,
+                canScroll: windowCanScroll,
+                endGap: windowEndGap,
+                isAtEnd: windowIsAtEnd,
+                isAtTop: windowIsAtTop,
+              }
+            : null,
+          list: listPayload
+            ? {
+                ...listPayload,
+                canScroll,
+                endGap,
+                isAtEnd,
+                isAtTop,
               }
             : null,
         };
@@ -1188,6 +1248,22 @@ async function requestGatePermit(
 async function scrollSearchPage(direction = 'down', keywordForRecovery = null) {
   const sign = direction === 'up' ? -1 : 1;
   const before = await getSearchScrollState();
+  const preferListScroll = Boolean(before?.list?.canScroll);
+  const beforeAtEnd = preferListScroll ? Boolean(before?.list?.isAtEnd) : Boolean(before?.windowScroll?.isAtEnd);
+  const beforeAtTop = preferListScroll ? Boolean(before?.list?.isAtTop) : Boolean(before?.windowScroll?.isAtTop);
+
+  if (direction === 'down' && beforeAtEnd) {
+    console.log(
+      `[FullCollect][ScrollSearchPage] stop: already_at_end scope=${preferListScroll ? 'list' : 'window'} scrollTop=${preferListScroll ? (before?.list?.scrollTop || 0) : (before?.windowScroll?.scrollTop || 0)} endGap=${preferListScroll ? (before?.list?.endGap ?? 'NA') : (before?.windowScroll?.endGap ?? 'NA')}`,
+    );
+    return false;
+  }
+  if (direction === 'up' && beforeAtTop) {
+    console.log(
+      `[FullCollect][ScrollSearchPage] stop: already_at_top scope=${preferListScroll ? 'list' : 'window'} scrollTop=${preferListScroll ? (before?.list?.scrollTop || 0) : (before?.windowScroll?.scrollTop || 0)}`,
+    );
+    return false;
+  }
 
   // 通过列表锚点定位滚动落点（坐标），使用系统滚轮事件；禁止 JS scroll 兜底
   const anchorBefore = await verifySearchListAnchor();
@@ -1285,6 +1361,11 @@ async function scrollSearchPage(direction = 'down', keywordForRecovery = null) {
     console.warn(
       '[FullCollect][ScrollSearchPage] ⚠️ window/list scrollTop 均未变化，认为系统滚动未生效，停止以避免在同一屏死循环',
     );
+    if (after?.list?.isAtEnd) {
+      console.warn(
+        `[FullCollect][ScrollSearchPage] stop reason: already_at_end scrollTop=${after?.list?.scrollTop || 0} endGap=${after?.list?.endGap ?? 'NA'}`,
+      );
+    }
     return false;
   }
 
@@ -5683,6 +5764,19 @@ async function runPhase2To4(
 }
 
 async function main() {
+  // Daemon mode: re-spawn detached process so run is not tied to terminal
+  if (resolveBoolFlag(argv.daemon ?? argv.d, false) && process.env.WEBAUTO_DAEMON !== '1') {
+    const args = process.argv.slice(1).filter((arg) => arg !== '--daemon' && arg !== '--d');
+    const child = spawn(process.execPath, args, {
+      detached: true,
+      stdio: 'ignore',
+      env: { ...process.env, WEBAUTO_DAEMON: '1' },
+    });
+    child.unref();
+    console.log(`[Daemon] spawned pid=${child.pid}`);
+    return;
+  }
+
   const keyword = resolveKeyword();
   const target = resolveTarget();
   const env = resolveEnv();
@@ -5835,6 +5929,64 @@ async function main() {
   );
   emitRunEvent('run_success', { target });
 }
+
+function stripDaemonArgs(rawArgs) {
+  const out = [];
+  for (let i = 0; i < rawArgs.length; i += 1) {
+    const a = rawArgs[i];
+    if (a === '--daemon' || a === '--daemon=true' || a === '--daemon=false') {
+      // 支持 `--daemon true/false` 形式
+      if (a === '--daemon' && i + 1 < rawArgs.length && !String(rawArgs[i + 1] || '').startsWith('-')) {
+        i += 1;
+      }
+      continue;
+    }
+    if (String(a || '').startsWith('--daemon=')) continue;
+    out.push(a);
+  }
+  return out;
+}
+
+function spawnDaemonOrExit() {
+  if (!isDaemonMode()) return false;
+  if (process.env.WEBAUTO_DAEMON_CHILD === '1') return false;
+
+  const keyword = resolveKeyword();
+  const env = resolveEnv();
+  const target = resolveTarget();
+  const baseDir = path.join(os.homedir(), '.webauto', 'download', PLATFORM, env, keyword);
+  try {
+    fs.mkdirSync(baseDir, { recursive: true });
+  } catch {
+    // ignore
+  }
+
+  const ts = new Date().toISOString().replace(/[:.]/g, '-');
+  const logPath = path.join(baseDir, `daemon.${ts}.log`);
+  const outFd = fs.openSync(logPath, 'a');
+
+  const scriptPath = process.argv[1];
+  const forwarded = stripDaemonArgs(process.argv.slice(2));
+
+  const child = spawn(process.execPath, [scriptPath, ...forwarded], {
+    detached: true,
+    stdio: ['ignore', outFd, outFd],
+    cwd: process.cwd(),
+    env: { ...process.env, WEBAUTO_DAEMON_CHILD: '1' },
+  });
+  child.unref();
+
+  console.log('[Daemon] spawned');
+  console.log(`- pid=${child.pid}`);
+  console.log(`- keyword=${keyword}`);
+  console.log(`- target=${target}`);
+  console.log(`- env=${env}`);
+  console.log(`- log=${logPath}`);
+  console.log('父进程已退出，你可以关闭终端，任务会在后台继续运行。');
+  process.exit(0);
+}
+
+spawnDaemonOrExit();
 
 main().catch((err) => {
   const reasonRaw = err?.message || String(err || '');

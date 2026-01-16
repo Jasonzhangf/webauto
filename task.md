@@ -18,6 +18,10 @@
 3. Phase3（可选）：基于 Phase2 的列表，使用 **N 个 tab 常驻补位** 轮转采集评论（默认 4；每帖每轮最多 100 条），避免单帖连续滚动。
 4. Phase4：落盘（续传 + 去重）：中断后按 step 恢复；本地已有内容必须可跳过/可增量更新。
 
+### 🧩 新增：后台运行（2026-01-16）
+
+- `phase1-4-full-collect.mjs` 支持 `--daemon true`：父进程会以 detached 方式拉起子进程并立刻退出，子进程持续写入本地 run log；关闭终端不影响任务继续运行。
+
 ### ✅ 已完成（稳定部分）
 
 - [x] Phase1 基础服务守门人：脚本可自动拉起 `unified-api`/`browser-service`，复用已存在的 `xiaohongshu_fresh` 会话；未找到会话时可后台启动 `start-headful` 并等待会话出现。
@@ -27,6 +31,7 @@
 - [x] Run-level 日志与时间线：每次运行会生成 `run.<runId>.log` 与 `run-events.<runId>.jsonl`，用于回放和定位卡点（目录在 `~/.webauto/download/xiaohongshu/{env}/{keyword}/`）。
 - [x] 评论区激活与 hover：对“正文很长导致评论区不在视口 / 需先点评论按钮”的页面，WarmupComments 会先点击 `xiaohongshu_detail.comment_button`（`.chat-wrapper`）再重新定位 `comment_section`，并在滚动前强制 hover/click 到评论区，避免焦点停在输入框导致滚动无效。
 - [x] Phase3-4 Tab 常驻补位：不再“4 帖一组整体关闭”，改为 **N 个 tab 常驻**（默认 4），当检测到 `reachedEnd` 或 `emptyState`（或达到 `maxRoundsPerNote`）即判定该帖完成，并在同一个 tab 内执行 `goto` 导航到下一条链接补位（队列耗尽则保持空闲）。
+- [x] Headless 测试开关：脚本支持 `--headless true` + `--restart-session true` 以 headless 模式启动/重建会话并执行采集（用于自动化回归测试）。
 
 ### 🧨 当前阻塞（需要复现 + 修复）
 
@@ -36,7 +41,8 @@
 2. [x] Phase2 系统滚动：已移除 JS scroll 兜底；滚动改为“系统滚轮”：
    - 优先走 `browser-service(7704) /command mouse:wheel`（服务重启后生效）；
    - 若当前服务版本未包含 `mouse:wheel`，脚本自动回退到 `browser-service(8765) WS user_action.scroll`（仍是 Playwright mouse.wheel，非 JS 滚动）；
-   - 每次滚动后记录并验证 `scrollY/scrollTop/visibleSig`，无变化则停下避免死循环。
+   - 每次滚动后记录并验证 `scrollY/scrollTop/visibleSig`，无变化则停下避免死循环；
+   - 新增 `isAtEnd` 判定：滚动前先判断是否已到底（list/window 任选其一），已到底则直接 stop 并记录原因，避免误报“滚动无变化”。
 3. [ ] Phase2 关键字漂移检测：一旦 URL keyword 与首次搜索 canonical keyword 不一致，必须停下（或仅允许一次“后退”恢复），避免在错误关键词下继续采集。
 4. [ ] Phase2 “无 token”处理：打开详情后如果 URL 没有 `xsec_token`，立刻停在详情页（给人工检查）+ 生成截图/DOM 快照 + 明确退出原因/退出码。
 5. [ ] Phase2 速度度量：把“每条详情打开耗时、总耗时、平均耗时”写入 JSONL（便于确认慢在哪里）。
