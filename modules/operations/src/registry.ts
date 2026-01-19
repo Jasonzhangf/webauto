@@ -16,6 +16,7 @@ export interface OperationContext {
   systemInput?: {
     mouseMove: (x: number, y: number, steps?: number) => Promise<any>;
     mouseClick: (x: number, y: number, button?: string, clicks?: number) => Promise<any>;
+    mouseWheel?: (deltaX: number, deltaY: number) => Promise<any>;
   };
 }
 

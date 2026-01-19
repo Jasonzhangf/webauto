@@ -42,6 +42,38 @@ curl http://127.0.0.1:7704/health
 - **Session 命名规则**：所有浏览器会话统一以 `{platform}_{variant}` 命名，platform 例如 `xiaohongshu`/`weibo`，variant 例如 `fresh`/`prod`/`dev`；若需要多实例则在末尾追加两位序号（如 `xiaohongshu_fresh_01`）。脚本中严禁创建临时 profile 名，确保 headful 会话可长时间复用并避免风控。
 - **单平台单会话**：同一平台在任意时刻只允许存在一个会话。启动新脚本前必须先调用 `node scripts/xiaohongshu/tests/status.mjs`（或对应平台 status 脚本）确认会话状态，若 `profile` 已存在则只能复用；若不存在再运行 Phase1 脚本创建。所有测试脚本都应该先读取状态再执行，以便随时回到统一的测试起点。
 - **安全搜索流程**：严禁通过构造搜索结果 URL 直接导航；必须在页面内聚焦搜索框，通过模拟输入 + 回车触发搜索，避免触发风控。
+- **安全链接采集（小红书专项，一级规则）**：
+  - **禁止使用 href 直接采集链接**：小红书帖子的 `href` 属性中的链接（如 `/explore/{noteId}`）**不包含** `xsec_token`，直接访问会触发 404 或风控。
+  - **必须点击进入帖子获取真实链接**：
+    1. 在搜索结果页，记录当前搜索 URL（`searchUrl`，包含关键词和参数）。
+    2. 通过容器操作点击帖子卡片（`container:operation click`），触发页面导航。
+    3. 导航完成后，从浏览器获取当前 URL（`window.location.href`），这个 URL 包含 `xsec_token` 等安全参数，是唯一可安全访问的链接。
+    4. 记录该链接时，同时保存 `searchUrl`，用于后续校验。
+  - **链接校验机制**：
+    - Phase 2 采集完成后，必须校验每个帖子的 `searchUrl` 是否与目标关键词一致。
+    - 如果发现不一致（例如误采集了推荐流中的帖子），从列表中移除该链接。
+    - 计算缺失数量，返回搜索结果页，继续采集直到满足目标数量。
+  - **错误示例（严禁）**：
+    ```javascript
+    // ❌ 错误：直接读取 href
+    const link = element.getAttribute('href'); // /explore/abc123
+    const url = `https://www.xiaohongshu.com${link}`; // 无 xsec_token，会触发风控
+    ```
+  - **正确示例**：
+    ```javascript
+    // ✅ 正确：点击后获取真实 URL
+    await controllerAction('container:operation', {
+      containerId: 'xiaohongshu_search.search_result_item',
+      operationId: 'click',
+      sessionId: PROFILE
+    });
+    await delay(2000); // 等待导航完成
+    const realUrl = await controllerAction('browser:execute', {
+      profile: PROFILE,
+      script: 'window.location.href'
+    });
+    // realUrl 包含 xsec_token，可安全访问
+    ```
   - （新增）所有自动搜索必须经过 SearchGate 节流服务授权：
     - SearchGate 默认规则：同一 key（通常是 profileId，例如 `xiaohongshu_fresh`）在任意 60s 窗口内最多允许 2 次搜索；
     - 入口脚本：`node scripts/search-gate-server.mjs`（监听 `WEBAUTO_SEARCH_GATE_PORT`，默认 7790）；
@@ -52,8 +84,8 @@ curl http://127.0.0.1:7704/health
   - `node scripts/test-container-events-direct.mjs <profile> [url]`：订阅 Bus `container:*` 事件并触发一次 `containers:match`，用于验证容器事件派发链路。
   - `node scripts/build-container.mjs <profile> <url>`：交互式容器构建工具，支持任意站点（weibo/xiaohongshu 等），默认不再绑定具体平台。
 - **Workflow 驱动调试（推荐入口）**：平台相关脚本一律通过 Workflow + Block 调用能力，脚本只做 CLI/参数解析：
-  - 小红书登录与状态：`modules/workflow/workflows/XiaohongshuLoginWorkflow.ts` + `scripts/xiaohongshu/tests/phase1-session-login.mjs`。
-  - 小红书采集主流程：`modules/workflow/definitions/xiaohongshu-collect-workflow-v2.ts` + `node scripts/run-xiaohongshu-workflow-v2.ts --keyword "手机膜" --count 5`。
+- 小红书 Phase1（App 模块统一入口）：`node scripts/xiaohongshu/phase1-start.mjs`（启动 `xiaohongshu_fresh`，headful）。
+- 小红书 Phase2（App 模块统一入口）：`node scripts/xiaohongshu/phase2-collect.mjs --keyword "手机膜" --target 50`。
   - 所有小红书 Block（搜索 / 列表 / 详情 / 评论 / 关闭）均返回 `anchor` 字段（containerId + Rect），配合高亮可完整回环每一步是否命中正确元素。
 - **锚点 + 高亮 + Rect 回环**：调试时优先使用容器锚点而不是硬编码 DOM 选择器：
   - 通过 `container:operation highlight` 或 `scripts/container-op.mjs <profile> <containerId> highlight` 在页面上高亮容器。
@@ -77,7 +109,7 @@ curl http://127.0.0.1:7704/health
   - 不确定：两类容器都未命中，需由上层 workflow 决定是否跳转登录页或重试。
 - 推荐参考实现：
   - `scripts/xiaohongshu/tests/status-v2.mjs`：容器驱动的登录状态检查脚本。
-  - `scripts/xiaohongshu/tests/phase1-session-login.mjs`：Phase1 登录调试脚本，仅依赖登录锚点容器。
+- `scripts/xiaohongshu/phase1-start.mjs`：Phase1 统一入口，自动启动并复用 `xiaohongshu_fresh` profile（headful）。
   - `modules/workflow/blocks/EnsureLoginBlock.ts`：通用 EnsureLogin Block，通过 Unified API `containers:match` 判定登录态。
 - 启动脚本 `scripts/start-headful.mjs` / `launcher/core/launcher.mjs` 已接入该模型，对 `xiaohongshu_*` profile 统一使用容器驱动登录检测。
 
@@ -294,6 +326,77 @@ apps/floating-panel/
 - 所有调试脚本
 - 所有需要截图验证的操作
 - 所有需要视觉确认的步骤
+
+### 11. 【强制】系统级操作原则（防风控核心）
+
+**原则：**
+- **所有点击、输入、滚动操作必须使用系统级 API**，禁止使用页面 JS 方法
+- 点击：使用 `page.mouse.click()` 或 `browserService.keyboard:press` + 系统坐标
+- 输入：使用 `page.keyboard.type()` 或 `browserService.keyboard:type`
+- 滚动：使用 `page.mouse.wheel()` 或 `page.keyboard.press('PageDown')`
+- 返回：使用 `page.keyboard.press('Escape')` 而非 `history.back()`
+
+**禁止的 JS 操作：**
+```javascript
+// ❌ 禁止：这些操作会被风控检测
+element.click()                  // DOM 点击
+element.scrollIntoView()         // JS 滚动
+window.history.back()            // JS 导航
+window.location.href = '...'     // JS 跳转
+element.focus(); element.value = '...' // JS 输入
+```
+
+**正确的系统操作：**
+```javascript
+// ✅ 正确：使用 Playwright 系统级 API
+await page.mouse.click(x, y)                    // 系统点击
+await page.keyboard.type('text', { delay })     // 系统输入
+await page.keyboard.press('Escape')             // 系统 ESC
+await page.keyboard.press('PageDown')           // 系统滚动
+await page.mouse.wheel(0, -300)                 // 系统滚轮
+```
+
+**原因：**
+- 小红书等平台通过浏览器事件特征识别爬虫
+- JS 触发的事件缺少真实的用户行为特征（时序、坐标、压力）
+- 系统 API 会产生真实的操作系统事件，与人工操作完全一致
+- 风控系统无法区分系统 API 和真人操作
+
+**范围：**
+- 所有 Phase 脚本（1-4）
+- 所有 Workflow Block
+- 所有容器操作
+- **例外**：仅允许用于读取页面状态（如 `getBoundingClientRect()` 获取坐标）
+
+**违规示例：**
+```javascript
+// ❌ 错误：直接点击 DOM 元素
+await element.click()
+
+// ❌ 错误：JS 滚动
+await element.scrollIntoView()
+
+// ❌ 错误：JS 导航
+window.history.back()
+```
+
+**正确示例：**
+```javascript
+// ✅ 正确：先获取坐标，再系统点击
+const rect = await element.getBoundingClientRect()
+await page.mouse.click(rect.x + rect.width / 2, rect.y + rect.height / 2)
+
+// ✅ 正确：系统滚动
+await page.keyboard.press('PageDown')
+
+// ✅ 正确：系统返回
+await page.keyboard.press('Escape')
+```
+
+**检测方法：**
+- 代码审查时搜索 `element.click`、`scrollIntoView`、`history.back`、`location.href` 等模式
+- 使用 `page.mouse` 和 `page.keyboard` 的操作视为合规
+- 任何绕过系统 API 的操作视为 **一级违规**
 
 ### 0. 【最高优先级】永远禁止使用模糊匹配的进程终止命令
 

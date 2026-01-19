@@ -2,7 +2,6 @@ import { ContainerDefinitionLoader } from '../../libs/containers/src/loader/Cont
 import { BrowserDiscoveryAdapter } from '../../libs/containers/src/adapter/BrowserDiscoveryAdapter.js';
 import { RuntimeController } from '../../libs/containers/src/engine/RuntimeController.js';
 import { TreeDiscoveryEngine } from '../../libs/containers/src/engine/TreeDiscoveryEngine.js';
-import { OperationExecutor } from '../../libs/containers/src/engine/OperationExecutor.js';
 import { logDebug } from '../../modules/logging/src/index.js';
 import { UiController } from '../../services/controller/src/controller.js';
 import { handleContainerOperations } from './container-operations-handler.js';
@@ -17,8 +16,9 @@ import { getActionUsage, getAllUsages } from '../../modules/api-usage/src/index.
 import registerCoreUsage from './register-core-usage.js';
 import { RemoteSessionManager } from './RemoteSessionManager.js';
 import { ensureBuiltinOperations } from '../../modules/operations/src/builtin.js';
+import { getContainerExecutor } from '../../modules/operations/src/executor.js';
 
-// Ensure builtin operations are registered BEFORE creating OperationExecutor
+// Ensure builtin operations are registered before handling any operations
 ensureBuiltinOperations();
 import { getStateRegistry } from './state-registry.js';
 
@@ -284,19 +284,8 @@ class UnifiedApiServer {
       console.warn('[unified-api] session sync failed:', err?.message || err);
     }
 
-    // Create OperationExecutor
-    this.containerExecutor = new OperationExecutor(
-      (sessionId) => {
-        const session = sessionManager.getSession(sessionId);
-        if (!session) {
-          throw new Error(`Session not found`);
-        }
-        return session.ensurePage();
-      },
-      { info: (...args: any[]) => logDebug('container-ops', 'info', args),
-        warn: (...args: any[]) => logDebug('container-ops', 'warn', args),
-        error: (...args: any[]) => logDebug('container-ops', 'error', args) }
-    );
+    // Container operations executor (fills selector + merges container op config)
+    this.containerExecutor = getContainerExecutor();
 
     // HTTP routes - unified request handler
     server.on('request', async (req, res) => {

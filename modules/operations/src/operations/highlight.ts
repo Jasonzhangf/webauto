@@ -4,6 +4,8 @@ export interface HighlightConfig {
   selector: string;
   style?: string;
   duration?: number;
+  index?: number;
+  target?: string;
 }
 
 async function runHighlight(ctx: OperationContext, config: HighlightConfig) {
@@ -12,17 +14,51 @@ async function runHighlight(ctx: OperationContext, config: HighlightConfig) {
   }
   const style = config.style || '2px solid #fbbc05';
   const duration = config.duration ?? 1500;
+  const index = Number.isFinite(config.index) ? Math.max(0, Math.floor(config.index as number)) : null;
+  const target = typeof config.target === 'string' ? config.target.trim() : '';
+
   return ctx.page.evaluate(
     (data) => {
       const nodes = Array.from(document.querySelectorAll(data.selector));
       if (!nodes.length) {
         return { success: false, error: 'element not found', count: 0 };
       }
-      const cleanups = nodes.map((el) => {
-        const originalOutline = el.style.outline;
-        el.style.outline = data.style;
+      const selected =
+        typeof data.index === 'number'
+          ? (() => {
+              const root = nodes[data.index] as Element | undefined;
+              if (!root) return [];
+              let el: Element = root;
+              if (data.target) {
+                if (data.target === 'self') {
+                  el = root;
+                } else if (data.target === 'img') {
+                  el = (root.querySelector('img') as Element | null) || root;
+                } else {
+                  el = (root.querySelector(data.target) as Element | null) || root;
+                }
+              }
+              return [el];
+            })()
+          : nodes;
+
+      if (!selected.length) {
+        return { success: false, error: 'element not found', count: 0 };
+      }
+
+      const cleanups = selected.map((el) => {
+        const originalOutline = (el as HTMLElement).style?.outline;
+        try {
+          (el as HTMLElement).style.outline = data.style;
+        } catch {
+          // ignore
+        }
         return () => {
-          el.style.outline = originalOutline;
+          try {
+            (el as HTMLElement).style.outline = originalOutline;
+          } catch {
+            // ignore cleanup errors
+          }
         };
       });
       const cleanup = () => {
@@ -37,9 +73,15 @@ async function runHighlight(ctx: OperationContext, config: HighlightConfig) {
       if (data.duration > 0) {
         setTimeout(cleanup, data.duration);
       }
-      return { success: true, count: nodes.length };
+      const first = selected[0] as Element;
+      const r = first.getBoundingClientRect();
+      return {
+        success: true,
+        count: selected.length,
+        rect: { x1: r.left, y1: r.top, x2: r.right, y2: r.bottom },
+      };
     },
-    { selector: config.selector, style, duration },
+    { selector: config.selector, style, duration, index, target },
   );
 }
 

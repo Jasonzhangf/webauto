@@ -72,8 +72,8 @@
     {
       "type": "click",
       "config": {
-        "target": "img",
-        "comment": "点击图片"
+        "target": "self",
+        "comment": "点击整个卡片"
       }
     },
     {

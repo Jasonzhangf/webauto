@@ -34,7 +34,55 @@ export async function handleContainerOperations(
     logDebug('container-ops', 'execute', { containerId, operationId, sessionId });
 
     try {
-      const result = await executor.execute(containerId, operationId, config || {}, { sessionId });
+      const session = sessionManager?.getSession?.(sessionId);
+      if (!session) {
+        throw new Error(`Session not found: ${sessionId}`);
+      }
+      const page = await session.ensurePage();
+
+      const context = {
+        containerId,
+        page: {
+          evaluate: async (fn: (...args: any[]) => any, ...args: any[]) => page.evaluate(fn, ...args),
+          keyboard: page.keyboard
+            ? {
+                type: async (text: string, options?: { delay?: number; submit?: boolean }) => {
+                  await page.keyboard.type(text, { delay: options?.delay });
+                  if (options?.submit) {
+                    await page.keyboard.press('Enter');
+                  }
+                },
+                press: async (key: string, options?: { delay?: number }) => {
+                  await page.keyboard.press(key, { delay: options?.delay });
+                },
+              }
+            : undefined,
+        },
+        systemInput: {
+          mouseMove: async (x: number, y: number, steps?: number) => {
+            if (!page.mouse?.move) throw new Error('Page mouse.move not available');
+            await page.mouse.move(x, y, { steps: steps || 1 });
+            return { success: true };
+          },
+          mouseClick: async (x: number, y: number, button?: string, clicks?: number) => {
+            if (!page.mouse?.click) throw new Error('Page mouse.click not available');
+            await page.mouse.click(x, y, { button: button || 'left', clickCount: clicks || 1 });
+            return { success: true };
+          },
+          mouseWheel: async (deltaX: number, deltaY: number) => {
+            if (!page.mouse?.wheel) throw new Error('Page mouse.wheel not available');
+            await page.mouse.wheel(deltaX || 0, deltaY || 0);
+            return { success: true };
+          },
+        },
+        logger: {
+          info: (...args: any[]) => logDebug('container-ops', 'info', args),
+          warn: (...args: any[]) => logDebug('container-ops', 'warn', args),
+          error: (...args: any[]) => logDebug('container-ops', 'error', args),
+        },
+      };
+
+      const result = await executor.execute(containerId, operationId, config || {}, context);
 
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ success: true, data: result }));

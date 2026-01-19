@@ -53,6 +53,9 @@ export class RemoteBrowserSession {
             delay: options?.delay || 50
           });
         },
+        wheel: async (deltaX: number, deltaY: number) => {
+          return this.sendCommand('mouse:wheel', { deltaX, deltaY });
+        },
       },
       keyboard: {
         type: async (text: string, options?: { delay?: number; submit?: boolean }) => {
@@ -96,7 +99,9 @@ export class RemoteBrowserSession {
     });
 
     if (!response.ok) {
-      throw new Error(`Browser Service command failed: ${response.statusText}`);
+      const text = await response.text().catch(() => '');
+      const detail = text ? ` | ${text}` : '';
+      throw new Error(`Browser Service command failed: HTTP ${response.status} ${response.statusText}${detail}`);
     }
 
     const result: any = await response.json();
@@ -132,9 +137,16 @@ export class RemoteBrowserSession {
   }
 
   async evaluate(expression: string | ((arg?: any) => any), arg?: any): Promise<any> {
+    // 注意：tsx/esbuild 可能会在函数源码中注入 __name 等辅助方法；
+    // 直接 toString() 后在页面上下文执行会触发 ReferenceError。
+    // 这里注入一个 noop __name 以保证序列化函数可执行。
     const script =
       typeof expression === 'function'
-        ? `(${expression.toString()})(${JSON.stringify(arg)})`
+        ? (() => {
+            const fnSource = expression.toString();
+            const argSource = typeof arg === 'undefined' ? 'undefined' : JSON.stringify(arg);
+            return `(function(){ const __name = (fn) => fn; return (${fnSource})(${argSource}); })()` as string;
+          })()
         : expression;
 
     return this.sendCommand('evaluate', { script });

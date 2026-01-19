@@ -7,6 +7,7 @@ import { clickOperation } from './operations/click.js';
 import { typeOperation } from './operations/type.js';
 import { findChildOperation } from './operations/find-child.js';
 import { navigateOperation } from './operations/navigate.js';
+import { keyOperation } from './operations/key.js';
 
 let initialized = false;
 
@@ -19,6 +20,7 @@ export function ensureBuiltinOperations() {
   registerOperation(extractOperation);
   registerOperation(clickOperation);
   registerOperation(typeOperation);
+  registerOperation(keyOperation);
   registerOperation(findChildOperation);
   registerOperation(navigateOperation);
   initialized = true;

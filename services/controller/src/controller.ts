@@ -245,10 +245,20 @@ export class UiController {
        return this.handleBrowserHighlightDomPath(payload);
      case 'browser:execute':
        return this.handleBrowserExecute(payload);
-     case 'browser:cancel-pick':
+     case 'browser:screenshot':
+       return this.handleBrowserScreenshot(payload);
+     case 'browser:goto':
+       return this.handleBrowserGoto(payload);
+      case 'browser:cancel-pick':
        return this.handleBrowserCancelDomPick(payload);
       case 'browser:pick-dom':
         return this.handleBrowserPickDom(payload);
+      case 'keyboard:press':
+        return this.handleKeyboardPress(payload);
+      case 'keyboard:type':
+        return this.handleKeyboardType(payload);
+      case 'mouse:wheel':
+        return this.handleMouseWheel(payload);
       case 'dom:branch:2':
         return this.handleDomBranch2(payload);
       case 'dom:pick:2':
@@ -638,6 +648,78 @@ export class UiController {
       const errorMessage = err?.message || '执行脚本失败';
       throw new Error(errorMessage);
     }
+  }
+
+  async handleBrowserScreenshot(payload: ActionPayload = {}) {
+    const profileId = (payload.profileId || payload.profile || payload.sessionId || 'default').toString();
+    const fullPage = typeof payload.fullPage === 'boolean' ? payload.fullPage : Boolean(payload.fullPage);
+    const result = await this.browserServiceCommand('screenshot', { profileId, fullPage });
+    return { success: true, data: result };
+  }
+
+  private getBrowserServiceHttpUrl(): string {
+    return `${this.defaultHttpProtocol}://${this.defaultHttpHost}:${this.defaultHttpPort}`;
+  }
+
+  private async browserServiceCommand(action: string, args: Record<string, any>) {
+    const res = await fetch(`${this.getBrowserServiceHttpUrl()}/command`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action, args }),
+      signal: AbortSignal.timeout(20000),
+    });
+
+    const raw = await res.text();
+    let data: any = {};
+    try {
+      data = raw ? JSON.parse(raw) : {};
+    } catch {
+      data = { raw };
+    }
+
+    if (!res.ok) {
+      throw new Error(data?.error || data?.body?.error || `browser-service command "${action}" HTTP ${res.status}`);
+    }
+    if (data && data.ok === false) {
+      throw new Error(data.error || `browser-service command "${action}" failed`);
+    }
+    if (data && data.error) {
+      throw new Error(data.error);
+    }
+    return data.body ?? data;
+  }
+
+  async handleBrowserGoto(payload: ActionPayload = {}) {
+    const profileId = (payload.profileId || payload.profile || payload.sessionId || 'default').toString();
+    const url = (payload.url || '').toString();
+    if (!url) throw new Error('url required');
+    const result = await this.browserServiceCommand('goto', { profileId, url });
+    return { success: true, data: result };
+  }
+
+  async handleKeyboardPress(payload: ActionPayload = {}) {
+    const profileId = (payload.profileId || payload.profile || payload.sessionId || 'default').toString();
+    const key = (payload.key || 'Enter').toString();
+    const delay = typeof payload.delay === 'number' ? payload.delay : undefined;
+    const result = await this.browserServiceCommand('keyboard:press', { profileId, key, ...(delay ? { delay } : {}) });
+    return { success: true, data: result };
+  }
+
+  async handleKeyboardType(payload: ActionPayload = {}) {
+    const profileId = (payload.profileId || payload.profile || payload.sessionId || 'default').toString();
+    const text = (payload.text ?? '').toString();
+    const delay = typeof payload.delay === 'number' ? payload.delay : undefined;
+    const submit = typeof payload.submit === 'boolean' ? payload.submit : Boolean(payload.submit);
+    const result = await this.browserServiceCommand('keyboard:type', { profileId, text, ...(delay ? { delay } : {}), ...(submit ? { submit } : {}) });
+    return { success: true, data: result };
+  }
+
+  async handleMouseWheel(payload: ActionPayload = {}) {
+    const profileId = (payload.profileId || payload.profile || payload.sessionId || 'default').toString();
+    const deltaY = Number(payload.deltaY ?? payload.y ?? payload.dy ?? 0) || 0;
+    const deltaX = Number(payload.deltaX ?? payload.x ?? payload.dx ?? 0) || 0;
+    const result = await this.browserServiceCommand('mouse:wheel', { profileId, deltaX, deltaY });
+    return { success: true, data: result };
   }
 
   async handleBrowserHighlightDomPath(payload: ActionPayload = {}) {
