@@ -72,6 +72,9 @@ export async function execute(input: CollectCommentsInput): Promise<CollectComme
   await delay(1500);
 
   // 2. 循环采集评论
+  let noNewCount = 0; // 连续无新增计数器
+  const MAX_NO_NEW = 3; // 连续 3 轮无新增才停止
+
   while (round < maxRounds) {
     round++;
 
@@ -90,6 +93,7 @@ export async function execute(input: CollectCommentsInput): Promise<CollectComme
     const items = extractResult.items || [];
 
     // 2.2 去重并添加
+    const prevCount = allComments.length;
     for (const item of items) {
       const key = `${item.userId || ''}:${item.content || ''}`;
       if (seen.has(key)) continue;
@@ -104,16 +108,30 @@ export async function execute(input: CollectCommentsInput): Promise<CollectComme
       });
     }
 
-    console.log(`[Phase34CollectComments] Round ${round}: 新增 ${allComments.length - lastCount} 条，总计 ${allComments.length}`);
-    lastCount = allComments.length;
+    const newCount = allComments.length - prevCount;
+    console.log(`[Phase34CollectComments] Round ${round}: 新增 ${newCount} 条，总计 ${allComments.length}`);
 
-    // 2.3 检查是否达到批次大小
+    // 2.3 如果有新增，重置无新增计数器
+    if (newCount > 0) {
+      noNewCount = 0;
+    } else {
+      noNewCount++;
+      console.log(`[Phase34CollectComments] 无新评论计数: ${noNewCount}/${MAX_NO_NEW}`);
+    }
+
+    // 2.4 检查是否达到批次大小
     if (allComments.length >= batchSize) {
       console.log(`[Phase34CollectComments] 已达到批次大小 ${batchSize}，停止采集`);
       break;
     }
 
-    // 2.4 滚动加载更多
+    // 2.5 连续无新增检测
+    if (noNewCount >= MAX_NO_NEW) {
+      console.log(`[Phase34CollectComments] 连续 ${MAX_NO_NEW} 轮无新评论，停止采集`);
+      break;
+    }
+
+    // 2.6 滚动加载更多
     const scrollResult = await controllerAction('container:operation', {
       containerId: 'xiaohongshu_detail.comment_list',
       operationId: 'scroll',
@@ -127,12 +145,6 @@ export async function execute(input: CollectCommentsInput): Promise<CollectComme
     }
 
     await delay(1500);
-
-    // 2.5 检查是否有新评论（连续 2 轮无新增则停止）
-    if (round > 2 && items.length === 0) {
-      console.log(`[Phase34CollectComments] 连续无新评论，停止采集`);
-      break;
-    }
   }
 
   console.log(`[Phase34CollectComments] 完成，共采集 ${allComments.length} 条评论`);

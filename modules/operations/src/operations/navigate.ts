@@ -129,29 +129,38 @@ async function resolveTargetUrl(ctx: OperationContext, config: NavigateConfig): 
   return { url: absoluteUrl, ...info };
 }
 
+function isXiaohongshuUrl(url: string): boolean {
+  return /(^https?:\/\/)?(www\.)?xiaohongshu\.com/i.test(url || '');
+}
+
+function isAllowedXiaohongshuNavigate(url: string): boolean {
+  // 小红书强规则：禁止通过代码构造/抽取链接进行导航（尤其是 /explore、/search_result）
+  // 仅允许回到站点主页，其他页面必须通过页面内点击/搜索流转生成带 token 的 URL。
+  try {
+    const u = new URL(url);
+    const p = u.pathname || '/';
+    if (p === '/' || p === '' || p === '/explore') return true; // /explore 作为站点入口页允许
+    return false;
+  } catch {
+    return false;
+  }
+}
+
 export async function runNavigateOperation(ctx: OperationContext, config: NavigateConfig) {
   const target = await resolveTargetUrl(ctx, config);
   if (!target.url) {
     return { success: false, error: 'navigate: empty url' };
   }
-  const mode = config.mode === 'replace' ? 'replace' : config.mode === 'href' ? 'href' : 'assign';
 
-  const navResult = await ctx.page.evaluate(
-    ({ url, mode }) => {
-      if (!url) {
-        return { success: false, error: 'navigate: empty url' };
-      }
-      if (mode === 'replace') {
-        window.location.replace(url);
-      } else if (mode === 'href') {
-        window.location.href = url;
-      } else {
-        window.location.assign(url);
-      }
-      return { success: true, href: url };
-    },
-    { url: target.url, mode },
-  );
+  if (isXiaohongshuUrl(target.url) && !isAllowedXiaohongshuNavigate(target.url)) {
+    return { success: false, error: `navigate: disabled for xiaohongshu url=${target.url}` };
+  }
+
+  try {
+    await (ctx.page as any).goto(target.url, { waitUntil: 'domcontentloaded' });
+  } catch (e: any) {
+    return { success: false, error: `navigate: page.goto failed: ${e?.message || String(e)}` };
+  }
 
   const waitAfter = resolveWaitAfter(config);
   if (waitAfter > 0) {
@@ -163,7 +172,7 @@ export async function runNavigateOperation(ctx: OperationContext, config: Naviga
     url: target.url,
     noteId: target.noteId,
     xsecToken: target.xsecToken,
-    navigation: navResult,
+    navigation: { success: true, href: target.url, via: 'page.goto' },
   };
 }
 

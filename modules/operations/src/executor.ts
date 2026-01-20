@@ -91,8 +91,41 @@ export class ContainerExecutor {
       config = { ...config, useSystemMouse: true };
     }
 
+    // click：如果调用方明确给了坐标/bbox，则优先走坐标点击，避免被容器默认 selector 覆盖
+    if (
+      operationId === 'click' &&
+      config &&
+      typeof config === 'object' &&
+      (Boolean((config as any).bbox) ||
+        (typeof (config as any).x === 'number' && typeof (config as any).y === 'number'))
+    ) {
+      const next = { ...(config as any) };
+      delete (next as any).selector;
+      config = next;
+    }
+
+    // extract：注入容器 extractors（兼容 container-library 的 extract operation fields: string[]）
+    if (operationId === 'extract' && config && typeof config === 'object' && !('extractors' in config)) {
+      try {
+        const { container } = await this.getContainerForContext(containerId, context);
+        const extractors = (container as any)?.extractors;
+        if (extractors && typeof extractors === 'object' && !Array.isArray(extractors)) {
+          config = { ...config, extractors };
+        }
+      } catch {
+        // ignore
+      }
+    }
+
     // 如果操作需要 selector，则从容器定义中补齐
-    if (this.requiresSelector(operation) && !config.selector) {
+    const isClickWithCoordinates =
+      operationId === 'click' &&
+      config &&
+      typeof config === 'object' &&
+      (Boolean((config as any).bbox) ||
+        (typeof (config as any).x === 'number' && typeof (config as any).y === 'number'));
+
+    if (this.requiresSelector(operation) && !config.selector && !isClickWithCoordinates) {
       const selector = await this.getSelectorForContainer(containerId, context);
       if (!selector) {
         return {

@@ -7,7 +7,6 @@
 export interface ScrollNextBatchInput {
   sessionId: string;
   distance?: number;
-  behavior?: 'smooth' | 'instant';
   serviceUrl?: string;
 }
 
@@ -25,49 +24,61 @@ export interface ScrollNextBatchOutput {
  * @returns Promise<ScrollNextBatchOutput>
  */
 export async function execute(input: ScrollNextBatchInput): Promise<ScrollNextBatchOutput> {
-  const { sessionId, distance = 800, behavior = 'smooth', serviceUrl = 'http://127.0.0.1:7704' } = input;
+  const { sessionId, distance = 800, serviceUrl = 'http://127.0.0.1:7704' } = input;
 
   const commandUrl = `${serviceUrl}/command`;
 
   try {
-    const evalRes = await fetch(commandUrl, {
+    const beforeRes = await fetch(commandUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         action: 'evaluate',
         args: {
           profileId: sessionId,
-          script: `
-            (() => {
-              const previousPosition = window.scrollY || 0;
-              window.scrollBy({
-                top: ${distance},
-                behavior: '${behavior}'
-              });
-              const newPosition = window.scrollY || 0;
-              return {
-                scrolled: true,
-                previousPosition,
-                newPosition
-              };
-            })()
-          `
-        }
-      })
+          script: 'window.scrollY || 0',
+        },
+      }),
     });
+    const beforeData = await beforeRes.json().catch(() => ({} as any));
+    const previousPosition = Number(beforeData?.data?.result ?? beforeData?.body?.result ?? beforeData?.result ?? 0) || 0;
 
-    const evalData = await evalRes.json();
-
-    if (!evalData.success) {
+    const wheelRes = await fetch(commandUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'mouse:wheel',
+        args: {
+          profileId: sessionId,
+          deltaX: 0,
+          deltaY: Math.max(-800, Math.min(800, Number(distance) || 0)),
+        },
+      }),
+    });
+    const wheelData = await wheelRes.json().catch(() => ({} as any));
+    if (wheelData?.ok === false || wheelData?.success === false) {
       return {
         scrolled: false,
-        previousPosition: 0,
-        newPosition: 0,
-        error: 'Failed to scroll'
+        previousPosition,
+        newPosition: previousPosition,
+        error: wheelData?.error || 'mouse_wheel_failed',
       };
     }
 
-    return evalData.data;
+    await new Promise((resolve) => setTimeout(resolve, 800));
+
+    const afterRes = await fetch(commandUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'evaluate',
+        args: { profileId: sessionId, script: 'window.scrollY || 0' },
+      }),
+    });
+    const afterData = await afterRes.json().catch(() => ({} as any));
+    const newPosition = Number(afterData?.data?.result ?? afterData?.body?.result ?? afterData?.result ?? previousPosition) || previousPosition;
+
+    return { scrolled: true, previousPosition, newPosition };
   } catch (error: any) {
     return {
       scrolled: false,

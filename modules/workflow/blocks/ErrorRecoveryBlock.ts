@@ -37,6 +37,16 @@ export async function execute(input: ErrorRecoveryInput): Promise<ErrorRecoveryO
     recoveryMode = 'navigate'
   } = input;
 
+  // 开发阶段策略：只允许系统级 ESC 恢复；禁止 navigate/JS click/dispatchEvent 等兜底
+  if (recoveryMode !== 'esc') {
+    return {
+      success: false,
+      recovered: false,
+      finalStage: 'unknown',
+      error: 'ErrorRecoveryBlock: only esc recovery is allowed (navigate disabled)',
+    };
+  }
+
   const controllerUrl = `${serviceUrl}/v1/controller/action`;
 
   async function controllerAction(action: string, payload: any = {}) {
@@ -306,7 +316,7 @@ export async function execute(input: ErrorRecoveryInput): Promise<ErrorRecoveryO
       }
     } catch (err) {
       console.warn(
-        `[ErrorRecovery] container close failed, fallback to history.back: ${
+        `[ErrorRecovery] container close failed, fallback to ESC key: ${
           (err as any)?.message || String(err)
         }`,
       );
@@ -314,11 +324,7 @@ export async function execute(input: ErrorRecoveryInput): Promise<ErrorRecoveryO
 
     // 2) 兜底：再次发送 ESC 键关闭详情页
     try {
-      await controllerAction('browser:execute', {
-        profile: sessionId,
-        script:
-          'document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", code: "Escape", keyCode: 27, which: 27, bubbles: true }))',
-      });
+      await controllerAction('keyboard:press', { profileId: sessionId, key: 'Escape' });
       await new Promise((resolve) => setTimeout(resolve, 1500));
 
       const { verifyAnchorByContainerId } = await import('./helpers/containerAnchors.js');
@@ -339,41 +345,26 @@ export async function execute(input: ErrorRecoveryInput): Promise<ErrorRecoveryO
     }
   }
 
-  async function navigateTo(target: 'search' | 'home'): Promise<void> {
-    // 禁止使用 history.back() 或 URL 构造进行导航
-    // 要求通过容器点击或用户交互完成页面切换
-    if (target === 'search') {
-      // 尝试通过点击搜索框重新进入搜索状态
-      try {
-        await controllerAction('browser:execute', {
-          profile: sessionId,
-          script: `
-            const searchBox = document.querySelector('.search-input, input[placeholder*="搜索"]');
-            if (searchBox) {
-              searchBox.focus();
-              searchBox.click();
-              'search-box-focused';
-            }
-            'search-box-not-found';
-          `
-        });
-        await new Promise(resolve => setTimeout(resolve, 1000));
-      } catch (err) {
-        console.warn('[ErrorRecovery] failed to focus search box:', err);
-      }
-      return;
-    }
-
-    // 禁止脚本直接导航回首页，要求人工确认/操作
-    console.warn('[ErrorRecovery] Skip auto navigation to home (manual action required).');
-  }
-
   console.log(`[ErrorRecovery] 从 ${fromStage} 恢复到 ${targetStage}...`);
 
   try {
-    if (recoveryMode === 'esc' && fromStage === 'detail' && targetStage === 'search') {
+    const currentUrl = await getCurrentUrl();
+    const atSearch = await verifyStage('search');
+    const atHome = await verifyStage('home');
+
+    if ((targetStage === 'search' && atSearch) || (targetStage === 'home' && atHome)) {
+      console.log(`[ErrorRecovery] ✅ 已在目标阶段 ${targetStage}（anchor verified）`);
+      return {
+        success: true,
+        recovered: false,
+        finalStage: targetStage,
+        currentUrl,
+        method: 'already-at-target',
+      };
+    }
+
+    if (fromStage === 'detail' && targetStage === 'search') {
       const escResult = await recoverWithEsc();
-      
       if (escResult.success) {
         const verified = await verifyStage('search');
         if (verified) {
@@ -382,72 +373,26 @@ export async function execute(input: ErrorRecoveryInput): Promise<ErrorRecoveryO
             recovered: true,
             finalStage: 'search',
             currentUrl: await getCurrentUrl(),
-            method: escResult.method
+            method: escResult.method,
           };
         }
       }
-      
-      console.log('[ErrorRecovery] ESC恢复失败，降级到navigate模式...');
-    }
-    
-    const currentUrl = await getCurrentUrl();
-    const atSearch = await verifyStage('search');
-    const atHome = await verifyStage('home');
-
-    // 仅通过锚点判断当前阶段，不再依赖 URL
-    if ((targetStage === 'search' && atSearch) || (targetStage === 'home' && atHome)) {
-      console.log(`[ErrorRecovery] ✅ 已在目标阶段 ${targetStage}（anchor verified）`);
-      return {
-        success: true,
-        recovered: false,
-        finalStage: targetStage,
-        currentUrl,
-        method: 'already-at-target'
-      };
-    }
-
-    for (let i = 0; i < maxRetries; i++) {
-      console.log(`[ErrorRecovery] 恢复尝试 ${i + 1}/${maxRetries}`);
-
-      if (fromStage === 'detail') {
-        try {
-          await controllerAction('container:operation', {
-            containerId: 'xiaohongshu_detail.modal_shell',
-            operationId: 'close',
-            sessionId
-          });
-        } catch (err) {
-          console.warn('[ErrorRecovery] 关闭 modal 失败:', (err as any).message);
-        }
-        await new Promise(resolve => setTimeout(resolve, 1000));
-      }
-
-      await navigateTo(targetStage);
-
-      const verified = await verifyStage(targetStage);
-      if (verified) {
-        console.log(`[ErrorRecovery] ✅ 成功恢复到 ${targetStage}`);
-        return {
-          success: true,
-          recovered: true,
-          finalStage: targetStage,
-          currentUrl: await getCurrentUrl(),
-          method: 'navigate'
-        };
-      }
-
-      if (i < maxRetries - 1) {
-        console.log('[ErrorRecovery] 等待3秒后重试...');
-        await new Promise(resolve => setTimeout(resolve, 3000));
-      }
+    return {
+      success: false,
+      recovered: false,
+      finalStage: 'unknown',
+      currentUrl: await getCurrentUrl(),
+      error: 'esc_recovery_failed',
+      method: 'esc_recovery_failed',
+    };
     }
 
     return {
       success: false,
       recovered: false,
       finalStage: 'unknown',
-      currentUrl: await getCurrentUrl(),
-      error: `无法恢复到 ${targetStage} 阶段`
+      currentUrl,
+      error: `unsupported_recovery_path: from=${fromStage} target=${targetStage} (esc only)`,
     };
 
   } catch (err: any) {

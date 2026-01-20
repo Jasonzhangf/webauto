@@ -24,6 +24,9 @@ export interface SearchItem {
   detailUrl?: string;
   safeDetailUrl?: string;
   hasToken?: boolean;
+  hrefAttr?: string;
+  rect?: { x: number; y: number; width: number; height: number };
+  isAd?: boolean;
   raw?: Record<string, any>;
 }
 
@@ -54,6 +57,7 @@ export async function execute(input: CollectSearchListInput): Promise<CollectSea
 
   const profile = sessionId;
   const controllerUrl = `${serviceUrl}/v1/controller/action`;
+  const MATCH_TIMEOUT_MS = 12_000;
 
   function deriveNoteIdFromUrl(url?: string): string | undefined {
     if (!url) return undefined;
@@ -91,6 +95,47 @@ export async function execute(input: CollectSearchListInput): Promise<CollectSea
     return data.data?.result || '';
   }
 
+  async function probeNoResultOrHasItems(): Promise<{ hasItems: boolean; hasNoResultText: boolean }> {
+    try {
+      const res = await controllerAction('browser:execute', {
+        profile,
+        script: `(() => {
+          const cards = document.querySelectorAll('.note-item').length;
+          const emptyEl =
+            document.querySelector('[class*="no-result"], [class*="noResult"], [class*="empty"], .search-empty, .empty') ||
+            null;
+          const emptyText = (emptyEl ? (emptyEl.textContent || '') : '').trim();
+          const bodyText = (document.body && document.body.innerText ? document.body.innerText.slice(0, 1200) : '');
+          const hasNoResultText =
+            emptyText.includes('没找到相关内容') ||
+            emptyText.includes('换个词试试') ||
+            bodyText.includes('没找到相关内容') ||
+            bodyText.includes('换个词试试');
+          return { cards, hasNoResultText };
+        })()`,
+      });
+      const payload = (res as any)?.result ?? (res as any)?.data?.result ?? res ?? {};
+      const cards = Number(payload?.cards ?? 0);
+      return { hasItems: cards > 0, hasNoResultText: Boolean(payload?.hasNoResultText) };
+    } catch {
+      return { hasItems: false, hasNoResultText: false };
+    }
+  }
+
+  async function waitForSearchItemsIfNeeded(currentUrl: string): Promise<{ ok: boolean; noResults: boolean }> {
+    if (!currentUrl.includes('/search_result')) return { ok: true, noResults: false };
+
+    const start = Date.now();
+    while (Date.now() - start < 25_000) {
+      const probe = await probeNoResultOrHasItems();
+      if (probe.hasNoResultText) return { ok: false, noResults: true };
+      if (probe.hasItems) return { ok: true, noResults: false };
+      await new Promise<void>((r) => setTimeout(r, 1000));
+    }
+    // 超时：继续走采集逻辑（可能页面慢/容器异常），由下游判断是否 0 item
+    return { ok: true, noResults: false };
+  }
+
   function findContainer(tree: any, pattern: RegExp): any {
     if (!tree) return null;
     if (pattern.test(tree.id || tree.defId || '')) return tree;
@@ -122,80 +167,19 @@ export async function execute(input: CollectSearchListInput): Promise<CollectSea
    * 基于列表容器锚点的 selector，在容器内部执行 scrollBy；
    * 单次滚动距离不超过 800px，滚动前后都会做 Rect 与滚动量校验。
    */
-  async function scrollListContainer(containerId: string): Promise<boolean> {
+  async function scrollListContainer(containerId: string, direction: 'down' | 'up' = 'down'): Promise<boolean> {
     try {
-      const { verifyAnchorByContainerId } = await import('./helpers/containerAnchors.js');
-      const anchor = await verifyAnchorByContainerId(containerId, profile, serviceUrl);
-
-      if (!anchor.found || !anchor.rect) {
-        console.warn(`[CollectSearchList] Cannot scroll: container ${containerId} not found`);
-        return false;
-      }
-
-      const rect = anchor.rect;
-
-      // 视口安全检查：列表容器必须在当前视口内
-      const viewportInfo = await controllerAction('browser:execute', {
-        profile,
-        script: '({ innerHeight: window.innerHeight || 0 })'
+      // ✅ 系统级滚动：通过容器 scroll operation 触发真实滚轮/键盘滚动（禁止 JS scrollBy）
+      const op = await controllerAction('container:operation', {
+        containerId,
+        operationId: 'scroll',
+        sessionId: profile,
+        config: { direction, amount: 800 },
       });
-      const viewportHeight = viewportInfo.result?.innerHeight
-        ?? viewportInfo.data?.result?.innerHeight
-        ?? viewportInfo.innerHeight
-        ?? 0;
-
-      if (viewportHeight && rect.y > viewportHeight) {
-        console.warn(
-          `[CollectSearchList] List out of viewport: y=${rect.y}, vh=${viewportHeight}`
-        );
-        return false;
-      }
-
-      if (!anchor.selector) {
-        console.warn('[CollectSearchList] No selector on anchor, skip scroll');
-        return false;
-      }
-
-      // 平滑滚动（单次最大 800px）
-      const scrollResult = await controllerAction('browser:execute', {
-        profile,
-        script: `(() => {
-          const selector = '${anchor.selector}';
-          const el = document.querySelector(selector);
-          if (!el) return { ok: false, reason: 'element not found' };
-
-          const beforeScroll = el.scrollTop || 0;
-          const scrollAmount = Math.min(window.innerHeight * 0.8, 800);
-          el.scrollBy({ top: scrollAmount, behavior: 'smooth' });
-
-          return new Promise(resolve => {
-            setTimeout(() => {
-              const afterScroll = el.scrollTop || 0;
-              resolve({
-                ok: true,
-                beforeScroll,
-                afterScroll,
-                scrolled: afterScroll - beforeScroll
-              });
-            }, 800);
-          });
-        })()`
-      });
-
-      const result = scrollResult.result || scrollResult.data?.result;
-      if (!result?.ok) {
-        console.warn('[CollectSearchList] Scroll failed:', result?.reason);
-        return false;
-      }
-
-      console.log(
-        `[CollectSearchList] Scrolled: ${result.beforeScroll} -> ${result.afterScroll} (+${result.scrolled}px)`
-      );
-
-      // 滚动后等待 DOM 稳定（避免连续滚动）
-      await new Promise((resolve) => setTimeout(resolve, 1000));
-
-      return result.scrolled > 0;
+      const payload = (op as any)?.data ?? op;
+      const ok = Boolean(payload?.success ?? (payload as any)?.data?.success ?? (op as any)?.success);
+      await new Promise<void>((resolve) => setTimeout(resolve, 1000));
+      return ok;
     } catch (error: any) {
       console.warn(`[CollectSearchList] Scroll error: ${error.message}`);
       return false;
@@ -204,42 +188,31 @@ export async function execute(input: CollectSearchListInput): Promise<CollectSea
 
   async function scrollPageFallback(direction: 'down' | 'up' = 'down'): Promise<boolean> {
     try {
-      const scrollResult = await controllerAction('browser:execute', {
+      // ✅ 系统级滚动：PageDown / PageUp（禁止 JS scrollBy）
+      const before = await controllerAction('browser:execute', {
         profile,
-        script: `(() => {
-          const beforeScroll = window.scrollY || document.documentElement.scrollTop || 0;
-          const scrollAmount = Math.min(window.innerHeight * 0.8, 800);
-          const direction = '${direction}';
-          const delta = direction === 'up' ? -scrollAmount : scrollAmount;
-          window.scrollBy({ top: delta, behavior: 'smooth' });
+        script: '({ y: window.scrollY || document.documentElement.scrollTop || 0 })'
+      });
+      const beforeY =
+        before?.result?.y ?? before?.data?.result?.y ?? before?.y ?? 0;
 
-          return new Promise(resolve => {
-            setTimeout(() => {
-              const afterScroll = window.scrollY || document.documentElement.scrollTop || 0;
-              resolve({
-                ok: true,
-                beforeScroll,
-                afterScroll,
-                scrolled: afterScroll - beforeScroll
-              });
-            }, 800);
-          });
-        })()`
+      await controllerAction('keyboard:press', {
+        profileId: profile,
+        key: direction === 'up' ? 'PageUp' : 'PageDown',
       });
 
-      const result = scrollResult.result || scrollResult.data?.result;
-      if (!result?.ok) {
-        console.warn('[CollectSearchList] Page scroll failed:', result?.reason);
-        return false;
-      }
+      await new Promise<void>((resolve) => setTimeout(resolve, 1200));
 
-      console.log(
-        `[CollectSearchList] Page scrolled (${direction}): ${result.beforeScroll} -> ${result.afterScroll} (+${result.scrolled}px)`,
-      );
+      const after = await controllerAction('browser:execute', {
+        profile,
+        script: '({ y: window.scrollY || document.documentElement.scrollTop || 0 })'
+      });
+      const afterY =
+        after?.result?.y ?? after?.data?.result?.y ?? after?.y ?? 0;
 
-      await new Promise((resolve) => setTimeout(resolve, 1000));
-
-      return result.scrolled > 0;
+      const scrolled = Number(afterY) - Number(beforeY);
+      console.log(`[CollectSearchList] Page scrolled (${direction}): ${beforeY} -> ${afterY} (+${scrolled}px)`);
+      return Math.abs(scrolled) > 0;
     } catch (error: any) {
       console.warn(`[CollectSearchList] Page scroll error: ${error.message}`);
       return false;
@@ -262,13 +235,13 @@ export async function execute(input: CollectSearchListInput): Promise<CollectSea
           maxChildren: 20
         }),
         new Promise((_, reject) =>
-          setTimeout(() => reject(new Error('containers:match timeout')), 5000)
+          setTimeout(() => reject(new Error('containers:match timeout')), MATCH_TIMEOUT_MS)
         )
       ]);
       tree = (matchResult as any).snapshot?.container_tree || (matchResult as any).container_tree;
     } catch (err: any) {
       if (err.message?.includes('timeout')) {
-        console.warn('[CollectSearchList] containers:match 超时（5s），使用降级方案');
+        console.warn(`[CollectSearchList] containers:match 超时（${MATCH_TIMEOUT_MS}ms），使用降级方案`);
       } else {
         console.warn('[CollectSearchList] containers:match 失败:', err.message);
       }
@@ -314,6 +287,23 @@ export async function execute(input: CollectSearchListInput): Promise<CollectSea
 
     if (!listContainer) {
       throw new Error('未找到搜索结果列表容器');
+    }
+
+    // 2.05 等待搜索结果页内容就绪（有卡片或明确无结果）
+    const pageReady = await waitForSearchItemsIfNeeded(currentUrl);
+    if (!pageReady.ok && pageReady.noResults) {
+      return {
+        success: false,
+        items: [],
+        count: 0,
+        scrollRounds: 0,
+        usedFallback: matchTimeout,
+        anchor: {
+          listContainerId,
+          verified: false,
+        },
+        error: 'search_no_results',
+      };
     }
 
     // 2.1 高亮列表容器
@@ -373,24 +363,49 @@ export async function execute(input: CollectSearchListInput): Promise<CollectSea
               return cards.map(function(card, idx) {
                 var rect = card.getBoundingClientRect();
                 var titleEl = card.querySelector('.footer .title span') || card.querySelector('.footer .title') || card.querySelector('[class*="title"]');
-                var linkEl = card.querySelector('a.cover') || card.querySelector('a[href*="/explore/"]') || card.querySelector('a[href*="/search_result/"]');
-                var href = linkEl ? linkEl.getAttribute('href') || '' : '';
+                var coverEl = card.querySelector('a.cover') || null;
+                var linkEl = coverEl || card.querySelector('a[href*="/explore/"]') || card.querySelector('a[href*="/search_result/"]');
+                var hrefAttr = linkEl ? (linkEl.getAttribute('href') || '') : '';
+                var href = linkEl ? (linkEl.href || hrefAttr || '') : '';
                 var match = href.match(/\\/(explore|search_result)\\/([^?]+)/);
                 var noteId = match ? match[2] : '';
+                var cardText = (card.textContent || '').trim();
+                var hasAdBadge =
+                  !!card.querySelector('[class*="ad"], [class*="Ad"], [class*="promo"], [class*="Promote"], [data-ad], [data-promote]') ||
+                  cardText.indexOf('广告') !== -1 ||
+                  cardText.indexOf('推广') !== -1 ||
+                  cardText.indexOf('赞助') !== -1;
                 // 仅采集**完全处于视口内**的卡片，避免点击到离屏或半离屏元素
-                var inViewport = rect.top >= 0 && rect.bottom <= viewportHeight;
+                var coverRect = null;
+                if (coverEl) {
+                  var cr = coverEl.getBoundingClientRect();
+                  if (cr && cr.width && cr.height) {
+                    coverRect = { x: cr.x, y: cr.y, width: cr.width, height: cr.height };
+                  }
+                }
+                var clickRect = coverRect || { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
+                var inViewport = clickRect.y >= 0 && (clickRect.y + clickRect.height) <= viewportHeight;
                 return {
                   index: idx,
                   title: titleEl ? titleEl.textContent.trim() : '',
                   detail_url: href,
+                  href_attr: hrefAttr,
                   note_id: noteId,
                   hasToken: href.indexOf('xsec_token=') !== -1,
                   rect: {
+                    x: clickRect.x,
+                    y: clickRect.y,
+                    width: clickRect.width,
+                    height: clickRect.height
+                  },
+                  card_rect: {
                     x: rect.x,
                     y: rect.y,
                     width: rect.width,
                     height: rect.height
                   },
+                  cover_rect: coverRect,
+                  isAd: hasAdBadge,
                   inViewport: inViewport
                 };
               });
@@ -402,6 +417,24 @@ export async function execute(input: CollectSearchListInput): Promise<CollectSea
 
         if (!Array.isArray(extractedItems)) {
           console.warn('[CollectSearchList] Batch extract returned non-array');
+        } else if (extractedItems.length === 0 && scrollRound === 1 && currentUrl.includes('/search_result')) {
+          // 首轮为空：再等 1 次（页面可能仍在加载/虚拟列表尚未渲染）
+          const probe = await waitForSearchItemsIfNeeded(currentUrl);
+          if (!probe.ok && probe.noResults) {
+            return {
+              success: false,
+              items: [],
+              count: 0,
+              scrollRounds: scrollRound,
+              usedFallback: matchTimeout,
+              anchor: {
+                listContainerId: listContainer.id,
+                listRect,
+                verified: false,
+              },
+              error: 'search_no_results',
+            };
+          }
         } else {
           for (const extracted of extractedItems) {
             // 只关心当前视口内的卡片
@@ -409,41 +442,48 @@ export async function execute(input: CollectSearchListInput): Promise<CollectSea
               continue;
             }
 
-            const uniqueKey = extracted.note_id || `idx_${extracted.index}`;
+            // 过滤广告/推广卡片：这些卡片可能不是真正的笔记详情入口，误点会污染采集
+            if ((extracted as any)?.isAd) {
+              continue;
+            }
+
+            // 仅采集“可识别 noteId 的真实帖子卡片”，避免空卡/推荐词/占位导致误点跳转
+            const noteId = typeof extracted.note_id === 'string' ? extracted.note_id.trim() : '';
+            const detailUrlRaw = typeof extracted.detail_url === 'string' ? extracted.detail_url.trim() : '';
+            if (!noteId || !/\/(explore|search_result)\//.test(detailUrlRaw)) {
+              continue;
+            }
+
+            const uniqueKey = noteId;
             if (seenContainerIds.has(uniqueKey)) continue;
 
             seenContainerIds.add(uniqueKey);
 
-            const detailUrl = extracted.detail_url || '';
+            const detailUrl = detailUrlRaw;
             const hasToken = /[?&]xsec_token=/.test(detailUrl);
             const safeDetailUrl = hasToken ? detailUrl : undefined;
 
             // 即使没有 token 也可以收集（后续通过 OpenDetail 点击触发，而不是直接 URL 导航）
             // 只要有 domIndex 和 noteId/title 即可
 
-            // 可视化：高亮当前处理的 item（与 OpenDetailBlock 保持相同选择器）
-            try {
-              await controllerAction('browser:execute', {
-                profile,
-                script: `(() => {
-                  const cards = document.querySelectorAll('.note-item');
-                  const el = cards[${extracted.index}];
-                  if (el) {
-                    el.style.outline = '2px solid #ff00ff';
-                    setTimeout(() => { try { el.style.outline = ''; } catch (_) {} }, 1000);
-                  }
-                })()`
-              });
-            } catch {}
-
             items.push({
               containerId: 'xiaohongshu_search.search_result_item',
               domIndex: extracted.index,
-              noteId: extracted.note_id,
+              noteId,
               title: extracted.title,
               detailUrl: safeDetailUrl,
               safeDetailUrl,
               hasToken,
+              hrefAttr: typeof extracted.href_attr === 'string' ? extracted.href_attr : undefined,
+              isAd: Boolean((extracted as any)?.isAd),
+              rect:
+                extracted?.rect &&
+                typeof extracted.rect.x === 'number' &&
+                typeof extracted.rect.y === 'number' &&
+                typeof extracted.rect.width === 'number' &&
+                typeof extracted.rect.height === 'number'
+                  ? extracted.rect
+                  : undefined,
               raw: extracted,
             });
 
@@ -490,7 +530,7 @@ export async function execute(input: CollectSearchListInput): Promise<CollectSea
 
           // 先向上滚动 2 次（小幅回拉）
           for (let i = 0; i < 2; i += 1) {
-            const upScrolled = await scrollPageFallback('up');
+            const upScrolled = await scrollListContainer(listContainer.id, 'up');
             if (!upScrolled) {
               console.warn('[CollectSearchList] Upward bounce scroll failed or reached top');
               break;
@@ -499,7 +539,7 @@ export async function execute(input: CollectSearchListInput): Promise<CollectSea
 
           // 再向下滚动 4 次（继续加载后续内容）
           for (let i = 0; i < 4; i += 1) {
-            const downScrolled = await scrollPageFallback('down');
+            const downScrolled = await scrollListContainer(listContainer.id, 'down');
             if (!downScrolled) {
               console.warn('[CollectSearchList] Downward bounce scroll failed or reached bottom');
               break;
@@ -524,7 +564,7 @@ export async function execute(input: CollectSearchListInput): Promise<CollectSea
         console.log(
           `[CollectSearchList] Need more items (${items.length}/${targetCount}), scrolling down...`,
         );
-        const scrolled = await scrollPageFallback('down');
+        const scrolled = await scrollListContainer(listContainer.id, 'down');
         if (!scrolled) {
           console.warn('[CollectSearchList] Page scroll failed or reached bottom');
           // 如果已经连续多轮没有新增并且滚不动了，可以提前退出

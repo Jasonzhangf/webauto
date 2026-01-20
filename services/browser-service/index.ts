@@ -283,6 +283,14 @@ async function handleCommand(payload: CommandPayload, manager: SessionManager, w
       broadcast('page:closed', { profileId, closedIndex: result.closedIndex, activeIndex: result.activeIndex });
       return { ok: true, body: { ok: true, ...result } };
     }
+    case 'page:back': {
+      const profileId = args.profileId || 'default';
+      const session = manager.getSession(profileId);
+      if (!session) throw new Error(`session for profile ${profileId} not started`);
+      const result = await session.goBack();
+      broadcast('page:navigated', { profileId, url: result.url, via: 'page:back' });
+      return { ok: true, body: { ok: true, ...result } };
+    }
     case 'page:setViewport': {
       const profileId = args.profileId || 'default';
       const session = manager.getSession(profileId);

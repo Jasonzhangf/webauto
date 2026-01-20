@@ -41,6 +41,30 @@ export async function execute(input: EnsureLoginInput): Promise<EnsureLoginOutpu
     try {
       // 通过 Unified API 调用容器匹配
       const controllerUrl = `${serviceUrl}/v1/controller/action`;
+
+      // 优先读取当前 URL 并传给 containers:match，避免为了匹配再额外跑 session-manager CLI（更稳定/更快）
+      let currentUrl = '';
+      try {
+        const urlResp = await fetch(controllerUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'browser:execute',
+            payload: {
+              profile: sessionId,
+              script: 'location.href',
+            },
+          }),
+          signal: (AbortSignal as any).timeout ? (AbortSignal as any).timeout(8000) : undefined,
+        });
+        if (urlResp.ok) {
+          const urlJson = await urlResp.json().catch(() => ({}));
+          currentUrl = urlJson?.data?.result || urlJson?.result || '';
+        }
+      } catch {
+        currentUrl = '';
+      }
+
       const response = await fetch(controllerUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -48,12 +72,13 @@ export async function execute(input: EnsureLoginInput): Promise<EnsureLoginOutpu
           action: 'containers:match',
           payload: {
             profile: sessionId,
+            ...(currentUrl ? { url: currentUrl } : {}),
             maxDepth: 3,
             maxChildren: 8
           }
         }),
         // 为 containers:match 增加超时，避免长时间挂起
-        signal: (AbortSignal as any).timeout ? (AbortSignal as any).timeout(10000) : undefined
+        signal: (AbortSignal as any).timeout ? (AbortSignal as any).timeout(20000) : undefined
       });
 
       if (!response.ok) {

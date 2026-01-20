@@ -17,6 +17,7 @@ export interface PersistXhsNoteInput {
   platform?: string;
   keyword: string;
   noteId: string;
+  searchUrl?: string;
   detailUrl?: string;
   detail?: any;
   commentsResult?: any;
@@ -112,6 +113,7 @@ export async function execute(input: PersistXhsNoteInput): Promise<PersistXhsNot
     platform = 'xiaohongshu',
     keyword,
     noteId,
+    searchUrl,
     detailUrl,
     detail,
     commentsResult,
@@ -211,6 +213,7 @@ export async function execute(input: PersistXhsNoteInput): Promise<PersistXhsNot
         lines.push('');
         lines.push(`- Note ID: ${noteId || '未知'}`);
         lines.push(`- 关键词: ${keyword || '未知'}`);
+        if (searchUrl) lines.push(`- Search URL: ${searchUrl}`);
         if (detailUrl) lines.push(`- 链接: ${detailUrl}`);
         if (author) lines.push(`- 作者: ${author}`);
         lines.push(`- 采集时间: ${new Date().toISOString()}`);
@@ -255,6 +258,7 @@ export async function execute(input: PersistXhsNoteInput): Promise<PersistXhsNot
         lines.push('');
         lines.push(`- Note ID: ${noteId || '未知'}`);
         lines.push(`- 关键词: ${keyword || '未知'}`);
+        if (searchUrl) lines.push(`- Search URL: ${searchUrl}`);
         if (detailUrl) lines.push(`- 链接: ${detailUrl}`);
         lines.push(`- 采集时间: ${new Date().toISOString()}`);
         lines.push(

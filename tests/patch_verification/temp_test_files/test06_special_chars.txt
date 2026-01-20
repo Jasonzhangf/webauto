@@ -1,0 +1,4 @@
+path: /usr/local/bin
+quote: "hello"
+backslash: \
+regex: [a-z]+

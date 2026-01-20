@@ -6,12 +6,14 @@
  * - 提取详情内容
  * - 采集评论（支持分批）
  * - 持久化结果
+ * - 返回搜索页
  */
 
 import { execute as openDetail } from './Phase34OpenDetailBlock.js';
 import { execute as extractDetail } from './Phase34ExtractDetailBlock.js';
 import { execute as collectComments } from './Phase34CollectCommentsBlock.js';
 import { execute as persistDetail } from './Phase34PersistDetailBlock.js';
+import { execute as closeDetail } from './Phase34CloseDetailBlock.js';
 
 export interface ProcessSingleNoteInput {
   noteId: string;
@@ -23,6 +25,8 @@ export interface ProcessSingleNoteInput {
   unifiedApiUrl?: string;
   maxCommentRounds?: number;
   commentBatchSize?: number;
+  timeoutMs?: number;
+  maxRetries?: number;
 }
 
 export interface ProcessSingleNoteOutput {
@@ -33,6 +37,30 @@ export interface ProcessSingleNoteOutput {
   noteDir?: string;
   readmePath?: string;
   error?: string;
+  retryCount?: number;
+}
+
+function delay(ms: number) {
+  return new Promise<void>((resolve) => setTimeout(resolve, ms));
+}
+
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, errorMessage: string): Promise<T> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const result = await Promise.race([
+      promise,
+      new Promise<never>((_, reject) => {
+        controller.signal.addEventListener('abort', () => reject(new Error(errorMessage)));
+      })
+    ]);
+    clearTimeout(timer);
+    return result;
+  } catch (err) {
+    clearTimeout(timer);
+    throw err;
+  }
 }
 
 export async function execute(input: ProcessSingleNoteInput): Promise<ProcessSingleNoteOutput> {
@@ -46,55 +74,107 @@ export async function execute(input: ProcessSingleNoteInput): Promise<ProcessSin
     unifiedApiUrl = 'http://127.0.0.1:7701',
     maxCommentRounds = 50,
     commentBatchSize = 50,
+    timeoutMs = 180000,
+    maxRetries = 2,
   } = input;
 
     console.log(`[Phase34ProcessSingleNote] 开始处理: ${noteId}`);
 
-  try {
-    // 1. 打开详情页
-    await openDetail({ noteId, safeUrl, profile, unifiedApiUrl });
+  let retryCount = 0;
+  let lastError: string | undefined;
 
-    // 2. 提取详情内容
-    const detailResult = await extractDetail({ noteId, profile, unifiedApiUrl });
-    if (!detailResult.success) {
-      throw new Error(`提取详情失败: ${detailResult.error || 'unknown'}`);
+  for (retryCount = 0; retryCount <= maxRetries; retryCount++) {
+    if (retryCount > 0) {
+      console.log(`[Phase34ProcessSingleNote] 重试 ${retryCount}/${maxRetries}: ${noteId}`);
+      await delay(2000);
     }
 
-    // 3. 采集评论
-    const commentsResult = await collectComments({
-      sessionId: profile,
-      maxRounds: maxCommentRounds,
-      batchSize: commentBatchSize,
-      unifiedApiUrl,
-    });
+    try {
+      // 1. 打开详情页（带超时）
+      await withTimeout(
+        openDetail({ noteId, safeUrl, profile, unifiedApiUrl }),
+        30000,
+        '打开详情页超时'
+      );
 
-    // 4. 持久化详情
-    const persistResult = await persistDetail({
-      noteId,
-      detail: detailResult.detail || {},
-      keyword,
-      env,
-      unifiedApiUrl,
-    });
+      // 2. 提取详情内容（带超时）
+      const detailResult = await withTimeout(
+        extractDetail({ noteId, profile, unifiedApiUrl }),
+        30000,
+        '提取详情超时'
+      );
+      if (!detailResult.success) {
+        throw new Error(`提取详情失败: ${detailResult.error || 'unknown'}`);
+      }
 
-    console.log(`[Phase34ProcessSingleNote] ✅ 完成: ${noteId}`);
+      // 3. 采集评论（带超时）
+      const commentsResult = await withTimeout(
+        collectComments({
+          sessionId: profile,
+          maxRounds: maxCommentRounds,
+          batchSize: commentBatchSize,
+          unifiedApiUrl,
+        }),
+        timeoutMs,
+        '采集评论超时'
+      );
 
-    return {
-      success: true,
-      noteId,
-      detail: detailResult.detail || null,
-      comments: commentsResult.comments,
-      noteDir: persistResult.noteDir,
-      readmePath: persistResult.readmePath,
-    };
-  } catch (err: any) {
-    console.error(`[Phase34ProcessSingleNote] ❌ 失败: ${noteId}`, err.message);
-    return {
-      success: false,
-      noteId,
-      detail: null,
-      comments: [],
-      error: err.message,
-    };
+      // 4. 持久化详情（带超时）
+      const persistResult = await withTimeout(
+        persistDetail({
+          noteId,
+          detail: detailResult.detail || {},
+          keyword,
+          env,
+          unifiedApiUrl,
+        }),
+        60000,
+        '持久化详情超时'
+      );
+
+      // 5. 返回搜索页（无论成功失败都要返回）
+      try {
+        await closeDetail({ profile, unifiedApiUrl });
+        await delay(1000);
+      } catch (err: any) {
+        console.warn(`[Phase34ProcessSingleNote] 返回搜索页失败: ${err.message}`);
+      }
+
+      console.log(`[Phase34ProcessSingleNote] ✅ 完成: ${noteId} (重试${retryCount}次)`);
+
+      return {
+        success: true,
+        noteId,
+        detail: detailResult.detail || null,
+        comments: commentsResult.comments,
+        noteDir: persistResult.noteDir,
+        readmePath: persistResult.readmePath,
+        retryCount,
+      };
+    } catch (err: any) {
+      lastError = err.message;
+      console.error(`[Phase34ProcessSingleNote] ❌ 尝试${retryCount + 1}失败: ${noteId}`, err.message);
+
+      // 失败也要返回搜索页
+      try {
+        await closeDetail({ profile, unifiedApiUrl });
+        await delay(1000);
+      } catch (closeErr: any) {
+        console.warn(`[Phase34ProcessSingleNote] 返回搜索页失败: ${closeErr.message}`);
+      }
+
+      if (retryCount >= maxRetries) {
+        break;
+      }
+    }
   }
+
+  return {
+    success: false,
+    noteId,
+    detail: null,
+    comments: [],
+    error: lastError || '未知错误',
+    retryCount,
+  };
 }

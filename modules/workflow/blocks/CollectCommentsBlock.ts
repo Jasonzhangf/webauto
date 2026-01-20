@@ -167,7 +167,8 @@ export async function execute(input: CollectCommentsInput): Promise<CollectComme
 
     const expanded = await expandComments({
       sessionId,
-      serviceUrl
+      serviceUrl,
+      expectedTotal: warmup.totalFromHeader ?? null,
     } as any);
 
     if (!expanded.success) {

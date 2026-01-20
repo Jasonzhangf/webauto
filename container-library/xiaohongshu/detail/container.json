@@ -27,12 +27,17 @@
       "css": ".note-detail, .detail-container",
       "variant": "backup",
       "score": 0.8
+    },
+    {
+      "css": ".main-container",
+      "variant": "fallback_2026",
+      "score": 0.7
     }
   ],
   "metadata": {
     "required_descendants_any": [
-      ".note-detail-mask",
       ".media-container",
+      ".note-scroller",
       ".comments-el"
     ]
   },

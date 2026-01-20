@@ -4,9 +4,18 @@
  * 展开评论并提取评论列表
  */
 
+import { locateCommentSection } from './helpers/commentSectionLocator.js';
+import { getScrollStats, getViewport, systemMouseWheel } from './helpers/commentScroller.js';
+import { expandRepliesInView, findExpandTargets } from './helpers/replyExpander.js';
+import { createExpandCommentsControllerClient } from './helpers/expandCommentsController.js';
+import { buildExtractCommentsScript, mergeExtractedComments } from './helpers/expandCommentsExtractor.js';
+import { systemClickAt } from './helpers/systemInput.js';
+import { getCommentEndState } from './helpers/xhsCommentDom.js';
+
 export interface ExpandCommentsInput {
   sessionId: string;
   maxRounds?: number;
+  expectedTotal?: number | null;
   serviceUrl?: string;
 }
 
@@ -43,45 +52,85 @@ export interface ExpandCommentsOutput {
 export async function execute(input: ExpandCommentsInput): Promise<ExpandCommentsOutput> {
   const {
     sessionId,
-    maxRounds = 6,
+    // 默认按“抓完”为目标：滚动到评论底部（或空评论）才结束
+    maxRounds = 240,
+    expectedTotal = null,
     serviceUrl = 'http://127.0.0.1:7701'
   } = input;
 
   const profile = sessionId;
   const controllerUrl = `${serviceUrl}/v1/controller/action`;
 
-  async function controllerAction(action: string, payload: any = {}) {
-    const response = await fetch(controllerUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action, payload }),
-      // 给容器相关操作加统一超时，避免挂死
-      signal: (AbortSignal as any).timeout ? (AbortSignal as any).timeout(10000) : undefined
-    });
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}: ${await response.text()}`);
-    }
-    const data = await response.json();
-    return data.data || data;
-  }
+  const controllerClient = createExpandCommentsControllerClient({ profile, controllerUrl });
+  const { controllerAction, getCurrentUrl } = controllerClient;
 
-  async function getCurrentUrl(): Promise<string> {
-    const response = await fetch(controllerUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        action: 'browser:execute',
-        payload: {
+  const browserServiceUrl =
+    process.env.WEBAUTO_BROWSER_SERVICE_URL || 'http://127.0.0.1:7704';
+  const browserWsUrl = process.env.WEBAUTO_BROWSER_WS_URL || 'ws://127.0.0.1:8765';
+
+  const commentSectionId = 'xiaohongshu_detail.comment_section';
+  const commentButtonId = 'xiaohongshu_detail.comment_button';
+  const showMoreContainerId = 'xiaohongshu_detail.comment_section.show_more_button';
+  const commentItemContainerId = 'xiaohongshu_detail.comment_section.comment_item';
+  const emptyStateContainerId = 'xiaohongshu_detail.comment_section.empty_state';
+  const endMarkerContainerId = 'xiaohongshu_detail.comment_section.end_marker';
+
+  const logPrefix = '[ExpandComments]';
+
+  const warn = (msg: string) => console.warn(`${logPrefix} ${msg}`);
+  const log = (msg: string) => console.log(`${logPrefix} ${msg}`);
+
+  const clamp = (n: number, min: number, max: number) => Math.min(Math.max(n, min), max);
+
+  const viewport0 = await getViewport(controllerUrl, profile);
+  const viewportW = viewport0.innerWidth || 1440;
+  const viewportH = viewport0.innerHeight || 900;
+
+  const tryActivateCommentsUi = async (reason: string) => {
+    try {
+      const result = await locateCommentSection({
+        profile,
+        serviceUrl,
+        controllerUrl,
+        commentSectionContainerId: commentSectionId,
+        commentButtonContainerId: commentButtonId,
+        canClickCommentButton: true,
+        highlightStyle: '2px solid #ffaa00',
+        highlightMs: 1200,
+      });
+      if (!result.found) {
+        // 强制按 comment_button 作为激活
+        await locateCommentSection({
           profile,
-          script: 'location.href',
-        },
-      }),
-    });
-    const data = await response.json();
-    return data.data?.result || data.result || '';
-  }
+          serviceUrl,
+          controllerUrl,
+          commentSectionContainerId: commentSectionId,
+          commentButtonContainerId: commentButtonId,
+          canClickCommentButton: true,
+          highlightStyle: '2px solid #ffaa00',
+          highlightMs: 1200,
+        });
+      }
+      log(`activated comments (${reason})`);
+    } catch {
+      // ignore
+    }
+  };
 
-  async function locateRectBySelectors(selectors: string[]): Promise<Rect | null> {
+  const systemWheel = async (deltaY: number, focusPoint?: { x: number; y: number }) => {
+    await systemMouseWheel({
+      profileId: profile,
+      deltaY,
+      focusPoint,
+      browserServiceUrl,
+      browserWsUrl,
+    });
+  };
+
+  const scrollStats = async (rootSelectors: string[]) =>
+    getScrollStats(rootSelectors, controllerUrl, profile);
+
+  const locateRectBySelectors = async (selectors: string[]): Promise<Rect | null> => {
     const filtered = selectors.filter((sel) => typeof sel === 'string' && sel.trim().length > 0);
     if (!filtered.length) return null;
     try {
@@ -101,8 +150,7 @@ export async function execute(input: ExpandCommentsInput): Promise<ExpandComment
           return null;
         })()`,
       });
-      const payload =
-        (response as any)?.result || (response as any)?.data?.result || response;
+      const payload = (response as any)?.result || (response as any)?.data?.result || response;
       if (
         payload &&
         ['x', 'y', 'width', 'height'].every(
@@ -117,50 +165,12 @@ export async function execute(input: ExpandCommentsInput): Promise<ExpandComment
         };
       }
     } catch (err: any) {
-      console.warn(`[ExpandComments] locateRectBySelectors error: ${err?.message || err}`);
+      warn(`locateRectBySelectors error: ${err?.message || err}`);
     }
     return null;
-  }
+  };
 
-  async function locateCommentSectionRectFallback(): Promise<Rect | null> {
-    try {
-      const response = await controllerAction('browser:execute', {
-        profile,
-        script: `(() => {
-          const root =
-            document.querySelector('.comments-el') ||
-            document.querySelector('.comment-list') ||
-            document.querySelector('.comments-container') ||
-            document.querySelector('[class*="comment-section"]');
-          if (!root) return null;
-          const rect = root.getBoundingClientRect();
-          return { x: rect.left, y: rect.top, width: rect.width, height: rect.height };
-        })()`,
-      });
-      const payload =
-        (response as any)?.result || (response as any)?.data?.result || response;
-      if (
-        payload &&
-        ['x', 'y', 'width', 'height'].every(
-          (key) => typeof payload[key] === 'number' && Number.isFinite(payload[key]),
-        )
-      ) {
-        return {
-          x: Number(payload.x),
-          y: Number(payload.y),
-          width: Number(payload.width),
-          height: Number(payload.height),
-        };
-      }
-    } catch (err: any) {
-      console.warn(
-        `[ExpandComments] fallback comment_section rect error: ${err?.message || err}`,
-      );
-    }
-    return null;
-  }
-
-  function findContainer(tree: any, pattern: RegExp): any {
+  const findContainer = (tree: any, pattern: RegExp): any => {
     if (!tree) return null;
     if (pattern.test(tree.id || tree.defId || '')) return tree;
     if (Array.isArray(tree.children)) {
@@ -170,54 +180,175 @@ export async function execute(input: ExpandCommentsInput): Promise<ExpandComment
       }
     }
     return null;
-  }
+  };
 
-  function collectContainers(tree: any, pattern: RegExp, result: any[] = []): any[] {
+  const collectContainers = (tree: any, pattern: RegExp, result: any[] = []): any[] => {
     if (!tree) return result;
-    if (pattern.test(tree.id || tree.defId || '')) {
-      result.push(tree);
-    }
+    if (pattern.test(tree.id || tree.defId || '')) result.push(tree);
     if (Array.isArray(tree.children)) {
-      for (const child of tree.children) {
-        collectContainers(child, pattern, result);
-      }
+      for (const child of tree.children) collectContainers(child, pattern, result);
     }
     return result;
-  }
+  };
+
+  const resolveEndMarkerRectViaSelectors = async (primarySelector: string | null): Promise<Rect | null> => {
+    const selectors: string[] = [];
+    if (primarySelector) selectors.push(primarySelector);
+    selectors.push('.comment-end', '.comments-end', '.comment-list .end');
+    return locateRectBySelectors(selectors);
+  };
+
+  const readEndMarkerTextBySelector = async (primarySelector: string | null): Promise<string | null> => {
+    const selectors: string[] = [];
+    if (primarySelector) selectors.push(primarySelector);
+    selectors.push('.end-container', '.comment-footer', '.comment-end', '.comments-end');
+    try {
+      const res = await controllerAction('browser:execute', {
+        profile,
+        script: `(() => {
+          const selectors = ${JSON.stringify(selectors)};
+          for (const sel of selectors) {
+            try {
+              const el = document.querySelector(sel);
+              if (!el) continue;
+              const t = (el.textContent || '').trim();
+              if (t) return t.slice(0, 120);
+            } catch (_) {}
+          }
+          return null;
+        })()`,
+      });
+      const payload = (res as any)?.result ?? (res as any)?.data?.result ?? res;
+      return typeof payload === 'string' ? payload : null;
+    } catch {
+      return null;
+    }
+  };
+
+  const trySelectLatestTab = async (): Promise<boolean> => {
+    try {
+      const res = await controllerAction('browser:execute', {
+        profile,
+        script: `(() => {
+          const roots = [
+            document.querySelector('.comments-el'),
+            document.querySelector('.comment-list'),
+            document.querySelector('.comments-container'),
+            document.querySelector('[class*="comment-section"]'),
+          ].filter(Boolean);
+          const root = roots[0] || document;
+
+          const isVisible = (r) => r && r.width > 0 && r.height > 0 && r.bottom > 0 && r.top < (window.innerHeight || 0);
+          const candidates = Array.from(root.querySelectorAll('button, a, div, span'))
+            .map((el) => {
+              const t = (el.textContent || '').trim();
+              if (t !== '最新' && t !== '最新评论') return null;
+              const r = el.getBoundingClientRect();
+              if (!isVisible(r)) return null;
+              const cls = (el.getAttribute('class') || '') + ' ' + (el.parentElement ? (el.parentElement.getAttribute('class') || '') : '');
+              const aria = el.getAttribute('aria-selected');
+              const active = aria === 'true' || /active|selected|current/.test(cls);
+              return { x: r.left, y: r.top, width: r.width, height: r.height, text: t, active };
+            })
+            .filter(Boolean);
+          if (!candidates.length) return null;
+          candidates.sort((a, b) => (a.text === '最新' ? -1 : 1));
+          return candidates[0];
+        })()`,
+      });
+      const payload = (res as any)?.result ?? (res as any)?.data?.result ?? res;
+      if (!payload || typeof payload.x !== 'number' || typeof payload.y !== 'number') return false;
+      if (payload.active) return true;
+      const cx = Math.floor(payload.x + payload.width / 2);
+      const cy = Math.floor(payload.y + payload.height / 2);
+      await systemClickAt(profile, cx, cy, browserServiceUrl);
+      await new Promise((r) => setTimeout(r, 900));
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  const buildFocusPoint = (rect?: Rect): { x: number; y: number } => {
+    if (!rect) return { x: Math.floor(viewportW / 2), y: Math.floor(viewportH / 2) };
+    return {
+      x: clamp(Math.floor(rect.x + rect.width / 2), 30, viewportW - 30),
+      y: clamp(Math.floor(rect.y + Math.max(12, rect.height * 0.25)), 160, viewportH - 160),
+    };
+  };
+
+  const extractCommentsOnce = async (params: {
+    rootSelectors: string[];
+    itemSelector: string;
+    extractors: Record<string, { selectors: string[]; attr?: string }>;
+    seenKeys: Set<string>;
+    out: Array<Record<string, any>>;
+  }) => {
+    const script = buildExtractCommentsScript({
+      rootSelectors: params.rootSelectors,
+      itemSelector: params.itemSelector,
+      extractors: params.extractors,
+    });
+
+    const domResult = await controllerAction('browser:execute', { profile, script });
+    const payload = (domResult as any)?.result || (domResult as any)?.data?.result || domResult;
+    if (!payload?.found || !Array.isArray(payload.comments)) return;
+    mergeExtractedComments({ rawList: payload.comments, seenKeys: params.seenKeys, out: params.out });
+  };
+
+  const stripExtractorDefs = (extractors: any): Record<string, { selectors: string[]; attr?: string }> => {
+    const fields: Record<string, { selectors: string[]; attr?: string }> = {};
+    for (const [field, def] of Object.entries(extractors || {})) {
+      const selectors = Array.isArray((def as any)?.selectors) ? (def as any).selectors : [];
+      if (!selectors.length) continue;
+      fields[field] = {
+        selectors,
+        attr: (def as any)?.attr,
+      };
+    }
+    return fields;
+  };
+
+  const safeGetPrimarySelectorById = async (getPrimarySelectorByContainerId: any, id: string): Promise<string | null> => {
+    try {
+      return await getPrimarySelectorByContainerId(id);
+    } catch (err: any) {
+      warn(`getPrimarySelectorByContainerId error (${id}): ${err?.message || err}`);
+      return null;
+    }
+  };
+
+  const normalizeRect = (raw: any): Rect | null => {
+    if (!raw || typeof raw !== 'object') return null;
+    if (typeof raw.x === 'number' && typeof raw.y === 'number' && typeof raw.width === 'number' && typeof raw.height === 'number') {
+      return { x: raw.x, y: raw.y, width: raw.width, height: raw.height };
+    }
+    return null;
+  };
+
+  // 以下旧的内联实现将被后续段落删除/替换
 
   try {
     const { verifyAnchorByContainerId, getPrimarySelectorByContainerId, getContainerExtractorsById } = await import('./helpers/containerAnchors.js');
 
-    const safeGetPrimarySelectorById = async (containerId: string): Promise<string | null> => {
-      try {
-        return await getPrimarySelectorByContainerId(containerId);
-      } catch (err: any) {
-        console.warn(
-          `[ExpandComments] getPrimarySelectorByContainerId error (${containerId}): ${err?.message || err}`,
-        );
-        return null;
-      }
-    };
-
-    // 1. 基于容器 ID 锚定评论区（不依赖 container_tree 是否挂在 detail 下）
-    const commentSection = { id: 'xiaohongshu_detail.comment_section' };
-
-    // 1.1 对评论区根容器做一次高亮 + Rect 回环（优先用容器定义 selector）
+    // 1. 锚定评论区根容器（只做一次高亮 + Rect 回环）
     let commentSectionRect: Rect | undefined;
     let commentSectionLocated = false;
     let lastAnchorError: string | null = null;
+
     try {
-      const anchor = await verifyAnchorByContainerId(
-        commentSection.id,
+      const anchor = await locateCommentSection({
         profile,
         serviceUrl,
-        '2px solid #ffaa00',
-        2000,
-      );
+        controllerUrl,
+        commentSectionContainerId: commentSectionId,
+        commentButtonContainerId: commentButtonId,
+        canClickCommentButton: true,
+      });
       if (anchor.found && anchor.rect) {
         commentSectionRect = anchor.rect;
         commentSectionLocated = true;
-        console.log(`[ExpandComments] comment_section rect: ${JSON.stringify(anchor.rect)}`);
+        log(`comment_section rect: ${JSON.stringify(anchor.rect)}`);
       } else {
         lastAnchorError = anchor.error || 'not found';
       }
@@ -227,65 +358,38 @@ export async function execute(input: ExpandCommentsInput): Promise<ExpandComment
 
     if (!commentSectionLocated) {
       if (lastAnchorError) {
-        console.warn(
-          `[ExpandComments] comment_section anchor verify failed: ${lastAnchorError}`,
-        );
+        warn(`comment_section anchor verify failed: ${lastAnchorError}`);
       }
-      const fallbackRect = await locateCommentSectionRectFallback();
-      if (fallbackRect) {
-        commentSectionRect = fallbackRect;
-        commentSectionLocated = true;
-        console.log(
-          `[ExpandComments] fallback comment_section rect: ${JSON.stringify(fallbackRect)}`,
-        );
-      } else {
-        return {
-          success: false,
-          comments: [],
-          reachedEnd: false,
-          emptyState: false,
-          anchor: {
-            commentSectionContainerId: commentSection.id,
-            commentSectionRect: undefined,
-          },
-          error:
-            lastAnchorError ||
-            'comment_section anchor not found',
-        };
-      }
+      return {
+        success: false,
+        comments: [],
+        reachedEnd: false,
+        emptyState: false,
+        anchor: {
+          commentSectionContainerId: commentSectionId,
+          commentSectionRect: undefined,
+        },
+        error: lastAnchorError || 'comment_section anchor not found',
+      };
     }
 
-    // 2. 基于容器 inspect 结果 + comment_item 容器定义提取评论列表
-  
-    // 2.1 重新 inspect 评论区域，供锚点与终止标记 / 样本评论锚点使用
-    // 为避免 Controller 侧再次依赖 session-manager CLI，这里显式传入当前 URL
+    // 2. 重新 inspect 评论区域，供锚点与终止标记 / 样本评论锚点使用
     const currentUrl = await getCurrentUrl();
-    if (!currentUrl || typeof currentUrl !== 'string') {
-      throw new Error('无法确定当前页面 URL，ExpandComments 需要在详情页内运行');
-    }
+    if (!currentUrl) throw new Error('无法确定当前页面 URL，ExpandComments 需要在详情页内运行');
 
     const inspected = await controllerAction('containers:inspect-container', {
       profile,
-      containerId: commentSection.id,
+      containerId: commentSectionId,
       url: currentUrl,
       maxChildren: 200
     });
 
-    const effectiveTree = inspected.snapshot?.container_tree || inspected.container_tree || commentSection;
+    const effectiveTree = inspected.snapshot?.container_tree || inspected.container_tree || { id: commentSectionId };
 
-    // 3. 收集评论项节点 / empty_state 节点（用于锚点兜底与样本评论锚点校验）
-    const emptyStateNode = findContainer(
-      effectiveTree,
-      /xiaohongshu_detail\.comment_section\.empty_state$/,
-    );
-    const commentNodes = collectContainers(
-      effectiveTree,
-      /xiaohongshu_detail\.comment_section\.comment_item$/,
-    );
+    const emptyStateNode = findContainer(effectiveTree, /xiaohongshu_detail\.comment_section\.empty_state$/);
+    const commentNodes = collectContainers(effectiveTree, /xiaohongshu_detail\.comment_section\.comment_item$/);
 
-    // 3.0 锚点兜底：
-    // - 只有 empty_state 且没有 comment_item -> 视为合法“无评论”结果，直接返回，不再做 DOM 扫描；
-    // - 既没有 comment_item，也没有 empty_state -> 视为锚点缺失，返回错误，避免在无锚点情况下盲目提取。
+    // 3.0 锚点兜底：无评论 + 命中 empty_state
     if (commentNodes.length === 0) {
       if (emptyStateNode?.id) {
         let emptyRect: Rect | undefined;
@@ -299,23 +403,12 @@ export async function execute(input: ExpandCommentsInput): Promise<ExpandComment
           );
           if (anchor.found && anchor.rect) {
             emptyRect = anchor.rect;
-            console.log(
-              `[ExpandComments] empty_state rect: ${JSON.stringify(anchor.rect)}`,
-            );
-          } else {
-            console.warn(
-              `[ExpandComments] empty_state anchor verify failed: ${
-                anchor.error || 'not found'
-              }`,
-            );
+            log(`empty_state rect: ${JSON.stringify(anchor.rect)}`);
           }
-        } catch (e: any) {
-          console.warn(
-            `[ExpandComments] empty_state anchor verify error: ${e.message}`,
-          );
+        } catch {
+          // ignore
         }
 
-        // 只有“空评论锚点”确实存在（拿到 rect）时才判定为空评论；否则继续后续 DOM 提取，避免误判。
         if (emptyRect && emptyRect.height > 0) {
           return {
             success: true,
@@ -323,10 +416,8 @@ export async function execute(input: ExpandCommentsInput): Promise<ExpandComment
             reachedEnd: true,
             emptyState: true,
             anchor: {
-              commentSectionContainerId: commentSection.id,
+              commentSectionContainerId: commentSectionId,
               commentSectionRect,
-              sampleCommentContainerId: undefined,
-              sampleCommentRect: undefined,
               endMarkerContainerId: emptyStateNode.id,
               endMarkerRect: emptyRect,
               verified: Boolean(commentSectionRect),
@@ -335,26 +426,21 @@ export async function execute(input: ExpandCommentsInput): Promise<ExpandComment
         }
       }
 
-      console.warn(
-        '[ExpandComments] no comment_item or empty_state anchors found, aborting expand',
-      );
+      warn('no comment_item or empty_state anchors found, aborting expand');
       return {
         success: false,
         comments: [],
         reachedEnd: false,
         emptyState: false,
         anchor: {
-          commentSectionContainerId: commentSection.id,
+          commentSectionContainerId: commentSectionId,
           commentSectionRect,
         },
         error: 'comment_item & empty_state anchors not found',
       };
     }
 
-    const comments: Array<Record<string, any>> = [];
-    const seenKeys = new Set<string>();
-
-    // 3.1 选一个样本评论做高亮 + Rect 回环
+    // 3.1 样本评论高亮
     let sampleCommentRect: Rect | undefined;
     let sampleCommentContainerId: string | undefined;
     if (commentNodes.length > 0) {
@@ -371,225 +457,213 @@ export async function execute(input: ExpandCommentsInput): Promise<ExpandComment
           );
           if (anchor.found && anchor.rect) {
             sampleCommentRect = anchor.rect;
-            console.log(`[ExpandComments] sample comment rect: ${JSON.stringify(anchor.rect)}`);
+            log(`sample comment rect: ${JSON.stringify(anchor.rect)}`);
           } else {
-            console.warn(
-              `[ExpandComments] sample comment anchor verify failed: ${anchor.error || 'not found'}`,
-            );
-            const primarySelector = await safeGetPrimarySelectorById(sample.id);
+            const primarySelector = await safeGetPrimarySelectorById(getPrimarySelectorByContainerId, sample.id);
             const fallbackSelectors = [
               primarySelector || '',
               '.comments-el .comment-item',
               '.comment-list .comment-item',
               '.comments-container .comment-item',
               '.comment-item',
-              '.comments-el [class*="comment-item"]',
-              '.comment-list [class*="comment-item"]',
-              '.comments-container [class*="comment-item"]',
-              '[class*="comment-item"]',
             ];
             const fallbackRect = await locateRectBySelectors(fallbackSelectors);
-            if (fallbackRect) {
-              sampleCommentRect = fallbackRect;
-              console.log(
-                `[ExpandComments] fallback sample comment rect: ${JSON.stringify(fallbackRect)}`,
-              );
-            }
+            if (fallbackRect) sampleCommentRect = fallbackRect;
           }
-        } catch (e: any) {
-          console.warn(`[ExpandComments] sample comment anchor verify error: ${e.message}`);
-          const primarySelector = await safeGetPrimarySelectorById(sample.id);
-          const fallbackSelectors = [
-            primarySelector || '',
-            '.comments-el .comment-item',
-            '.comment-list .comment-item',
-            '.comments-container .comment-item',
-            '.comment-item',
-            '.comments-el [class*="comment-item"]',
-            '.comment-list [class*="comment-item"]',
-            '.comments-container [class*="comment-item"]',
-            '[class*="comment-item"]',
-          ];
-          const fallbackRect = await locateRectBySelectors(fallbackSelectors);
-          if (fallbackRect) {
-            sampleCommentRect = fallbackRect;
-            console.log(
-              `[ExpandComments] fallback sample comment rect after error: ${JSON.stringify(fallbackRect)}`,
-            );
-          }
+        } catch {
+          // ignore
         }
       }
     }
 
-    // 3.2 实际评论内容提取：基于 comment_item 容器定义构造 DOM 提取脚本（selectors/attr 均来自容器配置）
+    const itemSelector = await safeGetPrimarySelectorById(getPrimarySelectorByContainerId, commentItemContainerId) || '.comment-item';
+    const rawExtractors = await getContainerExtractorsById(commentItemContainerId);
+    const extractors = stripExtractorDefs(rawExtractors);
+
+    const rootSelectors = [
+      (await safeGetPrimarySelectorById(getPrimarySelectorByContainerId, commentSectionId)) || '',
+      '.comments-el',
+      '.comment-list',
+      '.comments-container',
+      '[class*="comment-section"]',
+    ].filter((s) => s && typeof s === 'string');
+
+    const scrollRootSelectors =
+      rootSelectors.length > 0
+        ? Array.from(new Set([...rootSelectors, 'html', 'body']))
+        : ['.comments-el', '.comment-list', '.comments-container', 'html', 'body'];
+
+    const focusPoint = buildFocusPoint(commentSectionRect);
+
+    await trySelectLatestTab();
+
+    // 滚动回顶部
     try {
-      const itemContainerId = 'xiaohongshu_detail.comment_section.comment_item';
-      const itemSelector = await getPrimarySelectorByContainerId(itemContainerId);
-      const extractors = await getContainerExtractorsById(itemContainerId);
+      await systemClickAt(profile, focusPoint.x, focusPoint.y, browserServiceUrl);
+      for (let i = 0; i < 24; i += 1) {
+        const s = await scrollStats(scrollRootSelectors);
+        if (!s.found || s.atTop) break;
+        await systemWheel(-(360 + Math.floor(Math.random() * 220)), focusPoint);
+        await new Promise((r) => setTimeout(r, 450 + Math.random() * 350));
+      }
+    } catch {
+      // ignore
+    }
 
-      if (!itemSelector || !extractors) {
-        console.warn('[ExpandComments] missing selector or extractors for comment_item container');
-      } else {
-        const domConfig: {
-          rootSelectors: string[];
-          itemSelector: string;
-          fields: Record<string, { selectors: string[]; attr?: string }>;
-        } = {
-          rootSelectors: [
-            // 优先使用 comment_section 容器 selector
-            (await getPrimarySelectorByContainerId(commentSection.id)) || '',
-            '.comments-el',
-            '.comment-list',
-            '.comments-container',
-            '[class*=\"comment-section\"]',
-          ].filter((s) => s && typeof s === 'string'),
-          itemSelector,
-          fields: {},
-        };
+    const comments: Array<Record<string, any>> = [];
+    const seenKeys = new Set<string>();
 
-        for (const [field, def] of Object.entries(extractors)) {
-          const selectors = Array.isArray(def?.selectors) ? def.selectors : [];
-          if (!selectors.length) continue;
-          domConfig.fields[field] = {
-            selectors,
-            attr: def?.attr,
-          };
-        }
+    const showMoreSelector = await safeGetPrimarySelectorById(getPrimarySelectorByContainerId, showMoreContainerId);
 
-        const script = `(() => {
-          const cfg = ${JSON.stringify(domConfig)};
-          const pickRoot = () => {
-            const roots = cfg.rootSelectors || [];
-            for (const sel of roots) {
-              try {
-                const el = document.querySelector(sel);
-                if (el) return el;
-              } catch (_) {}
-            }
-            return null;
-          };
+    // 循环抽取
+    let noEffectStreak = 0;
+    let lastScrollTop: number | null = null;
+    let recoveries = 0;
+    let emptyDetectTries = 0;
 
-          const root = pickRoot();
-          if (!root) {
-            return { found: false, comments: [] };
-          }
-
-          const items = Array.from(
-            root.querySelectorAll(cfg.itemSelector || '.comment-item, [class*="comment-item"]'),
-          );
-          const comments = items.map((el, idx) => {
-            const item = {};
-            const fields = cfg.fields || {};
-
-            const getAttrValue = (node, attr) => {
-              if (!node) return '';
-              if (!attr || attr === 'textContent') {
-                return (node.textContent || '').trim();
-              }
-              if (attr === 'href') {
-                return (node.href || node.getAttribute('href') || '').trim();
-              }
-              const v = node.getAttribute(attr);
-              return v ? v.trim() : '';
-            };
-
-            for (const fieldName of Object.keys(fields)) {
-              const fieldCfg = fields[fieldName] || {};
-              const sels = Array.isArray(fieldCfg.selectors) ? fieldCfg.selectors : [];
-              let value = '';
-              for (const sel of sels) {
-                try {
-                  const node = el.querySelector(sel);
-                  if (!node) continue;
-                  value = getAttrValue(node, fieldCfg.attr);
-                  if (value) break;
-                } catch (_) {}
-              }
-              item[fieldName] = value;
-            }
-
-            // 稳定去重标识：优先使用 DOM 自带的 comment id，其次退回到 DOM 顺序 idx
-            item._idx = idx;
-            item.comment_id =
-              el.getAttribute('data-id') ||
-              el.getAttribute('data-comment-id') ||
-              el.getAttribute('data-commentid') ||
-              el.getAttribute('data-comment-id') ||
-              el.getAttribute('id') ||
-              '';
-
-            // 兜底：有的 comment_item 结构不一致，字段抽取失败时用整体文本兜底，避免漏计数
-            if (!item.text) {
-              item.text = (el.textContent || '').trim();
-            }
-
-            // 额外标记是否为回复
-            item.is_reply = !!el.closest('.reply-container');
-            return item;
-          });
-
-          return { found: true, comments };
-        })()`;
-
-        const domResult = await controllerAction('browser:execute', {
+    for (let round = 0; round < maxRounds; round += 1) {
+      try {
+        // 先展开视口内回复（只读查找 + 系统点击）
+        await expandRepliesInView({
+          controllerUrl,
           profile,
-          script,
+          browserServiceUrl,
+          maxTargets: 2,
+          focusPoint,
+          showMoreContainerId,
+          showMoreSelector,
+          logPrefix,
+          round,
         });
 
-        const payload = (domResult as any)?.result || (domResult as any)?.data?.result || domResult;
-        if (!payload?.found || !Array.isArray(payload.comments)) {
-          console.warn('[ExpandComments] DOM-based container extraction returned no comments');
-        } else {
-          const rawList = payload.comments as Array<Record<string, any>>;
-          for (const c of rawList) {
-            if (!c || typeof c !== 'object') continue;
-            const hasContent =
-              Boolean((c as any).text && String((c as any).text).trim()) ||
-              Boolean((c as any).user_name && String((c as any).user_name).trim());
-            if (!hasContent) continue;
-            const cid = (c as any).comment_id || (c as any).commentId || (c as any).id || '';
-            const idx = typeof (c as any)._idx === 'number' ? String((c as any)._idx) : '';
-            const key = cid
-              ? `id:${cid}`
-              : `idx:${idx}||${(c as any).user_id || ''}||${(c as any).user_name || ''}||${(c as any).text || ''}||${(c as any).timestamp || ''}`;
-            if (seenKeys.has(key)) continue;
-            seenKeys.add(key);
-            comments.push(c);
+        // 提取当前视口内评论
+        await extractCommentsOnce({
+          rootSelectors,
+          itemSelector,
+          extractors,
+          seenKeys,
+          out: comments,
+        });
+      } catch (e: any) {
+        warn(`round=${round} extract/expand error: ${e?.message || e}`);
+      }
+
+      // 空评论兜底：如果没有抽到任何 comment_item，优先用 empty_state 容器确认
+      if (comments.length === 0) {
+        try {
+          const emptyAnchor = await verifyAnchorByContainerId(
+            emptyStateContainerId,
+            profile,
+            serviceUrl,
+            '2px dashed #9c27b0',
+            900,
+          );
+          if (emptyAnchor?.found && emptyAnchor.rect) {
+            return {
+              success: true,
+              comments: [],
+              reachedEnd: true,
+              emptyState: true,
+              anchor: {
+                commentSectionContainerId: commentSectionId,
+                commentSectionRect,
+                endMarkerContainerId: emptyStateContainerId,
+                endMarkerRect: emptyAnchor.rect as Rect,
+                verified: Boolean(commentSectionRect),
+              },
+            };
           }
-          console.log(`[ExpandComments] container-driven DOM comments=${comments.length}`);
+        } catch {
+          // ignore
+        }
+        if (emptyDetectTries < 2) {
+          emptyDetectTries += 1;
+          await tryActivateCommentsUi(`no_comments_try_${emptyDetectTries}`);
+          await new Promise((r) => setTimeout(r, 900));
         }
       }
-    } catch (e: any) {
-      console.warn(`[ExpandComments] DOM-based comment aggregation (via container definitions) error: ${e.message}`);
+
+      const stats = await scrollStats(scrollRootSelectors);
+      const endState = await getCommentEndState(controllerUrl, profile);
+
+      if (round % 20 === 0) {
+        log(
+          `round=${round} comments=${comments.length} scrollTop=${stats.scrollTop}/${stats.scrollHeight} endMarker=${endState.endMarkerVisible} empty=${endState.emptyStateVisible}`,
+        );
+      }
+
+      // 终止条件：严格仅以 end_marker / empty_state 为准
+      if (endState.endMarkerVisible || endState.emptyStateVisible) {
+        break;
+      }
+
+      if (stats.found) {
+        if (lastScrollTop !== null && Math.abs(stats.scrollTop - lastScrollTop) < 2) {
+          noEffectStreak += 1;
+        } else {
+          noEffectStreak = 0;
+        }
+        lastScrollTop = stats.scrollTop;
+      } else {
+        noEffectStreak += 1;
+      }
+
+      if (noEffectStreak >= 2) {
+        recoveries += 1;
+        warn(`scroll stuck (streak=${noEffectStreak}), recovery #${recoveries}: rollback then down`);
+        try {
+          await systemClickAt(profile, focusPoint.x, focusPoint.y, browserServiceUrl);
+        } catch {
+          // ignore
+        }
+
+        // 回滚（向上）2 次，再向下 3 次
+        for (let k = 0; k < 2; k += 1) {
+          await systemWheel(-(320 + Math.floor(Math.random() * 160)), focusPoint).catch(() => {});
+          await new Promise((r) => setTimeout(r, 500 + Math.random() * 400));
+        }
+        for (let k = 0; k < 3; k += 1) {
+          await systemWheel(540 + Math.floor(Math.random() * 220), focusPoint).catch(() => {});
+          await new Promise((r) => setTimeout(r, 600 + Math.random() * 450));
+        }
+
+        noEffectStreak = 0;
+        // 避免无穷恢复
+        if (recoveries >= 6) break;
+      }
+
+      const deltaY = 520 + Math.floor(Math.random() * 260);
+      await systemWheel(deltaY, focusPoint).catch((e: any) => {
+        warn(`systemWheel failed: ${e?.message || e}`);
+      });
+      await new Promise((r) => setTimeout(r, 650 + Math.random() * 650));
     }
 
-    // 4. 检查终止条件（含“空评论”场景）
-    const endMarker = findContainer(
-      effectiveTree,
-      /xiaohongshu_detail\.comment_section\.end_marker$/,
-    );
+    // 补齐最后一屏
+    try {
+      await extractCommentsOnce({
+        rootSelectors,
+        itemSelector,
+        extractors,
+        seenKeys,
+        out: comments,
+      });
+    } catch {
+      // ignore
+    }
 
+    // 4. 检查终止条件
+    const endMarker = findContainer(effectiveTree, /xiaohongshu_detail\.comment_section\.end_marker$/);
     let endMarkerRect: Rect | undefined;
     let endMarkerContainerId: string | undefined;
     let endMarkerHit = false;
     let emptyStateHit = false;
-
-    // 优先：有评论时按 end_marker 判断；无评论时优先按 empty_state / comment_section 判空
-    async function resolveEndMarkerRectViaSelectors(
-      containerId: string | undefined,
-    ): Promise<Rect | null> {
-      const selectors: string[] = [];
-      if (containerId) {
-        const primary = await safeGetPrimarySelectorById(containerId);
-        if (primary) selectors.push(primary);
-      }
-      selectors.push('.comment-end', '.comments-end', '.comment-list .end');
-      return locateRectBySelectors(selectors);
-    }
+    let endMarkerText: string | undefined;
 
     if (endMarker?.id && comments.length > 0) {
       endMarkerContainerId = endMarker.id;
       try {
+        const primarySelector = await safeGetPrimarySelectorById(getPrimarySelectorByContainerId, endMarker.id);
         const anchor = await verifyAnchorByContainerId(
           endMarker.id,
           profile,
@@ -600,38 +674,29 @@ export async function execute(input: ExpandCommentsInput): Promise<ExpandComment
         if (anchor.found && anchor.rect) {
           endMarkerRect = anchor.rect;
           endMarkerHit = true;
-          console.log(`[ExpandComments] end_marker rect: ${JSON.stringify(anchor.rect)}`);
+          log(`end_marker rect: ${JSON.stringify(anchor.rect)}`);
+          endMarkerText = (await readEndMarkerTextBySelector(primarySelector)) || undefined;
         } else {
-          console.warn(
-            `[ExpandComments] end_marker anchor verify failed: ${anchor.error || 'not found'}`,
-          );
-          const fallbackRect = await resolveEndMarkerRectViaSelectors(endMarker.id);
+          const fallbackRect = await resolveEndMarkerRectViaSelectors(primarySelector);
           if (fallbackRect) {
-            endMarkerRect = fallbackRect;
-            endMarkerHit = true;
-            console.log(
-              `[ExpandComments] fallback end_marker rect: ${JSON.stringify(fallbackRect)}`,
-            );
+            const vp = await getViewport(controllerUrl, profile);
+            const innerH = vp.innerHeight || 0;
+            const ok = innerH ? fallbackRect.y > innerH * 0.55 : true;
+            if (ok) {
+              endMarkerRect = fallbackRect;
+              endMarkerHit = true;
+            }
           }
+          endMarkerText = (await readEndMarkerTextBySelector(primarySelector)) || undefined;
         }
-      } catch (e: any) {
-        console.warn(`[ExpandComments] end_marker anchor verify error: ${e.message}`);
-        const fallbackRect = await resolveEndMarkerRectViaSelectors(endMarker.id);
-        if (fallbackRect) {
-          endMarkerRect = fallbackRect;
-          endMarkerHit = true;
-          console.log(
-            `[ExpandComments] fallback end_marker rect after error: ${JSON.stringify(fallbackRect)}`,
-          );
-        }
+      } catch {
+        // ignore
       }
     } else if (emptyStateNode?.id && comments.length === 0) {
-      // 空状态：只认 empty_state 锚点（不再退回 comment_section，避免误判）
       endMarkerContainerId = emptyStateNode.id;
       try {
-        const anchorTargetId = emptyStateNode.id;
         const anchor = await verifyAnchorByContainerId(
-          anchorTargetId,
+          emptyStateNode.id,
           profile,
           serviceUrl,
           '2px dashed #888888',
@@ -640,54 +705,22 @@ export async function execute(input: ExpandCommentsInput): Promise<ExpandComment
         if (anchor.found && anchor.rect) {
           endMarkerRect = anchor.rect;
           emptyStateHit = true;
-          console.log(
-            `[ExpandComments] empty_state rect: ${JSON.stringify(anchor.rect)}, using=${
-              emptyStateNode?.id ? 'empty_state' : 'comment_section'
-            }`,
-          );
-        } else {
-          console.warn(
-            `[ExpandComments] empty_state anchor verify failed: ${anchor.error || 'not found'}`,
-          );
-          const fallbackRect = await resolveEndMarkerRectViaSelectors(endMarkerContainerId);
-          if (fallbackRect) {
-            endMarkerRect = fallbackRect;
-            emptyStateHit = true;
-            console.log(
-              `[ExpandComments] fallback empty_state/end_marker rect: ${JSON.stringify(fallbackRect)}`,
-            );
-          }
+          log(`empty_state rect: ${JSON.stringify(anchor.rect)}`);
+          endMarkerText = (await readEndMarkerTextBySelector(emptyStateNode.id)) || undefined;
         }
-      } catch (e: any) {
-        console.warn(`[ExpandComments] empty_state anchor verify error: ${e.message}`);
-        const fallbackRect = await resolveEndMarkerRectViaSelectors(endMarkerContainerId);
-        if (fallbackRect) {
-          endMarkerRect = fallbackRect;
-          emptyStateHit = true;
-          console.log(
-            `[ExpandComments] fallback empty_state/end_marker rect after error: ${JSON.stringify(fallbackRect)}`,
-          );
-        }
+      } catch {
+        // ignore
       }
     }
 
-    // Rect 规则验证：评论区在中下部，样本评论/终止标记可见
     let verified = false;
     if (commentSectionRect) {
       const sectionOk = commentSectionRect.height > 0;
       const sampleOk = comments.length > 0 ? !!(sampleCommentRect && sampleCommentRect.height > 0) : true;
       const endOk = endMarkerRect ? endMarkerRect.height > 0 : true;
       verified = sectionOk && sampleOk && endOk;
-      console.log(
-        `[ExpandComments] Rect validation: section=${sectionOk}, sample=${sampleOk}, end=${endOk}, hasComments=${
-          comments.length > 0
-        }`,
-      );
     }
 
-    // reachedEnd 更严格：
-    // - 有评论时：必须命中 end_marker 且能拿到 Rect，才视为滚到底
-    // - 无评论时：命中 empty_state（或退回 comment_section）才视为 reachedEnd
     const reachedEnd =
       comments.length === 0
         ? Boolean(emptyStateHit && endMarkerRect)
@@ -697,10 +730,9 @@ export async function execute(input: ExpandCommentsInput): Promise<ExpandComment
       success: true,
       comments,
       reachedEnd,
-      // 只有“确实无评论且命中 empty_state”时才视为空评论
       emptyState: comments.length === 0 && Boolean(emptyStateHit && endMarkerRect),
       anchor: {
-        commentSectionContainerId: commentSection.id,
+        commentSectionContainerId: commentSectionId,
         commentSectionRect,
         sampleCommentContainerId,
         sampleCommentRect,

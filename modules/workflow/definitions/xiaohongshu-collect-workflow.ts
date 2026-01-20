@@ -4,7 +4,7 @@
 
 export const xiaohongshuCollectWorkflow = {
   id: 'xiaohongshu-collect',
-  name: '小红书关键词采集',
+  name: '小红书关键词采集（已迁移到 v3 安全链路）',
   steps: [
     {
       blockName: 'StartBrowserService',
@@ -21,14 +21,36 @@ export const xiaohongshuCollectWorkflow = {
       }
     },
     {
-      blockName: 'XiaohongshuCrawlerBlock',
+      blockName: 'EnsureLoginBlock',
+      input: {
+        sessionId: '$sessionId',
+        maxWaitMs: 180000,
+        checkIntervalMs: 5000,
+      },
+    },
+    {
+      blockName: 'WaitSearchPermitBlock',
+      input: {
+        sessionId: '$sessionId',
+      },
+    },
+    {
+      blockName: 'GoToSearchBlock',
       input: {
         sessionId: '$sessionId',
         keyword: '$keyword',
+      },
+    },
+    {
+      blockName: 'XiaohongshuFullCollectBlock',
+      input: {
+        sessionId: '$sessionId',
+        keyword: '$keyword',
+        env: '$env',
         targetCount: '$targetCount',
-        maxNoNew: 10,
-        serviceUrl: 'http://127.0.0.1:7701'
-      }
-    }
+        maxWarmupRounds: '$maxWarmupRounds',
+        allowClickCommentButton: '$allowClickCommentButton',
+      },
+    },
   ]
 };

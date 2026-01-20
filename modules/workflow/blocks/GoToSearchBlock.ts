@@ -5,10 +5,28 @@
  * 警告：不要构造 search_result URL 直达，避免风控验证码
  */
 
+import { waitSearchPermit } from './helpers/searchGate.js';
+import { ensureHomePage, getCurrentUrl, urlKeywordEquals } from './helpers/searchPageState.js';
+import {
+  verifySearchBarAnchor,
+  isSearchInputFocused,
+  readSearchInputValue,
+  executeSearch,
+  performSystemClickFocus,
+  controllerAction
+} from './helpers/searchExecutor.js';
+import { waitForSearchResultsReady } from './helpers/searchResultWaiter.js';
+import os from 'node:os';
+import path from 'node:path';
+import { promises as fs } from 'node:fs';
+import { countPersistedNotes } from './helpers/persistedNotes.js';
+
 export interface GoToSearchInput {
   sessionId: string;
   keyword: string;
+  env?: string;
   serviceUrl?: string;
+  debugDir?: string;
 }
 
 export interface GoToSearchOutput {
@@ -59,7 +77,9 @@ export async function execute(input: GoToSearchInput): Promise<GoToSearchOutput>
   const {
     sessionId,
     keyword,
-    serviceUrl = 'http://127.0.0.1:7701'
+    env = 'debug',
+    serviceUrl = 'http://127.0.0.1:7701',
+    debugDir,
   } = input;
 
   const profile = sessionId;
@@ -67,6 +87,89 @@ export async function execute(input: GoToSearchInput): Promise<GoToSearchOutput>
   const steps: GoToSearchOutput['steps'] = [];
   let entryAnchor: GoToSearchOutput['entryAnchor'];
   let exitAnchor: GoToSearchOutput['exitAnchor'];
+  let searchInputContainerId: string = 'xiaohongshu_search.search_bar';
+
+  function sanitizeFilenamePart(value: string): string {
+    return String(value || '')
+      .trim()
+      .replace(/[\\/:"*?<>|]+/g, '_')
+      .replace(/\s+/g, '_')
+      .slice(0, 80);
+  }
+
+  function extractBase64FromScreenshotResponse(raw: any): string | undefined {
+    const v =
+      raw?.data?.data ??
+      raw?.data?.body?.data ??
+      raw?.body?.data ??
+      raw?.result?.data ??
+      raw?.result ??
+      raw?.data ??
+      raw;
+    return typeof v === 'string' && v.length > 10 ? v : undefined;
+  }
+
+  async function resolveDebugDir(): Promise<string | null> {
+    if (debugDir) return debugDir;
+    try {
+      const persisted = await countPersistedNotes({
+        platform: 'xiaohongshu',
+        env,
+        keyword,
+        homeDir: os.homedir(),
+        requiredFiles: ['content.md'],
+      });
+      return path.join(persisted.keywordDir, '_debug', 'search');
+    } catch {
+      return null;
+    }
+  }
+
+  async function saveDebugScreenshot(
+    kind: string,
+    meta: Record<string, any>,
+  ): Promise<{ pngPath?: string; jsonPath?: string }> {
+    const dir = await resolveDebugDir();
+    if (!dir) return {};
+    try {
+      await fs.mkdir(dir, { recursive: true });
+      const ts = new Date().toISOString().replace(/[:.]/g, '-');
+      const base = `${ts}-${sanitizeFilenamePart(kind)}`;
+      const pngPath = path.join(dir, `${base}.png`);
+      const jsonPath = path.join(dir, `${base}.json`);
+
+      const shot = await controllerAction(controllerUrl, 'browser:screenshot', {
+        profileId: profile,
+        fullPage: false,
+      });
+      const b64 = extractBase64FromScreenshotResponse(shot);
+      if (b64) {
+        await fs.writeFile(pngPath, Buffer.from(b64, 'base64'));
+      }
+      await fs.writeFile(
+        jsonPath,
+        JSON.stringify(
+          {
+            ts,
+            kind,
+            sessionId: profile,
+            keyword,
+            url: await getCurrentUrl({ profile, controllerUrl }).catch(() => ''),
+            ...meta,
+            pngPath: b64 ? pngPath : null,
+          },
+          null,
+          2,
+        ),
+        'utf-8',
+      );
+      console.log(`[GoToSearch][debug] saved ${kind}: ${pngPath}`);
+      return { pngPath: b64 ? pngPath : undefined, jsonPath };
+    } catch (e: any) {
+      console.warn(`[GoToSearch][debug] save screenshot failed (${kind}): ${e?.message || String(e)}`);
+      return {};
+    }
+  }
 
   function pushStep(step: NonNullable<GoToSearchOutput['steps']>[number]) {
     steps.push(step);
@@ -90,309 +193,123 @@ export async function execute(input: GoToSearchInput): Promise<GoToSearchOutput>
     }
   }
 
-  async function controllerAction(action: string, payload: any = {}) {
-    const response = await fetch(controllerUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action, payload }),
-      signal: (AbortSignal as any).timeout ? (AbortSignal as any).timeout(10000) : undefined
-    });
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}: ${await response.text()}`);
-    }
-    const data = await response.json();
-    return data.data || data;
-  }
-
-  async function verifySearchBarAnchor() {
-    try {
-      const { verifyAnchorByContainerId } = await import('./helpers/containerAnchors.js');
-      const anchor = await verifyAnchorByContainerId('xiaohongshu_search.search_bar', profile, serviceUrl);
-      if (!anchor.found) {
-        return { found: false, error: anchor.error || 'anchor_not_found', selector: anchor.selector };
-      }
-      return {
-        found: true,
-        selector: anchor.selector || '#search-input',
-        rect: anchor.rect
-      };
-    } catch (error: any) {
-      return { found: false, error: error.message };
-    }
-  }
-
-  async function verifySearchResultListAnchor() {
-    try {
-      const { verifyAnchorByContainerId } = await import('./helpers/containerAnchors.js');
-      const anchor = await verifyAnchorByContainerId('xiaohongshu_search.search_result_list', profile, serviceUrl);
-      if (!anchor.found) {
+  try {
+    // 0) 如果已经在正确的搜索结果页，则禁止“重复搜索”：直接等待列表就绪后返回
+    const url0 = await getCurrentUrl({ profile, controllerUrl });
+    if (url0.includes('/search_result')) {
+      if (!urlKeywordEquals(url0, keyword)) {
+        pushStep({
+          id: 'already_on_search_result_keyword_mismatch',
+          status: 'failed',
+          meta: { url: url0, keyword },
+          error: 'keyword_mismatch',
+        });
+        await saveDebugScreenshot('keyword_mismatch', { url: url0, keyword });
         return {
-          found: false,
-          error: anchor.error || 'anchor_not_found',
-          selector: anchor.selector,
-          rect: anchor.rect
+          success: false,
+          searchPageReady: false,
+          searchExecuted: false,
+          url: url0,
+          steps,
+          error: `keyword_changed: ${url0}`,
         };
       }
-      return {
-        found: true,
-        selector: anchor.selector,
-        rect: anchor.rect
-      };
-    } catch (error: any) {
-      return { found: false, error: error.message };
-    }
-  }
 
-  async function getCurrentUrl(): Promise<string> {
-    const response = await fetch(controllerUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        action: 'browser:execute',
-        payload: {
-          profile,
-          script: 'location.href'
-        }
-      })
-    });
-    const data = await response.json();
-    return data.data?.result || '';
-  }
-
-  async function isSearchInputFocused(selector: string | undefined): Promise<boolean> {
-    if (!selector) return false;
-    const script = `(() => {
-      const el = document.querySelector(${JSON.stringify(selector)});
-      if (!el) return false;
-      return document.activeElement === el;
-    })()`;
-
-    const response = await fetch(controllerUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        action: 'browser:execute',
-        payload: {
-          profile,
-          script,
-        },
-      }),
-    });
-    const data = await response.json();
-    return Boolean(data.data?.result ?? data.result);
-  }
-
-  async function readSearchInputValue(selector: string | undefined): Promise<string> {
-    const sel =
-      selector ||
-      '#search-input, input[type=\"search\"], .search-input';
-
-    const script = `(() => {
-      const el = document.querySelector(${JSON.stringify(sel)});
-      if (!el) return '';
-      // @ts-ignore
-      return (el as HTMLInputElement).value || '';
-    })()`;
-
-    const response = await fetch(controllerUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        action: 'browser:execute',
-        payload: {
-          profile,
-          script,
-        },
-      }),
-    });
-    const data = await response.json();
-    const value = data.data?.result ?? data.result ?? '';
-    return typeof value === 'string' ? value : '';
-  }
-
-  async function wait(ms: number) {
-    return new Promise(resolve => setTimeout(resolve, ms));
-  }
-
-  async function waitSearchPermit(): Promise<void> {
-    const gateUrl = process.env.WEBAUTO_SEARCH_GATE_URL || 'http://127.0.0.1:7790/permit';
-
-    async function requestOnce() {
-      const response = await fetch(gateUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          profileId: profile,
-          windowMs: 60_000,
-          maxCount: 2
-        }),
-        // 避免 SearchGate 挂死导致阻塞整个 Workflow
-        signal: (AbortSignal as any).timeout ? (AbortSignal as any).timeout(5000) : undefined
+      const ready = await waitForSearchResultsReady({
+        profile,
+        controllerUrl,
+        keyword,
+        maxWaitMs: 12000,
       });
-      if (!response.ok) {
-        throw new Error(`SearchGate HTTP ${response.status}`);
+      if (!ready.ok) {
+        pushStep({
+          id: 'already_on_search_result_wait_list',
+          status: 'failed',
+          error: ready.noResults ? 'search_no_results' : 'search_result_not_ready',
+          meta: { url: ready.url || url0 },
+        });
+        await saveDebugScreenshot('search_result_not_ready', { url: ready.url || url0 });
+        return {
+          success: false,
+          searchPageReady: false,
+          searchExecuted: false,
+          url: ready.url || url0,
+          steps,
+          error: ready.noResults ? 'Search returned no results' : 'Search results not ready (timeout)',
+        };
       }
-      const data = await response.json();
+
+      if (ready.listAnchor?.rect) {
+        exitAnchor = {
+          containerId: 'xiaohongshu_search.search_result_list',
+          selector: ready.listAnchor.selector,
+          rect: ready.listAnchor.rect,
+          verified: true,
+        };
+      }
+      pushStep({
+        id: 'already_on_search_result',
+        status: 'success',
+        anchor: exitAnchor,
+        meta: { url: ready.url || url0 },
+      });
       return {
-        allowed: Boolean(data.allowed),
-        waitMs: Number(data.waitMs || 0)
+        success: true,
+        searchPageReady: true,
+        searchExecuted: false,
+        url: ready.url || url0,
+        entryAnchor: undefined,
+        exitAnchor,
+        steps,
+        anchor: exitAnchor || {
+          containerId: 'xiaohongshu_search.search_result_list',
+          verified: false,
+        },
       };
     }
 
-    try {
-      // 最多等待几轮，避免无限阻塞（按 SearchGate 策略，每轮最多等 60s）
-      for (let i = 0; i < 5; i += 1) {
-        const { allowed, waitMs } = await requestOnce();
-        if (allowed) {
-          console.log('[GoToSearch] SearchGate permit granted');
-          return;
-        }
-        const safeWait = Math.min(Math.max(waitMs, 5_000), 65_000);
-        console.log(`[GoToSearch] SearchGate throttling, wait ${safeWait}ms`);
-        await wait(safeWait);
-      }
-      throw new Error('SearchGate throttling: too many retries');
-    } catch (err: any) {
-      console.error('[GoToSearch] SearchGate not available:', err.message);
-      throw new Error('SearchGate not available, 请先在另一终端运行 node scripts/search-gate-server.mjs');
-    }
-  }
+    // 0. 所有搜索必须先经过 SearchGate 节流（仅在真正需要执行搜索时）
+    await waitSearchPermit({
+      profileId: profile,
+      windowMs: 60_000,
+      maxCount: 2,
+    });
 
-  async function ensureHomePage(): Promise<boolean> {
-    const url = await getCurrentUrl();
+    // 1. 确保在站内（最好是首页或搜索页）
+    const homePageState = await ensureHomePage({ profile, controllerUrl });
 
-    // 入口锚点 1：URL 必须在小红书站内
-    if (!url.includes('xiaohongshu.com')) {
-      throw new Error(
-        `Not on xiaohongshu.com (current url=${url || 'unknown'}), please navigate manually before searching.`,
-      );
-    }
+    // 1.1 根据当前页面类型选择输入框容器（主页 / 搜索页）
+    searchInputContainerId = homePageState.onSearchPage
+      ? 'xiaohongshu_search.search_bar'
+      : 'xiaohongshu_home.search_input';
 
-    // 入口锚点 2：页面必须不是“可见的”详情态（存在可见的 .note-detail-mask / 详情容器 时视为详情页）
-    try {
-      const detailState = await fetch(controllerUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'browser:execute',
-          payload: {
-            profile,
-            script: `(() => {
-              const selectors = [
-                '.note-detail-mask',
-                '.note-detail-page',
-                '.note-detail-dialog',
-                '.note-detail',
-                '.detail-container',
-                '.media-container'
-              ];
-              const isVisible = (el) => {
-                if (!el) return false;
-                const style = window.getComputedStyle(el);
-                if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false;
-                const r = el.getBoundingClientRect();
-                if (!r.width || !r.height) return false;
-                if (r.bottom <= 0 || r.top >= window.innerHeight) return false;
-                return true;
-              };
-              let visibleOverlay = null;
-              for (const sel of selectors) {
-                const el = document.querySelector(sel);
-                if (el && isVisible(el)) {
-                  visibleOverlay = el;
-                  break;
-                }
-              }
-              return { hasDetailOverlayVisible: !!visibleOverlay };
-            })()`,
-          },
-        }),
-      }).then((r) => r.json());
-      const payload = detailState.data?.result ?? detailState.result ?? {};
-      if (payload.hasDetailOverlayVisible) {
-        throw new Error('Currently in visible detail overlay, please exit detail before searching.');
-      }
-    } catch (err: any) {
-      if (err?.message?.includes('Currently in detail overlay')) {
-        throw err;
-      }
-      console.warn('[GoToSearch] ensureHomePage detail-overlay check failed:', err?.message || err);
-    }
+    // 1.5 验证搜索框锚点
+    const anchorResult = await verifySearchBarAnchor({
+      profile,
+      controllerUrl,
+      searchInputContainerId,
+      keyword
+    });
 
-    // 如果已经在搜索结果页，且关键词不同，可以直接在当前结果页继续搜索
-    if (url.includes('/search_result')) {
-      console.log('[GoToSearch] Currently on search page (no detail overlay), ready for new search.');
-      return true;
-    }
-
-    // 如果在验证码页面，抛出错误请求人工介入
-    if (url.includes('captcha') || url.includes('verify')) {
-      throw new Error('Detected CAPTCHA page, please solve it manually.');
-    }
-
-    // 其他情况（首页 / 发现页 / 其它小红书站内页）视为可执行搜索的起点
-    return true;
-  }
-
-  async function executeSearch(anchorSelector?: string): Promise<boolean> {
-    try {
-      console.log(`[GoToSearch] Typing keyword "${keyword}"...`);
-
-      // 使用容器操作：type + enter（纯容器驱动，禁止脚本直接 click）
-      const selector =
-        anchorSelector ||
-        '#search-input, input[type="search"], .search-input';
-
-      const contResp = await controllerAction('container:operation', {
-        containerId: 'xiaohongshu_search.search_bar',
-        operationId: 'type',
-        config: {
-          selector,
-          text: keyword,
-          clear_first: true,
-          submit: true
-        },
-        sessionId: profile
-      });
-      
-      if (!contResp.success) {
-        throw new Error(`Search bar container operation failed: ${contResp.error || 'unknown'}`);
-      }
-
-      console.log('[GoToSearch] Search triggered, waiting for results...');
-      await wait(5000);
-      return true;
-    } catch (error) {
-      console.error(`[GoToSearch] Search failed: ${error.message}`);
-      throw error;
-    }
-  }
-
-  try {
-    // 0. 所有搜索必须先经过 SearchGate 节流
-    await waitSearchPermit();
-
-    // 1. 确保在站内（最好是首页或搜索页）——如果连站点都不对，直接失败
-    await ensureHomePage();
-
-    // 1.5 验证搜索框锚点（通过 containers:match）——入口锚点
-    const anchorResult = await verifySearchBarAnchor();
     if (!anchorResult.found) {
       entryAnchor = {
-        containerId: 'xiaohongshu_search.search_bar',
+        containerId: searchInputContainerId,
         selector: anchorResult.selector,
         rect: anchorResult.rect,
         verified: false,
       };
-      console.log(
-        '[GoToSearch][entryAnchor]',
-        JSON.stringify(entryAnchor, null, 2),
-      );
+      console.log('[GoToSearch][entryAnchor]', JSON.stringify(entryAnchor, null, 2));
       pushStep({
         id: 'verify_search_bar_anchor',
         status: 'failed',
         error: anchorResult.error || 'anchor_not_found',
         anchor: entryAnchor,
+      });
+      await saveDebugScreenshot('search_bar_anchor_not_found', {
+        searchInputContainerId,
+        selector: anchorResult.selector,
+        rect: anchorResult.rect,
+        error: anchorResult.error || 'anchor_not_found',
       });
       return {
         success: false,
@@ -403,7 +320,7 @@ export async function execute(input: GoToSearchInput): Promise<GoToSearchOutput>
         exitAnchor: undefined,
         steps,
         anchor: {
-          containerId: 'xiaohongshu_search.search_bar',
+          containerId: searchInputContainerId,
           selector: anchorResult.selector,
           verified: false
         },
@@ -411,10 +328,10 @@ export async function execute(input: GoToSearchInput): Promise<GoToSearchOutput>
       };
     }
 
-    // 1.6 执行 container:operation highlight（容器层高亮）
+    // 1.6 执行 container:operation highlight
     try {
-      await controllerAction('container:operation', {
-        containerId: 'xiaohongshu_search.search_bar',
+      await controllerAction(controllerUrl, 'container:operation', {
+        containerId: searchInputContainerId,
         operationId: 'highlight',
         config: {
           selector: anchorResult.selector,
@@ -424,15 +341,14 @@ export async function execute(input: GoToSearchInput): Promise<GoToSearchOutput>
         sessionId: profile
       });
       console.log('[GoToSearch] Search bar highlighted successfully');
-    } catch (error) {
+    } catch (error: any) {
       console.warn('[GoToSearch] Highlight error:', error.message);
     }
 
     // 1.7 获取 Rect 并验证
-    // 优先使用 verifyAnchor 返回的 rect（已经通过 DOM 回环计算过）
     const rect = anchorResult.rect;
-
     const rectVerified = rect && rect.y < 200 && rect.width > 0 && rect.height > 0;
+    
     if (!rectVerified) {
       console.warn(`[GoToSearch] Rect validation failed: ${JSON.stringify(rect)}`);
     } else {
@@ -440,72 +356,50 @@ export async function execute(input: GoToSearchInput): Promise<GoToSearchOutput>
     }
 
     entryAnchor = {
-      containerId: 'xiaohongshu_search.search_bar',
+      containerId: searchInputContainerId,
       selector: anchorResult.selector,
       rect,
       verified: Boolean(rectVerified),
     };
-    console.log(
-      '[GoToSearch][entryAnchor]',
-      JSON.stringify(entryAnchor, null, 2),
-    );
+    console.log('[GoToSearch][entryAnchor]', JSON.stringify(entryAnchor, null, 2));
     pushStep({
       id: 'verify_search_bar_anchor',
       status: rectVerified ? 'success' : 'success',
-      // 即便 rect 验证略警告，只要找到了就认为进入了阶段，具体质量通过 verified 表达
       anchor: entryAnchor,
     });
 
-    // 1.8 使用容器运行时 + 系统点击聚焦搜索框（基于容器锚点的安全点击）
+    // 1.8 使用容器运行时 + 系统点击聚焦搜索框
     if (anchorResult.selector) {
-      try {
-        const clickResp = await controllerAction('container:operation', {
-          containerId: 'xiaohongshu_search.search_bar',
-          operationId: 'click',
-          config: { selector: anchorResult.selector, useSystemMouse: true },
-          sessionId: profile
-        });
-        console.log('[GoToSearch] System click on search bar executed', clickResp);
+      const clickResult = await performSystemClickFocus(
+        { profile, controllerUrl, searchInputContainerId, keyword },
+        anchorResult.selector
+      );
 
-        // 点击后做一次焦点确认
-        const focused = await isSearchInputFocused(anchorResult.selector);
-        pushStep({
-          id: 'system_click_focus_input',
-          status: focused ? 'success' : 'failed',
-          anchor: entryAnchor,
-          meta: { focused },
-        });
-        if (!focused) {
-          return {
-            success: false,
-            searchPageReady: false,
-            searchExecuted: false,
-            url: await getCurrentUrl(),
-            entryAnchor,
-            exitAnchor: undefined,
-            steps,
-            anchor: entryAnchor,
-            error: 'Search input not focused after system click',
-          };
-        }
-      } catch (error: any) {
-        console.warn('[GoToSearch] System click on search bar failed:', error.message);
-        pushStep({
-          id: 'system_click_focus_input',
-          status: 'failed',
-          anchor: entryAnchor,
-          error: error.message,
+      pushStep({
+        id: 'system_click_focus_input',
+        status: clickResult.focused ? 'success' : 'failed',
+        anchor: entryAnchor,
+        meta: { focused: clickResult.focused },
+        error: clickResult.error
+      });
+
+      if (!clickResult.focused) {
+        await saveDebugScreenshot('search_input_not_focused', {
+          searchInputContainerId,
+          selector: anchorResult.selector,
+          rect,
+          error: clickResult.error || 'not_focused',
         });
         return {
           success: false,
           searchPageReady: false,
           searchExecuted: false,
-          url: await getCurrentUrl(),
+          url: await getCurrentUrl({ profile, controllerUrl }),
           entryAnchor,
           exitAnchor: undefined,
           steps,
           anchor: entryAnchor,
-          error: `System click failed: ${error.message}`,
+          error: 'Search input not focused after system click',
         };
       }
     } else {
@@ -518,78 +412,125 @@ export async function execute(input: GoToSearchInput): Promise<GoToSearchOutput>
       });
     }
 
-    // 2. 执行搜索（模拟输入，仍通过容器 operation 驱动）
-    const searchExecuted = await executeSearch(anchorResult.selector);
-    const finalUrl = await getCurrentUrl();
+    // 2. 执行搜索
+    const searchResult = await executeSearch(
+      { profile, controllerUrl, searchInputContainerId, keyword },
+      anchorResult.selector
+    );
+    
+    const finalUrl = await getCurrentUrl({ profile, controllerUrl });
 
     // 2.1 检查输入框中的值是否为当前关键字
-    const currentValue = await readSearchInputValue(anchorResult.selector);
-    const valueMatches = currentValue.trim() === keyword.trim();
+    const currentValue = await readSearchInputValue(
+      { profile, controllerUrl, searchInputContainerId, keyword },
+      anchorResult.selector
+    );
+    
+    const trimmedValue = currentValue.trim();
+    const trimmedExpected = keyword.trim();
+    // 主页搜索：触发回车后可能立刻跳转，旧输入框消失导致读到空值；开发阶段不把该校验作为失败依据
+    const valueCheckSkipped = !trimmedValue;
+    const valueMatches = valueCheckSkipped ? true : trimmedValue === trimmedExpected;
     pushStep({
       id: 'system_type_keyword',
-      status: valueMatches && searchExecuted ? 'success' : 'failed',
+      status: searchResult.success ? 'success' : 'failed',
       anchor: entryAnchor,
-      meta: { value: currentValue, expected: keyword, searchExecuted },
-      error: !valueMatches ? 'keyword_mismatch' : undefined,
+      meta: {
+        value: currentValue,
+        expected: keyword,
+        searchExecuted: searchResult.success,
+        valueCheckSkipped,
+        finalUrl,
+      },
+      ...(searchResult.success
+        ? {}
+        : { error: searchResult.error || (!valueMatches ? 'keyword_mismatch' : 'type_failed') }),
     });
 
-    // 如果搜索输入阶段本身失败，直接返回错误
-    if (!searchExecuted) {
+    if (!searchResult.success) {
+      await saveDebugScreenshot('search_trigger_failed', {
+        searchInputContainerId,
+        selector: anchorResult.selector,
+        rect,
+        error: searchResult.error || 'trigger_failed',
+      });
       return {
         success: false,
         searchPageReady: false,
-        searchExecuted,
+        searchExecuted: false,
         url: finalUrl,
         entryAnchor,
         exitAnchor: undefined,
         steps,
-        error: `Search input/trigger failed, current url=${finalUrl || 'unknown'}`,
+        error: searchResult.error || `Search input/trigger failed, current url=${finalUrl || 'unknown'}`,
       };
     }
 
-    // 2.5 通过容器锚点验证搜索结果列表是否出现
-    const listAnchor = await verifySearchResultListAnchor();
-    if (!listAnchor.found) {
-      console.warn(
-        '[GoToSearch] Search result list anchor not found after search:',
-        listAnchor.error || 'unknown error',
-      );
-      // 记录失败步骤，但不让整个 Block 失败，由 CollectSearchListBlock 继续通过容器/URL fallback 采集列表
+    // 2.5 等待搜索结果就绪
+    const ready = await waitForSearchResultsReady({
+      profile,
+      controllerUrl,
+      keyword,
+      maxWaitMs: 30000
+    });
+
+    if (!ready.ok) {
       pushStep({
         id: 'wait_search_result_list',
         status: 'failed',
-        error: listAnchor.error || 'anchor_not_found',
+        error: ready.noResults ? 'search_no_results' : 'search_result_not_ready',
         anchor: {
           containerId: 'xiaohongshu_search.search_result_list',
-          selector: listAnchor.selector,
-          rect: listAnchor.rect,
           verified: false,
         },
-        meta: { url: finalUrl },
+        meta: { url: ready.url || finalUrl },
       });
-      exitAnchor = undefined;
-    } else {
+      await saveDebugScreenshot('search_result_not_ready', {
+        url: ready.url || finalUrl,
+        noResults: Boolean(ready.noResults),
+      });
+      return {
+        success: false,
+        searchPageReady: false,
+        searchExecuted: true,
+        url: ready.url || finalUrl,
+        entryAnchor,
+        exitAnchor: undefined,
+        steps,
+        error: ready.noResults ? 'Search returned no results' : 'Search results not ready (timeout)',
+      };
+    }
+
+    if (ready.listAnchor?.rect) {
       exitAnchor = {
         containerId: 'xiaohongshu_search.search_result_list',
-        selector: listAnchor.selector,
-        rect: listAnchor.rect,
-        verified: Boolean(
-          listAnchor.rect &&
-            listAnchor.rect.height > 0 &&
-            listAnchor.rect.y < (listAnchor.rect.height + (listAnchor.rect.y || 0)),
-        ),
+        selector: ready.listAnchor.selector,
+        rect: ready.listAnchor.rect,
+        verified: true,
       };
       console.log('[GoToSearch][exitAnchor]', JSON.stringify(exitAnchor, null, 2));
       pushStep({
         id: 'wait_search_result_list',
         status: 'success',
         anchor: exitAnchor,
-        meta: { url: finalUrl },
+        meta: { url: ready.url || finalUrl },
       });
+    } else {
+      pushStep({
+        id: 'wait_search_result_list',
+        status: 'success',
+        anchor: {
+          containerId: 'xiaohongshu_search.search_result_list',
+          verified: false,
+        },
+        meta: { url: ready.url || finalUrl, note: 'items_detected_no_anchor' },
+      });
+      exitAnchor = undefined;
     }
     
-    // 3. 检查是否出现验证码（依然用 URL 作为风控信号，但不作为阶段判断条件）
+    // 3. 检查是否出现验证码
     if (finalUrl.includes('captcha') || finalUrl.includes('verify')) {
+      await saveDebugScreenshot('captcha_detected', { url: finalUrl });
       return {
         success: false,
         searchPageReady: false,
@@ -601,14 +542,14 @@ export async function execute(input: GoToSearchInput): Promise<GoToSearchOutput>
 
     return {
       success: true,
-      searchPageReady: Boolean(exitAnchor),
-      searchExecuted,
-      url: finalUrl,
+      searchPageReady: true,
+      searchExecuted: true,
+      url: ready.url || finalUrl,
       entryAnchor,
       exitAnchor,
       steps,
       anchor: {
-        containerId: 'xiaohongshu_search.search_bar',
+        containerId: searchInputContainerId,
         selector: anchorResult.selector,
         rect,
         verified: rectVerified,

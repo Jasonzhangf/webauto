@@ -140,10 +140,11 @@ export async function execute(input: CollectBatchInput): Promise<CollectBatchOut
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          action: 'evaluate',
+          action: 'mouse:wheel',
           args: {
             profileId: sessionId,
-            script: `window.scrollBy({ top: ${scrollDistance}, behavior: 'smooth' })`
+            deltaX: 0,
+            deltaY: Math.max(-800, Math.min(800, Number(scrollDistance) || 0)),
           }
         })
       });

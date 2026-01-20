@@ -251,6 +251,22 @@ export class BrowserSession {
     return page;
   }
 
+  async goBack(): Promise<{ ok: boolean; url: string }> {
+    const page = await this.ensurePrimaryPage();
+    try {
+      const res = await page
+        .goBack({ waitUntil: 'domcontentloaded' })
+        .catch((): null => null);
+      await ensurePageRuntime(page, true).catch(() => {});
+      this.lastKnownUrl = page.url();
+      return { ok: Boolean(res), url: page.url() };
+    } catch {
+      await ensurePageRuntime(page, true).catch(() => {});
+      this.lastKnownUrl = page.url();
+      return { ok: false, url: page.url() };
+    }
+  }
+
   listPages(): { index: number; url: string; active: boolean }[] {
     if (!this.context) return [];
     const pages = this.context.pages().filter((p) => !p.isClosed());

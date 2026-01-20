@@ -8,6 +8,7 @@
 import fs from 'fs/promises';
 
 const UNIFIED_API = 'http://127.0.0.1:7701';
+const PROFILE = 'weibo_fresh';
 
 async function executeScript(script: string) {
   const response = await fetch(`${UNIFIED_API}/v1/controller/action`, {
@@ -16,7 +17,7 @@ async function executeScript(script: string) {
     body: JSON.stringify({
       action: 'browser:execute',
       payload: {
-        sessionId: 'weibo_fresh',
+        sessionId: PROFILE,
         script
       }
     })
@@ -24,6 +25,21 @@ async function executeScript(script: string) {
 
   const result = await response.json();
   return result.data?.result ?? result.data;
+}
+
+async function mouseWheel(deltaY: number) {
+  await fetch(`${UNIFIED_API}/v1/controller/action`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      action: 'mouse:wheel',
+      payload: {
+        profileId: PROFILE,
+        deltaX: 0,
+        deltaY: Math.max(-800, Math.min(800, Number(deltaY) || 0)),
+      },
+    }),
+  }).then((r) => r.json().catch(() => ({})));
 }
 
 async function collectWeiboPosts(targetCount: number) {
@@ -147,7 +163,8 @@ async function collectWeiboPosts(targetCount: number) {
     // 如果还需要更多，滚动
     if (collectedPosts.size < targetCount && noChangeCount < maxNoChangeCount) {
       console.log('   🔄 Scrolling down...');
-      await executeScript('window.scrollBy(0, 1200);'); // 滚动更多
+      await mouseWheel(800);
+      await mouseWheel(800);
       await new Promise(r => setTimeout(r, 3000)); // 等待加载
       scrollCount++;
     } else {

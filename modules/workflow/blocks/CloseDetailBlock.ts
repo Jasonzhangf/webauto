@@ -1,8 +1,13 @@
 /**
  * Workflow Block: CloseDetailBlock
  *
- * 关闭详情页（通用策略：history.back / ESC / 点击遮罩）
+ * 关闭详情页（严格模式：只按 ESC，失败即停）
  */
+
+import os from 'node:os';
+import path from 'node:path';
+import { promises as fs } from 'node:fs';
+import { verifyAnchorByContainerId } from './helpers/containerAnchors.js';
 
 export interface CloseDetailInput {
   sessionId: string;
@@ -18,7 +23,7 @@ export interface Rect {
 
 export interface CloseDetailOutput {
   success: boolean;
-  method: 'history_back' | 'esc_key' | 'mask_click' | 'unknown';
+  method: 'close_button' | 'esc_key' | 'browser_back_key' | 'history_back' | 'mask_click' | 'unknown';
   anchor?: {
     detailContainerId?: string;
     detailRect?: Rect;
@@ -43,188 +48,96 @@ export async function execute(input: CloseDetailInput): Promise<CloseDetailOutpu
 
   const profile = sessionId;
   const controllerUrl = `${serviceUrl}/v1/controller/action`;
+  const logDir = path.join(os.homedir(), '.webauto', 'logs', 'close-detail');
+
+  async function getCurrentUrl(): Promise<string> {
+    const res = await controllerAction('browser:execute', {
+      profile,
+      script: 'location.href',
+    });
+    return (res?.result ?? res?.data?.result ?? '') as string;
+  }
 
   async function controllerAction(action: string, payload: any = {}) {
     const response = await fetch(controllerUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action, payload }),
-      // 防御性超时，避免 containers:match / browser:execute 长时间挂起
-      signal: (AbortSignal as any).timeout ? (AbortSignal as any).timeout(10000) : undefined
+      signal: (AbortSignal as any).timeout ? (AbortSignal as any).timeout(20000) : undefined,
     });
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}: ${await response.text()}`);
     }
-    const data = await response.json();
-    return data.data || data;
+    const data = await response.json().catch(() => ({}));
+    return (data as any).data || data;
   }
 
-  function findContainer(tree: any, pattern: RegExp): any {
-    if (!tree) return null;
-    if (pattern.test(tree.id || tree.defId || '')) return tree;
-    if (Array.isArray(tree.children)) {
-      for (const child of tree.children) {
-        const found = findContainer(child, pattern);
-        if (found) return found;
-      }
+  async function captureFailureScreenshot(tag: string): Promise<string | null> {
+    try {
+      const shot = await controllerAction('browser:screenshot', { profileId: profile, fullPage: false });
+      const b64 =
+        (shot as any)?.data?.data ??
+        (shot as any)?.data?.body?.data ??
+        (shot as any)?.body?.data ??
+        (shot as any)?.result?.data ??
+        (shot as any)?.result ??
+        (shot as any)?.data ??
+        shot;
+      if (typeof b64 !== 'string' || b64.length < 10) return null;
+      await fs.mkdir(logDir, { recursive: true });
+      const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const file = path.join(logDir, `${stamp}_${profile}_${tag}.png`);
+      await fs.writeFile(file, Buffer.from(b64, 'base64'));
+      return file;
+    } catch {
+      return null;
     }
-    return null;
   }
 
   try {
-    const { highlightContainer, getContainerRect } = await import('./helpers/anchorVerify.js');
+    // 1) 按 ESC（系统级）
+    await controllerAction('keyboard:press', { profileId: profile, key: 'Escape' });
+    await new Promise((r) => setTimeout(r, 1500));
 
-    // 0. 关闭前：尝试找到详情容器并高亮 + Rect
-    let detailContainerId: string | undefined;
-    let detailRect: Rect | undefined;
+    // 2) 必须回到搜索列表（不做任何兜底返回/重试）
+    const url = await getCurrentUrl();
+    const listAnchor = await verifyAnchorByContainerId(
+      'xiaohongshu_search.search_result_list',
+      profile,
+      serviceUrl,
+      '2px solid #00bbff',
+      800,
+    ).catch(() => ({ found: false, highlighted: false } as any));
 
-    try {
-      const matchResult = await controllerAction('containers:match', {
-        profile,
-        maxDepth: 6,
-        maxChildren: 30
-      });
-      const tree = matchResult.snapshot?.container_tree || matchResult.container_tree;
-      const modal = findContainer(tree, /xiaohongshu_detail\.modal_shell$/);
-      const detailRoot = findContainer(tree, /^xiaohongshu_detail$/);
-      const target = modal || detailRoot;
-
-      if (target?.id) {
-        detailContainerId = target.id;
-        await highlightContainer(target.id, profile, serviceUrl, {
-          style: '2px solid #ff4444',
-          duration: 1500
-        });
-        const rect = await getContainerRect(target.id, profile, serviceUrl);
-        if (rect) {
-          detailRect = rect;
-          console.log(`[CloseDetail] detail rect: ${JSON.stringify(rect)}`);
-        }
-      }
-    } catch (e: any) {
-      console.warn(`[CloseDetail] pre-close anchor verify error: ${e.message}`);
-    }
-
-    // 若无法命中任何详情页容器锚点，则直接返回错误，避免在错误页面上执行 history.back / mask 点击。
-    if (!detailContainerId) {
+    if (!url.includes('/search_result') || !listAnchor?.found) {
+      const shot = await captureFailureScreenshot('close_detail_failed');
       return {
         success: false,
         method: 'unknown',
         anchor: {
-          detailContainerId,
-          detailRect,
-          searchListContainerId: undefined,
-          searchListRect: undefined,
-          verified: false
+          searchListContainerId: 'xiaohongshu_search.search_result_list',
+          searchListRect: listAnchor?.rect,
+          verified: false,
         },
-        error: 'detail modal anchor not found, abort CloseDetail'
-      };
-    }
-
-    // 1. 尝试点击遮罩层关闭
-    let method: 'history_back' | 'esc_key' | 'mask_click' | 'unknown' = 'unknown';
-    let closeError: string | undefined;
-
-    try {
-      await controllerAction('browser:execute', {
-        profile,
-        script: `(() => {
-          const mask = document.querySelector('.note-detail-mask');
-          if (mask) {
-            mask.click();
-            return 'mask_click';
-          }
-          return null;
-        })()`
-      });
-      await new Promise(r => setTimeout(r, 1200));
-      method = 'mask_click';
-    } catch (error: any) {
-      // 2. 兜底：history.back
-      try {
-        await controllerAction('browser:execute', {
-          profile,
-          script: 'window.history.back()'
-        });
-        await new Promise(r => setTimeout(r, 1200));
-        method = 'history_back';
-      } catch (err: any) {
-        closeError = err.message || String(err);
-      }
-    }
-
-    // 3. 关闭后：尝试确认已经回到搜索列表页，并对列表容器做锚点回环
-    let searchListContainerId: string | undefined;
-    let searchListRect: Rect | undefined;
-    let verified = false;
-
-    try {
-      const matchResultAfter = await controllerAction('containers:match', {
-        profile,
-        maxDepth: 6,
-        maxChildren: 30
-      });
-      const treeAfter = matchResultAfter.snapshot?.container_tree || matchResultAfter.container_tree;
-      const searchList =
-        findContainer(treeAfter, /xiaohongshu_search\.search_result_list$/) ||
-        findContainer(treeAfter, /xiaohongshu_home\.feed_list$/);
-
-      if (searchList?.id) {
-        searchListContainerId = searchList.id;
-        await highlightContainer(searchList.id, profile, serviceUrl, {
-          style: '2px solid #00bbff',
-          duration: 1500
-        });
-        const rect = await getContainerRect(searchList.id, profile, serviceUrl);
-        if (rect) {
-          searchListRect = rect;
-          console.log(`[CloseDetail] search/list rect: ${JSON.stringify(rect)}`);
-
-          // 验证：详情 Rect 不再覆盖视口中心，列表出现在中部区域
-          const listOk = searchListRect.y > 100 && searchListRect.height > 0;
-          const detailGoneOrTop =
-            !detailRect || detailRect.height < searchListRect.height || detailRect.y < 50;
-          verified = listOk && detailGoneOrTop;
-          console.log(`[CloseDetail] Rect validation: listOk=${listOk}, detailGoneOrTop=${detailGoneOrTop}`);
-        }
-      } else {
-        console.warn('[CloseDetail] post-close containers:match did not find search_result_list or home.feed_list');
-      }
-    } catch (e: any) {
-      console.warn(`[CloseDetail] post-close anchor verify error: ${e.message}`);
-    }
-
-    if (closeError || !searchListContainerId) {
-      return {
-        success: false,
-        method: 'unknown',
-        anchor: {
-          detailContainerId,
-          detailRect,
-          searchListContainerId,
-          searchListRect,
-          verified
-        },
-        error: `CloseDetail failed: ${closeError}`
+        error: `CloseDetail failed: url=${url || 'unknown'} listFound=${Boolean(listAnchor?.found)} screenshot=${shot || 'none'}`,
       };
     }
 
     return {
       success: true,
-      method,
+      method: 'esc_key',
       anchor: {
-        detailContainerId,
-        detailRect,
-        searchListContainerId,
-        searchListRect,
-        verified
-      }
+        searchListContainerId: 'xiaohongshu_search.search_result_list',
+        searchListRect: listAnchor?.rect,
+        verified: true,
+      },
     };
   } catch (err: any) {
+    const shot = await captureFailureScreenshot('close_detail_threw');
     return {
       success: false,
       method: 'unknown',
-      error: `CloseDetail failed: ${err.message}`
+      error: `CloseDetail failed: ${err?.message || String(err)} screenshot=${shot || 'none'}`,
     };
   }
 }

@@ -12,6 +12,7 @@ import * as ExpandCommentsBlock from '../blocks/ExpandCommentsBlock.js';
 import * as CollectCommentsBlock from '../blocks/CollectCommentsBlock.js';
 import * as PersistXhsNoteBlock from '../blocks/PersistXhsNoteBlock.js';
 import * as CloseDetailBlock from '../blocks/CloseDetailBlock.js';
+import * as XiaohongshuFullCollectBlock from '../blocks/XiaohongshuFullCollectBlock.js';
 import * as ErrorRecoveryBlock from '../blocks/ErrorRecoveryBlock.js';
 import * as AnchorVerificationBlock from '../blocks/AnchorVerificationBlock.js';
 import * as CallWorkflowBlock from '../blocks/CallWorkflowBlock.js';
@@ -35,6 +36,7 @@ export function createDefaultWorkflowExecutor(): WorkflowExecutor {
   executor.registerBlock('CallWorkflowBlock', { execute: CallWorkflowBlock.execute });
   executor.registerBlock('PersistXhsNoteBlock', { execute: PersistXhsNoteBlock.execute });
   executor.registerBlock('RecordFixtureBlock', { execute: RecordFixtureBlock.execute });
+  executor.registerBlock('XiaohongshuFullCollectBlock', { execute: XiaohongshuFullCollectBlock.execute });
   return executor;
 }
 

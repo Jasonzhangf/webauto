@@ -246,16 +246,36 @@ export class BrowserMessageHandler {
 
     try {
       const page = await session.ensurePage();
-      
-      // 执行滚动
-      await page.evaluate((pos) => {
-        window.scrollTo(pos.x, pos.y);
-      }, { x: x || 0, y: y || 0 });
+      const targetX = Number(x || 0) || 0;
+      const targetY = Number(y || 0) || 0;
+
+      // 禁止 JS scrollTo：改为系统级滚轮逐步滚动逼近目标位置
+      const before = await page.evaluate(() => ({
+        scrollX: window.scrollX || 0,
+        scrollY: window.scrollY || 0,
+        innerHeight: window.innerHeight || 0,
+        scrollHeight: document.documentElement?.scrollHeight || 0,
+      }));
+
+      let currentY = Number(before.scrollY || 0) || 0;
+      let deltaY = targetY - currentY;
+      let steps = 0;
+
+      // 单次滚动不超过 800px，最多 80 步防止卡死
+      while (Math.abs(deltaY) > 2 && steps < 80) {
+        const stepY = Math.max(-800, Math.min(800, deltaY));
+        await page.mouse.wheel(0, stepY);
+        await new Promise((r) => setTimeout(r, 160));
+        const pos = await page.evaluate(() => window.scrollY || 0).catch(() => currentY);
+        currentY = Number(pos) || currentY;
+        deltaY = targetY - currentY;
+        steps += 1;
+      }
 
       await this.messageBus.publish(RES_BROWSER_PAGE_SCROLL, {
         requestId,
         success: true,
-        data: { x, y, scrolled: true }
+        data: { x: targetX, y: targetY, scrolled: true, steps }
       }, { component: 'BrowserService' });
     } catch (err: any) {
       await this.sendError(RES_BROWSER_PAGE_SCROLL, requestId, err.message);
