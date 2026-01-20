@@ -148,18 +148,19 @@ export async function execute(input: OpenDetailInput): Promise<OpenDetailOutput>
     const minY = Math.round(rect.y + 12);
     const maxY = Math.round(rect.y + rect.height - 12);
 
+    // 关键：避免点到作者/头像等交互区（通常在卡片下方区域）
+    // 优先点封面上方区域
     let x = Math.round(rect.x + rect.width / 2);
-    let y = Math.round(rect.y + rect.height * 0.2);
+    let y = Math.round(rect.y + rect.height * 0.12);
 
     x = clamp(x, minX, maxX);
     y = clamp(y, minY, maxY);
 
-    // 避免点击到顶部固定栏/遮挡层：y 至少 140px
-    const safeMinY = 140;
-    const safeMaxY = Math.max(safeMinY + 20, viewportH - 140);
-    y = clamp(y, safeMinY, safeMaxY);
-    // 再次确保仍在 rect 内
-    y = clamp(y, minY, maxY);
+    // 避免点击到顶部固定栏/遮挡层：仅在点位落到顶部栏范围时抬高
+    const headerSafeY = 120;
+    if (y < headerSafeY) {
+      y = clamp(headerSafeY, minY, maxY);
+    }
 
     x = clamp(x, 30, viewportW - 30);
     y = clamp(y, 30, viewportH - 30);
@@ -168,6 +169,106 @@ export async function execute(input: OpenDetailInput): Promise<OpenDetailOutput>
     y = clamp(y, minY, maxY);
 
     return { x, y };
+  }
+
+  async function probeClickTarget(point: { x: number; y: number }): Promise<{
+    inCover: boolean;
+    closestHref: string | null;
+    isUserProfile: boolean;
+    tag: string | null;
+    className: string | null;
+    textSnippet: string | null;
+  }> {
+    try {
+      const res = await controllerAction('browser:execute', {
+        profile,
+        script: `(() => {
+          const p = ${JSON.stringify(point)};
+          const el = document.elementFromPoint(p.x, p.y);
+          const tag = el && el.tagName ? String(el.tagName) : null;
+          const className = el && el.className ? String(el.className) : null;
+          const a = el && el.closest ? el.closest('a') : null;
+          const href = a ? (a.getAttribute('href') || a.href || '') : '';
+          const inCover = !!(el && el.closest && el.closest('a.cover'));
+          const isUserProfile = href.includes('/user/profile') || href.includes('/user/') && href.includes('profile');
+          const textSnippet = el && el.textContent ? String(el.textContent).trim().slice(0, 60) : null;
+          return { inCover, href: href || null, isUserProfile, tag, className, textSnippet };
+        })()`,
+      });
+      const payload = (res as any)?.result ?? (res as any)?.data?.result ?? res ?? {};
+      return {
+        inCover: Boolean(payload?.inCover),
+        closestHref: typeof payload?.href === 'string' ? payload.href : null,
+        isUserProfile: Boolean(payload?.isUserProfile),
+        tag: typeof payload?.tag === 'string' ? payload.tag : null,
+        className: typeof payload?.className === 'string' ? payload.className : null,
+        textSnippet: typeof payload?.textSnippet === 'string' ? payload.textSnippet : null,
+      };
+    } catch {
+      return {
+        inCover: false,
+        closestHref: null,
+        isUserProfile: false,
+        tag: null,
+        className: null,
+        textSnippet: null,
+      };
+    }
+  }
+
+  async function chooseSafeClickPoint(
+    rect: Rect,
+    viewport: { innerWidth?: number; innerHeight?: number },
+  ): Promise<{ x: number; y: number; probe: any }> {
+    const viewportW =
+      typeof viewport.innerWidth === 'number' && viewport.innerWidth > 0 ? viewport.innerWidth : 1440;
+    const viewportH =
+      typeof viewport.innerHeight === 'number' && viewport.innerHeight > 0 ? viewport.innerHeight : 900;
+
+    const minX = Math.round(rect.x + 12);
+    const maxX = Math.round(rect.x + rect.width - 12);
+    const minY = Math.round(rect.y + 12);
+    const maxY = Math.round(rect.y + rect.height - 12);
+
+    const headerSafeY = 120;
+
+    function computePointByFraction(fx: number, fy: number): { x: number; y: number } {
+      let x = Math.round(rect.x + rect.width * fx);
+      let y = Math.round(rect.y + rect.height * fy);
+
+      x = clamp(x, minX, maxX);
+      y = clamp(y, minY, maxY);
+
+      if (y < headerSafeY) {
+        y = clamp(headerSafeY, minY, maxY);
+      }
+
+      x = clamp(x, 30, viewportW - 30);
+      y = clamp(y, 30, viewportH - 30);
+
+      x = clamp(x, minX, maxX);
+      y = clamp(y, minY, maxY);
+
+      return { x, y };
+    }
+
+    const candidates: Array<{ fx: number; fy: number }> = [
+      { fx: 0.5, fy: 0.12 },
+      { fx: 0.5, fy: 0.08 },
+      { fx: 0.55, fy: 0.12 },
+      { fx: 0.45, fy: 0.12 },
+      { fx: 0.5, fy: 0.16 },
+    ];
+    for (const c of candidates) {
+      const p0 = computePointByFraction(c.fx, c.fy);
+      // computeSafeClickPoint 已经做了 clamp；这里直接用其返回值，再做一次 cover + profile 判定
+      const probe = await probeClickTarget(p0);
+      if (probe.inCover && !probe.isUserProfile) {
+        return { x: p0.x, y: p0.y, probe };
+      }
+    }
+    const fallback = computeSafeClickPoint(rect, viewport);
+    return { x: fallback.x, y: fallback.y, probe: await probeClickTarget(fallback) };
   }
 
   function sanitizeFilenamePart(value: string): string {
@@ -333,22 +434,63 @@ export async function execute(input: OpenDetailInput): Promise<OpenDetailOutput>
     }
 
     if (clickedItemRect) {
+      // 0.x 视口安全：避免卡片被顶部 sticky tab/筛选条遮挡（y 太靠上时 elementFromPoint 会命中 tab bar）
+      // 处理方式：不直接“硬点位”，而是先系统滚动把封面整体下移，再重新计算封面 rect。
+      const OVERLAY_SAFE_TOP = 180;
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        if (!clickedItemRect || typeof clickedItemRect.y !== 'number') break;
+        if (clickedItemRect.y >= OVERLAY_SAFE_TOP) break;
+
+        const delta = Math.min(800, Math.max(220, Math.floor(OVERLAY_SAFE_TOP - clickedItemRect.y + 160)));
+        console.warn(
+          `[OpenDetail] cover rect y=${clickedItemRect.y} too close to top overlay, scroll down delta=${delta} (attempt=${attempt + 1})`,
+        );
+        await saveDebugScreenshot('cover-rect-under-overlay', {
+          url: startUrl,
+          containerId,
+          clickedItemRect,
+          attempt: attempt + 1,
+          delta,
+        });
+
+        await viewportTools
+          .scrollTowardVisibility('down', delta, containerId)
+          .catch(() => false);
+
+        const coverByNoteId2 =
+          normalizedExpectedNoteId ? await computeCoverRectByNoteId(normalizedExpectedNoteId) : undefined;
+        if (coverByNoteId2) {
+          clickedItemRect = coverByNoteId2;
+          continue;
+        }
+        if (typeof domIndex === 'number') {
+          const coverByIndex2 = await computeCoverRectByIndex(domIndex);
+          if (coverByIndex2) {
+            clickedItemRect = coverByIndex2;
+            continue;
+          }
+        }
+        // 无法重新计算则退出循环，由后续 probe 判定失败并落盘截图
+        break;
+      }
+
       const viewport = await getViewportMetrics();
-      const probe = computeSafeClickPoint(clickedItemRect, viewport);
-      const ok = await isPointInsideCover(probe);
-      if (!ok) {
+      const chosen = await chooseSafeClickPoint(clickedItemRect, viewport);
+      const okCover = Boolean(chosen.probe?.inCover) || (await isPointInsideCover({ x: chosen.x, y: chosen.y }));
+      const unsafeProfile = Boolean(chosen.probe?.isUserProfile);
+      if (!okCover || unsafeProfile) {
         await saveDebugScreenshot('click-point-not-in-cover', {
           url: startUrl,
           containerId,
           clickedItemRect,
-          probe,
+          probe: { x: chosen.x, y: chosen.y, ...chosen.probe },
         });
         pushStep({
           id: 'verify_result_item_anchor',
           status: 'failed',
           anchor: { containerId, clickedItemRect, verified: false },
-          error: 'click_point_not_in_cover',
-          meta: { probe },
+          error: !okCover ? 'click_point_not_in_cover' : 'click_point_hits_user_profile',
+          meta: { probe: { x: chosen.x, y: chosen.y, ...chosen.probe } },
         });
         return {
           success: false,
@@ -363,7 +505,7 @@ export async function execute(input: OpenDetailInput): Promise<OpenDetailOutput>
             detailRect: undefined,
             verified: false,
           },
-          error: 'click_point_not_in_cover',
+          error: !okCover ? 'click_point_not_in_cover' : 'click_point_hits_user_profile',
         };
       }
     }
@@ -430,11 +572,14 @@ export async function execute(input: OpenDetailInput): Promise<OpenDetailOutput>
     // 1. 打开详情
     try {
       await highlightRect(clickedItemRect, 1000, '#00ccff').catch(() => {});
-      const { x, y } = computeSafeClickPoint(clickedItemRect, viewport);
+      const chosen = await chooseSafeClickPoint(clickedItemRect, viewport);
+      const x = chosen.x;
+      const y = chosen.y;
       await saveDebugScreenshot('pre-click', {
         url: startUrl,
         clickedItemRect,
         clickPoint: { x, y },
+        clickTarget: chosen.probe,
       });
 
       const clickResp = await controllerAction('container:operation', {

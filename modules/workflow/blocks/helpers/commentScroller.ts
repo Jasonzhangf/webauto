@@ -145,8 +145,10 @@ export async function scrollCommentSection(options: ScrollOptions): Promise<Scro
         : 96;
 
   let noEffectStreak = 0;
+  let roundsRan = 0;
 
   for (let i = 0; i < dynamicMaxRounds; i++) {
+    roundsRan = i + 1;
     const viewportBefore = await getViewportFirstComment(controllerUrl, profile);
 
     const scrollInfo = await getScrollContainerInfo(controllerUrl, profile);
@@ -290,7 +292,7 @@ export async function scrollCommentSection(options: ScrollOptions): Promise<Scro
     reachedEnd: Boolean(finalEndState.endMarkerVisible || finalEndState.emptyStateVisible),
     totalFromHeader: finalStats.total,
     finalCount: finalStats.count,
-    rounds: dynamicMaxRounds,
+    rounds: roundsRan,
     focusPoint,
   };
 }

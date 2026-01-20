@@ -73,12 +73,13 @@ export async function execute(input: EnsureLoginInput): Promise<EnsureLoginOutpu
           payload: {
             profile: sessionId,
             ...(currentUrl ? { url: currentUrl } : {}),
-            maxDepth: 3,
-            maxChildren: 8
+            // 登录锚点通常在较浅层级即可命中；避免过深/过宽导致 containers:match 超时
+            maxDepth: 2,
+            maxChildren: 5
           }
         }),
         // 为 containers:match 增加超时，避免长时间挂起
-        signal: (AbortSignal as any).timeout ? (AbortSignal as any).timeout(20000) : undefined
+        signal: (AbortSignal as any).timeout ? (AbortSignal as any).timeout(25000) : undefined
       });
 
       if (!response.ok) {
