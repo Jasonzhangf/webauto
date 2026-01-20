@@ -148,8 +148,8 @@ export async function execute(input: OpenDetailInput): Promise<OpenDetailOutput>
     const minY = Math.round(rect.y + 12);
     const maxY = Math.round(rect.y + rect.height - 12);
 
-    // 关键：避免点到作者/头像等交互区（通常在卡片下方区域）
-    // 优先点封面上方区域
+    // 目标为封面（a.cover）时，点中心即可；
+    // 这里保留“上半区”作为兜底（仅当上游传入的 rect 不是封面 rect 时也尽量降低误点作者区概率）。
     let x = Math.round(rect.x + rect.width / 2);
     let y = Math.round(rect.y + rect.height * 0.12);
 
@@ -253,6 +253,8 @@ export async function execute(input: OpenDetailInput): Promise<OpenDetailOutput>
     }
 
     const candidates: Array<{ fx: number; fy: number }> = [
+      // 首选：中心点
+      { fx: 0.5, fy: 0.5 },
       { fx: 0.5, fy: 0.12 },
       { fx: 0.5, fy: 0.08 },
       { fx: 0.55, fy: 0.12 },
@@ -269,6 +271,103 @@ export async function execute(input: OpenDetailInput): Promise<OpenDetailOutput>
     }
     const fallback = computeSafeClickPoint(rect, viewport);
     return { x: fallback.x, y: fallback.y, probe: await probeClickTarget(fallback) };
+  }
+
+  function isRectFullyVisible(
+    rect: Rect,
+    viewport: { innerWidth?: number; innerHeight?: number },
+    safe: { top: number; bottom: number; left: number; right: number },
+  ): boolean {
+    const viewportW = typeof viewport.innerWidth === 'number' && viewport.innerWidth > 0 ? viewport.innerWidth : 0;
+    const viewportH = typeof viewport.innerHeight === 'number' && viewport.innerHeight > 0 ? viewport.innerHeight : 0;
+    if (!viewportH || !rect || rect.width <= 0 || rect.height <= 0) return false;
+
+    const topOk = rect.y >= safe.top;
+    const bottomOk = rect.y + rect.height <= viewportH - safe.bottom;
+
+    if (!viewportW) return topOk && bottomOk;
+    const leftOk = rect.x >= safe.left;
+    const rightOk = rect.x + rect.width <= viewportW - safe.right;
+    return topOk && bottomOk && leftOk && rightOk;
+  }
+
+  async function ensureCoverFullyVisible(params: {
+    rect: Rect;
+    viewport: { innerWidth?: number; innerHeight?: number };
+    containerId: string;
+    expectedNoteId?: string;
+    domIndex?: number;
+    maxAttempts?: number;
+  }): Promise<Rect | null> {
+    const {
+      rect: initialRect,
+      viewport,
+      containerId,
+      expectedNoteId,
+      domIndex,
+      maxAttempts = 10,
+    } = params;
+
+    // 安全边距：避免顶部 sticky tab/筛选条、底部悬浮层遮挡
+    const SAFE = { top: 180, bottom: 140, left: 24, right: 24 };
+
+    let rect: Rect | null = initialRect;
+    for (let i = 0; i < maxAttempts; i += 1) {
+      if (rect && isRectFullyVisible(rect, viewport, SAFE)) return rect;
+
+      if (!rect) return null;
+
+      const viewportH =
+        typeof viewport.innerHeight === 'number' && viewport.innerHeight > 0 ? viewport.innerHeight : 1100;
+
+      const top = rect.y;
+      const bottom = rect.y + rect.height;
+
+      let direction: 'up' | 'down' = 'down';
+      let delta = 0;
+
+      if (top < SAFE.top) {
+        // rect 太靠上（可能被 sticky overlay 遮挡），向上滚动（让内容下移）
+        direction = 'up';
+        delta = SAFE.top - top + 160;
+      } else if (bottom > viewportH - SAFE.bottom) {
+        // rect 太靠下，向下滚动（让内容上移）
+        direction = 'down';
+        delta = bottom - (viewportH - SAFE.bottom) + 160;
+      } else {
+        // 理论上不会进入此分支（否则应该 fullyVisible），但兜底微调一下
+        direction = 'down';
+        delta = 260;
+      }
+
+      delta = Math.min(800, Math.max(220, Math.floor(delta)));
+
+      await saveDebugScreenshot('cover-rect-adjust-scroll', {
+        attempt: i + 1,
+        containerId,
+        rect,
+        direction,
+        delta,
+      });
+
+      await viewportTools.scrollTowardVisibility(direction, delta, containerId).catch(() => false);
+
+      // 滚动后必须重新计算封面 rect（虚拟列表/重排）
+      const nid = typeof expectedNoteId === 'string' ? expectedNoteId.trim() : '';
+      if (nid) {
+        const r2 = await computeCoverRectByNoteId(nid);
+        rect = r2 || rect;
+        continue;
+      }
+      if (typeof domIndex === 'number') {
+        const r2 = await computeCoverRectByIndex(domIndex);
+        rect = r2 || rect;
+        continue;
+      }
+    }
+
+    // 超过尝试次数仍无法 fully-visible，返回 null 让上层 fail-fast
+    return null;
   }
 
   function sanitizeFilenamePart(value: string): string {
@@ -434,47 +533,45 @@ export async function execute(input: OpenDetailInput): Promise<OpenDetailOutput>
     }
 
     if (clickedItemRect) {
-      // 0.x 视口安全：避免卡片被顶部 sticky tab/筛选条遮挡（y 太靠上时 elementFromPoint 会命中 tab bar）
-      // 处理方式：不直接“硬点位”，而是先系统滚动把封面整体下移，再重新计算封面 rect。
-      const OVERLAY_SAFE_TOP = 180;
-      for (let attempt = 0; attempt < 3; attempt += 1) {
-        if (!clickedItemRect || typeof clickedItemRect.y !== 'number') break;
-        if (clickedItemRect.y >= OVERLAY_SAFE_TOP) break;
-
-        const delta = Math.min(800, Math.max(220, Math.floor(OVERLAY_SAFE_TOP - clickedItemRect.y + 160)));
-        console.warn(
-          `[OpenDetail] cover rect y=${clickedItemRect.y} too close to top overlay, scroll down delta=${delta} (attempt=${attempt + 1})`,
-        );
-        await saveDebugScreenshot('cover-rect-under-overlay', {
+      const viewport = await getViewportMetrics();
+      const ensuredCover = await ensureCoverFullyVisible({
+        rect: clickedItemRect,
+        viewport,
+        containerId,
+        expectedNoteId: normalizedExpectedNoteId || undefined,
+        domIndex: typeof domIndex === 'number' ? domIndex : undefined,
+      });
+      if (!ensuredCover) {
+        await saveDebugScreenshot('cover-rect-not-fully-visible', {
           url: startUrl,
           containerId,
           clickedItemRect,
-          attempt: attempt + 1,
-          delta,
+          viewport,
         });
-
-        await viewportTools
-          .scrollTowardVisibility('down', delta, containerId)
-          .catch(() => false);
-
-        const coverByNoteId2 =
-          normalizedExpectedNoteId ? await computeCoverRectByNoteId(normalizedExpectedNoteId) : undefined;
-        if (coverByNoteId2) {
-          clickedItemRect = coverByNoteId2;
-          continue;
-        }
-        if (typeof domIndex === 'number') {
-          const coverByIndex2 = await computeCoverRectByIndex(domIndex);
-          if (coverByIndex2) {
-            clickedItemRect = coverByIndex2;
-            continue;
-          }
-        }
-        // 无法重新计算则退出循环，由后续 probe 判定失败并落盘截图
-        break;
+        pushStep({
+          id: 'verify_result_item_anchor',
+          status: 'failed',
+          anchor: { containerId, clickedItemRect, verified: false },
+          error: 'cover_rect_not_fully_visible',
+        });
+        return {
+          success: false,
+          detailReady: false,
+          entryAnchor: undefined,
+          exitAnchor: undefined,
+          steps,
+          anchor: {
+            clickedItemContainerId: containerId,
+            clickedItemRect,
+            detailContainerId: undefined,
+            detailRect: undefined,
+            verified: false,
+          },
+          error: 'cover_rect_not_fully_visible',
+        };
       }
+      clickedItemRect = ensuredCover;
 
-      const viewport = await getViewportMetrics();
       const chosen = await chooseSafeClickPoint(clickedItemRect, viewport);
       const okCover = Boolean(chosen.probe?.inCover) || (await isPointInsideCover({ x: chosen.x, y: chosen.y }));
       const unsafeProfile = Boolean(chosen.probe?.isUserProfile);

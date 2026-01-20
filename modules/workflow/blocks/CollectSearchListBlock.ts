@@ -359,6 +359,9 @@ export async function execute(input: CollectSearchListInput): Promise<CollectSea
           script: `
             (function () {
               var viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0;
+              // 视口安全边距：避免顶部 sticky tab/筛选条与底部悬浮层导致“看起来在视口内但实际被遮挡”
+              var safeTop = 180;
+              var safeBottom = 140;
               var cards = Array.from(document.querySelectorAll('.note-item'));
               return cards.map(function(card, idx) {
                 var rect = card.getBoundingClientRect();
@@ -384,7 +387,9 @@ export async function execute(input: CollectSearchListInput): Promise<CollectSea
                   }
                 }
                 var clickRect = coverRect || { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
-                var inViewport = clickRect.y >= 0 && (clickRect.y + clickRect.height) <= viewportHeight;
+                var inViewport =
+                  clickRect.y >= safeTop &&
+                  (clickRect.y + clickRect.height) <= (viewportHeight - safeBottom);
                 return {
                   index: idx,
                   title: titleEl ? titleEl.textContent.trim() : '',
