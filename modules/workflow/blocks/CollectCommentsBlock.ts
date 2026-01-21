@@ -152,16 +152,29 @@ export async function execute(input: CollectCommentsInput): Promise<CollectComme
       },
     });
 
-    if (!warmup.success) {
-      return {
-        success: false,
-        comments: [],
-        reachedEnd: false,
-        emptyState: false,
-        warmupCount: warmup.finalCount ?? 0,
-        totalFromHeader: warmup.totalFromHeader ?? null,
+    // 开发阶段严格结束规则：Warmup 已判定到达“底部/空态”，且 count=0 => 视为“空评论结束”，跳过 Expand（避免空态下 Expand 卡死/超时）
+    if (Boolean(warmup.reachedEnd) && (warmup.finalCount ?? 0) === 0) {
+      pushStep({
+        id: 'expand_comments',
+        status: 'skipped',
         anchor: warmup.anchor,
-        error: warmup.error || 'warmup failed'
+        meta: { reason: 'empty_comments_from_warmup' },
+      });
+      return {
+        success: true,
+        comments: [],
+        reachedEnd: true,
+        emptyState: true,
+        warmupCount: 0,
+        totalFromHeader: warmup.totalFromHeader ?? null,
+        entryAnchor,
+        exitAnchor: {
+          commentSectionContainerId: warmup.anchor?.commentSectionContainerId,
+          commentSectionRect: warmup.anchor?.commentSectionRect,
+          verified: Boolean(warmup.anchor?.commentSectionRect && warmup.anchor.commentSectionRect.height > 0),
+        },
+        steps,
+        anchor: warmup.anchor,
       };
     }
 

@@ -221,6 +221,24 @@ export async function getCommentStats(
       }
 
       const items = Array.from(root.querySelectorAll('.comment-item, [class*="comment-item"]'));
+      const emptyEl =
+        root.querySelector('.no-comments') ||
+        root.querySelector('.comment-empty') ||
+        root.querySelector('.empty-comment') ||
+        root.querySelector('.note-comment-empty') ||
+        root.querySelector('.empty-state');
+      const emptyText = (emptyEl?.textContent || '').replace(/\\s+/g, ' ').trim();
+      const rootText = (root.textContent || '').replace(/\\s+/g, ' ').trim();
+      const emptyHint =
+        Boolean(emptyEl) ||
+        /荒地/.test(emptyText) ||
+        /暂无评论|还没有评论|没有评论/.test(emptyText) ||
+        /荒地/.test(rootText);
+
+      // 空评论：允许以“空态”直接结束（符合“空评论也算结束”规则）
+      if (items.length === 0 && emptyHint) {
+        return { hasRoot: true, count: 0, hasMore: false, total: 0 };
+      }
 
       const candidates = [];
       const pushText = (el) => {
@@ -259,10 +277,11 @@ export async function getCommentStats(
       }
 
       if (total === null) {
+        // 仅在评论 root 内部寻找计数，避免误读页面其它区域（如推荐/频道/聊天计数）
         const chatCountEl =
-          document.querySelector('.chat-wrapper .count') ||
-          document.querySelector('[class*="chat-wrapper"] .count') ||
-          document.querySelector('.chat-wrapper [class*="count"]');
+          root.querySelector('.chat-wrapper .count') ||
+          root.querySelector('[class*="chat-wrapper"] .count') ||
+          root.querySelector('.chat-wrapper [class*="count"]');
         const parseCount = (raw) => {
           const t = (raw || '').toString().trim();
           if (!t) return null;
@@ -337,7 +356,8 @@ export async function getCommentEndState(
 
         // 以容器定义的 selector 为准（同义集合）
         const endSel = '.end-container, .comment-footer, .comment-end, [data-v-4a19279a][class*=\"end\"]';
-        const emptySel = '.comment-empty, .empty-comment, .note-comment-empty, .empty-state, [class*=\"empty\"][class*=\"comment\"]';
+        const emptySel =
+          '.comment-empty, .empty-comment, .note-comment-empty, .empty-state, .no-comments, [class*=\"no-comments\"], [class*=\"empty\"][class*=\"comment\"]';
 
         const endEl = root.querySelector(endSel) || document.querySelector(endSel);
         const emptyEl = root.querySelector(emptySel) || document.querySelector(emptySel);

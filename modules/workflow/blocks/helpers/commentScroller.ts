@@ -122,19 +122,73 @@ export async function scrollCommentSection(options: ScrollOptions): Promise<Scro
     targetTotal = after.total;
   }
 
+  // 一些详情页会先渲染“评论区骨架/占位”但 headerTotal 不可用（null），需要先点一次 comment_button 激活
+  if (
+    initialStats.count === 0 &&
+    (initialStats.total === null || initialStats.total === 0) &&
+    !initialStats.hasMore &&
+    activateComments
+  ) {
+    const endBefore = await getCommentEndState(controllerUrl, profile);
+    const noMoreBefore = Boolean(endBefore.endMarkerVisible || endBefore.emptyStateVisible);
+    if (!noMoreBefore) {
+      log(`count=0 total=${initialStats.total}, try activate comments (total_null_or_zero)`);
+      try {
+        await activateComments('count_zero_total_null_or_zero');
+      } catch (e: any) {
+        warn(`activate comments failed: ${e?.message || e}`);
+      }
+      const domFocus2 = await locateCommentsFocusPoint(controllerUrl, profile);
+      if (domFocus2) {
+        focusPoint = domFocus2;
+        await systemClickAt(profile, domFocus2.x, domFocus2.y, browserServiceUrl);
+        await new Promise((r) => setTimeout(r, 450));
+      }
+      await new Promise((r) => setTimeout(r, 900));
+      const after = await getCommentStats(controllerUrl, profile);
+      const endAfter = await getCommentEndState(controllerUrl, profile);
+      log(
+        `after activate(total_null_or_zero): count=${after.count} total=${after.total} hasMore=${after.hasMore} endMarker=${endAfter.endMarkerVisible} empty=${endAfter.emptyStateVisible}`,
+      );
+      lastCount = after.count;
+      targetTotal = after.total;
+      if (
+        after.count === 0 &&
+        (after.total === null || after.total === 0) &&
+        !after.hasMore &&
+        (endAfter.endMarkerVisible || endAfter.emptyStateVisible)
+      ) {
+        return {
+          reachedEnd: true,
+          totalFromHeader: typeof after.total === 'number' ? after.total : null,
+          finalCount: 0,
+          rounds: 0,
+          focusPoint,
+        };
+      }
+    }
+  }
+
   if (
     initialStats.count === 0 &&
     (initialStats.total === null || initialStats.total === 0) &&
     !initialStats.hasMore
   ) {
-    log('initial stats indicate no comments and no expand controls, skip scrolling');
-    return {
-      reachedEnd: true,
-      totalFromHeader: null,
-      finalCount: 0,
-      rounds: 0,
-      focusPoint,
-    };
+    // 严格结束条件：仅当 end_marker / empty_state 可见才视为结束
+    const endState = await getCommentEndState(controllerUrl, profile);
+    const noMore = Boolean(endState.endMarkerVisible || endState.emptyStateVisible);
+    log(
+      `initial no-comments probe: endMarker=${endState.endMarkerVisible} empty=${endState.emptyStateVisible} noMore=${noMore}`,
+    );
+    if (noMore) {
+      return {
+        reachedEnd: true,
+        totalFromHeader: typeof initialStats.total === 'number' ? initialStats.total : null,
+        finalCount: 0,
+        rounds: 0,
+        focusPoint,
+      };
+    }
   }
 
   const dynamicMaxRounds =

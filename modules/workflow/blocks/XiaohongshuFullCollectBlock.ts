@@ -166,6 +166,15 @@ export async function execute(input: XiaohongshuFullCollectInput): Promise<Xiaoh
     return false;
   }
 
+  async function assertKeywordStillCorrect(tag: string): Promise<true | { ok: false; url: string }> {
+    const url = await getCurrentUrl();
+    if (url && url.includes('/search_result') && !urlMatchesKeyword(url)) {
+      await saveEnsureClosedDebug(`keyword_changed_${tag}`, { url, keyword });
+      return { ok: false, url };
+    }
+    return true;
+  }
+
   async function controllerAction(action: string, payload: any = {}) {
     const response = await fetch(controllerUrl, {
       method: 'POST',
@@ -281,6 +290,21 @@ export async function execute(input: XiaohongshuFullCollectInput): Promise<Xiaoh
       serviceUrl,
     });
 
+    const kwOkAfterList = await assertKeywordStillCorrect('after_collect_list');
+    if (kwOkAfterList !== true) {
+      return {
+        success: false,
+        processedCount: persistedCount,
+        targetCount,
+        initialPersistedCount: persistedAtStart.count,
+        finalPersistedCount: persistedCount,
+        addedCount: Math.max(0, persistedCount - persistedAtStart.count),
+        keywordDir: persistedAtStart.keywordDir,
+        processed,
+        error: `keyword_changed_after_collect_list: ${kwOkAfterList.url}`,
+      };
+    }
+
     if (!list.success || !Array.isArray(list.items) || list.items.length === 0) {
       await saveEnsureClosedDebug('collect_search_list_failed', {
         success: Boolean(list.success),
@@ -327,6 +351,29 @@ export async function execute(input: XiaohongshuFullCollectInput): Promise<Xiaoh
 
       try {
         const beforePersistCount = persistedCount;
+
+        // 开发阶段：严格禁止 keyword 漂移。若在处理列表项前 URL 已变为其它 keyword，立即停止并保留调试信息。
+        const urlBeforeOpen = await getCurrentUrl();
+        if (urlBeforeOpen && !urlMatchesKeyword(urlBeforeOpen)) {
+          await saveEnsureClosedDebug('keyword_changed_before_open_detail', {
+            urlNow,
+            urlBeforeOpen,
+            keyword,
+            domIndex,
+            expectedNoteId: noteId || null,
+          });
+          return {
+            success: false,
+            processedCount: persistedCount,
+            targetCount,
+            initialPersistedCount: persistedAtStart.count,
+            finalPersistedCount: persistedCount,
+            addedCount: Math.max(0, persistedCount - persistedAtStart.count),
+            keywordDir: persistedAtStart.keywordDir,
+            processed,
+            error: `keyword_changed_before_open_detail: ${urlBeforeOpen}`,
+          };
+        }
 
         const opened = await openDetail({
           sessionId,
@@ -458,6 +505,21 @@ export async function execute(input: XiaohongshuFullCollectInput): Promise<Xiaoh
           };
         }
 
+        const kwOkAfterClose = await assertKeywordStillCorrect('after_close_detail');
+        if (kwOkAfterClose !== true) {
+          return {
+            success: false,
+            processedCount: persistedCount,
+            targetCount,
+            initialPersistedCount: persistedAtStart.count,
+            finalPersistedCount: persistedCount,
+            addedCount: Math.max(0, persistedCount - persistedAtStart.count),
+            keywordDir: persistedAtStart.keywordDir,
+            processed,
+            error: `keyword_changed_after_close_detail: ${kwOkAfterClose.url}`,
+          };
+        }
+
         // 每次成功后立即进入下一轮（重新采集当前视口），避免列表重渲染导致 selector/href 失效
         if (persistedCount > beforePersistCount) {
           break;
@@ -498,6 +560,21 @@ export async function execute(input: XiaohongshuFullCollectInput): Promise<Xiaoh
     scrollSteps += 1;
     const scrolled = await scrollSearchListDown();
     if (!scrolled) break;
+
+    const kwOkAfterScroll = await assertKeywordStillCorrect('after_scroll_list');
+    if (kwOkAfterScroll !== true) {
+      return {
+        success: false,
+        processedCount: persistedCount,
+        targetCount,
+        initialPersistedCount: persistedAtStart.count,
+        finalPersistedCount: persistedCount,
+        addedCount: Math.max(0, persistedCount - persistedAtStart.count),
+        keywordDir: persistedAtStart.keywordDir,
+        processed,
+        error: `keyword_changed_after_scroll_list: ${kwOkAfterScroll.url}`,
+      };
+    }
   }
 
   const persistedAtEnd = await countPersistedNotes({

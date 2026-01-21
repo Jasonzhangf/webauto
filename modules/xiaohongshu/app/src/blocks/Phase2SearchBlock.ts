@@ -101,14 +101,31 @@ export async function execute(input: SearchInput): Promise<SearchOutput> {
   }
   await delay(500);
 
-  // 统一使用容器系统来输入 + 回车（容器 operation 内部会走系统级输入/按键）
+  // ✅ 系统级输入：禁止 container:operation type（底层为 session.fill，属于非系统行为）
   await controllerAction('container:operation', {
     containerId: searchInputContainerId,
-    operationId: 'type',
+    operationId: 'click',
     sessionId: profile,
-    config: { text: keyword },
   }, unifiedApiUrl);
-  await delay(800);
+  await delay(200);
+  await controllerAction('keyboard:press', {
+    profileId: profile,
+    key: 'Meta+A',
+  }, unifiedApiUrl).catch(() => {});
+  await controllerAction('keyboard:press', {
+    profileId: profile,
+    key: 'Control+A',
+  }, unifiedApiUrl).catch(() => {});
+  await controllerAction('keyboard:press', {
+    profileId: profile,
+    key: 'Backspace',
+  }, unifiedApiUrl).catch(() => {});
+  await controllerAction('keyboard:type', {
+    profileId: profile,
+    text: keyword,
+    delay: 90,
+  }, unifiedApiUrl);
+  await delay(450);
 
   if (isHome) {
     // explore 主页：使用搜索图标按钮触发搜索（更贴近用户真实行为）
@@ -118,12 +135,10 @@ export async function execute(input: SearchInput): Promise<SearchOutput> {
       sessionId: profile,
     }, unifiedApiUrl);
   } else {
-    // search_result：搜索框自身定义了 key 操作，直接 Enter 提交
-    await controllerAction('container:operation', {
-      containerId: searchInputContainerId,
-      operationId: 'key',
-      sessionId: profile,
-      config: { key: 'Enter' },
+    // search_result：系统级 Enter 提交
+    await controllerAction('keyboard:press', {
+      profileId: profile,
+      key: 'Enter',
     }, unifiedApiUrl);
   }
   await delay(2500);

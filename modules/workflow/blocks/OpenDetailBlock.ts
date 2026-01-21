@@ -175,6 +175,9 @@ export async function execute(input: OpenDetailInput): Promise<OpenDetailOutput>
     inCover: boolean;
     closestHref: string | null;
     isUserProfile: boolean;
+    isHashtag: boolean;
+    inQueryNoteWrapper: boolean;
+    isSearchKeywordLink: boolean;
     tag: string | null;
     className: string | null;
     textSnippet: string | null;
@@ -190,9 +193,14 @@ export async function execute(input: OpenDetailInput): Promise<OpenDetailOutput>
           const a = el && el.closest ? el.closest('a') : null;
           const href = a ? (a.getAttribute('href') || a.href || '') : '';
           const inCover = !!(el && el.closest && el.closest('a.cover'));
-          const isUserProfile = href.includes('/user/profile') || href.includes('/user/') && href.includes('profile');
+          const inQueryNoteWrapper = !!(el && el.closest && el.closest('.query-note-wrapper'));
+          const isSearchKeywordLink =
+            href.includes('/search_result') &&
+            (href.includes('keyword=') || href.includes('?keyword=') || href.includes('&keyword='));
+          const isUserProfile = href.includes('/user/profile') || (href.includes('/user/') && href.includes('profile'));
           const textSnippet = el && el.textContent ? String(el.textContent).trim().slice(0, 60) : null;
-          return { inCover, href: href || null, isUserProfile, tag, className, textSnippet };
+          const isHashtag = !!(el && el.closest && el.closest('a[href*="search_result"][href*="#"], a[href*="/search_result"][href*="#"], a[href*="search_result"][href*="%23"], a[href*="/search_result"][href*="%23"]'));
+          return { inCover, inQueryNoteWrapper, isSearchKeywordLink, href: href || null, isUserProfile, isHashtag, tag, className, textSnippet };
         })()`,
       });
       const payload = (res as any)?.result ?? (res as any)?.data?.result ?? res ?? {};
@@ -200,6 +208,9 @@ export async function execute(input: OpenDetailInput): Promise<OpenDetailOutput>
         inCover: Boolean(payload?.inCover),
         closestHref: typeof payload?.href === 'string' ? payload.href : null,
         isUserProfile: Boolean(payload?.isUserProfile),
+        isHashtag: Boolean(payload?.isHashtag),
+        inQueryNoteWrapper: Boolean(payload?.inQueryNoteWrapper),
+        isSearchKeywordLink: Boolean(payload?.isSearchKeywordLink),
         tag: typeof payload?.tag === 'string' ? payload.tag : null,
         className: typeof payload?.className === 'string' ? payload.className : null,
         textSnippet: typeof payload?.textSnippet === 'string' ? payload.textSnippet : null,
@@ -209,6 +220,9 @@ export async function execute(input: OpenDetailInput): Promise<OpenDetailOutput>
         inCover: false,
         closestHref: null,
         isUserProfile: false,
+        isHashtag: false,
+        inQueryNoteWrapper: false,
+        isSearchKeywordLink: false,
         tag: null,
         className: null,
         textSnippet: null,
@@ -265,7 +279,7 @@ export async function execute(input: OpenDetailInput): Promise<OpenDetailOutput>
       const p0 = computePointByFraction(c.fx, c.fy);
       // computeSafeClickPoint 已经做了 clamp；这里直接用其返回值，再做一次 cover + profile 判定
       const probe = await probeClickTarget(p0);
-      if (probe.inCover && !probe.isUserProfile) {
+      if (probe.inCover && !probe.isUserProfile && !probe.isHashtag) {
         return { x: p0.x, y: p0.y, probe };
       }
     }
@@ -404,10 +418,29 @@ export async function execute(input: OpenDetailInput): Promise<OpenDetailOutput>
       const pngPath = path.join(debugDir, `${base}.png`);
       const jsonPath = path.join(debugDir, `${base}.json`);
 
-      const shot = await controllerAction('browser:screenshot', {
-        profileId: profile,
-        fullPage: false,
-      });
+      // debug 截图：允许更长超时（10s 在某些场景会误触发 AbortSignal timeout）
+      const takeShot = async (): Promise<any> => {
+        const resp = await fetch(controllerUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'browser:screenshot',
+            payload: { profileId: profile, fullPage: false },
+          }),
+          signal: (AbortSignal as any).timeout ? (AbortSignal as any).timeout(25000) : undefined,
+        });
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${await resp.text()}`);
+        const data = await resp.json().catch(() => ({}));
+        return data.data || data;
+      };
+
+      let shot: any = null;
+      try {
+        shot = await takeShot();
+      } catch {
+        // 再试一次（避免偶发超时导致缺少关键复盘截图）
+        shot = await takeShot();
+      }
       const b64 = extractBase64FromScreenshotResponse(shot);
       if (b64) {
         await writeFile(pngPath, Buffer.from(b64, 'base64'));
@@ -475,6 +508,7 @@ export async function execute(input: OpenDetailInput): Promise<OpenDetailOutput>
 
     // 0. 点击前：严格要求点击封面区域（避免点到作者/广告）
     const normalizedExpectedNoteId = typeof expectedNoteId === 'string' ? expectedNoteId.trim() : '';
+    const normalizedExpectedHref = typeof expectedHref === 'string' ? expectedHref.trim() : '';
 
     // 0.0 优先：如果上游已经给了视口内 Rect，直接使用（最稳：不依赖 domIndex/selector）
     if (
@@ -575,7 +609,19 @@ export async function execute(input: OpenDetailInput): Promise<OpenDetailOutput>
       const chosen = await chooseSafeClickPoint(clickedItemRect, viewport);
       const okCover = Boolean(chosen.probe?.inCover) || (await isPointInsideCover({ x: chosen.x, y: chosen.y }));
       const unsafeProfile = Boolean(chosen.probe?.isUserProfile);
-      if (!okCover || unsafeProfile) {
+      const unsafeHashtag = Boolean(chosen.probe?.isHashtag);
+      const unsafeQuery = Boolean(chosen.probe?.inQueryNoteWrapper);
+      const unsafeSearchKeywordLink = Boolean(chosen.probe?.isSearchKeywordLink) && !unsafeHashtag;
+      const unsafeHashText =
+        typeof chosen.probe?.textSnippet === 'string' && chosen.probe.textSnippet.includes('#');
+      if (
+        !okCover ||
+        unsafeProfile ||
+        unsafeHashtag ||
+        unsafeQuery ||
+        unsafeSearchKeywordLink ||
+        unsafeHashText
+      ) {
         await saveDebugScreenshot('click-point-not-in-cover', {
           url: startUrl,
           containerId,
@@ -586,7 +632,17 @@ export async function execute(input: OpenDetailInput): Promise<OpenDetailOutput>
           id: 'verify_result_item_anchor',
           status: 'failed',
           anchor: { containerId, clickedItemRect, verified: false },
-          error: !okCover ? 'click_point_not_in_cover' : 'click_point_hits_user_profile',
+          error: !okCover
+            ? 'click_point_not_in_cover'
+            : unsafeProfile
+              ? 'click_point_hits_user_profile'
+              : unsafeHashtag
+                ? 'click_point_hits_hashtag'
+                : unsafeQuery
+                  ? 'click_point_hits_query_note_wrapper'
+                  : unsafeSearchKeywordLink
+                    ? 'click_point_hits_search_keyword_link'
+                    : 'click_point_hits_hash_text',
           meta: { probe: { x: chosen.x, y: chosen.y, ...chosen.probe } },
         });
         return {
@@ -602,8 +658,128 @@ export async function execute(input: OpenDetailInput): Promise<OpenDetailOutput>
             detailRect: undefined,
             verified: false,
           },
-          error: !okCover ? 'click_point_not_in_cover' : 'click_point_hits_user_profile',
+          error: !okCover
+            ? 'click_point_not_in_cover'
+            : unsafeProfile
+              ? 'click_point_hits_user_profile'
+              : unsafeHashtag
+                ? 'click_point_hits_hashtag'
+                : unsafeQuery
+                  ? 'click_point_hits_query_note_wrapper'
+                  : unsafeSearchKeywordLink
+                    ? 'click_point_hits_search_keyword_link'
+                    : 'click_point_hits_hash_text',
         };
+      }
+
+      // 若 probe 到的 href 能解析出 noteId，则必须与 expectedNoteId 严格一致（否则直接判定为“点错卡片”）
+      if (normalizedExpectedNoteId && chosen.probe?.closestHref) {
+        const href = String(chosen.probe.closestHref || '');
+        if (/[#]|%23/i.test(href)) {
+          await saveDebugScreenshot('click-point-hashtag-href', {
+            url: startUrl,
+            containerId,
+            clickedItemRect,
+            probe: { x: chosen.x, y: chosen.y, ...chosen.probe },
+          });
+          pushStep({
+            id: 'verify_result_item_anchor',
+            status: 'failed',
+            anchor: { containerId, clickedItemRect, verified: false },
+            error: 'click_point_hits_hashtag',
+            meta: { href, probe: { x: chosen.x, y: chosen.y, ...chosen.probe } },
+          });
+          return {
+            success: false,
+            detailReady: false,
+            entryAnchor: undefined,
+            exitAnchor: undefined,
+            steps,
+            anchor: {
+              clickedItemContainerId: containerId,
+              clickedItemRect,
+              detailContainerId: undefined,
+              detailRect: undefined,
+              verified: false,
+            },
+            error: 'click_point_hits_hashtag',
+          };
+        }
+      }
+
+      // 若 probe 到的 href 能解析出 noteId，则必须与 expectedNoteId 严格一致（否则直接判定为“点错卡片”）
+      if (normalizedExpectedNoteId && chosen.probe?.closestHref) {
+        const href = String(chosen.probe.closestHref || '');
+        const m = href.match(/\/(?:explore|search_result)\/([0-9a-z]+)/i);
+        const probedNoteId = m ? String(m[1] || '') : '';
+        if (probedNoteId && probedNoteId !== normalizedExpectedNoteId) {
+          await saveDebugScreenshot('click-point-noteid-mismatch', {
+            url: startUrl,
+            containerId,
+            clickedItemRect,
+            probe: { x: chosen.x, y: chosen.y, ...chosen.probe },
+            expectedNoteId: normalizedExpectedNoteId,
+            probedNoteId,
+          });
+          pushStep({
+            id: 'verify_result_item_anchor',
+            status: 'failed',
+            anchor: { containerId, clickedItemRect, verified: false },
+            error: 'click_point_noteid_mismatch',
+            meta: { expectedNoteId: normalizedExpectedNoteId, probedNoteId, href },
+          });
+          return {
+            success: false,
+            detailReady: false,
+            entryAnchor: undefined,
+            exitAnchor: undefined,
+            steps,
+            anchor: {
+              clickedItemContainerId: containerId,
+              clickedItemRect,
+              detailContainerId: undefined,
+              detailRect: undefined,
+              verified: false,
+            },
+            error: 'click_point_noteid_mismatch',
+          };
+        }
+      }
+
+      if (normalizedExpectedHref && chosen.probe?.closestHref) {
+        const href = String(chosen.probe.closestHref || '');
+        if (href && href !== normalizedExpectedHref) {
+          await saveDebugScreenshot('click-point-href-mismatch', {
+            url: startUrl,
+            containerId,
+            clickedItemRect,
+            probe: { x: chosen.x, y: chosen.y, ...chosen.probe },
+            expectedHref: normalizedExpectedHref,
+            probedHref: href,
+          });
+          pushStep({
+            id: 'verify_result_item_anchor',
+            status: 'failed',
+            anchor: { containerId, clickedItemRect, verified: false },
+            error: 'click_point_href_mismatch',
+            meta: { expectedHref: normalizedExpectedHref, probedHref: href },
+          });
+          return {
+            success: false,
+            detailReady: false,
+            entryAnchor: undefined,
+            exitAnchor: undefined,
+            steps,
+            anchor: {
+              clickedItemContainerId: containerId,
+              clickedItemRect,
+              detailContainerId: undefined,
+              detailRect: undefined,
+              verified: false,
+            },
+            error: 'click_point_href_mismatch',
+          };
+        }
       }
     }
 
@@ -669,6 +845,8 @@ export async function execute(input: OpenDetailInput): Promise<OpenDetailOutput>
     // 1. 打开详情
     try {
       await highlightRect(clickedItemRect, 1000, '#00ccff').catch(() => {});
+      // 操作之间要等待：给高亮与页面布局一点稳定时间（避免误点 overlay）
+      await new Promise((r) => setTimeout(r, 450));
       const chosen = await chooseSafeClickPoint(clickedItemRect, viewport);
       const x = chosen.x;
       const y = chosen.y;
@@ -678,6 +856,7 @@ export async function execute(input: OpenDetailInput): Promise<OpenDetailOutput>
         clickPoint: { x, y },
         clickTarget: chosen.probe,
       });
+      await new Promise((r) => setTimeout(r, 280));
 
       const clickResp = await controllerAction('container:operation', {
         containerId,

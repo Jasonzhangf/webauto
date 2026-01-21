@@ -5,7 +5,6 @@
  * 警告：不要构造 search_result URL 直达，避免风控验证码
  */
 
-import { waitSearchPermit } from './helpers/searchGate.js';
 import { ensureHomePage, getCurrentUrl, urlKeywordEquals } from './helpers/searchPageState.js';
 import {
   verifySearchBarAnchor,
@@ -198,6 +197,7 @@ export async function execute(input: GoToSearchInput): Promise<GoToSearchOutput>
     const url0 = await getCurrentUrl({ profile, controllerUrl });
     if (url0.includes('/search_result')) {
       if (!urlKeywordEquals(url0, keyword)) {
+        // 开发阶段：不做任何兜底纠错，直接失败并落盘证据（用于定位 keyword 漂移原因）
         pushStep({
           id: 'already_on_search_result_keyword_mismatch',
           status: 'failed',
@@ -268,12 +268,7 @@ export async function execute(input: GoToSearchInput): Promise<GoToSearchOutput>
       };
     }
 
-    // 0. 所有搜索必须先经过 SearchGate 节流（仅在真正需要执行搜索时）
-    await waitSearchPermit({
-      profileId: profile,
-      windowMs: 60_000,
-      maxCount: 2,
-    });
+    // 注意：SearchGate 节流由上游 workflow 的 WaitSearchPermitBlock 负责，这里不再重复申请 permit。
 
     // 1. 确保在站内（最好是首页或搜索页）
     const homePageState = await ensureHomePage({ profile, controllerUrl });
@@ -441,6 +436,7 @@ export async function execute(input: GoToSearchInput): Promise<GoToSearchOutput>
         searchExecuted: searchResult.success,
         valueCheckSkipped,
         finalUrl,
+        debug: (searchResult as any)?.debug ?? null,
       },
       ...(searchResult.success
         ? {}
@@ -501,6 +497,34 @@ export async function execute(input: GoToSearchInput): Promise<GoToSearchOutput>
       };
     }
 
+    // 2.6 严格校验：搜索结果页 keyword 必须严格等于输入 keyword（禁止接受推荐/纠错关键词）
+    // 注意：页面可能短暂进入 search_result 后被站点重定向到其它 keyword；这里以“当前 URL”为准做硬校验
+    const urlAfterReady = await getCurrentUrl({ profile, controllerUrl });
+    if (!urlKeywordEquals(urlAfterReady || ready.url || finalUrl, keyword)) {
+      pushStep({
+        id: 'search_result_keyword_mismatch',
+        status: 'failed',
+        error: 'keyword_mismatch',
+        meta: { url: urlAfterReady || ready.url || finalUrl, keyword },
+      });
+      await saveDebugScreenshot('keyword_mismatch_after_search', {
+        url: urlAfterReady || ready.url || finalUrl,
+        keyword,
+        finalUrl,
+        readyUrl: ready.url || null,
+      });
+      return {
+        success: false,
+        searchPageReady: false,
+        searchExecuted: true,
+        url: urlAfterReady || ready.url || finalUrl,
+        entryAnchor,
+        exitAnchor: undefined,
+        steps,
+        error: `keyword_mismatch_after_search: ${urlAfterReady || ready.url || finalUrl}`,
+      };
+    }
+
     if (ready.listAnchor?.rect) {
       exitAnchor = {
         containerId: 'xiaohongshu_search.search_result_list',
@@ -529,13 +553,14 @@ export async function execute(input: GoToSearchInput): Promise<GoToSearchOutput>
     }
     
     // 3. 检查是否出现验证码
-    if (finalUrl.includes('captcha') || finalUrl.includes('verify')) {
-      await saveDebugScreenshot('captcha_detected', { url: finalUrl });
+    const urlForCaptcha = urlAfterReady || ready.url || finalUrl;
+    if (urlForCaptcha.includes('captcha') || urlForCaptcha.includes('verify')) {
+      await saveDebugScreenshot('captcha_detected', { url: urlForCaptcha });
       return {
         success: false,
         searchPageReady: false,
         searchExecuted: true,
-        url: finalUrl,
+        url: urlForCaptcha,
         error: 'Triggered CAPTCHA after search'
       };
     }
@@ -544,7 +569,7 @@ export async function execute(input: GoToSearchInput): Promise<GoToSearchOutput>
       success: true,
       searchPageReady: true,
       searchExecuted: true,
-      url: ready.url || finalUrl,
+      url: urlAfterReady || ready.url || finalUrl,
       entryAnchor,
       exitAnchor,
       steps,

@@ -49,6 +49,12 @@ export async function execute(input: CloseDetailInput): Promise<CloseDetailOutpu
   const profile = sessionId;
   const controllerUrl = `${serviceUrl}/v1/controller/action`;
   const logDir = path.join(os.homedir(), '.webauto', 'logs', 'close-detail');
+  const DETAIL_CONTAINER_ID = 'xiaohongshu_detail.modal_shell';
+  const SEARCH_LIST_CONTAINER_ID = 'xiaohongshu_search.search_result_list';
+
+  async function sleep(ms: number): Promise<void> {
+    await new Promise((r) => setTimeout(r, ms));
+  }
 
   async function getCurrentUrl(): Promise<string> {
     const res = await controllerAction('browser:execute', {
@@ -95,43 +101,68 @@ export async function execute(input: CloseDetailInput): Promise<CloseDetailOutpu
   }
 
   try {
-    // 1) 按 ESC（系统级）
-    await controllerAction('keyboard:press', { profileId: profile, key: 'Escape' });
-    await new Promise((r) => setTimeout(r, 1500));
+    // 只允许 ESC：但 ESC 在某些状态下（例如输入框聚焦/视频层）可能只会关闭子层，需要多按几次。
+    // 仍然不做任何其它方式的“兜底关闭”，仅做 ESC 重试与证据落盘。
+    const maxAttempts = 3;
+    for (let i = 1; i <= maxAttempts; i += 1) {
+      await controllerAction('keyboard:press', { profileId: profile, key: 'Escape' });
+      await sleep(900);
 
-    // 2) 必须回到搜索列表（不做任何兜底返回/重试）
-    const url = await getCurrentUrl();
-    const listAnchor = await verifyAnchorByContainerId(
-      'xiaohongshu_search.search_result_list',
-      profile,
-      serviceUrl,
-      '2px solid #00bbff',
-      800,
-    ).catch(() => ({ found: false, highlighted: false } as any));
+      const url = await getCurrentUrl();
+      const detailAnchor = await verifyAnchorByContainerId(
+        DETAIL_CONTAINER_ID,
+        profile,
+        serviceUrl,
+        '2px solid #ff00aa',
+        350,
+      ).catch(() => ({ found: false, highlighted: false } as any));
 
-    if (!url.includes('/search_result') || !listAnchor?.found) {
-      const shot = await captureFailureScreenshot('close_detail_failed');
-      return {
-        success: false,
-        method: 'unknown',
-        anchor: {
-          searchListContainerId: 'xiaohongshu_search.search_result_list',
-          searchListRect: listAnchor?.rect,
-          verified: false,
-        },
-        error: `CloseDetail failed: url=${url || 'unknown'} listFound=${Boolean(listAnchor?.found)} screenshot=${shot || 'none'}`,
-      };
+      const listAnchor = await verifyAnchorByContainerId(
+        SEARCH_LIST_CONTAINER_ID,
+        profile,
+        serviceUrl,
+        '2px solid #00bbff',
+        350,
+      ).catch(() => ({ found: false, highlighted: false } as any));
+
+      const inSearchResult = url.includes('/search_result');
+      const detailGone = !detailAnchor?.found;
+
+      if (inSearchResult && listAnchor?.found && detailGone) {
+        return {
+          success: true,
+          method: 'esc_key',
+          anchor: {
+            detailContainerId: DETAIL_CONTAINER_ID,
+            detailRect: detailAnchor?.rect,
+            searchListContainerId: SEARCH_LIST_CONTAINER_ID,
+            searchListRect: listAnchor?.rect,
+            verified: true,
+          },
+        };
+      }
+
+      const shot = await captureFailureScreenshot(`close_detail_attempt_${i}`);
+
+      // 继续下一次 ESC 前给页面一点时间稳定
+      await sleep(650);
+
+      if (i === maxAttempts) {
+        return {
+          success: false,
+          method: 'unknown',
+          anchor: {
+            detailContainerId: DETAIL_CONTAINER_ID,
+            detailRect: detailAnchor?.rect,
+            searchListContainerId: SEARCH_LIST_CONTAINER_ID,
+            searchListRect: listAnchor?.rect,
+            verified: false,
+          },
+          error: `CloseDetail failed after ${maxAttempts} ESC: url=${url || 'unknown'} inSearchResult=${inSearchResult} listFound=${Boolean(listAnchor?.found)} detailFound=${Boolean(detailAnchor?.found)} screenshot=${shot || 'none'}`,
+        };
+      }
     }
-
-    return {
-      success: true,
-      method: 'esc_key',
-      anchor: {
-        searchListContainerId: 'xiaohongshu_search.search_result_list',
-        searchListRect: listAnchor?.rect,
-        verified: true,
-      },
-    };
+    return { success: false, method: 'unknown', error: 'CloseDetail unreachable' };
   } catch (err: any) {
     const shot = await captureFailureScreenshot('close_detail_threw');
     return {

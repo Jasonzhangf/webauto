@@ -21,6 +21,7 @@ export interface SearchInputAnchor {
 export interface ExecuteSearchResult {
   success: boolean;
   error?: string;
+  debug?: Record<string, any>;
 }
 
 export async function controllerAction(
@@ -109,7 +110,7 @@ export async function readSearchInputValue(
   const script = `(() => {
     const el = document.querySelector(${JSON.stringify(sel)});
     if (!el) return '';
-    return (el as HTMLInputElement).value || '';
+    return el.value || '';
   })()`;
 
   const response = await fetch(controllerUrl, {
@@ -141,38 +142,87 @@ export async function executeSearch(
       anchorSelector ||
       '#search-input, input[type="search"], .search-input';
 
-    const typeResp = await controllerAction(controllerUrl, 'container:operation', {
-      containerId: searchInputContainerId,
-      operationId: 'type',
-      config: {
-        selector,
-        text: keyword,
-        clear_first: true,
-      },
-      sessionId: profile
-    });
+    // ✅ 系统级输入：禁止 container:operation type（底层为 session.fill，属于非系统行为）
+    // 依赖上游已完成 focus；这里额外做一次清空 + 输入 + Enter
+    // mac 优先 Meta+A；若不生效再尝试 Control+A
+    await controllerAction(controllerUrl, 'keyboard:press', { profileId: profile, key: 'Meta+A' }).catch(() => {});
+    await controllerAction(controllerUrl, 'keyboard:press', { profileId: profile, key: 'Control+A' }).catch(() => {});
+    await controllerAction(controllerUrl, 'keyboard:press', { profileId: profile, key: 'Backspace' }).catch(() => {});
+    await controllerAction(controllerUrl, 'keyboard:type', {
+      profileId: profile,
+      text: keyword,
+      delay: 80 + Math.floor(Math.random() * 60),
+    }).catch(() => {});
 
-    const typePayload = (typeResp as any)?.data ?? typeResp;
-    if (!typePayload?.success) {
+    await new Promise((r) => setTimeout(r, 220));
+
+    // 仅用于诊断：记录“相关搜索/推荐词”是否出现及其内容（不做点击/纠错）
+    let suggestionProbe: any = null;
+    try {
+      const raw = await controllerAction(controllerUrl, 'browser:execute', {
+        profile,
+        script: `(() => {
+          const wrap = document.querySelector('.query-note-wrapper');
+          if (!wrap) return { visible: false, items: [], active: null };
+          const r = wrap.getBoundingClientRect();
+          const visible =
+            r.width > 10 && r.height > 10 && r.bottom > 0 && r.top < (window.innerHeight || 0);
+          const items = Array.from(wrap.querySelectorAll('.item-text'))
+            .map((el) => (el && el.textContent ? el.textContent.trim() : ''))
+            .filter(Boolean)
+            .slice(0, 8);
+          const activeEl =
+            wrap.querySelector('.rec-query.active, .rec-query.selected, .rec-query.current, [aria-selected=\"true\"]') ||
+            null;
+          const active = activeEl && activeEl.textContent ? activeEl.textContent.trim().slice(0, 80) : null;
+          return { visible, items, active };
+        })()`,
+      });
+      suggestionProbe = (raw as any)?.result ?? (raw as any)?.data?.result ?? raw ?? null;
+    } catch {
+      suggestionProbe = null;
+    }
+
+    // 开发阶段：必须保证输入框中确实出现目标 keyword，否则直接失败（不做无脑重试）
+    let activeValue: any = '';
+    try {
+      const raw = await controllerAction(controllerUrl, 'browser:execute', {
+        profile,
+        script: `(() => {
+          const el = document.activeElement;
+          if (!el) return '';
+          const tag = (el.tagName || '').toLowerCase();
+          if (tag === 'input' || tag === 'textarea') {
+            const v = el.value || '';
+            return (typeof v === 'string') ? v : String(v || '');
+          }
+          if (el.isContentEditable) return (el.textContent || '');
+          return '';
+        })()`,
+      });
+      activeValue = (raw as any)?.result ?? (raw as any)?.data?.result ?? raw ?? '';
+    } catch {
+      activeValue = '';
+    }
+
+    const rawValue = await readSearchInputValue(config, selector).catch(() => '');
+    const trimmedExpected = String(keyword || '').trim();
+    const trimmedActive = typeof activeValue === 'string' ? activeValue.trim() : '';
+    const trimmedRaw = typeof rawValue === 'string' ? rawValue.trim() : '';
+
+    const matches = (trimmedActive && trimmedActive === trimmedExpected) || (trimmedRaw && trimmedRaw === trimmedExpected);
+    if (!matches) {
       return {
         success: false,
-        error: `Search input type failed: ${typePayload?.error || 'unknown'}`
+        error: `keyword_not_set_in_input (active="${trimmedActive}", selectorValue="${trimmedRaw}", expected="${trimmedExpected}")`,
+        debug: { selector, searchInputContainerId, suggestions: suggestionProbe },
       };
     }
 
-    if (searchInputContainerId === 'xiaohongshu_search.search_bar') {
-      await controllerAction(controllerUrl, 'container:operation', {
-        containerId: searchInputContainerId,
-        operationId: 'key',
-        config: { key: 'Enter' },
-        sessionId: profile,
-      }).catch(() => {});
-    } else {
-      await controllerAction(controllerUrl, 'keyboard:press', { profileId: profile, key: 'Enter' }).catch(() => {});
-    }
+    await controllerAction(controllerUrl, 'keyboard:press', { profileId: profile, key: 'Enter' }).catch(() => {});
 
     console.log('[SearchExecutor] Search triggered, waiting for results...');
-    return { success: true };
+    return { success: true, debug: { selector, searchInputContainerId, suggestions: suggestionProbe } };
   } catch (error: any) {
     console.error(`[SearchExecutor] Search failed: ${error.message}`);
     return { success: false, error: error.message };
