@@ -4,6 +4,7 @@
 *.bak2
 README-SEARCH-GATE.md
 SUMMARY.md
+
 # Dependencies
 node_modules/
 npm-debug.log*
@@ -62,6 +63,9 @@ typings/
 # dotenv environment variables file
 .env
 .env.test
+.env.local
+.env.production
+.env.*
 
 # parcel-bundler cache (https://parceljs.org/)
 .cache
@@ -120,6 +124,13 @@ dist/
 build/
 **/dist/
 
+# Package artifacts
+*.tar.gz
+*.zip
+dist/xiaohongshu-collector/
+dist/xiaohongshu-collector-*.tar.gz
+dist/xiaohongshu-collector-*.zip
+
 # Large local models (avoid committing)
 sharedmodule/ui-recognition/python-service/models/
 libs/ui-recognition/python-service/models/ui-ins-7b/model-*.safetensors
@@ -165,10 +176,15 @@ playwright/.cache/
 *.cache/
 .cache/
 
+# Swift plugin build artifacts
+plugins/**/.build/
+plugins/**/.swiftpm/
+
 # Development databases
 *.db
 *.sqlite
 *.sqlite3
+
 # SearchGate & Build artifacts
 modules/search-gate/
 *.log
@@ -180,3 +196,6 @@ output/
 tmp/
 xiaohongshu_data/
 xiaohongshu_images/
+
+# User data directories
+~/.webauto/

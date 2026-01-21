@@ -19,6 +19,8 @@
     "actions:run": "node scripts/run-action.cjs",
     "build": "npm run prebuild && npm run build:services && npm run test:floating-panel:logic && npm run self-check:post-build && npm run ui:test",
     "build:services": "node scripts/build/run-services-build.mjs",
+    "build:ocr:macos": "node scripts/build/build-ocr-macos.mjs",
+    "install:macos": "node scripts/install-macos.mjs",
     "self-check:post-build": "node scripts/self-check.mjs --quick --post-build",
     "start": "node dist/src/server.js",
     "start:workflow-api": "node dist/sharedmodule/engines/api-gateway/server.js",
