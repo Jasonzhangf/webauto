@@ -27,7 +27,8 @@ export const xiaohongshuCollectWorkflowV2 = {
     {
       blockName: 'WaitSearchPermitBlock',
       input: {
-        sessionId: '$sessionId'
+        sessionId: '$sessionId',
+        keyword: '$keyword',
       }
     },
     {

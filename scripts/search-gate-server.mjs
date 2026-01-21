@@ -30,12 +30,15 @@ const HOST = '127.0.0.1';
 const PORT = Number(process.env.WEBAUTO_SEARCH_GATE_PORT || 7790);
 const DEFAULT_WINDOW_MS = Number(process.env.WEBAUTO_SEARCH_GATE_WINDOW_MS || 60_000);
 const DEFAULT_MAX_COUNT = Number(process.env.WEBAUTO_SEARCH_GATE_MAX_COUNT || 5);
+const DEV_MAX_CONSECUTIVE_SAME_KEYWORD = Number(process.env.WEBAUTO_SEARCH_GATE_DEV_MAX_CONSECUTIVE_SAME_KEYWORD || 2);
 
 /**
  * 每个 key 的时间窗口内搜索记录
  * key 一般为 profileId（例如 xiaohongshu_fresh）
  */
 const buckets = new Map();
+// 开发阶段：记录每个 key 最近允许通过的 keyword，用于防止“连续三次同关键字搜索”导致软风控
+const keywordHistory = new Map();
 
 function nowMs() {
   return Date.now();
@@ -66,6 +69,32 @@ function computePermit(key, windowMs, maxCount) {
     waitMs,
     countInWindow: pruned.length,
   };
+}
+
+function normalizeKeyword(keyword) {
+  const s = typeof keyword === 'string' ? keyword : '';
+  return s.trim();
+}
+
+function pruneKeywordHistory(records) {
+  if (!Array.isArray(records) || records.length === 0) return [];
+  const now = nowMs();
+  // 只保留最近 24h，且最多 50 条，避免内存增长
+  const cutoff = now - 24 * 60 * 60 * 1000;
+  const pruned = records.filter((r) => r && typeof r.ts === 'number' && r.ts >= cutoff);
+  return pruned.slice(-50);
+}
+
+function getConsecutiveSameKeywordCount(records, keyword) {
+  if (!Array.isArray(records) || !records.length) return 0;
+  let cnt = 0;
+  for (let i = records.length - 1; i >= 0; i -= 1) {
+    const k = normalizeKeyword(records[i]?.keyword || '');
+    if (!k) break;
+    if (k !== keyword) break;
+    cnt += 1;
+  }
+  return cnt;
 }
 
 function readJson(req) {
@@ -124,10 +153,44 @@ const server = http.createServer(async (req, res) => {
 
       const profileId = (body.profileId || body.key || 'default').toString();
       const key = profileId || 'default';
+      const keyword = normalizeKeyword(body.keyword || '');
+      const dev = Boolean(body.dev);
+      const devTag = typeof body.devTag === 'string' ? body.devTag.trim() : '';
       const windowMs = Number(body.windowMs || DEFAULT_WINDOW_MS);
       const maxCount = Number(body.maxCount || DEFAULT_MAX_COUNT);
 
+      // 开发阶段：禁止连续 3 次（默认阈值 2，即前两次都一样则本次拒绝）同 keyword 搜索
+      if (dev && keyword) {
+        const prev = pruneKeywordHistory(keywordHistory.get(key) || []);
+        const consecutive = getConsecutiveSameKeywordCount(prev, keyword);
+        if (consecutive >= DEV_MAX_CONSECUTIVE_SAME_KEYWORD) {
+          keywordHistory.set(key, prev);
+          sendJson(res, 200, {
+            ok: true,
+            key,
+            windowMs,
+            maxCount,
+            allowed: false,
+            waitMs: 0,
+            countInWindow: (buckets.get(key) || []).length,
+            reason: 'dev_consecutive_keyword_limit',
+            keyword,
+            consecutive,
+            dev: true,
+            devTag: devTag || null,
+          });
+          return;
+        }
+      }
+
       const result = computePermit(key, windowMs, maxCount);
+
+      // 仅在允许时记录 keyword 历史（开发阶段）
+      if (result.allowed && dev && keyword) {
+        const prev = pruneKeywordHistory(keywordHistory.get(key) || []);
+        prev.push({ ts: nowMs(), keyword, devTag: devTag || null });
+        keywordHistory.set(key, prev);
+      }
 
       sendJson(res, 200, {
         ok: true,
@@ -137,6 +200,8 @@ const server = http.createServer(async (req, res) => {
         allowed: result.allowed,
         waitMs: result.waitMs,
         countInWindow: result.countInWindow,
+        ...(keyword ? { keyword } : {}),
+        ...(dev ? { dev: true, devTag: devTag || null } : {}),
       });
       return;
     }

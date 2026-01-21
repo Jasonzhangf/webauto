@@ -33,6 +33,7 @@ const CONFIG = {
     'dist/modules/workflow',
     'dist/sharedmodule',
     'scripts/xiaohongshu',
+    'scripts/xiaohongshu/lib',
     'container-library',
     'modules/xiaohongshu',
     'modules/workflow',
@@ -251,6 +252,10 @@ echo "✅ Node.js 版本: \$NODE_VERSION"
 echo ""
 echo "📦 正在安装项目依赖..."
 npm ci --production
+
+echo ""
+echo "🔍 正在验证安装..."
+./bin/xhs-cli install
 
 echo ""
 echo "✅ 安装完成！"

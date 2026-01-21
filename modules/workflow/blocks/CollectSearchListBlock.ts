@@ -353,21 +353,26 @@ export async function execute(input: CollectSearchListInput): Promise<CollectSea
       const beforeCount = items.length;
 
       // 3.2 批量从 DOM 提取所有 .note-item 的信息（一次性查询），并标记是否在当前视口内
-      try {
-        const batchExtractResult = await controllerAction('browser:execute', {
-          profile,
-          script: `
-            (function () {
-              var viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0;
-              // 视口安全边距：避免顶部 sticky tab/筛选条与底部悬浮层导致“看起来在视口内但实际被遮挡”
-              var safeTop = 180;
-              var safeBottom = 140;
-              var cards = Array.from(document.querySelectorAll('.note-item'));
-              return cards.map(function(card, idx) {
-                var rect = card.getBoundingClientRect();
-                var titleEl = card.querySelector('.footer .title span') || card.querySelector('.footer .title') || card.querySelector('[class*="title"]');
-                var coverEl = card.querySelector('a.cover') || null;
-                var linkEl = coverEl || card.querySelector('a[href*="/explore/"]') || card.querySelector('a[href*="/search_result/"]');
+	      try {
+	        const batchExtractResult = await controllerAction('browser:execute', {
+	          profile,
+	          script: `
+	            (function () {
+	              var viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0;
+	              var viewportWidth = window.innerWidth || document.documentElement.clientWidth || 0;
+	              // 视口安全边距：避免顶部 sticky tab/筛选条与底部悬浮层导致“看起来在视口内但实际被遮挡”
+	              var safeTop = 180;
+	              var safeBottom = 140;
+	              var safeLeft = 24;
+	              var safeRight = 24;
+	              var cards = Array.from(document.querySelectorAll('.note-item'));
+	              return cards.map(function(card, idx) {
+	                var rect = card.getBoundingClientRect();
+	                var titleEl = card.querySelector('.footer .title span') || card.querySelector('.footer .title') || card.querySelector('[class*="title"]');
+	                var coverEl = card.querySelector('a.cover') || null;
+	                var hasQueryWrapper = !!card.querySelector('.query-note-wrapper');
+                // 严格：只允许点击 a.cover（封面）。禁止使用其它 a[href]（可能是作者/推荐词/标签等，会误跳转）。
+                var linkEl = coverEl;
                 var hrefAttr = linkEl ? (linkEl.getAttribute('href') || '') : '';
                 var href = linkEl ? (linkEl.href || hrefAttr || '') : '';
                 var match = href.match(/\\/(explore|search_result)\\/([^?]+)/);
@@ -378,22 +383,40 @@ export async function execute(input: CollectSearchListInput): Promise<CollectSea
                   cardText.indexOf('广告') !== -1 ||
                   cardText.indexOf('推广') !== -1 ||
                   cardText.indexOf('赞助') !== -1;
-                // 仅采集**完全处于视口内**的卡片，避免点击到离屏或半离屏元素
-                var coverRect = null;
-                if (coverEl) {
-                  var cr = coverEl.getBoundingClientRect();
-                  if (cr && cr.width && cr.height) {
-                    coverRect = { x: cr.x, y: cr.y, width: cr.width, height: cr.height };
-                  }
-                }
-                var clickRect = coverRect || { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
-                var inViewport =
-                  clickRect.y >= safeTop &&
-                  (clickRect.y + clickRect.height) <= (viewportHeight - safeBottom);
-                return {
-                  index: idx,
-                  title: titleEl ? titleEl.textContent.trim() : '',
-                  detail_url: href,
+	                // 仅采集**完全处于视口内**的卡片与封面（双重校验），避免点击到离屏或半离屏元素
+	                var coverRect = null;
+	                if (coverEl) {
+	                  // ✅ 优先使用封面媒体（img/video）的 rect，避免 a.cover 覆盖过大导致误点到头像/作者区
+	                  var media = coverEl.querySelector('img,video');
+	                  var target = media || coverEl;
+	                  var cr = target.getBoundingClientRect();
+	                  if (cr && cr.width && cr.height) {
+	                    coverRect = { x: cr.x, y: cr.y, width: cr.width, height: cr.height };
+	                  }
+	                }
+	                // clickRect：用于返回给上层点击坐标/rect（优先封面 rect；无封面时回退卡片 rect）
+	                var clickRect = coverRect || { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
+	                var inViewportCard =
+	                  rect &&
+	                  rect.width > 0 &&
+	                  rect.height > 0 &&
+	                  rect.x >= safeLeft &&
+	                  (rect.x + rect.width) <= (viewportWidth - safeRight) &&
+	                  rect.y >= safeTop &&
+	                  (rect.y + rect.height) <= (viewportHeight - safeBottom);
+	                var inViewportCover =
+	                  coverRect &&
+	                  coverRect.width > 0 &&
+	                  coverRect.height > 0 &&
+	                  coverRect.x >= safeLeft &&
+	                  (coverRect.x + coverRect.width) <= (viewportWidth - safeRight) &&
+	                  coverRect.y >= safeTop &&
+	                  (coverRect.y + coverRect.height) <= (viewportHeight - safeBottom);
+	                var inViewport = Boolean(inViewportCard && inViewportCover);
+	                return {
+	                  index: idx,
+	                  title: titleEl ? titleEl.textContent.trim() : '',
+	                  detail_url: href,
                   href_attr: hrefAttr,
                   note_id: noteId,
                   hasToken: href.indexOf('xsec_token=') !== -1,
@@ -409,14 +432,17 @@ export async function execute(input: CollectSearchListInput): Promise<CollectSea
                     width: rect.width,
                     height: rect.height
                   },
-                  cover_rect: coverRect,
-                  isAd: hasAdBadge,
-                  inViewport: inViewport
-                };
-              });
-            })();
-          `
-        });
+	                  cover_rect: coverRect,
+	                  isAd: hasAdBadge,
+	                  hasQueryWrapper: hasQueryWrapper,
+	                  inViewport: inViewport,
+	                  inViewportCard: inViewportCard,
+	                  inViewportCover: inViewportCover
+	                };
+	              });
+	            })();
+	          `
+	        });
 
         const extractedItems = batchExtractResult.result || batchExtractResult.data?.result || [];
 
@@ -452,6 +478,16 @@ export async function execute(input: CollectSearchListInput): Promise<CollectSea
               continue;
             }
 
+            // 禁止：搜索结果里的“大家都在搜/相关搜索”等 query-note-wrapper 块（不是帖子，点击会跳转到推荐关键词/搜索）
+            if ((extracted as any)?.hasQueryWrapper) {
+              continue;
+            }
+
+            // 必须有 cover_rect（a.cover）才允许进入点击流程；否则宁可不采集，避免误点作者/推荐词
+            if (!(extracted as any)?.cover_rect) {
+              continue;
+            }
+
             // 仅采集“可识别 noteId 的真实帖子卡片”，避免空卡/推荐词/占位导致误点跳转
             const noteId = typeof extracted.note_id === 'string' ? extracted.note_id.trim() : '';
             const detailUrlRaw = typeof extracted.detail_url === 'string' ? extracted.detail_url.trim() : '';
@@ -482,12 +518,12 @@ export async function execute(input: CollectSearchListInput): Promise<CollectSea
               hrefAttr: typeof extracted.href_attr === 'string' ? extracted.href_attr : undefined,
               isAd: Boolean((extracted as any)?.isAd),
               rect:
-                extracted?.rect &&
-                typeof extracted.rect.x === 'number' &&
-                typeof extracted.rect.y === 'number' &&
-                typeof extracted.rect.width === 'number' &&
-                typeof extracted.rect.height === 'number'
-                  ? extracted.rect
+                extracted?.cover_rect &&
+                typeof extracted.cover_rect.x === 'number' &&
+                typeof extracted.cover_rect.y === 'number' &&
+                typeof extracted.cover_rect.width === 'number' &&
+                typeof extracted.cover_rect.height === 'number'
+                  ? extracted.cover_rect
                   : undefined,
               raw: extracted,
             });

@@ -4,6 +4,9 @@ import { xiaohongshuCollectWorkflow } from '../definitions/xiaohongshu-collect-w
 import { xiaohongshuNoteCollectWorkflow } from '../definitions/xiaohongshu-note-collect.js';
 import { xiaohongshuFullCollectWorkflowV3 } from '../definitions/xiaohongshu-full-collect-workflow-v3.js';
 import { xiaohongshuPhase3CollectWorkflowV1 } from '../definitions/xiaohongshu-phase3-collect-workflow-v1.js';
+import { xiaohongshuPhase1WorkflowV3 } from '../definitions/xiaohongshu-phase1-workflow-v3.js';
+import { xiaohongshuPhase2LinksWorkflowV3 } from '../definitions/xiaohongshu-phase2-links-workflow-v3.js';
+import { xiaohongshuPhase34FromLinksWorkflowV3 } from '../definitions/xiaohongshu-phase34-from-links-workflow-v3.js';
 
 const registry = new Map<string, WorkflowDefinitionInput>();
 
@@ -21,6 +24,9 @@ register(xiaohongshuCollectWorkflow, 'xiaohongshu-collect-v1');
 register(xiaohongshuNoteCollectWorkflow, 'xiaohongshu-note-collect');
 register(xiaohongshuFullCollectWorkflowV3, 'xiaohongshu-collect-full-v3');
 register(xiaohongshuPhase3CollectWorkflowV1, 'xiaohongshu-collect-phase3-v1');
+register(xiaohongshuPhase1WorkflowV3, 'xiaohongshu-phase1-v3');
+register(xiaohongshuPhase2LinksWorkflowV3, 'xiaohongshu-phase2-links-v3');
+register(xiaohongshuPhase34FromLinksWorkflowV3, 'xiaohongshu-phase34-from-links-v3');
 
 export function getWorkflowDefinition(id: string): WorkflowDefinitionInput | undefined {
   return registry.get(id);

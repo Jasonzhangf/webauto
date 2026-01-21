@@ -81,7 +81,7 @@ export async function clickCommentButtonByContainerId(
         `[WarmupComments] click comment_button @(${Math.floor(bx)},${Math.floor(by)})`,
       );
       const { systemClickAt } = await import('./systemInput.js');
-      await systemClickAt(profile, Math.floor(bx), Math.floor(by));
+      await systemClickAt(profile, Math.floor(bx), Math.floor(by), undefined, 'click_comment_button');
       await new Promise((r) => setTimeout(r, 800));
       return { clicked: true, rect: btnAnchor.rect };
     }
@@ -142,7 +142,7 @@ export async function locateCommentSection(
           `[WarmupComments] click comment_button (${reason}) @(${Math.floor(bx)},${Math.floor(by)})`,
         );
         const { systemClickAt } = await import('./systemInput.js');
-        await systemClickAt(profile, Math.floor(bx), Math.floor(by));
+        await systemClickAt(profile, Math.floor(bx), Math.floor(by), undefined, 'click_comment_button');
         clicked = true;
         await new Promise((r) => setTimeout(r, 800));
       }

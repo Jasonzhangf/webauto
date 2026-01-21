@@ -237,16 +237,24 @@ export class UiController {
      case 'containers:match':
      case 'containers:status':
        return this.handleContainerMatch(payload);
-    case 'browser:highlight':
-      return this.handleBrowserHighlight(payload);
-    case 'browser:clear-highlight':
-      return this.handleBrowserClearHighlight(payload);
+     case 'browser:highlight':
+       return this.handleBrowserHighlight(payload);
+     case 'browser:clear-highlight':
+       return this.handleBrowserClearHighlight(payload);
      case 'browser:highlight-dom-path':
        return this.handleBrowserHighlightDomPath(payload);
      case 'browser:execute':
        return this.handleBrowserExecute(payload);
      case 'browser:screenshot':
        return this.handleBrowserScreenshot(payload);
+     case 'browser:page:list':
+       return this.handleBrowserPageList(payload);
+     case 'browser:page:new':
+       return this.handleBrowserPageNew(payload);
+     case 'browser:page:switch':
+       return this.handleBrowserPageSwitch(payload);
+     case 'browser:page:close':
+       return this.handleBrowserPageClose(payload);
      case 'browser:goto':
        return this.handleBrowserGoto(payload);
       case 'browser:cancel-pick':
@@ -653,7 +661,41 @@ export class UiController {
   async handleBrowserScreenshot(payload: ActionPayload = {}) {
     const profileId = (payload.profileId || payload.profile || payload.sessionId || 'default').toString();
     const fullPage = typeof payload.fullPage === 'boolean' ? payload.fullPage : Boolean(payload.fullPage);
-    const result = await this.browserServiceCommand('screenshot', { profileId, fullPage });
+    // 截图在某些页面会更慢，放宽超时以保证调试证据可落盘
+    const result = await this.browserServiceCommand('screenshot', { profileId, fullPage }, { timeoutMs: 60000 });
+    return { success: true, data: result };
+  }
+
+  async handleBrowserPageList(payload: ActionPayload = {}) {
+    const profileId = (payload.profileId || payload.profile || payload.sessionId || 'default').toString();
+    const result = await this.browserServiceCommand('page:list', { profileId }, { timeoutMs: 30000 });
+    return { success: true, data: result };
+  }
+
+  async handleBrowserPageNew(payload: ActionPayload = {}) {
+    const profileId = (payload.profileId || payload.profile || payload.sessionId || 'default').toString();
+    const url = payload.url ? String(payload.url) : undefined;
+    const result = await this.browserServiceCommand('page:new', { profileId, ...(url ? { url } : {}) }, { timeoutMs: 30000 });
+    return { success: true, data: result };
+  }
+
+  async handleBrowserPageSwitch(payload: ActionPayload = {}) {
+    const profileId = (payload.profileId || payload.profile || payload.sessionId || 'default').toString();
+    const index = Number(payload.index);
+    if (!Number.isFinite(index)) throw new Error('index required');
+    const result = await this.browserServiceCommand('page:switch', { profileId, index }, { timeoutMs: 30000 });
+    return { success: true, data: result };
+  }
+
+  async handleBrowserPageClose(payload: ActionPayload = {}) {
+    const profileId = (payload.profileId || payload.profile || payload.sessionId || 'default').toString();
+    const hasIndex = typeof payload.index !== 'undefined' && payload.index !== null;
+    const index = hasIndex ? Number(payload.index) : undefined;
+    const result = await this.browserServiceCommand(
+      'page:close',
+      { profileId, ...(Number.isFinite(index as number) ? { index } : {}) },
+      { timeoutMs: 30000 },
+    );
     return { success: true, data: result };
   }
 
@@ -661,12 +703,13 @@ export class UiController {
     return `${this.defaultHttpProtocol}://${this.defaultHttpHost}:${this.defaultHttpPort}`;
   }
 
-  private async browserServiceCommand(action: string, args: Record<string, any>) {
+  private async browserServiceCommand(action: string, args: Record<string, any>, options: { timeoutMs?: number } = {}) {
+    const timeoutMs = typeof options.timeoutMs === 'number' && options.timeoutMs > 0 ? options.timeoutMs : 20000;
     const res = await fetch(`${this.getBrowserServiceHttpUrl()}/command`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action, args }),
-      signal: AbortSignal.timeout(20000),
+      signal: AbortSignal.timeout(timeoutMs),
     });
 
     const raw = await res.text();

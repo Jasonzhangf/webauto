@@ -154,7 +154,8 @@ export async function executeSearch(
       delay: 80 + Math.floor(Math.random() * 60),
     }).catch(() => {});
 
-    await new Promise((r) => setTimeout(r, 220));
+    // 操作之间要等待：给输入法/站内联想一点稳定时间
+    await new Promise((r) => setTimeout(r, 420));
 
     // 仅用于诊断：记录“相关搜索/推荐词”是否出现及其内容（不做点击/纠错）
     let suggestionProbe: any = null;
@@ -219,9 +220,55 @@ export async function executeSearch(
       };
     }
 
-    await controllerAction(controllerUrl, 'keyboard:press', { profileId: profile, key: 'Enter' }).catch(() => {});
+    async function readUrl(): Promise<string> {
+      try {
+        const raw = await controllerAction(controllerUrl, 'browser:execute', {
+          profile,
+          script: 'location.href',
+        });
+        const v = (raw as any)?.result ?? (raw as any)?.data?.result ?? raw ?? '';
+        return typeof v === 'string' ? v : String(v || '');
+      } catch {
+        return '';
+      }
+    }
+
+    async function waitForSearchResultUrl(maxWaitMs: number): Promise<{ ok: boolean; url: string }> {
+      const start = Date.now();
+      let last = '';
+      while (Date.now() - start < maxWaitMs) {
+        last = await readUrl();
+        if (typeof last === 'string' && last.includes('/search_result')) {
+          return { ok: true, url: last };
+        }
+        await new Promise((r) => setTimeout(r, 400));
+      }
+      return { ok: false, url: last };
+    }
+
+    // 中文输入法下 Enter 可能先“确认输入”而不触发搜索：最多 2 次 Enter（不循环重搜）
+    let navigated = false;
+    let lastUrl = '';
+    for (let attempt = 1; attempt <= 2; attempt += 1) {
+      console.log(`[SearchExecutor] Press Enter (attempt=${attempt}/2) ...`);
+      await controllerAction(controllerUrl, 'keyboard:press', { profileId: profile, key: 'Enter' }).catch(() => {});
+      await new Promise((r) => setTimeout(r, 450));
+      const waited = await waitForSearchResultUrl(7000);
+      lastUrl = waited.url;
+      if (waited.ok) {
+        navigated = true;
+        break;
+      }
+    }
 
     console.log('[SearchExecutor] Search triggered, waiting for results...');
+    if (!navigated) {
+      return {
+        success: false,
+        error: `search_not_navigated_after_enter (url="${lastUrl || ''}")`,
+        debug: { selector, searchInputContainerId, suggestions: suggestionProbe },
+      };
+    }
     return { success: true, debug: { selector, searchInputContainerId, suggestions: suggestionProbe } };
   } catch (error: any) {
     console.error(`[SearchExecutor] Search failed: ${error.message}`);

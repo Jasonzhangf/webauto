@@ -113,6 +113,8 @@ export function mergeExtractedComments(params: {
         }||${(c as any).timestamp || ''}`;
     if (seenKeys.has(key)) continue;
     seenKeys.add(key);
+    // 供上层做跨 tab / 跨批次去重
+    (c as any)._key = key;
     out.push(c);
   }
 }

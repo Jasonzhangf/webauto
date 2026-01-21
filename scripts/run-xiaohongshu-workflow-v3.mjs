@@ -2,11 +2,15 @@ import minimist from 'minimist';
 import { runWorkflowById } from '../dist/modules/workflow/src/runner.js';
 
 async function main() {
+  // 开发阶段默认开启结构化 debug 日志（写入 ~/.webauto/logs/debug.jsonl），便于事后回放。
+  if (!process.env.DEBUG) process.env.DEBUG = '1';
   const args = minimist(process.argv.slice(2));
   const keyword = args.keyword || '手机膜';
   const targetCount = Number(args.count || 10);
   const env = args.env || 'debug';
   const workflowId = args.workflow || 'xiaohongshu-collect-full-v3';
+  const ocrLanguages =
+    typeof args.ocrLanguages === 'string' && args.ocrLanguages.trim() ? String(args.ocrLanguages).trim() : undefined;
   const maxWarmupRounds =
     typeof args.warmup === 'number' || typeof args.warmup === 'string' ? Number(args.warmup) : undefined;
   const allowClickCommentButton =
@@ -24,6 +28,7 @@ async function main() {
     keyword,
     targetCount,
     env,
+    ...(typeof ocrLanguages === 'string' ? { ocrLanguages } : {}),
     ...(Number.isFinite(maxWarmupRounds) ? { maxWarmupRounds } : {}),
     ...(typeof allowClickCommentButton === 'boolean' ? { allowClickCommentButton } : {}),
   });

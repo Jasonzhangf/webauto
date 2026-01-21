@@ -4,6 +4,9 @@
  * 展开评论并提取评论列表
  */
 
+import os from 'node:os';
+import path from 'node:path';
+import { promises as fs } from 'node:fs';
 import { locateCommentSection } from './helpers/commentSectionLocator.js';
 import { getScrollStats, getViewport, systemMouseWheel } from './helpers/commentScroller.js';
 import { expandRepliesInView, findExpandTargets } from './helpers/replyExpander.js';
@@ -12,10 +15,88 @@ import { buildExtractCommentsScript, mergeExtractedComments } from './helpers/ex
 import { systemClickAt } from './helpers/systemInput.js';
 import { getCommentEndState } from './helpers/xhsCommentDom.js';
 
+// 调试截图保存目录
+const DEBUG_SCREENSHOT_DIR = path.join(os.homedir(), '.webauto', 'logs', 'debug-screenshots');
+
+/**
+ * 保存调试截图
+ */
+async function saveDebugScreenshot(
+  kind: string,
+  sessionId: string,
+  meta: Record<string, any> = {},
+): Promise<{ pngPath?: string; jsonPath?: string }> {
+  try {
+    await fs.mkdir(DEBUG_SCREENSHOT_DIR, { recursive: true });
+    const ts = new Date().toISOString().replace(/[:.]/g, '-');
+    const base = `${ts}-${kind}-${sessionId}`;
+    const pngPath = path.join(DEBUG_SCREENSHOT_DIR, `${base}.png`);
+    const jsonPath = path.join(DEBUG_SCREENSHOT_DIR, `${base}.json`);
+
+    const controllerUrl = 'http://127.0.0.1:7701/v1/controller/action';
+
+    // 截图
+    async function takeShot(): Promise<any> {
+      const response = await fetch(controllerUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'browser:screenshot',
+          payload: { profileId: sessionId, fullPage: false },
+        }),
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const data = await response.json().catch(() => ({}));
+      return data.data || data;
+    }
+
+    let shot: any = null;
+    try {
+      shot = await takeShot();
+    } catch {
+      try {
+        shot = await takeShot();
+      } catch {
+        shot = null;
+      }
+    }
+
+    // 提取 base64
+    const b64 =
+      shot?.data?.data ??
+      shot?.data?.body?.data ??
+      shot?.body?.data ??
+      shot?.result?.data ??
+      shot?.result ??
+      shot?.data ??
+      shot;
+    if (typeof b64 === 'string' && b64.length > 10) {
+      await fs.writeFile(pngPath, Buffer.from(b64, 'base64'));
+    }
+
+    // 保存元数据
+    await fs.writeFile(
+      jsonPath,
+      JSON.stringify({ ts, kind, sessionId, ...meta, pngPath: b64 ? pngPath : null }, null, 2),
+      'utf-8',
+    );
+
+    console.log(`[ExpandComments][debug] saved ${kind}: ${pngPath}`);
+    return { pngPath: b64 ? pngPath : undefined, jsonPath };
+  } catch {
+    return {};
+  }
+}
+
 export interface ExpandCommentsInput {
   sessionId: string;
   maxRounds?: number;
   expectedTotal?: number | null;
+  // 多 tab 渐进式评论抓取：每次只抓“新增”最多 N 条，然后切 tab
+  maxNewComments?: number;
+  seedSeenKeys?: string[];
+  startFromTop?: boolean;
+  ensureLatestTab?: boolean;
   serviceUrl?: string;
 }
 
@@ -31,6 +112,7 @@ export interface ExpandCommentsOutput {
   comments: Array<Record<string, any>>;
   reachedEnd: boolean;
   emptyState: boolean;
+  stoppedByMaxNew?: boolean;
   anchor?: {
     commentSectionContainerId: string;
     commentSectionRect?: Rect;
@@ -55,6 +137,10 @@ export async function execute(input: ExpandCommentsInput): Promise<ExpandComment
     // 默认按“抓完”为目标：滚动到评论底部（或空评论）才结束
     maxRounds = 240,
     expectedTotal = null,
+    maxNewComments,
+    seedSeenKeys,
+    startFromTop = true,
+    ensureLatestTab = true,
     serviceUrl = 'http://127.0.0.1:7701'
   } = input;
 
@@ -85,6 +171,11 @@ export async function execute(input: ExpandCommentsInput): Promise<ExpandComment
   const viewport0 = await getViewport(controllerUrl, profile);
   const viewportW = viewport0.innerWidth || 1440;
   const viewportH = viewport0.innerHeight || 900;
+
+  // Tab 监控：记录初始状态
+  const initialTabs: Array<{ index: number; url: string }> = await controllerAction('browser:page:list', { profileId: profile })
+    .then((r: any) => r?.pages || [])
+    .catch((): Array<{ index: number; url: string }> => []);
 
   const tryActivateCommentsUi = async (reason: string) => {
     try {
@@ -117,13 +208,14 @@ export async function execute(input: ExpandCommentsInput): Promise<ExpandComment
     }
   };
 
-  const systemWheel = async (deltaY: number, focusPoint?: { x: number; y: number }) => {
+  const systemWheel = async (deltaY: number, focusPoint?: { x: number; y: number }, context = 'expand_comments_scroll') => {
     await systemMouseWheel({
       profileId: profile,
       deltaY,
       focusPoint,
       browserServiceUrl,
       browserWsUrl,
+      context,
     });
   };
 
@@ -261,7 +353,7 @@ export async function execute(input: ExpandCommentsInput): Promise<ExpandComment
       if (payload.active) return true;
       const cx = Math.floor(payload.x + payload.width / 2);
       const cy = Math.floor(payload.y + payload.height / 2);
-      await systemClickAt(profile, cx, cy, browserServiceUrl);
+      await systemClickAt(profile, cx, cy, browserServiceUrl, 'select_latest_tab');
       await new Promise((r) => setTimeout(r, 900));
       return true;
     } catch {
@@ -495,23 +587,44 @@ export async function execute(input: ExpandCommentsInput): Promise<ExpandComment
 
     const focusPoint = buildFocusPoint(commentSectionRect);
 
-    await trySelectLatestTab();
+    if (ensureLatestTab) {
+      await trySelectLatestTab();
+    }
 
-    // 滚动回顶部
-    try {
-      await systemClickAt(profile, focusPoint.x, focusPoint.y, browserServiceUrl);
-      for (let i = 0; i < 24; i += 1) {
-        const s = await scrollStats(scrollRootSelectors);
-        if (!s.found || s.atTop) break;
-        await systemWheel(-(360 + Math.floor(Math.random() * 220)), focusPoint);
-        await new Promise((r) => setTimeout(r, 450 + Math.random() * 350));
+    // 滚动回顶部（仅在该 tab 第一次抓取时执行，避免重复回顶导致“永远只抽到前 50 条”）
+    if (startFromTop) {
+      const end0 = await getCommentEndState(controllerUrl, profile).catch((): any => null);
+      if (end0?.emptyStateVisible) {
+        log('empty_state visible before scroll_to_top; skip scroll_to_top');
+      } else {
+        try {
+          await systemClickAt(profile, focusPoint.x, focusPoint.y, browserServiceUrl, 'scroll_to_top');
+          for (let i = 0; i < 24; i += 1) {
+            const s = await scrollStats(scrollRootSelectors);
+            if (!s.found || s.atTop) break;
+            await systemWheel(-(360 + Math.floor(Math.random() * 220)), focusPoint);
+            await new Promise((r) => setTimeout(r, 450 + Math.random() * 350));
+          }
+        } catch (e: any) {
+          const msg = String(e?.message || e || '');
+          if (msg.includes('captcha_modal_detected') || msg.includes('unsafe_click_image_in_detail')) {
+            throw e;
+          }
+          // 非关键错误不影响后续抽取：保留日志即可
+          warn(`scroll_to_top ignored error: ${msg}`);
+        }
       }
-    } catch {
-      // ignore
     }
 
     const comments: Array<Record<string, any>> = [];
-    const seenKeys = new Set<string>();
+    const seenKeys = new Set<string>(
+      Array.isArray(seedSeenKeys) ? seedSeenKeys.filter((k) => typeof k === 'string') : [],
+    );
+    const maxNew =
+      typeof maxNewComments === 'number' && Number.isFinite(maxNewComments) && maxNewComments > 0
+        ? Math.floor(maxNewComments)
+        : null;
+    let stoppedByMaxNew = false;
 
     const showMoreSelector = await safeGetPrimarySelectorById(getPrimarySelectorByContainerId, showMoreContainerId);
 
@@ -528,7 +641,10 @@ export async function execute(input: ExpandCommentsInput): Promise<ExpandComment
           controllerUrl,
           profile,
           browserServiceUrl,
-          maxTargets: 2,
+          // 详情页同屏可能有多个“展开更多”按钮；这里要尽量展开干净，避免漏掉可见回复
+          // 每次点击都会重算目标坐标，避免布局变化导致点偏
+          maxTargets: 6,
+          recomputeEachClick: true,
           focusPoint,
           showMoreContainerId,
           showMoreSelector,
@@ -545,7 +661,17 @@ export async function execute(input: ExpandCommentsInput): Promise<ExpandComment
           out: comments,
         });
       } catch (e: any) {
-        warn(`round=${round} extract/expand error: ${e?.message || e}`);
+        const msg = String(e?.message || e || '');
+        if (msg.includes('captcha_modal_detected') || msg.includes('unsafe_click_image_in_detail')) {
+          throw e;
+        }
+        warn(`round=${round} extract/expand error: ${msg}`);
+      }
+
+      // 多 tab 渐进式：本次新增达到上限就停止（留在当前位置，下一次切回该 tab 继续）
+      if (maxNew && comments.length >= maxNew) {
+        stoppedByMaxNew = true;
+        break;
       }
 
       // 空评论兜底：如果没有抽到任何 comment_item，优先用 empty_state 容器确认
@@ -612,18 +738,29 @@ export async function execute(input: ExpandCommentsInput): Promise<ExpandComment
         recoveries += 1;
         warn(`scroll stuck (streak=${noEffectStreak}), recovery #${recoveries}: rollback then down`);
         try {
-          await systemClickAt(profile, focusPoint.x, focusPoint.y, browserServiceUrl);
-        } catch {
-          // ignore
+          await systemClickAt(profile, focusPoint.x, focusPoint.y, browserServiceUrl, 'scroll_recovery');
+        } catch (e: any) {
+          const msg = String(e?.message || e || '');
+          if (msg.includes('captcha_modal_detected') || msg.includes('unsafe_click_image_in_detail')) throw e;
         }
 
         // 回滚（向上）2 次，再向下 3 次
         for (let k = 0; k < 2; k += 1) {
-          await systemWheel(-(320 + Math.floor(Math.random() * 160)), focusPoint).catch(() => {});
+          try {
+            await systemWheel(-(320 + Math.floor(Math.random() * 160)), focusPoint, 'expand_scroll_recovery_up');
+          } catch (e: any) {
+            const msg = String(e?.message || e || '');
+            if (msg.includes('captcha_modal_detected')) throw e;
+          }
           await new Promise((r) => setTimeout(r, 500 + Math.random() * 400));
         }
         for (let k = 0; k < 3; k += 1) {
-          await systemWheel(540 + Math.floor(Math.random() * 220), focusPoint).catch(() => {});
+          try {
+            await systemWheel(540 + Math.floor(Math.random() * 220), focusPoint, 'expand_scroll_recovery_down');
+          } catch (e: any) {
+            const msg = String(e?.message || e || '');
+            if (msg.includes('captcha_modal_detected')) throw e;
+          }
           await new Promise((r) => setTimeout(r, 600 + Math.random() * 450));
         }
 
@@ -633,23 +770,31 @@ export async function execute(input: ExpandCommentsInput): Promise<ExpandComment
       }
 
       const deltaY = 520 + Math.floor(Math.random() * 260);
-      await systemWheel(deltaY, focusPoint).catch((e: any) => {
-        warn(`systemWheel failed: ${e?.message || e}`);
-      });
+      try {
+        await systemWheel(deltaY, focusPoint, 'expand_scroll');
+      } catch (e: any) {
+        const msg = String(e?.message || e || '');
+        if (msg.includes('captcha_modal_detected')) throw e;
+        warn(`systemWheel failed: ${msg}`);
+      }
       await new Promise((r) => setTimeout(r, 650 + Math.random() * 650));
     }
 
-    // 补齐最后一屏
-    try {
-      await extractCommentsOnce({
-        rootSelectors,
-        itemSelector,
-        extractors,
-        seenKeys,
-        out: comments,
-      });
-    } catch {
-      // ignore
+    // 补齐最后一屏：
+    // - 单 tab“抓完”模式需要补齐
+    // - 多 tab “maxNewComments” 分批模式不补齐，避免一次超过上限
+    if (!stoppedByMaxNew) {
+      try {
+        await extractCommentsOnce({
+          rootSelectors,
+          itemSelector,
+          extractors,
+          seenKeys,
+          out: comments,
+        });
+      } catch {
+        // ignore
+      }
     }
 
     // 4. 检查终止条件
@@ -731,6 +876,7 @@ export async function execute(input: ExpandCommentsInput): Promise<ExpandComment
       comments,
       reachedEnd,
       emptyState: comments.length === 0 && Boolean(emptyStateHit && endMarkerRect),
+      stoppedByMaxNew,
       anchor: {
         commentSectionContainerId: commentSectionId,
         commentSectionRect,

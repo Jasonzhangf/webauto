@@ -2,8 +2,186 @@
  * System Input Helper (browser-service)
  *
  * 统一封装系统级鼠标/键盘/滚轮操作，避免在各 Block 内重复实现。
- * 注意：这里只做“系统事件发送”，不做任何 DOM click/scroll 等 JS 行为。
+ * 注意：这里只做"系统事件发送"，不做任何 DOM click/scroll 等 JS 行为。
  */
+
+import os from 'node:os';
+import path from 'node:path';
+import { promises as fs } from 'node:fs';
+
+// 调试截图保存目录
+const DEBUG_SCREENSHOT_DIR = path.join(os.homedir(), '.webauto', 'logs', 'debug-screenshots');
+const DEFAULT_CONTROLLER_URL = process.env.WEBAUTO_CONTROLLER_URL || 'http://127.0.0.1:7701/v1/controller/action';
+
+/**
+ * 保存调试截图
+ */
+async function saveDebugScreenshot(
+  kind: string,
+  sessionId: string,
+  meta: Record<string, any> = {},
+): Promise<{ pngPath?: string; jsonPath?: string }> {
+  try {
+    await fs.mkdir(DEBUG_SCREENSHOT_DIR, { recursive: true });
+    const ts = new Date().toISOString().replace(/[:.]/g, '-');
+    const base = `${ts}-${kind}-${sessionId}`;
+    const pngPath = path.join(DEBUG_SCREENSHOT_DIR, `${base}.png`);
+    const jsonPath = path.join(DEBUG_SCREENSHOT_DIR, `${base}.json`);
+
+    const controllerUrl = DEFAULT_CONTROLLER_URL;
+
+    // 截图
+    async function takeShot(): Promise<any> {
+      const response = await fetch(controllerUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'browser:screenshot',
+          payload: { profileId: sessionId, fullPage: false },
+        }),
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const data = await response.json().catch(() => ({}));
+      return data.data || data;
+    }
+
+    let shot: any = null;
+    try {
+      shot = await takeShot();
+    } catch {
+      try {
+        shot = await takeShot();
+      } catch {
+        shot = null;
+      }
+    }
+
+    // 提取 base64
+    const b64 =
+      shot?.data?.data ??
+      shot?.data?.body?.data ??
+      shot?.body?.data ??
+      shot?.result?.data ??
+      shot?.result ??
+      shot?.data ??
+      shot;
+    if (typeof b64 === 'string' && b64.length > 10) {
+      await fs.writeFile(pngPath, Buffer.from(b64, 'base64'));
+    }
+
+    // 保存元数据
+    await fs.writeFile(
+      jsonPath,
+      JSON.stringify({ ts, kind, sessionId, ...meta, pngPath: b64 ? pngPath : null }, null, 2),
+      'utf-8',
+    );
+
+    console.log(`[systemInput][debug] saved ${kind}: ${pngPath}`);
+    return { pngPath: b64 ? pngPath : undefined, jsonPath };
+  } catch {
+    return {};
+  }
+}
+
+async function controllerAction(action: string, payload: any): Promise<any> {
+  const response = await fetch(DEFAULT_CONTROLLER_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action, payload }),
+    signal: (AbortSignal as any).timeout ? (AbortSignal as any).timeout(12000) : undefined,
+  });
+  if (!response.ok) throw new Error(`HTTP ${response.status}: ${await response.text()}`);
+  const data = await response.json().catch(() => ({}));
+  return data.data || data;
+}
+
+async function probePoint(profileId: string, x: number, y: number): Promise<{
+  tag: string | null;
+  className: string | null;
+  textSnippet: string | null;
+  href: string | null;
+  isCaptcha: boolean;
+  isImageLike: boolean;
+  isCover: boolean;
+}> {
+  try {
+    const res = await controllerAction('browser:execute', {
+      profile: profileId,
+      script: `(() => {
+        const x = ${JSON.stringify(x)};
+        const y = ${JSON.stringify(y)};
+        const el = document.elementFromPoint(x, y);
+        const tag = el && el.tagName ? String(el.tagName) : null;
+        const className = el && el.className ? String(el.className) : null;
+        const textSnippet = el && el.textContent ? String(el.textContent).trim().slice(0, 80) : null;
+        const linkEl = el && el.closest ? el.closest('a[href]') : null;
+        const href = linkEl ? (linkEl.getAttribute('href') || linkEl.href || '') : '';
+
+        const modal = document.querySelector('.r-captcha-modal, .captcha-modal-content');
+        const modalText = modal ? (modal.textContent || '') : '';
+        const isCaptcha = Boolean(modal) || modalText.includes('请通过验证') || modalText.includes('扫码验证');
+
+        const isImageTag = tag === 'IMG' || tag === 'VIDEO' || tag === 'CANVAS';
+        const imageAncestor = el && el.closest ? el.closest('img,video,canvas') : null;
+        const isImageLike = Boolean(isImageTag || imageAncestor);
+
+        const cover = el && el.closest ? el.closest('a.cover') : null;
+        const isCover = Boolean(cover);
+
+        return { tag, className, textSnippet, href: href || null, isCaptcha, isImageLike, isCover };
+      })()`,
+    });
+    const payload = (res as any)?.result ?? (res as any)?.data?.result ?? res;
+    return {
+      tag: typeof payload?.tag === 'string' ? payload.tag : null,
+      className: typeof payload?.className === 'string' ? payload.className : null,
+      textSnippet: typeof payload?.textSnippet === 'string' ? payload.textSnippet : null,
+      href: typeof payload?.href === 'string' ? payload.href : null,
+      isCaptcha: Boolean(payload?.isCaptcha),
+      isImageLike: Boolean(payload?.isImageLike),
+      isCover: Boolean(payload?.isCover),
+    };
+  } catch {
+    return {
+      tag: null,
+      className: null,
+      textSnippet: null,
+      href: null,
+      isCaptcha: false,
+      isImageLike: false,
+      isCover: false,
+    };
+  }
+}
+
+async function isCaptchaOverlayVisible(profileId: string): Promise<boolean> {
+  try {
+    const res = await controllerAction('browser:execute', {
+      profile: profileId,
+      script: `(() => {
+        const modal = document.querySelector('.r-captcha-modal, .captcha-modal-content');
+        const modalText = modal ? (modal.textContent || '') : '';
+        return Boolean(modal) || modalText.includes('请通过验证') || modalText.includes('扫码验证');
+      })()`,
+    });
+    const payload = (res as any)?.result ?? (res as any)?.data?.result ?? res;
+    return Boolean(payload);
+  } catch {
+    return false;
+  }
+}
+
+function shouldGuardAgainstImageClick(context?: string): boolean {
+  const c = String(context || '').trim();
+  if (!c) return false;
+  // 详情页/评论相关的坐标点击：禁止落在图片/视频上（避免打开图片查看器触发风控）
+  return (
+    c.includes('scroll') ||
+    c.includes('comment') ||
+    c.includes('reply') ||
+    c.includes('select_latest_tab')
+  );
+}
 
 export interface FocusPoint {
   x: number;
@@ -53,7 +231,24 @@ export async function systemClickAt(
   x: number,
   y: number,
   browserServiceUrl = 'http://127.0.0.1:7704',
+  context?: string,
 ): Promise<void> {
+  // 点击前截屏（用于调试）
+  await saveDebugScreenshot(`before_click_${context || 'system'}`, profileId, { x, y, context });
+
+  // 风控/验证码：出现就立即停下（开发阶段不做重试/兜底），保留证据便于人工处理
+  const probe = await probePoint(profileId, x, y);
+  if (probe.isCaptcha) {
+    await saveDebugScreenshot(`captcha_detected_${context || 'system'}`, profileId, { x, y, context, probe });
+    throw new Error(`captcha_modal_detected (context=${context || 'system'})`);
+  }
+
+  // 详情页/评论滚动相关点击：禁止点到图片/视频（会打开查看器/新层）
+  if (shouldGuardAgainstImageClick(context) && probe.isImageLike) {
+    await saveDebugScreenshot(`unsafe_click_image_${context || 'system'}`, profileId, { x, y, context, probe });
+    throw new Error(`unsafe_click_image_in_detail (context=${context || 'system'})`);
+  }
+
   await systemHoverAt(profileId, x, y, browserServiceUrl);
   await new Promise((r) => setTimeout(r, 80));
   await browserServiceCommand(
@@ -76,6 +271,7 @@ export async function systemMouseWheel(options: {
   focusPoint?: FocusPoint | null;
   browserServiceUrl?: string;
   browserWsUrl?: string;
+  context?: string;
 }): Promise<void> {
   const {
     profileId,
@@ -83,7 +279,14 @@ export async function systemMouseWheel(options: {
     focusPoint,
     browserServiceUrl = 'http://127.0.0.1:7704',
     browserWsUrl = process.env.WEBAUTO_BROWSER_WS_URL || 'ws://127.0.0.1:8765',
+    context,
   } = options;
+
+  // 风控/验证码：出现就立即停下（开发阶段不做重试/兜底），保留证据便于人工处理
+  if (await isCaptchaOverlayVisible(profileId)) {
+    await saveDebugScreenshot(`captcha_detected_wheel_${context || 'system'}`, profileId, { deltaY, focusPoint, context });
+    throw new Error(`captcha_modal_detected (context=${context || 'system'})`);
+  }
 
   try {
     if (focusPoint) {
@@ -187,4 +390,3 @@ async function browserServiceWsScroll(options: {
     });
   });
 }
-

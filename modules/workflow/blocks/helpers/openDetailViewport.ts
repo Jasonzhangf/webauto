@@ -217,16 +217,51 @@ export function createOpenDetailViewportTools(config: OpenDetailViewportToolsCon
           if (!card) return null;
           const cover = card.querySelector('a.cover');
           if (!cover) return null;
-          const r = cover.getBoundingClientRect();
+          const media = cover.querySelector('img,video');
+          const target = media || cover;
+          const r = target.getBoundingClientRect();
           if (!r || !r.width || !r.height) return null;
-          const inViewport = r.top >= 0 && r.bottom <= (window.innerHeight || 0);
+          const innerH = window.innerHeight || 0;
+          const inViewport = innerH ? (r.bottom > 0 && r.top < innerH) : true;
           return { x: r.x, y: r.y, width: r.width, height: r.height, inViewport };
         })()`,
       });
       const payload = (res as any)?.result ?? (res as any)?.data?.result ?? res;
       if (
         payload &&
-        payload.inViewport &&
+        typeof payload.x === 'number' &&
+        typeof payload.y === 'number' &&
+        typeof payload.width === 'number' &&
+        typeof payload.height === 'number'
+      ) {
+        return { x: payload.x, y: payload.y, width: payload.width, height: payload.height };
+      }
+    } catch {
+      // ignore
+    }
+    return undefined;
+  }
+
+  /**
+   * 通过 domIndex 计算卡片（.note-item）的 Rect
+   * 用于“禁止点击显示不全的 note item”场景：必须确保整个卡片完全在视口安全区内。
+   */
+  async function computeCardRectByIndex(index: number): Promise<Rect | undefined> {
+    try {
+      const res = await controllerAction('browser:execute', {
+        profile,
+        script: `(() => {
+          const cards = Array.from(document.querySelectorAll('.note-item'));
+          const card = cards[${index}];
+          if (!card) return null;
+          const r = card.getBoundingClientRect();
+          if (!r || !r.width || !r.height) return null;
+          return { x: r.x, y: r.y, width: r.width, height: r.height };
+        })()`,
+      });
+      const payload = (res as any)?.result ?? (res as any)?.data?.result ?? res;
+      if (
+        payload &&
         typeof payload.x === 'number' &&
         typeof payload.y === 'number' &&
         typeof payload.width === 'number' &&
@@ -258,10 +293,12 @@ export function createOpenDetailViewportTools(config: OpenDetailViewportToolsCon
               if (!cover) continue;
               const href = cover.getAttribute('href') || cover.href || '';
               if (!href || href.indexOf(noteId) === -1) continue;
-              const r = cover.getBoundingClientRect();
+              const media = cover.querySelector('img,video');
+              const target = media || cover;
+              const r = target.getBoundingClientRect();
               if (!r || !r.width || !r.height) continue;
-              const inViewport = r.top >= 0 && r.bottom <= (window.innerHeight || 0);
-              if (!inViewport) continue;
+              const innerH = window.innerHeight || 0;
+              const inViewport = innerH ? (r.bottom > 0 && r.top < innerH) : true;
               return { x: r.x, y: r.y, width: r.width, height: r.height, inViewport };
             } catch (_) {}
           }
@@ -271,7 +308,48 @@ export function createOpenDetailViewportTools(config: OpenDetailViewportToolsCon
       const payload = (res as any)?.result ?? (res as any)?.data?.result ?? res;
       if (
         payload &&
-        payload.inViewport &&
+        typeof payload.x === 'number' &&
+        typeof payload.y === 'number' &&
+        typeof payload.width === 'number' &&
+        typeof payload.height === 'number'
+      ) {
+        return { x: payload.x, y: payload.y, width: payload.width, height: payload.height };
+      }
+    } catch {
+      // ignore
+    }
+    return undefined;
+  }
+
+  /**
+   * 通过 noteId 精确查找卡片（.note-item）的 Rect
+   */
+  async function computeCardRectByNoteId(noteId: string): Promise<Rect | undefined> {
+    const nid = String(noteId || '').trim();
+    if (!nid) return undefined;
+    try {
+      const res = await controllerAction('browser:execute', {
+        profile,
+        script: `(() => {
+          const noteId = ${JSON.stringify(nid)};
+          const cards = Array.from(document.querySelectorAll('.note-item'));
+          for (const card of cards) {
+            try {
+              const cover = card.querySelector('a.cover');
+              if (!cover) continue;
+              const href = cover.getAttribute('href') || cover.href || '';
+              if (!href || href.indexOf(noteId) === -1) continue;
+              const r = card.getBoundingClientRect();
+              if (!r || !r.width || !r.height) continue;
+              return { x: r.x, y: r.y, width: r.width, height: r.height };
+            } catch (_) {}
+          }
+          return null;
+        })()`,
+      });
+      const payload = (res as any)?.result ?? (res as any)?.data?.result ?? res;
+      if (
+        payload &&
         typeof payload.x === 'number' &&
         typeof payload.y === 'number' &&
         typeof payload.width === 'number' &&
@@ -298,8 +376,11 @@ export function createOpenDetailViewportTools(config: OpenDetailViewportToolsCon
           if (!el) return false;
           const a = el.closest && el.closest('a.cover');
           if (!a) return false;
-          const r = a.getBoundingClientRect();
-          return !!(r && r.width && r.height);
+          const media = a.querySelector && a.querySelector('img,video');
+          const target = media || a;
+          const r = target.getBoundingClientRect();
+          if (!r || !r.width || !r.height) return false;
+          return p.x >= r.left && p.x <= r.right && p.y >= r.top && p.y <= r.bottom;
         })()`,
       });
       const payload = (res as any)?.result ?? (res as any)?.data?.result ?? res;
@@ -396,6 +477,8 @@ export function createOpenDetailViewportTools(config: OpenDetailViewportToolsCon
     ensureDomIndexFullyInViewport,
     computeCoverRectByIndex,
     computeCoverRectByNoteId,
+    computeCardRectByIndex,
+    computeCardRectByNoteId,
     isPointInsideCover,
     highlightRect,
     dumpViewportDiagnostics,

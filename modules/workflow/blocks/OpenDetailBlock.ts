@@ -31,6 +31,11 @@ export interface OpenDetailInput {
 export interface OpenDetailOutput {
   success: boolean;
   detailReady: boolean;
+  pageDelta?: {
+    before?: { count: number; activeIndex: number; pages: Array<{ index: number; url: string; active?: boolean }> };
+    after?: { count: number; activeIndex: number; pages: Array<{ index: number; url: string; active?: boolean }> };
+    newPages?: Array<{ index: number; url: string }>;
+  };
   entryAnchor?: {
     containerId: string;
     clickedItemRect?: Rect;
@@ -130,6 +135,8 @@ export async function execute(input: OpenDetailInput): Promise<OpenDetailOutput>
     getViewportMetrics,
     computeCoverRectByIndex,
     computeCoverRectByNoteId,
+    computeCardRectByIndex,
+    computeCardRectByNoteId,
     isPointInsideCover,
     highlightRect,
     dumpViewportDiagnostics,
@@ -171,7 +178,7 @@ export async function execute(input: OpenDetailInput): Promise<OpenDetailOutput>
     return { x, y };
   }
 
-  async function probeClickTarget(point: { x: number; y: number }): Promise<{
+  async function probeClickTarget(point: { x: number; y: number }, coverRect?: Rect): Promise<{
     inCover: boolean;
     closestHref: string | null;
     isUserProfile: boolean;
@@ -181,12 +188,15 @@ export async function execute(input: OpenDetailInput): Promise<OpenDetailOutput>
     tag: string | null;
     className: string | null;
     textSnippet: string | null;
+    outOfBounds: boolean;
+    overlapsAvatar: boolean;
   }> {
     try {
       const res = await controllerAction('browser:execute', {
         profile,
         script: `(() => {
           const p = ${JSON.stringify(point)};
+          const coverRect = ${coverRect ? JSON.stringify(coverRect) : 'undefined'};
           const el = document.elementFromPoint(p.x, p.y);
           const tag = el && el.tagName ? String(el.tagName) : null;
           const className = el && el.className ? String(el.className) : null;
@@ -197,10 +207,35 @@ export async function execute(input: OpenDetailInput): Promise<OpenDetailOutput>
           const isSearchKeywordLink =
             href.includes('/search_result') &&
             (href.includes('keyword=') || href.includes('?keyword=') || href.includes('&keyword='));
-          const isUserProfile = href.includes('/user/profile') || (href.includes('/user/') && href.includes('profile'));
+          const isUserProfile =
+            href.includes('/user/profile') ||
+            href.includes('/user/') ||
+            href.includes('/profile/') ||
+            href.includes('/profile');
           const textSnippet = el && el.textContent ? String(el.textContent).trim().slice(0, 60) : null;
           const isHashtag = !!(el && el.closest && el.closest('a[href*="search_result"][href*="#"], a[href*="/search_result"][href*="#"], a[href*="search_result"][href*="%23"], a[href*="/search_result"][href*="%23"]'));
-          return { inCover, inQueryNoteWrapper, isSearchKeywordLink, href: href || null, isUserProfile, isHashtag, tag, className, textSnippet };
+
+          // 检查点是否在封面 rect 内
+          let outOfBounds = false;
+          if (coverRect) {
+            outOfBounds = p.x < coverRect.x || p.x > coverRect.x + coverRect.width ||
+                          p.y < coverRect.y || p.y > coverRect.y + coverRect.height;
+          }
+
+          // 检查是否与用户头像元素重合（通过 class 和 href 双重判定）
+          let overlapsAvatar = false;
+          if (el) {
+            const avatarClass = el.className && (
+              el.className.includes('avatar') ||
+              el.className.includes('user') ||
+              el.className.includes('author')
+            );
+            const avatarParent = el.closest && el.closest('.avatar, .user-avatar, .author-avatar, [class*="avatar"], [class*="user"]');
+            const avatarHref = href.includes('/user/') || href.includes('/profile/');
+            overlapsAvatar = Boolean(avatarClass || avatarParent || avatarHref);
+          }
+
+          return { inCover, inQueryNoteWrapper, isSearchKeywordLink, href: href || null, isUserProfile, isHashtag, tag, className, textSnippet, outOfBounds, overlapsAvatar };
         })()`,
       });
       const payload = (res as any)?.result ?? (res as any)?.data?.result ?? res ?? {};
@@ -214,6 +249,8 @@ export async function execute(input: OpenDetailInput): Promise<OpenDetailOutput>
         tag: typeof payload?.tag === 'string' ? payload.tag : null,
         className: typeof payload?.className === 'string' ? payload.className : null,
         textSnippet: typeof payload?.textSnippet === 'string' ? payload.textSnippet : null,
+        outOfBounds: Boolean(payload?.outOfBounds),
+        overlapsAvatar: Boolean(payload?.overlapsAvatar),
       };
     } catch {
       return {
@@ -226,6 +263,8 @@ export async function execute(input: OpenDetailInput): Promise<OpenDetailOutput>
         tag: null,
         className: null,
         textSnippet: null,
+        outOfBounds: true,
+        overlapsAvatar: false,
       };
     }
   }
@@ -267,24 +306,75 @@ export async function execute(input: OpenDetailInput): Promise<OpenDetailOutput>
     }
 
     const candidates: Array<{ fx: number; fy: number }> = [
-      // 首选：中心点
+      // 搜索结果卡片常见：下半部分是作者/互动区，点太靠下容易误入个人主页
+      // 优先点封面上半区（更接近"封面中心"而不是"卡片中心"）
+      { fx: 0.5, fy: 0.28 },
+      { fx: 0.5, fy: 0.22 },
+      { fx: 0.5, fy: 0.32 },
+      { fx: 0.55, fy: 0.28 },
+      { fx: 0.45, fy: 0.28 },
+      // 次选：中心（某些纯封面卡片只有 cover）
       { fx: 0.5, fy: 0.5 },
-      { fx: 0.5, fy: 0.12 },
-      { fx: 0.5, fy: 0.08 },
-      { fx: 0.55, fy: 0.12 },
-      { fx: 0.45, fy: 0.12 },
-      { fx: 0.5, fy: 0.16 },
     ];
     for (const c of candidates) {
       const p0 = computePointByFraction(c.fx, c.fy);
-      // computeSafeClickPoint 已经做了 clamp；这里直接用其返回值，再做一次 cover + profile 判定
-      const probe = await probeClickTarget(p0);
-      if (probe.inCover && !probe.isUserProfile && !probe.isHashtag) {
+      // 探测时传入封面 rect，检查是否在 rect 内且不与头像重合
+      const probe = await probeClickTarget(p0, rect);
+      // 严格保护：必须在 rect 内，在 cover 内，且不与头像重合
+      if (
+        probe.inCover &&
+        !probe.isUserProfile &&
+        !probe.isHashtag &&
+        !probe.inQueryNoteWrapper &&
+        !probe.isSearchKeywordLink &&
+        !probe.outOfBounds &&
+        !probe.overlapsAvatar
+      ) {
         return { x: p0.x, y: p0.y, probe };
+      }
+      // 如果探测到超出封面 rect 或与头像重合，记录日志继续尝试下一个点
+      if (probe.outOfBounds || probe.overlapsAvatar) {
+        console.log(`[chooseSafeClickPoint] Candidate (${c.fx}, ${c.fy}) rejected: outOfBounds=${probe.outOfBounds}, overlapsAvatar=${probe.overlapsAvatar}`);
       }
     }
     const fallback = computeSafeClickPoint(rect, viewport);
-    return { x: fallback.x, y: fallback.y, probe: await probeClickTarget(fallback) };
+    return { x: fallback.x, y: fallback.y, probe: await probeClickTarget(fallback, rect) };
+  }
+
+  async function highlightClickPoint(point: { x: number; y: number }, durationMs = 4000) {
+    try {
+      await controllerAction('browser:execute', {
+        profile,
+        script: `(() => {
+          const p = ${JSON.stringify(point)};
+          let dot = document.getElementById('webauto-click-point');
+          if (!dot) {
+            dot = document.createElement('div');
+            dot.id = 'webauto-click-point';
+            dot.style.position = 'fixed';
+            dot.style.pointerEvents = 'none';
+            dot.style.zIndex = '2147483647';
+            dot.style.width = '14px';
+            dot.style.height = '14px';
+            dot.style.borderRadius = '999px';
+            dot.style.border = '3px solid #ff0033';
+            dot.style.background = 'rgba(255,0,51,0.15)';
+            dot.style.boxSizing = 'border-box';
+            dot.style.transform = 'translate(-50%, -50%)';
+            document.body.appendChild(dot);
+          }
+          dot.style.left = p.x + 'px';
+          dot.style.top = p.y + 'px';
+          setTimeout(() => {
+            const el = document.getElementById('webauto-click-point');
+            if (el && el.parentElement) el.parentElement.removeChild(el);
+          }, ${Math.max(500, Math.floor(durationMs))});
+          return true;
+        })()`,
+      });
+    } catch {
+      // ignore
+    }
   }
 
   function isRectFullyVisible(
@@ -327,15 +417,24 @@ export async function execute(input: OpenDetailInput): Promise<OpenDetailOutput>
 
     let rect: Rect | null = initialRect;
     for (let i = 0; i < maxAttempts; i += 1) {
-      if (rect && isRectFullyVisible(rect, viewport, SAFE)) return rect;
-
       if (!rect) return null;
+
+      const nid = typeof expectedNoteId === 'string' ? expectedNoteId.trim() : '';
+      const cardRect =
+        nid ? await computeCardRectByNoteId(nid) : typeof domIndex === 'number' ? await computeCardRectByIndex(domIndex) : undefined;
+      const coverOk = isRectFullyVisible(rect, viewport, SAFE);
+      const cardOk = cardRect ? isRectFullyVisible(cardRect, viewport, SAFE) : true;
+
+      // ✅ 必须“封面 + 整个卡片”都完全可见才允许点击（禁止点击显示不全的 note item）
+      if (coverOk && cardOk) return rect;
+
+      const targetRect = !cardOk && cardRect ? cardRect : rect;
 
       const viewportH =
         typeof viewport.innerHeight === 'number' && viewport.innerHeight > 0 ? viewport.innerHeight : 1100;
 
-      const top = rect.y;
-      const bottom = rect.y + rect.height;
+      const top = targetRect.y;
+      const bottom = targetRect.y + targetRect.height;
 
       let direction: 'up' | 'down' = 'down';
       let delta = 0;
@@ -360,6 +459,9 @@ export async function execute(input: OpenDetailInput): Promise<OpenDetailOutput>
         attempt: i + 1,
         containerId,
         rect,
+        cardRect: cardRect || null,
+        coverOk,
+        cardOk,
         direction,
         delta,
       });
@@ -367,7 +469,6 @@ export async function execute(input: OpenDetailInput): Promise<OpenDetailOutput>
       await viewportTools.scrollTowardVisibility(direction, delta, containerId).catch(() => false);
 
       // 滚动后必须重新计算封面 rect（虚拟列表/重排）
-      const nid = typeof expectedNoteId === 'string' ? expectedNoteId.trim() : '';
       if (nid) {
         const r2 = await computeCoverRectByNoteId(nid);
         rect = r2 || rect;
@@ -435,11 +536,17 @@ export async function execute(input: OpenDetailInput): Promise<OpenDetailOutput>
       };
 
       let shot: any = null;
+      let shotError: string | null = null;
       try {
         shot = await takeShot();
       } catch {
         // 再试一次（避免偶发超时导致缺少关键复盘截图）
-        shot = await takeShot();
+        try {
+          shot = await takeShot();
+        } catch (e2: any) {
+          shot = null;
+          shotError = e2?.message || String(e2);
+        }
       }
       const b64 = extractBase64FromScreenshotResponse(shot);
       if (b64) {
@@ -457,6 +564,7 @@ export async function execute(input: OpenDetailInput): Promise<OpenDetailOutput>
             expectedHref: expectedHref || null,
             ...meta,
             pngPath: b64 ? pngPath : null,
+            ...(shotError ? { screenshotError: shotError } : {}),
           },
           null,
           2,
@@ -500,15 +608,33 @@ export async function execute(input: OpenDetailInput): Promise<OpenDetailOutput>
     return undefined;
   }
 
-  try {
-    const { highlightContainer, getContainerRect } = await import('./helpers/anchorVerify.js');
+	  try {
+	    const { highlightContainer, getContainerRect } = await import('./helpers/anchorVerify.js');
 
-    const startUrl = await getCurrentUrl();
-    console.log(`[OpenDetail] Start URL: ${startUrl}`);
+	    const startUrl = await getCurrentUrl();
+	    console.log(`[OpenDetail] Start URL: ${startUrl}`);
 
-    // 0. 点击前：严格要求点击封面区域（避免点到作者/广告）
-    const normalizedExpectedNoteId = typeof expectedNoteId === 'string' ? expectedNoteId.trim() : '';
-    const normalizedExpectedHref = typeof expectedHref === 'string' ? expectedHref.trim() : '';
+	    // 0. 点击前：严格要求点击封面区域（避免点到作者/广告）
+	    const normalizedExpectedNoteId = typeof expectedNoteId === 'string' ? expectedNoteId.trim() : '';
+	    const normalizedExpectedHref = typeof expectedHref === 'string' ? expectedHref.trim() : '';
+
+	    const normalizeHrefForCompare = (raw: string): string => {
+	      const href = String(raw || '').trim();
+	      if (!href) return '';
+	      try {
+	        const u = new URL(href, 'https://www.xiaohongshu.com');
+	        // xsec_source 在不同上下文下可能缺失/不同，不能作为“点错”的判据
+	        u.searchParams.delete('xsec_source');
+	        // 参数排序，避免同值不同序导致误判
+	        const entries = Array.from(u.searchParams.entries()).sort(([a], [b]) => a.localeCompare(b));
+	        const p = new URL('https://www.xiaohongshu.com' + u.pathname);
+	        for (const [k, v] of entries) p.searchParams.append(k, v);
+	        return `${p.pathname}${p.search || ''}`;
+	      } catch {
+	        // fallback：仅做最小归一化（去掉 xsec_source）
+	        return href.replace(/([?&])xsec_source=[^&]*(&|$)/i, '$1').replace(/[?&]$/, '');
+	      }
+	    };
 
     // 0.0 优先：如果上游已经给了视口内 Rect，直接使用（最稳：不依赖 domIndex/selector）
     if (
@@ -606,6 +732,33 @@ export async function execute(input: OpenDetailInput): Promise<OpenDetailOutput>
       }
       clickedItemRect = ensuredCover;
 
+      // ✅ 每次点击前必须可视化确认：先高亮容器，再高亮封面 Rect
+      try {
+        if (typeof domIndex === 'number' && Number.isFinite(domIndex)) {
+          await controllerAction('container:operation', {
+            containerId,
+            operationId: 'highlight',
+            sessionId: profile,
+            config: { index: domIndex, style: '3px solid #00ff00', duration: 1200 },
+          });
+        } else {
+          await controllerAction('container:operation', {
+            containerId,
+            operationId: 'highlight',
+            sessionId: profile,
+            config: { style: '3px solid #00ff00', duration: 1200 },
+          });
+        }
+      } catch {
+        // ignore highlight failures (debug only)
+      }
+      try {
+        await highlightRect(clickedItemRect, 1200, '#00ff00');
+      } catch {
+        // ignore
+      }
+      await new Promise((r) => setTimeout(r, 650));
+
       const chosen = await chooseSafeClickPoint(clickedItemRect, viewport);
       const okCover = Boolean(chosen.probe?.inCover) || (await isPointInsideCover({ x: chosen.x, y: chosen.y }));
       const unsafeProfile = Boolean(chosen.probe?.isUserProfile);
@@ -614,13 +767,17 @@ export async function execute(input: OpenDetailInput): Promise<OpenDetailOutput>
       const unsafeSearchKeywordLink = Boolean(chosen.probe?.isSearchKeywordLink) && !unsafeHashtag;
       const unsafeHashText =
         typeof chosen.probe?.textSnippet === 'string' && chosen.probe.textSnippet.includes('#');
+      const outOfBounds = Boolean(chosen.probe?.outOfBounds);
+      const overlapsAvatar = Boolean(chosen.probe?.overlapsAvatar);
       if (
         !okCover ||
         unsafeProfile ||
         unsafeHashtag ||
         unsafeQuery ||
         unsafeSearchKeywordLink ||
-        unsafeHashText
+        unsafeHashText ||
+        outOfBounds ||
+        overlapsAvatar
       ) {
         await saveDebugScreenshot('click-point-not-in-cover', {
           url: startUrl,
@@ -632,17 +789,21 @@ export async function execute(input: OpenDetailInput): Promise<OpenDetailOutput>
           id: 'verify_result_item_anchor',
           status: 'failed',
           anchor: { containerId, clickedItemRect, verified: false },
-          error: !okCover
-            ? 'click_point_not_in_cover'
-            : unsafeProfile
-              ? 'click_point_hits_user_profile'
-              : unsafeHashtag
-                ? 'click_point_hits_hashtag'
-                : unsafeQuery
-                  ? 'click_point_hits_query_note_wrapper'
-                  : unsafeSearchKeywordLink
-                    ? 'click_point_hits_search_keyword_link'
-                    : 'click_point_hits_hash_text',
+          error: outOfBounds
+            ? 'click_point_out_of_bounds'
+            : overlapsAvatar
+              ? 'click_point_overlaps_avatar'
+              : !okCover
+                ? 'click_point_not_in_cover'
+                : unsafeProfile
+                  ? 'click_point_hits_user_profile'
+                  : unsafeHashtag
+                    ? 'click_point_hits_hashtag'
+                    : unsafeQuery
+                      ? 'click_point_hits_query_note_wrapper'
+                      : unsafeSearchKeywordLink
+                        ? 'click_point_hits_search_keyword_link'
+                        : 'click_point_hits_hash_text',
           meta: { probe: { x: chosen.x, y: chosen.y, ...chosen.probe } },
         });
         return {
@@ -658,17 +819,21 @@ export async function execute(input: OpenDetailInput): Promise<OpenDetailOutput>
             detailRect: undefined,
             verified: false,
           },
-          error: !okCover
-            ? 'click_point_not_in_cover'
-            : unsafeProfile
-              ? 'click_point_hits_user_profile'
-              : unsafeHashtag
-                ? 'click_point_hits_hashtag'
-                : unsafeQuery
-                  ? 'click_point_hits_query_note_wrapper'
-                  : unsafeSearchKeywordLink
-                    ? 'click_point_hits_search_keyword_link'
-                    : 'click_point_hits_hash_text',
+          error: outOfBounds
+            ? 'click_point_out_of_bounds'
+            : overlapsAvatar
+              ? 'click_point_overlaps_avatar'
+              : !okCover
+                ? 'click_point_not_in_cover'
+                : unsafeProfile
+                  ? 'click_point_hits_user_profile'
+                  : unsafeHashtag
+                    ? 'click_point_hits_hashtag'
+                    : unsafeQuery
+                      ? 'click_point_hits_query_note_wrapper'
+                      : unsafeSearchKeywordLink
+                        ? 'click_point_hits_search_keyword_link'
+                        : 'click_point_hits_hash_text',
         };
       }
 
@@ -746,28 +911,71 @@ export async function execute(input: OpenDetailInput): Promise<OpenDetailOutput>
         }
       }
 
-      if (normalizedExpectedHref && chosen.probe?.closestHref) {
-        const href = String(chosen.probe.closestHref || '');
-        if (href && href !== normalizedExpectedHref) {
-          await saveDebugScreenshot('click-point-href-mismatch', {
-            url: startUrl,
-            containerId,
-            clickedItemRect,
-            probe: { x: chosen.x, y: chosen.y, ...chosen.probe },
-            expectedHref: normalizedExpectedHref,
-            probedHref: href,
-          });
-          pushStep({
-            id: 'verify_result_item_anchor',
-            status: 'failed',
-            anchor: { containerId, clickedItemRect, verified: false },
-            error: 'click_point_href_mismatch',
-            meta: { expectedHref: normalizedExpectedHref, probedHref: href },
-          });
-          return {
-            success: false,
-            detailReady: false,
-            entryAnchor: undefined,
+	      if (normalizedExpectedHref && chosen.probe?.closestHref) {
+	        const href = String(chosen.probe.closestHref || '');
+	        // 如果已经验证过 noteId，则允许 href query 差异（例如 xsec_source 的不同/缺失）
+	        const m = href.match(/\/(?:explore|search_result)\/([0-9a-z]+)/i);
+	        const probedNoteId = m ? String(m[1] || '') : '';
+	        if (normalizedExpectedNoteId) {
+	          // expectedNoteId 存在但 probe 的 href 不是 note 链接：直接判定为点错（例如点到用户/话题/相关搜索）
+	          if (!probedNoteId) {
+	            await saveDebugScreenshot('click-point-href-not-note', {
+	              url: startUrl,
+	              containerId,
+	              clickedItemRect,
+	              probe: { x: chosen.x, y: chosen.y, ...chosen.probe },
+	              expectedNoteId: normalizedExpectedNoteId,
+	              expectedHref: normalizedExpectedHref || null,
+	              probedHref: href,
+	            });
+	            pushStep({
+	              id: 'verify_result_item_anchor',
+	              status: 'failed',
+	              anchor: { containerId, clickedItemRect, verified: false },
+	              error: 'click_point_href_not_note',
+	              meta: { expectedNoteId: normalizedExpectedNoteId, expectedHref: normalizedExpectedHref, probedHref: href },
+	            });
+	            return {
+	              success: false,
+	              detailReady: false,
+	              entryAnchor: undefined,
+	              exitAnchor: undefined,
+	              steps,
+	              anchor: {
+	                clickedItemContainerId: containerId,
+	                clickedItemRect,
+	                detailContainerId: undefined,
+	                detailRect: undefined,
+	                verified: false,
+	              },
+	              error: 'click_point_href_not_note',
+	            };
+	          }
+	        } else if (href && normalizeHrefForCompare(href) !== normalizeHrefForCompare(normalizedExpectedHref)) {
+	          await saveDebugScreenshot('click-point-href-mismatch', {
+	            url: startUrl,
+	            containerId,
+	            clickedItemRect,
+	            probe: { x: chosen.x, y: chosen.y, ...chosen.probe },
+	            expectedHref: normalizedExpectedHref,
+	            probedHref: href,
+	          });
+	          pushStep({
+	            id: 'verify_result_item_anchor',
+	            status: 'failed',
+	            anchor: { containerId, clickedItemRect, verified: false },
+	            error: 'click_point_href_mismatch',
+	            meta: {
+	              expectedHref: normalizedExpectedHref,
+	              probedHref: href,
+	              expectedNorm: normalizeHrefForCompare(normalizedExpectedHref),
+	              probedNorm: normalizeHrefForCompare(href),
+	            },
+	          });
+	          return {
+	            success: false,
+	            detailReady: false,
+	            entryAnchor: undefined,
             exitAnchor: undefined,
             steps,
             anchor: {
@@ -777,11 +985,11 @@ export async function execute(input: OpenDetailInput): Promise<OpenDetailOutput>
               detailRect: undefined,
               verified: false,
             },
-            error: 'click_point_href_mismatch',
-          };
-        }
-      }
-    }
+	            error: 'click_point_href_mismatch',
+	          };
+	        }
+	      }
+	    }
 
     // 0.1 入口锚点验证
     const viewport = await getViewportMetrics();
@@ -844,17 +1052,50 @@ export async function execute(input: OpenDetailInput): Promise<OpenDetailOutput>
 
     // 1. 打开详情
     try {
-      await highlightRect(clickedItemRect, 1000, '#00ccff').catch(() => {});
-      // 操作之间要等待：给高亮与页面布局一点稳定时间（避免误点 overlay）
-      await new Promise((r) => setTimeout(r, 450));
+      // ✅ 每次点击前先高亮目标（容器 + 封面 Rect），并等待 1-2 秒便于肉眼确认与截图复盘
+      try {
+        if (typeof domIndex === 'number' && Number.isFinite(domIndex)) {
+          await controllerAction('container:operation', {
+            containerId,
+            operationId: 'highlight',
+            sessionId: profile,
+            config: { index: domIndex, style: '3px solid #00ff00', duration: 2200 },
+          });
+        } else {
+          await controllerAction('container:operation', {
+            containerId,
+            operationId: 'highlight',
+            sessionId: profile,
+            config: { style: '3px solid #00ff00', duration: 2200 },
+          });
+        }
+      } catch {
+        // ignore
+      }
+      await highlightRect(clickedItemRect, 2200, '#00ff00').catch(() => {});
+      await new Promise((r) => setTimeout(r, 900));
+
       const chosen = await chooseSafeClickPoint(clickedItemRect, viewport);
       const x = chosen.x;
       const y = chosen.y;
+
+      // 记录点击前页面列表，用于诊断“误点打开新 tab”
+      let pagesBefore: any = null;
+      try {
+        const r = await controllerAction('browser:page:list', { profileId: profile });
+        pagesBefore = (r as any)?.data ?? r;
+      } catch {
+        pagesBefore = null;
+      }
+
+      await highlightClickPoint({ x, y }, 2600);
+      await new Promise((r) => setTimeout(r, 650));
       await saveDebugScreenshot('pre-click', {
         url: startUrl,
         clickedItemRect,
         clickPoint: { x, y },
         clickTarget: chosen.probe,
+        pagesBefore,
       });
       await new Promise((r) => setTimeout(r, 280));
 
@@ -870,6 +1111,7 @@ export async function execute(input: OpenDetailInput): Promise<OpenDetailOutput>
         return {
           success: false,
           detailReady: false,
+          pageDelta: undefined,
           entryAnchor,
           exitAnchor: undefined,
           steps,
@@ -881,6 +1123,81 @@ export async function execute(input: OpenDetailInput): Promise<OpenDetailOutput>
             verified: false,
           },
           error: 'container_click_failed',
+        };
+      }
+
+      // 点击后：检查是否意外打开了新 tab（常见于点到用户主页/推荐词）
+      let pagesAfter: any = null;
+      try {
+        const r = await controllerAction('browser:page:list', { profileId: profile });
+        pagesAfter = (r as any)?.data ?? r;
+      } catch {
+        pagesAfter = null;
+      }
+
+      type PageInfo = { index: number; url: string; active: boolean };
+      type PageList = { count: number; activeIndex: number; pages: PageInfo[] };
+
+      const normalizeList = (raw: any): PageList => {
+        const pagesRaw: unknown[] = Array.isArray(raw?.pages)
+          ? (raw.pages as unknown[])
+          : Array.isArray(raw?.data?.pages)
+            ? (raw.data.pages as unknown[])
+            : [];
+        const activeIndex = Number(raw?.activeIndex ?? raw?.data?.activeIndex ?? 0) || 0;
+        const pages: PageInfo[] = pagesRaw
+          .map((p): PageInfo => {
+            const obj = (p && typeof p === 'object') ? (p as any) : {};
+            return {
+              index: Number(obj?.index ?? 0),
+              url: String(obj?.url ?? ''),
+              active: Boolean(obj?.active),
+            };
+          })
+          .filter((p) => Number.isFinite(p.index));
+        return { pages, activeIndex, count: pages.length };
+      };
+
+      const before = pagesBefore ? normalizeList(pagesBefore) : null;
+      const after = pagesAfter ? normalizeList(pagesAfter) : null;
+      const beforeUrls = new Set((before?.pages ?? []).map((p) => `${p.index}:${p.url}`));
+      const newPages =
+        after && before
+          ? after.pages
+              .filter((p) => !beforeUrls.has(`${p.index}:${p.url}`))
+              .map((p) => ({ index: p.index, url: p.url }))
+          : [];
+      const openedNewTab = before && after ? after.count > before.count : false;
+
+      if (openedNewTab) {
+        await saveDebugScreenshot('new-tab-opened', {
+          url: startUrl,
+          clickedItemRect,
+          clickPoint: { x, y },
+          clickTarget: chosen.probe,
+          pagesBefore: before,
+          pagesAfter: after,
+          newPages,
+        });
+        return {
+          success: false,
+          detailReady: false,
+          pageDelta: {
+            before: before || undefined,
+            after: after || undefined,
+            newPages,
+          },
+          entryAnchor,
+          exitAnchor: undefined,
+          steps,
+          anchor: {
+            clickedItemContainerId: containerId,
+            clickedItemRect,
+            detailContainerId: undefined,
+            detailRect: undefined,
+            verified: false,
+          },
+          error: 'unexpected_new_tab_opened',
         };
       }
 

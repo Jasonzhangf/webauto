@@ -13,6 +13,7 @@ export interface BlockExecutor {
 export interface WorkflowStep {
   blockName: string;
   input: any;
+  continueOnError?: boolean;
 }
 
 export interface WorkflowDefinitionInput {
@@ -92,8 +93,9 @@ export class WorkflowExecutor {
         const result = await block.execute(resolvedInput);
         stepOutput = result;
 
-        if (result?.error) {
-          stepError = `${step.blockName}: ${result.error}`;
+        const hasError = Boolean(result?.error) || result?.success === false;
+        if (hasError) {
+          stepError = `${step.blockName}: ${result?.error || 'success=false'}`;
           errors.push(stepError);
         }
 
@@ -105,16 +107,21 @@ export class WorkflowExecutor {
           workflowName,
           stepIndex: index,
           stepName: step.blockName,
-          status: result?.error ? 'error' : 'success',
+          status: hasError ? 'error' : 'success',
           sessionId,
           profileId: resolvedInput.profileId,
           error: result?.error,
           anchor: result?.anchor,
           meta: {
-            success: !result?.error,
+            success: !hasError,
             inputSummary: this.buildInputSummary(resolvedInput),
           },
         });
+
+        // 开发阶段：遇到 error 或 success=false 立即停止后续步骤，避免“错误后继续跑”导致污染/误操作。
+        if (hasError && !step.continueOnError) {
+          break;
+        }
       } catch (error: any) {
         const errorMsg = `${step.blockName} execution failed: ${error?.message || String(error)}`;
         stepError = errorMsg;
@@ -129,6 +136,11 @@ export class WorkflowExecutor {
           profileId: resolvedInput.profileId,
           error: errorMsg,
         });
+
+        if (!step.continueOnError) {
+          // fail-fast
+          break;
+        }
       } finally {
         steps.push({
           index,

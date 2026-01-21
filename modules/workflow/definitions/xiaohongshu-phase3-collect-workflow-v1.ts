@@ -30,6 +30,7 @@ export const xiaohongshuPhase3CollectWorkflowV1 = {
       blockName: 'WaitSearchPermitBlock',
       input: {
         sessionId: '$sessionId',
+        keyword: '$keyword',
       },
     },
     {
@@ -51,4 +52,3 @@ export const xiaohongshuPhase3CollectWorkflowV1 = {
     },
   ],
 };
-

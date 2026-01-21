@@ -46,6 +46,7 @@ export interface ScrollOptions {
 
 export interface ScrollResult {
   reachedEnd: boolean;
+  endedByStuck?: boolean;
   totalFromHeader: number | null;
   finalCount: number;
   rounds: number;
@@ -75,7 +76,7 @@ export async function scrollCommentSection(options: ScrollOptions): Promise<Scro
   const domFocus = await locateCommentsFocusPoint(controllerUrl, profile);
   if (domFocus) {
     focusPoint = domFocus;
-    await systemClickAt(profile, domFocus.x, domFocus.y, browserServiceUrl);
+    await systemClickAt(profile, domFocus.x, domFocus.y, browserServiceUrl, 'comment_focus_dom');
     await new Promise((r) => setTimeout(r, 450));
   }
 
@@ -84,13 +85,14 @@ export async function scrollCommentSection(options: ScrollOptions): Promise<Scro
     await new Promise((r) => setTimeout(r, 180));
     if (await isInputFocused(controllerUrl, profile)) {
       log('检测到输入框焦点，点击评论区以切换焦点...');
-      await systemClickAt(profile, focusPoint.x, focusPoint.y, browserServiceUrl);
+      await systemClickAt(profile, focusPoint.x, focusPoint.y, browserServiceUrl, 'comment_blur_input');
       await new Promise((r) => setTimeout(r, 350));
     }
   }
 
   let lastCount = 0;
   let targetTotal: number | null = null;
+  let stuckBounceFailures = 0;
 
   const initialStats = await getCommentStats(controllerUrl, profile);
   lastCount = initialStats.count;
@@ -112,7 +114,7 @@ export async function scrollCommentSection(options: ScrollOptions): Promise<Scro
     const domFocus2 = await locateCommentsFocusPoint(controllerUrl, profile);
     if (domFocus2) {
       focusPoint = domFocus2;
-      await systemClickAt(profile, domFocus2.x, domFocus2.y, browserServiceUrl);
+      await systemClickAt(profile, domFocus2.x, domFocus2.y, browserServiceUrl, 'comment_focus_after_activate');
       await new Promise((r) => setTimeout(r, 450));
     }
     await new Promise((r) => setTimeout(r, 600));
@@ -141,7 +143,7 @@ export async function scrollCommentSection(options: ScrollOptions): Promise<Scro
       const domFocus2 = await locateCommentsFocusPoint(controllerUrl, profile);
       if (domFocus2) {
         focusPoint = domFocus2;
-        await systemClickAt(profile, domFocus2.x, domFocus2.y, browserServiceUrl);
+        await systemClickAt(profile, domFocus2.x, domFocus2.y, browserServiceUrl, 'comment_focus_after_activate');
         await new Promise((r) => setTimeout(r, 450));
       }
       await new Promise((r) => setTimeout(r, 900));
@@ -224,7 +226,10 @@ export async function scrollCommentSection(options: ScrollOptions): Promise<Scro
       try {
         await expand({ round: i, focusPoint });
       } catch (e: any) {
-        warn(`round=${i} expand failed: ${e?.message || e}`);
+        const msg = String(e?.message || e || '');
+        // 开发阶段：风控/验证码/误点保护触发时必须停下，不允许吞错继续滚
+        if (msg.includes('captcha_modal_detected') || msg.includes('unsafe_click_image_in_detail')) throw e;
+        warn(`round=${i} expand failed: ${msg}`);
       }
     }
 
@@ -237,10 +242,13 @@ export async function scrollCommentSection(options: ScrollOptions): Promise<Scro
         focusPoint,
         browserServiceUrl,
         browserWsUrl,
+        context: 'comment_scroll',
       });
       log(`round=${i} system wheel deltaY=${deltaY}`);
     } catch (e: any) {
-      warn(`round=${i} system wheel failed: ${e?.message || e}`);
+      const msg = String(e?.message || e || '');
+      if (msg.includes('captcha_modal_detected')) throw e;
+      warn(`round=${i} system wheel failed: ${msg}`);
     }
 
     await new Promise((r) => setTimeout(r, 650 + Math.random() * 650));
@@ -283,6 +291,21 @@ export async function scrollCommentSection(options: ScrollOptions): Promise<Scro
       warn(`round=${i} ⚠️ scroll seems ineffective (streak=${noEffectStreak})`);
       // 卡住时：先回滚（向上滚）几次，再继续向下滚（避免虚拟列表“卡在同一批节点”）
       if (noEffectStreak >= 2) {
+        // 规则：如果“回滚->再下滚”的尝试累计 3 次仍无法推进，则视为结束（避免无限卡死）
+        let stuckScrollBefore: Awaited<ReturnType<typeof getScrollContainerState>> | null = null;
+        let stuckFirstBefore: Awaited<ReturnType<typeof getViewportFirstComment>> | null = null;
+        try {
+          stuckScrollBefore = await getScrollContainerState(controllerUrl, profile);
+        } catch {
+          stuckScrollBefore = null;
+        }
+        try {
+          stuckFirstBefore = await getViewportFirstComment(controllerUrl, profile);
+        } catch {
+          stuckFirstBefore = null;
+        }
+        const stuckTopBefore = stuckScrollBefore?.scrollTop ?? null;
+
         const fallbackFocus = (await locateCommentsFocusPoint(controllerUrl, profile)) || focusPoint;
         if (fallbackFocus) focusPoint = fallbackFocus;
         const fp = focusPoint || fallbackFocus;
@@ -290,7 +313,7 @@ export async function scrollCommentSection(options: ScrollOptions): Promise<Scro
         if (fp) {
           await systemHoverAt(profile, fp.x, fp.y, browserServiceUrl);
           await new Promise((r) => setTimeout(r, 150));
-          await systemClickAt(profile, fp.x, fp.y, browserServiceUrl);
+          await systemClickAt(profile, fp.x, fp.y, browserServiceUrl, 'comment_scroll_recovery');
           await new Promise((r) => setTimeout(r, 220));
         }
 
@@ -302,6 +325,7 @@ export async function scrollCommentSection(options: ScrollOptions): Promise<Scro
             focusPoint,
             browserServiceUrl,
             browserWsUrl,
+            context: 'comment_scroll_recovery_up',
           });
           await new Promise((r) => setTimeout(r, 500 + Math.random() * 400));
         }
@@ -314,8 +338,46 @@ export async function scrollCommentSection(options: ScrollOptions): Promise<Scro
             focusPoint,
             browserServiceUrl,
             browserWsUrl,
+            context: 'comment_scroll_recovery_down',
           });
           await new Promise((r) => setTimeout(r, 600 + Math.random() * 450));
+        }
+
+        let stuckScrollAfter: Awaited<ReturnType<typeof getScrollContainerState>> | null = null;
+        let stuckFirstAfter: Awaited<ReturnType<typeof getViewportFirstComment>> | null = null;
+        try {
+          stuckScrollAfter = await getScrollContainerState(controllerUrl, profile);
+        } catch {
+          stuckScrollAfter = null;
+        }
+        try {
+          stuckFirstAfter = await getViewportFirstComment(controllerUrl, profile);
+        } catch {
+          stuckFirstAfter = null;
+        }
+        const stuckTopAfter = stuckScrollAfter?.scrollTop ?? null;
+        const topMoved =
+          stuckTopBefore !== null &&
+          stuckTopAfter !== null &&
+          Math.abs(Number(stuckTopAfter) - Number(stuckTopBefore)) > 2;
+        const firstMoved = Boolean(stuckFirstBefore?.key && stuckFirstAfter?.key && stuckFirstBefore.key !== stuckFirstAfter.key);
+
+        if (!topMoved && !firstMoved) {
+          stuckBounceFailures += 1;
+          warn(`round=${i} ⚠️ stuck bounce failed (attempt=${stuckBounceFailures}/3)`);
+          if (stuckBounceFailures >= 3) {
+            warn(`round=${i} 🛑 cannot scroll after 3 bounce attempts, treat as end`);
+            return {
+              reachedEnd: true,
+              endedByStuck: true,
+              totalFromHeader: targetTotal,
+              finalCount: currentCount,
+              rounds: i + 1,
+              focusPoint,
+            };
+          }
+        } else {
+          stuckBounceFailures = 0;
         }
 
         noEffectStreak = 0;

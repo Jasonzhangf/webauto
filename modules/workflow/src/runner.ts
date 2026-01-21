@@ -13,10 +13,13 @@ import * as CollectCommentsBlock from '../blocks/CollectCommentsBlock.js';
 import * as PersistXhsNoteBlock from '../blocks/PersistXhsNoteBlock.js';
 import * as CloseDetailBlock from '../blocks/CloseDetailBlock.js';
 import * as XiaohongshuFullCollectBlock from '../blocks/XiaohongshuFullCollectBlock.js';
+import * as XiaohongshuCollectLinksBlock from '../blocks/XiaohongshuCollectLinksBlock.js';
+import * as XiaohongshuCollectFromLinksBlock from '../blocks/XiaohongshuCollectFromLinksBlock.js';
 import * as ErrorRecoveryBlock from '../blocks/ErrorRecoveryBlock.js';
 import * as AnchorVerificationBlock from '../blocks/AnchorVerificationBlock.js';
 import * as CallWorkflowBlock from '../blocks/CallWorkflowBlock.js';
 import * as RecordFixtureBlock from '../blocks/RecordFixtureBlock.js';
+import * as OrganizeXhsNotesBlock from '../blocks/OrganizeXhsNotesBlock.js';
 
 export function createDefaultWorkflowExecutor(): WorkflowExecutor {
   const executor = new WorkflowExecutor();
@@ -37,6 +40,9 @@ export function createDefaultWorkflowExecutor(): WorkflowExecutor {
   executor.registerBlock('PersistXhsNoteBlock', { execute: PersistXhsNoteBlock.execute });
   executor.registerBlock('RecordFixtureBlock', { execute: RecordFixtureBlock.execute });
   executor.registerBlock('XiaohongshuFullCollectBlock', { execute: XiaohongshuFullCollectBlock.execute });
+  executor.registerBlock('XiaohongshuCollectLinksBlock', { execute: XiaohongshuCollectLinksBlock.execute });
+  executor.registerBlock('XiaohongshuCollectFromLinksBlock', { execute: XiaohongshuCollectFromLinksBlock.execute });
+  executor.registerBlock('OrganizeXhsNotesBlock', { execute: OrganizeXhsNotesBlock.execute });
   return executor;
 }
 

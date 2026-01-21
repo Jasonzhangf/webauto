@@ -9,9 +9,81 @@ import path from 'node:path';
 import { promises as fs } from 'node:fs';
 import { verifyAnchorByContainerId } from './helpers/containerAnchors.js';
 
+// 调试截图保存目录
+const DEBUG_SCREENSHOT_DIR = path.join(os.homedir(), '.webauto', 'logs', 'debug-screenshots');
+
+/**
+ * 保存调试截图（复用 OpenDetailBlock 的逻辑）
+ */
+async function saveDebugScreenshot(
+  kind: string,
+  sessionId: string,
+  meta: Record<string, any> = {},
+): Promise<{ pngPath?: string; jsonPath?: string }> {
+  try {
+    await fs.mkdir(DEBUG_SCREENSHOT_DIR, { recursive: true });
+    const ts = new Date().toISOString().replace(/[:.]/g, '-');
+    const base = `${ts}-${kind}-${sessionId}`;
+    const pngPath = path.join(DEBUG_SCREENSHOT_DIR, `${base}.png`);
+    const jsonPath = path.join(DEBUG_SCREENSHOT_DIR, `${base}.json`);
+
+    // 截图
+    async function takeShot(): Promise<any> {
+      const response = await fetch('http://127.0.0.1:7701/v1/controller/action', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'browser:screenshot',
+          payload: { profileId: sessionId, fullPage: false },
+        }),
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const data = await response.json().catch(() => ({}));
+      return data.data || data;
+    }
+
+    let shot: any = null;
+    try {
+      shot = await takeShot();
+    } catch {
+      try {
+        shot = await takeShot();
+      } catch {
+        shot = null;
+      }
+    }
+
+    // 提取 base64
+    const b64 =
+      shot?.data?.data ??
+      shot?.data?.body?.data ??
+      shot?.body?.data ??
+      shot?.result?.data ??
+      shot?.result ??
+      shot?.data ??
+      shot;
+    if (typeof b64 === 'string' && b64.length > 10) {
+      await fs.writeFile(pngPath, Buffer.from(b64, 'base64'));
+    }
+
+    // 保存元数据
+    await fs.writeFile(
+      jsonPath,
+      JSON.stringify({ ts, kind, sessionId, ...meta, pngPath: b64 ? pngPath : null }, null, 2),
+      'utf-8',
+    );
+
+    console.log(`[CloseDetail][debug] saved ${kind}: ${pngPath}`);
+    return { pngPath: b64 ? pngPath : undefined, jsonPath };
+  } catch {
+    return {};
+  }
+}
+
 export interface CloseDetailInput {
   sessionId: string;
   serviceUrl?: string;
+  debugDir?: string;
 }
 
 export interface Rect {
@@ -101,10 +173,22 @@ export async function execute(input: CloseDetailInput): Promise<CloseDetailOutpu
   }
 
   try {
+    // 记录初始 Tab 状态
+    const beforeTabs: Array<{ index: number; url: string }> = await controllerAction('browser:page:list', { profileId: profile })
+      .then((r: any) => r?.pages || [])
+      .catch((): Array<{ index: number; url: string }> => []);
+
     // 只允许 ESC：但 ESC 在某些状态下（例如输入框聚焦/视频层）可能只会关闭子层，需要多按几次。
-    // 仍然不做任何其它方式的“兜底关闭”，仅做 ESC 重试与证据落盘。
+    // 仍然不做任何其它方式的"兜底关闭"，仅做 ESC 重试与证据落盘。
     const maxAttempts = 3;
     for (let i = 1; i <= maxAttempts; i += 1) {
+      // ESC 前截屏
+      await saveDebugScreenshot(`before_esc_attempt_${i}`, profile, {
+        attempt: i,
+        maxAttempts,
+        tabsBefore: beforeTabs.length,
+      });
+
       await controllerAction('keyboard:press', { profileId: profile, key: 'Escape' });
       await sleep(900);
 

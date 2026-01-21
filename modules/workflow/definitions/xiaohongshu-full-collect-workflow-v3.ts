@@ -30,6 +30,7 @@ export const xiaohongshuFullCollectWorkflowV3 = {
       blockName: 'WaitSearchPermitBlock',
       input: {
         sessionId: '$sessionId',
+        keyword: '$keyword',
       },
     },
     {
@@ -48,6 +49,19 @@ export const xiaohongshuFullCollectWorkflowV3 = {
         targetCount: '$targetCount',
         maxWarmupRounds: '$maxWarmupRounds',
         allowClickCommentButton: '$allowClickCommentButton',
+        enableOcr: true,
+        ocrLanguages: '$ocrLanguages',
+        ocrConcurrency: 1,
+      },
+    },
+    {
+      blockName: 'OrganizeXhsNotesBlock',
+      input: {
+        platform: 'xiaohongshu',
+        env: '$env',
+        keyword: '$keyword',
+        ocrLanguages: '$ocrLanguages',
+        runOcr: false,
       },
     },
   ],

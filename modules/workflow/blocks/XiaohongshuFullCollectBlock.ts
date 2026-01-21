@@ -16,6 +16,8 @@ import { execute as collectComments } from './CollectCommentsBlock.js';
 import { execute as persistXhsNote } from './PersistXhsNoteBlock.js';
 import { execute as closeDetail } from './CloseDetailBlock.js';
 import { countPersistedNotes } from './helpers/persistedNotes.js';
+import { AsyncWorkQueue } from './helpers/asyncWorkQueue.js';
+import { organizeOneNote } from './helpers/xhsNoteOrganizer.js';
 import path from 'node:path';
 import { promises as fs } from 'node:fs';
 
@@ -30,6 +32,9 @@ export interface XiaohongshuFullCollectInput {
   allowClickCommentButton?: boolean;
   strictTargetCount?: boolean;
   serviceUrl?: string;
+  enableOcr?: boolean;
+  ocrLanguages?: string;
+  ocrConcurrency?: number;
 }
 
 export interface XiaohongshuFullCollectOutput {
@@ -64,6 +69,9 @@ export async function execute(input: XiaohongshuFullCollectInput): Promise<Xiaoh
     allowClickCommentButton,
     strictTargetCount = true,
     serviceUrl = 'http://127.0.0.1:7701',
+    enableOcr = true,
+    ocrLanguages,
+    ocrConcurrency = 1,
   } = input;
 
   const processed: XiaohongshuFullCollectOutput['processed'] = [];
@@ -81,6 +89,16 @@ export async function execute(input: XiaohongshuFullCollectInput): Promise<Xiaoh
   const seenNoteIds = new Set<string>(persistedAtStart.noteIds);
   let persistedCount = persistedAtStart.count;
   const openDetailDebugDir = `${persistedAtStart.keywordDir}/_debug/open_detail`;
+  const ocrDebugDir = path.join(persistedAtStart.keywordDir, '_debug', 'ocr');
+
+  const ocrQueue =
+    enableOcr && mode === 'phase34' && process.platform === 'darwin'
+      ? new AsyncWorkQueue({ concurrency: ocrConcurrency, label: 'ocr' })
+      : null;
+
+  if (enableOcr && mode === 'phase34' && process.platform !== 'darwin') {
+    console.warn(`[FullCollect][ocr] enableOcr=true but platform=${process.platform}; OCR skipped (macOS only)`);
+  }
 
   if (strictTargetCount && persistedCount > targetCount) {
     return {
@@ -146,6 +164,17 @@ export async function execute(input: XiaohongshuFullCollectInput): Promise<Xiaoh
     }
   }
 
+  async function saveOcrDebug(kind: string, meta: Record<string, any>) {
+    try {
+      await fs.mkdir(ocrDebugDir, { recursive: true });
+      const ts = new Date().toISOString().replace(/[:.]/g, '-');
+      const jsonPath = path.join(ocrDebugDir, `${ts}-${kind}.json`);
+      await fs.writeFile(jsonPath, JSON.stringify(meta, null, 2), 'utf-8');
+    } catch (e: any) {
+      console.warn(`[FullCollect][ocr] save debug failed (${kind}): ${e?.message || String(e)}`);
+    }
+  }
+
   async function ensureClosed(): Promise<boolean> {
     // 已在搜索结果页，直接视为关闭成功
     const url0 = await getCurrentUrl();
@@ -159,11 +188,33 @@ export async function execute(input: XiaohongshuFullCollectInput): Promise<Xiaoh
       if (res?.error) {
         processed.push({ ok: false, error: `CloseDetail failed: ${res.error}` });
       }
+      await saveEnsureClosedDebug('close_detail_failed', {
+        urlBefore: url0,
+        result: res || null,
+      });
     } catch (e: any) {
       processed.push({ ok: false, error: `CloseDetail threw: ${e?.message || String(e)}` });
+      await saveEnsureClosedDebug('close_detail_threw', {
+        urlBefore: url0,
+        error: e?.message || String(e),
+      });
     }
     await saveEnsureClosedDebug('stuck_in_detail_after_close_attempts', {});
     return false;
+  }
+
+  function buildStuckInDetailResult(reason: string): XiaohongshuFullCollectOutput {
+    return {
+      success: false,
+      processedCount: persistedCount,
+      targetCount,
+      initialPersistedCount: persistedAtStart.count,
+      finalPersistedCount: persistedCount,
+      addedCount: Math.max(0, persistedCount - persistedAtStart.count),
+      keywordDir: persistedAtStart.keywordDir,
+      processed,
+      error: reason,
+    };
   }
 
   async function assertKeywordStillCorrect(tag: string): Promise<true | { ok: false; url: string }> {
@@ -236,24 +287,72 @@ export async function execute(input: XiaohongshuFullCollectInput): Promise<Xiaoh
   }
 
   async function scrollSearchListDown(): Promise<boolean> {
+    return scrollSearchList('down', 800);
+  }
+
+  async function getSearchListScrollState(): Promise<{ windowY: number; feedsY: number | null }> {
+    try {
+      const res = await controllerAction('browser:execute', {
+        profile: sessionId,
+        script: `(() => {
+          const el = document.querySelector('.feeds-container');
+          const y = window.scrollY || document.documentElement.scrollTop || 0;
+          const feedsY =
+            el && typeof el.scrollTop === 'number' && el.scrollHeight && el.clientHeight
+              ? el.scrollTop
+              : null;
+          return { windowY: y, feedsY };
+        })()`,
+      });
+      const payload = (res as any)?.result ?? (res as any)?.data?.result ?? res ?? null;
+      const windowY = Number(payload?.windowY ?? 0);
+      const feedsYRaw = payload?.feedsY;
+      const feedsY = feedsYRaw === null || typeof feedsYRaw === 'undefined' ? null : Number(feedsYRaw);
+      return {
+        windowY: Number.isFinite(windowY) ? windowY : 0,
+        feedsY: feedsY === null ? null : Number.isFinite(feedsY) ? feedsY : null,
+      };
+    } catch {
+      return { windowY: 0, feedsY: null };
+    }
+  }
+
+  async function scrollSearchList(direction: 'down' | 'up', amount: number): Promise<boolean> {
+    const before = await getSearchListScrollState();
+
     // ✅ 系统级滚动：优先走容器 scroll operation
     try {
       const op = await controllerAction('container:operation', {
         containerId: 'xiaohongshu_search.search_result_list',
         operationId: 'scroll',
         sessionId,
-        config: { direction: 'down', amount: 800 },
+        config: { direction, amount: Math.min(800, Math.max(120, Math.floor(amount))) },
       });
       const payload = (op as any)?.data ?? op;
       const ok = Boolean(payload?.success ?? (payload as any)?.data?.success ?? (op as any)?.success);
-      await new Promise((r) => setTimeout(r, 1000));
-      return ok;
+      await new Promise((r) => setTimeout(r, 1100));
+      const after = await getSearchListScrollState();
+      const moved =
+        Math.abs(after.windowY - before.windowY) >= 10 ||
+        (after.feedsY !== null &&
+          before.feedsY !== null &&
+          Math.abs(after.feedsY - before.feedsY) >= 10);
+      return ok && moved;
     } catch {
-      // fallback：PageDown
+      // fallback：PageUp/PageDown（系统级）
       try {
-        await controllerAction('keyboard:press', { profileId: sessionId, key: 'PageDown' });
-        await new Promise((r) => setTimeout(r, 1200));
-        return true;
+        await controllerAction('keyboard:press', {
+          profileId: sessionId,
+          key: direction === 'up' ? 'PageUp' : 'PageDown',
+        });
+        await new Promise((r) => setTimeout(r, 1300));
+        const after = await getSearchListScrollState();
+        const moved =
+          Math.abs(after.windowY - before.windowY) >= 10 ||
+          (after.feedsY !== null &&
+            before.feedsY !== null &&
+            Math.abs(after.feedsY - before.feedsY) >= 10);
+        return moved;
       } catch {
         return false;
       }
@@ -263,6 +362,21 @@ export async function execute(input: XiaohongshuFullCollectInput): Promise<Xiaoh
   // 1) 逐屏处理：每次只采集当前视口内的卡片（maxScrollRounds=1），处理完再滚动下一屏
   let scrollSteps = 0;
   let stagnantRounds = 0;
+  let noScrollMoveRounds = 0;
+  let bounceAttempts = 0;
+
+  async function saveSearchListScrollDebug(kind: string, meta: Record<string, any>) {
+    try {
+      await controllerAction('container:operation', {
+        containerId: 'xiaohongshu_search.search_result_list',
+        operationId: 'highlight',
+        sessionId,
+        config: { style: '3px solid #ff4444', duration: 1500 },
+      });
+    } catch {}
+    await new Promise((r) => setTimeout(r, 600));
+    await saveEnsureClosedDebug(kind, meta);
+  }
 
   while (persistedCount < targetCount && scrollSteps < maxScrollRounds) {
     const urlNow = await getCurrentUrl();
@@ -352,9 +466,22 @@ export async function execute(input: XiaohongshuFullCollectInput): Promise<Xiaoh
       try {
         const beforePersistCount = persistedCount;
 
-        // 开发阶段：严格禁止 keyword 漂移。若在处理列表项前 URL 已变为其它 keyword，立即停止并保留调试信息。
+        // 开发阶段：严格禁止 keyword 漂移。若在处理列表项前 URL 已变为其它 keyword（search_result），立即停止并保留调试信息。
+        // 另外：若此时仍停留在详情页（/explore），优先判定为“未能退出详情”，直接 fail-fast。
         const urlBeforeOpen = await getCurrentUrl();
-        if (urlBeforeOpen && !urlMatchesKeyword(urlBeforeOpen)) {
+        if (urlBeforeOpen && urlBeforeOpen.includes('/explore/')) {
+          await saveEnsureClosedDebug('unexpected_in_detail_before_open_detail', {
+            urlNow,
+            urlBeforeOpen,
+            keyword,
+            domIndex,
+            expectedNoteId: noteId || null,
+          });
+          const closed = await ensureClosed();
+          if (!closed) return buildStuckInDetailResult('stuck_in_detail_before_open_detail');
+          continue;
+        }
+        if (urlBeforeOpen && urlBeforeOpen.includes('/search_result') && !urlMatchesKeyword(urlBeforeOpen)) {
           await saveEnsureClosedDebug('keyword_changed_before_open_detail', {
             urlNow,
             urlBeforeOpen,
@@ -393,12 +520,27 @@ export async function execute(input: XiaohongshuFullCollectInput): Promise<Xiaoh
             ok: false,
             error: opened.error || 'OpenDetailBlock failed',
           });
-          await ensureClosed();
-          continue;
+
+          // 开发阶段：不做兜底纠错/自动补偿。任何“打开详情失败”（尤其是风控/验证码/误点）都应立即停下，保留证据排查。
+          const closed = await ensureClosed();
+          if (!closed) return buildStuckInDetailResult('stuck_in_detail_after_open_detail_failed');
+
+          return {
+            success: false,
+            processedCount: persistedCount,
+            targetCount,
+            initialPersistedCount: persistedAtStart.count,
+            finalPersistedCount: persistedCount,
+            addedCount: Math.max(0, persistedCount - persistedAtStart.count),
+            keywordDir: persistedAtStart.keywordDir,
+            processed,
+            error: `open_detail_failed: ${opened.error || 'unknown'}`,
+          };
         }
 
         if (seenNoteIds.has(opened.noteId)) {
-          await ensureClosed();
+          const closed = await ensureClosed();
+          if (!closed) return buildStuckInDetailResult('stuck_in_detail_after_duplicate_note');
           continue;
         }
         seenNoteIds.add(opened.noteId);
@@ -412,7 +554,8 @@ export async function execute(input: XiaohongshuFullCollectInput): Promise<Xiaoh
             ok: false,
             error: detail.error || 'ExtractDetailBlock failed',
           });
-          await ensureClosed();
+          const closed = await ensureClosed();
+          if (!closed) return buildStuckInDetailResult('stuck_in_detail_after_extract_failed');
           continue;
         }
 
@@ -426,14 +569,17 @@ export async function execute(input: XiaohongshuFullCollectInput): Promise<Xiaoh
                 warmupCount: 0,
                 totalFromHeader: null,
               }
-            : await collectComments({
-                sessionId,
-                serviceUrl,
-                ...(typeof maxWarmupRounds === 'number' && maxWarmupRounds > 0
-                  ? { maxWarmupRounds }
-                  : {}),
-                ...(allowClickCommentButton === false ? { allowClickCommentButton: false } : {}),
-              } as any);
+	            : await collectComments({
+	                sessionId,
+	                serviceUrl,
+	                ...(typeof maxWarmupRounds === 'number' && maxWarmupRounds > 0
+	                  ? { maxWarmupRounds }
+	                  : {}),
+	                ...(allowClickCommentButton === false ? { allowClickCommentButton: false } : {}),
+	                commentTabMode: 'rotate4',
+	                commentTabBatch: 50,
+	                commentTabMaxTabs: 4,
+	              } as any);
 
         if (mode === 'phase34' && !comments?.success) {
           processed.push({
@@ -443,7 +589,8 @@ export async function execute(input: XiaohongshuFullCollectInput): Promise<Xiaoh
             ok: false,
             error: comments?.error || 'CollectCommentsBlock failed',
           });
-          await ensureClosed();
+          const closed = await ensureClosed();
+          if (!closed) return buildStuckInDetailResult('stuck_in_detail_after_collect_comments_failed');
           continue;
         }
 
@@ -469,6 +616,37 @@ export async function execute(input: XiaohongshuFullCollectInput): Promise<Xiaoh
           contentPath: persisted.contentPath,
           ...(persisted.success ? {} : { error: persisted.error || 'PersistXhsNoteBlock failed' }),
         });
+
+        // OCR + merged.md 后台并行：与后续的“开详情/抓评论”并行，不阻塞主流程。
+        // 注意：仅做本地文件处理，不涉及浏览器操作，不会触发风控。
+        if (persisted.success && ocrQueue && persisted.outputDir) {
+          const noteDir = String(persisted.outputDir);
+          const noteIdForJob = String(opened.noteId);
+          const languagesForJob = typeof ocrLanguages === 'string' && ocrLanguages.trim() ? ocrLanguages.trim() : 'chi_sim+eng';
+          console.log(`[FullCollect][ocr] queue note=${noteIdForJob} dir=${noteDir}`);
+          void ocrQueue
+            .enqueue(async () => {
+              const t0 = Date.now();
+              await saveOcrDebug(`start-${noteIdForJob}`, { noteId: noteIdForJob, noteDir, languages: languagesForJob });
+              const res = await organizeOneNote({
+                noteDir,
+                noteId: noteIdForJob,
+                keyword,
+                ocrLanguages: languagesForJob,
+                runOcr: true,
+              });
+              const ms = Date.now() - t0;
+              await saveOcrDebug(`done-${noteIdForJob}`, { ...res, ms });
+              console.log(
+                `[FullCollect][ocr] done note=${noteIdForJob} images=${res.imageCount} ocrErrors=${res.ocrErrors} ms=${ms}`,
+              );
+              return res;
+            })
+            .catch(async (e: any) => {
+              await saveOcrDebug(`error-${noteIdForJob}`, { noteId: noteIdForJob, error: e?.message || String(e) });
+              console.warn(`[FullCollect][ocr] failed note=${noteIdForJob}: ${e?.message || String(e)}`);
+            });
+        }
         if (persisted.success) {
           const persistedAfter = await countPersistedNotes({
             platform: 'xiaohongshu',
@@ -555,11 +733,45 @@ export async function execute(input: XiaohongshuFullCollectInput): Promise<Xiaoh
     }
 
     if (persistedCount >= targetCount) break;
-    if (stagnantRounds >= 3) break;
+
+    // 若连续多轮无新增，先尝试“回滚一次再下滚”来触发虚拟列表重排（不改变 keyword，不做纠错）
+    if (stagnantRounds >= 4 && bounceAttempts < 3) {
+      bounceAttempts += 1;
+      console.log(`[FullCollect] stagnantRounds=${stagnantRounds}, bounce=${bounceAttempts} (up then down)`);
+      await scrollSearchList('up', 600);
+      await scrollSearchList('down', 800);
+      stagnantRounds = 0;
+    }
 
     scrollSteps += 1;
     const scrolled = await scrollSearchListDown();
-    if (!scrolled) break;
+    if (!scrolled) {
+      noScrollMoveRounds += 1;
+      console.log(`[FullCollect] scroll did not move (round=${noScrollMoveRounds})`);
+      // 滚不动：往回滚几次再继续往前滚，触发虚拟列表重排
+      // 注意：这里只是滚动策略，不做 keyword 纠错/重搜
+      for (let j = 0; j < 3; j += 1) {
+        await scrollSearchList('up', 520);
+      }
+      const movedAfterBounce = await scrollSearchList('down', 800);
+      if (movedAfterBounce) {
+        noScrollMoveRounds = 0;
+        continue;
+      }
+
+      // 连续 3 次滚动都不动：基本可判定触底/卡死，退出避免无限循环
+      if (noScrollMoveRounds >= 3) {
+        await saveSearchListScrollDebug('search_list_scroll_stuck', {
+          persistedCount,
+          targetCount,
+          scrollSteps,
+          noScrollMoveRounds,
+        });
+        break;
+      }
+      continue;
+    }
+    noScrollMoveRounds = 0;
 
     const kwOkAfterScroll = await assertKeywordStillCorrect('after_scroll_list');
     if (kwOkAfterScroll !== true) {
@@ -584,6 +796,13 @@ export async function execute(input: XiaohongshuFullCollectInput): Promise<Xiaoh
     requiredFiles: [...requiredFiles],
     ...(mode === 'phase34' ? { requireCommentsDone: true } : {}),
   });
+
+  // 等待后台 OCR 收尾（已与采集过程并行执行）
+  if (ocrQueue) {
+    console.log(`[FullCollect][ocr] draining... pending=${ocrQueue.getPendingCount()} running=${ocrQueue.getRunningCount()}`);
+    await ocrQueue.drain();
+    console.log('[FullCollect][ocr] drained');
+  }
   const finalCount = persistedAtEnd.count;
 
   return {

@@ -28,6 +28,7 @@ export async function expandRepliesInView(options: {
   profile: string;
   browserServiceUrl?: string;
   maxTargets?: number;
+  recomputeEachClick?: boolean;
   focusPoint?: { x: number; y: number } | null;
   showMoreContainerId?: string;
   showMoreSelector?: string | null;
@@ -39,6 +40,7 @@ export async function expandRepliesInView(options: {
     profile,
     browserServiceUrl = 'http://127.0.0.1:7704',
     maxTargets,
+    recomputeEachClick = true,
     focusPoint,
     showMoreContainerId,
     showMoreSelector,
@@ -50,21 +52,68 @@ export async function expandRepliesInView(options: {
   // 注意：展开回复必须基于“视口内可见”的按钮坐标做系统点击。
   // 这里不再额外做容器 click（容易引发 off-screen 误点/噪音日志）。
 
-  const targets = await findExpandTargets(controllerUrl, profile, { maxTargets });
-  log(
-    `round=${typeof round === 'number' ? round : 'n/a'} expand buttons: clickTargets=${targets.targets.length}, visible=${targets.visible}, candidates=${targets.candidates}, all=${targets.all}`,
-  );
+  const maxClickTargets =
+    typeof maxTargets === 'number' && maxTargets > 0 ? Math.floor(maxTargets) : 2;
 
   let clicked = 0;
+  let visible = 0;
+  let candidates = 0;
+  let all = 0;
+  let error: string | undefined;
+
   const { systemClickAt, systemHoverAt } = await import('./systemInput.js');
-  for (const t of targets.targets) {
-    if (!t || !Number.isFinite(t.x) || !Number.isFinite(t.y)) continue;
+
+  // 注意：展开后会导致布局变化，预先计算一堆坐标容易“点偏/点不到”。
+  // 因此默认每次点击都重新计算一次（maxTargets 次），保证每次点的都是“当前仍可见”的按钮。
+  for (let i = 0; i < maxClickTargets; i += 1) {
+    const targets = await findExpandTargets(controllerUrl, profile, {
+      maxTargets: recomputeEachClick ? 1 : maxClickTargets,
+      selector: showMoreSelector || undefined,
+    });
+    visible = targets.visible;
+    candidates = targets.candidates;
+    all = targets.all;
+    error = targets.error;
+
+    if (i === 0) {
+      log(
+        `round=${typeof round === 'number' ? round : 'n/a'} expand buttons: clickTargets=${targets.targets.length}, visible=${targets.visible}, candidates=${targets.candidates}, all=${targets.all}`,
+      );
+    }
+
+    const t = targets.targets[0];
+    if (!t || !Number.isFinite(t.x) || !Number.isFinite(t.y)) break;
+
     try {
-      await systemClickAt(profile, Math.floor(t.x), Math.floor(t.y), browserServiceUrl);
+      await systemClickAt(profile, Math.floor(t.x), Math.floor(t.y), browserServiceUrl, 'reply_expand');
       clicked += 1;
-      await new Promise((r) => setTimeout(r, 280 + Math.random() * 320));
-    } catch {
-      // ignore
+      // 等待 DOM/布局更新（展开回复通常伴随动画与异步加载）
+      await new Promise((r) => setTimeout(r, 650 + Math.random() * 450));
+    } catch (e: any) {
+      const msg = String(e?.message || e || '');
+      if (msg.includes('captcha_modal_detected') || msg.includes('unsafe_click_image_in_detail')) {
+        throw e;
+      }
+      // 其他点击失败（例如元素瞬移）跳过本次，继续尝试下一个
+      await new Promise((r) => setTimeout(r, 500));
+      continue;
+    }
+
+    if (!recomputeEachClick) {
+      // 非重算模式：一次拿到多个坐标并依次点击
+      const rest = targets.targets.slice(1);
+      for (const p of rest) {
+        if (!p || !Number.isFinite(p.x) || !Number.isFinite(p.y)) continue;
+        try {
+          await systemClickAt(profile, Math.floor(p.x), Math.floor(p.y), browserServiceUrl, 'reply_expand');
+          clicked += 1;
+          await new Promise((r) => setTimeout(r, 650 + Math.random() * 450));
+        } catch (e: any) {
+          const msg = String(e?.message || e || '');
+          if (msg.includes('captcha_modal_detected') || msg.includes('unsafe_click_image_in_detail')) throw e;
+        }
+      }
+      break;
     }
   }
 
@@ -75,21 +124,22 @@ export async function expandRepliesInView(options: {
 
   return {
     clicked,
-    visible: targets.visible,
-    candidates: targets.candidates,
-    all: targets.all,
+    visible,
+    candidates,
+    all,
     containerClick: undefined,
-    error: targets.error,
+    error,
   };
 }
 
 export async function findExpandTargets(
   controllerUrl: string,
   profile: string,
-  opts: { maxTargets?: number } = {},
+  opts: { maxTargets?: number; selector?: string } = {},
 ): Promise<ExpandTargets> {
   const maxTargets =
     typeof opts.maxTargets === 'number' && opts.maxTargets > 0 ? opts.maxTargets : 2;
+  const selector = typeof opts.selector === 'string' && opts.selector.trim() ? opts.selector.trim() : '';
 
   try {
     const res = await fetch(controllerUrl, {
@@ -109,7 +159,13 @@ export async function findExpandTargets(
               return { targets: [], total: 0, all: 0, candidates: 0, error: 'no root' };
             }
 
-            const expandElements = Array.from(root.querySelectorAll('.show-more'));
+            const selector = ${JSON.stringify(selector)} || '.show-more, [class*="show-more"], [class*="expand"], [class*="more"]';
+            let expandElements = [];
+            try {
+              expandElements = Array.from(root.querySelectorAll(selector));
+            } catch (_) {
+              expandElements = Array.from(root.querySelectorAll('.show-more, [class*="show-more"], [class*="expand"], [class*="more"]'));
+            }
             const viewportH = window.innerHeight || 0;
             const viewportW = window.innerWidth || 0;
 
@@ -120,7 +176,6 @@ export async function findExpandTargets(
             for (const el of expandElements) {
               if (targets.length >= ${maxTargets}) break;
               if (!(el instanceof HTMLElement)) continue;
-              if (el.getAttribute('data-webauto-expand-clicked') === '1') continue;
 
               const rect = el.getBoundingClientRect();
               if (!rect || rect.width < 6 || rect.height < 6) continue;
@@ -133,10 +188,13 @@ export async function findExpandTargets(
                 continue;
               }
 
+              // 过滤掉明显的“收起/折叠”，避免反复点导致状态抖动
+              const text = (el.textContent || '').trim();
+              if (text.includes('收起') || text.includes('折叠')) continue;
+
               const x = Math.min(Math.max(rect.left + rect.width / 2, 30), viewportW - 30);
               const y = Math.min(Math.max(rect.top + rect.height / 2, 140), viewportH - 140);
               candidateCount += 1;
-              el.setAttribute('data-webauto-expand-clicked', '1');
               targets.push({ x, y });
             }
 
