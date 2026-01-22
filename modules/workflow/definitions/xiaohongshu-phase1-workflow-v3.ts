@@ -16,6 +16,7 @@ export const xiaohongshuPhase1WorkflowV3 = {
         profileId: '$sessionId',
         url: 'https://www.xiaohongshu.com',
         viewport: { width: 1440, height: 2160 },
+        headless: '$headless',
       },
     },
     {
@@ -28,4 +29,3 @@ export const xiaohongshuPhase1WorkflowV3 = {
     },
   ],
 };
-

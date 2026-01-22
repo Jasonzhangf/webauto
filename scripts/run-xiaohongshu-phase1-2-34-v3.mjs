@@ -186,6 +186,8 @@ Options:
   --keyword <kw>        搜索关键词（必填）
   --count <n>           目标采集数量（默认: 20）
   --sessionId <id>      会话ID（默认: xiaohongshu_fresh）
+  --headless            新建会话使用 headless（默认: true）
+  --headful             新建会话使用 headful（覆盖 headless）
   --startAt <phase>     起始阶段: phase1|phase2|phase34（默认: phase1）
   --stopAfter <phase>   结束阶段: phase1|phase2|phase34（默认: phase34）
   --linksCount <n>      Phase2 链接目标数（默认: max(count*2, count+30)）
@@ -195,7 +197,7 @@ Options:
 
 Examples:
   # 完整运行（Phase1 + Phase2 + Phase34）
-  node scripts/run-xiaohongshu-phase1-2-34-v3.mjs --keyword "手机壳" --count 50 --env prod
+  node scripts/run-xiaohongshu-phase1-2-34-v3.mjs --keyword "手机壳" --count 50 --env prod --headless
 
   # 仅运行 Phase1（登录）
   node scripts/run-xiaohongshu-phase1-2-34-v3.mjs --keyword "测试" --stopAfter phase1
@@ -215,6 +217,8 @@ Notes:
   const linksCountArg = Number(args.linksCount || 0);
   const env = typeof args.env === 'string' && args.env.trim() ? String(args.env).trim() : 'debug';
   const sessionId = typeof args.sessionId === 'string' && args.sessionId.trim() ? String(args.sessionId).trim() : 'xiaohongshu_fresh';
+  // 默认 headless=true（新建会话）；如指定 --headful 则强制 headless=false
+  const headless = args.headful ? false : (typeof args.headless === 'boolean' ? args.headless : true);
 
   const startAt = normalizePhase(args.startAt) || 'phase1';
   const stopAfter = normalizePhase(args.stopAfter) || 'phase34';
@@ -237,13 +241,15 @@ Notes:
       : Math.max(targetCount + 30, targetCount * 2);
 
   console.log(`[XHS][v3] Phase1 -> Phase2 -> Phase34`);
-  console.log(`[XHS][v3] keyword="${keyword}" count=${targetCount} env="${env}" sessionId="${sessionId}"`);
+  console.log(
+    `[XHS][v3] keyword="${keyword}" count=${targetCount} env="${env}" sessionId="${sessionId}" headless=${headless ? 'true' : 'false'}`,
+  );
   console.log(`[XHS][v3] startAt=${startAt} stopAfter=${stopAfter}`);
 
   // Phase1：仅会话 + 登录（视口固定高）
   if (phaseOrder(startAt) <= 1 && phaseOrder(stopAfter) >= 1) {
     console.log(`\n[XHS][v3] Phase1 (session+login) ...`);
-    const r1 = await runWorkflowById('xiaohongshu-phase1-v3', { sessionId, keyword, env, targetCount });
+    const r1 = await runWorkflowById('xiaohongshu-phase1-v3', { sessionId, keyword, env, targetCount, headless });
     if (!r1.success) {
       console.error('[XHS][v3] Phase1 failed:', r1.errors);
       process.exit(1);

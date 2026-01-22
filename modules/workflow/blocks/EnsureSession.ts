@@ -9,6 +9,11 @@ export interface EnsureSessionInput {
   url?: string;
   serviceUrl?: string;
   viewport?: { width: number; height: number };
+  /**
+   * When starting a new session, whether to run browser in headless mode.
+   * Note: if the session already exists, EnsureSession will reuse it and will NOT restart it.
+   */
+  headless?: boolean;
 }
 
 export interface EnsureSessionOutput {
@@ -26,6 +31,7 @@ export interface EnsureSessionOutput {
  */
 export async function execute(input: EnsureSessionInput): Promise<EnsureSessionOutput> {
   const { profileId, url, serviceUrl = 'http://127.0.0.1:7704', viewport } = input;
+  const headless = typeof input.headless === 'boolean' ? input.headless : false;
 
   if (!profileId) {
     return {
@@ -120,7 +126,7 @@ export async function execute(input: EnsureSessionInput): Promise<EnsureSessionO
         args: {
           profileId,
           url,
-          headless: false
+          headless
         }
       })
     });
