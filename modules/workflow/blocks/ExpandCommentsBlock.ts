@@ -12,7 +12,7 @@ import { getScrollStats, getViewport, systemMouseWheel } from './helpers/comment
 import { expandRepliesInView, findExpandTargets } from './helpers/replyExpander.js';
 import { createExpandCommentsControllerClient } from './helpers/expandCommentsController.js';
 import { buildExtractCommentsScript, mergeExtractedComments } from './helpers/expandCommentsExtractor.js';
-import { systemClickAt, systemHoverAt } from './helpers/systemInput.js';
+import { assertNoCaptcha, systemClickAt, systemHoverAt } from './helpers/systemInput.js';
 import { getCommentEndState, getCommentStats, getScrollContainerInfo, getScrollTargetInfo, isInputFocused, locateCommentsFocusPoint } from './helpers/xhsCommentDom.js';
 
 // 调试截图保存目录
@@ -772,6 +772,8 @@ export async function execute(input: ExpandCommentsInput): Promise<ExpandComment
     let emptyDetectTries = 0;
 
     for (let round = 0; round < maxRounds; round += 1) {
+      // 风控/验证码：出现“请通过验证”弹窗必须立刻停止（不要继续滚动/点击/抽取）
+      await assertNoCaptcha(profile, 'expand_comments_round');
       try {
         // 先展开视口内回复（只读查找 + 系统点击）
         await expandRepliesInView({

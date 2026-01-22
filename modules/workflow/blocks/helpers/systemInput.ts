@@ -177,9 +177,25 @@ async function isCaptchaOverlayVisible(profileId: string): Promise<boolean> {
     const res = await controllerAction('browser:execute', {
       profile: profileId,
       script: `(() => {
-        const modal = document.querySelector('.r-captcha-modal, .captcha-modal-content');
+        const modal =
+          document.querySelector('.r-captcha-modal') ||
+          document.querySelector('.captcha-modal-content') ||
+          document.querySelector('[class*="captcha-modal"]') ||
+          document.querySelector('[class*="captcha"][class*="modal"]');
+        const title =
+          document.querySelector('.captcha-modal-title') ||
+          document.querySelector('.captcha-modal__header .text-h6-bold') ||
+          null;
         const modalText = modal ? (modal.textContent || '') : '';
-        return Boolean(modal) || modalText.includes('请通过验证') || modalText.includes('扫码验证');
+        const titleText = title ? (title.textContent || '') : '';
+        return (
+          Boolean(modal) ||
+          titleText.includes('请通过验证') ||
+          modalText.includes('请通过验证') ||
+          modalText.includes('扫码验证') ||
+          modalText.includes('二维码') ||
+          modalText.includes('问题反馈')
+        );
       })()`,
     });
     const payload = (res as any)?.result ?? (res as any)?.data?.result ?? res;
@@ -187,6 +203,13 @@ async function isCaptchaOverlayVisible(profileId: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+export async function assertNoCaptcha(profileId: string, context?: string): Promise<void> {
+  const visible = await isCaptchaOverlayVisible(profileId);
+  if (!visible) return;
+  await saveDebugScreenshot(`captcha_detected_${context || 'system'}`, profileId, { context });
+  throw new Error(`captcha_modal_detected (context=${context || 'system'})`);
 }
 
 function shouldGuardAgainstImageClick(context?: string): boolean {
