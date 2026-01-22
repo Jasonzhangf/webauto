@@ -1,9 +1,9 @@
 import minimist from 'minimist';
 import { runWorkflowById } from '../dist/modules/workflow/src/runner.js';
-import { existsSync } from 'node:fs';
-import { writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, writeFileSync } from 'node:fs';
+import { join, resolve } from 'node:path';
 import { homedir } from 'node:os';
+import { spawn } from 'node:child_process';
 
 // 版本管理
 const VERSION = '3.0.0';
@@ -96,6 +96,64 @@ function phaseOrder(phase) {
   if (phase === 'phase2') return 2;
   if (phase === 'phase34') return 34;
   return 999;
+}
+
+function normalizeGateBaseUrl(raw) {
+  const u = String(raw || '').trim();
+  if (!u) return '';
+  // 避免误配：WEBAUTO_SEARCH_GATE_URL 若包含 /permit，会导致 WaitSearchPermit 拼出 /permit/permit
+  return u.replace(/\/permit\/?$/, '');
+}
+
+async function checkHealth(url) {
+  try {
+    const res = await fetch(url, {
+      signal: (AbortSignal).timeout ? (AbortSignal).timeout(2500) : undefined,
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+async function ensureSearchGate() {
+  // SearchGate 默认端口 7790
+  const gateBase = normalizeGateBaseUrl(process.env.WEBAUTO_SEARCH_GATE_URL || 'http://127.0.0.1:7790');
+  if (gateBase && gateBase !== (process.env.WEBAUTO_SEARCH_GATE_URL || '')) {
+    process.env.WEBAUTO_SEARCH_GATE_URL = gateBase;
+  }
+
+  const healthUrl = `${gateBase.replace(/\/$/, '')}/health`;
+  const ok = await checkHealth(healthUrl);
+  if (ok) {
+    console.log(`[XHS][v3] ✅ SearchGate healthy: ${healthUrl}`);
+    return;
+  }
+
+  // 自动拉起 SearchGate（开发阶段必需，避免 Phase2 卡死在 fetch failed 重试）
+  console.log(`[XHS][v3] ⚠️ SearchGate not reachable, starting: node scripts/search-gate-server.mjs`);
+  const scriptPath = resolve('scripts/search-gate-server.mjs');
+  const child = spawn('node', [scriptPath], {
+    stdio: 'inherit',
+    env: {
+      ...process.env,
+      // 若用户配置了 WEBAUTO_SEARCH_GATE_PORT，则尊重
+      WEBAUTO_SEARCH_GATE_PORT: process.env.WEBAUTO_SEARCH_GATE_PORT || '7790',
+    },
+  });
+
+  // 等待 health（最多 15s）
+  const t0 = Date.now();
+  while (Date.now() - t0 < 15_000) {
+    // 若子进程提前退出，直接报错
+    if (child.exitCode !== null) break;
+    if (await checkHealth(healthUrl)) {
+      console.log(`[XHS][v3] ✅ SearchGate started: ${healthUrl}`);
+      return;
+    }
+    await new Promise((r) => setTimeout(r, 500));
+  }
+  throw new Error(`SearchGate not available: ${healthUrl}`);
 }
 
 async function main() {
@@ -200,6 +258,9 @@ Notes:
   // Phase2：搜索 + 链接采集（写盘 phase2-links.jsonl）
   if (phaseOrder(startAt) <= 2 && phaseOrder(stopAfter) >= 2) {
     console.log(`\n[XHS][v3] Phase2 (collect links) ...`);
+    // Phase2 依赖 SearchGate（节流与开发阶段“禁止连续三次同 keyword”规则）
+    // 这里自动确保 SearchGate 在线，避免出现 fetch failed 的无意义重试。
+    await ensureSearchGate();
     console.log(`[XHS][v3] Phase2 target links=${phase2TargetCount} (final notes target=${targetCount})`);
     const r2 = await runWorkflowById('xiaohongshu-phase2-links-v3', { sessionId, keyword, env, targetCount: phase2TargetCount });
     if (!r2.success) {
