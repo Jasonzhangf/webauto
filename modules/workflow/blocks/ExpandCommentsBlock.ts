@@ -963,8 +963,8 @@ export async function execute(input: ExpandCommentsInput): Promise<ExpandComment
         }
 
         noEffectStreak = 0;
-        // 避免无穷恢复
-        if (recoveries >= 6) break;
+        // 避免无穷恢复：按约定最多尝试 3 次“回滚再向下”
+        if (recoveries >= 3) break;
       }
 
         const deltaY = 520 + Math.floor(Math.random() * 260);
