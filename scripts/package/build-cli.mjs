@@ -29,16 +29,13 @@ const CONFIG = {
   nodeVersion: '>=22.0.0',
   files: [
     'dist/services',
-    'dist/modules/xiaohongshu',
-    'dist/modules/workflow',
+    // 打包必须包含完整 dist/modules：services/workflow 运行时会依赖 logging/container-matcher 等模块
+    'dist/modules',
     'dist/sharedmodule',
     'scripts/xiaohongshu',
     'scripts/xiaohongshu/lib',
     'scripts/run-xiaohongshu-phase1-2-34-v3.mjs',  // v3 统一入口
     'container-library',
-    'modules/xiaohongshu',
-    'modules/workflow',
-    'sharedmodule',
     'runtime/infra/node-cli/package.json',
     'package.json',
     'package-lock.json'
@@ -106,7 +103,10 @@ async function createPackageJson() {
       minimist: pkg.dependencies.minimist,
       ws: pkg.dependencies.ws,
       undici: pkg.dependencies.undici,
-      'iconv-lite': pkg.dependencies['iconv-lite']
+      'iconv-lite': pkg.dependencies['iconv-lite'],
+      linkedom: pkg.dependencies.linkedom,
+      // browser-service 运行时依赖 playwright（原仓库为 devDependency，但安装包需要 production 可安装）
+      playwright: pkg.devDependencies.playwright
     }
   };
 
