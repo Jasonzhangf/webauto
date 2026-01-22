@@ -9,9 +9,11 @@
  * 接口：
  *   - POST /permit
  *       body: { key?: string, profileId?: string, windowMs?: number, maxCount?: number }
- *       返回: { ok: true, allowed: boolean, waitMs: number, windowMs, maxCount, countInWindow, key }
+ *       返回: { ok: true, allowed: boolean, waitMs: number, retryAfterMs, reason?, deny?, windowMs, maxCount, countInWindow, key }
  *   - GET /health
  *       返回: { ok: true }
+ *   - GET /stats
+ *       返回: { ok: true, buckets, keywordHistory }（用于调试拒绝原因）
  *   - POST /shutdown
  *       优雅退出（供脚本/命令行停止服务）
  *
@@ -127,6 +129,25 @@ function sendJson(res, statusCode, data) {
   res.end(payload);
 }
 
+function buildDeny({ code, message, details, suggestedActions, retryAfterMs }) {
+  return {
+    code: String(code || 'unknown'),
+    message: String(message || 'denied'),
+    retryAfterMs: typeof retryAfterMs === 'number' ? retryAfterMs : null,
+    details: details && typeof details === 'object' ? details : null,
+    suggestedActions: Array.isArray(suggestedActions) ? suggestedActions.map(String) : [],
+  };
+}
+
+function logPermit(payload) {
+  try {
+    // eslint-disable-next-line no-console
+    console.log(`[SearchGate] permit ${JSON.stringify(payload)}`);
+  } catch {
+    // ignore
+  }
+}
+
 const server = http.createServer(async (req, res) => {
   try {
     const url = new URL(req.url || '/', `http://${req.headers.host || `${HOST}:${PORT}`}`);
@@ -165,20 +186,36 @@ const server = http.createServer(async (req, res) => {
         const consecutive = getConsecutiveSameKeywordCount(prev, keyword);
         if (consecutive >= DEV_MAX_CONSECUTIVE_SAME_KEYWORD) {
           keywordHistory.set(key, prev);
-          sendJson(res, 200, {
+          const deny = buildDeny({
+            code: 'dev_consecutive_keyword_limit',
+            message: `dev mode blocked: too many consecutive same keyword searches (keyword="${keyword}", consecutive=${consecutive}, max=${DEV_MAX_CONSECUTIVE_SAME_KEYWORD})`,
+            details: { key, keyword, consecutive, maxConsecutive: DEV_MAX_CONSECUTIVE_SAME_KEYWORD, devTag: devTag || null },
+            retryAfterMs: null,
+            suggestedActions: [
+              'Stop and inspect logs/screenshots; do not spam search retries.',
+              'If you must re-run the same keyword in dev, restart SearchGate (clears in-memory dev history) or change workflow to reuse existing phase2 links.',
+            ],
+          });
+
+          const payload = {
             ok: true,
             key,
             windowMs,
             maxCount,
             allowed: false,
             waitMs: 0,
+            retryAfterMs: null,
             countInWindow: (buckets.get(key) || []).length,
             reason: 'dev_consecutive_keyword_limit',
             keyword,
             consecutive,
             dev: true,
             devTag: devTag || null,
-          });
+            deny,
+            ts: nowMs(),
+          };
+          logPermit({ key, allowed: false, reason: 'dev_consecutive_keyword_limit', keyword, consecutive, dev: true, devTag: devTag || null });
+          sendJson(res, 200, payload);
           return;
         }
       }
@@ -192,17 +229,72 @@ const server = http.createServer(async (req, res) => {
         keywordHistory.set(key, prev);
       }
 
-      sendJson(res, 200, {
+      const reason = result.allowed ? null : 'rate_limited';
+      const deny =
+        result.allowed
+          ? null
+          : buildDeny({
+              code: 'rate_limited',
+              message: `rate limited: too many searches in window (windowMs=${windowMs}, maxCount=${maxCount}, countInWindow=${result.countInWindow})`,
+              details: { key, windowMs, maxCount, countInWindow: result.countInWindow },
+              retryAfterMs: result.waitMs,
+              suggestedActions: ['Wait retryAfterMs then retry.', 'Reduce search frequency to avoid soft bans.'],
+            });
+
+      const payload = {
         ok: true,
         key,
         windowMs,
         maxCount,
         allowed: result.allowed,
         waitMs: result.waitMs,
+        retryAfterMs: result.allowed ? 0 : result.waitMs,
         countInWindow: result.countInWindow,
         ...(keyword ? { keyword } : {}),
         ...(dev ? { dev: true, devTag: devTag || null } : {}),
+        ...(reason ? { reason } : {}),
+        ...(deny ? { deny } : {}),
+        ts: nowMs(),
+      };
+
+      logPermit({
+        key,
+        allowed: result.allowed,
+        reason: reason || null,
+        waitMs: result.waitMs,
+        countInWindow: result.countInWindow,
+        keyword: keyword || null,
+        dev: dev || false,
+        devTag: devTag || null,
       });
+      sendJson(res, 200, payload);
+      return;
+    }
+
+    if (req.method === 'GET' && url.pathname === '/stats') {
+      const key = url.searchParams.get('key') || '';
+      const keys = key ? [key] : Array.from(buckets.keys());
+      const bucketStats = {};
+      for (const k of keys) {
+        const records = (buckets.get(k) || []).slice().sort((a, b) => a - b);
+        bucketStats[k] = {
+          countInWindow: records.length,
+          oldestTs: records.length ? records[0] : null,
+          newestTs: records.length ? records[records.length - 1] : null,
+        };
+      }
+
+      const historyKeys = key ? [key] : Array.from(keywordHistory.keys());
+      const historyStats = {};
+      for (const k of historyKeys) {
+        const records = pruneKeywordHistory(keywordHistory.get(k) || []);
+        historyStats[k] = {
+          size: records.length,
+          tail: records.slice(-10),
+        };
+      }
+
+      sendJson(res, 200, { ok: true, ts: nowMs(), keys: key ? [key] : undefined, buckets: bucketStats, keywordHistory: historyStats });
       return;
     }
 

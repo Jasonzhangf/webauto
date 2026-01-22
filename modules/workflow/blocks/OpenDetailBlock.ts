@@ -190,6 +190,8 @@ export async function execute(input: OpenDetailInput): Promise<OpenDetailOutput>
     textSnippet: string | null;
     outOfBounds: boolean;
     overlapsAvatar: boolean;
+    isImage: boolean;
+    cardTruncated: boolean;
   }> {
     try {
       const res = await controllerAction('browser:execute', {
@@ -235,7 +237,33 @@ export async function execute(input: OpenDetailInput): Promise<OpenDetailOutput>
             overlapsAvatar = Boolean(avatarClass || avatarParent || avatarHref);
           }
 
-          return { inCover, inQueryNoteWrapper, isSearchKeywordLink, href: href || null, isUserProfile, isHashtag, tag, className, textSnippet, outOfBounds, overlapsAvatar };
+          // 检查是否点击到图片元素（详情页内可能触发图片查看器）
+          let isImage = false;
+          if (el) {
+            const isImgTag = tag === 'IMG';
+            const hasImageClass = className && (className.includes('image') || className.includes('photo') || className.includes('picture'));
+            const isImageParent = el.closest && el.closest('figure, .image, .photo, .picture, [class*="image"], [class*="photo"]');
+            isImage = Boolean(isImgTag || hasImageClass || isImageParent);
+          }
+
+          // 检查封面所在的卡片是否被截断（搜索结果列表场景）
+          let cardTruncated = false;
+          if (inCover && coverRect) {
+            const coverEl = el && el.closest && el.closest('a.cover');
+            if (coverEl) {
+              const card = coverEl.closest('.query-note-wrapper, section, article');
+              if (card) {
+                const cardRect = card.getBoundingClientRect();
+                const viewportHeight = window.innerHeight || document.documentElement.clientHeight;
+                // 检查卡片底部是否被截断（允许 20px 容差）
+                const cardBottom = cardRect.bottom;
+                const safeBottom = viewportHeight - 20;
+                cardTruncated = cardBottom > safeBottom;
+              }
+            }
+          }
+
+          return { inCover, inQueryNoteWrapper, isSearchKeywordLink, href: href || null, isUserProfile, isHashtag, tag, className, textSnippet, outOfBounds, overlapsAvatar, isImage, cardTruncated };
         })()`,
       });
       const payload = (res as any)?.result ?? (res as any)?.data?.result ?? res ?? {};
@@ -251,6 +279,8 @@ export async function execute(input: OpenDetailInput): Promise<OpenDetailOutput>
         textSnippet: typeof payload?.textSnippet === 'string' ? payload.textSnippet : null,
         outOfBounds: Boolean(payload?.outOfBounds),
         overlapsAvatar: Boolean(payload?.overlapsAvatar),
+        isImage: Boolean(payload?.isImage),
+        cardTruncated: Boolean(payload?.cardTruncated),
       };
     } catch {
       return {
@@ -265,6 +295,8 @@ export async function execute(input: OpenDetailInput): Promise<OpenDetailOutput>
         textSnippet: null,
         outOfBounds: true,
         overlapsAvatar: false,
+        isImage: false,
+        cardTruncated: false,
       };
     }
   }
@@ -320,7 +352,7 @@ export async function execute(input: OpenDetailInput): Promise<OpenDetailOutput>
       const p0 = computePointByFraction(c.fx, c.fy);
       // 探测时传入封面 rect，检查是否在 rect 内且不与头像重合
       const probe = await probeClickTarget(p0, rect);
-      // 严格保护：必须在 rect 内，在 cover 内，且不与头像重合
+      // 严格保护：必须在 rect 内，在 cover 内，不与头像重合，不点击图片，卡片不被截断
       if (
         probe.inCover &&
         !probe.isUserProfile &&
@@ -328,13 +360,15 @@ export async function execute(input: OpenDetailInput): Promise<OpenDetailOutput>
         !probe.inQueryNoteWrapper &&
         !probe.isSearchKeywordLink &&
         !probe.outOfBounds &&
-        !probe.overlapsAvatar
+        !probe.overlapsAvatar &&
+        !probe.isImage &&
+        !probe.cardTruncated
       ) {
         return { x: p0.x, y: p0.y, probe };
       }
-      // 如果探测到超出封面 rect 或与头像重合，记录日志继续尝试下一个点
-      if (probe.outOfBounds || probe.overlapsAvatar) {
-        console.log(`[chooseSafeClickPoint] Candidate (${c.fx}, ${c.fy}) rejected: outOfBounds=${probe.outOfBounds}, overlapsAvatar=${probe.overlapsAvatar}`);
+      // 记录被拒绝的候选点原因
+      if (probe.outOfBounds || probe.overlapsAvatar || probe.isImage || probe.cardTruncated) {
+        console.log(`[chooseSafeClickPoint] Candidate (${c.fx}, ${c.fy}) rejected: outOfBounds=${probe.outOfBounds}, overlapsAvatar=${probe.overlapsAvatar}, isImage=${probe.isImage}, cardTruncated=${probe.cardTruncated}`);
       }
     }
     const fallback = computeSafeClickPoint(rect, viewport);
@@ -769,6 +803,8 @@ export async function execute(input: OpenDetailInput): Promise<OpenDetailOutput>
         typeof chosen.probe?.textSnippet === 'string' && chosen.probe.textSnippet.includes('#');
       const outOfBounds = Boolean(chosen.probe?.outOfBounds);
       const overlapsAvatar = Boolean(chosen.probe?.overlapsAvatar);
+      const isImage = Boolean(chosen.probe?.isImage);
+      const cardTruncated = Boolean(chosen.probe?.cardTruncated);
       if (
         !okCover ||
         unsafeProfile ||
@@ -777,7 +813,9 @@ export async function execute(input: OpenDetailInput): Promise<OpenDetailOutput>
         unsafeSearchKeywordLink ||
         unsafeHashText ||
         outOfBounds ||
-        overlapsAvatar
+        overlapsAvatar ||
+        isImage ||
+        cardTruncated
       ) {
         await saveDebugScreenshot('click-point-not-in-cover', {
           url: startUrl,

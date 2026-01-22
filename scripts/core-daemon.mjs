@@ -173,7 +173,12 @@ async function startService(service) {
   log(`Starting ${service.name}...`);
   
   const logFile = getLogFile(service.name);
-  const logStream = fs.createWriteStream(logFile, { flags: 'a' });
+  let logFd = null;
+  try {
+    logFd = fs.openSync(logFile, 'a');
+  } catch (err) {
+    log(`WARN: Failed to open log file for ${service.name}: ${err.message}`, 'WARN');
+  }
   
   const child = spawn('node', [scriptPath], {
     cwd: repoRoot,
@@ -181,17 +186,17 @@ async function startService(service) {
       ...process.env,
       ...service.env
     },
-    stdio: ['ignore', 'pipe', 'pipe'],
+    stdio: ['ignore', logFd ?? 'ignore', logFd ?? 'ignore'],
     detached: true
   });
-  
-  child.stdout.on('data', (data) => {
-    logStream.write(data);
-  });
-  
-  child.stderr.on('data', (data) => {
-    logStream.write(data);
-  });
+
+  if (typeof logFd === 'number') {
+    try {
+      fs.closeSync(logFd);
+    } catch {
+      // ignore
+    }
+  }
   
   child.unref();
   

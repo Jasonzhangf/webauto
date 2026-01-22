@@ -173,14 +173,35 @@ export async function findExpandTargets(
             let visibleCount = 0;
             let candidateCount = 0;
 
+            const clamp = (n, lo, hi) => Math.min(Math.max(n, lo), hi);
+            const isImageLike = (el) => {
+              if (!el || !(el instanceof Element)) return false;
+              const tag = String(el.tagName || '').toUpperCase();
+              if (tag === 'IMG' || tag === 'VIDEO' || tag === 'PICTURE') return true;
+              try {
+                const cls = typeof el.className === 'string' ? el.className : '';
+                if (cls && /(image|img|photo|picture|cover|gallery)/i.test(cls)) return true;
+              } catch {}
+              // 祖先是图片/视频（避免点到媒体查看器）
+              try {
+                const m = el.closest('img,video,picture');
+                if (m) return true;
+              } catch {}
+              return false;
+            };
+
             for (const el of expandElements) {
               if (targets.length >= ${maxTargets}) break;
               if (!(el instanceof HTMLElement)) continue;
 
               const rect = el.getBoundingClientRect();
               if (!rect || rect.width < 6 || rect.height < 6) continue;
-              if (!(rect.bottom > 0 && rect.top < viewportH)) continue;
-              if (!(rect.right > 0 && rect.left < viewportW)) continue;
+              // 防止 selector 过宽命中到 comment_item/大块区域（中心点可能落在评论图片上）
+              // 展开回复按钮一般是单行小高度元素
+              if (rect.height > 160) continue;
+              // 开发阶段严格要求：必须“完全在视口内”才允许点击，避免点到截断按钮造成误触
+              if (!(rect.top >= 0 && rect.bottom <= viewportH)) continue;
+              if (!(rect.left >= 0 && rect.right <= viewportW)) continue;
               visibleCount += 1;
 
               const style = window.getComputedStyle(el);
@@ -191,11 +212,44 @@ export async function findExpandTargets(
               // 过滤掉明显的“收起/折叠”，避免反复点导致状态抖动
               const text = (el.textContent || '').trim();
               if (text.includes('收起') || text.includes('折叠')) continue;
+              // 过滤：仅允许“展开xx回复/展开更多评论”等按钮
+              if (!text.includes('展开')) continue;
+              if (!(text.includes('回复') || text.includes('评论') || text.includes('更多'))) continue;
+              // 过滤：禁止点击任何链接内的元素（避免误点头像/话题/外链）
+              if (el.closest && el.closest('a[href]')) continue;
 
-              const x = Math.min(Math.max(rect.left + rect.width / 2, 30), viewportW - 30);
-              const y = Math.min(Math.max(rect.top + rect.height / 2, 140), viewportH - 140);
+              // ⚠️ 关键：评论区可能含图片，若选点落在 IMG 上会触发媒体查看器/风控。
+              // 这里在页面内做 elementFromPoint 探测，找到“落点不在图片且命中在该按钮内”的安全点击坐标。
+              const points = [
+                { fx: 0.5, fy: 0.55 },
+                { fx: 0.75, fy: 0.55 },
+                { fx: 0.6, fy: 0.55 },
+                { fx: 0.85, fy: 0.55 },
+                { fx: 0.5, fy: 0.35 },
+                { fx: 0.5, fy: 0.75 },
+              ];
+
+              let picked = null;
+              for (const p of points) {
+                const x = clamp(rect.left + rect.width * p.fx, 30, viewportW - 30);
+                const y = clamp(rect.top + rect.height * p.fy, 140, viewportH - 140);
+                const hit = document.elementFromPoint(x, y);
+                if (!hit || !(hit instanceof HTMLElement)) continue;
+                // 必须命中在本元素内（避免被遮挡导致点到别的元素）
+                if (!(el === hit || el.contains(hit))) continue;
+                // 保护：不允许落在图片/视频上
+                if (isImageLike(hit)) continue;
+                // 保护：不允许落在链接上（头像/话题等）
+                try {
+                  if (hit.closest && hit.closest('a[href]')) continue;
+                } catch {}
+                picked = { x, y };
+                break;
+              }
+
+              if (!picked) continue;
               candidateCount += 1;
-              targets.push({ x, y });
+              targets.push(picked);
             }
 
             return {

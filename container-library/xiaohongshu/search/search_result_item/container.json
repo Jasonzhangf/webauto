@@ -11,7 +11,7 @@
   "children": [],
   "selectors": [
     {
-      "css": ".note-item",
+      "css": ".note-item:has(a.cover)",
       "variant": "primary",
       "score": 1.0
     }
@@ -24,6 +24,12 @@
       "image",
       "text",
       "note_id"
+    ],
+    "required_descendants_any": [
+      "a.cover"
+    ],
+    "excluded_descendants_any": [
+      ".query-note-wrapper"
     ]
   },
   "extractors": {
@@ -36,27 +42,25 @@
     },
     "link": {
       "selectors": [
-        "a.cover",
-        "a"
+        "a.cover"
       ],
       "attr": "href"
     },
     "detail_url": {
       "selectors": [
-        "a.cover",
-        "a"
+        "a.cover"
       ],
       "attr": "href"
     },
     "image": {
       "selectors": [
-        "img"
+        "a.cover img"
       ],
       "attr": "src"
     },
     "note_id": {
       "selectors": [
-        "a"
+        "a.cover"
       ],
       "attr": "href"
     }
@@ -72,8 +76,8 @@
     {
       "type": "click",
       "config": {
-        "target": "self",
-        "comment": "点击整个卡片"
+        "target": "a.cover",
+        "comment": "点击笔记封面区域（a.cover）"
       }
     },
     {

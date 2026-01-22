@@ -161,20 +161,66 @@ export async function locateCommentsFocusPoint(
         const vx2 = window.innerWidth;
         const vy2 = window.innerHeight;
 
-        const xCenter = rect.left + rect.width / 2;
-        const x = Math.min(Math.max(xCenter, 10), vx2 - 10);
-
         const topVisible = Math.max(rect.top, 10);
         const bottomVisible = Math.min(rect.bottom, vy2 - 10);
         if (bottomVisible <= topVisible) return null;
-        const y = (topVisible + bottomVisible) / 2;
+        const yMid = (topVisible + bottomVisible) / 2;
+
+        const clamp = (n, lo, hi) => Math.min(Math.max(n, lo), hi);
+        const isImageLike = (el) => {
+          if (!el || !(el instanceof Element)) return false;
+          const tag = String(el.tagName || '').toUpperCase();
+          if (tag === 'IMG' || tag === 'VIDEO' || tag === 'PICTURE') return true;
+          try {
+            const cls = typeof el.className === 'string' ? el.className : '';
+            if (cls && /(image|img|photo|picture|zoom)/i.test(cls)) return true;
+          } catch {}
+          try {
+            const m = el.closest('img,video,picture');
+            if (m) return true;
+          } catch {}
+          return false;
+        };
+        const isDangerous = (hit) => {
+          if (!hit || !(hit instanceof Element)) return true;
+          try {
+            if (hit.closest && hit.closest('a[href]')) return true;
+          } catch {}
+          return isImageLike(hit);
+        };
+
+        // 选择一个“用于 hover/wheel 的安全点”：尽量靠右，且 elementFromPoint 不在图片/链接上
+        const candidates = [];
+        const ys = [0.35, 0.5, 0.65];
+        const xs = [0.92, 0.82, 0.72, 0.6, 0.5];
+        for (const fy of ys) {
+          const y = clamp(topVisible + (bottomVisible - topVisible) * fy, 140, vy2 - 140);
+          for (const fx of xs) {
+            const x = clamp(rect.left + rect.width * fx, 20, vx2 - 20);
+            candidates.push({ x, y });
+          }
+        }
+        // fallback: center
+        candidates.push({ x: clamp(rect.left + rect.width / 2, 20, vx2 - 20), y: clamp(yMid, 140, vy2 - 140) });
+
+        let picked = null;
+        for (const p of candidates) {
+          const hit = document.elementFromPoint(p.x, p.y);
+          if (!hit || !(hit instanceof HTMLElement)) continue;
+          // 必须落在 root 内
+          if (!(root === hit || (root.contains && root.contains(hit)))) continue;
+          if (isDangerous(hit)) continue;
+          picked = p;
+          break;
+        }
+        if (!picked) picked = candidates[candidates.length - 1];
 
         if (root instanceof HTMLElement) {
           root.style.outline = '4px solid magenta';
           root.setAttribute('data-webauto-highlight', 'true');
         }
 
-        return { x, y };
+        return picked ? { x: picked.x, y: picked.y } : null;
       })()`,
     });
 
@@ -220,7 +266,18 @@ export async function getCommentStats(
         return { hasRoot: false, count: 0, hasMore: false, total: parsed };
       }
 
-      const items = Array.from(root.querySelectorAll('.comment-item, [class*="comment-item"]'));
+      const items = Array.from(
+        root.querySelectorAll(
+          [
+            '.comment-item',
+            '[class*="comment-item"]',
+            "[class*='reply-item']",
+            "[class*='replyItem']",
+            "[class*='sub-comment']",
+            "[class*='subComment']",
+          ].join(', '),
+        ),
+      );
       const emptyEl =
         root.querySelector('.no-comments') ||
         root.querySelector('.comment-empty') ||
@@ -491,9 +548,53 @@ export async function getScrollContainerInfo(
 
       if (!scrollContainer) return null;
       const rect = scrollContainer.getBoundingClientRect();
+      const clamp = (n, lo, hi) => Math.min(Math.max(n, lo), hi);
+      const vw = window.innerWidth || document.documentElement.clientWidth || 0;
+      const vh = window.innerHeight || document.documentElement.clientHeight || 0;
+
+      const isImageLike = (el) => {
+        if (!el || !(el instanceof Element)) return false;
+        const tag = String(el.tagName || '').toUpperCase();
+        if (tag === 'IMG' || tag === 'VIDEO' || tag === 'PICTURE') return true;
+        try {
+          const cls = typeof el.className === 'string' ? el.className : '';
+          if (cls && /(image|img|photo|picture|zoom)/i.test(cls)) return true;
+        } catch {}
+        try {
+          const m = el.closest('img,video,picture');
+          if (m) return true;
+        } catch {}
+        return false;
+      };
+      const isBad = (hit) => {
+        if (!hit || !(hit instanceof Element)) return true;
+        try {
+          if (hit.closest && hit.closest('a[href]')) return true;
+        } catch {}
+        return isImageLike(hit);
+      };
+
+      // 选一个 wheel 安全点：优先靠右侧，避免落在评论图片上导致 wheel 被拦截（缩放/媒体）
+      const points = [];
+      const ys = [0.25, 0.45, 0.6, 0.75];
+      for (const fy of ys) {
+        const x = clamp(rect.right - 10, 20, Math.max(20, vw - 20));
+        const y = clamp(rect.top + rect.height * fy, 140, Math.max(140, vh - 140));
+        points.push({ x, y });
+      }
+      points.push({ x: clamp(rect.left + rect.width / 2, 20, Math.max(20, vw - 20)), y: clamp(rect.top + rect.height / 2, 140, Math.max(140, vh - 140)) });
+      let picked = points[points.length - 1];
+      for (const p of points) {
+        const hit = document.elementFromPoint(p.x, p.y);
+        if (!hit || !(hit instanceof HTMLElement)) continue;
+        if (!(scrollContainer === hit || scrollContainer.contains(hit))) continue;
+        if (isBad(hit)) continue;
+        picked = p;
+        break;
+      }
       return {
-        x: rect.left + rect.width / 2,
-        y: rect.top + rect.height / 2,
+        x: picked.x,
+        y: picked.y,
         scrollTop: scrollContainer.scrollTop,
         scrollHeight: scrollContainer.scrollHeight,
         clientHeight: scrollContainer.clientHeight
@@ -632,6 +733,159 @@ export async function getScrollStats(
       atTop: true,
       atBottom: false,
     };
+  }
+}
+
+export interface ScrollTargetInfo extends ScrollStats {
+  x: number;
+  y: number;
+}
+
+/**
+ * 与 getScrollStats 选择同一个“实际滚动容器”，并返回其视口内中心点坐标（用于系统级 hover/click/wheel 对齐滚动目标）。
+ */
+export async function getScrollTargetInfo(
+  rootSelectors: string[],
+  controllerUrl: string,
+  profile: string,
+): Promise<ScrollTargetInfo | null> {
+  const selectors = Array.isArray(rootSelectors)
+    ? rootSelectors.filter(Boolean)
+    : [];
+
+  try {
+    const result = await controllerAction(controllerUrl, 'browser:execute', {
+      profile,
+      script: `(() => {
+        const roots = ${JSON.stringify(selectors)};
+        const pickRoot = () => {
+          for (const sel of roots) {
+            try {
+              const el = document.querySelector(sel);
+              if (el) return el;
+            } catch (_) {}
+          }
+          return null;
+        };
+
+        const isScrollable = (el) => {
+          if (!el) return false;
+          const style = window.getComputedStyle(el);
+          const overflowY = style.overflowY || '';
+          const canScroll =
+            (overflowY === 'scroll' || overflowY === 'auto' || overflowY === 'overlay') &&
+            el.scrollHeight - el.clientHeight > 24;
+          return canScroll;
+        };
+
+        const root = pickRoot();
+        let best = null;
+        if (root) {
+          let current = root;
+          let safetyUp = 0;
+          while (current && current !== document.body && safetyUp < 60) {
+            safetyUp += 1;
+            if (isScrollable(current)) {
+              best = current;
+              break;
+            }
+            current = current.parentElement;
+          }
+        }
+        if (!best) {
+          if (root) {
+            const walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT);
+            let node = walker.currentNode;
+            let safety = 0;
+            while (node && safety < 1200) {
+              safety += 1;
+              if (isScrollable(node)) {
+                best = node;
+                break;
+              }
+              node = walker.nextNode();
+            }
+          }
+        }
+        if (!best) {
+          if (isScrollable(document.documentElement)) best = document.documentElement;
+          else if (isScrollable(document.body)) best = document.body;
+        }
+
+        if (!best) return null;
+
+        const scrollTop = best.scrollTop || 0;
+        const scrollHeight = best.scrollHeight || 0;
+        const clientHeight = best.clientHeight || 0;
+        const atTop = scrollTop <= 2;
+        const noNeedScroll = scrollHeight > 0 && clientHeight > 0 && (scrollHeight - clientHeight) <= 24;
+        const atBottom = noNeedScroll || (scrollHeight > 0 && clientHeight > 0 && (scrollTop + clientHeight) >= (scrollHeight - 8));
+
+        const r = best.getBoundingClientRect();
+        const vw = window.innerWidth || document.documentElement.clientWidth || 0;
+        const vh = window.innerHeight || document.documentElement.clientHeight || 0;
+        const clamp = (n, lo, hi) => Math.min(Math.max(n, lo), hi);
+        const isImageLike = (el) => {
+          if (!el || !(el instanceof Element)) return false;
+          const tag = String(el.tagName || '').toUpperCase();
+          if (tag === 'IMG' || tag === 'VIDEO' || tag === 'PICTURE') return true;
+          try {
+            const cls = typeof el.className === 'string' ? el.className : '';
+            if (cls && /(image|img|photo|picture|zoom)/i.test(cls)) return true;
+          } catch {}
+          try {
+            const m = el.closest('img,video,picture');
+            if (m) return true;
+          } catch {}
+          return false;
+        };
+        const isBad = (hit) => {
+          if (!hit || !(hit instanceof Element)) return true;
+          try {
+            if (hit.closest && hit.closest('a[href]')) return true;
+          } catch {}
+          return isImageLike(hit);
+        };
+
+        // wheel 安全点：优先靠右侧，避免落在评论图片上导致 wheel 被拦截
+        const points = [];
+        const ys = [0.25, 0.4, 0.55, 0.7];
+        for (const fy of ys) {
+          points.push({
+            x: clamp(r.right - 10, 20, Math.max(20, vw - 20)),
+            y: clamp(r.top + r.height * fy, 120, Math.max(120, vh - 120)),
+          });
+        }
+        points.push({ x: clamp(r.left + r.width / 2, 20, Math.max(20, vw - 20)), y: clamp(r.top + r.height / 2, 120, Math.max(120, vh - 120)) });
+
+        let picked = points[points.length - 1];
+        for (const p of points) {
+          const hit = document.elementFromPoint(p.x, p.y);
+          if (!hit || !(hit instanceof HTMLElement)) continue;
+          if (!(best === hit || best.contains(hit))) continue;
+          if (isBad(hit)) continue;
+          picked = p;
+          break;
+        }
+
+        return { found: true, scrollTop, scrollHeight, clientHeight, atTop, atBottom, x: picked.x, y: picked.y };
+      })()`,
+    });
+
+    const payload = (result as any).result || (result as any).data?.result || result;
+    if (!payload || typeof payload.x !== 'number' || typeof payload.y !== 'number') return null;
+    return {
+      found: Boolean(payload.found),
+      scrollTop: Number(payload.scrollTop ?? 0),
+      scrollHeight: Number(payload.scrollHeight ?? 0),
+      clientHeight: Number(payload.clientHeight ?? 0),
+      atTop: Boolean(payload.atTop),
+      atBottom: Boolean(payload.atBottom),
+      x: Number(payload.x),
+      y: Number(payload.y),
+    };
+  } catch {
+    return null;
   }
 }
 

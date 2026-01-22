@@ -12,8 +12,8 @@ import { getScrollStats, getViewport, systemMouseWheel } from './helpers/comment
 import { expandRepliesInView, findExpandTargets } from './helpers/replyExpander.js';
 import { createExpandCommentsControllerClient } from './helpers/expandCommentsController.js';
 import { buildExtractCommentsScript, mergeExtractedComments } from './helpers/expandCommentsExtractor.js';
-import { systemClickAt } from './helpers/systemInput.js';
-import { getCommentEndState } from './helpers/xhsCommentDom.js';
+import { systemClickAt, systemHoverAt } from './helpers/systemInput.js';
+import { getCommentEndState, getCommentStats, getScrollContainerInfo, getScrollTargetInfo, isInputFocused, locateCommentsFocusPoint } from './helpers/xhsCommentDom.js';
 
 // 调试截图保存目录
 const DEBUG_SCREENSHOT_DIR = path.join(os.homedir(), '.webauto', 'logs', 'debug-screenshots');
@@ -107,11 +107,23 @@ export interface Rect {
   height: number;
 }
 
+type ScrollTarget = {
+  found: boolean;
+  scrollTop: number;
+  scrollHeight: number;
+  clientHeight: number;
+  atTop: boolean;
+  atBottom: boolean;
+  x: number;
+  y: number;
+};
+
 export interface ExpandCommentsOutput {
   success: boolean;
   comments: Array<Record<string, any>>;
   reachedEnd: boolean;
   emptyState: boolean;
+  totalFromHeader: number | null;
   stoppedByMaxNew?: boolean;
   anchor?: {
     commentSectionContainerId: string;
@@ -171,6 +183,8 @@ export async function execute(input: ExpandCommentsInput): Promise<ExpandComment
   const viewport0 = await getViewport(controllerUrl, profile);
   const viewportW = viewport0.innerWidth || 1440;
   const viewportH = viewport0.innerHeight || 900;
+  // 默认将滚动焦点放在右侧区域（详情页左侧通常是大图，点到会触发媒体查看器/风控）
+  let preferredFocusPoint = { x: Math.floor(viewportW * 0.75), y: Math.floor(viewportH * 0.6) };
 
   // Tab 监控：记录初始状态
   const initialTabs: Array<{ index: number; url: string }> = await controllerAction('browser:page:list', { profileId: profile })
@@ -219,8 +233,23 @@ export async function execute(input: ExpandCommentsInput): Promise<ExpandComment
     });
   };
 
-  const scrollStats = async (rootSelectors: string[]) =>
-    getScrollStats(rootSelectors, controllerUrl, profile);
+  const scrollTarget = async (rootSelectors: string[]): Promise<ScrollTarget> => {
+    let t: any = null;
+    try {
+      t = await getScrollTargetInfo(rootSelectors, controllerUrl, profile);
+    } catch {
+      t = null;
+    }
+    if (t && Number.isFinite(t.x) && Number.isFinite(t.y)) {
+      return t;
+    }
+    const s = await getScrollStats(rootSelectors, controllerUrl, profile);
+    return {
+      ...s,
+      x: Math.floor(preferredFocusPoint.x),
+      y: Math.floor(preferredFocusPoint.y),
+    };
+  };
 
   const locateRectBySelectors = async (selectors: string[]): Promise<Rect | null> => {
     const filtered = selectors.filter((sel) => typeof sel === 'string' && sel.trim().length > 0);
@@ -364,9 +393,56 @@ export async function execute(input: ExpandCommentsInput): Promise<ExpandComment
   const buildFocusPoint = (rect?: Rect): { x: number; y: number } => {
     if (!rect) return { x: Math.floor(viewportW / 2), y: Math.floor(viewportH / 2) };
     return {
-      x: clamp(Math.floor(rect.x + rect.width / 2), 30, viewportW - 30),
+      // 详情页评论区内部可能包含图片；为避免任何“坐标点击”误落在图片上，
+      // focus 点尽量靠近评论区右侧（更接近滚动条区域），用于 hover/wheel 对齐滚动目标。
+      x: clamp(Math.floor(rect.x + rect.width - 12), 30, viewportW - 30),
       y: clamp(Math.floor(rect.y + Math.max(12, rect.height * 0.25)), 160, viewportH - 160),
     };
+  };
+
+  // 切 tab 后滚动焦点经常丢失：每个 batch 以及“滚不动恢复”前都要重新定位可滚动容器中心点并 hover/click 以恢复滚动目标。
+  const refreshScrollFocus = async (reason: string): Promise<{ x: number; y: number } | null> => {
+    try {
+      let domFocus: { x: number; y: number } | null = null;
+      try {
+        domFocus = await locateCommentsFocusPoint(controllerUrl, profile);
+      } catch {
+        domFocus = null;
+      }
+      if (domFocus && Number.isFinite(domFocus.x) && Number.isFinite(domFocus.y)) {
+        // 评论区可能包含图片：focus/click 坐标尽量靠右（接近滚动条区域），避免误点图片触发媒体查看器/风控
+        await systemHoverAt(profile, domFocus.x, domFocus.y, browserServiceUrl);
+        await new Promise((r) => setTimeout(r, 120));
+        // 输入框聚焦会导致滚轮无效：仅在确实聚焦 input 时才 click（否则只 hover，避免误点触发媒体/附件面板）
+        if (await isInputFocused(controllerUrl, profile)) {
+          await systemClickAt(profile, domFocus.x, domFocus.y, browserServiceUrl, `comment_blur_input:${reason}`);
+          await new Promise((r) => setTimeout(r, 350));
+        }
+        return domFocus;
+      }
+
+      let info: any = null;
+      try {
+        info = await getScrollContainerInfo(controllerUrl, profile);
+      } catch {
+        info = null;
+      }
+      if (info && Number.isFinite(info.x) && Number.isFinite(info.y)) {
+        // 同样靠右，避免点到评论图片
+        const fx = clamp(Math.floor(preferredFocusPoint.x), 30, viewportW - 30);
+        const fy = clamp(Math.floor(info.y), 160, viewportH - 160);
+        await systemHoverAt(profile, fx, fy, browserServiceUrl);
+        await new Promise((r) => setTimeout(r, 120));
+        if (await isInputFocused(controllerUrl, profile)) {
+          await systemClickAt(profile, fx, fy, browserServiceUrl, `comment_blur_input:${reason}`);
+          await new Promise((r) => setTimeout(r, 350));
+        }
+        return { x: fx, y: fy };
+      }
+    } catch {
+      // ignore
+    }
+    return null;
   };
 
   const extractCommentsOnce = async (params: {
@@ -375,6 +451,7 @@ export async function execute(input: ExpandCommentsInput): Promise<ExpandComment
     extractors: Record<string, { selectors: string[]; attr?: string }>;
     seenKeys: Set<string>;
     out: Array<Record<string, any>>;
+    maxOut?: number | null;
   }) => {
     const script = buildExtractCommentsScript({
       rootSelectors: params.rootSelectors,
@@ -385,7 +462,12 @@ export async function execute(input: ExpandCommentsInput): Promise<ExpandComment
     const domResult = await controllerAction('browser:execute', { profile, script });
     const payload = (domResult as any)?.result || (domResult as any)?.data?.result || domResult;
     if (!payload?.found || !Array.isArray(payload.comments)) return;
-    mergeExtractedComments({ rawList: payload.comments, seenKeys: params.seenKeys, out: params.out });
+    mergeExtractedComments({
+      rawList: payload.comments,
+      seenKeys: params.seenKeys,
+      out: params.out,
+      maxOut: params.maxOut ?? null,
+    });
   };
 
   const stripExtractorDefs = (extractors: any): Record<string, { selectors: string[]; attr?: string }> => {
@@ -427,6 +509,7 @@ export async function execute(input: ExpandCommentsInput): Promise<ExpandComment
     let commentSectionRect: Rect | undefined;
     let commentSectionLocated = false;
     let lastAnchorError: string | null = null;
+    let totalFromHeader: number | null = null;
 
     try {
       const anchor = await locateCommentSection({
@@ -440,6 +523,7 @@ export async function execute(input: ExpandCommentsInput): Promise<ExpandComment
       if (anchor.found && anchor.rect) {
         commentSectionRect = anchor.rect;
         commentSectionLocated = true;
+        preferredFocusPoint = buildFocusPoint(anchor.rect as Rect);
         log(`comment_section rect: ${JSON.stringify(anchor.rect)}`);
       } else {
         lastAnchorError = anchor.error || 'not found';
@@ -457,12 +541,33 @@ export async function execute(input: ExpandCommentsInput): Promise<ExpandComment
         comments: [],
         reachedEnd: false,
         emptyState: false,
+        totalFromHeader: null,
         anchor: {
           commentSectionContainerId: commentSectionId,
           commentSectionRect: undefined,
         },
         error: lastAnchorError || 'comment_section anchor not found',
       };
+    }
+
+    // 2. 读取评论“标称数量”（header total），用于后续校验与落盘展示
+    try {
+      const stats0 = await getCommentStats(controllerUrl, profile);
+      if (typeof stats0?.total === 'number' && Number.isFinite(stats0.total) && stats0.total >= 0) {
+        totalFromHeader = stats0.total;
+      }
+      // 一些页面需要先激活评论区才会出现计数
+      if (totalFromHeader === null) {
+        await tryActivateCommentsUi('header_total_probe');
+        await new Promise((r) => setTimeout(r, 700));
+        const stats1 = await getCommentStats(controllerUrl, profile);
+        if (typeof stats1?.total === 'number' && Number.isFinite(stats1.total) && stats1.total >= 0) {
+          totalFromHeader = stats1.total;
+        }
+      }
+      log(`comment headerTotal=${totalFromHeader === null ? 'null' : String(totalFromHeader)}`);
+    } catch {
+      totalFromHeader = null;
     }
 
     // 2. 重新 inspect 评论区域，供锚点与终止标记 / 样本评论锚点使用
@@ -507,6 +612,7 @@ export async function execute(input: ExpandCommentsInput): Promise<ExpandComment
             comments: [],
             reachedEnd: true,
             emptyState: true,
+            totalFromHeader,
             anchor: {
               commentSectionContainerId: commentSectionId,
               commentSectionRect,
@@ -524,6 +630,7 @@ export async function execute(input: ExpandCommentsInput): Promise<ExpandComment
         comments: [],
         reachedEnd: false,
         emptyState: false,
+        totalFromHeader,
         anchor: {
           commentSectionContainerId: commentSectionId,
           commentSectionRect,
@@ -568,7 +675,24 @@ export async function execute(input: ExpandCommentsInput): Promise<ExpandComment
       }
     }
 
-    const itemSelector = await safeGetPrimarySelectorById(getPrimarySelectorByContainerId, commentItemContainerId) || '.comment-item';
+    // 评论项选择器：必须覆盖“主评论 + 回复/子评论”以便与 headerTotal 对齐。
+    // 注意：这里只用于只读抽取（browser:execute），不会用于点击。
+    const primaryItemSelector =
+      (await safeGetPrimarySelectorById(getPrimarySelectorByContainerId, commentItemContainerId)) || '';
+    const itemSelector = Array.from(
+      new Set(
+        [
+          primaryItemSelector,
+          '.comment-item',
+          '[class*="comment-item"]',
+          // 回复/子评论（不同版本 class 可能不同）
+          "[class*='reply-item']",
+          "[class*='replyItem']",
+          "[class*='sub-comment']",
+          "[class*='subComment']",
+        ].filter((s) => typeof s === 'string' && s.trim()),
+      ),
+    ).join(', ');
     const rawExtractors = await getContainerExtractorsById(commentItemContainerId);
     const extractors = stripExtractorDefs(rawExtractors);
 
@@ -580,16 +704,22 @@ export async function execute(input: ExpandCommentsInput): Promise<ExpandComment
       '[class*="comment-section"]',
     ].filter((s) => s && typeof s === 'string');
 
+    // 仅在评论区域内寻找滚动容器：不要把 html/body 放进根选择器，
+    // 否则 getScrollTargetInfo 可能选中整页滚动容器，导致 focus 点落到左侧图片区域，触发安全保护。
     const scrollRootSelectors =
       rootSelectors.length > 0
-        ? Array.from(new Set([...rootSelectors, 'html', 'body']))
-        : ['.comments-el', '.comment-list', '.comments-container', 'html', 'body'];
+        ? Array.from(new Set([...rootSelectors]))
+        : ['.comments-el', '.comment-list', '.comments-container', '[class*="comment-section"]'];
 
-    const focusPoint = buildFocusPoint(commentSectionRect);
+    let focusPoint = buildFocusPoint(commentSectionRect);
 
     if (ensureLatestTab) {
       await trySelectLatestTab();
     }
+
+    // batch 开始时先恢复滚动焦点，避免切 tab 后 wheel 失效
+    const focused = await refreshScrollFocus('batch_start');
+    if (focused) focusPoint = focused;
 
     // 滚动回顶部（仅在该 tab 第一次抓取时执行，避免重复回顶导致“永远只抽到前 50 条”）
     if (startFromTop) {
@@ -598,10 +728,17 @@ export async function execute(input: ExpandCommentsInput): Promise<ExpandComment
         log('empty_state visible before scroll_to_top; skip scroll_to_top');
       } else {
         try {
-          await systemClickAt(profile, focusPoint.x, focusPoint.y, browserServiceUrl, 'scroll_to_top');
+          // scroll_to_top 前对齐滚动目标（仅 hover，不做额外 click，避免误点到图片导致 fail-fast）
+          const t0 = await scrollTarget(scrollRootSelectors);
+          if (t0?.found && Number.isFinite(t0.x) && Number.isFinite(t0.y)) {
+            focusPoint = { x: clamp(Math.floor(t0.x), 30, viewportW - 30), y: clamp(Math.floor(t0.y), 160, viewportH - 160) };
+          }
+          await systemHoverAt(profile, focusPoint.x, focusPoint.y, browserServiceUrl).catch(() => {});
+          await new Promise((r) => setTimeout(r, 120));
           for (let i = 0; i < 24; i += 1) {
-            const s = await scrollStats(scrollRootSelectors);
+            const s = await scrollTarget(scrollRootSelectors);
             if (!s.found || s.atTop) break;
+            focusPoint = { x: clamp(Math.floor(s.x), 30, viewportW - 30), y: clamp(Math.floor(s.y), 160, viewportH - 160) };
             await systemWheel(-(360 + Math.floor(Math.random() * 220)), focusPoint);
             await new Promise((r) => setTimeout(r, 450 + Math.random() * 350));
           }
@@ -643,7 +780,8 @@ export async function execute(input: ExpandCommentsInput): Promise<ExpandComment
           browserServiceUrl,
           // 详情页同屏可能有多个“展开更多”按钮；这里要尽量展开干净，避免漏掉可见回复
           // 每次点击都会重算目标坐标，避免布局变化导致点偏
-          maxTargets: 6,
+          // 开发阶段优先保证“点击 100% 正确”，避免一次性连续点击多个按钮导致误触
+          maxTargets: 3,
           recomputeEachClick: true,
           focusPoint,
           showMoreContainerId,
@@ -659,6 +797,7 @@ export async function execute(input: ExpandCommentsInput): Promise<ExpandComment
           extractors,
           seenKeys,
           out: comments,
+          maxOut: maxNew,
         });
       } catch (e: any) {
         const msg = String(e?.message || e || '');
@@ -690,6 +829,7 @@ export async function execute(input: ExpandCommentsInput): Promise<ExpandComment
               comments: [],
               reachedEnd: true,
               emptyState: true,
+              totalFromHeader,
               anchor: {
                 commentSectionContainerId: commentSectionId,
                 commentSectionRect,
@@ -709,7 +849,14 @@ export async function execute(input: ExpandCommentsInput): Promise<ExpandComment
         }
       }
 
-      const stats = await scrollStats(scrollRootSelectors);
+      const stats = await scrollTarget(scrollRootSelectors);
+      // 对齐滚动目标：确保 wheel 落在“实际可滚动容器”上（避免 focus 在别处导致 scrollTop 永远不变）
+      if (stats?.found && Number.isFinite(stats.x) && Number.isFinite(stats.y)) {
+        focusPoint = {
+          x: clamp(Math.floor(stats.x), 30, viewportW - 30),
+          y: clamp(Math.floor(stats.y), 160, viewportH - 160),
+        };
+      }
       const endState = await getCommentEndState(controllerUrl, profile);
 
       if (round % 20 === 0) {
@@ -719,8 +866,56 @@ export async function execute(input: ExpandCommentsInput): Promise<ExpandComment
       }
 
       // 终止条件：严格仅以 end_marker / empty_state 为准
-      if (endState.endMarkerVisible || endState.emptyStateVisible) {
+      // 但 end_marker 可见时，仍可能存在“可见但未展开”的回复按钮（导致 headerTotal 覆盖率不足）。
+      // 因此：若 end_marker 可见，先做一次“只展开不滚动”的 sweep；若 sweep 后 end_marker 仍可见且无可展开，则结束。
+      if (endState.emptyStateVisible) {
         break;
+      }
+      if (endState.endMarkerVisible) {
+        let expandedAny = false;
+        for (let sweep = 0; sweep < 4; sweep += 1) {
+          const exp = await expandRepliesInView({
+            controllerUrl,
+            profile,
+            browserServiceUrl,
+            maxTargets: 3,
+            recomputeEachClick: true,
+            focusPoint,
+            showMoreContainerId,
+            showMoreSelector,
+            logPrefix,
+            round: round,
+          });
+          if (exp.clicked > 0) expandedAny = true;
+
+          // 展开后立刻抽一次，确保新增回复进入增量集合
+          try {
+            await extractCommentsOnce({
+              rootSelectors,
+              itemSelector,
+              extractors,
+              seenKeys,
+              out: comments,
+              maxOut: maxNew,
+            });
+          } catch {
+            // ignore
+          }
+
+          if (!exp.clicked) break;
+          await new Promise((r) => setTimeout(r, 650 + Math.random() * 450));
+        }
+
+        const endAfterSweep = await getCommentEndState(controllerUrl, profile);
+        log(
+          `end_marker visible: sweep expandedAny=${expandedAny} endAfterSweep=${endAfterSweep.endMarkerVisible} emptyAfterSweep=${endAfterSweep.emptyStateVisible} comments=${comments.length}`,
+        );
+        if (!expandedAny && endAfterSweep.endMarkerVisible) {
+          break;
+        }
+        // sweep 可能使列表变长（end_marker 暂时消失），继续下一轮滚动以触达真实底部
+        await new Promise((r) => setTimeout(r, 650 + Math.random() * 450));
+        continue;
       }
 
       if (stats.found) {
@@ -738,7 +933,10 @@ export async function execute(input: ExpandCommentsInput): Promise<ExpandComment
         recoveries += 1;
         warn(`scroll stuck (streak=${noEffectStreak}), recovery #${recoveries}: rollback then down`);
         try {
-          await systemClickAt(profile, focusPoint.x, focusPoint.y, browserServiceUrl, 'scroll_recovery');
+          const focused3 = await refreshScrollFocus(`scroll_recovery_${recoveries}`);
+          if (focused3) focusPoint = focused3;
+          // 恢复滚动：按规则仅做“回滚几次再向下滚”的 wheel 操作，不做额外 click（评论区可能含图片，click 误触会触发媒体查看器/风控）
+          await systemHoverAt(profile, focusPoint.x, focusPoint.y, browserServiceUrl).catch(() => {});
         } catch (e: any) {
           const msg = String(e?.message || e || '');
           if (msg.includes('captcha_modal_detected') || msg.includes('unsafe_click_image_in_detail')) throw e;
@@ -769,8 +967,10 @@ export async function execute(input: ExpandCommentsInput): Promise<ExpandComment
         if (recoveries >= 6) break;
       }
 
-      const deltaY = 520 + Math.floor(Math.random() * 260);
+        const deltaY = 520 + Math.floor(Math.random() * 260);
       try {
+        // 每次向下滚前都 hover 一次，确保 wheel 落在可滚动区域（切回 tab 时尤其重要）
+        await systemHoverAt(profile, focusPoint.x, focusPoint.y, browserServiceUrl).catch(() => {});
         await systemWheel(deltaY, focusPoint, 'expand_scroll');
       } catch (e: any) {
         const msg = String(e?.message || e || '');
@@ -791,13 +991,39 @@ export async function execute(input: ExpandCommentsInput): Promise<ExpandComment
           extractors,
           seenKeys,
           out: comments,
+          maxOut: maxNew,
         });
       } catch {
         // ignore
       }
     }
 
-    // 4. 检查终止条件
+    // 多 tab 渐进式：达到本批上限就直接返回（不做 end_marker 判定，避免“刚好 50 条且 end_marker 恰好可见”导致误判为完成）
+    if (stoppedByMaxNew) {
+      let verified = false;
+      if (commentSectionRect) {
+        const sectionOk = commentSectionRect.height > 0;
+        const sampleOk = comments.length > 0 ? !!(sampleCommentRect && sampleCommentRect.height > 0) : true;
+        verified = sectionOk && sampleOk;
+      }
+      return {
+        success: true,
+        comments,
+        reachedEnd: false,
+        emptyState: false,
+        totalFromHeader,
+        stoppedByMaxNew,
+        anchor: {
+          commentSectionContainerId: commentSectionId,
+          commentSectionRect,
+          sampleCommentContainerId,
+          sampleCommentRect,
+          verified,
+        },
+      };
+    }
+
+    // 4. 检查终止条件（严格：end_marker / empty_state）
     const endMarker = findContainer(effectiveTree, /xiaohongshu_detail\.comment_section\.end_marker$/);
     let endMarkerRect: Rect | undefined;
     let endMarkerContainerId: string | undefined;
@@ -858,6 +1084,29 @@ export async function execute(input: ExpandCommentsInput): Promise<ExpandComment
       }
     }
 
+    // 4.1 终态兜底（非重试）：如果 DOM 探针已判定 empty/end 可见，但 anchor 反查失败（常见于布局抖动/遮挡），仍视为结束；
+    // 同时落一张证据截图用于复盘（避免“空态但未计入完成”导致 Phase34 fail-fast）。
+    const finalEndState = await getCommentEndState(controllerUrl, profile).catch((): any => ({
+      endMarkerVisible: false,
+      emptyStateVisible: false,
+    }));
+    if (finalEndState?.emptyStateVisible && !emptyStateHit && comments.length === 0) {
+      await saveDebugScreenshot('empty_state_visible_but_anchor_missing', profile, {
+        note: 'empty_state visible by DOM probe, but anchor verify failed; treat as done',
+        emptyStateContainerId: emptyStateNode?.id || null,
+      });
+      emptyStateHit = true;
+      if (!endMarkerContainerId && emptyStateNode?.id) endMarkerContainerId = emptyStateNode.id;
+    }
+    if (finalEndState?.endMarkerVisible && !endMarkerHit && comments.length > 0) {
+      await saveDebugScreenshot('end_marker_visible_but_anchor_missing', profile, {
+        note: 'end_marker visible by DOM probe, but anchor verify failed; treat as done',
+        endMarkerContainerId: endMarker?.id || null,
+      });
+      endMarkerHit = true;
+      if (!endMarkerContainerId && endMarker?.id) endMarkerContainerId = endMarker.id;
+    }
+
     let verified = false;
     if (commentSectionRect) {
       const sectionOk = commentSectionRect.height > 0;
@@ -867,15 +1116,14 @@ export async function execute(input: ExpandCommentsInput): Promise<ExpandComment
     }
 
     const reachedEnd =
-      comments.length === 0
-        ? Boolean(emptyStateHit && endMarkerRect)
-        : Boolean(endMarkerHit && endMarkerRect);
+      comments.length === 0 ? Boolean(emptyStateHit) : Boolean(endMarkerHit);
 
     return {
       success: true,
       comments,
       reachedEnd,
-      emptyState: comments.length === 0 && Boolean(emptyStateHit && endMarkerRect),
+      emptyState: comments.length === 0 && Boolean(emptyStateHit),
+      totalFromHeader,
       stoppedByMaxNew,
       anchor: {
         commentSectionContainerId: commentSectionId,
@@ -894,6 +1142,7 @@ export async function execute(input: ExpandCommentsInput): Promise<ExpandComment
       comments: [],
       reachedEnd: false,
       emptyState: false,
+      totalFromHeader: null,
       error: `ExpandComments failed: ${error.message}`
     };
   }

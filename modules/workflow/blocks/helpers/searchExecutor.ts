@@ -4,6 +4,8 @@
  * 处理搜索输入、焦点检查和搜索执行
  */
 
+import os from 'node:os';
+
 export interface SearchExecutorConfig {
   profile: string;
   controllerUrl: string;
@@ -144,10 +146,12 @@ export async function executeSearch(
 
     // ✅ 系统级输入：禁止 container:operation type（底层为 session.fill，属于非系统行为）
     // 依赖上游已完成 focus；这里额外做一次清空 + 输入 + Enter
-    // mac 优先 Meta+A；若不生效再尝试 Control+A
-    await controllerAction(controllerUrl, 'keyboard:press', { profileId: profile, key: 'Meta+A' }).catch(() => {});
-    await controllerAction(controllerUrl, 'keyboard:press', { profileId: profile, key: 'Control+A' }).catch(() => {});
+    // 注意：在 mac 上 Control+A 可能导致光标跳到行首，反而造成“关键字拼接”。
+    const platform = os.platform();
+    const selectAllKey = platform === 'darwin' ? 'Meta+A' : 'Control+A';
+    await controllerAction(controllerUrl, 'keyboard:press', { profileId: profile, key: selectAllKey }).catch(() => {});
     await controllerAction(controllerUrl, 'keyboard:press', { profileId: profile, key: 'Backspace' }).catch(() => {});
+    await controllerAction(controllerUrl, 'keyboard:press', { profileId: profile, key: 'Delete' }).catch(() => {});
     await controllerAction(controllerUrl, 'keyboard:type', {
       profileId: profile,
       text: keyword,

@@ -17,12 +17,14 @@ import registerCoreUsage from './register-core-usage.js';
 import { RemoteSessionManager } from './RemoteSessionManager.js';
 import { ensureBuiltinOperations } from '../../modules/operations/src/builtin.js';
 import { getContainerExecutor } from '../../modules/operations/src/executor.js';
+import { installServiceProcessLogger } from '../shared/serviceProcessLogger.js';
 
 // Ensure builtin operations are registered before handling any operations
 ensureBuiltinOperations();
 import { getStateRegistry } from './state-registry.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const { logEvent } = installServiceProcessLogger({ serviceName: 'unified-api' });
 
 const DEFAULT_PORT = Number(process.env.WEBAUTO_UNIFIED_PORT || 7701);
 const DEFAULT_HOST = process.env.WEBAUTO_UNIFIED_HOST || '127.0.0.1';
@@ -242,7 +244,14 @@ class UnifiedApiServer {
     const registry = this.stateRegistry;
     if (registry) {
       setInterval(() => {
-        registry.cleanupOldSessions();
+        try {
+          registry.cleanupOldSessions();
+        } catch (err) {
+          console.warn('[unified-api] stateRegistry cleanup failed:', err?.message || err);
+          logEvent('stateRegistry.cleanupOldSessions.error', {
+            error: { message: err?.message || String(err) },
+          });
+        }
       }, 5 * 60 * 1000); // 5 minutes
     }
     const { createServer } = await import('node:http');
@@ -288,39 +297,40 @@ class UnifiedApiServer {
     this.containerExecutor = getContainerExecutor();
 
     // HTTP routes - unified request handler
-    server.on('request', async (req, res) => {
-      const url = new URL(req.url, `http://${req.headers.host}`);
+    server.on('request', (req, res) => {
+      void (async () => {
+        const url = new URL(req.url, `http://${req.headers.host}`);
 
-      // Container operations endpoints
-      const containerHandled = await handleContainerOperations(req, res, sessionManager, this.containerExecutor);
-      if (containerHandled) return;
+        // Container operations endpoints
+        const containerHandled = await handleContainerOperations(req, res, sessionManager, this.containerExecutor);
+        if (containerHandled) return;
 
-      // 健康检查
-      if (url.pathname === '/health') {
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ ok: true, service: 'unified-api', timestamp: new Date().toISOString() }));
-        return;
-      }
-
-      // Controller actions
-      if (req.method === 'POST' && url.pathname === '/v1/controller/action') {
-        try {
-          const payload = await this.readJsonBody(req);
-          const action = payload?.action;
-          if (!action) {
-            res.writeHead(400, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ success: false, error: 'Missing action' }));
-            return;
-          }
-          const result = await this.controller.handleAction(action, payload.payload || {});
+        // 健康检查
+        if (url.pathname === '/health') {
           res.writeHead(200, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify(this.normalizeResult(result)));
-        } catch (err) {
-          res.writeHead(400, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ success: false, error: err?.message || String(err) }));
+          res.end(JSON.stringify({ ok: true, service: 'unified-api', timestamp: new Date().toISOString() }));
+          return;
         }
-        return;
-      }
+
+        // Controller actions
+        if (req.method === 'POST' && url.pathname === '/v1/controller/action') {
+          try {
+            const payload = await this.readJsonBody(req);
+            const action = payload?.action;
+            if (!action) {
+              res.writeHead(400, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ success: false, error: 'Missing action' }));
+              return;
+            }
+            const result = await this.controller.handleAction(action, payload.payload || {});
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify(this.normalizeResult(result)));
+          } catch (err) {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: false, error: err?.message || String(err) }));
+          }
+          return;
+        }
 
       // Health check for browser service
       // Usage endpoints
@@ -393,9 +403,25 @@ class UnifiedApiServer {
         return;
       }
 
-      // Not found
-      res.writeHead(404, { 'Content-Type': 'text/plain' });
-      res.end('Not Found');
+        // Not found
+        res.writeHead(404, { 'Content-Type': 'text/plain' });
+        res.end('Not Found');
+      })().catch((err) => {
+        // IMPORTANT: http server doesn't await async handlers; ensure no unhandledRejection kills the service.
+        logEvent('http.request.error', {
+          method: req?.method,
+          url: req?.url,
+          error: { message: err?.message || String(err), stack: err?.stack },
+        });
+        try {
+          if (!res.headersSent) {
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+          }
+          res.end(JSON.stringify({ success: false, error: 'Internal Server Error' }));
+        } catch {
+          // ignore
+        }
+      });
     });
 
     // WebSocket event handling
@@ -423,7 +449,11 @@ class UnifiedApiServer {
             return;
           }
 
-          this.handleMessage(socket, raw instanceof Buffer ? raw : Buffer.from(raw as any));
+          void this.handleMessage(socket, raw instanceof Buffer ? raw : Buffer.from(raw as any)).catch((err) => {
+            logEvent('ws.handleMessage.error', {
+              error: { message: err?.message || String(err), stack: err?.stack },
+            });
+          });
         });
         socket.on('close', () => {
           this.wsClients.delete(socket);
@@ -436,7 +466,13 @@ class UnifiedApiServer {
         this.safeSend(socket, { type: 'ready' });
       } else if (url.pathname === '/bus') {
         this.busClients.add(socket);
-        socket.on('message', (raw) => this.handleBusMessage(socket, raw instanceof Buffer ? raw : Buffer.from(raw as any)));
+        socket.on('message', (raw) => {
+          void this.handleBusMessage(socket, raw instanceof Buffer ? raw : Buffer.from(raw as any)).catch((err) => {
+            logEvent('ws.handleBusMessage.error', {
+              error: { message: err?.message || String(err), stack: err?.stack },
+            });
+          });
+        });
         socket.on('close', () => this.busClients.delete(socket));
         socket.on('error', () => this.busClients.delete(socket));
         this.safeSend(socket, { type: 'ready' });
@@ -504,6 +540,10 @@ class UnifiedApiServer {
       socket.send(JSON.stringify(payload));
     } catch (err) {
       console.warn('[unified-api] send failed', err?.message || err);
+      logEvent('ws.send.error', {
+        error: { message: err?.message || String(err), stack: err?.stack },
+        payloadType: typeof payload,
+      });
     }
   }
 
@@ -514,8 +554,56 @@ class UnifiedApiServer {
   }
 }
 
+// ============================================================================
+// Global Error Handlers (防止进程静默退出)
+// ============================================================================
+
+// 捕获未处理的 Promise rejection
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('[unified-api] UNHANDLED PROMISE REJECTION:', reason);
+  logEvent('process.unhandledRejection', {
+    reason: String(reason),
+    stack: reason instanceof Error ? reason.stack : undefined,
+    promise: String(promise),
+  });
+  // 不退出进程，只记录错误
+});
+
+// 捕获未捕获的异常
+process.on('uncaughtException', (err) => {
+  console.error('[unified-api] UNCAUGHT EXCEPTION:', err);
+  logEvent('process.uncaughtException', {
+    error: { message: err?.message || String(err), stack: err?.stack },
+  });
+  // 不立即退出，给现有请求完成的机会
+  setTimeout(() => {
+    console.error('[unified-api] Exiting due to uncaught exception');
+    process.exit(1);
+  }, 5000);
+});
+
+// 监听进程退出信号
+process.on('SIGTERM', () => {
+  console.log('[unified-api] Received SIGTERM, shutting down gracefully');
+  logEvent('process.SIGTERM', {});
+  setTimeout(() => process.exit(0), 1000);
+});
+
+process.on('SIGINT', () => {
+  console.log('[unified-api] Received SIGINT, shutting down gracefully');
+  logEvent('process.SIGINT', {});
+  setTimeout(() => process.exit(0), 1000);
+});
+
+// ============================================================================
+// Start Server
+// ============================================================================
+
 const server = new UnifiedApiServer();
 server.start().catch(err => {
   console.error('[unified-api] Server failed to start:', err);
+  logEvent('server.start.error', {
+    error: { message: err?.message || String(err), stack: err?.stack },
+  });
   process.exit(1);
 });

@@ -38,9 +38,32 @@ export function buildExtractCommentsScript(cfg: ExtractCommentsConfig): string {
     const root = pickRoot();
     const scope = root || document;
 
-    const items = Array.from(
-      scope.querySelectorAll(cfg.itemSelector || '.comment-item, [class*="comment-item"]'),
-    );
+    const DEFAULT_ITEM_SELECTOR = [
+      '.comment-item',
+      "[class*='comment-item']",
+      // 一些页面的“回复/子评论”可能不叫 comment-item，但仍属于评论计数
+      // 注意：这里必须避免把“展开更多/显示更多”按钮误当成评论项
+      "[class*='reply-item']",
+      "[class*='replyItem']",
+      "[class*='sub-comment']",
+      "[class*='subComment']",
+    ].join(', ');
+
+    const rawItems = Array.from(scope.querySelectorAll(cfg.itemSelector || DEFAULT_ITEM_SELECTOR));
+    const items = rawItems.filter((el) => {
+      if (!(el instanceof HTMLElement)) return false;
+      // 排除明显的“展开更多/显示更多”按钮（这些会被 replyExpander 处理）
+      if (el.matches('.show-more, .reply-expand, [class*=\"show-more\"], [class*=\"reply-expand\"], [class*=\"expand\"][class*=\"more\"]')) {
+        return false;
+      }
+      const tag = String(el.tagName || '').toUpperCase();
+      if (tag === 'BUTTON') return false;
+      const t = (el.textContent || '').trim();
+      if (!t) return false;
+      // 常见展开按钮文案很短；避免把它当成评论
+      if (t.length <= 16 && t.includes('展开')) return false;
+      return true;
+    });
 
     const comments = items.map((el, idx) => {
       const item = {};
@@ -96,9 +119,12 @@ export function mergeExtractedComments(params: {
   rawList: Array<Record<string, any>>;
   seenKeys: Set<string>;
   out: Array<Record<string, any>>;
+  maxOut?: number | null;
 }) {
-  const { rawList, seenKeys, out } = params;
+  const { rawList, seenKeys, out, maxOut } = params;
+  const limit = typeof maxOut === 'number' && Number.isFinite(maxOut) && maxOut > 0 ? Math.floor(maxOut) : null;
   for (const c of rawList) {
+    if (limit && out.length >= limit) break;
     if (!c || typeof c !== 'object') continue;
     const hasContent =
       Boolean((c as any).text && String((c as any).text).trim()) ||

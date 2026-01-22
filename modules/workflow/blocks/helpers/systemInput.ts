@@ -101,6 +101,7 @@ async function probePoint(profileId: string, x: number, y: number): Promise<{
   textSnippet: string | null;
   href: string | null;
   isCaptcha: boolean;
+  isMediaViewerOpen: boolean;
   isImageLike: boolean;
   isCover: boolean;
 }> {
@@ -121,6 +122,21 @@ async function probePoint(profileId: string, x: number, y: number): Promise<{
         const modalText = modal ? (modal.textContent || '') : '';
         const isCaptcha = Boolean(modal) || modalText.includes('请通过验证') || modalText.includes('扫码验证');
 
+        // 图片查看器/媒体预览层：出现时禁止继续点击（开发阶段不做兜底纠错）
+        const dialog = document.querySelector('[aria-modal=\"true\"], [role=\"dialog\"][aria-modal=\"true\"], [role=\"dialog\"]');
+        const hasBigImage = Array.from(document.querySelectorAll('img')).some((img) => {
+          try {
+            const r = img.getBoundingClientRect();
+            return r && r.width > (window.innerWidth || 0) * 0.55 && r.height > (window.innerHeight || 0) * 0.55;
+          } catch {
+            return false;
+          }
+        });
+        const mediaOverlay =
+          document.querySelector('.media-viewer, .image-viewer, .photo-viewer, .preview-modal, .viewer-modal') ||
+          document.querySelector('[class*=\"viewer\"][class*=\"image\"], [class*=\"viewer\"][class*=\"photo\"], [class*=\"preview\"][class*=\"image\"], [class*=\"preview\"][class*=\"photo\"]');
+        const isMediaViewerOpen = Boolean(mediaOverlay) || (Boolean(dialog) && hasBigImage);
+
         const isImageTag = tag === 'IMG' || tag === 'VIDEO' || tag === 'CANVAS';
         const imageAncestor = el && el.closest ? el.closest('img,video,canvas') : null;
         const isImageLike = Boolean(isImageTag || imageAncestor);
@@ -128,7 +144,7 @@ async function probePoint(profileId: string, x: number, y: number): Promise<{
         const cover = el && el.closest ? el.closest('a.cover') : null;
         const isCover = Boolean(cover);
 
-        return { tag, className, textSnippet, href: href || null, isCaptcha, isImageLike, isCover };
+        return { tag, className, textSnippet, href: href || null, isCaptcha, isMediaViewerOpen, isImageLike, isCover };
       })()`,
     });
     const payload = (res as any)?.result ?? (res as any)?.data?.result ?? res;
@@ -138,6 +154,7 @@ async function probePoint(profileId: string, x: number, y: number): Promise<{
       textSnippet: typeof payload?.textSnippet === 'string' ? payload.textSnippet : null,
       href: typeof payload?.href === 'string' ? payload.href : null,
       isCaptcha: Boolean(payload?.isCaptcha),
+      isMediaViewerOpen: Boolean(payload?.isMediaViewerOpen),
       isImageLike: Boolean(payload?.isImageLike),
       isCover: Boolean(payload?.isCover),
     };
@@ -148,6 +165,7 @@ async function probePoint(profileId: string, x: number, y: number): Promise<{
       textSnippet: null,
       href: null,
       isCaptcha: false,
+      isMediaViewerOpen: false,
       isImageLike: false,
       isCover: false,
     };
@@ -181,6 +199,129 @@ function shouldGuardAgainstImageClick(context?: string): boolean {
     c.includes('reply') ||
     c.includes('select_latest_tab')
   );
+}
+
+function shouldStopOnMediaViewer(context?: string): boolean {
+  const c = String(context || '').trim();
+  if (!c) return false;
+  // 开发阶段：评论/滚动相关任何点击遇到媒体查看器，直接停
+  return c.includes('scroll') || c.includes('comment') || c.includes('reply');
+}
+
+function isDangerousHrefInDetail(href: string | null): boolean {
+  const h = typeof href === 'string' ? href : '';
+  if (!h) return false;
+  // 在详情/评论区域，点击到链接通常意味着误点（头像/话题/推荐等）
+  return (
+    h.includes('/user/') ||
+    h.includes('/user/profile') ||
+    h.includes('/profile') ||
+    h.includes('/search_result') ||
+    h.startsWith('http://') ||
+    h.startsWith('https://')
+  );
+}
+
+async function highlightClickPoint(profileId: string, x: number, y: number, color = '#ff3b30', durationMs = 900) {
+  try {
+    const size = 18;
+    await controllerAction('browser:execute', {
+      profile: profileId,
+      script: `(() => {
+        const p = { x: ${JSON.stringify(x)}, y: ${JSON.stringify(y)} };
+        const size = ${JSON.stringify(size)};
+        let el = document.getElementById('webauto-click-point');
+        if (!el) {
+          el = document.createElement('div');
+          el.id = 'webauto-click-point';
+          el.style.position = 'fixed';
+          el.style.pointerEvents = 'none';
+          el.style.zIndex = '2147483647';
+          el.style.borderRadius = '50%';
+          el.style.boxSizing = 'border-box';
+          document.body.appendChild(el);
+        }
+        el.style.left = (p.x - size / 2) + 'px';
+        el.style.top = (p.y - size / 2) + 'px';
+        el.style.width = size + 'px';
+        el.style.height = size + 'px';
+        el.style.border = '3px solid ${color}';
+        el.style.background = 'rgba(255, 59, 48, 0.08)';
+        setTimeout(() => {
+          try { el && el.parentElement && el.parentElement.removeChild(el); } catch {}
+        }, ${durationMs});
+        return true;
+      })()`,
+    });
+  } catch {
+    // ignore
+  }
+}
+
+async function highlightTargetRectAtPoint(options: {
+  profileId: string;
+  x: number;
+  y: number;
+  context?: string;
+  color?: string;
+  durationMs?: number;
+}): Promise<{ rect?: { x: number; y: number; width: number; height: number }; tag?: string | null } | null> {
+  const { profileId, x, y, context, color = '#ff3b30', durationMs = 1200 } = options;
+  try {
+    const res = await controllerAction('browser:execute', {
+      profile: profileId,
+      script: `(() => {
+        const p = { x: ${JSON.stringify(x)}, y: ${JSON.stringify(y)} };
+        const context = ${JSON.stringify(String(context || ''))};
+        const el = document.elementFromPoint(p.x, p.y);
+        if (!el || !(el instanceof HTMLElement)) return null;
+
+        const tag = el.tagName ? String(el.tagName) : null;
+        // 优先高亮“可点击目标”本身（展开回复/更多评论等），避免只画一个点看不出点了啥
+        let target = el;
+        if (context.includes('reply') || context.includes('expand') || context.includes('comment')) {
+          const t =
+            el.closest('button') ||
+            el.closest('[role=\"button\"]') ||
+            el.closest('.show-more') ||
+            el.closest('[class*=\"show-more\"]') ||
+            el.closest('[class*=\"expand\"]') ||
+            el.closest('[class*=\"more\"]');
+          if (t && t instanceof HTMLElement) target = t;
+        }
+        const r = target.getBoundingClientRect();
+        if (!r || !r.width || !r.height) return null;
+
+        let overlay = document.getElementById('webauto-click-target-rect');
+        if (!overlay) {
+          overlay = document.createElement('div');
+          overlay.id = 'webauto-click-target-rect';
+          overlay.style.position = 'fixed';
+          overlay.style.pointerEvents = 'none';
+          overlay.style.zIndex = '2147483647';
+          overlay.style.boxSizing = 'border-box';
+          overlay.style.borderRadius = '6px';
+          document.body.appendChild(overlay);
+        }
+        overlay.style.left = r.left + 'px';
+        overlay.style.top = r.top + 'px';
+        overlay.style.width = r.width + 'px';
+        overlay.style.height = r.height + 'px';
+        overlay.style.border = '3px solid ${color}';
+        overlay.style.background = 'rgba(255, 59, 48, 0.05)';
+        setTimeout(() => {
+          try { overlay && overlay.parentElement && overlay.parentElement.removeChild(overlay); } catch {}
+        }, ${durationMs});
+
+        return { tag, rect: { x: r.left, y: r.top, width: r.width, height: r.height } };
+      })()`,
+    });
+    const payload = (res as any)?.result ?? (res as any)?.data?.result ?? res;
+    if (!payload) return null;
+    return payload;
+  } catch {
+    return null;
+  }
 }
 
 export interface FocusPoint {
@@ -233,14 +374,24 @@ export async function systemClickAt(
   browserServiceUrl = 'http://127.0.0.1:7704',
   context?: string,
 ): Promise<void> {
-  // 点击前截屏（用于调试）
-  await saveDebugScreenshot(`before_click_${context || 'system'}`, profileId, { x, y, context });
+  const probe = await probePoint(profileId, x, y);
 
   // 风控/验证码：出现就立即停下（开发阶段不做重试/兜底），保留证据便于人工处理
-  const probe = await probePoint(profileId, x, y);
   if (probe.isCaptcha) {
     await saveDebugScreenshot(`captcha_detected_${context || 'system'}`, profileId, { x, y, context, probe });
     throw new Error(`captcha_modal_detected (context=${context || 'system'})`);
+  }
+
+  // 媒体查看器/预览层：出现就立即停下（避免乱点）
+  if (shouldStopOnMediaViewer(context) && probe.isMediaViewerOpen) {
+    await saveDebugScreenshot(`media_viewer_open_${context || 'system'}`, profileId, { x, y, context, probe });
+    throw new Error(`media_viewer_open (context=${context || 'system'})`);
+  }
+
+  // 详情页/评论相关点击：禁止点到链接（通常是头像/话题/推荐/外链）
+  if (shouldGuardAgainstImageClick(context) && isDangerousHrefInDetail(probe.href)) {
+    await saveDebugScreenshot(`unsafe_click_href_${context || 'system'}`, profileId, { x, y, context, probe });
+    throw new Error(`unsafe_click_href_in_detail (context=${context || 'system'})`);
   }
 
   // 详情页/评论滚动相关点击：禁止点到图片/视频（会打开查看器/新层）
@@ -248,6 +399,27 @@ export async function systemClickAt(
     await saveDebugScreenshot(`unsafe_click_image_${context || 'system'}`, profileId, { x, y, context, probe });
     throw new Error(`unsafe_click_image_in_detail (context=${context || 'system'})`);
   }
+
+  // 高亮后再截图（便于复盘点位是否正确）
+  const hi = await highlightTargetRectAtPoint({
+    profileId,
+    x,
+    y,
+    context,
+    color: '#ff3b30',
+    durationMs: 1100,
+  });
+  // 同时保留点位小圆点，便于确认“点到的确切坐标”
+  await highlightClickPoint(profileId, x, y, '#ff3b30', 1100);
+  await new Promise((r) => setTimeout(r, 180));
+  await saveDebugScreenshot(`before_click_${context || 'system'}`, profileId, {
+    x,
+    y,
+    context,
+    probe,
+    highlightRect: hi?.rect ?? null,
+    highlightTag: hi?.tag ?? null,
+  });
 
   await systemHoverAt(profileId, x, y, browserServiceUrl);
   await new Promise((r) => setTimeout(r, 80));

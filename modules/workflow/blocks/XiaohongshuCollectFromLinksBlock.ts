@@ -44,6 +44,7 @@ export interface XiaohongshuCollectFromLinksOutput {
   finalPersistedCount: number;
   addedCount: number;
   processedCount: number;
+  rejectedCount?: number;
   targetCount: number;
   error?: string;
 }
@@ -167,6 +168,51 @@ export async function execute(input: XiaohongshuCollectFromLinksInput): Promise<
     }
   }
 
+  async function moveNoteToRejected(options: {
+    noteId: string;
+    reason: string;
+    meta?: Record<string, any>;
+  }): Promise<void> {
+    const { noteId, reason, meta } = options;
+    try {
+      const src = path.join(persistedAtStart.keywordDir, noteId);
+      const rejectedDir = path.join(persistedAtStart.keywordDir, '_rejected');
+      await fs.mkdir(rejectedDir, { recursive: true });
+      let dest = path.join(rejectedDir, noteId);
+      // 若已存在同名，追加时间戳避免覆盖
+      try {
+        await fs.access(dest);
+        const ts = new Date().toISOString().replace(/[:.]/g, '-');
+        dest = path.join(rejectedDir, `${noteId}_${ts}_${sanitizeFilenamePart(reason)}`);
+      } catch {
+        // ok
+      }
+      await fs.rename(src, dest).catch(async (e: any) => {
+        // rename 失败则尝试直接写入 reject.json（不阻塞流程）
+        await saveDebug('move_to_rejected_failed', { noteId, reason, error: e?.message || String(e) });
+      });
+      const rejectJsonPath = path.join(dest, 'reject.json');
+      await fs
+        .writeFile(
+          rejectJsonPath,
+          JSON.stringify(
+            {
+              ts: new Date().toISOString(),
+              noteId,
+              reason,
+              ...((meta && typeof meta === 'object') ? { meta } : {}),
+            },
+            null,
+            2,
+          ),
+          'utf-8',
+        )
+        .catch(() => {});
+    } catch {
+      // ignore
+    }
+  }
+
   function validateEntry(raw: any): Phase2LinkEntry | null {
     const noteId = typeof raw?.noteId === 'string' ? raw.noteId.trim() : '';
     const safeUrl = typeof raw?.safeUrl === 'string' ? raw.safeUrl.trim() : '';
@@ -183,6 +229,7 @@ export async function execute(input: XiaohongshuCollectFromLinksInput): Promise<
     keyword,
     requiredFiles: ['content.md', 'comments.md'],
     requireCommentsDone: true,
+    minCommentsCoverageRatio: 0.9,
   });
 
   let persistedCount = persistedAtStart.count;
@@ -264,6 +311,7 @@ export async function execute(input: XiaohongshuCollectFromLinksInput): Promise<
 
   const processedNoteIds = new Set<string>(persistedAtStart.noteIds);
   let processedCount = 0;
+  let rejectedCount = 0;
 
   // Phase34：最多 4 个“不同笔记”的详情 tab 轮换抓评论（每 tab 每次最多新增 50）
   const MAX_TABS = 4;
@@ -273,12 +321,14 @@ export async function execute(input: XiaohongshuCollectFromLinksInput): Promise<
     noteId: string;
     safeUrl: string;
     detailUrl: string;
+    tabIndex: number;
     startedAt: number;
     firstRun: boolean;
     seenKeys: Set<string>;
     comments: Array<Record<string, any>>;
     reachedEnd: boolean;
     emptyState: boolean;
+    totalFromHeader: number | null;
     batches: number;
   };
 
@@ -286,11 +336,18 @@ export async function execute(input: XiaohongshuCollectFromLinksInput): Promise<
   let cursor = 0;
   const active: Task[] = [];
   let rr = 0;
+  const usedTabIndexes = new Set<number>();
 
   async function listPages(): Promise<Array<{ index: number; url: string; active: boolean }>> {
     const res = await controllerAction('browser:page:list', { profileId: profile }).catch((): any => null);
     const pages = (res as any)?.pages || (res as any)?.data?.pages || [];
     return Array.isArray(pages) ? pages : [];
+  }
+
+  function parseNoteIdFromUrl(url: string): string | null {
+    const u = typeof url === 'string' ? url : '';
+    const m = u.match(/\/explore\/([^/?#]+)/);
+    return m ? String(m[1]) : null;
   }
 
   async function resolveDetailTabIndex(noteId: string): Promise<number | null> {
@@ -302,23 +359,112 @@ export async function execute(input: XiaohongshuCollectFromLinksInput): Promise<
     return null;
   }
 
+  async function rebuildUsedTabIndexes(reason: string): Promise<void> {
+    const pages = await listPages().catch(
+      () => [] as Array<{ index: number; url: string; active: boolean }>,
+    );
+    usedTabIndexes.clear();
+    for (const t of active) {
+      const resolved = pages.find((p) => typeof p?.url === 'string' && p.url.includes('/explore/') && p.url.includes(t.noteId));
+      if (resolved && Number.isFinite((resolved as any).index)) {
+        const idx = Number((resolved as any).index);
+        t.tabIndex = idx;
+        usedTabIndexes.add(idx);
+      } else {
+        // keep the task, but mark unknown; will reopen when scheduled
+        (t as any).tabIndex = null;
+      }
+    }
+    await saveDebug('tabs_rebuilt', {
+      reason,
+      pages: pages.map((p) => ({ index: (p as any)?.index, url: (p as any)?.url, active: (p as any)?.active })),
+      active: active.map((t) => ({ noteId: t.noteId, tabIndex: (t as any).tabIndex ?? null })),
+      usedTabIndexes: Array.from(usedTabIndexes),
+    }).catch(() => {});
+  }
+
+  async function pickReusableTabIndex(): Promise<number | null> {
+    const pages = await listPages();
+    const candidates = pages
+      .filter((p) => Number.isFinite(p?.index))
+      .filter((p) => !usedTabIndexes.has(Number(p.index)))
+      .map((p) => ({ index: Number(p.index), url: typeof p?.url === 'string' ? p.url : '' }))
+      .filter((p) => p.index >= 0)
+      // 允许复用 about:blank 等空白页（开发阶段避免无意义地新开 tab）
+      .filter((p) => p.url);
+
+    if (candidates.length === 0) return null;
+
+    // 优先不复用搜索页 tab（保留搜索结果页便于人工观察）
+    const preferred = candidates.filter((p) => !p.url.includes('/search_result'));
+    const pickFrom = preferred.length > 0 ? preferred : candidates;
+    pickFrom.sort((a, b) => a.index - b.index);
+    return pickFrom[0].index;
+  }
+
   async function openNewTask(link: Phase2LinkEntry): Promise<Task> {
     processedCount += 1;
-    console.log(`[Phase34FromLinks] open tab for note ${persistedCount + 1}/${targetCount}: noteId=${link.noteId}`);
+    console.log(
+      `[Phase34FromLinks] open/reuse tab for note ${persistedCount + 1}/${targetCount}: noteId=${link.noteId}`,
+    );
 
-    const created = await controllerAction('browser:page:new', { profileId: profile, url: link.safeUrl });
-    const createdIndex = Number(created?.index ?? created?.data?.index);
-    if (!Number.isFinite(createdIndex)) {
-      await saveDebug('page_new_invalid_index', { created, noteId: link.noteId, safeUrl: link.safeUrl });
-      throw new Error('browser:page:new returned invalid index');
+    // refresh tab index bookkeeping (page indices may shift after closePage)
+    await rebuildUsedTabIndexes('open_new_task').catch(() => {});
+
+    // 启动 Phase34 时，可能已经存在上次中断遗留的详情 tab；
+    // 开发阶段要求：优先复用现有 tab，在原有基础上重定向，避免无限开新 tab。
+    let idx: number | null = await resolveDetailTabIndex(link.noteId);
+    let reused = true;
+
+    if (idx === null) {
+      idx = await pickReusableTabIndex();
     }
-    await controllerAction('browser:page:switch', { profileId: profile, index: createdIndex });
-    await delay(1800);
-    await saveDebug('after_open_detail_tab', { noteId: link.noteId, detailIndex: createdIndex });
+
+    if (idx === null) {
+      reused = false;
+      const created = await controllerAction('browser:page:new', { profileId: profile, url: link.safeUrl });
+      const createdIndex = Number(created?.index ?? created?.data?.index);
+      if (!Number.isFinite(createdIndex)) {
+        await saveDebug('page_new_invalid_index', { created, noteId: link.noteId, safeUrl: link.safeUrl });
+        throw new Error('browser:page:new returned invalid index');
+      }
+      idx = createdIndex;
+    }
+
+    usedTabIndexes.add(idx);
+    try {
+      await controllerAction('browser:page:switch', { profileId: profile, index: idx });
+    } catch (e: any) {
+      // Page indices can shift; re-resolve by noteId and retry once.
+      await saveDebug('page_switch_failed_open_task', { noteId: link.noteId, detailIndex: idx, error: e?.message || String(e) });
+      const resolved = await resolveDetailTabIndex(link.noteId);
+      if (resolved === null || !Number.isFinite(resolved)) throw e;
+      usedTabIndexes.delete(idx);
+      idx = resolved;
+      usedTabIndexes.add(idx);
+      await controllerAction('browser:page:switch', { profileId: profile, index: idx });
+    }
+    await delay(900);
+
+    const beforeUrl = await getCurrentUrl().catch(() => '');
+    const beforeNoteId = parseNoteIdFromUrl(beforeUrl || '');
+
+    // 若复用的 tab 不是目标详情页，则在当前 tab 内 browser:goto 到 safeUrl
+    if (beforeNoteId !== link.noteId || !beforeUrl.includes('xsec_token=')) {
+      await controllerAction('browser:goto', { profile, url: link.safeUrl });
+      await delay(2200);
+    }
+
+    await saveDebug('after_open_detail_tab', {
+      noteId: link.noteId,
+      detailIndex: idx,
+      reused,
+      beforeUrl,
+    });
 
     const urlNow = await getCurrentUrl();
     if (!urlNow.includes('/explore/') || !urlNow.includes('xsec_token=') || !urlNow.includes(link.noteId)) {
-      await saveDebug('detail_url_mismatch', { noteId: link.noteId, expectedSafeUrl: link.safeUrl, urlNow });
+      await saveDebug('detail_url_mismatch', { noteId: link.noteId, expectedSafeUrl: link.safeUrl, beforeUrl, urlNow });
       throw new Error(`detail_url_mismatch: ${urlNow}`);
     }
 
@@ -349,20 +495,26 @@ export async function execute(input: XiaohongshuCollectFromLinksInput): Promise<
       noteId: link.noteId,
       safeUrl: link.safeUrl,
       detailUrl: urlNow,
+      tabIndex: idx,
       startedAt: Date.now(),
       firstRun: true,
       seenKeys: new Set<string>(),
       comments: [],
       reachedEnd: false,
       emptyState: false,
+      totalFromHeader: null,
       batches: 0,
     };
   }
 
   async function closeTaskTab(task: Task): Promise<void> {
     const idx = await resolveDetailTabIndex(task.noteId);
-    if (idx === null) {
-      await saveDebug('close_task_tab_not_found', { noteId: task.noteId, detailUrl: task.detailUrl });
+    if (idx === null || !Number.isFinite(idx)) {
+      await saveDebug('close_task_tab_not_found', {
+        noteId: task.noteId,
+        detailUrl: task.detailUrl,
+        tabIndex: task.tabIndex ?? null,
+      });
       return;
     }
     try {
@@ -377,23 +529,59 @@ export async function execute(input: XiaohongshuCollectFromLinksInput): Promise<
       await saveDebug('page_close_failed', { noteId: task.noteId, detailIndex: idx, error: e?.message || String(e) });
       throw e;
     });
+    usedTabIndexes.delete(idx);
+    // indices may shift after close; refresh bookkeeping
+    await rebuildUsedTabIndexes('close_task_tab').catch(() => {});
     await delay(650);
   }
 
-  async function runOneBatch(task: Task): Promise<{ done: boolean; newCount: number }> {
-    const idx = await resolveDetailTabIndex(task.noteId);
-    if (idx === null) {
-      await saveDebug('task_tab_not_found', { noteId: task.noteId, detailUrl: task.detailUrl });
-      throw new Error('task_tab_not_found');
+  async function runOneBatch(task: Task): Promise<{ done: boolean; newCount: number; rejected?: { reason: string; meta?: any } }> {
+    // Always resolve by noteId first; page indices can shift after closePage.
+    let idx: number | null = await resolveDetailTabIndex(task.noteId);
+    if (idx === null || !Number.isFinite(idx)) {
+      // The tab might have been closed (by us or by the site). Reopen on demand.
+      await saveDebug('task_tab_missing_reopen', { noteId: task.noteId, safeUrl: task.safeUrl, detailUrl: task.detailUrl });
+      await rebuildUsedTabIndexes('task_tab_missing_reopen').catch(() => {});
+      const created = await controllerAction('browser:page:new', { profileId: profile, url: task.safeUrl });
+      const createdIndex = Number(created?.index ?? created?.data?.index);
+      if (!Number.isFinite(createdIndex)) {
+        await saveDebug('page_new_invalid_index_run_batch', { created, noteId: task.noteId, safeUrl: task.safeUrl });
+        throw new Error('browser:page:new returned invalid index');
+      }
+      idx = createdIndex;
     }
+    task.tabIndex = idx;
 
     console.log(
       `[Phase34FromLinks] batch start noteId=${task.noteId} tabIndex=${idx} batchNo=${task.batches + 1} (maxNew=${BATCH})`,
     );
 
-    await controllerAction('browser:page:switch', { profileId: profile, index: idx });
+    try {
+      await controllerAction('browser:page:switch', { profileId: profile, index: idx });
+    } catch (e: any) {
+      // The index is stale or shifted; rebuild and retry once by re-resolving.
+      await saveDebug('page_switch_failed_run_batch', { noteId: task.noteId, detailIndex: idx, error: e?.message || String(e) });
+      await rebuildUsedTabIndexes('page_switch_failed_run_batch').catch(() => {});
+      const resolved = await resolveDetailTabIndex(task.noteId);
+      if (resolved === null || !Number.isFinite(resolved)) throw e;
+      task.tabIndex = resolved;
+      idx = resolved;
+      await controllerAction('browser:page:switch', { profileId: profile, index: idx });
+    }
     await delay(900);
     await saveDebug('before_comments_batch', { noteId: task.noteId, tabIndex: idx, batchNo: task.batches + 1 });
+
+    // Safety: ensure we are still on the correct detail URL; if not, navigate to safeUrl within the same tab.
+    try {
+      const urlNow = await getCurrentUrl();
+      if (!urlNow.includes('/explore/') || !urlNow.includes(task.noteId) || !urlNow.includes('xsec_token=')) {
+        await saveDebug('run_batch_detail_url_mismatch', { noteId: task.noteId, urlNow, safeUrl: task.safeUrl });
+        await controllerAction('browser:goto', { profile, url: task.safeUrl });
+        await delay(2200);
+      }
+    } catch {
+      // ignore
+    }
 
     const out = await expandComments({
       sessionId,
@@ -424,6 +612,7 @@ export async function execute(input: XiaohongshuCollectFromLinksInput): Promise<
     const done = Boolean(out.reachedEnd || out.emptyState);
     task.reachedEnd = Boolean(out.reachedEnd);
     task.emptyState = Boolean(out.emptyState);
+    task.totalFromHeader = typeof (out as any)?.totalFromHeader === 'number' ? (out as any).totalFromHeader : null;
 
     // 若未到底/空，则必须严格达到 batch 上限（否则说明抽取/滚动异常，需要停下排查）
     if (!done && !out.stoppedByMaxNew) {
@@ -451,7 +640,7 @@ export async function execute(input: XiaohongshuCollectFromLinksInput): Promise<
         reachedEnd: task.reachedEnd,
         emptyState: task.emptyState,
         // 仅用于 comments.md 头部展示
-        totalFromHeader: null,
+        totalFromHeader: task.totalFromHeader,
       },
       persistMode: 'comments',
       downloadImages: false,
@@ -459,6 +648,46 @@ export async function execute(input: XiaohongshuCollectFromLinksInput): Promise<
     if (!persistedComments.success) {
       await saveDebug('persist_comments_failed', { noteId: task.noteId, error: persistedComments.error || null });
       throw new Error(`persist_comments_failed: ${persistedComments.error || 'unknown'}`);
+    }
+
+    // 评论覆盖率校验（必须达到 90% 标称数量）：仅在“到底/空态”后执行硬校验
+    // 注意：这里不再 throw 终止整个 Phase34；而是将该 note 移入 _rejected，并继续用后续链接补齐 targetCount。
+    if (done && task.totalFromHeader !== null && task.totalFromHeader > 0) {
+      const need = Math.ceil(task.totalFromHeader * 0.9);
+      const got = task.comments.length;
+      if (got < need) {
+        const replyCount = task.comments.filter((c: any) => Boolean(c && typeof c === 'object' && (c as any).is_reply)).length;
+        const withIdCount = task.comments.filter((c: any) => {
+          const id = (c as any)?.comment_id || (c as any)?.commentId || (c as any)?.id || '';
+          return typeof id === 'string' && id.trim().length > 0;
+        }).length;
+        const tail = task.comments.slice(-5).map((c: any) => ({
+          key: typeof c?._key === 'string' ? c._key : null,
+          id: (c as any)?.comment_id || null,
+          user: (c as any)?.user_name || null,
+          text: typeof (c as any)?.text === 'string' ? String((c as any).text).slice(0, 80) : null,
+          is_reply: Boolean((c as any)?.is_reply),
+        }));
+        await saveDebug('comments_coverage_low', {
+          noteId: task.noteId,
+          got,
+          headerTotal: task.totalFromHeader,
+          needAtLeast: need,
+          reachedEnd: task.reachedEnd,
+          emptyState: task.emptyState,
+          replyCount,
+          withIdCount,
+          tail,
+        });
+        return {
+          done: true,
+          newCount,
+          rejected: {
+            reason: 'comments_coverage_low',
+            meta: { got, headerTotal: task.totalFromHeader, needAtLeast: need, replyCount, withIdCount },
+          },
+        };
+      }
     }
 
     console.log(
@@ -481,12 +710,21 @@ export async function execute(input: XiaohongshuCollectFromLinksInput): Promise<
         await closeTaskTab(task);
         active.pop();
         processedNoteIds.add(task.noteId);
+        if (res.rejected) {
+          rejectedCount += 1;
+          await moveNoteToRejected({
+            noteId: task.noteId,
+            reason: res.rejected.reason,
+            meta: res.rejected.meta || {},
+          });
+        }
         const persistedAfter = await countPersistedNotes({
           platform: 'xiaohongshu',
           env,
           keyword,
           requiredFiles: ['content.md', 'comments.md'],
           requireCommentsDone: true,
+          minCommentsCoverageRatio: 0.9,
         });
         persistedCount = persistedAfter.count;
       }
@@ -506,6 +744,14 @@ export async function execute(input: XiaohongshuCollectFromLinksInput): Promise<
       const idx = active.findIndex((t) => t.noteId === task.noteId);
       if (idx >= 0) active.splice(idx, 1);
       processedNoteIds.add(task.noteId);
+      if (res.rejected) {
+        rejectedCount += 1;
+        await moveNoteToRejected({
+          noteId: task.noteId,
+          reason: res.rejected.reason,
+          meta: res.rejected.meta || {},
+        });
+      }
 
       const persistedAfter = await countPersistedNotes({
         platform: 'xiaohongshu',
@@ -513,6 +759,7 @@ export async function execute(input: XiaohongshuCollectFromLinksInput): Promise<
         keyword,
         requiredFiles: ['content.md', 'comments.md'],
         requireCommentsDone: true,
+        minCommentsCoverageRatio: 0.9,
       });
       persistedCount = persistedAfter.count;
     }
@@ -532,6 +779,7 @@ export async function execute(input: XiaohongshuCollectFromLinksInput): Promise<
       finalPersistedCount,
       addedCount,
       processedCount,
+      rejectedCount,
       targetCount,
       error: `target_not_reached: ${finalPersistedCount}/${targetCount}`,
     };
@@ -546,6 +794,7 @@ export async function execute(input: XiaohongshuCollectFromLinksInput): Promise<
     finalPersistedCount,
     addedCount,
     processedCount,
+    rejectedCount,
     targetCount,
   };
 }

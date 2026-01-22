@@ -15,12 +15,14 @@ export interface ValidateLinksInput {
 }
 
 export interface ValidateLinksOutput {
-  validLinks: Array<{
+  success: boolean;
+  links: Array<{
     noteId: string;
     safeUrl: string;
     searchUrl: string;
     ts: string;
   }>;
+  error?: string;
   totalCount: number;
   validCount: number;
   currentUrl: string;
@@ -105,7 +107,7 @@ export async function execute(input: ValidateLinksInput): Promise<ValidateLinksO
 
   console.log(`[Phase34ValidateLinks] 开始校验链接...`);
 
-  // 1. 确认当前在搜索结果页
+  // 1. 确认当前在搜索结果页，如果不在则自动返回
   const currentUrl = await controllerAction('browser:execute', {
     profile,
     script: 'window.location.href',
@@ -113,8 +115,50 @@ export async function execute(input: ValidateLinksInput): Promise<ValidateLinksO
 
   console.log(`[Phase34ValidateLinks] 当前页面: ${currentUrl}`);
 
+  // 异常恢复：如果不在搜索结果页，尝试从 links 读取 searchUrl 并返回
   if (!currentUrl.includes('/search_result')) {
-    throw new Error(`[Phase34ValidateLinks] 当前不在搜索结果页: ${currentUrl}`);
+    console.warn(`[Phase34ValidateLinks] 当前不在搜索结果页，尝试返回...`);
+
+    const defaultPath = expandHome(`~/.webauto/download/xiaohongshu/debug/${keyword}/phase2-links.jsonl`);
+    const targetPath = expandHome(linksPath || defaultPath);
+
+    const allLinks = await readJsonl(targetPath);
+
+    if (allLinks.length === 0) {
+      throw new Error(`[Phase34ValidateLinks] 当前不在搜索结果页且无法读取链接文件: ${currentUrl}`);
+    }
+
+    // 找到第一条有效链接的 searchUrl
+    const firstValid = allLinks.find((item: any) => {
+      const hasToken = item.safeUrl && item.safeUrl.includes('xsec_token');
+      const matchesKeyword = item.searchUrl && matchesKeywordFromSearchUrl(item.searchUrl, keyword);
+      return hasToken && matchesKeyword;
+    }) as any;
+
+    if (!firstValid || !firstValid.searchUrl) {
+      throw new Error(`[Phase34ValidateLinks] 当前不在搜索结果页且无有效搜索URL: ${currentUrl}`);
+    }
+
+    console.log(`[Phase34ValidateLinks] 返回搜索结果页: ${firstValid.searchUrl}`);
+
+    await controllerAction('browser:goto', {
+      profile,
+      url: firstValid.searchUrl,
+    }, unifiedApiUrl);
+
+    // 等待页面加载完成
+    await delay(3000);
+
+    const afterUrl = await controllerAction('browser:execute', {
+      profile,
+      script: 'window.location.href',
+    }, unifiedApiUrl).then(res => res?.result || res?.data?.result || '');
+
+    console.log(`[Phase34ValidateLinks] 返回后页面: ${afterUrl}`);
+
+    if (!afterUrl.includes('/search_result')) {
+      throw new Error(`[Phase34ValidateLinks] 返回搜索结果页失败: ${afterUrl}`);
+    }
   }
 
   // 2. 读取 phase2-links.jsonl
@@ -141,7 +185,8 @@ export async function execute(input: ValidateLinksInput): Promise<ValidateLinksO
   console.log(`[Phase34ValidateLinks] 有效链接数: ${validLinks.length}`);
 
   return {
-    validLinks,
+    success: true,
+    links: validLinks,
     totalCount: allLinks.length,
     validCount: validLinks.length,
     currentUrl,

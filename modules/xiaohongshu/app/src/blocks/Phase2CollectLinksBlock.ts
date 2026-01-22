@@ -93,13 +93,12 @@ export async function execute(input: CollectLinksInput): Promise<CollectLinksOut
 
   const links: CollectLinksOutput['links'] = [];
   const seen = new Set<string>();
+  const seenExploreIds = new Set<string>();
   const registry = new ContainerRegistry();
   await registry.load();
   let attempts = 0;
   const maxAttempts = targetCount * 6;
   let scrollCount = 0;
-  let visibleIndexes: number[] = [];
-  let visiblePos = 0;
   const traceDir = path.join(os.homedir(), '.webauto', 'download', 'xiaohongshu', env, keyword, 'click-trace');
   const tracePath = path.join(traceDir, 'trace.jsonl');
 
@@ -138,7 +137,10 @@ export async function execute(input: CollectLinksInput): Promise<CollectLinksOut
         profile,
         script: 'window.location.href',
       }, unifiedApiUrl).then(res => res?.result || res?.data?.result || '');
-      return typeof afterEsc === 'string' ? afterEsc : currentUrl;
+      if (typeof afterEsc === 'string' && afterEsc.includes('/search_result')) {
+        return afterEsc;
+      }
+      throw new Error(`[Phase2Collect] ESC 后仍未回到搜索页: ${String(afterEsc || currentUrl)}`);
     }
 
     if (matchesKeywordFromSearchUrlStrict(currentUrl, keyword)) {
@@ -157,18 +159,8 @@ export async function execute(input: CollectLinksInput): Promise<CollectLinksOut
     } catch {
       // ignore screenshot failures
     }
-    console.log(`[Phase2Collect] 申请搜索许可并回到目标关键词...`);
-
-    const permit = await waitSearchPermit({ sessionId: profile });
-    if (!permit.granted) {
-      throw new Error(`[Phase2Collect] 无法获取搜索许可以恢复：${permit.error || 'unknown'}`);
-    }
-
-    const searchRes = await phase2Search({ keyword, profile, unifiedApiUrl });
-    if (!searchRes.success) {
-      throw new Error(`[Phase2Collect] 恢复搜索失败：${searchRes.finalUrl}`);
-    }
-    return searchRes.finalUrl;
+    // 开发阶段不做“自动纠错重搜”，避免连续多次搜索触发风控；留证据后直接停下让人看截图/日志。
+    throw new Error(`[Phase2Collect] 搜索关键词漂移，已截图并落盘 trace，停止执行（避免重复搜索触发风控）。url=${currentUrl}`);
   };
 
   // 进入采集前，先固定一个“期望 searchUrl”（严格等于 keyword）
@@ -188,49 +180,55 @@ export async function execute(input: CollectLinksInput): Promise<CollectLinksOut
     const primarySelectorDef = selectorDefs.find((s: any) => s?.variant === 'primary') || selectorDefs[0];
     const itemSelector = String(primarySelectorDef?.css || '.note-item');
 
-    // 3. 获取当前视口可见卡片索引（DOM 下标）
-    if (visibleIndexes.length === 0) {
-      const indexes = await controllerAction('browser:execute', {
-        profile,
-        script: `(function(){\n  const sel = ${JSON.stringify(itemSelector)};\n  const nodes = Array.from(document.querySelectorAll(sel));\n  const out = [];\n  const pad = 8;\n  for (let i = 0; i < nodes.length; i++) {\n    const r = nodes[i].getBoundingClientRect();\n    // 仅操作“完全在视口内”的卡片，避免顶部/底部被裁剪导致点击命中不稳定\n    const fullyVisible = r.width > 0 && r.height > 0 && r.top >= pad && r.bottom <= (window.innerHeight - pad);\n    // 过滤：必须是“帖子卡片”（含 explore 链接），避免把推荐关键词/话题卡也当成 item\n    const hasExplore = !!nodes[i].querySelector('a[href*=\"/explore/\"]');\n    if (fullyVisible && hasExplore) out.push(i);\n  }\n  return out;\n})()`,
-      }, unifiedApiUrl).then(res => res?.result || res?.data?.result || []);
+    // 3. “一次只挑一个目标”：按 DOM 顺序找下一个未处理且可见的 item；如果顶部/底部被遮挡，先滚动到完全可见再操作。
+    type PickResult = {
+      action: 'ok' | 'scroll';
+      index?: number;
+      exploreId?: string;
+      scroll?: { direction: 'up' | 'down'; amount: number; reason: string };
+      rect?: { top: number; bottom: number; width: number; height: number };
+      debug?: { total: number; pad: number; viewportH: number };
+    };
 
-      visibleIndexes = Array.isArray(indexes) ? indexes : [];
-      visiblePos = 0;
+    const pick: PickResult = await controllerAction('browser:execute', {
+      profile,
+      script: `(function(){\n  const sel = ${JSON.stringify(itemSelector)};\n  const seen = new Set(${JSON.stringify(Array.from(seenExploreIds))});\n  const nodes = Array.from(document.querySelectorAll(sel));\n  const pad = 8;\n  const vh = window.innerHeight;\n\n  function clampAmount(v){\n    const n = Math.ceil(Number(v) || 0);\n    if (n <= 0) return 200;\n    return Math.min(800, n);\n  }\n\n  for (let i = 0; i < nodes.length; i++) {\n    const node = nodes[i];\n    const exploreA = node.querySelector('a[href*=\"/explore/\"]');\n    const exploreHref = exploreA ? (exploreA.getAttribute('href') || '') : '';\n    const m = exploreHref.match(/\\/explore\\/([a-f0-9]+)/);\n    const exploreId = m ? m[1] : '';\n    if (!exploreId || seen.has(exploreId)) continue;\n\n    const r = node.getBoundingClientRect();\n    if (!(r.width > 0 && r.height > 0)) continue;\n\n    if (r.top < pad) {\n      return {\n        action: 'scroll',\n        index: i,\n        exploreId,\n        rect: { top: r.top, bottom: r.bottom, width: r.width, height: r.height },\n        scroll: { direction: 'up', amount: clampAmount((pad - r.top) + 24), reason: 'top_clipped' },\n        debug: { total: nodes.length, pad, viewportH: vh },\n      };\n    }\n\n    if (r.bottom > (vh - pad)) {\n      return {\n        action: 'scroll',\n        index: i,\n        exploreId,\n        rect: { top: r.top, bottom: r.bottom, width: r.width, height: r.height },\n        scroll: { direction: 'down', amount: clampAmount((r.bottom - (vh - pad)) + 24), reason: 'bottom_clipped' },\n        debug: { total: nodes.length, pad, viewportH: vh },\n      };\n    }\n\n    return {\n      action: 'ok',\n      index: i,\n      exploreId,\n      rect: { top: r.top, bottom: r.bottom, width: r.width, height: r.height },\n      debug: { total: nodes.length, pad, viewportH: vh },\n    };\n  }\n\n  return {\n    action: 'scroll',\n    scroll: { direction: 'down', amount: 800, reason: 'no_unseen_candidates' },\n    debug: { total: nodes.length, pad, viewportH: vh },\n  };\n})()`,
+    }, unifiedApiUrl).then(res => res?.result || res?.data?.result || null);
+
+    if (!pick || typeof pick !== 'object') {
+      throw new Error('[Phase2Collect] pick target failed: empty result');
     }
 
-    if (visibleIndexes.length === 0) {
-      console.warn(`[Phase2Collect] 未找到可见结果卡片，滚动后重试 attempt=${attempts}`);
+    if (pick.action === 'scroll' && pick.scroll) {
+      await appendTrace({
+        type: 'pick_scroll',
+        ts: new Date().toISOString(),
+        attempt: attempts,
+        collected: links.length,
+        searchUrl,
+        itemSelector,
+        pick,
+      });
+
       await controllerAction('container:operation', {
         containerId: 'xiaohongshu_search.search_result_list',
         operationId: 'scroll',
         sessionId: profile,
-        config: { direction: 'down', amount: 800 },
+        config: { direction: pick.scroll.direction, amount: pick.scroll.amount },
       }, unifiedApiUrl);
       scrollCount++;
-      await delay(1500);
+      await delay(1200);
       continue;
     }
 
-    if (visiblePos >= visibleIndexes.length) {
-      await controllerAction('container:operation', {
-        containerId: 'xiaohongshu_search.search_result_list',
-        operationId: 'scroll',
-        sessionId: profile,
-        config: { direction: 'down', amount: 800 },
-      }, unifiedApiUrl);
-      scrollCount++;
-      await delay(1500);
-      visibleIndexes = [];
-      visiblePos = 0;
-      continue;
-    }
-
-    const domIndex = Number(visibleIndexes[visiblePos] ?? -1);
+    const domIndex = Number(pick.index ?? -1);
     if (!Number.isFinite(domIndex) || domIndex < 0) {
-      visibleIndexes = [];
-      visiblePos = 0;
-      continue;
+      throw new Error(`[Phase2Collect] invalid picked index: ${String(pick.index)}`);
+    }
+
+    const exploreId = String(pick.exploreId || '');
+    if (exploreId) {
+      seenExploreIds.add(exploreId);
     }
 
     // 4. 点击第 N 个搜索结果卡片（通过 DOM 下标精确定位，避免依赖 href）
@@ -265,9 +263,9 @@ export async function execute(input: CollectLinksInput): Promise<CollectLinksOut
       collected: links.length,
       domIndex,
       scrollCount,
-      visiblePos,
-      visibleCount: visibleIndexes.length,
       searchUrl,
+      exploreId,
+      pick,
       highlight: highlightInfo,
       screenshot: preScreenshotPath,
     });
@@ -280,11 +278,8 @@ export async function execute(input: CollectLinksInput): Promise<CollectLinksOut
     }, unifiedApiUrl);
     if (clickResult?.success === false) {
       console.warn(`[Phase2Collect] 点击失败 index=${domIndex} err=${clickResult?.error || 'unknown'}，刷新索引后重试`);
-      visibleIndexes = [];
-      visiblePos = 0;
       continue;
     }
-    visiblePos++;
     await delay(1800);
 
     const urlAfterClick = await controllerAction('browser:execute', {

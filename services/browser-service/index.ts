@@ -7,6 +7,7 @@ import { BrowserWsServer } from './ws-server.js';
 import { RemoteMessageBusClient } from '../../libs/operations-framework/src/event-driven/RemoteMessageBusClient.js';
 import { BrowserMessageHandler } from './BrowserMessageHandler.js';
 import { logDebug } from '../../modules/logging/src/index.js';
+import { installServiceProcessLogger } from '../shared/serviceProcessLogger.js';
 
 type CommandPayload = { action: string; args?: any };
 
@@ -23,6 +24,7 @@ const clients = new Set<ServerResponse>();
 const autoLoops = new Map<string, NodeJS.Timeout>();
 
 export async function startBrowserService(opts: BrowserServiceOptions = {}) {
+  const { logEvent } = installServiceProcessLogger({ serviceName: 'browser-service' });
   const host = opts.host || '127.0.0.1';
   const port = Number(opts.port || 7704);
   const sessionManager = new SessionManager();
@@ -34,62 +36,78 @@ export async function startBrowserService(opts: BrowserServiceOptions = {}) {
 
   logDebug('browser-service', 'start', { host, port, wsHost, wsPort, enableWs, autoExit, busUrl });
 
-  const server = http.createServer(async (req, res) => {
-    const url = new URL(req.url || '/', `http://${req.headers.host}`);
+  // IMPORTANT: declare before server starts accepting requests (avoid TDZ crash).
+  let wsServer: BrowserWsServer | null = null;
 
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  const server = http.createServer((req, res) => {
+    void (async () => {
+      const url = new URL(req.url || '/', `http://${req.headers.host}`);
 
-    if (req.method === 'OPTIONS') {
-      res.writeHead(200);
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+
+      if (req.method === 'OPTIONS') {
+        res.writeHead(200);
+        res.end();
+        return;
+      }
+
+      if (url.pathname === '/health') {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true }));
+        return;
+      }
+
+      if (url.pathname === '/events') {
+        res.writeHead(200, {
+          'Content-Type': 'text/event-stream',
+          Connection: 'keep-alive',
+          'Cache-Control': 'no-cache',
+        });
+        clients.add(res);
+        req.on('close', () => clients.delete(res));
+        return;
+      }
+
+      if (url.pathname === '/command' && req.method === 'POST') {
+        const chunks: Buffer[] = [];
+        req.on('data', (chunk) => chunks.push(chunk));
+        req.on('end', async () => {
+          try {
+            const payload: CommandPayload = JSON.parse(Buffer.concat(chunks).toString('utf-8'));
+            const result = await handleCommand(payload, sessionManager, wsServer);
+            res.writeHead(result.ok ? 200 : 500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify(result.body));
+          } catch (err) {
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: (err as Error).message }));
+          }
+        });
+        return;
+      }
+
+      res.writeHead(404);
       res.end();
-      return;
-    }
-
-    if (url.pathname === '/health') {
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ ok: true }));
-      return;
-    }
-
-    if (url.pathname === '/events') {
-      res.writeHead(200, {
-        'Content-Type': 'text/event-stream',
-        Connection: 'keep-alive',
-        'Cache-Control': 'no-cache',
+    })().catch((err) => {
+      logEvent('http.request.error', {
+        method: req?.method,
+        url: req?.url,
+        error: { message: err?.message || String(err), stack: err?.stack },
       });
-      clients.add(res);
-      req.on('close', () => clients.delete(res));
-      return;
-    }
-
-    if (url.pathname === '/command' && req.method === 'POST') {
-      const chunks: Buffer[] = [];
-      req.on('data', (chunk) => chunks.push(chunk));
-      req.on('end', async () => {
-        try {
-          const payload: CommandPayload = JSON.parse(Buffer.concat(chunks).toString('utf-8'));
-          const result = await handleCommand(payload, sessionManager, wsServer);
-          res.writeHead(result.ok ? 200 : 500, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify(result.body));
-        } catch (err) {
-          res.writeHead(500, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ error: (err as Error).message }));
-        }
-      });
-      return;
-    }
-
-    res.writeHead(404);
-    res.end();
+      try {
+        if (!res.headersSent) res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: false, error: 'Internal Server Error' }));
+      } catch {
+        // ignore
+      }
+    });
   });
 
   server.listen(port, host, () => {
     console.log(`BrowserService listening on http://${host}:${port}`);
   });
 
-  let wsServer: BrowserWsServer | null = null;
   if (enableWs) {
     wsServer = new BrowserWsServer({ host: wsHost, port: wsPort, sessionManager });
     try {

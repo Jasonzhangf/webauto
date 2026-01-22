@@ -20,6 +20,8 @@
     "build": "npm run prebuild && npm run build:services && npm run test:floating-panel:logic && npm run self-check:post-build && npm run ui:test",
     "build:services": "node scripts/build/run-services-build.mjs",
     "build:ocr:macos": "node scripts/build/build-ocr-macos.mjs",
+    "build:package": "node scripts/package/build-cli.mjs",
+    "package": "npm run build:services && npm run build:package",
     "install:macos": "node scripts/install-macos.mjs",
     "self-check:post-build": "node scripts/self-check.mjs --quick --post-build",
     "start": "node dist/src/server.js",

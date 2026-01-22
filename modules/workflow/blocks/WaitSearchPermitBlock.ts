@@ -25,6 +25,15 @@ export interface WaitSearchPermitOutput {
   granted: boolean;
   waitedMs: number;
   skipped?: boolean;
+  reason?: string | null;
+  retryAfterMs?: number | null;
+  deny?: {
+    code: string;
+    message: string;
+    retryAfterMs: number | null;
+    details: any;
+    suggestedActions: string[];
+  } | null;
   error?: string;
 }
 
@@ -93,17 +102,31 @@ export async function execute(input: WaitSearchPermitInput): Promise<WaitSearchP
       });
 
       if (!response.ok) {
-        return { ok: false, retry: true, error: `HTTP ${response.status}` };
+        const text = await response.text().catch(() => '');
+        return { ok: false, retry: true, error: `HTTP ${response.status}${text ? `: ${text}` : ''}` };
       }
 
-      const data = await response.json();
+      const data: any = await response.json().catch(() => ({} as any));
       return {
         ok: true,
-        allowed: data.allowed,
-        waitMs: data.waitMs,
-        reason: data.reason,
-        keyword: data.keyword,
-        consecutive: data.consecutive,
+        allowed: Boolean(data.allowed),
+        waitMs: Number(data.waitMs || 0),
+        retryAfterMs: typeof data.retryAfterMs === 'number' ? Number(data.retryAfterMs) : null,
+        reason: typeof data.reason === 'string' ? data.reason : null,
+        keyword: typeof data.keyword === 'string' ? data.keyword : null,
+        consecutive: typeof data.consecutive === 'number' ? data.consecutive : null,
+        deny:
+          data.deny && typeof data.deny === 'object'
+            ? {
+                code: String(data.deny.code || 'unknown'),
+                message: String(data.deny.message || 'denied'),
+                retryAfterMs: typeof data.deny.retryAfterMs === 'number' ? Number(data.deny.retryAfterMs) : null,
+                details: (data.deny as any).details ?? null,
+                suggestedActions: Array.isArray((data.deny as any).suggestedActions)
+                  ? (data.deny as any).suggestedActions.map((s: any) => String(s))
+                  : [],
+              }
+            : null,
         retry: false
       };
     } catch (err: any) {
@@ -120,28 +143,52 @@ export async function execute(input: WaitSearchPermitInput): Promise<WaitSearchP
 
     if (result.ok && result.allowed) {
       console.log(`[WaitSearchPermit] ✅ Permit granted (waited ${(Date.now() - start) / 1000}s)`);
-      return { success: true, granted: true, waitedMs: Date.now() - start };
+      return { success: true, granted: true, waitedMs: Date.now() - start, reason: result.reason ?? null };
     }
 
     if (result.ok && !result.allowed) {
       // 开发阶段：禁止连续三次同 keyword 搜索，直接失败（不要无脑重试）
-      if (result.reason === 'dev_consecutive_keyword_limit') {
+      if (result.reason === 'dev_consecutive_keyword_limit' || result.deny?.code === 'dev_consecutive_keyword_limit') {
+        const denyMsg = result.deny?.message || '';
+        const actions =
+          (result.deny?.suggestedActions || []).length > 0
+            ? (result.deny?.suggestedActions || [])
+            : [
+                'Stop and inspect logs/screenshots; do not spam search retries.',
+                'If this is a dev-only rerun and you must search the same keyword again, restart SearchGate to clear in-memory dev keyword history.',
+                'Alternatively, wait until the dev keyword history expires (default keeps 24h).',
+              ];
+        console.error(
+          `[WaitSearchPermit] ❌ SearchGate denied: dev_consecutive_keyword_limit (keyword="${String(result.keyword || keyword || '')}", consecutive=${String(result.consecutive ?? '')})${denyMsg ? ` | ${denyMsg}` : ''}`,
+        );
+        for (const action of actions) {
+          console.error(`[WaitSearchPermit]   - ${action}`);
+        }
         return {
           success: false,
           granted: false,
           waitedMs: Date.now() - start,
-          error: `dev_consecutive_keyword_limit (keyword="${String(result.keyword || keyword || '')}", consecutive=${String(result.consecutive ?? '')})`,
+          reason: result.reason ?? null,
+          retryAfterMs: result.retryAfterMs ?? result.deny?.retryAfterMs ?? null,
+          deny: result.deny ?? null,
+          error: `SearchGate denied: dev_consecutive_keyword_limit (keyword="${String(result.keyword || keyword || '')}", consecutive=${String(result.consecutive ?? '')})`,
         };
       }
 
       // 只在服务端真正计算出需要等待时才等待
-      if (result.waitMs > 0) {
-        console.log(`[WaitSearchPermit] ⏳ Throttled, waiting ${result.waitMs / 1000}s...`);
-        await new Promise(resolve => setTimeout(resolve, result.waitMs));
+      const waitMs = Math.max(0, Number(result.retryAfterMs ?? result.waitMs ?? 0));
+      if (waitMs > 0) {
+        console.log(
+          `[WaitSearchPermit] ⏳ Throttled${result.reason ? ` (${result.reason})` : ''}, waiting ${Math.ceil(waitMs / 1000)}s...`,
+        );
+        await new Promise(resolve => setTimeout(resolve, waitMs));
         continue;
       } else {
-        // waitMs=0 说明服务端逻辑错误或未达上限，立即重试
-        console.warn(`[WaitSearchPermit] ⚠️ Gate denied but waitMs=0, retrying immediately...`);
+        // waitMs=0：可能是服务端拒绝但未给出等待时间；避免 busy-loop，稍等再试
+        console.warn(
+          `[WaitSearchPermit] ⚠️ Gate denied but waitMs=0${result.reason ? ` (reason=${result.reason})` : ''}, retrying in 1s...`,
+        );
+        await new Promise(resolve => setTimeout(resolve, 1000));
         continue;
       }
     }

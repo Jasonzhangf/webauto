@@ -244,6 +244,10 @@ export async function execute(input: PersistXhsNoteInput): Promise<PersistXhsNot
       const comments: any[] = Array.isArray(commentsResult?.comments) ? commentsResult.comments : [];
       const headerTotal =
         typeof commentsResult?.totalFromHeader === 'number' ? commentsResult.totalFromHeader : null;
+      const headerPositive = typeof headerTotal === 'number' && Number.isFinite(headerTotal) && headerTotal > 0;
+      const coverageRatio = headerPositive ? comments.length / headerTotal : null;
+      const coverageNeed = headerPositive ? Math.ceil(headerTotal * 0.9) : null;
+      const coverageOk = headerPositive ? comments.length >= (coverageNeed || 0) : null;
 
       // 没有任何评论且没有明确 reachedEnd/emptyState 信号时，不写入 comments.md
       const hasAnySignal =
@@ -266,6 +270,10 @@ export async function execute(input: PersistXhsNoteInput): Promise<PersistXhsNot
             headerTotal !== null ? headerTotal : '未知'
           }（reachedEnd=${commentsResult?.reachedEnd ? '是' : '否'}, empty=${
             commentsResult?.emptyState ? '是' : '否'
+          }${
+            headerPositive
+              ? `, coverage=${Math.round((coverageRatio || 0) * 100)}% (need>=${coverageNeed}, ok=${coverageOk ? '是' : '否'})`
+              : ''
           }）`,
         );
         lines.push('');

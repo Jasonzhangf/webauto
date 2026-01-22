@@ -34,6 +34,7 @@ const CONFIG = {
     'dist/sharedmodule',
     'scripts/xiaohongshu',
     'scripts/xiaohongshu/lib',
+    'scripts/run-xiaohongshu-phase1-2-34-v3.mjs',  // v3 统一入口
     'container-library',
     'modules/xiaohongshu',
     'modules/workflow',
@@ -145,6 +146,9 @@ fi
 
 # 命令路由
 case "\$1" in
+  v3|run)
+    node "\$PROJECT_ROOT/scripts/run-xiaohongshu-phase1-2-34-v3.mjs" "\${@:2}"
+    ;;
   phase1)
     node "\$PROJECT_ROOT/scripts/xiaohongshu/phase1-start.mjs" "\${@:2}"
     ;;
@@ -162,14 +166,17 @@ case "\$1" in
 小红书数据采集 CLI 工具 v${CONFIG.version}
 
 用法:
+  xhs-cli v3              使用 v3 统一入口（推荐）
+  xhs-cli run             同 v3
   xhs-cli phase1          启动并复用浏览器会话
   xhs-cli phase2          搜索并采集链接
   xhs-cli phase3          采集详情和评论
   xhs-cli install         检查并安装依赖
 
 示例:
-  xhs-cli phase1                      # 启动浏览器会话
-  xhs-cli phase2 --keyword "手机膜" --target 50 --env debug
+  xhs-cli v3 --keyword "手机膜" --count 50 --env prod    # v3 完整运行
+  xhs-cli v3 --help                                     # 查看 v3 详细帮助
+  xhs-cli phase1                                        # 启动浏览器会话
 
 更多信息请访问: https://github.com/your-repo/webauto
 EOF
@@ -198,7 +205,11 @@ if %errorlevel% neq 0 (
 )
 
 REM 命令路由
-if "%1"=="phase1" (
+if "%1"=="v3" (
+  node "%PROJECT_ROOT%\\scripts\\run-xiaohongshu-phase1-2-34-v3.mjs" %*
+) else if "%1"=="run" (
+  node "%PROJECT_ROOT%\\scripts\\run-xiaohongshu-phase1-2-34-v3.mjs" %*
+) else if "%1"=="phase1" (
   node "%PROJECT_ROOT%\\scripts\\xiaohongshu\\phase1-start.mjs" %*
 ) else if "%1"=="phase2" (
   node "%PROJECT_ROOT%\\scripts\\xiaohongshu\\phase2-collect.mjs" %*
@@ -210,14 +221,17 @@ if "%1"=="phase1" (
   echo 小红书数据采集 CLI 工具 v${CONFIG.version}
   echo.
   echo 用法:
+  echo   xhs-cli v3              使用 v3 统一入口（推荐）
+  echo   xhs-cli run             同 v3
   echo   xhs-cli phase1          启动并复用浏览器会话
   echo   xhs-cli phase2          搜索并采集链接
   echo   xhs-cli phase3          采集详情和评论
   echo   xhs-cli install         检查并安装依赖
   echo.
   echo 示例:
+  echo   xhs-cli v3 --keyword "手机膜" --count 50 --env prod
+  echo   xhs-cli v3 --help
   echo   xhs-cli phase1
-  echo   xhs-cli phase2 --keyword "手机膜" --target 50 --env debug
 )
 
 endlocal
@@ -309,10 +323,29 @@ async function createReadme() {
 ## 系统要求
 
 - **Node.js**: ${CONFIG.nodeVersion}
-- **操作系统**: Windows 10+, macOS 12+
+- **操作系统**: Windows 10+, macOS 12+, Linux (Ubuntu 20.04+)
 - **浏览器**: Playwright 会自动下载 Chromium
 
 ## 快速开始
+
+### 方式一：使用 v3 统一入口（推荐）
+
+v3 入口整合了所有阶段，使用更简单：
+
+\`\`\`bash
+# macOS/Linux
+./bin/xhs-cli v3 --keyword "手机膜" --count 50 --env prod
+
+# Windows
+bin\\xhs-cli.bat v3 --keyword "手机膜" --count 50 --env prod
+\`\`\`
+
+查看详细帮助：
+\`\`\`bash
+./bin/xhs-cli v3 --help
+\`\`\`
+
+### 方式二：分阶段执行（传统方式）
 
 ### 1. 检查环境
 
@@ -350,6 +383,7 @@ bin\\xhs-cli.bat phase2 --keyword "手机膜" --target 50 --env debug
 
 | 命令 | 说明 | 参数 |
 |------|------|------|
+| \`v3\` / \`run\` | **v3 统一入口（推荐）** | \`--keyword\` (关键词) \`--count\` (数量) \`--env\` (环境) \`--startAt\` (起始阶段) \`--stopAfter\` (结束阶段) |
 | \`phase1\` | 启动并复用浏览器会话 | \`--headless\` (无头模式) |
 | \`phase2\` | 搜索并采集链接 | \`--keyword\` (关键词) \`--target\` (数量) \`--env\` (环境) |
 | \`phase3\` | 采集详情和评论 | 从 phase2 产物读取 |
@@ -469,6 +503,12 @@ async function build() {
     const winPath = join(DIST_DIR, `xiaohongshu-collector-win-${currentArch}.zip`);
     await createZip(winPath);
     log(`✅ 生成: ${winPath}`);
+  } else if (currentPlatform === 'linux') {
+    const linuxPath = join(DIST_DIR, `xiaohongshu-collector-linux-${currentArch}.tar.gz`);
+    await createTarGz(linuxPath);
+    log(`✅ 生成: ${linuxPath}`);
+  } else {
+    log(`⚠️  未知平台: ${currentPlatform}，跳过压缩包创建`);
   }
 
   log('✅ 构建完成！');

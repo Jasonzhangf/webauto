@@ -4,6 +4,8 @@
  * 职责：通过容器系统执行搜索操作（全系统级操作）
  */
 
+import os from 'node:os';
+
 export interface SearchInput {
   keyword: string;
   profile?: string;
@@ -29,6 +31,21 @@ async function controllerAction(action: string, payload: any, apiUrl: string) {
 
 function delay(ms: number) {
   return new Promise<void>((resolve) => setTimeout(resolve, ms));
+}
+
+async function readSearchInputValue(profile: string, unifiedApiUrl: string) {
+  const value = await controllerAction('browser:execute', {
+    profile,
+    script: `(() => {
+      const el =
+        document.querySelector('#search-input') ||
+        document.querySelector("input[type='search']") ||
+        document.querySelector("input[placeholder*='搜索'], input[placeholder*='关键字']");
+      if (!el) return null;
+      try { return 'value' in el ? el.value : null; } catch { return null; }
+    })()`,
+  }, unifiedApiUrl).then((res) => res?.result || res?.data?.result || null);
+  return typeof value === 'string' ? value : null;
 }
 
 export async function execute(input: SearchInput): Promise<SearchOutput> {
@@ -108,24 +125,38 @@ export async function execute(input: SearchInput): Promise<SearchOutput> {
     sessionId: profile,
   }, unifiedApiUrl);
   await delay(200);
-  await controllerAction('keyboard:press', {
-    profileId: profile,
-    key: 'Meta+A',
-  }, unifiedApiUrl).catch(() => {});
-  await controllerAction('keyboard:press', {
-    profileId: profile,
-    key: 'Control+A',
-  }, unifiedApiUrl).catch(() => {});
-  await controllerAction('keyboard:press', {
-    profileId: profile,
-    key: 'Backspace',
-  }, unifiedApiUrl).catch(() => {});
+
+  // 清空输入框：mac 使用 Meta+A；非 mac 使用 Control+A
+  // 注意：在 mac 上 Control+A 可能导致光标跳到行首，反而造成“关键字拼接”。
+  const platform = os.platform();
+  const selectAllKey = platform === 'darwin' ? 'Meta+A' : 'Control+A';
+  await controllerAction('keyboard:press', { profileId: profile, key: selectAllKey }, unifiedApiUrl).catch(() => {});
+  await delay(80);
+  await controllerAction('keyboard:press', { profileId: profile, key: 'Backspace' }, unifiedApiUrl).catch(() => {});
+  await delay(60);
+  await controllerAction('keyboard:press', { profileId: profile, key: 'Delete' }, unifiedApiUrl).catch(() => {});
+  await delay(80);
+
+  const clearedValue = await readSearchInputValue(profile, unifiedApiUrl);
+  if (clearedValue && clearedValue.trim()) {
+    const shot = await controllerAction('browser:screenshot', { profileId: profile, fullPage: false }, unifiedApiUrl)
+      .then(res => res?.data || res?.result || res?.data?.data || '');
+    throw new Error(`[Phase2Search] 清空输入框失败（可能未聚焦到 input）。value="${clearedValue}" screenshot_len=${typeof shot === 'string' ? shot.length : 0}`);
+  }
+
   await controllerAction('keyboard:type', {
     profileId: profile,
     text: keyword,
     delay: 90,
   }, unifiedApiUrl);
   await delay(450);
+
+  const typedValue = await readSearchInputValue(profile, unifiedApiUrl);
+  if (typedValue !== keyword) {
+    const shot = await controllerAction('browser:screenshot', { profileId: profile, fullPage: false }, unifiedApiUrl)
+      .then(res => res?.data || res?.result || res?.data?.data || '');
+    throw new Error(`[Phase2Search] 输入框值不等于目标关键字：expected="${keyword}" actual="${typedValue}" screenshot_len=${typeof shot === 'string' ? shot.length : 0}`);
+  }
 
   if (isHome) {
     // explore 主页：使用搜索图标按钮触发搜索（更贴近用户真实行为）
