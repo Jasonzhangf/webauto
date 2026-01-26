@@ -59,6 +59,33 @@ export async function waitForServiceHealthy(spec) {
   return false;
 }
 
+async function runNodeScript(scriptPath, args = [], { cwd } = {}) {
+  await new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [scriptPath, ...args], {
+      cwd,
+      stdio: 'inherit',
+    });
+    child.on('error', reject);
+    child.on('exit', (code) => {
+      if (code === 0) resolve();
+      else reject(new Error(`node ${path.basename(scriptPath)} exited with code ${code}`));
+    });
+  });
+}
+
+async function tryStartCoreDaemon(root) {
+  const daemonPath = path.join(root, 'scripts', 'core-daemon.mjs');
+  if (!fs.existsSync(daemonPath)) return false;
+  try {
+    console.log('[Services] core-daemon start...');
+    await runNodeScript(daemonPath, ['start'], { cwd: root });
+    return true;
+  } catch (err) {
+    console.warn(`[Services] core-daemon start failed: ${err?.message || err}`);
+    return false;
+  }
+}
+
 export async function startNodeService(spec, { repoRoot } = {}) {
   const scriptPath = spec.script;
   if (!fs.existsSync(scriptPath)) {
@@ -92,6 +119,19 @@ export async function ensureBaseServices({ repoRoot } = {}) {
 
   const root = repoRoot || process.cwd();
   const specs = DEFAULT_SERVICE_SPECS(root);
+
+  let needStart = false;
+  for (const spec of specs) {
+    const healthy = await checkServiceHealth(spec.healthUrl);
+    if (!healthy) {
+      needStart = true;
+      break;
+    }
+  }
+
+  if (needStart) {
+    await tryStartCoreDaemon(root);
+  }
 
   for (const spec of specs) {
     const label = serviceLabel(spec);

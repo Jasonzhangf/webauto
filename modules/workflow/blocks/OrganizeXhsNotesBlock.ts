@@ -48,6 +48,13 @@ function sanitizeForPath(name: string): string {
   return name.replace(/[\\/:"*?<>|]+/g, '_').trim();
 }
 
+function resolveDownloadRoot(): string {
+  const custom = process.env.WEBAUTO_DOWNLOAD_ROOT || process.env.WEBAUTO_DOWNLOAD_DIR;
+  if (custom && custom.trim()) return custom;
+  const home = process.env.HOME || process.env.USERPROFILE || os.homedir();
+  return path.join(home, '.webauto', 'download');
+}
+
 export async function execute(input: OrganizeXhsNotesInput): Promise<OrganizeXhsNotesOutput> {
   const platform = input.platform || 'xiaohongshu';
   const env = input.env || 'debug';
@@ -60,7 +67,7 @@ export async function execute(input: OrganizeXhsNotesInput): Promise<OrganizeXhs
     platform,
     env,
     keyword,
-    homeDir: os.homedir(),
+    downloadRoot: resolveDownloadRoot(),
     requiredFiles: ['content.md', 'comments.md'],
     requireCommentsDone: true,
   });

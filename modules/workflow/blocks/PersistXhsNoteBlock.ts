@@ -39,6 +39,13 @@ function sanitizeForPath(name: string): string {
   return name.replace(/[\\/:"*?<>|]+/g, '_').trim();
 }
 
+function resolveDownloadRoot(): string {
+  const custom = process.env.WEBAUTO_DOWNLOAD_ROOT || process.env.WEBAUTO_DOWNLOAD_DIR;
+  if (custom && custom.trim()) return custom;
+  const home = process.env.HOME || process.env.USERPROFILE || os.homedir();
+  return path.join(home, '.webauto', 'download');
+}
+
 function formatUrlForLog(url: string, maxLen = 180): string {
   const s = (url || '').toString();
   if (s.length <= maxLen) return s;
@@ -130,8 +137,7 @@ export async function execute(input: PersistXhsNoteInput): Promise<PersistXhsNot
   }
 
   try {
-    const homeDir = os.homedir();
-    const baseDir = path.join(homeDir, '.webauto', 'download', platform, env);
+    const baseDir = path.join(resolveDownloadRoot(), platform, env);
     const safeKeyword = sanitizeForPath(keyword) || 'unknown';
     const keywordDir = path.join(baseDir, safeKeyword);
     const postDir = path.join(keywordDir, noteId);

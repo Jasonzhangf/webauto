@@ -66,6 +66,24 @@ function hashCookiePairs(pairs: Array<{ name: string; value: string }>): string 
   return h.toString(16);
 }
 
+function extractSessions(payload: any): any[] {
+  if (!payload) return [];
+  if (Array.isArray(payload.sessions)) return payload.sessions;
+  if (Array.isArray(payload.data?.sessions)) return payload.data.sessions;
+  if (Array.isArray(payload.result?.sessions)) return payload.result.sessions;
+  if (payload.data) return extractSessions(payload.data);
+  return [];
+}
+
+async function listSessions(apiUrl: string) {
+  const raw = await controllerAction('session:list', {}, apiUrl);
+  return extractSessions(raw);
+}
+
+function hasSession(sessions: any[], profile: string) {
+  return sessions.some((s) => s?.profileId === profile || s?.session_id === profile);
+}
+
 async function getDocumentCookiePairs(apiUrl: string, profile: string) {
   // 只读扫描：使用 document.cookie 的可见部分做“变化检测”即可。
   const raw = await controllerAction(
@@ -88,26 +106,59 @@ async function getDocumentCookiePairs(apiUrl: string, profile: string) {
   return pairs;
 }
 
-async function isLoggedIn(apiUrl: string, profile: string): Promise<boolean> {
+async function fetchContainerTree(apiUrl: string, profile: string) {
+  let currentUrl = '';
   try {
-    // 只做 match，不高亮，避免 UI 干扰
+    const urlRes = await controllerAction(
+      'browser:execute',
+      { profile, script: 'location.href' },
+      apiUrl,
+    );
+    currentUrl = urlRes?.result || urlRes?.data?.result || '';
+  } catch {
+    currentUrl = '';
+  }
+
+  try {
     const res = await controllerAction(
       'containers:match',
       {
         profile,
-        tree: false,
-        filters: [{ containerId: 'xiaohongshu_home.login_anchor' }],
+        ...(currentUrl ? { url: currentUrl } : {}),
+        maxDepth: 2,
+        maxChildren: 5,
       },
       apiUrl,
     );
-    if (!res) return false;
-    if (res.matched === true) return true;
-    if (res.container) return true;
-    if (res.data?.container) return true;
-    return false;
+    return res?.snapshot?.container_tree || res?.container_tree || res?.data?.snapshot?.container_tree || null;
   } catch {
-    return false;
+    return null;
   }
+}
+
+function findContainer(node: any, pattern: RegExp): any {
+  if (!node) return null;
+  if (pattern.test(node.id || node.defId || '')) return node;
+  if (Array.isArray(node.children)) {
+    for (const child of node.children) {
+      const found = findContainer(child, pattern);
+      if (found) return found;
+    }
+  }
+  return null;
+}
+
+async function isLoggedIn(apiUrl: string, profile: string): Promise<boolean> {
+  const tree = await fetchContainerTree(apiUrl, profile);
+  if (!tree) return false;
+
+  const loginAnchor = findContainer(tree, /\.login_anchor$/);
+  if (loginAnchor) return true;
+
+  const loginGuard = findContainer(tree, /xiaohongshu_login\.login_guard$/);
+  if (loginGuard) return false;
+
+  return false;
 }
 
 export async function execute(input: Phase1MonitorCookieInput): Promise<Phase1MonitorCookieOutput> {
@@ -117,8 +168,13 @@ export async function execute(input: Phase1MonitorCookieInput): Promise<Phase1Mo
     browserServiceUrl = 'http://127.0.0.1:7704',
     scanIntervalMs = 15000,
     stableCount = 3,
-    cookiePath = `${process.env.HOME}/.webauto/cookies/${profile}.json`,
+    cookiePath,
   } = input;
+  const homeDir = process.env.HOME || process.env.USERPROFILE || '';
+  const defaultCookiePath = homeDir
+    ? `${homeDir}/.webauto/cookies/${profile}.json`
+    : `.webauto/cookies/${profile}.json`;
+  const resolvedCookiePath = cookiePath || defaultCookiePath;
 
   let lastHash = '';
   let stableRounds = 0;
@@ -128,6 +184,11 @@ export async function execute(input: Phase1MonitorCookieInput): Promise<Phase1Mo
 
   while (true) {
     scanRounds += 1;
+
+    const sessions = await listSessions(unifiedApiUrl).catch((): any[] => []);
+    if (!hasSession(sessions, profile)) {
+      throw new Error(`[Phase1MonitorCookie] session closed: ${profile}`);
+    }
 
     const loggedIn = await isLoggedIn(unifiedApiUrl, profile);
     lastLoggedIn = loggedIn;
@@ -149,7 +210,11 @@ export async function execute(input: Phase1MonitorCookieInput): Promise<Phase1Mo
     // 只有登录成功时才保存，并且必须“变化后稳定”
     if (loggedIn && stableRounds >= stableCount) {
       console.log('[Phase1MonitorCookie] Cookie stable, saving...');
-      await browserServiceCommand('saveCookiesIfStable', { profileId: profile, path: cookiePath, minDelayMs: 2000 }, browserServiceUrl);
+      await browserServiceCommand(
+        'saveCookiesIfStable',
+        { profileId: profile, path: resolvedCookiePath, minDelayMs: 2000 },
+        browserServiceUrl,
+      );
 
       // 进入常驻模式：开启 Browser Service 自动保存 cookie，不阻塞后续 Phase2
       if (!autoCookiesStarted) {
@@ -163,7 +228,7 @@ export async function execute(input: Phase1MonitorCookieInput): Promise<Phase1Mo
         profile,
         loggedIn: true,
         saved: true,
-        cookiePath,
+        cookiePath: resolvedCookiePath,
         scanRounds,
         autoCookiesStarted,
       };

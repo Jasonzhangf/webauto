@@ -15,6 +15,7 @@ import path from 'node:path';
 import { promises as fs } from 'node:fs';
 import { urlKeywordEquals } from './helpers/searchPageState.js';
 import { countPersistedNotes } from './helpers/persistedNotes.js';
+import { isDebugArtifactsEnabled } from './helpers/debugArtifacts.js';
 import { execute as extractDetail } from './ExtractDetailBlock.js';
 import { execute as expandComments } from './ExpandCommentsBlock.js';
 import { execute as persistXhsNote } from './PersistXhsNoteBlock.js';
@@ -55,6 +56,14 @@ function sanitizeFilenamePart(value: string): string {
     .replace(/[\\/:"*?<>|]+/g, '_')
     .replace(/\s+/g, '_')
     .slice(0, 80);
+}
+
+function resolveDownloadRoot() {
+  const custom = process.env.WEBAUTO_DOWNLOAD_ROOT || process.env.WEBAUTO_DOWNLOAD_DIR;
+  if (custom && custom.trim()) return custom;
+  const home = process.env.HOME || process.env.USERPROFILE;
+  if (home && home.trim()) return path.join(home, '.webauto', 'download');
+  return path.join(os.homedir(), '.webauto', 'download');
 }
 
 function extractBase64FromScreenshotResponse(raw: any): string | undefined {
@@ -103,9 +112,11 @@ export async function execute(input: XiaohongshuCollectFromLinksInput): Promise<
   const profile = sessionId;
   const controllerUrl = `${serviceUrl}/v1/controller/action`;
 
-  const keywordDir = path.join(os.homedir(), '.webauto', 'download', 'xiaohongshu', env, keyword);
+  const downloadRoot = resolveDownloadRoot();
+  const keywordDir = path.join(downloadRoot, 'xiaohongshu', env, keyword);
   const linksPath = path.join(keywordDir, 'phase2-links.jsonl');
-  const debugDir = path.join(keywordDir, '_debug', 'phase34_from_links');
+  const debugArtifactsEnabled = isDebugArtifactsEnabled();
+  const debugDir = debugArtifactsEnabled ? path.join(keywordDir, '_debug', 'phase34_from_links') : null;
 
   async function controllerAction(action: string, payload: any = {}): Promise<any> {
     const res = await fetch(controllerUrl, {
@@ -133,6 +144,7 @@ export async function execute(input: XiaohongshuCollectFromLinksInput): Promise<
   }
 
   async function saveDebug(kind: string, meta: Record<string, any>): Promise<void> {
+    if (!debugArtifactsEnabled || !debugDir) return;
     try {
       await fs.mkdir(debugDir, { recursive: true });
       const ts = new Date().toISOString().replace(/[:.]/g, '-');
@@ -227,6 +239,7 @@ export async function execute(input: XiaohongshuCollectFromLinksInput): Promise<
     platform: 'xiaohongshu',
     env,
     keyword,
+    downloadRoot,
     requiredFiles: ['content.md', 'comments.md'],
     requireCommentsDone: true,
     minCommentsCoverageRatio: 0.9,

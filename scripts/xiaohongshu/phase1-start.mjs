@@ -42,12 +42,7 @@ async function main() {
     console.log('✅ Phase1: cookie 初次稳定保存完成');
     console.log(`   saved=${cookieRes.saved} autoCookiesStarted=${cookieRes.autoCookiesStarted} path=${cookieRes.cookiePath}`);
 
-    // 常驻：Phase1 不退出，保持进程存在（实际 cookie 更新由 browser-service autoCookies 负责）
-    console.log('🟢 Phase1 常驻运行中（autoCookies 已开启），不影响后续 Phase2');
-    // eslint-disable-next-line no-constant-condition
-    while (true) {
-      await new Promise((r) => setTimeout(r, 60_000));
-    }
+    console.log('✅ Phase1 完成：autoCookies 已开启，可继续执行 Phase2');
   } finally {
     if (lockHandle?.release) lockHandle.release();
   }

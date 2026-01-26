@@ -8,6 +8,7 @@
  */
 
 import { promises as fs } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 
 export interface PersistDetailInput {
@@ -34,10 +35,11 @@ export interface PersistDetailOutput {
   error?: string;
 }
 
-function expandHome(p: string): string {
-  if (!p) return p;
-  if (p.startsWith('~/')) return `${process.env.HOME}/${p.slice(2)}`;
-  return p;
+function resolveDownloadRoot(): string {
+  const custom = process.env.WEBAUTO_DOWNLOAD_ROOT || process.env.WEBAUTO_DOWNLOAD_DIR;
+  if (custom && custom.trim()) return custom;
+  const home = process.env.HOME || process.env.USERPROFILE || os.homedir();
+  return path.join(home, '.webauto', 'download');
 }
 
 function delay(ms: number) {
@@ -82,7 +84,7 @@ export async function execute(input: PersistDetailInput): Promise<PersistDetailO
 
   try {
     // 1. 创建目录结构
-    const baseDir = expandHome(`~/.webauto/download/xiaohongshu/${env}/${keyword}/${noteId}`);
+    const baseDir = path.join(resolveDownloadRoot(), 'xiaohongshu', env, keyword, noteId);
     const imagesDir = path.join(baseDir, 'images');
     const readmePath = path.join(baseDir, 'README.md');
 

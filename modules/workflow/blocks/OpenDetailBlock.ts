@@ -7,6 +7,7 @@
 import { createOpenDetailControllerClient } from './helpers/openDetailController.js';
 import { waitForDetail, type OpenDetailWaiterDeps } from './helpers/openDetailWaiter.js';
 import { createOpenDetailViewportTools, type OpenDetailViewportToolsConfig } from './helpers/openDetailViewport.js';
+import { isDebugArtifactsEnabled } from './helpers/debugArtifacts.js';
 import path from 'node:path';
 import { mkdir, writeFile } from 'node:fs/promises';
 
@@ -81,9 +82,11 @@ export async function execute(input: OpenDetailInput): Promise<OpenDetailOutput>
     clickRect,
     expectedNoteId,
     expectedHref,
-    debugDir,
+    debugDir: requestedDebugDir,
     serviceUrl = 'http://127.0.0.1:7701',
   } = input;
+  const debugArtifactsEnabled = isDebugArtifactsEnabled();
+  const debugDir = debugArtifactsEnabled ? requestedDebugDir : undefined;
 
   const profile = sessionId;
   const controllerUrl = `${serviceUrl}/v1/controller/action`;
@@ -543,7 +546,7 @@ export async function execute(input: OpenDetailInput): Promise<OpenDetailOutput>
     kind: string,
     meta: Record<string, any>,
   ): Promise<{ pngPath?: string; jsonPath?: string }> {
-    if (!debugDir) return {};
+    if (!debugArtifactsEnabled || !debugDir) return {};
     try {
       await mkdir(debugDir, { recursive: true });
       const ts = new Date().toISOString().replace(/[:.]/g, '-');

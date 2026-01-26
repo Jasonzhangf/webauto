@@ -123,6 +123,8 @@ coverage/
 dist/
 build/
 **/dist/
+!scripts/build/
+!scripts/build/**
 
 # Package artifacts
 *.tar.gz

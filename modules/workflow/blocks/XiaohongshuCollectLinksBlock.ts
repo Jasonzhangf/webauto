@@ -55,6 +55,21 @@ function sanitizeFilenamePart(value: string): string {
     .slice(0, 80);
 }
 
+function resolveDownloadRoot(): string {
+  const custom = process.env.WEBAUTO_DOWNLOAD_ROOT || process.env.WEBAUTO_DOWNLOAD_DIR;
+  if (custom && custom.trim()) return custom;
+  const home = process.env.HOME || process.env.USERPROFILE || os.homedir();
+  return path.join(home, '.webauto', 'download');
+}
+
+function isDebugArtifactsEnabled(): boolean {
+  return (
+    process.env.WEBAUTO_DEBUG === '1' ||
+    process.env.WEBAUTO_DEBUG_ARTIFACTS === '1' ||
+    process.env.WEBAUTO_DEBUG_SCREENSHOT === '1'
+  );
+}
+
 function extractBase64FromScreenshotResponse(raw: any): string | undefined {
   const v =
     raw?.data?.data ??
@@ -106,7 +121,8 @@ export async function execute(input: XiaohongshuCollectLinksInput): Promise<Xiao
 
   const profile = sessionId;
   const controllerUrl = `${serviceUrl}/v1/controller/action`;
-  const keywordDir = path.join(os.homedir(), '.webauto', 'download', 'xiaohongshu', env, keyword);
+  const debugArtifactsEnabled = isDebugArtifactsEnabled();
+  const keywordDir = path.join(resolveDownloadRoot(), 'xiaohongshu', env, keyword);
   const linksPath = path.join(keywordDir, 'phase2-links.jsonl');
   const debugDir = path.join(keywordDir, '_debug', 'phase2_links');
 
@@ -136,6 +152,7 @@ export async function execute(input: XiaohongshuCollectLinksInput): Promise<Xiao
   }
 
   async function saveDebug(kind: string, meta: Record<string, any>): Promise<void> {
+    if (!debugArtifactsEnabled) return;
     try {
       await fs.mkdir(debugDir, { recursive: true });
       const ts = new Date().toISOString().replace(/[:.]/g, '-');
@@ -176,14 +193,37 @@ export async function execute(input: XiaohongshuCollectLinksInput): Promise<Xiao
     const safeUrl = typeof raw?.safeUrl === 'string' ? raw.safeUrl.trim() : '';
     const searchUrl = typeof raw?.searchUrl === 'string' ? raw.searchUrl.trim() : '';
     if (!noteId || !safeUrl || !searchUrl) return null;
-    if (!safeUrl.includes('xsec_token=')) return null;
-    if (!urlKeywordEquals(searchUrl, keyword)) return null;
+    if (!isValidSafeUrl(safeUrl)) return null;
+    if (!isValidSearchUrl(searchUrl, keyword)) return null;
     return {
       noteId,
       safeUrl,
       searchUrl,
       ts: typeof raw?.ts === 'string' ? raw.ts : new Date().toISOString(),
     };
+  }
+
+  function isValidSearchUrl(searchUrl: string, expectedKeyword: string): boolean {
+    try {
+      const url = new URL(searchUrl);
+      if (!url.hostname.endsWith('xiaohongshu.com')) return false;
+      if (!url.pathname.includes('/search_result')) return false;
+      return urlKeywordEquals(searchUrl, expectedKeyword);
+    } catch {
+      return false;
+    }
+  }
+
+  function isValidSafeUrl(safeUrl: string): boolean {
+    try {
+      const url = new URL(safeUrl);
+      if (!url.hostname.endsWith('xiaohongshu.com')) return false;
+      if (!/\/explore\/[a-f0-9]+/.test(url.pathname)) return false;
+      if (!url.searchParams.get('xsec_token')) return false;
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   await fs.mkdir(keywordDir, { recursive: true });
@@ -201,17 +241,21 @@ export async function execute(input: XiaohongshuCollectLinksInput): Promise<Xiao
   }
 
   const initialCount = byNoteId.size;
-  if (strictTargetCount && initialCount > targetCount) {
+  if (initialCount > targetCount) {
+    const trimmed = existing.slice(0, targetCount);
+    const body = trimmed.length > 0 ? `${trimmed.map((e) => JSON.stringify(e)).join('\n')}\n` : '';
+    await fs.writeFile(linksPath, body, 'utf-8');
+    console.log(`[Phase2Links] existing links exceed target, trimmed ${initialCount} -> ${trimmed.length}`);
+    const expected = trimmed[0]?.searchUrl || '';
     return {
-      success: false,
+      success: true,
       keywordDir,
       linksPath,
-      expectedSearchUrl: '',
+      expectedSearchUrl: expected,
       initialCount,
-      finalCount: initialCount,
+      finalCount: trimmed.length,
       addedCount: 0,
       targetCount,
-      error: `existing_links_exceed_target: ${initialCount} > ${targetCount}`,
     };
   }
   if (initialCount === targetCount) {
@@ -426,6 +470,31 @@ export async function execute(input: XiaohongshuCollectLinksInput): Promise<Xiao
             addedCount: added,
             targetCount,
             error: `close_detail_failed: ${closedDup.error || 'unknown'}`,
+          };
+        }
+        await delay(700);
+        continue;
+      }
+
+      if (!isValidSafeUrl(opened.safeDetailUrl) || !isValidSearchUrl(expectedSearchUrl, keyword)) {
+        await saveDebug('invalid_link', {
+          noteId: opened.noteId,
+          safeUrl: opened.safeDetailUrl,
+          searchUrl: expectedSearchUrl,
+        });
+        const closedInvalid = await closeDetail({ sessionId, serviceUrl });
+        if (!closedInvalid.success) {
+          await saveDebug('close_detail_failed_after_invalid', { noteId: opened.noteId, error: closedInvalid.error || null });
+          return {
+            success: false,
+            keywordDir,
+            linksPath,
+            expectedSearchUrl,
+            initialCount,
+            finalCount: byNoteId.size,
+            addedCount: added,
+            targetCount,
+            error: `close_detail_failed: ${closedInvalid.error || 'unknown'}`,
           };
         }
         await delay(700);

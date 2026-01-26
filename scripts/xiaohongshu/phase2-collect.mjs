@@ -17,6 +17,7 @@ import { createSessionLock } from './lib/session-lock.mjs';
 import { execute as waitSearchPermit } from '../../dist/modules/workflow/blocks/WaitSearchPermitBlock.js';
 import { execute as phase2Search } from '../../dist/modules/xiaohongshu/app/src/blocks/Phase2SearchBlock.js';
 import { execute as phase2CollectLinks } from '../../dist/modules/xiaohongshu/app/src/blocks/Phase2CollectLinksBlock.js';
+import path from 'node:path';
 
 function nowMs() {
   return Date.now();
@@ -29,10 +30,12 @@ function formatDurationMs(ms) {
   return `${m}m${String(r).padStart(2, '0')}s`;
 }
 
-function expandHome(p) {
-  if (!p) return p;
-  if (p.startsWith('~/')) return `${process.env.HOME}/${p.slice(2)}`;
-  return p;
+function resolveDownloadRoot() {
+  const custom = process.env.WEBAUTO_DOWNLOAD_ROOT || process.env.WEBAUTO_DOWNLOAD_DIR;
+  if (custom && custom.trim()) return custom;
+  const home = process.env.HOME || process.env.USERPROFILE;
+  if (home) return path.join(home, '.webauto', 'download');
+  return path.join(process.cwd(), 'download');
 }
 
 async function ensureDir(dir) {
@@ -61,7 +64,7 @@ async function main() {
   const env = resolveEnv();
 
   // 清理旧产物（同 env + keyword 下）
-  const baseDir = expandHome(`~/.webauto/download/xiaohongshu/${env}/${keyword}`);
+  const baseDir = path.join(resolveDownloadRoot(), 'xiaohongshu', env, keyword);
   await safeRm(`${baseDir}/phase2-links.jsonl`);
   await safeRm(`${baseDir}/run.log`);
   await safeRm(`${baseDir}/run-events.jsonl`);
@@ -118,8 +121,8 @@ async function main() {
     emitRunEvent('phase2_timing', { stage: 'collect_done', ms: tCollect1 - tCollect0 });
     const results = collectResult.links || [];
 
-    const outPath = expandHome(`~/.webauto/download/xiaohongshu/${env}/${keyword}/phase2-links.jsonl`);
-    const outDir = outPath.split('/').slice(0, -1).join('/');
+    const outPath = path.join(resolveDownloadRoot(), 'xiaohongshu', env, keyword, 'phase2-links.jsonl');
+    const outDir = path.dirname(outPath);
     await ensureDir(outDir);
     await writeJsonl(outPath, results);
 

@@ -7,6 +7,9 @@
  * 3. 过滤有效链接（safeUrl 含 xsec_token + searchUrl 含关键字）
  */
 
+import os from 'node:os';
+import path from 'node:path';
+
 export interface ValidateLinksInput {
   keyword: string;
   linksPath?: string;
@@ -55,12 +58,11 @@ async function readJsonl(filePath: string): Promise<any[]> {
   }
 }
 
-function expandHome(p: string): string {
-  if (!p) return p;
-  if (p.startsWith('~/')) {
-    return `${process.env.HOME}/${p.slice(2)}`;
-  }
-  return p;
+function resolveDownloadRoot(): string {
+  const custom = process.env.WEBAUTO_DOWNLOAD_ROOT || process.env.WEBAUTO_DOWNLOAD_DIR;
+  if (custom && custom.trim()) return custom;
+  const home = process.env.HOME || process.env.USERPROFILE || os.homedir();
+  return path.join(home, '.webauto', 'download');
 }
 
 function decodeURIComponentSafe(value: string) {
@@ -119,8 +121,8 @@ export async function execute(input: ValidateLinksInput): Promise<ValidateLinksO
   if (!currentUrl.includes('/search_result')) {
     console.warn(`[Phase34ValidateLinks] 当前不在搜索结果页，尝试返回...`);
 
-    const defaultPath = expandHome(`~/.webauto/download/xiaohongshu/debug/${keyword}/phase2-links.jsonl`);
-    const targetPath = expandHome(linksPath || defaultPath);
+    const defaultPath = path.join(resolveDownloadRoot(), 'xiaohongshu', 'debug', keyword, 'phase2-links.jsonl');
+    const targetPath = linksPath || defaultPath;
 
     const allLinks = await readJsonl(targetPath);
 
@@ -162,8 +164,8 @@ export async function execute(input: ValidateLinksInput): Promise<ValidateLinksO
   }
 
   // 2. 读取 phase2-links.jsonl
-  const defaultPath = expandHome(`~/.webauto/download/xiaohongshu/debug/${keyword}/phase2-links.jsonl`);
-  const targetPath = expandHome(linksPath || defaultPath);
+  const defaultPath = path.join(resolveDownloadRoot(), 'xiaohongshu', 'debug', keyword, 'phase2-links.jsonl');
+  const targetPath = linksPath || defaultPath;
 
   console.log(`[Phase34ValidateLinks] 读取链接文件: ${targetPath}`);
 

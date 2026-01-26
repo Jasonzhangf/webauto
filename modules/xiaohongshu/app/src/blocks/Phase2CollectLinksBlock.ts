@@ -80,6 +80,44 @@ function matchesKeywordFromSearchUrlStrict(searchUrl: string, keyword: string) {
   return getKeywordFromSearchUrl(searchUrl) === keyword;
 }
 
+function resolveDownloadRoot() {
+  const custom = process.env.WEBAUTO_DOWNLOAD_ROOT || process.env.WEBAUTO_DOWNLOAD_DIR;
+  if (custom && custom.trim()) return custom;
+  const home = process.env.HOME || process.env.USERPROFILE || os.homedir();
+  return path.join(home, '.webauto', 'download');
+}
+
+function isDebugArtifactsEnabled() {
+  return (
+    process.env.WEBAUTO_DEBUG === '1' ||
+    process.env.WEBAUTO_DEBUG_ARTIFACTS === '1' ||
+    process.env.WEBAUTO_DEBUG_SCREENSHOT === '1'
+  );
+}
+
+function isValidSearchUrl(searchUrl: string, keyword: string) {
+  try {
+    const url = new URL(searchUrl);
+    if (!url.hostname.endsWith('xiaohongshu.com')) return false;
+    if (!url.pathname.includes('/search_result')) return false;
+    return matchesKeywordFromSearchUrlStrict(searchUrl, keyword);
+  } catch {
+    return false;
+  }
+}
+
+function isValidSafeUrl(safeUrl: string) {
+  try {
+    const url = new URL(safeUrl);
+    if (!url.hostname.endsWith('xiaohongshu.com')) return false;
+    if (!/\/explore\/[a-f0-9]+/.test(url.pathname)) return false;
+    if (!url.searchParams.get('xsec_token')) return false;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export async function execute(input: CollectLinksInput): Promise<CollectLinksOutput> {
   const {
     keyword,
@@ -99,19 +137,23 @@ export async function execute(input: CollectLinksInput): Promise<CollectLinksOut
   let attempts = 0;
   const maxAttempts = targetCount * 6;
   let scrollCount = 0;
-  const traceDir = path.join(os.homedir(), '.webauto', 'download', 'xiaohongshu', env, keyword, 'click-trace');
+  const debugArtifactsEnabled = isDebugArtifactsEnabled();
+  const traceDir = path.join(resolveDownloadRoot(), 'xiaohongshu', env, keyword, 'click-trace');
   const tracePath = path.join(traceDir, 'trace.jsonl');
 
   const ensureTraceDir = async () => {
+    if (!debugArtifactsEnabled) return;
     await fs.mkdir(traceDir, { recursive: true });
   };
 
   const appendTrace = async (row: Record<string, any>) => {
+    if (!debugArtifactsEnabled) return;
     await ensureTraceDir();
     await fs.appendFile(tracePath, `${JSON.stringify(row)}\n`, 'utf8');
   };
 
   const saveScreenshot = async (base64: string, fileName: string) => {
+    if (!debugArtifactsEnabled) return null;
     await ensureTraceDir();
     const buf = Buffer.from(base64, 'base64');
     const filePath = path.join(traceDir, fileName);
@@ -149,15 +191,17 @@ export async function execute(input: CollectLinksInput): Promise<CollectLinksOut
 
     const actual = getKeywordFromSearchUrl(currentUrl);
     console.warn(`[Phase2Collect] 检测到搜索漂移：expected="${keyword}" actual="${actual}" url=${currentUrl}`);
-    try {
-      const shot = await controllerAction('browser:screenshot', { profileId: profile, fullPage: false }, unifiedApiUrl)
-        .then(res => res?.data || res?.result || res?.data?.data || '');
-      if (typeof shot === 'string' && shot) {
-        const file = await saveScreenshot(shot, `drift-${Date.now()}.png`);
-        await appendTrace({ type: 'drift', ts: new Date().toISOString(), expected: keyword, actual, url: currentUrl, screenshot: file });
+    if (debugArtifactsEnabled) {
+      try {
+        const shot = await controllerAction('browser:screenshot', { profileId: profile, fullPage: false }, unifiedApiUrl)
+          .then(res => res?.data || res?.result || res?.data?.data || '');
+        if (typeof shot === 'string' && shot) {
+          const file = await saveScreenshot(shot, `drift-${Date.now()}.png`);
+          await appendTrace({ type: 'drift', ts: new Date().toISOString(), expected: keyword, actual, url: currentUrl, screenshot: file });
+        }
+      } catch {
+        // ignore screenshot failures
       }
-    } catch {
-      // ignore screenshot failures
     }
     // 开发阶段不做“自动纠错重搜”，避免连续多次搜索触发风控；留证据后直接停下让人看截图/日志。
     throw new Error(`[Phase2Collect] 搜索关键词漂移，已截图并落盘 trace，停止执行（避免重复搜索触发风控）。url=${currentUrl}`);
@@ -245,15 +289,17 @@ export async function execute(input: CollectLinksInput): Promise<CollectLinksOut
     }
 
     let preScreenshotPath: string | null = null;
-    try {
-      const shot = await controllerAction('browser:screenshot', { profileId: profile, fullPage: false }, unifiedApiUrl)
-        .then(res => res?.data || res?.result || res?.data?.data || '');
-      if (typeof shot === 'string' && shot) {
-        const name = `click-${String(attempts).padStart(4, '0')}-idx-${String(domIndex).padStart(4, '0')}-${Date.now()}.png`;
-        preScreenshotPath = await saveScreenshot(shot, name);
+    if (debugArtifactsEnabled) {
+      try {
+        const shot = await controllerAction('browser:screenshot', { profileId: profile, fullPage: false }, unifiedApiUrl)
+          .then(res => res?.data || res?.result || res?.data?.data || '');
+        if (typeof shot === 'string' && shot) {
+          const name = `click-${String(attempts).padStart(4, '0')}-idx-${String(domIndex).padStart(4, '0')}-${Date.now()}.png`;
+          preScreenshotPath = await saveScreenshot(shot, name);
+        }
+      } catch {
+        preScreenshotPath = null;
       }
-    } catch {
-      preScreenshotPath = null;
     }
 
     await appendTrace({
@@ -322,6 +368,24 @@ export async function execute(input: CollectLinksInput): Promise<CollectLinksOut
     }
 
     // 6. 校验 searchUrl（防止采集到推荐流等非目标搜索结果）
+    if (!isValidSearchUrl(searchUrl, keyword)) {
+      console.warn(`[Phase2Collect] searchUrl invalid, skip: ${searchUrl}`);
+      await controllerAction('keyboard:press', {
+        profileId: profile,
+        key: 'Escape',
+      }, unifiedApiUrl);
+      await delay(1000);
+      continue;
+    }
+    if (!isValidSafeUrl(safeUrl)) {
+      console.warn(`[Phase2Collect] safeUrl invalid, skip: ${safeUrl}`);
+      await controllerAction('keyboard:press', {
+        profileId: profile,
+        key: 'Escape',
+      }, unifiedApiUrl);
+      await delay(1000);
+      continue;
+    }
     if (!matchesKeywordFromSearchUrlStrict(searchUrl, keyword)) {
       console.warn(`[Phase2Collect] searchUrl keyword 不严格等于目标词，移除漂移项: ${safeUrl}`);
       await controllerAction('keyboard:press', {

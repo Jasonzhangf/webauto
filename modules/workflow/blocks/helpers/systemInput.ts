@@ -8,9 +8,21 @@
 import os from 'node:os';
 import path from 'node:path';
 import { promises as fs } from 'node:fs';
+import { isDebugArtifactsEnabled } from './debugArtifacts.js';
 
 // 调试截图保存目录
-const DEBUG_SCREENSHOT_DIR = path.join(os.homedir(), '.webauto', 'logs', 'debug-screenshots');
+function resolveDownloadRoot(): string {
+  const custom = process.env.WEBAUTO_DOWNLOAD_ROOT || process.env.WEBAUTO_DOWNLOAD_DIR;
+  if (custom && custom.trim()) return custom;
+  const home = process.env.HOME || process.env.USERPROFILE;
+  if (home && home.trim()) return path.join(home, '.webauto', 'download');
+  return path.join(os.homedir(), '.webauto', 'download');
+}
+
+const DEBUG_ENABLED = isDebugArtifactsEnabled();
+const DEBUG_SCREENSHOT_DIR = DEBUG_ENABLED
+  ? path.join(resolveDownloadRoot(), 'logs', 'debug-screenshots')
+  : '';
 const DEFAULT_CONTROLLER_URL = process.env.WEBAUTO_CONTROLLER_URL || 'http://127.0.0.1:7701/v1/controller/action';
 
 /**
@@ -21,6 +33,7 @@ async function saveDebugScreenshot(
   sessionId: string,
   meta: Record<string, any> = {},
 ): Promise<{ pngPath?: string; jsonPath?: string }> {
+  if (!DEBUG_ENABLED) return {};
   try {
     await fs.mkdir(DEBUG_SCREENSHOT_DIR, { recursive: true });
     const ts = new Date().toISOString().replace(/[:.]/g, '-');

@@ -7,6 +7,7 @@ export interface PersistedNotesCountInput {
   env: string;
   keyword: string;
   homeDir?: string;
+  downloadRoot?: string;
   requiredFiles?: string[];
   requireCommentsDone?: boolean;
   minCommentsCoverageRatio?: number;
@@ -21,6 +22,14 @@ export interface PersistedNotesCountOutput {
 function sanitizeForPath(name: string): string {
   if (!name) return '';
   return name.replace(/[\\/:"*?<>|]+/g, '_').trim();
+}
+
+function resolveDownloadRoot(custom?: string, homeDir?: string): string {
+  if (custom && custom.trim()) return custom;
+  if (homeDir && homeDir.trim()) return path.join(homeDir, '.webauto', 'download');
+  const envHome = process.env.HOME || process.env.USERPROFILE;
+  if (envHome && envHome.trim()) return path.join(envHome, '.webauto', 'download');
+  return path.join(os.homedir(), '.webauto', 'download');
 }
 
 async function pathExists(filepath: string): Promise<boolean> {
@@ -39,14 +48,15 @@ export async function countPersistedNotes(
     platform,
     env,
     keyword,
-    homeDir = os.homedir(),
+    homeDir,
+    downloadRoot,
     requiredFiles = ['content.md'],
     requireCommentsDone = false,
     minCommentsCoverageRatio,
   } = input;
 
   const safeKeyword = sanitizeForPath(keyword) || 'unknown';
-  const keywordDir = path.join(homeDir, '.webauto', 'download', platform, env, safeKeyword);
+  const keywordDir = path.join(resolveDownloadRoot(downloadRoot, homeDir), platform, env, safeKeyword);
 
   const exists = await pathExists(keywordDir);
   if (!exists) {

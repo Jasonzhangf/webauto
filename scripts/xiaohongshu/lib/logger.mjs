@@ -220,8 +220,15 @@ export function closeRunLogging() {
   runContext = null;
 }
 
+function resolveDownloadRoot() {
+  const custom = process.env.WEBAUTO_DOWNLOAD_ROOT || process.env.WEBAUTO_DOWNLOAD_DIR;
+  if (custom && custom.trim()) return custom;
+  const home = process.env.HOME || process.env.USERPROFILE || os.homedir();
+  return path.join(home, '.webauto', 'download');
+}
+
 function getKeywordBaseDir(env, keyword) {
-  const downloadDir = path.join(os.homedir(), '.webauto', 'download');
+  const downloadDir = resolveDownloadRoot();
   return path.join(downloadDir, 'xiaohongshu', env, keyword);
 }
 

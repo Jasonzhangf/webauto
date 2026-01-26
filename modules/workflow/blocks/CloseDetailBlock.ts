@@ -8,9 +8,13 @@ import os from 'node:os';
 import path from 'node:path';
 import { promises as fs } from 'node:fs';
 import { verifyAnchorByContainerId } from './helpers/containerAnchors.js';
+import { isDebugArtifactsEnabled } from './helpers/debugArtifacts.js';
 
 // 调试截图保存目录
-const DEBUG_SCREENSHOT_DIR = path.join(os.homedir(), '.webauto', 'logs', 'debug-screenshots');
+const DEBUG_ENABLED = isDebugArtifactsEnabled();
+const DEBUG_SCREENSHOT_DIR = DEBUG_ENABLED
+  ? path.join(os.homedir(), '.webauto', 'logs', 'debug-screenshots')
+  : '';
 
 /**
  * 保存调试截图（复用 OpenDetailBlock 的逻辑）
@@ -20,6 +24,7 @@ async function saveDebugScreenshot(
   sessionId: string,
   meta: Record<string, any> = {},
 ): Promise<{ pngPath?: string; jsonPath?: string }> {
+  if (!DEBUG_ENABLED) return {};
   try {
     await fs.mkdir(DEBUG_SCREENSHOT_DIR, { recursive: true });
     const ts = new Date().toISOString().replace(/[:.]/g, '-');
@@ -151,6 +156,7 @@ export async function execute(input: CloseDetailInput): Promise<CloseDetailOutpu
   }
 
   async function captureFailureScreenshot(tag: string): Promise<string | null> {
+    if (!DEBUG_ENABLED) return null;
     try {
       const shot = await controllerAction('browser:screenshot', { profileId: profile, fullPage: false });
       const b64 =

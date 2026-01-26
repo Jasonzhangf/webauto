@@ -19,6 +19,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { promises as fs } from 'node:fs';
 import { countPersistedNotes } from './helpers/persistedNotes.js';
+import { isDebugArtifactsEnabled } from './helpers/debugArtifacts.js';
 
 export interface GoToSearchInput {
   sessionId: string;
@@ -87,6 +88,14 @@ export async function execute(input: GoToSearchInput): Promise<GoToSearchOutput>
   let entryAnchor: GoToSearchOutput['entryAnchor'];
   let exitAnchor: GoToSearchOutput['exitAnchor'];
   let searchInputContainerId: string = 'xiaohongshu_search.search_bar';
+  const debugEnabled = isDebugArtifactsEnabled();
+
+  function resolveDownloadRoot(): string {
+    const custom = process.env.WEBAUTO_DOWNLOAD_ROOT || process.env.WEBAUTO_DOWNLOAD_DIR;
+    if (custom && custom.trim()) return custom;
+    const home = process.env.HOME || process.env.USERPROFILE || os.homedir();
+    return path.join(home, '.webauto', 'download');
+  }
 
   function sanitizeFilenamePart(value: string): string {
     return String(value || '')
@@ -109,13 +118,14 @@ export async function execute(input: GoToSearchInput): Promise<GoToSearchOutput>
   }
 
   async function resolveDebugDir(): Promise<string | null> {
+    if (!debugEnabled) return null;
     if (debugDir) return debugDir;
     try {
       const persisted = await countPersistedNotes({
         platform: 'xiaohongshu',
         env,
         keyword,
-        homeDir: os.homedir(),
+        downloadRoot: resolveDownloadRoot(),
         requiredFiles: ['content.md'],
       });
       return path.join(persisted.keywordDir, '_debug', 'search');
@@ -128,6 +138,7 @@ export async function execute(input: GoToSearchInput): Promise<GoToSearchOutput>
     kind: string,
     meta: Record<string, any>,
   ): Promise<{ pngPath?: string; jsonPath?: string }> {
+    if (!debugEnabled) return {};
     const dir = await resolveDebugDir();
     if (!dir) return {};
     try {

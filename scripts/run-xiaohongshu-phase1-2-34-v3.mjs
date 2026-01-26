@@ -1,9 +1,11 @@
 import minimist from 'minimist';
 import { runWorkflowById } from '../dist/modules/workflow/src/runner.js';
-import { existsSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { homedir } from 'node:os';
 import { spawn } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import { ensureBaseServices } from './xiaohongshu/lib/services.mjs';
 
 // 版本管理
 const VERSION = '3.0.0';
@@ -30,7 +32,7 @@ function checkEnvironment() {
 
   const missingPaths = [];
   for (const relPath of requiredPaths) {
-    const absPath = new URL(relPath, import.meta.url).pathname;
+    const absPath = fileURLToPath(new URL(relPath, import.meta.url));
     if (!existsSync(absPath)) {
       missingPaths.push(relPath);
     }
@@ -44,6 +46,19 @@ function checkEnvironment() {
 }
 
 // 错误恢复机制
+function ensureContainerIndex() {
+  const rootIndex = resolve('container-library.index.json');
+  if (existsSync(rootIndex)) return;
+  const fallbackIndex = resolve('container-library', 'index.json');
+  if (!existsSync(fallbackIndex)) return;
+  try {
+    writeFileSync(rootIndex, readFileSync(fallbackIndex));
+    console.log(`[XHS][v3] Created container-library.index.json from container-library/index.json`);
+  } catch (err) {
+    console.warn(`[XHS][v3] Failed to create container-library.index.json: ${err?.message || err}`);
+  }
+}
+
 function setupErrorHandlers() {
   process.on('unhandledRejection', (err) => {
     console.error('\n[FATAL] 未捕获的异常:', err?.message || String(err));
@@ -80,6 +95,14 @@ function setupErrorHandlers() {
     console.log('\n[XHS][v3] 收到终止信号，正在退出...');
     process.exit(143);
   });
+}
+
+function isDebugEnabled() {
+  return (
+    process.env.WEBAUTO_DEBUG === '1' ||
+    process.env.WEBAUTO_DEBUG_ARTIFACTS === '1' ||
+    process.env.WEBAUTO_DEBUG_SCREENSHOT === '1'
+  );
 }
 
 function normalizePhase(value) {
@@ -162,9 +185,10 @@ async function main() {
 
   // 检查环境
   checkEnvironment();
+  ensureContainerIndex();
 
   // 开发阶段默认开启结构化 debug 日志（写入 ~/.webauto/logs/debug.jsonl），便于事后回放。
-  if (!process.env.DEBUG) process.env.DEBUG = '1';
+  if (isDebugEnabled() && !process.env.DEBUG) process.env.DEBUG = '1';
 
   const args = minimist(process.argv.slice(2));
 
@@ -238,13 +262,15 @@ Notes:
   const phase2TargetCount =
     Number.isFinite(linksCountArg) && linksCountArg > 0
       ? Math.floor(linksCountArg)
-      : Math.max(targetCount + 30, targetCount * 2);
+      : Math.floor(targetCount);
 
   console.log(`[XHS][v3] Phase1 -> Phase2 -> Phase34`);
   console.log(
     `[XHS][v3] keyword="${keyword}" count=${targetCount} env="${env}" sessionId="${sessionId}" headless=${headless ? 'true' : 'false'}`,
   );
   console.log(`[XHS][v3] startAt=${startAt} stopAfter=${stopAfter}`);
+
+  await ensureBaseServices({ repoRoot: process.cwd() });
 
   // Phase1：仅会话 + 登录（视口固定高）
   if (phaseOrder(startAt) <= 1 && phaseOrder(stopAfter) >= 1) {

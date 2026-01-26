@@ -18,6 +18,8 @@ import { execute as closeDetail } from './CloseDetailBlock.js';
 import { countPersistedNotes } from './helpers/persistedNotes.js';
 import { AsyncWorkQueue } from './helpers/asyncWorkQueue.js';
 import { organizeOneNote } from './helpers/xhsNoteOrganizer.js';
+import { isDebugArtifactsEnabled } from './helpers/debugArtifacts.js';
+import os from 'node:os';
 import path from 'node:path';
 import { promises as fs } from 'node:fs';
 
@@ -57,6 +59,14 @@ export interface XiaohongshuFullCollectOutput {
   error?: string;
 }
 
+function resolveDownloadRoot(): string {
+  const custom = process.env.WEBAUTO_DOWNLOAD_ROOT || process.env.WEBAUTO_DOWNLOAD_DIR;
+  if (custom && custom.trim()) return custom;
+  const home = process.env.HOME || process.env.USERPROFILE;
+  if (home && home.trim()) return path.join(home, '.webauto', 'download');
+  return path.join(os.homedir(), '.webauto', 'download');
+}
+
 export async function execute(input: XiaohongshuFullCollectInput): Promise<XiaohongshuFullCollectOutput> {
   const {
     sessionId,
@@ -75,6 +85,8 @@ export async function execute(input: XiaohongshuFullCollectInput): Promise<Xiaoh
   } = input;
 
   const processed: XiaohongshuFullCollectOutput['processed'] = [];
+  const downloadRoot = resolveDownloadRoot();
+  const debugArtifactsEnabled = isDebugArtifactsEnabled();
 
   const requiredFiles =
     mode === 'phase34' ? (['content.md', 'comments.md'] as const) : (['content.md'] as const);
@@ -83,13 +95,18 @@ export async function execute(input: XiaohongshuFullCollectInput): Promise<Xiaoh
     platform: 'xiaohongshu',
     env,
     keyword,
+    downloadRoot,
     requiredFiles: [...requiredFiles],
     ...(mode === 'phase34' ? { requireCommentsDone: true } : {}),
   });
   const seenNoteIds = new Set<string>(persistedAtStart.noteIds);
   let persistedCount = persistedAtStart.count;
-  const openDetailDebugDir = `${persistedAtStart.keywordDir}/_debug/open_detail`;
-  const ocrDebugDir = path.join(persistedAtStart.keywordDir, '_debug', 'ocr');
+  const openDetailDebugDir = debugArtifactsEnabled
+    ? `${persistedAtStart.keywordDir}/_debug/open_detail`
+    : '';
+  const ocrDebugDir = debugArtifactsEnabled
+    ? path.join(persistedAtStart.keywordDir, '_debug', 'ocr')
+    : '';
 
   const ocrQueue =
     enableOcr && mode === 'phase34' && process.platform === 'darwin'
@@ -114,9 +131,12 @@ export async function execute(input: XiaohongshuFullCollectInput): Promise<Xiaoh
     };
   }
   const controllerUrl = `${serviceUrl}/v1/controller/action`;
-  const ensureClosedDebugDir = path.join(persistedAtStart.keywordDir, '_debug', 'ensure_closed');
+  const ensureClosedDebugDir = debugArtifactsEnabled
+    ? path.join(persistedAtStart.keywordDir, '_debug', 'ensure_closed')
+    : '';
 
   async function saveEnsureClosedDebug(kind: string, meta: Record<string, any>) {
+    if (!debugArtifactsEnabled) return;
     try {
       await fs.mkdir(ensureClosedDebugDir, { recursive: true });
       const ts = new Date().toISOString().replace(/[:.]/g, '-');
@@ -165,6 +185,7 @@ export async function execute(input: XiaohongshuFullCollectInput): Promise<Xiaoh
   }
 
   async function saveOcrDebug(kind: string, meta: Record<string, any>) {
+    if (!debugArtifactsEnabled || !ocrDebugDir) return;
     try {
       await fs.mkdir(ocrDebugDir, { recursive: true });
       const ts = new Date().toISOString().replace(/[:.]/g, '-');
@@ -509,7 +530,7 @@ export async function execute(input: XiaohongshuFullCollectInput): Promise<Xiaoh
           clickRect,
           expectedNoteId: item.noteId,
           expectedHref: item.hrefAttr,
-          debugDir: openDetailDebugDir,
+          debugDir: openDetailDebugDir || undefined,
           serviceUrl,
         });
 

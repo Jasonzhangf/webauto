@@ -14,9 +14,13 @@ import { createExpandCommentsControllerClient } from './helpers/expandCommentsCo
 import { buildExtractCommentsScript, mergeExtractedComments } from './helpers/expandCommentsExtractor.js';
 import { assertNoCaptcha, systemClickAt, systemHoverAt } from './helpers/systemInput.js';
 import { getCommentEndState, getCommentStats, getScrollContainerInfo, getScrollTargetInfo, isInputFocused, locateCommentsFocusPoint } from './helpers/xhsCommentDom.js';
+import { isDebugArtifactsEnabled } from './helpers/debugArtifacts.js';
 
 // 调试截图保存目录
-const DEBUG_SCREENSHOT_DIR = path.join(os.homedir(), '.webauto', 'logs', 'debug-screenshots');
+const DEBUG_ENABLED = isDebugArtifactsEnabled();
+const DEBUG_SCREENSHOT_DIR = DEBUG_ENABLED
+  ? path.join(os.homedir(), '.webauto', 'logs', 'debug-screenshots')
+  : '';
 
 /**
  * 保存调试截图
@@ -26,6 +30,7 @@ async function saveDebugScreenshot(
   sessionId: string,
   meta: Record<string, any> = {},
 ): Promise<{ pngPath?: string; jsonPath?: string }> {
+  if (!DEBUG_ENABLED) return {};
   try {
     await fs.mkdir(DEBUG_SCREENSHOT_DIR, { recursive: true });
     const ts = new Date().toISOString().replace(/[:.]/g, '-');
