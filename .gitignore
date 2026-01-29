@@ -173,6 +173,7 @@ cookies/
 # Playwright
 playwright-report/
 playwright/.cache/
+.ms-playwright/
 
 # Browser cache and data
 *.cache/
