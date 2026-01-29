@@ -4,6 +4,12 @@
  * ExpandComments 专用的 controller 调用封装
  */
 
+import {
+  logControllerActionError,
+  logControllerActionResult,
+  logControllerActionStart,
+} from './operationLogger.js';
+
 export interface ExpandCommentsControllerConfig {
   profile: string;
   controllerUrl: string;
@@ -23,19 +29,27 @@ export function createExpandCommentsControllerClient(
   const { profile, controllerUrl } = config;
 
   async function controllerAction(action: string, payload: any = {}): Promise<any> {
-    const response = await fetch(controllerUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action, payload }),
-      signal: (AbortSignal as any).timeout
-        ? (AbortSignal as any).timeout(10000)
-        : undefined,
-    });
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}: ${await response.text()}`);
+    const opId = logControllerActionStart(action, payload, { source: 'expandCommentsController' });
+    try {
+      const response = await fetch(controllerUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action, payload }),
+        signal: (AbortSignal as any).timeout
+          ? (AbortSignal as any).timeout(10000)
+          : undefined,
+      });
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${await response.text()}`);
+      }
+      const data = await response.json();
+      const result = data.data || data;
+      logControllerActionResult(opId, action, result, { source: 'expandCommentsController' });
+      return result;
+    } catch (error) {
+      logControllerActionError(opId, action, error, payload, { source: 'expandCommentsController' });
+      throw error;
     }
-    const data = await response.json();
-    return data.data || data;
   }
 
   async function getCurrentUrl(): Promise<string> {

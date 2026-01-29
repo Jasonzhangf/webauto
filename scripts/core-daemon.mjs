@@ -49,10 +49,18 @@ const SERVICES = {
 
 const RUN_DIR = path.join(os.homedir(), '.webauto', 'run');
 const LOG_DIR = path.join(os.homedir(), '.webauto', 'logs');
+const DEFAULT_HEARTBEAT_FILE = path.join(os.homedir(), '.webauto', 'run', 'xhs-heartbeat.json');
 
 // Ensure directories exist
 fs.mkdirSync(RUN_DIR, { recursive: true });
 fs.mkdirSync(LOG_DIR, { recursive: true });
+
+function ensureHeartbeatEnv() {
+  if (process.env.WEBAUTO_HEARTBEAT_FILE) return;
+  process.env.WEBAUTO_HEARTBEAT_FILE = DEFAULT_HEARTBEAT_FILE;
+}
+
+ensureHeartbeatEnv();
 
 function log(message, level = 'INFO') {
   const timestamp = new Date().toISOString();
@@ -187,7 +195,8 @@ async function startService(service) {
       ...service.env
     },
     stdio: ['ignore', logFd ?? 'ignore', logFd ?? 'ignore'],
-    detached: true
+    detached: true,
+    windowsHide: true
   });
 
   if (typeof logFd === 'number') {

@@ -77,6 +77,7 @@ function main() {
     const child = spawn('node', [scriptPath, ...scriptArgs], {
       stdio: 'inherit',
       cwd: path.join(__dirname, '../..'),
+      windowsHide: true,
     });
     
     child.on('exit', (code) => {
@@ -90,6 +91,7 @@ function main() {
     const child = spawn('node', [scriptPath, ...scriptArgs], {
       stdio: 'inherit',
       cwd: path.join(__dirname, '../..'),
+      windowsHide: true,
     });
     
     child.on('exit', (code) => {

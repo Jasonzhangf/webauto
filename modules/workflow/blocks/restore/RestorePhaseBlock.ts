@@ -18,6 +18,11 @@
 import type { PageStage } from '../DetectPageStateBlock.js';
 import { execute as detectPageState } from '../DetectPageStateBlock.js';
 import { execute as errorRecovery } from '../ErrorRecoveryBlock.js';
+import {
+  logControllerActionError,
+  logControllerActionResult,
+  logControllerActionStart,
+} from '../helpers/operationLogger.js';
 
 export interface RestorePhaseInput {
   sessionId: string;
@@ -64,16 +69,24 @@ export async function execute(input: RestorePhaseInput): Promise<RestorePhaseOut
   const controllerUrl = `${serviceUrl}/v1/controller/action`;
 
   async function controllerAction(action: string, payload: any = {}) {
-    const res = await fetch(controllerUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action, payload }),
-    });
-    if (!res.ok) {
-      throw new Error(`HTTP ${res.status}: ${await res.text()}`);
+    const opId = logControllerActionStart(action, payload, { source: 'RestorePhaseBlock' });
+    try {
+      const res = await fetch(controllerUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action, payload }),
+      });
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}: ${await res.text()}`);
+      }
+      const data = await res.json();
+      const result = data.data || data;
+      logControllerActionResult(opId, action, result, { source: 'RestorePhaseBlock' });
+      return result;
+    } catch (error) {
+      logControllerActionError(opId, action, error, payload, { source: 'RestorePhaseBlock' });
+      throw error;
     }
-    const data = await res.json();
-    return data.data || data;
   }
 
   async function clickDiscoverButton(): Promise<{ success: boolean; method?: string }> {

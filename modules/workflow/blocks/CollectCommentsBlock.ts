@@ -124,6 +124,47 @@ export async function execute(input: CollectCommentsInput): Promise<CollectComme
         return data.data || data;
       };
 
+      const listPagesDetailed = async (): Promise<{
+        pages: Array<{ index: number; url: string; active: boolean }>;
+        activeIndex: number | null;
+      }> => {
+        const res = await controllerAction('browser:page:list', { profileId: sessionId }).catch((): any => null);
+        const pages = (res as any)?.pages || (res as any)?.data?.pages || [];
+        const activeIndexRaw = (res as any)?.activeIndex ?? (res as any)?.data?.activeIndex;
+        const activeIndex = Number.isFinite(Number(activeIndexRaw)) ? Number(activeIndexRaw) : null;
+        return { pages: Array.isArray(pages) ? pages : [], activeIndex };
+      };
+
+      const openPageWithFallback = async (detailUrl: string, reason: string): Promise<number> => {
+        const beforeDetail = await listPagesDetailed().catch(() => ({
+          pages: [] as Array<{ index: number; url: string; active: boolean }>,
+          activeIndex: null,
+        }) as { pages: Array<{ index: number; url: string; active: boolean }>; activeIndex: number | null });
+        const beforeIndexes = new Set<number>(
+          beforeDetail.pages.map((p) => Number(p?.index)).filter((n) => Number.isFinite(n)) as number[],
+        );
+
+        const created = await controllerAction('browser:page:new', { profileId: sessionId, url: detailUrl });
+        const createdIndex = Number((created as any)?.index ?? (created as any)?.data?.index ?? (created as any)?.body?.index);
+        if (Number.isFinite(createdIndex)) return createdIndex;
+
+        await delay(400);
+        const afterDetail = await listPagesDetailed().catch(() => ({
+          pages: [] as Array<{ index: number; url: string; active: boolean }>,
+          activeIndex: null,
+        }) as { pages: Array<{ index: number; url: string; active: boolean }>; activeIndex: number | null });
+        if (Number.isFinite(afterDetail.activeIndex)) return Number(afterDetail.activeIndex);
+
+        const newPage = afterDetail.pages.find((p) => Number.isFinite(p?.index) && !beforeIndexes.has(Number(p.index)));
+        if (newPage && Number.isFinite(newPage.index)) return Number(newPage.index);
+
+        if (afterDetail.pages.length > 0 && Number.isFinite(afterDetail.pages[afterDetail.pages.length - 1]?.index)) {
+          return Number(afterDetail.pages[afterDetail.pages.length - 1]?.index);
+        }
+
+        throw new Error(`browser:page:new returned invalid index (${reason})`);
+      };
+
       const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
       const profile = sessionId;
 
@@ -249,9 +290,7 @@ export async function execute(input: CollectCommentsInput): Promise<CollectComme
         // 按要求：一个一个开 tab，开满 4 个后循环
         if (tabIndices.length < maxTabs) {
           console.log(`[CollectComments][rotate4] opening new tab for same detail (batch=${batch})`);
-          const created = await controllerAction('browser:page:new', { profileId: profile, url: detailUrl });
-          const newIndex = Number(created?.index ?? created?.data?.index);
-          if (!Number.isFinite(newIndex)) throw new Error('browser:page:new returned invalid index');
+          const newIndex = await openPageWithFallback(detailUrl, 'rotate4');
           tabIndices.push(newIndex);
           openedTabs.push(newIndex);
           tabSeenKeys.set(newIndex, new Set<string>());

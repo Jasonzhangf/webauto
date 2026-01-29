@@ -9,6 +9,12 @@
  * - 与 P0 目标一致：降低对 containers:match 的依赖
  */
 
+import {
+  logControllerActionError,
+  logControllerActionResult,
+  logControllerActionStart,
+} from './helpers/operationLogger.js';
+
 export interface CollectSearchListInput {
   sessionId: string;
   targetCount?: number;
@@ -70,16 +76,24 @@ export async function execute(input: CollectSearchListInput): Promise<CollectSea
   }
 
   async function controllerAction(action: string, payload: any = {}) {
-    const response = await fetch(controllerUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action, payload })
-    });
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}: ${await response.text()}`);
+    const opId = logControllerActionStart(action, payload, { source: 'CollectSearchListBlock' });
+    try {
+      const response = await fetch(controllerUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action, payload })
+      });
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${await response.text()}`);
+      }
+      const data = await response.json();
+      const result = data.data || data;
+      logControllerActionResult(opId, action, result, { source: 'CollectSearchListBlock' });
+      return result;
+    } catch (error) {
+      logControllerActionError(opId, action, error, payload, { source: 'CollectSearchListBlock' });
+      throw error;
     }
-    const data = await response.json();
-    return data.data || data;
   }
 
   async function getCurrentUrl(): Promise<string> {
@@ -396,22 +410,26 @@ export async function execute(input: CollectSearchListInput): Promise<CollectSea
 	                }
 	                // clickRect：用于返回给上层点击坐标/rect（优先封面 rect；无封面时回退卡片 rect）
 	                var clickRect = coverRect || { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
+	                var cardCx = rect ? (rect.x + rect.width / 2) : 0;
+	                var cardCy = rect ? (rect.y + rect.height / 2) : 0;
 	                var inViewportCard =
 	                  rect &&
 	                  rect.width > 0 &&
 	                  rect.height > 0 &&
-	                  rect.x >= safeLeft &&
-	                  (rect.x + rect.width) <= (viewportWidth - safeRight) &&
-	                  rect.y >= safeTop &&
-	                  (rect.y + rect.height) <= (viewportHeight - safeBottom);
+	                  cardCx >= safeLeft &&
+	                  cardCx <= (viewportWidth - safeRight) &&
+	                  cardCy >= safeTop &&
+	                  cardCy <= (viewportHeight - safeBottom);
+	                var coverCx = coverRect ? (coverRect.x + coverRect.width / 2) : 0;
+	                var coverCy = coverRect ? (coverRect.y + coverRect.height / 2) : 0;
 	                var inViewportCover =
 	                  coverRect &&
 	                  coverRect.width > 0 &&
 	                  coverRect.height > 0 &&
-	                  coverRect.x >= safeLeft &&
-	                  (coverRect.x + coverRect.width) <= (viewportWidth - safeRight) &&
-	                  coverRect.y >= safeTop &&
-	                  (coverRect.y + coverRect.height) <= (viewportHeight - safeBottom);
+	                  coverCx >= safeLeft &&
+	                  coverCx <= (viewportWidth - safeRight) &&
+	                  coverCy >= safeTop &&
+	                  coverCy <= (viewportHeight - safeBottom);
 	                var inViewport = Boolean(inViewportCard && inViewportCover);
 	                return {
 	                  index: idx,

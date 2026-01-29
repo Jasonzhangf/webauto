@@ -27,6 +27,8 @@ const CONFIG = {
   name: 'xiaohongshu-collector',
   version: '1.0.0',
   nodeVersion: '>=22.0.0',
+  includeDocs: false,
+  includeInstallScripts: true,
   files: [
     'dist/services',
     // 打包必须包含完整 dist/modules：services/workflow 运行时会依赖 logging/container-matcher 等模块
@@ -42,12 +44,10 @@ const CONFIG = {
     'scripts/core-daemon.mjs',
     'scripts/search-gate-server.mjs',
     'scripts/search-gate-cli.mjs',
-    'scripts/run-xiaohongshu-phase1-2-34-v3.mjs',  // v3 统一入口
+    'scripts/run-xiaohongshu-phase1-2-34-v3.mjs',
     'container-library',
     'runtime/browser',
-    'runtime/infra/node-cli/package.json',
-    'package.json',
-    'package-lock.json'
+    'runtime/infra/node-cli/package.json'
   ]
 };
 
@@ -141,8 +141,8 @@ async function createPackageJson() {
 
 // 创建 CLI 入口脚本
 async function createCliScripts() {
-  const binDir = join(PACKAGE_DIR, 'bin');
-  await ensureDir(binDir);
+  const scriptDir = PACKAGE_DIR;
+  await ensureDir(scriptDir);
 
   // Unix shell script
   const unixScript = `#!/bin/bash
@@ -151,7 +151,7 @@ async function createCliScripts() {
 set -e
 
 SCRIPT_DIR="\$(cd "\$(dirname "\${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="\$SCRIPT_DIR/.."
+PROJECT_ROOT="\$SCRIPT_DIR"
 cd "\$PROJECT_ROOT"
 export PLAYWRIGHT_BROWSERS_PATH="\$PROJECT_ROOT/.ms-playwright"
 
@@ -168,10 +168,54 @@ if [ "\$NODE_VERSION" -lt 22 ]; then
   exit 1
 fi
 
+show_help() {
+  cat << EOF
+小红书数据采集 CLI 工具 v${CONFIG.version}
+
+用法:
+  xhs -k <keyword> [-n <count>] [--cn <count>] [--headless|--headful]
+  xhs <keyword> [-n <count>] [--cn <count>]
+
+参数:
+  -k, --keyword       搜索关键词（必填，可用位置参数）
+  -n, --count         本次新增采集数量（默认 100，去重后补齐）
+  -cn, --commentCount 评论最大数量（不写=全部，写了就是上限）
+  --headless          无头模式：浏览器不显示（默认）
+  --headful           有头模式：浏览器显示（覆盖 headless）
+  --dev               开发模式：命中风控/安全点击直接失败（不做恢复）
+
+说明:
+  默认生产环境（prod），无需传参
+  同关键词已有记录不会跳过，按 -n 新增并对已有帖子去重
+
+命令:
+  xhs phase1          后台启动并复用浏览器会话
+  xhs phase2          搜索并采集链接
+  xhs phase3          采集详情和评论
+  xhs stop            停止所有服务与后台进程
+  xhs install         检查并安装依赖
+  xhs check           仅检查环境与浏览器
+
+示例:
+  xhs -k "手机膜" -n 50 --headless
+  xhs -k "手机膜" --headful
+  xhs phase1                                        # 后台启动浏览器会话（日志: ~/.webauto/logs/xiaohongshu_phase1.log）
+  xhs stop                                          # 停止所有服务与后台进程
+  xhs check                                         # 仅检查环境与浏览器
+
+更多信息请访问: https://github.com/your-repo/webauto
+EOF
+}
+
+if [ "\$#" -eq 0 ]; then
+  show_help
+  exit 0
+fi
+
 # 命令路由
 case "\$1" in
-  v3|run)
-    node "\$PROJECT_ROOT/scripts/run-xiaohongshu-phase1-2-34-v3.mjs" "\${@:2}"
+  -h|--help|help)
+    show_help
     ;;
   phase1)
     LOG_DIR="\${HOME:-\$USERPROFILE}/.webauto/logs"
@@ -192,34 +236,18 @@ case "\$1" in
   install)
     node "\$PROJECT_ROOT/scripts/xiaohongshu/install.mjs"
     ;;
+  check)
+    node "\$PROJECT_ROOT/scripts/xiaohongshu/install.mjs" --check
+    ;;
   *)
-    cat << EOF
-小红书数据采集 CLI 工具 v${CONFIG.version}
-
-用法:
-  xhs-cli v3              使用 v3 统一入口（推荐）
-  xhs-cli run             同 v3
-  xhs-cli phase1          后台启动并复用浏览器会话
-  xhs-cli phase2          搜索并采集链接
-  xhs-cli phase3          采集详情和评论
-  xhs-cli stop            停止所有服务与后台进程
-  xhs-cli install         检查并安装依赖
-
-示例:
-  xhs-cli v3 --keyword "手机膜" --count 50 --env prod    # v3 完整运行
-  xhs-cli v3 --help                                     # 查看 v3 详细帮助
-  xhs-cli phase1                                        # 后台启动浏览器会话（日志: ~/.webauto/logs/xiaohongshu_phase1.log）
-  xhs-cli stop                                          # 停止所有服务与后台进程
-
-更多信息请访问: https://github.com/your-repo/webauto
-EOF
+    node "\$PROJECT_ROOT/scripts/run-xiaohongshu-phase1-2-34-v3.mjs" "\$@"
     ;;
 esac
 `;
 
   if (platform() !== 'win32') {
-    await writeFile(join(binDir, 'xhs-cli'), unixScript, { mode: 0o755 });
-    log('创建: bin/xhs-cli');
+    await writeFile(join(scriptDir, 'xhs'), unixScript, { mode: 0o755 });
+    log('创建: xhs');
   }
 
   // Windows batch script
@@ -230,7 +258,7 @@ REM 小红书采集 CLI 入口
 setlocal EnableDelayedExpansion
 
 set "SCRIPT_DIR=%~dp0"
-set "PROJECT_ROOT=%SCRIPT_DIR%.."
+set "PROJECT_ROOT=%SCRIPT_DIR%"
 cd /d "%PROJECT_ROOT%"
 set "PLAYWRIGHT_BROWSERS_PATH=%PROJECT_ROOT%\\.ms-playwright"
 set "WEBAUTO_DOWNLOAD_ROOT=%PROJECT_ROOT%\\download"
@@ -245,11 +273,12 @@ if %errorlevel% neq 0 (
 )
 
 REM 命令路由
-if "%1"=="v3" (
-  node "%PROJECT_ROOT%\\scripts\\run-xiaohongshu-phase1-2-34-v3.mjs" %*
-) else if "%1"=="run" (
-  node "%PROJECT_ROOT%\\scripts\\run-xiaohongshu-phase1-2-34-v3.mjs" %*
-) else if "%1"=="phase1" (
+if "%~1"=="" goto :show_help
+if /I "%~1"=="-h" goto :show_help
+if /I "%~1"=="--help" goto :show_help
+if /I "%~1"=="help" goto :show_help
+
+if "%1"=="phase1" (
   set "LOG_BASE=%USERPROFILE%"
   if "!LOG_BASE!"=="" set "LOG_BASE=%HOMEDRIVE%%HOMEPATH%"
   if "!LOG_BASE!"=="" set "LOG_BASE=%PROJECT_ROOT%"
@@ -268,30 +297,52 @@ if "%1"=="v3" (
   node "%PROJECT_ROOT%\\scripts\\xiaohongshu\\stop-all.mjs"
 ) else if "%1"=="install" (
   node "%PROJECT_ROOT%\\scripts\\xiaohongshu\\install.mjs"
+) else if "%1"=="check" (
+  node "%PROJECT_ROOT%\\scripts\\xiaohongshu\\install.mjs" --check
 ) else (
-  echo 小红书数据采集 CLI 工具 v${CONFIG.version}
-  echo.
-  echo 用法:
-  echo   xhs-cli v3              使用 v3 统一入口（推荐）
-  echo   xhs-cli run             同 v3
-  echo   xhs-cli phase1          后台启动并复用浏览器会话
-  echo   xhs-cli phase2          搜索并采集链接
-  echo   xhs-cli phase3          采集详情和评论
-  echo   xhs-cli stop            停止所有服务与后台进程
-  echo   xhs-cli install         检查并安装依赖
-  echo.
-  echo 示例:
-  echo   xhs-cli v3 --keyword "手机膜" --count 50 --env prod
-  echo   xhs-cli v3 --help
-  echo   xhs-cli phase1  ^(日志: %USERPROFILE%\\.webauto\\logs\\xiaohongshu_phase1.log^)
-  echo   xhs-cli stop
+  node "%PROJECT_ROOT%\\scripts\\run-xiaohongshu-phase1-2-34-v3.mjs" %*
 )
+
+goto :eof
+
+:show_help
+echo 小红书数据采集 CLI 工具 v${CONFIG.version}
+echo.
+echo 用法:
+echo   xhs -k ^<keyword^> [-n ^<count^>] [--cn ^<count^>] [--headless^|--headful]
+echo   xhs ^<keyword^> [-n ^<count^>] [--cn ^<count^>]
+echo.
+echo 参数:
+echo   -k, --keyword       搜索关键词（必填，可用位置参数）
+echo   -n, --count         本次新增采集数量（默认 100，去重后补齐）
+echo   -cn, --commentCount 评论最大数量（不写=全部，写了就是上限）
+echo   --headless          无头模式：浏览器不显示（默认）
+echo   --headful           有头模式：浏览器显示（覆盖 headless）
+echo.
+echo 说明:
+echo   默认生产环境（prod），无需传参
+echo   同关键词已有记录不会跳过，按 -n 新增并对已有帖子去重
+echo.
+echo 命令:
+echo   xhs phase1          后台启动并复用浏览器会话
+echo   xhs phase2          搜索并采集链接
+echo   xhs phase3          采集详情和评论
+echo   xhs stop            停止所有服务与后台进程
+echo   xhs install         检查并安装依赖
+echo   xhs check           仅检查环境与浏览器
+echo.
+echo 示例:
+echo   xhs -k "手机膜" -n 50 --headless
+echo   xhs -k "手机膜" --headful
+echo   xhs phase1  ^(日志: %USERPROFILE%\\.webauto\\logs\\xiaohongshu_phase1.log^)
+echo   xhs stop
+echo   xhs check
 
 endlocal
 `;
 
-  await writeFile(join(binDir, 'xhs-cli.bat'), winScript.replace(/\n/g, '\r\n'));
-  log('创建: bin/xhs-cli.bat');
+  await writeFile(join(scriptDir, 'xhs.bat'), winScript.replace(/\n/g, '\r\n'));
+  log('创建: xhs.bat');
 }
 
 // 创建安装脚本
@@ -322,7 +373,7 @@ mkdir -p "\$PLAYWRIGHT_BROWSERS_PATH"
 echo "📦 浏览器安装目录: \$PLAYWRIGHT_BROWSERS_PATH"
 echo ""
 echo "📦 正在安装项目依赖..."
-npm ci --production
+npm install --production
 
 if ! ls "$PLAYWRIGHT_BROWSERS_PATH"/chromium-* >/dev/null 2>&1; then
   echo "📦 未检测到 Chromium，开始下载..."
@@ -336,14 +387,14 @@ fi
 
 echo ""
 echo "🔍 正在验证安装..."
-./bin/xhs-cli install
+./xhs install
 
 echo ""
 echo "✅ 安装完成！"
 echo ""
 echo "使用方法:"
-echo "  ./bin/xhs-cli phase1              # 启动浏览器会话"
-echo "  ./bin/xhs-cli phase2 --keyword \\"测试\\" --target 50"
+echo "  ./xhs phase1              # 启动浏览器会话"
+echo "  ./xhs phase2 --keyword \\"测试\\" --target 50"
 echo ""
 `;
 
@@ -425,8 +476,8 @@ echo [install] Node.js version: %NODE_VERSION%
 echo.
 echo [install] Browser install path: %PLAYWRIGHT_BROWSERS_PATH%
 echo.
-echo [install] Installing dependencies (npm ci --production)...
-call npm ci --production
+echo [install] Installing dependencies (npm install --production)...
+call npm install --production
 if %errorlevel% neq 0 (
   echo [install] npm install failed.
   set "EXIT_CODE=1"
@@ -456,8 +507,8 @@ if not defined BROWSER_FOUND (
 echo.
 echo [install] Done.
 echo [install] Next:
-echo   "%TARGET_DIR%\\bin\\xhs-cli.bat" phase1
-echo   "%TARGET_DIR%\\bin\\xhs-cli.bat" phase2 --keyword "test" --target 50
+echo   "%TARGET_DIR%\\xhs.bat" phase1
+echo   "%TARGET_DIR%\\xhs.bat" phase2 --keyword "test" --target 50
 
 :end
 call :maybe_pause
@@ -486,45 +537,45 @@ async function createReadme() {
 
 ## 快速开始
 
-### 方式一：使用 v3 统一入口（推荐）
-
-v3 入口整合了所有阶段，使用更简单：
+### 方式一：一键采集（推荐）
 
 \`\`\`bash
 # macOS/Linux
-./bin/xhs-cli v3 --keyword "手机膜" --count 50 --env prod
+./xhs -k 手机膜 -n 50 --headless
 
 # Windows
-bin\\xhs-cli.bat v3 --keyword "手机膜" --count 50 --env prod
+xhs.bat -k 手机膜 -n 50 --headless
 \`\`\`
 
 查看详细帮助：
 \`\`\`bash
-./bin/xhs-cli v3 --help
+./xhs --help
 \`\`\`
 
-> Windows 运行请使用 \`bin\\xhs-cli.bat\`（PowerShell 可用 \`.\\bin\\xhs-cli.bat\`），不要直接运行 \`bin\\xhs-cli\`。
+> Windows 运行请使用 \`xhs.bat\`（PowerShell 可用 \`.\\xhs.bat\`）。
 
 ### 方式二：分阶段执行（传统方式）
 
-### 1. 检查环境
+### 1. 检查环境 / 安装依赖
 
 \`\`\`bash
 # macOS/Linux
-./bin/xhs-cli install
+./xhs install
+./xhs check
 
 # Windows
-bin\\xhs-cli.bat install
+xhs.bat install
+xhs.bat check
 \`\`\`
 
 ### 2. 启动浏览器会话 (Phase 1)
 
 \`\`\`bash
 # macOS/Linux
-./bin/xhs-cli phase1
+./xhs phase1
 
 # Windows
-bin\\xhs-cli.bat phase1
+xhs.bat phase1
 \`\`\`
 
 等待浏览器启动并完成登录（手动扫码登录）。Phase1 会在后台运行，日志位于 \`~/.webauto/logs/xiaohongshu_phase1.log\`。
@@ -538,24 +589,25 @@ bin\\xhs-cli.bat phase1
 node scripts/search-gate-server.mjs
 
 # Windows
-node scripts\\search-gate-server.mjs
+node scripts\search-gate-server.mjs
 \`\`\`
 
 ### 3. 采集数据 (Phase 2)
 
 \`\`\`bash
 # macOS/Linux
-./bin/xhs-cli phase2 --keyword "手机膜" --target 50 --env debug
+./xhs phase2 --keyword 手机膜 --target 50
 
 # Windows
-bin\\xhs-cli.bat phase2 --keyword "手机膜" --target 50 --env debug
+xhs.bat phase2 --keyword 手机膜 --target 50
 \`\`\`
 
 ## 目录结构
 
 \`\`\`
 xiaohongshu-collector/
-  bin/                      # CLI 入口
+  xhs                       # CLI 入口 (macOS/Linux)
+  xhs.bat                   # CLI 入口 (Windows)
   dist/                     # 编译产物（services/modules/sharedmodule）
   scripts/                  # 业务脚本与工作流入口
   container-library/        # 容器定义
@@ -566,17 +618,19 @@ xiaohongshu-collector/
 
 | 命令 | 说明 | 参数 |
 |------|------|------|
-| \`v3\` / \`run\` | **v3 统一入口（推荐）** | \`--keyword\` (关键词) \`--count\` (数量) \`--env\` (环境) \`--startAt\` (起始阶段) \`--stopAfter\` (结束阶段) |
+| \`xhs\` | 一键采集入口 | \`-k/-n/--cn\` \`--headless/--headful\` |
 | \`phase1\` | 启动并复用浏览器会话 | \`--headless\` (无头模式) |
-| \`phase2\` | 搜索并采集链接 | \`--keyword\` (关键词) \`--target\` (数量) \`--env\` (环境) |
+| \`phase2\` | 搜索并采集链接 | \`--keyword\` (关键词) \`--target\` (数量) |
 | \`phase3\` | 采集详情和评论 | 从 phase2 产物读取 |
 | \`stop\` | 停止所有服务与后台进程 | - |
+| \`install\` | 检查并安装依赖 | - |
+| \`check\` | 仅检查环境与浏览器 | - |
 
 ## 数据存储
 
 采集结果保存在:
 \`\`\`
-~/.webauto/download/xiaohongshu/{env}/{keyword}/
+~/.webauto/download/xiaohongshu/prod/<keyword>/
 \`\`\`
 
 ## 故障排除

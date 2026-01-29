@@ -51,7 +51,7 @@ export async function execute(input: WaitSearchPermitInput): Promise<WaitSearchP
   const dev =
     typeof input.dev === 'boolean'
       ? input.dev
-      : (process.env.DEBUG === '1' || process.env.NODE_ENV !== 'production');
+      : (process.env.DEBUG === '1');
   const devTag =
     typeof input.devTag === 'string' && input.devTag.trim()
       ? String(input.devTag).trim()

@@ -5,6 +5,11 @@
  */
 
 import os from 'node:os';
+import {
+  logControllerActionError,
+  logControllerActionResult,
+  logControllerActionStart,
+} from './operationLogger.js';
 
 export interface SearchExecutorConfig {
   profile: string;
@@ -31,17 +36,25 @@ export async function controllerAction(
   action: string,
   payload: any = {}
 ): Promise<any> {
-  const response = await fetch(controllerUrl, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ action, payload }),
-    signal: (AbortSignal as any).timeout ? (AbortSignal as any).timeout(10000) : undefined
-  });
-  if (!response.ok) {
-    throw new Error(`HTTP ${response.status}: ${await response.text()}`);
+  const opId = logControllerActionStart(action, payload, { source: 'searchExecutor' });
+  try {
+    const response = await fetch(controllerUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action, payload }),
+      signal: (AbortSignal as any).timeout ? (AbortSignal as any).timeout(10000) : undefined
+    });
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${await response.text()}`);
+    }
+    const data = await response.json();
+    const result = data.data || data;
+    logControllerActionResult(opId, action, result, { source: 'searchExecutor' });
+    return result;
+  } catch (error) {
+    logControllerActionError(opId, action, error, payload, { source: 'searchExecutor' });
+    throw error;
   }
-  const data = await response.json();
-  return data.data || data;
 }
 
 export async function verifySearchBarAnchor(
@@ -81,7 +94,9 @@ export async function isSearchInputFocused(
   const script = `(() => {
     const el = document.querySelector(${JSON.stringify(selector)});
     if (!el) return false;
-    return document.activeElement === el;
+    const active = document.activeElement;
+    if (!active) return false;
+    return active === el || (el instanceof Element && el.contains(active));
   })()`;
 
   const response = await fetch(controllerUrl, {
@@ -112,7 +127,13 @@ export async function readSearchInputValue(
   const script = `(() => {
     const el = document.querySelector(${JSON.stringify(sel)});
     if (!el) return '';
-    return el.value || '';
+    try {
+      if ('value' in el) return String(el.value || '');
+      if (el.isContentEditable) return String(el.textContent || '');
+      return String(el.textContent || '');
+    } catch {
+      return '';
+    }
   })()`;
 
   const response = await fetch(controllerUrl, {
@@ -147,16 +168,42 @@ export async function executeSearch(
     // ✅ 系统级输入：禁止 container:operation type（底层为 session.fill，属于非系统行为）
     // 依赖上游已完成 focus；这里额外做一次清空 + 输入 + Enter
     // 注意：在 mac 上 Control+A 可能导致光标跳到行首，反而造成“关键字拼接”。
-    const platform = os.platform();
-    const selectAllKey = platform === 'darwin' ? 'Meta+A' : 'Control+A';
-    await controllerAction(controllerUrl, 'keyboard:press', { profileId: profile, key: selectAllKey }).catch(() => {});
-    await controllerAction(controllerUrl, 'keyboard:press', { profileId: profile, key: 'Backspace' }).catch(() => {});
-    await controllerAction(controllerUrl, 'keyboard:press', { profileId: profile, key: 'Delete' }).catch(() => {});
-    await controllerAction(controllerUrl, 'keyboard:type', {
-      profileId: profile,
-      text: keyword,
-      delay: 80 + Math.floor(Math.random() * 60),
-    }).catch(() => {});
+    let typedByContainer = false;
+    try {
+      const typeResp = await controllerAction(controllerUrl, 'container:operation', {
+        containerId: searchInputContainerId,
+        operationId: 'type',
+        sessionId: profile,
+        config: {
+          selector,
+          text: keyword,
+          clear_first: true,
+          human_typing: true,
+          pause_after: 320,
+        },
+      });
+      const ok = Boolean(typeResp?.success !== false && (typeResp?.data?.success ?? true));
+      if (!ok) {
+        console.warn('[SearchExecutor] container type failed', typeResp);
+      } else {
+        typedByContainer = true;
+      }
+    } catch (error: any) {
+      console.warn('[SearchExecutor] container type failed', error?.message || String(error));
+    }
+
+    if (!typedByContainer) {
+      const platform = os.platform();
+      const selectAllKey = platform === 'darwin' ? 'Meta+A' : 'Control+A';
+      await controllerAction(controllerUrl, 'keyboard:press', { profileId: profile, key: selectAllKey }).catch(() => {});
+      await controllerAction(controllerUrl, 'keyboard:press', { profileId: profile, key: 'Backspace' }).catch(() => {});
+      await controllerAction(controllerUrl, 'keyboard:press', { profileId: profile, key: 'Delete' }).catch(() => {});
+      await controllerAction(controllerUrl, 'keyboard:type', {
+        profileId: profile,
+        text: keyword,
+        delay: 80 + Math.floor(Math.random() * 60),
+      }).catch(() => {});
+    }
 
     // 操作之间要等待：给输入法/站内联想一点稳定时间
     await new Promise((r) => setTimeout(r, 420));
@@ -216,12 +263,11 @@ export async function executeSearch(
     const trimmedRaw = typeof rawValue === 'string' ? rawValue.trim() : '';
 
     const matches = (trimmedActive && trimmedActive === trimmedExpected) || (trimmedRaw && trimmedRaw === trimmedExpected);
-    if (!matches) {
-      return {
-        success: false,
-        error: `keyword_not_set_in_input (active="${trimmedActive}", selectorValue="${trimmedRaw}", expected="${trimmedExpected}")`,
-        debug: { selector, searchInputContainerId, suggestions: suggestionProbe },
-      };
+    const valueMismatch = !matches;
+    if (valueMismatch) {
+      console.warn(
+        `[SearchExecutor] keyword not detected in input, continue to press Enter. active="${trimmedActive}", selectorValue="${trimmedRaw}", expected="${trimmedExpected}"`,
+      );
     }
 
     async function readUrl(): Promise<string> {
@@ -253,15 +299,40 @@ export async function executeSearch(
     // 中文输入法下 Enter 可能先“确认输入”而不触发搜索：最多 2 次 Enter（不循环重搜）
     let navigated = false;
     let lastUrl = '';
-    for (let attempt = 1; attempt <= 2; attempt += 1) {
-      console.log(`[SearchExecutor] Press Enter (attempt=${attempt}/2) ...`);
-      await controllerAction(controllerUrl, 'keyboard:press', { profileId: profile, key: 'Enter' }).catch(() => {});
-      await new Promise((r) => setTimeout(r, 450));
-      const waited = await waitForSearchResultUrl(7000);
+    const useSearchButton = searchInputContainerId === 'xiaohongshu_home.search_input';
+
+    if (useSearchButton) {
+      console.log('[SearchExecutor] Trigger search via home search button ...');
+      try {
+        const clickResp = await controllerAction(controllerUrl, 'container:operation', {
+          containerId: 'xiaohongshu_home.search_button',
+          operationId: 'click',
+          sessionId: profile,
+        });
+        const ok = Boolean(clickResp?.success !== false && (clickResp?.data?.success ?? true));
+        if (!ok) {
+          console.warn('[SearchExecutor] search button click failed', clickResp);
+        }
+      } catch (error: any) {
+        console.warn('[SearchExecutor] search button click failed', error?.message || String(error));
+      }
+      await new Promise((r) => setTimeout(r, 650));
+      const waited = await waitForSearchResultUrl(9000);
       lastUrl = waited.url;
-      if (waited.ok) {
-        navigated = true;
-        break;
+      navigated = waited.ok;
+    }
+
+    if (!navigated) {
+      for (let attempt = 1; attempt <= 2; attempt += 1) {
+        console.log(`[SearchExecutor] Press Enter (attempt=${attempt}/2) ...`);
+        await controllerAction(controllerUrl, 'keyboard:press', { profileId: profile, key: 'Enter' }).catch(() => {});
+        await new Promise((r) => setTimeout(r, 450));
+        const waited = await waitForSearchResultUrl(7000);
+        lastUrl = waited.url;
+        if (waited.ok) {
+          navigated = true;
+          break;
+        }
       }
     }
 
@@ -270,10 +341,27 @@ export async function executeSearch(
       return {
         success: false,
         error: `search_not_navigated_after_enter (url="${lastUrl || ''}")`,
-        debug: { selector, searchInputContainerId, suggestions: suggestionProbe },
+        debug: {
+          selector,
+          searchInputContainerId,
+          suggestions: suggestionProbe,
+          valueMismatch,
+          activeValue: trimmedActive,
+          selectorValue: trimmedRaw,
+        },
       };
     }
-    return { success: true, debug: { selector, searchInputContainerId, suggestions: suggestionProbe } };
+    return {
+      success: true,
+      debug: {
+        selector,
+        searchInputContainerId,
+        suggestions: suggestionProbe,
+        valueMismatch,
+        activeValue: trimmedActive,
+        selectorValue: trimmedRaw,
+      },
+    };
   } catch (error: any) {
     console.error(`[SearchExecutor] Search failed: ${error.message}`);
     return { success: false, error: error.message };

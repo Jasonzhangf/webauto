@@ -9,6 +9,11 @@ import path from 'node:path';
 import { promises as fs } from 'node:fs';
 import { verifyAnchorByContainerId } from './helpers/containerAnchors.js';
 import { isDebugArtifactsEnabled } from './helpers/debugArtifacts.js';
+import {
+  logControllerActionError,
+  logControllerActionResult,
+  logControllerActionStart,
+} from './helpers/operationLogger.js';
 
 // 调试截图保存目录
 const DEBUG_ENABLED = isDebugArtifactsEnabled();
@@ -142,17 +147,25 @@ export async function execute(input: CloseDetailInput): Promise<CloseDetailOutpu
   }
 
   async function controllerAction(action: string, payload: any = {}) {
-    const response = await fetch(controllerUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action, payload }),
-      signal: (AbortSignal as any).timeout ? (AbortSignal as any).timeout(20000) : undefined,
-    });
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}: ${await response.text()}`);
+    const opId = logControllerActionStart(action, payload, { source: 'CloseDetailBlock' });
+    try {
+      const response = await fetch(controllerUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action, payload }),
+        signal: (AbortSignal as any).timeout ? (AbortSignal as any).timeout(20000) : undefined,
+      });
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${await response.text()}`);
+      }
+      const data = await response.json().catch(() => ({}));
+      const result = (data as any).data || data;
+      logControllerActionResult(opId, action, result, { source: 'CloseDetailBlock' });
+      return result;
+    } catch (error) {
+      logControllerActionError(opId, action, error, payload, { source: 'CloseDetailBlock' });
+      throw error;
     }
-    const data = await response.json().catch(() => ({}));
-    return (data as any).data || data;
   }
 
   async function captureFailureScreenshot(tag: string): Promise<string | null> {

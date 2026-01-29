@@ -18,6 +18,7 @@ import { RemoteSessionManager } from './RemoteSessionManager.js';
 import { ensureBuiltinOperations } from '../../modules/operations/src/builtin.js';
 import { getContainerExecutor } from '../../modules/operations/src/executor.js';
 import { installServiceProcessLogger } from '../shared/serviceProcessLogger.js';
+import { startHeartbeatWatcher } from '../shared/heartbeat.js';
 
 // Ensure builtin operations are registered before handling any operations
 ensureBuiltinOperations();
@@ -46,6 +47,8 @@ const cliTargets = {
   operations: path.join(repoRoot, 'dist/modules/operations/src/cli.js'),
   'container-matcher': path.join(repoRoot, 'dist/modules/container-matcher/src/cli.js'),
 };
+
+startHeartbeatWatcher({ serviceName: 'unified-api' });
 
 class UnifiedApiServer {
   private controller: UiController;

@@ -19,12 +19,34 @@ import { isDebugArtifactsEnabled } from './helpers/debugArtifacts.js';
 import { execute as extractDetail } from './ExtractDetailBlock.js';
 import { execute as expandComments } from './ExpandCommentsBlock.js';
 import { execute as persistXhsNote } from './PersistXhsNoteBlock.js';
+import { resolveTargetCount } from './helpers/targetCountMode.js';
+import { mergeNotesMarkdown } from './helpers/mergeXhsMarkdown.js';
+import { isDevMode } from './helpers/systemInput.js';
+import {
+  logControllerActionError,
+  logControllerActionResult,
+  logControllerActionStart,
+} from './helpers/operationLogger.js';
+
+const DEFAULT_COMMENTS_COVERAGE_RATIO = 0.9;
+
+function resolveCommentsCoverageRatio(): number {
+  const raw = String(process.env.WEBAUTO_COMMENTS_COVERAGE_RATIO || '').trim();
+  if (!raw) return DEFAULT_COMMENTS_COVERAGE_RATIO;
+  const normalized = raw.endsWith('%') ? Number(raw.slice(0, -1)) / 100 : Number(raw);
+  if (!Number.isFinite(normalized) || normalized <= 0 || normalized > 1) return DEFAULT_COMMENTS_COVERAGE_RATIO;
+  return normalized;
+}
+
+const COMMENTS_COVERAGE_RATIO = resolveCommentsCoverageRatio();
 
 export interface XiaohongshuCollectFromLinksInput {
   sessionId: string;
   keyword: string;
   env?: string;
   targetCount: number;
+  targetCountMode?: 'absolute' | 'incremental';
+  maxComments?: number;
   strictTargetCount?: boolean;
   serviceUrl?: string;
 }
@@ -47,6 +69,8 @@ export interface XiaohongshuCollectFromLinksOutput {
   processedCount: number;
   rejectedCount?: number;
   targetCount: number;
+  mergedMarkdownPath?: string;
+  mergedMarkdownNotes?: number;
   error?: string;
 }
 
@@ -105,6 +129,8 @@ export async function execute(input: XiaohongshuCollectFromLinksInput): Promise<
     keyword,
     env = 'debug',
     targetCount,
+    targetCountMode = 'absolute',
+    maxComments,
     strictTargetCount = true,
     serviceUrl = 'http://127.0.0.1:7701',
   } = input;
@@ -117,23 +143,41 @@ export async function execute(input: XiaohongshuCollectFromLinksInput): Promise<
   const linksPath = path.join(keywordDir, 'phase2-links.jsonl');
   const debugArtifactsEnabled = isDebugArtifactsEnabled();
   const debugDir = debugArtifactsEnabled ? path.join(keywordDir, '_debug', 'phase34_from_links') : null;
+  const failFast = isDevMode();
+  const maxCommentsLimit =
+    typeof maxComments === 'number' && Number.isFinite(maxComments) && maxComments > 0
+      ? Math.floor(maxComments)
+      : null;
+  const countCoverageRatio = failFast && !maxCommentsLimit ? COMMENTS_COVERAGE_RATIO : undefined;
+  const maxRetryPerNote = Math.max(
+    1,
+    Number(process.env.WEBAUTO_PHASE34_RETRY_MAX || 2),
+  );
 
   async function controllerAction(action: string, payload: any = {}): Promise<any> {
-    const res = await fetch(controllerUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action, payload }),
-      signal: (AbortSignal as any).timeout ? (AbortSignal as any).timeout(30000) : undefined,
-    });
-    const raw = await res.text();
-    if (!res.ok) throw new Error(`HTTP ${res.status}: ${raw}`);
-    let data: any = {};
+    const opId = logControllerActionStart(action, payload, { source: 'XiaohongshuCollectFromLinksBlock' });
     try {
-      data = raw ? JSON.parse(raw) : {};
-    } catch {
-      data = { raw };
+      const res = await fetch(controllerUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action, payload }),
+        signal: (AbortSignal as any).timeout ? (AbortSignal as any).timeout(30000) : undefined,
+      });
+      const raw = await res.text();
+      if (!res.ok) throw new Error(`HTTP ${res.status}: ${raw}`);
+      let data: any = {};
+      try {
+        data = raw ? JSON.parse(raw) : {};
+      } catch {
+        data = { raw };
+      }
+      const result = data.data || data;
+      logControllerActionResult(opId, action, result, { source: 'XiaohongshuCollectFromLinksBlock' });
+      return result;
+    } catch (error) {
+      logControllerActionError(opId, action, error, payload, { source: 'XiaohongshuCollectFromLinksBlock' });
+      throw error;
     }
-    return data.data || data;
   }
 
   const delay = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
@@ -242,13 +286,20 @@ export async function execute(input: XiaohongshuCollectFromLinksInput): Promise<
     downloadRoot,
     requiredFiles: ['content.md', 'comments.md'],
     requireCommentsDone: true,
-    minCommentsCoverageRatio: 0.9,
+    minCommentsCoverageRatio: countCoverageRatio,
   });
+
+  await resetIncompleteComments().catch(() => {});
 
   let persistedCount = persistedAtStart.count;
   const initialPersistedCount = persistedAtStart.count;
+  const { targetTotal } = resolveTargetCount({
+    targetCount,
+    baseCount: initialPersistedCount,
+    mode: targetCountMode,
+  });
 
-  if (strictTargetCount && persistedCount > targetCount) {
+  if (strictTargetCount && persistedCount > targetTotal) {
     return {
       success: false,
       keywordDir: persistedAtStart.keywordDir,
@@ -258,11 +309,12 @@ export async function execute(input: XiaohongshuCollectFromLinksInput): Promise<
       finalPersistedCount: persistedCount,
       addedCount: 0,
       processedCount: 0,
-      targetCount,
-      error: `existing_count_exceeds_target: ${persistedCount} > ${targetCount}`,
+      targetCount: targetTotal,
+      error: `existing_count_exceeds_target: ${persistedCount} > ${targetTotal}`,
     };
   }
-  if (persistedCount === targetCount) {
+  if (persistedCount === targetTotal) {
+    const merged = await mergeMarkdownIfNeeded();
     return {
       success: true,
       keywordDir: persistedAtStart.keywordDir,
@@ -272,12 +324,13 @@ export async function execute(input: XiaohongshuCollectFromLinksInput): Promise<
       finalPersistedCount: persistedCount,
       addedCount: 0,
       processedCount: 0,
-      targetCount,
+      targetCount: targetTotal,
+      ...merged,
     };
   }
 
   const rawLinks = await readJsonl(linksPath);
-  const links: Phase2LinkEntry[] = [];
+  let links: Phase2LinkEntry[] = [];
   const seenLinkNoteIds = new Set<string>();
   for (const r of rawLinks) {
     const e = validateEntry(r);
@@ -298,27 +351,58 @@ export async function execute(input: XiaohongshuCollectFromLinksInput): Promise<
       finalPersistedCount: persistedCount,
       addedCount: Math.max(0, persistedCount - initialPersistedCount),
       processedCount: 0,
-      targetCount,
+      targetCount: targetTotal,
       error: 'phase2_links_empty',
     };
   }
 
-  const expectedSearchUrl = links[0].searchUrl;
-  for (const e of links) {
-    if (e.searchUrl !== expectedSearchUrl) {
-      await saveDebug('searchurl_not_strict_equal', { expectedSearchUrl, bad: e });
+  const invalidLinks = links.filter((e) => !urlKeywordEquals(e.searchUrl, keyword));
+  if (invalidLinks.length > 0) {
+    await saveDebug('searchurl_keyword_mismatch', { bad: invalidLinks.slice(0, 5), count: invalidLinks.length });
+    if (failFast) {
+      const first = invalidLinks[0];
       return {
         success: false,
         keywordDir: persistedAtStart.keywordDir,
         linksPath,
-        expectedSearchUrl,
+        expectedSearchUrl: first?.searchUrl || '',
         initialPersistedCount,
         finalPersistedCount: persistedCount,
         addedCount: Math.max(0, persistedCount - initialPersistedCount),
         processedCount: 0,
-        targetCount,
-        error: `searchurl_not_strict_equal: ${e.searchUrl}`,
+        targetCount: targetTotal,
+        error: `searchurl_keyword_mismatch: ${first?.searchUrl || 'unknown'}`,
       };
+    }
+    links = links.filter((e) => urlKeywordEquals(e.searchUrl, keyword));
+  }
+
+  if (links.length === 0) {
+    await saveDebug('links_empty_after_filter', { linksPath });
+    return {
+      success: false,
+      keywordDir: persistedAtStart.keywordDir,
+      linksPath,
+      expectedSearchUrl: '',
+      initialPersistedCount,
+      finalPersistedCount: persistedCount,
+      addedCount: Math.max(0, persistedCount - initialPersistedCount),
+      processedCount: 0,
+      targetCount: targetTotal,
+      error: 'phase2_links_empty_after_filter',
+    };
+  }
+
+  const expectedSearchUrl = links[0].searchUrl;
+
+  async function appendCoverageShortfall(entry: Record<string, any>): Promise<void> {
+    try {
+      await fs.mkdir(keywordDir, { recursive: true });
+      const logPath = path.join(keywordDir, 'comments-coverage-shortfall.jsonl');
+      const line = `${JSON.stringify({ ts: new Date().toISOString(), ...entry })}\n`;
+      await fs.appendFile(logPath, line, 'utf-8');
+    } catch {
+      // ignore
     }
   }
 
@@ -328,11 +412,12 @@ export async function execute(input: XiaohongshuCollectFromLinksInput): Promise<
 
   // Phase34：最多 4 个“不同笔记”的详情 tab 轮换抓评论（每 tab 每次最多新增 50）
   const MAX_TABS = 4;
-  const BATCH = 50;
+  const BATCH = maxCommentsLimit ? Math.min(50, maxCommentsLimit) : 50;
 
   type Task = {
     noteId: string;
     safeUrl: string;
+    searchUrl: string;
     detailUrl: string;
     tabIndex: number;
     startedAt: number;
@@ -342,19 +427,183 @@ export async function execute(input: XiaohongshuCollectFromLinksInput): Promise<
     reachedEnd: boolean;
     emptyState: boolean;
     totalFromHeader: number | null;
+    stoppedByMaxComments: boolean;
     batches: number;
   };
 
   const pendingLinks = links.filter((l) => !processedNoteIds.has(l.noteId));
+  const linkById = new Map<string, Phase2LinkEntry>(links.map((l) => [l.noteId, l]));
+  const retryCounts = new Map<string, number>();
+  const queuedNoteIds = new Set<string>(pendingLinks.map((l) => l.noteId));
   let cursor = 0;
   const active: Task[] = [];
   let rr = 0;
   const usedTabIndexes = new Set<number>();
+  const reservedTabIndexes = new Set<number>();
+  let searchTabIndex: number | null = null;
+  let searchTabUrl: string | null = null;
 
-  async function listPages(): Promise<Array<{ index: number; url: string; active: boolean }>> {
+  function logProgress(stage: string, noteId?: string): void {
+    const noteLabel = noteId ? ` noteId=${noteId}` : '';
+    console.log(
+      `[Phase34FromLinks][progress] stage=${stage}${noteLabel} persisted=${persistedCount}/${targetTotal} processed=${processedCount}/${targetTotal} active=${active.length} cursor=${cursor}/${pendingLinks.length}`,
+    );
+  }
+
+  async function clearCommentsArtifacts(noteId: string): Promise<void> {
+    const postDir = path.join(persistedAtStart.keywordDir, noteId);
+    const commentsPath = path.join(postDir, 'comments.md');
+    const commentsDonePath = path.join(postDir, 'comments.done.json');
+    await fs.unlink(commentsPath).catch(() => {});
+    await fs.unlink(commentsDonePath).catch(() => {});
+  }
+
+  async function handleTaskError(options: {
+    noteId: string;
+    stage: string;
+    error: unknown;
+    task?: Task | null;
+  }): Promise<{ recovered: boolean; rejected: boolean }> {
+    const { noteId, stage, error, task } = options;
+    const message = error instanceof Error ? error.message : String(error);
+    await saveDebug('phase34_task_error', {
+      noteId,
+      stage,
+      error: message,
+    });
+
+    if (failFast) throw error;
+
+    const attempts = (retryCounts.get(noteId) || 0) + 1;
+    retryCounts.set(noteId, attempts);
+
+    await clearCommentsArtifacts(noteId);
+
+    if (task) {
+      task.comments = [];
+      task.seenKeys = new Set<string>();
+      task.reachedEnd = false;
+      task.emptyState = false;
+      task.totalFromHeader = null;
+      task.stoppedByMaxComments = false;
+      task.batches = 0;
+      task.firstRun = true;
+      await closeTaskTab(task).catch(() => {});
+      const idx = active.findIndex((t) => t.noteId === noteId);
+      if (idx >= 0) active.splice(idx, 1);
+    }
+
+    if (attempts > maxRetryPerNote) {
+      console.warn(`[Phase34FromLinks] noteId=${noteId} exceeded retry limit=${maxRetryPerNote}`);
+      rejectedCount += 1;
+      const link = linkById.get(noteId);
+      if (link) {
+        await moveNoteToRejected({ noteId, reason: 'retry_exhausted', meta: { stage, error: message } });
+      }
+      return { recovered: false, rejected: true };
+    }
+
+    const link = linkById.get(noteId);
+    if (link && !queuedNoteIds.has(noteId)) {
+      queuedNoteIds.add(noteId);
+      pendingLinks.push(link);
+    }
+    logProgress('retry_enqueued', noteId);
+    return { recovered: true, rejected: false };
+  }
+
+  async function listPagesDetailed(): Promise<{
+    pages: Array<{ index: number; url: string; active: boolean }>;
+    activeIndex: number | null;
+  }> {
     const res = await controllerAction('browser:page:list', { profileId: profile }).catch((): any => null);
     const pages = (res as any)?.pages || (res as any)?.data?.pages || [];
-    return Array.isArray(pages) ? pages : [];
+    const activeIndexRaw = (res as any)?.activeIndex ?? (res as any)?.data?.activeIndex;
+    const activeIndex = Number.isFinite(Number(activeIndexRaw)) ? Number(activeIndexRaw) : null;
+    return { pages: Array.isArray(pages) ? pages : [], activeIndex };
+  }
+
+  async function refreshSearchTabIndex(reason: string): Promise<void> {
+    const { pages } = await listPagesDetailed().catch(() => ({
+      pages: [] as Array<{ index: number; url: string; active: boolean }>,
+      activeIndex: null as number | null,
+    }));
+    const prev = searchTabIndex;
+    const found = pages.find((p) => {
+      const url = typeof p?.url === 'string' ? p.url : '';
+      return url.includes('/search_result') && urlKeywordEquals(url, keyword);
+    });
+    if (found && Number.isFinite(Number(found.index))) {
+      searchTabIndex = Number(found.index);
+      searchTabUrl = typeof found.url === 'string' ? found.url : searchTabUrl;
+    } else {
+      searchTabIndex = null;
+      searchTabUrl = searchTabUrl || expectedSearchUrl;
+    }
+    reservedTabIndexes.clear();
+    if (searchTabIndex !== null) reservedTabIndexes.add(searchTabIndex);
+    if (prev !== searchTabIndex) {
+      console.log(
+        `[Phase34FromLinks] search tab updated: reason=${reason} index=${searchTabIndex ?? 'n/a'} url=${searchTabUrl ?? ''}`,
+      );
+    }
+  }
+
+  searchTabUrl = expectedSearchUrl;
+  await refreshSearchTabIndex('phase34_start');
+  logProgress('start');
+
+  async function openPageWithFallback(url: string, reason: string): Promise<number> {
+    await refreshSearchTabIndex(`open_page:${reason}`).catch(() => {});
+    const reservedIndex = searchTabIndex;
+    const beforeDetail = await listPagesDetailed().catch(() => ({
+      pages: [] as Array<{ index: number; url: string; active: boolean }>,
+      activeIndex: null,
+    }) as { pages: Array<{ index: number; url: string; active: boolean }>; activeIndex: number | null });
+    const beforeIndexes = new Set<number>(
+      beforeDetail.pages.map((p) => Number(p?.index)).filter((n) => Number.isFinite(n)) as number[],
+    );
+
+    const created = await controllerAction('browser:page:new', { profileId: profile, url });
+    const createdIndex = Number((created as any)?.index ?? (created as any)?.data?.index ?? (created as any)?.body?.index);
+    if (Number.isFinite(createdIndex) && createdIndex !== reservedIndex) return createdIndex;
+
+    await delay(500);
+    const afterDetail = await listPagesDetailed().catch(() => ({
+      pages: [] as Array<{ index: number; url: string; active: boolean }>,
+      activeIndex: null,
+    }) as { pages: Array<{ index: number; url: string; active: boolean }>; activeIndex: number | null });
+
+    if (Number.isFinite(afterDetail.activeIndex) && afterDetail.activeIndex !== reservedIndex) {
+      return Number(afterDetail.activeIndex);
+    }
+
+    const newPage = afterDetail.pages.find(
+      (p) =>
+        Number.isFinite(p?.index) &&
+        !beforeIndexes.has(Number(p.index)) &&
+        Number(p.index) !== reservedIndex,
+    );
+    if (newPage && Number.isFinite(newPage.index)) return Number(newPage.index);
+
+    const fallback = afterDetail.pages
+      .map((p) => Number(p?.index))
+      .filter((idx) => Number.isFinite(idx) && idx !== reservedIndex)
+      .sort((a, b) => a - b);
+    if (fallback.length > 0) {
+      return fallback[fallback.length - 1];
+    }
+
+    await saveDebug('page_new_invalid_index', {
+      reason,
+      url,
+      created,
+      before: beforeDetail.pages.slice(0, 6).map((p) => ({ index: p.index, url: p.url })),
+      after: afterDetail.pages.slice(0, 6).map((p) => ({ index: p.index, url: p.url })),
+      beforeActive: beforeDetail.activeIndex,
+      afterActive: afterDetail.activeIndex,
+    });
+    throw new Error('browser:page:new returned invalid index');
   }
 
   function parseNoteIdFromUrl(url: string): string | null {
@@ -364,7 +613,7 @@ export async function execute(input: XiaohongshuCollectFromLinksInput): Promise<
   }
 
   async function resolveDetailTabIndex(noteId: string): Promise<number | null> {
-    const pages = await listPages();
+    const { pages } = await listPagesDetailed();
     for (const p of pages) {
       const url = typeof p?.url === 'string' ? p.url : '';
       if (url.includes('/explore/') && url.includes(noteId)) return Number(p.index);
@@ -373,9 +622,10 @@ export async function execute(input: XiaohongshuCollectFromLinksInput): Promise<
   }
 
   async function rebuildUsedTabIndexes(reason: string): Promise<void> {
-    const pages = await listPages().catch(
-      () => [] as Array<{ index: number; url: string; active: boolean }>,
-    );
+    await refreshSearchTabIndex(`rebuild_tabs:${reason}`).catch(() => {});
+    const pages = await listPagesDetailed()
+      .then((res) => res.pages)
+      .catch(() => [] as Array<{ index: number; url: string; active: boolean }>);
     usedTabIndexes.clear();
     for (const t of active) {
       const resolved = pages.find((p) => typeof p?.url === 'string' && p.url.includes('/explore/') && p.url.includes(t.noteId));
@@ -397,10 +647,11 @@ export async function execute(input: XiaohongshuCollectFromLinksInput): Promise<
   }
 
   async function pickReusableTabIndex(): Promise<number | null> {
-    const pages = await listPages();
+    const { pages } = await listPagesDetailed();
     const candidates = pages
       .filter((p) => Number.isFinite(p?.index))
       .filter((p) => !usedTabIndexes.has(Number(p.index)))
+      .filter((p) => !reservedTabIndexes.has(Number(p.index)))
       .map((p) => ({ index: Number(p.index), url: typeof p?.url === 'string' ? p.url : '' }))
       .filter((p) => p.index >= 0)
       // 允许复用 about:blank 等空白页（开发阶段避免无意义地新开 tab）
@@ -417,8 +668,9 @@ export async function execute(input: XiaohongshuCollectFromLinksInput): Promise<
 
   async function openNewTask(link: Phase2LinkEntry): Promise<Task> {
     processedCount += 1;
+    logProgress('open_tab', link.noteId);
     console.log(
-      `[Phase34FromLinks] open/reuse tab for note ${persistedCount + 1}/${targetCount}: noteId=${link.noteId}`,
+      `[Phase34FromLinks] open/reuse tab for note ${persistedCount + 1}/${targetTotal}: noteId=${link.noteId}`,
     );
 
     // refresh tab index bookkeeping (page indices may shift after closePage)
@@ -433,15 +685,13 @@ export async function execute(input: XiaohongshuCollectFromLinksInput): Promise<
       idx = await pickReusableTabIndex();
     }
 
+    if (idx !== null && idx === searchTabIndex) {
+      idx = null;
+    }
+
     if (idx === null) {
       reused = false;
-      const created = await controllerAction('browser:page:new', { profileId: profile, url: link.safeUrl });
-      const createdIndex = Number(created?.index ?? created?.data?.index);
-      if (!Number.isFinite(createdIndex)) {
-        await saveDebug('page_new_invalid_index', { created, noteId: link.noteId, safeUrl: link.safeUrl });
-        throw new Error('browser:page:new returned invalid index');
-      }
-      idx = createdIndex;
+      idx = await openPageWithFallback(link.safeUrl, `open_new_task:${link.noteId}`);
     }
 
     usedTabIndexes.add(idx);
@@ -494,7 +744,7 @@ export async function execute(input: XiaohongshuCollectFromLinksInput): Promise<
       platform: 'xiaohongshu',
       keyword,
       noteId: link.noteId,
-      searchUrl: expectedSearchUrl,
+      searchUrl: link.searchUrl,
       detailUrl: urlNow,
       detail: detail.detail,
       persistMode: 'detail',
@@ -507,6 +757,7 @@ export async function execute(input: XiaohongshuCollectFromLinksInput): Promise<
     return {
       noteId: link.noteId,
       safeUrl: link.safeUrl,
+      searchUrl: link.searchUrl,
       detailUrl: urlNow,
       tabIndex: idx,
       startedAt: Date.now(),
@@ -516,6 +767,7 @@ export async function execute(input: XiaohongshuCollectFromLinksInput): Promise<
       reachedEnd: false,
       emptyState: false,
       totalFromHeader: null,
+      stoppedByMaxComments: false,
       batches: 0,
     };
   }
@@ -555,19 +807,17 @@ export async function execute(input: XiaohongshuCollectFromLinksInput): Promise<
       // The tab might have been closed (by us or by the site). Reopen on demand.
       await saveDebug('task_tab_missing_reopen', { noteId: task.noteId, safeUrl: task.safeUrl, detailUrl: task.detailUrl });
       await rebuildUsedTabIndexes('task_tab_missing_reopen').catch(() => {});
-      const created = await controllerAction('browser:page:new', { profileId: profile, url: task.safeUrl });
-      const createdIndex = Number(created?.index ?? created?.data?.index);
-      if (!Number.isFinite(createdIndex)) {
-        await saveDebug('page_new_invalid_index_run_batch', { created, noteId: task.noteId, safeUrl: task.safeUrl });
-        throw new Error('browser:page:new returned invalid index');
-      }
-      idx = createdIndex;
+      idx = await openPageWithFallback(task.safeUrl, `reopen_task:${task.noteId}`);
+    }
+    if (idx === searchTabIndex) {
+      idx = await openPageWithFallback(task.safeUrl, `reopen_task_reserved:${task.noteId}`);
     }
     task.tabIndex = idx;
 
     console.log(
       `[Phase34FromLinks] batch start noteId=${task.noteId} tabIndex=${idx} batchNo=${task.batches + 1} (maxNew=${BATCH})`,
     );
+    logProgress('batch_start', task.noteId);
 
     try {
       await controllerAction('browser:page:switch', { profileId: profile, index: idx });
@@ -619,10 +869,15 @@ export async function execute(input: XiaohongshuCollectFromLinksInput): Promise<
       newCount += 1;
     }
 
+    if (maxCommentsLimit && task.comments.length >= maxCommentsLimit) {
+      task.comments = task.comments.slice(0, maxCommentsLimit);
+      task.stoppedByMaxComments = true;
+    }
+
     task.firstRun = false;
     task.batches += 1;
 
-    const done = Boolean(out.reachedEnd || out.emptyState);
+    const done = Boolean(out.reachedEnd || out.emptyState || task.stoppedByMaxComments);
     task.reachedEnd = Boolean(out.reachedEnd);
     task.emptyState = Boolean(out.emptyState);
     task.totalFromHeader = typeof (out as any)?.totalFromHeader === 'number' ? (out as any).totalFromHeader : null;
@@ -646,12 +901,14 @@ export async function execute(input: XiaohongshuCollectFromLinksInput): Promise<
       platform: 'xiaohongshu',
       keyword,
       noteId: task.noteId,
-      searchUrl: expectedSearchUrl,
+      searchUrl: task.searchUrl,
       detailUrl: task.detailUrl,
       commentsResult: {
         comments: task.comments,
         reachedEnd: task.reachedEnd,
         emptyState: task.emptyState,
+        stoppedByMaxComments: task.stoppedByMaxComments,
+        maxComments: maxCommentsLimit,
         // 仅用于 comments.md 头部展示
         totalFromHeader: task.totalFromHeader,
       },
@@ -665,8 +922,8 @@ export async function execute(input: XiaohongshuCollectFromLinksInput): Promise<
 
     // 评论覆盖率校验（必须达到 90% 标称数量）：仅在“到底/空态”后执行硬校验
     // 注意：这里不再 throw 终止整个 Phase34；而是将该 note 移入 _rejected，并继续用后续链接补齐 targetCount。
-    if (done && task.totalFromHeader !== null && task.totalFromHeader > 0) {
-      const need = Math.ceil(task.totalFromHeader * 0.9);
+    if (done && !task.stoppedByMaxComments && task.totalFromHeader !== null && task.totalFromHeader > 0) {
+      const need = Math.ceil(task.totalFromHeader * COMMENTS_COVERAGE_RATIO);
       const got = task.comments.length;
       if (got < need) {
         const replyCount = task.comments.filter((c: any) => Boolean(c && typeof c === 'object' && (c as any).is_reply)).length;
@@ -681,66 +938,80 @@ export async function execute(input: XiaohongshuCollectFromLinksInput): Promise<
           text: typeof (c as any)?.text === 'string' ? String((c as any).text).slice(0, 80) : null,
           is_reply: Boolean((c as any)?.is_reply),
         }));
-        await saveDebug('comments_coverage_low', {
+        const exitReason = task.reachedEnd
+          ? 'reached_end'
+          : task.emptyState
+            ? 'empty_state'
+            : task.stoppedByMaxComments
+              ? 'max_comments'
+              : 'unknown';
+        const shortfall = {
           noteId: task.noteId,
+          safeUrl: task.safeUrl,
+          detailUrl: task.detailUrl,
+          searchUrl: task.searchUrl,
           got,
           headerTotal: task.totalFromHeader,
           needAtLeast: need,
           reachedEnd: task.reachedEnd,
           emptyState: task.emptyState,
+          stoppedByMaxComments: task.stoppedByMaxComments,
+          exitReason,
           replyCount,
           withIdCount,
           tail,
-        });
-        return {
-          done: true,
-          newCount,
-          rejected: {
-            reason: 'comments_coverage_low',
-            meta: { got, headerTotal: task.totalFromHeader, needAtLeast: need, replyCount, withIdCount },
-          },
         };
+        await saveDebug('comments_coverage_shortfall', shortfall);
+        await appendCoverageShortfall(shortfall);
       }
     }
 
     console.log(
       `[Phase34FromLinks] batch done noteId=${task.noteId} new=${newCount} total=${task.comments.length} reachedEnd=${task.reachedEnd} empty=${task.emptyState}`,
     );
+    logProgress('batch_done', task.noteId);
 
     return { done, newCount };
   }
 
-  while (persistedCount < targetCount) {
+  while (persistedCount < targetTotal) {
     // 填充：按要求一个一个开 tab，开一个先抓一批 50
     if (active.length < MAX_TABS && cursor < pendingLinks.length) {
       const link = pendingLinks[cursor];
       cursor += 1;
-      const task = await openNewTask(link);
-      active.push(task);
+      queuedNoteIds.delete(link.noteId);
+      let task: Task | null = null;
+      try {
+        task = await openNewTask(link);
+        active.push(task);
 
-      const res = await runOneBatch(task);
-      if (res.done) {
-        await closeTaskTab(task);
-        active.pop();
-        processedNoteIds.add(task.noteId);
-        if (res.rejected) {
-          rejectedCount += 1;
-          await moveNoteToRejected({
-            noteId: task.noteId,
-            reason: res.rejected.reason,
-            meta: res.rejected.meta || {},
+        const res = await runOneBatch(task);
+        if (res.done) {
+          await closeTaskTab(task);
+          active.pop();
+          processedNoteIds.add(task.noteId);
+          logProgress('note_done', task.noteId);
+          if (res.rejected) {
+            rejectedCount += 1;
+            await moveNoteToRejected({
+              noteId: task.noteId,
+              reason: res.rejected.reason,
+              meta: res.rejected.meta || {},
+            });
+          }
+          const persistedAfter = await countPersistedNotes({
+            platform: 'xiaohongshu',
+            env,
+            keyword,
+            downloadRoot,
+            requiredFiles: ['content.md', 'comments.md'],
+            requireCommentsDone: true,
+            minCommentsCoverageRatio: countCoverageRatio,
           });
+          persistedCount = persistedAfter.count;
         }
-        const persistedAfter = await countPersistedNotes({
-          platform: 'xiaohongshu',
-          env,
-          keyword,
-          downloadRoot,
-          requiredFiles: ['content.md', 'comments.md'],
-          requireCommentsDone: true,
-          minCommentsCoverageRatio: 0.9,
-        });
-        persistedCount = persistedAfter.count;
+      } catch (error) {
+        await handleTaskError({ noteId: link.noteId, stage: 'open_or_batch', error, task });
       }
       continue;
     }
@@ -752,12 +1023,20 @@ export async function execute(input: XiaohongshuCollectFromLinksInput): Promise<
     const task = active[rr];
     rr += 1;
 
-    const res = await runOneBatch(task);
+    let res: { done: boolean; newCount: number; rejected?: { reason: string; meta?: any } } | null = null;
+    try {
+      res = await runOneBatch(task);
+    } catch (error) {
+      await handleTaskError({ noteId: task.noteId, stage: 'run_batch', error, task });
+      continue;
+    }
+    if (!res) continue;
     if (res.done) {
       await closeTaskTab(task);
       const idx = active.findIndex((t) => t.noteId === task.noteId);
       if (idx >= 0) active.splice(idx, 1);
       processedNoteIds.add(task.noteId);
+      logProgress('note_done', task.noteId);
       if (res.rejected) {
         rejectedCount += 1;
         await moveNoteToRejected({
@@ -774,17 +1053,85 @@ export async function execute(input: XiaohongshuCollectFromLinksInput): Promise<
         downloadRoot,
         requiredFiles: ['content.md', 'comments.md'],
         requireCommentsDone: true,
-        minCommentsCoverageRatio: 0.9,
+        minCommentsCoverageRatio: countCoverageRatio,
       });
       persistedCount = persistedAfter.count;
     }
   }
 
+  async function isCommentsDone(noteDir: string): Promise<boolean> {
+    const donePath = path.join(noteDir, 'comments.done.json');
+    try {
+      await fs.access(donePath);
+      return true;
+    } catch {
+      // ignore
+    }
+    const commentsPath = path.join(noteDir, 'comments.md');
+    try {
+      const text = await fs.readFile(commentsPath, 'utf-8');
+      if (text.includes('empty=鏄?')) return true;
+      if (text.includes('reachedEnd=鏄?')) return true;
+      if (text.includes('stoppedByMaxComments=yes')) return true;
+      return false;
+    } catch {
+      return false;
+    }
+  }
+
+  async function resetIncompleteComments(): Promise<string[]> {
+    const cleared: string[] = [];
+    const entries = await fs.readdir(keywordDir, { withFileTypes: true }).catch((): any[] => []);
+    for (const ent of entries) {
+      if (!ent?.isDirectory?.()) continue;
+      if (ent.name.startsWith('_')) continue;
+      const noteDir = path.join(keywordDir, ent.name);
+      const commentsPath = path.join(noteDir, 'comments.md');
+      const exists = await fs.access(commentsPath).then(() => true).catch(() => false);
+      if (!exists) continue;
+      const done = await isCommentsDone(noteDir);
+      if (done) continue;
+      await fs.unlink(commentsPath).catch(() => {});
+      await fs.unlink(path.join(noteDir, 'comments.jsonl')).catch(() => {});
+      await fs.unlink(path.join(noteDir, 'comments.done.json')).catch(() => {});
+      cleared.push(ent.name);
+    }
+    if (cleared.length > 0) {
+      console.log(`[Phase34FromLinks] cleared incomplete comments: ${cleared.join(', ')}`);
+    }
+    return cleared;
+  }
+
+  async function mergeMarkdownIfNeeded(): Promise<{
+    mergedMarkdownPath?: string;
+    mergedMarkdownNotes?: number;
+  }> {
+    try {
+      const merged = await mergeNotesMarkdown({
+        platform: 'xiaohongshu',
+        env,
+        keyword,
+        downloadRoot,
+      });
+      if (merged.success) {
+        console.log(`[Phase34FromLinks] merged markdown: ${merged.outputPath} (notes=${merged.mergedNotes})`);
+        return {
+          mergedMarkdownPath: merged.outputPath,
+          mergedMarkdownNotes: merged.mergedNotes,
+        };
+      }
+      console.warn(`[Phase34FromLinks] merge markdown skipped: ${merged.error}`);
+    } catch (err: any) {
+      console.warn(`[Phase34FromLinks] merge markdown failed: ${err?.message || String(err)}`);
+    }
+    return {};
+  }
+
   const finalPersistedCount = persistedCount;
   const addedCount = Math.max(0, finalPersistedCount - initialPersistedCount);
 
-  if (finalPersistedCount !== targetCount) {
-    await saveDebug('target_not_reached', { finalPersistedCount, targetCount, expectedSearchUrl });
+  if (finalPersistedCount !== targetTotal) {
+    await saveDebug('target_not_reached', { finalPersistedCount, targetCount: targetTotal, expectedSearchUrl });
     return {
       success: false,
       keywordDir: persistedAtStart.keywordDir,
@@ -795,11 +1142,12 @@ export async function execute(input: XiaohongshuCollectFromLinksInput): Promise<
       addedCount,
       processedCount,
       rejectedCount,
-      targetCount,
-      error: `target_not_reached: ${finalPersistedCount}/${targetCount}`,
+      targetCount: targetTotal,
+      error: `target_not_reached: ${finalPersistedCount}/${targetTotal}`,
     };
   }
 
+  const merged = await mergeMarkdownIfNeeded();
   return {
     success: true,
     keywordDir: persistedAtStart.keywordDir,
@@ -810,6 +1158,7 @@ export async function execute(input: XiaohongshuCollectFromLinksInput): Promise<
     addedCount,
     processedCount,
     rejectedCount,
-    targetCount,
+    targetCount: targetTotal,
+    ...merged,
   };
 }

@@ -4,6 +4,12 @@
  * 提取详情页内容（header/content/gallery）
  */
 
+import {
+  logControllerActionError,
+  logControllerActionResult,
+  logControllerActionStart,
+} from './helpers/operationLogger.js';
+
 export interface ExtractDetailInput {
   sessionId: string;
   serviceUrl?: string;
@@ -53,7 +59,9 @@ export async function execute(input: ExtractDetailInput): Promise<ExtractDetailO
   const controllerUrl = `${serviceUrl}/v1/controller/action`;
 
   async function controllerAction(action: string, payload: any = {}) {
-    const response = await fetch(controllerUrl, {
+    const opId = logControllerActionStart(action, payload, { source: 'ExtractDetailBlock' });
+    try {
+      const response = await fetch(controllerUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action, payload }),
@@ -64,7 +72,13 @@ export async function execute(input: ExtractDetailInput): Promise<ExtractDetailO
       throw new Error(`HTTP ${response.status}: ${await response.text()}`);
     }
     const data = await response.json();
-    return data.data || data;
+    const result = data.data || data;
+    logControllerActionResult(opId, action, result, { source: 'ExtractDetailBlock' });
+    return result;
+  } catch (error) {
+    logControllerActionError(opId, action, error, payload, { source: 'ExtractDetailBlock' });
+    throw error;
+  }
   }
 
   async function extractContainer(containerId: string) {

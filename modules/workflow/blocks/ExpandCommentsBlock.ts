@@ -12,7 +12,7 @@ import { getScrollStats, getViewport, systemMouseWheel } from './helpers/comment
 import { expandRepliesInView, findExpandTargets } from './helpers/replyExpander.js';
 import { createExpandCommentsControllerClient } from './helpers/expandCommentsController.js';
 import { buildExtractCommentsScript, mergeExtractedComments } from './helpers/expandCommentsExtractor.js';
-import { assertNoCaptcha, systemClickAt, systemHoverAt } from './helpers/systemInput.js';
+import { assertNoCaptcha, systemClickAt, systemHoverAt, isDevMode } from './helpers/systemInput.js';
 import { getCommentEndState, getCommentStats, getScrollContainerInfo, getScrollTargetInfo, isInputFocused, locateCommentsFocusPoint } from './helpers/xhsCommentDom.js';
 import { isDebugArtifactsEnabled } from './helpers/debugArtifacts.js';
 
@@ -749,8 +749,12 @@ export async function execute(input: ExpandCommentsInput): Promise<ExpandComment
           }
         } catch (e: any) {
           const msg = String(e?.message || e || '');
-          if (msg.includes('captcha_modal_detected') || msg.includes('unsafe_click_image_in_detail')) {
+          if (msg.includes('captcha_modal_detected')) {
             throw e;
+          }
+          if (msg.includes('unsafe_click_image_in_detail')) {
+            if (isDevMode()) throw e;
+            warn(`scroll_to_top skipped unsafe click (continue): ${msg}`);
           }
           // 非关键错误不影响后续抽取：保留日志即可
           warn(`scroll_to_top ignored error: ${msg}`);
@@ -808,8 +812,12 @@ export async function execute(input: ExpandCommentsInput): Promise<ExpandComment
         });
       } catch (e: any) {
         const msg = String(e?.message || e || '');
-        if (msg.includes('captcha_modal_detected') || msg.includes('unsafe_click_image_in_detail')) {
+        if (msg.includes('captcha_modal_detected')) {
           throw e;
+        }
+        if (msg.includes('unsafe_click_image_in_detail')) {
+          if (isDevMode()) throw e;
+          warn(`round=${round} expand skipped unsafe click (continue): ${msg}`);
         }
         warn(`round=${round} extract/expand error: ${msg}`);
       }
@@ -946,7 +954,11 @@ export async function execute(input: ExpandCommentsInput): Promise<ExpandComment
           await systemHoverAt(profile, focusPoint.x, focusPoint.y, browserServiceUrl).catch(() => {});
         } catch (e: any) {
           const msg = String(e?.message || e || '');
-          if (msg.includes('captcha_modal_detected') || msg.includes('unsafe_click_image_in_detail')) throw e;
+          if (msg.includes('captcha_modal_detected')) throw e;
+          if (msg.includes('unsafe_click_image_in_detail')) {
+            if (isDevMode()) throw e;
+            warn(`scroll_recovery skipped unsafe click (continue): ${msg}`);
+          }
         }
 
         // 回滚（向上）2 次，再向下 3 次

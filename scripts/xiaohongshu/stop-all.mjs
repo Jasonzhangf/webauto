@@ -27,6 +27,7 @@ async function runNodeScript(scriptPath, args = [], cwd = repoRoot) {
     const child = spawn(process.execPath, [scriptPath, ...args], {
       cwd,
       stdio: 'inherit',
+      windowsHide: true,
     });
     child.on('error', () => resolve());
     child.on('exit', () => resolve());

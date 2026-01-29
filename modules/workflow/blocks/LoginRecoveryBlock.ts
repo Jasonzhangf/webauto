@@ -11,6 +11,11 @@
 import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import {
+  logControllerActionError,
+  logControllerActionResult,
+  logControllerActionStart,
+} from './helpers/operationLogger.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -42,17 +47,25 @@ export async function execute(input: LoginRecoveryInput): Promise<LoginRecoveryO
   const controllerUrl = `${serviceUrl}/v1/controller/action`;
 
   async function controllerAction(action: string, payload: any = {}) {
-    const res = await fetch(controllerUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action, payload }),
-      signal: (AbortSignal as any).timeout ? (AbortSignal as any).timeout(10000) : undefined
-    });
-    if (!res.ok) {
-      throw new Error(`HTTP ${res.status}: ${await res.text()}`);
+    const opId = logControllerActionStart(action, payload, { source: 'LoginRecoveryBlock' });
+    try {
+      const res = await fetch(controllerUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action, payload }),
+        signal: (AbortSignal as any).timeout ? (AbortSignal as any).timeout(10000) : undefined
+      });
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}: ${await res.text()}`);
+      }
+      const data = await res.json();
+      const result = data.data || data;
+      logControllerActionResult(opId, action, result, { source: 'LoginRecoveryBlock' });
+      return result;
+    } catch (error) {
+      logControllerActionError(opId, action, error, payload, { source: 'LoginRecoveryBlock' });
+      throw error;
     }
-    const data = await res.json();
-    return data.data || data;
   }
 
   type LoginStatus = 'logged_in' | 'not_logged_in' | 'uncertain' | 'error';

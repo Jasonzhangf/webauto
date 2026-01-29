@@ -107,6 +107,7 @@ function start(args) {
       DEBUG: process.env.DEBUG || '1',
     },
     cwd: path.resolve(__dirname, '..'),
+    windowsHide: true,
   });
 
   child.unref();

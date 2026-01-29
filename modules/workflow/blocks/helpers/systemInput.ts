@@ -9,6 +9,13 @@ import os from 'node:os';
 import path from 'node:path';
 import { promises as fs } from 'node:fs';
 import { isDebugArtifactsEnabled } from './debugArtifacts.js';
+import {
+  logControllerActionError,
+  logControllerActionResult,
+  logControllerActionStart,
+  logError,
+  logOperation,
+} from './operationLogger.js';
 
 // 调试截图保存目录
 function resolveDownloadRoot(): string {
@@ -97,15 +104,25 @@ async function saveDebugScreenshot(
 }
 
 async function controllerAction(action: string, payload: any): Promise<any> {
-  const response = await fetch(DEFAULT_CONTROLLER_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ action, payload }),
-    signal: (AbortSignal as any).timeout ? (AbortSignal as any).timeout(12000) : undefined,
-  });
-  if (!response.ok) throw new Error(`HTTP ${response.status}: ${await response.text()}`);
-  const data = await response.json().catch(() => ({}));
-  return data.data || data;
+  const opId = logControllerActionStart(action, payload, { source: 'systemInput' });
+  try {
+    const response = await fetch(DEFAULT_CONTROLLER_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action, payload }),
+      signal: (AbortSignal as any).timeout ? (AbortSignal as any).timeout(12000) : undefined,
+    });
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${await response.text()}`);
+    }
+    const data = await response.json().catch(() => ({}));
+    const result = data.data || data;
+    logControllerActionResult(opId, action, result, { source: 'systemInput' });
+    return result;
+  } catch (error) {
+    logControllerActionError(opId, action, error, payload, { source: 'systemInput' });
+    throw error;
+  }
 }
 
 async function probePoint(profileId: string, x: number, y: number): Promise<{
@@ -400,7 +417,7 @@ export async function systemHoverAt(
     'mouse:move',
     { profileId, x: Math.floor(x), y: Math.floor(y), steps: 3 },
     8000,
-  ).catch(() => {});
+  ).catch(() => { });
 }
 
 export async function systemClickAt(
@@ -410,29 +427,92 @@ export async function systemClickAt(
   browserServiceUrl = 'http://127.0.0.1:7704',
   context?: string,
 ): Promise<void> {
+  // 先尝试将目标元素滚动到视口中心（如果元素在视口外）
+  try {
+    const { scrollElementAtPointIntoView } = await import('./scrollIntoView.js');
+    const scrollResult = await scrollElementAtPointIntoView(profileId, x, y);
+    if (scrollResult.success && !scrollResult.visible) {
+      // 元素滚动后仍不可见，可能需要调整坐标或元素已消失
+      console.warn(`[systemInput] Element scrolled but not visible at (${x}, ${y})`);
+    }
+    // 等待滚动稳定
+    await new Promise((r) => setTimeout(r, 200));
+  } catch (e: any) {
+    // 滚动失败不影响后续点击尝试（可能元素本身就在视口内）
+    console.warn(`[systemInput] scrollIntoView failed: ${e?.message || e}`);
+  }
+
   const probe = await probePoint(profileId, x, y);
+  const clickOpId = logOperation({
+    kind: 'system_click_attempt',
+    action: 'mouse:click',
+    sessionId: profileId,
+    context: context || null,
+    reason: context || null,
+    target: { x, y, probe },
+  });
 
   // 风控/验证码：出现就立即停下（开发阶段不做重试/兜底），保留证据便于人工处理
   if (probe.isCaptcha) {
     await saveDebugScreenshot(`captcha_detected_${context || 'system'}`, profileId, { x, y, context, probe });
+    logError({
+      kind: 'system_click_blocked',
+      action: 'mouse:click',
+      sessionId: profileId,
+      context: context || null,
+      reason: 'captcha_detected',
+      error: 'captcha_modal_detected',
+      payload: { x, y, probe },
+      opId: clickOpId,
+    });
     throw new Error(`captcha_modal_detected (context=${context || 'system'})`);
   }
 
   // 媒体查看器/预览层：出现就立即停下（避免乱点）
   if (shouldStopOnMediaViewer(context) && probe.isMediaViewerOpen) {
     await saveDebugScreenshot(`media_viewer_open_${context || 'system'}`, profileId, { x, y, context, probe });
+    logError({
+      kind: 'system_click_blocked',
+      action: 'mouse:click',
+      sessionId: profileId,
+      context: context || null,
+      reason: 'media_viewer_open',
+      error: 'media_viewer_open',
+      payload: { x, y, probe },
+      opId: clickOpId,
+    });
     throw new Error(`media_viewer_open (context=${context || 'system'})`);
   }
 
   // 详情页/评论相关点击：禁止点到链接（通常是头像/话题/推荐/外链）
   if (shouldGuardAgainstImageClick(context) && isDangerousHrefInDetail(probe.href)) {
     await saveDebugScreenshot(`unsafe_click_href_${context || 'system'}`, profileId, { x, y, context, probe });
+    logError({
+      kind: 'system_click_blocked',
+      action: 'mouse:click',
+      sessionId: profileId,
+      context: context || null,
+      reason: 'unsafe_click_href_in_detail',
+      error: 'unsafe_click_href_in_detail',
+      payload: { x, y, probe },
+      opId: clickOpId,
+    });
     throw new Error(`unsafe_click_href_in_detail (context=${context || 'system'})`);
   }
 
   // 详情页/评论滚动相关点击：禁止点到图片/视频（会打开查看器/新层）
   if (shouldGuardAgainstImageClick(context) && probe.isImageLike) {
     await saveDebugScreenshot(`unsafe_click_image_${context || 'system'}`, profileId, { x, y, context, probe });
+    logError({
+      kind: 'system_click_blocked',
+      action: 'mouse:click',
+      sessionId: profileId,
+      context: context || null,
+      reason: 'unsafe_click_image_in_detail',
+      error: 'unsafe_click_image_in_detail',
+      payload: { x, y, probe },
+      opId: clickOpId,
+    });
     throw new Error(`unsafe_click_image_in_detail (context=${context || 'system'})`);
   }
 
@@ -471,6 +551,20 @@ export async function systemClickAt(
     },
     8000,
   );
+  logOperation({
+    kind: 'system_click_done',
+    action: 'mouse:click',
+    sessionId: profileId,
+    context: context || null,
+    reason: context || null,
+    target: { x, y, probe },
+    meta: { opId: clickOpId },
+  });
+}
+
+export function isDevMode(): boolean {
+  const raw = String(process.env.WEBAUTO_DEV || '').trim().toLowerCase();
+  return raw === '1' || raw === 'true' || raw === 'yes' || raw === 'dev';
 }
 
 export async function systemMouseWheel(options: {
@@ -493,8 +587,25 @@ export async function systemMouseWheel(options: {
   // 风控/验证码：出现就立即停下（开发阶段不做重试/兜底），保留证据便于人工处理
   if (await isCaptchaOverlayVisible(profileId)) {
     await saveDebugScreenshot(`captcha_detected_wheel_${context || 'system'}`, profileId, { deltaY, focusPoint, context });
+    logError({
+      kind: 'system_scroll_blocked',
+      action: 'mouse:wheel',
+      sessionId: profileId,
+      context: context || null,
+      reason: 'captcha_detected',
+      error: 'captcha_modal_detected',
+      payload: { deltaY, focusPoint },
+    });
     throw new Error(`captcha_modal_detected (context=${context || 'system'})`);
   }
+  const scrollOpId = logOperation({
+    kind: 'system_scroll_attempt',
+    action: 'mouse:wheel',
+    sessionId: profileId,
+    context: context || null,
+    reason: context || null,
+    target: { deltaY, focusPoint },
+  });
 
   try {
     if (focusPoint) {
@@ -507,6 +618,15 @@ export async function systemMouseWheel(options: {
       { profileId, deltaX: 0, deltaY },
       8000,
     );
+    logOperation({
+      kind: 'system_scroll_done',
+      action: 'mouse:wheel',
+      sessionId: profileId,
+      context: context || null,
+      reason: context || null,
+      target: { deltaY, focusPoint },
+      meta: { opId: scrollOpId },
+    });
     return;
   } catch (err: any) {
     console.warn(
@@ -515,12 +635,35 @@ export async function systemMouseWheel(options: {
     );
   }
 
-  await browserServiceWsScroll({
-    profileId,
-    deltaY,
-    browserWsUrl,
-    coordinates: focusPoint ? { x: focusPoint.x, y: focusPoint.y } : null,
-  });
+  try {
+    await browserServiceWsScroll({
+      profileId,
+      deltaY,
+      browserWsUrl,
+      coordinates: focusPoint ? { x: focusPoint.x, y: focusPoint.y } : null,
+    });
+    logOperation({
+      kind: 'system_scroll_done',
+      action: 'mouse:wheel',
+      sessionId: profileId,
+      context: context || null,
+      reason: context || null,
+      target: { deltaY, focusPoint },
+      meta: { opId: scrollOpId, via: 'ws' },
+    });
+  } catch (error) {
+    logError({
+      kind: 'system_scroll_failed',
+      action: 'mouse:wheel',
+      sessionId: profileId,
+      context: context || null,
+      reason: context || null,
+      error: error instanceof Error ? error.message : String(error),
+      payload: { deltaY, focusPoint },
+      opId: scrollOpId,
+    });
+    throw error;
+  }
 }
 
 async function browserServiceWsScroll(options: {
@@ -536,7 +679,7 @@ async function browserServiceWsScroll(options: {
     const timer = setTimeout(() => {
       try {
         ws.close();
-      } catch {}
+      } catch { }
       reject(new Error('browser-service ws timeout'));
     }, 15000);
 
@@ -546,7 +689,7 @@ async function browserServiceWsScroll(options: {
       clearTimeout(timer);
       try {
         ws.close();
-      } catch {}
+      } catch { }
     };
 
     ws.on('open', () => {

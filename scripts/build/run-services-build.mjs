@@ -29,6 +29,13 @@ function main() {
     mkdirSync(resolve(ROOT, 'dist', 'modules'), { recursive: true });
     cpSync(coreSrc, coreDest, { recursive: true });
   }
+
+  const controllerSrc = resolve(ROOT, 'services', 'controller', 'src');
+  const controllerDest = resolve(ROOT, 'dist', 'services', 'controller', 'src');
+  if (existsSync(controllerSrc)) {
+    mkdirSync(resolve(ROOT, 'dist', 'services', 'controller'), { recursive: true });
+    cpSync(controllerSrc, controllerDest, { recursive: true });
+  }
 }
 
 main();

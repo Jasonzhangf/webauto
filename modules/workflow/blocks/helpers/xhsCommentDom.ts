@@ -5,6 +5,12 @@
  * 禁止在这里做 element.click()/scrollIntoView()/location 跳转等行为。
  */
 
+import {
+  logControllerActionError,
+  logControllerActionResult,
+  logControllerActionStart,
+} from './operationLogger.js';
+
 export interface Viewport {
   innerWidth: number;
   innerHeight: number;
@@ -58,19 +64,27 @@ export async function controllerAction(
   payload: any = {},
   timeoutMs = 10000,
 ): Promise<any> {
-  const response = await fetch(controllerUrl, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ action, payload }),
-    signal: (AbortSignal as any).timeout
-      ? (AbortSignal as any).timeout(timeoutMs)
-      : undefined,
-  });
-  if (!response.ok) {
-    throw new Error(`HTTP ${response.status}: ${await response.text()}`);
+  const opId = logControllerActionStart(action, payload, { source: 'xhsCommentDom' });
+  try {
+    const response = await fetch(controllerUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action, payload }),
+      signal: (AbortSignal as any).timeout
+        ? (AbortSignal as any).timeout(timeoutMs)
+        : undefined,
+    });
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${await response.text()}`);
+    }
+    const data = await response.json();
+    const result = data.data || data;
+    logControllerActionResult(opId, action, result, { source: 'xhsCommentDom' });
+    return result;
+  } catch (error) {
+    logControllerActionError(opId, action, error, payload, { source: 'xhsCommentDom' });
+    throw error;
   }
-  const data = await response.json();
-  return data.data || data;
 }
 
 export async function getViewport(

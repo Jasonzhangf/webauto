@@ -10,7 +10,10 @@
  *
  * 用法：
  *   node scripts/xiaohongshu/install.mjs
- *   ./bin/xhs-cli install
+ *   node scripts/xiaohongshu/install.mjs --check
+ *   node scripts/xiaohongshu/install.mjs --check --download-browser
+ *   ./xhs install
+ *   ./xhs check
  */
 
 import { existsSync, readFile } from 'node:fs';
@@ -21,6 +24,9 @@ import { promises as fs } from 'node:fs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = join(__dirname, '../..');
+const rawArgs = process.argv.slice(2);
+const isCheckOnly = rawArgs.includes('--check');
+const downloadBrowser = rawArgs.includes('--download-browser');
 
 // ANSI 颜色
 const colors = {
@@ -208,8 +214,48 @@ async function checkDependencies() {
   }
 }
 
+function resolveBrowserPath() {
+  const custom = process.env.PLAYWRIGHT_BROWSERS_PATH;
+  if (custom && custom.trim()) return custom;
+  return join(PROJECT_ROOT, '.ms-playwright');
+}
+
+async function checkBrowser() {
+  log('\n🌐 检查浏览器资源...');
+  const browserPath = resolveBrowserPath();
+  let entries = [];
+  if (existsSync(browserPath)) {
+    entries = await fs.readdir(browserPath).catch(() => []);
+  }
+  const hasChromium = entries.some((name) => String(name).startsWith('chromium-'));
+  if (hasChromium) {
+    success(`Chromium 已安装: ${browserPath}`);
+    return true;
+  }
+
+  warn(`Chromium 未安装: ${browserPath}`);
+  if (!downloadBrowser) return false;
+
+  try {
+    info('尝试下载 Chromium...');
+    execSync('npx playwright install chromium', { stdio: 'inherit' });
+  } catch (err) {
+    error(`Chromium 下载失败: ${err.message}`);
+    return false;
+  }
+
+  entries = await fs.readdir(browserPath).catch(() => []);
+  const ok = entries.some((name) => String(name).startsWith('chromium-'));
+  if (ok) {
+    success(`Chromium 已安装: ${browserPath}`);
+  } else {
+    error('Chromium 下载完成后仍未检测到浏览器');
+  }
+  return ok;
+}
+
 // 提供修复建议
-function provideFixSuggestions(missingBuild, missingDeps) {
+function provideFixSuggestions(missingBuild, missingDeps, missingBrowser) {
   log('\n🔧 修复建议:\n');
 
   if (missingBuild) {
@@ -221,6 +267,12 @@ function provideFixSuggestions(missingBuild, missingDeps) {
   if (missingDeps) {
     log('依赖缺失，请运行:', 'yellow');
     log('  npm install');
+    log('');
+  }
+
+  if (missingBrowser) {
+    log('浏览器缺失，请运行:', 'yellow');
+    log('  npx playwright install chromium');
     log('');
   }
 }
@@ -236,20 +288,21 @@ async function main() {
   const scriptsOk = checkScriptFiles();
   const containersOk = checkContainerLibrary();
   const depsOk = await checkDependencies();
+  const browserOk = await checkBrowser();
 
   log('\n' + '='.repeat(50));
-  if (buildOk && scriptsOk && containersOk && depsOk) {
+  if (buildOk && scriptsOk && containersOk && depsOk && browserOk) {
     success('所有检查通过！');
     log('\n可以使用以下命令启动:', 'green');
-    log('  ./bin/xhs-cli phase1              # 启动浏览器会话');
-    log('  ./bin/xhs-cli phase2 --keyword "测试" --target 50');
+    log('  ./xhs phase1              # 启动浏览器会话');
+    log('  ./xhs phase2 --keyword "测试" --target 50');
     log('');
     process.exit(0);
   } else {
     error('检查失败！');
-    provideFixSuggestions(!buildOk, !depsOk);
+    provideFixSuggestions(!buildOk, !depsOk, !browserOk);
     log('');
-    process.exit(1);
+    process.exit(isCheckOnly ? 2 : 1);
   }
 }
 

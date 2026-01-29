@@ -8,6 +8,7 @@
  */
 
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 
@@ -31,6 +32,13 @@ const DEFAULT_SERVICE_SPECS = (repoRoot) => [
     startTimeoutMs: 30_000,
   },
 ];
+
+const DEFAULT_HEARTBEAT_FILE = path.join(os.homedir(), '.webauto', 'run', 'xhs-heartbeat.json');
+
+function ensureHeartbeatEnv() {
+  if (process.env.WEBAUTO_HEARTBEAT_FILE) return;
+  process.env.WEBAUTO_HEARTBEAT_FILE = DEFAULT_HEARTBEAT_FILE;
+}
 
 function serviceLabel(spec) {
   return spec?.label || spec?.key || 'service';
@@ -64,6 +72,7 @@ async function runNodeScript(scriptPath, args = [], { cwd } = {}) {
     const child = spawn(process.execPath, [scriptPath, ...args], {
       cwd,
       stdio: 'inherit',
+      windowsHide: true,
     });
     child.on('error', reject);
     child.on('exit', (code) => {
@@ -100,6 +109,7 @@ export async function startNodeService(spec, { repoRoot } = {}) {
       env: { ...process.env, ...spec.env },
       detached: true,
       stdio: 'ignore',
+      windowsHide: true,
     });
     child.unref();
     console.log(`[Services] ${serviceLabel(spec)} 启动命令已下发 (pid=${child.pid})`);
@@ -116,6 +126,7 @@ export async function startNodeService(spec, { repoRoot } = {}) {
 
 export async function ensureBaseServices({ repoRoot } = {}) {
   console.log('0️⃣ Phase1: 确认基础服务（Unified API → Browser Service）按依赖顺序就绪...');
+  ensureHeartbeatEnv();
 
   const root = repoRoot || process.cwd();
   const specs = DEFAULT_SERVICE_SPECS(root);

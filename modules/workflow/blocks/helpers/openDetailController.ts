@@ -4,6 +4,12 @@
  * 封装 OpenDetail 专用的 controller 调用
  */
 
+import {
+  logControllerActionError,
+  logControllerActionResult,
+  logControllerActionStart,
+} from './operationLogger.js';
+
 export interface ControllerClientConfig {
   profile: string;
   controllerUrl: string;
@@ -28,7 +34,9 @@ export function createOpenDetailControllerClient(config: ControllerClientConfig)
         : action === 'containers:match'
           ? 20000
           : 10000;
-    const response = await fetch(controllerUrl, {
+    const opId = logControllerActionStart(action, payload, { source: 'openDetailController' });
+    try {
+      const response = await fetch(controllerUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action, payload }),
@@ -39,7 +47,13 @@ export function createOpenDetailControllerClient(config: ControllerClientConfig)
       throw new Error(`HTTP ${response.status}: ${await response.text()}`);
     }
     const data = await response.json();
-    return data.data || data;
+    const result = data.data || data;
+    logControllerActionResult(opId, action, result, { source: 'openDetailController' });
+    return result;
+  } catch (error) {
+    logControllerActionError(opId, action, error, payload, { source: 'openDetailController' });
+    throw error;
+  }
   }
 
   async function getCurrentUrl(): Promise<string> {

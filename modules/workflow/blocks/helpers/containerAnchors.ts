@@ -9,6 +9,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import { logError, logOperation } from './operationLogger.js';
 
 export interface ContainerDefinition {
   id: string;
@@ -201,6 +202,17 @@ export async function verifyAnchorByContainerId(
     return { found: false, highlighted: false, error: `No selector defined for: ${containerId}` };
   }
 
+  const matchOpId = logOperation({
+    kind: 'anchor_match_start',
+    action: 'anchor:verify',
+    sessionId,
+    payload: {
+      containerId,
+      selectorsCount: selectors.length,
+      serviceUrl,
+    },
+  });
+
   try {
     const selectorsJson = JSON.stringify(selectors);
     const script = `(() => {
@@ -288,6 +300,17 @@ export async function verifyAnchorByContainerId(
     const data = await response.json();
     const result = data.data?.result || data.result;
     if (!result?.found) {
+      logOperation({
+        kind: 'anchor_match_result',
+        action: 'anchor:verify',
+        sessionId,
+        result: {
+          found: false,
+          selector: result?.selector || null,
+          error: result?.error || 'Element not found',
+        },
+        meta: { opId: matchOpId, containerId },
+      });
       return {
         found: false,
         highlighted: false,
@@ -296,6 +319,17 @@ export async function verifyAnchorByContainerId(
       };
     }
 
+    logOperation({
+      kind: 'anchor_match_result',
+      action: 'anchor:verify',
+      sessionId,
+      result: {
+        found: true,
+        selector: result?.selector || null,
+        rect: result?.rect || null,
+      },
+      meta: { opId: matchOpId, containerId },
+    });
     return {
       found: true,
       highlighted: true,
@@ -303,6 +337,14 @@ export async function verifyAnchorByContainerId(
       selector: result.selector,
     };
   } catch (error: any) {
+    logError({
+      kind: 'anchor_match_error',
+      action: 'anchor:verify',
+      sessionId,
+      error: error?.message || String(error),
+      payload: { containerId, serviceUrl },
+      meta: { opId: matchOpId },
+    });
     return {
       found: false,
       highlighted: false,

@@ -8,6 +8,12 @@
  * 用于在进入各 Phase 前做“入口锚点”判定。
  */
 
+import {
+  logControllerActionError,
+  logControllerActionResult,
+  logControllerActionStart,
+} from './helpers/operationLogger.js';
+
 export type PageStage = 'login' | 'detail' | 'search' | 'home' | 'unknown';
 
 export interface DetectPageStateInput {
@@ -126,16 +132,24 @@ export async function execute(
   const controllerUrl = `${serviceUrl}/v1/controller/action`;
 
   async function controllerAction(action: string, payload: any = {}) {
-    const res = await fetch(controllerUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action, payload }),
-    });
-    if (!res.ok) {
-      throw new Error(`HTTP ${res.status}: ${await res.text()}`);
+    const opId = logControllerActionStart(action, payload, { source: 'DetectPageStateBlock' });
+    try {
+      const res = await fetch(controllerUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action, payload }),
+      });
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}: ${await res.text()}`);
+      }
+      const data = await res.json();
+      const result = data.data || data;
+      logControllerActionResult(opId, action, result, { source: 'DetectPageStateBlock' });
+      return result;
+    } catch (error) {
+      logControllerActionError(opId, action, error, payload, { source: 'DetectPageStateBlock' });
+      throw error;
     }
-    const data = await res.json();
-    return data.data || data;
   }
 
   async function getCurrentUrl(): Promise<string> {

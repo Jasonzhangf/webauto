@@ -6,6 +6,12 @@
  * - 必要时尝试点击 comment_button 激活评论区
  */
 
+import {
+  logControllerActionError,
+  logControllerActionResult,
+  logControllerActionStart,
+} from './operationLogger.js';
+
 export interface Rect {
   x: number;
   y: number;
@@ -197,19 +203,27 @@ async function controllerAction(
   action: string,
   payload: any = {},
 ) {
-  const response = await fetch(controllerUrl, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ action, payload }),
-    signal: (AbortSignal as any).timeout
-      ? (AbortSignal as any).timeout(10000)
-      : undefined,
-  });
-  if (!response.ok) {
-    throw new Error(`HTTP ${response.status}: ${await response.text()}`);
+  const opId = logControllerActionStart(action, payload, { source: 'commentSectionLocator' });
+  try {
+    const response = await fetch(controllerUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action, payload }),
+      signal: (AbortSignal as any).timeout
+        ? (AbortSignal as any).timeout(10000)
+        : undefined,
+    });
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${await response.text()}`);
+    }
+    const data = await response.json();
+    const result = data.data || data;
+    logControllerActionResult(opId, action, result, { source: 'commentSectionLocator' });
+    return result;
+  } catch (error) {
+    logControllerActionError(opId, action, error, payload, { source: 'commentSectionLocator' });
+    throw error;
   }
-  const data = await response.json();
-  return data.data || data;
 }
 
 async function getViewport(controllerUrl: string, profile: string) {

@@ -81,7 +81,11 @@ async function runQuickHealthCheck() {
 
 async function runHeadfulHealthCheck(){
   console.log('[health-check] start services (headful)');
-  const child = spawn('node', ['scripts/start-headful.mjs', '--profile', 'xiaohongshu_fresh', '--url', 'https://www.xiaohongshu.com/explore'], { stdio: 'inherit' });
+  const child = spawn(
+    'node',
+    ['scripts/start-headful.mjs', '--profile', 'xiaohongshu_fresh', '--url', 'https://www.xiaohongshu.com/explore'],
+    { stdio: 'inherit', windowsHide: true },
+  );
   let childClosed = false;
   child.on('exit', () => {
     childClosed = true;

@@ -7,6 +7,12 @@
  * - 用于长时间运行任务中的定期健康监控
  */
 
+import {
+  logControllerActionError,
+  logControllerActionResult,
+  logControllerActionStart,
+} from './helpers/operationLogger.js';
+
 export interface SessionHealthInput {
   sessionId: string;
   serviceUrl?: string;
@@ -35,17 +41,25 @@ export async function execute(input: SessionHealthInput): Promise<SessionHealthO
   const controllerUrl = `${serviceUrl}/v1/controller/action`;
 
   async function controllerAction(action: string, payload: any = {}) {
-    const res = await fetch(controllerUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action, payload }),
-      signal: (AbortSignal as any).timeout ? (AbortSignal as any).timeout(timeoutMs) : undefined
-    });
-    if (!res.ok) {
-      throw new Error(`HTTP ${res.status}: ${await res.text()}`);
+    const opId = logControllerActionStart(action, payload, { source: 'SessionHealthBlock' });
+    try {
+      const res = await fetch(controllerUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action, payload }),
+        signal: (AbortSignal as any).timeout ? (AbortSignal as any).timeout(timeoutMs) : undefined
+      });
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}: ${await res.text()}`);
+      }
+      const data = await res.json();
+      const result = data.data || data;
+      logControllerActionResult(opId, action, result, { source: 'SessionHealthBlock' });
+      return result;
+    } catch (error) {
+      logControllerActionError(opId, action, error, payload, { source: 'SessionHealthBlock' });
+      throw error;
     }
-    const data = await res.json();
-    return data.data || data;
   }
 
   const checks = {

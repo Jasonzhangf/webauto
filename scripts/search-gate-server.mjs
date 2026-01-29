@@ -2,11 +2,11 @@
 /**
  * SearchGate 后台节流服务
  *
- * 职责：
- *   - 控制搜索频率（默认：同一 key 每 60s 最多 5 次）
- *   - 所有搜索 Block 在真正触发“对话框搜索”前，必须先向本服务申请许可
+ * 职责�?
+ *   - 控制搜索频率（默认：同一 key �?60s 最�?5 次）
+ *   - 所有搜�?Block 在真正触发“对话框搜索”前，必须先向本服务申请许可
  *
- * 接口：
+ * 接口�?
  *   - POST /permit
  *       body: { key?: string, profileId?: string, windowMs?: number, maxCount?: number }
  *       返回: { ok: true, allowed: boolean, waitMs: number, retryAfterMs, reason?, deny?, windowMs, maxCount, countInWindow, key }
@@ -15,31 +15,89 @@
  *   - GET /stats
  *       返回: { ok: true, buckets, keywordHistory }（用于调试拒绝原因）
  *   - POST /shutdown
- *       优雅退出（供脚本/命令行停止服务）
+ *       优雅退出（供脚�?命令行停止服务）
  *
- * 启动：
+ * 启动�?
  *   node scripts/search-gate-server.mjs
  *
- * 端口：
+ * 端口�?
  *   - 默认: 7790
  *   - 可通过环境变量 WEBAUTO_SEARCH_GATE_PORT 覆盖
  */
 
 import http from 'node:http';
 import { URL } from 'node:url';
+import fs from 'node:fs';
 
 const HOST = '127.0.0.1';
 const PORT = Number(process.env.WEBAUTO_SEARCH_GATE_PORT || 7790);
 const DEFAULT_WINDOW_MS = Number(process.env.WEBAUTO_SEARCH_GATE_WINDOW_MS || 60_000);
 const DEFAULT_MAX_COUNT = Number(process.env.WEBAUTO_SEARCH_GATE_MAX_COUNT || 5);
+const KEYWORD_WINDOW_MS = Number(process.env.WEBAUTO_SEARCH_GATE_KEYWORD_WINDOW_MS || 180_000);
+const KEYWORD_MAX_COUNT = Number(process.env.WEBAUTO_SEARCH_GATE_KEYWORD_MAX_COUNT || 3);
 const DEV_MAX_CONSECUTIVE_SAME_KEYWORD = Number(process.env.WEBAUTO_SEARCH_GATE_DEV_MAX_CONSECUTIVE_SAME_KEYWORD || 2);
+function startHeartbeatWatcher() {
+  const filePath = process.env.WEBAUTO_HEARTBEAT_FILE;
+  if (!filePath) return () => {};
+  const staleMs = Number(process.env.WEBAUTO_HEARTBEAT_STALE_MS || 45_000);
+  const intervalMs = Number(process.env.WEBAUTO_HEARTBEAT_INTERVAL_MS || Math.max(2000, Math.floor(staleMs / 3)));
+  const startAt = Date.now();
+
+  const timer = setInterval(() => {
+    let ts = 0;
+    let status = '';
+
+    try {
+      const raw = fs.readFileSync(filePath, 'utf-8');
+      const payload = JSON.parse(raw);
+      if (payload && typeof payload === 'object') {
+        status = typeof payload.status === 'string' ? payload.status : '';
+        ts = payload.ts ? Date.parse(payload.ts) : 0;
+      }
+    } catch (err) {
+      if (err?.code === 'ENOENT') {
+        if (Date.now() - startAt > staleMs) {
+          console.warn(`[SearchGate] heartbeat missing: ${filePath}`);
+          process.exit(0);
+        }
+      }
+      return;
+    }
+
+    if (status === 'stopped') {
+      console.warn('[SearchGate] heartbeat stopped, exiting');
+      process.exit(0);
+    }
+
+    if (!ts) {
+      try {
+        const stat = fs.statSync(filePath);
+        ts = Number(stat.mtimeMs || 0);
+      } catch {
+        return;
+      }
+    }
+
+    const age = Date.now() - ts;
+    if (age > staleMs) {
+      console.warn(`[SearchGate] heartbeat stale ${age}ms > ${staleMs}ms`);
+      process.exit(0);
+    }
+  }, intervalMs);
+
+  timer.unref();
+  return () => clearInterval(timer);
+}
+
+startHeartbeatWatcher();
 
 /**
  * 每个 key 的时间窗口内搜索记录
- * key 一般为 profileId（例如 xiaohongshu_fresh）
+ * key 一般为 profileId（例�?xiaohongshu_fresh�?
  */
 const buckets = new Map();
-// 开发阶段：记录每个 key 最近允许通过的 keyword，用于防止“连续三次同关键字搜索”导致软风控
+const keywordBuckets = new Map();
+// 开发阶段：记录每个 key 最近允许通过�?keyword，用于防止“连续三次同关键字搜索”导致软风控
 const keywordHistory = new Map();
 
 function nowMs() {
@@ -73,6 +131,41 @@ function computePermit(key, windowMs, maxCount) {
   };
 }
 
+function checkKeywordPermit(key, keyword, windowMs, maxCount) {
+  const now = nowMs();
+  const bucketKey = `${key}::${keyword}`;
+  const records = keywordBuckets.get(bucketKey) || [];
+  const threshold = now - windowMs;
+  const pruned = records.filter((ts) => ts > threshold);
+
+  if (pruned.length < maxCount) {
+    return {
+      allowed: true,
+      waitMs: 0,
+      countInWindow: pruned.length,
+      bucketKey,
+      pruned,
+    };
+  }
+
+  const oldest = pruned[0];
+  const waitMs = Math.max(0, windowMs - (now - oldest));
+  return {
+    allowed: false,
+    waitMs,
+    countInWindow: pruned.length,
+    bucketKey,
+    pruned,
+  };
+}
+
+function commitKeywordPermit(state) {
+  if (!state) return;
+  const records = Array.isArray(state.pruned) ? state.pruned : [];
+  records.push(nowMs());
+  keywordBuckets.set(state.bucketKey, records);
+}
+
 function normalizeKeyword(keyword) {
   const s = typeof keyword === 'string' ? keyword : '';
   return s.trim();
@@ -81,7 +174,7 @@ function normalizeKeyword(keyword) {
 function pruneKeywordHistory(records) {
   if (!Array.isArray(records) || records.length === 0) return [];
   const now = nowMs();
-  // 只保留最近 24h，且最多 50 条，避免内存增长
+  // 只保留最�?24h，且最�?50 条，避免内存增长
   const cutoff = now - 24 * 60 * 60 * 1000;
   const pruned = records.filter((r) => r && typeof r.ts === 'number' && r.ts >= cutoff);
   return pruned.slice(-50);
@@ -180,7 +273,7 @@ const server = http.createServer(async (req, res) => {
       const windowMs = Number(body.windowMs || DEFAULT_WINDOW_MS);
       const maxCount = Number(body.maxCount || DEFAULT_MAX_COUNT);
 
-      // 开发阶段：禁止连续 3 次（默认阈值 2，即前两次都一样则本次拒绝）同 keyword 搜索
+      // 开发阶段：禁止连续 3 次（默认阈�?2，即前两次都一样则本次拒绝）同 keyword 搜索
       if (dev && keyword) {
         const prev = pruneKeywordHistory(keywordHistory.get(key) || []);
         const consecutive = getConsecutiveSameKeywordCount(prev, keyword);
@@ -220,13 +313,69 @@ const server = http.createServer(async (req, res) => {
         }
       }
 
+      let keywordPermit = null;
+      if (keyword) {
+        keywordPermit = checkKeywordPermit(key, keyword, KEYWORD_WINDOW_MS, KEYWORD_MAX_COUNT);
+        if (!keywordPermit.allowed) {
+          const deny = buildDeny({
+            code: 'keyword_rate_limited',
+            message: `keyword limited: too many searches for keyword in window (windowMs=${KEYWORD_WINDOW_MS}, maxCount=${KEYWORD_MAX_COUNT}, countInWindow=${keywordPermit.countInWindow}, keyword="${keyword}")`,
+            details: {
+              key,
+              keyword,
+              windowMs: KEYWORD_WINDOW_MS,
+              maxCount: KEYWORD_MAX_COUNT,
+              countInWindow: keywordPermit.countInWindow,
+            },
+            retryAfterMs: keywordPermit.waitMs,
+            suggestedActions: [
+              'Wait retryAfterMs then retry.',
+              'Reduce same-keyword searches to avoid soft bans.',
+            ],
+          });
+
+          const payload = {
+            ok: true,
+            key,
+            windowMs,
+            maxCount,
+            allowed: false,
+            waitMs: keywordPermit.waitMs,
+            retryAfterMs: keywordPermit.waitMs,
+            countInWindow: (buckets.get(key) || []).length,
+            keyword,
+            keywordWindowMs: KEYWORD_WINDOW_MS,
+            keywordMaxCount: KEYWORD_MAX_COUNT,
+            keywordCountInWindow: keywordPermit.countInWindow,
+            reason: 'keyword_rate_limited',
+            deny,
+            ts: nowMs(),
+          };
+          logPermit({
+            key,
+            allowed: false,
+            reason: 'keyword_rate_limited',
+            waitMs: keywordPermit.waitMs,
+            countInWindow: keywordPermit.countInWindow,
+            keyword,
+          });
+          sendJson(res, 200, payload);
+          return;
+        }
+      }
+
       const result = computePermit(key, windowMs, maxCount);
 
-      // 仅在允许时记录 keyword 历史（开发阶段）
-      if (result.allowed && dev && keyword) {
-        const prev = pruneKeywordHistory(keywordHistory.get(key) || []);
-        prev.push({ ts: nowMs(), keyword, devTag: devTag || null });
-        keywordHistory.set(key, prev);
+      // 仅在允许时记�?keyword 历史（开发阶段）
+      if (result.allowed) {
+        if (keyword && keywordPermit) {
+          commitKeywordPermit(keywordPermit);
+        }
+        if (dev && keyword) {
+          const prev = pruneKeywordHistory(keywordHistory.get(key) || []);
+          prev.push({ ts: nowMs(), keyword, devTag: devTag || null });
+          keywordHistory.set(key, prev);
+        }
       }
 
       const reason = result.allowed ? null : 'rate_limited';
@@ -307,6 +456,7 @@ const server = http.createServer(async (req, res) => {
 server.listen(PORT, HOST, () => {
   // eslint-disable-next-line no-console
   console.log(
-    `[SearchGate] listening on http://${HOST}:${PORT} (window: ${DEFAULT_WINDOW_MS / 1000}s, max: ${DEFAULT_MAX_COUNT} searches per key)`
+    `[SearchGate] listening on http://${HOST}:${PORT} (window: ${DEFAULT_WINDOW_MS / 1000}s, max: ${DEFAULT_MAX_COUNT} searches per key, keyword window: ${KEYWORD_WINDOW_MS / 1000}s, keyword max: ${KEYWORD_MAX_COUNT})`
   );
 });
+
