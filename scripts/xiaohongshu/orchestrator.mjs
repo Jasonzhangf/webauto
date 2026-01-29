@@ -40,6 +40,7 @@ async function runScript(scriptPath, args = []) {
     const child = spawn('node', [scriptPath, ...args], {
       stdio: 'inherit',
       cwd: path.join(__dirname, '../..'),
+      windowsHide: true,
     });
     child.on('exit', (code) => (code === 0 ? resolve() : reject(new Error(`exit ${code}`))));
     child.on('error', reject);
@@ -87,7 +88,7 @@ if (args.daemon && process.env.WEBAUTO_DAEMON !== '1') {
   const wrapperPath = path.join(__dirname, 'shared/daemon-wrapper.mjs');
   const currentScript = fileURLToPath(import.meta.url);
   const scriptArgs = process.argv.slice(2).filter((arg) => arg !== '--daemon');
-  spawn('node', [wrapperPath, currentScript, ...scriptArgs], { stdio: 'inherit' });
+  spawn('node', [wrapperPath, currentScript, ...scriptArgs], { stdio: 'inherit', windowsHide: true });
 } else {
   main();
 }

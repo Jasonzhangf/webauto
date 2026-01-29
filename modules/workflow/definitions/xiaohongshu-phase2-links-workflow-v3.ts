@@ -33,6 +33,7 @@ export const xiaohongshuPhase2LinksWorkflowV3 = {
         keyword: '$keyword',
         env: '$env',
         targetCount: '$targetCount',
+        targetCountMode: '$targetCountMode',
       },
     },
   ],

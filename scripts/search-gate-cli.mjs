@@ -64,6 +64,7 @@ async function start() {
     detached: true,
     stdio: ['ignore', 'pipe', 'pipe'],
     cwd: repoRoot,
+    windowsHide: true,
   });
 
   // 日志写入文件（可选）

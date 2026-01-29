@@ -21,6 +21,7 @@ import { initRunLogging, emitRunEvent, safeStringify } from './lib/logger.mjs';
 import { createSessionLock } from './lib/session-lock.mjs';
 import { execute as validateLinks } from '../../dist/modules/xiaohongshu/app/src/blocks/Phase34ValidateLinksBlock.js';
 import { execute as processSingleNote } from '../../dist/modules/xiaohongshu/app/src/blocks/Phase34ProcessSingleNoteBlock.js';
+import { mergeNotesMarkdown } from '../../dist/modules/workflow/blocks/helpers/mergeXhsMarkdown.js';
 
 function nowMs() {
   return Date.now();
@@ -161,6 +162,17 @@ async function main() {
       errors.forEach((e, i) => {
         console.log(`   ${i + 1}. ${e.noteId}: ${e.error}`);
       });
+    }
+
+    const mergeResult = await mergeNotesMarkdown({
+      platform: 'xiaohongshu',
+      env,
+      keyword,
+    });
+    if (mergeResult.success) {
+      console.log(`\n📄 合并 Markdown 完成: ${mergeResult.outputPath} (notes=${mergeResult.mergedNotes})`);
+    } else {
+      console.warn(`\n⚠️ 合并 Markdown 跳过: ${mergeResult.error}`);
     }
 
     console.log(`\n✅ Phase 3-4 完成`);

@@ -286,6 +286,7 @@ async function launchWorkflowAPI() {
     stdio: 'ignore',
     detached: true,
     env: { ...process.env },
+    windowsHide: true,
   });
   server.unref();
 
@@ -319,6 +320,7 @@ async function launchBrowserService(port, host) {
     stdio: 'ignore',
     env: { ...process.env, BROWSER_SERVICE_AUTO_EXIT: '0' },
     detached: true,
+    windowsHide: true,
   });
   
   child.on('error', (err) => {
@@ -373,7 +375,8 @@ async function launchController() {
       WEBAUTO_BROWSER_HTTP_PROTO: 'http',
       WEBAUTO_WS_HOST: DEFAULT_WS_HOST,
       WEBAUTO_WS_PORT: String(DEFAULT_WS_PORT),
-    }
+    },
+    windowsHide: true,
   });
   
   child.unref();

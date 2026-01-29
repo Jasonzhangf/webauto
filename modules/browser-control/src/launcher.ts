@@ -179,6 +179,7 @@ export async function launchOneClick(options: LaunchOptions = {}): Promise<Launc
         cwd: ROOT_DIR,
         stdio: 'inherit',
         env: { ...process.env, BROWSER_SERVICE_AUTO_EXIT: '0' },
+        windowsHide: true,
       });
       serviceChild = child;
       child.on('exit', (code) => {
@@ -351,6 +352,7 @@ async function ensureWorkflowApi() {
     stdio: 'ignore',
     detached: true,
     env: { ...process.env },
+    windowsHide: true,
   });
   server.unref();
   const ready = await waitHealth(healthUrl, 20000);
@@ -499,6 +501,7 @@ function spawnNpmDev(extraEnv: Record<string, string> = {}) {
     cwd: FLOATING_APP_DIR,
     stdio: 'inherit',
     env,
+    windowsHide: true,
   });
 }
 
@@ -654,7 +657,7 @@ function sendWsCommand(wsUrl: string, payload: any, timeoutMs = 8000) {
 function runNpmCommand(args: string[] = []) {
   const npmCmd = process.platform === 'win32' ? 'npm.cmd' : 'npm';
   return new Promise<void>((resolve, reject) => {
-    const child = spawn(npmCmd, args, { cwd: ROOT_DIR, stdio: 'inherit' });
+    const child = spawn(npmCmd, args, { cwd: ROOT_DIR, stdio: 'inherit', windowsHide: true });
     child.on('exit', (code) => {
       if (code === 0) resolve();
       else reject(new Error(`npm ${args.join(' ')} exited with ${code}`));
@@ -678,6 +681,7 @@ function runNodeScript(relPath: string, args: string[]) {
     const child = spawn(process.execPath, [relPath, ...args], {
       cwd: ROOT_DIR,
       stdio: 'inherit',
+      windowsHide: true,
     });
     child.on('exit', (code) => {
       if (code === 0) resolve();

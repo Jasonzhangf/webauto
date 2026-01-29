@@ -19,7 +19,7 @@ import {
   locateCommentsFocusPoint,
   type FocusPoint,
 } from './xhsCommentDom.js';
-import { systemClickAt, systemHoverAt, systemMouseWheel } from './systemInput.js';
+import { systemClickAt, systemHoverAt, systemMouseWheel, isDevMode } from './systemInput.js';
 
 // Back-compat re-exports (older blocks import these from commentScroller.js)
 export { getScrollStats, getViewport } from './xhsCommentDom.js';
@@ -228,7 +228,11 @@ export async function scrollCommentSection(options: ScrollOptions): Promise<Scro
       } catch (e: any) {
         const msg = String(e?.message || e || '');
         // 开发阶段：风控/验证码/误点保护触发时必须停下，不允许吞错继续滚
-        if (msg.includes('captcha_modal_detected') || msg.includes('unsafe_click_image_in_detail')) throw e;
+        if (msg.includes('captcha_modal_detected')) throw e;
+        if (msg.includes('unsafe_click_image_in_detail')) {
+          if (isDevMode()) throw e;
+          warn(`round=${i} expand skipped unsafe click (continue): ${msg}`);
+        }
         warn(`round=${i} expand failed: ${msg}`);
       }
     }
@@ -291,6 +295,15 @@ export async function scrollCommentSection(options: ScrollOptions): Promise<Scro
       warn(`round=${i} ⚠️ scroll seems ineffective (streak=${noEffectStreak})`);
       // 卡住时：先回滚（向上滚）几次，再继续向下滚（避免虚拟列表“卡在同一批节点”）
       if (noEffectStreak >= 2) {
+        const endStateBeforeBounce = await getCommentEndState(controllerUrl, profile);
+        const noMoreBeforeBounce = Boolean(endStateBeforeBounce.endMarkerVisible || endStateBeforeBounce.emptyStateVisible);
+        if (noMoreBeforeBounce) {
+          log(
+            `round=${i} endMarker=${endStateBeforeBounce.endMarkerVisible}, empty=${endStateBeforeBounce.emptyStateVisible} -> stop before bounce`,
+          );
+          lastCount = currentCount;
+          break;
+        }
         // 规则：如果“回滚->再下滚”的尝试累计 3 次仍无法推进，则视为结束（避免无限卡死）
         let stuckScrollBefore: Awaited<ReturnType<typeof getScrollContainerState>> | null = null;
         let stuckFirstBefore: Awaited<ReturnType<typeof getViewportFirstComment>> | null = null;
@@ -317,8 +330,9 @@ export async function scrollCommentSection(options: ScrollOptions): Promise<Scro
           await new Promise((r) => setTimeout(r, 220));
         }
 
-        // 回滚 2 次
-        for (let k = 0; k < 2; k += 1) {
+        const upCount = 3 + Math.floor(Math.random() * 4);
+        // 回滚 3-6 次
+        for (let k = 0; k < upCount; k += 1) {
           await systemMouseWheel({
             profileId: profile,
             deltaY: -(320 + Math.floor(Math.random() * 160)),

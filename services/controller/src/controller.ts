@@ -164,7 +164,8 @@ export class UiController {
       
       const child = spawn(cmd, cmdArgs, {
         cwd: this.repoRoot,
-        env: process.env
+        env: process.env,
+        windowsHide: true,
       });
       
       let stdout = '';
@@ -676,6 +677,16 @@ export class UiController {
     const profileId = (payload.profileId || payload.profile || payload.sessionId || 'default').toString();
     const url = payload.url ? String(payload.url) : undefined;
     const result = await this.browserServiceCommand('page:new', { profileId, ...(url ? { url } : {}) }, { timeoutMs: 30000 });
+    const index = Number((result as any)?.index ?? (result as any)?.data?.index);
+    if (Number.isFinite(index)) {
+      return { success: true, data: result };
+    }
+    const list = await this.browserServiceCommand('page:list', { profileId }, { timeoutMs: 30000 });
+    const activeIndexRaw = (list as any)?.activeIndex ?? (list as any)?.data?.activeIndex;
+    const activeIndex = Number(activeIndexRaw);
+    if (Number.isFinite(activeIndex)) {
+      return { success: true, data: { ...(result || {}), index: activeIndex, fallback: 'activeIndex' } };
+    }
     return { success: true, data: result };
   }
 

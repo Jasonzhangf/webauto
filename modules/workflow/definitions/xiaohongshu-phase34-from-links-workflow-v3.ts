@@ -17,6 +17,8 @@ export const xiaohongshuPhase34FromLinksWorkflowV3 = {
         keyword: '$keyword',
         env: '$env',
         targetCount: '$targetCount',
+        targetCountMode: '$targetCountMode',
+        maxComments: '$maxComments',
       },
     },
   ],

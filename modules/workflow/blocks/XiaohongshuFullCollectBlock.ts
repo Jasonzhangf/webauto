@@ -19,6 +19,12 @@ import { countPersistedNotes } from './helpers/persistedNotes.js';
 import { AsyncWorkQueue } from './helpers/asyncWorkQueue.js';
 import { organizeOneNote } from './helpers/xhsNoteOrganizer.js';
 import { isDebugArtifactsEnabled } from './helpers/debugArtifacts.js';
+import { mergeNotesMarkdown } from './helpers/mergeXhsMarkdown.js';
+import {
+  logControllerActionError,
+  logControllerActionResult,
+  logControllerActionStart,
+} from './helpers/operationLogger.js';
 import os from 'node:os';
 import path from 'node:path';
 import { promises as fs } from 'node:fs';
@@ -47,6 +53,8 @@ export interface XiaohongshuFullCollectOutput {
   finalPersistedCount: number;
   addedCount: number;
   keywordDir: string;
+  mergedMarkdownPath?: string;
+  mergedMarkdownNotes?: number;
   processed: Array<{
     noteId?: string;
     detailUrl?: string;
@@ -248,16 +256,24 @@ export async function execute(input: XiaohongshuFullCollectInput): Promise<Xiaoh
   }
 
   async function controllerAction(action: string, payload: any = {}) {
-    const response = await fetch(controllerUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action, payload }),
-    });
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}: ${await response.text()}`);
+    const opId = logControllerActionStart(action, payload, { source: 'XiaohongshuFullCollectBlock' });
+    try {
+      const response = await fetch(controllerUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action, payload }),
+      });
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${await response.text()}`);
+      }
+      const data = await response.json();
+      const result = data.data || data;
+      logControllerActionResult(opId, action, result, { source: 'XiaohongshuFullCollectBlock' });
+      return result;
+    } catch (error) {
+      logControllerActionError(opId, action, error, payload, { source: 'XiaohongshuFullCollectBlock' });
+      throw error;
     }
-    const data = await response.json();
-    return data.data || data;
   }
 
   function safeDecodeURIComponent(value: string): string {
@@ -825,6 +841,26 @@ export async function execute(input: XiaohongshuFullCollectInput): Promise<Xiaoh
     console.log('[FullCollect][ocr] drained');
   }
   const finalCount = persistedAtEnd.count;
+  let mergedMarkdownPath: string | undefined;
+  let mergedMarkdownNotes: number | undefined;
+
+  try {
+    const merged = await mergeNotesMarkdown({
+      platform: 'xiaohongshu',
+      env,
+      keyword,
+      downloadRoot,
+    });
+    if (merged.success) {
+      mergedMarkdownPath = merged.outputPath;
+      mergedMarkdownNotes = merged.mergedNotes;
+      console.log(`[FullCollect] merged markdown: ${merged.outputPath} (notes=${merged.mergedNotes})`);
+    } else {
+      console.warn(`[FullCollect] merge markdown skipped: ${merged.error}`);
+    }
+  } catch (err: any) {
+    console.warn(`[FullCollect] merge markdown failed: ${err?.message || String(err)}`);
+  }
 
   return {
     success: strictTargetCount ? finalCount === targetCount : finalCount >= targetCount,
@@ -834,6 +870,8 @@ export async function execute(input: XiaohongshuFullCollectInput): Promise<Xiaoh
     finalPersistedCount: finalCount,
     addedCount: Math.max(0, finalCount - persistedAtStart.count),
     keywordDir: persistedAtEnd.keywordDir,
+    mergedMarkdownPath,
+    mergedMarkdownNotes,
     processed,
     ...(strictTargetCount
       ? finalCount === targetCount

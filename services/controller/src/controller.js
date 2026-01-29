@@ -61,12 +61,30 @@ export class UiController {
       return this.handleBrowserClearHighlight(payload);
     case 'browser:execute':
       return this.handleBrowserExecute(payload);
+    case 'browser:screenshot':
+      return this.handleBrowserScreenshot(payload);
+    case 'browser:page:list':
+      return this.handleBrowserPageList(payload);
+    case 'browser:page:new':
+      return this.handleBrowserPageNew(payload);
+    case 'browser:page:switch':
+      return this.handleBrowserPageSwitch(payload);
+    case 'browser:page:close':
+      return this.handleBrowserPageClose(payload);
+    case 'browser:goto':
+      return this.handleBrowserGoto(payload);
      case 'browser:highlight-dom-path':
        return this.handleBrowserHighlightDomPath(payload);
      case 'browser:cancel-pick':
        return this.handleBrowserCancelDomPick(payload);
      case 'browser:pick-dom':
        return this.handleBrowserPickDom(payload);
+     case 'keyboard:press':
+       return this.handleKeyboardPress(payload);
+     case 'keyboard:type':
+       return this.handleKeyboardType(payload);
+     case 'mouse:wheel':
+       return this.handleMouseWheel(payload);
      case 'dom:branch:2':
        return this.handleDomBranch2(payload);
      case 'dom:pick:2':
@@ -75,6 +93,8 @@ export class UiController {
        return this.fetchInspectTree(payload);
      case 'containers:match':
        return this.handleContainerMatch(payload);
+     case 'container:operation':
+       return this.handleContainerOperation(payload);
      default:
        return { success: false, error: `Unknown action: ${action}` };
    }
@@ -422,6 +442,48 @@ export class UiController {
     }
   }
 
+  async handleContainerOperation(payload = {}) {
+    const containerId = payload.containerId || payload.id;
+    const operationId = payload.operationId;
+    const sessionId =
+      payload.profile ||
+      payload.profileId ||
+      payload.profile_id ||
+      payload.sessionId ||
+      payload.session_id;
+
+    if (!containerId) {
+      return { success: false, error: 'Missing containerId' };
+    }
+    if (!operationId) {
+      return { success: false, error: 'Missing operationId' };
+    }
+    if (!sessionId) {
+      return { success: false, error: 'Missing sessionId/profile' };
+    }
+
+    const port = process.env.WEBAUTO_UNIFIED_PORT || 7701;
+    const host = '127.0.0.1';
+
+    try {
+      const response = await fetch(`http://${host}:${port}/v1/container/${containerId}/execute`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          operationId,
+          config: payload.config,
+          sessionId,
+        }),
+      });
+      if (!response.ok) {
+        return { success: false, error: await response.text() };
+      }
+      return await response.json();
+    } catch (err) {
+      return { success: false, error: err?.message || String(err) };
+    }
+  }
+
       async handleBrowserHighlight(payload = {}) {
     const profile = payload.profile || payload.sessionId;
     const selector = (payload.selector || '').trim();
@@ -563,6 +625,92 @@ export class UiController {
       const errorMessage = err?.message || '执行脚本失败';
       throw new Error(errorMessage);
     }
+  }
+
+  async handleBrowserScreenshot(payload = {}) {
+    const profileId = (payload.profileId || payload.profile || payload.sessionId || 'default').toString();
+    const fullPage = typeof payload.fullPage === 'boolean' ? payload.fullPage : Boolean(payload.fullPage);
+    const result = await this.browserServiceCommand('screenshot', { profileId, fullPage }, { timeoutMs: 60000 });
+    return { success: true, data: result };
+  }
+
+  async handleBrowserPageList(payload = {}) {
+    const profileId = (payload.profileId || payload.profile || payload.sessionId || 'default').toString();
+    const result = await this.browserServiceCommand('page:list', { profileId }, { timeoutMs: 30000 });
+    return { success: true, data: result };
+  }
+
+  async handleBrowserPageNew(payload = {}) {
+    const profileId = (payload.profileId || payload.profile || payload.sessionId || 'default').toString();
+    const url = payload.url ? String(payload.url) : undefined;
+    const result = await this.browserServiceCommand('page:new', { profileId, ...(url ? { url } : {}) }, { timeoutMs: 30000 });
+    const index = Number(result?.index ?? result?.data?.index);
+    if (Number.isFinite(index)) {
+      return { success: true, data: result };
+    }
+    const list = await this.browserServiceCommand('page:list', { profileId }, { timeoutMs: 30000 });
+    const activeIndexRaw = list?.activeIndex ?? list?.data?.activeIndex;
+    const activeIndex = Number(activeIndexRaw);
+    if (Number.isFinite(activeIndex)) {
+      return { success: true, data: { ...(result || {}), index: activeIndex, fallback: 'activeIndex' } };
+    }
+    return { success: true, data: result };
+  }
+
+  async handleBrowserPageSwitch(payload = {}) {
+    const profileId = (payload.profileId || payload.profile || payload.sessionId || 'default').toString();
+    const index = Number(payload.index);
+    if (!Number.isFinite(index)) throw new Error('index required');
+    const result = await this.browserServiceCommand('page:switch', { profileId, index }, { timeoutMs: 30000 });
+    return { success: true, data: result };
+  }
+
+  async handleBrowserPageClose(payload = {}) {
+    const profileId = (payload.profileId || payload.profile || payload.sessionId || 'default').toString();
+    const hasIndex = typeof payload.index !== 'undefined' && payload.index !== null;
+    const index = hasIndex ? Number(payload.index) : undefined;
+    const result = await this.browserServiceCommand(
+      'page:close',
+      { profileId, ...(Number.isFinite(index) ? { index } : {}) },
+      { timeoutMs: 30000 },
+    );
+    return { success: true, data: result };
+  }
+
+  async handleBrowserGoto(payload = {}) {
+    const profileId = (payload.profileId || payload.profile || payload.sessionId || 'default').toString();
+    const url = (payload.url || '').toString();
+    if (!url) throw new Error('url required');
+    const result = await this.browserServiceCommand('goto', { profileId, url });
+    return { success: true, data: result };
+  }
+
+  async handleKeyboardPress(payload = {}) {
+    const profileId = (payload.profileId || payload.profile || payload.sessionId || 'default').toString();
+    const key = (payload.key || 'Enter').toString();
+    const delay = typeof payload.delay === 'number' ? payload.delay : undefined;
+    const result = await this.browserServiceCommand('keyboard:press', { profileId, key, ...(delay ? { delay } : {}) });
+    return { success: true, data: result };
+  }
+
+  async handleKeyboardType(payload = {}) {
+    const profileId = (payload.profileId || payload.profile || payload.sessionId || 'default').toString();
+    const text = (payload.text ?? '').toString();
+    const delay = typeof payload.delay === 'number' ? payload.delay : undefined;
+    const submit = typeof payload.submit === 'boolean' ? payload.submit : Boolean(payload.submit);
+    const result = await this.browserServiceCommand(
+      'keyboard:type',
+      { profileId, text, ...(delay ? { delay } : {}), ...(submit ? { submit } : {}) },
+    );
+    return { success: true, data: result };
+  }
+
+  async handleMouseWheel(payload = {}) {
+    const profileId = (payload.profileId || payload.profile || payload.sessionId || 'default').toString();
+    const deltaY = Number(payload.deltaY);
+    const deltaX = Number(payload.deltaX);
+    const result = await this.browserServiceCommand('mouse:wheel', { profileId, deltaY, deltaX });
+    return { success: true, data: result };
   }
 
   async handleBrowserCancelDomPick(payload = {}) {
@@ -1056,11 +1204,15 @@ export class UiController {
     const script = this.cliTargets[target];
     if (!script) throw new Error(`Unknown CLI target: ${target}`);
     return new Promise((resolve, reject) => {
+      const isJs = script.endsWith('.js');
       const npxCmd = process.platform === 'win32' ? 'npx.cmd' : 'npx';
+      const cmd = isJs ? 'node' : npxCmd;
+      const cmdArgs = isJs ? [script, ...args] : ['tsx', script, ...args];
       console.log('[controller] runCliCommand', target, script, args.join(' '));
-      const child = spawn(npxCmd, ['tsx', script, ...args], {
+      const child = spawn(cmd, cmdArgs, {
         cwd: this.repoRoot,
         env: process.env,
+        windowsHide: true,
       });
       let stdout = '';
       let stderr = '';
@@ -1158,6 +1310,35 @@ export class UiController {
     const port = Number(process.env.WEBAUTO_BROWSER_HTTP_PORT || this.defaultHttpPort);
     const protocol = process.env.WEBAUTO_BROWSER_HTTP_PROTO || this.defaultHttpProtocol;
     return `${protocol}://${host}:${port}`;
+  }
+
+  async browserServiceCommand(action, args, options = {}) {
+    const timeoutMs = typeof options.timeoutMs === 'number' && options.timeoutMs > 0 ? options.timeoutMs : 20000;
+    const res = await fetch(`${this.getBrowserHttpBase()}/command`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action, args }),
+      signal: AbortSignal.timeout ? AbortSignal.timeout(timeoutMs) : undefined,
+    });
+
+    const raw = await res.text();
+    let data = {};
+    try {
+      data = raw ? JSON.parse(raw) : {};
+    } catch {
+      data = { raw };
+    }
+
+    if (!res.ok) {
+      throw new Error(data?.error || data?.body?.error || `browser-service command "${action}" HTTP ${res.status}`);
+    }
+    if (data && data.ok === false) {
+      throw new Error(data.error || `browser-service command "${action}" failed`);
+    }
+    if (data && data.error) {
+      throw new Error(data.error);
+    }
+    return data.body ?? data;
   }
 
   sendWsCommand(wsUrl, payload, timeoutMs = 15000) {

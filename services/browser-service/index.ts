@@ -2,12 +2,15 @@ import http from 'http';
 import { IncomingMessage, ServerResponse } from 'http';
 import { setTimeout as delay } from 'timers/promises';
 import { fileURLToPath } from 'node:url';
+import os from 'node:os';
+import { spawnSync } from 'node:child_process';
 import { SessionManager, CreateSessionPayload, SESSION_CLOSED_EVENT } from './SessionManager.js';
 import { BrowserWsServer } from './ws-server.js';
 import { RemoteMessageBusClient } from '../../libs/operations-framework/src/event-driven/RemoteMessageBusClient.js';
 import { BrowserMessageHandler } from './BrowserMessageHandler.js';
 import { logDebug } from '../../modules/logging/src/index.js';
 import { installServiceProcessLogger } from '../shared/serviceProcessLogger.js';
+import { startHeartbeatWriter } from '../shared/heartbeat.js';
 
 type CommandPayload = { action: string; args?: any };
 
@@ -23,6 +26,59 @@ interface BrowserServiceOptions {
 const clients = new Set<ServerResponse>();
 const autoLoops = new Map<string, NodeJS.Timeout>();
 
+function readNumber(value: string | undefined): number | null {
+  if (!value) return null;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) return null;
+  return parsed;
+}
+
+function getDisplayMetrics() {
+  const envWidth = readNumber(process.env.WEBAUTO_SCREEN_WIDTH);
+  const envHeight = readNumber(process.env.WEBAUTO_SCREEN_HEIGHT);
+  if (envWidth && envHeight) {
+    return { width: envWidth, height: envHeight, source: 'env' };
+  }
+  if (os.platform() !== 'win32') return null;
+  try {
+    const script = [
+      'Add-Type -AssemblyName System.Windows.Forms;',
+      '$screen=[System.Windows.Forms.Screen]::PrimaryScreen;',
+      '$b=$screen.Bounds;',
+      '$w=$screen.WorkingArea;',
+      '$video=Get-CimInstance Win32_VideoController | Select-Object -First 1;',
+      '$nw=$null;$nh=$null;',
+      'if ($video) { $nw=$video.CurrentHorizontalResolution; $nh=$video.CurrentVerticalResolution }',
+      '$o=[pscustomobject]@{width=$b.Width;height=$b.Height;workWidth=$w.Width;workHeight=$w.Height;nativeWidth=$nw;nativeHeight=$nh};',
+      '$o | ConvertTo-Json -Compress',
+    ].join(' ');
+    const res = spawnSync('powershell', ['-NoProfile', '-Command', script], {
+      encoding: 'utf8',
+      windowsHide: true,
+    });
+    if (res.status !== 0 || !res.stdout) return null;
+    const payload = JSON.parse(res.stdout.trim());
+    const nativeWidth = readNumber(payload?.nativeWidth);
+    const nativeHeight = readNumber(payload?.nativeHeight);
+    const width = readNumber(payload?.width) || nativeWidth || null;
+    const height = readNumber(payload?.height) || nativeHeight || null;
+    const workWidth = readNumber(payload?.workWidth);
+    const workHeight = readNumber(payload?.workHeight);
+    if (!width || !height) return null;
+    return {
+      width,
+      height,
+      ...(workWidth ? { workWidth } : {}),
+      ...(workHeight ? { workHeight } : {}),
+      ...(nativeWidth ? { nativeWidth } : {}),
+      ...(nativeHeight ? { nativeHeight } : {}),
+      source: 'win32',
+    };
+  } catch {
+    return null;
+  }
+}
+
 export async function startBrowserService(opts: BrowserServiceOptions = {}) {
   const { logEvent } = installServiceProcessLogger({ serviceName: 'browser-service' });
   const host = opts.host || '127.0.0.1';
@@ -33,6 +89,25 @@ export async function startBrowserService(opts: BrowserServiceOptions = {}) {
   const wsPort = Number(opts.wsPort || 8765);
   const autoExit = process.env.BROWSER_SERVICE_AUTO_EXIT === '1';
   const busUrl = opts.busUrl || process.env.WEBAUTO_BUS_URL || 'ws://127.0.0.1:7701/bus';
+  const heartbeat = startHeartbeatWriter({ initialStatus: 'idle' });
+  let heartbeatStatus: 'idle' | 'running' | 'stopped' = 'idle';
+  let hasActiveSession = false;
+
+  const setHeartbeatStatus = (next: 'idle' | 'running' | 'stopped') => {
+    if (heartbeatStatus === next) return;
+    heartbeatStatus = next;
+    heartbeat.setStatus(next);
+  };
+
+  const markSessionStarted = () => {
+    hasActiveSession = true;
+    setHeartbeatStatus('running');
+  };
+
+  const markAllSessionsClosed = () => {
+    if (!hasActiveSession) return;
+    setHeartbeatStatus('stopped');
+  };
 
   logDebug('browser-service', 'start', { host, port, wsHost, wsPort, enableWs, autoExit, busUrl });
 
@@ -76,7 +151,7 @@ export async function startBrowserService(opts: BrowserServiceOptions = {}) {
         req.on('end', async () => {
           try {
             const payload: CommandPayload = JSON.parse(Buffer.concat(chunks).toString('utf-8'));
-            const result = await handleCommand(payload, sessionManager, wsServer);
+            const result = await handleCommand(payload, sessionManager, wsServer, { onSessionStart: markSessionStarted });
             res.writeHead(result.ok ? 200 : 500, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify(result.body));
           } catch (err) {
@@ -139,6 +214,7 @@ export async function startBrowserService(opts: BrowserServiceOptions = {}) {
   };
 
   const shutdown = async () => {
+    heartbeat.stop();
     server.close();
     clients.forEach((client) => client.end());
     autoLoops.forEach((timer) => clearInterval(timer));
@@ -152,7 +228,9 @@ export async function startBrowserService(opts: BrowserServiceOptions = {}) {
   process.on('SIGINT', shutdown);
   process.on('SIGTERM', shutdown);
   process.on(SESSION_CLOSED_EVENT as any, () => {
-    if (autoExit && managerIsIdle(sessionManager)) {
+    if (!managerIsIdle(sessionManager)) return;
+    markAllSessionsClosed();
+    if (autoExit || hasActiveSession) {
       shutdown().finally(() => process.exit(0));
     }
   });
@@ -162,7 +240,12 @@ function managerIsIdle(manager: SessionManager) {
   return manager.listSessions().length === 0;
 }
 
-async function handleCommand(payload: CommandPayload, manager: SessionManager, wsServer: BrowserWsServer | null) {
+async function handleCommand(
+  payload: CommandPayload,
+  manager: SessionManager,
+  wsServer: BrowserWsServer | null,
+  options: { onSessionStart?: () => void } = {},
+) {
   const action = payload.action;
   const args = payload.args ?? (payload as any);
 
@@ -175,6 +258,7 @@ async function handleCommand(payload: CommandPayload, manager: SessionManager, w
         initialUrl: args.url,
       };
       const res = await manager.createSession(opts);
+      options.onSessionStart?.();
       broadcast('browser:started', { profileId: opts.profileId, sessionId: res.sessionId });
       return { ok: true, body: { ok: true, sessionId: res.sessionId, profileId: opts.profileId } };
     }
@@ -219,6 +303,10 @@ async function handleCommand(payload: CommandPayload, manager: SessionManager, w
     }
     case 'getStatus': {
       return { ok: true, body: { ok: true, sessions: manager.listSessions() } };
+    }
+    case 'system:display': {
+      const metrics = getDisplayMetrics();
+      return { ok: true, body: { ok: true, metrics } };
     }
     case 'stop': {
       const profileId = args.profileId || 'default';

@@ -1,6 +1,6 @@
-import os from 'node:os';
 import path from 'node:path';
 import { promises as fs } from 'node:fs';
+import { resolveKeywordDir } from './downloadPaths.js';
 
 export interface PersistedNotesCountInput {
   platform: string;
@@ -17,19 +17,6 @@ export interface PersistedNotesCountOutput {
   keywordDir: string;
   noteIds: string[];
   count: number;
-}
-
-function sanitizeForPath(name: string): string {
-  if (!name) return '';
-  return name.replace(/[\\/:"*?<>|]+/g, '_').trim();
-}
-
-function resolveDownloadRoot(custom?: string, homeDir?: string): string {
-  if (custom && custom.trim()) return custom;
-  if (homeDir && homeDir.trim()) return path.join(homeDir, '.webauto', 'download');
-  const envHome = process.env.HOME || process.env.USERPROFILE;
-  if (envHome && envHome.trim()) return path.join(envHome, '.webauto', 'download');
-  return path.join(os.homedir(), '.webauto', 'download');
 }
 
 async function pathExists(filepath: string): Promise<boolean> {
@@ -55,8 +42,7 @@ export async function countPersistedNotes(
     minCommentsCoverageRatio,
   } = input;
 
-  const safeKeyword = sanitizeForPath(keyword) || 'unknown';
-  const keywordDir = path.join(resolveDownloadRoot(downloadRoot, homeDir), platform, env, safeKeyword);
+  const keywordDir = resolveKeywordDir({ platform, env, keyword, homeDir, downloadRoot });
 
   const exists = await pathExists(keywordDir);
   if (!exists) {
@@ -68,11 +54,11 @@ export async function countPersistedNotes(
 
   function parseCommentsStats(text: string): { fetched: number | null; header: number | null } {
     // PersistXhsNoteBlock 写入格式：抓取=10, header=123（reachedEnd=是, empty=否, coverage=...）
-    const m = text.match(/评论统计:\\s*抓取=(\\d+),\\s*header=([^（\\n]+)/);
+    const m = text.match(/评论统计:\s*抓取=(\d+),\s*header=([^（\n]+)/);
     if (!m) return { fetched: null, header: null };
     const fetched = Number(m[1]);
     const headerRaw = String(m[2] || '').trim();
-    const header = /^\\d+$/.test(headerRaw) ? Number(headerRaw) : null;
+    const header = /^\d+$/.test(headerRaw) ? Number(headerRaw) : null;
     return {
       fetched: Number.isFinite(fetched) ? fetched : null,
       header: Number.isFinite(header as any) ? (header as number) : null,
@@ -81,10 +67,13 @@ export async function countPersistedNotes(
 
   async function commentsDone(commentsPath: string): Promise<boolean> {
     try {
+      const donePath = path.join(path.dirname(commentsPath), 'comments.done.json');
+      if (await pathExists(donePath)) return true;
       const text = await fs.readFile(commentsPath, 'utf-8');
       // PersistXhsNoteBlock 写入格式：reachedEnd=是/否, empty=是/否
       if (text.includes('empty=是')) return true;
       if (text.includes('reachedEnd=是')) return true;
+      if (text.includes('stoppedByMaxComments=yes')) return true;
       return false;
     } catch {
       return false;
@@ -101,6 +90,7 @@ export async function countPersistedNotes(
     if (!ratio) return true;
     try {
       const text = await fs.readFile(commentsPath, 'utf-8');
+      if (text.includes('stoppedByMaxComments=yes')) return true;
       const stats = parseCommentsStats(text);
       if (stats.header === null || stats.header <= 0) return true; // 标称未知/0：不做覆盖率要求
       if (stats.fetched === null) return false;

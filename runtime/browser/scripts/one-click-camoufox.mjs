@@ -110,6 +110,7 @@ function startPythonService() {
     detached: true,
     stdio: 'ignore',
     env: { ...process.env, PYTHONDONTWRITEBYTECODE: '1' },
+    windowsHide: true,
   });
 
   child.unref();

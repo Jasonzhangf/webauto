@@ -75,7 +75,8 @@ function main() {
   
   const child = spawn('node', args, {
     stdio: 'inherit',
-    env: process.env
+    env: process.env,
+    windowsHide: true,
   });
 
   child.on('exit', (code) => {

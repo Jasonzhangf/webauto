@@ -17,7 +17,8 @@ const serverTsPath = path.resolve(__dirname, 'server.ts');
 
 const child = spawn('node', [tsxPath, serverTsPath], {
   stdio: 'inherit',
-  env: process.env
+  env: process.env,
+  windowsHide: true,
 });
 
 child.on('exit', (code) => {

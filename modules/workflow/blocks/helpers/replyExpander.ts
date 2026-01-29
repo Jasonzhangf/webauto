@@ -61,7 +61,8 @@ export async function expandRepliesInView(options: {
   let all = 0;
   let error: string | undefined;
 
-  const { systemClickAt, systemHoverAt } = await import('./systemInput.js');
+  const { systemClickAt, systemHoverAt, isDevMode } = await import('./systemInput.js');
+  const failFast = isDevMode();
 
   // 注意：展开后会导致布局变化，预先计算一堆坐标容易“点偏/点不到”。
   // 因此默认每次点击都重新计算一次（maxTargets 次），保证每次点的都是“当前仍可见”的按钮。
@@ -91,8 +92,13 @@ export async function expandRepliesInView(options: {
       await new Promise((r) => setTimeout(r, 650 + Math.random() * 450));
     } catch (e: any) {
       const msg = String(e?.message || e || '');
-      if (msg.includes('captcha_modal_detected') || msg.includes('unsafe_click_image_in_detail')) {
+      if (msg.includes('captcha_modal_detected')) {
         throw e;
+      }
+      if (msg.includes('unsafe_click_image_in_detail')) {
+        if (failFast) throw e;
+        log(`reply_expand skipped unsafe click (continue): ${msg}`);
+        break;
       }
       // 其他点击失败（例如元素瞬移）跳过本次，继续尝试下一个
       await new Promise((r) => setTimeout(r, 500));
@@ -110,7 +116,12 @@ export async function expandRepliesInView(options: {
           await new Promise((r) => setTimeout(r, 650 + Math.random() * 450));
         } catch (e: any) {
           const msg = String(e?.message || e || '');
-          if (msg.includes('captcha_modal_detected') || msg.includes('unsafe_click_image_in_detail')) throw e;
+          if (msg.includes('captcha_modal_detected')) throw e;
+          if (msg.includes('unsafe_click_image_in_detail')) {
+            if (failFast) throw e;
+            log(`reply_expand skipped unsafe click (continue): ${msg}`);
+            break;
+          }
         }
       }
       break;
@@ -200,8 +211,8 @@ export async function findExpandTargets(
               // 展开回复按钮一般是单行小高度元素
               if (rect.height > 160) continue;
               // 开发阶段严格要求：必须“完全在视口内”才允许点击，避免点到截断按钮造成误触
-              if (!(rect.top >= 0 && rect.bottom <= viewportH)) continue;
-              if (!(rect.left >= 0 && rect.right <= viewportW)) continue;
+              if (rect.bottom <= 0 || rect.top >= viewportH) continue;
+              if (rect.right <= 0 || rect.left >= viewportW) continue;
               visibleCount += 1;
 
               const style = window.getComputedStyle(el);

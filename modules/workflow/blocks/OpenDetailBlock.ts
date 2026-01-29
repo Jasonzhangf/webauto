@@ -423,13 +423,13 @@ export async function execute(input: OpenDetailInput): Promise<OpenDetailOutput>
     const viewportH = typeof viewport.innerHeight === 'number' && viewport.innerHeight > 0 ? viewport.innerHeight : 0;
     if (!viewportH || !rect || rect.width <= 0 || rect.height <= 0) return false;
 
-    const topOk = rect.y >= safe.top;
-    const bottomOk = rect.y + rect.height <= viewportH - safe.bottom;
+    const cx = rect.x + rect.width / 2;
+    const cy = rect.y + rect.height / 2;
+    const topOk = cy >= safe.top && cy <= viewportH - safe.bottom;
 
-    if (!viewportW) return topOk && bottomOk;
-    const leftOk = rect.x >= safe.left;
-    const rightOk = rect.x + rect.width <= viewportW - safe.right;
-    return topOk && bottomOk && leftOk && rightOk;
+    if (!viewportW) return topOk;
+    const leftOk = cx >= safe.left && cx <= viewportW - safe.right;
+    return topOk && leftOk;
   }
 
   async function ensureCoverFullyVisible(params: {

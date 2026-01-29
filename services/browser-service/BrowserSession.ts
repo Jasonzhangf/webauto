@@ -31,6 +31,7 @@ export class BrowserSession {
   private lastCookieSaveTs = 0;
   private runtimeObservers = new Set<(event: any) => void>();
   private bridgedPages = new WeakSet<Page>();
+  private lastViewport: { width: number; height: number } | null = null;
 
   onExit?: (profileId: string) => void;
   private exitNotified = false;
@@ -76,16 +77,19 @@ export class BrowserSession {
 
     const viewport = this.options.viewport || { width: 1440, height: 900 };
     const userAgent = this.options.userAgent || 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+    const deviceScaleFactor = this.resolveDeviceScaleFactor();
 
     this.context = await chromium.launchPersistentContext(this.profileDir, {
       headless: !!this.options.headless,
       viewport,
+      ...(deviceScaleFactor ? { deviceScaleFactor } : {}),
       userAgent,
       acceptDownloads: false,
       bypassCSP: false,
       locale: 'zh-CN',
       timezoneId: 'Asia/Shanghai',
     });
+    this.lastViewport = { width: viewport.width, height: viewport.height };
     this.browser = this.context.browser();
     this.browser.on('disconnected', () => this.notifyExit());
     this.context.on('close', () => this.notifyExit());
@@ -221,6 +225,49 @@ export class BrowserSession {
     return null;
   }
 
+  private resolveDeviceScaleFactor(): number | null {
+    const raw = String(process.env.WEBAUTO_DEVICE_SCALE || '').trim();
+    if (raw) {
+      const parsed = Number(raw);
+      if (Number.isFinite(parsed) && parsed > 0) return parsed;
+    }
+    if (os.platform() === 'win32' && this.options.profileId?.startsWith('xiaohongshu_')) {
+      return 1;
+    }
+    return null;
+  }
+
+  private async syncDeviceScaleFactor(page: Page, viewport: { width: number; height: number }): Promise<void> {
+    const desired = this.resolveDeviceScaleFactor();
+    if (!desired || !this.context) return;
+    try {
+      const client = await this.context.newCDPSession(page);
+      await client.send('Emulation.setDeviceMetricsOverride', {
+        width: viewport.width,
+        height: viewport.height,
+        deviceScaleFactor: desired,
+        mobile: false,
+        scale: 1,
+      });
+    } catch (error: any) {
+      console.warn(`[browser-session] sync device scale failed: ${error?.message || String(error)}`);
+    }
+  }
+
+  private async ensurePageViewport(page: Page): Promise<void> {
+    if (!this.lastViewport) return;
+    const current = page.viewportSize();
+    if (current && current.width === this.lastViewport.width && current.height === this.lastViewport.height) {
+      return;
+    }
+    await page.setViewportSize({
+      width: this.lastViewport.width,
+      height: this.lastViewport.height,
+    });
+    await this.syncWindowBounds(page, { ...this.lastViewport });
+    await this.syncDeviceScaleFactor(page, { ...this.lastViewport });
+  }
+
   private ensureContext(): BrowserContext {
     if (!this.context) {
       throw new Error('browser context not ready');
@@ -236,6 +283,11 @@ export class BrowserSession {
     }
     this.page = await ctx.newPage();
     this.setupPageHooks(this.page);
+    try {
+      await this.ensurePageViewport(this.page);
+    } catch {
+      /* ignore */
+    }
     return this.page;
   }
 
@@ -284,6 +336,11 @@ export class BrowserSession {
     this.setupPageHooks(page);
     this.page = page;
     try {
+      await this.ensurePageViewport(page);
+    } catch {
+      /* ignore */
+    }
+    try {
       await page.bringToFront();
     } catch {
       /* ignore */
@@ -306,6 +363,11 @@ export class BrowserSession {
     }
     const page = pages[idx];
     this.page = page;
+    try {
+      await this.ensurePageViewport(page);
+    } catch {
+      /* ignore */
+    }
     try {
       await page.bringToFront();
     } catch {
@@ -520,6 +582,37 @@ export class BrowserSession {
     await page.mouse.wheel(Number(deltaX) || 0, Number(deltaY) || 0);
   }
 
+  private async syncWindowBounds(
+    page: Page,
+    viewport: { width: number; height: number },
+  ): Promise<void> {
+    if (this.options.headless) return;
+    if (!this.context) return;
+
+    try {
+      const client = await this.context.newCDPSession(page);
+      const { windowId } = await client.send('Browser.getWindowForTarget');
+      const metrics = await page.evaluate(() => ({
+        innerWidth: window.innerWidth || 0,
+        innerHeight: window.innerHeight || 0,
+        outerWidth: window.outerWidth || 0,
+        outerHeight: window.outerHeight || 0,
+      }));
+
+      const deltaW = Math.max(0, Math.floor((metrics.outerWidth || 0) - (metrics.innerWidth || 0)));
+      const deltaH = Math.max(0, Math.floor((metrics.outerHeight || 0) - (metrics.innerHeight || 0)));
+      const targetWidth = Math.max(300, viewport.width + deltaW);
+      const targetHeight = Math.max(300, viewport.height + deltaH);
+
+      await client.send('Browser.setWindowBounds', {
+        windowId,
+        bounds: { width: targetWidth, height: targetHeight },
+      });
+    } catch (error: any) {
+      console.warn(`[browser-session] sync window bounds failed: ${error?.message || String(error)}`);
+    }
+  }
+
   async setViewportSize(opts: { width: number; height: number }): Promise<{ width: number; height: number }> {
     const page = await this.ensurePrimaryPage();
     const width = Math.max(800, Math.floor(Number(opts.width) || 0));
@@ -528,6 +621,9 @@ export class BrowserSession {
       throw new Error('invalid_viewport_size');
     }
     await page.setViewportSize({ width, height });
+    await this.syncWindowBounds(page, { width, height });
+    await this.syncDeviceScaleFactor(page, { width, height });
+    this.lastViewport = { width, height };
     return { width, height };
   }
 

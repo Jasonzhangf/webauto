@@ -39,6 +39,19 @@ function delay(ms: number) {
   return new Promise<void>((resolve) => setTimeout(resolve, ms));
 }
 
+async function getViewportHeight(profile: string, apiUrl: string): Promise<number> {
+  try {
+    const res = await controllerAction('browser:execute', {
+      profile,
+      script: 'window.innerHeight',
+    }, apiUrl);
+    const h = Number(res?.result || res?.data?.result || res?.data || 0);
+    return Number.isFinite(h) && h > 0 ? h : 0;
+  } catch {
+    return 0;
+  }
+}
+
 export async function execute(input: OpenDetailInput): Promise<OpenDetailOutput> {
   const {
     noteId,
@@ -91,7 +104,8 @@ export async function execute(input: OpenDetailInput): Promise<OpenDetailOutput>
   // 6. 视口保护：验证元素在视口内
   const rect = highlightResult?.anchor?.rect || highlightResult?.rect;
   if (rect) {
-    const viewportHeight = 2160; // 与 Phase1 启动时设置的高度一致
+    const viewportHeightRaw = await getViewportHeight(profile, unifiedApiUrl);
+    const viewportHeight = viewportHeightRaw || 1200;
     const isInViewport = rect.y >= 0 && (rect.y + rect.height) <= viewportHeight;
 
     if (!isInViewport) {

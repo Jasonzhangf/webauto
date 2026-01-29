@@ -407,6 +407,7 @@ async function main(){
         stdio: 'ignore',
         env: { ...process.env, BROWSER_SERVICE_AUTO_EXIT: '0' },
         detached: true,
+        windowsHide: true,
       });
       child.on('error', (err) => {
         console.warn('[one-click] browser service spawn failed:', err?.message || String(err));
@@ -539,6 +540,7 @@ async function ensureWorkflowApi() {
     stdio: 'ignore',
     detached: true,
     env: { ...process.env },
+    windowsHide: true,
   });
   server.unref();
 

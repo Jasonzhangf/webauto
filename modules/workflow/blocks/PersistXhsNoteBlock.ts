@@ -177,6 +177,7 @@ export async function execute(input: PersistXhsNoteInput): Promise<PersistXhsNot
 
     const detailPath = path.join(postDir, 'content.md');
     const commentsPath = path.join(postDir, 'comments.md');
+    const commentsDonePath = path.join(postDir, 'comments.done.json');
 
     // 1) 详情（正文/图片）
     if (wantDetail) {
@@ -254,6 +255,11 @@ export async function execute(input: PersistXhsNoteInput): Promise<PersistXhsNot
       const coverageRatio = headerPositive ? comments.length / headerTotal : null;
       const coverageNeed = headerPositive ? Math.ceil(headerTotal * 0.9) : null;
       const coverageOk = headerPositive ? comments.length >= (coverageNeed || 0) : null;
+      const maxComments =
+        typeof commentsResult?.maxComments === 'number' && Number.isFinite(commentsResult.maxComments)
+          ? Math.floor(commentsResult.maxComments)
+          : null;
+      const stoppedByMaxComments = Boolean(commentsResult?.stoppedByMaxComments);
 
       // 没有任何评论且没有明确 reachedEnd/emptyState 信号时，不写入 comments.md
       const hasAnySignal =
@@ -299,7 +305,39 @@ export async function execute(input: PersistXhsNoteInput): Promise<PersistXhsNot
           }
         }
 
+        if (stoppedByMaxComments && maxComments !== null) {
+          lines.push(`- MaxComments: ${maxComments} (stoppedByMaxComments=yes)`);
+        }
         await fs.writeFile(commentsPath, lines.join('\n'), 'utf-8');
+      }
+
+      const done = Boolean(
+        commentsResult?.reachedEnd === true ||
+          commentsResult?.emptyState === true ||
+          commentsResult?.stoppedByMaxComments === true,
+      );
+      if (done) {
+        await fs.writeFile(
+          commentsDonePath,
+          JSON.stringify(
+            {
+              noteId,
+              keyword,
+              done: true,
+              reachedEnd: Boolean(commentsResult?.reachedEnd),
+              emptyState: Boolean(commentsResult?.emptyState),
+              stoppedByMaxComments: Boolean(commentsResult?.stoppedByMaxComments),
+              totalComments: comments.length,
+              headerTotal,
+              ts: new Date().toISOString(),
+            },
+            null,
+            2,
+          ),
+          'utf-8',
+        );
+      } else {
+        await fs.unlink(commentsDonePath).catch(() => {});
       }
     }
 

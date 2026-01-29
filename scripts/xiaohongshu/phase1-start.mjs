@@ -43,6 +43,12 @@ async function main() {
     console.log(`   saved=${cookieRes.saved} autoCookiesStarted=${cookieRes.autoCookiesStarted} path=${cookieRes.cookiePath}`);
 
     console.log('✅ Phase1 完成：autoCookies 已开启，可继续执行 Phase2');
+    console.log('🧷 Phase1 keepalive：使用 "xhs stop" 或 Ctrl+C 退出');
+    await new Promise((resolve) => {
+      const stop = () => resolve();
+      process.on('SIGINT', stop);
+      process.on('SIGTERM', stop);
+    });
   } finally {
     if (lockHandle?.release) lockHandle.release();
   }

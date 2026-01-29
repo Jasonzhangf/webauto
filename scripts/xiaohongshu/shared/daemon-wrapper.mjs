@@ -22,6 +22,7 @@ function daemonize(scriptPath, args, logFile, pidFile) {
     detached: true,
     stdio: ['ignore', out, err],
     env: { ...process.env, WEBAUTO_DAEMON: '1' },
+    windowsHide: true,
   });
   
   child.unref();
