@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Phase 3-4 - 详情与评论采集
+ * Phase 4 - 内容采集（Harvest）
  *
  * 功能：
  * - 读取 Phase2 采集的安全链接
@@ -13,7 +13,7 @@
  *   - 返回搜索页继续下一条
  *
  * 用法：
- *   node scripts/xiaohongshu/phase3-4-collect.mjs --keyword "手机膜" --env debug
+ *   node scripts/xiaohongshu/phase4-harvest.mjs --keyword "手机膜" --env debug
  */
 
 import { resolveKeyword, resolveEnv, PROFILE } from './lib/env.mjs';
@@ -65,12 +65,12 @@ async function main() {
   // 初始化日志
   const runContext = initRunLogging({ env, keyword, logMode: 'single' });
 
-  console.log(`📝 Phase 3-4: 详情与评论采集 [runId: ${runContext.runId}]`);
+  console.log(`📝 Phase 4: 内容采集（Harvest） [runId: ${runContext.runId}]`);
   console.log(`关键字: ${keyword}`);
   console.log(`环境: ${env}`);
 
   // 获取会话锁
-  const lock = createSessionLock({ profileId: PROFILE, lockType: 'phase34' });
+  const lock = createSessionLock({ profileId: PROFILE, lockType: 'phase4' });
   const acquired = lock.acquire();
 
   if (!acquired) {
@@ -79,10 +79,10 @@ async function main() {
   }
 
   try {
-    emitRunEvent('phase34_start', { keyword, env });
+    emitRunEvent('phase4_start', { keyword, env });
 
     const t0 = nowMs();
-    emitRunEvent('phase34_timing', { stage: 'start', t0 });
+    emitRunEvent('phase4_timing', { stage: 'start', t0 });
 
     // 1. 校验链接
     console.log(`\n🔍 步骤 1: 校验链接...`);
@@ -90,7 +90,7 @@ async function main() {
     const validateResult = await validateLinks({ keyword, env });
     const tValidate1 = nowMs();
     console.log(`⏱️  校验耗时: ${formatDurationMs(tValidate1 - tValidate0)}`);
-    emitRunEvent('phase34_timing', { stage: 'validate_done', ms: tValidate1 - tValidate0 });
+    emitRunEvent('phase4_timing', { stage: 'validate_done', ms: tValidate1 - tValidate0 });
 
     if (!validateResult.success) {
       throw new Error(`链接校验失败: ${validateResult.error}`);
@@ -137,7 +137,7 @@ async function main() {
         console.log(`❌ ${progress} 失败: ${result.error}`);
       }
 
-      emitRunEvent('phase34_note_done', {
+      emitRunEvent('phase4_note_done', {
         index: i,
         total: validLinks.length,
         noteId: link.noteId,
@@ -150,7 +150,7 @@ async function main() {
     const t1 = nowMs();
     const totalMs = t1 - t0;
     console.log(`\n⏱️  总耗时: ${formatDurationMs(totalMs)}`);
-    emitRunEvent('phase34_timing', { stage: 'done', ms: totalMs, count: results.length });
+    emitRunEvent('phase4_timing', { stage: 'done', ms: totalMs, count: results.length });
 
     console.log(`\n📊 采集结果：`);
     console.log(`   成功: ${results.length} 条`);
@@ -163,12 +163,12 @@ async function main() {
       });
     }
 
-    console.log(`\n✅ Phase 3-4 完成`);
-    emitRunEvent('phase34_done', { success: results.length, failed: errors.length });
+    console.log(`\n✅ Phase 4 完成`);
+    emitRunEvent('phase4_done', { success: results.length, failed: errors.length });
 
   } catch (err) {
-    emitRunEvent('phase34_error', { error: safeStringify(err) });
-    console.error('\n❌ Phase 3-4 失败:', err?.message || String(err));
+    emitRunEvent('phase4_error', { error: safeStringify(err) });
+    console.error('\n❌ Phase 4 失败:', err?.message || String(err));
     process.exit(1);
   } finally {
     lock.release();

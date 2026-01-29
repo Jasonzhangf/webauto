@@ -6,7 +6,7 @@
 
 ---
 
-## Phase 1: 会话启动与登录
+## Phase 1: Boot（会话启动与登录）
 
 ### 功能
 - 确保 Unified API 和 Browser Service 运行中
@@ -34,12 +34,12 @@
 
 ### 入口脚本
 ```bash
-node scripts/xiaohongshu/phase1-start.mjs
+node scripts/xiaohongshu/phase1-boot.mjs
 ```
 
 ---
 
-## Phase 2: 搜索与链接采集
+## Phase 2: Collect（搜索与链接采集）
 
 ### 功能
 - 向 SearchGate 申请搜索许可（节流）
@@ -85,7 +85,28 @@ node scripts/xiaohongshu/phase2-collect.mjs --keyword "手机膜" --target 50 --
 
 ---
 
-## Phase 3-4: 多 Tab 并发采集（详情 + 评论）
+## Phase 3: Interact（评论点赞）
+
+### 功能
+- 基于 Phase2 采集的安全链接（包含 xsec_token）
+- 打开 5 个 Tab 并发轮转
+- 每个 Tab 在当前帖子中：筛选评论关键字并点赞
+- 每个 Tab 每轮点赞 2 条后切换到下一个 Tab
+- 轮转直至该帖评论区到底
+
+### 入口脚本
+```bash
+node scripts/xiaohongshu/phase3-interact.mjs --keyword "手机膜" --like-keywords "好评,推荐" --env debug
+```
+
+### 统一工作流脚本
+```bash
+node scripts/xiaohongshu/like-comments.mjs --keyword "手机膜" --like-keywords "好评,推荐" --env debug
+```
+
+---
+
+## Phase 4: Harvest（多 Tab 并发采集：详情 + 评论）
 
 ### 功能
 - 前置校验：确认在搜索结果页 + 链接有效性
@@ -200,7 +221,7 @@ node scripts/xiaohongshu/phase2-collect.mjs --keyword "手机膜" --target 50 --
 
 ### 入口脚本
 ```bash
-node scripts/xiaohongshu/phase3-4-collect.mjs --keyword "手机膜" --env debug
+node scripts/xiaohongshu/phase4-harvest.mjs --keyword "手机膜" --env debug
 ```
 
 ### 输出结构

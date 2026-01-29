@@ -127,9 +127,12 @@ function checkScriptFiles() {
   log('\n📜 检查脚本文件...');
 
   const required = [
-    { path: 'scripts/xiaohongshu/phase1-start.mjs', label: 'Phase 1 启动脚本' },
+    { path: 'scripts/xiaohongshu/phase1-boot.mjs', label: 'Phase 1 启动脚本' },
     { path: 'scripts/xiaohongshu/phase2-collect.mjs', label: 'Phase 2 采集脚本' },
-    { path: 'scripts/xiaohongshu/phase3-4-collect.mjs', label: 'Phase 3/4 采集脚本' },
+    { path: 'scripts/xiaohongshu/phase4-harvest.mjs', label: 'Phase 4 内容采集脚本' },
+    { path: 'scripts/xiaohongshu/phase3-interact.mjs', label: 'Phase 3 点赞脚本' },
+    { path: 'scripts/xiaohongshu/collect-content.mjs', label: '搜索采集工作流脚本' },
+    { path: 'scripts/xiaohongshu/like-comments.mjs', label: '点赞工作流脚本' },
     { path: 'scripts/xiaohongshu/lib/env.mjs', label: '环境配置模块' },
     { path: 'scripts/xiaohongshu/lib/logger.mjs', label: '日志模块' },
     { path: 'scripts/xiaohongshu/lib/services.mjs', label: '服务管理模块' },

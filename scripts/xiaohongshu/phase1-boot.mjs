@@ -3,7 +3,7 @@
  * Phase 1: 启动并复用 xiaohongshu_fresh profile（App Block 入口）
  *
  * 用法：
- *   node scripts/xiaohongshu/phase1-start.mjs
+ *   node scripts/xiaohongshu/phase1-boot.mjs
  */
 
 import { PROFILE } from './lib/env.mjs';

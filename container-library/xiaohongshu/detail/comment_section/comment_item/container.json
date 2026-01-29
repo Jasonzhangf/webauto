@@ -4,7 +4,8 @@
   "type": "item",
   "capabilities": [
     "highlight",
-    "extract"
+    "extract",
+    "click"
   ],
   "selectors": [
     {
@@ -55,6 +56,18 @@
         "[class*='time']"
       ],
       "attr": "textContent"
+    },
+    "like_status": {
+      "selectors": [
+        ".like-wrapper"
+      ],
+      "attr": "className"
+    },
+    "like_content": {
+      "selectors": [
+        ".like-wrapper .count"
+      ],
+      "attr": "textContent"
     }
   },
   "operations": [
@@ -73,9 +86,20 @@
           "user_link",
           "user_id",
           "text",
-          "timestamp"
+          "timestamp",
+          "like_status",
+          "like_content"
         ]
+      }
+    },
+    {
+      "type": "click",
+      "config": {
+        "target": ".like-wrapper",
+        "offset": { "x": 0.5, "y": 0.5 },
+        "delayMs": 100
       }
     }
   ]
 }
+
