@@ -13,6 +13,7 @@ export type {
   EnvironmentConfig,
   EnvironmentsConfig,
   UIConfig,
+  DesktopConsoleConfig,
   ConfigLoaderOptions,
   ValidationResult
 } from './types.js';

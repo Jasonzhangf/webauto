@@ -4,6 +4,7 @@ export { browserServiceSchema, type BrowserServiceSchema } from './browser-servi
 export { portsSchema, type PortsSchema } from './ports.schema.js';
 export { environmentsSchema, type EnvironmentsSchema, type EnvironmentSchema } from './environments.schema.js';
 export { uiSchema, type UISchema } from './ui.schema.js';
+export { desktopConsoleSchema, type DesktopConsoleSchema } from './desktop-console.schema.js';
 
 // 主 Schema - 组合所有子 Schema
 export const mainSchema = {
@@ -23,6 +24,9 @@ export const mainSchema = {
     },
     ui: {
       $ref: 'https://webauto.dev/schemas/ui.json#'
+    },
+    desktopConsole: {
+      $ref: 'https://webauto.dev/schemas/desktop-console.json#'
     }
   },
   required: ['browserService', 'ports', 'environments', 'ui'],

@@ -26,9 +26,14 @@ export function renderRun(root: HTMLElement, ctx: any) {
   const dryRun = createEl('input', { type: 'checkbox' }) as HTMLInputElement;
 
   const profileModeSel = createEl('select') as HTMLSelectElement;
-  const profileInput = createEl('input', { placeholder: 'profileId / poolKeyword / a,b,c' }) as HTMLInputElement;
+  const profileValue = createEl('input', { placeholder: 'auto-selected', readOnly: 'true' }) as HTMLInputElement;
+
   const profilePickSel = createEl('select') as HTMLSelectElement;
   const profileRefreshBtn = createEl('button', { className: 'secondary' }, ['刷新 profiles']) as HTMLButtonElement;
+
+  const poolPickSel = createEl('select') as HTMLSelectElement;
+  const profilesBox = createEl('div', { className: 'list' });
+  const profilesHint = createEl('div', { className: 'muted' }, ['']);
 
   const extraInput = createEl('input', { placeholder: 'extra args (raw)' }) as HTMLInputElement;
 
@@ -52,15 +57,82 @@ export function renderRun(root: HTMLElement, ctx: any) {
     profileModeSel.value = 'profile';
   }
 
+  function derivePoolKeys(profiles: string[]) {
+    const keys = new Set<string>();
+    for (const p of profiles) {
+      const m = /^(.+)-\d+$/.exec(p);
+      if (m && m[1]) keys.add(m[1]);
+    }
+    return Array.from(keys).sort((a, b) => a.localeCompare(b));
+  }
+
   async function refreshProfiles() {
     profilePickSel.textContent = '';
     profilePickSel.appendChild(createEl('option', { value: '' }, ['(选择已有 profile，填充到输入框)']));
     const res = await window.api.profilesList().catch(() => null);
     const profiles: string[] = res?.profiles || [];
     profiles.forEach((p) => profilePickSel.appendChild(createEl('option', { value: p }, [p])));
-    if (!profileInput.value.trim()) {
-      const prefer = profiles.includes('xiaohongshu_fresh') ? 'xiaohongshu_fresh' : profiles[0] || '';
-      if (prefer) profileInput.value = prefer;
+
+    poolPickSel.textContent = '';
+    poolPickSel.appendChild(createEl('option', { value: '' }, ['(选择 pool keyword)']));
+    derivePoolKeys(profiles).forEach((k) => poolPickSel.appendChild(createEl('option', { value: k }, [k])));
+
+    profilesBox.textContent = '';
+    profilesHint.textContent = '';
+    const selected = new Set<string>();
+    const preferSingle = profiles.includes('xiaohongshu_fresh') ? 'xiaohongshu_fresh' : profiles[0] || '';
+    if (preferSingle) {
+      profilePickSel.value = preferSingle;
+      selected.add(preferSingle);
+    }
+    profiles.forEach((p) => {
+      const id = `p_${p}`;
+      const cb = createEl('input', { type: 'checkbox', id }) as HTMLInputElement;
+      cb.dataset.profile = p;
+      cb.checked = selected.has(p);
+      cb.onchange = () => syncProfileValueFromUI();
+      const label = createEl('label', { for: id, style: 'cursor:pointer;' }, [p]);
+      const row = createEl('div', { className: 'row', style: 'align-items:center;' }, [cb, label]);
+      profilesBox.appendChild(row);
+    });
+
+    syncProfileValueFromUI();
+  }
+
+  function getSelectedProfiles(): string[] {
+    const selected: string[] = [];
+    profilesBox.querySelectorAll('input[type="checkbox"]').forEach((el) => {
+      const cb = el as HTMLInputElement;
+      if (!cb.checked) return;
+      const id = String(cb.dataset.profile || '').trim();
+      if (id) selected.push(id);
+    });
+    return selected;
+  }
+
+  function syncProfileValueFromUI() {
+    const mode = profileModeSel.value;
+    profilePickSel.style.display = mode === 'profile' ? '' : 'none';
+    poolPickSel.style.display = mode === 'profilepool' ? '' : 'none';
+    profilesBox.style.display = mode === 'profiles' ? '' : 'none';
+
+    if (mode === 'profile') {
+      const v = String(profilePickSel.value || '').trim();
+      profileValue.value = v;
+      profilesHint.textContent = v ? '' : '请选择一个 profile';
+      return;
+    }
+    if (mode === 'profilepool') {
+      const v = String(poolPickSel.value || '').trim();
+      profileValue.value = v;
+      profilesHint.textContent = v ? '' : '请选择一个 pool keyword';
+      return;
+    }
+    if (mode === 'profiles') {
+      const list = getSelectedProfiles();
+      profileValue.value = list.join(',');
+      profilesHint.textContent = `selected=${list.length}`;
+      return;
     }
   }
 
@@ -70,7 +142,7 @@ export function renderRun(root: HTMLElement, ctx: any) {
     const keyword = keywordInput.value.trim();
     const env = envSel.value.trim();
     const mode = profileModeSel.value;
-    const profileVal = profileInput.value.trim();
+    const profileVal = profileValue.value.trim();
     const extra = extraInput.value.trim();
 
     const common = buildArgs([
@@ -146,10 +218,12 @@ export function renderRun(root: HTMLElement, ctx: any) {
       ]),
       createEl('div', { className: 'row' }, [
         labeledInput('profile mode', profileModeSel),
-        labeledInput('profile/pool/profiles', profileInput),
-        createEl('div', { style: 'display:flex; gap:8px; align-items:center;' }, [profilePickSel, profileRefreshBtn]),
+        labeledInput('selected', profileValue),
+        createEl('div', { style: 'display:flex; gap:8px; align-items:center;' }, [profilePickSel, poolPickSel, profileRefreshBtn]),
         labeledInput('extra', extraInput),
       ]),
+      profilesHint,
+      profilesBox,
       actions,
       createEl('div', { className: 'muted' }, [
         'profile：单 profile；profilepool：keyword 前缀扫描 pool（会包含同名 base profile，例如 xiaohongshu_fresh）并自动分片；profiles：手动 a,b,c 并自动分片。',
@@ -158,10 +232,13 @@ export function renderRun(root: HTMLElement, ctx: any) {
   );
 
   templateSel.onchange = () => setProfileModes(templateSel.value as TemplateId);
+  profileModeSel.onchange = () => syncProfileValueFromUI();
   profilePickSel.onchange = () => {
     const v = profilePickSel.value;
-    if (v) profileInput.value = v;
+    if (v) profileValue.value = v;
+    syncProfileValueFromUI();
   };
+  poolPickSel.onchange = () => syncProfileValueFromUI();
   profileRefreshBtn.onclick = () => void refreshProfiles();
 
   setProfileModes(templateSel.value as TemplateId);

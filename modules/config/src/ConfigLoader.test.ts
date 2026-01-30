@@ -324,5 +324,26 @@ describe('ConfigLoader', () => {
       assert.strictEqual(merged.browserService.backend.baseUrl, 'http://localhost:8080');
       assert.strictEqual(merged.browserService.host, base.browserService.host);
     });
+
+    it('应该忽略 override 中的 undefined 字段', () => {
+      const base = loader.getDefaultConfig();
+      const merged = loader.merge(base, { ui: undefined as any });
+      assert.deepStrictEqual(merged.ui, base.ui);
+    });
+
+    it('应该在 base 字段为 null/undefined 时使用 override 值', () => {
+      const base = loader.getDefaultConfig() as any;
+      base.desktopConsole = null;
+      const merged = loader.merge(base, { desktopConsole: { defaultKeyword: 'x' } } as any) as any;
+      assert.ok(merged.desktopConsole);
+      assert.strictEqual(merged.desktopConsole.defaultKeyword, 'x');
+    });
+
+    it('应该在合并数组时以 override 为准', () => {
+      const base = loader.getDefaultConfig() as any;
+      base.__testArr = [1, 2, 3];
+      const merged = loader.merge(base, { __testArr: [9] } as any) as any;
+      assert.deepStrictEqual(merged.__testArr, [9]);
+    });
   });
 });

@@ -186,41 +186,17 @@ export class ConfigLoader {
    * @returns 合并后的配置
    */
   merge(base: Config, override: DeepPartial<Config>): Config {
-    return {
-      browserService: {
-        ...base.browserService,
-        ...override.browserService,
-        backend: {
-          ...base.browserService?.backend,
-          ...override.browserService?.backend
-        },
-        healthCheck: {
-          ...base.browserService?.healthCheck,
-          ...override.browserService?.healthCheck
-        }
-      },
-      ports: {
-        ...base.ports,
-        ...override.ports
-      },
-      environments: {
-        development: {
-          ...base.environments?.development,
-          ...override.environments?.development
-        },
-        production: {
-          ...base.environments?.production,
-          ...override.environments?.production
-        }
-      },
-      ui: {
-        ...base.ui,
-        ...override.ui,
-        window: {
-          ...base.ui?.window,
-          ...override.ui?.window
-        }
+    const deepMerge = (a: any, b: any): any => {
+      if (b === undefined) return a;
+      if (a === null || a === undefined) return b;
+      if (Array.isArray(a) || Array.isArray(b)) return b;
+      if (typeof a !== 'object' || typeof b !== 'object') return b;
+      const out: Record<string, any> = { ...a };
+      for (const [k, v] of Object.entries(b)) {
+        out[k] = deepMerge((a as any)[k], v);
       }
-    } as Config;
+      return out;
+    };
+    return deepMerge(base, override) as Config;
   }
 }

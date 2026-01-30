@@ -42,11 +42,28 @@ export interface UIConfig {
   autoHide?: boolean;
 }
 
+export interface DesktopConsoleConfig {
+  unifiedApiUrl: string;
+  browserServiceUrl: string;
+  searchGateUrl: string;
+  downloadRoot: string;
+  defaultEnv: 'debug' | 'prod';
+  defaultKeyword: string;
+  timeouts: {
+    loginTimeoutSec: number;
+    cmdTimeoutSec: number;
+  };
+}
+
 export interface Config {
   browserService: BrowserServiceConfig;
   ports: PortsConfig;
   environments: EnvironmentsConfig;
   ui: UIConfig;
+  /**
+   * Electron 桌面管理台（apps/desktop-console）使用的 UI 配置
+   */
+  desktopConsole?: DesktopConsoleConfig;
 }
 
 export type DeepPartial<T> = T extends Array<infer U>

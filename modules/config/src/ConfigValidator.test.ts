@@ -239,6 +239,16 @@ describe('ConfigValidator', () => {
       assert.strictEqual(result.errors?.[0]?.path, '/root');
       assert.strictEqual(result.errors?.[0]?.message, '未知错误');
     });
+
+    it('应该在 errors 为空时返回空 errors 数组', () => {
+      const fakeValidateFn = ((_: unknown) => false) as any;
+      fakeValidateFn.errors = undefined;
+      (validator as any).validateFn = fakeValidateFn;
+
+      const result = validator.validate({});
+      assert.strictEqual(result.valid, false);
+      assert.deepStrictEqual(result.errors, []);
+    });
   });
 
   describe('getDefaultConfig()', () => {
@@ -320,6 +330,20 @@ describe('ConfigValidator', () => {
         assert.strictEqual(result.errors?.[0]?.message, '读取或解析配置文件失败');
       } finally {
         (JSON as any).parse = originalParse;
+        await fs.rm(tempDir, { recursive: true, force: true }).catch(() => {});
+      }
+    });
+
+    it('应该验证有效的配置文件并返回 valid=true', async () => {
+      const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'webauto-config-validator-test-'));
+      const cfgPath = path.join(tempDir, 'config.json');
+      try {
+        const cfg = validator.getDefaultConfig();
+        await fs.writeFile(cfgPath, JSON.stringify(cfg, null, 2), 'utf-8');
+        const result = await validator.validateFile(cfgPath);
+        assert.strictEqual(result.valid, true);
+        assert.strictEqual(result.errors, undefined);
+      } finally {
         await fs.rm(tempDir, { recursive: true, force: true }).catch(() => {});
       }
     });

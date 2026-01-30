@@ -55,6 +55,8 @@ export function renderPreflight(root: HTMLElement, ctx: any) {
       window.api.pathJoin('scripts', 'profilepool.mjs'),
       'login',
       kw,
+      ...(ctx.settings?.unifiedApiUrl ? ['--unified-api', String(ctx.settings.unifiedApiUrl)] : []),
+      ...(ctx.settings?.browserServiceUrl ? ['--browser-service', String(ctx.settings.browserServiceUrl)] : []),
       '--timeout-sec',
       String(timeoutSec),
       ...(ensureCount > 0 ? ['--ensure-count', String(ensureCount)] : []),

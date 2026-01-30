@@ -7,6 +7,9 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promises as fs } from 'node:fs';
 
+import { readDesktopConsoleSettings, resolveDefaultDownloadRoot, writeDesktopConsoleSettings } from './desktop-settings.mts';
+import type { DesktopConsoleSettings } from './desktop-settings.mts';
+
 type CmdEvent =
   | { type: 'started'; runId: string; title: string; pid: number; ts: number }
   | { type: 'stdout'; runId: string; line: string; ts: number }
@@ -29,55 +32,14 @@ type RunJsonSpec = {
   timeoutMs?: number;
 };
 
-type UiSettings = {
-  unifiedApiUrl: string;
-  browserServiceUrl: string;
-  searchGateUrl: string;
-  downloadRoot: string;
-  defaultEnv: 'debug' | 'prod';
-  defaultKeyword: string;
-  timeouts: { loginTimeoutSec: number; cmdTimeoutSec: number };
-};
+type UiSettings = DesktopConsoleSettings;
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const APP_ROOT = path.resolve(__dirname, '../..'); // apps/desktop-console/dist/main -> apps/desktop-console
 const REPO_ROOT = path.resolve(APP_ROOT, '../..');
 
-const SETTINGS_PATH = path.join(os.homedir(), '.webauto', 'ui-settings.console.json');
-const DEFAULT_SETTINGS: UiSettings = {
-  unifiedApiUrl: 'http://127.0.0.1:7701',
-  browserServiceUrl: 'http://127.0.0.1:7704',
-  searchGateUrl: 'http://127.0.0.1:7790',
-  downloadRoot: path.join(os.homedir(), '.webauto', 'download'),
-  defaultEnv: 'debug',
-  defaultKeyword: '',
-  timeouts: { loginTimeoutSec: 900, cmdTimeoutSec: 0 },
-};
-
 function now() {
   return Date.now();
-}
-
-async function readSettings(): Promise<UiSettings> {
-  try {
-    const raw = await fs.readFile(SETTINGS_PATH, 'utf8');
-    const parsed = JSON.parse(raw);
-    return { ...DEFAULT_SETTINGS, ...(parsed || {}) };
-  } catch {
-    return DEFAULT_SETTINGS;
-  }
-}
-
-async function writeSettings(next: Partial<UiSettings>): Promise<UiSettings> {
-  const current = await readSettings();
-  const merged: UiSettings = {
-    ...current,
-    ...next,
-    timeouts: { ...current.timeouts, ...(next.timeouts || {}) },
-  };
-  await fs.mkdir(path.dirname(SETTINGS_PATH), { recursive: true });
-  await fs.writeFile(SETTINGS_PATH, JSON.stringify(merged, null, 2), 'utf8');
-  return merged;
 }
 
 class GroupQueue {
@@ -216,7 +178,7 @@ async function runJson(spec: RunJsonSpec) {
 }
 
 async function scanResults(input: { downloadRoot?: string }) {
-  const downloadRoot = String(input.downloadRoot || DEFAULT_SETTINGS.downloadRoot);
+  const downloadRoot = String(input.downloadRoot || resolveDefaultDownloadRoot());
   const root = path.join(downloadRoot, 'xiaohongshu');
 
   const result: any = { ok: true, root, entries: [] as any[] };
@@ -305,7 +267,8 @@ async function listDir(input: { root: string; recursive?: boolean; maxEntries?: 
 }
 
 async function listProfiles() {
-  const root = path.join(os.homedir(), '.webauto', 'profiles');
+  const homeDir = process.env.HOME || process.env.USERPROFILE || os.homedir() || '';
+  const root = path.join(homeDir, '.webauto', 'profiles');
   const entries: string[] = [];
   try {
     const dirs = await fs.readdir(root, { withFileTypes: true });
@@ -354,8 +317,10 @@ ipcMain.on('preload:test', () => {
   setTimeout(() => app.quit(), 200);
 });
 
-ipcMain.handle('settings:get', async () => readSettings());
-ipcMain.handle('settings:set', async (_evt, next) => writeSettings(next));
+ipcMain.handle('settings:get', async () => readDesktopConsoleSettings({ appRoot: APP_ROOT, repoRoot: REPO_ROOT }));
+ipcMain.handle('settings:set', async (_evt, next) =>
+  writeDesktopConsoleSettings({ appRoot: APP_ROOT, repoRoot: REPO_ROOT }, next || {}),
+);
 
 ipcMain.handle('cmd:spawn', async (_evt, spec: SpawnSpec) => {
   const title = String(spec?.title || 'command');

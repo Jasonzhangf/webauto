@@ -4,9 +4,12 @@ import {
   browserServiceSchema,
   portsSchema,
   environmentsSchema,
-  uiSchema
+  uiSchema,
+  desktopConsoleSchema
 } from './schemas/index.js';
 import type { Config, ValidationResult } from './types.js';
+import path from 'node:path';
+import os from 'node:os';
 
 /**
  * 配置验证器
@@ -40,6 +43,7 @@ export class ConfigValidator {
     this.ajv.addSchema(portsSchema);
     this.ajv.addSchema(environmentsSchema);
     this.ajv.addSchema(uiSchema);
+    this.ajv.addSchema(desktopConsoleSchema);
     
     // 最后注册主 schema
     this.ajv.addSchema(mainSchema);
@@ -95,6 +99,8 @@ export class ConfigValidator {
    * @returns 默认配置对象
    */
   getDefaultConfig(): Config {
+    const homeDir = process.env.HOME || process.env.USERPROFILE || os.homedir();
+    const downloadRoot = path.join(homeDir, '.webauto', 'download');
     return {
       browserService: {
         host: '0.0.0.0',
@@ -135,6 +141,18 @@ export class ConfigValidator {
         },
         theme: 'auto',
         autoHide: false
+      },
+      desktopConsole: {
+        unifiedApiUrl: 'http://127.0.0.1:7701',
+        browserServiceUrl: 'http://127.0.0.1:7704',
+        searchGateUrl: 'http://127.0.0.1:7790',
+        downloadRoot,
+        defaultEnv: 'debug',
+        defaultKeyword: '',
+        timeouts: {
+          loginTimeoutSec: 900,
+          cmdTimeoutSec: 0
+        }
       }
     } as Config;
   }
