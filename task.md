@@ -2,6 +2,72 @@
 
 > 目标：基于容器驱动的 Workflow 完成小红书搜索 + 详情 + 评论采集（当前全流程目标：200 条）。
 
+---
+
+## 仓库结构收敛计划（2026-01-30）
+
+> 目标：在不破坏现有入口脚本/运行链路的前提下，逐步消除 `modules/` / `libs/` / `sharedmodule/` 的职责重叠与命名冲突；同时建立“强制编译限制”，确保**未被 git track 的文件不会悄悄参与构建**（避免“本地有文件 CI 没有”的隐性依赖）。
+
+### A) 代码收敛（唯一真源 + 兼容层）
+
+1. **Operations Framework 统一真源**
+   - [ ] 盘点所有引用：明确当前运行链路实际 import 的路径（`libs/operations-framework` vs `sharedmodule/operations-framework`）。
+   - [ ] 明确唯一真源（建议：以现有被广泛引用的 `libs/operations-framework` 为真源）。
+   - [ ] 为非真源建立“兼容层或迁移桥接”（禁止新代码直接引用 legacy）。
+   - [ ] 增加“禁止新增 legacy 引用”的自检（进入 `npm test`/`prebuild`）。
+   - [ ] 回归验证：`npm test` + 关键服务启动自检（unified-api/browser-service 健康检查）。
+
+2. **Browser 抽象层统一真源**
+   - [ ] 盘点 `modules/browser` 与 `libs/browser` 的职责差异（API 边界、被哪些入口脚本/服务引用）。
+   - [ ] 选定唯一真源（并在另一侧只保留薄兼容层或逐步迁移）。
+   - [ ] 统一“会话/输入/滚动/点击”的系统级操作调用链（避免两套实现同时演进）。
+   - [ ] 回归验证：最小路径 smoke（启动会话、截图、坐标点击的 dryrun 走通）。
+
+3. **Python Services 定位与收敛**
+   - [ ] 盘点 `services/*.py` 是否仍被入口脚本/运行时依赖（以及依赖场景）。
+   - [ ] 决策：
+     - 若已不再使用：迁移到 `services/legacy/` 并在文档标注为 legacy；
+     - 若仍需保留：明确为“兼容层/历史实现”，并写清楚 TS 主链路与 Python 的边界。
+   - [ ] 回归验证：`core-daemon status` + `/health` 检查不受影响。
+
+4. **统一配置中心（唯一配置模块）**
+   - [ ] 将所有模块的配置读写统一到 `modules/config`（保留兼容：旧配置格式自动迁移/兼容读取）。
+   - [ ] UI 侧默认配置只放在 UI 根目录（例如 `apps/*/default-settings.json`），运行态写入统一配置文件。
+   - [ ] 回归验证：桌面 UI 启动后读写配置生效；配置文件路径跨平台（Windows/macOS）一致可用。
+
+### B) 目录收敛（低风险：先标注 legacy，再移动）
+
+1. **目录职责说明与“禁止新增重复实现”规则**
+   - [ ] 增加仓库级目录约定文档（清晰说明 `modules/`、`libs/`、`sharedmodule/` 的边界与迁移方向）。
+   - [ ] 在 legacy 目录增加显式标识（README/目录名/自检规则），防止继续扩散。
+
+2. **服务目录按语言分层（不立刻大搬家，先可选门牌）**
+   - [ ] 规划目标结构：`services/ts/*`、`services/py/*`（保持现有入口脚本兼容）。
+   - [ ] 迁移策略：先新增同路径 re-export/转发入口，确认入口脚本不变，再逐步移动实现目录。
+
+3. **构建产物统一策略**
+   - [ ] 定义“运行态只允许从根 `dist/` 加载”的规则（符合 ESM + dist-only 约束）。
+   - [ ] 逐步移除/停用子目录 `dist/`（例如 `libs/browser/dist`、`libs/operations-framework/dist`、`modules/workflow-builder/dist`），或确保不会被运行时引用。
+   - [ ] 回归验证：`npm run build:services` 后主要启动命令仍可用（只从根 dist 引用）。
+
+### C) 强制编译限制（根目录级别）
+
+> 目标：**任何未被 git track 的源码文件**（且不在 `.gitignore` 中）如果出现在编译/测试扫描范围内，应当让构建/测试直接失败，避免本地“偷偷依赖未提交文件”。
+
+1. **新增 git-track 约束自检**
+   - [ ] 新增自检：检测工作区内是否存在“未被 git track 且未被 ignore”的源码/配置文件（建议覆盖：`services/`、`modules/`、`libs/`、`apps/`、`runtime/`、`scripts/`）。
+   - [ ] 自检失败时输出明确的文件列表与修复建议（`git add` / `git rm` / 加入 `.gitignore`）。
+
+2. **将自检接入强制入口**
+   - [ ] 接入 `prebuild`/`self-check --quick`（确保 `npm test`/`npm run build` 会触发）。
+   - [ ] 接入 CI（确保 PR/主干不会引入未 track 文件依赖）。
+
+3. **验收标准**
+   - [ ] 在干净工作区：`npm test` 通过。
+   - [ ] 在存在未 track 源码文件时：`npm test` 必须失败并提示文件列表。
+
+---
+
 ## 当前执行任务（2026-01-15）
 
 ### 🎯 主线目标（按你的最新流程）
