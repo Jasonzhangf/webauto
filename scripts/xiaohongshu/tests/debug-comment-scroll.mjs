@@ -1,4 +1,8 @@
 #!/usr/bin/env node
+import { ensureUtf8Console } from '../../lib/cli-encoding.mjs';
+
+ensureUtf8Console();
+
 /**
  * Debug: 检查评论区的实际DOM结构和位置
  */

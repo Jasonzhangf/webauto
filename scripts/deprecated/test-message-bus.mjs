@@ -1,4 +1,8 @@
 #!/usr/bin/env node
+import { ensureUtf8Console } from '../lib/cli-encoding.mjs';
+
+ensureUtf8Console();
+
 /**
  * 测试消息总线功能
  * 验证 HTTP API 和 WebSocket 订阅

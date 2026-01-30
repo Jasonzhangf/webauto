@@ -1,4 +1,8 @@
 #!/usr/bin/env node
+import { ensureUtf8Console } from './lib/cli-encoding.mjs';
+
+ensureUtf8Console();
+
 /**
  * 小红书完整爬虫 v10
  * - 修复详情页切换问题

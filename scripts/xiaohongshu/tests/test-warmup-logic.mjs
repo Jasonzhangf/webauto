@@ -1,4 +1,8 @@
 #!/usr/bin/env node
+import { ensureUtf8Console } from '../../lib/cli-encoding.mjs';
+
+ensureUtf8Console();
+
 /**
  * 直接测试WarmupCommentsBlock中的展开按钮查找逻辑
  */

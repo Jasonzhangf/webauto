@@ -1,4 +1,8 @@
 #!/usr/bin/env node
+import { ensureUtf8Console } from '../../lib/cli-encoding.mjs';
+
+ensureUtf8Console();
+
 /**
  * 小红书状态检查脚本 v2（基于容器驱动）
  * 功能：单命令输出当前会话状态、URL、登录态（基于容器匹配）、Cookie数量

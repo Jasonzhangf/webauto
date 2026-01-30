@@ -1,4 +1,8 @@
 #!/usr/bin/env node
+import { ensureUtf8Console } from '../lib/cli-encoding.mjs';
+
+ensureUtf8Console();
+
 /**
  * DOM捕获功能流程测试
  * 验证：1. 点击捕获按钮 2. picker结果返回 3. 实线高亮显示 4. DOM高亮 5. 建议子容器创建

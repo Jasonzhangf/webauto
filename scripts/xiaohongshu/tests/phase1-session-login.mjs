@@ -1,4 +1,8 @@
 #!/usr/bin/env node
+import { ensureUtf8Console } from '../../lib/cli-encoding.mjs';
+
+ensureUtf8Console();
+
 /**
  * Phase 1：启动/复用 xiaohongshu_fresh 会话，并确保登录成功。
  * - 如果会话不存在，提示先手动启动 start-headful.mjs。

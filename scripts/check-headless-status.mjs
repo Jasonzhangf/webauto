@@ -1,4 +1,8 @@
 #!/usr/bin/env node
+import { ensureUtf8Console } from './lib/cli-encoding.mjs';
+
+ensureUtf8Console();
+
 /**
  * 监控 headless 采集任务状态
  */

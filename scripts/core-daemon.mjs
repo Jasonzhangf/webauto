@@ -1,4 +1,8 @@
 #!/usr/bin/env node
+import { ensureUtf8Console } from './lib/cli-encoding.mjs';
+
+ensureUtf8Console();
+
 /**
  * Core Daemon - Unified service manager for WebAuto
  * 

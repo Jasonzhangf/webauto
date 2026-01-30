@@ -1,4 +1,8 @@
 #!/usr/bin/env node
+import { ensureUtf8Console } from '../lib/cli-encoding.mjs';
+
+ensureUtf8Console();
+
 /**
  * Phase 3-4 - 详情与评论采集
  *

@@ -22,7 +22,7 @@ export const xiaohongshuPhase1WorkflowV3 = {
       blockName: 'EnsureLoginBlock',
       input: {
         sessionId: '$sessionId',
-        maxWaitMs: 180000,
+        maxWaitMs: 0,
         checkIntervalMs: 5000,
       },
     },

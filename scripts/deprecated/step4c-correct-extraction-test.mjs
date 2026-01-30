@@ -1,4 +1,8 @@
 #!/usr/bin/env node
+import { ensureUtf8Console } from '../lib/cli-encoding.mjs';
+
+ensureUtf8Console();
+
 /**
  * Step 4c: 使用正确的 API 测试单个帖子提取
  */

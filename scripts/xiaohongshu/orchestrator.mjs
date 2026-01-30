@@ -1,4 +1,8 @@
 #!/usr/bin/env node
+import { ensureUtf8Console } from '../lib/cli-encoding.mjs';
+
+ensureUtf8Console();
+
 /**
  * 小红书采集流程调度器（串联既有脚本）
  */

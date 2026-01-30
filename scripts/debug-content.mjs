@@ -1,4 +1,8 @@
 #!/usr/bin/env node
+import { ensureUtf8Console } from './lib/cli-encoding.mjs';
+
+ensureUtf8Console();
+
 /**
  * Debug content extraction with broader selectors
  */

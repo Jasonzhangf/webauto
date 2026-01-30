@@ -1,4 +1,8 @@
 #!/usr/bin/env node
+import { ensureUtf8Console } from './lib/cli-encoding.mjs';
+
+ensureUtf8Console();
+
 /**
  * Step 5: 验证 AutoScrollStrategy 逻辑
  */

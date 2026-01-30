@@ -1,4 +1,8 @@
 #!/usr/bin/env node
+import { ensureUtf8Console } from '../lib/cli-encoding.mjs';
+
+ensureUtf8Console();
+
 // 测试：dom:branch:2 是否能正确加载 DOM 分支
 
 async function post(action, payload, timeout = 30000) {

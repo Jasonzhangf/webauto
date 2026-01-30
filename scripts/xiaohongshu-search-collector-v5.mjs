@@ -1,4 +1,8 @@
 #!/usr/bin/env node
+import { ensureUtf8Console } from './lib/cli-encoding.mjs';
+
+ensureUtf8Console();
+
 /**
  * 小红书搜索采集脚本 v5
  * 修复：移除所有嵌套函数和复杂表达式，使用最简单的语法

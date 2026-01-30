@@ -1,4 +1,8 @@
 #!/usr/bin/env node
+import { ensureUtf8Console } from '../../lib/cli-encoding.mjs';
+
+ensureUtf8Console();
+
 /**
  * 小红书当前详情页单次持久化脚本
  *

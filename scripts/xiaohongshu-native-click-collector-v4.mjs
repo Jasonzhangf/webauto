@@ -1,4 +1,8 @@
 #!/usr/bin/env node
+import { ensureUtf8Console } from './lib/cli-encoding.mjs';
+
+ensureUtf8Console();
+
 /**
  * 小红书采集脚本 v14 - 增强点击验证和等待机制
  * 修复：增加元素等待时间、验证页面跳转、处理点击后延迟

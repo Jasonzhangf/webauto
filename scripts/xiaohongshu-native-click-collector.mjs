@@ -1,4 +1,8 @@
 #!/usr/bin/env node
+import { ensureUtf8Console } from './lib/cli-encoding.mjs';
+
+ensureUtf8Console();
+
 /**
  * 小红书采集脚本 v12 - 原生点击版本
  * 修复：使用 browser 原生点击而非 JS 模拟点击

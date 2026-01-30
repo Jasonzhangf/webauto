@@ -1,4 +1,8 @@
 #!/usr/bin/env node
+import { ensureUtf8Console } from './lib/cli-encoding.mjs';
+
+ensureUtf8Console();
+
 /**
  * 小红书采集脚本 v15 - 修复坐标和点击验证
  * 修复：使用绝对坐标（pageXY）、增加点击重试机制

@@ -1,4 +1,8 @@
 #!/usr/bin/env node
+import { ensureUtf8Console } from './lib/cli-encoding.mjs';
+
+ensureUtf8Console();
+
 /**
  * 子容器连线 - Mock数据验证
  * 目标：绕过容器匹配，直接验证 DOM 分支拉取和UI预拉取逻辑

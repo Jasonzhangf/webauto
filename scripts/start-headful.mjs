@@ -1,4 +1,8 @@
 #!/usr/bin/env node
+import { ensureUtf8Console } from './lib/cli-encoding.mjs';
+
+ensureUtf8Console();
+
 /**
  * 启动脚本 - 支持命令行参数
  * 用法：node scripts/start-headful.mjs [--profile <name>] [--url <url>]

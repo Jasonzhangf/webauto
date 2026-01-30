@@ -1,4 +1,8 @@
 #!/usr/bin/env node
+import { ensureUtf8Console } from '../lib/cli-encoding.mjs';
+
+ensureUtf8Console();
+
 /**
  * 小红书爬虫功能分步测试脚本 - 改进版
  * 目标：分别验证每个小功能，不杀session

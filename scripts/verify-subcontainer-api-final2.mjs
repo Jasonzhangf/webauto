@@ -1,4 +1,8 @@
 #!/usr/bin/env node
+import { ensureUtf8Console } from './lib/cli-encoding.mjs';
+
+ensureUtf8Console();
+
 /**
  * 子容器连线 - API验证 (含 Cookie 注入)
  * 修复：先注入 cookie，确保登录状态，然后匹配到正确容器

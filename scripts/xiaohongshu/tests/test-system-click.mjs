@@ -1,4 +1,8 @@
 #!/usr/bin/env node
+import { ensureUtf8Console } from '../../lib/cli-encoding.mjs';
+
+ensureUtf8Console();
+
 /**
  * 测试 Playwright 鼠标点击功能
  * 流程：容器匹配 -> 获取坐标 -> 计算中心 -> Playwright 鼠标点击

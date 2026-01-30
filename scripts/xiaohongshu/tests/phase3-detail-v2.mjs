@@ -1,4 +1,8 @@
 #!/usr/bin/env node
+import { ensureUtf8Console } from '../../lib/cli-encoding.mjs';
+
+ensureUtf8Console();
+
 /**
  * Phase 3: 详情页验证（容器驱动版 v2 - 使用简化的锚点验证）
  * 目标：验证打开详情页 + 详情容器是否可用

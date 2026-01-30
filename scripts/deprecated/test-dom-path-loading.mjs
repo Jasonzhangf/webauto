@@ -1,4 +1,8 @@
 #!/usr/bin/env node
+import { ensureUtf8Console } from '../lib/cli-encoding.mjs';
+
+ensureUtf8Console();
+
 // 测试：给定xpath，能否在DOM tree中正确加载、展开和渲染
 
 async function post(action, payload, timeout = 30000) {

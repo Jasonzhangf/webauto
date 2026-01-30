@@ -1,4 +1,8 @@
 #!/usr/bin/env node
+import { ensureUtf8Console } from './lib/cli-encoding.mjs';
+
+ensureUtf8Console();
+
 /**
  * 子容器连线 - 纯 API 层自动化验证
  * 目标：验证完整数据流，不依赖UI

@@ -1,4 +1,8 @@
 #!/usr/bin/env node
+import { ensureUtf8Console } from '../lib/cli-encoding.mjs';
+
+ensureUtf8Console();
+
 
 /**
  * 端到端测试：验证按需拉取 DOM 分支的完整流程

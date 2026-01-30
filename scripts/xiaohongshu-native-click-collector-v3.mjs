@@ -1,4 +1,8 @@
 #!/usr/bin/env node
+import { ensureUtf8Console } from './lib/cli-encoding.mjs';
+
+ensureUtf8Console();
+
 /**
  * 小红书采集脚本 v13 - 修正高亮清除机制
  * 修复：每次高亮新元素前先清除所有旧高亮

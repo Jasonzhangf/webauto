@@ -12,6 +12,7 @@ import path from 'node:path';
 
 export interface ValidateLinksInput {
   keyword: string;
+  env?: string;
   linksPath?: string;
   profile?: string;
   unifiedApiUrl?: string;
@@ -125,6 +126,7 @@ async function findSearchTabIndex(profile: string, unifiedApiUrl: string, keywor
 export async function execute(input: ValidateLinksInput): Promise<ValidateLinksOutput> {
   const {
     keyword,
+    env = 'debug',
     linksPath,
     profile = 'xiaohongshu_fresh',
     unifiedApiUrl = 'http://127.0.0.1:7701',
@@ -150,7 +152,7 @@ export async function execute(input: ValidateLinksInput): Promise<ValidateLinksO
     }
 
 
-    const defaultPath = path.join(resolveDownloadRoot(), 'xiaohongshu', 'debug', keyword, 'phase2-links.jsonl');
+    const defaultPath = path.join(resolveDownloadRoot(), 'xiaohongshu', env, keyword, 'phase2-links.jsonl');
     const targetPath = linksPath || defaultPath;
 
     const allLinks = await readJsonl(targetPath);
@@ -185,7 +187,7 @@ export async function execute(input: ValidateLinksInput): Promise<ValidateLinksO
   }
 
   // 2. 读取 phase2-links.jsonl
-  const defaultPath = path.join(resolveDownloadRoot(), 'xiaohongshu', 'debug', keyword, 'phase2-links.jsonl');
+  const defaultPath = path.join(resolveDownloadRoot(), 'xiaohongshu', env, keyword, 'phase2-links.jsonl');
   const targetPath = linksPath || defaultPath;
 
   console.log(`[Phase34ValidateLinks] 读取链接文件: ${targetPath}`);

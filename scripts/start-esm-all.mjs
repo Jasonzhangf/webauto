@@ -1,4 +1,8 @@
 #!/usr/bin/env node
+import { ensureUtf8Console } from './lib/cli-encoding.mjs';
+
+ensureUtf8Console();
+
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { setTimeout as sleep } from 'node:timers/promises';

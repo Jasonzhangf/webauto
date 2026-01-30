@@ -1,4 +1,8 @@
 #!/usr/bin/env node
+import { ensureUtf8Console } from '../lib/cli-encoding.mjs';
+
+ensureUtf8Console();
+
 
 /**
  * 验证 picker 事件是否通过 browser.runtime.event WebSocket 通道正确广播：

@@ -52,10 +52,33 @@ export async function execute(input: EnsureSessionInput): Promise<EnsureSessionO
     };
     const zoomRaw = String(process.env.WEBAUTO_VIEWPORT_ZOOM ?? '').trim().toLowerCase();
     const browserZoomRaw = String(process.env.WEBAUTO_BROWSER_ZOOM ?? '').trim().toLowerCase();
+    const allowCssZoom = String(process.env.WEBAUTO_ALLOW_CSS_ZOOM ?? '').trim() === '1';
+    const waitOnFail =
+      String(process.env.WEBAUTO_SESSION_WAIT_ON_FAIL ?? '').trim() !== '0' &&
+      profileId.startsWith('xiaohongshu_');
+    const waitMsRaw = Number(process.env.WEBAUTO_SESSION_WAIT_MS ?? 0);
+    const waitLimitMs = waitMsRaw <= 0 ? Number.POSITIVE_INFINITY : waitMsRaw;
+    const waitIntervalMs = Math.max(1000, Number(process.env.WEBAUTO_SESSION_WAIT_INTERVAL_MS ?? 3000));
+    const waitStartTs = Date.now();
 
     function clamp(n: number, min: number, max: number) {
       if (!Number.isFinite(n)) return min;
       return Math.min(Math.max(n, min), max);
+    }
+
+    function pickFirstPositive(...values: Array<number | null | undefined>): number {
+      for (const value of values) {
+        const parsed = Number(value ?? 0);
+        if (Number.isFinite(parsed) && parsed > 0) return parsed;
+      }
+      return 0;
+    }
+
+    function resolveEffectiveMax(displayValue: number, browserValue: number): number {
+      if (displayValue > 0 && browserValue > 0) {
+        return Math.min(displayValue, browserValue);
+      }
+      return displayValue > 0 ? displayValue : browserValue;
     }
 
     async function getScreenMetrics(): Promise<{
@@ -142,20 +165,10 @@ export async function execute(input: EnsureSessionInput): Promise<EnsureSessionO
       const innerW = Number(metrics?.innerWidth || 0);
       const innerH = Number(metrics?.innerHeight || 0);
       const display = await loadDisplay();
-      const displayW = Math.max(
-        0,
-        Number(display?.nativeWidth || 0),
-        Number(display?.width || 0),
-        Number(display?.workWidth || 0),
-      );
-      const displayH = Math.max(
-        0,
-        Number(display?.nativeHeight || 0),
-        Number(display?.height || 0),
-        Number(display?.workHeight || 0),
-      );
-      const effectiveMaxW = displayW > 0 ? Math.max(displayW, maxW) : maxW;
-      const effectiveMaxH = displayH > 0 ? Math.max(displayH, maxH) : maxH;
+      const displayW = pickFirstPositive(display?.workWidth, display?.width, display?.nativeWidth);
+      const displayH = pickFirstPositive(display?.workHeight, display?.height, display?.nativeHeight);
+      const effectiveMaxW = resolveEffectiveMax(displayW, maxW);
+      const effectiveMaxH = resolveEffectiveMax(displayH, maxH);
 
       const widthCandidate = Number.isFinite(desiredViewport.width) ? desiredViewport.width : 1440;
       const heightCandidate = Number.isFinite(desiredViewport.height) ? desiredViewport.height : 900;
@@ -170,12 +183,14 @@ export async function execute(input: EnsureSessionInput): Promise<EnsureSessionO
       const height = clamp(heightBase, 700, safeMaxH);
 
       console.log(
-        `[EnsureSession] display metrics: browser=${maxW}x${maxH} display=${displayW}x${displayH} inner=${innerW}x${innerH}`,
+        `[EnsureSession] display metrics: browser=${maxW}x${maxH} display=${displayW}x${displayH} ` +
+        `effective=${effectiveMaxW}x${effectiveMaxH} inner=${innerW}x${innerH}`,
       );
       return { width: Math.floor(width), height: Math.floor(height) };
     }
 
     function resolveZoom(metrics: Awaited<ReturnType<typeof getScreenMetrics>> | null): number | null {
+      if (!allowCssZoom) return null;
       if (!zoomRaw) return null;
       if (zoomRaw === 'auto') {
         const dpr = Number(metrics?.devicePixelRatio || 0);
@@ -191,11 +206,37 @@ export async function execute(input: EnsureSessionInput): Promise<EnsureSessionO
       return 1;
     }
 
+    async function clearCssZoom(): Promise<void> {
+      if (!profileId.startsWith('xiaohongshu_')) return;
+      try {
+        await fetch(statusUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'evaluate',
+            args: {
+              profileId,
+              script: `(() => {
+                if (document.documentElement) document.documentElement.style.zoom = '';
+                if (document.body) document.body.style.zoom = '';
+                return true;
+              })()`,
+            },
+          }),
+        }).then((r) => r.json().catch(() => ({} as any)));
+      } catch (error: any) {
+        console.warn(`[EnsureSession] zoom clear failed: ${error?.message || String(error)}`);
+      }
+    }
+
     async function applyZoom(): Promise<void> {
       if (!profileId.startsWith('xiaohongshu_')) return;
       const metrics = await loadMetrics();
       const zoom = resolveZoom(metrics);
-      if (zoom === null) return;
+      if (zoom === null) {
+        await clearCssZoom();
+        return;
+      }
       try {
         await fetch(statusUrl, {
           method: 'POST',
@@ -377,22 +418,42 @@ export async function execute(input: EnsureSessionInput): Promise<EnsureSessionO
       };
     }
 
-    const startRes = await fetch(statusUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        action: 'start',
-        args: {
-          profileId,
-          url,
-          headless
-        }
-      })
-    });
+    let startData: any = null;
+    let startError: string | null = null;
+    while (true) {
+      startError = null;
+      try {
+        const startRes = await fetch(statusUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'start',
+            args: {
+              profileId,
+              url,
+              headless
+            }
+          })
+        });
 
-    const startData = await startRes.json();
-    if (!startData.ok) {
-      throw new Error(startData.error || 'Failed to start session');
+        startData = await startRes.json();
+        if (!startData.ok) {
+          startError = startData.error || 'Failed to start session';
+        }
+      } catch (error: any) {
+        startError = error?.message || String(error);
+      }
+
+      if (!startError) break;
+      if (!waitOnFail) {
+        throw new Error(startError);
+      }
+      if (Date.now() - waitStartTs > waitLimitMs) {
+        throw new Error(startError);
+      }
+      console.warn(`[EnsureSession] start failed: ${startError}`);
+      console.warn(`[EnsureSession] waiting ${waitIntervalMs}ms and retrying...`);
+      await new Promise((r) => setTimeout(r, waitIntervalMs));
     }
 
     const vp = await setViewport();

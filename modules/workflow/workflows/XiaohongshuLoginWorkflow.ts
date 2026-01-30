@@ -74,7 +74,27 @@ export async function execute(
       serviceUrl: browserServiceUrl || 'http://127.0.0.1:7704',
     };
 
-    const sessionResult: EnsureSessionOutput = await ensureSessionExecute(sessionInput);
+    let sessionResult: EnsureSessionOutput = await ensureSessionExecute(sessionInput);
+
+    if (sessionResult.error) {
+      const waitMsRaw = Number(process.env.WEBAUTO_SESSION_WAIT_MS || 0);
+      const waitLimitMs = waitMsRaw <= 0 ? Number.POSITIVE_INFINITY : waitMsRaw;
+      const intervalMs = Math.max(1000, Number(process.env.WEBAUTO_SESSION_WAIT_INTERVAL_MS || 3000));
+      const startTime = Date.now();
+      const waitHint =
+        waitLimitMs === Number.POSITIVE_INFINITY
+          ? '无超时'
+          : `${waitLimitMs}ms`;
+      console.warn(`[EnsureSession] 启动失败: ${sessionResult.error}`);
+      console.warn(`[EnsureSession] 等待用户处理并重试，最大等待: ${waitHint}, 间隔: ${intervalMs}ms`);
+
+      while (Date.now() - startTime < waitLimitMs) {
+        await new Promise((r) => setTimeout(r, intervalMs));
+        sessionResult = await ensureSessionExecute(sessionInput);
+        if (!sessionResult.error) break;
+        console.warn(`[EnsureSession] 重试仍失败: ${sessionResult.error}`);
+      }
+    }
 
     if (sessionResult.error) {
       return {

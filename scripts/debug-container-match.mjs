@@ -1,4 +1,8 @@
 #!/usr/bin/env node
+import { ensureUtf8Console } from './lib/cli-encoding.mjs';
+
+ensureUtf8Console();
+
 import { spawn } from 'node:child_process';
 
 const BROWSER_SERVICE = 'http://127.0.0.1:7704';

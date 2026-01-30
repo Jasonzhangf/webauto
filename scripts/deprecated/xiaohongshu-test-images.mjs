@@ -1,4 +1,8 @@
 #!/usr/bin/env node
+import { ensureUtf8Console } from '../lib/cli-encoding.mjs';
+
+ensureUtf8Console();
+
 /**
  * 小红书图片提取与下载测试
  * - 先检查登录锚点，如未登录自动跳转登录页等待人工完成

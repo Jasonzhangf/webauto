@@ -1,4 +1,8 @@
 #!/usr/bin/env node
+import { ensureUtf8Console } from './lib/cli-encoding.mjs';
+
+ensureUtf8Console();
+
 /**
  * 小红书采集脚本 v18 - 分析并修复点击机制
  * 修复：使用JS模拟点击，因为原生点击可能触发小红书的反爬机制

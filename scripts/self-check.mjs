@@ -1,4 +1,8 @@
 #!/usr/bin/env node
+import { ensureUtf8Console } from './lib/cli-encoding.mjs';
+
+ensureUtf8Console();
+
 // 轻量自检：仅检查关键目录和配置文件存在，用于 prebuild
 import fs from 'node:fs';
 import path from 'node:path';

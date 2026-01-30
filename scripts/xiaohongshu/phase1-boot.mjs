@@ -1,4 +1,8 @@
 #!/usr/bin/env node
+import { ensureUtf8Console } from '../lib/cli-encoding.mjs';
+
+ensureUtf8Console();
+
 /**
  * Phase 1: 启动并复用 xiaohongshu_fresh profile（App Block 入口）
  *

@@ -48,14 +48,16 @@ export async function execute(input: OpenTabsInput): Promise<OpenTabsOutput> {
   // 打开新 Tab
   for (let i = 0; i < tabCount; i++) {
     try {
-      const result = await controllerAction('browser:new_page', {
+      const result = await controllerAction('browser:page:new', {
         profile,
         url: 'about:blank',
       }, unifiedApiUrl);
 
-      const pageId = result?.pageId;
-      tabs.push({ index: i, pageId });
-      console.log(`[Phase34OpenTabs] Tab ${i} opened, pageId=${pageId}`);
+      const index = Number(result?.index ?? result?.data?.index);
+      const pageId = Number(result?.pageId ?? result?.data?.pageId);
+      const resolvedIndex = Number.isFinite(index) ? index : i;
+      tabs.push({ index: resolvedIndex, pageId: Number.isFinite(pageId) ? pageId : undefined });
+      console.log(`[Phase34OpenTabs] Tab ${i} opened, index=${resolvedIndex}`);
     } catch (err) {
       console.error(`[Phase34OpenTabs] Failed to open tab ${i}:`, err?.message || String(err));
     }
@@ -66,9 +68,9 @@ export async function execute(input: OpenTabsInput): Promise<OpenTabsOutput> {
   }
 
   // 切换回第一个 Tab（原搜索结果页）
-  await controllerAction('browser:switch_to_page', {
+  await controllerAction('browser:page:switch', {
     profile,
-    pageId: tabs[0].pageId,
+    index: tabs[0].index,
   }, unifiedApiUrl);
 
   console.log(`[Phase34OpenTabs] 完成，共打开 ${tabs.length} 个 Tab`);

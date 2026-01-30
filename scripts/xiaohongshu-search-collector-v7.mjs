@@ -1,4 +1,8 @@
 #!/usr/bin/env node
+import { ensureUtf8Console } from './lib/cli-encoding.mjs';
+
+ensureUtf8Console();
+
 /**
  * 小红书搜索采集脚本 v7
  * 修复：1. 使用 ESC 关闭模态框 2. 保持页面状态 3. 优化滚动和去重

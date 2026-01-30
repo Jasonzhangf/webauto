@@ -1,4 +1,8 @@
 #!/usr/bin/env node
+import { ensureUtf8Console } from '../lib/cli-encoding.mjs';
+
+ensureUtf8Console();
+
 /**
  * 小红书完整采集工作流（简化版）
  * 直接调用已修复的 phase1-4-full-collect.mjs，增加后台执行支持

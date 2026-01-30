@@ -1,4 +1,8 @@
 #!/usr/bin/env node
+import { ensureUtf8Console } from '../lib/cli-encoding.mjs';
+
+ensureUtf8Console();
+
 import { execFileSync } from 'node:child_process';
 import { cpSync, existsSync, mkdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';

@@ -35,6 +35,7 @@ export async function execute(input: EnsureLoginInput): Promise<EnsureLoginOutpu
   } = input;
 
   const startTime = Date.now();
+  const waitLimitMs = maxWaitMs <= 0 ? Number.POSITIVE_INFINITY : maxWaitMs;
 
   // 检查登录状态的辅助函数
   async function checkLoginStatus(): Promise<{ isLoggedIn: boolean; containerId?: string; error?: string }> {
@@ -148,9 +149,13 @@ export async function execute(input: EnsureLoginInput): Promise<EnsureLoginOutpu
 
     // 如果未登录，等待人工登录
     console.log(`[EnsureLogin] 未检测到登录状态，匹配到容器: ${status.containerId || 'none'}`);
-    console.log(`[EnsureLogin] 等待人工登录，最大等待时间: ${maxWaitMs}ms`);
+    const waitHint =
+      waitLimitMs === Number.POSITIVE_INFINITY
+        ? '无超时'
+        : `${waitLimitMs}ms`;
+    console.log(`[EnsureLogin] 等待人工登录，最大等待时间: ${waitHint}`);
 
-    while (Date.now() - startTime < maxWaitMs) {
+    while (Date.now() - startTime < waitLimitMs) {
       await new Promise(resolve => setTimeout(resolve, checkIntervalMs));
       
       status = await checkLoginStatus();
@@ -176,7 +181,7 @@ export async function execute(input: EnsureLoginInput): Promise<EnsureLoginOutpu
       loginMethod: 'timeout',
       matchedContainer: status.containerId,
       waitTimeMs: Date.now() - startTime,
-      error: `登录等待超时 (${maxWaitMs}ms)`
+      error: `登录等待超时 (${waitLimitMs}ms)`
     };
 
   } catch (error: any) {

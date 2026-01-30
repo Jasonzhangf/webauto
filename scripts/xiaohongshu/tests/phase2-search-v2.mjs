@@ -1,4 +1,8 @@
 #!/usr/bin/env node
+import { ensureUtf8Console } from '../../lib/cli-encoding.mjs';
+
+ensureUtf8Console();
+
 /**
  * Phase 2: 小红书搜索验证（容器驱动版 v2 - 使用简化的锚点验证）
  * 目标：验证搜索输入 + 列表容器是否可用

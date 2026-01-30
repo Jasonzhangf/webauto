@@ -1,4 +1,8 @@
 #!/usr/bin/env node
+import { ensureUtf8Console } from './lib/cli-encoding.mjs';
+
+ensureUtf8Console();
+
 /**
  * 小红书搜索采集脚本 v4
  * 修复：1. 去重逻辑 2. 保存为Markdown 3. 图片只保存URL 4. 修复语法错误

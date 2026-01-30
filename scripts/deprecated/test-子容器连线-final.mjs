@@ -1,4 +1,8 @@
 #!/usr/bin/env node
+import { ensureUtf8Console } from '../lib/cli-encoding.mjs';
+
+ensureUtf8Console();
+
 /**
  * 最终版自动化验证 - 子容器连线
  * 策略：启动服务 → 调用API → 检查返回结果中的连线数据

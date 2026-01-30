@@ -1,4 +1,8 @@
 #!/usr/bin/env node
+import { ensureUtf8Console } from './lib/cli-encoding.mjs';
+
+ensureUtf8Console();
+
 /**
  * 交互式容器构建工具（CLI 入口）
  * 使用 AI 辅助分析 DOM 并生成容器定义

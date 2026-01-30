@@ -1,4 +1,8 @@
 #!/usr/bin/env node
+import { ensureUtf8Console } from './lib/cli-encoding.mjs';
+
+ensureUtf8Console();
+
 /**
  * 重新生成 container-library.index.json
  * 扫描 container-library 下每个平台目录，收集所有 container.json 文件

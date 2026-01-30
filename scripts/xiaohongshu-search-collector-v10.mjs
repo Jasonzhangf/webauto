@@ -1,4 +1,8 @@
 #!/usr/bin/env node
+import { ensureUtf8Console } from './lib/cli-encoding.mjs';
+
+ensureUtf8Console();
+
 /**
  * 小红书搜索采集脚本 v10
  * 修复：1. 高亮处理节点 2. 模态框聚焦与内部滚动 3. 增强评论采集

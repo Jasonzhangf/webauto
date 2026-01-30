@@ -1,4 +1,8 @@
 #!/usr/bin/env node
+import { ensureUtf8Console } from './lib/cli-encoding.mjs';
+
+ensureUtf8Console();
+
 /**
  * 小红书采集脚本 v16 - 修复点击目标（点击图片而非容器）
  * 修复：直接点击图片元素而非容器，使用更精确的坐标获取

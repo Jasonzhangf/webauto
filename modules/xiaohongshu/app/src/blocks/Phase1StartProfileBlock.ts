@@ -43,6 +43,21 @@ export async function execute(input: StartProfileInput): Promise<StartProfileOut
     return Math.min(Math.max(n, min), max);
   }
 
+  function pickFirstPositive(...values: Array<number | null | undefined>): number {
+    for (const value of values) {
+      const parsed = Number(value ?? 0);
+      if (Number.isFinite(parsed) && parsed > 0) return parsed;
+    }
+    return 0;
+  }
+
+  function resolveEffectiveMax(displayValue: number, browserValue: number): number {
+    if (displayValue > 0 && browserValue > 0) {
+      return Math.min(displayValue, browserValue);
+    }
+    return displayValue > 0 ? displayValue : browserValue;
+  }
+
   async function resolveViewportSize(): Promise<{ width: number; height: number }> {
     try {
       const displayRes = await browserServiceCommand(
@@ -73,20 +88,10 @@ export async function execute(input: StartProfileInput): Promise<StartProfileOut
       const maxH = Number(metrics?.availHeight || metrics?.screenHeight || 0);
       const innerW = Number(metrics?.innerWidth || 0);
       const innerH = Number(metrics?.innerHeight || 0);
-      const displayW = Math.max(
-        0,
-        Number(display?.nativeWidth || 0),
-        Number(display?.width || 0),
-        Number(display?.workWidth || 0),
-      );
-      const displayH = Math.max(
-        0,
-        Number(display?.nativeHeight || 0),
-        Number(display?.height || 0),
-        Number(display?.workHeight || 0),
-      );
-      const effectiveMaxW = displayW > 0 ? Math.max(displayW, maxW) : maxW;
-      const effectiveMaxH = displayH > 0 ? Math.max(displayH, maxH) : maxH;
+      const displayW = pickFirstPositive(display?.workWidth, display?.width, display?.nativeWidth);
+      const displayH = pickFirstPositive(display?.workHeight, display?.height, display?.nativeHeight);
+      const effectiveMaxW = resolveEffectiveMax(displayW, maxW);
+      const effectiveMaxH = resolveEffectiveMax(displayH, maxH);
 
       const safeMaxW = effectiveMaxW > 0 ? Math.max(900, effectiveMaxW - 40) : 1920;
       const safeMaxH = effectiveMaxH > 0 ? Math.max(700, effectiveMaxH - 40) : 1200;
@@ -98,7 +103,8 @@ export async function execute(input: StartProfileInput): Promise<StartProfileOut
       const height = clamp(heightBase, 700, safeMaxH);
 
       console.log(
-        `[Phase1StartProfile] display metrics: browser=${maxW}x${maxH} display=${displayW}x${displayH} inner=${innerW}x${innerH}`,
+        `[Phase1StartProfile] display metrics: browser=${maxW}x${maxH} display=${displayW}x${displayH} ` +
+        `effective=${effectiveMaxW}x${effectiveMaxH} inner=${innerW}x${innerH}`,
       );
       return { width: Math.floor(width), height: Math.floor(height) };
     } catch {

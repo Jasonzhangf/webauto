@@ -1,4 +1,8 @@
 #!/usr/bin/env node
+import { ensureUtf8Console } from './lib/cli-encoding.mjs';
+
+ensureUtf8Console();
+
 /**
  * 小红书采集脚本 v17 - 分析点击机制
  * 修复：尝试使用不同的点击方式，模拟真实用户行为

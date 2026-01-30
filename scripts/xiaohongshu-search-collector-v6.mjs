@@ -1,4 +1,8 @@
 #!/usr/bin/env node
+import { ensureUtf8Console } from './lib/cli-encoding.mjs';
+
+ensureUtf8Console();
+
 /**
  * 小红书搜索采集脚本 v6
  * 修复：1. 增强滚动翻页逻辑 2. 优化去重（只处理新节点） 3. 集成评论采集
