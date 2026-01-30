@@ -67,6 +67,9 @@ typings/
 .env.production
 .env.*
 
+# Local config (may contain machine-specific settings)
+config.json
+
 # parcel-bundler cache (https://parceljs.org/)
 .cache
 .parcel-cache
