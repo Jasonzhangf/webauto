@@ -267,7 +267,10 @@ async function listDir(input: { root: string; recursive?: boolean; maxEntries?: 
 }
 
 async function listProfiles() {
-  const homeDir = process.env.HOME || process.env.USERPROFILE || os.homedir() || '';
+  const homeDir =
+    process.platform === 'win32'
+      ? (process.env.USERPROFILE || os.homedir() || '')
+      : (process.env.HOME || os.homedir() || '');
   const root = path.join(homeDir, '.webauto', 'profiles');
   const entries: string[] = [];
   try {

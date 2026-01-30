@@ -1,4 +1,4 @@
-name: Modules CI
+name: CI
 
 on:
   push:
@@ -7,16 +7,31 @@ on:
     branches: [ main ]
 
 jobs:
-  build:
-    runs-on: ubuntu-latest
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        node: ['20']
+    runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: ${{ matrix.node }}
+          cache: npm
+
       - name: Install dependencies
-        run: npm install
-      - name: Run module checks
+        shell: bash
+        run: npm ci
+
+      - name: Tests
+        shell: bash
         run: npm test
+
+      - name: Desktop console build (smoke)
+        if: ${{ matrix.os == 'ubuntu-latest' }}
+        shell: bash
+        run: npm --prefix apps/desktop-console run build

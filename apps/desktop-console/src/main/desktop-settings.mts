@@ -24,7 +24,10 @@ type ConfigApi = {
 };
 
 function resolveHomeDir() {
-  const homeDir = process.env.HOME || process.env.USERPROFILE || os.homedir() || '';
+  const homeDir =
+    process.platform === 'win32'
+      ? (process.env.USERPROFILE || os.homedir() || '')
+      : (process.env.HOME || os.homedir() || '');
   if (!homeDir) throw new Error('无法获取用户主目录：HOME/USERPROFILE 未设置');
   return homeDir;
 }
@@ -181,4 +184,3 @@ export async function writeDesktopConsoleSettings(
   await fs.writeFile(legacyPath, JSON.stringify(merged, null, 2), 'utf8');
   return merged;
 }
-

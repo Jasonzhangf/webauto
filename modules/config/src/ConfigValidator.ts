@@ -99,7 +99,10 @@ export class ConfigValidator {
    * @returns 默认配置对象
    */
   getDefaultConfig(): Config {
-    const homeDir = process.env.HOME || process.env.USERPROFILE || os.homedir();
+    const homeDir =
+      process.platform === 'win32'
+        ? (process.env.USERPROFILE || os.homedir())
+        : (process.env.HOME || os.homedir());
     const downloadRoot = path.join(homeDir, '.webauto', 'download');
     return {
       browserService: {

@@ -260,9 +260,12 @@ describe('ConfigLoader', () => {
 
       try {
         const defaultLoader = new ConfigLoader();
-        const homeDir = process.env.HOME || process.env.USERPROFILE;
-        assert.ok(homeDir, '测试环境应存在 HOME 或 USERPROFILE');
-        assert.strictEqual(defaultLoader.getConfigPath(), path.join(homeDir, '.webauto', 'config.json'));
+        const expectedHomeDir =
+          process.platform === 'win32'
+            ? (process.env.USERPROFILE || '')
+            : (process.env.HOME || '');
+        assert.ok(expectedHomeDir, '测试环境应存在 HOME/USERPROFILE');
+        assert.strictEqual(defaultLoader.getConfigPath(), path.join(expectedHomeDir, '.webauto', 'config.json'));
       } finally {
         if (originalEnv === undefined) {
           delete process.env.WEBAUTO_CONFIG_PATH;

@@ -5,7 +5,12 @@ import { ConfigValidator } from './ConfigValidator.js';
 import type { Config, ConfigLoaderOptions, DeepPartial, ValidationResult } from './types.js';
 
 function resolveHomeDir() {
-  const homeDir = process.env.HOME || process.env.USERPROFILE || os.homedir() || '';
+  // On Windows, Git Bash may set HOME like "/c/Users/xxx" which breaks `path.join` (win32).
+  // Prefer USERPROFILE / os.homedir() on win32 to keep native paths.
+  const homeDir =
+    process.platform === 'win32'
+      ? (process.env.USERPROFILE || os.homedir() || '')
+      : (process.env.HOME || os.homedir() || '');
   if (!homeDir) throw new Error('无法获取用户主目录：HOME/USERPROFILE 未设置');
   return homeDir;
 }
