@@ -61,7 +61,7 @@
       "selectors": [
         ".like-wrapper"
       ],
-      "attr": "className"
+      "attr": "class"
     },
     "like_content": {
       "selectors": [
@@ -102,4 +102,3 @@
     }
   ]
 }
-

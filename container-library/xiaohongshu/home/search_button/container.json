@@ -10,16 +10,16 @@
   ],
   "selectors": [
     {
-      "css": ".input-button .search-icon",
+      "css": ".input-button",
       "variant": "primary",
       "score": 1.0,
-      "comment": "搜索图标容器"
+      "comment": "搜索按钮可点击区域（优先点父容器，避免点到 SVG 不触发）"
     },
     {
-      "css": ".input-button",
+      "css": ".input-button .search-icon",
       "variant": "backup",
       "score": 0.9,
-      "comment": "搜索按钮父容器"
+      "comment": "搜索图标容器"
     },
     {
       "css": "svg use[xlink:href='#search']",
@@ -33,14 +33,16 @@
       "type": "highlight",
       "config": {
         "style": "3px solid #ff9800",
-        "duration": 2000
+        "duration": 2000,
+        "index": 0,
+        "target": ".search-icon"
       }
     },
     {
       "type": "click",
       "config": {
-        "target": "self",
-        "comment": "点击搜索图标触发搜索"
+        "target": ".search-icon",
+        "comment": "点击放大镜图标触发搜索（避免点到 close-icon）"
       }
     }
   ],

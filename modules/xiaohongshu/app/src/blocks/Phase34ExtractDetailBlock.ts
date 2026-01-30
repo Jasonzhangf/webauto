@@ -70,8 +70,10 @@ export async function execute(input: ExtractDetailInput): Promise<ExtractDetailO
     };
   }
 
-  // 2. 容器匹配内容区域
-  const contentContainerId = 'xiaohongshu_detail.content_anchor';
+  // 2. 容器匹配内容区域（以 container-library 为准）
+  const contentContainerId = 'xiaohongshu_detail.content';
+  const headerContainerId = 'xiaohongshu_detail.header';
+  const galleryContainerId = 'xiaohongshu_detail.gallery';
 
   // 3. 高亮验证
   const highlightResult = await controllerAction('container:operation', {
@@ -90,46 +92,63 @@ export async function execute(input: ExtractDetailInput): Promise<ExtractDetailO
 
   await delay(500);
 
-  // 4. 提取标题
-  const titleResult = await controllerAction('container:operation', {
-    containerId: 'xiaohongshu_detail.title',
-    operationId: 'extract',
-    sessionId: profile,
-    config: { field: 'text' },
-  }, unifiedApiUrl);
+  // 4. 提取正文（包含 title/text）
+  const contentResult = await controllerAction(
+    'container:operation',
+    {
+      containerId: contentContainerId,
+      operationId: 'extract',
+      sessionId: profile,
+      config: { fields: ['title', 'text'] },
+    },
+    unifiedApiUrl,
+  ).catch((): null => null);
 
-  const title = titleResult?.data?.text || titleResult?.text || '';
+  const contentRow = Array.isArray(contentResult?.extracted) ? contentResult.extracted[0] : (contentResult?.data?.extracted?.[0] ?? null);
+  const title = String(contentRow?.title || '');
+  const content = String(contentRow?.text || '');
 
-  // 5. 提取正文
-  const contentResult = await controllerAction('container:operation', {
-    containerId: 'xiaohongshu_detail.content',
-    operationId: 'extract',
-    sessionId: profile,
-    config: { field: 'text' },
-  }, unifiedApiUrl);
+  // 5. 提取作者
+  const headerResult = await controllerAction(
+    'container:operation',
+    {
+      containerId: headerContainerId,
+      operationId: 'extract',
+      sessionId: profile,
+      config: { fields: ['author_name', 'author_link'] },
+    },
+    unifiedApiUrl,
+  ).catch((): null => null);
 
-  const content = contentResult?.data?.text || contentResult?.text || '';
+  const headerRow = Array.isArray(headerResult?.extracted) ? headerResult.extracted[0] : (headerResult?.data?.extracted?.[0] ?? null);
+  const authorName = String(headerRow?.author_name || '');
+  const authorLink = String(headerRow?.author_link || '');
+  let authorId = '';
+  try {
+    if (authorLink) {
+      const u = new URL(authorLink, 'https://www.xiaohongshu.com');
+      authorId = u.pathname.split('/').filter(Boolean).slice(-1)[0] || '';
+    }
+  } catch {
+    authorId = '';
+  }
 
-  // 6. 提取作者
-  const authorResult = await controllerAction('container:operation', {
-    containerId: 'xiaohongshu_detail.author',
-    operationId: 'extract',
-    sessionId: profile,
-    config: { fields: ['name', 'id'] },
-  }, unifiedApiUrl);
+  // 6. 提取图片
+  const galleryResult = await controllerAction(
+    'container:operation',
+    {
+      containerId: galleryContainerId,
+      operationId: 'extract',
+      sessionId: profile,
+      config: { fields: ['images'] },
+    },
+    unifiedApiUrl,
+  ).catch((): null => null);
 
-  const authorName = authorResult?.data?.name || authorResult?.name || '';
-  const authorId = authorResult?.data?.id || authorResult?.id || '';
-
-  // 7. 提取图片
-  const imagesResult = await controllerAction('container:operation', {
-    containerId: 'xiaohongshu_detail.images',
-    operationId: 'extract',
-    sessionId: profile,
-    config: { field: 'src', multiple: true },
-  }, unifiedApiUrl);
-
-  const images = imagesResult?.data?.src || imagesResult?.src || [];
+  const galleryRow = Array.isArray(galleryResult?.extracted)
+    ? galleryResult.extracted[0]
+    : (galleryResult?.data?.extracted?.[0] ?? null);
+  const images = Array.isArray(galleryRow?.images) ? galleryRow.images : (galleryRow?.images ? [galleryRow.images] : []);
 
   // 8. 获取 anchor（用于调试）
   const rect = highlightResult?.anchor?.rect || highlightResult?.rect;

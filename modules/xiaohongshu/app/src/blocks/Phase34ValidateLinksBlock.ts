@@ -9,11 +9,14 @@
 
 import os from 'node:os';
 import path from 'node:path';
+import { normalizeShard, shardFilterByNoteIdHash } from './helpers/sharding.js';
 
 export interface ValidateLinksInput {
   keyword: string;
   env?: string;
   linksPath?: string;
+  shardIndex?: number;
+  shardCount?: number;
   profile?: string;
   unifiedApiUrl?: string;
 }
@@ -100,34 +103,13 @@ function matchesKeywordFromSearchUrl(searchUrl: string, keyword: string) {
   return searchUrl.includes(keyword) || searchUrl.includes(enc1) || searchUrl.includes(enc2);
 }
 
-async function findSearchTabIndex(profile: string, unifiedApiUrl: string, keyword: string): Promise<number | null> {
-  const res = await controllerAction('browser:page:list', { profile }, unifiedApiUrl).catch((): null => null);
-  const pages = res?.pages || res?.data?.pages || [];
-  if (!Array.isArray(pages) || pages.length === 0) return null;
-
-  const byKeyword = pages.find((p: any) => {
-    const url = typeof p?.url === 'string' ? p.url : '';
-    return url.includes('/search_result') && matchesKeywordFromSearchUrl(url, keyword);
-  });
-  if (byKeyword && Number.isFinite(Number(byKeyword.index))) {
-    return Number(byKeyword.index);
-  }
-
-  const anySearch = pages.find((p: any) => {
-    const url = typeof p?.url === 'string' ? p.url : '';
-    return url.includes('/search_result');
-  });
-  if (anySearch && Number.isFinite(Number(anySearch.index))) {
-    return Number(anySearch.index);
-  }
-  return null;
-}
-
 export async function execute(input: ValidateLinksInput): Promise<ValidateLinksOutput> {
   const {
     keyword,
     env = 'debug',
     linksPath,
+    shardIndex,
+    shardCount,
     profile = 'xiaohongshu_fresh',
     unifiedApiUrl = 'http://127.0.0.1:7701',
   } = input;
@@ -145,12 +127,6 @@ export async function execute(input: ValidateLinksInput): Promise<ValidateLinksO
   // 异常恢复：如果不在搜索结果页，尝试从 links 读取 searchUrl 并返回
   if (!currentUrl.includes('/search_result')) {
     console.warn(`[Phase34ValidateLinks] 当前不在搜索结果页，尝试返回...`);
-    const tabIndex = await findSearchTabIndex(profile, unifiedApiUrl, keyword);
-    if (tabIndex !== null) {
-      await controllerAction("browser:page:switch", { profile, index: tabIndex }, unifiedApiUrl);
-      await delay(1200);
-    }
-
 
     const defaultPath = path.join(resolveDownloadRoot(), 'xiaohongshu', env, keyword, 'phase2-links.jsonl');
     const targetPath = linksPath || defaultPath;
@@ -172,8 +148,16 @@ export async function execute(input: ValidateLinksInput): Promise<ValidateLinksO
       throw new Error(`[Phase34ValidateLinks] 当前不在搜索结果页且无有效搜索URL: ${currentUrl}`);
     }
 
-    console.log(`[Phase34ValidateLinks] 尝试切换到搜索结果页 tab: ${firstValid.searchUrl}`);
+    console.log(`[Phase34ValidateLinks] 返回搜索结果页: ${firstValid.searchUrl}`);
+
+    await controllerAction('browser:goto', {
+      profile,
+      url: firstValid.searchUrl,
+    }, unifiedApiUrl);
+
     // 等待页面加载完成
+    await delay(3000);
+
     const afterUrl = await controllerAction('browser:execute', {
       profile,
       script: 'window.location.href',
@@ -182,7 +166,7 @@ export async function execute(input: ValidateLinksInput): Promise<ValidateLinksO
     console.log(`[Phase34ValidateLinks] 返回后页面: ${afterUrl}`);
 
     if (!afterUrl.includes('/search_result')) {
-      throw new Error(`[Phase34ValidateLinks] 未找到搜索结果页 tab: ${firstValid.searchUrl}`);
+      throw new Error(`[Phase34ValidateLinks] 返回搜索结果页失败: ${afterUrl}`);
     }
   }
 
@@ -207,13 +191,19 @@ export async function execute(input: ValidateLinksInput): Promise<ValidateLinksO
     return hasToken && matchesKeyword;
   });
 
+  const shard = normalizeShard({ index: shardIndex, count: shardCount, by: 'noteId-hash' });
+  const sharded = shard ? shardFilterByNoteIdHash(validLinks, shard) : validLinks;
+
   console.log(`[Phase34ValidateLinks] 有效链接数: ${validLinks.length}`);
+  if (shard) {
+    console.log(`[Phase34ValidateLinks] Shard: ${shard.index}/${shard.count} -> ${sharded.length} 条`);
+  }
 
   return {
     success: true,
-    links: validLinks,
+    links: sharded,
     totalCount: allLinks.length,
-    validCount: validLinks.length,
+    validCount: sharded.length,
     currentUrl,
   };
 }

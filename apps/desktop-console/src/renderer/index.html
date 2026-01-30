@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <title>WebAuto Console</title>
+    <style>
+      * { box-sizing: border-box; }
+      body { margin: 0; font: 13px/1.4 system-ui, sans-serif; background: #0f1115; color: #e7e7e7; }
+      header { height: 44px; display: flex; align-items: center; padding: 0 14px; border-bottom: 1px solid #23262f; }
+      header .title { font-weight: 700; margin-right: 14px; }
+      header .tabs { display: flex; gap: 10px; }
+      header .tab { padding: 6px 10px; border-radius: 8px; cursor: pointer; color: #b9c0d4; }
+      header .tab.active { background: #1b2233; color: #fff; }
+      #main { display: grid; grid-template-rows: 1fr 220px; height: calc(100vh - 44px); }
+      #content { padding: 14px; overflow: auto; }
+      #log { border-top: 1px solid #23262f; padding: 10px 14px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; overflow: auto; background: #0b0d12; }
+      .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 10px; }
+      .card { border: 1px solid #23262f; background: #121622; border-radius: 12px; padding: 12px; margin-bottom: 12px; }
+      label { color: #9aa4bd; }
+      input, select, textarea { background: #0b0d12; color: #fff; border: 1px solid #23262f; padding: 8px 10px; border-radius: 10px; }
+      button { background: #2b67ff; color: #fff; border: none; padding: 8px 12px; border-radius: 10px; cursor: pointer; }
+      button.secondary { background: #1b2233; color: #e7e7e7; border: 1px solid #23262f; }
+      button.danger { background: #c0392b; }
+      .muted { color: #8b93a6; }
+      .split { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+      .list { max-height: 260px; overflow: auto; border: 1px solid #23262f; border-radius: 10px; }
+      .list .item { padding: 8px 10px; border-bottom: 1px solid #23262f; cursor: pointer; }
+      .list .item:hover { background: #121622; }
+      .img-preview { max-width: 100%; border-radius: 10px; border: 1px solid #23262f; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <div class="title">WebAuto Console</div>
+      <nav class="tabs" id="tabs"></nav>
+      <div style="flex:1"></div>
+      <div class="muted" id="status"></div>
+    </header>
+    <div id="main">
+      <div id="content"></div>
+      <div id="log"></div>
+    </div>
+    <script type="module" src="./index.js"></script>
+  </body>
+</html>
+

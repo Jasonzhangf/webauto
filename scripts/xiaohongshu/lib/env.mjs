@@ -10,7 +10,25 @@ ensureUtf8Console();
  * 提供统一的配置接口
  */
 
-export const PROFILE = 'xiaohongshu_fresh';
+export const DEFAULT_PROFILE = 'xiaohongshu_fresh';
+
+/**
+ * 解析 profile（支持 CLI --profile 与 env WEBAUTO_PROFILE）
+ */
+export function resolveProfile() {
+  const args = process.argv.slice(2);
+  const idx = args.indexOf('--profile');
+  if (idx !== -1 && args[idx + 1]) {
+    const p = String(args[idx + 1] || '').trim();
+    if (p) return p;
+  }
+  const envProfile = String(process.env.WEBAUTO_PROFILE || '').trim();
+  if (envProfile) return envProfile;
+  return DEFAULT_PROFILE;
+}
+
+// Back-compat: keep PROFILE export used by existing scripts
+export const PROFILE = resolveProfile();
 export const UNIFIED_API = 'http://127.0.0.1:7701';
 export const BROWSER_SERVICE = process.env.WEBAUTO_BROWSER_SERVICE_URL || 'http://127.0.0.1:7704';
 export const BROWSER_WS = process.env.WEBAUTO_BROWSER_WS_URL || 'ws://127.0.0.1:8765';
@@ -122,6 +140,7 @@ export function resolveViewportWidth() {
  */
 export const CONFIG = {
   PROFILE,
+  DEFAULT_PROFILE,
   UNIFIED_API,
   BROWSER_SERVICE,
   BROWSER_WS,

@@ -7,7 +7,8 @@ export async function controllerAction(action: string, payload: any, apiUrl: str
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ action, payload }),
-    signal: AbortSignal.timeout(20000),
+    // 截图/容器操作在某些页面会更慢，统一放宽超时，避免调试链路被误杀
+    signal: AbortSignal.timeout(60000),
   });
   const data = await res.json().catch(() => ({}));
   return data.data || data;

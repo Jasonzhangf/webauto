@@ -43,6 +43,8 @@
     "cli:container-matcher": "tsx modules/container-matcher/src/cli.ts",
     "cli:dom-branch": "node modules/dom-branch-fetcher/src/cli.ts",
     "ui:test": "echo 'UI tests migrated to runtime/infra/utils/scripts/development/'",
+    "ui:console:build": "npm --prefix apps/desktop-console run build",
+    "ui:console:run": "npm --prefix apps/desktop-console start",
     "ui:test:driver": "node runtime/infra/utils/scripts/development/eval-in-session.mjs",
     "ui:state": "node runtime/infra/utils/scripts/development/highlight-search-containers.mjs",
     "browser:oneclick": "node runtime/browser/scripts/one-click-browser.mjs",

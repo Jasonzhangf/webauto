@@ -1,0 +1,19 @@
+{
+  "name": "@webauto/desktop-console",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/main/index.mjs",
+  "description": "Cross-platform desktop console for WebAuto (scripts runner)",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "start": "electron .",
+    "test-preload": "node scripts/test-preload.mjs",
+    "clean": "node --input-type=module -e \"import('node:fs').then((fs)=>fs.rmSync('dist',{recursive:true,force:true}))\""
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "electron": "^39.2.7",
+    "typescript": "^5.0.0"
+  }
+}

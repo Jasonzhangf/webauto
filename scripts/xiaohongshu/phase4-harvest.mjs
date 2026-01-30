@@ -4,7 +4,7 @@ import { ensureUtf8Console } from '../lib/cli-encoding.mjs';
 ensureUtf8Console();
 
 /**
- * Phase 3-4 - 详情与评论采集
+ * Phase 4 - 内容采集（Harvest）
  *
  * 功能：
  * - 读取 Phase2 采集的安全链接
@@ -17,7 +17,7 @@ ensureUtf8Console();
  *   - 返回搜索页继续下一条
  *
  * 用法：
- *   node scripts/xiaohongshu/phase3-4-collect.mjs --keyword "手机膜" --env debug
+ *   node scripts/xiaohongshu/phase4-harvest.mjs --keyword "手机膜" --env debug
  */
 
 import { resolveKeyword, resolveEnv, PROFILE } from './lib/env.mjs';
@@ -26,6 +26,13 @@ import { createSessionLock } from './lib/session-lock.mjs';
 import { execute as validateLinks } from '../../dist/modules/xiaohongshu/app/src/blocks/Phase34ValidateLinksBlock.js';
 import { execute as processSingleNote } from '../../dist/modules/xiaohongshu/app/src/blocks/Phase34ProcessSingleNoteBlock.js';
 import { mergeNotesMarkdown } from '../../dist/modules/workflow/blocks/helpers/mergeXhsMarkdown.js';
+import minimist from 'minimist';
+import { spawn } from 'node:child_process';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { assignShards, listProfilesForPool } from './lib/profilepool.mjs';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 function nowMs() {
   return Date.now();
@@ -40,7 +47,15 @@ function formatDurationMs(ms) {
 
 function expandHome(p) {
   if (!p) return p;
-  if (p.startsWith('~/')) return `${process.env.HOME}/${p.slice(2)}`;
+  if (p === '~') {
+    const homeDir = process.env.HOME || process.env.USERPROFILE || '';
+    return homeDir || p;
+  }
+  if (p.startsWith('~/')) {
+    const homeDir = process.env.HOME || process.env.USERPROFILE || '';
+    if (!homeDir) return p;
+    return path.join(homeDir, p.slice(2));
+  }
   return p;
 }
 
@@ -63,39 +78,132 @@ async function readJsonl(filePath) {
   }
 }
 
+function stripArgs(argv, keys) {
+  const drop = new Set(keys);
+  const out = [];
+  for (let i = 0; i < argv.length; i += 1) {
+    const a = argv[i];
+    if (drop.has(a)) {
+      if (i + 1 < argv.length && !String(argv[i + 1] || '').startsWith('--')) i += 1;
+      continue;
+    }
+    out.push(a);
+  }
+  return out;
+}
+
+async function runNode(scriptPath, args) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [scriptPath, ...args], {
+      stdio: 'inherit',
+      cwd: path.join(__dirname, '../..'),
+      env: process.env,
+    });
+    child.on('exit', (code) => (code === 0 ? resolve() : reject(new Error(`exit ${code}`))));
+    child.on('error', reject);
+  });
+}
+
 async function main() {
   const keyword = resolveKeyword();
   const env = resolveEnv();
+  const args = minimist(process.argv.slice(2));
+  const linksPath = String(args.links || '').trim() || undefined;
+  const shardIndex = args['shard-index'] != null ? Number(args['shard-index']) : undefined;
+  const shardCount = args['shard-count'] != null ? Number(args['shard-count']) : undefined;
+  const profilesArg = String(args.profiles || '').trim();
+  const poolKeyword = String(args.profilepool || '').trim();
+  const shardedChild = args['sharded-child'] === true || args['sharded-child'] === '1' || args['sharded-child'] === 1;
+  const skipPhase1 = args['skip-phase1'] === true || args['skip-phase1'] === '1' || args['skip-phase1'] === 1;
+
+  // Multi-profile orchestrator (auto-sharding)
+  if (!shardedChild && (profilesArg || poolKeyword)) {
+    const profiles = profilesArg
+      ? profilesArg.split(',').map((s) => s.trim()).filter(Boolean)
+      : listProfilesForPool(poolKeyword);
+    if (profiles.length === 0) {
+      console.error('❌ 未找到可用 profiles');
+      console.error(`   profilesRoot: ~/.webauto/profiles`);
+      console.error(`   hint: node scripts/profilepool.mjs add "${poolKeyword || keyword}"`);
+      process.exit(2);
+    }
+
+    const assignments = assignShards(profiles);
+    console.log(`🧩 Phase4 multi-profile: ${assignments.length} shards`);
+    assignments.forEach((a) => console.log(`- ${a.profileId} => shard ${a.shardIndex}/${a.shardCount}`));
+
+    const scriptPath = fileURLToPath(import.meta.url);
+    const baseArgs = stripArgs(process.argv.slice(2), [
+      '--profiles',
+      '--profilepool',
+      '--profile',
+      '--shard-index',
+      '--shard-count',
+      '--sharded-child',
+      '--skip-phase1',
+    ]);
+
+    for (const a of assignments) {
+      console.log(`\n➡️  shard ${a.shardIndex}/${a.shardCount} profile=${a.profileId}`);
+      if (!skipPhase1) {
+        await runNode(path.join(__dirname, 'phase1-boot.mjs'), ['--profile', a.profileId]);
+      }
+      await runNode(scriptPath, [
+        ...baseArgs,
+        '--profile',
+        a.profileId,
+        '--shard-index',
+        String(a.shardIndex),
+        '--shard-count',
+        String(a.shardCount),
+        '--sharded-child',
+        '1',
+      ]);
+    }
+    return;
+  }
 
   // 初始化日志
   const runContext = initRunLogging({ env, keyword, logMode: 'single' });
 
-  console.log(`📝 Phase 3-4: 详情与评论采集 [runId: ${runContext.runId}]`);
+  console.log(`📝 Phase 4: 内容采集（Harvest） [runId: ${runContext.runId}]`);
   console.log(`关键字: ${keyword}`);
   console.log(`环境: ${env}`);
+  console.log(`Profile: ${PROFILE}`);
+  if (linksPath) console.log(`links: ${linksPath}`);
+  if (shardIndex != null && shardCount != null) console.log(`shard: ${shardIndex}/${shardCount}`);
 
   // 获取会话锁
-  const lock = createSessionLock({ profileId: PROFILE, lockType: 'phase34' });
-  const acquired = lock.acquire();
-
-  if (!acquired) {
+  const lock = createSessionLock({ profileId: PROFILE, lockType: 'phase4' });
+  let lockHandle = null;
+  try {
+    lockHandle = lock.acquire();
+  } catch (e) {
     console.log('⚠️  会话锁已被其他进程持有，退出');
+    console.log(String(e?.message || e));
     process.exit(1);
   }
 
   try {
-    emitRunEvent('phase34_start', { keyword, env });
+    emitRunEvent('phase4_start', { keyword, env });
 
     const t0 = nowMs();
-    emitRunEvent('phase34_timing', { stage: 'start', t0 });
+    emitRunEvent('phase4_timing', { stage: 'start', t0 });
 
     // 1. 校验链接
     console.log(`\n🔍 步骤 1: 校验链接...`);
     const tValidate0 = nowMs();
-    const validateResult = await validateLinks({ keyword, env });
+    const validateResult = await validateLinks({
+      keyword,
+      env,
+      profile: PROFILE,
+      ...(linksPath ? { linksPath } : {}),
+      ...(shardIndex != null ? { shardIndex } : {}),
+      ...(shardCount != null ? { shardCount } : {}),
+    });
     const tValidate1 = nowMs();
     console.log(`⏱️  校验耗时: ${formatDurationMs(tValidate1 - tValidate0)}`);
-    emitRunEvent('phase34_timing', { stage: 'validate_done', ms: tValidate1 - tValidate0 });
+    emitRunEvent('phase4_timing', { stage: 'validate_done', ms: tValidate1 - tValidate0 });
 
     if (!validateResult.success) {
       throw new Error(`链接校验失败: ${validateResult.error}`);
@@ -127,6 +235,7 @@ async function main() {
         searchUrl: link.searchUrl,
         keyword,
         env,
+        profile: PROFILE,
         maxCommentRounds: 50,
         commentBatchSize: 50,
       });
@@ -142,7 +251,7 @@ async function main() {
         console.log(`❌ ${progress} 失败: ${result.error}`);
       }
 
-      emitRunEvent('phase34_note_done', {
+      emitRunEvent('phase4_note_done', {
         index: i,
         total: validLinks.length,
         noteId: link.noteId,
@@ -155,7 +264,7 @@ async function main() {
     const t1 = nowMs();
     const totalMs = t1 - t0;
     console.log(`\n⏱️  总耗时: ${formatDurationMs(totalMs)}`);
-    emitRunEvent('phase34_timing', { stage: 'done', ms: totalMs, count: results.length });
+    emitRunEvent('phase4_timing', { stage: 'done', ms: totalMs, count: results.length });
 
     console.log(`\n📊 采集结果：`);
     console.log(`   成功: ${results.length} 条`);
@@ -179,15 +288,15 @@ async function main() {
       console.warn(`\n⚠️ 合并 Markdown 跳过: ${mergeResult.error}`);
     }
 
-    console.log(`\n✅ Phase 3-4 完成`);
-    emitRunEvent('phase34_done', { success: results.length, failed: errors.length });
+    console.log(`\n✅ Phase 4 完成`);
+    emitRunEvent('phase4_done', { success: results.length, failed: errors.length });
 
   } catch (err) {
-    emitRunEvent('phase34_error', { error: safeStringify(err) });
-    console.error('\n❌ Phase 3-4 失败:', err?.message || String(err));
+    emitRunEvent('phase4_error', { error: safeStringify(err) });
+    console.error('\n❌ Phase 4 失败:', err?.message || String(err));
     process.exit(1);
   } finally {
-    lock.release();
+    lockHandle?.release?.();
   }
 }
 

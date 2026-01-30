@@ -26,6 +26,11 @@ export interface ExtractConfig {
    */
   fields?: string[] | Record<string, string>;
   extractors?: Record<string, ContainerExtractorDef>;
+  /**
+   * If true, only extract elements currently visible in viewport.
+   * Visibility uses boundingClientRect intersection with (0..innerWidth, 0..innerHeight).
+   */
+  visibleOnly?: boolean;
 }
 
 async function runExtract(ctx: OperationContext, config: ExtractConfig) {
@@ -36,12 +41,30 @@ async function runExtract(ctx: OperationContext, config: ExtractConfig) {
   const maxItems = config.max_items ?? 32;
   const includeText = config.include_text ?? false;
   const index = Number.isFinite(config.index) ? Math.max(0, Math.floor(config.index as number)) : null;
+  const visibleOnly = config.visibleOnly === true;
 
   return ctx.page.evaluate(
     (data) => {
-      const nodes = Array.from(document.querySelectorAll(data.selector || ''));
-      if (!nodes.length) {
+      const isVisible = (el: Element) => {
+        const r = el.getBoundingClientRect();
+        return (
+          r.width > 0 &&
+          r.height > 0 &&
+          r.bottom > 0 &&
+          r.top < window.innerHeight &&
+          r.right > 0 &&
+          r.left < window.innerWidth
+        );
+      };
+
+      const allNodes = Array.from(document.querySelectorAll(data.selector || ''));
+      if (!allNodes.length) {
         return { success: false, error: 'no elements found', count: 0, extracted: [] };
+      }
+
+      const nodes = data.visibleOnly ? allNodes.filter((n) => isVisible(n as Element)) : allNodes;
+      if (!nodes.length) {
+        return { success: false, error: data.visibleOnly ? 'no visible elements found' : 'no elements found', count: 0, extracted: [] };
       }
 
       const roots =
@@ -217,7 +240,7 @@ async function runExtract(ctx: OperationContext, config: ExtractConfig) {
 
       return { success: true, count: extracted.length, extracted };
     },
-    { ...config, maxItems, includeText, index },
+    { ...config, maxItems, includeText, index, visibleOnly },
   );
 }
 

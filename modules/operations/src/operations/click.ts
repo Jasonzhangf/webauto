@@ -10,6 +10,7 @@ export interface ClickConfig {
   useSystemMouse?: boolean;
   x?: number;
   y?: number;
+  visibleOnly?: boolean;
 }
 
 async function runClick(ctx: OperationContext, config: ClickConfig) {
@@ -23,6 +24,7 @@ async function runClick(ctx: OperationContext, config: ClickConfig) {
     // 方案 A: 通过 selector + index 点击（强制系统级点击，避免 DOM click）
     const index = Number.isFinite(config.index) ? Math.max(0, Math.floor(config.index as number)) : 0;
     const useSystemMouse = config.useSystemMouse !== false;
+    const visibleOnly = config.visibleOnly === true;
 
     if (!useSystemMouse) {
       return { success: false, error: 'DOM click disabled; set useSystemMouse=true' };
@@ -31,8 +33,21 @@ async function runClick(ctx: OperationContext, config: ClickConfig) {
     type ClickPoint = { x: number; y: number };
     const target = typeof config.target === 'string' ? config.target.trim() : '';
 
-    const info = await ctx.page.evaluate(({ sel, idx, tgt }) => {
-      const nodes = Array.from(document.querySelectorAll(sel));
+    const info = await ctx.page.evaluate(({ sel, idx, tgt, visibleOnly: vOnly }) => {
+      const isVisible = (el: Element) => {
+        const r = el.getBoundingClientRect();
+        return (
+          r.width > 0 &&
+          r.height > 0 &&
+          r.bottom > 0 &&
+          r.top < window.innerHeight &&
+          r.right > 0 &&
+          r.left < window.innerWidth
+        );
+      };
+
+      const allNodes = Array.from(document.querySelectorAll(sel));
+      const nodes = vOnly ? allNodes.filter((n) => isVisible(n as Element)) : allNodes;
       const root = nodes[idx] as Element | undefined;
       if (!root) return null;
 
@@ -83,7 +98,7 @@ async function runClick(ctx: OperationContext, config: ClickConfig) {
       }
 
       return { visible: true, clickPoints };
-    }, { sel: config.selector, idx: index, tgt: target });
+    }, { sel: config.selector, idx: index, tgt: target, visibleOnly });
 
     if (!info || !info.visible || !Array.isArray((info as any).clickPoints) || (info as any).clickPoints.length === 0) {
       return { success: false, error: 'element not visible' };

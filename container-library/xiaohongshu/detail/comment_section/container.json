@@ -15,12 +15,12 @@
   ],
   "selectors": [
     {
-      "css": ".comments-el",
+      "css": ".note-scroller",
       "variant": "primary",
       "score": 1.0
     },
     {
-      "css": ".comment-list, .note-scroller, .comments-container, [class*='comment-section']",
+      "css": ".comments-el, .comment-list, .comments-container, [class*='comment-section']",
       "variant": "backup",
       "score": 0.85
     }

@@ -23,17 +23,45 @@ async function runScroll(ctx: OperationContext, config: ScrollConfig) {
   if (ctx.systemInput?.mouseWheel) {
     const selector = typeof config.selector === 'string' ? config.selector.trim() : '';
     if (selector && ctx.systemInput?.mouseMove) {
-      const rect = await ctx.page.evaluate((sel) => {
+      const info = await ctx.page.evaluate((sel) => {
         const el = document.querySelector(sel);
         if (!el) return null;
         const r = el.getBoundingClientRect();
         const visible = r.width > 0 && r.height > 0 && r.y < window.innerHeight && r.y + r.height > 0;
-        return { x1: r.left, y1: r.top, x2: r.right, y2: r.bottom, visible };
+        if (!visible) return { visible: false, points: [] as Array<{ x: number; y: number }> };
+
+        const x1 = Math.max(0, r.left);
+        const y1 = Math.max(0, r.top);
+        const x2 = Math.min(window.innerWidth, r.right);
+        const y2 = Math.min(window.innerHeight, r.bottom);
+
+        const mx = Math.round((x1 + x2) / 2);
+        const pad = 24;
+        const points = [
+          { x: mx, y: Math.round(y1 + pad) }, // top-middle (avoid center overlays)
+          { x: mx, y: Math.round((y1 + y2) / 2) }, // middle
+          { x: mx, y: Math.round(y2 - pad) }, // bottom-middle
+          { x: Math.round(x1 + pad), y: Math.round(y1 + pad) }, // top-left
+          { x: Math.round(x2 - pad), y: Math.round(y1 + pad) }, // top-right
+        ];
+
+        const ok: Array<{ x: number; y: number }> = [];
+        for (const p of points) {
+          if (!Number.isFinite(p.x) || !Number.isFinite(p.y)) continue;
+          if (p.x < 0 || p.y < 0 || p.x > window.innerWidth || p.y > window.innerHeight) continue;
+          const hit = document.elementFromPoint(p.x, p.y);
+          if (hit && (hit === el || el.contains(hit))) {
+            ok.push(p);
+          }
+        }
+
+        if (!ok.length) ok.push({ x: mx, y: Math.round((y1 + y2) / 2) });
+        return { visible: true, points: ok };
       }, selector);
-      if (rect && rect.visible) {
-        const cx = Math.round((rect.x1 + rect.x2) / 2);
-        const cy = Math.round((rect.y1 + rect.y2) / 2);
-        await ctx.systemInput.mouseMove(cx, cy, 2);
+
+      if (info && info.visible && Array.isArray((info as any).points) && (info as any).points.length > 0) {
+        const p = (info as any).points[0];
+        await ctx.systemInput.mouseMove(Math.round(p.x), Math.round(p.y), 2);
         await new Promise((r) => setTimeout(r, 80));
       }
     }

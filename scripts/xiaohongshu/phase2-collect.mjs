@@ -84,10 +84,12 @@ async function main() {
 
   // 获取会话锁
   const lock = createSessionLock({ profileId: PROFILE, lockType: 'phase2' });
-  const acquired = lock.acquire();
-  
-  if (!acquired) {
+  let lockHandle = null;
+  try {
+    lockHandle = lock.acquire();
+  } catch (e) {
     console.log('⚠️  会话锁已被其他进程持有，退出');
+    console.log(String(e?.message || e));
     process.exit(1);
   }
 
@@ -149,7 +151,7 @@ async function main() {
     console.error('\n❌ Phase 2 失败:', err?.message || String(err));
     process.exit(1);
   } finally {
-    lock.release();
+    lockHandle?.release?.();
   }
 }
 
