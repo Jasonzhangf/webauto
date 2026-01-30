@@ -38,4 +38,4 @@
 
 ## 历史脚本
 
-早期探索脚本已归档至 `scripts/deprecated/`，如需查看历史实现可参考该目录。
+早期探索脚本已移除（曾归档在 `scripts/deprecated/`）。
