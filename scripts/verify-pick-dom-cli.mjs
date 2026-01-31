@@ -4,7 +4,9 @@ import { ensureUtf8Console } from './lib/cli-encoding.mjs';
 ensureUtf8Console();
 
 
-import { post } from '../modules/browser/src/controller/client.mjs';
+import { createBrowserControllerClient } from '../services/unified-api/browser-controller-client.mjs';
+
+const { post } = createBrowserControllerClient();
 
 async function main() {
   console.log('[pick-dom-cli] 开始测试 pick-dom CLI 功能...');
