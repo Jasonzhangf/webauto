@@ -1,5 +1,15 @@
 #!/usr/bin/env python3
 """
+Camoufox 浏览器启动器 (Camoufox-specific browser launcher)
+
+⚠️ 注意：此文件为 Camoufox 专用启动器，被以下文件引用：
+- runtime/browser/scripts/one-click-camoufox.mjs
+
+如需修改或重构，请确保上述引用同步更新。
+"""
+
+#!/usr/bin/env python3
+"""
 Legacy launcher stub.
 
 Browser sessions are now managed exclusively by the TypeScript BrowserService.

@@ -28,8 +28,8 @@
 **职责**：基于 `libs/` 的框架，实现具体业务功能。
 
 **当前活跃模块**：
-- `modules/workflow/` - 工作流引擎（基于 `libs/operations-framework`）
-- `modules/browser/` - 浏览器业务逻辑（基于 `libs/browser`）
+- `modules/workflow/` - 工作流引擎
+- `modules/browser/` - **LEGACY**（已废弃，使用 `libs/browser`）
 - `modules/container-matcher/` - 容器匹配业务逻辑
 - `modules/session-manager/` - 会话管理业务逻辑
 - `modules/controller/` - 控制器
@@ -42,6 +42,10 @@
 **规则**：
 - ✅ 允许：业务编排、平台特定逻辑、模块间协调
 - ❌ 禁止：重复实现 `libs/` 中已有的框架能力
+
+**详见**: `modules/browser/LEGACY.md`
+
+---
 
 ---
 
@@ -169,7 +173,9 @@ dist/
 
 **规则**：
 - ❌ 禁止引用 `sharedmodule/operations-framework`
+- ❌ 禁止引用 `modules/browser`
 - ✅ 使用 `libs/operations-framework`
+- ✅ 使用 `libs/browser`
 
 ### 2. 禁止未 track 文件参与构建
 
@@ -190,7 +196,7 @@ dist/
 3. ⏳ 实现 `scripts/check-untracked-sources.mjs`
 
 ### 中优先级（逐步推进）
-4. ⏳ 统一 `modules/browser` 与 `libs/browser`
+4. ✅ 统一 `modules/browser` 与 `libs/browser`
 5. ⏳ 迁移 Python 服务到 `services/py/`
 6. ⏳ 统一配置中心到 `modules/config`
 

@@ -8,6 +8,7 @@ import { execSync } from 'child_process';
 import fs from 'fs';
 
 const LEGACY_PATTERNS = [
+  "modules/browser",
   'sharedmodule/operations-framework',
 ];
 
