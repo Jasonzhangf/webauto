@@ -6,7 +6,7 @@
 
 import minimist from 'minimist';
 import EngineManager from '../libs/browser/engine-manager.js';
-import { loadOrGenerateFingerprint, getFingerprintPath } from '../libs/browser/fingerprint-manager.js';
+import { loadOrGenerateFingerprint, getFingerprintPath, applyFingerprint } from '../libs/browser/fingerprint-manager.js';
 import path from 'node:path';
 import { homedir } from 'node:os';
 
@@ -45,6 +45,10 @@ async function testCamoufoxEngine() {
       timezoneId: 'Asia/Shanghai',
     });
     console.log('✓ Camoufox context launched');
+
+    // 应用我们的指纹补丁（覆盖 navigator 字段，避免差异）
+    await applyFingerprint(context, fingerprint);
+    console.log('✓ Fingerprint applied');
 
     // 获取或创建页面
     const pages = context.pages();

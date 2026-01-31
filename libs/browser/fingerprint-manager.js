@@ -70,7 +70,9 @@ export function generateFingerprint(profileId = 'default', options = {}) {
         maxTouchPoints: 0,
         vendor: 'Google Inc.',
         renderer: 'ANGLE (NVIDIA, NVIDIA GeForce, D3D11)',
-        originalPlatform: platform || (base.platform === 'Win32' ? 'windows' : 'macos')
+        originalPlatform: platform || (base.platform === 'Win32' ? 'windows' : 'macos'),
+        // 增加一个随机噪声用于区分 profile
+        fingerprintSalt: hash.slice(0, 8)
     };
 }
 

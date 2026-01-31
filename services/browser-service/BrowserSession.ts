@@ -9,7 +9,7 @@ import { logDebug } from '../../modules/logging/src/index.js';
 import { getStateBus } from '../../modules/core/src/index.mjs';
 import { globalEventBus } from '../../libs/operations-framework/src/event-driven/EventBus.js';
 import { loadOrGenerateFingerprint, applyFingerprint } from '../../libs/browser/fingerprint-manager.js';
-import EngineManager from '../../libs/browser/engine-manager.js';
+import { launchEngineContext } from './engine-manager.js';
 
 const stateBus = getStateBus();
 
@@ -36,7 +36,6 @@ export class BrowserSession {
   private runtimeObservers = new Set<(event: any) => void>();
   private bridgedPages = new WeakSet<Page>();
   private lastViewport: { width: number; height: number } | null = null;
-  private engineManager: EngineManager;
   private fingerprint: any = null;
 
   onExit?: (profileId: string) => void;
@@ -49,8 +48,6 @@ export class BrowserSession {
     fs.mkdirSync(this.profileDir, { recursive: true });
     this.lock = new ProfileLock(profileId);
     
-    const engine = EngineManager.resolveEngineType(options.engine);
-    this.engineManager = new EngineManager(engine);
   }
 
   get id(): string {
@@ -84,7 +81,7 @@ export class BrowserSession {
       throw new Error(`无法获取 profile ${this.options.profileId} 的锁`);
     }
 
-    const engine = EngineManager.resolveEngineType(this.options.engine);
+    const engine = this.options.engine === 'camoufox' ? 'camoufox' : 'chromium';
 
     // 加载或生成指纹（支持 Win/Mac 随机）
     const fingerprint = await loadOrGenerateFingerprint(this.options.profileId, {
@@ -102,14 +99,14 @@ export class BrowserSession {
     const deviceScaleFactor = this.resolveDeviceScaleFactor();
 
     // 使用 EngineManager 启动上下文（支持 Chromium/Camoufox）
-    this.context = await this.engineManager.launchPersistentContext({
+    this.context = await launchEngineContext({
       engine,
       headless: !!this.options.headless,
       profileDir: this.profileDir,
-      fingerprint,
-      viewport,
+      viewport: fingerprint?.viewport || viewport,
+      userAgent: fingerprint?.userAgent,
       locale: 'zh-CN',
-      timezoneId: 'Asia/Shanghai',
+      timezoneId: fingerprint?.timezoneId || 'Asia/Shanghai',
     });
 
     // 应用指纹到上下文（Playwright JS 注入）

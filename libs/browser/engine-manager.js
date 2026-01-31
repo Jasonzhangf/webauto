@@ -5,7 +5,10 @@
  */
 
 import path from 'node:path';
+import { createRequire } from 'node:module';
 import { chromium } from 'playwright';
+
+const require = createRequire(import.meta.url);
 
 let logDebug = () => {};
 try {
@@ -14,6 +17,18 @@ try {
   logDebug = mod.logDebug || (() => {});
 } catch {
   // ignore
+}
+
+async function loadCamoufox() {
+  try {
+    return await import('camoufox');
+  } catch (err) {
+    try {
+      return require('camoufox');
+    } catch (err2) {
+      throw err2 || err;
+    }
+  }
 }
 
 /** @typedef {'chromium' | 'camoufox'} EngineType */
@@ -42,9 +57,7 @@ export class EngineManager {
    */
   static async getCamoufoxPath() {
     try {
-      // NOTE: 这里不能直接依赖 dist/modules 下的运行时（避免 scripts 直接跑时报错）。
-      // Camoufox 本体由 npm 包提供。
-      const camoufox = await import('camoufox');
+      const camoufox = await loadCamoufox();
       const launchPath = camoufox.getLaunchPath?.();
       if (launchPath) {
         logDebug('engine-manager', 'camoufox:found', { path: launchPath });
@@ -117,36 +130,61 @@ export class EngineManager {
       throw new Error('camoufox_not_found');
     }
 
-    const camoufox = await import('camoufox');
+    const camoufox = await loadCamoufox();
     const Camoufox = camoufox.Camoufox;
-    if (!Camoufox?.launch) {
+    if (!Camoufox) {
       throw new Error('camoufox_invalid_api');
     }
 
-    const defaults = (camoufox.launchOptions && camoufox.launchOptions()) || {};
-
-    // Camoufox 使用的是 Firefox 内核：这里尽量透传通用参数。
-    // 具体参数差异由 camoufox 包内部适配。
+    // Camoufox JS 直接返回 Browser 对象
     const opts = {
-      ...defaults,
       headless: !!launchOpts.headless,
-      userDataDir: profileDir,
-      viewport: launchOpts.viewport,
-      locale: launchOpts.locale,
-      timezone: launchOpts.timezoneId,
-      userAgent: launchOpts.userAgent,
+      os: ['windows', 'macos'],
+      window: [launchOpts.viewport.width, launchOpts.viewport.height],
+      data_dir: profileDir,
       humanize: true,
-      images: true,
+      // 字体与语言（防止中文乱码）
+      locale: 'zh-CN',
+      fonts: [
+        // macOS 常见中文字体
+        'PingFang SC',
+        'Hiragino Sans GB',
+        'STHeiti',
+        // Windows 常见中文字体
+        'Microsoft YaHei',
+        'SimHei',
+        'SimSun',
+        'Microsoft JhengHei',
+        // 跨平台字体
+        'Noto Sans CJK SC',
+        'Source Han Sans SC',
+        'Arial Unicode MS',
+        'Helvetica',
+        'Arial',
+        'Sans-Serif',
+      ],
+      custom_fonts_only: false,
     };
 
     logDebug('engine-manager', 'camoufox:launch', {
       profileId: path.basename(profileDir),
       headless: !!opts.headless,
+      window: opts.window,
     });
 
-    const browser = await Camoufox.launch(opts);
-    const context = await browser.newContext();
-    return context;
+    // Camoufox 可能返回 Browser 或 BrowserContext
+    const result = await Camoufox(opts);
+
+    // 检查返回类型
+    if (result && typeof result.newContext === 'function') {
+      return await result.newContext();
+    }
+    // 如果已经是 Context，直接返回
+    if (result && typeof result.pages === 'function') {
+      return result;
+    }
+
+    throw new Error('camoufox_invalid_response');
   }
 }
 
