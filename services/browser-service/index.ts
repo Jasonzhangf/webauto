@@ -256,6 +256,8 @@ async function handleCommand(
         sessionName: args.profileId || 'default',
         headless: !!args.headless,
         initialUrl: args.url,
+        engine: args.engine || 'camoufox',
+        fingerprintPlatform: args.fingerprintPlatform || null,
       };
       const res = await manager.createSession(opts);
       options.onSessionStart?.();

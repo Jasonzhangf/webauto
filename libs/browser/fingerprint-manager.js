@@ -142,10 +142,10 @@ export async function applyFingerprint(context, fingerprint) {
             `);
         }
         
-        // 设置视口
-        if (fingerprint.viewport) {
-            await context.setViewportSize(fingerprint.viewport);
-        }
+        // 设置视口 (Camoufox 已在启动时应用，无需重新设置)
+        // if (fingerprint.viewport) {
+        //     await context.setViewportSize?.(fingerprint.viewport);
+        // }
         
         // 设置时区
         if (fingerprint.timezoneId) {

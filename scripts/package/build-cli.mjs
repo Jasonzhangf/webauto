@@ -40,6 +40,7 @@ const CONFIG = {
     'scripts/xiaohongshu/lib',
     'scripts/run-xiaohongshu-phase1-2-34-v3.mjs',  // v3 统一入口
     'container-library',
+    'scripts/lib',
     'runtime/infra/node-cli/package.json',
     'package.json',
     'package-lock.json'
@@ -289,7 +290,7 @@ if [ "$IN_CHINA" = "1" ]; then
   echo "🌐 注意：Camoufox 下载可能较慢..."
 fi
 
-npx camoufox download
+npx camoufox fetch
 
 if ! ls .camoufox/Camoufox.app/Contents/MacOS/camoufox >/dev/null 2>&1; then
   echo "❌ Camoufox 下载失败"
@@ -334,7 +335,7 @@ echo 📦 正在安装项目依赖...
 call npm ci --production
 
 echo 🦊 正在下载 Camoufox 浏览器...
-call npx camoufox download
+call npx camoufox fetch
 
 if not exist ".camoufox\Camoufox.app\Contents\MacOS\camoufox" (
   echo ❌ Camoufox 下载失败

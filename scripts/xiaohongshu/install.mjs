@@ -226,37 +226,39 @@ function resolveBrowserPath() {
 
 async function checkBrowser() {
   log('\n🌐 检查浏览器资源...');
-  const browserPath = resolveBrowserPath();
-  let entries = [];
-  if (existsSync(browserPath)) {
-    entries = await fs.readdir(browserPath).catch(() => []);
-  }
-  const hasChromium = entries.some((name) => String(name).startsWith('chromium-'));
-  if (hasChromium) {
-    success(`Chromium 已安装: ${browserPath}`);
+
+  // 检查 Camoufox
+  const camoufoxPath = process.env.HOME 
+    ? join(process.env.HOME, 'Library', 'Caches', 'camoufox')
+    : null;
+
+  if (camoufoxPath && existsSync(join(camoufoxPath, 'Camoufox.app'))) {
+    success(`Camoufox 已安装: ${camoufoxPath}`);
     return true;
   }
 
-  warn(`Chromium 未安装: ${browserPath}`);
+  warn(`Camoufox 未安装`);
   if (!downloadBrowser) return false;
 
   try {
-    info('尝试下载 Chromium...');
-    execSync('npx playwright install chromium', { stdio: 'inherit' });
+    info('尝试下载 Camoufox...');
+    execSync('npx camoufox fetch', { stdio: 'inherit' });
   } catch (err) {
-    error(`Chromium 下载失败: ${err.message}`);
+    error(`Camoufox 下载失败: ${err.message}`);
     return false;
   }
 
-  entries = await fs.readdir(browserPath).catch(() => []);
-  const ok = entries.some((name) => String(name).startsWith('chromium-'));
+  // 重新检查
+  const ok = camoufoxPath && existsSync(join(camoufoxPath, 'Camoufox.app'));
   if (ok) {
-    success(`Chromium 已安装: ${browserPath}`);
+    success(`Camoufox 已安装: ${camoufoxPath}`);
+    info('如需授予执行权限: chmod +x ~/Library/Caches/camoufox/Camoufox.app/Contents/MacOS/camoufox');
   } else {
-    error('Chromium 下载完成后仍未检测到浏览器');
+    error('Camoufox 下载完成后仍未检测到浏览器');
   }
   return ok;
 }
+
 
 // 提供修复建议
 function provideFixSuggestions(missingBuild, missingDeps, missingBrowser) {
