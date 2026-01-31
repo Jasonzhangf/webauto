@@ -31,6 +31,10 @@ jobs:
         shell: bash
         run: npm test
 
+      - name: Check legacy refs & untracked sources
+        shell: bash
+        run: node scripts/check-legacy-refs.mjs && node scripts/check-untracked-sources.mjs
+
       - name: Desktop console build (smoke)
         if: ${{ matrix.os == 'ubuntu-latest' }}
         shell: bash

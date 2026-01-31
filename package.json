@@ -68,7 +68,7 @@
     "test:dom-branch": "tsx --test modules/dom-branch-fetcher/tests/**/*.ts",
     "test:floating-orchestrator": "tsx apps/floating-panel/core/__tests__/orchestrator.test.mjs",
     "test:floating-panel:logic": "cd apps/floating-panel && npm run test:logic",
-    "prebuild": "node scripts/self-check.mjs --quick",
+    "prebuild": "node scripts/self-check.mjs --quick && node scripts/check-legacy-refs.mjs && node scripts/check-untracked-sources.mjs",
     "self-check": "node scripts/self-check.mjs",
     "self-check:quick": "node scripts/self-check.mjs --quick",
     "self-check:fix": "node scripts/self-check.mjs --fix",
