@@ -140,7 +140,6 @@ export class EngineManager {
     const opts = {
       headless: !!launchOpts.headless,
       os: ['windows', 'macos'],
-      window: [launchOpts.viewport.width, launchOpts.viewport.height],
       data_dir: profileDir,
       humanize: true,
       // 字体与语言（防止中文乱码）

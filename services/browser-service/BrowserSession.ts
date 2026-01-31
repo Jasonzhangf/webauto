@@ -19,7 +19,7 @@ export interface BrowserSessionOptions {
   headless?: boolean;
   viewport?: { width: number; height: number };
   userAgent?: string;
-  engine?: 'chromium' | 'camoufox';
+  engine?: 'chromium' | 'camoufox' | null;
   fingerprintPlatform?: 'windows' | 'macos' | null;
 }
 
@@ -81,7 +81,7 @@ export class BrowserSession {
       throw new Error(`无法获取 profile ${this.options.profileId} 的锁`);
     }
 
-    const engine = this.options.engine === 'camoufox' ? 'camoufox' : 'chromium';
+    const engine = this.options.engine === 'chromium' ? 'chromium' : 'camoufox';
 
     // 加载或生成指纹（支持 Win/Mac 随机）
     const fingerprint = await loadOrGenerateFingerprint(this.options.profileId, {
