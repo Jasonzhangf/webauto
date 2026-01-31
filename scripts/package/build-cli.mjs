@@ -275,7 +275,27 @@ echo "✅ Node.js 版本: \$NODE_VERSION"
 
 echo ""
 echo "📦 正在安装项目依赖..."
+
+if [ "$IN_CHINA" = "1" ]; then
+  echo "🌐 使用 npm 镜像..."
+  export NPM_CONFIG_REGISTRY=https://registry.npmmirror.com
+fi
+
 npm ci --production
+
+echo "🦊 正在下载 Camoufox 浏览器..."
+
+if [ "$IN_CHINA" = "1" ]; then
+  echo "🌐 注意：Camoufox 下载可能较慢..."
+fi
+
+npx camoufox download
+
+if ! ls .camoufox/Camoufox.app/Contents/MacOS/camoufox >/dev/null 2>&1; then
+  echo "❌ Camoufox 下载失败"
+  exit 1
+fi
+echo "✅ Camoufox 浏览器已就绪"
 
 echo ""
 echo "🔍 正在验证安装..."
@@ -313,6 +333,15 @@ echo.
 echo 📦 正在安装项目依赖...
 call npm ci --production
 
+echo 🦊 正在下载 Camoufox 浏览器...
+call npx camoufox download
+
+if not exist ".camoufox\Camoufox.app\Contents\MacOS\camoufox" (
+  echo ❌ Camoufox 下载失败
+  exit /b 1
+)
+echo ✅ Camoufox 浏览器已就绪
+
 echo.
 echo ✅ 安装完成！
 echo.
@@ -334,7 +363,7 @@ async function createReadme() {
 
 - **Node.js**: ${CONFIG.nodeVersion}
 - **操作系统**: Windows 10+, macOS 12+, Linux (Ubuntu 20.04+)
-- **浏览器**: Playwright 会自动下载 Chromium
+- **浏览器**: 自动下载 Camoufox (Firefox)
 
 ## 快速开始
 
@@ -409,7 +438,7 @@ bin\\xhs-cli.bat phase2 --keyword "手机膜" --target 50 --env debug
 
 1. **Node.js 版本过低**: 请升级到 v22 或更高版本
 2. **端口占用**: 确保 7701/7704/8765/7790 端口未被占用
-3. **浏览器下载失败**: 检查网络连接，Playwright 会自动下载
+3. **浏览器下载失败**: 检查网络连接，程序会自动下载 Camoufox (Firefox)
 
 ## 技术支持
 

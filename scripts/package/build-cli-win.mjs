@@ -372,22 +372,21 @@ NODE_VERSION=\$(node -v)
 echo "✅ Node.js 版本: \$NODE_VERSION"
 
 echo ""
-export PLAYWRIGHT_BROWSERS_PATH="\$PWD/.ms-playwright"
-mkdir -p "\$PLAYWRIGHT_BROWSERS_PATH"
-echo "📦 浏览器安装目录: \$PLAYWRIGHT_BROWSERS_PATH"
+export CAMOUFOX_DIR="\$PWD/.camoufox"
+mkdir -p "\$CAMOUFOX_DIR"
+echo "🦊 Camoufox 安装目录: \$CAMOUFOX_DIR"
 echo ""
 echo "📦 正在安装项目依赖..."
 npm install --production
 
-if ! ls "$PLAYWRIGHT_BROWSERS_PATH"/chromium-* >/dev/null 2>&1; then
-  echo "📦 未检测到 Chromium，开始下载..."
-  npx playwright install chromium
-fi
+echo "🦊 正在下载 Camoufox 浏览器..."
+npx camoufox download
 
-if ! ls "$PLAYWRIGHT_BROWSERS_PATH"/chromium-* >/dev/null 2>&1; then
-  echo "❌ Chromium 下载失败"
+if ! ls "$CAMOUFOX_DIR"/Camoufox.app/Contents/MacOS/camoufox 2>/dev/null; then
+  echo "❌ Camoufox 下载失败"
   exit 1
 fi
+echo "✅ Camoufox 浏览器已就绪"
 
 echo ""
 echo "🔍 正在验证安装..."
@@ -472,13 +471,13 @@ if %errorlevel% geq 4 (
 
 :after_copy
 cd /d "%TARGET_DIR%"
-set "PLAYWRIGHT_BROWSERS_PATH=%TARGET_DIR%\\.ms-playwright"
-if not exist "%PLAYWRIGHT_BROWSERS_PATH%" mkdir "%PLAYWRIGHT_BROWSERS_PATH%"
+set "CAMOUFOX_DIR=%TARGET_DIR%\\.camoufox"
+if not exist "%CAMOUFOX_DIR%" mkdir "%CAMOUFOX_DIR%"
 
 for /f "tokens=*" %%i in ('node -v') do set NODE_VERSION=%%i
 echo [install] Node.js version: %NODE_VERSION%
 echo.
-echo [install] Browser install path: %PLAYWRIGHT_BROWSERS_PATH%
+echo [install] Browser install path: %CAMOUFOX_DIR%
 echo.
 echo [install] Installing dependencies (npm install --production)...
 call npm install --production
@@ -488,25 +487,20 @@ if %errorlevel% neq 0 (
   goto :end
 )
 
-set "BROWSER_FOUND="
-for /d %%i in ("%PLAYWRIGHT_BROWSERS_PATH%\\chromium-*") do set "BROWSER_FOUND=1"
-if not defined BROWSER_FOUND (
-  echo [install] Chromium not found. Downloading...
-  call npx playwright install chromium
-  if %errorlevel% neq 0 (
-    echo [install] Playwright download failed.
-    set "EXIT_CODE=1"
-    goto :end
-  )
-)
-
-set "BROWSER_FOUND="
-for /d %%i in ("%PLAYWRIGHT_BROWSERS_PATH%\\chromium-*") do set "BROWSER_FOUND=1"
-if not defined BROWSER_FOUND (
-  echo [install] Chromium download missing after install.
+echo [install] Downloading Camoufox browser...
+call npx camoufox download
+if %errorlevel% neq 0 (
+  echo [install] Camoufox download failed.
   set "EXIT_CODE=1"
   goto :end
 )
+
+if not exist "%CAMOUFOX_DIR%\\Camoufox.app\\Contents\\MacOS\\camoufox" (
+  echo [install] Camoufox check failed after download.
+  set "EXIT_CODE=1"
+  goto :end
+)
+echo [install] Camoufox browser ready.
 
 echo.
 echo [install] Done.
