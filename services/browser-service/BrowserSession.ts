@@ -2,12 +2,14 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import crypto from 'node:crypto';
-import { chromium, BrowserContext, Page, Browser } from 'playwright';
+import type { BrowserContext, Page, Browser } from 'playwright';
 import { ProfileLock } from './ProfileLock.js';
 import { ensurePageRuntime } from './pageRuntime.js';
 import { logDebug } from '../../modules/logging/src/index.js';
 import { getStateBus } from '../../modules/core/src/index.mjs';
 import { globalEventBus } from '../../libs/operations-framework/src/event-driven/EventBus.js';
+import { loadOrGenerateFingerprint, applyFingerprint } from '../../libs/browser/fingerprint-manager.js';
+import EngineManager from '../../libs/browser/engine-manager.js';
 
 const stateBus = getStateBus();
 
@@ -17,6 +19,8 @@ export interface BrowserSessionOptions {
   headless?: boolean;
   viewport?: { width: number; height: number };
   userAgent?: string;
+  engine?: 'chromium' | 'camoufox';
+  fingerprintPlatform?: 'windows' | 'macos' | null;
 }
 
 export class BrowserSession {
@@ -32,6 +36,8 @@ export class BrowserSession {
   private runtimeObservers = new Set<(event: any) => void>();
   private bridgedPages = new WeakSet<Page>();
   private lastViewport: { width: number; height: number } | null = null;
+  private engineManager: EngineManager;
+  private fingerprint: any = null;
 
   onExit?: (profileId: string) => void;
   private exitNotified = false;
@@ -42,6 +48,9 @@ export class BrowserSession {
     this.profileDir = path.join(root, profileId);
     fs.mkdirSync(this.profileDir, { recursive: true });
     this.lock = new ProfileLock(profileId);
+    
+    const engine = EngineManager.resolveEngineType(options.engine);
+    this.engineManager = new EngineManager(engine);
   }
 
   get id(): string {
@@ -75,20 +84,56 @@ export class BrowserSession {
       throw new Error(`无法获取 profile ${this.options.profileId} 的锁`);
     }
 
+    const engine = EngineManager.resolveEngineType(this.options.engine);
+
+    // 加载或生成指纹（支持 Win/Mac 随机）
+    const fingerprint = await loadOrGenerateFingerprint(this.options.profileId, {
+      platform: this.options.fingerprintPlatform || null,
+    });
+    this.fingerprint = fingerprint;
+    
+    logDebug('browser-service', 'session:fingerprint', {
+      profileId: this.options.profileId,
+      platform: fingerprint.platform,
+      userAgent: fingerprint.userAgent?.substring(0, 50) + '...',
+    });
+
     const viewport = this.options.viewport || { width: 1440, height: 900 };
-    const userAgent = this.options.userAgent || 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
     const deviceScaleFactor = this.resolveDeviceScaleFactor();
 
-    this.context = await chromium.launchPersistentContext(this.profileDir, {
+    // 使用 EngineManager 启动上下文（支持 Chromium/Camoufox）
+    this.context = await this.engineManager.launchPersistentContext({
+      engine,
       headless: !!this.options.headless,
+      profileDir: this.profileDir,
+      fingerprint,
       viewport,
-      ...(deviceScaleFactor ? { deviceScaleFactor } : {}),
-      userAgent,
-      acceptDownloads: false,
-      bypassCSP: false,
       locale: 'zh-CN',
       timezoneId: 'Asia/Shanghai',
     });
+
+    // 应用指纹到上下文（Playwright JS 注入）
+    await applyFingerprint(this.context, fingerprint);
+
+    // 设置设备缩放因子（小红书兼容，Chromium only）
+    if (deviceScaleFactor && engine === 'chromium') {
+      try {
+        const tempPage = this.page || (await this.context.newPage());
+        const client = await this.context.newCDPSession(tempPage);
+        await client.send('Emulation.setDeviceMetricsOverride', {
+          width: viewport.width,
+          height: viewport.height,
+          deviceScaleFactor,
+          mobile: false,
+          scale: 1,
+        });
+      } catch (err) {
+        logDebug('browser-service', 'device-scale-factor:failed', {
+          error: (err as Error)?.message || String(err),
+        });
+      }
+    }
+
     this.lastViewport = { width: viewport.width, height: viewport.height };
     this.browser = this.context.browser();
     this.browser.on('disconnected', () => this.notifyExit());

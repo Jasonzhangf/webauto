@@ -137,7 +137,8 @@ async function main() {
       printUsage();
       process.exit(1);
     }
-    const created = addProfile(keyword);
+    const platform = args.platform ? String(args.platform).trim() : null;
+    const created = addProfile(keyword, { platform });
     const payload = { ok: true, keyword, ...created };
     if (json) {
       console.log(JSON.stringify(payload, null, 2));
@@ -186,8 +187,9 @@ async function main() {
     // Ensure profile dirs exist (to show up in pool), optionally auto-create up to N.
     let profiles = listProfilesForPool(keyword);
     if (ensureCount > 0) {
+      const platform = args.platform ? String(args.platform).trim() : null;
       while (profiles.length < ensureCount) {
-        const created = addProfile(keyword);
+        const created = addProfile(keyword, { platform });
         profiles = listProfilesForPool(keyword);
         if (!created?.profileId) break;
       }

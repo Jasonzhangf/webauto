@@ -8,31 +8,56 @@ import { writeFile, readFile, mkdir } from 'fs/promises';
 import { join, dirname } from 'path';
 import { homedir } from 'os';
 
-export function generateFingerprint(profileId = 'default') {
-    const seed = profileId + Date.now();
+const FINGERPRINT_DIR = join(homedir(), '.webauto', 'fingerprints');
+
+const PLATFORM_FINGERPRINTS = {
+    windows: [
+        {
+            userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+            platform: 'Win32',
+            osVersion: '10.0'
+        },
+        {
+            userAgent: 'Mozilla/5.0 (Windows NT 11.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+            platform: 'Win32',
+            osVersion: '11.0'
+        }
+    ],
+    macos: [
+        {
+            userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+            platform: 'MacIntel',
+            osVersion: '10.15.7'
+        },
+        {
+            userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_6_1) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+            platform: 'MacIntel',
+            osVersion: '14.6.1'
+        }
+    ]
+};
+
+export function generateFingerprint(profileId = 'default', options = {}) {
+    const { platform = null, seed = null } = options;
+    const seedValue = seed || (profileId + Date.now());
     const hash = randomBytes(16).toString('hex');
     
-    const fingerprints = [
-        {
-            userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            platform: 'Win32'
-        },
-        {
-            userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            platform: 'MacIntel'
-        },
-        {
-            userAgent: 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            platform: 'Linux x86_64'
-        }
-    ];
-    
-    const base = fingerprints[hash.charCodeAt(0) % fingerprints.length];
+    let base;
+    if (platform === 'windows') {
+        base = PLATFORM_FINGERPRINTS.windows[hash.charCodeAt(0) % PLATFORM_FINGERPRINTS.windows.length];
+    } else if (platform === 'macos') {
+        base = PLATFORM_FINGERPRINTS.macos[hash.charCodeAt(0) % PLATFORM_FINGERPRINTS.macos.length];
+    } else {
+        const useWindows = hash.charCodeAt(0) % 2 === 0;
+        const pool = useWindows ? PLATFORM_FINGERPRINTS.windows : PLATFORM_FINGERPRINTS.macos;
+        base = pool[hash.charCodeAt(1) % pool.length];
+    }
     
     return {
         profileId,
         userAgent: base.userAgent,
         platform: base.platform,
+        osVersion: base.osVersion,
         languages: ['zh-CN', 'zh', 'en-US', 'en'],
         language: 'zh-CN',
         hardwareConcurrency: [4, 6, 8, 12, 16][hash.charCodeAt(1) % 5],
@@ -44,7 +69,8 @@ export function generateFingerprint(profileId = 'default') {
         timezoneId: 'Asia/Shanghai',
         maxTouchPoints: 0,
         vendor: 'Google Inc.',
-        renderer: 'ANGLE (NVIDIA, NVIDIA GeForce, D3D11)'
+        renderer: 'ANGLE (NVIDIA, NVIDIA GeForce, D3D11)',
+        originalPlatform: platform || (base.platform === 'Win32' ? 'windows' : 'macos')
     };
 }
 
@@ -57,6 +83,23 @@ export async function applyFingerprint(context, fingerprint) {
             await context.addInitScript(`
                 Object.defineProperty(navigator, 'userAgent', {
                     get: () => '${fingerprint.userAgent}',
+                    configurable: true
+                });
+                Object.defineProperty(navigator, 'platform', {
+                    get: () => '${fingerprint.platform}',
+                    configurable: true
+                });
+                Object.defineProperty(navigator, 'osVersion', {
+                    get: () => '${fingerprint.osVersion || ''}',
+                    configurable: true
+                });
+            `);
+        }
+        
+        if (fingerprint.vendor) {
+            await context.addInitScript(`
+                Object.defineProperty(navigator, 'vendor', {
+                    get: () => '${fingerprint.vendor}',
                     configurable: true
                 });
             `);
@@ -141,3 +184,26 @@ export async function saveFingerprint(fingerprintPath, fingerprint) {
         return false;
     }
 }
+
+export function getFingerprintPath(profileId) {
+    return join(FINGERPRINT_DIR, `${profileId}.json`);
+}
+
+export async function generateAndSaveFingerprint(profileId, options = {}) {
+    const fingerprint = generateFingerprint(profileId, options);
+    const path = getFingerprintPath(profileId);
+    await saveFingerprint(path, fingerprint);
+    return { fingerprint, path };
+}
+
+export async function loadOrGenerateFingerprint(profileId, options = {}) {
+    const path = getFingerprintPath(profileId);
+    let fingerprint = await loadFingerprint(path);
+    if (!fingerprint) {
+        fingerprint = generateFingerprint(profileId, options);
+        await saveFingerprint(path, fingerprint);
+    }
+    return fingerprint;
+}
+
+export { FINGERPRINT_DIR };

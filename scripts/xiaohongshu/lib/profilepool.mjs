@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { generateAndSaveFingerprint } from '../../../libs/browser/fingerprint-manager.js';
 
 function resolveHomeDir() {
   const homeDir = process.env.HOME || process.env.USERPROFILE || '';
@@ -88,9 +89,15 @@ export function ensureProfileDir(profileId) {
   return dir;
 }
 
-export function addProfile(prefix) {
+export function addProfile(prefix, options = {}) {
+  const { platform = null } = options;
   const id = nextProfileId(prefix);
   const dir = ensureProfileDir(id);
+
+  generateAndSaveFingerprint(id, { platform }).catch((err) => {
+    console.warn(`[profilepool] failed to generate fingerprint for ${id}:`, err?.message || err);
+  });
+
   return { profileId: id, profileDir: dir };
 }
 
