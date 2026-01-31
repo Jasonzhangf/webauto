@@ -193,15 +193,15 @@ dist/
 ### 高优先级（立即执行）
 1. ✅ 标记 `sharedmodule/operations-framework` 为 legacy
 2. ✅ 添加 `scripts/check-legacy-refs.mjs` 自检
-3. ⏳ 实现 `scripts/check-untracked-sources.mjs`
+3. ✅ 实现 `scripts/check-untracked-sources.mjs`
 
 ### 中优先级（逐步推进）
 4. ✅ 统一 `modules/browser` 与 `libs/browser`
-5. ⏳ 迁移 Python 服务到 `services/py/`
-6. ⏳ 统一配置中心到 `modules/config`
+5. ✅ 迁移 Python 服务到 `services/py/`
+6. ✅ 统一配置中心到 `modules/config`
 
 ### 低优先级（长期规划）
-7. ⏳ 清理子目录 `dist/`
+7. ✅ 清理子目录 `dist/`
 8. ⏳ 迁移 `sharedmodule/engines` 到 `modules/`
 
 ---
