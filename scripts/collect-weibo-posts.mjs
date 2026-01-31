@@ -14,7 +14,7 @@ ensureUtf8Console();
  * 5. 输出为 Markdown 格式
  */
 
-import { WorkflowExecutor } from '../modules/workflow-builder/dist/WorkflowExecutor.js';
+import { WorkflowExecutor } from '../dist/modules/workflow-builder/src/WorkflowExecutor.js';
 import fs from 'fs/promises';
 import path from 'path';
 

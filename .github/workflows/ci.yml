@@ -33,7 +33,7 @@ jobs:
 
       - name: Check legacy refs & untracked sources
         shell: bash
-        run: node scripts/check-legacy-refs.mjs && node scripts/check-untracked-sources.mjs
+        run: node scripts/check-legacy-refs.mjs && node scripts/check-untracked-sources.mjs && node scripts/check-sub-dist.mjs
 
       - name: Desktop console build (smoke)
         if: ${{ matrix.os == 'ubuntu-latest' }}

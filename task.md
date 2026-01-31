@@ -46,9 +46,9 @@
    - [ ] 迁移策略：先新增同路径 re-export/转发入口，确认入口脚本不变，再逐步移动实现目录。
 
 3. **构建产物统一策略**
-   - [ ] 定义“运行态只允许从根 `dist/` 加载”的规则（符合 ESM + dist-only 约束）。
-   - [ ] 逐步移除/停用子目录 `dist/`（例如 `libs/browser/dist`、`libs/operations-framework/dist`、`modules/workflow-builder/dist`），或确保不会被运行时引用。
-   - [ ] 回归验证：`npm run build:services` 后主要启动命令仍可用（只从根 dist 引用）。
+   - [x] 定义“运行态只允许从根 `dist/` 加载”的规则（符合 ESM + dist-only 约束）。
+   - [x] 逐步移除/停用子目录 `dist/`（例如 `libs/browser/dist`、`libs/operations-framework/dist`、`modules/workflow-builder/dist`），或确保不会被运行时引用。
+   - [x] 回归验证：`npm run build:services` 后主要启动命令仍可用（只从根 dist 引用）。
 
 ### C) 强制编译限制（根目录级别）
 
