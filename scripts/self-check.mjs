@@ -20,8 +20,10 @@ function main() {
     'config/ports.json',
     'container-library/index.json',
     'container-library/weibo',
-    'apps/floating-panel/build/main/index.js',
-    'apps/floating-panel/build/renderer/index.mjs',
+    // prebuild 自检不应依赖构建产物（dist/build），只检查关键源码入口存在
+    'apps/floating-panel/src/main/index.mts',
+    'apps/floating-panel/src/main/preload.mjs',
+    'apps/floating-panel/src/renderer/index.mts',
   ];
 
   let ok = true;

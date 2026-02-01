@@ -2,13 +2,13 @@ import electron from 'electron';
 const { app, BrowserWindow, ipcMain, shell } = electron;
 
 import { spawn } from 'node:child_process';
-import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { promises as fs } from 'node:fs';
 
 import { readDesktopConsoleSettings, resolveDefaultDownloadRoot, writeDesktopConsoleSettings } from './desktop-settings.mts';
 import type { DesktopConsoleSettings } from './desktop-settings.mts';
+import { createProfileStore } from './profile-store.mts';
 
 type CmdEvent =
   | { type: 'started'; runId: string; title: string; pid: number; ts: number }
@@ -37,6 +37,7 @@ type UiSettings = DesktopConsoleSettings;
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const APP_ROOT = path.resolve(__dirname, '../..'); // apps/desktop-console/dist/main -> apps/desktop-console
 const REPO_ROOT = path.resolve(APP_ROOT, '../..');
+const profileStore = createProfileStore({ repoRoot: REPO_ROOT });
 
 function now() {
   return Date.now();
@@ -296,28 +297,6 @@ async function listDir(input: { root: string; recursive?: boolean; maxEntries?: 
   return { ok: true, root, entries, truncated: entries.length >= maxEntries };
 }
 
-async function listProfiles() {
-  const homeDir =
-    process.platform === 'win32'
-      ? (process.env.USERPROFILE || os.homedir() || '')
-      : (process.env.HOME || os.homedir() || '');
-  const root = path.join(homeDir, '.webauto', 'profiles');
-  const entries: string[] = [];
-  try {
-    const dirs = await fs.readdir(root, { withFileTypes: true });
-    for (const ent of dirs) {
-      if (!ent.isDirectory()) continue;
-      const name = ent.name;
-      if (!name || name.startsWith('.')) continue;
-      entries.push(name);
-    }
-  } catch {
-    // ignore
-  }
-  entries.sort((a, b) => a.localeCompare(b));
-  return { ok: true, root, profiles: entries };
-}
-
 function createWindow() {
   win = new BrowserWindow({
     width: 1080,
@@ -386,7 +365,16 @@ ipcMain.handle('fs:readTextPreview', async (_evt, spec: { path: string; maxBytes
   readTextPreview(spec),
 );
 ipcMain.handle('fs:readFileBase64', async (_evt, spec: { path: string; maxBytes?: number }) => readFileBase64(spec));
-ipcMain.handle('profiles:list', async () => listProfiles());
+ipcMain.handle('profiles:list', async () => profileStore.listProfiles());
+ipcMain.handle('profiles:scan', async () => profileStore.scanProfiles());
+ipcMain.handle('profile:create', async (_evt, input: { profileId: string }) => profileStore.profileCreate(input || ({} as any)));
+ipcMain.handle('profile:delete', async (_evt, input: { profileId: string; deleteFingerprint?: boolean }) =>
+  profileStore.profileDelete(input || ({} as any)),
+);
+ipcMain.handle('fingerprint:delete', async (_evt, input: { profileId: string }) => profileStore.fingerprintDelete(input || ({} as any)));
+ipcMain.handle('fingerprint:regenerate', async (_evt, input: { profileId: string; platform?: 'windows' | 'macos' | 'random' }) =>
+  profileStore.fingerprintRegenerate(input || ({} as any)),
+);
 ipcMain.handle('os:openPath', async (_evt, input: { path: string }) => {
   const p = String(input?.path || '');
   const r = await shell.openPath(p);

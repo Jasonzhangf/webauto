@@ -18,6 +18,11 @@ contextBridge.exposeInMainWorld('api', {
   fsReadTextPreview: (spec) => ipcRenderer.invoke('fs:readTextPreview', spec),
   fsReadFileBase64: (spec) => ipcRenderer.invoke('fs:readFileBase64', spec),
   profilesList: () => ipcRenderer.invoke('profiles:list'),
+  profilesScan: () => ipcRenderer.invoke('profiles:scan'),
+  profileCreate: (profileId) => ipcRenderer.invoke('profile:create', { profileId: String(profileId || '') }),
+  profileDelete: (spec) => ipcRenderer.invoke('profile:delete', spec),
+  fingerprintDelete: (spec) => ipcRenderer.invoke('fingerprint:delete', spec),
+  fingerprintRegenerate: (spec) => ipcRenderer.invoke('fingerprint:regenerate', spec),
   osOpenPath: (p) => ipcRenderer.invoke('os:openPath', { path: p }),
 
   onCmdEvent: (handler) => {

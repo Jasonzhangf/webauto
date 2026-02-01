@@ -11,6 +11,7 @@ export type DesktopConsoleSettings = {
   defaultEnv: 'debug' | 'prod';
   defaultKeyword: string;
   timeouts: { loginTimeoutSec: number; cmdTimeoutSec: number };
+  profileAliases: Record<string, string>;
 };
 
 type DefaultsFile = Partial<DesktopConsoleSettings> & {
@@ -41,6 +42,17 @@ export function resolveDefaultDownloadRoot() {
 }
 
 function normalizeSettings(defaults: Partial<DesktopConsoleSettings>, input: Partial<DesktopConsoleSettings>): DesktopConsoleSettings {
+  const aliasesRaw = (input as any).profileAliases ?? (defaults as any).profileAliases ?? {};
+  const aliases: Record<string, string> = {};
+  if (aliasesRaw && typeof aliasesRaw === 'object') {
+    for (const [k, v] of Object.entries(aliasesRaw as any)) {
+      const key = String(k || '').trim();
+      const val = String(v || '').trim();
+      if (!key) continue;
+      if (!val) continue;
+      aliases[key] = val;
+    }
+  }
   const merged: DesktopConsoleSettings = {
     unifiedApiUrl: String(input.unifiedApiUrl || defaults.unifiedApiUrl || 'http://127.0.0.1:7701'),
     browserServiceUrl: String(input.browserServiceUrl || defaults.browserServiceUrl || 'http://127.0.0.1:7704'),
@@ -70,6 +82,7 @@ function normalizeSettings(defaults: Partial<DesktopConsoleSettings>, input: Par
         ),
       ),
     },
+    profileAliases: aliases,
   };
   return merged;
 }
