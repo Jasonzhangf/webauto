@@ -12,6 +12,7 @@
 
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
+import { atomicWriteJson, readJsonMaybe } from '../../state/src/atomic-json.js';
 
 export interface ProgressState {
   version: number;
@@ -57,7 +58,7 @@ export class ProgressTracker {
       updatedAt: new Date().toISOString(),
       ...state
     };
-    await fs.writeFile(this.progressPath, JSON.stringify(fullState, null, 2), 'utf-8');
+    await atomicWriteJson(this.progressPath, fullState);
     console.log(
       `[ProgressTracker] 进度已保存: ${state.collectedCount} 条, ` +
       `keys=${state.seenKeys?.length || state.seenNoteIds?.length || 0}, ` +
@@ -74,8 +75,8 @@ export class ProgressTracker {
    */
   async load(): Promise<ProgressState | null> {
     try {
-      const data = await fs.readFile(this.progressPath, 'utf-8');
-      const state = JSON.parse(data) as ProgressState;
+      const state = await readJsonMaybe<ProgressState>(this.progressPath);
+      if (!state) return null;
       
       // 版本兼容性检查
       if (state.version !== 1) {
@@ -94,10 +95,6 @@ export class ProgressTracker {
       console.log(`[ProgressTracker] 发现保存的进度: ${state.collectedCount} 条, 最后更新: ${state.updatedAt}`);
       return state;
     } catch (err: any) {
-      if (err.code === 'ENOENT') {
-        // 文件不存在，正常情况
-        return null;
-      }
       console.warn(`[ProgressTracker] 加载进度失败: ${err.message}`);
       return null;
     }

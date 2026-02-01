@@ -27,6 +27,8 @@ import { execute as validateLinks } from '../../dist/modules/xiaohongshu/app/src
 import { execute as openTabs } from '../../dist/modules/xiaohongshu/app/src/blocks/Phase34OpenTabsBlock.js';
 import { execute as interact } from '../../dist/modules/xiaohongshu/app/src/blocks/Phase3InteractBlock.js';
 import { controllerAction, delay } from '../../dist/modules/xiaohongshu/app/src/utils/controllerAction.js';
+import { resolveDownloadRoot } from '../../dist/modules/state/src/paths.js';
+import { updateXhsCollectState } from '../../dist/modules/state/src/xiaohongshu-collect-state.js';
 
 const UNIFIED_API_URL = 'http://127.0.0.1:7701';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -86,6 +88,7 @@ async function main() {
 
   const keyword = resolveKeyword();
   const env = resolveEnv();
+  const downloadRoot = resolveDownloadRoot();
   const profilesArg = String(args.profiles || '').trim();
   const poolKeyword = String(args.profilepool || '').trim();
   const shardedChild = args['sharded-child'] === true || args['sharded-child'] === '1' || args['sharded-child'] === 1;
@@ -182,6 +185,21 @@ async function main() {
 
   try {
     emitRunEvent('phase3_start', { keyword, env, likeKeywords, tabCount, maxLikesPerRound });
+    await updateXhsCollectState({ keyword, env, downloadRoot }, (draft) => {
+      if (!draft.startTime) draft.startTime = new Date().toISOString();
+      draft.status = 'running';
+      draft.resume.lastStep = 'phase3_start';
+      draft.legacy = {
+        ...(draft.legacy || {}),
+        phase3: {
+          ...(draft.legacy?.phase3 || {}),
+          likeKeywords,
+          tabCount,
+          maxLikesPerRound,
+          startedAt: new Date().toISOString(),
+        },
+      };
+    });
 
     console.log(`\n🔍 步骤 1: 校验 Phase2 链接...`);
     const validateResult = await validateLinks({
@@ -282,6 +300,26 @@ async function main() {
         totalLiked: state2.totalLiked,
         reachedBottom: state2.reachedBottom,
       });
+      await updateXhsCollectState({ keyword, env, downloadRoot }, (draft) => {
+        draft.resume.lastNoteId = link2.noteId;
+        draft.resume.lastStep = 'phase3_round_done';
+        const prev = (draft.legacy?.phase3?.notes || {}) as Record<string, any>;
+        const next = {
+          ...prev,
+          [link2.noteId]: {
+            totalLiked: state2.totalLiked,
+            reachedBottom: state2.reachedBottom,
+            updatedAt: new Date().toISOString(),
+          },
+        };
+        draft.legacy = {
+          ...(draft.legacy || {}),
+          phase3: {
+            ...(draft.legacy?.phase3 || {}),
+            notes: next,
+          },
+        };
+      });
 
       // 轮转节奏
       await delay(1200);
@@ -292,9 +330,32 @@ async function main() {
     console.log(`\n⏱️  总耗时: ${formatDurationMs(totalMs)}`);
     console.log(`✅ 总点赞数: ${totalLiked}`);
     emitRunEvent('phase3_done', { totalLiked, ms: totalMs });
+    await updateXhsCollectState({ keyword, env, downloadRoot }, (draft) => {
+      draft.stats.phase3DurationMs = totalMs;
+      draft.resume.lastStep = 'phase3_done';
+      draft.legacy = {
+        ...(draft.legacy || {}),
+        phase3: {
+          ...(draft.legacy?.phase3 || {}),
+          totalLiked,
+          doneAt: new Date().toISOString(),
+        },
+      };
+    });
 
   } catch (err) {
     emitRunEvent('phase3_error', { error: safeStringify(err) });
+    await updateXhsCollectState({ keyword, env, downloadRoot }, (draft) => {
+      draft.resume.lastStep = 'phase3_error';
+      draft.legacy = {
+        ...(draft.legacy || {}),
+        phase3: {
+          ...(draft.legacy?.phase3 || {}),
+          error: safeStringify(err),
+          failedAt: new Date().toISOString(),
+        },
+      };
+    }).catch(() => {});
     console.error('\n❌ Phase 3 失败:', err?.message || String(err));
     process.exit(1);
   } finally {

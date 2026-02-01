@@ -30,7 +30,12 @@ export function renderResults(root: HTMLElement, ctx: any) {
     }
     const entries = res.entries || [];
     entries.forEach((e: any) => {
-      const item = createEl('div', { className: 'item' }, [`${e.env}/${e.keyword}`]);
+      const s = e.state || null;
+      const badge =
+        s && s.status
+          ? ` [${s.status}] links=${s.links || 0}/${s.target || 0} ok=${s.completed || 0} fail=${s.failed || 0}`
+          : ' [no-state]';
+      const item = createEl('div', { className: 'item' }, [`${e.env}/${e.keyword}${badge}`]);
       item.onclick = () => void openEntry(e);
       entryList.appendChild(item);
     });

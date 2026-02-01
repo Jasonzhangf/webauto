@@ -26,6 +26,13 @@ import { createSessionLock } from './lib/session-lock.mjs';
 import { execute as validateLinks } from '../../dist/modules/xiaohongshu/app/src/blocks/Phase34ValidateLinksBlock.js';
 import { execute as processSingleNote } from '../../dist/modules/xiaohongshu/app/src/blocks/Phase34ProcessSingleNoteBlock.js';
 import { mergeNotesMarkdown } from '../../dist/modules/workflow/blocks/helpers/mergeXhsMarkdown.js';
+import { resolveDownloadRoot } from '../../dist/modules/state/src/paths.js';
+import {
+  markXhsCollectCompleted,
+  markXhsCollectFailed,
+  updateXhsCollectState,
+  updateXhsDetailCollection,
+} from '../../dist/modules/state/src/xiaohongshu-collect-state.js';
 import minimist from 'minimist';
 import { spawn } from 'node:child_process';
 import path from 'node:path';
@@ -107,6 +114,7 @@ async function runNode(scriptPath, args) {
 async function main() {
   const keyword = resolveKeyword();
   const env = resolveEnv();
+  const downloadRoot = resolveDownloadRoot();
   const args = minimist(process.argv.slice(2));
   const linksPath = String(args.links || '').trim() || undefined;
   const shardIndex = args['shard-index'] != null ? Number(args['shard-index']) : undefined;
@@ -186,6 +194,11 @@ async function main() {
 
   try {
     emitRunEvent('phase4_start', { keyword, env });
+    await updateXhsCollectState({ keyword, env, downloadRoot }, (draft) => {
+      if (!draft.startTime) draft.startTime = new Date().toISOString();
+      draft.status = 'running';
+      draft.resume.lastStep = 'phase4_start';
+    });
 
     const t0 = nowMs();
     emitRunEvent('phase4_timing', { stage: 'start', t0 });
@@ -211,6 +224,17 @@ async function main() {
 
     const validLinks = validateResult.links || [];
     console.log(`✅ 有效链接: ${validLinks.length} 条`);
+    await updateXhsCollectState({ keyword, env, downloadRoot }, (draft) => {
+      // 只在 state 为空时补齐（避免覆盖 Phase2 的更完整来源）
+      if ((draft.listCollection.collectedUrls || []).length === 0) {
+        draft.listCollection.collectedUrls = validLinks.map((l) => ({
+          noteId: String(l?.noteId || '').trim(),
+          safeUrl: String(l?.safeUrl || '').trim(),
+          ...(String(l?.searchUrl || '').trim() ? { searchUrl: String(l.searchUrl).trim() } : {}),
+        }));
+      }
+      draft.resume.lastStep = 'phase4_validate_done';
+    });
 
     if (validLinks.length === 0) {
       console.log('⚠️  没有有效链接，请先运行 Phase2 采集链接');
@@ -246,9 +270,24 @@ async function main() {
       if (result.success) {
         results.push(result);
         console.log(`✅ ${progress} 成功`);
+        await updateXhsDetailCollection({
+          keyword,
+          env,
+          downloadRoot,
+          noteId: link.noteId,
+          status: 'completed',
+        });
       } else {
         errors.push({ noteId: link.noteId, error: result.error });
         console.log(`❌ ${progress} 失败: ${result.error}`);
+        await updateXhsDetailCollection({
+          keyword,
+          env,
+          downloadRoot,
+          noteId: link.noteId,
+          status: 'failed',
+          error: String(result.error || 'unknown'),
+        });
       }
 
       emitRunEvent('phase4_note_done', {
@@ -265,6 +304,10 @@ async function main() {
     const totalMs = t1 - t0;
     console.log(`\n⏱️  总耗时: ${formatDurationMs(totalMs)}`);
     emitRunEvent('phase4_timing', { stage: 'done', ms: totalMs, count: results.length });
+    await updateXhsCollectState({ keyword, env, downloadRoot }, (draft) => {
+      draft.stats.phase4DurationMs = totalMs;
+      draft.resume.lastStep = 'phase4_done';
+    });
 
     console.log(`\n📊 采集结果：`);
     console.log(`   成功: ${results.length} 条`);
@@ -290,9 +333,11 @@ async function main() {
 
     console.log(`\n✅ Phase 4 完成`);
     emitRunEvent('phase4_done', { success: results.length, failed: errors.length });
+    await markXhsCollectCompleted({ keyword, env, downloadRoot });
 
   } catch (err) {
     emitRunEvent('phase4_error', { error: safeStringify(err) });
+    await markXhsCollectFailed({ keyword, env, downloadRoot, error: safeStringify(err) }).catch(() => {});
     console.error('\n❌ Phase 4 失败:', err?.message || String(err));
     process.exit(1);
   } finally {

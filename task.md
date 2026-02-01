@@ -35,6 +35,15 @@
    - [x] UI 侧默认配置只放在 UI 根目录（例如 `apps/*/default-settings.json`），运行态写入统一配置文件。
    - [x] 回归验证：桌面 UI 启动后读写配置生效；配置文件路径跨平台（Windows/macOS）一致可用。
 
+5. **统一状态管理（唯一 State 模块）**
+   - [x] 盘点现状：`ProgressTracker(.progress_*)` + 多套 `.collect-state.json` schema 并存。
+   - [x] 新增唯一实现：`modules/state`（atomic write + 路径解析 + 小红书 `.collect-state.json` 兼容迁移）。
+   - [x] 接入 Phase2/3/4 scripts：运行中/完成/失败、links/notes 进度写入 `.collect-state.json`。
+   - [x] Desktop Console 结果页展示状态摘要（`apps/desktop-console` 扫描并读取 state）。
+   - [x] 文档：`docs/arch/STATE.md` 描述 schema、写入时机、UI 调用结构。
+   - [ ] 收敛 Workflow 进度文件：`modules/workflow/blocks/ProgressTracker.ts` 改为复用 `modules/state` 的原子读写（避免重复实现）。
+   - [ ] 回归验证：Phase2/3/4 跑一轮（dry-run 可用）并截图/日志证明状态更新正确。
+
 ### B) 目录收敛（低风险：先标注 legacy，再移动）
 
 1. **目录职责说明与“禁止新增重复实现”规则**

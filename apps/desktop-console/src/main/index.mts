@@ -4,7 +4,7 @@ const { app, BrowserWindow, ipcMain, shell } = electron;
 import { spawn } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { promises as fs } from 'node:fs';
 
 import { readDesktopConsoleSettings, resolveDefaultDownloadRoot, writeDesktopConsoleSettings } from './desktop-settings.mts';
@@ -101,6 +101,19 @@ function resolveNodeBin() {
   return process.platform === 'win32' ? 'node.exe' : 'node';
 }
 
+let cachedStateMod: any = null;
+async function getStateModule() {
+  if (cachedStateMod) return cachedStateMod;
+  try {
+    const p = path.join(REPO_ROOT, 'dist', 'modules', 'state', 'src', 'xiaohongshu-collect-state.js');
+    cachedStateMod = await import(pathToFileURL(p).href);
+    return cachedStateMod;
+  } catch {
+    cachedStateMod = null;
+    return null;
+  }
+}
+
 async function spawnCommand(spec: SpawnSpec) {
   const runId = generateRunId();
   const groupKey = spec.groupKey || 'xiaohongshu';
@@ -183,6 +196,7 @@ async function scanResults(input: { downloadRoot?: string }) {
 
   const result: any = { ok: true, root, entries: [] as any[] };
   try {
+    const stateMod = await getStateModule();
     const envDirs = await fs.readdir(root, { withFileTypes: true });
     for (const envEnt of envDirs) {
       if (!envEnt.isDirectory()) continue;
@@ -194,7 +208,23 @@ async function scanResults(input: { downloadRoot?: string }) {
         const keyword = kwEnt.name;
         const kwPath = path.join(envPath, keyword);
         const stat = await fs.stat(kwPath).catch(() => null);
-        result.entries.push({ env, keyword, path: kwPath, mtimeMs: stat?.mtimeMs || 0 });
+        let stateSummary: any = null;
+        if (stateMod?.loadXhsCollectState) {
+          try {
+            const state = await stateMod.loadXhsCollectState({ keyword, env, downloadRoot });
+            stateSummary = {
+              status: state?.status,
+              links: state?.listCollection?.collectedUrls?.length || 0,
+              target: state?.listCollection?.targetCount || 0,
+              completed: state?.detailCollection?.completed || 0,
+              failed: state?.detailCollection?.failed || 0,
+              updatedAt: state?.lastUpdateTime || null,
+            };
+          } catch {
+            // ignore
+          }
+        }
+        result.entries.push({ env, keyword, path: kwPath, mtimeMs: stat?.mtimeMs || 0, state: stateSummary });
       }
     }
     result.entries.sort((a: any, b: any) => (b.mtimeMs || 0) - (a.mtimeMs || 0));

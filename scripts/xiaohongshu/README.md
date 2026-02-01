@@ -22,7 +22,7 @@ node scripts/xiaohongshu/search/orchestrator.mjs --keyword "手机膜" --resume
 | **Phase2** | `search/phase2/collect-list.mjs` | SearchGate + 列表采集 | ✅ | ✅ | ✅ 记录 safe-detail-urls |
 | **Phase3** | `search/phase3/collect-detail.mjs` | 容器点击详情页 + xsec_token 校验 | ✅ | ✅ | ✅ 记录 completedNoteIds |
 | **Phase4** | `search/phase4/collect-comments.mjs` | 评论采集 + 落盘 | ✅ | ✅ | ✅ 记录 failedNoteIds |
-| **状态** | `search/shared/state.mjs` | 断点恢复、统计 | N/A | N/A | ✅ .collect-state.json |
+| **状态** | `modules/state`（唯一实现） | 断点恢复、统计、兼容迁移 | N/A | N/A | ✅ .collect-state.json |
 | **日志** | `search/lib/logger.mjs` | 统一日志 + JSONL 事件流 | N/A | N/A | ✅ run-events.jsonl |
 
 ## 🎯 关键特性
@@ -51,14 +51,14 @@ node scripts/xiaohongshu/search/orchestrator.mjs --keyword "手机膜" --resume
 ## 🔍 断点恢复流程
 
 ```bash
-# 中断后查看状态
-node scripts/xiaohongshu/search/shared/state.mjs --load --keyword "手机膜"
+# 中断后查看状态（摘要）
+node scripts/xiaohongshu/state.mjs show --keyword "手机膜" --env debug
 
 # 从断点继续（自动跳过已完成）
 node scripts/xiaohongshu/search/orchestrator.mjs --keyword "手机膜" --resume --debug
 
 # 失败后重跑（保留失败记录）
-rm ~/.webauto/download/debug/手机膜/.collect-state.json
+rm ~/.webauto/download/xiaohongshu/debug/手机膜/.collect-state.json
 node scripts/xiaohongshu/search/orchestrator.mjs --keyword "手机膜" --debug
 ```
 

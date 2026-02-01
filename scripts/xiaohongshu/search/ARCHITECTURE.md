@@ -178,7 +178,7 @@ version": 1,
               └─► 展开评论
               └─► comments.md
 
-状态文件（.collect-state.json）贯穿所有 Phase
+状态文件（.collect-state.json）贯穿所有 Phase；唯一实现为 `modules/state`（脚本侧仅兼容转发）。
 
 ```
 
@@ -349,4 +349,3 @@ cat ~/.webauto/download/xiaohongshu/{env}/{keyword}/.collect-state.json
 **文档版本**: v1.0
 **最后更新**: 2026-01-17
 **维护者**: Codex
-

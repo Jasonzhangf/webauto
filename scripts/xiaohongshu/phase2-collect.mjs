@@ -21,6 +21,8 @@ import { createSessionLock } from './lib/session-lock.mjs';
 import { execute as waitSearchPermit } from '../../dist/modules/workflow/blocks/WaitSearchPermitBlock.js';
 import { execute as phase2Search } from '../../dist/modules/xiaohongshu/app/src/blocks/Phase2SearchBlock.js';
 import { execute as phase2CollectLinks } from '../../dist/modules/xiaohongshu/app/src/blocks/Phase2CollectLinksBlock.js';
+import { resolveDownloadRoot } from '../../dist/modules/state/src/paths.js';
+import { updateXhsCollectState, markXhsCollectFailed } from '../../dist/modules/state/src/xiaohongshu-collect-state.js';
 import path from 'node:path';
 
 function nowMs() {
@@ -32,14 +34,6 @@ function formatDurationMs(ms) {
   const m = Math.floor(s / 60);
   const r = s % 60;
   return `${m}m${String(r).padStart(2, '0')}s`;
-}
-
-function resolveDownloadRoot() {
-  const custom = process.env.WEBAUTO_DOWNLOAD_ROOT || process.env.WEBAUTO_DOWNLOAD_DIR;
-  if (custom && custom.trim()) return custom;
-  const home = process.env.HOME || process.env.USERPROFILE;
-  if (home) return path.join(home, '.webauto', 'download');
-  return path.join(process.cwd(), 'download');
 }
 
 async function ensureDir(dir) {
@@ -66,9 +60,10 @@ async function main() {
   const keyword = resolveKeyword();
   const target = resolveTarget();
   const env = resolveEnv();
+  const downloadRoot = resolveDownloadRoot();
 
   // 清理旧产物（同 env + keyword 下）
-  const baseDir = path.join(resolveDownloadRoot(), 'xiaohongshu', env, keyword);
+  const baseDir = path.join(downloadRoot, 'xiaohongshu', env, keyword);
   await safeRm(`${baseDir}/phase2-links.jsonl`);
   await safeRm(`${baseDir}/run.log`);
   await safeRm(`${baseDir}/run-events.jsonl`);
@@ -95,6 +90,12 @@ async function main() {
 
   try {
     emitRunEvent('phase2_start', { keyword, target, env });
+    await updateXhsCollectState({ keyword, env, downloadRoot, targetCount: target }, (draft) => {
+      if (!draft.startTime) draft.startTime = new Date().toISOString();
+      draft.status = 'running';
+      draft.listCollection.targetCount = target;
+      draft.resume.lastStep = 'phase2_start';
+    });
 
     const t0 = nowMs();
     emitRunEvent('phase2_timing', { stage: 'start', t0 });
@@ -127,7 +128,7 @@ async function main() {
     emitRunEvent('phase2_timing', { stage: 'collect_done', ms: tCollect1 - tCollect0 });
     const results = collectResult.links || [];
 
-    const outPath = path.join(resolveDownloadRoot(), 'xiaohongshu', env, keyword, 'phase2-links.jsonl');
+    const outPath = path.join(downloadRoot, 'xiaohongshu', env, keyword, 'phase2-links.jsonl');
     const outDir = path.dirname(outPath);
     await ensureDir(outDir);
     await writeJsonl(outPath, results);
@@ -141,6 +142,19 @@ async function main() {
     console.log(`📁 保存路径: ${outPath}`);
     emitRunEvent('phase2_done', { outPath, count: results.length });
 
+    await updateXhsCollectState({ keyword, env, downloadRoot, targetCount: target }, (draft) => {
+      draft.status = 'running';
+      draft.listCollection.targetCount = target;
+      draft.listCollection.collectedUrls = results.map((r) => ({
+        noteId: String(r?.noteId || '').trim(),
+        safeUrl: String(r?.safeUrl || '').trim(),
+        ...(String(r?.searchUrl || '').trim() ? { searchUrl: String(r.searchUrl).trim() } : {}),
+        ...(typeof r?.timestamp === 'number' ? { timestamp: r.timestamp } : {}),
+      }));
+      draft.stats.phase2DurationMs = totalMs;
+      draft.resume.lastStep = 'phase2_done';
+    });
+
     console.log('\n📊 采集结果：');
     console.log(`   总链接数: ${results.length}`);
     console.log(`   输出路径: ${outPath}`);
@@ -148,6 +162,7 @@ async function main() {
 
   } catch (err) {
     emitRunEvent('phase2_error', { error: safeStringify(err) });
+    await markXhsCollectFailed({ keyword, env, downloadRoot, error: safeStringify(err) }).catch(() => {});
     console.error('\n❌ Phase 2 失败:', err?.message || String(err));
     process.exit(1);
   } finally {

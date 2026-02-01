@@ -1,61 +1,49 @@
 /**
- * 状态管理模块
+ * Legacy StateManager（兼容层）
+ *
+ * 该实现仅保留旧 API，底层统一转发到 `modules/state` 的 `.collect-state.json`。
+ * 运行前请确保已构建：`npm run build:services`
  */
-import fs from 'node:fs/promises';
-import path from 'node:path';
-import os from 'node:os';
 
-const STATE_FILE = '.collect-state.json';
+import {
+  loadXhsCollectState,
+  updateXhsDetailCollection,
+} from '../../../../dist/modules/state/src/xiaohongshu-collect-state.js';
 
 class StateManager {
   constructor(keyword, env) {
     this.keyword = keyword;
     this.env = env;
-    this.baseDir = path.join(os.homedir(), '.webauto', 'download', 'xiaohongshu', env, keyword);
-    this.statePath = path.join(this.baseDir, STATE_FILE);
-    this.state = {
-      keyword,
-      env,
-      processedCount: 0,
-      completedNotes: [],
-      lastUpdatedAt: Date.now()
-    };
+    this.state = null;
   }
 
   async load() {
-    try {
-      await fs.mkdir(this.baseDir, { recursive: true });
-      const content = await fs.readFile(this.statePath, 'utf8');
-      const loaded = JSON.parse(content);
-      // 合并状态
-      this.state = { ...this.state, ...loaded };
-      return this.state;
-    } catch {
-      // 首次运行，保存初始状态
-      await this.save();
-      return this.state;
-    }
+    this.state = await loadXhsCollectState({ keyword: this.keyword, env: this.env });
+    return this.state;
   }
 
   async save() {
-    try {
-      this.state.lastUpdatedAt = Date.now();
-      await fs.writeFile(this.statePath, JSON.stringify(this.state, null, 2));
-    } catch (err) {
-      console.error('Failed to save state:', err);
-    }
+    // 兼容：不提供直写，统一由 modules/state 负责
+    if (!this.state) await this.load();
+    return this.state;
   }
 
   async markNoteCompleted(noteId) {
-    if (!this.state.completedNotes.includes(noteId)) {
-      this.state.completedNotes.push(noteId);
-      this.state.processedCount = this.state.completedNotes.length;
-      await this.save();
-    }
+    const note = String(noteId || '').trim();
+    if (!note) return;
+    this.state = await updateXhsDetailCollection({
+      keyword: this.keyword,
+      env: this.env,
+      noteId: note,
+      status: 'completed',
+    });
   }
 
   isCompleted(noteId) {
-    return this.state.completedNotes.includes(noteId);
+    const note = String(noteId || '').trim();
+    if (!note) return false;
+    const completed = new Set(this.state?.detailCollection?.completedNoteIds || []);
+    return completed.has(note);
   }
 }
 
