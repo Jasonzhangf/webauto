@@ -26,7 +26,6 @@ export function renderRun(root: HTMLElement, ctx: any) {
   const dryRun = createEl('input', { type: 'checkbox' }) as HTMLInputElement;
 
   const profileModeSel = createEl('select') as HTMLSelectElement;
-  const profileValue = createEl('input', { placeholder: 'auto-selected', readOnly: 'true' }) as HTMLInputElement;
 
   const profilePickSel = createEl('select') as HTMLSelectElement;
   const profileRefreshBtn = createEl('button', { className: 'secondary' }, ['刷新 profiles']) as HTMLButtonElement;
@@ -34,6 +33,7 @@ export function renderRun(root: HTMLElement, ctx: any) {
   const poolPickSel = createEl('select') as HTMLSelectElement;
   const profilesBox = createEl('div', { className: 'list' });
   const profilesHint = createEl('div', { className: 'muted' }, ['']);
+  const resolvedHint = createEl('div', { className: 'muted' }, ['']);
 
   const extraInput = createEl('input', { placeholder: 'extra args (raw)' }) as HTMLInputElement;
 
@@ -118,22 +118,47 @@ export function renderRun(root: HTMLElement, ctx: any) {
 
     if (mode === 'profile') {
       const v = String(profilePickSel.value || '').trim();
-      profileValue.value = v;
       profilesHint.textContent = v ? '' : '请选择一个 profile';
+      resolvedHint.textContent = v ? `resolved: --profile ${v}` : '';
       return;
     }
     if (mode === 'profilepool') {
       const v = String(poolPickSel.value || '').trim();
-      profileValue.value = v;
       profilesHint.textContent = v ? '' : '请选择一个 pool keyword';
+      resolvedHint.textContent = v ? `resolved: --profilepool ${v}` : '';
       return;
     }
     if (mode === 'profiles') {
       const list = getSelectedProfiles();
-      profileValue.value = list.join(',');
       profilesHint.textContent = `selected=${list.length}`;
+      resolvedHint.textContent = list.length ? `resolved: --profiles ${list.join(',')}` : '';
       return;
     }
+  }
+
+  function resolveProfileArgsForRun(t: TemplateId) {
+    const supportsMultiProfile = t === 'phase3' || t === 'phase4';
+    const mode = profileModeSel.value;
+
+    if (!supportsMultiProfile) {
+      const v = String(profilePickSel.value || '').trim();
+      if (!v) return { ok: false as const, error: '请选择一个 profile', args: [] as string[] };
+      return { ok: true as const, args: ['--profile', v], mode: 'profile', value: v };
+    }
+
+    if (mode === 'profile') {
+      const v = String(profilePickSel.value || '').trim();
+      if (!v) return { ok: false as const, error: '请选择一个 profile', args: [] as string[] };
+      return { ok: true as const, args: ['--profile', v], mode: 'profile', value: v };
+    }
+    if (mode === 'profilepool') {
+      const v = String(poolPickSel.value || '').trim();
+      if (!v) return { ok: false as const, error: '请选择一个 pool keyword', args: [] as string[] };
+      return { ok: true as const, args: ['--profilepool', v], mode: 'profilepool', value: v };
+    }
+    const list = getSelectedProfiles();
+    if (list.length === 0) return { ok: false as const, error: '请勾选至少一个 profile', args: [] as string[] };
+    return { ok: true as const, args: ['--profiles', list.join(',')], mode: 'profiles', value: list.join(',') };
   }
 
   async function run() {
@@ -141,8 +166,6 @@ export function renderRun(root: HTMLElement, ctx: any) {
     const t = templateSel.value as TemplateId;
     const keyword = keywordInput.value.trim();
     const env = envSel.value.trim();
-    const mode = profileModeSel.value;
-    const profileVal = profileValue.value.trim();
     const extra = extraInput.value.trim();
 
     const common = buildArgs([
@@ -151,14 +174,12 @@ export function renderRun(root: HTMLElement, ctx: any) {
       ...(dryRun.checked ? ['--dry-run'] : []),
     ]);
 
-    const supportsMultiProfile = t === 'phase3' || t === 'phase4';
-    const profileArgs = supportsMultiProfile
-      ? mode === 'profile'
-        ? maybeFlag('--profile', profileVal)
-        : mode === 'profilepool'
-          ? maybeFlag('--profilepool', profileVal)
-          : maybeFlag('--profiles', profileVal)
-      : maybeFlag('--profile', profileVal);
+    const resolved = resolveProfileArgsForRun(t);
+    if (!resolved.ok) {
+      profilesHint.textContent = resolved.error;
+      return;
+    }
+    const profileArgs = resolved.args;
 
     const extraArgs = extra ? extra.split(' ').filter(Boolean) : [];
 
@@ -218,11 +239,11 @@ export function renderRun(root: HTMLElement, ctx: any) {
       ]),
       createEl('div', { className: 'row' }, [
         labeledInput('profile mode', profileModeSel),
-        labeledInput('selected', profileValue),
         createEl('div', { style: 'display:flex; gap:8px; align-items:center;' }, [profilePickSel, poolPickSel, profileRefreshBtn]),
         labeledInput('extra', extraInput),
       ]),
       profilesHint,
+      resolvedHint,
       profilesBox,
       actions,
       createEl('div', { className: 'muted' }, [
@@ -234,8 +255,6 @@ export function renderRun(root: HTMLElement, ctx: any) {
   templateSel.onchange = () => setProfileModes(templateSel.value as TemplateId);
   profileModeSel.onchange = () => syncProfileValueFromUI();
   profilePickSel.onchange = () => {
-    const v = profilePickSel.value;
-    if (v) profileValue.value = v;
     syncProfileValueFromUI();
   };
   poolPickSel.onchange = () => syncProfileValueFromUI();
