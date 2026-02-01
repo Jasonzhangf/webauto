@@ -20,6 +20,18 @@ import {
   updateXhsListCollection,
 } from '../../../../dist/modules/state/src/xiaohongshu-collect-state.js';
 
+function toCompat(state) {
+  const completed = state?.detailCollection?.completedNoteIds || [];
+  const failed = (state?.detailCollection?.failedNoteIds || []).map((x) => x.noteId).filter(Boolean);
+  return {
+    ...state,
+    // legacy orchestrator 兼容字段
+    targetCount: state?.listCollection?.targetCount || 0,
+    collectedNoteIds: completed,
+    failedNoteIds: failed,
+  };
+}
+
 export function getStateFilePath(keyword, env = 'download') {
   return resolveXhsCollectStatePath({ keyword, env });
 }
@@ -34,11 +46,45 @@ export function createInitialState(keyword, env = 'download', targetCount = 50) 
 }
 
 export async function loadState(keyword, env = 'download') {
-  return loadXhsCollectState({ keyword, env });
+  const state = await loadXhsCollectState({ keyword, env });
+  return toCompat(state);
 }
 
-export async function saveState(state, keyword, env = 'download') {
-  await saveXhsCollectState(state, { keyword, env });
+export async function saveState(a, b, c) {
+  // 兼容两种调用：
+  // - saveState(state, keyword, env)
+  // - saveState(keyword, env, state)  (legacy orchestrator 曾经这样调用)
+  const stateArg = a && typeof a === 'object' ? a : c;
+  const keyword = a && typeof a === 'object' ? b : a;
+  const env = a && typeof a === 'object' ? c : b;
+
+  const state = stateArg || {};
+  const base = await loadXhsCollectState({ keyword, env });
+  const merged = { ...base, ...state };
+
+  // legacy: targetCount / collectedNoteIds / failedNoteIds
+  if (typeof state.targetCount === 'number') {
+    merged.listCollection.targetCount = state.targetCount;
+  }
+  if (Array.isArray(state.collectedNoteIds)) {
+    const ids = state.collectedNoteIds.map((x) => String(x || '').trim()).filter(Boolean);
+    merged.detailCollection.completedNoteIds = Array.from(new Set(ids));
+    merged.detailCollection.completed = merged.detailCollection.completedNoteIds.length;
+  }
+  if (Array.isArray(state.failedNoteIds)) {
+    const ids = state.failedNoteIds.map((x) => String(x || '').trim()).filter(Boolean);
+    const unique = Array.from(new Set(ids));
+    merged.detailCollection.failedNoteIds = unique.map((noteId) => ({
+      noteId,
+      error: 'unknown',
+      timestamp: new Date().toISOString(),
+    }));
+    merged.detailCollection.failed = unique.length;
+  }
+  merged.detailCollection.total =
+    merged.detailCollection.completed + merged.detailCollection.failed + merged.detailCollection.skipped;
+
+  await saveXhsCollectState(merged, { keyword, env });
 }
 
 export async function initializeState(keyword, env = 'download', targetCount = 50) {
@@ -78,4 +124,3 @@ export async function getPendingItems(keyword, env) {
 export function formatStateSummary(state) {
   return formatXhsCollectStateSummary(state);
 }
-
