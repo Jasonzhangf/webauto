@@ -5,6 +5,14 @@
 ## 开发
 
 ```bash
+# 从仓库根目录（推荐：通过 webauto CLI）
+npm link
+npm --prefix apps/desktop-console install
+npm --prefix apps/desktop-console run build
+npm run build:services
+webauto ui console
+
+# 或者直接进入目录
 cd apps/desktop-console
 npm install
 npm run build
