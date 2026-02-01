@@ -83,7 +83,10 @@
     "health-check:runtime:watch": "node scripts/health-check-runtime.mjs --watch",
     "launch:diagnose": "node scripts/launch-with-diagnostics.mjs",
     "launch:diagnose:ui": "node scripts/launch-with-diagnostics.mjs --headless=false",
-    "launch:diagnose:dev": "node scripts/launch-with-diagnostics.mjs --dev"
+    "launch:diagnose:dev": "node scripts/launch-with-diagnostics.mjs --dev",
+    "dev:build-install-global": "node scripts/dev/build-install-global.mjs",
+    "dev:build-install-global:full": "node scripts/dev/build-install-global.mjs --full",
+    "dev:build-install-global:link": "node scripts/dev/build-install-global.mjs --link"
   },
   "devDependencies": {
     "@modelcontextprotocol/sdk": "^1.20.1",

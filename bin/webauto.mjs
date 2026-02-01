@@ -16,10 +16,12 @@ function usage() {
 
 Usage:
   webauto ui console [--build] [--install] [--check]
+  webauto dev install-global [--full] [--link]
 
 Examples:
   webauto ui console --check
   webauto ui console --build
+  webauto dev install-global --link
 `);
 }
 
@@ -98,7 +100,7 @@ async function uiConsole({ build, install, checkOnly }) {
 
 async function main() {
   const args = minimist(process.argv.slice(2), {
-    boolean: ['help', 'build', 'install', 'check'],
+    boolean: ['help', 'build', 'install', 'check', 'full', 'link'],
     alias: { h: 'help' },
   });
 
@@ -109,6 +111,7 @@ async function main() {
 
   const cmd = String(args._[0] || '').trim();
   const sub = String(args._[1] || '').trim();
+  const sub2 = String(args._[2] || '').trim();
 
   if (cmd === 'ui' && sub === 'console') {
     await uiConsole({
@@ -116,6 +119,15 @@ async function main() {
       install: args.install === true,
       checkOnly: args.check === true,
     });
+    return;
+  }
+
+  if (cmd === 'dev' && sub === 'install-global') {
+    const scriptPath = path.join(ROOT, 'scripts', 'dev', 'build-install-global.mjs');
+    const pass = [];
+    if (args.full === true) pass.push('--full');
+    if (args.link === true) pass.push('--link');
+    await run(process.platform === 'win32' ? 'node.exe' : 'node', [scriptPath, ...pass], { cwd: ROOT });
     return;
   }
 
@@ -127,4 +139,3 @@ main().catch((err) => {
   console.error(err?.stack || err?.message || String(err));
   process.exit(1);
 });
-
