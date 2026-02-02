@@ -13,6 +13,8 @@ ensureUtf8Console();
  *
  * 用法：
  *   node scripts/xiaohongshu/collect-content.mjs --keyword "手机膜" --target 50 --env debug
+ *   node scripts/xiaohongshu/collect-content.mjs --keyword "手机膜" --target 50 --env debug --profilepool xiaohongshu_batch
+ *   node scripts/xiaohongshu/collect-content.mjs --keyword "手机膜" --target 50 --env debug --profiles xiaohongshu_batch-1,xiaohongshu_batch-2
  *
  * 输出：
  *   ~/.webauto/download/xiaohongshu/{env}/{keyword}/
@@ -28,6 +30,7 @@ import minimist from 'minimist';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+import { listProfilesForPool } from './lib/profilepool.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, '../..');
@@ -84,6 +87,9 @@ async function main() {
   const keyword = argv.keyword || argv.k;
   const target = argv.target || argv.t;
   const env = argv.env || 'debug';
+  const profile = argv.profile ? String(argv.profile).trim() : '';
+  const profilepool = argv.profilepool ? String(argv.profilepool).trim() : '';
+  const profilesArg = argv.profiles ? String(argv.profiles).trim() : '';
   const skipPhase1 = argv['skip-phase1'] === true;
   const skipPhase2 = argv['skip-phase2'] === true;
 
@@ -97,6 +103,30 @@ async function main() {
     process.exit(1);
   }
 
+  const profiles = (() => {
+    if (profilepool) {
+      return Array.from(new Set(listProfilesForPool(profilepool)));
+    }
+    if (profilesArg) {
+      return Array.from(new Set(profilesArg.split(',').map((s) => s.trim()).filter(Boolean)));
+    }
+    if (profile) return [profile];
+    return [];
+  })();
+
+  if (profilepool && profiles.length === 0) {
+    console.error('❌ profilepool 为空，先创建 profiles');
+    console.error(`   node scripts/profilepool.mjs add "${profilepool}"`);
+    process.exit(2);
+  }
+
+  if (profilesArg && profiles.length === 0) {
+    console.error('❌ profiles 为空，请检查 --profiles 参数');
+    process.exit(2);
+  }
+
+  const phase2Profile = profiles.length > 0 ? profiles[0] : '';
+
   console.log(`
 ╔════════════════════════════════════════╗
 ║   小红书搜索采集工作流               ║
@@ -105,6 +135,10 @@ async function main() {
 关键字: ${keyword}
 目标数量: ${target}
 环境: ${env}
+Profile: ${profile || '(default)'}
+ProfilePool: ${profilepool || '(none)'}
+Profiles: ${profilesArg || '(none)'}
+Phase2 运行: ${phase2Profile || '(default)'}
   `);
 
   const t0 = Date.now();
@@ -113,10 +147,20 @@ async function main() {
     // Phase 1: 启动浏览器会话
     if (!skipPhase1) {
       console.log('\n📍 Phase 1: 启动浏览器会话');
-      await runScript(
-        path.join(__dirname, 'phase1-boot.mjs'),
-        []
-      );
+      if (profilepool) {
+        await runScript(
+          path.join(__dirname, '..', 'profilepool.mjs'),
+          ['login', profilepool, '--keep-session']
+        );
+      } else if (profiles.length > 1) {
+        for (const p of profiles) {
+          await runScript(path.join(__dirname, 'phase1-boot.mjs'), ['--profile', p]);
+        }
+      } else if (profile) {
+        await runScript(path.join(__dirname, 'phase1-boot.mjs'), ['--profile', profile]);
+      } else {
+        await runScript(path.join(__dirname, 'phase1-boot.mjs'), []);
+      }
     } else {
       console.log('\n⏭️  跳过 Phase 1（假设浏览器已启动）');
     }
@@ -124,20 +168,22 @@ async function main() {
     // Phase 2: 搜索 + 链接采集
     if (!skipPhase2) {
       console.log('\n📍 Phase 2: 搜索与链接采集');
-      await runScript(
-        path.join(__dirname, 'phase2-collect.mjs'),
-        ['--keyword', keyword, '--target', String(target), '--env', env]
-      );
+      const phase2Args = ['--keyword', keyword, '--target', String(target), '--env', env];
+      if (profilepool) phase2Args.push('--profilepool', profilepool);
+      if (profilesArg) phase2Args.push('--profiles', profilesArg);
+      if (profile) phase2Args.push('--profile', profile);
+      await runScript(path.join(__dirname, 'phase2-collect.mjs'), phase2Args);
     } else {
       console.log('\n⏭️  跳过 Phase 2（假设链接已存在）');
     }
 
     // Phase 4: 详情 + 评论采集
     console.log('\n📍 Phase 4: 详情与评论采集');
-    await runScript(
-      path.join(__dirname, 'phase4-harvest.mjs'),
-      ['--keyword', keyword, '--env', env]
-    );
+    const phase4Args = ['--keyword', keyword, '--env', env];
+    if (profilepool) phase4Args.push('--profilepool', profilepool);
+    if (profilesArg) phase4Args.push('--profiles', profilesArg);
+    if (profile) phase4Args.push('--profile', profile);
+    await runScript(path.join(__dirname, 'phase4-harvest.mjs'), phase4Args);
 
     const elapsed = Math.floor((Date.now() - t0) / 1000);
     const minutes = Math.floor(elapsed / 60);
@@ -165,4 +211,3 @@ async function main() {
 }
 
 main();
-

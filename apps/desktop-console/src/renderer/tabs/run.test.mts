@@ -21,3 +21,9 @@ test('non-phase1 single selection uses runtime picker', async () => {
   assert.match(src, /runtimePickSel\.style\.display = mode === 'profile' && useRuntimeForSingle \? '' : 'none';/);
   assert.match(src, /profilePickSel\.style\.display = mode === 'profile' && !useRuntimeForSingle \? '' : 'none';/);
 });
+
+test('profilepool mode shows profilesBox and auto-selects pool members', async () => {
+  const src = await readFile(runPath, 'utf8');
+  assert.match(src, /profilesBox\.style\.display = \(mode === 'profiles' \|\| mode === 'profilepool'\) \? '' : 'none';/);
+  assert.match(src, /mode === 'profilepool'[\s\S]*pid\.startsWith\(v\)/);
+});
