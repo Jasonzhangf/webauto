@@ -26,6 +26,7 @@ export function renderRun(root: HTMLElement, ctx: any) {
   templates.forEach((t) => templateSel.appendChild(createEl('option', { value: t.id }, [t.label])));
 
   const keywordInput = createEl('input', { value: ctx.settings?.defaultKeyword || '', placeholder: 'keyword' }) as HTMLInputElement;
+  const targetInput = createEl('input', { value: String(ctx.settings?.defaultTarget || ''), placeholder: 'target', type: 'number', min: '1' }) as HTMLInputElement;
   const envSel = createEl('select') as HTMLSelectElement;
   ['debug', 'prod'].forEach((x) => envSel.appendChild(createEl('option', { value: x }, [x])));
   envSel.value = ctx.settings?.defaultEnv || 'debug';
@@ -235,8 +236,10 @@ export function renderRun(root: HTMLElement, ctx: any) {
     const env = envSel.value.trim();
     const extra = extraInput.value.trim();
 
+    const target = targetInput.value.trim();
     const common = buildArgs([
       ...(keyword ? ['--keyword', keyword] : []),
+      ...(target ? ['--target', target] : []),
       ...(env ? ['--env', env] : []),
       ...(dryRun.checked ? ['--dry-run'] : []),
     ]);
@@ -317,6 +320,7 @@ export function renderRun(root: HTMLElement, ctx: any) {
       createEl('div', { className: 'row' }, [
         labeledInput('template', templateSel),
         labeledInput('keyword', keywordInput),
+        labeledInput('target', targetInput),
         labeledInput('env', envSel),
         createEl('div', { style: 'display:flex; flex-direction:column; gap:6px;' }, [
           createEl('label', {}, ['dry-run']),

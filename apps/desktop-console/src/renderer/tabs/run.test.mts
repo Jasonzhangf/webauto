@@ -29,6 +29,12 @@ test('fullCollect uses scripts scan result as script path when available', async
   assert.match(src, /const scriptPath = chosen\?\.path \|\| window\.api\.pathJoin\('scripts', 'xiaohongshu', 'collect-content\.mjs'\);/);
 });
 
+test('run template includes target argument', async () => {
+  const src = await readFile(runPath, 'utf8');
+  assert.match(src, /\['--target', target\]/);
+  assert.match(src, /labeledInput\('target', targetInput\)/);
+});
+
 test('non-phase1 single selection uses runtime picker', async () => {
   const src = await readFile(runPath, 'utf8');
   assert.match(src, /const useRuntimeForSingle = templateSel\.value !== 'phase1' && templateSel\.value !== 'fullCollect';/);
