@@ -471,6 +471,7 @@ await page.keyboard.press('Escape')
 - docs/arch/AGENTS.md：完整设计原则
 - scripts/xiaohongshu/README-workflows.md：脚本规范（参数/流程/完整脚本规范）
 - scripts/xiaohongshu/README.md：小红书脚本总览与标准入口
+- scripts/xiaohongshu/README-output.md：相应目录规范（输出结构与规则）
 
 ## 新建编排必须先读
 
