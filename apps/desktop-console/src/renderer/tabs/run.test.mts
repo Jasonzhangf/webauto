@@ -39,10 +39,14 @@ test('fullCollect and phase2 validate keyword/target before spawn', async () => 
   const src = await readFile(runPath, 'utf8');
   assert.match(src, /if \(t === 'fullCollect'\) \{/);
   assert.match(src, /fullCollect: 必须填写 keyword/);
+  assert.match(src, /alert\('Full Collect: 必须填写 keyword'\)/);
   assert.match(src, /fullCollect: 必须填写 target（正整数）/);
+  assert.match(src, /alert\('Full Collect: 必须填写 target（正整数）'\)/);
   assert.match(src, /if \(t === 'phase2'\) \{/);
   assert.match(src, /phase2: 必须填写 keyword/);
+  assert.match(src, /alert\('Phase2: 必须填写 keyword'\)/);
   assert.match(src, /phase2: 必须填写 target（正整数）/);
+  assert.match(src, /alert\('Phase2: 必须填写 target（正整数）'\)/);
 });
 
 test('non-phase1 single selection uses runtime picker', async () => {

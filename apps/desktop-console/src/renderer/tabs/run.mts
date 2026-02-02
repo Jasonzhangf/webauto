@@ -241,22 +241,26 @@ export function renderRun(root: HTMLElement, ctx: any) {
     if (t === 'fullCollect') {
       if (!keyword) {
         profilesHint.textContent = 'fullCollect: 必须填写 keyword';
+        alert('Full Collect: 必须填写 keyword');
         return;
       }
       const n = Number(target);
       if (!Number.isFinite(n) || n <= 0) {
         profilesHint.textContent = 'fullCollect: 必须填写 target（正整数）';
+        alert('Full Collect: 必须填写 target（正整数）');
         return;
       }
     }
     if (t === 'phase2') {
       if (!keyword) {
         profilesHint.textContent = 'phase2: 必须填写 keyword';
+        alert('Phase2: 必须填写 keyword');
         return;
       }
       const n = Number(target);
       if (!Number.isFinite(n) || n <= 0) {
         profilesHint.textContent = 'phase2: 必须填写 target（正整数）';
+        alert('Phase2: 必须填写 target（正整数）');
         return;
       }
     }
