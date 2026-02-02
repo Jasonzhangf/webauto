@@ -35,6 +35,16 @@ test('run template includes target argument', async () => {
   assert.match(src, /labeledInput\('target', targetInput\)/);
 });
 
+test('fullCollect and phase2 validate keyword/target before spawn', async () => {
+  const src = await readFile(runPath, 'utf8');
+  assert.match(src, /if \(t === 'fullCollect'\) \{/);
+  assert.match(src, /fullCollect: 必须填写 keyword/);
+  assert.match(src, /fullCollect: 必须填写 target（正整数）/);
+  assert.match(src, /if \(t === 'phase2'\) \{/);
+  assert.match(src, /phase2: 必须填写 keyword/);
+  assert.match(src, /phase2: 必须填写 target（正整数）/);
+});
+
 test('non-phase1 single selection uses runtime picker', async () => {
   const src = await readFile(runPath, 'utf8');
   assert.match(src, /const useRuntimeForSingle = templateSel\.value !== 'phase1' && templateSel\.value !== 'fullCollect';/);

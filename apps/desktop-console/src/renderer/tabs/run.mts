@@ -235,8 +235,32 @@ export function renderRun(root: HTMLElement, ctx: any) {
     const keyword = keywordInput.value.trim();
     const env = envSel.value.trim();
     const extra = extraInput.value.trim();
-
     const target = targetInput.value.trim();
+
+    // Enforce required params for full scripts.
+    if (t === 'fullCollect') {
+      if (!keyword) {
+        profilesHint.textContent = 'fullCollect: 必须填写 keyword';
+        return;
+      }
+      const n = Number(target);
+      if (!Number.isFinite(n) || n <= 0) {
+        profilesHint.textContent = 'fullCollect: 必须填写 target（正整数）';
+        return;
+      }
+    }
+    if (t === 'phase2') {
+      if (!keyword) {
+        profilesHint.textContent = 'phase2: 必须填写 keyword';
+        return;
+      }
+      const n = Number(target);
+      if (!Number.isFinite(n) || n <= 0) {
+        profilesHint.textContent = 'phase2: 必须填写 target（正整数）';
+        return;
+      }
+    }
+
     const common = buildArgs([
       ...(keyword ? ['--keyword', keyword] : []),
       ...(target ? ['--target', target] : []),
