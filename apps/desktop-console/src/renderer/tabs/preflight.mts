@@ -6,6 +6,8 @@ function buildArgs(parts: string[]) {
 
 export function renderPreflight(root: HTMLElement, ctx: any) {
   const filterInput = createEl('input', { value: '', placeholder: '过滤：profileId / alias / platform' }) as HTMLInputElement;
+  const selectAllBox = createEl('input', { type: 'checkbox' }) as HTMLInputElement;
+  const selectionHint = createEl('div', { className: 'muted' }, ['selected=0']);
   const onlyMissingFp = createEl('input', { type: 'checkbox' }) as HTMLInputElement;
   const regenPlatform = createEl('select') as HTMLSelectElement;
   [
@@ -66,8 +68,9 @@ export function renderPreflight(root: HTMLElement, ctx: any) {
     const header = createEl('div', {
       className: 'item',
       // One-row-per-profile, keep actions on a single line; avoid horizontal scroll.
-      style: 'display:grid; grid-template-columns: 180px 180px 120px minmax(0,1fr) 360px; gap:8px; font-weight:700; align-items:center; min-width:0;',
+      style: 'display:grid; grid-template-columns: 32px 180px 180px 120px minmax(0,1fr) 360px; gap:8px; font-weight:700; align-items:center; min-width:0;',
     });
+    header.appendChild(createEl('div', {}, ['sel']));
     header.appendChild(createEl('div', {}, ['profileId']));
     header.appendChild(createEl('div', {}, ['alias']));
     header.appendChild(createEl('div', {}, ['fingerprint']));
@@ -88,9 +91,12 @@ export function renderPreflight(root: HTMLElement, ctx: any) {
 
       const row = createEl('div', {
         className: 'item',
-        style: 'display:grid; grid-template-columns: 180px 180px 120px minmax(0,1fr) 360px; gap:8px; align-items:center; min-width:0;',
+        style: 'display:grid; grid-template-columns: 32px 180px 180px 120px minmax(0,1fr) 360px; gap:8px; align-items:center; min-width:0;',
       });
-
+      const rowSelect = createEl('input', { type: 'checkbox' }) as HTMLInputElement;
+      rowSelect.dataset.profileId = String(e.profileId || '');
+      rowSelect.onchange = () => updateSelectionHint();
+      row.appendChild(rowSelect);
       row.appendChild(createEl('div', {}, [String(e.profileId)]));
       row.appendChild(createEl('div', { style: 'min-width:0;' }, [aliasInput]));
       row.appendChild(createEl('div', { className: 'muted' }, [fpLabel]));
@@ -150,6 +156,12 @@ export function renderPreflight(root: HTMLElement, ctx: any) {
 
       listBox.appendChild(row);
     }
+    updateSelectionHint();
+  }
+
+  function updateSelectionHint() {
+    const selected = listBox.querySelectorAll('input[type="checkbox"][data-profile-id]:checked').length;
+    selectionHint.textContent = `selected=${selected}`;
   }
 
   async function refreshScan() {
@@ -161,6 +173,10 @@ export function renderPreflight(root: HTMLElement, ctx: any) {
 
   const toolbar = createEl('div', { className: 'row' }, [
     labeledInput('filter', filterInput),
+    createEl('div', { style: 'display:flex; flex-direction:column; gap:6px;' }, [
+      createEl('label', {}, ['select all']),
+      selectAllBox,
+    ]),
     createEl('div', { style: 'display:flex; flex-direction:column; gap:6px;' }, [
       createEl('label', {}, ['only missing fingerprint']),
       onlyMissingFp,
@@ -179,11 +195,19 @@ export function renderPreflight(root: HTMLElement, ctx: any) {
 
   filterInput.oninput = () => renderList();
   onlyMissingFp.onchange = () => renderList();
+  selectAllBox.onchange = () => {
+    const checked = selectAllBox.checked;
+    listBox.querySelectorAll('input[type="checkbox"][data-profile-id]').forEach((el) => {
+      (el as HTMLInputElement).checked = checked;
+    });
+    updateSelectionHint();
+  };
 
   root.appendChild(
     section('Profiles + Fingerprints (CRUD)', [
       toolbar,
       statusBox,
+      selectionHint,
       listBox,
       createEl('div', { className: 'muted' }, ['提示：profile 与 fingerprint 的真实路径均在 ~/.webauto 下；alias 只影响 UI 显示，不影响 profileId。']),
     ]),

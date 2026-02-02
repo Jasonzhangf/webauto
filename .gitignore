@@ -205,3 +205,5 @@ xiaohongshu_images/
 
 # User data directories
 ~/.webauto/
+# Desktop console build output
+apps/desktop-console/dist/

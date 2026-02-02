@@ -157,7 +157,7 @@ export function renderRun(root: HTMLElement, ctx: any) {
   }
 
   function resolveProfileArgsForRun(t: TemplateId) {
-    const supportsMultiProfile = t === 'phase3' || t === 'phase4';
+    const supportsMultiProfile = t === 'phase1' || t === 'phase3' || t === 'phase4';
     const mode = profileModeSel.value;
 
     if (!supportsMultiProfile) {

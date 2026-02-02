@@ -33,5 +33,6 @@ execSync(
 console.log('[desktop-console] copying renderer assets...');
 fs.mkdirSync(distRendererDir, { recursive: true });
 fs.copyFileSync(path.join(appRoot, 'src/renderer/index.html'), path.join(distRendererDir, 'index.html'));
+fs.copyFileSync(path.join(appRoot, 'src/renderer/tabs/run.mts'), path.join(distRendererDir, 'run.mts'));
 
 console.log('[desktop-console] build complete');
