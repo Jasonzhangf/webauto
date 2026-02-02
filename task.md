@@ -79,6 +79,102 @@
 
 ## 当前执行任务（2026-01-15）
 
+---
+
+## 回归测试接入（2026-02-01）
+
+目标：让 `npm run build` 每次都跑可重复的 UI 回归（不依赖外网/不破坏会话），并能给出可追踪的失败原因。
+
+### 验证证据
+
+- `npm run test:floating-panel:logic` 必须 PASS。
+- `node scripts/test-loop-all.mjs` 在服务未启动时应明确失败在 `ui:health`，并输出 HTTP/连接错误。
+- 在服务启动后：`node scripts/test-loop-all.mjs` 应 PASS（包含 preload + health + highlight）。
+- `npm run build` 包含 `ui:test`，会自动运行全局回环测试。
+
+### 已完成
+
+- [x] 接入 UI 回归到 `npm run build`（`ui:test` 不再是 echo）。
+- [x] 修复全局回环脚本 `scripts/test-loop-all.mjs`：
+  - [x] preload:esm 走 repo pinned electron（使用 `npx electron@39.2.7`）。
+  - [x] 增加 unified-api 健康检查 smoke。
+  - [x] 增加 highlight/clear-highlight API 回环。
+- [x] 新增测试脚本：
+  - `scripts/test-ui-preload-loop.mjs` - ESM Preload 回环
+  - `scripts/test-ui-health-smoke.mjs` - Unified API 健康检查
+  - `scripts/test-ui-highlight-loop.mjs` - 高亮 API 回环（会话不存在时 skip）
+- [x] 更新 `package.json` 的 `ui:test` 指向 `scripts/test-loop-all.mjs`
+- [x] 更新 `apps/floating-panel/package.json` 增加 `test:preload` 脚本
+
+### 变更（2026-02-01）
+
+- apps/floating-panel 标记为 deprecated：不再作为 build/test 的强依赖（目录保留，不做代码/测试更新）。
+- UI E2E 统一入口切换为小红书脚本：`npm run ui:e2e:xiaohongshu`。
+
+### 已验证（证据）
+
+- `node scripts/core-daemon.mjs start`：unified-api(7701)/browser-service(7704)/search-gate(7790) 均 healthy。
+- `node scripts/test-ui-health-smoke.mjs`：输出 ok（health JSON）。
+- `node scripts/test-loop-all.mjs`：服务启动后 3/3 PASS（其中 ui:highlight 在会话缺失时 skip）。
+
+### 待办
+
+- [ ] 明确 UI E2E（需要 Unified API + Browser Service + 会话）在本地如何跑、如何保证不破坏会话。
+- [ ] 明确"无会话时 ui:highlight 目前为 skip"的策略是否符合预期（是否需要强制启动/复用 weibo_fresh）。
+- [x] 建立覆盖率门槛：`npm run test:coverage` + `npm run test:coverage:check`（90% lines/branches/functions/statements）。
+- [ ] 补全覆盖率：当前约 77.5%，需补全 tests（覆盖 services/modules/libs/sharedmodule/runtime/launcher）。
+
+### 覆盖率现状（2026-02-01）
+
+- 当前覆盖率：**4.2%**（远低于 90% 目标）
+- 覆盖范围：services/modules/libs/sharedmodule/runtime/launcher（排除 apps/floating-panel/scripts/docs/tests）
+- 测试数量：154 tests / 22 suites / 152 pass / 2 skipped
+- 主要未覆盖模块：
+  - services/*：0% 覆盖率
+  - libs/*：0% 覆盖率  
+  - sharedmodule/*：0% 覆盖率
+  - modules/analyzer：0% 覆盖率
+  - modules/executable-container：0% 覆盖率
+  - modules/operations-framework：0% 覆盖率
+- 已覆盖模块（高覆盖率）：
+  - modules/config：~90% 覆盖率
+  - modules/state：~90% 覆盖率
+  - modules/xiaohongshu/app：~90% 覆盖率
+  - modules/operations：~90% 覆盖率
+
+### 覆盖率现状（2026-02-02 更新）
+
+- **当前覆盖率**：**77.47% lines** / **64.66% branches** / **86.15% functions** / **77.47% statements**
+- 覆盖范围：services/modules/libs/sharedmodule/runtime/launcher（排除 apps/floating-panel/scripts/docs/tests）
+- 测试数量：234 tests / 28 suites / 232 pass / 2 skipped
+- **已覆盖模块（高覆盖率 >=90%）**：
+  - modules/config：~99.77% lines
+  - modules/state：~92.66% lines
+  - modules/xiaohongshu/app：~92.26% lines
+  - modules/workflow/blocks/helpers：~99.36% lines
+  - modules/graph-engine：~100% lines
+  - modules/dom-branch-fetcher：~94.73% lines
+  - modules/session-manager：~89.17% lines
+  - modules/operations：~86.11% lines
+  - modules/workflow-builder：~77.84% lines
+- **低覆盖率模块（<60%）**：
+  - modules/browser-control：~47.51% lines（launcher.ts 34.96%, domSource.ts 54.38%, cli.ts 73.43%）
+  - modules/operations/src/operations：~67.42% lines（extract.ts 45.23%, find-child.ts 52%, highlight.ts 59.23%, type.ts 66.27%）
+  - operations/src/system/mouse.ts：54% lines
+  - modules/logging：75% lines
+  - modules/container-matcher：79.91% lines
+  - modules/container-registry：73.4% lines
+- **services 覆盖率**：
+  - services/shared/heartbeat.test.ts 存在
+  - services/unified-api/state-registry.test.ts 已添加（4 tests）
+  - services/unified-api/state-registry.ts 已修复为动态路径解析（支持测试 HOME 重定向）
+  - services/unified-api/server.ts 等核心服务文件仍为 0% 覆盖率（需要独立服务启动测试）
+- **到 90% 缺口**：~12.5% lines / ~25% branches 需要补充
+  - 优先级：browser-control（launcher/domSource）、operations/extract、logging、services/unified-api 核心文件
+
+
+
+
 ### 🎯 主线目标（按你的最新流程）
 
 1. Phase1：启动守门人（按依赖顺序确保 `Unified API(7701)` → `Browser Service(7704)` → 会话存在 → 已登录）。

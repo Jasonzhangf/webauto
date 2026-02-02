@@ -31,6 +31,8 @@ export interface SessionState {
   lastPhase?: string; // phase1/2/3/4 or workflowId
   lastActiveAt: string;
   createdAt: string;
+  status: 'running' | 'idle' | 'error';
+  pid?: number;
 }
 
 export interface EnvState {
@@ -54,9 +56,18 @@ export interface CoreState {
 
 // ===== State Registry Class =====
 
-const STATE_DIR = path.join(os.homedir(), '.webauto', 'state');
-const STATE_FILE = path.join(STATE_DIR, 'core-state.json');
-const LOG_FILE = path.join(os.homedir(), '.webauto', 'logs', 'state.jsonl');
+function resolveStatePaths() {
+  const home = os.homedir();
+  const stateDir = path.join(home, '.webauto', 'state');
+  const logDir = path.join(home, '.webauto', 'logs');
+  return {
+    home,
+    stateDir,
+    logDir,
+    stateFile: path.join(stateDir, 'core-state.json'),
+    logFile: path.join(logDir, 'state.jsonl'),
+  };
+}
 
 class StateRegistry {
   private state: CoreState;
@@ -64,8 +75,9 @@ class StateRegistry {
 
   constructor() {
     // Ensure directories exist
-    fs.mkdirSync(STATE_DIR, { recursive: true });
-    fs.mkdirSync(path.dirname(LOG_FILE), { recursive: true });
+    const paths = resolveStatePaths();
+    fs.mkdirSync(paths.stateDir, { recursive: true });
+    fs.mkdirSync(paths.logDir, { recursive: true });
 
     // Load or initialize state
     this.state = this.loadState();
@@ -81,8 +93,9 @@ class StateRegistry {
    */
   private loadState(): CoreState {
     try {
-      if (fs.existsSync(STATE_FILE)) {
-        const data = fs.readFileSync(STATE_FILE, 'utf-8');
+      const { stateFile } = resolveStatePaths();
+      if (fs.existsSync(stateFile)) {
+        const data = fs.readFileSync(stateFile, 'utf-8');
         const parsed = JSON.parse(data);
         // Validate and migrate if needed
         return this.validateState(parsed);
@@ -176,6 +189,7 @@ class StateRegistry {
       profileId,
       lastActiveAt: new Date().toISOString(),
       createdAt: new Date().toISOString(),
+      status: 'running' as const,
     };
 
     this.state.sessions[profileId] = {
@@ -257,7 +271,9 @@ class StateRegistry {
    */
   flush(): void {
     try {
-      fs.writeFileSync(STATE_FILE, JSON.stringify(this.state, null, 2), 'utf-8');
+      const { stateFile, stateDir } = resolveStatePaths();
+      fs.mkdirSync(stateDir, { recursive: true });
+      fs.writeFileSync(stateFile, JSON.stringify(this.state, null, 2), 'utf-8');
     } catch (err) {
       console.error('[StateRegistry] Failed to flush state:', err);
     }
@@ -275,7 +291,9 @@ class StateRegistry {
     };
 
     try {
-      fs.appendFileSync(LOG_FILE, JSON.stringify(entry) + '\n', 'utf-8');
+      const { logFile, logDir } = resolveStatePaths();
+      fs.mkdirSync(logDir, { recursive: true });
+      fs.appendFileSync(logFile, JSON.stringify(entry) + '\n', 'utf-8');
     } catch (err) {
       console.error('[StateRegistry] Failed to log change:', err);
     }
@@ -317,10 +335,13 @@ class StateRegistry {
 
 // Singleton instance
 let registryInstance: StateRegistry | null = null;
+let registryHome: string | null = null;
 
 export function getStateRegistry(): StateRegistry {
-  if (!registryInstance) {
+  const currentHome = os.homedir();
+  if (!registryInstance || registryHome !== currentHome) {
     registryInstance = new StateRegistry();
+    registryHome = currentHome;
   }
   return registryInstance;
 }

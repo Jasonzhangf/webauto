@@ -258,6 +258,8 @@ async function handleCommand(
         initialUrl: args.url,
         engine: args.engine || 'camoufox',
         fingerprintPlatform: args.fingerprintPlatform || null,
+        // Optional: pid of the owning script process.
+        ...(args.ownerPid ? { ownerPid: args.ownerPid } : {}),
       };
       const res = await manager.createSession(opts);
       options.onSessionStart?.();

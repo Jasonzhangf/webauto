@@ -1,5 +1,6 @@
 import { renderPreflight } from './tabs/preflight.mts';
 import { renderRun } from './tabs/run.mts';
+import { renderRuntime } from './tabs/runtime.mts';
 import { renderResults } from './tabs/results.mts';
 import { renderSettings } from './tabs/settings.mts';
 import { createEl } from './ui-components.mts';
@@ -10,11 +11,12 @@ declare global {
   }
 }
 
-type TabId = 'preflight' | 'run' | 'results' | 'settings';
+type TabId = 'preflight' | 'run' | 'runtime' | 'results' | 'settings';
 
 const tabs: Array<{ id: TabId; label: string; render: (root: HTMLElement, ctx: any) => void }> = [
   { id: 'preflight', label: '预处理', render: renderPreflight },
   { id: 'run', label: '调用', render: renderRun },
+  { id: 'runtime', label: 'Runtime', render: renderRuntime },
   { id: 'results', label: '结果', render: renderResults },
   { id: 'settings', label: '设置', render: renderSettings },
 ];
@@ -81,4 +83,3 @@ async function main() {
 }
 
 void main();
-

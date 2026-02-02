@@ -30,6 +30,7 @@ await withTempDir(async (homeDir) => {
   assert.equal(scan1.entries[0]!.profileId, 'xiaohongshu_fresh');
   assert.equal(!!scan1.entries[0]!.fingerprint, false);
 
+  // Regenerate fingerprint for the created profile.
   const regen = await store.fingerprintRegenerate({ profileId: 'xiaohongshu_fresh', platform: 'random' });
   assert.equal(regen.ok, true);
   assert.ok(regen.fingerprint.userAgent);
@@ -51,4 +52,3 @@ await withTempDir(async (homeDir) => {
   await assert.rejects(() => store.profileCreate({ profileId: '../bad' }), /profileId/);
   await assert.rejects(() => store.profileCreate({ profileId: '' }), /profileId/);
 });
-

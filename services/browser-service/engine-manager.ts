@@ -26,14 +26,24 @@ async function loadCamoufox(): Promise<any> {
 
 export async function launchEngineContext(opts: EngineLaunchOptions): Promise<BrowserContext> {
   if (opts.engine === 'camoufox') {
+    // Camoufox/Firefox is sensitive to non-integer window placement/size values.
+    // In practice, when the underlying launch path attempts to derive screenY/screenX from floats,
+    // Firefox can crash with: "Invalid type for property window.screenY. Expected int, got number".
+    // We clamp to safe integers here to avoid batch startup flakiness.
+    const winW = Math.max(300, Math.floor(Number(opts.viewport?.width || 1440)));
+    const winH = Math.max(300, Math.floor(Number(opts.viewport?.height || 900)));
+
+    // Headless camoufox is much more likely to hit window metric issues; prefer headful.
+    const headless = false;
+
     const camoufox = await loadCamoufox();
     const Camoufox = camoufox.Camoufox;
     if (!Camoufox) throw new Error('camoufox_invalid_api');
 
     const result = await Camoufox({
-      headless: !!opts.headless,
+      headless,
       os: ['windows', 'macos'],
-      window: [opts.viewport.width, opts.viewport.height],
+      window: [winW, winH],
       data_dir: opts.profileDir,
       humanize: true,
       locale: 'zh-CN',
@@ -77,4 +87,3 @@ export async function launchEngineContext(opts: EngineLaunchOptions): Promise<Br
     timezoneId: opts.timezoneId,
   });
 }
-

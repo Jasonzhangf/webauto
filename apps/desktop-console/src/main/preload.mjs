@@ -23,7 +23,22 @@ contextBridge.exposeInMainWorld('api', {
   profileDelete: (spec) => ipcRenderer.invoke('profile:delete', spec),
   fingerprintDelete: (spec) => ipcRenderer.invoke('fingerprint:delete', spec),
   fingerprintRegenerate: (spec) => ipcRenderer.invoke('fingerprint:regenerate', spec),
-  osOpenPath: (p) => ipcRenderer.invoke('os:openPath', { path: p }),
+ osOpenPath: (p) => ipcRenderer.invoke('os:openPath', { path: p }),
+
+  // Runtime Dashboard APIs
+  runtimeListSessions: () => ipcRenderer.invoke('runtime:listSessions'),
+  runtimeFocus: (spec) => ipcRenderer.invoke('runtime:focus', spec),
+  runtimeKill: (spec) => ipcRenderer.invoke('runtime:kill', spec),
+  runtimeRestartPhase1: (spec) => ipcRenderer.invoke('runtime:restartPhase1', spec),
+  runtimeSetBrowserTitle: (spec) => ipcRenderer.invoke('runtime:setBrowserTitle', spec),
+  runtimeSetHeaderBar: (spec) => ipcRenderer.invoke('runtime:setHeaderBar', spec),
+
+  // Event listeners
+  onSettingsChanged: (handler) => {
+    const fn = (_, payload) => handler(payload);
+    ipcRenderer.on('settings:changed', fn);
+    return () => ipcRenderer.removeListener('settings:changed', fn);
+  },
 
   onCmdEvent: (handler) => {
     const fn = (_, payload) => handler(payload);

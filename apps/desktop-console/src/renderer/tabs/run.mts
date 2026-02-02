@@ -44,7 +44,7 @@ export function renderRun(root: HTMLElement, ctx: any) {
   }
 
   function setProfileModes(templateId: TemplateId) {
-    const supportsMultiProfile = templateId === 'phase3' || templateId === 'phase4';
+    const supportsMultiProfile = templateId === 'phase1' || templateId === 'phase3' || templateId === 'phase4';
     profileModeSel.textContent = '';
     const modes = supportsMultiProfile
       ? [
@@ -69,18 +69,30 @@ export function renderRun(root: HTMLElement, ctx: any) {
   async function refreshProfiles() {
     profilePickSel.textContent = '';
     profilePickSel.appendChild(createEl('option', { value: '' }, ['(选择已有 profile，填充到输入框)']));
-    const res = await window.api.profilesList().catch(() => null);
-    const profiles: string[] = res?.profiles || [];
-    profiles.forEach((p) => profilePickSel.appendChild(createEl('option', { value: p }, [p])));
+    const profilesRes = await window.api.profilesList().catch(() => null);
+    const profiles: string[] = profilesRes?.profiles || [];
+    const aliases = (ctx.settings?.profileAliases && typeof ctx.settings.profileAliases === 'object') ? ctx.settings.profileAliases : {};
+    profiles.forEach((p) => {
+      const alias = String((aliases as any)[p] || '').trim();
+      const label = alias ? `${alias} (${p})` : p;
+      profilePickSel.appendChild(createEl('option', { value: p }, [label]));
+    });
 
     poolPickSel.textContent = '';
     poolPickSel.appendChild(createEl('option', { value: '' }, ['(选择 pool keyword)']));
-    derivePoolKeys(profiles).forEach((k) => poolPickSel.appendChild(createEl('option', { value: k }, [k])));
+    const poolKeys = derivePoolKeys(profiles);
+    poolKeys.forEach((k) => poolPickSel.appendChild(createEl('option', { value: k }, [String(k)])));
+    
+    // Auto-select first pool if available and pool mode is active
+    if (poolKeys.length > 0 && profileModeSel.value === 'profilepool' && !poolPickSel.value) {
+      poolPickSel.value = poolKeys[0];
+      syncProfileValueFromUI();
+    }
 
     profilesBox.textContent = '';
     profilesHint.textContent = '';
     const selected = new Set<string>();
-    const preferSingle = profiles.includes('xiaohongshu_fresh') ? 'xiaohongshu_fresh' : profiles[0] || '';
+    const preferSingle = profiles[0] || '';
     if (preferSingle) {
       profilePickSel.value = preferSingle;
       selected.add(preferSingle);
@@ -91,13 +103,21 @@ export function renderRun(root: HTMLElement, ctx: any) {
       cb.dataset.profile = p;
       cb.checked = selected.has(p);
       cb.onchange = () => syncProfileValueFromUI();
-      const label = createEl('label', { for: id, style: 'cursor:pointer;' }, [p]);
+      const alias = String((aliases as any)[p] || '').trim();
+      const labelText = alias ? `${alias} (${p})` : p;
+      const label = createEl('label', { for: id, style: 'cursor:pointer;' }, [labelText]);
       const row = createEl('div', { className: 'row', style: 'align-items:center;' }, [cb, label]);
       profilesBox.appendChild(row);
     });
 
     syncProfileValueFromUI();
   }
+
+  // When Preflight updates aliases or profile lists, re-render.
+  window.api.onSettingsChanged((next: any) => {
+    ctx.settings = next;
+    void refreshProfiles();
+  });
 
   function getSelectedProfiles(): string[] {
     const selected: string[] = [];
@@ -186,9 +206,23 @@ export function renderRun(root: HTMLElement, ctx: any) {
     let script = '';
     let args: string[] = [];
 
-    if (t === 'phase1') {
+  if (t === 'phase1') {
       script = window.api.pathJoin('scripts', 'xiaohongshu', 'phase1-boot.mjs');
       args = buildArgs([script, ...profileArgs]);
+      // Special case: Phase1 + profilepool → use profilepool.mjs login
+      if (resolved.mode === 'profilepool' && resolved.value) {
+        script = window.api.pathJoin('scripts', 'profilepool.mjs');
+        args = buildArgs([
+          script,
+          'login',
+          resolved.value,
+          '--keep-session',
+          '--timeout-sec',
+          String(ctx.settings?.timeouts?.loginTimeoutSec || 900),
+          ...(ctx.settings?.unifiedApiUrl ? ['--unified-api', String(ctx.settings.unifiedApiUrl)] : []),
+          ...(ctx.settings?.browserServiceUrl ? ['--browser-service', String(ctx.settings.browserServiceUrl)] : []),
+        ]);
+      }
     } else if (t === 'phase2') {
       script = window.api.pathJoin('scripts', 'xiaohongshu', 'phase2-collect.mjs');
       args = buildArgs([script, ...profileArgs, ...common, ...extraArgs]);
@@ -253,7 +287,18 @@ export function renderRun(root: HTMLElement, ctx: any) {
   );
 
   templateSel.onchange = () => setProfileModes(templateSel.value as TemplateId);
-  profileModeSel.onchange = () => syncProfileValueFromUI();
+  profileModeSel.onchange = async () => {
+    syncProfileValueFromUI();
+    if (profileModeSel.value === 'profilepool') {
+      const res = await window.api.profilesList().catch(() => null);
+      const profiles = res?.profiles || [];
+      const poolKeys = derivePoolKeys(profiles);
+      if (poolKeys.length > 0 && !poolPickSel.value) {
+        poolPickSel.value = poolKeys[0];
+        syncProfileValueFromUI();
+      }
+    }
+  };
   profilePickSel.onchange = () => {
     syncProfileValueFromUI();
   };

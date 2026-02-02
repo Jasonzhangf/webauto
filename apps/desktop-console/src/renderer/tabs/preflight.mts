@@ -34,6 +34,7 @@ export function renderPreflight(root: HTMLElement, ctx: any) {
     else nextAliases[key] = val;
     const next = await window.api.settingsSet({ profileAliases: nextAliases });
     ctx.settings = next;
+    // main process broadcasts settings:changed; other tabs will refresh automatically.
   }
 
   function toLower(x: any) {
@@ -64,7 +65,8 @@ export function renderPreflight(root: HTMLElement, ctx: any) {
 
     const header = createEl('div', {
       className: 'item',
-      style: 'display:grid; grid-template-columns: 220px 220px 120px 1fr 420px; gap:10px; font-weight:700;',
+      // One-row-per-profile, keep actions on a single line; avoid horizontal scroll.
+      style: 'display:grid; grid-template-columns: 180px 180px 120px minmax(0,1fr) 360px; gap:8px; font-weight:700; align-items:center; min-width:0;',
     });
     header.appendChild(createEl('div', {}, ['profileId']));
     header.appendChild(createEl('div', {}, ['alias']));
@@ -86,21 +88,28 @@ export function renderPreflight(root: HTMLElement, ctx: any) {
 
       const row = createEl('div', {
         className: 'item',
-        style: 'display:grid; grid-template-columns: 220px 220px 120px 1fr 420px; gap:10px; align-items:center;',
+        style: 'display:grid; grid-template-columns: 180px 180px 120px minmax(0,1fr) 360px; gap:8px; align-items:center; min-width:0;',
       });
 
       row.appendChild(createEl('div', {}, [String(e.profileId)]));
-      row.appendChild(aliasInput);
+      row.appendChild(createEl('div', { style: 'min-width:0;' }, [aliasInput]));
       row.appendChild(createEl('div', { className: 'muted' }, [fpLabel]));
-      row.appendChild(createEl('div', { className: 'muted', title: String(fp?.userAgent || '') }, [String(fp?.userAgent || '')]));
+      row.appendChild(
+        createEl(
+          'div',
+          { className: 'muted', style: 'overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0;', title: String(fp?.userAgent || '') },
+          [String(fp?.userAgent || '')],
+        ),
+      );
 
-      const actions = createEl('div', { style: 'display:flex; gap:8px; flex-wrap:wrap; align-items:center;' });
-      const btnOpenProfile = createEl('button', { className: 'secondary' }, ['打开 profile']);
-      const btnOpenFp = createEl('button', { className: 'secondary' }, ['打开指纹']);
-      const btnSaveAlias = createEl('button', { className: 'secondary' }, ['保存 alias']);
-      const btnRegenFp = createEl('button', {}, ['重生成指纹']);
-      const btnDelFp = createEl('button', { className: 'secondary' }, ['删除指纹']);
-      const btnDelProfile = createEl('button', { className: 'danger' }, ['删除 profile']);
+      const actions = createEl('div', { style: 'display:flex; gap:6px; flex-wrap:nowrap; align-items:center; overflow:hidden; justify-content:flex-end;' });
+      const btnOpenProfile = createEl('button', { className: 'secondary' }, ['打开']);
+      const btnOpenFp = createEl('button', { className: 'secondary' }, ['指纹']);
+      const btnSaveAlias = createEl('button', { className: 'secondary' }, ['保存']);
+      // Reduce width for the frequently-used action.
+      const btnRegenFp = createEl('button', {}, ['重生']);
+      const btnDelFp = createEl('button', { className: 'secondary' }, ['删指']);
+      const btnDelProfile = createEl('button', { className: 'danger' }, ['删档']);
 
       btnOpenProfile.onclick = () => void window.api.osOpenPath(e.profileDir);
       btnOpenFp.onclick = () => void window.api.osOpenPath(e.fingerprintPath);

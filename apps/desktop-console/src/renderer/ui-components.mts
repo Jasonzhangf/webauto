@@ -16,7 +16,8 @@ export function createEl<K extends keyof HTMLElementTagNameMap>(
 }
 
 export function labeledInput(label: string, input: HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement) {
-  const wrap = createEl('div', { style: 'display:flex; flex-direction:column; gap:6px; min-width:220px;' });
+  // Avoid forcing wide min-width so toolbars can fit on smaller windows.
+  const wrap = createEl('div', { style: 'display:flex; flex-direction:column; gap:6px; min-width:140px; max-width:260px;' });
   wrap.appendChild(createEl('label', {}, [label]));
   wrap.appendChild(input);
   return wrap;
@@ -28,4 +29,3 @@ export function section(title: string, children: HTMLElement[]) {
   children.forEach((c) => card.appendChild(c));
   return card;
 }
-

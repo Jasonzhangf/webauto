@@ -12,6 +12,7 @@ export type DesktopConsoleSettings = {
   defaultKeyword: string;
   timeouts: { loginTimeoutSec: number; cmdTimeoutSec: number };
   profileAliases: Record<string, string>;
+  profileColors: Record<string, string>;
 };
 
 type DefaultsFile = Partial<DesktopConsoleSettings> & {
@@ -83,8 +84,23 @@ function normalizeSettings(defaults: Partial<DesktopConsoleSettings>, input: Par
       ),
     },
     profileAliases: aliases,
+    profileColors: normalizeColorMap((input as any).profileColors ?? (defaults as any).profileColors ?? {}),
   };
   return merged;
+}
+
+function normalizeColorMap(raw: any): Record<string, string> {
+  const out: Record<string, string> = {};
+  if (!raw || typeof raw !== 'object') return out;
+  for (const [k, v] of Object.entries(raw as any)) {
+    const key = String(k || '').trim();
+    const val = String(v || '').trim();
+    if (!key || !val) continue;
+    // Accept only simple #RRGGBB to avoid injecting unexpected CSS.
+    if (!/^#[0-9a-fA-F]{6}$/.test(val)) continue;
+    out[key] = val;
+  }
+  return out;
 }
 
 async function readDefaultSettingsFromAppRoot(appRoot: string): Promise<DesktopConsoleSettings> {

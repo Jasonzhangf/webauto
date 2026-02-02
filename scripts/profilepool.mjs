@@ -216,60 +216,102 @@ async function main() {
     await ensureServices();
 
     const results = [];
-    for (const profileId of profiles) {
-      ensureProfileDir(profileId);
-      console.log(`\n➡️  profile=${profileId}`);
 
-      try {
-        await startProfile({ profile: profileId, headless: false, url: 'https://www.xiaohongshu.com' });
+    // 2) Start all profiles in parallel
+    const startResults = await Promise.all(
+      profiles.map(async (profileId) => {
+        ensureProfileDir(profileId);
+        console.log(`\n➡️  profile=${profileId}`);
+        try {
+          await startProfile({ profile: profileId, headless: false, url: 'https://www.xiaohongshu.com', ownerPid: process.pid });
+          return { profileId, ok: true };
+        } catch (e) {
+          console.warn(`   ❌ start failed: ${e?.message || String(e)}`);
+          return { profileId, ok: false, error: e?.message || String(e) };
+        }
+      }),
+    );
 
+    const started = startResults.filter((r) => r.ok).map((r) => r.profileId);
+    const failedStart = startResults.filter((r) => !r.ok);
+    if (failedStart.length) {
+      failedStart.forEach((r) => results.push({ profileId: r.profileId, ok: false, error: r.error || 'start failed' }));
+    }
+
+    // 3) Check login status in parallel
+    const loginChecks = await Promise.all(
+      started.map(async (profileId) => {
         const first = await checkLoginOnce(profileId, unifiedApiUrl).catch(() => ({ isLoggedIn: false, matched: '' }));
-        if (first.isLoggedIn && skipLogged) {
-          console.log(`   ✅ already logged in (${first.matched || 'login_anchor'})`);
-        } else {
-          console.log(`   ⏳ waiting manual login...`);
-          console.log(`   - 请在打开的浏览器窗口里完成登录（扫码/短信等）`);
+        return { profileId, ...first };
+      }),
+    );
+
+    const needLogin = loginChecks.filter((r) => !r.isLoggedIn || !skipLogged);
+    const alreadyLogged = loginChecks.filter((r) => r.isLoggedIn && skipLogged);
+    alreadyLogged.forEach((r) => {
+      console.log(`   ✅ already logged in (${r.profileId})`);
+    });
+
+    // 4) Wait manual login in parallel
+    const loginResults = await Promise.all(
+      needLogin.map(async (r) => {
+        if (r.isLoggedIn && skipLogged) return { profileId: r.profileId, ok: true, matched: r.matched };
+        console.log(`   ⏳ waiting manual login... (${r.profileId})`);
+        console.log(`   - 请在打开的浏览器窗口里完成登录（扫码/短信等）`);
+        try {
           const loginRes = await ensureLogin({
-            sessionId: profileId,
+            sessionId: r.profileId,
             serviceUrl: unifiedApiUrl,
             maxWaitMs: timeoutSec * 1000,
             checkIntervalMs: checkIntervalSec * 1000,
           });
-          if (!loginRes?.isLoggedIn) {
-            throw new Error(loginRes?.error || 'login timeout');
-          }
-          console.log(`   ✅ logged in (${loginRes.matchedContainer || 'login_anchor'})`);
+          if (!loginRes?.isLoggedIn) throw new Error(loginRes?.error || 'login timeout');
+          console.log(`   ✅ logged in (${r.profileId})`);
+          return { profileId: r.profileId, ok: true, matched: loginRes.matchedContainer || '' };
+        } catch (e) {
+          console.warn(`   ❌ login failed (${r.profileId}): ${e?.message || String(e)}`);
+          return { profileId: r.profileId, ok: false, error: e?.message || String(e) };
         }
+      }),
+    );
 
-        // Cookie stable save + autoCookies start
-        const cookieRes = await monitorCookie({
-          profile: profileId,
-          unifiedApiUrl,
-          browserServiceUrl,
-          scanIntervalMs,
-          stableCount,
-        });
-        console.log(`   🍪 cookie saved=${cookieRes.saved} path=${cookieRes.cookiePath}`);
+    const loggedInProfiles = loginResults.filter((r) => r.ok).map((r) => r.profileId);
+    const failedLogin = loginResults.filter((r) => !r.ok);
+    failedLogin.forEach((r) => results.push({ profileId: r.profileId, ok: false, error: r.error || 'login failed' }));
 
-        if (!keepSession) {
-          await browserServiceCommand('stop', { profileId }, browserServiceUrl).catch(() => null);
+    // 5) Save cookies in parallel
+    const cookieResults = await Promise.all(
+      loggedInProfiles.map(async (profileId) => {
+        try {
+          const cookieRes = await monitorCookie({
+            profile: profileId,
+            unifiedApiUrl,
+            browserServiceUrl,
+            scanIntervalMs,
+            stableCount,
+          });
+          console.log(`   🍪 cookie saved=${cookieRes.saved} path=${cookieRes.cookiePath} (${profileId})`);
+          return {
+            profileId,
+            ok: true,
+            loggedIn: true,
+            cookiePath: cookieRes.cookiePath,
+            autoCookiesStarted: cookieRes.autoCookiesStarted,
+            scanRounds: cookieRes.scanRounds,
+          };
+        } catch (e) {
+          console.warn(`   ❌ cookie save failed (${profileId}): ${e?.message || String(e)}`);
+          return { profileId, ok: false, error: e?.message || String(e) };
         }
+      }),
+    );
 
-        results.push({
-          profileId,
-          ok: true,
-          loggedIn: true,
-          cookiePath: cookieRes.cookiePath,
-          autoCookiesStarted: cookieRes.autoCookiesStarted,
-          scanRounds: cookieRes.scanRounds,
-        });
-      } catch (e) {
-        results.push({ profileId, ok: false, error: e?.message || String(e) });
-        console.warn(`   ❌ ${e?.message || String(e)}`);
-        if (!keepSession) {
-          await browserServiceCommand('stop', { profileId }, browserServiceUrl).catch(() => null);
-        }
-      }
+    cookieResults.forEach((r) => results.push(r));
+
+    if (!keepSession) {
+      await Promise.all(
+        started.map((profileId) => browserServiceCommand('stop', { profileId }, browserServiceUrl).catch(() => null)),
+      );
     }
 
     const summary = {

@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
+import fs from 'node:fs';
+import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { run as runCli } from '../src/cli.js';
 
@@ -36,4 +38,67 @@ test('status cli works in test mode', async () => {
   assert.equal(result.success, true);
   assert.equal(result.data.healthy, true);
   delete process.env.BROWSER_CONTROL_TEST_MODE;
+});
+
+test('highlight commands should fail without active page (fixture mode does not create page)', async () => {
+  await assert.rejects(
+    () =>
+      runCli([
+        'highlight',
+        '--fixture',
+        fixture,
+        '--url',
+        'https://weibo.com/',
+        '--selector',
+        '#app'
+      ]),
+    /no active page/
+  );
+
+  await assert.rejects(
+    () =>
+      runCli([
+        'highlight-dom-path',
+        '--fixture',
+        fixture,
+        '--url',
+        'https://weibo.com/',
+        '--dom-path',
+        'root/0'
+      ]),
+    /no active page/
+  );
+});
+
+test('dom-dump should require url or fixture', async () => {
+  await assert.rejects(
+    () => runCli(['dom-dump']),
+    /Either --url or --fixture must be provided/
+  );
+});
+
+test('dom-tree should require url or fixture', async () => {
+  await assert.rejects(
+    () => runCli(['dom-tree']),
+    /Either --url or --fixture must be provided/
+  );
+});
+
+test('unknown command should throw', async () => {
+  await assert.rejects(
+    () => runCli(['unknown-cmd']),
+    /Unknown command/
+  );
+});
+
+test('dom-dump should write output file when --output provided', async () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'webauto-dom-'));
+  const output = path.join(tmpDir, 'out.html');
+
+  const result = await runCli(['dom-dump', '--fixture', fixture, '--output', output]);
+  assert.equal(result.success, true);
+  assert.equal(result.data.output, output);
+  assert.ok(fs.existsSync(output));
+  const content = fs.readFileSync(output, 'utf-8');
+  assert.ok(content.includes('<div id="app"'));
 });
