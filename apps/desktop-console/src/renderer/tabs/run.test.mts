@@ -11,13 +11,21 @@ test('phase1 supports multi-profile modes in resolveProfileArgsForRun', async ()
   // Ensure Phase1 is included in supportsMultiProfile predicate.
   assert.match(
     src,
-    /supportsMultiProfile\s*=\s*t\s*===\s*'phase1'\s*\|\|\s*t\s*===\s*'phase3'\s*\|\|\s*t\s*===\s*'phase4'/,
+    /supportsMultiProfile\s*=\s*t\s*===\s*'fullCollect'\s*\|\|\s*t\s*===\s*'phase1'/,
+  );
+});
+
+test('fullCollect supports multi-profile modes', async () => {
+  const src = await readFile(runPath, 'utf8');
+  assert.match(
+    src,
+    /supportsMultiProfile\s*=\s*t\s*===\s*'fullCollect'\s*\|\|\s*t\s*===\s*'phase1'/,
   );
 });
 
 test('non-phase1 single selection uses runtime picker', async () => {
   const src = await readFile(runPath, 'utf8');
-  assert.match(src, /const useRuntimeForSingle = templateSel\.value !== 'phase1';/);
+  assert.match(src, /const useRuntimeForSingle = templateSel\.value !== 'phase1' && templateSel\.value !== 'fullCollect';/);
   assert.match(src, /runtimePickSel\.style\.display = mode === 'profile' && useRuntimeForSingle \? '' : 'none';/);
   assert.match(src, /profilePickSel\.style\.display = mode === 'profile' && !useRuntimeForSingle \? '' : 'none';/);
 });

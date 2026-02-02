@@ -4,11 +4,12 @@ function buildArgs(parts: string[]) {
   return parts.filter((x) => x != null && String(x).trim() !== '');
 }
 
-type TemplateId = 'phase1' | 'phase2' | 'phase3' | 'phase4' | 'smartReply' | 'virtualLike';
+type TemplateId = 'fullCollect' | 'phase1' | 'phase2' | 'phase3' | 'phase4' | 'smartReply' | 'virtualLike';
 
 export function renderRun(root: HTMLElement, ctx: any) {
   const templateSel = createEl('select') as HTMLSelectElement;
   const templates: Array<{ id: TemplateId; label: string }> = [
+    { id: 'fullCollect', label: 'Full Collect (Phase1-4)' },
     { id: 'phase1', label: 'Phase1 boot' },
     { id: 'phase2', label: 'Phase2 collect links' },
     { id: 'phase3', label: 'Phase3 interact' },
@@ -45,7 +46,8 @@ export function renderRun(root: HTMLElement, ctx: any) {
   }
 
   function setProfileModes(templateId: TemplateId) {
-    const supportsMultiProfile = templateId === 'phase1' || templateId === 'phase3' || templateId === 'phase4';
+    const supportsMultiProfile =
+      templateId === 'fullCollect' || templateId === 'phase1' || templateId === 'phase3' || templateId === 'phase4';
     profileModeSel.textContent = '';
     const modes = supportsMultiProfile
       ? [
@@ -148,7 +150,7 @@ export function renderRun(root: HTMLElement, ctx: any) {
 
   function syncProfileValueFromUI() {
     const mode = profileModeSel.value;
-    const useRuntimeForSingle = templateSel.value !== 'phase1';
+    const useRuntimeForSingle = templateSel.value !== 'phase1' && templateSel.value !== 'fullCollect';
     profilePickSel.style.display = mode === 'profile' && !useRuntimeForSingle ? '' : 'none';
     runtimePickSel.style.display = mode === 'profile' && useRuntimeForSingle ? '' : 'none';
     poolPickSel.style.display = mode === 'profilepool' ? '' : 'none';
@@ -183,9 +185,9 @@ export function renderRun(root: HTMLElement, ctx: any) {
   }
 
   function resolveProfileArgsForRun(t: TemplateId) {
-    const supportsMultiProfile = t === 'phase1' || t === 'phase3' || t === 'phase4';
+    const supportsMultiProfile = t === 'fullCollect' || t === 'phase1' || t === 'phase3' || t === 'phase4';
     const mode = profileModeSel.value;
-    const useRuntimeForSingle = t !== 'phase1';
+    const useRuntimeForSingle = t !== 'phase1' && t !== 'fullCollect';
 
     if (!supportsMultiProfile) {
       const v = String(useRuntimeForSingle ? runtimePickSel.value : profilePickSel.value || '').trim();
@@ -233,7 +235,10 @@ export function renderRun(root: HTMLElement, ctx: any) {
     let script = '';
     let args: string[] = [];
 
-  if (t === 'phase1') {
+  if (t === 'fullCollect') {
+      script = window.api.pathJoin('scripts', 'xiaohongshu', 'collect-content.mjs');
+      args = buildArgs([script, ...profileArgs, ...common, ...extraArgs]);
+    } else if (t === 'phase1') {
       script = window.api.pathJoin('scripts', 'xiaohongshu', 'phase1-boot.mjs');
       args = buildArgs([script, ...profileArgs]);
       // Special case: Phase1 + profilepool → use profilepool.mjs login
