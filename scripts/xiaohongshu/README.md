@@ -4,10 +4,13 @@
 
 ### 统一入口
 ```bash
-# 一个命令跑完所有阶段（50 条示例）
-node scripts/xiaohongshu/search/orchestrator.mjs --keyword "手机膜" --target 50 --env download
+# 一个命令跑完所有阶段（单 profile）
+node scripts/xiaohongshu/collect-content.mjs --keyword "手机膜" --target 50 --env debug --profile xiaohongshu_fresh
 
-# Debug 模式：每步高亮容器 + 截图回放
+# 一个命令跑完所有阶段（profilepool，Phase2 自动取第一个）
+node scripts/xiaohongshu/collect-content.mjs --keyword "手机膜" --target 50 --env debug --profilepool xiaohongshu_batch
+
+# Debug 模式：每步高亮容器 + 截图回放（仅 workflow 版本）
 debug/node scripts/xiaohongshu/search/orchestrator.mjs --keyword "手机膜" --target 20 --debug
 
 # 断点恢复（失败后继续）

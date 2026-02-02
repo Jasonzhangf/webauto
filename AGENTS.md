@@ -469,6 +469,14 @@ await page.keyboard.press('Escape')
 - docs/arch/PORTS.md：端口与环境变量
 - docs/arch/LAUNCHER.md：启动器架构
 - docs/arch/AGENTS.md：完整设计原则
+- scripts/xiaohongshu/README-workflows.md：脚本规范（参数/流程/完整脚本规范）
+- scripts/xiaohongshu/README.md：小红书脚本总览与标准入口
+
+## 新建编排必须先读
+
+新增或调整任何“完整脚本/编排脚本”前，必须先阅读并遵循：
+- scripts/xiaohongshu/README-workflows.md
+- scripts/xiaohongshu/README.md
 
 ---
 

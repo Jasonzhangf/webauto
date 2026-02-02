@@ -36,14 +36,20 @@
 ### 用法
 
 ```bash
-# 完整采集
-node scripts/xiaohongshu/collect-content.mjs --keyword "手机膜" --target 50 --env debug
+# 完整采集（单 profile）
+node scripts/xiaohongshu/collect-content.mjs --keyword "手机膜" --target 50 --env debug --profile xiaohongshu_fresh
+
+# 完整采集（profilepool，Phase2 自动取第一个）
+node scripts/xiaohongshu/collect-content.mjs --keyword "手机膜" --target 50 --env debug --profilepool xiaohongshu_batch
+
+# 完整采集（手动 profiles 分片，Phase2 自动取第一个）
+node scripts/xiaohongshu/collect-content.mjs --keyword "手机膜" --target 50 --env debug --profiles xiaohongshu_batch-1,xiaohongshu_batch-2
 
 # 跳过 Phase 1（假设浏览器已启动）
-node scripts/xiaohongshu/collect-content.mjs --keyword "手机壳" --target 100 --skip-phase1
+node scripts/xiaohongshu/collect-content.mjs --keyword "手机壳" --target 100 --skip-phase1 --profile xiaohongshu_fresh
 
 # 跳过 Phase 2（假设链接已采集）
-node scripts/xiaohongshu/collect-content.mjs --keyword "手机膜" --skip-phase2
+node scripts/xiaohongshu/collect-content.mjs --keyword "手机膜" --skip-phase2 --profile xiaohongshu_fresh
 ```
 
 ### 输出
@@ -243,4 +249,3 @@ Phase 3 会自动检测评论的 `like-active` class，跳过已赞评论。
 - [../../../modules/xiaohongshu/app/README.md](../../../modules/xiaohongshu/app/README.md) - Phase Block 详细设计
 - [../../../container-library/xiaohongshu/README.md](../../../container-library/xiaohongshu/README.md) - 容器定义
 - [../../../AGENTS.md](../../../AGENTS.md) - 系统级操作规则
-
