@@ -28,6 +28,7 @@ export function renderRun(root: HTMLElement, ctx: any) {
   const profileModeSel = createEl('select') as HTMLSelectElement;
 
   const profilePickSel = createEl('select') as HTMLSelectElement;
+  const runtimePickSel = createEl('select') as HTMLSelectElement;
   const profileRefreshBtn = createEl('button', { className: 'secondary' }, ['刷新 profiles']) as HTMLButtonElement;
 
   const poolPickSel = createEl('select') as HTMLSelectElement;
@@ -113,10 +114,25 @@ export function renderRun(root: HTMLElement, ctx: any) {
     syncProfileValueFromUI();
   }
 
+  async function refreshRuntimes() {
+    runtimePickSel.textContent = '';
+    runtimePickSel.appendChild(createEl('option', { value: '' }, ['(选择运行中的 runtime)']));
+    const sessions = await window.api.runtimeListSessions().catch(() => []);
+    const aliases = (ctx.settings?.profileAliases && typeof ctx.settings.profileAliases === 'object') ? ctx.settings.profileAliases : {};
+    (Array.isArray(sessions) ? sessions : []).forEach((s: any) => {
+      const profileId = String(s?.profileId || s?.sessionId || '').trim();
+      if (!profileId) return;
+      const alias = String((aliases as any)[profileId] || '').trim();
+      const label = alias ? `${alias} (${profileId})` : profileId;
+      runtimePickSel.appendChild(createEl('option', { value: profileId }, [label]));
+    });
+  }
+
   // When Preflight updates aliases or profile lists, re-render.
   window.api.onSettingsChanged((next: any) => {
     ctx.settings = next;
     void refreshProfiles();
+    void refreshRuntimes();
   });
 
   function getSelectedProfiles(): string[] {
@@ -132,13 +148,15 @@ export function renderRun(root: HTMLElement, ctx: any) {
 
   function syncProfileValueFromUI() {
     const mode = profileModeSel.value;
-    profilePickSel.style.display = mode === 'profile' ? '' : 'none';
+    const useRuntimeForSingle = templateSel.value !== 'phase1';
+    profilePickSel.style.display = mode === 'profile' && !useRuntimeForSingle ? '' : 'none';
+    runtimePickSel.style.display = mode === 'profile' && useRuntimeForSingle ? '' : 'none';
     poolPickSel.style.display = mode === 'profilepool' ? '' : 'none';
-    profilesBox.style.display = mode === 'profiles' ? '' : 'none';
+    profilesBox.style.display = (mode === 'profiles' || mode === 'profilepool') ? '' : 'none';
 
     if (mode === 'profile') {
-      const v = String(profilePickSel.value || '').trim();
-      profilesHint.textContent = v ? '' : '请选择一个 profile';
+      const v = String(useRuntimeForSingle ? runtimePickSel.value : profilePickSel.value || '').trim();
+      profilesHint.textContent = v ? '' : '请选择一个 runtime/profile';
       resolvedHint.textContent = v ? `resolved: --profile ${v}` : '';
       return;
     }
@@ -146,6 +164,14 @@ export function renderRun(root: HTMLElement, ctx: any) {
       const v = String(poolPickSel.value || '').trim();
       profilesHint.textContent = v ? '' : '请选择一个 pool keyword';
       resolvedHint.textContent = v ? `resolved: --profilepool ${v}` : '';
+      if (v) {
+        // Auto-select all profiles belonging to the pool
+        profilesBox.querySelectorAll('input[type="checkbox"]').forEach((el) => {
+          const cb = el as HTMLInputElement;
+          const pid = String(cb.dataset.profile || '');
+          cb.checked = pid.startsWith(v);
+        });
+      }
       return;
     }
     if (mode === 'profiles') {
@@ -159,15 +185,16 @@ export function renderRun(root: HTMLElement, ctx: any) {
   function resolveProfileArgsForRun(t: TemplateId) {
     const supportsMultiProfile = t === 'phase1' || t === 'phase3' || t === 'phase4';
     const mode = profileModeSel.value;
+    const useRuntimeForSingle = t !== 'phase1';
 
     if (!supportsMultiProfile) {
-      const v = String(profilePickSel.value || '').trim();
+      const v = String(useRuntimeForSingle ? runtimePickSel.value : profilePickSel.value || '').trim();
       if (!v) return { ok: false as const, error: '请选择一个 profile', args: [] as string[] };
       return { ok: true as const, args: ['--profile', v], mode: 'profile', value: v };
     }
 
     if (mode === 'profile') {
-      const v = String(profilePickSel.value || '').trim();
+      const v = String(useRuntimeForSingle ? runtimePickSel.value : profilePickSel.value || '').trim();
       if (!v) return { ok: false as const, error: '请选择一个 profile', args: [] as string[] };
       return { ok: true as const, args: ['--profile', v], mode: 'profile', value: v };
     }
@@ -273,7 +300,7 @@ export function renderRun(root: HTMLElement, ctx: any) {
       ]),
       createEl('div', { className: 'row' }, [
         labeledInput('profile mode', profileModeSel),
-        createEl('div', { style: 'display:flex; gap:8px; align-items:center;' }, [profilePickSel, poolPickSel, profileRefreshBtn]),
+        createEl('div', { style: 'display:flex; gap:8px; align-items:center;' }, [profilePickSel, runtimePickSel, poolPickSel, profileRefreshBtn]),
         labeledInput('extra', extraInput),
       ]),
       profilesHint,
@@ -286,7 +313,11 @@ export function renderRun(root: HTMLElement, ctx: any) {
     ]),
   );
 
-  templateSel.onchange = () => setProfileModes(templateSel.value as TemplateId);
+  templateSel.onchange = () => {
+    setProfileModes(templateSel.value as TemplateId);
+    syncProfileValueFromUI();
+    void refreshRuntimes();
+  };
   profileModeSel.onchange = async () => {
     syncProfileValueFromUI();
     if (profileModeSel.value === 'profilepool') {
@@ -302,9 +333,13 @@ export function renderRun(root: HTMLElement, ctx: any) {
   profilePickSel.onchange = () => {
     syncProfileValueFromUI();
   };
+  runtimePickSel.onchange = () => {
+    syncProfileValueFromUI();
+  };
   poolPickSel.onchange = () => syncProfileValueFromUI();
   profileRefreshBtn.onclick = () => void refreshProfiles();
 
   setProfileModes(templateSel.value as TemplateId);
   void refreshProfiles();
+  void refreshRuntimes();
 }

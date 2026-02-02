@@ -16,6 +16,7 @@ ensureUtf8Console();
  */
 
 import { resolveKeyword, resolveTarget, resolveEnv, PROFILE } from './lib/env.mjs';
+import { listProfilesForPool } from './lib/profilepool.mjs';
 import { initRunLogging, emitRunEvent, safeStringify } from './lib/logger.mjs';
 import { createSessionLock } from './lib/session-lock.mjs';
 import { execute as waitSearchPermit } from '../../dist/modules/workflow/blocks/WaitSearchPermitBlock.js';
@@ -60,6 +61,25 @@ async function main() {
   const keyword = resolveKeyword();
   const target = resolveTarget();
   const env = resolveEnv();
+  const argv = process.argv.slice(2);
+  const poolIdx = argv.indexOf('--profilepool');
+  const profilesIdx = argv.indexOf('--profiles');
+  let runtimeProfile = PROFILE;
+
+  if (poolIdx !== -1 && argv[poolIdx + 1]) {
+    const poolKeyword = String(argv[poolIdx + 1]).trim();
+    const poolProfiles = listProfilesForPool(poolKeyword);
+    if (poolProfiles.length > 0) runtimeProfile = poolProfiles[0];
+  } else if (profilesIdx !== -1 && argv[profilesIdx + 1]) {
+    const list = String(argv[profilesIdx + 1])
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (list.length > 0) runtimeProfile = list[0];
+  }
+
+  // Phase2 only supports a single runtime profile
+  const PROFILE_RUNTIME = runtimeProfile;
   const downloadRoot = resolveDownloadRoot();
 
   // 清理旧产物（同 env + keyword 下）
@@ -78,7 +98,7 @@ async function main() {
   console.log(`环境: ${env}`);
 
   // 获取会话锁
-  const lock = createSessionLock({ profileId: PROFILE, lockType: 'phase2' });
+  const lock = createSessionLock({ profileId: PROFILE_RUNTIME, lockType: 'phase2' });
   let lockHandle = null;
   try {
     lockHandle = lock.acquire();
@@ -103,7 +123,7 @@ async function main() {
     // 1. SearchGate 节流许可申请
     console.log(`⏳ 申请搜索许可...`);
     const tPermit0 = nowMs();
-    const permitResult = await waitSearchPermit({ sessionId: PROFILE });
+    const permitResult = await waitSearchPermit({ sessionId: PROFILE_RUNTIME });
     const tPermit1 = nowMs();
     console.log(`⏱️  许可申请耗时: ${formatDurationMs(tPermit1 - tPermit0)}`);
     emitRunEvent('phase2_timing', { stage: 'permit_done', ms: tPermit1 - tPermit0 });
@@ -113,7 +133,7 @@ async function main() {
 
     // 2. 执行搜索（输入 + 触发）
     const tSearch0 = nowMs();
-    const searchResult = await phase2Search({ keyword });
+    const searchResult = await phase2Search({ keyword, profile: PROFILE_RUNTIME });
     const tSearch1 = nowMs();
     console.log(`⏱️  搜索耗时: ${formatDurationMs(tSearch1 - tSearch0)}`);
     emitRunEvent('phase2_timing', { stage: 'search_done', ms: tSearch1 - tSearch0 });
@@ -122,7 +142,7 @@ async function main() {
     }
 
     const tCollect0 = nowMs();
-    const collectResult = await phase2CollectLinks({ keyword, targetCount: target, env });
+    const collectResult = await phase2CollectLinks({ keyword, targetCount: target, env, profile: PROFILE_RUNTIME });
     const tCollect1 = nowMs();
     console.log(`⏱️  采集耗时: ${formatDurationMs(tCollect1 - tCollect0)}`);
     emitRunEvent('phase2_timing', { stage: 'collect_done', ms: tCollect1 - tCollect0 });

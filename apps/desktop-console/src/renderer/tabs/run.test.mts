@@ -14,3 +14,10 @@ test('phase1 supports multi-profile modes in resolveProfileArgsForRun', async ()
     /supportsMultiProfile\s*=\s*t\s*===\s*'phase1'\s*\|\|\s*t\s*===\s*'phase3'\s*\|\|\s*t\s*===\s*'phase4'/,
   );
 });
+
+test('non-phase1 single selection uses runtime picker', async () => {
+  const src = await readFile(runPath, 'utf8');
+  assert.match(src, /const useRuntimeForSingle = templateSel\.value !== 'phase1';/);
+  assert.match(src, /runtimePickSel\.style\.display = mode === 'profile' && useRuntimeForSingle \? '' : 'none';/);
+  assert.match(src, /profilePickSel\.style\.display = mode === 'profile' && !useRuntimeForSingle \? '' : 'none';/);
+});
