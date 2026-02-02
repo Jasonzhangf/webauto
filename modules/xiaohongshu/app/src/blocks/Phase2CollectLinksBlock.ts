@@ -161,6 +161,10 @@ export async function execute(input: CollectLinksInput): Promise<CollectLinksOut
     return filePath;
   };
 
+  // Updated by ensureOnExpectedSearch once we confirmed we are on the correct search_result.
+  // Used as a safe fallback to return from detail pages without triggering a new search.
+  let expectedSearchUrl = '';
+
   const ensureOnExpectedSearch = async () => {
     const currentUrl = await controllerAction('browser:execute', {
       profile,
@@ -172,7 +176,8 @@ export async function execute(input: CollectLinksInput): Promise<CollectLinksOut
     }
 
     if (!currentUrl.includes('/search_result')) {
-      // 可能还在详情页或被弹窗遮挡，尝试 ESC 回退到搜索页
+      // 可能还在详情页或被弹窗遮挡。
+      // 先尝试 ESC（关闭弹窗/返回列表）；若仍失败，则 goto 回到“本轮固定 searchUrl”。
       await controllerAction('keyboard:press', { profileId: profile, key: 'Escape' }, unifiedApiUrl);
       await delay(1200);
       const afterEsc = await controllerAction('browser:execute', {
@@ -182,7 +187,27 @@ export async function execute(input: CollectLinksInput): Promise<CollectLinksOut
       if (typeof afterEsc === 'string' && afterEsc.includes('/search_result')) {
         return afterEsc;
       }
-      throw new Error(`[Phase2Collect] ESC 后仍未回到搜索页: ${String(afterEsc || currentUrl)}`);
+
+      // Hard fallback: use browser navigation back to the last known searchUrl.
+      // This does NOT perform a new search, so it should not violate SearchGate.
+      if (!expectedSearchUrl) {
+        throw new Error(
+          `[Phase2Collect] expectedSearchUrl 为空，无法 goto 回搜索页。current=${String(currentUrl)} afterEsc=${String(afterEsc)}`,
+        );
+      }
+      await controllerAction('browser:goto', { profile, url: expectedSearchUrl }, unifiedApiUrl);
+      await delay(1800);
+      const afterGoto = await controllerAction('browser:execute', {
+        profile,
+        script: 'window.location.href',
+      }, unifiedApiUrl).then(res => res?.result || res?.data?.result || '');
+      if (typeof afterGoto === 'string' && afterGoto.includes('/search_result')) {
+        return afterGoto;
+      }
+
+      throw new Error(
+        `[Phase2Collect] 返回搜索页失败（ESC+goto），current=${String(currentUrl)} afterEsc=${String(afterEsc)} afterGoto=${String(afterGoto)}`,
+      );
     }
 
     if (matchesKeywordFromSearchUrlStrict(currentUrl, keyword)) {
@@ -208,7 +233,7 @@ export async function execute(input: CollectLinksInput): Promise<CollectLinksOut
   };
 
   // 进入采集前，先固定一个“期望 searchUrl”（严格等于 keyword）
-  let expectedSearchUrl = await ensureOnExpectedSearch();
+  expectedSearchUrl = await ensureOnExpectedSearch();
 
   while (links.length < targetCount && attempts < maxAttempts) {
     attempts++;
