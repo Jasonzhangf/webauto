@@ -6,6 +6,12 @@ function buildArgs(parts: string[]) {
 
 type TemplateId = 'fullCollect' | 'phase1' | 'phase2' | 'phase3' | 'phase4' | 'smartReply' | 'virtualLike';
 
+type FullCollectTemplate = {
+  id: string;
+  label: string;
+  path: string;
+};
+
 export function renderRun(root: HTMLElement, ctx: any) {
   const templateSel = createEl('select') as HTMLSelectElement;
   const templates: Array<{ id: TemplateId; label: string }> = [
@@ -38,6 +44,7 @@ export function renderRun(root: HTMLElement, ctx: any) {
   const resolvedHint = createEl('div', { className: 'muted' }, ['']);
 
   const extraInput = createEl('input', { placeholder: 'extra args (raw)' }) as HTMLInputElement;
+  let fullCollectScripts: FullCollectTemplate[] = [];
 
   function maybeFlag(flag: string, value: string) {
     const v = String(value || '').trim();
@@ -114,6 +121,17 @@ export function renderRun(root: HTMLElement, ctx: any) {
     });
 
     syncProfileValueFromUI();
+  }
+
+  async function refreshFullCollectScripts() {
+    const res = await window.api.scriptsXhsFullCollect().catch(() => null);
+    fullCollectScripts = Array.isArray(res?.scripts) ? res.scripts : [];
+    if (fullCollectScripts.length > 0) {
+      const first = fullCollectScripts[0];
+      const label = first?.label || 'Full Collect (Phase1-4)';
+      const option = templateSel.querySelector('option[value="fullCollect"]') as HTMLOptionElement | null;
+      if (option) option.textContent = label;
+    }
   }
 
   async function refreshRuntimes() {
@@ -236,7 +254,9 @@ export function renderRun(root: HTMLElement, ctx: any) {
     let args: string[] = [];
 
   if (t === 'fullCollect') {
-      script = window.api.pathJoin('scripts', 'xiaohongshu', 'collect-content.mjs');
+      const chosen = fullCollectScripts[0];
+      const scriptPath = chosen?.path || window.api.pathJoin('scripts', 'xiaohongshu', 'collect-content.mjs');
+      script = scriptPath;
       args = buildArgs([script, ...profileArgs, ...common, ...extraArgs]);
     } else if (t === 'phase1') {
       script = window.api.pathJoin('scripts', 'xiaohongshu', 'phase1-boot.mjs');
@@ -347,4 +367,5 @@ export function renderRun(root: HTMLElement, ctx: any) {
   setProfileModes(templateSel.value as TemplateId);
   void refreshProfiles();
   void refreshRuntimes();
+  void refreshFullCollectScripts();
 }

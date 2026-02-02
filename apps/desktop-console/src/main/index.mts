@@ -38,6 +38,8 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const APP_ROOT = path.resolve(__dirname, '../..'); // apps/desktop-console/dist/main -> apps/desktop-console
 const REPO_ROOT = path.resolve(APP_ROOT, '../..');
 const profileStore = createProfileStore({ repoRoot: REPO_ROOT });
+const XHS_SCRIPTS_ROOT = path.join(REPO_ROOT, 'scripts', 'xiaohongshu');
+const XHS_FULL_COLLECT_RE = /collect-content\.mjs$/;
 
 function now() {
   return Date.now();
@@ -241,6 +243,25 @@ async function scanResults(input: { downloadRoot?: string }) {
   return result;
 }
 
+async function listXhsFullCollectScripts() {
+  try {
+    const entries = await fs.readdir(XHS_SCRIPTS_ROOT, { withFileTypes: true });
+    const scripts = entries
+      .filter((ent) => ent.isFile() && XHS_FULL_COLLECT_RE.test(ent.name))
+      .map((ent) => {
+        const name = ent.name;
+        return {
+          id: `xhs:${name}`,
+          label: `Full Collect (${name})`,
+          path: path.join(XHS_SCRIPTS_ROOT, name),
+        };
+      });
+    return { ok: true, scripts };
+  } catch (err: any) {
+    return { ok: false, error: err?.message || String(err), scripts: [] };
+  }
+}
+
 async function readTextPreview(input: { path: string; maxBytes?: number; maxLines?: number }) {
   const filePath = String(input.path || '');
   const maxBytes = typeof input.maxBytes === 'number' ? input.maxBytes : 80_000;
@@ -376,6 +397,7 @@ ipcMain.handle('fs:readTextPreview', async (_evt, spec: { path: string; maxBytes
 ipcMain.handle('fs:readFileBase64', async (_evt, spec: { path: string; maxBytes?: number }) => readFileBase64(spec));
 ipcMain.handle('profiles:list', async () => profileStore.listProfiles());
 ipcMain.handle('profiles:scan', async () => profileStore.scanProfiles());
+ipcMain.handle('scripts:xhsFullCollect', async () => listXhsFullCollectScripts());
 ipcMain.handle('profile:create', async (_evt, input: { profileId: string }) => profileStore.profileCreate(input || ({} as any)));
 ipcMain.handle('profile:delete', async (_evt, input: { profileId: string; deleteFingerprint?: boolean }) =>
   profileStore.profileDelete(input || ({} as any)),
