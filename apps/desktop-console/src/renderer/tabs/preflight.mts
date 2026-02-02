@@ -19,6 +19,8 @@ export function renderPreflight(root: HTMLElement, ctx: any) {
 
   const statusBox = createEl('div', { className: 'muted' }, ['']);
   const listBox = createEl('div', { className: 'list' });
+  const batchDeleteBtn = createEl('button', { className: 'danger' }, ['批量删除选中 profile']) as HTMLButtonElement;
+  const batchDeleteFp = createEl('input', { type: 'checkbox' }) as HTMLInputElement;
 
   let cachedScan: any = null;
 
@@ -164,6 +166,31 @@ export function renderPreflight(root: HTMLElement, ctx: any) {
     selectionHint.textContent = `selected=${selected}`;
   }
 
+  async function batchDeleteSelectedProfiles() {
+    const selected: string[] = [];
+    listBox.querySelectorAll('input[type="checkbox"][data-profile-id]').forEach((el) => {
+      const cb = el as HTMLInputElement;
+      if (!cb.checked) return;
+      const id = String(cb.dataset.profileId || '').trim();
+      if (id) selected.push(id);
+    });
+    if (selected.length === 0) return;
+
+    if (!confirm(`批量删除 ${selected.length} 个 profile？`)) return;
+    const deleteFp = batchDeleteFp.checked && confirm(`同时删除这 ${selected.length} 个 profile 的 fingerprint 文件？`);
+
+    ctx.clearLog();
+    for (const profileId of selected) {
+      try {
+        const out = await window.api.profileDelete({ profileId, deleteFingerprint: deleteFp });
+        ctx.appendLog(JSON.stringify(out, null, 2));
+      } catch (err: any) {
+        ctx.appendLog(`[batch-delete] ${profileId} failed: ${err?.message || String(err)}`);
+      }
+    }
+    await refreshScan();
+  }
+
   async function refreshScan() {
     const out = await window.api.profilesScan();
     cachedScan = out;
@@ -178,12 +205,17 @@ export function renderPreflight(root: HTMLElement, ctx: any) {
       selectAllBox,
     ]),
     createEl('div', { style: 'display:flex; flex-direction:column; gap:6px;' }, [
+      createEl('label', {}, ['del fingerprint']),
+      batchDeleteFp,
+    ]),
+    createEl('div', { style: 'display:flex; flex-direction:column; gap:6px;' }, [
       createEl('label', {}, ['only missing fingerprint']),
       onlyMissingFp,
     ]),
     labeledInput('regen platform', regenPlatform),
     createEl('button', { className: 'secondary' }, ['刷新列表']),
     createEl('button', {}, ['批量补齐缺失指纹（脚本）']),
+    batchDeleteBtn,
   ]);
   (toolbar.children[3] as HTMLButtonElement).onclick = () => void refreshScan();
   (toolbar.children[4] as HTMLButtonElement).onclick = async () => {
@@ -192,6 +224,7 @@ export function renderPreflight(root: HTMLElement, ctx: any) {
     await window.api.cmdSpawn({ title: 'migrate fingerprints', cwd: '', args, groupKey: 'profilepool' });
     setTimeout(() => void refreshScan(), 1000);
   };
+  batchDeleteBtn.onclick = () => void batchDeleteSelectedProfiles();
 
   filterInput.oninput = () => renderList();
   onlyMissingFp.onchange = () => renderList();
