@@ -5,7 +5,8 @@ ensureUtf8Console();
 
 /**
  * 小红书完整采集工作流（简化版）
- * 直接调用已修复的 phase1-4-full-collect.mjs，增加后台执行支持
+ * Legacy: 该脚本依赖 tests/phase1-4-full-collect.mjs（当前已迁移到 tests/legacy）。
+ * 建议使用唯一标准入口：scripts/xiaohongshu/collect-content.mjs
  */
 
 import { spawn } from 'node:child_process';
@@ -42,6 +43,8 @@ function parseArgs() {
   return args;
 }
 
+console.warn('[run-full-workflow] Legacy entry. Use: node scripts/xiaohongshu/collect-content.mjs ...');
+
 function main() {
   const args = parseArgs();
   
@@ -58,7 +61,7 @@ function main() {
     process.exit(1);
   }
   
-  const scriptPath = path.join(__dirname, 'tests/phase1-4-full-collect.mjs');
+  const scriptPath = path.join(__dirname, 'tests/legacy/phase1-4-full-collect.mjs');
   
   const scriptArgs = [
     '--keyword', args.keyword,

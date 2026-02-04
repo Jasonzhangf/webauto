@@ -4,11 +4,13 @@ import { ensureUtf8Console } from './lib/cli-encoding.mjs';
 ensureUtf8Console();
 
 /**
- * 小红书完整爬虫 v10
- * - 修复详情页切换问题
- * - 添加评论爬取
- * - 添加图片下载
- * - 生成Markdown
+ * [LEGACY] 小红书完整爬虫 v10
+ *
+ * ⚠️ 该脚本包含 DOM click 等非系统级交互，不符合当前强制规则：
+ * - 所有点击/输入/滚动必须通过系统级 API（mouse/keyboard/wheel）
+ * - 禁止 DOM click/JS scroll/history.back
+ *
+ * 目前请使用 scripts/xiaohongshu/phase1-4 系列脚本作为标准入口。
  */
 
 import fs from 'fs/promises';

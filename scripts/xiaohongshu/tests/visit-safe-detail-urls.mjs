@@ -95,7 +95,7 @@ async function loadSafeDetailEntries(indexPath) {
     console.error(`❌ 无法读取 safe-detail-urls 文件: ${indexPath}`);
     console.error(`   错误: ${err?.message || String(err)}`);
     console.error('💡 请先运行 Phase2-4 采集脚本生成该文件：');
-    console.error('   node scripts/xiaohongshu/tests/phase2-4-loop.mjs --keyword "<关键词>"');
+    console.error('   node scripts/xiaohongshu/tests/legacy/phase2-4-loop.mjs --keyword "<关键词>"');
     process.exit(1);
   }
 

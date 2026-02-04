@@ -4,8 +4,12 @@ import { ensureUtf8Console } from './lib/cli-encoding.mjs';
 ensureUtf8Console();
 
 /**
- * 小红书搜索采集脚本
- * 关键机制：点击图片获取带xtoken的详情页URL
+ * [LEGACY] 小红书搜索采集脚本
+ *
+ * ⚠️ 该脚本存在多处“非系统级操作”（DOM click / location.href / JS scroll），
+ * 与仓库强制规则（只允许系统 click/scroll/输入）冲突。
+ *
+ * 目前小红书主回归入口请使用 scripts/xiaohongshu/phase1-4 系列脚本。
  */
 
 const UNIFIED_API = 'http://127.0.0.1:7701';
