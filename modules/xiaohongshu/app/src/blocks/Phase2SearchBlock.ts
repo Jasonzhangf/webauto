@@ -68,6 +68,101 @@ async function readSearchInputValue(profile: string, unifiedApiUrl: string) {
   return typeof value === 'string' ? value : null;
 }
 
+async function systemFillSearchInputValue(profile: string, unifiedApiUrl: string, keyword: string) {
+  // System-level requirement: prefer keyboard/mouse. `browser:execute` is JS mutation and should be avoided.
+  // We implement a system-level "fill" as: select-all + delete + type (with retries).
+  const trySelectAllDeleteType = async (modifier: 'Meta' | 'Control') => {
+    await controllerAction('keyboard:down', { profileId: profile, key: modifier }, unifiedApiUrl).catch(() => {});
+    await controllerAction('keyboard:press', { profileId: profile, key: 'A' }, unifiedApiUrl).catch(() => {});
+    await controllerAction('keyboard:up', { profileId: profile, key: modifier }, unifiedApiUrl).catch(() => {});
+    await delay(60);
+    await controllerAction('keyboard:press', { profileId: profile, key: 'Backspace' }, unifiedApiUrl).catch(() => {});
+    await delay(60);
+    await controllerAction('keyboard:type', { profileId: profile, text: keyword, delay: 70 }, unifiedApiUrl).catch(() => {});
+  };
+
+  // Try a few times; Camoufox can drop events if focus is flaky.
+  for (let i = 0; i < 3; i++) {
+    await trySelectAllDeleteType('Meta');
+    await delay(250);
+    const v1 = await readSearchInputValue(profile, unifiedApiUrl).catch((): null => null);
+    if (v1 && v1.trim() === keyword) return { ok: true, method: 'meta' };
+
+    await trySelectAllDeleteType('Control');
+    await delay(250);
+    const v2 = await readSearchInputValue(profile, unifiedApiUrl).catch((): null => null);
+    if (v2 && v2.trim() === keyword) return { ok: true, method: 'control' };
+  }
+  const v = await readSearchInputValue(profile, unifiedApiUrl).catch((): null => null);
+  return { ok: false, reason: `mismatch:${String(v ?? '')}` };
+}
+
+async function browserFillSearchInputValue(profile: string, unifiedApiUrl: string, keyword: string) {
+  // Preferred: use browser-service page.fill via unified-api controller action.
+  // IMPORTANT: Camoufox can append text instead of replacing; we MUST clear input.value first.
+  const selector =
+    '#search-input input, #search-input textarea, input#search-input, input[type="search"], input[placeholder*="搜索"], input[placeholder*="关键字"]';
+  
+  // Step 1: force clear the input value via JS (system operations alone can fail to clear in some cases)
+  const escapedSelector = selector.replace(/'/g, "\\'" );
+  await controllerAction(
+    'browser:execute',
+    {
+      profile,
+      script: `(() => {
+        const el = document.querySelector('${escapedSelector}');
+        if (el && 'value' in el) { el.value = ''; el.dispatchEvent(new Event('input', { bubbles: true })); }
+      })()`,
+    },
+    unifiedApiUrl,
+  ).catch(() => {});
+
+  // Step 2: use browser:fill to set the value (now that it's cleared)
+  const res = await controllerAction(
+    'browser:fill',
+    { profile, selector, text: keyword },
+    unifiedApiUrl,
+  ).catch((e) => ({ success: false, error: e?.message || String(e) }));
+  return res;
+}
+
+async function clearSearchInput(profile: string, unifiedApiUrl: string) {
+  // Prefer deterministic select-all deletion. Fallback to repeated Backspace.
+  // IMPORTANT: only system keyboard operations allowed.
+  const tryCombo = async (combo: 'Meta+A' | 'Control+A') => {
+    const mod = combo.startsWith('Meta') ? 'Meta' : 'Control';
+    await controllerAction('keyboard:down', { profileId: profile, key: mod }, unifiedApiUrl).catch(() => {});
+    await controllerAction('keyboard:press', { profileId: profile, key: 'A' }, unifiedApiUrl).catch(() => {});
+    await controllerAction('keyboard:up', { profileId: profile, key: mod }, unifiedApiUrl).catch(() => {});
+    await delay(80);
+    // Use both Delete and Backspace to cover different input implementations.
+    await controllerAction('keyboard:press', { profileId: profile, key: 'Backspace' }, unifiedApiUrl).catch(() => {});
+    await controllerAction('keyboard:press', { profileId: profile, key: 'Delete' }, unifiedApiUrl).catch(() => {});
+  };
+
+  // 1) Cmd+A (Mac) then delete
+  await tryCombo('Meta+A');
+  await delay(120);
+  let v = await readSearchInputValue(profile, unifiedApiUrl);
+  if (!v || !v.trim()) return;
+
+  // 2) Ctrl+A then delete
+  await tryCombo('Control+A');
+  await delay(120);
+  v = await readSearchInputValue(profile, unifiedApiUrl);
+  if (!v || !v.trim()) return;
+
+  // 3) Fallback: repeated Backspace
+  for (let i = 0; i < 80; i++) {
+    await controllerAction('keyboard:press', { profileId: profile, key: 'Backspace' }, unifiedApiUrl).catch(() => {});
+    if (i % 10 === 0) {
+      await delay(40);
+      v = await readSearchInputValue(profile, unifiedApiUrl);
+      if (!v || !v.trim()) return;
+    }
+  }
+}
+
 export async function execute(input: SearchInput): Promise<SearchOutput> {
   const {
     keyword,
@@ -83,6 +178,13 @@ export async function execute(input: SearchInput): Promise<SearchOutput> {
     { profile, script: 'window.location.href' },
     unifiedApiUrl,
   ).then((res) => res?.result || res?.data?.result || '');
+
+  // 开发期硬门禁：每个大环节开始先定位，不做容错兜底。
+  const det = await detectXhsCheckpoint({ sessionId: profile, serviceUrl: unifiedApiUrl });
+  console.log(`[Phase2Search] locate: checkpoint=${det.checkpoint} url=${det.url}`);
+  if (det.checkpoint === 'risk_control' || det.checkpoint === 'login_guard' || det.checkpoint === 'offsite') {
+    throw new Error(`[Phase2Search] hard_stop checkpoint=${det.checkpoint} url=${det.url}`);
+  }
 
   // 检查当前页面是否可搜索（优先用 DOM signals，禁止任何刷新/导航）
   const domCheck = await controllerAction('browser:execute', {
@@ -111,16 +213,38 @@ export async function execute(input: SearchInput): Promise<SearchOutput> {
   const hasDetailMask = Boolean(domCheck?.hasDetailMask);
   const domRect = domCheck?.rect || null;
   
-  // 如果检测到详情遮罩，说明可能仍处于详情态。
-  // 但在 Camoufox 下 /explore/<id> 可能已经回到可搜索壳页（hasSearchInput=true 且无实际遮罩）。
-  // 这里不强制 stop，只在 hasSearchInput=false 时才停。
-  if (hasDetailMask && !hasSearchInput) {
-    throw new Error(
-      `[Phase2Search] 检测到详情遮罩且无搜索输入框，当前不可搜索，停止（避免刷新）。URL=${currentUrl}`,
-    );
+  // Priority 1: If detail mask exists or we're still in detail/comments, attempt ESC multiple times (no refresh).
+  if (hasDetailMask || det.checkpoint === 'detail_ready' || det.checkpoint === 'comments_ready') {
+    console.log('[Phase2Search] 处于详情/评论态，尝试 ESC 返回搜索列表（最多 5 次）...');
+    let escaped = false;
+    for (let i = 0; i < 5; i++) {
+      // Blur activeElement first (e.g., comment input) so ESC can close the detail modal.
+      await controllerAction('browser:execute', {
+        profile,
+        script: '(() => { const el = document.activeElement; if (el && el.blur) el.blur(); })()',
+      }, unifiedApiUrl).catch(() => {});
+      await delay(150);
+      await controllerAction('keyboard:press', { profileId: profile, key: 'Escape' }, unifiedApiUrl).catch(() => {});
+      await delay(1500);
+
+      const detAfterEsc = await detectXhsCheckpoint({ sessionId: profile, serviceUrl: unifiedApiUrl });
+      if (detAfterEsc.checkpoint === 'search_ready' || detAfterEsc.checkpoint === 'home_ready') {
+        escaped = true;
+        console.log(`[Phase2Search] ESC 成功返回（第 ${i + 1} 次），checkpoint=${detAfterEsc.checkpoint}`);
+        break;
+      }
+    }
+    if (!escaped) {
+      const detAfterEsc = await detectXhsCheckpoint({ sessionId: profile, serviceUrl: unifiedApiUrl });
+      throw new Error(
+        `[Phase2Search] ESC 后仍未回到搜索/首页（checkpoint=${detAfterEsc.checkpoint}）。停止（避免刷新）。URL=${currentUrl}`,
+      );
+    }
+
+    // No further actions here: avoid repeating locate/esc loops.
   }
-  
-  // 如果有搜索输入框，说明在可搜索页面，直接继续
+
+  // Priority 2: Without search input we cannot search
   if (!hasSearchInput) {
     throw new Error(
       `[Phase2Search] 未检测到搜索输入框，无法执行搜索。URL=${currentUrl}`,
@@ -216,21 +340,7 @@ export async function execute(input: SearchInput): Promise<SearchOutput> {
   if (inputAlreadyMatches) {
     console.log('[Phase2Search] input already matches keyword, skip clear + type');
   } else {
-    // Clear input by continuously pressing Backspace until empty (more reliable than select-all).
-    // Max 50 attempts to avoid infinite loops.
-    let attempt = 0;
-    const maxAttempts = 50;
-    while (attempt < maxAttempts) {
-      const currentValue = await readSearchInputValue(profile, unifiedApiUrl).catch((): null => null);
-      if (!currentValue || currentValue.trim() === '') {
-        console.log(`[Phase2Search] input cleared after ${attempt} attempts`);
-        break;
-      }
-      await controllerAction('keyboard:press', { profileId: profile, key: 'Backspace' }, unifiedApiUrl).catch(() => {});
-      await delay(100);
-      attempt++;
-    }
-
+    await clearSearchInput(profile, unifiedApiUrl);
     const clearedValue = await readSearchInputValue(profile, unifiedApiUrl);
     if (typeof clearedValue === 'string' && clearedValue.trim() && clearedValue.trim() !== keyword) {
       let shotLen = 0;
@@ -243,12 +353,18 @@ export async function execute(input: SearchInput): Promise<SearchOutput> {
         shotLen = typeof shot === 'string' ? shot.length : 0;
       }
       throw new Error(
-        `[Phase2Search] 清空输入框失败（持续按键 ${attempt} 次后仍有残留）。value="${clearedValue}" screenshot_len=${shotLen}`,
+        `[Phase2Search] 清空输入框失败（组合键 + 退格后仍有残留）。value="${clearedValue}" screenshot_len=${shotLen}`,
       );
     }
 
-    await controllerAction('keyboard:type', { profileId: profile, text: keyword, delay: 90 }, unifiedApiUrl);
-    console.log(`[Phase2Search] type done: ${keyword}`);
+    // Camoufox: keyboard typing can be flaky (focus/IME). Use a fill-style set + input/change events.
+    const fillRes = await browserFillSearchInputValue(profile, unifiedApiUrl, keyword);
+    const fillSuccess = Boolean(fillRes?.success !== false);
+    console.log(`[Phase2Search] browser:fill done: success=${fillSuccess}`);
+    if (!fillSuccess) {
+      const fallback = await systemFillSearchInputValue(profile, unifiedApiUrl, keyword);
+      console.log(`[Phase2Search] keyboard fill fallback: ok=${Boolean(fallback?.ok)} reason=${fallback?.reason || ''}`);
+    }
     await delay(450);
   }
 

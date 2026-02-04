@@ -204,10 +204,13 @@ async function main() {
 
   try {
     emitRunEvent('phase3_start', { keyword, env, likeKeywords, tabCount, maxLikesPerRound, dryRun });
+    // IMPORTANT:
+    // Phase3/4 must NOT invalidate Phase2 completion state.
+    // This state file is used as the gate for Phase34ValidateLinks.
+    // We only record phase3 metadata without changing `status` away from `completed`.
     if (!dryRun) {
       await updateXhsCollectState({ keyword, env, downloadRoot }, (draft) => {
         if (!draft.startTime) draft.startTime = new Date().toISOString();
-        draft.status = 'running';
         draft.resume.lastStep = 'phase3_start';
         draft.legacy = {
           ...(draft.legacy || {}),

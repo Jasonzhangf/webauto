@@ -3,13 +3,17 @@
  */
 
 export async function controllerAction(action: string, payload: any, apiUrl: string): Promise<any> {
+  const timeoutMs =
+    typeof payload?.timeoutMs === 'number' && Number.isFinite(payload.timeoutMs) && payload.timeoutMs > 0
+      ? Math.floor(payload.timeoutMs)
+      : 60000;
   const res = await fetch(`${apiUrl}/v1/controller/action`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     // Unified API expects payload nested under `payload`.
     body: JSON.stringify({ action, payload: payload || {} }),
-    // 截图/容器操作在某些页面会更慢，统一放宽超时，避免调试链路被误杀
-    signal: AbortSignal.timeout(60000),
+    // 截图/容器操作在某些页面会更慢，允许调用方覆盖超时。
+    signal: AbortSignal.timeout(timeoutMs),
   });
   const data = await res.json().catch(() => ({}));
   return data.data || data;

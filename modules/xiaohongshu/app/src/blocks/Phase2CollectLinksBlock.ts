@@ -118,6 +118,16 @@ export async function execute(input: CollectLinksInput): Promise<CollectLinksOut
 
   console.log(`[Phase2CollectLinks] 目标: ${targetCount} 条链接`);
 
+  // 开发期硬门禁：进入采集前先定位，避免在详情/风控态继续执行。
+  const det = await detectXhsCheckpoint({ sessionId: profile, serviceUrl: unifiedApiUrl });
+  console.log(`[Phase2CollectLinks] locate: checkpoint=${det.checkpoint} url=${det.url}`);
+  if (det.checkpoint === 'risk_control' || det.checkpoint === 'login_guard' || det.checkpoint === 'offsite') {
+    throw new Error(`[Phase2CollectLinks] hard_stop checkpoint=${det.checkpoint} url=${det.url}`);
+  }
+  if (det.checkpoint === 'detail_ready' || det.checkpoint === 'comments_ready') {
+    throw new Error(`[Phase2CollectLinks] 当前处于详情态，禁止采集列表（避免风控）。checkpoint=${det.checkpoint} url=${det.url}`);
+  }
+
   const links: CollectLinksOutput['links'] = [];
   const seen = new Set<string>();
   const seenExploreIds = new Set<string>();
@@ -250,6 +260,7 @@ export async function execute(input: CollectLinksInput): Promise<CollectLinksOut
   }
 
   while (links.length < targetCount && attempts < maxAttempts) {
+    await appendTrace({ type: 'while_loop_start', ts: new Date().toISOString(), attempt: attempts + 1, collected: links.length, targetCount });
     attempts++;
 
     // 0. 每轮开始确保仍在目标搜索页，避免误点到推荐关键词
@@ -286,6 +297,8 @@ export async function execute(input: CollectLinksInput): Promise<CollectLinksOut
       throw new Error('[Phase2Collect] pick target failed: empty result');
     }
 
+    await appendTrace({ type: 'pick_done', ts: new Date().toISOString(), attempt: attempts, pick });
+
     if (pick.action === 'scroll' && pick.scroll) {
       await appendTrace({
         type: 'pick_scroll',
@@ -319,8 +332,10 @@ export async function execute(input: CollectLinksInput): Promise<CollectLinksOut
     }
 
     // 4. 点击第 N 个搜索结果卡片（通过 DOM 下标精确定位，避免依赖 href）
-    let highlightInfo: any = null;
+        await appendTrace({ type: 'highlight_start', ts: new Date().toISOString(), attempt: attempts, domIndex, exploreId });let highlightInfo: any = null;
+
     try {
+      await appendTrace({ type: 'highlight_calling', ts: new Date().toISOString(), domIndex });
       highlightInfo = await controllerAction('container:operation', {
         containerId: 'xiaohongshu_search.search_result_item',
         operationId: 'highlight',
@@ -330,6 +345,8 @@ export async function execute(input: CollectLinksInput): Promise<CollectLinksOut
     } catch {
       highlightInfo = null;
     }
+
+    await appendTrace({ type: 'highlight_done', ts: new Date().toISOString(), attempt: attempts, domIndex, highlightInfo });
 
     let preScreenshotPath: string | null = null;
     if (debugArtifactsEnabled) {
@@ -364,6 +381,8 @@ export async function execute(input: CollectLinksInput): Promise<CollectLinksOut
       operationId: 'click',
       sessionId: profile,
       config: { index: domIndex },
+      // On large viewports and camoufox, click/highlight/rect checks can be slower.
+      timeoutMs: 180000,
     }, unifiedApiUrl);
     if (clickResult?.success === false) {
       console.warn(`[Phase2Collect] 点击失败 index=${domIndex} err=${clickResult?.error || 'unknown'}，刷新索引后重试`);

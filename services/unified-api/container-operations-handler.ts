@@ -82,7 +82,20 @@ export async function handleContainerOperations(
         },
       };
 
-      const result = await executor.execute(containerId, operationId, config || {}, context);
+      // Avoid hung container operations (especially on camoufox) from blocking the caller forever.
+      // Per-stage logging should live inside operations; this is a hard cap.
+      const hardTimeoutMs =
+        typeof (config as any)?.timeoutMs === 'number' && Number.isFinite((config as any).timeoutMs)
+          ? Math.max(1000, Math.floor((config as any).timeoutMs))
+          : 30_000;
+      const hardTimeout = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error(`container_operation_timeout_${hardTimeoutMs}ms`)), hardTimeoutMs),
+      );
+
+      const result = (await Promise.race([
+        executor.execute(containerId, operationId, config || {}, context),
+        hardTimeout,
+      ])) as any;
 
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ success: true, data: result }));

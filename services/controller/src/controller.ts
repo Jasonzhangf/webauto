@@ -246,8 +246,10 @@ export class UiController {
        return this.handleBrowserHighlightDomPath(payload);
      case 'browser:execute':
        return this.handleBrowserExecute(payload);
-     case 'browser:screenshot':
-       return this.handleBrowserScreenshot(payload);
+    case 'browser:screenshot':
+      return this.handleBrowserScreenshot(payload);
+    case 'browser:fill':
+      return this.handleBrowserFill(payload);
      case 'browser:page:list':
        return this.handleBrowserPageList(payload);
      case 'browser:page:new':
@@ -667,6 +669,13 @@ export class UiController {
     return { success: true, data: result };
   }
 
+  async handleBrowserFill(payload: ActionPayload = {}) {
+    const { profile, selector, text } = normalizePayload(payload, { required: ['profile', 'selector', 'text'] });
+    logDebug('controller', 'browser:fill', { profile, selector, textLen: String(text || '').length });
+    // Use browser-service fill (Playwright page.fill) so it stays in system-level input pathway.
+    return this.browserServiceCommand('fill', { profileId: profile, selector, value: text }, { timeoutMs: 60000 });
+  }
+
   async handleBrowserPageList(payload: ActionPayload = {}) {
     const profileId = (payload.profileId || payload.profile || payload.sessionId || 'default').toString();
     const result = await this.browserServiceCommand('page:list', { profileId }, { timeoutMs: 30000 });
@@ -716,13 +725,16 @@ export class UiController {
 
   private async browserServiceCommand(action: string, args: Record<string, any>, options: { timeoutMs?: number } = {}) {
     const timeoutMs = typeof options.timeoutMs === 'number' && options.timeoutMs > 0 ? options.timeoutMs : 20000;
+    const abortController1 = new AbortController();
+    const timeoutId1 = setTimeout(() => abortController1.abort(), timeoutMs);
     const res = await fetch(`${this.getBrowserServiceHttpUrl()}/command`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action, args }),
-      signal: AbortSignal.timeout(timeoutMs),
+      signal: abortController1.signal,
     });
 
+    clearTimeout(timeoutId1);
     const raw = await res.text();
     let data: any = {};
     try {
@@ -1392,28 +1404,48 @@ export class UiController {
 
   async handleContainerOperation(payload: ActionPayload = {}) {
     const { containerId, operationId, config, profile } = normalizePayload(payload, { required: ['containerId', 'operationId', 'profile'] });
+
+    // Allow caller to override timeout; without this Phase2 can hang until the outer controllerAction aborts.
+    const timeoutMs = typeof payload?.timeoutMs === 'number' && Number.isFinite(payload.timeoutMs) && payload.timeoutMs > 0
+      ? Math.floor(payload.timeoutMs)
+      : 120000;
     
     // Determine target URL for HTTP post to container endpoint
     const port = process.env.WEBAUTO_UNIFIED_PORT || 7701;
     const host = '127.0.0.1';
+
+    logDebug('controller', 'container:operation', { containerId, operationId, profile, timeoutMs });
     
+    const abortController2 = new AbortController();
+    const timeoutId2 = setTimeout(() => abortController2.abort(), timeoutMs);
     try {
+      const mergedConfig = { ...(config as Record<string, any> || {}) };
+      if (typeof mergedConfig.timeoutMs !== 'number') {
+        mergedConfig.timeoutMs = timeoutMs;
+      }
+
       const response = await fetch(`http://${host}:${port}/v1/container/${containerId}/execute`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           operationId,
-          config,
+          config: mergedConfig,
           sessionId: profile
-        } as Record<string, any>)
+        } as Record<string, any>),
+        signal: abortController2.signal,
       });
       
+      clearTimeout(timeoutId2);
       if (!response.ok) {
         return { success: false, error: await response.text() };
       }
       
-      return await response.json();
+      const result = await response.json();
+      clearTimeout(timeoutId2);
+      return result;
     } catch (error: any) {
+      clearTimeout(timeoutId2);
+      logDebug('controller', 'container:operation:error', { containerId, operationId, profile, timeoutMs, error: error?.message || String(error) });
       return { success: false, error: error.message };
     }
   }

@@ -6,11 +6,11 @@ ensureUtf8Console();
 /**
  * SearchGate 后台节流服务
  *
- * 职责�?
- *   - 控制搜索频率（默认：同一 key �?60s 最�?5 次）
- *   - 所有搜�?Block 在真正触发“对话框搜索”前，必须先向本服务申请许可
+ * 职责?
+ *   - 控制搜索频率（默认：同一 key ?60s 最?5 次）
+ *   - 所有搜?Block 在真正触发“对话框搜索”前，必须先向本服务申请许可
  *
- * 接口�?
+ * 接口?
  *   - POST /permit
  *       body: { key?: string, profileId?: string, windowMs?: number, maxCount?: number }
  *       返回: { ok: true, allowed: boolean, waitMs: number, retryAfterMs, reason?, deny?, windowMs, maxCount, countInWindow, key }
@@ -19,12 +19,12 @@ ensureUtf8Console();
  *   - GET /stats
  *       返回: { ok: true, buckets, keywordHistory }（用于调试拒绝原因）
  *   - POST /shutdown
- *       优雅退出（供脚�?命令行停止服务）
+ *       优雅退出（供脚?命令行停止服务）
  *
- * 启动�?
+ * 启动?
  *   node scripts/search-gate-server.mjs
  *
- * 端口�?
+ * 端口?
  *   - 默认: 7790
  *   - 可通过环境变量 WEBAUTO_SEARCH_GATE_PORT 覆盖
  */
@@ -93,15 +93,21 @@ function startHeartbeatWatcher() {
   return () => clearInterval(timer);
 }
 
-startHeartbeatWatcher();
+// Heartbeat watcher: keeps SearchGate from becoming an orphan.
+// For local/dev runs you can disable it: WEBAUTO_SEARCH_GATE_DISABLE_HEARTBEAT=1
+if (String(process.env.WEBAUTO_SEARCH_GATE_DISABLE_HEARTBEAT || '').trim() !== '1') {
+  startHeartbeatWatcher();
+} else {
+  console.warn('[SearchGate] heartbeat watcher disabled via WEBAUTO_SEARCH_GATE_DISABLE_HEARTBEAT=1');
+}
 
 /**
  * 每个 key 的时间窗口内搜索记录
- * key 一般为 profileId（例�?xiaohongshu_fresh�?
+ * key 一般为 profileId（例?xiaohongshu_fresh?
  */
 const buckets = new Map();
 const keywordBuckets = new Map();
-// 开发阶段：记录每个 key 最近允许通过�?keyword，用于防止“连续三次同关键字搜索”导致软风控
+// 开发阶段：记录每个 key 最近允许通过?keyword，用于防止“连续三次同关键字搜索”导致软风控
 const keywordHistory = new Map();
 
 function nowMs() {
@@ -178,7 +184,7 @@ function normalizeKeyword(keyword) {
 function pruneKeywordHistory(records) {
   if (!Array.isArray(records) || records.length === 0) return [];
   const now = nowMs();
-  // 只保留最�?24h，且最�?50 条，避免内存增长
+  // 只保留最?24h，且最?50 条，避免内存增长
   const cutoff = now - 24 * 60 * 60 * 1000;
   const pruned = records.filter((r) => r && typeof r.ts === 'number' && r.ts >= cutoff);
   return pruned.slice(-50);
@@ -277,7 +283,7 @@ const server = http.createServer(async (req, res) => {
       const windowMs = Number(body.windowMs || DEFAULT_WINDOW_MS);
       const maxCount = Number(body.maxCount || DEFAULT_MAX_COUNT);
 
-      // 开发阶段：禁止连续 3 次（默认阈�?2，即前两次都一样则本次拒绝）同 keyword 搜索
+      // 开发阶段：禁止连续 3 次（默认阈?2，即前两次都一样则本次拒绝）同 keyword 搜索
       if (dev && keyword) {
         const prev = pruneKeywordHistory(keywordHistory.get(key) || []);
         const consecutive = getConsecutiveSameKeywordCount(prev, keyword);
@@ -370,7 +376,7 @@ const server = http.createServer(async (req, res) => {
 
       const result = computePermit(key, windowMs, maxCount);
 
-      // 仅在允许时记�?keyword 历史（开发阶段）
+      // 仅在允许时记?keyword 历史（开发阶段）
       if (result.allowed) {
         if (keyword && keywordPermit) {
           commitKeywordPermit(keywordPermit);

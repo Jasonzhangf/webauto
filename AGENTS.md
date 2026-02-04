@@ -66,6 +66,30 @@ curl http://127.0.0.1:7704/health
 
 AGENTS.md 只放规则；所有具体任务/进度/证据都必须写到 bd。
 
+### bd 的 git 同步最佳实践（强制，团队统一）
+
+目标：团队只通过 git 同步 `.beads/issues.jsonl`（以及必要的元数据文件），**不提交本地数据库文件**，并把“忘了导出/导入”的风险降到最低。
+
+- **统一模式**：`bd sync mode set git-portable`
+- **一次性初始化**：`bd init`
+  - 若 main 受保护：用 `bd init --branch beads-sync` 建一个元数据分支
+- **自动护栏（强烈推荐）**：`bd hooks install`
+  - 安装 `pre-commit / post-merge / pre-push / post-checkout` 等 hooks
+  - 保证提交前 flush、拉取/切分支后 import、推送前不允许 stale
+- **日常最省心流程**：`git pull --rebase` → 正常 `bd create/update/close` → 正常 `git commit/push`
+  - hooks 会自动处理大部分同步
+- **关键时刻强制落盘**：会话结束/交接前跑一次 `bd sync`
+  - 把 debounce 窗口里的改动立刻刷到 JSONL
+- **仓库约定（必须遵守）**：git 只追踪以下文件：
+  - `.beads/issues.jsonl`
+  - `.beads/.gitattributes`
+  - `.beads/.gitignore`
+  - （以及 `.beads/` 目录本身）
+  - **禁止提交**：`.beads/beads.db` 等本地数据库文件
+- **git worktree 注意**：别开 daemon
+  - `export BEADS_NO_DAEMON=1` 或每次加 `--no-daemon`
+  - 主要依赖 hooks + 必要时手动 `bd sync`
+
 - 初始化（推荐个人本地，不污染仓库）：`bd init --stealth`
 - 查看可做任务：`bd ready`
 - 创建任务：`bd create "Title" -p 0 --description "..."`
