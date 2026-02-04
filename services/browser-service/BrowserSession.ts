@@ -263,6 +263,7 @@ export class BrowserSession {
   }
 
   private async syncDeviceScaleFactor(page: Page, viewport: { width: number; height: number }): Promise<void> {
+    if (String(this.options.engine ?? 'camoufox') !== 'chromium') return;
     const desired = this.resolveDeviceScaleFactor();
     if (!desired || !this.context) return;
     try {
@@ -645,6 +646,7 @@ export class BrowserSession {
     page: Page,
     viewport: { width: number; height: number },
   ): Promise<void> {
+    const engine = String(this.options.engine ?? 'camoufox');
     // Log viewport metrics for diagnosis
     try {
       const metrics = await page.evaluate(() => ({
@@ -664,7 +666,7 @@ export class BrowserSession {
         } : null,
       }));
       console.log(`[viewport-metrics] target=${viewport.width}x${viewport.height} inner=${metrics.innerWidth}x${metrics.innerHeight} outer=${metrics.outerWidth}x${metrics.outerHeight} screen=(${metrics.screenX},${metrics.screenY}) dpr=${metrics.devicePixelRatio} visual=${JSON.stringify(metrics.visualViewport)}`);
-      
+
       // If inner dimensions don't match target, retry setViewportSize
       const widthDelta = Math.abs(metrics.innerWidth - viewport.width);
       const heightDelta = Math.abs(metrics.innerHeight - viewport.height);
@@ -681,15 +683,8 @@ export class BrowserSession {
     } catch (err) {
       console.warn(`[viewport-metrics] log failed: ${err?.message || String(err)}`);
     }
-    
-    // Disable CDP window bounds sync (Camoufox doesn't support CDP Browser.setWindowBounds)
-    return;
-  }
 
-  private async _disabled_syncWindowBounds(
-    page: Page,
-    viewport: { width: number; height: number },
-  ): Promise<void> {
+    if (engine !== 'chromium') return;
     if (this.options.headless) return;
     if (!this.context) return;
 

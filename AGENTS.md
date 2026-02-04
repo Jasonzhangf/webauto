@@ -86,7 +86,7 @@ AGENTS.md 只放规则；所有具体任务/进度/证据都必须写到 bd。
   - 把 debounce 窗口里的改动立刻刷到 JSONL
 - **仓库约定（必须遵守）**：git 只追踪以下文件：
   - `.beads/issues.jsonl`
-  - `.beads/.gitattributes`
+  - `.gitattributes`
   - `.beads/.gitignore`
   - （以及 `.beads/` 目录本身）
   - **禁止提交**：`.beads/beads.db` 等本地数据库文件

@@ -1,30 +1,26 @@
-#!/usr/bin/env node
+﻿#!/usr/bin/env node
 import { ensureUtf8Console } from '../lib/cli-encoding.mjs';
 import { ensureCoreServices } from '../lib/ensure-core-services.mjs';
+import { existsSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 ensureUtf8Console();
 
 /**
- * Phase 1: 启动并复用 xiaohongshu_fresh profile（App Block 入口）
+ * Phase 1: 鍚姩骞跺鐢?xiaohongshu_fresh profile锛圓pp Block 鍏ュ彛锛?
  *
- * 用法：
+ * 鐢ㄦ硶锛?
  *   node scripts/xiaohongshu/phase1-boot.mjs
- *   node scripts/xiaohongshu/phase1-boot.mjs --once   # 完成后退出（不保持前台阻塞）
+ *   node scripts/xiaohongshu/phase1-boot.mjs --once   # 瀹屾垚鍚庨€€鍑猴紙涓嶄繚鎸佸墠鍙伴樆濉烇級
  */
 
 // Phase1 must be driven by explicit CLI input; do not fallback to defaults.
 import { ensureBaseServices } from './lib/services.mjs';
 import { createSessionLock } from './lib/session-lock.mjs';
-import { execute as ensureServices } from '../../dist/modules/xiaohongshu/app/src/blocks/Phase1EnsureServicesBlock.js';
-import { execute as startProfile } from '../../dist/modules/xiaohongshu/app/src/blocks/Phase1StartProfileBlock.js';
-import { execute as monitorCookie } from '../../dist/modules/xiaohongshu/app/src/blocks/Phase1MonitorCookieBlock.js';
 import { ensureServicesHealthy, restoreBrowserState } from './lib/recovery.mjs';
-import { recordStageCheck, recordStageRecovery } from './lib/stage-checks.mjs';
 import minimist from 'minimist';
-import { fileURLToPath } from 'node:url';
-import path from 'node:path';
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 
 
 
@@ -43,7 +39,7 @@ async function withTimeout(promise, timeoutMs, timeoutMessage) {
 
 async function maybeDaemonize(argv) {
   if (!argv.includes('--daemon') || process.env.WEBAUTO_DAEMON === '1') return false;
-  const wrapperPath = path.join(__dirname, 'shared', 'daemon-wrapper.mjs');
+  const wrapperPath = join(SCRIPT_DIR, 'shared', 'daemon-wrapper.mjs');
   const scriptPath = fileURLToPath(import.meta.url);
   const args = argv.filter((a) => a !== '--daemon');
   const { spawn } = await import('node:child_process');
@@ -55,6 +51,26 @@ async function maybeDaemonize(argv) {
   return true;
 }
 
+function resolveBlockPath(filename) {
+  const candidates = [
+    // Standard dist layout
+    join(SCRIPT_DIR, '..', '..', 'dist', 'modules', 'xiaohongshu', 'app', 'src', 'blocks', filename),
+    // Legacy layout (avoid crash if older dist exists)
+    join(SCRIPT_DIR, '..', '..', 'dist', 'modules', 'xiaohongshu', 'app', 'src', 'xiaohongshu', 'app', 'src', 'blocks', filename),
+  ];
+  for (const candidate of candidates) {
+    if (existsSync(candidate)) return pathToFileURL(candidate).href;
+  }
+  throw new Error(`Phase1 block not found: ${filename}`);
+}
+
+async function loadBlocks() {
+  const ensureServices = (await import(resolveBlockPath('Phase1EnsureServicesBlock.js'))).execute;
+  const startProfile = (await import(resolveBlockPath('Phase1StartProfileBlock.js'))).execute;
+  const monitorCookie = (await import(resolveBlockPath('Phase1MonitorCookieBlock.js'))).execute;
+  return { ensureServices, startProfile, monitorCookie };
+}
+
 async function main() {
   const rawArgv = process.argv.slice(2);
   // Default to daemon mode unless --foreground is passed
@@ -62,7 +78,7 @@ async function main() {
   const filteredArgv = rawArgv.filter(a => a !== '--foreground');
   
   if (!foreground && await maybeDaemonize([...filteredArgv, '--daemon'])) {
-    console.log('✅ Phase1 started in daemon mode');
+    console.log('Phase1 started in daemon mode');
     return;
   }
 
@@ -80,18 +96,19 @@ async function main() {
   const ownerPid = Number.isFinite(ownerPidRaw) && ownerPidRaw > 0 ? ownerPidRaw : process.pid;
   const profile = String(args.profile || '').trim();
   if (!profile) {
-    console.error('❌ 必须提供 --profile 参数（禁止回退默认 profile）');
+    console.error('ERROR: --profile is required');
     process.exit(2);
   }
 
-  console.log('🚀 Phase 1: App Block 启动');
+  console.log('Phase1: starting app block');
   console.log(`Profile: ${profile}`);
 
-  // 1) 基础服务
+  // 1) 鍩虹鏈嶅姟
+  const { ensureServices, startProfile, monitorCookie } = await loadBlocks();
   await ensureBaseServices({ repoRoot: process.cwd() });
   await ensureServices();
 
-  // 2) profile 会话
+  // 2) profile 浼氳瘽
   const lock = createSessionLock({ profileId: profile, lockType: 'phase1', force: true });
   const lockHandle = lock.acquire({ phase: 'phase1', headless });
   try {
@@ -110,7 +127,7 @@ async function main() {
       }
     } catch {}
 
-    console.log('✅ Phase1: profile 启动完成');
+    console.log('Phase1: profile started');
 
     // 3) Cookie 监控与保存（登录成功后才保存）
     console.log('🍪 Phase1: 开始监控 cookie（每 15 秒扫描）');
@@ -147,9 +164,9 @@ async function main() {
     console.log('✅ Phase1: cookie 初次稳定保存完成');
     console.log(`   saved=${cookieRes.saved} autoCookiesStarted=${cookieRes.autoCookiesStarted} path=${cookieRes.cookiePath}`);
 
-    console.log('✅ Phase1 完成：autoCookies 已开启，可继续执行 Phase2');
+    console.log('Phase1 complete: autoCookies enabled, ready for Phase2');
     if (!once) {
-      console.log('🧷 Phase1 keepalive：使用 "xhs stop" 或 Ctrl+C 退出');
+      console.log('Phase1 keepalive: use xhs stop or Ctrl+C to exit');
       await new Promise((resolve) => {
         const stop = () => resolve();
         process.on('SIGINT', stop);
@@ -162,6 +179,7 @@ async function main() {
 }
 
 main().catch((err) => {
-  console.error('❌ Phase 1 失败:', err?.message || String(err));
+  console.error('Phase1 failed:', err?.message || String(err));
   process.exit(1);
 });
+

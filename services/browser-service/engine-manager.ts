@@ -213,6 +213,11 @@ export async function launchEngineContext(opts: EngineLaunchOptions): Promise<Br
     const camoufox = await loadCamoufox();
     const Camoufox = camoufox.Camoufox;
     if (!Camoufox) throw new Error('camoufox_invalid_api');
+    const targetOS = process.platform === 'win32'
+      ? 'windows'
+      : process.platform === 'darwin'
+        ? 'macos'
+        : 'linux';
 
     // Build config to force actual display dimensions (without screen constraints to avoid position calc issues)
     const config: Record<string, any> = {
@@ -240,7 +245,7 @@ export async function launchEngineContext(opts: EngineLaunchOptions): Promise<Br
     
     const result = await Camoufox({
       headless,
-      os: ['windows', 'macos'],
+      os: targetOS,
       window: [intWinW, intWinH],
       viewport: { width: headless ? headlessW : viewportW, height: headless ? headlessH : viewportH },
       firefox_user_prefs,

@@ -17,12 +17,19 @@ export interface StartProfileOutput {
   headless: boolean;
 }
 
-async function browserServiceCommand(action: string, args: any, serviceUrl: string) {
+const DEFAULT_TIMEOUT_MS = process.platform === 'win32' ? 60000 : 20000;
+
+async function browserServiceCommand(
+  action: string,
+  args: any,
+  serviceUrl: string,
+  timeoutMs = DEFAULT_TIMEOUT_MS,
+) {
   const res = await fetch(`${serviceUrl}/command`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ action, args }),
-    signal: AbortSignal.timeout(20000),
+    signal: AbortSignal.timeout(timeoutMs),
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok || data?.error) throw new Error(data?.error || 'browser-service error');
