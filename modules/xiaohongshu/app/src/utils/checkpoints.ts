@@ -63,6 +63,24 @@ export async function detectXhsCheckpoint(input: DetectCheckpointInput): Promise
   const signals: string[] = [];
   const allIds = [String(rootId || ''), ...matchIds].filter(Boolean);
 
+  // Priority 0 (DOM-first): XHS may keep /explore/<id> in the URL even after closing the detail modal.
+  // In that case URL-based assumptions are wrong; prefer DOM signals.
+  if (dom.hasDetailMask === false && dom.hasSearchInput === true) {
+    const isInSearch = url.includes('/search_result') || url.includes('keyword=');
+    const checkpoint: XhsCheckpointId = isInSearch ? 'search_ready' : 'home_ready';
+    return {
+      success: true,
+      checkpoint,
+      stage,
+      url,
+      rootId,
+      matchIds,
+      signals: ['no_detail_mask', 'has_search_input', checkpoint],
+      dom,
+      error: state?.error,
+    };
+  }
+
   // Risk-control / captcha URL patterns are hard stops (even if container match fails).
   // We must avoid any automated retries here to reduce further risk-control triggers.
   const lowerUrl = url.toLowerCase();

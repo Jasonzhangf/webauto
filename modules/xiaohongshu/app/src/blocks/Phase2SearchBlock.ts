@@ -213,35 +213,27 @@ export async function execute(input: SearchInput): Promise<SearchOutput> {
   const hasDetailMask = Boolean(domCheck?.hasDetailMask);
   const domRect = domCheck?.rect || null;
   
-  // Priority 1: If detail mask exists or we're still in detail/comments, attempt ESC multiple times (no refresh).
+  // Priority 1: If detail mask exists or we're still in detail/comments, close the modal.
+  // NOTE: On XHS, ESC is unreliable in Camoufox; prefer clicking the close button (system click via container).
   if (hasDetailMask || det.checkpoint === 'detail_ready' || det.checkpoint === 'comments_ready') {
-    console.log('[Phase2Search] 处于详情/评论态，尝试 ESC 返回搜索列表（最多 5 次）...');
-    let escaped = false;
-    for (let i = 0; i < 5; i++) {
-      // Blur activeElement first (e.g., comment input) so ESC can close the detail modal.
-      await controllerAction('browser:execute', {
-        profile,
-        script: '(() => { const el = document.activeElement; if (el && el.blur) el.blur(); })()',
-      }, unifiedApiUrl).catch(() => {});
-      await delay(150);
-      await controllerAction('keyboard:press', { profileId: profile, key: 'Escape' }, unifiedApiUrl).catch(() => {});
-      await delay(1500);
+    console.log('[Phase2Search] 处于详情/评论态，尝试点击关闭按钮关闭详情页...');
 
-      const detAfterEsc = await detectXhsCheckpoint({ sessionId: profile, serviceUrl: unifiedApiUrl });
-      if (detAfterEsc.checkpoint === 'search_ready' || detAfterEsc.checkpoint === 'home_ready') {
-        escaped = true;
-        console.log(`[Phase2Search] ESC 成功返回（第 ${i + 1} 次），checkpoint=${detAfterEsc.checkpoint}`);
-        break;
-      }
-    }
-    if (!escaped) {
-      const detAfterEsc = await detectXhsCheckpoint({ sessionId: profile, serviceUrl: unifiedApiUrl });
+    // Best-effort click the close button by container operation (system-level click).
+    // If container is missing (layout changed), we fail fast (no refresh) with evidence.
+    const clickRes = await controllerAction(
+      'container:operation',
+      { containerId: 'xiaohongshu_detail.modal_shell', operationId: 'click', sessionId: profile },
+      unifiedApiUrl,
+    );
+    console.log(`[Phase2Search] close_button click: success=${Boolean(clickRes?.success)}`);
+    await delay(1500);
+
+    const detAfterClose = await detectXhsCheckpoint({ sessionId: profile, serviceUrl: unifiedApiUrl });
+    if (detAfterClose.checkpoint !== 'search_ready' && detAfterClose.checkpoint !== 'home_ready') {
       throw new Error(
-        `[Phase2Search] ESC 后仍未回到搜索/首页（checkpoint=${detAfterEsc.checkpoint}）。停止（避免刷新）。URL=${currentUrl}`,
+        `[Phase2Search] 关闭详情页后仍未回到搜索/首页（checkpoint=${detAfterClose.checkpoint}）。停止（避免刷新）。URL=${currentUrl}`,
       );
     }
-
-    // No further actions here: avoid repeating locate/esc loops.
   }
 
   // Priority 2: Without search input we cannot search
