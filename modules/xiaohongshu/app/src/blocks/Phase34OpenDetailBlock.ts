@@ -73,8 +73,19 @@ export async function execute(input: OpenDetailInput): Promise<OpenDetailOutput>
     url: safeUrl,
   }, unifiedApiUrl);
 
-  if (!gotoResult?.success) {
-    throw new Error(`[Phase34OpenDetail] 导航失败: ${gotoResult?.error || 'unknown'}`);
+  // controllerAction 返回形态可能是：
+  // - { ok: true }
+  // - { success: true, data: { ok: true } }
+  // - { success: false, error: ... }
+  // 这里把 browser-service 的底层错误透传出来，避免 “unknown” 无法诊断。
+  const okFlag =
+    gotoResult?.ok === true ||
+    gotoResult?.data?.ok === true ||
+    gotoResult?.success === true;
+  const gotoOk = Boolean(okFlag);
+  if (!gotoOk) {
+    const detail = gotoResult?.data?.error || gotoResult?.error || JSON.stringify(gotoResult);
+    throw new Error(`[Phase34OpenDetail] 导航失败: ${detail}`);
   }
 
   // 3. 等待页面加载完成
@@ -91,28 +102,29 @@ export async function execute(input: OpenDetailInput): Promise<OpenDetailOutput>
   }
 
   // 5. 高亮验证内容区域可见
+  // 容器命名以 container-library 为准：详情正文容器为 xiaohongshu_detail.content。
   const highlightResult = await controllerAction('container:operation', {
-    containerId: 'xiaohongshu_detail.content_anchor',
+    containerId: 'xiaohongshu_detail.content',
     operationId: 'highlight',
     sessionId: profile,
   }, unifiedApiUrl);
 
   if (highlightResult?.success === false) {
-    throw new Error(`[Phase34OpenDetail] 内容区域不可见: xiaohongshu_detail.content_anchor`);
+    throw new Error(`[Phase34OpenDetail] 内容区域不可见: xiaohongshu_detail.content`);
   }
 
-  // 6. 视口保护：验证元素在视口内
+  // 6. 视口保护：只做“可见性/有尺寸”校验，不强制要求完全在视口内。
+  // 说明：在 Camoufox + 多窗口情况下，window.innerHeight 可能固定较小（如 707），
+  // 但页面仍可正常交互。强制 in-viewport 会导致误判并中断。
   const rect = highlightResult?.anchor?.rect || highlightResult?.rect;
   if (rect) {
-    const viewportHeightRaw = await getViewportHeight(profile, unifiedApiUrl);
-    const viewportHeight = viewportHeightRaw || 1200;
-    const isInViewport = rect.y >= 0 && (rect.y + rect.height) <= viewportHeight;
-
-    if (!isInViewport) {
-      throw new Error(`[Phase34OpenDetail] 内容区域不在视口内: rect=${JSON.stringify(rect)}, viewportHeight=${viewportHeight}`);
+    const width = Number(rect.width ?? (rect.x2 - rect.x1));
+    const height = Number(rect.height ?? (rect.y2 - rect.y1));
+    if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
+      throw new Error(`[Phase34OpenDetail] 内容区域 rect 无效: ${JSON.stringify(rect)}`);
     }
-
-    console.log(`[Phase34OpenDetail] ✅ 视口验证通过: y=${rect.y}, height=${rect.height}`);
+    const viewportHeightRaw = await getViewportHeight(profile, unifiedApiUrl);
+    console.log(`[Phase34OpenDetail] rect ok (w=${width}, h=${height}), viewportHeight=${viewportHeightRaw}`);
   }
 
   await delay(500);

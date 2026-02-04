@@ -7,9 +7,11 @@
 import { ContainerRegistry } from '../../../../container-registry/src/index.js';
 import { execute as waitSearchPermit } from '../../../../workflow/blocks/WaitSearchPermitBlock.js';
 import { execute as phase2Search } from './Phase2SearchBlock.js';
+import { detectXhsCheckpoint } from '../utils/checkpoints.js';
 import os from 'node:os';
 import path from 'node:path';
 import { promises as fs } from 'node:fs';
+import { controllerAction, delay } from '../utils/controllerAction.js';
 
 export interface CollectLinksInput {
   keyword: string;
@@ -29,20 +31,7 @@ export interface CollectLinksOutput {
   totalCollected: number;
 }
 
-async function controllerAction(action: string, payload: any, apiUrl: string) {
-  const res = await fetch(`${apiUrl}/v1/controller/action`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ action, payload }),
-    signal: AbortSignal.timeout(20000),
-  });
-  const data = await res.json().catch(() => ({}));
-  return data.data || data;
-}
-
-function delay(ms: number) {
-  return new Promise<void>((resolve) => setTimeout(resolve, ms));
-}
+// controllerAction/delay are shared utilities (with safer timeouts) to avoid per-block drift.
 
 function decodeURIComponentSafe(value: string) {
   try {
@@ -175,39 +164,58 @@ export async function execute(input: CollectLinksInput): Promise<CollectLinksOut
       throw new Error('[Phase2Collect] 无法读取当前 URL');
     }
 
-    if (!currentUrl.includes('/search_result')) {
-      // 可能还在详情页或被弹窗遮挡。
-      // 先尝试 ESC（关闭弹窗/返回列表）；若仍失败，则 goto 回到“本轮固定 searchUrl”。
-      await controllerAction('keyboard:press', { profileId: profile, key: 'Escape' }, unifiedApiUrl);
-      await delay(1200);
-      const afterEsc = await controllerAction('browser:execute', {
-        profile,
-        script: 'window.location.href',
-      }, unifiedApiUrl).then(res => res?.result || res?.data?.result || '');
-      if (typeof afterEsc === 'string' && afterEsc.includes('/search_result')) {
-        return afterEsc;
+    // XHS 在某些情况下 URL 会停留在 /explore/<id>，但 DOM 已经是搜索结果页。
+    // 这里不能只依赖 URL，需要用 DOM 信号判断是否已经在 search_result。
+    const looksLikeSearchResult = await controllerAction('browser:execute', {
+      profile,
+      script: `(function(){
+        const hasResultList = !!document.querySelector('.feeds-container, .search-result-list, .note-list');
+        const hasFilter = !!document.querySelector('.tabs, .filter-tabs, [role="tablist"], .filter');
+        return Boolean(hasResultList || hasFilter);
+      })()`,
+    }, unifiedApiUrl).then(res => Boolean(res?.result || res?.data?.result));
+
+    if (!currentUrl.includes('/search_result') && !looksLikeSearchResult) {
+      const waitForSearchResult = async (maxWaitMs: number) => {
+        const start = Date.now();
+        let url = '';
+        while (Date.now() - start < maxWaitMs) {
+          await delay(400);
+          url = await controllerAction('browser:execute', {
+            profile,
+            script: 'window.location.href',
+          }, unifiedApiUrl).then(res => res?.result || res?.data?.result || '');
+          if (typeof url === 'string' && url.includes('/search_result')) return url;
+        }
+        return url;
+      };
+
+      // 先基于 checkpoint 做状态确认
+      const det = await detectXhsCheckpoint({ sessionId: profile, serviceUrl: unifiedApiUrl });
+
+      // 详情页：先用 ESC 回退
+      if (det.checkpoint === 'detail_ready' || det.checkpoint === 'comments_ready') {
+        for (let i = 0; i < 3; i += 1) {
+          await controllerAction('keyboard:press', { profileId: profile, key: 'Escape' }, unifiedApiUrl);
+          const afterEsc = await waitForSearchResult(5000);
+          if (typeof afterEsc === 'string' && afterEsc.includes('/search_result')) return afterEsc;
+        }
       }
 
-      // Hard fallback: use browser navigation back to the last known searchUrl.
-      // This does NOT perform a new search, so it should not violate SearchGate.
-      if (!expectedSearchUrl) {
-        throw new Error(
-          `[Phase2Collect] expectedSearchUrl 为空，无法 goto 回搜索页。current=${String(currentUrl)} afterEsc=${String(afterEsc)}`,
-        );
-      }
-      await controllerAction('browser:goto', { profile, url: expectedSearchUrl }, unifiedApiUrl);
-      await delay(1800);
-      const afterGoto = await controllerAction('browser:execute', {
-        profile,
-        script: 'window.location.href',
-      }, unifiedApiUrl).then(res => res?.result || res?.data?.result || '');
-      if (typeof afterGoto === 'string' && afterGoto.includes('/search_result')) {
-        return afterGoto;
-      }
+       // 禁止刷新兜底：不使用 goto 回到 search_result（高风控）。
+       // 如果无法回到搜索页，直接停止交由人工处理。
+       if (!expectedSearchUrl) {
+         throw new Error(`[Phase2Collect] expectedSearchUrl 为空，且当前不在搜索结果页（URL/DOM），停止（避免刷新）。current=${String(currentUrl)}`);
+       }
 
-      throw new Error(
-        `[Phase2Collect] 返回搜索页失败（ESC+goto），current=${String(currentUrl)} afterEsc=${String(afterEsc)} afterGoto=${String(afterGoto)}`,
-      );
+       throw new Error(
+         `[Phase2Collect] 当前不在搜索结果页（checkpoint=${det.checkpoint}），停止（避免 goto 刷新）。current=${String(currentUrl)} expected=${String(expectedSearchUrl)}`,
+       );
+     }
+
+    // If DOM says it's already search results, accept currentUrl as searchUrl placeholder.
+    if (!currentUrl.includes('/search_result') && looksLikeSearchResult) {
+      return currentUrl;
     }
 
     if (matchesKeywordFromSearchUrlStrict(currentUrl, keyword)) {
@@ -234,12 +242,22 @@ export async function execute(input: CollectLinksInput): Promise<CollectLinksOut
 
   // 进入采集前，先固定一个“期望 searchUrl”（严格等于 keyword）
   expectedSearchUrl = await ensureOnExpectedSearch();
+  // URL 可能不含 /search_result（壳页），但 DOM 已是搜索结果页；仍然允许将其作为回退锚点。
+  // 为了防止 dist 未更新导致旧逻辑报错，这里直接用当前 URL 兜底。
+  if (!expectedSearchUrl) {
+    expectedSearchUrl = await controllerAction('browser:execute', { profile, script: 'window.location.href' }, unifiedApiUrl)
+      .then(res => res?.result || res?.data?.result || '');
+  }
 
   while (links.length < targetCount && attempts < maxAttempts) {
     attempts++;
 
     // 0. 每轮开始确保仍在目标搜索页，避免误点到推荐关键词
     expectedSearchUrl = await ensureOnExpectedSearch();
+    if (!expectedSearchUrl) {
+      expectedSearchUrl = await controllerAction('browser:execute', { profile, script: 'window.location.href' }, unifiedApiUrl)
+        .then(res => res?.result || res?.data?.result || '');
+    }
     const searchUrl = expectedSearchUrl;
 
     // 2. 解析搜索结果卡片 selector（来自容器定义）
@@ -392,15 +410,27 @@ export async function execute(input: CollectLinksInput): Promise<CollectLinksOut
       continue;
     }
 
-    // 6. 校验 searchUrl（防止采集到推荐流等非目标搜索结果）
+    // 6. 校验 searchUrl
+    // XHS 壳页可能不含 /search_result，但 DOM 已是搜索结果页；此时允许通过。
     if (!isValidSearchUrl(searchUrl, keyword)) {
-      console.warn(`[Phase2Collect] searchUrl invalid, skip: ${searchUrl}`);
-      await controllerAction('keyboard:press', {
-        profileId: profile,
-        key: 'Escape',
-      }, unifiedApiUrl);
-      await delay(1000);
-      continue;
+      const stillLooksLikeSearchResult = await controllerAction('browser:execute', {
+        profile,
+        script: `(function(){
+          const hasResultList = !!document.querySelector('.feeds-container, .search-result-list, .note-list');
+          const hasFilter = !!document.querySelector('.tabs, .filter-tabs, [role="tablist"], .filter');
+          return Boolean(hasResultList || hasFilter);
+        })()`,
+      }, unifiedApiUrl).then(res => Boolean(res?.result || res?.data?.result));
+
+      if (!stillLooksLikeSearchResult) {
+        console.warn(`[Phase2Collect] searchUrl invalid, skip: ${searchUrl}`);
+        await controllerAction('keyboard:press', {
+          profileId: profile,
+          key: 'Escape',
+        }, unifiedApiUrl);
+        await delay(1000);
+        continue;
+      }
     }
     if (!isValidSafeUrl(safeUrl)) {
       console.warn(`[Phase2Collect] safeUrl invalid, skip: ${safeUrl}`);
@@ -411,7 +441,8 @@ export async function execute(input: CollectLinksInput): Promise<CollectLinksOut
       await delay(1000);
       continue;
     }
-    if (!matchesKeywordFromSearchUrlStrict(searchUrl, keyword)) {
+    // 壳页情况下 searchUrl 可能不是 /search_result?keyword=...，此时不做 URL 关键词严格校验。
+    if (searchUrl.includes('/search_result') && !matchesKeywordFromSearchUrlStrict(searchUrl, keyword)) {
       console.warn(`[Phase2Collect] searchUrl keyword 不严格等于目标词，移除漂移项: ${safeUrl}`);
       await controllerAction('keyboard:press', {
         profileId: profile,
@@ -445,11 +476,51 @@ export async function execute(input: CollectLinksInput): Promise<CollectLinksOut
     console.log(`[Phase2Collect] ✅ ${links.length}/${targetCount}: ${noteId}`);
 
     // 8. ESC 返回搜索页（系统键盘）
-    await controllerAction('keyboard:press', {
-      profileId: profile,
-      key: 'Escape',
-    }, unifiedApiUrl);
-    await delay(1500);
+    // 风控敏感：禁止使用刷新兜底；只做确定性的状态等待。
+    // XHS 回退到搜索结果有时需要较长时间（动画/网络/渲染），给足 15s。
+    await controllerAction(
+      'keyboard:press',
+      {
+        profileId: profile,
+        key: 'Escape',
+      },
+      unifiedApiUrl,
+    );
+
+    let backOk = false;
+    for (let i = 0; i < 30; i++) {
+      const res = await controllerAction(
+        'browser:execute',
+        {
+          profile,
+          script: `(function(){
+            const url = window.location.href;
+            const hasResultList = !!document.querySelector('.feeds-container, .search-result-list, .note-list');
+            const hasTabs = !!document.querySelector('.tabs, .filter-tabs, [role="tablist"], .filter');
+            // 搜索页一般存在搜索输入框；详情页通常不存在。
+            const hasSearchInput = !!document.querySelector('#search-input, input[type="search"], input[placeholder*="搜索"], input[placeholder*="关键字"]');
+            return { url, hasResultList, hasTabs, hasSearchInput };
+          })()`,
+        },
+        unifiedApiUrl,
+      ).then((r) => r?.result || r?.data?.result || null);
+
+      if (res && (res.hasResultList || res.hasTabs) && res.hasSearchInput) {
+        backOk = true;
+        break;
+      }
+      await delay(500);
+    }
+
+    if (!backOk) {
+      // 直接失败：让 orchestrator 决策是否需要人工介入/下一次最小回归点。
+      const urlNow = await controllerAction(
+        'browser:execute',
+        { profile, script: 'window.location.href' },
+        unifiedApiUrl,
+      ).then((r) => r?.result || r?.data?.result || '');
+      throw new Error(`[Phase2Collect] ESC 后 15s 仍未回到搜索页: ${urlNow}`);
+    }
   }
 
   console.log(`[Phase2Collect] 完成，滚动次数: ${scrollCount}`);

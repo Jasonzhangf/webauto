@@ -20,11 +20,15 @@ import { listProfilesForPool } from './lib/profilepool.mjs';
 import { initRunLogging, emitRunEvent, safeStringify } from './lib/logger.mjs';
 import { createSessionLock } from './lib/session-lock.mjs';
 import { execute as waitSearchPermit } from '../../dist/modules/workflow/blocks/WaitSearchPermitBlock.js';
+// NOTE: xiaohongshu/app is compiled with rootDir=../.. so output is nested under xiaohongshu/app/src.
 import { execute as phase2Search } from '../../dist/modules/xiaohongshu/app/src/blocks/Phase2SearchBlock.js';
 import { execute as phase2CollectLinks } from '../../dist/modules/xiaohongshu/app/src/blocks/Phase2CollectLinksBlock.js';
 import { resolveDownloadRoot } from '../../dist/modules/state/src/paths.js';
 import { updateXhsCollectState, markXhsCollectFailed } from '../../dist/modules/state/src/xiaohongshu-collect-state.js';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 function nowMs() {
   return Date.now();
@@ -57,14 +61,56 @@ async function writeJsonl(filePath, rows) {
   await writeFile(filePath, body, 'utf8');
 }
 
+async function maybeDaemonize(argv) {
+  if (!argv.includes('--daemon') || process.env.WEBAUTO_DAEMON === '1') return false;
+  const wrapperPath = path.join(__dirname, 'shared', 'daemon-wrapper.mjs');
+  const scriptPath = fileURLToPath(import.meta.url);
+  const args = argv.filter((a) => a !== '--daemon');
+  const { spawn } = await import('node:child_process');
+  spawn(process.execPath, [wrapperPath, scriptPath, ...args], { stdio: 'inherit', cwd: process.cwd(), env: process.env });
+  return true;
+}
+
+async function showStatus({ keyword, env, downloadRoot }) {
+  const { readFile } = await import('node:fs/promises');
+  const statePath = path.join(downloadRoot, 'xiaohongshu', env, keyword, '.collect-state.json');
+  try {
+    const raw = await readFile(statePath, 'utf8');
+    const state = JSON.parse(raw);
+    const collected = state?.listCollection?.collectedUrls?.length || 0;
+    const target = state?.listCollection?.targetCount || 0;
+    console.log(`Phase2 status: ${state?.status || 'unknown'} ${collected}/${target} updated=${state?.lastUpdateTime || 'n/a'}`);
+    if (state?.error) console.log(`error: ${String(state.error).slice(0, 200)}`);
+  } catch (err) {
+    if (err?.code === 'ENOENT') {
+      console.log('Phase2 status: not_started');
+      return;
+    }
+    throw err;
+  }
+}
+
 async function main() {
+  const argv = process.argv.slice(2);
+  const downloadRoot = resolveDownloadRoot();
+
+  if (argv.includes('--status')) {
+    await showStatus({ keyword: resolveKeyword(), env: resolveEnv(), downloadRoot });
+    return;
+  }
+
+  if (await maybeDaemonize(argv)) {
+    console.log('started in daemon mode');
+    return;
+  }
+
   const keyword = resolveKeyword();
   const target = resolveTarget();
   const env = resolveEnv();
-  const argv = process.argv.slice(2);
   const poolIdx = argv.indexOf('--profilepool');
   const profilesIdx = argv.indexOf('--profiles');
-  let runtimeProfile = PROFILE;
+  // CLI overrides first: Phase2 must be driven by explicit input (no hidden fallback).
+  let runtimeProfile = String((argv.includes('--profile') ? argv[argv.indexOf('--profile') + 1] : '') || '').trim() || PROFILE;
 
   if (poolIdx !== -1 && argv[poolIdx + 1]) {
     const poolKeyword = String(argv[poolIdx + 1]).trim();
@@ -80,7 +126,7 @@ async function main() {
 
   // Phase2 only supports a single runtime profile
   const PROFILE_RUNTIME = runtimeProfile;
-  const downloadRoot = resolveDownloadRoot();
+  // downloadRoot already resolved above
 
   // 清理旧产物（同 env + keyword 下）
   const baseDir = path.join(downloadRoot, 'xiaohongshu', env, keyword);
@@ -163,7 +209,7 @@ async function main() {
     emitRunEvent('phase2_done', { outPath, count: results.length });
 
     await updateXhsCollectState({ keyword, env, downloadRoot, targetCount: target }, (draft) => {
-      draft.status = 'running';
+      draft.status = 'completed';
       draft.listCollection.targetCount = target;
       draft.listCollection.collectedUrls = results.map((r) => ({
         noteId: String(r?.noteId || '').trim(),
@@ -173,6 +219,8 @@ async function main() {
       }));
       draft.stats.phase2DurationMs = totalMs;
       draft.resume.lastStep = 'phase2_done';
+      // 成功路径必须清理历史错误，避免出现“已完成但仍报错”的矛盾状态。
+      if (draft.error) draft.error = null;
     });
 
     console.log('\n📊 采集结果：');

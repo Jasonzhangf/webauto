@@ -90,6 +90,10 @@
   ],
   "xiaohongshu": [
     {
+      "id": "xiaohongshu_detail.comment_button",
+      "path": "xiaohongshu/detail/comment_button/container.json"
+    },
+    {
       "id": "xiaohongshu_detail.comment_section.comment_item",
       "path": "xiaohongshu/detail/comment_section/comment_item/container.json"
     },

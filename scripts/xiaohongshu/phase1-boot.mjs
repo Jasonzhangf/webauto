@@ -8,51 +8,60 @@ ensureUtf8Console();
  *
  * 用法：
  *   node scripts/xiaohongshu/phase1-boot.mjs
+ *   node scripts/xiaohongshu/phase1-boot.mjs --once   # 完成后退出（不保持前台阻塞）
  */
 
-import { PROFILE } from './lib/env.mjs';
+// Phase1 must be driven by explicit CLI input; do not fallback to defaults.
 import { ensureBaseServices } from './lib/services.mjs';
 import { createSessionLock } from './lib/session-lock.mjs';
-import { execute as ensureServices } from '../../dist/modules/xiaohongshu/app/src/blocks/Phase1EnsureServicesBlock.js';
-import { execute as startProfile } from '../../dist/modules/xiaohongshu/app/src/blocks/Phase1StartProfileBlock.js';
-import { execute as monitorCookie } from '../../dist/modules/xiaohongshu/app/src/blocks/Phase1MonitorCookieBlock.js';
+import { execute as ensureServices } from '../../dist/modules/xiaohongshu/app/src/xiaohongshu/app/src/blocks/Phase1EnsureServicesBlock.js';
+import { execute as startProfile } from '../../dist/modules/xiaohongshu/app/src/xiaohongshu/app/src/blocks/Phase1StartProfileBlock.js';
+import { execute as monitorCookie } from '../../dist/modules/xiaohongshu/app/src/xiaohongshu/app/src/blocks/Phase1MonitorCookieBlock.js';
 import minimist from 'minimist';
 
 async function main() {
   const args = minimist(process.argv.slice(2));
   const headless = args.headless === true || args.headless === 'true' || args.headless === 1 || args.headless === '1';
+  const once = args.once === true || args.once === 'true' || args.once === 1 || args.once === '1';
+  const profile = String(args.profile || '').trim();
+  if (!profile) {
+    console.error('❌ 必须提供 --profile 参数（禁止回退默认 profile）');
+    process.exit(2);
+  }
 
   console.log('🚀 Phase 1: App Block 启动');
-  console.log(`Profile: ${PROFILE}`);
+  console.log(`Profile: ${profile}`);
 
   // 1) 基础服务
   await ensureBaseServices({ repoRoot: process.cwd() });
   await ensureServices();
 
   // 2) profile 会话
-  const lock = createSessionLock({ profileId: PROFILE, lockType: 'phase1', force: true });
+  const lock = createSessionLock({ profileId: profile, lockType: 'phase1', force: true });
   const lockHandle = lock.acquire();
   try {
-    await startProfile({ profile: PROFILE, headless, url: 'https://www.xiaohongshu.com' });
+    await startProfile({ profile, headless, url: 'https://www.xiaohongshu.com' });
     console.log('✅ Phase1: profile 启动完成');
 
     // 3) Cookie 监控与保存（登录成功后才保存）
     console.log('🍪 Phase1: 开始监控 cookie（每 15 秒扫描）');
     const cookieRes = await monitorCookie({
-      profile: PROFILE,
+      profile,
       scanIntervalMs: 15000,
-      stableCount: 3,
+      stableCount: 1,
     });
     console.log('✅ Phase1: cookie 初次稳定保存完成');
     console.log(`   saved=${cookieRes.saved} autoCookiesStarted=${cookieRes.autoCookiesStarted} path=${cookieRes.cookiePath}`);
 
     console.log('✅ Phase1 完成：autoCookies 已开启，可继续执行 Phase2');
-    console.log('🧷 Phase1 keepalive：使用 "xhs stop" 或 Ctrl+C 退出');
-    await new Promise((resolve) => {
-      const stop = () => resolve();
-      process.on('SIGINT', stop);
-      process.on('SIGTERM', stop);
-    });
+    if (!once) {
+      console.log('🧷 Phase1 keepalive：使用 "xhs stop" 或 Ctrl+C 退出');
+      await new Promise((resolve) => {
+        const stop = () => resolve();
+        process.on('SIGINT', stop);
+        process.on('SIGTERM', stop);
+      });
+    }
   } finally {
     if (lockHandle?.release) lockHandle.release();
   }

@@ -52,7 +52,7 @@ export async function execute(input: CloseTabsInput): Promise<CloseTabsOutput> {
       );
       closedCount++;
       console.log(`[Phase34CloseTabs] 已关闭 Tab pageId=${tab.pageId}`);
-    } catch (err) {
+    } catch (err: any) {
       failedCount++;
       const errorMsg = err?.message || String(err);
       errors.push({ pageId: tab.pageId, error: errorMsg });

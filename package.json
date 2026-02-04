@@ -41,7 +41,7 @@
     "test:desktop-console:unit": "tsx --test apps/desktop-console/src/main/profile-store.test.mts",
     "test:desktop-console:renderer": "npm --prefix apps/desktop-console run test:renderer",
     "test:desktop-console:coverage": "c8 --reporter=text --reporter=lcov --all --src apps/desktop-console/src/main --extension .mts --extension .mjs --exclude \"**/*.test.mts\" --include \"apps/desktop-console/src/main/profile-store.mts\" tsx --test apps/desktop-console/src/main/profile-store.test.mts",
-    "test": "npm run check:modules && npm run check:ts && npm run test:modules:unit && npm run test:desktop-console:unit",
+    "test": "npm run check:modules && npm run check:ts && npm run test:modules:unit && npm run test:desktop-console:unit && npm run test:services:unit",
     "cli:browser-control": "tsx modules/browser-control/src/cli.ts",
     "cli:session-manager": "tsx modules/session-manager/src/cli.ts",
     "cli:logging": "tsx modules/logging/src/cli.ts",
@@ -89,7 +89,8 @@
     "launch:diagnose:dev": "node scripts/launch-with-diagnostics.mjs --dev",
     "dev:build-install-global": "node scripts/dev/build-install-global.mjs",
     "dev:build-install-global:full": "node scripts/dev/build-install-global.mjs --full",
-    "dev:build-install-global:link": "node scripts/dev/build-install-global.mjs --link"
+    "dev:build-install-global:link": "node scripts/dev/build-install-global.mjs --link",
+    "test:services:unit": "npx tsx --test $(find services -name \"*.test.ts\" -o -name \"*.test.mts\" 2>/dev/null | tr \"\\n\" \" \")"
   },
   "devDependencies": {
     "@modelcontextprotocol/sdk": "^1.20.1",

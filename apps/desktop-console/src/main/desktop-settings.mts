@@ -10,6 +10,8 @@ export type DesktopConsoleSettings = {
   downloadRoot: string;
   defaultEnv: 'debug' | 'prod';
   defaultKeyword: string;
+  defaultTarget: number;
+  defaultDryRun: boolean;
   timeouts: { loginTimeoutSec: number; cmdTimeoutSec: number };
   profileAliases: Record<string, string>;
   profileColors: Record<string, string>;
@@ -61,6 +63,8 @@ function normalizeSettings(defaults: Partial<DesktopConsoleSettings>, input: Par
     downloadRoot: String(input.downloadRoot || defaults.downloadRoot || resolveDefaultDownloadRoot()),
     defaultEnv: (String(input.defaultEnv || defaults.defaultEnv || 'debug') === 'prod' ? 'prod' : 'debug'),
     defaultKeyword: String(input.defaultKeyword ?? defaults.defaultKeyword ?? ''),
+    defaultTarget: Math.max(1, Math.floor(Number((input as any).defaultTarget ?? (defaults as any).defaultTarget ?? 20) || 20)),
+    defaultDryRun: Boolean((input as any).defaultDryRun ?? (defaults as any).defaultDryRun ?? false),
     timeouts: {
       loginTimeoutSec: Math.max(
         30,

@@ -12,9 +12,17 @@ export async function ensurePageRuntime(page: Page, forceReinject = false): Prom
     await injectRuntimeBundle({ page });
     injectedPages.add(page);
   }
-  await page.waitForFunction(() => Boolean((window as any).__webautoRuntime && (window as any).__webautoRuntime.ready), {
-    timeout: 4000,
-  });
+  try {
+    await page.waitForFunction(() => Boolean((window as any).__webautoRuntime && (window as any).__webautoRuntime.ready), {
+      timeout: 4000,
+    });
+  } catch (err) {
+    // Runtime is best-effort for system-level mouse/keyboard commands.
+    // If injection readiness times out (common on slow/heavy pages), we must not block
+    // low-level commands like mouse:click/mouse:wheel.
+    // Higher-level operations (containers:match, overlay highlight) will handle their own retries.
+    return;
+  }
 }
 
 export async function evalPageRuntime<T>(page: Page, fn: (runtime: any) => T | Promise<T>): Promise<T> {

@@ -349,7 +349,7 @@ export async function execute(input: ErrorRecoveryInput): Promise<ErrorRecoveryO
         '2px solid #4caf50',
         1000,
       );
-      const ok = anchor.found && anchor.rect && anchor.rect.width > 0 && anchor.rect.height > 0;
+      const ok = Boolean(anchor.found && anchor.rect && anchor.rect.width > 0 && anchor.rect.height > 0);
       return { success: ok, method: 'esc-key-double' };
     } catch (err: any) {
       console.warn(

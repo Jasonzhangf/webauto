@@ -207,3 +207,4 @@ xiaohongshu_images/
 ~/.webauto/
 # Desktop console build output
 apps/desktop-console/dist/
+modules/xiaohongshu/app/pnpm-lock.yaml

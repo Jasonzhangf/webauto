@@ -25,9 +25,9 @@ import {
   resolveProfilesRoot,
 } from './xiaohongshu/lib/profilepool.mjs';
 
-import { execute as ensureServices } from '../dist/modules/xiaohongshu/app/src/blocks/Phase1EnsureServicesBlock.js';
-import { execute as startProfile } from '../dist/modules/xiaohongshu/app/src/blocks/Phase1StartProfileBlock.js';
-import { execute as monitorCookie } from '../dist/modules/xiaohongshu/app/src/blocks/Phase1MonitorCookieBlock.js';
+import { execute as ensureServices } from '../dist/modules/xiaohongshu/app/src/xiaohongshu/app/src/blocks/Phase1EnsureServicesBlock.js';
+import { execute as startProfile } from '../dist/modules/xiaohongshu/app/src/xiaohongshu/app/src/blocks/Phase1StartProfileBlock.js';
+import { execute as monitorCookie } from '../dist/modules/xiaohongshu/app/src/xiaohongshu/app/src/blocks/Phase1MonitorCookieBlock.js';
 import { execute as ensureLogin } from '../dist/modules/workflow/blocks/EnsureLoginBlock.js';
 
 // Avoid crashing when piped output is closed early (e.g., `| head`)

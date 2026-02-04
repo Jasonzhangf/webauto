@@ -29,6 +29,11 @@ test('fullCollect uses scripts scan result as script path when available', async
   assert.match(src, /const scriptPath = chosen\?\.path \|\| window\.api\.pathJoin\('scripts', 'xiaohongshu', 'collect-content\.mjs'\);/);
 });
 
+test('run tab persists default keyword/target/env/dry-run on execute', async () => {
+  const src = await readFile(runPath, 'utf8');
+  assert.match(src, /persistRunInputs\(\{ keyword, target:.*env, dryRun: dryRun\.checked \}\)/);
+});
+
 test('run template includes target argument', async () => {
   const src = await readFile(runPath, 'utf8');
   assert.match(src, /\['--target', target\]/);

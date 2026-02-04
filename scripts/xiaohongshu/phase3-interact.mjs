@@ -18,7 +18,7 @@ import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { resolveKeyword, resolveEnv, PROFILE } from './lib/env.mjs';
+import { resolveKeyword, resolveEnv } from './lib/env.mjs';
 import { initRunLogging, emitRunEvent, safeStringify } from './lib/logger.mjs';
 import { createSessionLock } from './lib/session-lock.mjs';
 import { assignShards, listProfilesForPool } from './lib/profilepool.mjs';
@@ -95,6 +95,17 @@ async function main() {
   const skipPhase1 = args['skip-phase1'] === true || args['skip-phase1'] === '1' || args['skip-phase1'] === 1;
   const dryRun = args['dry-run'] === true || args['dry-run'] === 'true' || args['dry-run'] === 1 || args['dry-run'] === '1';
 
+  // Daemon mode: delegate to shared daemon-wrapper so UI can launch and exit safely.
+  if (args.daemon === true && process.env.WEBAUTO_DAEMON !== '1') {
+    const wrapperPath = path.join(__dirname, 'shared', 'daemon-wrapper.mjs');
+    const scriptPath = fileURLToPath(import.meta.url);
+    const scriptArgs = process.argv.slice(2).filter((arg) => arg !== '--daemon');
+    await runNode(wrapperPath, [scriptPath, ...scriptArgs]);
+    return;
+  }
+
+  // dry-run is "no-write": run the flow but avoid persisting outputs.
+
   // Multi-profile orchestrator (auto-sharding)
   if (!shardedChild && (profilesArg || poolKeyword)) {
     const profiles = profilesArg
@@ -122,10 +133,10 @@ async function main() {
       '--skip-phase1',
     ]);
 
-    for (const a of assignments) {
+    const runShard = async (a) => {
       console.log(`\n➡️  shard ${a.shardIndex}/${a.shardCount} profile=${a.profileId}`);
       if (!skipPhase1) {
-        await runNode(path.join(__dirname, 'phase1-boot.mjs'), ['--profile', a.profileId]);
+        await runNode(path.join(__dirname, 'phase1-boot.mjs'), ['--profile', a.profileId, '--once']);
       }
       await runNode(scriptPath, [
         ...baseArgs,
@@ -138,16 +149,24 @@ async function main() {
         '--sharded-child',
         '1',
       ]);
-    }
+    };
+
+    await Promise.all(assignments.map((a) => runShard(a)));
     return;
   }
 
   const linksPath = String(args.links || '').trim() || undefined;
   const shardIndex = args['shard-index'] != null ? Number(args['shard-index']) : undefined;
   const shardCount = args['shard-count'] != null ? Number(args['shard-count']) : undefined;
+  const profile = String(args.profile || '').trim();
   const likeKeywords = String(args['like-keywords'] || '').trim()
     ? String(args['like-keywords']).split(',').map((k) => k.trim()).filter(Boolean)
     : [];
+
+  if (!profile) {
+    console.error('❌ 必须提供 --profile 参数（禁止回退默认 profile）');
+    process.exit(2);
+  }
 
   if (likeKeywords.length === 0) {
     console.error('❌ 必须提供 --like-keywords，例如：--like-keywords "好评,推荐"');
@@ -157,10 +176,10 @@ async function main() {
   const tabCount = 5;
   const maxLikesPerRound = 2;
 
-  const runContext = initRunLogging({ env, keyword, logMode: 'single' });
+  const runContext = initRunLogging({ env, keyword, logMode: 'single', noWrite: dryRun });
 
   console.log(`❤️  Phase 3: 评论互动 [runId: ${runContext.runId}]`);
-  console.log(`Profile: ${PROFILE}`);
+  console.log(`Profile: ${profile}`);
   console.log(`关键字: ${keyword}`);
   console.log(`评论筛选关键字: ${likeKeywords.join(', ')}`);
   console.log(`Tab: ${tabCount} (固定)`);
@@ -170,7 +189,7 @@ async function main() {
   if (linksPath) console.log(`links: ${linksPath}`);
   if (shardIndex != null && shardCount != null) console.log(`shard: ${shardIndex}/${shardCount}`);
 
-  const lock = createSessionLock({ profileId: PROFILE, lockType: 'phase3' });
+  const lock = createSessionLock({ profileId: profile, lockType: 'phase3' });
   let lockHandle = null;
   try {
     lockHandle = lock.acquire();
@@ -184,28 +203,30 @@ async function main() {
   let tabs = [];
 
   try {
-    emitRunEvent('phase3_start', { keyword, env, likeKeywords, tabCount, maxLikesPerRound });
-    await updateXhsCollectState({ keyword, env, downloadRoot }, (draft) => {
-      if (!draft.startTime) draft.startTime = new Date().toISOString();
-      draft.status = 'running';
-      draft.resume.lastStep = 'phase3_start';
-      draft.legacy = {
-        ...(draft.legacy || {}),
-        phase3: {
-          ...(draft.legacy?.phase3 || {}),
-          likeKeywords,
-          tabCount,
-          maxLikesPerRound,
-          startedAt: new Date().toISOString(),
-        },
-      };
-    });
+    emitRunEvent('phase3_start', { keyword, env, likeKeywords, tabCount, maxLikesPerRound, dryRun });
+    if (!dryRun) {
+      await updateXhsCollectState({ keyword, env, downloadRoot }, (draft) => {
+        if (!draft.startTime) draft.startTime = new Date().toISOString();
+        draft.status = 'running';
+        draft.resume.lastStep = 'phase3_start';
+        draft.legacy = {
+          ...(draft.legacy || {}),
+          phase3: {
+            ...(draft.legacy?.phase3 || {}),
+            likeKeywords,
+            tabCount,
+            maxLikesPerRound,
+            startedAt: new Date().toISOString(),
+          },
+        };
+      });
+    }
 
     console.log(`\n🔍 步骤 1: 校验 Phase2 链接...`);
     const validateResult = await validateLinks({
       keyword,
       env,
-      profile: PROFILE,
+      profile,
       ...(linksPath ? { linksPath } : {}),
       ...(shardIndex != null ? { shardIndex } : {}),
       ...(shardCount != null ? { shardCount } : {}),
@@ -221,7 +242,7 @@ async function main() {
     }
 
     console.log(`\n📂 步骤 2: 打开 ${tabCount} 个 Tab...`);
-    const openTabsResult = await openTabs({ profile: PROFILE, tabCount, unifiedApiUrl: UNIFIED_API_URL });
+    const openTabsResult = await openTabs({ profile, tabCount, unifiedApiUrl: UNIFIED_API_URL });
     tabs = openTabsResult?.tabs || [];
     if (tabs.length === 0) {
       throw new Error('打开 Tab 失败：tabs 为空');
@@ -266,11 +287,11 @@ async function main() {
       console.log(`\n[Round ${round}] Tab ${activeTab.tabIndex} -> note ${link2.noteId}`);
 
       // 切换 Tab
-      await controllerAction('browser:switch_to_page', { profile: PROFILE, pageId: activeTab.pageId }, UNIFIED_API_URL);
+      await controllerAction('browser:switch_to_page', { profile, pageId: activeTab.pageId }, UNIFIED_API_URL);
       await delay(500);
 
       const res = await interact({
-        sessionId: PROFILE,
+        sessionId: profile,
         noteId: link2.noteId,
         safeUrl: link2.safeUrl,
         likeKeywords,
@@ -300,26 +321,28 @@ async function main() {
         totalLiked: state2.totalLiked,
         reachedBottom: state2.reachedBottom,
       });
-      await updateXhsCollectState({ keyword, env, downloadRoot }, (draft) => {
-        draft.resume.lastNoteId = link2.noteId;
-        draft.resume.lastStep = 'phase3_round_done';
-        const prev = (draft.legacy?.phase3?.notes || {}) as Record<string, any>;
-        const next = {
-          ...prev,
-          [link2.noteId]: {
-            totalLiked: state2.totalLiked,
-            reachedBottom: state2.reachedBottom,
-            updatedAt: new Date().toISOString(),
-          },
-        };
-        draft.legacy = {
-          ...(draft.legacy || {}),
-          phase3: {
-            ...(draft.legacy?.phase3 || {}),
-            notes: next,
-          },
-        };
-      });
+      if (!dryRun) {
+        await updateXhsCollectState({ keyword, env, downloadRoot }, (draft) => {
+          draft.resume.lastNoteId = link2.noteId;
+          draft.resume.lastStep = 'phase3_round_done';
+          const prev = (draft.legacy?.phase3?.notes || {});
+          const next = {
+            ...prev,
+            [link2.noteId]: {
+              totalLiked: state2.totalLiked,
+              reachedBottom: state2.reachedBottom,
+              updatedAt: new Date().toISOString(),
+            },
+          };
+          draft.legacy = {
+            ...(draft.legacy || {}),
+            phase3: {
+              ...(draft.legacy?.phase3 || {}),
+              notes: next,
+            },
+          };
+        });
+      }
 
       // 轮转节奏
       await delay(1200);
@@ -329,40 +352,44 @@ async function main() {
     const totalMs = nowMs() - t0;
     console.log(`\n⏱️  总耗时: ${formatDurationMs(totalMs)}`);
     console.log(`✅ 总点赞数: ${totalLiked}`);
-    emitRunEvent('phase3_done', { totalLiked, ms: totalMs });
-    await updateXhsCollectState({ keyword, env, downloadRoot }, (draft) => {
-      draft.stats.phase3DurationMs = totalMs;
-      draft.resume.lastStep = 'phase3_done';
-      draft.legacy = {
-        ...(draft.legacy || {}),
-        phase3: {
-          ...(draft.legacy?.phase3 || {}),
-          totalLiked,
-          doneAt: new Date().toISOString(),
-        },
-      };
-    });
+    emitRunEvent('phase3_done', { totalLiked, ms: totalMs, dryRun });
+    if (!dryRun) {
+      await updateXhsCollectState({ keyword, env, downloadRoot }, (draft) => {
+        draft.stats.phase3DurationMs = totalMs;
+        draft.resume.lastStep = 'phase3_done';
+        draft.legacy = {
+          ...(draft.legacy || {}),
+          phase3: {
+            ...(draft.legacy?.phase3 || {}),
+            totalLiked,
+            doneAt: new Date().toISOString(),
+          },
+        };
+      });
+    }
 
   } catch (err) {
-    emitRunEvent('phase3_error', { error: safeStringify(err) });
-    await updateXhsCollectState({ keyword, env, downloadRoot }, (draft) => {
-      draft.resume.lastStep = 'phase3_error';
-      draft.legacy = {
-        ...(draft.legacy || {}),
-        phase3: {
-          ...(draft.legacy?.phase3 || {}),
-          error: safeStringify(err),
-          failedAt: new Date().toISOString(),
-        },
-      };
-    }).catch(() => {});
+    emitRunEvent('phase3_error', { error: safeStringify(err), dryRun });
+    if (!dryRun) {
+      await updateXhsCollectState({ keyword, env, downloadRoot }, (draft) => {
+        draft.resume.lastStep = 'phase3_error';
+        draft.legacy = {
+          ...(draft.legacy || {}),
+          phase3: {
+            ...(draft.legacy?.phase3 || {}),
+            error: safeStringify(err),
+            failedAt: new Date().toISOString(),
+          },
+        };
+      }).catch(() => {});
+    }
     console.error('\n❌ Phase 3 失败:', err?.message || String(err));
     process.exit(1);
   } finally {
     // 尽量关闭 tab，避免资源泄漏
     if (tabs.length > 0) {
       console.log(`\n📂 收尾: 关闭 ${tabs.length} 个 Tab...`);
-      await closeTabs(PROFILE, tabs);
+      await closeTabs(profile, tabs);
     }
     lockHandle?.release?.();
   }

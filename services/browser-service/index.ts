@@ -151,10 +151,16 @@ export async function startBrowserService(opts: BrowserServiceOptions = {}) {
         req.on('end', async () => {
           try {
             const payload: CommandPayload = JSON.parse(Buffer.concat(chunks).toString('utf-8'));
+            const t0 = Date.now();
+            const action = String(payload?.action || '');
+            const profileId = String(payload?.args?.profileId || payload?.args?.profile || payload?.args?.sessionId || '');
+            logEvent('browser.command.start', { action, profileId });
             const result = await handleCommand(payload, sessionManager, wsServer, { onSessionStart: markSessionStarted });
+            logEvent('browser.command.done', { action, profileId, ok: result.ok, ms: Date.now() - t0 });
             res.writeHead(result.ok ? 200 : 500, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify(result.body));
           } catch (err) {
+            logEvent('browser.command.error', { error: (err as Error)?.message || String(err) });
             res.writeHead(500, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ error: (err as Error).message }));
           }
@@ -251,6 +257,9 @@ async function handleCommand(
 
   switch (action) {
     case 'start': {
+      // Ensure exactly one session per profileId:
+      // - if an existing session exists and ownerPid is alive -> reuse
+      // - if ownerPid is dead -> SessionManager replaces it
       const opts: CreateSessionPayload = {
         profileId: args.profileId || 'default',
         sessionName: args.profileId || 'default',

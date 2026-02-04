@@ -6,7 +6,8 @@ export async function controllerAction(action: string, payload: any, apiUrl: str
   const res = await fetch(`${apiUrl}/v1/controller/action`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ action, payload }),
+    // Unified API expects payload nested under `payload`.
+    body: JSON.stringify({ action, payload: payload || {} }),
     // 截图/容器操作在某些页面会更慢，统一放宽超时，避免调试链路被误杀
     signal: AbortSignal.timeout(60000),
   });

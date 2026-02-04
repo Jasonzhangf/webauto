@@ -74,12 +74,30 @@ export async function cleanupOldRunArtifacts(baseDir, logMode = 'single') {
   }
 }
 
-export function initRunLogging({ env, keyword, logMode = 'single', baseDir: customBaseDir } = {}) {
+export function initRunLogging({ env, keyword, logMode = 'single', baseDir: customBaseDir, noWrite = false } = {}) {
   if (!env) throw new Error('initRunLogging: env is required');
   if (!keyword) throw new Error('initRunLogging: keyword is required');
 
   const baseDir = customBaseDir || getKeywordBaseDir(env, keyword);
   const runId = createRunId();
+
+  if (noWrite) {
+    // dry-run: avoid any file IO
+    runContext = {
+      runId,
+      env,
+      keyword,
+      baseDir,
+      logPath: null,
+      eventsPath: null,
+      startedAtMs: Date.now(),
+      emitEvent: () => {},
+      close: () => {},
+    };
+    console.log(`[Logger] runId=${runId} (no-write)`);
+    return runContext;
+  }
+
   const logPath =
     logMode === 'rotate' ? path.join(baseDir, `run.${runId}.log`) : path.join(baseDir, 'run.log');
   const eventsPath =
@@ -231,4 +249,3 @@ function getKeywordBaseDir(env, keyword) {
   const downloadDir = resolveDownloadRoot();
   return path.join(downloadDir, 'xiaohongshu', env, keyword);
 }
-

@@ -25,7 +25,21 @@ export class UiController {
     this.errorHandler = null;
   }
 
+  debugLog(label, data) {
+    if (process.env.DEBUG !== '1' && process.env.WEBAUTO_DEBUG !== '1') return;
+    try {
+      const safe = JSON.stringify(data);
+      // Keep logs single-line JSON for grepability.
+      console.log(`[ui-controller:${label}] ${safe}`);
+    } catch {
+      console.log(`[ui-controller:${label}]`, data);
+    }
+  }
+
   async handleAction(action, payload = {}) {
+    const startedAt = Date.now();
+    const profileId = (payload.profileId || payload.profile || payload.sessionId || '').toString();
+    this.debugLog('action:start', { action, profileId });
     switch (action) {
       case 'browser:status':
         return this.fetchBrowserStatus();
@@ -83,8 +97,10 @@ export class UiController {
        return this.handleKeyboardPress(payload);
      case 'keyboard:type':
        return this.handleKeyboardType(payload);
-     case 'mouse:wheel':
-       return this.handleMouseWheel(payload);
+    case 'mouse:wheel':
+      return this.handleMouseWheel(payload);
+    case 'mouse:click':
+      return this.handleMouseClick(payload);
      case 'dom:branch:2':
        return this.handleDomBranch2(payload);
      case 'dom:pick:2':
@@ -98,7 +114,19 @@ export class UiController {
      default:
        return { success: false, error: `Unknown action: ${action}` };
    }
- }
+  }
+
+  async runWithTrace(label, fn) {
+    const startedAt = Date.now();
+    try {
+      const res = await fn();
+      this.debugLog(`${label}:ok`, { ms: Date.now() - startedAt });
+      return res;
+    } catch (err) {
+      this.debugLog(`${label}:err`, { ms: Date.now() - startedAt, error: err?.message || String(err) });
+      throw err;
+    }
+  }
 
   async fetchBrowserStatus() {
     try {
@@ -713,6 +741,20 @@ export class UiController {
     return { success: true, data: result };
   }
 
+  async handleMouseClick(payload = {}) {
+    const profileId = (payload.profileId || payload.profile || payload.sessionId || 'default').toString();
+    const x = Number(payload.x);
+    const y = Number(payload.y);
+    const button = payload.button || 'left';
+    const clicks = typeof payload.clicks === 'number' ? payload.clicks : 1;
+    const delay = typeof payload.delay === 'number' ? payload.delay : undefined;
+    if (!Number.isFinite(x) || !Number.isFinite(y)) {
+      throw new Error('x/y required for mouse:click');
+    }
+    const result = await this.browserServiceCommand('mouse:click', { profileId, x, y, button, clicks, ...(delay ? { delay } : {}) });
+    return { success: true, data: result };
+  }
+
   async handleBrowserCancelDomPick(payload = {}) {
     const profile = payload.profile || payload.sessionId;
     if (!profile) {
@@ -1314,6 +1356,8 @@ export class UiController {
 
   async browserServiceCommand(action, args, options = {}) {
     const timeoutMs = typeof options.timeoutMs === 'number' && options.timeoutMs > 0 ? options.timeoutMs : 20000;
+    const profileId = (args?.profileId || args?.profile || args?.sessionId || '').toString();
+    this.debugLog('browserServiceCommand:start', { action, profileId, timeoutMs });
     const res = await fetch(`${this.getBrowserHttpBase()}/command`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -1330,14 +1374,18 @@ export class UiController {
     }
 
     if (!res.ok) {
+      this.debugLog('browserServiceCommand:http_err', { action, profileId, status: res.status, raw: raw?.slice?.(0, 200) });
       throw new Error(data?.error || data?.body?.error || `browser-service command "${action}" HTTP ${res.status}`);
     }
     if (data && data.ok === false) {
+      this.debugLog('browserServiceCommand:ok_false', { action, profileId, error: data.error });
       throw new Error(data.error || `browser-service command "${action}" failed`);
     }
     if (data && data.error) {
+      this.debugLog('browserServiceCommand:body_err', { action, profileId, error: data.error });
       throw new Error(data.error);
     }
+    this.debugLog('browserServiceCommand:ok', { action, profileId });
     return data.body ?? data;
   }
 

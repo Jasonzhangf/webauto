@@ -74,12 +74,17 @@ async function main() {
   --keyword, -k    搜索关键字（必填）
   --target, -t     目标采集数量（必填）
   --env            环境标识（默认: debug）
+  --profile         单 profile（默认: xiaohongshu_fresh）
+  --profiles        手动 profiles 列表（逗号分隔）用于 Phase3/4 分片；Phase2 自动取第一个
+  --profilepool     profilepool 前缀（扫描 ~/.webauto/profiles）用于 Phase3/4 分片；Phase2 自动取第一个
   --skip-phase1    跳过 Phase 1 启动（假设浏览器已启动）
   --skip-phase2    跳过 Phase 2 搜索采集（假设链接已存在）
 
 示例:
-  node scripts/xiaohongshu/collect-content.mjs --keyword "手机膜" --target 50
-  node scripts/xiaohongshu/collect-content.mjs -k "手机壳" -t 100 --env prod
+  node scripts/xiaohongshu/collect-content.mjs --keyword "手机膜" --target 50 --profile xiaohongshu_fresh
+  node scripts/xiaohongshu/collect-content.mjs --keyword "手机膜" --target 50 --profilepool xiaohongshu_batch
+  node scripts/xiaohongshu/collect-content.mjs --keyword "手机膜" --target 50 --profiles xiaohongshu_batch-1,xiaohongshu_batch-2
+  node scripts/xiaohongshu/collect-content.mjs -k "手机壳" -t 100 --env prod --profile xiaohongshu_fresh
     `);
     process.exit(0);
   }
@@ -92,6 +97,7 @@ async function main() {
   const profilesArg = argv.profiles ? String(argv.profiles).trim() : '';
   const skipPhase1 = argv['skip-phase1'] === true;
   const skipPhase2 = argv['skip-phase2'] === true;
+  const dryRun = argv['dry-run'] === true || argv['dry-run'] === '1' || argv['dry-run'] === 1;
 
   if (!keyword) {
     console.error('❌ 错误：必须提供 --keyword 参数');
@@ -127,6 +133,10 @@ async function main() {
 
   const phase2Profile = profiles.length > 0 ? profiles[0] : '';
 
+  // Note: "dry-run" is stage-specific.
+  // - Phase1/2: treat dry-run as "no write" (do not persist outputs)
+  // - Phase3/4: still execute the flow, but do not write outputs
+
   console.log(`
 ╔════════════════════════════════════════╗
 ║   小红书搜索采集工作流               ║
@@ -154,12 +164,12 @@ Phase2 运行: ${phase2Profile || '(default)'}
         );
       } else if (profiles.length > 1) {
         for (const p of profiles) {
-          await runScript(path.join(__dirname, 'phase1-boot.mjs'), ['--profile', p]);
+          await runScript(path.join(__dirname, 'phase1-boot.mjs'), ['--profile', p, '--once']);
         }
       } else if (profile) {
-        await runScript(path.join(__dirname, 'phase1-boot.mjs'), ['--profile', profile]);
+        await runScript(path.join(__dirname, 'phase1-boot.mjs'), ['--profile', profile, '--once']);
       } else {
-        await runScript(path.join(__dirname, 'phase1-boot.mjs'), []);
+        await runScript(path.join(__dirname, 'phase1-boot.mjs'), ['--once']);
       }
     } else {
       console.log('\n⏭️  跳过 Phase 1（假设浏览器已启动）');
@@ -172,6 +182,7 @@ Phase2 运行: ${phase2Profile || '(default)'}
       if (profilepool) phase2Args.push('--profilepool', profilepool);
       if (profilesArg) phase2Args.push('--profiles', profilesArg);
       if (profile) phase2Args.push('--profile', profile);
+      if (dryRun) phase2Args.push('--dry-run');
       await runScript(path.join(__dirname, 'phase2-collect.mjs'), phase2Args);
     } else {
       console.log('\n⏭️  跳过 Phase 2（假设链接已存在）');
@@ -183,6 +194,7 @@ Phase2 运行: ${phase2Profile || '(default)'}
     if (profilepool) phase4Args.push('--profilepool', profilepool);
     if (profilesArg) phase4Args.push('--profiles', profilesArg);
     if (profile) phase4Args.push('--profile', profile);
+    if (dryRun) phase4Args.push('--dry-run');
     await runScript(path.join(__dirname, 'phase4-harvest.mjs'), phase4Args);
 
     const elapsed = Math.floor((Date.now() - t0) / 1000);

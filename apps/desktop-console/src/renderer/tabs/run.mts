@@ -32,6 +32,7 @@ export function renderRun(root: HTMLElement, ctx: any) {
   envSel.value = ctx.settings?.defaultEnv || 'debug';
 
   const dryRun = createEl('input', { type: 'checkbox' }) as HTMLInputElement;
+  dryRun.checked = ctx.settings?.defaultDryRun === true;
 
   const profileModeSel = createEl('select') as HTMLSelectElement;
 
@@ -229,6 +230,19 @@ export function renderRun(root: HTMLElement, ctx: any) {
     return { ok: true as const, args: ['--profiles', list.join(',')], mode: 'profiles', value: list.join(',') };
   }
 
+  function persistRunInputs(next: { keyword?: string; target?: number; env?: string; dryRun?: boolean }) {
+    const curr = ctx.settings || {};
+    const payload: any = {};
+    if (next.keyword && next.keyword !== curr.defaultKeyword) payload.defaultKeyword = next.keyword;
+    if (typeof next.target === 'number' && next.target > 0 && next.target !== curr.defaultTarget) payload.defaultTarget = next.target;
+    if (next.env && next.env !== curr.defaultEnv) payload.defaultEnv = next.env;
+    if (typeof next.dryRun === 'boolean' && next.dryRun !== curr.defaultDryRun) payload.defaultDryRun = next.dryRun;
+    if (Object.keys(payload).length === 0) return;
+    window.api.settingsSet(payload).then((updated: any) => {
+      if (updated) ctx.settings = updated;
+    }).catch(() => {});
+  }
+
   async function run() {
     ctx.clearLog();
     const t = templateSel.value as TemplateId;
@@ -264,6 +278,10 @@ export function renderRun(root: HTMLElement, ctx: any) {
         return;
       }
     }
+
+    // Persist last-used keyword/target/env for next run.
+    const targetNum = Number(target);
+    persistRunInputs({ keyword, target: Number.isFinite(targetNum) ? targetNum : undefined, env, dryRun: dryRun.checked });
 
     const common = buildArgs([
       ...(keyword ? ['--keyword', keyword] : []),
@@ -323,12 +341,15 @@ export function renderRun(root: HTMLElement, ctx: any) {
       args = buildArgs([script, ...profileArgs, ...common, ...extraArgs]);
     }
 
-    await window.api.cmdSpawn({
+    const ok = await window.api.cmdSpawn({
       title: `${t} ${keyword}`,
       cwd: '',
       args,
       groupKey: 'xiaohongshu',
     });
+    if (!ok || (ok as any).runId == null) {
+      alert('运行失败：命令未启动（请检查输入参数或日志）');
+    }
   }
 
   async function stop() {

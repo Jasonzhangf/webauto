@@ -7,13 +7,37 @@ export interface CreateSessionPayload extends BrowserSessionOptions {
 
 export const SESSION_CLOSED_EVENT = 'browser-service:session-closed';
 
+function isProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export class SessionManager {
   private sessions = new Map<string, BrowserSession>();
   // Track owning process (e.g. a script pid) so we can kill it when the browser is closed manually.
   private owners = new Map<string, { pid: number; startedAt: string }>();
+  private sessionFactory: (options: BrowserSessionOptions) => BrowserSession;
+
+  private debugLog(label: string, data: any) {
+    if (process.env.DEBUG !== '1' && process.env.WEBAUTO_DEBUG !== '1') return;
+    try {
+      console.log(`[browser-service:${label}] ${JSON.stringify(data)}`);
+    } catch {
+      console.log(`[browser-service:${label}]`, data);
+    }
+  }
 
   // Optional options are currently not used, but allowed for future extensions
-  constructor(_options?: { host?: string; port?: number; wsHost?: string; wsPort?: number }) {}
+  constructor(
+    _options?: { host?: string; port?: number; wsHost?: string; wsPort?: number },
+    sessionFactory?: (options: BrowserSessionOptions) => BrowserSession,
+  ) {
+    this.sessionFactory = sessionFactory || ((opts) => new BrowserSession(opts));
+  }
 
   async createSession(options: CreateSessionPayload): Promise<{ sessionId: string }> {
     const profileId = options.profileId || options.sessionId || `session_${Date.now().toString(36)}`;
@@ -22,15 +46,28 @@ export class SessionManager {
       options.sessionName = profileId;
     }
 
+    this.debugLog('createSession:start', {
+      profileId,
+      headless: options.headless,
+      hasInitialUrl: Boolean(options.initialUrl),
+      ownerPid: Number((options as any).ownerPid || 0) || null,
+    });
+
     const existing = this.sessions.get(profileId);
     if (existing) {
-      existing.onExit = undefined;
-      await existing.close().catch(() => {});
-      this.sessions.delete(profileId);
-      this.owners.delete(profileId);
+      const owner = this.owners.get(profileId);
+      if (owner?.pid && !isProcessAlive(owner.pid)) {
+        // Owner died; treat existing session as stale and replace it.
+        this.debugLog('createSession:replace_stale_owner', { profileId, deadPid: owner.pid });
+        await this.deleteSession(profileId);
+      } else {
+        this.debugLog('createSession:reuse', { profileId, ownerPid: owner?.pid || null });
+        // Reuse existing session (keepalive). Do not restart the browser if it's already running.
+        return { sessionId: profileId };
+      }
     }
 
-    const session = new BrowserSession(options);
+    const session = this.sessionFactory(options);
     session.onExit = (id) => {
       const current = this.sessions.get(id);
       if (current === session) {
@@ -51,6 +88,8 @@ export class SessionManager {
     await session.start(options.initialUrl);
     this.sessions.set(profileId, session);
 
+    this.debugLog('createSession:started', { profileId });
+
     const ownerPid = Number((options as any).ownerPid || 0);
     if (Number.isFinite(ownerPid) && ownerPid > 0) {
       this.owners.set(profileId, { pid: ownerPid, startedAt: new Date().toISOString() });
@@ -60,6 +99,7 @@ export class SessionManager {
   }
 
   getSession(profileId: string): BrowserSession | undefined {
+    this.debugLog('getSession', { profileId, hit: this.sessions.has(profileId) });
     return this.sessions.get(profileId);
   }
 
@@ -82,12 +122,15 @@ export class SessionManager {
   async deleteSession(profileId: string): Promise<boolean> {
     const session = this.sessions.get(profileId);
     if (!session) return false;
+
+    this.debugLog('deleteSession:start', { profileId });
     session.onExit = undefined;
     await session.close();
     this.sessions.delete(profileId);
     // Deleting a session from API should NOT kill the owner (Stop=only kill script lives in UI).
     this.owners.delete(profileId);
     (process as any).emit(SESSION_CLOSED_EVENT, profileId);
+    this.debugLog('deleteSession:done', { profileId });
     return true;
   }
 

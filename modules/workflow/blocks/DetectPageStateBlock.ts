@@ -31,6 +31,13 @@ export interface DetectPageStateOutput {
   pageName?: string;
   rootId?: string | null;
   matchIds?: string[];
+  /** DOM side signals (optional, only when available) */
+  dom?: {
+    hasDetailMask?: boolean;
+    hasSearchInput?: boolean;
+    readyState?: string;
+    title?: string;
+  };
   error?: string;
 }
 
@@ -120,6 +127,30 @@ function mapContainerIdToStage(
   return 'unknown';
 }
 
+function detectRiskControlByUrl(url: string, platform: 'xiaohongshu' | 'weibo' | 'unknown'): boolean {
+  const u = url.toLowerCase();
+  if (platform === 'xiaohongshu') {
+    return (
+      u.includes('/website-login/captcha') ||
+      u.includes('/website-login/verify') ||
+      u.includes('/website-login/security') ||
+      u.includes('verifyuuid=') ||
+      u.includes('verifytype=') ||
+      u.includes('verifybiz=')
+    );
+  }
+  if (platform === 'weibo') {
+    return u.includes('/signup/verify') || u.includes('/security/') || u.includes('/sina/verify');
+  }
+  return false;
+}
+
+function detectLoginByUrl(url: string, platform: 'xiaohongshu' | 'weibo' | 'unknown'): boolean {
+  if (platform === 'xiaohongshu') return /\/login/.test(url);
+  if (platform === 'weibo') return /\/signin/.test(url);
+  return false;
+}
+
 export async function execute(
   input: DetectPageStateInput,
 ): Promise<DetectPageStateOutput> {
@@ -160,9 +191,36 @@ export async function execute(
     return data?.result || data?.data?.result || '';
   }
 
+  async function getDomSummary(): Promise<{ hasDetailMask?: boolean; hasSearchInput?: boolean; readyState?: string; title?: string }> {
+    try {
+      const data = await controllerAction('browser:execute', {
+        profile: sessionId,
+        script: `(() => {
+          const hasDetailMask = !!document.querySelector('.note-detail-mask');
+          const hasSearchInput = !!document.querySelector('input[type="search"], #search-input');
+          return {
+            hasDetailMask,
+            hasSearchInput,
+            readyState: document.readyState,
+            title: document.title
+          };
+        })()`
+      });
+      const result = data?.result || data?.data?.result || null;
+      if (result && typeof result === 'object') return result;
+      return {};
+    } catch {
+      return {};
+    }
+  }
+
   async function matchContainers(): Promise<{ rootId: string | null; matchIds: string[] }> {
+    // Controller's containers:match requires an explicit URL.
+    // Use the current page URL as the match target; this keeps matching aligned with the active document.
+    const currentUrl = await getCurrentUrl().catch(() => '');
     const data = await controllerAction('containers:match', {
       profile: sessionId,
+      url: currentUrl,
     });
     const rootId: string | null =
       data?.container?.id || data?.data?.container?.id || null;
@@ -198,6 +256,35 @@ export async function execute(
     };
   }
 
+  // Hard-stop detection (URL-based) to avoid triggering risk-control via repeated container matching.
+  if (url && detectRiskControlByUrl(url, platform)) {
+    return {
+      success: true,
+      sessionId,
+      platform,
+      url,
+      stage: 'login',
+      pageName: 'risk_control',
+      rootId: null,
+      matchIds: [],
+      dom: await getDomSummary(),
+    };
+  }
+
+  if (url && detectLoginByUrl(url, platform)) {
+    return {
+      success: true,
+      sessionId,
+      platform,
+      url,
+      stage: 'login',
+      pageName: 'login_page',
+      rootId: null,
+      matchIds: [],
+      dom: await getDomSummary(),
+    };
+  }
+
   const platformContainers = PLATFORM_CONTAINERS[platform] || [];
   const urlDetection = url ? detectPageByUrl(url, platformContainers) : null;
 
@@ -205,6 +292,7 @@ export async function execute(
   let rootId: string | null = null;
   let matchIds: string[] = [];
   let matchError: string | undefined;
+  const dom = await getDomSummary();
 
   try {
     const matched = await matchContainers();
@@ -232,6 +320,7 @@ export async function execute(
     pageName: effectiveDetection?.name,
     rootId,
     matchIds,
+    dom,
     error: matchError,
   };
 }

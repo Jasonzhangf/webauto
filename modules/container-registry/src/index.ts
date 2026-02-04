@@ -99,7 +99,7 @@ export class ContainerRegistry {
     }
     if (fs.existsSync(INDEX_PATH)) {
       try {
-        this.indexCache = JSON.parse(fs.readFileSync(INDEX_PATH, 'utf-8'));
+        this.indexCache = (JSON.parse(fs.readFileSync(INDEX_PATH, 'utf-8')) || {}) as RegistryIndex;
         return this.indexCache;
       } catch {
         // fall through
@@ -230,7 +230,7 @@ export class ContainerRegistry {
     }
     if (!bestKey) {
       // fallback legacy
-      const legacy = this.loadLegacyRegistry();
+      const legacy = this.loadLegacyRegistry() || {};
       for (const [key, value] of Object.entries(legacy)) {
         const domain = (value?.website || '').toLowerCase();
         if (!domain) continue;

@@ -8,6 +8,8 @@
   ],
   "defaultEnv": "debug",
   "defaultKeyword": "",
+  "defaultTarget": 20,
+  "defaultDryRun": false,
   "timeouts": {
     "loginTimeoutSec": 900,
     "cmdTimeoutSec": 0

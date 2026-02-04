@@ -58,7 +58,7 @@ export async function execute(input: OpenTabsInput): Promise<OpenTabsOutput> {
       const resolvedIndex = Number.isFinite(index) ? index : i;
       tabs.push({ index: resolvedIndex, pageId: Number.isFinite(pageId) ? pageId : undefined });
       console.log(`[Phase34OpenTabs] Tab ${i} opened, index=${resolvedIndex}`);
-    } catch (err) {
+    } catch (err: any) {
       console.error(`[Phase34OpenTabs] Failed to open tab ${i}:`, err?.message || String(err));
     }
   }
