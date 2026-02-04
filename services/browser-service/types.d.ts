@@ -23,8 +23,8 @@ declare module '../../libs/browser/fingerprint-manager.js?module' {
 
 declare module '../../libs/browser/engine-manager.js' {
   export class EngineManager {
-    constructor(engine?: 'chromium' | 'camoufox');
-    static resolveEngineType(raw?: string | null): 'chromium' | 'camoufox';
+    constructor(engine?: 'camoufox');
+    static resolveEngineType(raw?: string | null): 'camoufox';
     static getCamoufoxPath(): Promise<string | null>;
     launchPersistentContext(options: any): Promise<any>;
   }

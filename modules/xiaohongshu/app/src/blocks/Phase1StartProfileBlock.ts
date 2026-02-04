@@ -84,33 +84,36 @@ export async function execute(input: StartProfileInput): Promise<StartProfileOut
       const metrics = payload?.result || payload?.data?.result || null;
       const displayPayload = displayRes?.body || displayRes?.data || displayRes;
       const display = displayPayload?.metrics || displayPayload?.data?.metrics || null;
+      // These reflect *browser* idea of available size (can be scaled / not equal to physical pixels).
       const maxW = Number(metrics?.availWidth || metrics?.screenWidth || 0);
       const maxH = Number(metrics?.availHeight || metrics?.screenHeight || 0);
       const innerW = Number(metrics?.innerWidth || 0);
       const innerH = Number(metrics?.innerHeight || 0);
-      // Prefer work area (excludes taskbar/dock), fall back to total screen size
-      const displayW = pickFirstPositive(display?.workWidth, display?.width, display?.nativeWidth, maxW);
-      const displayH = pickFirstPositive(display?.workHeight, display?.height, display?.nativeHeight, maxH);
+      // Prefer OS work area (excludes taskbar/dock), fall back to total screen size.
+      // IMPORTANT: do not let browser metrics override OS metrics when present.
+      const displayW = pickFirstPositive(display?.workWidth, display?.width, display?.nativeWidth);
+      const displayH = pickFirstPositive(display?.workHeight, display?.height, display?.nativeHeight);
       // Use inner dimensions as the floor - browser cannot render smaller than its inner window
       const innerFloorW = Math.max(innerW, 900);
       const innerFloorH = Math.max(innerH, 720);
       const effectiveMaxW = resolveEffectiveMax(displayW, maxW);
       const effectiveMaxH = resolveEffectiveMax(displayH, maxH);
 
-      // Directly use browser's availWidth/availHeight for maximum viewport (ignoring inner dimensions)
-      // availHeight already excludes OS menu bar/taskbar
-      const targetW = maxW > 0 ? maxW : 1920;
-      const targetH = maxH > 0 ? maxH : 1400;
-      
-      const width = clamp(targetW, 1200, 2560);
-      const height = clamp(targetH, 1000, 1600);
+      // Hard requirement: use OS work area as the viewport when available.
+      // Only fall back to browser metrics if OS metrics are missing.
+      const targetW = displayW > 0 ? displayW : (maxW > 0 ? maxW : 1920);
+      const targetH = displayH > 0 ? displayH : (maxH > 0 ? maxH : 1400);
+
+      // Keep a reasonable minimum, but do NOT clamp max height/width; use real screen size.
+      const width = Math.max(innerFloorW, Math.floor(targetW));
+      const height = Math.max(innerFloorH, Math.floor(targetH));
 
       console.log(
         `[Phase1StartProfile] display metrics: browser=${maxW}x${maxH} display=${displayW}x${displayH} ` +
         `effective=${effectiveMaxW}x${effectiveMaxH} inner=${innerW}x${innerH} ` +
         `target=${targetW}x${targetH} finalViewport=${width}x${height}`,
       );
-      return { width: Math.floor(width), height: Math.floor(height) };
+      return { width, height };
     } catch {
       return { width: 1440, height: 1080 };
     }

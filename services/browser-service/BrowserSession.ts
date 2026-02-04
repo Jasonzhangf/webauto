@@ -19,7 +19,7 @@ export interface BrowserSessionOptions {
   headless?: boolean;
   viewport?: { width: number; height: number };
   userAgent?: string;
-  engine?: 'chromium' | 'camoufox' | null;
+  engine?: 'camoufox' | null;
   fingerprintPlatform?: 'windows' | 'macos' | null;
 }
 
@@ -81,7 +81,7 @@ export class BrowserSession {
       throw new Error(`无法获取 profile ${this.options.profileId} 的锁`);
     }
 
-    const engine = this.options.engine === 'chromium' ? 'chromium' : 'camoufox';
+    const engine = 'camoufox';
 
     // 加载或生成指纹（支持 Win/Mac 随机）
     const fingerprint = await loadOrGenerateFingerprint(this.options.profileId, {
@@ -98,7 +98,7 @@ export class BrowserSession {
     const viewport = this.options.viewport || { width: 1440, height: 900 };
     const deviceScaleFactor = this.resolveDeviceScaleFactor();
 
-    // 使用 EngineManager 启动上下文（支持 Chromium/Camoufox）
+    // 使用 EngineManager 启动上下文（Chromium 已移除，仅支持 Camoufox）
     this.context = await launchEngineContext({
       engine,
       headless: !!this.options.headless,
@@ -112,24 +112,7 @@ export class BrowserSession {
     // 应用指纹到上下文（Playwright JS 注入）
     await applyFingerprint(this.context, fingerprint);
 
-    // 设置设备缩放因子（小红书兼容，Chromium only）
-    if (deviceScaleFactor && engine === 'chromium') {
-      try {
-        const tempPage = this.page || (await this.context.newPage());
-        const client = await this.context.newCDPSession(tempPage);
-        await client.send('Emulation.setDeviceMetricsOverride', {
-          width: viewport.width,
-          height: viewport.height,
-          deviceScaleFactor,
-          mobile: false,
-          scale: 1,
-        });
-      } catch (err) {
-        logDebug('browser-service', 'device-scale-factor:failed', {
-          error: (err as Error)?.message || String(err),
-        });
-      }
-    }
+    // NOTE: deviceScaleFactor override was Chromium-only (CDP). Chromium removed.
 
     this.lastViewport = { width: viewport.width, height: viewport.height };
     this.browser = this.context.browser();
@@ -643,8 +626,8 @@ export class BrowserSession {
 
       const deltaW = Math.max(0, Math.floor((metrics.outerWidth || 0) - (metrics.innerWidth || 0)));
       const deltaH = Math.max(0, Math.floor((metrics.outerHeight || 0) - (metrics.innerHeight || 0)));
-      const targetWidth = Math.max(300, viewport.width + deltaW);
-      const targetHeight = Math.max(300, viewport.height + deltaH);
+      const targetWidth = Math.max(300, Math.floor(Number(viewport.width) + deltaW));
+      const targetHeight = Math.max(300, Math.floor(Number(viewport.height) + deltaH));
 
       await client.send('Browser.setWindowBounds', {
         windowId,

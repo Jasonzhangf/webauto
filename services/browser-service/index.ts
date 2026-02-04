@@ -39,6 +39,70 @@ function getDisplayMetrics() {
   if (envWidth && envHeight) {
     return { width: envWidth, height: envHeight, source: 'env' };
   }
+  // macOS: try to read the main display size (and visible frame as work area).
+  // This is used to size the viewport so later system clicks stay in-bounds.
+  if (os.platform() === 'darwin') {
+    try {
+      // Use system_profiler for total resolution; use NSScreen visibleFrame for work area.
+      const sp = spawnSync('system_profiler', ['SPDisplaysDataType', '-json'], { encoding: 'utf8' });
+      const spJson = sp.status === 0 && sp.stdout ? JSON.parse(sp.stdout) : null;
+      let width: number | null = null;
+      let height: number | null = null;
+
+      // Best-effort parse (varies across macOS versions).
+      const displays = spJson?.SPDisplaysDataType;
+      if (Array.isArray(displays) && displays.length > 0) {
+        const first = displays[0];
+        const gpus = first?._items;
+        const maybe = Array.isArray(gpus) && gpus.length > 0 ? gpus[0] : first;
+        const resStr = maybe?.spdisplays_ndrvs?.[0]?._spdisplays_resolution || maybe?._spdisplays_resolution;
+        if (typeof resStr === 'string') {
+          const m = resStr.match(/(\d+)\s*x\s*(\d+)/i);
+          if (m) {
+            width = readNumber(m[1]);
+            height = readNumber(m[2]);
+          }
+        }
+      }
+
+      const osascript = spawnSync(
+        'osascript',
+        [
+          '-l',
+          'JavaScript',
+          '-e',
+          `ObjC.import('AppKit');
+           const s = $.NSScreen.mainScreen;
+           const f = s.frame;
+           const v = s.visibleFrame;
+           JSON.stringify({
+             width: Number(f.size.width),
+             height: Number(f.size.height),
+             workWidth: Number(v.size.width),
+             workHeight: Number(v.size.height)
+           });`,
+        ],
+        { encoding: 'utf8' },
+      );
+      const vf = osascript.status === 0 && osascript.stdout ? JSON.parse(osascript.stdout.trim()) : null;
+
+      const finalW = readNumber(vf?.width) || width;
+      const finalH = readNumber(vf?.height) || height;
+      const workWidth = readNumber(vf?.workWidth);
+      const workHeight = readNumber(vf?.workHeight);
+      if (!finalW || !finalH) return null;
+      return {
+        width: finalW,
+        height: finalH,
+        ...(workWidth ? { workWidth } : {}),
+        ...(workHeight ? { workHeight } : {}),
+        source: 'darwin',
+      };
+    } catch {
+      return null;
+    }
+  }
+
   if (os.platform() !== 'win32') return null;
   try {
     const script = [
@@ -319,7 +383,8 @@ async function handleCommand(
     }
     case 'system:display': {
       const metrics = getDisplayMetrics();
-      return { ok: true, body: { ok: true, metrics } };
+      // Keep response shape stable across internal refactors.
+      return { ok: true, body: { ok: true, metrics: metrics || null } };
     }
     case 'stop': {
       const profileId = args.profileId || 'default';
