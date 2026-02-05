@@ -136,9 +136,27 @@ export async function execute(input: CollectLinksInput): Promise<CollectLinksOut
   let attempts = 0;
   const maxAttempts = targetCount * 6;
   let scrollCount = 0;
+  let scrollLocked = false;
   const debugArtifactsEnabled = isDebugArtifactsEnabled();
   const traceDir = path.join(resolveDownloadRoot(), 'xiaohongshu', env, keyword, 'click-trace');
   const tracePath = path.join(traceDir, 'trace.jsonl');
+
+  // Check if we have enough visible cards on the first page to skip scrolling entirely (scroll lock).
+  // This is a best-effort check to avoid unnecessary scrolling (high-risk operation).
+  const initialCheckResult = await controllerAction('browser:execute', {
+    profile,
+    script: `(function(){
+      const itemSelector = '.note-item, [data-note-id], a[href*="/explore/"]';
+      const nodes = Array.from(document.querySelectorAll(itemSelector));
+      return { totalCards: nodes.length };
+    })()`,
+  }, unifiedApiUrl).then(res => res?.result || res?.data?.result || { totalCards: 0 });
+
+  const initialTotalCards = Number(initialCheckResult?.totalCards ?? 0);
+  if (Number.isFinite(initialTotalCards) && initialTotalCards >= targetCount) {
+    scrollLocked = true;
+    console.log(`[Phase2Collect] scrollLocked=true (initialCheck: total=${initialTotalCards} >= target=${targetCount})`);
+  }
 
   const ensureTraceDir = async () => {
     if (!debugArtifactsEnabled) return;
@@ -301,6 +319,21 @@ export async function execute(input: CollectLinksInput): Promise<CollectLinksOut
     await appendTrace({ type: 'pick_done', ts: new Date().toISOString(), attempt: attempts, pick });
 
     if (pick.action === 'scroll' && pick.scroll) {
+      // If the first page already has enough cards to satisfy targetCount, do NOT scroll.
+      // Scrolling unnecessarily is a high-risk operation (more requests + predictable behavior).
+      // We treat "visible enough" as "total cards in DOM >= targetCount" (best-effort).
+      const total = Number((pick as any)?.debug?.total ?? 0);
+      const visibleEnough = Number.isFinite(total) && total >= targetCount;
+      if (visibleEnough) {
+        if (!scrollLocked) {
+          scrollLocked = true;
+          console.log(`[Phase2Collect] scrollLocked=true (total=${total} >= target=${targetCount}) - skip scroll`);
+        }
+        // Continue to next attempt; pick() should now return action=ok because we won't scroll.
+        attempts++;
+        await delay(200);
+        continue;
+      }
       console.log(`[Phase2Collect] scroll: reason=${pick.scroll.reason} dir=${pick.scroll.direction} amount=${pick.scroll.amount} visibleCount=${(pick as any)?.debug?.visibleCount ?? 'n/a'} total=${(pick as any)?.debug?.total ?? 'n/a'}`);
       await appendTrace({
         type: 'pick_scroll',
