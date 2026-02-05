@@ -19,6 +19,7 @@ import {
   highlightCommentRow,
   isCommentEnd,
   scrollComments,
+  checkBottomWithBackAndForth,
   type XhsExtractedComment,
 } from './helpers/xhsComments.js';
 
@@ -215,6 +216,7 @@ export async function execute(input: InteractInput): Promise<InteractOutput> {
   const likedComments: InteractOutput['likedComments'] = [];
   let likedCount = 0;
   let reachedBottom = false;
+  let bottomReason = '';
   let scrollCount = 0;
   const maxScrolls = 60;
 
@@ -329,8 +331,22 @@ export async function execute(input: InteractInput): Promise<InteractOutput> {
       await delay(900);
     }
 
-    reachedBottom = await isCommentEnd(sessionId, unifiedApiUrl);
-    if (reachedBottom) break;
+    // 底部检测：
+    // - 优先使用明确 end marker / 空评论标记
+    // - 定期使用往返滚动检测，避免卡死在“看起来还能滚但实际不再加载”的状态
+    const basicEnd = await isCommentEnd(sessionId, unifiedApiUrl);
+    if (basicEnd) {
+      reachedBottom = true;
+      bottomReason = 'end_marker_or_empty';
+    } else if (scrollCount % 10 === 0) {
+      const bf = await checkBottomWithBackAndForth(sessionId, unifiedApiUrl, 3).catch(() => ({ reachedBottom: false, reason: 'error' }));
+      reachedBottom = bf.reachedBottom;
+      bottomReason = bf.reason;
+    }
+    if (reachedBottom) {
+      console.log(`[Phase3Interact] reachedBottom=true reason=${bottomReason}`);
+      break;
+    }
 
     // 系统级滚动（避免大跨度、且保证在评论区域上滚动）
     await scrollComments(sessionId, unifiedApiUrl, 650);
