@@ -151,6 +151,10 @@ export async function launchEngineContext(opts: EngineLaunchOptions): Promise<Br
     // Headless camoufox is much more likely to hit window metric issues; prefer headful.
     const headless = false;
 
+    // Firefox/Camoufox requires screenX/screenY to be integers; default to 0 to avoid float errors.
+    const screenX = 0;
+    const screenY = 0;
+
     const camoufox = await loadCamoufox();
     const Camoufox = camoufox.Camoufox;
     if (!Camoufox) throw new Error('camoufox_invalid_api');
@@ -159,6 +163,7 @@ export async function launchEngineContext(opts: EngineLaunchOptions): Promise<Br
       headless,
       os: ['windows', 'macos'],
       window: [winW, winH],
+      screen: [screenX, screenY],
       data_dir: opts.profileDir,
       humanize: true,
       locale: 'zh-CN',
