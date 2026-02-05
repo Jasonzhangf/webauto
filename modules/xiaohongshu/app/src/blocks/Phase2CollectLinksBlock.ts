@@ -7,6 +7,7 @@
 import { ContainerRegistry } from '../../../../container-registry/src/index.js';
 import { execute as waitSearchPermit } from '../../../../workflow/blocks/WaitSearchPermitBlock.js';
 import { execute as phase2Search } from './Phase2SearchBlock.js';
+import { execute as discoverFallback } from './XhsDiscoverFallbackBlock.js';
 import { detectXhsCheckpoint } from '../utils/checkpoints.js';
 import os from 'node:os';
 import path from 'node:path';
@@ -107,6 +108,32 @@ function isValidSafeUrl(safeUrl: string) {
   }
 }
 
+async function clickDiscoverAndRetrySearch(opts: {
+  profile: string;
+  unifiedApiUrl: string;
+  keyword: string;
+  env: string;
+  appendTrace: (row: Record<string, any>) => Promise<void>;
+}) {
+  const { profile, unifiedApiUrl, keyword, env, appendTrace } = opts;
+  await appendTrace({ type: 'discover_fallback_block_start', ts: new Date().toISOString() });
+  const out = await discoverFallback({ profile, unifiedApiUrl, keyword, env });
+  await appendTrace({ type: 'discover_fallback_block_done', ts: new Date().toISOString(), out });
+  if (!out.success) {
+    throw new Error(`[Phase2Collect] Discover fallback block failed: checkpoint=${out.finalCheckpoint} url=${out.finalUrl} screenshot=${out.screenshotPath || ''} dom=${out.domDumpPath || ''}`);
+  }
+}
+
+function getExploreIdFromUrl(urlString: string) {
+  try {
+    const url = new URL(urlString);
+    const m = url.pathname.match(/\/explore\/([a-f0-9]+)/);
+    return m ? m[1] : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function execute(input: CollectLinksInput): Promise<CollectLinksOutput> {
   const {
     keyword,
@@ -131,6 +158,7 @@ export async function execute(input: CollectLinksInput): Promise<CollectLinksOut
   const links: CollectLinksOutput['links'] = [];
   const seen = new Set<string>();
   const seenExploreIds = new Set<string>();
+  const seenNoteIds = new Set<string>();
   const registry = new ContainerRegistry();
   await registry.load();
   let attempts = 0;
@@ -138,25 +166,9 @@ export async function execute(input: CollectLinksInput): Promise<CollectLinksOut
   let scrollCount = 0;
   let scrollLocked = false;
   const debugArtifactsEnabled = isDebugArtifactsEnabled();
+  let scrollForVisibilityCount = 0; // Separate counter for visibility scrolls
   const traceDir = path.join(resolveDownloadRoot(), 'xiaohongshu', env, keyword, 'click-trace');
   const tracePath = path.join(traceDir, 'trace.jsonl');
-
-  // Check if we have enough visible cards on the first page to skip scrolling entirely (scroll lock).
-  // This is a best-effort check to avoid unnecessary scrolling (high-risk operation).
-  const initialCheckResult = await controllerAction('browser:execute', {
-    profile,
-    script: `(function(){
-      const itemSelector = '.note-item, [data-note-id], a[href*="/explore/"]';
-      const nodes = Array.from(document.querySelectorAll(itemSelector));
-      return { totalCards: nodes.length };
-    })()`,
-  }, unifiedApiUrl).then(res => res?.result || res?.data?.result || { totalCards: 0 });
-
-  const initialTotalCards = Number(initialCheckResult?.totalCards ?? 0);
-  if (Number.isFinite(initialTotalCards) && initialTotalCards >= targetCount) {
-    scrollLocked = true;
-    console.log(`[Phase2Collect] scrollLocked=true (initialCheck: total=${initialTotalCards} >= target=${targetCount})`);
-  }
 
   const ensureTraceDir = async () => {
     if (!debugArtifactsEnabled) return;
@@ -230,24 +242,54 @@ export async function execute(input: CollectLinksInput): Promise<CollectLinksOut
         }
       }
 
-       // 禁止刷新兜底：不使用 goto 回到 search_result（高风控）。
+  // 禁止刷新兜底：不使用 goto 回到 search_result（高风控）。
        // 如果无法回到搜索页，直接停止交由人工处理。
        if (!expectedSearchUrl) {
          throw new Error(`[Phase2Collect] expectedSearchUrl 为空，且当前不在搜索结果页（URL/DOM），停止（避免刷新）。current=${String(currentUrl)}`);
        }
 
        throw new Error(
-         `[Phase2Collect] 当前不在搜索结果页（checkpoint=${det.checkpoint}），停止（避免 goto 刷新）。current=${String(currentUrl)} expected=${String(expectedSearchUrl)}`,
-       );
-     }
+       `[Phase2Collect] 当前不在搜索结果页（checkpoint=${det.checkpoint}），停止（避免 goto 刷新）。current=${String(currentUrl)} expected=${String(expectedSearchUrl)}`,
+      );
+    }
+    
+    // 如果仍然是 /explore/<id> URL 且 checkpoint 标记为 search（XHS shell-page 行为），
+    // 按照用户指示：点击「发现」后重试搜索 (轻度风控回退策略)
+    if (currentUrl.includes('/explore/') && looksLikeSearchResult) {
+      console.warn(`[Phase2Collect] 检测到小红书 shell-page URL（/explore/<id> 但 DOM 已渲染搜索结果），触发 Discover 回退策略`);
+      throw new Error(`[SHELL_PAGE] URL=${currentUrl}; triggering fallback`);
+    }
 
-    // If DOM says it's already search results, accept currentUrl as searchUrl placeholder.
-    if (!currentUrl.includes('/search_result') && looksLikeSearchResult) {
+    // If we're already on /search_result and keyword matches, accept.
+    if (matchesKeywordFromSearchUrlStrict(currentUrl, keyword)) {
       return currentUrl;
     }
 
-    if (matchesKeywordFromSearchUrlStrict(currentUrl, keyword)) {
-      return currentUrl;
+    // If DOM looks like search results but URL is not /search_result, Phase2Search has likely
+    // completed but XHS kept a shell URL (/explore/<id>). In this case, resolve the strict
+    // expectedSearchUrl by reading the input value and triggering Enter once (no refresh/goto).
+    if (!currentUrl.includes('/search_result') && looksLikeSearchResult) {
+      const inputVal = await controllerAction('browser:execute', {
+        profile,
+        script: `(function(){
+          const el = document.querySelector('#search-input') || document.querySelector('input[type="search"]') || document.querySelector('input[placeholder*="搜索"], input[placeholder*="关键字"]');
+          if (!el) return '';
+          return String(el.value || '').trim();
+        })()`,
+      }, unifiedApiUrl).then(res => String(res?.result || res?.data?.result || '').trim());
+
+      if (inputVal && inputVal === keyword) {
+        // Submit once to force URL to /search_result (still system-level action).
+        await controllerAction('keyboard:press', { profileId: profile, key: 'Enter' }, unifiedApiUrl);
+        await delay(1500);
+        const urlNow = await controllerAction('browser:execute', { profile, script: 'window.location.href' }, unifiedApiUrl)
+          .then(res => res?.result || res?.data?.result || '');
+        if (typeof urlNow === 'string' && matchesKeywordFromSearchUrlStrict(urlNow, keyword)) {
+          return urlNow;
+        }
+      }
+
+      // Fall through to strict failure: we refuse to accept shell URL as expectedSearchUrl.
     }
 
     const actual = getKeywordFromSearchUrl(currentUrl);
@@ -264,17 +306,64 @@ export async function execute(input: CollectLinksInput): Promise<CollectLinksOut
         // ignore screenshot failures
       }
     }
-    // 开发阶段不做“自动纠错重搜”，避免连续多次搜索触发风控；留证据后直接停下让人看截图/日志。
-    throw new Error(`[Phase2Collect] 搜索关键词漂移，已截图并落盘 trace，停止执行（避免重复搜索触发风控）。url=${currentUrl}`);
+    // 开发阶段允许一次 Discover 回退（轻度风控），避免连续重搜触发风控。
+    console.warn('[Phase2Collect] Drift detected: attempting Discover fallback (once)');
+    await appendTrace({ type: 'discover_fallback_start', ts: new Date().toISOString(), url: currentUrl });
+    try {
+      await clickDiscoverAndRetrySearch({ profile, unifiedApiUrl, keyword, env, appendTrace });
+      const urlAfter = await controllerAction('browser:execute', { profile, script: 'window.location.href' }, unifiedApiUrl)
+        .then(res => res?.result || res?.data?.result || '');
+      if (typeof urlAfter === 'string' && matchesKeywordFromSearchUrlStrict(urlAfter, keyword)) {
+        await appendTrace({ type: 'discover_fallback_ok', ts: new Date().toISOString(), url: urlAfter });
+        return urlAfter;
+      }
+    } catch (fallbackError) {
+      await appendTrace({ type: 'discover_fallback_fail', ts: new Date().toISOString(), error: String(fallbackError) });
+    }
+
+    // Discover fallback failed; stop to avoid repeated searches.
+    throw new Error(`[Phase2Collect] 搜索关键词漂移，Discover fallback 失败，停止执行。url=${currentUrl}`);
   };
 
-  // 进入采集前，先固定一个“期望 searchUrl”（严格等于 keyword）
-  expectedSearchUrl = await ensureOnExpectedSearch();
-  // URL 可能不含 /search_result（壳页），但 DOM 已是搜索结果页；仍然允许将其作为回退锚点。
-  // 为了防止 dist 未更新导致旧逻辑报错，这里直接用当前 URL 兜底。
+  // 进入采集前，先固定一个"期望 searchUrl"（必须为 /search_result?keyword=<keyword> 且严格匹配）
+  let fallbackAttempts = 0;
+  while (fallbackAttempts < 1) {
+    try {
+      expectedSearchUrl = await ensureOnExpectedSearch();
+      break; // Success, exit loop
+    } catch (e: any) {
+      if (String(e.message || '').includes('[SHELL_PAGE]')) {
+        fallbackAttempts++;
+        console.warn(`[Phase2Collect] 触发 shell-page fallback（第 ${fallbackAttempts} 次）`);
+        await clickDiscoverAndRetrySearch({ profile, unifiedApiUrl, keyword, env, appendTrace });
+        continue; // Retry ensureOnExpectedSearch
+      }
+      throw e; // Other errors: rethrow
+    }
+  }
   if (!expectedSearchUrl) {
-    expectedSearchUrl = await controllerAction('browser:execute', { profile, script: 'window.location.href' }, unifiedApiUrl)
-      .then(res => res?.result || res?.data?.result || '');
+    throw new Error('[Phase2Collect] Failed to resolve expectedSearchUrl after fallback');
+  }
+  if (!isValidSearchUrl(expectedSearchUrl, keyword)) {
+    throw new Error(`[Phase2Collect] expectedSearchUrl invalid for keyword="${keyword}": ${String(expectedSearchUrl)}`);
+  }
+  console.log(`[Phase2Collect] expectedSearchUrl=${expectedSearchUrl}`);
+
+  // Now that we have a confirmed expectedSearchUrl, we can enable scrollLocked if the first view
+  // already contains enough cards to meet targetCount.
+  const initialCheckResult = await controllerAction('browser:execute', {
+    profile,
+    script: `(function(){
+      const itemSelector = '.note-item, [data-note-id], a[href*="/explore/"]';
+      const nodes = Array.from(document.querySelectorAll(itemSelector));
+      return { totalCards: nodes.length };
+    })()`,
+  }, unifiedApiUrl).then(res => res?.result || res?.data?.result || { totalCards: 0 });
+
+  const initialTotalCards = Number(initialCheckResult?.totalCards ?? 0);
+  if (Number.isFinite(initialTotalCards) && initialTotalCards >= targetCount) {
+    scrollLocked = true;
+    console.log(`[Phase2Collect] scrollLocked=true (initialCheck: total=${initialTotalCards} >= target=${targetCount})`);
   }
 
   try {
@@ -282,12 +371,8 @@ export async function execute(input: CollectLinksInput): Promise<CollectLinksOut
     await appendTrace({ type: 'while_loop_start', ts: new Date().toISOString(), attempt: attempts + 1, collected: links.length, targetCount });
     attempts++;
 
-    // 0. 每轮开始确保仍在目标搜索页，避免误点到推荐关键词
-    expectedSearchUrl = await ensureOnExpectedSearch();
-    if (!expectedSearchUrl) {
-      expectedSearchUrl = await controllerAction('browser:execute', { profile, script: 'window.location.href' }, unifiedApiUrl)
-        .then(res => res?.result || res?.data?.result || '');
-    }
+    // 0. 每轮开始应该处于搜索结果页，但避免每轮都通过 URL/DOM 重新定位（风控敏感）。
+    // Phase2 输出强绑定“冻结的 expectedSearchUrl”，并在 per-note 校验处做严格 gate。
     const searchUrl = expectedSearchUrl;
 
     // 2. 解析搜索结果卡片 selector（来自容器定义）
@@ -361,6 +446,79 @@ export async function execute(input: CollectLinksInput): Promise<CollectLinksOut
       throw new Error(`[Phase2Collect] invalid picked index: ${String(pick.index)}`);
     }
 
+    // Ensure candidate is fully visible before highlight + click.
+    // Fully visible = rect.top >= pad && rect.bottom <= viewportH - pad
+    // This prevents unstable clicks on partially clipped cards.
+    const ensureVisibleMaxRounds = 4;
+    const ensureVisiblePad = 12;
+    for (let vr = 0; vr < ensureVisibleMaxRounds; vr++) {
+      const rectCheck = await controllerAction('browser:execute', {
+        profile,
+        script: `(function(){
+  const sel = ${JSON.stringify(itemSelector)};
+  const idx = ${JSON.stringify(domIndex)};
+  const nodes = Array.from(document.querySelectorAll(sel));
+  if (idx < 0 || idx >= nodes.length) return { ok: false, error: 'index_out_of_range', idx, len: nodes.length };
+  const node = nodes[idx];
+  const r = node.getBoundingClientRect();
+  const pad = ${ensureVisiblePad};
+  const vh = window.innerHeight;
+  return {
+    ok: true,
+    idx,
+    rect: { top: r.top, bottom: r.bottom, left: r.left, right: r.right, width: r.width, height: r.height },
+    visible: {
+      fully: (r.top >= pad && r.bottom <= (vh - pad)),
+      topClipped: r.top < pad,
+      bottomClipped: r.bottom > (vh - pad),
+    },
+    viewportH: vh,
+    pad,
+  };
+})()`,
+      }, unifiedApiUrl).then(res => res?.result || res?.data?.result || null);
+
+      if (!rectCheck || rectCheck.ok !== true) {
+        throw new Error(`[Phase2Collect] ensureVisible rect check failed: ${JSON.stringify(rectCheck)}`);
+      }
+
+      if (rectCheck.visible?.fully) {
+        if (vr > 0) {
+          console.log(`[Phase2Collect] ensureVisible satisfied after ${vr} round(s), index=${domIndex}`);
+        }
+        break;
+      }
+
+      const scrollDir = rectCheck.visible?.topClipped ? 'up' : 'down';
+      const scrollAmount = Math.ceil(
+        rectCheck.visible?.topClipped
+          ? (ensureVisiblePad - rectCheck.rect.top) + 24
+          : (rectCheck.rect.bottom - (rectCheck.viewportH - ensureVisiblePad)) + 24,
+      );
+
+      console.log(`[Phase2Collect] ensureVisible round=${vr + 1}/${ensureVisibleMaxRounds} index=${domIndex} dir=${scrollDir} amount=${scrollAmount}`);
+      await appendTrace({
+        type: 'ensure_visible_scroll',
+        ts: new Date().toISOString(),
+        attempt: attempts,
+        collected: links.length,
+        domIndex,
+        scrollForVisibilityCount,
+        scrollDir,
+        scrollAmount,
+        rectBefore: rectCheck.rect,
+      });
+
+      await controllerAction('container:operation', {
+        containerId: 'xiaohongshu_search.search_result_list',
+        operationId: 'scroll',
+        sessionId: profile,
+        config: { direction: scrollDir, amount: scrollAmount },
+      }, unifiedApiUrl);
+      scrollForVisibilityCount++;
+      await delay(400);
+    }
+
     const exploreId = String(pick.exploreId || '');
     if (exploreId) {
       seenExploreIds.add(exploreId);
@@ -417,8 +575,8 @@ export async function execute(input: CollectLinksInput): Promise<CollectLinksOut
       operationId: 'click',
       sessionId: profile,
       config: { index: domIndex },
-      // On large viewports and camoufox, click/highlight/rect checks can be slower.
-      timeoutMs: 180000,
+      // Keep click operation tight to avoid hanging; if this times out, we should re-pick/scroll.
+      timeoutMs: 45000,
     }, unifiedApiUrl);
     if (clickResult?.success === false) {
       console.warn(`[Phase2Collect] 点击失败 index=${domIndex} err=${clickResult?.error || 'unknown'}，刷新索引后重试`);
@@ -465,27 +623,13 @@ export async function execute(input: CollectLinksInput): Promise<CollectLinksOut
       continue;
     }
 
-    // 6. 校验 searchUrl
-    // XHS 壳页可能不含 /search_result，但 DOM 已是搜索结果页；此时允许通过。
+    // 6. 校验 searchUrl（严格匹配 keyword）
     if (!isValidSearchUrl(searchUrl, keyword)) {
-      const stillLooksLikeSearchResult = await controllerAction('browser:execute', {
-        profile,
-        script: `(function(){
-          const hasResultList = !!document.querySelector('.feeds-container, .search-result-list, .note-list');
-          const hasFilter = !!document.querySelector('.tabs, .filter-tabs, [role="tablist"], .filter');
-          return Boolean(hasResultList || hasFilter);
-        })()`,
-      }, unifiedApiUrl).then(res => Boolean(res?.result || res?.data?.result));
-
-      if (!stillLooksLikeSearchResult) {
-        console.warn(`[Phase2Collect] searchUrl invalid, skip: ${searchUrl}`);
-        await controllerAction('keyboard:press', {
-          profileId: profile,
-          key: 'Escape',
-        }, unifiedApiUrl);
-        await delay(1000);
-        continue;
-      }
+      console.warn(`[Phase2Collect] drop: search_url_mismatch expectedKeyword="${keyword}" searchUrl=${String(searchUrl)}`);
+      await appendTrace({ type: 'drop', ts: new Date().toISOString(), reason: 'search_url_mismatch', expectedKeyword: keyword, searchUrl });
+      await controllerAction('keyboard:press', { profileId: profile, key: 'Escape' }, unifiedApiUrl);
+      await delay(1000);
+      continue;
     }
     if (!isValidSafeUrl(safeUrl)) {
       console.warn(`[Phase2Collect] safeUrl invalid, skip: ${safeUrl}`);
@@ -496,35 +640,31 @@ export async function execute(input: CollectLinksInput): Promise<CollectLinksOut
       await delay(1000);
       continue;
     }
-    // 壳页情况下 searchUrl 可能不是 /search_result?keyword=...，此时不做 URL 关键词严格校验。
-    if (searchUrl.includes('/search_result') && !matchesKeywordFromSearchUrlStrict(searchUrl, keyword)) {
-      console.warn(`[Phase2Collect] searchUrl keyword 不严格等于目标词，移除漂移项: ${safeUrl}`);
-      await controllerAction('keyboard:press', {
-        profileId: profile,
-        key: 'Escape',
-      }, unifiedApiUrl);
-      await delay(1000);
-      continue;
-    }
+    // NOTE: We already validated searchUrl strictly via isValidSearchUrl().
 
-    // 7. 提取 noteId
-    const noteId = safeUrl.match(/\/explore\/([a-f0-9]+)/)?.[1] || '';
-    if (!noteId || seen.has(noteId)) {
-      console.log(`[Phase2Collect] Duplicate noteId=${noteId}`);
-      // 仍然需要返回搜索页，否则下一轮会在详情页上循环
-      await controllerAction('keyboard:press', {
-        profileId: profile,
-        key: 'Escape',
-      }, unifiedApiUrl);
+    // 7. 提取 noteId + 去重（按 noteId 全局唯一）
+    const noteId = getExploreIdFromUrl(safeUrl) || '';
+    if (!noteId) {
+      console.warn(`[Phase2Collect] drop: missing_note_id safeUrl=${safeUrl}`);
+      await appendTrace({ type: 'drop', ts: new Date().toISOString(), reason: 'missing_note_id', safeUrl });
+      await controllerAction('keyboard:press', { profileId: profile, key: 'Escape' }, unifiedApiUrl);
       await delay(1000);
       continue;
     }
-    seen.add(noteId);
+    if (seenNoteIds.has(noteId)) {
+      console.warn(`[Phase2Collect] drop: duplicate_note_id noteId=${noteId}`);
+      await appendTrace({ type: 'drop', ts: new Date().toISOString(), reason: 'duplicate_note_id', noteId, safeUrl });
+      await controllerAction('keyboard:press', { profileId: profile, key: 'Escape' }, unifiedApiUrl);
+      await delay(1000);
+      continue;
+    }
+    seenNoteIds.add(noteId);
 
     links.push({
       noteId,
       safeUrl,
-      searchUrl,
+      // Bind to strict search_result?keyword=<keyword>.
+      searchUrl: expectedSearchUrl,
       ts: new Date().toISOString(),
     });
 
@@ -579,6 +719,11 @@ export async function execute(input: CollectLinksInput): Promise<CollectLinksOut
   }
 
   console.log(`[Phase2Collect] 完成，滚动次数: ${scrollCount}`);
+
+  // Final gate: quantity must match target.
+  if (links.length < targetCount) {
+    throw new Error(`[Phase2Collect] target_not_reached target=${targetCount} collected=${links.length}`);
+  }
 
   } finally {
     // Always try to restore to search_result page on exit (success or failure)

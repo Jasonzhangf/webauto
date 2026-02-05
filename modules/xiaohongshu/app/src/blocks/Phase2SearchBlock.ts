@@ -186,6 +186,64 @@ export async function execute(input: SearchInput): Promise<SearchOutput> {
     throw new Error(`[Phase2Search] hard_stop checkpoint=${det.checkpoint} url=${det.url}`);
   }
 
+  async function waitCheckpoint(maxWaitMs: number) {
+    const start = Date.now();
+    let last = det;
+    while (Date.now() - start < maxWaitMs) {
+      await delay(500);
+      last = await detectXhsCheckpoint({ sessionId: profile, serviceUrl: unifiedApiUrl });
+      if (last.checkpoint !== 'detail_ready' && last.checkpoint !== 'comments_ready') return last;
+    }
+    return last;
+  }
+
+  async function exitDetailOrCommentsState() {
+    let d = await detectXhsCheckpoint({ sessionId: profile, serviceUrl: unifiedApiUrl });
+    if (d.checkpoint !== 'detail_ready' && d.checkpoint !== 'comments_ready') return d;
+
+    // 详情/评论态：先尝试点击关闭按钮（更贴近用户行为），然后等待状态变化。
+    console.log('[Phase2Search] 处于详情/评论态，尝试点击关闭按钮关闭详情页...');
+    try {
+      const r = await controllerAction(
+        'container:operation',
+        { containerId: 'xiaohongshu_detail.close_button', operationId: 'click', sessionId: profile, timeoutMs: 15000 },
+        unifiedApiUrl,
+      );
+      console.log(`[Phase2Search] close_button click: success=${Boolean(r?.success !== false)}`);
+    } catch {
+      console.log('[Phase2Search] close_button click failed (ignored)');
+    }
+    d = await waitCheckpoint(8000);
+    if (d.checkpoint !== 'detail_ready' && d.checkpoint !== 'comments_ready') return d;
+
+    // 若仍在详情/评论态：使用 ESC 退出（系统级），每次后等待状态稳定。
+    for (let i = 0; i < 2; i += 1) {
+      console.log(`[Phase2Search] still in ${d.checkpoint}, press ESC to exit (round=${i + 1})`);
+      await controllerAction('keyboard:press', { profileId: profile, key: 'Escape' }, unifiedApiUrl);
+      d = await waitCheckpoint(8000);
+      if (d.checkpoint !== 'detail_ready' && d.checkpoint !== 'comments_ready') return d;
+    }
+
+    // 最终仍失败：留证据（截图长度），停止（不刷新）。
+    let shotLen = 0;
+    if (isDebugArtifactsEnabled()) {
+      const shot = await controllerAction(
+        'browser:screenshot',
+        { profileId: profile, fullPage: false },
+        unifiedApiUrl,
+      ).then((res) => res?.data || res?.result || res?.data?.data || '');
+      shotLen = typeof shot === 'string' ? shot.length : 0;
+    }
+    throw new Error(
+      `[Phase2Search] 关闭详情页后仍未回到搜索/首页（checkpoint=${d.checkpoint}）。停止（避免刷新）。URL=${d.url} screenshot_len=${shotLen}`,
+    );
+  }
+
+  // If starting from detail/comments state, exit to a stable checkpoint before doing anything else.
+  if (det.checkpoint === 'detail_ready' || det.checkpoint === 'comments_ready') {
+    await exitDetailOrCommentsState();
+  }
+
   // 检查当前页面是否可搜索（优先用 DOM signals，禁止任何刷新/导航）
   const domCheck = await controllerAction('browser:execute', {
     profile,
@@ -362,10 +420,10 @@ export async function execute(input: SearchInput): Promise<SearchOutput> {
 
   // If we skipped typing, the input already contains keyword; proceed to submit.
 
-  const typedValue = await readSearchInputValue(profile, unifiedApiUrl);
-  // Camoufox sometimes blocks reading input value immediately after typing.
-  // Treat null as non-fatal here and rely on finalUrl + container anchors to validate search.
-  if (typedValue && typedValue?.trim?.() !== keyword) {
+  // 强制验证：提交前必须确认 input 值等于 keyword，否则直接失败（不点击搜索按钮）
+  const beforeSubmitValue = await readSearchInputValue(profile, unifiedApiUrl);
+  console.log(`[Phase2Search] Before submit: input value="${String(beforeSubmitValue)}" keyword="${keyword}"`);
+  if (typeof beforeSubmitValue !== 'string' || beforeSubmitValue.trim() !== keyword) {
     let shotLen = 0;
     if (debugArtifactsEnabled) {
       const shot = await controllerAction(
@@ -376,7 +434,7 @@ export async function execute(input: SearchInput): Promise<SearchOutput> {
       shotLen = typeof shot === 'string' ? shot.length : 0;
     }
     throw new Error(
-      `[Phase2Search] 输入框值不等于目标关键字：expected="${keyword}" actual="${typedValue}" screenshot_len=${shotLen}`,
+      `[Phase2Search] 提交前 input 值不等于关键字：expected="${keyword}" actual="${String(beforeSubmitValue)}" screenshot_len=${shotLen}。停止执行（不点击搜索按钮）。`,
     );
   }
 
