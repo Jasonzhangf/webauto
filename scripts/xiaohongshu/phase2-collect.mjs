@@ -15,7 +15,7 @@ ensureUtf8Console();
  *   node scripts/xiaohongshu/phase2-collect.mjs --keyword "手机膜" --target 50 --env debug
  */
 
-import { resolveKeyword, resolveTarget, resolveEnv, PROFILE } from './lib/env.mjs';
+import { resolveKeyword, resolveTarget, resolveEnv, PROFILE, getNextDevKeyword } from './lib/env.mjs';
 import { listProfilesForPool } from './lib/profilepool.mjs';
 import { initRunLogging, emitRunEvent, safeStringify } from './lib/logger.mjs';
 import { createSessionLock } from './lib/session-lock.mjs';
@@ -104,7 +104,7 @@ async function main() {
     return;
   }
 
-  const keyword = resolveKeyword();
+  let keyword = resolveKeyword();
   const target = resolveTarget();
   const env = resolveEnv();
   const poolIdx = argv.indexOf('--profilepool');
@@ -169,7 +169,17 @@ async function main() {
     // 1. SearchGate 节流许可申请
     console.log(`⏳ 申请搜索许可...`);
     const tPermit0 = nowMs();
-    const permitResult = await waitSearchPermit({ sessionId: PROFILE_RUNTIME });
+    let permitResult = await waitSearchPermit({ sessionId: PROFILE_RUNTIME, keyword });
+    // Dev/test ergonomics: if SearchGate denies due to dev-only consecutive keyword rule,
+    // rotate keyword from the pool and retry once (no extra search yet).
+    if (!permitResult.granted && (permitResult.reason === 'dev_consecutive_keyword_limit' || permitResult.deny?.code === 'dev_consecutive_keyword_limit')) {
+      const next = getNextDevKeyword(keyword);
+      if (next && next !== keyword) {
+        console.warn(`[Phase2] SearchGate denied consecutive keyword in dev, rotating keyword: "${keyword}" -> "${next}"`);
+        keyword = next;
+        permitResult = await waitSearchPermit({ sessionId: PROFILE_RUNTIME, keyword });
+      }
+    }
     const tPermit1 = nowMs();
     console.log(`⏱️  许可申请耗时: ${formatDurationMs(tPermit1 - tPermit0)}`);
     emitRunEvent('phase2_timing', { stage: 'permit_done', ms: tPermit1 - tPermit0 });

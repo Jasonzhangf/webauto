@@ -259,6 +259,7 @@ export async function execute(input: CollectLinksInput): Promise<CollectLinksOut
       .then(res => res?.result || res?.data?.result || '');
   }
 
+  try {
   while (links.length < targetCount && attempts < maxAttempts) {
     await appendTrace({ type: 'while_loop_start', ts: new Date().toISOString(), attempt: attempts + 1, collected: links.length, targetCount });
     attempts++;
@@ -300,6 +301,7 @@ export async function execute(input: CollectLinksInput): Promise<CollectLinksOut
     await appendTrace({ type: 'pick_done', ts: new Date().toISOString(), attempt: attempts, pick });
 
     if (pick.action === 'scroll' && pick.scroll) {
+      console.log(`[Phase2Collect] scroll: reason=${pick.scroll.reason} dir=${pick.scroll.direction} amount=${pick.scroll.amount} visibleCount=${(pick as any)?.debug?.visibleCount ?? 'n/a'} total=${(pick as any)?.debug?.total ?? 'n/a'}`);
       await appendTrace({
         type: 'pick_scroll',
         ts: new Date().toISOString(),
@@ -332,7 +334,8 @@ export async function execute(input: CollectLinksInput): Promise<CollectLinksOut
     }
 
     // 4. 点击第 N 个搜索结果卡片（通过 DOM 下标精确定位，避免依赖 href）
-        await appendTrace({ type: 'highlight_start', ts: new Date().toISOString(), attempt: attempts, domIndex, exploreId });let highlightInfo: any = null;
+        await appendTrace({ type: 'highlight_start', ts: new Date().toISOString(), attempt: attempts, domIndex, exploreId });
+    let highlightInfo: any = null;
 
     try {
       await appendTrace({ type: 'highlight_calling', ts: new Date().toISOString(), domIndex });
@@ -543,6 +546,30 @@ export async function execute(input: CollectLinksInput): Promise<CollectLinksOut
   }
 
   console.log(`[Phase2Collect] 完成，滚动次数: ${scrollCount}`);
+
+  } finally {
+    // Always try to restore to search_result page on exit (success or failure)
+    try {
+      const det = await detectXhsCheckpoint({ sessionId: profile, serviceUrl: unifiedApiUrl });
+      if (det.checkpoint === 'detail_ready' || det.checkpoint === 'comments_ready') {
+        console.log('[Phase2Collect] Exit cleanup: restoring to search_result from detail page');
+        for (let i = 0; i < 3; i++) {
+          await controllerAction('keyboard:press', { profileId: profile, key: 'Escape' }, unifiedApiUrl);
+          await delay(1500);
+          const afterEsc = await controllerAction('browser:execute', {
+            profile,
+            script: 'window.location.href',
+          }, unifiedApiUrl).then(res => res?.result || res?.data?.result || '');
+          if (typeof afterEsc === 'string' && afterEsc.includes('/search_result')) {
+            console.log('[Phase2Collect] Exit cleanup: ✅ restored to search_result');
+            break;
+          }
+        }
+      }
+    } catch (cleanupErr) {
+      console.warn('[Phase2Collect] Exit cleanup failed:', String(cleanupErr));
+    }
+  }
 
   return {
     links,

@@ -35,6 +35,28 @@ export const BROWSER_WS = process.env.WEBAUTO_BROWSER_WS_URL || 'ws://127.0.0.1:
 export const SEARCH_GATE = process.env.WEBAUTO_SEARCH_GATE_URL || 'http://127.0.0.1:7790';
 export const HOME_URL = 'https://www.xiaohongshu.com';
 
+// Dev/test keyword pool: when SearchGate denies (dev-only) we can rotate keywords to avoid
+// repeated searches triggering soft bans. Real runs should pass explicit --keyword.
+export const DEV_KEYWORD_POOL = [
+  '手机膜',
+  '手机壳',
+  '充电宝',
+  '数据线',
+  '无线耳机',
+  '蓝牙音箱',
+  '智能手表',
+  '平板支架',
+  '充电头',
+  '车载支架',
+];
+
+export function getNextDevKeyword(currentKeyword) {
+  const current = String(currentKeyword || '').trim();
+  const idx = DEV_KEYWORD_POOL.indexOf(current);
+  if (idx === -1) return DEV_KEYWORD_POOL[0] || null;
+  return DEV_KEYWORD_POOL[idx + 1] || null;
+}
+
 /**
  * 解析命令行参数中的关键字
  */

@@ -46,6 +46,9 @@ export async function execute(input: WaitSearchPermitInput): Promise<WaitSearchP
     maxWaitMs = 300_000
   } = input;
 
+  // Gate errors are not actionable by waiting; fail fast instead of retry loops.
+  const failFastOnGateError = String(process.env.WEBAUTO_SEARCH_GATE_FAIL_FAST || '1') !== '0';
+
   const skipIfAlreadyOnSearchResult =
     typeof input.skipIfAlreadyOnSearchResult === 'boolean' ? input.skipIfAlreadyOnSearchResult : true;
   const dev =
@@ -194,7 +197,16 @@ export async function execute(input: WaitSearchPermitInput): Promise<WaitSearchP
     }
 
     if (!result.ok && result.retry) {
-      console.warn(`[WaitSearchPermit] ⚠️ Gate error (${result.error}), retrying in 5s...`);
+      const errMsg = String(result.error || 'unknown error');
+      if (failFastOnGateError) {
+        return {
+          success: false,
+          granted: false,
+          waitedMs: Date.now() - start,
+          error: `SearchGate error: ${errMsg}`,
+        };
+      }
+      console.warn(`[WaitSearchPermit] ⚠️ Gate error (${errMsg}), retrying in 5s...`);
       await new Promise(resolve => setTimeout(resolve, 5000));
       continue;
     }
