@@ -171,13 +171,18 @@ async function main() {
     const tPermit0 = nowMs();
     let permitResult = await waitSearchPermit({ sessionId: PROFILE_RUNTIME, keyword });
     // Dev/test ergonomics: if SearchGate denies due to dev-only consecutive keyword rule,
-    // rotate keyword from the pool and retry once (no extra search yet).
+    // rotate keyword from the pool and retry permit with the NEW keyword (no extra search yet).
+    // IMPORTANT: Do NOT retry with the same keyword that was just denied - it will be denied again.
+    // Instead, request permit with the NEXT keyword from the pool.
     if (!permitResult.granted && (permitResult.reason === 'dev_consecutive_keyword_limit' || permitResult.deny?.code === 'dev_consecutive_keyword_limit')) {
-      const next = getNextDevKeyword(keyword);
+      const originalKeyword = keyword;
+      const next = getNextDevKeyword(originalKeyword);
       if (next && next !== keyword) {
         console.warn(`[Phase2] SearchGate denied consecutive keyword in dev, rotating keyword: "${keyword}" -> "${next}"`);
+        // Request permit with the NEW keyword (not the denied one) to avoid history pollution
+        permitResult = await waitSearchPermit({ sessionId: PROFILE_RUNTIME, keyword: next });
+        // Update keyword to the new one for subsequent search
         keyword = next;
-        permitResult = await waitSearchPermit({ sessionId: PROFILE_RUNTIME, keyword });
       }
     }
     const tPermit1 = nowMs();
