@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { ensureUtf8Console } from '../lib/cli-encoding.mjs';
+import { ensureCoreServices } from '../lib/ensure-core-services.mjs';
 
 ensureUtf8Console();
 
@@ -20,6 +21,10 @@ import { execute as monitorCookie } from '../../dist/modules/xiaohongshu/app/src
 import minimist from 'minimist';
 
 async function main() {
+  // Single source of truth for service lifecycle: core-daemon.
+  // Phase1/2/3/4 scripts should not each implement their own service orchestration.
+  await ensureCoreServices();
+
   const args = minimist(process.argv.slice(2));
   const headless = args.headless === true || args.headless === 'true' || args.headless === 1 || args.headless === '1';
   const once = args.once === true || args.once === 'true' || args.once === 1 || args.once === '1';

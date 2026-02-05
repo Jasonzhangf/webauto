@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { ensureUtf8Console } from '../lib/cli-encoding.mjs';
+import { ensureCoreServices } from '../lib/ensure-core-services.mjs';
 
 ensureUtf8Console();
 
@@ -112,6 +113,9 @@ async function runNode(scriptPath, args) {
 }
 
 async function main() {
+  // Single source of truth for service lifecycle: core-daemon.
+  await ensureCoreServices();
+
   const keyword = resolveKeyword();
   const env = resolveEnv();
   const downloadRoot = resolveDownloadRoot();
