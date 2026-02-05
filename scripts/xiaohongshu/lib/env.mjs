@@ -53,8 +53,10 @@ export const DEV_KEYWORD_POOL = [
 export function getNextDevKeyword(currentKeyword) {
   const current = String(currentKeyword || '').trim();
   const idx = DEV_KEYWORD_POOL.indexOf(current);
-  if (idx === -1) return DEV_KEYWORD_POOL[0] || null;
-  return DEV_KEYWORD_POOL[idx + 1] || null;
+  if (idx === -1) return DEV_KEYWORD_POOL[0] || null; // 不在池中则从第一个开始
+  // 循环到池中下一个，如果到末尾则回到开头
+  const nextIdx = (idx + 1) % DEV_KEYWORD_POOL.length;
+  return DEV_KEYWORD_POOL[nextIdx] || null;
 }
 
 /**
