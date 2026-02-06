@@ -177,8 +177,10 @@ async function main() {
     process.exit(1);
   }
 
-  const tabCount = 5;
-  const maxLikesPerRound = 2;
+  const tabCount = 4; // 4-Tab 轮询策略
+  const maxLikesPerRound = 2; // 每轮最多点赞 2 条
+  const maxCommentsPerTab = 50; // 每个 Tab 刷 50 评论后切换
+  const commentsPerScroll = 3; // 估算：每次滚动约加载 3 条新评论
 
   const runContext = initRunLogging({ env, keyword, logMode: 'single', noWrite: dryRun });
 
