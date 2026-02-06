@@ -263,6 +263,7 @@ async function main() {
       tabIndex: idx,
       pageId: tab.pageId,
       linkIndex: idx % validLinks.length,
+      commentsScanned: 0,
     }));
 
     const noteState = new Map();
@@ -277,6 +278,17 @@ async function main() {
     while (round < maxRounds) {
       round += 1;
       const activeTab = tabAssignments[(round - 1) % tabAssignments.length];
+
+      // 风控规避：每个 Tab 连续处理(扫描) 50 条评论后强制切换到下一个 Tab
+      if (activeTab.commentsScanned >= maxCommentsPerTab) {
+        console.log(
+          `[Round ${round}] Tab ${activeTab.tabIndex} 已扫描 ${activeTab.commentsScanned} 条评论，强制切换到下一个 Tab 规避风控`,
+        );
+        activeTab.commentsScanned = 0;
+        await delay(800);
+        continue;
+      }
+
       const link = validLinks[activeTab.linkIndex];
       const state = noteState.get(link.noteId);
 
@@ -310,6 +322,9 @@ async function main() {
         env,
         unifiedApiUrl: UNIFIED_API_URL,
       });
+
+      // 计数：把本轮扫描的评论数计入 Tab（无论是否点赞成功）
+      activeTab.commentsScanned += Number(res?.scannedCount || 0);
 
       if (!res?.success) {
         console.log(`[Tab ${activeTab.tabIndex}] ❌ 失败: ${res?.error || 'unknown error'}`);

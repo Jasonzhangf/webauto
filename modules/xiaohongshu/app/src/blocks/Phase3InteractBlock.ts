@@ -39,6 +39,7 @@ export interface InteractOutput {
   success: boolean;
   noteId: string;
   likedCount: number;
+  scannedCount: number;
   likedComments: Array<{
     index: number;
     userId: string;
@@ -48,6 +49,7 @@ export interface InteractOutput {
     screenshots?: { before?: string | null; after?: string | null };
   }>;
   reachedBottom: boolean;
+  stopReason?: string;
   error?: string;
 }
 
@@ -215,6 +217,7 @@ export async function execute(input: InteractInput): Promise<InteractOutput> {
 
   const likedComments: InteractOutput['likedComments'] = [];
   let likedCount = 0;
+  let scannedCount = 0;
   let reachedBottom = false;
   let bottomReason = '';
   let scrollCount = 0;
@@ -236,6 +239,7 @@ export async function execute(input: InteractInput): Promise<InteractOutput> {
       success: false,
       noteId,
       likedCount: 0,
+      scannedCount: 0,
       likedComments: [],
       reachedBottom: false,
       error: navRes?.error || 'goto failed',
@@ -251,6 +255,7 @@ export async function execute(input: InteractInput): Promise<InteractOutput> {
     scrollCount += 1;
 
     const extracted = await extractVisibleComments(sessionId, unifiedApiUrl, 40);
+    scannedCount += extracted.length;
 
     for (let i = 0; i < extracted.length; i++) {
       if (likedCount >= maxLikesPerRound) break;
@@ -381,7 +386,9 @@ export async function execute(input: InteractInput): Promise<InteractOutput> {
     success: true,
     noteId,
     likedCount,
+    scannedCount,
     likedComments,
     reachedBottom,
+    stopReason: reachedBottom ? bottomReason : undefined,
   };
 }
