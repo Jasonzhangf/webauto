@@ -517,12 +517,14 @@ export async function execute(input: CollectLinksInput): Promise<CollectLinksOut
     await appendTrace({ type: 'pick_done', ts: new Date().toISOString(), attempt: attempts, pick });
 
     if (pick.action === 'scroll' && pick.scroll) {
-      // If the first page already has enough cards to satisfy targetCount, do NOT scroll.
-      // Scrolling unnecessarily is a high-risk operation (more requests + predictable behavior).
-      // We treat "visible enough" as "total cards in DOM >= targetCount" (best-effort).
       const total = Number((pick as any)?.debug?.total ?? 0);
       const candidatesCount = Number((pick as any)?.debug?.candidatesCount ?? 0);
-      const visibleEnough = Number.isFinite(total) && total >= targetCount && Number.isFinite(candidatesCount) && candidatesCount > 0;
+      
+      // Only lock scroll if we have both:
+      // 1) Enough total cards in DOM (total >= targetCount)
+      // 2) At least one visible candidate we can click
+      // If candidatesCount=0 even with total>=target, we MUST keep scrolling to find visible items.
+      const visibleEnough = Number.isFinite(total) && total >= targetCount && candidatesCount > 0;
       if (visibleEnough) {
         if (!scrollLocked) {
           scrollLocked = true;
