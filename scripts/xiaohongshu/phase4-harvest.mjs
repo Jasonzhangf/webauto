@@ -130,11 +130,15 @@ async function main() {
   const dryRun = args['dry-run'] === true || args['dry-run'] === 'true' || args['dry-run'] === 1 || args['dry-run'] === '1';
 
   // Daemon mode: delegate to shared daemon-wrapper so UI can launch and exit safely.
-  if (args.daemon === true && process.env.WEBAUTO_DAEMON !== '1') {
+  const foreground = args.foreground === true || args.foreground === '1' || args.foreground === 1;
+  const shouldDaemonize = !foreground && process.env.WEBAUTO_DAEMON !== '1';
+  
+  if (shouldDaemonize) {
     const wrapperPath = path.join(__dirname, 'shared', 'daemon-wrapper.mjs');
     const scriptPath = fileURLToPath(import.meta.url);
-    const scriptArgs = process.argv.slice(2).filter((arg) => arg !== '--daemon');
+    const scriptArgs = process.argv.slice(2).filter((arg) => arg !== '--foreground');
     await runNode(wrapperPath, [scriptPath, ...scriptArgs]);
+    console.log('✅ Phase4 started in daemon mode');
     return;
   }
 

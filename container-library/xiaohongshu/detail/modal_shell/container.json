@@ -17,7 +17,7 @@
     {
       "css": ".note-detail-mask",
       "variant": "primary",
-      "score": 1.0
+      "score": 1
     },
     {
       "css": ".note-detail, .detail-container, .media-container",
@@ -32,7 +32,10 @@
       ".media-container",
       ".comments-el",
       ".comment-item"
-    ]
+    ],
+    "zIndexPriority": 1000,
+    "isOverlay": true,
+    "blocksInteraction": true
   },
   "operations": [
     {

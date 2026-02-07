@@ -180,6 +180,7 @@ export async function executeSearch(
           clear_first: true,
           human_typing: true,
           pause_after: 320,
+          fullyVisible: true,
         },
       });
       const ok = Boolean(typeResp?.success !== false && (typeResp?.data?.success ?? true));
@@ -308,6 +309,7 @@ export async function executeSearch(
           containerId: 'xiaohongshu_home.search_button',
           operationId: 'click',
           sessionId: profile,
+          config: { fullyVisible: true, useSystemMouse: true },
         });
         const ok = Boolean(clickResp?.success !== false && (clickResp?.data?.success ?? true));
         if (!ok) {
@@ -378,7 +380,7 @@ export async function performSystemClickFocus(
     const clickResp = await controllerAction(controllerUrl, 'container:operation', {
       containerId: searchInputContainerId,
       operationId: 'click',
-      config: { selector, useSystemMouse: true },
+      config: { selector, useSystemMouse: true, fullyVisible: true },
       sessionId: profile
     });
     console.log('[SearchExecutor] System click on search bar executed', clickResp);

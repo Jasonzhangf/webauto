@@ -5,8 +5,10 @@ export interface ClickConfig {
   index?: number;
   bbox?: { x1: number; y1: number; x2: number; y2: number };
   target?: string;
+  anchor?: { x: number; y: number };
   waitFor?: number;
   retries?: number;
+  fullyVisible?: boolean;
   useSystemMouse?: boolean;
   x?: number;
   y?: number;
@@ -25,6 +27,8 @@ async function runClick(ctx: OperationContext, config: ClickConfig) {
     const index = Number.isFinite(config.index) ? Math.max(0, Math.floor(config.index as number)) : 0;
     const useSystemMouse = config.useSystemMouse !== false;
     const visibleOnly = config.visibleOnly === true;
+    const fullyVisible = config.fullyVisible === true;
+    const anchor = config.anchor ?? null;
 
     if (!useSystemMouse) {
       return { success: false, error: 'DOM click disabled; set useSystemMouse=true' };
@@ -33,7 +37,7 @@ async function runClick(ctx: OperationContext, config: ClickConfig) {
     type ClickPoint = { x: number; y: number };
     const target = typeof config.target === 'string' ? config.target.trim() : '';
 
-    const info = await ctx.page.evaluate(({ sel, idx, tgt, visibleOnly: vOnly }) => {
+    const info = await ctx.page.evaluate(({ sel, idx, tgt, visibleOnly: vOnly, fullyVisible: fOnly, anchor: anchorPoint }) => {
       const isVisible = (el: Element) => {
         const r = el.getBoundingClientRect();
         return (
@@ -46,8 +50,20 @@ async function runClick(ctx: OperationContext, config: ClickConfig) {
         );
       };
 
+      const isFullyVisible = (el: Element) => {
+        const r = el.getBoundingClientRect();
+        return (
+          r.width > 0 &&
+          r.height > 0 &&
+          r.top >= 0 &&
+          r.left >= 0 &&
+          r.bottom <= window.innerHeight &&
+          r.right <= window.innerWidth
+        );
+      };
+
       const allNodes = Array.from(document.querySelectorAll(sel));
-      const nodes = vOnly ? allNodes.filter((n) => isVisible(n as Element)) : allNodes;
+      const nodes = vOnly || fOnly ? allNodes.filter((n) => isVisible(n as Element)) : allNodes;
       const root = nodes[idx] as Element | undefined;
       if (!root) return null;
 
@@ -64,7 +80,18 @@ async function runClick(ctx: OperationContext, config: ClickConfig) {
 
       const r = el.getBoundingClientRect();
       const visible = r.width > 0 && r.height > 0 && r.y < window.innerHeight && r.y + r.height > 0;
-      if (!visible) return { visible: false, clickPoints: [] as Array<{ x: number; y: number }> };
+      if (!visible) return { visible: false, clickPoints: [] as Array<{ x: number; y: number }>, anchorMatch: false };
+
+      if (fOnly && !isFullyVisible(el)) {
+        return { visible: false, clickPoints: [] as Array<{ x: number; y: number }>, anchorMatch: false };
+      }
+
+      if (anchorPoint) {
+        const hit = document.elementFromPoint(anchorPoint.x, anchorPoint.y);
+        if (!hit || (hit !== el && !el.contains(hit))) {
+          return { visible: false, clickPoints: [] as Array<{ x: number; y: number }>, anchorMatch: false };
+        }
+      }
 
       const x1 = Math.max(0, r.left);
       const y1 = Math.max(0, r.top);
@@ -97,8 +124,8 @@ async function runClick(ctx: OperationContext, config: ClickConfig) {
         clickPoints.push({ x: mx, y: my });
       }
 
-      return { visible: true, clickPoints };
-    }, { sel: config.selector, idx: index, tgt: target, visibleOnly });
+      return { visible: true, clickPoints, anchorMatch: Boolean(anchorPoint) };
+    }, { sel: config.selector, idx: index, tgt: target, visibleOnly, fullyVisible, anchor });
 
     if (!info || !info.visible || !Array.isArray((info as any).clickPoints) || (info as any).clickPoints.length === 0) {
       return { success: false, error: 'element not visible' };

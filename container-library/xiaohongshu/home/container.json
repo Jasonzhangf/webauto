@@ -21,14 +21,17 @@
     {
       "css": ".feeds-page",
       "variant": "primary",
-      "score": 1.0
+      "score": 1
     }
   ],
   "metadata": {
     "required_descendants_any": [
       ".note-item",
       "[class*=\"feed\"]"
-    ]
+    ],
+    "zIndexPriority": 1,
+    "isOverlay": false,
+    "blocksInteraction": false
   },
   "operations": [
     {

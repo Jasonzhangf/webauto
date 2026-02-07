@@ -21,7 +21,7 @@
     {
       "css": ".login-container, .login-card",
       "variant": "primary",
-      "score": 1.0
+      "score": 1
     },
     {
       "css": "#login-root",
@@ -61,5 +61,10 @@
         "container_id": "xiaohongshu_login.login_button"
       }
     }
-  ]
+  ],
+  "metadata": {
+    "zIndexPriority": 1,
+    "isOverlay": false,
+    "blocksInteraction": false
+  }
 }

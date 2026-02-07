@@ -21,7 +21,7 @@
     {
       "css": "#search-result",
       "variant": "primary",
-      "score": 1.0
+      "score": 1
     },
     {
       "css": "[class*=\"search-result\"]",
@@ -33,7 +33,10 @@
     "required_descendants_any": [
       ".note-item",
       "[class*=\"search\"]"
-    ]
+    ],
+    "zIndexPriority": 1,
+    "isOverlay": false,
+    "blocksInteraction": false
   },
   "operations": [
     {

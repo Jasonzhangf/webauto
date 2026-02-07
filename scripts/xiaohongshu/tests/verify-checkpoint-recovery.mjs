@@ -22,12 +22,18 @@ import { detectXhsCheckpoint, ensureXhsCheckpoint } from '../../../dist/modules/
 const UNIFIED_API = 'http://127.0.0.1:7701';
 
 function parseArgs(argv) {
-  const args = { profile: 'xiaohongshu_batch-2', rounds: 3, evidenceDir: '/tmp/webauto-checkpoint-evidence' };
+  const args = {
+    profile: 'xiaohongshu_batch-2',
+    rounds: 3,
+    evidenceDir: '/tmp/webauto-checkpoint-evidence',
+    keyword: process.env.XHS_PHASE2_KEYWORD || '小米造车'
+  };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--profile' && argv[i + 1]) args.profile = argv[++i];
     else if (a === '--rounds' && argv[i + 1]) args.rounds = Number(argv[++i]);
     else if (a === '--evidence-dir' && argv[i + 1]) args.evidenceDir = argv[++i];
+    else if (a === '--keyword' && argv[i + 1]) args.keyword = argv[++i];
   }
   return args;
 }
@@ -78,13 +84,15 @@ async function saveEvidence(baseDir, label, sessionId) {
   return dir;
 }
 
-function loadOneSafeUrlFromPhase2() {
+function loadOneSafeUrlFromPhase2(keyword) {
   const linksPath = path.join(
     process.env.HOME || '.',
-    '.webauto/download/xiaohongshu/debug/深圳黄金/phase2-links.jsonl'
+    `.webauto/download/xiaohongshu/debug/${keyword}/phase2-links.jsonl`
   );
-
-  if (!fs.existsSync(linksPath)) return null;
+  if (!fs.existsSync(linksPath)) {
+    console.log(`⚠️  phase2-links.jsonl not found: ${linksPath}`);
+    return null;
+  }
   const lines = fs.readFileSync(linksPath, 'utf-8').split('\n').filter(Boolean);
   if (lines.length === 0) return null;
   try {
@@ -95,8 +103,8 @@ function loadOneSafeUrlFromPhase2() {
   }
 }
 
-async function simulateDetail(sessionId) {
-  const safeUrl = loadOneSafeUrlFromPhase2();
+async function simulateDetail(sessionId, keyword) {
+  const safeUrl = loadOneSafeUrlFromPhase2(keyword);
   if (!safeUrl) return false;
 
   await controllerAction('browser:navigate', {
@@ -110,13 +118,14 @@ async function simulateDetail(sessionId) {
 }
 
 async function main() {
-  const { profile, rounds, evidenceDir } = parseArgs(process.argv.slice(2));
+  const { profile, rounds, evidenceDir, keyword } = parseArgs(process.argv.slice(2));
   fs.mkdirSync(evidenceDir, { recursive: true });
 
   console.log('🔬 verify-checkpoint-recovery');
   console.log(`- profile: ${profile}`);
   console.log(`- rounds: ${rounds}`);
   console.log(`- evidenceDir: ${evidenceDir}`);
+  console.log(`- keyword: ${keyword}`);
 
   // health
   try {
@@ -133,7 +142,7 @@ async function main() {
     const before = await detectXhsCheckpoint({ sessionId: profile, serviceUrl: UNIFIED_API });
     console.log(`before: checkpoint=${before.checkpoint} stage=${before.stage} url=${before.url}`);
 
-    const entered = await simulateDetail(profile);
+    const entered = await simulateDetail(profile, keyword);
     if (!entered) {
       console.log('⚠️  no safeUrl to simulate detail, skip');
       continue;

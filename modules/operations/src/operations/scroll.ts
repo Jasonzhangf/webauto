@@ -5,6 +5,8 @@ export interface ScrollConfig {
   distance?: number;
   amount?: number;
   direction?: 'up' | 'down';
+  anchor?: { x: number; y: number };
+  fullyVisible?: boolean;
 }
 
 async function runScroll(ctx: OperationContext, config: ScrollConfig) {
@@ -14,6 +16,8 @@ async function runScroll(ctx: OperationContext, config: ScrollConfig) {
       ? config.amount
       : 500;
   const direction = config.direction || 'down';
+  const fullyVisible = config.fullyVisible !== false;
+  const anchor = config.anchor ?? null;
 
   // 单次滚动约束：不超过 800px，符合“用户手势范围”
   const distance = Math.min(800, Math.max(0, Math.floor(Math.abs(rawDistance))));
@@ -23,12 +27,31 @@ async function runScroll(ctx: OperationContext, config: ScrollConfig) {
   if (ctx.systemInput?.mouseWheel) {
     const selector = typeof config.selector === 'string' ? config.selector.trim() : '';
     if (selector && ctx.systemInput?.mouseMove) {
-      const info = await ctx.page.evaluate((sel) => {
+      const info = await ctx.page.evaluate(({ sel, fVisible, anchorPoint }) => {
+        const isVisible = (el: Element) => {
+          const r = el.getBoundingClientRect();
+          return r.width > 0 && r.height > 0 && r.bottom > 0 && r.top < window.innerHeight && r.right > 0 && r.left < window.innerWidth;
+        };
+
+        const isFullyVisible = (el: Element) => {
+          const r = el.getBoundingClientRect();
+          return r.width > 0 && r.height > 0 && r.top >= 0 && r.left >= 0 && r.bottom <= window.innerHeight && r.right <= window.innerWidth;
+        };
+
         const el = document.querySelector(sel);
         if (!el) return null;
         const r = el.getBoundingClientRect();
-        const visible = r.width > 0 && r.height > 0 && r.y < window.innerHeight && r.y + r.height > 0;
-        if (!visible) return { visible: false, points: [] as Array<{ x: number; y: number }> };
+        const visible = isVisible(el);
+        const fVisibleCheck = isFullyVisible(el);
+        if (!visible) return { visible: false, fullyVisible: false, anchorMatch: false, points: [] as Array<{ x: number; y: number }> };
+        if (fVisible && !fVisibleCheck) return { visible, fullyVisible: false, anchorMatch: false, points: [] as Array<{ x: number; y: number }> };
+
+        let anchorMatch = true;
+        if (anchorPoint) {
+          const hit = document.elementFromPoint(anchorPoint.x, anchorPoint.y);
+          anchorMatch = hit !== null && (hit === el || el.contains(hit));
+          if (!anchorMatch) return { visible, fullyVisible: fVisibleCheck, anchorMatch: false, points: [] as Array<{ x: number; y: number }> };
+        }
 
         const x1 = Math.max(0, r.left);
         const y1 = Math.max(0, r.top);
@@ -56,10 +79,22 @@ async function runScroll(ctx: OperationContext, config: ScrollConfig) {
         }
 
         if (!ok.length) ok.push({ x: mx, y: Math.round((y1 + y2) / 2) });
-        return { visible: true, points: ok };
-      }, selector);
+        return { visible: true, fullyVisible: fVisibleCheck, anchorMatch, points: ok };
+      }, { sel: selector, fVisible: fullyVisible, anchorPoint: anchor });
 
-      if (info && info.visible && Array.isArray((info as any).points) && (info as any).points.length > 0) {
+      if (!info) {
+        return { success: false, error: 'element not found' };
+      }
+      if (!info.visible) {
+        return { success: false, error: 'element not visible' };
+      }
+      if (fullyVisible && !info.fullyVisible) {
+        return { success: false, error: 'element not fully visible in viewport' };
+      }
+      if (anchor && !info.anchorMatch) {
+        return { success: false, error: 'anchor point does not hit target element' };
+      }
+      if (Array.isArray((info as any).points) && (info as any).points.length > 0) {
         const p = (info as any).points[0];
         await ctx.systemInput.mouseMove(Math.round(p.x), Math.round(p.y), 2);
         await new Promise((r) => setTimeout(r, 80));

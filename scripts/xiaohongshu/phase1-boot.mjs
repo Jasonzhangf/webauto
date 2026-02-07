@@ -19,8 +19,36 @@ import { execute as ensureServices } from '../../dist/modules/xiaohongshu/app/sr
 import { execute as startProfile } from '../../dist/modules/xiaohongshu/app/src/xiaohongshu/app/src/blocks/Phase1StartProfileBlock.js';
 import { execute as monitorCookie } from '../../dist/modules/xiaohongshu/app/src/xiaohongshu/app/src/blocks/Phase1MonitorCookieBlock.js';
 import minimist from 'minimist';
+import { fileURLToPath } from 'node:url';
+import path from 'node:path';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+async function maybeDaemonize(argv) {
+  if (!argv.includes('--daemon') || process.env.WEBAUTO_DAEMON === '1') return false;
+  const wrapperPath = path.join(__dirname, 'shared', 'daemon-wrapper.mjs');
+  const scriptPath = fileURLToPath(import.meta.url);
+  const args = argv.filter((a) => a !== '--daemon');
+  const { spawn } = await import('node:child_process');
+  spawn(process.execPath, [wrapperPath, scriptPath, ...args], {
+    stdio: 'inherit',
+    cwd: process.cwd(),
+    env: process.env,
+  });
+  return true;
+}
 
 async function main() {
+  const rawArgv = process.argv.slice(2);
+  // Default to daemon mode unless --foreground is passed
+  const foreground = rawArgv.includes('--foreground');
+  const filteredArgv = rawArgv.filter(a => a !== '--foreground');
+  
+  if (!foreground && await maybeDaemonize([...filteredArgv, '--daemon'])) {
+    console.log('✅ Phase1 started in daemon mode');
+    return;
+  }
+
   // Single source of truth for service lifecycle: core-daemon.
   // Phase1/2/3/4 scripts should not each implement their own service orchestration.
   await ensureCoreServices();

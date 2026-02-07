@@ -103,8 +103,12 @@ async function main() {
     return;
   }
 
-  if (await maybeDaemonize(argv)) {
-    console.log('started in daemon mode');
+  // Default to daemon mode unless --foreground is passed
+  const foreground = argv.includes('--foreground');
+  const filteredArgv = argv.filter(a => a !== '--foreground');
+  
+  if (!foreground && await maybeDaemonize([...filteredArgv, '--daemon'])) {
+    console.log('✅ Phase2 started in daemon mode');
     return;
   }
 
@@ -173,7 +177,15 @@ async function main() {
     // 1. SearchGate 节流许可申请
     console.log(`⏳ 申请搜索许可...`);
     const tPermit0 = nowMs();
-    let permitResult = await waitSearchPermit({ sessionId: PROFILE_RUNTIME, keyword });
+    const isDev = process.env.DEBUG === '1' || process.env.WEBAUTO_DEV === '1';
+    const forcePermit = process.env.WEBAUTO_SEARCH_GATE_FORCE_PERMIT === '1';
+    let permitResult = await waitSearchPermit({
+      sessionId: PROFILE_RUNTIME,
+      keyword,
+      dev: isDev,
+      devTag: isDev ? 'phase2-dev' : '',
+      skipIfAlreadyOnSearchResult: !forcePermit,
+    });
     // Dev/test ergonomics: if SearchGate denies due to dev-only consecutive keyword rule,
     // rotate keyword from the pool and retry permit with the NEW keyword (no extra search yet).
     // IMPORTANT: Do NOT retry with the same keyword that was just denied - it will be denied again.
@@ -184,7 +196,13 @@ async function main() {
       if (next && next !== keyword) {
         console.warn(`[Phase2] SearchGate denied consecutive keyword in dev, rotating keyword: "${keyword}" -> "${next}"`);
         // Request permit with the NEW keyword (not the denied one) to avoid history pollution
-        permitResult = await waitSearchPermit({ sessionId: PROFILE_RUNTIME, keyword: next });
+        permitResult = await waitSearchPermit({
+          sessionId: PROFILE_RUNTIME,
+          keyword: next,
+          dev: isDev,
+          devTag: isDev ? 'phase2-dev' : '',
+          skipIfAlreadyOnSearchResult: !forcePermit,
+        });
         // Update keyword to the new one for subsequent search
         keyword = next;
       }

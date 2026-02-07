@@ -253,11 +253,29 @@ export async function execute(input: CollectLinksInput): Promise<CollectLinksOut
       );
     }
     
-    // 如果仍然是 /explore/<id> URL 且 checkpoint 标记为 search（XHS shell-page 行为），
-    // 按照用户指示：点击「发现」后重试搜索 (轻度风控回退策略)
+    // 如果仍然是 /explore/<id> URL 但 DOM 已渲染搜索结果（XHS shell-page 行为），
+    // 避免任何 refresh/goto/Discover 回退：直接合成 search_result URL 作为 expectedSearchUrl。
     if (currentUrl.includes('/explore/') && looksLikeSearchResult) {
-      console.warn(`[Phase2Collect] 检测到小红书 shell-page URL（/explore/<id> 但 DOM 已渲染搜索结果），触发 Discover 回退策略`);
-      throw new Error(`[SHELL_PAGE] URL=${currentUrl}; triggering fallback`);
+      const inputVal = await controllerAction(
+        'browser:execute',
+        {
+          profile,
+          script: `(function(){
+            const el = document.querySelector('#search-input') || document.querySelector('input[type="search"]') || document.querySelector('input[placeholder*="搜索"], input[placeholder*="关键字"]');
+            if (!el) return '';
+            return String(el.value || '').trim();
+          })()`,
+        },
+        unifiedApiUrl,
+      ).then((res) => String(res?.result || res?.data?.result || '').trim());
+
+      if (inputVal && inputVal === keyword) {
+        const synthesized = new URL('https://www.xiaohongshu.com/search_result');
+        synthesized.searchParams.set('keyword', keyword);
+        const synthesizedUrl = synthesized.toString();
+        console.warn(`[Phase2Collect] shell-page detected; using synthesized expectedSearchUrl=${synthesizedUrl}`);
+        return synthesizedUrl;
+      }
     }
 
     // If we're already on /search_result and keyword matches, accept.
@@ -265,9 +283,8 @@ export async function execute(input: CollectLinksInput): Promise<CollectLinksOut
       return currentUrl;
     }
 
-    // If DOM looks like search results but URL is not /search_result, Phase2Search has likely
-    // completed but XHS kept a shell URL (/explore/<id>). In this case, resolve the strict
-    // expectedSearchUrl by reading the input value and triggering Enter once (no refresh/goto).
+    // If DOM looks like search results but URL is not /search_result, treat as shell-page.
+    // Avoid any Enter/refresh/goto; synthesize expectedSearchUrl from the input value.
     if (!currentUrl.includes('/search_result') && looksLikeSearchResult) {
       const inputVal = await controllerAction('browser:execute', {
         profile,
@@ -279,16 +296,12 @@ export async function execute(input: CollectLinksInput): Promise<CollectLinksOut
       }, unifiedApiUrl).then(res => String(res?.result || res?.data?.result || '').trim());
 
       if (inputVal && inputVal === keyword) {
-        // Submit once to force URL to /search_result (still system-level action).
-        await controllerAction('keyboard:press', { profileId: profile, key: 'Enter' }, unifiedApiUrl);
-        await delay(1500);
-        const urlNow = await controllerAction('browser:execute', { profile, script: 'window.location.href' }, unifiedApiUrl)
-          .then(res => res?.result || res?.data?.result || '');
-        if (typeof urlNow === 'string' && matchesKeywordFromSearchUrlStrict(urlNow, keyword)) {
-          return urlNow;
-        }
+        const synthesized = new URL('https://www.xiaohongshu.com/search_result');
+        synthesized.searchParams.set('keyword', keyword);
+        const synthesizedUrl = synthesized.toString();
+        console.warn(`[Phase2Collect] shell-page detected (non-search URL); using synthesized expectedSearchUrl=${synthesizedUrl}`);
+        return synthesizedUrl;
       }
-
       // Fall through to strict failure: we refuse to accept shell URL as expectedSearchUrl.
     }
 
@@ -332,12 +345,6 @@ export async function execute(input: CollectLinksInput): Promise<CollectLinksOut
       expectedSearchUrl = await ensureOnExpectedSearch();
       break; // Success, exit loop
     } catch (e: any) {
-      if (String(e.message || '').includes('[SHELL_PAGE]')) {
-        fallbackAttempts++;
-        console.warn(`[Phase2Collect] 触发 shell-page fallback（第 ${fallbackAttempts} 次）`);
-        await clickDiscoverAndRetrySearch({ profile, unifiedApiUrl, keyword, env, appendTrace });
-        continue; // Retry ensureOnExpectedSearch
-      }
       throw e; // Other errors: rethrow
     }
   }
@@ -394,7 +401,113 @@ export async function execute(input: CollectLinksInput): Promise<CollectLinksOut
 
     const pick: PickResult = await controllerAction('browser:execute', {
       profile,
-      script: `(function(){\n  const sel = ${JSON.stringify(itemSelector)};\n  const seen = new Set(${JSON.stringify(Array.from(seenExploreIds))});\n  const nodes = Array.from(document.querySelectorAll(sel));\n  const pad = 8;\n  const vh = window.innerHeight;\n\n  function clampAmount(v){\n    const n = Math.ceil(Number(v) || 0);\n    if (n <= 0) return 200;\n    return Math.min(800, n);\n  }\n\n  for (let i = 0; i < nodes.length; i++) {\n    const node = nodes[i];\n    const exploreA = node.querySelector('a[href*=\"/explore/\"]');\n    const exploreHref = exploreA ? (exploreA.getAttribute('href') || '') : '';\n    const m = exploreHref.match(/\\/explore\\/([a-f0-9]+)/);\n    const exploreId = m ? m[1] : '';\n    if (!exploreId || seen.has(exploreId)) continue;\n\n    const r = node.getBoundingClientRect();\n    if (!(r.width > 0 && r.height > 0)) continue;\n\n    if (r.top < pad) {\n      return {\n        action: 'scroll',\n        index: i,\n        exploreId,\n        rect: { top: r.top, bottom: r.bottom, width: r.width, height: r.height },\n        scroll: { direction: 'up', amount: clampAmount((pad - r.top) + 24), reason: 'top_clipped' },\n        debug: { total: nodes.length, pad, viewportH: vh },\n      };\n    }\n\n    if (r.bottom > (vh - pad)) {\n      return {\n        action: 'scroll',\n        index: i,\n        exploreId,\n        rect: { top: r.top, bottom: r.bottom, width: r.width, height: r.height },\n        scroll: { direction: 'down', amount: clampAmount((r.bottom - (vh - pad)) + 24), reason: 'bottom_clipped' },\n        debug: { total: nodes.length, pad, viewportH: vh },\n      };\n    }\n\n    return {\n      action: 'ok',\n      index: i,\n      exploreId,\n      rect: { top: r.top, bottom: r.bottom, width: r.width, height: r.height },\n      debug: { total: nodes.length, pad, viewportH: vh },\n    };\n  }\n\n  return {\n    action: 'scroll',\n    scroll: { direction: 'down', amount: 800, reason: 'no_unseen_candidates' },\n    debug: { total: nodes.length, pad, viewportH: vh },\n  };\n})()`,
+      script: `(function(){
+  const sel = ${JSON.stringify(itemSelector)};
+  const seen = new Set(${JSON.stringify(Array.from(seenExploreIds))});
+  const nodes = Array.from(document.querySelectorAll(sel));
+  const pad = 8;
+  const vh = window.innerHeight;
+
+  function clampAmount(v){
+    const n = Math.ceil(Number(v) || 0);
+    if (n <= 0) return 200;
+    return Math.min(800, n);
+  }
+
+  const candidates = [];
+  let scrollUp = null;
+  let scrollDown = null;
+
+  for (let i = 0; i < nodes.length; i++) {
+    const node = nodes[i];
+    const exploreA = node.querySelector('a[href*="/explore/"]');
+    const exploreHref = exploreA ? (exploreA.getAttribute('href') || '') : '';
+    const m = exploreHref.match(/\\/explore\\/([a-f0-9]+)/);
+    const exploreId = m ? m[1] : '';
+    if (!exploreId || seen.has(exploreId)) continue;
+
+    const r = node.getBoundingClientRect();
+    if (!(r.width > 0 && r.height > 0)) continue;
+
+    if (r.top < pad) {
+      const amount = clampAmount((pad - r.top) + 24);
+      if (!scrollUp || amount > scrollUp.amount) {
+        scrollUp = {
+          direction: 'up',
+          amount,
+          reason: 'top_clipped',
+          index: i,
+          exploreId,
+          rect: { top: r.top, bottom: r.bottom, width: r.width, height: r.height },
+        };
+      }
+      continue;
+    }
+
+    if (r.bottom > (vh - pad)) {
+      const amount = clampAmount((r.bottom - (vh - pad)) + 24);
+      if (!scrollDown || amount > scrollDown.amount) {
+        scrollDown = {
+          direction: 'down',
+          amount,
+          reason: 'bottom_clipped',
+          index: i,
+          exploreId,
+          rect: { top: r.top, bottom: r.bottom, width: r.width, height: r.height },
+        };
+      }
+      continue;
+    }
+
+    candidates.push({
+      index: i,
+      exploreId,
+      rect: { top: r.top, bottom: r.bottom, width: r.width, height: r.height },
+    });
+  }
+
+  if (candidates.length > 0) {
+    const randomIdx = Math.floor(Math.random() * candidates.length);
+    const chosen = candidates[randomIdx];
+    return {
+      action: 'ok',
+      index: chosen.index,
+      exploreId: chosen.exploreId,
+      rect: chosen.rect,
+      debug: {
+        total: nodes.length,
+        pad,
+        viewportH: vh,
+        candidatesCount: candidates.length,
+        pick: 'random',
+        chosenIdx: randomIdx,
+      },
+    };
+  }
+
+  if (scrollUp || scrollDown) {
+    const scroll = scrollUp || scrollDown;
+    return {
+      action: 'scroll',
+      index: scroll.index,
+      exploreId: scroll.exploreId,
+      rect: scroll.rect,
+      scroll: { direction: scroll.direction, amount: scroll.amount, reason: scroll.reason },
+      debug: {
+        total: nodes.length,
+        pad,
+        viewportH: vh,
+        candidatesCount: 0,
+      },
+    };
+  }
+
+  return {
+    action: 'scroll',
+    scroll: { direction: 'down', amount: 800, reason: 'no_unseen_candidates' },
+    debug: { total: nodes.length, pad, viewportH: vh, candidatesCount: 0 },
+  };
+})()`,
     }, unifiedApiUrl).then(res => res?.result || res?.data?.result || null);
 
     if (!pick || typeof pick !== 'object') {
@@ -408,7 +521,8 @@ export async function execute(input: CollectLinksInput): Promise<CollectLinksOut
       // Scrolling unnecessarily is a high-risk operation (more requests + predictable behavior).
       // We treat "visible enough" as "total cards in DOM >= targetCount" (best-effort).
       const total = Number((pick as any)?.debug?.total ?? 0);
-      const visibleEnough = Number.isFinite(total) && total >= targetCount;
+      const candidatesCount = Number((pick as any)?.debug?.candidatesCount ?? 0);
+      const visibleEnough = Number.isFinite(total) && total >= targetCount && Number.isFinite(candidatesCount) && candidatesCount > 0;
       if (visibleEnough) {
         if (!scrollLocked) {
           scrollLocked = true;

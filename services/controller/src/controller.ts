@@ -86,6 +86,9 @@ interface SnapshotOptions {
   maxChildren?: number;
   containerId?: string;
   rootSelector?: string;
+  cache?: boolean;
+  cacheTtlMs?: number;
+  invalidateCache?: boolean;
 }
 
 interface BranchOptions {
@@ -126,6 +129,16 @@ export class UiController {
   private defaultHttpPort: number;
   private defaultHttpProtocol: string;
   private _containerIndexCache: Record<string, any> | null;
+  private snapshotCache = new Map<
+    string,
+    {
+      ts: number;
+      sessionId: string;
+      profileId: string;
+      url: string;
+      snapshot: any;
+    }
+  >();
 
   constructor(options: UiControllerOptions = {}) {
     this.repoRoot = options.repoRoot || process.cwd();
@@ -146,6 +159,14 @@ export class UiController {
       httpHost: this.defaultHttpHost,
       httpPort: this.defaultHttpPort
     });
+  }
+
+  private getSnapshotCacheKey(options: SnapshotOptions, targetUrl: string, sessionId: string) {
+    const maxDepth = options.maxDepth ?? 2;
+    const maxChildren = options.maxChildren ?? 5;
+    const rootSelector = options.rootSelector || '';
+    const containerId = (options as any).containerId || (options as any).rootContainerId || '';
+    return [sessionId, targetUrl, String(maxDepth), String(maxChildren), rootSelector, containerId].join('::');
   }
 
   async runCliCommand(moduleName: string, args: string[]): Promise<any> {
@@ -547,7 +568,7 @@ export class UiController {
 
 
   async handleContainerMatch(payload: ActionPayload = {}) {
-    const { profile, url, maxDepth, maxChildren, rootSelector } = normalizePayload(payload, { required: ['profile'] });
+    const { profile, url, maxDepth, maxChildren, rootSelector, cache, cacheTtlMs, invalidateCache } = normalizePayload(payload, { required: ['profile'] });
 
     logDebug('controller', 'containers:match', { profile, url, payload });
     
@@ -558,6 +579,9 @@ export class UiController {
         maxDepth: maxDepth || 2,
         maxChildren: maxChildren || 5,
         rootSelector,
+        cache,
+        cacheTtlMs,
+        invalidateCache,
       });
       
       const snapshot = context.snapshot;
@@ -569,6 +593,7 @@ export class UiController {
         matched: !!rootContainer,
         container: rootContainer || null,
         snapshot,
+        cache: context.cache || null,
       };
       this.messageBus?.publish?.('containers.matched', matchPayload);
       if (matchPayload.container) {
@@ -1189,16 +1214,57 @@ export class UiController {
     }
     let liveError: Error | null = null;
     let snapshot: any = null;
+    let fromCache = false;
+    let cacheAgeMs: number | null = null;
+    const cacheEnabled =
+      typeof options.cache === 'boolean'
+        ? options.cache
+        : String(process.env.WEBAUTO_CONTAINER_SNAPSHOT_CACHE || '0') === '1';
+    const cacheTtlMs =
+      typeof options.cacheTtlMs === 'number' && Number.isFinite(options.cacheTtlMs)
+        ? Math.max(0, Math.floor(options.cacheTtlMs))
+        : Number(process.env.WEBAUTO_CONTAINER_SNAPSHOT_CACHE_TTL_MS || 5000);
+
+    if (sessionId && targetUrl && cacheEnabled) {
+      const cacheKey = this.getSnapshotCacheKey(options, targetUrl, sessionId);
+      if (options.invalidateCache) {
+        this.snapshotCache.delete(cacheKey);
+      } else {
+        const cached = this.snapshotCache.get(cacheKey);
+        if (cached) {
+          const age = Date.now() - cached.ts;
+          if (age <= cacheTtlMs) {
+            snapshot = cached.snapshot;
+            fromCache = true;
+            cacheAgeMs = age;
+          } else {
+            this.snapshotCache.delete(cacheKey);
+          }
+        }
+      }
+    }
     if (sessionId) {
       try {
-        snapshot = await this.fetchContainerSnapshotFromService({
-          sessionId,
-          url: targetUrl,
-          maxDepth: options.maxDepth,
-          maxChildren: options.maxChildren,
-          rootContainerId: requestedContainerId,
-          rootSelector: (options as any).rootSelector,
-        });
+        if (!snapshot) {
+          snapshot = await this.fetchContainerSnapshotFromService({
+            sessionId,
+            url: targetUrl,
+            maxDepth: options.maxDepth,
+            maxChildren: options.maxChildren,
+            rootContainerId: requestedContainerId,
+            rootSelector: (options as any).rootSelector,
+          });
+          if (snapshot && cacheEnabled && sessionId && targetUrl) {
+            const cacheKey = this.getSnapshotCacheKey(options, targetUrl, sessionId);
+            this.snapshotCache.set(cacheKey, {
+              ts: Date.now(),
+              sessionId,
+              profileId: profileId || 'default',
+              url: targetUrl,
+              snapshot,
+            });
+          }
+        }
       } catch (err) {
         liveError = err as Error;
       }
@@ -1215,6 +1281,12 @@ export class UiController {
       profileId: profileId || 'default',
       targetUrl,
       snapshot,
+      cache: {
+        enabled: cacheEnabled,
+        hit: fromCache,
+        ageMs: cacheAgeMs,
+        ttlMs: cacheTtlMs,
+      },
     };
   }
 

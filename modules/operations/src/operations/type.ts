@@ -8,6 +8,8 @@ export interface TypeConfig {
   human_typing?: boolean;
   pause_after?: number;
   index?: number;
+  anchor?: { x: number; y: number };
+  fullyVisible?: boolean;
 }
 
 async function runType(ctx: OperationContext, config: TypeConfig) {
@@ -18,6 +20,8 @@ async function runType(ctx: OperationContext, config: TypeConfig) {
 
   const index = Number.isFinite(config.index) ? Math.max(0, Math.floor(config.index as number)) : 0;
   const keyboard = ctx.page.keyboard;
+  const fullyVisible = config.fullyVisible !== false;
+  const anchor = config.anchor ?? null;
 
   if (!ctx.systemInput?.mouseClick) {
     return { success: false, error: 'system mouse not available' };
@@ -26,25 +30,48 @@ async function runType(ctx: OperationContext, config: TypeConfig) {
     return { success: false, error: 'keyboard type not available' };
   }
 
-  type ClickableRect = { x1: number; y1: number; x2: number; y2: number; visible: boolean };
-
+  type ClickableRect = { x1: number; y1: number; x2: number; y2: number; visible: boolean; fullyVisible: boolean; anchorMatch: boolean };
   type ClickPoint = { x: number; y: number };
   type TargetInfo = ClickableRect & { clickPoints: ClickPoint[] };
 
   const getClickableRect = async (): Promise<TargetInfo | null> =>
-    ctx.page.evaluate(({ sel, idx }) => {
+    ctx.page.evaluate(({ sel, idx, fVisible, anchorPoint }) => {
+      const isVisible = (el: Element) => {
+        const r = el.getBoundingClientRect();
+        return r.width > 0 && r.height > 0 && r.bottom > 0 && r.top < window.innerHeight && r.right > 0 && r.left < window.innerWidth;
+      };
+
+      const isFullyVisible = (el: Element) => {
+        const r = el.getBoundingClientRect();
+        return r.width > 0 && r.height > 0 && r.top >= 0 && r.left >= 0 && r.bottom <= window.innerHeight && r.right <= window.innerWidth;
+      };
+
       const nodes = Array.from(document.querySelectorAll(sel));
-      const root = nodes[idx] as Element | undefined;
+      const candidates = nodes.filter((n) => isVisible(n as Element));
+      const root = candidates[idx] as Element | undefined;
       if (!root) return null;
+
       const focusEl =
         root instanceof HTMLInputElement ||
         root instanceof HTMLTextAreaElement ||
         (root instanceof HTMLElement && root.isContentEditable)
           ? root
-          : (root.querySelector('input,textarea,[contenteditable=\"true\"],[contenteditable=\"plaintext-only\"]') as Element | null) ||
+          : (root.querySelector('input,textarea,[contenteditable="true"],[contenteditable="plaintext-only"]') as Element | null) ||
             root;
       const r = focusEl.getBoundingClientRect();
-      const visible = r.width > 0 && r.height > 0 && r.y < window.innerHeight && r.y + r.height > 0;
+      const visible = isVisible(focusEl);
+      const fVisibleCheck = isFullyVisible(focusEl);
+
+      if (!visible) return { x1: r.left, y1: r.top, x2: r.right, y2: r.bottom, visible: false, fullyVisible: false, anchorMatch: false, clickPoints: [] };
+      if (fVisible && !fVisible) return { x1: r.left, y1: r.top, x2: r.right, y2: r.bottom, visible, fullyVisible: false, anchorMatch: false, clickPoints: [] };
+
+      let anchorMatch = true;
+      if (anchorPoint) {
+        const hit = document.elementFromPoint(anchorPoint.x, anchorPoint.y);
+        anchorMatch = hit !== null && (hit === focusEl || focusEl.contains(hit));
+        if (!anchorMatch) return { x1: r.left, y1: r.top, x2: r.right, y2: r.bottom, visible, fullyVisible: fVisibleCheck, anchorMatch: false, clickPoints: [] };
+      }
+
       const midY = Math.round((r.top + r.bottom) / 2);
       const points = [
         { x: Math.round((r.left + r.right) / 2), y: midY },
@@ -60,8 +87,8 @@ async function runType(ctx: OperationContext, config: TypeConfig) {
         }
       }
       if (!clickPoints.length) clickPoints.push(points[0]!);
-      return { x1: r.left, y1: r.top, x2: r.right, y2: r.bottom, visible, clickPoints };
-    }, { sel: selector, idx: index });
+      return { x1: r.left, y1: r.top, x2: r.right, y2: r.bottom, visible, fullyVisible: fVisibleCheck, anchorMatch, clickPoints };
+    }, { sel: selector, idx: index, fVisible: fullyVisible, anchorPoint: anchor });
 
   const getTextLen = async (): Promise<number | null> =>
     ctx.page.evaluate(({ sel, idx }) => {
@@ -73,7 +100,7 @@ async function runType(ctx: OperationContext, config: TypeConfig) {
         root instanceof HTMLTextAreaElement ||
         (root instanceof HTMLElement && root.isContentEditable)
           ? root
-          : (root.querySelector('input,textarea,[contenteditable=\"true\"],[contenteditable=\"plaintext-only\"]') as Element | null) ||
+          : (root.querySelector('input,textarea,[contenteditable="true"],[contenteditable="plaintext-only"]') as Element | null) ||
             root;
       if (focusEl instanceof HTMLInputElement || focusEl instanceof HTMLTextAreaElement) return focusEl.value.length;
       if (focusEl instanceof HTMLElement && focusEl.isContentEditable) return (focusEl.textContent || '').trim().length;
@@ -96,6 +123,12 @@ async function runType(ctx: OperationContext, config: TypeConfig) {
 
   if (!rect || !rect.visible) {
     return { success: false, error: 'element not visible' };
+  }
+  if (fullyVisible && !rect.fullyVisible) {
+    return { success: false, error: 'element not fully visible in viewport' };
+  }
+  if (anchor && !rect.anchorMatch) {
+    return { success: false, error: 'anchor point does not hit target element' };
   }
 
   let focused = false;
