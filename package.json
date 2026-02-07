@@ -90,7 +90,12 @@
     "dev:build-install-global": "node scripts/dev/build-install-global.mjs",
     "dev:build-install-global:full": "node scripts/dev/build-install-global.mjs --full",
     "dev:build-install-global:link": "node scripts/dev/build-install-global.mjs --link",
-    "test:services:unit": "npx tsx --test $(find services -name \"*.test.ts\" -o -name \"*.test.mts\" 2>/dev/null | tr \"\\n\" \" \")"
+    "test:services:unit": "npx tsx --test $(find services -name \"*.test.ts\" -o -name \"*.test.mts\" 2>/dev/null | tr \"\\n\" \" \")",
+    "test:coverage": "node scripts/test/run-coverage.mjs",
+    "test:coverage:modules": "node scripts/test/run-coverage.mjs --scope=modules",
+    "test:coverage:services": "node scripts/test/run-coverage.mjs --scope=services",
+    "test:coverage:xiaohongshu": "node scripts/test/run-coverage.mjs --scope=xiaohongshu",
+    "test:coverage:report": "node scripts/test/run-coverage.mjs --report=html"
   },
   "devDependencies": {
     "@modelcontextprotocol/sdk": "^1.20.1",
