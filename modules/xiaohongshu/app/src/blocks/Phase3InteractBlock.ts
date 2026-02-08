@@ -10,7 +10,8 @@
  */
 
 import path from 'node:path';
-import { promises as fs } from 'node:fs';
+import fs, { promises as fsp } from 'node:fs';
+import os from 'node:os';
 import { controllerAction, delay } from '../utils/controllerAction.js';
 import { resolveDownloadRoot, savePngBase64, takeScreenshotBase64 } from './helpers/evidence.js';
 import {
@@ -274,6 +275,53 @@ async function requestLikeGate(profileId: string): Promise<{ allowed: boolean; c
   }
 }
 
+function emitLikeEvent(keyword: string, env: string, payload: any) {
+  try {
+    const home = process.env.HOME || process.env.USERPROFILE || require('os').homedir();
+    const logPath = require('path').join(home, '.webauto', 'download', 'xiaohongshu', env, keyword, 'run-events.jsonl');
+    const row = { ts: new Date().toISOString(), type: 'like', ...payload };
+    fs.appendFileSync(logPath, JSON.stringify(row) + '\n', 'utf8');
+  } catch {}
+}
+
+
+// Like deduplication: persist liked signatures to disk
+function getLikeStatePath(keyword: string, env: string): string {
+  const home = process.env.HOME || process.env.USERPROFILE || require('os').homedir();
+  return path.join(home, '.webauto', 'download', 'xiaohongshu', env, keyword, '.like-state.jsonl');
+}
+
+function loadLikedSignatures(keyword: string, env: string): Set<string> {
+  try {
+    const p = getLikeStatePath(keyword, env);
+    if (!fs.existsSync(p)) return new Set();
+    const lines = fs.readFileSync(p, 'utf8').split('\n').filter(Boolean);
+    const sigs = new Set<string>();
+    for (const line of lines) {
+      try {
+        const obj = JSON.parse(line);
+        if (obj.signature) sigs.add(obj.signature);
+      } catch {}
+    }
+    return sigs;
+  } catch {
+    return new Set();
+  }
+}
+
+function saveLikedSignature(keyword: string, env: string, signature: string): void {
+  try {
+    const p = getLikeStatePath(keyword, env);
+    const row = { ts: new Date().toISOString(), signature };
+    fs.appendFileSync(p, JSON.stringify(row) + '\n', 'utf8');
+  } catch {}
+}
+
+function makeSignature(noteId: string, userId: string, userName: string, text: string): string {
+  const normalizedText = String(text || '').trim().slice(0, 200);
+  return [noteId, String(userId || ''), String(userName || ''), normalizedText].join('|');
+}
+
 export async function execute(input: InteractInput): Promise<InteractOutput> {
   const {
     sessionId,
@@ -287,7 +335,9 @@ export async function execute(input: InteractInput): Promise<InteractOutput> {
     env = 'debug',
   } = input;
 
-  console.log(`[Phase3Interact] 开始处理帖子: ${noteId}`);
+  // Load persisted liked signatures for dedup (resume support)
+  const likedSignatures = loadLikedSignatures(keyword, env);
+  console.log(`[Phase3Interact] 开始处理帖子: ${noteId}, 已有点赞记录: ${likedSignatures.size}`);
 
   const likedComments: InteractOutput['likedComments'] = [];
   let likedCount = 0;
@@ -459,8 +509,8 @@ export async function execute(input: InteractInput): Promise<InteractOutput> {
 
   // 落盘一份摘要，便于复盘（不影响主流程）
   try {
-    await fs.mkdir(traceDir, { recursive: true });
-    await fs.writeFile(
+    await fsp.mkdir(traceDir, { recursive: true });
+    await fsp.writeFile(
       path.join(traceDir, `summary-${Date.now()}.json`),
       JSON.stringify(
         {

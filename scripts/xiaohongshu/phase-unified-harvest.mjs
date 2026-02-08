@@ -153,7 +153,7 @@ async function main() {
     const runShard = async (a) => {
       console.log(`\n➡️  shard ${a.shardIndex}/${a.shardCount} profile=${a.profileId}`);
       if (!skipPhase1) {
-        await runNode(path.join(__dirname, 'phase1-boot.mjs'), ['--profile', a.profileId, '--once']);
+        await runNode(path.join(__dirname, 'phase1-boot.mjs'), ['--profile', a.profileId, '--once', ...(headless ? ['--headless'] : [])]);
       }
       await runNode(scriptPath, [
         ...baseArgs,
