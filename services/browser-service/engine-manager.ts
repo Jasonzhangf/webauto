@@ -183,19 +183,27 @@ export async function launchEngineContext(opts: EngineLaunchOptions): Promise<Br
     // Target: fill work area, but don't exceed explicit viewport caps if provided
     const targetW = maxViewportW > 0 ? Math.min(maxViewportW, workW) : workW;
     const targetH = maxViewportH > 0 ? Math.min(maxViewportH, workH) : workH;
+
+    // Use targetW/targetH as viewport (even in headless) to match headful size
+    const viewportW = Math.max(1440, Math.floor(targetW));
+    const viewportH = Math.max(900, Math.floor(targetH));
+
+    const envHeadlessW = Number(process.env.WEBAUTO_HEADLESS_WIDTH || 0);
+    const envHeadlessH = Number(process.env.WEBAUTO_HEADLESS_HEIGHT || 0);
+    const headlessW = envHeadlessW > 0 ? envHeadlessW : viewportW;
+    const headlessH = envHeadlessH > 0 ? envHeadlessH : viewportH;
     
+    const headless = Boolean(opts.headless);
+
     // Final window size: maximize to fill work area (leave small margin for chrome/window decorations)
-    const winW = Math.max(1440, Math.floor(workW * 0.95));
-    const winH = Math.max(900, Math.floor(workH - 80));
+    const winW = headless ? headlessW : Math.max(1440, Math.floor(workW * 0.95));
+    const winH = headless ? headlessH : Math.max(900, Math.floor(workH - 80));
     
     // Ensure integer types for Camoufox
     const screenW = Math.floor(physicalW) | 0;
     const screenH = Math.floor(physicalH) | 0;
     const intWinW = Math.floor(winW) | 0;
     const intWinH = Math.floor(winH) | 0;
-
-    // Headless camoufox is much more likely to hit window metric issues; prefer headful.
-    const headless = false;
 
     // Firefox/Camoufox requires screenX/screenY to be integers; default to 0 to avoid float errors.
 
@@ -231,6 +239,7 @@ export async function launchEngineContext(opts: EngineLaunchOptions): Promise<Br
       headless,
       os: ['windows', 'macos'],
       window: [intWinW, intWinH],
+      viewport: [headless ? headlessW : viewportW, headless ? headlessH : viewportH],
       firefox_user_prefs,
       config,
       data_dir: opts.profileDir,
