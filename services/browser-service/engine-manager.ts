@@ -177,8 +177,8 @@ export async function launchEngineContext(opts: EngineLaunchOptions): Promise<Br
     const workH = Number(dm?.workHeight || physicalH);
     
     // Use provided viewport as MAXIMUM (e.g., from fingerprint or explicit opt), default to full work area
-    const maxViewportW = Number(opts.viewport?.width || 0);
-    const maxViewportH = Number(opts.viewport?.height || 0);
+    const maxViewportW = Number(opts.viewport?.width || workW);
+    const maxViewportH = Number(opts.viewport?.height || workH);
     
     // Target: fill work area, but don't exceed explicit viewport caps if provided
     const targetW = maxViewportW > 0 ? Math.min(maxViewportW, workW) : workW;
