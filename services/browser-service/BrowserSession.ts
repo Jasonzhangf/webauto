@@ -95,7 +95,7 @@ export class BrowserSession {
       userAgent: fingerprint.userAgent?.substring(0, 50) + '...',
     });
 
-    const viewport = this.options.viewport || { width: 1440, height: 900 };
+    const viewport = this.options.viewport || { width: 3840, height: 2046 };
     const deviceScaleFactor = this.resolveDeviceScaleFactor();
 
     // 使用 EngineManager 启动上下文（Chromium 已移除，仅支持 Camoufox）
