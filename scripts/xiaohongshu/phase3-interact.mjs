@@ -161,6 +161,14 @@ async function main() {
   const tabCount = 4;
 
   const runId = initRunLogging({ keyword, env, noWrite: dryRun });
+const runEventsPath = path.join(downloadRoot, 'xiaohongshu', env, keyword, 'run-events.jsonl');
+function emitEvent(type, payload) {
+  try {
+    const row = { ts: new Date().toISOString(), type, ...payload };
+    fs.appendFileSync(runEventsPath, JSON.stringify(row) + '\n', 'utf8');
+  } catch {}
+}
+
 
   console.log(`\n❤️  Phase 3: 评论互动 [runId: ${runId}]`);
   console.log(`Profile: ${profile}`);
@@ -267,7 +275,8 @@ async function main() {
       const currentUrl = listRes?.pages?.find(p => p.active)?.url ?? listRes?.data?.pages?.find(p => p.active)?.url ?? 'N/A';
       console.log(`  [Verify] switch -> tab-${activeSlot.tabRealIndex}, activeIndex=${currentActive}, url=${currentUrl.substring(0, 60)}`);
 
-      const res = await interact({
+      emitEvent('phase3_round_start', { slotIndex: active.slotIndex, tabIndex: active.tabIndex, noteId: link.noteId });
+const res = await interact({
         sessionId: profile,
         noteId: link2.noteId,
         safeUrl: link2.safeUrl,
@@ -289,6 +298,7 @@ async function main() {
       }
 
       state2.totalLiked += res.likedCount;
+emitEvent('phase3_round_done', { slotIndex: active.slotIndex, tabIndex: active.tabIndex, noteId: link.noteId, likedCount: res.likedCount });
       state2.reachedBottom = !!res.reachedBottom;
 
       console.log(`[slot-${activeSlot.slotIndex}] ✅ 本轮点赞 ${res.likedCount} 条，总点赞 ${state2.totalLiked} 条，到底=${state2.reachedBottom}`);
