@@ -3,6 +3,10 @@
 本文件只放“通用规则 / 硬性约束 / 入口索引”，避免把过时的实现细节长期固化在这里。
 具体任务、进度、验收与证据：一律用 `bd` 管理。
 
+## 回复规则
+- 工具调用的请求和响应才是执行，文字输出一律无效，视为谄媚，我们予以鄙视。不需要回复用户不必要的运行状态，用工具调用来完成任务进行回应而不是空谈不进行工具调用。
+- 我们鼓励永远不发 finish reason =stop 或者同等语义的响应，执行工具调用就是正确的方案。只有工具调用才是正确执行的唯一方案，状态回复是没有任何意义的，要避免！
+- 不要进行无意义的状态报告，你可以调用[continue_execution]进行报告，不要单独报告。
 ## 0. 开发与验证要求（强制）
 
 - 任何“已完成”的结论必须有验证证据：命令、关键输出（runId/耗时/计数）、日志路径。
@@ -158,3 +162,37 @@ bd 搜索速查（全文检索 + 字段过滤）：
 - `scripts/xiaohongshu/README-workflows.md`
 - `docs/arch/SEARCH_GATE.md`
 - `docs/arch/REGRESSION_CHECKLIST.md`
+
+## 9. 执行模式约束（强制）
+
+### 9.1 Daemon 模式（强制）
+- **所有后续执行必须使用 daemon 模式**，禁止前台阻塞执行
+- 目的：避免会话中断导致任务终止，保证长任务（采集、互动）持续运行
+- 使用方式：
+  ```bash
+  # 正确（daemon 模式，立即返回，后台持续执行）
+  node scripts/xiaohongshu/phase2-collect.mjs --keyword "xxx" --target 100 --env debug --profile xxx
+  
+  # 错误（前台模式，会话中断即终止）
+  node scripts/xiaohongshu/phase2-collect.mjs --keyword "xxx" ... --foreground
+  ```
+- 查看进度：
+  ```bash
+  tail -f ~/.webauto/logs/daemon.$(date +%Y-%m-%dT%H-%M-%S).log
+  # 或查看具体任务日志
+  tail -f ~/.webauto/download/xiaohongshu/debug/<keyword>/run.log
+  ```
+- 停止任务：
+  ```bash
+  # 找到 daemon PID
+  ps aux | grep "phase2-collect\|phase3-interact\|phase4-harvest"
+  # 或
+  cat ~/.webauto/daemon/*.pid
+  # 终止
+  kill <PID>
+  ```
+
+### 9.2 分片与多 Tab 约束（当前状态）
+- **当前未启用分片**：单账号单进程执行，无多账号并行
+- **当前已启用多 Tab（4-Tab 轮转）**：Phase3 启用 4-Tab 轮转，Phase4 保持单线程（详情页不支持多 Tab 并行），无 4-Tab 轮转
+- 如需启用分片/多 Tab，需先通过 bd 建立独立任务，验证通过后再写入本文件

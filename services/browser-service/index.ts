@@ -386,6 +386,24 @@ async function handleCommand(
       // Keep response shape stable across internal refactors.
       return { ok: true, body: { ok: true, metrics: metrics || null } };
     }
+    
+    case 'window:move': {
+      const profileId = args.profileId || 'default';
+      const session = manager.getSession(profileId);
+      if (!session) throw new Error(`session for profile ${profileId} not started`);
+      const { x, y } = args;
+      await session.evaluate(`window.moveTo(${x}, ${y})`);
+      return { ok: true, body: { ok: true } };
+    }
+    case 'window:resize': {
+      const profileId = args.profileId || 'default';
+      const session = manager.getSession(profileId);
+      if (!session) throw new Error(`session for profile ${profileId} not started`);
+      const { width, height } = args;
+      await session.evaluate(`window.resizeTo(${width}, ${height})`);
+      return { ok: true, body: { ok: true } };
+    }
+
     case 'stop': {
       const profileId = args.profileId || 'default';
       const deleted = await manager.deleteSession(profileId);

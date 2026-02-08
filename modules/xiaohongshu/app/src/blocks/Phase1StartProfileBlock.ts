@@ -99,10 +99,10 @@ export async function execute(input: StartProfileInput): Promise<StartProfileOut
       const effectiveMaxW = resolveEffectiveMax(displayW, maxW);
       const effectiveMaxH = resolveEffectiveMax(displayH, maxH);
 
-      // Hard requirement: use OS work area as the viewport when available.
-      // Only fall back to browser metrics if OS metrics are missing.
-      const targetW = displayW > 0 ? displayW : (maxW > 0 ? maxW : 1920);
-      const targetH = displayH > 0 ? displayH : (maxH > 0 ? maxH : 1400);
+      // Hard requirement: do not exceed browser-reported max size to avoid oversized window
+      // that ends up partially off-screen (causing non-centered viewport).
+      const targetW = maxW > 0 ? maxW : (effectiveMaxW > 0 ? effectiveMaxW : (displayW > 0 ? displayW : 1920));
+      const targetH = maxH > 0 ? maxH : (effectiveMaxH > 0 ? effectiveMaxH : (displayH > 0 ? displayH : 1400));
 
       // Keep a reasonable minimum, but do NOT clamp max height/width; use real screen size.
       const width = Math.max(innerFloorW, Math.floor(targetW));
@@ -132,6 +132,20 @@ export async function execute(input: StartProfileInput): Promise<StartProfileOut
     width: viewport.width,
     height: viewport.height,
   }, browserServiceUrl);
+
+  // Ensure window centered on screen to keep viewport in expected position
+  try {
+    await browserServiceCommand('window:move', {
+      profileId: profile,
+      x: 0,
+      y: 0,
+      width: viewport.width,
+      height: viewport.height,
+    }, browserServiceUrl);
+    console.log('[Phase1StartProfile] window positioned at (0,0)');
+  } catch (err) {
+    console.warn('[Phase1StartProfile] window move failed:', err?.message || String(err));
+  }
   console.log(`[Phase1StartProfile] viewport set: ${viewport.width}x${viewport.height}`);
 
   return {

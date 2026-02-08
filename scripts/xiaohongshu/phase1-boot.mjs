@@ -18,6 +18,8 @@ import { createSessionLock } from './lib/session-lock.mjs';
 import { execute as ensureServices } from '../../dist/modules/xiaohongshu/app/src/xiaohongshu/app/src/blocks/Phase1EnsureServicesBlock.js';
 import { execute as startProfile } from '../../dist/modules/xiaohongshu/app/src/xiaohongshu/app/src/blocks/Phase1StartProfileBlock.js';
 import { execute as monitorCookie } from '../../dist/modules/xiaohongshu/app/src/xiaohongshu/app/src/blocks/Phase1MonitorCookieBlock.js';
+import { ensureServicesHealthy, restoreBrowserState } from './lib/recovery.mjs';
+import { recordStageCheck, recordStageRecovery } from './lib/stage-checks.mjs';
 import minimist from 'minimist';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
@@ -51,6 +53,7 @@ async function main() {
 
   // Single source of truth for service lifecycle: core-daemon.
   // Phase1/2/3/4 scripts should not each implement their own service orchestration.
+  await ensureServicesHealthy();
   await ensureCoreServices();
 
   const args = minimist(process.argv.slice(2));
@@ -74,6 +77,20 @@ async function main() {
   const lockHandle = lock.acquire();
   try {
     await startProfile({ profile, headless, url: 'https://www.xiaohongshu.com' });
+    await restoreBrowserState(profile);
+    // viewport sanity check: if abnormal, restart profile once
+    try {
+      const res = await fetch('http://127.0.0.1:7704/health');
+      const data = await res.json().catch(() => ({}));
+      const sessions = data?.sessions || [];
+      const s = sessions.find((x) => x.profile === profile);
+      if (s && s.viewport && (s.viewport.width < 800 || s.viewport.height < 600)) {
+        console.warn('[Phase1StartProfile] viewport too small, restarting profile');
+        await startProfile({ profile, headless, url: 'https://www.xiaohongshu.com' });
+        await restoreBrowserState(profile);
+      }
+    } catch {}
+
     console.log('✅ Phase1: profile 启动完成');
 
     // 3) Cookie 监控与保存（登录成功后才保存）

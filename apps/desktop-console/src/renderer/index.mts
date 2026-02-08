@@ -3,6 +3,7 @@ import { renderRun } from './tabs/run.mts';
 import { renderRuntime } from './tabs/runtime.mts';
 import { renderResults } from './tabs/results.mts';
 import { renderSettings } from './tabs/settings.mts';
+import { renderXiaohongshuTab } from './tabs/xiaohongshu.mjs';
 import { createEl } from './ui-components.mts';
 
 declare global {
@@ -11,13 +12,14 @@ declare global {
   }
 }
 
-type TabId = 'preflight' | 'run' | 'runtime' | 'results' | 'settings';
+type TabId = 'preflight' | 'run' | 'runtime' | 'results' | 'settings' | 'xiaohongshu';
 
 const tabs: Array<{ id: TabId; label: string; render: (root: HTMLElement, ctx: any) => void }> = [
   { id: 'preflight', label: '预处理', render: renderPreflight },
   { id: 'run', label: '调用', render: renderRun },
   { id: 'runtime', label: 'Runtime', render: renderRuntime },
   { id: 'results', label: '结果', render: renderResults },
+  { id: 'xiaohongshu', label: '小红书', render: renderXiaohongshuTab },
   { id: 'settings', label: '设置', render: renderSettings },
 ];
 
@@ -39,6 +41,9 @@ const ctx: any = {
   },
   setStatus(s: string) {
     statusEl.textContent = s;
+  },
+  runScript(scriptPath: string, args: string[]) {
+    window.api.runScript(scriptPath, args);
   },
 };
 

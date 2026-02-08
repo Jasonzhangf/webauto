@@ -4,7 +4,7 @@
  * 职责：通过容器系统执行搜索操作（全系统级操作）
  */
 
-import { detectXhsCheckpoint } from '../utils/checkpoints.js';
+import { detectXhsCheckpoint, ensureXhsCheckpoint } from '../utils/checkpoints.js';
 
 import os from 'node:os';
 import { controllerAction, delay } from '../utils/controllerAction.js';
@@ -68,6 +68,31 @@ async function readSearchInputValue(profile: string, unifiedApiUrl: string) {
   return typeof value === 'string' ? value : null;
 }
 
+async function readActiveInputValue(profile: string, unifiedApiUrl: string) {
+  const value = await controllerAction(
+    'browser:execute',
+    {
+      profile,
+      script: `(() => {
+        const el = document.activeElement;
+        if (!el) return null;
+        const input = (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement)
+          ? el
+          : (el.querySelector?.('input, textarea') || el);
+        if (input && 'value' in input) {
+          // @ts-ignore
+          const v = input.value;
+          return typeof v === 'string' ? v : String(v ?? '');
+        }
+        const text = (input && 'textContent' in input) ? (input.textContent ?? '') : '';
+        return typeof text === 'string' ? text : String(text ?? '');
+      })()`,
+    },
+    unifiedApiUrl,
+  ).then((res) => res?.result || res?.data?.result || null);
+  return typeof value === 'string' ? value : null;
+}
+
 async function systemFillSearchInputValue(profile: string, unifiedApiUrl: string, keyword: string) {
   // System-level requirement: prefer keyboard/mouse. `browser:execute` is JS mutation and should be avoided.
   // We implement a system-level "fill" as: select-all + delete + type (with retries).
@@ -81,20 +106,63 @@ async function systemFillSearchInputValue(profile: string, unifiedApiUrl: string
     await controllerAction('keyboard:type', { profileId: profile, text: keyword, delay: 70 }, unifiedApiUrl).catch(() => {});
   };
 
+  const checkBoth = async () => {
+    const v1 = await readSearchInputValue(profile, unifiedApiUrl).catch((): null => null);
+    if (v1 && v1.trim() === keyword) return { ok: true, source: 'readSearchInputValue', value: v1 };
+    const v2 = await readActiveInputValue(profile, unifiedApiUrl).catch((): null => null);
+    if (v2 && v2.trim() === keyword) return { ok: true, source: 'readActiveInputValue', value: v2 };
+    return { ok: false, value: v1 || v2 || '' };
+  };
+
   // Try a few times; Camoufox can drop events if focus is flaky.
   for (let i = 0; i < 3; i++) {
     await trySelectAllDeleteType('Meta');
     await delay(250);
-    const v1 = await readSearchInputValue(profile, unifiedApiUrl).catch((): null => null);
-    if (v1 && v1.trim() === keyword) return { ok: true, method: 'meta' };
+    const c1 = await checkBoth();
+    if (c1.ok) return { ok: true, method: 'meta', source: c1.source };
 
     await trySelectAllDeleteType('Control');
     await delay(250);
-    const v2 = await readSearchInputValue(profile, unifiedApiUrl).catch((): null => null);
-    if (v2 && v2.trim() === keyword) return { ok: true, method: 'control' };
+    const c2 = await checkBoth();
+    if (c2.ok) return { ok: true, method: 'control', source: c2.source };
   }
-  const v = await readSearchInputValue(profile, unifiedApiUrl).catch((): null => null);
-  return { ok: false, reason: `mismatch:${String(v ?? '')}` };
+  const finalCheck = await checkBoth();
+  return { ok: false, reason: `mismatch:${String(finalCheck.value ?? '')}` };
+}
+
+async function submitHomeSearchViaContainer(profile: string, unifiedApiUrl: string, keyword: string) {
+  // Prefer container operations: type + key (all system-level), avoid generic keyboard focus flakiness.
+  try {
+    await controllerAction(
+      'container:operation',
+      { containerId: 'xiaohongshu_home.search_input', operationId: 'type', sessionId: profile, config: { text: keyword } },
+      unifiedApiUrl,
+    );
+    await delay(200);
+  } catch {
+    // If container type fails, rely on existing filled input (verified before submit).
+  }
+
+  try {
+    await controllerAction(
+      'container:operation',
+      { containerId: 'xiaohongshu_search.search_bar', operationId: 'key', sessionId: profile },
+      unifiedApiUrl,
+    );
+    console.log('[Phase2Search] submit via container key (search_bar)');
+    return true;
+  } catch {
+    // Fall back to keyboard enter if container key is unavailable.
+    return false;
+  }
+}
+
+async function canSubmitSearch(profile: string, unifiedApiUrl: string, keyword: string): Promise<{ ok: boolean; value: string | null; source: string | null }> {
+  const value = await readSearchInputValue(profile, unifiedApiUrl).catch((): null => null);
+  if (typeof value === 'string' && value.trim() === keyword) return { ok: true, value, source: 'readSearchInputValue' };
+  const activeValue = await readActiveInputValue(profile, unifiedApiUrl).catch((): null => null);
+  if (typeof activeValue === 'string' && activeValue.trim() === keyword) return { ok: true, value: activeValue, source: 'readActiveInputValue' };
+  return { ok: false, value: (value ?? activeValue ?? null) as string | null, source: null };
 }
 
 async function browserFillSearchInputValue(profile: string, unifiedApiUrl: string, keyword: string) {
@@ -172,6 +240,18 @@ export async function execute(input: SearchInput): Promise<SearchOutput> {
   const debugArtifactsEnabled = isDebugArtifactsEnabled();
 
   console.log(`[Phase2Search] 执行搜索(容器驱动): ${keyword}`);
+
+  // Ensure we are in a safe starting state (home/search). Recover from detail/comments if needed.
+  const ensureRes = await ensureXhsCheckpoint({
+    sessionId: profile,
+    target: 'search_ready',
+    serviceUrl: unifiedApiUrl,
+    timeoutMs: 15000,
+    allowOneLevelUpFallback: true,
+  });
+  if (!ensureRes.success && ensureRes.reached !== 'home_ready' && ensureRes.reached !== 'search_ready') {
+    throw new Error(`[Phase2Search] ensure checkpoint failed: reached=${ensureRes.reached} url=${ensureRes.url}`);
+  }
 
   let currentUrl = await controllerAction(
     'browser:execute',
@@ -421,9 +501,11 @@ export async function execute(input: SearchInput): Promise<SearchOutput> {
   // If we skipped typing, the input already contains keyword; proceed to submit.
 
   // 强制验证：提交前必须确认 input 值等于 keyword，否则直接失败（不点击搜索按钮）
-  const beforeSubmitValue = await readSearchInputValue(profile, unifiedApiUrl);
-  console.log(`[Phase2Search] Before submit: input value="${String(beforeSubmitValue)}" keyword="${keyword}"`);
-  if (typeof beforeSubmitValue !== 'string' || beforeSubmitValue.trim() !== keyword) {
+  const canSubmit = await canSubmitSearch(profile, unifiedApiUrl, keyword);
+  const beforeSubmitValue = await readSearchInputValue(profile, unifiedApiUrl).catch((): null => null);
+  const activeBeforeSubmitValue = await readActiveInputValue(profile, unifiedApiUrl).catch((): null => null);
+  console.log(`[Phase2Search] Before submit: input value="${String(beforeSubmitValue)}" active="${String(activeBeforeSubmitValue)}" keyword="${keyword}"`);
+  if (!canSubmit.ok) {
     let shotLen = 0;
     if (debugArtifactsEnabled) {
       const shot = await controllerAction(
@@ -434,27 +516,16 @@ export async function execute(input: SearchInput): Promise<SearchOutput> {
       shotLen = typeof shot === 'string' ? shot.length : 0;
     }
     throw new Error(
-      `[Phase2Search] 提交前 input 值不等于关键字：expected="${keyword}" actual="${String(beforeSubmitValue)}" screenshot_len=${shotLen}。停止执行（不点击搜索按钮）。`,
+      `[Phase2Search] 提交前 input 值不等于关键字：expected="${keyword}" actual="${String(canSubmit.value)}" source=${String(canSubmit.source)} screenshot_len=${shotLen}。停止执行（不点击搜索按钮）。`,
     );
   }
 
   if (isHome) {
-    // explore 主页：使用搜索图标按钮触发搜索（更贴近用户真实行为）
-    console.log('[Phase2Search] search_button click start');
-    // 尝试点击搜索按钮，但不强求（某些页面按钮点击无效）
-    try {
-      await controllerAction(
-        'container:operation',
-        { containerId: 'xiaohongshu_home.search_button', operationId: 'click', sessionId: profile },
-        unifiedApiUrl,
-      );
-      console.log('[Phase2Search] search_button click done');
-      await delay(500);
-    } catch (e) {
-      console.log('[Phase2Search] search_button click failed, fallback to Enter');
+    const ok = await submitHomeSearchViaContainer(profile, unifiedApiUrl, keyword);
+    if (!ok) {
+      console.log('[Phase2Search] submit via Enter (fallback)');
+      await controllerAction('keyboard:press', { profileId: profile, key: 'Enter' }, unifiedApiUrl);
     }
-    // 保险：用 Enter 触发搜索
-    await controllerAction('keyboard:press', { profileId: profile, key: 'Enter' }, unifiedApiUrl);
   } else {
     // search_result：系统级 Enter 提交
     await controllerAction('keyboard:press', { profileId: profile, key: 'Enter' }, unifiedApiUrl);
@@ -464,26 +535,62 @@ export async function execute(input: SearchInput): Promise<SearchOutput> {
   // 这里仅做节奏控制，最终成功判定仍以 DOM/容器信号为准。
   await delay(15000);
 
-  // 验证是否到达搜索结果页（不依赖 URL，使用 DOM 检测）
-  const pageCheck = await controllerAction('browser:execute', {
-    profile,
-    script: `(function(){
-      const hasTabs = !!document.querySelector('.tabs, .filter-tabs, [role="tablist"]');
-      const hasResultList = !!document.querySelector('.feeds-container, .search-result-list, .note-list');
-      const hasSearchInput = !!document.querySelector('#search-input, input[type="search"]');
-      return {
-        hasTabs,
-        hasResultList,
-        hasSearchInput,
-        url: window.location.href,
-      };
-    })()`,
-  }, unifiedApiUrl).then(res => res?.result || res?.data?.result || null);
+  // 验证是否到达搜索结果页（不依赖 URL，使用 DOM 检测），失败则最多重试 3 次 Enter 提交
+  let finalUrl = currentUrl;
+  let success = false;
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    const pageCheck = await controllerAction('browser:execute', {
+      profile,
+      script: `(function(){
+        const hasTabs = !!document.querySelector('.tabs, .filter-tabs, [role="tablist"]');
+        const hasResultList = !!document.querySelector('.feeds-container, .search-result-list, .note-list');
+        const hasSearchInput = !!document.querySelector('#search-input, input[type="search"]');
+        return {
+          hasTabs,
+          hasResultList,
+          hasSearchInput,
+          url: window.location.href,
+        };
+      })()`,
+    }, unifiedApiUrl).then(res => res?.result || res?.data?.result || null);
 
-  const finalUrl = pageCheck?.url || currentUrl;
-  const success = Boolean(pageCheck?.hasSearchInput && (pageCheck?.hasTabs || pageCheck?.hasResultList));
+    finalUrl = pageCheck?.url || finalUrl;
+    const urlStr = String(finalUrl || '');
+    const urlLooksSearch = urlStr.includes('/search_result') || urlStr.includes('search_result');
+    success = Boolean(pageCheck?.hasSearchInput && (pageCheck?.hasTabs || pageCheck?.hasResultList || urlLooksSearch));
 
-  console.log(`[Phase2Search] 完成: success=${success} url=${finalUrl} hasTabs=${pageCheck?.hasTabs} hasResultList=${pageCheck?.hasResultList}`);
+    console.log(`[Phase2Search] 完成: success=${success} url=${finalUrl} hasTabs=${pageCheck?.hasTabs} hasResultList=${pageCheck?.hasResultList} attempt=${attempt}`);
+
+    if (success) break;
+    if (attempt < 3) {
+      console.log(`[Phase2Search] retry search submit (attempt=${attempt + 1})`);
+      // 重新聚焦输入框（系统级点击）再输入关键字，避免焦点丢失
+      try {
+        const rect = await controllerAction('browser:execute', {
+          profile,
+          script: `(function(){
+            const el = document.querySelector('#search-input') || document.querySelector('input[type="search"]') || document.querySelector('input[placeholder*="搜索"], input[placeholder*="关键字"]');
+            if (!el) return null;
+            const r = el.getBoundingClientRect();
+            return { x1: r.left, y1: r.top, x2: r.right, y2: r.bottom };
+          })()`,
+        }, unifiedApiUrl).then(res => res?.result || res?.data?.result || null);
+        if (rect && rect.x1 !== undefined) {
+          const cx = (Number(rect.x1) + Number(rect.x2)) / 2;
+          const cy = (Number(rect.y1) + Number(rect.y2)) / 2;
+          await controllerAction('mouse:click', { profileId: profile, x: cx, y: cy, clicks: 1 }, unifiedApiUrl).catch(() => {});
+          await delay(200);
+        }
+      } catch {
+        // ignore refocus errors
+      }
+
+      await systemFillSearchInputValue(profile, unifiedApiUrl, keyword).catch(() => {});
+      await delay(300);
+      await controllerAction('keyboard:press', { profileId: profile, key: 'Enter' }, unifiedApiUrl);
+      await delay(5000);
+    }
+  }
 
   return {
     success,

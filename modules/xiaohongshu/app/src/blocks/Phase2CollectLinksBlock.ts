@@ -167,6 +167,9 @@ export async function execute(input: CollectLinksInput): Promise<CollectLinksOut
   let scrollLocked = false;
   const debugArtifactsEnabled = isDebugArtifactsEnabled();
   let scrollForVisibilityCount = 0; // Separate counter for visibility scrolls
+  let noProgressRetryCount = 0;
+  const maxNoProgressRetries = 3;
+  let lastLinksCount = 0;
   const traceDir = path.join(resolveDownloadRoot(), 'xiaohongshu', env, keyword, 'click-trace');
   const tracePath = path.join(traceDir, 'trace.jsonl');
 
@@ -369,8 +372,8 @@ export async function execute(input: CollectLinksInput): Promise<CollectLinksOut
 
   const initialTotalCards = Number(initialCheckResult?.totalCards ?? 0);
   if (Number.isFinite(initialTotalCards) && initialTotalCards >= targetCount) {
-    scrollLocked = true;
-    console.log(`[Phase2Collect] scrollLocked=true (initialCheck: total=${initialTotalCards} >= target=${targetCount})`);
+    scrollLocked = false;
+    console.log(`[Phase2Collect] scrollLocked=false (allow scrolling even if total>=target)`);
   }
 
   try {
@@ -514,6 +517,17 @@ export async function execute(input: CollectLinksInput): Promise<CollectLinksOut
       throw new Error('[Phase2Collect] pick target failed: empty result');
     }
 
+    // Safety: if we haven't made progress for too long, re-verify the checkpoint to avoid shell-page drift.
+    if (noProgressRetryCount >= maxNoProgressRetries) {
+      const det = await detectXhsCheckpoint({ sessionId: profile, serviceUrl: unifiedApiUrl });
+      console.log(`[Phase2Collect] noProgress detected, checkpoint=${det.checkpoint} url=${det.url}`);
+      if (det.checkpoint !== 'search_ready' && det.checkpoint !== 'home_ready') {
+        throw new Error(`[Phase2Collect] 进入异常状态，停止采集。checkpoint=${det.checkpoint} url=${det.url}`);
+      }
+      // reset retry counter after checkpoint check
+      noProgressRetryCount = 0;
+    }
+
     await appendTrace({ type: 'pick_done', ts: new Date().toISOString(), attempt: attempts, pick });
 
     if (pick.action === 'scroll' && pick.scroll) {
@@ -553,6 +567,47 @@ export async function execute(input: CollectLinksInput): Promise<CollectLinksOut
         config: { direction: pick.scroll.direction, amount: pick.scroll.amount },
       }, unifiedApiUrl);
       scrollCount++;
+
+      // No-progress detection: if links.length hasn't changed after scroll
+      if (links.length === lastLinksCount) {
+        noProgressRetryCount++;
+        console.log(`[Phase2Collect] no progress after scroll: retry ${noProgressRetryCount}/${maxNoProgressRetries}`);
+
+        if (noProgressRetryCount >= maxNoProgressRetries) {
+          console.log(`[Phase2Collect] terminating: no_progress_after_${maxNoProgressRetries}_retries, collected=${links.length}/${targetCount}`);
+          await appendTrace({
+            type: 'terminate_no_progress',
+            ts: new Date().toISOString(),
+            collected: links.length,
+            targetCount,
+            scrollCount,
+            noProgressRetryCount,
+          });
+          break; // Exit while loop
+        }
+
+        // Backtrack strategy: scroll up then down to try different viewport
+        console.log(`[Phase2Collect] backtrack: scroll up 400 then down 800`);
+        await controllerAction('container:operation', {
+          containerId: 'xiaohongshu_search.search_result_list',
+          operationId: 'scroll',
+          sessionId: profile,
+          config: { direction: 'up', amount: 400 },
+        }, unifiedApiUrl);
+        await delay(800);
+
+        await controllerAction('container:operation', {
+          containerId: 'xiaohongshu_search.search_result_list',
+          operationId: 'scroll',
+          sessionId: profile,
+          config: { direction: 'down', amount: 800 },
+        }, unifiedApiUrl);
+      } else {
+        // Reset counter when we make progress
+        noProgressRetryCount = 0;
+        lastLinksCount = links.length;
+      }
+
       await delay(1200);
       continue;
     }
@@ -567,6 +622,7 @@ export async function execute(input: CollectLinksInput): Promise<CollectLinksOut
     // This prevents unstable clicks on partially clipped cards.
     const ensureVisibleMaxRounds = 4;
     const ensureVisiblePad = 12;
+    let lastRect: any = null;
     for (let vr = 0; vr < ensureVisibleMaxRounds; vr++) {
       const rectCheck = await controllerAction('browser:execute', {
         profile,
@@ -598,6 +654,7 @@ export async function execute(input: CollectLinksInput): Promise<CollectLinksOut
         throw new Error(`[Phase2Collect] ensureVisible rect check failed: ${JSON.stringify(rectCheck)}`);
       }
 
+      lastRect = rectCheck.rect || lastRect;
       if (rectCheck.visible?.fully) {
         if (vr > 0) {
           console.log(`[Phase2Collect] ensureVisible satisfied after ${vr} round(s), index=${domIndex}`);
@@ -690,13 +747,20 @@ export async function execute(input: CollectLinksInput): Promise<CollectLinksOut
       containerId: 'xiaohongshu_search.search_result_item',
       operationId: 'click',
       sessionId: profile,
-      config: { index: domIndex },
+      config: { index: domIndex, useSystemMouse: true, visibleOnly: true },
       // Keep click operation tight to avoid hanging; if this times out, we should re-pick/scroll.
       timeoutMs: 45000,
     }, unifiedApiUrl);
     if (clickResult?.success === false) {
-      console.warn(`[Phase2Collect] 点击失败 index=${domIndex} err=${clickResult?.error || 'unknown'}，刷新索引后重试`);
-      continue;
+      console.warn(`[Phase2Collect] 点击失败 index=${domIndex} err=${clickResult?.error || 'unknown'}，尝试系统级点击兜底`);
+      if (lastRect && lastRect.left !== undefined && lastRect.top !== undefined) {
+        const cx = (Number(lastRect.left) + Number(lastRect.right)) / 2;
+        const cy = (Number(lastRect.top) + Number(lastRect.bottom)) / 2;
+        await controllerAction('mouse:click', { profileId: profile, x: cx, y: cy, clicks: 1 }, unifiedApiUrl).catch(() => {});
+        await delay(1200);
+      } else {
+        continue;
+      }
     }
     await delay(1800);
 
@@ -786,19 +850,35 @@ export async function execute(input: CollectLinksInput): Promise<CollectLinksOut
 
     console.log(`[Phase2Collect] ✅ ${links.length}/${targetCount}: ${noteId}`);
 
-    // 8. ESC 返回搜索页（系统键盘）
-    // 风控敏感：禁止使用刷新兜底；只做确定性的状态等待。
-    // XHS 回退到搜索结果有时需要较长时间（动画/网络/渲染），给足 15s。
+    // 8. Close detail modal: prefer system-level container close, then ESC fallback.
+    let backOk = false;
+    try {
+      await controllerAction(
+        'container:operation',
+        {
+          containerId: 'xiaohongshu_detail.modal_shell',
+          operationId: 'click',
+          sessionId: profile,
+          config: {
+            selector: '.note-detail-mask .close-box, .note-detail-mask .close-circle',
+            useSystemMouse: true,
+            retries: 1,
+          },
+        },
+        unifiedApiUrl,
+      );
+      await delay(1500);
+    } catch {
+      // ignore, fallback to ESC below
+    }
+
+    // ESC fallback (system keyboard)
     await controllerAction(
       'keyboard:press',
-      {
-        profileId: profile,
-        key: 'Escape',
-      },
+      { profileId: profile, key: 'Escape' },
       unifiedApiUrl,
     );
 
-    let backOk = false;
     for (let i = 0; i < 30; i++) {
       const res = await controllerAction(
         'browser:execute',
@@ -808,15 +888,36 @@ export async function execute(input: CollectLinksInput): Promise<CollectLinksOut
             const url = window.location.href;
             const hasResultList = !!document.querySelector('.feeds-container, .search-result-list, .note-list');
             const hasTabs = !!document.querySelector('.tabs, .filter-tabs, [role="tablist"], .filter');
-            // 搜索页一般存在搜索输入框；详情页通常不存在。
             const hasSearchInput = !!document.querySelector('#search-input, input[type="search"], input[placeholder*="搜索"], input[placeholder*="关键字"]');
-            return { url, hasResultList, hasTabs, hasSearchInput };
+            const selectors = [
+              '.note-detail-mask',
+              '.note-detail-page',
+              '.note-detail-dialog',
+              '.note-detail',
+              '.detail-container',
+              '.media-container'
+            ];
+            const isVisible = (el) => {
+              if (!el) return false;
+              const style = window.getComputedStyle(el);
+              if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false;
+              const r = el.getBoundingClientRect();
+              if (!r.width || !r.height) return false;
+              if (r.bottom <= 0 || r.top >= window.innerHeight) return false;
+              return true;
+            };
+            let visibleOverlay = null;
+            for (const sel of selectors) {
+              const el = document.querySelector(sel);
+              if (el && isVisible(el)) { visibleOverlay = el; break; }
+            }
+            return { url, hasResultList, hasTabs, hasSearchInput, hasDetailOverlay: !!visibleOverlay };
           })()`,
         },
         unifiedApiUrl,
       ).then((r) => r?.result || r?.data?.result || null);
 
-      if (res && (res.hasResultList || res.hasTabs) && res.hasSearchInput) {
+      if (res && (res.hasResultList || res.hasTabs) && res.hasSearchInput && !res.hasDetailOverlay) {
         backOk = true;
         break;
       }
@@ -824,17 +925,16 @@ export async function execute(input: CollectLinksInput): Promise<CollectLinksOut
     }
 
     if (!backOk) {
-      // 直接失败：让 orchestrator 决策是否需要人工介入/下一次最小回归点。
       const urlNow = await controllerAction(
         'browser:execute',
         { profile, script: 'window.location.href' },
         unifiedApiUrl,
       ).then((r) => r?.result || r?.data?.result || '');
-      throw new Error(`[Phase2Collect] ESC 后 15s 仍未回到搜索页: ${urlNow}`);
+      throw new Error(`[Phase2Collect] close detail failed: still not on search/home (overlay visible) url=${urlNow}`);
     }
   }
 
-  console.log(`[Phase2Collect] 完成，滚动次数: ${scrollCount}`);
+  console.log(`[Phase2Collect] 完成，滚动次数: ${scrollCount}, 终止原因: ${noProgressRetryCount >= maxNoProgressRetries ? 'no_progress_after_' + maxNoProgressRetries + '_retries' : 'reached_target' }`);
 
   // Final gate: quantity must match target.
   if (links.length < targetCount) {

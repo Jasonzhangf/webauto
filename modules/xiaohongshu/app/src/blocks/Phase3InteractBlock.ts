@@ -77,6 +77,48 @@ async function highlightLikeButton(sessionId: string, index: number, apiUrl: str
   );
 }
 
+async function ensureCommentVisibleCentered(sessionId: string, apiUrl: string, index: number) {
+  for (let i = 0; i < 3; i++) {
+    const rect = await controllerAction(
+      'browser:execute',
+      {
+        profile: sessionId,
+        script: `(() => {
+          const idx = ${index};
+          const items = Array.from(document.querySelectorAll('.comment-item'));
+          if (!items[idx]) return { ok: false };
+          const r = items[idx].getBoundingClientRect();
+          const vh = window.innerHeight;
+          return { ok: true, top: r.top, bottom: r.bottom, height: r.height, vh };
+        })()`
+      },
+      apiUrl,
+    ).then(res => res?.result || res?.data?.result || null);
+
+    if (!rect || rect.ok !== true) return false;
+
+    const pad = 80;
+    const visible = rect.top >= pad && rect.bottom <= (rect.vh - pad);
+    if (visible) return true;
+
+    const dir = rect.top < pad ? 'up' : 'down';
+    const amount = Math.min(800, Math.ceil((rect.top < pad ? (pad - rect.top) : (rect.bottom - (rect.vh - pad))) + 120));
+
+    await controllerAction(
+      'container:operation',
+      {
+        containerId: 'xiaohongshu_detail.comment_section',
+        operationId: 'scroll',
+        sessionId,
+        config: { direction: dir, amount },
+      },
+      apiUrl,
+    ).catch(() => {});
+    await delay(500);
+  }
+  return false;
+}
+
 async function clickLikeButtonByIndex(sessionId: string, index: number, apiUrl: string) {
   return controllerAction(
     'container:operation',
@@ -200,6 +242,38 @@ async function getLikeStateForVisibleCommentIndex(
   }
 }
 
+async function checkLikeGate(profileId: string): Promise<{ allowed: boolean; current: number; limit: number }> {
+  try {
+    const res = await fetch(`http://127.0.0.1:7790/like/status/${encodeURIComponent(profileId)}`);
+    const data = await res.json();
+    return {
+      allowed: Boolean(data?.allowed ?? data?.ok ?? true),
+      current: Number(data?.current ?? data?.countInWindow ?? 0),
+      limit: Number(data?.limit ?? data?.maxCount ?? 6),
+    };
+  } catch {
+    return { allowed: true, current: 0, limit: 6 };
+  }
+}
+
+async function requestLikeGate(profileId: string): Promise<{ allowed: boolean; current: number; limit: number }> {
+  try {
+    const res = await fetch('http://127.0.0.1:7790/like', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ profileId, key: profileId }),
+    });
+    const data = await res.json();
+    return {
+      allowed: Boolean(data?.allowed ?? data?.ok ?? true),
+      current: Number(data?.current ?? data?.countInWindow ?? 0),
+      limit: Number(data?.limit ?? data?.maxCount ?? 6),
+    };
+  } catch {
+    return { allowed: true, current: 0, limit: 6 };
+  }
+}
+
 export async function execute(input: InteractInput): Promise<InteractOutput> {
   const {
     sessionId,
@@ -221,7 +295,7 @@ export async function execute(input: InteractInput): Promise<InteractOutput> {
   let reachedBottom = false;
   let bottomReason = '';
   let scrollCount = 0;
-  const maxScrolls = 60;
+  const maxScrolls = Infinity;
 
   const traceDir = path.join(
     resolveDownloadRoot(),
@@ -231,6 +305,10 @@ export async function execute(input: InteractInput): Promise<InteractOutput> {
     'virtual-like',
     noteId,
   );
+
+  // 检查点赞速率限制
+  const gateStatus = await checkLikeGate(sessionId);
+  console.log(`[Phase3Interact] Like Gate: ${gateStatus.current}/${gateStatus.limit} ${gateStatus.allowed ? '✅' : '❌'}`);
 
   // 1) 打开详情页（必须是带 xsec_token 的 safeUrl）
   const navRes = await controllerAction('browser:goto', { profile: sessionId, url: safeUrl }, unifiedApiUrl);
@@ -251,7 +329,7 @@ export async function execute(input: InteractInput): Promise<InteractOutput> {
   await ensureCommentsOpened(sessionId, unifiedApiUrl);
 
   // 3) 滚动评论区 + 筛选 + 点赞
-  while (likedCount < maxLikesPerRound && !reachedBottom && scrollCount < maxScrolls) {
+  while (likedCount < maxLikesPerRound && scrollCount < maxScrolls) {
     scrollCount += 1;
 
     const extracted = await extractVisibleComments(sessionId, unifiedApiUrl, 40);
@@ -265,6 +343,15 @@ export async function execute(input: InteractInput): Promise<InteractOutput> {
       if (!text) continue;
       if (!likeKeywords.some((k) => k && text.includes(k))) continue;
 
+      // 请求点赞许可（速率限制）
+      const likePermit = await requestLikeGate(sessionId);
+      if (process.env.WEBAUTO_LIKE_GATE_BYPASS === '1') { likePermit.allowed = true; }
+      if (!likePermit.allowed) {
+        console.log(`[Phase3Interact] ⏳ 点赞速率限制：${likePermit.current}/${likePermit.limit}`);
+        await delay(1000);
+        continue;
+      }
+
       // 视觉确认：高亮需要点击的位置（like button）
       await highlightCommentRow(sessionId, i, unifiedApiUrl, 'virtual-like-row').catch((): null => null);
       const highlightRes = await highlightLikeButton(sessionId, i, unifiedApiUrl);
@@ -273,6 +360,17 @@ export async function execute(input: InteractInput): Promise<InteractOutput> {
       if (highlightRes?.inViewport !== true) {
         continue;
       }
+
+      // 确保评论项在视口中部，避免截图/点击偏移
+      const centered = await ensureCommentVisibleCentered(sessionId, unifiedApiUrl, i);
+      if (!centered) {
+        continue;
+      }
+
+      // 再高亮一次，确保截图能看到高亮
+      await highlightCommentRow(sessionId, i, unifiedApiUrl, 'virtual-like-row').catch((): null => null);
+      await highlightLikeButton(sessionId, i, unifiedApiUrl).catch((): null => null);
+      await delay(300);
 
       const signature = {
         userId: String(c.user_id || '').trim() || undefined,

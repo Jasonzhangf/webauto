@@ -37,6 +37,8 @@ const HOST = '127.0.0.1';
 const PORT = Number(process.env.WEBAUTO_SEARCH_GATE_PORT || 7790);
 const DEFAULT_WINDOW_MS = Number(process.env.WEBAUTO_SEARCH_GATE_WINDOW_MS || 60_000);
 const DEFAULT_MAX_COUNT = Number(process.env.WEBAUTO_SEARCH_GATE_MAX_COUNT || 5);
+const DEFAULT_LIKE_WINDOW_MS = Number(process.env.WEBAUTO_LIKE_GATE_WINDOW_MS || 60_000);
+const DEFAULT_LIKE_MAX_COUNT = Number(process.env.WEBAUTO_LIKE_GATE_MAX_COUNT || 6);
 const KEYWORD_WINDOW_MS = Number(process.env.WEBAUTO_SEARCH_GATE_KEYWORD_WINDOW_MS || 180_000);
 const KEYWORD_MAX_COUNT = Number(process.env.WEBAUTO_SEARCH_GATE_KEYWORD_MAX_COUNT || 3);
 const DEV_MAX_CONSECUTIVE_SAME_KEYWORD = Number(process.env.WEBAUTO_SEARCH_GATE_DEV_MAX_CONSECUTIVE_SAME_KEYWORD || 2);
@@ -106,12 +108,39 @@ if (String(process.env.WEBAUTO_SEARCH_GATE_DISABLE_HEARTBEAT || '').trim() !== '
  * key 一般为 profileId（例?xiaohongshu_fresh?
  */
 const buckets = new Map();
+const likeBuckets = new Map();
 const keywordBuckets = new Map();
 // 开发阶段：记录每个 key 最近允许通过?keyword，用于防止“连续三次同关键字搜索”导致软风控
 const keywordHistory = new Map();
 
 function nowMs() {
   return Date.now();
+}
+
+function computeLikePermit(key, windowMs, maxCount) {
+  const now = nowMs();
+  const records = likeBuckets.get(key) || [];
+  const threshold = now - windowMs;
+  const pruned = records.filter((ts) => ts > threshold);
+
+  if (pruned.length < maxCount) {
+    pruned.push(now);
+    likeBuckets.set(key, pruned);
+    return {
+      allowed: true,
+      waitMs: 0,
+      countInWindow: pruned.length,
+    };
+  }
+
+  const oldest = pruned[0];
+  const waitMs = Math.max(0, windowMs - (now - oldest));
+  likeBuckets.set(key, pruned);
+  return {
+    allowed: false,
+    waitMs,
+    countInWindow: pruned.length,
+  };
 }
 
 function computePermit(key, windowMs, maxCount) {
@@ -430,6 +459,59 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    if (req.method === 'POST' && url.pathname === '/like') {
+      const payload = await readJsonBody(req);
+      const key = String(payload?.key || payload?.profileId || '').trim();
+      const windowMs = Number(payload?.windowMs || DEFAULT_LIKE_WINDOW_MS);
+      const maxCount = Number(payload?.maxCount || DEFAULT_LIKE_MAX_COUNT);
+
+      if (!key) {
+        sendJson(res, 400, { ok: false, error: 'key/profileId required' });
+        return;
+      }
+
+      const result = computeLikePermit(key, windowMs, maxCount);
+      const reason = result.allowed ? null : 'rate_limited';
+
+      const payloadOut = {
+        ok: true,
+        key,
+        windowMs,
+        maxCount,
+        allowed: result.allowed,
+        waitMs: result.waitMs,
+        retryAfterMs: result.allowed ? 0 : result.waitMs,
+        countInWindow: result.countInWindow,
+        ...(reason ? { reason } : {}),
+        ts: nowMs(),
+      };
+
+      sendJson(res, 200, payloadOut);
+      return;
+    }
+
+    if (req.method === 'GET' && url.pathname.startsWith('/like/status/')) {
+      const key = decodeURIComponent(url.pathname.split('/')[3] || '').trim();
+      if (!key) {
+        sendJson(res, 400, { ok: false, error: 'key/profileId required' });
+        return;
+      }
+      const records = (likeBuckets.get(key) || []).slice().sort((a, b) => a - b);
+      const now = nowMs();
+      const pruned = records.filter((ts) => ts > now - DEFAULT_LIKE_WINDOW_MS);
+      likeBuckets.set(key, pruned);
+      sendJson(res, 200, {
+        ok: true,
+        key,
+        windowMs: DEFAULT_LIKE_WINDOW_MS,
+        maxCount: DEFAULT_LIKE_MAX_COUNT,
+        allowed: pruned.length < DEFAULT_LIKE_MAX_COUNT,
+        countInWindow: pruned.length,
+        ts: nowMs(),
+      });
+      return;
+    }
+
     if (req.method === 'GET' && url.pathname === '/stats') {
       const key = url.searchParams.get('key') || '';
       const keys = key ? [key] : Array.from(buckets.keys());
@@ -469,4 +551,3 @@ server.listen(PORT, HOST, () => {
     `[SearchGate] listening on http://${HOST}:${PORT} (window: ${DEFAULT_WINDOW_MS / 1000}s, max: ${DEFAULT_MAX_COUNT} searches per key, keyword window: ${KEYWORD_WINDOW_MS / 1000}s, keyword max: ${KEYWORD_MAX_COUNT})`
   );
 });
-

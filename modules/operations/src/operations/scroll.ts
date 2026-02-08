@@ -16,7 +16,7 @@ async function runScroll(ctx: OperationContext, config: ScrollConfig) {
       ? config.amount
       : 500;
   const direction = config.direction || 'down';
-  const fullyVisible = config.fullyVisible !== false;
+  const fullyVisible = config.fullyVisible === true;
   const anchor = config.anchor ?? null;
 
   // 单次滚动约束：不超过 800px，符合“用户手势范围”

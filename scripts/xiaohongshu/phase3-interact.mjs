@@ -4,16 +4,8 @@ import { ensureCoreServices } from '../lib/ensure-core-services.mjs';
 
 ensureUtf8Console();
 
-/**
- * Phase 3: 评论互动（Interact）
- *
- * 策略（按你的要求）：
- * - 5 个 Tab 轮转
- * - 每个 Tab 在当前帖子中：找到 1 条关键字评论就点赞 1 条
- * - 每个 Tab 点赞到 2 条就切换到下一个 Tab
- * - 轮转 5 个 Tab 一圈后回到第一个 Tab，继续滚动/点赞直到评论到底
- */
-
+import { ensureServicesHealthy, restoreBrowserState } from './lib/recovery.mjs';
+import { recordStageCheck, recordStageRecovery } from './lib/stage-checks.mjs';
 import minimist from 'minimist';
 import { spawn } from 'node:child_process';
 import path from 'node:path';
@@ -63,7 +55,6 @@ function stripArgs(argv, keys) {
   for (let i = 0; i < argv.length; i += 1) {
     const a = argv[i];
     if (drop.has(a)) {
-      // drop this flag and its value if it looks like --flag value
       if (i + 1 < argv.length && !String(argv[i + 1] || '').startsWith('--')) i += 1;
       continue;
     }
@@ -85,7 +76,7 @@ async function runNode(scriptPath, args) {
 }
 
 async function main() {
-  // Single source of truth for service lifecycle: core-daemon.
+  await ensureServicesHealthy();
   await ensureCoreServices();
 
   const args = minimist(process.argv.slice(2));
@@ -99,7 +90,6 @@ async function main() {
   const skipPhase1 = args['skip-phase1'] === true || args['skip-phase1'] === '1' || args['skip-phase1'] === 1;
   const dryRun = args['dry-run'] === true || args['dry-run'] === 'true' || args['dry-run'] === 1 || args['dry-run'] === '1';
 
-  // Daemon mode: delegate to shared daemon-wrapper so UI can launch and exit safely.
   const foreground = args.foreground === true || args.foreground === '1' || args.foreground === 1;
   const shouldDaemonize = !foreground && process.env.WEBAUTO_DAEMON !== '1';
   
@@ -112,9 +102,6 @@ async function main() {
     return;
   }
 
-  // dry-run is "no-write": run the flow but avoid persisting outputs.
-
-  // Multi-profile orchestrator (auto-sharding)
   if (!shardedChild && (profilesArg || poolKeyword)) {
     const profiles = profilesArg
       ? profilesArg.split(',').map((s) => s.trim()).filter(Boolean)
@@ -159,161 +146,126 @@ async function main() {
       ]);
     };
 
-    await Promise.all(assignments.map((a) => runShard(a)));
+    for (const a of assignments) {
+      await runShard(a);
+    }
+    console.log('\n✅ Phase3 multi-profile done');
     return;
   }
 
-  const linksPath = String(args.links || '').trim() || undefined;
-  const shardIndex = args['shard-index'] != null ? Number(args['shard-index']) : undefined;
-  const shardCount = args['shard-count'] != null ? Number(args['shard-count']) : undefined;
-  const profile = String(args.profile || '').trim();
-  const likeKeywords = String(args['like-keywords'] || '').trim()
-    ? String(args['like-keywords']).split(',').map((k) => k.trim()).filter(Boolean)
-    : [];
+  const profile = String(args.profile || 'xiaohongshu_fresh').trim();
+  const likeKeywordsRaw = String(args['like-keywords'] || '黄金,走势,涨,跌,投资,理财').trim();
+  const likeKeywords = likeKeywordsRaw.split(',').map((s) => s.trim()).filter(Boolean);
+  const maxLikesPerRound = parseInt(String(args['max-likes-per-round'] || '2'), 10);
+  const maxCommentsPerTab = parseInt(String(args['max-comments-per-tab'] || '50'), 10);
+  const tabCount = 4;
 
-  if (!profile) {
-    console.error('❌ 必须提供 --profile 参数（禁止回退默认 profile）');
-    process.exit(2);
-  }
+  const runId = initRunLogging({ keyword, env, noWrite: dryRun });
 
-  if (likeKeywords.length === 0) {
-    console.error('❌ 必须提供 --like-keywords，例如：--like-keywords "好评,推荐"');
-    process.exit(1);
-  }
-
-  const tabCount = 4; // 4-Tab 轮询策略
-  const maxLikesPerRound = 2; // 每轮最多点赞 2 条
-  const maxCommentsPerTab = 50; // 每个 Tab 刷 50 评论后切换
-  const commentsPerScroll = 3; // 估算：每次滚动约加载 3 条新评论
-
-  const runContext = initRunLogging({ env, keyword, logMode: 'single', noWrite: dryRun });
-
-  console.log(`❤️  Phase 3: 评论互动 [runId: ${runContext.runId}]`);
+  console.log(`\n❤️  Phase 3: 评论互动 [runId: ${runId}]`);
   console.log(`Profile: ${profile}`);
   console.log(`关键字: ${keyword}`);
   console.log(`评论筛选关键字: ${likeKeywords.join(', ')}`);
   console.log(`Tab: ${tabCount} (固定)`);
   console.log(`每 Tab 每轮点赞: ${maxLikesPerRound}`);
   console.log(`环境: ${env}`);
-  console.log(`dry-run: ${dryRun}`);
-  if (linksPath) console.log(`links: ${linksPath}`);
-  if (shardIndex != null && shardCount != null) console.log(`shard: ${shardIndex}/${shardCount}`);
+  console.log(`dry-run: ${dryRun}\n`);
 
-  const lock = createSessionLock({ profileId: profile, lockType: 'phase3' });
   let lockHandle = null;
-  try {
-    lockHandle = lock.acquire();
-  } catch (e) {
-    console.log('⚠️  会话锁已被其他进程持有，退出');
-    console.log(String(e?.message || e));
-    process.exit(1);
-  }
-
-  const t0 = nowMs();
   let tabs = [];
+  const t0 = nowMs();
 
   try {
-    emitRunEvent('phase3_start', { keyword, env, likeKeywords, tabCount, maxLikesPerRound, dryRun });
-    // IMPORTANT:
-    // Phase3/4 must NOT invalidate Phase2 completion state.
-    // This state file is used as the gate for Phase34ValidateLinks.
-    // We only record phase3 metadata without changing `status` away from `completed`.
-    if (!dryRun) {
-      await updateXhsCollectState({ keyword, env, downloadRoot }, (draft) => {
-        if (!draft.startTime) draft.startTime = new Date().toISOString();
-        draft.resume.lastStep = 'phase3_start';
-        draft.legacy = {
-          ...(draft.legacy || {}),
-          phase3: {
-            ...(draft.legacy?.phase3 || {}),
-            likeKeywords,
-            tabCount,
-            maxLikesPerRound,
-            startedAt: new Date().toISOString(),
-          },
-        };
-      });
-    }
+    lockHandle = await createSessionLock({ profileId: profile });
 
-    console.log(`\n🔍 步骤 1: 校验 Phase2 链接...`);
-    const validateResult = await validateLinks({
-      keyword,
-      env,
-      profile,
-      ...(linksPath ? { linksPath } : {}),
-      ...(shardIndex != null ? { shardIndex } : {}),
-      ...(shardCount != null ? { shardCount } : {}),
-    });
-    if (!validateResult?.success) {
-      throw new Error(`链接校验失败: ${validateResult?.error || 'unknown error'}`);
-    }
-    const validLinks = validateResult.links || [];
-    console.log(`✅ 有效链接: ${validLinks.length} 条`);
+    console.log('\n🔍 步骤 1: 校验 Phase2 链接...');
+    const vres = await validateLinks({ profile, keyword, env, downloadRoot, unifiedApiUrl: UNIFIED_API_URL });
+    const validLinks = vres?.links || [];
+    console.log(`✅ 有效链接: ${validLinks.length} 条\n`);
+
     if (validLinks.length === 0) {
-      console.log('⚠️  没有有效链接，请先运行 Phase2 采集链接');
-      return;
+      console.error('❌ 无有效链接，无法继续 Phase3');
+      process.exit(1);
     }
 
-    console.log(`\n📂 步骤 2: 打开 ${tabCount} 个 Tab...`);
+    console.log(`\n📂 步骤 2: 确保固定 5-tab 池（tab0=搜索页, tab1~4=帖子页）...`);
+    // validate tab pool, reset if invalid URLs
+    const preList = await controllerAction('browser:page:list', { profile }, UNIFIED_API_URL).catch(() => null);
+    const pages = preList?.pages || preList?.data?.pages || [];
+    const bad = pages.filter((p) => !String(p?.url || '').includes('xiaohongshu.com/explore'));
+    if (bad.length > 0) {
+      console.log(`[Phase3] tab pool invalid (${bad.length}), restoring browser state`);
+      await restoreBrowserState(profile, UNIFIED_API_URL);
+    }
     const openTabsResult = await openTabs({ profile, tabCount, unifiedApiUrl: UNIFIED_API_URL });
     tabs = openTabsResult?.tabs || [];
     if (tabs.length === 0) {
       throw new Error('打开 Tab 失败：tabs 为空');
     }
-    console.log(`✅ 已打开 ${tabs.length} 个 Tab`);
+    console.log(`✅ 已准备 ${tabs.length} 个帖子页 tab\n`);
 
-    // 为每个 tab 分配一个 note（循环分配），并持久使用该 tab 直到 note 到底。
-    const tabAssignments = tabs.map((tab, idx) => ({
-      tabIndex: idx,
-      pageId: tab.pageId,
+    const postTabs = tabs.slice(0, tabCount);
+    
+    const tabAssignments = postTabs.map((tab, idx) => ({
+      tabRealIndex: tab.index,
+      slotIndex: idx + 1,
       linkIndex: idx % validLinks.length,
       commentsScanned: 0,
     }));
+
+    console.log(`[TabPool] 固定帖子页 slots:`);
+    tabAssignments.forEach(t => {
+      const note = validLinks[t.linkIndex];
+      console.log(`  slot-${t.slotIndex} -> tab-${t.tabRealIndex} -> note ${note.noteId}`);
+    });
 
     const noteState = new Map();
     for (const link of validLinks) {
       noteState.set(link.noteId, { reachedBottom: false, totalLiked: 0 });
     }
 
-    console.log(`\n❤️  步骤 3: 轮转 Tab 点赞（直到各自帖子到底）...`);
+    console.log(`\n❤️  步骤 3: 轮转 slot1~4 点赞（固定 tab 池，各自帖子到底后换新帖子）...\n`);
     let round = 0;
-    const maxRounds = 10_000; // 纯保护
+    const maxRounds = 10_000;
 
     while (round < maxRounds) {
       round += 1;
-      const activeTab = tabAssignments[(round - 1) % tabAssignments.length];
+      const activeSlot = tabAssignments[(round - 1) % tabAssignments.length];
 
-      // 风控规避：每个 Tab 连续处理(扫描) 50 条评论后强制切换到下一个 Tab
-      if (activeTab.commentsScanned >= maxCommentsPerTab) {
+      if (activeSlot.commentsScanned >= maxCommentsPerTab) {
         console.log(
-          `[Round ${round}] Tab ${activeTab.tabIndex} 已扫描 ${activeTab.commentsScanned} 条评论，强制切换到下一个 Tab 规避风控`,
+          `[Round ${round}] slot-${activeSlot.slotIndex} 已扫描 ${activeSlot.commentsScanned} 条评论，强制切换到下一个 slot 规避风控`,
         );
-        activeTab.commentsScanned = 0;
+        activeSlot.commentsScanned = 0;
         await delay(800);
         continue;
       }
 
-      const link = validLinks[activeTab.linkIndex];
+      const link = validLinks[activeSlot.linkIndex];
       const state = noteState.get(link.noteId);
 
       if (state?.reachedBottom) {
-        // 该 tab 当前帖子已到底，换一个还没到底的帖子
         const nextIdx = validLinks.findIndex((l) => !noteState.get(l.noteId)?.reachedBottom);
         if (nextIdx === -1) {
           console.log('\n🎉 所有帖子均已到达评论区底部，结束');
           break;
         }
-        activeTab.linkIndex = nextIdx;
+        activeSlot.linkIndex = nextIdx;
+        console.log(`[slot-${activeSlot.slotIndex}] 当前帖子到底，切换到下一个未完成的帖子`);
       }
 
-      const link2 = validLinks[activeTab.linkIndex];
+      const link2 = validLinks[activeSlot.linkIndex];
       const state2 = noteState.get(link2.noteId);
 
-      console.log(`\n[Round ${round}] Tab ${activeTab.tabIndex} -> note ${link2.noteId}`);
+      console.log(`\n[Round ${round}] slot-${activeSlot.slotIndex}(tab-${activeSlot.tabRealIndex}) -> note ${link2.noteId}`);
 
-      // 切换 Tab
-      await controllerAction('browser:switch_to_page', { profile, pageId: activeTab.pageId }, UNIFIED_API_URL);
-      await delay(500);
+      const switchRes = await controllerAction('browser:page:switch', { profile, index: activeSlot.tabRealIndex }, UNIFIED_API_URL);
+      await delay(800);
+      
+      const listRes = await controllerAction('browser:page:list', { profile }, UNIFIED_API_URL);
+      const currentActive = listRes?.activeIndex ?? listRes?.data?.activeIndex ?? -1;
+      const currentUrl = listRes?.pages?.find(p => p.active)?.url ?? listRes?.data?.pages?.find(p => p.active)?.url ?? 'N/A';
+      console.log(`  [Verify] switch -> tab-${activeSlot.tabRealIndex}, activeIndex=${currentActive}, url=${currentUrl.substring(0, 60)}`);
 
       const res = await interact({
         sessionId: profile,
@@ -327,13 +279,11 @@ async function main() {
         unifiedApiUrl: UNIFIED_API_URL,
       });
 
-      // 计数：把本轮扫描的评论数计入 Tab（无论是否点赞成功）
-      activeTab.commentsScanned += Number(res?.scannedCount || 0);
+      activeSlot.commentsScanned += Number(res?.scannedCount || 0);
 
       if (!res?.success) {
-        console.log(`[Tab ${activeTab.tabIndex}] ❌ 失败: ${res?.error || 'unknown error'}`);
-        emitRunEvent('phase3_note_error', { tabIndex: activeTab.tabIndex, noteId: link2.noteId, error: res?.error });
-        // 失败时先切换到下一个 tab
+        console.log(`[slot-${activeSlot.slotIndex}] ❌ 失败: ${res?.error || 'unknown error'}`);
+        emitRunEvent('phase3_note_error', { slot: activeSlot.slotIndex, tabRealIndex: activeSlot.tabRealIndex, noteId: link2.noteId, error: res?.error });
         await delay(800);
         continue;
       }
@@ -341,14 +291,16 @@ async function main() {
       state2.totalLiked += res.likedCount;
       state2.reachedBottom = !!res.reachedBottom;
 
-      console.log(`[Tab ${activeTab.tabIndex}] ✅ 本轮点赞 ${res.likedCount} 条，总点赞 ${state2.totalLiked} 条，到底=${state2.reachedBottom}`);
+      console.log(`[slot-${activeSlot.slotIndex}] ✅ 本轮点赞 ${res.likedCount} 条，总点赞 ${state2.totalLiked} 条，到底=${state2.reachedBottom}`);
       emitRunEvent('phase3_note_round_done', {
-        tabIndex: activeTab.tabIndex,
+        slot: activeSlot.slotIndex,
+        tabRealIndex: activeSlot.tabRealIndex,
         noteId: link2.noteId,
         likedCount: res.likedCount,
         totalLiked: state2.totalLiked,
         reachedBottom: state2.reachedBottom,
       });
+      
       if (!dryRun) {
         await updateXhsCollectState({ keyword, env, downloadRoot }, (draft) => {
           draft.resume.lastNoteId = link2.noteId;
@@ -372,7 +324,6 @@ async function main() {
         });
       }
 
-      // 轮转节奏
       await delay(1200);
     }
 
@@ -381,6 +332,7 @@ async function main() {
     console.log(`\n⏱️  总耗时: ${formatDurationMs(totalMs)}`);
     console.log(`✅ 总点赞数: ${totalLiked}`);
     emitRunEvent('phase3_done', { totalLiked, ms: totalMs, dryRun });
+    
     if (!dryRun) {
       await updateXhsCollectState({ keyword, env, downloadRoot }, (draft) => {
         draft.stats.phase3DurationMs = totalMs;
@@ -414,7 +366,7 @@ async function main() {
     console.error('\n❌ Phase 3 失败:', err?.message || String(err));
     process.exit(1);
   } finally {
-    // 尽量关闭 tab，避免资源泄漏
+    await restoreBrowserState(profile, UNIFIED_API_URL);
     if (tabs.length > 0) {
       console.log(`\n📂 收尾: 关闭 ${tabs.length} 个 Tab...`);
       await closeTabs(profile, tabs);

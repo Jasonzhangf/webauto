@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 import { ensureUtf8Console } from '../lib/cli-encoding.mjs';
 import { ensureCoreServices } from '../lib/ensure-core-services.mjs';
+import { ensureServicesHealthy, restoreBrowserState } from './lib/recovery.mjs';
+// duplicate import removed
 
 ensureUtf8Console();
 
@@ -93,6 +95,7 @@ async function showStatus({ keyword, env, downloadRoot }) {
 
 async function main() {
   // Single source of truth for service lifecycle: core-daemon.
+  await ensureServicesHealthy();
   await ensureCoreServices();
 
   const argv = process.argv.slice(2);
@@ -230,11 +233,16 @@ async function main() {
     console.log(`⏱️  采集耗时: ${formatDurationMs(tCollect1 - tCollect0)}`);
     emitRunEvent('phase2_timing', { stage: 'collect_done', ms: tCollect1 - tCollect0 });
     const results = collectResult.links || [];
+    if (!Array.isArray(results) || results.length === 0) {
+      console.warn('[Phase2Collect] ⚠️ 未获取到链接，跳过写入');
+    }
 
     const outPath = path.join(downloadRoot, 'xiaohongshu', env, keyword, 'phase2-links.jsonl');
     const outDir = path.dirname(outPath);
     await ensureDir(outDir);
-    await writeJsonl(outPath, results);
+    if (results.length > 0) {
+      await writeJsonl(outPath, results);
+    }
 
     const t1 = nowMs();
     const totalMs = t1 - t0;
@@ -243,7 +251,7 @@ async function main() {
 
     console.log(`✅ 采集完成，共 ${results.length} 条链接`);
     console.log(`📁 保存路径: ${outPath}`);
-    emitRunEvent('phase2_done', { outPath, count: results.length });
+    emitRunEvent('phase2_done', { outPath, count: results.length, target });
 
     await updateXhsCollectState({ keyword, env, downloadRoot, targetCount: target }, (draft) => {
       draft.status = 'completed';
@@ -267,10 +275,33 @@ async function main() {
 
   } catch (err) {
     emitRunEvent('phase2_error', { error: safeStringify(err) });
+    
+    const partialResults = collectResult?.links || [];
+    if (partialResults.length > 0) {
+      const fallbackPath = path.join(downloadRoot, 'xiaohongshu', env, keyword, 'phase2-links.jsonl');
+      const fallbackDir = path.dirname(fallbackPath);
+      await ensureDir(fallbackDir).catch(() => {});
+      await writeJsonl(fallbackPath, partialResults).catch(() => {});
+      console.log(`📁 部分结果已保存: ${fallbackPath} (${partialResults.length} 条)`);
+      
+      await updateXhsCollectState({ keyword, env, downloadRoot, targetCount: target }, (draft) => {
+        draft.status = 'failed_partial';
+        draft.listCollection.targetCount = target;
+        draft.listCollection.collectedUrls = partialResults.map((r) => ({
+          noteId: String(r?.noteId || '').trim(),
+          safeUrl: String(r?.safeUrl || '').trim(),
+          ...(String(r?.searchUrl || '').trim() ? { searchUrl: String(r.searchUrl).trim() } : {}),
+          ...(typeof r?.timestamp === 'number' ? { timestamp: r.timestamp } : {}),
+        }));
+        draft.error = err?.message || String(err);
+      }).catch(() => {});
+    }
+    
     await markXhsCollectFailed({ keyword, env, downloadRoot, error: safeStringify(err) }).catch(() => {});
     console.error('\n❌ Phase 2 失败:', err?.message || String(err));
     process.exit(1);
   } finally {
+    await restoreBrowserState(PROFILE_RUNTIME, UNIFIED_API_URL);
     lockHandle?.release?.();
   }
 }

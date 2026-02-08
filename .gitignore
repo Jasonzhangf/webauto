@@ -208,3 +208,4 @@ xiaohongshu_images/
 # Desktop console build output
 apps/desktop-console/dist/
 modules/xiaohongshu/app/pnpm-lock.yaml
+scripts/verify-tabs.mjs

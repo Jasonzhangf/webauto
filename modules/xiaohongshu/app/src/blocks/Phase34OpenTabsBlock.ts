@@ -1,10 +1,10 @@
 /**
- * Phase 3-4 Block: 打开多个 Tab
+ * Phase 3-4 Block: 确保固定 Tab 池（5 个：0=搜索页, 1-4=帖子详情页）
  *
  * 职责：
- * 1. 通过 Unified API 打开指定数量的 Tab
- * 2. 记录每个 Tab 的索引和状态
- * 3. 返回 Tab 管理器
+ * 1. 检查当前 tab 数量，若不足 5 个则补齐到 5 个
+ * 2. 返回固定 tab 池索引 [0, 1, 2, 3, 4]（0 保留给搜索页，1-4 用于帖子轮转）
+ * 3. 确保后续轮转使用固定 tab，不再开新 tab
  */
 
 export interface OpenTabsInput {
@@ -34,6 +34,16 @@ async function controllerAction(action: string, payload: any, apiUrl: string) {
   return data.data || data;
 }
 
+async function listPages(profile: string, apiUrl: string) {
+  const res = await controllerAction('browser:page:list', { profile }, apiUrl);
+  return res?.pages || res?.data?.pages || [];
+}
+
+async function openTabViaWindowOpen(profile: string, apiUrl: string) {
+  await controllerAction('browser:execute', { profile, script: `window.open('about:blank', '_blank')` }, apiUrl);
+  await new Promise(r => setTimeout(r, 400));
+}
+
 export async function execute(input: OpenTabsInput): Promise<OpenTabsOutput> {
   const {
     profile = 'xiaohongshu_fresh',
@@ -41,39 +51,40 @@ export async function execute(input: OpenTabsInput): Promise<OpenTabsOutput> {
     unifiedApiUrl = 'http://127.0.0.1:7701',
   } = input;
 
-  console.log(`[Phase34OpenTabs] 打开 ${tabCount} 个 Tab`);
+  const requiredTotal = tabCount + 1; // tab0=搜索页 + tab1~4=帖子页
+  console.log(`[Phase34OpenTabs] 确保固定 tab 池: ${requiredTotal} 个 (0=搜索页, 1-${tabCount}=帖子页)`);
 
-  const tabs: TabInfo[] = [];
+  const existing = await listPages(profile, unifiedApiUrl);
+  const currentCount = existing.length;
+  console.log(`[Phase34OpenTabs] 当前已有 ${currentCount} 个 tab`);
 
-  // 打开新 Tab
-  for (let i = 0; i < tabCount; i++) {
-    try {
-      const result = await controllerAction('browser:page:new', {
-        profile,
-        url: 'about:blank',
-      }, unifiedApiUrl);
-
-      const index = Number(result?.index ?? result?.data?.index);
-      const pageId = Number(result?.pageId ?? result?.data?.pageId);
-      const resolvedIndex = Number.isFinite(index) ? index : i;
-      tabs.push({ index: resolvedIndex, pageId: Number.isFinite(pageId) ? pageId : undefined });
-      console.log(`[Phase34OpenTabs] Tab ${i} opened, index=${resolvedIndex}`);
-    } catch (err: any) {
-      console.error(`[Phase34OpenTabs] Failed to open tab ${i}:`, err?.message || String(err));
+  const needed = Math.max(0, requiredTotal - currentCount);
+  
+  if (needed > 0) {
+    console.log(`[Phase34OpenTabs] 需要补齐 ${needed} 个 tab`);
+    for (let i = 0; i < needed; i++) {
+      await openTabViaWindowOpen(profile, unifiedApiUrl);
+      console.log(`[Phase34OpenTabs] 新 tab ${currentCount + i + 1} 已打开`);
     }
+  } else {
+    console.log(`[Phase34OpenTabs] tab 数量已满足，无需新开`);
   }
 
-  if (tabs.length === 0) {
-    throw new Error('[Phase34OpenTabs] 未能打开任何 Tab');
-  }
+  // 验证最终 tab 池
+  const finalPages = await listPages(profile, unifiedApiUrl);
+  console.log(`[Phase34OpenTabs] 最终 tab 池: ${finalPages.length} 个`);
+  finalPages.forEach((p: any, i: number) => {
+    const role = i === 0 ? '(搜索页)' : `(帖子页-${i})`;
+    console.log(`  [${i}] index=${p.index} ${role} url=${p.url?.substring(0, 60)}`);
+  });
 
-  // 切换回第一个 Tab（原搜索结果页）
-  await controllerAction('browser:page:switch', {
-    profile,
-    index: tabs[0].index,
-  }, unifiedApiUrl);
+  // 返回固定 tab 索引池（跳过 tab0，返回 tab1~4）
+  const tabs: TabInfo[] = finalPages.slice(1, requiredTotal).map((p: any) => ({
+    index: p.index,
+    pageId: undefined as number | undefined,
+  }));
 
-  console.log(`[Phase34OpenTabs] 完成，共打开 ${tabs.length} 个 Tab`);
+  console.log(`[Phase34OpenTabs] 固定帖子页 tab 索引: [${tabs.map(t => t.index).join(', ')}]`);
 
   return {
     tabs,

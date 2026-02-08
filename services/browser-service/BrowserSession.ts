@@ -611,6 +611,51 @@ export class BrowserSession {
     page: Page,
     viewport: { width: number; height: number },
   ): Promise<void> {
+    // Log viewport metrics for diagnosis
+    try {
+      const metrics = await page.evaluate(() => ({
+        innerWidth: window.innerWidth || 0,
+        innerHeight: window.innerHeight || 0,
+        outerWidth: window.outerWidth || 0,
+        outerHeight: window.outerHeight || 0,
+        screenX: Math.floor(window.screenX || 0),
+        screenY: Math.floor(window.screenY || 0),
+        devicePixelRatio: window.devicePixelRatio || 1,
+        visualViewport: window.visualViewport ? {
+          width: window.visualViewport.width || 0,
+          height: window.visualViewport.height || 0,
+          offsetLeft: window.visualViewport.offsetLeft || 0,
+          offsetTop: window.visualViewport.offsetTop || 0,
+          scale: window.visualViewport.scale || 1,
+        } : null,
+      }));
+      console.log(`[viewport-metrics] target=${viewport.width}x${viewport.height} inner=${metrics.innerWidth}x${metrics.innerHeight} outer=${metrics.outerWidth}x${metrics.outerHeight} screen=(${metrics.screenX},${metrics.screenY}) dpr=${metrics.devicePixelRatio} visual=${JSON.stringify(metrics.visualViewport)}`);
+      
+      // If inner dimensions don't match target, retry setViewportSize
+      const widthDelta = Math.abs(metrics.innerWidth - viewport.width);
+      const heightDelta = Math.abs(metrics.innerHeight - viewport.height);
+      if (widthDelta > 50 || heightDelta > 50) {
+        console.warn(`[viewport-metrics] MISMATCH detected: widthDelta=${widthDelta} heightDelta=${heightDelta}, retrying setViewportSize...`);
+        await page.setViewportSize({ width: viewport.width, height: viewport.height });
+        await page.waitForTimeout(500);
+        const retry = await page.evaluate(() => ({
+          innerWidth: window.innerWidth || 0,
+          innerHeight: window.innerHeight || 0,
+        }));
+        console.log(`[viewport-metrics] after retry: inner=${retry.innerWidth}x${retry.innerHeight}`);
+      }
+    } catch (err) {
+      console.warn(`[viewport-metrics] log failed: ${err?.message || String(err)}`);
+    }
+    
+    // Disable CDP window bounds sync (Camoufox doesn't support CDP Browser.setWindowBounds)
+    return;
+  }
+
+  private async _disabled_syncWindowBounds(
+    page: Page,
+    viewport: { width: number; height: number },
+  ): Promise<void> {
     if (this.options.headless) return;
     if (!this.context) return;
 
@@ -638,6 +683,47 @@ export class BrowserSession {
     }
   }
 
+  private async maybeCenterWindow(page: Page, viewport: { width: number; height: number }): Promise<void> {
+    if (this.options.headless) return;
+    try {
+      const metrics = await page.evaluate(() => ({
+        screenX: Math.floor(window.screenX || 0),
+        screenY: Math.floor(window.screenY || 0),
+        outerWidth: Math.floor(window.outerWidth || 0),
+        outerHeight: Math.floor(window.outerHeight || 0),
+        innerWidth: Math.floor(window.innerWidth || 0),
+        innerHeight: Math.floor(window.innerHeight || 0),
+        screenWidth: Math.floor(window.screen?.availWidth || window.screen?.width || 0),
+        screenHeight: Math.floor(window.screen?.availHeight || window.screen?.height || 0),
+      }));
+
+      const sw = Math.max(metrics.screenWidth || 0, viewport.width);
+      const sh = Math.max(metrics.screenHeight || 0, viewport.height);
+
+      // Try to resize outer window to fit viewport (inner) + chrome delta
+      const deltaW = Math.max(0, (metrics.outerWidth || 0) - (metrics.innerWidth || 0));
+      const deltaH = Math.max(0, (metrics.outerHeight || 0) - (metrics.innerHeight || 0));
+      const targetOuterW = Math.max(viewport.width + deltaW, 300);
+      const targetOuterH = Math.max(viewport.height + deltaH, 300);
+
+      await page.evaluate(({w, h}) => { try { window.resizeTo(w, h); } catch {} }, { w: targetOuterW, h: targetOuterH });
+      await page.waitForTimeout(200);
+
+      const ow = Math.max(metrics.outerWidth || 0, targetOuterW);
+      const oh = Math.max(metrics.outerHeight || 0, targetOuterH);
+      const targetX = Math.max(0, Math.floor((sw - ow) / 2));
+      const targetY = Math.max(0, Math.floor((sh - oh) / 2));
+
+      // Only move if we're clearly off-center
+      if (Math.abs(metrics.screenX - targetX) > 5 || Math.abs(metrics.screenY - targetY) > 5) {
+        await page.evaluate(({x, y}) => { try { window.moveTo(x, y); } catch {} }, { x: targetX, y: targetY });
+        await page.waitForTimeout(200);
+      }
+    } catch (err: any) {
+      console.warn('[browser-session] maybeCenterWindow failed:', err?.message || String(err));
+    }
+  }
+
   async setViewportSize(opts: { width: number; height: number }): Promise<{ width: number; height: number }> {
     const page = await this.ensurePrimaryPage();
     const width = Math.max(800, Math.floor(Number(opts.width) || 0));
@@ -648,6 +734,7 @@ export class BrowserSession {
     await page.setViewportSize({ width, height });
     await this.syncWindowBounds(page, { width, height });
     await this.syncDeviceScaleFactor(page, { width, height });
+    await this.maybeCenterWindow(page, { width, height });
     this.lastViewport = { width, height };
     return { width, height };
   }

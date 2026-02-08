@@ -121,6 +121,35 @@ function getDisplayMetrics() {
   }
 }
 
+
+
+function getDisplayMetricsWithDPR() {
+  const dm = getDisplayMetrics();
+  const base = dm ? { ...dm } : {};
+  const width = Number((base as any).width) || 0;
+  const height = Number((base as any).height) || 0;
+  const workWidth = Number((base as any).workWidth) || width;
+  const workHeight = Number((base as any).workHeight) || height;
+  let dpr = 1;
+  if (os.platform() === 'darwin') {
+    try {
+      const sp = spawnSync('system_profiler', ['SPDisplaysDataType', '-json'], { encoding: 'utf8' });
+      const spJson = sp.status === 0 && sp.stdout ? JSON.parse(sp.stdout) : null;
+      const displays = spJson?.SPDisplaysDataType;
+      if (Array.isArray(displays) && displays.length > 0) {
+        const first = displays[0];
+        const gpus = first?._items;
+        const maybe = Array.isArray(gpus) && gpus.length > 0 ? gpus[0] : first;
+        const isRetina = maybe?.spdisplays_retina === 'spdisplays_yes' || maybe?.spdisplays_retina === true;
+        if (isRetina) dpr = 2;
+      }
+    } catch {
+      if (width >= 2560 && height >= 1440) dpr = 2;
+    }
+  }
+  return { width, height, workWidth, workHeight, source: (base as any).source || 'unknown', dpr };
+}
+
 async function loadCamoufox(): Promise<any> {
   // Prefer dynamic import; fall back to require for NodeNext interop edge cases.
   try {
@@ -140,30 +169,55 @@ export async function launchEngineContext(opts: EngineLaunchOptions): Promise<Br
     // Also, we want the window size to reflect the *real* OS work area so later system clicks
     // have enough usable viewport.
     // Prefer OS work area (real screen resolution) for window size; fall back to viewport.
-    const dm = getDisplayMetrics();
-    const workW = Number(dm?.workWidth || dm?.width || 0);
-    const workH = Number(dm?.workHeight || dm?.height || 0);
-    const baseW = workW > 0 ? workW : Number(opts.viewport?.width || 1440);
-    const baseH = workH > 0 ? workH : Number(opts.viewport?.height || 900);
-    const winW = Math.max(300, Math.floor(baseW));
-    const winH = Math.max(300, Math.floor(baseH));
+    const dm = getDisplayMetricsWithDPR();
+    // Physical display size from OS
+    const physicalW = Number(dm?.width || 3840);
+    const physicalH = Number(dm?.height || 2160);
+    const workW = Number(dm?.workWidth || physicalW);
+    const workH = Number(dm?.workHeight || physicalH);
+    
+    // Use provided viewport as MAXIMUM (e.g., from fingerprint or explicit opt), default to full work area
+    const maxViewportW = Number(opts.viewport?.width || 0);
+    const maxViewportH = Number(opts.viewport?.height || 0);
+    
+    // Target: fill work area, but don't exceed explicit viewport caps if provided
+    const targetW = maxViewportW > 0 ? Math.min(maxViewportW, workW) : workW;
+    const targetH = maxViewportH > 0 ? Math.min(maxViewportH, workH) : workH;
+    
+    // Final window size: maximize to fill work area (leave small margin for chrome/window decorations)
+    const winW = Math.max(1440, Math.floor(workW * 0.95));
+    const winH = Math.max(900, Math.floor(workH - 80));
+    
+    // Ensure integer types for Camoufox
+    const screenW = Math.floor(physicalW) | 0;
+    const screenH = Math.floor(physicalH) | 0;
+    const intWinW = Math.floor(winW) | 0;
+    const intWinH = Math.floor(winH) | 0;
 
     // Headless camoufox is much more likely to hit window metric issues; prefer headful.
     const headless = false;
 
     // Firefox/Camoufox requires screenX/screenY to be integers; default to 0 to avoid float errors.
-    const screenX = 0;
-    const screenY = 0;
 
     const camoufox = await loadCamoufox();
     const Camoufox = camoufox.Camoufox;
     if (!Camoufox) throw new Error('camoufox_invalid_api');
 
+    // Build config to force actual display dimensions (without screen constraints to avoid position calc issues)
+    const config: Record<string, any> = {
+      'screen.width': Math.floor(physicalW),
+      'screen.height': Math.floor(physicalH),
+      'screen.availWidth': Math.floor(workW),
+      'screen.availHeight': Math.floor(workH),
+      'window.screenX': 0,
+      'window.screenY': 0,
+    };
+    
     const result = await Camoufox({
       headless,
       os: ['windows', 'macos'],
-      window: [winW, winH],
-      screen: [screenX, screenY],
+      window: [intWinW, intWinH],
+      config,
       data_dir: opts.profileDir,
       humanize: true,
       locale: 'zh-CN',

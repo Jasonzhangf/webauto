@@ -4,100 +4,31 @@ import { ensureCoreServices } from '../lib/ensure-core-services.mjs';
 
 ensureUtf8Console();
 
-/**
- * Phase 4 - 内容采集（Harvest）
- *
- * 功能：
- * - 读取 Phase2 采集的安全链接
- * - 校验链接有效性（xsec_token + 关键字匹配）
- * - 循环处理每条链接：
- *   - 打开详情页
- *   - 提取详情内容（标题、正文、作者、图片）
- *   - 采集评论（支持分批）
- *   - 持久化结果
- *   - 返回搜索页继续下一条
- *
- * 用法：
- *   node scripts/xiaohongshu/phase4-harvest.mjs --keyword "手机膜" --env debug
- */
-
 import { resolveKeyword, resolveEnv } from './lib/env.mjs';
 import { initRunLogging, emitRunEvent, safeStringify } from './lib/logger.mjs';
 import { createSessionLock } from './lib/session-lock.mjs';
 import { execute as validateLinks } from '../../dist/modules/xiaohongshu/app/src/blocks/Phase34ValidateLinksBlock.js';
-import { execute as processSingleNote } from '../../dist/modules/xiaohongshu/app/src/blocks/Phase34ProcessSingleNoteBlock.js';
-import { mergeNotesMarkdown } from '../../dist/modules/workflow/blocks/helpers/mergeXhsMarkdown.js';
+import { execute as multiTabHarvest } from '../../dist/modules/xiaohongshu/app/src/blocks/Phase4MultiTabHarvestBlock.js';
 import { resolveDownloadRoot } from '../../dist/modules/state/src/paths.js';
 import {
   markXhsCollectCompleted,
   markXhsCollectFailed,
-  updateXhsCollectState,
-  updateXhsDetailCollection,
 } from '../../dist/modules/state/src/xiaohongshu-collect-state.js';
+import { ensureServicesHealthy, restoreBrowserState } from './lib/recovery.mjs';
+import { recordStageCheck, recordStageRecovery } from './lib/stage-checks.mjs';
 import minimist from 'minimist';
 import { spawn } from 'node:child_process';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+
+const execFileAsync = promisify(execFile);
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { assignShards, listProfilesForPool } from './lib/profilepool.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 function nowMs() {
   return Date.now();
-}
-
-function formatDurationMs(ms) {
-  const s = Math.max(0, Math.floor(ms / 1000));
-  const m = Math.floor(s / 60);
-  const r = s % 60;
-  return `${m}m${String(r).padStart(2, '0')}s`;
-}
-
-function expandHome(p) {
-  if (!p) return p;
-  if (p === '~') {
-    const homeDir = process.env.HOME || process.env.USERPROFILE || '';
-    return homeDir || p;
-  }
-  if (p.startsWith('~/')) {
-    const homeDir = process.env.HOME || process.env.USERPROFILE || '';
-    if (!homeDir) return p;
-    return path.join(homeDir, p.slice(2));
-  }
-  return p;
-}
-
-async function readJsonl(filePath) {
-  const { readFile } = await import('node:fs/promises');
-  try {
-    const content = await readFile(filePath, 'utf8');
-    return content.trim().split('\n').filter(Boolean).map(line => {
-      try {
-        return JSON.parse(line);
-      } catch {
-        return null;
-      }
-    }).filter(Boolean);
-  } catch (err) {
-    if (err.code === 'ENOENT') {
-      return [];
-    }
-    throw err;
-  }
-}
-
-function stripArgs(argv, keys) {
-  const drop = new Set(keys);
-  const out = [];
-  for (let i = 0; i < argv.length; i += 1) {
-    const a = argv[i];
-    if (drop.has(a)) {
-      if (i + 1 < argv.length && !String(argv[i + 1] || '').startsWith('--')) i += 1;
-      continue;
-    }
-    out.push(a);
-  }
-  return out;
 }
 
 async function runNode(scriptPath, args) {
@@ -112,8 +43,33 @@ async function runNode(scriptPath, args) {
   });
 }
 
+async function ensureProfileSession(profile) {
+  // Check if session exists via browser-service
+  try {
+    const res = await fetch('http://127.0.0.1:7704/health');
+    const data = await res.json().catch(() => ({}));
+    const sessions = data?.sessions || [];
+    const hasSession = sessions.some((s) => s.profile === profile && s.state === 'active');
+    if (hasSession) {
+      console.log(`[Phase4] Profile ${profile} session already active`);
+      return;
+    }
+  } catch (e) {
+    console.log(`[Phase4] Health check failed: ${e.message}`);
+  }
+  
+  // Start session via phase1-boot
+  console.log(`[Phase4] Booting profile ${profile}...`);
+  const phase1Path = path.join(__dirname, 'phase1-boot.mjs');
+  await runNode(phase1Path, ['--profile', profile, '--once']);
+  console.log(`[Phase4] Profile ${profile} booted`);
+  
+  // Wait a bit for session to be ready
+  await new Promise(r => setTimeout(r, 2000));
+}
+
 async function main() {
-  // Single source of truth for service lifecycle: core-daemon.
+  await ensureServicesHealthy();
   await ensureCoreServices();
 
   const keyword = resolveKeyword();
@@ -121,18 +77,13 @@ async function main() {
   const downloadRoot = resolveDownloadRoot();
   const args = minimist(process.argv.slice(2));
   const linksPath = String(args.links || '').trim() || undefined;
-  const shardIndex = args['shard-index'] != null ? Number(args['shard-index']) : undefined;
-  const shardCount = args['shard-count'] != null ? Number(args['shard-count']) : undefined;
-  const profilesArg = String(args.profiles || '').trim();
-  const poolKeyword = String(args.profilepool || '').trim();
-  const shardedChild = args['sharded-child'] === true || args['sharded-child'] === '1' || args['sharded-child'] === 1;
-  const skipPhase1 = args['skip-phase1'] === true || args['skip-phase1'] === '1' || args['skip-phase1'] === 1;
+  const shardIndex = args['shard-index'] !== undefined ? Number(args['shard-index']) : undefined;
+  const shardCount = args['shard-count'] !== undefined ? Number(args['shard-count']) : undefined;
   const dryRun = args['dry-run'] === true || args['dry-run'] === 'true' || args['dry-run'] === 1 || args['dry-run'] === '1';
 
-  // Daemon mode: delegate to shared daemon-wrapper so UI can launch and exit safely.
   const foreground = args.foreground === true || args.foreground === '1' || args.foreground === 1;
   const shouldDaemonize = !foreground && process.env.WEBAUTO_DAEMON !== '1';
-  
+
   if (shouldDaemonize) {
     const wrapperPath = path.join(__dirname, 'shared', 'daemon-wrapper.mjs');
     const scriptPath = fileURLToPath(import.meta.url);
@@ -142,111 +93,46 @@ async function main() {
     return;
   }
 
-  // dry-run is "no-write": run the flow but avoid persisting outputs.
-
-  // Multi-profile orchestrator (auto-sharding)
-  if (!shardedChild && (profilesArg || poolKeyword)) {
-    const profiles = profilesArg
-      ? profilesArg.split(',').map((s) => s.trim()).filter(Boolean)
-      : listProfilesForPool(poolKeyword);
-    if (profiles.length === 0) {
-      console.error('❌ 未找到可用 profiles');
-      console.error(`   profilesRoot: ~/.webauto/profiles`);
-      console.error(`   hint: node scripts/profilepool.mjs add "${poolKeyword || keyword}"`);
-      process.exit(2);
-    }
-
-    const assignments = assignShards(profiles);
-    console.log(`🧩 Phase4 multi-profile: ${assignments.length} shards`);
-    assignments.forEach((a) => console.log(`- ${a.profileId} => shard ${a.shardIndex}/${a.shardCount}`));
-
-    const scriptPath = fileURLToPath(import.meta.url);
-    const baseArgs = stripArgs(process.argv.slice(2), [
-      '--profiles',
-      '--profilepool',
-      '--profile',
-      '--shard-index',
-      '--shard-count',
-      '--sharded-child',
-      '--skip-phase1',
-    ]);
-
-    const runShard = async (a) => {
-      console.log(`\n➡️  shard ${a.shardIndex}/${a.shardCount} profile=${a.profileId}`);
-      if (!skipPhase1) {
-        await runNode(path.join(__dirname, 'phase1-boot.mjs'), ['--profile', a.profileId, '--once']);
-      }
-      await runNode(scriptPath, [
-        ...baseArgs,
-        '--profile',
-        a.profileId,
-        '--shard-index',
-        String(a.shardIndex),
-        '--shard-count',
-        String(a.shardCount),
-        '--sharded-child',
-        '1',
-      ]);
-    };
-
-    await Promise.all(assignments.map((a) => runShard(a)));
-    return;
-  }
-
   const profile = String(args.profile || '').trim();
   if (!profile) {
-    console.error('❌ 必须提供 --profile 参数（禁止回退默认 profile）');
+    console.error('❌ 必须提供 --profile 参数');
     process.exit(2);
   }
 
-  // 初始化日志
-  const runContext = initRunLogging({ env, keyword, logMode: 'single', noWrite: dryRun });
+  const runCtx = initRunLogging({ env, keyword, noWrite: dryRun });
+  const runId = runCtx?.runId || runCtx;
 
-  console.log(`📝 Phase 4: 内容采集（Harvest） [runId: ${runContext.runId}]`);
+  console.log(`📝 Phase 4 Multi-Tab: 评论采集 [runId: ${runId}]`);
   console.log(`关键字: ${keyword}`);
   console.log(`环境: ${env}`);
   console.log(`Profile: ${profile}`);
-  if (linksPath) console.log(`links: ${linksPath}`);
-  if (shardIndex != null && shardCount != null) console.log(`shard: ${shardIndex}/${shardCount}`);
 
-  // 获取会话锁
   const lock = createSessionLock({ profileId: profile, lockType: 'phase4' });
   let lockHandle = null;
   try {
     lockHandle = lock.acquire();
   } catch (e) {
-    console.log('⚠️  会话锁已被其他进程持有，退出');
-    console.log(String(e?.message || e));
+    console.log('⚠️ 会话锁已被持有，退出');
     process.exit(1);
   }
 
   try {
-    emitRunEvent('phase4_start', { keyword, env, dryRun });
-    if (!dryRun) {
-      await updateXhsCollectState({ keyword, env, downloadRoot }, (draft) => {
-        if (!draft.startTime) draft.startTime = new Date().toISOString();
-        draft.status = 'running';
-        draft.resume.lastStep = 'phase4_start';
-      });
-    }
-
     const t0 = nowMs();
-    emitRunEvent('phase4_timing', { stage: 'start', t0 });
+    emitRunEvent('phase4_start', { keyword, env, dryRun });
+
+    // 0. 确保 profile session 已启动
+    await ensureProfileSession(profile);
 
     // 1. 校验链接
     console.log(`\n🔍 步骤 1: 校验链接...`);
-    const tValidate0 = nowMs();
     const validateResult = await validateLinks({
       keyword,
       env,
       profile,
-      ...(linksPath ? { linksPath } : {}),
-      ...(shardIndex != null ? { shardIndex } : {}),
-      ...(shardCount != null ? { shardCount } : {}),
+      linksPath,
+      shardIndex,
+      shardCount,
     });
-    const tValidate1 = nowMs();
-    console.log(`⏱️  校验耗时: ${formatDurationMs(tValidate1 - tValidate0)}`);
-    emitRunEvent('phase4_timing', { stage: 'validate_done', ms: tValidate1 - tValidate0 });
 
     if (!validateResult.success) {
       throw new Error(`链接校验失败: ${validateResult.error}`);
@@ -254,130 +140,40 @@ async function main() {
 
     const validLinks = validateResult.links || [];
     console.log(`✅ 有效链接: ${validLinks.length} 条`);
-    if (!dryRun) {
-      await updateXhsCollectState({ keyword, env, downloadRoot }, (draft) => {
-        // 只在 state 为空时补齐（避免覆盖 Phase2 的更完整来源）
-        if ((draft.listCollection.collectedUrls || []).length === 0) {
-          draft.listCollection.collectedUrls = validLinks.map((l) => ({
-            noteId: String(l?.noteId || '').trim(),
-            safeUrl: String(l?.safeUrl || '').trim(),
-            ...(String(l?.searchUrl || '').trim() ? { searchUrl: String(l.searchUrl).trim() } : {}),
-          }));
-        }
-        draft.resume.lastStep = 'phase4_validate_done';
-      });
-    }
 
     if (validLinks.length === 0) {
-      console.log('⚠️  没有有效链接，请先运行 Phase2 采集链接');
+      console.log('⚠️ 没有有效链接');
       process.exit(0);
     }
 
-    // 2. 循环处理每条链接
-    console.log(`\n📝 步骤 2: 采集详情与评论...`);
-    const results = [];
-    const errors = [];
+    // 2. 多Tab轮转采集
+    console.log(`\n📝 步骤 2: 多Tab轮转采集评论...`);
+    const harvestResult = await multiTabHarvest({
+      profile,
+      keyword,
+      env,
+      links: validLinks,
+      maxCommentsPerNote: 50,
+    });
 
-    for (let i = 0; i < validLinks.length; i++) {
-      const link = validLinks[i];
-      const progress = `[${i + 1}/${validLinks.length}]`;
-
-      console.log(`\n${progress} 处理: ${link.noteId}`);
-
-      const tNote0 = nowMs();
-      const result = await processSingleNote({
-        noteId: link.noteId,
-        safeUrl: link.safeUrl,
-        searchUrl: link.searchUrl,
-        keyword,
-        env,
-        profile,
-        maxCommentRounds: 50,
-        commentBatchSize: 50,
-      });
-      const tNote1 = nowMs();
-
-      console.log(`⏱️  耗时: ${formatDurationMs(tNote1 - tNote0)}`);
-
-      if (result.success) {
-        results.push(result);
-        console.log(`✅ ${progress} 成功`);
-        if (!dryRun) {
-          await updateXhsDetailCollection({
-            keyword,
-            env,
-            downloadRoot,
-            noteId: link.noteId,
-            status: 'completed',
-          });
-        }
-      } else {
-        errors.push({ noteId: link.noteId, error: result.error });
-        console.log(`❌ ${progress} 失败: ${result.error}`);
-        if (!dryRun) {
-          await updateXhsDetailCollection({
-            keyword,
-            env,
-            downloadRoot,
-            noteId: link.noteId,
-            status: 'failed',
-            error: String(result.error || 'unknown'),
-          });
-        }
-      }
-
-      emitRunEvent('phase4_note_done', {
-        index: i,
-        total: validLinks.length,
-        noteId: link.noteId,
-        success: result.success,
-        ms: tNote1 - tNote0,
-      });
-    }
-
-    // 3. 汇总
     const t1 = nowMs();
     const totalMs = t1 - t0;
-    console.log(`\n⏱️  总耗时: ${formatDurationMs(totalMs)}`);
-    emitRunEvent('phase4_timing', { stage: 'done', ms: totalMs, count: results.length });
-    if (!dryRun) {
-      await updateXhsCollectState({ keyword, env, downloadRoot }, (draft) => {
-        draft.stats.phase4DurationMs = totalMs;
-        draft.resume.lastStep = 'phase4_done';
-      });
-    }
 
-    console.log(`\n📊 采集结果：`);
-    console.log(`   成功: ${results.length} 条`);
-    console.log(`   失败: ${errors.length} 条`);
+    console.log(`\n⏱️ 总耗时: ${Math.floor(totalMs / 1000)}s`);
+    console.log(`📊 结果: ${harvestResult.totalNotes} 帖子, ${harvestResult.totalComments} 条评论`);
 
-    if (errors.length > 0) {
-      console.log(`\n❌ 失败列表：`);
-      errors.forEach((e, i) => {
-        console.log(`   ${i + 1}. ${e.noteId}: ${e.error}`);
-      });
-    }
+    emitRunEvent('phase4_done', {
+      success: harvestResult.totalNotes,
+      failed: harvestResult.errors.length,
+      totalComments: harvestResult.totalComments,
+      dryRun,
+    });
 
-    if (!dryRun) {
-      const mergeResult = await mergeNotesMarkdown({
-        platform: 'xiaohongshu',
-        env,
-        keyword,
-      });
-      if (mergeResult.success) {
-        console.log(`\n📄 合并 Markdown 完成: ${mergeResult.outputPath} (notes=${mergeResult.mergedNotes})`);
-      } else {
-        console.warn(`\n⚠️ 合并 Markdown 跳过: ${mergeResult.error}`);
-      }
-    } else {
-      console.log(`\n[dry-run] skip merge markdown`);
-    }
-
-    console.log(`\n✅ Phase 4 完成`);
-    emitRunEvent('phase4_done', { success: results.length, failed: errors.length, dryRun });
     if (!dryRun) {
       await markXhsCollectCompleted({ keyword, env, downloadRoot });
     }
+
+    console.log(`\n✅ Phase 4 完成`);
 
   } catch (err) {
     emitRunEvent('phase4_error', { error: safeStringify(err), dryRun });
