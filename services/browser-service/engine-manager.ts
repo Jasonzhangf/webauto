@@ -213,10 +213,25 @@ export async function launchEngineContext(opts: EngineLaunchOptions): Promise<Br
       'window.screenY': 0,
     };
     
+    // Force tabs to open in same window (not new windows)
+    const firefox_user_prefs = {
+      // Force all new windows (including script popups) to open as tabs
+      'browser.link.open_newwindow': 3,
+      'browser.link.open_newwindow.restriction': 0,
+      'browser.link.open_newwindow.override.external': -1,
+      // Make sure tab strip is visible and no single-window mode
+      'browser.tabs.loadInBackground': false,
+      'browser.tabs.loadDivertedInBackground': false,
+      'browser.tabs.closeWindowWithLastTab': false,
+      'browser.tabs.warnOnClose': false,
+      'browser.tabs.tabMinWidth': 50,
+    };
+    
     const result = await Camoufox({
       headless,
       os: ['windows', 'macos'],
       window: [intWinW, intWinH],
+      firefox_user_prefs,
       config,
       data_dir: opts.profileDir,
       humanize: true,

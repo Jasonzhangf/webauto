@@ -10,6 +10,7 @@ import { tabClose, tabAttach, tabCloseUnmatched } from './controllers/browserExt
 import { evalFile as devEvalFile, evalCode as devEvalCode, installPicker as devInstallPicker } from './controllers/devController.js';
 import * as mouseCtl from './controllers/mouseController.js';
 import * as keyboardCtl from './controllers/keyboardController.js';
+import * as systemCtl from './controllers/systemController.js';
 // import * as containerOps from './controllers/containerOpsController.js';
 // import * as containerByName from './controllers/containerByNameController.js';
 import { run as runSequence } from './controllers/workflowSequenceController.js';
@@ -97,6 +98,7 @@ app.post('/v1/keyboard/type', keyboardCtl.type);
 app.post('/v1/keyboard/press', keyboardCtl.press);
 app.post('/v1/keyboard/down', keyboardCtl.down);
 app.post('/v1/keyboard/up', keyboardCtl.up);
+app.post('/v1/system/shortcut', systemCtl.shortcut);
 
 // container operations and by-name are served by container-engine now
 

@@ -96,7 +96,9 @@ export class UiController {
      case 'keyboard:press':
        return this.handleKeyboardPress(payload);
      case 'keyboard:type':
-       return this.handleKeyboardType(payload);
+        return this.handleKeyboardType(payload);
+      case 'system:shortcut':
+        return this.handleSystemShortcut(payload);
     case 'mouse:wheel':
       return this.handleMouseWheel(payload);
     case 'mouse:click':
@@ -732,6 +734,40 @@ export class UiController {
     );
     return { success: true, data: result };
   }
+  async handleSystemShortcut(payload = {}) {
+    const shortcut = String(payload.shortcut || '').trim();
+    const app = String(payload.app || 'camoufox').trim();
+    if (!shortcut) throw new Error('shortcut required');
+
+    if (process.platform === 'darwin') {
+      const { spawnSync } = await import('node:child_process');
+      spawnSync('osascript', ['-e', `tell application "${app}" to activate`]);
+      if (shortcut === 'new-tab') {
+        const res = spawnSync('osascript', [
+          '-e',
+          'tell application "System Events" to keystroke "t" using command down'
+        ]);
+        if (res.status != 0) throw new Error('osascript new-tab failed');
+        return { success: true, data: { ok: true, shortcut } };
+      }
+      throw new Error(`unsupported shortcut: ${shortcut}`);
+    }
+
+    if (process.platform === 'win32') {
+      const { spawnSync } = await import('node:child_process');
+      if (shortcut === 'new-tab') {
+        const script =
+          'Add-Type -AssemblyName System.Windows.Forms; $ws = New-Object -ComObject WScript.Shell; $ws.SendKeys("^t");';
+        const res = spawnSync('powershell', ['-NoProfile', '-Command', script], { windowsHide: true });
+        if (res.status != 0) throw new Error('powershell new-tab failed');
+        return { success: true, data: { ok: true, shortcut } };
+      }
+      throw new Error(`unsupported shortcut: ${shortcut}`);
+    }
+
+    throw new Error('unsupported platform');
+  }
+
 
   async handleMouseWheel(payload = {}) {
     const profileId = (payload.profileId || payload.profile || payload.sessionId || 'default').toString();

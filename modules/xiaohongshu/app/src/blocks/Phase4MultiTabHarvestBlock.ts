@@ -57,14 +57,14 @@ function resolveDownloadRoot(): string {
 type PageInfo = { index?: number; pageId?: string; url?: string; active?: boolean };
 
 async function listPages(profile: string, apiUrl: string): Promise<{ pages: PageInfo[]; activeIndex: number }> {
-  const res = await controllerAction('browser:page:list', { profile }, apiUrl);
+  const res = await controllerAction('browser:page:list', { profileId: profile }, apiUrl);
   const pages: PageInfo[] = res?.pages || res?.data?.pages || [];
   const activeIndex: number = res?.activeIndex ?? res?.data?.activeIndex ?? -1;
   return { pages, activeIndex };
 }
 
 async function switchToTab(profile: string, apiUrl: string, index: number): Promise<{ activeIndex: number; activeUrl: string }> {
-  await controllerAction('browser:page:switch', { profile, index }, apiUrl).catch((): null => null);
+  await controllerAction('browser:page:switch', { profileId: profile, index }, apiUrl).catch((): null => null);
   await delay(500);
   const listRes = await listPages(profile, apiUrl);
   const activeIndex: number = listRes.activeIndex;
@@ -74,8 +74,9 @@ async function switchToTab(profile: string, apiUrl: string, index: number): Prom
 }
 
 async function openTabViaWindowOpen(profile: string, apiUrl: string): Promise<void> {
-  await controllerAction('browser:execute', { profile, script: "window.open('about:blank', '_blank')" }, apiUrl).catch((): null => null);
-  await delay(400);
+  await controllerAction('browser:page:switch', { profileId: profile, index: 0 }, apiUrl).catch((): null => null);
+  await controllerAction('system:shortcut', { app: 'camoufox', shortcut: 'new-tab' }, apiUrl).catch((): null => null);
+  await delay(500);
 }
 
 async function ensureTabPool(profile: string, apiUrl: string, requiredTotal = 5): Promise<Array<{ index: number; pageId?: any }>> {

@@ -313,3 +313,13 @@ export function registerCoreUsage() {
  * 导出注册函数，供 server.ts 加载
  */
 export default registerCoreUsage;
+
+  registerActionUsage('system:shortcut', {
+    description: '触发系统级快捷键（例如新建标签）',
+    parameters: {
+      app: { type: 'string', description: '应用名称（默认 camoufox）' },
+      shortcut: { type: 'string', required: true, description: '快捷键名称（e.g. new-tab）' }
+    },
+    returns: 'success + data'
+  });
+

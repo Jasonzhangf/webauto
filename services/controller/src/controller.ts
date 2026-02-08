@@ -289,6 +289,8 @@ export class UiController {
         return this.handleKeyboardPress(payload);
       case 'keyboard:type':
         return this.handleKeyboardType(payload);
+      case 'system:shortcut':
+        return this.handleSystemShortcut(payload);
       case 'mouse:wheel':
         return this.handleMouseWheel(payload);
       case 'dom:branch:2':
@@ -323,6 +325,37 @@ export class UiController {
     if (payload.session) args.push('--session', payload.session);
     if (payload.lines) args.push('--lines', String(payload.lines));
     return this.runCliCommand('logging', args);
+  }
+
+
+  async handleSystemShortcut(payload: ActionPayload = {}) {
+    const shortcut = String(payload.shortcut || '').trim();
+    const app = String(payload.app || 'camoufox').trim();
+    if (!shortcut) throw new Error('shortcut required');
+
+    if (process.platform === 'darwin') {
+      const { spawnSync } = await import('node:child_process');
+      spawnSync('osascript', ['-e', `tell application "${app}" to activate`]);
+      if (shortcut === 'new-tab') {
+        const res = spawnSync('osascript', ['-e', 'tell application "System Events" to keystroke "t" using command down']);
+        if (res.status != 0) throw new Error('osascript new-tab failed');
+        return { success: true, data: { ok: true, shortcut } };
+      }
+      throw new Error(`unsupported shortcut: ${shortcut}`);
+    }
+
+    if (process.platform === 'win32') {
+      const { spawnSync } = await import('node:child_process');
+      if (shortcut === 'new-tab') {
+        const script = 'Add-Type -AssemblyName System.Windows.Forms; $ws = New-Object -ComObject WScript.Shell; $ws.SendKeys("^t");';
+        const res = spawnSync('powershell', ['-NoProfile', '-Command', script], { windowsHide: true });
+        if (res.status != 0) throw new Error('powershell new-tab failed');
+        return { success: true, data: { ok: true, shortcut } };
+      }
+      throw new Error(`unsupported shortcut: ${shortcut}`);
+    }
+
+    throw new Error('unsupported platform');
   }
 
   async handleOperationRun(payload: ActionPayload = {}) {

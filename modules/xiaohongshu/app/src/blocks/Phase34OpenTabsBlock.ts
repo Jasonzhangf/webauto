@@ -35,13 +35,18 @@ async function controllerAction(action: string, payload: any, apiUrl: string) {
 }
 
 async function listPages(profile: string, apiUrl: string) {
-  const res = await controllerAction('browser:page:list', { profile }, apiUrl);
+  const res = await controllerAction('browser:page:list', { profileId: profile }, apiUrl);
+  if (res?.error) {
+    console.warn(`[Phase34OpenTabs] page:list error: ${res.error}`);
+  }
   return res?.pages || res?.data?.pages || [];
 }
 
 async function openTabViaWindowOpen(profile: string, apiUrl: string) {
-  await controllerAction('browser:execute', { profile, script: `window.open('about:blank', '_blank')` }, apiUrl);
-  await new Promise(r => setTimeout(r, 400));
+  // Use system-level keyboard shortcut to open a new tab in the same window
+  await controllerAction('browser:page:switch', { profileId: profile, index: 0 }, apiUrl).catch((): null => null);
+  await controllerAction('system:shortcut', { app: 'camoufox', shortcut: 'new-tab' }, apiUrl).catch((): null => null);
+  await new Promise(r => setTimeout(r, 500));
 }
 
 export async function execute(input: OpenTabsInput): Promise<OpenTabsOutput> {
@@ -54,7 +59,13 @@ export async function execute(input: OpenTabsInput): Promise<OpenTabsOutput> {
   const requiredTotal = tabCount + 1; // tab0=搜索页 + tab1~4=帖子页
   console.log(`[Phase34OpenTabs] 确保固定 tab 池: ${requiredTotal} 个 (0=搜索页, 1-${tabCount}=帖子页)`);
 
-  const existing = await listPages(profile, unifiedApiUrl);
+  let existing = await listPages(profile, unifiedApiUrl);
+  if (!existing.length) {
+    console.log('[Phase34OpenTabs] 未检测到 session，尝试创建会话');
+    await controllerAction('session:create', { profile, url: 'https://www.xiaohongshu.com' }, unifiedApiUrl);
+    await new Promise(r => setTimeout(r, 800));
+    existing = await listPages(profile, unifiedApiUrl);
+  }
   const currentCount = existing.length;
   console.log(`[Phase34OpenTabs] 当前已有 ${currentCount} 个 tab`);
 

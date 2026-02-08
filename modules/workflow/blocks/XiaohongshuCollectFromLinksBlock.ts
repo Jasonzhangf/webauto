@@ -564,7 +564,8 @@ export async function execute(input: XiaohongshuCollectFromLinksInput): Promise<
       beforeDetail.pages.map((p) => Number(p?.index)).filter((n) => Number.isFinite(n)) as number[],
     );
 
-    const created = await controllerAction('browser:page:new', { profileId: profile, url });
+    // Use system-level shortcut to open new tab in same window (Cmd+T on macOS)
+const created = await controllerAction('system:shortcut', { app: 'camoufox', shortcut: 'new-tab' });
     const createdIndex = Number((created as any)?.index ?? (created as any)?.data?.index ?? (created as any)?.body?.index);
     if (Number.isFinite(createdIndex) && createdIndex !== reservedIndex) return createdIndex;
 
