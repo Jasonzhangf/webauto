@@ -242,7 +242,7 @@ export async function launchEngineContext(opts: EngineLaunchOptions): Promise<Br
       headless,
       os: ['windows', 'macos'],
       window: [intWinW, intWinH],
-      viewport: [headless ? headlessW : viewportW, headless ? headlessH : viewportH],
+      viewport: { width: headless ? headlessW : viewportW, height: headless ? headlessH : viewportH },
       firefox_user_prefs,
       config,
       data_dir: opts.profileDir,

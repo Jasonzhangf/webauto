@@ -275,8 +275,8 @@ function emitEvent(type, payload) {
       const currentUrl = listRes?.pages?.find(p => p.active)?.url ?? listRes?.data?.pages?.find(p => p.active)?.url ?? 'N/A';
       console.log(`  [Verify] switch -> tab-${activeSlot.tabRealIndex}, activeIndex=${currentActive}, url=${currentUrl.substring(0, 60)}`);
 
-      emitEvent('phase3_round_start', { slotIndex: active.slotIndex, tabIndex: active.tabIndex, noteId: link.noteId });
-const res = await interact({
+      emitRunEvent('phase3_round_start', { slotIndex: activeSlot.slotIndex, tabRealIndex: activeSlot.tabRealIndex, noteId: link2.noteId });
+      const res = await interact({
         sessionId: profile,
         noteId: link2.noteId,
         safeUrl: link2.safeUrl,
@@ -298,7 +298,7 @@ const res = await interact({
       }
 
       state2.totalLiked += res.likedCount;
-emitEvent('phase3_round_done', { slotIndex: active.slotIndex, tabIndex: active.tabIndex, noteId: link.noteId, likedCount: res.likedCount });
+      emitRunEvent('phase3_round_done', { slotIndex: activeSlot.slotIndex, tabRealIndex: activeSlot.tabRealIndex, noteId: link2.noteId, likedCount: res.likedCount });
       state2.reachedBottom = !!res.reachedBottom;
 
       console.log(`[slot-${activeSlot.slotIndex}] ✅ 本轮点赞 ${res.likedCount} 条，总点赞 ${state2.totalLiked} 条，到底=${state2.reachedBottom}`);

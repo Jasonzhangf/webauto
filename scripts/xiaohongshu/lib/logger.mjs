@@ -82,19 +82,49 @@ export function initRunLogging({ env, keyword, logMode = 'single', baseDir: cust
   const runId = createRunId();
 
   if (noWrite) {
-    // dry-run: avoid any file IO
+    // dry-run: still write events.jsonl for tracking, skip run.log
+    const eventsPath = path.join(baseDir, 'run-events.jsonl');
+    fs.mkdirSync(baseDir, { recursive: true });
+    const eventStream = fs.createWriteStream(eventsPath, { flags: 'a' });
+    try {
+      eventStream.write(
+        JSON.stringify({ ts: new Date().toISOString(), runId, type: 'run_start_marker', env, keyword }) + '\n',
+      );
+    } catch {}
+
+    const emitEvent = (type, data = {}) => {
+      const payload = {
+        ts: new Date().toISOString(),
+        runId,
+        type,
+        env,
+        keyword,
+        ...data,
+      };
+      try {
+        eventStream.write(JSON.stringify(payload) + '\n');
+      } catch {
+        // ignore
+      }
+    };
+
     runContext = {
       runId,
       env,
       keyword,
       baseDir,
       logPath: null,
-      eventsPath: null,
+      eventsPath,
       startedAtMs: Date.now(),
-      emitEvent: () => {},
-      close: () => {},
+      emitEvent,
+      close: () => {
+        try {
+          eventStream.end();
+        } catch {}
+      },
     };
-    console.log(`[Logger] runId=${runId} (no-write)`);
+    console.log('[Logger] runId=' + runId + ' (dry-run, events-only)');
+    console.log('[Logger] events=' + eventsPath);
     return runContext;
   }
 
