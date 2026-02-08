@@ -173,8 +173,8 @@ export async function launchEngineContext(opts: EngineLaunchOptions): Promise<Br
     // Physical display size from OS
     const physicalW = Number(dm?.width || 3840);
     const physicalH = Number(dm?.height || 2160);
-    const workW = Number(dm?.workWidth || physicalW);
-    const workH = Number(dm?.workHeight || physicalH);
+    const workW = Number(dm?.workWidth || physicalW || 3840);
+    const workH = Number(dm?.workHeight || physicalH || 2046);
     
     // Use provided viewport as MAXIMUM (e.g., from fingerprint or explicit opt), default to full work area
     const maxViewportW = Number(opts.viewport?.width || workW);
@@ -185,8 +185,8 @@ export async function launchEngineContext(opts: EngineLaunchOptions): Promise<Br
     const targetH = maxViewportH > 0 ? Math.min(maxViewportH, workH) : workH;
 
     // Use targetW/targetH as viewport (even in headless) to match headful size
-    const viewportW = Math.max(1440, Math.floor(targetW));
-    const viewportH = Math.max(900, Math.floor(targetH));
+    const viewportW = Math.max(1440, Math.floor(Number(targetW) || 3840));
+    const viewportH = Math.max(900, Math.floor(Number(targetH) || 2046));
 
     const envHeadlessW = Number(process.env.WEBAUTO_HEADLESS_WIDTH || 0);
     const envHeadlessH = Number(process.env.WEBAUTO_HEADLESS_HEIGHT || 0);
