@@ -244,6 +244,7 @@ export async function launchEngineContext(opts: EngineLaunchOptions): Promise<Br
       config,
       data_dir: opts.profileDir,
       humanize: true,
+      iKnowWhatImDoing: true,
       locale: 'zh-CN',
       fonts: [
         'PingFang SC',
