@@ -281,6 +281,10 @@ export class UiController {
        return this.handleBrowserPageClose(payload);
      case 'browser:goto':
        return this.handleBrowserGoto(payload);
+     case 'browser:set-viewport':
+       return this.handleBrowserSetViewport(payload);
+     case 'browser:set-viewport':
+       return this.handleBrowserSetViewport(payload);
       case 'browser:cancel-pick':
        return this.handleBrowserCancelDomPick(payload);
       case 'browser:pick-dom':
@@ -818,6 +822,17 @@ export class UiController {
     const url = (payload.url || '').toString();
     if (!url) throw new Error('url required');
     const result = await this.browserServiceCommand('goto', { profileId, url });
+    return { success: true, data: result };
+  }
+
+  async handleBrowserSetViewport(payload: ActionPayload = {}) {
+    const profileId = (payload.profileId || payload.profile || payload.sessionId || 'default').toString();
+    const width = Number(payload.width);
+    const height = Number(payload.height);
+    if (!Number.isFinite(width) || !Number.isFinite(height)) {
+      throw new Error('width/height required');
+    }
+    const result = await this.browserServiceCommand('page:setViewport', { profileId, width, height }, { timeoutMs: 30000 });
     return { success: true, data: result };
   }
 
