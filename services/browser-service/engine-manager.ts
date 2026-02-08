@@ -192,6 +192,9 @@ export async function launchEngineContext(opts: EngineLaunchOptions): Promise<Br
     const envHeadlessH = Number(process.env.WEBAUTO_HEADLESS_HEIGHT || 0);
     const headlessW = envHeadlessW > 0 ? envHeadlessW : viewportW;
     const headlessH = envHeadlessH > 0 ? envHeadlessH : viewportH;
+    if (!Number.isFinite(headlessW) || !Number.isFinite(headlessH)) {
+      throw new Error('headless viewport invalid');
+    }
     
     const headless = Boolean(opts.headless);
 
