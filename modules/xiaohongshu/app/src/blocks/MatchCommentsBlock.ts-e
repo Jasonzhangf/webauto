@@ -114,7 +114,7 @@ export async function execute(input: MatchCommentsInput): Promise<MatchCommentsO
       for (let i = 0; i < rows.length; i += 1) {
         if (matches.length >= maxMatches) break;
 
-        const r: any = rows[i] || {};
+        const r = rows[i] || {};
         const text = String(r.text || '').trim();
         if (!text) continue;
 

@@ -337,8 +337,9 @@ export async function execute(input: InteractInput): Promise<InteractOutput> {
 
     for (let i = 0; i < extracted.length; i++) {
       if (likedCount >= maxLikesPerRound) break;
-
-      const c = extracted[i] || {};
+      const c: any = extracted[i] || {};
+      // Use domIndex from xhsComments if available, fallback to array index
+      const domIndex = typeof (c as any).domIndex === 'number' ? (c as any).domIndex : i;
       const text = String(c.text || '').trim();
       if (!text) continue;
       if (!likeKeywords.some((k) => k && text.includes(k))) continue;
@@ -353,8 +354,8 @@ export async function execute(input: InteractInput): Promise<InteractOutput> {
       }
 
       // 视觉确认：高亮需要点击的位置（like button）
-      await highlightCommentRow(sessionId, i, unifiedApiUrl, 'virtual-like-row').catch((): null => null);
-      const highlightRes = await highlightLikeButton(sessionId, i, unifiedApiUrl);
+      await highlightCommentRow(sessionId, domIndex, unifiedApiUrl, 'virtual-like-row').catch((): null => null);
+      const highlightRes = await highlightLikeButton(sessionId, domIndex, unifiedApiUrl);
       await delay(450);
 
       if (highlightRes?.inViewport !== true) {
@@ -362,14 +363,14 @@ export async function execute(input: InteractInput): Promise<InteractOutput> {
       }
 
       // 确保评论项在视口中部，避免截图/点击偏移
-      const centered = await ensureCommentVisibleCentered(sessionId, unifiedApiUrl, i);
+      const centered = await ensureCommentVisibleCentered(sessionId, unifiedApiUrl, domIndex);
       if (!centered) {
         continue;
       }
 
       // 再高亮一次，确保截图能看到高亮
-      await highlightCommentRow(sessionId, i, unifiedApiUrl, 'virtual-like-row').catch((): null => null);
-      await highlightLikeButton(sessionId, i, unifiedApiUrl).catch((): null => null);
+      await highlightCommentRow(sessionId, domIndex, unifiedApiUrl, 'virtual-like-row').catch((): null => null);
+      await highlightLikeButton(sessionId, domIndex, unifiedApiUrl).catch((): null => null);
       await delay(300);
 
       const signature = {
@@ -379,7 +380,7 @@ export async function execute(input: InteractInput): Promise<InteractOutput> {
       };
 
       // 已点赞则跳过（优先走 DOM 校验，避免容器 extractor 缺失导致误判）
-      const beforeState = await getLikeStateForVisibleCommentIndex(sessionId, unifiedApiUrl, i);
+      const beforeState = await getLikeStateForVisibleCommentIndex(sessionId, unifiedApiUrl, domIndex);
       const beforeLiked = beforeState.useHref.includes('#liked');
       if (beforeLiked) {
         continue;
@@ -393,7 +394,7 @@ export async function execute(input: InteractInput): Promise<InteractOutput> {
       }
 
       if (!dryRun) {
-        const clickRes = await clickLikeButtonByIndex(sessionId, i, unifiedApiUrl);
+        const clickRes = await clickLikeButtonByIndex(sessionId, domIndex, unifiedApiUrl);
         if (!clickRes?.success) {
           continue;
         }
@@ -412,7 +413,7 @@ export async function execute(input: InteractInput): Promise<InteractOutput> {
 
       // 验证：目标评论的 like-wrapper 是否变为 like-active（避免 index 漂移误判）
       if (!dryRun) {
-        const afterState = await getLikeStateForVisibleCommentIndex(sessionId, unifiedApiUrl, i);
+        const afterState = await getLikeStateForVisibleCommentIndex(sessionId, unifiedApiUrl, domIndex);
         const nowLiked =
           afterState.useHref.includes('#liked') || (await verifyLikedBySignature(sessionId, unifiedApiUrl, signature));
         if (!nowLiked) {

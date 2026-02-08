@@ -140,7 +140,7 @@ export async function checkBottomWithBackAndForth(
   return { reachedBottom: true, reason: 'no_change_after_back_and_forth' };
 }
 
-export async function extractVisibleComments(sessionId: string, apiUrl: string, maxItems: number) {
+export async function extractVisibleComments(sessionId: string, apiUrl: string, maxItems: number): Promise<Array<XhsExtractedComment & { domIndex: number }>> {
   const res = await controllerAction(
     'container:operation',
     {
@@ -152,9 +152,28 @@ export async function extractVisibleComments(sessionId: string, apiUrl: string, 
     apiUrl,
   );
 
-  if (!res?.success) return [] as XhsExtractedComment[];
-  const extracted = Array.isArray(res?.extracted) ? (res.extracted as XhsExtractedComment[]) : [];
-  return extracted;
+  if (!res?.success) return [];
+  const extracted = Array.isArray(res?.extracted) ? res.extracted : [];
+  // Map extracted items with their DOM index (position in selectorAll result)
+  const containerRes = await controllerAction(
+    'browser:execute',
+    {
+      profile: sessionId,
+      script: `(() => {
+        const items = Array.from(document.querySelectorAll('.comment-item'));
+        return items.map((el, idx) => {
+          const rect = el.getBoundingClientRect();
+          return {
+            domIndex: idx,
+            visible: rect.top >= 0 && rect.bottom <= window.innerHeight && rect.height > 0
+          };
+        }).filter(x => x.visible);
+      })()`,
+    },
+    apiUrl,
+  );
+  const visibleIndices = (containerRes?.result || []).map((x: any) => x.domIndex);
+  return extracted.map((item: any, idx: number) => ({ ...item, domIndex: visibleIndices[idx] ?? idx }));
 }
 
 export async function highlightCommentRow(sessionId: string, index: number, apiUrl: string, channel = 'xhs-comment-row') {
