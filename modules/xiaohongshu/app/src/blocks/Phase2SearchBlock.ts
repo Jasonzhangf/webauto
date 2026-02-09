@@ -481,6 +481,25 @@ export async function execute(input: SearchInput): Promise<SearchOutput> {
     console.log('[Phase2Search] input already matches keyword, will clear and retype to ensure focus');
   }
   // Always clear and type to ensure focus and input state
+    // Force clear via JS first (most reliable)
+    await controllerAction(
+      'browser:execute',
+      {
+        profile,
+        script: `(() => {
+          const root = document.querySelector('#search-input') ||
+            document.querySelector("input[type='search']") ||
+            document.querySelector("input[placeholder*='搜索'], input[placeholder*='关键字']");
+          if (root) {
+            root.value = '';
+            root.dispatchEvent(new Event('input', { bubbles: true }));
+          }
+          return true;
+        })()`,
+      },
+      unifiedApiUrl,
+    ).catch(() => {});
+    await delay(100);
     await clearSearchInput(profile, unifiedApiUrl);
     const clearedValue = await readSearchInputValue(profile, unifiedApiUrl);
     if (typeof clearedValue === 'string' && clearedValue.trim() && clearedValue.trim() !== keyword) {
