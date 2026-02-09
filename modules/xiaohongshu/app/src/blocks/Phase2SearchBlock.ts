@@ -455,12 +455,11 @@ export async function execute(input: SearchInput): Promise<SearchOutput> {
   // If the input already contains the same keyword, do not force clearing.
   // Camoufox sometimes ignores deletion events in certain states; treat "already correct" as success.
   const beforeClear = await readSearchInputValue(profile, unifiedApiUrl).catch((): null => null);
-  // If input already equals keyword, don't attempt to clear/type again.
-  // Camoufox can ignore key events and mis-focus; treating this as success avoids repeated actions.
   const inputAlreadyMatches = typeof beforeClear === 'string' && beforeClear.trim() === keyword;
   if (inputAlreadyMatches) {
-    console.log('[Phase2Search] input already matches keyword, skip clear + type');
-  } else {
+    console.log('[Phase2Search] input already matches keyword, will clear and retype to ensure focus');
+  }
+  // Always clear and type to ensure focus and input state
     await clearSearchInput(profile, unifiedApiUrl);
     const clearedValue = await readSearchInputValue(profile, unifiedApiUrl);
     if (typeof clearedValue === 'string' && clearedValue.trim() && clearedValue.trim() !== keyword) {
@@ -487,7 +486,7 @@ export async function execute(input: SearchInput): Promise<SearchOutput> {
       console.log(`[Phase2Search] keyboard fill fallback: ok=${Boolean(fallback?.ok)} reason=${fallback?.reason || ''}`);
     }
     await delay(450);
-  }
+
 
   // If we skipped typing, the input already contains keyword; proceed to submit.
 
@@ -496,6 +495,14 @@ export async function execute(input: SearchInput): Promise<SearchOutput> {
   const beforeSubmitValue = await readSearchInputValue(profile, unifiedApiUrl).catch((): null => null);
   const activeBeforeSubmitValue = await readActiveInputValue(profile, unifiedApiUrl).catch((): null => null);
   console.log(`[Phase2Search] Before submit: input value="${String(beforeSubmitValue)}" active="${String(activeBeforeSubmitValue)}" keyword="${keyword}"`);
+  if (String(activeBeforeSubmitValue || '') != String(keyword)) {
+    await controllerAction(
+      'container:operation',
+      { containerId: 'xiaohongshu_home.search_input', operationId: 'click', sessionId: profile },
+      unifiedApiUrl,
+    ).catch(() => {});
+    await delay(300);
+  }
   if (!canSubmit.ok) {
     let shotLen = 0;
     if (debugArtifactsEnabled) {

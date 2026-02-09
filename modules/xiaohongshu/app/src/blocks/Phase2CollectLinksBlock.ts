@@ -741,14 +741,47 @@ export async function execute(input: CollectLinksInput): Promise<CollectLinksOut
       screenshot: preScreenshotPath,
     });
 
+    // === RIGID CLICK GATE: Re-verify before click ===
+    // Gate 1: Re-read element signature at same index, must match pick
+    const preClickVerify = await controllerAction('browser:execute', {
+      profile,
+      script: `(function(){
+        const items = document.querySelectorAll('.note-item, [data-note-id], a[href*=/explore/]');
+        if (${domIndex} >= items.length) return {ok:false, reason:'index_out_of_range'};
+        const el = items[${domIndex}];
+        const rect = el.getBoundingClientRect();
+        // Hit-test center point
+        const cx = rect.left + rect.width/2;
+        const cy = rect.top + rect.height/2;
+        const hitEl = document.elementFromPoint(cx, cy);
+        const hitOk = hitEl && (el === hitEl || el.contains(hitEl) || hitEl.contains(el));
+        return {
+          ok: hitOk,
+          reason: hitOk ? 'hit_test_pass' : 'hit_test_fail',
+          rect: {left:rect.left, top:rect.top, right:rect.right, bottom:rect.bottom},
+          noteId: el.getAttribute('data-note-id') || el.getAttribute('href') || '',
+        };
+      })()`,
+    }, unifiedApiUrl).then(r => r?.result || r?.data?.result || {ok:false});
+
+    if (!preClickVerify?.ok) {
+      console.warn(`[Phase2Collect] Rigid gate blocked click index=${domIndex}: ${preClickVerify?.reason}`);
+      await delay(300);
+      continue; // Re-pick next iteration
+    }
+    console.log(`[Phase2Collect] Rigid gate passed index=${domIndex}, hit-test ok`);
+
+    // Phase-based timeout tracking
+    const clickStartMs = Date.now();
     const clickResult = await controllerAction('container:operation', {
       containerId: 'xiaohongshu_search.search_result_item',
       operationId: 'click',
       sessionId: profile,
       config: { index: domIndex, useSystemMouse: true, visibleOnly: true },
-      // Keep click operation tight to avoid hanging; if this times out, we should re-pick/scroll.
-      timeoutMs: 45000,
+      timeoutMs: 20000, // Reduced: click itself should be fast
     }, unifiedApiUrl);
+    const clickPhaseMs = Date.now() - clickStartMs;
+    console.log(`[Phase2Collect] click phase took ${clickPhaseMs}ms`);
     if (clickResult?.success === false) {
       console.warn(`[Phase2Collect] 点击失败 index=${domIndex} err=${clickResult?.error || 'unknown'}，尝试系统级点击兜底`);
       if (lastRect && lastRect.left !== undefined && lastRect.top !== undefined) {
@@ -762,10 +795,37 @@ export async function execute(input: CollectLinksInput): Promise<CollectLinksOut
     }
     await delay(1800);
 
-    const urlAfterClick = await controllerAction('browser:execute', {
+    // Phase: Navigation validation
+    const navStartMs = Date.now();
+    await delay(1200);
+    let urlAfterClick = await controllerAction('browser:execute', {
       profile,
       script: 'window.location.href'
     }, unifiedApiUrl).then(res => res?.result || res?.data?.result || '');
+    const navPhaseMs = Date.now() - navStartMs;
+    console.log(`[Phase2Collect] nav phase took ${navPhaseMs}ms, url=${urlAfterClick.slice(0,80)}`);
+
+    // Rigid post-click gate: must have /explore/ and xsec_token
+    const hasExplore = urlAfterClick.includes('/explore/');
+    const hasXsec = urlAfterClick.includes('xsec_token=');
+    if (!hasExplore || !hasXsec) {
+      console.warn(`[Phase2Collect] Post-click gate FAILED: explore=${hasExplore} xsec=${hasXsec}, will retry same index`);
+      await appendTrace({
+        type: 'click_no_xsec_retry',
+        ts: new Date().toISOString(),
+        index: domIndex,
+        url: urlAfterClick,
+        clickPhaseMs,
+        navPhaseMs,
+      });
+      // Back to search results if stuck in detail without xsec
+      if (!urlAfterClick.includes('search_result')) {
+        await controllerAction('keyboard:press', { profileId: profile, key: 'Escape' }, unifiedApiUrl).catch(()=>{});
+        await delay(500);
+      }
+      continue; // Retry same index
+    }
+    console.log(`[Phase2Collect] Post-click gate PASSED: xsec_token present`);
 
     await appendTrace({
       type: 'click_after',
