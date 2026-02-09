@@ -130,31 +130,18 @@ async function systemFillSearchInputValue(profile: string, unifiedApiUrl: string
   return { ok: false, reason: `mismatch:${String(finalCheck.value ?? '')}` };
 }
 
-async function submitHomeSearchViaContainer(profile: string, unifiedApiUrl: string, keyword: string) {
-  // Prefer container operations: type + key (all system-level), avoid generic keyboard focus flakiness.
-  try {
-    await controllerAction(
-      'container:operation',
-      { containerId: 'xiaohongshu_home.search_input', operationId: 'type', sessionId: profile, config: { text: keyword } },
-      unifiedApiUrl,
-    );
-    await delay(200);
-  } catch {
-    // If container type fails, rely on existing filled input (verified before submit).
-  }
-
+async function submitHomeSearchViaContainer(profile: string, unifiedApiUrl: string) {
+  // Fallback only: do NOT type keyword again (it can append duplicated text).
+  // Just click search button once.
   try {
     await controllerAction(
       'container:operation',
       { containerId: 'xiaohongshu_home.search_button', operationId: 'click', sessionId: profile, timeoutMs: 10000 },
       unifiedApiUrl,
     ).catch(() => {});
-    // Always press Enter to trigger search even if input already matches
-    await controllerAction('keyboard:press', { profileId: profile, key: 'Enter' }, unifiedApiUrl).catch(() => {});
-    console.log('[Phase2Search] submit via click + Enter');
+    console.log('[Phase2Search] submit via click fallback');
     return true;
   } catch {
-    // Fall back to keyboard enter if container click is unavailable.
     return false;
   }
 }
@@ -167,13 +154,15 @@ async function canSubmitSearch(profile: string, unifiedApiUrl: string, keyword: 
   return { ok: false, value: (value ?? activeValue ?? null) as string | null, source: null };
 }
 
-async function browserFillSearchInputValue(profile: string, unifiedApiUrl: string, keyword: string) {
+async function browserFillSearchInputValue(profile: string, unifiedApiUrl: string, keyword: string, searchInputContainerId: string) {
   // System-level input only (no browser:fill/execute)
-  await controllerAction(
-    'container:operation',
-    { containerId: 'xiaohongshu_home.search_input', operationId: 'click', sessionId: profile },
-    unifiedApiUrl,
-  ).catch(() => {});
+  if (searchInputContainerId !== 'dom_fallback_search_input') {
+    await controllerAction(
+      'container:operation',
+      { containerId: searchInputContainerId, operationId: 'click', sessionId: profile },
+      unifiedApiUrl,
+    ).catch(() => {});
+  }
   await delay(200);
   await clearSearchInput(profile, unifiedApiUrl);
   await delay(120);
@@ -412,12 +401,15 @@ export async function execute(input: SearchInput): Promise<SearchOutput> {
   let highlightResult: any = null;
   let useDomFallback = false;
 
-  highlightResult = await probeHighlight('xiaohongshu_home.search_input');
-  if (highlightResult) {
-    searchInputContainerId = 'xiaohongshu_home.search_input';
-  } else {
-    highlightResult = await probeHighlight('xiaohongshu_search.search_bar');
-    if (highlightResult) searchInputContainerId = 'xiaohongshu_search.search_bar';
+  const preferredOrder = det.checkpoint === 'search_ready'
+    ? ['xiaohongshu_search.search_bar', 'xiaohongshu_home.search_input']
+    : ['xiaohongshu_home.search_input', 'xiaohongshu_search.search_bar'];
+  for (const candidate of preferredOrder) {
+    highlightResult = await probeHighlight(candidate);
+    if (highlightResult) {
+      searchInputContainerId = candidate;
+      break;
+    }
   }
 
   // Fallback: if container highlight fails, use DOM rect (no refresh/goto)
@@ -518,7 +510,7 @@ export async function execute(input: SearchInput): Promise<SearchOutput> {
     }
 
     // Camoufox: keyboard typing can be flaky (focus/IME). Use a fill-style set + input/change events.
-    const fillRes = await browserFillSearchInputValue(profile, unifiedApiUrl, keyword);
+    const fillRes = await browserFillSearchInputValue(profile, unifiedApiUrl, keyword, searchInputContainerId);
     const fillSuccess = Boolean(fillRes?.success !== false);
     console.log(`[Phase2Search] browser:fill done: success=${fillSuccess}`);
     if (!fillSuccess) {
@@ -535,10 +527,10 @@ export async function execute(input: SearchInput): Promise<SearchOutput> {
   const beforeSubmitValue = await readSearchInputValue(profile, unifiedApiUrl).catch((): null => null);
   const activeBeforeSubmitValue = await readActiveInputValue(profile, unifiedApiUrl).catch((): null => null);
   console.log(`[Phase2Search] Before submit: input value="${String(beforeSubmitValue)}" active="${String(activeBeforeSubmitValue)}" keyword="${keyword}"`);
-  if (String(activeBeforeSubmitValue || '') != String(keyword)) {
+  if (String(activeBeforeSubmitValue || '') != String(keyword) && searchInputContainerId !== 'dom_fallback_search_input') {
     await controllerAction(
       'container:operation',
-      { containerId: 'xiaohongshu_home.search_input', operationId: 'click', sessionId: profile },
+      { containerId: searchInputContainerId, operationId: 'click', sessionId: profile },
       unifiedApiUrl,
     ).catch(() => {});
     await delay(300);
@@ -559,17 +551,22 @@ export async function execute(input: SearchInput): Promise<SearchOutput> {
   }
 
   if (isHome) {
-    // Always trigger search via Enter first (system-level)
+    // Trigger Enter first; fallback to click only when Enter does not navigate to search result.
     console.log('[Phase2Search] submit via Enter');
     await controllerAction('keyboard:press', { profileId: profile, key: 'Enter' }, unifiedApiUrl).catch(() => {});
-    await delay(800);
-    // Then try search button click as fallback
-    const ok = await submitHomeSearchViaContainer(profile, unifiedApiUrl, keyword);
-    if (!ok) {
-      console.log('[Phase2Search] submit via search_button failed');
+    await delay(1200);
+
+    const afterEnter = await detectXhsCheckpoint({ sessionId: profile, serviceUrl: unifiedApiUrl });
+    if (afterEnter.checkpoint !== 'search_ready') {
+      const ok = await submitHomeSearchViaContainer(profile, unifiedApiUrl);
+      if (!ok) {
+        console.log('[Phase2Search] submit via search_button failed');
+      }
+    } else {
+      console.log('[Phase2Search] Enter submit accepted, skip click fallback');
     }
   } else {
-    // search_result：系统级 Enter 提交
+    // search_result：single Enter submit only
     await controllerAction('keyboard:press', { profileId: profile, key: 'Enter' }, unifiedApiUrl).catch(() => {});
   }
   // 等待搜索结果页加载：最多 15 秒。
