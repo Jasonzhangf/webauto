@@ -743,7 +743,7 @@ export async function execute(input: CollectLinksInput): Promise<CollectLinksOut
 
     // === RIGID CLICK GATE: Re-verify before click ===
     // Gate 1: Re-read element signature at same index, must match pick
-    const preClickVerify = await controllerAction('browser:execute', {
+    const preClickVerifyRaw = await controllerAction('browser:execute', {
       profile,
       script: `(function(){
         const items = document.querySelectorAll('.note-item, [data-note-id], a[href*=/explore/]');
@@ -762,7 +762,8 @@ export async function execute(input: CollectLinksInput): Promise<CollectLinksOut
           noteId: el.getAttribute('data-note-id') || el.getAttribute('href') || '',
         };
       })()`,
-    }, unifiedApiUrl).then(r => r?.result || r?.data?.result || {ok:false});
+    }, unifiedApiUrl);
+    const preClickVerify = preClickVerifyRaw?.result || preClickVerifyRaw?.data?.result || {ok:false};
 
     if (!preClickVerify?.ok) {
       console.warn(`[Phase2Collect] Rigid gate blocked click index=${domIndex}: ${preClickVerify?.reason}`);
