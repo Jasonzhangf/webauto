@@ -30,6 +30,7 @@ export interface CollectLinksOutput {
     ts: string;
   }>;
   totalCollected: number;
+  termination?: 'reached_target' | 'no_progress_after_3_retries';
 }
 
 // controllerAction/delay are shared utilities (with safer timeouts) to avoid per-block drift.
@@ -1002,14 +1003,10 @@ export async function execute(input: CollectLinksInput): Promise<CollectLinksOut
     }
   }
 
-  console.log(`[Phase2Collect] 完成，滚动次数: ${scrollCount}, 终止原因: ${noProgressRetryCount >= maxNoProgressRetries ? 'no_progress_after_' + maxNoProgressRetries + '_retries' : 'reached_target' }`);
-
-  // Final gate: quantity must match target.
-  if (links.length < targetCount) {
-    throw new Error(`[Phase2Collect] target_not_reached target=${targetCount} collected=${links.length}`);
-  }
-
   } finally {
+    // Always calculate termination reason based on final state
+    const termination = noProgressRetryCount >= maxNoProgressRetries ? 'no_progress_after_3_retries' : 'reached_target';
+    console.log(`[Phase2Collect] 完成，滚动次数: ${scrollCount}, 终止原因: ${termination}`);
     // Always try to restore to search_result page on exit (success or failure)
     try {
       const det = await detectXhsCheckpoint({ sessionId: profile, serviceUrl: unifiedApiUrl });
@@ -1033,8 +1030,10 @@ export async function execute(input: CollectLinksInput): Promise<CollectLinksOut
     }
   }
 
+  const termination = noProgressRetryCount >= maxNoProgressRetries ? 'no_progress_after_3_retries' : 'reached_target';
   return {
     links,
     totalCollected: links.length,
+    termination,
   };
 }

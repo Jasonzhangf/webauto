@@ -233,6 +233,7 @@ async function main() {
     console.log(`⏱️  采集耗时: ${formatDurationMs(tCollect1 - tCollect0)}`);
     emitRunEvent('phase2_timing', { stage: 'collect_done', ms: tCollect1 - tCollect0 });
     const results = collectResult.links || [];
+    const termination = collectResult?.termination || collectResult?.terminateReason || null;
     if (!Array.isArray(results) || results.length === 0) {
       console.warn('[Phase2Collect] ⚠️ 未获取到链接，跳过写入');
     }
@@ -249,9 +250,12 @@ async function main() {
     console.log(`⏱️  总耗时: ${formatDurationMs(totalMs)}`);
     emitRunEvent('phase2_timing', { stage: 'done', ms: totalMs, count: results.length });
 
+    if (termination) {
+      console.log(`⚠️  采集提前结束，原因: ${termination}`);
+    }
     console.log(`✅ 采集完成，共 ${results.length} 条链接`);
     console.log(`📁 保存路径: ${outPath}`);
-    emitRunEvent('phase2_done', { outPath, count: results.length, target });
+    emitRunEvent('phase2_done', { outPath, count: results.length, target, termination });
 
     await updateXhsCollectState({ keyword, env, downloadRoot, targetCount: target }, (draft) => {
       draft.status = 'completed';
