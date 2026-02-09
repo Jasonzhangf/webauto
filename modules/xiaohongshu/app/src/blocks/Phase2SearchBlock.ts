@@ -146,13 +146,15 @@ async function submitHomeSearchViaContainer(profile: string, unifiedApiUrl: stri
   try {
     await controllerAction(
       'container:operation',
-      { containerId: 'xiaohongshu_search.search_bar', operationId: 'key', sessionId: profile },
+      { containerId: 'xiaohongshu_home.search_button', operationId: 'click', sessionId: profile, timeoutMs: 10000 },
       unifiedApiUrl,
-    );
-    console.log('[Phase2Search] submit via container key (search_bar)');
+    ).catch(() => {});
+    // Always press Enter to trigger search even if input already matches
+    await controllerAction('keyboard:press', { profileId: profile, key: 'Enter' }, unifiedApiUrl).catch(() => {});
+    console.log('[Phase2Search] submit via click + Enter');
     return true;
   } catch {
-    // Fall back to keyboard enter if container key is unavailable.
+    // Fall back to keyboard enter if container click is unavailable.
     return false;
   }
 }
@@ -166,33 +168,22 @@ async function canSubmitSearch(profile: string, unifiedApiUrl: string, keyword: 
 }
 
 async function browserFillSearchInputValue(profile: string, unifiedApiUrl: string, keyword: string) {
-  // Preferred: use browser-service page.fill via unified-api controller action.
-  // IMPORTANT: Camoufox can append text instead of replacing; we MUST clear input.value first.
-  const selector =
-    '#search-input, input#search-input, input[type="search"], input[placeholder*="搜索"], input[placeholder*="关键字"]';
-  
-  // Step 1: force clear the input value via JS (system operations alone can fail to clear in some cases)
-  const escapedSelector = selector.replace(/'/g, "\\'" );
+  // System-level input only (no browser:fill/execute)
   await controllerAction(
-    'browser:execute',
-    {
-      profile,
-      script: `(() => {
-        const el = document.querySelector('${escapedSelector}');
-        if (el && 'value' in el) { el.value = ''; el.dispatchEvent(new Event('input', { bubbles: true })); }
-      })()`,
-    },
+    'container:operation',
+    { containerId: 'xiaohongshu_home.search_input', operationId: 'click', sessionId: profile },
     unifiedApiUrl,
   ).catch(() => {});
-
-  // Step 2: use browser:fill to set the value (now that it's cleared)
-  const res = await controllerAction(
-    'browser:fill',
-    { profile, selector, text: keyword },
-    unifiedApiUrl,
-  ).catch((e) => ({ success: false, error: e?.message || String(e) }));
-  return res;
+  await delay(200);
+  await clearSearchInput(profile, unifiedApiUrl);
+  await delay(120);
+  await controllerAction('keyboard:type', { profileId: profile, text: keyword }, unifiedApiUrl).catch(() => {});
+  await delay(200);
+  const ok = await canSubmitSearch(profile, unifiedApiUrl, keyword).catch(() => ({ ok: false }));
+  return { success: !!ok?.ok, mode: 'keyboard:type' } as any;
 }
+
+
 
 async function clearSearchInput(profile: string, unifiedApiUrl: string) {
   // Prefer deterministic select-all deletion. Fallback to repeated Backspace.
@@ -521,14 +512,18 @@ export async function execute(input: SearchInput): Promise<SearchOutput> {
   }
 
   if (isHome) {
+    // Always trigger search via Enter first (system-level)
+    console.log('[Phase2Search] submit via Enter');
+    await controllerAction('keyboard:press', { profileId: profile, key: 'Enter' }, unifiedApiUrl).catch(() => {});
+    await delay(800);
+    // Then try search button click as fallback
     const ok = await submitHomeSearchViaContainer(profile, unifiedApiUrl, keyword);
     if (!ok) {
-      console.log('[Phase2Search] submit via Enter (fallback)');
-      await controllerAction('keyboard:press', { profileId: profile, key: 'Enter' }, unifiedApiUrl);
+      console.log('[Phase2Search] submit via search_button failed');
     }
   } else {
     // search_result：系统级 Enter 提交
-    await controllerAction('keyboard:press', { profileId: profile, key: 'Enter' }, unifiedApiUrl);
+    await controllerAction('keyboard:press', { profileId: profile, key: 'Enter' }, unifiedApiUrl).catch(() => {});
   }
   // 等待搜索结果页加载：最多 15 秒。
   // 注意：XHS 在 Camoufox 下可能出现“URL 仍停留 /explore/<id>，但 DOM 已是搜索结果页”的壳页行为。

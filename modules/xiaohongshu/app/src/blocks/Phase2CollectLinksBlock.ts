@@ -273,11 +273,8 @@ export async function execute(input: CollectLinksInput): Promise<CollectLinksOut
       ).then((res) => String(res?.result || res?.data?.result || '').trim());
 
       if (inputVal && inputVal === keyword) {
-        const synthesized = new URL('https://www.xiaohongshu.com/search_result');
-        synthesized.searchParams.set('keyword', keyword);
-        const synthesizedUrl = synthesized.toString();
-        console.warn(`[Phase2Collect] shell-page detected; using synthesized expectedSearchUrl=${synthesizedUrl}`);
-        return synthesizedUrl;
+        console.warn(`[Phase2Collect] shell-page detected (input matches); using current URL`);
+        return String(currentUrl || '') || '';
       }
     }
 
@@ -301,11 +298,12 @@ export async function execute(input: CollectLinksInput): Promise<CollectLinksOut
       if (inputVal && inputVal === keyword) {
         const synthesized = new URL('https://www.xiaohongshu.com/search_result');
         synthesized.searchParams.set('keyword', keyword);
-        const synthesizedUrl = synthesized.toString();
-        console.warn(`[Phase2Collect] shell-page detected (non-search URL); using synthesized expectedSearchUrl=${synthesizedUrl}`);
-        return synthesizedUrl;
+        console.warn(`[Phase2Collect] shell-page detected (non-search URL); proceed without synth, using DOM results`);
+        return String(currentUrl || '') || '';
       }
-      // Fall through to strict failure: we refuse to accept shell URL as expectedSearchUrl.
+      // Fall through: shell-page with matching DOM is allowed (no synth URL)
+      console.warn(`[Phase2Collect] shell-page with matching DOM allowed, using current URL`);
+      return String(currentUrl || '') || '';
     }
 
     const actual = getKeywordFromSearchUrl(currentUrl);
