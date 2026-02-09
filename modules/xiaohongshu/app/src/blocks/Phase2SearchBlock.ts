@@ -169,7 +169,7 @@ async function browserFillSearchInputValue(profile: string, unifiedApiUrl: strin
   // Preferred: use browser-service page.fill via unified-api controller action.
   // IMPORTANT: Camoufox can append text instead of replacing; we MUST clear input.value first.
   const selector =
-    '#search-input input, #search-input textarea, input#search-input, input[type="search"], input[placeholder*="搜索"], input[placeholder*="关键字"]';
+    '#search-input, input#search-input, input[type="search"], input[placeholder*="搜索"], input[placeholder*="关键字"]';
   
   // Step 1: force clear the input value via JS (system operations alone can fail to clear in some cases)
   const escapedSelector = selector.replace(/'/g, "\\'" );
