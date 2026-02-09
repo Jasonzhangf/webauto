@@ -537,10 +537,11 @@ export async function execute(input: SearchInput): Promise<SearchOutput> {
   // 这里仅做节奏控制，最终成功判定仍以 DOM/容器信号为准。
   await delay(15000);
 
-  // 验证是否到达搜索结果页（不依赖 URL，使用 DOM 检测），失败则最多重试 3 次 Enter 提交
+  // 验证是否到达搜索结果页（不依赖 URL，使用 DOM + checkpoint），失败则最多重试 3 次 Enter 提交
   let finalUrl = currentUrl;
   let success = false;
   for (let attempt = 1; attempt <= 3; attempt += 1) {
+    const checkpoint = await detectXhsCheckpoint({ sessionId: profile, serviceUrl: unifiedApiUrl });
     const pageCheck = await controllerAction('browser:execute', {
       profile,
       script: `(function(){
@@ -559,9 +560,9 @@ export async function execute(input: SearchInput): Promise<SearchOutput> {
     finalUrl = pageCheck?.url || finalUrl;
     const urlStr = String(finalUrl || '');
     const urlLooksSearch = urlStr.includes('/search_result') || urlStr.includes('search_result');
-    success = Boolean(pageCheck?.hasSearchInput && (pageCheck?.hasTabs || pageCheck?.hasResultList || urlLooksSearch));
+    success = checkpoint.checkpoint === 'search_ready' && Boolean(pageCheck?.hasSearchInput) && (pageCheck?.hasTabs || pageCheck?.hasResultList || urlLooksSearch);
 
-    console.log(`[Phase2Search] 完成: success=${success} url=${finalUrl} hasTabs=${pageCheck?.hasTabs} hasResultList=${pageCheck?.hasResultList} attempt=${attempt}`);
+    console.log(`[Phase2Search] 完成: success=${success} checkpoint=${checkpoint.checkpoint} url=${finalUrl} hasTabs=${pageCheck?.hasTabs} hasResultList=${pageCheck?.hasResultList} attempt=${attempt}`);
 
     if (success) break;
     if (attempt < 3) {
@@ -592,6 +593,19 @@ export async function execute(input: SearchInput): Promise<SearchOutput> {
       await controllerAction('keyboard:press', { profileId: profile, key: 'Enter' }, unifiedApiUrl);
       await delay(5000);
     }
+  }
+
+  if (!success) {
+    const ensureFinal = await ensureXhsCheckpoint({
+      sessionId: profile,
+      target: 'search_ready',
+      serviceUrl: unifiedApiUrl,
+      timeoutMs: 12000,
+      allowOneLevelUpFallback: false,
+    });
+    success = ensureFinal.success && ensureFinal.reached === 'search_ready';
+    finalUrl = ensureFinal.url || finalUrl;
+    console.log(`[Phase2Search] ensure final: success=${success} reached=${ensureFinal.reached} url=${finalUrl}`);
   }
 
   return {

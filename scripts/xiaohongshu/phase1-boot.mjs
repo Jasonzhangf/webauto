@@ -74,7 +74,7 @@ async function main() {
 
   // 2) profile 会话
   const lock = createSessionLock({ profileId: profile, lockType: 'phase1', force: true });
-  const lockHandle = lock.acquire();
+  const lockHandle = lock.acquire({ phase: 'phase1', headless });
   try {
     await startProfile({ profile, headless, url: 'https://www.xiaohongshu.com' });
     await restoreBrowserState(profile);

@@ -47,7 +47,7 @@ export function createSessionLock({ profileId, lockType = 'collector', force = f
     }
   }
 
-  function writeLockFile() {
+  function writeLockFile(extra = {}) {
     fs.mkdirSync(lockDir, { recursive: true });
     const payload = {
       pid: process.pid,
@@ -56,6 +56,7 @@ export function createSessionLock({ profileId, lockType = 'collector', force = f
       profile: profileId,
       type: lockType,
       timeoutMs,
+      ...extra,
     };
     fs.writeFileSync(lockPath, JSON.stringify(payload, null, 2), 'utf8');
   }
@@ -65,6 +66,10 @@ export function createSessionLock({ profileId, lockType = 'collector', force = f
       const existing = readLockFile();
       if (existing && existing.pid === process.pid) {
         existing.updatedAt = new Date().toISOString();
+        if (pendingExtra && typeof pendingExtra === 'object') {
+          Object.assign(existing, pendingExtra);
+          pendingExtra = null;
+        }
         fs.writeFileSync(lockPath, JSON.stringify(existing, null, 2), 'utf8');
       }
     } catch {
@@ -88,7 +93,8 @@ export function createSessionLock({ profileId, lockType = 'collector', force = f
     }
   }
 
-  function acquire() {
+  let pendingExtra = null;
+  function acquire(extra = {}) {
     const existing = readLockFile();
 
     if (!force && existing && existing.type === lockType) {
@@ -110,7 +116,7 @@ export function createSessionLock({ profileId, lockType = 'collector', force = f
       }
     }
 
-    writeLockFile();
+    writeLockFile(extra);
 
     // 启动心跳
     heartbeatInterval = setInterval(updateHeartbeat, HEARTBEAT_INTERVAL_MS);
@@ -132,7 +138,14 @@ export function createSessionLock({ profileId, lockType = 'collector', force = f
       process.exit(1);
     });
 
-    return { lockPath, release: cleanup };
+    return {
+      lockPath,
+      release: cleanup,
+      update: (extraUpdate = {}) => {
+        pendingExtra = { ...(pendingExtra || {}), ...extraUpdate };
+        updateHeartbeat();
+      },
+    };
   }
 
   return { lockPath, acquire };

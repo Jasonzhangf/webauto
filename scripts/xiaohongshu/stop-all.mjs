@@ -81,11 +81,74 @@ function killLocks(profileId) {
           // ignore
         }
       }
+
+      const browserPid = Number(data?.browserPid);
+      if (Number.isFinite(browserPid)) {
+        try {
+          process.kill(browserPid, 'SIGTERM');
+          log(`killed browserPid=${browserPid} from lock ${file}`);
+        } catch {
+          // ignore
+        }
+      }
     } catch {
       // ignore
     }
     try {
       fs.unlinkSync(lockPath);
+    } catch {
+      // ignore
+    }
+  }
+}
+
+function killPhaseProcesses() {
+  const ps = spawn('ps', ['aux']);
+  let output = '';
+  ps.stdout.on('data', (chunk) => {
+    output += chunk.toString();
+  });
+  ps.on('close', () => {
+    const lines = output.split('\n');
+    const targets = lines
+      .filter((line) => /phase2-collect\.mjs|phase3-interact\.mjs|phase4-harvest\.mjs/.test(line))
+      .map((line) => Number(line.trim().split(/\s+/)[1]))
+      .filter((pid) => Number.isFinite(pid));
+    for (const pid of targets) {
+      try {
+        process.kill(pid, 'SIGTERM');
+        log(`killed phase process pid=${pid}`);
+      } catch {
+        // ignore
+      }
+    }
+  });
+}
+
+async function killCamoufox(profileId) {
+  const profilePath = path.join(os.homedir(), '.webauto', 'profiles', profileId);
+  const ps = spawn('ps', ['aux']);
+  let output = '';
+  ps.stdout.on('data', (chunk) => {
+    output += chunk.toString();
+  });
+  await new Promise((resolve) => ps.on('close', resolve));
+
+  const lines = output.split('\n');
+  const targets = lines
+    .filter((line) => line.includes('camoufox') && line.includes(profilePath))
+    .map((line) => {
+      const parts = line.trim().split(/\s+/);
+      return Number(parts[1]);
+    })
+    .filter((pid) => Number.isFinite(pid));
+
+  if (!targets.length) return;
+
+  for (const pid of targets) {
+    try {
+      process.kill(pid, 'SIGTERM');
+      log(`killed camoufox pid=${pid}`);
     } catch {
       // ignore
     }
@@ -102,6 +165,8 @@ async function main() {
   }
 
   killLocks(PROFILE);
+  killPhaseProcesses();
+  await killCamoufox(PROFILE);
   log('done');
 }
 

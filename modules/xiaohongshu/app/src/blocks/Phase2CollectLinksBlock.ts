@@ -8,7 +8,7 @@ import { ContainerRegistry } from '../../../../container-registry/src/index.js';
 import { execute as waitSearchPermit } from '../../../../workflow/blocks/WaitSearchPermitBlock.js';
 import { execute as phase2Search } from './Phase2SearchBlock.js';
 import { execute as discoverFallback } from './XhsDiscoverFallbackBlock.js';
-import { detectXhsCheckpoint } from '../utils/checkpoints.js';
+import { detectXhsCheckpoint, ensureXhsCheckpoint } from '../utils/checkpoints.js';
 import os from 'node:os';
 import path from 'node:path';
 import { promises as fs } from 'node:fs';
@@ -143,16 +143,25 @@ export async function execute(input: CollectLinksInput): Promise<CollectLinksOut
     env = 'debug',
   } = input;
 
-  console.log(`[Phase2CollectLinks] 目标: ${targetCount} 条链接`);
+ console.log(`[Phase2CollectLinks] 目标: ${targetCount} 条链接`);
+
+  // Ensure we are in a safe starting state (search). Recover from detail/comments if needed.
+  const ensureRes = await ensureXhsCheckpoint({
+    sessionId: profile,
+    target: 'search_ready',
+    serviceUrl: unifiedApiUrl,
+    timeoutMs: 15000,
+    allowOneLevelUpFallback: true,
+  });
+  if (!ensureRes.success && ensureRes.reached !== 'home_ready' && ensureRes.reached !== 'search_ready') {
+    throw new Error(`[Phase2CollectLinks] ensure checkpoint failed: reached=${ensureRes.reached} url=${ensureRes.url}`);
+  }
 
   // 开发期硬门禁：进入采集前先定位，避免在详情/风控态继续执行。
   const det = await detectXhsCheckpoint({ sessionId: profile, serviceUrl: unifiedApiUrl });
   console.log(`[Phase2CollectLinks] locate: checkpoint=${det.checkpoint} url=${det.url}`);
   if (det.checkpoint === 'risk_control' || det.checkpoint === 'login_guard' || det.checkpoint === 'offsite') {
     throw new Error(`[Phase2CollectLinks] hard_stop checkpoint=${det.checkpoint} url=${det.url}`);
-  }
-  if (det.checkpoint === 'detail_ready' || det.checkpoint === 'comments_ready') {
-    throw new Error(`[Phase2CollectLinks] 当前处于详情态，禁止采集列表（避免风控）。checkpoint=${det.checkpoint} url=${det.url}`);
   }
 
   const links: CollectLinksOutput['links'] = [];
@@ -746,7 +755,7 @@ export async function execute(input: CollectLinksInput): Promise<CollectLinksOut
     const preClickVerifyRaw = await controllerAction('browser:execute', {
       profile,
       script: `(function(){
-        const items = document.querySelectorAll('.note-item, [data-note-id], a[href*=/explore/]');
+        const items = document.querySelectorAll('.note-item, [data-note-id], a[href*="/explore/"]');
         if (${domIndex} >= items.length) return {ok:false, reason:'index_out_of_range'};
         const el = items[${domIndex}];
         const rect = el.getBoundingClientRect();
@@ -763,7 +772,7 @@ export async function execute(input: CollectLinksInput): Promise<CollectLinksOut
         };
       })()`,
     }, unifiedApiUrl);
-    const preClickVerify = preClickVerifyRaw?.result || preClickVerifyRaw?.data?.result || {ok:false};
+    const preClickVerify = preClickVerifyRaw?.data?.result ?? preClickVerifyRaw?.result ?? preClickVerifyRaw?.data ?? preClickVerifyRaw ?? {ok:false};
 
     if (!preClickVerify?.ok) {
       console.warn(`[Phase2Collect] Rigid gate blocked click index=${domIndex}: ${preClickVerify?.reason}`);

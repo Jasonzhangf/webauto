@@ -158,7 +158,7 @@ async function main() {
   const lock = createSessionLock({ profileId: PROFILE_RUNTIME, lockType: 'phase2' });
   let lockHandle = null;
   try {
-    lockHandle = lock.acquire();
+    lockHandle = lock.acquire({ phase: 'phase2', keyword, target, runId: runContext.runId });
   } catch (e) {
     console.log('⚠️  会话锁已被其他进程持有，退出');
     console.log(String(e?.message || e));
@@ -166,7 +166,7 @@ async function main() {
   }
 
   try {
-    emitRunEvent('phase2_start', { keyword, target, env });
+    emitRunEvent('phase2_start', { keyword, target, env, runId: runContext.runId });
     await updateXhsCollectState({ keyword, env, downloadRoot, targetCount: target }, (draft) => {
       if (!draft.startTime) draft.startTime = new Date().toISOString();
       draft.status = 'running';
