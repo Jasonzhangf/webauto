@@ -20,6 +20,7 @@ export interface CollectLinksInput {
   profile?: string;
   unifiedApiUrl?: string;
   env?: string;
+  alreadyCollectedNoteIds?: string[];
 }
 
 export interface CollectLinksOutput {
@@ -142,6 +143,7 @@ export async function execute(input: CollectLinksInput): Promise<CollectLinksOut
     profile = 'xiaohongshu_fresh',
     unifiedApiUrl = 'http://127.0.0.1:7701',
     env = 'debug',
+    alreadyCollectedNoteIds = [],
   } = input;
 
  console.log(`[Phase2CollectLinks] 目标: ${targetCount} 条链接`);
@@ -168,7 +170,7 @@ export async function execute(input: CollectLinksInput): Promise<CollectLinksOut
   const links: CollectLinksOutput['links'] = [];
   const seen = new Set<string>();
   const seenExploreIds = new Set<string>();
-  const seenNoteIds = new Set<string>();
+  const seenNoteIds = new Set<string>(alreadyCollectedNoteIds.filter(Boolean));
   const registry = new ContainerRegistry();
   await registry.load();
   let attempts = 0;

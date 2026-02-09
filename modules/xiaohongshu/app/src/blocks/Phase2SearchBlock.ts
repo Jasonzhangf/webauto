@@ -186,8 +186,29 @@ async function browserFillSearchInputValue(profile: string, unifiedApiUrl: strin
 
 
 async function clearSearchInput(profile: string, unifiedApiUrl: string) {
-  // Prefer deterministic select-all deletion. Fallback to repeated Backspace.
-  // IMPORTANT: only system keyboard operations allowed.
+  // Step 1: JS-based clear first (most reliable for Camoufox/Firefox)
+  const jsCleared = await controllerAction(
+    'browser:execute',
+    {
+      profile,
+      script: `(() => {
+        const root = document.querySelector('#search-input') ||
+          document.querySelector("input[type='search']") ||
+          document.querySelector("input[placeholder*='搜索'], input[placeholder*='关键字']");
+        if (!root) return false;
+        root.value = '';
+        root.dispatchEvent(new Event('input', { bubbles: true }));
+        root.dispatchEvent(new Event('change', { bubbles: true }));
+        return true;
+      })()`,
+    },
+    unifiedApiUrl
+  ).then(res => res?.result || res?.data?.result || false).catch(() => false);
+  await delay(100);
+  const v1 = await readSearchInputValue(profile, unifiedApiUrl);
+  if (!v1 || !v1.trim()) return;
+
+  // Step 2+: Fallback to system keyboard if needed
   const tryCombo = async (combo: 'Meta+A' | 'Control+A') => {
     const mod = combo.startsWith('Meta') ? 'Meta' : 'Control';
     await controllerAction('keyboard:down', { profileId: profile, key: mod }, unifiedApiUrl).catch(() => {});

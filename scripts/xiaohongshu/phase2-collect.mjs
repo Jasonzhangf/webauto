@@ -58,10 +58,27 @@ async function safeRm(targetPath) {
   }
 }
 
-async function writeJsonl(filePath, rows) {
+async function readExistingJsonl(filePath) {
+  const { readFile } = await import('node:fs/promises');
+  try {
+    const text = await readFile(filePath, 'utf8');
+    return text.split('\n').filter(Boolean).map((line) => {
+      try { return JSON.parse(line); } catch { return null; }
+    }).filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+async function writeJsonl(filePath, rows, { append = true, dedupeKey = 'noteId' } = {}) {
   const { writeFile } = await import('node:fs/promises');
-  const body = rows.map((r) => JSON.stringify(r)).join('\n') + (rows.length ? '\n' : '');
+  const existing = append ? await readExistingJsonl(filePath) : [];
+  const seen = new Set(existing.map((r) => r[dedupeKey]).filter(Boolean));
+  const newRows = rows.filter((r) => !seen.has(r[dedupeKey]));
+  const merged = [...existing, ...newRows];
+  const body = merged.map((r) => JSON.stringify(r)).join('\n') + (merged.length ? '\n' : '');
   await writeFile(filePath, body, 'utf8');
+  return { total: merged.length, added: newRows.length, existing: existing.length };
 }
 
 async function maybeDaemonize(argv) {
@@ -141,10 +158,10 @@ async function main() {
 
   // 清理旧产物（同 env + keyword 下）
   const baseDir = path.join(downloadRoot, 'xiaohongshu', env, keyword);
-  await safeRm(`${baseDir}/phase2-links.jsonl`);
-  await safeRm(`${baseDir}/run.log`);
-  await safeRm(`${baseDir}/run-events.jsonl`);
-  await safeRm(`${baseDir}/click-trace`);
+  // await safeRm(`${baseDir}/phase2-links.jsonl`); // 保留已有进度
+  // await safeRm(`${baseDir}/run.log`);
+  // await safeRm(`${baseDir}/run-events.jsonl`);
+  // await safeRm(`${baseDir}/click-trace`);
 
   // 初始化日志
   const runContext = initRunLogging({ env, keyword, logMode: 'single' });
@@ -228,17 +245,6 @@ async function main() {
     }
 
     const tCollect0 = nowMs();
-    const collectResult = await phase2CollectLinks({ keyword, targetCount: target, env, profile: PROFILE_RUNTIME });
-    const tCollect1 = nowMs();
-    console.log(`⏱️  采集耗时: ${formatDurationMs(tCollect1 - tCollect0)}`);
-    emitRunEvent('phase2_timing', { stage: 'collect_done', ms: tCollect1 - tCollect0 });
-    const results = collectResult.links || [];
-    const termination = collectResult?.termination || collectResult?.terminateReason || null;
-    if (!Array.isArray(results) || results.length === 0) {
-      console.warn('[Phase2Collect] ⚠️ 未获取到链接，跳过写入');
-    }
-
-    const outPath = path.join(downloadRoot, 'xiaohongshu', env, keyword, 'phase2-links.jsonl');
     const outDir = path.dirname(outPath);
     await ensureDir(outDir);
     if (results.length > 0) {
