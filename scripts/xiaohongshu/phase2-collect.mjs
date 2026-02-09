@@ -174,6 +174,8 @@ async function main() {
   // 获取会话锁
   const lock = createSessionLock({ profileId: PROFILE_RUNTIME, lockType: 'phase2' });
   let lockHandle = null;
+  const outPath = path.join(downloadRoot, 'xiaohongshu', env, keyword, 'phase2-links.jsonl');
+  let collectResult = null;
   try {
     lockHandle = lock.acquire({ phase: 'phase2', keyword, target, runId: runContext.runId });
   } catch (e) {
@@ -244,19 +246,53 @@ async function main() {
       throw new Error(`搜索失败: ${searchResult.finalUrl}`);
     }
 
+    const existingRows = await readExistingJsonl(outPath);
+    const existingNoteIds = Array.from(new Set(existingRows
+      .map((r) => String(r?.noteId || '').trim())
+      .filter(Boolean)));
+    const remainingTarget = Math.max(0, Number(target) - existingNoteIds.length);
+
+    console.log(`[Phase2] resume: existing=${existingNoteIds.length}, remaining=${remainingTarget}, target=${target}`);
+    emitRunEvent('phase2_resume', {
+      existing: existingNoteIds.length,
+      remaining: remainingTarget,
+      target,
+      outPath,
+    });
+
     const tCollect0 = nowMs();
+    let newlyCollected = [];
+    let termination = null;
+    if (remainingTarget > 0) {
+      collectResult = await phase2CollectLinks({
+        keyword,
+        targetCount: remainingTarget,
+        profile: PROFILE_RUNTIME,
+        env,
+        alreadyCollectedNoteIds: existingNoteIds,
+      });
+      newlyCollected = Array.isArray(collectResult?.links) ? collectResult.links : [];
+      termination = collectResult?.termination || null;
+    } else {
+      termination = 'reached_target';
+      console.log('[Phase2] resume target already reached, skip collect run');
+    }
+    const tCollect1 = nowMs();
+    console.log(`⏱️  采集耗时: ${formatDurationMs(tCollect1 - tCollect0)}`);
+    emitRunEvent('phase2_timing', { stage: 'collect_done', ms: tCollect1 - tCollect0, count: newlyCollected.length });
+
     const outDir = path.dirname(outPath);
     await ensureDir(outDir);
-    if (results.length > 0) {
-      await writeJsonl(outPath, results);
-    }
+    const persist = await writeJsonl(outPath, newlyCollected, { append: true, dedupeKey: 'noteId' });
+    const results = await readExistingJsonl(outPath);
+    console.log(`[Phase2] persist: existingBefore=${persist.existing} added=${persist.added} total=${persist.total}`);
 
     const t1 = nowMs();
     const totalMs = t1 - t0;
     console.log(`⏱️  总耗时: ${formatDurationMs(totalMs)}`);
     emitRunEvent('phase2_timing', { stage: 'done', ms: totalMs, count: results.length });
 
-    if (termination) {
+    if (termination && termination !== 'reached_target') {
       console.log(`⚠️  采集提前结束，原因: ${termination}`);
     }
     console.log(`✅ 采集完成，共 ${results.length} 条链接`);
@@ -274,14 +310,13 @@ async function main() {
       }));
       draft.stats.phase2DurationMs = totalMs;
       draft.resume.lastStep = 'phase2_done';
-      // 成功路径必须清理历史错误，避免出现“已完成但仍报错”的矛盾状态。
       if (draft.error) draft.error = null;
     });
 
     console.log('\n📊 采集结果：');
     console.log(`   总链接数: ${results.length}`);
     console.log(`   输出路径: ${outPath}`);
-    console.log(`\n✅ Phase 2 完成`);
+    console.log('\n✅ Phase 2 完成');
 
   } catch (err) {
     emitRunEvent('phase2_error', { error: safeStringify(err) });
@@ -291,13 +326,14 @@ async function main() {
       const fallbackPath = path.join(downloadRoot, 'xiaohongshu', env, keyword, 'phase2-links.jsonl');
       const fallbackDir = path.dirname(fallbackPath);
       await ensureDir(fallbackDir).catch(() => {});
-      await writeJsonl(fallbackPath, partialResults).catch(() => {});
-      console.log(`📁 部分结果已保存: ${fallbackPath} (${partialResults.length} 条)`);
+      await writeJsonl(fallbackPath, partialResults, { append: true, dedupeKey: 'noteId' }).catch(() => {});
+      const merged = await readExistingJsonl(fallbackPath).catch(() => partialResults);
+      console.log(`📁 部分结果已保存: ${fallbackPath} (added=${partialResults.length}, merged=${merged.length})`);
       
       await updateXhsCollectState({ keyword, env, downloadRoot, targetCount: target }, (draft) => {
         draft.status = 'failed_partial';
         draft.listCollection.targetCount = target;
-        draft.listCollection.collectedUrls = partialResults.map((r) => ({
+        draft.listCollection.collectedUrls = merged.map((r) => ({
           noteId: String(r?.noteId || '').trim(),
           safeUrl: String(r?.safeUrl || '').trim(),
           ...(String(r?.searchUrl || '').trim() ? { searchUrl: String(r.searchUrl).trim() } : {}),

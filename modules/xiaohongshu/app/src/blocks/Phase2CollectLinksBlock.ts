@@ -136,6 +136,15 @@ function getExploreIdFromUrl(urlString: string) {
   }
 }
 
+function normalizeNoteId(raw: string) {
+  const value = String(raw || '').trim();
+  if (!value) return null;
+  const fromPath = value.match(/\/explore\/([a-f0-9]+)/i);
+  if (fromPath?.[1]) return fromPath[1].toLowerCase();
+  if (/^[a-f0-9]{8,}$/i.test(value)) return value.toLowerCase();
+  return null;
+}
+
 export async function execute(input: CollectLinksInput): Promise<CollectLinksOutput> {
   const {
     keyword,
@@ -169,8 +178,12 @@ export async function execute(input: CollectLinksInput): Promise<CollectLinksOut
 
   const links: CollectLinksOutput['links'] = [];
   const seen = new Set<string>();
-  const seenExploreIds = new Set<string>();
-  const seenNoteIds = new Set<string>(alreadyCollectedNoteIds.filter(Boolean));
+  const seenNoteIds = new Set<string>(
+    alreadyCollectedNoteIds
+      .map((id) => normalizeNoteId(String(id || '')))
+      .filter((id): id is string => Boolean(id)),
+  );
+  const seenExploreIds = new Set<string>(Array.from(seenNoteIds));
   const registry = new ContainerRegistry();
   await registry.load();
   let attempts = 0;
@@ -702,7 +715,13 @@ export async function execute(input: CollectLinksInput): Promise<CollectLinksOut
       await delay(400);
     }
 
-    const exploreId = String(pick.exploreId || '');
+    const exploreId = normalizeNoteId(String(pick.exploreId || '')) || '';
+    if (exploreId && seenNoteIds.has(exploreId)) {
+      console.log(`[Phase2Collect] skip pre-click: already_collected noteId=${exploreId}`);
+      await appendTrace({ type: 'skip_existing_note_preclick', ts: new Date().toISOString(), domIndex, noteId: exploreId });
+      await delay(80);
+      continue;
+    }
     if (exploreId) {
       seenExploreIds.add(exploreId);
     }
@@ -767,11 +786,17 @@ export async function execute(input: CollectLinksInput): Promise<CollectLinksOut
         const cy = rect.top + rect.height/2;
         const hitEl = document.elementFromPoint(cx, cy);
         const hitOk = hitEl && (el === hitEl || el.contains(hitEl) || hitEl.contains(el));
+        const noteLike =
+          el.getAttribute('data-note-id') ||
+          el.getAttribute('href') ||
+          (el.querySelector && el.querySelector('a[href*="/explore/"]')
+            ? el.querySelector('a[href*="/explore/"]').getAttribute('href')
+            : '') || '';
         return {
           ok: hitOk,
           reason: hitOk ? 'hit_test_pass' : 'hit_test_fail',
           rect: {left:rect.left, top:rect.top, right:rect.right, bottom:rect.bottom},
-          noteId: el.getAttribute('data-note-id') || el.getAttribute('href') || '',
+          noteId: noteLike,
         };
       })()`,
     }, unifiedApiUrl);
@@ -782,7 +807,20 @@ export async function execute(input: CollectLinksInput): Promise<CollectLinksOut
       await delay(300);
       continue; // Re-pick next iteration
     }
-    console.log(`[Phase2Collect] Rigid gate passed index=${domIndex}, hit-test ok`);
+    const preClickNoteId = normalizeNoteId(String(preClickVerify?.noteId || '')) || '';
+    if (!preClickNoteId) {
+      console.warn(`[Phase2Collect] Rigid gate blocked click index=${domIndex}: missing_note_id`);
+      await appendTrace({ type: 'skip_missing_noteid_gate', ts: new Date().toISOString(), domIndex });
+      await delay(120);
+      continue;
+    }
+    if (seenNoteIds.has(preClickNoteId)) {
+      console.log(`[Phase2Collect] skip by gate: already_collected noteId=${preClickNoteId}`);
+      await appendTrace({ type: 'skip_existing_note_gate', ts: new Date().toISOString(), domIndex, noteId: preClickNoteId });
+      await delay(80);
+      continue;
+    }
+    console.log(`[Phase2Collect] Rigid gate passed index=${domIndex}, hit-test ok noteId=${preClickNoteId}`);
 
     // Phase-based timeout tracking
     const clickStartMs = Date.now();
@@ -894,7 +932,7 @@ export async function execute(input: CollectLinksInput): Promise<CollectLinksOut
     // NOTE: We already validated searchUrl strictly via isValidSearchUrl().
 
     // 7. 提取 noteId + 去重（按 noteId 全局唯一）
-    const noteId = getExploreIdFromUrl(safeUrl) || '';
+    const noteId = normalizeNoteId(getExploreIdFromUrl(safeUrl) || '') || '';
     if (!noteId) {
       console.warn(`[Phase2Collect] drop: missing_note_id safeUrl=${safeUrl}`);
       await appendTrace({ type: 'drop', ts: new Date().toISOString(), reason: 'missing_note_id', safeUrl });
