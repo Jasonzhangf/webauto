@@ -21,16 +21,17 @@ async function checkHealth(url) {
   }
 }
 
-export async function ensureServicesHealthy() {
+export async function ensureServicesHealthy({ allowRestart = false } = {}) {
   const uOk = await checkHealth('http://127.0.0.1:7701/health');
   const bOk = await checkHealth('http://127.0.0.1:7704/health');
   const sOk = await checkHealth('http://127.0.0.1:7790/health');
 
   if (uOk && bOk && sOk) return;
 
+  const action = allowRestart ? 'restart' : 'start';
   await new Promise((resolve, reject) => {
-    const child = spawn('node', ['scripts/core-daemon.mjs', 'restart'], { stdio: 'inherit' });
-    child.on('exit', (code) => (code === 0 ? resolve() : reject(new Error(`core-daemon restart exit ${code}`))));
+    const child = spawn('node', ['scripts/core-daemon.mjs', action], { stdio: 'inherit' });
+    child.on('exit', (code) => (code === 0 ? resolve() : reject(new Error(`core-daemon ${action} exit ${code}`))));
     child.on('error', reject);
   });
 }

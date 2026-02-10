@@ -358,7 +358,7 @@ export class BrowserSession {
   async newPage(url?: string): Promise<{ index: number; url: string }> {
     const ctx = this.ensureContext();
     const isMac = process.platform === 'darwin';
-    const shortcut = isMac ? 'Meta+T' : 'Control+T';
+    const shortcut = isMac ? 'Meta+t' : 'Control+t';
     let page = null;
 
     // Strictly use keyboard shortcut to create a new tab in the same window
@@ -367,9 +367,20 @@ export class BrowserSession {
 
     await opener.bringToFront().catch((): any => null);
     const before = ctx.pages().filter((p) => !p.isClosed()).length;
-    const waitPage = ctx.waitForEvent('page', { timeout: 3000 }).catch((): any => null);
-    await opener.keyboard.press(shortcut).catch((): any => null);
-    page = await waitPage;
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      const waitPage = ctx.waitForEvent('page', { timeout: 8000 }).catch((): any => null);
+      await opener.keyboard.press(shortcut).catch((): any => null);
+      page = await waitPage;
+
+      const pagesNow = ctx.pages().filter((p) => !p.isClosed());
+      const after = pagesNow.length;
+      if (page && after > before) break;
+      if (!page && after > before) {
+        page = pagesNow[pagesNow.length - 1] || null;
+        break;
+      }
+      await new Promise((r) => setTimeout(r, 250));
+    }
 
     const after = ctx.pages().filter((p) => !p.isClosed()).length;
     if (!page || after <= before) {

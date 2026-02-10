@@ -24,6 +24,20 @@ import {
   type XhsExtractedComment,
 } from './helpers/xhsComments.js';
 
+export interface InteractRoundStats {
+  round: number;
+  visible: number;
+  harvestedNew: number;
+  harvestedTotal: number;
+  ruleHits: number;
+  gateBlocked: number;
+  newLikes: number;
+  likedTotal: number;
+  reachedBottom: boolean;
+  endReason?: string;
+  ms: number;
+}
+
 export interface InteractInput {
   sessionId: string;
   noteId: string;
@@ -34,6 +48,12 @@ export interface InteractInput {
   unifiedApiUrl?: string;
   keyword?: string;
   env?: string;
+  reuseCurrentDetail?: boolean;
+  commentsAlreadyOpened?: boolean;
+  collectComments?: boolean;
+  persistCollectedComments?: boolean;
+  commentsFilePath?: string;
+  onRound?: (stats: InteractRoundStats) => void;
 }
 
 export interface InteractOutput {
@@ -48,7 +68,11 @@ export interface InteractOutput {
     content: string;
     timestamp: string;
     screenshots?: { before?: string | null; after?: string | null };
+    matchedRule?: string;
   }>;
+  commentsAdded?: number;
+  commentsTotal?: number;
+  commentsPath?: string;
   reachedBottom: boolean;
   stopReason?: string;
   error?: string;
@@ -58,6 +82,68 @@ function normalizeText(s: string) {
   return String(s || '').replace(/\s+/g, ' ').trim();
 }
 
+export type LikeRule =
+  | { kind: 'contains'; include: string; raw: string }
+  | { kind: 'and'; includeA: string; includeB: string; raw: string }
+  | { kind: 'include_without'; include: string; exclude: string; raw: string };
+
+function parseLikeRuleToken(token: string): LikeRule | null {
+  const raw = String(token || '').trim();
+  if (!raw) return null;
+
+  const m = raw.match(/^\{\s*(.+?)\s*([+\-＋－])\s*(.+?)\s*\}$/);
+  if (!m) {
+    return { kind: 'contains', include: raw, raw };
+  }
+
+  const left = normalizeText(m[1]);
+  const right = normalizeText(m[3]);
+  if (!left || !right) return null;
+
+  const op = m[2] === '＋' ? '+' : m[2] === '－' ? '-' : m[2];
+  if (op === '+') {
+    return { kind: 'and', includeA: left, includeB: right, raw: `{${left} + ${right}}` };
+  }
+  return { kind: 'include_without', include: left, exclude: right, raw: `{${left} - ${right}}` };
+}
+
+export function compileLikeRules(likeKeywords: string[]): LikeRule[] {
+  const rows = Array.isArray(likeKeywords) ? likeKeywords : [];
+  const rules: LikeRule[] = [];
+  for (const row of rows) {
+    const parsed = parseLikeRuleToken(String(row || '').trim());
+    if (!parsed) continue;
+    rules.push(parsed);
+  }
+  return rules;
+}
+
+export function matchLikeText(textRaw: string, rules: LikeRule[]): { ok: boolean; reason: string; matchedRule?: string } {
+  const text = normalizeText(textRaw);
+  if (!text) return { ok: false, reason: 'empty_text' };
+  if (!Array.isArray(rules) || rules.length === 0) return { ok: false, reason: 'no_rules' };
+
+  for (const rule of rules) {
+    if (rule.kind === 'contains') {
+      if (text.includes(rule.include)) {
+        return { ok: true, reason: 'contains_match', matchedRule: rule.raw };
+      }
+      continue;
+    }
+    if (rule.kind === 'and') {
+      if (text.includes(rule.includeA) && text.includes(rule.includeB)) {
+        return { ok: true, reason: 'and_match', matchedRule: rule.raw };
+      }
+      continue;
+    }
+    if (text.includes(rule.include) && !text.includes(rule.exclude)) {
+      return { ok: true, reason: 'include_without_match', matchedRule: rule.raw };
+    }
+  }
+
+  return { ok: false, reason: 'no_rule_match' };
+}
+
 async function highlightLikeButton(sessionId: string, index: number, apiUrl: string) {
   return controllerAction(
     'container:operation',
@@ -65,6 +151,7 @@ async function highlightLikeButton(sessionId: string, index: number, apiUrl: str
       containerId: 'xiaohongshu_detail.comment_section.comment_item',
       operationId: 'highlight',
       sessionId,
+      timeoutMs: 12000,
       config: {
         index,
         target: '.like-wrapper',
@@ -84,6 +171,7 @@ async function ensureCommentVisibleCentered(sessionId: string, apiUrl: string, i
       'browser:execute',
       {
         profile: sessionId,
+        timeoutMs: 12000,
         script: `(() => {
           const idx = ${index};
           const items = Array.from(document.querySelectorAll('.comment-item'));
@@ -111,6 +199,7 @@ async function ensureCommentVisibleCentered(sessionId: string, apiUrl: string, i
         containerId: 'xiaohongshu_detail.comment_section',
         operationId: 'scroll',
         sessionId,
+        timeoutMs: 12000,
         config: { direction: dir, amount },
       },
       apiUrl,
@@ -127,11 +216,26 @@ async function clickLikeButtonByIndex(sessionId: string, index: number, apiUrl: 
       containerId: 'xiaohongshu_detail.comment_section.comment_item',
       operationId: 'click',
       sessionId,
+      timeoutMs: 12000,
       // 明确走系统级点击（clickOperation 内部用 bbox/elementFromPoint 选点并调用 systemInput.mouseClick）
       config: { index, target: '.like-wrapper', useSystemMouse: true, visibleOnly: true },
     },
     apiUrl,
   );
+}
+
+async function expandMoreComments(sessionId: string, apiUrl: string): Promise<void> {
+  await controllerAction(
+    'container:operation',
+    {
+      containerId: 'xiaohongshu_detail.comment_section.show_more_button',
+      operationId: 'click',
+      sessionId,
+      timeoutMs: 12000,
+      config: { visibleOnly: true, useSystemMouse: true },
+    },
+    apiUrl,
+  ).catch(() => {});
 }
 
 async function verifyLikedBySignature(
@@ -169,6 +273,7 @@ async function verifyLikedBySignature(
       'browser:execute',
       {
         profile: sessionId,
+        timeoutMs: 12000,
         script: `(() => {
           const targetText = ${JSON.stringify(targetText)};
           const userName = ${JSON.stringify(String(signature.userName || ''))};
@@ -215,6 +320,7 @@ async function getLikeStateForVisibleCommentIndex(
       'browser:execute',
       {
         profile: sessionId,
+        timeoutMs: 12000,
         script: `(() => {
           const idx = ${JSON.stringify(index)};
           const isVisible = (el) => {
@@ -322,6 +428,45 @@ function makeSignature(noteId: string, userId: string, userName: string, text: s
   return [noteId, String(userId || ''), String(userName || ''), normalizedText].join('|');
 }
 
+function normalizeHarvestComment(noteId: string, row: XhsExtractedComment) {
+  return {
+    noteId,
+    userName: String((row as any).user_name || '').trim(),
+    userId: String((row as any).user_id || '').trim(),
+    content: String((row as any).text || '').replace(/\s+/g, ' ').trim(),
+    time: String((row as any).timestamp || '').trim(),
+    likeCount: 0,
+    ts: new Date().toISOString(),
+  };
+}
+
+async function readJsonlRows(filePath: string): Promise<any[]> {
+  try {
+    const text = await fsp.readFile(filePath, 'utf8');
+    return text
+      .split('\n')
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .map((line) => {
+        try {
+          return JSON.parse(line);
+        } catch {
+          return null;
+        }
+      })
+      .filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+async function appendJsonlRows(filePath: string, rows: any[]): Promise<void> {
+  if (!rows.length) return;
+  await fsp.mkdir(path.dirname(filePath), { recursive: true });
+  const payload = rows.map((row) => JSON.stringify(row)).join('\n') + '\n';
+  await fsp.appendFile(filePath, payload, 'utf8');
+}
+
 export async function execute(input: InteractInput): Promise<InteractOutput> {
   const {
     sessionId,
@@ -333,11 +478,21 @@ export async function execute(input: InteractInput): Promise<InteractOutput> {
     unifiedApiUrl = 'http://127.0.0.1:7701',
     keyword = 'unknown',
     env = 'debug',
+    reuseCurrentDetail = false,
+    commentsAlreadyOpened = false,
+    collectComments = false,
+    persistCollectedComments = false,
+    commentsFilePath = '',
+    onRound,
   } = input;
 
   // Load persisted liked signatures for dedup (resume support)
   const likedSignatures = loadLikedSignatures(keyword, env);
+  const compiledLikeRules = compileLikeRules(likeKeywords);
   console.log(`[Phase3Interact] 开始处理帖子: ${noteId}, 已有点赞记录: ${likedSignatures.size}`);
+  console.log(
+    `[Phase3Interact] 关键词规则: ${compiledLikeRules.length > 0 ? compiledLikeRules.map((r) => r.raw).join(' | ') : '(empty)'}`,
+  );
 
   const likedComments: InteractOutput['likedComments'] = [];
   let likedCount = 0;
@@ -346,6 +501,22 @@ export async function execute(input: InteractInput): Promise<InteractOutput> {
   let bottomReason = '';
   let scrollCount = 0;
   const maxScrolls = Infinity;
+
+  const harvestPath = String(commentsFilePath || '').trim();
+  const shouldHarvest = Boolean(collectComments);
+  const shouldPersistHarvest = shouldHarvest && Boolean(persistCollectedComments) && Boolean(harvestPath);
+  const harvestedKeySet = new Set<string>();
+  let harvestedAdded = 0;
+  let harvestedTotal = 0;
+
+  if (shouldPersistHarvest && harvestPath) {
+    const existingRows = await readJsonlRows(harvestPath);
+    for (const row of existingRows) {
+      const key = `${String(row?.userId || '')}:${String(row?.content || '')}`;
+      if (!key.endsWith(':')) harvestedKeySet.add(key);
+    }
+    harvestedTotal = harvestedKeySet.size;
+  }
 
   const traceDir = path.join(
     resolveDownloadRoot(),
@@ -360,30 +531,65 @@ export async function execute(input: InteractInput): Promise<InteractOutput> {
   const gateStatus = await checkLikeGate(sessionId);
   console.log(`[Phase3Interact] Like Gate: ${gateStatus.current}/${gateStatus.limit} ${gateStatus.allowed ? '✅' : '❌'}`);
 
-  // 1) 打开详情页（必须是带 xsec_token 的 safeUrl）
-  const navRes = await controllerAction('browser:goto', { profile: sessionId, url: safeUrl }, unifiedApiUrl);
-  if (navRes?.success === false) {
-    return {
-      success: false,
-      noteId,
-      likedCount: 0,
-      scannedCount: 0,
-      likedComments: [],
-      reachedBottom: false,
-      error: navRes?.error || 'goto failed',
-    };
+  // 1) 打开详情页（必须是带 xsec_token 的 safeUrl），或复用当前已打开详情页
+  if (!reuseCurrentDetail) {
+    const navRes = await controllerAction('browser:goto', { profile: sessionId, url: safeUrl, timeoutMs: 30000 }, unifiedApiUrl);
+    if (navRes?.success === false) {
+      return {
+        success: false,
+        noteId,
+        likedCount: 0,
+        scannedCount: 0,
+        likedComments: [],
+        reachedBottom: false,
+        error: navRes?.error || 'goto failed',
+      };
+    }
+    await delay(2200);
+  } else {
+    console.log('[Phase3Interact] reuse current detail page, skip goto');
   }
-  await delay(2200);
 
   // 2) 展开评论区（如果按钮存在则点击；否则视为已展开）
-  await ensureCommentsOpened(sessionId, unifiedApiUrl);
+  if (!commentsAlreadyOpened) {
+    await ensureCommentsOpened(sessionId, unifiedApiUrl);
+  } else {
+    console.log('[Phase3Interact] comments already opened, skip open click');
+  }
 
   // 3) 滚动评论区 + 筛选 + 点赞
   while (likedCount < maxLikesPerRound && scrollCount < maxScrolls) {
     scrollCount += 1;
+    const roundStartMs = Date.now();
+    let roundRuleHits = 0;
+    let roundGateBlocked = 0;
+    let roundNewLikes = 0;
 
     const extracted = await extractVisibleComments(sessionId, unifiedApiUrl, 40);
     scannedCount += extracted.length;
+
+    let roundHarvestedNew = 0;
+    if (shouldHarvest && extracted.length > 0) {
+      const rowsToAppend: any[] = [];
+      for (const row of extracted) {
+        const normalized = normalizeHarvestComment(noteId, row);
+        if (!normalized.content) continue;
+        const key = `${normalized.userId}:${normalized.content}`;
+        if (harvestedKeySet.has(key)) continue;
+        harvestedKeySet.add(key);
+        harvestedAdded += 1;
+        harvestedTotal += 1;
+        roundHarvestedNew += 1;
+        if (shouldPersistHarvest) rowsToAppend.push(normalized);
+      }
+      if (shouldPersistHarvest && rowsToAppend.length > 0) {
+        try {
+          await appendJsonlRows(harvestPath, rowsToAppend);
+        } catch {
+          // ignore comment append errors to avoid blocking like flow
+        }
+      }
+    }
 
     for (let i = 0; i < extracted.length; i++) {
       if (likedCount >= maxLikesPerRound) break;
@@ -392,12 +598,20 @@ export async function execute(input: InteractInput): Promise<InteractOutput> {
       const domIndex = typeof (c as any).domIndex === 'number' ? (c as any).domIndex : i;
       const text = String(c.text || '').trim();
       if (!text) continue;
-      if (!likeKeywords.some((k) => k && text.includes(k))) continue;
+      const likeMatch = matchLikeText(text, compiledLikeRules);
+      if (!likeMatch.ok) {
+        continue;
+      }
+      roundRuleHits += 1;
+      console.log(
+        `[Phase3Interact] 命中规则 note=${noteId} row=${domIndex} rule=${likeMatch.matchedRule || likeMatch.reason}`,
+      );
 
       // 请求点赞许可（速率限制）
       const likePermit = await requestLikeGate(sessionId);
       if (process.env.WEBAUTO_LIKE_GATE_BYPASS === '1') { likePermit.allowed = true; }
       if (!likePermit.allowed) {
+        roundGateBlocked += 1;
         console.log(`[Phase3Interact] ⏳ 点赞速率限制：${likePermit.current}/${likePermit.limit}`);
         await delay(1000);
         continue;
@@ -472,6 +686,7 @@ export async function execute(input: InteractInput): Promise<InteractOutput> {
       }
 
       likedCount += 1;
+      roundNewLikes += 1;
       likedComments.push({
         index: i,
         userId: String(signature.userId || ''),
@@ -479,11 +694,16 @@ export async function execute(input: InteractInput): Promise<InteractOutput> {
         content: String(text || ''),
         timestamp: String(c.timestamp || ''),
         screenshots: { before: beforePath, after: afterPath },
+        matchedRule: likeMatch.matchedRule,
       });
 
       // 点赞间隔
       await delay(900);
     }
+
+    // 尝试展开更多评论回复，避免只展开一层导致命中遗漏。
+    await expandMoreComments(sessionId, unifiedApiUrl);
+    await delay(350);
 
     // 底部检测：
     // - 优先使用明确 end marker / 空评论标记
@@ -498,6 +718,27 @@ export async function execute(input: InteractInput): Promise<InteractOutput> {
       bottomReason = bf.reason;
     }
     if (reachedBottom) {
+      const roundMs = Date.now() - roundStartMs;
+      console.log(
+        `[Phase3Interact] round=${scrollCount} visible=${extracted.length} harvestedNew=${roundHarvestedNew} harvestedTotal=${harvestedTotal} ruleHits=${roundRuleHits} gateBlocked=${roundGateBlocked} newLikes=${roundNewLikes} likedTotal=${likedCount}/${maxLikesPerRound} end=${bottomReason} ms=${roundMs}`,
+      );
+      try {
+        onRound?.({
+          round: scrollCount,
+          visible: extracted.length,
+          harvestedNew: roundHarvestedNew,
+          harvestedTotal,
+          ruleHits: roundRuleHits,
+          gateBlocked: roundGateBlocked,
+          newLikes: roundNewLikes,
+          likedTotal: likedCount,
+          reachedBottom: true,
+          endReason: bottomReason,
+          ms: roundMs,
+        });
+      } catch {
+        // ignore onRound callback failures
+      }
       console.log(`[Phase3Interact] reachedBottom=true reason=${bottomReason}`);
       break;
     }
@@ -505,6 +746,27 @@ export async function execute(input: InteractInput): Promise<InteractOutput> {
     // 系统级滚动（避免大跨度、且保证在评论区域上滚动）
     await scrollComments(sessionId, unifiedApiUrl, 650);
     await delay(900);
+
+    const roundMs = Date.now() - roundStartMs;
+    console.log(
+      `[Phase3Interact] round=${scrollCount} visible=${extracted.length} harvestedNew=${roundHarvestedNew} harvestedTotal=${harvestedTotal} ruleHits=${roundRuleHits} gateBlocked=${roundGateBlocked} newLikes=${roundNewLikes} likedTotal=${likedCount}/${maxLikesPerRound} end=no ms=${roundMs}`,
+    );
+    try {
+      onRound?.({
+        round: scrollCount,
+        visible: extracted.length,
+        harvestedNew: roundHarvestedNew,
+        harvestedTotal,
+        ruleHits: roundRuleHits,
+        gateBlocked: roundGateBlocked,
+        newLikes: roundNewLikes,
+        likedTotal: likedCount,
+        reachedBottom: false,
+        ms: roundMs,
+      });
+    } catch {
+      // ignore onRound callback failures
+    }
   }
 
   // 落盘一份摘要，便于复盘（不影响主流程）
@@ -537,6 +799,9 @@ export async function execute(input: InteractInput): Promise<InteractOutput> {
     likedCount,
     scannedCount,
     likedComments,
+    commentsAdded: shouldHarvest ? harvestedAdded : undefined,
+    commentsTotal: shouldHarvest ? harvestedTotal : undefined,
+    commentsPath: shouldPersistHarvest ? harvestPath : undefined,
     reachedBottom,
     stopReason: reachedBottom ? bottomReason : undefined,
   };

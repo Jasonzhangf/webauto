@@ -69,7 +69,12 @@ class GroupQueue {
 }
 
 const groupQueues = new Map<string, GroupQueue>();
-const runs = new Map<string, { child: ReturnType<typeof spawn>; title: string }>();
+const runs = new Map<string, { child: ReturnType<typeof spawn>; title: string; startedAt: number }>();
+
+const UI_HEARTBEAT_TIMEOUT_MS = 60_000;
+let lastUiHeartbeatAt = Date.now();
+let heartbeatWatchdog: NodeJS.Timeout | null = null;
+let heartbeatTimeoutHandled = false;
 
 let win: BrowserWindow | null = null;
 
@@ -81,6 +86,86 @@ function getWin() {
 function sendEvent(evt: CmdEvent) {
   if (!win || win.isDestroyed()) return;
   win.webContents.send('cmd:event', evt);
+}
+
+function markUiHeartbeat(source = 'renderer') {
+  lastUiHeartbeatAt = Date.now();
+  heartbeatTimeoutHandled = false;
+  return { ok: true, ts: new Date(lastUiHeartbeatAt).toISOString(), source };
+}
+
+function terminateRunProcess(runId: string, reason = 'manual') {
+  const run = runs.get(runId);
+  if (!run) return false;
+  const child = run.child;
+  const pid = Number(child.pid || 0);
+
+  try {
+    if (process.platform === 'win32') {
+      if (pid > 0) {
+        spawn('taskkill', ['/PID', String(pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true });
+      }
+    } else {
+      if (pid > 0) {
+        // Best-effort: terminate direct children first, then root process.
+        spawn('pkill', ['-TERM', '-P', String(pid)], { stdio: 'ignore' }).on('error', () => {});
+      }
+    }
+  } catch {
+    // ignore
+  }
+
+  try {
+    child.kill('SIGTERM');
+  } catch {
+    // ignore
+  }
+
+  sendEvent({ type: 'stderr', runId, line: `[watchdog] kill requested (${reason})`, ts: now() });
+  return true;
+}
+
+function stopCoreServicesBestEffort() {
+  try {
+    const coreDaemon = path.join(REPO_ROOT, 'scripts', 'core-daemon.mjs');
+    spawn(resolveNodeBin(), [coreDaemon, 'stop'], {
+      cwd: REPO_ROOT,
+      stdio: 'ignore',
+      windowsHide: true,
+      detached: false,
+      env: { ...process.env, WEBAUTO_DAEMON: '1' },
+    });
+  } catch {
+    // ignore
+  }
+}
+
+function killAllRuns(reason = 'ui_heartbeat_timeout') {
+  for (const runId of Array.from(runs.keys())) {
+    terminateRunProcess(runId, reason);
+  }
+  if (reason === 'ui_heartbeat_timeout' || reason === 'window_closed') {
+    stopCoreServicesBestEffort();
+  }
+}
+
+function ensureHeartbeatWatchdog() {
+  if (heartbeatWatchdog) return;
+  heartbeatWatchdog = setInterval(() => {
+    const staleMs = Date.now() - lastUiHeartbeatAt;
+    if (staleMs <= UI_HEARTBEAT_TIMEOUT_MS) return;
+    if (heartbeatTimeoutHandled) return;
+    heartbeatTimeoutHandled = true;
+
+    if (runs.size > 0) {
+      console.warn(`[desktop-heartbeat] stale ${staleMs}ms > ${UI_HEARTBEAT_TIMEOUT_MS}ms, killing ${runs.size} run(s)`);
+      killAllRuns('ui_heartbeat_timeout');
+    } else {
+      console.warn(`[desktop-heartbeat] stale ${staleMs}ms > ${UI_HEARTBEAT_TIMEOUT_MS}ms, stopping core services`);
+      stopCoreServicesBestEffort();
+    }
+  }, 5_000);
+  heartbeatWatchdog.unref();
 }
 
 function getQueue(groupKey: string) {
@@ -132,11 +217,16 @@ async function spawnCommand(spec: SpawnSpec) {
       new Promise<void>((resolve) => {
         const child = spawn(resolveNodeBin(), spec.args, {
           cwd: spec.cwd,
-          env: { ...process.env, ...(spec.env || {}) },
+          env: {
+            ...process.env,
+            WEBAUTO_DAEMON: '1',
+            WEBAUTO_UI_HEARTBEAT: '1',
+            ...(spec.env || {}),
+          },
           stdio: ['ignore', 'pipe', 'pipe'],
         });
 
-        runs.set(runId, { child, title: spec.title });
+        runs.set(runId, { child, title: spec.title, startedAt: now() });
         sendEvent({ type: 'started', runId, title: spec.title, pid: child.pid ?? -1, ts: now() });
 
         child.stdout?.on('data', (chunk: Buffer) => {
@@ -272,6 +362,39 @@ async function readTextPreview(input: { path: string; maxBytes?: number; maxLine
   return { ok: true, path: filePath, text: lines.join('\n') };
 }
 
+
+
+async function readTextTail(input: { path: string; fromOffset?: number; maxBytes?: number }) {
+  const filePath = String(input?.path || '');
+  const requestedOffset = typeof input?.fromOffset === 'number' ? Math.max(0, Math.floor(input.fromOffset)) : 0;
+  const maxBytes = typeof input?.maxBytes === 'number' ? Math.max(1024, Math.floor(input.maxBytes)) : 256_000;
+
+  const st = await fs.stat(filePath);
+  const size = Number(st?.size || 0);
+  const fromOffset = requestedOffset > size ? 0 : requestedOffset;
+  const toRead = Math.max(0, Math.min(maxBytes, size - fromOffset));
+  if (toRead <= 0) {
+    return { ok: true, path: filePath, text: '', fromOffset, nextOffset: fromOffset, fileSize: size };
+  }
+
+  const fh = await fs.open(filePath, 'r');
+  try {
+    const buf = Buffer.allocUnsafe(toRead);
+    const { bytesRead } = await fh.read(buf, 0, toRead, fromOffset);
+    const text = buf.subarray(0, bytesRead).toString('utf8');
+    return {
+      ok: true,
+      path: filePath,
+      text,
+      fromOffset,
+      nextOffset: fromOffset + bytesRead,
+      fileSize: size,
+    };
+  } finally {
+    await fh.close();
+  }
+}
+
 async function readFileBase64(input: { path: string; maxBytes?: number }) {
   const filePath = String(input.path || '');
   const maxBytes = typeof input.maxBytes === 'number' ? input.maxBytes : 8_000_000;
@@ -342,10 +465,13 @@ function createWindow() {
 }
 
 app.on('window-all-closed', () => {
+  killAllRuns('window_closed');
   if (process.platform !== 'darwin') app.quit();
 });
 
 app.whenReady().then(() => {
+  markUiHeartbeat('main_ready');
+  ensureHeartbeatWatchdog();
   createWindow();
 });
 
@@ -364,7 +490,10 @@ ipcMain.handle('settings:set', async (_evt, next) => {
   return updated;
 });
 
+ipcMain.handle('desktop:heartbeat', async () => markUiHeartbeat());
+
 ipcMain.handle('cmd:spawn', async (_evt, spec: SpawnSpec) => {
+  markUiHeartbeat('cmd_spawn');
   const title = String(spec?.title || 'command');
   const cwd = String(spec?.cwd || REPO_ROOT);
   const args = Array.isArray(spec?.args) ? spec.args : [];
@@ -376,8 +505,8 @@ ipcMain.handle('cmd:kill', async (_evt, input: { runId: string }) => {
   const r = runs.get(runId);
   if (!r) return { ok: false, error: 'not found' };
   try {
-    r.child.kill('SIGTERM');
-    return { ok: true };
+    const ok = terminateRunProcess(runId, 'manual_stop');
+    return { ok };
   } catch (e: any) {
     return { ok: false, error: e?.message || String(e) };
   }
@@ -393,6 +522,9 @@ ipcMain.handle('results:scan', async (_evt, spec: { downloadRoot?: string }) => 
 ipcMain.handle('fs:listDir', async (_evt, spec: { root: string; recursive?: boolean; maxEntries?: number }) => listDir(spec));
 ipcMain.handle('fs:readTextPreview', async (_evt, spec: { path: string; maxBytes?: number; maxLines?: number }) =>
   readTextPreview(spec),
+);
+ipcMain.handle('fs:readTextTail', async (_evt, spec: { path: string; fromOffset?: number; maxBytes?: number }) =>
+  readTextTail(spec),
 );
 ipcMain.handle('fs:readFileBase64', async (_evt, spec: { path: string; maxBytes?: number }) => readFileBase64(spec));
 ipcMain.handle('profiles:list', async () => profileStore.listProfiles());

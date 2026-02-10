@@ -43,6 +43,13 @@ import { navigateOperation } from './operations/navigate.js';
 import { keyOperation } from './operations/key.js';
 import { ContainerRegistry } from '../../container-registry/src/index.js';
 
+
+function resolveInputMode(): 'system' | 'protocol' {
+  const raw = String(process.env.WEBAUTO_INPUT_MODE || 'system').trim().toLowerCase();
+  return raw === 'protocol' ? 'protocol' : 'system';
+}
+
+
 export class ContainerExecutor {
   private operations = new Map<string, OperationDefinition>();
   private registry = new ContainerRegistry();
@@ -86,9 +93,15 @@ export class ContainerExecutor {
     // 合并容器定义中的默认 operation config（调用方 config 优先）
     config = await this.mergeContainerOperationConfig(containerId, operationId, config, context);
 
-    // 统一默认使用系统级点击，避免 DOM click 触发风控
-    if (operationId === 'click' && typeof config.useSystemMouse !== 'boolean') {
-      config = { ...config, useSystemMouse: true };
+    const inputMode = resolveInputMode();
+    const modeControlledOps = new Set(['click', 'type', 'key', 'scroll']);
+    if (modeControlledOps.has(operationId)) {
+      if (inputMode === 'protocol') {
+        // Protocol mode bypasses OS-level input so actions can run without window focus.
+        config = { ...config, useSystemMouse: false };
+      } else if (typeof config.useSystemMouse !== 'boolean') {
+        config = { ...config, useSystemMouse: true };
+      }
     }
 
     // click：如果调用方明确给了坐标/bbox，则优先走坐标点击，避免被容器默认 selector 覆盖

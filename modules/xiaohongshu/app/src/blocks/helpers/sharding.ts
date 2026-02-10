@@ -1,7 +1,7 @@
 export interface ShardSpec {
   index: number;
   count: number;
-  by?: 'noteId-hash';
+  by?: 'noteId-hash' | 'index-mod';
 }
 
 export function fnv1a32(input: string) {
@@ -36,3 +36,8 @@ export function shardFilterByNoteIdHash<T extends { noteId?: string }>(items: T[
   });
 }
 
+export function shardFilterByIndexMod<T>(items: T[], shard: ShardSpec) {
+  const list = Array.isArray(items) ? items : [];
+  if (shard.count <= 1) return list;
+  return list.filter((_, idx) => idx % shard.count === shard.index);
+}

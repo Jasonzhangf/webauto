@@ -5,6 +5,7 @@ import { ensureCoreServices } from '../lib/ensure-core-services.mjs';
 ensureUtf8Console();
 
 import { ensureServicesHealthy, restoreBrowserState } from './lib/recovery.mjs';
+import { ensureRuntimeReady } from './lib/runtime-ready.mjs';
 import { recordStageCheck, recordStageRecovery } from './lib/stage-checks.mjs';
 import minimist from 'minimist';
 import { spawn } from 'node:child_process';
@@ -185,6 +186,27 @@ function emitEvent(type, payload) {
 
   try {
     lockHandle = await createSessionLock({ profileId: profile });
+
+    const ready = await ensureRuntimeReady({
+      phase: 'phase3',
+      profile,
+      keyword,
+      env,
+      unifiedApiUrl: UNIFIED_API_URL,
+      headless: Boolean(args.headless),
+      requireCheckpoint: true,
+    });
+    recordStageCheck('phase3', 'runtime_ready', true, {
+      profile,
+      checkpoint: ready?.checkpoint || 'unknown',
+      url: ready?.url || '',
+    });
+    if (ready?.checkpoint !== 'search_ready' && ready?.checkpoint !== 'home_ready') {
+      recordStageRecovery('phase3', 'runtime_recover_non_ready', {
+        profile,
+        checkpoint: ready?.checkpoint || 'unknown',
+      });
+    }
 
     console.log('\n🔍 步骤 1: 校验 Phase2 链接...');
     const vres = await validateLinks({ profile, keyword, env, downloadRoot, unifiedApiUrl: UNIFIED_API_URL });

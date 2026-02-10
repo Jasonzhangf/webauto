@@ -4,7 +4,8 @@ function buildArgs(parts: string[]) {
   return parts.filter((x) => x != null && String(x).trim() !== '');
 }
 
-type TemplateId = 'fullCollect' | 'phase1' | 'phase2' | 'phase3' | 'phase4' | 'smartReply' | 'virtualLike';
+
+type TemplateId = 'fullCollect' | 'phase3' | 'phase4' | 'smartReply' | 'virtualLike';
 
 type FullCollectTemplate = {
   id: string;
@@ -15,13 +16,11 @@ type FullCollectTemplate = {
 export function renderRun(root: HTMLElement, ctx: any) {
   const templateSel = createEl('select') as HTMLSelectElement;
   const templates: Array<{ id: TemplateId; label: string }> = [
-    { id: 'fullCollect', label: 'Full Collect (Phase1-4)' },
-    { id: 'phase1', label: 'Phase1 boot' },
-    { id: 'phase2', label: 'Phase2 collect links' },
-    { id: 'phase3', label: 'Phase3 interact' },
-    { id: 'phase4', label: 'Phase4 harvest' },
-    { id: 'smartReply', label: 'Smart Reply DEV E2E' },
-    { id: 'virtualLike', label: 'Virtual Like E2E' },
+    { id: 'fullCollect', label: '调试：Full Collect (legacy)' },
+    { id: 'phase3', label: '调试：Phase3 interact' },
+    { id: 'phase4', label: '调试：Phase4 harvest' },
+    { id: 'smartReply', label: '调试：Smart Reply DEV E2E' },
+    { id: 'virtualLike', label: '调试：Virtual Like E2E' },
   ];
   templates.forEach((t) => templateSel.appendChild(createEl('option', { value: t.id }, [t.label])));
 
@@ -56,7 +55,7 @@ export function renderRun(root: HTMLElement, ctx: any) {
 
   function setProfileModes(templateId: TemplateId) {
     const supportsMultiProfile =
-      templateId === 'fullCollect' || templateId === 'phase1' || templateId === 'phase3' || templateId === 'phase4';
+      templateId === 'fullCollect' || templateId === 'phase3' || templateId === 'phase4';
     profileModeSel.textContent = '';
     const modes = supportsMultiProfile
       ? [
@@ -170,7 +169,7 @@ export function renderRun(root: HTMLElement, ctx: any) {
 
   function syncProfileValueFromUI() {
     const mode = profileModeSel.value;
-    const useRuntimeForSingle = templateSel.value !== 'phase1' && templateSel.value !== 'fullCollect';
+    const useRuntimeForSingle = templateSel.value !== 'fullCollect';
     profilePickSel.style.display = mode === 'profile' && !useRuntimeForSingle ? '' : 'none';
     runtimePickSel.style.display = mode === 'profile' && useRuntimeForSingle ? '' : 'none';
     poolPickSel.style.display = mode === 'profilepool' ? '' : 'none';
@@ -205,9 +204,9 @@ export function renderRun(root: HTMLElement, ctx: any) {
   }
 
   function resolveProfileArgsForRun(t: TemplateId) {
-    const supportsMultiProfile = t === 'fullCollect' || t === 'phase1' || t === 'phase3' || t === 'phase4';
+    const supportsMultiProfile = t === 'fullCollect' || t === 'phase3' || t === 'phase4';
     const mode = profileModeSel.value;
-    const useRuntimeForSingle = t !== 'phase1' && t !== 'fullCollect';
+    const useRuntimeForSingle = t !== 'fullCollect';
 
     if (!supportsMultiProfile) {
       const v = String(useRuntimeForSingle ? runtimePickSel.value : profilePickSel.value || '').trim();
@@ -265,19 +264,6 @@ export function renderRun(root: HTMLElement, ctx: any) {
         return;
       }
     }
-    if (t === 'phase2') {
-      if (!keyword) {
-        profilesHint.textContent = 'phase2: 必须填写 keyword';
-        alert('Phase2: 必须填写 keyword');
-        return;
-      }
-      const n = Number(target);
-      if (!Number.isFinite(n) || n <= 0) {
-        profilesHint.textContent = 'phase2: 必须填写 target（正整数）';
-        alert('Phase2: 必须填写 target（正整数）');
-        return;
-      }
-    }
 
     // Persist last-used keyword/target/env for next run.
     const targetNum = Number(target);
@@ -302,30 +288,10 @@ export function renderRun(root: HTMLElement, ctx: any) {
     let script = '';
     let args: string[] = [];
 
-  if (t === 'fullCollect') {
+    if (t === 'fullCollect') {
       const chosen = fullCollectScripts[0];
       const scriptPath = chosen?.path || window.api.pathJoin('scripts', 'xiaohongshu', 'collect-content.mjs');
       script = scriptPath;
-      args = buildArgs([script, ...profileArgs, ...common, ...extraArgs]);
-    } else if (t === 'phase1') {
-      script = window.api.pathJoin('scripts', 'xiaohongshu', 'phase1-boot.mjs');
-      args = buildArgs([script, ...profileArgs]);
-      // Special case: Phase1 + profilepool → use profilepool.mjs login
-      if (resolved.mode === 'profilepool' && resolved.value) {
-        script = window.api.pathJoin('scripts', 'profilepool.mjs');
-        args = buildArgs([
-          script,
-          'login',
-          resolved.value,
-          '--keep-session',
-          '--timeout-sec',
-          String(ctx.settings?.timeouts?.loginTimeoutSec || 900),
-          ...(ctx.settings?.unifiedApiUrl ? ['--unified-api', String(ctx.settings.unifiedApiUrl)] : []),
-          ...(ctx.settings?.browserServiceUrl ? ['--browser-service', String(ctx.settings.browserServiceUrl)] : []),
-        ]);
-      }
-    } else if (t === 'phase2') {
-      script = window.api.pathJoin('scripts', 'xiaohongshu', 'phase2-collect.mjs');
       args = buildArgs([script, ...profileArgs, ...common, ...extraArgs]);
     } else if (t === 'phase3') {
       script = window.api.pathJoin('scripts', 'xiaohongshu', 'phase3-interact.mjs');
@@ -366,6 +332,9 @@ export function renderRun(root: HTMLElement, ctx: any) {
 
   root.appendChild(
     section('调用', [
+      createEl('div', { className: 'muted' }, [
+        '说明：小红书完整编排（Phase1/2/Unified + 分片）已迁移到“小红书”Tab；这里仅保留调试入口。',
+      ]),
       createEl('div', { className: 'row' }, [
         labeledInput('template', templateSel),
         labeledInput('keyword', keywordInput),
@@ -386,7 +355,7 @@ export function renderRun(root: HTMLElement, ctx: any) {
       profilesBox,
       actions,
       createEl('div', { className: 'muted' }, [
-        'profile：单 profile；profilepool：keyword 前缀扫描 pool（会包含同名 base profile，例如 xiaohongshu_fresh）并自动分片；profiles：手动 a,b,c 并自动分片。',
+        'profile：单 profile；profilepool：按 keyword 前缀扫描 pool 自动分片；profiles：手动 a,b,c 自动分片。',
       ]),
     ]),
   );

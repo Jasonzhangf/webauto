@@ -10,6 +10,7 @@ export interface TypeConfig {
   index?: number;
   anchor?: { x: number; y: number };
   fullyVisible?: boolean;
+  useSystemMouse?: boolean;
 }
 
 async function runType(ctx: OperationContext, config: TypeConfig) {
@@ -22,9 +23,14 @@ async function runType(ctx: OperationContext, config: TypeConfig) {
   const keyboard = ctx.page.keyboard;
   const fullyVisible = config.fullyVisible !== false;
   const anchor = config.anchor ?? null;
+  const useSystemMouse = config.useSystemMouse !== false;
+  const protocolMouse = (ctx.page as any)?.mouse;
 
-  if (!ctx.systemInput?.mouseClick) {
+  if (useSystemMouse && !ctx.systemInput?.mouseClick) {
     return { success: false, error: 'system mouse not available' };
+  }
+  if (!useSystemMouse && (!protocolMouse || typeof protocolMouse.click !== 'function')) {
+    return { success: false, error: 'protocol mouse not available' };
   }
   if (!keyboard || typeof keyboard.type !== 'function') {
     return { success: false, error: 'keyboard type not available' };
@@ -133,7 +139,13 @@ async function runType(ctx: OperationContext, config: TypeConfig) {
 
   let focused = false;
   for (const p of rect.clickPoints) {
-    await ctx.systemInput.mouseClick(p.x, p.y);
+    const x = Math.round(p.x);
+    const y = Math.round(p.y);
+    if (useSystemMouse) {
+      await ctx.systemInput!.mouseClick(x, y);
+    } else {
+      await protocolMouse.click(x, y);
+    }
     await new Promise((r) => setTimeout(r, 160));
     try {
       focused = await isFocused();
@@ -194,7 +206,7 @@ async function runType(ctx: OperationContext, config: TypeConfig) {
     await new Promise((r) => setTimeout(r, config.pause_after));
   }
 
-  return { success: true };
+  return { success: true, inputMode: useSystemMouse ? 'system' : 'protocol' };
 }
 
 export const typeOperation: OperationDefinition<TypeConfig> = {

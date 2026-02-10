@@ -30,8 +30,9 @@ async function runClick(ctx: OperationContext, config: ClickConfig) {
     const fullyVisible = config.fullyVisible === true;
     const anchor = config.anchor ?? null;
 
-    if (!useSystemMouse) {
-      return { success: false, error: 'DOM click disabled; set useSystemMouse=true' };
+    const protocolMouse = (ctx.page as any)?.mouse;
+    if (!useSystemMouse && (!protocolMouse || typeof protocolMouse.click !== 'function')) {
+      return { success: false, error: 'protocol mouse not available' };
     }
 
     type ClickPoint = { x: number; y: number };
@@ -130,36 +131,59 @@ async function runClick(ctx: OperationContext, config: ClickConfig) {
     if (!info || !info.visible || !Array.isArray((info as any).clickPoints) || (info as any).clickPoints.length === 0) {
       return { success: false, error: 'element not visible' };
     }
-    if (!ctx.systemInput?.mouseClick) {
+    if (useSystemMouse && !ctx.systemInput?.mouseClick) {
       return { success: false, error: 'system mouse not available' };
     }
     const clickPoints = (info as { clickPoints: ClickPoint[] }).clickPoints;
     // 优先点击视口内且命中目标元素的点，避免“元素部分可见但中心离屏”导致点错
     for (const p of clickPoints) {
-      await ctx.systemInput.mouseClick(Math.round(p.x), Math.round(p.y));
+      const x = Math.round(p.x);
+      const y = Math.round(p.y);
+      if (useSystemMouse) {
+        await ctx.systemInput!.mouseClick(x, y);
+      } else {
+        await protocolMouse.click(x, y);
+      }
       break;
     }
-    return { success: true };
+    return { success: true, inputMode: useSystemMouse ? 'system' : 'protocol' };
 
   } else if (config.bbox) {
     // 方案 B: 通过 bbox 点击（使用系统鼠标）
     const cx = Math.round((config.bbox.x1 + config.bbox.x2) / 2);
     const cy = Math.round((config.bbox.y1 + config.bbox.y2) / 2);
 
-    if (!ctx.systemInput?.mouseClick) {
-      return { success: false, error: 'system mouse not available' };
+    const useSystemMouse = config.useSystemMouse !== false;
+    const protocolMouse = (ctx.page as any)?.mouse;
+    if (useSystemMouse) {
+      if (!ctx.systemInput?.mouseClick) {
+        return { success: false, error: 'system mouse not available' };
+      }
+      await ctx.systemInput.mouseClick(cx, cy);
+    } else {
+      if (!protocolMouse || typeof protocolMouse.click !== 'function') {
+        return { success: false, error: 'protocol mouse not available' };
+      }
+      await protocolMouse.click(cx, cy);
     }
-
-    await ctx.systemInput.mouseClick(cx, cy);
-    return { success: true };
+    return { success: true, inputMode: useSystemMouse ? 'system' : 'protocol' };
 
   } else if (typeof config.x === 'number' && typeof config.y === 'number') {
     // 方案 C: 直接通过坐标点击
-    if (!ctx.systemInput?.mouseClick) {
-      return { success: false, error: 'system mouse not available' };
+    const useSystemMouse = config.useSystemMouse !== false;
+    const protocolMouse = (ctx.page as any)?.mouse;
+    if (useSystemMouse) {
+      if (!ctx.systemInput?.mouseClick) {
+        return { success: false, error: 'system mouse not available' };
+      }
+      await ctx.systemInput.mouseClick(config.x, config.y);
+    } else {
+      if (!protocolMouse || typeof protocolMouse.click !== 'function') {
+        return { success: false, error: 'protocol mouse not available' };
+      }
+      await protocolMouse.click(config.x, config.y);
     }
-    await ctx.systemInput.mouseClick(config.x, config.y);
-    return { success: true };
+    return { success: true, inputMode: useSystemMouse ? 'system' : 'protocol' };
 
   } else {
     return { success: false, error: 'selector or bbox required' };

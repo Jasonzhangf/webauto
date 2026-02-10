@@ -207,3 +207,36 @@ bd 搜索速查（全文检索 + 字段过滤）：
 - 出错先拉取：URL/DOM 摘要/截图（Unified API/WS）+ 查看 ~/.webauto/logs 与 run.log/run-events.jsonl。
 - 服务与浏览器的启动/停止必须统一由 stop-all/core-daemon 管理，避免孤儿进程。
 - 点击/输入/滚动必须走系统级 API；JS 仅用于读取状态（rect/可见性）。
+
+
+## 11. LSP Code Analysis 使用规范（强制）
+
+### 11.1 强制前置流程（每次会话）
+
+1. 更新检查：`/Users/fanzhang/.codex/skills/lsp-code-analysis/scripts/update.sh`
+   - 若提示 `lsp` 不在 PATH，先执行：`export PATH="/Users/fanzhang/.local/bin:$PATH"`
+2. 启动 Server：`lsp server start <repo_path>`
+   - 若启动失败，**禁止进入任何 LSP 分析流程**
+3. 验证语言支持：`lsp server list` 必须看到当前仓库对应语言（如 `typescript <repo_path>`）
+
+### 11.2 入口流程（固定顺序）
+
+1. `lsp outline <file>`（先看结构）
+2. `lsp doc <file> --scope <symbol>`（看签名/类型）
+3. `lsp definition <file> --scope <symbol>`（跳定义）
+4. `lsp reference <file> --scope <symbol>`（看调用链）
+
+### 11.3 精准定位规则
+
+- 优先使用：`--scope <symbol_path>`（示例：`A.b.c`）
+- 需要精确点位时追加：`--find "<|>token"`
+- 大结果集必须使用：`--pagination-id` + `--max-items` + `--start-index`
+
+### 11.4 兜底规则
+
+- 只有 LSP 无法覆盖场景（注释、纯文本、日志串）才允许使用 `rg/read`
+
+### 11.5 会话收尾（强制）
+
+- 会话结束必须执行：`lsp server stop <repo_path>`，避免后台残留
+- 可选全局清理：`lsp server shutdown`

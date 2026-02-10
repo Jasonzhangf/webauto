@@ -7,6 +7,7 @@ export interface ScrollConfig {
   direction?: 'up' | 'down';
   anchor?: { x: number; y: number };
   fullyVisible?: boolean;
+  useSystemMouse?: boolean;
 }
 
 async function runScroll(ctx: OperationContext, config: ScrollConfig) {
@@ -22,11 +23,17 @@ async function runScroll(ctx: OperationContext, config: ScrollConfig) {
   // 单次滚动约束：不超过 800px，符合“用户手势范围”
   const distance = Math.min(800, Math.max(0, Math.floor(Math.abs(rawDistance))));
   const deltaY = direction === 'up' ? -distance : distance;
+  const useSystemMouse = config.useSystemMouse !== false;
+  const protocolMouse = (ctx.page as any)?.mouse;
 
-  // 优先系统级滚轮
-  if (ctx.systemInput?.mouseWheel) {
+  if (useSystemMouse && !ctx.systemInput?.mouseWheel) {
+    return { success: false, error: 'system scroll not available' };
+  }
+
+  // 优先鼠标滚轮（系统级或协议级）
+  if ((useSystemMouse && ctx.systemInput?.mouseWheel) || (!useSystemMouse && protocolMouse?.wheel)) {
     const selector = typeof config.selector === 'string' ? config.selector.trim() : '';
-    if (selector && ctx.systemInput?.mouseMove) {
+    if (selector) {
       const info = await ctx.page.evaluate(({ sel, fVisible, anchorPoint }) => {
         const isVisible = (el: Element) => {
           const r = el.getBoundingClientRect();
@@ -96,13 +103,25 @@ async function runScroll(ctx: OperationContext, config: ScrollConfig) {
       }
       if (Array.isArray((info as any).points) && (info as any).points.length > 0) {
         const p = (info as any).points[0];
-        await ctx.systemInput.mouseMove(Math.round(p.x), Math.round(p.y), 2);
+        const x = Math.round(p.x);
+        const y = Math.round(p.y);
+        if (useSystemMouse) {
+          if (ctx.systemInput?.mouseMove) {
+            await ctx.systemInput.mouseMove(x, y, 2);
+          }
+        } else if (protocolMouse && typeof protocolMouse.move === 'function') {
+          await protocolMouse.move(x, y, { steps: 2 });
+        }
         await new Promise((r) => setTimeout(r, 80));
       }
     }
 
-    await ctx.systemInput.mouseWheel(0, deltaY);
-    return { success: true, deltaY };
+    if (useSystemMouse) {
+      await ctx.systemInput!.mouseWheel!(0, deltaY);
+    } else {
+      await protocolMouse.wheel(0, deltaY);
+    }
+    return { success: true, deltaY, inputMode: useSystemMouse ? 'system' : 'protocol' };
   }
 
   // fallback：系统键盘滚动（PageDown / PageUp）
@@ -110,10 +129,10 @@ async function runScroll(ctx: OperationContext, config: ScrollConfig) {
   if (keyboard?.press) {
     const key = direction === 'up' ? 'PageUp' : 'PageDown';
     await keyboard.press(key);
-    return { success: true, key };
+    return { success: true, key, inputMode: useSystemMouse ? 'system' : 'protocol' };
   }
 
-  return { success: false, error: 'no system scroll available' };
+  return { success: false, error: 'no scroll capability available' };
 }
 
 export const scrollOperation: OperationDefinition<ScrollConfig> = {

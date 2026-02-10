@@ -15,6 +15,7 @@ import {
   markXhsCollectFailed,
 } from '../../dist/modules/state/src/xiaohongshu-collect-state.js';
 import { ensureServicesHealthy, restoreBrowserState } from './lib/recovery.mjs';
+import { ensureRuntimeReady } from './lib/runtime-ready.mjs';
 import { recordStageCheck, recordStageRecovery } from './lib/stage-checks.mjs';
 import minimist from 'minimist';
 import { spawn } from 'node:child_process';
@@ -43,30 +44,7 @@ async function runNode(scriptPath, args) {
   });
 }
 
-async function ensureProfileSession(profile) {
-  // Check if session exists via browser-service
-  try {
-    const res = await fetch('http://127.0.0.1:7704/health');
-    const data = await res.json().catch(() => ({}));
-    const sessions = data?.sessions || [];
-    const hasSession = sessions.some((s) => s.profile === profile && s.state === 'active');
-    if (hasSession) {
-      console.log(`[Phase4] Profile ${profile} session already active`);
-      return;
-    }
-  } catch (e) {
-    console.log(`[Phase4] Health check failed: ${e.message}`);
-  }
-  
-  // Start session via phase1-boot
-  console.log(`[Phase4] Booting profile ${profile}...`);
-  const phase1Path = path.join(__dirname, 'phase1-boot.mjs');
-  await runNode(phase1Path, ['--profile', profile, '--once']);
-  console.log(`[Phase4] Profile ${profile} booted`);
-  
-  // Wait a bit for session to be ready
-  await new Promise(r => setTimeout(r, 2000));
-}
+
 
 async function main() {
   await ensureServicesHealthy();
@@ -120,8 +98,27 @@ async function main() {
     const t0 = nowMs();
     emitRunEvent('phase4_start', { keyword, env, dryRun });
 
-    // 0. 确保 profile session 已启动
-    await ensureProfileSession(profile);
+    // 0. 统一运行前检查：服务、session、起点checkpoint
+    const ready = await ensureRuntimeReady({
+      phase: 'phase4',
+      profile,
+      keyword,
+      env,
+      unifiedApiUrl: 'http://127.0.0.1:7701',
+      headless: Boolean(args.headless),
+      requireCheckpoint: true,
+    });
+    recordStageCheck('phase4', 'runtime_ready', true, {
+      profile,
+      checkpoint: ready?.checkpoint || 'unknown',
+      url: ready?.url || '',
+    });
+    if (ready?.checkpoint !== 'search_ready' && ready?.checkpoint !== 'home_ready') {
+      recordStageRecovery('phase4', 'runtime_recover_non_ready', {
+        profile,
+        checkpoint: ready?.checkpoint || 'unknown',
+      });
+    }
 
     // 1. 校验链接
     console.log(`\n🔍 步骤 1: 校验链接...`);

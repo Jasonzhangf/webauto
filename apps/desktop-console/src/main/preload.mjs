@@ -16,6 +16,7 @@ contextBridge.exposeInMainWorld('api', {
   resultsScan: (spec) => ipcRenderer.invoke('results:scan', spec),
   fsListDir: (spec) => ipcRenderer.invoke('fs:listDir', spec),
   fsReadTextPreview: (spec) => ipcRenderer.invoke('fs:readTextPreview', spec),
+  fsReadTextTail: (spec) => ipcRenderer.invoke('fs:readTextTail', spec),
   fsReadFileBase64: (spec) => ipcRenderer.invoke('fs:readFileBase64', spec),
   profilesList: () => ipcRenderer.invoke('profiles:list'),
   profilesScan: () => ipcRenderer.invoke('profiles:scan'),
@@ -33,6 +34,7 @@ contextBridge.exposeInMainWorld('api', {
   runtimeRestartPhase1: (spec) => ipcRenderer.invoke('runtime:restartPhase1', spec),
   runtimeSetBrowserTitle: (spec) => ipcRenderer.invoke('runtime:setBrowserTitle', spec),
   runtimeSetHeaderBar: (spec) => ipcRenderer.invoke('runtime:setHeaderBar', spec),
+  desktopHeartbeat: () => ipcRenderer.invoke('desktop:heartbeat'),
 
   // Event listeners
   onSettingsChanged: (handler) => {

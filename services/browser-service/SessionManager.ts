@@ -18,9 +18,11 @@ function isProcessAlive(pid: number): boolean {
 
 export class SessionManager {
   private sessions = new Map<string, BrowserSession>();
-  // Track owning process (e.g. a script pid) so we can kill it when the browser is closed manually.
+  // Track owning process (e.g. script pid) and bind browser lifetime to it.
   private owners = new Map<string, { pid: number; startedAt: string }>();
   private sessionFactory: (options: BrowserSessionOptions) => BrowserSession;
+  private ownerWatchdog: NodeJS.Timeout;
+  private ownerWatchdogBusy = false;
 
   private debugLog(label: string, data: any) {
     if (process.env.DEBUG !== '1' && process.env.WEBAUTO_DEBUG !== '1') return;
@@ -33,10 +35,47 @@ export class SessionManager {
 
   // Optional options are currently not used, but allowed for future extensions
   constructor(
-    _options?: { host?: string; port?: number; wsHost?: string; wsPort?: number },
+    _options?: { host?: string; port?: number; wsHost?: string; wsPort?: number; ownerWatchdogMs?: number },
     sessionFactory?: (options: BrowserSessionOptions) => BrowserSession,
   ) {
     this.sessionFactory = sessionFactory || ((opts) => new BrowserSession(opts));
+    const watchdogMs = Math.max(1000, Number(_options?.ownerWatchdogMs || 5000));
+    this.ownerWatchdog = setInterval(() => {
+      void this.reapDeadOwners();
+    }, watchdogMs);
+    this.ownerWatchdog.unref?.();
+  }
+
+  private normalizeOwnerPid(value: any): number | null {
+    const pid = Number(value || 0);
+    return Number.isFinite(pid) && pid > 0 ? pid : null;
+  }
+
+  private bindOwner(profileId: string, pid: number | null) {
+    if (!pid) return;
+    this.owners.set(profileId, { pid, startedAt: new Date().toISOString() });
+  }
+
+  private async reapDeadOwners() {
+    if (this.ownerWatchdogBusy) return;
+    this.ownerWatchdogBusy = true;
+    try {
+      for (const [profileId, owner] of this.owners.entries()) {
+        if (!owner?.pid) continue;
+        if (isProcessAlive(owner.pid)) continue;
+
+        this.debugLog('owner:dead_cleanup', { profileId, deadPid: owner.pid });
+        await this.deleteSession(profileId).catch((err) => {
+          this.debugLog('owner:dead_cleanup_error', {
+            profileId,
+            deadPid: owner.pid,
+            error: (err as Error)?.message || err,
+          });
+        });
+      }
+    } finally {
+      this.ownerWatchdogBusy = false;
+    }
   }
 
   async createSession(options: CreateSessionPayload): Promise<{ sessionId: string }> {
@@ -54,6 +93,8 @@ export class SessionManager {
     });
 
     const existing = this.sessions.get(profileId);
+    const ownerPid = this.normalizeOwnerPid((options as any).ownerPid);
+
     if (existing) {
       const owner = this.owners.get(profileId);
       if (owner?.pid && !isProcessAlive(owner.pid)) {
@@ -61,7 +102,15 @@ export class SessionManager {
         this.debugLog('createSession:replace_stale_owner', { profileId, deadPid: owner.pid });
         await this.deleteSession(profileId);
       } else {
-        this.debugLog('createSession:reuse', { profileId, ownerPid: owner?.pid || null });
+        if (ownerPid && owner?.pid && owner.pid !== ownerPid && isProcessAlive(owner.pid)) {
+          throw new Error(`session_owned_by_another_process profile=${profileId} ownerPid=${owner.pid} requesterPid=${ownerPid}`);
+        }
+        this.bindOwner(profileId, ownerPid);
+        this.debugLog('createSession:reuse', {
+          profileId,
+          ownerPid: this.owners.get(profileId)?.pid || null,
+          requesterPid: ownerPid,
+        });
         // Reuse existing session (keepalive). Do not restart the browser if it's already running.
         return { sessionId: profileId };
       }
@@ -90,10 +139,7 @@ export class SessionManager {
 
     this.debugLog('createSession:started', { profileId });
 
-    const ownerPid = Number((options as any).ownerPid || 0);
-    if (Number.isFinite(ownerPid) && ownerPid > 0) {
-      this.owners.set(profileId, { pid: ownerPid, startedAt: new Date().toISOString() });
-    }
+    this.bindOwner(profileId, ownerPid);
 
     return { sessionId: profileId };
   }
@@ -135,8 +181,10 @@ export class SessionManager {
   }
 
   async shutdown(): Promise<void> {
+    clearInterval(this.ownerWatchdog);
     const jobs = Array.from(this.sessions.values()).map((session) => session.close().catch(() => {}));
     await Promise.all(jobs);
     this.sessions.clear();
+    this.owners.clear();
   }
 }

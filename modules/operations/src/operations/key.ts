@@ -5,6 +5,7 @@ export interface KeyConfig {
   key: string;
   wait_after?: number;
   waitAfter?: number;
+  useSystemMouse?: boolean;
 }
 
 function delay(ms: number) {
@@ -25,6 +26,9 @@ async function runKey(ctx: OperationContext, config: KeyConfig) {
         ? config.waitAfter
         : 0;
 
+  const useSystemMouse = config.useSystemMouse !== false;
+  const protocolMouse = (ctx.page as any)?.mouse;
+
   if (selector) {
     const rect = await ctx.page.evaluate((sel) => {
       const el = document.querySelector(sel);
@@ -37,12 +41,19 @@ async function runKey(ctx: OperationContext, config: KeyConfig) {
     if (!rect || !rect.visible) {
       return { success: false, error: 'element not visible' };
     }
-    if (!ctx.systemInput?.mouseClick) {
-      return { success: false, error: 'system mouse not available' };
-    }
     const cx = Math.round((rect.x1 + rect.x2) / 2);
     const cy = Math.round((rect.y1 + rect.y2) / 2);
-    await ctx.systemInput.mouseClick(cx, cy);
+    if (useSystemMouse) {
+      if (!ctx.systemInput?.mouseClick) {
+        return { success: false, error: 'system mouse not available' };
+      }
+      await ctx.systemInput.mouseClick(cx, cy);
+    } else {
+      if (!protocolMouse || typeof protocolMouse.click !== 'function') {
+        return { success: false, error: 'protocol mouse not available' };
+      }
+      await protocolMouse.click(cx, cy);
+    }
     await delay(150);
   }
 
@@ -56,7 +67,7 @@ async function runKey(ctx: OperationContext, config: KeyConfig) {
     await delay(waitAfter);
   }
 
-  return { success: true };
+  return { success: true, inputMode: useSystemMouse ? 'system' : 'protocol' };
 }
 
 export const keyOperation: OperationDefinition<KeyConfig> = {

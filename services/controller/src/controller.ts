@@ -117,6 +117,13 @@ interface WsResponse {
   error?: string;
 }
 
+type InputMode = 'system' | 'protocol';
+
+function normalizeInputMode(mode: any): InputMode {
+  const raw = String(mode || '').trim().toLowerCase();
+  return raw === 'protocol' ? 'protocol' : 'system';
+}
+
 export class UiController {
   private repoRoot: string;
   private messageBus: any;
@@ -129,6 +136,7 @@ export class UiController {
   private defaultHttpPort: number;
   private defaultHttpProtocol: string;
   private _containerIndexCache: Record<string, any> | null;
+  private inputMode: InputMode;
   private snapshotCache = new Map<
     string,
     {
@@ -152,6 +160,7 @@ export class UiController {
     this.defaultHttpPort = Number(options.defaultHttpPort || 7704);
     this.defaultHttpProtocol = options.defaultHttpProtocol || 'http';
     this._containerIndexCache = null;
+    this.inputMode = normalizeInputMode(process.env.WEBAUTO_INPUT_MODE);
     this.cliTargets = options.cliTargets || {};
     logDebug('controller', 'init', {
       wsHost: this.defaultWsHost,
@@ -295,6 +304,10 @@ export class UiController {
         return this.handleKeyboardType(payload);
       case 'system:shortcut':
         return this.handleSystemShortcut(payload);
+      case 'system:input-mode:set':
+        return this.handleSystemInputModeSet(payload);
+      case 'system:input-mode:get':
+        return this.handleSystemInputModeGet();
       case 'mouse:wheel':
         return this.handleMouseWheel(payload);
       case 'dom:branch:2':
@@ -360,6 +373,19 @@ export class UiController {
     }
 
     throw new Error('unsupported platform');
+  }
+
+
+  async handleSystemInputModeSet(payload: ActionPayload = {}) {
+    const mode = normalizeInputMode(payload.mode);
+    this.inputMode = mode;
+    process.env.WEBAUTO_INPUT_MODE = mode;
+    logDebug('controller', 'input-mode:set', { mode });
+    return { success: true, data: { mode } };
+  }
+
+  async handleSystemInputModeGet() {
+    return { success: true, data: { mode: this.inputMode } };
   }
 
   async handleOperationRun(payload: ActionPayload = {}) {
@@ -1542,6 +1568,15 @@ export class UiController {
       const mergedConfig = { ...(config as Record<string, any> || {}) };
       if (typeof mergedConfig.timeoutMs !== 'number') {
         mergedConfig.timeoutMs = timeoutMs;
+      }
+
+      // Global input mode switch: keeps API shape unchanged, only toggles execution strategy.
+      if (['click', 'type', 'key', 'scroll'].includes(String(operationId))) {
+        if (this.inputMode === 'protocol') {
+          mergedConfig.useSystemMouse = false;
+        } else if (typeof mergedConfig.useSystemMouse !== 'boolean') {
+          mergedConfig.useSystemMouse = true;
+        }
       }
 
       const response = await fetch(`http://${host}:${port}/v1/container/${containerId}/execute`, {

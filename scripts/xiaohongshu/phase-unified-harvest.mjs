@@ -5,23 +5,30 @@ import { ensureCoreServices } from '../lib/ensure-core-services.mjs';
 ensureUtf8Console();
 
 import { ensureServicesHealthy, restoreBrowserState } from './lib/recovery.mjs';
+import { ensureRuntimeReady } from './lib/runtime-ready.mjs';
 import minimist from 'minimist';
 import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { promises as fs } from 'node:fs';
 
 import { resolveKeyword, resolveEnv } from './lib/env.mjs';
 import { initRunLogging, emitRunEvent, safeStringify } from './lib/logger.mjs';
 import { createSessionLock } from './lib/session-lock.mjs';
 import { assignShards, listProfilesForPool } from './lib/profilepool.mjs';
+import { parseFlag, splitCsv, buildOperationPlan, matchHarvestedComments } from './lib/unified-pipeline.mjs';
 
 import { execute as validateLinks } from '../../dist/modules/xiaohongshu/app/src/blocks/Phase34ValidateLinksBlock.js';
+import { execute as openDetail } from '../../dist/modules/xiaohongshu/app/src/blocks/Phase34OpenDetailBlock.js';
+import { execute as extractDetail } from '../../dist/modules/xiaohongshu/app/src/blocks/Phase34ExtractDetailBlock.js';
+import { execute as collectComments } from '../../dist/modules/xiaohongshu/app/src/blocks/Phase34CollectCommentsBlock.js';
+import { execute as persistDetail } from '../../dist/modules/xiaohongshu/app/src/blocks/Phase34PersistDetailBlock.js';
+import { execute as closeDetail } from '../../dist/modules/xiaohongshu/app/src/blocks/Phase34CloseDetailBlock.js';
 import { execute as openTabs } from '../../dist/modules/xiaohongshu/app/src/blocks/Phase34OpenTabsBlock.js';
 import { execute as interact } from '../../dist/modules/xiaohongshu/app/src/blocks/Phase3InteractBlock.js';
-import { execute as multiTabHarvest } from '../../dist/modules/xiaohongshu/app/src/blocks/Phase4MultiTabHarvestBlock.js';
-import { execute as extractDetail } from '../../dist/modules/xiaohongshu/app/src/blocks/Phase34ExtractDetailBlock.js';
-import { execute as persistDetail } from '../../dist/modules/xiaohongshu/app/src/blocks/Phase34PersistDetailBlock.js';
-import { delay } from '../../dist/modules/xiaohongshu/app/src/utils/controllerAction.js';
+import { execute as matchComments } from '../../dist/modules/xiaohongshu/app/src/blocks/MatchCommentsBlock.js';
+import { execute as replyInteract } from '../../dist/modules/xiaohongshu/app/src/blocks/ReplyInteractBlock.js';
+import { controllerAction, delay } from '../../dist/modules/xiaohongshu/app/src/utils/controllerAction.js';
 import { resolveDownloadRoot } from '../../dist/modules/state/src/paths.js';
 import { updateXhsCollectState } from '../../dist/modules/state/src/xiaohongshu-collect-state.js';
 
@@ -39,23 +46,11 @@ function formatDurationMs(ms) {
   return `${m}m${String(r).padStart(2, '0')}s`;
 }
 
-async function closeTabs(profile, tabs) {
-  for (const tab of tabs) {
-    if (!tab?.pageId) continue;
-    try {
-      await fetch(`${UNIFIED_API_URL}/v1/controller/action`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'browser:close_page',
-          payload: { profile, pageId: tab.pageId }
-        }),
-      }).catch(() => null);
-      await delay(200);
-    } catch (err) {
-      console.warn(`[phase-unified] 关闭 Tab 失败 pageId=${tab.pageId}:`, err?.message || String(err));
-    }
-  }
+function parsePositiveOrUnlimited(value, fallback = 0) {
+  if (value === undefined || value === null || value === '') return fallback;
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0) return 0;
+  return Math.floor(n);
 }
 
 function stripArgs(argv, keys) {
@@ -84,6 +79,439 @@ async function runNode(scriptPath, args) {
   });
 }
 
+async function readJsonl(filePath) {
+  try {
+    const text = await fs.readFile(filePath, 'utf8');
+    return text
+      .split('\n')
+      .filter(Boolean)
+      .map((line) => {
+        try {
+          return JSON.parse(line);
+        } catch {
+          return null;
+        }
+      })
+      .filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+async function writeJsonl(filePath, rows) {
+  const text = rows.map((row) => JSON.stringify(row)).join('\n') + (rows.length ? '\n' : '');
+  await fs.writeFile(filePath, text, 'utf8');
+}
+
+function getPhase2LinksPath(downloadRoot, env, keyword) {
+  return path.join(downloadRoot, 'xiaohongshu', env, keyword, 'phase2-links.jsonl');
+}
+
+async function countValidPhase2Links(filePath) {
+  const rows = await readJsonl(filePath);
+  const valid = rows.filter((item) => typeof item?.safeUrl === 'string' && item.safeUrl.includes('xsec_token'));
+  return { total: rows.length, valid: valid.length };
+}
+
+async function ensurePhase2LinksReady({ profile, keyword, env, target, headless, autoBackfill }) {
+  const downloadRoot = resolveDownloadRoot();
+  const linksPath = getPhase2LinksPath(downloadRoot, env, keyword);
+  const before = await countValidPhase2Links(linksPath);
+  const need = Math.max(1, Number(target) || 1);
+
+  emitRunEvent('phase_unified_links_check', {
+    linksPath,
+    total: before.total,
+    valid: before.valid,
+    target: need,
+    autoBackfill,
+  });
+
+  if (before.valid >= need || !autoBackfill) {
+    return { linksPath, before, after: before, backfilled: false };
+  }
+
+  console.log(`[Links] 当前有效链接 ${before.valid}/${need}，自动触发 Phase2 补齐...`);
+  emitRunEvent('phase_unified_links_backfill_start', { beforeValid: before.valid, target: need, profile });
+
+  const phase2Script = path.join(__dirname, 'phase2-collect.mjs');
+  const phase2Args = [
+    '--profile', profile,
+    '--keyword', keyword,
+    '--target', String(need),
+    '--env', env,
+    '--foreground',
+    ...(headless ? ['--headless'] : []),
+  ];
+  await runNode(phase2Script, phase2Args);
+
+  const after = await countValidPhase2Links(linksPath);
+  emitRunEvent('phase_unified_links_backfill_done', {
+    beforeValid: before.valid,
+    afterValid: after.valid,
+    target: need,
+    linksPath,
+  });
+
+  return { linksPath, before, after, backfilled: true };
+}
+
+async function mergeComments(noteDir, noteId, comments) {
+  const filePath = path.join(noteDir, 'comments.jsonl');
+  const existing = await readJsonl(filePath);
+  const seen = new Set(existing.map((r) => `${String(r.userId || '')}:${String(r.content || '')}`));
+  const incoming = Array.isArray(comments) ? comments : [];
+  const now = new Date().toISOString();
+
+  const addedRows = [];
+  for (const row of incoming) {
+    const normalized = {
+      noteId,
+      userName: String(row?.userName || row?.user_name || ''),
+      userId: String(row?.userId || row?.user_id || ''),
+      content: String(row?.content || row?.text || ''),
+      time: String(row?.time || row?.timestamp || ''),
+      likeCount: Number(row?.likeCount || row?.like_count || 0),
+      ts: now,
+    };
+    const key = `${normalized.userId}:${normalized.content}`;
+    if (!normalized.content || seen.has(key)) continue;
+    seen.add(key);
+    addedRows.push(normalized);
+  }
+
+  const merged = [...existing, ...addedRows];
+  await fs.mkdir(noteDir, { recursive: true });
+  await writeJsonl(filePath, merged);
+  return {
+    filePath,
+    existing: existing.length,
+    added: addedRows.length,
+    total: merged.length,
+    mergedRows: merged,
+  };
+}
+
+function buildMatchRule(keywords, mode, minHits) {
+  if (!keywords.length) return null;
+  if (mode === 'all') {
+    return { must: keywords };
+  }
+  if (mode === 'atLeast') {
+    return { any: keywords, minAnyMatches: Math.max(1, Number(minHits) || 1) };
+  }
+  return { any: keywords };
+}
+
+async function switchToTab(profile, tabIndex, apiUrl) {
+  await controllerAction('browser:page:switch', { profileId: profile, index: tabIndex }, apiUrl).catch(() => null);
+  await delay(450);
+  const listRes = await controllerAction('browser:page:list', { profileId: profile }, apiUrl).catch(() => null);
+  const pages = listRes?.pages || listRes?.data?.pages || [];
+  const activeIndex = listRes?.activeIndex ?? listRes?.data?.activeIndex ?? -1;
+  const activeUrl = pages.find((p) => p.active)?.url || '';
+  return { activeIndex, activeUrl };
+}
+
+async function ensureTabAssignments(profile, tabCount, apiUrl) {
+  const openTabsResult = await openTabs({
+    profile,
+    tabCount,
+    unifiedApiUrl: apiUrl,
+  });
+  const tabs = Array.isArray(openTabsResult?.tabs) ? openTabsResult.tabs.slice(0, tabCount) : [];
+  if (tabs.length === 0) {
+    throw new Error('tab_pool_empty');
+  }
+  return tabs.map((tab, idx) => ({
+    slotIndex: idx + 1,
+    tabRealIndex: Number(tab?.index),
+  }));
+}
+
+async function processSingleNote({
+  profile,
+  keyword,
+  env,
+  downloadRoot,
+  link,
+  operationPlan,
+  config,
+  slotIndex = null,
+  tabRealIndex = null,
+}) {
+  const noteId = String(link?.noteId || '');
+  const safeUrl = String(link?.safeUrl || '');
+  const noteDir = path.join(downloadRoot, 'xiaohongshu', env, keyword, noteId);
+  const result = {
+    noteId,
+    success: true,
+    homepageOk: false,
+    commentsTotal: 0,
+    matchCount: 0,
+    likedCount: 0,
+    repliedCount: 0,
+    errors: [],
+  };
+
+  let detailOpened = false;
+  let harvestedComments = [];
+  let matchedFromHarvest = [];
+
+  for (const op of operationPlan) {
+    emitRunEvent('phase_unified_op_start', { noteId, op, slotIndex, tabRealIndex });
+
+    try {
+      if (op === 'detail_harvest') {
+        if (!config.doHomepage && !config.doImages) {
+          emitRunEvent('phase_unified_op_skip', { noteId, op, reason: 'disabled', slotIndex, tabRealIndex });
+          continue;
+        }
+
+        const openRes = await openDetail({ noteId, safeUrl, profile, unifiedApiUrl: UNIFIED_API_URL });
+        if (!openRes?.success) {
+          throw new Error(openRes?.error || 'open_detail_failed');
+        }
+        detailOpened = true;
+
+        const detailRes = await extractDetail({ noteId, profile, unifiedApiUrl: UNIFIED_API_URL });
+        if (!detailRes?.success) {
+          throw new Error(detailRes?.error || 'extract_detail_failed');
+        }
+
+        const persistRes = await persistDetail({
+          noteId,
+          detail: detailRes.detail || {},
+          keyword,
+          env,
+          unifiedApiUrl: UNIFIED_API_URL,
+        });
+        if (!persistRes?.success) {
+          throw new Error(persistRes?.error || 'persist_detail_failed');
+        }
+
+        result.homepageOk = true;
+        emitRunEvent('phase_unified_op_done', {
+          noteId,
+          op,
+          imageCount: Number(persistRes?.imageCount || 0),
+        });
+        continue;
+      }
+
+      if (op === 'comments_harvest') {
+        if (!config.doComments && !config.doReply) {
+          emitRunEvent('phase_unified_op_skip', { noteId, op, reason: 'disabled', slotIndex, tabRealIndex });
+          continue;
+        }
+
+        if (!detailOpened) {
+          const openRes = await openDetail({ noteId, safeUrl, profile, unifiedApiUrl: UNIFIED_API_URL });
+          if (!openRes?.success) throw new Error(openRes?.error || 'open_detail_failed');
+          detailOpened = true;
+        }
+
+        const cRes = await collectComments({
+          sessionId: profile,
+          unifiedApiUrl: UNIFIED_API_URL,
+          maxRounds: config.commentRounds,
+          batchSize: config.maxComments,
+        });
+        if (!cRes?.success) throw new Error(cRes?.error || 'collect_comments_failed');
+
+        const persistComments = await mergeComments(noteDir, noteId, cRes.comments || []);
+        harvestedComments = persistComments.mergedRows;
+        result.commentsTotal = persistComments.total;
+
+        emitRunEvent('phase_unified_op_done', {
+          noteId,
+          op,
+          commentsAdded: persistComments.added,
+          commentsTotal: persistComments.total,
+          commentsPath: persistComments.filePath,
+        });
+        continue;
+      }
+
+      if (op === 'comment_match_gate') {
+        if (!config.doLikes && !config.doReply) {
+          emitRunEvent('phase_unified_op_skip', { noteId, op, reason: 'interaction_disabled', slotIndex, tabRealIndex });
+          continue;
+        }
+
+        matchedFromHarvest = matchHarvestedComments(
+          harvestedComments,
+          config.matchKeywords,
+          config.matchMode,
+          config.matchMinHits,
+        );
+        result.matchCount = matchedFromHarvest.length;
+
+        emitRunEvent('phase_unified_op_done', {
+          noteId,
+          op,
+          matchCount: matchedFromHarvest.length,
+          keywords: config.matchKeywords,
+          mode: config.matchMode,
+          minHits: config.matchMinHits,
+        });
+        continue;
+      }
+
+      if (op === 'comment_like') {
+        if (!config.doLikes) {
+          emitRunEvent('phase_unified_op_skip', { noteId, op, reason: 'disabled', slotIndex, tabRealIndex });
+          continue;
+        }
+
+        const likeKeywords = config.likeKeywords.length ? config.likeKeywords : config.matchKeywords;
+        if (likeKeywords.length === 0) {
+          emitRunEvent('phase_unified_op_skip', { noteId, op, reason: 'no_like_keywords', slotIndex, tabRealIndex });
+          continue;
+        }
+
+        const commentsPath = path.join(noteDir, 'comments.jsonl');
+        const likeRes = await interact({
+          sessionId: profile,
+          noteId,
+          safeUrl,
+          likeKeywords,
+          maxLikesPerRound: config.maxLikes,
+          dryRun: config.dryRun,
+          keyword,
+          env,
+          unifiedApiUrl: UNIFIED_API_URL,
+          // 点赞支持独立运行：仅在已打开详情页时复用上下文，否则由互动块自行打开。
+          reuseCurrentDetail: detailOpened,
+          commentsAlreadyOpened: detailOpened,
+          // 评论+点赞同屏统一：每轮提取可见评论，按开关决定是否落盘。
+          collectComments: Boolean(config.doComments),
+          persistCollectedComments: Boolean(config.doComments),
+          commentsFilePath: commentsPath,
+          onRound: (round) => {
+            emitRunEvent('phase_unified_like_round', {
+              noteId,
+              slotIndex,
+              tabRealIndex,
+              ...round,
+            });
+          },
+        });
+        if (!likeRes?.success) throw new Error(likeRes?.error || 'like_failed');
+
+        result.likedCount += Number(likeRes?.likedCount || 0);
+        if (config.doComments) {
+          result.commentsTotal = Number(likeRes?.commentsTotal || result.commentsTotal || 0);
+        }
+        emitRunEvent('phase_unified_op_done', {
+          noteId,
+          op,
+          likedCount: Number(likeRes?.likedCount || 0),
+          commentsAdded: Number(likeRes?.commentsAdded || 0),
+          commentsTotal: Number(likeRes?.commentsTotal || 0),
+          commentsPath: likeRes?.commentsPath || (config.doComments ? commentsPath : null),
+          reachedBottom: Boolean(likeRes?.reachedBottom),
+        });
+        continue;
+      }
+
+      if (op === 'comment_reply') {
+        if (!config.doReply) {
+          emitRunEvent('phase_unified_op_skip', { noteId, op, reason: 'disabled', slotIndex, tabRealIndex });
+          continue;
+        }
+
+        if (matchedFromHarvest.length === 0) {
+          emitRunEvent('phase_unified_op_skip', { noteId, op, reason: 'no_match', slotIndex, tabRealIndex });
+          continue;
+        }
+
+        const rule = buildMatchRule(config.matchKeywords, config.matchMode, config.matchMinHits);
+        if (!rule) {
+          emitRunEvent('phase_unified_op_skip', { noteId, op, reason: 'no_rule', slotIndex, tabRealIndex });
+          continue;
+        }
+
+        const locateRes = await matchComments({
+          sessionId: profile,
+          rule,
+          unifiedApiUrl: UNIFIED_API_URL,
+          maxScrolls: 8,
+          maxItems: 60,
+          maxMatches: 1,
+          openComments: true,
+          highlightOnFirstMatch: true,
+          screenshotOnFirstMatch: true,
+          noteId,
+          env,
+          keyword,
+        });
+
+        const firstMatch = locateRes?.matches?.[0] || null;
+        if (!firstMatch || Number(firstMatch.index) < 0) {
+          emitRunEvent('phase_unified_op_skip', { noteId, op, reason: 'match_not_visible', slotIndex, tabRealIndex });
+          continue;
+        }
+
+        const replyRes = await replyInteract({
+          sessionId: profile,
+          noteId,
+          commentVisibleIndex: Number(firstMatch.index),
+          replyText: config.replyText,
+          dryRun: config.dryRun,
+          unifiedApiUrl: UNIFIED_API_URL,
+          env,
+          keyword,
+          dev: true,
+        });
+
+        if (!replyRes?.success) {
+          throw new Error(replyRes?.error || 'reply_failed');
+        }
+
+        result.repliedCount += replyRes?.typed ? 1 : 0;
+        emitRunEvent('phase_unified_op_done', {
+          noteId,
+          op,
+          typed: Boolean(replyRes?.typed),
+          screenshot: replyRes?.evidence?.screenshot || null,
+        });
+        continue;
+      }
+
+      if (op === 'next_note') {
+        emitRunEvent('phase_unified_op_done', { noteId, op, slotIndex, tabRealIndex });
+      }
+    } catch (err) {
+      const message = err?.message || String(err);
+      result.success = false;
+      result.errors.push(`${op}: ${message}`);
+      emitRunEvent('phase_unified_op_error', { noteId, op, error: message, slotIndex, tabRealIndex });
+      // 关键步骤失败后直接结束当前 note，进入下一个。
+      break;
+    }
+  }
+
+  if (detailOpened) {
+    await closeDetail({ profile, unifiedApiUrl: UNIFIED_API_URL }).catch(() => null);
+    await delay(500);
+  }
+
+  emitRunEvent('phase_unified_note_done', {
+    noteId,
+    success: result.success,
+    commentsTotal: result.commentsTotal,
+    matchCount: result.matchCount,
+    likedCount: result.likedCount,
+    repliedCount: result.repliedCount,
+    errors: result.errors,
+    slotIndex,
+    tabRealIndex,
+  });
+
+  return result;
+}
+
 async function main() {
   await ensureServicesHealthy();
   await ensureCoreServices();
@@ -95,26 +523,46 @@ async function main() {
   const downloadRoot = resolveDownloadRoot();
   const profilesArg = String(args.profiles || '').trim();
   const poolKeyword = String(args.profilepool || '').trim();
-  const shardedChild = args['sharded-child'] === true || args['sharded-child'] === '1' || args['sharded-child'] === 1;
-  const skipPhase1 = args['skip-phase1'] === true || args['skip-phase1'] === '1' || args['skip-phase1'] === 1;
-  
-  // 统一采集控制参数
-  const doComments = args['do-comments'] !== false;
-  const doLikes = args['do-likes'] === true;
-  const doHomepage = args['do-homepage'] === true;
-  const doImages = args['do-images'] === true;
-  const doOcr = args['do-ocr'] === true;  // 占位，后续实现
-  const maxComments = Number(args['max-comments'] || 50);
-  const maxLikes = Number(args['max-likes'] || 2);
-  const likeKeywordsRaw = String(args['like-keywords'] || '').trim();
-  const likeKeywords = likeKeywordsRaw ? likeKeywordsRaw.split(',').map(s => s.trim()).filter(Boolean) : [];
-  
-  // Dry-run 默认开启（UI 勾选控制）
-  const dryRun = args['dry-run'] !== false;  // 默认 true，显式 --no-dry-run 才真实点赞
+  const shardedChild = parseFlag(args['sharded-child'], false);
+  const skipPhase1 = parseFlag(args['skip-phase1'], false);
+  const headless = parseFlag(args.headless, true);
+  const inputMode = String(args['input-mode'] || 'protocol').trim().toLowerCase() === 'system' ? 'system' : 'protocol';
+  const autoBackfillLinks = !parseFlag(args['no-auto-backfill-links'], false);
 
-  const foreground = args.foreground === true || args.foreground === '1' || args.foreground === 1;
+  const doHomepage = parseFlag(args['do-homepage'], true);
+  const doImages = parseFlag(args['do-images'], false);
+  const doComments = parseFlag(args['do-comments'], true);
+  const doLikes = parseFlag(args['do-likes'], false);
+  const doReply = parseFlag(args['do-reply'], false);
+  const doOcr = parseFlag(args['do-ocr'], false);
+
+  const maxNotes = Math.max(1, Number(args['max-notes'] || 100));
+  const tabCount = Math.max(1, Number(args['tab-count'] || 4));
+  const maxComments = parsePositiveOrUnlimited(args['max-comments'], 0);
+  const commentRounds = parsePositiveOrUnlimited(args['comment-rounds'], 0);
+  const maxLikes = Math.max(1, Number(args['max-likes'] || 2));
+
+  const likeKeywords = splitCsv(args['like-keywords'] || '');
+  const matchKeywords = splitCsv(args['match-keywords'] || args['like-keywords'] || '');
+  const matchMode = String(args['match-mode'] || 'any').trim();
+  const matchMinHits = Math.max(1, Number(args['match-min-hits'] || 2));
+
+  const replyText = String(args['reply-text'] || '感谢分享，已关注').trim();
+
+  const dryRun = !parseFlag(args['no-dry-run'], false) && parseFlag(args['dry-run'], true);
+
+  let operationPlan = buildOperationPlan({ doHomepage, doImages, doComments, doLikes, doReply });
+  const opOrderRaw = splitCsv(args['op-order'] || '');
+  if (opOrderRaw.length > 0) {
+    const allowed = new Set(['detail_harvest', 'comments_harvest', 'comment_match_gate', 'comment_like', 'comment_reply', 'next_note']);
+    const normalized = opOrderRaw.filter((op) => allowed.has(op));
+    if (!normalized.includes('next_note')) normalized.push('next_note');
+    if (normalized.length > 0) operationPlan = normalized;
+  }
+
+  const foreground = parseFlag(args.foreground, false);
   const shouldDaemonize = !foreground && process.env.WEBAUTO_DAEMON !== '1';
-  
+
   if (shouldDaemonize) {
     const wrapperPath = path.join(__dirname, 'shared', 'daemon-wrapper.mjs');
     const scriptPath = fileURLToPath(import.meta.url);
@@ -124,20 +572,20 @@ async function main() {
     return;
   }
 
+  await controllerAction('system:input-mode:set', { mode: inputMode }, UNIFIED_API_URL).catch(() => null);
+  console.log(`[InputMode] ${inputMode}`);
+
   if (!shardedChild && (profilesArg || poolKeyword)) {
     const profiles = profilesArg
       ? profilesArg.split(',').map((s) => s.trim()).filter(Boolean)
       : listProfilesForPool(poolKeyword);
     if (profiles.length === 0) {
       console.error('❌ 未找到可用 profiles');
-      console.error(`   profilesRoot: ~/.webauto/profiles`);
-      console.error(`   hint: node scripts/profilepool.mjs add "${poolKeyword || keyword}"`);
       process.exit(2);
     }
 
     const assignments = assignShards(profiles);
     console.log(`🧩 Unified Harvest multi-profile: ${assignments.length} shards`);
-    assignments.forEach((a) => console.log(`- ${a.profileId} => shard ${a.shardIndex}/${a.shardCount}`));
 
     const scriptPath = fileURLToPath(import.meta.url);
     const baseArgs = stripArgs(process.argv.slice(2), [
@@ -151,304 +599,234 @@ async function main() {
     ]);
 
     const runShard = async (a) => {
-      console.log(`\n➡️  shard ${a.shardIndex}/${a.shardCount} profile=${a.profileId}`);
-      if (!skipPhase1) {
-        await runNode(path.join(__dirname, 'phase1-boot.mjs'), ['--profile', a.profileId, '--once', ...(headless ? ['--headless'] : [])]);
-      }
+      console.log(`\n➡️ shard ${a.shardIndex}/${a.shardCount} profile=${a.profileId}`);
+      // Child process runs runtime-ready + phase1 with ownerPid=self.
+      // This avoids parent-booted sessions being reaped when parent phase1 exits.
       await runNode(scriptPath, [
         ...baseArgs,
-        '--profile',
-        a.profileId,
-        '--shard-index',
-        String(a.shardIndex),
-        '--shard-count',
-        String(a.shardCount),
-        '--sharded-child',
-        '1',
+        '--profile', a.profileId,
+        '--shard-index', String(a.shardIndex),
+        '--shard-count', String(a.shardCount),
+        '--sharded-child', '1',
+        '--skip-phase1', '1',
       ]);
     };
 
-    for (const a of assignments) {
-      await runShard(a);
+    const shardResults = await Promise.allSettled(assignments.map((a) => runShard(a)));
+    const failed = shardResults
+      .map((r, idx) => ({ r, idx }))
+      .filter((x) => x.r.status === 'rejected')
+      .map((x) => ({
+        profile: assignments[x.idx]?.profileId,
+        shardIndex: assignments[x.idx]?.shardIndex,
+        error: x.r.reason?.message || String(x.r.reason || 'unknown_error'),
+      }));
+
+    if (failed.length > 0) {
+      failed.forEach((f) => {
+        console.error(`❌ shard ${f.shardIndex}/${assignments.length} profile=${f.profile} failed: ${f.error}`);
+      });
+      throw new Error(`multi-profile failed: ${failed.length}/${assignments.length} shard(s)`);
     }
+
     console.log('\n✅ Unified Harvest multi-profile done');
     return;
   }
 
   const profile = String(args.profile || 'xiaohongshu_fresh').trim();
+
+  await ensureRuntimeReady({
+    phase: 'phase_unified',
+    profile,
+    keyword,
+    env,
+    unifiedApiUrl: UNIFIED_API_URL,
+    headless,
+    requireCheckpoint: true,
+  });
+
   const runCtx = initRunLogging({ keyword, env, noWrite: dryRun });
   const runId = runCtx?.runId || runCtx;
 
-  console.log(`\n📝 Phase Unified Harvest: 统一采集与点赞 [runId: ${runId}]`);
+  const config = {
+    doHomepage,
+    doImages,
+    doComments,
+    doLikes,
+    doReply,
+    doOcr,
+    maxNotes,
+    tabCount,
+    maxComments,
+    commentRounds,
+    maxLikes,
+    matchKeywords,
+    likeKeywords,
+    matchMode,
+    matchMinHits,
+    replyText,
+    dryRun,
+  };
+
+  console.log(`\n📝 Phase Unified Harvest: 顺序流水线 [runId: ${runId}]`);
   console.log(`关键字: ${keyword}`);
   console.log(`环境: ${env}`);
   console.log(`Profile: ${profile}`);
-  console.log(`\n🎯 采集配置:`);
-  console.log(`  - 采集评论: ${doComments ? '✅' : '❌'} (maxComments=${maxComments})`);
-  console.log(`  - 点赞评论: ${doLikes ? '✅' : '❌'} (maxLikes=${maxLikes}, keywords=[${likeKeywords.join(', ') || '无'}])`);
-  console.log(`  - 采集主页: ${doHomepage ? '✅' : '❌'}`);
-  console.log(`  - 采集图片: ${doImages ? '✅' : '❌'}`);
-  console.log(`  - OCR识别: ${doOcr ? '✅ (占位)' : '❌'}`);
-  console.log(`  - Dry Run: ${dryRun ? '✅ (测试不点赞)' : '❌ (真实点赞)'}`);
+  console.log(`Operation plan: ${operationPlan.join(' -> ')}`);
+  console.log(`Tab rotation: ${tabCount} tabs (Cmd+T pool)`);
+  console.log(`Input mode: ${inputMode}`);
+  console.log(`Comments cap: ${maxComments > 0 ? maxComments : 'unlimited'} | Comment rounds: ${commentRounds > 0 ? commentRounds : 'unlimited'}`);
 
   const lock = createSessionLock({ profileId: profile, lockType: 'phase-unified' });
   let lockHandle = null;
   try {
     lockHandle = lock.acquire();
-  } catch (e) {
+  } catch {
     console.log('⚠️ 会话锁已被持有，退出');
     process.exit(1);
   }
 
   try {
     const t0 = nowMs();
-    emitRunEvent('phase_unified_start', { keyword, env, doComments, doLikes, doHomepage, doImages, doOcr, dryRun });
+    emitRunEvent('phase_unified_start', { keyword, env, config, operationPlan, tabCount, inputMode });
 
-    // 1. 校验链接
-    console.log(`\n🔍 步骤 1: 校验链接...`);
+    const linksReady = await ensurePhase2LinksReady({
+      profile,
+      keyword,
+      env,
+      target: maxNotes,
+      headless,
+      autoBackfill: autoBackfillLinks,
+    });
+
     const validateResult = await validateLinks({
       keyword,
       env,
       profile,
-      linksPath: undefined,
+      linksPath: linksReady.linksPath,
+      shardIndex: args['shard-index'] !== undefined ? Number(args['shard-index']) : undefined,
+      shardCount: args['shard-count'] !== undefined ? Number(args['shard-count']) : undefined,
+      shardBy: 'index-mod',
+      maxNotes,
     });
 
     if (!validateResult.success) {
       throw new Error(`链接校验失败: ${validateResult.error}`);
     }
 
-    const validLinks = validateResult.links || [];
-    console.log(`✅ 有效链接: ${validLinks.length} 条`);
-
-    if (validLinks.length === 0) {
-      console.log('⚠️ 没有有效链接');
-      process.exit(0);
+    const links = Array.isArray(validateResult.links) ? validateResult.links : [];
+    console.log(`✅ 有效链接: ${links.length}，本轮处理: ${links.length}`);
+    if (linksReady.after.valid < maxNotes) {
+      console.log(`⚠️ 链接池不足目标：valid=${linksReady.after.valid}, target=${maxNotes}（将处理可用链接）`);
+      emitRunEvent('phase_unified_links_insufficient', {
+        valid: linksReady.after.valid,
+        target: maxNotes,
+        linksPath: linksReady.linksPath,
+      });
     }
 
-    // 2. 主页内容 + 图片采集（如果启用）
-    let homepageResult = { notesProcessed: 0, imagesDownloaded: 0 };
-    if (doHomepage || doImages) {
-      console.log(`\n📄 步骤 2: 主页内容 + 图片采集...`);
-      let hpCount = 0;
-      let imgCount = 0;
-      
-      for (const link of validLinks.slice(0, Math.min(validLinks.length, 20))) {
-        try {
-          // 导航到详情页
-          await fetch(`${UNIFIED_API_URL}/v1/controller/action`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              action: 'browser:goto',
-              payload: { profile, url: link.safeUrl }
-            }),
-          });
-          await delay(1500);
-
-          // 提取主页内容
-          if (doHomepage) {
-            const extractRes = await extractDetail({ profile, noteId: link.noteId, unifiedApiUrl: UNIFIED_API_URL });
-            if (extractRes.success) {
-              hpCount++;
-            }
-          }
-
-          // 持久化（含图片下载）
-          if (doImages || doHomepage) {
-            const persistRes = await persistDetail({
-              profile,
-              noteId: link.noteId,
-              keyword,
-              env,
-              unifiedApiUrl: UNIFIED_API_URL,
-            });
-            if (persistRes.success) {
-              if (doImages) imgCount += persistRes.imageCount;
-            }
-          }
-
-          if (hpCount % 5 === 0) {
-            console.log(`  进度: ${hpCount}/${validLinks.length} 帖子主页已采集`);
-          }
-        } catch (err) {
-          console.warn(`  [${link.noteId}] 主页采集失败: ${err?.message || String(err)}`);
-        }
-      }
-      
-      homepageResult.notesProcessed = hpCount;
-      homepageResult.imagesDownloaded = imgCount;
-      console.log(`✅ 主页采集完成: ${hpCount} 帖子, ${imgCount} 张图片`);
+    if (links.length === 0) {
+      console.log('⚠️ 没有可处理链接');
+      return;
     }
 
-    // 3. 评论采集（如果启用）
-    let tabs = [];
-    let commentsResult = { totalNotes: 0, totalComments: 0 };
-    if (doComments || doLikes) {
-      const openRes = await openTabs({ profile, tabCount: 4, unifiedApiUrl: UNIFIED_API_URL });
-      tabs = openRes.tabs || [];
-      console.log(`\n📂 Tab 池已准备: ${tabs.length} 个 tab`);
-    }
+    const tabAssignments = await ensureTabAssignments(profile, tabCount, UNIFIED_API_URL);
+    console.log(`[TabPool] 固定帖子页 slots:`);
+    tabAssignments.forEach((slot) => {
+      console.log(`  slot-${slot.slotIndex} -> tab-${slot.tabRealIndex}`);
+    });
+    emitRunEvent('phase_unified_tab_pool', { tabAssignments, tabCount });
 
-    if (doComments) {
-      console.log(`\n💬 步骤 3: 多 Tab 轮转采集评论...`);
-      commentsResult = await multiTabHarvest({
+    const stats = {
+      processed: 0,
+      failedNotes: 0,
+      totalComments: 0,
+      totalLiked: 0,
+      totalReplied: 0,
+      homepageOk: 0,
+      errors: [],
+    };
+
+    for (let i = 0; i < links.length; i += 1) {
+      const link = links[i];
+      const noteId = String(link?.noteId || '');
+      const slot = tabAssignments[i % tabAssignments.length];
+      const slotIndex = Number(slot?.slotIndex || 1);
+      const tabRealIndex = Number.isFinite(Number(slot?.tabRealIndex)) ? Number(slot?.tabRealIndex) : 0;
+
+      console.log(`\n[${i + 1}/${links.length}] slot-${slotIndex}(tab-${tabRealIndex}) note=${noteId}`);
+      const switched = await switchToTab(profile, tabRealIndex, UNIFIED_API_URL);
+      console.log(`  [Verify] activeIndex=${switched.activeIndex} url=${String(switched.activeUrl || '').slice(0, 90)}`);
+      emitRunEvent('phase_unified_tab_switch', {
+        noteId,
+        slotIndex,
+        tabRealIndex,
+        activeIndex: switched.activeIndex,
+        activeUrl: switched.activeUrl,
+      });
+
+      const noteResult = await processSingleNote({
         profile,
         keyword,
         env,
-        links: validLinks,
-        maxCommentsPerNote: maxComments,
-        unifiedApiUrl: UNIFIED_API_URL,
+        downloadRoot,
+        link,
+        operationPlan,
+        config,
+        slotIndex,
+        tabRealIndex,
       });
-      console.log(`✅ 评论采集完成: ${commentsResult.totalNotes} 帖子, ${commentsResult.totalComments} 条评论`);
+
+      stats.processed += 1;
+      stats.totalComments += Number(noteResult.commentsTotal || 0);
+      stats.totalLiked += Number(noteResult.likedCount || 0);
+      stats.totalReplied += Number(noteResult.repliedCount || 0);
+      if (noteResult.homepageOk) stats.homepageOk += 1;
+      if (!noteResult.success) {
+        stats.failedNotes += 1;
+        stats.errors.push({ noteId, errors: noteResult.errors, slotIndex, tabRealIndex });
+      }
+
+      if (!dryRun) {
+        await updateXhsCollectState({ keyword, env, downloadRoot }, (draft) => {
+          draft.resume.lastNoteId = noteId;
+          draft.resume.lastStep = 'phase_unified_note_done';
+        }).catch(() => {});
+      }
+
+      await delay(500);
     }
 
-    // 4. 评论点赞（如果启用）
-    let likesResult = { totalLiked: 0 };
-    if (doLikes && likeKeywords.length > 0) {
-      console.log(`\n❤️  步骤 4: 多 Tab 轮转点赞评论...`);
-      console.log(`🎯 点赞关键字: [${likeKeywords.join(', ')}]`);
-      console.log(`⏱️  每帖最多点赞: ${maxLikes} 条`);
-      
-      const noteState = new Map();
-      for (const link of validLinks) {
-        noteState.set(link.noteId, { reachedBottom: false, totalLiked: 0 });
-      }
-      
-      const tabAssignments = tabs.slice(0, 4).map((t, i) => ({
-        slotIndex: i + 1,
-        tabRealIndex: t.index,
-        linkIndex: i,
-        commentsScanned: 0,
-      }));
-      
-      console.log(`\n[Tabs] 固定帖子页 slots:`);
-      tabAssignments.forEach(t => {
-        const note = validLinks[t.linkIndex];
-        console.log(`  slot-${t.slotIndex} -> tab-${t.tabRealIndex} -> note ${note.noteId}`);
-      });
-      
-      let round = 0;
-      const maxRounds = 10_000;
-      const maxCommentsPerTab = 200;
-      
-      while (round < maxRounds) {
-        round += 1;
-        const activeSlot = tabAssignments[(round - 1) % tabAssignments.length];
-        
-        if (activeSlot.commentsScanned >= maxCommentsPerTab) {
-          console.log(`[Round ${round}] slot-${activeSlot.slotIndex} 已扫描 ${activeSlot.commentsScanned} 条评论，强制切换下一个 slot 规避风控`);
-          activeSlot.commentsScanned = 0;
-          await delay(800);
-          continue;
-        }
-        
-        const link = validLinks[activeSlot.linkIndex];
-        const state = noteState.get(link.noteId);
-        
-        if (state?.reachedBottom) {
-          const nextIdx = validLinks.findIndex((l) => !noteState.get(l.noteId)?.reachedBottom);
-          if (nextIdx === -1) {
-            console.log('\n🎉 所有帖子均已到达评论区底部，结束点赞');
-            break;
-          }
-          activeSlot.linkIndex = nextIdx;
-          console.log(`[slot-${activeSlot.slotIndex}] 当前帖子到底，切换到下一个未完成的帖子`);
-        }
-        
-        const link2 = validLinks[activeSlot.linkIndex];
-        const state2 = noteState.get(link2.noteId);
-        
-        console.log(`\n[Round ${round}] slot-${activeSlot.slotIndex}(tab-${activeSlot.tabRealIndex}) -> note ${link2.noteId}`);
-        
-        await fetch(`${UNIFIED_API_URL}/v1/controller/action`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            action: 'browser:page:switch',
-            payload: { profile, index: activeSlot.tabRealIndex }
-          }),
-        });
-        await delay(800);
-        
-        const res = await interact({
-          sessionId: profile,
-          noteId: link2.noteId,
-          safeUrl: link2.safeUrl,
-          likeKeywords,
-          maxLikesPerRound: maxLikes,
-          dryRun,
-          keyword,
-          env,
-          unifiedApiUrl: UNIFIED_API_URL,
-        });
-        
-        activeSlot.commentsScanned += Number(res?.scannedCount || 0);
-        
-        if (!res?.success) {
-          console.log(`[slot-${activeSlot.slotIndex}] ❌ 失败: ${res?.error || 'unknown error'}`);
-          emitRunEvent('phase_unified_note_error', { slot: activeSlot.slotIndex, noteId: link2.noteId, error: res?.error });
-          await delay(800);
-          continue;
-        }
-        
-        state2.totalLiked += res.likedCount;
-        state2.reachedBottom = !!res.reachedBottom;
-        
-        console.log(`[slot-${activeSlot.slotIndex}] ✅ 本轮点赞 ${res.likedCount} 条，总点赞 ${state2.totalLiked} 条，到底=${state2.reachedBottom}`);
-        emitRunEvent('phase_unified_note_round_done', {
-          slot: activeSlot.slotIndex,
-          noteId: link2.noteId,
-          likedCount: res.likedCount,
-          totalLiked: state2.totalLiked,
-          reachedBottom: state2.reachedBottom,
-        });
-        
-        if (!dryRun) {
-          await updateXhsCollectState({ keyword, env, downloadRoot }, (draft) => {
-            draft.resume.lastNoteId = link2.noteId;
-            draft.resume.lastStep = 'phase_unified_round_done';
-          });
-        }
-        
-        await delay(1200);
-      }
-      
-      likesResult.totalLiked = Array.from(noteState.values()).reduce((sum, s) => sum + (s.totalLiked || 0), 0);
-      console.log(`\n✅ 点赞完成: 总点赞数 ${likesResult.totalLiked}`);
-    }
-
-    // 5. OCR识别（占位）
     if (doOcr) {
-      console.log(`\n🔍 步骤 5: OCR识别（占位，暂未实现）`);
-      console.log(`⚠️  OCR 功能待实现，已放入 BD 管理`);
+      console.log('⚠️ OCR 当前为占位，未执行实际识别。');
+      emitRunEvent('phase_unified_ocr_placeholder', { enabled: true });
     }
 
     const totalMs = nowMs() - t0;
-    console.log(`\n⏱️  总耗时: ${formatDurationMs(totalMs)}`);
+    console.log(`\n⏱️ 总耗时: ${formatDurationMs(totalMs)}`);
     console.log(`📊 结果汇总:`);
-    console.log(`  - 采集主页: ${homepageResult.notesProcessed} 个帖子`);
-    console.log(`  - 下载图片: ${homepageResult.imagesDownloaded} 张`);
-    console.log(`  - 采集评论: ${commentsResult.totalNotes} 个帖子, ${commentsResult.totalComments} 条评论`);
-    console.log(`  - 点赞评论: ${likesResult.totalLiked} 条`);
-    emitRunEvent('phase_unified_done', { 
-      homepageNotes: homepageResult.notesProcessed,
-      imagesDownloaded: homepageResult.imagesDownloaded,
-      totalNotes: commentsResult.totalNotes, 
-      totalComments: commentsResult.totalComments,
-      totalLiked: likesResult.totalLiked,
-      ms: totalMs, 
-      dryRun 
+    console.log(`  - 处理帖子: ${stats.processed}`);
+    console.log(`  - 主页采集成功: ${stats.homepageOk}`);
+    console.log(`  - 评论总量: ${stats.totalComments}`);
+    console.log(`  - 点赞总量: ${stats.totalLiked}`);
+    console.log(`  - 回复总量: ${stats.totalReplied}`);
+    console.log(`  - 失败帖子: ${stats.failedNotes}`);
+
+    emitRunEvent('phase_unified_done', {
+      ...stats,
+      ms: totalMs,
+      operationPlan,
+      dryRun,
     });
-    
+
     if (!dryRun) {
       await updateXhsCollectState({ keyword, env, downloadRoot }, (draft) => {
         draft.stats.phaseUnifiedDurationMs = totalMs;
         draft.resume.lastStep = 'phase_unified_done';
-      });
+      }).catch(() => {});
     }
 
-    console.log(`\n✅ Phase Unified Harvest 完成`);
-
+    console.log('\n✅ Phase Unified Harvest 完成');
   } catch (err) {
     emitRunEvent('phase_unified_error', { error: safeStringify(err), dryRun });
     if (!dryRun) {
@@ -459,11 +837,7 @@ async function main() {
     console.error('\n❌ Phase Unified Harvest 失败:', err?.message || String(err));
     process.exit(1);
   } finally {
-    await restoreBrowserState(profile, UNIFIED_API_URL);
-    if (tabs.length > 0) {
-      console.log(`\n📂 收尾: 关闭 ${tabs.length} 个 Tab...`);
-      await closeTabs(profile, tabs);
-    }
+    await restoreBrowserState(profile, UNIFIED_API_URL).catch(() => {});
     lockHandle?.release?.();
   }
 }

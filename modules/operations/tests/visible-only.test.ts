@@ -134,6 +134,39 @@ test('click supports visibleOnly filtering and uses system mouse', async () => {
   assert.deepEqual(clicked, { x: 200, y: 150 });
 });
 
+
+
+test('click supports protocol mode without system mouse', async () => {
+  const { document } = installDom(`
+    <div class="btn" id="a"><span class="inner">A</span></div>
+  `);
+
+  const a = document.getElementById('a')!;
+  const aInner = a.querySelector('.inner') as Element;
+  setRect(a, { left: 100, top: 100, right: 300, bottom: 200 });
+  setRect(aInner, { left: 100, top: 100, right: 300, bottom: 200 });
+  (document as any).elementFromPoint = () => aInner;
+
+  let clicked: { x: number; y: number } | null = null;
+  const res = await clickOperation.run(
+    {
+      page: {
+        evaluate: async (fn: any, arg: any) => fn(arg),
+        mouse: {
+          click: async (x: number, y: number) => {
+            clicked = { x, y };
+          },
+        },
+      } as any,
+    },
+    { selector: '.btn', index: 0, target: '.inner', useSystemMouse: false, visibleOnly: true },
+  );
+
+  assert.equal(res.success, true);
+  assert.equal(res.inputMode, 'protocol');
+  assert.deepEqual(clicked, { x: 200, y: 150 });
+});
+
 test('scroll moves mouse into selector before wheel', async () => {
   const { document } = installDom(`
     <div class="scroller" id="s"><div id="child"></div></div>
@@ -172,6 +205,46 @@ test('scroll moves mouse into selector before wheel', async () => {
 
   assert.equal(res.success, true);
   // We should move near the top-middle (top + pad=24), not the center.
+  assert.deepEqual(moved, { x: 300, y: 124 });
+  assert.deepEqual(wheel, { dx: 0, dy: 600 });
+});
+
+
+test('scroll supports protocol mode without system wheel', async () => {
+  const { document } = installDom(`
+    <div class="scroller" id="s"><div id="child"></div></div>
+  `);
+
+  const s = document.getElementById('s')!;
+  const child = document.getElementById('child')!;
+  setRect(s, { left: 100, top: 100, right: 500, bottom: 500 });
+  setRect(child, { left: 120, top: 120, right: 140, bottom: 140 });
+
+  (document as any).elementFromPoint = () => child;
+
+  let moved: { x: number; y: number } | null = null;
+  let wheel: { dx: number; dy: number } | null = null;
+
+  const res = await scrollOperation.run(
+    {
+      page: {
+        evaluate: async (fn: any, arg: any) => fn(arg),
+        keyboard: undefined,
+        mouse: {
+          move: async (x: number, y: number) => {
+            moved = { x, y };
+          },
+          wheel: async (dx: number, dy: number) => {
+            wheel = { dx, dy };
+          },
+        },
+      } as any,
+    },
+    { selector: '.scroller', direction: 'down', distance: 600, useSystemMouse: false },
+  );
+
+  assert.equal(res.success, true);
+  assert.equal(res.inputMode, 'protocol');
   assert.deepEqual(moved, { x: 300, y: 124 });
   assert.deepEqual(wheel, { dx: 0, dy: 600 });
 });

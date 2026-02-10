@@ -11,9 +11,17 @@
       header .tabs { display: flex; gap: 10px; }
       header .tab { padding: 6px 10px; border-radius: 8px; cursor: pointer; color: #b9c0d4; }
       header .tab.active { background: #1b2233; color: #fff; }
-      #main { display: grid; grid-template-rows: 1fr 220px; height: calc(100vh - 44px); }
+      #main { display: grid; grid-template-rows: 1fr 0px; height: calc(100vh - 44px); }
       #content { padding: 14px; overflow: auto; }
-      #log { border-top: 1px solid #23262f; padding: 10px 14px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; overflow: auto; background: #0b0d12; }
+      #log { border-top: 1px solid #23262f; padding: 8px 14px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; overflow: auto; background: #0b0d12; }
+      body:not(.log-expanded) #log { border-top: none; padding: 0; overflow: hidden; }
+      #log-toggle { margin-right: 8px; background: #1b2233; color: #b9c0d4; border: 1px solid #23262f; border-radius: 8px; padding: 4px 10px; cursor: pointer; }
+      #log-toggle:hover { color: #fff; }
+      #log-clear { margin-right: 10px; background: #111723; color: #9fb0d8; border: 1px solid #23262f; border-radius: 8px; padding: 4px 10px; cursor: pointer; }
+      #log-clear:hover { color: #fff; }
+      #log-ratio-wrap { display:flex; align-items:center; gap:6px; margin-right: 10px; color:#8b93a6; }
+      #log-ratio { width: 120px; accent-color: #2b67ff; }
+      #log-ratio-value { min-width: 36px; text-align: right; color:#b9c0d4; }
       .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 10px; }
       .row > * { min-width: 0; }
       .card { border: 1px solid #23262f; background: #121622; border-radius: 12px; padding: 12px; margin-bottom: 12px; }
@@ -48,6 +56,13 @@
       <div class="title">WebAuto Console</div>
       <nav class="tabs" id="tabs"></nav>
       <div style="flex:1"></div>
+      <button id="log-toggle" type="button">日志：展开</button>
+      <button id="log-clear" type="button">清空日志</button>
+      <div id="log-ratio-wrap" class="muted">
+        <span>下方面板</span>
+        <input id="log-ratio" type="range" min="15" max="60" step="1" value="28" />
+        <span id="log-ratio-value">28%</span>
+      </div>
       <div class="muted" id="status"></div>
     </header>
     <div id="main">

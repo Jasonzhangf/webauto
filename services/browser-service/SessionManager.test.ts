@@ -53,3 +53,19 @@ test('SessionManager routes sessions by profileId (multi-instance)', async () =>
   assert.equal(Boolean(mgr.getSession('p-a')), false);
   assert.ok(mgr.getSession('p-b'));
 });
+
+
+test('SessionManager rejects reuse when profile is owned by another live process', async () => {
+  const mgr = new SessionManager(undefined, (opts: any) => new FakeSession(opts) as any);
+
+  await mgr.createSession({ profileId: 'p-owned', ownerPid: process.pid } as any);
+
+  await assert.rejects(
+    async () => {
+      await mgr.createSession({ profileId: 'p-owned', ownerPid: process.pid + 100000 } as any);
+    },
+    /session_owned_by_another_process/,
+  );
+
+  await mgr.shutdown();
+});

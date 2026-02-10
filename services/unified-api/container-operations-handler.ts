@@ -57,6 +57,16 @@ export async function handleContainerOperations(
                 },
               }
             : undefined,
+          // Protocol mode operations read ctx.page.mouse directly.
+          mouse: page.mouse
+            ? {
+                click: async (x: number, y: number, options?: { button?: string; clickCount?: number }) =>
+                  page.mouse.click(x, y, options as any),
+                move: async (x: number, y: number, options?: { steps?: number }) =>
+                  page.mouse.move(x, y, options as any),
+                wheel: async (deltaX: number, deltaY: number) => page.mouse.wheel(deltaX, deltaY),
+              }
+            : undefined,
         },
         systemInput: {
           mouseMove: async (x: number, y: number, steps?: number) => {

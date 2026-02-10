@@ -15,6 +15,7 @@ export async function ensureCommentsOpened(sessionId: string, apiUrl: string): P
       containerId: 'xiaohongshu_detail.comment_button',
       operationId: 'highlight',
       sessionId,
+      timeoutMs: 15000,
       config: { duration: 1800, channel: 'xhs-comments' },
     },
     apiUrl,
@@ -22,7 +23,7 @@ export async function ensureCommentsOpened(sessionId: string, apiUrl: string): P
 
   await controllerAction(
     'container:operation',
-    { containerId: 'xiaohongshu_detail.comment_button', operationId: 'click', sessionId },
+    { containerId: 'xiaohongshu_detail.comment_button', operationId: 'click', sessionId, timeoutMs: 15000 },
     apiUrl,
   ).catch(() => {});
 
@@ -32,7 +33,7 @@ export async function ensureCommentsOpened(sessionId: string, apiUrl: string): P
 export async function isCommentEnd(sessionId: string, apiUrl: string): Promise<boolean> {
   const end = await controllerAction(
     'container:operation',
-    { containerId: 'xiaohongshu_detail.comment_section.end_marker', operationId: 'extract', sessionId },
+    { containerId: 'xiaohongshu_detail.comment_section.end_marker', operationId: 'extract', sessionId, timeoutMs: 12000 },
     apiUrl,
   ).catch((): null => null);
 
@@ -47,6 +48,7 @@ export async function isCommentEnd(sessionId: string, apiUrl: string): Promise<b
       'browser:execute',
       {
         profile: sessionId,
+        timeoutMs: 12000,
         script: `(() => {
           const candidates = [
             'p.no-comments-text',
@@ -79,6 +81,7 @@ async function getVisibleCommentSignature(sessionId: string, apiUrl: string) {
       'browser:execute',
       {
         profile: sessionId,
+        timeoutMs: 12000,
         script: `(() => {
           const isVisible = (el) => {
             const r = el.getBoundingClientRect();
@@ -147,6 +150,7 @@ export async function extractVisibleComments(sessionId: string, apiUrl: string, 
       containerId: 'xiaohongshu_detail.comment_section.comment_item',
       operationId: 'extract',
       sessionId,
+      timeoutMs: 15000,
       config: { max_items: Math.max(1, Math.min(80, Math.floor(maxItems))), visibleOnly: true },
     },
     apiUrl,
@@ -159,6 +163,7 @@ export async function extractVisibleComments(sessionId: string, apiUrl: string, 
     'browser:execute',
     {
       profile: sessionId,
+      timeoutMs: 12000,
       script: `(() => {
         const items = Array.from(document.querySelectorAll('.comment-item'));
         return items.map((el, idx) => {
@@ -203,8 +208,141 @@ export async function scrollComments(sessionId: string, apiUrl: string, distance
       containerId: 'xiaohongshu_detail.comment_section',
       operationId: 'scroll',
       sessionId,
+      timeoutMs: 15000,
       config: { direction: 'down', distance: Math.max(60, Math.min(800, Math.floor(distance))) },
     },
     apiUrl,
   );
+}
+
+export async function expandAllVisibleReplyButtons(
+  sessionId: string,
+  apiUrl: string,
+  options: { maxPasses?: number; maxClicksPerPass?: number } = {},
+): Promise<{ clicked: number; passes: number; remaining: number; detected: number }> {
+  const maxPasses = Math.max(1, Math.min(12, Number(options.maxPasses || 6)));
+  const maxClicksPerPass = Math.max(1, Math.min(30, Number(options.maxClicksPerPass || 12)));
+
+  const probeTargets = async (): Promise<Array<{ x: number; y: number; text?: string }>> => {
+    const probe = await controllerAction(
+      'browser:execute',
+      {
+        profile: sessionId,
+        timeoutMs: 12000,
+        script: `(() => {
+          const root =
+            document.querySelector('.comments-el') ||
+            document.querySelector('.comment-list') ||
+            document.querySelector('.comments-container') ||
+            document.querySelector('[class*="comment-section"]') ||
+            document.body;
+
+          const selector = '.show-more, .reply-expand, [class*="show-more"], [class*="expand"]';
+          const nodes = Array.from(root.querySelectorAll(selector));
+          const viewportH = window.innerHeight || 0;
+          const viewportW = window.innerWidth || 0;
+
+          const targets = [];
+
+          const isVisible = (el) => {
+            const r = el.getBoundingClientRect();
+            return r.width > 0 && r.height > 0 && r.bottom > 0 && r.top < viewportH && r.right > 0 && r.left < viewportW;
+          };
+
+          for (const el of nodes) {
+            if (!(el instanceof HTMLElement)) continue;
+            if (!isVisible(el)) continue;
+
+            const text = (el.textContent || '').replace(/\s+/g, ' ').trim();
+            if (!text || !text.includes('展开')) continue;
+            if (text.includes('收起') || text.includes('折叠')) continue;
+            if (!(text.includes('回复') || text.includes('评论') || text.includes('更多'))) continue;
+
+            const r = el.getBoundingClientRect();
+            const points = [
+              { x: Math.round(r.left + r.width * 0.72), y: Math.round(r.top + r.height * 0.55) },
+              { x: Math.round(r.left + r.width * 0.55), y: Math.round(r.top + r.height * 0.55) },
+              { x: Math.round(r.left + r.width * 0.85), y: Math.round(r.top + r.height * 0.5) },
+            ];
+
+            let picked = null;
+            for (const p of points) {
+              if (!Number.isFinite(p.x) || !Number.isFinite(p.y)) continue;
+              if (p.x < 8 || p.y < 8 || p.x > viewportW - 8 || p.y > viewportH - 8) continue;
+              const hit = document.elementFromPoint(p.x, p.y);
+              if (!hit || !(hit instanceof Element)) continue;
+              if (!(hit === el || el.contains(hit) || hit.contains(el))) continue;
+              if (hit.closest && hit.closest('a[href]')) continue;
+              picked = p;
+              break;
+            }
+
+            if (!picked) continue;
+            targets.push({ x: picked.x, y: picked.y, text });
+          }
+
+          targets.sort((a, b) => (a.y - b.y) || (a.x - b.x));
+          return { targets };
+        })()`,
+      },
+      apiUrl,
+    ).catch((): null => null);
+
+    const raw = Array.isArray((probe as any)?.result?.targets)
+      ? (probe as any).result.targets
+      : Array.isArray((probe as any)?.targets)
+      ? (probe as any).targets
+      : [];
+
+    return raw
+      .map((t: any) => ({
+        x: Math.round(Number(t?.x)),
+        y: Math.round(Number(t?.y)),
+        text: String(t?.text || ''),
+      }))
+      .filter((t: { x: number; y: number; text: string }) => Number.isFinite(t.x) && Number.isFinite(t.y));
+  };
+
+  let totalClicked = 0;
+  let totalDetected = 0;
+  let passes = 0;
+
+  for (let pass = 0; pass < maxPasses; pass += 1) {
+    const targets = await probeTargets();
+    if (!targets.length) break;
+
+    totalDetected += targets.length;
+    let clickedThisPass = 0;
+    const toClick = targets.slice(0, maxClicksPerPass);
+
+    for (const t of toClick) {
+      const clicked = await controllerAction(
+        'container:operation',
+        {
+          containerId: 'xiaohongshu_detail.comment_section.show_more_button',
+          operationId: 'click',
+          sessionId,
+          timeoutMs: 15000,
+          config: {
+            x: t.x,
+            y: t.y,
+          },
+        },
+        apiUrl,
+      ).catch((): null => null);
+
+      if ((clicked as any)?.success !== false) clickedThisPass += 1;
+      await delay(220);
+    }
+
+    passes += 1;
+    totalClicked += clickedThisPass;
+
+    // No successful click in this pass means target is currently not actionable.
+    if (clickedThisPass <= 0) break;
+    await delay(380);
+  }
+
+  const remaining = (await probeTargets()).length;
+  return { clicked: totalClicked, passes, remaining, detected: totalDetected };
 }

@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 import { ensureUtf8Console } from '../lib/cli-encoding.mjs';
 import { ensureCoreServices } from '../lib/ensure-core-services.mjs';
-import { ensureServicesHealthy, restoreBrowserState } from './lib/recovery.mjs';
-// duplicate import removed
+import { restoreBrowserState } from './lib/recovery.mjs';
+import { ensureRuntimeReady } from './lib/runtime-ready.mjs';
+import { createRealtimeJsonlWriter } from './lib/realtime-jsonl.mjs';
 
 ensureUtf8Console();
 
@@ -32,6 +33,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const UNIFIED_API_URL = 'http://127.0.0.1:7701';
 
 function nowMs() {
   return Date.now();
@@ -112,7 +114,6 @@ async function showStatus({ keyword, env, downloadRoot }) {
 
 async function main() {
   // Single source of truth for service lifecycle: core-daemon.
-  await ensureServicesHealthy();
   await ensureCoreServices();
 
   const argv = process.argv.slice(2);
@@ -155,6 +156,16 @@ async function main() {
   // Phase2 only supports a single runtime profile
   const PROFILE_RUNTIME = runtimeProfile;
   // downloadRoot already resolved above
+
+  await ensureRuntimeReady({
+    phase: 'phase2',
+    profile: PROFILE_RUNTIME,
+    keyword,
+    env,
+    unifiedApiUrl: UNIFIED_API_URL,
+    headless: argv.includes('--headless'),
+    requireCheckpoint: true,
+  });
 
   // 清理旧产物（同 env + keyword 下）
   const baseDir = path.join(downloadRoot, 'xiaohongshu', env, keyword);
@@ -245,11 +256,17 @@ async function main() {
     if (!searchResult.success) {
       throw new Error(`搜索失败: ${searchResult.finalUrl}`);
     }
+    const outDir = path.dirname(outPath);
+    await ensureDir(outDir);
 
     const existingRows = await readExistingJsonl(outPath);
     const existingNoteIds = Array.from(new Set(existingRows
       .map((r) => String(r?.noteId || '').trim())
       .filter(Boolean)));
+    const realtimeWriter = await createRealtimeJsonlWriter(outPath, {
+      dedupeKey: 'noteId',
+      seedRows: existingRows,
+    });
     const remainingTarget = Math.max(0, Number(target) - existingNoteIds.length);
 
     console.log(`[Phase2] resume: existing=${existingNoteIds.length}, remaining=${remainingTarget}, target=${target}`);
@@ -270,6 +287,9 @@ async function main() {
         profile: PROFILE_RUNTIME,
         env,
         alreadyCollectedNoteIds: existingNoteIds,
+        onLink: async (linkRow) => {
+          await realtimeWriter.append(linkRow);
+        },
       });
       newlyCollected = Array.isArray(collectResult?.links) ? collectResult.links : [];
       termination = collectResult?.termination || null;
@@ -281,11 +301,14 @@ async function main() {
     console.log(`⏱️  采集耗时: ${formatDurationMs(tCollect1 - tCollect0)}`);
     emitRunEvent('phase2_timing', { stage: 'collect_done', ms: tCollect1 - tCollect0, count: newlyCollected.length });
 
-    const outDir = path.dirname(outPath);
-    await ensureDir(outDir);
+    const realtimeStats = realtimeWriter.stats();
+    // Reconcile any rows that might not be flushed by callback (best-effort safety net).
     const persist = await writeJsonl(outPath, newlyCollected, { append: true, dedupeKey: 'noteId' });
     const results = await readExistingJsonl(outPath);
-    console.log(`[Phase2] persist: existingBefore=${persist.existing} added=${persist.added} total=${persist.total}`);
+    const addedByRealtime = Math.max(0, Number(realtimeStats.added) || 0);
+    const addedByFinalMerge = Math.max(0, Number(persist.added) || 0);
+    const effectiveAdded = Math.max(0, results.length - existingNoteIds.length);
+    console.log(`[Phase2] persist(realtime): existingBefore=${existingNoteIds.length} addedRealtime=${addedByRealtime} addedFinalMerge=${addedByFinalMerge} addedTotal=${effectiveAdded} total=${results.length}`);
 
     const t1 = nowMs();
     const totalMs = t1 - t0;

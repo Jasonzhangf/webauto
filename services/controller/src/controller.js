@@ -5,6 +5,11 @@ import os from 'node:os';
 import { spawn } from 'node:child_process';
 import WebSocket from 'ws';
 
+function normalizeInputMode(mode) {
+  const raw = String(mode || '').trim().toLowerCase();
+  return raw === 'protocol' ? 'protocol' : 'system';
+}
+
 export class UiController {
   constructor(options = {}) {
     this.repoRoot = options.repoRoot || process.cwd();
@@ -22,6 +27,7 @@ export class UiController {
     this.defaultHttpPort = Number(options.defaultHttpPort || 7704);
     this.defaultHttpProtocol = options.defaultHttpProtocol || 'http';
     this._containerIndexCache = null;
+    this.inputMode = normalizeInputMode(process.env.WEBAUTO_INPUT_MODE);
     this.errorHandler = null;
   }
 
@@ -99,6 +105,10 @@ export class UiController {
         return this.handleKeyboardType(payload);
       case 'system:shortcut':
         return this.handleSystemShortcut(payload);
+      case 'system:input-mode:set':
+        return this.handleSystemInputModeSet(payload);
+      case 'system:input-mode:get':
+        return this.handleSystemInputModeGet();
     case 'mouse:wheel':
       return this.handleMouseWheel(payload);
     case 'mouse:click':
@@ -496,12 +506,21 @@ export class UiController {
     const host = '127.0.0.1';
 
     try {
+      const mergedConfig = { ...(payload.config || {}) };
+      if (['click', 'type', 'key', 'scroll'].includes(String(operationId))) {
+        if (this.inputMode === 'protocol') {
+          mergedConfig.useSystemMouse = false;
+        } else if (typeof mergedConfig.useSystemMouse !== 'boolean') {
+          mergedConfig.useSystemMouse = true;
+        }
+      }
+
       const response = await fetch(`http://${host}:${port}/v1/container/${containerId}/execute`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           operationId,
-          config: payload.config,
+          config: mergedConfig,
           sessionId,
         }),
       });
@@ -766,6 +785,17 @@ export class UiController {
     }
 
     throw new Error('unsupported platform');
+  }
+
+  async handleSystemInputModeSet(payload = {}) {
+    const mode = normalizeInputMode(payload.mode);
+    this.inputMode = mode;
+    process.env.WEBAUTO_INPUT_MODE = mode;
+    return { success: true, data: { mode } };
+  }
+
+  async handleSystemInputModeGet() {
+    return { success: true, data: { mode: this.inputMode } };
   }
 
 

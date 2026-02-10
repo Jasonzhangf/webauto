@@ -7,6 +7,7 @@ export interface StartProfileInput {
   url?: string;
   headless?: boolean;
   browserServiceUrl?: string;
+  ownerPid?: number;
 }
 
 export interface StartProfileOutput {
@@ -34,6 +35,7 @@ export async function execute(input: StartProfileInput): Promise<StartProfileOut
     url = 'https://www.xiaohongshu.com',
     headless = false,
     browserServiceUrl = 'http://127.0.0.1:7704',
+    ownerPid = process.pid,
   } = input;
 
   console.log(`[Phase1StartProfile] 启动 profile=${profile} headless=${headless}`);
@@ -123,7 +125,7 @@ export async function execute(input: StartProfileInput): Promise<StartProfileOut
     profileId: profile,
     headless,
     url,
-    ownerPid: process.pid,
+    ownerPid,
   }, browserServiceUrl);
 
   const viewport = await resolveViewportSize();

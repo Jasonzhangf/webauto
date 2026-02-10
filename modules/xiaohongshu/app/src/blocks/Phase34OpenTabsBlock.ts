@@ -42,11 +42,51 @@ async function listPages(profile: string, apiUrl: string) {
   return res?.pages || res?.data?.pages || [];
 }
 
-async function openTabViaWindowOpen(profile: string, apiUrl: string) {
-  // Use system-level keyboard shortcut to open a new tab in the same window
-  await controllerAction('browser:page:switch', { profileId: profile, index: 0 }, apiUrl).catch((): null => null);
-  await controllerAction('system:shortcut', { app: 'camoufox', shortcut: 'new-tab' }, apiUrl).catch((): null => null);
-  await new Promise(r => setTimeout(r, 500));
+async function getInputMode(apiUrl: string): Promise<'system' | 'protocol'> {
+  const res = await controllerAction('system:input-mode:get', {}, apiUrl).catch((): null => null);
+  const mode = String((res as any)?.data?.mode || (res as any)?.mode || 'system').trim().toLowerCase();
+  return mode === 'protocol' ? 'protocol' : 'system';
+}
+
+async function openTab(profile: string, apiUrl: string, inputMode: 'system' | 'protocol') {
+  const maxRetries = 4;
+  for (let attempt = 1; attempt <= maxRetries; attempt += 1) {
+    const before = await listPages(profile, apiUrl);
+    const beforeCount = before.length;
+
+    const tryCountIncrease = async (waitMs = 450): Promise<boolean> => {
+      await new Promise((r) => setTimeout(r, waitMs));
+      const after = await listPages(profile, apiUrl);
+      return after.length > beforeCount;
+    };
+
+    if (inputMode === 'protocol') {
+      await controllerAction('browser:page:new', { profileId: profile }, apiUrl).catch((): null => null);
+      if (await tryCountIncrease(350)) return;
+
+      await controllerAction(
+        'browser:execute',
+        { profile, script: 'window.open("about:blank", "_blank"); true;' },
+        apiUrl,
+      ).catch((): null => null);
+      if (await tryCountIncrease(350)) return;
+
+      await controllerAction('browser:page:switch', { profileId: profile, index: 0 }, apiUrl).catch((): null => null);
+      await controllerAction('system:shortcut', { app: 'camoufox', shortcut: 'new-tab' }, apiUrl).catch((): null => null);
+      if (await tryCountIncrease(500)) {
+        console.log('[Phase34OpenTabs] protocol fallback -> system shortcut succeeded');
+        return;
+      }
+    } else {
+      await controllerAction('browser:page:switch', { profileId: profile, index: 0 }, apiUrl).catch((): null => null);
+      await controllerAction('system:shortcut', { app: 'camoufox', shortcut: 'new-tab' }, apiUrl).catch((): null => null);
+      if (await tryCountIncrease(500)) return;
+    }
+
+    console.warn(`[Phase34OpenTabs] ${inputMode} open-tab attempt ${attempt}/${maxRetries} failed (count=${beforeCount})`);
+  }
+
+  throw new Error('open_tab_failed_after_retries');
 }
 
 export async function execute(input: OpenTabsInput): Promise<OpenTabsOutput> {
@@ -58,6 +98,9 @@ export async function execute(input: OpenTabsInput): Promise<OpenTabsOutput> {
 
   const requiredTotal = tabCount + 1; // tab0=搜索页 + tab1~4=帖子页
   console.log(`[Phase34OpenTabs] 确保固定 tab 池: ${requiredTotal} 个 (0=搜索页, 1-${tabCount}=帖子页)`);
+
+  const inputMode = await getInputMode(unifiedApiUrl);
+  console.log(`[Phase34OpenTabs] input mode: ${inputMode}`);
 
   let existing = await listPages(profile, unifiedApiUrl);
   if (!existing.length) {
@@ -74,7 +117,7 @@ export async function execute(input: OpenTabsInput): Promise<OpenTabsOutput> {
   if (needed > 0) {
     console.log(`[Phase34OpenTabs] 需要补齐 ${needed} 个 tab`);
     for (let i = 0; i < needed; i++) {
-      await openTabViaWindowOpen(profile, unifiedApiUrl);
+      await openTab(profile, unifiedApiUrl, inputMode);
       console.log(`[Phase34OpenTabs] 新 tab ${currentCount + i + 1} 已打开`);
     }
   } else {

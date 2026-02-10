@@ -21,6 +21,12 @@ export interface CollectLinksInput {
   unifiedApiUrl?: string;
   env?: string;
   alreadyCollectedNoteIds?: string[];
+  onLink?: (link: {
+    noteId: string;
+    safeUrl: string;
+    searchUrl: string;
+    ts: string;
+  }, meta: { collected: number; targetCount: number }) => Promise<void> | void;
 }
 
 export interface CollectLinksOutput {
@@ -153,6 +159,7 @@ export async function execute(input: CollectLinksInput): Promise<CollectLinksOut
     unifiedApiUrl = 'http://127.0.0.1:7701',
     env = 'debug',
     alreadyCollectedNoteIds = [],
+    onLink,
   } = input;
 
  console.log(`[Phase2CollectLinks] 目标: ${targetCount} 条链接`);
@@ -216,6 +223,34 @@ export async function execute(input: CollectLinksInput): Promise<CollectLinksOut
     const filePath = path.join(traceDir, fileName);
     await fs.writeFile(filePath, buf);
     return filePath;
+  };
+
+  let preClickStallCount = 0;
+  const preClickStallThreshold = 12;
+  const recoverFromPreClickStall = async (reason: string, extra: Record<string, any> = {}) => {
+    preClickStallCount += 1;
+    if (preClickStallCount < preClickStallThreshold) return;
+
+    console.log(
+      `[Phase2Collect] pre-click stall ${preClickStallCount}/${preClickStallThreshold} reason=${reason}, forcing scroll`,
+    );
+    await appendTrace({
+      type: 'pre_click_stall_scroll',
+      ts: new Date().toISOString(),
+      reason,
+      stallCount: preClickStallCount,
+      ...extra,
+    });
+
+    await controllerAction('container:operation', {
+      containerId: 'xiaohongshu_search.search_result_list',
+      operationId: 'scroll',
+      sessionId: profile,
+      config: { direction: 'down', amount: 700 },
+    }, unifiedApiUrl);
+    scrollCount++;
+    preClickStallCount = 0;
+    await delay(600);
   };
 
   // Updated by ensureOnExpectedSearch once we confirmed we are on the correct search_result.
@@ -719,13 +754,10 @@ export async function execute(input: CollectLinksInput): Promise<CollectLinksOut
     if (exploreId && seenNoteIds.has(exploreId)) {
       console.log(`[Phase2Collect] skip pre-click: already_collected noteId=${exploreId}`);
       await appendTrace({ type: 'skip_existing_note_preclick', ts: new Date().toISOString(), domIndex, noteId: exploreId });
+      await recoverFromPreClickStall('skip_existing_note_preclick', { domIndex, noteId: exploreId });
       await delay(80);
       continue;
     }
-    if (exploreId) {
-      seenExploreIds.add(exploreId);
-    }
-
     // 4. 点击第 N 个搜索结果卡片（通过 DOM 下标精确定位，避免依赖 href）
         await appendTrace({ type: 'highlight_start', ts: new Date().toISOString(), attempt: attempts, domIndex, exploreId });
     let highlightInfo: any = null;
@@ -804,6 +836,7 @@ export async function execute(input: CollectLinksInput): Promise<CollectLinksOut
 
     if (!preClickVerify?.ok) {
       console.warn(`[Phase2Collect] Rigid gate blocked click index=${domIndex}: ${preClickVerify?.reason}`);
+      await recoverFromPreClickStall('rigid_gate_blocked', { domIndex, gateReason: preClickVerify?.reason || 'unknown' });
       await delay(300);
       continue; // Re-pick next iteration
     }
@@ -811,39 +844,53 @@ export async function execute(input: CollectLinksInput): Promise<CollectLinksOut
     if (!preClickNoteId) {
       console.warn(`[Phase2Collect] Rigid gate blocked click index=${domIndex}: missing_note_id`);
       await appendTrace({ type: 'skip_missing_noteid_gate', ts: new Date().toISOString(), domIndex });
+      await recoverFromPreClickStall('missing_noteid_gate', { domIndex });
       await delay(120);
       continue;
     }
     if (seenNoteIds.has(preClickNoteId)) {
       console.log(`[Phase2Collect] skip by gate: already_collected noteId=${preClickNoteId}`);
       await appendTrace({ type: 'skip_existing_note_gate', ts: new Date().toISOString(), domIndex, noteId: preClickNoteId });
+      await recoverFromPreClickStall('skip_existing_note_gate', { domIndex, noteId: preClickNoteId });
       await delay(80);
       continue;
     }
     console.log(`[Phase2Collect] Rigid gate passed index=${domIndex}, hit-test ok noteId=${preClickNoteId}`);
 
-    // Phase-based timeout tracking
+    // Phase-based timeout tracking.
+    // Click by pre-verified rect center to avoid index re-resolution drift between pick() and click().
+    const gateRect = preClickVerify?.rect || lastRect;
     const clickStartMs = Date.now();
-    const clickResult = await controllerAction('container:operation', {
-      containerId: 'xiaohongshu_search.search_result_item',
-      operationId: 'click',
-      sessionId: profile,
-      config: { index: domIndex, useSystemMouse: true, visibleOnly: true },
-      timeoutMs: 20000, // Reduced: click itself should be fast
-    }, unifiedApiUrl);
-    const clickPhaseMs = Date.now() - clickStartMs;
-    console.log(`[Phase2Collect] click phase took ${clickPhaseMs}ms`);
-    if (clickResult?.success === false) {
-      console.warn(`[Phase2Collect] 点击失败 index=${domIndex} err=${clickResult?.error || 'unknown'}，尝试系统级点击兜底`);
-      if (lastRect && lastRect.left !== undefined && lastRect.top !== undefined) {
-        const cx = (Number(lastRect.left) + Number(lastRect.right)) / 2;
-        const cy = (Number(lastRect.top) + Number(lastRect.bottom)) / 2;
-        await controllerAction('mouse:click', { profileId: profile, x: cx, y: cy, clicks: 1 }, unifiedApiUrl).catch(() => {});
-        await delay(1200);
-      } else {
+    let clickError = '';
+    if (gateRect && gateRect.left !== undefined && gateRect.top !== undefined) {
+      const cx = Math.round((Number(gateRect.left) + Number(gateRect.right)) / 2);
+      const cy = Math.round((Number(gateRect.top) + Number(gateRect.bottom)) / 2);
+      try {
+        await controllerAction('mouse:click', { profileId: profile, x: cx, y: cy, clicks: 1 }, unifiedApiUrl);
+      } catch (e: any) {
+        clickError = String(e?.message || e || 'mouse_click_failed');
+      }
+    } else {
+      clickError = 'missing_gate_rect';
+    }
+
+    if (clickError) {
+      console.warn(`[Phase2Collect] 点击失败 index=${domIndex} err=${clickError}，尝试容器点击兜底`);
+      const fallbackResult = await controllerAction('container:operation', {
+        containerId: 'xiaohongshu_search.search_result_item',
+        operationId: 'click',
+        sessionId: profile,
+        config: { index: domIndex, useSystemMouse: true, visibleOnly: true },
+        timeoutMs: 20000,
+      }, unifiedApiUrl).catch((e: any) => ({ success: false, error: String(e?.message || e || 'unknown') }));
+      if (fallbackResult?.success === false) {
+        await recoverFromPreClickStall('click_failed', { domIndex, clickError, fallbackError: fallbackResult?.error || 'unknown' });
         continue;
       }
     }
+
+    const clickPhaseMs = Date.now() - clickStartMs;
+    console.log(`[Phase2Collect] click phase took ${clickPhaseMs}ms`);
     await delay(1800);
 
     // Phase: Navigation validation
@@ -943,19 +990,45 @@ export async function execute(input: CollectLinksInput): Promise<CollectLinksOut
     if (seenNoteIds.has(noteId)) {
       console.warn(`[Phase2Collect] drop: duplicate_note_id noteId=${noteId}`);
       await appendTrace({ type: 'drop', ts: new Date().toISOString(), reason: 'duplicate_note_id', noteId, safeUrl });
+      if (preClickNoteId) {
+        // Prevent repeatedly re-opening the same source card when mapped URL resolves to an already-seen note.
+        seenExploreIds.add(preClickNoteId);
+      }
+      await recoverFromPreClickStall('duplicate_note_id', { domIndex, noteId, preClickNoteId });
       await controllerAction('keyboard:press', { profileId: profile, key: 'Escape' }, unifiedApiUrl);
       await delay(1000);
       continue;
     }
     seenNoteIds.add(noteId);
+    // Mark as seen only after a verified successful open to avoid dropping candidates on pre-click failures.
+    seenExploreIds.add(noteId);
+    if (preClickNoteId) {
+      seenExploreIds.add(preClickNoteId);
+    }
+    preClickStallCount = 0;
 
-    links.push({
+    const linkRow = {
       noteId,
       safeUrl,
       // Bind to strict search_result?keyword=<keyword>.
       searchUrl: expectedSearchUrl,
       ts: new Date().toISOString(),
-    });
+    };
+    links.push(linkRow);
+
+    if (typeof onLink === 'function') {
+      try {
+        await onLink(linkRow, { collected: links.length, targetCount });
+      } catch (persistErr) {
+        console.warn(`[Phase2Collect] onLink callback failed: ${String(persistErr)}`);
+        await appendTrace({
+          type: 'on_link_callback_error',
+          ts: new Date().toISOString(),
+          noteId,
+          error: String(persistErr),
+        });
+      }
+    }
 
     console.log(`[Phase2Collect] ✅ ${links.length}/${targetCount}: ${noteId}`);
 
@@ -1044,8 +1117,9 @@ export async function execute(input: CollectLinksInput): Promise<CollectLinksOut
   }
 
   } finally {
-    // Always calculate termination reason based on final state
-    const termination = noProgressRetryCount >= maxNoProgressRetries ? 'no_progress_after_3_retries' : 'reached_target';
+    // Always calculate termination reason based on final state.
+    // If we did not reach target, treat as no_progress to avoid false "reached_target" when max attempts are exhausted.
+    const termination = links.length >= targetCount ? 'reached_target' : 'no_progress_after_3_retries';
     console.log(`[Phase2Collect] 完成，滚动次数: ${scrollCount}, 终止原因: ${termination}`);
     // Always try to restore to search_result page on exit (success or failure)
     try {
@@ -1070,7 +1144,7 @@ export async function execute(input: CollectLinksInput): Promise<CollectLinksOut
     }
   }
 
-  const termination = noProgressRetryCount >= maxNoProgressRetries ? 'no_progress_after_3_retries' : 'reached_target';
+  const termination = links.length >= targetCount ? 'reached_target' : 'no_progress_after_3_retries';
   return {
     links,
     totalCollected: links.length,

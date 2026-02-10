@@ -15,9 +15,9 @@ ensureUtf8Console();
 // Phase1 must be driven by explicit CLI input; do not fallback to defaults.
 import { ensureBaseServices } from './lib/services.mjs';
 import { createSessionLock } from './lib/session-lock.mjs';
-import { execute as ensureServices } from '../../dist/modules/xiaohongshu/app/src/xiaohongshu/app/src/blocks/Phase1EnsureServicesBlock.js';
-import { execute as startProfile } from '../../dist/modules/xiaohongshu/app/src/xiaohongshu/app/src/blocks/Phase1StartProfileBlock.js';
-import { execute as monitorCookie } from '../../dist/modules/xiaohongshu/app/src/xiaohongshu/app/src/blocks/Phase1MonitorCookieBlock.js';
+import { execute as ensureServices } from '../../dist/modules/xiaohongshu/app/src/blocks/Phase1EnsureServicesBlock.js';
+import { execute as startProfile } from '../../dist/modules/xiaohongshu/app/src/blocks/Phase1StartProfileBlock.js';
+import { execute as monitorCookie } from '../../dist/modules/xiaohongshu/app/src/blocks/Phase1MonitorCookieBlock.js';
 import { ensureServicesHealthy, restoreBrowserState } from './lib/recovery.mjs';
 import { recordStageCheck, recordStageRecovery } from './lib/stage-checks.mjs';
 import minimist from 'minimist';
@@ -25,6 +25,21 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+
+
+async function withTimeout(promise, timeoutMs, timeoutMessage) {
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) return promise;
+  let timer = null;
+  const timeoutPromise = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(timeoutMessage)), Math.floor(timeoutMs));
+  });
+  try {
+    return await Promise.race([promise, timeoutPromise]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
 
 async function maybeDaemonize(argv) {
   if (!argv.includes('--daemon') || process.env.WEBAUTO_DAEMON === '1') return false;
@@ -59,6 +74,10 @@ async function main() {
   const args = minimist(process.argv.slice(2));
   const headless = args.headless === true || args.headless === 'true' || args.headless === 1 || args.headless === '1';
   const once = args.once === true || args.once === 'true' || args.once === 1 || args.once === '1';
+  const timeoutSecRaw = Number(args['headless-login-timeout-sec'] || process.env.WEBAUTO_HEADLESS_LOGIN_TIMEOUT_SEC || 120);
+  const headlessLoginTimeoutMs = Number.isFinite(timeoutSecRaw) && timeoutSecRaw > 0 ? Math.floor(timeoutSecRaw * 1000) : 120000;
+  const ownerPidRaw = Number(args['owner-pid'] || process.pid || 0);
+  const ownerPid = Number.isFinite(ownerPidRaw) && ownerPidRaw > 0 ? ownerPidRaw : process.pid;
   const profile = String(args.profile || '').trim();
   if (!profile) {
     console.error('❌ 必须提供 --profile 参数（禁止回退默认 profile）');
@@ -76,7 +95,7 @@ async function main() {
   const lock = createSessionLock({ profileId: profile, lockType: 'phase1', force: true });
   const lockHandle = lock.acquire({ phase: 'phase1', headless });
   try {
-    await startProfile({ profile, headless, url: 'https://www.xiaohongshu.com' });
+    await startProfile({ profile, headless, url: 'https://www.xiaohongshu.com', ownerPid });
     await restoreBrowserState(profile);
     // viewport sanity check: if abnormal, restart profile once
     try {
@@ -86,7 +105,7 @@ async function main() {
       const s = sessions.find((x) => x.profile === profile);
       if (s && s.viewport && (s.viewport.width < 800 || s.viewport.height < 600)) {
         console.warn('[Phase1StartProfile] viewport too small, restarting profile');
-        await startProfile({ profile, headless, url: 'https://www.xiaohongshu.com' });
+        await startProfile({ profile, headless, url: 'https://www.xiaohongshu.com', ownerPid });
         await restoreBrowserState(profile);
       }
     } catch {}
@@ -95,11 +114,36 @@ async function main() {
 
     // 3) Cookie 监控与保存（登录成功后才保存）
     console.log('🍪 Phase1: 开始监控 cookie（每 15 秒扫描）');
-    const cookieRes = await monitorCookie({
-      profile,
-      scanIntervalMs: 15000,
-      stableCount: 1,
-    });
+    let cookieRes;
+    try {
+      const monitorPromise = monitorCookie({
+        profile,
+        scanIntervalMs: 15000,
+        stableCount: 1,
+      });
+      cookieRes = headless
+        ? await withTimeout(
+            monitorPromise,
+            headlessLoginTimeoutMs,
+            `[Phase1MonitorCookie] headless_login_timeout ${headlessLoginTimeoutMs}ms`,
+          )
+        : await monitorPromise;
+    } catch (err) {
+      const msg = err?.message || String(err);
+      if (!headless) throw err;
+
+      console.warn(`[Phase1MonitorCookie] headless 登录/风控未通过，切换 headful 重试: ${msg}`);
+      console.warn('[Phase1MonitorCookie] 即将打开可见浏览器，请人工完成登录/过风控...');
+      await startProfile({ profile, headless: false, url: 'https://www.xiaohongshu.com', ownerPid });
+      await restoreBrowserState(profile);
+
+      cookieRes = await monitorCookie({
+        profile,
+        scanIntervalMs: 15000,
+        stableCount: 1,
+      });
+    }
+
     console.log('✅ Phase1: cookie 初次稳定保存完成');
     console.log(`   saved=${cookieRes.saved} autoCookiesStarted=${cookieRes.autoCookiesStarted} path=${cookieRes.cookiePath}`);
 

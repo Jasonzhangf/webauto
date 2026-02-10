@@ -460,7 +460,7 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === 'POST' && url.pathname === '/like') {
-      const payload = await readJsonBody(req);
+      const payload = await readJson(req);
       const key = String(payload?.key || payload?.profileId || '').trim();
       const windowMs = Number(payload?.windowMs || DEFAULT_LIKE_WINDOW_MS);
       const maxCount = Number(payload?.maxCount || DEFAULT_LIKE_MAX_COUNT);

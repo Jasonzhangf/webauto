@@ -9,7 +9,11 @@
 
 import os from 'node:os';
 import path from 'node:path';
-import { normalizeShard, shardFilterByNoteIdHash } from './helpers/sharding.js';
+import {
+  normalizeShard,
+  shardFilterByIndexMod,
+  shardFilterByNoteIdHash,
+} from './helpers/sharding.js';
 
 export interface ValidateLinksInput {
   keyword: string;
@@ -17,6 +21,8 @@ export interface ValidateLinksInput {
   linksPath?: string;
   shardIndex?: number;
   shardCount?: number;
+  shardBy?: 'noteId-hash' | 'index-mod';
+  maxNotes?: number;
   profile?: string;
   unifiedApiUrl?: string;
 }
@@ -50,9 +56,11 @@ async function readJsonl(filePath: string): Promise<any[]> {
   const { readFile } = await import('node:fs/promises');
   try {
     const content = await readFile(filePath, 'utf8');
-    return content.trim().split('\n')
-      .filter(line => line.trim())
-      .map(line => JSON.parse(line));
+    return content
+      .trim()
+      .split('\n')
+      .filter((line) => line.trim())
+      .map((line) => JSON.parse(line));
   } catch {
     return [];
   }
@@ -72,19 +80,25 @@ export async function execute(input: ValidateLinksInput): Promise<ValidateLinksO
     linksPath,
     shardIndex,
     shardCount,
+    shardBy = 'noteId-hash',
+    maxNotes,
     profile = 'xiaohongshu_fresh',
     unifiedApiUrl = 'http://127.0.0.1:7701',
   } = input;
 
-  console.log(`[Phase34ValidateLinks] 开始校验链接...`);
+  console.log('[Phase34ValidateLinks] 开始校验链接...');
 
   // Phase34 只依赖 phase2-links.jsonl，不依赖 .collect-state.json
   // .collect-state.json 只是 phase2 内部重入状态管理
 
-  const currentUrl = await controllerAction('browser:execute', {
-    profile,
-    script: 'window.location.href',
-  }, unifiedApiUrl).then(res => res?.result || res?.data?.result || '');
+  const currentUrl = await controllerAction(
+    'browser:execute',
+    {
+      profile,
+      script: 'window.location.href',
+    },
+    unifiedApiUrl,
+  ).then((res) => res?.result || res?.data?.result || '');
 
   console.log(`[Phase34ValidateLinks] 当前页面: ${currentUrl}`);
 
@@ -97,7 +111,7 @@ export async function execute(input: ValidateLinksInput): Promise<ValidateLinksO
   const allLinks = await readJsonl(targetPath);
 
   if (allLinks.length === 0) {
-    console.warn(`[Phase34ValidateLinks] 链接文件为空或不存在`);
+    console.warn('[Phase34ValidateLinks] 链接文件为空或不存在');
   }
 
   console.log(`[Phase34ValidateLinks] 总链接数: ${allLinks.length}`);
@@ -108,12 +122,22 @@ export async function execute(input: ValidateLinksInput): Promise<ValidateLinksO
     return hasToken;
   });
 
-  const shard = normalizeShard({ index: shardIndex, count: shardCount, by: 'noteId-hash' });
-  const sharded = shard ? shardFilterByNoteIdHash(validLinks, shard) : validLinks;
+  const cappedLimit = Number.isFinite(Number(maxNotes)) ? Math.max(1, Math.floor(Number(maxNotes))) : null;
+  const cappedLinks = cappedLimit ? validLinks.slice(0, cappedLimit) : validLinks;
+
+  const shard = normalizeShard({ index: shardIndex, count: shardCount, by: shardBy });
+  const sharded = shard
+    ? shard.by === 'index-mod'
+      ? shardFilterByIndexMod(cappedLinks, shard)
+      : shardFilterByNoteIdHash(cappedLinks, shard)
+    : cappedLinks;
 
   console.log(`[Phase34ValidateLinks] 有效链接数: ${validLinks.length}`);
+  if (cappedLimit) {
+    console.log(`[Phase34ValidateLinks] 全局上限: ${cappedLimit} -> ${cappedLinks.length} 条`);
+  }
   if (shard) {
-    console.log(`[Phase34ValidateLinks] Shard: ${shard.index}/${shard.count} -> ${sharded.length} 条`);
+    console.log(`[Phase34ValidateLinks] Shard(${shard.by}): ${shard.index}/${shard.count} -> ${sharded.length} 条`);
   }
 
   return {
