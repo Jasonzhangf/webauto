@@ -249,6 +249,7 @@ async function spawnCommand(spec: SpawnSpec) {
             ...(spec.env || {}),
           },
           stdio: ['ignore', 'pipe', 'pipe'],
+          windowsHide: true,
         });
 
         runs.set(runId, { child, title: spec.title, startedAt: now() });
@@ -277,6 +278,7 @@ async function runJson(spec: RunJsonSpec) {
     cwd: spec.cwd,
     env: { ...process.env, ...(spec.env || {}) },
     stdio: ['ignore', 'pipe', 'pipe'],
+    windowsHide: true,
   });
 
   const stdout: Buffer[] = [];

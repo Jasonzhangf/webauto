@@ -1,4 +1,5 @@
 import { createEl, labeledInput, section } from '../ui-components.mts';
+import { resolveWebautoRoot } from '../path-helpers.mts';
 
 function buildArgs(parts: string[]) {
   return parts.filter((x) => x != null && String(x).trim() !== '');
@@ -23,6 +24,7 @@ export function renderPreflight(root: HTMLElement, ctx: any) {
   const batchDeleteFp = createEl('input', { type: 'checkbox' }) as HTMLInputElement;
 
   let cachedScan: any = null;
+  const webautoRoot = resolveWebautoRoot(ctx.settings?.downloadRoot || '', window.api);
 
   function getAliasMap(): Record<string, string> {
     const m = ctx.settings?.profileAliases;
@@ -242,7 +244,7 @@ export function renderPreflight(root: HTMLElement, ctx: any) {
       statusBox,
       selectionHint,
       listBox,
-      createEl('div', { className: 'muted' }, ['提示：profile 与 fingerprint 的真实路径均在 ~/.webauto 下；alias 只影响 UI 显示，不影响 profileId。']),
+      createEl('div', { className: 'muted' }, [`提示：profile 与 fingerprint 的真实路径均在 ${webautoRoot} 下；alias 只影响 UI 显示，不影响 profileId。`]),
     ]),
   );
 
