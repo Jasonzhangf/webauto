@@ -378,6 +378,7 @@ async function processSingleNote({
   const noteId = String(link?.noteId || '');
   const safeUrl = String(link?.safeUrl || '');
   const noteDir = path.join(downloadRoot, 'xiaohongshu', env, keyword, noteId);
+  const likeEvidenceDir = path.join(downloadRoot, 'xiaohongshu', env, keyword, 'virtual-like', noteId);
   const result = {
     noteId,
     success: true,
@@ -538,6 +539,7 @@ async function processSingleNote({
         }
 
         const commentsPath = path.join(noteDir, 'comments.jsonl');
+        await fs.mkdir(likeEvidenceDir, { recursive: true });
         const likeRes = await interact({
           sessionId: profile,
           noteId,
@@ -577,6 +579,8 @@ async function processSingleNote({
           commentsAdded: Number(likeRes?.commentsAdded || 0),
           commentsTotal: Number(likeRes?.commentsTotal || 0),
           commentsPath: likeRes?.commentsPath || (config.doComments ? commentsPath : null),
+          noteDir,
+          likeEvidenceDir,
           reachedBottom: Boolean(likeRes?.reachedBottom),
         });
         continue;
@@ -673,6 +677,8 @@ async function processSingleNote({
     repliedCount: result.repliedCount,
     ocrImages: result.ocrImages,
     ocrFailedImages: result.ocrFailedImages,
+    noteDir,
+    likeEvidenceDir,
     errors: result.errors,
     slotIndex,
     tabRealIndex,

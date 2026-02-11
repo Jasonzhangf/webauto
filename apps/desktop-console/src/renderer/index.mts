@@ -3,7 +3,7 @@ import { renderRun } from './tabs/run.mts';
 import { renderRuntime } from './tabs/runtime.mts';
 import { renderResults } from './tabs/results.mts';
 import { renderSettings } from './tabs/settings.mts';
-import { renderXiaohongshuTab } from './tabs/xiaohongshu.mjs';
+import { renderXiaohongshuTab } from './tabs/xiaohongshu.mts';
 import { createEl } from './ui-components.mts';
 
 declare global {
@@ -173,7 +173,7 @@ async function main() {
   startDesktopHeartbeat();
   await loadSettings();
   installCmdEvents();
-  setActiveTab('preflight');
+  setActiveTab('xiaohongshu');
   ctx.setStatus('idle');
 }
 

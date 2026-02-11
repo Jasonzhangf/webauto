@@ -9,6 +9,7 @@ import { promises as fs } from 'node:fs';
 import { readDesktopConsoleSettings, resolveDefaultDownloadRoot, writeDesktopConsoleSettings } from './desktop-settings.mts';
 import type { DesktopConsoleSettings } from './desktop-settings.mts';
 import { createProfileStore } from './profile-store.mts';
+import { decideWatchdogAction, resolveUiHeartbeatTimeoutMs } from './heartbeat-watchdog.mts';
 
 type CmdEvent =
   | { type: 'started'; runId: string; title: string; pid: number; ts: number }
@@ -71,7 +72,7 @@ class GroupQueue {
 const groupQueues = new Map<string, GroupQueue>();
 const runs = new Map<string, { child: ReturnType<typeof spawn>; title: string; startedAt: number }>();
 
-const UI_HEARTBEAT_TIMEOUT_MS = 60_000;
+const UI_HEARTBEAT_TIMEOUT_MS = resolveUiHeartbeatTimeoutMs(process.env);
 let lastUiHeartbeatAt = Date.now();
 let heartbeatWatchdog: NodeJS.Timeout | null = null;
 let heartbeatTimeoutHandled = false;
@@ -81,6 +82,15 @@ let win: BrowserWindow | null = null;
 function getWin() {
   if (!win || win.isDestroyed()) return null;
   return win;
+}
+
+function isUiOperational() {
+  const w = getWin();
+  if (!w) return false;
+  const wc = w.webContents;
+  if (!wc || wc.isDestroyed()) return false;
+  if (typeof wc.isCrashed === 'function' && wc.isCrashed()) return false;
+  return true;
 }
 
 function sendEvent(evt: CmdEvent) {
@@ -153,17 +163,32 @@ function ensureHeartbeatWatchdog() {
   if (heartbeatWatchdog) return;
   heartbeatWatchdog = setInterval(() => {
     const staleMs = Date.now() - lastUiHeartbeatAt;
-    if (staleMs <= UI_HEARTBEAT_TIMEOUT_MS) return;
-    if (heartbeatTimeoutHandled) return;
-    heartbeatTimeoutHandled = true;
+    const decision = decideWatchdogAction({
+      staleMs,
+      timeoutMs: UI_HEARTBEAT_TIMEOUT_MS,
+      alreadyHandled: heartbeatTimeoutHandled,
+      runCount: runs.size,
+      uiOperational: isUiOperational(),
+    });
+    heartbeatTimeoutHandled = decision.nextHandled;
 
-    if (runs.size > 0) {
+    if (decision.action === 'none') {
+      if (decision.reason === 'stale_ui_alive') {
+        console.warn(
+          `[desktop-heartbeat] stale ${staleMs}ms > ${UI_HEARTBEAT_TIMEOUT_MS}ms, UI still alive, skip kill (likely timer throttling)`,
+        );
+      }
+      return;
+    }
+
+    if (decision.action === 'kill_runs') {
       console.warn(`[desktop-heartbeat] stale ${staleMs}ms > ${UI_HEARTBEAT_TIMEOUT_MS}ms, killing ${runs.size} run(s)`);
       killAllRuns('ui_heartbeat_timeout');
-    } else {
-      console.warn(`[desktop-heartbeat] stale ${staleMs}ms > ${UI_HEARTBEAT_TIMEOUT_MS}ms, stopping core services`);
-      stopCoreServicesBestEffort();
+      return;
     }
+
+    console.warn(`[desktop-heartbeat] stale ${staleMs}ms > ${UI_HEARTBEAT_TIMEOUT_MS}ms, stopping core services`);
+    stopCoreServicesBestEffort();
   }, 5_000);
   heartbeatWatchdog.unref();
 }
@@ -448,15 +473,17 @@ async function listDir(input: { root: string; recursive?: boolean; maxEntries?: 
 
 function createWindow() {
   win = new BrowserWindow({
-    width: 1080,
-    height: 720,
+    width: 1280,
+    height: 900,
     minWidth: 920,
-    minHeight: 640,
+    minHeight: 800,
     webPreferences: {
       preload: path.join(APP_ROOT, 'dist', 'main', 'preload.mjs'),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
+      // Prevent renderer timer throttling when app loses focus; heartbeat must remain stable.
+      backgroundThrottling: false,
     },
   });
 
@@ -466,7 +493,17 @@ function createWindow() {
 
 app.on('window-all-closed', () => {
   killAllRuns('window_closed');
-  if (process.platform !== 'darwin') app.quit();
+  // macOS 下关闭窗口后也退出应用，避免命令行挂起
+  app.quit();
+});
+
+// 确保窗口关闭时命令行能退出
+app.on('before-quit', () => {
+  killAllRuns('before_quit');
+  if (heartbeatWatchdog) {
+    clearInterval(heartbeatWatchdog);
+    heartbeatWatchdog = null;
+  }
 });
 
 app.whenReady().then(() => {

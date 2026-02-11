@@ -17,7 +17,7 @@ function bindSectionToggle(toggle: HTMLInputElement, body: HTMLElement) {
     body.style.display = toggle.checked ? '' : 'none';
   };
   toggle.addEventListener('change', refresh);
-  refresh();
+  setTimeout(refresh, 0);
 }
 
 
@@ -274,45 +274,65 @@ export function renderXiaohongshuTab(root: HTMLElement, api: any) {
     '完整编排推荐：先 Phase1 启动，再 Phase2 采集链接，最后 Unified 采集评论/点赞。',
   ]);
 
-  card.appendChild(createEl('div', { className: 'row', style: 'gap:8px; margin-bottom:8px;' }, [
-    createEl('label', { style: 'width:70px;' }, ['编排模式']), orchestrateModeSelect,
+  // 基础参数 - 3列Tile布局
+  const baseParamsTile = createEl('div', { style: 'display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; margin-bottom:10px;' });
+  
+  // Tile 1: 编排与关键词
+  const tileBase1 = createEl('div', { style: 'border:1px solid #eee; border-radius:8px; padding:10px;' });
+  tileBase1.appendChild(createEl('div', { style: 'font-weight:600; margin-bottom:8px; font-size:13px; color:#2b67ff;' }, ['📋 编排设置']));
+  tileBase1.appendChild(createEl('div', { className: 'row', style: 'gap:6px; margin-bottom:6px;' }, [
+    createEl('label', { style: 'font-size:12px;' }, ['模式']), orchestrateModeSelect,
   ]));
+  tileBase1.appendChild(createEl('div', { className: 'row', style: 'gap:6px;' }, [
+    createEl('label', { style: 'font-size:12px;' }, ['关键词']), keywordInput,
+  ]));
+  baseParamsTile.appendChild(tileBase1);
+  
+  // Tile 2: 环境与账号
+  const tileBase2 = createEl('div', { style: 'border:1px solid #eee; border-radius:8px; padding:10px;' });
+  tileBase2.appendChild(createEl('div', { style: 'font-weight:600; margin-bottom:8px; font-size:13px; color:#2b67ff;' }, ['🔧 环境账号']));
+  tileBase2.appendChild(createEl('div', { className: 'row', style: 'gap:6px; margin-bottom:6px;' }, [
+    createEl('label', { style: 'font-size:12px;' }, ['环境']), envInput,
+  ]));
+  tileBase2.appendChild(createEl('div', { className: 'row', style: 'gap:6px; margin-bottom:6px;' }, [
+    createEl('label', { style: 'font-size:12px;' }, ['账号模式']), accountModeSelect,
+  ]));
+  tileBase2.appendChild(createEl('div', { className: 'row', style: 'gap:6px; margin-bottom:6px;' }, [
+    createEl('label', { style: 'font-size:12px;' }, ['首选项']), profilePickSel, profileRefreshBtn,
+  ]));
+  tileBase2.appendChild(shardProfilesBox);
+  shardProfilesBox.style.marginTop = '6px';
+  baseParamsTile.appendChild(tileBase2);
+  
+  // Tile 3: 运行选项
+  const tileBase3 = createEl('div', { style: 'border:1px solid #eee; border-radius:8px; padding:10px;' });
+  tileBase3.appendChild(createEl('div', { style: 'font-weight:600; margin-bottom:8px; font-size:13px; color:#2b67ff;' }, ['⚙️ 运行选项']));
+  tileBase3.appendChild(createEl('div', { className: 'row', style: 'gap:6px; margin-bottom:6px;' }, [
+    createEl('label', { style: 'font-size:12px;' }, ['目标帖子']), maxNotesInput,
+  ]));
+  tileBase3.appendChild(createEl('div', { className: 'row', style: 'gap:8px; margin-bottom:6px;' }, [
+    dryRunCheckbox,
+    createEl('label', { htmlFor: 'xh-dry-run', style: 'font-size:12px; color:#a87b00; cursor:pointer;' }, ['Dry Run']),
+  ]));
+  tileBase3.appendChild(createEl('div', { className: 'row', style: 'gap:8px; margin-bottom:6px;' }, [
+    headlessCheckbox,
+    createEl('label', { htmlFor: 'xh-headless', style: 'font-size:12px; color:#2b67ff; cursor:pointer;' }, ['无头模式']),
+  ]));
+  tileBase3.appendChild(createEl('div', { className: 'row', style: 'gap:8px;' }, [
+    protocolModeCheckbox,
+    createEl('label', { htmlFor: 'xh-protocol-mode', style: 'font-size:12px; color:#14532d; cursor:pointer;' }, ['协议级操作']),
+  ]));
+  baseParamsTile.appendChild(tileBase3);
+  
+  card.appendChild(baseParamsTile);
   card.appendChild(modeHint);
 
-  card.appendChild(createEl('div', { className: 'row', style: 'gap:8px; margin-bottom:8px;' }, [
-    createEl('label', { style: 'width:70px;' }, ['关键词']), keywordInput,
-  ]));
-  card.appendChild(createEl('div', { className: 'row', style: 'gap:8px; margin-bottom:8px;' }, [
-    createEl('label', { style: 'width:70px;' }, ['环境']), envInput,
-    createEl('label', { style: 'width:64px; margin-left:8px;' }, ['账号模式']), accountModeSelect,
-  ]));
-  const profileRow = createEl('div', { className: 'row', style: 'gap:8px; margin-bottom:8px; align-items:center;' }, [
-    createEl('label', { style: 'width:70px;' }, ['首选项']), profilePickSel, profileRefreshBtn,
-  ]);
-  const shardBoxWrap = createEl('div', { style: 'flex:1;' }, [shardProfilesBox, shardProfilesHint, shardResolvedHint]);
-  const shardRow = createEl('div', { className: 'row', style: 'gap:8px; margin-bottom:8px; align-items:flex-start;' }, [
-    createEl('label', { style: 'width:70px; margin-top:4px;' }, ['可用项']), shardBoxWrap,
-  ]);
-  card.appendChild(profileRow);
-  card.appendChild(shardRow);
-
-  const targetRow = createEl('div', { className: 'row', style: 'gap:8px; margin-bottom:12px;' }, [
-    createEl('label', { style: 'width:70px;' }, ['目标帖子']), maxNotesInput,
-    dryRunCheckbox,
-    createEl('label', { htmlFor: 'xh-dry-run', style: 'margin-left:4px; color:#a87b00; cursor:pointer;' }, ['Dry Run']),
-    headlessCheckbox,
-    createEl('label', { htmlFor: 'xh-headless', style: 'margin-left:4px; color:#2b67ff; cursor:pointer;' }, ['无头模式（默认）']),
-  ]);
-  card.appendChild(targetRow);
-  card.appendChild(createEl('div', { className: 'row', style: 'gap:8px; margin-bottom:12px;' }, [
-    protocolModeCheckbox,
-    createEl('label', { htmlFor: 'xh-protocol-mode', style: 'cursor:pointer; color:#14532d;' }, ['协议级操作（默认，取消为系统级）']),
-  ]));
+  const featureTiles = createEl('div', { style: 'display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; margin-bottom:10px; align-items:start; grid-auto-rows:min-content;' });
 
   // 任务 1：主页采集
   const homepageToggle = makeCheckbox(true, 'xh-do-homepage');
   const imagesToggle = makeCheckbox(true, 'xh-do-images');
-  const homeSection = createEl('div', { style: 'border:1px solid #eee; border-radius:8px; padding:10px; margin-bottom:10px;' });
+  const homeSection = createEl('div', { style: 'border:1px solid #eee; border-radius:8px; padding:10px;' });
   homeSection.appendChild(createEl('div', { className: 'row', style: 'gap:6px; margin-bottom:8px;' }, [
     homepageToggle,
     createEl('label', { htmlFor: 'xh-do-homepage', style: 'cursor:pointer; font-weight:600;' }, ['主页内容采集（正文/作者/链接）']),
@@ -324,13 +344,13 @@ export function renderXiaohongshuTab(root: HTMLElement, api: any) {
   ]));
   homeSection.appendChild(homeBody);
   bindSectionToggle(homepageToggle, homeBody);
-  card.appendChild(homeSection);
+  featureTiles.appendChild(homeSection);
 
   // 任务 2：评论采集
   const commentsToggle = makeCheckbox(true, 'xh-do-comments');
   const maxCommentsInput = makeNumberInput('0', '0');
   const commentRoundsInput = makeNumberInput('0', '0');
-  const commentsSection = createEl('div', { style: 'border:1px solid #eee; border-radius:8px; padding:10px; margin-bottom:10px;' });
+  const commentsSection = createEl('div', { style: 'border:1px solid #eee; border-radius:8px; padding:10px;' });
   commentsSection.appendChild(createEl('div', { className: 'row', style: 'gap:6px; margin-bottom:8px;' }, [
     commentsToggle,
     createEl('label', { htmlFor: 'xh-do-comments', style: 'cursor:pointer; font-weight:600;' }, ['评论采集']),
@@ -344,11 +364,11 @@ export function renderXiaohongshuTab(root: HTMLElement, api: any) {
   ]));
   commentsSection.appendChild(commentsBody);
   bindSectionToggle(commentsToggle, commentsBody);
-  card.appendChild(commentsSection);
+  featureTiles.appendChild(commentsSection);
 
   // 命中规则（用于回复或高级匹配）
   const gateToggle = makeCheckbox(false, 'xh-do-gate');
-  const gateSection = createEl('div', { style: 'border:1px solid #eee; border-radius:8px; padding:10px; margin-bottom:10px;' });
+  const gateSection = createEl('div', { style: 'border:1px solid #eee; border-radius:8px; padding:10px;' });
   gateSection.appendChild(createEl('div', { className: 'row', style: 'gap:6px; margin-bottom:8px;' }, [
     gateToggle,
     createEl('label', { htmlFor: 'xh-do-gate', style: 'cursor:pointer; font-weight:600;' }, ['评论命中规则（用于回复/兜底匹配）']),
@@ -369,69 +389,94 @@ export function renderXiaohongshuTab(root: HTMLElement, api: any) {
   ]));
   gateSection.appendChild(gateBody);
   bindSectionToggle(gateToggle, gateBody);
-  card.appendChild(gateSection);
+  featureTiles.appendChild(gateSection);
 
-  // 任务 4：点赞
+  // 任务 4：点赞 - 3列Tile布局
   const likesToggle = makeCheckbox(false, 'xh-do-likes');
   const maxLikesInput = makeNumberInput('2', '1');
-  const likesSection = createEl('div', { style: 'border:1px solid #eee; border-radius:8px; padding:10px; margin-bottom:10px;' });
+  const likesSection = createEl('div', { style: 'border:1px solid #eee; border-radius:8px; padding:10px;' });
+  
+  // 标题行
   likesSection.appendChild(createEl('div', { className: 'row', style: 'gap:6px; margin-bottom:8px;' }, [
     likesToggle,
     createEl('label', { htmlFor: 'xh-do-likes', style: 'cursor:pointer; font-weight:600;' }, ['评论点赞']),
   ]));
-  const likesBody = createEl('div', { style: 'padding-left:24px;' });
-  likesBody.appendChild(createEl('div', { className: 'row', style: 'gap:8px; margin-bottom:8px;' }, [
-    createEl('label', { style: 'width:86px;' }, ['每轮上限']), maxLikesInput,
+  
+  // 3列Tile网格
+  const likesBody = createEl('div', { style: 'display:grid; grid-template-columns:1fr; gap:8px;' });
+
+  // Tile 1: 数量限制
+  const tile1 = createEl('div', { style: 'border:1px solid #e2e8f0; border-radius:8px; padding:10px; background:#0f1117; display:flex; flex-direction:column;' });
+  tile1.appendChild(createEl('div', { style: 'font-weight:600; margin-bottom:8px; font-size:13px; color:#2b67ff;' }, ['📊 数量限制']));
+  tile1.appendChild(createEl('div', { className: 'row', style: 'gap:6px; flex-wrap:nowrap;' }, [
+    createEl('label', { style: 'font-size:12px; white-space:nowrap; color:#8b93a6;' }, ['每轮滚动点赞上限']), 
+    maxLikesInput,
   ]));
+  likesBody.appendChild(tile1);
 
-  const likeRuleTypeSelect = createEl('select', { style: 'width:220px;' }) as HTMLSelectElement;
-  likeRuleTypeSelect.appendChild(createEl('option', { value: 'contains' }, ['单关键词：评论包含A即可命中']));
-  likeRuleTypeSelect.appendChild(createEl('option', { value: 'and' }, ['同时包含：{A + B}（同条评论同时出现）']));
-  likeRuleTypeSelect.appendChild(createEl('option', { value: 'include_without' }, ['包含且排除：{A - B}（包含A且不含B）']));
+  // Tile 2: 匹配模式
+  const likeRuleTypeSelect = createEl('select', { style: 'width:100%; font-size:12px;' }) as HTMLSelectElement;
+  likeRuleTypeSelect.appendChild(createEl('option', { value: 'contains' }, ['单关键词']));
+  likeRuleTypeSelect.appendChild(createEl('option', { value: 'and' }, ['同时包含 {A+B}']));
+  likeRuleTypeSelect.appendChild(createEl('option', { value: 'include_without' }, ['包含排除 {A-B}']));
+  
+  const tile2 = createEl('div', { style: 'border:1px solid #e2e8f0; border-radius:8px; padding:10px; background:#0f1117; display:flex; flex-direction:column;' });
+  tile2.appendChild(createEl('div', { style: 'font-weight:600; margin-bottom:8px; font-size:13px; color:#2b67ff;' }, ['🎯 匹配模式']));
+  tile2.appendChild(likeRuleTypeSelect);
+  
+  const likeRuleHelp = createEl('div', { style: 'color:#8b93a6; font-size:10px; margin-top:6px; line-height:1.4;' });
+  tile2.appendChild(likeRuleHelp);
+  likesBody.appendChild(tile2);
 
-  const likeRuleAInput = makeTextInput('', '词A', '180px');
-  const likeRuleBInput = makeTextInput('', '词B', '180px');
-  const addLikeRuleBtn = createEl('button', { type: 'button' }, ['+ 添加规则']) as HTMLButtonElement;
-  const likeRuleHelp = createEl('div', { style: 'color:#4b5563; font-size:12px; margin-bottom:8px; line-height:1.5;' });
-  const likeRuleList = createEl('div', { style: 'display:flex; flex-direction:column; gap:6px; margin-bottom:8px;' });
-  const likeRulePreview = createEl('input', {
-    type: 'text',
-    readOnly: true,
-    style: 'width:100%; color:#334155; background:#f8fafc; border:1px dashed #cbd5e1;',
-    placeholder: '规则预览（自动生成，不可手写）',
-  }) as HTMLInputElement;
+  // Tile 3: 添加规则
+  const likeRuleAInput = makeTextInput('', '词A', '100%');
+  const likeRuleBInput = makeTextInput('', '词B (可选)', '100%');
+  const addLikeRuleBtn = createEl('button', { type: 'button', style: 'width:100%; font-size:12px;' }, ['+ 添加规则']) as HTMLButtonElement;
+  
+  const tile3 = createEl('div', { style: 'border:1px solid #e2e8f0; border-radius:8px; padding:10px; background:#0f1117; display:flex; flex-direction:column;' });
+  tile3.appendChild(createEl('div', { style: 'font-weight:600; margin-bottom:8px; font-size:13px; color:#2b67ff;' }, ['➕ 添加规则']));
+  tile3.appendChild(createEl('div', { style: 'margin-bottom:6px;' }, [likeRuleAInput]));
+  tile3.appendChild(createEl('div', { style: 'margin-bottom:6px;' }, [likeRuleBInput]));
+  tile3.appendChild(addLikeRuleBtn);
+  likesBody.appendChild(tile3);
 
+  // 规则列表（横跨3列）
   const likeRules: LikeRuleDraft[] = [
     { kind: 'contains', a: '操底' },
     { kind: 'contains', a: '上链接' },
   ];
+  
+  const likeRuleList = createEl('div', { style: 'display:flex; flex-wrap:wrap; gap:6px;' });
+  const likeRulePreview = createEl('input', { type: 'hidden', readOnly: true }) as HTMLInputElement;
 
   const refreshLikeGuide = () => {
     const kind = (likeRuleTypeSelect.value || 'contains') as LikeRuleKind;
     const g = likeRuleGuide(kind);
-    likeRuleHelp.textContent = `${g.title}：${g.desc} ${g.example}`;
+    likeRuleHelp.textContent = `${g.title}：${g.desc}`;
     likeRuleBInput.disabled = kind === 'contains';
     likeRuleBInput.style.opacity = kind === 'contains' ? '0.5' : '1';
+    likeRuleBInput.placeholder = kind === 'contains' ? '(单关键词无需词B)' : '词B';
     if (kind === 'contains') likeRuleBInput.value = '';
   };
 
   const refreshLikeRuleList = () => {
     likeRuleList.innerHTML = '';
+    if (likeRules.length === 0) {
+      likeRuleList.appendChild(createEl('span', { style: 'color:#666; font-size:11px;' }, ['暂无规则']));
+    }
     likeRules.forEach((rule, idx) => {
-      const row = createEl('div', {
-        className: 'row',
-        style: 'justify-content:space-between; gap:8px; border:1px solid #e2e8f0; border-radius:6px; padding:6px 8px;',
-      }, [
-        createEl('code', { style: 'font-size:12px;' }, [stringifyLikeRule(rule)]),
-      ]);
-      const rmBtn = createEl('button', { type: 'button', className: 'danger', style: 'padding:2px 8px;' }, ['删除']) as HTMLButtonElement;
+      const chip = createEl('div', {
+        style: 'display:inline-flex; align-items:center; gap:4px; background:#1b2233; border:1px solid #2b67ff; border-radius:6px; padding:4px 8px; font-size:12px;',
+      });
+      chip.appendChild(createEl('span', {}, [stringifyLikeRule(rule)]));
+      const rmBtn = createEl('span', { style: 'cursor:pointer; color:#ff6b6b; margin-left:4px; font-weight:bold;' }, ['×']) as HTMLSpanElement;
       rmBtn.onclick = () => {
         likeRules.splice(idx, 1);
         refreshLikeRuleList();
         persistLastConfig();
       };
-      row.appendChild(rmBtn);
-      likeRuleList.appendChild(row);
+      chip.appendChild(rmBtn);
+      likeRuleList.appendChild(chip);
     });
     likeRulePreview.value = likeRules.map((rule) => stringifyLikeRule(rule)).join(',');
   };
@@ -470,29 +515,18 @@ export function renderXiaohongshuTab(root: HTMLElement, api: any) {
   refreshLikeGuide();
   refreshLikeRuleList();
 
-  likesBody.appendChild(createEl('div', { className: 'row', style: 'gap:8px; margin-bottom:8px; align-items:center;' }, [
-    createEl('label', { style: 'width:86px;' }, ['规则类型']), likeRuleTypeSelect,
-  ]));
-  likesBody.appendChild(createEl('div', { className: 'row', style: 'gap:8px; margin-bottom:8px; align-items:center; flex-wrap:wrap;' }, [
-    createEl('label', { style: 'width:86px;' }, ['新增规则']),
-    likeRuleAInput,
-    likeRuleBInput,
-    addLikeRuleBtn,
-  ]));
-  likesBody.appendChild(likeRuleHelp);
-  likesBody.appendChild(likeRuleList);
-  likesBody.appendChild(createEl('div', { className: 'row', style: 'gap:8px;' }, [
-    createEl('label', { style: 'width:86px;' }, ['规则预览']), likeRulePreview,
-  ]));
-
+  // 规则列表单独一行（横跨3列）
+  const ruleListRow = createEl('div', { style: 'grid-column:span 1; margin-top:4px; border:1px solid #23262f; border-radius:8px; padding:8px; background:#0b1220;' });
+  ruleListRow.appendChild(createEl('div', { style: 'font-size:11px; color:#8b93a6; margin-bottom:6px;' }, ['已添加规则（点击 × 删除）：']));
+  ruleListRow.appendChild(likeRuleList);
+  likesBody.appendChild(ruleListRow);
   likesSection.appendChild(likesBody);
   bindSectionToggle(likesToggle, likesBody);
-  card.appendChild(likesSection);
-
+  featureTiles.appendChild(likesSection);
   // 任务 5：回复
   const replyToggle = makeCheckbox(false, 'xh-do-reply');
   const replyTextInput = makeTextInput('感谢分享，已关注', '回复内容');
-  const replySection = createEl('div', { style: 'border:1px solid #eee; border-radius:8px; padding:10px; margin-bottom:10px;' });
+  const replySection = createEl('div', { style: 'border:1px solid #eee; border-radius:8px; padding:10px;' });
   replySection.appendChild(createEl('div', { className: 'row', style: 'gap:6px; margin-bottom:8px;' }, [
     replyToggle,
     createEl('label', { htmlFor: 'xh-do-reply', style: 'cursor:pointer; font-weight:600;' }, ['自动回复（开发态，不发送）']),
@@ -503,10 +537,10 @@ export function renderXiaohongshuTab(root: HTMLElement, api: any) {
   ]));
   replySection.appendChild(replyBody);
   bindSectionToggle(replyToggle, replyBody);
-  card.appendChild(replySection);
+  featureTiles.appendChild(replySection);
 
   const ocrToggle = makeCheckbox(false, 'xh-do-ocr');
-  const ocrSection = createEl('div', { style: 'border:1px solid #eee; border-radius:8px; padding:10px; margin-bottom:10px;' });
+  const ocrSection = createEl('div', { style: 'border:1px solid #eee; border-radius:8px; padding:10px;' });
   ocrSection.appendChild(createEl('div', { className: 'row', style: 'gap:6px; margin-bottom:8px;' }, [
     ocrToggle,
     createEl('label', { htmlFor: 'xh-do-ocr', style: 'cursor:pointer; font-weight:600;' }, ['图片 OCR（DeepSeek OCR）']),
@@ -518,7 +552,9 @@ export function renderXiaohongshuTab(root: HTMLElement, api: any) {
   ]));
   ocrSection.appendChild(ocrBody);
   bindSectionToggle(ocrToggle, ocrBody);
-  card.appendChild(ocrSection);
+  featureTiles.appendChild(ocrSection);
+
+  card.appendChild(featureTiles);
 
   const opOrderInput = makeTextInput('', '执行顺序列表（留空使用默认编排）');
   const opOrderRow = createEl('div', { className: 'row', style: 'gap:8px; margin-bottom:12px;' }, [
@@ -569,21 +605,21 @@ export function renderXiaohongshuTab(root: HTMLElement, api: any) {
   const statsSection = createEl('div', {
     style: 'border:1px solid #e2e8f0; border-radius:8px; padding:10px; margin-bottom:12px; background:#0b1220;',
   });
-  statsSection.appendChild(createEl('div', { style: 'font-weight:700; margin-bottom:8px;' }, ['实时统计']));
 
-  const linksStat = createEl('div', { className: 'muted', style: 'margin-bottom:4px;' }, ['链接采集：0/0']) as HTMLDivElement;
-  const postsStat = createEl('div', { className: 'muted', style: 'margin-bottom:4px;' }, ['帖子处理：0']) as HTMLDivElement;
-  const commentsStat = createEl('div', { className: 'muted', style: 'margin-bottom:4px;' }, ['当前帖子评论：0/不限']) as HTMLDivElement;
-  const likesStat = createEl('div', { className: 'muted', style: 'margin-bottom:4px;' }, ['总点赞：0']) as HTMLDivElement;
-  const repliesStat = createEl('div', { className: 'muted', style: 'margin-bottom:8px;' }, ['总回复：0']) as HTMLDivElement;
-  const streamStat = createEl('div', { className: 'muted', style: 'margin-bottom:8px; font-size:11px;' }, ['事件流：未绑定']) as HTMLDivElement;
+  // 单行横向统计：节省垂直空间
+  const statsRow = createEl('div', {
+    className: 'row',
+    style: 'flex-wrap: nowrap; gap: 16px; margin-bottom: 8px; font-size: 12px; overflow-x: auto;',
+  });
+  const linksStat = createEl('span', { className: 'muted' }, ['链接：0/0']) as HTMLSpanElement;
+  const postsStat = createEl('span', { className: 'muted' }, ['帖子：0']) as HTMLSpanElement;
+  const commentsStat = createEl('span', { className: 'muted' }, ['评论：0/不限']) as HTMLSpanElement;
+  const likesStat = createEl('span', { className: 'muted' }, ['点赞：0']) as HTMLSpanElement;
+  const repliesStat = createEl('span', { className: 'muted' }, ['回复：0']) as HTMLSpanElement;
+  const streamStat = createEl('span', { className: 'muted', style: 'font-size:11px;' }, ['事件流：未绑定']) as HTMLSpanElement;
 
-  statsSection.appendChild(linksStat);
-  statsSection.appendChild(postsStat);
-  statsSection.appendChild(commentsStat);
-  statsSection.appendChild(likesStat);
-  statsSection.appendChild(repliesStat);
-  statsSection.appendChild(streamStat);
+  [linksStat, postsStat, commentsStat, likesStat, repliesStat, streamStat].forEach(el => statsRow.appendChild(el));
+  statsSection.appendChild(statsRow);
 
   const likedTitle = createEl('div', { style: 'margin-top:8px; font-weight:600;' }, ['已点赞帖子']) as HTMLDivElement;
   const likedList = createEl('div', { style: 'display:flex; flex-direction:column; gap:6px; margin-top:6px;' }) as HTMLDivElement;
@@ -719,7 +755,11 @@ export function renderXiaohongshuTab(root: HTMLElement, api: any) {
         if (typeof evt?.likedCount === 'number') current.liked = Number(evt.likedCount || 0);
         if (typeof evt?.repliedCount === 'number') current.replied = Number(evt.repliedCount || 0);
         const commentsPath = String(evt?.commentsPath || '').trim();
+        const noteDir = String(evt?.noteDir || '').trim();
+        const likeEvidenceDir = String(evt?.likeEvidenceDir || '').trim();
         if (commentsPath) current.path = parentDir(commentsPath);
+        else if (likeEvidenceDir) current.path = likeEvidenceDir;
+        else if (noteDir) current.path = noteDir;
         noteAgg.set(noteId, current);
 
         if (current.liked > 0) likedNotes.set(noteId, { count: current.liked, path: current.path });
@@ -735,6 +775,10 @@ export function renderXiaohongshuTab(root: HTMLElement, api: any) {
       current.comments = Number(evt?.commentsTotal || current.comments || 0);
       current.liked = Number(evt?.likedCount || current.liked || 0);
       current.replied = Number(evt?.repliedCount || current.replied || 0);
+      const noteDir = String(evt?.noteDir || '').trim();
+      const likeEvidenceDir = String(evt?.likeEvidenceDir || '').trim();
+      if (!current.path && likeEvidenceDir) current.path = likeEvidenceDir;
+      if (!current.path && noteDir) current.path = noteDir;
       noteAgg.set(noteId, current);
       if (current.liked > 0) likedNotes.set(noteId, { count: current.liked, path: current.path });
       if (current.replied > 0) repliedNotes.set(noteId, { count: current.replied, path: current.path });
@@ -994,9 +1038,8 @@ export function renderXiaohongshuTab(root: HTMLElement, api: any) {
     const needsTarget = mode !== 'phase1-only';
     const accountMode = String(accountModeSelect.value || 'single').trim();
 
-    targetRow.style.display = needsTarget ? '' : 'none';
-    profileRow.style.display = accountMode === 'single' ? '' : 'none';
-    shardRow.style.display = accountMode === 'shards' ? '' : 'none';
+    // 目标帖子在 tileBase3 内，暂时通过显示/隐藏整个 baseParamsTile 控制
+    // 账号选择相关已整合到 tile 中
 
     const featureDisplay = unifiedEnabled ? '' : 'none';
     homeSection.style.display = featureDisplay;
@@ -1205,6 +1248,6 @@ export function renderXiaohongshuTab(root: HTMLElement, api: any) {
     }
   });
 
-  card.appendChild(createEl('div', { className: 'row' }, [runBtn, stopBtn]));
+  card.insertBefore(createEl('div', { className: 'row', style: 'margin-bottom:12px;' }, [runBtn, stopBtn]), card.firstChild);
   root.appendChild(card);
 }

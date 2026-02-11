@@ -25,3 +25,12 @@ test('orchestrate forwards ocr-command only to unified stage', async () => {
   assert.match(src, /'--ocr-command'/);
   assert.match(src, /\.\.\.\(ocrCommand \? \['--ocr-command', ocrCommand\] : \[\]\)/);
 });
+
+
+test('unified harvest emits noteDir and likeEvidenceDir for like-only runs', async () => {
+  const src = await readFile(unifiedPath, 'utf8');
+  assert.match(src, /const likeEvidenceDir = path\.join\(downloadRoot, 'xiaohongshu', env, keyword, 'virtual-like', noteId\)/);
+  assert.match(src, /await fs\.mkdir\(likeEvidenceDir, \{ recursive: true \}\)/);
+  assert.match(src, /likeEvidenceDir,/);
+  assert.match(src, /noteDir,/);
+});

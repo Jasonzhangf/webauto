@@ -11,7 +11,7 @@
       header .tabs { display: flex; gap: 10px; }
       header .tab { padding: 6px 10px; border-radius: 8px; cursor: pointer; color: #b9c0d4; }
       header .tab.active { background: #1b2233; color: #fff; }
-      #main { display: grid; grid-template-rows: 1fr 0px; height: calc(100vh - 44px); }
+      #main { display: grid; grid-template-rows: 1fr 0px; height: calc(100vh - 44px); min-height: 1000px; }
       #content { padding: 14px; overflow: auto; }
       #log { border-top: 1px solid #23262f; padding: 8px 14px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; overflow: auto; background: #0b0d12; }
       body:not(.log-expanded) #log { border-top: none; padding: 0; overflow: hidden; }

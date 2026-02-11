@@ -7,6 +7,13 @@ const distDir = path.join(appRoot, 'dist');
 const distMainDir = path.join(distDir, 'main');
 const distRendererDir = path.join(distDir, 'renderer');
 
+console.log('[desktop-console] ensuring dependencies...');
+try {
+  execSync('npm install', { stdio: 'inherit', cwd: appRoot });
+} catch {
+  // ignore
+}
+
 console.log('[desktop-console] cleaning dist...');
 try {
   fs.rmSync(distDir, { recursive: true, force: true });

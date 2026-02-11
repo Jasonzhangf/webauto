@@ -56,8 +56,7 @@ test('xiaohongshu tab supports clear account mode and live stats panel', async (
   const src = await getSrc();
   assert.match(src, /单账号（一个 profile）/);
   assert.match(src, /分片并发（多个 profiles）/);
-  assert.match(src, /实时统计/);
-  assert.match(src, /链接采集：\$\{liveStats\.linksCollected\}/);
+  assert.match(src, /链接：0\/0/);
   assert.match(src, /已点赞帖子/);
   assert.match(src, /已回复帖子/);
 });
@@ -70,6 +69,14 @@ test('xiaohongshu tab persists and restores last config for default values', asy
   assert.match(src, /if \(typeof persistedConfig\.dryRun === 'boolean'\) dryRunCheckbox\.checked = persistedConfig\.dryRun/);
   assert.match(src, /const persistLastConfig = \(\) => \{/);
   assert.match(src, /writeLastConfig\(\{/);
+});
+
+
+test('xiaohongshu tab maps like-only results to like evidence directory', async () => {
+  const src = await getSrc();
+  assert.match(src, /const likeEvidenceDir = String\(evt\?\.likeEvidenceDir \|\| ''\)\.trim\(\);/);
+  assert.match(src, /else if \(likeEvidenceDir\) current\.path = likeEvidenceDir;/);
+  assert.match(src, /if \(!current\.path && likeEvidenceDir\) current\.path = likeEvidenceDir;/);
 });
 
 
