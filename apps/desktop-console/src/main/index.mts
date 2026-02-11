@@ -8,6 +8,7 @@ import { promises as fs } from 'node:fs';
 
 import { readDesktopConsoleSettings, resolveDefaultDownloadRoot, writeDesktopConsoleSettings } from './desktop-settings.mts';
 import type { DesktopConsoleSettings } from './desktop-settings.mts';
+import { startCoreDaemon } from './core-daemon-manager.mts';
 import { createProfileStore } from './profile-store.mts';
 import { decideWatchdogAction, resolveUiHeartbeatTimeoutMs } from './heartbeat-watchdog.mts';
 
@@ -509,6 +510,7 @@ app.on('before-quit', () => {
 });
 
 app.whenReady().then(() => {
+  startCoreDaemon().catch(()=>{});
   markUiHeartbeat('main_ready');
   ensureHeartbeatWatchdog();
   createWindow();
