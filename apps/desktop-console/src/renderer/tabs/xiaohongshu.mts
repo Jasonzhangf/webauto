@@ -1,4 +1,6 @@
-import { createEl } from '../ui-components.mjs';
+import { createEl } from "../ui-components.mjs";
+import * as state from "./xiaohongshu-state.mjs";
+
 
 function makeNumberInput(value: string, min = '1', width = '92px') {
   return createEl('input', { type: 'number', value, min, style: `width:${width};` }) as HTMLInputElement;
@@ -330,8 +332,8 @@ export function renderXiaohongshuTab(root: HTMLElement, api: any) {
   const featureTiles = createEl('div', { style: 'display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; margin-bottom:10px; align-items:start; grid-auto-rows:min-content;' });
 
   // 任务 1：主页采集
-  const homepageToggle = makeCheckbox(true, 'xh-do-homepage');
-  const imagesToggle = makeCheckbox(true, 'xh-do-images');
+  const homepageToggle = makeCheckbox(false, 'xh-do-homepage');
+  const imagesToggle = makeCheckbox(false, 'xh-do-images');
   const homeSection = createEl('div', { style: 'border:1px solid #eee; border-radius:8px; padding:10px;' });
   homeSection.appendChild(createEl('div', { className: 'row', style: 'gap:6px; margin-bottom:8px;' }, [
     homepageToggle,
@@ -344,6 +346,7 @@ export function renderXiaohongshuTab(root: HTMLElement, api: any) {
   ]));
   homeSection.appendChild(homeBody);
   bindSectionToggle(homepageToggle, homeBody);
+  homepageToggle.addEventListener('change', () => { if (!homepageToggle.checked) imagesToggle.checked = false; });
   featureTiles.appendChild(homeSection);
 
   // 任务 2：评论采集
@@ -589,6 +592,7 @@ export function renderXiaohongshuTab(root: HTMLElement, api: any) {
   if (typeof persistedConfig.headless === 'boolean') headlessCheckbox.checked = persistedConfig.headless;
   if (typeof persistedConfig.doHomepage === 'boolean') homepageToggle.checked = persistedConfig.doHomepage;
   if (typeof persistedConfig.doImages === 'boolean') imagesToggle.checked = persistedConfig.doImages;
+  if (!homepageToggle.checked) imagesToggle.checked = false;
   if (typeof persistedConfig.doComments === 'boolean') commentsToggle.checked = persistedConfig.doComments;
   if (typeof persistedConfig.doGate === 'boolean') gateToggle.checked = persistedConfig.doGate;
   if (typeof persistedConfig.doLikes === 'boolean') likesToggle.checked = persistedConfig.doLikes;
@@ -965,6 +969,11 @@ export function renderXiaohongshuTab(root: HTMLElement, api: any) {
   registerHistoryInput(ocrCommandInput, 'ocrCommand');
   registerHistoryInput(opOrderInput, 'opOrder');
 
+  const getEffectiveHomepageFlags = () => ({
+    doHomepage: Boolean(homepageToggle.checked),
+    doImages: Boolean(homepageToggle.checked && imagesToggle.checked),
+  });
+
   const persistLastConfig = () => {
     writeLastConfig({
       orchestrateMode: orchestrateModeSelect.value,
@@ -977,8 +986,8 @@ export function renderXiaohongshuTab(root: HTMLElement, api: any) {
       dryRun: dryRunCheckbox.checked,
       protocolMode: protocolModeCheckbox.checked,
       headless: headlessCheckbox.checked,
-      doHomepage: homepageToggle.checked,
-      doImages: imagesToggle.checked,
+      doHomepage: getEffectiveHomepageFlags().doHomepage,
+      doImages: getEffectiveHomepageFlags().doImages,
       doComments: commentsToggle.checked,
       maxComments: maxCommentsInput.value,
       commentRounds: commentRoundsInput.value,
@@ -1146,9 +1155,11 @@ export function renderXiaohongshuTab(root: HTMLElement, api: any) {
     else args.push('--no-dry-run');
 
     if (unifiedEnabled) {
+      const homepageFlags = getEffectiveHomepageFlags();
+      api?.appendLog?.(`[ui-run-flags] doHomepage=${homepageFlags.doHomepage} doImages=${homepageFlags.doImages}`);
       args.push(
-        '--do-homepage', homepageToggle.checked ? 'true' : 'false',
-        '--do-images', imagesToggle.checked ? 'true' : 'false',
+        '--do-homepage', getEffectiveHomepageFlags().doHomepage ? 'true' : 'false',
+        '--do-images', getEffectiveHomepageFlags().doImages ? 'true' : 'false',
         '--do-comments', commentsToggle.checked ? 'true' : 'false',
         '--max-comments', String(maxCommentsInput.value || 0),
         '--comment-rounds', String(commentRoundsInput.value || 0),
