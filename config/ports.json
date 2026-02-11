@@ -1,10 +1,12 @@
 {
-  "browser_service": 7704,
-  "unified_api": 7701,
-  "floating_bus": 8790
+  "coreDaemon": {
+    "port": 7700,
+    "url": "http://127.0.0.1:7700"
+  },
+  "legacy": {
+    "unifiedApi": 7701,
+    "browserService": 7704,
+    "searchGate": 7790,
+    "profileGate": 7800
+  }
 }
-
-# 说明:
-# - 7701: Unified API (HTTP + WebSocket) - 合并了 Workflow + Controller + WebSocket Service
-# - 7704: Browser Service (保留，Python后端)
-# - 8790: Floating Bus (浮窗状态广播)

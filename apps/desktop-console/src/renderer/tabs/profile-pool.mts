@@ -13,7 +13,7 @@ export function renderProfilePool(root: HTMLElement, ctx: any) {
   
   async function loadProfiles() {
     try {
-      const res = await fetch('http://127.0.0.1:7800/profile/list');
+      const res = await fetch((ctx.settings?.coreDaemonUrl || 'http://127.0.0.1:7700') + '/profile/list');
       const data = await res.json();
       profiles = data.allowed || [];
       // Restore saved selection

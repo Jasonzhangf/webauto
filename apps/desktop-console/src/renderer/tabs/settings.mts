@@ -2,9 +2,7 @@ import { createEl, labeledInput, section } from '../ui-components.mts';
 import { resolveConfigPath } from '../path-helpers.mts';
 
 export function renderSettings(root: HTMLElement, ctx: any) {
-  const unified = createEl('input', { value: ctx.settings?.unifiedApiUrl || 'http://127.0.0.1:7701' }) as HTMLInputElement;
-  const browser = createEl('input', { value: ctx.settings?.browserServiceUrl || 'http://127.0.0.1:7704' }) as HTMLInputElement;
-  const searchGate = createEl('input', { value: ctx.settings?.searchGateUrl || 'http://127.0.0.1:7790' }) as HTMLInputElement;
+  const coreDaemon = createEl('input', { value: ctx.settings?.coreDaemonUrl || 'http://127.0.0.1:7700' }) as HTMLInputElement;
   const download = createEl('input', { value: ctx.settings?.downloadRoot || '' }) as HTMLInputElement;
   const env = createEl('select') as HTMLSelectElement;
   ['debug', 'prod'].forEach((x) => env.appendChild(createEl('option', { value: x }, [x])));
@@ -16,9 +14,7 @@ export function renderSettings(root: HTMLElement, ctx: any) {
 
   async function save() {
     const next = await window.api.settingsSet({
-      unifiedApiUrl: unified.value.trim(),
-      browserServiceUrl: browser.value.trim(),
-      searchGateUrl: searchGate.value.trim(),
+      coreDaemonUrl: coreDaemon.value.trim(),
       downloadRoot: download.value.trim(),
       defaultEnv: env.value,
       defaultKeyword: keyword.value,
@@ -34,11 +30,10 @@ export function renderSettings(root: HTMLElement, ctx: any) {
   root.appendChild(
     section('设置', [
       createEl('div', { className: 'row' }, [
-        labeledInput('Unified API', unified),
-        labeledInput('Browser Service', browser),
+        labeledInput('Core Daemon', coreDaemon),
       ]),
       createEl('div', { className: 'row' }, [
-        labeledInput('SearchGate', searchGate),
+        
         labeledInput('downloadRoot', download),
         labeledInput('defaultEnv', env),
         labeledInput('defaultKeyword', keyword),
