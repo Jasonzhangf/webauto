@@ -8,6 +8,7 @@ async function controllerAction(action, payload, apiUrl) {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ action, payload }),
+    signal: AbortSignal.timeout ? AbortSignal.timeout(15000) : undefined,
   });
   const data = await res.json().catch(() => ({}));
   return data.data || data;
@@ -15,7 +16,9 @@ async function controllerAction(action, payload, apiUrl) {
 
 async function checkHealth(url) {
   try {
-    const res = await fetch(url);
+    const res = await fetch(url, {
+      signal: AbortSignal.timeout ? AbortSignal.timeout(5000) : undefined,
+    });
     return res.ok;
   } catch {
     return false;

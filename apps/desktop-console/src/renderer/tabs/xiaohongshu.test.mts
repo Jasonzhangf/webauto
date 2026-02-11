@@ -31,7 +31,7 @@ test('xiaohongshu tab uses preferred+available profile selectors (no manual prof
   assert.doesNotMatch(src, /分片 profiles（逗号分隔）/);
   assert.doesNotMatch(src, /主 profile（单账号）/);
   assert.match(src, /if \(mode !== 'phase1-only'\) \{\s*args\.push\('--target'/s);
-  assert.match(src, /if \(unifiedEnabled\) \{\s*args\.push\(/s);
+  assert.match(src, /if \(unifiedEnabled\) \{[\s\S]*args\.push\(/s);
 });
 
 test('xiaohongshu tab hides unchecked bodies and blocks reply without gate', async () => {
@@ -53,10 +53,16 @@ test('xiaohongshu tab input history supports autocomplete and hotkey delete', as
 });
 
 
-test('xiaohongshu tab supports clear account mode and live stats panel', async () => {
+test('xiaohongshu tab clarifies active profile and account-mode visibility', async () => {
   const src = await getSrc();
   assert.match(src, /单账号（一个 profile）/);
   assert.match(src, /分片并发（多个 profiles）/);
+  assert.match(src, /单账号 profile/);
+  assert.match(src, /当前实际使用：\(未选择 profile\)/);
+  assert.match(src, /singleProfileRow\.style\.display = isSingleMode \? '' : 'none';/);
+  assert.match(src, /shardProfilesSection\.style\.display = isSingleMode \? 'none' : '';/);
+  assert.match(src, /if \(isSingleMode\) renderSingleProfileHint\(\);/);
+  assert.match(src, /else renderShardHints\(\);/);
   assert.match(src, /链接：0\/0/);
   assert.match(src, /已点赞帖子/);
   assert.match(src, /已回复帖子/);

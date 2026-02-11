@@ -299,11 +299,21 @@ export function renderXiaohongshuTab(root: HTMLElement, api: any) {
   tileBase2.appendChild(createEl('div', { className: 'row', style: 'gap:6px; margin-bottom:6px;' }, [
     createEl('label', { style: 'font-size:12px;' }, ['账号模式']), accountModeSelect,
   ]));
-  tileBase2.appendChild(createEl('div', { className: 'row', style: 'gap:6px; margin-bottom:6px;' }, [
-    createEl('label', { style: 'font-size:12px;' }, ['首选项']), profilePickSel, profileRefreshBtn,
-  ]));
-  tileBase2.appendChild(shardProfilesBox);
-  shardProfilesBox.style.marginTop = '6px';
+  const singleProfileRow = createEl('div', { className: 'row', style: 'gap:6px; margin-bottom:6px;' }, [
+    createEl('label', { style: 'font-size:12px;' }, ['单账号 profile']), profilePickSel, profileRefreshBtn,
+  ]) as HTMLDivElement;
+  const singleProfileHint = createEl('div', { className: 'muted', style: 'font-size:12px; margin:-2px 0 6px 0;' }, [
+    '当前实际使用：(未选择 profile)',
+  ]) as HTMLDivElement;
+  const shardProfilesSection = createEl('div', { style: 'margin-top:6px;' }) as HTMLDivElement;
+  shardProfilesSection.appendChild(createEl('div', { className: 'muted', style: 'font-size:12px; margin-bottom:4px;' }, ['分片 profiles（仅分片模式生效）']));
+  shardProfilesSection.appendChild(shardProfilesBox);
+  shardProfilesSection.appendChild(shardProfilesHint);
+  shardProfilesSection.appendChild(shardResolvedHint);
+  tileBase2.appendChild(singleProfileRow);
+  tileBase2.appendChild(singleProfileHint);
+  tileBase2.appendChild(shardProfilesSection);
+  shardProfilesBox.style.marginTop = '0';
   baseParamsTile.appendChild(tileBase2);
   
   // Tile 3: 运行选项
@@ -886,6 +896,16 @@ export function renderXiaohongshuTab(root: HTMLElement, api: any) {
     return selected;
   };
 
+  const renderSingleProfileHint = () => {
+    const current = String(profilePickSel.value || '').trim();
+    if (!current) {
+      singleProfileHint.textContent = '当前实际使用：(未选择 profile)';
+      return;
+    }
+    const label = String(profilePickSel.selectedOptions?.[0]?.textContent || current).trim();
+    singleProfileHint.textContent = `当前实际使用：${label}`;
+  };
+
   const renderShardHints = () => {
     const selected = getSelectedShardProfiles();
     shardProfilesHint.textContent = `selected=${selected.length}`;
@@ -914,6 +934,7 @@ export function renderXiaohongshuTab(root: HTMLElement, api: any) {
     } else if (profiles.length > 0) {
       profilePickSel.value = profiles[0];
     }
+    renderSingleProfileHint();
 
     shardProfilesBox.innerHTML = '';
     for (const profileId of profiles) {
@@ -1044,11 +1065,16 @@ export function renderXiaohongshuTab(root: HTMLElement, api: any) {
   const refreshOrchestrationLayout = () => {
     const mode = String(orchestrateModeSelect.value || 'phase1-phase2-unified').trim();
     const unifiedEnabled = mode === 'phase1-phase2-unified' || mode === 'unified-only';
-    const needsTarget = mode !== 'phase1-only';
     const accountMode = String(accountModeSelect.value || 'single').trim();
+    const isSingleMode = accountMode !== 'shards';
+
+    singleProfileRow.style.display = isSingleMode ? '' : 'none';
+    singleProfileHint.style.display = isSingleMode ? '' : 'none';
+    shardProfilesSection.style.display = isSingleMode ? 'none' : '';
+    if (isSingleMode) renderSingleProfileHint();
+    else renderShardHints();
 
     // 目标帖子在 tileBase3 内，暂时通过显示/隐藏整个 baseParamsTile 控制
-    // 账号选择相关已整合到 tile 中
 
     const featureDisplay = unifiedEnabled ? '' : 'none';
     homeSection.style.display = featureDisplay;
@@ -1074,6 +1100,7 @@ export function renderXiaohongshuTab(root: HTMLElement, api: any) {
     modeHint.textContent = '完整编排：先 Phase1 启动，再 Phase2 采集链接，最后 Unified 采集评论/点赞。';
   };
 
+  profilePickSel.addEventListener('change', renderSingleProfileHint);
   orchestrateModeSelect.addEventListener('change', refreshOrchestrationLayout);
   accountModeSelect.addEventListener('change', refreshOrchestrationLayout);
   refreshOrchestrationLayout();
