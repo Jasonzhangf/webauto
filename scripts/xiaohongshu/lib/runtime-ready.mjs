@@ -1,3 +1,4 @@
+import { CORE_DAEMON_URL } from './core-daemon.mjs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
@@ -51,11 +52,11 @@ async function bindSessionOwner(profile, { headless = false } = {}) {
 
   for (let attempt = 1; attempt <= 5; attempt += 1) {
     try {
-      await fetch('CORE_DAEMON_URL/health', {
+      await fetch(CORE_DAEMON_URL + "/health", {
         signal: AbortSignal.timeout(5000),
       }).catch(() => null);
 
-      const res = await fetch('CORE_DAEMON_URL/command', {
+      const res = await fetch(CORE_DAEMON_URL + "/command", {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -94,7 +95,7 @@ export async function ensureRuntimeReady({
   profile,
   keyword,
   env = 'debug',
-  unifiedApiUrl = 'CORE_DAEMON_URL',
+  unifiedApiUrl = CORE_DAEMON_URL,
   headless = false,
   requireCheckpoint = true,
 } = {}) {
