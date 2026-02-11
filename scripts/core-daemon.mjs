@@ -21,7 +21,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import fs from 'node:fs';
 import os from 'node:os';
-import { createServer } from 'node:net';
+import { checkPortInUse, releasePort } from './lib/port-utils.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -80,23 +80,6 @@ async function checkServiceHealth(service) {
   }
 }
 
-async function checkPortInUse(port) {
-  return new Promise((resolve) => {
-    const server = createServer();
-    
-    server.once('error', (err) => {
-      resolve(err.code === 'EADDRINUSE');
-    });
-    
-    server.once('listening', () => {
-      server.close();
-      resolve(false);
-    });
-    
-    server.listen(port);
-  });
-}
-
 function getPidFile(serviceName) {
   return path.join(RUN_DIR, `${serviceName}.pid`);
 }
@@ -105,10 +88,21 @@ function getLogFile(serviceName) {
   return path.join(LOG_DIR, `${serviceName}.log`);
 }
 
-async function stopService(service) {
+async function stopService(service, options = {}) {
+  const { releaseWhenNoPid = false } = options;
   const pidFile = getPidFile(service.name);
   
   if (!fs.existsSync(pidFile)) {
+    if (releaseWhenNoPid) {
+      const portReleased = await releasePort(service.port, {
+        excludePids: [process.pid],
+        logger: (message, level = 'WARN') => log(message, level)
+      });
+      if (portReleased) {
+        log(`${service.name} stopped by port cleanup (no pid file)`);
+        return { stopped: true, method: 'port_cleanup' };
+      }
+    }
     return { stopped: false, reason: 'no_pid_file' };
   }
   
@@ -168,8 +162,27 @@ async function startService(service) {
   const portInUse = await checkPortInUse(service.port);
   if (portInUse) {
     log(`Port ${service.port} in use but not healthy, stopping...`);
-    await stopService(service);
+    await stopService(service, { releaseWhenNoPid: true });
     await new Promise(r => setTimeout(r, 1000));
+
+    const stillInUse = await checkPortInUse(service.port);
+    if (stillInUse) {
+      log(`Port ${service.port} still occupied, force releasing...`, 'WARN');
+      const forceReleased = await releasePort(service.port, {
+        excludePids: [process.pid],
+        logger: (message, level = 'WARN') => log(message, level)
+      });
+      if (!forceReleased) {
+        log(`ERROR: Unable to release port ${service.port} for ${service.name}`, 'ERROR');
+        return { started: false, reason: 'port_blocked' };
+      }
+      await new Promise(r => setTimeout(r, 300));
+    }
+  }
+
+  if (await checkPortInUse(service.port)) {
+    log(`ERROR: Port ${service.port} still in use before launching ${service.name}`, 'ERROR');
+    return { started: false, reason: 'port_still_in_use' };
   }
   
   // Check if service script exists
