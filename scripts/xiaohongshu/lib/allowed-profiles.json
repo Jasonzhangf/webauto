@@ -1,0 +1,7 @@
+{
+  "allowedProfiles": [
+    "xiaohongshu_batch-1",
+    "xiaohongshu_batch-2"
+  ],
+  "description": "只允许使用手工创建的profile，禁止自动生成xiaohongshu_default等虚假profile"
+}
