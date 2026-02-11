@@ -40,11 +40,13 @@ const CONFIG = {
     'dist/libs',
     'dist/sharedmodule',
     'scripts/xiaohongshu/lib',
-    'scripts/xiaohongshu/phase1-start.mjs',
+    'scripts/lib',
+    'scripts/xiaohongshu/phase1-boot.mjs',
     'scripts/xiaohongshu/phase2-collect.mjs',
     'scripts/xiaohongshu/phase3-4-collect.mjs',
     'scripts/xiaohongshu/install.mjs',
     'scripts/xiaohongshu/stop-all.mjs',
+    'scripts/xiaohongshu/shared',
     'scripts/core-daemon.mjs',
     'scripts/search-gate-server.mjs',
     'scripts/search-gate-cli.mjs',
@@ -131,6 +133,7 @@ async function createPackageJson() {
       undici: pkg.dependencies.undici,
       'iconv-lite': pkg.dependencies['iconv-lite'],
       linkedom: pkg.dependencies.linkedom,
+      camoufox: pkg.devDependencies.camoufox,
       // browser-service 运行时依赖 playwright（原仓库为 devDependency，但安装包需要 production 可安装）
       playwright: pkg.devDependencies.playwright
     }
@@ -226,7 +229,7 @@ case "\$1" in
     mkdir -p "\$LOG_DIR"
     PHASE1_LOG="\$LOG_DIR/xiaohongshu_phase1.log"
     echo "[phase1] starting in background, log: \$PHASE1_LOG"
-    nohup node "\$PROJECT_ROOT/scripts/xiaohongshu/phase1-start.mjs" "\${@:2}" > "\$PHASE1_LOG" 2>&1 &
+    nohup node "\$PROJECT_ROOT/scripts/xiaohongshu/phase1-boot.mjs" "\${@:2}" > "\$PHASE1_LOG" 2>&1 &
     ;;
   phase2)
     node "\$PROJECT_ROOT/scripts/xiaohongshu/phase2-collect.mjs" "\${@:2}"
@@ -291,7 +294,7 @@ if "%1"=="phase1" (
   set "PHASE1_LOG=!LOG_DIR!\\xiaohongshu_phase1.log"
   set "PHASE1_ERR_LOG=!LOG_DIR!\\xiaohongshu_phase1.err.log"
   echo [phase1] starting in background, log: !PHASE1_LOG!
-  powershell -NoProfile -WindowStyle Hidden -Command "Start-Process -FilePath node -ArgumentList '\"%PROJECT_ROOT%\\scripts\\xiaohongshu\\phase1-start.mjs\" %*' -WorkingDirectory '%PROJECT_ROOT%' -RedirectStandardOutput '!PHASE1_LOG!' -RedirectStandardError '!PHASE1_ERR_LOG!' -WindowStyle Hidden"
+  powershell -NoProfile -WindowStyle Hidden -Command "Start-Process -FilePath node -ArgumentList '\"%PROJECT_ROOT%\\scripts\\xiaohongshu\\phase1-boot.mjs\" %*' -WorkingDirectory '%PROJECT_ROOT%' -RedirectStandardOutput '!PHASE1_LOG!' -RedirectStandardError '!PHASE1_ERR_LOG!' -WindowStyle Hidden"
   exit /b 0
 ) else if "%1"=="phase2" (
   node "%PROJECT_ROOT%\\scripts\\xiaohongshu\\phase2-collect.mjs" %*
@@ -379,14 +382,19 @@ echo ""
 echo "📦 正在安装项目依赖..."
 npm install --production
 
-echo "🦊 正在下载 Camoufox 浏览器..."
-npx camoufox download
+echo "🦊 正在检测 Camoufox..."
+CAMOUFOX_PATH="$(npx camoufox path 2>/dev/null | tail -n 1 || true)"
+if [ -z "$CAMOUFOX_PATH" ] || [ ! -e "$CAMOUFOX_PATH" ]; then
+  echo "🦊 未检测到 Camoufox，开始下载..."
+  npx camoufox fetch
+  CAMOUFOX_PATH="$(npx camoufox path 2>/dev/null | tail -n 1 || true)"
+fi
 
-if ! ls "$CAMOUFOX_DIR"/Camoufox.app/Contents/MacOS/camoufox 2>/dev/null; then
+if [ -z "$CAMOUFOX_PATH" ] || [ ! -e "$CAMOUFOX_PATH" ]; then
   echo "❌ Camoufox 下载失败"
   exit 1
 fi
-echo "✅ Camoufox 浏览器已就绪"
+echo "✅ Camoufox 浏览器已就绪: $CAMOUFOX_PATH"
 
 echo ""
 echo "🔍 正在验证安装..."
@@ -471,13 +479,8 @@ if %errorlevel% geq 4 (
 
 :after_copy
 cd /d "%TARGET_DIR%"
-set "CAMOUFOX_DIR=%TARGET_DIR%\\.camoufox"
-if not exist "%CAMOUFOX_DIR%" mkdir "%CAMOUFOX_DIR%"
-
 for /f "tokens=*" %%i in ('node -v') do set NODE_VERSION=%%i
 echo [install] Node.js version: %NODE_VERSION%
-echo.
-echo [install] Browser install path: %CAMOUFOX_DIR%
 echo.
 echo [install] Installing dependencies (npm install --production)...
 call npm install --production
@@ -487,20 +490,36 @@ if %errorlevel% neq 0 (
   goto :end
 )
 
-echo [install] Downloading Camoufox browser...
-call npx camoufox download
-if %errorlevel% neq 0 (
-  echo [install] Camoufox download failed.
+set "CAMOUFOX_PATH="
+for /f "delims=" %%i in ('npx camoufox path 2^>nul ^| findstr /v /c:"[baseline-browser-mapping]"') do set "CAMOUFOX_PATH=%%i"
+if not exist "%CAMOUFOX_PATH%" set "CAMOUFOX_PATH="
+if "%CAMOUFOX_PATH%"=="" (
+  echo [install] Camoufox not found. Downloading...
+  call npx camoufox fetch
+  if %errorlevel% neq 0 (
+    echo [install] Camoufox download failed.
+    set "EXIT_CODE=1"
+    goto :end
+  )
+)
+
+set "CAMOUFOX_PATH="
+for /f "delims=" %%i in ('npx camoufox path 2^>nul ^| findstr /v /c:"[baseline-browser-mapping]"') do set "CAMOUFOX_PATH=%%i"
+if not exist "%CAMOUFOX_PATH%" set "CAMOUFOX_PATH="
+
+if "%CAMOUFOX_PATH%"=="" (
+  echo [install] Camoufox path not found after download.
   set "EXIT_CODE=1"
   goto :end
 )
 
-if not exist "%CAMOUFOX_DIR%\\Camoufox.app\\Contents\\MacOS\\camoufox" (
-  echo [install] Camoufox check failed after download.
+if not exist "%CAMOUFOX_PATH%" (
+  echo [install] Camoufox executable missing: %CAMOUFOX_PATH%
   set "EXIT_CODE=1"
   goto :end
 )
-echo [install] Camoufox browser ready.
+
+echo [install] Camoufox browser ready: %CAMOUFOX_PATH%
 
 echo.
 echo [install] Done.
@@ -531,7 +550,7 @@ async function createReadme() {
 
 - **Node.js**: ${CONFIG.nodeVersion}
 - **操作系统**: Windows 10+, macOS 12+, Linux (Ubuntu 20.04+)
-- **浏览器**: Playwright 会自动下载 Chromium
+- **浏览器**: 自动下载 Camoufox
 
 ## 快速开始
 
@@ -635,7 +654,7 @@ xiaohongshu-collector/
 
 1. **Node.js 版本过低**: 请升级到 v22 或更高版本
 2. **端口占用**: 确保 7701/7704/8765/7790 端口未被占用
-3. **浏览器下载失败**: 检查网络连接，Playwright 会自动下载
+3. **浏览器下载失败**: 检查网络连接，Camoufox 会自动下载
 
 ## 技术支持
 

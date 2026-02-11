@@ -218,26 +218,30 @@ async function checkDependencies() {
   }
 }
 
-function resolveBrowserPath() {
-  const custom = process.env.PLAYWRIGHT_BROWSERS_PATH;
-  if (custom && custom.trim()) return custom;
-  return join(PROJECT_ROOT, '.ms-playwright');
+function resolveCamoufoxPath() {
+  const envPath = process.env.CAMOUFOX_PATH;
+  if (envPath && envPath.trim() && existsSync(envPath)) return envPath.trim();
+  try {
+    const output = execSync('npx camoufox path', {
+      stdio: ['ignore', 'pipe', 'ignore'],
+      encoding: 'utf-8',
+    }).trim();
+    if (output && existsSync(output)) return output;
+  } catch {}
+  return null;
 }
 
 async function checkBrowser() {
   log('\n🌐 检查浏览器资源...');
 
   // 检查 Camoufox
-  const camoufoxPath = process.env.HOME 
-    ? join(process.env.HOME, 'Library', 'Caches', 'camoufox')
-    : null;
-
-  if (camoufoxPath && existsSync(join(camoufoxPath, 'Camoufox.app'))) {
+  let camoufoxPath = resolveCamoufoxPath();
+  if (camoufoxPath) {
     success(`Camoufox 已安装: ${camoufoxPath}`);
     return true;
   }
 
-  warn(`Camoufox 未安装`);
+  warn('Camoufox 未安装');
   if (!downloadBrowser) return false;
 
   try {
@@ -249,14 +253,15 @@ async function checkBrowser() {
   }
 
   // 重新检查
-  const ok = camoufoxPath && existsSync(join(camoufoxPath, 'Camoufox.app'));
-  if (ok) {
+  camoufoxPath = resolveCamoufoxPath();
+  if (camoufoxPath) {
     success(`Camoufox 已安装: ${camoufoxPath}`);
-    info('如需授予执行权限: chmod +x ~/Library/Caches/camoufox/Camoufox.app/Contents/MacOS/camoufox');
-  } else {
-    error('Camoufox 下载完成后仍未检测到浏览器');
+    info('如需授权执行权限，请确保 Camoufox 可执行文件具备运行权限');
+    return true;
   }
-  return ok;
+
+  error('Camoufox 下载完成后仍未检测到浏览器');
+  return false;
 }
 
 
@@ -278,7 +283,7 @@ function provideFixSuggestions(missingBuild, missingDeps, missingBrowser) {
 
   if (missingBrowser) {
     log('浏览器缺失，请运行:', 'yellow');
-    log('  npx playwright install chromium');
+    log('  npx camoufox fetch');
     log('');
   }
 }

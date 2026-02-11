@@ -110,6 +110,7 @@ async function createPackageJson() {
       undici: pkg.dependencies.undici,
       'iconv-lite': pkg.dependencies['iconv-lite'],
       linkedom: pkg.dependencies.linkedom,
+      camoufox: pkg.devDependencies.camoufox,
       // browser-service 运行时依赖 playwright（原仓库为 devDependency，但安装包需要 production 可安装）
       playwright: pkg.devDependencies.playwright
     }
@@ -284,19 +285,24 @@ fi
 
 npm ci --production
 
-echo "🦊 正在下载 Camoufox 浏览器..."
+echo "🦊 正在检测 Camoufox..."
 
 if [ "$IN_CHINA" = "1" ]; then
   echo "🌐 注意：Camoufox 下载可能较慢..."
 fi
 
-npx camoufox fetch
+CAMOUFOX_PATH="$(npx camoufox path 2>/dev/null | tail -n 1 || true)"
+if [ -z "$CAMOUFOX_PATH" ] || [ ! -e "$CAMOUFOX_PATH" ]; then
+  echo "🦊 未检测到 Camoufox，开始下载..."
+  npx camoufox fetch
+  CAMOUFOX_PATH="$(npx camoufox path 2>/dev/null | tail -n 1 || true)"
+fi
 
-if ! ls .camoufox/Camoufox.app/Contents/MacOS/camoufox >/dev/null 2>&1; then
+if [ -z "$CAMOUFOX_PATH" ] || [ ! -e "$CAMOUFOX_PATH" ]; then
   echo "❌ Camoufox 下载失败"
   exit 1
 fi
-echo "✅ Camoufox 浏览器已就绪"
+echo "✅ Camoufox 浏览器已就绪: $CAMOUFOX_PATH"
 
 echo ""
 echo "🔍 正在验证安装..."
@@ -334,11 +340,24 @@ echo.
 echo 📦 正在安装项目依赖...
 call npm ci --production
 
-echo 🦊 正在下载 Camoufox 浏览器...
-call npx camoufox fetch
+echo 🦊 正在检测 Camoufox...
+set "CAMOUFOX_PATH="
+for /f "delims=" %%i in ('npx camoufox path 2^>nul ^| findstr /v /c:"[baseline-browser-mapping]"') do set "CAMOUFOX_PATH=%%i"
+if not exist "%CAMOUFOX_PATH%" set "CAMOUFOX_PATH="
+if "%CAMOUFOX_PATH%"=="" (
+  echo 🦊 Camoufox 未找到，开始下载...
+  call npx camoufox fetch
+)
 
-if not exist ".camoufox\Camoufox.app\Contents\MacOS\camoufox" (
+set "CAMOUFOX_PATH="
+for /f "delims=" %%i in ('npx camoufox path 2^>nul ^| findstr /v /c:"[baseline-browser-mapping]"') do set "CAMOUFOX_PATH=%%i"
+if not exist "%CAMOUFOX_PATH%" set "CAMOUFOX_PATH="
+if "%CAMOUFOX_PATH%"=="" (
   echo ❌ Camoufox 下载失败
+  exit /b 1
+)
+if not exist "%CAMOUFOX_PATH%" (
+  echo ❌ Camoufox 可执行文件缺失: %CAMOUFOX_PATH%
   exit /b 1
 )
 echo ✅ Camoufox 浏览器已就绪

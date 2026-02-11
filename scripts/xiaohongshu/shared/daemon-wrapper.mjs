@@ -9,6 +9,7 @@ ensureUtf8Console();
 
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 
 function daemonize(scriptPath, args, logFile, pidFile) {
@@ -50,8 +51,9 @@ function main() {
   
   const [scriptPath, ...scriptArgs] = args;
   const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-  const logFile = process.env.DAEMON_LOG || path.join(process.env.HOME, '.webauto', 'logs', `daemon.${ts}.log`);
-  const pidFile = process.env.DAEMON_PID || path.join(process.env.HOME, '.webauto', 'logs', `daemon.${ts}.pid`);
+  const homeDir = os.homedir() || process.env.HOME || process.env.USERPROFILE || process.cwd();
+  const logFile = process.env.DAEMON_LOG || path.join(homeDir, '.webauto', 'logs', `daemon.${ts}.log`);
+  const pidFile = process.env.DAEMON_PID || path.join(homeDir, '.webauto', 'logs', `daemon.${ts}.pid`);
   
   daemonize(scriptPath, scriptArgs, logFile, pidFile);
 }
