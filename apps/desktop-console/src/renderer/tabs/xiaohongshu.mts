@@ -21,7 +21,8 @@ function bindSectionToggle(toggle: HTMLInputElement, body: HTMLElement) {
 }
 
 
-const INPUT_HISTORY_MAX = 20;
+const INPUT_HISTORY_MAX = 10;
+const XHS_LAST_CONFIG_KEY = 'webauto.xhs.lastConfig.v1';
 
 function readInputHistory(key: string): string[] {
   try {
@@ -37,6 +38,55 @@ function writeInputHistory(key: string, values: string[]) {
   const next = Array.from(new Set(values.map((x) => String(x || '').trim()).filter(Boolean))).slice(0, INPUT_HISTORY_MAX);
   try {
     window.localStorage.setItem(`webauto.xhs.history.${key}`, JSON.stringify(next));
+  } catch {
+    // ignore storage failures
+  }
+}
+
+
+type XhsLastConfig = {
+  orchestrateMode?: string;
+  keyword?: string;
+  env?: string;
+  accountMode?: string;
+  singleProfile?: string;
+  shardProfiles?: string[];
+  maxNotes?: string;
+  dryRun?: boolean;
+  protocolMode?: boolean;
+  headless?: boolean;
+  doHomepage?: boolean;
+  doImages?: boolean;
+  doComments?: boolean;
+  maxComments?: string;
+  commentRounds?: string;
+  doGate?: boolean;
+  matchKeywords?: string;
+  matchMode?: string;
+  matchMinHits?: string;
+  doLikes?: boolean;
+  maxLikes?: string;
+  likeRules?: string;
+  doReply?: boolean;
+  replyText?: string;
+  doOcr?: boolean;
+  ocrCommand?: string;
+  opOrder?: string;
+};
+
+function readLastConfig(): XhsLastConfig {
+  try {
+    const raw = window.localStorage.getItem(XHS_LAST_CONFIG_KEY) || '{}';
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeLastConfig(next: XhsLastConfig) {
+  try {
+    window.localStorage.setItem(XHS_LAST_CONFIG_KEY, JSON.stringify(next));
   } catch {
     // ignore storage failures
   }
@@ -109,6 +159,29 @@ function stringifyLikeRule(rule: LikeRuleDraft): string {
   return `{${a} - ${b}}`;
 }
 
+
+function parseLikeRuleToken(token: string): LikeRuleDraft | null {
+  const raw = String(token || '').trim();
+  if (!raw) return null;
+  const m = raw.match(/^\{\s*(.+?)\s*([+\-＋－])\s*(.+?)\s*\}$/);
+  if (!m) return { kind: 'contains', a: raw };
+  const a = String(m[1] || '').trim();
+  const b = String(m[3] || '').trim();
+  if (!a || !b) return null;
+  const op = m[2] === '＋' ? '+' : m[2] === '－' ? '-' : m[2];
+  return op === '+' ? { kind: 'and', a, b } : { kind: 'include_without', a, b };
+}
+
+function parseLikeRulesCsv(value: string): LikeRuleDraft[] {
+  const rows = String(value || '').split(',').map((x) => x.trim()).filter(Boolean);
+  const out: LikeRuleDraft[] = [];
+  for (const row of rows) {
+    const parsed = parseLikeRuleToken(row);
+    if (parsed) out.push(parsed);
+  }
+  return out;
+}
+
 function likeRuleGuide(kind: LikeRuleKind): { title: string; desc: string; example: string } {
   if (kind === 'and') {
     return {
@@ -135,6 +208,7 @@ function likeRuleGuide(kind: LikeRuleKind): { title: string; desc: string; examp
 
 let xhsCmdUnsubscribe: (() => void) | null = null;
 let xhsEventsPollTimer: number | null = null;
+let xhsSettingsUnsubscribe: (() => void) | null = null;
 export function renderXiaohongshuTab(root: HTMLElement, api: any) {
   if (xhsCmdUnsubscribe) {
     xhsCmdUnsubscribe();
@@ -143,6 +217,10 @@ export function renderXiaohongshuTab(root: HTMLElement, api: any) {
   if (xhsEventsPollTimer != null) {
     window.clearInterval(xhsEventsPollTimer);
     xhsEventsPollTimer = null;
+  }
+  if (xhsSettingsUnsubscribe) {
+    xhsSettingsUnsubscribe();
+    xhsSettingsUnsubscribe = null;
   }
 
   root.innerHTML = '';
@@ -178,8 +256,15 @@ export function renderXiaohongshuTab(root: HTMLElement, api: any) {
   const accountModeSelect = createEl('select', { style: 'width:220px;' }) as HTMLSelectElement;
   accountModeSelect.appendChild(createEl('option', { value: 'single', selected: true }, ['单账号（一个 profile）']));
   accountModeSelect.appendChild(createEl('option', { value: 'shards' }, ['分片并发（多个 profiles）']));
-  const profileInput = makeTextInput('xiaohongshu_batch-2', '主 profile（单账号）');
-  const shardProfilesInput = makeTextInput('', '分片 profiles（逗号分隔）');
+  const profilePickSel = createEl('select', { style: 'min-width:360px; max-width:580px;' }) as HTMLSelectElement;
+  profilePickSel.appendChild(createEl('option', { value: '' }, ['(请选择 profile)']));
+  const profileRefreshBtn = createEl('button', { type: 'button', className: 'secondary' }, ['刷新 profiles']) as HTMLButtonElement;
+  const shardProfilesBox = createEl('div', {
+    className: 'list',
+    style: 'width:100%; max-height:156px; overflow:auto; border:1px solid #1f2937; border-radius:6px; padding:6px;',
+  });
+  const shardProfilesHint = createEl('div', { className: 'muted', style: 'font-size:12px; margin-top:6px;' }, ['selected=0']) as HTMLDivElement;
+  const shardResolvedHint = createEl('div', { className: 'muted', style: 'font-size:12px; margin-top:4px;' }, ['']) as HTMLDivElement;
   const maxNotesInput = makeNumberInput('100', '1');
   const dryRunCheckbox = makeCheckbox(true, 'xh-dry-run');
   const protocolModeCheckbox = makeCheckbox(true, 'xh-protocol-mode');
@@ -201,11 +286,12 @@ export function renderXiaohongshuTab(root: HTMLElement, api: any) {
     createEl('label', { style: 'width:70px;' }, ['环境']), envInput,
     createEl('label', { style: 'width:64px; margin-left:8px;' }, ['账号模式']), accountModeSelect,
   ]));
-  const profileRow = createEl('div', { className: 'row', style: 'gap:8px; margin-bottom:8px;' }, [
-    createEl('label', { style: 'width:70px;' }, ['Profile']), profileInput,
+  const profileRow = createEl('div', { className: 'row', style: 'gap:8px; margin-bottom:8px; align-items:center;' }, [
+    createEl('label', { style: 'width:70px;' }, ['首选项']), profilePickSel, profileRefreshBtn,
   ]);
-  const shardRow = createEl('div', { className: 'row', style: 'gap:8px; margin-bottom:8px;' }, [
-    createEl('label', { style: 'width:70px;' }, ['分片']), shardProfilesInput,
+  const shardBoxWrap = createEl('div', { style: 'flex:1;' }, [shardProfilesBox, shardProfilesHint, shardResolvedHint]);
+  const shardRow = createEl('div', { className: 'row', style: 'gap:8px; margin-bottom:8px; align-items:flex-start;' }, [
+    createEl('label', { style: 'width:70px; margin-top:4px;' }, ['可用项']), shardBoxWrap,
   ]);
   card.appendChild(profileRow);
   card.appendChild(shardRow);
@@ -342,6 +428,7 @@ export function renderXiaohongshuTab(root: HTMLElement, api: any) {
       rmBtn.onclick = () => {
         likeRules.splice(idx, 1);
         refreshLikeRuleList();
+        persistLastConfig();
       };
       row.appendChild(rmBtn);
       likeRuleList.appendChild(row);
@@ -369,9 +456,17 @@ export function renderXiaohongshuTab(root: HTMLElement, api: any) {
     likeRuleAInput.value = '';
     likeRuleBInput.value = '';
     refreshLikeRuleList();
+    persistLastConfig();
   };
 
   likeRuleTypeSelect.onchange = refreshLikeGuide;
+
+  const persistedConfig = readLastConfig();
+  const persistedLikeRules = parseLikeRulesCsv(String(persistedConfig.likeRules || ''));
+  if (persistedLikeRules.length > 0) {
+    likeRules.splice(0, likeRules.length, ...persistedLikeRules);
+  }
+
   refreshLikeGuide();
   refreshLikeRuleList();
 
@@ -411,18 +506,65 @@ export function renderXiaohongshuTab(root: HTMLElement, api: any) {
   card.appendChild(replySection);
 
   const ocrToggle = makeCheckbox(false, 'xh-do-ocr');
-  ocrToggle.disabled = true;
-  const ocrRow = createEl('div', { className: 'row', style: 'gap:6px; margin-bottom:10px; opacity:0.6;' }, [
+  const ocrSection = createEl('div', { style: 'border:1px solid #eee; border-radius:8px; padding:10px; margin-bottom:10px;' });
+  ocrSection.appendChild(createEl('div', { className: 'row', style: 'gap:6px; margin-bottom:8px;' }, [
     ocrToggle,
-    createEl('label', { htmlFor: 'xh-do-ocr' }, ['OCR（占位，待实现）']),
-  ]);
-  card.appendChild(ocrRow);
+    createEl('label', { htmlFor: 'xh-do-ocr', style: 'cursor:pointer; font-weight:600;' }, ['图片 OCR（DeepSeek OCR）']),
+  ]));
+  const ocrCommandInput = makeTextInput('', 'OCR命令（留空自动: deepseek-ocr 或 dsocr）');
+  const ocrBody = createEl('div', { style: 'padding-left:24px;' });
+  ocrBody.appendChild(createEl('div', { className: 'row', style: 'gap:8px;' }, [
+    createEl('label', { style: 'width:86px;' }, ['OCR命令']), ocrCommandInput,
+  ]));
+  ocrSection.appendChild(ocrBody);
+  bindSectionToggle(ocrToggle, ocrBody);
+  card.appendChild(ocrSection);
 
   const opOrderInput = makeTextInput('', '执行顺序列表（留空使用默认编排）');
   const opOrderRow = createEl('div', { className: 'row', style: 'gap:8px; margin-bottom:12px;' }, [
     createEl('label', { style: 'width:86px;' }, ['执行顺序']), opOrderInput,
   ]);
   card.appendChild(opOrderRow);
+
+  const applyPersistedValue = (input: HTMLInputElement | HTMLSelectElement, value: unknown) => {
+    if (value === undefined || value === null) return;
+    const textValue = String(value).trim();
+    if (!textValue) return;
+    input.value = textValue;
+  };
+
+  applyPersistedValue(orchestrateModeSelect, persistedConfig.orchestrateMode);
+  applyPersistedValue(keywordInput, persistedConfig.keyword);
+  applyPersistedValue(envInput, persistedConfig.env);
+  applyPersistedValue(accountModeSelect, persistedConfig.accountMode);
+  applyPersistedValue(maxNotesInput, persistedConfig.maxNotes);
+  applyPersistedValue(maxCommentsInput, persistedConfig.maxComments);
+  applyPersistedValue(commentRoundsInput, persistedConfig.commentRounds);
+  applyPersistedValue(matchKeywordsInput, persistedConfig.matchKeywords);
+  applyPersistedValue(matchModeSelect, persistedConfig.matchMode);
+  applyPersistedValue(matchMinHitsInput, persistedConfig.matchMinHits);
+  applyPersistedValue(maxLikesInput, persistedConfig.maxLikes);
+  applyPersistedValue(replyTextInput, persistedConfig.replyText);
+  applyPersistedValue(ocrCommandInput, persistedConfig.ocrCommand);
+  applyPersistedValue(opOrderInput, persistedConfig.opOrder);
+
+  if (typeof persistedConfig.dryRun === 'boolean') dryRunCheckbox.checked = persistedConfig.dryRun;
+  if (typeof persistedConfig.protocolMode === 'boolean') protocolModeCheckbox.checked = persistedConfig.protocolMode;
+  if (typeof persistedConfig.headless === 'boolean') headlessCheckbox.checked = persistedConfig.headless;
+  if (typeof persistedConfig.doHomepage === 'boolean') homepageToggle.checked = persistedConfig.doHomepage;
+  if (typeof persistedConfig.doImages === 'boolean') imagesToggle.checked = persistedConfig.doImages;
+  if (typeof persistedConfig.doComments === 'boolean') commentsToggle.checked = persistedConfig.doComments;
+  if (typeof persistedConfig.doGate === 'boolean') gateToggle.checked = persistedConfig.doGate;
+  if (typeof persistedConfig.doLikes === 'boolean') likesToggle.checked = persistedConfig.doLikes;
+  if (typeof persistedConfig.doReply === 'boolean') replyToggle.checked = persistedConfig.doReply;
+  if (typeof persistedConfig.doOcr === 'boolean') ocrToggle.checked = persistedConfig.doOcr;
+
+  const persistedSingleProfile = String(persistedConfig.singleProfile || '').trim();
+  const persistedShardProfiles = new Set(
+    Array.isArray(persistedConfig.shardProfiles)
+      ? persistedConfig.shardProfiles.map((x) => String(x || '').trim()).filter(Boolean)
+      : [],
+  );
 
   const statsSection = createEl('div', {
     style: 'border:1px solid #e2e8f0; border-radius:8px; padding:10px; margin-bottom:12px; background:#0b1220;',
@@ -680,6 +822,84 @@ export function renderXiaohongshuTab(root: HTMLElement, api: any) {
   resetLiveStats();
 
 
+  const aliasesMap = () => {
+    const aliases = api?.settings?.profileAliases;
+    return aliases && typeof aliases === 'object' ? aliases : {};
+  };
+
+  const getSelectedShardProfiles = () => {
+    const selected: string[] = [];
+    shardProfilesBox.querySelectorAll('input[type="checkbox"][data-profile-id]').forEach((node) => {
+      const cb = node as HTMLInputElement;
+      if (!cb.checked) return;
+      const id = String(cb.dataset.profileId || '').trim();
+      if (id) selected.push(id);
+    });
+    return selected;
+  };
+
+  const renderShardHints = () => {
+    const selected = getSelectedShardProfiles();
+    shardProfilesHint.textContent = `selected=${selected.length}`;
+    shardResolvedHint.textContent = selected.length > 0 ? `resolved: --profiles ${selected.join(',')}` : '';
+  };
+
+  const refreshProfileChoices = async () => {
+    const selectedNow = getSelectedShardProfiles();
+    const prevSingle = String(profilePickSel.value || persistedSingleProfile || '').trim();
+    const prevSelected = selectedNow.length > 0 ? new Set(selectedNow) : new Set(persistedShardProfiles);
+
+    const res = await window.api.profilesList().catch(() => null);
+    const profiles: string[] = Array.isArray(res?.profiles) ? res.profiles : [];
+    const aliases = aliasesMap();
+
+    profilePickSel.textContent = '';
+    profilePickSel.appendChild(createEl('option', { value: '' }, ['(请选择 profile)']));
+    for (const profileId of profiles) {
+      const alias = String((aliases as any)[profileId] || '').trim();
+      const label = alias ? `${alias} (${profileId})` : profileId;
+      profilePickSel.appendChild(createEl('option', { value: profileId }, [label]));
+    }
+
+    if (prevSingle && profiles.includes(prevSingle)) {
+      profilePickSel.value = prevSingle;
+    } else if (profiles.length > 0) {
+      profilePickSel.value = profiles[0];
+    }
+
+    shardProfilesBox.innerHTML = '';
+    for (const profileId of profiles) {
+      const alias = String((aliases as any)[profileId] || '').trim();
+      const label = alias ? `${alias} (${profileId})` : profileId;
+      const id = `xh-profile-${profileId.replace(/[^a-zA-Z0-9_-]/g, '-')}`;
+      const cb = createEl('input', { type: 'checkbox', id }) as HTMLInputElement;
+      cb.dataset.profileId = profileId;
+      cb.checked = prevSelected.has(profileId);
+      cb.onchange = () => {
+        persistedShardProfiles.clear();
+        getSelectedShardProfiles().forEach((pid) => persistedShardProfiles.add(pid));
+        renderShardHints();
+      };
+      const row = createEl('div', { className: 'row', style: 'align-items:center; gap:8px; margin-bottom:4px;' }, [
+        cb,
+        createEl('label', { for: id, style: 'cursor:pointer;' }, [label]),
+      ]);
+      shardProfilesBox.appendChild(row);
+    }
+
+    if (shardProfilesBox.childElementCount === 0) {
+      shardProfilesBox.appendChild(createEl('div', { className: 'muted' }, ['暂无可用 profile，请先在预处理创建']));
+    }
+
+    persistedShardProfiles.clear();
+    getSelectedShardProfiles().forEach((pid) => persistedShardProfiles.add(pid));
+    renderShardHints();
+  };
+
+  profileRefreshBtn.onclick = () => {
+    void refreshProfileChoices();
+  };
+
   const persistHistoryFns: Array<() => void> = [];
   const registerHistoryInput = (input: HTMLInputElement, key: string) => {
     const persist = bindInputHistory(input, key, api);
@@ -689,8 +909,6 @@ export function renderXiaohongshuTab(root: HTMLElement, api: any) {
 
   registerHistoryInput(keywordInput, 'keyword');
   registerHistoryInput(envInput, 'env');
-  registerHistoryInput(profileInput, 'profile');
-  registerHistoryInput(shardProfilesInput, 'profiles');
   registerHistoryInput(maxNotesInput, 'target');
   registerHistoryInput(maxCommentsInput, 'maxComments');
   registerHistoryInput(commentRoundsInput, 'commentRounds');
@@ -700,7 +918,75 @@ export function renderXiaohongshuTab(root: HTMLElement, api: any) {
   const persistLikeRuleAHistory = registerHistoryInput(likeRuleAInput, 'likeRuleA');
   const persistLikeRuleBHistory = registerHistoryInput(likeRuleBInput, 'likeRuleB');
   registerHistoryInput(replyTextInput, 'replyText');
+  registerHistoryInput(ocrCommandInput, 'ocrCommand');
   registerHistoryInput(opOrderInput, 'opOrder');
+
+  const persistLastConfig = () => {
+    writeLastConfig({
+      orchestrateMode: orchestrateModeSelect.value,
+      keyword: keywordInput.value,
+      env: envInput.value,
+      accountMode: accountModeSelect.value,
+      singleProfile: profilePickSel.value,
+      shardProfiles: getSelectedShardProfiles(),
+      maxNotes: maxNotesInput.value,
+      dryRun: dryRunCheckbox.checked,
+      protocolMode: protocolModeCheckbox.checked,
+      headless: headlessCheckbox.checked,
+      doHomepage: homepageToggle.checked,
+      doImages: imagesToggle.checked,
+      doComments: commentsToggle.checked,
+      maxComments: maxCommentsInput.value,
+      commentRounds: commentRoundsInput.value,
+      doGate: gateToggle.checked,
+      matchKeywords: matchKeywordsInput.value,
+      matchMode: matchModeSelect.value,
+      matchMinHits: matchMinHitsInput.value,
+      doLikes: likesToggle.checked,
+      maxLikes: maxLikesInput.value,
+      likeRules: likeRulePreview.value,
+      doReply: replyToggle.checked,
+      replyText: replyTextInput.value,
+      doOcr: ocrToggle.checked,
+      ocrCommand: ocrCommandInput.value,
+      opOrder: opOrderInput.value,
+    });
+  };
+
+  const bindPersistControl = (el: HTMLElement, evt = 'change') => {
+    el.addEventListener(evt, persistLastConfig);
+  };
+
+  [
+    orchestrateModeSelect,
+    accountModeSelect,
+    profilePickSel,
+    keywordInput,
+    envInput,
+    maxNotesInput,
+    maxCommentsInput,
+    commentRoundsInput,
+    matchKeywordsInput,
+    matchModeSelect,
+    matchMinHitsInput,
+    maxLikesInput,
+    replyTextInput,
+    ocrCommandInput,
+    opOrderInput,
+    dryRunCheckbox,
+    protocolModeCheckbox,
+    headlessCheckbox,
+    homepageToggle,
+    imagesToggle,
+    commentsToggle,
+    gateToggle,
+    likesToggle,
+    replyToggle,
+    ocrToggle,
+  ].forEach((el) => bindPersistControl(el));
+
+  likeRuleTypeSelect.addEventListener('change', persistLastConfig);
+  addLikeRuleBtn.addEventListener('click', persistLastConfig);
 
   const refreshOrchestrationLayout = () => {
     const mode = String(orchestrateModeSelect.value || 'phase1-phase2-unified').trim();
@@ -718,7 +1004,7 @@ export function renderXiaohongshuTab(root: HTMLElement, api: any) {
     gateSection.style.display = featureDisplay;
     likesSection.style.display = featureDisplay;
     replySection.style.display = featureDisplay;
-    ocrRow.style.display = featureDisplay;
+    ocrSection.style.display = featureDisplay;
     opOrderRow.style.display = featureDisplay;
 
     if (mode === 'phase1-only') {
@@ -739,6 +1025,11 @@ export function renderXiaohongshuTab(root: HTMLElement, api: any) {
   orchestrateModeSelect.addEventListener('change', refreshOrchestrationLayout);
   accountModeSelect.addEventListener('change', refreshOrchestrationLayout);
   refreshOrchestrationLayout();
+  void refreshProfileChoices();
+  xhsSettingsUnsubscribe = window.api.onSettingsChanged((next: any) => {
+    api.settings = next;
+    void refreshProfileChoices();
+  });
 
   let localRunId = '';
   const runBtn = createEl('button', {}, ['开始执行编排']) as HTMLButtonElement;
@@ -752,27 +1043,24 @@ export function renderXiaohongshuTab(root: HTMLElement, api: any) {
     }
 
     persistHistoryFns.forEach((persist) => persist());
+    persistLastConfig();
     resetLiveStats();
 
     const mode = String(orchestrateModeSelect.value || 'phase1-phase2-unified').trim();
     const accountMode = String(accountModeSelect.value || 'single').trim();
-    const singleProfile = String(profileInput.value || '').trim();
-    const shardProfilesRaw = String(shardProfilesInput.value || '').trim();
-    const shardProfiles = shardProfilesRaw
-      .split(',')
-      .map((s) => s.trim())
-      .filter(Boolean);
+    const singleProfile = String(profilePickSel.value || '').trim();
+    const shardProfiles = getSelectedShardProfiles();
 
     const profileArgs: string[] = [];
     if (accountMode === 'shards') {
       if (shardProfiles.length === 0) {
-        alert('当前为分片模式，请填写分片 profiles');
+        alert('当前为分片模式，请在可用项中至少勾选一个 profile');
         return;
       }
       profileArgs.push('--profiles', shardProfiles.join(','));
     } else {
       if (!singleProfile) {
-        alert('当前为单账号模式，请填写 Profile');
+        alert('当前为单账号模式，请在首选项中选择一个 profile');
         return;
       }
       profileArgs.push('--profile', singleProfile);
@@ -831,6 +1119,9 @@ export function renderXiaohongshuTab(root: HTMLElement, api: any) {
         '--reply-text', replyTextInput.value || '',
         '--do-ocr', ocrToggle.checked ? 'true' : 'false',
       );
+      if (ocrToggle.checked && String(ocrCommandInput.value || '').trim()) {
+        args.push('--ocr-command', String(ocrCommandInput.value || '').trim());
+      }
       if (String(opOrderInput.value || '').trim()) {
         args.push('--op-order', String(opOrderInput.value || '').trim());
       }

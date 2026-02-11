@@ -7,9 +7,10 @@ ensureUtf8Console();
 import { ensureServicesHealthy, restoreBrowserState } from './lib/recovery.mjs';
 import { ensureRuntimeReady } from './lib/runtime-ready.mjs';
 import minimist from 'minimist';
-import { spawn } from 'node:child_process';
+import { spawn, execFile } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { promisify } from 'node:util';
 import { promises as fs } from 'node:fs';
 
 import { resolveKeyword, resolveEnv } from './lib/env.mjs';
@@ -33,6 +34,9 @@ import { resolveDownloadRoot } from '../../dist/modules/state/src/paths.js';
 import { updateXhsCollectState } from '../../dist/modules/state/src/xiaohongshu-collect-state.js';
 
 const UNIFIED_API_URL = 'http://127.0.0.1:7701';
+const execFileAsync = promisify(execFile);
+const OCR_START_MARKER = '<!-- WEBAUTO_OCR_START -->';
+const OCR_END_MARKER = '<!-- WEBAUTO_OCR_END -->';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 function nowMs() {
@@ -101,6 +105,137 @@ async function readJsonl(filePath) {
 async function writeJsonl(filePath, rows) {
   const text = rows.map((row) => JSON.stringify(row)).join('\n') + (rows.length ? '\n' : '');
   await fs.writeFile(filePath, text, 'utf8');
+}
+
+
+async function commandExists(command) {
+  try {
+    await execFileAsync('which', [String(command || '').trim()], { timeout: 3000, maxBuffer: 64 * 1024 });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function resolveOcrCommand(preferred = '') {
+  const pref = String(preferred || '').trim();
+  if (pref) {
+    if (await commandExists(pref)) return pref;
+    throw new Error(`ocr_command_not_found:${pref}`);
+  }
+
+  if (await commandExists('deepseek-ocr')) return 'deepseek-ocr';
+  if (await commandExists('dsocr')) return 'dsocr';
+  throw new Error('ocr_command_not_found:deepseek-ocr|dsocr');
+}
+
+function formatOcrSection(results) {
+  const lines = [];
+  lines.push('## 图片 OCR');
+  lines.push('');
+  for (const item of results) {
+    lines.push(`### ${item.imageName}`);
+    lines.push('');
+    if (item.success) {
+      lines.push(item.text || '（OCR 结果为空）');
+    } else {
+      lines.push(`（OCR 失败：${item.error || 'unknown_error'}）`);
+    }
+    lines.push('');
+  }
+  return [OCR_START_MARKER, ...lines, OCR_END_MARKER].join('\n');
+}
+
+async function upsertOcrSectionInReadme(readmePath, ocrResults) {
+  let content = '';
+  try {
+    content = await fs.readFile(readmePath, 'utf8');
+  } catch {
+    content = '';
+  }
+
+  const section = formatOcrSection(ocrResults);
+  const start = content.indexOf(OCR_START_MARKER);
+  const end = content.indexOf(OCR_END_MARKER);
+  if (start >= 0 && end > start) {
+    const before = content.slice(0, start).replace(/\s+$/, '');
+    const after = content.slice(end + OCR_END_MARKER.length).replace(/^\s+/, '');
+    const merged = [before, section, after].filter(Boolean).join('\n\n');
+    await fs.writeFile(readmePath, `${merged}\n`, 'utf8');
+    return;
+  }
+
+  const merged = [content.replace(/\s+$/, ''), section].filter(Boolean).join('\n\n');
+  await fs.writeFile(readmePath, `${merged}\n`, 'utf8');
+}
+
+async function runOcrForImage(ocrCommand, imagePath) {
+  const attempts = [
+    [imagePath, '--format', 'markdown'],
+    [imagePath, '-f', 'markdown'],
+    ['-f', 'markdown', imagePath],
+    [imagePath],
+  ];
+
+  let lastErr = null;
+  for (const args of attempts) {
+    try {
+      const { stdout, stderr } = await execFileAsync(ocrCommand, args, {
+        timeout: 120000,
+        maxBuffer: 8 * 1024 * 1024,
+      });
+      const text = String(stdout || '').trim();
+      if (text) return { success: true, text, args };
+      if (String(stderr || '').trim()) {
+        lastErr = new Error(String(stderr || '').trim());
+      }
+    } catch (err) {
+      lastErr = err;
+    }
+  }
+
+  throw new Error(lastErr?.message || 'ocr_failed');
+}
+
+async function runNoteImagesOcr({ noteDir, ocrCommand }) {
+  const imagesDir = path.join(noteDir, 'images');
+  const readmePath = path.join(noteDir, 'README.md');
+
+  const entries = await fs.readdir(imagesDir, { withFileTypes: true }).catch(() => []);
+  const images = entries
+    .filter((ent) => ent.isFile() && /\.(png|jpe?g|webp|bmp)$/i.test(ent.name))
+    .map((ent) => ent.name)
+    .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+
+  if (images.length === 0) {
+    return { readmePath, imageCount: 0, successCount: 0, failedCount: 0, results: [] };
+  }
+
+  const resolvedCommand = await resolveOcrCommand(ocrCommand);
+  const results = [];
+
+  for (const imageName of images) {
+    const imagePath = path.join(imagesDir, imageName);
+    try {
+      const res = await runOcrForImage(resolvedCommand, imagePath);
+      results.push({ imageName, success: true, text: res.text, args: res.args });
+    } catch (err) {
+      results.push({ imageName, success: false, text: '', error: err?.message || String(err) });
+    }
+  }
+
+  await upsertOcrSectionInReadme(readmePath, results);
+
+  const successCount = results.filter((r) => r.success).length;
+  const failedCount = results.length - successCount;
+  return {
+    readmePath,
+    imageCount: images.length,
+    successCount,
+    failedCount,
+    results,
+    command: resolvedCommand,
+  };
 }
 
 function getPhase2LinksPath(downloadRoot, env, keyword) {
@@ -251,6 +386,8 @@ async function processSingleNote({
     matchCount: 0,
     likedCount: 0,
     repliedCount: 0,
+    ocrImages: 0,
+    ocrFailedImages: 0,
     errors: [],
   };
 
@@ -291,6 +428,36 @@ async function processSingleNote({
         }
 
         result.homepageOk = true;
+
+        if (config.doOcr) {
+          emitRunEvent('phase_unified_ocr_start', {
+            noteId,
+            noteDir,
+            readmePath: path.join(noteDir, 'README.md'),
+          });
+          try {
+            const ocrRes = await runNoteImagesOcr({
+              noteDir,
+              ocrCommand: config.ocrCommand,
+            });
+            result.ocrImages += Number(ocrRes?.successCount || 0);
+            result.ocrFailedImages += Number(ocrRes?.failedCount || 0);
+            emitRunEvent('phase_unified_ocr_done', {
+              noteId,
+              noteDir,
+              readmePath: ocrRes?.readmePath || path.join(noteDir, 'README.md'),
+              imageCount: Number(ocrRes?.imageCount || 0),
+              successCount: Number(ocrRes?.successCount || 0),
+              failedCount: Number(ocrRes?.failedCount || 0),
+              command: ocrRes?.command || null,
+            });
+          } catch (ocrErr) {
+            const message = ocrErr?.message || String(ocrErr);
+            result.ocrFailedImages += 1;
+            emitRunEvent('phase_unified_ocr_error', { noteId, noteDir, error: message });
+          }
+        }
+
         emitRunEvent('phase_unified_op_done', {
           noteId,
           op,
@@ -504,6 +671,8 @@ async function processSingleNote({
     matchCount: result.matchCount,
     likedCount: result.likedCount,
     repliedCount: result.repliedCount,
+    ocrImages: result.ocrImages,
+    ocrFailedImages: result.ocrFailedImages,
     errors: result.errors,
     slotIndex,
     tabRealIndex,
@@ -535,6 +704,7 @@ async function main() {
   const doLikes = parseFlag(args['do-likes'], false);
   const doReply = parseFlag(args['do-reply'], false);
   const doOcr = parseFlag(args['do-ocr'], false);
+  const ocrCommand = String(args['ocr-command'] || process.env.WEBAUTO_OCR_COMMAND || '').trim();
 
   const maxNotes = Math.max(1, Number(args['max-notes'] || 100));
   const tabCount = Math.max(1, Number(args['tab-count'] || 4));
@@ -558,6 +728,10 @@ async function main() {
     const normalized = opOrderRaw.filter((op) => allowed.has(op));
     if (!normalized.includes('next_note')) normalized.push('next_note');
     if (normalized.length > 0) operationPlan = normalized;
+  }
+
+  if (doOcr && !operationPlan.includes('detail_harvest')) {
+    operationPlan = ['detail_harvest', ...operationPlan.filter((op) => op !== 'detail_harvest')];
   }
 
   const foreground = parseFlag(args.foreground, false);
@@ -655,6 +829,7 @@ async function main() {
     doLikes,
     doReply,
     doOcr,
+    ocrCommand,
     maxNotes,
     tabCount,
     maxComments,
@@ -676,6 +851,9 @@ async function main() {
   console.log(`Tab rotation: ${tabCount} tabs (Cmd+T pool)`);
   console.log(`Input mode: ${inputMode}`);
   console.log(`Comments cap: ${maxComments > 0 ? maxComments : 'unlimited'} | Comment rounds: ${commentRounds > 0 ? commentRounds : 'unlimited'}`);
+  if (doOcr) {
+    console.log(`OCR: enabled (command=${ocrCommand || 'auto: deepseek-ocr|dsocr'})`);
+  }
 
   const lock = createSessionLock({ profileId: profile, lockType: 'phase-unified' });
   let lockHandle = null;
@@ -743,6 +921,8 @@ async function main() {
       totalComments: 0,
       totalLiked: 0,
       totalReplied: 0,
+      totalOcrImages: 0,
+      totalOcrFailedImages: 0,
       homepageOk: 0,
       errors: [],
     };
@@ -781,6 +961,8 @@ async function main() {
       stats.totalComments += Number(noteResult.commentsTotal || 0);
       stats.totalLiked += Number(noteResult.likedCount || 0);
       stats.totalReplied += Number(noteResult.repliedCount || 0);
+      stats.totalOcrImages += Number(noteResult.ocrImages || 0);
+      stats.totalOcrFailedImages += Number(noteResult.ocrFailedImages || 0);
       if (noteResult.homepageOk) stats.homepageOk += 1;
       if (!noteResult.success) {
         stats.failedNotes += 1;
@@ -797,10 +979,6 @@ async function main() {
       await delay(500);
     }
 
-    if (doOcr) {
-      console.log('⚠️ OCR 当前为占位，未执行实际识别。');
-      emitRunEvent('phase_unified_ocr_placeholder', { enabled: true });
-    }
 
     const totalMs = nowMs() - t0;
     console.log(`\n⏱️ 总耗时: ${formatDurationMs(totalMs)}`);
@@ -810,6 +988,8 @@ async function main() {
     console.log(`  - 评论总量: ${stats.totalComments}`);
     console.log(`  - 点赞总量: ${stats.totalLiked}`);
     console.log(`  - 回复总量: ${stats.totalReplied}`);
+    console.log(`  - OCR 成功图片: ${stats.totalOcrImages}`);
+    console.log(`  - OCR 失败图片: ${stats.totalOcrFailedImages}`);
     console.log(`  - 失败帖子: ${stats.failedNotes}`);
 
     emitRunEvent('phase_unified_done', {

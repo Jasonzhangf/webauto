@@ -165,6 +165,7 @@ async function main() {
   const env = String(args.env || 'debug').trim() || 'debug';
   const inputMode = String(args['input-mode'] || 'protocol').trim();
   const headless = parseBool(args.headless, true);
+  const ocrCommand = String(args['ocr-command'] || '').trim();
 
   const hasDryRun = rawArgv.includes('--dry-run');
   const hasNoDryRun = rawArgv.includes('--no-dry-run');
@@ -179,6 +180,7 @@ async function main() {
     '--env',
     '--input-mode',
     '--headless',
+    '--ocr-command',
     '--dry-run',
     '--no-dry-run',
     '--foreground',
@@ -243,6 +245,7 @@ async function main() {
     '--max-notes', String(maxNotes),
     ...(inputMode ? ['--input-mode', inputMode] : []),
     ...(headless ? ['--headless'] : []),
+    ...(ocrCommand ? ['--ocr-command', ocrCommand] : []),
     ...unifiedDryRunArgs,
     ...extraArgs,
     '--foreground',

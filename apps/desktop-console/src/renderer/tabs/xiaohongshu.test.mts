@@ -19,10 +19,16 @@ test('xiaohongshu tab integrates orchestrate modes including unified-only', asyn
   assert.match(src, /phase-orchestrate\.mjs/);
 });
 
-test('xiaohongshu tab supports shard profiles and mode-specific args', async () => {
+test('xiaohongshu tab uses preferred+available profile selectors (no manual profile typing)', async () => {
   const src = await getSrc();
-  assert.match(src, /const shardProfilesInput = makeTextInput\('', '分片 profiles/);
+  assert.match(src, /const profilePickSel = createEl\('select'/);
+  assert.match(src, /const shardProfilesBox = createEl\('div'/);
+  assert.match(src, /const getSelectedShardProfiles = \(\) =>/);
+  assert.match(src, /void refreshProfileChoices\(\);/);
   assert.match(src, /profileArgs\.push\('--profiles', shardProfiles\.join\(','\)\)/);
+  assert.match(src, /profileArgs\.push\('--profile', singleProfile\)/);
+  assert.doesNotMatch(src, /分片 profiles（逗号分隔）/);
+  assert.doesNotMatch(src, /主 profile（单账号）/);
   assert.match(src, /if \(mode !== 'phase1-only'\) \{\s*args\.push\('--target'/s);
   assert.match(src, /if \(unifiedEnabled\) \{\s*args\.push\(/s);
 });
@@ -38,6 +44,7 @@ test('xiaohongshu tab hides unchecked bodies and blocks reply without gate', asy
 
 test('xiaohongshu tab input history supports autocomplete and hotkey delete', async () => {
   const src = await getSrc();
+  assert.match(src, /INPUT_HISTORY_MAX = 10/);
   assert.match(src, /bindInputHistory\(input: HTMLInputElement, key: string/);
   assert.match(src, /input\.setAttribute\('list', safeId\)/);
   assert.match(src, /Ctrl\+Shift\+Backspace/);
@@ -53,4 +60,23 @@ test('xiaohongshu tab supports clear account mode and live stats panel', async (
   assert.match(src, /链接采集：\$\{liveStats\.linksCollected\}/);
   assert.match(src, /已点赞帖子/);
   assert.match(src, /已回复帖子/);
+});
+
+test('xiaohongshu tab persists and restores last config for default values', async () => {
+  const src = await getSrc();
+  assert.match(src, /XHS_LAST_CONFIG_KEY = 'webauto\.xhs\.lastConfig\.v1'/);
+  assert.match(src, /const persistedConfig = readLastConfig\(\);/);
+  assert.match(src, /applyPersistedValue\(keywordInput, persistedConfig\.keyword\)/);
+  assert.match(src, /if \(typeof persistedConfig\.dryRun === 'boolean'\) dryRunCheckbox\.checked = persistedConfig\.dryRun/);
+  assert.match(src, /const persistLastConfig = \(\) => \{/);
+  assert.match(src, /writeLastConfig\(\{/);
+});
+
+
+test('xiaohongshu tab enables OCR toggle and forwards ocr command', async () => {
+  const src = await getSrc();
+  assert.match(src, /图片 OCR（DeepSeek OCR）/);
+  assert.match(src, /const ocrCommandInput = makeTextInput\('', 'OCR命令/);
+  assert.match(src, /registerHistoryInput\(ocrCommandInput, 'ocrCommand'\)/);
+  assert.match(src, /args\.push\('--ocr-command', String\(ocrCommandInput\.value \|\| ''\)\.trim\(\)\)/);
 });

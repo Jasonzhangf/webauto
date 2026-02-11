@@ -31,6 +31,11 @@ export interface InteractRoundStats {
   harvestedTotal: number;
   ruleHits: number;
   gateBlocked: number;
+  dedupSkipped: number;
+  alreadyLikedSkipped: number;
+  notVisibleSkipped: number;
+  clickFailed: number;
+  verifyFailed: number;
   newLikes: number;
   likedTotal: number;
   reachedBottom: boolean;
@@ -174,7 +179,11 @@ async function ensureCommentVisibleCentered(sessionId: string, apiUrl: string, i
         timeoutMs: 12000,
         script: `(() => {
           const idx = ${index};
-          const items = Array.from(document.querySelectorAll('.comment-item'));
+          const isVisible = (el) => {
+            const r = el.getBoundingClientRect();
+            return r.width > 0 && r.height > 0 && r.bottom > 0 && r.top < window.innerHeight;
+          };
+          const items = Array.from(document.querySelectorAll('.comment-item')).filter(isVisible);
           if (!items[idx]) return { ok: false };
           const r = items[idx].getBoundingClientRect();
           const vh = window.innerHeight;
@@ -563,6 +572,11 @@ export async function execute(input: InteractInput): Promise<InteractOutput> {
     const roundStartMs = Date.now();
     let roundRuleHits = 0;
     let roundGateBlocked = 0;
+    let roundDedupSkipped = 0;
+    let roundAlreadyLikedSkipped = 0;
+    let roundNotVisibleSkipped = 0;
+    let roundClickFailed = 0;
+    let roundVerifyFailed = 0;
     let roundNewLikes = 0;
 
     const extracted = await extractVisibleComments(sessionId, unifiedApiUrl, 40);
@@ -594,8 +608,8 @@ export async function execute(input: InteractInput): Promise<InteractOutput> {
     for (let i = 0; i < extracted.length; i++) {
       if (likedCount >= maxLikesPerRound) break;
       const c: any = extracted[i] || {};
-      // Use domIndex from xhsComments if available, fallback to array index
-      const domIndex = typeof (c as any).domIndex === 'number' ? (c as any).domIndex : i;
+      const visibleIndex = i;
+      const domIndex = typeof (c as any).domIndex === 'number' ? (c as any).domIndex : -1;
       const text = String(c.text || '').trim();
       if (!text) continue;
       const likeMatch = matchLikeText(text, compiledLikeRules);
@@ -604,7 +618,7 @@ export async function execute(input: InteractInput): Promise<InteractOutput> {
       }
       roundRuleHits += 1;
       console.log(
-        `[Phase3Interact] 命中规则 note=${noteId} row=${domIndex} rule=${likeMatch.matchedRule || likeMatch.reason}`,
+        `[Phase3Interact] 命中规则 note=${noteId} visibleRow=${visibleIndex} domRow=${domIndex >= 0 ? domIndex : 'na'} rule=${likeMatch.matchedRule || likeMatch.reason}`,
       );
 
       // 请求点赞许可（速率限制）
@@ -618,23 +632,27 @@ export async function execute(input: InteractInput): Promise<InteractOutput> {
       }
 
       // 视觉确认：高亮需要点击的位置（like button）
-      await highlightCommentRow(sessionId, domIndex, unifiedApiUrl, 'virtual-like-row').catch((): null => null);
-      const highlightRes = await highlightLikeButton(sessionId, domIndex, unifiedApiUrl);
+      await highlightCommentRow(sessionId, visibleIndex, unifiedApiUrl, 'virtual-like-row').catch((): null => null);
+      const highlightRes = await highlightLikeButton(sessionId, visibleIndex, unifiedApiUrl);
       await delay(450);
 
       if (highlightRes?.inViewport !== true) {
+        roundNotVisibleSkipped += 1;
+        console.log(`[Phase3Interact] 跳过点赞 note=${noteId} visibleRow=${visibleIndex} reason=not_in_viewport`);
         continue;
       }
 
       // 确保评论项在视口中部，避免截图/点击偏移
-      const centered = await ensureCommentVisibleCentered(sessionId, unifiedApiUrl, domIndex);
+      const centered = await ensureCommentVisibleCentered(sessionId, unifiedApiUrl, visibleIndex);
       if (!centered) {
+        roundNotVisibleSkipped += 1;
+        console.log(`[Phase3Interact] 跳过点赞 note=${noteId} visibleRow=${visibleIndex} reason=center_failed`);
         continue;
       }
 
       // 再高亮一次，确保截图能看到高亮
-      await highlightCommentRow(sessionId, domIndex, unifiedApiUrl, 'virtual-like-row').catch((): null => null);
-      await highlightLikeButton(sessionId, domIndex, unifiedApiUrl).catch((): null => null);
+      await highlightCommentRow(sessionId, visibleIndex, unifiedApiUrl, 'virtual-like-row').catch((): null => null);
+      await highlightLikeButton(sessionId, visibleIndex, unifiedApiUrl).catch((): null => null);
       await delay(300);
 
       const signature = {
@@ -643,10 +661,18 @@ export async function execute(input: InteractInput): Promise<InteractOutput> {
         text,
       };
 
+      const sigKey = makeSignature(noteId, String(signature.userId || ''), String(signature.userName || ''), text);
+      if (likedSignatures.has(sigKey)) {
+        roundDedupSkipped += 1;
+        continue;
+      }
+
       // 已点赞则跳过（优先走 DOM 校验，避免容器 extractor 缺失导致误判）
-      const beforeState = await getLikeStateForVisibleCommentIndex(sessionId, unifiedApiUrl, domIndex);
+      const beforeState = await getLikeStateForVisibleCommentIndex(sessionId, unifiedApiUrl, visibleIndex);
       const beforeLiked = beforeState.useHref.includes('#liked');
       if (beforeLiked) {
+        roundAlreadyLikedSkipped += 1;
+        likedSignatures.add(sigKey);
         continue;
       }
 
@@ -658,8 +684,9 @@ export async function execute(input: InteractInput): Promise<InteractOutput> {
       }
 
       if (!dryRun) {
-        const clickRes = await clickLikeButtonByIndex(sessionId, domIndex, unifiedApiUrl);
+        const clickRes = await clickLikeButtonByIndex(sessionId, visibleIndex, unifiedApiUrl);
         if (!clickRes?.success) {
+          roundClickFailed += 1;
           continue;
         }
         await delay(650);
@@ -677,16 +704,21 @@ export async function execute(input: InteractInput): Promise<InteractOutput> {
 
       // 验证：目标评论的 like-wrapper 是否变为 like-active（避免 index 漂移误判）
       if (!dryRun) {
-        const afterState = await getLikeStateForVisibleCommentIndex(sessionId, unifiedApiUrl, domIndex);
+        const afterState = await getLikeStateForVisibleCommentIndex(sessionId, unifiedApiUrl, visibleIndex);
         const nowLiked =
           afterState.useHref.includes('#liked') || (await verifyLikedBySignature(sessionId, unifiedApiUrl, signature));
         if (!nowLiked) {
+          roundVerifyFailed += 1;
           continue;
         }
       }
 
       likedCount += 1;
       roundNewLikes += 1;
+      likedSignatures.add(sigKey);
+      if (!dryRun) {
+        saveLikedSignature(keyword, env, sigKey);
+      }
       likedComments.push({
         index: i,
         userId: String(signature.userId || ''),
@@ -720,7 +752,7 @@ export async function execute(input: InteractInput): Promise<InteractOutput> {
     if (reachedBottom) {
       const roundMs = Date.now() - roundStartMs;
       console.log(
-        `[Phase3Interact] round=${scrollCount} visible=${extracted.length} harvestedNew=${roundHarvestedNew} harvestedTotal=${harvestedTotal} ruleHits=${roundRuleHits} gateBlocked=${roundGateBlocked} newLikes=${roundNewLikes} likedTotal=${likedCount}/${maxLikesPerRound} end=${bottomReason} ms=${roundMs}`,
+        `[Phase3Interact] round=${scrollCount} visible=${extracted.length} harvestedNew=${roundHarvestedNew} harvestedTotal=${harvestedTotal} ruleHits=${roundRuleHits} gateBlocked=${roundGateBlocked} dedup=${roundDedupSkipped} alreadyLiked=${roundAlreadyLikedSkipped} notVisible=${roundNotVisibleSkipped} clickFailed=${roundClickFailed} verifyFailed=${roundVerifyFailed} newLikes=${roundNewLikes} likedTotal=${likedCount}/${maxLikesPerRound} end=${bottomReason} ms=${roundMs}`,
       );
       try {
         onRound?.({
@@ -730,6 +762,11 @@ export async function execute(input: InteractInput): Promise<InteractOutput> {
           harvestedTotal,
           ruleHits: roundRuleHits,
           gateBlocked: roundGateBlocked,
+          dedupSkipped: roundDedupSkipped,
+          alreadyLikedSkipped: roundAlreadyLikedSkipped,
+          notVisibleSkipped: roundNotVisibleSkipped,
+          clickFailed: roundClickFailed,
+          verifyFailed: roundVerifyFailed,
           newLikes: roundNewLikes,
           likedTotal: likedCount,
           reachedBottom: true,
@@ -749,7 +786,7 @@ export async function execute(input: InteractInput): Promise<InteractOutput> {
 
     const roundMs = Date.now() - roundStartMs;
     console.log(
-      `[Phase3Interact] round=${scrollCount} visible=${extracted.length} harvestedNew=${roundHarvestedNew} harvestedTotal=${harvestedTotal} ruleHits=${roundRuleHits} gateBlocked=${roundGateBlocked} newLikes=${roundNewLikes} likedTotal=${likedCount}/${maxLikesPerRound} end=no ms=${roundMs}`,
+      `[Phase3Interact] round=${scrollCount} visible=${extracted.length} harvestedNew=${roundHarvestedNew} harvestedTotal=${harvestedTotal} ruleHits=${roundRuleHits} gateBlocked=${roundGateBlocked} dedup=${roundDedupSkipped} alreadyLiked=${roundAlreadyLikedSkipped} notVisible=${roundNotVisibleSkipped} clickFailed=${roundClickFailed} verifyFailed=${roundVerifyFailed} newLikes=${roundNewLikes} likedTotal=${likedCount}/${maxLikesPerRound} end=no ms=${roundMs}`,
     );
     try {
       onRound?.({
@@ -759,6 +796,11 @@ export async function execute(input: InteractInput): Promise<InteractOutput> {
         harvestedTotal,
         ruleHits: roundRuleHits,
         gateBlocked: roundGateBlocked,
+        dedupSkipped: roundDedupSkipped,
+        alreadyLikedSkipped: roundAlreadyLikedSkipped,
+        notVisibleSkipped: roundNotVisibleSkipped,
+        clickFailed: roundClickFailed,
+        verifyFailed: roundVerifyFailed,
         newLikes: roundNewLikes,
         likedTotal: likedCount,
         reachedBottom: false,
