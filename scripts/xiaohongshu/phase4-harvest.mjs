@@ -104,7 +104,7 @@ async function main() {
       profile,
       keyword,
       env,
-      unifiedApiUrl: 'http://127.0.0.1:7701',
+      unifiedApiUrl: 'CORE_DAEMON_URL',
       headless: Boolean(args.headless),
       requireCheckpoint: true,
     });

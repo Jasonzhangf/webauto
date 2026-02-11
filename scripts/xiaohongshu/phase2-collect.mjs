@@ -33,7 +33,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const UNIFIED_API_URL = 'http://127.0.0.1:7701';
+import { CORE_DAEMON_URL as UNIFIED_API_URL } from './lib/core-daemon.mjs';
 
 function nowMs() {
   return Date.now();

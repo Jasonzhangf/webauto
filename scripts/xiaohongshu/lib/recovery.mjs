@@ -22,9 +22,9 @@ async function checkHealth(url) {
 }
 
 export async function ensureServicesHealthy({ allowRestart = false } = {}) {
-  const uOk = await checkHealth('http://127.0.0.1:7701/health');
-  const bOk = await checkHealth('http://127.0.0.1:7704/health');
-  const sOk = await checkHealth('http://127.0.0.1:7790/health');
+  const uOk = await checkHealth('CORE_DAEMON_URL/health');
+  const bOk = await checkHealth('CORE_DAEMON_URL/health');
+  const sOk = await checkHealth('CORE_DAEMON_URL/health');
 
   if (uOk && bOk && sOk) return;
 
@@ -36,7 +36,7 @@ export async function ensureServicesHealthy({ allowRestart = false } = {}) {
   });
 }
 
-export async function restoreBrowserState(profile, apiUrl = 'http://127.0.0.1:7701') {
+export async function restoreBrowserState(profile, apiUrl = 'CORE_DAEMON_URL') {
   try {
     const listRes = await controllerAction('browser:page:list', { profile }, apiUrl);
     const pages = listRes?.pages || listRes?.data?.pages || [];

@@ -116,7 +116,7 @@ async function main() {
     await restoreBrowserState(profile);
     // viewport sanity check: if abnormal, restart profile once
     try {
-      const res = await fetch('http://127.0.0.1:7704/health');
+      const res = await fetch('CORE_DAEMON_URL/health');
       const data = await res.json().catch(() => ({}));
       const sessions = data?.sessions || [];
       const s = sessions.find((x) => x.profile === profile);

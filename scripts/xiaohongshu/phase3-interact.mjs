@@ -24,7 +24,7 @@ import { controllerAction, delay } from '../../dist/modules/xiaohongshu/app/src/
 import { resolveDownloadRoot } from '../../dist/modules/state/src/paths.js';
 import { updateXhsCollectState } from '../../dist/modules/state/src/xiaohongshu-collect-state.js';
 
-const UNIFIED_API_URL = 'http://127.0.0.1:7701';
+import { CORE_DAEMON_URL as UNIFIED_API_URL } from './lib/core-daemon.mjs';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 function nowMs() {

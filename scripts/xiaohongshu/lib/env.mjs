@@ -29,10 +29,10 @@ export function resolveProfile() {
 
 // Back-compat: keep PROFILE export used by existing scripts
 export const PROFILE = resolveProfile();
-export const UNIFIED_API = 'http://127.0.0.1:7701';
-export const BROWSER_SERVICE = process.env.WEBAUTO_BROWSER_SERVICE_URL || 'http://127.0.0.1:7704';
+export const UNIFIED_API = 'CORE_DAEMON_URL';
+export const BROWSER_SERVICE = process.env.WEBAUTO_BROWSER_SERVICE_URL || 'CORE_DAEMON_URL';
 export const BROWSER_WS = process.env.WEBAUTO_BROWSER_WS_URL || 'ws://127.0.0.1:8765';
-export const SEARCH_GATE = process.env.WEBAUTO_SEARCH_GATE_URL || 'http://127.0.0.1:7790';
+export const SEARCH_GATE = process.env.WEBAUTO_SEARCH_GATE_URL || 'CORE_DAEMON_URL';
 export const HOME_URL = 'https://www.xiaohongshu.com';
 
 // Dev/test keyword pool: when SearchGate denies (dev-only) we can rotate keywords to avoid

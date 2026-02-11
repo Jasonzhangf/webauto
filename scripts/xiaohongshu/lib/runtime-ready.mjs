@@ -51,11 +51,11 @@ async function bindSessionOwner(profile, { headless = false } = {}) {
 
   for (let attempt = 1; attempt <= 5; attempt += 1) {
     try {
-      await fetch('http://127.0.0.1:7704/health', {
+      await fetch('CORE_DAEMON_URL/health', {
         signal: AbortSignal.timeout(5000),
       }).catch(() => null);
 
-      const res = await fetch('http://127.0.0.1:7704/command', {
+      const res = await fetch('CORE_DAEMON_URL/command', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -94,7 +94,7 @@ export async function ensureRuntimeReady({
   profile,
   keyword,
   env = 'debug',
-  unifiedApiUrl = 'http://127.0.0.1:7701',
+  unifiedApiUrl = 'CORE_DAEMON_URL',
   headless = false,
   requireCheckpoint = true,
 } = {}) {

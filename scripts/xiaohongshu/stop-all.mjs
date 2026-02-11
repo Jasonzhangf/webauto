@@ -40,7 +40,7 @@ async function runNodeScript(scriptPath, args = [], cwd = repoRoot) {
 
 async function tryShutdownBrowserService() {
   try {
-    await fetch('http://127.0.0.1:7704/command', {
+    await fetch('CORE_DAEMON_URL/command', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: 'service:shutdown' }),
@@ -53,7 +53,7 @@ async function tryShutdownBrowserService() {
 
 async function tryShutdownSearchGate() {
   try {
-    await fetch('http://127.0.0.1:7790/shutdown', { method: 'POST' });
+    await fetch('CORE_DAEMON_URL/shutdown', { method: 'POST' });
     log('search-gate shutdown requested');
   } catch {
     // ignore
