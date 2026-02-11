@@ -1,33 +1,28 @@
 import { spawn, ChildProcess } from 'child_process';
 import path from 'path';
+import { fileURLToPath } from 'url';
 
 let coreDaemonProcess: ChildProcess | null = null;
+const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../..');
 
 export async function startCoreDaemon(): Promise<boolean> {
-  // Check if already running
   try {
     const res = await fetch('http://127.0.0.1:7700/health', { signal: AbortSignal.timeout(1000) });
-    if (res.ok) {
-      console.log('[CoreDaemonManager] Already running on port 7700');
-      return true;
-    }
-  } catch {
-    // Not running, start it
-  }
+    if (res.ok) return true;
+  } catch {}
 
-  const scriptPath = path.join(__dirname, '../../services/core-daemon/index.mjs');
+  const scriptPath = path.join(REPO_ROOT, 'services/core-daemon/index.mjs');
   coreDaemonProcess = spawn('node', [scriptPath], {
     detached: true,
     stdio: 'ignore'
   });
 
-  // Wait for it to be ready
-  for (let i = 0; i < 10; i++) {
-    await new Promise(r => setTimeout(r, 500));
+  for (let i = 0; i < 20; i++) {
+    await new Promise(r => setTimeout(r, 300));
     try {
-      const res = await fetch('http://127.0.0.1:7700/health', { signal: AbortSignal.timeout(1000) });
+      const res = await fetch('http://127.0.0.1:7700/health', { signal: AbortSignal.timeout(500) });
       if (res.ok) {
-        console.log('[CoreDaemonManager] Started successfully');
+        console.log('[CoreDaemonManager] Started on port 7700');
         return true;
       }
     } catch {}
