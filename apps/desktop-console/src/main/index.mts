@@ -476,6 +476,7 @@ async function listDir(input: { root: string; recursive?: boolean; maxEntries?: 
 
 function createWindow() {
   win = new BrowserWindow({
+    title: "WebAuto Desktop v0.1.1",
     width: 1280,
     height: 900,
     minWidth: 920,
