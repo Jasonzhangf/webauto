@@ -4,6 +4,7 @@ import { renderRuntime } from './tabs/runtime.mts';
 import { renderResults } from './tabs/results.mts';
 import { renderSettings } from './tabs/settings.mts';
 import { renderXiaohongshuTab } from './tabs/xiaohongshu.mts';
+import { renderProfilePool } from './tabs/profile-pool.mts';
 import { createEl } from './ui-components.mts';
 
 declare global {
@@ -12,7 +13,7 @@ declare global {
   }
 }
 
-type TabId = 'preflight' | 'run' | 'runtime' | 'results' | 'settings' | 'xiaohongshu';
+type TabId = 'preflight' | 'run' | 'runtime' | 'results' | 'settings' | 'xiaohongshu' | 'profilepool';
 
 const tabs: Array<{ id: TabId; label: string; render: (root: HTMLElement, ctx: any) => void }> = [
   { id: 'preflight', label: '预处理', render: renderPreflight },
@@ -20,6 +21,7 @@ const tabs: Array<{ id: TabId; label: string; render: (root: HTMLElement, ctx: a
   { id: 'runtime', label: 'Runtime', render: renderRuntime },
   { id: 'results', label: '结果', render: renderResults },
   { id: 'xiaohongshu', label: '小红书', render: renderXiaohongshuTab },
+  { id: 'profilepool', label: 'Profile池', render: renderProfilePool },
   { id: 'settings', label: '设置', render: renderSettings },
 ];
 
