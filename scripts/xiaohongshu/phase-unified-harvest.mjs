@@ -34,7 +34,7 @@ import { controllerAction, delay } from '../../dist/modules/xiaohongshu/app/src/
 import { resolveDownloadRoot } from '../../dist/modules/state/src/paths.js';
 import { updateXhsCollectState } from '../../dist/modules/state/src/xiaohongshu-collect-state.js';
 
-import { CORE_DAEMON_URL as UNIFIED_API_URL } from './lib/core-daemon.mjs';
+import { UNIFIED_API_URL } from './lib/core-daemon.mjs';
 const execFileAsync = promisify(execFile);
 const OCR_START_MARKER = '<!-- WEBAUTO_OCR_START -->';
 const OCR_END_MARKER = '<!-- WEBAUTO_OCR_END -->';

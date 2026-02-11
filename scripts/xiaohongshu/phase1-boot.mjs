@@ -18,7 +18,7 @@ ensureUtf8Console();
 // Phase1 must be driven by explicit CLI input; do not fallback to defaults.
 import { ensureBaseServices } from './lib/services.mjs';
 import { createSessionLock } from './lib/session-lock.mjs';
-import { CORE_DAEMON_URL } from './lib/core-daemon.mjs';
+import { CORE_DAEMON_URL, UNIFIED_API_URL } from './lib/core-daemon.mjs';
 import { ensureServicesHealthy, restoreBrowserState } from './lib/recovery.mjs';
 import minimist from 'minimist';
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
@@ -183,4 +183,3 @@ main().catch((err) => {
   console.error('Phase1 failed:', err?.message || String(err));
   process.exit(1);
 });
-

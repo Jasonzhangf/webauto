@@ -19,7 +19,7 @@ ensureUtf8Console();
  *   node scripts/xiaohongshu/phase2-collect.mjs --keyword "手机膜" --target 50 --env debug
  */
 
-import { resolveKeyword, resolveTarget, resolveEnv, PROFILE, getNextDevKeyword } from './lib/env.mjs';
+import { resolveKeyword, resolveTarget, resolveEnv, PROFILE, getNextDevKeyword, CONFIG } from './lib/env.mjs';
 import { listProfilesForPool } from './lib/profilepool.mjs';
 import { initRunLogging, emitRunEvent, safeStringify } from './lib/logger.mjs';
 import { createSessionLock } from './lib/session-lock.mjs';
@@ -33,7 +33,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-import { CORE_DAEMON_URL as UNIFIED_API_URL } from './lib/core-daemon.mjs';
+import { UNIFIED_API_URL } from './lib/core-daemon.mjs';
+const ownerPidArg = Number(String((process.argv.slice(2).includes('--owner-pid') ? process.argv[process.argv.indexOf('--owner-pid') + 1] : process.env.WEBAUTO_OWNER_PID) || process.pid));
 
 function nowMs() {
   return Date.now();
@@ -165,6 +166,7 @@ async function main() {
     unifiedApiUrl: UNIFIED_API_URL,
     headless: argv.includes('--headless'),
     requireCheckpoint: true,
+    ownerPid: Number.isFinite(ownerPidArg) ? ownerPidArg : process.pid,
   });
 
   // 清理旧产物（同 env + keyword 下）

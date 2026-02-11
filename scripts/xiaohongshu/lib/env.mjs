@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { CORE_DAEMON_URL } from './core-daemon.mjs';
+import { UNIFIED_API_URL, BROWSER_SERVICE_URL, SEARCH_GATE_URL } from './core-daemon.mjs';
 import { ensureUtf8Console } from '../../lib/cli-encoding.mjs';
 
 ensureUtf8Console();
@@ -30,10 +30,10 @@ export function resolveProfile() {
 
 // Back-compat: keep PROFILE export used by existing scripts
 export const PROFILE = resolveProfile();
-export const UNIFIED_API = CORE_DAEMON_URL;
-export const BROWSER_SERVICE = process.env.WEBAUTO_BROWSER_SERVICE_URL || CORE_DAEMON_URL;
+export const UNIFIED_API = UNIFIED_API_URL;
+export const BROWSER_SERVICE = process.env.WEBAUTO_BROWSER_SERVICE_URL || BROWSER_SERVICE_URL;
 export const BROWSER_WS = process.env.WEBAUTO_BROWSER_WS_URL || 'ws://127.0.0.1:8765';
-export const SEARCH_GATE = process.env.WEBAUTO_SEARCH_GATE_URL || CORE_DAEMON_URL;
+export const SEARCH_GATE = process.env.WEBAUTO_SEARCH_GATE_URL || SEARCH_GATE_URL;
 export const HOME_URL = 'https://www.xiaohongshu.com';
 
 // Dev/test keyword pool: when SearchGate denies (dev-only) we can rotate keywords to avoid
