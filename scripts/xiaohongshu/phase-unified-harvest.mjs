@@ -16,6 +16,7 @@ import { promises as fs } from 'node:fs';
 import { resolveKeyword, resolveEnv } from './lib/env.mjs';
 import { initRunLogging, emitRunEvent, safeStringify } from './lib/logger.mjs';
 import { createSessionLock } from './lib/session-lock.mjs';
+import { requestProfile, releaseProfile, heartbeat } from '../../services/unified-gate/client.mjs';
 import { assignShards, listProfilesForPool } from './lib/profilepool.mjs';
 import { parseFlag, splitCsv, buildOperationPlan, matchHarvestedComments } from './lib/unified-pipeline.mjs';
 
@@ -813,7 +814,24 @@ async function main() {
     return;
   }
 
-  const profile = String(args.profile || 'xiaohongshu_fresh').trim();
+  // Request profile from Unified Gate if not provided
+let profileAllocation = null;
+const profile = await (async () => {
+  if (args.profile) return String(args.profile).trim();
+  console.log('[UnifiedGate] Requesting profile...');
+  try {
+    profileAllocation = await requestProfile(`unified-harvest-${Date.now()}`);
+    console.log('[UnifiedGate] Allocated:', profileAllocation.profile);
+    const hbInterval = setInterval(() => {
+      heartbeat(profileAllocation.profile, profileAllocation.token).catch(() => {});
+    }, 30000);
+    process.on('exit', () => clearInterval(hbInterval));
+    return profileAllocation.profile;
+  } catch (e) {
+    console.error('[UnifiedGate] Failed:', e.message);
+    process.exit(1);
+  }
+})();
 
   await ensureRuntimeReady({
     phase: 'phase_unified',
