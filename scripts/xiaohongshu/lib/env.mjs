@@ -1,5 +1,5 @@
-import { CORE_DAEMON_URL } from './core-daemon.mjs';
 #!/usr/bin/env node
+import { CORE_DAEMON_URL } from './core-daemon.mjs';
 import { ensureUtf8Console } from '../../lib/cli-encoding.mjs';
 
 ensureUtf8Console();
