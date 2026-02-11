@@ -18,7 +18,7 @@ const DEFAULT_SERVICE_SPECS = (repoRoot) => [
   {
     key: 'unified-api',
     label: 'Unified API',
-    healthUrl: 'CORE_DAEMON_URL/health',
+    healthUrl: CORE_DAEMON_URL + '/health',
     script: path.join(repoRoot, 'dist', 'services', 'unified-api', 'server.js'),
     env: { PORT: '7701', NODE_ENV: 'production' },
     startTimeoutMs: 30_000,
@@ -26,7 +26,7 @@ const DEFAULT_SERVICE_SPECS = (repoRoot) => [
   {
     key: 'browser-service',
     label: 'Browser Service',
-    healthUrl: 'CORE_DAEMON_URL/health',
+    healthUrl: CORE_DAEMON_URL + '/health',
     script: path.join(repoRoot, 'dist', 'services', 'browser-service', 'index.js'),
     env: { PORT: '7704', WS_PORT: '8765', NODE_ENV: 'production' },
     startTimeoutMs: 30_000,
