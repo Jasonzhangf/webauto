@@ -1,3 +1,4 @@
+import { CORE_DAEMON_URL } from './core-daemon.mjs';
 import { spawn } from 'node:child_process';
 
 const SEARCH_URL = 'https://www.xiaohongshu.com/explore';

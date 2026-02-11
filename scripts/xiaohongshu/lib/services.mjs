@@ -1,3 +1,4 @@
+import { CORE_DAEMON_URL } from './core-daemon.mjs';
 /**
  * 服务管理模块
  *
