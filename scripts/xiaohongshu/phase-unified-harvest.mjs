@@ -292,6 +292,44 @@ async function ensurePhase2LinksReady({ profile, keyword, env, target, headless,
   return { linksPath, before, after, backfilled: true };
 }
 
+function resolveLikeEvidenceDir(downloadRoot, env, keyword, noteId, dryRun) {
+  return path.join(downloadRoot, 'xiaohongshu', env, keyword, dryRun ? 'virtual-like' : 'like-evidence', noteId);
+}
+
+function getLikedNotesPath(downloadRoot, env, keyword) {
+  return path.join(downloadRoot, 'xiaohongshu', env, keyword, '.liked-notes.jsonl');
+}
+
+async function loadLikedNotes(downloadRoot, env, keyword) {
+  const rows = await readJsonl(getLikedNotesPath(downloadRoot, env, keyword));
+  const out = new Set();
+  for (const row of rows) {
+    const noteId = String(row?.noteId || '').trim();
+    if (noteId) out.add(noteId);
+  }
+  return out;
+}
+
+async function saveLikedNote(downloadRoot, env, keyword, noteId) {
+  const filePath = getLikedNotesPath(downloadRoot, env, keyword);
+  await fs.mkdir(path.dirname(filePath), { recursive: true });
+  const row = { ts: new Date().toISOString(), noteId: String(noteId || '').trim() };
+  await fs.appendFile(filePath, JSON.stringify(row) + "\n", 'utf8');
+  return filePath;
+}
+
+async function syncLikeEvidenceArtifacts({ downloadRoot, env, keyword, noteId, targetDir, dryRun }) {
+  if (dryRun) return;
+  const sourceDir = path.join(downloadRoot, 'xiaohongshu', env, keyword, 'virtual-like', noteId);
+  if (sourceDir === targetDir) return;
+
+  const sourceStat = await fs.stat(sourceDir).catch(() => null);
+  if (!sourceStat?.isDirectory?.()) return;
+
+  await fs.mkdir(targetDir, { recursive: true });
+  await fs.cp(sourceDir, targetDir, { recursive: true, force: true });
+}
+
 async function mergeComments(noteDir, noteId, comments) {
   const filePath = path.join(noteDir, 'comments.jsonl');
   const existing = await readJsonl(filePath);
@@ -373,13 +411,15 @@ async function processSingleNote({
   link,
   operationPlan,
   config,
+  likedNotes,
   slotIndex = null,
   tabRealIndex = null,
 }) {
   const noteId = String(link?.noteId || '');
   const safeUrl = String(link?.safeUrl || '');
   const noteDir = path.join(downloadRoot, 'xiaohongshu', env, keyword, noteId);
-  const likeEvidenceDir = path.join(downloadRoot, 'xiaohongshu', env, keyword, 'virtual-like', noteId);
+  const likeEvidenceDir = resolveLikeEvidenceDir(downloadRoot, env, keyword, noteId, config.dryRun);
+  let resolvedLikeEvidenceDir = likeEvidenceDir;
   const result = {
     noteId,
     success: true,
@@ -533,6 +573,11 @@ async function processSingleNote({
           continue;
         }
 
+        if (!config.dryRun && likedNotes instanceof Set && likedNotes.has(noteId)) {
+          emitRunEvent('phase_unified_op_skip', { noteId, op, reason: 'note_already_liked', slotIndex, tabRealIndex });
+          continue;
+        }
+
         const likeKeywords = config.likeKeywords.length ? config.likeKeywords : config.matchKeywords;
         if (likeKeywords.length === 0) {
           emitRunEvent('phase_unified_op_skip', { noteId, op, reason: 'no_like_keywords', slotIndex, tabRealIndex });
@@ -540,7 +585,7 @@ async function processSingleNote({
         }
 
         const commentsPath = path.join(noteDir, 'comments.jsonl');
-        await fs.mkdir(likeEvidenceDir, { recursive: true });
+        await fs.mkdir(resolvedLikeEvidenceDir, { recursive: true });
         const likeRes = await interact({
           sessionId: profile,
           noteId,
@@ -558,6 +603,7 @@ async function processSingleNote({
           collectComments: Boolean(config.doComments),
           persistCollectedComments: Boolean(config.doComments),
           commentsFilePath: commentsPath,
+          evidenceDir: resolvedLikeEvidenceDir,
           onRound: (round) => {
             emitRunEvent('phase_unified_like_round', {
               noteId,
@@ -569,19 +615,39 @@ async function processSingleNote({
         });
         if (!likeRes?.success) throw new Error(likeRes?.error || 'like_failed');
 
+        resolvedLikeEvidenceDir = String(likeRes?.evidenceDir || resolvedLikeEvidenceDir || likeEvidenceDir).trim() || likeEvidenceDir;
         result.likedCount += Number(likeRes?.likedCount || 0);
         if (config.doComments) {
           result.commentsTotal = Number(likeRes?.commentsTotal || result.commentsTotal || 0);
         }
+
+        await syncLikeEvidenceArtifacts({
+          downloadRoot,
+          env,
+          keyword,
+          noteId,
+          targetDir: resolvedLikeEvidenceDir,
+          dryRun: config.dryRun,
+        }).catch(() => null);
+
+        const alreadyLikedSkipped = Number(likeRes?.alreadyLikedSkipped || 0);
+        const likedThisRound = Number(likeRes?.likedCount || 0);
+        if (!config.dryRun && likedNotes instanceof Set && (likedThisRound > 0 || alreadyLikedSkipped > 0) && !likedNotes.has(noteId)) {
+          likedNotes.add(noteId);
+          await saveLikedNote(downloadRoot, env, keyword, noteId).catch(() => null);
+        }
+
         emitRunEvent('phase_unified_op_done', {
           noteId,
           op,
-          likedCount: Number(likeRes?.likedCount || 0),
+          likedCount: likedThisRound,
+          alreadyLikedSkipped,
+          dedupSkipped: Number(likeRes?.dedupSkipped || 0),
           commentsAdded: Number(likeRes?.commentsAdded || 0),
           commentsTotal: Number(likeRes?.commentsTotal || 0),
           commentsPath: likeRes?.commentsPath || (config.doComments ? commentsPath : null),
           noteDir,
-          likeEvidenceDir,
+          likeEvidenceDir: resolvedLikeEvidenceDir,
           reachedBottom: Boolean(likeRes?.reachedBottom),
         });
         continue;
@@ -679,7 +745,7 @@ async function processSingleNote({
     ocrImages: result.ocrImages,
     ocrFailedImages: result.ocrFailedImages,
     noteDir,
-    likeEvidenceDir,
+    likeEvidenceDir: resolvedLikeEvidenceDir,
     errors: result.errors,
     slotIndex,
     tabRealIndex,
@@ -867,6 +933,8 @@ const profile = await (async () => {
     dryRun,
   };
 
+  const likedNotes = (!dryRun && doLikes) ? await loadLikedNotes(downloadRoot, env, keyword) : null;
+
   console.log(`\n📝 Phase Unified Harvest: 顺序流水线 [runId: ${runId}]`);
   console.log(`关键字: ${keyword}`);
   console.log(`环境: ${env}`);
@@ -977,6 +1045,7 @@ const profile = await (async () => {
         link,
         operationPlan,
         config,
+        likedNotes,
         slotIndex,
         tabRealIndex,
       });

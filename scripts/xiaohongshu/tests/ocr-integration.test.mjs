@@ -26,11 +26,14 @@ test('orchestrate forwards ocr-command only to unified stage', async () => {
   assert.match(src, /\.\.\.\(ocrCommand \? \['--ocr-command', ocrCommand\] : \[\]\)/);
 });
 
-
-test('unified harvest emits noteDir and likeEvidenceDir for like-only runs', async () => {
+test('unified harvest routes like evidence by dryRun and supports liked-note dedup', async () => {
   const src = await readFile(unifiedPath, 'utf8');
-  assert.match(src, /const likeEvidenceDir = path\.join\(downloadRoot, 'xiaohongshu', env, keyword, 'virtual-like', noteId\)/);
-  assert.match(src, /await fs\.mkdir\(likeEvidenceDir, \{ recursive: true \}\)/);
-  assert.match(src, /likeEvidenceDir,/);
+  assert.match(src, /function resolveLikeEvidenceDir\(downloadRoot, env, keyword, noteId, dryRun\)/);
+  assert.match(src, /dryRun \? 'virtual-like' : 'like-evidence'/);
+  assert.match(src, /evidenceDir: resolvedLikeEvidenceDir/);
+  assert.match(src, /likeEvidenceDir: resolvedLikeEvidenceDir/);
+  assert.match(src, /reason: 'note_already_liked'/);
+  assert.match(src, /saveLikedNote\(downloadRoot, env, keyword, noteId\)/);
+  assert.match(src, /likeRes\?\.alreadyLikedSkipped/);
   assert.match(src, /noteDir,/);
 });

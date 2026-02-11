@@ -58,6 +58,7 @@ export interface InteractInput {
   collectComments?: boolean;
   persistCollectedComments?: boolean;
   commentsFilePath?: string;
+  evidenceDir?: string;
   onRound?: (stats: InteractRoundStats) => void;
 }
 
@@ -78,6 +79,9 @@ export interface InteractOutput {
   commentsAdded?: number;
   commentsTotal?: number;
   commentsPath?: string;
+  evidenceDir?: string;
+  dedupSkipped?: number;
+  alreadyLikedSkipped?: number;
   reachedBottom: boolean;
   stopReason?: string;
   error?: string;
@@ -492,6 +496,7 @@ export async function execute(input: InteractInput): Promise<InteractOutput> {
     collectComments = false,
     persistCollectedComments = false,
     commentsFilePath = '',
+    evidenceDir = '',
     onRound,
   } = input;
 
@@ -509,6 +514,8 @@ export async function execute(input: InteractInput): Promise<InteractOutput> {
   let reachedBottom = false;
   let bottomReason = '';
   let scrollCount = 0;
+  let totalDedupSkipped = 0;
+  let totalAlreadyLikedSkipped = 0;
   const maxScrolls = Infinity;
 
   const harvestPath = String(commentsFilePath || '').trim();
@@ -527,12 +534,12 @@ export async function execute(input: InteractInput): Promise<InteractOutput> {
     harvestedTotal = harvestedKeySet.size;
   }
 
-  const traceDir = path.join(
+  const traceDir = String(evidenceDir || '').trim() || path.join(
     resolveDownloadRoot(),
     'xiaohongshu',
     env,
     keyword,
-    'virtual-like',
+    dryRun ? 'virtual-like' : 'like-evidence',
     noteId,
   );
 
@@ -550,6 +557,9 @@ export async function execute(input: InteractInput): Promise<InteractOutput> {
         likedCount: 0,
         scannedCount: 0,
         likedComments: [],
+        evidenceDir: traceDir,
+        dedupSkipped: 0,
+        alreadyLikedSkipped: 0,
         reachedBottom: false,
         error: navRes?.error || 'goto failed',
       };
@@ -673,6 +683,9 @@ export async function execute(input: InteractInput): Promise<InteractOutput> {
       if (beforeLiked) {
         roundAlreadyLikedSkipped += 1;
         likedSignatures.add(sigKey);
+        if (!dryRun) {
+          saveLikedSignature(keyword, env, sigKey);
+        }
         continue;
       }
 
@@ -732,6 +745,9 @@ export async function execute(input: InteractInput): Promise<InteractOutput> {
       // 点赞间隔
       await delay(900);
     }
+
+    totalDedupSkipped += roundDedupSkipped;
+    totalAlreadyLikedSkipped += roundAlreadyLikedSkipped;
 
     // 尝试展开更多评论回复，避免只展开一层导致命中遗漏。
     await expandMoreComments(sessionId, unifiedApiUrl);
@@ -844,6 +860,9 @@ export async function execute(input: InteractInput): Promise<InteractOutput> {
     commentsAdded: shouldHarvest ? harvestedAdded : undefined,
     commentsTotal: shouldHarvest ? harvestedTotal : undefined,
     commentsPath: shouldPersistHarvest ? harvestPath : undefined,
+    evidenceDir: traceDir,
+    dedupSkipped: totalDedupSkipped,
+    alreadyLikedSkipped: totalAlreadyLikedSkipped,
     reachedBottom,
     stopReason: reachedBottom ? bottomReason : undefined,
   };
