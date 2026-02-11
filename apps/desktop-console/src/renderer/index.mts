@@ -1,10 +1,7 @@
 import { renderPreflight } from './tabs/preflight.mts';
-import { renderRun } from './tabs/run.mts';
-import { renderRuntime } from './tabs/runtime.mts';
-import { renderResults } from './tabs/results.mts';
+import { renderDebug } from './tabs/debug.mts';
 import { renderSettings } from './tabs/settings.mts';
 import { renderXiaohongshuTab } from './tabs/xiaohongshu.mts';
-import { renderProfilePool } from './tabs/profile-pool.mts';
 import { createEl } from './ui-components.mts';
 
 declare global {
@@ -13,15 +10,12 @@ declare global {
   }
 }
 
-type TabId = 'preflight' | 'run' | 'runtime' | 'results' | 'settings' | 'xiaohongshu' | 'profilepool';
+type TabId = 'xiaohongshu' | 'preflight' | 'debug' | 'settings';
 
 const tabs: Array<{ id: TabId; label: string; render: (root: HTMLElement, ctx: any) => void }> = [
-  { id: 'preflight', label: '预处理', render: renderPreflight },
-  { id: 'run', label: '调用', render: renderRun },
-  { id: 'runtime', label: 'Runtime', render: renderRuntime },
-  { id: 'results', label: '结果', render: renderResults },
   { id: 'xiaohongshu', label: '小红书', render: renderXiaohongshuTab },
-  { id: 'profilepool', label: 'Profile池', render: renderProfilePool },
+  { id: 'preflight', label: '预处理', render: renderPreflight },
+  { id: 'debug', label: '调试', render: renderDebug },
   { id: 'settings', label: '设置', render: renderSettings },
 ];
 
@@ -103,6 +97,9 @@ const ctx: any = {
   },
   runScript(scriptPath: string, args: string[]) {
     window.api.runScript(scriptPath, args);
+  },
+  setActiveTab(id: TabId) {
+    setActiveTab(id);
   },
 };
 

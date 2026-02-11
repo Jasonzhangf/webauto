@@ -56,9 +56,11 @@ test('xiaohongshu tab input history supports autocomplete and hotkey delete', as
 test('xiaohongshu tab clarifies active profile and account-mode visibility', async () => {
   const src = await getSrc();
   assert.match(src, /单账号（一个 profile）/);
+  assert.match(src, /首次引导：先配置账号/);
   assert.match(src, /分片并发（多个 profiles）/);
-  assert.match(src, /单账号 profile/);
-  assert.match(src, /当前实际使用：\(未选择 profile\)/);
+  assert.match(src, /请选择账号：alias \/ profile/);
+  assert.match(src, /单账号（账号名 \/ profile）/);
+  assert.match(src, /当前实际使用：\(未选择账号\)/);
   assert.match(src, /singleProfileRow\.style\.display = isSingleMode \? '' : 'none';/);
   assert.match(src, /shardProfilesSection\.style\.display = isSingleMode \? 'none' : '';/);
   assert.match(src, /if \(isSingleMode\) renderSingleProfileHint\(\);/);

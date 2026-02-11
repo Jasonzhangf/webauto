@@ -23,6 +23,12 @@ export function renderPreflight(root: HTMLElement, ctx: any) {
   const batchDeleteBtn = createEl('button', { className: 'danger' }, ['批量删除选中 profile']) as HTMLButtonElement;
   const batchDeleteFp = createEl('input', { type: 'checkbox' }) as HTMLInputElement;
 
+  const onboardingSummary = createEl('div', { className: 'muted' }, ['正在加载 profile 信息...']) as HTMLDivElement;
+  const onboardingTips = createEl('div', { className: 'muted', style: 'font-size:12px; margin-top:6px;' }, [
+    '首次使用建议：先在“预处理池”创建/登录 profile，再为 profile 设置账号名（alias），最后回小红书页按账号选择。',
+  ]) as HTMLDivElement;
+  const gotoXhsBtn = createEl('button', { className: 'secondary', type: 'button' }, ['去小红书首页']) as HTMLButtonElement;
+
   let cachedScan: any = null;
   const webautoRoot = resolveWebautoRoot(ctx.settings?.downloadRoot || '', window.api);
 
@@ -90,7 +96,7 @@ export function renderPreflight(root: HTMLElement, ctx: any) {
 
       const aliasInput = createEl('input', {
         value: String(aliases[e.profileId] || ''),
-        placeholder: 'alias (可选)',
+        placeholder: '账号名（alias，可选）',
       }) as HTMLInputElement;
 
       const row = createEl('div', {
@@ -197,6 +203,19 @@ export function renderPreflight(root: HTMLElement, ctx: any) {
     const out = await window.api.profilesScan();
     cachedScan = out;
     statusBox.textContent = `profiles=${out?.entries?.length || 0} profilesRoot=${out?.profilesRoot || ''} fingerprintsRoot=${out?.fingerprintsRoot || ''}`;
+
+    const entries: any[] = out?.entries || [];
+    const aliases = getAliasMap();
+    const aliasedCount = entries.filter((e) => String(aliases[String(e?.profileId || '')] || '').trim()).length;
+    onboardingSummary.textContent = `profile=${entries.length}，已设置账号名=${aliasedCount}`;
+    if (entries.length === 0) {
+      onboardingTips.textContent = '当前没有可用 profile：请先在下方“预处理池”里按 keyword 创建并登录 profile。';
+    } else if (aliasedCount < entries.length) {
+      onboardingTips.textContent = `仍有 ${entries.length - aliasedCount} 个 profile 未设置账号名。建议在列表中填写 alias，便于在小红书页按账号识别。`;
+    } else {
+      onboardingTips.textContent = '很好：所有 profile 都有账号名（alias），在小红书首页会按“账号名 (profileId)”显示。';
+    }
+
     renderList();
   }
 
@@ -219,8 +238,8 @@ export function renderPreflight(root: HTMLElement, ctx: any) {
     createEl('button', {}, ['批量补齐缺失指纹（脚本）']),
     batchDeleteBtn,
   ]);
-  (toolbar.children[3] as HTMLButtonElement).onclick = () => void refreshScan();
-  (toolbar.children[4] as HTMLButtonElement).onclick = async () => {
+  (toolbar.children[5] as HTMLButtonElement).onclick = () => void refreshScan();
+  (toolbar.children[6] as HTMLButtonElement).onclick = async () => {
     ctx.clearLog();
     const args = buildArgs([window.api.pathJoin('scripts', 'migrate-fingerprints.mjs')]);
     await window.api.cmdSpawn({ title: 'migrate fingerprints', cwd: '', args, groupKey: 'profilepool' });
@@ -237,6 +256,18 @@ export function renderPreflight(root: HTMLElement, ctx: any) {
     });
     updateSelectionHint();
   };
+
+  gotoXhsBtn.onclick = () => {
+    if (typeof ctx?.setActiveTab === 'function') ctx.setActiveTab('xiaohongshu');
+  };
+
+  root.appendChild(
+    section('首次引导（账号视角）', [
+      onboardingSummary,
+      onboardingTips,
+      createEl('div', { className: 'row' }, [gotoXhsBtn]),
+    ]),
+  );
 
   root.appendChild(
     section('Profiles + Fingerprints (CRUD)', [
@@ -319,7 +350,7 @@ export function renderPreflight(root: HTMLElement, ctx: any) {
   (poolActions.children[2] as HTMLButtonElement).onclick = () => void poolLogin();
 
   root.appendChild(
-    section('ProfilePool', [
+    section('预处理池（ProfilePool）', [
       createEl('div', { className: 'row' }, [
         labeledInput('keyword', keywordInput),
         labeledInput('ensure-count (可选)', ensureCountInput),

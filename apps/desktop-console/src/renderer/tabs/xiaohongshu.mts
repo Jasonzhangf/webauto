@@ -245,6 +245,24 @@ export function renderXiaohongshuTab(root: HTMLElement, api: any) {
 
   const card = createEl('div', { className: 'card', style: 'padding:12px;' });
 
+  const onboardingCard = createEl('div', {
+    style: 'margin-bottom:10px; border:1px dashed #2b67ff; border-radius:10px; padding:10px; background:#0d1a33;',
+  }) as HTMLDivElement;
+  const onboardingTitle = createEl('div', { style: 'font-weight:600; margin-bottom:4px; color:#dbeafe;' }, ['首次引导：先配置账号']);
+  const onboardingSummary = createEl('div', { className: 'muted', style: 'font-size:12px; margin-bottom:4px;' }, ['正在加载 profile...']) as HTMLDivElement;
+  const onboardingTips = createEl('div', { className: 'muted', style: 'font-size:12px; margin-bottom:8px;' }, [
+    '请先在预处理页创建 profile，并设置账号名（alias），这里会按“账号名 (profileId)”显示。',
+  ]) as HTMLDivElement;
+  const onboardingGotoPreflightBtn = createEl('button', { type: 'button', className: 'secondary' }, ['去预处理设置账号']) as HTMLButtonElement;
+  onboardingGotoPreflightBtn.onclick = () => {
+    if (typeof api?.setActiveTab === 'function') api.setActiveTab('preflight');
+  };
+  onboardingCard.appendChild(onboardingTitle);
+  onboardingCard.appendChild(onboardingSummary);
+  onboardingCard.appendChild(onboardingTips);
+  onboardingCard.appendChild(createEl('div', { className: 'row', style: 'margin-bottom:0;' }, [onboardingGotoPreflightBtn]));
+  card.appendChild(onboardingCard);
+
   // Base params
   card.appendChild(createEl('div', { style: 'font-weight:700; margin-bottom:8px;' }, ['基础参数']));
   const orchestrateModeSelect = createEl('select', { style: 'width:280px;' }) as HTMLSelectElement;
@@ -259,7 +277,7 @@ export function renderXiaohongshuTab(root: HTMLElement, api: any) {
   accountModeSelect.appendChild(createEl('option', { value: 'single', selected: true }, ['单账号（一个 profile）']));
   accountModeSelect.appendChild(createEl('option', { value: 'shards' }, ['分片并发（多个 profiles）']));
   const profilePickSel = createEl('select', { style: 'min-width:360px; max-width:580px;' }) as HTMLSelectElement;
-  profilePickSel.appendChild(createEl('option', { value: '' }, ['(请选择 profile)']));
+  profilePickSel.appendChild(createEl('option', { value: '' }, ['(请选择账号：alias / profile)']));
   const profileRefreshBtn = createEl('button', { type: 'button', className: 'secondary' }, ['刷新 profiles']) as HTMLButtonElement;
   const shardProfilesBox = createEl('div', {
     className: 'list',
@@ -300,10 +318,10 @@ export function renderXiaohongshuTab(root: HTMLElement, api: any) {
     createEl('label', { style: 'font-size:12px;' }, ['账号模式']), accountModeSelect,
   ]));
   const singleProfileRow = createEl('div', { className: 'row', style: 'gap:6px; margin-bottom:6px;' }, [
-    createEl('label', { style: 'font-size:12px;' }, ['单账号 profile']), profilePickSel, profileRefreshBtn,
+    createEl('label', { style: 'font-size:12px;' }, ['单账号（账号名 / profile）']), profilePickSel, profileRefreshBtn,
   ]) as HTMLDivElement;
   const singleProfileHint = createEl('div', { className: 'muted', style: 'font-size:12px; margin:-2px 0 6px 0;' }, [
-    '当前实际使用：(未选择 profile)',
+    '当前实际使用：(未选择账号)',
   ]) as HTMLDivElement;
   const shardProfilesSection = createEl('div', { style: 'margin-top:6px;' }) as HTMLDivElement;
   shardProfilesSection.appendChild(createEl('div', { className: 'muted', style: 'font-size:12px; margin-bottom:4px;' }, ['分片 profiles（仅分片模式生效）']));
@@ -899,7 +917,7 @@ export function renderXiaohongshuTab(root: HTMLElement, api: any) {
   const renderSingleProfileHint = () => {
     const current = String(profilePickSel.value || '').trim();
     if (!current) {
-      singleProfileHint.textContent = '当前实际使用：(未选择 profile)';
+      singleProfileHint.textContent = '当前实际使用：(未选择账号)';
       return;
     }
     const label = String(profilePickSel.selectedOptions?.[0]?.textContent || current).trim();
@@ -921,8 +939,20 @@ export function renderXiaohongshuTab(root: HTMLElement, api: any) {
     const profiles: string[] = Array.isArray(res?.profiles) ? res.profiles : [];
     const aliases = aliasesMap();
 
+    const aliasedProfiles = profiles.filter((profileId) => String((aliases as any)[profileId] || '').trim()).length;
+    onboardingSummary.textContent = `profile=${profiles.length}，已设置账号名=${aliasedProfiles}`;
+    if (profiles.length === 0) {
+      onboardingCard.style.display = '';
+      onboardingTips.textContent = '当前没有可用 profile：请前往预处理页创建/登录 profile，再返回此页。';
+    } else if (aliasedProfiles < profiles.length) {
+      onboardingCard.style.display = '';
+      onboardingTips.textContent = `仍有 ${profiles.length - aliasedProfiles} 个 profile 未设置账号名。建议先配置 alias，再按账号运行。`;
+    } else {
+      onboardingCard.style.display = 'none';
+    }
+
     profilePickSel.textContent = '';
-    profilePickSel.appendChild(createEl('option', { value: '' }, ['(请选择 profile)']));
+    profilePickSel.appendChild(createEl('option', { value: '' }, ['(请选择账号：alias / profile)']));
     for (const profileId of profiles) {
       const alias = String((aliases as any)[profileId] || '').trim();
       const label = alias ? `${alias} (${profileId})` : profileId;
@@ -957,7 +987,7 @@ export function renderXiaohongshuTab(root: HTMLElement, api: any) {
     }
 
     if (shardProfilesBox.childElementCount === 0) {
-      shardProfilesBox.appendChild(createEl('div', { className: 'muted' }, ['暂无可用 profile，请先在预处理创建']));
+      shardProfilesBox.appendChild(createEl('div', { className: 'muted' }, ['暂无可用 profile，请先在预处理页创建账号']));
     }
 
     persistedShardProfiles.clear();
