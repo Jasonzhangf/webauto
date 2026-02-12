@@ -12,12 +12,16 @@ export function renderLogs(root: HTMLElement, ctx: any) {
   const clearBtn = createEl('button', { type: 'button', className: 'secondary' }, ['清空日志']) as HTMLButtonElement;
   const activeOnlyCheckbox = createEl('input', { type: 'checkbox', id: 'logs-active-only', checked: true }) as HTMLInputElement;
   const activeOnlyLabel = createEl('label', { htmlFor: 'logs-active-only', style: 'cursor:pointer; user-select:none;' }, ['仅显示活跃分片']) as HTMLLabelElement;
+  const showGlobalCheckbox = createEl('input', { type: 'checkbox', id: 'logs-show-global' }) as HTMLInputElement;
+  const showGlobalLabel = createEl('label', { htmlFor: 'logs-show-global', style: 'cursor:pointer; user-select:none;' }, ['显示公共日志']) as HTMLLabelElement;
   toolbar.appendChild(clearBtn);
   toolbar.appendChild(activeOnlyCheckbox);
   toolbar.appendChild(activeOnlyLabel);
+  toolbar.appendChild(showGlobalCheckbox);
+  toolbar.appendChild(showGlobalLabel);
 
   const container = createEl('div', {
-    style: 'display:flex; flex-direction:column; gap:10px; font-family:"Cascadia Mono", Consolas, ui-monospace, SFMono-Regular, Menlo, monospace; font-size:12px;',
+    style: 'display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; align-items:start; font-family:"Cascadia Mono", Consolas, ui-monospace, SFMono-Regular, Menlo, monospace; font-size:12px;',
   }) as HTMLDivElement;
 
   const sectionMap = new Map<string, HTMLDivElement>();
@@ -78,13 +82,13 @@ export function renderLogs(root: HTMLElement, ctx: any) {
     }
 
     const card = createEl('div', {
-      style: 'border:1px solid #23262f; background:#0b0d12; border-radius:10px; overflow:hidden;',
+      style: 'border:1px solid #23262f; background:#0b0d12; border-radius:10px; overflow:hidden; min-width:0;',
     }) as HTMLDivElement;
     const head = createEl('div', {
       style: 'padding:8px 12px; border-bottom:1px solid #23262f; background:#121622; font-weight:600; color:#9aa4bd;',
     }, [headerLabel || (normalized === 'global' ? '公共日志' : `runId: ${normalized}`)]) as HTMLDivElement;
     const body = createEl('div', {
-      style: 'padding:10px 12px; white-space:pre-wrap; word-break:break-all; line-height:1.5;',
+      style: 'padding:10px 12px; white-space:pre-wrap; word-break:break-all; line-height:1.5; height:calc(100vh - 220px); overflow:auto;',
     }) as HTMLDivElement;
 
     card.appendChild(head);
@@ -128,10 +132,15 @@ export function renderLogs(root: HTMLElement, ctx: any) {
 
   const updateSectionVisibility = () => {
     const activeOnly = activeOnlyCheckbox.checked;
+    const showGlobal = showGlobalCheckbox.checked;
     const activeRunIds: Set<string> = (ctx as any)._activeRunIds instanceof Set ? (ctx as any)._activeRunIds : new Set<string>();
     const effectiveActiveRunIds = new Set<string>([...activeRunIds, ...logActiveRunIds]);
     sectionCardMap.forEach((card, sectionKey) => {
-      if (!activeOnly || sectionKey === 'global') {
+      if (sectionKey === 'global') {
+        card.style.display = showGlobal ? '' : 'none';
+        return;
+      }
+      if (!activeOnly) {
         card.style.display = '';
         return;
       }
@@ -171,9 +180,11 @@ export function renderLogs(root: HTMLElement, ctx: any) {
     }
 
     // 识别日志中的 Profile 行，切换父rid当前分片上下文
-    const profileMatch = text.match(/\b[Pp]rofile:\s*([A-Za-z0-9_-]+)/);
-    if (profileMatch?.[1]) {
-      const profileId = String(profileMatch[1]).trim();
+    const profileMatch = text.match(/\b[Pp]rofile\s*[:：]\s*([A-Za-z0-9_-]+)/);
+    const profileEqMatch = text.match(/\bprofile=([A-Za-z0-9_-]+)/);
+    const resolvedProfile = String(profileMatch?.[1] || profileEqMatch?.[1] || '').trim();
+    if (resolvedProfile) {
+      const profileId = resolvedProfile;
       if (profileId) {
         const sectionKey = `shard:${profileId}`;
         ensureSection(sectionKey, `分片: ${profileId}`);
@@ -238,6 +249,9 @@ export function renderLogs(root: HTMLElement, ctx: any) {
   };
 
   activeOnlyCheckbox.onchange = () => {
+    updateSectionVisibility();
+  };
+  showGlobalCheckbox.onchange = () => {
     updateSectionVisibility();
   };
 
