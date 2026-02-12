@@ -1633,6 +1633,7 @@ export function renderXiaohongshuTab(root: HTMLElement, api: any) {
         alert('当前为分片模式，请在可用项中至少勾选一个 profile');
         return;
       }
+      api?.appendLog?.(`[shard-hint] profiles=${shardProfiles.join(',')}`);
       profileArgs.push('--profiles', shardProfiles.join(','));
     } else {
       if (!singleProfile) {

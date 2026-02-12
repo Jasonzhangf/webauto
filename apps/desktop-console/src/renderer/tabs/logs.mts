@@ -3,10 +3,10 @@ import { createEl } from '../ui-components.mts';
 export function renderLogs(root: HTMLElement, ctx: any) {
   root.textContent = '';
 
- const title = createEl('div', { style: 'font-weight:700; margin-bottom:8px;' }, ['日志 · Logs']);
- const sub = createEl('div', { className: 'muted', style: 'margin-bottom:10px; font-size:12px;' }, [
-   '命令事件的运行日志（从主壳上下文收集）。',
- ]);
+  const title = createEl('div', { style: 'font-weight:700; margin-bottom:8px;' }, ['日志 · Logs']);
+  const sub = createEl('div', { className: 'muted', style: 'margin-bottom:10px; font-size:12px;' }, [
+    '命令事件的运行日志（从主壳上下文收集）。',
+  ]);
 
   const toolbar = createEl('div', { className: 'row', style: 'margin-bottom:8px;' });
   const clearBtn = createEl('button', { type: 'button', className: 'secondary' }, ['清空日志']) as HTMLButtonElement;
@@ -22,7 +22,21 @@ export function renderLogs(root: HTMLElement, ctx: any) {
 
   const sectionMap = new Map<string, HTMLDivElement>();
   const sectionCardMap = new Map<string, HTMLDivElement>();
+  const sectionRunIds = new Map<string, Set<string>>();
   const logActiveRunIds = new Set<string>();
+  const parentRunIds = new Set<string>();
+  const runIdToSection = new Map<string, string>();
+  let shardProfileQueue: string[] = [];
+
+  const parseShardHint = (line: string): string[] => {
+    const text = String(line || '');
+    const match = text.match(/\[shard-hint\]\s*profiles=([A-Za-z0-9_,-]+)/i);
+    if (!match?.[1]) return [];
+    return String(match[1])
+      .split(',')
+      .map((x) => x.trim())
+      .filter(Boolean);
+  };
 
   const extractRunId = (line: string) => {
     const text = String(line || '');
@@ -43,8 +57,8 @@ export function renderLogs(root: HTMLElement, ctx: any) {
     return 'global';
   };
 
-  const ensureSection = (runId: string) => {
-    const normalized = String(runId || 'global').trim() || 'global';
+  const ensureSection = (sectionKey: string, headerLabel?: string) => {
+    const normalized = String(sectionKey || 'global').trim() || 'global';
     const existing = sectionMap.get(normalized);
     if (existing) return existing;
 
@@ -53,7 +67,7 @@ export function renderLogs(root: HTMLElement, ctx: any) {
     }) as HTMLDivElement;
     const head = createEl('div', {
       style: 'padding:8px 12px; border-bottom:1px solid #23262f; background:#121622; font-weight:600; color:#9aa4bd;',
-    }, [normalized === 'global' ? '公共日志' : `runId: ${normalized}`]);
+    }, [headerLabel || (normalized === 'global' ? '公共日志' : `runId: ${normalized}`)]);
     const body = createEl('div', {
       style: 'padding:10px 12px; white-space:pre-wrap; word-break:break-all; line-height:1.5;',
     }) as HTMLDivElement;
@@ -63,33 +77,79 @@ export function renderLogs(root: HTMLElement, ctx: any) {
     container.appendChild(card);
     sectionMap.set(normalized, body);
     sectionCardMap.set(normalized, card);
+    sectionRunIds.set(normalized, new Set<string>());
     return body;
+  };
+
+  const resolveSectionKey = (text: string, rawRunId: string) => {
+    if (rawRunId === 'global') return 'global';
+
+    if (text.includes('[started]') && text.includes('xiaohongshu orchestrate')) {
+      parentRunIds.add(rawRunId);
+    }
+
+    const mapped = runIdToSection.get(rawRunId);
+    if (mapped) return mapped;
+
+    if (!parentRunIds.has(rawRunId) && shardProfileQueue.length > 0) {
+      const profile = String(shardProfileQueue.shift() || '').trim();
+      if (profile) {
+        const sectionKey = `shard:${profile}`;
+        runIdToSection.set(rawRunId, sectionKey);
+        ensureSection(sectionKey, `分片: ${profile}`);
+        return sectionKey;
+      }
+    }
+
+    return rawRunId;
   };
 
   const updateSectionVisibility = () => {
     const activeOnly = activeOnlyCheckbox.checked;
     const activeRunIds: Set<string> = (ctx as any)._activeRunIds instanceof Set ? (ctx as any)._activeRunIds : new Set<string>();
     const effectiveActiveRunIds = new Set<string>([...activeRunIds, ...logActiveRunIds]);
-    sectionCardMap.forEach((card, runId) => {
-      if (!activeOnly || runId === 'global') {
+    sectionCardMap.forEach((card, sectionKey) => {
+      if (!activeOnly || sectionKey === 'global') {
         card.style.display = '';
         return;
       }
-      card.style.display = effectiveActiveRunIds.has(runId) ? '' : 'none';
+      const relatedRunIds = sectionRunIds.get(sectionKey) || new Set<string>();
+      const visible =
+        effectiveActiveRunIds.has(sectionKey) ||
+        Array.from(relatedRunIds).some((runId) => effectiveActiveRunIds.has(runId));
+      card.style.display = visible ? '' : 'none';
     });
   };
 
   const appendLine = (line: string) => {
     const text = String(line || '').trim();
     if (!text) return;
-    const runId = extractRunId(text);
-    if (runId !== 'global') {
-      logActiveRunIds.add(runId);
+
+    const hintedProfiles = parseShardHint(text);
+    if (hintedProfiles.length > 0) {
+      shardProfileQueue = hintedProfiles.slice();
+      hintedProfiles.forEach((profile) => {
+        ensureSection(`shard:${profile}`, `分片: ${profile}`);
+      });
+    }
+
+    const rawRunId = extractRunId(text);
+    if (rawRunId !== 'global') {
+      logActiveRunIds.add(rawRunId);
       if (text.includes('[exit]')) {
-        logActiveRunIds.delete(runId);
+        logActiveRunIds.delete(rawRunId);
       }
     }
-    const body = ensureSection(runId);
+
+    const sectionKey = resolveSectionKey(text, rawRunId);
+    const body = ensureSection(sectionKey);
+    if (rawRunId !== 'global') {
+      if (!sectionRunIds.has(sectionKey)) {
+        sectionRunIds.set(sectionKey, new Set<string>());
+      }
+      sectionRunIds.get(sectionKey)?.add(rawRunId);
+    }
+
     const div = createEl('div', { className: 'muted' }, [text]);
     body.appendChild(div);
   };
@@ -99,7 +159,11 @@ export function renderLogs(root: HTMLElement, ctx: any) {
     container.textContent = '';
     sectionMap.clear();
     sectionCardMap.clear();
+    sectionRunIds.clear();
     logActiveRunIds.clear();
+    parentRunIds.clear();
+    runIdToSection.clear();
+    shardProfileQueue = [];
   };
 
   activeOnlyCheckbox.onchange = () => {
@@ -131,10 +195,10 @@ export function renderLogs(root: HTMLElement, ctx: any) {
 
   updateSectionVisibility();
 
- root.appendChild(title);
- root.appendChild(sub);
- root.appendChild(toolbar);
- root.appendChild(container);
+  root.appendChild(title);
+  root.appendChild(sub);
+  root.appendChild(toolbar);
+  root.appendChild(container);
 
   root.addEventListener('DOMNodeRemoved', () => {
     if (typeof unsubscribeActiveRuns === 'function') unsubscribeActiveRuns();
