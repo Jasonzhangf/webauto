@@ -10,9 +10,11 @@ export function renderLogs(root: HTMLElement, ctx: any) {
 
   const toolbar = createEl('div', { className: 'row', style: 'margin-bottom:8px;' });
   const clearBtn = createEl('button', { type: 'button', className: 'secondary' }, ['清空日志']) as HTMLButtonElement;
-  const activeOnlyCheckbox = createEl('input', { type: 'checkbox', id: 'logs-active-only', checked: true }) as HTMLInputElement;
+  const activeOnlyCheckbox = createEl('input', { type: 'checkbox', id: 'logs-active-only' }) as HTMLInputElement;
+  activeOnlyCheckbox.checked = true;
   const activeOnlyLabel = createEl('label', { htmlFor: 'logs-active-only', style: 'cursor:pointer; user-select:none;' }, ['仅显示活跃分片']) as HTMLLabelElement;
   const showGlobalCheckbox = createEl('input', { type: 'checkbox', id: 'logs-show-global' }) as HTMLInputElement;
+  showGlobalCheckbox.checked = false;
   const showGlobalLabel = createEl('label', { htmlFor: 'logs-show-global', style: 'cursor:pointer; user-select:none;' }, ['显示公共日志']) as HTMLLabelElement;
   toolbar.appendChild(clearBtn);
   toolbar.appendChild(activeOnlyCheckbox);
@@ -49,6 +51,8 @@ export function renderLogs(root: HTMLElement, ctx: any) {
       .map((x) => x.trim())
       .filter(Boolean);
   };
+
+  const isShardSection = (sectionKey: string) => String(sectionKey || '').startsWith('shard:');
 
   const extractRunId = (line: string) => {
     const text = String(line || '');
@@ -148,6 +152,10 @@ export function renderLogs(root: HTMLElement, ctx: any) {
         card.style.display = showGlobal ? '' : 'none';
         return;
       }
+      if (!isShardSection(sectionKey)) {
+        card.style.display = showGlobal ? '' : 'none';
+        return;
+      }
       if (!activeOnly) {
         card.style.display = '';
         return;
@@ -244,7 +252,6 @@ export function renderLogs(root: HTMLElement, ctx: any) {
 
   clearBtn.onclick = () => {
     ctx.clearLog();
-    container.textContent = '';
     sectionMap.clear();
     sectionCardMap.clear();
     sectionRunIds.clear();
