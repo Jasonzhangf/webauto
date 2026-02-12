@@ -11,7 +11,17 @@ function makeTextInput(value: string, placeholder = '', width = '100%') {
 }
 
 function makeCheckbox(checked: boolean, id: string) {
-  return createEl('input', { type: 'checkbox', checked, id }) as HTMLInputElement;
+ return createEl('input', { type: 'checkbox', checked, id }) as HTMLInputElement;
+}
+
+function attachTooltip(anchor: HTMLElement, text: string) {
+  const tip = createEl('div', {
+    style: 'position:absolute; left:0; top:100%; margin-top:4px; padding:6px 8px; background:#0f1419; border:1px solid #26437a; border-radius:6px; font-size:11px; color:#c7d2fe; z-index:20; opacity:0; pointer-events:none; transition:opacity 0.15s; max-width:320px; white-space:normal;',
+  }, [text]) as HTMLDivElement;
+  anchor.style.position = anchor.style.position || 'relative';
+  anchor.appendChild(tip);
+  anchor.addEventListener('mouseenter', () => { tip.style.opacity = '1'; });
+  anchor.addEventListener('mouseleave', () => { tip.style.opacity = '0'; });
 }
 
 function bindSectionToggle(toggle: HTMLInputElement, body: HTMLElement) {
@@ -287,6 +297,9 @@ export function renderXiaohongshuTab(root: HTMLElement, api: any) {
  const accountStep = createEl('div', { style: 'margin-bottom:6px; padding:6px; background:#0f1419; border-radius:6px;' }) as HTMLDivElement;
  accountStep.appendChild(createEl('span', {}, ['2. ']));
  const accountStatus = createEl('span', { style: 'color:#f59e0b;' }, ['⏳ 配置账号']) as HTMLSpanElement;
+ accountStatus.style.cursor = 'pointer';
+ accountStatus.title = '点击开始账号检查与交互配置';
+ accountStatus.addEventListener('click', () => runInteractiveAccountCheck());
  accountStep.appendChild(accountStatus);
  guideCard.appendChild(accountStep);
  
@@ -362,12 +375,7 @@ export function renderXiaohongshuTab(root: HTMLElement, api: any) {
     { passive: false, capture: true },
   );
 
- navToBoardBtn.onclick = () => focusTile('board');
- navToAccountBtn.onclick = () => focusTile('account');
- navToLikeBtn.onclick = () => focusTile('like');
- navigationModeToggle.onchange = () => {
-  // 导航模式始终强制开启
- };
+ // 旧导航按钮已移除，由向导流程替代
 
   // 引导与锁定：未完成前强制只允许账号检查入口
   const guideLockMask = createEl('div', {
@@ -392,10 +400,14 @@ export function renderXiaohongshuTab(root: HTMLElement, api: any) {
     saveGuideState(guideState);
   };
 
-  const applyGuideLock = () => {
+ const applyGuideLock = () => {
     const accountReady = guideState.accountReady;
     const keywordReady = isKeywordReady();
     guideState.keywordSet = keywordReady;
+
+    // 强制项高亮：关键词为空时高亮
+    keywordInput.style.borderColor = keywordReady ? '' : '#ef4444';
+    keywordInput.style.backgroundColor = keywordReady ? '' : '#2a1515';
 
     accountStatus.textContent = accountReady ? '✅ 已有可用账号' : '⏳ 至少登录1个账号';
     accountStatus.style.color = accountReady ? '#22c55e' : '#f59e0b';
@@ -419,6 +431,45 @@ export function renderXiaohongshuTab(root: HTMLElement, api: any) {
       if (accountTile) accountTile.scrollIntoView({ behavior: 'smooth', inline: 'start', block: 'nearest' });
     }
     saveGuideState(guideState);
+ };
+
+  const runInteractiveAccountCheck = async () => {
+    const selectedProfile = String(profilePickSel.value || '').trim();
+    if (!selectedProfile) {
+      alert('请先选择一个账号 profile');
+      guideState.accountReady = false;
+      applyGuideLock();
+      return;
+    }
+
+    // 交互式询问：是否改名
+    const wantRename = window.confirm('是否要为当前账号设置/修改易读名称（alias）？');
+    if (wantRename) {
+      const nextAlias = window.prompt('请输入账号显示名称（alias）：', '');
+      if (nextAlias && String(nextAlias).trim()) {
+        try {
+          const aliases = (api?.settings?.profileAliases && typeof api.settings.profileAliases === 'object')
+            ? { ...api.settings.profileAliases }
+            : {};
+          aliases[selectedProfile] = String(nextAlias).trim();
+          const nextSettings = await window.api.settingsSet({
+            profileAliases: aliases,
+          });
+          api.settings = nextSettings;
+        } catch {
+          alert('alias 保存失败，请检查设置权限');
+        }
+      }
+    }
+
+    // 交互式询问：是否新增账号
+    const wantAdd = window.confirm('是否立即新增账号？（将打开 headful/camoufox 登录）');
+    if (wantAdd) {
+      accountAddBtn.click();
+    }
+
+    guideState.accountReady = true;
+    applyGuideLock();
   };
 
  card.appendChild(guideCard);
@@ -553,8 +604,9 @@ export function renderXiaohongshuTab(root: HTMLElement, api: any) {
     imagesToggle,
     createEl('label', { htmlFor: 'xh-do-images', style: 'cursor:pointer;' }, ['同时下载图片']),
   ]));
-  homeSection.appendChild(homeBody);
-  bindSectionToggle(homepageToggle, homeBody);
+ homeSection.appendChild(homeBody);
+ attachTooltip(homeSection, '主页采集：抓取帖子正文、作者和主贴链接；若勾选图片下载，会额外下载图片。');
+ bindSectionToggle(homepageToggle, homeBody);
   homepageToggle.addEventListener('change', () => { if (!homepageToggle.checked) imagesToggle.checked = false; });
   featureTiles.appendChild(homeSection);
 
@@ -574,8 +626,9 @@ export function renderXiaohongshuTab(root: HTMLElement, api: any) {
   commentsBody.appendChild(createEl('div', { className: 'row', style: 'gap:8px;' }, [
     createEl('label', { style: 'width:86px;' }, ['滚屏轮次(0=不限)']), commentRoundsInput,
   ]));
-  commentsSection.appendChild(commentsBody);
-  bindSectionToggle(commentsToggle, commentsBody);
+ commentsSection.appendChild(commentsBody);
+ attachTooltip(commentsSection, '评论采集：抓取评论区内容；可配置每帖最大评论数与滚屏轮次。');
+ bindSectionToggle(commentsToggle, commentsBody);
   featureTiles.appendChild(commentsSection);
 
   // 命中规则（用于回复或高级匹配）
@@ -599,8 +652,9 @@ export function renderXiaohongshuTab(root: HTMLElement, api: any) {
     createEl('label', { style: 'width:86px;' }, ['匹配模式']), matchModeSelect,
     createEl('label', { style: 'width:62px; margin-left:8px;' }, ['最少命中']), matchMinHitsInput,
   ]));
-  gateSection.appendChild(gateBody);
-  bindSectionToggle(gateToggle, gateBody);
+ gateSection.appendChild(gateBody);
+ attachTooltip(gateSection, '命中规则：根据关键词筛选评论；通常与自动回复联动使用。');
+ bindSectionToggle(gateToggle, gateBody);
   featureTiles.appendChild(gateSection);
 
   // 任务 4：点赞 - 3列Tile布局
@@ -732,8 +786,9 @@ export function renderXiaohongshuTab(root: HTMLElement, api: any) {
   ruleListRow.appendChild(createEl('div', { style: 'font-size:11px; color:#8b93a6; margin-bottom:6px;' }, ['已添加规则（点击 × 删除）：']));
   ruleListRow.appendChild(likeRuleList);
   likesBody.appendChild(ruleListRow);
-  likesSection.appendChild(likesBody);
-  const likeNextBoardBtn = createEl('button', { type: 'button', className: 'secondary' }, ['点赞设置完成：回看板']) as HTMLButtonElement;
+ likesSection.appendChild(likesBody);
+ attachTooltip(likesSection, '评论点赞：按规则对评论点赞；需配置关键词规则和点赞上限。');
+ const likeNextBoardBtn = createEl('button', { type: 'button', className: 'secondary' }, ['点赞设置完成：回看板']) as HTMLButtonElement;
   likesSection.appendChild(createEl('div', { className: 'row', style: 'margin-top:8px; margin-bottom:0;' }, [likeNextBoardBtn]));
   bindSectionToggle(likesToggle, likesBody);
   featureTiles.appendChild(likesSection);
@@ -749,8 +804,9 @@ export function renderXiaohongshuTab(root: HTMLElement, api: any) {
   replyBody.appendChild(createEl('div', { className: 'row', style: 'gap:8px;' }, [
     createEl('label', { style: 'width:86px;' }, ['回复文本']), replyTextInput,
   ]));
-  replySection.appendChild(replyBody);
-  bindSectionToggle(replyToggle, replyBody);
+ replySection.appendChild(replyBody);
+ attachTooltip(replySection, '自动回复：对命中规则的评论执行回复；必须配合“评论命中规则”开启。');
+ bindSectionToggle(replyToggle, replyBody);
   featureTiles.appendChild(replySection);
 
   const ocrToggle = makeCheckbox(false, 'xh-do-ocr');
