@@ -22,17 +22,20 @@ export function renderLogs(root: HTMLElement, ctx: any) {
 
   const sectionMap = new Map<string, HTMLDivElement>();
   const sectionCardMap = new Map<string, HTMLDivElement>();
+  const logActiveRunIds = new Set<string>();
 
   const extractRunId = (line: string) => {
     const text = String(line || '');
     const byRunTag = text.match(/^\[(?:run:|rid:)([A-Za-z0-9_-]+)\]/);
     if (byRunTag?.[1]) return String(byRunTag[1]);
+    const byRunTagAnyPos = text.match(/\[(?:run:|rid:)([A-Za-z0-9_-]+)\]/);
+    if (byRunTagAnyPos?.[1]) return String(byRunTagAnyPos[1]);
     const byRunIdField = text.match(/runId=([A-Za-z0-9_-]+)/);
     if (byRunIdField?.[1]) return String(byRunIdField[1]);
-    const byRunIdTag = text.match(/\[runId:([A-Za-z0-9_-]+)\]/);
-    if (byRunIdTag?.[1]) return String(byRunIdTag[1]);
-    return 'global';
-  };
+   const byRunIdTag = text.match(/\[runId:([A-Za-z0-9_-]+)\]/);
+   if (byRunIdTag?.[1]) return String(byRunIdTag[1]);
+   return 'global';
+ };
 
   const ensureSection = (runId: string) => {
     const normalized = String(runId || 'global').trim() || 'global';
@@ -60,12 +63,13 @@ export function renderLogs(root: HTMLElement, ctx: any) {
   const updateSectionVisibility = () => {
     const activeOnly = activeOnlyCheckbox.checked;
     const activeRunIds: Set<string> = (ctx as any)._activeRunIds instanceof Set ? (ctx as any)._activeRunIds : new Set<string>();
+    const effectiveActiveRunIds = new Set<string>([...activeRunIds, ...logActiveRunIds]);
     sectionCardMap.forEach((card, runId) => {
       if (!activeOnly || runId === 'global') {
         card.style.display = '';
         return;
       }
-      card.style.display = activeRunIds.has(runId) ? '' : 'none';
+      card.style.display = effectiveActiveRunIds.has(runId) ? '' : 'none';
     });
   };
 
@@ -73,6 +77,12 @@ export function renderLogs(root: HTMLElement, ctx: any) {
     const text = String(line || '').trim();
     if (!text) return;
     const runId = extractRunId(text);
+    if (runId !== 'global') {
+      logActiveRunIds.add(runId);
+      if (text.includes('[exit]')) {
+        logActiveRunIds.delete(runId);
+      }
+    }
     const body = ensureSection(runId);
     const div = createEl('div', { className: 'muted' }, [text]);
     body.appendChild(div);
@@ -83,6 +93,7 @@ export function renderLogs(root: HTMLElement, ctx: any) {
     container.textContent = '';
     sectionMap.clear();
     sectionCardMap.clear();
+    logActiveRunIds.clear();
   };
 
   activeOnlyCheckbox.onchange = () => {
