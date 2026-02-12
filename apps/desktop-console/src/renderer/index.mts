@@ -86,16 +86,17 @@ function setActiveTab(id: TabId) {
 
 function installCmdEvents() {
   window.api.onCmdEvent((evt: any) => {
+    const runTag = evt?.runId ? `[rid:${evt.runId}] ` : '';
     if (evt?.type === 'started') {
       ctx.activeRunId = evt.runId;
-      ctx.appendLog(`[started] ${evt.title} pid=${evt.pid} runId=${evt.runId}`);
+      ctx.appendLog(`${runTag}[started] ${evt.title} pid=${evt.pid} runId=${evt.runId}`);
       ctx.setStatus(`running: ${evt.title}`);
     } else if (evt?.type === 'stdout') {
-      ctx.appendLog(evt.line);
+      ctx.appendLog(`${runTag}${evt.line}`);
     } else if (evt?.type === 'stderr') {
-      ctx.appendLog(`[stderr] ${evt.line}`);
+      ctx.appendLog(`${runTag}[stderr] ${evt.line}`);
     } else if (evt?.type === 'exit') {
-      ctx.appendLog(`[exit] code=${evt.exitCode ?? 'null'} signal=${evt.signal ?? 'null'}`);
+      ctx.appendLog(`${runTag}[exit] code=${evt.exitCode ?? 'null'} signal=${evt.signal ?? 'null'}`);
       ctx.setStatus('idle');
     }
   });
