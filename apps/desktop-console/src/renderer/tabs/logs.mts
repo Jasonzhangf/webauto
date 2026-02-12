@@ -26,16 +26,22 @@ export function renderLogs(root: HTMLElement, ctx: any) {
 
   const extractRunId = (line: string) => {
     const text = String(line || '');
-    const byRunTag = text.match(/^\[(?:run:|rid:)([A-Za-z0-9_-]+)\]/);
-    if (byRunTag?.[1]) return String(byRunTag[1]);
+    const byRunTag = text.match(/^\[(?:run:|rid:)([A-Za-z0-9_-]+)\]\s*(.*)$/);
+    const prefixedRunId = byRunTag?.[1] ? String(byRunTag[1]) : '';
+    const tailText = byRunTag?.[2] ? String(byRunTag[2]) : text;
+
+    // 优先使用日志正文里的 runId（例如 [Logger] runId=...），避免被外层 [rid:parent] 覆盖
+    const byRunIdField = tailText.match(/runId=([A-Za-z0-9_-]+)/);
+    if (byRunIdField?.[1]) return String(byRunIdField[1]);
+    const byRunIdTag = tailText.match(/\[runId:([A-Za-z0-9_-]+)\]/);
+    if (byRunIdTag?.[1]) return String(byRunIdTag[1]);
+
+    if (prefixedRunId) return prefixedRunId;
+
     const byRunTagAnyPos = text.match(/\[(?:run:|rid:)([A-Za-z0-9_-]+)\]/);
     if (byRunTagAnyPos?.[1]) return String(byRunTagAnyPos[1]);
-    const byRunIdField = text.match(/runId=([A-Za-z0-9_-]+)/);
-    if (byRunIdField?.[1]) return String(byRunIdField[1]);
-   const byRunIdTag = text.match(/\[runId:([A-Za-z0-9_-]+)\]/);
-   if (byRunIdTag?.[1]) return String(byRunIdTag[1]);
-   return 'global';
- };
+    return 'global';
+  };
 
   const ensureSection = (runId: string) => {
     const normalized = String(runId || 'global').trim() || 'global';
