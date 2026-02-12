@@ -436,9 +436,12 @@ export function renderXiaohongshuTab(root: HTMLElement, api: any) {
   const runInteractiveAccountCheck = async () => {
     const selectedProfile = String(profilePickSel.value || '').trim();
     if (!selectedProfile) {
-      alert('请先选择一个账号 profile');
       guideState.accountReady = false;
       applyGuideLock();
+      if (typeof api?.setActiveTab === 'function') {
+        api.setActiveTab('preflight');
+      }
+      alert('请先在预处理页创建或选择一个 profile');
       return;
     }
 
@@ -1295,12 +1298,21 @@ export function renderXiaohongshuTab(root: HTMLElement, api: any) {
     if (rows.length === 0) {
       accountAuditList.appendChild(createEl('div', { className: 'xhs-account-row muted' }, ['暂无账号，请先新增账号。']));
       accountAuditSummary.textContent = '账号检查：0 个账号';
+      guideState.accountReady = false;
       return;
     }
 
     const cookieReadyCount = rows.filter((x) => x.cookieReady).length;
     const activeCount = rows.filter((x) => x.active).length;
     accountAuditSummary.textContent = '账号检查：总数=' + rows.length + '，cookie就绪=' + cookieReadyCount + '，当前在线=' + activeCount;
+
+    // 自动判定账号就绪：有 cookie 的账号即算可用
+    if (cookieReadyCount > 0) {
+      guideState.accountReady = true;
+    }
+    // 保存状态
+    saveGuideState(guideState);
+    applyGuideLock();
 
     rows.forEach((entry) => {
       const label = entry.alias ? entry.alias + ' (' + entry.profileId + ')' : entry.profileId;
