@@ -11,8 +11,8 @@
       header .tabs { display: flex; gap: 10px; }
       header .tab { padding: 6px 10px; border-radius: 8px; cursor: pointer; color: #b9c0d4; }
       header .tab.active { background: #1b2233; color: #fff; }
-      #main { height: calc(100vh - 44px); min-height: 1000px; }
-      #content { padding: 14px; overflow: auto; }
+      #main { height: calc(100vh - 44px); min-height: 0; display: flex; }
+      #content { padding: 14px; overflow: auto; flex: 1; min-height: 0; }
       .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 10px; }
       .row > * { min-width: 0; }
       .card { border: 1px solid #23262f; background: #121622; border-radius: 12px; padding: 12px; margin-bottom: 12px; }
