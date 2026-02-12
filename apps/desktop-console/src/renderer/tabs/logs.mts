@@ -20,7 +20,11 @@ export function renderLogs(root: HTMLElement, ctx: any) {
   toolbar.appendChild(showGlobalCheckbox);
   toolbar.appendChild(showGlobalLabel);
 
-  const container = createEl('div', {
+  const globalContainer = createEl('div', {
+    style: 'display:flex; flex-direction:column; gap:10px; margin-bottom:10px;',
+  }) as HTMLDivElement;
+
+  const shardContainer = createEl('div', {
     style: 'display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; align-items:start; font-family:"Cascadia Mono", Consolas, ui-monospace, SFMono-Regular, Menlo, monospace; font-size:12px;',
   }) as HTMLDivElement;
 
@@ -93,7 +97,11 @@ export function renderLogs(root: HTMLElement, ctx: any) {
 
     card.appendChild(head);
     card.appendChild(body);
-    container.appendChild(card);
+    if (normalized === 'global') {
+      globalContainer.appendChild(card);
+    } else {
+      shardContainer.appendChild(card);
+    }
     sectionMap.set(normalized, body);
     sectionCardMap.set(normalized, card);
     sectionRunIds.set(normalized, new Set<string>());
@@ -246,6 +254,9 @@ export function renderLogs(root: HTMLElement, ctx: any) {
     runIdToSection.clear();
     parentRunCurrentSection.clear();
     shardProfileQueue = [];
+
+    globalContainer.textContent = '';
+    shardContainer.textContent = '';
   };
 
   activeOnlyCheckbox.onchange = () => {
@@ -283,7 +294,8 @@ export function renderLogs(root: HTMLElement, ctx: any) {
   root.appendChild(title);
   root.appendChild(sub);
   root.appendChild(toolbar);
-  root.appendChild(container);
+  root.appendChild(globalContainer);
+  root.appendChild(shardContainer);
 
   root.addEventListener('DOMNodeRemoved', () => {
     if (typeof unsubscribeActiveRuns === 'function') unsubscribeActiveRuns();
