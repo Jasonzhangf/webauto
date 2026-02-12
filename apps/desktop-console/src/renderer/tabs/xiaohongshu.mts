@@ -441,7 +441,7 @@ export function renderXiaohongshuTab(root: HTMLElement, api: any) {
       if (typeof api?.setActiveTab === 'function') {
         api.setActiveTab('preflight');
       }
-      alert('请先在预处理页创建或选择一个 profile');
+      alert('请先在预处理页创建或选择一个账号');
       return;
     }
 
@@ -468,6 +468,8 @@ export function renderXiaohongshuTab(root: HTMLElement, api: any) {
     // 交互式询问：是否新增账号
     const wantAdd = window.confirm('是否立即新增账号？（将打开 headful/camoufox 登录）');
     if (wantAdd) {
+      // 提醒用户设置alias
+      window.alert('新增账号后，系统将自动获取用户名作为默认别名，您也可以手动修改。');
       accountAddBtn.click();
     }
 
@@ -551,6 +553,7 @@ export function renderXiaohongshuTab(root: HTMLElement, api: any) {
   const accountRefreshBtn = createEl('button', { type: 'button', className: 'secondary' }, ['检查账号状态']) as HTMLButtonElement;
   const accountLiveProbeBtn = createEl('button', { type: 'button', className: 'secondary' }, ['实时探测登录']) as HTMLButtonElement;
   const addAccountCountInput = makeNumberInput('1', '1', '64px');
+  const addBatchNameInput = makeTextInput('', '账号名前缀（默认当前 batch / xiaohongshu）', '220px');
   const accountAddBtn = createEl('button', { type: 'button' }, ['新增账号（headful/camoufox）']) as HTMLButtonElement;
   const accountNextLikeBtn = createEl('button', { type: 'button', className: 'secondary' }, ['下一步：点赞设置']) as HTMLButtonElement;
 
@@ -563,6 +566,8 @@ export function renderXiaohongshuTab(root: HTMLElement, api: any) {
     accountLiveProbeBtn,
     createEl('label', { style: 'font-size:12px; color:#8b93a6;' }, ['新增账号数']),
     addAccountCountInput,
+    createEl('label', { style: 'font-size:12px; color:#8b93a6;' }, ['账号名前缀']),
+    addBatchNameInput,
     accountAddBtn,
   ]));
   accountAuditCard.appendChild(createEl('div', { className: 'row', style: 'margin-bottom:0;' }, [accountNextLikeBtn]));
@@ -1254,6 +1259,32 @@ export function renderXiaohongshuTab(root: HTMLElement, api: any) {
 
   let latestProfiles: string[] = [];
 
+  function extractBatchBase(profileId: string): string {
+    const m = String(profileId || '').trim().match(/^(.*?)-batch(?:[-_](\d+))?$/);
+    if (!m) return '';
+    return String(m[1] || '').trim();
+  }
+
+  function inferDefaultBatchBase(): string {
+    const currentProfile = String(profilePickSel.value || '').trim();
+    const fromCurrent = extractBatchBase(currentProfile);
+    if (fromCurrent) return fromCurrent;
+    const firstBatch = latestProfiles.find((p) => /-batch(?:[-_]\d+)?$/.test(String(p || '').trim()));
+    const fromFirst = extractBatchBase(String(firstBatch || ''));
+    return fromFirst || 'xiaohongshu';
+  }
+
+  function resolveAddBatchPrefix(): string {
+    const manual = String(addBatchNameInput.value || '').trim();
+    const base = manual || inferDefaultBatchBase();
+    return `${base}-batch`;
+  }
+
+  function syncAddBatchPlaceholder() {
+    const base = inferDefaultBatchBase();
+    addBatchNameInput.placeholder = `账号名前缀（默认 ${base}）`;
+  }
+
   const deriveCookiePath = (profileDir: string, profileId: string) => {
     const normalized = String(profileDir || '').replace(/\\/g, '/');
     const marker = '/profiles/';
@@ -1340,6 +1371,7 @@ export function renderXiaohongshuTab(root: HTMLElement, api: any) {
       profileDirs.set(pid, String(e?.profileDir || '').trim());
     });
     latestProfiles = profiles.slice();
+    syncAddBatchPlaceholder();
     const aliases = aliasesMap();
 
     const aliasedProfiles = profiles.filter((profileId) => String((aliases as any)[profileId] || '').trim()).length;
@@ -1390,7 +1422,7 @@ export function renderXiaohongshuTab(root: HTMLElement, api: any) {
     }
 
     if (shardProfilesBox.childElementCount === 0) {
-      shardProfilesBox.appendChild(createEl('div', { className: 'muted' }, ['暂无可用 profile，请先在预处理页创建账号']));
+      shardProfilesBox.appendChild(createEl('div', { className: 'muted' }, ['暂无可用账号，请先在预处理页新增账号']));
     }
 
     persistedShardProfiles.clear();
@@ -1428,13 +1460,9 @@ export function renderXiaohongshuTab(root: HTMLElement, api: any) {
   };
 
   accountAddBtn.onclick = async () => {
-    const kw = String(keywordInput.value || '').trim();
-    if (!kw) {
-      alert('请先填写关键词（用于 profile 池命名）');
-      return;
-    }
+    const kw = resolveAddBatchPrefix();
     const addCount = Math.max(1, Math.floor(Number(addAccountCountInput.value || '1')));
-    const poolCount = latestProfiles.filter((p) => p.startsWith(kw + '-')).length;
+    const poolCount = latestProfiles.filter((p) => String(p || '').trim() === kw || String(p || '').trim().startsWith(kw + '-')).length;
     const ensureCount = poolCount + addCount;
     const timeoutSec = Math.max(30, Math.floor(Number(api?.settings?.timeouts?.loginTimeoutSec || 900)));
     const args = [
@@ -1458,7 +1486,7 @@ export function renderXiaohongshuTab(root: HTMLElement, api: any) {
       env: { WEBAUTO_DAEMON: '1' },
     });
 
-    navStepHint.textContent = '已触发新增账号流程：请在弹出的 camoufox/headful 窗口完成登录，再点“检查账号状态”。';
+    navStepHint.textContent = `已触发新增账号流程（前缀 ${kw}）：请在弹出的 camoufox/headful 窗口完成登录，再点“检查账号状态”。`;
     setTimeout(() => void refreshProfileChoices(), 1800);
   };
 
@@ -1593,7 +1621,7 @@ export function renderXiaohongshuTab(root: HTMLElement, api: any) {
     modeHint.textContent = '完整编排：先 Phase1 启动，再 Phase2 采集链接，最后 Unified 采集评论/点赞。';
   };
 
-  profilePickSel.addEventListener('change', renderSingleProfileHint);
+  profilePickSel.addEventListener('change', () => { renderSingleProfileHint(); syncAddBatchPlaceholder(); });
   orchestrateModeSelect.addEventListener('change', refreshOrchestrationLayout);
   accountModeSelect.addEventListener('change', refreshOrchestrationLayout);
   refreshOrchestrationLayout();

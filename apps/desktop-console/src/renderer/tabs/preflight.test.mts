@@ -14,10 +14,10 @@ async function getSrc() {
 test('preflight includes onboarding and profilepool in same tab', async () => {
   const src = await getSrc();
   assert.match(src, /section\('首次引导（账号视角）'/);
-  assert.match(src, /section\('预处理池（ProfilePool）'/);
+  assert.match(src, /section\('批量账号池（自动序号）'/);
   assert.match(src, /去小红书首页/);
   assert.match(src, /ctx\.setActiveTab\('xiaohongshu'\)/);
-  assert.match(src, /账号名（alias，可选）/);
+  assert.match(src, /账号名（alias，用于区分账号，默认登录后获取用户名）/);
   assert.match(src, /toolbar\.children\[5\]/);
   assert.match(src, /toolbar\.children\[6\]/);
 });

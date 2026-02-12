@@ -25,7 +25,7 @@ export function renderPreflight(root: HTMLElement, ctx: any) {
 
   const onboardingSummary = createEl('div', { className: 'muted' }, ['正在加载 profile 信息...']) as HTMLDivElement;
   const onboardingTips = createEl('div', { className: 'muted', style: 'font-size:12px; margin-top:6px;' }, [
-    '首次使用建议：先在“预处理池”创建/登录 profile，再为 profile 设置账号名（alias），最后回小红书页按账号选择。',
+    '首次使用建议：输入账号名后，系统自动按 <账号名>-batch-1/2/3 命名；留空默认 xiaohongsh-batch-1/2/3。登录后可设置 alias（账号名）用于区分，默认会自动获取用户名。',
   ]) as HTMLDivElement;
   const gotoXhsBtn = createEl('button', { className: 'secondary', type: 'button' }, ['去小红书首页']) as HTMLButtonElement;
 
@@ -96,7 +96,7 @@ export function renderPreflight(root: HTMLElement, ctx: any) {
 
       const aliasInput = createEl('input', {
         value: String(aliases[e.profileId] || ''),
-        placeholder: '账号名（alias，可选）',
+        placeholder: '账号名（alias，用于区分账号，默认登录后获取用户名）',
       }) as HTMLInputElement;
 
       const row = createEl('div', {
@@ -209,9 +209,9 @@ export function renderPreflight(root: HTMLElement, ctx: any) {
     const aliasedCount = entries.filter((e) => String(aliases[String(e?.profileId || '')] || '').trim()).length;
     onboardingSummary.textContent = `profile=${entries.length}，已设置账号名=${aliasedCount}`;
     if (entries.length === 0) {
-      onboardingTips.textContent = '当前没有可用 profile：请先在下方“预处理池”里按 keyword 创建并登录 profile。';
+      onboardingTips.textContent = '当前没有可用 profile：请先在下方“批量账号池”里新增账号。';
     } else if (aliasedCount < entries.length) {
-      onboardingTips.textContent = `仍有 ${entries.length - aliasedCount} 个 profile 未设置账号名。建议在列表中填写 alias，便于在小红书页按账号识别。`;
+      onboardingTips.textContent = `仍有 ${entries.length - aliasedCount} 个 profile 未设置账号名（alias）。alias 用于区分账号，默认登录后会自动获取用户名。`;
     } else {
       onboardingTips.textContent = '很好：所有 profile 都有账号名（alias），在小红书首页会按“账号名 (profileId)”显示。';
     }
@@ -280,17 +280,22 @@ export function renderPreflight(root: HTMLElement, ctx: any) {
   );
 
   // keep: ProfilePool helper (create profiles + bulk login)
-  const keywordInput = createEl('input', { value: ctx.settings?.defaultKeyword || '', placeholder: '例如：工作服' }) as HTMLInputElement;
+  const keywordInput = createEl('input', { value: 'xiaohongsh', placeholder: '账号名（可选），系统自动拼接为 <账号名>-batch-1/2/3；留空默认 xiaohongsh-batch' }) as HTMLInputElement;
   const ensureCountInput = createEl('input', { value: '0', type: 'number', min: '0' }) as HTMLInputElement;
   const timeoutInput = createEl('input', { value: String(ctx.settings?.timeouts?.loginTimeoutSec || 900), type: 'number', min: '30' }) as HTMLInputElement;
   const keepSession = createEl('input', { type: 'checkbox' }) as HTMLInputElement;
   const poolListBox = createEl('div', { className: 'list' });
   const poolStatus = createEl('div', { className: 'muted' }, ['']);
 
+
+  function resolveBatchPrefix() {
+    const base = String(keywordInput.value || '').trim() || 'xiaohongsh';
+    return `${base}-batch`;
+  }
+
   async function poolList() {
     ctx.clearLog();
-    const kw = keywordInput.value.trim();
-    if (!kw) return;
+    const kw = resolveBatchPrefix();
     const out = await window.api.cmdRunJson({
       title: 'profilepool list',
       cwd: '',
@@ -309,8 +314,7 @@ export function renderPreflight(root: HTMLElement, ctx: any) {
 
   async function poolAdd() {
     ctx.clearLog();
-    const kw = keywordInput.value.trim();
-    if (!kw) return;
+    const kw = resolveBatchPrefix();
     const out = await window.api.cmdRunJson({
       title: 'profilepool add',
       cwd: '',
@@ -322,8 +326,7 @@ export function renderPreflight(root: HTMLElement, ctx: any) {
 
   async function poolLogin() {
     ctx.clearLog();
-    const kw = keywordInput.value.trim();
-    if (!kw) return;
+    const kw = resolveBatchPrefix();
     const ensureCount = Math.max(0, Math.floor(Number(ensureCountInput.value || '0')));
     const timeoutSec = Math.max(30, Math.floor(Number(timeoutInput.value || '900')));
     const args = buildArgs([
@@ -350,9 +353,9 @@ export function renderPreflight(root: HTMLElement, ctx: any) {
   (poolActions.children[2] as HTMLButtonElement).onclick = () => void poolLogin();
 
   root.appendChild(
-    section('预处理池（ProfilePool）', [
+    section('批量账号池（自动序号）', [
       createEl('div', { className: 'row' }, [
-        labeledInput('keyword', keywordInput),
+        labeledInput('账号名（默认 xiaohongsh）', keywordInput),
         labeledInput('ensure-count (可选)', ensureCountInput),
         labeledInput('login timeout (sec)', timeoutInput),
         createEl('div', { style: 'display:flex; flex-direction:column; gap:6px;' }, [

@@ -103,3 +103,25 @@ test('xiaohongshu tab aggregates multi-shard runIds within current session', asy
   assert.match(src, /if \(runId\) \{[\s\S]*runDoneAgg\.set\(runId,/);
   assert.match(src, /事件流\$\{shardHint\}：\$\{liveStats\.eventsPath\}/);
 });
+
+
+test('xiaohongshu add account has batch name input and resolver', async () => {
+  const src = await getSrc();
+  // batch name input
+  assert.match(src, /const addBatchNameInput = makeTextInput/);
+  // helper functions
+  assert.match(src, /function extractBatchBase\(profileId: string\): string/);
+  assert.match(src, /function inferDefaultBatchBase\(\): string/);
+  assert.match(src, /function resolveAddBatchPrefix\(\): string/);
+  assert.match(src, /function syncAddBatchPlaceholder\(\)/);
+  // add handler uses resolver
+  assert.match(src, /const kw = resolveAddBatchPrefix\(\);/);
+});
+
+test('xiaohongshu add account infers default from current profile', async () => {
+  const src = await getSrc();
+  assert.match(src, /const currentProfile = String\(profilePickSel\.value/);
+  assert.match(src, /const fromCurrent = extractBatchBase\(currentProfile\);/);
+  assert.match(src, /const firstBatch = latestProfiles\.find/);
+  assert.match(src, /return fromFirst \|\| 'xiaohongshu';/);
+});
