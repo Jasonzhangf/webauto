@@ -221,30 +221,16 @@ export function renderXiaohongshuTab(root: HTMLElement, api: any) {
     window.clearInterval(xhsEventsPollTimer);
     xhsEventsPollTimer = null;
   }
-  if (xhsSettingsUnsubscribe) {
-    xhsSettingsUnsubscribe();
-    xhsSettingsUnsubscribe = null;
-  }
+ if (xhsSettingsUnsubscribe) {
+   xhsSettingsUnsubscribe();
+   xhsSettingsUnsubscribe = null;
+ }
 
-  root.innerHTML = '';
+ root.innerHTML = '';
 
-  const title = createEl('div', { style: 'font-weight:700; margin-bottom:10px;' }, ['小红书 · Unified Harvest Pipeline']);
-  const sub = createEl('div', { style: 'margin-bottom:6px; color:#666; font-size:12px;' }, [
-    '编排支持：Phase1 启动 -> Phase2 链接采集 -> Unified 评论采集/点赞/回复（可按模式裁剪）',
-  ]);
-  const relation = createEl('div', { style: 'margin-bottom:14px; color:#7a8599; font-size:12px;' }, [
-    '说明：本页已整合 Orchestrate（phase-orchestrate.mjs），可在此直接执行 Phase1/2/Unified。',
-  ]);
 
-  const historyHint = createEl('div', { style: 'margin-bottom:10px; color:#64748b; font-size:12px;' }, [
-    '输入框支持历史候选；快捷键 Ctrl+Shift+Backspace 可删除当前输入的历史项。',
-  ]);
-  root.appendChild(title);
-  root.appendChild(sub);
-  root.appendChild(relation);
-  root.appendChild(historyHint);
 
-  const card = createEl('div', { className: 'card', style: 'padding:12px;' });
+ const card = createEl('div', { className: 'card', style: 'padding:12px;' });
 
   const onboardingCard = createEl('div', {
     style: 'margin-bottom:0; border:1px dashed #2b67ff; border-radius:10px; padding:10px; background:#0d1a33;',
@@ -263,39 +249,64 @@ export function renderXiaohongshuTab(root: HTMLElement, api: any) {
   onboardingCard.appendChild(onboardingTips);
   onboardingCard.appendChild(createEl('div', { className: 'row', style: 'margin-bottom:0;' }, [onboardingGotoPreflightBtn]));
 
-  const readNavigationMode = () => {
-    try {
-      const raw = window.localStorage.getItem(XHS_NAV_MODE_KEY);
-      if (raw == null) return true;
-      return raw !== '0';
-    } catch {
-      return true;
-    }
-  };
-  const saveNavigationMode = (enabled: boolean) => {
-    try {
-      window.localStorage.setItem(XHS_NAV_MODE_KEY, enabled ? '1' : '0');
-    } catch {
-      // ignore localStorage failures
-    }
-  };
+ // 强制导航模式：用户无法关闭，引导完成前隐藏配置详情
+ const navigationModeEnabled = true;
+ const navStepHint = createEl('div', { className: 'muted', style: 'font-size:12px;' }, ['导航模式：先账号检查，再点赞设置，最后回到运行看板。']) as HTMLDivElement;
+ 
+ // 引导步骤状态管理
+ const GUIDE_STATE_KEY = 'webauto.xhs.guideState.v1';
+ const readGuideState = () => {
+   try {
+     const raw = window.localStorage.getItem(GUIDE_STATE_KEY);
+     return raw ? JSON.parse(raw) : { browserReady: false, accountReady: false, keywordSet: false };
+   } catch { return { browserReady: false, accountReady: false, keywordSet: false }; }
+ };
+ const saveGuideState = (s: any) => {
+   try { window.localStorage.setItem(GUIDE_STATE_KEY, JSON.stringify(s)); } catch {}
+ };
+ let guideState = readGuideState();
 
-  const navigationModeToggle = makeCheckbox(readNavigationMode(), 'xh-navigation-mode');
-  const navStepHint = createEl('div', { className: 'muted', style: 'font-size:12px;' }, ['导航模式：先账号检查，再点赞设置，最后回到运行看板。']) as HTMLDivElement;
-  const navToBoardBtn = createEl('button', { type: 'button', className: 'secondary' }, ['看板']) as HTMLButtonElement;
-  const navToAccountBtn = createEl('button', { type: 'button', className: 'secondary' }, ['账号检查']) as HTMLButtonElement;
-  const navToLikeBtn = createEl('button', { type: 'button', className: 'secondary' }, ['点赞设置']) as HTMLButtonElement;
-  const navStrip = createEl('div', { className: 'xhs-nav-strip' }) as HTMLDivElement;
-  const navActions = createEl('div', { className: 'xhs-nav-actions' }) as HTMLDivElement;
-  navActions.appendChild(createEl('label', { htmlFor: 'xh-navigation-mode', style: 'cursor:pointer; color:#dbeafe; display:flex; align-items:center; gap:6px;' }, ['导航模式（默认开启）']));
-  navActions.appendChild(navigationModeToggle);
-  navActions.appendChild(navToBoardBtn);
-  navActions.appendChild(navToAccountBtn);
-  navActions.appendChild(navToLikeBtn);
-  navStrip.appendChild(navActions);
-  navStrip.appendChild(navStepHint);
+ // 导航向导UI（强制顺序引导）
+ const guideCard = createEl('div', { 
+   style: 'border:1px solid #26437a; background:#0c1830; border-radius:10px; padding:10px; margin-bottom:10px;'
+ }) as HTMLDivElement;
+ 
+ const guideTitle = createEl('div', { style: 'font-weight:600; margin-bottom:8px; color:#dbeafe;' }, ['🧭 新用户引导']) as HTMLDivElement;
+ const guideProgress = createEl('div', { style: 'font-size:12px; color:#8b93a6; margin-bottom:8px;' }, ['检查进度...']) as HTMLDivElement;
+ guideCard.appendChild(guideTitle);
+ guideCard.appendChild(guideProgress);
+ 
+ // 步骤1: 浏览器检查
+ const browserStep = createEl('div', { style: 'margin-bottom:6px; padding:6px; background:#0f1419; border-radius:6px;' }) as HTMLDivElement;
+ browserStep.appendChild(createEl('span', {}, ['1. ']));
+ const browserStatus = createEl('span', { style: 'color:#f59e0b;' }, ['⏳ 检查浏览器']) as HTMLSpanElement;
+ browserStep.appendChild(browserStatus);
+ guideCard.appendChild(browserStep);
+ 
+ // 步骤2: 账号检查
+ const accountStep = createEl('div', { style: 'margin-bottom:6px; padding:6px; background:#0f1419; border-radius:6px;' }) as HTMLDivElement;
+ accountStep.appendChild(createEl('span', {}, ['2. ']));
+ const accountStatus = createEl('span', { style: 'color:#f59e0b;' }, ['⏳ 配置账号']) as HTMLSpanElement;
+ accountStep.appendChild(accountStatus);
+ guideCard.appendChild(accountStep);
+ 
+ // 步骤3: 关键字配置
+ const keywordStep = createEl('div', { style: 'margin-bottom:6px; padding:6px; background:#0f1419; border-radius:6px;' }) as HTMLDivElement;
+ keywordStep.appendChild(createEl('span', {}, ['3. ']));
+ const keywordStatus = createEl('span', { style: 'color:#f59e0b;' }, ['⏳ 配置关键词']) as HTMLSpanElement;
+ keywordStep.appendChild(keywordStatus);
+ guideCard.appendChild(keywordStep);
+ 
+ // 步骤4: 完成
+ const completeStep = createEl('div', { style: 'margin-bottom:6px; padding:6px; background:#0f1419; border-radius:6px; display:none;' }) as HTMLDivElement;
+ completeStep.appendChild(createEl('span', {}, ['✅ ']));
+ completeStep.appendChild(createEl('span', { style: 'color:#22c55e;' }, ['准备就绪，可以开始运行']));
+ guideCard.appendChild(completeStep);
+ 
+ const startRunBtn = createEl('button', { type: 'button', style: 'display:none; margin-top:8px; width:100%;' }, ['开始运行']) as HTMLButtonElement;
+ guideCard.appendChild(startRunBtn);
 
-  const tileLane = createEl('div', { className: 'xhs-tile-lane' }) as HTMLDivElement;
+ const tileLane = createEl('div', { className: 'xhs-tile-lane' }) as HTMLDivElement;
   const tileRegistry = new Map<string, HTMLDivElement>();
   let activeTileId = 'board';
 
@@ -351,18 +362,66 @@ export function renderXiaohongshuTab(root: HTMLElement, api: any) {
     { passive: false, capture: true },
   );
 
-  navToBoardBtn.onclick = () => focusTile('board');
-  navToAccountBtn.onclick = () => focusTile('account');
-  navToLikeBtn.onclick = () => focusTile('like');
-  navigationModeToggle.onchange = () => {
-    const enabled = navigationModeToggle.checked;
-    saveNavigationMode(enabled);
-    navStepHint.textContent = enabled
-      ? '导航模式：先账号检查，再点赞设置，最后回到运行看板。'
-      : '导航模式已关闭：按你自己的顺序配置并执行。';
+ navToBoardBtn.onclick = () => focusTile('board');
+ navToAccountBtn.onclick = () => focusTile('account');
+ navToLikeBtn.onclick = () => focusTile('like');
+ navigationModeToggle.onchange = () => {
+  // 导航模式始终强制开启
+ };
+
+  // 引导与锁定：未完成前强制只允许账号检查入口
+  const guideLockMask = createEl('div', {
+    style: 'position:absolute; inset:0; background:rgba(10,14,24,0.72); border:1px dashed #26437a; border-radius:10px; display:none; align-items:center; justify-content:center; z-index:5; color:#c7d2fe; text-align:center; padding:12px; font-size:12px;',
+  }, ['请先完成引导：浏览器检查、账号登录、关键词配置']) as HTMLDivElement;
+
+  const isKeywordReady = () => String(keywordInput.value || '').trim().length > 0;
+
+  const runQuickBrowserCheck = async () => {
+    const script = window.api.pathJoin('scripts', 'browser-status.mjs');
+    const args = [script, String(profilePickSel.value || ''), '--site', 'xiaohongshu'];
+    try {
+      await window.api.cmdSpawn({ title: 'browser-status quick-check', cwd: '', args, groupKey: 'xiaohongshu' });
+      guideState.browserReady = true;
+      browserStatus.textContent = '✅ 浏览器检查已触发';
+      browserStatus.style.color = '#22c55e';
+    } catch {
+      guideState.browserReady = false;
+      browserStatus.textContent = '❌ 浏览器检查失败';
+      browserStatus.style.color = '#ef4444';
+    }
+    saveGuideState(guideState);
   };
 
-  card.appendChild(navStrip);
+  const applyGuideLock = () => {
+    const accountReady = guideState.accountReady;
+    const keywordReady = isKeywordReady();
+    guideState.keywordSet = keywordReady;
+
+    accountStatus.textContent = accountReady ? '✅ 已有可用账号' : '⏳ 至少登录1个账号';
+    accountStatus.style.color = accountReady ? '#22c55e' : '#f59e0b';
+    keywordStatus.textContent = keywordReady ? '✅ 关键词已配置' : '⏳ 请先配置关键词';
+    keywordStatus.style.color = keywordReady ? '#22c55e' : '#f59e0b';
+
+    const allReady = Boolean(guideState.browserReady && accountReady && keywordReady);
+    guideProgress.textContent = allReady
+      ? '引导完成，可查看全部配置并运行。'
+      : `引导未完成：browser=${guideState.browserReady ? 'ok' : 'pending'} account=${accountReady ? 'ok' : 'pending'} keyword=${keywordReady ? 'ok' : 'pending'}`;
+
+    completeStep.style.display = allReady ? '' : 'none';
+    startRunBtn.style.display = allReady ? '' : 'none';
+    tileLane.style.pointerEvents = allReady ? '' : 'none';
+    tileLane.style.filter = allReady ? '' : 'blur(1px)';
+    guideLockMask.style.display = allReady ? 'none' : 'flex';
+
+    if (!allReady) {
+      setActiveTile('account');
+      const accountTile = tileRegistry.get('account');
+      if (accountTile) accountTile.scrollIntoView({ behavior: 'smooth', inline: 'start', block: 'nearest' });
+    }
+    saveGuideState(guideState);
+  };
+
+ card.appendChild(guideCard);
 
   // Base params
   const orchestrateModeSelect = createEl('select', { style: 'width:280px;' }) as HTMLSelectElement;
@@ -812,17 +871,19 @@ export function renderXiaohongshuTab(root: HTMLElement, api: any) {
   collectTile.body.appendChild(homeSection);
   collectTile.body.appendChild(ocrSection);
 
-  [boardTile.tile, likeTile.tile, accountTile.tile, runTile.tile, commentTile.tile, collectTile.tile].forEach((tile) => tileLane.appendChild(tile));
-  card.appendChild(tileLane);
+ [boardTile.tile, likeTile.tile, accountTile.tile, runTile.tile, commentTile.tile, collectTile.tile].forEach((tile) => tileLane.appendChild(tile));
+ tileLane.style.position = 'relative';
+ tileLane.appendChild(guideLockMask);
+ card.appendChild(tileLane);
 
   accountNextLikeBtn.onclick = () => focusTile('like');
   likeNextBoardBtn.onclick = () => focusTile('board');
 
   queueMicrotask(() => {
-    focusTile('board');
-    if (navigationModeToggle.checked) {
-      navStepHint.textContent = '第1步：先完成账号检查/登录，再到点赞设置；最后回运行看板执行。';
-    }
+    runQuickBrowserCheck().finally(() => {
+      navStepHint.textContent = '第1步：先完成账号检查/登录，再配置关键词。';
+      applyGuideLock();
+    });
   });
 
   const parentDir = (inputPath: string) => {
