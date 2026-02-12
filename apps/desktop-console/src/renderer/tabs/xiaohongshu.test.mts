@@ -121,6 +121,17 @@ test('xiaohongshu tab enables navigation-mode onboarding for account check and a
   assert.match(src, /camoufox\/headful/);
 });
 
+
+
+test('xiaohongshu tab supports click-activate tile and wheel horizontal scrolling', async () => {
+  const src = await getSrc();
+  assert.match(src, /let activeTileId = 'board';/);
+  assert.match(src, /const setActiveTile = \(id: string\) => \{/);
+  assert.match(src, /tile\.onclick = \(\) => setActiveTile\(id\);/);
+  assert.match(src, /tileLane\.addEventListener\(\s*'wheel'/);
+  assert.match(src, /evt\.preventDefault\(\);/);
+  assert.match(src, /tileLane\.scrollLeft \+= delta;/);
+});
 test('xiaohongshu tab renders horizontal equal-height tiles with board then like order', async () => {
   const src = await getSrc();
   assert.match(src, /const tileLane = createEl\('div', \{ className: 'xhs-tile-lane' \}\)/);

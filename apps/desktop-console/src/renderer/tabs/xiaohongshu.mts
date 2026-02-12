@@ -297,10 +297,20 @@ export function renderXiaohongshuTab(root: HTMLElement, api: any) {
 
   const tileLane = createEl('div', { className: 'xhs-tile-lane' }) as HTMLDivElement;
   const tileRegistry = new Map<string, HTMLDivElement>();
+  let activeTileId = 'board';
+
+  const setActiveTile = (id: string) => {
+    activeTileId = id;
+    tileRegistry.forEach((tileEl, tileId) => {
+      tileEl.classList.toggle('active', tileId === id);
+    });
+  };
+
   const createTile = (id: string, titleText: string) => {
     const tile = createEl('section', { className: 'xhs-tile', 'data-xhs-tile': id }) as HTMLDivElement;
     const head = createEl('div', { className: 'xhs-tile-head' }, [titleText]);
     const body = createEl('div', { className: 'xhs-tile-body' }) as HTMLDivElement;
+    tile.onclick = () => setActiveTile(id);
     tile.appendChild(head);
     tile.appendChild(body);
     tileRegistry.set(id, tile);
@@ -309,8 +319,21 @@ export function renderXiaohongshuTab(root: HTMLElement, api: any) {
   const focusTile = (id: string) => {
     const tile = tileRegistry.get(id);
     if (!tile) return;
+    setActiveTile(id);
     tile.scrollIntoView({ behavior: 'smooth', inline: 'start', block: 'nearest' });
   };
+
+  tileLane.addEventListener(
+    'wheel',
+    (evt) => {
+      if (!tileLane.matches(':hover')) return;
+      const delta = Math.abs(evt.deltaY) >= Math.abs(evt.deltaX) ? evt.deltaY : evt.deltaX;
+      if (!Number.isFinite(delta) || delta === 0) return;
+      evt.preventDefault();
+      tileLane.scrollLeft += delta;
+    },
+    { passive: false },
+  );
 
   navToBoardBtn.onclick = () => focusTile('board');
   navToAccountBtn.onclick = () => focusTile('account');
