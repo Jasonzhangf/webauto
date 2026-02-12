@@ -1276,10 +1276,8 @@ export function renderXiaohongshuTab(root: HTMLElement, api: any) {
 
   function resolveAddBatchPrefix(): string {
     const manual = String(addBatchNameInput.value || '').trim();
-    const inferredBase = inferDefaultBatchBase();
-    const base = manual || inferredBase;
-    const hasLegacyBatch = latestProfiles.some((p) => String(p || '').trim().startsWith(`${base}_batch-`) || String(p || '').trim() === `${base}_batch`);
-    return hasLegacyBatch ? `${base}_batch` : `${base}-batch`;
+    const base = manual || inferDefaultBatchBase();
+    return `${base}-batch`;
   }
 
   function syncAddBatchPlaceholder() {
@@ -1464,7 +1462,7 @@ export function renderXiaohongshuTab(root: HTMLElement, api: any) {
   accountAddBtn.onclick = async () => {
     const kw = resolveAddBatchPrefix();
     const addCount = Math.max(1, Math.floor(Number(addAccountCountInput.value || '1')));
-    const poolCount = latestProfiles.filter((p) => String(p || '').trim() === kw || String(p || '').trim().startsWith(kw + '-') || String(p || '').trim().startsWith(kw.replace('-batch','_batch') + '-') || String(p || '').trim().startsWith(kw.replace('-batch','_batch') + '_')).length;
+    const poolCount = latestProfiles.filter((p) => String(p || '').trim() === kw || String(p || '').trim().startsWith(kw + '-')).length;
     const ensureCount = poolCount + addCount;
     const timeoutSec = Math.max(30, Math.floor(Number(api?.settings?.timeouts?.loginTimeoutSec || 900)));
     const args = [
