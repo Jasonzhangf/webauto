@@ -23,6 +23,7 @@ export function renderLogs(root: HTMLElement, ctx: any) {
   const sectionMap = new Map<string, HTMLDivElement>();
   const sectionCardMap = new Map<string, HTMLDivElement>();
   const sectionRunIds = new Map<string, Set<string>>();
+  const sectionHeaderMap = new Map<string, HTMLDivElement>();
   const logActiveRunIds = new Set<string>();
   const parentRunIds = new Set<string>();
   const runIdToSection = new Map<string, string>();
@@ -69,14 +70,19 @@ export function renderLogs(root: HTMLElement, ctx: any) {
   const ensureSection = (sectionKey: string, headerLabel?: string) => {
     const normalized = String(sectionKey || 'global').trim() || 'global';
     const existing = sectionMap.get(normalized);
-    if (existing) return existing;
+    if (existing) {
+      if (headerLabel && sectionHeaderMap.has(normalized)) {
+        sectionHeaderMap.get(normalized)!.textContent = headerLabel;
+      }
+      return existing;
+    }
 
     const card = createEl('div', {
       style: 'border:1px solid #23262f; background:#0b0d12; border-radius:10px; overflow:hidden;',
     }) as HTMLDivElement;
     const head = createEl('div', {
       style: 'padding:8px 12px; border-bottom:1px solid #23262f; background:#121622; font-weight:600; color:#9aa4bd;',
-    }, [headerLabel || (normalized === 'global' ? '公共日志' : `runId: ${normalized}`)]);
+    }, [headerLabel || (normalized === 'global' ? '公共日志' : `runId: ${normalized}`)]) as HTMLDivElement;
     const body = createEl('div', {
       style: 'padding:10px 12px; white-space:pre-wrap; word-break:break-all; line-height:1.5;',
     }) as HTMLDivElement;
@@ -87,6 +93,7 @@ export function renderLogs(root: HTMLElement, ctx: any) {
     sectionMap.set(normalized, body);
     sectionCardMap.set(normalized, card);
     sectionRunIds.set(normalized, new Set<string>());
+    sectionHeaderMap.set(normalized, head);
     return body;
   };
 
@@ -170,9 +177,29 @@ export function renderLogs(root: HTMLElement, ctx: any) {
       if (profileId) {
         const sectionKey = `shard:${profileId}`;
         ensureSection(sectionKey, `分片: ${profileId}`);
+        if (prefixedRunId && rawRunId && rawRunId !== prefixedRunId) {
+          runIdToSection.set(rawRunId, sectionKey);
+          if (!sectionRunIds.has(sectionKey)) {
+            sectionRunIds.set(sectionKey, new Set<string>());
+          }
+          sectionRunIds.get(sectionKey)!.add(rawRunId);
+        }
         if (prefixedRunId) {
           parentRunCurrentSection.set(prefixedRunId, sectionKey);
         }
+      }
+    }
+
+    const loggerChildRunId = text.match(/\[Logger\]\s+runId=([A-Za-z0-9_-]+)/);
+    if (loggerChildRunId?.[1] && prefixedRunId) {
+      const childRunId = String(loggerChildRunId[1]).trim();
+      const parentSection = parentRunCurrentSection.get(prefixedRunId);
+      if (parentSection) {
+        runIdToSection.set(childRunId, parentSection);
+        if (!sectionRunIds.has(parentSection)) {
+          sectionRunIds.set(parentSection, new Set<string>());
+        }
+        sectionRunIds.get(parentSection)!.add(childRunId);
       }
     }
 
@@ -202,6 +229,7 @@ export function renderLogs(root: HTMLElement, ctx: any) {
     sectionMap.clear();
     sectionCardMap.clear();
     sectionRunIds.clear();
+    sectionHeaderMap.clear();
     logActiveRunIds.clear();
     parentRunIds.clear();
     runIdToSection.clear();
