@@ -1761,6 +1761,7 @@ export function renderXiaohongshuTab(root: HTMLElement, api: any) {
 
   xhsCmdUnsubscribe = window.api.onCmdEvent((evt: any) => {
     const eventType = String(evt?.type || '');
+    const evtRunId = String(evt?.runId || '').trim();
 
     if (eventType === 'started') {
       const title = String(evt?.title || '');
@@ -1771,13 +1772,13 @@ export function renderXiaohongshuTab(root: HTMLElement, api: any) {
       return;
     }
 
-    const evtRunId = String(evt?.runId || '').trim();
-    if (!localRunId || evtRunId !== localRunId) return;
-
+    // stdout/stderr 里会携带 eventsPath/runId，先解析再做 runId 过滤
     if (eventType === 'stdout' || eventType === 'stderr') {
       parseStdoutForEvents(String(evt?.line || ''));
       return;
     }
+
+    if (!localRunId || evtRunId !== localRunId) return;
 
     if (eventType === 'exit') {
       if (xhsEventsPollTimer != null) {
