@@ -1604,8 +1604,12 @@ export function renderXiaohongshuTab(root: HTMLElement, api: any) {
   });
 
   let localRunId = '';
-  const runBtn = createEl('button', {}, ['开始执行编排']) as HTMLButtonElement;
-  const stopBtn = createEl('button', { className: 'danger' }, ['停止当前任务']) as HTMLButtonElement;
+ const runBtn = createEl('button', {}, ['开始执行编排']) as HTMLButtonElement;
+ const stopBtn = createEl('button', { className: 'danger' }, ['停止当前任务']) as HTMLButtonElement;
+
+  // 确保按钮被正确添加到 DOM
+  const actionsRow = createEl('div', { className: 'row', style: 'margin-bottom:12px;' }, [runBtn, stopBtn]);
+  card.insertBefore(actionsRow, card.firstChild);
 
   runBtn.onclick = async () => {
     if (typeof window.api?.cmdSpawn !== 'function') {
@@ -1781,8 +1785,7 @@ export function renderXiaohongshuTab(root: HTMLElement, api: any) {
         xhsEventsPollTimer = null;
       }
     }
-  });
+ });
 
-  card.insertBefore(createEl('div', { className: 'row', style: 'margin-bottom:12px;' }, [runBtn, stopBtn]), card.firstChild);
   root.appendChild(card);
 }
