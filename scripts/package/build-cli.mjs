@@ -44,6 +44,9 @@ const CONFIG = {
     'apps/desktop-console/src',
     'apps/desktop-console/README.md',
     'scripts/run-xiaohongshu-phase1-2-34-v3.mjs',  // v3 统一入口
+    'scripts/browser-status.mjs',
+    'scripts/profilepool.mjs',
+    'scripts/migrate-fingerprints.mjs',
     'container-library',
     'scripts/lib',
     'runtime/infra/node-cli/package.json',
