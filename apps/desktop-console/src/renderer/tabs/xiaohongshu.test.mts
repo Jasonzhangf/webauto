@@ -130,7 +130,10 @@ test('xiaohongshu tab supports click-activate tile and wheel horizontal scrollin
   assert.match(src, /tile\.onclick = \(\) => setActiveTile\(id\);/);
   assert.match(src, /tileLane\.addEventListener\(\s*'wheel'/);
   assert.match(src, /evt\.preventDefault\(\);/);
-  assert.match(src, /tileLane\.scrollLeft \+= delta;/);
+  assert.match(src, /tile\.addEventListener\('pointerdown', \(\) => setActiveTile\(id\), \{ capture: true \}\);/);
+  assert.match(src, /const resolveTileIdFromEvent = \(target: EventTarget \| null\) => \{/);
+  assert.match(src, /if \(!sourceTileId \|\| sourceTileId !== activeTileId\) return;/);
+  assert.match(src, /tileLane\.scrollLeft \+= baseDelta \* deltaFactor;/);
 });
 test('xiaohongshu tab renders horizontal equal-height tiles with board then like order', async () => {
   const src = await getSrc();
