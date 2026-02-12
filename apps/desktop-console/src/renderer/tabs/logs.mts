@@ -10,13 +10,18 @@ export function renderLogs(root: HTMLElement, ctx: any) {
 
   const toolbar = createEl('div', { className: 'row', style: 'margin-bottom:8px;' });
   const clearBtn = createEl('button', { type: 'button', className: 'secondary' }, ['清空日志']) as HTMLButtonElement;
+  const activeOnlyCheckbox = createEl('input', { type: 'checkbox', id: 'logs-active-only', checked: true }) as HTMLInputElement;
+  const activeOnlyLabel = createEl('label', { htmlFor: 'logs-active-only', style: 'cursor:pointer; user-select:none;' }, ['仅显示活跃分片']) as HTMLLabelElement;
   toolbar.appendChild(clearBtn);
+  toolbar.appendChild(activeOnlyCheckbox);
+  toolbar.appendChild(activeOnlyLabel);
 
   const container = createEl('div', {
     style: 'display:flex; flex-direction:column; gap:10px; font-family:"Cascadia Mono", Consolas, ui-monospace, SFMono-Regular, Menlo, monospace; font-size:12px;',
   }) as HTMLDivElement;
 
   const sectionMap = new Map<string, HTMLDivElement>();
+  const sectionCardMap = new Map<string, HTMLDivElement>();
 
   const extractRunId = (line: string) => {
     const text = String(line || '');
@@ -48,7 +53,20 @@ export function renderLogs(root: HTMLElement, ctx: any) {
     card.appendChild(body);
     container.appendChild(card);
     sectionMap.set(normalized, body);
+    sectionCardMap.set(normalized, card);
     return body;
+  };
+
+  const updateSectionVisibility = () => {
+    const activeOnly = activeOnlyCheckbox.checked;
+    const activeRunIds: Set<string> = (ctx as any)._activeRunIds instanceof Set ? (ctx as any)._activeRunIds : new Set<string>();
+    sectionCardMap.forEach((card, runId) => {
+      if (!activeOnly || runId === 'global') {
+        card.style.display = '';
+        return;
+      }
+      card.style.display = activeRunIds.has(runId) ? '' : 'none';
+    });
   };
 
   const appendLine = (line: string) => {
@@ -64,6 +82,11 @@ export function renderLogs(root: HTMLElement, ctx: any) {
     ctx.clearLog();
     container.textContent = '';
     sectionMap.clear();
+    sectionCardMap.clear();
+  };
+
+  activeOnlyCheckbox.onchange = () => {
+    updateSectionVisibility();
   };
 
   // 初始渲染现有日志
@@ -72,6 +95,7 @@ export function renderLogs(root: HTMLElement, ctx: any) {
     existingLines.forEach((line: string) => {
       appendLine(line);
     });
+    updateSectionVisibility();
   }
 
   // 监听后续日志追加
@@ -79,12 +103,23 @@ export function renderLogs(root: HTMLElement, ctx: any) {
   ctx._appendLogBase = originalAppendLog;
   ctx.appendLog = (line: string) => {
     appendLine(line);
+    updateSectionVisibility();
     // 同时保留原有行为（如果其他地方需要）
     if (typeof originalAppendLog === 'function') originalAppendLog(line);
   };
+
+  const unsubscribeActiveRuns = typeof ctx.onActiveRunsChanged === 'function'
+    ? ctx.onActiveRunsChanged(() => updateSectionVisibility())
+    : null;
+
+  updateSectionVisibility();
 
  root.appendChild(title);
  root.appendChild(sub);
  root.appendChild(toolbar);
  root.appendChild(container);
+
+  root.addEventListener('DOMNodeRemoved', () => {
+    if (typeof unsubscribeActiveRuns === 'function') unsubscribeActiveRuns();
+  }, { once: true });
 }

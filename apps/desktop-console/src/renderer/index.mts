@@ -29,6 +29,8 @@ const mainEl = document.getElementById('main') as HTMLElement | null;
 const ctx: any = {
   settings: null as any,
   activeRunId: null as string | null,
+  _activeRunIds: new Set<string>(),
+  _activeRunsListeners: [] as Array<() => void>,
   _logLines: [] as string[],
   appendLog(line: string) {
     const l = String(line || '').trim();
@@ -38,6 +40,17 @@ const ctx: any = {
   },
   clearLog() {
     this._logLines = [];
+  },
+  onActiveRunsChanged(listener: () => void) {
+    this._activeRunsListeners.push(listener);
+    return () => {
+      this._activeRunsListeners = this._activeRunsListeners.filter((x: () => void) => x !== listener);
+    };
+  },
+  notifyActiveRunsChanged() {
+    this._activeRunsListeners.forEach((listener: () => void) => {
+      try { listener(); } catch {}
+    });
   },
   setStatus(s: string) {
     statusEl.textContent = s;
@@ -87,8 +100,13 @@ function setActiveTab(id: TabId) {
 function installCmdEvents() {
   window.api.onCmdEvent((evt: any) => {
     const runTag = evt?.runId ? `[rid:${evt.runId}] ` : '';
+    const runId = String(evt?.runId || '').trim();
     if (evt?.type === 'started') {
       ctx.activeRunId = evt.runId;
+      if (runId) {
+        ctx._activeRunIds.add(runId);
+        ctx.notifyActiveRunsChanged();
+      }
       ctx.appendLog(`${runTag}[started] ${evt.title} pid=${evt.pid} runId=${evt.runId}`);
       ctx.setStatus(`running: ${evt.title}`);
     } else if (evt?.type === 'stdout') {
@@ -96,8 +114,12 @@ function installCmdEvents() {
     } else if (evt?.type === 'stderr') {
       ctx.appendLog(`${runTag}[stderr] ${evt.line}`);
     } else if (evt?.type === 'exit') {
+      if (runId) {
+        ctx._activeRunIds.delete(runId);
+        ctx.notifyActiveRunsChanged();
+      }
       ctx.appendLog(`${runTag}[exit] code=${evt.exitCode ?? 'null'} signal=${evt.signal ?? 'null'}`);
-      ctx.setStatus('idle');
+      ctx.setStatus(ctx._activeRunIds.size > 0 ? `running: ${ctx._activeRunIds.size} tasks` : 'idle');
     }
   });
 }
