@@ -317,10 +317,6 @@ export function renderXiaohongshuTab(root: HTMLElement, api: any) {
  guideCard.appendChild(completeStep);
  
  const startRunBtn = createEl('button', { type: 'button', style: 'display:none; margin-top:8px; width:100%;' }, ['开始运行']) as HTMLButtonElement;
-  startRunBtn.onclick = () => {
-    // 触发主运行按钮
-    runBtn.click();
-  };
  guideCard.appendChild(startRunBtn);
 
  const tileLane = createEl('div', { className: 'xhs-tile-lane' }) as HTMLDivElement;
@@ -1734,6 +1730,10 @@ export function renderXiaohongshuTab(root: HTMLElement, api: any) {
       runBtn.disabled = false;
       runBtn.textContent = prevText || '开始执行编排';
     }
+  };
+
+  startRunBtn.onclick = () => {
+    runBtn.click();
   };
 
   stopBtn.onclick = async () => {
