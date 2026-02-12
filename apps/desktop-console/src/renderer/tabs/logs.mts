@@ -30,9 +30,11 @@ export function renderLogs(root: HTMLElement, ctx: any) {
 
   const parseShardHint = (line: string): string[] => {
     const text = String(line || '');
-    const match = text.match(/\[shard-hint\]\s*profiles=([A-Za-z0-9_,-]+)/i);
-    if (!match?.[1]) return [];
-    return String(match[1])
+    const hinted = text.match(/\[shard-hint\]\s*profiles=([A-Za-z0-9_,-]+)/i);
+    const orchestrate = text.match(/\[orchestrate\][^\n]*\bprofiles=([A-Za-z0-9_,-]+)/i);
+    const raw = hinted?.[1] || orchestrate?.[1] || '';
+    if (!raw) return [];
+    return String(raw)
       .split(',')
       .map((x) => x.trim())
       .filter(Boolean);
@@ -125,15 +127,23 @@ export function renderLogs(root: HTMLElement, ctx: any) {
     const text = String(line || '').trim();
     if (!text) return;
 
+    const rawRunId = extractRunId(text);
+
     const hintedProfiles = parseShardHint(text);
     if (hintedProfiles.length > 0) {
       shardProfileQueue = hintedProfiles.slice();
       hintedProfiles.forEach((profile) => {
-        ensureSection(`shard:${profile}`, `分片: ${profile}`);
+        const sectionKey = `shard:${profile}`;
+        ensureSection(sectionKey, `分片: ${profile}`);
+        if (rawRunId !== 'global') {
+          if (!sectionRunIds.has(sectionKey)) {
+            sectionRunIds.set(sectionKey, new Set<string>());
+          }
+          sectionRunIds.get(sectionKey)?.add(rawRunId);
+        }
       });
     }
 
-    const rawRunId = extractRunId(text);
     if (rawRunId !== 'global') {
       logActiveRunIds.add(rawRunId);
       if (text.includes('[exit]')) {
