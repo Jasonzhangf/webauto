@@ -1260,7 +1260,7 @@ export function renderXiaohongshuTab(root: HTMLElement, api: any) {
   let latestProfiles: string[] = [];
 
   function extractBatchBase(profileId: string): string {
-    const m = String(profileId || '').trim().match(/^(.*?)-batch(?:[-_](\d+))?$/);
+    const m = String(profileId || '').trim().match(/^(.*?)[-_]batch(?:[-_](\\d+))?$/);
     if (!m) return '';
     return String(m[1] || '').trim();
   }
@@ -1269,15 +1269,17 @@ export function renderXiaohongshuTab(root: HTMLElement, api: any) {
     const currentProfile = String(profilePickSel.value || '').trim();
     const fromCurrent = extractBatchBase(currentProfile);
     if (fromCurrent) return fromCurrent;
-    const firstBatch = latestProfiles.find((p) => /-batch(?:[-_]\d+)?$/.test(String(p || '').trim()));
+    const firstBatch = latestProfiles.find((p) => /[-_]batch(?:[-_]\\d+)?$/.test(String(p || '').trim()));
     const fromFirst = extractBatchBase(String(firstBatch || ''));
     return fromFirst || 'xiaohongshu';
   }
 
   function resolveAddBatchPrefix(): string {
     const manual = String(addBatchNameInput.value || '').trim();
-    const base = manual || inferDefaultBatchBase();
-    return `${base}-batch`;
+    const inferredBase = inferDefaultBatchBase();
+    const base = manual || inferredBase;
+    const hasLegacyBatch = latestProfiles.some((p) => String(p || '').trim().startsWith(`${base}_batch-`) || String(p || '').trim() === `${base}_batch`);
+    return hasLegacyBatch ? `${base}_batch` : `${base}-batch`;
   }
 
   function syncAddBatchPlaceholder() {
@@ -1462,7 +1464,7 @@ export function renderXiaohongshuTab(root: HTMLElement, api: any) {
   accountAddBtn.onclick = async () => {
     const kw = resolveAddBatchPrefix();
     const addCount = Math.max(1, Math.floor(Number(addAccountCountInput.value || '1')));
-    const poolCount = latestProfiles.filter((p) => String(p || '').trim() === kw || String(p || '').trim().startsWith(kw + '-')).length;
+    const poolCount = latestProfiles.filter((p) => String(p || '').trim() === kw || String(p || '').trim().startsWith(kw + '-') || String(p || '').trim().startsWith(kw.replace('-batch','_batch') + '-') || String(p || '').trim().startsWith(kw.replace('-batch','_batch') + '_')).length;
     const ensureCount = poolCount + addCount;
     const timeoutSec = Math.max(30, Math.floor(Number(api?.settings?.timeouts?.loginTimeoutSec || 900)));
     const args = [
