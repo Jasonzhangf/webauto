@@ -96,3 +96,14 @@ test('xiaohongshu tab enables OCR toggle and forwards ocr command', async () => 
   assert.match(src, /registerHistoryInput\(ocrCommandInput, 'ocrCommand'\)/);
   assert.match(src, /args\.push\('--ocr-command', String\(ocrCommandInput\.value \|\| ''\)\.trim\(\)\)/);
 });
+
+test('xiaohongshu tab aggregates multi-shard runIds within current session', async () => {
+  const src = await getSrc();
+  assert.match(src, /const activeUnifiedRunIds = new Set<string>\(\);/);
+  assert.match(src, /const runDoneAgg = new Map<string, \{ processed: number; liked: number; replied: number \}>\(\);/);
+  assert.match(src, /return tsMs \+ 2000 >= sessionStartMs;/);
+  assert.match(src, /if \(activeUnifiedRunIds\.size > 0 && evtRunId && !activeUnifiedRunIds\.has\(evtRunId\)\) continue;/);
+  assert.match(src, /if \(activeUnifiedRunIds\.size === 0 && evtRunId\) activeUnifiedRunIds\.add\(evtRunId\);/);
+  assert.match(src, /if \(runId\) \{[\s\S]*runDoneAgg\.set\(runId,/);
+  assert.match(src, /事件流\$\{shardHint\}：\$\{liveStats\.eventsPath\}/);
+});

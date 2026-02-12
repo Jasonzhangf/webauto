@@ -681,11 +681,13 @@ export function renderXiaohongshuTab(root: HTMLElement, api: any) {
     noteId: '',
   };
 
-  let internalRunId = '';
+  let sessionStartMs = Date.now();
   let eventsOffset = 0;
   let eventsCarry = '';
+  const activeUnifiedRunIds = new Set<string>();
   const processedNotes = new Set<string>();
   const noteAgg = new Map<string, { liked: number; replied: number; comments: number; path: string }>();
+  const runDoneAgg = new Map<string, { processed: number; liked: number; replied: number }>();
   const likedNotes = new Map<string, { count: number; path: string }>();
   const repliedNotes = new Map<string, { count: number; path: string }>();
 
@@ -719,7 +721,8 @@ export function renderXiaohongshuTab(root: HTMLElement, api: any) {
     commentsStat.textContent = `当前帖子评论：${liveStats.currentCommentsCollected}/${liveStats.currentCommentsTarget}`;
     likesStat.textContent = `总点赞：${liveStats.likesTotal}`;
     repliesStat.textContent = `总回复：${liveStats.repliesTotal}`;
-    streamStat.textContent = liveStats.eventsPath ? `事件流：${liveStats.eventsPath}` : '事件流：未绑定';
+    const shardHint = activeUnifiedRunIds.size > 0 ? `（分片run=${activeUnifiedRunIds.size}）` : '';
+    streamStat.textContent = liveStats.eventsPath ? `事件流${shardHint}：${liveStats.eventsPath}` : '事件流：未绑定';
     renderActionList(likedList, likedNotes, '暂无点赞命中');
     renderActionList(repliedList, repliedNotes, '暂无回复命中');
   };
@@ -734,25 +737,38 @@ export function renderXiaohongshuTab(root: HTMLElement, api: any) {
     liveStats.repliesTotal = 0;
     liveStats.eventsPath = '';
     liveStats.noteId = '';
-    internalRunId = '';
+    sessionStartMs = Date.now();
     eventsOffset = 0;
     eventsCarry = '';
+    activeUnifiedRunIds.clear();
     processedNotes.clear();
     noteAgg.clear();
+    runDoneAgg.clear();
     likedNotes.clear();
     repliedNotes.clear();
     renderLiveStats();
   };
 
   const applyUnifiedTotals = () => {
-    let likes = 0;
-    let replies = 0;
+    let likesFromNotes = 0;
+    let repliesFromNotes = 0;
     noteAgg.forEach((v) => {
-      likes += Number(v.liked || 0);
-      replies += Number(v.replied || 0);
+      likesFromNotes += Number(v.liked || 0);
+      repliesFromNotes += Number(v.replied || 0);
     });
-    liveStats.likesTotal = likes;
-    liveStats.repliesTotal = replies;
+
+    let processedFromDone = 0;
+    let likesFromDone = 0;
+    let repliesFromDone = 0;
+    runDoneAgg.forEach((v) => {
+      processedFromDone += Number(v.processed || 0);
+      likesFromDone += Number(v.liked || 0);
+      repliesFromDone += Number(v.replied || 0);
+    });
+
+    liveStats.postsProcessed = Math.max(processedNotes.size, processedFromDone, Number(liveStats.postsProcessed || 0));
+    liveStats.likesTotal = Math.max(likesFromNotes, likesFromDone, Number(liveStats.likesTotal || 0));
+    liveStats.repliesTotal = Math.max(repliesFromNotes, repliesFromDone, Number(liveStats.repliesTotal || 0));
   };
 
   const applyRunEvent = (evt: any) => {
@@ -816,13 +832,30 @@ export function renderXiaohongshuTab(root: HTMLElement, api: any) {
       if (current.replied > 0) repliedNotes.set(noteId, { count: current.replied, path: current.path });
     }
     if (eventType === 'phase_unified_done') {
-      liveStats.postsProcessed = Number(evt?.processed || liveStats.postsProcessed || 0);
-      liveStats.likesTotal = Number(evt?.totalLiked || liveStats.likesTotal || 0);
-      liveStats.repliesTotal = Number(evt?.totalReplied || liveStats.repliesTotal || 0);
+      const runId = String(evt?.runId || '').trim();
+      if (runId) {
+        runDoneAgg.set(runId, {
+          processed: Number(evt?.processed || 0),
+          liked: Number(evt?.totalLiked || 0),
+          replied: Number(evt?.totalReplied || 0),
+        });
+      } else {
+        liveStats.postsProcessed = Number(evt?.processed || liveStats.postsProcessed || 0);
+        liveStats.likesTotal = Number(evt?.totalLiked || liveStats.likesTotal || 0);
+        liveStats.repliesTotal = Number(evt?.totalReplied || liveStats.repliesTotal || 0);
+      }
     }
 
     applyUnifiedTotals();
     renderLiveStats();
+  };
+
+  const isCurrentSessionEvent = (evt: any) => {
+    const tsRaw = String(evt?.ts || '').trim();
+    if (!tsRaw) return true;
+    const tsMs = Date.parse(tsRaw);
+    if (!Number.isFinite(tsMs)) return true;
+    return tsMs + 2000 >= sessionStartMs;
   };
 
   const maybeBindEventsFile = (filePath: string) => {
@@ -846,7 +879,7 @@ export function renderXiaohongshuTab(root: HTMLElement, api: any) {
         eventsOffset = Number(ret?.nextOffset || eventsOffset || 0);
         if (!text) return;
 
-        const lines = `${eventsCarry}${text}`.split(/\r?\n/g);
+        const lines = (eventsCarry + text).split(/\r?\n/g);
         eventsCarry = lines.pop() || '';
 
         for (const rawLine of lines) {
@@ -854,9 +887,15 @@ export function renderXiaohongshuTab(root: HTMLElement, api: any) {
           if (!line) continue;
           try {
             const evt = JSON.parse(line);
-            if (!internalRunId && evt?.type === 'run_start' && evt?.runId) internalRunId = String(evt.runId);
-            if (internalRunId && evt?.runId && String(evt.runId) !== internalRunId) continue;
-            if (!internalRunId && evt?.runId) internalRunId = String(evt.runId);
+            if (!isCurrentSessionEvent(evt)) continue;
+
+            const evtRunId = String(evt?.runId || '').trim();
+            if (evtRunId && String(evt?.type || '') === 'run_start') {
+              activeUnifiedRunIds.add(evtRunId);
+            }
+
+            if (activeUnifiedRunIds.size > 0 && evtRunId && !activeUnifiedRunIds.has(evtRunId)) continue;
+            if (activeUnifiedRunIds.size === 0 && evtRunId) activeUnifiedRunIds.add(evtRunId);
             applyRunEvent(evt);
           } catch {
             // ignore malformed json lines
@@ -872,7 +911,8 @@ export function renderXiaohongshuTab(root: HTMLElement, api: any) {
     const text = String(line || '');
     const runIdMatch = text.match(/runId\s*[:=]\s*([A-Za-z0-9_-]+)/);
     if (runIdMatch?.[1]) {
-      internalRunId = String(runIdMatch[1]);
+      activeUnifiedRunIds.add(String(runIdMatch[1]));
+      renderLiveStats();
     }
 
     const eventsPathMatch = text.match(/(?:events=|eventsPath\s*[:=]\s*)(\/[^\s]+run-events\.jsonl)/);
