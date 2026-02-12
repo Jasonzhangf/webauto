@@ -36,6 +36,9 @@ contextBridge.exposeInMainWorld('api', {
   runtimeSetHeaderBar: (spec) => ipcRenderer.invoke('runtime:setHeaderBar', spec),
   desktopHeartbeat: () => ipcRenderer.invoke('desktop:heartbeat'),
 
+  // Generic IPC invoke for extensibility
+  invoke: (channel, ...args) => ipcRenderer.invoke(channel, ...args),
+
   // Event listeners
   onSettingsChanged: (handler) => {
     const fn = (_, payload) => handler(payload);
