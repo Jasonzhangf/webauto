@@ -11,17 +11,8 @@
       header .tabs { display: flex; gap: 10px; }
       header .tab { padding: 6px 10px; border-radius: 8px; cursor: pointer; color: #b9c0d4; }
       header .tab.active { background: #1b2233; color: #fff; }
-      #main { display: grid; grid-template-rows: 1fr 0px; height: calc(100vh - 44px); min-height: 1000px; }
+      #main { height: calc(100vh - 44px); min-height: 1000px; }
       #content { padding: 14px; overflow: auto; }
-      #log { border-top: 1px solid #23262f; padding: 8px 14px; font-family: "Cascadia Mono", Consolas, ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; overflow: auto; background: #0b0d12; }
-      body:not(.log-expanded) #log { border-top: none; padding: 0; overflow: hidden; }
-      #log-toggle { margin-right: 8px; background: #1b2233; color: #b9c0d4; border: 1px solid #23262f; border-radius: 8px; padding: 4px 10px; cursor: pointer; }
-      #log-toggle:hover { color: #fff; }
-      #log-clear { margin-right: 10px; background: #111723; color: #9fb0d8; border: 1px solid #23262f; border-radius: 8px; padding: 4px 10px; cursor: pointer; }
-      #log-clear:hover { color: #fff; }
-      #log-ratio-wrap { display:flex; align-items:center; gap:6px; margin-right: 10px; color:#8b93a6; }
-      #log-ratio { width: 120px; accent-color: #2b67ff; }
-      #log-ratio-value { min-width: 36px; text-align: right; color:#b9c0d4; }
       .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 10px; }
       .row > * { min-width: 0; }
       .card { border: 1px solid #23262f; background: #121622; border-radius: 12px; padding: 12px; margin-bottom: 12px; }
@@ -52,11 +43,6 @@
 
       .xhs-nav-strip { border:1px solid #26437a; background:#0c1830; border-radius:10px; padding:10px; margin-bottom:10px; }
       .xhs-nav-actions { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
-      .xhs-tile-lane { display:flex; gap:12px; overflow-x:auto; overflow-y:hidden; align-items:stretch; padding-bottom:6px; scroll-snap-type:x proximity; }
-      .xhs-tile { flex:0 0 min(560px, 86vw); height:620px; display:flex; flex-direction:column; scroll-snap-align:start; border:1px solid #263147; background:#0d131f; border-radius:12px; padding:10px; }
-      .xhs-tile.active { border-color:#2b67ff; box-shadow:0 0 0 1px #2b67ff inset; }
-      .xhs-tile-head { font-size:13px; font-weight:700; margin-bottom:8px; color:#dbeafe; }
-      .xhs-tile-body { display:flex; flex-direction:column; gap:10px; overflow:auto; min-height:0; padding-right:2px; }
       .xhs-compact-card { border:1px solid #263147; border-radius:8px; padding:8px; background:#101a2a; }
       .xhs-account-list { max-height:230px; overflow:auto; border:1px solid #263147; border-radius:8px; }
       .xhs-account-row { display:flex; justify-content:space-between; gap:8px; border-bottom:1px solid #263147; padding:6px 8px; }
@@ -67,18 +53,10 @@
       <div class="title">WebAuto Console</div>
       <nav class="tabs" id="tabs"></nav>
       <div style="flex:1"></div>
-      <button id="log-toggle" type="button">日志：展开</button>
-      <button id="log-clear" type="button">清空日志</button>
-      <div id="log-ratio-wrap" class="muted">
-        <span>下方面板</span>
-        <input id="log-ratio" type="range" min="15" max="60" step="1" value="28" />
-        <span id="log-ratio-value">28%</span>
-      </div>
       <div class="muted" id="status"></div>
     </header>
     <div id="main">
       <div id="content"></div>
-      <div id="log"></div>
     </div>
     <script type="module" src="./index.js"></script>
   </body>

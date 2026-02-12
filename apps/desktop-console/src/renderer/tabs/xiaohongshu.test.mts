@@ -42,7 +42,6 @@ test('xiaohongshu tab hides unchecked bodies and blocks reply without gate', asy
   assert.match(src, /opOrderRow\.style\.display = featureDisplay/);
 });
 
-
 test('xiaohongshu tab input history supports autocomplete and hotkey delete', async () => {
   const src = await getSrc();
   assert.match(src, /INPUT_HISTORY_MAX = 10/);
@@ -51,7 +50,6 @@ test('xiaohongshu tab input history supports autocomplete and hotkey delete', as
   assert.match(src, /Ctrl\+Shift\+Backspace/);
   assert.match(src, /persistHistoryFns\.forEach\(\(persist\) => persist\(\)\)/);
 });
-
 
 test('xiaohongshu tab clarifies active profile and account-mode visibility', async () => {
   const src = await getSrc();
@@ -80,14 +78,12 @@ test('xiaohongshu tab persists and restores last config for default values', asy
   assert.match(src, /writeLastConfig\(\{/);
 });
 
-
 test('xiaohongshu tab maps like-only results to like evidence directory', async () => {
   const src = await getSrc();
   assert.match(src, /const likeEvidenceDir = String\(evt\?\.likeEvidenceDir \|\| ''\)\.trim\(\);/);
   assert.match(src, /else if \(likeEvidenceDir\) current\.path = likeEvidenceDir;/);
   assert.match(src, /if \(!current\.path && likeEvidenceDir\) current\.path = likeEvidenceDir;/);
 });
-
 
 test('xiaohongshu tab enables OCR toggle and forwards ocr command', async () => {
   const src = await getSrc();
@@ -106,42 +102,4 @@ test('xiaohongshu tab aggregates multi-shard runIds within current session', asy
   assert.match(src, /if \(activeUnifiedRunIds\.size === 0 && evtRunId\) activeUnifiedRunIds\.add\(evtRunId\);/);
   assert.match(src, /if \(runId\) \{[\s\S]*runDoneAgg\.set\(runId,/);
   assert.match(src, /事件流\$\{shardHint\}：\$\{liveStats\.eventsPath\}/);
-});
-
-test('xiaohongshu tab enables navigation-mode onboarding for account check and add account flow', async () => {
-  const src = await getSrc();
-  assert.match(src, /XHS_NAV_MODE_KEY = 'webauto\.xhs\.navigationMode\.v1'/);
-  assert.match(src, /导航模式（默认开启）/);
-  assert.match(src, /账号检查与新增/);
-  assert.match(src, /accountAddBtn\.onclick = async \(\) => \{/);
-  assert.match(src, /'新增账号（headful\/camoufox）'/);
-  assert.match(src, /window\.api\.pathJoin\('scripts', 'profilepool\.mjs'\)/);
-  assert.match(src, /--ensure-count/);
-  assert.match(src, /--keep-session/);
-  assert.match(src, /camoufox\/headful/);
-});
-
-
-
-test('xiaohongshu tab supports click-activate tile and wheel horizontal scrolling', async () => {
-  const src = await getSrc();
-  assert.match(src, /let activeTileId = 'board';/);
-  assert.match(src, /const setActiveTile = \(id: string\) => \{/);
-  assert.match(src, /tile\.onclick = \(\) => setActiveTile\(id\);/);
-  assert.match(src, /tileLane\.addEventListener\(\s*'wheel'/);
-  assert.match(src, /evt\.preventDefault\(\);/);
-  assert.match(src, /tile\.addEventListener\('pointerdown', \(\) => setActiveTile\(id\), \{ capture: true \}\);/);
-  assert.match(src, /const resolveTileIdFromEvent = \(target: EventTarget \| null\) => \{/);
-  assert.match(src, /if \(!sourceTileId \|\| sourceTileId !== activeTileId\) return;/);
-  assert.match(src, /tileLane\.scrollLeft \+= baseDelta \* deltaFactor;/);
-});
-test('xiaohongshu tab renders horizontal equal-height tiles with board then like order', async () => {
-  const src = await getSrc();
-  assert.match(src, /const tileLane = createEl\('div', \{ className: 'xhs-tile-lane' \}\)/);
-  assert.match(src, /const boardTile = createTile\('board', '运行看板'\)/);
-  assert.match(src, /const likeTile = createTile\('like', '点赞设置'\)/);
-  assert.match(src, /\[boardTile\.tile, likeTile\.tile, accountTile\.tile, runTile\.tile, commentTile\.tile, collectTile\.tile\]/);
-  assert.match(src, /focusTile\('board'\)/);
-  assert.match(src, /accountNextLikeBtn\.onclick = \(\) => focusTile\('like'\)/);
-  assert.match(src, /likeNextBoardBtn\.onclick = \(\) => focusTile\('board'\)/);
 });

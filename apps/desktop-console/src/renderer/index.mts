@@ -1,6 +1,7 @@
 import { renderPreflight } from './tabs/preflight.mts';
 import { renderDebug } from './tabs/debug.mts';
 import { renderSettings } from './tabs/settings.mts';
+import { renderLogs } from './tabs/logs.mts';
 import { renderXiaohongshuTab } from './tabs/xiaohongshu.mts';
 import { createEl } from './ui-components.mts';
 
@@ -10,87 +11,33 @@ declare global {
   }
 }
 
-type TabId = 'xiaohongshu' | 'preflight' | 'debug' | 'settings';
+type TabId = 'xiaohongshu' | 'preflight' | 'debug' | 'settings' | 'logs';
 
 const tabs: Array<{ id: TabId; label: string; render: (root: HTMLElement, ctx: any) => void }> = [
   { id: 'xiaohongshu', label: '小红书', render: renderXiaohongshuTab },
   { id: 'preflight', label: '预处理', render: renderPreflight },
   { id: 'debug', label: '调试', render: renderDebug },
   { id: 'settings', label: '设置', render: renderSettings },
+  { id: 'logs', label: '日志', render: renderLogs },
 ];
 
 const tabsEl = document.getElementById('tabs')!;
 const contentEl = document.getElementById('content')!;
-const logEl = document.getElementById('log')!;
 const statusEl = document.getElementById('status')!;
 const mainEl = document.getElementById('main') as HTMLElement | null;
-const logToggleEl = document.getElementById('log-toggle') as HTMLButtonElement | null;
-const logClearEl = document.getElementById('log-clear') as HTMLButtonElement | null;
-const logRatioWrapEl = document.getElementById('log-ratio-wrap') as HTMLElement | null;
-const logRatioEl = document.getElementById('log-ratio') as HTMLInputElement | null;
-const logRatioValueEl = document.getElementById('log-ratio-value') as HTMLElement | null;
-
-let logExpanded = true;
-let logRatio = 42;
-
-try {
-  const saved = Number(window.localStorage.getItem('webauto.logRatio') || '');
-  if (Number.isFinite(saved) && saved >= 15 && saved <= 60) {
-    logRatio = Math.floor(saved);
-  }
-} catch {
-  // ignore localStorage failures
-}
-
-function applyMainLayout() {
-  if (!mainEl) return;
-  if (!logExpanded) {
-    mainEl.style.gridTemplateRows = '1fr 0px';
-    return;
-  }
-
-  const totalHeight = Math.max(320, mainEl.clientHeight || (window.innerHeight - 44));
-  const minLog = 120;
-  const maxLog = Math.max(minLog, totalHeight - 220);
-  const byRatio = Math.round(totalHeight * (logRatio / 100));
-  const logHeight = Math.min(maxLog, Math.max(minLog, byRatio));
-  mainEl.style.gridTemplateRows = `1fr ${logHeight}px`;
-}
-
-function setLogRatio(next: number) {
-  const clamped = Math.max(15, Math.min(60, Math.floor(next)));
-  logRatio = clamped;
-  if (logRatioEl) logRatioEl.value = String(clamped);
-  if (logRatioValueEl) logRatioValueEl.textContent = `${clamped}%`;
-  try {
-    window.localStorage.setItem('webauto.logRatio', String(clamped));
-  } catch {
-    // ignore localStorage failures
-  }
-  applyMainLayout();
-}
-
-function setLogExpanded(next: boolean) {
-  logExpanded = next;
-  document.body.classList.toggle('log-expanded', next);
-  if (logToggleEl) {
-    logToggleEl.textContent = next ? '日志：收起' : '日志：展开';
-  }
-  if (logRatioEl) logRatioEl.disabled = !next;
-  if (logRatioWrapEl) logRatioWrapEl.style.opacity = next ? '1' : '0.55';
-  applyMainLayout();
-}
 
 const ctx: any = {
   settings: null as any,
   activeRunId: null as string | null,
+  _logLines: [] as string[],
   appendLog(line: string) {
-    const div = createEl('div', { className: 'muted' }, [line]);
-    logEl.appendChild(div);
-    logEl.scrollTop = logEl.scrollHeight;
+    const l = String(line || '').trim();
+    if (!l) return;
+    this._logLines.push(l);
+    // Logs tab 会接管渲染；这里不再直接写 DOM
   },
   clearLog() {
-    logEl.textContent = '';
+    this._logLines = [];
   },
   setStatus(s: string) {
     statusEl.textContent = s;
@@ -102,17 +49,6 @@ const ctx: any = {
     setActiveTab(id);
   },
 };
-
-if (logToggleEl) {
-  logToggleEl.addEventListener('click', () => setLogExpanded(!logExpanded));
-}
-if (logClearEl) {
-  logClearEl.addEventListener('click', () => ctx.clearLog());
-}
-if (logRatioEl) {
-  logRatioEl.addEventListener('input', () => setLogRatio(Number(logRatioEl.value || '28')));
-}
-window.addEventListener('resize', () => applyMainLayout());
 
 function startDesktopHeartbeat() {
   const sendHeartbeat = async () => {
@@ -152,7 +88,6 @@ function installCmdEvents() {
   window.api.onCmdEvent((evt: any) => {
     if (evt?.type === 'started') {
       ctx.activeRunId = evt.runId;
-      setLogExpanded(true);
       ctx.appendLog(`[started] ${evt.title} pid=${evt.pid} runId=${evt.runId}`);
       ctx.setStatus(`running: ${evt.title}`);
     } else if (evt?.type === 'stdout') {
@@ -167,8 +102,6 @@ function installCmdEvents() {
 }
 
 async function main() {
-  setLogRatio(logRatio);
-  setLogExpanded(true);
   startDesktopHeartbeat();
   await loadSettings();
   installCmdEvents();
