@@ -13,7 +13,7 @@ export function renderLogs(root: HTMLElement, ctx: any) {
   toolbar.appendChild(clearBtn);
 
   const container = createEl('div', {
-    style: 'border:1px solid #23262f; background:#0b0d12; padding:10px 14px; border-radius:10px; min-height:400px; max-height:calc(100vh - 160px); overflow:auto; font-family:"Cascadia Mono", Consolas, ui-monospace, SFMono-Regular, Menlo, monospace; font-size:12px; white-space:pre-wrap; word-break:break-all;',
+    style: 'border:1px solid #23262f; background:#0b0d12; padding:10px 14px; border-radius:10px; height:calc(100vh - 140px); overflow:auto; font-family:"Cascadia Mono", Consolas, ui-monospace, SFMono-Regular, Menlo, monospace; font-size:12px; white-space:pre-wrap; word-break:break-all;',
   }) as HTMLDivElement;
 
   clearBtn.onclick = () => {
