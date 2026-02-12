@@ -107,3 +107,27 @@ test('xiaohongshu tab aggregates multi-shard runIds within current session', asy
   assert.match(src, /if \(runId\) \{[\s\S]*runDoneAgg\.set\(runId,/);
   assert.match(src, /事件流\$\{shardHint\}：\$\{liveStats\.eventsPath\}/);
 });
+
+test('xiaohongshu tab enables navigation-mode onboarding for account check and add account flow', async () => {
+  const src = await getSrc();
+  assert.match(src, /XHS_NAV_MODE_KEY = 'webauto\.xhs\.navigationMode\.v1'/);
+  assert.match(src, /导航模式（默认开启）/);
+  assert.match(src, /账号检查与新增/);
+  assert.match(src, /accountAddBtn\.onclick = async \(\) => \{/);
+  assert.match(src, /'新增账号（headful\/camoufox）'/);
+  assert.match(src, /window\.api\.pathJoin\('scripts', 'profilepool\.mjs'\)/);
+  assert.match(src, /--ensure-count/);
+  assert.match(src, /--keep-session/);
+  assert.match(src, /camoufox\/headful/);
+});
+
+test('xiaohongshu tab renders horizontal equal-height tiles with board then like order', async () => {
+  const src = await getSrc();
+  assert.match(src, /const tileLane = createEl\('div', \{ className: 'xhs-tile-lane' \}\)/);
+  assert.match(src, /const boardTile = createTile\('board', '运行看板'\)/);
+  assert.match(src, /const likeTile = createTile\('like', '点赞设置'\)/);
+  assert.match(src, /\[boardTile\.tile, likeTile\.tile, accountTile\.tile, runTile\.tile, commentTile\.tile, collectTile\.tile\]/);
+  assert.match(src, /focusTile\('board'\)/);
+  assert.match(src, /accountNextLikeBtn\.onclick = \(\) => focusTile\('like'\)/);
+  assert.match(src, /likeNextBoardBtn\.onclick = \(\) => focusTile\('board'\)/);
+});
