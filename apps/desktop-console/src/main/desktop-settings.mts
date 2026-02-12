@@ -3,6 +3,21 @@ import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
+export type ReplyStyle = 'friendly' | 'professional' | 'humorous' | 'concise' | 'custom';
+
+export type AiReplyConfig = {
+  enabled: boolean;
+  provider: 'openai-compatible';
+  baseUrl: string;
+  apiKey: string;
+  model: string;
+  temperature: number;
+  maxChars: number;
+  timeoutMs: number;
+  stylePreset: ReplyStyle;
+  styleCustom: string;
+};
+
 export type DesktopConsoleSettings = {
   unifiedApiUrl: string;
   browserServiceUrl: string;
@@ -15,6 +30,7 @@ export type DesktopConsoleSettings = {
   timeouts: { loginTimeoutSec: number; cmdTimeoutSec: number };
   profileAliases: Record<string, string>;
   profileColors: Record<string, string>;
+  aiReply: AiReplyConfig;
 };
 
 type DefaultsFile = Partial<DesktopConsoleSettings> & {
@@ -42,6 +58,37 @@ export function resolveLegacySettingsPath() {
 
 export function resolveDefaultDownloadRoot() {
   return path.join(resolveHomeDir(), '.webauto', 'download');
+}
+
+function normalizeAiReplyConfig(raw: any): AiReplyConfig {
+  if (!raw || typeof raw !== 'object') {
+    return {
+      enabled: false,
+      provider: 'openai-compatible',
+      baseUrl: 'http://127.0.0.1:5520/v1',
+      apiKey: '',
+      model: 'gemini-2.5-flash',
+      temperature: 0.7,
+      maxChars: 20,
+      timeoutMs: 25000,
+      stylePreset: 'friendly',
+      styleCustom: '',
+    };
+  }
+  const stylePresets: ReplyStyle[] = ['friendly', 'professional', 'humorous', 'concise', 'custom'];
+  const preset = String(raw.stylePreset || 'friendly');
+  return {
+    enabled: Boolean(raw.enabled ?? false),
+    provider: 'openai-compatible',
+    baseUrl: String(raw.baseUrl || 'http://127.0.0.1:5520/v1'),
+    apiKey: String(raw.apiKey || ''),
+    model: String(raw.model || 'gemini-2.5-flash'),
+    temperature: Math.max(0, Math.min(2, Number(raw.temperature ?? 0.7))),
+    maxChars: Math.max(5, Math.min(500, Math.floor(Number(raw.maxChars ?? 20)))),
+    timeoutMs: Math.max(5000, Math.floor(Number(raw.timeoutMs ?? 25000))),
+    stylePreset: stylePresets.includes(preset as ReplyStyle) ? (preset as ReplyStyle) : 'friendly',
+    styleCustom: String(raw.styleCustom || ''),
+  };
 }
 
 function normalizeSettings(defaults: Partial<DesktopConsoleSettings>, input: Partial<DesktopConsoleSettings>): DesktopConsoleSettings {
@@ -89,6 +136,7 @@ function normalizeSettings(defaults: Partial<DesktopConsoleSettings>, input: Par
     },
     profileAliases: aliases,
     profileColors: normalizeColorMap((input as any).profileColors ?? (defaults as any).profileColors ?? {}),
+    aiReply: normalizeAiReplyConfig((input as any).aiReply ?? (defaults as any).aiReply ?? {}),
   };
   return merged;
 }
