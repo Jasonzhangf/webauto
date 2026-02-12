@@ -38,6 +38,7 @@ export function renderLogs(root: HTMLElement, ctx: any) {
   const parentRunIds = new Set<string>();
   const runIdToSection = new Map<string, string>();
   const parentRunCurrentSection = new Map<string, string>();
+  const shardRunIds = new Set<string>();
   let shardProfileQueue: string[] = [];
 
   const parseShardHint = (line: string): string[] => {
@@ -101,7 +102,7 @@ export function renderLogs(root: HTMLElement, ctx: any) {
 
     card.appendChild(head);
     card.appendChild(body);
-    if (normalized === 'global') {
+    if (normalized === 'global' || !isShardSection(normalized)) {
       globalContainer.appendChild(card);
     } else {
       shardContainer.appendChild(card);
@@ -134,6 +135,7 @@ export function renderLogs(root: HTMLElement, ctx: any) {
       if (profile) {
         const sectionKey = `shard:${profile}`;
         runIdToSection.set(rawRunId, sectionKey);
+        shardRunIds.add(rawRunId);
         ensureSection(sectionKey, `分片: ${profile}`);
         return sectionKey;
       }
@@ -163,6 +165,7 @@ export function renderLogs(root: HTMLElement, ctx: any) {
       const relatedRunIds = sectionRunIds.get(sectionKey) || new Set<string>();
       const visible =
         effectiveActiveRunIds.has(sectionKey) ||
+        shardRunIds.has(sectionKey) ||
         Array.from(relatedRunIds).some((runId) => effectiveActiveRunIds.has(runId));
       card.style.display = visible ? '' : 'none';
     });
@@ -181,18 +184,16 @@ export function renderLogs(root: HTMLElement, ctx: any) {
       hintedProfiles.forEach((profile) => {
         const sectionKey = `shard:${profile}`;
         ensureSection(sectionKey, `分片: ${profile}`);
-        if (rawRunId !== 'global') {
+        if (prefixedRunId && rawRunId !== 'global') {
+          parentRunCurrentSection.set(prefixedRunId, sectionKey);
+          runIdToSection.set(rawRunId, sectionKey);
+          shardRunIds.add(rawRunId);
           if (!sectionRunIds.has(sectionKey)) {
             sectionRunIds.set(sectionKey, new Set<string>());
           }
-          sectionRunIds.get(sectionKey)?.add(rawRunId);
+          sectionRunIds.get(sectionKey)!.add(rawRunId);
         }
       });
-
-      // 若只有一个分片提示，直接绑定父rid上下文
-      if (prefixedRunId && hintedProfiles.length === 1) {
-        parentRunCurrentSection.set(prefixedRunId, `shard:${hintedProfiles[0]}`);
-      }
     }
 
     // 识别日志中的 Profile 行，切换父rid当前分片上下文
@@ -222,6 +223,7 @@ export function renderLogs(root: HTMLElement, ctx: any) {
       const childRunId = String(loggerChildRunId[1]).trim();
       const parentSection = parentRunCurrentSection.get(prefixedRunId);
       if (parentSection) {
+        shardRunIds.add(childRunId);
         runIdToSection.set(childRunId, parentSection);
         if (!sectionRunIds.has(parentSection)) {
           sectionRunIds.set(parentSection, new Set<string>());
@@ -239,6 +241,9 @@ export function renderLogs(root: HTMLElement, ctx: any) {
 
     const sectionKey = resolveSectionKey(text, rawRunId, prefixedRunId);
     const body = ensureSection(sectionKey);
+    if (isShardSection(sectionKey) && rawRunId !== 'global') {
+      shardRunIds.add(rawRunId);
+    }
     if (rawRunId !== 'global') {
       if (!sectionRunIds.has(sectionKey)) {
         sectionRunIds.set(sectionKey, new Set<string>());
@@ -260,6 +265,7 @@ export function renderLogs(root: HTMLElement, ctx: any) {
     parentRunIds.clear();
     runIdToSection.clear();
     parentRunCurrentSection.clear();
+    shardRunIds.clear();
     shardProfileQueue = [];
 
     globalContainer.textContent = '';
