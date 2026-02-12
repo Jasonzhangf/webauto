@@ -38,6 +38,11 @@ const CONFIG = {
     'dist/sharedmodule',
     'scripts/xiaohongshu',
     'scripts/xiaohongshu/lib',
+    'apps/desktop-console/package.json',
+    'apps/desktop-console/package-lock.json',
+    'apps/desktop-console/scripts',
+    'apps/desktop-console/src',
+    'apps/desktop-console/README.md',
     'scripts/run-xiaohongshu-phase1-2-34-v3.mjs',  // v3 统一入口
     'container-library',
     'scripts/lib',
@@ -99,7 +104,7 @@ async function createPackageJson() {
   const slimPkg = {
     name: CONFIG.name,
     version: CONFIG.version,
-    description: '小红书数据采集 CLI 工具',
+    description: 'WebAuto Desktop Console',
     type: 'module',
     engines: {
       node: CONFIG.nodeVersion
@@ -254,9 +259,159 @@ endlocal
 }
 
 // 创建安装脚本
+async function createDesktopConsoleScripts() {
+  const scriptDir = PACKAGE_DIR;
+  await ensureDir(scriptDir);
+
+  const unixScript = `#!/bin/bash
+# WebAuto Desktop Console
+
+set -e
+
+SCRIPT_DIR="\$(cd "\$(dirname "\${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="\$SCRIPT_DIR"
+APP_DIR="\$PROJECT_ROOT/apps/desktop-console"
+
+if ! command -v node &> /dev/null; then
+  echo "❌ 未检测到 Node.js"
+  echo "请访问 https://nodejs.org/ 下载安装 Node.js ${CONFIG.nodeVersion} 或更高版本"
+  exit 1
+fi
+
+if ! command -v npm &> /dev/null; then
+  echo "❌ 未检测到 npm，请重装 Node.js"
+  exit 1
+fi
+
+if [ ! -x "\$APP_DIR/node_modules/.bin/electron" ]; then
+  echo "[desktop-console] installing dependencies..."
+  (cd "\$APP_DIR" && npm install)
+fi
+
+if [ ! -f "\$APP_DIR/dist/main/index.mjs" ]; then
+  echo "[desktop-console] building..."
+  (cd "\$APP_DIR" && npm run build)
+fi
+
+"\$APP_DIR/node_modules/.bin/electron" "\$APP_DIR"
+`;
+
+  await writeFile(join(scriptDir, 'desktop-console'), unixScript, { mode: 0o755 });
+  log('创建: desktop-console');
+
+  const winScript = `@echo off
+chcp 65001 >nul
+REM WebAuto Desktop Console
+
+setlocal EnableDelayedExpansion
+
+set "SCRIPT_DIR=%~dp0"
+set "PROJECT_ROOT=%SCRIPT_DIR%"
+set "APP_DIR=%PROJECT_ROOT%\\apps\\desktop-console"
+
+if not exist "%APP_DIR%\\package.json" (
+  echo [error] desktop-console files missing: %APP_DIR%
+  exit /b 1
+)
+
+where node >nul 2>nul
+if %errorlevel% neq 0 (
+  echo [error] 未检测到 Node.js
+  echo 请访问 https://nodejs.org/ 下载安装 Node.js ${CONFIG.nodeVersion} 或更高版本
+  exit /b 1
+)
+
+where npm >nul 2>nul
+if %errorlevel% neq 0 (
+  echo [error] npm 未找到，请重装 Node.js
+  exit /b 1
+)
+
+if not exist "%APP_DIR%\\node_modules\\.bin\\electron.cmd" (
+  echo [desktop-console] installing dependencies...
+  call npm --prefix "%APP_DIR%" install
+  if %errorlevel% neq 0 exit /b 1
+)
+
+if not exist "%APP_DIR%\\dist\\main\\index.mjs" (
+  echo [desktop-console] building...
+  call npm --prefix "%APP_DIR%" run build
+  if %errorlevel% neq 0 exit /b 1
+)
+
+"%APP_DIR%\\node_modules\\.bin\\electron.cmd" "%APP_DIR%"
+
+endlocal
+`;
+
+  await writeFile(
+    join(scriptDir, 'desktop-console.bat'),
+    `\uFEFF${winScript.replace(/\n/g, '\r\n')}`
+  );
+  log('创建: desktop-console.bat');
+
+  await rm(join(PACKAGE_DIR, 'bin', 'xhs-cli'), { force: true });
+  await rm(join(PACKAGE_DIR, 'bin', 'xhs-cli.bat'), { force: true });
+}
+
 async function createInstallScripts() {
   // Unix install script
   const unixInstall = `#!/bin/bash
+# WebAuto Desktop Console 安装脚本
+
+set -e
+
+echo "🔍 正在检查 Node.js..."
+
+if ! command -v node &> /dev/null; then
+  echo "❌ 未检测到 Node.js"
+  echo ""
+  echo "请手动安装 Node.js:"
+  echo "  macOS:   brew install node"
+  echo "  或访问:  https://nodejs.org/"
+  exit 1
+fi
+
+NODE_VERSION=\$(node -v)
+echo "✅ Node.js 版本: \$NODE_VERSION"
+
+echo ""
+export CAMOUFOX_DIR="\$PWD/.camoufox"
+mkdir -p "\$CAMOUFOX_DIR"
+echo "🦊 Camoufox 安装目录: \$CAMOUFOX_DIR"
+echo ""
+echo "📦 正在安装项目依赖..."
+npm ci --production
+
+echo "🦊 正在检测 Camoufox..."
+CAMOUFOX_PATH="\$(npx camoufox path 2>/dev/null | tail -n 1 || true)"
+if [ -z "\$CAMOUFOX_PATH" ] || [ ! -e "\$CAMOUFOX_PATH" ]; then
+  echo "🦊 未检测到 Camoufox，开始下载..."
+  npx camoufox fetch
+  CAMOUFOX_PATH="\$(npx camoufox path 2>/dev/null | tail -n 1 || true)"
+fi
+
+if [ -z "\$CAMOUFOX_PATH" ] || [ ! -e "\$CAMOUFOX_PATH" ]; then
+  echo "❌ Camoufox 下载失败"
+  exit 1
+fi
+echo "✅ Camoufox 浏览器已就绪: $CAMOUFOX_PATH"
+
+echo ""
+echo "🧭 正在安装 Desktop Console 依赖..."
+npm --prefix apps/desktop-console install
+echo "🧱 正在构建 Desktop Console..."
+npm --prefix apps/desktop-console run build
+
+echo ""
+echo "✅ 安装完成！"
+echo ""
+echo "启动方式:"
+echo "  ./desktop-console"
+echo ""
+`;
+
+  const legacyUnixInstall = `#!/bin/bash
 # 小红书采集工具安装脚本
 
 set -e
@@ -322,6 +477,83 @@ echo ""
 
   // Windows install script
   const winInstall = `@echo off
+REM WebAuto Desktop Console 安装脚本
+
+setlocal
+cd /d "%~dp0"
+
+echo [install] Checking Node.js...
+
+where node >nul 2>nul
+if %errorlevel% neq 0 (
+  echo [install] Node.js not found.
+  echo [install] Download: https://nodejs.org/ (>=22.0.0)
+  exit /b 1
+)
+
+where npm >nul 2>nul
+if %errorlevel% neq 0 (
+  echo [install] npm not found. Reinstall Node.js.
+  exit /b 1
+)
+
+echo [install] Installing dependencies (npm ci --production)...
+call npm ci --production
+if %errorlevel% neq 0 (
+  echo [install] npm install failed.
+  exit /b 1
+)
+
+set "CAMOUFOX_PATH="
+for /f "delims=" %%i in ('npx camoufox path 2^>nul ^| findstr /v /c:"[baseline-browser-mapping]"') do set "CAMOUFOX_PATH=%%i"
+if not exist "%CAMOUFOX_PATH%" set "CAMOUFOX_PATH="
+if "%CAMOUFOX_PATH%"=="" (
+  echo [install] Camoufox not found. Downloading...
+  call npx camoufox fetch
+  if %errorlevel% neq 0 (
+    echo [install] Camoufox download failed.
+    exit /b 1
+  )
+)
+
+set "CAMOUFOX_PATH="
+for /f "delims=" %%i in ('npx camoufox path 2^>nul ^| findstr /v /c:"[baseline-browser-mapping]"') do set "CAMOUFOX_PATH=%%i"
+if not exist "%CAMOUFOX_PATH%" set "CAMOUFOX_PATH="
+
+if "%CAMOUFOX_PATH%"=="" (
+  echo [install] Camoufox path not found after download.
+  exit /b 1
+)
+
+echo [install] Camoufox browser ready: %CAMOUFOX_PATH%
+
+set "DESKTOP_DIR=%CD%\\apps\\desktop-console"
+if not exist "%DESKTOP_DIR%\\package.json" (
+  echo [install] Desktop Console files missing: %DESKTOP_DIR%
+  exit /b 1
+)
+
+echo [install] Installing Desktop Console dependencies...
+call npm --prefix "%DESKTOP_DIR%" install
+if %errorlevel% neq 0 (
+  echo [install] Desktop Console npm install failed.
+  exit /b 1
+)
+
+echo [install] Building Desktop Console...
+call npm --prefix "%DESKTOP_DIR%" run build
+if %errorlevel% neq 0 (
+  echo [install] Desktop Console build failed.
+  exit /b 1
+)
+
+echo.
+echo [install] Done.
+echo [install] Next:
+echo   "%CD%\\desktop-console.bat"
+`;
+
+  const legacyWinInstall = `@echo off
 REM 小红书采集工具安装脚本
 
 echo 🔍 正在检查 Node.js...
@@ -371,12 +603,75 @@ echo   bin\\xhs-cli phase2 --keyword "测试" --target 50
 echo.
 `;
 
-  await writeFile(join(PACKAGE_DIR, 'install.bat'), winInstall);
+  await writeFile(
+    join(PACKAGE_DIR, 'install.bat'),
+    `\uFEFF${winInstall.replace(/\n/g, '\r\n')}`
+  );
   log('创建: install.bat');
 }
 
 // 创建 README
 async function createReadme() {
+  const desktopReadme = `# WebAuto Desktop Console v${CONFIG.version}
+
+## 系统要求
+
+- **Node.js**: ${CONFIG.nodeVersion}
+- **操作系统**: Windows 10+, macOS 12+, Linux (Ubuntu 20.04+)
+- **浏览器**: 自动下载 Camoufox
+
+## 安装
+
+### Windows
+
+\`\`\`bash
+install.bat
+\`\`\`
+
+### macOS/Linux
+
+\`\`\`bash
+./install.sh
+\`\`\`
+
+## 启动
+
+\`\`\`bash
+# macOS/Linux
+./desktop-console
+
+# Windows
+desktop-console.bat
+\`\`\`
+
+## 目录结构
+
+\`\`\`
+xiaohongshu-collector/
+  desktop-console           # Desktop Console 入口 (macOS/Linux)
+  desktop-console.bat       # Desktop Console 入口 (Windows)
+  apps/desktop-console/     # Desktop Console 源码与构建产物
+  dist/                     # 编译产物（services/modules/sharedmodule）
+  scripts/                  # 业务脚本与工作流入口
+  container-library/        # 容器定义
+  runtime/infra/node-cli/   # 运行配置
+\`\`\`
+
+## 说明
+
+- Desktop Console 作为唯一执行入口，内部调用本地 scripts 与服务。
+- 搜索前需启动 SearchGate（端口 7790），服务端口为 7701/7704/8765。
+
+## 技术支持
+
+- GitHub: https://github.com/your-repo/webauto
+- 文档: https://github.com/your-repo/webauto/docs
+`;
+
+  await writeFile(join(PACKAGE_DIR, 'README.md'), desktopReadme);
+  log('鍒涘缓: README.md');
+  return;
+
   const readme = `# 小红书数据采集 CLI 工具 v${CONFIG.version}
 
 ## 系统要求
@@ -546,6 +841,7 @@ async function build() {
   // 5. 创建配置文件
   await createPackageJson();
   await createCliScripts();
+  await createDesktopConsoleScripts();
   await createInstallScripts();
   await createReadme();
 

@@ -49,6 +49,11 @@ const CONFIG = {
     'scripts/search-gate-server.mjs',
     'scripts/search-gate-cli.mjs',
     'scripts/run-xiaohongshu-phase1-2-34-v3.mjs',
+    'apps/desktop-console/package.json',
+    'apps/desktop-console/package-lock.json',
+    'apps/desktop-console/scripts',
+    'apps/desktop-console/src',
+    'apps/desktop-console/README.md',
     'container-library',
     'runtime/browser',
     'runtime/infra/node-cli/package.json'
@@ -107,7 +112,7 @@ async function createPackageJson() {
   const slimPkg = {
     name: CONFIG.name,
     version: CONFIG.version,
-    description: '小红书数据采集 CLI 工具',
+    description: 'WebAuto Desktop Console',
     type: 'module',
     engines: {
       node: CONFIG.nodeVersion
@@ -131,130 +136,62 @@ async function createPackageJson() {
   log('创建: package.json');
 }
 
-// 创建 CLI 入口脚本
+// 创建 Desktop Console 入口脚本
 async function createCliScripts() {
   const scriptDir = PACKAGE_DIR;
   await ensureDir(scriptDir);
 
-  // Unix shell script
   const unixScript = `#!/bin/bash
-# 小红书采集 CLI 入口
+# WebAuto Desktop Console
 
 set -e
 
 SCRIPT_DIR="\$(cd "\$(dirname "\${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="\$SCRIPT_DIR"
-cd "\$PROJECT_ROOT"
-export PLAYWRIGHT_BROWSERS_PATH="\$PROJECT_ROOT/.ms-playwright"
+APP_DIR="\$PROJECT_ROOT/apps/desktop-console"
 
-# 检查 Node.js
 if ! command -v node &> /dev/null; then
   echo "❌ 未检测到 Node.js"
   echo "请访问 https://nodejs.org/ 下载安装 Node.js ${CONFIG.nodeVersion} 或更高版本"
   exit 1
 fi
 
-NODE_VERSION=\$(node -v | cut -d'v' -f2 | cut -d'.' -f1)
-if [ "\$NODE_VERSION" -lt 22 ]; then
-  echo "❌ Node.js 版本过低 (当前: \$(node -v), 需要: >=22.0.0)"
+if ! command -v npm &> /dev/null; then
+  echo "❌ 未检测到 npm，请重装 Node.js"
   exit 1
 fi
 
-show_help() {
-  cat << EOF
-小红书数据采集 CLI 工具 v${CONFIG.version}
-
-用法:
-  xhs -k <keyword> [-n <count>] [--cn <count>] [--headless|--headful]
-  xhs <keyword> [-n <count>] [--cn <count>]
-
-参数:
-  -k, --keyword       搜索关键词（必填，可用位置参数）
-  -n, --count         本次新增采集数量（默认 100，去重后补齐）
-  -cn, --commentCount 评论最大数量（不写=全部，写了就是上限）
-  --headless          无头模式：浏览器不显示（默认）
-  --headful           有头模式：浏览器显示（覆盖 headless）
-  --dev               开发模式：命中风控/安全点击直接失败（不做恢复）
-
-说明:
-  默认生产环境（prod），无需传参
-  同关键词已有记录不会跳过，按 -n 新增并对已有帖子去重
-
-命令:
-  xhs phase1          后台启动并复用浏览器会话
-  xhs phase2          搜索并采集链接
-  xhs phase3          采集详情和评论
-  xhs stop            停止所有服务与后台进程
-  xhs install         检查并安装依赖
-  xhs check           仅检查环境与浏览器
-
-示例:
-  xhs -k "手机膜" -n 50 --headless
-  xhs -k "手机膜" --headful
-  xhs phase1                                        # 后台启动浏览器会话（日志: ~/.webauto/logs/xiaohongshu_phase1.log）
-  xhs stop                                          # 停止所有服务与后台进程
-  xhs check                                         # 仅检查环境与浏览器
-
-更多信息请访问: https://github.com/your-repo/webauto
-EOF
-}
-
-if [ "\$#" -eq 0 ]; then
-  show_help
-  exit 0
+if [ ! -x "\$APP_DIR/node_modules/.bin/electron" ]; then
+  echo "[desktop-console] installing dependencies..."
+  (cd "\$APP_DIR" && npm install)
 fi
 
-# 命令路由
-case "\$1" in
-  -h|--help|help)
-    show_help
-    ;;
-  phase1)
-    LOG_DIR="\${HOME:-\$USERPROFILE}/.webauto/logs"
-    mkdir -p "\$LOG_DIR"
-    PHASE1_LOG="\$LOG_DIR/xiaohongshu_phase1.log"
-    echo "[phase1] starting in background, log: \$PHASE1_LOG"
-    nohup node "\$PROJECT_ROOT/scripts/xiaohongshu/phase1-boot.mjs" "\${@:2}" > "\$PHASE1_LOG" 2>&1 &
-    ;;
-  phase2)
-    node "\$PROJECT_ROOT/scripts/xiaohongshu/phase2-collect.mjs" "\${@:2}"
-    ;;
-  phase3)
-    node "\$PROJECT_ROOT/scripts/xiaohongshu/phase3-4-collect.mjs" "\${@:2}"
-    ;;
-  stop)
-    node "\$PROJECT_ROOT/scripts/xiaohongshu/stop-all.mjs"
-    ;;
-  install)
-    node "\$PROJECT_ROOT/scripts/xiaohongshu/install.mjs"
-    ;;
-  check)
-    node "\$PROJECT_ROOT/scripts/xiaohongshu/install.mjs" --check
-    ;;
-  *)
-    node "\$PROJECT_ROOT/scripts/run-xiaohongshu-phase1-2-34-v3.mjs" "\$@"
-    ;;
-esac
+if [ ! -f "\$APP_DIR/dist/main/index.mjs" ]; then
+  echo "[desktop-console] building..."
+  (cd "\$APP_DIR" && npm run build)
+fi
+
+"\$APP_DIR/node_modules/.bin/electron" "\$APP_DIR"
 `;
 
-  await writeFile(join(scriptDir, 'xhs'), unixScript, { mode: 0o755 });
-  log('创建: xhs');
+  await writeFile(join(scriptDir, 'desktop-console'), unixScript, { mode: 0o755 });
+  log('创建: desktop-console');
 
-  // Windows batch script
   const winScript = `@echo off
 chcp 65001 >nul
-REM 小红书采集 CLI 入口
+REM WebAuto Desktop Console
 
 setlocal EnableDelayedExpansion
 
 set "SCRIPT_DIR=%~dp0"
 set "PROJECT_ROOT=%SCRIPT_DIR%"
-cd /d "%PROJECT_ROOT%"
-set "PLAYWRIGHT_BROWSERS_PATH=%PROJECT_ROOT%\\.ms-playwright"
-set "WEBAUTO_DOWNLOAD_ROOT=%PROJECT_ROOT%\\download"
-if not exist "%WEBAUTO_DOWNLOAD_ROOT%" mkdir "%WEBAUTO_DOWNLOAD_ROOT%"
+set "APP_DIR=%PROJECT_ROOT%\\apps\\desktop-console"
 
-REM 检查 Node.js
+if not exist "%APP_DIR%\\package.json" (
+  echo [error] desktop-console files missing: %APP_DIR%
+  exit /b 1
+)
+
 where node >nul 2>nul
 if %errorlevel% neq 0 (
   echo [error] 未检测到 Node.js
@@ -262,77 +199,34 @@ if %errorlevel% neq 0 (
   exit /b 1
 )
 
-REM 命令路由
-if "%~1"=="" goto :show_help
-if /I "%~1"=="-h" goto :show_help
-if /I "%~1"=="--help" goto :show_help
-if /I "%~1"=="help" goto :show_help
-
-if "%1"=="phase1" (
-  set "LOG_BASE=%USERPROFILE%"
-  if "!LOG_BASE!"=="" set "LOG_BASE=%HOMEDRIVE%%HOMEPATH%"
-  if "!LOG_BASE!"=="" set "LOG_BASE=%PROJECT_ROOT%"
-  set "LOG_DIR=!LOG_BASE!\\.webauto\\logs"
-  if not exist "!LOG_DIR!" mkdir "!LOG_DIR!"
-  set "PHASE1_LOG=!LOG_DIR!\\xiaohongshu_phase1.log"
-  set "PHASE1_ERR_LOG=!LOG_DIR!\\xiaohongshu_phase1.err.log"
-  echo [phase1] starting in background, log: !PHASE1_LOG!
-  powershell -NoProfile -WindowStyle Hidden -Command "Start-Process -FilePath node -ArgumentList '\"%PROJECT_ROOT%\\scripts\\xiaohongshu\\phase1-boot.mjs\" %*' -WorkingDirectory '%PROJECT_ROOT%' -RedirectStandardOutput '!PHASE1_LOG!' -RedirectStandardError '!PHASE1_ERR_LOG!' -WindowStyle Hidden"
-  exit /b 0
-) else if "%1"=="phase2" (
-  node "%PROJECT_ROOT%\\scripts\\xiaohongshu\\phase2-collect.mjs" %*
-) else if "%1"=="phase3" (
-  node "%PROJECT_ROOT%\\scripts\\xiaohongshu\\phase3-4-collect.mjs" %*
-) else if "%1"=="stop" (
-  node "%PROJECT_ROOT%\\scripts\\xiaohongshu\\stop-all.mjs"
-) else if "%1"=="install" (
-  node "%PROJECT_ROOT%\\scripts\\xiaohongshu\\install.mjs"
-) else if "%1"=="check" (
-  node "%PROJECT_ROOT%\\scripts\\xiaohongshu\\install.mjs" --check
-) else (
-  node "%PROJECT_ROOT%\\scripts\\run-xiaohongshu-phase1-2-34-v3.mjs" %*
+where npm >nul 2>nul
+if %errorlevel% neq 0 (
+  echo [error] npm 未找到，请重装 Node.js
+  exit /b 1
 )
 
-goto :eof
+if not exist "%APP_DIR%\\node_modules\\.bin\\electron.cmd" (
+  echo [desktop-console] installing dependencies...
+  call npm --prefix "%APP_DIR%" install
+  if %errorlevel% neq 0 exit /b 1
+)
 
-:show_help
-echo 小红书数据采集 CLI 工具 v${CONFIG.version}
-echo.
-echo 用法:
-echo   xhs -k ^<keyword^> [-n ^<count^>] [--cn ^<count^>] [--headless^|--headful]
-echo   xhs ^<keyword^> [-n ^<count^>] [--cn ^<count^>]
-echo.
-echo 参数:
-echo   -k, --keyword       搜索关键词（必填，可用位置参数）
-echo   -n, --count         本次新增采集数量（默认 100，去重后补齐）
-echo   -cn, --commentCount 评论最大数量（不写=全部，写了就是上限）
-echo   --headless          无头模式：浏览器不显示（默认）
-echo   --headful           有头模式：浏览器显示（覆盖 headless）
-echo.
-echo 说明:
-echo   默认生产环境（prod），无需传参
-echo   同关键词已有记录不会跳过，按 -n 新增并对已有帖子去重
-echo.
-echo 命令:
-echo   xhs phase1          后台启动并复用浏览器会话
-echo   xhs phase2          搜索并采集链接
-echo   xhs phase3          采集详情和评论
-echo   xhs stop            停止所有服务与后台进程
-echo   xhs install         检查并安装依赖
-echo   xhs check           仅检查环境与浏览器
-echo.
-echo 示例:
-echo   xhs -k "手机膜" -n 50 --headless
-echo   xhs -k "手机膜" --headful
-echo   xhs phase1  ^(日志: %USERPROFILE%\\.webauto\\logs\\xiaohongshu_phase1.log^)
-echo   xhs stop
-echo   xhs check
+if not exist "%APP_DIR%\\dist\\main\\index.mjs" (
+  echo [desktop-console] building...
+  call npm --prefix "%APP_DIR%" run build
+  if %errorlevel% neq 0 exit /b 1
+)
+
+"%APP_DIR%\\node_modules\\.bin\\electron.cmd" "%APP_DIR%"
 
 endlocal
 `;
 
-  await writeFile(join(scriptDir, 'xhs.bat'), winScript.replace(/\n/g, '\r\n'));
-  log('创建: xhs.bat');
+  await writeFile(
+    join(scriptDir, 'desktop-console.bat'),
+    `\uFEFF${winScript.replace(/\n/g, '\r\n')}`
+  );
+  log('创建: desktop-console.bat');
 }
 
 // 创建安装脚本
@@ -376,15 +270,16 @@ fi
 echo "✅ Camoufox 浏览器已就绪: \$CAMOUFOX_PATH"
 
 echo ""
-echo "🔍 正在验证安装..."
-./xhs install
+echo "🧭 正在安装 Desktop Console 依赖..."
+npm --prefix apps/desktop-console install
+echo "🧱 正在构建 Desktop Console..."
+npm --prefix apps/desktop-console run build
 
 echo ""
 echo "✅ 安装完成！"
 echo ""
-echo "使用方法:"
-echo "  ./xhs phase1              # 启动浏览器会话"
-echo "  ./xhs phase2 --keyword \\"测试\\" --target 50"
+echo "启动方式:"
+echo "  ./desktop-console"
 echo ""
 `;
 
@@ -496,11 +391,35 @@ if not exist "%CAMOUFOX_PATH%" (
   goto :end
 )
 
+echo [install] Camoufox browser ready: %CAMOUFOX_PATH%
+
+set "DESKTOP_DIR=%TARGET_DIR%\\apps\\desktop-console"
+if not exist "%DESKTOP_DIR%\\package.json" (
+  echo [install] Desktop Console files missing: %DESKTOP_DIR%
+  set "EXIT_CODE=1"
+  goto :end
+)
+
+echo [install] Installing Desktop Console dependencies...
+call npm --prefix "%DESKTOP_DIR%" install
+if %errorlevel% neq 0 (
+  echo [install] Desktop Console npm install failed.
+  set "EXIT_CODE=1"
+  goto :end
+)
+
+echo [install] Building Desktop Console...
+call npm --prefix "%DESKTOP_DIR%" run build
+if %errorlevel% neq 0 (
+  echo [install] Desktop Console build failed.
+  set "EXIT_CODE=1"
+  goto :end
+)
+
 echo.
 echo [install] Done.
 echo [install] Next:
-echo   "%TARGET_DIR%\\xhs.bat" phase1
-echo   "%TARGET_DIR%\\xhs.bat" phase2 --keyword "test" --target 50
+echo   "%TARGET_DIR%\\desktop-console.bat"
 
 :end
 call :maybe_pause
@@ -512,13 +431,76 @@ if errorlevel 1 pause
 exit /b 0
 `;
 
-  await writeFile(join(PACKAGE_DIR, 'install.bat'), winInstall.replace(/\n/g, '\r\n'));
+  await writeFile(
+    join(PACKAGE_DIR, 'install.bat'),
+    `\uFEFF${winInstall.replace(/\n/g, '\r\n')}`
+  );
   log('创建: install.bat');
 }
 
 // 创建 README
 async function createReadme() {
-  const readme = `# 小红书数据采集 CLI 工具 v${CONFIG.version}
+  const desktopReadme = `# WebAuto Desktop Console v${CONFIG.version}
+
+## 系统要求
+
+- **Node.js**: ${CONFIG.nodeVersion}
+- **操作系统**: Windows 10+, macOS 12+, Linux (Ubuntu 20.04+)
+- **浏览器**: 自动下载 Camoufox
+
+## 安装
+
+### Windows
+
+\`\`\`bash
+install.bat
+\`\`\`
+
+### macOS/Linux
+
+\`\`\`bash
+./install.sh
+\`\`\`
+
+## 启动
+
+\`\`\`bash
+# macOS/Linux
+./desktop-console
+
+# Windows
+desktop-console.bat
+\`\`\`
+
+## 目录结构
+
+\`\`\`
+xiaohongshu-collector/
+  desktop-console           # Desktop Console 入口 (macOS/Linux)
+  desktop-console.bat       # Desktop Console 入口 (Windows)
+  apps/desktop-console/     # Desktop Console 源码与构建产物
+  dist/                     # 编译产物（services/modules/sharedmodule）
+  scripts/                  # 业务脚本与工作流入口
+  container-library/        # 容器定义
+  runtime/infra/node-cli/   # 运行配置
+\`\`\`
+
+## 说明
+
+- Desktop Console 作为唯一执行入口，内部调用本地 scripts 与服务。
+- 搜索前需启动 SearchGate（端口 7790），服务端口为 7701/7704/8765。
+
+## 技术支持
+
+- GitHub: https://github.com/your-repo/webauto
+- 文档: https://github.com/your-repo/webauto/docs
+`;
+
+  await writeFile(join(PACKAGE_DIR, 'README.md'), desktopReadme);
+  log('创建: README.md');
+  return;
+
+  const legacyReadme = `# 小红书数据采集 CLI 工具 v${CONFIG.version}
 
 ## 系统要求
 
@@ -636,7 +618,7 @@ xiaohongshu-collector/
 - 文档: https://github.com/your-repo/webauto/docs
 `;
 
-  await writeFile(join(PACKAGE_DIR, 'README.md'), readme);
+  await writeFile(join(PACKAGE_DIR, 'README.md'), legacyReadme);
   log('创建: README.md');
 }
 
