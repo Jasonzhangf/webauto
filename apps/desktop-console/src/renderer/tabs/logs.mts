@@ -26,6 +26,7 @@ export function renderLogs(root: HTMLElement, ctx: any) {
   const logActiveRunIds = new Set<string>();
   const parentRunIds = new Set<string>();
   const runIdToSection = new Map<string, string>();
+  const parentRunCurrentSection = new Map<string, string>();
   let shardProfileQueue: string[] = [];
 
   const parseShardHint = (line: string): string[] => {
@@ -59,6 +60,12 @@ export function renderLogs(root: HTMLElement, ctx: any) {
     return 'global';
   };
 
+  const extractPrefixedRunId = (line: string) => {
+    const text = String(line || '');
+    const byRunTag = text.match(/^\[(?:run:|rid:)([A-Za-z0-9_-]+)\]/);
+    return byRunTag?.[1] ? String(byRunTag[1]) : '';
+  };
+
   const ensureSection = (sectionKey: string, headerLabel?: string) => {
     const normalized = String(sectionKey || 'global').trim() || 'global';
     const existing = sectionMap.get(normalized);
@@ -83,7 +90,7 @@ export function renderLogs(root: HTMLElement, ctx: any) {
     return body;
   };
 
-  const resolveSectionKey = (text: string, rawRunId: string) => {
+  const resolveSectionKey = (text: string, rawRunId: string, prefixedRunId: string) => {
     if (rawRunId === 'global') return 'global';
 
     if (text.includes('[started]') && text.includes('xiaohongshu orchestrate')) {
@@ -92,6 +99,12 @@ export function renderLogs(root: HTMLElement, ctx: any) {
 
     const mapped = runIdToSection.get(rawRunId);
     if (mapped) return mapped;
+
+    // 同一父rid下，优先沿用“当前分片上下文”
+    if (prefixedRunId && rawRunId === prefixedRunId) {
+      const currentSection = parentRunCurrentSection.get(prefixedRunId);
+      if (currentSection) return currentSection;
+    }
 
     if (!parentRunIds.has(rawRunId) && shardProfileQueue.length > 0) {
       const profile = String(shardProfileQueue.shift() || '').trim();
@@ -127,6 +140,7 @@ export function renderLogs(root: HTMLElement, ctx: any) {
     const text = String(line || '').trim();
     if (!text) return;
 
+    const prefixedRunId = extractPrefixedRunId(text);
     const rawRunId = extractRunId(text);
 
     const hintedProfiles = parseShardHint(text);
@@ -142,6 +156,24 @@ export function renderLogs(root: HTMLElement, ctx: any) {
           sectionRunIds.get(sectionKey)?.add(rawRunId);
         }
       });
+
+      // 若只有一个分片提示，直接绑定父rid上下文
+      if (prefixedRunId && hintedProfiles.length === 1) {
+        parentRunCurrentSection.set(prefixedRunId, `shard:${hintedProfiles[0]}`);
+      }
+    }
+
+    // 识别日志中的 Profile 行，切换父rid当前分片上下文
+    const profileMatch = text.match(/\b[Pp]rofile:\s*([A-Za-z0-9_-]+)/);
+    if (profileMatch?.[1]) {
+      const profileId = String(profileMatch[1]).trim();
+      if (profileId) {
+        const sectionKey = `shard:${profileId}`;
+        ensureSection(sectionKey, `分片: ${profileId}`);
+        if (prefixedRunId) {
+          parentRunCurrentSection.set(prefixedRunId, sectionKey);
+        }
+      }
     }
 
     if (rawRunId !== 'global') {
@@ -151,7 +183,7 @@ export function renderLogs(root: HTMLElement, ctx: any) {
       }
     }
 
-    const sectionKey = resolveSectionKey(text, rawRunId);
+    const sectionKey = resolveSectionKey(text, rawRunId, prefixedRunId);
     const body = ensureSection(sectionKey);
     if (rawRunId !== 'global') {
       if (!sectionRunIds.has(sectionKey)) {
@@ -173,6 +205,7 @@ export function renderLogs(root: HTMLElement, ctx: any) {
     logActiveRunIds.clear();
     parentRunIds.clear();
     runIdToSection.clear();
+    parentRunCurrentSection.clear();
     shardProfileQueue = [];
   };
 
