@@ -36,6 +36,7 @@ const CONFIG = {
     // 打包必须包含完整 dist/modules：services/workflow 运行时会依赖 logging/container-matcher 等模块
     'dist/modules',
     'dist/sharedmodule',
+    'libs/browser',
     'scripts/xiaohongshu',
     'scripts/xiaohongshu/lib',
     'apps/desktop-console/package.json',
@@ -47,6 +48,7 @@ const CONFIG = {
     'scripts/browser-status.mjs',
     'scripts/profilepool.mjs',
     'scripts/migrate-fingerprints.mjs',
+    'container-library.index.json',
     'container-library',
     'scripts/lib',
     'runtime/infra/node-cli/package.json',

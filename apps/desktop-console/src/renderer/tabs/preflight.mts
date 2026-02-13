@@ -25,9 +25,12 @@ export function renderPreflight(root: HTMLElement, ctx: any) {
 
   const onboardingSummary = createEl('div', { className: 'muted' }, ['正在加载 profile 信息...']) as HTMLDivElement;
   const onboardingTips = createEl('div', { className: 'muted', style: 'font-size:12px; margin-top:6px;' }, [
-    '首次使用建议：输入账号名后，系统自动按 <账号名>-batch-1/2/3 命名；留空默认 xiaohongsh-batch-1/2/3。登录后可设置 alias（账号名）用于区分，默认会自动获取用户名。',
+    '首次使用建议：输入账号名后，系统自动按 <账号名>-batch-1/2/3 命名；留空默认 xiaohongshu-batch-1/2/3。登录后可设置 alias（账号名）用于区分，默认会自动获取用户名。',
   ]) as HTMLDivElement;
   const gotoXhsBtn = createEl('button', { className: 'secondary', type: 'button' }, ['去小红书首页']) as HTMLButtonElement;
+  const browserStatus = createEl('div', { className: 'muted' }, ['浏览器状态：未检查']) as HTMLDivElement;
+  const browserCheckBtn = createEl('button', { className: 'secondary', type: 'button' }, ['检查浏览器/依赖']) as HTMLButtonElement;
+  const browserDownloadBtn = createEl('button', { type: 'button' }, ['下载 Camoufox']) as HTMLButtonElement;
 
   let cachedScan: any = null;
   const webautoRoot = resolveWebautoRoot(ctx.settings?.downloadRoot || '', window.api);
@@ -261,11 +264,40 @@ export function renderPreflight(root: HTMLElement, ctx: any) {
     if (typeof ctx?.setActiveTab === 'function') ctx.setActiveTab('xiaohongshu');
   };
 
+  browserCheckBtn.onclick = async () => {
+    if (typeof window.api?.cmdSpawn !== 'function') return;
+    ctx.clearLog();
+    browserStatus.textContent = '浏览器状态：检查中...';
+    const args = buildArgs([window.api.pathJoin('scripts', 'xiaohongshu', 'install.mjs'), '--check']);
+    await window.api.cmdSpawn({ title: 'xhs install check', cwd: '', args, groupKey: 'install' });
+    browserStatus.textContent = '浏览器状态：已触发检查（查看日志）';
+  };
+  browserDownloadBtn.onclick = async () => {
+    if (typeof window.api?.cmdSpawn !== 'function') return;
+    ctx.clearLog();
+    browserStatus.textContent = '浏览器状态：下载中...';
+    const args = buildArgs([
+      window.api.pathJoin('scripts', 'xiaohongshu', 'install.mjs'),
+      '--check',
+      '--download-browser',
+    ]);
+    await window.api.cmdSpawn({ title: 'xhs install download', cwd: '', args, groupKey: 'install' });
+    browserStatus.textContent = '浏览器状态：已触发下载（查看日志）';
+  };
+
   root.appendChild(
     section('首次引导（账号视角）', [
       onboardingSummary,
       onboardingTips,
       createEl('div', { className: 'row' }, [gotoXhsBtn]),
+    ]),
+  );
+
+  root.appendChild(
+    section('浏览器检查与下载', [
+      browserStatus,
+      createEl('div', { className: 'row' }, [browserCheckBtn, browserDownloadBtn]),
+      createEl('div', { className: 'muted', style: 'font-size:12px;' }, ['说明：检查/下载的详细输出请查看日志页。']),
     ]),
   );
 
@@ -280,7 +312,7 @@ export function renderPreflight(root: HTMLElement, ctx: any) {
   );
 
   // keep: ProfilePool helper (create profiles + bulk login)
-  const keywordInput = createEl('input', { value: 'xiaohongsh', placeholder: '账号名（可选），系统自动拼接为 <账号名>-batch-1/2/3；留空默认 xiaohongsh-batch' }) as HTMLInputElement;
+  const keywordInput = createEl('input', { value: 'xiaohongshu', placeholder: '账号名（可选），系统自动拼接为 <账号名>-batch-1/2/3；留空默认 xiaohongshu-batch' }) as HTMLInputElement;
   const ensureCountInput = createEl('input', { value: '0', type: 'number', min: '0' }) as HTMLInputElement;
   const timeoutInput = createEl('input', { value: String(ctx.settings?.timeouts?.loginTimeoutSec || 900), type: 'number', min: '30' }) as HTMLInputElement;
   const keepSession = createEl('input', { type: 'checkbox' }) as HTMLInputElement;
@@ -289,7 +321,7 @@ export function renderPreflight(root: HTMLElement, ctx: any) {
 
 
   function resolveBatchPrefix() {
-    const base = String(keywordInput.value || '').trim() || 'xiaohongsh';
+    const base = String(keywordInput.value || '').trim() || 'xiaohongshu';
     return `${base}-batch`;
   }
 
@@ -355,7 +387,7 @@ export function renderPreflight(root: HTMLElement, ctx: any) {
   root.appendChild(
     section('批量账号池（自动序号）', [
       createEl('div', { className: 'row' }, [
-        labeledInput('账号名（默认 xiaohongsh）', keywordInput),
+        labeledInput('账号名（默认 xiaohongshu）', keywordInput),
         labeledInput('ensure-count (可选)', ensureCountInput),
         labeledInput('login timeout (sec)', timeoutInput),
         createEl('div', { style: 'display:flex; flex-direction:column; gap:6px;' }, [

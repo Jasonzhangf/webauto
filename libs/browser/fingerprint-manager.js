@@ -8,7 +8,13 @@ import { writeFile, readFile, mkdir } from 'fs/promises';
 import { join, dirname } from 'path';
 import { homedir } from 'os';
 
-const FINGERPRINT_DIR = join(homedir(), '.webauto', 'fingerprints');
+const PORTABLE_ROOT = String(process.env.WEBAUTO_PORTABLE_ROOT || process.env.WEBAUTO_ROOT || '').trim();
+const ENV_FINGERPRINT_DIR = String(process.env.WEBAUTO_PATHS_FINGERPRINTS || '').trim();
+const FINGERPRINT_DIR = ENV_FINGERPRINT_DIR
+    ? ENV_FINGERPRINT_DIR
+    : PORTABLE_ROOT
+        ? join(PORTABLE_ROOT, '.webauto', 'fingerprints')
+        : join(homedir(), '.webauto', 'fingerprints');
 
 const PLATFORM_FINGERPRINTS = {
     windows: [

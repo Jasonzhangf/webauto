@@ -39,11 +39,13 @@ const CONFIG = {
     'dist/modules',
     'dist/libs',
     'dist/sharedmodule',
+    'libs/browser',
     'scripts/xiaohongshu/lib',
     'scripts/lib',
     'scripts/xiaohongshu/phase1-boot.mjs',
     'scripts/xiaohongshu/phase2-collect.mjs',
     'scripts/xiaohongshu/phase-orchestrate.mjs',
+    'scripts/xiaohongshu/phase-unified-harvest.mjs',
     'scripts/xiaohongshu/collect-content.mjs',
     'scripts/xiaohongshu/phase3-interact.mjs',
     'scripts/xiaohongshu/phase4-harvest.mjs',
@@ -65,6 +67,7 @@ const CONFIG = {
     'apps/desktop-console/scripts',
     'apps/desktop-console/src',
     'apps/desktop-console/README.md',
+    'container-library.index.json',
     'container-library',
     'runtime/browser',
     'runtime/infra/node-cli/package.json'
@@ -203,6 +206,7 @@ fi
     log('创建: desktop-console');
   }
 
+  const winNodeVersion = CONFIG.nodeVersion.replace(/>/g, '^>');
   const winScript = `@echo off
 chcp 65001 >nul
 REM WebAuto Desktop Console
@@ -212,6 +216,12 @@ setlocal EnableDelayedExpansion
 set "SCRIPT_DIR=%~dp0"
 set "PROJECT_ROOT=%SCRIPT_DIR%"
 set "APP_DIR=%PROJECT_ROOT%\\apps\\desktop-console"
+set "WEBAUTO_PORTABLE_ROOT=%PROJECT_ROOT%"
+set "WEBAUTO_PATHS_PROFILES=%PROJECT_ROOT%\\.webauto\\profiles"
+set "WEBAUTO_PATHS_COOKIES=%PROJECT_ROOT%\\.webauto\\cookies"
+set "WEBAUTO_PATHS_LOGS=%PROJECT_ROOT%\\.webauto\\logs"
+set "WEBAUTO_PATHS_CONTAINERS=%PROJECT_ROOT%\\.webauto\\container-lib"
+set "WEBAUTO_PATHS_FINGERPRINTS=%PROJECT_ROOT%\\.webauto\\fingerprints"
 
 if not exist "%APP_DIR%\\package.json" (
   echo [error] desktop-console files missing: %APP_DIR%
@@ -221,7 +231,7 @@ if not exist "%APP_DIR%\\package.json" (
 where node >nul 2>nul
 if %errorlevel% neq 0 (
   echo [error] 未检测到 Node.js
-  echo 请访问 https://nodejs.org/ 下载安装 Node.js ${CONFIG.nodeVersion} 或更高版本
+  echo 请访问 https://nodejs.org/ 下载安装 Node.js ${winNodeVersion} 或更高版本
   exit /b 1
 )
 
@@ -250,7 +260,7 @@ endlocal
 
   await writeFile(
     join(scriptDir, 'desktop-console.bat'),
-    `\uFEFF${winScript.replace(/\n/g, '\r\n')}`
+    winScript.replace(/\n/g, '\r\n')
   );
   log('创建: desktop-console.bat');
 }
@@ -320,6 +330,7 @@ echo ""
 
   // Windows install script
     const winInstall = `@echo off
+chcp 65001 >nul
 setlocal
 cd /d "%~dp0"
 
@@ -334,7 +345,7 @@ echo [install] Checking Node.js...
 where node >nul 2>nul
 if %errorlevel% neq 0 (
   echo [install] Node.js not found.
-  echo [install] Download: https://nodejs.org/ ^(>=22.0.0^)
+  echo [install] Download: https://nodejs.org/ ^(^>=22.0.0^)
   set "EXIT_CODE=1"
   goto :end
 )
@@ -466,7 +477,7 @@ exit /b 0
 
   await writeFile(
     join(PACKAGE_DIR, 'install.bat'),
-    `\uFEFF${winInstall.replace(/\n/g, '\r\n')}`
+    winInstall.replace(/\n/g, '\r\n')
   );
   log('创建: install.bat');
 }

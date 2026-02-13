@@ -4,9 +4,8 @@
  * 验证：创建 profile 时自动生成指纹，不同 profile 有不同指纹
  */
 
-import { addProfile, listProfilesForPool } from './xiaohongshu/lib/profilepool.mjs';
+import { addProfile, listProfilesForPool, resolveProfilesRoot } from './xiaohongshu/lib/profilepool.mjs';
 import { loadFingerprint, getFingerprintPath } from '../libs/browser/fingerprint-manager.js';
-import { homedir } from 'node:os';
 import path from 'node:path';
 
 async function testProfilePoolFingerprint() {
@@ -19,12 +18,9 @@ async function testProfilePoolFingerprint() {
   console.log(`\n--- Creating ${count} profiles with prefix "${prefix}" ---`);
   const createdProfiles = [];
   for (let i = 0; i < count; i++) {
-    const { profileId, profileDir } = addProfile(prefix);
+    const { profileId, profileDir, fingerprintPath } = await addProfile(prefix);
     console.log(`✓ Created: ${profileId}`);
-    createdProfiles.push({ profileId, profileDir });
-
-    // 等待指纹生成完成
-    await new Promise(resolve => setTimeout(resolve, 100));
+    createdProfiles.push({ profileId, profileDir, fingerprintPath });
   }
 
   // 2. 验证 ProfilePool 列表
@@ -86,8 +82,7 @@ async function testProfilePoolFingerprint() {
   // 6. 清理测试数据
   console.log(`\n--- Cleaning up ---`);
   const fs = await import('fs/promises');
-  const profileRoot = path.join(homedir(), '.webauto', 'profiles');
-  const fingerprintRoot = path.join(homedir(), '.webauto', 'fingerprints');
+  const profileRoot = resolveProfilesRoot();
 
   for (const profileId of profiles) {
     // 删除 profile 目录

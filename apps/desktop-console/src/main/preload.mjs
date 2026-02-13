@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import path from 'node:path';
+import os from 'node:os';
 
 contextBridge.exposeInMainWorld('api', {
   settingsGet: () => ipcRenderer.invoke('settings:get'),
@@ -8,6 +9,7 @@ contextBridge.exposeInMainWorld('api', {
   pathJoin: (...parts) => path.join(...parts.map((x) => String(x))),
   pathNormalize: (p) => path.normalize(String(p)),
   pathSep: path.sep,
+  osHomedir: () => os.homedir(),
 
   cmdSpawn: (spec) => ipcRenderer.invoke('cmd:spawn', spec),
   cmdKill: (runId) => ipcRenderer.invoke('cmd:kill', { runId }),

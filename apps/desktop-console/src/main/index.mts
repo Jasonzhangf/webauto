@@ -4,7 +4,7 @@ const { app, BrowserWindow, ipcMain, shell } = electron;
 import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { promises as fs } from 'node:fs';
+import { mkdirSync, promises as fs } from 'node:fs';
 
 import { readDesktopConsoleSettings, resolveDefaultDownloadRoot, writeDesktopConsoleSettings } from './desktop-settings.mts';
 import type { DesktopConsoleSettings } from './desktop-settings.mts';
@@ -43,6 +43,26 @@ const profileStore = createProfileStore({ repoRoot: REPO_ROOT });
 const XHS_SCRIPTS_ROOT = path.join(REPO_ROOT, 'scripts', 'xiaohongshu');
 const XHS_FULL_COLLECT_RE = /collect-content\.mjs$/;
 
+function configureElectronPaths() {
+  try {
+    const downloadRoot = resolveDefaultDownloadRoot();
+    const baseDir = path.dirname(downloadRoot);
+    const userDataRoot = path.join(baseDir, 'desktop-console');
+    const cacheRoot = path.join(userDataRoot, 'cache');
+    const gpuCacheRoot = path.join(cacheRoot, 'gpu');
+
+    try { mkdirSync(cacheRoot, { recursive: true }); } catch {}
+    try { mkdirSync(gpuCacheRoot, { recursive: true }); } catch {}
+
+    app.setPath('userData', userDataRoot);
+    app.setPath('cache', cacheRoot);
+    app.commandLine.appendSwitch('disk-cache-dir', cacheRoot);
+    app.commandLine.appendSwitch('gpu-cache-dir', gpuCacheRoot);
+  } catch (err) {
+    console.warn('[desktop-console] failed to configure cache paths', err);
+  }
+}
+
 function now() {
   return Date.now();
 }
@@ -79,6 +99,8 @@ let heartbeatWatchdog: NodeJS.Timeout | null = null;
 let heartbeatTimeoutHandled = false;
 
 let win: BrowserWindow | null = null;
+
+configureElectronPaths();
 
 function getWin() {
   if (!win || win.isDestroyed()) return null;
@@ -220,6 +242,12 @@ function resolveNodeBin() {
   return process.platform === 'win32' ? 'node.exe' : 'node';
 }
 
+function resolveCwd(input?: string) {
+  const raw = String(input || '').trim();
+  if (!raw) return REPO_ROOT;
+  return path.isAbsolute(raw) ? raw : path.resolve(REPO_ROOT, raw);
+}
+
 let cachedStateMod: any = null;
 async function getStateModule() {
   if (cachedStateMod) return cachedStateMod;
@@ -237,12 +265,13 @@ async function spawnCommand(spec: SpawnSpec) {
   const runId = generateRunId();
   const groupKey = spec.groupKey || 'xiaohongshu';
   const q = getQueue(groupKey);
+  const cwd = resolveCwd(spec.cwd);
 
   q.enqueue(
     () =>
       new Promise<void>((resolve) => {
         const child = spawn(resolveNodeBin(), spec.args, {
-          cwd: spec.cwd,
+          cwd,
           env: {
             ...process.env,
             WEBAUTO_DAEMON: '1',
@@ -262,6 +291,12 @@ async function spawnCommand(spec: SpawnSpec) {
         child.stderr?.on('data', (chunk: Buffer) => {
           splitLines(chunk).forEach((line) => sendEvent({ type: 'stderr', runId, line, ts: now() }));
         });
+        child.on('error', (err: any) => {
+          sendEvent({ type: 'stderr', runId, line: `[spawn-error] ${err?.message || String(err)}`, ts: now() });
+          sendEvent({ type: 'exit', runId, exitCode: null, signal: 'error', ts: now() });
+          runs.delete(runId);
+          resolve();
+        });
         child.on('exit', (code, signal) => {
           sendEvent({ type: 'exit', runId, exitCode: code, signal, ts: now() });
           runs.delete(runId);
@@ -275,8 +310,9 @@ async function spawnCommand(spec: SpawnSpec) {
 
 async function runJson(spec: RunJsonSpec) {
   const timeoutMs = typeof spec.timeoutMs === 'number' ? spec.timeoutMs : 20_000;
+  const cwd = resolveCwd(spec.cwd);
   const child = spawn(resolveNodeBin(), spec.args, {
-    cwd: spec.cwd,
+    cwd,
     env: { ...process.env, ...(spec.env || {}) },
     stdio: ['ignore', 'pipe', 'pipe'],
     windowsHide: true,
@@ -384,10 +420,15 @@ async function readTextPreview(input: { path: string; maxBytes?: number; maxLine
   const filePath = String(input.path || '');
   const maxBytes = typeof input.maxBytes === 'number' ? input.maxBytes : 80_000;
   const maxLines = typeof input.maxLines === 'number' ? input.maxLines : 200;
-  const raw = await fs.readFile(filePath, 'utf8');
-  const clipped = raw.slice(0, maxBytes);
-  const lines = clipped.split(/\r?\n/g).slice(0, maxLines);
-  return { ok: true, path: filePath, text: lines.join('\n') };
+  try {
+    const raw = await fs.readFile(filePath, 'utf8');
+    const clipped = raw.slice(0, maxBytes);
+    const lines = clipped.split(/\r?\n/g).slice(0, maxLines);
+    return { ok: true, path: filePath, text: lines.join('\n') };
+  } catch (err: any) {
+    if (err?.code === 'ENOENT') return { ok: false, path: filePath, error: 'not_found' };
+    return { ok: false, path: filePath, error: err?.message || String(err) };
+  }
 }
 
 

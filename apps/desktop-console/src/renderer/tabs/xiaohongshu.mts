@@ -1,4 +1,4 @@
-import { createEl } from "../ui-components.mjs";
+﻿import { createEl } from "../ui-components.mjs";
 import * as state from "./xiaohongshu-state.mjs";
 
 
@@ -36,6 +36,46 @@ function bindSectionToggle(toggle: HTMLInputElement, body: HTMLElement) {
 const INPUT_HISTORY_MAX = 10;
 const XHS_LAST_CONFIG_KEY = 'webauto.xhs.lastConfig.v1';
 const XHS_NAV_MODE_KEY = 'webauto.xhs.navigationMode.v1';
+const XHS_BATCH_KEY = 'webauto.xhs.batchKey.v1';
+const XHS_DEFAULT_BATCH_KEY = 'xiaohongshu';
+
+function formatBatchKey(now = new Date()) {
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const y = now.getFullYear();
+  const m = pad(now.getMonth() + 1);
+  const d = pad(now.getDate());
+  const hh = pad(now.getHours());
+  const mm = pad(now.getMinutes());
+  return `batch-${y}${m}${d}-${hh}${mm}`;
+}
+
+function sanitizeBatchKey(value: string) {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  const cleaned = raw
+    .replace(/[<>:"/\\|?*\u0000-\u001f]/g, '-')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/[. ]+$/g, '');
+  return cleaned;
+}
+
+function readBatchKey() {
+  try {
+    const raw = window.localStorage.getItem(XHS_BATCH_KEY) || '';
+    return String(raw || '').trim();
+  } catch {
+    return '';
+  }
+}
+
+function writeBatchKey(next: string) {
+  try {
+    window.localStorage.setItem(XHS_BATCH_KEY, String(next || '').trim());
+  } catch {
+    // ignore storage failures
+  }
+}
 
 function readInputHistory(key: string): string[] {
   try {
@@ -223,6 +263,7 @@ let xhsCmdUnsubscribe: (() => void) | null = null;
 let xhsEventsPollTimer: number | null = null;
 let xhsSettingsUnsubscribe: (() => void) | null = null;
 export function renderXiaohongshuTab(root: HTMLElement, api: any) {
+  let startAddAccountFlow: (() => Promise<void>) | null = null;
   if (xhsCmdUnsubscribe) {
     xhsCmdUnsubscribe();
     xhsCmdUnsubscribe = null;
@@ -264,7 +305,7 @@ export function renderXiaohongshuTab(root: HTMLElement, api: any) {
  const navStepHint = createEl('div', { className: 'muted', style: 'font-size:12px;' }, ['导航模式：先账号检查，再点赞设置，最后回到运行看板。']) as HTMLDivElement;
  
  // 引导步骤状态管理
- const GUIDE_STATE_KEY = 'webauto.xhs.guideState.v1';
+const GUIDE_STATE_KEY = 'webauto.xhs.guideState.v1';
  const readGuideState = () => {
    try {
      const raw = window.localStorage.getItem(GUIDE_STATE_KEY);
@@ -274,7 +315,8 @@ export function renderXiaohongshuTab(root: HTMLElement, api: any) {
  const saveGuideState = (s: any) => {
    try { window.localStorage.setItem(GUIDE_STATE_KEY, JSON.stringify(s)); } catch {}
  };
- let guideState = readGuideState();
+  let guideState = readGuideState();
+  let runBtn: HTMLButtonElement | null = null;
 
  // 导航向导UI（强制顺序引导）
  const guideCard = createEl('div', { 
@@ -330,11 +372,19 @@ export function renderXiaohongshuTab(root: HTMLElement, api: any) {
     });
   };
 
+  const isInteractiveTarget = (target: EventTarget | null) => {
+    if (!(target instanceof Element)) return false;
+    return Boolean(target.closest('button, input, select, textarea, label, a'));
+  };
+
   const createTile = (id: string, titleText: string) => {
     const tile = createEl('section', { className: 'xhs-tile', 'data-xhs-tile': id }) as HTMLDivElement;
     const head = createEl('div', { className: 'xhs-tile-head' }, [titleText]);
     const body = createEl('div', { className: 'xhs-tile-body' }) as HTMLDivElement;
-    tile.addEventListener('pointerdown', () => setActiveTile(id), { capture: true });
+    tile.addEventListener('pointerdown', (evt) => {
+      if (isInteractiveTarget(evt.target)) return;
+      setActiveTile(id);
+    }, { capture: true });
     tile.onclick = () => setActiveTile(id);
     tile.appendChild(head);
     tile.appendChild(body);
@@ -379,18 +429,24 @@ export function renderXiaohongshuTab(root: HTMLElement, api: any) {
 
   // 引导与锁定：未完成前强制只允许账号检查入口
   const guideLockMask = createEl('div', {
-    style: 'position:absolute; inset:0; background:rgba(10,14,24,0.72); border:1px dashed #26437a; border-radius:10px; display:none; align-items:center; justify-content:center; z-index:5; color:#c7d2fe; text-align:center; padding:12px; font-size:12px;',
+    style: 'position:absolute; inset:0; background:rgba(10,14,24,0.72); border:1px dashed #26437a; border-radius:10px; display:none; align-items:center; justify-content:center; z-index:5; color:#c7d2fe; text-align:center; padding:12px; font-size:12px; pointer-events:none;',
   }, ['请先完成引导：浏览器检查、账号登录、关键词配置']) as HTMLDivElement;
 
   const isKeywordReady = () => String(keywordInput.value || '').trim().length > 0;
 
   const runQuickBrowserCheck = async () => {
-    const script = window.api.pathJoin('scripts', 'browser-status.mjs');
-    const args = [script, String(profilePickSel.value || ''), '--site', 'xiaohongshu'];
+    if (typeof window.api?.cmdSpawn !== 'function') {
+      guideState.browserReady = false;
+      browserStatus.textContent = '❌ 浏览器检查失败';
+      browserStatus.style.color = '#ef4444';
+      return;
+    }
+    const script = window.api.pathJoin('scripts', 'xiaohongshu', 'install.mjs');
+    const args = [script, '--check'];
     try {
-      await window.api.cmdSpawn({ title: 'browser-status quick-check', cwd: '', args, groupKey: 'xiaohongshu' });
+      await window.api.cmdSpawn({ title: 'xhs install check', cwd: '', args, groupKey: 'install' });
       guideState.browserReady = true;
-      browserStatus.textContent = '✅ 浏览器检查已触发';
+      browserStatus.textContent = '✅ 浏览器检查已触发（查看日志）';
       browserStatus.style.color = '#22c55e';
     } catch {
       guideState.browserReady = false;
@@ -421,9 +477,13 @@ export function renderXiaohongshuTab(root: HTMLElement, api: any) {
 
     completeStep.style.display = allReady ? '' : 'none';
     startRunBtn.style.display = allReady ? '' : 'none';
-    tileLane.style.pointerEvents = allReady ? '' : 'none';
-    tileLane.style.filter = allReady ? '' : 'blur(1px)';
+    tileLane.style.pointerEvents = '';
+    tileLane.style.filter = '';
     guideLockMask.style.display = allReady ? 'none' : 'flex';
+    if (runBtn) {
+      runBtn.disabled = !allReady;
+      runBtn.title = allReady ? '' : '请先完成引导：浏览器检查、账号登录、关键词配置';
+    }
 
     if (!allReady) {
       setActiveTile('account');
@@ -432,6 +492,24 @@ export function renderXiaohongshuTab(root: HTMLElement, api: any) {
     }
     saveGuideState(guideState);
  };
+
+  const runBrowserStatusCheck = async (profileId: string, reason = 'account-check') => {
+    if (typeof window.api?.cmdSpawn !== 'function') return false;
+    const args = [
+      window.api.pathJoin('scripts', 'browser-status.mjs'),
+      profileId,
+      '--site',
+      'xiaohongshu',
+    ];
+    api?.appendLog?.(`[ui] browser-status (${reason}) profile=${profileId}`);
+    await window.api.cmdSpawn({
+      title: `browser-status ${profileId}`,
+      cwd: '',
+      args,
+      groupKey: 'xiaohongshu',
+    });
+    return true;
+  };
 
   const runInteractiveAccountCheck = async () => {
     const selectedProfile = String(profilePickSel.value || '').trim();
@@ -445,36 +523,12 @@ export function renderXiaohongshuTab(root: HTMLElement, api: any) {
       return;
     }
 
-    // 交互式询问：是否改名
-    const wantRename = window.confirm('是否要为当前账号设置/修改易读名称（alias）？');
-    if (wantRename) {
-      const nextAlias = window.prompt('请输入账号显示名称（alias）：', '');
-      if (nextAlias && String(nextAlias).trim()) {
-        try {
-          const aliases = (api?.settings?.profileAliases && typeof api.settings.profileAliases === 'object')
-            ? { ...api.settings.profileAliases }
-            : {};
-          aliases[selectedProfile] = String(nextAlias).trim();
-          const nextSettings = await window.api.settingsSet({
-            profileAliases: aliases,
-          });
-          api.settings = nextSettings;
-        } catch {
-          alert('alias 保存失败，请检查设置权限');
-        }
-      }
+    const ok = await runBrowserStatusCheck(selectedProfile, 'guide-step');
+    if (!ok) {
+      alert('账号检查失败：cmdSpawn 不可用，请查看日志');
+      return;
     }
-
-    // 交互式询问：是否新增账号
-    const wantAdd = window.confirm('是否立即新增账号？（将打开 headful/camoufox 登录）');
-    if (wantAdd) {
-      // 提醒用户设置alias
-      window.alert('新增账号后，系统将自动获取用户名作为默认别名，您也可以手动修改。');
-      accountAddBtn.click();
-    }
-
-    guideState.accountReady = true;
-    applyGuideLock();
+    void refreshProfileChoices();
   };
 
  card.appendChild(guideCard);
@@ -550,17 +604,39 @@ export function renderXiaohongshuTab(root: HTMLElement, api: any) {
 
   const accountAuditSummary = createEl('div', { className: 'muted', style: 'font-size:12px;' }, ['账号检查：待刷新']) as HTMLDivElement;
   const accountAuditList = createEl('div', { className: 'xhs-account-list' }) as HTMLDivElement;
+  const accountAliasHint = createEl('div', { className: 'muted', style: 'font-size:11px;' }, ['别名用于区分账号显示名称，不影响真实 profileId。']) as HTMLDivElement;
   const accountRefreshBtn = createEl('button', { type: 'button', className: 'secondary' }, ['检查账号状态']) as HTMLButtonElement;
   const accountLiveProbeBtn = createEl('button', { type: 'button', className: 'secondary' }, ['实时探测登录']) as HTMLButtonElement;
   const addAccountCountInput = makeNumberInput('1', '1', '64px');
   const addBatchNameInput = makeTextInput('', '账号名前缀（默认当前 batch / xiaohongshu）', '220px');
-  const accountAddBtn = createEl('button', { type: 'button' }, ['新增账号（headful/camoufox）']) as HTMLButtonElement;
+  const accountAddBtn = createEl('button', { type: 'button' }, ['新增账号（批次/自动命名）']) as HTMLButtonElement;
   const accountNextLikeBtn = createEl('button', { type: 'button', className: 'secondary' }, ['下一步：点赞设置']) as HTMLButtonElement;
+  const batchKeyValue = createEl('div', { className: 'muted', style: 'font-size:12px; min-width:180px;' }, ['']) as HTMLDivElement;
+  const batchNextBtn = createEl('button', { type: 'button', className: 'secondary' }, ['生成新批次（可命名）']) as HTMLButtonElement;
+  let batchKey = readBatchKey();
+  if (!batchKey || /^batch-\\d{8}-\\d{4}$/.test(batchKey)) {
+    batchKey = XHS_DEFAULT_BATCH_KEY;
+  }
+  const updateBatchKey = (next?: string) => {
+    const candidate = next == null ? formatBatchKey() : String(next || '').trim();
+    batchKey = sanitizeBatchKey(candidate);
+    if (!batchKey) batchKey = XHS_DEFAULT_BATCH_KEY;
+    writeBatchKey(batchKey);
+    batchKeyValue.textContent = batchKey;
+    addBatchNameInput.value = batchKey;
+  };
+  updateBatchKey(batchKey || XHS_DEFAULT_BATCH_KEY);
 
   const accountAuditCard = createEl('div', { className: 'xhs-compact-card' });
   accountAuditCard.appendChild(createEl('div', { style: 'font-weight:600; margin-bottom:6px; color:#dbeafe;' }, ['账号检查与新增']));
   accountAuditCard.appendChild(accountAuditSummary);
+  accountAuditCard.appendChild(accountAliasHint);
   accountAuditCard.appendChild(accountAuditList);
+  accountAuditCard.appendChild(createEl('div', { className: 'row', style: 'margin-top:6px; margin-bottom:6px; gap:8px;' }, [
+    createEl('label', { style: 'font-size:12px; color:#8b93a6;' }, ['批次']),
+    batchKeyValue,
+    batchNextBtn,
+  ]));
   accountAuditCard.appendChild(createEl('div', { className: 'row', style: 'margin-top:8px; margin-bottom:6px;' }, [
     accountRefreshBtn,
     accountLiveProbeBtn,
@@ -1258,6 +1334,8 @@ export function renderXiaohongshuTab(root: HTMLElement, api: any) {
   };
 
   let latestProfiles: string[] = [];
+  let accountAutoRefreshTimer: ReturnType<typeof setInterval> | null = null;
+  let accountAutoRefreshUntil = 0;
 
   function extractBatchBase(profileId: string): string {
     const m = String(profileId || '').trim().match(/^(.*?)[-_]batch(?:[-_](\\d+))?$/);
@@ -1275,9 +1353,10 @@ export function renderXiaohongshuTab(root: HTMLElement, api: any) {
   }
 
   function resolveAddBatchPrefix(): string {
+    const current = String(batchKey || '').trim();
+    if (current) return current;
     const manual = String(addBatchNameInput.value || '').trim();
-    const base = manual || inferDefaultBatchBase();
-    return `${base}-batch`;
+    return manual || inferDefaultBatchBase() || XHS_DEFAULT_BATCH_KEY;
   }
 
   function syncAddBatchPlaceholder() {
@@ -1285,13 +1364,22 @@ export function renderXiaohongshuTab(root: HTMLElement, api: any) {
     addBatchNameInput.placeholder = `账号名前缀（默认 ${base}）`;
   }
 
-  const deriveCookiePath = (profileDir: string, profileId: string) => {
+  const deriveCookieCandidates = (profileDir: string, profileId: string) => {
+    const candidates = new Set<string>();
     const normalized = String(profileDir || '').replace(/\\/g, '/');
     const marker = '/profiles/';
     const at = normalized.lastIndexOf(marker);
-    if (at <= 0) return '';
-    const rootDir = normalized.slice(0, at);
-    return rootDir + '/cookies/' + profileId + '.json';
+    if (at > 0) {
+      const rootDir = normalized.slice(0, at);
+      candidates.add(rootDir + '/cookies/' + profileId + '.json');
+    }
+    if (typeof window.api?.osHomedir === 'function') {
+      const homeDir = String(window.api.osHomedir() || '').trim();
+      if (homeDir) {
+        candidates.add(window.api.pathJoin(homeDir, '.webauto', 'cookies', `${profileId}.json`));
+      }
+    }
+    return Array.from(candidates).map((p) => (window.api?.pathNormalize ? window.api.pathNormalize(p) : p));
   };
 
   const refreshAccountAudit = async (
@@ -1311,11 +1399,15 @@ export function renderXiaohongshuTab(root: HTMLElement, api: any) {
     const rows = await Promise.all(
       profiles.map(async (profileId) => {
         const profileDir = String(profileDirs.get(profileId) || '').trim();
-        const cookiePath = deriveCookiePath(profileDir, profileId);
-        const cookieRet = cookiePath
-          ? await window.api.fsReadTextPreview({ path: cookiePath, maxBytes: 160, maxLines: 2 }).catch(() => null)
-          : null;
-        const cookieReady = Boolean(cookieRet?.ok && String(cookieRet?.text || '').trim());
+        const cookieCandidates = deriveCookieCandidates(profileDir, profileId);
+        let cookieReady = false;
+        for (const cookiePath of cookieCandidates) {
+          const cookieRet = await window.api.fsReadTextPreview({ path: cookiePath, maxBytes: 160, maxLines: 2 }).catch(() => null);
+          if (cookieRet?.ok && String(cookieRet?.text || '').trim()) {
+            cookieReady = true;
+            break;
+          }
+        }
         const active = activeProfiles.has(profileId);
         return {
           profileId,
@@ -1330,6 +1422,8 @@ export function renderXiaohongshuTab(root: HTMLElement, api: any) {
       accountAuditList.appendChild(createEl('div', { className: 'xhs-account-row muted' }, ['暂无账号，请先新增账号。']));
       accountAuditSummary.textContent = '账号检查：0 个账号';
       guideState.accountReady = false;
+      saveGuideState(guideState);
+      applyGuideLock();
       return;
     }
 
@@ -1338,9 +1432,7 @@ export function renderXiaohongshuTab(root: HTMLElement, api: any) {
     accountAuditSummary.textContent = '账号检查：总数=' + rows.length + '，cookie就绪=' + cookieReadyCount + '，当前在线=' + activeCount;
 
     // 自动判定账号就绪：有 cookie 的账号即算可用
-    if (cookieReadyCount > 0) {
-      guideState.accountReady = true;
-    }
+    guideState.accountReady = cookieReadyCount > 0;
     // 保存状态
     saveGuideState(guideState);
     applyGuideLock();
@@ -1352,11 +1444,30 @@ export function renderXiaohongshuTab(root: HTMLElement, api: any) {
       const row = createEl('div', { className: 'xhs-account-row' });
       row.appendChild(createEl('div', { className: 'muted', style: 'font-size:12px;' }, [label]));
       row.appendChild(createEl('div', { style: 'font-size:12px; color:' + statusColor + ';' }, [status]));
+      const aliasBtn = createEl('button', { type: 'button', className: 'secondary', style: 'padding:2px 6px; font-size:11px;' }, ['设置别名']) as HTMLButtonElement;
+      aliasBtn.onclick = async () => {
+        const currentAlias = String(entry.alias || '').trim();
+        const nextAlias = window.prompt('账号别名（仅用于区分账号显示名）', currentAlias || '');
+        if (nextAlias == null) return;
+        const aliasesNext: Record<string, string> = { ...aliases };
+        const cleaned = String(nextAlias || '').trim();
+        if (cleaned) aliasesNext[entry.profileId] = cleaned;
+        else delete aliasesNext[entry.profileId];
+        try {
+          const updated = await window.api.settingsSet({ profileAliases: aliasesNext });
+          api.settings = updated;
+          void refreshProfileChoices();
+        } catch {
+          alert('别名保存失败，请稍后再试');
+        }
+      };
+      row.appendChild(aliasBtn);
       accountAuditList.appendChild(row);
     });
   };
 
   const refreshProfileChoices = async () => {
+    accountAuditSummary.textContent = '账号检查：刷新中...';
     const selectedNow = getSelectedShardProfiles();
     const prevSingle = String(profilePickSel.value || persistedSingleProfile || '').trim();
     const prevSelected = selectedNow.length > 0 ? new Set(selectedNow) : new Set(persistedShardProfiles);
@@ -1431,36 +1542,90 @@ export function renderXiaohongshuTab(root: HTMLElement, api: any) {
     await refreshAccountAudit(profiles, aliases as Record<string, string>, profileDirs);
   };
 
+  const stopAccountAutoRefresh = () => {
+    if (accountAutoRefreshTimer) {
+      clearInterval(accountAutoRefreshTimer);
+      accountAutoRefreshTimer = null;
+    }
+  };
+
+  const startAccountAutoRefresh = (reason: string) => {
+    stopAccountAutoRefresh();
+    accountAutoRefreshUntil = Date.now() + 10 * 60 * 1000;
+    api?.appendLog?.(`[ui] account auto refresh start (${reason})`);
+    const tick = async () => {
+      if (Date.now() > accountAutoRefreshUntil) {
+        stopAccountAutoRefresh();
+        return;
+      }
+      await refreshProfileChoices().catch(() => null);
+      if (guideState.accountReady) {
+        api?.appendLog?.('[ui] account auto refresh done (cookie ready)');
+        stopAccountAutoRefresh();
+      }
+    };
+    void tick();
+    accountAutoRefreshTimer = setInterval(() => { void tick(); }, 4000);
+  };
+
   profileRefreshBtn.onclick = () => {
     void refreshProfileChoices();
   };
 
-  accountRefreshBtn.onclick = () => {
+  batchNextBtn.onclick = () => {
+    const suggestion = formatBatchKey();
+    const input = window.prompt('请输入批次名称（可选，留空将自动生成）', suggestion);
+    if (input === null) return;
+    const nextName = String(input || '').trim();
+    updateBatchKey(nextName || suggestion);
+    navStepHint.textContent = `已生成新批次：${batchKey}`;
+  };
+
+  addBatchNameInput.addEventListener('change', () => {
+    const next = sanitizeBatchKey(addBatchNameInput.value || '');
+    if (!next) {
+      updateBatchKey(XHS_DEFAULT_BATCH_KEY);
+      navStepHint.textContent = `已恢复默认批次：${batchKey}`;
+      return;
+    }
+    updateBatchKey(next);
+    navStepHint.textContent = `已更新批次：${batchKey}`;
+  });
+
+  accountRefreshBtn.onclick = async () => {
+    const profileId = String(profilePickSel.value || '').trim();
+    if (profileId) {
+      await runBrowserStatusCheck(profileId, 'refresh');
+    }
     void refreshProfileChoices();
   };
 
   accountLiveProbeBtn.onclick = async () => {
-    const profileId = String(profilePickSel.value || '').trim();
+    const accountMode = String(accountModeSelect.value || 'single').trim();
+    const shardSelected = accountMode === 'shards' ? getSelectedShardProfiles() : [];
+    const profileId = String((shardSelected[0] || profilePickSel.value || '')).trim();
     if (!profileId) {
       alert('请先选择一个账号后再执行实时探测');
       return;
     }
-    const args = [
-      window.api.pathJoin('scripts', 'browser-status.mjs'),
-      profileId,
-      '--site',
-      'xiaohongshu',
-    ];
-    await window.api.cmdSpawn({
-      title: 'browser-status ' + profileId,
-      cwd: '',
-      args,
-      groupKey: 'xiaohongshu',
-    });
+    await runBrowserStatusCheck(profileId, 'live-probe');
+    setTimeout(() => void refreshProfileChoices(), 1500);
   };
 
-  accountAddBtn.onclick = async () => {
+  startAddAccountFlow = async () => {
+    if (typeof window.api?.cmdSpawn !== 'function') {
+      api?.appendLog?.('[error] cmdSpawn API unavailable in renderer');
+      alert('启动失败：cmdSpawn API 不可用');
+      return;
+    }
     const kw = resolveAddBatchPrefix();
+    if (!kw) {
+      api?.appendLog?.('[ui] add-account blocked: empty batch');
+      alert('批次名称不能为空，请先填写批次名称或使用默认 xiaohongshu');
+      return;
+    }
+    api?.appendLog?.(`[ui] add-account start batch=${kw}`);
+    navStepHint.textContent = `正在启动新增账号流程（批次=${kw}）...`;
     const addCount = Math.max(1, Math.floor(Number(addAccountCountInput.value || '1')));
     const poolCount = latestProfiles.filter((p) => String(p || '').trim() === kw || String(p || '').trim().startsWith(kw + '-')).length;
     const ensureCount = poolCount + addCount;
@@ -1477,18 +1642,40 @@ export function renderXiaohongshuTab(root: HTMLElement, api: any) {
       ...(api?.settings?.unifiedApiUrl ? ['--unified-api', String(api.settings.unifiedApiUrl)] : []),
       ...(api?.settings?.browserServiceUrl ? ['--browser-service', String(api.settings.browserServiceUrl)] : []),
     ];
+    api?.appendLog?.(`[ui] spawn profilepool login batch=${kw} ensure=${ensureCount} timeout=${timeoutSec}s`);
 
-    await window.api.cmdSpawn({
-      title: 'profilepool login ' + kw + ' (headful)',
-      cwd: '',
-      args,
-      groupKey: 'profilepool',
-      env: { WEBAUTO_DAEMON: '1' },
-    });
-
-    navStepHint.textContent = `已触发新增账号流程（前缀 ${kw}）：请在弹出的 camoufox/headful 窗口完成登录，再点“检查账号状态”。`;
-    setTimeout(() => void refreshProfileChoices(), 1800);
+    try {
+      const ret = await window.api.cmdSpawn({
+        title: 'profilepool login ' + kw + ' (headful)',
+        cwd: '',
+        args,
+        groupKey: 'profilepool',
+        env: { WEBAUTO_DAEMON: '1' },
+      });
+      if (!ret || !ret.runId) {
+        api?.appendLog?.('[ui] spawn returned empty runId');
+        alert('新增账号启动失败：未获取 runId，请查看日志');
+        return;
+      }
+      api?.appendLog?.(`[ui] spawn ok runId=${ret.runId}`);
+      navStepHint.textContent = `已触发新增账号流程（批次=${kw}）：请在弹出的 camoufox/headful 窗口完成登录，再点“检查账号状态”。`;
+      setTimeout(() => void refreshProfileChoices(), 1800);
+      startAccountAutoRefresh('add-account');
+    } catch (err: any) {
+      api?.appendLog?.(`[ui] spawn exception: ${err?.message || String(err)}`);
+      alert(`新增账号启动失败：${err?.message || String(err)}`);
+    }
   };
+
+  accountAddBtn.addEventListener('pointerdown', (evt) => {
+    evt.stopPropagation();
+  });
+
+  accountAddBtn.addEventListener('click', (evt) => {
+    evt.preventDefault();
+    evt.stopPropagation();
+    if (startAddAccountFlow) void startAddAccountFlow();
+  });
 
   const persistHistoryFns: Array<() => void> = [];
   const registerHistoryInput = (input: HTMLInputElement, key: string) => {
@@ -1632,8 +1819,8 @@ export function renderXiaohongshuTab(root: HTMLElement, api: any) {
   });
 
   let localRunId = '';
- const runBtn = createEl('button', {}, ['开始执行编排']) as HTMLButtonElement;
- const stopBtn = createEl('button', { className: 'danger' }, ['停止当前任务']) as HTMLButtonElement;
+  runBtn = createEl('button', {}, ['开始执行编排']) as HTMLButtonElement;
+  const stopBtn = createEl('button', { className: 'danger' }, ['停止当前任务']) as HTMLButtonElement;
 
   // 确保按钮被正确添加到 DOM
   const actionsRow = createEl('div', { className: 'row', style: 'margin-bottom:12px;' }, [runBtn, stopBtn]);
@@ -1819,3 +2006,4 @@ export function renderXiaohongshuTab(root: HTMLElement, api: any) {
 
   root.appendChild(card);
 }
+

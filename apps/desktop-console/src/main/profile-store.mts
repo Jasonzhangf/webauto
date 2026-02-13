@@ -1,6 +1,7 @@
 import os from 'node:os';
 import path from 'node:path';
 import { promises as fs } from 'node:fs';
+import { existsSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 
 export type ProfileScanEntry = {
@@ -65,6 +66,14 @@ function resolveHomeDir(opts: Options) {
   return homeDir;
 }
 
+function resolvePortableRoot(opts: Options) {
+  const root = String(process.env.WEBAUTO_PORTABLE_ROOT || process.env.WEBAUTO_ROOT || '').trim();
+  if (root) return path.join(root, '.webauto');
+  const marker = path.join(opts.repoRoot, 'desktop-console.bat');
+  if (existsSync(marker)) return path.join(opts.repoRoot, '.webauto');
+  return '';
+}
+
 function isWithinDir(root: string, target: string) {
   const rel = path.relative(root, target);
   return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
@@ -80,9 +89,12 @@ function validateProfileId(profileId: string) {
 
 function resolveRoots(opts: Options) {
   const homeDir = resolveHomeDir(opts);
+  const envProfiles = String(process.env.WEBAUTO_PATHS_PROFILES || '').trim();
+  const envFingerprints = String(process.env.WEBAUTO_PATHS_FINGERPRINTS || '').trim();
+  const portable = resolvePortableRoot(opts);
   return {
-    profilesRoot: path.join(homeDir, '.webauto', 'profiles'),
-    fingerprintsRoot: path.join(homeDir, '.webauto', 'fingerprints'),
+    profilesRoot: envProfiles || (portable ? path.join(portable, 'profiles') : path.join(homeDir, '.webauto', 'profiles')),
+    fingerprintsRoot: envFingerprints || (portable ? path.join(portable, 'fingerprints') : path.join(homeDir, '.webauto', 'fingerprints')),
   };
 }
 

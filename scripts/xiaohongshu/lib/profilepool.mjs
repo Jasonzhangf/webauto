@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { generateAndSaveFingerprint } from '../../../libs/browser/fingerprint-manager.js';
+import { generateAndSaveFingerprint, getFingerprintPath } from '../../../libs/browser/fingerprint-manager.js';
 
 function resolveHomeDir() {
   const homeDir = process.env.HOME || process.env.USERPROFILE || '';
@@ -8,7 +8,17 @@ function resolveHomeDir() {
   return homeDir;
 }
 
+function resolvePortableRoot() {
+  const root = String(process.env.WEBAUTO_PORTABLE_ROOT || process.env.WEBAUTO_ROOT || '').trim();
+  if (!root) return '';
+  return path.join(root, '.webauto');
+}
+
 export function resolveProfilesRoot() {
+  const envRoot = String(process.env.WEBAUTO_PATHS_PROFILES || '').trim();
+  if (envRoot) return envRoot;
+  const portable = resolvePortableRoot();
+  if (portable) return path.join(portable, 'profiles');
   return path.join(resolveHomeDir(), '.webauto', 'profiles');
 }
 
@@ -89,16 +99,34 @@ export function ensureProfileDir(profileId) {
   return dir;
 }
 
-export function addProfile(prefix, options = {}) {
+export async function ensureProfileFingerprint(profileId, options = {}) {
+  const { platform = null } = options;
+  const existingPath = getFingerprintPath(profileId);
+  if (fs.existsSync(existingPath)) {
+    return { fingerprintPath: existingPath, created: false };
+  }
+  const result = await generateAndSaveFingerprint(profileId, { platform });
+  const fpPath = result?.path || existingPath;
+  if (!fpPath || !fs.existsSync(fpPath)) {
+    throw new Error(`fingerprint_not_created:${profileId}`);
+  }
+  return { fingerprintPath: fpPath, created: true };
+}
+
+export async function addProfile(prefix, options = {}) {
   const { platform = null } = options;
   const id = nextProfileId(prefix);
   const dir = ensureProfileDir(id);
 
-  generateAndSaveFingerprint(id, { platform }).catch((err) => {
-    console.warn(`[profilepool] failed to generate fingerprint for ${id}:`, err?.message || err);
-  });
-
-  return { profileId: id, profileDir: dir };
+  try {
+    const { fingerprintPath } = await ensureProfileFingerprint(id, { platform });
+    return { profileId: id, profileDir: dir, fingerprintPath };
+  } catch (err) {
+    try {
+      fs.rmSync(dir, { recursive: true, force: true });
+    } catch {}
+    throw err;
+  }
 }
 
 export function assignShards(prefixOrProfiles) {

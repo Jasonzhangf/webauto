@@ -15,20 +15,29 @@
 import minimist from 'minimist';
 import path from 'node:path';
 import { promises as fs } from 'node:fs';
+import { existsSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { ensureUtf8Console } from './lib/cli-encoding.mjs';
 
 import { ensureBaseServices } from './xiaohongshu/lib/services.mjs';
 import {
   addProfile,
   assignShards,
   ensureProfileDir,
+  ensureProfileFingerprint,
   listProfilesForPool,
   resolveProfilesRoot,
 } from './xiaohongshu/lib/profilepool.mjs';
 
-import { execute as ensureServices } from '../dist/modules/xiaohongshu/app/src/xiaohongshu/app/src/blocks/Phase1EnsureServicesBlock.js';
-import { execute as startProfile } from '../dist/modules/xiaohongshu/app/src/xiaohongshu/app/src/blocks/Phase1StartProfileBlock.js';
-import { execute as monitorCookie } from '../dist/modules/xiaohongshu/app/src/xiaohongshu/app/src/blocks/Phase1MonitorCookieBlock.js';
+import { execute as ensureServices } from '../dist/modules/xiaohongshu/app/src/blocks/Phase1EnsureServicesBlock.js';
+import { execute as startProfile } from '../dist/modules/xiaohongshu/app/src/blocks/Phase1StartProfileBlock.js';
+import { execute as monitorCookie } from '../dist/modules/xiaohongshu/app/src/blocks/Phase1MonitorCookieBlock.js';
 import { execute as ensureLogin } from '../dist/modules/workflow/blocks/EnsureLoginBlock.js';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const REPO_ROOT = path.resolve(__dirname, '..');
+
+ensureUtf8Console();
 
 // Avoid crashing when piped output is closed early (e.g., `| head`)
 process.stdout?.on?.('error', (err) => {
@@ -51,6 +60,21 @@ function resolveHomeDir() {
   if (!homeDir) throw new Error('无法获取用户主目录：HOME/USERPROFILE 未设置');
   return homeDir;
 }
+
+function applyPortableEnv() {
+  if (process.env.WEBAUTO_PORTABLE_ROOT || process.env.WEBAUTO_ROOT) return;
+  const marker = path.join(REPO_ROOT, 'desktop-console.bat');
+  if (!existsSync(marker)) return;
+  const root = REPO_ROOT;
+  process.env.WEBAUTO_PORTABLE_ROOT = root;
+  if (!process.env.WEBAUTO_PATHS_PROFILES) process.env.WEBAUTO_PATHS_PROFILES = path.join(root, '.webauto', 'profiles');
+  if (!process.env.WEBAUTO_PATHS_COOKIES) process.env.WEBAUTO_PATHS_COOKIES = path.join(root, '.webauto', 'cookies');
+  if (!process.env.WEBAUTO_PATHS_LOGS) process.env.WEBAUTO_PATHS_LOGS = path.join(root, '.webauto', 'logs');
+  if (!process.env.WEBAUTO_PATHS_CONTAINERS) process.env.WEBAUTO_PATHS_CONTAINERS = path.join(root, '.webauto', 'container-lib');
+  if (!process.env.WEBAUTO_PATHS_FINGERPRINTS) process.env.WEBAUTO_PATHS_FINGERPRINTS = path.join(root, '.webauto', 'fingerprints');
+}
+
+applyPortableEnv();
 
 function resolvePoolStatusDir() {
   return path.join(resolveHomeDir(), '.webauto', 'profilepool');
@@ -138,7 +162,7 @@ async function main() {
       process.exit(1);
     }
     const platform = args.platform ? String(args.platform).trim() : null;
-    const created = addProfile(keyword, { platform });
+    const created = await addProfile(keyword, { platform });
     const payload = { ok: true, keyword, ...created };
     if (json) {
       console.log(JSON.stringify(payload, null, 2));
@@ -189,7 +213,7 @@ async function main() {
     if (ensureCount > 0) {
       const platform = args.platform ? String(args.platform).trim() : null;
       while (profiles.length < ensureCount) {
-        const created = addProfile(keyword, { platform });
+        const created = await addProfile(keyword, { platform });
         profiles = listProfilesForPool(keyword);
         if (!created?.profileId) break;
       }
@@ -217,10 +241,21 @@ async function main() {
 
     const results = [];
 
-    // 2) Start all profiles in parallel
-    const startResults = await Promise.all(
+    // 2) Ensure profile dirs + fingerprints first
+    await Promise.all(
       profiles.map(async (profileId) => {
         ensureProfileDir(profileId);
+        try {
+          await ensureProfileFingerprint(profileId, { platform: args.platform ? String(args.platform).trim() : null });
+        } catch (err) {
+          console.warn(`[profilepool] fingerprint ensure failed for ${profileId}: ${err?.message || String(err)}`);
+        }
+      }),
+    );
+
+    // 3) Start all profiles in parallel
+    const startResults = await Promise.all(
+      profiles.map(async (profileId) => {
         console.log(`\n➡️  profile=${profileId}`);
         try {
           await startProfile({ profile: profileId, headless: false, url: 'https://www.xiaohongshu.com', ownerPid: process.pid });
@@ -238,7 +273,7 @@ async function main() {
       failedStart.forEach((r) => results.push({ profileId: r.profileId, ok: false, error: r.error || 'start failed' }));
     }
 
-    // 3) Check login status in parallel
+    // 4) Check login status in parallel
     const loginChecks = await Promise.all(
       started.map(async (profileId) => {
         const first = await checkLoginOnce(profileId, unifiedApiUrl).catch(() => ({ isLoggedIn: false, matched: '' }));
@@ -252,7 +287,7 @@ async function main() {
       console.log(`   ✅ already logged in (${r.profileId})`);
     });
 
-    // 4) Wait manual login in parallel
+    // 5) Wait manual login in parallel
     const loginResults = await Promise.all(
       needLogin.map(async (r) => {
         if (r.isLoggedIn && skipLogged) return { profileId: r.profileId, ok: true, matched: r.matched };
@@ -279,7 +314,7 @@ async function main() {
     const failedLogin = loginResults.filter((r) => !r.ok);
     failedLogin.forEach((r) => results.push({ profileId: r.profileId, ok: false, error: r.error || 'login failed' }));
 
-    // 5) Save cookies in parallel
+    // 6) Save cookies in parallel
     const cookieResults = await Promise.all(
       loggedInProfiles.map(async (profileId) => {
         try {

@@ -125,3 +125,10 @@ test('xiaohongshu add account infers default from current profile', async () => 
   assert.match(src, /const firstBatch = latestProfiles\.find/);
   assert.match(src, /return fromFirst \|\| 'xiaohongshu';/);
 });
+
+test('xiaohongshu account check uses CLI probe (no confirm gate)', async () => {
+  const src = await getSrc();
+  assert.match(src, /browser-status\.mjs/);
+  assert.match(src, /const runBrowserStatusCheck = async/);
+  assert.doesNotMatch(src, /window\.confirm/);
+});

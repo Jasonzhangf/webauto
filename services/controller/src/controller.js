@@ -1202,47 +1202,6 @@ export class UiController {
         liveError = err;
       }
     }
-    let fixtureSnapshot = null;
-    if (!snapshot) {
-      fixtureSnapshot = await this.captureSnapshotFromFixture({
-        profileId,
-        url: targetUrl,
-        maxDepth: options.maxDepth,
-        maxChildren: options.maxChildren,
-        containerId: requestedContainerId,
-        rootSelector: options.rootSelector,
-      });
-      snapshot = fixtureSnapshot;
-    } else if (!snapshot?.dom_tree) {
-      try {
-        fixtureSnapshot = await this.captureSnapshotFromFixture({
-          profileId,
-          url: targetUrl,
-          maxDepth: options.maxDepth,
-          maxChildren: options.maxChildren,
-          containerId: requestedContainerId,
-          rootSelector: options.rootSelector,
-        });
-        if (fixtureSnapshot?.dom_tree) {
-          snapshot.dom_tree = fixtureSnapshot.dom_tree;
-          if (!snapshot.matches && fixtureSnapshot.matches) {
-            snapshot.matches = fixtureSnapshot.matches;
-          }
-          const mergedMetadata = {
-            ...(fixtureSnapshot.metadata || {}),
-            ...(snapshot.metadata || {}),
-          };
-          if (!mergedMetadata.dom_source) {
-            mergedMetadata.dom_source = 'fixture';
-          }
-          snapshot.metadata = mergedMetadata;
-        }
-      } catch (fixtureError) {
-        if (this.errorHandler) this.errorHandler.warn('controller', 'fixture DOM capture failed', { error: fixtureError?.message || fixtureError });
-        else console.warn('[controller] fixture DOM capture failed:', fixtureError?.message || fixtureError);
-        console.warn('[controller] fixture DOM capture failed:', fixtureError?.message || fixtureError);
-      }
-    }
     if (!snapshot || !snapshot.container_tree) {
       const rootError = liveError || new Error('容器树为空，检查容器定义或选择器是否正确');
       throw rootError;
@@ -1286,16 +1245,6 @@ export class UiController {
       } catch (err) {
         liveError = err;
       }
-    }
-    if (!branch) {
-      branch = await this.captureBranchFromFixture({
-        profileId,
-        url: targetUrl,
-        path: domPath,
-        rootSelector: options.rootSelector,
-        maxDepth: options.maxDepth,
-        maxChildren: options.maxChildren,
-      });
     }
     if (!branch?.node) {
       throw liveError || new Error('无法获取 DOM 分支');

@@ -295,7 +295,7 @@ export function renderLogs(root: HTMLElement, ctx: any) {
     appendLine(line);
     updateSectionVisibility();
     // 同时保留原有行为（如果其他地方需要）
-    if (typeof originalAppendLog === 'function') originalAppendLog(line);
+    if (typeof originalAppendLog === 'function') originalAppendLog.call(ctx, line);
   };
 
   const unsubscribeActiveRuns = typeof ctx.onActiveRunsChanged === 'function'
