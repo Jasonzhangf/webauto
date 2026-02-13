@@ -65,9 +65,9 @@ function normalizeAiReplyConfig(raw: any): AiReplyConfig {
     return {
       enabled: false,
       provider: 'openai-compatible',
-      baseUrl: 'http://127.0.0.1:5520/v1',
+      baseUrl: 'http://127.0.0.1:5520',
       apiKey: '',
-      model: 'gemini-2.5-flash',
+      model: 'antigravity.gemini-2.5-flash',
       temperature: 0.7,
       maxChars: 20,
       timeoutMs: 25000,
@@ -80,9 +80,9 @@ function normalizeAiReplyConfig(raw: any): AiReplyConfig {
   return {
     enabled: Boolean(raw.enabled ?? false),
     provider: 'openai-compatible',
-    baseUrl: String(raw.baseUrl || 'http://127.0.0.1:5520/v1'),
+    baseUrl: String(raw.baseUrl || 'http://127.0.0.1:5520'),
     apiKey: String(raw.apiKey || ''),
-    model: String(raw.model || 'gemini-2.5-flash'),
+    model: String(raw.model || 'antigravity.gemini-2.5-flash'),
     temperature: Math.max(0, Math.min(2, Number(raw.temperature ?? 0.7))),
     maxChars: Math.max(5, Math.min(500, Math.floor(Number(raw.maxChars ?? 20)))),
     timeoutMs: Math.max(5000, Math.floor(Number(raw.timeoutMs ?? 25000))),
