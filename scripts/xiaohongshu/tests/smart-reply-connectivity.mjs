@@ -29,7 +29,7 @@ async function loadAiConfig() {
     enabled: true,
     baseUrl: 'http://127.0.0.1:5520',
     apiKey: 'sk-user-01a741881a24856eb910f38e',
-    model: 'antigravity.gemini-2.5-flash',
+    model: 'iflow.glm-5',
     temperature: 0.7,
     maxChars: 20,
     timeoutMs: 25000,
