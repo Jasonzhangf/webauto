@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+﻿#!/usr/bin/env node
 import { ensureUtf8Console } from '../lib/cli-encoding.mjs';
 
 ensureUtf8Console();
@@ -211,55 +211,73 @@ esac
 
   // Windows batch script
   const winScript = `@echo off
-REM 小红书采集 CLI 入口
+chcp 65001 >nul
+REM Xiaohongshu CLI
 
 setlocal
 
 set "SCRIPT_DIR=%~dp0"
 set "PROJECT_ROOT=%SCRIPT_DIR%.."
 
-REM 检查 Node.js
+REM Check Node.js
 where node >nul 2>nul
-if %errorlevel% neq 0 (
-  echo ❌ 未检测到 Node.js
-  echo 请访问 https://nodejs.org/ 下载安装 Node.js ${CONFIG.nodeVersion} 或更高版本
+if errorlevel 1 (
+  echo [error] Node.js not found
+  echo Please install Node.js ${CONFIG.nodeVersion} or later: https://nodejs.org/
   exit /b 1
 )
 
-REM 命令路由
-if "%1"=="v3" (
-  node "%PROJECT_ROOT%\\scripts\\run-xiaohongshu-phase1-2-34-v3.mjs" %*
-) else if "%1"=="run" (
-  node "%PROJECT_ROOT%\\scripts\\run-xiaohongshu-phase1-2-34-v3.mjs" %*
-) else if "%1"=="phase1" (
-  node "%PROJECT_ROOT%\\scripts\\xiaohongshu\\phase1-boot.mjs" %*
-) else if "%1"=="phase2" (
-  node "%PROJECT_ROOT%\\scripts\\xiaohongshu\\phase2-collect.mjs" %*
-) else if "%1"=="phase3" (
-  node "%PROJECT_ROOT%\\scripts\\xiaohongshu\\phase3-interact.mjs" %*
-) else if "%1"=="install" (
-  node "%PROJECT_ROOT%\\scripts\\xiaohongshu\\install.mjs"
-) else (
-  echo 小红书数据采集 CLI 工具 v${CONFIG.version}
-  echo.
-  echo 用法:
-  echo   xhs-cli v3              使用 v3 统一入口（推荐）
-  echo   xhs-cli run             同 v3
-  echo   xhs-cli phase1          启动并复用浏览器会话
-  echo   xhs-cli phase2          搜索并采集链接
-  echo   xhs-cli phase3          采集详情和评论
-  echo   xhs-cli install         检查并安装依赖
-  echo.
-  echo 示例:
-  echo   xhs-cli v3 --keyword "手机膜" --count 50 --env prod
-  echo   xhs-cli v3 --help
-  echo   xhs-cli phase1
-)
+REM Command routing
+if "%1"=="v3" goto :v3
+if "%1"=="run" goto :v3
+if "%1"=="phase1" goto :phase1
+if "%1"=="phase2" goto :phase2
+if "%1"=="phase3" goto :phase3
+if "%1"=="install" goto :install
+goto :help
 
+:v3
+node "%PROJECT_ROOT%\\scripts\\run-xiaohongshu-phase1-2-34-v3.mjs" %*
+goto :done
+
+:phase1
+node "%PROJECT_ROOT%\\scripts\\xiaohongshu\\phase1-boot.mjs" %*
+goto :done
+
+:phase2
+node "%PROJECT_ROOT%\\scripts\\xiaohongshu\\phase2-collect.mjs" %*
+goto :done
+
+:phase3
+node "%PROJECT_ROOT%\\scripts\\xiaohongshu\\phase3-interact.mjs" %*
+goto :done
+
+:install
+node "%PROJECT_ROOT%\\scripts\\xiaohongshu\\install.mjs"
+goto :done
+
+:help
+echo Xiaohongshu CLI v${CONFIG.version}
+echo.
+echo Usage:
+echo   xhs-cli v3              Use v3 unified entry (recommended)
+echo   xhs-cli run             Same as v3
+echo   xhs-cli phase1          Start/reuse browser session
+echo   xhs-cli phase2          Search and collect links
+echo   xhs-cli phase3          Collect details and comments
+echo   xhs-cli install         Check and install deps
+echo.
+echo Examples:
+echo   xhs-cli v3 --keyword ^"phone-case^" --count 50 --env prod
+echo   xhs-cli v3 --help
+echo   xhs-cli phase1
+
+:done
 endlocal
+exit /b 0
 `;
 
-  await writeFile(join(binDir, 'xhs-cli.bat'), winScript);
+  await writeFile(join(binDir, 'xhs-cli.bat'), winScript.replace(/\n/g, '\r\n'));
   log('创建: bin/xhs-cli.bat');
 }
 
@@ -355,8 +373,6 @@ endlocal
   );
   log('创建: desktop-console.bat');
 
-  await rm(join(PACKAGE_DIR, 'bin', 'xhs-cli'), { force: true });
-  await rm(join(PACKAGE_DIR, 'bin', 'xhs-cli.bat'), { force: true });
 }
 
 async function createInstallScripts() {
@@ -482,6 +498,7 @@ echo ""
 
   // Windows install script
   const winInstall = `@echo off
+chcp 65001 >nul
 REM WebAuto Desktop Console 安装脚本
 
 setlocal
@@ -490,14 +507,14 @@ cd /d "%~dp0"
 echo [install] Checking Node.js...
 
 where node >nul 2>nul
-if %errorlevel% neq 0 (
+if errorlevel 1 (
   echo [install] Node.js not found.
-  echo [install] Download: https://nodejs.org/ (>=22.0.0)
+  echo [install] Download: https://nodejs.org/ ^(>=22.0.0^)
   exit /b 1
 )
 
 where npm >nul 2>nul
-if %errorlevel% neq 0 (
+if errorlevel 1 (
   echo [install] npm not found. Reinstall Node.js.
   exit /b 1
 )
@@ -610,7 +627,7 @@ echo.
 
   await writeFile(
     join(PACKAGE_DIR, 'install.bat'),
-    `\uFEFF${winInstall.replace(/\n/g, '\r\n')}`
+    winInstall.replace(/\n/g, '\r\n')
   );
   log('创建: install.bat');
 }
@@ -793,17 +810,10 @@ async function createTarGz(outputPath) {
   });
 }
 
-// 创建 zip 压缩包（使用系统 zip 命令）
-async function createZip(outputPath) {
+// 创建 zip 压缩包（优先使用系统 zip 命令；Windows fallback 到 PowerShell）
+async function createZipWithBinary(outputPath) {
   return new Promise((resolve, reject) => {
-    const zipProcess = spawn('zip', [
-      '-r',
-      outputPath,
-      'xiaohongshu-collector'
-    ], {
-      cwd: DIST_DIR
-    });
-
+    const zipProcess = spawn('zip', ['-r', outputPath, 'xiaohongshu-collector'], { cwd: DIST_DIR });
     zipProcess.on('close', (code) => {
       if (code === 0) {
         resolve();
@@ -811,9 +821,41 @@ async function createZip(outputPath) {
         reject(new Error(`zip 命令退出码: ${code}`));
       }
     });
-
     zipProcess.on('error', reject);
   });
+}
+
+async function createZipWithPowerShell(outputPath) {
+  const script = [
+    "$ErrorActionPreference='Stop'",
+    `$out='${outputPath.replace(/'/g, "''")}'`,
+    "if (Test-Path $out) { Remove-Item -Force $out }",
+    "Compress-Archive -Path (Join-Path (Get-Location) 'xiaohongshu-collector') -DestinationPath $out -Force"
+  ].join('; ');
+  return new Promise((resolve, reject) => {
+    const ps = spawn('powershell', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', script], { cwd: DIST_DIR });
+    ps.on('close', (code) => {
+      if (code === 0) {
+        resolve();
+      } else {
+        reject(new Error(`PowerShell Compress-Archive 退出码: ${code}`));
+      }
+    });
+    ps.on('error', reject);
+  });
+}
+
+async function createZip(outputPath) {
+  try {
+    await createZipWithBinary(outputPath);
+  } catch (err) {
+    if (platform() === 'win32') {
+      log('未发现 zip 命令，使用 PowerShell Compress-Archive 作为 fallback');
+      await createZipWithPowerShell(outputPath);
+      return;
+    }
+    throw err;
+  }
 }
 
 // 主构建流程
@@ -879,3 +921,4 @@ build().catch((err) => {
   error(err.message);
   process.exit(1);
 });
+
