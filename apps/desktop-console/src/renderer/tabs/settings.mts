@@ -12,9 +12,9 @@ export function renderSettings(root: HTMLElement, ctx: any) {
   const cmdTimeout = createEl('input', { value: String(ctx.settings?.timeouts?.cmdTimeoutSec || 0), type: 'number', min: '0' }) as HTMLInputElement;
   // AI Reply Configuration
   const aiEnabled = createEl('input', { type: 'checkbox', checked: ctx.settings?.aiReply?.enabled ?? false }) as HTMLInputElement;
-  const aiBaseUrl = createEl('input', { value: ctx.settings?.aiReply?.baseUrl || 'http://127.0.0.1:5520/v1', placeholder: 'http://127.0.0.1:5520/v1' }) as HTMLInputElement;
+  const aiBaseUrl = createEl('input', { value: ctx.settings?.aiReply?.baseUrl || 'http://127.0.0.1:5520', placeholder: 'http://127.0.0.1:5520' }) as HTMLInputElement;
   const aiApiKey = createEl('input', { value: ctx.settings?.aiReply?.apiKey || '', type: 'password', placeholder: 'sk-...' }) as HTMLInputElement;
-  const aiModel = createEl('input', { value: ctx.settings?.aiReply?.model || 'gemini-2.5-flash', placeholder: 'gemini-2.5-flash' }) as HTMLInputElement;
+  const aiModel = createEl('input', { value: ctx.settings?.aiReply?.model || 'iflow.glm-5', placeholder: 'iflow.glm-5' }) as HTMLInputElement;
   const aiTemperature = createEl('input', { value: String(ctx.settings?.aiReply?.temperature ?? 0.7), type: 'number', min: '0', max: '2', step: '0.1' }) as HTMLInputElement;
   const aiMaxChars = createEl('input', { value: String(ctx.settings?.aiReply?.maxChars ?? 20), type: 'number', min: '5', max: '500' }) as HTMLInputElement;
   const aiTimeout = createEl('input', { value: String(ctx.settings?.aiReply?.timeoutMs ?? 25000), type: 'number', min: '5000', step: '1000' }) as HTMLInputElement;
@@ -50,7 +50,7 @@ export function renderSettings(root: HTMLElement, ctx: any) {
       const result = await (window as any).api.invoke('ai:testChatCompletion', {
         baseUrl: aiBaseUrl.value.trim(),
         apiKey: aiApiKey.value.trim(),
-        model: aiModel.value.trim() || 'gemini-2.5-flash',
+        model: aiModel.value.trim() || 'iflow.glm-5',
         timeoutMs: Number(aiTimeout.value) || 25000,
       });
       if (result.ok) {
