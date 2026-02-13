@@ -10,6 +10,7 @@ import { getStateBus } from '../../modules/core/src/index.mjs';
 import { globalEventBus } from '../../libs/operations-framework/src/event-driven/EventBus.js';
 import { loadOrGenerateFingerprint, applyFingerprint } from '../../libs/browser/fingerprint-manager.js';
 import { launchEngineContext } from './engine-manager.js';
+import { resolveCookiesRoot, resolveProfilesRoot } from './storage-paths.js';
 
 const stateBus = getStateBus();
 
@@ -43,7 +44,7 @@ export class BrowserSession {
 
   constructor(private options: BrowserSessionOptions) {
     const profileId = options.profileId || 'default';
-    const root = path.join(os.homedir(), '.webauto', 'profiles');
+    const root = resolveProfilesRoot();
     this.profileDir = path.join(root, profileId);
     fs.mkdirSync(this.profileDir, { recursive: true });
     this.lock = new ProfileLock(profileId);
@@ -785,7 +786,7 @@ export class BrowserSession {
   }
 
   private resolveCookieTargets(currentUrl?: string | null): string[] {
-    const cookieDir = path.join(os.homedir(), '.webauto', 'cookies');
+    const cookieDir = resolveCookiesRoot();
     const targets = new Set<string>([path.join(cookieDir, `${this.options.profileId}.json`)]);
 
     if (currentUrl) {

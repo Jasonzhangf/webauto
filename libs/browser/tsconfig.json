@@ -7,14 +7,15 @@
     "esModuleInterop": true,
     "strict": false,
     "skipLibCheck": true,
-    "outDir": "./dist",
+    "outDir": "../../dist/libs/browser",
     "rootDir": ".",
     "declaration": true,
     "declarationMap": true,
     "sourceMap": true
   },
   "include": [
-    "remote-service.ts"
+    "remote-service.ts",
+    "fingerprint-manager.ts"
   ],
   "exclude": [
     "node_modules",

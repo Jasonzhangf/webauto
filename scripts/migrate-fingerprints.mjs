@@ -7,7 +7,7 @@
 import { readdirSync, statSync } from 'fs';
 import path from 'node:path';
 import { homedir } from 'node:os';
-import { generateAndSaveFingerprint, getFingerprintPath, loadFingerprint } from '../libs/browser/fingerprint-manager.js';
+import { generateAndSaveFingerprint, getFingerprintPath, loadFingerprint } from '../dist/libs/browser/fingerprint-manager.js';
 
 function isDirectory(p) {
   try {

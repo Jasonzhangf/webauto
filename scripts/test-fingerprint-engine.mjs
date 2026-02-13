@@ -5,7 +5,7 @@
  */
 
 import minimist from 'minimist';
-import { generateAndSaveFingerprint, loadFingerprint, getFingerprintPath } from '../libs/browser/fingerprint-manager.js';
+import { generateAndSaveFingerprint, loadFingerprint, getFingerprintPath } from '../dist/libs/browser/fingerprint-manager.js';
 import path from 'node:path';
 import { homedir } from 'node:os';
 

@@ -1,7 +1,6 @@
 import os from 'node:os';
 import path from 'node:path';
 import { promises as fs } from 'node:fs';
-import { existsSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 
 export type ProfileScanEntry = {
@@ -68,10 +67,8 @@ function resolveHomeDir(opts: Options) {
 
 function resolvePortableRoot(opts: Options) {
   const root = String(process.env.WEBAUTO_PORTABLE_ROOT || process.env.WEBAUTO_ROOT || '').trim();
-  if (root) return path.join(root, '.webauto');
-  const marker = path.join(opts.repoRoot, 'desktop-console.bat');
-  if (existsSync(marker)) return path.join(opts.repoRoot, '.webauto');
-  return '';
+  if (!root) return '';
+  return path.join(root, '.webauto');
 }
 
 function isWithinDir(root: string, target: string) {
@@ -116,7 +113,7 @@ export function createProfileStore(opts: Options): ProfileStore {
   let cachedFingerprintMod: any = null;
   async function getFingerprintModule() {
     if (cachedFingerprintMod) return cachedFingerprintMod;
-    const p = path.join(opts.repoRoot, 'libs', 'browser', 'fingerprint-manager.js');
+    const p = path.join(opts.repoRoot, 'dist', 'libs', 'browser', 'fingerprint-manager.js');
     cachedFingerprintMod = await import(pathToFileURL(p).href);
     return cachedFingerprintMod;
   }

@@ -5,130 +5,181 @@ import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const tabPath = path.join(__dirname, 'xiaohongshu.mts');
+const entryPath = path.join(__dirname, 'xiaohongshu.mts');
+const helperPath = path.join(__dirname, 'xiaohongshu', 'helpers.mts');
+const layoutPath = path.join(__dirname, 'xiaohongshu', 'layout-block.mts');
+const accountPath = path.join(__dirname, 'xiaohongshu', 'account-flow.mts');
+const runPath = path.join(__dirname, 'xiaohongshu', 'run-flow.mts');
+const livePath = path.join(__dirname, 'xiaohongshu', 'live-stats.mts');
+const guidePath = path.join(__dirname, 'xiaohongshu', 'guide-browser-check.mts');
 
-async function getSrc() {
-  return readFile(tabPath, 'utf8');
+async function readText(filePath: string) {
+  return readFile(filePath, 'utf8');
 }
 
-test('xiaohongshu tab integrates orchestrate modes including unified-only', async () => {
-  const src = await getSrc();
-  assert.match(src, /phase1-phase2-unified/);
-  assert.match(src, /phase1-phase2/);
-  assert.match(src, /phase1-only/);
-  assert.match(src, /unified-only/);
-  assert.match(src, /phase-orchestrate\.mjs/);
+async function readAll() {
+  const [entry, helper, layout, account, run, live, guide] = await Promise.all([
+    readText(entryPath),
+    readText(helperPath),
+    readText(layoutPath),
+    readText(accountPath),
+    readText(runPath),
+    readText(livePath),
+    readText(guidePath),
+  ]);
+  return { entry, helper, layout, account, run, live, guide, all: [entry, helper, layout, account, run, live, guide].join('\n') };
+}
+
+test('xiaohongshu tab keeps orchestrate modes and run script wiring after modular split', async () => {
+  const { entry, run, layout } = await readAll();
+  assert.match(entry, /buildXhsLayout/);
+  assert.match(entry, /createRunFlowController/);
+  assert.match(layout, /phase1-phase2-unified/);
+  assert.match(layout, /phase1-phase2/);
+  assert.match(layout, /phase1-only/);
+  assert.match(layout, /unified-only/);
+  assert.match(run, /phase-orchestrate\.mjs/);
 });
 
-test('xiaohongshu tab uses preferred+available profile selectors (no manual profile typing)', async () => {
-  const src = await getSrc();
-  assert.match(src, /const profilePickSel = createEl\('select'/);
-  assert.match(src, /const shardProfilesBox = createEl\('div'/);
-  assert.match(src, /const getSelectedShardProfiles = \(\) =>/);
-  assert.match(src, /void refreshProfileChoices\(\);/);
-  assert.match(src, /profileArgs\.push\('--profiles', shardProfiles\.join\(','\)\)/);
-  assert.match(src, /profileArgs\.push\('--profile', singleProfile\)/);
-  assert.doesNotMatch(src, /分片 profiles（逗号分隔）/);
-  assert.doesNotMatch(src, /主 profile（单账号）/);
-  assert.match(src, /if \(mode !== 'phase1-only'\) \{\s*args\.push\('--target'/s);
-  assert.match(src, /if \(unifiedEnabled\) \{[\s\S]*args\.push\(/s);
+test('xiaohongshu module files are split and each stays under 500 lines', async () => {
+  const files = [entryPath, helperPath, layoutPath, accountPath, runPath, livePath, guidePath];
+  const lengths = await Promise.all(files.map(async (p) => String((await readText(p)).split(/\r?\n/g).length)));
+  files.forEach((file, i) => {
+    const lines = Number(lengths[i]);
+    assert.ok(lines <= 500, `${path.basename(file)} has ${lines} lines`);
+  });
 });
 
-test('xiaohongshu tab hides unchecked bodies and blocks reply without gate', async () => {
-  const src = await getSrc();
-  assert.match(src, /body\.style\.display = toggle\.checked \? '' : 'none';/);
-  assert.match(src, /开启“自动回复”时，请同时开启“评论命中规则”。/);
-  assert.match(src, /homeSection\.style\.display = featureDisplay/);
-  assert.match(src, /opOrderRow\.style\.display = featureDisplay/);
+test('xiaohongshu layout imports stringifyLikeRule helper used by rule chips', async () => {
+  const { layout } = await readAll();
+  assert.match(layout, /stringifyLikeRule/);
+  assert.match(layout, /from '\.\/helpers\.mjs'/);
 });
 
-test('xiaohongshu tab input history supports autocomplete and hotkey delete', async () => {
-  const src = await getSrc();
-  assert.match(src, /INPUT_HISTORY_MAX = 10/);
-  assert.match(src, /bindInputHistory\(input: HTMLInputElement, key: string/);
-  assert.match(src, /input\.setAttribute\('list', safeId\)/);
-  assert.match(src, /Ctrl\+Shift\+Backspace/);
-  assert.match(src, /persistHistoryFns\.forEach\(\(persist\) => persist\(\)\)/);
+test('xiaohongshu keeps homepage toggle wiring between layout and tab orchestration', async () => {
+  const { entry, layout } = await readAll();
+  assert.match(layout, /homepageToggle/);
+  assert.match(layout, /imagesToggle/);
+  assert.match(entry, /homepageToggle/);
+  assert.match(entry, /imagesToggle/);
 });
 
-test('xiaohongshu tab clarifies active profile and account-mode visibility', async () => {
-  const src = await getSrc();
-  assert.match(src, /单账号（一个 profile）/);
-  assert.match(src, /首次引导：先配置账号/);
-  assert.match(src, /分片并发（多个 profiles）/);
-  assert.match(src, /请选择账号：alias \/ profile/);
-  assert.match(src, /单账号（账号名 \/ profile）/);
-  assert.match(src, /当前实际使用：\(未选择账号\)/);
-  assert.match(src, /singleProfileRow\.style\.display = isSingleMode \? '' : 'none';/);
-  assert.match(src, /shardProfilesSection\.style\.display = isSingleMode \? 'none' : '';/);
-  assert.match(src, /if \(isSingleMode\) renderSingleProfileHint\(\);/);
-  assert.match(src, /else renderShardHints\(\);/);
-  assert.match(src, /链接：0\/0/);
-  assert.match(src, /已点赞帖子/);
-  assert.match(src, /已回复帖子/);
+test('xiaohongshu keeps preferred profile selectors and shard args', async () => {
+  const { entry, run, layout } = await readAll();
+  assert.match(layout, /const profilePickSel = createEl\('select'/);
+  assert.match(layout, /const shardProfilesBox = createEl\('div'/);
+  assert.match(entry, /getSelectedShardProfiles/);
+  assert.match(entry, /void refreshProfileChoices\(\);/);
+  assert.match(run, /profileArgs\.push\('--profiles', shardProfiles\.join\(','\)\)/);
+  assert.match(run, /profileArgs\.push\('--profile', singleProfile\)/);
 });
 
-test('xiaohongshu tab persists and restores last config for default values', async () => {
-  const src = await getSrc();
-  assert.match(src, /XHS_LAST_CONFIG_KEY = 'webauto\.xhs\.lastConfig\.v1'/);
-  assert.match(src, /const persistedConfig = readLastConfig\(\);/);
-  assert.match(src, /applyPersistedValue\(keywordInput, persistedConfig\.keyword\)/);
-  assert.match(src, /if \(typeof persistedConfig\.dryRun === 'boolean'\) dryRunCheckbox\.checked = persistedConfig\.dryRun/);
-  assert.match(src, /const persistLastConfig = \(\) => \{/);
-  assert.match(src, /writeLastConfig\(\{/);
+test('xiaohongshu history helper supports autocomplete and hotkey delete', async () => {
+  const { helper, run } = await readAll();
+  assert.match(helper, /INPUT_HISTORY_MAX = 10/);
+  assert.match(helper, /bindInputHistory\(input: HTMLInputElement, key: string/);
+  assert.match(helper, /input\.setAttribute\('list', safeId\)/);
+  assert.match(helper, /evt\.ctrlKey && evt\.shiftKey && evt\.key === 'Backspace'/);
+  assert.match(run, /persistHistoryFns\.forEach\(\(persist\) => persist\(\)\)/);
 });
 
-test('xiaohongshu tab maps like-only results to like evidence directory', async () => {
-  const src = await getSrc();
-  assert.match(src, /const likeEvidenceDir = String\(evt\?\.likeEvidenceDir \|\| ''\)\.trim\(\);/);
-  assert.match(src, /else if \(likeEvidenceDir\) current\.path = likeEvidenceDir;/);
-  assert.match(src, /if \(!current\.path && likeEvidenceDir\) current\.path = likeEvidenceDir;/);
+test('xiaohongshu persists and restores last config via helper storage', async () => {
+  const { helper, entry } = await readAll();
+  assert.match(helper, /XHS_LAST_CONFIG_KEY = 'webauto\.xhs\.lastConfig\.v1'/);
+  assert.match(entry, /const persistedConfig = readLastConfig\(\);/);
+  assert.match(entry, /writeLastConfig\(\{/);
+  assert.match(entry, /bindLikeRulePersistence\(\{/);
 });
 
-test('xiaohongshu tab enables OCR toggle and forwards ocr command', async () => {
-  const src = await getSrc();
-  assert.match(src, /图片 OCR（DeepSeek OCR）/);
-  assert.match(src, /const ocrCommandInput = makeTextInput\('', 'OCR命令/);
-  assert.match(src, /registerHistoryInput\(ocrCommandInput, 'ocrCommand'\)/);
-  assert.match(src, /args\.push\('--ocr-command', String\(ocrCommandInput\.value \|\| ''\)\.trim\(\)\)/);
+test('xiaohongshu add-account flow creates profile then starts login-profile run', async () => {
+  const { account } = await readAll();
+  assert.match(account, /profilepool\.mjs'/);
+  assert.match(account, /'add', kw, '--json'/);
+  assert.match(account, /'login-profile'/);
+  assert.match(account, /cmdRunJson/);
+  assert.match(account, /cmdSpawn/);
+  assert.match(account, /await refreshProfileChoices\(targetProfile\)/);
 });
 
-test('xiaohongshu tab aggregates multi-shard runIds within current session', async () => {
-  const src = await getSrc();
-  assert.match(src, /const activeUnifiedRunIds = new Set<string>\(\);/);
-  assert.match(src, /const runDoneAgg = new Map<string, \{ processed: number; liked: number; replied: number \}>\(\);/);
-  assert.match(src, /return tsMs \+ 2000 >= sessionStartMs;/);
-  assert.match(src, /if \(activeUnifiedRunIds\.size > 0 && evtRunId && !activeUnifiedRunIds\.has\(evtRunId\)\) continue;/);
-  assert.match(src, /if \(activeUnifiedRunIds\.size === 0 && evtRunId\) activeUnifiedRunIds\.add\(evtRunId\);/);
-  assert.match(src, /if \(runId\) \{[\s\S]*runDoneAgg\.set\(runId,/);
-  assert.match(src, /事件流\$\{shardHint\}：\$\{liveStats\.eventsPath\}/);
+test('xiaohongshu account flow uses one fixed profile naming prefix', async () => {
+  const { account } = await readAll();
+  assert.match(account, /export function extractBatchBase\(_profileId: string\): string/);
+  assert.match(account, /export function inferDefaultBatchBase\(_currentProfileId: string, _latestProfiles: string\[\]\): string/);
+  assert.match(account, /const resolveAddBatchPrefix = \(\): string => \{\s*return XHS_DEFAULT_BATCH_KEY;/);
+  assert.match(account, /setNavHint\(`Account IDs use fixed pattern: \$\{XHS_DEFAULT_BATCH_KEY\}-N`\);/);
+});
+
+test('xiaohongshu account flow auto-selects single profile in shard list', async () => {
+  const { account } = await readAll();
+  assert.match(account, /profiles\.length === 1 && prevSelected\.size === 0/);
+});
+
+test('xiaohongshu consumes preflight navigation target and checks browser with runJson when available', async () => {
+  const { entry, guide } = await readAll();
+  assert.match(entry, /consumeNavTarget/);
+  assert.match(entry, /runGuideBrowserCheck/);
+  assert.match(guide, /XHS_NAV_TARGET_KEY/);
+  assert.match(guide, /'--check-browser-only'/);
+  assert.match(guide, /cmdRunJson/);
+});
+
+test('xiaohongshu account check uses browser-status probe without confirm dialog', async () => {
+  const { entry } = await readAll();
+  assert.match(entry, /browser-status\.mjs/);
+  assert.match(entry, /const runBrowserStatusCheck = async/);
+  assert.doesNotMatch(entry, /window\.confirm/);
+});
+
+test('xiaohongshu live stats uses cmd-event stream as single source', async () => {
+  const { live } = await readAll();
+  assert.match(live, /cmd-event/);
+  assert.doesNotMatch(live, /fsReadTextTail/);
+  assert.match(live, /const activeRunIds = new Set<string>\(\);/);
+  assert.match(live, /noteProgressMatch/);
+});
+
+test('xiaohongshu run flow forwards ocr command and gate/reply guard', async () => {
+  const { run, entry } = await readAll();
+  assert.match(run, /if \(unifiedEnabled && replyToggle\.checked && !gateToggle\.checked\)/);
+  assert.match(run, /jumpToAccountSetup\(\)/);
+  assert.match(run, /jumpToKeywordSetup\(\)/);
+  assert.match(run, /--do-ocr/);
+  assert.match(run, /--ocr-command/);
+  assert.match(run, /--match-keywords/);
+  assert.match(entry, /focusAccountSetup/);
+  assert.match(entry, /focusKeywordSetup/);
 });
 
 
-test('xiaohongshu add account has batch name input and resolver', async () => {
-  const src = await getSrc();
-  // batch name input
-  assert.match(src, /const addBatchNameInput = makeTextInput/);
-  // helper functions
-  assert.match(src, /function extractBatchBase\(profileId: string\): string/);
-  assert.match(src, /function inferDefaultBatchBase\(\): string/);
-  assert.match(src, /function resolveAddBatchPrefix\(\): string/);
-  assert.match(src, /function syncAddBatchPlaceholder\(\)/);
-  // add handler uses resolver
-  assert.match(src, /const kw = resolveAddBatchPrefix\(\);/);
+test('xiaohongshu run flow keeps logs shortcut in action row', async () => {
+  const { run } = await readAll();
+  assert.match(run, /const logsBtn = createEl\('button', \{ type: 'button', className: 'secondary' \}, \['日志'\]\)/);
+  assert.match(run, /api\.setActiveTab\('logs'\)/);
+  assert.match(run, /setExpectedLinksTarget\(/);
 });
 
-test('xiaohongshu add account infers default from current profile', async () => {
-  const src = await getSrc();
-  assert.match(src, /const currentProfile = String\(profilePickSel\.value/);
-  assert.match(src, /const fromCurrent = extractBatchBase\(currentProfile\);/);
-  assert.match(src, /const firstBatch = latestProfiles\.find/);
-  assert.match(src, /return fromFirst \|\| 'xiaohongshu';/);
+test('xiaohongshu live stats parser accepts rotated events files and phase2 progress lines', async () => {
+  const { live } = await readAll();
+  assert.match(live, /setExpectedLinksTarget: \(target: number\) => void/);
+  assert.ok(live.includes('run-events(?:'));
+  assert.ok(live.includes('Phase2Collect(?:Links)?'));
 });
 
-test('xiaohongshu account check uses CLI probe (no confirm gate)', async () => {
-  const src = await getSrc();
-  assert.match(src, /browser-status\.mjs/);
-  assert.match(src, /const runBrowserStatusCheck = async/);
-  assert.doesNotMatch(src, /window\.confirm/);
+test('xiaohongshu guide account step always brings account tile into view before checks', async () => {
+  const { entry } = await readAll();
+  assert.match(entry, /accountStep\.onclick = \(\) => \{ focusTile\('account'\); void runInteractiveAccountCheck\(\); \};/);
+});
+
+
+test('xiaohongshu browser guide checks browser only once at startup', async () => {
+  const { entry } = await readAll();
+  assert.match(entry, /let startupBrowserChecked = false;/);
+  assert.match(entry, /if \(startupBrowserChecked\) return void finalizeGuide\(\);/);
+  assert.match(entry, /startupBrowserChecked = true;/);
+});
+
+test('xiaohongshu run flow only consumes stdout/stderr from current run id', async () => {
+  const { run } = await readAll();
+  assert.match(run, /if \(!localRunId\) return;/);
+  assert.match(run, /if \(evtRunId && evtRunId !== localRunId\) return;/);
 });

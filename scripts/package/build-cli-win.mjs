@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env node
+#!/usr/bin/env node
 import { ensureUtf8Console } from '../lib/cli-encoding.mjs';
 
 ensureUtf8Console();
@@ -216,12 +216,12 @@ setlocal EnableDelayedExpansion
 set "SCRIPT_DIR=%~dp0"
 set "PROJECT_ROOT=%SCRIPT_DIR%"
 set "APP_DIR=%PROJECT_ROOT%\\apps\\desktop-console"
-set "WEBAUTO_PORTABLE_ROOT=%PROJECT_ROOT%"
-set "WEBAUTO_PATHS_PROFILES=%PROJECT_ROOT%\\.webauto\\profiles"
-set "WEBAUTO_PATHS_COOKIES=%PROJECT_ROOT%\\.webauto\\cookies"
-set "WEBAUTO_PATHS_LOGS=%PROJECT_ROOT%\\.webauto\\logs"
-set "WEBAUTO_PATHS_CONTAINERS=%PROJECT_ROOT%\\.webauto\\container-lib"
-set "WEBAUTO_PATHS_FINGERPRINTS=%PROJECT_ROOT%\\.webauto\\fingerprints"
+REM 默认使用用户目录 ~/.webauto；如需自定义可在外部设置 WEBAUTO_PATHS_* / WEBAUTO_PORTABLE_ROOT
+
+
+
+
+
 
 if not exist "%APP_DIR%\\package.json" (
   echo [error] desktop-console files missing: %APP_DIR%

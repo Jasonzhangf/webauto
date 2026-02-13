@@ -26,6 +26,14 @@ function log(msg) {
   console.log(`[stop] ${msg}`);
 }
 
+function resolveProfilesRoot() {
+  const envProfiles = String(process.env.WEBAUTO_PATHS_PROFILES || '').trim();
+  if (envProfiles) return envProfiles;
+  const portableRoot = String(process.env.WEBAUTO_PORTABLE_ROOT || process.env.WEBAUTO_ROOT || '').trim();
+  if (portableRoot) return path.join(portableRoot, '.webauto', 'profiles');
+  return path.join(os.homedir(), '.webauto', 'profiles');
+}
+
 async function runNodeScript(scriptPath, args = [], cwd = repoRoot) {
   await new Promise((resolve) => {
     const child = spawn(process.execPath, [scriptPath, ...args], {
@@ -102,45 +110,97 @@ function killLocks(profileId) {
   }
 }
 
-function killPhaseProcesses() {
-  const ps = spawn('ps', ['aux']);
-  let output = '';
-  ps.stdout.on('data', (chunk) => {
-    output += chunk.toString();
-  });
-  ps.on('close', () => {
-    const lines = output.split('\n');
-    const targets = lines
-      .filter((line) => /phase2-collect\.mjs|phase3-interact\.mjs|phase4-harvest\.mjs/.test(line))
-      .map((line) => Number(line.trim().split(/\s+/)[1]))
-      .filter((pid) => Number.isFinite(pid));
-    for (const pid of targets) {
-      try {
-        process.kill(pid, 'SIGTERM');
-        log(`killed phase process pid=${pid}`);
-      } catch {
-        // ignore
-      }
-    }
+function normalizeMatchTarget(value) {
+  return String(value || '').toLowerCase().replace(/\\/g, '/');
+}
+
+async function collectProcessListPosix() {
+  return await new Promise((resolve) => {
+    const ps = spawn('ps', ['aux'], { windowsHide: true });
+    let output = '';
+    ps.stdout.on('data', (chunk) => {
+      output += chunk.toString();
+    });
+    ps.on('error', () => resolve([]));
+    ps.on('close', () => {
+      const lines = output.split('\n').filter(Boolean);
+      const entries = lines
+        .map((line) => {
+          const parts = line.trim().split(/\s+/);
+          const pid = Number(parts[1]);
+          return Number.isFinite(pid) ? { pid, cmd: line } : null;
+        })
+        .filter(Boolean);
+      resolve(entries);
+    });
   });
 }
 
-async function killCamoufox(profileId) {
-  const profilePath = path.join(os.homedir(), '.webauto', 'profiles', profileId);
-  const ps = spawn('ps', ['aux']);
-  let output = '';
-  ps.stdout.on('data', (chunk) => {
-    output += chunk.toString();
+async function collectProcessListWindows() {
+  return await new Promise((resolve) => {
+    const args = [
+      '-NoProfile',
+      '-Command',
+      'Get-CimInstance Win32_Process | Select-Object ProcessId,CommandLine | ConvertTo-Json -Compress',
+    ];
+    const child = spawn('powershell', args, { windowsHide: true });
+    let output = '';
+    child.stdout.on('data', (chunk) => {
+      output += chunk.toString();
+    });
+    child.on('error', () => resolve([]));
+    child.on('close', () => {
+      const raw = output.trim();
+      if (!raw) return resolve([]);
+      try {
+        const parsed = JSON.parse(raw);
+        const list = Array.isArray(parsed) ? parsed : [parsed];
+        const entries = list
+          .map((item) => {
+            const pid = Number(item?.ProcessId);
+            const cmd = String(item?.CommandLine || '');
+            return Number.isFinite(pid) ? { pid, cmd } : null;
+          })
+          .filter(Boolean);
+        resolve(entries);
+      } catch {
+        resolve([]);
+      }
+    });
   });
-  await new Promise((resolve) => ps.on('close', resolve));
+}
 
-  const lines = output.split('\n');
-  const targets = lines
-    .filter((line) => line.includes('camoufox') && line.includes(profilePath))
-    .map((line) => {
-      const parts = line.trim().split(/\s+/);
-      return Number(parts[1]);
+async function collectProcessList() {
+  if (process.platform === 'win32') return await collectProcessListWindows();
+  return await collectProcessListPosix();
+}
+
+async function killPhaseProcesses() {
+  const list = await collectProcessList();
+  const targets = list
+    .filter((entry) => /phase2-collect\.mjs|phase3-interact\.mjs|phase4-harvest\.mjs/.test(entry.cmd || ''))
+    .map((entry) => entry.pid)
+    .filter((pid) => Number.isFinite(pid));
+  for (const pid of targets) {
+    try {
+      process.kill(pid, 'SIGTERM');
+      log(`killed phase process pid=${pid}`);
+    } catch {
+      // ignore
+    }
+  }
+}
+
+async function killCamoufox(profileId) {
+  const profilePath = path.join(resolveProfilesRoot(), profileId);
+  const profileMatch = normalizeMatchTarget(profilePath);
+  const list = await collectProcessList();
+  const targets = list
+    .filter((entry) => {
+      const cmd = normalizeMatchTarget(entry.cmd || '');
+      return cmd.includes('camoufox') && cmd.includes(profileMatch);
     })
+    .map((entry) => entry.pid)
     .filter((pid) => Number.isFinite(pid));
 
   if (!targets.length) return;
@@ -165,7 +225,7 @@ async function main() {
   }
 
   killLocks(PROFILE);
-  killPhaseProcesses();
+  await killPhaseProcesses();
   await killCamoufox(PROFILE);
   log('done');
 }

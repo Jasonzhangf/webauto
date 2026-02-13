@@ -23,7 +23,22 @@ import { ensureServicesHealthy, restoreBrowserState } from './lib/recovery.mjs';
 import minimist from 'minimist';
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 
+function resolveHomeDir() {
+  const homeDir = process.platform === 'win32'
+    ? String(process.env.USERPROFILE || '').trim()
+    : String(process.env.HOME || '').trim();
+  return homeDir || '';
+}
 
+function resolveCookiePath(profileId) {
+  const envCookies = String(process.env.WEBAUTO_PATHS_COOKIES || '').trim();
+  if (envCookies) return join(envCookies, `${profileId}.json`);
+  const portableRoot = String(process.env.WEBAUTO_PORTABLE_ROOT || process.env.WEBAUTO_ROOT || '').trim();
+  if (portableRoot) return join(portableRoot, '.webauto', 'cookies', `${profileId}.json`);
+  const homeDir = resolveHomeDir();
+  if (homeDir) return join(homeDir, '.webauto', 'cookies', `${profileId}.json`);
+  return `.webauto/cookies/${profileId}.json`;
+}
 
 async function withTimeout(promise, timeoutMs, timeoutMessage) {
   if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) return promise;
@@ -138,6 +153,7 @@ async function main() {
         profile,
         scanIntervalMs: 15000,
         stableCount: 1,
+        cookiePath: resolveCookiePath(profile),
       });
       cookieRes = headless
         ? await withTimeout(
@@ -159,6 +175,7 @@ async function main() {
         profile,
         scanIntervalMs: 15000,
         stableCount: 1,
+        cookiePath: resolveCookiePath(profile),
       });
     }
 

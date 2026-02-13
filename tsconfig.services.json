@@ -17,11 +17,13 @@
     "modules/**/*.ts",
     "modules/**/*.d.ts",
     "sharedmodule/engines/**/*.ts",
+    "libs/browser/**/*.ts",
     "src/server.ts",
     "services/controller/**/*.ts"
   ],
   "exclude": [
     "node_modules",
-    "dist"
+    "dist",
+    "libs/browser/tests/**"
   ]
 }

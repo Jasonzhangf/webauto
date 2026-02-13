@@ -11,16 +11,20 @@ async function getSrc() {
   return readFile(indexPath, 'utf8');
 }
 
-test('main tabs keep xiaohongshu home and debug consolidation', async () => {
+test('main tabs keep xiaohongshu home and logs before settings', async () => {
   const src = await getSrc();
-  assert.match(src, /type TabId = 'xiaohongshu' \| 'preflight' \| 'debug' \| 'settings' \| 'logs';/);
-  assert.match(src, /\{ id: 'xiaohongshu', label: '小红书', render: renderXiaohongshuTab \}/);
-  assert.match(src, /\{ id: 'debug', label: '调试', render: renderDebug \}/);
+  assert.match(src, /type TabId = 'xiaohongshu' \| 'preflight' \| 'logs' \| 'settings';/);
+  assert.match(src, /\{ id: 'xiaohongshu', label: '[^']+', render: renderXiaohongshuTab \}/);
+  assert.match(src, /\{ id: 'preflight', label: '[^']+', render: renderPreflight \}/);
+  assert.match(src, /\{ id: 'logs', label: '[^']+', render: renderLogs \}/);
+  assert.match(src, /\{ id: 'settings', label: '[^']+', render: renderSettings \}/);
+  assert.doesNotMatch(src, /id: 'debug'/);
   assert.doesNotMatch(src, /'runtime'/);
-  assert.doesNotMatch(src, /'profilepool'/);
+
+  const logsIdx = src.indexOf("{ id: 'logs'");
+  const settingsIdx = src.indexOf("{ id: 'settings'");
+  assert.ok(logsIdx > -1 && settingsIdx > logsIdx, 'logs tab should render before settings tab');
   assert.match(src, /setActiveTab\('xiaohongshu'\);/);
-  assert.match(src, /renderLogs/);
-  assert.match(src, /\{ id: 'logs', label: '日志', render: renderLogs \}/);
 });
 
 test('renderer context exposes setActiveTab for cross-tab onboarding navigation', async () => {

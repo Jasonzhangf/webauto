@@ -5,7 +5,7 @@
  */
 
 import { addProfile, listProfilesForPool, resolveProfilesRoot } from './xiaohongshu/lib/profilepool.mjs';
-import { loadFingerprint, getFingerprintPath } from '../libs/browser/fingerprint-manager.js';
+import { loadFingerprint, getFingerprintPath } from '../dist/libs/browser/fingerprint-manager.js';
 import path from 'node:path';
 
 async function testProfilePoolFingerprint() {

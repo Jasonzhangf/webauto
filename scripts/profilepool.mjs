@@ -15,7 +15,6 @@
 import minimist from 'minimist';
 import path from 'node:path';
 import { promises as fs } from 'node:fs';
-import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { ensureUtf8Console } from './lib/cli-encoding.mjs';
 
@@ -61,20 +60,18 @@ function resolveHomeDir() {
   return homeDir;
 }
 
-function applyPortableEnv() {
-  if (process.env.WEBAUTO_PORTABLE_ROOT || process.env.WEBAUTO_ROOT) return;
-  const marker = path.join(REPO_ROOT, 'desktop-console.bat');
-  if (!existsSync(marker)) return;
-  const root = REPO_ROOT;
-  process.env.WEBAUTO_PORTABLE_ROOT = root;
-  if (!process.env.WEBAUTO_PATHS_PROFILES) process.env.WEBAUTO_PATHS_PROFILES = path.join(root, '.webauto', 'profiles');
-  if (!process.env.WEBAUTO_PATHS_COOKIES) process.env.WEBAUTO_PATHS_COOKIES = path.join(root, '.webauto', 'cookies');
-  if (!process.env.WEBAUTO_PATHS_LOGS) process.env.WEBAUTO_PATHS_LOGS = path.join(root, '.webauto', 'logs');
-  if (!process.env.WEBAUTO_PATHS_CONTAINERS) process.env.WEBAUTO_PATHS_CONTAINERS = path.join(root, '.webauto', 'container-lib');
-  if (!process.env.WEBAUTO_PATHS_FINGERPRINTS) process.env.WEBAUTO_PATHS_FINGERPRINTS = path.join(root, '.webauto', 'fingerprints');
+function resolveCookiesRoot() {
+  const envRoot = String(process.env.WEBAUTO_PATHS_COOKIES || '').trim();
+  if (envRoot) return envRoot;
+  const portable = String(process.env.WEBAUTO_PORTABLE_ROOT || process.env.WEBAUTO_ROOT || '').trim();
+  if (portable) return path.join(portable, '.webauto', 'cookies');
+  return path.join(resolveHomeDir(), '.webauto', 'cookies');
 }
 
-applyPortableEnv();
+function resolveCookiePath(profileId) {
+  return path.join(resolveCookiesRoot(), `${profileId}.json`);
+}
+
 
 function resolvePoolStatusDir() {
   return path.join(resolveHomeDir(), '.webauto', 'profilepool');
@@ -143,6 +140,65 @@ async function browserServiceCommand(action, args, serviceUrl) {
   return data;
 }
 
+async function loginSingleProfile({
+  profileId,
+  timeoutSec,
+  checkIntervalSec,
+  scanIntervalMs,
+  stableCount,
+  keepSession,
+  unifiedApiUrl,
+  browserServiceUrl,
+  platform,
+}) {
+  if (!profileId) throw new Error('profileId required');
+
+  ensureProfileDir(profileId);
+  await ensureProfileFingerprint(profileId, { platform });
+
+  await ensureBaseServices({ repoRoot: process.cwd() });
+  await ensureServices();
+
+  const ownerPid = keepSession ? 0 : process.pid;
+  await startProfile({ profile: profileId, headless: false, url: 'https://www.xiaohongshu.com', ownerPid });
+
+  console.log(`   ⏳ waiting manual login... (${profileId})`);
+  console.log('   - 请在打开的浏览器窗口里完成登录（扫码/短信等）');
+
+  const loginRes = await ensureLogin({
+    sessionId: profileId,
+    serviceUrl: unifiedApiUrl,
+    maxWaitMs: timeoutSec * 1000,
+    checkIntervalMs: checkIntervalSec * 1000,
+  });
+  if (!loginRes?.isLoggedIn) {
+    throw new Error(loginRes?.error || 'login timeout');
+  }
+
+  const cookieRes = await monitorCookie({
+    profile: profileId,
+    unifiedApiUrl,
+    browserServiceUrl,
+    scanIntervalMs,
+    stableCount,
+    cookiePath: resolveCookiePath(profileId),
+  });
+
+  if (!keepSession) {
+    await browserServiceCommand('stop', { profileId }, browserServiceUrl).catch(() => null);
+  }
+
+  return {
+    ok: true,
+    profileId,
+    matchedContainer: loginRes.matchedContainer || '',
+    cookiePath: cookieRes.cookiePath,
+    cookieSaved: Boolean(cookieRes.saved),
+    autoCookiesStarted: cookieRes.autoCookiesStarted,
+    scanRounds: cookieRes.scanRounds,
+  };
+}
+
 async function main() {
   const args = minimist(process.argv.slice(2));
   const json = args.json === true || args.json === 'true' || args.json === 1 || args.json === '1';
@@ -189,6 +245,46 @@ async function main() {
       console.log(`keyword: ${keyword}`);
       console.log(`count: ${profiles.length}`);
       profiles.forEach((p) => console.log(`- ${p}`));
+    }
+    return;
+  }
+
+  if (cmdOrKeyword === 'login-profile') {
+    const profileId = String(maybeKeyword || '').trim();
+    if (!profileId) {
+      printUsage();
+      process.exit(1);
+    }
+    const timeoutSec = args['timeout-sec'] != null ? Math.max(30, Math.floor(Number(args['timeout-sec']))) : 900;
+    const checkIntervalSec = args['check-interval-sec'] != null ? Math.max(1, Math.floor(Number(args['check-interval-sec']))) : 3;
+    const scanIntervalMs = args['scan-interval-ms'] != null ? Math.max(3000, Math.floor(Number(args['scan-interval-ms']))) : 15000;
+    const stableCount = args['stable-count'] != null ? Math.max(1, Math.floor(Number(args['stable-count']))) : 3;
+    const keepSession = args['keep-session'] === true || args['keep-session'] === '1' || args['keep-session'] === 1;
+    const unifiedApiUrl = String(args['unified-api'] || 'http://127.0.0.1:7701').trim();
+    const browserServiceUrl = String(args['browser-service'] || 'http://127.0.0.1:7704').trim();
+    const platform = args.platform ? String(args.platform).trim() : null;
+
+    console.log('🔐 Profile single login');
+    console.log(`profile: ${profileId}`);
+    console.log(`timeoutSec: ${timeoutSec}`);
+
+    const result = await loginSingleProfile({
+      profileId,
+      timeoutSec,
+      checkIntervalSec,
+      scanIntervalMs,
+      stableCount,
+      keepSession,
+      unifiedApiUrl,
+      browserServiceUrl,
+      platform,
+    });
+
+    if (json) {
+      console.log(JSON.stringify(result, null, 2));
+    } else {
+      console.log(`✅ done profile=${result.profileId}`);
+      console.log(`🍪 cookie path=${result.cookiePath}`);
     }
     return;
   }
@@ -253,12 +349,14 @@ async function main() {
       }),
     );
 
+    const ownerPid = keepSession ? 0 : process.pid;
+
     // 3) Start all profiles in parallel
     const startResults = await Promise.all(
       profiles.map(async (profileId) => {
         console.log(`\n➡️  profile=${profileId}`);
         try {
-          await startProfile({ profile: profileId, headless: false, url: 'https://www.xiaohongshu.com', ownerPid: process.pid });
+          await startProfile({ profile: profileId, headless: false, url: 'https://www.xiaohongshu.com', ownerPid });
           return { profileId, ok: true };
         } catch (e) {
           console.warn(`   ❌ start failed: ${e?.message || String(e)}`);
@@ -277,12 +375,13 @@ async function main() {
     const loginChecks = await Promise.all(
       started.map(async (profileId) => {
         const first = await checkLoginOnce(profileId, unifiedApiUrl).catch(() => ({ isLoggedIn: false, matched: '' }));
-        return { profileId, ...first };
+        const hasCookie = existsSync(resolveCookiePath(profileId));
+        return { profileId, hasCookie, ...first };
       }),
     );
 
-    const needLogin = loginChecks.filter((r) => !r.isLoggedIn || !skipLogged);
-    const alreadyLogged = loginChecks.filter((r) => r.isLoggedIn && skipLogged);
+    const needLogin = loginChecks.filter((r) => !r.isLoggedIn || !(skipLogged && r.hasCookie));
+    const alreadyLogged = loginChecks.filter((r) => r.isLoggedIn && skipLogged && r.hasCookie);
     alreadyLogged.forEach((r) => {
       console.log(`   ✅ already logged in (${r.profileId})`);
     });
@@ -324,6 +423,7 @@ async function main() {
             browserServiceUrl,
             scanIntervalMs,
             stableCount,
+            cookiePath: resolveCookiePath(profileId),
           });
           console.log(`   🍪 cookie saved=${cookieRes.saved} path=${cookieRes.cookiePath} (${profileId})`);
           return {

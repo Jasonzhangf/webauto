@@ -6,7 +6,7 @@
 
 import minimist from 'minimist';
 import EngineManager from '../libs/browser/engine-manager.js';
-import { loadOrGenerateFingerprint, applyFingerprint } from '../libs/browser/fingerprint-manager.js';
+import { loadOrGenerateFingerprint, applyFingerprint } from '../dist/libs/browser/fingerprint-manager.js';
 import path from 'node:path';
 import { homedir } from 'node:os';
 

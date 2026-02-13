@@ -1,5 +1,6 @@
 import { createEl, labeledInput, section } from '../ui-components.mts';
 import { resolveConfigPath } from '../path-helpers.mts';
+import { renderDebug } from './debug.mts';
 
 export function renderSettings(root: HTMLElement, ctx: any) {
   const coreDaemon = createEl('input', { value: ctx.settings?.coreDaemonUrl || 'http://127.0.0.1:7700' }) as HTMLInputElement;
@@ -63,6 +64,7 @@ export function renderSettings(root: HTMLElement, ctx: any) {
     }
   }
   const configPath = resolveConfigPath(ctx.settings?.downloadRoot || '', window.api);
+  const debugHost = createEl('div') as HTMLDivElement;
 
   async function save() {
     const next = await window.api.settingsSet({
@@ -133,10 +135,12 @@ export function renderSettings(root: HTMLElement, ctx: any) {
         ]),
         aiTestResult,
       ]),
+      section('调试（已并入设置）', [debugHost]),
     ]),
   );
   (root.querySelector('button') as HTMLButtonElement).onclick = () => void save();
   const buttons = root.querySelectorAll('button');
   if (buttons[1]) (buttons[1] as HTMLButtonElement).onclick = () => void fetchModels();
   if (buttons[2]) (buttons[2] as HTMLButtonElement).onclick = () => void testConnection();
+  renderDebug(debugHost, ctx);
 }

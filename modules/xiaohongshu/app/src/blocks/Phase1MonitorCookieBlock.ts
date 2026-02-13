@@ -1,3 +1,5 @@
+import path from 'node:path';
+
 /**
  * Phase 1 Block: Cookie 监控与稳定保存
  *
@@ -51,6 +53,21 @@ async function browserServiceCommand(action: string, args: any, serviceUrl: stri
 
 function delay(ms: number) {
   return new Promise((r) => setTimeout(r, ms));
+}
+
+function resolveDefaultCookiePath(profile: string) {
+  const envRoot = String(process.env.WEBAUTO_PATHS_COOKIES || '').trim();
+  if (envRoot) return path.join(envRoot, `${profile}.json`);
+
+  const portableRoot = String(process.env.WEBAUTO_PORTABLE_ROOT || process.env.WEBAUTO_ROOT || '').trim();
+  if (portableRoot) return path.join(portableRoot, '.webauto', 'cookies', `${profile}.json`);
+
+  const homeDir = process.platform === 'win32'
+    ? String(process.env.USERPROFILE || '').trim()
+    : String(process.env.HOME || '').trim();
+  if (homeDir) return path.join(homeDir, '.webauto', 'cookies', `${profile}.json`);
+
+  return path.join('.webauto', 'cookies', `${profile}.json`);
 }
 
 function hashCookiePairs(pairs: Array<{ name: string; value: string }>): string {
@@ -170,11 +187,7 @@ export async function execute(input: Phase1MonitorCookieInput): Promise<Phase1Mo
     stableCount = 3,
     cookiePath,
   } = input;
-  const homeDir = process.env.HOME || process.env.USERPROFILE || '';
-  const defaultCookiePath = homeDir
-    ? `${homeDir}/.webauto/cookies/${profile}.json`
-    : `.webauto/cookies/${profile}.json`;
-  const resolvedCookiePath = cookiePath || defaultCookiePath;
+  const resolvedCookiePath = cookiePath || resolveDefaultCookiePath(profile);
 
   let lastHash = '';
   let stableRounds = 0;
@@ -210,11 +223,37 @@ export async function execute(input: Phase1MonitorCookieInput): Promise<Phase1Mo
     // 只有登录成功时才保存，并且必须“变化后稳定”
     if (loggedIn && stableRounds >= stableCount) {
       console.log('[Phase1MonitorCookie] Cookie stable, saving...');
-      await browserServiceCommand(
-        'saveCookiesIfStable',
-        { profileId: profile, path: resolvedCookiePath, minDelayMs: 2000 },
-        browserServiceUrl,
-      );
+      let saveResult: any = null;
+      try {
+        saveResult = await browserServiceCommand(
+          'saveCookiesIfStable',
+          { profileId: profile, path: resolvedCookiePath, minDelayMs: 2000 },
+          browserServiceUrl,
+        );
+      } catch (err) {
+        console.warn(`[Phase1MonitorCookie] saveCookiesIfStable failed: ${(err as Error)?.message || String(err)}`);
+      }
+
+      if (!Boolean(saveResult?.saved)) {
+        // Fallback: force save once so downstream checks can find explicit cookie file.
+        let forced: any = null;
+        try {
+          forced = await browserServiceCommand('saveCookies', { profileId: profile, path: resolvedCookiePath }, browserServiceUrl);
+        } catch {
+          forced = null;
+        }
+        const forcedCount = Number(forced?.count ?? forced?.body?.count ?? -1);
+        if (forcedCount >= 0) {
+          saveResult = { ...(saveResult || {}), saved: true, count: forcedCount };
+          console.log(`[Phase1MonitorCookie] saveCookies fallback count=${forcedCount}`);
+        }
+      }
+
+      if (!Boolean(saveResult?.saved)) {
+        console.warn('[Phase1MonitorCookie] cookie not saved yet, continue scanning');
+        await delay(scanIntervalMs);
+        continue;
+      }
 
       // 进入常驻模式：开启 Browser Service 自动保存 cookie，不阻塞后续 Phase2
       if (!autoCookiesStarted) {

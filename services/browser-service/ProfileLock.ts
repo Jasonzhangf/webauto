@@ -1,12 +1,13 @@
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
+import { resolveLocksRoot } from './storage-paths.js';
 
 export class ProfileLock {
   private lockDir: string;
   private lockFile: string;
 
-  constructor(private profileId: string, lockRoot = path.join(os.homedir(), '.webauto', 'locks')) {
+  constructor(private profileId: string, lockRoot = resolveLocksRoot()) {
     this.lockDir = lockRoot;
     fs.mkdirSync(this.lockDir, { recursive: true });
     this.lockFile = path.join(this.lockDir, `${this.profileId}.lock`);

@@ -30,6 +30,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = join(__dirname, '../..');
 const rawArgs = process.argv.slice(2);
 const isCheckOnly = rawArgs.includes('--check');
+const isBrowserCheckOnly = rawArgs.includes('--check-browser-only');
 const downloadBrowser = rawArgs.includes('--download-browser');
 
 // ANSI 颜色
@@ -293,6 +294,18 @@ async function main() {
   const nodeOk = checkNodeVersion();
   if (!nodeOk) {
     process.exit(1);
+  }
+
+  if (isBrowserCheckOnly) {
+    const browserOk = await checkBrowser();
+    log('\n' + '='.repeat(50));
+    if (browserOk) {
+      success('浏览器检查通过！');
+      process.exit(0);
+    }
+    error('浏览器检查失败！');
+    provideFixSuggestions(false, false, true);
+    process.exit(2);
   }
 
   const buildOk = checkBuildArtifacts();

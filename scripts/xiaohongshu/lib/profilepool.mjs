@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { generateAndSaveFingerprint, getFingerprintPath } from '../../../libs/browser/fingerprint-manager.js';
+import { generateAndSaveFingerprint, getFingerprintPath } from '../../../dist/libs/browser/fingerprint-manager.js';
 
 function resolveHomeDir() {
   const homeDir = process.env.HOME || process.env.USERPROFILE || '';

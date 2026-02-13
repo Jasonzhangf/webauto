@@ -5,6 +5,8 @@ function buildArgs(parts: string[]) {
   return parts.filter((x) => x != null && String(x).trim() !== '');
 }
 
+const XHS_NAV_TARGET_KEY = 'webauto.xhs.navTarget.v1';
+
 export function renderPreflight(root: HTMLElement, ctx: any) {
   const filterInput = createEl('input', { value: '', placeholder: '过滤：profileId / alias / platform' }) as HTMLInputElement;
   const selectAllBox = createEl('input', { type: 'checkbox' }) as HTMLInputElement;
@@ -132,10 +134,23 @@ export function renderPreflight(root: HTMLElement, ctx: any) {
 
       btnOpenProfile.onclick = () => void window.api.osOpenPath(e.profileDir);
       btnOpenFp.onclick = () => void window.api.osOpenPath(e.fingerprintPath);
-      btnSaveAlias.onclick = () => void saveAlias(e.profileId, aliasInput.value);
-      aliasInput.onkeydown = (ev) => {
-        if (ev.key === 'Enter') void saveAlias(e.profileId, aliasInput.value);
+      let lastSavedAlias = String(aliases[e.profileId] || '').trim();
+      const commitAlias = async () => {
+        const nextAlias = String(aliasInput.value || '').trim();
+        if (nextAlias === lastSavedAlias) return;
+        await saveAlias(e.profileId, nextAlias);
+        lastSavedAlias = nextAlias;
+        aliasInput.style.borderColor = '';
       };
+      aliasInput.oninput = () => {
+        const dirty = String(aliasInput.value || '').trim() !== lastSavedAlias;
+        aliasInput.style.borderColor = dirty ? '#2b67ff' : '';
+      };
+      btnSaveAlias.onclick = () => void commitAlias();
+      aliasInput.onkeydown = (ev) => {
+        if (ev.key === 'Enter') void commitAlias();
+      };
+      aliasInput.onblur = () => void commitAlias();
       btnRegenFp.onclick = async () => {
         ctx.clearLog();
         const platform = String(regenPlatform.value || 'random');
@@ -260,29 +275,68 @@ export function renderPreflight(root: HTMLElement, ctx: any) {
     updateSelectionHint();
   };
 
+  const runBrowserCheck = async (opts: { download?: boolean; source?: 'auto' | 'manual' } = {}) => {
+    const download = opts.download === true;
+    const source = opts.source || 'manual';
+    const script = window.api.pathJoin('scripts', 'xiaohongshu', 'install.mjs');
+    const args = buildArgs([script, '--check-browser-only', ...(download ? ['--download-browser'] : [])]);
+
+    browserStatus.textContent = download ? '浏览器状态：下载+检查中...' : '浏览器状态：检查中...';
+    browserStatus.style.color = '#8b93a6';
+
+    if (typeof window.api?.cmdRunJson === 'function') {
+      const out = await window.api.cmdRunJson({
+        title: download ? 'xhs install download' : 'xhs install check',
+        cwd: '',
+        args,
+        timeoutMs: download ? 240000 : 120000,
+      }).catch((err: any) => ({ ok: false, error: err?.message || String(err) }));
+
+      const mergedOutput = String(out?.stdout || out?.stderr || out?.error || '').replace(/\x1b\[[0-9;]*m/g, '');
+      if (out?.ok) {
+        browserStatus.textContent = download ? '浏览器状态：下载并检查通过' : '浏览器状态：检查通过';
+        browserStatus.style.color = '#22c55e';
+      } else if (/Camoufox 未安装/i.test(mergedOutput)) {
+        browserStatus.textContent = '浏览器状态：未安装 Camoufox（可点“下载 Camoufox”）';
+        browserStatus.style.color = '#f59e0b';
+      } else {
+        browserStatus.textContent = `浏览器状态：检查失败（code=${out?.code ?? 'n/a'}）`;
+        browserStatus.style.color = '#ef4444';
+      }
+      if (source === 'manual' && mergedOutput) {
+        ctx.appendLog(`[preflight] install output\n${mergedOutput}`);
+      }
+      return;
+    }
+
+    if (typeof window.api?.cmdSpawn === 'function') {
+      await window.api.cmdSpawn({ title: download ? 'xhs install download' : 'xhs install check', cwd: '', args, groupKey: 'install' });
+      browserStatus.textContent = '浏览器状态：已触发检查（查看日志）';
+      browserStatus.style.color = '#22c55e';
+      return;
+    }
+
+    browserStatus.textContent = '浏览器状态：检查能力不可用';
+    browserStatus.style.color = '#ef4444';
+  };
+
   gotoXhsBtn.onclick = () => {
+    try {
+      window.localStorage.setItem(XHS_NAV_TARGET_KEY, 'account');
+    } catch {
+      // ignore storage failures
+    }
     if (typeof ctx?.setActiveTab === 'function') ctx.setActiveTab('xiaohongshu');
   };
 
   browserCheckBtn.onclick = async () => {
-    if (typeof window.api?.cmdSpawn !== 'function') return;
     ctx.clearLog();
-    browserStatus.textContent = '浏览器状态：检查中...';
-    const args = buildArgs([window.api.pathJoin('scripts', 'xiaohongshu', 'install.mjs'), '--check']);
-    await window.api.cmdSpawn({ title: 'xhs install check', cwd: '', args, groupKey: 'install' });
-    browserStatus.textContent = '浏览器状态：已触发检查（查看日志）';
+    await runBrowserCheck({ source: 'manual' });
   };
+
   browserDownloadBtn.onclick = async () => {
-    if (typeof window.api?.cmdSpawn !== 'function') return;
     ctx.clearLog();
-    browserStatus.textContent = '浏览器状态：下载中...';
-    const args = buildArgs([
-      window.api.pathJoin('scripts', 'xiaohongshu', 'install.mjs'),
-      '--check',
-      '--download-browser',
-    ]);
-    await window.api.cmdSpawn({ title: 'xhs install download', cwd: '', args, groupKey: 'install' });
-    browserStatus.textContent = '浏览器状态：已触发下载（查看日志）';
+    await runBrowserCheck({ download: true, source: 'manual' });
   };
 
   root.appendChild(
@@ -353,7 +407,33 @@ export function renderPreflight(root: HTMLElement, ctx: any) {
       args: buildArgs([window.api.pathJoin('scripts', 'profilepool.mjs'), 'add', kw, '--json']),
     });
     ctx.appendLog(JSON.stringify(out?.json || out, null, 2));
+    const createdProfileId = String(out?.json?.profileId || '').trim();
     await poolList();
+
+    if (!createdProfileId) return;
+    if (typeof window.api?.cmdSpawn !== 'function') return;
+
+    const timeoutSec = Math.max(30, Math.floor(Number(timeoutInput.value || '900')));
+    const loginArgs = buildArgs([
+      window.api.pathJoin('scripts', 'profilepool.mjs'),
+      'login-profile',
+      createdProfileId,
+      '--timeout-sec',
+      String(timeoutSec),
+      '--check-interval-sec',
+      '2',
+      '--keep-session',
+      ...(ctx.settings?.unifiedApiUrl ? ['--unified-api', String(ctx.settings.unifiedApiUrl)] : []),
+      ...(ctx.settings?.browserServiceUrl ? ['--browser-service', String(ctx.settings.browserServiceUrl)] : []),
+    ]);
+    await window.api.cmdSpawn({
+      title: `profilepool login-profile ${createdProfileId}`,
+      cwd: '',
+      args: loginArgs,
+      groupKey: 'profilepool',
+      env: { WEBAUTO_DAEMON: '1' },
+    });
+    ctx.appendLog(`[preflight] 已创建并启动登录: ${createdProfileId}`);
   }
 
   async function poolLogin() {
@@ -377,7 +457,7 @@ export function renderPreflight(root: HTMLElement, ctx: any) {
 
   const poolActions = createEl('div', { className: 'row' }, [
     createEl('button', { className: 'secondary' }, ['扫描池']),
-    createEl('button', { className: 'secondary' }, ['新增一个']),
+    createEl('button', { className: 'secondary' }, ['新增一个并登录']),
     createEl('button', {}, ['批量登录/补登录']),
   ]);
   (poolActions.children[0] as HTMLButtonElement).onclick = () => void poolList();
@@ -402,4 +482,5 @@ export function renderPreflight(root: HTMLElement, ctx: any) {
   );
 
   void refreshScan();
+  void runBrowserCheck({ source: 'auto' });
 }

@@ -1,5 +1,4 @@
 import { renderPreflight } from './tabs/preflight.mts';
-import { renderDebug } from './tabs/debug.mts';
 import { renderSettings } from './tabs/settings.mts';
 import { renderLogs } from './tabs/logs.mts';
 import { renderXiaohongshuTab } from './tabs/xiaohongshu.mts';
@@ -11,14 +10,13 @@ declare global {
   }
 }
 
-type TabId = 'xiaohongshu' | 'preflight' | 'debug' | 'settings' | 'logs';
+type TabId = 'xiaohongshu' | 'preflight' | 'logs' | 'settings';
 
 const tabs: Array<{ id: TabId; label: string; render: (root: HTMLElement, ctx: any) => void }> = [
   { id: 'xiaohongshu', label: '小红书', render: renderXiaohongshuTab },
   { id: 'preflight', label: '预处理', render: renderPreflight },
-  { id: 'debug', label: '调试', render: renderDebug },
-  { id: 'settings', label: '设置', render: renderSettings },
   { id: 'logs', label: '日志', render: renderLogs },
+  { id: 'settings', label: '设置', render: renderSettings },
 ];
 
 const tabsEl = document.getElementById('tabs')!;

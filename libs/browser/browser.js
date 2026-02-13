@@ -103,7 +103,7 @@ export { CookieManager } from './cookie-manager.js';
 export { startBrowserService } from './remote-service.js';
 
 // 指纹管理（可选直接使用）
-export { generateFingerprint, applyFingerprint } from './fingerprint-manager.js';
+export { generateFingerprint, applyFingerprint } from '../../dist/libs/browser/fingerprint-manager.js';
 
 // 版本号
 export const __version__ = '3.1.0';
