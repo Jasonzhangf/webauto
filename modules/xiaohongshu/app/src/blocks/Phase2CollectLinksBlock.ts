@@ -205,6 +205,7 @@ export async function execute(input: CollectLinksInput): Promise<CollectLinksOut
   const traceDir = path.join(resolveDownloadRoot(), 'xiaohongshu', env, keyword, 'click-trace');
   const tracePath = path.join(traceDir, 'trace.jsonl');
   const traceEnabled = debugArtifactsEnabled || process.env.WEBAUTO_CLICK_TRACE === '1';
+  const shouldEnsureFocusBeforeMouseFallback = process.platform === 'win32';
 
   const ensureTraceDir = async () => {
     if (!traceEnabled) return;
@@ -1046,7 +1047,17 @@ export async function execute(input: CollectLinksInput): Promise<CollectLinksOut
     }
 
     if (!safeUrl) {
-      await ensureBrowserFocus('mouse_center');
+      if (shouldEnsureFocusBeforeMouseFallback) {
+        await ensureBrowserFocus('mouse_center');
+      } else {
+        console.log(`[Phase2Collect] Focus ensure skipped: platform=${process.platform} strategy=mouse_center`);
+        await appendTrace({
+          type: 'focus_ensure_skipped',
+          ts: new Date().toISOString(),
+          strategy: 'mouse_center',
+          platform: process.platform,
+        });
+      }
       for (const point of clickPoints.slice(0, 3)) {
         const strategy = `point:${String(point?.name || 'unknown')}`;
         attemptedStrategies.push(strategy);
