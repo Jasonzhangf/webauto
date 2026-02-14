@@ -2,7 +2,6 @@
 // Bridge between unified-api state and Desktop UI (webauto-04b)
 
 import { ipcMain, BrowserWindow } from 'electron';
-import nodeFetch from 'node-fetch';
 import WebSocket from 'ws';
 import type { TaskState, StateUpdate } from './task-state-types.js';
 
@@ -11,16 +10,12 @@ const UNIFIED_API_WS = process.env.WEBAUTO_UNIFIED_WS || 'ws://127.0.0.1:7701/ws
 // Fallback if unified-api is not available
 const API_URL = 'http://127.0.0.1:7701';
 
-// Polyfill fetch for Node.js < 18
-if (!globalThis.fetch) {
-  globalThis.fetch = nodeFetch as any;
-}
-
 class StateBridge {
   private ws: WebSocket | null = null;
   private reconnectTimer: NodeJS.Timeout | null = null;
   private win: BrowserWindow | null = null;
   private tasks: Map<string, TaskState> = new Map();
+  private handlersRegistered = false;
 
   start(win: BrowserWindow) {
     this.win = win;
@@ -76,24 +71,34 @@ class StateBridge {
   }
 
   private setupIPCHandlers() {
+    if (this.handlersRegistered) return;
+    this.handlersRegistered = true;
+
+    const fetchJson = async (url: string) => {
+      try {
+        const res = await globalThis.fetch(url, { signal: AbortSignal.timeout(5000) });
+        if (!res.ok) return null;
+        return await res.json().catch(() => null);
+      } catch {
+        return null;
+      }
+    };
+
     ipcMain.handle('state:getTasks', async () => {
-      const res = await globalThis.fetch(`${API_URL}/api/v1/tasks`);
-      const json = await res.json();
-      return json.data || [];
+      const json = await fetchJson(`${API_URL}/api/v1/tasks`);
+      return json?.data || [];
     });
 
     ipcMain.handle('state:getTask', async (_e, runId: string) => {
-      const res = await globalThis.fetch(`${API_URL}/api/v1/tasks/${runId}`);
-      const json = await res.json();
-      return json.data;
+      const json = await fetchJson(`${API_URL}/api/v1/tasks/${runId}`);
+      return json?.data ?? null;
     });
 
     ipcMain.handle('state:getEvents', async (_e, runId: string, since?: number) => {
       let url = `${API_URL}/api/v1/tasks/${runId}/events`;
       if (since) url += `?since=${since}`;
-      const res = await globalThis.fetch(url);
-      const json = await res.json();
-      return json.data || [];
+      const json = await fetchJson(url);
+      return json?.data || [];
     });
   }
 

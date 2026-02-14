@@ -37,6 +37,7 @@ contextBridge.exposeInMainWorld('api', {
   runtimeSetBrowserTitle: (spec) => ipcRenderer.invoke('runtime:setBrowserTitle', spec),
   runtimeSetHeaderBar: (spec) => ipcRenderer.invoke('runtime:setHeaderBar', spec),
   desktopHeartbeat: () => ipcRenderer.invoke('desktop:heartbeat'),
+  clipboardWriteText: (text) => ipcRenderer.invoke('clipboard:writeText', { text: String(text || '') }),
 
   // Generic IPC invoke for extensibility
   invoke: (channel, ...args) => ipcRenderer.invoke(channel, ...args),

@@ -10,6 +10,8 @@ export function renderLogs(root: HTMLElement, ctx: any) {
 
   const toolbar = createEl('div', { className: 'row', style: 'margin-bottom:8px;' });
   const clearBtn = createEl('button', { type: 'button', className: 'secondary' }, ['清空日志']) as HTMLButtonElement;
+  const copyGlobalBtn = createEl('button', { type: 'button', className: 'secondary', title: '复制公共日志（Ctrl/Cmd+Shift+1）' }, ['复制公共日志']) as HTMLButtonElement;
+  const copyShardBtn = createEl('button', { type: 'button', className: 'secondary', title: '复制分片日志（Ctrl/Cmd+Shift+2）' }, ['复制分片日志']) as HTMLButtonElement;
   const activeOnlyCheckbox = createEl('input', { type: 'checkbox', id: 'logs-active-only' }) as HTMLInputElement;
   activeOnlyCheckbox.checked = true;
   const activeOnlyLabel = createEl('label', { htmlFor: 'logs-active-only', style: 'cursor:pointer; user-select:none;' }, ['仅显示活跃分片']) as HTMLLabelElement;
@@ -17,6 +19,8 @@ export function renderLogs(root: HTMLElement, ctx: any) {
   showGlobalCheckbox.checked = false;
   const showGlobalLabel = createEl('label', { htmlFor: 'logs-show-global', style: 'cursor:pointer; user-select:none;' }, ['显示公共日志']) as HTMLLabelElement;
   toolbar.appendChild(clearBtn);
+  toolbar.appendChild(copyGlobalBtn);
+  toolbar.appendChild(copyShardBtn);
   toolbar.appendChild(activeOnlyCheckbox);
   toolbar.appendChild(activeOnlyLabel);
   toolbar.appendChild(showGlobalCheckbox);
@@ -34,11 +38,13 @@ export function renderLogs(root: HTMLElement, ctx: any) {
   const sectionCardMap = new Map<string, HTMLDivElement>();
   const sectionRunIds = new Map<string, Set<string>>();
   const sectionHeaderMap = new Map<string, HTMLDivElement>();
+  const sectionTypeMap = new Map<string, 'global' | 'shard'>();
   const logActiveRunIds = new Set<string>();
   const parentRunIds = new Set<string>();
   const runIdToSection = new Map<string, string>();
   const parentRunCurrentSection = new Map<string, string>();
   const shardRunIds = new Set<string>();
+  let selectedSectionKey = 'global';
   let shardProfileQueue: string[] = [];
 
   const parseShardHint = (line: string): string[] => {
@@ -99,19 +105,91 @@ export function renderLogs(root: HTMLElement, ctx: any) {
     const body = createEl('div', {
       style: 'padding:10px 12px; white-space:pre-wrap; word-break:break-all; line-height:1.5; height:calc(100vh - 220px); overflow:auto;',
     }) as HTMLDivElement;
+    card.tabIndex = 0;
 
     card.appendChild(head);
     card.appendChild(body);
     if (normalized === 'global' || !isShardSection(normalized)) {
       globalContainer.appendChild(card);
+      sectionTypeMap.set(normalized, 'global');
     } else {
       shardContainer.appendChild(card);
+      sectionTypeMap.set(normalized, 'shard');
     }
     sectionMap.set(normalized, body);
     sectionCardMap.set(normalized, card);
     sectionRunIds.set(normalized, new Set<string>());
     sectionHeaderMap.set(normalized, head);
+    const activateCard = () => {
+      selectedSectionKey = normalized;
+      sectionCardMap.forEach((item, key) => {
+        const isSelected = key === selectedSectionKey;
+        item.style.outline = isSelected ? '2px solid #4f86ff' : 'none';
+        item.style.outlineOffset = isSelected ? '-2px' : '0';
+      });
+    };
+    card.addEventListener('click', activateCard);
+    card.addEventListener('focus', activateCard);
     return body;
+  };
+
+  const getSectionText = (sectionKey: string) => {
+    const body = sectionMap.get(sectionKey);
+    if (!body) return '';
+    return Array.from(body.children)
+      .map((el) => String((el as HTMLElement).innerText || (el as HTMLElement).textContent || '').trim())
+      .filter(Boolean)
+      .join('\n');
+  };
+
+  const collectSectionText = (type: 'global' | 'shard') => {
+    return Array.from(sectionMap.keys())
+      .filter((sectionKey) => sectionTypeMap.get(sectionKey) === type)
+      .filter((sectionKey) => {
+        const card = sectionCardMap.get(sectionKey);
+        if (!card) return false;
+        return card.style.display !== 'none';
+      })
+      .map((sectionKey) => getSectionText(sectionKey))
+      .filter(Boolean)
+      .join('\n');
+  };
+
+  const writeClipboard = async (text: string) => {
+    if (!text) return { ok: false, error: 'empty' };
+    if (typeof window.api?.clipboardWriteText === 'function') {
+      return window.api.clipboardWriteText(text);
+    }
+    if (typeof navigator?.clipboard?.writeText === 'function') {
+      await navigator.clipboard.writeText(text);
+      return { ok: true };
+    }
+    return { ok: false, error: 'clipboard_unavailable' };
+  };
+
+  const copyByType = async (type: 'global' | 'shard') => {
+    const text = collectSectionText(type);
+    if (!text) {
+      ctx.setStatus?.(`日志复制失败：${type === 'global' ? '公共日志为空' : '分片日志为空'}`);
+      return;
+    }
+    const ret = await writeClipboard(text);
+    ctx.setStatus?.(ret?.ok ? `已复制${type === 'global' ? '公共日志' : '分片日志'}（${text.split('\n').length}行）` : `日志复制失败：${ret?.error || 'unknown'}`);
+  };
+
+  const copySelected = async () => {
+    const sectionType = sectionTypeMap.get(selectedSectionKey) || 'global';
+    const text = selectedSectionKey ? getSectionText(selectedSectionKey) : '';
+    if (text) {
+      const ret = await writeClipboard(text);
+      ctx.setStatus?.(
+        ret?.ok
+          ? `已复制当前日志卡片（${selectedSectionKey}）`
+          : `日志复制失败：${ret?.error || 'unknown'}`,
+      );
+      return;
+    }
+    await copyByType(sectionType);
   };
 
   const resolveSectionKey = (text: string, rawRunId: string, prefixedRunId: string) => {
@@ -261,16 +339,20 @@ export function renderLogs(root: HTMLElement, ctx: any) {
     sectionCardMap.clear();
     sectionRunIds.clear();
     sectionHeaderMap.clear();
+    sectionTypeMap.clear();
     logActiveRunIds.clear();
     parentRunIds.clear();
     runIdToSection.clear();
     parentRunCurrentSection.clear();
     shardRunIds.clear();
     shardProfileQueue = [];
+    selectedSectionKey = 'global';
 
     globalContainer.textContent = '';
     shardContainer.textContent = '';
   };
+  copyGlobalBtn.onclick = () => { void copyByType('global'); };
+  copyShardBtn.onclick = () => { void copyByType('shard'); };
 
   activeOnlyCheckbox.onchange = () => {
     updateSectionVisibility();
@@ -310,7 +392,29 @@ export function renderLogs(root: HTMLElement, ctx: any) {
   root.appendChild(globalContainer);
   root.appendChild(shardContainer);
 
+  const onKeydown = (evt: KeyboardEvent) => {
+    if (!(evt.ctrlKey || evt.metaKey) || !evt.shiftKey) return;
+    const key = String(evt.key || '').toLowerCase();
+    if (key === '1') {
+      evt.preventDefault();
+      void copyByType('global');
+      return;
+    }
+    if (key === '2') {
+      evt.preventDefault();
+      void copyByType('shard');
+      return;
+    }
+    if (key === 'c') {
+      evt.preventDefault();
+      void copySelected();
+    }
+  };
+  root.addEventListener('keydown', onKeydown);
+  ensureSection('global', '公共日志');
+
   root.addEventListener('DOMNodeRemoved', () => {
     if (typeof unsubscribeActiveRuns === 'function') unsubscribeActiveRuns();
+    root.removeEventListener('keydown', onKeydown);
   }, { once: true });
 }

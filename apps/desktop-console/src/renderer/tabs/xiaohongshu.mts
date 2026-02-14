@@ -1,5 +1,4 @@
 import { createEl } from '../ui-components.mjs';
-import * as state from './xiaohongshu-state.mjs';
 import {
   LikeRuleDraft,
   LikeRuleKind,
@@ -21,9 +20,9 @@ import { createAccountFlowController } from './xiaohongshu/account-flow.mjs';
 import { createRunFlowController } from './xiaohongshu/run-flow.mjs';
 import { buildXhsLayout } from './xiaohongshu/layout-block.mjs';
 import { consumeNavTarget, runGuideBrowserCheck } from './xiaohongshu/guide-browser-check.mjs';
-let xhsCmdUnsubscribe: (() => void) | null = null;
-let xhsSettingsUnsubscribe: (() => void) | null = null;
+let xhsCmdUnsubscribe: (() => void) | null = null, xhsSettingsUnsubscribe: (() => void) | null = null;
 let startupBrowserChecked = false;
+let startupBrowserCheckDone = false;
 export function renderXiaohongshuTab(root: HTMLElement, api: any) {
   if (xhsCmdUnsubscribe) {
     xhsCmdUnsubscribe();
@@ -44,54 +43,44 @@ export function renderXiaohongshuTab(root: HTMLElement, api: any) {
     '请先在预处理页创建 profile，并设置账号名（alias），这里会按“账号名 (profileId)”显示。',
   ]) as HTMLDivElement;
   const onboardingGotoPreflightBtn = createEl('button', { type: 'button', className: 'secondary' }, ['去预处理设置账号']) as HTMLButtonElement;
-  onboardingGotoPreflightBtn.onclick = () => {
-    if (typeof api?.setActiveTab === 'function') api.setActiveTab('preflight');
-  };
+  onboardingGotoPreflightBtn.onclick = () => { if (typeof api?.setActiveTab === 'function') api.setActiveTab('preflight'); };
   onboardingCard.appendChild(onboardingTitle);
   onboardingCard.appendChild(onboardingSummary);
   onboardingCard.appendChild(onboardingTips);
   onboardingCard.appendChild(createEl('div', { className: 'row', style: 'margin-bottom:0;' }, [onboardingGotoPreflightBtn]));
- const navigationModeEnabled = true;
  const navStepHint = createEl('div', { className: 'muted', style: 'font-size:12px;' }, ['导航模式：先账号检查，再点赞设置，最后回到运行看板。']) as HTMLDivElement;
 const GUIDE_STATE_KEY = 'webauto.xhs.guideState.v1';
- const readGuideState = () => {
-   try {
-     const raw = window.localStorage.getItem(GUIDE_STATE_KEY);
-     return raw ? JSON.parse(raw) : { browserReady: false, accountReady: false, keywordSet: false };
-   } catch { return { browserReady: false, accountReady: false, keywordSet: false }; }
- };
- const saveGuideState = (s: any) => {
-   try { window.localStorage.setItem(GUIDE_STATE_KEY, JSON.stringify(s)); } catch {}
- };
+ const readGuideState = () => { try { const raw = window.localStorage.getItem(GUIDE_STATE_KEY); return raw ? JSON.parse(raw) : { browserReady: false, accountReady: false, keywordSet: false }; } catch { return { browserReady: false, accountReady: false, keywordSet: false }; } };
+ const saveGuideState = (s: any) => { try { window.localStorage.setItem(GUIDE_STATE_KEY, JSON.stringify(s)); } catch {} };
   let guideState = readGuideState();
   let runBtn: HTMLButtonElement | null = null;
- const guideCard = createEl('div', { 
-   style: 'border:1px solid #26437a; background:#0c1830; border-radius:10px; padding:10px; margin-bottom:10px;'
- }) as HTMLDivElement;
- const guideTitle = createEl('div', { style: 'font-weight:600; margin-bottom:8px; color:#dbeafe;' }, ['🧭 新用户引导']) as HTMLDivElement;
- const guideProgress = createEl('div', { style: 'font-size:12px; color:#8b93a6; margin-bottom:8px;' }, ['检查进度...']) as HTMLDivElement;
+  let browserCheckAttempted = false;
+ const guideCard = createEl('div', { style: 'border:1px solid #26437a; background:#0c1830; border-radius:10px; padding:10px; margin-bottom:10px;' }) as HTMLDivElement;
+ const guideTitle = createEl('div', { style: 'font-weight:600; margin-bottom:8px; color:#dbeafe;' }, ['🧭 新用户引导']) as HTMLDivElement, guideProgress = createEl('div', { style: 'font-size:12px; color:#8b93a6; margin-bottom:8px;' }, ['检查进度...']) as HTMLDivElement;
  guideCard.appendChild(guideTitle); guideCard.appendChild(guideProgress);
- const browserStep = createEl('div', { style: 'margin-bottom:6px; padding:6px; background:#0f1419; border-radius:6px;' }) as HTMLDivElement;
+ const guideStepsGrid = createEl('div', { className: 'xhs-guide-grid' }) as HTMLDivElement;
+ const browserStep = createEl('div', { className: 'xhs-guide-step' }) as HTMLDivElement;
  browserStep.appendChild(createEl('span', {}, ['1. ']));
  const browserStatus = createEl('span', { style: 'color:#f59e0b;' }, ['⏳ 检查浏览器']) as HTMLSpanElement;
  browserStep.appendChild(browserStatus);
- guideCard.appendChild(browserStep);
- const accountStep = createEl('div', { style: 'margin-bottom:6px; padding:6px; background:#0f1419; border-radius:6px;' }) as HTMLDivElement;
+ guideStepsGrid.appendChild(browserStep);
+ const accountStep = createEl('div', { className: 'xhs-guide-step' }) as HTMLDivElement;
  accountStep.appendChild(createEl('span', {}, ['2. ']));
  const accountStatus = createEl('span', { style: 'color:#f59e0b;' }, ['⏳ 配置账号']) as HTMLSpanElement;
  accountStatus.style.cursor = 'pointer';
  accountStatus.title = '点击开始账号检查与交互配置';
  accountStatus.addEventListener('click', () => runInteractiveAccountCheck());
  accountStep.appendChild(accountStatus);
- guideCard.appendChild(accountStep);
- const keywordStep = createEl('div', { style: 'margin-bottom:6px; padding:6px; background:#0f1419; border-radius:6px;' }) as HTMLDivElement;
+ guideStepsGrid.appendChild(accountStep);
+ const keywordStep = createEl('div', { className: 'xhs-guide-step' }) as HTMLDivElement;
  keywordStep.appendChild(createEl('span', {}, ['3. ']));
  const keywordStatus = createEl('span', { style: 'color:#f59e0b;' }, ['⏳ 配置关键词']) as HTMLSpanElement;
- keywordStep.appendChild(keywordStatus); guideCard.appendChild(keywordStep);
- const completeStep = createEl('div', { style: 'margin-bottom:6px; padding:6px; background:#0f1419; border-radius:6px; display:none;' }) as HTMLDivElement;
+ keywordStep.appendChild(keywordStatus); guideStepsGrid.appendChild(keywordStep);
+ const completeStep = createEl('div', { className: 'xhs-guide-step xhs-guide-step--full', style: 'display:none;' }) as HTMLDivElement;
  completeStep.appendChild(createEl('span', {}, ['✅ ']));
  completeStep.appendChild(createEl('span', { style: 'color:#22c55e;' }, ['准备就绪，可以开始运行']));
- guideCard.appendChild(completeStep);
+ guideStepsGrid.appendChild(completeStep);
+ guideCard.appendChild(guideStepsGrid);
  const startRunBtn = createEl('button', { type: 'button', style: 'display:none; margin-top:8px; width:100%;' }, ['开始运行']) as HTMLButtonElement;
  guideCard.appendChild(startRunBtn);
  const tileLane = createEl('div', { className: 'xhs-tile-lane' }) as HTMLDivElement;
@@ -108,7 +97,7 @@ const GUIDE_STATE_KEY = 'webauto.xhs.guideState.v1';
     return Boolean(target.closest('button, input, select, textarea, label, a'));
   };
   const createTile = (id: string, titleText: string) => {
-    const tile = createEl('section', { className: 'xhs-tile', 'data-xhs-tile': id }) as HTMLDivElement;
+    const tile = createEl('section', { className: `xhs-tile xhs-tile--${id}`, 'data-xhs-tile': id }) as HTMLDivElement;
     const head = createEl('div', { className: 'xhs-tile-head' }, [titleText]);
     const body = createEl('div', { className: 'xhs-tile-body' }) as HTMLDivElement;
     tile.addEventListener('pointerdown', (evt) => {
@@ -135,7 +124,7 @@ const GUIDE_STATE_KEY = 'webauto.xhs.guideState.v1';
   tileLane.addEventListener(
     'wheel',
     (evt) => {
-      const sourceTileId = resolveTileIdFromEvent(evt.target);
+      const sourceTileId = tileLane.scrollWidth <= tileLane.clientWidth + 4 ? '' : resolveTileIdFromEvent(evt.target);
       if (!sourceTileId || sourceTileId !== activeTileId) return;
       const baseDelta = Math.abs(evt.deltaY) >= Math.abs(evt.deltaX) ? evt.deltaY : evt.deltaX;
       if (!Number.isFinite(baseDelta) || baseDelta === 0) return;
@@ -154,6 +143,9 @@ const GUIDE_STATE_KEY = 'webauto.xhs.guideState.v1';
   }, ['请先完成引导：浏览器检查、账号登录、关键词配置']) as HTMLDivElement;
   const isKeywordReady = () => String(keywordInput.value || '').trim().length > 0;
   const runQuickBrowserCheck = async () => {
+    if (browserCheckAttempted || startupBrowserCheckDone || guideState.browserReady) return;
+    browserCheckAttempted = true;
+    startupBrowserCheckDone = true;
     await runGuideBrowserCheck(api, guideState, browserStatus, saveGuideState);
   };
  const applyGuideLock = () => {
@@ -171,14 +163,16 @@ const GUIDE_STATE_KEY = 'webauto.xhs.guideState.v1';
       ? '引导完成，可查看全部配置并运行。'
       : `引导未完成：browser=${guideState.browserReady ? 'ok' : 'pending'} account=${accountReady ? 'ok' : 'pending'} keyword=${keywordReady ? 'ok' : 'pending'}`;
     completeStep.style.display = allReady ? '' : 'none';
-    startRunBtn.style.display = '';
-    startRunBtn.textContent = allReady ? '开始运行' : '仍然开始运行';
+    startRunBtn.style.display = allReady ? 'none' : '';
+    startRunBtn.textContent = '仍然开始运行';
+    guideCard.style.display = allReady ? 'none' : '';
     tileLane.style.pointerEvents = '';
     tileLane.style.filter = '';
     guideLockMask.style.display = allReady ? 'none' : 'flex';
     if (runBtn) {
-      runBtn.disabled = false;
-      runBtn.title = allReady ? '' : '引导未完成，仍可直接运行';
+      if (!runBtn.disabled) {
+        runBtn.title = allReady ? '' : '引导未完成，仍可直接运行';
+      }
     }
     if (!allReady) {
       setActiveTile('account');
@@ -245,7 +239,7 @@ const GUIDE_STATE_KEY = 'webauto.xhs.guideState.v1';
     maxLikesInput, likeRuleTypeSelect, likeRuleAInput, likeRuleBInput, addLikeRuleBtn, likeRulePreview,
     replyToggle, replyTextInput, ocrToggle, ocrCommandInput, opOrderInput, opOrderRow, homeSection,
     commentsSection, gateSection, likesSection, replySection, ocrSection, likeNextBoardBtn, linksStat,
-    postsStat, commentsStat, likesStat, repliesStat, streamStat, likedList, repliedList,
+    postsStat, commentsStat, likesStat, likesSkipStat, repliesStat, streamStat, shardStatsList, likedList, repliedList,
     persistedSingleProfile, persistedShardProfiles, bindLikeRulePersistence,
   } = layout;
   accountNextLikeBtn.onclick = () => focusTile('like');
@@ -253,6 +247,8 @@ const GUIDE_STATE_KEY = 'webauto.xhs.guideState.v1';
   browserStep.onclick = () => { focusTile('account'); void runQuickBrowserCheck(); };
   accountStep.onclick = () => { focusTile('account'); void runInteractiveAccountCheck(); };
   keywordStep.onclick = () => { focusTile('board'); keywordInput.focus(); };
+  keywordInput.addEventListener('input', applyGuideLock);
+  keywordInput.addEventListener('change', applyGuideLock);
   queueMicrotask(() => {
     const finalizeGuide = () => { navStepHint.textContent = 'Step 1: complete account check/login, then configure keyword.'; applyGuideLock(); };
     if (startupBrowserChecked) return void finalizeGuide();
@@ -265,8 +261,10 @@ const GUIDE_STATE_KEY = 'webauto.xhs.guideState.v1';
     postsStat,
     commentsStat,
     likesStat,
+    likesSkipStat,
     repliesStat,
     streamStat,
+    shardStatsList,
     likedList,
     repliedList,
   });

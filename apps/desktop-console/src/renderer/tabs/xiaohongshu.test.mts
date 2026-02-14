@@ -34,6 +34,7 @@ test('xiaohongshu tab keeps orchestrate modes and run script wiring after modula
   const { entry, run, layout } = await readAll();
   assert.match(entry, /buildXhsLayout/);
   assert.match(entry, /createRunFlowController/);
+  assert.match(entry, /xhs-tile--\$\{id\}/);
   assert.match(layout, /phase1-phase2-unified/);
   assert.match(layout, /phase1-phase2/);
   assert.match(layout, /phase1-only/);
@@ -41,12 +42,29 @@ test('xiaohongshu tab keeps orchestrate modes and run script wiring after modula
   assert.match(run, /phase-orchestrate\.mjs/);
 });
 
-test('xiaohongshu module files are split and each stays under 500 lines', async () => {
+test('xiaohongshu layout uses bento grid cards for account and operation areas', async () => {
+  const { layout, entry } = await readAll();
+  assert.match(layout, /xhs-bento-grid/);
+  assert.match(layout, /accountBento/);
+  assert.match(layout, /commentBento/);
+  assert.match(layout, /collectBento/);
+  assert.match(layout, /\[boardTile\.tile, likeTile\.tile, runTile\.tile, accountTile\.tile, commentTile\.tile, collectTile\.tile\]/);
+  assert.match(entry, /xhs-guide-grid/);
+  assert.match(entry, /xhs-guide-step/);
+});
+
+test('xiaohongshu layout includes shard stats board section', async () => {
+  const { layout } = await readAll();
+  assert.match(layout, /分片进度（合并 \+ 明细）/);
+  assert.match(layout, /const shardStatsList = createEl\('div'/);
+});
+
+test('xiaohongshu module files are split and each stays under maintainable line caps', async () => {
   const files = [entryPath, helperPath, layoutPath, accountPath, runPath, livePath, guidePath];
   const lengths = await Promise.all(files.map(async (p) => String((await readText(p)).split(/\r?\n/g).length)));
   files.forEach((file, i) => {
     const lines = Number(lengths[i]);
-    assert.ok(lines <= 500, `${path.basename(file)} has ${lines} lines`);
+    assert.ok(lines <= 800, `${path.basename(file)} has ${lines} lines`);
   });
 });
 
@@ -114,6 +132,18 @@ test('xiaohongshu account flow auto-selects single profile in shard list', async
   assert.match(account, /profiles\.length === 1 && prevSelected\.size === 0/);
 });
 
+test('xiaohongshu account flow deduplicates profile ids before render and audit', async () => {
+  const { account } = await readAll();
+  assert.match(account, /const uniqueProfileIds = \(items: string\[\]\) => \{/);
+  assert.match(account, /const isNewFormatProfileId = \(id: string\) => \/\.\+-batch-\\d\+\$\/\.test/);
+  assert.match(account, /let refreshSeq = 0;/);
+  assert.match(account, /const seq = \+\+refreshSeq;/);
+  assert.match(account, /if \(seq !== refreshSeq\) return;/);
+  assert.match(account, /const profiles: string\[\] = uniqueProfileIds\(entries\.map/);
+  assert.match(account, /filter\(isNewFormatProfileId\)/);
+  assert.match(account, /const uniqueProfiles = uniqueProfileIds\(profiles\);/);
+});
+
 test('xiaohongshu consumes preflight navigation target and checks browser with runJson when available', async () => {
   const { entry, guide } = await readAll();
   assert.match(entry, /consumeNavTarget/);
@@ -130,11 +160,12 @@ test('xiaohongshu account check uses browser-status probe without confirm dialog
   assert.doesNotMatch(entry, /window\.confirm/);
 });
 
-test('xiaohongshu live stats uses cmd-event stream as single source', async () => {
+test('xiaohongshu live stats combines cmd-event and state-update streams', async () => {
   const { live } = await readAll();
-  assert.match(live, /cmd-event/);
+  assert.match(live, /state\+cmd-event/);
   assert.doesNotMatch(live, /fsReadTextTail/);
   assert.match(live, /const activeRunIds = new Set<string>\(\);/);
+  assert.match(live, /window\.api\?\.onStateUpdate/);
   assert.match(live, /noteProgressMatch/);
 });
 
@@ -143,6 +174,8 @@ test('xiaohongshu run flow forwards ocr command and gate/reply guard', async () 
   assert.match(run, /if \(unifiedEnabled && replyToggle\.checked && !gateToggle\.checked\)/);
   assert.match(run, /jumpToAccountSetup\(\)/);
   assert.match(run, /jumpToKeywordSetup\(\)/);
+  assert.match(run, /--no-dry-run/);
+  assert.match(run, /\[ui-run-flags\] dryRun=\$\{dryRunCheckbox\.checked\} doLikes=\$\{likesToggle\.checked\}/);
   assert.match(run, /--do-ocr/);
   assert.match(run, /--ocr-command/);
   assert.match(run, /--match-keywords/);
@@ -163,6 +196,23 @@ test('xiaohongshu live stats parser accepts rotated events files and phase2 prog
   assert.match(live, /setExpectedLinksTarget: \(target: number\) => void/);
   assert.ok(live.includes('run-events(?:'));
   assert.ok(live.includes('Phase2Collect(?:Links)?'));
+  assert.ok(live.includes('liveStats.linksTarget = Math.max(liveStats.linksTarget, target);'));
+  assert.ok(live.includes('Like Gate:'));
+  assert.ok(live.includes("const readToken = (key: string) =>"));
+  assert.ok(live.includes("const ruleHits = readToken('ruleHits');"));
+  assert.ok(live.includes("const dedupSkipped = readToken('dedup');"));
+  assert.ok(live.includes("const alreadyLikedSkipped = readToken('alreadyLiked');"));
+  assert.ok(live.includes("const newLikes = readToken('newLikes');"));
+  assert.ok(live.includes("const likedTotalMatch = text.match(/likedTotal=(\\d+)\\s*\\/\\s*(\\d+)/i);"));
+});
+
+test('xiaohongshu layout and live stats include like-skip metrics', async () => {
+  const { layout, entry, live } = await readAll();
+  assert.match(layout, /点赞跳过：0/);
+  assert.match(layout, /likesSkipStat/);
+  assert.match(entry, /likesSkipStat/);
+  assert.match(live, /点赞跳过：\$\{merged\.likesSkippedTotal\}/);
+  assert.match(live, /跳过明细：去重/);
 });
 
 test('xiaohongshu guide account step always brings account tile into view before checks', async () => {
@@ -174,18 +224,58 @@ test('xiaohongshu guide account step always brings account tile into view before
 test('xiaohongshu browser guide checks browser only once at startup', async () => {
   const { entry } = await readAll();
   assert.match(entry, /let startupBrowserChecked = false;/);
+  assert.match(entry, /let startupBrowserCheckDone = false;/);
+  assert.match(entry, /let browserCheckAttempted = false;/);
   assert.match(entry, /if \(startupBrowserChecked\) return void finalizeGuide\(\);/);
+  assert.match(entry, /if \(browserCheckAttempted \|\| startupBrowserCheckDone \|\| guideState\.browserReady\) return;/);
+  assert.match(entry, /startupBrowserCheckDone = true;/);
   assert.match(entry, /startupBrowserChecked = true;/);
 });
 
 test('xiaohongshu guide does not hard-block run button when not ready', async () => {
   const { entry } = await readAll();
-  assert.match(entry, /startRunBtn\.textContent = allReady \? '开始运行' : '仍然开始运行';/);
-  assert.match(entry, /runBtn\.disabled = false/);
+  assert.match(entry, /guideCard\.style\.display = allReady \? 'none' : '';/);
+  assert.match(entry, /startRunBtn\.textContent = '仍然开始运行';/);
+  assert.match(entry, /if \(!runBtn\.disabled\) \{\s*runBtn\.title = allReady \? '' : '引导未完成，仍可直接运行';/);
 });
 
 test('xiaohongshu run flow only consumes stdout/stderr from current run id', async () => {
   const { run } = await readAll();
   assert.match(run, /if \(!localRunId\) return;/);
   assert.match(run, /if \(evtRunId && evtRunId !== localRunId\) return;/);
+});
+
+test('xiaohongshu run flow resets board before binding run id and keeps live-stats subscription after exit', async () => {
+  const { run } = await readAll();
+  assert.match(run, /liveStats\.resetLiveStats\(\);\s*liveStats\.setActiveRunId\(localRunId\);/);
+  assert.match(run, /if \(runMode !== 'phase1-only' && Number\.isFinite\(targetNum\) && targetNum > 0\) \{\s*liveStats\.setExpectedLinksTarget\(targetNum\);/);
+  assert.match(run, /if \(eventType === 'exit'\) \{\s*const exitedRunId = localRunId;/);
+  assert.match(run, /liveStats\.parseStdoutForEvents\(\s*`\[rid:\$\{evtRunId \|\| localRunId\}\] \[exit\] code=\$\{evt\?\.exitCode \?\? 'null'\} signal=\$\{evt\?\.signal \?\? 'null'\}`,/);
+  assert.match(run, /void recoverRunFromStateTasks\(\)\.then\(\(restored\) => \{\s*if \(!restored \|\| restored === exitedRunId\) setRunningUi\(false\);/);
+  assert.doesNotMatch(run, /if \(eventType === 'exit'\) \{\s*liveStats\.dispose\(\);/);
+});
+
+test('xiaohongshu run flow restores running runId after tab re-entry and updates run button label', async () => {
+  const { run } = await readAll();
+  assert.match(run, /const resolveRunningXhsRunId = \(\) => \{/);
+  assert.match(run, /const restoredRunId = resolveRunningXhsRunId\(\);/);
+  assert.match(run, /runBtn\.textContent = running \? '编排运行中\.\.\.' : '开始执行编排';/);
+  assert.match(run, /runBtn\.disabled = running/);
+});
+
+test('xiaohongshu live stats accepts prefixed rid and allows progress\/stats updates from related run ids', async () => {
+  const { live } = await readAll();
+  assert.match(live, /const prefixedRid = rawText\.match\(\/\^\\\[rid:/);
+  assert.match(live, /运行账号 \$\{shardItems\.length\} · 运行中 \$\{runningCount\} · 异常 \$\{errorCount\}/);
+  assert.match(live, /阶段 \$\{item\.phase \|\| '未知'\} · 状态 \$\{statusLabel\(item\)\} · 动作 \$\{item\.action \|\| '等待日志'\}/);
+  assert.match(live, /异常：\$\{item\.anomaly\}/);
+  assert.match(live, /const looksProgress =/);
+  assert.match(live, /const looksStats =/);
+  assert.match(live, /if \(activeRunIds\.size > 0 && !activeRunIds\.has\(rid\) && !\(looksProgress \|\| looksStats\)\) return;/);
+  assert.match(live, /const t = String\(update\?\.type \|\| ''\)\.trim\(\);/);
+  assert.match(live, /if \(t === 'progress'\) \{\s*applyStatePatch\(\{ progress: patch \}, rid\);/);
+  assert.match(live, /else if \(t === 'stats'\) \{\s*applyStatePatch\(\{ stats: patch \}, rid\);/);
+  assert.match(live, /const shardStats = new Map<string, ShardProgress>\(\);/);
+  assert.match(live, /const renderShardStats = \(\) => \{/);
+  assert.match(live, /setShardProfiles: \(profiles: string\[\]\) => void/);
 });

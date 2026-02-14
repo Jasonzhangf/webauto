@@ -87,20 +87,20 @@ async function maybeDaemonize(rawArgv) {
   return true;
 }
 
-function buildPhase1Args(profile, headless) {
+function buildPhase1Args(profile, headless, once = true) {
   return [
     '--profile', profile,
-    '--once',
+    ...(once ? ['--once'] : []),
     '--foreground',
     '--owner-pid', String(process.pid),
     ...(headless ? ['--headless'] : []),
   ];
 }
 
-async function runPhase1ForProfiles(profiles, headless) {
+async function runPhase1ForProfiles(profiles, headless, once = true) {
   for (const profile of profiles) {
     console.log(`[orchestrate] phase1 start profile=${profile}`);
-    await runNode(path.join(__dirname, 'phase1-boot.mjs'), buildPhase1Args(profile, headless));
+    await runNode(path.join(__dirname, 'phase1-boot.mjs'), buildPhase1Args(profile, headless, once));
   }
 }
 
@@ -194,7 +194,8 @@ async function main() {
       mode === 'phase1-only' || mode === 'phase1-phase2-unified'
         ? profiles
         : [primaryProfile];
-    await runPhase1ForProfiles(phase1Profiles, headless);
+    const phase1Once = mode !== 'phase1-only';
+    await runPhase1ForProfiles(phase1Profiles, headless, phase1Once);
   }
 
   if (mode === 'phase1-only') {

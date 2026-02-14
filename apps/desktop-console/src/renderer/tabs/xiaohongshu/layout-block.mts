@@ -33,7 +33,7 @@ export function buildXhsLayout(opts: BuildLayoutOptions) {
     '完整编排推荐：先 Phase1 启动，再 Phase2 采集链接，最后 Unified 采集评论/点赞。',
   ]);
   const baseParamsTile = createEl('div', { style: 'display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; margin-bottom:10px;' });
-  const tileBase1 = createEl('div', { style: 'border:1px solid #eee; border-radius:8px; padding:10px;' });
+  const tileBase1 = createEl('div', { className: 'xhs-bento-card' });
   tileBase1.appendChild(createEl('div', { style: 'font-weight:600; margin-bottom:8px; font-size:13px; color:#2b67ff;' }, ['📋 编排设置']));
   tileBase1.appendChild(createEl('div', { className: 'row', style: 'gap:6px; margin-bottom:6px;' }, [
     createEl('label', { style: 'font-size:12px;' }, ['模式']), orchestrateModeSelect,
@@ -42,7 +42,7 @@ export function buildXhsLayout(opts: BuildLayoutOptions) {
     createEl('label', { style: 'font-size:12px;' }, ['关键词']), keywordInput,
   ]));
   baseParamsTile.appendChild(tileBase1);
-  const tileBase2 = createEl('div', { style: 'border:1px solid #eee; border-radius:8px; padding:10px;' });
+  const tileBase2 = createEl('div', { className: 'xhs-bento-card' });
   tileBase2.appendChild(createEl('div', { style: 'font-weight:600; margin-bottom:8px; font-size:13px; color:#2b67ff;' }, ['🔧 环境账号']));
   tileBase2.appendChild(createEl('div', { className: 'row', style: 'gap:6px; margin-bottom:6px;' }, [
     createEl('label', { style: 'font-size:12px;' }, ['环境']), envInput,
@@ -75,7 +75,7 @@ export function buildXhsLayout(opts: BuildLayoutOptions) {
   const accountNextLikeBtn = createEl('button', { type: 'button', className: 'secondary' }, ['下一步：点赞设置']) as HTMLButtonElement;
   const batchKeyValue = createEl('div', { className: 'muted', style: 'font-size:12px; min-width:160px;' }, ['xiaohongshu']) as HTMLDivElement;
   const batchNextBtn = createEl('button', { type: 'button', className: 'secondary' }, ['新建批次']) as HTMLButtonElement;
-  const accountAuditCard = createEl('div', { className: 'xhs-compact-card' });
+  const accountAuditCard = createEl('div', { className: 'xhs-compact-card xhs-bento-card' });
   accountAuditCard.appendChild(createEl('div', { style: 'font-weight:600; margin-bottom:6px; color:#dbeafe;' }, ['账号检查与新增']));
   accountAuditCard.appendChild(accountAuditSummary);
   accountAuditCard.appendChild(accountAuditList);
@@ -94,9 +94,9 @@ export function buildXhsLayout(opts: BuildLayoutOptions) {
     batchNextBtn,
   ]));
   accountAuditCard.appendChild(createEl('div', { className: 'row', style: 'margin-bottom:0;' }, [accountNextLikeBtn]));
-  tileBase2.appendChild(accountAuditCard);
+  // accountAuditCard is placed as an independent card in account bento grid
   baseParamsTile.appendChild(tileBase2);
-  const tileBase3 = createEl('div', { style: 'border:1px solid #eee; border-radius:8px; padding:10px;' });
+  const tileBase3 = createEl('div', { className: 'xhs-bento-card' });
   tileBase3.appendChild(createEl('div', { style: 'font-weight:600; margin-bottom:8px; font-size:13px; color:#2b67ff;' }, ['⚙️ 运行选项']));
   tileBase3.appendChild(createEl('div', { className: 'row', style: 'gap:6px; margin-bottom:6px;' }, [
     createEl('label', { style: 'font-size:12px;' }, ['目标帖子']), maxNotesInput,
@@ -117,7 +117,7 @@ export function buildXhsLayout(opts: BuildLayoutOptions) {
   const featureTiles = createEl('div', { style: 'display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; margin-bottom:10px; align-items:start; grid-auto-rows:min-content;' });
   const homepageToggle = makeCheckbox(false, 'xh-do-homepage');
   const imagesToggle = makeCheckbox(false, 'xh-do-images');
-  const homeSection = createEl('div', { style: 'border:1px solid #eee; border-radius:8px; padding:10px;' });
+  const homeSection = createEl('div', { className: 'xhs-bento-card' });
   homeSection.appendChild(createEl('div', { className: 'row', style: 'gap:6px; margin-bottom:8px;' }, [
     homepageToggle,
     createEl('label', { htmlFor: 'xh-do-homepage', style: 'cursor:pointer; font-weight:600;' }, ['主页内容采集（正文/作者/链接）']),
@@ -135,7 +135,7 @@ export function buildXhsLayout(opts: BuildLayoutOptions) {
   const commentsToggle = makeCheckbox(true, 'xh-do-comments');
   const maxCommentsInput = makeNumberInput('0', '0');
   const commentRoundsInput = makeNumberInput('0', '0');
-  const commentsSection = createEl('div', { style: 'border:1px solid #eee; border-radius:8px; padding:10px;' });
+  const commentsSection = createEl('div', { className: 'xhs-bento-card' });
   commentsSection.appendChild(createEl('div', { className: 'row', style: 'gap:6px; margin-bottom:8px;' }, [
     commentsToggle,
     createEl('label', { htmlFor: 'xh-do-comments', style: 'cursor:pointer; font-weight:600;' }, ['评论采集']),
@@ -152,7 +152,7 @@ export function buildXhsLayout(opts: BuildLayoutOptions) {
  bindSectionToggle(commentsToggle, commentsBody);
   featureTiles.appendChild(commentsSection);
   const gateToggle = makeCheckbox(false, 'xh-do-gate');
-  const gateSection = createEl('div', { style: 'border:1px solid #eee; border-radius:8px; padding:10px;' });
+  const gateSection = createEl('div', { className: 'xhs-bento-card' });
   gateSection.appendChild(createEl('div', { className: 'row', style: 'gap:6px; margin-bottom:8px;' }, [
     gateToggle,
     createEl('label', { htmlFor: 'xh-do-gate', style: 'cursor:pointer; font-weight:600;' }, ['评论命中规则（用于回复/兜底匹配）']),
@@ -177,13 +177,13 @@ export function buildXhsLayout(opts: BuildLayoutOptions) {
   featureTiles.appendChild(gateSection);
   const likesToggle = makeCheckbox(false, 'xh-do-likes');
   const maxLikesInput = makeNumberInput('2', '1');
-  const likesSection = createEl('div', { style: 'border:1px solid #eee; border-radius:8px; padding:10px;' });
+  const likesSection = createEl('div', { className: 'xhs-bento-card' });
   likesSection.appendChild(createEl('div', { className: 'row', style: 'gap:6px; margin-bottom:8px;' }, [
     likesToggle,
     createEl('label', { htmlFor: 'xh-do-likes', style: 'cursor:pointer; font-weight:600;' }, ['评论点赞']),
   ]));
-  const likesBody = createEl('div', { style: 'display:grid; grid-template-columns:1fr; gap:8px;' });
-  const tile1 = createEl('div', { style: 'border:1px solid #e2e8f0; border-radius:8px; padding:10px; background:#0f1117; display:flex; flex-direction:column;' });
+  const likesBody = createEl('div', { className: 'xhs-bento-grid xhs-bento-grid--tight' });
+  const tile1 = createEl('div', { className: 'xhs-compact-card', style: 'display:flex; flex-direction:column;' });
   tile1.appendChild(createEl('div', { style: 'font-weight:600; margin-bottom:8px; font-size:13px; color:#2b67ff;' }, ['📊 数量限制']));
   tile1.appendChild(createEl('div', { className: 'row', style: 'gap:6px; flex-wrap:nowrap;' }, [
     createEl('label', { style: 'font-size:12px; white-space:nowrap; color:#8b93a6;' }, ['每轮滚动点赞上限']), 
@@ -194,7 +194,7 @@ export function buildXhsLayout(opts: BuildLayoutOptions) {
   likeRuleTypeSelect.appendChild(createEl('option', { value: 'contains' }, ['单关键词']));
   likeRuleTypeSelect.appendChild(createEl('option', { value: 'and' }, ['同时包含 {A+B}']));
   likeRuleTypeSelect.appendChild(createEl('option', { value: 'include_without' }, ['包含排除 {A-B}']));
-  const tile2 = createEl('div', { style: 'border:1px solid #e2e8f0; border-radius:8px; padding:10px; background:#0f1117; display:flex; flex-direction:column;' });
+  const tile2 = createEl('div', { className: 'xhs-compact-card', style: 'display:flex; flex-direction:column;' });
   tile2.appendChild(createEl('div', { style: 'font-weight:600; margin-bottom:8px; font-size:13px; color:#2b67ff;' }, ['🎯 匹配模式']));
   tile2.appendChild(likeRuleTypeSelect);
   const likeRuleHelp = createEl('div', { style: 'color:#8b93a6; font-size:10px; margin-top:6px; line-height:1.4;' });
@@ -203,7 +203,7 @@ export function buildXhsLayout(opts: BuildLayoutOptions) {
   const likeRuleAInput = makeTextInput('', '词A', '100%');
   const likeRuleBInput = makeTextInput('', '词B (可选)', '100%');
   const addLikeRuleBtn = createEl('button', { type: 'button', style: 'width:100%; font-size:12px;' }, ['+ 添加规则']) as HTMLButtonElement;
-  const tile3 = createEl('div', { style: 'border:1px solid #e2e8f0; border-radius:8px; padding:10px; background:#0f1117; display:flex; flex-direction:column;' });
+  const tile3 = createEl('div', { className: 'xhs-compact-card', style: 'display:flex; flex-direction:column;' });
   tile3.appendChild(createEl('div', { style: 'font-weight:600; margin-bottom:8px; font-size:13px; color:#2b67ff;' }, ['➕ 添加规则']));
   tile3.appendChild(createEl('div', { style: 'margin-bottom:6px;' }, [likeRuleAInput]));
   tile3.appendChild(createEl('div', { style: 'margin-bottom:6px;' }, [likeRuleBInput]));
@@ -272,7 +272,7 @@ export function buildXhsLayout(opts: BuildLayoutOptions) {
   }
   refreshLikeGuide();
   refreshLikeRuleList();
-  const ruleListRow = createEl('div', { style: 'grid-column:span 1; margin-top:4px; border:1px solid #23262f; border-radius:8px; padding:8px; background:#0b1220;' });
+  const ruleListRow = createEl('div', { style: 'grid-column:1 / -1; margin-top:4px; border:1px solid #23262f; border-radius:8px; padding:8px; background:#0b1220;' });
   ruleListRow.appendChild(createEl('div', { style: 'font-size:11px; color:#8b93a6; margin-bottom:6px;' }, ['已添加规则（点击 × 删除）：']));
   ruleListRow.appendChild(likeRuleList);
   likesBody.appendChild(ruleListRow);
@@ -284,7 +284,7 @@ export function buildXhsLayout(opts: BuildLayoutOptions) {
   featureTiles.appendChild(likesSection);
   const replyToggle = makeCheckbox(false, 'xh-do-reply');
   const replyTextInput = makeTextInput('感谢分享，已关注', '回复内容');
-  const replySection = createEl('div', { style: 'border:1px solid #eee; border-radius:8px; padding:10px;' });
+  const replySection = createEl('div', { className: 'xhs-bento-card' });
   replySection.appendChild(createEl('div', { className: 'row', style: 'gap:6px; margin-bottom:8px;' }, [
     replyToggle,
     createEl('label', { htmlFor: 'xh-do-reply', style: 'cursor:pointer; font-weight:600;' }, ['自动回复（开发态，不发送）']),
@@ -298,7 +298,7 @@ export function buildXhsLayout(opts: BuildLayoutOptions) {
  bindSectionToggle(replyToggle, replyBody);
   featureTiles.appendChild(replySection);
   const ocrToggle = makeCheckbox(false, 'xh-do-ocr');
-  const ocrSection = createEl('div', { style: 'border:1px solid #eee; border-radius:8px; padding:10px;' });
+  const ocrSection = createEl('div', { className: 'xhs-bento-card' });
   ocrSection.appendChild(createEl('div', { className: 'row', style: 'gap:6px; margin-bottom:8px;' }, [
     ocrToggle,
     createEl('label', { htmlFor: 'xh-do-ocr', style: 'cursor:pointer; font-weight:600;' }, ['图片 OCR（DeepSeek OCR）']),
@@ -352,9 +352,7 @@ export function buildXhsLayout(opts: BuildLayoutOptions) {
       ? persistedConfig.shardProfiles.map((x) => String(x || '').trim()).filter(Boolean)
       : [],
   );
-  const statsSection = createEl('div', {
-    style: 'border:1px solid #e2e8f0; border-radius:8px; padding:10px; margin-bottom:12px; background:#0b1220;',
-  });
+  const statsSection = createEl('div', { className: 'xhs-bento-card', style: 'margin-bottom:0;' });
   const statsRow = createEl('div', {
     className: 'row',
     style: 'flex-wrap: nowrap; gap: 16px; margin-bottom: 8px; font-size: 12px; overflow-x: auto;',
@@ -363,10 +361,15 @@ export function buildXhsLayout(opts: BuildLayoutOptions) {
   const postsStat = createEl('span', { className: 'muted' }, ['帖子：0']) as HTMLSpanElement;
   const commentsStat = createEl('span', { className: 'muted' }, ['评论：0/不限']) as HTMLSpanElement;
   const likesStat = createEl('span', { className: 'muted' }, ['点赞：0']) as HTMLSpanElement;
+  const likesSkipStat = createEl('span', { className: 'muted' }, ['点赞跳过：0']) as HTMLSpanElement;
   const repliesStat = createEl('span', { className: 'muted' }, ['回复：0']) as HTMLSpanElement;
   const streamStat = createEl('span', { className: 'muted', style: 'font-size:11px;' }, ['事件流：未绑定']) as HTMLSpanElement;
-  [linksStat, postsStat, commentsStat, likesStat, repliesStat, streamStat].forEach(el => statsRow.appendChild(el));
+  [linksStat, postsStat, commentsStat, likesStat, likesSkipStat, repliesStat, streamStat].forEach(el => statsRow.appendChild(el));
   statsSection.appendChild(statsRow);
+  const shardStatsTitle = createEl('div', { style: 'margin-top:6px; font-weight:600;' }, ['分片进度（合并 + 明细）']) as HTMLDivElement;
+  const shardStatsList = createEl('div', { style: 'display:flex; flex-direction:column; gap:6px; margin-top:6px;' }) as HTMLDivElement;
+  statsSection.appendChild(shardStatsTitle);
+  statsSection.appendChild(shardStatsList);
   const likedTitle = createEl('div', { style: 'margin-top:8px; font-weight:600;' }, ['已点赞帖子']) as HTMLDivElement;
   const likedList = createEl('div', { style: 'display:flex; flex-direction:column; gap:6px; margin-top:6px;' }) as HTMLDivElement;
   const repliedTitle = createEl('div', { style: 'margin-top:10px; font-weight:600;' }, ['已回复帖子']) as HTMLDivElement;
@@ -378,23 +381,34 @@ export function buildXhsLayout(opts: BuildLayoutOptions) {
   const boardTile = createTile('board', '运行看板');
   boardTile.body.appendChild(statsSection);
   const likeTile = createTile('like', '点赞设置');
-  likeTile.body.appendChild(likesSection);
+  const likeBento = createEl('div', { className: 'xhs-bento-grid xhs-bento-grid--tight' });
+  likeBento.appendChild(likesSection);
+  likeTile.body.appendChild(likeBento);
   const accountTile = createTile('account', '账号检查与登录引导');
-  accountTile.body.appendChild(onboardingCard);
-  accountTile.body.appendChild(tileBase2);
+  const accountBento = createEl('div', { className: 'xhs-bento-grid' });
+  accountBento.appendChild(onboardingCard);
+  accountBento.appendChild(tileBase2);
+  accountBento.appendChild(accountAuditCard);
+  accountTile.body.appendChild(accountBento);
   const runTile = createTile('run', '编排与运行参数');
-  runTile.body.appendChild(tileBase1);
-  runTile.body.appendChild(tileBase3);
-  runTile.body.appendChild(createEl('div', { className: 'xhs-compact-card' }, [modeHint]));
-  runTile.body.appendChild(createEl('div', { className: 'xhs-compact-card' }, [opOrderRow]));
+  const runBento = createEl('div', { className: 'xhs-bento-grid' });
+  runBento.appendChild(tileBase1);
+  runBento.appendChild(tileBase3);
+  runBento.appendChild(createEl('div', { className: 'xhs-compact-card xhs-bento-card' }, [modeHint]));
+  runBento.appendChild(createEl('div', { className: 'xhs-compact-card xhs-bento-card' }, [opOrderRow]));
+  runTile.body.appendChild(runBento);
   const commentTile = createTile('comment', '评论与回复设置');
-  commentTile.body.appendChild(commentsSection);
-  commentTile.body.appendChild(gateSection);
-  commentTile.body.appendChild(replySection);
+  const commentBento = createEl('div', { className: 'xhs-bento-grid xhs-bento-grid--tight' });
+  commentBento.appendChild(commentsSection);
+  commentBento.appendChild(gateSection);
+  commentBento.appendChild(replySection);
+  commentTile.body.appendChild(commentBento);
   const collectTile = createTile('collect', '主页采集与OCR');
-  collectTile.body.appendChild(homeSection);
-  collectTile.body.appendChild(ocrSection);
- [boardTile.tile, likeTile.tile, accountTile.tile, runTile.tile, commentTile.tile, collectTile.tile].forEach((tile) => tileLane.appendChild(tile));
+  const collectBento = createEl('div', { className: 'xhs-bento-grid xhs-bento-grid--tight' });
+  collectBento.appendChild(homeSection);
+  collectBento.appendChild(ocrSection);
+  collectTile.body.appendChild(collectBento);
+ [boardTile.tile, likeTile.tile, runTile.tile, accountTile.tile, commentTile.tile, collectTile.tile].forEach((tile) => tileLane.appendChild(tile));
  tileLane.style.position = 'relative';
  tileLane.appendChild(guideLockMask);
  card.appendChild(tileLane);
@@ -410,7 +424,7 @@ export function buildXhsLayout(opts: BuildLayoutOptions) {
     accountNextLikeBtn, batchKeyValue, batchNextBtn, homepageToggle, imagesToggle, commentsToggle, maxCommentsInput, commentRoundsInput, gateToggle, matchKeywordsInput,
     matchModeSelect, matchMinHitsInput, likesToggle, maxLikesInput, likeRuleTypeSelect, likeRuleAInput, likeRuleBInput, addLikeRuleBtn,
     likeRulePreview, replyToggle, replyTextInput, ocrToggle, ocrCommandInput, opOrderInput, opOrderRow, homeSection, commentsSection, gateSection,
-    likesSection, replySection, ocrSection, likeNextBoardBtn, linksStat, postsStat, commentsStat, likesStat, repliesStat, streamStat, likedList,
+    likesSection, replySection, ocrSection, likeNextBoardBtn, linksStat, postsStat, commentsStat, likesStat, likesSkipStat, repliesStat, streamStat, shardStatsList, likedList,
     repliedList, persistedSingleProfile, persistedShardProfiles, bindLikeRulePersistence,
   };
 }

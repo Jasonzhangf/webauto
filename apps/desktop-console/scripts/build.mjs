@@ -23,7 +23,7 @@ try {
 
 console.log('[desktop-console] building main process (ESM)...');
 execSync(
-  'npx esbuild src/main/index.mts --bundle --platform=node --format=esm --outfile=dist/main/index.mjs --sourcemap --external:electron --loader:.ts=ts',
+  'npx esbuild src/main/index.mts --bundle --platform=node --format=esm --outfile=dist/main/index.mjs --sourcemap --external:electron --external:ws --loader:.ts=ts',
   { stdio: 'inherit' },
 );
 

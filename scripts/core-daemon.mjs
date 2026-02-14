@@ -40,7 +40,12 @@ const SERVICES = {
     port: 7704,
     healthPath: '/health',
     scriptPath: 'dist/services/browser-service/index.js',
-    env: { PORT: '7704', WS_PORT: '8765', NODE_ENV: 'production', BROWSER_SERVICE_AUTO_EXIT: '1' }
+    env: {
+      PORT: '7704',
+      WS_PORT: '8765',
+      NODE_ENV: 'production',
+      BROWSER_SERVICE_AUTO_EXIT: process.env.BROWSER_SERVICE_AUTO_EXIT || '1'
+    }
   },
   'search-gate': {
     name: 'search-gate',

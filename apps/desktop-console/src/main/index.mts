@@ -1,14 +1,15 @@
 import electron from 'electron';
-const { app, BrowserWindow, ipcMain, shell } = electron;
+const { app, BrowserWindow, ipcMain, shell, clipboard } = electron;
 
 import { spawn } from 'node:child_process';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { mkdirSync, promises as fs } from 'node:fs';
 
 import { readDesktopConsoleSettings, resolveDefaultDownloadRoot, writeDesktopConsoleSettings } from './desktop-settings.mts';
 import type { DesktopConsoleSettings } from './desktop-settings.mts';
-import { startCoreDaemon } from './core-daemon-manager.mts';
+import { startCoreDaemon, stopCoreDaemon } from './core-daemon-manager.mts';
 import { createProfileStore } from './profile-store.mts';
 import { decideWatchdogAction, resolveUiHeartbeatTimeoutMs } from './heartbeat-watchdog.mts';
 
@@ -40,6 +41,12 @@ import { stateBridge } from './state-bridge.mts';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const APP_ROOT = path.resolve(__dirname, '../..'); // apps/desktop-console/dist/main -> apps/desktop-console
 const REPO_ROOT = path.resolve(APP_ROOT, '../..');
+const DESKTOP_HEARTBEAT_FILE = path.join(
+  os.homedir(),
+  '.webauto',
+  'run',
+  'desktop-console-heartbeat.json',
+);
 const profileStore = createProfileStore({ repoRoot: REPO_ROOT });
 const XHS_SCRIPTS_ROOT = path.join(REPO_ROOT, 'scripts', 'xiaohongshu');
 const XHS_FULL_COLLECT_RE = /collect-content\.mjs$/;
@@ -98,6 +105,51 @@ const UI_HEARTBEAT_TIMEOUT_MS = resolveUiHeartbeatTimeoutMs(process.env);
 let lastUiHeartbeatAt = Date.now();
 let heartbeatWatchdog: NodeJS.Timeout | null = null;
 let heartbeatTimeoutHandled = false;
+let coreServicesStopRequested = false;
+let coreServiceHeartbeatTimer: NodeJS.Timeout | null = null;
+let coreServiceHeartbeatStopped = false;
+
+async function writeCoreServiceHeartbeat(status: 'running' | 'stopped') {
+  const filePath = String(process.env.WEBAUTO_HEARTBEAT_FILE || DESKTOP_HEARTBEAT_FILE).trim() || DESKTOP_HEARTBEAT_FILE;
+  const payload = {
+    pid: process.pid,
+    ts: new Date().toISOString(),
+    status,
+    source: 'desktop-console',
+  };
+  try {
+    await fs.mkdir(path.dirname(filePath), { recursive: true });
+    await fs.writeFile(filePath, JSON.stringify(payload), 'utf8');
+  } catch {
+    // ignore heartbeat write errors
+  }
+}
+
+function startCoreServiceHeartbeat() {
+  const filePath = String(process.env.WEBAUTO_HEARTBEAT_FILE || DESKTOP_HEARTBEAT_FILE).trim() || DESKTOP_HEARTBEAT_FILE;
+  process.env.WEBAUTO_HEARTBEAT_FILE = filePath;
+  if (!process.env.WEBAUTO_HEARTBEAT_INTERVAL_MS) process.env.WEBAUTO_HEARTBEAT_INTERVAL_MS = '5000';
+  if (!process.env.WEBAUTO_HEARTBEAT_STALE_MS) process.env.WEBAUTO_HEARTBEAT_STALE_MS = '45000';
+
+  coreServiceHeartbeatStopped = false;
+  void writeCoreServiceHeartbeat('running');
+  if (coreServiceHeartbeatTimer) clearInterval(coreServiceHeartbeatTimer);
+  coreServiceHeartbeatTimer = setInterval(() => {
+    if (coreServiceHeartbeatStopped) return;
+    void writeCoreServiceHeartbeat('running');
+  }, 5000);
+  coreServiceHeartbeatTimer.unref();
+}
+
+function stopCoreServiceHeartbeat() {
+  if (coreServiceHeartbeatStopped) return;
+  coreServiceHeartbeatStopped = true;
+  if (coreServiceHeartbeatTimer) {
+    clearInterval(coreServiceHeartbeatTimer);
+    coreServiceHeartbeatTimer = null;
+  }
+  void writeCoreServiceHeartbeat('stopped');
+}
 
 let stateBridgeStarted = false;
 function ensureStateBridge() {
@@ -106,14 +158,9 @@ function ensureStateBridge() {
   if (w) { stateBridge.start(w); stateBridgeStarted = true; }
 }
 
-app.whenReady().then(() => {
-  ensureStateBridge();
-});
-
 let win: BrowserWindow | null = null;
 
 configureElectronPaths();
-stateBridge.start(win!);
 
 function getWin() {
   if (!win || win.isDestroyed()) return null;
@@ -171,18 +218,13 @@ function terminateRunProcess(runId: string, reason = 'manual') {
   return true;
 }
 
-function stopCoreServicesBestEffort() {
+async function stopCoreServicesBestEffort(reason: string) {
+  if (coreServicesStopRequested) return;
+  coreServicesStopRequested = true;
   try {
-    const coreDaemon = path.join(REPO_ROOT, 'scripts', 'core-daemon.mjs');
-    spawn(resolveNodeBin(), [coreDaemon, 'stop'], {
-      cwd: REPO_ROOT,
-      stdio: 'ignore',
-      windowsHide: true,
-      detached: false,
-      env: { ...process.env, WEBAUTO_DAEMON: '1' },
-    });
-  } catch {
-    // ignore
+    await stopCoreDaemon();
+  } catch (err) {
+    console.warn(`[desktop-console] core-daemon stop failed (${reason})`, err);
   }
 }
 
@@ -191,7 +233,7 @@ function killAllRuns(reason = 'ui_heartbeat_timeout') {
     terminateRunProcess(runId, reason);
   }
   if (reason === 'ui_heartbeat_timeout' || reason === 'window_closed') {
-    stopCoreServicesBestEffort();
+    void stopCoreServicesBestEffort(reason);
   }
 }
 
@@ -224,7 +266,7 @@ function ensureHeartbeatWatchdog() {
     }
 
     console.warn(`[desktop-heartbeat] stale ${staleMs}ms > ${UI_HEARTBEAT_TIMEOUT_MS}ms, stopping core services`);
-    stopCoreServicesBestEffort();
+    void stopCoreServicesBestEffort('heartbeat_stop_only');
   }, 5_000);
   heartbeatWatchdog.unref();
 }
@@ -283,6 +325,17 @@ async function spawnCommand(spec: SpawnSpec) {
   q.enqueue(
     () =>
       new Promise<void>((resolve) => {
+        let finished = false;
+        let exitCode: number | null = null;
+        let exitSignal: string | null = null;
+        const finalize = (code: number | null, signal: string | null) => {
+          if (finished) return;
+          finished = true;
+          sendEvent({ type: 'exit', runId, exitCode: code, signal, ts: now() });
+          runs.delete(runId);
+          resolve();
+        };
+
         const child = spawn(resolveNodeBin(), spec.args, {
           cwd,
           env: {
@@ -306,14 +359,14 @@ async function spawnCommand(spec: SpawnSpec) {
         });
         child.on('error', (err: any) => {
           sendEvent({ type: 'stderr', runId, line: `[spawn-error] ${err?.message || String(err)}`, ts: now() });
-          sendEvent({ type: 'exit', runId, exitCode: null, signal: 'error', ts: now() });
-          runs.delete(runId);
-          resolve();
+          finalize(null, 'error');
         });
         child.on('exit', (code, signal) => {
-          sendEvent({ type: 'exit', runId, exitCode: code, signal, ts: now() });
-          runs.delete(runId);
-          resolve();
+          exitCode = code;
+          exitSignal = signal;
+        });
+        child.on('close', (code, signal) => {
+          finalize(exitCode ?? code ?? null, exitSignal ?? signal ?? null);
         });
       }),
   );
@@ -547,6 +600,7 @@ function createWindow() {
 
   const htmlPath = path.join(APP_ROOT, 'dist', 'renderer', 'index.html');
   void win.loadFile(htmlPath);
+  ensureStateBridge();
 }
 
 app.on('window-all-closed', () => {
@@ -558,14 +612,27 @@ app.on('window-all-closed', () => {
 // 确保窗口关闭时命令行能退出
 app.on('before-quit', () => {
   killAllRuns('before_quit');
+  stopCoreServiceHeartbeat();
+  void stopCoreServicesBestEffort('before_quit');
   if (heartbeatWatchdog) {
     clearInterval(heartbeatWatchdog);
     heartbeatWatchdog = null;
   }
 });
 
-app.whenReady().then(() => {
-  startCoreDaemon().catch(()=>{});
+app.on('will-quit', () => {
+  killAllRuns('will_quit');
+  stopCoreServiceHeartbeat();
+  void stopCoreServicesBestEffort('will_quit');
+  stateBridge.stop();
+});
+
+app.whenReady().then(async () => {
+  startCoreServiceHeartbeat();
+  const started = await startCoreDaemon().catch(() => false);
+  if (!started) {
+    console.warn('[desktop-console] core services are not healthy at startup');
+  }
   markUiHeartbeat('main_ready');
   ensureHeartbeatWatchdog();
   createWindow();
@@ -725,6 +792,15 @@ ipcMain.handle('os:openPath', async (_evt, input: { path: string }) => {
   const p = String(input?.path || '');
   const r = await shell.openPath(p);
   return { ok: !r, error: r || null };
+});
+
+ipcMain.handle('clipboard:writeText', async (_evt, input: { text: string }) => {
+  try {
+    clipboard.writeText(String(input?.text || ''));
+    return { ok: true };
+  } catch (err: any) {
+    return { ok: false, error: err?.message || String(err) };
+  }
 });
 
 // ---- Runtime Dashboard APIs ----

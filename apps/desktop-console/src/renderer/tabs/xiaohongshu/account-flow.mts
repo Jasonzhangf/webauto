@@ -83,6 +83,7 @@ export function createAccountFlowController(opts: AccountFlowOptions): AccountFl
   let latestProfiles: string[] = [];
   let accountAutoRefreshTimer: ReturnType<typeof setInterval> | null = null;
   let accountAutoRefreshUntil = 0;
+  let refreshSeq = 0;
   let batchKey = readBatchKey();
   if (!batchKey || /^batch-\d{8}-\d{4}$/.test(batchKey)) {
     batchKey = XHS_DEFAULT_BATCH_KEY;
@@ -109,6 +110,18 @@ export function createAccountFlowController(opts: AccountFlowOptions): AccountFl
     });
     return selected;
   };
+  const uniqueProfileIds = (items: string[]) => {
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const raw of items) {
+      const id = String(raw || '').trim();
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
+      out.push(id);
+    }
+    return out;
+  };
+  const isNewFormatProfileId = (id: string) => /.+-batch-\d+$/.test(String(id || '').trim());
   const renderSingleProfileHint = () => {
     const current = String(profilePickSel.value || '').trim();
     if (!current) {
@@ -151,8 +164,8 @@ export function createAccountFlowController(opts: AccountFlowOptions): AccountFl
     profiles: string[],
     aliases: Record<string, string>,
     profileDirs: Map<string, string>,
+    seq: number,
   ) => {
-    accountAuditList.innerHTML = '';
     const appendAction = (label: string, onClick: () => void) => {
       const row = createEl('div', { className: 'xhs-account-row' });
       const btn = createEl('button', { type: 'button', className: 'secondary', style: 'padding:2px 8px; font-size:11px;' }, [label]) as HTMLButtonElement;
@@ -170,8 +183,9 @@ export function createAccountFlowController(opts: AccountFlowOptions): AccountFl
         ? sessions.map((s: any) => String(s?.profileId || '').trim()).filter(Boolean)
         : [],
     );
+    const uniqueProfiles = uniqueProfileIds(profiles);
     const rows = await Promise.all(
-      profiles.map(async (profileId) => {
+      uniqueProfiles.map(async (profileId) => {
         const profileDir = String(profileDirs.get(profileId) || '').trim();
         const cookieCandidates = deriveCookieCandidates(profileDir, profileId);
         let cookieReady = false;
@@ -191,6 +205,8 @@ export function createAccountFlowController(opts: AccountFlowOptions): AccountFl
         };
       }),
     );
+    if (seq !== refreshSeq) return;
+    accountAuditList.innerHTML = '';
     if (rows.length === 0) {
       accountAuditList.appendChild(createEl('div', { className: 'xhs-account-row muted' }, ['暂无账号，请先新增账号。']));
       accountAuditSummary.textContent = '账号检查：0 个账号';
@@ -246,6 +262,7 @@ export function createAccountFlowController(opts: AccountFlowOptions): AccountFl
     });
   };
   const refreshProfileChoices = async (preferredProfileId = '') => {
+    const seq = ++refreshSeq;
     accountAuditSummary.textContent = '账号检查：刷新中...';
     const selectedNow = getSelectedShardProfiles();
     const prevSingle = String(profilePickSel.value || persistedSingleProfile || '').trim();
@@ -253,13 +270,14 @@ export function createAccountFlowController(opts: AccountFlowOptions): AccountFl
     const prevSelected = selectedNow.length > 0 ? new Set(selectedNow) : new Set(persistedShardProfiles);
     const scan = await window.api.profilesScan().catch(() => null);
     const entries: any[] = Array.isArray(scan?.entries) ? scan.entries : [];
-    const profiles: string[] = entries.map((e: any) => String(e?.profileId || '').trim()).filter(Boolean);
+    const profiles: string[] = uniqueProfileIds(entries.map((e: any) => String(e?.profileId || '').trim())).filter(isNewFormatProfileId);
     const profileDirs = new Map<string, string>();
     entries.forEach((e: any) => {
       const pid = String(e?.profileId || '').trim();
-      if (!pid) return;
-      profileDirs.set(pid, String(e?.profileDir || '').trim());
+      if (!pid || !isNewFormatProfileId(pid)) return;
+      if (!profileDirs.has(pid)) profileDirs.set(pid, String(e?.profileDir || '').trim());
     });
+    if (seq !== refreshSeq) return;
     latestProfiles = profiles.slice();
     syncAddBatchPlaceholder();
     const aliases = aliasesMap();
@@ -268,9 +286,6 @@ export function createAccountFlowController(opts: AccountFlowOptions): AccountFl
     if (profiles.length === 0) {
       onboardingCard.style.display = '';
       onboardingTips.textContent = '当前没有可用 profile：请前往预处理页创建/登录 profile，再返回此页。';
-    } else if (aliasedProfiles < profiles.length) {
-      onboardingCard.style.display = '';
-      onboardingTips.textContent = `仍有 ${profiles.length - aliasedProfiles} 个 profile 未设置账号名。建议先配置 alias，再按账号运行。`;
     } else {
       onboardingCard.style.display = 'none';
     }
@@ -314,7 +329,7 @@ export function createAccountFlowController(opts: AccountFlowOptions): AccountFl
     persistedShardProfiles.clear();
     getSelectedShardProfiles().forEach((pid) => persistedShardProfiles.add(pid));
     renderShardHints();
-    await refreshAccountAudit(profiles, aliases as Record<string, string>, profileDirs);
+    await refreshAccountAudit(profiles, aliases as Record<string, string>, profileDirs, seq);
   };
   const stopAccountAutoRefresh = () => {
     if (accountAutoRefreshTimer) {

@@ -11,6 +11,10 @@ test('phase2 uses UNIFIED_API_URL and has no undefined CONFIG reference', async 
   const src = await readFile(phase2Path, 'utf8');
   assert.match(src, /import \{ UNIFIED_API_URL \} from '\.\/lib\/core-daemon\.mjs';/);
   assert.doesNotMatch(src, /CONFIG\.UNIFIED_API/);
+  assert.match(src, /import \{ execute as waitSearchPermit \} from '\.\.\/\.\.\/dist\/modules\/workflow\/blocks\/WaitSearchPermitBlock\.js';/);
+  assert.match(src, /import \{ execute as phase2Search \} from '\.\.\/\.\.\/dist\/modules\/xiaohongshu\/app\/src\/blocks\/Phase2SearchBlock\.js';/);
+  assert.match(src, /import \{ execute as phase2CollectLinks \} from '\.\.\/\.\.\/dist\/modules\/xiaohongshu\/app\/src\/blocks\/Phase2CollectLinksBlock\.js';/);
+  assert.doesNotMatch(src, /xhs-orchestrator\/index\.js/);
 });
 
 test('UNIFIED_API_URL points to unified endpoint', async () => {

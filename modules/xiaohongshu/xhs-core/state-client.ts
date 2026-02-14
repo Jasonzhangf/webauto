@@ -2,11 +2,11 @@
 // State client factory and utilities for Xiaohongshu modules
 
 import { StateClient as BaseStateClient, createStateClient as createBaseClient } from '../../../sharedmodule/state-client.mjs';
-import type { StateClientOptions } from '../../../sharedmodule/state-client.mts';
+import type { StateClientOptions } from '../../../sharedmodule/state-client.mjs';
 import type { XhsCollectOptions, XhsCollectResult } from './types.js';
 
 // Re-export the base StateClient class
-export { StateClient } from '../../../sharedmodule/state-client.mts';
+export { StateClient } from '../../../sharedmodule/state-client.mjs';
 
 /**
  * Create a state client for a Xiaohongshu collection run

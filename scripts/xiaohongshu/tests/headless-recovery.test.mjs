@@ -23,3 +23,9 @@ test('phase orchestrate retries failed headless steps in headful mode', async ()
   assert.match(src, /phase2-collect\.mjs/);
   assert.match(src, /phase-unified-harvest\.mjs/);
 });
+
+test('phase1-only keeps browser session open by not forcing --once', async () => {
+  const src = await readFile(orchestratePath, 'utf8');
+  assert.match(src, /const phase1Once = mode !== 'phase1-only';/);
+  assert.match(src, /await runPhase1ForProfiles\(phase1Profiles, headless, phase1Once\);/);
+});

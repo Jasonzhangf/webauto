@@ -47,6 +47,84 @@
       .xhs-compact-card { border:1px solid #263147; border-radius:8px; padding:8px; background:#101a2a; }
       .xhs-account-list { max-height:230px; overflow:auto; border:1px solid #263147; border-radius:8px; }
       .xhs-account-row { display:flex; justify-content:space-between; gap:8px; border-bottom:1px solid #263147; padding:6px 8px; }
+
+      .xhs-tile-lane {
+        display: grid;
+        grid-template-columns: repeat(12, minmax(0, 1fr));
+        gap: 12px;
+        align-items: start;
+      }
+      .xhs-tile {
+        grid-column: span 12;
+        border: 1px solid #263147;
+        border-radius: 12px;
+        background: linear-gradient(180deg, #0f1729 0%, #101a2f 100%);
+        box-shadow: inset 0 1px 0 rgba(148, 163, 184, 0.12);
+        overflow: hidden;
+      }
+      .xhs-tile.active {
+        border-color: #3b82f6;
+        box-shadow:
+          0 0 0 1px rgba(59, 130, 246, 0.32),
+          0 12px 30px rgba(2, 6, 23, 0.35);
+      }
+      .xhs-tile-head {
+        padding: 10px 12px;
+        border-bottom: 1px solid #263147;
+        font-size: 13px;
+        font-weight: 700;
+        color: #dbeafe;
+      }
+      .xhs-tile-body {
+        display: grid;
+        gap: 10px;
+        padding: 10px;
+      }
+      .xhs-bento-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+        gap: 10px;
+        align-items: start;
+      }
+      .xhs-bento-card {
+        border: 1px solid #2a3959;
+        border-radius: 10px;
+        background: #0e182b;
+        padding: 10px;
+        min-width: 0;
+      }
+      .xhs-bento-card .row:last-child { margin-bottom: 0; }
+      .xhs-bento-grid--tight { grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); }
+      .xhs-guide-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        gap: 8px;
+        margin-bottom: 8px;
+      }
+      .xhs-guide-step {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 8px 10px;
+        min-height: 44px;
+        border-radius: 8px;
+        border: 1px solid #1f2f4f;
+        background: #0f1419;
+      }
+      .xhs-guide-step--full { grid-column: 1 / -1; }
+
+      @media (min-width: 1100px) {
+        .xhs-tile { grid-column: span 6; }
+        .xhs-tile--board { grid-column: span 12; }
+        .xhs-tile--run,
+        .xhs-tile--like { grid-column: span 6; }
+      }
+      @media (min-width: 1560px) {
+        .xhs-tile { grid-column: span 4; }
+        .xhs-tile--run,
+        .xhs-tile--like { grid-column: span 6; }
+        .xhs-tile--board { grid-column: span 12; }
+      }
     </style>
   </head>
   <body>

@@ -1,7 +1,5 @@
 // apps/desktop-console/src/renderer/hooks/use-task-state.mts
-// React-style hook for task state in renderer (webauto-04b)
-
-import { ipcRenderer } from 'electron';
+// Renderer-side task state store backed by preload-exposed window.api.
 
 // Inline types to avoid import path issues
 export interface TaskState {
@@ -38,19 +36,27 @@ class TaskStateStore {
   private tasks: Map<string, TaskState> = new Map();
   private listeners: Set<Listener> = new Set();
   private started = false;
+  private unsubscribeState: (() => void) | null = null;
 
   start() {
     if (this.started) return;
     this.started = true;
-    ipcRenderer.on('state:update', (_e, update: StateUpdate) => {
+    const api = window?.api;
+    if (!api || typeof api.onStateUpdate !== 'function') {
+      console.warn('[TaskStateStore] onStateUpdate API unavailable');
+      return;
+    }
+    this.unsubscribeState = api.onStateUpdate((update: StateUpdate) => {
       this.handleUpdate(update);
     });
-    this.loadTasks();
+    void this.loadTasks();
   }
 
   private async loadTasks() {
+    const api = window?.api;
+    if (!api || typeof api.stateGetTasks !== 'function') return;
     try {
-      const tasks: TaskState[] = await ipcRenderer.invoke('state:getTasks');
+      const tasks: TaskState[] = await api.stateGetTasks();
       tasks.forEach(t => this.tasks.set(t.runId, t));
       this.notify({ runId: '', type: 'init', data: tasks, timestamp: Date.now() });
     } catch (err) {
@@ -88,6 +94,12 @@ class TaskStateStore {
 
   getAllTasks(): TaskState[] {
     return Array.from(this.tasks.values());
+  }
+
+  dispose() {
+    if (typeof this.unsubscribeState === 'function') this.unsubscribeState();
+    this.unsubscribeState = null;
+    this.started = false;
   }
 }
 

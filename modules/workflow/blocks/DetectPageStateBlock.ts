@@ -14,6 +14,20 @@ import {
   logControllerActionStart,
 } from './helpers/operationLogger.js';
 
+export interface DetectPageStateOutput {
+  url: string;
+  stage: PageStage;
+  rootId?: string | null;
+  matchIds?: string[];
+  dom?: {
+    hasDetailMask?: boolean;
+    hasSearchInput?: boolean;
+    readyState?: string;
+    title?: string;
+  };
+  error?: string;
+}
+
 export type PageStage = 'login' | 'detail' | 'search' | 'home' | 'unknown';
 
 export interface DetectPageStateInput {

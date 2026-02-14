@@ -91,6 +91,13 @@ function normalizeText(s: string) {
   return String(s || '').replace(/\s+/g, ' ').trim();
 }
 
+function resolveLikeIconState(useHref: string): 'liked' | 'unliked' | 'unknown' {
+  const href = String(useHref || '').trim().toLowerCase();
+  if (href.includes('#liked')) return 'liked';
+  if (href.includes('#like')) return 'unliked';
+  return 'unknown';
+}
+
 export type LikeRule =
   | { kind: 'contains'; include: string; raw: string }
   | { kind: 'and'; includeA: string; includeB: string; raw: string }
@@ -327,7 +334,7 @@ async function getLikeStateForVisibleCommentIndex(
   sessionId: string,
   apiUrl: string,
   index: number,
-): Promise<{ useHref: string; count: string; likeClass: string }> {
+): Promise<{ useHref: string; count: string; likeClass: string; iconState: 'liked' | 'unliked' | 'unknown' }> {
   try {
     const res = await controllerAction(
       'browser:execute',
@@ -342,23 +349,27 @@ async function getLikeStateForVisibleCommentIndex(
           };
           const visibleItems = Array.from(document.querySelectorAll('.comment-item')).filter(isVisible);
           const el = visibleItems[idx];
-          if (!el) return { ok: false, likeClass: '', useHref: '', count: '' };
+          if (!el) return { ok: false, likeClass: '', useHref: '', count: '', iconState: 'unknown' };
           const like = el.querySelector('.like-wrapper');
-          const use = like?.querySelector('use');
-          const useHref = use?.getAttribute('xlink:href') || use?.getAttribute('href') || '';
+          const use = like?.querySelector('svg.like-icon use') || like?.querySelector('use');
+          const useHref = use?.getAttribute('xlink:href') || use?.getAttribute('href') || use?.href?.baseVal || '';
           const count = (like?.querySelector('.count')?.textContent || '').replace(/\\s+/g, ' ').trim();
-          return { ok: true, likeClass: like ? like.className : '', useHref, count };
+          const likeClass = like ? String(like.className || '') : '';
+          const iconState = useHref.includes('#liked') ? 'liked' : useHref.includes('#like') ? 'unliked' : (likeClass.includes('like-active') ? 'liked' : 'unknown');
+          return { ok: true, likeClass, useHref, count, iconState };
         })()`,
       },
       apiUrl,
     );
+    const useHref = String(res?.result?.useHref || res?.useHref || '');
     return {
-      useHref: String(res?.result?.useHref || res?.useHref || ''),
+      useHref,
       count: String(res?.result?.count || res?.count || ''),
       likeClass: String(res?.result?.likeClass || res?.likeClass || ''),
+      iconState: resolveLikeIconState(String(res?.result?.iconState || res?.iconState || useHref)),
     };
   } catch {
-    return { useHref: '', count: '', likeClass: '' };
+    return { useHref: '', count: '', likeClass: '', iconState: 'unknown' };
   }
 }
 
@@ -679,7 +690,10 @@ export async function execute(input: InteractInput): Promise<InteractOutput> {
 
       // 已点赞则跳过（优先走 DOM 校验，避免容器 extractor 缺失导致误判）
       const beforeState = await getLikeStateForVisibleCommentIndex(sessionId, unifiedApiUrl, visibleIndex);
-      const beforeLiked = beforeState.useHref.includes('#liked');
+      let beforeLiked = beforeState.iconState === 'liked';
+      if (!beforeLiked && beforeState.iconState === 'unknown') {
+        beforeLiked = await verifyLikedBySignature(sessionId, unifiedApiUrl, signature);
+      }
       if (beforeLiked) {
         roundAlreadyLikedSkipped += 1;
         likedSignatures.add(sigKey);
@@ -719,7 +733,7 @@ export async function execute(input: InteractInput): Promise<InteractOutput> {
       if (!dryRun) {
         const afterState = await getLikeStateForVisibleCommentIndex(sessionId, unifiedApiUrl, visibleIndex);
         const nowLiked =
-          afterState.useHref.includes('#liked') || (await verifyLikedBySignature(sessionId, unifiedApiUrl, signature));
+          afterState.iconState === 'liked' || (await verifyLikedBySignature(sessionId, unifiedApiUrl, signature));
         if (!nowLiked) {
           roundVerifyFailed += 1;
           continue;

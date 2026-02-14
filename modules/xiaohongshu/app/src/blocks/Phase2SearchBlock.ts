@@ -93,6 +93,126 @@ async function readActiveInputValue(profile: string, unifiedApiUrl: string) {
   return typeof value === 'string' ? value : null;
 }
 
+async function probeSearchInputState(profile: string, unifiedApiUrl: string, keyword: string) {
+  const state = await controllerAction(
+    'browser:execute',
+    {
+      profile,
+      script: `(() => {
+        const norm = (v) => (typeof v === 'string' ? v.trim() : String(v ?? '').trim());
+        const editableSelector = "input, textarea, [contenteditable='true'], [contenteditable=''], [role='textbox']";
+        const toValue = (el) => {
+          try {
+            if (!el) return '';
+            if ('value' in el) {
+              const v = el.value;
+              return typeof v === 'string' ? v : String(v ?? '');
+            }
+            const t = el.textContent ?? '';
+            return typeof t === 'string' ? t : String(t ?? '');
+          } catch {
+            return '';
+          }
+        };
+        const isVisible = (el) => {
+          try {
+            if (!el || !el.getBoundingClientRect) return false;
+            const r = el.getBoundingClientRect();
+            if (!(r.width > 0 && r.height > 0)) return false;
+            return r.bottom >= 0 && r.right >= 0 && r.top <= window.innerHeight && r.left <= window.innerWidth;
+          } catch {
+            return false;
+          }
+        };
+        const descriptor = (el) => {
+          const bits = [
+            el?.id || '',
+            el?.className || '',
+            el?.getAttribute?.('name') || '',
+            el?.getAttribute?.('placeholder') || '',
+            el?.getAttribute?.('aria-label') || '',
+            el?.getAttribute?.('data-placeholder') || '',
+          ]
+            .map((x) => String(x || '').toLowerCase())
+            .filter(Boolean);
+          return bits.join(' ');
+        };
+        const hasSearchHint = (el) => /search|搜索|关键/.test(descriptor(el));
+        const activeElement = document.activeElement;
+        const activeEditable = activeElement && (activeElement.matches?.(editableSelector)
+          ? activeElement
+          : activeElement.querySelector?.(editableSelector));
+
+        /** @type {Array<{value: string, source: string, score: number}>} */
+        const candidates = [];
+        const seen = new Set();
+        const pushCandidate = (el, source) => {
+          if (!el || seen.has(el)) return;
+          seen.add(el);
+          if (!isVisible(el)) return;
+          const value = toValue(el);
+          const rect = el.getBoundingClientRect?.() || { top: 9999, width: 0 };
+          const score =
+            (el === activeEditable ? 80 : 0) +
+            (hasSearchHint(el) ? 40 : 0) +
+            (rect.top < 180 ? 20 : 0) +
+            (rect.width > 120 ? 10 : 0);
+          candidates.push({ value: String(value || ''), source, score });
+        };
+
+        if (activeEditable) pushCandidate(activeEditable, 'active');
+
+        const root = document.querySelector('#search-input');
+        if (root) {
+          const nested = root.matches?.(editableSelector)
+            ? root
+            : root.querySelector?.(editableSelector);
+          if (nested) pushCandidate(nested, 'search_root');
+        }
+
+        const primary = document.querySelectorAll(
+          "#search-input, input[type='search'], input[placeholder*='搜索'], input[placeholder*='关键字'], input[aria-label*='搜索'], input[name*='search']",
+        );
+        primary.forEach((node, idx) => {
+          const el = node.matches?.(editableSelector)
+            ? node
+            : node.querySelector?.(editableSelector);
+          if (el) pushCandidate(el, \`primary_\${idx + 1}\`);
+        });
+
+        const editable = document.querySelectorAll(editableSelector);
+        editable.forEach((node, idx) => {
+          pushCandidate(node, \`editable_\${idx + 1}\`);
+        });
+
+        candidates.sort((a, b) => b.score - a.score);
+        const normalizedKeyword = norm(keyword);
+        const exact = candidates.find((c) => norm(c.value) === normalizedKeyword) || null;
+        const nonEmpty = candidates.find((c) => norm(c.value).length > 0) || null;
+        const best = exact || nonEmpty || candidates[0] || null;
+        const activeValue = activeEditable ? toValue(activeEditable) : null;
+
+        return {
+          ok: !!exact,
+          value: best ? String(best.value || '') : null,
+          source: best ? String(best.source || '') : null,
+          activeValue: typeof activeValue === 'string' ? activeValue : (activeValue == null ? null : String(activeValue)),
+          candidates: candidates.slice(0, 5).map((c) => \`\${c.source}:\${String(c.value || '').slice(0, 60)}\`),
+        };
+      })()`,
+    },
+    unifiedApiUrl,
+  ).then((res) => res?.result || res?.data?.result || null);
+
+  return {
+    ok: Boolean(state?.ok),
+    value: typeof state?.value === 'string' ? state.value : null,
+    source: typeof state?.source === 'string' ? state.source : null,
+    activeValue: typeof state?.activeValue === 'string' ? state.activeValue : null,
+    candidates: Array.isArray(state?.candidates) ? state.candidates.map((x: any) => String(x)) : [],
+  };
+}
+
 async function systemFillSearchInputValue(profile: string, unifiedApiUrl: string, keyword: string) {
   // System-level requirement: prefer keyboard/mouse. `browser:execute` is JS mutation and should be avoided.
   // We implement a system-level "fill" as: select-all + delete + type (with retries).
@@ -107,11 +227,15 @@ async function systemFillSearchInputValue(profile: string, unifiedApiUrl: string
   };
 
   const checkBoth = async () => {
+    const probe = await probeSearchInputState(profile, unifiedApiUrl, keyword).catch(() => null as any);
+    if (probe?.ok) {
+      return { ok: true, source: probe.source || 'probeSearchInputState', value: probe.value || '' };
+    }
     const v1 = await readSearchInputValue(profile, unifiedApiUrl).catch((): null => null);
     if (v1 && v1.trim() === keyword) return { ok: true, source: 'readSearchInputValue', value: v1 };
     const v2 = await readActiveInputValue(profile, unifiedApiUrl).catch((): null => null);
     if (v2 && v2.trim() === keyword) return { ok: true, source: 'readActiveInputValue', value: v2 };
-    return { ok: false, value: v1 || v2 || '' };
+    return { ok: false, value: probe?.value || v1 || v2 || '' };
   };
 
   // Try a few times; Camoufox can drop events if focus is flaky.
@@ -146,12 +270,32 @@ async function submitHomeSearchViaContainer(profile: string, unifiedApiUrl: stri
   }
 }
 
-async function canSubmitSearch(profile: string, unifiedApiUrl: string, keyword: string): Promise<{ ok: boolean; value: string | null; source: string | null }> {
+async function canSubmitSearch(
+  profile: string,
+  unifiedApiUrl: string,
+  keyword: string,
+): Promise<{ ok: boolean; value: string | null; source: string | null; activeValue: string | null; candidates: string[] }> {
+  const probe = await probeSearchInputState(profile, unifiedApiUrl, keyword).catch(() => null as any);
+  if (probe?.ok) {
+    return {
+      ok: true,
+      value: probe.value ?? null,
+      source: probe.source ?? 'probeSearchInputState',
+      activeValue: probe.activeValue ?? null,
+      candidates: Array.isArray(probe.candidates) ? probe.candidates : [],
+    };
+  }
   const value = await readSearchInputValue(profile, unifiedApiUrl).catch((): null => null);
-  if (typeof value === 'string' && value.trim() === keyword) return { ok: true, value, source: 'readSearchInputValue' };
+  if (typeof value === 'string' && value.trim() === keyword) return { ok: true, value, source: 'readSearchInputValue', activeValue: null, candidates: [] };
   const activeValue = await readActiveInputValue(profile, unifiedApiUrl).catch((): null => null);
-  if (typeof activeValue === 'string' && activeValue.trim() === keyword) return { ok: true, value: activeValue, source: 'readActiveInputValue' };
-  return { ok: false, value: (value ?? activeValue ?? null) as string | null, source: null };
+  if (typeof activeValue === 'string' && activeValue.trim() === keyword) return { ok: true, value: activeValue, source: 'readActiveInputValue', activeValue, candidates: [] };
+  return {
+    ok: false,
+    value: (probe?.value ?? value ?? activeValue ?? null) as string | null,
+    source: (probe?.source ?? null) as string | null,
+    activeValue: (probe?.activeValue ?? activeValue ?? null) as string | null,
+    candidates: Array.isArray(probe?.candidates) ? probe.candidates : [],
+  };
 }
 
 async function browserFillSearchInputValue(profile: string, unifiedApiUrl: string, keyword: string, searchInputContainerId: string) {
@@ -451,6 +595,19 @@ export async function execute(input: SearchInput): Promise<SearchOutput> {
   const anchor = highlightResult?.data || highlightResult;
   const rect = anchor?.rect;
   if (rect?.x1 !== undefined && rect?.y1 !== undefined && rect?.x2 !== undefined && rect?.y2 !== undefined) {
+    const width = Number(rect.x2) - Number(rect.x1);
+    const height = Number(rect.y2) - Number(rect.y1);
+    if (!Number.isFinite(width) || !Number.isFinite(height) || width < 8 || height < 8) {
+      console.log(`[Phase2Search] rect invalid for coordinate click (w=${width}, h=${height}), fallback to container click`);
+      if (!useDomFallback) {
+        await controllerAction(
+          'container:operation',
+          { containerId: searchInputContainerId, operationId: 'click', sessionId: profile, timeoutMs: 10000 },
+          unifiedApiUrl,
+        ).catch(() => {});
+      }
+      await delay(260);
+    } else {
     const cx = (Number(rect.x1) + Number(rect.x2)) / 2;
     const cy = (Number(rect.y1) + Number(rect.y2)) / 2;
     console.log(`[Phase2Search] mouse:click at (${cx.toFixed(1)}, ${cy.toFixed(1)})`);
@@ -461,8 +618,17 @@ export async function execute(input: SearchInput): Promise<SearchOutput> {
     // Try selecting text via mouse (more reliable than keyboard shortcuts on some builds).
     await controllerAction('mouse:click', { profileId: profile, x: cx, y: cy, clicks: 2 }, unifiedApiUrl).catch(() => {});
     await delay(200);
+    }
   } else {
-    console.warn(`[Phase2Search] missing rect for system click, fallback to no-click`);
+    console.warn(`[Phase2Search] missing rect for system click, fallback to container click`);
+    if (!useDomFallback) {
+      await controllerAction(
+        'container:operation',
+        { containerId: searchInputContainerId, operationId: 'click', sessionId: profile, timeoutMs: 10000 },
+        unifiedApiUrl,
+      ).catch(() => {});
+      await delay(260);
+    }
   }
 
   // If the input already contains the same keyword, do not force clearing.
@@ -526,8 +692,8 @@ export async function execute(input: SearchInput): Promise<SearchOutput> {
   const canSubmit = await canSubmitSearch(profile, unifiedApiUrl, keyword);
   const beforeSubmitValue = await readSearchInputValue(profile, unifiedApiUrl).catch((): null => null);
   const activeBeforeSubmitValue = await readActiveInputValue(profile, unifiedApiUrl).catch((): null => null);
-  console.log(`[Phase2Search] Before submit: input value="${String(beforeSubmitValue)}" active="${String(activeBeforeSubmitValue)}" keyword="${keyword}"`);
-  if (String(activeBeforeSubmitValue || '') != String(keyword) && searchInputContainerId !== 'dom_fallback_search_input') {
+  console.log(`[Phase2Search] Before submit: input value="${String(beforeSubmitValue)}" active="${String(activeBeforeSubmitValue)}" keyword="${keyword}" probe=${String(canSubmit.source)} candidates=${(canSubmit.candidates || []).join(' | ')}`);
+  if (String(canSubmit.activeValue || activeBeforeSubmitValue || '') !== String(keyword) && searchInputContainerId !== 'dom_fallback_search_input') {
     await controllerAction(
       'container:operation',
       { containerId: searchInputContainerId, operationId: 'click', sessionId: profile },
@@ -546,7 +712,7 @@ export async function execute(input: SearchInput): Promise<SearchOutput> {
       shotLen = typeof shot === 'string' ? shot.length : 0;
     }
     throw new Error(
-      `[Phase2Search] 提交前 input 值不等于关键字：expected="${keyword}" actual="${String(canSubmit.value)}" source=${String(canSubmit.source)} screenshot_len=${shotLen}。停止执行（不点击搜索按钮）。`,
+      `[Phase2Search] 提交前 input 值不等于关键字：expected="${keyword}" actual="${String(canSubmit.value)}" source=${String(canSubmit.source)} active="${String(canSubmit.activeValue)}" candidates=${(canSubmit.candidates || []).join(' | ')} screenshot_len=${shotLen}。停止执行（不点击搜索按钮）。`,
     );
   }
 

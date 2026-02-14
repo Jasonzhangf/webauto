@@ -1,7 +1,7 @@
 // sharedmodule/state-client.mts
 // Client SDK for scripts to interact with unified-api task state (webauto-04b)
 
-import type { TaskPhase, TaskStatus, TaskProgress, TaskStats, TaskError } from '../../services/unified-api/task-state.js';
+import type { TaskPhase, TaskStatus, TaskProgress, TaskStats, TaskError } from '../services/unified-api/task-state.js';
 
 export interface StateClientOptions {
   runId: string;

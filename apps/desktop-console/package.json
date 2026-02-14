@@ -9,7 +9,7 @@
     "build": "node scripts/build.mjs",
     "start": "electron .",
     "test-preload": "node scripts/test-preload.mjs",
-    "test:renderer": "tsx --test src/renderer/index.test.mts src/renderer/tabs/debug.test.mts src/renderer/tabs/preflight.test.mts src/renderer/tabs/run.test.mts src/renderer/tabs/xiaohongshu.test.mts",
+    "test:renderer": "tsx --test src/renderer/index.test.mts src/renderer/tabs/debug.test.mts src/renderer/tabs/logs.test.mts src/renderer/tabs/preflight.test.mts src/renderer/tabs/run.test.mts src/renderer/tabs/xiaohongshu.test.mts",
     "clean": "node --input-type=module -e \"import('node:fs').then((fs)=>fs.rmSync('dist',{recursive:true,force:true}))\""
   },
   "devDependencies": {
