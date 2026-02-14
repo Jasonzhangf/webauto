@@ -395,17 +395,18 @@ export function renderLogs(root: HTMLElement, ctx: any) {
   const onKeydown = (evt: KeyboardEvent) => {
     if (!(evt.ctrlKey || evt.metaKey) || !evt.shiftKey) return;
     const key = String(evt.key || '').toLowerCase();
-    if (key === '1') {
+    const code = String(evt.code || '');
+    if (code === 'Digit1' || key === '1') {
       evt.preventDefault();
       void copyByType('global');
       return;
     }
-    if (key === '2') {
+    if (code === 'Digit2' || key === '2') {
       evt.preventDefault();
       void copyByType('shard');
       return;
     }
-    if (key === 'c') {
+    if (code === 'KeyC' || key === 'c') {
       evt.preventDefault();
       void copySelected();
     }

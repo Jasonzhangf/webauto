@@ -45,8 +45,16 @@ function isProcessAlive(pid) {
 }
 
 function tryKill(pid, signal) {
+  const value = Number(pid);
+  if (!Number.isInteger(value) || value <= 0) return false;
   try {
-    process.kill(pid, signal);
+    if (process.platform === 'win32') {
+      const args = ['/PID', String(value), '/T'];
+      if (signal === 'SIGKILL') args.push('/F');
+      execSync(`taskkill ${args.join(' ')}`, { stdio: 'ignore' });
+      return true;
+    }
+    process.kill(value, signal);
     return true;
   } catch {
     return false;
@@ -109,4 +117,3 @@ export async function releasePort(port, options = {}) {
 
   return !(await checkPortInUse(port));
 }
-

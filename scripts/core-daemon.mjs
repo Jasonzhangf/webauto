@@ -71,6 +71,32 @@ function ensureHeartbeatEnv() {
 
 ensureHeartbeatEnv();
 
+function resolveNodeBin() {
+  const explicit = String(process.env.WEBAUTO_NODE_BIN || '').trim();
+  if (explicit) return explicit;
+  const npmNode = String(process.env.npm_node_execpath || '').trim();
+  if (npmNode) return npmNode;
+  return process.platform === 'win32' ? 'node.exe' : 'node';
+}
+
+function killProcessTree(pid, options = {}) {
+  const force = Boolean(options.force);
+  const value = Number(pid);
+  if (!Number.isInteger(value) || value <= 0) return false;
+  try {
+    if (process.platform === 'win32') {
+      const args = ['/PID', String(value), '/T'];
+      if (force) args.push('/F');
+      spawn('taskkill', args, { stdio: 'ignore', windowsHide: true });
+      return true;
+    }
+    process.kill(value, force ? 'SIGKILL' : 'SIGTERM');
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function log(message, level = 'INFO') {
   const timestamp = new Date().toISOString();
   console.log(`[${timestamp}] [${level}] ${message}`);
@@ -120,7 +146,7 @@ async function stopService(service, options = {}) {
   log(`Stopping ${service.name} (PID: ${pid})...`);
   
   try {
-    process.kill(pid, 'SIGTERM');
+    killProcessTree(pid, { force: false });
     
     // Wait for graceful shutdown
     for (let i = 0; i < 30; i++) {
@@ -138,7 +164,7 @@ async function stopService(service, options = {}) {
     try {
       process.kill(pid, 0);
       log(`Force killing ${service.name}...`);
-      process.kill(pid, 'SIGKILL');
+      killProcessTree(pid, { force: true });
       await new Promise(r => setTimeout(r, 500));
     } catch {
       // Already stopped
@@ -210,7 +236,7 @@ async function startService(service) {
     log(`WARN: Failed to open log file for ${service.name}: ${err.message}`, 'WARN');
   }
   
-  const child = spawn('node', [scriptPath], {
+  const child = spawn(resolveNodeBin(), [scriptPath], {
     cwd: repoRoot,
     env: {
       ...process.env,

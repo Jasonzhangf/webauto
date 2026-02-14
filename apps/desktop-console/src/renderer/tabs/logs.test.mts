@@ -20,8 +20,8 @@ test('logs tab supports keyboard shortcuts for copy', async () => {
   const src = await readFile(logsPath, 'utf8');
   assert.match(src, /evt\.ctrlKey \|\| evt\.metaKey/);
   assert.match(src, /evt\.shiftKey/);
-  assert.match(src, /key === '1'/);
-  assert.match(src, /key === '2'/);
-  assert.match(src, /key === 'c'/);
+  assert.match(src, /code === 'Digit1' \|\| key === '1'/);
+  assert.match(src, /code === 'Digit2' \|\| key === '2'/);
+  assert.match(src, /code === 'KeyC' \|\| key === 'c'/);
   assert.match(src, /copySelected/);
 });

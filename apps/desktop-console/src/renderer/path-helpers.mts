@@ -18,7 +18,9 @@ function joinPath(api: PathApi | undefined, ...parts: string[]) {
 
 export function resolveWebautoRoot(downloadRoot: string, api?: PathApi) {
   const raw = String(downloadRoot || '').trim();
-  if (!raw) return '~/.webauto';
+  if (!raw) {
+    return api?.pathSep === '\\' ? '%USERPROFILE%\\.webauto' : '~/.webauto';
+  }
   const normalized = normalizePath(raw, api);
   const sep = api?.pathSep || '/';
   const suffix = `${sep}download`;
