@@ -21,3 +21,14 @@ test('phase3 interact persists signatures for already-liked comments', async () 
   assert.match(src, /alreadyLikedSkipped: totalAlreadyLikedSkipped/);
   assert.match(src, /dedupSkipped: totalDedupSkipped/);
 });
+
+test('phase3 like gate counts only real like attempts', async () => {
+  const src = await readFile(blockSourcePath, 'utf8');
+  assert.match(
+    src,
+    /if \(!dryRun\) \{\s*\/\/ 请求点赞许可（速率限制）只在“即将执行实际点赞点击”时触发，[^\n]*\n[\s\S]*?const likePermit = await requestLikeGate\(sessionId\);[\s\S]*?const clickRes = await clickLikeButtonByIndex/s,
+  );
+  const gateIdx = src.indexOf('const likePermit = await requestLikeGate(sessionId);');
+  const alreadyLikedIdx = src.indexOf('if (beforeLiked) {');
+  assert.ok(gateIdx > alreadyLikedIdx, 'gate permit should be requested after already-liked skip checks');
+});

@@ -642,16 +642,6 @@ export async function execute(input: InteractInput): Promise<InteractOutput> {
         `[Phase3Interact] 命中规则 note=${noteId} visibleRow=${visibleIndex} domRow=${domIndex >= 0 ? domIndex : 'na'} rule=${likeMatch.matchedRule || likeMatch.reason}`,
       );
 
-      // 请求点赞许可（速率限制）
-      const likePermit = await requestLikeGate(sessionId);
-      if (process.env.WEBAUTO_LIKE_GATE_BYPASS === '1') { likePermit.allowed = true; }
-      if (!likePermit.allowed) {
-        roundGateBlocked += 1;
-        console.log(`[Phase3Interact] ⏳ 点赞速率限制：${likePermit.current}/${likePermit.limit}`);
-        await delay(1000);
-        continue;
-      }
-
       // 视觉确认：高亮需要点击的位置（like button）
       await highlightCommentRow(sessionId, visibleIndex, unifiedApiUrl, 'virtual-like-row').catch((): null => null);
       const highlightRes = await highlightLikeButton(sessionId, visibleIndex, unifiedApiUrl);
@@ -711,6 +701,19 @@ export async function execute(input: InteractInput): Promise<InteractOutput> {
       }
 
       if (!dryRun) {
+        // 请求点赞许可（速率限制）只在“即将执行实际点赞点击”时触发，
+        // 跳过项（去重/已赞/不可见）不应消耗 gate 计数。
+        const likePermit = await requestLikeGate(sessionId);
+        if (process.env.WEBAUTO_LIKE_GATE_BYPASS === '1') {
+          likePermit.allowed = true;
+        }
+        if (!likePermit.allowed) {
+          roundGateBlocked += 1;
+          console.log(`[Phase3Interact] ⏳ 点赞速率限制：${likePermit.current}/${likePermit.limit}`);
+          await delay(1000);
+          continue;
+        }
+
         const clickRes = await clickLikeButtonByIndex(sessionId, visibleIndex, unifiedApiUrl);
         if (!clickRes?.success) {
           roundClickFailed += 1;
