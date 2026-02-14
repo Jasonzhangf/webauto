@@ -53,6 +53,14 @@ contextBridge.exposeInMainWorld('api', {
     ipcRenderer.on('cmd:event', fn);
     return () => ipcRenderer.removeListener('cmd:event', fn);
   },
+  stateGetTasks: () => ipcRenderer.invoke('state:getTasks'),
+  stateGetTask: (runId) => ipcRenderer.invoke('state:getTask', runId),
+  stateGetEvents: (runId, since) => ipcRenderer.invoke('state:getEvents', runId, since),
+  onStateUpdate: (cb) => {
+    const listener = (_e, update) => cb(update);
+    ipcRenderer.on('state:update', listener);
+    return () => ipcRenderer.removeListener('state:update', listener);
+  },
 });
 
 if (process.env.WEBAUTO_DESKTOP_CONSOLE_PRELOAD_TEST === '1') {

@@ -23,10 +23,7 @@ import { resolveKeyword, resolveTarget, resolveEnv, PROFILE, getNextDevKeyword, 
 import { listProfilesForPool } from './lib/profilepool.mjs';
 import { initRunLogging, emitRunEvent, safeStringify } from './lib/logger.mjs';
 import { createSessionLock } from './lib/session-lock.mjs';
-import { execute as waitSearchPermit } from '../../dist/modules/workflow/blocks/WaitSearchPermitBlock.js';
-// NOTE: xiaohongshu/app is compiled with rootDir=../.. so output is nested under xiaohongshu/app/src.
-import { execute as phase2Search } from '../../dist/modules/xiaohongshu/app/src/blocks/Phase2SearchBlock.js';
-import { execute as phase2CollectLinks } from '../../dist/modules/xiaohongshu/app/src/blocks/Phase2CollectLinksBlock.js';
+import { runPhase2 } from '../../modules/xiaohongshu/xhs-orchestrator/index.js';
 import { resolveDownloadRoot } from '../../dist/modules/state/src/paths.js';
 import { updateXhsCollectState, markXhsCollectFailed } from '../../dist/modules/state/src/xiaohongshu-collect-state.js';
 import path from 'node:path';

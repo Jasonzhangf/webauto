@@ -216,3 +216,12 @@ export function createLiveStatsController(opts: LiveStatsOptions): LiveStatsCont
     dispose,
   };
 }
+// State integration: taskStateStore will be imported and used here
+import { taskStateStore } from '../../hooks/use-task-state.mts';
+
+export function initLiveStats() {
+  taskStateStore.start();
+  taskStateStore.subscribe((update) => {
+    console.log('[LiveStats] state update:', update.type, update.runId);
+  });
+}
