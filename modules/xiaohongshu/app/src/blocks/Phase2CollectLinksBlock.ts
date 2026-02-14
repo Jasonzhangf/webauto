@@ -204,20 +204,21 @@ export async function execute(input: CollectLinksInput): Promise<CollectLinksOut
   let lastLinksCount = 0;
   const traceDir = path.join(resolveDownloadRoot(), 'xiaohongshu', env, keyword, 'click-trace');
   const tracePath = path.join(traceDir, 'trace.jsonl');
+  const traceEnabled = debugArtifactsEnabled || process.env.WEBAUTO_CLICK_TRACE === '1';
 
   const ensureTraceDir = async () => {
-    if (!debugArtifactsEnabled) return;
+    if (!traceEnabled) return;
     await fs.mkdir(traceDir, { recursive: true });
   };
 
   const appendTrace = async (row: Record<string, any>) => {
-    if (!debugArtifactsEnabled) return;
+    if (!traceEnabled) return;
     await ensureTraceDir();
     await fs.appendFile(tracePath, `${JSON.stringify(row)}\n`, 'utf8');
   };
 
   const saveScreenshot = async (base64: string, fileName: string) => {
-    if (!debugArtifactsEnabled) return null;
+    if (!traceEnabled) return null;
     await ensureTraceDir();
     const buf = Buffer.from(base64, 'base64');
     const filePath = path.join(traceDir, fileName);
@@ -286,6 +287,71 @@ export async function execute(input: CollectLinksInput): Promise<CollectLinksOut
     } catch (e: any) {
       return { ok: false, error: String(e?.message || e || 'mouse_click_failed') };
     }
+  };
+
+  const readFocusState = async () => {
+    const state = await controllerAction('browser:execute', {
+      profile,
+      script: `(() => {
+        const active = document.activeElement;
+        const hasFocus = typeof document.hasFocus === 'function' ? document.hasFocus() : true;
+        return {
+          hasFocus,
+          activeTag: active?.tagName || '',
+          activeId: active?.id || '',
+          activeClass: active?.className || '',
+        };
+      })()`,
+    }, unifiedApiUrl).then((res) => res?.result || res?.data?.result || res?.data || {});
+    const tag = String(state?.activeTag || '').trim() || 'unknown';
+    const id = String(state?.activeId || '').trim();
+    const cls = String(state?.activeClass || '').trim().replace(/\s+/g, '.');
+    const activeLabel = `${tag}${id ? `#${id}` : ''}${cls ? `.${cls}` : ''}`;
+    return {
+      hasFocus: Boolean(state?.hasFocus ?? true),
+      activeLabel,
+    };
+  };
+
+  const ensureBrowserFocus = async (strategy: string) => {
+    const before = await readFocusState().catch(() => ({ hasFocus: false, activeLabel: 'unknown' }));
+    const focusRes = await controllerAction('browser:focus', { profile }, unifiedApiUrl)
+      .catch((e: any) => ({ ok: false, error: String(e?.message || e || 'focus_failed') }));
+    const after = await readFocusState().catch(() => ({ hasFocus: false, activeLabel: 'unknown' }));
+    const ok = Boolean((focusRes as any)?.success ?? (focusRes as any)?.ok ?? false);
+    console.log(`[Phase2Collect] Focus ensure: strategy=${strategy} ok=${ok} beforeFocus=${before.hasFocus} beforeActive=${before.activeLabel} afterFocus=${after.hasFocus} afterActive=${after.activeLabel}`);
+    await appendTrace({
+      type: 'focus_ensure',
+      ts: new Date().toISOString(),
+      strategy,
+      ok,
+      before,
+      after,
+    });
+    return { ok, before, after };
+  };
+
+  const performContainerClick = async (
+    domIndex: number,
+    useSystemMouse: boolean,
+  ): Promise<{ ok: boolean; error?: string }> => {
+    const clickRes = await controllerAction('container:operation', {
+      containerId: 'xiaohongshu_search.search_result_item',
+      operationId: 'click',
+      sessionId: profile,
+      config: {
+        index: domIndex,
+        target: 'a.cover',
+        useSystemMouse,
+        visibleOnly: true,
+      },
+      timeoutMs: 20000,
+    }, unifiedApiUrl).catch((e: any) => ({ success: false, error: String(e?.message || e || 'container_click_failed') }));
+
+    if (clickRes?.success === false) {
+      return { ok: false, error: String(clickRes?.error || 'container_click_failed') };
+    }
+    return { ok: true };
   };
 
   // Updated by ensureOnExpectedSearch once we confirmed we are on the correct search_result.
@@ -944,44 +1010,80 @@ export async function execute(input: CollectLinksInput): Promise<CollectLinksOut
       );
     }
     const clickErrors: Array<{ strategy: string; error: string }> = [];
+    const attemptedStrategies: string[] = [];
     let safeUrl = '';
     let urlAfterClick = '';
     let navWaitMs = 0;
-    for (const point of clickPoints.slice(0, 3)) {
-      const strategy = `point:${String(point?.name || 'unknown')}`;
-      const clickRes = await performCoordinateClick(point);
-      if (!clickRes.ok) {
-        const errText = String(clickRes.error || 'unknown_click_error');
-        clickErrors.push({ strategy, error: errText });
-        console.warn(`[Phase2Collect] Click strategy failed: strategy=${strategy} reason=${errText}`);
-        continue;
-      }
+
+    const focusBeforeProtocol = await readFocusState().catch(() => ({ hasFocus: false, activeLabel: 'unknown' }));
+    console.log(`[Phase2Collect] Click decision: strategy=container_protocol mode=protocol focus=${focusBeforeProtocol.hasFocus} active=${focusBeforeProtocol.activeLabel}`);
+    attemptedStrategies.push('container_protocol');
+    const protocolRes = await performContainerClick(domIndex, false);
+    if (!protocolRes.ok) {
+      const errText = String(protocolRes.error || 'container_protocol_failed');
+      clickErrors.push({ strategy: 'container_protocol', error: errText });
+      console.warn(`[Phase2Collect] Click strategy failed: strategy=container_protocol reason=${errText}`);
+    } else {
       await delay(450);
       const navProbe = await waitForSafeExploreUrl(4800, 250);
       navWaitMs += Number(navProbe.waitedMs || 0);
       if (navProbe.lastUrl) urlAfterClick = navProbe.lastUrl;
       if (navProbe.safeUrl) {
         safeUrl = navProbe.safeUrl;
-        break;
+      } else {
+        await appendTrace({
+          type: 'click_strategy_miss',
+          ts: new Date().toISOString(),
+          domIndex,
+          strategy: 'container_protocol',
+          url: navProbe.lastUrl,
+          waitedMs: navProbe.waitedMs,
+        });
+        console.warn(
+          `[Phase2Collect] Click strategy no-open: strategy=container_protocol url=${String(navProbe.lastUrl || '')} waitedMs=${Number(navProbe.waitedMs || 0)}`,
+        );
       }
+    }
 
-      await appendTrace({
-        type: 'click_strategy_miss',
-        ts: new Date().toISOString(),
-        domIndex,
-        strategy,
-        point,
-        url: navProbe.lastUrl,
-        waitedMs: navProbe.waitedMs,
-      });
-      console.warn(
-        `[Phase2Collect] Click strategy no-open: strategy=${strategy} url=${String(navProbe.lastUrl || '')} waitedMs=${Number(navProbe.waitedMs || 0)}`,
-      );
+    if (!safeUrl) {
+      await ensureBrowserFocus('mouse_center');
+      for (const point of clickPoints.slice(0, 3)) {
+        const strategy = `point:${String(point?.name || 'unknown')}`;
+        attemptedStrategies.push(strategy);
+        const clickRes = await performCoordinateClick(point);
+        if (!clickRes.ok) {
+          const errText = String(clickRes.error || 'unknown_click_error');
+          clickErrors.push({ strategy, error: errText });
+          console.warn(`[Phase2Collect] Click strategy failed: strategy=${strategy} reason=${errText}`);
+          continue;
+        }
+        await delay(450);
+        const navProbe = await waitForSafeExploreUrl(4800, 250);
+        navWaitMs += Number(navProbe.waitedMs || 0);
+        if (navProbe.lastUrl) urlAfterClick = navProbe.lastUrl;
+        if (navProbe.safeUrl) {
+          safeUrl = navProbe.safeUrl;
+          break;
+        }
 
-      // When detail opened but URL lacks xsec_token, exit and retry next strategy.
-      if (navProbe.lastUrl.includes('/explore/') && !navProbe.lastUrl.includes('xsec_token=')) {
-        await controllerAction('keyboard:press', { profileId: profile, key: 'Escape' }, unifiedApiUrl).catch(() => {});
-        await delay(500);
+        await appendTrace({
+          type: 'click_strategy_miss',
+          ts: new Date().toISOString(),
+          domIndex,
+          strategy,
+          point,
+          url: navProbe.lastUrl,
+          waitedMs: navProbe.waitedMs,
+        });
+        console.warn(
+          `[Phase2Collect] Click strategy no-open: strategy=${strategy} url=${String(navProbe.lastUrl || '')} waitedMs=${Number(navProbe.waitedMs || 0)}`,
+        );
+
+        // When detail opened but URL lacks xsec_token, exit and retry next strategy.
+        if (navProbe.lastUrl.includes('/explore/') && !navProbe.lastUrl.includes('xsec_token=')) {
+          await controllerAction('keyboard:press', { profileId: profile, key: 'Escape' }, unifiedApiUrl).catch(() => {});
+          await delay(500);
+        }
       }
     }
 
@@ -989,7 +1091,9 @@ export async function execute(input: CollectLinksInput): Promise<CollectLinksOut
     if (clickPoints.length === 0) {
       clickErrors.push({ strategy: 'point:none', error: 'no_click_point' });
     }
-    const clickStrategies = clickPoints.slice(0, 3).map((p) => `point:${String(p?.name || 'unknown')}`);
+    const clickStrategies = attemptedStrategies.length > 0
+      ? attemptedStrategies
+      : clickPoints.slice(0, 3).map((p) => `point:${String(p?.name || 'unknown')}`);
     console.log(`[Phase2Collect] click phase took ${clickPhaseMs}ms strategies=${clickStrategies.join('->')}`);
 
     // Rigid post-click gate: must have /explore/ and xsec_token

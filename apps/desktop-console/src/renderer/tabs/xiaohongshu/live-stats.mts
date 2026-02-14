@@ -426,6 +426,34 @@ export function createLiveStatsController(opts: LiveStatsOptions): LiveStatsCont
       shardStat.updatedAt = Date.now();
     }
 
+    const clickDecision = text.match(/\[Phase2Collect\]\s*Click decision:\s*strategy=([a-z0-9:_-]+)\s+mode=([a-z0-9:_-]+)\s+focus=(\w+)\s+active=([^\s]+)/i);
+    if (clickDecision && shardStat) {
+      const strategy = String(clickDecision[1] || '').trim() || 'unknown';
+      const mode = String(clickDecision[2] || '').trim() || 'unknown';
+      const focus = String(clickDecision[3] || '').trim() || 'unknown';
+      const active = formatLineText(String(clickDecision[4] || '').trim(), 80) || 'unknown';
+      shardStat.phase = 'Phase2Collect';
+      shardStat.status = 'running';
+      shardStat.action = `Click decision: ${strategy} (${mode})`;
+      shardStat.anomaly = `focus=${focus} active=${active}`;
+      shardStat.updatedAt = Date.now();
+    }
+
+    const focusEnsure = text.match(/\[Phase2Collect\]\s*Focus ensure:\s*strategy=([a-z0-9:_-]+)\s+ok=(\w+)\s+beforeFocus=(\w+)\s+beforeActive=([^\s]+)\s+afterFocus=(\w+)\s+afterActive=([^\s]+)/i);
+    if (focusEnsure && shardStat) {
+      const strategy = String(focusEnsure[1] || '').trim() || 'unknown';
+      const ok = String(focusEnsure[2] || '').trim() || 'unknown';
+      const beforeFocus = String(focusEnsure[3] || '').trim() || 'unknown';
+      const beforeActive = formatLineText(String(focusEnsure[4] || '').trim(), 80) || 'unknown';
+      const afterFocus = String(focusEnsure[5] || '').trim() || 'unknown';
+      const afterActive = formatLineText(String(focusEnsure[6] || '').trim(), 80) || 'unknown';
+      shardStat.phase = 'Phase2Collect';
+      shardStat.status = 'running';
+      shardStat.action = `Focus ensure: ${strategy} ok=${ok}`;
+      shardStat.anomaly = `before=${beforeFocus}/${beforeActive} after=${afterFocus}/${afterActive}`;
+      shardStat.updatedAt = Date.now();
+    }
+
     const clickStrategyFailed = text.match(/\[Phase2Collect\]\s*Click strategy failed:\s*strategy=([a-z_]+)\s+reason=(.+)$/i);
     if (clickStrategyFailed && shardStat) {
       const strategy = String(clickStrategyFailed[1] || '').trim() || 'unknown';
@@ -446,6 +474,29 @@ export function createLiveStatsController(opts: LiveStatsOptions): LiveStatsCont
       shardStat.status = 'running';
       shardStat.action = `点击已发出但未开帖（${strategy}，${waitedMs}ms）`;
       shardStat.anomaly = `阻断原因：no explore/xsec after click (url=${url})`;
+      shardStat.updatedAt = Date.now();
+    }
+
+    const protocolFill = text.match(/\[Phase2Search\]\s*protocol fill:\s*selector="([^"]+)"\s*success=(\w+)(?:\s+error=(.+))?/i);
+    if (protocolFill && shardStat) {
+      const selector = formatLineText(String(protocolFill[1] || '').trim(), 80) || 'n/a';
+      const ok = String(protocolFill[2] || '').trim() || 'unknown';
+      const err = formatLineText(String(protocolFill[3] || '').trim(), 120) || '';
+      shardStat.phase = 'Phase2Search';
+      shardStat.status = ok === 'true' ? 'running' : 'error';
+      shardStat.action = `Protocol fill (browser:fill)=${ok}`;
+      shardStat.anomaly = err ? `selector=${selector} error=${err}` : `selector=${selector}`;
+      shardStat.updatedAt = Date.now();
+    }
+
+    const protocolType = text.match(/\[Phase2Search\]\s*protocol input:\s*container_type\s*success=(\w+)(?:\s+error=(.+))?/i);
+    if (protocolType && shardStat) {
+      const ok = String(protocolType[1] || '').trim() || 'unknown';
+      const err = formatLineText(String(protocolType[2] || '').trim(), 120) || '';
+      shardStat.phase = 'Phase2Search';
+      shardStat.status = ok === 'true' ? 'running' : 'error';
+      shardStat.action = `Protocol input (container:type)=${ok}`;
+      shardStat.anomaly = err ? `error=${err}` : '';
       shardStat.updatedAt = Date.now();
     }
 

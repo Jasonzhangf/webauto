@@ -299,7 +299,46 @@ async function canSubmitSearch(
 }
 
 async function browserFillSearchInputValue(profile: string, unifiedApiUrl: string, keyword: string, searchInputContainerId: string) {
-  // System-level input only (no browser:fill/execute)
+  const selector = "#search-input input, #search-input textarea, #search-input [contenteditable='true'], input[type='search'], input[placeholder*='鎼滅储'], input[placeholder*='鍏抽敭'], input[aria-label*='鎼滅储']";
+  const fillRes = await controllerAction(
+    'browser:fill',
+    { profile, selector, text: keyword },
+    unifiedApiUrl,
+  ).catch((e: any) => ({ success: false, error: String(e?.message || e || 'browser_fill_failed') }));
+  const fillOk = Boolean((fillRes as any)?.success ?? (fillRes as any)?.ok ?? false);
+  const fillErr = String((fillRes as any)?.error || '').trim();
+  console.log(`[Phase2Search] protocol fill: selector="${selector}" success=${fillOk}${fillErr ? ` error=${fillErr}` : ''}`);
+  if (fillOk) {
+    return { success: true, mode: 'browser:fill', selector } as any;
+  }
+
+  if (searchInputContainerId !== 'dom_fallback_search_input') {
+    const typeRes = await controllerAction(
+      'container:operation',
+      {
+        containerId: searchInputContainerId,
+        operationId: 'type',
+        sessionId: profile,
+        config: {
+          text: keyword,
+          value: keyword,
+          clear_first: true,
+          human_typing: true,
+          pause_after: 300,
+        },
+      },
+      unifiedApiUrl,
+    ).catch((e: any) => ({ success: false, error: String(e?.message || e || 'container_type_failed') }));
+    const typeOk = Boolean((typeRes as any)?.success ?? (typeRes as any)?.ok ?? false);
+    const typeErr = String((typeRes as any)?.error || '').trim();
+    console.log(`[Phase2Search] protocol input: container_type success=${typeOk}${typeErr ? ` error=${typeErr}` : ''}`);
+    if (typeOk) {
+      const ok = await canSubmitSearch(profile, unifiedApiUrl, keyword).catch(() => ({ ok: false }));
+      if (ok?.ok) return { success: true, mode: 'container:type', selector } as any;
+    }
+  }
+
+  // Fallback: system-level input
   if (searchInputContainerId !== 'dom_fallback_search_input') {
     await controllerAction(
       'container:operation',
@@ -313,7 +352,7 @@ async function browserFillSearchInputValue(profile: string, unifiedApiUrl: strin
   await controllerAction('keyboard:type', { profileId: profile, text: keyword }, unifiedApiUrl).catch(() => {});
   await delay(200);
   const ok = await canSubmitSearch(profile, unifiedApiUrl, keyword).catch(() => ({ ok: false }));
-  return { success: !!ok?.ok, mode: 'keyboard:type' } as any;
+  return { success: !!ok?.ok, mode: 'keyboard:type', selector } as any;
 }
 
 
