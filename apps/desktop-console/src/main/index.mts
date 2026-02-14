@@ -285,8 +285,34 @@ function generateRunId() {
   return `run_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`;
 }
 
-function splitLines(buf: Buffer) {
-  return buf.toString('utf8').split(/\r?\n/g).filter(Boolean);
+type StreamEventType = 'stdout' | 'stderr';
+
+function createLineEmitter(runId: string, type: StreamEventType) {
+  let pending = '';
+
+  const emit = (line: string) => {
+    const normalized = String(line || '').replace(/\r$/, '');
+    if (!normalized) return;
+    sendEvent({ type, runId, line: normalized, ts: now() });
+  };
+
+  return {
+    push(chunk: Buffer) {
+      pending += chunk.toString('utf8');
+      let idx = pending.indexOf('\n');
+      while (idx >= 0) {
+        const line = pending.slice(0, idx);
+        pending = pending.slice(idx + 1);
+        emit(line);
+        idx = pending.indexOf('\n');
+      }
+    },
+    flush() {
+      if (!pending) return;
+      emit(pending);
+      pending = '';
+    },
+  };
 }
 
 function resolveNodeBin() {
@@ -351,11 +377,14 @@ async function spawnCommand(spec: SpawnSpec) {
         runs.set(runId, { child, title: spec.title, startedAt: now() });
         sendEvent({ type: 'started', runId, title: spec.title, pid: child.pid ?? -1, ts: now() });
 
+        const stdoutLines = createLineEmitter(runId, 'stdout');
+        const stderrLines = createLineEmitter(runId, 'stderr');
+
         child.stdout?.on('data', (chunk: Buffer) => {
-          splitLines(chunk).forEach((line) => sendEvent({ type: 'stdout', runId, line, ts: now() }));
+          stdoutLines.push(chunk);
         });
         child.stderr?.on('data', (chunk: Buffer) => {
-          splitLines(chunk).forEach((line) => sendEvent({ type: 'stderr', runId, line, ts: now() }));
+          stderrLines.push(chunk);
         });
         child.on('error', (err: any) => {
           sendEvent({ type: 'stderr', runId, line: `[spawn-error] ${err?.message || String(err)}`, ts: now() });
@@ -366,6 +395,8 @@ async function spawnCommand(spec: SpawnSpec) {
           exitSignal = signal;
         });
         child.on('close', (code, signal) => {
+          stdoutLines.flush();
+          stderrLines.flush();
           finalize(exitCode ?? code ?? null, exitSignal ?? signal ?? null);
         });
       }),
