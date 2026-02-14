@@ -70,14 +70,15 @@ test('setStatus changes status and sets completedAt for terminal states', () => 
   taskStateRegistry.deleteTask('test-run-4');
 });
 
-test('getEvents returns events since timestamp', () => {
+test('getEvents returns events since timestamp', async () => {
   const runId = 'test-run-5';
   taskStateRegistry.createTask({ runId, profileId: 'p1', keyword: 'test' });
   taskStateRegistry.pushEvent(runId, 'event1', {});
+  await new Promise(r => setTimeout(r, 10)); // Ensure different timestamps
   taskStateRegistry.pushEvent(runId, 'event2', {});
   const all = taskStateRegistry.getEvents(runId);
   assert.equal(all.length, 2);
-  const since = taskStateRegistry.getEvents(runId, all[0].timestamp);
+  const since = taskStateRegistry.getEvents(runId, all[0].timestamp + 1);
   assert.equal(since.length, 1);
   assert.equal(since[0].type, 'event2');
   taskStateRegistry.deleteTask(runId);

@@ -27,6 +27,10 @@ jobs:
         shell: bash
         run: npm ci
 
+      - name: Build services
+        shell: bash
+        run: npm run build:services
+
       - name: Tests
         shell: bash
         run: npm test
