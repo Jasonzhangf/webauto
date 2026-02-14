@@ -229,30 +229,38 @@ export async function execute(input: CollectLinksInput): Promise<CollectLinksOut
 
   let preClickStallCount = 0;
   const preClickStallThreshold = 12;
-  const recoverFromPreClickStall = async (reason: string, extra: Record<string, any> = {}) => {
+  const recoverFromPreClickStall = async (
+    reason: string,
+    extra: Record<string, any> = {},
+    options: { allowScroll?: boolean } = {},
+  ) => {
     preClickStallCount += 1;
     if (preClickStallCount < preClickStallThreshold) return;
 
+    const allowScroll = options.allowScroll === true;
     console.log(
-      `[Phase2Collect] pre-click stall ${preClickStallCount}/${preClickStallThreshold} reason=${reason}, forcing scroll`,
+      `[Phase2Collect] pre-click stall ${preClickStallCount}/${preClickStallThreshold} reason=${reason}, ` +
+        (allowScroll ? 'forcing scroll' : 'no scroll (picker decides)'),
     );
     await appendTrace({
-      type: 'pre_click_stall_scroll',
+      type: allowScroll ? 'pre_click_stall_scroll' : 'pre_click_stall_noop',
       ts: new Date().toISOString(),
       reason,
       stallCount: preClickStallCount,
       ...extra,
     });
 
-    await controllerAction('container:operation', {
-      containerId: 'xiaohongshu_search.search_result_list',
-      operationId: 'scroll',
-      sessionId: profile,
-      config: { direction: 'down', amount: 700 },
-    }, unifiedApiUrl);
-    scrollCount++;
+    if (allowScroll) {
+      await controllerAction('container:operation', {
+        containerId: 'xiaohongshu_search.search_result_list',
+        operationId: 'scroll',
+        sessionId: profile,
+        config: { direction: 'down', amount: 360 },
+      }, unifiedApiUrl);
+      scrollCount++;
+      await delay(400);
+    }
     preClickStallCount = 0;
-    await delay(600);
   };
 
   const readCurrentUrl = async () =>
@@ -562,19 +570,50 @@ export async function execute(input: CollectLinksInput): Promise<CollectLinksOut
       debug?: { total: number; pad: number; viewportH: number };
     };
 
-    const pick: PickResult = await controllerAction('browser:execute', {
+  const pick: PickResult = await controllerAction('browser:execute', {
       profile,
       script: `(function(){
   const sel = ${JSON.stringify(itemSelector)};
   const seen = new Set(${JSON.stringify(Array.from(seenExploreIds))});
   const nodes = Array.from(document.querySelectorAll(sel));
-  const pad = 8;
+  const pad = 10;
   const vh = window.innerHeight;
 
   function clampAmount(v){
     const n = Math.ceil(Number(v) || 0);
-    if (n <= 0) return 200;
-    return Math.min(800, n);
+    if (n <= 0) return 120;
+    return Math.max(80, Math.min(360, n));
+  }
+
+  function normalizeId(raw){
+    const v = String(raw || '').trim();
+    if (!v) return '';
+    const m = v.match(/\\/explore\\/([a-f0-9]+)/i);
+    if (m && m[1]) return m[1].toLowerCase();
+    if (/^[a-f0-9]{8,}$/i.test(v)) return v.toLowerCase();
+    return '';
+  }
+
+  function extractNoteId(node){
+    if (!node) return '';
+    const direct =
+      node.getAttribute?.('data-note-id') ||
+      node.getAttribute?.('data-id') ||
+      node.getAttribute?.('href') ||
+      node.dataset?.noteId ||
+      '';
+    const directId = normalizeId(direct);
+    if (directId) return directId;
+
+    const nestedNote = node.querySelector?.('[data-note-id]');
+    if (nestedNote) {
+      const nestedId = normalizeId(nestedNote.getAttribute?.('data-note-id') || '');
+      if (nestedId) return nestedId;
+    }
+
+    const exploreA = node.querySelector?.('a[href*="/explore/"]');
+    const exploreHref = exploreA ? (exploreA.getAttribute('href') || '') : '';
+    return normalizeId(exploreHref);
   }
 
   const candidates = [];
@@ -583,17 +622,14 @@ export async function execute(input: CollectLinksInput): Promise<CollectLinksOut
 
   for (let i = 0; i < nodes.length; i++) {
     const node = nodes[i];
-    const exploreA = node.querySelector('a[href*="/explore/"]');
-    const exploreHref = exploreA ? (exploreA.getAttribute('href') || '') : '';
-    const m = exploreHref.match(/\\/explore\\/([a-f0-9]+)/);
-    const exploreId = m ? m[1] : '';
+    const exploreId = extractNoteId(node);
     if (!exploreId || seen.has(exploreId)) continue;
 
     const r = node.getBoundingClientRect();
     if (!(r.width > 0 && r.height > 0)) continue;
 
     if (r.top < pad) {
-      const amount = clampAmount((pad - r.top) + 24);
+      const amount = clampAmount((pad - r.top) + 12);
       if (!scrollUp || amount > scrollUp.amount) {
         scrollUp = {
           direction: 'up',
@@ -608,7 +644,7 @@ export async function execute(input: CollectLinksInput): Promise<CollectLinksOut
     }
 
     if (r.bottom > (vh - pad)) {
-      const amount = clampAmount((r.bottom - (vh - pad)) + 24);
+      const amount = clampAmount((r.bottom - (vh - pad)) + 12);
       if (!scrollDown || amount > scrollDown.amount) {
         scrollDown = {
           direction: 'down',
@@ -630,8 +666,8 @@ export async function execute(input: CollectLinksInput): Promise<CollectLinksOut
   }
 
   if (candidates.length > 0) {
-    const randomIdx = Math.floor(Math.random() * candidates.length);
-    const chosen = candidates[randomIdx];
+    candidates.sort((a, b) => a.rect.top - b.rect.top);
+    const chosen = candidates[0];
     return {
       action: 'ok',
       index: chosen.index,
@@ -642,8 +678,8 @@ export async function execute(input: CollectLinksInput): Promise<CollectLinksOut
         pad,
         viewportH: vh,
         candidatesCount: candidates.length,
-        pick: 'random',
-        chosenIdx: randomIdx,
+        pick: 'topmost',
+        chosenIdx: 0,
       },
     };
   }
@@ -667,7 +703,7 @@ export async function execute(input: CollectLinksInput): Promise<CollectLinksOut
 
   return {
     action: 'scroll',
-    scroll: { direction: 'down', amount: 800, reason: 'no_unseen_candidates' },
+    scroll: { direction: 'down', amount: 360, reason: 'no_unseen_candidates' },
     debug: { total: nodes.length, pad, viewportH: vh, candidatesCount: 0 },
   };
 })()`,
@@ -911,7 +947,8 @@ export async function execute(input: CollectLinksInput): Promise<CollectLinksOut
     const preClickVerifyRaw = await controllerAction('browser:execute', {
       profile,
       script: `(function(){
-        const items = document.querySelectorAll('.note-item, [data-note-id], a[href*="/explore/"]');
+        const sel = ${JSON.stringify(itemSelector)};
+        const items = document.querySelectorAll(sel);
         if (${domIndex} >= items.length) return {ok:false, reason:'index_out_of_range'};
         const el = items[${domIndex}];
         const rect = el.getBoundingClientRect();
@@ -940,12 +977,34 @@ export async function execute(input: CollectLinksInput): Promise<CollectLinksOut
             clickPoints.push({ name: p.name, x: Math.round(p.x), y: Math.round(p.y) });
           }
         }
-        const noteLike =
-          el.getAttribute('data-note-id') ||
-          el.getAttribute('href') ||
-          (el.querySelector && el.querySelector('a[href*="/explore/"]')
-            ? el.querySelector('a[href*="/explore/"]').getAttribute('href')
-            : '') || '';
+        const normalizeId = (raw) => {
+          const v = String(raw || '').trim();
+          if (!v) return '';
+          const m = v.match(/\\/explore\\/([a-f0-9]+)/i);
+          if (m && m[1]) return m[1].toLowerCase();
+          if (/^[a-f0-9]{8,}$/i.test(v)) return v.toLowerCase();
+          return '';
+        };
+        const readNoteId = (node) => {
+          if (!node) return '';
+          const direct =
+            node.getAttribute?.('data-note-id') ||
+            node.getAttribute?.('data-id') ||
+            node.getAttribute?.('href') ||
+            node.dataset?.noteId ||
+            '';
+          const directId = normalizeId(direct);
+          if (directId) return directId;
+          const nested = node.querySelector?.('[data-note-id]');
+          if (nested) {
+            const nestedId = normalizeId(nested.getAttribute?.('data-note-id') || '');
+            if (nestedId) return nestedId;
+          }
+          const exploreA = node.querySelector?.('a[href*="/explore/"]');
+          const exploreHref = exploreA ? (exploreA.getAttribute('href') || '') : '';
+          return normalizeId(exploreHref);
+        };
+        const noteLike = readNoteId(el) || '';
         return {
           ok: hitOk,
           reason: hitOk ? 'hit_test_pass' : 'hit_test_fail',
@@ -965,7 +1024,14 @@ export async function execute(input: CollectLinksInput): Promise<CollectLinksOut
       await delay(300);
       continue; // Re-pick next iteration
     }
-    const preClickNoteId = normalizeNoteId(String(preClickVerify?.noteId || '')) || '';
+    let preClickNoteId = normalizeNoteId(String(preClickVerify?.noteId || '')) || '';
+    if (!preClickNoteId && pick.exploreId) {
+      preClickNoteId = normalizeNoteId(String(pick.exploreId || '')) || '';
+      if (preClickNoteId) {
+        console.warn(`[Phase2Collect] Rigid gate soft-pass index=${domIndex}: missing_note_id, fallback to pick.exploreId`);
+        await appendTrace({ type: 'rigid_gate_soft_pass', ts: new Date().toISOString(), domIndex, reason: 'missing_note_id_fallback', noteId: preClickNoteId });
+      }
+    }
     if (!preClickNoteId) {
       console.warn(`[Phase2Collect] Rigid gate blocked click index=${domIndex}: missing_note_id`);
       await appendTrace({ type: 'skip_missing_noteid_gate', ts: new Date().toISOString(), domIndex });
