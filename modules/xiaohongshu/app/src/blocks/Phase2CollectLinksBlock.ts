@@ -253,6 +253,66 @@ export async function execute(input: CollectLinksInput): Promise<CollectLinksOut
     await delay(600);
   };
 
+  const readCurrentUrl = async () =>
+    controllerAction('browser:execute', {
+      profile,
+      script: 'window.location.href',
+    }, unifiedApiUrl).then((res) => String(res?.result || res?.data?.result || ''));
+
+  const waitForSafeExploreUrl = async (timeoutMs = 4800, intervalMs = 250) => {
+    const startMs = Date.now();
+    let lastUrl = '';
+    while (Date.now() - startMs < timeoutMs) {
+      const url = await readCurrentUrl();
+      if (url) lastUrl = url;
+      if (url.includes('/explore/') && url.includes('xsec_token=')) {
+        return { safeUrl: url, lastUrl: url, waitedMs: Date.now() - startMs };
+      }
+      await delay(intervalMs);
+    }
+    return { safeUrl: '', lastUrl, waitedMs: Date.now() - startMs };
+  };
+
+  type ClickStrategy = 'mouse_center' | 'container_system' | 'container_protocol';
+  const performOpenDetailClick = async (
+    strategy: ClickStrategy,
+    domIndex: number,
+    gateRect: any,
+  ): Promise<{ ok: boolean; error?: string }> => {
+    try {
+      if (strategy === 'mouse_center') {
+        if (!gateRect || gateRect.left === undefined || gateRect.top === undefined) {
+          return { ok: false, error: 'missing_gate_rect' };
+        }
+        const cx = Math.round((Number(gateRect.left) + Number(gateRect.right)) / 2);
+        const cy = Math.round((Number(gateRect.top) + Number(gateRect.bottom)) / 2);
+        await controllerAction('mouse:click', { profileId: profile, x: cx, y: cy, clicks: 1 }, unifiedApiUrl);
+        return { ok: true };
+      }
+
+      const useSystemMouse = strategy === 'container_system';
+      const clickRes = await controllerAction('container:operation', {
+        containerId: 'xiaohongshu_search.search_result_item',
+        operationId: 'click',
+        sessionId: profile,
+        config: {
+          index: domIndex,
+          target: 'a[href*="/explore/"]',
+          useSystemMouse,
+          visibleOnly: true,
+        },
+        timeoutMs: 20000,
+      }, unifiedApiUrl).catch((e: any) => ({ success: false, error: String(e?.message || e || 'unknown') }));
+
+      if (clickRes?.success === false) {
+        return { ok: false, error: String(clickRes?.error || 'container_click_failed') };
+      }
+      return { ok: true };
+    } catch (e: any) {
+      return { ok: false, error: String(e?.message || e || 'click_failed') };
+    }
+  };
+
   // Updated by ensureOnExpectedSearch once we confirmed we are on the correct search_result.
   // Used as a safe fallback to return from detail pages without triggering a new search.
   let expectedSearchUrl = '';
@@ -834,9 +894,11 @@ export async function execute(input: CollectLinksInput): Promise<CollectLinksOut
     }, unifiedApiUrl);
     const preClickVerify = preClickVerifyRaw?.data?.result ?? preClickVerifyRaw?.result ?? preClickVerifyRaw?.data ?? preClickVerifyRaw ?? {ok:false};
 
-    if (!preClickVerify?.ok) {
-      console.warn(`[Phase2Collect] Rigid gate blocked click index=${domIndex}: ${preClickVerify?.reason}`);
-      await recoverFromPreClickStall('rigid_gate_blocked', { domIndex, gateReason: preClickVerify?.reason || 'unknown' });
+    const preClickReason = String(preClickVerify?.reason || 'unknown');
+    const softHitTestPass = !preClickVerify?.ok && preClickReason === 'hit_test_fail';
+    if (!preClickVerify?.ok && !softHitTestPass) {
+      console.warn(`[Phase2Collect] Rigid gate blocked click index=${domIndex}: ${preClickReason}`);
+      await recoverFromPreClickStall('rigid_gate_blocked', { domIndex, gateReason: preClickReason });
       await delay(300);
       continue; // Re-pick next iteration
     }
@@ -855,58 +917,67 @@ export async function execute(input: CollectLinksInput): Promise<CollectLinksOut
       await delay(80);
       continue;
     }
-    console.log(`[Phase2Collect] Rigid gate passed index=${domIndex}, hit-test ok noteId=${preClickNoteId}`);
-
-    // Phase-based timeout tracking.
-    // Click by pre-verified rect center to avoid index re-resolution drift between pick() and click().
-    const gateRect = preClickVerify?.rect || lastRect;
-    const clickStartMs = Date.now();
-    let clickError = '';
-    if (gateRect && gateRect.left !== undefined && gateRect.top !== undefined) {
-      const cx = Math.round((Number(gateRect.left) + Number(gateRect.right)) / 2);
-      const cy = Math.round((Number(gateRect.top) + Number(gateRect.bottom)) / 2);
-      try {
-        await controllerAction('mouse:click', { profileId: profile, x: cx, y: cy, clicks: 1 }, unifiedApiUrl);
-      } catch (e: any) {
-        clickError = String(e?.message || e || 'mouse_click_failed');
-      }
+    if (softHitTestPass) {
+      console.warn(`[Phase2Collect] Rigid gate soft-pass index=${domIndex}: hit_test_fail, continue with fallback click strategies`);
+      await appendTrace({ type: 'rigid_gate_soft_pass', ts: new Date().toISOString(), domIndex, reason: preClickReason, noteId: preClickNoteId });
     } else {
-      clickError = 'missing_gate_rect';
+      console.log(`[Phase2Collect] Rigid gate passed index=${domIndex}, hit-test ok noteId=${preClickNoteId}`);
     }
 
-    if (clickError) {
-      console.warn(`[Phase2Collect] 点击失败 index=${domIndex} err=${clickError}，尝试容器点击兜底`);
-      const fallbackResult = await controllerAction('container:operation', {
-        containerId: 'xiaohongshu_search.search_result_item',
-        operationId: 'click',
-        sessionId: profile,
-        config: { index: domIndex, useSystemMouse: true, visibleOnly: true },
-        timeoutMs: 20000,
-      }, unifiedApiUrl).catch((e: any) => ({ success: false, error: String(e?.message || e || 'unknown') }));
-      if (fallbackResult?.success === false) {
-        await recoverFromPreClickStall('click_failed', { domIndex, clickError, fallbackError: fallbackResult?.error || 'unknown' });
+    // Phase-based timeout tracking.
+    // Click with multiple strategies and only accept if URL has /explore/ + xsec_token.
+    const gateRect = preClickVerify?.rect || lastRect;
+    const clickStartMs = Date.now();
+    const clickStrategies: ClickStrategy[] = softHitTestPass
+      ? ['container_system', 'mouse_center', 'container_protocol']
+      : ['mouse_center', 'container_system', 'container_protocol'];
+    const clickErrors: Array<{ strategy: ClickStrategy; error: string }> = [];
+    let safeUrl = '';
+    let urlAfterClick = '';
+    let navWaitMs = 0;
+    for (const strategy of clickStrategies) {
+      const clickRes = await performOpenDetailClick(strategy, domIndex, gateRect);
+      if (!clickRes.ok) {
+        const errText = String(clickRes.error || 'unknown_click_error');
+        clickErrors.push({ strategy, error: errText });
+        console.warn(`[Phase2Collect] Click strategy failed: strategy=${strategy} reason=${errText}`);
         continue;
+      }
+      await delay(450);
+      const navProbe = await waitForSafeExploreUrl(4800, 250);
+      navWaitMs += Number(navProbe.waitedMs || 0);
+      if (navProbe.lastUrl) urlAfterClick = navProbe.lastUrl;
+      if (navProbe.safeUrl) {
+        safeUrl = navProbe.safeUrl;
+        break;
+      }
+
+      await appendTrace({
+        type: 'click_strategy_miss',
+        ts: new Date().toISOString(),
+        domIndex,
+        strategy,
+        url: navProbe.lastUrl,
+        waitedMs: navProbe.waitedMs,
+      });
+      console.warn(
+        `[Phase2Collect] Click strategy no-open: strategy=${strategy} url=${String(navProbe.lastUrl || '')} waitedMs=${Number(navProbe.waitedMs || 0)}`,
+      );
+
+      // When detail opened but URL lacks xsec_token, exit and retry next strategy.
+      if (navProbe.lastUrl.includes('/explore/') && !navProbe.lastUrl.includes('xsec_token=')) {
+        await controllerAction('keyboard:press', { profileId: profile, key: 'Escape' }, unifiedApiUrl).catch(() => {});
+        await delay(500);
       }
     }
 
     const clickPhaseMs = Date.now() - clickStartMs;
-    console.log(`[Phase2Collect] click phase took ${clickPhaseMs}ms`);
-    await delay(1800);
-
-    // Phase: Navigation validation
-    const navStartMs = Date.now();
-    await delay(1200);
-    let urlAfterClick = await controllerAction('browser:execute', {
-      profile,
-      script: 'window.location.href'
-    }, unifiedApiUrl).then(res => res?.result || res?.data?.result || '');
-    const navPhaseMs = Date.now() - navStartMs;
-    console.log(`[Phase2Collect] nav phase took ${navPhaseMs}ms, url=${urlAfterClick.slice(0,80)}`);
+    console.log(`[Phase2Collect] click phase took ${clickPhaseMs}ms strategies=${clickStrategies.join('->')}`);
 
     // Rigid post-click gate: must have /explore/ and xsec_token
-    const hasExplore = urlAfterClick.includes('/explore/');
-    const hasXsec = urlAfterClick.includes('xsec_token=');
-    if (!hasExplore || !hasXsec) {
+    if (!safeUrl) {
+      const hasExplore = urlAfterClick.includes('/explore/');
+      const hasXsec = urlAfterClick.includes('xsec_token=');
       console.warn(`[Phase2Collect] Post-click gate FAILED: explore=${hasExplore} xsec=${hasXsec}, will retry same index`);
       await appendTrace({
         type: 'click_no_xsec_retry',
@@ -914,8 +985,11 @@ export async function execute(input: CollectLinksInput): Promise<CollectLinksOut
         index: domIndex,
         url: urlAfterClick,
         clickPhaseMs,
-        navPhaseMs,
+        navWaitMs,
+        clickStrategies,
+        clickErrors,
       });
+      await recoverFromPreClickStall('click_no_xsec_retry', { domIndex, hasExplore, hasXsec, clickErrors });
       // Back to search results if stuck in detail without xsec
       if (!urlAfterClick.includes('search_result')) {
         await controllerAction('keyboard:press', { profileId: profile, key: 'Escape' }, unifiedApiUrl).catch(()=>{});
@@ -930,34 +1004,10 @@ export async function execute(input: CollectLinksInput): Promise<CollectLinksOut
       ts: new Date().toISOString(),
       attempt: attempts,
       domIndex,
-      urlAfterClick,
+      urlAfterClick: safeUrl,
+      clickPhaseMs,
+      navWaitMs,
     });
-
-    // 5. 等待详情页加载并获取安全 URL
-    let safeUrl = '';
-    for (let i = 0; i < 20; i++) {
-      const url = await controllerAction('browser:execute', {
-        profile,
-        script: 'window.location.href'
-      }, unifiedApiUrl).then(res => res?.result || res?.data?.result || '');
-      
-      if (url.includes('/explore/') && url.includes('xsec_token')) {
-        safeUrl = url;
-        break;
-      }
-      await delay(500);
-    }
-
-    if (!safeUrl) {
-      console.warn(`[Phase2Collect] 未获取到 xsec_token URL，跳过 index=${domIndex}`);
-      // 尝试返回搜索页
-      await controllerAction('keyboard:press', {
-        profileId: profile,
-        key: 'Escape',
-      }, unifiedApiUrl);
-      await delay(1000);
-      continue;
-    }
 
     // 6. 校验 searchUrl（严格匹配 keyword）
     if (!isValidSearchUrl(searchUrl, keyword)) {

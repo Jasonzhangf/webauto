@@ -206,6 +206,16 @@ test('xiaohongshu live stats parser accepts rotated events files and phase2 prog
   assert.ok(live.includes("const likedTotalMatch = text.match(/likedTotal=(\\d+)\\s*\\/\\s*(\\d+)/i);"));
 });
 
+test('xiaohongshu live stats surfaces phase2 block and fatal reasons on board', async () => {
+  const { live } = await readAll();
+  assert.match(live, /Rigid gate blocked click index=/);
+  assert.match(live, /阻断原因：/);
+  assert.match(live, /Post-click gate FAILED/);
+  assert.match(live, /Click strategy failed:/);
+  assert.match(live, /Click strategy no-open:/);
+  assert.match(live, /Phase\\s\*2\\s\*失败/);
+});
+
 test('xiaohongshu layout and live stats include like-skip metrics', async () => {
   const { layout, entry, live } = await readAll();
   assert.match(layout, /点赞跳过：0/);

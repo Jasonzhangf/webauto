@@ -404,6 +404,61 @@ export function createLiveStatsController(opts: LiveStatsOptions): LiveStatsCont
       shardStat.updatedAt = Date.now();
     }
 
+    const rigidGateBlocked = text.match(/\[Phase2Collect\]\s*Rigid gate blocked click index=(\d+):\s*(.+)$/i);
+    if (rigidGateBlocked && shardStat) {
+      const idx = Number(rigidGateBlocked[1] || -1);
+      const reason = formatLineText(String(rigidGateBlocked[2] || '').trim(), 80) || 'unknown';
+      shardStat.phase = 'Phase2Collect';
+      shardStat.status = 'running';
+      shardStat.action = `开帖点击被阻断，自动重试（index=${idx >= 0 ? idx : '?'})`;
+      shardStat.anomaly = `阻断原因：${reason}`;
+      shardStat.updatedAt = Date.now();
+    }
+
+    const postClickGateFailed = text.match(/\[Phase2Collect\]\s*Post-click gate FAILED:\s*explore=(\w+)\s*xsec=(\w+)/i);
+    if (postClickGateFailed && shardStat) {
+      const hasExplore = String(postClickGateFailed[1] || '').toLowerCase() === 'true';
+      const hasXsec = String(postClickGateFailed[2] || '').toLowerCase() === 'true';
+      shardStat.phase = 'Phase2Collect';
+      shardStat.status = 'running';
+      shardStat.action = '开帖后校验未通过，正在切换点击策略';
+      shardStat.anomaly = `阻断原因：post-click gate failed (explore=${hasExplore} xsec=${hasXsec})`;
+      shardStat.updatedAt = Date.now();
+    }
+
+    const clickStrategyFailed = text.match(/\[Phase2Collect\]\s*Click strategy failed:\s*strategy=([a-z_]+)\s+reason=(.+)$/i);
+    if (clickStrategyFailed && shardStat) {
+      const strategy = String(clickStrategyFailed[1] || '').trim() || 'unknown';
+      const reason = formatLineText(String(clickStrategyFailed[2] || '').trim(), 120) || 'unknown';
+      shardStat.phase = 'Phase2Collect';
+      shardStat.status = 'running';
+      shardStat.action = `点击未执行（${strategy}）`;
+      shardStat.anomaly = `阻断原因：click dispatch failed (${reason})`;
+      shardStat.updatedAt = Date.now();
+    }
+
+    const clickStrategyNoOpen = text.match(/\[Phase2Collect\]\s*Click strategy no-open:\s*strategy=([a-z_]+)\s+url=(.+?)\s+waitedMs=(\d+)/i);
+    if (clickStrategyNoOpen && shardStat) {
+      const strategy = String(clickStrategyNoOpen[1] || '').trim() || 'unknown';
+      const url = formatLineText(String(clickStrategyNoOpen[2] || '').trim(), 100) || 'n/a';
+      const waitedMs = Number(clickStrategyNoOpen[3] || 0);
+      shardStat.phase = 'Phase2Collect';
+      shardStat.status = 'running';
+      shardStat.action = `点击已发出但未开帖（${strategy}，${waitedMs}ms）`;
+      shardStat.anomaly = `阻断原因：no explore/xsec after click (url=${url})`;
+      shardStat.updatedAt = Date.now();
+    }
+
+    const phase2Fatal = text.match(/(?:❌\s*)?Phase\s*2\s*失败[:：]\s*(.+)$/i);
+    if (phase2Fatal && shardStat) {
+      const reason = formatLineText(String(phase2Fatal[1] || '').trim(), 160);
+      shardStat.phase = 'Phase2Collect';
+      shardStat.status = 'error';
+      shardStat.action = 'Phase2 终止';
+      shardStat.anomaly = reason || 'Phase2 执行失败';
+      shardStat.updatedAt = Date.now();
+    }
+
     const likeGateMatch = text.match(/\[Phase3Interact\]\s*Like Gate:\s*(\d+)\s*\/\s*(\d+)\s*(✅|❌)?/i);
     if (likeGateMatch && shardStat) {
       const gateCurrent = Number(likeGateMatch[1] || 0);
