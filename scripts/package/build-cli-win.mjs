@@ -712,9 +712,17 @@ async function build() {
     process.exit(1);
   }
 
+  const buildInputs = [
+    'dist/services',
+    'dist/modules',
+    'dist/sharedmodule',
+    'dist/libs/browser/fingerprint-manager.js'
+  ];
+  const needsBuild = buildInputs.some((p) => !existsSync(join(ROOT, p)));
+
   // 1. 确保服务已编译
   log('检查编译产物...');
-  if (!existsSync(join(ROOT, 'dist/services'))) {
+  if (needsBuild) {
     log('编译服务代码...');
     exec('npm run build:services');
   }

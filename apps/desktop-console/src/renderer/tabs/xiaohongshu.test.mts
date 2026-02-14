@@ -178,6 +178,12 @@ test('xiaohongshu browser guide checks browser only once at startup', async () =
   assert.match(entry, /startupBrowserChecked = true;/);
 });
 
+test('xiaohongshu guide does not hard-block run button when not ready', async () => {
+  const { entry } = await readAll();
+  assert.match(entry, /startRunBtn\.textContent = allReady \? '开始运行' : '仍然开始运行';/);
+  assert.match(entry, /runBtn\.disabled = false/);
+});
+
 test('xiaohongshu run flow only consumes stdout/stderr from current run id', async () => {
   const { run } = await readAll();
   assert.match(run, /if \(!localRunId\) return;/);

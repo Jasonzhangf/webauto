@@ -70,8 +70,7 @@ const GUIDE_STATE_KEY = 'webauto.xhs.guideState.v1';
  }) as HTMLDivElement;
  const guideTitle = createEl('div', { style: 'font-weight:600; margin-bottom:8px; color:#dbeafe;' }, ['🧭 新用户引导']) as HTMLDivElement;
  const guideProgress = createEl('div', { style: 'font-size:12px; color:#8b93a6; margin-bottom:8px;' }, ['检查进度...']) as HTMLDivElement;
- guideCard.appendChild(guideTitle);
- guideCard.appendChild(guideProgress);
+ guideCard.appendChild(guideTitle); guideCard.appendChild(guideProgress);
  const browserStep = createEl('div', { style: 'margin-bottom:6px; padding:6px; background:#0f1419; border-radius:6px;' }) as HTMLDivElement;
  browserStep.appendChild(createEl('span', {}, ['1. ']));
  const browserStatus = createEl('span', { style: 'color:#f59e0b;' }, ['⏳ 检查浏览器']) as HTMLSpanElement;
@@ -88,8 +87,7 @@ const GUIDE_STATE_KEY = 'webauto.xhs.guideState.v1';
  const keywordStep = createEl('div', { style: 'margin-bottom:6px; padding:6px; background:#0f1419; border-radius:6px;' }) as HTMLDivElement;
  keywordStep.appendChild(createEl('span', {}, ['3. ']));
  const keywordStatus = createEl('span', { style: 'color:#f59e0b;' }, ['⏳ 配置关键词']) as HTMLSpanElement;
- keywordStep.appendChild(keywordStatus);
- guideCard.appendChild(keywordStep);
+ keywordStep.appendChild(keywordStatus); guideCard.appendChild(keywordStep);
  const completeStep = createEl('div', { style: 'margin-bottom:6px; padding:6px; background:#0f1419; border-radius:6px; display:none;' }) as HTMLDivElement;
  completeStep.appendChild(createEl('span', {}, ['✅ ']));
  completeStep.appendChild(createEl('span', { style: 'color:#22c55e;' }, ['准备就绪，可以开始运行']));
@@ -173,13 +171,14 @@ const GUIDE_STATE_KEY = 'webauto.xhs.guideState.v1';
       ? '引导完成，可查看全部配置并运行。'
       : `引导未完成：browser=${guideState.browserReady ? 'ok' : 'pending'} account=${accountReady ? 'ok' : 'pending'} keyword=${keywordReady ? 'ok' : 'pending'}`;
     completeStep.style.display = allReady ? '' : 'none';
-    startRunBtn.style.display = allReady ? '' : 'none';
+    startRunBtn.style.display = '';
+    startRunBtn.textContent = allReady ? '开始运行' : '仍然开始运行';
     tileLane.style.pointerEvents = '';
     tileLane.style.filter = '';
     guideLockMask.style.display = allReady ? 'none' : 'flex';
     if (runBtn) {
-      runBtn.disabled = !allReady;
-      runBtn.title = allReady ? '' : '请先完成引导：浏览器检查、账号登录、关键词配置';
+      runBtn.disabled = false;
+      runBtn.title = allReady ? '' : '引导未完成，仍可直接运行';
     }
     if (!allReady) {
       setActiveTile('account');
