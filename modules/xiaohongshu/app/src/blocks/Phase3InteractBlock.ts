@@ -91,6 +91,58 @@ function normalizeText(s: string) {
   return String(s || '').replace(/\s+/g, ' ').trim();
 }
 
+async function readCurrentUrl(sessionId: string, apiUrl: string) {
+  try {
+    const res = await controllerAction(
+      'browser:execute',
+      { profile: sessionId, timeoutMs: 12000, script: 'window.location.href' },
+      apiUrl,
+    );
+    return String(res?.result || res?.data?.result || '');
+  } catch {
+    return '';
+  }
+}
+
+async function gotoDetailWithRetry(sessionId: string, safeUrl: string, apiUrl: string) {
+  const attempts = [
+    { timeoutMs: 30000, label: 'goto_30s' },
+    { timeoutMs: 60000, label: 'goto_60s' },
+  ];
+
+  for (const attempt of attempts) {
+    console.log(`[Phase3Interact] goto attempt=${attempt.label} url=${safeUrl}`);
+    try {
+      const navRes = await controllerAction(
+        'browser:goto',
+        { profile: sessionId, url: safeUrl, timeoutMs: attempt.timeoutMs },
+        apiUrl,
+      );
+      if (navRes?.success === false) {
+        const err = String(navRes?.error || 'goto_failed');
+        console.warn(`[Phase3Interact] goto failed: ${err}`);
+      } else {
+        return { ok: true };
+      }
+    } catch (err: any) {
+      const msg = String(err?.message || err || 'goto_error');
+      console.warn(`[Phase3Interact] goto error: ${msg}`);
+      if (!/timeout/i.test(msg)) {
+        return { ok: false, error: msg };
+      }
+    }
+
+    // If goto timed out, check whether we still landed on detail page.
+    const currentUrl = await readCurrentUrl(sessionId, apiUrl);
+    if (currentUrl.includes('/explore/') && currentUrl.includes('xsec_token=')) {
+      console.log(`[Phase3Interact] goto timeout but detail loaded: ${currentUrl}`);
+      return { ok: true };
+    }
+  }
+
+  return { ok: false, error: 'goto_timeout' };
+}
+
 function resolveLikeIconState(useHref: string): 'liked' | 'unliked' | 'unknown' {
   const href = String(useHref || '').trim().toLowerCase();
   if (href.includes('#liked')) return 'liked';
@@ -560,8 +612,8 @@ export async function execute(input: InteractInput): Promise<InteractOutput> {
 
   // 1) 打开详情页（必须是带 xsec_token 的 safeUrl），或复用当前已打开详情页
   if (!reuseCurrentDetail) {
-    const navRes = await controllerAction('browser:goto', { profile: sessionId, url: safeUrl, timeoutMs: 30000 }, unifiedApiUrl);
-    if (navRes?.success === false) {
+    const navRes = await gotoDetailWithRetry(sessionId, safeUrl, unifiedApiUrl);
+    if (!navRes.ok) {
       return {
         success: false,
         noteId,

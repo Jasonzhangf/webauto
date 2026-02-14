@@ -5,6 +5,7 @@ import { ensureCoreServices } from '../lib/ensure-core-services.mjs';
 ensureUtf8Console();
 
 import { resolveKeyword, resolveEnv } from './lib/env.mjs';
+import { UNIFIED_API_URL } from './lib/core-daemon.mjs';
 import { initRunLogging, emitRunEvent, safeStringify } from './lib/logger.mjs';
 import { createSessionLock } from './lib/session-lock.mjs';
 import { execute as validateLinks } from '../../dist/modules/xiaohongshu/app/src/blocks/Phase34ValidateLinksBlock.js';
@@ -104,7 +105,7 @@ async function main() {
       profile,
       keyword,
       env,
-      unifiedApiUrl: 'CORE_DAEMON_URL',
+      unifiedApiUrl: UNIFIED_API_URL,
       headless: Boolean(args.headless),
       requireCheckpoint: true,
     });
