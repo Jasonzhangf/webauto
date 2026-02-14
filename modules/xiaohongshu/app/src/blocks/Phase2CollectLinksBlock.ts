@@ -273,43 +273,18 @@ export async function execute(input: CollectLinksInput): Promise<CollectLinksOut
     return { safeUrl: '', lastUrl, waitedMs: Date.now() - startMs };
   };
 
-  type ClickStrategy = 'mouse_center' | 'container_system' | 'container_protocol';
-  const performOpenDetailClick = async (
-    strategy: ClickStrategy,
-    domIndex: number,
-    gateRect: any,
-  ): Promise<{ ok: boolean; error?: string }> => {
+  type ClickPoint = { x: number; y: number; name?: string };
+  const performCoordinateClick = async (point: ClickPoint): Promise<{ ok: boolean; error?: string }> => {
     try {
-      if (strategy === 'mouse_center') {
-        if (!gateRect || gateRect.left === undefined || gateRect.top === undefined) {
-          return { ok: false, error: 'missing_gate_rect' };
-        }
-        const cx = Math.round((Number(gateRect.left) + Number(gateRect.right)) / 2);
-        const cy = Math.round((Number(gateRect.top) + Number(gateRect.bottom)) / 2);
-        await controllerAction('mouse:click', { profileId: profile, x: cx, y: cy, clicks: 1 }, unifiedApiUrl);
-        return { ok: true };
+      const x = Math.round(Number(point?.x));
+      const y = Math.round(Number(point?.y));
+      if (!Number.isFinite(x) || !Number.isFinite(y)) {
+        return { ok: false, error: 'invalid_click_point' };
       }
-
-      const useSystemMouse = strategy === 'container_system';
-      const clickRes = await controllerAction('container:operation', {
-        containerId: 'xiaohongshu_search.search_result_item',
-        operationId: 'click',
-        sessionId: profile,
-        config: {
-          index: domIndex,
-          target: 'a[href*="/explore/"]',
-          useSystemMouse,
-          visibleOnly: true,
-        },
-        timeoutMs: 20000,
-      }, unifiedApiUrl).catch((e: any) => ({ success: false, error: String(e?.message || e || 'unknown') }));
-
-      if (clickRes?.success === false) {
-        return { ok: false, error: String(clickRes?.error || 'container_click_failed') };
-      }
+      await controllerAction('mouse:click', { profileId: profile, x, y, clicks: 1 }, unifiedApiUrl);
       return { ok: true };
     } catch (e: any) {
-      return { ok: false, error: String(e?.message || e || 'click_failed') };
+      return { ok: false, error: String(e?.message || e || 'mouse_click_failed') };
     }
   };
 
@@ -878,6 +853,26 @@ export async function execute(input: CollectLinksInput): Promise<CollectLinksOut
         const cy = rect.top + rect.height/2;
         const hitEl = document.elementFromPoint(cx, cy);
         const hitOk = hitEl && (el === hitEl || el.contains(hitEl) || hitEl.contains(el));
+        const x1 = Math.max(0, rect.left);
+        const y1 = Math.max(0, rect.top);
+        const x2 = Math.min(window.innerWidth, rect.right);
+        const y2 = Math.min(window.innerHeight, rect.bottom);
+        const points = [
+          { name: 'center', x: (x1 + x2) / 2, y: (y1 + y2) / 2 },
+          { name: 'left_mid', x: x1 + 14, y: (y1 + y2) / 2 },
+          { name: 'right_mid', x: x2 - 14, y: (y1 + y2) / 2 },
+          { name: 'top_mid', x: (x1 + x2) / 2, y: y1 + 14 },
+          { name: 'bottom_mid', x: (x1 + x2) / 2, y: y2 - 14 },
+        ];
+        const clickPoints = [];
+        for (const p of points) {
+          if (!Number.isFinite(p.x) || !Number.isFinite(p.y)) continue;
+          if (p.x < 0 || p.y < 0 || p.x > window.innerWidth || p.y > window.innerHeight) continue;
+          const hp = document.elementFromPoint(p.x, p.y);
+          if (hp && (el === hp || el.contains(hp) || hp.contains(el))) {
+            clickPoints.push({ name: p.name, x: Math.round(p.x), y: Math.round(p.y) });
+          }
+        }
         const noteLike =
           el.getAttribute('data-note-id') ||
           el.getAttribute('href') ||
@@ -888,6 +883,7 @@ export async function execute(input: CollectLinksInput): Promise<CollectLinksOut
           ok: hitOk,
           reason: hitOk ? 'hit_test_pass' : 'hit_test_fail',
           rect: {left:rect.left, top:rect.top, right:rect.right, bottom:rect.bottom},
+          clickPoints,
           noteId: noteLike,
         };
       })()`,
@@ -918,25 +914,42 @@ export async function execute(input: CollectLinksInput): Promise<CollectLinksOut
       continue;
     }
     if (softHitTestPass) {
-      console.warn(`[Phase2Collect] Rigid gate soft-pass index=${domIndex}: hit_test_fail, continue with fallback click strategies`);
+      console.warn(`[Phase2Collect] Rigid gate soft-pass index=${domIndex}: hit_test_fail, continue with coordinate click points`);
       await appendTrace({ type: 'rigid_gate_soft_pass', ts: new Date().toISOString(), domIndex, reason: preClickReason, noteId: preClickNoteId });
     } else {
       console.log(`[Phase2Collect] Rigid gate passed index=${domIndex}, hit-test ok noteId=${preClickNoteId}`);
     }
 
     // Phase-based timeout tracking.
-    // Click with multiple strategies and only accept if URL has /explore/ + xsec_token.
+    // Click using verified in-card points and only accept if URL has /explore/ + xsec_token.
     const gateRect = preClickVerify?.rect || lastRect;
     const clickStartMs = Date.now();
-    const clickStrategies: ClickStrategy[] = softHitTestPass
-      ? ['container_system', 'mouse_center', 'container_protocol']
-      : ['mouse_center', 'container_system', 'container_protocol'];
-    const clickErrors: Array<{ strategy: ClickStrategy; error: string }> = [];
+    const clickPointsFromGate = Array.isArray(preClickVerify?.clickPoints) ? preClickVerify.clickPoints : [];
+    const clickPoints: ClickPoint[] = [];
+    const pushPoint = (p: any, name?: string) => {
+      const x = Math.round(Number(p?.x));
+      const y = Math.round(Number(p?.y));
+      if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+      if (clickPoints.some((it) => it.x === x && it.y === y)) return;
+      clickPoints.push({ x, y, name: String(name || p?.name || 'point') });
+    };
+    for (const p of clickPointsFromGate) pushPoint(p, p?.name);
+    if (gateRect && gateRect.left !== undefined && gateRect.top !== undefined) {
+      pushPoint(
+        {
+          x: Math.round((Number(gateRect.left) + Number(gateRect.right)) / 2),
+          y: Math.round((Number(gateRect.top) + Number(gateRect.bottom)) / 2),
+        },
+        'center_fallback',
+      );
+    }
+    const clickErrors: Array<{ strategy: string; error: string }> = [];
     let safeUrl = '';
     let urlAfterClick = '';
     let navWaitMs = 0;
-    for (const strategy of clickStrategies) {
-      const clickRes = await performOpenDetailClick(strategy, domIndex, gateRect);
+    for (const point of clickPoints.slice(0, 3)) {
+      const strategy = `point:${String(point?.name || 'unknown')}`;
+      const clickRes = await performCoordinateClick(point);
       if (!clickRes.ok) {
         const errText = String(clickRes.error || 'unknown_click_error');
         clickErrors.push({ strategy, error: errText });
@@ -957,6 +970,7 @@ export async function execute(input: CollectLinksInput): Promise<CollectLinksOut
         ts: new Date().toISOString(),
         domIndex,
         strategy,
+        point,
         url: navProbe.lastUrl,
         waitedMs: navProbe.waitedMs,
       });
@@ -972,6 +986,10 @@ export async function execute(input: CollectLinksInput): Promise<CollectLinksOut
     }
 
     const clickPhaseMs = Date.now() - clickStartMs;
+    if (clickPoints.length === 0) {
+      clickErrors.push({ strategy: 'point:none', error: 'no_click_point' });
+    }
+    const clickStrategies = clickPoints.slice(0, 3).map((p) => `point:${String(p?.name || 'unknown')}`);
     console.log(`[Phase2Collect] click phase took ${clickPhaseMs}ms strategies=${clickStrategies.join('->')}`);
 
     // Rigid post-click gate: must have /explore/ and xsec_token
@@ -1043,6 +1061,7 @@ export async function execute(input: CollectLinksInput): Promise<CollectLinksOut
       if (preClickNoteId) {
         // Prevent repeatedly re-opening the same source card when mapped URL resolves to an already-seen note.
         seenExploreIds.add(preClickNoteId);
+        seenNoteIds.add(preClickNoteId);
       }
       await recoverFromPreClickStall('duplicate_note_id', { domIndex, noteId, preClickNoteId });
       await controllerAction('keyboard:press', { profileId: profile, key: 'Escape' }, unifiedApiUrl);
