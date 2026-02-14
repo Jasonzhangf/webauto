@@ -35,6 +35,7 @@ type RunJsonSpec = {
 };
 
 type UiSettings = DesktopConsoleSettings;
+import { stateBridge } from './state-bridge.mts';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const APP_ROOT = path.resolve(__dirname, '../..'); // apps/desktop-console/dist/main -> apps/desktop-console
@@ -98,9 +99,21 @@ let lastUiHeartbeatAt = Date.now();
 let heartbeatWatchdog: NodeJS.Timeout | null = null;
 let heartbeatTimeoutHandled = false;
 
+let stateBridgeStarted = false;
+function ensureStateBridge() {
+  if (stateBridgeStarted) return;
+  const w = getWin();
+  if (w) { stateBridge.start(w); stateBridgeStarted = true; }
+}
+
+app.whenReady().then(() => {
+  ensureStateBridge();
+});
+
 let win: BrowserWindow | null = null;
 
 configureElectronPaths();
+stateBridge.start(win!);
 
 function getWin() {
   if (!win || win.isDestroyed()) return null;

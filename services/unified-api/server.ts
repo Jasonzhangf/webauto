@@ -19,6 +19,8 @@ import { ensureBuiltinOperations } from '../../modules/operations/src/builtin.js
 import { getContainerExecutor } from '../../modules/operations/src/executor.js';
 import { installServiceProcessLogger } from '../shared/serviceProcessLogger.js';
 import { startHeartbeatWatcher } from '../shared/heartbeat.js';
+import { taskStateRegistry } from './task-state.js';
+import { saveTaskSnapshot, appendEvent } from './task-persistence.js';
 
 // Ensure builtin operations are registered before handling any operations
 ensureBuiltinOperations();
@@ -62,6 +64,7 @@ class UnifiedApiServer {
   private containerExecutor: any;
   private sessionManager: any;
   private stateRegistry: any;
+  private taskRegistry = taskStateRegistry;
 
   constructor() {
     this.controller = new UiController({
@@ -93,6 +96,7 @@ class UnifiedApiServer {
 
     // Initialize state registry
     this.stateRegistry = getStateRegistry();
+    this.setupTaskRoutes();
   }
 
   private setupEventBridge(): void {
@@ -305,11 +309,107 @@ class UnifiedApiServer {
         const url = new URL(req.url, `http://${req.headers.host}`);
 
         // Container operations endpoints
-        const containerHandled = await handleContainerOperations(req, res, sessionManager, this.containerExecutor);
-        if (containerHandled) return;
+      const containerHandled = await handleContainerOperations(req, res, sessionManager, this.containerExecutor);
+      if (containerHandled) return;
 
-        // 健康检查
-        if (url.pathname === '/health') {
+      // Task state API endpoints
+      if (req.method === 'GET' && url.pathname === '/api/v1/tasks') {
+        const tasks = this.taskRegistry.getAllTasks();
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: true, data: tasks }));
+        return;
+      }
+
+      if (req.method === 'GET' && url.pathname.startsWith('/api/v1/tasks/')) {
+        const parts = url.pathname.split('/');
+        const runId = parts[parts.length - 1];
+        const task = this.taskRegistry.getTask(runId);
+        if (!task) {
+          res.writeHead(404, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: false, error: 'Task not found' }));
+          return;
+        }
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: true, data: task }));
+        return;
+      }
+
+      if (req.method === 'GET' && url.pathname.includes('/api/v1/tasks/') && url.pathname.includes('/events')) {
+        const parts = url.pathname.split('/');
+        const tasksIndex = parts.indexOf('tasks');
+        const runId = parts[tasksIndex + 1];
+        const since = url.searchParams.get('since');
+        const events = this.taskRegistry.getEvents(runId, since ? Number(since) : undefined);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: true, data: events }));
+        return;
+      }
+
+      if (req.method === 'POST' && url.pathname.includes('/api/v1/tasks/') && url.pathname.includes('/update')) {
+        const parts = url.pathname.split('/');
+        const tasksIndex = parts.indexOf('tasks');
+        const runId = parts[tasksIndex + 1];
+        try {
+          const payload = await this.readJsonBody(req);
+          this.taskRegistry.updateTask(runId, payload);
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: true }));
+        } catch (err: any) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: false, error: err?.message || String(err) }));
+        }
+        return;
+      }
+
+      if (req.method === 'POST' && url.pathname.includes('/api/v1/tasks/') && url.pathname.includes('/events')) {
+        const parts = url.pathname.split('/');
+        const tasksIndex = parts.indexOf('tasks');
+        const runId = parts[tasksIndex + 1];
+        try {
+          const event = await this.readJsonBody(req);
+          this.taskRegistry.pushEvent(runId, event.type, event.data);
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: true }));
+        } catch (err: any) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: false, error: err?.message || String(err) }));
+        }
+        return;
+      }
+
+      if (req.method === 'POST' && url.pathname.includes('/api/v1/tasks/') && url.pathname.includes('/control')) {
+        const parts = url.pathname.split('/');
+        const tasksIndex = parts.indexOf('tasks');
+        const runId = parts[tasksIndex + 1];
+        const action = url.searchParams.get('action');
+        try {
+          if (action === 'pause') {
+            this.taskRegistry.setStatus(runId, 'paused');
+          } else if (action === 'resume') {
+            this.taskRegistry.setStatus(runId, 'running');
+          } else if (action === 'stop') {
+            this.taskRegistry.setStatus(runId, 'aborted');
+          }
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: true }));
+        } catch (err: any) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: false, error: err?.message || String(err) }));
+        }
+        return;
+      }
+
+      if (req.method === 'DELETE' && url.pathname.startsWith('/api/v1/tasks/')) {
+        const parts = url.pathname.split('/');
+        const runId = parts[parts.length - 1];
+        const deleted = this.taskRegistry.deleteTask(runId);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: true, data: { deleted } }));
+        return;
+      }
+
+      // 健康检查
+      if (url.pathname === '/health') {
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ ok: true, service: 'unified-api', timestamp: new Date().toISOString() }));
           return;
@@ -554,6 +654,29 @@ class UnifiedApiServer {
     if (!result || typeof result !== 'object') return { success: true, data: result };
     if (typeof result.success === 'boolean') return result;
     return { success: true, data: result };
+  }
+
+  private setupTaskRoutes(): void {
+    // Subscribe to task state updates and broadcast to WebSocket clients
+    this.taskRegistry.subscribe((update) => {
+      const message = {
+        type: 'task:update',
+        data: update,
+        timestamp: Date.now()
+      };
+      this.wsClients.forEach((socket) => {
+        if (socket.readyState === WebSocket.OPEN) {
+          this.safeSend(socket, message);
+        }
+      });
+      // Persist to disk
+      if (update.type === 'event') {
+        appendEvent(update.data);
+      } else {
+        const task = this.taskRegistry.getTask(update.runId);
+        if (task) saveTaskSnapshot(task);
+      }
+    });
   }
 }
 
