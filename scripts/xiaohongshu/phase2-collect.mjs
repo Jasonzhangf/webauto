@@ -24,17 +24,56 @@ import { listProfilesForPool } from './lib/profilepool.mjs';
 import { initRunLogging, emitRunEvent, safeStringify } from './lib/logger.mjs';
 import { createSessionLock } from './lib/session-lock.mjs';
 import { execute as waitSearchPermit } from '../../dist/modules/workflow/blocks/WaitSearchPermitBlock.js';
-// NOTE: xiaohongshu/app is compiled with rootDir=../.. so output is nested under xiaohongshu/app/src.
-import { execute as phase2Search } from '../../dist/modules/xiaohongshu/app/src/blocks/Phase2SearchBlock.js';
-import { execute as phase2CollectLinks } from '../../dist/modules/xiaohongshu/app/src/blocks/Phase2CollectLinksBlock.js';
 import { resolveDownloadRoot } from '../../dist/modules/state/src/paths.js';
 import { updateXhsCollectState, markXhsCollectFailed } from '../../dist/modules/state/src/xiaohongshu-collect-state.js';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { execFileSync } from 'node:child_process';
+import { statSync } from 'node:fs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const repoRoot = path.resolve(__dirname, '../..');
 import { UNIFIED_API_URL } from './lib/core-daemon.mjs';
 const ownerPidArg = Number(String((process.argv.slice(2).includes('--owner-pid') ? process.argv[process.argv.indexOf('--owner-pid') + 1] : process.env.WEBAUTO_OWNER_PID) || process.pid));
+
+const PHASE2_SEARCH_SRC = path.join(repoRoot, 'modules', 'xiaohongshu', 'app', 'src', 'blocks', 'Phase2SearchBlock.ts');
+const PHASE2_SEARCH_DIST = path.join(repoRoot, 'dist', 'modules', 'xiaohongshu', 'app', 'src', 'blocks', 'Phase2SearchBlock.js');
+const PHASE2_COLLECT_SRC = path.join(repoRoot, 'modules', 'xiaohongshu', 'app', 'src', 'blocks', 'Phase2CollectLinksBlock.ts');
+const PHASE2_COLLECT_DIST = path.join(repoRoot, 'dist', 'modules', 'xiaohongshu', 'app', 'src', 'blocks', 'Phase2CollectLinksBlock.js');
+
+function fileMtimeMs(filePath) {
+  try {
+    return Number(statSync(filePath).mtimeMs || 0);
+  } catch {
+    return 0;
+  }
+}
+
+function needsXhsBlockRebuild() {
+  return (
+    fileMtimeMs(PHASE2_SEARCH_SRC) > fileMtimeMs(PHASE2_SEARCH_DIST) ||
+    fileMtimeMs(PHASE2_COLLECT_SRC) > fileMtimeMs(PHASE2_COLLECT_DIST)
+  );
+}
+
+function ensureFreshXhsBlocks() {
+  if (!needsXhsBlockRebuild()) return;
+  const buildScript = path.join(repoRoot, 'scripts', 'build', 'run-services-build.mjs');
+  console.log('[phase2] detected stale dist blocks, rebuilding services...');
+  execFileSync(process.execPath, [buildScript], { cwd: repoRoot, stdio: 'inherit' });
+}
+
+async function loadPhase2Blocks() {
+  ensureFreshXhsBlocks();
+  const [searchMod, collectMod] = await Promise.all([
+    import('../../dist/modules/xiaohongshu/app/src/blocks/Phase2SearchBlock.js'),
+    import('../../dist/modules/xiaohongshu/app/src/blocks/Phase2CollectLinksBlock.js'),
+  ]);
+  return {
+    phase2Search: searchMod.execute,
+    phase2CollectLinks: collectMod.execute,
+  };
+}
 
 function nowMs() {
   return Date.now();
@@ -116,6 +155,7 @@ async function showStatus({ keyword, env, downloadRoot }) {
 async function main() {
   // Single source of truth for service lifecycle: core-daemon.
   await ensureCoreServices();
+  const { phase2Search, phase2CollectLinks } = await loadPhase2Blocks();
 
   const argv = process.argv.slice(2);
   const downloadRoot = resolveDownloadRoot();
