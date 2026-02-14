@@ -575,12 +575,37 @@ export class BrowserSession {
     await page.fill(selector, text, { timeout: 20000 });
   }
 
+  private async ensureInputReady(page: Page): Promise<void> {
+    if (this.options.headless) return;
+    if (os.platform() !== 'win32') return;
+    let needsFocus = false;
+    try {
+      const state = await page.evaluate(() => ({
+        hasFocus: typeof document?.hasFocus === 'function' ? document.hasFocus() : true,
+        hidden: !!document?.hidden,
+        visibilityState: String(document?.visibilityState || 'visible'),
+      }));
+      needsFocus = !state.hasFocus || state.hidden || state.visibilityState !== 'visible';
+    } catch {
+      // If we cannot read focus state, conservatively try to bring page to front.
+      needsFocus = true;
+    }
+    if (!needsFocus) return;
+    try {
+      await page.bringToFront();
+      await page.waitForTimeout(80);
+    } catch {
+      // Keep best-effort behavior and do not block input flow on platform quirks.
+    }
+  }
+
   /**
    * 基于屏幕坐标的系统级鼠标点击（Playwright 原生）
    * @param opts 屏幕坐标及点击选项
    */
   async mouseClick(opts: { x: number; y: number; button?: 'left' | 'right' | 'middle'; clicks?: number; delay?: number }): Promise<void> {
     const page = await this.ensurePrimaryPage();
+    await this.ensureInputReady(page);
     const { x, y, button = 'left', clicks = 1, delay = 50 } = opts;
 
     // 移动鼠标到目标位置（模拟轨迹）
@@ -606,6 +631,7 @@ export class BrowserSession {
    */
   async mouseMove(opts: { x: number; y: number; steps?: number }): Promise<void> {
     const page = await this.ensurePrimaryPage();
+    await this.ensureInputReady(page);
     const { x, y, steps = 3 } = opts;
 
     await page.mouse.move(x, y, { steps });
@@ -616,6 +642,7 @@ export class BrowserSession {
    */
   async keyboardType(opts: { text: string; delay?: number; submit?: boolean }): Promise<void> {
     const page = await this.ensurePrimaryPage();
+    await this.ensureInputReady(page);
     const { text, delay = 80, submit } = opts;
 
     if (text && text.length > 0) {
@@ -629,6 +656,7 @@ export class BrowserSession {
 
   async keyboardPress(opts: { key: string; delay?: number }): Promise<void> {
     const page = await this.ensurePrimaryPage();
+    await this.ensureInputReady(page);
     const { key, delay } = opts;
     await page.keyboard.press(key, typeof delay === 'number' ? { delay } : undefined);
   }
@@ -639,6 +667,7 @@ export class BrowserSession {
    */
   async mouseWheel(opts: { deltaY: number; deltaX?: number }): Promise<void> {
     const page = await this.ensurePrimaryPage();
+    await this.ensureInputReady(page);
     const { deltaX = 0, deltaY } = opts;
     await page.mouse.wheel(Number(deltaX) || 0, Number(deltaY) || 0);
   }
