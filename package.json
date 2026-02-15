@@ -4,11 +4,11 @@
   "version": "0.1.003",
   "type": "module",
   "bin": {
-    "webauto": "bin/webauto.mjs",
-    "camoufox": "modules/camoufox-cli/src/cli.mjs"
+    "webauto": "bin/webauto.mjs"
   },
   "dependencies": {
     "ajv": "^8.12.0",
+    "@web-auto/camo": "^0.1.2",
     "esbuild-register": "^3.6.0",
     "iconv-lite": "^0.6.3",
     "linkedom": "^0.18.12",
