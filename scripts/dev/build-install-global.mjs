@@ -66,8 +66,18 @@ async function ensureDeps() {
 }
 
 async function buildDev() {
-  await run(npmBin(), ['run', 'build:services']);
-  await run(npmBin(), ['--prefix', path.join('apps', 'desktop-console'), 'run', 'build']);
+ await run(npmBin(), ['run', 'build:services']);
+ await run(npmBin(), ['--prefix', path.join('apps', 'desktop-console'), 'run', 'build']);
+  // Copy camoufox-cli
+  const cliSrc = path.join(ROOT, 'modules', 'camoufox-cli', 'src', 'cli.mjs');
+  const cliDest = path.join(ROOT, 'bin', 'camoufox-cli.mjs');
+  if (existsSync(cliSrc)) {
+    const { copyFile } = await import('node:fs/promises');
+    await copyFile(cliSrc, cliDest);
+    const { chmodSync } = await import('node:fs');
+    chmodSync(cliDest, 0o755);
+    console.log('[dev-install] copied camoufox-cli');
+  }
 }
 
 async function installGlobal({ preferLink }) {
@@ -128,4 +138,3 @@ main().catch((err) => {
   console.error(err?.stack || err?.message || String(err));
   process.exit(1);
 });
-

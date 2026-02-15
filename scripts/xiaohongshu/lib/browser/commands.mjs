@@ -1,33 +1,92 @@
 /**
- * 浏览器命令封装
+ * 浏览器命令封装 (camo CLI 版本)
  *
- * 封装对 Unified API 和 Browser Service 的调用，提供统一的命令接口。
+ * 封装对 camo CLI 的调用，提供统一的命令接口。
  */
 
+import { spawn } from 'child_process';
 import { BROWSER_SERVICE, PROFILE, UNIFIED_API, HOME_URL } from '../env.mjs';
 
-export async function browserServiceCommand(action, args = {}, timeoutMs = 30_000) {
-  const url = `${BROWSER_SERVICE}/command`;
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ action, args }),
-    signal: AbortSignal.timeout ? AbortSignal.timeout(timeoutMs) : undefined,
+async function camoCommand(args, timeoutMs = 30_000) {
+  return new Promise((resolve, reject) => {
+    const child = spawn('camo', args, {
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    
+    let stdout = '';
+    let stderr = '';
+    
+    child.stdout.on('data', (data) => { stdout += data; });
+    child.stderr.on('data', (data) => { stderr += data; });
+    
+    const timeout = setTimeout(() => {
+      child.kill();
+      reject(new Error(`camo command timeout: ${args.join(' ')}`));
+    }, timeoutMs);
+    
+    child.on('close', (code) => {
+      clearTimeout(timeout);
+      if (code !== 0) {
+        reject(new Error(`camo exit ${code}: ${stderr || stdout}`));
+        return;
+      }
+      try {
+        const result = JSON.parse(stdout);
+        resolve(result);
+      } catch {
+        resolve({ ok: true, raw: stdout });
+      }
+    });
   });
-  const raw = await res.text();
-  const data = raw ? JSON.parse(raw) : {};
-  if (!res.ok) {
-    throw new Error(
-      data?.error || data?.body?.error || `browser-service command "${action}" HTTP ${res.status}`,
-    );
+}
+
+export async function browserServiceCommand(action, args = {}, timeoutMs = 30_000) {
+  // Map browser-service actions to camo CLI commands
+  const camoArgs = mapToCamoArgs(action, args, PROFILE);
+  return camoCommand(camoArgs, timeoutMs);
+}
+
+function mapToCamoArgs(action, args, profile) {
+  const profileId = args.profileId || profile;
+  
+  switch (action) {
+    case 'start':
+      return ['start', profileId, '--url', args.url || HOME_URL, args.headless ? '--headless' : ''];
+    case 'stop':
+      return ['stop', profileId];
+    case 'goto':
+      return ['goto', profileId, args.url];
+    case 'getStatus':
+    case 'status':
+      return ['status'];
+    case 'screenshot':
+      return args.output 
+        ? ['screenshot', profileId, '--output', args.output]
+        : ['screenshot', profileId];
+    case 'saveCookies':
+      return ['cookies', 'save', profileId, '--path', args.path];
+    case 'loadCookies':
+      return ['cookies', 'load', profileId, '--path', args.path];
+    case 'autoCookies:start':
+      return ['cookies', 'auto', 'start', profileId, '--interval', String(args.intervalMs || 2500)];
+    case 'autoCookies:stop':
+      return ['cookies', 'auto', 'stop', profileId];
+    case 'mouse:click':
+      return ['mouse', 'click', profileId, '--x', String(args.x), '--y', String(args.y), 
+              args.button ? `--button ${args.button}` : '',
+              args.clicks ? `--clicks ${args.clicks}` : ''];
+    case 'mouse:move':
+      return ['mouse', 'move', profileId, '--x', String(args.x), '--y', String(args.y)];
+    case 'mouse:wheel':
+      return ['mouse', 'wheel', profileId, 
+              args.deltaX ? `--deltax ${args.deltaX}` : '',
+              args.deltaY ? `--deltay ${args.deltaY}` : ''];
+    case 'evaluate':
+      // camo CLI 不直接支持 evaluate，需要通过 controller
+      throw new Error('evaluate not supported in camo CLI, use controllerAction');
+    default:
+      throw new Error(`Unknown action: ${action}`);
   }
-  if (data && data.ok === false) {
-    throw new Error(data.error || `browser-service command "${action}" failed`);
-  }
-  if (data && data.error) {
-    throw new Error(data.error);
-  }
-  return data;
 }
 
 export async function controllerAction(action, payload = {}, timeoutMs = 20_000) {
@@ -51,22 +110,26 @@ function extractSessions(payload) {
 }
 
 export async function listSessions() {
-  const raw = await controllerAction('session:list', {});
-  return extractSessions(raw);
+  // Use camo CLI sessions command
+  const result = await camoCommand(['sessions']);
+  return extractSessions(result);
 }
 
 export async function ensureProfileSessionExists() {
-  const sessions = await listSessions().catch(() => []);
+  // Use camo CLI to check sessions
+  const result = await camoCommand(['sessions']).catch(() => ({ sessions: [] }));
+  const sessions = result.sessions || [];
   const exists = sessions.some((s) => (s?.profileId || s?.profile_id) === PROFILE);
   
   if (!exists) {
-    // 尝试启动 session
-    console.log(`[Browser] Session ${PROFILE} not found, starting...`);
-    await browserServiceCommand('start', { profileId: PROFILE, headless: true, url: HOME_URL });
+    // Try to start session with camo
+    console.log(`[Browser] Session ${PROFILE} not found, starting with camo...`);
+    await camoCommand(['start', PROFILE, '--url', HOME_URL]);
     await delay(5000);
     
-    // 二次确认
-    const sessions2 = await listSessions().catch(() => []);
+    // Double check
+    const result2 = await camoCommand(['sessions']).catch(() => ({ sessions: [] }));
+    const sessions2 = result2.sessions || [];
     return sessions2.some((s) => (s?.profileId || s?.profile_id) === PROFILE);
   }
   

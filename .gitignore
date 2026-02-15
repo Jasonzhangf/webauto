@@ -7,6 +7,24 @@ SUMMARY.md
 
 # Dependencies
 node_modules/
+bin/camoufox-cli.mjs
+bin/-la
+bin/ls
+bin/index.mjs
+bin/camoufox-cli.mjs.bak
+modules/camoufox-cli/src/-la
+modules/camoufox-cli/src/ls
+modules/camoufox-cli/src/bin
+modules/camoufox-cli/src/camoufox-cli.mjs
+modules/camoufox-cli/src/index.mjs
+bin/camoufox-cli.mjs
+bin/-la
+bin/ls
+bin/index.mjs
+bin/camoufox-cli.mjs.bak
+modules/camoufox-cli/src/-la
+modules/camoufox-cli/src/ls
+modules/camoufox-cli/src/bin
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*

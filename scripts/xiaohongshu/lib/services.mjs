@@ -1,11 +1,11 @@
 import { CORE_DAEMON_URL } from './core-daemon.mjs';
 /**
- * 服务管理模块
+ * 服务管理模块 (camo CLI 版本)
  *
  * 负责：
  * - 健康检查
- * - 启动 Unified API / Browser Service
- * - 等待服务就绪
+ * - 启动 Unified API
+ * - 使用 camo CLI 管理浏览器会话
  */
 
 import fs from 'node:fs';
@@ -24,14 +24,7 @@ const DEFAULT_SERVICE_SPECS = (repoRoot) => [
     env: { PORT: '7701', NODE_ENV: 'production' },
     startTimeoutMs: 30_000,
   },
-  {
-    key: 'browser-service',
-    label: 'Browser Service',
-    healthUrl: 'http://127.0.0.1:7704/health',
-    script: path.join(repoRoot, 'dist', 'services', 'browser-service', 'index.js'),
-    env: { PORT: '7704', WS_PORT: '8765', NODE_ENV: 'production' },
-    startTimeoutMs: 30_000,
-  },
+  // browser-service 由 camo CLI 管理，不再作为独立服务启动
 ];
 
 const DEFAULT_HEARTBEAT_FILE = path.join(os.homedir(), '.webauto', 'run', 'xhs-heartbeat.json');
@@ -126,7 +119,7 @@ export async function startNodeService(spec, { repoRoot } = {}) {
 }
 
 export async function ensureBaseServices({ repoRoot } = {}) {
-  console.log('0️⃣ Phase1: 确认基础服务（Unified API → Browser Service）按依赖顺序就绪...');
+  console.log('0️⃣ Phase1: 确认基础服务（Unified API）按依赖顺序就绪...');
   ensureHeartbeatEnv();
 
   const root = repoRoot || process.cwd();
@@ -155,6 +148,51 @@ export async function ensureBaseServices({ repoRoot } = {}) {
     console.log(`[Services] ${label} 未检测到，准备启动...`);
     await startNodeService(spec, { repoRoot: root });
   }
+  
+  // Browser service 由 camo CLI 管理，确保 camo init 已执行
+  await ensureCamoReady();
+}
+
+async function ensureCamoReady() {
+  // Run camo init to ensure browser-service is ready
+  const result = await runCamoCommand(['init']).catch(() => null);
+  if (result?.browserService) {
+    console.log('[Services] Browser Service (via camo) ✅ 在线');
+  } else {
+    console.warn('[Services] Browser Service (via camo) ⚠️ 未检测到，首次使用需要启动浏览器会话');
+  }
+}
+
+function runCamoCommand(args, timeoutMs = 10_000) {
+  return new Promise((resolve, reject) => {
+    const child = spawn('camo', args, {
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    
+    let stdout = '';
+    let stderr = '';
+    
+    child.stdout.on('data', (data) => { stdout += data; });
+    child.stderr.on('data', (data) => { stderr += data; });
+    
+    const timeout = setTimeout(() => {
+      child.kill();
+      reject(new Error(`camo command timeout: ${args.join(' ')}`));
+    }, timeoutMs);
+    
+    child.on('close', (code) => {
+      clearTimeout(timeout);
+      if (code !== 0 && code !== null) {
+        reject(new Error(`camo exit ${code}: ${stderr || stdout}`));
+        return;
+      }
+      try {
+        resolve(JSON.parse(stdout));
+      } catch {
+        resolve({ ok: true, raw: stdout });
+      }
+    });
+  });
 }
 
 export async function controllerAction(action, payload = {}, timeoutMs = 20_000) {
@@ -169,20 +207,15 @@ export async function controllerAction(action, payload = {}, timeoutMs = 20_000)
 }
 
 export async function listSessions() {
-  const raw = await controllerAction('session:list', {});
-  return extractSessions(raw);
-}
-
-function extractSessions(payload) {
-  if (!payload) return [];
-  if (Array.isArray(payload.sessions)) return payload.sessions;
-  if (Array.isArray(payload.data?.sessions)) return payload.data.sessions;
-  if (Array.isArray(payload.result?.sessions)) return payload.result.sessions;
-  if (payload.data) return extractSessions(payload.data);
-  return [];
+  // Use camo CLI sessions command
+  try {
+    const result = await runCamoCommand(['sessions']);
+    return result.sessions || [];
+  } catch {
+    return [];
+  }
 }
 
 function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
-
