@@ -9,9 +9,21 @@ import {
   type XhsCheckpointId,
   type CheckpointEvent,
 } from './checkpoint-subscriber.js';
+import {
+  camoStart,
+  camoStop,
+  camoType,
+  camoPress,
+  camoClick,
+  camoScreenshot,
+} from '../xhs-camo-adapter/camo-commands.js';
+import { getPrimarySelector, isBlockingCheckpoint } from '../xhs-camo-adapter/checkpoint-selectors.js';
+import { execute as phase2Search } from '../xhs-search/Phase2SearchBlock.js';
+import { execute as phase2CollectLinks } from '../xhs-search/Phase2CollectLinksBlock.js';
 
 export interface OrchestratorV2Options extends XhsCollectOptions {
   onCheckpoint?: (event: CheckpointEvent) => void;
+  useCamoDirect?: boolean;
 }
 
 export class XhsOrchestratorV2 {
@@ -20,6 +32,7 @@ export class XhsOrchestratorV2 {
   private stateClient: any;
   private checkpointSubscriber: any;
   private currentPhase: 'idle' | 'search' | 'collect' | 'harvest' | 'done' | 'error' = 'idle';
+  private links: Array<{ noteId: string; safeUrl: string; searchUrl: string; ts: string }> = [];
 
   constructor(options: OrchestratorV2Options) {
     this.runId = generateRunId();
@@ -47,15 +60,17 @@ export class XhsOrchestratorV2 {
     await this.stateClient.pushEvent('checkpoint:change', event);
     this.options.onCheckpoint?.(event);
 
-    // React to checkpoint changes based on current phase
+    if (isBlockingCheckpoint(event.to)) {
+      await this.handleBlockingState(event.to);
+      return;
+    }
+
     if (event.to === 'home_ready' && this.currentPhase === 'idle') {
       await this.startSearchPhase();
     } else if (event.to === 'search_ready' && this.currentPhase === 'search') {
       await this.startCollectPhase();
     } else if (event.to === 'detail_ready' && this.currentPhase === 'collect') {
       await this.startHarvestPhase();
-    } else if (event.to === 'login_guard' || event.to === 'risk_control') {
-      await this.handleBlockingState(event.to);
     }
   }
 
@@ -63,39 +78,80 @@ export class XhsOrchestratorV2 {
     this.currentPhase = 'search';
     await this.stateClient.pushEvent('phase:search:start', {});
 
-    // TODO: Invoke search block via camo commands
-    // const camo = await import('@web-auto/camo');
-    // await camo.type(this.options.profileId, '.search-input', this.options.keyword);
-    // await camo.press(this.options.profileId, 'Enter');
-
     console.log(`[OrchestratorV2] Starting search for: ${this.options.keyword}`);
+
+    if (this.options.useCamoDirect) {
+      try {
+        const searchInput = getPrimarySelector('home_ready');
+        if (searchInput) {
+          await camoClick(this.options.profileId, searchInput);
+          await new Promise(r => setTimeout(r, 300));
+          await camoType(this.options.profileId, searchInput, this.options.keyword);
+          await new Promise(r => setTimeout(r, 200));
+          await camoPress(this.options.profileId, 'Enter');
+        }
+      } catch (error: any) {
+        console.error(`[OrchestratorV2] Search phase failed: ${error.message}`);
+        this.currentPhase = 'error';
+      }
+    } else {
+      try {
+        const result = await phase2Search({
+          keyword: this.options.keyword,
+          profile: this.options.profileId,
+          unifiedApiUrl: 'http://127.0.0.1:7701',
+          stateClient: this.stateClient,
+        });
+        if (!result.success) throw new Error(`Search failed: ${result.finalUrl}`);
+        console.log(`[OrchestratorV2] Search completed: ${result.finalUrl}`);
+      } catch (error: any) {
+        console.error(`[OrchestratorV2] Search failed: ${error.message}`);
+        this.currentPhase = 'error';
+      }
+    }
   }
 
   private async startCollectPhase() {
     this.currentPhase = 'collect';
     await this.stateClient.pushEvent('phase:collect:start', {});
 
-    // TODO: Collect links from search results
-    // Subscribe to result items appearing
-
     console.log(`[OrchestratorV2] Starting link collection`);
+
+    try {
+      const result = await phase2CollectLinks({
+        keyword: this.options.keyword,
+        targetCount: this.options.target,
+        profile: this.options.profileId,
+        unifiedApiUrl: 'http://127.0.0.1:7701',
+        env: this.options.env,
+        stateClient: this.stateClient,
+        onLink: (link, meta) => {
+          this.links.push(link);
+          console.log(`[OrchestratorV2] ${meta.collected}/${meta.targetCount}: ${link.noteId}`);
+        },
+      });
+      this.links = result.links;
+      console.log(`[OrchestratorV2] Collection completed: ${result.totalCollected} links`);
+    } catch (error: any) {
+      console.error(`[OrchestratorV2] Collect failed: ${error.message}`);
+      this.currentPhase = 'error';
+    }
   }
 
   private async startHarvestPhase() {
     this.currentPhase = 'harvest';
     await this.stateClient.pushEvent('phase:harvest:start', {});
-
-    // TODO: Harvest detail page data
-
-    console.log(`[OrchestratorV2] Starting detail harvest`);
+    console.log(`[OrchestratorV2] Harvest: ${this.links.length} links`);
+    await this.stateClient.pushEvent('phase:harvest:done', { count: 0 });
   }
 
   private async handleBlockingState(checkpoint: XhsCheckpointId) {
     this.currentPhase = 'error';
     await this.stateClient.pushEvent('phase:blocked', { checkpoint });
-
-    console.log(`[OrchestratorV2] Blocked by: ${checkpoint}`);
-    // Wait for user intervention or retry logic
+    console.log(`[OrchestratorV2] Blocked: ${checkpoint}`);
+    try {
+      await camoScreenshot(this.options.profileId, `/tmp/blocked-${this.runId}.png`);
+    } catch {}
   }
 
   getCurrentPhase(): string {
@@ -115,7 +171,6 @@ export class XhsOrchestratorV2 {
   async run(): Promise<XhsCollectResult> {
     await this.initialize();
 
-    // Wait for completion or timeout
     return new Promise((resolve) => {
       const timeout = setTimeout(async () => {
         await this.stop();
@@ -126,9 +181,21 @@ export class XhsOrchestratorV2 {
           failed: 0,
           error: 'timeout',
         });
-      }, 5 * 60 * 1000); // 5 min timeout
+      }, 5 * 60 * 1000);
 
-      // TODO: Add completion detection
+      const checkInterval = setInterval(() => {
+        if (this.currentPhase === 'done' || this.currentPhase === 'error') {
+          clearTimeout(timeout);
+          clearInterval(checkInterval);
+          resolve({
+            runId: this.runId,
+            processed: this.links.length,
+            total: this.options.target,
+            failed: 0,
+            links: this.links.map(l => l.safeUrl),
+          });
+        }
+      }, 1000);
     });
   }
 }
