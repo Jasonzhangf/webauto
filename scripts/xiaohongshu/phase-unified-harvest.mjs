@@ -585,7 +585,6 @@ async function processSingleNote({
         }
 
         const commentsPath = path.join(noteDir, 'comments.jsonl');
-        await fs.mkdir(resolvedLikeEvidenceDir, { recursive: true });
         const likeRes = await interact({
           sessionId: profile,
           noteId,
