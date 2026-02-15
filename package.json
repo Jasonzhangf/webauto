@@ -1,7 +1,6 @@
 {
-  "name": "webauto",
-  "private": true,
-  "version": "0.1.003",
+  "name": "@web-auto/webauto",
+  "version": "0.1.0",
   "type": "module",
   "bin": {
     "webauto": "bin/webauto.mjs"
