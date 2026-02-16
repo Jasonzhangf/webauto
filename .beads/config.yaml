@@ -14,7 +14,7 @@
 # no-db: false
 
 # Disable daemon for RPC communication (forces direct database access)
-# no-daemon: false
+no-daemon: true  # Required for multi-repo isolation
 
 # Disable auto-flush of database to JSONL after mutations
 # no-auto-flush: false
