@@ -6,8 +6,8 @@
     "webauto": "bin/webauto.mjs"
   },
   "dependencies": {
+    "@web-auto/camo": "^0.1.3",
     "ajv": "^8.12.0",
-    "@web-auto/camo": "^0.1.2",
     "esbuild-register": "^3.6.0",
     "iconv-lite": "^0.6.3",
     "linkedom": "^0.18.12",
