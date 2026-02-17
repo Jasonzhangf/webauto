@@ -22,7 +22,7 @@
     "actions:validate": "node scripts/actions-validate.cjs",
     "actions:run": "node scripts/run-action.cjs",
     "build": "npm run prebuild && npm run build:services && npm run test:floating-panel:logic && npm run self-check:post-build && npm run ui:test",
-    "build:services": "node scripts/build/run-services-build.mjs",
+    "build:services": "tsc -p tsconfig.services.json",
     "build:ocr:macos": "node scripts/build/build-ocr-macos.mjs",
     "build:package": "node scripts/package/build-cli.mjs",
     "package": "npm run build:services && npm run build:package",

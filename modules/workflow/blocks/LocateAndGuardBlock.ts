@@ -14,7 +14,9 @@
  */
 
 import { controllerAction } from './helpers/searchExecutor.js';
-import { emitRunEvent } from '../../../scripts/xiaohongshu/lib/logger.mjs';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 
 export type HardStopState = 'risk_control' | 'login_guard' | 'offsite' | 'none';
 
@@ -61,6 +63,23 @@ interface ContainerNode {
   match?: {
     nodes?: Array<{ rect?: any }>;
   };
+}
+
+function resolveRunEventsPath(): string {
+  const explicit = process.env.WEBAUTO_RUN_EVENTS;
+  if (explicit && explicit.trim()) return explicit.trim();
+  return path.join(os.homedir(), '.webauto', 'logs', 'run-events.jsonl');
+}
+
+async function emitRunEvent(event: string, data: Record<string, any>): Promise<void> {
+  try {
+    const filePath = resolveRunEventsPath();
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
+    const line = JSON.stringify({ ts: new Date().toISOString(), event, data });
+    fs.appendFileSync(filePath, `${line}\n`);
+  } catch {
+    // Best-effort logging; failure should not block workflow execution.
+  }
 }
 
 function findContainerNode(tree: any, targetId: string): ContainerNode | null {
