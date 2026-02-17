@@ -3,7 +3,6 @@ import type { ContainerDefinition } from '../../container-registry/src/index.js'
 import { ContainerOperationQueue, type OperationTaskConfig } from '../../operations/src/queue.js';
 import { ensureBuiltinOperations } from '../../operations/src/builtin.js';
 import { assertContainerOperations, containerAllowsOperation } from '../../operations/src/container-binding.js';
-import { globalEventBus } from '../../../libs/operations-framework/src/event-driven/EventBus.js';
 import type { OperationContextProvider } from '../../operations/src/queue.js';
 
 function matches(pattern: string, topic: string): boolean {
@@ -37,19 +36,15 @@ export interface WorkflowDefinition {
 
 export interface WorkflowRuntimeOptions {
   contextProvider?: OperationContextProvider;
-  useGlobalBus?: boolean;
 }
 
 export class WorkflowRuntime extends EventEmitter {
   private queue: ContainerOperationQueue;
   private workflows = new Map<string, WorkflowDefinition>();
-  private middlewareAttached = false;
-  private useGlobalBus: boolean;
 
   constructor(options: WorkflowRuntimeOptions = {}) {
     super();
     ensureBuiltinOperations();
-    this.useGlobalBus = options.useGlobalBus !== false;
     this.queue = new ContainerOperationQueue({
       contextProvider: options.contextProvider,
       autoStart: true,
@@ -58,9 +53,6 @@ export class WorkflowRuntime extends EventEmitter {
     this.queue.on('task:started', (payload) => this.emit('task:started', payload));
     this.queue.on('task:completed', (payload) => this.emit('task:completed', payload));
     this.queue.on('task:failed', (payload) => this.emit('task:failed', payload));
-    if (this.useGlobalBus) {
-      this.attachMiddleware();
-    }
   }
 
   registerWorkflow(definition: WorkflowDefinition) {
@@ -78,15 +70,6 @@ export class WorkflowRuntime extends EventEmitter {
     }
   }
 
-  private attachMiddleware() {
-    if (this.middlewareAttached) return;
-    globalEventBus.use(async (event, data, next) => {
-      await this.handleEvent(event, data);
-      await next();
-    });
-    this.middlewareAttached = true;
-  }
-
   async dispatchEvent(event: string, payload: any) {
     for (const workflow of this.workflows.values()) {
       for (const trigger of workflow.triggers) {
@@ -102,11 +85,6 @@ export class WorkflowRuntime extends EventEmitter {
         await this.enqueueOperations(workflow, trigger.operations, { event: { name: event, data: payload } });
       }
     }
-  }
-
-  // backward compat for middleware usage
-  private async handleEvent(event: string, payload: any) {
-    await this.dispatchEvent(event, payload);
   }
 
   private async enqueueOperations(

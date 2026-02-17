@@ -7,7 +7,7 @@ function killPid(pid){
 }
 
 async function main(){
-  const pidFile = '/tmp/workflow-api.pid';
+  const pidFile = '/tmp/webauto-api.pid';
   if (!existsSync(pidFile)) { console.log('No pid file.'); return; }
   const pid = Number(readFileSync(pidFile,'utf8').trim());
   if (pid>0) killPid(pid);
@@ -16,4 +16,3 @@ async function main(){
 }
 
 main().catch(e=>{ console.error(e); process.exit(1); });
-

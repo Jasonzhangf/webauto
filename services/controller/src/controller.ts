@@ -152,7 +152,7 @@ export class UiController {
     this.repoRoot = options.repoRoot || process.cwd();
     this.messageBus = options.messageBus;
     this.userContainerRoot = options.userContainerRoot || path.join(os.homedir(), '.webauto', 'container-lib');
-    this.containerIndexPath = options.containerIndexPath || path.join(this.repoRoot, 'container-library.index.json');
+    this.containerIndexPath = options.containerIndexPath || path.join(this.repoRoot, 'apps/webauto/resources/container-library.index.json');
     this.cliTargets = options.cliTargets || {};
     this.defaultWsHost = options.defaultWsHost || '127.0.0.1';
     this.defaultWsPort = Number(options.defaultWsPort || 8765);
@@ -236,7 +236,7 @@ export class UiController {
     logDebug('controller', 'handleAction', { action, payload });
     switch (action) {
       case 'browser:status':
-        return this.runCliCommand('browser-control', ['status']);
+        return this.fetchBrowserStatus();
       case 'session:list':
         return this.runCliCommand('session-manager', ['list']);
       case 'session:create':
@@ -805,6 +805,15 @@ export class UiController {
       { timeoutMs: 30000 },
     );
     return { success: true, data: result };
+  }
+
+  async fetchBrowserStatus() {
+    try {
+      const data = await this.browserServiceCommand('getStatus', {}, { timeoutMs: 10000 });
+      return { success: true, data };
+    } catch (err: any) {
+      return { success: false, error: err?.message || String(err) };
+    }
   }
 
   private getBrowserServiceHttpUrl(): string {

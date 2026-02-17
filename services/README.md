@@ -93,17 +93,15 @@ API接口层 (RESTful API)
 ### 一键启动服务
 
 ```bash
-# 启动浏览器服务
-python services/browser_launcher.py
+# 启动 Unified API（7701）
+node runtime/infra/utils/scripts/service/start-api.mjs
 
-# 指定端口启动
-python services/browser_launcher.py --port 9999
+# 启动 Browser Service（7704）
+node runtime/infra/utils/scripts/service/start-browser-service.mjs
 
-# 调试模式启动
-python services/browser_launcher.py --debug
-
-# 后台模式启动
-python services/browser_launcher.py --daemon
+# 停止服务
+node runtime/infra/utils/scripts/service/stop-browser-service.mjs
+node runtime/infra/utils/scripts/service/stop-api.mjs
 ```
 
 ### API使用示例

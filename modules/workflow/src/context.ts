@@ -1,4 +1,3 @@
-import { BrowserService } from '../../browser/src/service.mjs';
 import type { OperationContext } from '../../operations/src/registry.js';
 
 export interface BrowserContextProviderOptions {
@@ -34,15 +33,14 @@ function buildScript(fn: ((...args: any[]) => any) | string, args: any[]): strin
 }
 
 export class BrowserWorkflowContextProvider {
-  private service: BrowserService;
+  private serviceHost: string;
+  private servicePort: number;
   private profile: string;
 
   constructor(options: BrowserContextProviderOptions) {
     this.profile = options.profile;
-    const serviceOptions: Record<string, any> = {};
-    if (options.host) serviceOptions.host = options.host;
-    if (typeof options.port === 'number') serviceOptions.port = options.port;
-    this.service = new BrowserService(serviceOptions);
+    this.serviceHost = options.host || '127.0.0.1';
+    this.servicePort = typeof options.port === 'number' ? options.port : 7704;
   }
 
   async createContext(): Promise<OperationContext> {
@@ -60,7 +58,7 @@ export class BrowserWorkflowContextProvider {
       console.debug('[workflow:context] evaluate fn:', typeof fn === 'function' ? fn.toString() : fn);
       console.debug('[workflow:context] script:', script);
     }
-    const response = await this.service.command('evaluate', {
+    const response = await this.command('evaluate', {
       profileId: this.profile,
       script,
     });
@@ -68,5 +66,18 @@ export class BrowserWorkflowContextProvider {
       throw new Error(response?.error || 'evaluate failed');
     }
     return typeof response?.result === 'undefined' ? response : response.result;
+  }
+
+  private async command(action: string, args: Record<string, any>) {
+    const resp = await fetch(`http://${this.serviceHost}:${this.servicePort}/command`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ action, args }),
+    });
+    const payload = await resp.json().catch(() => ({}));
+    if (!resp.ok) {
+      return { ok: false, error: payload?.error || `command ${action} failed: HTTP ${resp.status}` };
+    }
+    return payload;
   }
 }

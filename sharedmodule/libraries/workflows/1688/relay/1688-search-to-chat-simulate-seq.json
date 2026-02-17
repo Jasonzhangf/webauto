@@ -1,9 +1,0 @@
-{
-  "sharedParameters": { "keyword": "钢化膜", "chatMessage": "你好" },
-  "pauseBetweenMs": 1200,
-  "workflows": [
-    { "path": "sharedmodule/libraries/workflows/1688/relay/1688-search-event-click.json", "parameters": { "skipPreflows": true } },
-    { "path": "sharedmodule/libraries/workflows/1688/relay/1688-chat-basic.json", "parameters": { "send": false } }
-  ]
-}
-

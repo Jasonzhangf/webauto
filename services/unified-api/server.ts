@@ -1,19 +1,12 @@
-import { ContainerDefinitionLoader } from '../../libs/containers/src/loader/ContainerDefinitionLoader.js';
-import { BrowserDiscoveryAdapter } from '../../libs/containers/src/adapter/BrowserDiscoveryAdapter.js';
-import { RuntimeController } from '../../libs/containers/src/engine/RuntimeController.js';
-import { TreeDiscoveryEngine } from '../../libs/containers/src/engine/TreeDiscoveryEngine.js';
 import { logDebug } from '../../modules/logging/src/index.js';
 import { UiController } from '../../services/controller/src/controller.js';
 import { handleContainerOperations } from './container-operations-handler.js';
 // @ts-ignore
 // import { setupContainerOperationsRoutes } from './container-operations.mjs';
 import { WebSocketServer, WebSocket } from 'ws';
-import { EventBus, globalEventBus } from '../../libs/operations-framework/src/event-driven/EventBus.js';
 import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
-import { getActionUsage, getAllUsages } from '../../modules/api-usage/src/index.js';
-import registerCoreUsage from './register-core-usage.js';
 import { RemoteSessionManager } from './RemoteSessionManager.js';
 import { ensureBuiltinOperations } from '../../modules/operations/src/builtin.js';
 import { getContainerExecutor } from '../../modules/operations/src/executor.js';
@@ -36,18 +29,16 @@ const DEFAULT_HOST = process.env.WEBAUTO_UNIFIED_HOST || '127.0.0.1';
 // 源码构建时同样兼容（__dirname 为 services/unified-api/），此写法在两种场景下都能得到仓库根目录
 const repoRoot = path.resolve(__dirname, '../../..');
 const userContainerRoot = process.env.WEBAUTO_USER_CONTAINER_ROOT || path.join(os.homedir(), '.webauto', 'container-lib');
-const containerIndexPath = process.env.WEBAUTO_CONTAINER_INDEX || path.join(repoRoot, 'container-library.index.json');
+const containerIndexPath = process.env.WEBAUTO_CONTAINER_INDEX || path.join(repoRoot, 'apps/webauto/resources/container-library.index.json');
 const defaultWsHost = process.env.WEBAUTO_WS_HOST || '127.0.0.1';
 const defaultWsPort = Number(process.env.WEBAUTO_WS_PORT || 8765);
 const defaultHttpHost = process.env.WEBAUTO_BROWSER_HTTP_HOST || '127.0.0.1';
 const defaultHttpPort = Number(process.env.WEBAUTO_BROWSER_HTTP_PORT || 7704);
 const defaultHttpProtocol = process.env.WEBAUTO_BROWSER_HTTP_PROTO || 'http';
 const cliTargets = {
-  'browser-control': path.join(repoRoot, 'dist/modules/browser-control/src/cli.js'),
   'session-manager': path.join(repoRoot, 'dist/modules/session-manager/src/cli.js'),
   logging: path.join(repoRoot, 'dist/modules/logging/src/cli.js'),
   operations: path.join(repoRoot, 'dist/modules/operations/src/cli.js'),
-  'container-matcher': path.join(repoRoot, 'dist/modules/container-matcher/src/cli.js'),
 };
 
 startHeartbeatWatcher({ serviceName: 'unified-api' });
@@ -57,10 +48,7 @@ class UnifiedApiServer {
   private wsClients: Set<WebSocket>;
   private busClients: Set<WebSocket>;
   private subscriptions: Map<WebSocket, Set<string>>;
-  private eventBus: EventBus;
   private containerSubscriptions: Map<string, Set<WebSocket>> = new Map();
-  private containerLoader: any;
-  private runtimeControllers: Map<string, RuntimeController> = new Map();
   private containerExecutor: any;
   private sessionManager: any;
   private stateRegistry: any;
@@ -87,30 +75,10 @@ class UnifiedApiServer {
     this.wsClients = new Set();
     this.busClients = new Set();
     this.subscriptions = new Map();
-    this.eventBus = globalEventBus;
-    this.containerLoader = ContainerDefinitionLoader;
-    this.setupEventBridge();
-
-    // Register core usage definitions
-    registerCoreUsage();
 
     // Initialize state registry
     this.stateRegistry = getStateRegistry();
     this.setupTaskRoutes();
-  }
-
-  private setupEventBridge(): void {
-    this.eventBus.on('container:*', (data) => {
-      this.broadcastEvent('container:event', data);
-    });
-
-    this.eventBus.on('operation:*', (data) => {
-      this.broadcastEvent('operation:event', data);
-    });
-
-    this.eventBus.on('system:*', (data) => {
-      this.broadcastEvent('system:event', data);
-    });
   }
 
     private broadcastEvent(topic: string, payload: any): void {
@@ -436,15 +404,6 @@ class UnifiedApiServer {
         }
 
       // Health check for browser service
-      // Usage endpoints
-      if (req.method === 'GET' && url.pathname === '/v1/usage') {
-        const action = url.searchParams.get('action');
-        const usage = action ? getActionUsage(action) : getAllUsages();
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ success: true, data: usage }));
-        return;
-      }
-
       if (req.method === 'GET' && url.pathname === '/v1/browser/health') {
         try {
           const result = await this.controller.handleAction('browser:status', {});

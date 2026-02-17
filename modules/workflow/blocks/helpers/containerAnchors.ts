@@ -41,7 +41,7 @@ export interface AnchorVerifyResult {
 
 const repoRoot = path.resolve(process.cwd());
 const userContainerRoot = process.env.WEBAUTO_USER_CONTAINER_ROOT || path.join(os.homedir(), '.webauto', 'container-lib');
-const containerIndexPath = process.env.WEBAUTO_CONTAINER_INDEX || path.join(repoRoot, 'container-library.index.json');
+const containerIndexPath = process.env.WEBAUTO_CONTAINER_INDEX || path.join(repoRoot, 'apps/webauto/resources/container-library.index.json');
 
 const definitionCache = new Map<string, ContainerDefinition | null>();
 
@@ -66,7 +66,7 @@ function findSiteKeyForContainer(containerId: string, index: Record<string, { we
 function findContainerJsonPath(containerId: string): string | null {
   const index = loadContainerIndex();
   const siteKey = findSiteKeyForContainer(containerId, index) || 'xiaohongshu';
-  const rootDir = path.join(repoRoot, 'container-library', siteKey);
+  const rootDir = path.join(repoRoot, 'apps/webauto/resources/container-library', siteKey);
 
   if (!fs.existsSync(rootDir)) {
     return null;

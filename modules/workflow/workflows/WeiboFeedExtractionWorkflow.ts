@@ -9,11 +9,10 @@
  */
 
 import { EventEmitter } from 'events';
-import {
-  MSG_CONTAINER_APPEAR,
-  MSG_CONTAINER_OPERATION_COMPLETE,
-  MSG_CONTAINER_CLICK
-} from '../../../libs/operations-framework/src/event-driven/MessageConstants.js';
+
+const MSG_CONTAINER_APPEAR = 'MSG_CONTAINER_APPEAR';
+const MSG_CONTAINER_OPERATION_COMPLETE = 'MSG_CONTAINER_OPERATION_COMPLETE';
+const MSG_CONTAINER_CLICK = 'MSG_CONTAINER_CLICK';
 
 export interface WeiboPost {
   id: string;
@@ -34,7 +33,7 @@ export interface WorkflowConfig {
 }
 
 export interface WorkflowContext {
-  messageBus: any;  // MessageBusService
+  messageBus: any;
   apiClient: any;   // API client for unified API calls
 }
 

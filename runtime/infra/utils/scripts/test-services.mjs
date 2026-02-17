@@ -47,45 +47,45 @@ async function main() {
     } catch {}
   }
   
-  // 3. 测试 Workflow API
-  log('测试 Workflow API...');
-  const workflowProc = spawn('node', ['dist/services/engines/api-gateway/server.js'], {
-    env: { ...process.env, PORT_WORKFLOW: '7704' },
+  // 3. 测试 Unified API
+  log('测试 Unified API...');
+  const unifiedProc = spawn('node', ['dist/apps/webauto/server.js'], {
+    env: { ...process.env, WEBAUTO_RUNTIME_MODE: 'unified', WEBAUTO_UNIFIED_PORT: '7704' },
     stdio: ['ignore', 'pipe', 'pipe']
   });
   
-  workflowProc.stdout.on('data', (data) => {
-    log(`[Workflow API] ${data.toString().trim()}`);
+  unifiedProc.stdout.on('data', (data) => {
+    log(`[Unified API] ${data.toString().trim()}`);
   });
   
-  workflowProc.stderr.on('data', (data) => {
-    log(`[Workflow API ERROR] ${data.toString().trim()}`);
+  unifiedProc.stderr.on('data', (data) => {
+    log(`[Unified API ERROR] ${data.toString().trim()}`);
   });
   
-  workflowProc.on('error', (err) => {
-    log(`❌ Workflow API 启动错误: ${err.message}`);
+  unifiedProc.on('error', (err) => {
+    log(`❌ Unified API 启动错误: ${err.message}`);
   });
   
-  const workflowOk = await testHealth(7704, 'Workflow API', 15000);
+  const unifiedOk = await testHealth(7704, 'Unified API', 15000);
   
-  if (workflowOk) {
+  if (unifiedOk) {
     // 4. 测试基本 API
     try {
-      const response = await fetch('http://127.0.0.1:7704/sessions');
+      const response = await fetch('http://127.0.0.1:7704/v1/system/state');
       const data = await response.json();
-      log(`📋 会话列表: ${JSON.stringify(data)}`);
+      log(`📋 系统状态: ${JSON.stringify(data)}`);
     } catch (e) {
-      log(`❌ 会话列表获取失败: ${e.message}`);
+      log(`❌ 系统状态获取失败: ${e.message}`);
     }
   }
   
   // 5. 清理
-  workflowProc.kill('SIGTERM');
+  unifiedProc.kill('SIGTERM');
   await wait(1000);
-  workflowProc.kill('SIGKILL');
+  unifiedProc.kill('SIGKILL');
   
   log('🧹 测试完成');
-  process.exit(workflowOk ? 0 : 1);
+  process.exit(unifiedOk ? 0 : 1);
 }
 
 main().catch(e => {

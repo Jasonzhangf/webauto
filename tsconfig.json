@@ -22,8 +22,7 @@
     "downlevelIteration": true
   },
   "include": [
-    "src/page-analyzer/**/*.ts",
-    "src/modules/executable-container/**/*.ts"
+    "apps/webauto/server.ts"
   ],
   "exclude": [
     "node_modules",

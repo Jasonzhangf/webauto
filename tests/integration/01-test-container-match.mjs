@@ -45,7 +45,7 @@ try {
   log(`✓ Unified API 健康: ${health.trim()}`);
   
   // 启动 Browser Service
-  const browser = execSync('node libs/browser/remote-service.js --host 127.0.0.1 --port 7704 > /tmp/browser-service.log 2>&1 & echo $!', {
+  const browser = execSync('node dist/modules/camo-backend/src/index.js --host 127.0.0.1 --port 7704 > /tmp/browser-service.log 2>&1 & echo $!', {
     encoding: 'utf8',
     shell: '/bin/bash'
   });

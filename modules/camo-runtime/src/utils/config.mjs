@@ -81,10 +81,3 @@ export function setRepoRoot(repoRoot) {
 export function getDefaultProfile() {
   return loadConfig().defaultProfile;
 }
-
-const START_SCRIPT_REL = path.join('runtime', 'infra', 'utils', 'scripts', 'service', 'start-browser-service.mjs');
-
-export function hasStartScript(root) {
-  if (!root) return false;
-  return fs.existsSync(path.join(root, START_SCRIPT_REL));
-}

@@ -75,7 +75,6 @@ export class WorkflowOrchestrator {
         });
     this.runtime = new WorkflowRuntime({
       contextProvider: () => contextProvider.createContext(),
-      useGlobalBus: false,
     });
     this.attachRuntimeEvents(this.runtime);
     for (const wf of workflows) {

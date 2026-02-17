@@ -1,78 +1,106 @@
 #!/usr/bin/env node
-// 启动浏览器远程服务（后台守护进程）
-import { spawn, execSync } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
-import { dirname, join, resolve } from 'node:path';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { execSync, spawn } from 'node:child_process';
+import fs from 'node:fs';
 import os from 'node:os';
-import { loadBrowserServiceConfig } from '../../../../../libs/browser/browser-service-config.js';
+import path from 'node:path';
+import { setTimeout as wait } from 'node:timers/promises';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
-const projectRoot = resolve(__dirname, '../../../../..');
+const RUN_DIR = path.join(os.homedir(), '.webauto', 'run');
+const PID_FILE = path.join(RUN_DIR, 'browser-service.pid');
+const DEFAULT_HOST = process.env.WEBAUTO_BROWSER_HOST || '127.0.0.1';
+const DEFAULT_PORT = Number(process.env.WEBAUTO_BROWSER_PORT || 7704);
 
-const args = process.argv.slice(2);
-const cfg = loadBrowserServiceConfig();
-const portArgIndex = args.findIndex(a => a === '--port');
-const hostArgIndex = args.findIndex(a => a === '--host');
-const port = portArgIndex !== -1 ? Number(args[portArgIndex + 1]) : Number(cfg.port || 7704);
-const host = hostArgIndex !== -1 ? String(args[hostArgIndex + 1]) : String(cfg.host || '0.0.0.0');
-
-const runDir = join(os.homedir(), '.webauto', 'run');
-const pidFile = join(runDir, 'browser-service.pid');
-
-function ensureBrowserServiceBuild() {
-  const entry = join(projectRoot, 'dist', 'services', 'browser-service', 'index.js');
-  if (existsSync(entry)) return;
-  console.log('[browser-service] 构建缺失，自动执行 npm run build:services');
-  execSync('npm run build:services', { stdio: 'inherit', cwd: projectRoot });
+function isAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
-function isProcessAlive(pid) {
-  try { return process.kill(pid, 0), true; } catch { return false; }
+async function health(host = DEFAULT_HOST, port = DEFAULT_PORT) {
+  try {
+    const res = await fetch(`http://${host}:${port}/health`);
+    if (!res.ok) return false;
+    const body = await res.json().catch(() => ({}));
+    return Boolean(body?.ok ?? true);
+  } catch {
+    return false;
+  }
 }
 
-function main() {
-  mkdirSync(runDir, { recursive: true });
-  ensureBrowserServiceBuild();
+function parseArgs() {
+  const args = process.argv.slice(2);
+  const hostIdx = args.findIndex((item) => item === '--host');
+  const portIdx = args.findIndex((item) => item === '--port');
+  const host = hostIdx >= 0 && args[hostIdx + 1] ? String(args[hostIdx + 1]) : DEFAULT_HOST;
+  const port = portIdx >= 0 && args[portIdx + 1] ? Number(args[portIdx + 1]) : DEFAULT_PORT;
+  return {
+    host,
+    port: Number.isFinite(port) && port > 0 ? port : DEFAULT_PORT,
+  };
+}
 
-  if (existsSync(pidFile)) {
-    try {
-      const oldPid = Number(readFileSync(pidFile, 'utf8'));
-      if (oldPid && isProcessAlive(oldPid)) {
-        console.log(`Browser service already running (pid=${oldPid}).`);
-        process.exit(0);
-      }
-    } catch {}
+function ensureBuild() {
+  const distEntry = path.resolve('dist/modules/camo-backend/src/index.js');
+  if (fs.existsSync(distEntry)) return distEntry;
+  console.log('[browser-service] backend entry missing, running npm run -s build:services');
+  execSync('npm run -s build:services', { stdio: 'inherit' });
+  if (!fs.existsSync(distEntry)) {
+    throw new Error(`backend entry missing after build: ${distEntry}`);
+  }
+  return distEntry;
+}
+
+async function main() {
+  const { host, port } = parseArgs();
+  fs.mkdirSync(RUN_DIR, { recursive: true });
+
+  if (await health(host, port)) {
+    console.log(`Browser service already healthy on http://${host}:${port}`);
+    return;
   }
 
-  // 先强制清理占用端口的进程，避免 EADDRINUSE
-  try {
-    if (process.platform === 'win32') {
-      const out = execSync(`netstat -ano | findstr :${port}`, { encoding: 'utf8' });
-      const pids = new Set();
-      out.split(/\r?\n/).forEach(line=>{ const m=line.trim().match(/\s(\d+)\s*$/); if (m) pids.add(Number(m[1])); });
-      for (const pid of pids){ try{ execSync(`taskkill /F /PID ${pid}`); }catch{} }
-    } else {
-      const out = execSync(`lsof -ti :${port} || true`, { encoding: 'utf8' });
-      const pids = out.split(/\s+/).map(s=>Number(s.trim())).filter(Boolean);
-      for (const pid of pids){ try{ process.kill(pid, 'SIGKILL'); }catch{} }
+  if (fs.existsSync(PID_FILE)) {
+    try {
+      const oldPid = Number(fs.readFileSync(PID_FILE, 'utf8'));
+      if (oldPid && isAlive(oldPid)) {
+        console.log(`Browser service already running (pid=${oldPid}).`);
+        return;
+      }
+    } catch {
+      // stale pid file will be overwritten
     }
-  } catch {}
+  }
 
-  const remoteService = join(projectRoot, 'libs', 'browser', 'remote-service.js');
-
-  const child = spawn(process.execPath, [remoteService, '--host', host, '--port', String(port)], {
+  const entry = ensureBuild();
+  const child = spawn(process.execPath, [entry], {
     detached: true,
     stdio: 'ignore',
-    env: { ...process.env }
+    env: {
+      ...process.env,
+      BROWSER_SERVICE_HOST: host,
+      BROWSER_SERVICE_PORT: String(port),
+      WEBAUTO_BROWSER_HOST: host,
+      WEBAUTO_BROWSER_PORT: String(port),
+    },
   });
-
   child.unref();
+  fs.writeFileSync(PID_FILE, String(child.pid));
 
-  writeFileSync(pidFile, String(child.pid));
-  console.log(`Browser service started in background (pid=${child.pid}) on http://${host}:${port}.`);
-  console.log(`PID file: ${pidFile}`);
+  for (let i = 0; i < 30; i += 1) {
+    if (await health(host, port)) {
+      console.log(`Browser service started (pid=${child.pid}) on http://${host}:${port}`);
+      return;
+    }
+    await wait(300);
+  }
+
+  throw new Error('browser service did not become healthy in time');
 }
 
-main();
+main().catch((err) => {
+  console.error(`[browser-service] start failed: ${err?.message || String(err)}`);
+  process.exit(1);
+});

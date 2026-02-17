@@ -5,7 +5,7 @@
 | 端口 | 服务 | 用途 | 实现文件 |
 |------|------|------|----------|
 | 7701 | Unified API | HTTP + WebSocket + Bus | services/unified-api/index.ts |
-| 7704 | Browser Service | 浏览器会话管理 | services/browser-service/index.ts |
+| 7704 | Browser Service | 浏览器会话管理 | modules/camo-backend/src/index.ts |
 | 7790 | SearchGate | 搜索节流服务（每 key 60s 最多 2 次） | scripts/search-gate-server.mjs |
 
 ## 环境变量
@@ -16,8 +16,8 @@
 - `WEBAUTO_FLOATING_HEADLESS`：浮窗是否无头（默认：0，显示窗口）
 
 ### 启动参数
-- `--profile <name>`：Profile 名称（默认：weibo_fresh）
-- `--url <url>`：目标 URL（默认：https://weibo.com）
+- `--profile <name>`：Profile 名称（默认：xiaohongshu-batch-1）
+- `--url <url>`：目标 URL（默认：https://www.xiaohongshu.com）
 - `--headless`：无头模式（仅用于调试，无可见窗口）
 
 ### 搜索节流

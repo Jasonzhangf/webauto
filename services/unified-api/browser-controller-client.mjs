@@ -1,6 +1,6 @@
 /**
  * Browser Controller Client (Unified API)
- * 用于替代 modules/browser/src/controller/client.mjs 的遗留引用
+ * Unified API 的 controller action 轻量客户端
  */
 
 export function createBrowserControllerClient(config = {}) {

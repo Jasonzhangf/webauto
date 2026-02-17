@@ -10,18 +10,16 @@ const DEFAULT_PORT = Number(process.env.WEBAUTO_CONTROLLER_PORT || 8970);
 const DEFAULT_HOST = process.env.WEBAUTO_CONTROLLER_HOST || '127.0.0.1';
 const repoRoot = process.env.WEBAUTO_REPO_ROOT || path.resolve(__dirname, '../../..');
 const userContainerRoot = process.env.WEBAUTO_USER_CONTAINER_ROOT || path.join(os.homedir(), '.webauto', 'container-lib');
-const containerIndexPath = process.env.WEBAUTO_CONTAINER_INDEX || path.join(repoRoot, 'container-library.index.json');
+const containerIndexPath = process.env.WEBAUTO_CONTAINER_INDEX || path.join(repoRoot, 'apps/webauto/resources/container-library.index.json');
 const defaultWsHost = process.env.WEBAUTO_WS_HOST || '127.0.0.1';
 const defaultWsPort = Number(process.env.WEBAUTO_WS_PORT || 8765);
 const defaultHttpHost = process.env.WEBAUTO_BROWSER_HTTP_HOST || '127.0.0.1';
 const defaultHttpPort = Number(process.env.WEBAUTO_BROWSER_HTTP_PORT || 7704);
 const defaultHttpProtocol = process.env.WEBAUTO_BROWSER_HTTP_PROTO || 'http';
 const cliTargets = {
-  'browser-control': path.join(repoRoot, 'modules/browser-control/src/cli.ts'),
   'session-manager': path.join(repoRoot, 'modules/session-manager/src/cli.ts'),
   logging: path.join(repoRoot, 'modules/logging/src/cli.ts'),
   operations: path.join(repoRoot, 'modules/operations/src/cli.ts'),
-  'container-matcher': path.join(repoRoot, 'modules/container-matcher/src/cli.ts'),
 };
 
 const controllerBusClients = new Set();

@@ -3,7 +3,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { findRepoRootCandidate } from '../utils/browser-service.mjs';
 
-const CONTAINER_ROOT_ENV = process.env.WEBAUTO_CONTAINER_ROOT || process.env.ROUTECODEX_CONTAINER_ROOT;
+const CONTAINER_ROOT_ENV = process.env.WEBAUTO_CONTAINER_ROOT;
 
 export const USER_CONTAINER_ROOT = CONTAINER_ROOT_ENV || path.join(os.homedir(), '.webauto', 'container-lib');
 export const SUBSCRIPTION_ROOT = path.join(os.homedir(), '.webauto', 'container-subscriptions');
@@ -225,7 +225,7 @@ function detectContainerLibraryRoot(explicitRoot) {
   if (explicitRoot) return explicitRoot;
   const repoRoot = findRepoRootCandidate();
   if (!repoRoot) return null;
-  const candidate = path.join(repoRoot, 'container-library');
+  const candidate = path.join(repoRoot, 'apps/webauto/resources/container-library');
   return fs.existsSync(candidate) ? candidate : null;
 }
 

@@ -113,7 +113,7 @@ export function createProfileStore(opts: Options): ProfileStore {
   let cachedFingerprintMod: any = null;
   async function getFingerprintModule() {
     if (cachedFingerprintMod) return cachedFingerprintMod;
-    const p = path.join(opts.repoRoot, 'dist', 'libs', 'browser', 'fingerprint-manager.js');
+    const p = path.join(opts.repoRoot, 'dist', 'modules', 'camo-backend', 'src', 'internal', 'fingerprint.js');
     cachedFingerprintMod = await import(pathToFileURL(p).href);
     return cachedFingerprintMod;
   }

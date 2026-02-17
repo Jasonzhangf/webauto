@@ -1,12 +1,11 @@
 import { spawn } from 'child_process';
 import path from 'path';
-import os from 'os';
 import { fileURLToPath } from 'url';
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../..');
-const CORE_DAEMON_SCRIPT = path.join(REPO_ROOT, 'scripts', 'core-daemon.mjs');
 const CORE_HEALTH_URLS = ['http://127.0.0.1:7701/health', 'http://127.0.0.1:7704/health'];
-const DESKTOP_HEARTBEAT_FILE = path.join(os.homedir(), '.webauto', 'run', 'desktop-console-heartbeat.json');
+const START_API_SCRIPT = path.join(REPO_ROOT, 'runtime', 'infra', 'utils', 'scripts', 'service', 'start-api.mjs');
+const STOP_API_SCRIPT = path.join(REPO_ROOT, 'runtime', 'infra', 'utils', 'scripts', 'service', 'stop-api.mjs');
 
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -34,22 +33,48 @@ async function areCoreServicesHealthy() {
   return health.every(Boolean);
 }
 
-type CoreDaemonCommand = 'start' | 'stop';
-
-async function runCoreDaemon(command: CoreDaemonCommand, timeoutMs: number) {
+async function runNodeScript(scriptPath: string, timeoutMs: number) {
   return new Promise<boolean>((resolve) => {
     const nodeBin = resolveNodeBin();
-    const child = spawn(nodeBin, [CORE_DAEMON_SCRIPT, command], {
+    const child = spawn(nodeBin, [scriptPath], {
       cwd: REPO_ROOT,
       stdio: 'ignore',
       windowsHide: true,
       detached: false,
       env: {
         ...process.env,
-        WEBAUTO_DAEMON: '1',
-        WEBAUTO_HEARTBEAT_FILE: String(process.env.WEBAUTO_HEARTBEAT_FILE || DESKTOP_HEARTBEAT_FILE),
-        // Keep browser-service alive while Desktop UI is open.
         BROWSER_SERVICE_AUTO_EXIT: '0',
+      },
+    });
+
+    const timer = setTimeout(() => {
+      try {
+        child.kill('SIGTERM');
+      } catch {}
+      resolve(false);
+    }, timeoutMs);
+
+    child.once('error', () => {
+      clearTimeout(timer);
+      resolve(false);
+    });
+
+    child.once('exit', (code) => {
+      clearTimeout(timer);
+      resolve(code === 0);
+    });
+  });
+}
+
+async function runCommand(command: string, args: string[], timeoutMs: number) {
+  return new Promise<boolean>((resolve) => {
+    const child = spawn(command, args, {
+      cwd: REPO_ROOT,
+      stdio: 'ignore',
+      windowsHide: true,
+      detached: false,
+      env: {
+        ...process.env,
       },
     });
 
@@ -74,9 +99,16 @@ async function runCoreDaemon(command: CoreDaemonCommand, timeoutMs: number) {
 
 export async function startCoreDaemon(): Promise<boolean> {
   if (await areCoreServicesHealthy()) return true;
-  const started = await runCoreDaemon('start', 60_000);
-  if (!started) {
-    console.error('[CoreDaemonManager] Failed to execute core-daemon start');
+
+  const startedApi = await runNodeScript(START_API_SCRIPT, 40_000);
+  if (!startedApi) {
+    console.error('[CoreDaemonManager] Failed to start unified API service');
+    return false;
+  }
+
+  const startedBrowser = await runCommand('npx', ['--yes', '@web-auto/camo', 'init'], 40_000);
+  if (!startedBrowser) {
+    console.error('[CoreDaemonManager] Failed to start camo browser backend');
     return false;
   }
 
@@ -90,9 +122,9 @@ export async function startCoreDaemon(): Promise<boolean> {
 }
 
 export async function stopCoreDaemon(): Promise<boolean> {
-  const stopped = await runCoreDaemon('stop', 30_000);
-  if (!stopped) {
-    console.error('[CoreDaemonManager] Failed to execute core-daemon stop');
+  const stoppedApi = await runNodeScript(STOP_API_SCRIPT, 20_000);
+  if (!stoppedApi) {
+    console.error('[CoreDaemonManager] Failed to stop core services');
     return false;
   }
   return true;

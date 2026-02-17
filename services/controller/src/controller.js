@@ -14,12 +14,10 @@ export class UiController {
   constructor(options = {}) {
     this.repoRoot = options.repoRoot || process.cwd();
     this.messageBus = options.messageBus;
-    // 外置容器树：新的路径优先（~/.webauto/container-lib），其次兼容历史路径（~/.routecodex/container-lib）。
+    // 外置容器树：统一使用 ~/.webauto/container-lib
     this.userContainerRoot =
       options.userContainerRoot || path.join(os.homedir(), '.webauto', 'container-lib');
-    this.legacyUserContainerRoot =
-      options.legacyUserContainerRoot || path.join(os.homedir(), '.routecodex', 'container-lib');
-    this.containerIndexPath = options.containerIndexPath || path.join(this.repoRoot, 'container-library.index.json');
+    this.containerIndexPath = options.containerIndexPath || path.join(this.repoRoot, 'apps/webauto/resources/container-library.index.json');
     this.cliTargets = options.cliTargets || {};
     this.defaultWsHost = options.defaultWsHost || '127.0.0.1';
     this.defaultWsPort = Number(options.defaultWsPort || 8765);
@@ -1128,51 +1126,11 @@ export class UiController {
   }
 
   async captureSnapshotFromFixture({ profileId, url, maxDepth, maxChildren, containerId, rootSelector }) {
-    const tmpDir = await fsPromises.mkdtemp(path.join(os.tmpdir(), 'webauto-ui-'));
-    const fixturePath = path.join(tmpDir, 'dom.html');
-    try {
-      const domArgs = ['dom-dump', '--url', url, '--headless', 'true', '--output', fixturePath];
-      if (profileId) {
-        domArgs.push('--profile', profileId);
-      }
-      await this.runCliCommand('browser-control', domArgs);
-      const treeArgs = ['inspect-tree', '--url', url, '--fixture', fixturePath];
-      if (containerId) treeArgs.push('--root-container-id', containerId);
-      if (rootSelector) treeArgs.push('--root-selector', rootSelector);
-      if (typeof maxDepth === 'number') {
-        treeArgs.push('--max-depth', String(maxDepth));
-      }
-      if (typeof maxChildren === 'number') {
-        treeArgs.push('--max-children', String(maxChildren));
-      }
-      const tree = await this.runCliCommand('container-matcher', treeArgs);
-      return tree?.data || tree;
-    } finally {
-      fsPromises.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
-    }
+    throw new Error('fixture snapshot fallback has been removed; use active browser session snapshot');
   }
 
   async captureBranchFromFixture({ profileId, url, path: domPath, rootSelector, maxDepth, maxChildren }) {
-    if (!domPath) {
-      throw new Error('缺少 DOM 路径');
-    }
-    const tmpDir = await fsPromises.mkdtemp(path.join(os.tmpdir(), 'webauto-branch-'));
-    const fixturePath = path.join(tmpDir, 'dom.html');
-    try {
-      const domArgs = ['dom-dump', '--url', url, '--headless', 'true', '--output', fixturePath];
-      if (profileId) domArgs.push('--profile', profileId);
-      await this.runCliCommand('browser-control', domArgs);
-      const branchArgs = ['inspect-branch', '--url', url, '--fixture', fixturePath, '--path', domPath];
-      if (rootSelector) branchArgs.push('--root-selector', rootSelector);
-      if (typeof maxDepth === 'number') branchArgs.push('--max-depth', String(maxDepth));
-      if (typeof maxChildren === 'number') {
-        branchArgs.push('--max-children', String(maxChildren));
-      }
-      const result = await this.runCliCommand('container-matcher', branchArgs);
-      return result?.data || result;
-    } finally {
-      fsPromises.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
-    }
+    throw new Error('fixture branch fallback has been removed; use active browser session branch');
   }
 
   async captureInspectorSnapshot(options = {}) {
@@ -1464,7 +1422,7 @@ export class UiController {
 
   resolveSiteBaseDir(siteKey) {
     const index = this.loadContainerIndex();
-    const rel = index[siteKey]?.path || path.join('container-library', siteKey);
+    const rel = index[siteKey]?.path || path.join('apps/webauto/resources/container-library', siteKey);
     return path.isAbsolute(rel) ? rel : path.join(this.repoRoot, rel);
   }
 
@@ -1489,28 +1447,11 @@ export class UiController {
         if (this.errorHandler) {
           this.errorHandler.debug('controller', 'read container file failed', { error: e.message });
         }
-        // ignore read error, fall through to legacy/builtin
+        // ignore read error, fall through to builtin
       }
     }
 
-    // 2) 兼容历史外置容器树 (~/.routecodex/container-lib)
-    if (this.legacyUserContainerRoot) {
-      const legacyBase = path.join(this.legacyUserContainerRoot, siteKey);
-      const legacyFile = this.buildContainerPath(legacyBase, containerId);
-      if (legacyFile && fs.existsSync(legacyFile)) {
-        try {
-          const raw = await fsPromises.readFile(legacyFile, 'utf-8');
-          return JSON.parse(raw);
-        } catch (e) {
-          if (this.errorHandler) {
-            this.errorHandler.debug('controller', 'read container file failed', { error: e.message });
-          }
-          // ignore read error, fall through to builtin
-        }
-      }
-    }
-
-    // 3) 内置容器树（仓库中的 container-library/*）
+    // 2) 内置容器树（仓库中的 apps/webauto/resources/container-library/*）
     const builtinBase = this.resolveSiteBaseDir(siteKey);
     const builtinFile = this.buildContainerPath(builtinBase, containerId);
     if (builtinFile && fs.existsSync(builtinFile)) {

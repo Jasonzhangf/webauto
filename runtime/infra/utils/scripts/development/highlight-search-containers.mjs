@@ -17,7 +17,7 @@ async function validate({ sessionId, selector }){ return await j('/v1/containers
 async function main(){
   const sessionId = arg('sessionId', null) || await lastSession();
   if (!sessionId) { console.error('No active session.'); process.exit(1); }
-  // container-library definitions (must match container-library.json)
+  // container definitions (must match container registry)
   const rootSel = '.search-ui2024, .search-i18nUi, body';
   const listSel = '.space-common-offerlist, .offer-list, #offer-list';
   const itemSel = '.offer-item, .sm-offer, [class*=offer]';
@@ -33,4 +33,3 @@ async function main(){
 }
 
 main().catch(e=>{ console.error(e); process.exit(1); });
-

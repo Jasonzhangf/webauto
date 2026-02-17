@@ -1,0 +1,22 @@
+{
+  "cbu": {
+    "website": "1688.com",
+    "container_file": "apps/webauto/resources/container-library/cbu/containers.json",
+    "description": "1688.com 容器定义"
+  },
+  "weibo": {
+    "website": "weibo.com",
+    "container_file": "apps/webauto/resources/container-library/weibo/containers.json",
+    "description": "weibo.com 容器定义"
+  },
+  "xiaohongshu": {
+    "website": "xiaohongshu.com",
+    "container_file": "apps/webauto/resources/container-library/xiaohongshu/home/container.json",
+    "description": "xiaohongshu.com 容器定义（首页入口）"
+  },
+  "default": {
+    "website": "default",
+    "container_file": "apps/webauto/resources/container-library/default/containers.json",
+    "description": "Containers for default"
+  }
+}

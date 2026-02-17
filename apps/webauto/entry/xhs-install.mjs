@@ -7,7 +7,8 @@ function run(cmd, args) {
 }
 
 function checkCamoufoxInstalled() {
-  const ret = run('npx', ['camoufox', 'path']);
+  const cmd = process.platform === 'win32' ? 'python' : 'python3';
+  const ret = run(cmd, ['-m', 'camoufox', 'path']);
   return ret.status === 0;
 }
 
@@ -16,7 +17,7 @@ function installCamoufox() {
   return ret.status === 0;
 }
 
-async function checkBrowserService() {
+async function checkBackendHealth() {
   try {
     const res = await fetch('http://127.0.0.1:7704/health', { signal: AbortSignal.timeout(3000) });
     return res.ok;
@@ -28,20 +29,37 @@ async function checkBrowserService() {
 async function main() {
   const argv = minimist(process.argv.slice(2));
   const download = argv['download-browser'] === true;
+  const ensureBackend = argv['ensure-backend'] === true;
+  const provider = String(process.env.WEBAUTO_BROWSER_PROVIDER || 'camo').trim().toLowerCase();
   let camoufoxInstalled = checkCamoufoxInstalled();
 
   if (!camoufoxInstalled && download) {
     camoufoxInstalled = installCamoufox();
   }
 
-  const browserServiceHealthy = await checkBrowserService();
-  const ok = camoufoxInstalled;
+  let backendEnsured = false;
+  let ensureBackendError = null;
+  if (ensureBackend) {
+    try {
+      const mod = await import('../../../modules/camo-runtime/src/utils/browser-service.mjs');
+      await mod.ensureBrowserService();
+      backendEnsured = true;
+    } catch (error) {
+      ensureBackendError = error?.message || String(error);
+    }
+  }
+
+  const backendHealthy = await checkBackendHealth();
+  const ok = camoufoxInstalled || backendHealthy;
 
   const result = {
     ok,
     camoufoxInstalled,
-    browserServiceHealthy,
-    message: camoufoxInstalled ? 'Camoufox 就绪' : 'Camoufox 未安装',
+    provider,
+    backendEnsured,
+    ensureBackendError,
+    backendHealthy,
+    message: ok ? 'Camo 后端就绪' : 'Camoufox 未安装',
   };
 
   console.log(JSON.stringify(result));

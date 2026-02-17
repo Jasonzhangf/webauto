@@ -75,7 +75,7 @@ export async function ensureProfile(profileId) {
 
 async function ensureFingerprint(profileId) {
   try {
-    const modulePath = path.resolve(process.cwd(), 'dist', 'libs', 'browser', 'fingerprint-manager.js');
+    const modulePath = path.resolve(process.cwd(), 'dist', 'modules', 'camo-backend', 'src', 'internal', 'fingerprint.js');
     if (!fs.existsSync(modulePath)) return { ok: false, reason: 'dist_missing' };
     const mod = await import(modulePath);
     const fpPath = path.join(resolveFingerprintsRoot(), `${profileId}.json`);

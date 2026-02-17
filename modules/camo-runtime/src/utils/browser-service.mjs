@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 import { execSync } from 'node:child_process';
 import fs from 'node:fs';
-import path from 'node:path';
 import os from 'node:os';
+import path from 'node:path';
 import { BROWSER_SERVICE_URL, loadConfig, setRepoRoot } from './config.mjs';
 
 export async function callAPI(action, payload = {}) {
@@ -261,46 +261,18 @@ export async function checkBrowserService() {
   }
 }
 
-export function detectCamoufoxPath() {
-  try {
-    const cmd = process.platform === 'win32' ? 'python -m camoufox path' : 'python3 -m camoufox path';
-    const out = execSync(cmd, {
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-    const lines = out.trim().split(/\r?\n/);
-    for (let i = lines.length - 1; i >= 0; i -= 1) {
-      const line = lines[i].trim();
-      if (line && (line.startsWith('/') || line.match(/^[A-Z]:\\/))) return line;
-    }
-  } catch {
-    return null;
-  }
-  return null;
-}
-
-export function ensureCamoufox() {
-  if (detectCamoufoxPath()) return;
-  console.log('Camoufox is not found. Installing...');
-  execSync('npx --yes --package=camoufox camoufox fetch', { stdio: 'inherit' });
-  if (!detectCamoufoxPath()) {
-    throw new Error('Camoufox install finished but executable was not detected');
-  }
-  console.log('Camoufox installed.');
-}
-
-const START_SCRIPT_REL = path.join('runtime', 'infra', 'utils', 'scripts', 'service', 'start-browser-service.mjs');
-
-function hasStartScript(root) {
-  if (!root) return false;
-  return fs.existsSync(path.join(root, START_SCRIPT_REL));
+function hasContainerLibrary(repoRoot) {
+  if (!repoRoot) return false;
+  const root = path.resolve(String(repoRoot));
+  const candidate = path.join(root, 'apps', 'webauto', 'resources', 'container-library');
+  return fs.existsSync(candidate);
 }
 
 function walkUpForRepoRoot(startDir) {
   if (!startDir) return null;
   let cursor = path.resolve(startDir);
   for (;;) {
-    if (hasStartScript(cursor)) return cursor;
+    if (hasContainerLibrary(cursor)) return cursor;
     const parent = path.dirname(cursor);
     if (parent === cursor) return null;
     cursor = parent;
@@ -332,7 +304,7 @@ function scanCommonRepoRoots() {
         if (!entry.isDirectory()) continue;
         if (!entry.name.toLowerCase().includes('webauto')) continue;
         const candidate = path.join(root, entry.name);
-        if (hasStartScript(candidate)) return candidate;
+        if (hasContainerLibrary(candidate)) return candidate;
       }
     } catch {
       // ignore scanning errors and continue
@@ -346,8 +318,8 @@ export function findRepoRootCandidate() {
   const cfg = loadConfig();
   const candidates = [
     process.env.WEBAUTO_REPO_ROOT,
-    cfg.repoRoot,
     process.cwd(),
+    cfg.repoRoot,
     path.join('/Volumes', 'extension', 'code', 'webauto'),
     path.join('/Volumes', 'extension', 'code', 'WebAuto'),
     path.join(os.homedir(), 'Documents', 'github', 'webauto'),
@@ -361,22 +333,20 @@ export function findRepoRootCandidate() {
   ].filter(Boolean);
 
   for (const root of candidates) {
-    if (hasStartScript(root)) {
-      if (cfg.repoRoot !== root) {
-        setRepoRoot(root);
-      }
-      return root;
+    if (!hasContainerLibrary(root)) continue;
+    const resolved = path.resolve(String(root));
+    if (cfg.repoRoot !== resolved) {
+      setRepoRoot(resolved);
     }
+    return resolved;
   }
 
-  for (const startDir of [process.cwd()]) {
-    const found = walkUpForRepoRoot(startDir);
-    if (found) {
-      if (cfg.repoRoot !== found) {
-        setRepoRoot(found);
-      }
-      return found;
+  const walked = walkUpForRepoRoot(process.cwd());
+  if (walked) {
+    if (cfg.repoRoot !== walked) {
+      setRepoRoot(walked);
     }
+    return walked;
   }
 
   const scanned = scanCommonRepoRoots();
@@ -390,28 +360,72 @@ export function findRepoRootCandidate() {
   return null;
 }
 
+export function detectCamoufoxPath() {
+  try {
+    const cmd = process.platform === 'win32' ? 'python -m camoufox path' : 'python3 -m camoufox path';
+    const out = execSync(cmd, {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    const lines = out.trim().split(/\r?\n/);
+    for (let i = lines.length - 1; i >= 0; i -= 1) {
+      const line = lines[i].trim();
+      if (line && (line.startsWith('/') || line.match(/^[A-Z]:\\/))) return line;
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+export function ensureCamoufox() {
+  if (detectCamoufoxPath()) return;
+  console.log('Camoufox is not found. Installing...');
+  execSync('npx --yes --package=camoufox camoufox fetch', { stdio: 'inherit' });
+  if (!detectCamoufoxPath()) {
+    throw new Error('Camoufox install finished but executable was not detected');
+  }
+  console.log('Camoufox installed.');
+}
+
 export async function ensureBrowserService() {
   if (await checkBrowserService()) return;
 
-  const repoRoot = findRepoRootCandidate();
-  if (!repoRoot) {
+  const provider = String(process.env.WEBAUTO_BROWSER_PROVIDER || 'camo').trim().toLowerCase();
+  if (provider === 'none' || provider === 'external') {
     throw new Error(
-      `Cannot locate browser-service start script (${START_SCRIPT_REL}). ` +
-      'Run from webauto repo once or set WEBAUTO_REPO_ROOT=/path/to/webauto.',
+      `Browser backend is not healthy at ${BROWSER_SERVICE_URL} (provider=${provider}). ` +
+      'Start backend manually or set WEBAUTO_BROWSER_PROVIDER=camo.',
     );
   }
 
-  const scriptPath = path.join(repoRoot, START_SCRIPT_REL);
-  console.log('Starting browser-service daemon...');
-  execSync(`node "${scriptPath}"`, { stdio: 'inherit', cwd: repoRoot });
-
-  for (let i = 0; i < 20; i += 1) {
-    await new Promise((r) => setTimeout(r, 400));
-    if (await checkBrowserService()) {
-      console.log('Browser-service is ready.');
-      return;
+  if (provider === 'camo') {
+    const repoRoot = findRepoRootCandidate();
+    if (repoRoot) {
+      try {
+        execSync(`npx --yes @web-auto/camo config repo-root ${JSON.stringify(repoRoot)}`, { stdio: 'ignore' });
+      } catch {
+        // best-effort only; init will still try using current config
+      }
     }
+
+    try {
+      console.log('Starting browser backend via camo init...');
+      execSync('npx --yes @web-auto/camo init', { stdio: 'inherit' });
+    } catch (error) {
+      throw new Error(`camo init failed: ${error?.message || String(error)}`);
+    }
+
+    for (let i = 0; i < 20; i += 1) {
+      await new Promise((r) => setTimeout(r, 400));
+      if (await checkBrowserService()) {
+        console.log('Browser backend is ready (provider=camo).');
+        return;
+      }
+    }
+
+    throw new Error('Browser backend failed to become healthy after camo init');
   }
 
-  throw new Error('Browser-service failed to become healthy within timeout');
+  throw new Error(`Unsupported WEBAUTO_BROWSER_PROVIDER=${provider}; only "camo" is supported.`);
 }

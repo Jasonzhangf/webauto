@@ -8,23 +8,19 @@
     "rootDir": "."
   },
   "include": [
-    "services/browser-service/**/*.ts",
     "services/unified-api/**/*.ts",
-    "services/engines/**/*.ts",
     "services/shared/**/*.ts",
     "services/**/*.d.ts",
     "services/shared/**/*.d.ts",
     "modules/container-registry/**/*.ts",
+    "modules/camo-backend/**/*.ts",
     "modules/workflow/**/*.ts",
     "modules/xiaohongshu/app/**/*.ts",
-    "sharedmodule/engines/**/*.ts",
-    "libs/browser/**/*.ts",
-    "src/server.ts",
+    "apps/webauto/server.ts",
     "services/controller/**/*.ts"
   ],
   "exclude": [
     "node_modules",
-    "dist",
-    "libs/browser/tests/**"
+    "dist"
   ]
 }

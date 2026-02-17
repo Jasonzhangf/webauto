@@ -349,6 +349,6 @@ dist/modules/xiaohongshu/app/src/blocks/*.js
 ## 参考文档
 
 - [../../../AGENTS.md](../../../AGENTS.md) - 系统级操作规则
-- [../../../container-library/xiaohongshu/README.md](../../../container-library/xiaohongshu/README.md) - 容器定义
+- [../../../apps/webauto/resources/container-library/xiaohongshu/README.md](../../../apps/webauto/resources/container-library/xiaohongshu/README.md) - 容器定义
 - [../../../apps/webauto/entry/xhs-orchestrate.mjs](../../../apps/webauto/entry/xhs-orchestrate.mjs) - 编排入口
 - [../../../apps/webauto/entry/xhs-unified.mjs](../../../apps/webauto/entry/xhs-unified.mjs) - Unified 入口

@@ -8,13 +8,8 @@ const __dirname = path.dirname(__filename);
 const PROJECT_ROOT = resolveProjectRoot(__dirname);
 // 新的外置容器树根目录（开发用）：~/.webauto/container-lib
 const PRIMARY_USER_CONTAINER_ROOT =
-  process.env.WEBAUTO_CONTAINER_ROOT ||
-  process.env.ROUTECODEX_CONTAINER_ROOT ||
-  path.join(os.homedir(), '.webauto', 'container-lib');
-// 兼容旧路径：~/.routecodex/container-lib（仅用于读取，写入统一走 PRIMARY_USER_CONTAINER_ROOT）
-const LEGACY_USER_CONTAINER_ROOT = path.join(os.homedir(), '.routecodex', 'container-lib');
-const INDEX_PATH = path.join(PROJECT_ROOT, 'container-library.index.json');
-const LEGACY_PATH = path.join(PROJECT_ROOT, 'container-library.json');
+  process.env.WEBAUTO_CONTAINER_ROOT || path.join(os.homedir(), '.webauto', 'container-lib');
+const INDEX_PATH = path.join(PROJECT_ROOT, 'apps/webauto/resources/container-library.index.json');
 
 function isLegacyContainer(definition: any): boolean {
   try {
@@ -48,7 +43,6 @@ type RegistryIndex = Record<string, { website?: string; path?: string }>;
 
 export class ContainerRegistry {
   private indexCache: RegistryIndex | null = null;
-  private legacyCache: Record<string, any> | null = null;
 
   listSites() {
     const registry = this.ensureIndex();
@@ -62,7 +56,7 @@ export class ContainerRegistry {
   getContainersForSite(siteKey: string): Record<string, ContainerDefinition> {
     if (!siteKey) return {};
     const registry = this.ensureIndex();
-    const site = registry[siteKey] || { path: path.join('container-library', siteKey) };
+    const site = registry[siteKey] || { path: path.join('apps/webauto/resources/container-library', siteKey) };
     return this.fetchContainersForSite(siteKey, site);
   }
 
@@ -83,7 +77,7 @@ export class ContainerRegistry {
     if (!siteKey) {
       return {};
     }
-    const site = registry[siteKey] || { path: `container-library/${siteKey}` };
+    const site = registry[siteKey] || { path: `apps/webauto/resources/container-library/${siteKey}` };
     return this.fetchContainersForSite(siteKey, site);
   }
 
@@ -111,21 +105,10 @@ export class ContainerRegistry {
 
   private loadSiteContainers(siteKey: string, relativePath?: string) {
     const containers: Record<string, ContainerDefinition> = {};
-    const builtinPath = path.join(PROJECT_ROOT, relativePath || path.join('container-library', siteKey));
+    const builtinPath = path.join(PROJECT_ROOT, relativePath || path.join('apps/webauto/resources/container-library', siteKey));
     if (fs.existsSync(builtinPath)) {
       this.walkSite(builtinPath, containers);
       this.loadLegacyFile(builtinPath, containers);
-    } else {
-      const legacy = this.loadLegacyRegistry();
-      const fallback = legacy?.[siteKey]?.containers || {};
-      Object.assign(containers, fallback);
-    }
-
-    // 先加载旧路径，最后加载新的 PRIMARY_USER_CONTAINER_ROOT，保证新容器定义覆盖旧定义与内置定义。
-    const legacyUserPath = path.join(LEGACY_USER_CONTAINER_ROOT, siteKey);
-    if (fs.existsSync(legacyUserPath)) {
-      this.walkSite(legacyUserPath, containers);
-      this.loadLegacyFile(legacyUserPath, containers);
     }
 
     const userPath = path.join(PRIMARY_USER_CONTAINER_ROOT, siteKey);
@@ -192,22 +175,6 @@ export class ContainerRegistry {
     }
   }
 
-  private loadLegacyRegistry() {
-    if (this.legacyCache) {
-      return this.legacyCache;
-    }
-    if (!fs.existsSync(LEGACY_PATH)) {
-      this.legacyCache = {};
-      return this.legacyCache;
-    }
-    try {
-      this.legacyCache = JSON.parse(fs.readFileSync(LEGACY_PATH, 'utf-8'));
-    } catch {
-      this.legacyCache = {};
-    }
-    return this.legacyCache;
-  }
-
   private findSiteKey(url: string, registry: RegistryIndex): string | null {
     let host = '';
     try {
@@ -225,20 +192,6 @@ export class ContainerRegistry {
         if (domain.length > bestLen) {
           bestKey = key;
           bestLen = domain.length;
-        }
-      }
-    }
-    if (!bestKey) {
-      // fallback legacy
-      const legacy = this.loadLegacyRegistry() || {};
-      for (const [key, value] of Object.entries(legacy)) {
-        const domain = (value?.website || '').toLowerCase();
-        if (!domain) continue;
-        if (host === domain || host.endsWith(`.${domain}`)) {
-          if (domain.length > bestLen) {
-            bestKey = key;
-            bestLen = domain.length;
-          }
         }
       }
     }
