@@ -1,9 +1,0 @@
-@@ -448,6 +448,8 @@
- 
-   // 交互式询问：是否新增账号
-   const wantAdd = window.confirm('是否立即新增账号？（将打开 headful/camoufox 登录）');
-   if (wantAdd) {
-+    // 提醒用户设置alias
-+    window.alert('新增账号后，系统将自动获取用户名作为默认别名，您也可以手动修改。');
-     accountAddBtn.click();
-   }

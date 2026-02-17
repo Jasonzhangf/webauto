@@ -11,18 +11,18 @@ async function getSrc() {
   return readFile(runPath, 'utf8');
 }
 
-test('phase3/phase4/fullCollect support multi-profile modes in resolveProfileArgsForRun', async () => {
+test('only fullCollect supports multi-profile modes in resolveProfileArgsForRun', async () => {
   const src = await getSrc();
   assert.match(
     src,
-    /supportsMultiProfile\s*=\s*t\s*===\s*'fullCollect'\s*\|\|\s*t\s*===\s*'phase3'\s*\|\|\s*t\s*===\s*'phase4'/,
+    /supportsMultiProfile\s*=\s*t\s*===\s*'fullCollect'/,
   );
 });
 
 test('fullCollect uses scripts scan result as script path when available', async () => {
   const src = await getSrc();
   assert.match(src, /scriptsXhsFullCollect/);
-  assert.match(src, /const scriptPath = chosen\?\.path \|\| window\.api\.pathJoin\('scripts', 'xiaohongshu', 'collect-content\.mjs'\);/);
+  assert.match(src, /const scriptPath = chosen\?\.path \|\| window\.api\.pathJoin\('apps', 'webauto', 'entry', 'xhs-unified\.mjs'\);/);
 });
 
 test('run tab persists default keyword/target/env/dry-run on execute', async () => {

@@ -1,1 +1,0 @@
-../tests/phase1-4-full-collect.mjs

@@ -19,7 +19,7 @@ export async function runGuideBrowserCheck(
   browserStatus: HTMLSpanElement | HTMLDivElement,
   saveGuideState: (state: any) => void,
 ) {
-  const script = window.api.pathJoin('scripts', 'xiaohongshu', 'install.mjs');
+  const script = window.api.pathJoin('apps', 'webauto', 'entry', 'xhs-install.mjs');
   const args = [script, '--check-browser-only'];
 
   browserStatus.textContent = '⏳ 浏览器检查中...';

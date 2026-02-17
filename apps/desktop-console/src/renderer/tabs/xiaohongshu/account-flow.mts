@@ -378,7 +378,7 @@ export function createAccountFlowController(opts: AccountFlowOptions): AccountFl
       const out = await window.api.cmdRunJson({
         title: `profilepool add ${kw}`,
         cwd: '',
-        args: [window.api.pathJoin('scripts', 'profilepool.mjs'), 'add', kw, '--json'],
+        args: [window.api.pathJoin('apps', 'webauto', 'entry', 'profilepool.mjs'), 'add', kw, '--json'],
       }).catch((err: any) => ({ ok: false, error: err?.message || String(err) }));
       if (!out?.ok || !out?.json?.profileId) {
         const reason = String(out?.error || out?.stderr || out?.stdout || 'unknown_error');
@@ -400,7 +400,7 @@ export function createAccountFlowController(opts: AccountFlowOptions): AccountFl
       return;
     }
     const loginArgs = [
-      window.api.pathJoin('scripts', 'profilepool.mjs'),
+      window.api.pathJoin('apps', 'webauto', 'entry', 'profilepool.mjs'),
       'login-profile',
       targetProfile,
       '--timeout-sec',

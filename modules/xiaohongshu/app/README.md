@@ -34,7 +34,7 @@
 
 ### 入口脚本
 ```bash
-node scripts/xiaohongshu/phase1-boot.mjs
+node apps/webauto/entry/xhs-orchestrate.mjs --mode phase1-only --profile xiaohongshu-batch-1 --keyword "手机膜"
 ```
 
 ---
@@ -75,7 +75,7 @@ node scripts/xiaohongshu/phase1-boot.mjs
 
 ### 入口脚本
 ```bash
-node scripts/xiaohongshu/phase2-collect.mjs --keyword "手机膜" --target 50 --env debug
+node apps/webauto/entry/xhs-orchestrate.mjs --mode phase1-phase2 --profile xiaohongshu-batch-1 --keyword "手机膜" --target 50 --env debug
 ```
 
 ### 输出格式
@@ -96,12 +96,12 @@ node scripts/xiaohongshu/phase2-collect.mjs --keyword "手机膜" --target 50 --
 
 ### 入口脚本
 ```bash
-node scripts/xiaohongshu/phase3-interact.mjs --keyword "手机膜" --like-keywords "好评,推荐" --env debug
+node apps/webauto/entry/xhs-unified.mjs --profile xiaohongshu-batch-1 --keyword "手机膜" --like-keywords "好评,推荐" --env debug
 ```
 
 ### 统一工作流脚本
 ```bash
-node scripts/xiaohongshu/like-comments.mjs --keyword "手机膜" --like-keywords "好评,推荐" --env debug
+node apps/webauto/entry/xhs-unified.mjs --profile xiaohongshu-batch-1 --keyword "手机膜" --like-keywords "好评,推荐" --env debug
 ```
 
 ---
@@ -221,7 +221,7 @@ node scripts/xiaohongshu/like-comments.mjs --keyword "手机膜" --like-keywords
 
 ### 入口脚本
 ```bash
-node scripts/xiaohongshu/phase4-harvest.mjs --keyword "手机膜" --env debug
+node apps/webauto/entry/xhs-unified.mjs --profile xiaohongshu-batch-1 --keyword "手机膜" --env debug
 ```
 
 ### 输出结构
@@ -350,4 +350,5 @@ dist/modules/xiaohongshu/app/src/blocks/*.js
 
 - [../../../AGENTS.md](../../../AGENTS.md) - 系统级操作规则
 - [../../../container-library/xiaohongshu/README.md](../../../container-library/xiaohongshu/README.md) - 容器定义
-- [../../../scripts/xiaohongshu/README.md](../../../scripts/xiaohongshu/README.md) - 脚本使用说明
+- [../../../apps/webauto/entry/xhs-orchestrate.mjs](../../../apps/webauto/entry/xhs-orchestrate.mjs) - 编排入口
+- [../../../apps/webauto/entry/xhs-unified.mjs](../../../apps/webauto/entry/xhs-unified.mjs) - Unified 入口

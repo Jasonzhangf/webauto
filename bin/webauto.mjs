@@ -227,12 +227,8 @@ async function main() {
   }
 
   if (cmd === 'dev' && sub === 'install-global') {
-    const scriptPath = path.join(ROOT, 'scripts', 'dev', 'build-install-global.mjs');
-    const pass = [];
-    if (args.full === true) pass.push('--full');
-    if (args.link === true) pass.push('--link');
-    await run(process.platform === 'win32' ? 'node.exe' : 'node', [scriptPath, ...pass], { cwd: ROOT });
-    return;
+    console.error('❌ `webauto dev install-global` 已迁移，请使用新的 app 入口与 npm 发布流程。');
+    process.exit(2);
   }
 
   usage();

@@ -25,9 +25,9 @@
   - `phase2_start`：标记运行中、写入 target、记录 lastStep
   - `phase2_done`：写入 links 列表、phase2DurationMs
   - `phase2_error`：写入 failed 状态与 error（用于 UI 快速定位）
-- Phase3（`scripts/xiaohongshu/phase3-interact.mjs`）
+- Phase3（`scripts/xiaohongshu/phase-unified-harvest.mjs`）
   - 记录 phase3 的基本运行参数与每帖点赞统计（写入 `legacy.phase3`），并更新 lastStep/lastNoteId
-- Phase4（`scripts/xiaohongshu/phase4-harvest.mjs`）
+- Phase4（`scripts/xiaohongshu/phase-unified-harvest.mjs`）
   - 每条 note 完成/失败：写入 detailCollection（幂等去重）
   - 结束：写入 phase4DurationMs，整体标记 completed
 

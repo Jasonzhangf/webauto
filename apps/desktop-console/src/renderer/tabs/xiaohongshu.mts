@@ -184,7 +184,7 @@ const GUIDE_STATE_KEY = 'webauto.xhs.guideState.v1';
   const runBrowserStatusCheck = async (profileId: string, reason = 'account-check') => {
     if (typeof window.api?.cmdSpawn !== 'function') return false;
     const args = [
-      window.api.pathJoin('scripts', 'browser-status.mjs'),
+      window.api.pathJoin('apps', 'webauto', 'entry', 'browser-status.mjs'),
       profileId,
       '--site',
       'xiaohongshu',

@@ -302,7 +302,7 @@ export function createRunFlowController(opts: RunFlowOptions): RunFlowController
       }
     }
 
-    const script = window.api.pathJoin('scripts', 'xiaohongshu', 'phase-orchestrate.mjs');
+    const script = window.api.pathJoin('apps', 'webauto', 'entry', 'xhs-orchestrate.mjs');
     const spawnArgs = [script, ...args];
     const titleText = `xiaohongshu orchestrate ${mode} ${keywordInput.value || ''}`.trim();
 

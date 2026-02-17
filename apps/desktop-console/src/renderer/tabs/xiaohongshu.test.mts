@@ -39,7 +39,7 @@ test('xiaohongshu tab keeps orchestrate modes and run script wiring after modula
   assert.match(layout, /phase1-phase2/);
   assert.match(layout, /phase1-only/);
   assert.match(layout, /unified-only/);
-  assert.match(run, /phase-orchestrate\.mjs/);
+  assert.match(run, /xhs-orchestrate\.mjs/);
 });
 
 test('xiaohongshu layout uses bento grid cards for account and operation areas', async () => {
@@ -111,7 +111,7 @@ test('xiaohongshu persists and restores last config via helper storage', async (
 
 test('xiaohongshu add-account flow creates profile then starts login-profile run', async () => {
   const { account } = await readAll();
-  assert.match(account, /profilepool\.mjs'/);
+  assert.match(account, /apps', 'webauto', 'entry', 'profilepool\.mjs'/);
   assert.match(account, /'add', kw, '--json'/);
   assert.match(account, /'login-profile'/);
   assert.match(account, /cmdRunJson/);

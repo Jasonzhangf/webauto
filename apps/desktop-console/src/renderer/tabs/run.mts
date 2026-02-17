@@ -5,7 +5,7 @@ function buildArgs(parts: string[]) {
 }
 
 
-type TemplateId = 'fullCollect' | 'phase3' | 'phase4' | 'smartReply' | 'virtualLike';
+type TemplateId = 'fullCollect' | 'smartReply' | 'virtualLike';
 
 type FullCollectTemplate = {
   id: string;
@@ -16,9 +16,7 @@ type FullCollectTemplate = {
 export function renderRun(root: HTMLElement, ctx: any) {
   const templateSel = createEl('select') as HTMLSelectElement;
   const templates: Array<{ id: TemplateId; label: string }> = [
-    { id: 'fullCollect', label: '调试：Full Collect (legacy)' },
-    { id: 'phase3', label: '调试：Phase3 interact' },
-    { id: 'phase4', label: '调试：Phase4 harvest' },
+    { id: 'fullCollect', label: '调试：Unified Harvest' },
     { id: 'smartReply', label: '调试：Smart Reply DEV E2E' },
     { id: 'virtualLike', label: '调试：Virtual Like E2E' },
   ];
@@ -54,8 +52,7 @@ export function renderRun(root: HTMLElement, ctx: any) {
   }
 
   function setProfileModes(templateId: TemplateId) {
-    const supportsMultiProfile =
-      templateId === 'fullCollect' || templateId === 'phase3' || templateId === 'phase4';
+    const supportsMultiProfile = templateId === 'fullCollect';
     profileModeSel.textContent = '';
     const modes = supportsMultiProfile
       ? [
@@ -204,7 +201,7 @@ export function renderRun(root: HTMLElement, ctx: any) {
   }
 
   function resolveProfileArgsForRun(t: TemplateId) {
-    const supportsMultiProfile = t === 'fullCollect' || t === 'phase3' || t === 'phase4';
+    const supportsMultiProfile = t === 'fullCollect';
     const mode = profileModeSel.value;
     const useRuntimeForSingle = t !== 'fullCollect';
 
@@ -290,21 +287,35 @@ export function renderRun(root: HTMLElement, ctx: any) {
 
     if (t === 'fullCollect') {
       const chosen = fullCollectScripts[0];
-      const scriptPath = chosen?.path || window.api.pathJoin('scripts', 'xiaohongshu', 'collect-content.mjs');
+      const scriptPath = chosen?.path || window.api.pathJoin('apps', 'webauto', 'entry', 'xhs-unified.mjs');
       script = scriptPath;
       args = buildArgs([script, ...profileArgs, ...common, ...extraArgs]);
-    } else if (t === 'phase3') {
-      script = window.api.pathJoin('scripts', 'xiaohongshu', 'phase3-interact.mjs');
-      args = buildArgs([script, ...profileArgs, ...common, ...extraArgs]);
-    } else if (t === 'phase4') {
-      script = window.api.pathJoin('scripts', 'xiaohongshu', 'phase4-harvest.mjs');
-      args = buildArgs([script, ...profileArgs, ...common, ...extraArgs]);
     } else if (t === 'smartReply') {
-      script = window.api.pathJoin('scripts', 'xiaohongshu', 'tests', 'smart-reply-e2e.mjs');
-      args = buildArgs([script, ...profileArgs, ...common, '--dev', ...extraArgs]);
+      script = window.api.pathJoin('apps', 'webauto', 'entry', 'xhs-unified.mjs');
+      args = buildArgs([
+        script,
+        ...profileArgs,
+        ...common,
+        '--do-comments',
+        'true',
+        '--do-reply',
+        'true',
+        '--do-likes',
+        'false',
+        ...extraArgs,
+      ]);
     } else if (t === 'virtualLike') {
-      script = window.api.pathJoin('scripts', 'xiaohongshu', 'tests', 'virtual-like-e2e.mjs');
-      args = buildArgs([script, ...profileArgs, ...common, ...extraArgs]);
+      script = window.api.pathJoin('apps', 'webauto', 'entry', 'xhs-unified.mjs');
+      args = buildArgs([
+        script,
+        ...profileArgs,
+        ...common,
+        '--do-comments',
+        'true',
+        '--do-likes',
+        'true',
+        ...extraArgs,
+      ]);
     }
 
     const ok = await window.api.cmdSpawn({

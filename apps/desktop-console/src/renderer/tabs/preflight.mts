@@ -259,7 +259,7 @@ export function renderPreflight(root: HTMLElement, ctx: any) {
   (toolbar.children[5] as HTMLButtonElement).onclick = () => void refreshScan();
   (toolbar.children[6] as HTMLButtonElement).onclick = async () => {
     ctx.clearLog();
-    const args = buildArgs([window.api.pathJoin('scripts', 'migrate-fingerprints.mjs')]);
+    const args = buildArgs([window.api.pathJoin('apps', 'webauto', 'entry', 'profilepool.mjs'), 'migrate-fingerprints']);
     await window.api.cmdSpawn({ title: 'migrate fingerprints', cwd: '', args, groupKey: 'profilepool' });
     setTimeout(() => void refreshScan(), 1000);
   };
@@ -278,7 +278,7 @@ export function renderPreflight(root: HTMLElement, ctx: any) {
   const runBrowserCheck = async (opts: { download?: boolean; source?: 'auto' | 'manual' } = {}) => {
     const download = opts.download === true;
     const source = opts.source || 'manual';
-    const script = window.api.pathJoin('scripts', 'xiaohongshu', 'install.mjs');
+    const script = window.api.pathJoin('apps', 'webauto', 'entry', 'xhs-install.mjs');
     const args = buildArgs([script, '--check-browser-only', ...(download ? ['--download-browser'] : [])]);
 
     browserStatus.textContent = download ? '浏览器状态：下载+检查中...' : '浏览器状态：检查中...';
@@ -385,7 +385,7 @@ export function renderPreflight(root: HTMLElement, ctx: any) {
     const out = await window.api.cmdRunJson({
       title: 'profilepool list',
       cwd: '',
-      args: buildArgs([window.api.pathJoin('scripts', 'profilepool.mjs'), 'list', kw, '--json']),
+      args: buildArgs([window.api.pathJoin('apps', 'webauto', 'entry', 'profilepool.mjs'), 'list', kw, '--json']),
     });
     poolListBox.textContent = '';
     if (!out?.ok || !out?.json) {
@@ -404,7 +404,7 @@ export function renderPreflight(root: HTMLElement, ctx: any) {
     const out = await window.api.cmdRunJson({
       title: 'profilepool add',
       cwd: '',
-      args: buildArgs([window.api.pathJoin('scripts', 'profilepool.mjs'), 'add', kw, '--json']),
+      args: buildArgs([window.api.pathJoin('apps', 'webauto', 'entry', 'profilepool.mjs'), 'add', kw, '--json']),
     });
     ctx.appendLog(JSON.stringify(out?.json || out, null, 2));
     const createdProfileId = String(out?.json?.profileId || '').trim();
@@ -415,7 +415,7 @@ export function renderPreflight(root: HTMLElement, ctx: any) {
 
     const timeoutSec = Math.max(30, Math.floor(Number(timeoutInput.value || '900')));
     const loginArgs = buildArgs([
-      window.api.pathJoin('scripts', 'profilepool.mjs'),
+      window.api.pathJoin('apps', 'webauto', 'entry', 'profilepool.mjs'),
       'login-profile',
       createdProfileId,
       '--timeout-sec',
@@ -442,7 +442,7 @@ export function renderPreflight(root: HTMLElement, ctx: any) {
     const ensureCount = Math.max(0, Math.floor(Number(ensureCountInput.value || '0')));
     const timeoutSec = Math.max(30, Math.floor(Number(timeoutInput.value || '900')));
     const args = buildArgs([
-      window.api.pathJoin('scripts', 'profilepool.mjs'),
+      window.api.pathJoin('apps', 'webauto', 'entry', 'profilepool.mjs'),
       'login',
       kw,
       ...(ctx.settings?.unifiedApiUrl ? ['--unified-api', String(ctx.settings.unifiedApiUrl)] : []),

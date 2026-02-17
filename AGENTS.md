@@ -240,3 +240,14 @@ bd 搜索速查（全文检索 + 字段过滤）：
 
 - 会话结束必须执行：`lsp server stop <repo_path>`，避免后台残留
 - 可选全局清理：`lsp server shutdown`
+
+## 12. Git 提交流程约束（强制）
+
+### 12.1 编译前门禁检查
+- **所有新代码文件必须先 git add 再编译**：`scripts/check-untracked-sources.mjs` 已在 `npm run prebuild` 中作为门禁。若存在未 track 的源码文件，编译失败。
+
+### 12.2 git add 前检查清单
+- **禁止临时文件入版本**：`git add` 前自检新增文件内容，排除测试用 `*.bak`、临时日志 `*.log`、调试产物、草稿文件等废文件。
+- **禁止空文件/占位文件**：禁止为了通过编译检查而创建空文件或无实际功能的占位文件。
+- **机制**：建议在个人环境配置 alias：`git add` 前运行 `node scripts/check-untracked-sources.mjs --staged-only`（若该脚本支持 staged-only 模式），或人工确认新增文件均为必需代码。
+- **违规处理**：若发现废文件通过 CI，提交者负责在后续 commit 中清理。
