@@ -43,7 +43,7 @@ export function renderAccountManager(root: HTMLElement, ctx: any) {
       <button id="add-account-btn" style="margin-left: auto; padding: 6px 12px; font-size: 12px;">添加账户</button>
     </div>
     <div class="row" style="margin: 8px 0; gap: 8px; align-items: center;">
-      <input id="new-account-alias-input" placeholder="请输入新账户别名" style="flex: 1; min-width: 180px;" />
+      <input id="new-account-alias-input" placeholder="别名可选（登录后自动识别）" style="flex: 1; min-width: 180px;" />
       <button id="add-account-confirm-btn" class="secondary" style="flex: 0 0 auto;">创建并登录</button>
     </div>
     <div id="account-list" class="account-list" style="margin-bottom: var(--gap); max-height: 300px; overflow: auto;"></div>
@@ -246,11 +246,6 @@ export function renderAccountManager(root: HTMLElement, ctx: any) {
   // Add new account
   async function addAccount() {
     const alias = newAccountAliasInput.value.trim();
-    if (!alias) {
-      alert('请先输入账户别名');
-      newAccountAliasInput.focus();
-      return;
-    }
 
     try {
       // Create profile
@@ -267,17 +262,19 @@ export function renderAccountManager(root: HTMLElement, ctx: any) {
 
       const profileId = out.json.profileId;
 
-      // Save alias
-      const aliases = { ...ctx.api.settings?.profileAliases, [profileId]: alias.trim() };
-      await ctx.api.settingsSet({ profileAliases: aliases });
-      if (typeof ctx.refreshSettings === 'function') {
-        await ctx.refreshSettings();
+      // Save alias if provided
+      if (alias) {
+        const aliases = { ...ctx.api.settings?.profileAliases, [profileId]: alias.trim() };
+        await ctx.api.settingsSet({ profileAliases: aliases });
+        if (typeof ctx.refreshSettings === 'function') {
+          await ctx.refreshSettings();
+        }
       }
 
       // Open login window
       const timeoutSec = ctx.api.settings?.timeouts?.loginTimeoutSec || 900;
       await ctx.api.cmdSpawn({
-        title: `登录 ${alias}`,
+        title: `登录 ${alias || profileId}`,
         cwd: '',
         args: [
           ctx.api.pathJoin('apps', 'webauto', 'entry', 'profilepool.mjs'),

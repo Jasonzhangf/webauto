@@ -72,8 +72,8 @@ export function renderSetupWizard(root: HTMLElement, ctx: any) {
     </div>
     <div class="row">
       <div>
-        <label>新账户别名</label>
-        <input id="new-alias-input" placeholder="例如: 美食探店账号" style="width: 200px;" />
+        <label>新账户别名（可选）</label>
+        <input id="new-alias-input" placeholder="可留空，登录后自动识别" style="width: 200px;" />
       </div>
       <button id="add-account-btn" style="flex: 0 0 auto; min-width: 120px;">添加账户</button>
     </div>
@@ -402,10 +402,6 @@ export function renderSetupWizard(root: HTMLElement, ctx: any) {
 
   async function addAccount() {
     const alias = newAliasInput.value.trim();
-    if (!alias) {
-      alert('请输入账户别名');
-      return;
-    }
 
     addAccountBtn.disabled = true;
     addAccountBtn.textContent = '创建中...';
@@ -426,11 +422,13 @@ export function renderSetupWizard(root: HTMLElement, ctx: any) {
 
       const profileId = out.json.profileId;
 
-      // Save alias
-      const aliases = { ...ctx.api.settings?.profileAliases, [profileId]: alias };
-      await ctx.api.settingsSet({ profileAliases: aliases });
-      if (typeof ctx.refreshSettings === 'function') {
-        await ctx.refreshSettings();
+      // Save alias if provided
+      if (alias) {
+        const aliases = { ...ctx.api.settings?.profileAliases, [profileId]: alias };
+        await ctx.api.settingsSet({ profileAliases: aliases });
+        if (typeof ctx.refreshSettings === 'function') {
+          await ctx.refreshSettings();
+        }
       }
 
       // Open login window
@@ -445,7 +443,7 @@ export function renderSetupWizard(root: HTMLElement, ctx: any) {
       ];
 
       await ctx.api.cmdSpawn({
-        title: `登录 ${alias}`,
+        title: `登录 ${alias || profileId}`,
         cwd: '',
         args: loginArgs,
         groupKey: 'profilepool'
