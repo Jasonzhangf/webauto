@@ -91,12 +91,21 @@ function formatSeq(seq) {
   return String(seq).padStart(4, '0');
 }
 
+function resolveAutoTag(platform) {
+  const normalized = normalizePlatform(platform);
+  return normalized === 'xiaohongshu'
+    ? 'xhs'
+    : (toSlug(normalized).split('-')[0] || 'acct');
+}
+
+function buildAutoAccountId(platform, seq) {
+  return `${resolveAutoTag(platform)}-${formatSeq(seq)}`;
+}
+
 function normalizeId(id, fallbackPlatform, seq) {
   const cleaned = toSlug(id || '');
   if (cleaned) return cleaned;
-  const platform = normalizePlatform(fallbackPlatform);
-  const tag = platform === 'xiaohongshu' ? 'xhs' : (toSlug(platform).split('-')[0] || 'acct');
-  return `${tag}-${formatSeq(seq)}`;
+  return buildAutoAccountId(fallbackPlatform, seq);
 }
 
 function ensureSafeName(name, field) {
@@ -133,6 +142,19 @@ function resolveAccountDir(id) {
   return path.join(resolveAccountsRoot(), id);
 }
 
+function removeAccountDirById(id) {
+  const safeId = String(id || '').trim();
+  if (!safeId) return;
+  const dir = resolveAccountDir(safeId);
+  if (fs.existsSync(dir)) {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+function hasPersistentAccountId(record) {
+  return Boolean(normalizeText(record?.accountId));
+}
+
 function isWithinDir(rootDir, targetPath) {
   const root = path.resolve(rootDir);
   const target = path.resolve(targetPath);
@@ -142,7 +164,12 @@ function isWithinDir(rootDir, targetPath) {
 function loadIndex() {
   const fallback = { version: 1, nextSeq: 1, updatedAt: null, accounts: [] };
   const raw = readJson(resolveIndexPath(), fallback);
-  const accounts = Array.isArray(raw?.accounts) ? raw.accounts : [];
+  const accountsRaw = Array.isArray(raw?.accounts) ? raw.accounts : [];
+  const staleIds = accountsRaw
+    .filter((account) => !hasPersistentAccountId(account))
+    .map((account) => String(account?.id || '').trim())
+    .filter(Boolean);
+  const accounts = accountsRaw.filter((account) => hasPersistentAccountId(account));
   const maxSeq = accounts.reduce((max, account) => {
     const seq = Number(account?.seq);
     return Number.isFinite(seq) ? Math.max(max, seq) : max;
@@ -150,12 +177,26 @@ function loadIndex() {
   const nextSeq = Number.isFinite(Number(raw?.nextSeq)) && Number(raw?.nextSeq) > maxSeq
     ? Number(raw.nextSeq)
     : maxSeq + 1;
-  return {
+  const normalized = {
     version: 1,
     nextSeq,
     updatedAt: raw?.updatedAt || null,
     accounts,
   };
+
+  if (staleIds.length > 0 || accounts.length !== accountsRaw.length) {
+    writeJson(resolveIndexPath(), {
+      version: 1,
+      nextSeq,
+      updatedAt: nowIso(),
+      accounts,
+    });
+    for (const id of staleIds) {
+      removeAccountDirById(id);
+    }
+  }
+
+  return normalized;
 }
 
 function saveIndex(index) {
@@ -173,6 +214,43 @@ function resolveProfilePrefix(platform) {
   if (platform === 'xiaohongshu') return 'xiaohongshu-batch';
   const slug = toSlug(platform) || 'account';
   return `${slug}-account`;
+}
+
+function resolveProfileSeq(profileId, platform) {
+  const value = String(profileId || '').trim();
+  if (!value) return null;
+  const prefix = resolveProfilePrefix(platform);
+  const match = value.match(new RegExp(`^${prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}-([0-9]+)$`));
+  if (!match) return null;
+  const seq = Number(match[1]);
+  if (!Number.isFinite(seq) || seq < 0) return null;
+  return seq;
+}
+
+function resolveUsedAutoSeq(index, platform) {
+  const tag = resolveAutoTag(platform);
+  const pattern = new RegExp(`^${tag}-([0-9]+)$`);
+  const used = new Set();
+  for (const row of (index?.accounts || [])) {
+    const id = String(row?.id || '').trim();
+    const match = id.match(pattern);
+    if (!match) continue;
+    const seq = Number(match[1]);
+    if (!Number.isFinite(seq) || seq < 0) continue;
+    used.add(seq);
+  }
+  return used;
+}
+
+function resolveNextAutoSeq(index, platform, preferredSeq = null) {
+  const used = resolveUsedAutoSeq(index, platform);
+  const preferred = Number(preferredSeq);
+  if (Number.isFinite(preferred) && preferred >= 0 && !used.has(preferred)) {
+    return preferred;
+  }
+  let seq = 0;
+  while (used.has(seq)) seq += 1;
+  return seq;
 }
 
 function ensureAliasUnique(accounts, alias, exceptId = '') {
@@ -227,10 +305,7 @@ function persistAccountMeta(account) {
 }
 
 function deleteAccountMeta(id) {
-  const dir = resolveAccountDir(id);
-  if (fs.existsSync(dir)) {
-    fs.rmSync(dir, { recursive: true, force: true });
-  }
+  removeAccountDirById(id);
 }
 
 function resolveAccountName(inputName, platform, seq) {
@@ -305,19 +380,35 @@ export function getAccount(idOrAlias) {
 
 export async function addAccount(input = {}) {
   const index = loadIndex();
-  const seq = Number(index.nextSeq) || 1;
   const platform = normalizePlatform(input.platform);
-  const id = ensureSafeName(normalizeId(input.id, platform, seq), 'id');
+  const hasCustomId = Boolean(normalizeText(input.id));
+  const explicitProfileId = normalizeText(input.profileId);
+  const autoPrefix = resolveProfilePrefix(platform);
+  let seq = null;
+  let profileId = explicitProfileId;
+
+  if (!hasCustomId && !explicitProfileId) {
+    // Default path: account/profile share the same minimal available slot.
+    seq = resolveNextAutoSeq(index, platform, null);
+    profileId = `${autoPrefix}-${seq}`;
+  } else {
+    profileId = explicitProfileId || resolveNextProfileId(autoPrefix);
+    const profileSeq = resolveProfileSeq(profileId, platform);
+    seq = resolveNextAutoSeq(index, platform, hasCustomId ? null : profileSeq);
+  }
+
+  await ensureProfile(profileId);
+
+  const id = ensureSafeName(
+    hasCustomId ? normalizeId(input.id, platform, seq) : buildAutoAccountId(platform, seq),
+    'id',
+  );
   if (index.accounts.some((item) => item?.id === id)) {
     throw new Error(`account id already exists: ${id}`);
   }
 
   const alias = normalizeAlias(input.alias) || normalizeAlias(input.username);
   ensureAliasUnique(index.accounts, alias);
-
-  const profileId = normalizeText(input.profileId)
-    || resolveNextProfileId(resolveProfilePrefix(platform));
-  await ensureProfile(profileId);
 
   const fingerprintId = normalizeText(input.fingerprintId) || profileId;
   const createdAt = nowIso();
@@ -342,7 +433,7 @@ export async function addAccount(input = {}) {
   };
 
   index.accounts.push(account);
-  index.nextSeq = seq + 1;
+  index.nextSeq = Math.max(Number(index.nextSeq) || 1, seq + 1);
   saveIndex(index);
   persistAccountMeta(account);
 
@@ -445,7 +536,40 @@ export function upsertProfileAccountState(input = {}) {
   let target = existingByAccountId || existingByProfile || null;
   const purgeIds = new Set();
 
-  if (!target && !accountId && !alias) {
+  if (!accountId) {
+    if (target && hasPersistentAccountId(target)) {
+      const next = {
+        ...target,
+        platform,
+        profileId,
+        fingerprintId: profileId,
+        status: STATUS_INVALID,
+        valid: false,
+        reason: reason || 'invalid',
+        detectedAt,
+        updatedAt: nowIso(),
+      };
+      const rowIndex = index.accounts.findIndex((item) => item?.id === target.id);
+      if (rowIndex < 0) throw new Error(`account not found: ${target.id}`);
+      index.accounts[rowIndex] = next;
+      saveIndex(index);
+      persistAccountMeta(next);
+      return buildProfileAccountView(profileId, next);
+    }
+
+    const staleIds = index.accounts
+      .filter((item) => String(item?.profileId || '').trim() === profileId && !hasPersistentAccountId(item))
+      .map((item) => String(item?.id || '').trim())
+      .filter(Boolean);
+    if (staleIds.length > 0) {
+      index.accounts = index.accounts.filter((item) => {
+        const id = String(item?.id || '').trim();
+        return !staleIds.includes(id);
+      });
+      saveIndex(index);
+      for (const id of staleIds) deleteAccountMeta(id);
+    }
+
     return buildProfileAccountView(profileId, {
       profileId,
       accountId: null,
@@ -457,28 +581,10 @@ export function upsertProfileAccountState(input = {}) {
     });
   }
 
-  if (target && !accountId && !alias) {
-    const targetAccountId = normalizeText(target.accountId);
-    const targetAlias = normalizeAlias(target.alias);
-    if (!targetAccountId && !targetAlias) {
-      index.accounts = index.accounts.filter((item) => item?.id !== target.id);
-      saveIndex(index);
-      deleteAccountMeta(target.id);
-      return buildProfileAccountView(profileId, {
-        profileId,
-        accountId: null,
-        alias: null,
-        status: STATUS_INVALID,
-        valid: false,
-        reason: reason || 'missing_account_id',
-        updatedAt: detectedAt,
-      });
-    }
-  }
-
   if (!target) {
-    const seq = Number(index.nextSeq) || 1;
-    const id = ensureSafeName(normalizeId(`${platform}-${profileId}`, platform, seq), 'id');
+    const profileSeq = resolveProfileSeq(profileId, platform);
+    const seq = resolveNextAutoSeq(index, platform, profileSeq);
+    const id = ensureSafeName(buildAutoAccountId(platform, seq), 'id');
     const createdAt = nowIso();
     const record = {
       id,
@@ -499,7 +605,7 @@ export function upsertProfileAccountState(input = {}) {
       aliasSource: alias ? 'auto' : null,
     };
     index.accounts.push(record);
-    index.nextSeq = seq + 1;
+    index.nextSeq = Math.max(Number(index.nextSeq) || 1, seq + 1);
     saveIndex(index);
     persistAccountMeta(record);
     return buildProfileAccountView(profileId, record);

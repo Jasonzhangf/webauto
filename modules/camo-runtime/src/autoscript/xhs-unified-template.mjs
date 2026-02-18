@@ -19,6 +19,13 @@ function toPositiveInt(value, fallback, min = 1) {
   return Math.max(min, Math.floor(num));
 }
 
+function toNonNegativeInt(value, fallback = 0) {
+  if (value === null || value === undefined || value === '') return fallback;
+  const num = Number(value);
+  if (!Number.isFinite(num)) return fallback;
+  return Math.max(0, Math.floor(num));
+}
+
 function splitCsv(value) {
   if (Array.isArray(value)) {
     return value
@@ -73,7 +80,9 @@ function buildOpenFirstDetailScript(maxNotes, keyword) {
       const cover = item.querySelector('a.cover');
       if (!cover) return null;
       const href = String(cover.getAttribute('href') || '').trim();
-      const noteId = href.split('/').filter(Boolean).pop() || ('idx_' + index);
+      const lastSegment = href.split('/').filter(Boolean).pop() || '';
+      const normalized = lastSegment.split('?')[0].split('#')[0];
+      const noteId = normalized || ('idx_' + index);
       return { item, cover, href, noteId };
     })
     .filter(Boolean);
@@ -137,7 +146,9 @@ function buildOpenNextDetailScript(maxNotes) {
       const cover = item.querySelector('a.cover');
       if (!cover) return null;
       const href = String(cover.getAttribute('href') || '').trim();
-      const noteId = href.split('/').filter(Boolean).pop() || ('idx_' + index);
+      const lastSegment = href.split('/').filter(Boolean).pop() || '';
+      const normalized = lastSegment.split('?')[0].split('#')[0];
+      const noteId = normalized || ('idx_' + index);
       return { item, cover, href, noteId };
     })
     .filter(Boolean);
@@ -472,6 +483,10 @@ export function buildXhsUnifiedAutoscript(rawOptions = {}) {
   const matchMode = toTrimmedString(rawOptions.matchMode, 'any');
   const matchMinHits = toPositiveInt(rawOptions.matchMinHits, 1, 1);
   const replyText = toTrimmedString(rawOptions.replyText, '感谢分享，已关注');
+  const sharedHarvestPath = toTrimmedString(rawOptions.sharedHarvestPath, '');
+  const searchSerialKey = toTrimmedString(rawOptions.searchSerialKey, `${env}:${keyword}`);
+  const seedCollectCount = toNonNegativeInt(rawOptions.seedCollectCount, 0);
+  const seedCollectMaxRounds = toNonNegativeInt(rawOptions.seedCollectMaxRounds, 0);
 
   const doHomepage = toBoolean(rawOptions.doHomepage, true);
   const doImages = toBoolean(rawOptions.doImages, false);
@@ -543,6 +558,10 @@ export function buildXhsUnifiedAutoscript(rawOptions = {}) {
       matchKeywords,
       likeKeywords,
       replyText,
+      sharedHarvestPath,
+      searchSerialKey,
+      seedCollectCount,
+      seedCollectMaxRounds,
       notes: [
         'open_next_detail intentionally stops script by throwing AUTOSCRIPT_DONE_* when exhausted.',
         'dev mode uses deterministic no-recovery policy (checkpoint recovery disabled).',
@@ -613,7 +632,11 @@ export function buildXhsUnifiedAutoscript(rawOptions = {}) {
       {
         id: 'submit_search',
         action: 'xhs_submit_search',
-        params: { keyword },
+        params: {
+          keyword,
+          searchSerialKey,
+          sharedHarvestPath,
+        },
         trigger: 'home_search_input.exist',
         dependsOn: ['fill_keyword'],
         once: true,
@@ -631,7 +654,16 @@ export function buildXhsUnifiedAutoscript(rawOptions = {}) {
       {
         id: 'open_first_detail',
         action: 'xhs_open_detail',
-        params: { mode: 'first', maxNotes, keyword, resume, incrementalMax },
+        params: {
+          mode: 'first',
+          maxNotes,
+          keyword,
+          resume,
+          incrementalMax,
+          sharedHarvestPath,
+          seedCollectCount,
+          seedCollectMaxRounds,
+        },
         trigger: 'search_result_item.exist',
         dependsOn: ['submit_search'],
         once: true,
@@ -722,10 +754,10 @@ export function buildXhsUnifiedAutoscript(rawOptions = {}) {
         dependsOn: [detailHarvestEnabled ? 'detail_harvest' : 'open_first_detail'],
         once: false,
         oncePerAppear: true,
-        timeoutMs: 90000,
+        timeoutMs: 180000,
         retry: { attempts: 1, backoffMs: 0 },
-        impact: 'op',
-        onFailure: 'continue',
+        impact: 'script',
+        onFailure: 'stop_all',
         pacing: { operationMinIntervalMs: 2400, eventCooldownMs: 1500, jitterMs: 280 },
         validation: {
           mode: 'both',
@@ -819,7 +851,7 @@ export function buildXhsUnifiedAutoscript(rawOptions = {}) {
         trigger: 'search_result_item.exist',
         dependsOn: ['close_detail'],
         once: false,
-        oncePerAppear: true,
+        oncePerAppear: false,
         retry: { attempts: 1, backoffMs: 0 },
         impact: 'op',
         onFailure: 'continue',
@@ -832,7 +864,7 @@ export function buildXhsUnifiedAutoscript(rawOptions = {}) {
         trigger: 'search_result_item.exist',
         dependsOn: ['wait_between_notes', 'ensure_tab_pool'],
         once: false,
-        oncePerAppear: true,
+        oncePerAppear: false,
         timeoutMs: 180000,
         retry: { attempts: 2, backoffMs: 500 },
         impact: 'op',
@@ -841,11 +873,17 @@ export function buildXhsUnifiedAutoscript(rawOptions = {}) {
       {
         id: 'open_next_detail',
         action: 'xhs_open_detail',
-        params: { mode: 'next', maxNotes, resume, incrementalMax },
+        params: {
+          mode: 'next',
+          maxNotes,
+          resume,
+          incrementalMax,
+          sharedHarvestPath,
+        },
         trigger: 'search_result_item.exist',
         dependsOn: ['switch_tab_round_robin'],
         once: false,
-        oncePerAppear: true,
+        oncePerAppear: false,
         timeoutMs: 90000,
         retry: { attempts: 1, backoffMs: 0 },
         impact: 'script',
@@ -919,6 +957,8 @@ export function buildXhsUnifiedAutoscript(rawOptions = {}) {
         params: {
           acrossPages: true,
           settleMs: 320,
+          pageUrlIncludes: ['/search_result'],
+          requireMatchedPages: true,
           selectors: [
             { id: 'home_search_input', selector: '#search-input, input.search-input' },
             { id: 'search_result_item', selector: '.note-item', visible: false, minCount: 1 },

@@ -166,6 +166,16 @@ function buildTemplateOptions(argv, profileId, overrides = {}) {
   const outputRoot = String(argv['output-root'] || '').trim();
   const resume = parseBool(argv.resume, true);
   const incrementalMax = parseBool(argv['incremental-max'], true);
+  const sharedHarvestPath = String(overrides.sharedHarvestPath ?? argv['shared-harvest-path'] ?? '').trim();
+  const searchSerialKey = String(overrides.searchSerialKey ?? argv['search-serial-key'] ?? '').trim();
+  const seedCollectCount = parseNonNegativeInt(
+    overrides.seedCollectCount ?? argv['seed-collect-count'],
+    0,
+  );
+  const seedCollectMaxRounds = parseNonNegativeInt(
+    overrides.seedCollectMaxRounds ?? argv['seed-collect-rounds'],
+    0,
+  );
 
   const dryRun = parseBool(argv['dry-run'], false);
   const disableDryRun = parseBool(argv['no-dry-run'], false);
@@ -198,6 +208,10 @@ function buildTemplateOptions(argv, profileId, overrides = {}) {
     doReply: parseBool(argv['do-reply'], false) && !effectiveDryRun,
     doOcr: parseBool(argv['do-ocr'], false),
     persistComments: parseBool(argv['persist-comments'], !effectiveDryRun),
+    sharedHarvestPath,
+    searchSerialKey,
+    seedCollectCount,
+    seedCollectMaxRounds,
   };
   return { ...base, ...overrides };
 }
@@ -295,10 +309,15 @@ function updateProfileStatsFromEvent(stats, payload) {
   if (event !== 'autoscript:operation_done') return;
 
   const operationId = String(payload.operationId || '').trim();
-  const result = payload.result && typeof payload.result === 'object' ? payload.result : {};
+  const rawResult = payload.result && typeof payload.result === 'object' ? payload.result : {};
+  const result = rawResult.result && typeof rawResult.result === 'object'
+    ? rawResult.result
+    : rawResult;
 
   if (operationId === 'open_first_detail' || operationId === 'open_next_detail') {
-    stats.openedNotes = Math.max(stats.openedNotes, toNumber(result.visited, stats.openedNotes));
+    if (result.opened === true) {
+      stats.openedNotes += 1;
+    }
     return;
   }
 
@@ -345,6 +364,14 @@ async function runProfile(spec, argv, baseOverrides = {}) {
     maxNotes: spec.assignedNotes,
     outputRoot: spec.outputRoot,
   };
+  if (spec.sharedHarvestPath) overrides.sharedHarvestPath = spec.sharedHarvestPath;
+  if (spec.searchSerialKey) overrides.searchSerialKey = spec.searchSerialKey;
+  if (spec.seedCollectCount !== undefined && spec.seedCollectCount !== null) {
+    overrides.seedCollectCount = parseNonNegativeInt(spec.seedCollectCount, 0);
+  }
+  if (spec.seedCollectMaxRounds !== undefined && spec.seedCollectMaxRounds !== null) {
+    overrides.seedCollectMaxRounds = parseNonNegativeInt(spec.seedCollectMaxRounds, 0);
+  }
   const options = buildTemplateOptions(argv, profileId, overrides);
   const script = buildXhsUnifiedAutoscript(options);
   const normalized = normalizeAutoscript(script, `xhs-unified:${profileId}`);
@@ -621,11 +648,17 @@ export async function runUnified(argv, overrides = {}) {
   const parallelRequested = parseBool(argv.parallel, false);
   const configuredConcurrency = parseIntFlag(argv.concurrency, profiles.length || 1, 1);
   const planOnly = parseBool(argv['plan-only'], false);
+  const seedCollectCountFlag = parseNonNegativeInt(argv['seed-collect-count'], 0);
+  const seedCollectRoundsFlag = parseNonNegativeInt(argv['seed-collect-rounds'], 6);
 
   const runLabel = formatRunLabel();
   const baseOutputRoot = resolveDownloadRoot(argv['output-root']);
   const outputRootArg = String(argv['output-root'] || '').trim();
   const useShardRoots = profiles.length > 1;
+  const sharedHarvestPath = profiles.length > 1
+    ? path.join(baseOutputRoot, 'xiaohongshu', sanitizeForPath(env, 'debug'), sanitizeForPath(keyword, 'unknown'), 'merged', `run-${runLabel}`, 'coord', 'harvest-note-claims.json')
+    : '';
+  const searchSerialKey = `${sanitizeForPath(env, 'debug')}:${sanitizeForPath(keyword, 'unknown')}:${runLabel}`;
   const mergedDir = path.join(
     baseOutputRoot,
     'xiaohongshu',
@@ -738,11 +771,18 @@ export async function runUnified(argv, overrides = {}) {
       ? Math.min(plan.length, configuredConcurrency)
       : 1;
     const waveTag = `wave-${String(wave).padStart(3, '0')}`;
-    const specs = plan.map((item) => {
+    const specs = plan.map((item, index) => {
       const shardId = sanitizeForPath(item.profileId, 'profile');
       const shardOutputRoot = useShardRoots
         ? path.join(baseOutputRoot, 'shards', shardId)
         : outputRootArg;
+      const defaultSeedCollectCount = Math.max(1, Math.min(
+        Number(item.assignedNotes || 1),
+        Math.max(1, plan.length * 2),
+      ));
+      const seedCollectCount = index === 0
+        ? (seedCollectCountFlag > 0 ? seedCollectCountFlag : defaultSeedCollectCount)
+        : 0;
       return {
         ...item,
         runLabel,
@@ -750,6 +790,10 @@ export async function runUnified(argv, overrides = {}) {
         outputRoot: shardOutputRoot,
         logPath: path.join(mergedDir, 'profiles', `${waveTag}.${shardId}.events.jsonl`),
         summaryPath: path.join(mergedDir, 'profiles', `${waveTag}.${shardId}.summary.json`),
+        sharedHarvestPath,
+        searchSerialKey,
+        seedCollectCount,
+        seedCollectMaxRounds: index === 0 ? seedCollectRoundsFlag : 0,
       };
     });
 
@@ -764,6 +808,9 @@ export async function runUnified(argv, overrides = {}) {
         assignedNotes: item.assignedNotes,
         outputRoot: item.outputRoot,
         logPath: item.logPath,
+        sharedHarvestPath: item.sharedHarvestPath || null,
+        seedCollectCount: item.seedCollectCount || 0,
+        seedCollectMaxRounds: item.seedCollectMaxRounds || 0,
       })),
     });
 
@@ -893,6 +940,10 @@ async function main() {
       '  --incremental-max <bool>     max-notes 作为增量配额（默认 true）',
       '  --plan-only                  只生成分片计划，不执行',
       '  --output-root <path>         输出根目录（并行时自动分 profile shard）',
+      '  --seed-collect-count <n>     首账号预采样去重ID数量（默认按分片自动）',
+      '  --seed-collect-rounds <n>    首账号预采样滚动轮数（默认6）',
+      '  --search-serial-key <key>    搜索阶段串行锁key（默认自动生成）',
+      '  --shared-harvest-path <path> 共享harvest去重列表路径（默认自动生成）',
     ].join('\n'));
     return;
   }

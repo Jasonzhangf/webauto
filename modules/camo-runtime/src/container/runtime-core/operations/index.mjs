@@ -137,6 +137,56 @@ async function executeVerifySubscriptions({ profileId, params }) {
 
   const acrossPages = params.acrossPages === true;
   const settleMs = Math.max(0, Number(params.settleMs ?? 280) || 280);
+  const pageUrlIncludes = normalizeArray(params.pageUrlIncludes)
+    .map((item) => String(item || '').trim())
+    .filter(Boolean);
+  const pageUrlExcludes = normalizeArray(params.pageUrlExcludes)
+    .map((item) => String(item || '').trim())
+    .filter(Boolean);
+  const pageUrlRegex = String(params.pageUrlRegex || '').trim();
+  const pageUrlNotRegex = String(params.pageUrlNotRegex || '').trim();
+  const requireMatchedPages = params.requireMatchedPages !== false;
+
+  let includeRegex = null;
+  if (pageUrlRegex) {
+    try {
+      includeRegex = new RegExp(pageUrlRegex);
+    } catch {
+      return asErrorPayload('OPERATION_FAILED', `invalid pageUrlRegex: ${pageUrlRegex}`);
+    }
+  }
+  let excludeRegex = null;
+  if (pageUrlNotRegex) {
+    try {
+      excludeRegex = new RegExp(pageUrlNotRegex);
+    } catch {
+      return asErrorPayload('OPERATION_FAILED', `invalid pageUrlNotRegex: ${pageUrlNotRegex}`);
+    }
+  }
+
+  const hasPageFilter = (
+    pageUrlIncludes.length > 0
+    || pageUrlExcludes.length > 0
+    || Boolean(includeRegex)
+    || Boolean(excludeRegex)
+  );
+
+  const shouldVerifyPage = (rawUrl) => {
+    const url = String(rawUrl || '').trim();
+    if (pageUrlIncludes.length > 0 && !pageUrlIncludes.some((part) => url.includes(part))) {
+      return false;
+    }
+    if (pageUrlExcludes.length > 0 && pageUrlExcludes.some((part) => url.includes(part))) {
+      return false;
+    }
+    if (includeRegex && !includeRegex.test(url)) {
+      return false;
+    }
+    if (excludeRegex && excludeRegex.test(url)) {
+      return false;
+    }
+    return true;
+  };
 
   const collectForCurrentPage = async () => {
     const snapshot = await getDomSnapshotByProfile(profileId);
@@ -156,6 +206,7 @@ async function executeVerifySubscriptions({ profileId, params }) {
 
   let pagesResult = [];
   let overallOk = true;
+  let matchedPageCount = 0;
   if (!acrossPages) {
     const current = await collectForCurrentPage();
     overallOk = current.matches.every((item) => item.count >= item.minCount);
@@ -165,6 +216,16 @@ async function executeVerifySubscriptions({ profileId, params }) {
     const { pages, activeIndex } = extractPageList(listed);
     for (const page of pages) {
       const pageIndex = Number(page.index);
+      const listedUrl = String(page.url || '');
+      if (!shouldVerifyPage(listedUrl)) {
+        pagesResult.push({
+          index: pageIndex,
+          url: listedUrl,
+          skipped: true,
+          ok: true,
+        });
+        continue;
+      }
       if (Number.isFinite(activeIndex) && activeIndex !== pageIndex) {
         await callAPI('page:switch', { profileId, index: pageIndex });
         if (settleMs > 0) await new Promise((resolve) => setTimeout(resolve, settleMs));
@@ -173,15 +234,28 @@ async function executeVerifySubscriptions({ profileId, params }) {
       const pageOk = current.matches.every((item) => item.count >= item.minCount);
       overallOk = overallOk && pageOk;
       pagesResult.push({ index: pageIndex, ...current, ok: pageOk });
+      matchedPageCount += 1;
     }
     if (Number.isFinite(activeIndex)) {
       await callAPI('page:switch', { profileId, index: activeIndex });
     }
   }
 
+  if (acrossPages && hasPageFilter && requireMatchedPages && matchedPageCount === 0) {
+    return asErrorPayload('SUBSCRIPTION_MISMATCH', 'no page matched verify_subscriptions pageUrl filter', {
+      acrossPages,
+      pageUrlIncludes,
+      pageUrlExcludes,
+      pageUrlRegex: pageUrlRegex || null,
+      pageUrlNotRegex: pageUrlNotRegex || null,
+      pages: pagesResult,
+    });
+  }
+
   if (!overallOk) {
     return asErrorPayload('SUBSCRIPTION_MISMATCH', 'subscription selectors missing on one or more pages', {
       acrossPages,
+      matchedPageCount,
       pages: pagesResult,
     });
   }
@@ -190,7 +264,7 @@ async function executeVerifySubscriptions({ profileId, params }) {
     ok: true,
     code: 'OPERATION_DONE',
     message: 'verify_subscriptions done',
-    data: { acrossPages, pages: pagesResult },
+    data: { acrossPages, matchedPageCount, pages: pagesResult },
   };
 }
 

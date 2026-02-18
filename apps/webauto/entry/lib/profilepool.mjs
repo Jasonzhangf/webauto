@@ -57,9 +57,9 @@ export function resolveNextProfileId(prefix) {
     const match = profileId.match(/-(\d+)$/);
     if (!match) continue;
     const index = Number(match[1]);
-    if (Number.isFinite(index) && index > 0) used.add(index);
+    if (Number.isFinite(index) && index >= 0) used.add(index);
   }
-  let next = 1;
+  let next = 0;
   while (used.has(next)) next += 1;
   return `${normalized}-${next}`;
 }

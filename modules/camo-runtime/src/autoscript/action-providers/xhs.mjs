@@ -1,3 +1,5 @@
+import path from 'node:path';
+import fsp from 'node:fs/promises';
 import { asErrorPayload } from '../../container/runtime-core/utils.mjs';
 import {
   createEvaluateHandler,
@@ -20,6 +22,175 @@ import {
   resolveXhsOutputContext,
 } from './xhs/persistence.mjs';
 import { buildOpenDetailScript, buildSubmitSearchScript } from './xhs/search.mjs';
+
+const XHS_OPERATION_LOCKS = new Map();
+
+function toLockKey(text, fallback = '') {
+  const value = String(text || '').trim();
+  return value || fallback;
+}
+
+async function withSerializedLock(lockKey, fn) {
+  const key = toLockKey(lockKey);
+  if (!key) return fn();
+  const previous = XHS_OPERATION_LOCKS.get(key) || Promise.resolve();
+  let release;
+  const gate = new Promise((resolve) => {
+    release = resolve;
+  });
+  XHS_OPERATION_LOCKS.set(key, previous.catch(() => null).then(() => gate));
+  await previous.catch(() => null);
+  try {
+    return await fn();
+  } finally {
+    release();
+    if (XHS_OPERATION_LOCKS.get(key) === gate) XHS_OPERATION_LOCKS.delete(key);
+  }
+}
+
+function normalizeNoteIdList(items) {
+  if (!Array.isArray(items)) return [];
+  const out = [];
+  const seen = new Set();
+  for (const item of items) {
+    const noteId = String(item || '').trim();
+    if (!noteId || seen.has(noteId)) continue;
+    seen.add(noteId);
+    out.push(noteId);
+  }
+  return out;
+}
+
+function resolveSharedClaimPath(params = {}) {
+  const raw = String(params.sharedHarvestPath || params.sharedClaimPath || '').trim();
+  return raw ? path.resolve(raw) : '';
+}
+
+function resolveSearchLockKey(params = {}) {
+  const raw = String(params.searchSerialKey || params.searchLockKey || '').trim();
+  if (raw) return raw;
+  const claimPath = resolveSharedClaimPath(params);
+  return claimPath ? `claim:${claimPath}` : '';
+}
+
+async function loadSharedClaimDoc(filePath) {
+  if (!filePath) {
+    return { noteIds: [], byNoteId: {}, updatedAt: null };
+  }
+  try {
+    const raw = await fsp.readFile(filePath, 'utf8');
+    const parsed = JSON.parse(raw);
+    const noteIds = normalizeNoteIdList(parsed?.noteIds);
+    const byNoteId = parsed?.byNoteId && typeof parsed.byNoteId === 'object' ? parsed.byNoteId : {};
+    return {
+      noteIds,
+      byNoteId,
+      updatedAt: parsed?.updatedAt || null,
+    };
+  } catch {
+    return { noteIds: [], byNoteId: {}, updatedAt: null };
+  }
+}
+
+async function saveSharedClaimDoc(filePath, doc) {
+  if (!filePath) return;
+  const noteIds = normalizeNoteIdList(doc?.noteIds);
+  const payload = {
+    updatedAt: new Date().toISOString(),
+    noteIds,
+    byNoteId: doc?.byNoteId && typeof doc.byNoteId === 'object' ? doc.byNoteId : {},
+  };
+  await fsp.mkdir(path.dirname(filePath), { recursive: true });
+  await fsp.writeFile(filePath, `${JSON.stringify(payload, null, 2)}\n`, 'utf8');
+}
+
+async function executeSubmitSearchOperation({ profileId, params = {} }) {
+  const script = buildSubmitSearchScript(params);
+  const highlight = params.highlight !== false;
+  const lockKey = resolveSearchLockKey(params);
+  return withSerializedLock(lockKey ? `xhs_submit_search:${lockKey}` : '', () => evaluateWithScript({
+    profileId,
+    script,
+    message: 'xhs_submit_search done',
+    highlight,
+  }));
+}
+
+async function executeOpenDetailOperation({ profileId, params = {} }) {
+  const highlight = params.highlight !== false;
+  const claimPath = resolveSharedClaimPath(params);
+  const lockKey = claimPath ? `xhs_open_detail:${claimPath}` : '';
+
+  const runWithExclude = async (excludeNoteIds) => {
+    const script = buildOpenDetailScript({
+      ...params,
+      excludeNoteIds,
+    });
+    const operationResult = await evaluateWithScript({
+      profileId,
+      script,
+      message: 'xhs_open_detail done',
+      highlight,
+    });
+    const payload = extractEvaluateResultData(operationResult.data) || {};
+    return {
+      operationResult,
+      payload: payload && typeof payload === 'object' ? payload : {},
+    };
+  };
+
+  if (!claimPath) {
+    const { operationResult } = await runWithExclude([]);
+    return operationResult;
+  }
+
+  const runLocked = async () => {
+    const claimDoc = await loadSharedClaimDoc(claimPath);
+    const excludeNoteIds = normalizeNoteIdList(claimDoc.noteIds);
+    const { operationResult, payload } = await runWithExclude(excludeNoteIds);
+
+    const claimSet = new Set(excludeNoteIds);
+    const claimAdded = [];
+    const markClaim = (noteId, source = 'open_detail') => {
+      const id = String(noteId || '').trim();
+      if (!id || claimSet.has(id)) return;
+      claimSet.add(id);
+      claimAdded.push(id);
+      claimDoc.byNoteId[id] = {
+        noteId: id,
+        profileId,
+        source,
+        ts: new Date().toISOString(),
+      };
+    };
+
+    const seeded = normalizeNoteIdList(payload.seedCollectedNoteIds);
+    for (const noteId of seeded) markClaim(noteId, 'seed_collect');
+    if (payload.opened === true) markClaim(payload.noteId, 'open_detail');
+    claimDoc.noteIds = Array.from(claimSet);
+    if (claimAdded.length > 0) {
+      await saveSharedClaimDoc(claimPath, claimDoc);
+    }
+
+    const mergedPayload = {
+      ...payload,
+      sharedClaimPath: claimPath,
+      sharedClaimCount: claimDoc.noteIds.length,
+      sharedClaimAdded: claimAdded,
+      dedupExcluded: excludeNoteIds.length,
+    };
+    const mergedData = operationResult.data && typeof operationResult.data === 'object'
+      ? { ...operationResult.data, result: mergedPayload }
+      : { result: mergedPayload };
+
+    return {
+      ...operationResult,
+      data: mergedData,
+    };
+  };
+
+  return withSerializedLock(lockKey, runLocked);
+}
 
 function buildReadStateScript() {
   return `(() => {
@@ -108,8 +279,8 @@ async function executeCommentsHarvestOperation({ profileId, params = {} }) {
 
 const XHS_ACTION_HANDLERS = {
   raise_error: handleRaiseError,
-  xhs_submit_search: createEvaluateHandler('xhs_submit_search done', buildSubmitSearchScript),
-  xhs_open_detail: createEvaluateHandler('xhs_open_detail done', buildOpenDetailScript),
+  xhs_submit_search: executeSubmitSearchOperation,
+  xhs_open_detail: executeOpenDetailOperation,
   xhs_detail_harvest: createEvaluateHandler('xhs_detail_harvest done', buildDetailHarvestScript),
   xhs_expand_replies: createEvaluateHandler('xhs_expand_replies done', buildExpandRepliesScript),
   xhs_comments_harvest: executeCommentsHarvestOperation,
