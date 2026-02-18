@@ -19,29 +19,45 @@ export function renderSetupWizard(root: HTMLElement, ctx: any) {
   envCard.innerHTML = `
     <div class="bento-title"><span style="color: var(--warning);">●</span> 环境检查</div>
     <div class="env-status-grid">
-      <div class="env-item" id="env-camo">
-        <span class="icon" style="color: var(--text-4);">○</span>
-        <span>Camoufox CLI</span>
+      <div class="env-item" id="env-camo" style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
+        <span style="display:flex; align-items:center; gap:8px; min-width:0;">
+          <span class="icon" style="color: var(--text-4);">○</span>
+          <span class="env-label">Camoufox CLI</span>
+        </span>
+        <button id="repair-camo-btn" class="secondary" style="display:none; flex:0 0 auto;">一键修复</button>
       </div>
-      <div class="env-item" id="env-unified">
-        <span class="icon" style="color: var(--text-4);">○</span>
-        <span>Unified API (7701)</span>
+      <div class="env-item" id="env-unified" style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
+        <span style="display:flex; align-items:center; gap:8px; min-width:0;">
+          <span class="icon" style="color: var(--text-4);">○</span>
+          <span class="env-label">Unified API (7701)</span>
+        </span>
+        <button id="repair-core-btn" class="secondary" style="display:none; flex:0 0 auto;">一键修复</button>
       </div>
-      <div class="env-item" id="env-browser">
-        <span class="icon" style="color: var(--text-4);">○</span>
-        <span>Browser Service (7704)</span>
+      <div class="env-item" id="env-browser" style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
+        <span style="display:flex; align-items:center; gap:8px; min-width:0;">
+          <span class="icon" style="color: var(--text-4);">○</span>
+          <span class="env-label">Browser Service (7704)</span>
+        </span>
+        <button id="repair-core2-btn" class="secondary" style="display:none; flex:0 0 auto;">一键修复</button>
       </div>
-      <div class="env-item" id="env-firefox">
-        <span class="icon" style="color: var(--text-4);">○</span>
-        <span>Camoufox Runtime</span>
+      <div class="env-item" id="env-firefox" style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
+        <span style="display:flex; align-items:center; gap:8px; min-width:0;">
+          <span class="icon" style="color: var(--text-4);">○</span>
+          <span class="env-label">Camoufox Runtime</span>
+        </span>
+        <button id="repair-runtime-btn" class="secondary" style="display:none; flex:0 0 auto;">一键修复</button>
       </div>
-      <div class="env-item" id="env-geoip">
-        <span class="icon" style="color: var(--text-4);">○</span>
-        <span>GeoIP Database</span>
+      <div class="env-item" id="env-geoip" style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
+        <span style="display:flex; align-items:center; gap:8px; min-width:0;">
+          <span class="icon" style="color: var(--text-4);">○</span>
+          <span class="env-label">GeoIP Database（可选）</span>
+        </span>
+        <button id="repair-geoip-btn" class="secondary" style="display:none; flex:0 0 auto;">可选安装</button>
       </div>
     </div>
     <div style="margin-top: var(--gap);">
       <button id="env-check-btn" class="secondary" style="width: 100%;">检查环境</button>
+      <button id="env-repair-all-btn" style="width: 100%; margin-top: 8px; display: none;">一键修复缺失项</button>
     </div>
   `;
   bentoGrid.appendChild(envCard);
@@ -86,6 +102,12 @@ export function renderSetupWizard(root: HTMLElement, ctx: any) {
 
   // Elements
   const envCheckBtn = root.querySelector('#env-check-btn') as HTMLButtonElement;
+  const envRepairAllBtn = root.querySelector('#env-repair-all-btn') as HTMLButtonElement;
+  const repairCamoBtn = root.querySelector('#repair-camo-btn') as HTMLButtonElement;
+  const repairCoreBtn = root.querySelector('#repair-core-btn') as HTMLButtonElement;
+  const repairCore2Btn = root.querySelector('#repair-core2-btn') as HTMLButtonElement;
+  const repairRuntimeBtn = root.querySelector('#repair-runtime-btn') as HTMLButtonElement;
+  const repairGeoipBtn = root.querySelector('#repair-geoip-btn') as HTMLButtonElement;
   const addAccountBtn = root.querySelector('#add-account-btn') as HTMLButtonElement;
   const newAliasInput = root.querySelector('#new-alias-input') as HTMLInputElement;
   const enterMainBtn = root.querySelector('#enter-main-btn') as HTMLButtonElement;
@@ -108,9 +130,15 @@ export function renderSetupWizard(root: HTMLElement, ctx: any) {
       snapshot?.camo?.installed &&
       snapshot?.services?.unifiedApi &&
       snapshot?.services?.browserService &&
-      snapshot?.firefox?.installed &&
-      snapshot?.geoip?.installed,
+      snapshot?.firefox?.installed,
     );
+
+  const getMissing = (snapshot: EnvSnapshot) => ({
+    core: !snapshot?.services?.unifiedApi || !snapshot?.services?.browserService,
+    camo: !snapshot?.camo?.installed,
+    runtime: !snapshot?.firefox?.installed,
+    geoip: !snapshot?.geoip?.installed,
+  });
 
   async function collectEnvironment(): Promise<EnvSnapshot> {
     const [camo, services, firefox, geoip] = await Promise.all([
@@ -127,31 +155,35 @@ export function renderSetupWizard(root: HTMLElement, ctx: any) {
     updateEnvItem('env-unified', snapshot.services?.unifiedApi, '7701');
     updateEnvItem('env-browser', snapshot.services?.browserService, '7704');
     updateEnvItem('env-firefox', snapshot.firefox?.installed, snapshot.firefox?.path ? '已安装' : '未安装');
-    updateEnvItem('env-geoip', snapshot.geoip?.installed, snapshot.geoip?.installed ? '已安装' : '未安装');
+    updateEnvItem('env-geoip', snapshot.geoip?.installed, snapshot.geoip?.installed ? '已安装（可选）' : '未安装（可选）');
     envReady = isEnvReady(snapshot);
+    syncRepairButtons(snapshot);
   }
 
-  async function autoRepairEnvironment(snapshot: EnvSnapshot) {
-    const missingCore = !snapshot.services?.unifiedApi || !snapshot.services?.browserService;
-    const missingCamo = !snapshot.camo?.installed;
-    const missingRuntime = !snapshot.firefox?.installed;
-    const missingGeoIP = !snapshot.geoip?.installed;
-
-    if (!missingCore && !missingCamo && !missingRuntime && !missingGeoIP) return;
-
-    setupStatusText.textContent = '检测到依赖缺失，正在自动修复...';
-
-    if (missingCore && typeof ctx.api?.envRepairCore === 'function') {
+  async function repairCoreServices() {
+    if (typeof ctx.api?.envRepairDeps === 'function') {
+      setupStatusText.textContent = '正在拉起核心服务...';
+      await ctx.api.envRepairDeps({ core: true }).catch(() => null);
+      return;
+    }
+    if (typeof ctx.api?.envRepairCore === 'function') {
       setupStatusText.textContent = '正在拉起核心服务...';
       await ctx.api.envRepairCore().catch(() => null);
     }
+  }
 
-    if ((missingCamo || missingRuntime || missingGeoIP) && typeof ctx.api?.cmdRunJson === 'function') {
-      setupStatusText.textContent = '正在安装依赖（Camoufox/GeoIP）...';
+  async function repairInstall({ browser, geoip }: { browser?: boolean; geoip?: boolean }) {
+    if (typeof ctx.api?.envRepairDeps === 'function') {
+      setupStatusText.textContent = geoip && browser ? '正在安装依赖（Camoufox/GeoIP）...' : geoip ? '正在安装 GeoIP（可选）...' : '正在安装 Camoufox...';
+      await ctx.api.envRepairDeps({ browser: Boolean(browser), geoip: Boolean(geoip) }).catch(() => null);
+      return;
+    }
+    if (typeof ctx.api?.cmdRunJson === 'function') {
+      setupStatusText.textContent = geoip && browser ? '正在安装依赖（Camoufox/GeoIP）...' : geoip ? '正在安装 GeoIP（可选）...' : '正在安装 Camoufox...';
       const script = ctx.api.pathJoin('apps', 'webauto', 'entry', 'xhs-install.mjs');
       const args = [script];
-      if (missingRuntime || missingCamo) args.push('--download-browser');
-      if (missingGeoIP) args.push('--download-geoip');
+      if (browser) args.push('--download-browser');
+      if (geoip) args.push('--download-geoip');
       args.push('--ensure-backend');
       await ctx.api
         .cmdRunJson({
@@ -164,31 +196,64 @@ export function renderSetupWizard(root: HTMLElement, ctx: any) {
     }
   }
 
+  async function repairMissing(snapshot: EnvSnapshot) {
+    const missing = getMissing(snapshot);
+    if (missing.core) await repairCoreServices();
+    if (missing.camo || missing.runtime) await repairInstall({ browser: true });
+    if (missing.geoip) await repairInstall({ geoip: true });
+  }
+
+  function syncRepairButtons(snapshot: EnvSnapshot) {
+    const missing = getMissing(snapshot);
+    repairCoreBtn.style.display = missing.core ? '' : 'none';
+    repairCore2Btn.style.display = missing.core ? '' : 'none';
+    repairCamoBtn.style.display = missing.camo ? '' : 'none';
+    repairRuntimeBtn.style.display = missing.runtime ? '' : 'none';
+    repairGeoipBtn.style.display = missing.geoip ? '' : 'none';
+    const hasRequiredMissing = missing.core || missing.camo || missing.runtime;
+    envRepairAllBtn.style.display = hasRequiredMissing ? '' : 'none';
+    envRepairAllBtn.disabled = !hasRequiredMissing;
+  }
+
+  async function runRepair(action: () => Promise<void>) {
+    envCheckBtn.disabled = true;
+    envRepairAllBtn.disabled = true;
+    repairCamoBtn.disabled = true;
+    repairCoreBtn.disabled = true;
+    repairCore2Btn.disabled = true;
+    repairRuntimeBtn.disabled = true;
+    repairGeoipBtn.disabled = true;
+    try {
+      await action();
+    } finally {
+      const latest = await collectEnvironment().catch(() => null);
+      if (latest) {
+        applyEnvironment(latest);
+        updateCompleteStatus();
+      }
+      envCheckBtn.disabled = false;
+    }
+  }
+
   // Environment Check
   async function checkEnvironment() {
     envCheckBtn.disabled = true;
-    envCheckBtn.textContent = '检查/修复中...';
+    envCheckBtn.textContent = '检查中...';
 
     try {
-      const before = await collectEnvironment();
-      applyEnvironment(before);
-
-      if (!isEnvReady(before)) {
-        await autoRepairEnvironment(before);
-      }
-
-      const after = await collectEnvironment();
-      applyEnvironment(after);
+      const snapshot = await collectEnvironment();
+      applyEnvironment(snapshot);
       updateCompleteStatus();
 
       if (!envReady) {
         const missing: string[] = [];
-        if (!after?.camo?.installed) missing.push('camo');
-        if (!after?.services?.unifiedApi) missing.push('unified-api');
-        if (!after?.services?.browserService) missing.push('browser-service');
-        if (!after?.firefox?.installed) missing.push('camoufox-runtime');
-        if (!after?.geoip?.installed) missing.push('geoip');
-        setupStatusText.textContent = `自动修复后仍缺失: ${missing.join(', ')}`;
+        if (!snapshot?.camo?.installed) missing.push('camo');
+        if (!snapshot?.services?.unifiedApi) missing.push('unified-api');
+        if (!snapshot?.services?.browserService) missing.push('browser-service');
+        if (!snapshot?.firefox?.installed) missing.push('camoufox-runtime');
+        setupStatusText.textContent = `存在待修复项: ${missing.join(', ')}`;
+      } else if (!snapshot?.geoip?.installed) {
+        setupStatusText.textContent = '环境就绪（GeoIP 可选，未安装不影响使用）';
       }
     } catch (err) {
       console.error('Environment check failed:', err);
@@ -203,7 +268,7 @@ export function renderSetupWizard(root: HTMLElement, ctx: any) {
     const el = root.querySelector(`#${id}`);
     if (!el) return;
     const icon = el.querySelector('.icon') as HTMLSpanElement;
-    const text = el.querySelector('span:last-child') as HTMLSpanElement;
+    const text = el.querySelector('.env-label') as HTMLSpanElement;
     const baseLabel = (el as HTMLElement).dataset.label || text.textContent || '';
     (el as HTMLElement).dataset.label = baseLabel;
     icon.textContent = ok ? '✓' : '✗';
@@ -333,6 +398,15 @@ export function renderSetupWizard(root: HTMLElement, ctx: any) {
 
   // Event Listeners
   envCheckBtn.onclick = checkEnvironment;
+  envRepairAllBtn.onclick = () => void runRepair(async () => {
+    const snapshot = await collectEnvironment();
+    await repairMissing(snapshot);
+  });
+  repairCoreBtn.onclick = () => void runRepair(repairCoreServices);
+  repairCore2Btn.onclick = () => void runRepair(repairCoreServices);
+  repairCamoBtn.onclick = () => void runRepair(() => repairInstall({ browser: true }));
+  repairRuntimeBtn.onclick = () => void runRepair(() => repairInstall({ browser: true }));
+  repairGeoipBtn.onclick = () => void runRepair(() => repairInstall({ geoip: true }));
   addAccountBtn.onclick = addAccount;
   enterMainBtn.onclick = () => {
     if (typeof ctx.setActiveTab === 'function') {

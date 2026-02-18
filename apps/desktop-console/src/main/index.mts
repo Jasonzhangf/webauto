@@ -840,6 +840,39 @@ ipcMain.handle('env:repairCore', async () => {
   const services = await checkServices().catch(() => ({ unifiedApi: false, browserService: false }));
   return { ok, services };
 });
+ipcMain.handle('env:repairDeps', async (_evt, input: { core?: boolean; browser?: boolean; geoip?: boolean }) => {
+  const wantCore = Boolean(input?.core);
+  const wantBrowser = Boolean(input?.browser);
+  const wantGeoip = Boolean(input?.geoip);
+  const result: any = { ok: true, core: null, install: null, env: null };
+
+  if (wantCore) {
+    const coreOk = await startCoreDaemon().catch(() => false);
+    result.core = {
+      ok: coreOk,
+      services: await checkServices().catch(() => ({ unifiedApi: false, browserService: false })),
+    };
+    if (!coreOk) result.ok = false;
+  }
+
+  if (wantBrowser || wantGeoip) {
+    const args = [path.join('apps', 'webauto', 'entry', 'xhs-install.mjs')];
+    if (wantBrowser) args.push('--download-browser');
+    if (wantGeoip) args.push('--download-geoip');
+    args.push('--ensure-backend');
+    const installRes = await runJson({
+      title: 'env repair deps',
+      cwd: REPO_ROOT,
+      args,
+      timeoutMs: 300_000,
+    }).catch((err: any) => ({ ok: false, error: err?.message || String(err) }));
+    result.install = installRes;
+    if (!installRes?.ok) result.ok = false;
+  }
+
+  result.env = await checkEnvironment().catch(() => null);
+  return result;
+});
 ipcMain.handle('config:saveLast', async (_evt, config: CrawlConfig) => {
   await saveCrawlConfig({ appRoot: APP_ROOT, repoRoot: REPO_ROOT }, config);
   return { ok: true };

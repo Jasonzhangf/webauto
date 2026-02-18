@@ -198,7 +198,6 @@ export async function checkEnvironment(): Promise<{
     camo.installed &&
     services.unifiedApi &&
     services.browserService &&
-    firefox.installed &&
-    geoip.installed;
+    firefox.installed;
   return { camo, services, firefox, geoip, allReady };
 }

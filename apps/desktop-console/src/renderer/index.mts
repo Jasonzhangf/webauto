@@ -32,9 +32,10 @@ const tabsEl = document.getElementById('tabs')!;
 const contentEl = document.getElementById('content')!;
 const statusEl = document.getElementById('status')!;
 let activeTabCleanup: (() => void) | null = null;
+const mutableApi: any = { ...(window.api || {}), settings: null };
 
 const ctx: any = {
-  api: window.api,
+  api: mutableApi,
   settings: null as any,
   xhsCurrentRun: null as any,
   activeRunId: null as string | null,
