@@ -1,8 +1,6 @@
 #!/usr/bin/env node
 import minimist from 'minimist';
 import path from 'node:path';
-import { existsSync } from 'node:fs';
-import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import {
   addAccount,
@@ -14,6 +12,7 @@ import {
 } from './lib/account-store.mjs';
 import { ensureProfile } from './lib/profilepool.mjs';
 import { syncXhsAccountByProfile, syncXhsAccountsByProfiles } from './lib/account-detect.mjs';
+import { runCamo } from './lib/camo-cli.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 const XHS_HOME_URL = 'https://www.xiaohongshu.com';
@@ -33,93 +32,6 @@ function parseBoolean(value, fallback = false) {
   if (normalized === '1' || normalized === 'true' || normalized === 'yes') return true;
   if (normalized === '0' || normalized === 'false' || normalized === 'no') return false;
   return fallback;
-}
-
-function resolveOnPath(candidates) {
-  const pathEnv = process.env.PATH || process.env.Path || '';
-  const dirs = pathEnv.split(path.delimiter).filter(Boolean);
-  for (const dir of dirs) {
-    for (const name of candidates) {
-      const full = path.join(dir, name);
-      if (existsSync(full)) return full;
-    }
-  }
-  return null;
-}
-
-function resolveInDir(dir, candidates) {
-  for (const name of candidates) {
-    const full = path.join(dir, name);
-    if (existsSync(full)) return full;
-  }
-  return null;
-}
-
-function wrapWindowsRunner(cmdPath, prefix = []) {
-  if (process.platform !== 'win32') return { cmd: cmdPath, prefix };
-  const lower = String(cmdPath || '').toLowerCase();
-  if (lower.endsWith('.ps1')) {
-    return {
-      cmd: 'powershell.exe',
-      prefix: ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', cmdPath, ...prefix],
-    };
-  }
-  if (lower.endsWith('.cmd') || lower.endsWith('.bat')) {
-    const useCmd = /\s/u.test(cmdPath) ? path.basename(cmdPath) : cmdPath;
-    return {
-      cmd: 'cmd.exe',
-      prefix: ['/d', '/s', '/c', useCmd, ...prefix],
-    };
-  }
-  return { cmd: cmdPath, prefix };
-}
-
-function getCamoRunner() {
-  const isWin = process.platform === 'win32';
-  const localBin = path.join(ROOT, 'node_modules', '.bin');
-  const camoNames = isWin ? ['camo.cmd', 'camo.exe', 'camo.bat', 'camo.ps1'] : ['camo'];
-  const npxNames = isWin ? ['npx.cmd', 'npx.exe', 'npx.bat', 'npx.ps1'] : ['npx'];
-
-  const local = resolveInDir(localBin, camoNames);
-  if (local) return wrapWindowsRunner(local);
-
-  const global = resolveOnPath(camoNames);
-  if (global) return wrapWindowsRunner(global);
-
-  const npx = resolveOnPath(npxNames) || (isWin ? 'npx.cmd' : 'npx');
-  return wrapWindowsRunner(npx, ['--yes', '--package=@web-auto/camo', 'camo']);
-}
-
-function runCamo(args) {
-  const runner = getCamoRunner();
-  const ret = spawnSync(runner.cmd, [...runner.prefix, ...args], {
-    cwd: ROOT,
-    env: process.env,
-    encoding: 'utf8',
-    timeout: 60000,
-    windowsHide: true,
-  });
-  const stdout = String(ret.stdout || '').trim();
-  const stderr = String(ret.stderr || '').trim();
-  let parsed = null;
-  if (stdout) {
-    const lines = stdout.split('\n').map((line) => line.trim()).filter(Boolean).reverse();
-    for (const line of lines) {
-      try {
-        parsed = JSON.parse(line);
-        break;
-      } catch {
-        continue;
-      }
-    }
-  }
-  return {
-    ok: ret.status === 0,
-    code: ret.status,
-    stdout,
-    stderr,
-    json: parsed,
-  };
 }
 
 function inferLoginUrl(platform) {
@@ -195,7 +107,7 @@ Usage:
   webauto account get <id|alias> [--json]
   webauto account update <id|alias> [--alias <alias>|--clear-alias] [--name <name>] [--username <name>] [--profile <id>] [--fingerprint <id>] [--status pending|active|disabled|archived] [--json]
   webauto account delete <id|alias> [--delete-profile] [--delete-fingerprint] [--json]
-  webauto account login <id|alias> [--url <url>] [--sync-alias] [--json]
+  webauto account login <id|alias> [--url <url>] [--idle-timeout <duration>] [--sync-alias] [--json]
   webauto account sync-alias <id|alias> [--selector <css>] [--alias <value>] [--json]
   webauto account sync <profileId|all> [--pending-while-login] [--json]
 
@@ -211,7 +123,7 @@ Examples:
   webauto account add --platform xiaohongshu --alias 主号
   webauto account list
   webauto account sync all
-  webauto account login xhs-0001 --url https://www.xiaohongshu.com
+  webauto account login xhs-0001 --url https://www.xiaohongshu.com --idle-timeout 30m
   webauto account sync-alias xhs-0001
   webauto account update xhs-0001 --alias 运营1号
   webauto account delete xhs-0001 --delete-profile --delete-fingerprint
@@ -285,8 +197,16 @@ async function cmdLogin(idOrAlias, argv, jsonMode) {
   const account = getAccount(idOrAlias);
   await ensureProfile(account.profileId);
   const url = String(argv.url || inferLoginUrl(account.platform)).trim();
+  const idleTimeout = String(argv['idle-timeout'] || process.env.WEBAUTO_LOGIN_IDLE_TIMEOUT || '30m').trim() || '30m';
 
-  const initResult = runCamo(['init']);
+  const pendingProfile = await syncXhsAccountByProfile(account.profileId, { pendingWhileLogin: true }).catch((error) => ({
+    profileId: account.profileId,
+    valid: false,
+    status: 'pending',
+    reason: `waiting_login_sync:${error?.message || String(error)}`,
+  }));
+
+  const initResult = runCamo(['init'], { rootDir: ROOT });
   if (!initResult.ok) {
     output({
       ok: false,
@@ -297,7 +217,7 @@ async function cmdLogin(idOrAlias, argv, jsonMode) {
     process.exit(1);
   }
 
-  const startResult = runCamo(['start', account.profileId, '--url', url]);
+  const startResult = runCamo(['start', account.profileId, '--url', url, '--idle-timeout', idleTimeout], { rootDir: ROOT });
   if (!startResult.ok) {
     output({
       ok: false,
@@ -308,6 +228,11 @@ async function cmdLogin(idOrAlias, argv, jsonMode) {
     }, jsonMode);
     process.exit(1);
   }
+
+  const cookieAuto = runCamo(['cookies', 'auto', 'start', account.profileId, '--interval', '5000'], {
+    rootDir: ROOT,
+    timeoutMs: 20000,
+  });
 
   let aliasSync = null;
   if (parseBoolean(argv['sync-alias'], false)) {
@@ -323,11 +248,11 @@ async function cmdLogin(idOrAlias, argv, jsonMode) {
     }
   }
 
-  const accountSync = await syncXhsAccountByProfile(account.profileId).catch((error) => ({
+  const accountSync = await syncXhsAccountByProfile(account.profileId, { pendingWhileLogin: true }).catch((error) => ({
     profileId: account.profileId,
     valid: false,
-    status: 'invalid',
-    reason: error?.message || String(error),
+    status: 'pending',
+    reason: `waiting_login_sync:${error?.message || String(error)}`,
   }));
 
   output({
@@ -335,7 +260,12 @@ async function cmdLogin(idOrAlias, argv, jsonMode) {
     account,
     profileId: account.profileId,
     url,
+    idleTimeout,
     camo: startResult.json || startResult.stdout || null,
+    pendingProfile,
+    cookieAuto: cookieAuto.ok
+      ? { ok: true }
+      : { ok: false, code: cookieAuto.code, error: cookieAuto.stderr || cookieAuto.stdout || 'cookie auto start failed' },
     aliasSync,
     accountSync,
   }, jsonMode);

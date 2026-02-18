@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import path from 'node:path';
-import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import { runCamo } from './lib/camo-cli.mjs';
 
 const profileId = String(process.argv[2] || '').trim();
 if (!profileId) {
@@ -8,17 +9,13 @@ if (!profileId) {
   process.exit(1);
 }
 
-const cliPath = path.resolve(process.cwd(), 'bin', 'camoufox-cli.mjs');
-const ret = spawnSync(process.execPath, [cliPath, 'status', profileId], { encoding: 'utf8' });
-const stdout = String(ret.stdout || '').trim();
-const stderr = String(ret.stderr || '').trim();
-let parsed = null;
-try { parsed = stdout ? JSON.parse(stdout) : null; } catch {}
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
+const ret = runCamo(['status', profileId, '--json'], { rootDir: ROOT, timeoutMs: 20000 });
 
-if (ret.status !== 0) {
-  console.error(JSON.stringify({ ok: false, code: ret.status, stderr: stderr || stdout }));
+if (!ret.ok) {
+  console.error(JSON.stringify({ ok: false, code: ret.code, stderr: ret.stderr || ret.stdout }));
   process.exit(1);
 }
 
-const session = parsed?.session || null;
+const session = ret.json?.session || null;
 console.log(JSON.stringify({ ok: true, profileId, online: Boolean(session), session }));

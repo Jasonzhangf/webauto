@@ -20,8 +20,8 @@
 | 端口 | 服务 | 说明 |
 |------|------|------|
 | 7701 | Unified API（HTTP + WebSocket + Bus） | 主入口：HTTP REST API、WebSocket、Bus |
-| 7704 | Browser Service（HTTP） | 会话管理 HTTP 接口 |
-| 8765 | Browser Service WebSocket | 会话管理实时通道 |
+| 7704 | Camo Runtime（HTTP） | camo 会话管理 HTTP 接口 |
+| 8765 | Camo Runtime WebSocket | camo 会话管理实时通道 |
 
 快速验证：
 
@@ -29,6 +29,107 @@
 curl http://127.0.0.1:7701/health
 curl http://127.0.0.1:7704/health
 ```
+
+### 1.1 CLI 启动（标准入口）
+
+优先用 `webauto` 作为业务入口，用 `camo` 作为浏览器/runtime 入口：
+
+```bash
+# WebAuto 入口
+webauto --help
+webauto ui console --check
+webauto ui console --build
+webauto ui console --install
+webauto ui console
+
+# 小红书编排入口
+webauto xhs install --download-geoip --ensure-backend
+webauto xhs unified --profile xiaohongshu-batch-1 --keyword "seedance2.0" --max-notes 100 --do-comments true --persist-comments true --do-likes true --like-keywords "真牛逼" --env debug --tab-count 4
+webauto xhs status --json
+
+# Camo 入口
+camo help
+camo init
+camo start xiaohongshu-batch-1 --url https://www.xiaohongshu.com --alias xhs-main
+camo status xiaohongshu-batch-1
+camo stop --alias xhs-main
+camo stop all
+```
+
+Windows 推荐优先使用 PowerShell（`pwsh`/`powershell`）执行上述命令；`cmd` 可用但脚本兼容性和输出可读性较差。
+
+### 1.2 UI 控制调试（本地）
+
+目标：可复现“UI 发起命令 -> runtime 执行 -> 状态回流 UI”的完整链路。
+
+```bash
+# 1) 前台模式启动 UI（便于观察 stderr/stdout）
+webauto ui console --no-daemon
+
+# 2) 运行内置场景测试（自动化回归 UI 控制链路）
+webauto ui test env-check
+webauto ui test account-flow --profile test-001
+webauto ui test config-save --output ./tmp/ui-config-report.json
+webauto ui test crawl-run --keyword "测试" --target 10 --headless
+```
+
+关键日志与状态源：
+
+- UI 命令事件：`onCmdEvent`（`started/stdout/stderr/exit`）
+- 任务状态流：`onStateUpdate`
+- 拉取快照：`stateGetTasks` / `stateGetTask` / `stateGetEvents`
+- runtime 会话：`runtimeListSessions`
+- 环境巡检：`envCheckAll`
+
+对应实现位置：
+
+- `apps/desktop-console/src/main/preload.mjs`
+- `apps/desktop-console/src/main/index.mts`
+- `apps/desktop-console/src/main/state-bridge.mts`
+
+### 1.3 状态获取（CLI / API / UI 三层）
+
+CLI：
+
+```bash
+webauto xhs status --json
+webauto xhs status --run-id <runId> --json
+camo instances
+camo sessions
+```
+
+Unified API：
+
+```bash
+curl http://127.0.0.1:7701/api/v1/tasks
+curl http://127.0.0.1:7701/api/v1/tasks/<runId>
+curl http://127.0.0.1:7701/api/v1/tasks/<runId>/events
+```
+
+WebSocket（实时任务更新）：`ws://127.0.0.1:7701/ws`，订阅 `task:*`。
+
+### 1.4 CI 调试（流程与 UI 控制）
+
+先做“本地与 CI 同步”的最小闭环，再定位差异：
+
+```bash
+npm ci
+npm run build:services
+npm test
+node scripts/check-legacy-refs.mjs && node scripts/check-untracked-sources.mjs && node scripts/check-sub-dist.mjs
+npm --prefix apps/desktop-console run build
+node scripts/test/run-coverage.mjs
+```
+
+UI 控制链路专项回归（本地可直接跑）：
+
+```bash
+webauto ui test env-check
+webauto ui test account-flow --profile test-001
+webauto ui test crawl-run --keyword "CI-smoke" --target 5 --headless
+```
+
+调试证据必须至少包含：命令、runId、失败阶段、错误事件、日志路径（`~/.webauto/logs` + `~/.webauto/download/.../run.log`）。
 
 ## 2. 分层与职责边界
 
@@ -63,8 +164,9 @@ curl http://127.0.0.1:7704/health
 
 常用脚本入口（示例）：
 
-- `node scripts/browser-status.mjs <profile> [--site xiaohongshu|weibo] [--url URL]`
-- `node scripts/container-op.mjs <profile> <containerId> <operationId> [--config JSON]`
+- `node apps/webauto/entry/browser-status.mjs <profile> [--url URL]`
+- `node apps/webauto/entry/xhs-status.mjs --json`
+- `webauto xhs status --run-id <runId> --json`
 
 ## 7. Beads (bd) 任务管理（强制）
 

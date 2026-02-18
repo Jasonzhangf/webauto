@@ -17,7 +17,7 @@ export type CamoCheckResult = {
 
 export type ServicesCheckResult = {
   unifiedApi: boolean;
-  browserService: boolean;
+  camoRuntime: boolean;
   searchGate?: boolean;
 };
 
@@ -27,7 +27,21 @@ export type GeoIPCheckResult = {
 };
 
 function resolveNpxBin() {
-  return process.platform === 'win32' ? 'npx.cmd' : 'npx';
+  if (process.platform !== 'win32') return 'npx';
+  const resolved = resolveOnPath(['npx.cmd', 'npx.exe', 'npx.bat', 'npx.ps1']);
+  return resolved || 'npx.cmd';
+}
+
+function resolveOnPath(candidates: string[]): string | null {
+  const pathEnv = process.env.PATH || process.env.Path || '';
+  const dirs = pathEnv.split(path.delimiter).filter(Boolean);
+  for (const dir of dirs) {
+    for (const name of candidates) {
+      const full = path.join(dir, name);
+      if (existsSync(full)) return full;
+    }
+  }
+  return null;
 }
 
 function resolveCamoVersionFromText(stdout: string, stderr: string) {
@@ -93,20 +107,27 @@ function runVersionCheck(command: string, args: string[], explicitPath?: string)
  * Supports PATH/global install, local dependency bin, and npx package fallback.
  */
 export async function checkCamoCli(): Promise<CamoCheckResult> {
-  const pathCheck = runVersionCheck(process.platform === 'win32' ? 'camo.cmd' : 'camo', ['help'], 'PATH:camo');
-  if (pathCheck.installed) return pathCheck;
+  const camoCandidates = process.platform === 'win32'
+    ? ['camo.cmd', 'camo.exe', 'camo.bat', 'camo.ps1']
+    : ['camo'];
+  for (const candidate of camoCandidates) {
+    const pathCheck = runVersionCheck(candidate, ['help'], `PATH:${candidate}`);
+    if (pathCheck.installed) return pathCheck;
+  }
 
   const cwd = process.cwd();
-  const suffix = process.platform === 'win32' ? 'camo.cmd' : 'camo';
-  const localCandidates = [
-    path.resolve(cwd, 'node_modules', '.bin', suffix),
-    path.resolve(cwd, '..', 'node_modules', '.bin', suffix),
-    path.resolve(cwd, '..', '..', 'node_modules', '.bin', suffix),
+  const localRoots = [
+    path.resolve(cwd, 'node_modules', '.bin'),
+    path.resolve(cwd, '..', 'node_modules', '.bin'),
+    path.resolve(cwd, '..', '..', 'node_modules', '.bin'),
   ];
-  for (const candidate of localCandidates) {
-    if (!existsSync(candidate)) continue;
-    const ret = runVersionCheck(candidate, ['help'], candidate);
-    if (ret.installed) return ret;
+  for (const localRoot of localRoots) {
+    for (const suffix of camoCandidates) {
+      const candidate = path.resolve(localRoot, suffix);
+      if (!existsSync(candidate)) continue;
+      const ret = runVersionCheck(candidate, ['help'], candidate);
+      if (ret.installed) return ret;
+    }
   }
 
   const npxCheck = runVersionCheck(
@@ -126,7 +147,7 @@ export async function checkCamoCli(): Promise<CamoCheckResult> {
  * Check if required services are running
  */
 export async function checkServices(): Promise<ServicesCheckResult> {
-  const [unifiedApi, browserService, searchGate] = await Promise.all([
+  const [unifiedApi, camoRuntime, searchGate] = await Promise.all([
     fetch('http://127.0.0.1:7701/health', { signal: AbortSignal.timeout(3000) })
       .then((r) => r.ok)
       .catch(() => false),
@@ -138,7 +159,7 @@ export async function checkServices(): Promise<ServicesCheckResult> {
       .catch(() => false),
   ]);
 
-  return { unifiedApi, browserService, searchGate };
+  return { unifiedApi, camoRuntime, searchGate };
 }
 
 /**
@@ -220,7 +241,6 @@ export async function checkEnvironment(): Promise<{
   const allReady =
     camo.installed &&
     services.unifiedApi &&
-    services.browserService &&
     firefox.installed;
   return { camo, services, firefox, geoip, allReady };
 }
