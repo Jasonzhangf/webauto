@@ -6,7 +6,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const APP_ROOT = path.resolve(__dirname, '../..');
+const APP_ROOT = path.resolve(__dirname, '..');
 const DIST_MAIN = path.join(APP_ROOT, 'dist', 'main', 'index.mjs');
 
 const args = minimist(process.argv.slice(2), {
@@ -83,14 +83,23 @@ async function startConsole(noDaemon = false) {
   }
 
   console.log('[ui-console] Starting Desktop Console...');
+  const npxBin = process.platform === 'win32' ? 'npx.cmd' : 'npx';
   const env = { ...process.env };
   if (noDaemon) env.WEBAUTO_NO_DAEMON = '1';
+  const detached = !noDaemon;
+  const stdio = detached ? 'ignore' : 'inherit';
 
-  const child = spawn('npx', ['electron', DIST_MAIN], {
+  const useCmd = process.platform === 'win32';
+  const spawnCmd = useCmd ? 'cmd.exe' : npxBin;
+  const spawnArgs = useCmd
+    ? ['/d', '/s', '/c', npxBin, 'electron', DIST_MAIN]
+    : ['electron', DIST_MAIN];
+
+  const child = spawn(spawnCmd, spawnArgs, {
     cwd: APP_ROOT,
     env,
-    stdio: 'inherit',
-    detached: !noDaemon
+    stdio,
+    detached
   });
 
   if (noDaemon) {
@@ -142,10 +151,11 @@ class UITestRunner {
   }
 
   async testEnvCheck() {
-    this.log('Starting environment check test', 'test');
+      this.log('Starting environment check test', 'test');
     try {
       this.log('Testing: camo CLI');
-      await this.runCommand('which camo');
+      const camoCli = path.join(process.cwd(), 'bin', 'camoufox-cli.mjs');
+      await this.runCommand('node', [camoCli, 'help']);
       this.log('PASS: camo CLI found', 'pass');
 
       this.log('Testing: Unified API');

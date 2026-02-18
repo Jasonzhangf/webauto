@@ -26,7 +26,7 @@ export function renderRun(root: HTMLElement, ctx: any) {
   const targetInput = createEl('input', { value: String(ctx.settings?.defaultTarget || ''), placeholder: 'target', type: 'number', min: '1' }) as HTMLInputElement;
   const envSel = createEl('select') as HTMLSelectElement;
   ['debug', 'prod'].forEach((x) => envSel.appendChild(createEl('option', { value: x }, [x])));
-  envSel.value = ctx.settings?.defaultEnv || 'debug';
+  envSel.value = ctx.settings?.defaultEnv || 'prod';
 
   const dryRun = createEl('input', { type: 'checkbox' }) as HTMLInputElement;
   dryRun.checked = ctx.settings?.defaultDryRun === true;

@@ -85,7 +85,7 @@ function createMockCtx(): MockBundle {
   const settings: any = {
     coreDaemonUrl: 'http://127.0.0.1:7700',
     downloadRoot: '/tmp/webauto/download',
-    defaultEnv: 'debug',
+    defaultEnv: 'prod',
     defaultKeyword: 'seedance2.0',
     defaultTarget: 50,
     defaultDryRun: false,

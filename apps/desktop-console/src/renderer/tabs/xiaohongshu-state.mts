@@ -55,7 +55,7 @@ export function getDefaultConfig(): XhsConfig {
   return {
     orchestrateMode: 'unified',
     keyword: '',
-    env: 'debug',
+    env: 'prod',
     accountMode: 'single',
     singleProfile: 'xiaohongshu_default',
     shardProfiles: ['xiaohongshu_default'],
@@ -73,12 +73,12 @@ export function getDefaultConfig(): XhsConfig {
     doOcr: false,
     doGate: false,
     
-    maxComments: 50,
+    maxComments: 0,
     commentRounds: 0,
     matchKeywords: '',
     matchMode: 'any',
     matchMinHits: 1,
-    maxLikes: 5,
+    maxLikes: 0,
     likeRules: [],
     replyText: '',
     ocrCommand: 'deepseek-ocr',

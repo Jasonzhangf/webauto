@@ -258,7 +258,7 @@ export function createRunFlowController(opts: RunFlowOptions): RunFlowController
     const args: string[] = [
       '--mode', mode,
       ...profileArgs,
-      '--env', envInput.value || 'debug',
+      '--env', envInput.value || 'prod',
       '--input-mode', protocolModeCheckbox.checked ? 'protocol' : 'system',
       '--headless', headlessCheckbox.checked ? 'true' : 'false',
       '--foreground',
@@ -273,7 +273,7 @@ export function createRunFlowController(opts: RunFlowOptions): RunFlowController
 
     if (dryRunCheckbox.checked) args.push('--dry-run');
     else args.push('--no-dry-run');
-    api?.appendLog?.(`[ui-run-flags] dryRun=${dryRunCheckbox.checked} doLikes=${likesToggle.checked} maxLikes=${String(maxLikesInput.value || 2)}`);
+    api?.appendLog?.(`[ui-run-flags] dryRun=${dryRunCheckbox.checked} doLikes=${likesToggle.checked} maxLikes=${String(maxLikesInput.value || 0)}`);
 
     if (unifiedEnabled) {
       const homepageFlags = getEffectiveHomepageFlags();
@@ -288,7 +288,7 @@ export function createRunFlowController(opts: RunFlowOptions): RunFlowController
         '--match-mode', gateToggle.checked ? (matchModeSelect.value || 'any') : 'any',
         '--match-min-hits', gateToggle.checked ? String(matchMinHitsInput.value || 2) : '1',
         '--do-likes', likesToggle.checked ? 'true' : 'false',
-        '--max-likes', String(maxLikesInput.value || 2),
+        '--max-likes', String(maxLikesInput.value || 0),
         '--like-keywords', likeRulePreview.value || '',
         '--do-reply', replyToggle.checked ? 'true' : 'false',
         '--reply-text', replyTextInput.value || '',

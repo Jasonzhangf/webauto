@@ -7,7 +7,7 @@ export function renderSettings(root: HTMLElement, ctx: any) {
   const download = createEl('input', { value: ctx.settings?.downloadRoot || '' }) as HTMLInputElement;
   const env = createEl('select') as HTMLSelectElement;
   ['debug', 'prod'].forEach((x) => env.appendChild(createEl('option', { value: x }, [x])));
-  env.value = ctx.settings?.defaultEnv || 'debug';
+  env.value = ctx.settings?.defaultEnv || 'prod';
   const keyword = createEl('input', { value: ctx.settings?.defaultKeyword || '' }) as HTMLInputElement;
   const loginTimeout = createEl('input', { value: String(ctx.settings?.timeouts?.loginTimeoutSec || 900), type: 'number', min: '30' }) as HTMLInputElement;
   const cmdTimeout = createEl('input', { value: String(ctx.settings?.timeouts?.cmdTimeoutSec || 0), type: 'number', min: '0' }) as HTMLInputElement;

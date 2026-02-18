@@ -42,7 +42,7 @@ export function renderConfigPanel(root: HTMLElement, ctx: any) {
         <label>运行环境</label>
         <select id="env-select" style="width: 120px;">
           <option value="debug">调试模式</option>
-          <option value="prod">生产模式</option>
+          <option value="prod" selected>生产模式</option>
         </select>
       </div>
     </div>
@@ -91,7 +91,7 @@ export function renderConfigPanel(root: HTMLElement, ctx: any) {
     <div class="row">
       <div>
         <label>最多评论数</label>
-        <input id="max-comments-input" type="number" value="100" min="0" style="width: 100px;" />
+        <input id="max-comments-input" type="number" value="0" min="0" style="width: 100px;" />
       </div>
     </div>
 
@@ -103,8 +103,15 @@ export function renderConfigPanel(root: HTMLElement, ctx: any) {
       </label>
       <div>
         <label>点赞关键词 (逗号分隔)</label>
-        <input id="like-keywords-input" placeholder="例如: 美食,旅游,摄影" disabled />
+        <input id="like-keywords-input" placeholder="例如: 美食,旅游,摄影" />
+      
+      <div class="row" style="margin-top: 8px;">
+        <div>
+          <label>??????(0=??)</label>
+          <input id="max-likes-input" type="number" value="0" min="0" style="width: 100px;" />
+        </div>
       </div>
+</div>
     </div>
 
     <div style="margin-top: var(--gap); padding-top: var(--gap); border-top: 1px solid var(--border);">
@@ -146,6 +153,7 @@ export function renderConfigPanel(root: HTMLElement, ctx: any) {
   const maxCommentsInput = root.querySelector('#max-comments-input') as HTMLInputElement;
   const autoLikeCb = root.querySelector('#auto-like-cb') as HTMLInputElement;
   const likeKeywordsInput = root.querySelector('#like-keywords-input') as HTMLInputElement;
+  const maxLikesInput = root.querySelector('#max-likes-input') as HTMLInputElement;
   const headlessCb = root.querySelector('#headless-cb') as HTMLInputElement;
   const dryRunCb = root.querySelector('#dry-run-cb') as HTMLInputElement;
   const startBtn = root.querySelector('#start-btn') as HTMLButtonElement;
@@ -157,6 +165,12 @@ export function renderConfigPanel(root: HTMLElement, ctx: any) {
   let accountRows: UiAccountProfile[] = [];
   let preferredProfileId = '';
 
+  function readNumber(input: HTMLInputElement, fallback: number) {
+    const raw = Number(input.value);
+    if (!Number.isFinite(raw)) return fallback;
+    return Math.max(0, Math.floor(raw));
+  }
+
   function buildConfigPayload() {
     return {
       keyword: keywordInput.value.trim(),
@@ -164,9 +178,10 @@ export function renderConfigPanel(root: HTMLElement, ctx: any) {
       env: envSelect.value as 'debug' | 'prod',
       fetchBody: fetchBodyCb.checked,
       fetchComments: fetchCommentsCb.checked,
-      maxComments: parseInt(maxCommentsInput.value) || 100,
+      maxComments: readNumber(maxCommentsInput, 0),
       autoLike: autoLikeCb.checked,
       likeKeywords: likeKeywordsInput.value.trim(),
+      maxLikes: readNumber(maxLikesInput, 0),
       headless: headlessCb.checked,
       dryRun: dryRunCb.checked,
       lastProfileId: accountSelect.value || undefined
@@ -180,12 +195,13 @@ export function renderConfigPanel(root: HTMLElement, ctx: any) {
       if (config) {
         keywordInput.value = config.keyword || '';
         targetInput.value = String(config.target || 50);
-        envSelect.value = config.env || 'debug';
+        envSelect.value = config.env || 'prod';
         fetchBodyCb.checked = config.fetchBody !== false;
         fetchCommentsCb.checked = config.fetchComments !== false;
-        maxCommentsInput.value = String(config.maxComments || 100);
+        maxCommentsInput.value = String(config.maxComments ?? 0);
         autoLikeCb.checked = config.autoLike === true;
         likeKeywordsInput.value = config.likeKeywords || '';
+        maxLikesInput.value = String(config.maxLikes ?? 0);
         headlessCb.checked = config.headless === true;
         dryRunCb.checked = config.dryRun === true;
         preferredProfileId = String(config.lastProfileId || '').trim();
@@ -266,12 +282,13 @@ export function renderConfigPanel(root: HTMLElement, ctx: any) {
 
         keywordInput.value = config.keyword || '';
         targetInput.value = String(config.target || 50);
-        envSelect.value = config.env || 'debug';
+        envSelect.value = config.env || 'prod';
         fetchBodyCb.checked = config.fetchBody !== false;
         fetchCommentsCb.checked = config.fetchComments !== false;
-        maxCommentsInput.value = String(config.maxComments || 100);
+        maxCommentsInput.value = String(config.maxComments ?? 0);
         autoLikeCb.checked = config.autoLike === true;
         likeKeywordsInput.value = config.likeKeywords || '';
+        maxLikesInput.value = String(config.maxLikes ?? 0);
         headlessCb.checked = config.headless === true;
         dryRunCb.checked = config.dryRun === true;
         updateLikeKeywordsState();
@@ -287,8 +304,10 @@ export function renderConfigPanel(root: HTMLElement, ctx: any) {
 
   // Update like keywords state
   function updateLikeKeywordsState() {
-    likeKeywordsInput.disabled = !autoLikeCb.checked;
-    likeKeywordsInput.style.opacity = autoLikeCb.checked ? '1' : '0.5';
+    likeKeywordsInput.disabled = false;
+    likeKeywordsInput.style.opacity = autoLikeCb.checked ? '1' : '0.9';
+    maxLikesInput.disabled = false;
+    maxLikesInput.style.opacity = autoLikeCb.checked ? '1' : '0.9';
   }
 
   // Start crawl
@@ -328,8 +347,9 @@ export function renderConfigPanel(root: HTMLElement, ctx: any) {
       '--env', config.env,
       '--do-comments', config.fetchComments ? 'true' : 'false',
       '--persist-comments', config.fetchComments ? 'true' : 'false',
+      ...(config.fetchComments ? ['--max-comments', String(config.maxComments)] : []),
       '--do-likes', config.autoLike ? 'true' : 'false',
-      '--like-keywords', config.likeKeywords || '',
+      ...(config.autoLike ? ['--like-keywords', config.likeKeywords || '', '--max-likes', String(config.maxLikes)] : []),
       '--headless', config.headless ? 'true' : 'false',
     ];
     if (outputRoot) args.push('--output-root', outputRoot);
@@ -388,7 +408,7 @@ export function renderConfigPanel(root: HTMLElement, ctx: any) {
 
   // Auto-save on change
   [keywordInput, targetInput, envSelect, accountSelect, fetchBodyCb, fetchCommentsCb,
-   maxCommentsInput, autoLikeCb, likeKeywordsInput, headlessCb, dryRunCb].forEach(el => {
+   maxCommentsInput, autoLikeCb, likeKeywordsInput, maxLikesInput, headlessCb, dryRunCb].forEach(el => {
     el.onchange = saveConfig;
     if (el.tagName === 'INPUT' && (el as HTMLInputElement).type !== 'checkbox') {
       (el as HTMLInputElement).oninput = saveConfig;

@@ -198,6 +198,9 @@ playwright/.cache/
 
 # Browser cache and data
 *.cache/
+
+# Allow camoufox-cli shim
+!bin/camoufox-cli.mjs
 .cache/
 
 # Swift plugin build artifacts

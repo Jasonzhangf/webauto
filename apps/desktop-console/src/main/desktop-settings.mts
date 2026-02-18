@@ -27,6 +27,7 @@ export type CrawlConfig = {
   maxComments: number;
   autoLike: boolean;
   likeKeywords: string;
+  maxLikes?: number;
   headless: boolean;
   dryRun: boolean;
   lastProfileId?: string;
@@ -127,7 +128,7 @@ function normalizeSettings(defaults: Partial<DesktopConsoleSettings>, input: Par
     browserServiceUrl: String(input.browserServiceUrl || defaults.browserServiceUrl || 'http://127.0.0.1:7704'),
     searchGateUrl: String(input.searchGateUrl || defaults.searchGateUrl || 'http://127.0.0.1:7790'),
     downloadRoot: String(input.downloadRoot || defaults.downloadRoot || resolveDefaultDownloadRoot()),
-    defaultEnv: (String(input.defaultEnv || defaults.defaultEnv || 'debug') === 'prod' ? 'prod' : 'debug'),
+    defaultEnv: (String(input.defaultEnv || defaults.defaultEnv || 'prod') === 'prod' ? 'prod' : 'debug'),
     defaultKeyword: String(input.defaultKeyword ?? defaults.defaultKeyword ?? ''),
     defaultTarget: Math.max(1, Math.floor(Number((input as any).defaultTarget ?? (defaults as any).defaultTarget ?? 20) || 20)),
     defaultDryRun: Boolean((input as any).defaultDryRun ?? (defaults as any).defaultDryRun ?? false),

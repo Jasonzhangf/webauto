@@ -16,14 +16,48 @@ function buildDetectScript() {
       if (text === '我' || text === '我的' || text === '个人主页') return null;
       return text;
     };
+    const cleanAlias = (value) => {
+      let text = normalizeAlias(value);
+      if (!text) return null;
+      text = text.replace(/\\s*[-–—]\\s*(小红书|XiaoHongShu|xiaohongshu).*$/i, '').trim();
+      if (!text) return null;
+      const blocked = ['小红书', '登录', '注册', '搜索'];
+      if (blocked.includes(text)) return null;
+      return text;
+    };
     const pushCandidate = (id, alias, source) => {
       const value = String(id || '').trim();
       if (!value) return;
       candidates.push({
         id: value,
-        alias: normalizeAlias(alias),
+        alias: cleanAlias(alias),
         source: String(source || '').trim() || null,
       });
+    };
+    const findAliasFromDom = () => {
+      const selectors = [
+        '[class*="user"] [class*="name"]',
+        '[class*="nickname"]',
+        '[class*="account"] [class*="name"]',
+        'a[href*="/user/profile"] span',
+        'header a[href*="/user"] span',
+        'nav a[href*="/user"] span',
+      ];
+      const picks = [];
+      for (const sel of selectors) {
+        const nodes = Array.from(document.querySelectorAll(sel)).slice(0, 6);
+        for (const node of nodes) {
+          const text = cleanAlias(node.textContent || '');
+          if (text) picks.push({ text, source: sel });
+        }
+      }
+      const metaTitle = document.querySelector('meta[property="og:title"], meta[name="og:title"]');
+      const metaText = cleanAlias(metaTitle ? metaTitle.getAttribute('content') || '' : '');
+      if (metaText) picks.push({ text: metaText, source: 'meta:og:title' });
+      const title = cleanAlias(document.title || '');
+      if (title) picks.push({ text: title, source: 'document.title' });
+      const picked = picks.find((item) => item.text && item.text.length >= 2) || null;
+      return picked ? picked.text : null;
     };
 
     const initialState = (typeof window !== 'undefined' && window.__INITIAL_STATE__) || null;
@@ -36,7 +70,7 @@ function buildDetectScript() {
       : null;
     if (rawUserInfo) {
       const initUserId = String(rawUserInfo.user_id || rawUserInfo.userId || '').trim();
-      const initNickname = normalizeAlias(rawUserInfo.nickname || rawUserInfo.name || rawUserInfo.nickName || null);
+      const initNickname = cleanAlias(rawUserInfo.nickname || rawUserInfo.name || rawUserInfo.nickName || null);
       if (initUserId) {
         pushCandidate(initUserId, initNickname, 'initial_state.user_info');
       }
@@ -95,7 +129,12 @@ function buildDetectScript() {
       const aliasNode = Array.from(document.querySelectorAll('a[href*="/user/profile/"], [class*="user"] a[href*="/user/profile/"]'))
         .find((node) => String(node.getAttribute && node.getAttribute('href') || '').includes(best.id));
       const text = aliasNode ? String(aliasNode.textContent || '').replace(/\\s+/g, ' ').trim() : '';
-      if (text && text !== '我' && text !== '我的') alias = text;
+      const picked = cleanAlias(text);
+      if (picked) alias = picked;
+    }
+    if (!alias) {
+      const picked = findAliasFromDom();
+      if (picked) alias = picked;
     }
     return {
       url: location.href,

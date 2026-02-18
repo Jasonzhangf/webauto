@@ -164,6 +164,7 @@ export function renderDashboard(root: HTMLElement, ctx: any) {
   let logsExpanded = false;
   let paused = false;
   let startTime = Date.now();
+  let stoppedAt: number | null = null;
   let elapsedTimer: ReturnType<typeof setInterval> | null = null;
   let unsubscribeState: (() => void) | null = null;
   let unsubscribeCmd: (() => void) | null = null;
@@ -206,11 +207,23 @@ export function renderDashboard(root: HTMLElement, ctx: any) {
 
   // Update elapsed time
   function updateElapsed() {
-    const elapsed = Math.floor((Date.now() - startTime) / 1000);
+    const base = stoppedAt ?? Date.now();
+    const elapsed = Math.max(0, Math.floor((base - startTime) / 1000));
     const h = Math.floor(elapsed / 3600);
     const m = Math.floor((elapsed % 3600) / 60);
     const s = elapsed % 60;
     statElapsed.textContent = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+  }
+
+  function startElapsedTimer() {
+    if (elapsedTimer) return;
+    elapsedTimer = setInterval(updateElapsed, 1000);
+  }
+
+  function stopElapsedTimer() {
+    if (!elapsedTimer) return;
+    clearInterval(elapsedTimer);
+    elapsedTimer = null;
   }
 
   // Add log line
@@ -302,6 +315,11 @@ export function renderDashboard(root: HTMLElement, ctx: any) {
     if (event === 'xhs.unified.start') {
       currentPhase.textContent = '运行中';
       currentAction.textContent = '启动 autoscript';
+      const ts = Date.parse(String(payload.ts || '')) || Date.now();
+      startTime = ts;
+      stoppedAt = null;
+      updateElapsed();
+      startElapsedTimer();
       if (payload.runId) {
         activeRunId = String(payload.runId || '').trim() || activeRunId;
       }
@@ -344,9 +362,14 @@ export function renderDashboard(root: HTMLElement, ctx: any) {
     }
     if (event === 'xhs.unified.stop') {
       const reason = String(payload.reason || '').trim();
+      const stoppedTs = Date.parse(String(payload.stoppedAt || payload.ts || '')) || Date.now();
+      stoppedAt = stoppedTs;
+      updateElapsed();
+      stopElapsedTimer();
+      const successReasons = new Set(['completed', 'script_complete']);
       currentPhase.textContent = reason && reason !== 'script_failure' ? '已结束' : '失败';
       currentAction.textContent = reason || 'stop';
-      if (reason && reason !== 'completed') {
+      if (reason && !successReasons.has(reason)) {
         pushRecentError(`stop reason=${reason}`, event);
       }
       renderRunSummary();
@@ -502,11 +525,11 @@ export function renderDashboard(root: HTMLElement, ctx: any) {
   fetchCurrentState();
 
   // Start elapsed timer
-  elapsedTimer = setInterval(updateElapsed, 1000);
+  startElapsedTimer();
 
   // Cleanup
   return () => {
-    if (elapsedTimer) clearInterval(elapsedTimer);
+    stopElapsedTimer();
     if (unsubscribeState) unsubscribeState();
     if (unsubscribeCmd) unsubscribeCmd();
   };

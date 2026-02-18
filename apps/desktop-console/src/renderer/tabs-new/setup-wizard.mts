@@ -302,7 +302,7 @@ export function renderSetupWizard(root: HTMLElement, ctx: any) {
           } else if (label.includes('Camoufox CLI') || label.includes('CLI') || label.includes('camo')) {
             ok = Boolean(latest.camo?.installed);
           } else if (label.includes('核心')) {
-            ok = Boolean(latest.services?.unifiedApi && latest.services?.browserService);
+            ok = Boolean(latest.services?.unifiedApi && latest.services?.camoRuntime);
           } else {
             ok = isEnvReady(latest);
           }
@@ -361,7 +361,9 @@ export function renderSetupWizard(root: HTMLElement, ctx: any) {
     (el as HTMLElement).dataset.label = baseLabel;
     icon.textContent = ok ? '✓' : '✗';
     icon.style.color = ok ? 'var(--success)' : 'var(--danger)';
-    text.textContent = detail ? `${baseLabel} · ${detail}` : baseLabel;
+    const safeDetail = String(detail || '').trim();
+    const shouldAppend = safeDetail && !String(baseLabel || '').includes(safeDetail);
+    text.textContent = shouldAppend ? `${baseLabel} · ${safeDetail}` : baseLabel;
   }
 
   // Account Management

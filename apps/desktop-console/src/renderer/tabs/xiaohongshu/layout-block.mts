@@ -12,7 +12,7 @@ export function buildXhsLayout(opts: BuildLayoutOptions) {
   orchestrateModeSelect.appendChild(createEl('option', { value: 'phase1-only' }, ['仅启动浏览器：Phase1']));
   orchestrateModeSelect.appendChild(createEl('option', { value: 'unified-only' }, ['仅执行 Unified（使用已有 links）']));
   const keywordInput = makeTextInput('黄金走势', '关键词');
-  const envInput = makeTextInput('debug', 'env');
+  const envInput = makeTextInput('prod', 'env');
   const accountModeSelect = createEl('select', { style: 'width:220px;' }) as HTMLSelectElement;
   accountModeSelect.appendChild(createEl('option', { value: 'single', selected: true }, ['单账号（一个 profile）']));
   accountModeSelect.appendChild(createEl('option', { value: 'shards' }, ['分片并发（多个 profiles）']));
@@ -176,7 +176,7 @@ export function buildXhsLayout(opts: BuildLayoutOptions) {
  bindSectionToggle(gateToggle, gateBody);
   featureTiles.appendChild(gateSection);
   const likesToggle = makeCheckbox(false, 'xh-do-likes');
-  const maxLikesInput = makeNumberInput('2', '1');
+  const maxLikesInput = makeNumberInput('0', '0');
   const likesSection = createEl('div', { className: 'xhs-bento-card' });
   likesSection.appendChild(createEl('div', { className: 'row', style: 'gap:6px; margin-bottom:8px;' }, [
     likesToggle,

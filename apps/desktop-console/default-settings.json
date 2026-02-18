@@ -7,7 +7,7 @@
     ".webauto",
     "download"
   ],
-  "defaultEnv": "debug",
+  "defaultEnv": "prod",
   "defaultKeyword": "",
   "defaultTarget": 20,
   "defaultDryRun": false,
