@@ -37,8 +37,42 @@ function isGlobalInstall() {
          !existsSync(path.join(ROOT, '.git'));
 }
 
-function npmBin() {
-  return process.platform === 'win32' ? 'npm.cmd' : 'npm';
+function resolveOnPath(candidates) {
+  const pathEnv = process.env.PATH || process.env.Path || '';
+  const dirs = pathEnv.split(path.delimiter).filter(Boolean);
+  for (const dir of dirs) {
+    for (const name of candidates) {
+      const full = path.join(dir, name);
+      if (existsSync(full)) return full;
+    }
+  }
+  return null;
+}
+
+function wrapWindowsRunner(cmdPath, prefix = []) {
+  if (process.platform !== 'win32') return { cmd: cmdPath, prefix };
+  const lower = String(cmdPath || '').toLowerCase();
+  if (lower.endsWith('.ps1')) {
+    return {
+      cmd: 'powershell.exe',
+      prefix: ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', cmdPath, ...prefix],
+    };
+  }
+  if (lower.endsWith('.cmd') || lower.endsWith('.bat')) {
+    const useCmd = /\s/u.test(cmdPath) ? path.basename(cmdPath) : cmdPath;
+    return {
+      cmd: 'cmd.exe',
+      prefix: ['/d', '/s', '/c', useCmd, ...prefix],
+    };
+  }
+  return { cmd: cmdPath, prefix };
+}
+
+function npmRunner() {
+  if (process.platform !== 'win32') return { cmd: 'npm', prefix: [] };
+  const npmNames = ['npm.cmd', 'npm.exe', 'npm.bat', 'npm.ps1'];
+  const resolved = resolveOnPath(npmNames) || 'npm.cmd';
+  return wrapWindowsRunner(resolved);
 }
 
 function printMainHelp() {
@@ -294,13 +328,15 @@ async function ensureDepsAndBuild() {
   // Install deps if needed
   if (!checkDesktopConsoleDeps()) {
     console.log('[webauto] Installing desktop-console dependencies...');
-    await runInDir(appDir, npmBin(), ['install']);
+  const npm = npmRunner();
+  await runInDir(appDir, npm.cmd, [...npm.prefix, 'install']);
   }
 
   // Build if needed  
   if (!checkDesktopConsoleBuilt()) {
     console.log('[webauto] Building desktop-console...');
-    await runInDir(appDir, npmBin(), ['run', 'build']);
+  const npm = npmRunner();
+  await runInDir(appDir, npm.cmd, [...npm.prefix, 'run', 'build']);
   }
 
   // Mark as initialized
@@ -332,13 +368,14 @@ async function uiConsole({ build, install, checkOnly }) {
     }
   } else {
     // Local dev mode - require explicit build
-  if (!okServices) {
-    if (!build) {
-      console.error('❌ missing dist/ (services/modules). Run: npm run build:services');
-      process.exit(2);
+    if (!okServices) {
+      if (!build) {
+        console.error('❌ missing dist/ (services/modules). Run: npm run build:services');
+        process.exit(2);
+      }
+      const npm = npmRunner();
+      await run(npm.cmd, [...npm.prefix, 'run', 'build:services']);
     }
-    await run(npmBin(), ['run', 'build:services']);
-  }
   }
 
   if (!okDeps) {
@@ -349,7 +386,8 @@ async function uiConsole({ build, install, checkOnly }) {
       process.exit(2);
     }
     if (!isGlobalInstall()) {
-      await runInDir(path.join(ROOT, 'apps', 'desktop-console'), npmBin(), ['install']);
+      const npm = npmRunner();
+      await runInDir(path.join(ROOT, 'apps', 'desktop-console'), npm.cmd, [...npm.prefix, 'install']);
     }
   }
 
@@ -358,10 +396,12 @@ async function uiConsole({ build, install, checkOnly }) {
       console.error('❌ missing apps/desktop-console/dist. Run: npm --prefix apps/desktop-console run build');
       process.exit(2);
     }
-    await runInDir(path.join(ROOT, 'apps', 'desktop-console'), npmBin(), ['run', 'build']);
+    const npm = npmRunner();
+    await runInDir(path.join(ROOT, 'apps', 'desktop-console'), npm.cmd, [...npm.prefix, 'run', 'build']);
   }
 
-  await runInDir(path.join(ROOT, 'apps', 'desktop-console'), npmBin(), ['start']);
+  const npm = npmRunner();
+  await runInDir(path.join(ROOT, 'apps', 'desktop-console'), npm.cmd, [...npm.prefix, 'start']);
 }
 
 async function main() {
@@ -399,9 +439,10 @@ async function main() {
   // build:dev - local development mode
   if (cmd === 'build:dev') {
     console.log('[webauto] Running local dev setup...');
-    await run(npmBin(), ['run', 'build:services']);
-    await runInDir(path.join(ROOT, 'apps', 'desktop-console'), npmBin(), ['install']);
-    await runInDir(path.join(ROOT, 'apps', 'desktop-console'), npmBin(), ['run', 'build']);
+    const npm = npmRunner();
+    await run(npm.cmd, [...npm.prefix, 'run', 'build:services']);
+    await runInDir(path.join(ROOT, 'apps', 'desktop-console'), npm.cmd, [...npm.prefix, 'install']);
+    await runInDir(path.join(ROOT, 'apps', 'desktop-console'), npm.cmd, [...npm.prefix, 'run', 'build']);
     console.log('[webauto] Dev setup complete');
     return;
   }
@@ -409,7 +450,8 @@ async function main() {
   // build:release - prepare for npm publish
   if (cmd === 'build:release') {
     console.log('[webauto] Building release version...');
-    await run(npmBin(), ['run', 'build:services']);
+    const npm = npmRunner();
+    await run(npm.cmd, [...npm.prefix, 'run', 'build:services']);
     // Clean up state for fresh install
     saveState({ initialized: false, version: null });
     console.log('[webauto] Release build complete');

@@ -42,13 +42,36 @@ function resolveCamoVersionFromText(stdout: string, stderr: string) {
   return 'unknown';
 }
 
+function quoteCmdArg(value: string) {
+  if (!value) return '""';
+  if (!/[\s"]/u.test(value)) return value;
+  return `"${value.replace(/"/g, '""')}"`;
+}
+
 function runVersionCheck(command: string, args: string[], explicitPath?: string): CamoCheckResult {
   try {
-    const ret = spawnSync(command, args, {
-      encoding: 'utf8',
-      timeout: 8000,
-      windowsHide: true,
-    });
+    const lower = String(command || '').toLowerCase();
+    let ret;
+    if (process.platform === 'win32' && (lower.endsWith('.cmd') || lower.endsWith('.bat'))) {
+      const cmdLine = [quoteCmdArg(command), ...args.map(quoteCmdArg)].join(' ');
+      ret = spawnSync('cmd.exe', ['/d', '/s', '/c', cmdLine], {
+        encoding: 'utf8',
+        timeout: 8000,
+        windowsHide: true,
+      });
+    } else if (process.platform === 'win32' && lower.endsWith('.ps1')) {
+      ret = spawnSync('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', command, ...args], {
+        encoding: 'utf8',
+        timeout: 8000,
+        windowsHide: true,
+      });
+    } else {
+      ret = spawnSync(command, args, {
+        encoding: 'utf8',
+        timeout: 8000,
+        windowsHide: true,
+      });
+    }
     if (ret.status !== 0) {
       return {
         installed: false,

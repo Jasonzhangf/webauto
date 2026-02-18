@@ -35,10 +35,59 @@ function parseBoolean(value, fallback = false) {
   return fallback;
 }
 
+function resolveOnPath(candidates) {
+  const pathEnv = process.env.PATH || process.env.Path || '';
+  const dirs = pathEnv.split(path.delimiter).filter(Boolean);
+  for (const dir of dirs) {
+    for (const name of candidates) {
+      const full = path.join(dir, name);
+      if (existsSync(full)) return full;
+    }
+  }
+  return null;
+}
+
+function resolveInDir(dir, candidates) {
+  for (const name of candidates) {
+    const full = path.join(dir, name);
+    if (existsSync(full)) return full;
+  }
+  return null;
+}
+
+function wrapWindowsRunner(cmdPath, prefix = []) {
+  if (process.platform !== 'win32') return { cmd: cmdPath, prefix };
+  const lower = String(cmdPath || '').toLowerCase();
+  if (lower.endsWith('.ps1')) {
+    return {
+      cmd: 'powershell.exe',
+      prefix: ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', cmdPath, ...prefix],
+    };
+  }
+  if (lower.endsWith('.cmd') || lower.endsWith('.bat')) {
+    const useCmd = /\s/u.test(cmdPath) ? path.basename(cmdPath) : cmdPath;
+    return {
+      cmd: 'cmd.exe',
+      prefix: ['/d', '/s', '/c', useCmd, ...prefix],
+    };
+  }
+  return { cmd: cmdPath, prefix };
+}
+
 function getCamoRunner() {
-  const local = path.join(ROOT, 'node_modules', '.bin', process.platform === 'win32' ? 'camo.cmd' : 'camo');
-  if (existsSync(local)) return { cmd: local, prefix: [] };
-  return { cmd: process.platform === 'win32' ? 'npx.cmd' : 'npx', prefix: ['@web-auto/camo'] };
+  const isWin = process.platform === 'win32';
+  const localBin = path.join(ROOT, 'node_modules', '.bin');
+  const camoNames = isWin ? ['camo.cmd', 'camo.exe', 'camo.bat', 'camo.ps1'] : ['camo'];
+  const npxNames = isWin ? ['npx.cmd', 'npx.exe', 'npx.bat', 'npx.ps1'] : ['npx'];
+
+  const local = resolveInDir(localBin, camoNames);
+  if (local) return wrapWindowsRunner(local);
+
+  const global = resolveOnPath(camoNames);
+  if (global) return wrapWindowsRunner(global);
+
+  const npx = resolveOnPath(npxNames) || (isWin ? 'npx.cmd' : 'npx');
+  return wrapWindowsRunner(npx, ['@web-auto/camo']);
 }
 
 function runCamo(args) {

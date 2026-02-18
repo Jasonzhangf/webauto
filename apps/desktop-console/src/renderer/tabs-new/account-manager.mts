@@ -42,6 +42,10 @@ export function renderAccountManager(root: HTMLElement, ctx: any) {
       账户列表
       <button id="add-account-btn" style="margin-left: auto; padding: 6px 12px; font-size: 12px;">添加账户</button>
     </div>
+    <div class="row" style="margin: 8px 0; gap: 8px; align-items: center;">
+      <input id="new-account-alias-input" placeholder="请输入新账户别名" style="flex: 1; min-width: 180px;" />
+      <button id="add-account-confirm-btn" class="secondary" style="flex: 0 0 auto;">创建并登录</button>
+    </div>
     <div id="account-list" class="account-list" style="margin-bottom: var(--gap); max-height: 300px; overflow: auto;"></div>
     <div style="margin-top: var(--gap);">
       <div class="btn-group">
@@ -56,6 +60,8 @@ export function renderAccountManager(root: HTMLElement, ctx: any) {
   // Elements
   const recheckEnvBtn = root.querySelector('#recheck-env-btn') as HTMLButtonElement;
   const addAccountBtn = root.querySelector('#add-account-btn') as HTMLButtonElement;
+  const addAccountConfirmBtn = root.querySelector('#add-account-confirm-btn') as HTMLButtonElement;
+  const newAccountAliasInput = root.querySelector('#new-account-alias-input') as HTMLInputElement;
   const checkAllBtn = root.querySelector('#check-all-btn') as HTMLButtonElement;
   const refreshExpiredBtn = root.querySelector('#refresh-expired-btn') as HTMLButtonElement;
   const accountListEl = root.querySelector('#account-list') as HTMLDivElement;
@@ -239,8 +245,12 @@ export function renderAccountManager(root: HTMLElement, ctx: any) {
 
   // Add new account
   async function addAccount() {
-    const alias = prompt('请输入新账户别名:');
-    if (!alias?.trim()) return;
+    const alias = newAccountAliasInput.value.trim();
+    if (!alias) {
+      alert('请先输入账户别名');
+      newAccountAliasInput.focus();
+      return;
+    }
 
     try {
       // Create profile
@@ -281,6 +291,7 @@ export function renderAccountManager(root: HTMLElement, ctx: any) {
       });
 
       await loadAccounts();
+      newAccountAliasInput.value = '';
 
     } catch (err: any) {
       alert('添加账号失败: ' + (err?.message || String(err)));
@@ -340,6 +351,13 @@ export function renderAccountManager(root: HTMLElement, ctx: any) {
   // Event handlers
   recheckEnvBtn.onclick = checkEnvironment;
   addAccountBtn.onclick = addAccount;
+  addAccountConfirmBtn.onclick = addAccount;
+  newAccountAliasInput.onkeydown = (ev) => {
+    if (ev.key === 'Enter') {
+      ev.preventDefault();
+      void addAccount();
+    }
+  };
   checkAllBtn.onclick = checkAllAccounts;
   refreshExpiredBtn.onclick = refreshExpiredAccounts;
 

@@ -45,6 +45,7 @@ export type DesktopConsoleSettings = {
   profileAliases: Record<string, string>;
   profileColors: Record<string, string>;
   aiReply: AiReplyConfig;
+  envRepairHistory?: Array<{ ts: string; action: string; ok: boolean; detail?: string }>;
   lastCrawlConfig?: CrawlConfig;
 };
 
@@ -155,9 +156,30 @@ function normalizeSettings(defaults: Partial<DesktopConsoleSettings>, input: Par
     profileAliases: aliases,
     profileColors: normalizeColorMap((input as any).profileColors ?? (defaults as any).profileColors ?? {}),
     aiReply: normalizeAiReplyConfig((input as any).aiReply ?? (defaults as any).aiReply ?? {}),
+    envRepairHistory: normalizeRepairHistory(
+      (input as any).envRepairHistory ?? (defaults as any).envRepairHistory ?? [],
+    ),
     lastCrawlConfig: (input as any).lastCrawlConfig ?? (defaults as any).lastCrawlConfig ?? undefined,
   };
   return merged;
+}
+
+function normalizeRepairHistory(raw: any): Array<{ ts: string; action: string; ok: boolean; detail?: string }> {
+  if (!Array.isArray(raw)) return [];
+  const out: Array<{ ts: string; action: string; ok: boolean; detail?: string }> = [];
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') continue;
+    const ts = String((item as any).ts || '').trim();
+    const action = String((item as any).action || '').trim();
+    if (!ts || !action) continue;
+    out.push({
+      ts,
+      action,
+      ok: Boolean((item as any).ok),
+      detail: String((item as any).detail || '').trim() || undefined,
+    });
+  }
+  return out.slice(-30);
 }
 
 function normalizeColorMap(raw: any): Record<string, string> {
