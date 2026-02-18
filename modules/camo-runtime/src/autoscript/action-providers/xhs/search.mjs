@@ -88,10 +88,18 @@ export function buildOpenDetailScript(params = {}) {
 
     const state = loadState();
     if (!Array.isArray(state.visitedNoteIds)) state.visitedNoteIds = [];
+    const requestedKeyword = ${JSON.stringify(keyword)};
+    const mode = ${JSON.stringify(mode)};
+    const previousKeyword = String(state.keyword || '').trim();
+    if (mode === 'first') {
+      state.visitedNoteIds = [];
+    } else if (requestedKeyword && previousKeyword && requestedKeyword !== previousKeyword) {
+      state.visitedNoteIds = [];
+    }
     state.maxNotes = Number(${maxNotes});
-    if (${JSON.stringify(keyword)}) state.keyword = ${JSON.stringify(keyword)};
+    if (requestedKeyword) state.keyword = requestedKeyword;
 
-    if (${JSON.stringify(mode)} === 'next' && state.visitedNoteIds.length >= state.maxNotes) {
+    if (mode === 'next' && state.visitedNoteIds.length >= state.maxNotes) {
       throw new Error('AUTOSCRIPT_DONE_MAX_NOTES');
     }
 
@@ -107,7 +115,7 @@ export function buildOpenDetailScript(params = {}) {
     if (nodes.length === 0) throw new Error('NO_SEARCH_RESULT_ITEM');
 
     let next = null;
-    if (${JSON.stringify(mode)} === 'next') {
+    if (mode === 'next') {
       next = nodes.find((row) => !state.visitedNoteIds.includes(row.noteId));
       if (!next) throw new Error('AUTOSCRIPT_DONE_NO_MORE_NOTES');
     } else {
@@ -161,7 +169,7 @@ export function buildOpenDetailScript(params = {}) {
     saveState(state);
     return {
       opened: true,
-      source: ${JSON.stringify(mode)} === 'next' ? 'open_next_detail' : 'open_first_detail',
+      source: mode === 'next' ? 'open_next_detail' : 'open_first_detail',
       noteId: next.noteId,
       visited: state.visitedNoteIds.length,
       maxNotes: state.maxNotes,
@@ -171,4 +179,3 @@ export function buildOpenDetailScript(params = {}) {
     };
   })()`;
 }
-

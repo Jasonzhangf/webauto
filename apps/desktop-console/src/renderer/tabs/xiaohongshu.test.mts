@@ -11,6 +11,9 @@ const layoutPath = path.join(__dirname, 'xiaohongshu', 'layout-block.mts');
 const accountPath = path.join(__dirname, 'xiaohongshu', 'account-flow.mts');
 const runPath = path.join(__dirname, 'xiaohongshu', 'run-flow.mts');
 const livePath = path.join(__dirname, 'xiaohongshu', 'live-stats.mts');
+const liveTypesPath = path.join(__dirname, 'xiaohongshu', 'live-stats', 'types.mts');
+const liveParserPath = path.join(__dirname, 'xiaohongshu', 'live-stats', 'stdout-parser.mts');
+const liveStatePatchPath = path.join(__dirname, 'xiaohongshu', 'live-stats', 'state-patch.mts');
 const guidePath = path.join(__dirname, 'xiaohongshu', 'guide-browser-check.mts');
 
 async function readText(filePath: string) {
@@ -18,16 +21,33 @@ async function readText(filePath: string) {
 }
 
 async function readAll() {
-  const [entry, helper, layout, account, run, live, guide] = await Promise.all([
+  const [entry, helper, layout, account, run, live, liveTypes, liveParser, liveStatePatch, guide] = await Promise.all([
     readText(entryPath),
     readText(helperPath),
     readText(layoutPath),
     readText(accountPath),
     readText(runPath),
     readText(livePath),
+    readText(liveTypesPath),
+    readText(liveParserPath),
+    readText(liveStatePatchPath),
     readText(guidePath),
   ]);
-  return { entry, helper, layout, account, run, live, guide, all: [entry, helper, layout, account, run, live, guide].join('\n') };
+  const liveAll = [live, liveTypes, liveParser, liveStatePatch].join('\n');
+  return {
+    entry,
+    helper,
+    layout,
+    account,
+    run,
+    live,
+    liveAll,
+    liveTypes,
+    liveParser,
+    liveStatePatch,
+    guide,
+    all: [entry, helper, layout, account, run, live, liveTypes, liveParser, liveStatePatch, guide].join('\n'),
+  };
 }
 
 test('xiaohongshu tab keeps orchestrate modes and run script wiring after modular split', async () => {
@@ -60,7 +80,18 @@ test('xiaohongshu layout includes shard stats board section', async () => {
 });
 
 test('xiaohongshu module files are split and each stays under maintainable line caps', async () => {
-  const files = [entryPath, helperPath, layoutPath, accountPath, runPath, livePath, guidePath];
+  const files = [
+    entryPath,
+    helperPath,
+    layoutPath,
+    accountPath,
+    runPath,
+    livePath,
+    liveTypesPath,
+    liveParserPath,
+    liveStatePatchPath,
+    guidePath,
+  ];
   const lengths = await Promise.all(files.map(async (p) => String((await readText(p)).split(/\r?\n/g).length)));
   files.forEach((file, i) => {
     const lines = Number(lengths[i]);
@@ -161,12 +192,12 @@ test('xiaohongshu account check uses browser-status probe without confirm dialog
 });
 
 test('xiaohongshu live stats combines cmd-event and state-update streams', async () => {
-  const { live } = await readAll();
-  assert.match(live, /state\+cmd-event/);
-  assert.doesNotMatch(live, /fsReadTextTail/);
-  assert.match(live, /const activeRunIds = new Set<string>\(\);/);
-  assert.match(live, /window\.api\?\.onStateUpdate/);
-  assert.match(live, /noteProgressMatch/);
+  const { liveAll } = await readAll();
+  assert.match(liveAll, /state\+cmd-event/);
+  assert.doesNotMatch(liveAll, /fsReadTextTail/);
+  assert.match(liveAll, /const activeRunIds = new Set<string>\(\);/);
+  assert.match(liveAll, /window\.api\?\.onStateUpdate/);
+  assert.match(liveAll, /noteProgressMatch/);
 });
 
 test('xiaohongshu run flow forwards ocr command and gate/reply guard', async () => {
@@ -192,37 +223,37 @@ test('xiaohongshu run flow keeps logs shortcut in action row', async () => {
 });
 
 test('xiaohongshu live stats parser accepts rotated events files and phase2 progress lines', async () => {
-  const { live } = await readAll();
-  assert.match(live, /setExpectedLinksTarget: \(target: number\) => void/);
-  assert.ok(live.includes('run-events(?:'));
-  assert.ok(live.includes('Phase2Collect(?:Links)?'));
-  assert.ok(live.includes('liveStats.linksTarget = Math.max(liveStats.linksTarget, target);'));
-  assert.ok(live.includes('Like Gate:'));
-  assert.ok(live.includes("const readToken = (key: string) =>"));
-  assert.ok(live.includes("const ruleHits = readToken('ruleHits');"));
-  assert.ok(live.includes("const dedupSkipped = readToken('dedup');"));
-  assert.ok(live.includes("const alreadyLikedSkipped = readToken('alreadyLiked');"));
-  assert.ok(live.includes("const newLikes = readToken('newLikes');"));
-  assert.ok(live.includes("const likedTotalMatch = text.match(/likedTotal=(\\d+)\\s*\\/\\s*(\\d+)/i);"));
+  const { liveAll } = await readAll();
+  assert.match(liveAll, /setExpectedLinksTarget: \(target: number\) => void/);
+  assert.ok(liveAll.includes('run-events(?:'));
+  assert.ok(liveAll.includes('Phase2Collect(?:Links)?'));
+  assert.ok(liveAll.includes('liveStats.linksTarget = Math.max(liveStats.linksTarget, normalized);'));
+  assert.ok(liveAll.includes('Like Gate:'));
+  assert.ok(liveAll.includes("const readToken = (key: string) =>"));
+  assert.ok(liveAll.includes("const ruleHits = readToken('ruleHits');"));
+  assert.ok(liveAll.includes("const dedupSkipped = readToken('dedup');"));
+  assert.ok(liveAll.includes("const alreadyLikedSkipped = readToken('alreadyLiked');"));
+  assert.ok(liveAll.includes("const newLikes = readToken('newLikes');"));
+  assert.ok(liveAll.includes("const likedTotalMatch = text.match(/likedTotal=(\\d+)\\s*\\/\\s*(\\d+)/i);"));
 });
 
 test('xiaohongshu live stats surfaces phase2 block and fatal reasons on board', async () => {
-  const { live } = await readAll();
-  assert.match(live, /Rigid gate blocked click index=/);
-  assert.match(live, /阻断原因：/);
-  assert.match(live, /Post-click gate FAILED/);
-  assert.match(live, /Click strategy failed:/);
-  assert.match(live, /Click strategy no-open:/);
-  assert.match(live, /Phase\\s\*2\\s\*失败/);
+  const { liveAll } = await readAll();
+  assert.match(liveAll, /Rigid gate blocked click index=/);
+  assert.match(liveAll, /阻断原因：/);
+  assert.match(liveAll, /Post-click gate FAILED/);
+  assert.match(liveAll, /Click strategy failed:/);
+  assert.match(liveAll, /Click strategy no-open:/);
+  assert.match(liveAll, /Phase\\s\*2\\s\*失败/);
 });
 
 test('xiaohongshu layout and live stats include like-skip metrics', async () => {
-  const { layout, entry, live } = await readAll();
+  const { layout, entry, liveAll } = await readAll();
   assert.match(layout, /点赞跳过：0/);
   assert.match(layout, /likesSkipStat/);
   assert.match(entry, /likesSkipStat/);
-  assert.match(live, /点赞跳过：\$\{merged\.likesSkippedTotal\}/);
-  assert.match(live, /跳过明细：去重/);
+  assert.match(liveAll, /点赞跳过：\$\{merged\.likesSkippedTotal\}/);
+  assert.match(liveAll, /跳过明细：去重/);
 });
 
 test('xiaohongshu guide account step always brings account tile into view before checks', async () => {
@@ -274,18 +305,18 @@ test('xiaohongshu run flow restores running runId after tab re-entry and updates
 });
 
 test('xiaohongshu live stats accepts prefixed rid and allows progress\/stats updates from related run ids', async () => {
-  const { live } = await readAll();
-  assert.match(live, /const prefixedRid = rawText\.match\(\/\^\\\[rid:/);
-  assert.match(live, /运行账号 \$\{shardItems\.length\} · 运行中 \$\{runningCount\} · 异常 \$\{errorCount\}/);
-  assert.match(live, /阶段 \$\{item\.phase \|\| '未知'\} · 状态 \$\{statusLabel\(item\)\} · 动作 \$\{item\.action \|\| '等待日志'\}/);
-  assert.match(live, /异常：\$\{item\.anomaly\}/);
-  assert.match(live, /const looksProgress =/);
-  assert.match(live, /const looksStats =/);
-  assert.match(live, /if \(activeRunIds\.size > 0 && !activeRunIds\.has\(rid\) && !\(looksProgress \|\| looksStats\)\) return;/);
-  assert.match(live, /const t = String\(update\?\.type \|\| ''\)\.trim\(\);/);
-  assert.match(live, /if \(t === 'progress'\) \{\s*applyStatePatch\(\{ progress: patch \}, rid\);/);
-  assert.match(live, /else if \(t === 'stats'\) \{\s*applyStatePatch\(\{ stats: patch \}, rid\);/);
-  assert.match(live, /const shardStats = new Map<string, ShardProgress>\(\);/);
-  assert.match(live, /const renderShardStats = \(\) => \{/);
-  assert.match(live, /setShardProfiles: \(profiles: string\[\]\) => void/);
+  const { liveAll } = await readAll();
+  assert.match(liveAll, /const prefixedRid = rawText\.match\(\/\^\\\[rid:/);
+  assert.match(liveAll, /运行账号 \$\{shardItems\.length\} · 运行中 \$\{runningCount\} · 异常 \$\{errorCount\}/);
+  assert.match(liveAll, /阶段 \$\{item\.phase \|\| '未知'\} · 状态 \$\{statusLabel\(item\)\} · 动作 \$\{item\.action \|\| '等待日志'\}/);
+  assert.match(liveAll, /异常：\$\{item\.anomaly\}/);
+  assert.match(liveAll, /const looksProgress =/);
+  assert.match(liveAll, /const looksStats =/);
+  assert.match(liveAll, /if \(activeRunIds\.size > 0 && !activeRunIds\.has\(rid\) && !\(looksProgress \|\| looksStats\)\) return;/);
+  assert.match(liveAll, /const t = String\(update\?\.type \|\| ''\)\.trim\(\);/);
+  assert.match(liveAll, /if \(t === 'progress'\) \{\s*applyStatePatch\(runtime, \{ progress: patch \}, rid\);/);
+  assert.match(liveAll, /else if \(t === 'stats'\) \{\s*applyStatePatch\(runtime, \{ stats: patch \}, rid\);/);
+  assert.match(liveAll, /const shardStats = new Map<string, ShardProgress>\(\);/);
+  assert.match(liveAll, /const renderShardStats = \(\) => \{/);
+  assert.match(liveAll, /setShardProfiles: \(profiles: string\[\]\) => void/);
 });

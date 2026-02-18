@@ -1,7 +1,11 @@
 import { renderPreflight } from './tabs/preflight.mts';
 import { renderSettings } from './tabs/settings.mts';
 import { renderLogs } from './tabs/logs.mts';
-import { renderXiaohongshuTab } from './tabs/xiaohongshu.mts';
+import { renderSetupWizard } from './tabs-new/setup-wizard.mts';
+import { renderConfigPanel } from './tabs-new/config-panel.mts';
+import { renderDashboard } from './tabs-new/dashboard.mts';
+import { renderAccountManager } from './tabs-new/account-manager.mts';
+import { listAccountProfiles } from './account-source.mts';
 import { createEl } from './ui-components.mts';
 
 declare global {
@@ -10,11 +14,16 @@ declare global {
   }
 }
 
-type TabId = 'xiaohongshu' | 'preflight' | 'logs' | 'settings';
+type TabId = 'setup-wizard' | 'config' | 'dashboard' | 'account-manager' | 'preflight' | 'logs' | 'settings';
 
-const tabs: Array<{ id: TabId; label: string; render: (root: HTMLElement, ctx: any) => void }> = [
-  { id: 'xiaohongshu', label: '小红书', render: renderXiaohongshuTab },
-  { id: 'preflight', label: '预处理', render: renderPreflight },
+type TabRender = (root: HTMLElement, ctx: any) => void | (() => void);
+
+const tabs: Array<{ id: TabId; label: string; render: TabRender; hidden?: boolean }> = [
+  { id: 'setup-wizard', label: '初始化', render: renderSetupWizard },
+  { id: 'config', label: '配置', render: renderConfigPanel },
+  { id: 'dashboard', label: '看板', render: renderDashboard },
+  { id: 'account-manager', label: '账户管理', render: renderAccountManager },
+  { id: 'preflight', label: '旧预处理', render: renderPreflight, hidden: true },
   { id: 'logs', label: '日志', render: renderLogs },
   { id: 'settings', label: '设置', render: renderSettings },
 ];
@@ -22,10 +31,12 @@ const tabs: Array<{ id: TabId; label: string; render: (root: HTMLElement, ctx: a
 const tabsEl = document.getElementById('tabs')!;
 const contentEl = document.getElementById('content')!;
 const statusEl = document.getElementById('status')!;
-const mainEl = document.getElementById('main') as HTMLElement | null;
+let activeTabCleanup: (() => void) | null = null;
 
 const ctx: any = {
+  api: window.api,
   settings: null as any,
+  xhsCurrentRun: null as any,
   activeRunId: null as string | null,
   _activeRunIds: new Set<string>(),
   _activeRunsListeners: [] as Array<() => void>,
@@ -34,7 +45,6 @@ const ctx: any = {
     const l = String(line || '').trim();
     if (!l) return;
     this._logLines.push(l);
-    // Logs tab 会接管渲染；这里不再直接写 DOM
   },
   clearLog() {
     this._logLines = [];
@@ -53,8 +63,13 @@ const ctx: any = {
   setStatus(s: string) {
     statusEl.textContent = s;
   },
-  runScript(scriptPath: string, args: string[]) {
-    window.api.runScript(scriptPath, args);
+  async refreshSettings() {
+    const latest = await window.api.settingsGet();
+    this.settings = latest;
+    if (this.api && typeof this.api === 'object') {
+      this.api.settings = latest;
+    }
+    return latest;
   },
   setActiveTab(id: TabId) {
     setActiveTab(id);
@@ -80,25 +95,33 @@ function startDesktopHeartbeat() {
 }
 
 async function loadSettings() {
-  ctx.settings = await window.api.settingsGet();
+  await ctx.refreshSettings();
 }
 
 function setActiveTab(id: TabId) {
+  if (activeTabCleanup) {
+    try { activeTabCleanup(); } catch {}
+    activeTabCleanup = null;
+  }
+
   tabsEl.textContent = '';
-  for (const t of tabs) {
+  for (const t of tabs.filter((x) => !x.hidden)) {
     const el = createEl('div', { className: `tab ${t.id === id ? 'active' : ''}` }, [t.label]);
     el.addEventListener('click', () => setActiveTab(t.id));
     tabsEl.appendChild(el);
   }
+
   contentEl.textContent = '';
   const tab = tabs.find((x) => x.id === id)!;
-  tab.render(contentEl, ctx);
+  const dispose = tab.render(contentEl, ctx);
+  if (typeof dispose === 'function') activeTabCleanup = dispose;
 }
 
 function installCmdEvents() {
   window.api.onCmdEvent((evt: any) => {
     const runTag = evt?.runId ? `[rid:${evt.runId}] ` : '';
     const runId = String(evt?.runId || '').trim();
+
     if (evt?.type === 'started') {
       ctx.activeRunId = evt.runId;
       if (runId) {
@@ -107,11 +130,20 @@ function installCmdEvents() {
       }
       ctx.appendLog(`${runTag}[started] ${evt.title} pid=${evt.pid} runId=${evt.runId}`);
       ctx.setStatus(`running: ${evt.title}`);
-    } else if (evt?.type === 'stdout') {
+      return;
+    }
+
+    if (evt?.type === 'stdout') {
       ctx.appendLog(`${runTag}${evt.line}`);
-    } else if (evt?.type === 'stderr') {
+      return;
+    }
+
+    if (evt?.type === 'stderr') {
       ctx.appendLog(`${runTag}[stderr] ${evt.line}`);
-    } else if (evt?.type === 'exit') {
+      return;
+    }
+
+    if (evt?.type === 'exit') {
       if (runId) {
         ctx._activeRunIds.delete(runId);
         ctx.notifyActiveRunsChanged();
@@ -122,12 +154,32 @@ function installCmdEvents() {
   });
 }
 
+async function detectStartupTab(): Promise<TabId> {
+  try {
+    const env = typeof window.api?.envCheckAll === 'function' ? await window.api.envCheckAll() : null;
+    const rows = await listAccountProfiles(window.api).catch(() => []);
+    const hasAccount = rows.some((row) => row.valid);
+    const envReady = Boolean(env?.allReady);
+    if (envReady && hasAccount) return 'config';
+  } catch {
+    // ignore and fallback to setup
+  }
+  return 'setup-wizard';
+}
+
 async function main() {
   startDesktopHeartbeat();
   await loadSettings();
   installCmdEvents();
-  setActiveTab('xiaohongshu');
+  const startupTab = await detectStartupTab();
+  setActiveTab(startupTab);
   ctx.setStatus('idle');
 }
+
+window.addEventListener('beforeunload', () => {
+  if (!activeTabCleanup) return;
+  try { activeTabCleanup(); } catch {}
+  activeTabCleanup = null;
+});
 
 void main();

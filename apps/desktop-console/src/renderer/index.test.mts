@@ -11,20 +11,23 @@ async function getSrc() {
   return readFile(indexPath, 'utf8');
 }
 
-test('main tabs keep xiaohongshu home and logs before settings', async () => {
+test('main tabs use onboarding flow and keep logs before settings', async () => {
   const src = await getSrc();
-  assert.match(src, /type TabId = 'xiaohongshu' \| 'preflight' \| 'logs' \| 'settings';/);
-  assert.match(src, /\{ id: 'xiaohongshu', label: '[^']+', render: renderXiaohongshuTab \}/);
-  assert.match(src, /\{ id: 'preflight', label: '[^']+', render: renderPreflight \}/);
+  assert.match(src, /type TabId = 'setup-wizard' \| 'config' \| 'dashboard' \| 'account-manager' \| 'preflight' \| 'logs' \| 'settings';/);
+  assert.match(src, /\{ id: 'setup-wizard', label: '[^']+', render: renderSetupWizard \}/);
+  assert.match(src, /\{ id: 'config', label: '[^']+', render: renderConfigPanel \}/);
+  assert.match(src, /\{ id: 'dashboard', label: '[^']+', render: renderDashboard \}/);
+  assert.match(src, /\{ id: 'account-manager', label: '[^']+', render: renderAccountManager \}/);
+  assert.match(src, /\{ id: 'preflight', label: '[^']+', render: renderPreflight, hidden: true \}/);
   assert.match(src, /\{ id: 'logs', label: '[^']+', render: renderLogs \}/);
   assert.match(src, /\{ id: 'settings', label: '[^']+', render: renderSettings \}/);
-  assert.doesNotMatch(src, /id: 'debug'/);
-  assert.doesNotMatch(src, /'runtime'/);
+  assert.doesNotMatch(src, /id: 'xiaohongshu'/);
 
   const logsIdx = src.indexOf("{ id: 'logs'");
   const settingsIdx = src.indexOf("{ id: 'settings'");
   assert.ok(logsIdx > -1 && settingsIdx > logsIdx, 'logs tab should render before settings tab');
-  assert.match(src, /setActiveTab\('xiaohongshu'\);/);
+  assert.match(src, /const startupTab = await detectStartupTab\(\);/);
+  assert.match(src, /return 'setup-wizard';/);
 });
 
 test('renderer context exposes setActiveTab for cross-tab onboarding navigation', async () => {

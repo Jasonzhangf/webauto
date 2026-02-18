@@ -15,7 +15,7 @@ export function resolveProfilesRoot() {
   return path.join(process.env.HOME || os.homedir(), '.webauto', 'profiles');
 }
 
-function resolveFingerprintsRoot() {
+export function resolveFingerprintsRoot() {
   const envFps = String(process.env.WEBAUTO_PATHS_FINGERPRINTS || '').trim();
   if (envFps) return envFps;
   const portableRoot = resolvePortableRoot();

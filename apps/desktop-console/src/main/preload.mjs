@@ -57,6 +57,16 @@ contextBridge.exposeInMainWorld('api', {
   stateGetTasks: () => ipcRenderer.invoke('state:getTasks'),
   stateGetTask: (runId) => ipcRenderer.invoke('state:getTask', runId),
   stateGetEvents: (runId, since) => ipcRenderer.invoke('state:getEvents', runId, since),
+  envCheckCamo: () => ipcRenderer.invoke("env:checkCamo"),
+  envCheckServices: () => ipcRenderer.invoke("env:checkServices"),
+  envCheckFirefox: () => ipcRenderer.invoke("env:checkFirefox"),
+  envCheckGeoIP: () => ipcRenderer.invoke("env:checkGeoIP"),
+  envCheckAll: () => ipcRenderer.invoke("env:checkAll"),
+  envRepairCore: () => ipcRenderer.invoke("env:repairCore"),
+  configSaveLast: (config) => ipcRenderer.invoke("config:saveLast", config),
+  configLoadLast: () => ipcRenderer.invoke("config:loadLast"),
+  configExport: (spec) => ipcRenderer.invoke("config:export", spec),
+  configImport: (spec) => ipcRenderer.invoke("config:import", spec),
   onStateUpdate: (cb) => {
     const listener = (_e, update) => cb(update);
     ipcRenderer.on('state:update', listener);

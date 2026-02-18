@@ -2,6 +2,7 @@
   "unifiedApiUrl": "http://127.0.0.1:7701",
   "browserServiceUrl": "http://127.0.0.1:7704",
   "searchGateUrl": "http://127.0.0.1:7790",
+  "downloadRootWindows": "D:\\webauto",
   "downloadRootParts": [
     ".webauto",
     "download"

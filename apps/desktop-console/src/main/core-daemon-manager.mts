@@ -19,6 +19,10 @@ function resolveNodeBin() {
   return process.platform === 'win32' ? 'node.exe' : 'node';
 }
 
+function resolveNpxBin() {
+  return process.platform === 'win32' ? 'npx.cmd' : 'npx';
+}
+
 async function checkHttpHealth(url: string) {
   try {
     const res = await fetch(url, { signal: AbortSignal.timeout(1000) });
@@ -106,7 +110,7 @@ export async function startCoreDaemon(): Promise<boolean> {
     return false;
   }
 
-  const startedBrowser = await runCommand('npx', ['--yes', '@web-auto/camo', 'init'], 40_000);
+  const startedBrowser = await runCommand(resolveNpxBin(), ['--yes', '@web-auto/camo', 'init'], 40_000);
   if (!startedBrowser) {
     console.error('[CoreDaemonManager] Failed to start camo browser backend');
     return false;

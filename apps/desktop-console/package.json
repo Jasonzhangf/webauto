@@ -13,8 +13,9 @@
     "clean": "node --input-type=module -e \"import('node:fs').then((fs)=>fs.rmSync('dist',{recursive:true,force:true}))\""
   },
   "devDependencies": {
-    "@types/node": "^20.0.0",
-    "electron": "^39.2.7",
-    "typescript": "^5.0.0"
+    "@types/node": "^20.19.33"
+  },
+  "dependencies": {
+    "electron": "^39.6.0"
   }
 }

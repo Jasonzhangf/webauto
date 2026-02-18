@@ -18,6 +18,20 @@ export type AiReplyConfig = {
   styleCustom: string;
 };
 
+export type CrawlConfig = {
+  keyword: string;
+  target: number;
+  env: 'debug' | 'prod';
+  fetchBody: boolean;
+  fetchComments: boolean;
+  maxComments: number;
+  autoLike: boolean;
+  likeKeywords: string;
+  headless: boolean;
+  dryRun: boolean;
+  lastProfileId?: string;
+};
+
 export type DesktopConsoleSettings = {
   unifiedApiUrl: string;
   browserServiceUrl: string;
@@ -31,10 +45,13 @@ export type DesktopConsoleSettings = {
   profileAliases: Record<string, string>;
   profileColors: Record<string, string>;
   aiReply: AiReplyConfig;
+  lastCrawlConfig?: CrawlConfig;
 };
 
 type DefaultsFile = Partial<DesktopConsoleSettings> & {
   downloadRootParts?: string[];
+  downloadRootWindows?: string;
+  downloadRootPosix?: string;
 };
 
 type ConfigApi = {
@@ -57,6 +74,7 @@ export function resolveLegacySettingsPath() {
 }
 
 export function resolveDefaultDownloadRoot() {
+  if (process.platform === 'win32') return 'D:\\webauto';
   return path.join(resolveHomeDir(), '.webauto', 'download');
 }
 
@@ -137,6 +155,7 @@ function normalizeSettings(defaults: Partial<DesktopConsoleSettings>, input: Par
     profileAliases: aliases,
     profileColors: normalizeColorMap((input as any).profileColors ?? (defaults as any).profileColors ?? {}),
     aiReply: normalizeAiReplyConfig((input as any).aiReply ?? (defaults as any).aiReply ?? {}),
+    lastCrawlConfig: (input as any).lastCrawlConfig ?? (defaults as any).lastCrawlConfig ?? undefined,
   };
   return merged;
 }
@@ -177,6 +196,10 @@ async function readDefaultSettingsFromAppRoot(appRoot: string): Promise<DesktopC
   const downloadRoot =
     typeof (raw as any).downloadRoot === 'string'
       ? String((raw as any).downloadRoot)
+      : process.platform === 'win32' && typeof raw.downloadRootWindows === 'string'
+        ? String(raw.downloadRootWindows)
+      : process.platform !== 'win32' && typeof raw.downloadRootPosix === 'string'
+        ? String(raw.downloadRootPosix)
       : Array.isArray(raw.downloadRootParts)
         ? path.join(resolveHomeDir(), ...raw.downloadRootParts.map((x) => String(x)))
         : resolveDefaultDownloadRoot();
@@ -264,4 +287,52 @@ export async function writeDesktopConsoleSettings(
   await fs.mkdir(path.dirname(legacyPath), { recursive: true });
   await fs.writeFile(legacyPath, JSON.stringify(merged, null, 2), 'utf8');
   return merged;
+}
+
+export async function saveCrawlConfig(
+  input: { appRoot: string; repoRoot: string },
+  config: CrawlConfig
+): Promise<void> {
+  const current = await readDesktopConsoleSettings(input);
+  const next = { ...current, lastCrawlConfig: config };
+  await writeDesktopConsoleSettings(input, next);
+}
+
+export async function loadCrawlConfig(
+  input: { appRoot: string; repoRoot: string }
+): Promise<CrawlConfig | null> {
+  const current = await readDesktopConsoleSettings(input);
+  return current.lastCrawlConfig || null;
+}
+
+export async function exportConfigToFile(
+  filePath: string,
+  config: CrawlConfig
+): Promise<{ ok: true; path: string }> {
+  await fs.mkdir(path.dirname(filePath), { recursive: true });
+  const content = JSON.stringify(config, null, 2);
+  const isWindows = process.platform === 'win32';
+  if (isWindows) {
+    const BOM = '\uFEFF';
+    await fs.writeFile(filePath, BOM + content, 'utf8');
+  } else {
+    await fs.writeFile(filePath, content, 'utf8');
+  }
+  return { ok: true, path: filePath };
+}
+
+export async function importConfigFromFile(filePath: string): Promise<{ ok: true; config: CrawlConfig }> {
+  const content = await fs.readFile(filePath, 'utf8');
+  const cleanContent = content.replace(/^\uFEFF/, '');
+  const config = JSON.parse(cleanContent) as CrawlConfig;
+  return { ok: true, config };
+}
+
+export function getDefaultConfigExportPath(configName: string = 'crawl-config'): string {
+  const homeDir = process.platform === 'win32'
+    ? (process.env.USERPROFILE || os.homedir() || '')
+    : (process.env.HOME || os.homedir() || '');
+  const downloadsDir = path.join(homeDir, 'Downloads');
+  const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+  return path.join(downloadsDir, `webauto-${configName}-${timestamp}.json`);
 }

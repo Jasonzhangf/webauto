@@ -1,0 +1,62 @@
+# Build artifacts that should not be in the package
+.iflow/
+*.bak
+*.bak2
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+**/node_modules/
+**/.pnpm/
+**/.cache/
+
+# Test files and coverage
+tests/
+coverage/
+*.lcov
+.nyc_output
+*.test.ts
+*.test.mts
+*.test.js
+*.test.mjs
+*.spec.ts
+*.spec.mts
+*.spec.js
+*.spec.mjs
+**/__tests__/
+**/tests/
+*.map
+
+# Development files
+.env
+.env.test
+.env.local
+.env.production
+.env.*
+
+# Large files and models
+sharedmodule/ui-recognition/python-service/models/
+libs/ui-recognition/python-service/models/ui-ins-7b/model-*.safetensors
+
+# Debug logs
+debug-logs/
+*.debug.log
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.temp
+
+# OS files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+Thumbs.db
+
+# Logs
+*.log
+logs/

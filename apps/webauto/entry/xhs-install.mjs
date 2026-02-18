@@ -1,9 +1,16 @@
 #!/usr/bin/env node
 import minimist from 'minimist';
 import { spawnSync } from 'node:child_process';
+import os from 'node:os';
+import path from 'node:path';
+import { existsSync } from 'node:fs';
 
 function run(cmd, args) {
   return spawnSync(cmd, args, { encoding: 'utf8' });
+}
+
+function resolveNpxBin() {
+  return process.platform === 'win32' ? 'npx.cmd' : 'npx';
 }
 
 function checkCamoufoxInstalled() {
@@ -13,7 +20,16 @@ function checkCamoufoxInstalled() {
 }
 
 function installCamoufox() {
-  const ret = run('npx', ['camoufox', 'fetch']);
+  const ret = run(resolveNpxBin(), ['--yes', '--package=camoufox', 'camoufox', 'fetch']);
+  return ret.status === 0;
+}
+
+function checkGeoIPInstalled() {
+  return existsSync(path.join(os.homedir(), '.webauto', 'geoip', 'GeoLite2-City.mmdb'));
+}
+
+function installGeoIP() {
+  const ret = run(resolveNpxBin(), ['--yes', '--package=@web-auto/camo', 'camo', 'init', 'geoip']);
   return ret.status === 0;
 }
 
@@ -29,12 +45,17 @@ async function checkBackendHealth() {
 async function main() {
   const argv = minimist(process.argv.slice(2));
   const download = argv['download-browser'] === true;
+  const downloadGeoip = argv['download-geoip'] === true;
   const ensureBackend = argv['ensure-backend'] === true;
   const provider = String(process.env.WEBAUTO_BROWSER_PROVIDER || 'camo').trim().toLowerCase();
   let camoufoxInstalled = checkCamoufoxInstalled();
+  let geoipInstalled = checkGeoIPInstalled();
 
   if (!camoufoxInstalled && download) {
     camoufoxInstalled = installCamoufox();
+  }
+  if (!geoipInstalled && downloadGeoip) {
+    geoipInstalled = installGeoIP();
   }
 
   let backendEnsured = false;
@@ -50,7 +71,9 @@ async function main() {
   }
 
   const backendHealthy = await checkBackendHealth();
-  const ok = camoufoxInstalled || backendHealthy;
+  const dependencyReady = camoufoxInstalled || backendHealthy;
+  const geoipReady = downloadGeoip ? geoipInstalled : true;
+  const ok = dependencyReady && geoipReady;
 
   const result = {
     ok,
@@ -59,7 +82,8 @@ async function main() {
     backendEnsured,
     ensureBackendError,
     backendHealthy,
-    message: ok ? 'Camo 后端就绪' : 'Camoufox 未安装',
+    geoipInstalled,
+    message: ok ? 'Camo 后端就绪' : (downloadGeoip && !geoipInstalled ? 'GeoIP 未安装' : 'Camoufox 未安装'),
   };
 
   console.log(JSON.stringify(result));

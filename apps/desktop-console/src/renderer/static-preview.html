@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebAuto Desktop Console UI Preview</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f0f2f5;
+            color: #333;
+            display: flex;
+            justify-content: center;
+            align-items: flex-start;
+            min-height: 100vh;
+            box-sizing: border-box;
+        }
+        .container {
+            width: 100%;
+            max-width: 1200px; /* Max width for a desktop view */
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); /* Responsive grid columns */
+            gap: 20px;
+            padding: 20px;
+            background-color: #ffffff;
+            border-radius: 12px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+        }
+        .card {
+            background-color: #f9f9f9;
+            border-radius: 8px;
+            padding: 25px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+            border: 1px solid #e0e0e0;
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+            display: flex;
+            flex-direction: column;
+        }
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 6px 25px rgba(0, 0, 0, 0.1);
+        }
+        .card h2 {
+            margin-top: 0;
+            color: #2c3e50;
+            font-size: 1.4em;
+            border-bottom: 2px solid #4a90e2;
+            padding-bottom: 10px;
+            margin-bottom: 15px;
+        }
+        .card p {
+            color: #555;
+            line-height: 1.6;
+            flex-grow: 1; /* Allow content to grow */
+        }
+        .card.wide {
+            grid-column: span 2; /* Span two columns */
+        }
+        .card.full-width {
+            grid-column: 1 / -1; /* Span all columns */
+        }
+        .card ul {
+            list-style: none;
+            padding: 0;
+        }
+        .card ul li {
+            margin-bottom: 8px;
+            padding-left: 20px;
+            position: relative;
+        }
+        .card ul li::before {
+            content: '•';
+            color: #4a90e2;
+            position: absolute;
+            left: 0;
+            font-size: 1.2em;
+            line-height: 1;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="card full-width">
+            <h2>1. 初始化与环境检查 (Setup Wizard)</h2>
+            <p>首次启动向导，确保 Camoufox CLI、Unified API 和 Browser Service 正常运行。提供浏览器路径配置和账户登录。</p>
+            <ul>
+                <li>检查 Camoufox CLI 可用性</li>
+                <li>验证服务端口 7701 (Unified API) 和 7704 (Browser Service)</li>
+                <li>配置默认浏览器路径</li>
+                <li>引导用户登录至少一个账户</li>
+            </ul>
+        </div>
+
+        <div class="card wide">
+            <h2>2. 账户管理 (Account Management)</h2>
+            <p>管理 WebAuto 使用的登录账户池，支持多平台账户的添加、删除、状态查看及重新登录。</p>
+            <ul>
+                <li>查看所有账户列表及当前登录状态</li>
+                <li>添加新账户或编辑现有账户信息</li>
+                <li>一键重新登录或更新账户别名</li>
+            </ul>
+        </div>
+
+        <div class="card">
+            <h2>3. 任务配置 (Task Configuration)</h2>
+            <p>设置爬取任务的目标、选项。支持配置导入导出，记住上次设置。</p>
+            <ul>
+                <li>设定爬取关键字、目标数量</li>
+                <li>配置是否爬取正文和评论、点赞策略</li>
+                <li>导入/导出任务配置，快速复用</li>
+            </ul>
+        </div>
+
+        <div class="card">
+            <h2>4. 实时看板 (Dashboard)</h2>
+            <p>实时监控任务执行进度、显示关键指标和日志输出。</p>
+            <ul>
+                <li>展示当前任务阶段和正在执行的操作</li>
+                <li>统计成功/失败数量、耗时</li>
+                <li>实时日志输出与筛选</li>
+            </ul>
+        </div>
+    </div>
+</body>
+</html>

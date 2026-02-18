@@ -7,7 +7,7 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { mkdirSync, promises as fs } from 'node:fs';
 
-import { readDesktopConsoleSettings, resolveDefaultDownloadRoot, writeDesktopConsoleSettings } from './desktop-settings.mts';
+import { readDesktopConsoleSettings, resolveDefaultDownloadRoot, writeDesktopConsoleSettings, saveCrawlConfig, loadCrawlConfig, exportConfigToFile, importConfigFromFile, type CrawlConfig } from './desktop-settings.mts';
 import type { DesktopConsoleSettings } from './desktop-settings.mts';
 import { startCoreDaemon, stopCoreDaemon } from './core-daemon-manager.mts';
 import { createProfileStore } from './profile-store.mts';
@@ -37,6 +37,7 @@ type RunJsonSpec = {
 
 type UiSettings = DesktopConsoleSettings;
 import { stateBridge } from './state-bridge.mts';
+import { checkCamoCli, checkServices, checkFirefox, checkGeoIP, checkEnvironment } from './env-check.mts';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const APP_ROOT = path.resolve(__dirname, '../..'); // apps/desktop-console/dist/main -> apps/desktop-console
@@ -54,7 +55,10 @@ const XHS_FULL_COLLECT_RE = /collect-content\.mjs$/;
 function configureElectronPaths() {
   try {
     const downloadRoot = resolveDefaultDownloadRoot();
-    const baseDir = path.dirname(downloadRoot);
+    const normalized = path.normalize(downloadRoot);
+    const baseDir = path.basename(normalized).toLowerCase() === 'download'
+      ? path.dirname(normalized)
+      : normalized;
     const userDataRoot = path.join(baseDir, 'desktop-console');
     const cacheRoot = path.join(userDataRoot, 'cache');
     const gpuCacheRoot = path.join(cacheRoot, 'gpu');
@@ -823,6 +827,32 @@ ipcMain.handle('os:openPath', async (_evt, input: { path: string }) => {
   const p = String(input?.path || '');
   const r = await shell.openPath(p);
   return { ok: !r, error: r || null };
+});
+
+// Environment and config management IPC handlers
+ipcMain.handle('env:checkCamo', async () => checkCamoCli());
+ipcMain.handle('env:checkServices', async () => checkServices());
+ipcMain.handle('env:checkFirefox', async () => checkFirefox());
+ipcMain.handle('env:checkGeoIP', async () => checkGeoIP());
+ipcMain.handle('env:checkAll', async () => checkEnvironment());
+ipcMain.handle('env:repairCore', async () => {
+  const ok = await startCoreDaemon().catch(() => false);
+  const services = await checkServices().catch(() => ({ unifiedApi: false, browserService: false }));
+  return { ok, services };
+});
+ipcMain.handle('config:saveLast', async (_evt, config: CrawlConfig) => {
+  await saveCrawlConfig({ appRoot: APP_ROOT, repoRoot: REPO_ROOT }, config);
+  return { ok: true };
+});
+ipcMain.handle('config:loadLast', async () => {
+  const config = await loadCrawlConfig({ appRoot: APP_ROOT, repoRoot: REPO_ROOT });
+  return config;
+});
+ipcMain.handle('config:export', async (_evt, { filePath, config }: { filePath: string; config: CrawlConfig }) => {
+  return await exportConfigToFile(filePath, config);
+});
+ipcMain.handle('config:import', async (_evt, { filePath }: { filePath: string }) => {
+  return await importConfigFromFile(filePath);
 });
 
 ipcMain.handle('clipboard:writeText', async (_evt, input: { text: string }) => {
