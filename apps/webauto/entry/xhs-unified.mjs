@@ -908,11 +908,23 @@ export async function runUnified(argv, overrides = {}) {
     remainingNotes: hasTotalTarget ? remainingNotes : null,
   }));
 
+  const failedResults = results.filter((item) => !item.ok);
   if (hasTotalTarget && remainingNotes > 0) {
     throw new Error(`target not reached, remaining=${remainingNotes}, see ${merged.summaryPath}`);
   }
-  if (results.some((item) => !item.ok)) {
-    throw new Error(`unified finished with failures, see ${merged.summaryPath}`);
+  if (failedResults.length > 0) {
+    if (hasTotalTarget && remainingNotes <= 0) {
+      console.warn(JSON.stringify({
+        event: 'xhs.unified.partial_failures_tolerated',
+        summaryPath: merged.summaryPath,
+        failedProfiles: failedResults.map((item) => ({
+          profileId: item.profileId,
+          reason: item.reason || null,
+        })),
+      }));
+    } else {
+      throw new Error(`unified finished with failures, see ${merged.summaryPath}`);
+    }
   }
 
   return {

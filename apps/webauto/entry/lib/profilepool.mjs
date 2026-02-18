@@ -7,12 +7,19 @@ function resolvePortableRoot() {
   return root ? path.join(root, '.webauto') : '';
 }
 
+function resolveHomeDir() {
+  if (process.platform === 'win32') {
+    return process.env.USERPROFILE || os.homedir();
+  }
+  return process.env.HOME || os.homedir();
+}
+
 export function resolveProfilesRoot() {
   const envProfiles = String(process.env.WEBAUTO_PATHS_PROFILES || '').trim();
   if (envProfiles) return envProfiles;
   const portableRoot = resolvePortableRoot();
   if (portableRoot) return path.join(portableRoot, 'profiles');
-  return path.join(process.env.HOME || os.homedir(), '.webauto', 'profiles');
+  return path.join(resolveHomeDir(), '.webauto', 'profiles');
 }
 
 export function resolveFingerprintsRoot() {
@@ -20,7 +27,7 @@ export function resolveFingerprintsRoot() {
   if (envFps) return envFps;
   const portableRoot = resolvePortableRoot();
   if (portableRoot) return path.join(portableRoot, 'fingerprints');
-  return path.join(process.env.HOME || os.homedir(), '.webauto', 'fingerprints');
+  return path.join(resolveHomeDir(), '.webauto', 'fingerprints');
 }
 
 export function listProfiles() {
