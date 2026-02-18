@@ -3,6 +3,7 @@ import { listAccountProfiles, type UiAccountProfile } from '../account-source.mt
 
 export function renderAccountManager(root: HTMLElement, ctx: any) {
   root.innerHTML = '';
+  const autoSyncTimers = new Map<string, ReturnType<typeof setInterval>>();
 
   // Bento Grid Layout
   const bentoGrid = createEl('div', { className: 'bento-grid bento-sidebar' });
@@ -14,7 +15,7 @@ export function renderAccountManager(root: HTMLElement, ctx: any) {
     <div class="env-status-grid">
       <div class="env-item" id="env-camo">
         <span class="icon" style="color: var(--text-4);">○</span>
-        <span>Camoufox CLI</span>
+        <span>Camo CLI</span>
       </div>
       <div class="env-item" id="env-unified">
         <span class="icon" style="color: var(--text-4);">○</span>
@@ -22,7 +23,7 @@ export function renderAccountManager(root: HTMLElement, ctx: any) {
       </div>
       <div class="env-item" id="env-browser">
         <span class="icon" style="color: var(--text-4);">○</span>
-        <span>Browser Service</span>
+        <span>Camo Runtime（可选）</span>
       </div>
       <div class="env-item" id="env-firefox">
         <span class="icon" style="color: var(--text-4);">○</span>
@@ -84,7 +85,7 @@ export function renderAccountManager(root: HTMLElement, ctx: any) {
 
       updateEnvItem('env-camo', camo.installed);
       updateEnvItem('env-unified', services.unifiedApi);
-      updateEnvItem('env-browser', services.browserService);
+      updateEnvItem('env-browser', services.camoRuntime);
       updateEnvItem('env-firefox', firefox.installed);
     } catch (err) {
       console.error('Environment check failed:', err);
@@ -143,7 +144,7 @@ export function renderAccountManager(root: HTMLElement, ctx: any) {
             ? '✗ 失效'
             : acc.statusView === 'checking'
               ? '⏳ 检查中'
-              : '⏳ 待检查'
+              : '⏳ 待登录'
       ]);
 
       const checkBtn = createEl('button', {
@@ -208,9 +209,9 @@ export function renderAccountManager(root: HTMLElement, ctx: any) {
   }
 
   // Check single account status
-  async function checkAccountStatus(profileId: string) {
+  async function checkAccountStatus(profileId: string, options: { pendingWhileLogin?: boolean } = {}) {
     const account = accounts.find(a => a.profileId === profileId);
-    if (!account) return;
+    if (!account) return false;
 
     account.statusView = 'checking';
     renderAccountList();
@@ -223,24 +224,36 @@ export function renderAccountManager(root: HTMLElement, ctx: any) {
           ctx.api.pathJoin('apps', 'webauto', 'entry', 'account.mjs'),
           'sync',
           profileId,
+          ...(options.pendingWhileLogin ? ['--pending-while-login'] : []),
           '--json',
         ],
       });
       const profile = result?.json?.profile;
       if (profile && String(profile.profileId || '').trim() === profileId) {
         account.accountId = String(profile.accountId || '').trim() || null;
-        account.alias = String(profile.alias || '').trim() || account.alias;
+        const detectedAlias = String(profile.alias || '').trim();
+        account.alias = detectedAlias || account.alias;
         account.status = String(profile.status || '').trim() || account.status;
         account.valid = profile.valid === true && Boolean(account.accountId);
         account.reason = String(profile.reason || '').trim() || null;
+        if (detectedAlias) {
+          const aliases = { ...(ctx.api?.settings?.profileAliases || {}), [profileId]: detectedAlias };
+          await ctx.api.settingsSet({ profileAliases: aliases }).catch(() => null);
+          if (typeof ctx.refreshSettings === 'function') {
+            await ctx.refreshSettings().catch(() => null);
+          }
+        }
       }
-      account.statusView = account.valid ? 'valid' : 'expired';
+      account.statusView = account.valid
+        ? 'valid'
+        : (account.status === 'pending' ? 'pending' : 'expired');
       account.lastCheck = new Date().toLocaleString('zh-CN');
     } catch (err) {
-      account.statusView = 'expired';
+      account.statusView = options.pendingWhileLogin ? 'pending' : 'expired';
     }
 
     renderAccountList();
+    return Boolean(account.valid);
   }
 
   // Add new account
@@ -248,23 +261,31 @@ export function renderAccountManager(root: HTMLElement, ctx: any) {
     const alias = newAccountAliasInput.value.trim();
 
     try {
-      // Create profile
+      // Create account + profile + fingerprint first.
       const out = await ctx.api.cmdRunJson({
-        title: 'profilepool add',
+        title: 'account add',
         cwd: '',
-        args: [ctx.api.pathJoin('apps', 'webauto', 'entry', 'profilepool.mjs'), 'add', 'xiaohongshu', '--json']
+        args: [
+          ctx.api.pathJoin('apps', 'webauto', 'entry', 'account.mjs'),
+          'add',
+          '--platform',
+          'xiaohongshu',
+          '--status',
+          'pending',
+          ...(alias ? ['--alias', alias] : []),
+          '--json',
+        ],
       });
 
-      if (!out?.ok || !out?.json?.profileId) {
+      const profileId = String(out?.json?.account?.profileId || '').trim();
+      if (!out?.ok || !profileId) {
         alert('创建账号失败: ' + (out?.error || '未知错误'));
         return;
       }
 
-      const profileId = out.json.profileId;
-
-      // Save alias if provided
+      // Save alias
       if (alias) {
-        const aliases = { ...ctx.api.settings?.profileAliases, [profileId]: alias.trim() };
+        const aliases = { ...ctx.api.settings?.profileAliases, [profileId]: alias };
         await ctx.api.settingsSet({ profileAliases: aliases });
         if (typeof ctx.refreshSettings === 'function') {
           await ctx.refreshSettings();
@@ -280,6 +301,8 @@ export function renderAccountManager(root: HTMLElement, ctx: any) {
           ctx.api.pathJoin('apps', 'webauto', 'entry', 'profilepool.mjs'),
           'login-profile',
           profileId,
+          '--wait-sync',
+          'false',
           '--timeout-sec',
           String(timeoutSec),
           '--keep-session'
@@ -289,10 +312,41 @@ export function renderAccountManager(root: HTMLElement, ctx: any) {
 
       await loadAccounts();
       newAccountAliasInput.value = '';
+      startAutoSyncProfile(profileId);
+      startAutoSyncProfile(profileId);
 
     } catch (err: any) {
       alert('添加账号失败: ' + (err?.message || String(err)));
     }
+  }
+
+  function startAutoSyncProfile(profileId: string) {
+    const id = String(profileId || '').trim();
+    if (!id) return;
+    const existing = autoSyncTimers.get(id);
+    if (existing) clearInterval(existing);
+    const timeoutSec = Math.max(30, Number(ctx.api?.settings?.timeouts?.loginTimeoutSec || 900));
+    const intervalMs = 2_000;
+    const maxAttempts = Math.ceil((timeoutSec * 1000) / intervalMs);
+    let attempts = 0;
+    void checkAccountStatus(id, { pendingWhileLogin: true }).then((ok) => {
+      if (ok) {
+        const timer = autoSyncTimers.get(id);
+        if (timer) clearInterval(timer);
+        autoSyncTimers.delete(id);
+      }
+    });
+    const timer = setInterval(() => {
+      attempts += 1;
+      void checkAccountStatus(id, { pendingWhileLogin: true }).then((ok) => {
+        if (ok || attempts >= maxAttempts) {
+          const current = autoSyncTimers.get(id);
+          if (current) clearInterval(current);
+          autoSyncTimers.delete(id);
+        }
+      });
+    }, intervalMs);
+    autoSyncTimers.set(id, timer);
   }
 
   // Check all accounts
@@ -310,7 +364,7 @@ export function renderAccountManager(root: HTMLElement, ctx: any) {
 
   // Refresh expired accounts
   async function refreshExpiredAccounts() {
-    const expired = accounts.filter((a) => !a.valid);
+    const expired = accounts.filter((a) => !a.valid && a.status !== 'pending');
 
     if (expired.length === 0) {
       alert('没有失效的账户需要刷新');
@@ -361,4 +415,9 @@ export function renderAccountManager(root: HTMLElement, ctx: any) {
   // Initial load
   void checkEnvironment();
   void loadAccounts();
+
+  return () => {
+    for (const timer of autoSyncTimers.values()) clearInterval(timer);
+    autoSyncTimers.clear();
+  };
 }

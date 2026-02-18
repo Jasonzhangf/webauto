@@ -14,6 +14,7 @@ const DEFAULT_PLATFORM = 'xiaohongshu';
 const STATUS_ACTIVE = 'active';
 const STATUS_VALID = 'valid';
 const STATUS_INVALID = 'invalid';
+const STATUS_PENDING = 'pending';
 
 function nowIso() {
   return new Date().toISOString();
@@ -152,7 +153,8 @@ function removeAccountDirById(id) {
 }
 
 function hasPersistentAccountId(record) {
-  return Boolean(normalizeText(record?.accountId));
+  if (normalizeText(record?.accountId)) return true;
+  return normalizeStatus(record?.status) === STATUS_PENDING;
 }
 
 function isWithinDir(rootDir, targetPath) {
@@ -413,14 +415,21 @@ export async function addAccount(input = {}) {
   const fingerprintId = normalizeText(input.fingerprintId) || profileId;
   const createdAt = nowIso();
   const accountId = normalizeText(input.accountId || input.platformAccountId || null);
-  const status = accountId ? STATUS_VALID : STATUS_INVALID;
+  const requestedStatus = normalizeStatus(input.status);
+  const status = accountId
+    ? STATUS_VALID
+    : (requestedStatus === STATUS_PENDING ? STATUS_PENDING : STATUS_INVALID);
+  const reason =
+    status === STATUS_VALID
+      ? null
+      : (status === STATUS_PENDING ? 'waiting_login' : 'missing_account_id');
   const account = {
     id,
     seq,
     platform,
     status,
-    valid: status === STATUS_VALID,
-    reason: status === STATUS_VALID ? null : 'missing_account_id',
+    valid: false,
+    reason,
     accountId,
     name: accountId || resolveAccountName(input.name, platform, seq),
     alias,
@@ -497,9 +506,14 @@ export async function updateAccount(idOrAlias, patch = {}) {
     next.name = String(next.accountId);
   }
   if (!next.accountId) {
-    next.status = STATUS_INVALID;
-    next.valid = false;
-    if (!next.reason) next.reason = 'missing_account_id';
+    if (next.status === STATUS_PENDING) {
+      next.valid = false;
+      if (!next.reason) next.reason = 'waiting_login';
+    } else {
+      next.status = STATUS_INVALID;
+      next.valid = false;
+      if (!next.reason) next.reason = 'missing_account_id';
+    }
   } else if (next.status !== 'disabled' && next.status !== 'archived') {
     next.status = next.valid === false ? STATUS_INVALID : STATUS_VALID;
   }
@@ -509,6 +523,9 @@ export async function updateAccount(idOrAlias, patch = {}) {
   } else if (next.status === STATUS_INVALID) {
     next.valid = false;
     next.reason = next.reason || 'invalid';
+  } else if (next.status === STATUS_PENDING) {
+    next.valid = false;
+    next.reason = next.reason || 'waiting_login';
   }
 
   next.updatedAt = nowIso();
@@ -528,7 +545,9 @@ export function upsertProfileAccountState(input = {}) {
   const alias = normalizeAlias(input.alias);
   const reason = normalizeText(input.reason);
   const detectedAt = normalizeText(input.detectedAt) || nowIso();
-  const status = accountId ? STATUS_VALID : STATUS_INVALID;
+  const statusHint = normalizeStatus(input.status);
+  const pendingMode = !accountId && statusHint === STATUS_PENDING;
+  const status = accountId ? STATUS_VALID : (pendingMode ? STATUS_PENDING : STATUS_INVALID);
 
   const index = loadIndex();
   const existingByProfile = resolveAccountByProfile(index, profileId);
@@ -538,14 +557,15 @@ export function upsertProfileAccountState(input = {}) {
 
   if (!accountId) {
     if (target && hasPersistentAccountId(target)) {
+      const nextStatus = pendingMode ? STATUS_PENDING : STATUS_INVALID;
       const next = {
         ...target,
         platform,
         profileId,
         fingerprintId: profileId,
-        status: STATUS_INVALID,
+        status: nextStatus,
         valid: false,
-        reason: reason || 'invalid',
+        reason: reason || (nextStatus === STATUS_PENDING ? 'waiting_login' : 'invalid'),
         detectedAt,
         updatedAt: nowIso(),
       };
@@ -555,6 +575,36 @@ export function upsertProfileAccountState(input = {}) {
       saveIndex(index);
       persistAccountMeta(next);
       return buildProfileAccountView(profileId, next);
+    }
+
+    if (pendingMode) {
+      const profileSeq = resolveProfileSeq(profileId, platform);
+      const seq = resolveNextAutoSeq(index, platform, profileSeq);
+      const id = ensureSafeName(buildAutoAccountId(platform, seq), 'id');
+      const createdAt = nowIso();
+      const record = {
+        id,
+        seq,
+        platform,
+        status: STATUS_PENDING,
+        valid: false,
+        reason: reason || 'waiting_login',
+        accountId: null,
+        name: `${platform}-${profileId}`,
+        alias: alias || null,
+        username: null,
+        profileId,
+        fingerprintId: profileId,
+        createdAt,
+        updatedAt: createdAt,
+        detectedAt,
+        aliasSource: alias ? 'auto' : null,
+      };
+      index.accounts.push(record);
+      index.nextSeq = Math.max(Number(index.nextSeq) || 1, seq + 1);
+      saveIndex(index);
+      persistAccountMeta(record);
+      return buildProfileAccountView(profileId, record);
     }
 
     const staleIds = index.accounts
@@ -574,9 +624,9 @@ export function upsertProfileAccountState(input = {}) {
       profileId,
       accountId: null,
       alias: null,
-      status: STATUS_INVALID,
+      status,
       valid: false,
-      reason: reason || 'missing_account_id',
+      reason: reason || (pendingMode ? 'waiting_login' : 'missing_account_id'),
       updatedAt: detectedAt,
     });
   }
@@ -675,6 +725,16 @@ export function markProfileInvalid(profileId, reason = 'login_guard') {
   return upsertProfileAccountState({
     profileId: id,
     accountId: null,
+    reason,
+  });
+}
+
+export function markProfilePending(profileId, reason = 'waiting_login') {
+  const id = ensureSafeName(normalizeText(profileId), 'profileId');
+  return upsertProfileAccountState({
+    profileId: id,
+    accountId: null,
+    status: STATUS_PENDING,
     reason,
   });
 }

@@ -3,11 +3,12 @@ import { listAccountProfiles, type UiAccountProfile } from '../account-source.mt
 
 export function renderSetupWizard(root: HTMLElement, ctx: any) {
   root.innerHTML = '';
+  const autoSyncTimers = new Map<string, ReturnType<typeof setInterval>>();
 
   // Header
   const header = createEl('div', { style: 'margin-bottom:20px;' }, [
     createEl('h2', { style: 'margin:0 0 8px 0; font-size:20px; color:#dbeafe;' }, ['环境与账户初始化']),
-    createEl('div', { className: 'muted', style: 'font-size:13px;' }, ['首次使用必须完成环境检查与账户登录，之后可在"账户管理"Tab中维护'])
+    createEl('div', { className: 'muted', style: 'font-size:13px;' }, ['建议先完成环境检查；账号可先不登录，后续自动识别账户名并回填 alias'])
   ]);
   root.appendChild(header);
 
@@ -22,7 +23,7 @@ export function renderSetupWizard(root: HTMLElement, ctx: any) {
       <div class="env-item" id="env-camo" style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
         <span style="display:flex; align-items:center; gap:8px; min-width:0;">
           <span class="icon" style="color: var(--text-4);">○</span>
-          <span class="env-label">Camoufox CLI</span>
+          <span class="env-label">Camo CLI</span>
         </span>
         <button id="repair-camo-btn" class="secondary" style="display:none; flex:0 0 auto;">一键修复</button>
       </div>
@@ -36,7 +37,7 @@ export function renderSetupWizard(root: HTMLElement, ctx: any) {
       <div class="env-item" id="env-browser" style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
         <span style="display:flex; align-items:center; gap:8px; min-width:0;">
           <span class="icon" style="color: var(--text-4);">○</span>
-          <span class="env-label">Browser Service (7704)</span>
+          <span class="env-label">Camo Runtime (7704，可选)</span>
         </span>
         <button id="repair-core2-btn" class="secondary" style="display:none; flex:0 0 auto;">一键修复</button>
       </div>
@@ -92,7 +93,7 @@ export function renderSetupWizard(root: HTMLElement, ctx: any) {
           请完成上述步骤
         </div>
         <div style="font-size: 12px; color: var(--text-3);" id="setup-status-text">
-          环境检查和账户登录后才能开始使用
+          完成环境检查后即可进入主界面；账号可稍后登录
         </div>
       </div>
       <button id="enter-main-btn" class="secondary" disabled style="padding: 12px 32px; font-size: 14px;">进入主界面</button>
@@ -133,12 +134,12 @@ export function renderSetupWizard(root: HTMLElement, ctx: any) {
     Boolean(
       snapshot?.camo?.installed &&
       snapshot?.services?.unifiedApi &&
-      snapshot?.services?.browserService &&
       snapshot?.firefox?.installed,
     );
 
   const getMissing = (snapshot: EnvSnapshot) => ({
-    core: !snapshot?.services?.unifiedApi || !snapshot?.services?.browserService,
+    core: !snapshot?.services?.unifiedApi,
+    runtimeService: !snapshot?.services?.camoRuntime,
     camo: !snapshot?.camo?.installed,
     runtime: !snapshot?.firefox?.installed,
     geoip: !snapshot?.geoip?.installed,
@@ -157,7 +158,7 @@ export function renderSetupWizard(root: HTMLElement, ctx: any) {
   function applyEnvironment(snapshot: EnvSnapshot) {
     updateEnvItem('env-camo', snapshot.camo?.installed, snapshot.camo?.version || (snapshot.camo?.installed ? '已安装' : '未安装'));
     updateEnvItem('env-unified', snapshot.services?.unifiedApi, '7701');
-    updateEnvItem('env-browser', snapshot.services?.browserService, '7704');
+    updateEnvItem('env-browser', snapshot.services?.camoRuntime, '7704');
     updateEnvItem('env-firefox', snapshot.firefox?.installed, snapshot.firefox?.path ? '已安装' : '未安装');
     updateEnvItem('env-geoip', snapshot.geoip?.installed, snapshot.geoip?.installed ? '已安装（可选）' : '未安装（可选）');
     envReady = isEnvReady(snapshot);
@@ -266,7 +267,7 @@ export function renderSetupWizard(root: HTMLElement, ctx: any) {
   function syncRepairButtons(snapshot: EnvSnapshot) {
     const missing = getMissing(snapshot);
     repairCoreBtn.style.display = missing.core ? '' : 'none';
-    repairCore2Btn.style.display = missing.core ? '' : 'none';
+    repairCore2Btn.style.display = missing.runtimeService ? '' : 'none';
     repairCamoBtn.style.display = missing.camo ? '' : 'none';
     repairRuntimeBtn.style.display = missing.runtime ? '' : 'none';
     repairGeoipBtn.style.display = missing.geoip ? '' : 'none';
@@ -332,11 +333,15 @@ export function renderSetupWizard(root: HTMLElement, ctx: any) {
         const missing: string[] = [];
         if (!snapshot?.camo?.installed) missing.push('camo');
         if (!snapshot?.services?.unifiedApi) missing.push('unified-api');
-        if (!snapshot?.services?.browserService) missing.push('browser-service');
         if (!snapshot?.firefox?.installed) missing.push('camoufox-runtime');
         setupStatusText.textContent = `存在待修复项: ${missing.join(', ')}`;
+        if (!snapshot?.services?.camoRuntime) {
+          setupStatusText.textContent += '（camo-runtime 未就绪，当前为可选）';
+        }
       } else if (!snapshot?.geoip?.installed) {
         setupStatusText.textContent = '环境就绪（GeoIP 可选，未安装不影响使用）';
+      } else if (!snapshot?.services?.camoRuntime) {
+        setupStatusText.textContent = '环境就绪（camo-runtime 未就绪，当前不阻塞）';
       }
     } catch (err) {
       console.error('Environment check failed:', err);
@@ -407,22 +412,29 @@ export function renderSetupWizard(root: HTMLElement, ctx: any) {
     addAccountBtn.textContent = '创建中...';
 
     try {
-      // Create profile
-      const batchKey = 'xiaohongshu';
+      // Create account record + profile + fingerprint first (status=pending).
       const out = await ctx.api.cmdRunJson({
-        title: 'profilepool add',
+        title: 'account add',
         cwd: '',
-        args: [ctx.api.pathJoin('apps', 'webauto', 'entry', 'profilepool.mjs'), 'add', batchKey, '--json']
+        args: [
+          ctx.api.pathJoin('apps', 'webauto', 'entry', 'account.mjs'),
+          'add',
+          '--platform',
+          'xiaohongshu',
+          '--status',
+          'pending',
+          ...(alias ? ['--alias', alias] : []),
+          '--json',
+        ],
       });
 
-      if (!out?.ok || !out?.json?.profileId) {
+      const profileId = String(out?.json?.account?.profileId || '').trim();
+      if (!out?.ok || !profileId) {
         alert('创建账号失败: ' + (out?.error || '未知错误'));
         return;
       }
 
-      const profileId = out.json.profileId;
-
-      // Save alias if provided
+      // Save alias when user provided one. Alias is optional; auto sync will backfill later.
       if (alias) {
         const aliases = { ...ctx.api.settings?.profileAliases, [profileId]: alias };
         await ctx.api.settingsSet({ profileAliases: aliases });
@@ -431,12 +443,18 @@ export function renderSetupWizard(root: HTMLElement, ctx: any) {
         }
       }
 
+      // Show pending state immediately.
+      await refreshAccounts();
+      setupStatusText.textContent = `账号 ${profileId} 已创建，等待登录...`;
+
       // Open login window
       const timeoutSec = ctx.api.settings?.timeouts?.loginTimeoutSec || 900;
       const loginArgs = [
         ctx.api.pathJoin('apps', 'webauto', 'entry', 'profilepool.mjs'),
         'login-profile',
         profileId,
+        '--wait-sync',
+        'false',
         '--timeout-sec',
         String(timeoutSec),
         '--keep-session'
@@ -450,7 +468,7 @@ export function renderSetupWizard(root: HTMLElement, ctx: any) {
       });
 
       newAliasInput.value = '';
-      await refreshAccounts();
+      startAutoSyncProfile(profileId);
 
     } catch (err: any) {
       alert('添加账号失败: ' + (err?.message || String(err)));
@@ -462,19 +480,93 @@ export function renderSetupWizard(root: HTMLElement, ctx: any) {
 
   function updateCompleteStatus() {
     const hasValidAccount = accounts.some((a) => a.valid);
-    const canProceed = envReady && hasValidAccount;
+    const canProceed = envReady;
 
     enterMainBtn.disabled = !canProceed;
 
     if (canProceed) {
-      setupStatusText.textContent = `环境就绪，${accounts.length} 个账户配置完成`;
+      setupStatusText.textContent = hasValidAccount
+        ? `环境就绪，${accounts.length} 个账户配置完成`
+        : '环境就绪，可先进入主界面后登录账号（alias 将在登录后自动识别）';
       enterMainBtn.className = '';
     } else {
       const missing = [];
       if (!envReady) missing.push('环境检查');
-      if (!hasValidAccount) missing.push('至少一个账户');
+      if (!hasValidAccount) missing.push('账户登录（可稍后）');
       setupStatusText.textContent = `尚未完成: ${missing.join('、')}`;
     }
+  }
+
+  function getSettingsAlias(profileId: string): string {
+    return String(ctx.api?.settings?.profileAliases?.[profileId] || '').trim();
+  }
+
+  async function upsertAliasFromProfile(profile: any) {
+    const profileId = String(profile?.profileId || '').trim();
+    const alias = String(profile?.alias || '').trim();
+    if (!profileId || !alias) return;
+    if (getSettingsAlias(profileId) === alias) return;
+    const aliases = { ...(ctx.api?.settings?.profileAliases || {}), [profileId]: alias };
+    await ctx.api.settingsSet({ profileAliases: aliases }).catch(() => null);
+    if (typeof ctx.refreshSettings === 'function') {
+      await ctx.refreshSettings().catch(() => null);
+    }
+  }
+
+  async function syncProfileAccount(profileId: string) {
+    const id = String(profileId || '').trim();
+    if (!id) return false;
+    const result = await ctx.api.cmdRunJson({
+      title: `account sync ${id}`,
+      cwd: '',
+      args: [
+        ctx.api.pathJoin('apps', 'webauto', 'entry', 'account.mjs'),
+        'sync',
+        id,
+        '--pending-while-login',
+        '--json',
+      ],
+      timeoutMs: 20_000,
+    }).catch(() => null);
+    const profile = result?.json?.profile;
+    if (!profile || String(profile.profileId || '').trim() !== id) return false;
+    await upsertAliasFromProfile(profile);
+    await refreshAccounts();
+    const hasAccountId = Boolean(String(profile.accountId || '').trim());
+    if (hasAccountId) {
+      setupStatusText.textContent = `账号 ${id} 已识别，alias=${String(profile.alias || '').trim() || '未命名'}`;
+      return true;
+    }
+    if (String(profile.status || '').trim() === 'pending') {
+      setupStatusText.textContent = `账号 ${id} 待登录，等待检测登录完成...`;
+    }
+    return false;
+  }
+
+  function startAutoSyncProfile(profileId: string) {
+    const id = String(profileId || '').trim();
+    if (!id) return;
+    const existing = autoSyncTimers.get(id);
+    if (existing) clearInterval(existing);
+    const timeoutSec = Math.max(30, Number(ctx.api?.settings?.timeouts?.loginTimeoutSec || 900));
+    const intervalMs = 2_000;
+    const maxAttempts = Math.ceil((timeoutSec * 1000) / intervalMs);
+    let attempts = 0;
+    void syncProfileAccount(id);
+    const timer = setInterval(() => {
+      attempts += 1;
+      void syncProfileAccount(id).then((done) => {
+        if (done || attempts >= maxAttempts) {
+          const current = autoSyncTimers.get(id);
+          if (current) clearInterval(current);
+          autoSyncTimers.delete(id);
+          if (!done) {
+            setupStatusText.textContent = `账号 ${id} 登录检测超时，请确认已在浏览器完成登录`;
+          }
+        }
+      });
+    }, intervalMs);
+    autoSyncTimers.set(id, timer);
   }
 
   // Event Listeners
@@ -499,4 +591,9 @@ export function renderSetupWizard(root: HTMLElement, ctx: any) {
   void checkEnvironment();
   void refreshAccounts();
   renderRepairHistory();
+
+  return () => {
+    for (const timer of autoSyncTimers.values()) clearInterval(timer);
+    autoSyncTimers.clear();
+  };
 }

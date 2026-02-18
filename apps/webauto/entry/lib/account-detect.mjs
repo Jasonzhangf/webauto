@@ -1,5 +1,5 @@
 import { callAPI } from '../../../../modules/camo-runtime/src/utils/browser-service.mjs';
-import { markProfileInvalid, upsertProfileAccountState } from './account-store.mjs';
+import { markProfileInvalid, markProfilePending, upsertProfileAccountState } from './account-store.mjs';
 
 function normalizeText(value) {
   const text = String(value ?? '').trim();
@@ -125,15 +125,22 @@ export async function detectXhsAccountIdentity(profileId) {
   };
 }
 
-export async function syncXhsAccountByProfile(profileId) {
+export async function syncXhsAccountByProfile(profileId, options = {}) {
   const normalizedProfileId = String(profileId || '').trim();
   if (!normalizedProfileId) throw new Error('profileId is required');
+  const pendingWhileLogin = options?.pendingWhileLogin === true;
   try {
     const detected = await detectXhsAccountIdentity(normalizedProfileId);
     if (detected.hasLoginGuard) {
+      if (pendingWhileLogin) {
+        return markProfilePending(normalizedProfileId, 'waiting_login_guard');
+      }
       return markProfileInvalid(normalizedProfileId, 'login_guard');
     }
     if (!detected.accountId) {
+      if (pendingWhileLogin) {
+        return markProfilePending(normalizedProfileId, 'waiting_login');
+      }
       return markProfileInvalid(normalizedProfileId, 'missing_account_id');
     }
     return upsertProfileAccountState({
@@ -145,15 +152,18 @@ export async function syncXhsAccountByProfile(profileId) {
       detectedAt: new Date().toISOString(),
     });
   } catch (error) {
+    if (pendingWhileLogin) {
+      return markProfilePending(normalizedProfileId, `waiting_login_sync:${error?.message || String(error)}`);
+    }
     return markProfileInvalid(normalizedProfileId, `sync_failed:${error?.message || String(error)}`);
   }
 }
 
-export async function syncXhsAccountsByProfiles(profileIds = []) {
+export async function syncXhsAccountsByProfiles(profileIds = [], options = {}) {
   const list = Array.from(new Set((Array.isArray(profileIds) ? profileIds : []).map((item) => String(item || '').trim()).filter(Boolean)));
   const out = [];
   for (const profileId of list) {
-    const state = await syncXhsAccountByProfile(profileId);
+    const state = await syncXhsAccountByProfile(profileId, options);
     out.push(state);
   }
   return out;

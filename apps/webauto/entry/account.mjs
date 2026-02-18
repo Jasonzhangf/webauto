@@ -87,7 +87,7 @@ function getCamoRunner() {
   if (global) return wrapWindowsRunner(global);
 
   const npx = resolveOnPath(npxNames) || (isWin ? 'npx.cmd' : 'npx');
-  return wrapWindowsRunner(npx, ['@web-auto/camo']);
+  return wrapWindowsRunner(npx, ['--yes', '--package=@web-auto/camo', 'camo']);
 }
 
 function runCamo(args) {
@@ -96,6 +96,8 @@ function runCamo(args) {
     cwd: ROOT,
     env: process.env,
     encoding: 'utf8',
+    timeout: 60000,
+    windowsHide: true,
   });
   const stdout = String(ret.stdout || '').trim();
   const stderr = String(ret.stderr || '').trim();
@@ -189,13 +191,13 @@ Usage:
   webauto account --help
   webauto account list [--json]
   webauto account list --records [--json]
-  webauto account add [--platform <name>] [--alias <alias>] [--name <name>] [--username <username>] [--profile <id>] [--fingerprint <id>] [--json]
+  webauto account add [--platform <name>] [--alias <alias>] [--name <name>] [--username <username>] [--profile <id>] [--fingerprint <id>] [--status pending|active|disabled|archived] [--json]
   webauto account get <id|alias> [--json]
-  webauto account update <id|alias> [--alias <alias>|--clear-alias] [--name <name>] [--username <name>] [--profile <id>] [--fingerprint <id>] [--status active|disabled|archived] [--json]
+  webauto account update <id|alias> [--alias <alias>|--clear-alias] [--name <name>] [--username <name>] [--profile <id>] [--fingerprint <id>] [--status pending|active|disabled|archived] [--json]
   webauto account delete <id|alias> [--delete-profile] [--delete-fingerprint] [--json]
   webauto account login <id|alias> [--url <url>] [--sync-alias] [--json]
   webauto account sync-alias <id|alias> [--selector <css>] [--alias <value>] [--json]
-  webauto account sync <profileId|all> [--json]
+  webauto account sync <profileId|all> [--pending-while-login] [--json]
 
 Notes:
   - 账号数据默认保存到 ~/.webauto/accounts（可用 WEBAUTO_PATHS_ACCOUNTS 覆盖）
@@ -203,6 +205,7 @@ Notes:
   - add 会自动创建并关联 profile/fingerprint（未指定时自动编号）
   - login 会通过 @web-auto/camo 拉起浏览器并绑定账号 profile
   - 只有识别到账号 id 的 profile 才会进入 valid 状态
+  - sync --pending-while-login 会在登录过程中保持待登录状态，避免过早标记失效
 
 Examples:
   webauto account add --platform xiaohongshu --alias 主号
@@ -359,16 +362,17 @@ async function cmdSyncAlias(idOrAlias, argv, jsonMode) {
   }, jsonMode);
 }
 
-async function cmdSync(target, jsonMode) {
+async function cmdSync(target, argv, jsonMode) {
+  const pendingWhileLogin = parseBoolean(argv['pending-while-login'], false);
   const value = String(target || '').trim().toLowerCase();
   if (!value || value === 'all') {
     const rows = listAccountProfiles().profiles;
     const profileIds = rows.map((item) => item.profileId);
-    const synced = await syncXhsAccountsByProfiles(profileIds);
+    const synced = await syncXhsAccountsByProfiles(profileIds, { pendingWhileLogin });
     output({ ok: true, count: synced.length, profiles: synced }, jsonMode);
     return;
   }
-  const synced = await syncXhsAccountByProfile(target);
+  const synced = await syncXhsAccountByProfile(target, { pendingWhileLogin });
   output({ ok: true, profile: synced }, jsonMode);
 }
 
@@ -393,7 +397,7 @@ async function main() {
   if (cmd === 'delete' || cmd === 'remove' || cmd === 'rm') return cmdDelete(arg1, argv, jsonMode);
   if (cmd === 'login') return cmdLogin(arg1, argv, jsonMode);
   if (cmd === 'sync-alias') return cmdSyncAlias(arg1, argv, jsonMode);
-  if (cmd === 'sync') return cmdSync(arg1, jsonMode);
+  if (cmd === 'sync') return cmdSync(arg1, argv, jsonMode);
 
   throw new Error(`unknown account command: ${cmd}`);
 }
