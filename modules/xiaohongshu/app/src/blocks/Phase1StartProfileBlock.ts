@@ -152,7 +152,7 @@ export async function execute(input: StartProfileInput): Promise<StartProfileOut
       height: viewport.height,
     }, browserServiceUrl);
     console.log('[Phase1StartProfile] window positioned at (0,0)');
-  } catch (err) {
+  } catch (err: any) {
     console.warn('[Phase1StartProfile] window move failed:', err?.message || String(err));
   }
   console.log(`[Phase1StartProfile] viewport set: ${viewport.width}x${viewport.height}`);

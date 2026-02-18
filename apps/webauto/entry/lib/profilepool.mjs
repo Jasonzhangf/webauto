@@ -52,14 +52,16 @@ export function resolveNextProfileId(prefix) {
   const normalized = String(prefix || '').trim();
   if (!normalized) throw new Error('prefix is required');
   const { profiles } = listProfilesForPool(normalized);
-  let maxIndex = 0;
+  const used = new Set();
   for (const profileId of profiles) {
     const match = profileId.match(/-(\d+)$/);
     if (!match) continue;
     const index = Number(match[1]);
-    if (Number.isFinite(index)) maxIndex = Math.max(maxIndex, index);
+    if (Number.isFinite(index) && index > 0) used.add(index);
   }
-  return `${normalized}-${maxIndex + 1}`;
+  let next = 1;
+  while (used.has(next)) next += 1;
+  return `${normalized}-${next}`;
 }
 
 export async function ensureProfile(profileId) {

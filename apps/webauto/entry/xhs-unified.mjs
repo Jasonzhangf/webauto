@@ -65,6 +65,13 @@ function sanitizeForPath(name, fallback = 'unknown') {
   return cleaned || fallback;
 }
 
+function sanitizeKeywordDirParts({ env, keyword }) {
+  return {
+    safeEnv: sanitizeForPath(env, 'debug'),
+    safeKeyword: sanitizeForPath(keyword, 'unknown'),
+  };
+}
+
 function resolveDownloadRoot(customRoot = '') {
   const fromArg = String(customRoot || '').trim();
   if (fromArg) return path.resolve(fromArg);
@@ -72,6 +79,58 @@ function resolveDownloadRoot(customRoot = '') {
   if (fromEnv) return path.resolve(fromEnv);
   const home = process.env.HOME || process.env.USERPROFILE || os.homedir();
   return path.join(home, '.webauto', 'download');
+}
+
+const NON_NOTE_DIR_NAMES = new Set([
+  'merged',
+  'profiles',
+  'like-evidence',
+  'virtual-like',
+  'smart-reply',
+  'comment-match',
+  'discover-fallback',
+]);
+
+async function collectKeywordDirs(baseOutputRoot, env, keyword) {
+  const { safeEnv, safeKeyword } = sanitizeKeywordDirParts({ env, keyword });
+  const dirs = [
+    path.join(baseOutputRoot, 'xiaohongshu', safeEnv, safeKeyword),
+  ];
+  const shardsRoot = path.join(baseOutputRoot, 'shards');
+  try {
+    const entries = await fsp.readdir(shardsRoot, { withFileTypes: true });
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      dirs.push(path.join(shardsRoot, entry.name, 'xiaohongshu', safeEnv, safeKeyword));
+    }
+  } catch {
+    // ignore
+  }
+  return Array.from(new Set(dirs));
+}
+
+async function collectCompletedNoteIds(baseOutputRoot, env, keyword) {
+  const keywordDirs = await collectKeywordDirs(baseOutputRoot, env, keyword);
+  const completed = new Set();
+  for (const keywordDir of keywordDirs) {
+    let entries = [];
+    try {
+      entries = await fsp.readdir(keywordDir, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      const noteId = String(entry.name || '').trim();
+      if (!noteId || noteId.startsWith('.') || noteId.startsWith('_')) continue;
+      if (NON_NOTE_DIR_NAMES.has(noteId)) continue;
+      completed.add(noteId);
+    }
+  }
+  return {
+    count: completed.size,
+    noteIds: Array.from(completed),
+  };
 }
 
 async function ensureDir(dirPath) {
@@ -105,6 +164,8 @@ function buildTemplateOptions(argv, profileId, overrides = {}) {
   const likeKeywords = String(argv['like-keywords'] || '').trim();
   const replyText = String(argv['reply-text'] || '感谢分享，已关注').trim() || '感谢分享，已关注';
   const outputRoot = String(argv['output-root'] || '').trim();
+  const resume = parseBool(argv.resume, true);
+  const incrementalMax = parseBool(argv['incremental-max'], true);
 
   const dryRun = parseBool(argv['dry-run'], false);
   const disableDryRun = parseBool(argv['no-dry-run'], false);
@@ -123,6 +184,8 @@ function buildTemplateOptions(argv, profileId, overrides = {}) {
     noteIntervalMs,
     maxNotes,
     maxLikesPerRound,
+    resume,
+    incrementalMax,
     matchMode,
     matchMinHits,
     matchKeywords,
@@ -139,7 +202,7 @@ function buildTemplateOptions(argv, profileId, overrides = {}) {
   return { ...base, ...overrides };
 }
 
-function buildShardPlan({ profiles, totalNotes, defaultMaxNotes }) {
+function buildEvenShardPlan({ profiles, totalNotes, defaultMaxNotes }) {
   const uniqueProfiles = Array.from(new Set(profiles.map((item) => String(item || '').trim()).filter(Boolean)));
   if (uniqueProfiles.length === 0) return [];
 
@@ -154,6 +217,27 @@ function buildShardPlan({ profiles, totalNotes, defaultMaxNotes }) {
     assignedNotes: base + (index < remainder ? 1 : 0),
   }));
   return plan.filter((item) => item.assignedNotes > 0);
+}
+
+function buildDynamicWavePlan({ profiles, remainingNotes }) {
+  const uniqueProfiles = Array.from(new Set(profiles.map((item) => String(item || '').trim()).filter(Boolean)));
+  if (uniqueProfiles.length === 0) return [];
+  const remaining = Math.max(0, Number(remainingNotes) || 0);
+  if (remaining <= 0) return [];
+
+  if (remaining < uniqueProfiles.length) {
+    return uniqueProfiles.slice(0, remaining).map((profileId) => ({
+      profileId,
+      assignedNotes: 1,
+    }));
+  }
+
+  const waveTotal = remaining - (remaining % uniqueProfiles.length);
+  return buildEvenShardPlan({
+    profiles: uniqueProfiles,
+    totalNotes: waveTotal > 0 ? waveTotal : remaining,
+    defaultMaxNotes: 1,
+  });
 }
 
 function createProfileStats(spec) {
@@ -530,29 +614,18 @@ export async function runUnified(argv, overrides = {}) {
   const env = String(argv.env || 'debug').trim() || 'debug';
   const profiles = parseProfiles(argv);
   if (profiles.length === 0) throw new Error('missing --profile or --profiles or --profilepool');
-
-  const accountStates = await syncXhsAccountsByProfiles(profiles);
-  const executableProfiles = accountStates
-    .filter((item) => item?.valid === true && Boolean(String(item?.accountId || '').trim()))
-    .map((item) => item.profileId);
-  const invalidProfiles = accountStates.filter((item) => !item || item.valid !== true);
-  if (executableProfiles.length === 0) {
-    throw new Error(`no valid business accounts: ${invalidProfiles.map((item) => `${item.profileId}:${item.reason || 'invalid'}`).join(', ')}`);
-  }
-
   const defaultMaxNotes = parseIntFlag(argv['max-notes'] ?? argv.target, 30, 1);
   const totalNotes = parseNonNegativeInt(argv['total-notes'] ?? argv['total-target'], 0);
-  const plan = buildShardPlan({ profiles: executableProfiles, totalNotes, defaultMaxNotes });
-  if (plan.length === 0) throw new Error('empty shard plan');
-
+  const hasTotalTarget = totalNotes > 0;
+  const maxWaves = parseIntFlag(argv['max-waves'], 40, 1);
   const parallelRequested = parseBool(argv.parallel, false);
-  const parallel = parallelRequested && plan.length > 1;
-  const concurrency = parallel
-    ? Math.min(plan.length, parseIntFlag(argv.concurrency, plan.length, 1))
-    : 1;
+  const configuredConcurrency = parseIntFlag(argv.concurrency, profiles.length || 1, 1);
+  const planOnly = parseBool(argv['plan-only'], false);
 
   const runLabel = formatRunLabel();
   const baseOutputRoot = resolveDownloadRoot(argv['output-root']);
+  const outputRootArg = String(argv['output-root'] || '').trim();
+  const useShardRoots = profiles.length > 1;
   const mergedDir = path.join(
     baseOutputRoot,
     'xiaohongshu',
@@ -562,58 +635,17 @@ export async function runUnified(argv, overrides = {}) {
     `run-${runLabel}`,
   );
   const planPath = path.join(mergedDir, 'plan.json');
+  const completedAtStart = hasTotalTarget
+    ? await collectCompletedNoteIds(baseOutputRoot, env, keyword)
+    : { count: 0, noteIds: [] };
+  let remainingNotes = hasTotalTarget
+    ? Math.max(0, totalNotes - completedAtStart.count)
+    : defaultMaxNotes;
 
-  const useShardRoots = plan.length > 1;
-  const specs = plan.map((item) => {
-    const shardId = sanitizeForPath(item.profileId, 'profile');
-    const shardOutputRoot = useShardRoots
-      ? path.join(baseOutputRoot, 'shards', shardId)
-      : String(argv['output-root'] || '').trim();
-    return {
-      ...item,
-      runLabel,
-      outputRoot: shardOutputRoot,
-      logPath: path.join(mergedDir, 'profiles', `${shardId}.events.jsonl`),
-      summaryPath: path.join(mergedDir, 'profiles', `${shardId}.summary.json`),
-    };
-  });
-
-  const planPayload = {
-    event: 'xhs.unified.plan',
-    planPath,
-    keyword,
-    env,
-    totalNotes: totalNotes > 0 ? totalNotes : null,
-    defaultMaxNotes,
-    parallel,
-    concurrency,
-    accountStates,
-    skippedProfiles: invalidProfiles.map((item) => ({
-      profileId: item?.profileId || null,
-      status: item?.status || 'invalid',
-      reason: item?.reason || 'invalid',
-      valid: item?.valid === true,
-      accountId: item?.accountId || null,
-    })),
-    specs: specs.map((item) => ({
-      profileId: item.profileId,
-      assignedNotes: item.assignedNotes,
-      outputRoot: item.outputRoot,
-      logPath: item.logPath,
-    })),
-  };
-  console.log(JSON.stringify(planPayload));
-
-  await writeJson(planPath, planPayload);
-
-  if (parseBool(argv['plan-only'], false)) {
-    return {
-      ok: true,
-      planOnly: true,
-      planPath,
-      specs,
-    };
-  }
+  const skippedProfileMap = new Map();
+  const wavePlans = [];
+  const allResults = [];
+  let finalAccountStates = [];
 
   const execute = async (spec) => {
     try {
@@ -667,9 +699,133 @@ export async function runUnified(argv, overrides = {}) {
     }
   };
 
-  const results = parallel
-    ? await runWithConcurrency(specs, concurrency, execute)
-    : await runWithConcurrency(specs, 1, execute);
+  for (let wave = 1; wave <= maxWaves; wave += 1) {
+    if (hasTotalTarget && remainingNotes <= 0) break;
+    if (!hasTotalTarget && wave > 1) break;
+
+    const accountStates = await syncXhsAccountsByProfiles(profiles);
+    finalAccountStates = accountStates;
+    const executableProfiles = accountStates
+      .filter((item) => item?.valid === true && Boolean(String(item?.accountId || '').trim()))
+      .map((item) => item.profileId);
+    const invalidProfiles = accountStates.filter((item) => !item || item.valid !== true);
+    for (const item of invalidProfiles) {
+      const profileId = String(item?.profileId || '').trim();
+      if (!profileId) continue;
+      skippedProfileMap.set(profileId, {
+        profileId,
+        status: item?.status || 'invalid',
+        reason: item?.reason || 'invalid',
+        valid: item?.valid === true,
+        accountId: item?.accountId || null,
+      });
+    }
+
+    if (executableProfiles.length === 0) {
+      if (wave === 1) {
+        throw new Error(`no valid business accounts: ${invalidProfiles.map((item) => `${item.profileId}:${item.reason || 'invalid'}`).join(', ')}`);
+      }
+      break;
+    }
+
+    const plan = hasTotalTarget
+      ? buildDynamicWavePlan({ profiles: executableProfiles, remainingNotes })
+      : buildEvenShardPlan({ profiles: executableProfiles, totalNotes: 0, defaultMaxNotes });
+    if (plan.length === 0) break;
+
+    const parallel = parallelRequested && plan.length > 1;
+    const concurrency = parallel
+      ? Math.min(plan.length, configuredConcurrency)
+      : 1;
+    const waveTag = `wave-${String(wave).padStart(3, '0')}`;
+    const specs = plan.map((item) => {
+      const shardId = sanitizeForPath(item.profileId, 'profile');
+      const shardOutputRoot = useShardRoots
+        ? path.join(baseOutputRoot, 'shards', shardId)
+        : outputRootArg;
+      return {
+        ...item,
+        runLabel,
+        waveTag,
+        outputRoot: shardOutputRoot,
+        logPath: path.join(mergedDir, 'profiles', `${waveTag}.${shardId}.events.jsonl`),
+        summaryPath: path.join(mergedDir, 'profiles', `${waveTag}.${shardId}.summary.json`),
+      };
+    });
+
+    wavePlans.push({
+      wave,
+      waveTag,
+      remainingBefore: remainingNotes,
+      parallel,
+      concurrency,
+      specs: specs.map((item) => ({
+        profileId: item.profileId,
+        assignedNotes: item.assignedNotes,
+        outputRoot: item.outputRoot,
+        logPath: item.logPath,
+      })),
+    });
+
+    if (planOnly) break;
+
+    const waveResults = parallel
+      ? await runWithConcurrency(specs, concurrency, execute)
+      : await runWithConcurrency(specs, 1, execute);
+    allResults.push(...waveResults);
+
+    if (hasTotalTarget) {
+      const openedInWave = waveResults.reduce((sum, item) => sum + toNumber(item?.stats?.openedNotes, 0), 0);
+      remainingNotes = Math.max(0, remainingNotes - openedInWave);
+      const waveRecord = wavePlans[wavePlans.length - 1];
+      waveRecord.openedInWave = openedInWave;
+      waveRecord.remainingAfter = remainingNotes;
+      if (openedInWave <= 0) {
+        console.error(JSON.stringify({
+          event: 'xhs.unified.wave_stalled',
+          wave,
+          remainingNotes,
+        }));
+        break;
+      }
+    }
+  }
+
+  const skippedProfiles = Array.from(skippedProfileMap.values());
+
+  const planPayload = {
+    event: 'xhs.unified.plan',
+    planPath,
+    keyword,
+    env,
+    totalNotes: totalNotes > 0 ? totalNotes : null,
+    defaultMaxNotes,
+    maxWaves,
+    runLabel,
+    hasTotalTarget,
+    completedAtStart: completedAtStart.count,
+    remainingAtPlan: remainingNotes,
+    accountStates: finalAccountStates,
+    skippedProfiles,
+    waves: wavePlans,
+  };
+  console.log(JSON.stringify(planPayload));
+
+  await writeJson(planPath, planPayload);
+
+  if (planOnly) {
+    return {
+      ok: true,
+      planOnly: true,
+      planPath,
+      waves: wavePlans,
+    };
+  }
+
+  const results = allResults;
+  if (results.length === 0) {
+    throw new Error(`no executable waves generated, see ${planPath}`);
+  }
 
   const merged = await mergeProfileOutputs({
     results,
@@ -677,24 +833,37 @@ export async function runUnified(argv, overrides = {}) {
     keyword,
     env,
     totalNotes,
-    parallel,
-    concurrency,
-    skippedProfiles: invalidProfiles.map((item) => ({
-      profileId: item?.profileId || null,
-      status: item?.status || 'invalid',
-      reason: item?.reason || 'invalid',
-      accountId: item?.accountId || null,
-    })),
+    parallel: parallelRequested,
+    concurrency: configuredConcurrency,
+    skippedProfiles,
   });
+
+  const mergedSummary = {
+    ...merged.mergedSummary,
+    progress: {
+      completedAtStart: completedAtStart.count,
+      completedDuringRun: toNumber(merged.mergedSummary?.totals?.openedNotes, 0),
+      targetTotal: hasTotalTarget ? totalNotes : null,
+      remainingAfterRun: hasTotalTarget ? Math.max(0, remainingNotes) : null,
+      reachedTarget: hasTotalTarget ? remainingNotes <= 0 : null,
+    },
+    waves: wavePlans,
+  };
+  await writeJson(merged.summaryPath, mergedSummary);
 
   console.log(JSON.stringify({
     event: 'xhs.unified.merged',
     summaryPath: merged.summaryPath,
+    waves: wavePlans.length,
     profilesTotal: results.length,
     profilesSucceeded: results.filter((item) => item.ok).length,
     profilesFailed: results.filter((item) => !item.ok).length,
+    remainingNotes: hasTotalTarget ? remainingNotes : null,
   }));
 
+  if (hasTotalTarget && remainingNotes > 0) {
+    throw new Error(`target not reached, remaining=${remainingNotes}, see ${merged.summaryPath}`);
+  }
   if (results.some((item) => !item.ok)) {
     throw new Error(`unified finished with failures, see ${merged.summaryPath}`);
   }
@@ -717,8 +886,11 @@ async function main() {
       '  --max-notes <n>              单账号目标（未启用 total-notes 时）',
       '  --total-notes <n>            总目标数（自动分片到账号）',
       '  --total-target <n>           total-notes 别名',
+      '  --max-waves <n>              动态分片最大波次（默认40）',
       '  --parallel                   启用并行执行',
       '  --concurrency <n>            并行度（默认=账号数）',
+      '  --resume <bool>              断点续传（默认 true）',
+      '  --incremental-max <bool>     max-notes 作为增量配额（默认 true）',
       '  --plan-only                  只生成分片计划，不执行',
       '  --output-root <path>         输出根目录（并行时自动分 profile shard）',
     ].join('\n'));

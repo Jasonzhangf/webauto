@@ -445,15 +445,35 @@ export function upsertProfileAccountState(input = {}) {
   let target = existingByAccountId || existingByProfile || null;
   const purgeIds = new Set();
 
-  if (!target && !accountId) {
+  if (!target && !accountId && !alias) {
     return buildProfileAccountView(profileId, {
       profileId,
       accountId: null,
+      alias: null,
       status: STATUS_INVALID,
       valid: false,
       reason: reason || 'missing_account_id',
       updatedAt: detectedAt,
     });
+  }
+
+  if (target && !accountId && !alias) {
+    const targetAccountId = normalizeText(target.accountId);
+    const targetAlias = normalizeAlias(target.alias);
+    if (!targetAccountId && !targetAlias) {
+      index.accounts = index.accounts.filter((item) => item?.id !== target.id);
+      saveIndex(index);
+      deleteAccountMeta(target.id);
+      return buildProfileAccountView(profileId, {
+        profileId,
+        accountId: null,
+        alias: null,
+        status: STATUS_INVALID,
+        valid: false,
+        reason: reason || 'missing_account_id',
+        updatedAt: detectedAt,
+      });
+    }
   }
 
   if (!target) {

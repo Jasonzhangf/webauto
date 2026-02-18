@@ -466,6 +466,8 @@ export function buildXhsUnifiedAutoscript(rawOptions = {}) {
   const tabCount = toPositiveInt(rawOptions.tabCount, 4, 1);
   const noteIntervalMs = toPositiveInt(rawOptions.noteIntervalMs, 1200, 200);
   const maxNotes = toPositiveInt(rawOptions.maxNotes, 30, 1);
+  const resume = toBoolean(rawOptions.resume, true);
+  const incrementalMax = toBoolean(rawOptions.incrementalMax, true);
   const maxLikesPerRound = toPositiveInt(rawOptions.maxLikesPerRound, 2, 1);
   const matchMode = toTrimmedString(rawOptions.matchMode, 'any');
   const matchMinHits = toPositiveInt(rawOptions.matchMinHits, 1, 1);
@@ -527,6 +529,8 @@ export function buildXhsUnifiedAutoscript(rawOptions = {}) {
       tabCount,
       noteIntervalMs,
       maxNotes,
+      resume,
+      incrementalMax,
       doHomepage,
       doImages,
       doComments,
@@ -542,6 +546,7 @@ export function buildXhsUnifiedAutoscript(rawOptions = {}) {
       notes: [
         'open_next_detail intentionally stops script by throwing AUTOSCRIPT_DONE_* when exhausted.',
         'dev mode uses deterministic no-recovery policy (checkpoint recovery disabled).',
+        'resume=true keeps visited note history for断点续传; incrementalMax=true treats maxNotes as增量配额.',
         'when persistComments=true, xhs_comments_harvest emits full comments in operation result for downstream jsonl/file persistence.',
       ],
     },
@@ -626,7 +631,7 @@ export function buildXhsUnifiedAutoscript(rawOptions = {}) {
       {
         id: 'open_first_detail',
         action: 'xhs_open_detail',
-        params: { mode: 'first', maxNotes, keyword },
+        params: { mode: 'first', maxNotes, keyword, resume, incrementalMax },
         trigger: 'search_result_item.exist',
         dependsOn: ['submit_search'],
         once: true,
@@ -836,7 +841,7 @@ export function buildXhsUnifiedAutoscript(rawOptions = {}) {
       {
         id: 'open_next_detail',
         action: 'xhs_open_detail',
-        params: { mode: 'next', maxNotes },
+        params: { mode: 'next', maxNotes, resume, incrementalMax },
         trigger: 'search_result_item.exist',
         dependsOn: ['switch_tab_round_robin'],
         once: false,

@@ -54,6 +54,8 @@ export function buildOpenDetailScript(params = {}) {
   const mode = String(params.mode || 'first').trim().toLowerCase();
   const maxNotes = Math.max(1, Number(params.maxNotes ?? params.limit ?? 20) || 20);
   const keyword = String(params.keyword || '').trim();
+  const resume = params.resume !== false;
+  const incrementalMax = params.incrementalMax !== false;
 
   return `(async () => {
     const STATE_KEY = '__camoXhsState';
@@ -91,12 +93,27 @@ export function buildOpenDetailScript(params = {}) {
     const requestedKeyword = ${JSON.stringify(keyword)};
     const mode = ${JSON.stringify(mode)};
     const previousKeyword = String(state.keyword || '').trim();
+    const keywordChanged = Boolean(requestedKeyword && previousKeyword && requestedKeyword !== previousKeyword);
     if (mode === 'first') {
-      state.visitedNoteIds = [];
-    } else if (requestedKeyword && previousKeyword && requestedKeyword !== previousKeyword) {
+      if (!${resume ? 'true' : 'false'} || keywordChanged) {
+        state.visitedNoteIds = [];
+      }
+    } else if (keywordChanged) {
       state.visitedNoteIds = [];
     }
-    state.maxNotes = Number(${maxNotes});
+    const requestedMaxNotes = Number(${maxNotes});
+    if (mode === 'first') {
+      if (${incrementalMax ? 'true' : 'false'} && ${resume ? 'true' : 'false'} && !keywordChanged) {
+        state.maxNotes = Math.max(
+          Number(state.maxNotes || 0),
+          Number(state.visitedNoteIds.length || 0) + requestedMaxNotes,
+        );
+      } else {
+        state.maxNotes = requestedMaxNotes;
+      }
+    } else if (!Number.isFinite(Number(state.maxNotes)) || Number(state.maxNotes) <= 0) {
+      state.maxNotes = requestedMaxNotes;
+    }
     if (requestedKeyword) state.keyword = requestedKeyword;
 
     if (mode === 'next' && state.visitedNoteIds.length >= state.maxNotes) {
