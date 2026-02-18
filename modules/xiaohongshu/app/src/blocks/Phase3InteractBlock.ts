@@ -183,7 +183,7 @@ function parseLikeRuleToken(token: string): LikeRule | null {
   const raw = String(token || '').trim();
   if (!raw) return null;
 
-  const m = raw.match(/^\\{\\s*(.+?)\\s*([+\\-\\uFF0B\\uFF0D])\\s*(.+?)\\s*\\}$/);
+  const m = raw.match(/^\{\s*(.+?)\s*([+\-\uFF0B\uFF0D])\s*(.+?)\s*\}$/);
   if (!m) {
     return { kind: 'contains', include: raw, raw };
   }
@@ -192,7 +192,7 @@ function parseLikeRuleToken(token: string): LikeRule | null {
   const right = normalizeText(m[3]);
   if (!left || !right) return null;
 
-  const op = m[2] === '\\uFF0B' ? '+' : m[2] === '\\uFF0D' ? '-' : m[2];
+  const op = m[2] === '\uFF0B' ? '+' : m[2] === '\uFF0D' ? '-' : m[2];
   if (op === '+') {
     return { kind: 'and', includeA: left, includeB: right, raw: `{${left} + ${right}}` };
   }
@@ -1228,4 +1228,3 @@ export async function execute(input: InteractInput): Promise<InteractOutput> {
     stopReason: reachedBottom ? bottomReason : undefined,
   };
 }
-
