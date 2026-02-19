@@ -11,6 +11,7 @@ import { AutoscriptRunner } from '../../../modules/camo-runtime/src/autoscript/r
 import { syncXhsAccountsByProfiles } from './lib/account-detect.mjs';
 import { markProfileInvalid } from './lib/account-store.mjs';
 import { listProfilesForPool } from './lib/profilepool.mjs';
+import { runCamo } from './lib/camo-cli.mjs';
 
 function nowIso() {
   return new Date().toISOString();
@@ -63,6 +64,43 @@ function sanitizeForPath(name, fallback = 'unknown') {
   if (!text) return fallback;
   const cleaned = text.replace(/[\\/:"*?<>|]+/g, '_').trim();
   return cleaned || fallback;
+}
+
+const XHS_HOME_URL = 'https://www.xiaohongshu.com';
+
+async function ensureProfileSession(profileId) {
+  const id = String(profileId || '').trim();
+  if (!id) return false;
+  const ret = runCamo(['start', id, '--url', XHS_HOME_URL], {
+    rootDir: process.cwd(),
+    timeoutMs: 60000,
+  });
+  if (ret?.ok) {
+    runCamo(['goto', id, XHS_HOME_URL], { rootDir: process.cwd(), timeoutMs: 60000 });
+  }
+  return Boolean(ret?.ok);
+}
+
+function buildStopScreenshotPath(profileId, reason, outputDir) {
+  const safeProfile = sanitizeForPath(profileId, 'profile');
+  const safeReason = sanitizeForPath(reason || 'stop', 'stop');
+  const file = `stop-${safeProfile}-${safeReason}.png`;
+  return path.join(outputDir, file);
+}
+
+async function captureStopScreenshot({ profileId, reason, outputDir }) {
+  const outDir = String(outputDir || '').trim();
+  if (!outDir) return null;
+  try {
+    await fsp.mkdir(outDir, { recursive: true });
+  } catch {}
+  const outputPath = buildStopScreenshotPath(profileId, reason, outDir);
+  const ret = runCamo(['screenshot', profileId, '--output', outputPath], {
+    rootDir: process.cwd(),
+    timeoutMs: 60000,
+  });
+  if (ret?.ok) return outputPath;
+  return null;
 }
 
 function sanitizeKeywordDirParts({ env, keyword }) {
@@ -432,6 +470,21 @@ async function runProfile(spec, argv, baseOverrides = {}) {
   };
   logEvent(stopPayload);
 
+  const stopScreenshotPath = await captureStopScreenshot({
+    profileId,
+    reason: stopPayload.reason || 'stop',
+    outputDir: path.dirname(spec.logPath),
+  });
+  if (stopScreenshotPath) {
+    logEvent({
+      event: 'xhs.unified.stop_screenshot',
+      profileId,
+      runId: stopPayload.runId,
+      reason: stopPayload.reason || null,
+      path: stopScreenshotPath,
+    });
+  }
+
   stats.stopReason = stopPayload.reason;
 
   const profileResult = {
@@ -442,6 +495,7 @@ async function runProfile(spec, argv, baseOverrides = {}) {
     assignedNotes: spec.assignedNotes,
     outputRoot: options.outputRoot,
     logPath: spec.logPath,
+    stopScreenshotPath: stopScreenshotPath || null,
     stats,
   };
 
@@ -641,6 +695,7 @@ export async function runUnified(argv, overrides = {}) {
   const env = String(argv.env || 'debug').trim() || 'debug';
   const profiles = parseProfiles(argv);
   if (profiles.length === 0) throw new Error('missing --profile or --profiles or --profilepool');
+  await Promise.all(profiles.map((profileId) => ensureProfileSession(profileId)));
   const defaultMaxNotes = parseIntFlag(argv['max-notes'] ?? argv.target, 30, 1);
   const totalNotes = parseNonNegativeInt(argv['total-notes'] ?? argv['total-target'], 0);
   const hasTotalTarget = totalNotes > 0;

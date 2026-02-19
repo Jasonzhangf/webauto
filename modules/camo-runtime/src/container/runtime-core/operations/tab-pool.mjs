@@ -364,17 +364,48 @@ export async function executeTabPoolOperation({ profileId, action, params = {}, 
       for (const page of selected) {
         const pageIndex = Number(page.index);
         if (!Number.isFinite(pageIndex)) continue;
-        await callApiWithTimeout('page:switch', { profileId, index: pageIndex }, apiTimeoutMs);
-        if (shouldNavigateToSeed(page.url, fallbackSeedUrl)) {
-          await callApiWithTimeout('goto', { profileId, url: fallbackSeedUrl }, navigationTimeoutMs);
-          if (openDelayMs > 0) await sleep(Math.min(openDelayMs, 1200));
-        }
-        const syncResult = await syncTabViewportIfNeeded({ profileId, syncConfig });
-        if (!syncResult?.ok) {
-          return asErrorPayload('OPERATION_FAILED', 'tab viewport sync failed', {
-            pageIndex,
-            syncResult,
-          });
+        try {
+          await callApiWithTimeout('page:switch', { profileId, index: pageIndex }, apiTimeoutMs);
+          if (shouldNavigateToSeed(page.url, fallbackSeedUrl)) {
+            await callApiWithTimeout('goto', { profileId, url: fallbackSeedUrl }, navigationTimeoutMs);
+            if (openDelayMs > 0) await sleep(Math.min(openDelayMs, 1200));
+          }
+          const syncResult = await syncTabViewportIfNeeded({ profileId, syncConfig });
+          if (!syncResult?.ok) {
+            throw new Error(syncResult?.message || 'tab viewport sync failed');
+          }
+        } catch (err) {
+          const activePage = selected.find((item) => Number(item.index) === Number(activeIndex)) || selected[0] || null;
+          const slots = activePage
+            ? [{
+              slotIndex: 1,
+              tabRealIndex: Number(activePage.index),
+              url: String(activePage.url || ''),
+            }]
+            : [];
+          if (runtimeState) {
+            runtimeState.tabPool = {
+              slots,
+              cursor: 0,
+              count: slots.length,
+              syncConfig,
+              apiTimeoutMs,
+              initializedAt: new Date().toISOString(),
+            };
+          }
+          return {
+            ok: true,
+            code: 'OPERATION_DEGRADED',
+            message: 'ensure_tab_pool degraded to active tab',
+            data: {
+              tabCount: slots.length,
+              normalized: false,
+              degraded: true,
+              reason: err?.message || 'page switch failed',
+              slots,
+              pages: activePage ? [activePage] : [],
+            },
+          };
         }
       }
       listed = await callApiWithTimeout('page:list', { profileId }, apiTimeoutMs);
@@ -391,13 +422,40 @@ export async function executeTabPoolOperation({ profileId, action, params = {}, 
     }));
 
     if (slots.length > 0) {
-      await callApiWithTimeout('page:switch', {
-        profileId,
-        index: Number(slots[0].tabRealIndex),
-      }, apiTimeoutMs);
-      const syncResult = await syncTabViewportIfNeeded({ profileId, syncConfig });
-      if (!syncResult?.ok) {
-        return asErrorPayload('OPERATION_FAILED', 'tab viewport sync failed', { slotIndex: 1, syncResult });
+      try {
+        await callApiWithTimeout('page:switch', {
+          profileId,
+          index: Number(slots[0].tabRealIndex),
+        }, apiTimeoutMs);
+        const syncResult = await syncTabViewportIfNeeded({ profileId, syncConfig });
+        if (!syncResult?.ok) {
+          throw new Error(syncResult?.message || 'tab viewport sync failed');
+        }
+      } catch (err) {
+        const activePage = slots[0];
+        if (runtimeState) {
+          runtimeState.tabPool = {
+            slots: activePage ? [activePage] : [],
+            cursor: 0,
+            count: activePage ? 1 : 0,
+            syncConfig,
+            apiTimeoutMs,
+            initializedAt: new Date().toISOString(),
+          };
+        }
+        return {
+          ok: true,
+          code: 'OPERATION_DEGRADED',
+          message: 'ensure_tab_pool degraded on final switch',
+          data: {
+            tabCount: activePage ? 1 : 0,
+            normalized: false,
+            degraded: true,
+            reason: err?.message || 'page switch failed',
+            slots: activePage ? [activePage] : [],
+            pages: activePage ? [activePage] : [],
+          },
+        };
       }
     }
 

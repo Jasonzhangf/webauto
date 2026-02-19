@@ -103,7 +103,7 @@ class GroupQueue {
 }
 
 const groupQueues = new Map<string, GroupQueue>();
-const runs = new Map<string, { child: ReturnType<typeof spawn>; title: string; startedAt: number }>();
+const runs = new Map<string, { child: ReturnType<typeof spawn>; title: string; startedAt: number; profiles?: string[] }>();
 
 const UI_HEARTBEAT_TIMEOUT_MS = resolveUiHeartbeatTimeoutMs(process.env);
 let lastUiHeartbeatAt = Date.now();
@@ -166,9 +166,30 @@ let win: BrowserWindow | null = null;
 
 configureElectronPaths();
 
+const singleInstanceLock = app.requestSingleInstanceLock();
+if (!singleInstanceLock) {
+  app.quit();
+}
+
 function getWin() {
   if (!win || win.isDestroyed()) return null;
   return win;
+}
+
+if (singleInstanceLock) {
+  app.on('second-instance', () => {
+    const w = getWin();
+    if (w) {
+      if (w.isMinimized()) w.restore();
+      w.focus();
+      return;
+    }
+    if (app.isReady()) {
+      createWindow();
+    } else {
+      app.whenReady().then(() => createWindow());
+    }
+  });
 }
 
 function isUiOperational() {
@@ -351,6 +372,35 @@ async function spawnCommand(spec: SpawnSpec) {
   const groupKey = spec.groupKey || 'xiaohongshu';
   const q = getQueue(groupKey);
   const cwd = resolveCwd(spec.cwd);
+  const args = Array.isArray(spec.args) ? spec.args : [];
+
+  const isXhsRunCommand = args.some((item) => /xhs-(orchestrate|unified)\.mjs$/i.test(String(item || '').replace(/\\/g, '/')));
+  const extractProfilesFromArgs = (argv: string[]) => {
+    const out: string[] = [];
+    for (let i = 0; i < argv.length; i += 1) {
+      const flag = String(argv[i] || '').trim();
+      if (flag === '--profile' || flag === '--profile-id') {
+        const value = String(argv[i + 1] || '').trim();
+        if (value) out.push(value);
+      } else if (flag === '--profiles') {
+        const value = String(argv[i + 1] || '').trim();
+        if (value) {
+          value.split(',').map((v) => v.trim()).filter(Boolean).forEach((v) => out.push(v));
+        }
+      }
+    }
+    return Array.from(new Set(out));
+  };
+  const requestedProfiles = isXhsRunCommand ? extractProfilesFromArgs(args) : [];
+  if (requestedProfiles.length > 0) {
+    for (const run of runs.values()) {
+      const activeProfiles = Array.isArray(run.profiles) ? run.profiles : [];
+      const conflict = requestedProfiles.find((p) => activeProfiles.includes(p));
+      if (conflict) {
+        throw new Error(`profile already running: ${conflict}`);
+      }
+    }
+  }
 
   q.enqueue(
     () =>
@@ -366,7 +416,7 @@ async function spawnCommand(spec: SpawnSpec) {
           resolve();
         };
 
-        const child = spawn(resolveNodeBin(), spec.args, {
+        const child = spawn(resolveNodeBin(), args, {
           cwd,
           env: {
             ...process.env,
@@ -378,7 +428,7 @@ async function spawnCommand(spec: SpawnSpec) {
           windowsHide: true,
         });
 
-        runs.set(runId, { child, title: spec.title, startedAt: now() });
+        runs.set(runId, { child, title: spec.title, startedAt: now(), profiles: requestedProfiles });
         sendEvent({ type: 'started', runId, title: spec.title, pid: child.pid ?? -1, ts: now() });
 
         const stdoutLines = createLineEmitter(runId, 'stdout');

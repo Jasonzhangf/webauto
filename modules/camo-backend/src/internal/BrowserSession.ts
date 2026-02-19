@@ -363,7 +363,20 @@ export class BrowserSession {
       await new Promise((r) => setTimeout(r, 250));
     }
 
-    const after = ctx.pages().filter((p) => !p.isClosed()).length;
+    let after = ctx.pages().filter((p) => !p.isClosed()).length;
+    if (!page || after <= before) {
+      try {
+        page = await ctx.newPage();
+        await page.waitForLoadState('domcontentloaded', { timeout: 8000 }).catch((): any => null);
+      } catch {
+        // ignore fallback errors
+      }
+      after = ctx.pages().filter((p) => !p.isClosed()).length;
+      if (!page && after > before) {
+        const pagesNow = ctx.pages().filter((p) => !p.isClosed());
+        page = pagesNow[pagesNow.length - 1] || null;
+      }
+    }
     if (!page || after <= before) {
       throw new Error('new_tab_failed');
     }

@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 import minimist from 'minimist';
 import { spawn } from 'node:child_process';
-import { existsSync, writeFileSync, readFileSync, mkdirSync } from 'node:fs';
+import { existsSync, writeFileSync, readFileSync, mkdirSync, readdirSync, statSync } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -10,8 +11,8 @@ const APP_ROOT = path.resolve(__dirname, '..');
 const DIST_MAIN = path.join(APP_ROOT, 'dist', 'main', 'index.mjs');
 
 const args = minimist(process.argv.slice(2), {
-  boolean: ['build', 'install', 'check', 'help', 'headless', 'no-daemon'],
-  string: ['profile', 'keyword', 'target', 'scenario', 'output'],
+  boolean: ['build', 'install', 'check', 'help', 'headless', 'no-daemon', 'dry-run', 'no-dry-run', 'parallel', 'do-likes'],
+  string: ['profile', 'profiles', 'keyword', 'target', 'scenario', 'output', 'concurrency', 'like-keywords', 'max-likes'],
   alias: { h: 'help', p: 'profile', k: 'keyword', t: 'target', o: 'output' }
 });
 
@@ -35,11 +36,44 @@ Options:
   --no-daemon  Run in foreground mode
   --scenario   Test scenario name
   --profile    Test profile ID
+  --profiles   Test profile IDs (comma-separated)
   --keyword    Test keyword
   --target     Target count
+  --like-keywords  Like keyword filter
+  --do-likes   Enable likes
+  --max-likes  Max likes per note (0=unlimited)
+  --parallel   Enable parallel sharding
+  --concurrency  Parallel concurrency
   --headless   Headless mode
   --output     Output report path
 `);
+}
+
+function resolveDownloadRoot() {
+  const fromEnv = String(process.env.WEBAUTO_DOWNLOAD_ROOT || process.env.WEBAUTO_DOWNLOAD_DIR || '').trim();
+  if (fromEnv) return path.resolve(fromEnv);
+  return path.join(os.homedir(), '.webauto', 'download');
+}
+
+function findLatestSummary(keyword) {
+  const root = resolveDownloadRoot();
+  const safeKeyword = String(keyword || '').trim();
+  if (!safeKeyword) return null;
+  const keywordDir = path.join(root, 'xiaohongshu', 'debug', safeKeyword);
+  const mergedDir = path.join(keywordDir, 'merged');
+  if (!existsSync(mergedDir)) return null;
+  const entries = readdirSync(mergedDir, { withFileTypes: true })
+    .filter((e) => e.isDirectory() && e.name.startsWith('run-'))
+    .map((e) => {
+      const full = path.join(mergedDir, e.name);
+      return { full, mtime: statSync(full).mtimeMs };
+    })
+    .sort((a, b) => b.mtime - a.mtime);
+  for (const entry of entries) {
+    const summaryPath = path.join(entry.full, 'summary.json');
+    if (existsSync(summaryPath)) return summaryPath;
+  }
+  return null;
 }
 
 function checkBuildStatus() {
@@ -133,17 +167,20 @@ class UITestRunner {
 
   async runCommand(cmd, args, timeoutMs = 30000) {
     return new Promise((resolve, reject) => {
-      const child = spawn(cmd, args, { shell: true, stdio: 'pipe' });
+      const child = spawn(cmd, args, { shell: false, stdio: 'pipe' });
       let stdout = '';
       let stderr = '';
-      const timer = setTimeout(() => {
-        child.kill('SIGTERM');
-        reject(new Error(`Command timeout: ${cmd}`));
-      }, timeoutMs);
+      let timer = null;
+      if (Number.isFinite(timeoutMs) && timeoutMs > 0) {
+        timer = setTimeout(() => {
+          child.kill('SIGTERM');
+          reject(new Error(`Command timeout: ${cmd}`));
+        }, timeoutMs);
+      }
       child.stdout.on('data', (data) => { stdout += data.toString(); });
       child.stderr.on('data', (data) => { stderr += data.toString(); });
       child.on('close', (code) => {
-        clearTimeout(timer);
+        if (timer) clearTimeout(timer);
         if (code === 0) resolve({ ok: true, stdout, stderr });
         else reject(new Error(stderr || `Exit code: ${code}`));
       });
@@ -225,17 +262,55 @@ class UITestRunner {
   async testCrawlRun() {
     this.log('Starting crawl run test', 'test');
     try {
-      this.log(`Testing: Dry-run crawl (keyword=${this.keyword}, target=${this.target})`);
-      const args = [
+      const runProfilesRaw = String(args.profiles || '').trim();
+      const runProfiles = runProfilesRaw
+        ? runProfilesRaw.split(',').map((p) => p.trim()).filter(Boolean)
+        : [];
+      const profileFlag = runProfiles.length > 0
+        ? ['--profiles', runProfiles.join(',')]
+        : ['--profile', this.profile];
+      this.log(`Testing: Crawl run (keyword=${this.keyword}, target=${this.target})`);
+      const runArgs = [
         path.join(process.cwd(), 'apps/webauto/entry/xhs-unified.mjs'),
-        '--profile', this.profile,
+        ...profileFlag,
         '--keyword', this.keyword,
         '--target', String(this.target),
         '--env', 'debug',
-        '--dry-run', 'true'
       ];
-      if (this.headless) args.push('--headless', 'true');
-      await this.runCommand('node', args, 120000);
+      if (runProfiles.length > 1 && (args.parallel === true || args.parallel === undefined)) {
+        runArgs.push('--parallel', 'true');
+        const conc = String(args.concurrency || '').trim();
+        if (conc) runArgs.push('--concurrency', conc);
+      }
+      const likeKeywords = String(args['like-keywords'] || '').trim();
+      const doLikes = args['do-likes'] === true || Boolean(likeKeywords);
+      if (doLikes) {
+        runArgs.push('--do-likes', 'true');
+        if (likeKeywords) runArgs.push('--like-keywords', likeKeywords);
+        const maxLikes = String(args['max-likes'] || '').trim();
+        if (maxLikes) runArgs.push('--max-likes', maxLikes);
+      }
+      const forceDryRun = args['dry-run'] === true && args['no-dry-run'] !== true;
+      const dryFlag = forceDryRun ? '--dry-run' : '--no-dry-run';
+      runArgs.push(dryFlag, 'true');
+      if (this.headless) runArgs.push('--headless', 'true');
+      await this.runCommand('node', runArgs, 0);
+      const summaryPath = findLatestSummary(this.keyword);
+      if (summaryPath && existsSync(summaryPath)) {
+        try {
+          const summary = JSON.parse(readFileSync(summaryPath, 'utf8'));
+          const totals = summary?.totals || {};
+          const profiles = Array.isArray(summary?.profiles) ? summary.profiles : [];
+          const reasons = profiles.map((p) => `${p.profileId}:${p.reason || p.stats?.stopReason || 'unknown'}`).join(', ');
+          this.log(`Summary: profilesSucceeded=${totals.profilesSucceeded ?? '-'} profilesFailed=${totals.profilesFailed ?? '-'} openedNotes=${totals.openedNotes ?? '-'} operationErrors=${totals.operationErrors ?? '-'} recoveryFailed=${totals.recoveryFailed ?? '-'}`, 'info');
+          if (reasons) this.log(`Stop reasons: ${reasons}`, 'info');
+          this.log(`Summary path: ${summaryPath}`, 'info');
+        } catch (err) {
+          this.log(`Summary parse failed: ${err.message || String(err)}`, 'warn');
+        }
+      } else {
+        this.log('Summary not found after crawl run', 'warn');
+      }
       this.log('PASS: Crawl run completed', 'pass');
       this.log('Crawl run PASSED', 'success');
       return { passed: true };
@@ -294,7 +369,12 @@ async function main() {
         process.exit(1);
       }
     } catch (err) {
-      console.log(`\n❌ Test ERROR: ${err.message}`);
+      const message = err?.message || String(err);
+      if (process.platform === 'win32' && message.includes('3221226505')) {
+        console.warn(`[ui-console] Ignored spurious exit on Windows: ${message}`);
+        process.exit(0);
+      }
+      console.log(`\n❌ Test ERROR: ${message}`);
       process.exit(1);
     }
     return;

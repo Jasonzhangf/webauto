@@ -248,10 +248,14 @@ export function renderDashboard(root: HTMLElement, ctx: any) {
   function updateFromTaskState(state: any) {
     if (!state) return;
 
-    const collected = state.collected || state.progress || 0;
-    const target = state.target || 50;
-    const success = state.success || collected;
-    const failed = state.failed || state.errors || 0;
+    const progressObj = state.progress && typeof state.progress === 'object' ? state.progress : null;
+    const processedRaw = progressObj?.processed ?? progressObj?.current ?? state.progress ?? state.collected ?? state.current ?? 0;
+    const totalRaw = progressObj?.total ?? state.total ?? state.target ?? state.maxNotes ?? 0;
+    const failedRaw = progressObj?.failed ?? state.failed ?? state.errors ?? 0;
+    const collected = Number(processedRaw) || 0;
+    const target = Number(totalRaw) || 0;
+    const success = Number(state.success ?? collected) || 0;
+    const failed = Number(failedRaw) || 0;
     const remaining = Math.max(0, target - collected);
 
     statCollected.textContent = String(collected);
@@ -259,21 +263,31 @@ export function renderDashboard(root: HTMLElement, ctx: any) {
     statFailed.textContent = String(failed);
     statRemaining.textContent = String(remaining);
 
-    const percent = target > 0 ? Math.round((collected / target) * 100) : 0;
+    let percent = 0;
+    if (target > 0) {
+      percent = Math.round((collected / target) * 100);
+    } else if (progressObj && Number.isFinite(Number(progressObj.percent))) {
+      const pct = Number(progressObj.percent);
+      percent = pct <= 1 ? Math.round(pct * 100) : Math.round(pct);
+    }
     progressPercent.textContent = `${percent}%`;
     progressBar.style.width = `${percent}%`;
 
     if (state.phase) {
       currentPhase.textContent = state.phase;
     }
-    if (state.action) {
-      currentAction.textContent = state.action;
+    const action = String(state.action || state.message || state.step || '').trim();
+    if (action) {
+      currentAction.textContent = action;
     }
-    if (state.comments) {
-      statComments.textContent = `${state.comments}条`;
+    const stats = state.stats && typeof state.stats === 'object' ? state.stats : null;
+    const comments = Number(stats?.commentsCollected ?? state.comments);
+    if (Number.isFinite(comments)) {
+      statComments.textContent = `${Math.max(0, Math.floor(comments))}条`;
     }
-    if (state.likes) {
-      statLikes.textContent = `${state.likes}次`;
+    const likes = Number(stats?.likesPerformed ?? state.likes);
+    if (Number.isFinite(likes)) {
+      statLikes.textContent = `${Math.max(0, Math.floor(likes))}次`;
     }
     if (state.ratelimits) {
       statRatelimit.textContent = `${state.ratelimits}次`;
@@ -293,6 +307,31 @@ export function renderDashboard(root: HTMLElement, ctx: any) {
     if (state.runId) {
       activeRunId = String(state.runId);
       renderRunSummary();
+    }
+    if (state.startedAt) {
+      const ts = Number(state.startedAt) || Date.parse(String(state.startedAt));
+      if (Number.isFinite(ts) && ts > 0) {
+        startTime = ts;
+        if (!stoppedAt) {
+          updateElapsed();
+          startElapsedTimer();
+        }
+      }
+    }
+    const status = String(state.status || '').trim().toLowerCase();
+    if (status === 'completed' || status === 'done' || status === 'success' || status === 'succeeded') {
+      if (!stoppedAt) {
+        stoppedAt = Date.now();
+        updateElapsed();
+        stopElapsedTimer();
+      }
+    }
+    if (status === 'failed' || status === 'error') {
+      if (!stoppedAt) {
+        stoppedAt = Date.now();
+        updateElapsed();
+        stopElapsedTimer();
+      }
     }
     if (state.error) {
       pushRecentError(String(state.error), 'state');

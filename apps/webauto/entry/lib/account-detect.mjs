@@ -1,5 +1,5 @@
 import { callAPI } from '../../../../modules/camo-runtime/src/utils/browser-service.mjs';
-import { markProfileInvalid, markProfilePending, upsertProfileAccountState } from './account-store.mjs';
+import { listAccountProfiles, markProfileInvalid, markProfilePending, upsertProfileAccountState } from './account-store.mjs';
 
 function normalizeText(value) {
   const text = String(value ?? '').trim();
@@ -191,6 +191,15 @@ export async function syncXhsAccountByProfile(profileId, options = {}) {
       detectedAt: new Date().toISOString(),
     });
   } catch (error) {
+    const msg = String(error?.message || error || '');
+    if (msg.toLowerCase().includes('operation is insecure')) {
+      try {
+        const existing = listAccountProfiles().profiles.find((item) => String(item?.profileId || '').trim() === normalizedProfileId);
+        if (existing && existing.valid) return existing;
+      } catch {
+        // ignore fallback lookup
+      }
+    }
     if (pendingWhileLogin) {
       return markProfilePending(normalizedProfileId, `waiting_login_sync:${error?.message || String(error)}`);
     }

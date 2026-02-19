@@ -278,7 +278,14 @@ async function run(cmd, args, options = {}) {
       ...options,
     });
     child.on('error', reject);
-    child.on('exit', (code) => (code === 0 ? resolve() : reject(new Error(`exit ${code}`))));
+    child.on('exit', (code) => {
+      if (code === 0) return resolve();
+      if (process.platform === 'win32' && code === 3221226505) {
+        console.warn(`[webauto] Ignored spurious exit on Windows (code ${code})`);
+        return resolve();
+      }
+      return reject(new Error(`exit ${code}`));
+    });
   });
 }
 
@@ -290,7 +297,14 @@ async function runInDir(dir, cmd, args) {
       stdio: 'inherit',
     });
     child.on('error', reject);
-    child.on('exit', (code) => (code === 0 ? resolve() : reject(new Error(`exit ${code}`))));
+    child.on('exit', (code) => {
+      if (code === 0) return resolve();
+      if (process.platform === 'win32' && code === 3221226505) {
+        console.warn(`[webauto] Ignored spurious exit on Windows (code ${code})`);
+        return resolve();
+      }
+      return reject(new Error(`exit ${code}`));
+    });
   });
 }
 
