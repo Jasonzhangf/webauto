@@ -16,6 +16,10 @@ class StateBridge {
   private win: BrowserWindow | null = null;
   private tasks: Map<string, TaskState> = new Map();
   private handlersRegistered = false;
+  private emitBusEvent(payload: any) {
+    if (!this.win) return;
+    this.win.webContents.send('bus:event', payload);
+  }
 
   start(win: BrowserWindow) {
     this.win = win;
@@ -33,12 +37,27 @@ class StateBridge {
       this.ws.on('open', () => {
         console.log('[StateBridge] connected to', UNIFIED_API_WS);
         this.ws?.send(JSON.stringify({ type: 'subscribe', topic: 'task:*' }));
+        this.emitBusEvent({ type: 'env:unified', ok: true, ts: Date.now() });
       });
       this.ws.on('message', (data) => {
         try {
           const msg = JSON.parse(data.toString());
           if (msg.type === 'task:update' && msg.data) {
             this.handleTaskUpdate(msg.data);
+            return;
+          }
+          if (msg.type === 'event' && msg.topic === 'bus.message') {
+            const raw = msg?.payload?.data;
+            if (typeof raw === 'string' && raw.trim()) {
+              try {
+                const parsed = JSON.parse(raw);
+                if (parsed && typeof parsed === 'object') {
+                  this.emitBusEvent(parsed);
+                }
+              } catch {
+                // ignore parse errors
+              }
+            }
           }
         } catch (err) {
           console.warn('[StateBridge] parse error:', err);
@@ -46,6 +65,7 @@ class StateBridge {
       });
       this.ws.on('close', () => {
         console.log('[StateBridge] disconnected, reconnecting...');
+        this.emitBusEvent({ type: 'env:unified', ok: false, ts: Date.now() });
         this.scheduleReconnect();
       });
       this.ws.on('error', (err) => {

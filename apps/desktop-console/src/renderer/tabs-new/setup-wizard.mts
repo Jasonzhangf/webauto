@@ -122,10 +122,9 @@ export function renderSetupWizard(root: HTMLElement, ctx: any) {
   let accounts: UiAccountProfile[] = [];
   let repairHistory: Array<{ ts: string; action: string; ok: boolean; detail?: string }> =
     Array.isArray(ctx.api?.settings?.envRepairHistory) ? [...ctx.api.settings.envRepairHistory] : [];
-  let envPollTimer: ReturnType<typeof setInterval> | null = null;
-  let accountPollTimer: ReturnType<typeof setInterval> | null = null;
   let envCheckInFlight = false;
   let accountCheckInFlight = false;
+  let busUnsubscribe: (() => void) | null = null;
 
   type EnvSnapshot = {
     camo: any;
@@ -620,14 +619,23 @@ export function renderSetupWizard(root: HTMLElement, ctx: any) {
   // Initial check
   void tickEnvironment();
   void tickAccounts();
-  envPollTimer = setInterval(() => void tickEnvironment(), 10_000);
-  accountPollTimer = setInterval(() => void tickAccounts(), 15_000);
+  if (typeof ctx.api?.onBusEvent === 'function') {
+    busUnsubscribe = ctx.api.onBusEvent((evt: any) => {
+      const type = String(evt?.type || evt?.event || '').trim().toLowerCase();
+      if (!type) return;
+      if (type.startsWith('account:')) {
+        void tickAccounts();
+      }
+      if (type.startsWith('env:')) {
+        void tickEnvironment();
+      }
+    });
+  }
   renderRepairHistory();
 
   return () => {
     for (const timer of autoSyncTimers.values()) clearInterval(timer);
     autoSyncTimers.clear();
-    if (envPollTimer) clearInterval(envPollTimer);
-    if (accountPollTimer) clearInterval(accountPollTimer);
+    if (typeof busUnsubscribe === 'function') busUnsubscribe();
   };
 }

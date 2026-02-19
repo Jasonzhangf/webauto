@@ -73,10 +73,9 @@ export function renderAccountManager(root: HTMLElement, ctx: any) {
     lastCheck?: string;
   };
   let accounts: Account[] = [];
-  let envPollTimer: ReturnType<typeof setInterval> | null = null;
-  let accountPollTimer: ReturnType<typeof setInterval> | null = null;
   let envCheckInFlight = false;
   let accountCheckInFlight = false;
+  let busUnsubscribe: (() => void) | null = null;
 
   // Check environment
   async function checkEnvironment() {
@@ -442,13 +441,22 @@ export function renderAccountManager(root: HTMLElement, ctx: any) {
   // Initial load
   void tickEnvironment();
   void tickAccounts();
-  envPollTimer = setInterval(() => void tickEnvironment(), 10_000);
-  accountPollTimer = setInterval(() => void tickAccounts(), 15_000);
+  if (typeof ctx.api?.onBusEvent === 'function') {
+    busUnsubscribe = ctx.api.onBusEvent((evt: any) => {
+      const type = String(evt?.type || evt?.event || '').trim().toLowerCase();
+      if (!type) return;
+      if (type.startsWith('account:')) {
+        void tickAccounts();
+      }
+      if (type.startsWith('env:')) {
+        void tickEnvironment();
+      }
+    });
+  }
 
   return () => {
     for (const timer of autoSyncTimers.values()) clearInterval(timer);
     autoSyncTimers.clear();
-    if (envPollTimer) clearInterval(envPollTimer);
-    if (accountPollTimer) clearInterval(accountPollTimer);
+    if (typeof busUnsubscribe === 'function') busUnsubscribe();
   };
 }

@@ -12,6 +12,7 @@ import {
 } from './lib/account-store.mjs';
 import { ensureProfile } from './lib/profilepool.mjs';
 import { syncXhsAccountByProfile, syncXhsAccountsByProfiles } from './lib/account-detect.mjs';
+import { publishBusEvent } from './lib/bus-publish.mjs';
 import { runCamo } from './lib/camo-cli.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
@@ -43,6 +44,18 @@ function inferLoginUrl(platform) {
 function normalizeAlias(input) {
   const value = String(input ?? '').trim();
   return value || null;
+}
+
+async function publishAccountEvent(type, payload) {
+  try {
+    await publishBusEvent({
+      type,
+      payload: payload || null,
+      ts: new Date().toISOString(),
+    });
+  } catch {
+    // ignore bus errors
+  }
 }
 
 async function detectAliasFromActivePage(profileId, selector) {
@@ -152,6 +165,13 @@ async function cmdAdd(argv, jsonMode) {
     status: argv.status,
   });
   output({ ok: true, ...result }, jsonMode);
+  await publishAccountEvent('account:add', {
+    profileId: result?.account?.profileId || null,
+    accountId: result?.account?.accountId || null,
+    alias: result?.account?.alias || null,
+    status: result?.account?.status || null,
+    valid: result?.account?.valid === true,
+  });
 }
 
 async function cmdGet(idOrAlias, jsonMode) {
@@ -183,6 +203,13 @@ async function cmdUpdate(idOrAlias, argv, jsonMode) {
   }
   const account = await updateAccount(idOrAlias, patch);
   output({ ok: true, account }, jsonMode);
+  await publishAccountEvent('account:update', {
+    profileId: account?.profileId || null,
+    accountId: account?.accountId || null,
+    alias: account?.alias || null,
+    status: account?.status || null,
+    valid: account?.valid === true,
+  });
 }
 
 async function cmdDelete(idOrAlias, argv, jsonMode) {
@@ -191,6 +218,11 @@ async function cmdDelete(idOrAlias, argv, jsonMode) {
     deleteFingerprint: argv['delete-fingerprint'] === true,
   });
   output({ ok: true, ...result }, jsonMode);
+  await publishAccountEvent('account:delete', {
+    profileId: result?.removed?.profileId || null,
+    accountId: result?.removed?.accountId || null,
+    alias: result?.removed?.alias || null,
+  });
 }
 
 async function cmdLogin(idOrAlias, argv, jsonMode) {
@@ -269,6 +301,13 @@ async function cmdLogin(idOrAlias, argv, jsonMode) {
     aliasSync,
     accountSync,
   }, jsonMode);
+  await publishAccountEvent('account:login', {
+    profileId: account?.profileId || null,
+    accountId: account?.accountId || null,
+    alias: account?.alias || null,
+    status: accountSync?.status || null,
+    valid: accountSync?.valid === true,
+  });
 }
 
 async function cmdSyncAlias(idOrAlias, argv, jsonMode) {
@@ -290,6 +329,12 @@ async function cmdSyncAlias(idOrAlias, argv, jsonMode) {
     source,
     candidates,
   }, jsonMode);
+  await publishAccountEvent('account:alias', {
+    profileId: updated?.profileId || null,
+    accountId: updated?.accountId || null,
+    alias: updated?.alias || null,
+    source,
+  });
 }
 
 async function cmdSync(target, argv, jsonMode) {
@@ -300,10 +345,17 @@ async function cmdSync(target, argv, jsonMode) {
     const profileIds = rows.map((item) => item.profileId);
     const synced = await syncXhsAccountsByProfiles(profileIds, { pendingWhileLogin });
     output({ ok: true, count: synced.length, profiles: synced }, jsonMode);
+    await publishAccountEvent('account:sync', {
+      count: synced.length,
+      profiles: synced,
+    });
     return;
   }
   const synced = await syncXhsAccountByProfile(target, { pendingWhileLogin });
   output({ ok: true, profile: synced }, jsonMode);
+  await publishAccountEvent('account:sync', {
+    profile: synced,
+  });
 }
 
 async function main() {

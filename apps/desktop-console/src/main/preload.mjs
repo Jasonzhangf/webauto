@@ -54,6 +54,11 @@ contextBridge.exposeInMainWorld('api', {
     ipcRenderer.on('cmd:event', fn);
     return () => ipcRenderer.removeListener('cmd:event', fn);
   },
+  onBusEvent: (handler) => {
+    const fn = (_, payload) => handler(payload);
+    ipcRenderer.on('bus:event', fn);
+    return () => ipcRenderer.removeListener('bus:event', fn);
+  },
   stateGetTasks: () => ipcRenderer.invoke('state:getTasks'),
   stateGetTask: (runId) => ipcRenderer.invoke('state:getTask', runId),
   stateGetEvents: (runId, since) => ipcRenderer.invoke('state:getEvents', runId, since),
