@@ -202,7 +202,7 @@ function buildTemplateOptions(argv, profileId, overrides = {}) {
   const likeKeywords = String(argv['like-keywords'] || '').trim();
   const replyText = String(argv['reply-text'] || '感谢分享，已关注').trim() || '感谢分享，已关注';
   const outputRoot = String(argv['output-root'] || '').trim();
-  const resume = parseBool(argv.resume, true);
+  const resume = parseBool(argv.resume, false);
   const incrementalMax = parseBool(argv['incremental-max'], true);
   const sharedHarvestPath = String(overrides.sharedHarvestPath ?? argv['shared-harvest-path'] ?? '').trim();
   const searchSerialKey = String(overrides.searchSerialKey ?? argv['search-serial-key'] ?? '').trim();
@@ -1003,7 +1003,7 @@ async function main() {
       '  --max-waves <n>              动态分片最大波次（默认40）',
       '  --parallel                   启用并行执行',
       '  --concurrency <n>            并行度（默认=账号数）',
-      '  --resume <bool>              断点续传（默认 true）',
+      '  --resume <bool>              断点续传（默认 false）',
       '  --incremental-max <bool>     max-notes 作为增量配额（默认 true）',
       '  --plan-only                  只生成分片计划，不执行',
       '  --output-root <path>         输出根目录（并行时自动分 profile shard）',

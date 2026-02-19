@@ -413,6 +413,11 @@ export function renderDashboard(root: HTMLElement, ctx: any) {
       }
       renderRunSummary();
     }
+    if (event === 'autoscript:operation_terminal') {
+      const code = String(payload.code || '').trim();
+      currentAction.textContent = code ? `terminal:${code}` : 'terminal';
+      renderRunSummary();
+    }
   }
 
   function parseLineEvent(line: string) {
@@ -470,9 +475,16 @@ export function renderDashboard(root: HTMLElement, ctx: any) {
           const failed = Number(statFailed.textContent || '0') || 0;
           statFailed.textContent = String(failed + 1);
         } else if (evt.type === 'exit') {
-          currentPhase.textContent = Number(evt.exitCode || 0) === 0 ? '已结束' : '失败';
-          currentAction.textContent = `exit(${evt.exitCode ?? 'null'})`;
+          if (!stoppedAt) {
+            currentPhase.textContent = Number(evt.exitCode || 0) === 0 ? '已结束' : '失败';
+            currentAction.textContent = `exit(${evt.exitCode ?? 'null'})`;
+          }
           addLog(`进程退出: code=${evt.exitCode}`, evt.exitCode === 0 ? 'success' : 'error');
+          if (!stoppedAt) {
+            stoppedAt = Date.now();
+            updateElapsed();
+            stopElapsedTimer();
+          }
           if (Number(evt.exitCode || 0) !== 0) {
             pushRecentError(`进程退出 code=${evt.exitCode ?? 'null'}`, 'exit');
           }

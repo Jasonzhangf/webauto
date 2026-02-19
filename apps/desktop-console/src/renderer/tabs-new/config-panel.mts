@@ -344,6 +344,7 @@ export function renderConfigPanel(root: HTMLElement, ctx: any) {
       '--profile', profileId,
       '--keyword', config.keyword,
       '--max-notes', String(config.target),
+      '--resume', 'false',
       '--env', config.env,
       '--do-comments', config.fetchComments ? 'true' : 'false',
       '--persist-comments', config.fetchComments ? 'true' : 'false',
