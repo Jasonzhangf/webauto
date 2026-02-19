@@ -175,10 +175,15 @@ export function renderDashboard(root: HTMLElement, ctx: any) {
   let unsubscribeState: (() => void) | null = null;
   let unsubscribeCmd: (() => void) | null = null;
   let activeRunId = String(ctx?.xhsCurrentRun?.runId || '').trim();
+  let activeStatus = '';
   let errorCountTotal = 0;
   const recentErrors: Array<{ ts: string; source: string; message: string }> = [];
   const maxLogs = 500;
   const maxRecentErrors = 8;
+
+  const normalizeStatus = (value: any) => String(value || '').trim().toLowerCase();
+  const isRunningStatus = (value: any) => ['running', 'queued', 'pending', 'starting'].includes(normalizeStatus(value));
+  const isTerminalStatus = (value: any) => ['completed', 'done', 'success', 'succeeded', 'failed', 'error', 'stopped', 'canceled'].includes(normalizeStatus(value));
 
   function renderRunSummary() {
     runIdText.textContent = activeRunId || '-';
@@ -326,7 +331,10 @@ export function renderDashboard(root: HTMLElement, ctx: any) {
         }
       }
     }
-    const status = String(state.status || '').trim().toLowerCase();
+    const status = normalizeStatus(state.status);
+    if (status) {
+      activeStatus = status;
+    }
     if (status === 'completed' || status === 'done' || status === 'success' || status === 'succeeded') {
       if (!stoppedAt) {
         stoppedAt = Date.now();
@@ -348,12 +356,23 @@ export function renderDashboard(root: HTMLElement, ctx: any) {
 
   function pickTaskFromList(tasks: any[]) {
     const target = activeRunId;
+    const running = tasks.find((item) => isRunningStatus(item?.status));
+    const sorted = [...tasks].sort((a, b) => {
+      const aTs = Number(a?.updatedAt ?? a?.completedAt ?? a?.startedAt ?? 0) || 0;
+      const bTs = Number(b?.updatedAt ?? b?.completedAt ?? b?.startedAt ?? 0) || 0;
+      return bTs - aTs;
+    });
+    const latest = sorted[0] || null;
     if (target) {
       const matched = tasks.find((item) => String(item?.runId || '').trim() === target);
-      if (matched) return matched;
+      if (matched) {
+        if (isRunningStatus(matched?.status)) return matched;
+        if (running) return running;
+        if (latest && String(latest?.runId || '').trim() !== target) return latest;
+        return matched;
+      }
     }
-    const running = tasks.find((item) => ['running', 'queued', 'pending', 'starting'].includes(String(item?.status || '').toLowerCase()));
-    return running || tasks[0] || null;
+    return running || latest || null;
   }
 
   function updateFromEventPayload(payload: any) {
@@ -362,6 +381,7 @@ export function renderDashboard(root: HTMLElement, ctx: any) {
     if (event === 'xhs.unified.start') {
       currentPhase.textContent = '运行中';
       currentAction.textContent = '启动 autoscript';
+      activeStatus = 'running';
       statCollected.textContent = '0';
       statSuccess.textContent = '0';
       statFailed.textContent = '0';
@@ -447,6 +467,7 @@ export function renderDashboard(root: HTMLElement, ctx: any) {
       const reason = String(payload.reason || '').trim();
       const stoppedTs = Date.parse(String(payload.stoppedAt || payload.ts || '')) || Date.now();
       stoppedAt = stoppedTs;
+      activeStatus = reason ? normalizeStatus(reason) || 'stopped' : 'stopped';
       updateElapsed();
       stopElapsedTimer();
       const successReasons = new Set(['completed', 'script_complete']);
@@ -475,13 +496,127 @@ export function renderDashboard(root: HTMLElement, ctx: any) {
     }
   }
 
+  function applySummary(summary: any) {
+    if (!summary || typeof summary !== 'object') return;
+    const totals = summary?.totals && typeof summary.totals === 'object' ? summary.totals : {};
+    const profiles = Array.isArray(summary?.profiles) ? summary.profiles : [];
+    const profile = profiles[0] || null;
+    const stats = profile?.stats && typeof profile.stats === 'object' ? profile.stats : totals;
+
+    const assigned = Number(stats?.assignedNotes ?? totals?.assignedNotes ?? summary?.target ?? 0) || 0;
+    const opened = Number(stats?.openedNotes ?? totals?.openedNotes ?? totals?.assignedNotes ?? 0) || 0;
+    const failed = Number(totals?.operationErrors ?? 0) || 0;
+    const remaining = Math.max(0, assigned - opened);
+
+    statCollected.textContent = String(opened);
+    statSuccess.textContent = String(opened);
+    statFailed.textContent = String(failed);
+    statRemaining.textContent = String(remaining);
+
+    let percent = 0;
+    if (assigned > 0) {
+      percent = Math.round((opened / assigned) * 100);
+    }
+    progressPercent.textContent = `${percent}%`;
+    progressBar.style.width = `${percent}%`;
+
+    const comments = Number(stats?.commentsCollected ?? totals?.commentsCollected ?? 0);
+    if (Number.isFinite(comments)) {
+      commentsCount = Math.max(0, Math.floor(comments));
+      statComments.textContent = `${commentsCount}条`;
+    }
+
+    const likesNew = Number(stats?.likesNewCount ?? totals?.likesNewCount ?? 0);
+    const likesSkipped = Number(stats?.likesSkippedCount ?? totals?.likesSkippedCount ?? 0);
+    const likesAlready = Number(stats?.likesAlreadyCount ?? totals?.likesAlreadyCount ?? 0);
+    const likesDedup = Number(stats?.likesDedupCount ?? totals?.likesDedupCount ?? 0);
+    likesCount = Math.max(0, Math.floor(likesNew || 0));
+    likesSkippedCount = Math.max(0, Math.floor(likesSkipped || 0));
+    likesAlreadyCount = Math.max(0, Math.floor(likesAlready || 0));
+    likesDedupCount = Math.max(0, Math.floor(likesDedup || 0));
+    statLikes.textContent = `${likesCount}次(跳过:${likesSkippedCount}, 已赞:${likesAlreadyCount}, 去重:${likesDedupCount})`;
+
+    if (summary.keyword) taskKeyword.textContent = String(summary.keyword);
+    if (assigned) taskTarget.textContent = String(assigned);
+    if (profile?.profileId) {
+      const aliases = ctx.api?.settings?.profileAliases || {};
+      taskAccount.textContent = aliases[profile.profileId] || profile.profileId;
+    }
+
+    const runId = String(profile?.runId || summary?.runId || '').trim();
+    if (runId) {
+      activeRunId = runId;
+      renderRunSummary();
+    }
+
+    const reason = String(profile?.reason || summary?.status || '').trim();
+    if (reason) {
+      const okReasons = new Set(['script_complete', 'completed', 'success', 'succeeded']);
+      currentPhase.textContent = okReasons.has(reason) ? '已结束' : '失败';
+      currentAction.textContent = reason;
+      activeStatus = normalizeStatus(reason) || activeStatus;
+    }
+
+    const summaryTs = Date.parse(String(summary?.generatedAt || '')) || Date.now();
+    stoppedAt = summaryTs;
+    updateElapsed();
+    stopElapsedTimer();
+
+    const errorTotal = Number(totals?.operationErrors ?? 0) + Number(totals?.recoveryFailed ?? 0);
+    if (Number.isFinite(errorTotal)) {
+      errorCountTotal = Math.max(0, Math.floor(errorTotal));
+      renderRunSummary();
+    }
+  }
+
+  async function loadLatestSummary() {
+    if (typeof ctx.api?.resultsScan !== 'function') return null;
+    if (typeof ctx.api?.fsListDir !== 'function') return null;
+    if (typeof ctx.api?.fsReadTextPreview !== 'function') return null;
+
+    const res = await ctx.api.resultsScan({ downloadRoot: ctx.settings?.downloadRoot });
+    if (!res?.ok || !Array.isArray(res?.entries) || res.entries.length === 0) return null;
+
+    const keyword = String(taskKeyword.textContent || '').trim();
+    const matched = keyword ? res.entries.find((e: any) => e?.keyword === keyword) : null;
+    const entry = matched || res.entries[0];
+    if (!entry?.path) return null;
+
+    const mergedRoot = ctx.api.pathJoin(entry.path, 'merged');
+    const list = await ctx.api.fsListDir({ root: mergedRoot, recursive: true, maxEntries: 3000 });
+    if (!list?.ok || !Array.isArray(list?.entries)) return null;
+    const summaries = list.entries.filter((e: any) => !e?.isDir && e?.name === 'summary.json');
+    if (summaries.length === 0) return null;
+    summaries.sort((a: any, b: any) => (b?.mtimeMs || 0) - (a?.mtimeMs || 0));
+    const summaryPath = summaries[0].path;
+    if (!summaryPath) return null;
+
+    const textRes = await ctx.api.fsReadTextPreview({ path: summaryPath, maxBytes: 1_000_000, maxLines: 20_000 });
+    if (!textRes?.ok || !textRes?.text) return null;
+    try {
+      return JSON.parse(textRes.text);
+    } catch {
+      return null;
+    }
+  }
+
   // Subscribe to state updates
   function subscribeToUpdates() {
     if (typeof ctx.api?.onStateUpdate === 'function') {
       unsubscribeState = ctx.api.onStateUpdate((update: any) => {
         if (paused) return;
         const runId = String(update?.runId || '').trim();
-        if (activeRunId && runId && runId !== activeRunId) return;
+        const status = normalizeStatus(update?.data?.status);
+        if (activeRunId && runId && runId !== activeRunId) {
+          if (isTerminalStatus(activeStatus) && (isRunningStatus(status) || status)) {
+            activeRunId = runId;
+            activeStatus = status || 'running';
+            stoppedAt = null;
+            renderRunSummary();
+          } else {
+            return;
+          }
+        }
         if (!activeRunId && runId) {
           activeRunId = runId;
           renderRunSummary();
@@ -513,8 +648,10 @@ export function renderDashboard(root: HTMLElement, ctx: any) {
       unsubscribeCmd = ctx.api.onCmdEvent((evt: any) => {
         if (paused) return;
         const runId = String(evt?.runId || '').trim();
-        if (!activeRunId && evt?.type === 'started' && String(evt?.title || '').includes('xhs unified')) {
+        if ((isTerminalStatus(activeStatus) || !activeRunId) && evt?.type === 'started' && String(evt?.title || '').includes('xhs unified')) {
           activeRunId = runId;
+          activeStatus = 'running';
+          stoppedAt = null;
           renderRunSummary();
         }
         if (activeRunId && runId && runId !== activeRunId) return;
@@ -579,6 +716,9 @@ export function renderDashboard(root: HTMLElement, ctx: any) {
           }
           updateFromTaskState(picked);
         }
+      } else {
+        const summary = await loadLatestSummary();
+        if (summary) applySummary(summary);
       }
     } catch (err) {
       console.error('Failed to fetch state:', err);
