@@ -122,7 +122,7 @@ Usage:
   webauto account delete <id|alias> [--delete-profile] [--delete-fingerprint] [--json]
   webauto account login <id|alias> [--url <url>] [--idle-timeout <duration>] [--sync-alias] [--json]
   webauto account sync-alias <id|alias> [--selector <css>] [--alias <value>] [--json]
-  webauto account sync <profileId|all> [--pending-while-login] [--json]
+  webauto account sync <profileId|all> [--pending-while-login] [--resolve-alias] [--json]
 
 Notes:
   - 账号数据默认保存到 ~/.webauto/accounts（可用 WEBAUTO_PATHS_ACCOUNTS 覆盖）
@@ -339,11 +339,12 @@ async function cmdSyncAlias(idOrAlias, argv, jsonMode) {
 
 async function cmdSync(target, argv, jsonMode) {
   const pendingWhileLogin = parseBoolean(argv['pending-while-login'], false);
+  const resolveAlias = parseBoolean(argv['resolve-alias'], false);
   const value = String(target || '').trim().toLowerCase();
   if (!value || value === 'all') {
     const rows = listAccountProfiles().profiles;
     const profileIds = rows.map((item) => item.profileId);
-    const synced = await syncXhsAccountsByProfiles(profileIds, { pendingWhileLogin });
+    const synced = await syncXhsAccountsByProfiles(profileIds, { pendingWhileLogin, resolveAlias });
     output({ ok: true, count: synced.length, profiles: synced }, jsonMode);
     await publishAccountEvent('account:sync', {
       count: synced.length,
@@ -351,7 +352,7 @@ async function cmdSync(target, argv, jsonMode) {
     });
     return;
   }
-  const synced = await syncXhsAccountByProfile(target, { pendingWhileLogin });
+  const synced = await syncXhsAccountByProfile(target, { pendingWhileLogin, resolveAlias });
   output({ ok: true, profile: synced }, jsonMode);
   await publishAccountEvent('account:sync', {
     profile: synced,
@@ -360,7 +361,7 @@ async function cmdSync(target, argv, jsonMode) {
 
 async function main() {
   const argv = minimist(process.argv.slice(2), {
-    boolean: ['help', 'json', 'clear-alias', 'delete-profile', 'delete-fingerprint', 'sync-alias', 'records'],
+    boolean: ['help', 'json', 'clear-alias', 'delete-profile', 'delete-fingerprint', 'sync-alias', 'resolve-alias', 'records'],
     alias: { h: 'help' },
   });
   const cmd = String(argv._[0] || '').trim();

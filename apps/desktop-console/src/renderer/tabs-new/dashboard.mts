@@ -163,6 +163,12 @@ export function renderDashboard(root: HTMLElement, ctx: any) {
   // State
   let logsExpanded = false;
   let paused = false;
+  let unsubscribeBus: (() => void) | null = null;
+  let commentsCount = 0;
+  let likesCount = 0;
+  let likesSkippedCount = 0;
+  let likesAlreadyCount = 0;
+  let likesDedupCount = 0;
   let startTime = Date.now();
   let stoppedAt: number | null = null;
   let elapsedTimer: ReturnType<typeof setInterval> | null = null;
@@ -283,11 +289,13 @@ export function renderDashboard(root: HTMLElement, ctx: any) {
     const stats = state.stats && typeof state.stats === 'object' ? state.stats : null;
     const comments = Number(stats?.commentsCollected ?? state.comments);
     if (Number.isFinite(comments)) {
-      statComments.textContent = `${Math.max(0, Math.floor(comments))}条`;
+      commentsCount = Math.max(0, Math.floor(comments));
+      statComments.textContent = `${commentsCount}条`;
     }
     const likes = Number(stats?.likesPerformed ?? state.likes);
     if (Number.isFinite(likes)) {
-      statLikes.textContent = `${Math.max(0, Math.floor(likes))}次`;
+      likesCount = Math.max(0, Math.floor(likes));
+      statLikes.textContent = `${likesCount}次 (跳过:${likesSkippedCount}, 已赞:${likesAlreadyCount}, 去重:${likesDedupCount})`;
     }
     if (state.ratelimits) {
       statRatelimit.textContent = `${state.ratelimits}次`;
@@ -354,6 +362,19 @@ export function renderDashboard(root: HTMLElement, ctx: any) {
     if (event === 'xhs.unified.start') {
       currentPhase.textContent = '运行中';
       currentAction.textContent = '启动 autoscript';
+      statCollected.textContent = '0';
+      statSuccess.textContent = '0';
+      statFailed.textContent = '0';
+      statRemaining.textContent = '0';
+      progressPercent.textContent = '0%';
+      progressBar.style.width = '0%';
+      commentsCount = 0;
+      likesCount = 0;
+      likesSkippedCount = 0;
+      likesAlreadyCount = 0;
+      likesDedupCount = 0;
+      statComments.textContent = `0条`;
+      statLikes.textContent = `0次 (跳过:0, 已赞:0, 去重:0)`;
       const ts = Date.parse(String(payload.ts || '')) || Date.now();
       startTime = ts;
       stoppedAt = null;
@@ -371,15 +392,38 @@ export function renderDashboard(root: HTMLElement, ctx: any) {
       const opId = String(payload.operationId || '').trim();
       currentAction.textContent = opId || currentAction.textContent;
       const result = payload.result && typeof payload.result === 'object' ? payload.result : {};
+      const opResult = (result && typeof result === 'object' && 'result' in result) ? result.result : result;
+      if (opId === 'open_first_detail' || opId === 'open_next_detail') {
+        const visited = Number(opResult?.visited || 0);
+        const maxNotes = Number(opResult?.maxNotes || 0);
+        if (visited > 0) {
+          statCollected.textContent = String(visited);
+          statSuccess.textContent = String(visited);
+          if (maxNotes > 0) {
+            const remaining = Math.max(0, maxNotes - visited);
+            statRemaining.textContent = String(remaining);
+            taskTarget.textContent = String(maxNotes);
+            const pct = Math.round((visited / maxNotes) * 100);
+            progressPercent.textContent = `${pct}%`;
+            progressBar.style.width = `${pct}%`;
+          }
+        }
+      }
       if (opId === 'comments_harvest') {
-        const nowComments = Number((statComments.textContent || '0').replace(/[^\d]/g, '')) || 0;
-        const added = Number(result.collected || 0);
-        statComments.textContent = `${Math.max(0, nowComments + added)}条`;
+        const added = Number(opResult?.collected || 0);
+        commentsCount = Math.max(0, commentsCount + added);
+        statComments.textContent = `${commentsCount}条`;
       }
       if (opId === 'comment_like') {
-        const nowLikes = Number((statLikes.textContent || '0').replace(/[^\d]/g, '')) || 0;
-        const added = Number(result.likedCount || 0);
-        statLikes.textContent = `${Math.max(0, nowLikes + added)}次`;
+        const added = Number(opResult?.likedCount || 0);
+        const skipped = Number(opResult?.skippedCount || 0);
+        const already = Number(opResult?.alreadyLikedSkipped || 0);
+        const dedup = Number(opResult?.dedupSkipped || 0);
+        likesCount = Math.max(0, likesCount + added);
+        likesSkippedCount = Math.max(0, likesSkippedCount + skipped);
+        likesAlreadyCount = Math.max(0, likesAlreadyCount + already);
+        likesDedupCount = Math.max(0, likesDedupCount + dedup);
+        statLikes.textContent = `${likesCount}次 (跳过:${likesSkippedCount}, 已赞:${likesAlreadyCount}, 去重:${likesDedupCount})`;
       }
       return;
     }
@@ -456,6 +500,15 @@ export function renderDashboard(root: HTMLElement, ctx: any) {
     }
 
     // Also subscribe to cmd events for logs
+    if (typeof ctx.api?.onBusEvent === 'function') {
+      unsubscribeBus = ctx.api.onBusEvent((payload: any) => {
+        if (paused) return;
+        if (payload && payload.event) {
+          updateFromEventPayload(payload);
+        }
+      });
+    }
+
     if (typeof ctx.api?.onCmdEvent === 'function') {
       unsubscribeCmd = ctx.api.onCmdEvent((evt: any) => {
         if (paused) return;
@@ -583,5 +636,6 @@ export function renderDashboard(root: HTMLElement, ctx: any) {
     stopElapsedTimer();
     if (unsubscribeState) unsubscribeState();
     if (unsubscribeCmd) unsubscribeCmd();
+    if (unsubscribeBus) unsubscribeBus();
   };
 }

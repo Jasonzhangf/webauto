@@ -39,9 +39,6 @@ function splitCsv(value) {
 }
 
 function pickCloseDependency(options) {
-  if (options.doReply || options.doLikes) return 'comment_match_gate';
-  if (options.matchGateEnabled) return 'comment_match_gate';
-  if (options.commentsHarvestEnabled) return 'comments_harvest';
   if (options.detailHarvestEnabled) return 'detail_harvest';
   return 'open_first_detail';
 }
@@ -757,7 +754,7 @@ export function buildXhsUnifiedAutoscript(rawOptions = {}) {
         timeoutMs: 180000,
         retry: { attempts: 1, backoffMs: 0 },
         impact: 'script',
-        onFailure: 'stop_all',
+        onFailure: 'continue',
         pacing: { operationMinIntervalMs: 2400, eventCooldownMs: 1500, jitterMs: 280 },
         validation: {
           mode: 'both',
@@ -782,7 +779,7 @@ export function buildXhsUnifiedAutoscript(rawOptions = {}) {
         action: 'xhs_comment_match',
         params: { keywords: matchKeywords, mode: matchMode, minHits: matchMinHits },
         trigger: 'detail_modal.exist',
-        dependsOn: [commentsHarvestEnabled ? 'comments_harvest' : (detailHarvestEnabled ? 'detail_harvest' : 'open_first_detail')],
+        dependsOn: [detailHarvestEnabled ? 'detail_harvest' : 'open_first_detail'],
         once: false,
         oncePerAppear: true,
         pacing: { operationMinIntervalMs: 2400, eventCooldownMs: 1200, jitterMs: 160 },

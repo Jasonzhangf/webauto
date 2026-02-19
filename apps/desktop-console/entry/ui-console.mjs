@@ -165,9 +165,10 @@ class UITestRunner {
     this.results.push({ ts, type, message });
   }
 
-  async runCommand(cmd, args, timeoutMs = 30000) {
+  async runCommand(cmd, args, timeoutMs = 30000, options = {}) {
     return new Promise((resolve, reject) => {
-      const child = spawn(cmd, args, { shell: false, stdio: 'pipe' });
+      const env = { ...process.env, ...(options.env || {}) };
+      const child = spawn(cmd, args, { shell: false, stdio: 'pipe', env });
       let stdout = '';
       let stderr = '';
       let timer = null;
@@ -294,7 +295,7 @@ class UITestRunner {
       const dryFlag = forceDryRun ? '--dry-run' : '--no-dry-run';
       runArgs.push(dryFlag, 'true');
       if (this.headless) runArgs.push('--headless', 'true');
-      await this.runCommand('node', runArgs, 0);
+      await this.runCommand('node', runArgs, 0, { env: { WEBAUTO_BUS_EVENTS: '1' } });
       const summaryPath = findLatestSummary(this.keyword);
       if (summaryPath && existsSync(summaryPath)) {
         try {

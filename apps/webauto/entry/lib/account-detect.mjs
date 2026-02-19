@@ -1,9 +1,15 @@
 import { callAPI } from '../../../../modules/camo-runtime/src/utils/browser-service.mjs';
 import { listAccountProfiles, markProfileInvalid, markProfilePending, upsertProfileAccountState } from './account-store.mjs';
 
+const XHS_PROFILE_URL = 'https://www.xiaohongshu.com/user/profile';
+
 function normalizeText(value) {
   const text = String(value ?? '').trim();
   return text || null;
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function buildDetectScript() {
@@ -132,7 +138,7 @@ function buildDetectScript() {
       const picked = cleanAlias(text);
       if (picked) alias = picked;
     }
-    if (!alias) {
+    if (!alias && (!best || !best.id)) {
       const picked = findAliasFromDom();
       if (picked) alias = picked;
     }
@@ -147,13 +153,110 @@ function buildDetectScript() {
   })()`;
 }
 
-export async function detectXhsAccountIdentity(profileId) {
+function buildAliasResolveScript() {
+  return `(() => {
+    const candidates = [];
+    const normalizeAlias = (value) => {
+      const text = String(value || '').replace(/\\s+/g, ' ').trim();
+      if (!text) return null;
+      if (text === '我' || text === '我的' || text === '个人主页') return null;
+      return text;
+    };
+    const cleanAlias = (value) => {
+      let text = normalizeAlias(value);
+      if (!text) return null;
+      text = text.replace(/\\s*[-—–]\\s*(小红书|xiaohongshu).*$/i, '').trim();
+      if (!text) return null;
+      const blocked = ['小红书', '登录', '注册', '搜索'];
+      if (blocked.includes(text)) return null;
+      return text;
+    };
+    const pushCandidate = (text, source) => {
+      const alias = cleanAlias(text);
+      if (!alias) return;
+      candidates.push({ text: alias, source });
+    };
+    const initialState = (typeof window !== 'undefined' && window.__INITIAL_STATE__) || null;
+    const rawUserInfo = initialState && initialState.user && initialState.user.userInfo
+      ? (
+        (initialState.user.userInfo._rawValue && typeof initialState.user.userInfo._rawValue === 'object' && initialState.user.userInfo._rawValue)
+        || (initialState.user.userInfo._value && typeof initialState.user.userInfo._value === 'object' && initialState.user.userInfo._value)
+        || (typeof initialState.user.userInfo === 'object' ? initialState.user.userInfo : null)
+      )
+      : null;
+    if (rawUserInfo) {
+      pushCandidate(rawUserInfo.nickname || rawUserInfo.name || rawUserInfo.nickName || null, 'initial_state.user_info');
+    }
+    const selectors = [
+      '[class*="user"] [class*="name"]',
+      '[class*="user"] [class*="nickname"]',
+      '[class*="nickname"]',
+      '[class*="user-name"]',
+      'header [class*="name"]',
+      'header h1',
+      'header h2',
+    ];
+    for (const sel of selectors) {
+      const nodes = Array.from(document.querySelectorAll(sel)).slice(0, 8);
+      for (const node of nodes) {
+        pushCandidate(node.textContent || '', sel);
+      }
+    }
+    const metaTitle = document.querySelector('meta[property="og:title"], meta[name="og:title"]');
+    if (metaTitle) pushCandidate(metaTitle.getAttribute('content') || '', 'meta:og:title');
+    pushCandidate(document.title || '', 'document.title');
+    const picked = candidates.find((item) => item.text && item.text.length >= 2) || null;
+    return {
+      alias: picked ? picked.text : null,
+      source: picked ? picked.source : null,
+      candidates,
+    };
+  })()`;
+}
+
+async function resolveAliasFromProfilePage(profileId, accountId) {
+  if (!profileId || !accountId) return null;
+  let originalUrl = null;
+  try {
+    const urlPayload = await callAPI('evaluate', { profileId, script: 'window.location.href' });
+    originalUrl = normalizeText(urlPayload?.result || urlPayload?.data?.result || urlPayload?.url);
+  } catch {
+    originalUrl = null;
+  }
+  const targetUrl = `${XHS_PROFILE_URL}/${accountId}`;
+  const shouldNavigate = !originalUrl || !String(originalUrl).includes(`/user/profile/${accountId}`);
+  try {
+    if (shouldNavigate) {
+      await callAPI('goto', { profileId, url: targetUrl });
+      await sleep(1200);
+    }
+    const payload = await callAPI('evaluate', { profileId, script: buildAliasResolveScript() });
+    const result = payload?.result || payload?.data || payload || {};
+    return {
+      alias: normalizeText(result.alias),
+      source: normalizeText(result.source) || 'profile_page',
+      candidates: Array.isArray(result.candidates) ? result.candidates : [],
+    };
+  } catch {
+    return null;
+  } finally {
+    if (shouldNavigate && originalUrl) {
+      try {
+        await callAPI('goto', { profileId, url: originalUrl });
+      } catch {
+        // ignore restore failures
+      }
+    }
+  }
+}
+
+export async function detectXhsAccountIdentity(profileId, options = {}) {
   const payload = await callAPI('evaluate', {
     profileId,
     script: buildDetectScript(),
   });
   const result = payload?.result || payload?.data || payload || {};
-  return {
+  const detected = {
     profileId: String(profileId || '').trim(),
     url: normalizeText(result.url),
     hasLoginGuard: result.hasLoginGuard === true,
@@ -162,6 +265,14 @@ export async function detectXhsAccountIdentity(profileId) {
     source: normalizeText(result.source),
     candidates: Array.isArray(result.candidates) ? result.candidates : [],
   };
+  if (options?.resolveAlias === true && detected.accountId && !detected.alias) {
+    const resolved = await resolveAliasFromProfilePage(detected.profileId, detected.accountId);
+    if (resolved?.alias) {
+      detected.alias = resolved.alias;
+      detected.source = resolved.source || detected.source;
+    }
+  }
+  return detected;
 }
 
 export async function syncXhsAccountByProfile(profileId, options = {}) {
@@ -169,7 +280,9 @@ export async function syncXhsAccountByProfile(profileId, options = {}) {
   if (!normalizedProfileId) throw new Error('profileId is required');
   const pendingWhileLogin = options?.pendingWhileLogin === true;
   try {
-    const detected = await detectXhsAccountIdentity(normalizedProfileId);
+    const detected = await detectXhsAccountIdentity(normalizedProfileId, {
+      resolveAlias: options?.resolveAlias === true,
+    });
     if (detected.hasLoginGuard) {
       if (pendingWhileLogin) {
         return markProfilePending(normalizedProfileId, 'waiting_login_guard');

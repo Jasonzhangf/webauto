@@ -107,7 +107,7 @@ export function renderConfigPanel(root: HTMLElement, ctx: any) {
       
       <div class="row" style="margin-top: 8px;">
         <div>
-          <label>??????(0=??)</label>
+          <label>最大点赞数 (0=不限)</label>
           <input id="max-likes-input" type="number" value="0" min="0" style="width: 100px;" />
         </div>
       </div>

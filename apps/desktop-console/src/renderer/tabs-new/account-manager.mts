@@ -197,7 +197,7 @@ export function renderAccountManager(root: HTMLElement, ctx: any) {
       row.appendChild(actionsDiv);
 
       // Check account status
-      checkBtn.onclick = () => checkAccountStatus(acc.profileId);
+      checkBtn.onclick = () => checkAccountStatus(acc.profileId, { resolveAlias: true });
 
       // Show details
       detailBtn.onclick = () => {
@@ -236,7 +236,7 @@ export function renderAccountManager(root: HTMLElement, ctx: any) {
   }
 
   // Check single account status
-  async function checkAccountStatus(profileId: string, options: { pendingWhileLogin?: boolean } = {}) {
+  async function checkAccountStatus(profileId: string, options: { pendingWhileLogin?: boolean; resolveAlias?: boolean } = {}) {
     const account = accounts.find(a => a.profileId === profileId);
     if (!account) return false;
 
@@ -252,6 +252,7 @@ export function renderAccountManager(root: HTMLElement, ctx: any) {
           'sync',
           profileId,
           ...(options.pendingWhileLogin ? ['--pending-while-login'] : []),
+          ...(options.resolveAlias ? ['--resolve-alias'] : []),
           '--json',
         ],
       });
@@ -360,6 +361,7 @@ export function renderAccountManager(root: HTMLElement, ctx: any) {
         const timer = autoSyncTimers.get(id);
         if (timer) clearInterval(timer);
         autoSyncTimers.delete(id);
+        void checkAccountStatus(id, { resolveAlias: true }).catch(() => null);
       }
     });
     const timer = setInterval(() => {
@@ -381,7 +383,7 @@ export function renderAccountManager(root: HTMLElement, ctx: any) {
     checkAllBtn.textContent = '检查中...';
 
     for (const acc of accounts) {
-      await checkAccountStatus(acc.profileId);
+      await checkAccountStatus(acc.profileId, { resolveAlias: true });
     }
 
     checkAllBtn.disabled = false;

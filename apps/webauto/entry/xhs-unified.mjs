@@ -12,6 +12,7 @@ import { syncXhsAccountsByProfiles } from './lib/account-detect.mjs';
 import { markProfileInvalid } from './lib/account-store.mjs';
 import { listProfilesForPool } from './lib/profilepool.mjs';
 import { runCamo } from './lib/camo-cli.mjs';
+import { publishBusEvent } from './lib/bus-publish.mjs';
 
 function nowIso() {
   return new Date().toISOString();
@@ -397,6 +398,18 @@ function isObject(value) {
 
 async function runProfile(spec, argv, baseOverrides = {}) {
   const profileId = spec.profileId;
+  const busEnabled = parseBool(argv['bus-events'], false) || process.env.WEBAUTO_BUS_EVENTS === '1';
+  const busPublishable = new Set([
+    'xhs.unified.start',
+    'xhs.unified.stop',
+    'xhs.unified.stop_screenshot',
+    'xhs.unified.profile_failed',
+    'autoscript:operation_done',
+    'autoscript:operation_error',
+    'autoscript:operation_terminal',
+    'autoscript:operation_recovery_failed',
+  ]);
+  let currentRunId = null;
   const overrides = {
     ...baseOverrides,
     maxNotes: spec.assignedNotes,
@@ -426,9 +439,13 @@ async function runProfile(spec, argv, baseOverrides = {}) {
       profileId,
       ...eventPayload,
     };
+    if (!merged.runId && currentRunId) merged.runId = currentRunId;
     fs.appendFileSync(spec.logPath, `${JSON.stringify(merged)}\n`, 'utf8');
     console.log(JSON.stringify(merged));
     updateProfileStatsFromEvent(stats, merged);
+    if (busEnabled && busPublishable.has(String(merged.event || '').trim())) {
+      void publishBusEvent(merged);
+    }
     if (
       merged.event === 'autoscript:event'
       && merged.subscriptionId === 'login_guard'
@@ -442,8 +459,16 @@ async function runProfile(spec, argv, baseOverrides = {}) {
     }
   };
 
+  const runner = new AutoscriptRunner(normalized, {
+    profileId,
+    log: logEvent,
+  });
+
+  const running = await runner.start();
+  currentRunId = running?.runId || currentRunId;
   logEvent({
     event: 'xhs.unified.start',
+    runId: running?.runId || null,
     keyword: options.keyword,
     env: options.env,
     maxNotes: options.maxNotes,
@@ -451,13 +476,6 @@ async function runProfile(spec, argv, baseOverrides = {}) {
     outputRoot: options.outputRoot,
     parallelRunLabel: spec.runLabel,
   });
-
-  const runner = new AutoscriptRunner(normalized, {
-    profileId,
-    log: logEvent,
-  });
-
-  const running = await runner.start();
   const done = await running.done;
 
   const stopPayload = {
@@ -693,6 +711,7 @@ export async function runUnified(argv, overrides = {}) {
   if (!keyword) throw new Error('missing --keyword');
 
   const env = String(argv.env || 'debug').trim() || 'debug';
+  const busEnabled = parseBool(argv['bus-events'], false) || process.env.WEBAUTO_BUS_EVENTS === '1';
   const profiles = parseProfiles(argv);
   if (profiles.length === 0) throw new Error('missing --profile or --profiles or --profilepool');
   await Promise.all(profiles.map((profileId) => ensureProfileSession(profileId)));
@@ -953,7 +972,7 @@ export async function runUnified(argv, overrides = {}) {
   };
   await writeJson(merged.summaryPath, mergedSummary);
 
-  console.log(JSON.stringify({
+  const mergedEvent = {
     event: 'xhs.unified.merged',
     summaryPath: merged.summaryPath,
     waves: wavePlans.length,
@@ -961,7 +980,11 @@ export async function runUnified(argv, overrides = {}) {
     profilesSucceeded: results.filter((item) => item.ok).length,
     profilesFailed: results.filter((item) => !item.ok).length,
     remainingNotes: hasTotalTarget ? remainingNotes : null,
-  }));
+  };
+  console.log(JSON.stringify(mergedEvent));
+  if (busEnabled) {
+    void publishBusEvent(mergedEvent);
+  }
 
   const failedResults = results.filter((item) => !item.ok);
   if (hasTotalTarget && remainingNotes > 0) {
@@ -1002,6 +1025,7 @@ async function main() {
       '  --total-target <n>           total-notes 别名',
       '  --max-waves <n>              动态分片最大波次（默认40）',
       '  --parallel                   启用并行执行',
+      '  --bus-events <bool>          启用 UI 事件总线推送（默认 false）',
       '  --concurrency <n>            并行度（默认=账号数）',
       '  --resume <bool>              断点续传（默认 false）',
       '  --incremental-max <bool>     max-notes 作为增量配额（默认 true）',
