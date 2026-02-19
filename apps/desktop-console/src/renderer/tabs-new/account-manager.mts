@@ -73,6 +73,10 @@ export function renderAccountManager(root: HTMLElement, ctx: any) {
     lastCheck?: string;
   };
   let accounts: Account[] = [];
+  let envPollTimer: ReturnType<typeof setInterval> | null = null;
+  let accountPollTimer: ReturnType<typeof setInterval> | null = null;
+  let envCheckInFlight = false;
+  let accountCheckInFlight = false;
 
   // Check environment
   async function checkEnvironment() {
@@ -89,6 +93,16 @@ export function renderAccountManager(root: HTMLElement, ctx: any) {
       updateEnvItem('env-firefox', firefox.installed);
     } catch (err) {
       console.error('Environment check failed:', err);
+    }
+  }
+
+  async function tickEnvironment() {
+    if (envCheckInFlight) return;
+    envCheckInFlight = true;
+    try {
+      await checkEnvironment();
+    } finally {
+      envCheckInFlight = false;
     }
   }
 
@@ -112,6 +126,20 @@ export function renderAccountManager(root: HTMLElement, ctx: any) {
       renderAccountList();
     } catch (err) {
       console.error('Failed to load accounts:', err);
+    }
+  }
+
+  async function tickAccounts() {
+    if (accountCheckInFlight) return;
+    accountCheckInFlight = true;
+    try {
+      await loadAccounts();
+      const pending = accounts.filter((acc) => acc.statusView === 'pending');
+      for (const acc of pending) {
+        await checkAccountStatus(acc.profileId, { pendingWhileLogin: true });
+      }
+    } finally {
+      accountCheckInFlight = false;
     }
   }
 
@@ -313,7 +341,6 @@ export function renderAccountManager(root: HTMLElement, ctx: any) {
       await loadAccounts();
       newAccountAliasInput.value = '';
       startAutoSyncProfile(profileId);
-      startAutoSyncProfile(profileId);
 
     } catch (err: any) {
       alert('添加账号失败: ' + (err?.message || String(err)));
@@ -413,11 +440,15 @@ export function renderAccountManager(root: HTMLElement, ctx: any) {
   refreshExpiredBtn.onclick = refreshExpiredAccounts;
 
   // Initial load
-  void checkEnvironment();
-  void loadAccounts();
+  void tickEnvironment();
+  void tickAccounts();
+  envPollTimer = setInterval(() => void tickEnvironment(), 10_000);
+  accountPollTimer = setInterval(() => void tickAccounts(), 15_000);
 
   return () => {
     for (const timer of autoSyncTimers.values()) clearInterval(timer);
     autoSyncTimers.clear();
+    if (envPollTimer) clearInterval(envPollTimer);
+    if (accountPollTimer) clearInterval(accountPollTimer);
   };
 }

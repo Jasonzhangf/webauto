@@ -122,6 +122,10 @@ export function renderSetupWizard(root: HTMLElement, ctx: any) {
   let accounts: UiAccountProfile[] = [];
   let repairHistory: Array<{ ts: string; action: string; ok: boolean; detail?: string }> =
     Array.isArray(ctx.api?.settings?.envRepairHistory) ? [...ctx.api.settings.envRepairHistory] : [];
+  let envPollTimer: ReturnType<typeof setInterval> | null = null;
+  let accountPollTimer: ReturnType<typeof setInterval> | null = null;
+  let envCheckInFlight = false;
+  let accountCheckInFlight = false;
 
   type EnvSnapshot = {
     camo: any;
@@ -352,6 +356,16 @@ export function renderSetupWizard(root: HTMLElement, ctx: any) {
     envCheckBtn.textContent = '重新检查';
   }
 
+  async function tickEnvironment() {
+    if (envCheckInFlight) return;
+    envCheckInFlight = true;
+    try {
+      await checkEnvironment();
+    } finally {
+      envCheckInFlight = false;
+    }
+  }
+
   function updateEnvItem(id: string, ok: boolean, detail: string) {
     const el = root.querySelector(`#${id}`);
     if (!el) return;
@@ -367,6 +381,20 @@ export function renderSetupWizard(root: HTMLElement, ctx: any) {
   }
 
   // Account Management
+  async function tickAccounts() {
+    if (accountCheckInFlight) return;
+    accountCheckInFlight = true;
+    try {
+      await refreshAccounts();
+      const pending = accounts.filter((acc) => acc.status === 'pending');
+      for (const acc of pending) {
+        await syncProfileAccount(acc.profileId);
+      }
+    } finally {
+      accountCheckInFlight = false;
+    }
+  }
+
   async function refreshAccounts() {
     try {
       accounts = await listAccountProfiles(ctx.api);
@@ -590,12 +618,16 @@ export function renderSetupWizard(root: HTMLElement, ctx: any) {
   };
 
   // Initial check
-  void checkEnvironment();
-  void refreshAccounts();
+  void tickEnvironment();
+  void tickAccounts();
+  envPollTimer = setInterval(() => void tickEnvironment(), 10_000);
+  accountPollTimer = setInterval(() => void tickAccounts(), 15_000);
   renderRepairHistory();
 
   return () => {
     for (const timer of autoSyncTimers.values()) clearInterval(timer);
     autoSyncTimers.clear();
+    if (envPollTimer) clearInterval(envPollTimer);
+    if (accountPollTimer) clearInterval(accountPollTimer);
   };
 }
