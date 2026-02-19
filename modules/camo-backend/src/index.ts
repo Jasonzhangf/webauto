@@ -308,9 +308,29 @@ async function handleCommand(
         ...(args.ownerPid ? { ownerPid: args.ownerPid } : {}),
       };
       const res = await manager.createSession(opts);
+      const session = manager.getSession(opts.profileId);
+      if (!session) {
+        throw new Error(`session for profile ${opts.profileId} not started`);
+      }
+      let recording = null;
+      if (args.record === true || args.recording === true) {
+        recording = await session.startRecording({
+          name: args.recordName || args.recordingName,
+          outputPath: args.recordOutput || args.recordingOutput || args.recordOutputPath,
+          overlay: typeof args.recordOverlay === 'boolean' ? args.recordOverlay : undefined,
+        });
+      }
       options.onSessionStart?.();
       broadcast('browser:started', { profileId: opts.profileId, sessionId: res.sessionId });
-      return { ok: true, body: { ok: true, sessionId: res.sessionId, profileId: opts.profileId } };
+      return {
+        ok: true,
+        body: {
+          ok: true,
+          sessionId: res.sessionId,
+          profileId: opts.profileId,
+          ...(recording ? { recording } : {}),
+        },
+      };
     }
     case 'goto': {
       const profileId = args.profileId || 'default';
@@ -353,6 +373,31 @@ async function handleCommand(
     }
     case 'getStatus': {
       return { ok: true, body: { ok: true, sessions: manager.listSessions() } };
+    }
+    case 'record:start': {
+      const profileId = args.profileId || 'default';
+      const session = manager.getSession(profileId);
+      if (!session) throw new Error(`session for profile ${profileId} not started`);
+      const recording = await session.startRecording({
+        name: args.name || args.recordName,
+        outputPath: args.outputPath || args.output || args.recordOutput,
+        overlay: typeof args.overlay === 'boolean' ? args.overlay : undefined,
+      });
+      return { ok: true, body: { ok: true, profileId, recording } };
+    }
+    case 'record:stop': {
+      const profileId = args.profileId || 'default';
+      const session = manager.getSession(profileId);
+      if (!session) throw new Error(`session for profile ${profileId} not started`);
+      const recording = await session.stopRecording({ reason: String(args.reason || 'manual') });
+      return { ok: true, body: { ok: true, profileId, recording } };
+    }
+    case 'record:status': {
+      const profileId = args.profileId || 'default';
+      const session = manager.getSession(profileId);
+      if (!session) throw new Error(`session for profile ${profileId} not started`);
+      const recording = session.getRecordingStatus();
+      return { ok: true, body: { ok: true, profileId, recording } };
     }
     case 'system:display': {
       const metrics = getDisplayMetrics();

@@ -16,6 +16,7 @@ type ScheduleTask = {
   lastError: string | null;
   runCount: number;
   failCount: number;
+  runHistory?: Array<{ timestamp: string; status: 'success' | 'failure'; durationMs: number }>;
 };
 
 function toLocalDatetimeValue(iso: string | null): string {
@@ -361,6 +362,11 @@ export function renderSchedulerPanel(root: HTMLElement, ctx: any) {
       const statusText = task.lastStatus
         ? `${task.lastStatus} / run=${task.runCount} / fail=${task.failCount}`
         : 'never run';
+      const historyHtml = (task.runHistory || []).slice(-5).map((h) => {
+        const icon = h.status === 'success' ? '✅' : '❌';
+        const duration = h.durationMs ? `${Math.round(h.durationMs / 1000)}s` : '-';
+        return `<span title="${h.timestamp} ${duration}">${icon}</span>`;
+      }).join(' ');
       card.innerHTML = `
         <div style="display:flex; justify-content:space-between; gap:8px; margin-bottom:6px;">
           <div style="font-weight:600;">${task.name || task.id}</div>
@@ -371,6 +377,7 @@ export function renderSchedulerPanel(root: HTMLElement, ctx: any) {
         <div style="font-size:12px;">maxRuns: ${task.maxRuns || 'unlimited'}</div>
         <div style="font-size:12px;">nextRunAt: ${task.nextRunAt || '-'}</div>
         <div style="font-size:12px;">status: ${statusText}</div>
+        ${historyHtml ? `<div style="font-size:12px;">recent: ${historyHtml}</div>` : ''}
         ${task.lastError ? `<div style="font-size:12px; color:var(--danger);">error: ${task.lastError}</div>` : ''}
       `;
       const actions = createEl('div', { className: 'btn-group', style: 'margin-top: 8px;' });

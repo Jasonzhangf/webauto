@@ -86,6 +86,43 @@ export function buildCommentsHarvestScript(params = {}) {
       }
       return null;
     };
+    const normalizeInlineText = (value) => String(value || '').replace(/\\s+/g, ' ').trim();
+    const sanitizeAuthorText = (raw, commentText = '') => {
+      const text = normalizeInlineText(raw);
+      if (!text) return '';
+      if (commentText && text === commentText) return '';
+      if (text.length > 40) return '';
+      if (/^(回复|展开|收起|查看更多|评论|赞|分享|发送)$/.test(text)) return '';
+      return text;
+    };
+    const readAuthor = (item, commentText = '') => {
+      const attrNames = ['data-user-name', 'data-username', 'data-user_nickname', 'data-nickname'];
+      for (const attr of attrNames) {
+        const value = sanitizeAuthorText(item.getAttribute?.(attr), commentText);
+        if (value) return value;
+      }
+      const selectors = [
+        '.comment-user .name',
+        '.comment-user .username',
+        '.comment-user .user-name',
+        '.author .name',
+        '.author',
+        '.user-name',
+        '.username',
+        '.name',
+        'a[href*="/user/profile/"]',
+        'a[href*="/user/"]',
+      ];
+      for (const selector of selectors) {
+        const node = item.querySelector(selector);
+        if (!node) continue;
+        const title = sanitizeAuthorText(node.getAttribute?.('title'), commentText);
+        if (title) return title;
+        const text = sanitizeAuthorText(node.textContent, commentText);
+        if (text) return text;
+      }
+      return '';
+    };
 
     const scroller = document.querySelector('.note-scroller')
       || document.querySelector('.comments-el')
@@ -105,9 +142,8 @@ export function buildCommentsHarvestScript(params = {}) {
       const nodes = Array.from(document.querySelectorAll('.comment-item, [class*="comment-item"]'));
       for (const item of nodes) {
         const textNode = item.querySelector('.content, .comment-content, p');
-        const authorNode = item.querySelector('.name, .author, .user-name, [class*="author"], [class*="name"]');
         const text = String((textNode && textNode.textContent) || '').trim();
-        const author = String((authorNode && authorNode.textContent) || '').trim();
+        const author = readAuthor(item, text);
         if (!text) continue;
         const key = author + '::' + text;
         if (commentMap.has(key)) continue;

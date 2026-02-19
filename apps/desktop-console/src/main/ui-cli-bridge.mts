@@ -12,11 +12,12 @@ type UiCliAction = {
   key?: string;
   tabId?: string;
   tabLabel?: string;
-  state?: 'exists' | 'visible' | 'hidden';
+  state?: 'exists' | 'visible' | 'hidden' | 'text_contains' | 'text_equals' | 'value_equals' | 'not_disabled';
   nth?: number;
   exact?: boolean;
   timeoutMs?: number;
   intervalMs?: number;
+  detailed?: boolean;
 };
 
 type UiCliStatus = {
@@ -139,8 +140,11 @@ function buildSnapshotScript() {
 }
 
 function buildActionScript(action: UiCliAction) {
+  const payloadJson = JSON.stringify(action);
+  const snapshotScript = buildSnapshotScript();
+  
   return `(() => {
-    const payload = ${JSON.stringify(action)};
+    const payload = ${payloadJson};
     const normalize = (v) => String(v || '').trim();
     const isVisible = (el) => {
       if (!el) return false;
@@ -172,6 +176,44 @@ function buildActionScript(action: UiCliAction) {
       });
       const index = Number.isFinite(Number(nth)) ? Math.max(0, Math.floor(Number(nth))) : 0;
       return matched[index] || null;
+    };
+    const getElementDetails = (el) => {
+      if (!el) return null;
+      const rect = el.getBoundingClientRect();
+      const style = window.getComputedStyle(el);
+      const attrs = {};
+      for (const attr of el.attributes) {
+        attrs[attr.name] = attr.value;
+      }
+      return {
+        rect: {
+          x: Math.round(rect.x),
+          y: Math.round(rect.y),
+          width: Math.round(rect.width),
+          height: Math.round(rect.height),
+          top: Math.round(rect.top),
+          left: Math.round(rect.left),
+          right: Math.round(rect.right),
+          bottom: Math.round(rect.bottom),
+        },
+        computedStyle: {
+          display: style.display,
+          visibility: style.visibility,
+          opacity: style.opacity,
+          backgroundColor: style.backgroundColor,
+          color: style.color,
+          fontSize: style.fontSize,
+          fontFamily: style.fontFamily,
+          position: style.position,
+          zIndex: style.zIndex,
+        },
+        attributes: attrs,
+        innerText: el.innerText,
+        outerHTML: el.outerHTML?.slice(0, 2000),
+        tagName: el.tagName,
+        className: el.className,
+        id: el.id,
+      };
     };
     const focusEl = (el) => {
       if (!el || typeof el.focus !== 'function') return false;
@@ -224,7 +266,7 @@ function buildActionScript(action: UiCliAction) {
     };
 
     if (payload.action === 'snapshot') {
-      return { ok: true, snapshot: ${buildSnapshotScript()} };
+      return { ok: true, snapshot: ${snapshotScript} };
     }
     if (payload.action === 'dialogs') {
       const mode = normalize(payload.value).toLowerCase();
@@ -262,26 +304,26 @@ function buildActionScript(action: UiCliAction) {
     }
     if (payload.action === 'click') {
       const el = query(payload.selector);
-      if (!el) return { ok: false, error: 'selector_not_found' };
+      if (!el) return { ok: false, error: 'selector_not_found', selector: normalize(payload.selector) };
       clickEl(el);
       return { ok: true };
     }
     if (payload.action === 'focus') {
       const el = query(payload.selector);
-      if (!el) return { ok: false, error: 'selector_not_found' };
+      if (!el) return { ok: false, error: 'selector_not_found', selector: normalize(payload.selector) };
       const focused = focusEl(el);
       return { ok: focused, focused };
     }
     if (payload.action === 'input') {
       const el = query(payload.selector);
-      if (!el) return { ok: false, error: 'selector_not_found' };
+      if (!el) return { ok: false, error: 'selector_not_found', selector: normalize(payload.selector) };
       focusEl(el);
       const written = setInputValue(el, payload.value || '');
       return { ok: written, value: String(payload.value || '') };
     }
     if (payload.action === 'select') {
       const el = query(payload.selector);
-      if (!el || el.tagName !== 'SELECT') return { ok: false, error: 'select_not_found' };
+      if (!el || el.tagName !== 'SELECT') return { ok: false, error: 'select_not_found', selector: normalize(payload.selector) };
       el.value = String(payload.value || '');
       el.dispatchEvent(new Event('input', { bubbles: true }));
       el.dispatchEvent(new Event('change', { bubbles: true }));
@@ -299,7 +341,7 @@ function buildActionScript(action: UiCliAction) {
         exact: payload.exact === true,
         nth: payload.nth,
       });
-      if (!el) return { ok: false, error: 'text_not_found' };
+      if (!el) return { ok: false, error: 'text_not_found', text: normalize(payload.text || payload.value), selector: normalize(payload.selector) };
       clickEl(el);
       return { ok: true, text: normalize(el.textContent) };
     }
@@ -313,6 +355,10 @@ function buildActionScript(action: UiCliAction) {
       const checked = Boolean(first && 'checked' in first && first.checked === true);
       const disabled = Boolean(first && 'disabled' in first && first.disabled === true);
       const probeText = normalize(payload.text || payload.value);
+      let details = null;
+      if (first && payload.detailed === true) {
+        details = getElementDetails(first);
+      }
       let textMatchedCount = 0;
       if (probeText) {
         const target = payload.exact === true ? probeText : probeText.toLowerCase();
@@ -335,6 +381,7 @@ function buildActionScript(action: UiCliAction) {
         disabled,
         tagName: first?.tagName || '',
         className: first?.className || '',
+        details,
         textMatchedCount,
       };
     }
@@ -342,7 +389,7 @@ function buildActionScript(action: UiCliAction) {
       window.close();
       return { ok: true };
     }
-    return { ok: false, error: 'unsupported_action' };
+    return { ok: false, error: 'unsupported_action', action: normalize(payload.action) };
   })()`;
 }
 
@@ -463,7 +510,7 @@ export class UiCliBridge {
       const out = await win!.webContents.executeJavaScript(buildActionScript(input), true);
       return out && typeof out === 'object' ? out : { ok: false, error: 'empty_result' };
     } catch (err: any) {
-      return { ok: false, error: err?.message || String(err) };
+      return { ok: false, error: err?.message || String(err), details: err?.stack || null };
     }
   }
 
@@ -488,17 +535,56 @@ export class UiCliBridge {
             const style = window.getComputedStyle(el);
             return style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0';
           })();
-          return { exists: Boolean(el), visible };
+          const text = String(el?.textContent || '').trim();
+          const value = el && 'value' in el ? String(el.value ?? '') : '';
+          const disabled = Boolean(el && 'disabled' in el && el.disabled === true);
+          return { exists: Boolean(el), visible, text, value, disabled };
         })()`;
         const state = await win!.webContents.executeJavaScript(checkScript, true);
         const exists = Boolean(state?.exists);
         const visible = Boolean(state?.visible);
-        const matched =
-          expected === 'exists' ? exists :
-          expected === 'hidden' ? (!exists || !visible) :
-          visible;
+        const text = String(state?.text || '');
+        const value = String(state?.value || '');
+        const disabled = Boolean(state?.disabled);
+
+        let matched = false;
+        let reason = '';
+
+        switch (expected) {
+          case 'exists':
+            matched = exists;
+            reason = exists ? 'element exists' : 'element not found';
+            break;
+          case 'visible':
+            matched = visible;
+            reason = visible ? 'element visible' : 'element not visible';
+            break;
+          case 'hidden':
+            matched = !exists || !visible;
+            reason = matched ? 'element hidden or absent' : 'element is visible';
+            break;
+          case 'text_contains':
+            matched = exists && text.includes(String(input.value || ''));
+            reason = matched ? 'text matched' : `text '${text}' does not contain '${input.value || ''}'`;
+            break;
+          case 'text_equals':
+            matched = exists && text === String(input.value || '');
+            reason = matched ? 'text matched' : `text '${text}' !== '${input.value || ''}'`;
+            break;
+          case 'value_equals':
+            matched = exists && value === String(input.value || '');
+            reason = matched ? 'value matched' : `value '${value}' !== '${input.value || ''}'`;
+            break;
+          case 'not_disabled':
+            matched = exists && !disabled;
+            reason = matched ? 'element enabled' : 'element disabled';
+            break;
+          default:
+            return { ok: false, error: 'unsupported_state', state: expected };
+        }
+
         if (matched) {
-          return { ok: true, selector, expected, exists, visible, elapsedMs: Date.now() - startedAt };
+          return { ok: true, selector, expected, exists, visible, text, value, disabled, elapsedMs: Date.now() - startedAt, reason };
         }
       } catch (err: any) {
         return { ok: false, error: err?.message || String(err) };

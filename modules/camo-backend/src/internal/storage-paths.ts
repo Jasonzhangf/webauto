@@ -36,3 +36,8 @@ export function resolveLocksRoot() {
   return path.join(resolveDataRoot(), 'locks');
 }
 
+export function resolveRecordsRoot() {
+  const envRoot = String(process.env.WEBAUTO_PATHS_RECORDS || '').trim();
+  if (envRoot) return envRoot;
+  return path.join(resolveDataRoot(), 'records');
+}

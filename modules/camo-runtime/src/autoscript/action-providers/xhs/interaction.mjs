@@ -74,12 +74,57 @@ function buildCollectLikeTargetsScript() {
       }
       return '';
     };
+    const sanitizeUserName = (raw, commentText = '') => {
+      const text = String(raw || '').replace(/\\s+/g, ' ').trim();
+      if (!text) return '';
+      if (commentText && text === commentText) return '';
+      if (text.length > 40) return '';
+      if (/^(回复|展开|收起|查看更多|评论|赞|分享|发送)$/.test(text)) return '';
+      return text;
+    };
+    const readUserName = (item, commentText = '') => {
+      const attrNames = ['data-user-name', 'data-username', 'data-user_nickname', 'data-nickname'];
+      for (const attr of attrNames) {
+        const value = sanitizeUserName(item.getAttribute?.(attr), commentText);
+        if (value) return value;
+      }
+      const selectors = [
+        '.comment-user .name',
+        '.comment-user .username',
+        '.comment-user .user-name',
+        '.author .name',
+        '.author',
+        '.user-name',
+        '.username',
+        '.name',
+        'a[href*="/user/profile/"]',
+        'a[href*="/user/"]',
+      ];
+      for (const selector of selectors) {
+        const node = item.querySelector(selector);
+        if (!node) continue;
+        const title = sanitizeUserName(node.getAttribute?.('title'), commentText);
+        if (title) return title;
+        const text = sanitizeUserName(node.textContent, commentText);
+        if (text) return text;
+      }
+      return '';
+    };
     const readAttr = (item, attrNames) => {
       for (const attr of attrNames) {
         const value = String(item.getAttribute?.(attr) || '').trim();
         if (value) return value;
       }
       return '';
+    };
+    const readUserId = (item) => {
+      const value = readAttr(item, ['data-user-id', 'data-userid', 'data-user_id']);
+      if (value) return value;
+      const anchor = item.querySelector('a[href*="/user/profile/"], a[href*="/user/"]');
+      const href = String(anchor?.getAttribute?.('href') || '').trim();
+      if (!href) return '';
+      const matched = href.match(/\\/user\\/(?:profile\\/)?([a-zA-Z0-9_-]+)/);
+      return matched && matched[1] ? matched[1] : '';
     };
 
     const matchedSet = new Set(
@@ -92,8 +137,8 @@ function buildCollectLikeTargetsScript() {
       const item = items[index];
       const text = readText(item, ['.content', '.comment-content', 'p']);
       if (!text) continue;
-      const userName = readText(item, ['.name', '.author', '.user-name', '.username', '[class*="author"]', '[class*="name"]']);
-      const userId = readAttr(item, ['data-user-id', 'data-userid', 'data-user_id']);
+      const userName = readUserName(item, text);
+      const userId = readUserId(item);
       const timestamp = readText(item, ['.date', '.time', '.timestamp', '[class*="time"]']);
       const likeControl = findLikeControl(item);
       rows.push({

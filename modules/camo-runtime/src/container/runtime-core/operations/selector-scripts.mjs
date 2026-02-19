@@ -33,7 +33,20 @@ export function buildSelectorClickScript({ selector, highlight }) {
     }
     el.scrollIntoView({ behavior: 'smooth', block: 'center' });
     await new Promise((r) => setTimeout(r, 150));
-    el.click();
+    if (el instanceof HTMLElement) {
+      try { el.focus({ preventScroll: true }); } catch {}
+      const common = { bubbles: true, cancelable: true, view: window };
+      try {
+        if (typeof PointerEvent === 'function') {
+          el.dispatchEvent(new PointerEvent('pointerdown', { ...common, pointerType: 'mouse', button: 0 }));
+          el.dispatchEvent(new PointerEvent('pointerup', { ...common, pointerType: 'mouse', button: 0 }));
+        }
+      } catch {}
+      try { el.dispatchEvent(new MouseEvent('mousedown', { ...common, button: 0 })); } catch {}
+      try { el.dispatchEvent(new MouseEvent('mouseup', { ...common, button: 0 })); } catch {}
+    }
+    if (typeof el.click === 'function') el.click();
+    else el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window, button: 0 }));
     if (${highlightLiteral} && el instanceof HTMLElement) {
       setTimeout(() => { el.style.outline = restoreOutline; }, 260);
     }
@@ -56,9 +69,63 @@ export function buildSelectorTypeScript({ selector, highlight, text }) {
     }
     el.scrollIntoView({ behavior: 'smooth', block: 'center' });
     await new Promise((r) => setTimeout(r, 150));
-    el.focus();
-    el.value = ${textLiteral};
-    el.dispatchEvent(new Event('input', { bubbles: true }));
+    if (el instanceof HTMLElement) {
+      try { el.focus({ preventScroll: true }); } catch {}
+      if (typeof el.click === 'function') el.click();
+    }
+    const value = ${textLiteral};
+    const fireInputEvent = (target, name, init) => {
+      try {
+        if (typeof InputEvent === 'function') {
+          target.dispatchEvent(new InputEvent(name, init));
+          return;
+        }
+      } catch {}
+      target.dispatchEvent(new Event(name, { bubbles: true, cancelable: init?.cancelable === true }));
+    };
+    const assignControlValue = (target, next) => {
+      if (target instanceof HTMLInputElement) {
+        const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+        if (setter) setter.call(target, next);
+        else target.value = next;
+        if (typeof target.setSelectionRange === 'function') {
+          const cursor = String(next).length;
+          try { target.setSelectionRange(cursor, cursor); } catch {}
+        }
+        return true;
+      }
+      if (target instanceof HTMLTextAreaElement) {
+        const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
+        if (setter) setter.call(target, next);
+        else target.value = next;
+        if (typeof target.setSelectionRange === 'function') {
+          const cursor = String(next).length;
+          try { target.setSelectionRange(cursor, cursor); } catch {}
+        }
+        return true;
+      }
+      return false;
+    };
+    const editableAssigned = assignControlValue(el, value);
+    if (!editableAssigned) {
+      if (el instanceof HTMLElement && el.isContentEditable) {
+        el.textContent = value;
+      } else {
+        throw new Error('Element not editable: ' + ${selectorLiteral});
+      }
+    }
+    fireInputEvent(el, 'beforeinput', {
+      bubbles: true,
+      cancelable: true,
+      data: value,
+      inputType: 'insertText',
+    });
+    fireInputEvent(el, 'input', {
+      bubbles: true,
+      cancelable: false,
+      data: value,
+      inputType: 'insertText',
+    });
     el.dispatchEvent(new Event('change', { bubbles: true }));
     if (${highlightLiteral} && el instanceof HTMLElement) {
       setTimeout(() => { el.style.outline = restoreOutline; }, 260);

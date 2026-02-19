@@ -35,6 +35,18 @@ const statusEl = document.getElementById('status')!;
 let activeTabCleanup: (() => void) | null = null;
 const mutableApi: any = { ...(window.api || {}), settings: null };
 
+// Tab Icons mapping for visual enhancement
+const tabIcons: Record<TabId, string> = {
+  'setup-wizard': '⚡',
+  'config': '⚙️',
+  'dashboard': '📊',
+  'scheduler': '⏰',
+  'account-manager': '👤',
+  'preflight': '🔧',
+  'logs': '📝',
+  'settings': '🔨',
+};
+
 const ctx: any = {
   api: mutableApi,
   settings: null as any,
@@ -108,13 +120,22 @@ function setActiveTab(id: TabId) {
 
   tabsEl.textContent = '';
   for (const t of tabs.filter((x) => !x.hidden)) {
-    const el = createEl('div', { className: `tab ${t.id === id ? 'active' : ''}` }, [t.label]);
+    const icon = tabIcons[t.id] || '';
+    const el = createEl('div', { className: `tab ${t.id === id ? 'active' : ''}` }, [
+      createEl('span', { className: 'tab-icon' }, [icon]),
+      t.label
+    ]);
     el.dataset.tabId = t.id;
     el.addEventListener('click', () => setActiveTab(t.id));
     tabsEl.appendChild(el);
   }
 
   contentEl.textContent = '';
+  // Add fade-in animation to content
+  contentEl.classList.remove('animate-fade-in');
+  void contentEl.offsetWidth; // Trigger reflow
+  contentEl.classList.add('animate-fade-in');
+  
   const tab = tabs.find((x) => x.id === id)!;
   const dispose = tab.render(contentEl, ctx);
   if (typeof dispose === 'function') activeTabCleanup = dispose;

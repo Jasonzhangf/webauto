@@ -9,7 +9,7 @@ import { logDebug } from '../../../../modules/logging/src/index.js';
 import { getStateBus } from './state-bus.js';
 import { loadOrGenerateFingerprint, applyFingerprint } from './fingerprint.js';
 import { launchEngineContext } from './engine-manager.js';
-import { resolveCookiesRoot, resolveProfilesRoot } from './storage-paths.js';
+import { resolveCookiesRoot, resolveProfilesRoot, resolveRecordsRoot } from './storage-paths.js';
 
 const stateBus = getStateBus();
 
@@ -21,6 +21,25 @@ export interface BrowserSessionOptions {
   userAgent?: string;
   engine?: 'camoufox' | null;
   fingerprintPlatform?: 'windows' | 'macos' | null;
+}
+
+export interface RecordingOptions {
+  name?: string;
+  outputPath?: string;
+  overlay?: boolean;
+}
+
+interface RecordingState {
+  active: boolean;
+  enabled: boolean;
+  name: string | null;
+  outputPath: string | null;
+  overlay: boolean;
+  startedAt: number | null;
+  endedAt: number | null;
+  eventCount: number;
+  lastEventAt: number | null;
+  lastError: string | null;
 }
 
 export class BrowserSession {
@@ -35,8 +54,22 @@ export class BrowserSession {
   private lastCookieSaveTs = 0;
   private runtimeObservers = new Set<(event: any) => void>();
   private bridgedPages = new WeakSet<Page>();
+  private recorderBridgePages = new WeakSet<Page>();
   private lastViewport: { width: number; height: number } | null = null;
   private fingerprint: any = null;
+  private recordingStream: fs.WriteStream | null = null;
+  private recording: RecordingState = {
+    active: false,
+    enabled: false,
+    name: null,
+    outputPath: null,
+    overlay: true,
+    startedAt: null,
+    endedAt: null,
+    eventCount: 0,
+    lastEventAt: null,
+    lastError: null,
+  };
 
   onExit?: (profileId: string) => void;
   private exitNotified = false;
@@ -73,6 +106,7 @@ export class BrowserSession {
       current_url: this.getCurrentUrl(),
       mode: this.mode,
       headless: !!this.options.headless,
+      recording: this.getRecordingStatus(),
     };
   }
 
@@ -111,6 +145,7 @@ export class BrowserSession {
 
     // 应用指纹到上下文（Playwright JS 注入）
     await applyFingerprint(this.context, fingerprint);
+    await this.context.addInitScript({ content: this.buildRecorderBootstrapScript() }).catch(() => {});
 
     // NOTE: deviceScaleFactor override was Chromium-only (CDP). Chromium removed.
 
@@ -138,10 +173,15 @@ export class BrowserSession {
       });
     };
     this.bindRuntimeBridge(page);
-    page.on('domcontentloaded', () => ensure('domcontentloaded'));
+    this.bindRecorderBridge(page);
+    page.on('domcontentloaded', () => {
+      ensure('domcontentloaded');
+      void this.installRecorderRuntime(page, 'domcontentloaded');
+    });
     page.on('framenavigated', (frame) => {
       if (frame === page.mainFrame()) {
         ensure('framenavigated');
+        this.recordPageVisit(page, 'framenavigated');
       }
     });
     page.on('pageerror', (error) => {
@@ -154,6 +194,7 @@ export class BrowserSession {
     });
 
     ensure('initial');
+    void this.installRecorderRuntime(page, 'initial');
   }
 
   addRuntimeEventObserver(observer: (event: any) => void): () => void {
@@ -214,6 +255,514 @@ export class BrowserSession {
     }).catch((err) => {
       console.warn(`[session:${this.id}] failed to expose webauto_dispatch`, err?.message || err);
     });
+  }
+
+  private buildRecorderBootstrapScript(): string {
+    return `(() => {
+      const KEY = '__camoRecorderV1__';
+      if (window[KEY]) return window[KEY].getState();
+
+      const state = {
+        enabled: false,
+        overlay: true,
+        destroyed: false,
+        scrollAt: 0,
+        wheelAt: 0,
+      };
+      const listeners = [];
+      const OVERLAY_ID = '__camo_recorder_toggle__';
+
+      const now = () => Date.now();
+      const safeText = (value, max = 160) => {
+        if (typeof value !== 'string') return '';
+        return value.replace(/\\s+/g, ' ').trim().slice(0, max);
+      };
+      const toNumber = (value, fallback = 0) => {
+        const n = Number(value);
+        return Number.isFinite(n) ? n : fallback;
+      };
+
+      const isVisible = (el) => {
+        if (!(el instanceof Element)) return false;
+        const rect = el.getBoundingClientRect?.();
+        if (!rect || rect.width <= 0 || rect.height <= 0) return false;
+        try {
+          const style = window.getComputedStyle(el);
+          if (!style) return false;
+          if (style.display === 'none') return false;
+          if (style.visibility === 'hidden' || style.visibility === 'collapse') return false;
+          const opacity = Number.parseFloat(String(style.opacity || '1'));
+          if (Number.isFinite(opacity) && opacity <= 0.01) return false;
+        } catch {
+          return false;
+        }
+        return true;
+      };
+
+      const buildSelectorPath = (el) => {
+        if (!(el instanceof Element)) return null;
+        const parts = [];
+        let cursor = el;
+        let depth = 0;
+        while (cursor && depth < 8) {
+          const tag = String(cursor.tagName || '').toLowerCase();
+          if (!tag) break;
+          const id = cursor.id ? '#' + cursor.id : '';
+          const cls = Array.from(cursor.classList || []).slice(0, 2).join('.');
+          let piece = tag + id + (cls ? '.' + cls : '');
+          if (!id) {
+            const parent = cursor.parentElement;
+            if (parent) {
+              const siblings = Array.from(parent.children).filter((item) => item.tagName === cursor.tagName);
+              if (siblings.length > 1) {
+                const nth = siblings.indexOf(cursor) + 1;
+                piece += ':nth-of-type(' + nth + ')';
+              }
+            }
+          }
+          parts.unshift(piece);
+          cursor = cursor.parentElement;
+          depth += 1;
+          if (id) break;
+        }
+        return parts.join(' > ');
+      };
+
+      const resolveElement = (target) => {
+        if (target instanceof Element) return target;
+        if (target && target.scrollingElement instanceof Element) return target.scrollingElement;
+        if (document.activeElement instanceof Element) return document.activeElement;
+        if (document.scrollingElement instanceof Element) return document.scrollingElement;
+        return document.documentElement instanceof Element ? document.documentElement : null;
+      };
+
+      const buildElementPayload = (target) => {
+        const el = resolveElement(target);
+        if (!(el instanceof Element)) return null;
+        const rect = el.getBoundingClientRect?.();
+        const attrs = {};
+        ['name', 'type', 'role', 'placeholder', 'aria-label'].forEach((key) => {
+          const value = el.getAttribute?.(key);
+          if (value) attrs[key] = String(value).slice(0, 120);
+        });
+        let valueSnippet = null;
+        const value = el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement ? el.value : null;
+        if (typeof value === 'string' && value.length > 0) {
+          valueSnippet = value.slice(0, 120);
+        }
+        return {
+          tag: String(el.tagName || '').toLowerCase(),
+          id: el.id || null,
+          classes: Array.from(el.classList || []).slice(0, 6),
+          selectorPath: buildSelectorPath(el),
+          textSnippet: safeText(el.textContent || '', 120),
+          attrs,
+          valueSnippet,
+          visible: isVisible(el),
+          rect: rect
+            ? {
+                x: Math.round(toNumber(rect.x, 0)),
+                y: Math.round(toNumber(rect.y, 0)),
+                width: Math.round(toNumber(rect.width, 0)),
+                height: Math.round(toNumber(rect.height, 0)),
+              }
+            : null,
+        };
+      };
+
+      const emit = (type, payload = {}) => {
+        if (typeof window.webauto_recorder_dispatch !== 'function') return;
+        try {
+          window.webauto_recorder_dispatch({
+            ts: now(),
+            type,
+            payload,
+            href: String(window.location?.href || ''),
+            title: safeText(String(document?.title || ''), 200),
+          });
+        } catch {
+          // ignore bridge errors
+        }
+      };
+
+      const shouldRecord = (event) => {
+        if (state.destroyed || !state.enabled) return false;
+        if (!event) return false;
+        if (typeof event.isTrusted === 'boolean' && !event.isTrusted) return false;
+        return true;
+      };
+
+      const onClick = (event) => {
+        if (!shouldRecord(event)) return;
+        emit('interaction.click', {
+          button: Number(event.button || 0),
+          buttons: Number(event.buttons || 0),
+          element: buildElementPayload(event.target),
+        });
+      };
+
+      const onKeyDown = (event) => {
+        if (!shouldRecord(event)) return;
+        emit('interaction.keydown', {
+          key: String(event.key || ''),
+          code: String(event.code || ''),
+          ctrlKey: !!event.ctrlKey,
+          metaKey: !!event.metaKey,
+          altKey: !!event.altKey,
+          shiftKey: !!event.shiftKey,
+          element: buildElementPayload(event.target || document.activeElement),
+        });
+      };
+
+      const onInput = (event) => {
+        if (!shouldRecord(event)) return;
+        const element = buildElementPayload(event.target || document.activeElement);
+        emit('interaction.input', {
+          inputType: String(event.inputType || ''),
+          data: safeText(String(event.data || ''), 80),
+          element,
+        });
+      };
+
+      const onWheel = (event) => {
+        if (!shouldRecord(event)) return;
+        const ts = now();
+        if (ts - state.wheelAt < 120) return;
+        state.wheelAt = ts;
+        emit('interaction.wheel', {
+          deltaX: toNumber(event.deltaX, 0),
+          deltaY: toNumber(event.deltaY, 0),
+          deltaMode: Number(event.deltaMode || 0),
+          element: buildElementPayload(event.target),
+        });
+      };
+
+      const onScroll = (event) => {
+        if (!shouldRecord(event)) return;
+        const ts = now();
+        if (ts - state.scrollAt < 150) return;
+        state.scrollAt = ts;
+        const target = resolveElement(event.target || document.scrollingElement);
+        const scrollTop = target && typeof target.scrollTop === 'number'
+          ? target.scrollTop
+          : (window.scrollY || document.documentElement.scrollTop || 0);
+        const scrollLeft = target && typeof target.scrollLeft === 'number'
+          ? target.scrollLeft
+          : (window.scrollX || document.documentElement.scrollLeft || 0);
+        emit('interaction.scroll', {
+          scrollTop: Math.round(toNumber(scrollTop, 0)),
+          scrollLeft: Math.round(toNumber(scrollLeft, 0)),
+          element: buildElementPayload(target),
+        });
+      };
+
+      const addListener = (target, type, handler, options) => {
+        target.addEventListener(type, handler, options);
+        listeners.push(() => {
+          try {
+            target.removeEventListener(type, handler, options);
+          } catch {
+            // ignore
+          }
+        });
+      };
+
+      const getOverlayButton = () => document.getElementById(OVERLAY_ID);
+      const applyOverlay = () => {
+        const existing = getOverlayButton();
+        if (existing && !state.overlay) {
+          existing.remove();
+          return;
+        }
+        if (!state.overlay) return;
+        const btn = existing || document.createElement('button');
+        btn.id = OVERLAY_ID;
+        btn.type = 'button';
+        btn.textContent = state.enabled ? 'REC ON' : 'REC OFF';
+        Object.assign(btn.style, {
+          position: 'fixed',
+          right: '16px',
+          bottom: '16px',
+          zIndex: '2147483647',
+          border: '0',
+          borderRadius: '999px',
+          background: state.enabled ? '#d63636' : '#5b6575',
+          color: '#fff',
+          padding: '8px 12px',
+          fontSize: '12px',
+          fontFamily: 'monospace',
+          cursor: 'pointer',
+          boxShadow: '0 4px 14px rgba(0,0,0,0.25)',
+        });
+        if (!existing) {
+          btn.addEventListener('click', () => {
+            state.enabled = !state.enabled;
+            applyOverlay();
+            emit('recording.toggled', { enabled: state.enabled, source: 'overlay' });
+          });
+          (document.body || document.documentElement || document).appendChild(btn);
+        }
+      };
+
+      addListener(document, 'click', onClick, true);
+      addListener(document, 'keydown', onKeyDown, true);
+      addListener(document, 'input', onInput, true);
+      addListener(window, 'wheel', onWheel, { capture: true, passive: true });
+      addListener(window, 'scroll', onScroll, { capture: true, passive: true });
+
+      const api = {
+        setOptions(options = {}) {
+          if (typeof options.enabled === 'boolean') {
+            state.enabled = options.enabled;
+          }
+          if (typeof options.overlay === 'boolean') {
+            state.overlay = options.overlay;
+          }
+          applyOverlay();
+          return this.getState();
+        },
+        getState() {
+          return {
+            ok: true,
+            enabled: !!state.enabled,
+            overlay: !!state.overlay,
+            href: String(window.location?.href || ''),
+          };
+        },
+        destroy() {
+          state.destroyed = true;
+          while (listeners.length) {
+            const dispose = listeners.pop();
+            try {
+              dispose && dispose();
+            } catch {
+              // ignore
+            }
+          }
+          const existing = getOverlayButton();
+          if (existing) existing.remove();
+          try {
+            delete window[KEY];
+          } catch {
+            window[KEY] = undefined;
+          }
+          return { ok: true };
+        },
+      };
+
+      window[KEY] = api;
+      applyOverlay();
+      emit('recording.runtime_ready', { enabled: state.enabled, overlay: state.overlay });
+      return api.getState();
+    })();`;
+  }
+
+  private bindRecorderBridge(page: Page) {
+    if (this.recorderBridgePages.has(page)) return;
+    this.recorderBridgePages.add(page);
+    page.exposeFunction('webauto_recorder_dispatch', (evt: any) => {
+      this.handleRecorderEvent(page, evt);
+    }).catch((err) => {
+      console.warn(`[session:${this.id}] failed to expose webauto_recorder_dispatch`, err?.message || err);
+    });
+  }
+
+  private async installRecorderRuntime(page: Page, reason: string): Promise<void> {
+    if (!page || page.isClosed()) return;
+    try {
+      await page.evaluate(this.buildRecorderBootstrapScript());
+    } catch {
+      return;
+    }
+    if (this.recording.active) {
+      await this.syncRecorderStateToPage(page).catch(() => {});
+      this.recordPageVisit(page, reason);
+    }
+  }
+
+  private async syncRecorderStateToPage(page: Page): Promise<void> {
+    if (!page || page.isClosed()) return;
+    await page.evaluate(
+      (options) => {
+        const runtime = (window as any).__camoRecorderV1__;
+        if (!runtime || typeof runtime.setOptions !== 'function') return null;
+        return runtime.setOptions(options);
+      },
+      { enabled: this.recording.enabled, overlay: this.recording.overlay },
+    );
+  }
+
+  private normalizeRecordingName(raw?: string): string {
+    const text = String(raw || '').trim();
+    const fallback = `record-${this.id}`;
+    if (!text) return fallback;
+    return text.replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 120) || fallback;
+  }
+
+  private buildRecordingFilename(name: string): string {
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    return `${stamp}-${name}.jsonl`;
+  }
+
+  private resolveRecordingOutputPath(options: RecordingOptions): string {
+    const name = this.normalizeRecordingName(options?.name);
+    const rawOutput = String(options?.outputPath || '').trim();
+    if (!rawOutput) {
+      const root = path.join(resolveRecordsRoot(), this.id);
+      return path.join(root, this.buildRecordingFilename(name));
+    }
+    const absolute = path.isAbsolute(rawOutput) ? rawOutput : path.resolve(rawOutput);
+    if (absolute.endsWith(path.sep)) {
+      return path.join(absolute, this.buildRecordingFilename(name));
+    }
+    if (fs.existsSync(absolute) && fs.statSync(absolute).isDirectory()) {
+      return path.join(absolute, this.buildRecordingFilename(name));
+    }
+    return absolute;
+  }
+
+  private writeRecordingEvent(
+    type: string,
+    payload: any = {},
+    options: { pageUrl?: string; allowWhenDisabled?: boolean } = {},
+  ) {
+    if (!this.recordingStream || !this.recording.active) return;
+    if (!this.recording.enabled && !options.allowWhenDisabled) return;
+    const eventTs = Date.now();
+    const entry = {
+      ts: eventTs,
+      profileId: this.id,
+      sessionId: this.id,
+      type,
+      url: options.pageUrl || this.getCurrentUrl() || null,
+      payload,
+    };
+    try {
+      this.recordingStream.write(`${JSON.stringify(entry)}\n`);
+      this.recording.eventCount += 1;
+      this.recording.lastEventAt = eventTs;
+    } catch (err) {
+      this.recording.lastError = (err as Error)?.message || String(err);
+    }
+  }
+
+  private handleRecorderEvent(page: Page, evt: any) {
+    const type = String(evt?.type || '').trim();
+    if (!type) return;
+    const pageUrl = String(evt?.href || page?.url?.() || this.getCurrentUrl() || '');
+    const payload = evt?.payload && typeof evt.payload === 'object' ? evt.payload : {};
+
+    if (type === 'recording.toggled') {
+      if (!this.recording.active) {
+        this.recording.enabled = false;
+        return;
+      }
+      this.recording.enabled = payload.enabled !== false;
+      this.writeRecordingEvent(type, payload, { pageUrl, allowWhenDisabled: true });
+      return;
+    }
+    if (type === 'recording.runtime_ready') {
+      this.writeRecordingEvent(type, payload, { pageUrl, allowWhenDisabled: true });
+      return;
+    }
+    this.writeRecordingEvent(type, payload, { pageUrl });
+  }
+
+  private recordPageVisit(page: Page, reason: string) {
+    const pageUrl = page?.url?.() || this.getCurrentUrl() || null;
+    if (!pageUrl) return;
+    this.lastKnownUrl = pageUrl;
+    this.writeRecordingEvent(
+      'page.visit',
+      { reason, title: null },
+      { pageUrl },
+    );
+  }
+
+  getRecordingStatus(): RecordingState {
+    return { ...this.recording };
+  }
+
+  async startRecording(options: RecordingOptions = {}): Promise<RecordingState> {
+    const outputPath = this.resolveRecordingOutputPath(options);
+    const name = this.normalizeRecordingName(options?.name);
+    const overlay = options?.overlay !== false;
+
+    if (this.recordingStream) {
+      await this.stopRecording({ reason: 'restart' });
+    }
+
+    await fs.promises.mkdir(path.dirname(outputPath), { recursive: true });
+    const stream = fs.createWriteStream(outputPath, { flags: 'a', encoding: 'utf-8' });
+    stream.on('error', (err) => {
+      this.recording.lastError = (err as Error)?.message || String(err);
+      this.recording.enabled = false;
+    });
+    this.recordingStream = stream;
+
+    this.recording = {
+      active: true,
+      enabled: true,
+      name,
+      outputPath,
+      overlay,
+      startedAt: Date.now(),
+      endedAt: null,
+      eventCount: 0,
+      lastEventAt: null,
+      lastError: null,
+    };
+
+    if (this.context) {
+      const pages = this.context.pages().filter((p) => !p.isClosed());
+      for (const page of pages) {
+        this.bindRecorderBridge(page);
+        // eslint-disable-next-line no-await-in-loop
+        await this.installRecorderRuntime(page, 'recording_start').catch(() => {});
+      }
+    }
+
+    this.writeRecordingEvent(
+      'recording.start',
+      { name, outputPath, overlay },
+      { allowWhenDisabled: true },
+    );
+    return this.getRecordingStatus();
+  }
+
+  async stopRecording(options: { reason?: string } = {}): Promise<RecordingState> {
+    if (!this.recordingStream) {
+      this.recording.active = false;
+      this.recording.enabled = false;
+      this.recording.overlay = false;
+      this.recording.endedAt = Date.now();
+      return this.getRecordingStatus();
+    }
+
+    this.writeRecordingEvent(
+      'recording.stop',
+      { reason: options.reason || 'manual' },
+      { allowWhenDisabled: true },
+    );
+    this.recording.enabled = false;
+    this.recording.active = false;
+    this.recording.overlay = false;
+    this.recording.endedAt = Date.now();
+
+    if (this.context) {
+      const pages = this.context.pages().filter((p) => !p.isClosed());
+      for (const page of pages) {
+        // eslint-disable-next-line no-await-in-loop
+        await this.syncRecorderStateToPage(page).catch(() => {});
+      }
+    }
+
+    const stream = this.recordingStream;
+    this.recordingStream = null;
+    await new Promise<void>((resolve) => {
+      stream.end(() => resolve());
+    });
+    return this.getRecordingStatus();
   }
 
   private getActivePage(): Page | null {
@@ -857,6 +1406,7 @@ export class BrowserSession {
 
   async close(): Promise<void> {
     try {
+      await this.stopRecording({ reason: 'session_close' }).catch(() => {});
       await this.context?.close();
     } finally {
       await this.browser?.close();

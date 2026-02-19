@@ -156,6 +156,7 @@ export class SessionManager {
       current_url: session.getCurrentUrl(),
       mode: session.modeName,
       owner_pid: this.owners.get(session.id)?.pid || null,
+      recording: session.getRecordingStatus(),
     }));
   }
 
