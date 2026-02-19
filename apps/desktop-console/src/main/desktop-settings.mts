@@ -35,7 +35,7 @@ export type CrawlConfig = {
 
 export type DesktopConsoleSettings = {
   unifiedApiUrl: string;
-  browserServiceUrl: string;
+  camoRuntimeUrl: string;
   searchGateUrl: string;
   downloadRoot: string;
   defaultEnv: 'debug' | 'prod';
@@ -125,7 +125,13 @@ function normalizeSettings(defaults: Partial<DesktopConsoleSettings>, input: Par
   }
   const merged: DesktopConsoleSettings = {
     unifiedApiUrl: String(input.unifiedApiUrl || defaults.unifiedApiUrl || 'http://127.0.0.1:7701'),
-    browserServiceUrl: String(input.browserServiceUrl || defaults.browserServiceUrl || 'http://127.0.0.1:7704'),
+    camoRuntimeUrl: String(
+      (input as any).camoRuntimeUrl ||
+      (input as any).browserServiceUrl ||
+      (defaults as any).camoRuntimeUrl ||
+      (defaults as any).browserServiceUrl ||
+      'http://127.0.0.1:7704',
+    ),
     searchGateUrl: String(input.searchGateUrl || defaults.searchGateUrl || 'http://127.0.0.1:7790'),
     downloadRoot: String(input.downloadRoot || defaults.downloadRoot || resolveDefaultDownloadRoot()),
     defaultEnv: (String(input.defaultEnv || defaults.defaultEnv || 'prod') === 'prod' ? 'prod' : 'debug'),
@@ -209,7 +215,7 @@ async function readDefaultSettingsFromAppRoot(appRoot: string): Promise<DesktopC
 
   const base: Partial<DesktopConsoleSettings> = {
     unifiedApiUrl: raw.unifiedApiUrl,
-    browserServiceUrl: raw.browserServiceUrl,
+    camoRuntimeUrl: (raw as any).camoRuntimeUrl || (raw as any).browserServiceUrl,
     searchGateUrl: raw.searchGateUrl,
     defaultEnv: raw.defaultEnv as any,
     defaultKeyword: raw.defaultKeyword,

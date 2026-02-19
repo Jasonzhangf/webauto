@@ -33,6 +33,9 @@ function summarizeTasks(tasks = []) {
   const rows = tasks.map((task) => {
     const runId = asText(task?.runId || task?.id || '');
     const status = asText(task?.status || 'unknown').toLowerCase();
+    const progressPayload = task?.progress && typeof task.progress === 'object' ? task.progress : null;
+    const processed = Number(progressPayload?.processed ?? task?.progress ?? task?.current ?? 0) || 0;
+    const total = Number(progressPayload?.total ?? task?.total ?? 0) || 0;
     if (status === 'running' || status === 'starting') totals.running += 1;
     else if (status === 'queued' || status === 'pending') totals.queued += 1;
     else if (status === 'completed' || status === 'success' || status === 'succeeded') totals.succeeded += 1;
@@ -43,8 +46,8 @@ function summarizeTasks(tasks = []) {
       runId,
       status,
       phase: asText(task?.phase || task?.lastPhase || ''),
-      progress: Number(task?.progress || task?.current || 0) || 0,
-      total: Number(task?.total || 0) || 0,
+      progress: processed,
+      total,
       updatedAt: asText(task?.updatedAt || task?.lastActiveAt || ''),
       error: asText(task?.error || ''),
     };

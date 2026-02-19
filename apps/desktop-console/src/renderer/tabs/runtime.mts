@@ -139,13 +139,13 @@ export function renderRuntime(root: HTMLElement, ctx: any) {
 
   refreshBtn.onclick = () => void refresh();
 
-  section('Runtime Dashboard', [
+  root.appendChild(section('Runtime Dashboard', [
     createEl('div', { style: 'display:flex; gap:8px; align-items:center;' }, [refreshBtn, status]),
     list,
     createEl('div', { className: 'muted' }, [
       '提示：颜色与 alias 会持久化到 settings；颜色也会 best-effort 写入浏览器页面 title（用于在浏览器窗口标题/Tab 上区分）。',
     ]),
-  ]).forEach((x) => root.appendChild(x));
+  ]));
 
   void refresh();
 }

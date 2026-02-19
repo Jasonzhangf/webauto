@@ -262,10 +262,6 @@ export function renderRun(root: HTMLElement, ctx: any) {
       }
     }
 
-    // Persist last-used keyword/target/env for next run.
-    const targetNum = Number(target);
-    persistRunInputs({ keyword, target: Number.isFinite(targetNum) ? targetNum : undefined, env, dryRun: dryRun.checked });
-
     const common = buildArgs([
       ...(keyword ? ['--keyword', keyword] : []),
       ...(target ? ['--target', target] : []),
@@ -279,6 +275,11 @@ export function renderRun(root: HTMLElement, ctx: any) {
       return;
     }
     const profileArgs = resolved.args;
+
+    // Persist last-used keyword/target/env after profile resolution to avoid
+    // settings change callbacks clearing profile inputs before run starts.
+    const targetNum = Number(target);
+    persistRunInputs({ keyword, target: Number.isFinite(targetNum) ? targetNum : undefined, env, dryRun: dryRun.checked });
 
     const extraArgs = extra ? extra.split(' ').filter(Boolean) : [];
 

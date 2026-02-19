@@ -81,13 +81,15 @@ function printMainHelp() {
 Usage:
   webauto --help
   webauto account --help
-  webauto ui console --help
+  webauto schedule --help
+  webauto ui --help
   webauto xhs --help
 
 Core Commands:
   webauto account <list|sync|add|get|update|delete|login|sync-alias> [options]
+  webauto schedule <list|get|add|update|delete|import|export|run|run-due|daemon> [options]
   webauto ui console [--build] [--install] [--check]
-  webauto ui test <scenario> [options]
+  webauto ui cli <action> [options]
   webauto xhs install [--download-browser] [--download-geoip] [--ensure-backend]
   webauto xhs unified [xhs options...]
   webauto xhs status [--run-id <id>] [--json]
@@ -102,29 +104,33 @@ Examples (standard):
   webauto account list
   webauto account login xhs-0001 --url https://www.xiaohongshu.com
   webauto account sync-alias xhs-0001
+  webauto schedule add --name "工作服-半小时" --schedule-type interval --interval-minutes 30 --profile xiaohongshu-batch-1 --keyword "工作服定制" --max-notes 50 --env debug
+  webauto schedule list
+  webauto schedule daemon --interval-sec 30
   webauto ui console --check
   webauto ui console --build
   webauto ui console --install
-  webauto ui test env-check
-  webauto ui test account-flow --profile test-001
-  webauto ui test config-save --output ./report.json
-  webauto ui test crawl-run --keyword "测试" --target 10
+  webauto ui cli start --build
+  webauto ui cli tab --tab 配置
+  webauto ui cli input --selector "#keyword-input" --value "seedance2.0"
+  webauto ui cli click --selector "#start-btn"
   webauto xhs install --ensure-backend
   webauto xhs unified --profile xiaohongshu-batch-1 --keyword "seedance2.0" --max-notes 100 --do-comments true --persist-comments true --do-likes true --like-keywords "真牛逼" --env debug --tab-count 4
 
 Tips:
   - xhs 命令会转发到 apps/webauto/entry/xhs-*.mjs
   - account 命令会转发到 apps/webauto/entry/account.mjs
+  - schedule 命令会转发到 apps/webauto/entry/schedule.mjs
   - 全量参数请看: webauto xhs --help
 `);
 }
 
 function printUiConsoleHelp() {
-  console.log(`webauto ui console
+  console.log(`webauto ui
 
 Usage:
   webauto ui console [--build] [--install] [--check] [--no-daemon]
-  webauto ui test <scenario> [options]
+  webauto ui cli <action> [options]
 
 Options:
   --check       只检查构建/依赖状态，不启动 UI
@@ -132,27 +138,40 @@ Options:
   --install     缺少依赖时自动安装
   --no-daemon   前台模式运行（不后台守护）
 
-Test Scenarios:
-  env-check     环境检查（camo CLI + 服务健康）
-  account-flow  账户创建/登录流程测试
-  config-save   配置导入/导出测试
-  crawl-run     完整爬取流程测试（dry-run 模式）
+CLI Actions:
+  start         启动 UI（可配合 --build/--install）
+  status        获取 UI 运行状态（含 runId/错误计数）
+  snapshot      获取 UI 快照（含当前 tab 与关键控件值）
+  tab           切换 tab（--tab config 或 --label 配置）
+  click         点击控件（--selector）
+  focus         聚焦控件（--selector）
+  input         输入文本（--selector --value）
+  select        选择下拉项（--selector --value）
+  press         输入按键（--key Enter/Escape）
+  probe         读取控件状态（exists/count/value/text/checked）
+  click-text    按文案点击按钮（无 id 控件）
+  dialogs       控制 alert/confirm/prompt 静默模式
+  wait          等待元素状态（--selector --state visible|exists|hidden）
+  run           按 steps.json 执行动作序列
+  full-cover    真实 UI CLI 全功能覆盖回归（无 mock）
 
-Test Options:
-  --profile <id>   测试用 profile ID
-  --keyword <kw>   测试关键词
-  --target <n>     目标数量
-  --headless       无头模式
-  --output <path>  输出 JSON 报告路径
+Common Options:
+  --auto-start    未检测到 UI 时自动拉起
+  --host <host>   控制通道 host（默认 127.0.0.1）
+  --port <n>      控制通道端口（默认 7716）
+  --json          输出 JSON
 
 Examples:
   webauto ui console --check
   webauto ui console --build
   webauto ui console --install
-  webauto ui test env-check
-  webauto ui test account-flow --profile test-001
-  webauto ui test config-save --output ./report.json
-  webauto ui test crawl-run --keyword "测试" --target 10 --headless
+  webauto ui cli start --build
+  webauto ui cli status --json
+  webauto ui cli tab --tab 配置
+  webauto ui cli input --selector "#keyword-input" --value "春晚"
+  webauto ui cli click --selector "#start-btn"
+  webauto ui cli probe --selector "#start-btn"
+  webauto ui cli full-cover --build --output ./.tmp/ui-cli-full-cover.json
 `);
 }
 
@@ -258,6 +277,32 @@ Examples:
   webauto account sync all
   webauto account list --records
   webauto account login xiaohongshu-batch-1 --url https://www.xiaohongshu.com
+`);
+}
+
+function printScheduleHelp() {
+  console.log(`webauto schedule
+
+Usage:
+  webauto schedule --help
+  webauto schedule list [--json]
+  webauto schedule get <taskId> [--json]
+  webauto schedule add [options]
+  webauto schedule update <taskId> [options]
+  webauto schedule delete <taskId> [--json]
+  webauto schedule import [--file <path> | --payload-json <json>] [--json]
+  webauto schedule export [taskId] [--file <path>] [--json]
+  webauto schedule run <taskId> [--json]
+  webauto schedule run-due [--limit <n>] [--json]
+  webauto schedule daemon [--interval-sec <n>] [--limit <n>] [--once] [--json]
+
+Examples:
+  webauto schedule add --name "deepseek-每30分钟" --schedule-type interval --interval-minutes 30 --profile xiaohongshu-batch-1 --keyword deepseek --max-notes 100 --do-comments true --do-likes true --like-keywords 牛逼 --env debug
+  webauto schedule add --name "每天早上任务" --schedule-type daily --run-at 2026-02-20T09:00:00+08:00 --max-runs 30 --profile xiaohongshu-batch-1 --keyword 工作服
+  webauto schedule add --name "每周巡检" --schedule-type weekly --run-at 2026-02-22T10:30:00+08:00 --max-runs 8 --profile xiaohongshu-batch-1 --keyword deepseek
+  webauto schedule list
+  webauto schedule run-due --json
+  webauto schedule daemon --interval-sec 30
 `);
 }
 
@@ -433,7 +478,11 @@ async function main() {
       printAccountHelp();
       return;
     }
-    if (cmd === 'ui' && sub === 'console') {
+    if (cmd === 'schedule') {
+      printScheduleHelp();
+      return;
+    }
+    if (cmd === 'ui') {
       printUiConsoleHelp();
       return;
     }
@@ -482,15 +531,27 @@ async function main() {
     return;
   }
 
+  if (cmd === 'ui' && sub === 'cli') {
+    const script = path.join(ROOT, 'apps', 'desktop-console', 'entry', 'ui-cli.mjs');
+    await run(process.execPath, [script, ...rawArgv.slice(2)]);
+    return;
+  }
 
-  // Delegate to ui-console.mjs for test scenarios
+  // Legacy: keep compatibility for historical `ui test` usage.
   if (cmd === 'ui' && sub === 'test') {
+    console.warn('[webauto] `ui test` 已废弃，建议改用 `webauto ui cli ...`。');
     const uiConsoleScript = path.join(ROOT, 'apps', 'desktop-console', 'entry', 'ui-console.mjs');
     await run(process.execPath, [uiConsoleScript, ...rawArgv.slice(1)]);
     return;
   }
   if (cmd === 'account') {
     const script = path.join(ROOT, 'apps', 'webauto', 'entry', 'account.mjs');
+    await run(process.execPath, [script, ...rawArgv.slice(1)]);
+    return;
+  }
+
+  if (cmd === 'schedule') {
+    const script = path.join(ROOT, 'apps', 'webauto', 'entry', 'schedule.mjs');
     await run(process.execPath, [script, ...rawArgv.slice(1)]);
     return;
   }

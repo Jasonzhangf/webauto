@@ -148,6 +148,7 @@ test('xiaohongshu add-account flow creates profile then starts login-profile run
   assert.match(account, /cmdRunJson/);
   assert.match(account, /cmdSpawn/);
   assert.match(account, /await refreshProfileChoices\(targetProfile\)/);
+  assert.doesNotMatch(account, /--browser-service/);
 });
 
 test('xiaohongshu account flow uses one fixed profile naming prefix', async () => {

@@ -147,6 +147,7 @@ test('renderer index boots onboarding tabs and responds to cmd events', async ()
     assert.ok(findTabByText(tabsRoot, '初始化'));
     assert.ok(findTabByText(tabsRoot, '配置'));
     assert.ok(findTabByText(tabsRoot, '看板'));
+    assert.ok(findTabByText(tabsRoot, '定时任务'));
     assert.ok(findTabByText(tabsRoot, '账户管理'));
 
     findTabByText(tabsRoot, '配置').click();

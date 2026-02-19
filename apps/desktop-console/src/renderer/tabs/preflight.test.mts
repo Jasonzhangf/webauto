@@ -30,4 +30,5 @@ test('preflight includes onboarding and profilepool in same tab', async () => {
   assert.match(src, /const commitAlias = async \(\) =>/);
   assert.match(src, /aliasInput\.onblur = \(\) => void commitAlias\(\);/);
   assert.match(src, /source: 'auto'/);
+  assert.doesNotMatch(src, /--browser-service/);
 });

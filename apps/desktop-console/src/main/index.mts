@@ -38,6 +38,7 @@ type RunJsonSpec = {
 type UiSettings = DesktopConsoleSettings;
 import { stateBridge } from './state-bridge.mts';
 import { checkCamoCli, checkServices, checkFirefox, checkGeoIP, checkEnvironment } from './env-check.mts';
+import { UiCliBridge } from './ui-cli-bridge.mts';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const APP_ROOT = path.resolve(__dirname, '../..'); // apps/desktop-console/dist/main -> apps/desktop-console
@@ -163,6 +164,7 @@ function ensureStateBridge() {
 }
 
 let win: BrowserWindow | null = null;
+const uiCliBridge = new UiCliBridge({ getWindow: getWin });
 
 configureElectronPaths();
 
@@ -690,6 +692,7 @@ function createWindow() {
 
 app.on('window-all-closed', () => {
   killAllRuns('window_closed');
+  void uiCliBridge.stop();
   // macOS 下关闭窗口后也退出应用，避免命令行挂起
   app.quit();
 });
@@ -697,6 +700,7 @@ app.on('window-all-closed', () => {
 // 确保窗口关闭时命令行能退出
 app.on('before-quit', () => {
   killAllRuns('before_quit');
+  void uiCliBridge.stop();
   stopCoreServiceHeartbeat();
   void stopCoreServicesBestEffort('before_quit');
   if (heartbeatWatchdog) {
@@ -707,6 +711,7 @@ app.on('before-quit', () => {
 
 app.on('will-quit', () => {
   killAllRuns('will_quit');
+  void uiCliBridge.stop();
   stopCoreServiceHeartbeat();
   void stopCoreServicesBestEffort('will_quit');
   stateBridge.stop();
@@ -721,6 +726,9 @@ app.whenReady().then(async () => {
   markUiHeartbeat('main_ready');
   ensureHeartbeatWatchdog();
   createWindow();
+  await uiCliBridge.start().catch((err) => {
+    console.warn('[desktop-console] ui-cli bridge start failed', err);
+  });
 });
 
 ipcMain.on('preload:test', () => {
@@ -887,7 +895,7 @@ ipcMain.handle('env:checkGeoIP', async () => checkGeoIP());
 ipcMain.handle('env:checkAll', async () => checkEnvironment());
 ipcMain.handle('env:repairCore', async () => {
   const ok = await startCoreDaemon().catch(() => false);
-  const services = await checkServices().catch(() => ({ unifiedApi: false, browserService: false }));
+  const services = await checkServices().catch(() => ({ unifiedApi: false, camoRuntime: false }));
   return { ok, services };
 });
 ipcMain.handle('env:repairDeps', async (_evt, input: { core?: boolean; browser?: boolean; geoip?: boolean }) => {
@@ -900,7 +908,7 @@ ipcMain.handle('env:repairDeps', async (_evt, input: { core?: boolean; browser?:
     const coreOk = await startCoreDaemon().catch(() => false);
     result.core = {
       ok: coreOk,
-      services: await checkServices().catch(() => ({ unifiedApi: false, browserService: false })),
+      services: await checkServices().catch(() => ({ unifiedApi: false, camoRuntime: false })),
     };
     if (!coreOk) result.ok = false;
   }

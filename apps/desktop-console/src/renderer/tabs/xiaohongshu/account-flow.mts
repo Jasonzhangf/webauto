@@ -406,8 +406,6 @@ export function createAccountFlowController(opts: AccountFlowOptions): AccountFl
       '--timeout-sec',
       String(timeoutSec),
       '--keep-session',
-      ...(api?.settings?.unifiedApiUrl ? ['--unified-api', String(api.settings.unifiedApiUrl)] : []),
-      ...(api?.settings?.browserServiceUrl ? ['--browser-service', String(api.settings.browserServiceUrl)] : []),
     ];
     api?.appendLog?.(`[ui] spawn profilepool login-profile profile=${targetProfile} timeout=${timeoutSec}s`);
     try {

@@ -13,10 +13,11 @@ async function getSrc() {
 
 test('main tabs use onboarding flow and keep logs before settings', async () => {
   const src = await getSrc();
-  assert.match(src, /type TabId = 'setup-wizard' \| 'config' \| 'dashboard' \| 'account-manager' \| 'preflight' \| 'logs' \| 'settings';/);
+  assert.match(src, /type TabId = 'setup-wizard' \| 'config' \| 'dashboard' \| 'scheduler' \| 'account-manager' \| 'preflight' \| 'logs' \| 'settings';/);
   assert.match(src, /\{ id: 'setup-wizard', label: '[^']+', render: renderSetupWizard \}/);
   assert.match(src, /\{ id: 'config', label: '[^']+', render: renderConfigPanel \}/);
   assert.match(src, /\{ id: 'dashboard', label: '[^']+', render: renderDashboard \}/);
+  assert.match(src, /\{ id: 'scheduler', label: '[^']+', render: renderSchedulerPanel \}/);
   assert.match(src, /\{ id: 'account-manager', label: '[^']+', render: renderAccountManager \}/);
   assert.match(src, /\{ id: 'preflight', label: '[^']+', render: renderPreflight, hidden: true \}/);
   assert.match(src, /\{ id: 'logs', label: '[^']+', render: renderLogs \}/);

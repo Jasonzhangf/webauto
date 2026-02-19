@@ -5,7 +5,7 @@ import { renderSetupWizard } from './tabs-new/setup-wizard.mts';
 import { renderConfigPanel } from './tabs-new/config-panel.mts';
 import { renderDashboard } from './tabs-new/dashboard.mts';
 import { renderAccountManager } from './tabs-new/account-manager.mts';
-import { listAccountProfiles } from './account-source.mts';
+import { renderSchedulerPanel } from './tabs-new/scheduler.mts';
 import { createEl } from './ui-components.mts';
 
 declare global {
@@ -14,7 +14,7 @@ declare global {
   }
 }
 
-type TabId = 'setup-wizard' | 'config' | 'dashboard' | 'account-manager' | 'preflight' | 'logs' | 'settings';
+type TabId = 'setup-wizard' | 'config' | 'dashboard' | 'scheduler' | 'account-manager' | 'preflight' | 'logs' | 'settings';
 
 type TabRender = (root: HTMLElement, ctx: any) => void | (() => void);
 
@@ -22,6 +22,7 @@ const tabs: Array<{ id: TabId; label: string; render: TabRender; hidden?: boolea
   { id: 'setup-wizard', label: '初始化', render: renderSetupWizard },
   { id: 'config', label: '配置', render: renderConfigPanel },
   { id: 'dashboard', label: '看板', render: renderDashboard },
+  { id: 'scheduler', label: '定时任务', render: renderSchedulerPanel },
   { id: 'account-manager', label: '账户管理', render: renderAccountManager },
   { id: 'preflight', label: '旧预处理', render: renderPreflight, hidden: true },
   { id: 'logs', label: '日志', render: renderLogs },
@@ -108,6 +109,7 @@ function setActiveTab(id: TabId) {
   tabsEl.textContent = '';
   for (const t of tabs.filter((x) => !x.hidden)) {
     const el = createEl('div', { className: `tab ${t.id === id ? 'active' : ''}` }, [t.label]);
+    el.dataset.tabId = t.id;
     el.addEventListener('click', () => setActiveTab(t.id));
     tabsEl.appendChild(el);
   }
@@ -158,10 +160,8 @@ function installCmdEvents() {
 async function detectStartupTab(): Promise<TabId> {
   try {
     const env = typeof window.api?.envCheckAll === 'function' ? await window.api.envCheckAll() : null;
-    const rows = await listAccountProfiles(window.api).catch(() => []);
-    const hasAccount = rows.some((row) => row.valid);
     const envReady = Boolean(env?.allReady);
-    if (envReady && hasAccount) return 'config';
+    if (envReady) return 'config';
   } catch {
     // ignore and fallback to setup
   }

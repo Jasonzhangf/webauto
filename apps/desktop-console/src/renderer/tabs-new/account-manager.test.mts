@@ -13,10 +13,8 @@ async function getSrc() {
 
 test('account manager keeps alias optional and starts profilepool login', async () => {
   const src = await getSrc();
-  assert.match(src, /prompt\('请输入新账户别名（可留空，登录后自动识别）:'\)/);
-  assert.match(src, /if \(aliasInput === null\) return;/);
-  assert.match(src, /const alias = aliasInput\.trim\(\);/);
-  assert.match(src, /if \(alias\) \{/);
+  assert.match(src, /const alias = newAccountAliasInput\.value\.trim\(\);/);
+  assert.match(src, /\.\.\.\(alias \? \['--alias', alias\] : \[\]\)/);
   assert.match(src, /'account\.mjs'/);
   assert.match(src, /'add'/);
   assert.match(src, /'--status'/);

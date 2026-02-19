@@ -21,51 +21,74 @@ npm start
 
 ## UI 自动化 CLI
 
-### 启动控制台
+`webauto ui cli` 用于真实驱动 Desktop UI（不是 mock，不是静态断言）。
 
 ```bash
-# 检查构建状态
-webauto ui console --check
+# 查看命令
+webauto ui cli --help
 
-# 自动构建并启动
-webauto ui console --build
+# 自动构建并启动控制台（若未启动）
+webauto ui cli start --build
 
-# 前台模式运行
+# 当前状态/快照
+webauto ui cli status --json
+webauto ui cli snapshot --json
+```
+
+### 常用动作
+
+```bash
+webauto ui cli tab --tab 配置
+webauto ui cli input --selector "#keyword-input" --value "春晚"
+webauto ui cli input --selector "#target-input" --value "100"
+webauto ui cli click --selector "#start-btn"
+
+# 探测与等待
+webauto ui cli probe --selector "#run-id-text" --json
+webauto ui cli wait --selector "#run-id-text" --state exists --timeout 20000
+
+# 按文本点击（避免 brittle selector）
+webauto ui cli click-text --text "保存"
+
+# 结束后关闭窗口
+webauto ui cli stop
+```
+
+### 一键真实覆盖（推荐）
+
+```bash
+webauto ui cli full-cover --json
+```
+
+默认输出报告：
+- `.tmp/ui-cli-full-cover-<timestamp>.json`
+- 报告包含：`steps`、`controls`、`coverage`（总数/通过/失败 + 分页签统计）
+
+### 测试与门禁（本地/CI 一致）
+
+```bash
+# 渲染层回归
+npm --prefix apps/desktop-console run test:renderer
+
+# 覆盖门禁（当前阈值：line/statements >=90, functions >=85, branches >=55）
+npm --prefix apps/desktop-console run test:renderer:coverage
+
+# Desktop 构建
+npm --prefix apps/desktop-console run build
+```
+
+### 常见调试流程
+
+```bash
+# 1) 前台启动 UI（便于看日志）
 webauto ui console --no-daemon
+
+# 2) 用 UI CLI 驱动并观察状态回流
+webauto ui cli start
+webauto ui cli tab --tab 看板
+webauto ui cli probe --selector "#error-count-text" --json
+webauto ui cli snapshot --json
 ```
-
-### 自动化测试
-
-```bash
-# 环境检查测试
-webauto ui test env-check
-
-# 账户流程测试
-webauto ui test account-flow --profile test-001
-
-# 配置保存测试
-webauto ui test config-save --output ./report.json
-
-# 爬取流程测试 (dry-run)
-webauto ui test crawl-run --keyword "测试" --target 10 --headless
-```
-
-### 测试场景
-
-| 场景 | 说明 |
-|------|------|
-| `env-check` | 检查 camo CLI、Unified API (7701)、Browser Service (7704) |
-| `account-flow` | 测试 profile 创建流程 |
-| `config-save` | 测试配置导入/导出功能 |
-| `crawl-run` | 测试完整爬取流程 (dry-run 模式) |
-
-### 测试选项
-
-- `--profile <id>` - 指定测试用 profile ID
-- `--keyword <kw>` - 测试关键词
-- `--target <n>` - 目标数量
-- `--headless` - 无头模式运行
-- `--output <path>` - 输出 JSON 测试报告
 
 ## UI Tabs
 
@@ -83,12 +106,14 @@ webauto ui test crawl-run --keyword "测试" --target 10 --headless
 ```
 apps/desktop-console/
 ├── entry/
-│   └── ui-console.mjs      # CLI 入口（启动 + 自动化测试）
+│   ├── ui-console.mjs      # 启动 Electron 控制台
+│   └── ui-cli.mjs          # UI 自动化 CLI（真实驱动）
 ├── src/
 │   ├── main/
 │   │   ├── index.mts       # Electron 主进程
 │   │   ├── preload.mjs     # Preload 脚本（暴露 API）
 │   │   ├── env-check.mts   # 环境检查模块
+│   │   ├── ui-cli-bridge.mts # UI CLI HTTP bridge
 │   │   └── desktop-settings.mts  # 配置管理
 │   └── renderer/
 │       ├── index.mts       # 渲染进程入口
@@ -97,6 +122,7 @@ apps/desktop-console/
 │           ├── setup-wizard.mts    # 初始化向导
 │           ├── config-panel.mts    # 配置面板
 │           ├── dashboard.mts       # 执行看板
+│           ├── scheduler.mts       # 定时任务
 │           └── account-manager.mts # 账户管理
 └── dist/                   # 构建产物
 ```
@@ -105,7 +131,7 @@ apps/desktop-console/
 
 ### 环境检查 API
 - `envCheckCamo()` - 检查 Camoufox CLI
-- `envCheckServices()` - 检查服务状态 (7701/7704)
+- `envCheckServices()` - 检查服务状态 (7701，7704 为可选)
 - `envCheckFirefox()` - 检查 Firefox 浏览器
 - `envCheckAll()` - 完整环境检查
 

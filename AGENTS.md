@@ -66,12 +66,25 @@ Windows 推荐优先使用 PowerShell（`pwsh`/`powershell`）执行上述命令
 # 1) 前台模式启动 UI（便于观察 stderr/stdout）
 webauto ui console --no-daemon
 
-# 2) 运行内置场景测试（自动化回归 UI 控制链路）
-webauto ui test env-check
-webauto ui test account-flow --profile test-001
-webauto ui test config-save --output ./tmp/ui-config-report.json
-webauto ui test crawl-run --keyword "测试" --target 10 --headless
+# 2) 通过 UI CLI 驱动真实界面（点击/聚焦/输入/状态获取）
+webauto ui cli start --build
+webauto ui cli status --json
+webauto ui cli tab --tab 配置
+webauto ui cli input --selector "#keyword-input" --value "测试"
+webauto ui cli click --selector "#start-btn"
+webauto ui cli snapshot --json
+webauto ui cli stop
+
+# 3) 一键真实覆盖（不使用 mock）
+webauto ui cli full-cover --json
+# 产物默认写入 .tmp/ui-cli-full-cover-<timestamp>.json
 ```
+
+UI CLI 关键动作（统一入口）：
+- `webauto ui cli probe --selector "#id"`：探测存在/可见/值/文本
+- `webauto ui cli click-text --text "保存"`：按文本点击按钮
+- `webauto ui cli wait --selector "#id" --state visible|exists|hidden`
+- `webauto ui cli dialogs --value silent|restore`：测试时静默弹窗/恢复
 
 关键日志与状态源：
 
@@ -121,12 +134,26 @@ npm --prefix apps/desktop-console run build
 node scripts/test/run-coverage.mjs
 ```
 
-UI 控制链路专项回归（本地可直接跑）：
+UI 控制链路专项回归（本地可直接跑，真实 UI CLI）：
 
 ```bash
-webauto ui test env-check
-webauto ui test account-flow --profile test-001
-webauto ui test crawl-run --keyword "CI-smoke" --target 5 --headless
+# UI CLI 命令帮助
+webauto ui cli --help
+
+# 最小链路
+webauto ui cli start --build
+webauto ui cli tab --tab 配置
+webauto ui cli input --selector "#keyword-input" --value "CI-smoke"
+webauto ui cli input --selector "#target-input" --value "5"
+webauto ui cli click --selector "#start-btn"
+webauto ui cli status --json
+
+# 全功能真实覆盖
+webauto ui cli full-cover --json
+
+# UI 代码回归与覆盖门禁
+npm --prefix apps/desktop-console run test:renderer
+npm --prefix apps/desktop-console run test:renderer:coverage
 ```
 
 调试证据必须至少包含：命令、runId、失败阶段、错误事件、日志路径（`~/.webauto/logs` + `~/.webauto/download/.../run.log`）。

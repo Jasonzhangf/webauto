@@ -423,8 +423,6 @@ export function renderPreflight(root: HTMLElement, ctx: any) {
       '--check-interval-sec',
       '2',
       '--keep-session',
-      ...(ctx.settings?.unifiedApiUrl ? ['--unified-api', String(ctx.settings.unifiedApiUrl)] : []),
-      ...(ctx.settings?.browserServiceUrl ? ['--browser-service', String(ctx.settings.browserServiceUrl)] : []),
     ]);
     await window.api.cmdSpawn({
       title: `profilepool login-profile ${createdProfileId}`,
@@ -445,8 +443,6 @@ export function renderPreflight(root: HTMLElement, ctx: any) {
       window.api.pathJoin('apps', 'webauto', 'entry', 'profilepool.mjs'),
       'login',
       kw,
-      ...(ctx.settings?.unifiedApiUrl ? ['--unified-api', String(ctx.settings.unifiedApiUrl)] : []),
-      ...(ctx.settings?.browserServiceUrl ? ['--browser-service', String(ctx.settings.browserServiceUrl)] : []),
       '--timeout-sec',
       String(timeoutSec),
       ...(ensureCount > 0 ? ['--ensure-count', String(ensureCount)] : []),

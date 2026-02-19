@@ -186,6 +186,93 @@ async function appendJsonl(filePath, payload) {
   await fsp.appendFile(filePath, `${JSON.stringify(payload)}\n`, 'utf8');
 }
 
+function resolveUnifiedApiBaseUrl() {
+  const raw = String(
+    process.env.WEBAUTO_UNIFIED_API
+    || process.env.WEBAUTO_UNIFIED_URL
+    || 'http://127.0.0.1:7701',
+  ).trim();
+  return raw.replace(/\/+$/, '');
+}
+
+async function postUnifiedTaskRequest(baseUrl, pathname, payload) {
+  try {
+    const response = await fetch(`${baseUrl}${pathname}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload || {}),
+      signal: AbortSignal.timeout(2000),
+    });
+    if (!response.ok) return false;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function createTaskReporter(seed = {}) {
+  const baseUrl = resolveUnifiedApiBaseUrl();
+  const staticSeed = {
+    profileId: String(seed.profileId || 'unknown').trim() || 'unknown',
+    keyword: String(seed.keyword || '').trim(),
+    phase: 'unified',
+  };
+  const createdRunIds = new Set();
+
+  const ensureCreated = async (runId, extra = {}) => {
+    const rid = String(runId || '').trim();
+    if (!rid) return false;
+    if (createdRunIds.has(rid)) return true;
+    const ok = await postUnifiedTaskRequest(baseUrl, '/api/v1/tasks', {
+      runId: rid,
+      ...staticSeed,
+      ...extra,
+    });
+    if (ok) createdRunIds.add(rid);
+    return ok;
+  };
+
+  const update = async (runId, patch = {}) => {
+    const rid = String(runId || '').trim();
+    if (!rid) return false;
+    await ensureCreated(rid, patch);
+    return postUnifiedTaskRequest(baseUrl, `/api/v1/tasks/${encodeURIComponent(rid)}/update`, {
+      ...staticSeed,
+      ...patch,
+    });
+  };
+
+  const pushEvent = async (runId, type, data = {}) => {
+    const rid = String(runId || '').trim();
+    if (!rid) return false;
+    await ensureCreated(rid, data);
+    return postUnifiedTaskRequest(baseUrl, `/api/v1/tasks/${encodeURIComponent(rid)}/events`, {
+      type: String(type || 'event').trim() || 'event',
+      data,
+    });
+  };
+
+  const setError = async (runId, message, code = 'TASK_ERROR', recoverable = false) => {
+    const rid = String(runId || '').trim();
+    if (!rid) return false;
+    return update(rid, {
+      error: {
+        message: String(message || 'task_error'),
+        code: String(code || 'TASK_ERROR'),
+        timestamp: Date.now(),
+        recoverable: recoverable === true,
+      },
+    });
+  };
+
+  return {
+    ensureCreated,
+    update,
+    pushEvent,
+    setError,
+  };
+}
+
 function buildTemplateOptions(argv, profileId, overrides = {}) {
   const keyword = String(argv.keyword || argv.k || '').trim();
   const env = String(argv.env || 'debug').trim() || 'debug';
@@ -431,6 +518,31 @@ async function runProfile(spec, argv, baseOverrides = {}) {
 
   await ensureDir(path.dirname(spec.logPath));
   const stats = createProfileStats(spec);
+  const reporter = createTaskReporter({
+    profileId,
+    keyword: options.keyword,
+  });
+  let activeRunId = '';
+  const pushTaskSnapshot = (status = 'running') => {
+    if (!activeRunId) return;
+    void reporter.update(activeRunId, {
+      status,
+      phase: 'unified',
+      progress: {
+        total: Math.max(0, Number(spec.assignedNotes) || 0),
+        processed: Math.max(0, Number(stats.openedNotes) || 0),
+        failed: Math.max(0, Number(stats.operationErrors) || 0),
+      },
+      stats: {
+        notesProcessed: Math.max(0, Number(stats.openedNotes) || 0),
+        commentsCollected: Math.max(0, Number(stats.commentsCollected) || 0),
+        likesPerformed: Math.max(0, Number(stats.likesNewCount) || 0),
+        repliesGenerated: 0,
+        imagesDownloaded: 0,
+        ocrProcessed: 0,
+      },
+    });
+  };
 
   const logEvent = (payload) => {
     const eventPayload = isObject(payload) ? payload : { event: 'autoscript:raw', payload };
@@ -445,6 +557,31 @@ async function runProfile(spec, argv, baseOverrides = {}) {
     updateProfileStatsFromEvent(stats, merged);
     if (busEnabled && busPublishable.has(String(merged.event || '').trim())) {
       void publishBusEvent(merged);
+    }
+    const eventName = String(merged.event || '').trim();
+    const mergedRunId = String(merged.runId || '').trim();
+    if (mergedRunId) activeRunId = mergedRunId;
+    const shouldReportEvent = (
+      eventName === 'xhs.unified.start'
+      || eventName === 'xhs.unified.stop'
+      || eventName === 'autoscript:start'
+      || eventName === 'autoscript:stop'
+      || eventName === 'autoscript:impact'
+      || eventName === 'autoscript:operation_start'
+      || eventName === 'autoscript:operation_done'
+      || eventName === 'autoscript:operation_error'
+      || eventName === 'autoscript:operation_recovery_failed'
+    );
+    if (activeRunId && shouldReportEvent) {
+      void reporter.pushEvent(activeRunId, eventName, merged);
+    }
+    if (
+      eventName === 'autoscript:operation_done'
+      || eventName === 'autoscript:operation_error'
+      || eventName === 'autoscript:operation_recovery_failed'
+      || eventName === 'autoscript:impact'
+    ) {
+      pushTaskSnapshot('running');
     }
     if (
       merged.event === 'autoscript:event'
@@ -466,6 +603,35 @@ async function runProfile(spec, argv, baseOverrides = {}) {
 
   const running = await runner.start();
   currentRunId = running?.runId || currentRunId;
+  activeRunId = String(running?.runId || '').trim();
+  if (activeRunId) {
+    await reporter.ensureCreated(activeRunId, {
+      status: 'starting',
+      phase: 'unified',
+      progress: {
+        total: Math.max(0, Number(spec.assignedNotes) || 0),
+        processed: 0,
+        failed: 0,
+      },
+    });
+    await reporter.update(activeRunId, {
+      status: 'running',
+      phase: 'unified',
+      progress: {
+        total: Math.max(0, Number(spec.assignedNotes) || 0),
+        processed: 0,
+        failed: 0,
+      },
+      stats: {
+        notesProcessed: 0,
+        commentsCollected: 0,
+        likesPerformed: 0,
+        repliesGenerated: 0,
+        imagesDownloaded: 0,
+        ocrProcessed: 0,
+      },
+    });
+  }
   logEvent({
     event: 'xhs.unified.start',
     runId: running?.runId || null,
@@ -504,6 +670,31 @@ async function runProfile(spec, argv, baseOverrides = {}) {
   }
 
   stats.stopReason = stopPayload.reason;
+  const finalRunId = String(stopPayload.runId || activeRunId || '').trim();
+  if (finalRunId) {
+    activeRunId = finalRunId;
+    const failed = stopPayload.reason === 'script_failure';
+    await reporter.update(finalRunId, {
+      status: failed ? 'failed' : 'completed',
+      phase: 'unified',
+      progress: {
+        total: Math.max(0, Number(spec.assignedNotes) || 0),
+        processed: Math.max(0, Number(stats.openedNotes) || 0),
+        failed: Math.max(0, Number(stats.operationErrors) || 0),
+      },
+      stats: {
+        notesProcessed: Math.max(0, Number(stats.openedNotes) || 0),
+        commentsCollected: Math.max(0, Number(stats.commentsCollected) || 0),
+        likesPerformed: Math.max(0, Number(stats.likesNewCount) || 0),
+        repliesGenerated: 0,
+        imagesDownloaded: 0,
+        ocrProcessed: 0,
+      },
+    });
+    if (failed) {
+      await reporter.setError(finalRunId, `autoscript stopped: ${stopPayload.reason || 'script_failure'}`, 'SCRIPT_FAILURE', false);
+    }
+  }
 
   const profileResult = {
     ok: stopPayload.reason !== 'script_failure',
@@ -810,29 +1001,41 @@ export async function runUnified(argv, overrides = {}) {
     if (hasTotalTarget && remainingNotes <= 0) break;
     if (!hasTotalTarget && wave > 1) break;
 
-    const accountStates = await syncXhsAccountsByProfiles(profiles);
-    finalAccountStates = accountStates;
-    const executableProfiles = accountStates
-      .filter((item) => item?.valid === true && Boolean(String(item?.accountId || '').trim()))
-      .map((item) => item.profileId);
-    const invalidProfiles = accountStates.filter((item) => !item || item.valid !== true);
-    for (const item of invalidProfiles) {
-      const profileId = String(item?.profileId || '').trim();
-      if (!profileId) continue;
-      skippedProfileMap.set(profileId, {
+    let executableProfiles = [];
+    if (planOnly) {
+      executableProfiles = profiles.slice();
+      finalAccountStates = executableProfiles.map((profileId) => ({
         profileId,
-        status: item?.status || 'invalid',
-        reason: item?.reason || 'invalid',
-        valid: item?.valid === true,
-        accountId: item?.accountId || null,
-      });
-    }
-
-    if (executableProfiles.length === 0) {
-      if (wave === 1) {
-        throw new Error(`no valid business accounts: ${invalidProfiles.map((item) => `${item.profileId}:${item.reason || 'invalid'}`).join(', ')}`);
+        status: 'plan_only_unverified',
+        reason: 'plan_only_skip_account_sync',
+        valid: null,
+        accountId: null,
+      }));
+    } else {
+      const accountStates = await syncXhsAccountsByProfiles(profiles);
+      finalAccountStates = accountStates;
+      executableProfiles = accountStates
+        .filter((item) => item?.valid === true && Boolean(String(item?.accountId || '').trim()))
+        .map((item) => item.profileId);
+      const invalidProfiles = accountStates.filter((item) => !item || item.valid !== true);
+      for (const item of invalidProfiles) {
+        const profileId = String(item?.profileId || '').trim();
+        if (!profileId) continue;
+        skippedProfileMap.set(profileId, {
+          profileId,
+          status: item?.status || 'invalid',
+          reason: item?.reason || 'invalid',
+          valid: item?.valid === true,
+          accountId: item?.accountId || null,
+        });
       }
-      break;
+
+      if (executableProfiles.length === 0) {
+        if (wave === 1) {
+          throw new Error(`no valid business accounts: ${invalidProfiles.map((item) => `${item.profileId}:${item.reason || 'invalid'}`).join(', ')}`);
+        }
+        break;
+      }
     }
 
     const plan = hasTotalTarget

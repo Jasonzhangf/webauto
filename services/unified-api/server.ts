@@ -275,16 +275,111 @@ class UnifiedApiServer {
     server.on('request', (req, res) => {
       void (async () => {
         const url = new URL(req.url, `http://${req.headers.host}`);
+        const normalizeTaskPhase = (value: any) => {
+          const text = String(value || '').trim().toLowerCase();
+          if (text === 'phase1' || text === 'phase2' || text === 'phase3' || text === 'phase4' || text === 'unified' || text === 'orchestrate') {
+            return text;
+          }
+          return 'unknown';
+        };
+        const normalizeTaskStatus = (value: any) => {
+          const text = String(value || '').trim().toLowerCase();
+          if (text === 'starting' || text === 'running' || text === 'paused' || text === 'completed' || text === 'failed' || text === 'aborted') {
+            return text;
+          }
+          return '';
+        };
+        const ensureTask = (runId: string, seed: any = {}) => {
+          const normalizedRunId = String(runId || '').trim();
+          if (!normalizedRunId) return null;
+          const existing = this.taskRegistry.getTask(normalizedRunId);
+          if (existing) return existing;
+          const profileId = String(seed?.profileId || 'unknown').trim() || 'unknown';
+          const keyword = String(seed?.keyword || '').trim();
+          const phase = normalizeTaskPhase(seed?.phase);
+          return this.taskRegistry.createTask({
+            runId: normalizedRunId,
+            profileId,
+            keyword,
+            phase,
+          });
+        };
+        const applyTaskPatch = (runId: string, payload: any = {}) => {
+          const normalizedRunId = String(runId || '').trim();
+          if (!normalizedRunId) return;
+          ensureTask(normalizedRunId, payload);
+          const phase = normalizeTaskPhase(payload?.phase);
+          const profileId = String(payload?.profileId || '').trim();
+          const keyword = String(payload?.keyword || '').trim();
+          const details = payload?.details && typeof payload.details === 'object' ? payload.details : undefined;
+          const patch: any = {};
+          if (phase !== 'unknown') patch.phase = phase;
+          if (profileId) patch.profileId = profileId;
+          if (keyword) patch.keyword = keyword;
+          if (details) patch.details = details;
+          if (Object.keys(patch).length > 0) {
+            this.taskRegistry.updateTask(normalizedRunId, patch);
+          }
+          if (payload?.progress && typeof payload.progress === 'object') {
+            this.taskRegistry.updateProgress(normalizedRunId, payload.progress);
+          }
+          if (payload?.stats && typeof payload.stats === 'object') {
+            this.taskRegistry.updateStats(normalizedRunId, payload.stats);
+          }
+          const status = normalizeTaskStatus(payload?.status);
+          if (status) {
+            this.taskRegistry.setStatus(normalizedRunId, status as any);
+          }
+          const errorPayload = payload?.error && typeof payload.error === 'object'
+            ? payload.error
+            : (payload?.lastError && typeof payload.lastError === 'object' ? payload.lastError : null);
+          if (errorPayload) {
+            this.taskRegistry.setError(normalizedRunId, {
+              message: String(errorPayload.message || 'task_error'),
+              code: String(errorPayload.code || 'TASK_ERROR'),
+              timestamp: Number(errorPayload.timestamp || Date.now()),
+              recoverable: Boolean(errorPayload.recoverable),
+            });
+          }
+        };
 
         // Container operations endpoints
       const containerHandled = await handleContainerOperations(req, res, sessionManager, this.containerExecutor);
       if (containerHandled) return;
 
       // Task state API endpoints
+      if (req.method === 'POST' && url.pathname === '/api/v1/tasks') {
+        try {
+          const payload = await this.readJsonBody(req);
+          const runId = String(payload?.runId || payload?.id || '').trim();
+          if (!runId) throw new Error('runId is required');
+          ensureTask(runId, payload);
+          applyTaskPatch(runId, payload);
+          const task = this.taskRegistry.getTask(runId);
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: true, data: task }));
+        } catch (err: any) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: false, error: err?.message || String(err) }));
+        }
+        return;
+      }
+
       if (req.method === 'GET' && url.pathname === '/api/v1/tasks') {
         const tasks = this.taskRegistry.getAllTasks();
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ success: true, data: tasks }));
+        return;
+      }
+
+      if (req.method === 'GET' && url.pathname.includes('/api/v1/tasks/') && url.pathname.includes('/events')) {
+        const parts = url.pathname.split('/');
+        const tasksIndex = parts.indexOf('tasks');
+        const runId = parts[tasksIndex + 1];
+        const since = url.searchParams.get('since');
+        const events = this.taskRegistry.getEvents(runId, since ? Number(since) : undefined);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: true, data: events }));
         return;
       }
 
@@ -302,24 +397,13 @@ class UnifiedApiServer {
         return;
       }
 
-      if (req.method === 'GET' && url.pathname.includes('/api/v1/tasks/') && url.pathname.includes('/events')) {
-        const parts = url.pathname.split('/');
-        const tasksIndex = parts.indexOf('tasks');
-        const runId = parts[tasksIndex + 1];
-        const since = url.searchParams.get('since');
-        const events = this.taskRegistry.getEvents(runId, since ? Number(since) : undefined);
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ success: true, data: events }));
-        return;
-      }
-
       if (req.method === 'POST' && url.pathname.includes('/api/v1/tasks/') && url.pathname.includes('/update')) {
         const parts = url.pathname.split('/');
         const tasksIndex = parts.indexOf('tasks');
         const runId = parts[tasksIndex + 1];
         try {
           const payload = await this.readJsonBody(req);
-          this.taskRegistry.updateTask(runId, payload);
+          applyTaskPatch(runId, payload);
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ success: true }));
         } catch (err: any) {
@@ -335,6 +419,7 @@ class UnifiedApiServer {
         const runId = parts[tasksIndex + 1];
         try {
           const event = await this.readJsonBody(req);
+          ensureTask(runId, event?.data || {});
           this.taskRegistry.pushEvent(runId, event.type, event.data);
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ success: true }));
@@ -351,6 +436,7 @@ class UnifiedApiServer {
         const runId = parts[tasksIndex + 1];
         const action = url.searchParams.get('action');
         try {
+          ensureTask(runId, {});
           if (action === 'pause') {
             this.taskRegistry.setStatus(runId, 'paused');
           } else if (action === 'resume') {
