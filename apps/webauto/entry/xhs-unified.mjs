@@ -96,17 +96,22 @@ async function captureStopScreenshot({ profileId, reason, outputDir }) {
     await fsp.mkdir(outDir, { recursive: true });
   } catch {}
   const outputPath = buildStopScreenshotPath(profileId, reason, outDir);
-  const ret = runCamo(['screenshot', profileId, '--output', outputPath], {
+  const tryCapture = () => runCamo(['screenshot', profileId, '--output', outputPath], {
     rootDir: process.cwd(),
     timeoutMs: 60000,
   });
+  let ret = tryCapture();
+  if (!ret?.ok) {
+    await ensureProfileSession(profileId);
+    ret = tryCapture();
+  }
   if (ret?.ok) return outputPath;
   return null;
 }
 
 function sanitizeKeywordDirParts({ env, keyword }) {
   return {
-    safeEnv: sanitizeForPath(env, 'debug'),
+    safeEnv: sanitizeForPath(env, 'prod'),
     safeKeyword: sanitizeForPath(keyword, 'unknown'),
   };
 }
@@ -275,15 +280,16 @@ function createTaskReporter(seed = {}) {
 
 function buildTemplateOptions(argv, profileId, overrides = {}) {
   const keyword = String(argv.keyword || argv.k || '').trim();
-  const env = String(argv.env || 'debug').trim() || 'debug';
+  const env = String(argv.env || 'prod').trim() || 'prod';
   const inputMode = String(argv['input-mode'] || 'protocol').trim() || 'protocol';
   const headless = parseBool(argv.headless, false);
   const ocrCommand = String(argv['ocr-command'] || '').trim();
   const maxNotes = parseIntFlag(argv['max-notes'] ?? argv.target, 30, 1);
+  const maxComments = parseNonNegativeInt(argv['max-comments'], 0);
   const throttle = parseIntFlag(argv.throttle, 500, 100);
   const tabCount = parseIntFlag(argv['tab-count'], 4, 1);
   const noteIntervalMs = parseIntFlag(argv['note-interval'], 900, 200);
-  const maxLikesPerRound = parseIntFlag(argv['max-likes'], 2, 1);
+  const maxLikesPerRound = parseNonNegativeInt(argv['max-likes'], 0);
   const matchMode = String(argv['match-mode'] || 'any').trim() || 'any';
   const matchMinHits = parseIntFlag(argv['match-min-hits'], 1, 1);
   const matchKeywords = String(argv['match-keywords'] || keyword).trim();
@@ -319,6 +325,7 @@ function buildTemplateOptions(argv, profileId, overrides = {}) {
     tabCount,
     noteIntervalMs,
     maxNotes,
+    maxComments,
     maxLikesPerRound,
     resume,
     incrementalMax,
@@ -901,7 +908,7 @@ export async function runUnified(argv, overrides = {}) {
   const keyword = String(argv.keyword || argv.k || '').trim();
   if (!keyword) throw new Error('missing --keyword');
 
-  const env = String(argv.env || 'debug').trim() || 'debug';
+  const env = String(argv.env || 'prod').trim() || 'prod';
   const busEnabled = parseBool(argv['bus-events'], false) || process.env.WEBAUTO_BUS_EVENTS === '1';
   const profiles = parseProfiles(argv);
   if (profiles.length === 0) throw new Error('missing --profile or --profiles or --profilepool');
@@ -921,13 +928,13 @@ export async function runUnified(argv, overrides = {}) {
   const outputRootArg = String(argv['output-root'] || '').trim();
   const useShardRoots = profiles.length > 1;
   const sharedHarvestPath = profiles.length > 1
-    ? path.join(baseOutputRoot, 'xiaohongshu', sanitizeForPath(env, 'debug'), sanitizeForPath(keyword, 'unknown'), 'merged', `run-${runLabel}`, 'coord', 'harvest-note-claims.json')
+    ? path.join(baseOutputRoot, 'xiaohongshu', sanitizeForPath(env, 'prod'), sanitizeForPath(keyword, 'unknown'), 'merged', `run-${runLabel}`, 'coord', 'harvest-note-claims.json')
     : '';
-  const searchSerialKey = `${sanitizeForPath(env, 'debug')}:${sanitizeForPath(keyword, 'unknown')}:${runLabel}`;
+  const searchSerialKey = `${sanitizeForPath(env, 'prod')}:${sanitizeForPath(keyword, 'unknown')}:${runLabel}`;
   const mergedDir = path.join(
     baseOutputRoot,
     'xiaohongshu',
-    sanitizeForPath(env, 'debug'),
+    sanitizeForPath(env, 'prod'),
     sanitizeForPath(keyword, 'unknown'),
     'merged',
     `run-${runLabel}`,

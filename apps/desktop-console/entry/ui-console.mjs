@@ -310,7 +310,7 @@ class UITestRunner {
     this.log('Starting config save test', 'test');
     try {
       const testConfig = {
-        keyword: this.keyword, target: this.target, env: 'debug',
+        keyword: this.keyword, target: this.target, env: 'prod',
         fetchBody: true, fetchComments: true, maxComments: 50,
         autoLike: false, likeKeywords: '', headless: this.headless, dryRun: true
       };
@@ -341,12 +341,13 @@ class UITestRunner {
         ? ['--profiles', runProfiles.join(',')]
         : ['--profile', this.profile];
       this.log(`Testing: Crawl run (keyword=${this.keyword}, target=${this.target})`);
+      const env = String(args.env || 'prod').trim() || 'prod';
       const runArgs = [
         path.join(process.cwd(), 'apps/webauto/entry/xhs-unified.mjs'),
         ...profileFlag,
         '--keyword', this.keyword,
         '--target', String(this.target),
-        '--env', 'debug',
+        '--env', env,
       ];
       if (runProfiles.length > 1 && (args.parallel === true || args.parallel === undefined)) {
         runArgs.push('--parallel', 'true');
@@ -361,6 +362,8 @@ class UITestRunner {
         const maxLikes = String(args['max-likes'] || '').trim();
         if (maxLikes) runArgs.push('--max-likes', maxLikes);
       }
+      const maxComments = String(args['max-comments'] || '').trim();
+      if (maxComments) runArgs.push('--max-comments', maxComments);
       const forceDryRun = args['dry-run'] === true && args['no-dry-run'] !== true;
       const dryFlag = forceDryRun ? '--dry-run' : '--no-dry-run';
       runArgs.push(dryFlag, 'true');

@@ -359,6 +359,11 @@ export class AutoscriptRunner {
 
   resolveTimeoutMs(operation) {
     const pacing = this.resolvePacing(operation);
+    const disableTimeout = Boolean(
+      operation?.disableTimeout ?? this.script?.defaults?.disableTimeout,
+    );
+    if (disableTimeout) return 0;
+    if (pacing.timeoutMs === 0) return 0;
     if (Number.isFinite(pacing.timeoutMs) && pacing.timeoutMs > 0) return pacing.timeoutMs;
     return this.getDefaultTimeoutMs(operation);
   }
@@ -778,8 +783,9 @@ export class AutoscriptRunner {
         };
       }
 
+      const failureStatus = operation?.onFailure === 'continue' ? 'skipped' : 'failed';
       this.operationState.set(operation.id, {
-        status: 'failed',
+        status: failureStatus,
         runs: Number(this.operationState.get(operation.id)?.runs || 0) + 1,
         lastError: result.message || 'operation failed',
         updatedAt: nowIso(),

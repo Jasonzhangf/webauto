@@ -328,6 +328,7 @@ function buildCommentLikeScript(likeKeywords, maxLikesPerRound) {
   const state = window.__camoXhsState || (window.__camoXhsState = {});
   const keywords = ${JSON.stringify(likeKeywords)};
   const maxLikes = Number(${maxLikesPerRound});
+  const maxLikesLimit = maxLikes > 0 ? maxLikes : Number.POSITIVE_INFINITY;
   const nodes = Array.from(document.querySelectorAll('.comment-item'));
   const matches = Array.isArray(state.matchedComments) ? state.matchedComments : [];
   const targetIndexes = new Set(matches.map((row) => Number(row.index)));
@@ -335,7 +336,7 @@ function buildCommentLikeScript(likeKeywords, maxLikesPerRound) {
   let likedCount = 0;
   let skippedActive = 0;
   for (let idx = 0; idx < nodes.length; idx += 1) {
-    if (likedCount >= maxLikes) break;
+    if (likedCount >= maxLikesLimit) break;
     if (targetIndexes.size > 0 && !targetIndexes.has(idx)) continue;
     const item = nodes[idx];
     const text = String((item.querySelector('.content, .comment-content, p') || {}).textContent || '').trim();
@@ -468,15 +469,16 @@ function buildAbortScript(code) {
 export function buildXhsUnifiedAutoscript(rawOptions = {}) {
   const profileId = toTrimmedString(rawOptions.profileId, 'xiaohongshu-batch-1');
   const keyword = toTrimmedString(rawOptions.keyword, '手机膜');
-  const env = toTrimmedString(rawOptions.env, 'debug');
+  const env = toTrimmedString(rawOptions.env, 'prod');
   const outputRoot = toTrimmedString(rawOptions.outputRoot, '');
   const throttle = toPositiveInt(rawOptions.throttle, 900, 100);
   const tabCount = toPositiveInt(rawOptions.tabCount, 4, 1);
   const noteIntervalMs = toPositiveInt(rawOptions.noteIntervalMs, 1200, 200);
   const maxNotes = toPositiveInt(rawOptions.maxNotes, 30, 1);
-  const resume = toBoolean(rawOptions.resume, true);
+  const maxComments = toNonNegativeInt(rawOptions.maxComments, 0);
+  const resume = toBoolean(rawOptions.resume, false);
   const incrementalMax = toBoolean(rawOptions.incrementalMax, true);
-  const maxLikesPerRound = toPositiveInt(rawOptions.maxLikesPerRound, 2, 1);
+  const maxLikesPerRound = toNonNegativeInt(rawOptions.maxLikesPerRound ?? rawOptions.maxLikes, 0);
   const matchMode = toTrimmedString(rawOptions.matchMode, 'any');
   const matchMinHits = toPositiveInt(rawOptions.matchMinHits, 1, 1);
   const replyText = toTrimmedString(rawOptions.replyText, '感谢分享，已关注');
@@ -520,6 +522,7 @@ export function buildXhsUnifiedAutoscript(rawOptions = {}) {
     profileId,
     throttle,
     defaults: {
+      disableTimeout: true,
       retry: { attempts: 2, backoffMs: 500 },
       impact: 'subscription',
       onFailure: 'chain_stop',
@@ -530,9 +533,9 @@ export function buildXhsUnifiedAutoscript(rawOptions = {}) {
         eventCooldownMs: 300,
         jitterMs: 220,
         navigationMinIntervalMs: 1800,
-        timeoutMs: 180000,
+        timeoutMs: 0,
       },
-      timeoutMs: 180000,
+      timeoutMs: 0,
     },
     metadata: {
       keyword,
@@ -541,6 +544,8 @@ export function buildXhsUnifiedAutoscript(rawOptions = {}) {
       tabCount,
       noteIntervalMs,
       maxNotes,
+      maxComments,
+      maxLikesPerRound,
       resume,
       incrementalMax,
       doHomepage,
@@ -665,10 +670,8 @@ export function buildXhsUnifiedAutoscript(rawOptions = {}) {
         dependsOn: ['submit_search'],
         once: true,
         timeoutMs: 90000,
-        validation: {
-          mode: 'post',
-          post: { page: { hostIncludes: ['xiaohongshu.com'], checkpointIn: ['detail_ready', 'comments_ready', 'search_ready'] } },
-        },
+        onFailure: 'continue',
+        validation: { mode: 'none' },
         checkpoint: {
           containerId: 'xiaohongshu_search.search_result_item',
           targetCheckpoint: 'detail_ready',
@@ -689,17 +692,7 @@ export function buildXhsUnifiedAutoscript(rawOptions = {}) {
         impact: 'op',
         onFailure: 'continue',
         pacing: { operationMinIntervalMs: 2000, eventCooldownMs: 1200, jitterMs: 260 },
-        validation: {
-          mode: 'both',
-          pre: {
-            page: { hostIncludes: ['xiaohongshu.com'], checkpointIn: ['detail_ready', 'comments_ready'] },
-            container: { selector: '.note-detail-mask, .note-detail-page, .note-detail-dialog', mustExist: true, minCount: 1 },
-          },
-          post: {
-            page: { hostIncludes: ['xiaohongshu.com'], checkpointIn: ['detail_ready', 'comments_ready'] },
-            container: { selector: '.note-content, .note-scroller, .media-container', mustExist: true, minCount: 1 },
-          },
-        },
+        validation: { mode: 'none' },
         checkpoint: {
           containerId: 'xiaohongshu_detail.modal_shell',
           targetCheckpoint: 'detail_ready',
@@ -730,6 +723,7 @@ export function buildXhsUnifiedAutoscript(rawOptions = {}) {
           keyword,
           outputRoot,
           persistComments,
+          commentsLimit: maxComments,
           maxRounds: 48,
           scrollStep: 360,
           settleMs: 260,
@@ -831,10 +825,7 @@ export function buildXhsUnifiedAutoscript(rawOptions = {}) {
         once: false,
         oncePerAppear: true,
         pacing: { operationMinIntervalMs: 2500, eventCooldownMs: 1300, jitterMs: 180 },
-        validation: {
-          mode: 'post',
-          post: { page: { hostIncludes: ['xiaohongshu.com'], checkpointIn: ['home_ready', 'search_ready'] } },
-        },
+        validation: { mode: 'none' },
         checkpoint: {
           containerId: 'xiaohongshu_detail.discover_button',
           targetCheckpoint: 'search_ready',
@@ -882,9 +873,9 @@ export function buildXhsUnifiedAutoscript(rawOptions = {}) {
         once: false,
         oncePerAppear: false,
         timeoutMs: 90000,
-        retry: { attempts: 1, backoffMs: 0 },
-        impact: 'script',
-        onFailure: 'stop_all',
+        retry: { attempts: 3, backoffMs: 1000 },
+        impact: 'op',
+        onFailure: 'continue',
         checkpoint: {
           containerId: 'xiaohongshu_search.search_result_item',
           targetCheckpoint: 'detail_ready',
@@ -965,8 +956,8 @@ export function buildXhsUnifiedAutoscript(rawOptions = {}) {
         dependsOn: ['ensure_tab_pool'],
         once: true,
         timeoutMs: 90000,
-        impact: 'script',
-        onFailure: 'stop_all',
+        impact: 'op',
+        onFailure: 'continue',
       },
     ],
   };

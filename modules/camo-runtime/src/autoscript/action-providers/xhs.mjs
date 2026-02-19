@@ -121,6 +121,29 @@ async function executeOpenDetailOperation({ profileId, params = {} }) {
   const claimPath = resolveSharedClaimPath(params);
   const lockKey = claimPath ? `xhs_open_detail:${claimPath}` : '';
 
+  const mapOpenDetailError = (err, paramsRef = {}) => {
+    const message = String(err?.message || err || '');
+    const mode = String(paramsRef?.mode || '').trim().toLowerCase();
+    if (message.includes('AUTOSCRIPT_DONE_NO_MORE_NOTES')) {
+      return {
+        ok: true,
+        code: 'AUTOSCRIPT_DONE_NO_MORE_NOTES',
+        message: 'no more notes',
+        data: { stopReason: 'no_more_notes' },
+      };
+    }
+    if (message.includes('NO_SEARCH_RESULT_ITEM')) {
+      if (mode === 'first') return null;
+      return {
+        ok: true,
+        code: 'OPERATION_SKIPPED_NO_SEARCH_RESULT_ITEM',
+        message: 'search result item missing',
+        data: { skipped: true },
+      };
+    }
+    return null;
+  };
+
   const runWithExclude = async (excludeNoteIds) => {
     const script = buildOpenDetailScript({
       ...params,
@@ -140,8 +163,14 @@ async function executeOpenDetailOperation({ profileId, params = {} }) {
   };
 
   if (!claimPath) {
-    const { operationResult } = await runWithExclude([]);
-    return operationResult;
+    try {
+      const { operationResult } = await runWithExclude([]);
+      return operationResult;
+    } catch (err) {
+      const mapped = mapOpenDetailError(err, params);
+      if (mapped) return mapped;
+      throw err;
+    }
   }
 
   const runLocked = async () => {
@@ -189,7 +218,13 @@ async function executeOpenDetailOperation({ profileId, params = {} }) {
     };
   };
 
-  return withSerializedLock(lockKey, runLocked);
+  try {
+    return await withSerializedLock(lockKey, runLocked);
+  } catch (err) {
+    const mapped = mapOpenDetailError(err, params);
+    if (mapped) return mapped;
+    throw err;
+  }
 }
 
 function buildReadStateScript() {

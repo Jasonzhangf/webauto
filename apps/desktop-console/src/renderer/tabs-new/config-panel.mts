@@ -90,7 +90,7 @@ export function renderConfigPanel(root: HTMLElement, ctx: any) {
 
     <div class="row">
       <div>
-        <label>最多评论数</label>
+        <label>最多评论数 (0=不限)</label>
         <input id="max-comments-input" type="number" value="0" min="0" style="width: 100px;" />
       </div>
     </div>
