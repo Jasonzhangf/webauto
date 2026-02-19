@@ -43,7 +43,7 @@ test('setup wizard keeps startup unblocked by missing account and backfills alia
 test('setup wizard uses camo runtime naming', async () => {
   const src = await getSrc();
   assert.match(src, /Camo CLI/);
-  assert.match(src, /Camo Runtime \(7704，可选\)/);
+  assert.match(src, /Camo Runtime（可选）/);
   assert.match(src, /snapshot\?\.services\?\.camoRuntime/);
   assert.doesNotMatch(src, /browserService/);
   assert.match(src, /runtimeService: !snapshot\?\.services\?\.camoRuntime/);

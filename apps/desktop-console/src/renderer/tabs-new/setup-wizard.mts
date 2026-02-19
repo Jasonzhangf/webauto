@@ -37,14 +37,14 @@ export function renderSetupWizard(root: HTMLElement, ctx: any) {
       <div class="env-item" id="env-browser" style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
         <span style="display:flex; align-items:center; gap:8px; min-width:0;">
           <span class="icon" style="color: var(--text-4);">○</span>
-          <span class="env-label">Camo Runtime (7704，可选)</span>
+          <span class="env-label">Camo Runtime（可选）</span>
         </span>
         <button id="repair-core2-btn" class="secondary" style="display:none; flex:0 0 auto;">一键修复</button>
       </div>
       <div class="env-item" id="env-firefox" style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
         <span style="display:flex; align-items:center; gap:8px; min-width:0;">
           <span class="icon" style="color: var(--text-4);">○</span>
-          <span class="env-label">Camoufox Runtime</span>
+          <span class="env-label">Camoufox Browser</span>
         </span>
         <button id="repair-runtime-btn" class="secondary" style="display:none; flex:0 0 auto;">一键修复</button>
       </div>

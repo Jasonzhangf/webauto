@@ -27,7 +27,7 @@ export function renderAccountManager(root: HTMLElement, ctx: any) {
       </div>
       <div class="env-item" id="env-firefox">
         <span class="icon" style="color: var(--text-4);">○</span>
-        <span>Firefox</span>
+        <span>Camoufox Browser</span>
       </div>
     </div>
     <div style="margin-top: var(--gap);">

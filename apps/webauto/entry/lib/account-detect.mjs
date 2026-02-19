@@ -22,6 +22,24 @@ function buildDetectScript() {
       if (text === '我' || text === '我的' || text === '个人主页') return null;
       return text;
     };
+    const isSelfLabel = (value) => {
+      const text = String(value || '').replace(/\\s+/g, ' ').trim();
+      if (!text) return false;
+      return (
+        text === '我'
+        || text === '我的'
+        || text === '个人主页'
+        || text === '我的主页'
+        || text === '我的账号'
+      );
+    };
+    const readLabelCandidates = (node) => {
+      if (!node) return [];
+      const text = String(node.textContent || '').replace(/\\s+/g, ' ').trim();
+      const title = String(node.getAttribute ? (node.getAttribute('title') || '') : '').trim();
+      const aria = String(node.getAttribute ? (node.getAttribute('aria-label') || '') : '').trim();
+      return [text, title, aria].filter((item) => Boolean(item));
+    };
     const cleanAlias = (value) => {
       let text = normalizeAlias(value);
       if (!text) return null;
@@ -92,8 +110,8 @@ function buildDetectScript() {
 
     const selfNavEntry = Array.from(document.querySelectorAll('a[href*="/user/profile/"]'))
       .find((node) => {
-        const text = String(node.textContent || '').replace(/\\s+/g, ' ').trim();
-        return text === '我' || text === '我的' || text === '个人主页';
+        const labels = readLabelCandidates(node);
+        return labels.some(isSelfLabel);
       });
     if (selfNavEntry) {
       const href = String(selfNavEntry.getAttribute('href') || '').trim();
@@ -111,7 +129,12 @@ function buildDetectScript() {
       if (!matched) matched = href.match(/\\/user\\/([^/?#]+)/);
       if (!matched || !matched[1]) continue;
       const alias = String(anchor.textContent || '').trim();
-      pushCandidate(matched[1], alias, 'anchor');
+      const labels = readLabelCandidates(anchor);
+      if (labels.some(isSelfLabel)) {
+        pushCandidate(matched[1], alias, 'anchor.self');
+      } else {
+        pushCandidate(matched[1], alias, 'anchor');
+      }
     }
 
     const avatar = document.querySelector('img[alt], [class*="avatar"] img[alt]');
@@ -123,11 +146,15 @@ function buildDetectScript() {
       }
     }
 
-    const best = candidates
+    const strongCandidates = candidates.filter((item) => item.source !== 'localStorage.search_history');
+    const best = strongCandidates
       .find((item) => item.source === 'initial_state.user_info')
+      || strongCandidates.find((item) => item.source === 'nav.self')
+      || strongCandidates.find((item) => item.source === 'anchor.self')
+      || strongCandidates.find((item) => item.source === 'anchor' && item.alias)
+      || strongCandidates.find((item) => item.source === 'anchor')
+      || strongCandidates.find((item) => item.id && item.id.length >= 6)
       || candidates.find((item) => item.source === 'localStorage.search_history')
-      || candidates.find((item) => item.source === 'nav.self')
-      || candidates.find((item) => item.id && item.id.length >= 6)
       || candidates[0]
       || null;
     let alias = best ? best.alias : null;
@@ -251,20 +278,43 @@ async function resolveAliasFromProfilePage(profileId, accountId) {
 }
 
 export async function detectXhsAccountIdentity(profileId, options = {}) {
-  const payload = await callAPI('evaluate', {
-    profileId,
-    script: buildDetectScript(),
-  });
-  const result = payload?.result || payload?.data || payload || {};
-  const detected = {
-    profileId: String(profileId || '').trim(),
-    url: normalizeText(result.url),
-    hasLoginGuard: result.hasLoginGuard === true,
-    accountId: normalizeText(result.accountId),
-    alias: normalizeText(result.alias),
-    source: normalizeText(result.source),
-    candidates: Array.isArray(result.candidates) ? result.candidates : [],
+  const runDetect = async () => {
+    const payload = await callAPI('evaluate', {
+      profileId,
+      script: buildDetectScript(),
+    });
+    const result = payload?.result || payload?.data || payload || {};
+    return {
+      profileId: String(profileId || '').trim(),
+      url: normalizeText(result.url),
+      hasLoginGuard: result.hasLoginGuard === true,
+      accountId: normalizeText(result.accountId),
+      alias: normalizeText(result.alias),
+      source: normalizeText(result.source),
+      candidates: Array.isArray(result.candidates) ? result.candidates : [],
+    };
   };
+
+  let detected = await runDetect();
+  const shouldRetry = !detected.hasLoginGuard && (
+    !detected.accountId
+    || detected.source === 'localStorage.search_history'
+    || !detected.alias
+  );
+  if (shouldRetry) {
+    await sleep(1200);
+    const retry = await runDetect();
+    if (retry.accountId && (!detected.accountId || detected.source === 'localStorage.search_history')) {
+      detected.accountId = retry.accountId;
+      detected.source = retry.source || detected.source;
+      detected.candidates = retry.candidates;
+    }
+    if (retry.alias && !detected.alias) {
+      detected.alias = retry.alias;
+      if (!detected.source) detected.source = retry.source || detected.source;
+    }
+    if (retry.url && !detected.url) detected.url = retry.url;
+  }
   if (options?.resolveAlias === true && detected.accountId && !detected.alias) {
     const resolved = await resolveAliasFromProfilePage(detected.profileId, detected.accountId);
     if (resolved?.alias) {
@@ -280,8 +330,13 @@ export async function syncXhsAccountByProfile(profileId, options = {}) {
   if (!normalizedProfileId) throw new Error('profileId is required');
   const pendingWhileLogin = options?.pendingWhileLogin === true;
   try {
+    const existing = listAccountProfiles().profiles.find(
+      (item) => String(item?.profileId || '').trim() === normalizedProfileId,
+    );
+    const shouldResolveAlias = options?.resolveAlias === true
+      || (!existing?.alias && options?.resolveAlias !== false);
     const detected = await detectXhsAccountIdentity(normalizedProfileId, {
-      resolveAlias: options?.resolveAlias === true,
+      resolveAlias: shouldResolveAlias,
     });
     if (detected.hasLoginGuard) {
       if (pendingWhileLogin) {

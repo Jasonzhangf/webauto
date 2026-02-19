@@ -237,6 +237,37 @@ async function runFullCover(endpoint) {
     return ret.json;
   };
 
+  const probeRaw = async (selector, extra = {}) => {
+    const ret = await sendAction(endpoint, { action: 'probe', selector, ...extra });
+    return ret.json || {};
+  };
+
+  const snapshotRaw = async () => {
+    const ret = await sendAction(endpoint, { action: 'snapshot' });
+    return ret.json || {};
+  };
+
+  const waitForElement = async (selector, attempts = 40, intervalMs = 500) => {
+    for (let i = 0; i < attempts; i += 1) {
+      const raw = await probeRaw(selector);
+      const exists = Boolean(raw?.exists || (raw?.count || 0) > 0);
+      if (exists) return true;
+      await sleep(intervalMs);
+    }
+    throw new Error(`wait_timeout:${selector}`);
+  };
+
+  const ensureTabActive = async (label, id) => {
+    for (let i = 0; i < 4; i += 1) {
+      await tab(label);
+      const snap = await snapshotRaw();
+      const activeId = String(snap?.snapshot?.activeTabId || snap?.activeTabId || '').trim();
+      if (!id || activeId === id) return true;
+      await sleep(300);
+    }
+    return false;
+  };
+
   const runProbe = async (bucket, selector, extra = {}, options = {}) => {
     const probe = await runAction(`probe:${selector || 'body'}`, { action: 'probe', selector, ...extra }, { optional: options.optional === true });
     const hasText = typeof extra?.text === 'string' && extra.text.trim().length > 0;
@@ -265,6 +296,7 @@ async function runFullCover(endpoint) {
     runAction(`click_text:${text}`, { action: 'click_text', selector, text }, { optional });
 
   const taskName = `ui-cli-full-${Date.now()}`;
+  const keywordSeed = taskName;
   try {
     await runAction('wait:tabs_ready', { action: 'wait', selector: '#tabs .tab', state: 'exists', timeoutMs: 20000 });
     await runAction('dialogs:silent', { action: 'dialogs', value: 'silent' });
@@ -309,7 +341,7 @@ async function runFullCover(endpoint) {
     await runProbe('config', '#headless-cb');
     await runProbe('config', '#dry-run-cb');
     await runProbe('config', '#start-btn');
-    await input('#keyword-input', 'ui-cli-full-cover');
+    await input('#keyword-input', keywordSeed);
     await input('#target-input', '100');
     await select('#preset-select', 'last');
     await select('#preset-select', 'preset1');
@@ -402,7 +434,7 @@ async function runFullCover(endpoint) {
     await select('#scheduler-type', 'interval');
     await input('#scheduler-interval', '20');
     await input('#scheduler-profile', 'xiaohongshu-batch-0');
-    await input('#scheduler-keyword', 'ui-cli-full-cover');
+    await input('#scheduler-keyword', keywordSeed);
     await input('#scheduler-max-notes', '20');
     await select('#scheduler-env', 'debug');
     await click('#scheduler-comments');
@@ -413,6 +445,12 @@ async function runFullCover(endpoint) {
     await input('#scheduler-like-keywords', '真牛逼,购买链接');
     await click('#scheduler-save-btn');
     await wait('#scheduler-list');
+    // Wait for async schedule refresh to render the new task.
+    for (let i = 0; i < 6; i += 1) {
+      const raw = await probeRaw('#scheduler-list', { text: taskName });
+      if (Number(raw?.textMatchedCount || 0) > 0) break;
+      await sleep(500);
+    }
     await runProbe('scheduler', '#scheduler-list', { text: taskName });
     await runProbe('scheduler', '#scheduler-list button', { text: '编辑' });
     await runProbe('scheduler', '#scheduler-list button', { text: '执行' });
@@ -426,11 +464,12 @@ async function runFullCover(endpoint) {
     await click('#scheduler-daemon-stop-btn');
     await click('#scheduler-reset-btn');
 
-    await tab('账户管理');
-    await wait('#recheck-env-btn', 20000, 'exists');
-    await wait('#add-account-btn', 10000, 'exists');
-    await wait('#check-all-btn', 10000, 'exists');
-    await wait('#refresh-expired-btn', 10000, 'exists');
+    const tabOk = await ensureTabActive('账户管理', 'account-manager');
+    if (!tabOk) throw new Error('tab_failed:账户管理');
+    await waitForElement('#recheck-env-btn', 40, 500);
+    await waitForElement('#add-account-btn', 20, 500);
+    await waitForElement('#check-all-btn', 20, 500);
+    await waitForElement('#refresh-expired-btn', 20, 500);
     await runProbe('account', '#env-camo');
     await runProbe('account', '#env-unified');
     await runProbe('account', '#env-browser');
