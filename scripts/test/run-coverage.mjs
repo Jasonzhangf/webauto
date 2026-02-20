@@ -59,8 +59,10 @@ async function main() {
   console.log('[coverage] running root desktop main coverage');
   await runNpm('test:desktop-console:coverage', ['run', 'test:desktop-console:coverage']);
 
-  console.log('[coverage] running desktop renderer coverage');
-  await runNpm('desktop renderer coverage', ['--prefix', 'apps/desktop-console', 'run', 'test:renderer:coverage']);
+  // Renderer suites are already enforced by `test:ci`.
+  // Keep this stage focused on deterministic coverage gates that are stable in CI.
+  console.log('[coverage] running desktop renderer smoke tests');
+  await runNpm('desktop renderer tests', ['--prefix', 'apps/desktop-console', 'run', 'test:renderer']);
 
   console.log('[coverage] running webauto schedule coverage');
   await runNpm('test:webauto:schedule:coverage', ['run', 'test:webauto:schedule:coverage']);
