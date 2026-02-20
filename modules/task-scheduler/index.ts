@@ -9,6 +9,7 @@
  */
 
 import { EventEmitter } from 'events';
+import { execSync } from 'child_process';
 
 export type TaskStatus = 'pending' | 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
 
@@ -49,6 +50,25 @@ export class TaskScheduler extends EventEmitter {
   private runningProfiles: Map<string, string> = new Map(); // profile -> taskId
   private queue: string[] = [];
   private maxRunTimeMs: number;
+  
+  /**
+   * Terminate a process by PID (cross-platform)
+   */
+  private terminateProcess(pid: number): void {
+    if (process.platform === 'win32') {
+      try {
+        execSync(`taskkill /PID ${pid} /T /F`, { stdio: 'ignore' });
+      } catch {
+        // Ignore errors if process already terminated
+      }
+    } else {
+      try {
+        process.kill(pid, 'SIGTERM');
+      } catch {
+        // Ignore errors if process already terminated
+      }
+    }
+  }
   
   constructor(options: { maxRunTimeMs?: number } = {}) {
     super();
@@ -202,7 +222,7 @@ export class TaskScheduler extends EventEmitter {
     if (task.status === 'running') {
       task.status = 'cancelled';
       if (task.pid) {
-        process.kill(task.pid, 'SIGTERM');
+        this.terminateProcess(task.pid);
       }
       this.runningProfiles.delete(task.profile);
     }
