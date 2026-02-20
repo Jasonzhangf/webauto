@@ -116,6 +116,9 @@
         padding: 8px 14px; 
         border-radius: var(--radius-md); 
         cursor: pointer; 
+        border: 1px solid transparent;
+        background: transparent;
+        font-family: inherit;
         color: var(--text-secondary);
         font-size: 13px;
         font-weight: 500;
@@ -133,6 +136,10 @@
         background: var(--accent-primary);
         color: #fff;
         box-shadow: var(--shadow-sm);
+      }
+      header .tab:focus-visible {
+        outline: 2px solid var(--accent-info);
+        outline-offset: 2px;
       }
       header .tab.active::after {
         content: '';
@@ -665,6 +672,14 @@
         background: var(--bg-overlay);
         border-radius: var(--radius-md);
         border: 1px solid var(--border-subtle);
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        *, *::before, *::after {
+          animation: none !important;
+          transition: none !important;
+          scroll-behavior: auto !important;
+        }
       }
     </style>
   </head>

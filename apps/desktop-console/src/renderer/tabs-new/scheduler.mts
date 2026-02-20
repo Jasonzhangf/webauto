@@ -1,75 +1,21 @@
 import { createEl } from '../ui-components.mts';
-
-type ScheduleTask = {
-  id: string;
-  name: string;
-  enabled: boolean;
-  scheduleType: 'interval' | 'once' | 'daily' | 'weekly';
-  intervalMinutes: number;
-  runAt: string | null;
-  maxRuns: number | null;
-  nextRunAt: string | null;
-  commandType: string;
-  commandArgv: Record<string, any>;
-  lastRunAt: string | null;
-  lastStatus: string | null;
-  lastError: string | null;
-  runCount: number;
-  failCount: number;
-  runHistory?: Array<{ timestamp: string; status: 'success' | 'failure'; durationMs: number }>;
-};
-
-function toLocalDatetimeValue(iso: string | null): string {
-  const text = String(iso || '').trim();
-  if (!text) return '';
-  const ts = Date.parse(text);
-  if (!Number.isFinite(ts)) return '';
-  const date = new Date(ts);
-  const yyyy = date.getFullYear();
-  const mm = String(date.getMonth() + 1).padStart(2, '0');
-  const dd = String(date.getDate()).padStart(2, '0');
-  const hh = String(date.getHours()).padStart(2, '0');
-  const min = String(date.getMinutes()).padStart(2, '0');
-  return `${yyyy}-${mm}-${dd}T${hh}:${min}`;
-}
-
-function toIsoOrNull(localDateTime: string): string | null {
-  const text = String(localDateTime || '').trim();
-  if (!text) return null;
-  const ts = Date.parse(text);
-  if (!Number.isFinite(ts)) return null;
-  return new Date(ts).toISOString();
-}
-
-function parseTaskRows(payload: any): ScheduleTask[] {
-  const rows = Array.isArray(payload?.tasks) ? payload.tasks : [];
-  return rows
-    .map((row) => {
-      const scheduleType: ScheduleTask['scheduleType'] = (() => {
-        const value = String(row?.scheduleType || 'interval').trim().toLowerCase();
-        if (value === 'once' || value === 'daily' || value === 'weekly') return value;
-        return 'interval';
-      })();
-      return ({
-      id: String(row?.id || '').trim(),
-      name: String(row?.name || row?.id || '').trim(),
-      enabled: row?.enabled !== false,
-      scheduleType,
-      intervalMinutes: Number(row?.intervalMinutes || 30) || 30,
-      runAt: String(row?.runAt || '').trim() || null,
-      maxRuns: Number.isFinite(Number(row?.maxRuns)) && Number(row.maxRuns) > 0 ? Math.floor(Number(row.maxRuns)) : null,
-      nextRunAt: String(row?.nextRunAt || '').trim() || null,
-      commandType: String(row?.commandType || 'xhs-unified').trim() || 'xhs-unified',
-      commandArgv: row?.commandArgv && typeof row.commandArgv === 'object' ? row.commandArgv : {},
-      lastRunAt: String(row?.lastRunAt || '').trim() || null,
-      lastStatus: String(row?.lastStatus || '').trim() || null,
-      lastError: String(row?.lastError || '').trim() || null,
-      runCount: Number(row?.runCount || 0) || 0,
-      failCount: Number(row?.failCount || 0) || 0,
-    });
-    })
-    .filter((row) => row.id);
-}
+import {
+  parseTaskRows,
+  toIsoOrNull,
+  toLocalDatetimeValue,
+  type ScheduleTask,
+  type TaskDefinition,
+  PLATFORM_TASKS,
+  getTasksForPlatform,
+  getPlatformForCommandType,
+  getTaskDefinition,
+} from './schedule-task-bridge.mts';
+import {
+  parseTaskRows,
+  toIsoOrNull,
+  toLocalDatetimeValue,
+  type ScheduleTask,
+} from './schedule-task-bridge.mts';
 
 export function renderSchedulerPanel(root: HTMLElement, ctx: any) {
   root.innerHTML = '';
@@ -109,6 +55,21 @@ export function renderSchedulerPanel(root: HTMLElement, ctx: any) {
   formCell.innerHTML = `
     <div class="bento-title">任务编辑</div>
     <input id="scheduler-editing-id" type="hidden" />
+    <div class="row">
+      <div>
+        <label>平台</label>
+        <select id="scheduler-platform" style="width: 140px;">
+          <option value="xiaohongshu">📕 小红书</option>
+          <option value="weibo">📰 微博</option>
+          <option value="1688">🛒 1688</option>
+        </select>
+      </div>
+      <div>
+        <label>任务类型</label>
+        <select id="scheduler-task-type" style="width: 160px;">
+        </select>
+      </div>
+    </div>
     <div class="row">
       <div>
         <label>任务名</label>
@@ -212,6 +173,8 @@ export function renderSchedulerPanel(root: HTMLElement, ctx: any) {
   const daemonStatus = root.querySelector('#scheduler-daemon-status') as HTMLSpanElement;
   const listEl = root.querySelector('#scheduler-list') as HTMLDivElement;
 
+  const platformSelect = root.querySelector('#scheduler-platform') as HTMLSelectElement;
+  const taskTypeSelect = root.querySelector('#scheduler-task-type') as HTMLSelectElement;
   const editingIdInput = root.querySelector('#scheduler-editing-id') as HTMLInputElement;
   const nameInput = root.querySelector('#scheduler-name') as HTMLInputElement;
   const enabledInput = root.querySelector('#scheduler-enabled') as HTMLInputElement;
@@ -236,6 +199,7 @@ export function renderSchedulerPanel(root: HTMLElement, ctx: any) {
   let tasks: ScheduleTask[] = [];
   let daemonRunId = '';
   let unsubscribeCmd: (() => void) | null = null;
+  let pendingFocusTaskId = String(ctx?.activeTaskConfigId || '').trim();
 
   function setDaemonStatus(text: string) {
     daemonStatus.textContent = text;
@@ -248,7 +212,17 @@ export function renderSchedulerPanel(root: HTMLElement, ctx: any) {
     intervalWrap.style.display = useRunAt ? 'none' : '';
   }
 
+  function updateTaskTypeOptions() {
+    const platform = platformSelect.value;
+    const tasks = getTasksForPlatform(platform);
+    taskTypeSelect.innerHTML = tasks
+      .map(t => `<option value="${t.type}">${t.icon} ${t.label}</option>`)
+      .join('');
+  }
+
   function resetForm() {
+    platformSelect.value = 'xiaohongshu';
+    updateTaskTypeOptions();
     editingIdInput.value = '';
     nameInput.value = '';
     enabledInput.checked = true;
@@ -265,6 +239,9 @@ export function renderSchedulerPanel(root: HTMLElement, ctx: any) {
     headlessInput.checked = false;
     dryRunInput.checked = false;
     likeKeywordsInput.value = '';
+    if (ctx && typeof ctx === 'object') {
+      ctx.activeTaskConfigId = '';
+    }
     updateTypeFields();
   }
 
@@ -288,7 +265,7 @@ export function renderSchedulerPanel(root: HTMLElement, ctx: any) {
       id: editingIdInput.value.trim(),
       name: nameInput.value.trim(),
       enabled: enabledInput.checked,
-      scheduleType: typeSelect.value,
+      scheduleType: typeSelect.value as ScheduleTask['scheduleType'],
       intervalMinutes: Number(intervalInput.value || 30) || 30,
       runAt: toIsoOrNull(runAtInput.value),
       maxRuns,
@@ -297,6 +274,7 @@ export function renderSchedulerPanel(root: HTMLElement, ctx: any) {
   }
 
   function applyTaskToForm(task: ScheduleTask) {
+    pendingFocusTaskId = '';
     editingIdInput.value = task.id;
     nameInput.value = task.name || '';
     enabledInput.checked = task.enabled !== false;
@@ -313,6 +291,9 @@ export function renderSchedulerPanel(root: HTMLElement, ctx: any) {
     headlessInput.checked = task.commandArgv?.headless === true;
     dryRunInput.checked = task.commandArgv?.['dry-run'] === true;
     likeKeywordsInput.value = String(task.commandArgv?.['like-keywords'] || '');
+    if (ctx && typeof ctx === 'object') {
+      ctx.activeTaskConfigId = task.id;
+    }
     updateTypeFields();
   }
 
@@ -362,24 +343,39 @@ export function renderSchedulerPanel(root: HTMLElement, ctx: any) {
       const statusText = task.lastStatus
         ? `${task.lastStatus} / run=${task.runCount} / fail=${task.failCount}`
         : 'never run';
-      const historyHtml = (task.runHistory || []).slice(-5).map((h) => {
-        const icon = h.status === 'success' ? '✅' : '❌';
-        const duration = h.durationMs ? `${Math.round(h.durationMs / 1000)}s` : '-';
-        return `<span title="${h.timestamp} ${duration}">${icon}</span>`;
-      }).join(' ');
-      card.innerHTML = `
-        <div style="display:flex; justify-content:space-between; gap:8px; margin-bottom:6px;">
-          <div style="font-weight:600;">${task.name || task.id}</div>
-          <span style="font-size:12px; color:${task.enabled ? 'var(--success)' : 'var(--danger)'};">${task.enabled ? 'enabled' : 'disabled'}</span>
-        </div>
-        <div class="muted" style="font-size:12px; margin-bottom:4px;">id=${task.id}</div>
-        <div style="font-size:12px;">schedule: ${scheduleText}</div>
-        <div style="font-size:12px;">maxRuns: ${task.maxRuns || 'unlimited'}</div>
-        <div style="font-size:12px;">nextRunAt: ${task.nextRunAt || '-'}</div>
-        <div style="font-size:12px;">status: ${statusText}</div>
-        ${historyHtml ? `<div style="font-size:12px;">recent: ${historyHtml}</div>` : ''}
-        ${task.lastError ? `<div style="font-size:12px; color:var(--danger);">error: ${task.lastError}</div>` : ''}
-      `;
+
+      const headRow = createEl('div', { style: 'display:flex; justify-content:space-between; gap:8px; margin-bottom:6px;' });
+      headRow.appendChild(createEl('div', { style: 'font-weight:600;' }, [task.name || task.id]));
+      headRow.appendChild(
+        createEl(
+          'span',
+          { style: `font-size:12px; color:${task.enabled ? 'var(--accent-success)' : 'var(--accent-danger)'};` },
+          [task.enabled ? 'enabled' : 'disabled'],
+        ),
+      );
+      card.appendChild(headRow);
+      card.appendChild(createEl('div', { className: 'muted', style: 'font-size:12px; margin-bottom:4px;' }, [`id=${task.id}`]));
+      card.appendChild(createEl('div', { style: 'font-size:12px;' }, [`schedule: ${scheduleText}`]));
+      card.appendChild(createEl('div', { style: 'font-size:12px;' }, [`maxRuns: ${task.maxRuns || 'unlimited'}`]));
+      card.appendChild(createEl('div', { style: 'font-size:12px;' }, [`nextRunAt: ${task.nextRunAt || '-'}`]));
+      card.appendChild(createEl('div', { style: 'font-size:12px;' }, [`status: ${statusText}`]));
+
+      const recent = (task.runHistory || []).slice(-5);
+      if (recent.length > 0) {
+        const recentRow = createEl('div', { style: 'font-size:12px;' }, ['recent: ']);
+        for (const h of recent) {
+          const icon = h.status === 'success' ? '✅' : '❌';
+          const duration = h.durationMs ? `${Math.round(h.durationMs / 1000)}s` : '-';
+          const badge = createEl('span', { title: `${h.timestamp} ${duration}` }, [icon]);
+          recentRow.appendChild(badge);
+          recentRow.appendChild(document.createTextNode(' '));
+        }
+        card.appendChild(recentRow);
+      }
+
+      if (task.lastError) {
+        card.appendChild(createEl('div', { style: 'font-size:12px; color:var(--accent-danger);' }, [`error: ${task.lastError}`]));
+      }
       const actions = createEl('div', { className: 'btn-group', style: 'margin-top: 8px;' });
       const editBtn = createEl('button', { className: 'secondary' }, ['编辑']) as HTMLButtonElement;
       const runBtn = createEl('button', { className: 'secondary' }, ['执行']) as HTMLButtonElement;
@@ -394,6 +390,9 @@ export function renderSchedulerPanel(root: HTMLElement, ctx: any) {
       editBtn.onclick = () => applyTaskToForm(task);
       runBtn.onclick = async () => {
         try {
+          if (ctx && typeof ctx === 'object') {
+            ctx.activeTaskConfigId = task.id;
+          }
           await runScheduleJson(['run', task.id], 0);
           await refreshList();
         } catch (err: any) {
@@ -425,6 +424,16 @@ export function renderSchedulerPanel(root: HTMLElement, ctx: any) {
   async function refreshList() {
     const out = await runScheduleJson(['list']);
     tasks = parseTaskRows(out);
+    if (!pendingFocusTaskId) {
+      pendingFocusTaskId = String(ctx?.activeTaskConfigId || '').trim();
+    }
+    if (pendingFocusTaskId) {
+      const target = tasks.find((item) => item.id === pendingFocusTaskId);
+      if (target) {
+        applyTaskToForm(target);
+      }
+      pendingFocusTaskId = '';
+    }
     renderTaskList();
   }
 
@@ -466,9 +475,13 @@ export function renderSchedulerPanel(root: HTMLElement, ctx: any) {
     args.push('--max-runs', payload.maxRuns === null ? '0' : String(payload.maxRuns));
     args.push('--argv-json', JSON.stringify(payload.argv));
     try {
-      await runScheduleJson(args);
+      const out = await runScheduleJson(args);
+      const savedId = String(out?.task?.id || payload.id || '').trim();
+      pendingFocusTaskId = savedId;
+      if (ctx && typeof ctx === 'object' && savedId) {
+        ctx.activeTaskConfigId = savedId;
+      }
       await refreshList();
-      resetForm();
     } catch (err: any) {
       alert(`保存失败: ${err?.message || String(err)}`);
     }
@@ -540,6 +553,20 @@ export function renderSchedulerPanel(root: HTMLElement, ctx: any) {
     }
     daemonRunId = '';
     setDaemonStatus('daemon: 已停止');
+  }
+
+  platformSelect.addEventListener('change', () => {
+    updateTaskTypeOptions();
+    updatePlatformFields();
+  });
+  function updatePlatformFields() {
+    const platform = platformSelect.value;
+    const taskType = taskTypeSelect.value;
+    if (platform === 'weibo') {
+      // Add weibo-specific fields if needed
+    } else if (platform === '1688') {
+      // Add 1688-specific fields if needed
+    }
   }
 
   typeSelect.addEventListener('change', updateTypeFields);

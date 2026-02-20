@@ -13,6 +13,7 @@ async function getSrc() {
 
 test('scheduler panel wires schedule cli operations and daemon controls', async () => {
   const src = await getSrc();
+  assert.match(src, /from '\.\/schedule-task-bridge\.mts'/);
   assert.match(src, /apps', 'webauto', 'entry', 'schedule\.mjs'/);
   assert.match(src, /runScheduleJson\(\['list'\]\)/);
   assert.match(src, /runScheduleJson\(\['run-due', '--limit', '20'\]/);
@@ -23,4 +24,6 @@ test('scheduler panel wires schedule cli operations and daemon controls', async 
   assert.match(src, /--max-runs/);
   assert.match(src, /cmdSpawn\(\{\s*title: `schedule daemon/);
   assert.match(src, /cmdKill\(\{ runId: daemonRunId \}\)/);
+  assert.match(src, /pendingFocusTaskId/);
+  assert.doesNotMatch(src, /card\.innerHTML\s*=/);
 });

@@ -63,7 +63,7 @@ export class BrowserSession {
     enabled: false,
     name: null,
     outputPath: null,
-    overlay: true,
+    overlay: false,
     startedAt: null,
     endedAt: null,
     eventCount: 0,
@@ -145,7 +145,6 @@ export class BrowserSession {
 
     // 应用指纹到上下文（Playwright JS 注入）
     await applyFingerprint(this.context, fingerprint);
-    await this.context.addInitScript({ content: this.buildRecorderBootstrapScript() }).catch(() => {});
 
     // NOTE: deviceScaleFactor override was Chromium-only (CDP). Chromium removed.
 
@@ -176,7 +175,9 @@ export class BrowserSession {
     this.bindRecorderBridge(page);
     page.on('domcontentloaded', () => {
       ensure('domcontentloaded');
-      void this.installRecorderRuntime(page, 'domcontentloaded');
+      if (this.recording.active) {
+        void this.installRecorderRuntime(page, 'domcontentloaded');
+      }
     });
     page.on('framenavigated', (frame) => {
       if (frame === page.mainFrame()) {
@@ -194,7 +195,9 @@ export class BrowserSession {
     });
 
     ensure('initial');
-    void this.installRecorderRuntime(page, 'initial');
+    if (this.recording.active) {
+      void this.installRecorderRuntime(page, 'initial');
+    }
   }
 
   addRuntimeEventObserver(observer: (event: any) => void): () => void {
@@ -264,7 +267,7 @@ export class BrowserSession {
 
       const state = {
         enabled: false,
-        overlay: true,
+        overlay: false,
         destroyed: false,
         scrollAt: 0,
         wheelAt: 0,
@@ -277,9 +280,33 @@ export class BrowserSession {
         if (typeof value !== 'string') return '';
         return value.replace(/\\s+/g, ' ').trim().slice(0, max);
       };
+      const SENSITIVE_TEXT_RE = /(pass(word)?|pwd|secret|token|otp|one[\\s_-]?time|验证码|校验码|短信|sms|手机|phone|mail|邮箱|email)/i;
       const toNumber = (value, fallback = 0) => {
         const n = Number(value);
         return Number.isFinite(n) ? n : fallback;
+      };
+      const getAttr = (el, name) => {
+        if (!(el instanceof Element)) return '';
+        const value = el.getAttribute?.(name);
+        return typeof value === 'string' ? value : '';
+      };
+      const hasSensitiveHint = (value) => SENSITIVE_TEXT_RE.test(String(value || ''));
+      const isSensitiveElement = (el) => {
+        if (!(el instanceof Element)) return false;
+        const tag = String(el.tagName || '').toLowerCase();
+        const type = String((el instanceof HTMLInputElement ? el.type : getAttr(el, 'type')) || '').toLowerCase();
+        if (tag === 'input' && ['password', 'email', 'tel'].includes(type)) return true;
+        const autocomplete = String(getAttr(el, 'autocomplete') || '').toLowerCase();
+        if (autocomplete.includes('one-time-code') || autocomplete.includes('password')) return true;
+        const hint = [
+          el.id || '',
+          getAttr(el, 'name'),
+          getAttr(el, 'aria-label'),
+          getAttr(el, 'placeholder'),
+          autocomplete,
+          String(el.className || ''),
+        ].join(' ');
+        return hasSensitiveHint(hint);
       };
 
       const isVisible = (el) => {
@@ -345,10 +372,11 @@ export class BrowserSession {
           const value = el.getAttribute?.(key);
           if (value) attrs[key] = String(value).slice(0, 120);
         });
+        const sensitive = isSensitiveElement(el);
         let valueSnippet = null;
         const value = el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement ? el.value : null;
         if (typeof value === 'string' && value.length > 0) {
-          valueSnippet = value.slice(0, 120);
+          valueSnippet = sensitive ? '[REDACTED]' : value.slice(0, 120);
         }
         return {
           tag: String(el.tagName || '').toLowerCase(),
@@ -358,6 +386,7 @@ export class BrowserSession {
           textSnippet: safeText(el.textContent || '', 120),
           attrs,
           valueSnippet,
+          sensitive,
           visible: isVisible(el),
           rect: rect
             ? {
@@ -403,23 +432,31 @@ export class BrowserSession {
 
       const onKeyDown = (event) => {
         if (!shouldRecord(event)) return;
+        const element = buildElementPayload(event.target || document.activeElement);
+        const isPrintable = typeof event.key === 'string' && event.key.length === 1;
+        const redactKey = !!element?.sensitive || (isPrintable && !event.ctrlKey && !event.metaKey && !event.altKey);
         emit('interaction.keydown', {
-          key: String(event.key || ''),
+          key: redactKey ? '[REDACTED]' : String(event.key || ''),
           code: String(event.code || ''),
           ctrlKey: !!event.ctrlKey,
           metaKey: !!event.metaKey,
           altKey: !!event.altKey,
           shiftKey: !!event.shiftKey,
-          element: buildElementPayload(event.target || document.activeElement),
+          redacted: redactKey,
+          element,
         });
       };
 
       const onInput = (event) => {
         if (!shouldRecord(event)) return;
         const element = buildElementPayload(event.target || document.activeElement);
+        const rawData = typeof event.data === 'string' ? event.data : '';
+        const redactData = !!element?.sensitive;
         emit('interaction.input', {
           inputType: String(event.inputType || ''),
-          data: safeText(String(event.data || ''), 80),
+          data: redactData ? '[REDACTED]' : safeText(rawData, 80),
+          dataLength: rawData.length,
+          redacted: redactData,
           element,
         });
       };
@@ -592,6 +629,15 @@ export class BrowserSession {
     );
   }
 
+  private async destroyRecorderRuntimeOnPage(page: Page): Promise<void> {
+    if (!page || page.isClosed()) return;
+    await page.evaluate(() => {
+      const runtime = (window as any).__camoRecorderV1__;
+      if (!runtime || typeof runtime.destroy !== 'function') return null;
+      return runtime.destroy();
+    });
+  }
+
   private normalizeRecordingName(raw?: string): string {
     const text = String(raw || '').trim();
     const fallback = `record-${this.id}`;
@@ -736,6 +782,13 @@ export class BrowserSession {
       this.recording.enabled = false;
       this.recording.overlay = false;
       this.recording.endedAt = Date.now();
+      if (this.context) {
+        const pages = this.context.pages().filter((p) => !p.isClosed());
+        for (const page of pages) {
+          // eslint-disable-next-line no-await-in-loop
+          await this.destroyRecorderRuntimeOnPage(page).catch(() => {});
+        }
+      }
       return this.getRecordingStatus();
     }
 
@@ -753,7 +806,7 @@ export class BrowserSession {
       const pages = this.context.pages().filter((p) => !p.isClosed());
       for (const page of pages) {
         // eslint-disable-next-line no-await-in-loop
-        await this.syncRecorderStateToPage(page).catch(() => {});
+        await this.destroyRecorderRuntimeOnPage(page).catch(() => {});
       }
     }
 

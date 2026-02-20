@@ -148,10 +148,10 @@ CLI Actions:
   input         输入文本（--selector --value）
   select        选择下拉项（--selector --value）
   press         输入按键（--key Enter/Escape）
-  probe         读取控件状态（exists/count/value/text/checked）
+  probe         读取控件状态（exists/count/value/text/checked，可选 --detailed）
   click-text    按文案点击按钮（无 id 控件）
   dialogs       控制 alert/confirm/prompt 静默模式
-  wait          等待元素状态（--selector --state visible|exists|hidden）
+  wait          等待元素状态（--selector --state visible|exists|hidden|text_contains|text_equals|value_equals|not_disabled）
   run           按 steps.json 执行动作序列
   full-cover    真实 UI CLI 全功能覆盖回归（无 mock）
 
@@ -160,6 +160,7 @@ Common Options:
   --host <host>   控制通道 host（默认 127.0.0.1）
   --port <n>      控制通道端口（默认 7716）
   --json          输出 JSON
+  --detailed      probe 时返回 rect/style/attributes 等详细信息
 
 Examples:
   webauto ui console --check
@@ -170,7 +171,7 @@ Examples:
   webauto ui cli tab --tab 配置
   webauto ui cli input --selector "#keyword-input" --value "春晚"
   webauto ui cli click --selector "#start-btn"
-  webauto ui cli probe --selector "#start-btn"
+  webauto ui cli probe --selector "#start-btn" --detailed
   webauto ui cli full-cover --build --output ./.tmp/ui-cli-full-cover.json
 `);
 }

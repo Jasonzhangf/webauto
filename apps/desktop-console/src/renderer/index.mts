@@ -112,29 +112,68 @@ async function loadSettings() {
   await ctx.refreshSettings();
 }
 
+function focusTabButton(tabId: TabId) {
+  const button = tabsEl.querySelector(`[data-tab-id="${tabId}"]`) as HTMLButtonElement | null;
+  button?.focus();
+}
+
 function setActiveTab(id: TabId) {
   if (activeTabCleanup) {
     try { activeTabCleanup(); } catch {}
     activeTabCleanup = null;
   }
 
+  const visibleTabs = tabs.filter((x) => !x.hidden);
+  tabsEl.setAttribute('role', 'tablist');
   tabsEl.textContent = '';
-  for (const t of tabs.filter((x) => !x.hidden)) {
+  for (let index = 0; index < visibleTabs.length; index += 1) {
+    const t = visibleTabs[index];
+    const isActive = t.id === id;
     const icon = tabIcons[t.id] || '';
-    const el = createEl('div', { className: `tab ${t.id === id ? 'active' : ''}` }, [
+    const el = createEl('button', { className: `tab ${isActive ? 'active' : ''}`, type: 'button' }, [
       createEl('span', { className: 'tab-icon' }, [icon]),
       t.label
-    ]);
+    ]) as HTMLButtonElement;
     el.dataset.tabId = t.id;
+    el.setAttribute('role', 'tab');
+    el.setAttribute('aria-selected', String(isActive));
+    el.tabIndex = isActive ? 0 : -1;
     el.addEventListener('click', () => setActiveTab(t.id));
+    el.addEventListener('keydown', (evt) => {
+      const key = evt.key;
+      if (key === 'Enter' || key === ' ') {
+        evt.preventDefault();
+        setActiveTab(t.id);
+        return;
+      }
+      let nextIndex = -1;
+      if (key === 'ArrowRight') nextIndex = (index + 1) % visibleTabs.length;
+      else if (key === 'ArrowLeft') nextIndex = (index - 1 + visibleTabs.length) % visibleTabs.length;
+      else if (key === 'Home') nextIndex = 0;
+      else if (key === 'End') nextIndex = visibleTabs.length - 1;
+      if (nextIndex >= 0) {
+        evt.preventDefault();
+        const nextTab = visibleTabs[nextIndex];
+        if (!nextTab) return;
+        setActiveTab(nextTab.id);
+        requestAnimationFrame(() => focusTabButton(nextTab.id));
+      }
+    });
     tabsEl.appendChild(el);
   }
 
   contentEl.textContent = '';
-  // Add fade-in animation to content
-  contentEl.classList.remove('animate-fade-in');
-  void contentEl.offsetWidth; // Trigger reflow
-  contentEl.classList.add('animate-fade-in');
+  const reducedMotion = typeof window.matchMedia === 'function'
+    ? window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    : false;
+  if (!reducedMotion) {
+    contentEl.classList.remove('animate-fade-in');
+    if (typeof requestAnimationFrame === 'function') {
+      requestAnimationFrame(() => contentEl.classList.add('animate-fade-in'));
+    } else {
+      contentEl.classList.add('animate-fade-in');
+    }
+  }
   
   const tab = tabs.find((x) => x.id === id)!;
   const dispose = tab.render(contentEl, ctx);

@@ -94,6 +94,13 @@ function createMockCtx(): MockBundle {
         lastError: null,
         runCount: 0,
         failCount: 0,
+        runHistory: [
+          {
+            timestamp: '2026-02-20T10:00:00.000Z',
+            status: 'success',
+            durationMs: 4321,
+          },
+        ],
       },
     ] as any[],
     nextId: 2,
@@ -340,6 +347,8 @@ test('scheduler panel supports validate + add/update/delete/import + daemon life
 
   const listAfterAdd = root.querySelector('#scheduler-list') as HTMLDivElement;
   assert.equal(String(listAfterAdd.textContent || '').includes('missing-profile'), true);
+  assert.equal(String(listAfterAdd.textContent || '').includes('recent:'), true);
+  assert.equal(String(listAfterAdd.textContent || '').includes('✅'), true);
 
   const schedulerList = root.querySelector('#scheduler-list') as HTMLDivElement;
   findButtonByTextIn(schedulerList, '编辑', 0).click();
@@ -432,5 +441,38 @@ test('scheduler panel renders list failure fallback when list command errors', a
   await flush(4);
   const list = root.querySelector('#scheduler-list') as HTMLDivElement;
   assert.equal(String(list.textContent || '').includes('加载失败'), true);
+  if (typeof dispose === 'function') dispose();
+});
+
+test('scheduler panel escapes untrusted task content when rendering task cards', async () => {
+  const bundle = createMockCtx();
+  bundle.state.tasks = [{
+    id: 'sched-xss',
+    name: '<img src=x onerror=alert(1)>',
+    enabled: true,
+    scheduleType: 'interval',
+    intervalMinutes: 10,
+    runAt: null,
+    maxRuns: null,
+    nextRunAt: null,
+    commandType: 'xhs-unified',
+    commandArgv: { profile: 'xiaohongshu-batch-0', keyword: 'xss' },
+    lastRunAt: null,
+    lastStatus: 'failure',
+    lastError: '<script>boom</script>',
+    runCount: 1,
+    failCount: 1,
+    runHistory: [
+      { timestamp: '2026-02-20T10:00:00.000Z" onmouseover="alert(2)', status: 'failure', durationMs: 2200 },
+    ],
+  }];
+  const root = document.createElement('div');
+  const dispose = renderSchedulerPanel(root, bundle.ctx) as (() => void) | void;
+  await flush(6);
+  const schedulerList = root.querySelector('#scheduler-list') as HTMLDivElement;
+  assert.equal(schedulerList.querySelector('img') == null, true);
+  assert.equal(schedulerList.querySelector('script') == null, true);
+  assert.equal(String(schedulerList.textContent || '').includes('<img src=x onerror=alert(1)>'), true);
+  assert.equal(String(schedulerList.textContent || '').includes('<script>boom</script>'), true);
   if (typeof dispose === 'function') dispose();
 });

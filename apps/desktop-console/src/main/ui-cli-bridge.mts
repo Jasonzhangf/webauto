@@ -79,6 +79,21 @@ function isUiReady(win: BrowserWindow | null) {
   return true;
 }
 
+function toActionError(input: Partial<UiCliAction> | null | undefined, error: string, extra: Record<string, any> = {}) {
+  const action = String(input?.action || '').trim();
+  const selector = String(input?.selector || '').trim();
+  const state = String(input?.state || '').trim();
+  const payload = {
+    ok: false,
+    error: String(error || 'unknown_error'),
+    action: action || null,
+    selector: selector || null,
+    state: state || null,
+    ...extra,
+  };
+  return payload;
+}
+
 async function writeControlFile(host: string, port: number) {
   const payload = {
     pid: process.pid,
@@ -498,25 +513,25 @@ export class UiCliBridge {
 
   private async handleAction(input: UiCliAction) {
     const action = String(input?.action || '').trim();
-    if (!action) return { ok: false, error: 'missing_action' };
+    if (!action) return toActionError(input, 'missing_action');
 
     if (action === 'wait') {
       return this.waitForSelector(input);
     }
 
     const win = this.options.getWindow();
-    if (!isUiReady(win)) return { ok: false, error: 'window_not_ready' };
+    if (!isUiReady(win)) return toActionError(input, 'window_not_ready');
     try {
       const out = await win!.webContents.executeJavaScript(buildActionScript(input), true);
-      return out && typeof out === 'object' ? out : { ok: false, error: 'empty_result' };
+      return out && typeof out === 'object' ? out : toActionError(input, 'empty_result');
     } catch (err: any) {
-      return { ok: false, error: err?.message || String(err), details: err?.stack || null };
+      return toActionError(input, err?.message || String(err), { details: err?.stack || null });
     }
   }
 
   private async waitForSelector(input: UiCliAction) {
     const selector = String(input.selector || '').trim();
-    if (!selector) return { ok: false, error: 'missing_selector' };
+    if (!selector) return toActionError(input, 'missing_selector');
     const expected = input.state || 'visible';
     const timeoutMs = readInt(input.timeoutMs, 15_000);
     const intervalMs = readInt(input.intervalMs, 250);
@@ -524,7 +539,7 @@ export class UiCliBridge {
 
     while (Date.now() - startedAt <= timeoutMs) {
       const win = this.options.getWindow();
-      if (!isUiReady(win)) return { ok: false, error: 'window_not_ready' };
+      if (!isUiReady(win)) return toActionError(input, 'window_not_ready');
       try {
         const checkScript = `(() => {
           const el = document.querySelector(${JSON.stringify(selector)});
@@ -580,19 +595,23 @@ export class UiCliBridge {
             reason = matched ? 'element enabled' : 'element disabled';
             break;
           default:
-            return { ok: false, error: 'unsupported_state', state: expected };
+            return toActionError(input, 'unsupported_state', { expected });
         }
 
         if (matched) {
           return { ok: true, selector, expected, exists, visible, text, value, disabled, elapsedMs: Date.now() - startedAt, reason };
         }
       } catch (err: any) {
-        return { ok: false, error: err?.message || String(err) };
+        return toActionError(input, err?.message || String(err), { details: err?.stack || null });
       }
       await new Promise((resolve) => setTimeout(resolve, intervalMs));
     }
 
-    return { ok: false, error: 'wait_timeout', selector, expected, timeoutMs };
+    return toActionError(input, 'wait_timeout', {
+      expected,
+      timeoutMs,
+      elapsedMs: Date.now() - startedAt,
+    });
   }
 }
 

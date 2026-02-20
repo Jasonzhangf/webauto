@@ -14,7 +14,7 @@ const DEFAULT_HOST = process.env.WEBAUTO_UI_CLI_HOST || '127.0.0.1';
 const DEFAULT_PORT = Number(process.env.WEBAUTO_UI_CLI_PORT || 7716);
 
 const args = minimist(process.argv.slice(2), {
-  boolean: ['help', 'json', 'auto-start', 'build', 'install', 'continue-on-error', 'exact', 'keep-open'],
+  boolean: ['help', 'json', 'auto-start', 'build', 'install', 'continue-on-error', 'exact', 'keep-open', 'detailed'],
   string: ['host', 'port', 'selector', 'value', 'text', 'key', 'tab', 'label', 'state', 'file', 'output', 'timeout', 'interval', 'nth'],
   alias: { h: 'help' },
   default: { 'auto-start': false, json: false, 'keep-open': false },
@@ -33,10 +33,10 @@ Usage:
   webauto ui cli input --selector <css> --value <text>
   webauto ui cli select --selector <css> --value <value>
   webauto ui cli press --key <Enter|Escape|...> [--selector <css>]
-  webauto ui cli probe [--selector <css>] [--text <contains>] [--exact]
+  webauto ui cli probe [--selector <css>] [--text <contains>] [--exact] [--detailed]
   webauto ui cli click-text --text <button_text> [--selector "button"] [--nth 0]
   webauto ui cli dialogs --value silent|restore
-  webauto ui cli wait --selector <css> [--state visible|exists|hidden] [--timeout 15000] [--interval 250]
+  webauto ui cli wait --selector <css> [--state visible|exists|hidden|text_contains|text_equals|value_equals|not_disabled] [--value <text>] [--timeout 15000] [--interval 250]
   webauto ui cli full-cover [--build] [--install] [--output <report.json>] [--keep-open]
   webauto ui cli run --file <steps.json> [--continue-on-error]
   webauto ui cli stop
@@ -638,6 +638,7 @@ async function main() {
     if (args.exact === true) payload.exact = true;
     if (args.timeout != null) payload.timeoutMs = parseIntSafe(args.timeout, 15000);
     if (args.interval != null) payload.intervalMs = parseIntSafe(args.interval, 250);
+    if (args.detailed === true) payload.detailed = true;
     if (cmd === 'dialogs' && !payload.value) {
       throw new Error('dialogs requires --value silent|restore');
     }

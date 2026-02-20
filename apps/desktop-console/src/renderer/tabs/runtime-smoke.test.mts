@@ -104,6 +104,8 @@ function createMockCtx(): MockBundle {
       styleCustom: '',
     },
   };
+  let scheduleSeq = 1;
+  const scheduleTasks: any[] = [];
 
   const api: any = {
     settings,
@@ -144,6 +146,56 @@ function createMockCtx(): MockBundle {
             ],
           },
         };
+      }
+      if (args.some((value: string) => value.endsWith('/schedule.mjs'))) {
+        const cmd = String(args[1] || '').trim();
+        if (cmd === 'list') {
+          return { ok: true, json: { tasks: scheduleTasks } };
+        }
+        if (cmd === 'add') {
+          const id = `sched-${String(scheduleSeq).padStart(4, '0')}`;
+          scheduleSeq += 1;
+          const argvRaw = args[args.indexOf('--argv-json') + 1] || '{}';
+          let argv: any = {};
+          try { argv = JSON.parse(String(argvRaw)); } catch { argv = {}; }
+          const row = {
+            id,
+            seq: scheduleSeq,
+            name: String(args[args.indexOf('--name') + 1] || id),
+            enabled: String(args[args.indexOf('--enabled') + 1] || 'true') !== 'false',
+            scheduleType: String(args[args.indexOf('--schedule-type') + 1] || 'interval'),
+            intervalMinutes: Number(args[args.indexOf('--interval-minutes') + 1] || 30) || 30,
+            runAt: String(args[args.indexOf('--run-at') + 1] || '') || null,
+            maxRuns: Number(args[args.indexOf('--max-runs') + 1] || 0) > 0
+              ? Number(args[args.indexOf('--max-runs') + 1])
+              : null,
+            nextRunAt: null,
+            commandType: 'xhs-unified',
+            commandArgv: argv,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+            runCount: 0,
+            failCount: 0,
+          };
+          scheduleTasks.push(row);
+          return { ok: true, json: { task: row } };
+        }
+        if (cmd === 'update') {
+          const id = String(args[2] || '').trim();
+          const row = scheduleTasks.find((item) => String(item.id) === id);
+          if (!row) return { ok: false, error: 'missing_task' };
+          const argvRaw = args[args.indexOf('--argv-json') + 1] || '{}';
+          let argv: any = {};
+          try { argv = JSON.parse(String(argvRaw)); } catch { argv = {}; }
+          row.name = String(args[args.indexOf('--name') + 1] || row.name);
+          row.commandArgv = argv;
+          row.updatedAt = new Date().toISOString();
+          return { ok: true, json: { task: row } };
+        }
+        if (cmd === 'run') {
+          const id = String(args[2] || '').trim();
+          return { ok: true, json: { result: { taskId: id, runResult: { id, lastRunId: 'rid-schedule-1' } } } };
+        }
       }
       if (args.some((value: string) => value.endsWith('/profilepool.mjs')) && args.includes('add')) {
         return { ok: true, json: { profileId: 'xiaohongshu-9' } };
@@ -310,7 +362,7 @@ afterEach(() => {
   dom.cleanup();
 });
 
-test('config panel can load, export and start crawl', async () => {
+test('config panel can load, export and run current schedule config', async () => {
   const { ctx, calls } = createMockCtx();
   (window as any).api = ctx.api;
   const root = document.createElement('div');
@@ -319,6 +371,7 @@ test('config panel can load, export and start crawl', async () => {
 
   const accountSel = root.querySelector('#account-select') as HTMLSelectElement;
   const keyword = root.querySelector('#keyword-input') as HTMLInputElement;
+  const saveCurrentBtn = root.querySelector('#save-current-btn') as HTMLButtonElement;
   const start = root.querySelector('#start-btn') as HTMLButtonElement;
   const exportBtn = root.querySelector('#export-btn') as HTMLButtonElement;
   assert.ok(accountSel.options.length >= 2);
@@ -328,11 +381,13 @@ test('config panel can load, export and start crawl', async () => {
   exportBtn.click();
   await flush();
   assert.equal(calls.configExport.length > 0, true);
+  saveCurrentBtn.click();
+  await flush(3);
 
   start.click();
-  await flush(3);
-  assert.equal(calls.spawns.length, 1);
-  assert.match(calls.spawns[0].args.join(' '), /--profile xhs-1/);
+  await flush(6);
+  assert.equal(calls.spawns.length, 0);
+  assert.equal(calls.logs.some((line: string) => line.includes('schedule run task=')), true);
   assert.ok(calls.setActiveTab.includes('dashboard'));
 });
 

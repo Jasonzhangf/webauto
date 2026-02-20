@@ -4,6 +4,13 @@ import path from 'node:path';
 
 const INDEX_FILE = 'index.json';
 const DEFAULT_COMMAND_TYPE = 'xhs-unified';
+const SUPPORTED_COMMAND_TYPES = [
+  'xhs-unified',
+  'weibo-timeline',
+  'weibo-search',
+  'weibo-monitor',
+  '1688-search',
+];
 const DEFAULT_INTERVAL_MINUTES = 30;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -127,15 +134,46 @@ function normalizeCommandArgv(value) {
 
 function validateCommand(task) {
   const commandType = String(task.commandType || DEFAULT_COMMAND_TYPE).trim();
-  if (commandType !== DEFAULT_COMMAND_TYPE) {
-    throw new Error(`unsupported commandType: ${commandType}`);
+  if (!SUPPORTED_COMMAND_TYPES.includes(commandType)) {
+    throw new Error(`unsupported commandType: ${commandType}. Supported: ${SUPPORTED_COMMAND_TYPES.join(', ')}`);
   }
   const argv = task.commandArgv && typeof task.commandArgv === 'object' ? task.commandArgv : {};
+  const platform = commandType.split('-')[0];
+  if (platform === 'xhs') {
+    validateXhsCommand(argv);
+  } else if (platform === 'weibo' || platform === '1688') {
+    validateGenericCommand(argv, platform);
+  }
+}
+
+function validateXhsCommand(argv) {
   const keyword = normalizeText(argv.keyword || argv.k);
   const profile = normalizeText(argv.profile);
   const profiles = normalizeText(argv.profiles);
   const profilepool = normalizeText(argv.profilepool);
   if (!keyword) throw new Error('task command argv missing keyword');
+  if (!profile && !profiles && !profilepool) {
+    throw new Error('task command argv missing profile/profiles/profilepool');
+  }
+}
+
+function validateGenericCommand(argv, platform) {
+  const keyword = normalizeText(argv.keyword || argv.k);
+  const profile = normalizeText(argv.profile);
+  const profiles = normalizeText(argv.profiles);
+  const profilepool = normalizeText(argv.profilepool);
+  if (platform === 'weibo') {
+    const taskType = String(argv['task-type'] || argv.taskType || '').trim();
+    if (!['timeline', 'search', 'monitor'].includes(taskType)) {
+      throw new Error(`weibo task requires task-type: timeline|search|monitor`);
+    }
+    if (taskType === 'monitor' && !argv['user-id'] && !argv.userId) {
+      throw new Error('weibo monitor task requires user-id');
+    }
+  }
+  if (!keyword && (platform !== 'weibo' || argv['task-type'] === 'search')) {
+    throw new Error('task command argv missing keyword');
+  }
   if (!profile && !profiles && !profilepool) {
     throw new Error('task command argv missing profile/profiles/profilepool');
   }
