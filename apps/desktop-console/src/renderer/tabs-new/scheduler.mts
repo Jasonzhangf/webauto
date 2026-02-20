@@ -4,18 +4,23 @@ import {
   toIsoOrNull,
   toLocalDatetimeValue,
   type ScheduleTask,
-  type TaskDefinition,
-  PLATFORM_TASKS,
   getTasksForPlatform,
   getPlatformForCommandType,
-  getTaskDefinition,
 } from './schedule-task-bridge.mts';
-import {
-  parseTaskRows,
-  toIsoOrNull,
-  toLocalDatetimeValue,
-  type ScheduleTask,
-} from './schedule-task-bridge.mts';
+
+type WeiboTaskType = 'timeline' | 'search' | 'monitor';
+
+function commandTypeToWeiboTaskType(commandType: string): WeiboTaskType {
+  if (commandType === 'weibo-search') return 'search';
+  if (commandType === 'weibo-monitor') return 'monitor';
+  return 'timeline';
+}
+
+function weiboTaskTypeToCommandType(taskType: string): string {
+  if (taskType === 'search') return 'weibo-search';
+  if (taskType === 'monitor') return 'weibo-monitor';
+  return 'weibo-timeline';
+}
 
 export function renderSchedulerPanel(root: HTMLElement, ctx: any) {
   root.innerHTML = '';
@@ -36,6 +41,10 @@ export function renderSchedulerPanel(root: HTMLElement, ctx: any) {
       <button id="scheduler-run-due-btn" class="secondary">立即执行到点任务</button>
       <button id="scheduler-export-all-btn" class="secondary">导出全部</button>
       <button id="scheduler-import-btn" class="secondary">导入</button>
+    </div>
+    <div class="row" style="margin-top: 8px; align-items: center;">
+      <span class="muted">当前配置: <strong id="scheduler-active-task-id">-</strong></span>
+      <button id="scheduler-open-config-btn" class="secondary">打开配置页</button>
     </div>
     <div class="row" style="margin-top: 8px; align-items: end;">
       <div>
@@ -113,6 +122,12 @@ export function renderSchedulerPanel(root: HTMLElement, ctx: any) {
         <input id="scheduler-keyword" placeholder="deepseek新模型" style="width: 220px;" />
       </div>
     </div>
+    <div class="row" id="scheduler-user-id-wrap" style="display:none;">
+      <div>
+        <label>微博用户ID (monitor 必填)</label>
+        <input id="scheduler-user-id" placeholder="例如: 1234567890" style="width: 220px;" />
+      </div>
+    </div>
     <div class="row">
       <div>
         <label>目标帖子数</label>
@@ -167,10 +182,12 @@ export function renderSchedulerPanel(root: HTMLElement, ctx: any) {
   const runDueBtn = root.querySelector('#scheduler-run-due-btn') as HTMLButtonElement;
   const exportAllBtn = root.querySelector('#scheduler-export-all-btn') as HTMLButtonElement;
   const importBtn = root.querySelector('#scheduler-import-btn') as HTMLButtonElement;
+  const openConfigBtn = root.querySelector('#scheduler-open-config-btn') as HTMLButtonElement;
   const daemonStartBtn = root.querySelector('#scheduler-daemon-start-btn') as HTMLButtonElement;
   const daemonStopBtn = root.querySelector('#scheduler-daemon-stop-btn') as HTMLButtonElement;
   const daemonIntervalInput = root.querySelector('#scheduler-daemon-interval') as HTMLInputElement;
   const daemonStatus = root.querySelector('#scheduler-daemon-status') as HTMLSpanElement;
+  const activeTaskIdText = root.querySelector('#scheduler-active-task-id') as HTMLElement;
   const listEl = root.querySelector('#scheduler-list') as HTMLDivElement;
 
   const platformSelect = root.querySelector('#scheduler-platform') as HTMLSelectElement;
@@ -186,6 +203,8 @@ export function renderSchedulerPanel(root: HTMLElement, ctx: any) {
   const maxRunsInput = root.querySelector('#scheduler-max-runs') as HTMLInputElement;
   const profileInput = root.querySelector('#scheduler-profile') as HTMLInputElement;
   const keywordInput = root.querySelector('#scheduler-keyword') as HTMLInputElement;
+  const userIdWrap = root.querySelector('#scheduler-user-id-wrap') as HTMLDivElement;
+  const userIdInput = root.querySelector('#scheduler-user-id') as HTMLInputElement;
   const maxNotesInput = root.querySelector('#scheduler-max-notes') as HTMLInputElement;
   const envSelect = root.querySelector('#scheduler-env') as HTMLSelectElement;
   const commentsInput = root.querySelector('#scheduler-comments') as HTMLInputElement;
@@ -205,6 +224,21 @@ export function renderSchedulerPanel(root: HTMLElement, ctx: any) {
     daemonStatus.textContent = text;
   }
 
+  function setActiveTaskContext(taskId: string) {
+    const id = String(taskId || '').trim();
+    activeTaskIdText.textContent = id || '-';
+    if (ctx && typeof ctx === 'object') {
+      ctx.activeTaskConfigId = id;
+    }
+  }
+
+  function openConfigTab(taskId: string) {
+    setActiveTaskContext(taskId);
+    if (typeof ctx.setActiveTab === 'function') {
+      ctx.setActiveTab('config');
+    }
+  }
+
   function updateTypeFields() {
     const mode = typeSelect.value;
     const useRunAt = mode === 'once' || mode === 'daily' || mode === 'weekly';
@@ -218,6 +252,16 @@ export function renderSchedulerPanel(root: HTMLElement, ctx: any) {
     taskTypeSelect.innerHTML = tasks
       .map(t => `<option value="${t.type}">${t.icon} ${t.label}</option>`)
       .join('');
+    if (taskTypeSelect.options.length > 0) {
+      taskTypeSelect.value = taskTypeSelect.options[0]?.value || '';
+    }
+    updatePlatformFields();
+  }
+
+  function updatePlatformFields() {
+    const commandType = String(taskTypeSelect.value || '').trim();
+    const isWeiboMonitor = commandType === 'weibo-monitor';
+    userIdWrap.style.display = isWeiboMonitor ? '' : 'none';
   }
 
   function resetForm() {
@@ -232,6 +276,7 @@ export function renderSchedulerPanel(root: HTMLElement, ctx: any) {
     maxRunsInput.value = '';
     profileInput.value = '';
     keywordInput.value = '';
+    userIdInput.value = '';
     maxNotesInput.value = '50';
     envSelect.value = 'debug';
     commentsInput.checked = true;
@@ -239,9 +284,8 @@ export function renderSchedulerPanel(root: HTMLElement, ctx: any) {
     headlessInput.checked = false;
     dryRunInput.checked = false;
     likeKeywordsInput.value = '';
-    if (ctx && typeof ctx === 'object') {
-      ctx.activeTaskConfigId = '';
-    }
+    setActiveTaskContext('');
+    updatePlatformFields();
     updateTypeFields();
   }
 
@@ -250,7 +294,8 @@ export function renderSchedulerPanel(root: HTMLElement, ctx: any) {
     const maxRuns = maxRunsRaw
       ? Math.max(1, Number(maxRunsRaw) || 1)
       : null;
-    const argv = {
+    const commandType = String(taskTypeSelect.value || 'xhs-unified').trim();
+    const argv: Record<string, any> = {
       profile: profileInput.value.trim(),
       keyword: keywordInput.value.trim(),
       'max-notes': Number(maxNotesInput.value || 50) || 50,
@@ -261,10 +306,15 @@ export function renderSchedulerPanel(root: HTMLElement, ctx: any) {
       headless: headlessInput.checked,
       'dry-run': dryRunInput.checked,
     };
+    if (commandType.startsWith('weibo')) {
+      argv['task-type'] = commandTypeToWeiboTaskType(commandType);
+      argv['user-id'] = userIdInput.value.trim();
+    }
     return {
       id: editingIdInput.value.trim(),
       name: nameInput.value.trim(),
       enabled: enabledInput.checked,
+      commandType,
       scheduleType: typeSelect.value as ScheduleTask['scheduleType'],
       intervalMinutes: Number(intervalInput.value || 30) || 30,
       runAt: toIsoOrNull(runAtInput.value),
@@ -275,6 +325,10 @@ export function renderSchedulerPanel(root: HTMLElement, ctx: any) {
 
   function applyTaskToForm(task: ScheduleTask) {
     pendingFocusTaskId = '';
+    const platform = getPlatformForCommandType(String(task.commandType || 'xhs-unified'));
+    platformSelect.value = platform;
+    updateTaskTypeOptions();
+    taskTypeSelect.value = String(task.commandType || taskTypeSelect.value || 'xhs-unified');
     editingIdInput.value = task.id;
     nameInput.value = task.name || '';
     enabledInput.checked = task.enabled !== false;
@@ -284,6 +338,7 @@ export function renderSchedulerPanel(root: HTMLElement, ctx: any) {
     maxRunsInput.value = task.maxRuns ? String(task.maxRuns) : '';
     profileInput.value = String(task.commandArgv?.profile || '');
     keywordInput.value = String(task.commandArgv?.keyword || task.commandArgv?.k || '');
+    userIdInput.value = String(task.commandArgv?.['user-id'] || task.commandArgv?.userId || '');
     maxNotesInput.value = String(task.commandArgv?.['max-notes'] ?? task.commandArgv?.target ?? 50);
     envSelect.value = String(task.commandArgv?.env || 'debug');
     commentsInput.checked = task.commandArgv?.['do-comments'] !== false;
@@ -291,9 +346,8 @@ export function renderSchedulerPanel(root: HTMLElement, ctx: any) {
     headlessInput.checked = task.commandArgv?.headless === true;
     dryRunInput.checked = task.commandArgv?.['dry-run'] === true;
     likeKeywordsInput.value = String(task.commandArgv?.['like-keywords'] || '');
-    if (ctx && typeof ctx === 'object') {
-      ctx.activeTaskConfigId = task.id;
-    }
+    setActiveTaskContext(task.id);
+    updatePlatformFields();
     updateTypeFields();
   }
 
@@ -378,22 +432,46 @@ export function renderSchedulerPanel(root: HTMLElement, ctx: any) {
       }
       const actions = createEl('div', { className: 'btn-group', style: 'margin-top: 8px;' });
       const editBtn = createEl('button', { className: 'secondary' }, ['编辑']) as HTMLButtonElement;
+      const loadBtn = createEl('button', { className: 'secondary' }, ['载入配置']) as HTMLButtonElement;
       const runBtn = createEl('button', { className: 'secondary' }, ['执行']) as HTMLButtonElement;
       const exportBtn = createEl('button', { className: 'secondary' }, ['导出']) as HTMLButtonElement;
       const delBtn = createEl('button', { className: 'danger' }, ['删除']) as HTMLButtonElement;
       actions.appendChild(editBtn);
+      actions.appendChild(loadBtn);
       actions.appendChild(runBtn);
       actions.appendChild(exportBtn);
       actions.appendChild(delBtn);
       card.appendChild(actions);
 
       editBtn.onclick = () => applyTaskToForm(task);
+      loadBtn.onclick = () => openConfigTab(task.id);
       runBtn.onclick = async () => {
         try {
-          if (ctx && typeof ctx === 'object') {
-            ctx.activeTaskConfigId = task.id;
+          setActiveTaskContext(task.id);
+          const out = await runScheduleJson(['run', task.id], 0);
+          const runId = String(
+            out?.result?.runResult?.lastRunId
+            || out?.result?.runResult?.runId
+            || out?.runResult?.runId
+            || '',
+          ).trim();
+          if (task.commandType === 'xhs-unified' && ctx && typeof ctx === 'object') {
+            const argv = task.commandArgv || {};
+            ctx.xhsCurrentRun = {
+              runId: runId || null,
+              taskId: task.id,
+              profileId: String(argv.profile || ''),
+              keyword: String(argv.keyword || argv.k || ''),
+              target: Number(argv['max-notes'] || argv.target || 0) || 0,
+              startedAt: new Date().toISOString(),
+            };
           }
-          await runScheduleJson(['run', task.id], 0);
+          if (typeof ctx.setStatus === 'function') {
+            ctx.setStatus(`running: ${task.id}`);
+          }
+          if (task.commandType === 'xhs-unified' && typeof ctx.setActiveTab === 'function') {
+            ctx.setActiveTab('dashboard');
+          }
           await refreshList();
         } catch (err: any) {
           alert(`执行失败: ${err?.message || String(err)}`);
@@ -431,8 +509,12 @@ export function renderSchedulerPanel(root: HTMLElement, ctx: any) {
       const target = tasks.find((item) => item.id === pendingFocusTaskId);
       if (target) {
         applyTaskToForm(target);
+      } else {
+        setActiveTaskContext('');
       }
       pendingFocusTaskId = '';
+    } else {
+      setActiveTaskContext(String(ctx?.activeTaskConfigId || '').trim());
     }
     renderTaskList();
   }
@@ -447,8 +529,14 @@ export function renderSchedulerPanel(root: HTMLElement, ctx: any) {
       alert('profile/profiles/profilepool 至少填写一个');
       return;
     }
-    if (!payload.argv.keyword) {
+    const commandType = String(payload.commandType || '').trim();
+    const keywordRequired = commandType === 'xhs-unified' || commandType === 'weibo-search' || commandType === '1688-search';
+    if (keywordRequired && !payload.argv.keyword) {
       alert('关键词不能为空');
+      return;
+    }
+    if (commandType === 'weibo-monitor' && !payload.argv['user-id']) {
+      alert('微博 monitor 任务需要 user-id');
       return;
     }
     const args = payload.id
@@ -456,6 +544,7 @@ export function renderSchedulerPanel(root: HTMLElement, ctx: any) {
       : ['add'];
     args.push('--name', payload.name);
     args.push('--enabled', String(payload.enabled));
+    args.push('--command-type', commandType || 'xhs-unified');
     args.push('--schedule-type', payload.scheduleType);
     if (payload.scheduleType === 'once') {
       if (!payload.runAt) {
@@ -478,9 +567,7 @@ export function renderSchedulerPanel(root: HTMLElement, ctx: any) {
       const out = await runScheduleJson(args);
       const savedId = String(out?.task?.id || payload.id || '').trim();
       pendingFocusTaskId = savedId;
-      if (ctx && typeof ctx === 'object' && savedId) {
-        ctx.activeTaskConfigId = savedId;
-      }
+      if (savedId) setActiveTaskContext(savedId);
       await refreshList();
     } catch (err: any) {
       alert(`保存失败: ${err?.message || String(err)}`);
@@ -555,19 +642,8 @@ export function renderSchedulerPanel(root: HTMLElement, ctx: any) {
     setDaemonStatus('daemon: 已停止');
   }
 
-  platformSelect.addEventListener('change', () => {
-    updateTaskTypeOptions();
-    updatePlatformFields();
-  });
-  function updatePlatformFields() {
-    const platform = platformSelect.value;
-    const taskType = taskTypeSelect.value;
-    if (platform === 'weibo') {
-      // Add weibo-specific fields if needed
-    } else if (platform === '1688') {
-      // Add 1688-specific fields if needed
-    }
-  }
+  platformSelect.addEventListener('change', updateTaskTypeOptions);
+  taskTypeSelect.addEventListener('change', updatePlatformFields);
 
   typeSelect.addEventListener('change', updateTypeFields);
   saveBtn.onclick = () => void saveTask();
@@ -576,6 +652,10 @@ export function renderSchedulerPanel(root: HTMLElement, ctx: any) {
   runDueBtn.onclick = () => void runDueNow();
   exportAllBtn.onclick = () => void exportAll();
   importBtn.onclick = () => void importFromFile();
+  openConfigBtn.onclick = () => {
+    const id = String(editingIdInput.value || activeTaskIdText.textContent || '').trim();
+    openConfigTab(id);
+  };
   daemonStartBtn.onclick = () => void startDaemon();
   daemonStopBtn.onclick = () => void stopDaemon();
 
@@ -591,6 +671,7 @@ export function renderSchedulerPanel(root: HTMLElement, ctx: any) {
   }
 
   resetForm();
+  updateTaskTypeOptions();
   void refreshList().catch((err: any) => {
     listEl.innerHTML = `<div class="muted" style="padding: 12px;">加载失败: ${err?.message || String(err)}</div>`;
   });

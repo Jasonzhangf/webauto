@@ -42,10 +42,54 @@ function parseArgs() {
   };
 }
 
+function latestMtimeMs(targetPath) {
+  if (!fs.existsSync(targetPath)) return 0;
+  const stat = fs.statSync(targetPath);
+  if (stat.isFile()) return Number(stat.mtimeMs || 0);
+  if (!stat.isDirectory()) return 0;
+  let latest = Number(stat.mtimeMs || 0);
+  const stack = [targetPath];
+  while (stack.length) {
+    const current = stack.pop();
+    if (!current) continue;
+    let entries = [];
+    try {
+      entries = fs.readdirSync(current, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      const full = path.join(current, entry.name);
+      let entryStat;
+      try {
+        entryStat = fs.statSync(full);
+      } catch {
+        continue;
+      }
+      const mtime = Number(entryStat.mtimeMs || 0);
+      if (mtime > latest) latest = mtime;
+      if (entryStat.isDirectory()) stack.push(full);
+    }
+  }
+  return latest;
+}
+
+function shouldRebuild(distEntry) {
+  if (!fs.existsSync(distEntry)) return true;
+  if (String(process.env.WEBAUTO_SKIP_BUILD_CHECK || '') === '1') return false;
+  const distMtime = Number(fs.statSync(distEntry).mtimeMs || 0);
+  const watchRoots = [
+    path.resolve('modules/camo-backend/src'),
+    path.resolve('modules/logging/src'),
+  ];
+  const latestSourceMtime = Math.max(...watchRoots.map((root) => latestMtimeMs(root)));
+  return latestSourceMtime > distMtime;
+}
+
 function ensureBuild() {
   const distEntry = path.resolve('dist/modules/camo-backend/src/index.js');
-  if (fs.existsSync(distEntry)) return distEntry;
-  console.log('[browser-service] backend entry missing, running npm run -s build:services');
+  if (!shouldRebuild(distEntry)) return distEntry;
+  console.log('[browser-service] backend entry missing/stale, running npm run -s build:services');
   execSync('npm run -s build:services', { stdio: 'inherit' });
   if (!fs.existsSync(distEntry)) {
     throw new Error(`backend entry missing after build: ${distEntry}`);

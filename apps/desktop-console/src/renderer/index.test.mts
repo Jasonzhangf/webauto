@@ -13,9 +13,9 @@ async function getSrc() {
 
 test('main tabs use onboarding flow and keep logs before settings', async () => {
   const src = await getSrc();
-  assert.match(src, /type TabId = 'setup-wizard' \| 'config' \| 'dashboard' \| 'scheduler' \| 'account-manager' \| 'preflight' \| 'logs' \| 'settings';/);
+  assert.match(src, /type TabId = 'setup-wizard' \| 'tasks' \| 'dashboard' \| 'scheduler' \| 'account-manager' \| 'preflight' \| 'logs' \| 'settings';/);
   assert.match(src, /\{ id: 'setup-wizard', label: '[^']+', render: renderSetupWizard \}/);
-  assert.match(src, /\{ id: 'config', label: '[^']+', render: renderConfigPanel \}/);
+  assert.match(src, /\{ id: 'tasks', label: '[^']+', render: renderTasksPanel \}/);
   assert.match(src, /\{ id: 'dashboard', label: '[^']+', render: renderDashboard \}/);
   assert.match(src, /\{ id: 'scheduler', label: '[^']+', render: renderSchedulerPanel \}/);
   assert.match(src, /\{ id: 'account-manager', label: '[^']+', render: renderAccountManager \}/);
@@ -28,6 +28,7 @@ test('main tabs use onboarding flow and keep logs before settings', async () => 
   const settingsIdx = src.indexOf("{ id: 'settings'");
   assert.ok(logsIdx > -1 && settingsIdx > logsIdx, 'logs tab should render before settings tab');
   assert.match(src, /const startupTab = await detectStartupTab\(\);/);
+  assert.match(src, /if \(envReady\) return 'tasks';/);
   assert.match(src, /return 'setup-wizard';/);
 });
 

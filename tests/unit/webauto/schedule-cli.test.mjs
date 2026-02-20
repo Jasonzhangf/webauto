@@ -123,6 +123,20 @@ describe('schedule cli', () => {
     assert.equal(exported.count, 1);
     assert.equal(exported.tasks[0].scheduleType, 'weekly');
     assert.equal(exported.tasks[0].maxRuns, 7);
+
+    const exportPath = path.join(root, 'exports', 'sched-9999.json');
+    const exportedToFile = runSchedule(['export', 'sched-9999', '--file', exportPath, '--json'], root);
+    assert.equal(exportedToFile.ok, true);
+    assert.equal(exportedToFile.filePath, exportPath);
+    assert.equal(fs.existsSync(exportPath), true);
+  });
+
+  it('supports help output', () => {
+    const root = newRoot();
+    const ret = runScheduleRaw(['--help'], root);
+    assert.equal(ret.status, 0, ret.stderr || ret.stdout);
+    assert.match(String(ret.stdout || ''), /webauto schedule/i);
+    assert.match(String(ret.stdout || ''), /schedule add/i);
   });
 
   it('supports daemon once mode when no due tasks', () => {
@@ -178,10 +192,11 @@ describe('schedule cli', () => {
     const addRes = runSchedule([
       'add',
       '--name', 'run-fail',
+      '--command-type', '1688-search',
       '--schedule-type', 'once',
       '--run-at', new Date(Date.now() - 10_000).toISOString(),
-      '--profile', 'p1',
       '--keyword', 'k1',
+      '--profile', 'p1',
       '--json',
     ], root);
     const taskId = addRes.task.id;
@@ -189,15 +204,16 @@ describe('schedule cli', () => {
     const runRes = runSchedule(['run', taskId, '--json'], root, 1);
     assert.equal(runRes.ok, false);
     assert.equal(runRes.result.taskId, taskId);
-    assert.match(String(runRes.result.error || ''), /no valid business accounts/i);
+    assert.match(String(runRes.result.error || ''), /executor_not_implemented/i);
 
     runSchedule([
       'add',
       '--name', 'run-due-fail',
+      '--command-type', '1688-search',
       '--schedule-type', 'once',
       '--run-at', new Date(Date.now() - 9_000).toISOString(),
-      '--profile', 'p1',
       '--keyword', 'k2',
+      '--profile', 'p1',
       '--json',
     ], root);
     const runDueRes = runSchedule(['run-due', '--limit', '5', '--json'], root, 1);

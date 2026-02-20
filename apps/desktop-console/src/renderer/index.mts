@@ -2,7 +2,7 @@ import { renderPreflight } from './tabs/preflight.mts';
 import { renderSettings } from './tabs/settings.mts';
 import { renderLogs } from './tabs/logs.mts';
 import { renderSetupWizard } from './tabs-new/setup-wizard.mts';
-import { renderConfigPanel } from './tabs-new/config-panel.mts';
+import { renderTasksPanel } from './tabs-new/tasks.mts';
 import { renderDashboard } from './tabs-new/dashboard.mts';
 import { renderAccountManager } from './tabs-new/account-manager.mts';
 import { renderSchedulerPanel } from './tabs-new/scheduler.mts';
@@ -14,13 +14,13 @@ declare global {
   }
 }
 
-type TabId = 'setup-wizard' | 'config' | 'dashboard' | 'scheduler' | 'account-manager' | 'preflight' | 'logs' | 'settings';
+type TabId = 'setup-wizard' | 'tasks' | 'dashboard' | 'scheduler' | 'account-manager' | 'preflight' | 'logs' | 'settings';
 
 type TabRender = (root: HTMLElement, ctx: any) => void | (() => void);
 
 const tabs: Array<{ id: TabId; label: string; render: TabRender; hidden?: boolean }> = [
   { id: 'setup-wizard', label: '初始化', render: renderSetupWizard },
-  { id: 'config', label: '配置', render: renderConfigPanel },
+  { id: 'tasks', label: '任务', render: renderTasksPanel },
   { id: 'dashboard', label: '看板', render: renderDashboard },
   { id: 'scheduler', label: '定时任务', render: renderSchedulerPanel },
   { id: 'account-manager', label: '账户管理', render: renderAccountManager },
@@ -38,7 +38,7 @@ const mutableApi: any = { ...(window.api || {}), settings: null };
 // Tab Icons mapping for visual enhancement
 const tabIcons: Record<TabId, string> = {
   'setup-wizard': '⚡',
-  'config': '⚙️',
+  'tasks': '📝',
   'dashboard': '📊',
   'scheduler': '⏰',
   'account-manager': '👤',
@@ -221,7 +221,7 @@ async function detectStartupTab(): Promise<TabId> {
   try {
     const env = typeof window.api?.envCheckAll === 'function' ? await window.api.envCheckAll() : null;
     const envReady = Boolean(env?.allReady);
-    if (envReady) return 'config';
+    if (envReady) return 'tasks';
   } catch {
     // ignore and fallback to setup
   }

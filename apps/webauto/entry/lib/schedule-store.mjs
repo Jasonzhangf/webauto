@@ -142,7 +142,7 @@ function validateCommand(task) {
   if (platform === 'xhs') {
     validateXhsCommand(argv);
   } else if (platform === 'weibo' || platform === '1688') {
-    validateGenericCommand(argv, platform);
+    validateGenericCommand(argv, platform, commandType);
   }
 }
 
@@ -157,21 +157,26 @@ function validateXhsCommand(argv) {
   }
 }
 
-function validateGenericCommand(argv, platform) {
+function validateGenericCommand(argv, platform, commandType = '') {
   const keyword = normalizeText(argv.keyword || argv.k);
   const profile = normalizeText(argv.profile);
   const profiles = normalizeText(argv.profiles);
   const profilepool = normalizeText(argv.profilepool);
+  let weiboTaskType = '';
   if (platform === 'weibo') {
-    const taskType = String(argv['task-type'] || argv.taskType || '').trim();
-    if (!['timeline', 'search', 'monitor'].includes(taskType)) {
+    weiboTaskType = String(argv['task-type'] || argv.taskType || '').trim();
+    if (!weiboTaskType && commandType === 'weibo-timeline') weiboTaskType = 'timeline';
+    if (!weiboTaskType && commandType === 'weibo-search') weiboTaskType = 'search';
+    if (!weiboTaskType && commandType === 'weibo-monitor') weiboTaskType = 'monitor';
+    if (!['timeline', 'search', 'monitor'].includes(weiboTaskType)) {
       throw new Error(`weibo task requires task-type: timeline|search|monitor`);
     }
-    if (taskType === 'monitor' && !argv['user-id'] && !argv.userId) {
+    const userId = normalizeText(argv['user-id'] || argv.userId);
+    if (weiboTaskType === 'monitor' && !userId) {
       throw new Error('weibo monitor task requires user-id');
     }
   }
-  if (!keyword && (platform !== 'weibo' || argv['task-type'] === 'search')) {
+  if (!keyword && (platform !== 'weibo' || weiboTaskType === 'search')) {
     throw new Error('task command argv missing keyword');
   }
   if (!profile && !profiles && !profilepool) {

@@ -1,8 +1,7 @@
 #!/usr/bin/env node
 import minimist from 'minimist';
 import { runWorkflowById } from '../../../dist/modules/workflow/src/runner.js';
-import path from 'node:path';
-import { promises as fs } from 'node:fs';
+import { pathToFileURL } from 'node:url';
 
 const WEIBO_HOME_URL = 'https://www.weibo.com';
 const DEFAULT_PROFILE = 'xiaohongshu-batch-1'; // Use shared profile for now
@@ -94,10 +93,15 @@ Examples:
   }
 }
 
-main().catch((error) => {
-  console.error('Error in Weibo Unified:', error.message);
-  process.exit(1);
-});
+const isDirectExec =
+  process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
+
+if (isDirectExec) {
+  main().catch((error) => {
+    console.error('Error in Weibo Unified:', error.message);
+    process.exit(1);
+  });
+}
 
 export async function runWeiboUnified(argv) {
   const workflowId = String(argv.workflow || 'weibo-search-v1').trim();

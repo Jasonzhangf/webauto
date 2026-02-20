@@ -131,7 +131,7 @@ export async function execute(input: WeiboCollectFromLinksInput): Promise<WeiboC
     env = 'debug',
     targetCount,
     maxComments = 0,
-    collectComments: enableComments = true,
+    collectComments: enableComments = false,  // 默认不采集评论，加快速度
     serviceUrl = 'http://127.0.0.1:7704',
   } = input;
 
@@ -187,7 +187,7 @@ export async function execute(input: WeiboCollectFromLinksInput): Promise<WeiboC
   
   async function gotoUrl(url: string): Promise<void> {
     await controllerAction('goto', { url });
-    await new Promise(r => setTimeout(r, 3000));
+    await new Promise(r => setTimeout(r, 500));  // 减少间隔  // 减少等待时间
   }
   
   async function extractPostContent(): Promise<string> {
@@ -266,7 +266,7 @@ export async function execute(input: WeiboCollectFromLinksInput): Promise<WeiboC
         errors++;
       }
 
-      await new Promise(r => setTimeout(r, 1500));
+      await new Promise(r => setTimeout(r, 500));  // 减少间隔
     }
     
     return {

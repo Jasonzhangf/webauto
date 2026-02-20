@@ -47,8 +47,15 @@
         --space-4: 16px;
         --space-5: 24px;
         --space-6: 32px;
-        --gap: var(--space-3);
-        --gap-sm: var(--space-2);
+        --gap: var(--space-2);
+        --gap-sm: 6px;
+        --gap-xs: 4px;
+        
+        /* Compact Control Sizes */
+        --control-h: 28px;
+        --control-h-sm: 24px;
+        --input-padding: 6px 10px;
+        --btn-padding: 6px 12px;
         
         /* Shadows */
         --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
@@ -174,10 +181,10 @@
          ============================================ */
       .row { 
         display: flex; 
-        gap: var(--space-3); 
+        gap: var(--gap-sm); 
         flex-wrap: wrap; 
         align-items: center; 
-        margin-bottom: var(--space-3); 
+        margin-bottom: var(--gap-sm); 
       }
       .row > * { min-width: 0; }
       
@@ -185,8 +192,8 @@
         border: 1px solid var(--border-default); 
         background: var(--bg-elevated); 
         border-radius: var(--radius-lg); 
-        padding: var(--space-4); 
-        margin-bottom: var(--space-3);
+        padding: var(--gap); 
+        margin-bottom: var(--gap-sm);
         box-shadow: var(--shadow-sm);
       }
       
@@ -203,9 +210,10 @@
         background: var(--bg-base); 
         color: var(--text-primary); 
         border: 1px solid var(--border-default); 
-        padding: 10px 12px; 
+        padding: var(--input-padding); 
         border-radius: var(--radius-md);
-        font-size: 13px;
+        font-size: 12px;
+        height: var(--control-h);
         transition: all var(--transition-fast);
       }
       input:hover, select:hover, textarea:hover {
@@ -222,10 +230,11 @@
         background: var(--accent-primary); 
         color: #fff; 
         border: none; 
-        padding: 10px 16px; 
+        padding: var(--btn-padding); 
         border-radius: var(--radius-md); 
         cursor: pointer;
-        font-size: 13px;
+        font-size: 12px;
+        height: var(--control-h);
         font-weight: 500;
         transition: all var(--transition-fast);
         display: inline-flex;

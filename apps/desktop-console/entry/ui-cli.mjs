@@ -51,9 +51,9 @@ Options:
 Steps JSON format:
   {
     "steps": [
-      { "action": "tab", "tabId": "config" },
-      { "action": "input", "selector": "#keyword-input", "value": "春晚" },
-      { "action": "click", "selector": "#start-btn" },
+      { "action": "tab", "tabId": "tasks" },
+      { "action": "input", "selector": "#task-keyword", "value": "春晚" },
+      { "action": "click", "selector": "#task-run-btn" },
       { "action": "wait", "selector": "#run-id-text", "state": "exists", "timeoutMs": 20000 }
     ]
   }
@@ -323,42 +323,41 @@ async function runFullCover(endpoint) {
     await runProbe('setup', '#setup-status-text');
     await runProbe('setup', '#enter-main-btn');
 
-    await tab('配置');
-    await wait('#keyword-input');
-    await runProbe('config', '#keyword-input');
-    await runProbe('config', '#target-input');
-    await runProbe('config', '#env-select');
-    await runProbe('config', '#account-select');
-    await runProbe('config', '#preset-select');
-    await runProbe('config', '#import-btn');
-    await runProbe('config', '#export-btn');
-    await runProbe('config', '#fetch-body-cb');
-    await runProbe('config', '#fetch-comments-cb');
-    await runProbe('config', '#max-comments-input');
-    await runProbe('config', '#auto-like-cb');
-    await runProbe('config', '#like-keywords-input');
-    await runProbe('config', '#max-likes-input');
-    await runProbe('config', '#headless-cb');
-    await runProbe('config', '#dry-run-cb');
-    await runProbe('config', '#start-btn');
-    await input('#keyword-input', keywordSeed);
-    await input('#target-input', '100');
-    await select('#preset-select', 'last');
-    await select('#preset-select', 'preset1');
-    await select('#preset-select', 'last');
-    await select('#env-select', 'debug');
-    await select('#env-select', 'prod');
-    await click('#fetch-body-cb');
-    await click('#fetch-body-cb');
-    await click('#fetch-comments-cb');
-    await click('#fetch-comments-cb');
-    await input('#max-comments-input', '150');
-    await click('#auto-like-cb');
-    await input('#like-keywords-input', '真牛逼,购买链接');
-    await input('#max-likes-input', '8');
-    await click('#headless-cb');
-    await click('#dry-run-cb');
-    await click('#export-btn');
+    await tab('任务'); await wait('#task-keyword');
+    await runProbe('tasks', '#task-keyword');
+    await runProbe('tasks', '#task-target');
+    await runProbe('tasks', '#task-env');
+    await runProbe('tasks', '#task-profile');
+    await runProbe('tasks', '#task-platform');
+    await runProbe('tasks', '#task-save-btn');
+    await runProbe('tasks', '#task-run-btn');
+    await runProbe('tasks', '#task-body');
+    await runProbe('tasks', '#task-comments');
+    await runProbe('tasks', '#task-target');
+    await runProbe('tasks', '#task-likes');
+    await runProbe('tasks', '#task-like-keywords');
+    await runProbe('tasks', '#task-target');
+    await runProbe('tasks', '#task-env');
+    await runProbe('tasks', '#task-comments');
+    await runProbe('tasks', '#task-run-btn');
+    await input('#task-keyword', 'ui-cli-full-cover');
+    await input('#task-target', '100');
+    await select('#task-platform', 'last');
+    await select('#task-platform', 'preset1');
+    await select('#task-platform', 'last');
+    await select('#task-env', 'debug');
+    await select('#task-env', 'prod');
+    await click('#task-body');
+    await click('#task-body');
+    await click('#task-comments');
+    await click('#task-comments');
+    await input('#task-target', '150');
+    await click('#task-likes');
+    await input('#task-like-keywords', '真牛逼,购买链接');
+    await input('#task-target', '8');
+    await click('#task-env');
+    await click('#task-comments');
+    await click('#task-run-btn');
 
     await tab('看板');
     await wait('#toggle-logs-btn');

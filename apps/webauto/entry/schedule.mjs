@@ -14,6 +14,7 @@ import {
   updateScheduleTask,
 } from './lib/schedule-store.mjs';
 import { runUnified } from './xhs-unified.mjs';
+import { runWeiboUnified } from './weibo-unified.mjs';
 
 function output(payload, jsonMode) {
   if (jsonMode) {
@@ -105,6 +106,10 @@ function buildCommandArgv(argv) {
     'ocr-command',
     'input-mode',
     'headless',
+    'task-type',
+    'taskType',
+    'user-id',
+    'userId',
   ];
   for (const key of keys) {
     const value = pickArgvValue(argv, key);
@@ -122,6 +127,14 @@ function parseTaskInput(argv, mode = 'add') {
   const enabled = argv.enabled;
   const commandType = String(argv['command-type'] || 'xhs-unified').trim();
   const commandArgv = buildCommandArgv(argv);
+  if (commandType.startsWith('weibo-')) {
+    const explicitTaskType = String(commandArgv['task-type'] || commandArgv.taskType || '').trim();
+    if (!explicitTaskType) {
+      if (commandType === 'weibo-search') commandArgv['task-type'] = 'search';
+      else if (commandType === 'weibo-monitor') commandArgv['task-type'] = 'monitor';
+      else commandArgv['task-type'] = 'timeline';
+    }
+  }
   const patch = {
     name: argv.name,
     scheduleType: scheduleType || undefined,
@@ -135,10 +148,43 @@ function parseTaskInput(argv, mode = 'add') {
   return patch;
 }
 
-async function executeTask(task) {
-  const startedAt = Date.now();
+async function withConsoleSilenced(enabled, fn) {
+  if (!enabled) return fn();
+  const originalLog = console.log;
+  const originalWarn = console.warn;
+  const originalInfo = console.info;
+  const originalError = console.error;
+  console.log = () => {};
+  console.warn = () => {};
+  console.info = () => {};
+  console.error = () => {};
   try {
-    const result = await runUnified(task.commandArgv || {});
+    return await fn();
+  } finally {
+    console.log = originalLog;
+    console.warn = originalWarn;
+    console.info = originalInfo;
+    console.error = originalError;
+  }
+}
+
+async function executeTask(task, options = {}) {
+  const startedAt = Date.now();
+  const quietExecutors = options.quietExecutors === true;
+  try {
+    const commandType = String(task?.commandType || 'xhs-unified').trim();
+    const result = await withConsoleSilenced(quietExecutors, async () => {
+      if (commandType === 'xhs-unified') {
+        return runUnified(task.commandArgv || {});
+      }
+      if (commandType.startsWith('weibo-')) {
+        return runWeiboUnified(task.commandArgv || {});
+      }
+      if (commandType === '1688-search') {
+        throw new Error(`executor_not_implemented: ${commandType}`);
+      }
+      throw new Error(`unsupported commandType at executeTask: ${commandType}`);
+    });
     const durationMs = Date.now() - startedAt;
     const runResult = markScheduleTaskResult(task.id, {
       status: 'success',
@@ -177,11 +223,11 @@ async function executeTask(task) {
   }
 }
 
-async function runDue(limit) {
+async function runDue(limit, options = {}) {
   const dueTasks = listDueScheduleTasks(limit);
   const results = [];
   for (const task of dueTasks) {
-    const item = await executeTask(task);
+    const item = await executeTask(task, options);
     results.push(item);
   }
   return {
@@ -215,14 +261,18 @@ Task Options:
   --interval-minutes <n>     interval 模式每次触发间隔分钟
   --run-at <iso>             once/daily/weekly 模式锚点时间（ISO）
   --max-runs <n>             最大执行次数（>0；为空=不限）
-  --command-type xhs-unified
-  --argv-json <json>         透传给 xhs-unified 的参数对象
+  --command-type xhs-unified|weibo-timeline|weibo-search|weibo-monitor|1688-search
+  --argv-json <json>         透传给任务执行器的参数对象
 
 Common xhs argv shortcuts (optional):
   --profile <id> --profiles <a,b> --profilepool <prefix>
   --keyword <kw> --max-notes <n> --env <debug|prod>
   --do-comments <bool> --do-likes <bool> --like-keywords <csv>
   --dry-run <bool> --no-dry-run
+
+Common weibo argv shortcuts (optional):
+  --task-type <timeline|search|monitor>
+  --user-id <id>             monitor 任务必填
 `);
 }
 
@@ -278,14 +328,14 @@ async function cmdExport(taskId, argv, jsonMode) {
 
 async function cmdRun(taskId, jsonMode) {
   const task = getScheduleTask(taskId);
-  const result = await executeTask(task);
+  const result = await executeTask(task, { quietExecutors: jsonMode });
   output({ ok: result.ok, result }, jsonMode);
   if (!result.ok) process.exitCode = 1;
 }
 
 async function cmdRunDue(argv, jsonMode) {
   const limit = parsePositiveInt(argv.limit, 20);
-  const result = await runDue(limit);
+  const result = await runDue(limit, { quietExecutors: jsonMode });
   const ok = result.failed === 0;
   output({ ok, ...result }, jsonMode);
   if (!ok) process.exitCode = 1;
@@ -296,7 +346,7 @@ async function cmdDaemon(argv, jsonMode) {
   const limit = parsePositiveInt(argv.limit, 20);
   const runOnce = argv.once === true;
   if (runOnce) {
-    const onceResult = await runDue(limit);
+    const onceResult = await runDue(limit, { quietExecutors: jsonMode });
     const ok = onceResult.failed === 0;
     output({ ok, mode: 'once', intervalSec, ...onceResult }, jsonMode);
     if (!ok) process.exitCode = 1;
@@ -311,7 +361,7 @@ async function cmdDaemon(argv, jsonMode) {
     startedAt: new Date().toISOString(),
   }, jsonMode);
   const tick = async () => {
-    const result = await runDue(limit);
+    const result = await runDue(limit, { quietExecutors: jsonMode });
     const line = {
       ts: new Date().toISOString(),
       event: 'schedule.tick',

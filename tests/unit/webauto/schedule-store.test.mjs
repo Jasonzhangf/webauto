@@ -196,6 +196,56 @@ describe('schedule-store', () => {
     assert.equal(all.tasks[0].id, 'sched-r1');
   });
 
+  it('covers import payload variants, merge update path, max-runs disable and export-all', () => {
+    useTempSchedulesRoot();
+    const created = addScheduleTask({
+      name: 'existing-for-merge',
+      scheduleType: 'interval',
+      intervalMinutes: 2,
+      maxRuns: 1,
+      commandType: 'xhs-unified',
+      commandArgv: { profile: 'p1', keyword: 'k1' },
+    });
+
+    const mergedArray = importScheduleTasks([
+      {
+        id: created.id,
+        name: 'existing-updated',
+        scheduleType: 'interval',
+        intervalMinutes: 4,
+        maxRuns: 1,
+        commandType: 'xhs-unified',
+        commandArgv: { profile: 'p1', keyword: 'k-updated' },
+      },
+    ], { mode: 'merge' });
+    assert.equal(mergedArray.count, 1);
+    assert.equal(mergedArray.tasks[0].id, created.id);
+    assert.equal(mergedArray.tasks[0].name, 'existing-updated');
+
+    const mergedObject = importScheduleTasks({
+      id: 'sched-single',
+      name: 'single-object-import',
+      scheduleType: 'once',
+      runAt: new Date(Date.now() + 5_000).toISOString(),
+      commandType: 'xhs-unified',
+      commandArgv: { profile: 'p2', keyword: 'k2' },
+    }, { mode: 'merge' });
+    assert.equal(mergedObject.count, 1);
+    assert.equal(mergedObject.tasks[0].id, 'sched-single');
+
+    const runResult = markScheduleTaskResult(created.id, {
+      status: 'success',
+      finishedAt: new Date(Date.now() + 10_000).toISOString(),
+    });
+    assert.equal(runResult.enabled, false);
+    assert.equal(runResult.nextRunAt, null);
+
+    const exportedAll = exportScheduleTasks();
+    assert.equal(exportedAll.version, 1);
+    assert.ok(Array.isArray(exportedAll.tasks));
+    assert.equal(exportedAll.count >= 2, true);
+  });
+
   it('supports remove and reports not found errors', () => {
     useTempSchedulesRoot();
     const created = addScheduleTask({

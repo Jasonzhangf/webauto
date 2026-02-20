@@ -134,7 +134,17 @@ export class SessionManager {
         (process as any).emit(SESSION_CLOSED_EVENT, id);
       }
     };
-    await session.start(options.initialUrl);
+    try {
+      await session.start(options.initialUrl);
+    } catch (err) {
+      this.debugLog('createSession:start_failed', {
+        profileId,
+        error: (err as Error)?.message || String(err),
+      });
+      session.onExit = undefined;
+      await session.close().catch(() => {});
+      throw err;
+    }
     this.sessions.set(profileId, session);
 
     this.debugLog('createSession:started', { profileId });

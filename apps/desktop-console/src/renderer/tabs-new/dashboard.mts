@@ -84,6 +84,10 @@ export function renderDashboard(root: HTMLElement, ctx: any) {
         <label>使用账户</label>
         <div id="task-account" style="font-weight: 600; color: var(--text-1);">-</div>
       </div>
+      <div>
+        <label>配置ID</label>
+        <div id="task-config-id" style="font-weight: 600; color: var(--text-1);">-</div>
+      </div>
     </div>
 
     <div class="phase-indicator" style="margin-bottom: var(--gap);">
@@ -129,6 +133,7 @@ export function renderDashboard(root: HTMLElement, ctx: any) {
       <div class="btn-group">
         <button id="pause-btn" class="secondary" style="flex: 1;">暂停</button>
         <button id="stop-btn" class="danger" style="flex: 1;">停止</button>
+        <button id="back-config-btn" class="secondary" style="flex: 1;">返回配置</button>
       </div>
     </div>
   `;
@@ -143,6 +148,7 @@ export function renderDashboard(root: HTMLElement, ctx: any) {
   const taskKeyword = root.querySelector('#task-keyword') as HTMLDivElement;
   const taskTarget = root.querySelector('#task-target') as HTMLDivElement;
   const taskAccount = root.querySelector('#task-account') as HTMLDivElement;
+  const taskConfigId = root.querySelector('#task-config-id') as HTMLDivElement;
   const currentPhase = root.querySelector('#current-phase') as HTMLSpanElement;
   const currentAction = root.querySelector('#current-action') as HTMLSpanElement;
   const progressPercent = root.querySelector('#progress-percent') as HTMLSpanElement;
@@ -159,6 +165,7 @@ export function renderDashboard(root: HTMLElement, ctx: any) {
   const toggleLogsBtn = root.querySelector('#toggle-logs-btn') as HTMLButtonElement;
   const pauseBtn = root.querySelector('#pause-btn') as HTMLButtonElement;
   const stopBtn = root.querySelector('#stop-btn') as HTMLButtonElement;
+  const backConfigBtn = root.querySelector('#back-config-btn') as HTMLButtonElement;
 
   // State
   let logsExpanded = false;
@@ -180,6 +187,10 @@ export function renderDashboard(root: HTMLElement, ctx: any) {
   const recentErrors: Array<{ ts: string; source: string; message: string }> = [];
   const maxLogs = 500;
   const maxRecentErrors = 8;
+  const initialTaskId = String(ctx?.xhsCurrentRun?.taskId || ctx?.activeTaskConfigId || '').trim();
+  if (initialTaskId) {
+    taskConfigId.textContent = initialTaskId;
+  }
 
   const normalizeStatus = (value: any) => String(value || '').trim().toLowerCase();
   const isRunningStatus = (value: any) => ['running', 'queued', 'pending', 'starting'].includes(normalizeStatus(value));
@@ -317,6 +328,13 @@ export function renderDashboard(root: HTMLElement, ctx: any) {
       const aliases = ctx.api?.settings?.profileAliases || {};
       taskAccount.textContent = aliases[state.profileId] || state.profileId;
     }
+    const taskId = String(state.taskId || state.scheduleTaskId || state.configTaskId || '').trim();
+    if (taskId) {
+      taskConfigId.textContent = taskId;
+      if (ctx && typeof ctx === 'object') {
+        ctx.activeTaskConfigId = taskId;
+      }
+    }
     if (state.runId) {
       activeRunId = String(state.runId);
       renderRunSummary();
@@ -405,6 +423,15 @@ export function renderDashboard(root: HTMLElement, ctx: any) {
       }
       if (payload.keyword) taskKeyword.textContent = String(payload.keyword);
       if (payload.maxNotes) taskTarget.textContent = String(payload.maxNotes);
+      if (payload.taskId) {
+        const taskId = String(payload.taskId || '').trim();
+        if (taskId) {
+          taskConfigId.textContent = taskId;
+          if (ctx && typeof ctx === 'object') {
+            ctx.activeTaskConfigId = taskId;
+          }
+        }
+      }
       renderRunSummary();
       return;
     }
@@ -696,6 +723,10 @@ export function renderDashboard(root: HTMLElement, ctx: any) {
           const aliases = ctx.api?.settings?.profileAliases || {};
           taskAccount.textContent = aliases[config.lastProfileId] || config.lastProfileId;
         }
+        const taskId = String(config.taskId || ctx?.activeTaskConfigId || '').trim();
+        if (taskId) {
+          taskConfigId.textContent = taskId;
+        }
       }
     } catch (err) {
       console.error('Failed to load task info:', err);
@@ -746,9 +777,16 @@ export function renderDashboard(root: HTMLElement, ctx: any) {
     if (confirm('确定要停止当前任务吗？')) {
       try {
         const tasks = await ctx.api.stateGetTasks();
-        if (Array.isArray(tasks) && tasks.length > 0 && tasks[0].runId) {
-          await ctx.api.cmdKill(tasks[0].runId);
+        let runIdToStop = String(activeRunId || '').trim();
+        if (!runIdToStop && Array.isArray(tasks)) {
+          const running = tasks.find((item: any) => ['running', 'queued', 'pending', 'starting'].includes(String(item?.status || '').toLowerCase()));
+          runIdToStop = String(running?.runId || tasks[0]?.runId || '').trim();
+        }
+        if (runIdToStop) {
+          await ctx.api.cmdKill(runIdToStop);
           addLog('任务已停止', 'warn');
+        } else {
+          addLog('未找到可停止的运行任务', 'warn');
         }
       } catch (err) {
         console.error('Failed to stop task:', err);
@@ -759,6 +797,12 @@ export function renderDashboard(root: HTMLElement, ctx: any) {
           ctx.setActiveTab('config');
         }
       }, 1500);
+    }
+  };
+
+  backConfigBtn.onclick = () => {
+    if (typeof ctx.setActiveTab === 'function') {
+      ctx.setActiveTab('config');
     }
   };
 

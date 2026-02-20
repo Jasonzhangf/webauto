@@ -174,12 +174,40 @@ export function renderConfigPanel(root: HTMLElement, ctx: any) {
   grid.appendChild(optionsCard);
   root.appendChild(grid);
 
+  const statusRow = createEl('div', { className: 'bento-grid', style: 'margin-top: var(--gap);' });
+  const statusCard = createEl('div', { className: 'bento-cell' });
+  statusCard.innerHTML = `
+    <div class="bento-title">配置状态</div>
+    <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 8px;">
+      <div>
+        <label>当前配置ID</label>
+        <div id="config-active-task-id" style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace;">新配置</div>
+      </div>
+      <div>
+        <label>编辑模式</label>
+        <div id="config-edit-mode">新建</div>
+      </div>
+      <div>
+        <label>保存状态</label>
+        <div id="config-dirty-state" style="font-weight: 600; color: var(--accent-success);">已保存</div>
+      </div>
+      <div>
+        <label>调度预览</label>
+        <div id="config-schedule-preview" class="muted">每 30 分钟</div>
+      </div>
+    </div>
+    <div id="config-last-action" class="muted" style="margin-top: 6px; font-size: 12px;">最近操作：-</div>
+  `;
+  statusRow.appendChild(statusCard);
+  root.appendChild(statusRow);
+
   const actionRow = createEl('div', { className: 'bento-grid', style: 'margin-top: var(--gap);' });
   const actionCard = createEl('div', { className: 'bento-cell highlight' });
   actionCard.innerHTML = `
     <div style="display:flex; justify-content:center; flex-wrap: wrap; gap: 12px;">
       <button id="save-current-btn" class="secondary">保存当前配置</button>
       <button id="save-new-btn" class="secondary">另存为新配置</button>
+      <button id="save-open-scheduler-btn" class="secondary">保存并前往任务页</button>
       <button id="start-btn" style="padding: 12px 44px; font-size: 15px;">执行当前配置</button>
     </div>
   `;
@@ -215,13 +243,72 @@ export function renderConfigPanel(root: HTMLElement, ctx: any) {
   const exportBtn = root.querySelector('#export-btn') as HTMLButtonElement;
   const saveCurrentBtn = root.querySelector('#save-current-btn') as HTMLButtonElement;
   const saveNewBtn = root.querySelector('#save-new-btn') as HTMLButtonElement;
+  const saveOpenSchedulerBtn = root.querySelector('#save-open-scheduler-btn') as HTMLButtonElement;
   const startBtn = root.querySelector('#start-btn') as HTMLButtonElement;
+  const configActiveTaskId = root.querySelector('#config-active-task-id') as HTMLDivElement;
+  const configEditMode = root.querySelector('#config-edit-mode') as HTMLDivElement;
+  const configDirtyState = root.querySelector('#config-dirty-state') as HTMLDivElement;
+  const configSchedulePreview = root.querySelector('#config-schedule-preview') as HTMLDivElement;
+  const configLastAction = root.querySelector('#config-last-action') as HTMLDivElement;
 
   let accountRows: UiAccountProfile[] = [];
   let taskRows: ScheduleTask[] = [];
   let selectedTaskId = String(ctx?.activeTaskConfigId || '').trim();
   let saveTimeout: ReturnType<typeof setTimeout> | null = null;
   let loadedFromLegacy = false;
+  let isDirty = false;
+  let suppressDirtyTracking = false;
+  let lastActionText = '-';
+
+  function nowText() {
+    return new Date().toLocaleTimeString('zh-CN', { hour12: false });
+  }
+
+  function scheduleSummaryText() {
+    const mode = String(scheduleTypeSelect.value || 'interval').trim();
+    const maxRunsRaw = scheduleMaxRunsInput.value.trim();
+    const maxRuns = maxRunsRaw ? `，最多 ${Math.max(1, Number(maxRunsRaw) || 1)} 次` : '，不限次数';
+    if (mode === 'interval') {
+      const interval = readNumber(scheduleIntervalInput, 30, 1);
+      return `每 ${interval} 分钟${maxRuns}`;
+    }
+    const modeLabel = mode === 'once' ? '一次性' : mode === 'daily' ? '每日' : '每周';
+    const runAtText = scheduleRunAtInput.value ? scheduleRunAtInput.value.replace('T', ' ') : '未设置时间';
+    return `${modeLabel}，${runAtText}${maxRuns}`;
+  }
+
+  function renderConfigStatus() {
+    const hasTask = Boolean(selectedTaskId);
+    configActiveTaskId.textContent = hasTask ? selectedTaskId : '新配置';
+    configEditMode.textContent = hasTask ? '编辑已有配置' : '新建配置';
+    configDirtyState.textContent = isDirty ? '未保存' : '已保存';
+    configDirtyState.style.color = isDirty ? 'var(--accent-warning)' : 'var(--accent-success)';
+    configSchedulePreview.textContent = scheduleSummaryText();
+    configLastAction.textContent = `最近操作：${lastActionText}`;
+  }
+
+  function markDirty(reason = '配置已修改') {
+    if (suppressDirtyTracking) return;
+    isDirty = true;
+    lastActionText = `${reason} (${nowText()})`;
+    renderConfigStatus();
+  }
+
+  function markSaved(reason: string) {
+    isDirty = false;
+    lastActionText = `${reason} (${nowText()})`;
+    renderConfigStatus();
+  }
+
+  function withSilentFormApply(apply: () => void) {
+    suppressDirtyTracking = true;
+    try {
+      apply();
+    } finally {
+      suppressDirtyTracking = false;
+      renderConfigStatus();
+    }
+  }
 
   function readNumber(input: HTMLInputElement, fallback: number, min = 0) {
     const raw = Number(input.value);
@@ -234,6 +321,7 @@ export function renderConfigPanel(root: HTMLElement, ctx: any) {
     const useRunAt = mode === 'once' || mode === 'daily' || mode === 'weekly';
     scheduleRunAtWrap.style.display = useRunAt ? '' : 'none';
     scheduleIntervalWrap.style.display = useRunAt ? 'none' : '';
+    renderConfigStatus();
   }
 
   function updateLikeKeywordsState() {
@@ -356,36 +444,39 @@ export function renderConfigPanel(root: HTMLElement, ctx: any) {
   }
 
   function applyTaskToForm(task: ScheduleTask) {
-    selectedTaskId = task.id;
-    if (ctx && typeof ctx === 'object') {
-      ctx.activeTaskConfigId = task.id;
-    }
-    taskConfigSelect.value = task.id;
-    taskNameInput.value = task.name || '';
-    taskEnabledCb.checked = task.enabled !== false;
-    scheduleTypeSelect.value = task.scheduleType;
-    scheduleIntervalInput.value = String(task.intervalMinutes || 30);
-    scheduleRunAtInput.value = toLocalDatetimeValue(task.runAt);
-    scheduleMaxRunsInput.value = task.maxRuns ? String(task.maxRuns) : '';
+    withSilentFormApply(() => {
+      selectedTaskId = task.id;
+      if (ctx && typeof ctx === 'object') {
+        ctx.activeTaskConfigId = task.id;
+      }
+      taskConfigSelect.value = task.id;
+      taskNameInput.value = task.name || '';
+      taskEnabledCb.checked = task.enabled !== false;
+      scheduleTypeSelect.value = task.scheduleType;
+      scheduleIntervalInput.value = String(task.intervalMinutes || 30);
+      scheduleRunAtInput.value = toLocalDatetimeValue(task.runAt);
+      scheduleMaxRunsInput.value = task.maxRuns ? String(task.maxRuns) : '';
 
-    const profileId = String(task.commandArgv?.profile || '').trim();
-    ensureAccountOption(profileId);
-    if (profileId) accountSelect.value = profileId;
-    keywordInput.value = String(task.commandArgv?.keyword || task.commandArgv?.k || '');
-    targetInput.value = String(task.commandArgv?.['max-notes'] ?? task.commandArgv?.target ?? DEFAULT_MAX_NOTES);
-    envSelect.value = String(task.commandArgv?.env || 'debug');
-    fetchBodyCb.checked = task.commandArgv?.['fetch-body'] !== false;
-    fetchCommentsCb.checked = task.commandArgv?.['do-comments'] !== false;
-    maxCommentsInput.value = String(task.commandArgv?.['max-comments'] ?? 0);
-    autoLikeCb.checked = task.commandArgv?.['do-likes'] === true;
-    likeKeywordsInput.value = asCsvText(task.commandArgv?.['like-keywords']);
-    maxLikesInput.value = String(task.commandArgv?.['max-likes'] ?? 0);
-    headlessCb.checked = task.commandArgv?.headless === true;
-    dryRunCb.checked = task.commandArgv?.['dry-run'] === true;
+      const profileId = String(task.commandArgv?.profile || '').trim();
+      ensureAccountOption(profileId);
+      if (profileId) accountSelect.value = profileId;
+      keywordInput.value = String(task.commandArgv?.keyword || task.commandArgv?.k || '');
+      targetInput.value = String(task.commandArgv?.['max-notes'] ?? task.commandArgv?.target ?? DEFAULT_MAX_NOTES);
+      envSelect.value = String(task.commandArgv?.env || 'debug');
+      fetchBodyCb.checked = task.commandArgv?.['fetch-body'] !== false;
+      fetchCommentsCb.checked = task.commandArgv?.['do-comments'] !== false;
+      maxCommentsInput.value = String(task.commandArgv?.['max-comments'] ?? 0);
+      autoLikeCb.checked = task.commandArgv?.['do-likes'] === true;
+      likeKeywordsInput.value = asCsvText(task.commandArgv?.['like-keywords']);
+      maxLikesInput.value = String(task.commandArgv?.['max-likes'] ?? 0);
+      headlessCb.checked = task.commandArgv?.headless === true;
+      dryRunCb.checked = task.commandArgv?.['dry-run'] === true;
 
-    updateScheduleFields();
-    updateLikeKeywordsState();
-    queueDraftSave();
+      updateScheduleFields();
+      updateLikeKeywordsState();
+      queueDraftSave();
+    });
+    markSaved(`已加载配置 ${task.id}`);
   }
 
   function renderTaskSelectOptions(preferredTaskId = '') {
@@ -395,6 +486,7 @@ export function renderConfigPanel(root: HTMLElement, ctx: any) {
       taskConfigSelect.appendChild(createEl('option', { value: '' }, ['暂无配置任务']) as HTMLOptionElement);
       taskConfigSelect.value = '';
       selectedTaskId = '';
+      renderConfigStatus();
       return;
     }
     for (const row of taskRows) {
@@ -418,29 +510,33 @@ export function renderConfigPanel(root: HTMLElement, ctx: any) {
     try {
       const config = await ctx.api.configLoadLast();
       if (!config) return;
-      taskNameInput.value = String(config.taskName || '').trim();
-      keywordInput.value = config.keyword || '';
-      targetInput.value = String(config.target || DEFAULT_MAX_NOTES);
-      envSelect.value = config.env || 'prod';
-      fetchBodyCb.checked = config.fetchBody !== false;
-      fetchCommentsCb.checked = config.fetchComments !== false;
-      maxCommentsInput.value = String(config.maxComments ?? 0);
-      autoLikeCb.checked = config.autoLike === true;
-      likeKeywordsInput.value = asCsvText(config.likeKeywords);
-      maxLikesInput.value = String(config.maxLikes ?? 0);
-      headlessCb.checked = config.headless === true;
-      dryRunCb.checked = config.dryRun === true;
-      scheduleTypeSelect.value = String(config.scheduleType || 'interval');
-      scheduleIntervalInput.value = String(config.intervalMinutes || 30);
-      scheduleRunAtInput.value = toLocalDatetimeValue(config.runAt || null);
-      scheduleMaxRunsInput.value = config.maxRuns ? String(config.maxRuns) : '';
-      const preferredProfileId = String(config.lastProfileId || '').trim();
-      ensureAccountOption(preferredProfileId);
-      if (preferredProfileId) {
-        accountSelect.value = preferredProfileId;
-      }
-      updateScheduleFields();
-      updateLikeKeywordsState();
+      withSilentFormApply(() => {
+        selectedTaskId = '';
+        taskNameInput.value = String(config.taskName || '').trim();
+        keywordInput.value = config.keyword || '';
+        targetInput.value = String(config.target || DEFAULT_MAX_NOTES);
+        envSelect.value = config.env || 'prod';
+        fetchBodyCb.checked = config.fetchBody !== false;
+        fetchCommentsCb.checked = config.fetchComments !== false;
+        maxCommentsInput.value = String(config.maxComments ?? 0);
+        autoLikeCb.checked = config.autoLike === true;
+        likeKeywordsInput.value = asCsvText(config.likeKeywords);
+        maxLikesInput.value = String(config.maxLikes ?? 0);
+        headlessCb.checked = config.headless === true;
+        dryRunCb.checked = config.dryRun === true;
+        scheduleTypeSelect.value = String(config.scheduleType || 'interval');
+        scheduleIntervalInput.value = String(config.intervalMinutes || 30);
+        scheduleRunAtInput.value = toLocalDatetimeValue(config.runAt || null);
+        scheduleMaxRunsInput.value = config.maxRuns ? String(config.maxRuns) : '';
+        const preferredProfileId = String(config.lastProfileId || '').trim();
+        ensureAccountOption(preferredProfileId);
+        if (preferredProfileId) {
+          accountSelect.value = preferredProfileId;
+        }
+        updateScheduleFields();
+        updateLikeKeywordsState();
+      });
+      markSaved('已加载上次草稿');
     } catch (err) {
       console.error('Failed to load last config:', err);
     }
@@ -510,6 +606,9 @@ export function renderConfigPanel(root: HTMLElement, ctx: any) {
       if (id && typeof ctx.setStatus === 'function') {
         ctx.setStatus(`saved: ${id}`);
       }
+      if (id) {
+        markSaved(`已保存配置 ${id}`);
+      }
     } catch (err: any) {
       alert(`保存失败: ${err?.message || String(err)}`);
     }
@@ -520,6 +619,27 @@ export function renderConfigPanel(root: HTMLElement, ctx: any) {
       const id = await persistTask('add');
       if (id && typeof ctx.setStatus === 'function') {
         ctx.setStatus(`saved new: ${id}`);
+      }
+      if (id) {
+        markSaved(`已另存为 ${id}`);
+      }
+    } catch (err: any) {
+      alert(`保存失败: ${err?.message || String(err)}`);
+    }
+  }
+
+  async function saveAndOpenScheduler() {
+    try {
+      const id = selectedTaskId
+        ? await persistTask('update')
+        : await persistTask('add');
+      if (!id) return;
+      if (typeof ctx.setStatus === 'function') {
+        ctx.setStatus(`saved: ${id}`);
+      }
+      markSaved(`已保存并跳转任务页 ${id}`);
+      if (typeof ctx.setActiveTab === 'function') {
+        ctx.setActiveTab('scheduler');
       }
     } catch (err: any) {
       alert(`保存失败: ${err?.message || String(err)}`);
@@ -551,6 +671,7 @@ export function renderConfigPanel(root: HTMLElement, ctx: any) {
       if (typeof ctx.setStatus === 'function') {
         ctx.setStatus(`running: ${taskId}`);
       }
+      markSaved(`执行中: ${taskId}`);
       if (typeof ctx.setActiveTab === 'function') {
         ctx.setActiveTab('dashboard');
       }
@@ -597,31 +718,34 @@ export function renderConfigPanel(root: HTMLElement, ctx: any) {
       try {
         const text = await file.text();
         const config = JSON.parse(text.replace(/^\uFEFF/, ''));
-        taskNameInput.value = String(config.taskName || config.name || '').trim();
-        keywordInput.value = String(config.keyword || '');
-        targetInput.value = String(config.target || config.maxNotes || DEFAULT_MAX_NOTES);
-        envSelect.value = String(config.env || 'prod');
-        fetchBodyCb.checked = config.fetchBody !== false;
-        fetchCommentsCb.checked = config.fetchComments !== false;
-        maxCommentsInput.value = String(config.maxComments ?? 0);
-        autoLikeCb.checked = config.autoLike === true;
-        likeKeywordsInput.value = asCsvText(config.likeKeywords);
-        maxLikesInput.value = String(config.maxLikes ?? 0);
-        headlessCb.checked = config.headless === true;
-        dryRunCb.checked = config.dryRun === true;
-        scheduleTypeSelect.value = String(config.scheduleType || 'interval');
-        scheduleIntervalInput.value = String(config.intervalMinutes || 30);
-        scheduleRunAtInput.value = toLocalDatetimeValue(config.runAt || null);
-        scheduleMaxRunsInput.value = config.maxRuns ? String(config.maxRuns) : '';
-        const profileId = String(config.lastProfileId || config.profile || '').trim();
-        if (profileId) {
-          ensureAccountOption(profileId);
-          accountSelect.value = profileId;
-        }
-        selectedTaskId = '';
-        taskConfigSelect.value = '';
-        updateScheduleFields();
-        updateLikeKeywordsState();
+        withSilentFormApply(() => {
+          taskNameInput.value = String(config.taskName || config.name || '').trim();
+          keywordInput.value = String(config.keyword || '');
+          targetInput.value = String(config.target || config.maxNotes || DEFAULT_MAX_NOTES);
+          envSelect.value = String(config.env || 'prod');
+          fetchBodyCb.checked = config.fetchBody !== false;
+          fetchCommentsCb.checked = config.fetchComments !== false;
+          maxCommentsInput.value = String(config.maxComments ?? 0);
+          autoLikeCb.checked = config.autoLike === true;
+          likeKeywordsInput.value = asCsvText(config.likeKeywords);
+          maxLikesInput.value = String(config.maxLikes ?? 0);
+          headlessCb.checked = config.headless === true;
+          dryRunCb.checked = config.dryRun === true;
+          scheduleTypeSelect.value = String(config.scheduleType || 'interval');
+          scheduleIntervalInput.value = String(config.intervalMinutes || 30);
+          scheduleRunAtInput.value = toLocalDatetimeValue(config.runAt || null);
+          scheduleMaxRunsInput.value = config.maxRuns ? String(config.maxRuns) : '';
+          const profileId = String(config.lastProfileId || config.profile || '').trim();
+          if (profileId) {
+            ensureAccountOption(profileId);
+            accountSelect.value = profileId;
+          }
+          selectedTaskId = '';
+          taskConfigSelect.value = '';
+          updateScheduleFields();
+          updateLikeKeywordsState();
+        });
+        markDirty('已导入配置，待保存');
         queueDraftSave();
         alert('配置已导入');
       } catch (err: any) {
@@ -640,10 +764,12 @@ export function renderConfigPanel(root: HTMLElement, ctx: any) {
   });
   scheduleTypeSelect.addEventListener('change', () => {
     updateScheduleFields();
+    markDirty();
     queueDraftSave();
   });
   autoLikeCb.onchange = () => {
     updateLikeKeywordsState();
+    markDirty();
     queueDraftSave();
   };
 
@@ -664,6 +790,9 @@ export function renderConfigPanel(root: HTMLElement, ctx: any) {
   };
   saveNewBtn.onclick = () => {
     void saveAsNewConfig();
+  };
+  saveOpenSchedulerBtn.onclick = () => {
+    void saveAndOpenScheduler();
   };
   startBtn.onclick = () => {
     void runCurrentConfig();
@@ -687,14 +816,21 @@ export function renderConfigPanel(root: HTMLElement, ctx: any) {
     headlessCb,
     dryRunCb,
   ].forEach((el) => {
-    el.onchange = queueDraftSave;
+    el.onchange = () => {
+      markDirty();
+      queueDraftSave();
+    };
     if (el.tagName === 'INPUT' && (el as HTMLInputElement).type !== 'checkbox') {
-      (el as HTMLInputElement).oninput = queueDraftSave;
+      (el as HTMLInputElement).oninput = () => {
+        markDirty();
+        queueDraftSave();
+      };
     }
   });
 
   updateScheduleFields();
   updateLikeKeywordsState();
+  renderConfigStatus();
   void loadAccounts();
   void refreshTaskList(selectedTaskId);
 }

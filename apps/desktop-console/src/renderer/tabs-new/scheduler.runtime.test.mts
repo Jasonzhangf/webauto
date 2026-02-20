@@ -10,6 +10,8 @@ type MockBundle = {
     cmdRunJson: string[][];
     cmdSpawn: any[];
     cmdKill: any[];
+    setActiveTab: string[];
+    setStatus: string[];
   };
   state: {
     tasks: any[];
@@ -65,6 +67,8 @@ function createMockCtx(): MockBundle {
     cmdRunJson: [] as string[][],
     cmdSpawn: [] as any[],
     cmdKill: [] as any[],
+    setActiveTab: [] as string[],
+    setStatus: [] as string[],
   };
   const state = {
     tasks: [
@@ -235,7 +239,11 @@ function createMockCtx(): MockBundle {
   };
 
   return {
-    ctx: { api },
+    ctx: {
+      api,
+      setActiveTab: (id: string) => calls.setActiveTab.push(id),
+      setStatus: (text: string) => calls.setStatus.push(text),
+    },
     calls,
     state,
   };
@@ -316,6 +324,8 @@ test('scheduler panel supports validate + add/update/delete/import + daemon life
   const runAtInput = root.querySelector('#scheduler-runat') as HTMLInputElement;
   const typeSelect = root.querySelector('#scheduler-type') as HTMLSelectElement;
   const maxNotesInput = root.querySelector('#scheduler-max-notes') as HTMLInputElement;
+  const openConfigBtn = root.querySelector('#scheduler-open-config-btn') as HTMLButtonElement;
+  const activeTaskText = root.querySelector('#scheduler-active-task-id') as HTMLElement;
   const saveBtn = root.querySelector('#scheduler-save-btn') as HTMLButtonElement;
   const resetBtn = root.querySelector('#scheduler-reset-btn') as HTMLButtonElement;
   const intervalWrap = root.querySelector('#scheduler-interval-wrap') as HTMLDivElement;
@@ -353,14 +363,25 @@ test('scheduler panel supports validate + add/update/delete/import + daemon life
   const schedulerList = root.querySelector('#scheduler-list') as HTMLDivElement;
   findButtonByTextIn(schedulerList, '编辑', 0).click();
   await flush(2);
+  assert.equal(activeTaskText.textContent, 'sched-0001');
   maxNotesInput.value = '99';
   saveBtn.click();
   await flush(4);
   assert.equal(calls.cmdRunJson.some((args) => args.includes('update')), true);
 
+  findButtonByTextIn(schedulerList, '载入配置', 0).click();
+  await flush(2);
+  assert.equal(calls.setActiveTab.includes('config'), true);
+
   findButtonByTextIn(schedulerList, '执行', 0).click();
   await flush(3);
   assert.equal(calls.cmdRunJson.some((args) => args[1] === 'run'), true);
+  assert.equal(calls.setStatus.some((text) => text.includes('running: sched-0001')), true);
+  assert.equal(calls.setActiveTab.includes('dashboard'), true);
+
+  openConfigBtn.click();
+  await flush(2);
+  assert.equal(calls.setActiveTab.filter((id) => id === 'config').length >= 2, true);
 
   findButtonByTextIn(schedulerList, '导出', 0).click();
   await flush(3);

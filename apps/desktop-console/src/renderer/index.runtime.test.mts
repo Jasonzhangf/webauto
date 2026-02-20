@@ -145,14 +145,14 @@ test('renderer index boots onboarding tabs and responds to cmd events', async ()
 
   try {
     assert.ok(findTabByText(tabsRoot, '初始化'));
-    assert.ok(findTabByText(tabsRoot, '配置'));
+    assert.ok(findTabByText(tabsRoot, '任务'));
     assert.ok(findTabByText(tabsRoot, '看板'));
     assert.ok(findTabByText(tabsRoot, '定时任务'));
     assert.ok(findTabByText(tabsRoot, '账户管理'));
 
-    findTabByText(tabsRoot, '配置').click();
+    findTabByText(tabsRoot, '任务').click();
     await flush(3);
-    assert.equal(Boolean(contentRoot.querySelector('#start-btn')), true);
+    assert.equal(Boolean(contentRoot.querySelector('#task-run-btn')), true);
 
     findTabByText(tabsRoot, '看板').click();
     await flush(3);

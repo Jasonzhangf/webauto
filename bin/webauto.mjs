@@ -479,6 +479,12 @@ async function main() {
       printAccountHelp();
       return;
     }
+  if (cmd === 'weibo') {
+    const script = path.join(ROOT, 'apps', 'webauto', 'entry', 'weibo-unified.mjs');
+    await run(process.execPath, [script, ...rawArgv.slice(1)]);
+    return;
+  }
+
     if (cmd === 'schedule') {
       printScheduleHelp();
       return;
@@ -547,6 +553,12 @@ async function main() {
   }
   if (cmd === 'account') {
     const script = path.join(ROOT, 'apps', 'webauto', 'entry', 'account.mjs');
+    await run(process.execPath, [script, ...rawArgv.slice(1)]);
+    return;
+  }
+
+  if (cmd === 'weibo') {
+    const script = path.join(ROOT, 'apps', 'webauto', 'entry', 'weibo-unified.mjs');
     await run(process.execPath, [script, ...rawArgv.slice(1)]);
     return;
   }

@@ -249,7 +249,10 @@ test('config panel defaults to latest task and supports update/save-as-new/run',
   const scheduleMaxRunsInput = root.querySelector('#schedule-max-runs-input') as HTMLInputElement;
   const saveCurrentBtn = root.querySelector('#save-current-btn') as HTMLButtonElement;
   const saveNewBtn = root.querySelector('#save-new-btn') as HTMLButtonElement;
+  const saveOpenSchedulerBtn = root.querySelector('#save-open-scheduler-btn') as HTMLButtonElement;
   const runBtn = root.querySelector('#start-btn') as HTMLButtonElement;
+  const configIdText = root.querySelector('#config-active-task-id') as HTMLDivElement;
+  const dirtyStateText = root.querySelector('#config-dirty-state') as HTMLDivElement;
 
   assert.equal(taskSelect.value, 'sched-0002');
   assert.equal(keywordInput.value, 'new');
@@ -258,20 +261,29 @@ test('config panel defaults to latest task and supports update/save-as-new/run',
   assert.equal(scheduleTypeSelect.value, 'daily');
   assert.equal(scheduleRunAtWrap.style.display === 'none', false);
   assert.equal(scheduleMaxRunsInput.value, '9');
+  assert.equal(configIdText.textContent, 'sched-0002');
+  assert.equal(dirtyStateText.textContent, '已保存');
 
   taskSelect.value = 'sched-0001';
   taskSelect.dispatchEvent(new Event('change', { bubbles: true }));
   await flush(3);
   assert.equal(keywordInput.value, 'old');
   keywordInput.value = 'old-updated';
+  keywordInput.dispatchEvent(new Event('input', { bubbles: true }));
+  assert.equal(dirtyStateText.textContent, '未保存');
   saveCurrentBtn.click();
   await flush(5);
   assert.equal(bundle.calls.cmdRunJson.some((args) => args[1] === 'update' && args[2] === 'sched-0001'), true);
+  assert.equal(dirtyStateText.textContent, '已保存');
 
   saveNewBtn.click();
   await flush(5);
   assert.equal(bundle.calls.cmdRunJson.some((args) => args[1] === 'add'), true);
   assert.equal(taskSelect.value.startsWith('sched-'), true);
+
+  saveOpenSchedulerBtn.click();
+  await flush(5);
+  assert.equal(bundle.calls.setActiveTab.includes('scheduler'), true);
 
   runBtn.click();
   await flush(8);
