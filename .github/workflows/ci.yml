@@ -6,6 +6,13 @@ on:
   pull_request:
     branches: [ main ]
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     strategy:
@@ -27,13 +34,17 @@ jobs:
         shell: bash
         run: npm ci
 
+      - name: Install desktop-console dependencies
+        shell: bash
+        run: npm --prefix apps/desktop-console ci
+
       - name: Build services
         shell: bash
         run: npm run build:services
 
       - name: Tests
         shell: bash
-        run: npm test
+        run: npm run test:ci
 
       - name: Check legacy refs & untracked sources
         shell: bash
@@ -46,10 +57,12 @@ jobs:
 
       - name: Coverage tests
         shell: bash
-        run: node scripts/test/run-coverage.mjs
+        run: npm run coverage:ci
 
       - name: Upload coverage report
         uses: actions/upload-artifact@v4
         with:
           name: coverage-report-${{ matrix.os }}
-          path: coverage/
+          path: |
+            coverage/
+            apps/desktop-console/coverage/

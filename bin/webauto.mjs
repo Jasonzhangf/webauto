@@ -96,7 +96,9 @@ Core Commands:
 
 Build & Release:
   webauto build:dev        # Local link mode
-  webauto build:release    # Prepare npm release
+  webauto build:release    # Full release gate (tests/build/pack)
+  webauto build:release -- --skip-tests
+  webauto build:release -- --skip-pack
 
 Examples (standard):
   webauto account add --platform xiaohongshu --alias 主号
@@ -466,7 +468,7 @@ async function uiConsole({ build, install, checkOnly }) {
 async function main() {
   const rawArgv = process.argv.slice(2);
   const args = minimist(process.argv.slice(2), {
-    boolean: ['help', 'build', 'install', 'check', 'full', 'link'],
+    boolean: ['help', 'build', 'install', 'check', 'full', 'link', 'skip-tests', 'skip-pack'],
     alias: { h: 'help' },
   });
 
@@ -518,13 +520,28 @@ async function main() {
 
   // build:release - prepare for npm publish
   if (cmd === 'build:release') {
-    console.log('[webauto] Building release version...');
+    const skipTests = args['skip-tests'] === true;
+    const skipPack = args['skip-pack'] === true;
+    console.log('[webauto] Running release gate...');
     const npm = npmRunner();
+    await run(npm.cmd, [...npm.prefix, 'run', 'prebuild']);
+    if (!skipTests) {
+      await run(npm.cmd, [...npm.prefix, 'run', 'test:ci']);
+      await run(npm.cmd, [...npm.prefix, 'run', 'coverage:ci']);
+    } else {
+      console.log('[webauto] Skipping tests (--skip-tests)');
+    }
     await run(npm.cmd, [...npm.prefix, 'run', 'build:services']);
+    await run(npm.cmd, [...npm.prefix, '--prefix', 'apps/desktop-console', 'run', 'build']);
+    if (!skipPack) {
+      await run(npm.cmd, [...npm.prefix, 'pack', '--dry-run']);
+    } else {
+      console.log('[webauto] Skipping npm pack validation (--skip-pack)');
+    }
     // Clean up state for fresh install
     saveState({ initialized: false, version: null });
-    console.log('[webauto] Release build complete');
-    console.log('[webauto] Ready to publish');
+    console.log('[webauto] Release gate complete');
+    console.log('[webauto] Ready to publish (npm publish --access public)');
     return;
   }
 

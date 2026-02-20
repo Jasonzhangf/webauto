@@ -11,9 +11,9 @@
 
 import { BaseBlock } from '../base';
 import type { BlockContext, BlockResult } from '../types';
-import { CollectionDataManager, type CollectionIdSpec } from '../../collection-manager';
-import { ProcessRegistry } from '../../process-registry';
-import { RateLimiter } from '../../rate-limiter';
+import { CollectionDataManager, type CollectionIdSpec } from '../../collection-manager/index.js';
+import { ProcessRegistry } from '../../process-registry/index.js';
+import { RateLimiter } from '../../rate-limiter/index.js';
 import type { Page } from 'playwright';
 
 interface SearchLinksConfig {

@@ -8,10 +8,9 @@ const distMainDir = path.join(distDir, 'main');
 const distRendererDir = path.join(distDir, 'renderer');
 
 console.log('[desktop-console] ensuring dependencies...');
-try {
-  execSync('npm install', { stdio: 'inherit', cwd: appRoot });
-} catch {
-  // ignore
+const nodeModulesDir = path.join(appRoot, 'node_modules');
+if (!fs.existsSync(nodeModulesDir)) {
+  execSync('npm ci', { stdio: 'inherit', cwd: appRoot });
 }
 
 console.log('[desktop-console] cleaning dist...');
