@@ -1,0 +1,10 @@
+{
+  "name": "@webauto/collection-manager",
+  "version": "1.0.0",
+  "main": "index.ts",
+  "types": "index.ts",
+  "dependencies": {},
+  "devDependencies": {
+    "@types/node": "^20.0.0"
+  }
+}
