@@ -44,8 +44,18 @@ export interface PostRecord {
   authorName?: string;
   /** Post content */
   content?: string;
-  /** Collected timestamp */
+  /** Collected timestamp (ISO 8601 UTC) */
   collectedAt: string;
+  /** Collected timestamp (local with timezone) */
+  collectedAtLocal?: string;
+  /** Collected date (YYYY-MM-DD, local) */
+  collectedDate?: string;
+  /** Published date extracted from content (YYYY-MM-DD) */
+  publishedDate?: string;
+  /** Published time extracted from content (HH:MM) */
+  publishedTime?: string;
+  /** Full published datetime text */
+  publishedAtText?: string;
   /** Raw data from platform */
   raw?: Record<string, unknown>;
   /** Comments count */

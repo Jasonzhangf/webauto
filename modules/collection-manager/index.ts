@@ -13,6 +13,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { BloomFilter } from './bloom-filter';
 import { CollectionStorage } from './storage';
+import { getCurrentTimestamp, parsePlatformDate } from './date-utils';
 import type { 
   Platform, 
   CollectionSource, 
@@ -159,6 +160,14 @@ export class CollectionDataManager {
       return false;
     }
     
+    // Auto-fill collectedAt fields if not provided
+    if (!post.collectedAt) {
+      const ts = getCurrentTimestamp();
+      post.collectedAt = ts.collectedAt;
+      post.collectedAtLocal = ts.collectedAtLocal;
+      post.collectedDate = ts.collectedDate;
+    }
+    
     // Add to bloom filter and storage
     this.bloomFilter.add(post.id);
     await this.storage.appendPost(post);
@@ -293,3 +302,5 @@ export class CollectionDataManager {
 
 export { buildCollectionId, parseCollectionId };
 export type { CollectionIdSpec, CollectionMeta, PostRecord, CommentRecord };
+
+export { getCurrentTimestamp, parsePlatformDate, extractWeiboPostDate } from "./date-utils.js";
