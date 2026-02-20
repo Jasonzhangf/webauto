@@ -1,0 +1,38 @@
+{
+  "id": "weibo_detail_page.reply_expand_button",
+  "name": "详情页-回复展开按钮",
+  "type": "button",
+  "selectors": [
+    {
+      "css": "a[class*='reply_expand']",
+      "variant": "primary",
+      "score": 1.0
+    },
+    {
+      "css": "span[class*='reply_btn']",
+      "variant": "backup",
+      "score": 0.8
+    }
+  ],
+  "metadata": {
+    "text_contains": ["收起回复", "展开"],
+    "auto_click": true
+  },
+  "capabilities": ["highlight", "click"],
+  "operations": [
+    {
+      "type": "highlight",
+      "config": {
+        "style": "2px solid #f39c12",
+        "duration": 1000
+      }
+    },
+    {
+      "type": "click",
+      "config": {
+        "scroll_to_view": true,
+        "wait_after": 800
+      }
+    }
+  ]
+}

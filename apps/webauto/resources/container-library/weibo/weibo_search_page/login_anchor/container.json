@@ -1,0 +1,30 @@
+{
+  "id": "weibo_search_page.login_anchor",
+  "name": "登录状态标识",
+  "type": "anchor",
+  "capabilities": ["highlight"],
+  "selectors": [
+    {
+      "css": "a[href*='/u/'][class*='user']",
+      "variant": "logged-in",
+      "score": 1.0
+    },
+    {
+      "css": ".user_icon",
+      "variant": "backup",
+      "score": 0.8
+    }
+  ],
+  "metadata": {
+    "indicates": "logged_in"
+  },
+  "operations": [
+    {
+      "type": "highlight",
+      "config": {
+        "style": "2px solid #22c55e",
+        "duration": 1000
+      }
+    }
+  ]
+}

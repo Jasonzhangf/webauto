@@ -1,0 +1,47 @@
+{
+  "id": "weibo_search_page.search_bar",
+  "name": "搜索输入框",
+  "type": "input",
+  "capabilities": ["input", "highlight", "focus"],
+  "selectors": [
+    {
+      "css": ".woo-input-main[placeholder*='搜索']",
+      "variant": "primary",
+      "score": 1.0
+    },
+    {
+      "css": "input[type='text'][placeholder*='搜索']",
+      "variant": "backup",
+      "score": 0.8
+    },
+    {
+      "css": "input[name='q']",
+      "variant": "fallback",
+      "score": 0.7
+    }
+  ],
+  "operations": [
+    {
+      "type": "highlight",
+      "config": {
+        "style": "2px solid #34a853",
+        "duration": 1500
+      }
+    },
+    {
+      "type": "type",
+      "config": {
+        "clear_first": true,
+        "human_typing": true,
+        "pause_after": 300
+      }
+    },
+    {
+      "type": "key",
+      "config": {
+        "key": "Enter",
+        "wait_after": 1500
+      }
+    }
+  ]
+}

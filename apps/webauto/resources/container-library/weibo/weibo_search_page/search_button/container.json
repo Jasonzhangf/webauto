@@ -1,0 +1,39 @@
+{
+  "id": "weibo_search_page.search_button",
+  "name": "搜索按钮",
+  "type": "button",
+  "capabilities": ["click", "highlight"],
+  "selectors": [
+    {
+      "css": "button[type='submit']",
+      "variant": "primary",
+      "score": 1.0
+    },
+    {
+      "css": ".search_btn",
+      "variant": "backup",
+      "score": 0.8
+    },
+    {
+      "css": "a[class*='search_btn']",
+      "variant": "fallback",
+      "score": 0.6
+    }
+  ],
+  "operations": [
+    {
+      "type": "highlight",
+      "config": {
+        "style": "2px solid #e6162d",
+        "duration": 1000
+      }
+    },
+    {
+      "type": "click",
+      "config": {
+        "scroll_to_view": true,
+        "wait_after": 1500
+      }
+    }
+  ]
+}

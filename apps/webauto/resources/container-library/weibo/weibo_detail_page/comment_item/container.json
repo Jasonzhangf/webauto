@@ -1,0 +1,40 @@
+{
+  "id": "weibo_detail_page.comment_item",
+  "name": "详情页-单条评论",
+  "type": "content",
+  "selectors": [
+    {
+      "css": "div[class*='Comment_wrap_']",
+      "variant": "primary",
+      "score": 1.0
+    },
+    {
+      "css": "article[class*='Comment_item_']",
+      "variant": "backup",
+      "score": 0.8
+    }
+  ],
+  "capabilities": ["highlight", "extract", "click"],
+  "operations": [
+    {
+      "type": "highlight",
+      "config": {
+        "style": "2px solid #8e44ad",
+        "duration": 800
+      }
+    },
+    {
+      "type": "extract",
+      "config": {
+        "target": "comment",
+        "fields": {
+          "author": "a[class*='author']",
+          "content": "div[class*='content']",
+          "timestamp": "time",
+          "likeCount": "span[class*='like_count']",
+          "replyCount": "span[class*='reply_count']"
+        }
+      }
+    }
+  ]
+}

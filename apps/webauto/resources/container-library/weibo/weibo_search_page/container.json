@@ -2,17 +2,22 @@
   "id": "weibo_search_page",
   "name": "微博搜索页（未登录/已登录均可）",
   "type": "page",
-  "page_patterns": ["s.weibo.com"],
+  "page_patterns": ["s.weibo.com", "s.weibo.com/weibo/*"],
   "selectors": [
-    { "css": "body.wbs-feed", "variant": "primary", "score": 1.0 }
+    { "css": "body.wbs-feed", "variant": "primary", "score": 1.0 },
+    { "css": ".search_wrap", "variant": "backup", "score": 0.8 }
   ],
   "children": [
+    "weibo_search_page.search_bar",
+    "weibo_search_page.search_button",
     "weibo_search_page.search_list",
-    "weibo_search_page.search_item"
+    "weibo_search_page.search_item",
+    "weibo_search_page.login_anchor"
   ],
   "capabilities": ["scroll", "highlight", "find-child"],
   "operations": [
     { "type": "highlight", "config": { "style": "2px solid #26a69a", "duration": 1000 } },
+    { "type": "find-child", "config": { "container_id": "weibo_search_page.search_bar" } },
     { "type": "find-child", "config": { "container_id": "weibo_search_page.search_list" } }
   ]
 }

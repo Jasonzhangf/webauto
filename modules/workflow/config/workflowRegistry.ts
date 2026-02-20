@@ -7,6 +7,7 @@ import { xiaohongshuPhase3CollectWorkflowV1 } from '../definitions/xiaohongshu-p
 import { xiaohongshuPhase1WorkflowV3 } from '../definitions/xiaohongshu-phase1-workflow-v3.js';
 import { xiaohongshuPhase2LinksWorkflowV3 } from '../definitions/xiaohongshu-phase2-links-workflow-v3.js';
 import { xiaohongshuPhase34FromLinksWorkflowV3 } from '../definitions/xiaohongshu-phase34-from-links-workflow-v3.js';
+import { weiboSearchWorkflowV1 } from '../definitions/weibo-search-workflow-v1.js'; // 导入微博搜索工作流
 
 const registry = new Map<string, WorkflowDefinitionInput>();
 
@@ -27,6 +28,7 @@ register(xiaohongshuPhase3CollectWorkflowV1, 'xiaohongshu-collect-phase3-v1');
 register(xiaohongshuPhase1WorkflowV3, 'xiaohongshu-phase1-v3');
 register(xiaohongshuPhase2LinksWorkflowV3, 'xiaohongshu-phase2-links-v3');
 register(xiaohongshuPhase34FromLinksWorkflowV3, 'xiaohongshu-phase34-from-links-v3');
+register(weiboSearchWorkflowV1, 'weibo-search-v1'); // 注册微博搜索工作流
 
 export function getWorkflowDefinition(id: string): WorkflowDefinitionInput | undefined {
   return registry.get(id);

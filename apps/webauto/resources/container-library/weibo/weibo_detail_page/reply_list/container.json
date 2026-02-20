@@ -1,0 +1,37 @@
+{
+  "id": "weibo_detail_page.reply_list",
+  "name": "详情页-回复列表",
+  "type": "list",
+  "selectors": [
+    {
+      "css": "div[class*='reply_list']",
+      "variant": "primary",
+      "score": 1.0
+    },
+    {
+      "css": "div[class*='Reply_wrap_']",
+      "variant": "backup",
+      "score": 0.8
+    }
+  ],
+  "capabilities": ["scroll", "highlight", "find-child"],
+  "children": [
+    "weibo_detail_page.comment_item"
+  ],
+  "operations": [
+    {
+      "type": "highlight",
+      "config": {
+        "style": "2px solid #16a085",
+        "duration": 800
+      }
+    },
+    {
+      "type": "scroll",
+      "config": {
+        "direction": "down",
+        "distance": 300
+      }
+    }
+  ]
+}
