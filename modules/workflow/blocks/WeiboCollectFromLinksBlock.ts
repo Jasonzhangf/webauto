@@ -8,6 +8,7 @@
 import os from 'node:os';
 import path from 'node:path';
 import { promises as fs } from 'node:fs';
+import { parsePlatformDate, getCurrentTimestamp } from '../../collection-manager/date-utils.js';
 
 export interface WeiboCollectFromLinksInput {
   sessionId: string;
@@ -75,7 +76,7 @@ async function readJsonl(filePath: string): Promise<any[]> {
   }
 }
 
-async function saveMarkdown(keywordDir: string, entry: WeiboLinkEntry, content: string, comments: any[], commentStats?: any): Promise<void> {
+async function saveMarkdown(keywordDir: string, entry: WeiboLinkEntry, content: string, comments: any[], commentStats?: any, publishedAtInfo?: { date: string; time: string; fullText: string } | null): Promise<void> {
   const safeStatusId = sanitizeFilenamePart(entry.statusId);
   const mdPath = path.join(keywordDir, `${safeStatusId}.md`);
   
@@ -84,7 +85,13 @@ async function saveMarkdown(keywordDir: string, entry: WeiboLinkEntry, content: 
     '',
     `**作者**: ${entry.authorName || '未知'}`,
     `**链接**: ${entry.safeUrl}`,
-    `**采集时间**: ${new Date().toISOString()}`,
+    `**采集时间**: ${getCurrentTimestamp().collectedAt}`,
+    `**采集时间(本地)**: ${getCurrentTimestamp().collectedAtLocal}`,
+    ...(publishedAtInfo ? [
+      `**发布时间**: ${publishedAtInfo.fullText}`,
+      `**发布日期**: ${publishedAtInfo.date}`,
+      `**发布时间**: ${publishedAtInfo.time}`,
+    ] : []),
     '',
     '---',
     '',
@@ -202,6 +209,40 @@ export async function execute(input: WeiboCollectFromLinksInput): Promise<WeiboC
     return typeof value === 'string' ? value : '';
   }
   
+
+
+  // 提取帖子发布时间
+  async function extractPostTime(): Promise<{ date: string; time: string; fullText: string } | null> {
+    const script = `
+      (() => {
+        const selectors = [
+          'time',
+          '[class*="time"]',
+          '[class*="date"]',
+          '.from a',
+          '[class*="head-info_time"]'
+        ];
+        for (const sel of selectors) {
+          const el = document.querySelector(sel);
+          if (el) {
+            return el.textContent?.trim() || el.getAttribute('datetime') || '';
+          }
+        }
+        return '';
+      })()
+    `;
+    try {
+      const res = await controllerAction('evaluate', { script });
+      const value = unwrapResult(res);
+      if (typeof value === 'string' && value) {
+        return parsePlatformDate(value);
+      }
+    } catch (e) {
+      console.log('[WeiboCollectFromLinks] Could not extract post time:', e);
+    }
+    return null;
+  }
+
   // 动态导入 WeiboCollectCommentsBlock
   async function collectPostComments(): Promise<{ comments: any[], stats?: any }> {
     if (!enableComments) return { comments: [], stats: undefined };
@@ -254,9 +295,10 @@ export async function execute(input: WeiboCollectFromLinksInput): Promise<WeiboC
         }
         
         const content = await extractPostContent();
+        const publishedAtInfo = await extractPostTime();
         const { comments, stats } = await collectPostComments();
         
-        await saveMarkdown(keywordDir, link, content, comments, stats);
+        await saveMarkdown(keywordDir, link, content, comments, stats, publishedAtInfo);
         persistedCount++;
         totalComments += comments.length;
         
