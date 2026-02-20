@@ -17,7 +17,6 @@ import * as XiaohongshuCollectLinksBlock from '../blocks/XiaohongshuCollectLinks
 import * as XiaohongshuCollectFromLinksBlock from '../blocks/XiaohongshuCollectFromLinksBlock.js';
 import * as ErrorRecoveryBlock from '../blocks/ErrorRecoveryBlock.js';
 import * as ExecuteWeiboSearchBlock from '../blocks/ExecuteWeiboSearchBlock.js';
-import * as WeiboCollectSearchLinksBlock from '../blocks/WeiboCollectSearchLinksBlock.js';
 import * as WeiboCollectFromLinksBlock from '../blocks/WeiboCollectFromLinksBlock.js';
 import * as WeiboCollectCommentsBlock from '../blocks/WeiboCollectCommentsBlock.js';
 import * as AnchorVerificationBlock from '../blocks/AnchorVerificationBlock.js';
@@ -48,7 +47,6 @@ export function createDefaultWorkflowExecutor(): WorkflowExecutor {
   executor.registerBlock('XiaohongshuCollectFromLinksBlock', { execute: XiaohongshuCollectFromLinksBlock.execute });
   executor.registerBlock('OrganizeXhsNotesBlock', { execute: OrganizeXhsNotesBlock.execute });
   executor.registerBlock('ExecuteWeiboSearchBlock', { execute: ExecuteWeiboSearchBlock.execute });
-  executor.registerBlock('WeiboCollectSearchLinksBlock', { execute: WeiboCollectSearchLinksBlock.execute });
   executor.registerBlock('WeiboCollectFromLinksBlock', { execute: WeiboCollectFromLinksBlock.execute });
   executor.registerBlock('WeiboCollectCommentsBlock', { execute: WeiboCollectCommentsBlock.execute });
   return executor;
