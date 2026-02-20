@@ -79,18 +79,19 @@ async function readJsonl(filePath: string): Promise<any[]> {
 async function saveMarkdown(keywordDir: string, entry: WeiboLinkEntry, content: string, comments: any[], commentStats?: any, publishedAtInfo?: { date: string; time: string; fullText: string } | null): Promise<void> {
   const safeStatusId = sanitizeFilenamePart(entry.statusId);
   const mdPath = path.join(keywordDir, `${safeStatusId}.md`);
+  const ts = getCurrentTimestamp();
   
   const lines = [
     `# ${entry.authorName || '未知作者'}的微博`,
     '',
     `**作者**: ${entry.authorName || '未知'}`,
     `**链接**: ${entry.safeUrl}`,
-    `**采集时间**: ${getCurrentTimestamp().collectedAt}`,
-    `**采集时间(本地)**: ${getCurrentTimestamp().collectedAtLocal}`,
+    `**采集时间**: ${ts.collectedAt}`,
+    `**采集时间(本地)**: ${ts.collectedAtLocal}`,
     ...(publishedAtInfo ? [
       `**发布时间**: ${publishedAtInfo.fullText}`,
       `**发布日期**: ${publishedAtInfo.date}`,
-      `**发布时间**: ${publishedAtInfo.time}`,
+      ...(publishedAtInfo.time ? [`**发布时间(时分)**: ${publishedAtInfo.time}`] : []),
     ] : []),
     '',
     '---',

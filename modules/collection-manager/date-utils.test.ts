@@ -56,7 +56,7 @@ test('parsePlatformDate: MM-DD', () => {
 test('parsePlatformDate: MM-DD HH:MM', () => {
   const result = parsePlatformDate('12-01 15:30', { now: testNow });
   assert.ok(result);
-  assert.equal(result.date, '2026-12-01');
+  assert.equal(result.date, '2025-12-01');
   assert.equal(result.time, '15:30');
 });
 

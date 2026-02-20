@@ -132,6 +132,9 @@ export function parsePlatformDate(
     const timeMatch = trimmed.match(/(\d{1,2}):(\d{2})/);
     if (timeMatch) {
       result.setHours(parseInt(timeMatch[1], 10), parseInt(timeMatch[2], 10), 0, 0);
+      if (result.getTime() > currentDate.getTime()) {
+        result.setFullYear(currentYear - 1);
+      }
       return {
         date: formatDate(result),
         time: formatTime(result),
@@ -146,7 +149,7 @@ export function parsePlatformDate(
     };
   }
   
- // "01-15" / "1月15日" (this year)
+ // "01-15" / "1月15日" (this year, fallback to previous year when parsed date is in future)
  const monthDayMatch = trimmed.match(/(\d{1,2})[-月](\d{1,2})日?/);
  if (monthDayMatch && !trimmed.includes('年')) {
     const month = parseInt(monthDayMatch[1], 10);
@@ -157,11 +160,17 @@ export function parsePlatformDate(
     const timeMatch = trimmed.match(/(\d{1,2}):(\d{2})/);
     if (timeMatch) {
       result.setHours(parseInt(timeMatch[1], 10), parseInt(timeMatch[2], 10), 0, 0);
+      if (result.getTime() > currentDate.getTime()) {
+        result.setFullYear(currentYear - 1);
+      }
       return {
         date: formatDate(result),
         time: formatTime(result),
         fullText: formatDateTime(result)
       };
+    }
+    if (result.getTime() > currentDate.getTime()) {
+      result.setFullYear(currentYear - 1);
     }
     
    return {

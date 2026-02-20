@@ -179,6 +179,7 @@ export async function execute(input: PersistXhsNoteInput): Promise<PersistXhsNot
     const detailPath = path.join(postDir, 'content.md');
     const commentsPath = path.join(postDir, 'comments.md');
     const commentsDonePath = path.join(postDir, 'comments.done.json');
+    const persistTs = getCurrentTimestamp();
 
     // 1) 详情（正文/图片）
     if (wantDetail) {
@@ -224,8 +225,8 @@ export async function execute(input: PersistXhsNoteInput): Promise<PersistXhsNot
         if (searchUrl) lines.push(`- Search URL: ${searchUrl}`);
         if (detailUrl) lines.push(`- 链接: ${detailUrl}`);
         if (author) lines.push(`- 作者: ${author}`);
-        lines.push(`- 采集时间: ${getCurrentTimestamp().collectedAt}`);
-        lines.push(`- 采集时间(本地): ${getCurrentTimestamp().collectedAtLocal}`);
+        lines.push(`- 采集时间: ${persistTs.collectedAt}`);
+        lines.push(`- 采集时间(本地): ${persistTs.collectedAtLocal}`);
         lines.push('');
         lines.push('## 正文');
         lines.push('');
@@ -278,8 +279,8 @@ export async function execute(input: PersistXhsNoteInput): Promise<PersistXhsNot
         lines.push(`- 关键词: ${keyword || '未知'}`);
         if (searchUrl) lines.push(`- Search URL: ${searchUrl}`);
         if (detailUrl) lines.push(`- 链接: ${detailUrl}`);
-        lines.push(`- 采集时间: ${getCurrentTimestamp().collectedAt}`);
-        lines.push(`- 采集时间(本地): ${getCurrentTimestamp().collectedAtLocal}`);
+        lines.push(`- 采集时间: ${persistTs.collectedAt}`);
+        lines.push(`- 采集时间(本地): ${persistTs.collectedAtLocal}`);
         lines.push(
           `- 评论统计: 抓取=${comments.length}, header=${
             headerTotal !== null ? headerTotal : '未知'
@@ -332,7 +333,7 @@ export async function execute(input: PersistXhsNoteInput): Promise<PersistXhsNot
               stoppedByMaxComments: Boolean(commentsResult?.stoppedByMaxComments),
               totalComments: comments.length,
               headerTotal,
-              ts: new Date().toISOString(),
+              ts: persistTs.collectedAt,
             },
             null,
             2,
