@@ -206,6 +206,7 @@ async function runFullCover(endpoint) {
     steps: [],
     controls: {
       setup: [],
+      tasks: [],
       config: [],
       dashboard: [],
       scheduler: [],
@@ -269,17 +270,22 @@ async function runFullCover(endpoint) {
   };
 
   const runProbe = async (bucket, selector, extra = {}, options = {}) => {
+    if (!report.controls[bucket]) {
+      console.error('runProbe: invalid bucket', bucket, 'available:', Object.keys(report.controls));
+    }
     const probe = await runAction(`probe:${selector || 'body'}`, { action: 'probe', selector, ...extra }, { optional: options.optional === true });
     const hasText = typeof extra?.text === 'string' && extra.text.trim().length > 0;
     const exists = Boolean(probe?.exists || (probe?.count || 0) > 0);
     const textMatched = hasText ? Number(probe?.textMatchedCount || 0) > 0 : true;
     const ok = exists && textMatched;
+    if (report.controls[bucket]) {
     report.controls[bucket].push({
       selector: selector || 'body',
       text: hasText ? String(extra.text).trim() : '',
       ok,
       probe,
     });
+    }
     if (!ok && options.optional !== true) {
       throw new Error(`probe_failed:${bucket}:${selector || 'body'}${hasText ? ':text_not_matched' : ''}`);
     }

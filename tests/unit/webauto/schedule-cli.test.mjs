@@ -131,6 +131,34 @@ describe('schedule cli', () => {
     assert.equal(fs.existsSync(exportPath), true);
   });
 
+  it('supports importing BOM-encoded json file on windows/mac/linux', () => {
+    const root = newRoot();
+    const filePath = path.join(root, 'imports', 'bom-schedules.json');
+    const payload = {
+      tasks: [
+        {
+          id: 'sched-bom-1',
+          name: 'bom-task',
+          scheduleType: 'interval',
+          intervalMinutes: 15,
+          commandType: 'xhs-unified',
+          commandArgv: { profile: 'p-bom', keyword: 'bom' },
+        },
+      ],
+    };
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
+    fs.writeFileSync(filePath, `\uFEFF${JSON.stringify(payload, null, 2)}`, 'utf8');
+
+    const imported = runSchedule(['import', '--file', filePath, '--mode', 'merge', '--json'], root);
+    assert.equal(imported.ok, true);
+    assert.equal(imported.count, 1);
+
+    const listed = runSchedule(['list', '--json'], root);
+    assert.equal(listed.ok, true);
+    assert.equal(listed.count, 1);
+    assert.equal(listed.tasks[0].id, 'sched-bom-1');
+  });
+
   it('supports help output', () => {
     const root = newRoot();
     const ret = runScheduleRaw(['--help'], root);

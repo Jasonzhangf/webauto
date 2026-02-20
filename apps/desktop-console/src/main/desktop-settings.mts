@@ -1,4 +1,4 @@
-import { promises as fs } from 'node:fs';
+import { existsSync, promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -75,9 +75,34 @@ export function resolveLegacySettingsPath() {
   return path.join(resolveHomeDir(), '.webauto', 'ui-settings.console.json');
 }
 
-export function resolveDefaultDownloadRoot() {
-  if (process.platform === 'win32') return 'D:\\webauto';
-  return path.join(resolveHomeDir(), '.webauto', 'download');
+function hasWindowsDriveD(): boolean {
+  try {
+    return existsSync('D:\\');
+  } catch {
+    return false;
+  }
+}
+
+function normalizeWindowsDefaultRoot(input: string): string {
+  const value = String(input || '').trim();
+  if (!value) return path.join(resolveHomeDir(), '.webauto');
+  if (!/^[dD]:[\\/]/.test(value)) return value;
+  if (hasWindowsDriveD()) return value;
+  return path.join(resolveHomeDir(), '.webauto');
+}
+
+export function resolveDefaultDownloadRoot(options?: {
+  platform?: string;
+  windowsDriveDExists?: boolean;
+  homeDir?: string;
+}) {
+  const platform = String(options?.platform || process.platform).trim();
+  const homeDir = String(options?.homeDir || resolveHomeDir()).trim() || resolveHomeDir();
+  if (platform !== 'win32') return path.join(homeDir, '.webauto', 'download');
+  const driveExists = typeof options?.windowsDriveDExists === 'boolean'
+    ? options.windowsDriveDExists
+    : hasWindowsDriveD();
+  return driveExists ? 'D:\\webauto' : path.join(homeDir, '.webauto');
 }
 
 function normalizeAiReplyConfig(raw: any): AiReplyConfig {
@@ -222,7 +247,7 @@ async function readDefaultSettingsFromAppRoot(appRoot: string): Promise<DesktopC
     timeouts: raw.timeouts as any,
   };
 
-  const downloadRoot =
+  const downloadRootRaw =
     typeof (raw as any).downloadRoot === 'string'
       ? String((raw as any).downloadRoot)
       : process.platform === 'win32' && typeof raw.downloadRootWindows === 'string'
@@ -232,6 +257,10 @@ async function readDefaultSettingsFromAppRoot(appRoot: string): Promise<DesktopC
       : Array.isArray(raw.downloadRootParts)
         ? path.join(resolveHomeDir(), ...raw.downloadRootParts.map((x) => String(x)))
         : resolveDefaultDownloadRoot();
+  const downloadRoot =
+    process.platform === 'win32'
+      ? normalizeWindowsDefaultRoot(downloadRootRaw)
+      : downloadRootRaw;
 
   return normalizeSettings({ ...base, downloadRoot }, {});
 }

@@ -53,6 +53,14 @@ Options:
 function resolveDownloadRoot() {
   const fromEnv = String(process.env.WEBAUTO_DOWNLOAD_ROOT || process.env.WEBAUTO_DOWNLOAD_DIR || '').trim();
   if (fromEnv) return path.resolve(fromEnv);
+  if (process.platform === 'win32') {
+    try {
+      if (existsSync('D:\\')) return 'D:\\webauto';
+    } catch {
+      // ignore
+    }
+    return path.join(os.homedir(), '.webauto');
+  }
   return path.join(os.homedir(), '.webauto', 'download');
 }
 

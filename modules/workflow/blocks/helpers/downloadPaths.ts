@@ -1,5 +1,6 @@
 import os from 'node:os';
 import path from 'node:path';
+import { existsSync } from 'node:fs';
 
 export interface DownloadPathInput {
   platform: string;
@@ -16,6 +17,21 @@ export function sanitizeForPath(name: string): string {
 
 export function resolveDownloadRoot(custom?: string, homeDir?: string): string {
   if (custom && custom.trim()) return custom;
+  if (process.platform === 'win32') {
+    try {
+      if (existsSync('D:\\')) return 'D:\\webauto';
+    } catch {
+      // ignore
+    }
+    if (homeDir && homeDir.trim()) return path.join(homeDir, '.webauto');
+    const envHome = process.env.HOME || process.env.USERPROFILE;
+    if (envHome && envHome.trim()) return path.join(envHome, '.webauto');
+    try {
+      return path.join(os.homedir(), '.webauto');
+    } catch {
+      return path.join(process.cwd(), '.webauto');
+    }
+  }
   if (homeDir && homeDir.trim()) return path.join(homeDir, '.webauto', 'download');
   const envHome = process.env.HOME || process.env.USERPROFILE;
   if (envHome && envHome.trim()) return path.join(envHome, '.webauto', 'download');

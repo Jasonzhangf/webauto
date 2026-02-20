@@ -22,7 +22,8 @@ function nowIso() {
 
 function readJson(filePath, fallback) {
   try {
-    return JSON.parse(fs.readFileSync(filePath, 'utf8'));
+    const raw = fs.readFileSync(filePath, 'utf8');
+    return JSON.parse(String(raw).replace(/^\uFEFF/, ''));
   } catch {
     return fallback;
   }

@@ -121,6 +121,15 @@ function resolveDownloadRoot(customRoot = '') {
   if (fromArg) return path.resolve(fromArg);
   const fromEnv = String(process.env.WEBAUTO_DOWNLOAD_ROOT || process.env.WEBAUTO_DOWNLOAD_DIR || '').trim();
   if (fromEnv) return path.resolve(fromEnv);
+  if (process.platform === 'win32') {
+    try {
+      if (fs.existsSync('D:\\')) return 'D:\\webauto';
+    } catch {
+      // ignore
+    }
+    const home = process.env.HOME || process.env.USERPROFILE || os.homedir();
+    return path.join(home, '.webauto');
+  }
   const home = process.env.HOME || process.env.USERPROFILE || os.homedir();
   return path.join(home, '.webauto', 'download');
 }

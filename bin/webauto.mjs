@@ -59,10 +59,9 @@ function wrapWindowsRunner(cmdPath, prefix = []) {
     };
   }
   if (lower.endsWith('.cmd') || lower.endsWith('.bat')) {
-    const useCmd = /\s/u.test(cmdPath) ? path.basename(cmdPath) : cmdPath;
     return {
       cmd: 'cmd.exe',
-      prefix: ['/d', '/s', '/c', useCmd, ...prefix],
+      prefix: ['/d', '/s', '/c', cmdPath, ...prefix],
     };
   }
   return { cmd: cmdPath, prefix };

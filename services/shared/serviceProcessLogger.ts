@@ -32,7 +32,7 @@ function ensureLogDir(): string {
 
 function safeAppend(filePath: string, line: string): void {
   try {
-    fs.appendFileSync(filePath, line);
+    fs.appendFileSync(filePath, line, 'utf8');
   } catch {
     // ignore
   }

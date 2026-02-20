@@ -53,7 +53,7 @@ export function logDebug(module: string, event: string, data: Record<string, any
     data,
   };
   try {
-    fs.appendFileSync(DEBUG_LOG_FILE, `${JSON.stringify(entry)}\n`);
+    fs.appendFileSync(DEBUG_LOG_FILE, `${JSON.stringify(entry)}\n`, 'utf8');
   } catch {
     // ignore
   }

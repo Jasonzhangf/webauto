@@ -42,7 +42,8 @@ function parsePositiveInt(value, fallback) {
 
 function parseJson(text, fallback = {}) {
   if (text === undefined || text === null || text === '') return fallback;
-  return JSON.parse(String(text));
+  const raw = String(text);
+  return JSON.parse(raw.replace(/^\uFEFF/, ''));
 }
 
 function safeReadJsonFile(filePath) {

@@ -1,5 +1,6 @@
 import os from 'node:os';
 import path from 'node:path';
+import { existsSync } from 'node:fs';
 
 export function resolveHomeDir(): string {
   const fromEnv = process.platform === 'win32' ? process.env.USERPROFILE : process.env.HOME;
@@ -11,6 +12,14 @@ export function resolveHomeDir(): string {
 export function resolveDownloadRoot(): string {
   const custom = String(process.env.WEBAUTO_DOWNLOAD_ROOT || process.env.WEBAUTO_DOWNLOAD_DIR || '').trim();
   if (custom) return custom;
+  if (process.platform === 'win32') {
+    try {
+      if (existsSync('D:\\')) return 'D:\\webauto';
+    } catch {
+      // ignore
+    }
+    return path.join(resolveHomeDir(), '.webauto');
+  }
   return path.join(resolveHomeDir(), '.webauto', 'download');
 }
 
@@ -29,4 +38,3 @@ export function resolvePlatformEnvKeywordDir(input: {
   if (!keyword) throw new Error('keyword 不能为空');
   return path.join(downloadRoot, platform, env, keyword);
 }
-

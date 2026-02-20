@@ -135,3 +135,20 @@ test('default path helpers return deterministic paths', () => {
   assert.equal(exportPath.includes('Downloads'), true);
   assert.equal(exportPath.includes('webauto-test-'), true);
 });
+
+test('resolveDefaultDownloadRoot uses D:\\webauto on windows and falls back when D is missing', () => {
+  const home = path.join(tempRoot, 'fallback-home');
+  const winWithD = resolveDefaultDownloadRoot({
+    platform: 'win32',
+    windowsDriveDExists: true,
+    homeDir: home,
+  });
+  assert.equal(winWithD, 'D:\\webauto');
+
+  const winWithoutD = resolveDefaultDownloadRoot({
+    platform: 'win32',
+    windowsDriveDExists: false,
+    homeDir: home,
+  });
+  assert.equal(winWithoutD, path.join(home, '.webauto'));
+});
