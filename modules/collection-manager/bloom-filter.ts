@@ -9,7 +9,7 @@ export class BloomFilter {
   private hashCount: number;
   private count: number = 0;
 
-  constructor(expectedItems: number = 100000, falsePositiveRate: number = 0.01) {
+  constructor(expectedItems: number = 500000, falsePositiveRate: number = 0.001) {
     // Calculate optimal size and hash count
     this.size = Math.ceil(-expectedItems * Math.log(falsePositiveRate) / Math.pow(Math.LN2, 2));
     this.hashCount = Math.ceil((this.size / expectedItems) * Math.LN2);
@@ -56,7 +56,12 @@ export class BloomFilter {
    * Export to base64 string for persistence
    */
   export(): string {
-    const buffer = Buffer.from(this.bitmap);
+    // Header: hashCount (4), count (4), size (4) = 12 bytes
+    const header = Buffer.alloc(12);
+    header.writeUInt32LE(this.hashCount, 0);
+    header.writeUInt32LE(this.count, 4);
+    header.writeUInt32LE(this.size, 8);
+    const buffer = Buffer.concat([header, Buffer.from(this.bitmap)]);
     return buffer.toString('base64');
   }
 
@@ -64,9 +69,20 @@ export class BloomFilter {
    * Import from base64 string
    */
   static import(base64: string, expectedItems: number = 100000): BloomFilter {
-    const filter = new BloomFilter(expectedItems);
     const buffer = Buffer.from(base64, 'base64');
-    filter.bitmap = new Uint8Array(buffer);
+    
+    // Read header (12 bytes)
+    const hashCount = buffer.readUInt32LE(0);
+    const count = buffer.readUInt32LE(4);
+    const size = buffer.readUInt32LE(8);
+    const bitmapBuffer = buffer.slice(12);
+    
+    const filter = Object.create(BloomFilter.prototype);
+    filter.bitmap = new Uint8Array(bitmapBuffer);
+    filter.size = size;
+    filter.hashCount = hashCount;
+    filter.count = count;
+    
     return filter;
   }
 

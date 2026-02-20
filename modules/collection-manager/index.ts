@@ -95,18 +95,21 @@ export class CollectionDataManager {
       this.meta = existingMeta;
       this.meta.updatedAt = new Date().toISOString();
       
-      // Load existing posts into bloom filter
-      const posts = await this.storage.readPosts();
-      for (const post of posts) {
-        this.bloomFilter.add(post.id);
-      }
-      
-      // Load existing bloom filter state if available
+      // Load existing bloom filter state if available; fallback to rebuild from posts.
+      let loadedFromMeta = false;
       if (existingMeta.bloomFilter) {
         try {
           this.bloomFilter = BloomFilter.import(existingMeta.bloomFilter, 500000);
+          loadedFromMeta = true;
         } catch {
-          // Ignore if bloom filter is corrupted
+          loadedFromMeta = false;
+        }
+      }
+
+      if (!loadedFromMeta) {
+        const posts = await this.storage.readPosts();
+        for (const post of posts) {
+          this.bloomFilter.add(post.id);
         }
       }
       
