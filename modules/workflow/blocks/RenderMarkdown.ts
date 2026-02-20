@@ -39,7 +39,9 @@ export async function execute(input: RenderMarkdownInput): Promise<RenderMarkdow
 
   const lines: string[] = [];
   lines.push(`# 微博采集结果`);
-  lines.push(`采集时间: ${new Date().toISOString()}`);
+  const ts = getCurrentTimestamp();
+  lines.push(`采集时间: ${ts.collectedAt}`);
+  lines.push(`采集时间(本地): ${ts.collectedAtLocal}`);
   lines.push(`总计: ${posts.length} 条`);
   lines.push('');
 
@@ -70,3 +72,4 @@ export async function execute(input: RenderMarkdownInput): Promise<RenderMarkdow
     count: posts.length
   };
 }
+import { getCurrentTimestamp } from '../../collection-manager/date-utils.js';

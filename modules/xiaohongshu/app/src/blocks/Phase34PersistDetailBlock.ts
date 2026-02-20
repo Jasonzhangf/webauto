@@ -8,6 +8,7 @@
  */
 
 import { promises as fs } from 'node:fs';
+import { getCurrentTimestamp } from '../../../../collection-manager/date-utils.js';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -122,6 +123,9 @@ export async function execute(input: PersistDetailInput): Promise<PersistDetailO
     lines.push(`- **Note ID**: ${noteId}`);
     lines.push(`- **作者**: ${detail.authorName || '未知'} (${detail.authorId || 'N/A'})`);
     lines.push(`- **发布时间**: ${detail.publishTime || '未知'}`);
+    const ts = getCurrentTimestamp();
+    lines.push(`- **采集时间**: ${ts.collectedAt}`);
+    lines.push(`- **采集时间(本地)**: ${ts.collectedAtLocal}`);
     lines.push(`- **原始链接**: \`https://www.xiaohongshu.com/explore/${noteId}\``);
     lines.push('');
     lines.push(`## 正文`);

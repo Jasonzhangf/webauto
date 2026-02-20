@@ -10,6 +10,7 @@
 import os from 'node:os';
 import path from 'node:path';
 import { promises as fs } from 'node:fs';
+import { getCurrentTimestamp } from '../../collection-manager/date-utils.js';
 
 export interface PersistXhsNoteInput {
   sessionId: string;
@@ -223,7 +224,8 @@ export async function execute(input: PersistXhsNoteInput): Promise<PersistXhsNot
         if (searchUrl) lines.push(`- Search URL: ${searchUrl}`);
         if (detailUrl) lines.push(`- 链接: ${detailUrl}`);
         if (author) lines.push(`- 作者: ${author}`);
-        lines.push(`- 采集时间: ${new Date().toISOString()}`);
+        lines.push(`- 采集时间: ${getCurrentTimestamp().collectedAt}`);
+        lines.push(`- 采集时间(本地): ${getCurrentTimestamp().collectedAtLocal}`);
         lines.push('');
         lines.push('## 正文');
         lines.push('');
@@ -276,7 +278,8 @@ export async function execute(input: PersistXhsNoteInput): Promise<PersistXhsNot
         lines.push(`- 关键词: ${keyword || '未知'}`);
         if (searchUrl) lines.push(`- Search URL: ${searchUrl}`);
         if (detailUrl) lines.push(`- 链接: ${detailUrl}`);
-        lines.push(`- 采集时间: ${new Date().toISOString()}`);
+        lines.push(`- 采集时间: ${getCurrentTimestamp().collectedAt}`);
+        lines.push(`- 采集时间(本地): ${getCurrentTimestamp().collectedAtLocal}`);
         lines.push(
           `- 评论统计: 抓取=${comments.length}, header=${
             headerTotal !== null ? headerTotal : '未知'
