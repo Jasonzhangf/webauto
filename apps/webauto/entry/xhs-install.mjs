@@ -4,19 +4,72 @@ import { spawnSync } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
 import { existsSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 
 function run(cmd, args) {
-  return spawnSync(cmd, args, { encoding: 'utf8' });
+  const lower = String(cmd || '').toLowerCase();
+  const spawnOptions = {
+    encoding: 'utf8',
+    windowsHide: true,
+    timeout: 120000,
+  };
+  if (process.platform === 'win32' && (lower.endsWith('.cmd') || lower.endsWith('.bat'))) {
+    const cmdLine = [quoteCmdArg(cmd), ...args.map(quoteCmdArg)].join(' ');
+    return spawnSync('cmd.exe', ['/d', '/s', '/c', cmdLine], spawnOptions);
+  }
+  if (process.platform === 'win32' && lower.endsWith('.ps1')) {
+    return spawnSync(
+      'powershell.exe',
+      ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', cmd, ...args],
+      spawnOptions,
+    );
+  }
+  return spawnSync(cmd, args, spawnOptions);
 }
 
-function resolveNpxBin() {
-  return process.platform === 'win32' ? 'npx.cmd' : 'npx';
+function quoteCmdArg(value) {
+  if (!value) return '""';
+  if (!/[\s"]/u.test(value)) return value;
+  return `"${String(value).replace(/"/g, '""')}"`;
+}
+
+function resolveOnPath(candidates, pathEnv = process.env.PATH || process.env.Path || '', delimiter = path.delimiter) {
+  const dirs = String(pathEnv)
+    .split(delimiter)
+    .map((x) => x.trim())
+    .filter(Boolean);
+  for (const dir of dirs) {
+    for (const name of candidates) {
+      const full = path.join(dir, name);
+      if (existsSync(full)) return full;
+    }
+  }
+  return null;
+}
+
+function resolveNpxBin(platform = process.platform, pathEnv = process.env.PATH || process.env.Path || '') {
+  if (platform !== 'win32') return 'npx';
+  const resolved = resolveOnPath(
+    ['npx.cmd', 'npx.exe', 'npx.bat', 'npx.ps1'],
+    pathEnv,
+    ';',
+  );
+  return resolved || 'npx.cmd';
 }
 
 function checkCamoufoxInstalled() {
-  const cmd = process.platform === 'win32' ? 'python' : 'python3';
-  const ret = run(cmd, ['-m', 'camoufox', 'path']);
-  return ret.status === 0;
+  const candidates =
+    process.platform === 'win32'
+      ? [
+          { cmd: 'python', args: ['-m', 'camoufox', 'path'] },
+          { cmd: 'py', args: ['-3', '-m', 'camoufox', 'path'] },
+        ]
+      : [{ cmd: 'python3', args: ['-m', 'camoufox', 'path'] }];
+  for (const candidate of candidates) {
+    const ret = run(candidate.cmd, candidate.args);
+    if (ret.status === 0) return true;
+  }
+  return false;
 }
 
 function installCamoufox() {
@@ -90,7 +143,15 @@ async function main() {
   if (!ok) process.exit(1);
 }
 
-main().catch((err) => {
-  console.error(JSON.stringify({ ok: false, error: err?.message || String(err) }));
-  process.exit(1);
-});
+const isEntrypoint = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+if (isEntrypoint) {
+  main().catch((err) => {
+    console.error(JSON.stringify({ ok: false, error: err?.message || String(err) }));
+    process.exit(1);
+  });
+}
+
+export const __internals = {
+  resolveOnPath,
+  resolveNpxBin,
+};
