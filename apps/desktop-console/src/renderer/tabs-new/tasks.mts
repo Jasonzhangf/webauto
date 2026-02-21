@@ -24,7 +24,8 @@ type TaskFormData = {
   collectBody: boolean;
   doLikes: boolean;
   likeKeywords: string;
-  scheduleType: 'interval' | 'once' | 'daily' | 'weekly';
+  scheduleMode: 'immediate' | 'periodic' | 'scheduled';
+  periodicType: 'interval' | 'daily' | 'weekly';
   intervalMinutes: number;
   runAt: string | null;
   maxRuns: number | null;
@@ -45,7 +46,8 @@ const DEFAULT_FORM: TaskFormData = {
   collectBody: true,
   doLikes: false,
   likeKeywords: '',
-  scheduleType: 'once',
+  scheduleMode: 'immediate',
+  periodicType: 'interval',
   intervalMinutes: 30,
   runAt: null,
   maxRuns: null,
@@ -153,14 +155,20 @@ export function renderTasksPanel(root: HTMLElement, ctx: any) {
       <div style="font-size:12px; color:var(--text-secondary); margin-bottom:var(--gap-sm);">调度设置（可选）</div>
       <div class="row">
         <div>
-          <select id="task-schedule-type" style="width: 100px;">
-            <option value="once">一次性</option>
-            <option value="interval">循环间隔</option>
+          <select id="task-schedule-type" style="width: 140px;">
+            <option value="immediate">马上执行（仅一次）</option>
+            <option value="periodic">周期任务</option>
+            <option value="scheduled">定时任务</option>
+          </select>
+        </div>
+        <div id="task-periodic-type-wrap" style="display:none;">
+          <select id="task-periodic-type" style="width: 100px;">
+            <option value="interval">按间隔</option>
             <option value="daily">每天</option>
             <option value="weekly">每周</option>
           </select>
         </div>
-        <div id="task-interval-wrap">
+        <div id="task-interval-wrap" style="display:none;">
           <input id="task-interval" type="number" min="1" value="30" style="width: 70px;" />
           <span style="font-size:11px;color:var(--text-tertiary);">分钟</span>
         </div>
@@ -240,6 +248,8 @@ export function renderTasksPanel(root: HTMLElement, ctx: any) {
   const likesInput = formCard.querySelector('#task-likes') as HTMLInputElement;
   const likeKeywordsInput = formCard.querySelector('#task-like-keywords') as HTMLInputElement;
   const scheduleTypeSelect = formCard.querySelector('#task-schedule-type') as HTMLSelectElement;
+  const periodicTypeWrap = formCard.querySelector('#task-periodic-type-wrap') as HTMLDivElement;
+  const periodicTypeSelect = formCard.querySelector('#task-periodic-type') as HTMLSelectElement;
   const intervalInput = formCard.querySelector('#task-interval') as HTMLInputElement;
   const intervalWrap = formCard.querySelector('#task-interval-wrap') as HTMLDivElement;
   const runAtInput = formCard.querySelector('#task-runat') as HTMLInputElement;
@@ -309,11 +319,17 @@ export function renderTasksPanel(root: HTMLElement, ctx: any) {
   }
 
   function updateScheduleVisibility() {
-    const scheduleType = String(scheduleTypeSelect.value || 'interval').trim();
-    intervalWrap.style.display = scheduleType === 'interval' ? 'inline-flex' : 'none';
-    runAtWrap.style.display = scheduleType === 'once' || scheduleType === 'daily' || scheduleType === 'weekly'
-      ? 'inline-flex'
-      : 'none';
+    const mode = String(scheduleTypeSelect.value || 'immediate').trim();
+    const periodicType = String(periodicTypeSelect.value || 'interval').trim();
+    const periodic = mode === 'periodic';
+    const scheduled = mode === 'scheduled';
+    periodicTypeWrap.style.display = periodic ? 'inline-flex' : 'none';
+    intervalWrap.style.display = periodic && periodicType === 'interval' ? 'inline-flex' : 'none';
+    runAtWrap.style.display = scheduled || (periodic && periodicType !== 'interval') ? 'inline-flex' : 'none';
+    maxRunsInput.disabled = mode === 'immediate';
+    if (mode === 'immediate') {
+      maxRunsInput.value = '';
+    }
   }
 
   function updateLikeKeywordsState() {
@@ -323,7 +339,8 @@ export function renderTasksPanel(root: HTMLElement, ctx: any) {
   function collectFormData(): TaskFormData {
     const maxRunsRaw = String(maxRunsInput.value || '').trim();
     const maxRunsNum = maxRunsRaw ? Number(maxRunsRaw) : 0;
-    const scheduleType = scheduleTypeSelect.value as TaskFormData['scheduleType'];
+    const scheduleMode = scheduleTypeSelect.value as TaskFormData['scheduleMode'];
+    const periodicType = periodicTypeSelect.value as TaskFormData['periodicType'];
     const runAtText = String(runAtInput.value || '').trim();
     return {
       id: String(editingIdInput.value || '').trim() || undefined,
@@ -340,7 +357,8 @@ export function renderTasksPanel(root: HTMLElement, ctx: any) {
       collectBody: bodyInput.checked,
       doLikes: likesInput.checked,
       likeKeywords: String(likeKeywordsInput.value || '').trim(),
-      scheduleType,
+      scheduleMode,
+      periodicType,
       intervalMinutes: Math.max(1, Number(intervalInput.value || 30) || 30),
       runAt: toIsoOrNull(runAtText),
       maxRuns: Number.isFinite(maxRunsNum) && maxRunsNum > 0 ? Math.max(1, Math.floor(maxRunsNum)) : null,
@@ -365,7 +383,14 @@ export function renderTasksPanel(root: HTMLElement, ctx: any) {
     bodyInput.checked = task.commandArgv?.['fetch-body'] !== false;
     likesInput.checked = task.commandArgv?.['do-likes'] === true;
     likeKeywordsInput.value = String(task.commandArgv?.['like-keywords'] || '').trim();
-    scheduleTypeSelect.value = String(task.scheduleType || 'once') as TaskFormData['scheduleType'];
+    const rawScheduleType = String(task.scheduleType || 'once').trim();
+    if (rawScheduleType === 'interval' || rawScheduleType === 'daily' || rawScheduleType === 'weekly') {
+      scheduleTypeSelect.value = 'periodic';
+      periodicTypeSelect.value = rawScheduleType as TaskFormData['periodicType'];
+    } else {
+      scheduleTypeSelect.value = 'scheduled';
+      periodicTypeSelect.value = 'interval';
+    }
     intervalInput.value = String(task.intervalMinutes || 30);
     runAtInput.value = toLocalDatetimeValue(task.runAt);
     maxRunsInput.value = task.maxRuns ? String(task.maxRuns) : '';
@@ -389,7 +414,8 @@ export function renderTasksPanel(root: HTMLElement, ctx: any) {
     bodyInput.checked = DEFAULT_FORM.collectBody;
     likesInput.checked = DEFAULT_FORM.doLikes;
     likeKeywordsInput.value = DEFAULT_FORM.likeKeywords;
-    scheduleTypeSelect.value = DEFAULT_FORM.scheduleType;
+    scheduleTypeSelect.value = DEFAULT_FORM.scheduleMode;
+    periodicTypeSelect.value = DEFAULT_FORM.periodicType;
     intervalInput.value = String(DEFAULT_FORM.intervalMinutes);
     runAtInput.value = '';
     maxRunsInput.value = '';
@@ -555,16 +581,56 @@ export function renderTasksPanel(root: HTMLElement, ctx: any) {
     return argv;
   }
 
+  function resolveSchedule(data: TaskFormData): {
+    scheduleType: 'interval' | 'once' | 'daily' | 'weekly';
+    intervalMinutes: number;
+    runAt: string | null;
+    maxRuns: number | null;
+  } {
+    if (data.scheduleMode === 'immediate') {
+      return {
+        scheduleType: 'once',
+        intervalMinutes: data.intervalMinutes,
+        runAt: new Date().toISOString(),
+        maxRuns: 1,
+      };
+    }
+    if (data.scheduleMode === 'scheduled') {
+      return {
+        scheduleType: 'once',
+        intervalMinutes: data.intervalMinutes,
+        runAt: data.runAt,
+        maxRuns: 1,
+      };
+    }
+    const periodicType = data.periodicType;
+    if (periodicType === 'daily' || periodicType === 'weekly') {
+      return {
+        scheduleType: periodicType,
+        intervalMinutes: data.intervalMinutes,
+        runAt: data.runAt,
+        maxRuns: data.maxRuns,
+      };
+    }
+    return {
+      scheduleType: 'interval',
+      intervalMinutes: data.intervalMinutes,
+      runAt: null,
+      maxRuns: data.maxRuns,
+    };
+  }
+
   function toSchedulePayload(data: TaskFormData): Record<string, any> {
+    const schedule = resolveSchedule(data);
     return {
       id: data.id || '',
       name: data.name || '',
       enabled: data.enabled,
       commandType: data.taskType || 'xhs-unified',
-      scheduleType: data.scheduleType,
-      intervalMinutes: data.intervalMinutes,
-      runAt: data.runAt,
-      maxRuns: data.maxRuns,
+      scheduleType: schedule.scheduleType,
+      intervalMinutes: schedule.intervalMinutes,
+      runAt: schedule.runAt,
+      maxRuns: schedule.maxRuns,
       argv: buildCommandArgv(data),
     };
   }
@@ -709,6 +775,7 @@ export function renderTasksPanel(root: HTMLElement, ctx: any) {
   });
   taskTypeSelect.addEventListener('change', () => updatePlatformFields());
   scheduleTypeSelect.addEventListener('change', () => updateScheduleVisibility());
+  periodicTypeSelect.addEventListener('change', () => updateScheduleVisibility());
   likesInput.addEventListener('change', () => updateLikeKeywordsState());
   saveBtn.addEventListener('click', () => { void saveTask(false); });
   runBtn.addEventListener('click', () => { void saveTask(true); });

@@ -266,7 +266,7 @@ test('save and run uses schedule run and no direct spawn', async () => {
 
   keywordInput.value = '工作服';
   profileInput.value = 'xhs-1';
-  scheduleTypeSelect.value = 'interval';
+  scheduleTypeSelect.value = 'periodic';
   scheduleTypeSelect.dispatchEvent(new Event('change', { bubbles: true }));
   runBtn.click();
   await flush(8);

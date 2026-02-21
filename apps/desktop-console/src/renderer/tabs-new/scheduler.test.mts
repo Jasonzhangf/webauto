@@ -18,8 +18,9 @@ test('scheduler panel wires schedule cli operations and daemon controls', async 
   assert.match(src, /invokeSchedule\(\{ action: 'run-due', limit: 20, timeoutMs: 0 \}\)/);
   assert.match(src, /invokeSchedule\(\{ action: 'export' \}\)/);
   assert.match(src, /invokeSchedule\(\{ action: 'import', payloadJson: text, mode: 'merge' \}\)/);
-  assert.match(src, /<option value="daily">每天<\/option>/);
-  assert.match(src, /<option value="weekly">每周<\/option>/);
+  assert.match(src, /<option value="immediate">马上执行（仅一次）<\/option>/);
+  assert.match(src, /<option value="periodic">周期任务<\/option>/);
+  assert.match(src, /<option value="scheduled">定时任务<\/option>/);
   assert.match(src, /scheduleInvoke/);
   assert.match(src, /action: 'daemon-start'/);
   assert.match(src, /cmdKill\(\{ runId: daemonRunId \}\)/);

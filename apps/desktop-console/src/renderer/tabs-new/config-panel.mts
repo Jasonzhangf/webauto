@@ -90,15 +90,22 @@ export function renderConfigPanel(root: HTMLElement, ctx: any) {
       <div class="bento-title" style="font-size: 13px;">调度设置</div>
       <div class="row">
         <div>
-          <label>循环模式</label>
+          <label>任务类型</label>
           <select id="schedule-type-select" style="width: 140px;">
-            <option value="once">一次性</option>
-            <option value="interval">循环间隔</option>
+            <option value="immediate">马上执行（仅一次）</option>
+            <option value="periodic">周期任务</option>
+            <option value="scheduled">定时任务</option>
+          </select>
+        </div>
+        <div id="schedule-periodic-type-wrap" style="display:none;">
+          <label>周期类型</label>
+          <select id="schedule-periodic-type-select" style="width: 120px;">
+            <option value="interval">按间隔</option>
             <option value="daily">每天</option>
             <option value="weekly">每周</option>
           </select>
         </div>
-        <div id="schedule-interval-wrap">
+        <div id="schedule-interval-wrap" style="display:none;">
           <label>间隔分钟</label>
           <input id="schedule-interval-input" type="number" min="1" value="30" style="width: 120px;" />
         </div>
@@ -194,7 +201,7 @@ export function renderConfigPanel(root: HTMLElement, ctx: any) {
       </div>
       <div>
         <label>调度预览</label>
-        <div id="config-schedule-preview" class="muted">一次性（需设时间）</div>
+        <div id="config-schedule-preview" class="muted">马上执行（仅一次）</div>
       </div>
     </div>
     <div id="config-last-action" class="muted" style="margin-top: 6px; font-size: 12px;">最近操作：-</div>
@@ -227,6 +234,8 @@ export function renderConfigPanel(root: HTMLElement, ctx: any) {
   const envSelect = root.querySelector('#env-select') as HTMLSelectElement;
   const accountSelect = root.querySelector('#account-select') as HTMLSelectElement;
   const scheduleTypeSelect = root.querySelector('#schedule-type-select') as HTMLSelectElement;
+  const schedulePeriodicTypeWrap = root.querySelector('#schedule-periodic-type-wrap') as HTMLDivElement;
+  const schedulePeriodicTypeSelect = root.querySelector('#schedule-periodic-type-select') as HTMLSelectElement;
   const scheduleIntervalWrap = root.querySelector('#schedule-interval-wrap') as HTMLDivElement;
   const scheduleRunAtWrap = root.querySelector('#schedule-runat-wrap') as HTMLDivElement;
   const scheduleIntervalInput = root.querySelector('#schedule-interval-input') as HTMLInputElement;
@@ -268,16 +277,24 @@ export function renderConfigPanel(root: HTMLElement, ctx: any) {
   }
 
   function scheduleSummaryText() {
-    const mode = String(scheduleTypeSelect.value || 'once').trim();
+    const mode = String(scheduleTypeSelect.value || 'immediate').trim();
+    const periodicType = String(schedulePeriodicTypeSelect.value || 'interval').trim();
     const maxRunsRaw = scheduleMaxRunsInput.value.trim();
     const maxRuns = maxRunsRaw ? `，最多 ${Math.max(1, Number(maxRunsRaw) || 1)} 次` : '，不限次数';
-    if (mode === 'interval') {
+    if (mode === 'immediate') {
+      return '马上执行（仅一次）';
+    }
+    if (mode === 'periodic') {
+      if (periodicType === 'daily' || periodicType === 'weekly') {
+        const label = periodicType === 'daily' ? '每天' : '每周';
+        const runAtText = scheduleRunAtInput.value ? scheduleRunAtInput.value.replace('T', ' ') : '未设置时间';
+        return `${label}，${runAtText}${maxRuns}`;
+      }
       const interval = readNumber(scheduleIntervalInput, 30, 1);
       return `每 ${interval} 分钟${maxRuns}`;
     }
-    const modeLabel = mode === 'once' ? '一次性' : mode === 'daily' ? '每日' : '每周';
     const runAtText = scheduleRunAtInput.value ? scheduleRunAtInput.value.replace('T', ' ') : '未设置时间';
-    return `${modeLabel}，${runAtText}${maxRuns}`;
+    return `定时任务，${runAtText}`;
   }
 
   function renderConfigStatus() {
@@ -320,10 +337,17 @@ export function renderConfigPanel(root: HTMLElement, ctx: any) {
   }
 
   function updateScheduleFields() {
-    const mode = String(scheduleTypeSelect.value || 'interval');
-    const useRunAt = mode === 'once' || mode === 'daily' || mode === 'weekly';
-    scheduleRunAtWrap.style.display = useRunAt ? '' : 'none';
-    scheduleIntervalWrap.style.display = useRunAt ? 'none' : '';
+    const mode = String(scheduleTypeSelect.value || 'immediate');
+    const periodicType = String(schedulePeriodicTypeSelect.value || 'interval');
+    const periodic = mode === 'periodic';
+    const scheduled = mode === 'scheduled';
+    schedulePeriodicTypeWrap.style.display = periodic ? '' : 'none';
+    scheduleIntervalWrap.style.display = periodic && periodicType === 'interval' ? '' : 'none';
+    scheduleRunAtWrap.style.display = scheduled || (periodic && periodicType !== 'interval') ? '' : 'none';
+    scheduleMaxRunsInput.disabled = mode === 'immediate' || mode === 'scheduled';
+    if (mode === 'immediate' || mode === 'scheduled') {
+      scheduleMaxRunsInput.value = '';
+    }
     renderConfigStatus();
   }
 
@@ -380,8 +404,27 @@ export function renderConfigPanel(root: HTMLElement, ctx: any) {
   function buildSchedulePayload(withId: string): SchedulePayload {
     const maxRunsRaw = scheduleMaxRunsInput.value.trim();
     const maxRuns = maxRunsRaw ? Math.max(1, Number(maxRunsRaw) || 1) : null;
-    const scheduleType = String(scheduleTypeSelect.value || 'once') as ScheduleTask['scheduleType'];
+    const scheduleMode = String(scheduleTypeSelect.value || 'immediate').trim();
+    const periodicType = String(schedulePeriodicTypeSelect.value || 'interval').trim();
     const runAtValue = String(scheduleRunAtInput.value || '').trim();
+    let scheduleType: ScheduleTask['scheduleType'] = 'once';
+    let runAt = toIsoOrNull(runAtValue);
+    let normalizedMaxRuns: number | null = maxRuns;
+    if (scheduleMode === 'immediate') {
+      scheduleType = 'once';
+      runAt = new Date().toISOString();
+      normalizedMaxRuns = 1;
+    } else if (scheduleMode === 'periodic') {
+      if (periodicType === 'daily' || periodicType === 'weekly') {
+        scheduleType = periodicType;
+      } else {
+        scheduleType = 'interval';
+        runAt = null;
+      }
+    } else {
+      scheduleType = 'once';
+      normalizedMaxRuns = 1;
+    }
     const argv = {
       profile: accountSelect.value.trim(),
       keyword: keywordInput.value.trim(),
@@ -404,8 +447,8 @@ export function renderConfigPanel(root: HTMLElement, ctx: any) {
       commandType: 'xhs-unified',
       scheduleType,
       intervalMinutes: readNumber(scheduleIntervalInput, 30, 1),
-      runAt: toIsoOrNull(runAtValue),
-      maxRuns,
+      runAt,
+      maxRuns: normalizedMaxRuns,
       argv,
     };
   }
@@ -444,6 +487,16 @@ export function renderConfigPanel(root: HTMLElement, ctx: any) {
       taskNameInput.value = task.name || '';
       taskEnabledCb.checked = task.enabled !== false;
       scheduleTypeSelect.value = task.scheduleType;
+      if (task.scheduleType === 'interval') {
+        scheduleTypeSelect.value = 'periodic';
+        schedulePeriodicTypeSelect.value = 'interval';
+      } else if (task.scheduleType === 'daily' || task.scheduleType === 'weekly') {
+        scheduleTypeSelect.value = 'periodic';
+        schedulePeriodicTypeSelect.value = task.scheduleType;
+      } else {
+        scheduleTypeSelect.value = 'scheduled';
+        schedulePeriodicTypeSelect.value = 'interval';
+      }
       scheduleIntervalInput.value = String(task.intervalMinutes || 30);
       scheduleRunAtInput.value = toLocalDatetimeValue(task.runAt);
       scheduleMaxRunsInput.value = task.maxRuns ? String(task.maxRuns) : '';
@@ -515,7 +568,20 @@ export function renderConfigPanel(root: HTMLElement, ctx: any) {
         maxLikesInput.value = String(config.maxLikes ?? 0);
         headlessCb.checked = config.headless === true;
         dryRunCb.checked = config.dryRun === true;
-        scheduleTypeSelect.value = String(config.scheduleType || 'once');
+        const legacyScheduleType = String(config.scheduleType || 'immediate').trim();
+        if (legacyScheduleType === 'interval') {
+          scheduleTypeSelect.value = 'periodic';
+          schedulePeriodicTypeSelect.value = 'interval';
+        } else if (legacyScheduleType === 'daily' || legacyScheduleType === 'weekly') {
+          scheduleTypeSelect.value = 'periodic';
+          schedulePeriodicTypeSelect.value = legacyScheduleType;
+        } else if (legacyScheduleType === 'scheduled') {
+          scheduleTypeSelect.value = 'scheduled';
+          schedulePeriodicTypeSelect.value = 'interval';
+        } else {
+          scheduleTypeSelect.value = 'immediate';
+          schedulePeriodicTypeSelect.value = 'interval';
+        }
         scheduleIntervalInput.value = String(config.intervalMinutes || 30);
         scheduleRunAtInput.value = toLocalDatetimeValue(config.runAt || null);
         scheduleMaxRunsInput.value = config.maxRuns ? String(config.maxRuns) : '';
@@ -756,7 +822,20 @@ export function renderConfigPanel(root: HTMLElement, ctx: any) {
           maxLikesInput.value = String(config.maxLikes ?? 0);
           headlessCb.checked = config.headless === true;
           dryRunCb.checked = config.dryRun === true;
-          scheduleTypeSelect.value = String(config.scheduleType || 'once');
+          const legacyScheduleType = String(config.scheduleType || 'immediate').trim();
+          if (legacyScheduleType === 'interval') {
+            scheduleTypeSelect.value = 'periodic';
+            schedulePeriodicTypeSelect.value = 'interval';
+          } else if (legacyScheduleType === 'daily' || legacyScheduleType === 'weekly') {
+            scheduleTypeSelect.value = 'periodic';
+            schedulePeriodicTypeSelect.value = legacyScheduleType;
+          } else if (legacyScheduleType === 'scheduled') {
+            scheduleTypeSelect.value = 'scheduled';
+            schedulePeriodicTypeSelect.value = 'interval';
+          } else {
+            scheduleTypeSelect.value = 'immediate';
+            schedulePeriodicTypeSelect.value = 'interval';
+          }
           scheduleIntervalInput.value = String(config.intervalMinutes || 30);
           scheduleRunAtInput.value = toLocalDatetimeValue(config.runAt || null);
           scheduleMaxRunsInput.value = config.maxRuns ? String(config.maxRuns) : '';
@@ -788,6 +867,11 @@ export function renderConfigPanel(root: HTMLElement, ctx: any) {
     }
   });
   scheduleTypeSelect.addEventListener('change', () => {
+    updateScheduleFields();
+    markDirty();
+    queueDraftSave();
+  });
+  schedulePeriodicTypeSelect.addEventListener('change', () => {
     updateScheduleFields();
     markDirty();
     queueDraftSave();
@@ -856,7 +940,8 @@ export function renderConfigPanel(root: HTMLElement, ctx: any) {
     }
   });
 
-  scheduleTypeSelect.value = 'once';
+  scheduleTypeSelect.value = 'immediate';
+  schedulePeriodicTypeSelect.value = 'interval';
   scheduleRunAtInput.value = '';
   updateScheduleFields();
   updateLikeKeywordsState();

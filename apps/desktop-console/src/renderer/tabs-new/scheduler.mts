@@ -79,13 +79,20 @@ export function renderSchedulerPanel(root: HTMLElement, ctx: any) {
       <div>
         <label>调度类型</label>
         <select id="scheduler-type" style="width: 140px;">
-          <option value="once">一次性</option>
-          <option value="interval">循环间隔</option>
+          <option value="immediate">马上执行（仅一次）</option>
+          <option value="periodic">周期任务</option>
+          <option value="scheduled">定时任务</option>
+        </select>
+      </div>
+      <div id="scheduler-periodic-type-wrap" style="display:none;">
+        <label>周期类型</label>
+        <select id="scheduler-periodic-type" style="width: 120px;">
+          <option value="interval">按间隔</option>
           <option value="daily">每天</option>
           <option value="weekly">每周</option>
         </select>
       </div>
-      <div id="scheduler-interval-wrap">
+      <div id="scheduler-interval-wrap" style="display:none;">
         <label>间隔分钟</label>
         <input id="scheduler-interval" type="number" min="1" value="30" style="width: 120px;" />
       </div>
@@ -183,6 +190,8 @@ export function renderSchedulerPanel(root: HTMLElement, ctx: any) {
   const nameInput = root.querySelector('#scheduler-name') as HTMLInputElement;
   const enabledInput = root.querySelector('#scheduler-enabled') as HTMLInputElement;
   const typeSelect = root.querySelector('#scheduler-type') as HTMLSelectElement;
+  const periodicTypeWrap = root.querySelector('#scheduler-periodic-type-wrap') as HTMLDivElement;
+  const periodicTypeSelect = root.querySelector('#scheduler-periodic-type') as HTMLSelectElement;
   const intervalWrap = root.querySelector('#scheduler-interval-wrap') as HTMLDivElement;
   const runAtWrap = root.querySelector('#scheduler-runat-wrap') as HTMLDivElement;
   const intervalInput = root.querySelector('#scheduler-interval') as HTMLInputElement;
@@ -228,10 +237,17 @@ export function renderSchedulerPanel(root: HTMLElement, ctx: any) {
   }
 
   function updateTypeFields() {
-    const mode = typeSelect.value;
-    const useRunAt = mode === 'once' || mode === 'daily' || mode === 'weekly';
-    runAtWrap.style.display = useRunAt ? '' : 'none';
-    intervalWrap.style.display = useRunAt ? 'none' : '';
+    const mode = String(typeSelect.value || 'immediate').trim();
+    const periodicType = String(periodicTypeSelect.value || 'interval').trim();
+    const periodic = mode === 'periodic';
+    const scheduled = mode === 'scheduled';
+    periodicTypeWrap.style.display = periodic ? '' : 'none';
+    runAtWrap.style.display = scheduled || (periodic && periodicType !== 'interval') ? '' : 'none';
+    intervalWrap.style.display = periodic && periodicType === 'interval' ? '' : 'none';
+    maxRunsInput.disabled = mode === 'immediate' || mode === 'scheduled';
+    if (mode === 'immediate' || mode === 'scheduled') {
+      maxRunsInput.value = '';
+    }
   }
 
   function updateTaskTypeOptions() {
@@ -258,7 +274,8 @@ export function renderSchedulerPanel(root: HTMLElement, ctx: any) {
     editingIdInput.value = '';
     nameInput.value = '';
     enabledInput.checked = true;
-    typeSelect.value = 'once';
+    typeSelect.value = 'immediate';
+    periodicTypeSelect.value = 'interval';
     intervalInput.value = '30';
     runAtInput.value = '';
     maxRunsInput.value = '';
@@ -297,15 +314,35 @@ export function renderSchedulerPanel(root: HTMLElement, ctx: any) {
     if (commandType.startsWith('weibo')) {
       argv['user-id'] = userIdInput.value.trim();
     }
+    const mode = String(typeSelect.value || 'immediate').trim();
+    const periodicType = String(periodicTypeSelect.value || 'interval').trim();
+    let scheduleType: ScheduleTask['scheduleType'] = 'once';
+    let runAt = toIsoOrNull(runAtInput.value);
+    let maxRunsFinal = maxRuns;
+    if (mode === 'immediate') {
+      scheduleType = 'once';
+      runAt = new Date().toISOString();
+      maxRunsFinal = 1;
+    } else if (mode === 'periodic') {
+      if (periodicType === 'daily' || periodicType === 'weekly') {
+        scheduleType = periodicType;
+      } else {
+        scheduleType = 'interval';
+        runAt = null;
+      }
+    } else {
+      scheduleType = 'once';
+      maxRunsFinal = 1;
+    }
     return {
       id: editingIdInput.value.trim(),
       name: nameInput.value.trim(),
       enabled: enabledInput.checked,
       commandType,
-      scheduleType: typeSelect.value as ScheduleTask['scheduleType'],
+      scheduleType,
       intervalMinutes: Number(intervalInput.value || 30) || 30,
-      runAt: toIsoOrNull(runAtInput.value),
-      maxRuns,
+      runAt,
+      maxRuns: maxRunsFinal,
       argv,
     };
   }
@@ -319,7 +356,16 @@ export function renderSchedulerPanel(root: HTMLElement, ctx: any) {
     editingIdInput.value = task.id;
     nameInput.value = task.name || '';
     enabledInput.checked = task.enabled !== false;
-    typeSelect.value = task.scheduleType;
+    if (task.scheduleType === 'interval') {
+      typeSelect.value = 'periodic';
+      periodicTypeSelect.value = 'interval';
+    } else if (task.scheduleType === 'daily' || task.scheduleType === 'weekly') {
+      typeSelect.value = 'periodic';
+      periodicTypeSelect.value = task.scheduleType;
+    } else {
+      typeSelect.value = 'scheduled';
+      periodicTypeSelect.value = 'interval';
+    }
     intervalInput.value = String(task.intervalMinutes || 30);
     runAtInput.value = toLocalDatetimeValue(task.runAt);
     maxRunsInput.value = task.maxRuns ? String(task.maxRuns) : '';
@@ -384,12 +430,12 @@ export function renderSchedulerPanel(root: HTMLElement, ctx: any) {
         style: 'border:1px solid var(--border); border-radius:10px; padding:10px; margin-bottom:10px; background: var(--panel-soft);',
       });
       const scheduleText = task.scheduleType === 'once'
-        ? `once @ ${task.runAt || '-'}`
+        ? `定时任务 @ ${task.runAt || '-'}`
         : task.scheduleType === 'daily'
-          ? `daily @ ${task.runAt || '-'}`
+          ? `周期任务(日) @ ${task.runAt || '-'}`
           : task.scheduleType === 'weekly'
-            ? `weekly @ ${task.runAt || '-'}`
-            : `interval ${task.intervalMinutes}m`;
+            ? `周期任务(周) @ ${task.runAt || '-'}`
+            : `周期任务(间隔 ${task.intervalMinutes}m)`;
       const statusText = task.lastStatus
         ? `${task.lastStatus} / run=${task.runCount} / fail=${task.failCount}`
         : 'never run';
@@ -631,6 +677,7 @@ export function renderSchedulerPanel(root: HTMLElement, ctx: any) {
   taskTypeSelect.addEventListener('change', updatePlatformFields);
 
   typeSelect.addEventListener('change', updateTypeFields);
+  periodicTypeSelect.addEventListener('change', updateTypeFields);
   saveBtn.onclick = () => void saveTask();
   runNowBtn.onclick = () => void runNowFromForm();
   resetBtn.onclick = () => resetForm();

@@ -246,6 +246,7 @@ test('config panel defaults to latest task and supports update/save-as-new/run',
   const targetInput = root.querySelector('#target-input') as HTMLInputElement;
   const accountSelect = root.querySelector('#account-select') as HTMLSelectElement;
   const scheduleTypeSelect = root.querySelector('#schedule-type-select') as HTMLSelectElement;
+  const periodicTypeSelect = root.querySelector('#schedule-periodic-type-select') as HTMLSelectElement;
   const scheduleRunAtWrap = root.querySelector('#schedule-runat-wrap') as HTMLDivElement;
   const scheduleMaxRunsInput = root.querySelector('#schedule-max-runs-input') as HTMLInputElement;
   const saveCurrentBtn = root.querySelector('#save-current-btn') as HTMLButtonElement;
@@ -259,7 +260,8 @@ test('config panel defaults to latest task and supports update/save-as-new/run',
   assert.equal(keywordInput.value, 'new');
   assert.equal(targetInput.value, '66');
   assert.equal(accountSelect.value, 'xhs-1');
-  assert.equal(scheduleTypeSelect.value, 'daily');
+  assert.equal(scheduleTypeSelect.value, 'periodic');
+  assert.equal(periodicTypeSelect.value, 'daily');
   assert.equal(scheduleRunAtWrap.style.display === 'none', false);
   assert.equal(scheduleMaxRunsInput.value, '9');
   assert.equal(configIdText.textContent, 'sched-0002');
@@ -293,7 +295,7 @@ test('config panel defaults to latest task and supports update/save-as-new/run',
   assert.equal(bundle.calls.logs.some((line) => line.includes('schedule run task=')), true);
 });
 
-test('config panel validates runAt for daily/weekly schedules', async () => {
+test('config panel validates runAt for scheduled task', async () => {
   const bundle = createMockCtx([]);
   const root = document.createElement('div');
   renderConfigPanel(root, bundle.ctx);
@@ -307,13 +309,13 @@ test('config panel validates runAt for daily/weekly schedules', async () => {
 
   keywordInput.value = '春晚';
   accountSelect.value = 'xhs-0';
-  scheduleTypeSelect.value = 'daily';
+  scheduleTypeSelect.value = 'scheduled';
   scheduleTypeSelect.dispatchEvent(new Event('change', { bubbles: true }));
   scheduleRunAtInput.value = '';
   saveCurrentBtn.click();
   await flush(3);
 
-  assert.equal(alerts.some((item) => item.includes('daily 任务需要锚点时间')), true);
+  assert.equal(alerts.some((item) => item.includes('once 任务需要锚点时间')), true);
 });
 
 test('config panel supports immediate run without save and without schedule runAt', async () => {
@@ -330,7 +332,7 @@ test('config panel supports immediate run without save and without schedule runA
 
   keywordInput.value = '春晚';
   accountSelect.value = 'xhs-0';
-  scheduleTypeSelect.value = 'once';
+  scheduleTypeSelect.value = 'immediate';
   scheduleTypeSelect.dispatchEvent(new Event('change', { bubbles: true }));
   scheduleRunAtInput.value = '';
 

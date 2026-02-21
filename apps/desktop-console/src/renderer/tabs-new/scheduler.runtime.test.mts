@@ -310,6 +310,7 @@ test('scheduler panel supports validate + add/update/delete/import + daemon life
   const keywordInput = root.querySelector('#scheduler-keyword') as HTMLInputElement;
   const runAtInput = root.querySelector('#scheduler-runat') as HTMLInputElement;
   const typeSelect = root.querySelector('#scheduler-type') as HTMLSelectElement;
+  const periodicTypeSelect = root.querySelector('#scheduler-periodic-type') as HTMLSelectElement;
   const maxNotesInput = root.querySelector('#scheduler-max-notes') as HTMLInputElement;
   const openConfigBtn = root.querySelector('#scheduler-open-config-btn') as HTMLButtonElement;
   const activeTaskText = root.querySelector('#scheduler-active-task-id') as HTMLElement;
@@ -336,7 +337,7 @@ test('scheduler panel supports validate + add/update/delete/import + daemon life
   assert.equal(alertMessages.some((x) => x.includes('关键词不能为空')), true);
 
   keywordInput.value = '春晚';
-  typeSelect.value = 'once';
+  typeSelect.value = 'scheduled';
   typeSelect.dispatchEvent(new Event('change', { bubbles: true }));
   assert.equal(runAtWrap.style.display === 'none', false);
   assert.equal(intervalWrap.style.display, 'none');
@@ -374,7 +375,8 @@ test('scheduler panel supports validate + add/update/delete/import + daemon life
   assert.equal(calls.setStatus.some((text) => text.includes('running: sched-0001')), true);
   assert.equal(calls.setActiveTab.includes('dashboard'), true);
 
-  typeSelect.value = 'once';
+  typeSelect.value = 'immediate';
+  periodicTypeSelect.value = 'interval';
   typeSelect.dispatchEvent(new Event('change', { bubbles: true }));
   runAtInput.value = '';
   profileInput.value = 'xiaohongshu-batch-0';
