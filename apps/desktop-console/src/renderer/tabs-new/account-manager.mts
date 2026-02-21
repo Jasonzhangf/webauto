@@ -73,7 +73,7 @@ export function renderAccountManager(root: HTMLElement, ctx: any) {
       </div>
       <div class="env-item" id="env-firefox">
         <span class="icon" style="color: var(--text-4);">○</span>
-        <span>Camoufox Runtime (python -m camoufox)</span>
+        <span>浏览器内核（Camoufox Firefox）</span>
       </div>
     </div>
     <div class="btn-group" style="margin-top: var(--gap);">

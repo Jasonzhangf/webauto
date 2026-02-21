@@ -44,7 +44,7 @@ export function renderSetupWizard(root: HTMLElement, ctx: any) {
       <div class="env-item" id="env-firefox" style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
         <span style="display:flex; align-items:center; gap:8px; min-width:0;">
           <span class="icon" style="color: var(--text-4);">○</span>
-          <span class="env-label">Camoufox Runtime (python -m camoufox)</span>
+          <span class="env-label">浏览器内核（Camoufox Firefox）</span>
         </span>
         <button id="repair-runtime-btn" class="secondary" style="display:none; flex:0 0 auto;">一键修复</button>
       </div>
@@ -225,12 +225,12 @@ export function renderSetupWizard(root: HTMLElement, ctx: any) {
   ): Promise<{ ok: boolean; detail?: string }> {
     if (typeof ctx.api?.envRepairDeps === 'function') {
       setupStatusText.textContent = reinstall
-        ? '正在卸载并重装资源（Camoufox Runtime/GeoIP）...'
+        ? '正在卸载并重装资源（浏览器内核/GeoIP）...'
         : geoip && browser
-          ? '正在安装依赖（Camoufox Runtime/GeoIP）...'
+          ? '正在安装依赖（浏览器内核/GeoIP）...'
           : geoip
             ? '正在安装 GeoIP（可选）...'
-            : '正在安装 Camoufox Runtime...';
+            : '正在安装浏览器内核（Camoufox）...';
       const res = await ctx.api.envRepairDeps({
         browser: Boolean(browser),
         geoip: Boolean(geoip),
@@ -248,19 +248,18 @@ export function renderSetupWizard(root: HTMLElement, ctx: any) {
     }
     if (typeof ctx.api?.cmdRunJson === 'function') {
       setupStatusText.textContent = reinstall
-        ? '正在卸载并重装资源（Camoufox Runtime/GeoIP）...'
+        ? '正在卸载并重装资源（浏览器内核/GeoIP）...'
         : geoip && browser
-          ? '正在安装依赖（Camoufox Runtime/GeoIP）...'
+          ? '正在安装依赖（浏览器内核/GeoIP）...'
           : geoip
             ? '正在安装 GeoIP（可选）...'
-            : '正在安装 Camoufox Runtime...';
+            : '正在安装浏览器内核（Camoufox）...';
       const script = ctx.api.pathJoin('apps', 'webauto', 'entry', 'xhs-install.mjs');
       const args = [script];
       if (reinstall) args.push('--reinstall');
       else if (uninstall) args.push('--uninstall');
       if (browser) args.push('--download-browser');
       if (geoip) args.push('--download-geoip');
-      if (!uninstall) args.push('--ensure-backend');
       const res = await ctx.api
         .cmdRunJson({
           title: 'setup auto repair',
@@ -337,9 +336,9 @@ export function renderSetupWizard(root: HTMLElement, ctx: any) {
         applyEnvironment(latest);
         updateCompleteStatus();
         if (!detail) {
-          if (label.includes('Camoufox') || label.includes('Runtime')) {
+          if (label.includes('浏览器内核') || label.includes('Camoufox') || label.includes('Runtime')) {
             ok = Boolean(latest.firefox?.installed);
-          } else if (label.includes('Camoufox CLI') || label.includes('CLI') || label.includes('camo')) {
+          } else if (label.includes('CLI') || label.includes('camo')) {
             ok = Boolean(latest.camo?.installed);
           } else if (label.includes('核心')) {
             ok = Boolean(latest.services?.unifiedApi && latest.services?.camoRuntime);
@@ -374,7 +373,7 @@ export function renderSetupWizard(root: HTMLElement, ctx: any) {
         const missing: string[] = [];
         if (!snapshot?.camo?.installed) missing.push('camo-cli');
         if (!snapshot?.services?.unifiedApi) missing.push('unified-api');
-        if (!snapshot?.firefox?.installed) missing.push('camoufox-runtime');
+        if (!snapshot?.firefox?.installed) missing.push('browser-kernel');
         setupStatusText.textContent = `存在待修复项: ${missing.join(', ')}`;
         if (!snapshot?.services?.camoRuntime) {
           setupStatusText.textContent += '（camo-runtime 未就绪，当前为可选）';
@@ -651,7 +650,7 @@ export function renderSetupWizard(root: HTMLElement, ctx: any) {
   repairCoreBtn.onclick = () => void runRepair('修复核心服务', repairCoreServices);
   repairCore2Btn.onclick = () => void runRepair('修复核心服务', repairCoreServices);
   repairCamoBtn.onclick = () => void runRepair('修复 Camo CLI', repairCoreServices);
-  repairRuntimeBtn.onclick = () => void runRepair('修复 Camoufox Runtime', () => repairInstall({ browser: true }));
+  repairRuntimeBtn.onclick = () => void runRepair('修复浏览器内核', () => repairInstall({ browser: true }));
   repairGeoipBtn.onclick = () => void runRepair('安装 GeoIP', () => repairInstall({ geoip: true }));
   addAccountBtn.onclick = addAccount;
   enterMainBtn.onclick = () => {

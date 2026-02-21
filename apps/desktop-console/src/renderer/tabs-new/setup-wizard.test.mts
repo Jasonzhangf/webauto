@@ -44,7 +44,7 @@ test('setup wizard uses camo runtime naming', async () => {
   const src = await getSrc();
   assert.match(src, /Camo CLI \(@web-auto\/camo\)/);
   assert.match(src, /Camo Runtime Service \(7704，可选\)/);
-  assert.match(src, /Camoufox Runtime \(python -m camoufox\)/);
+  assert.match(src, /浏览器内核（Camoufox Firefox）/);
   assert.match(src, /snapshot\?\.services\?\.camoRuntime/);
   assert.doesNotMatch(src, /browserService/);
   assert.match(src, /runtimeService: !snapshot\?\.services\?\.camoRuntime/);

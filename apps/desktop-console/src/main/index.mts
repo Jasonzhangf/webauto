@@ -993,12 +993,14 @@ ipcMain.handle('env:repairDeps', async (_evt, input: {
   geoip?: boolean;
   reinstall?: boolean;
   uninstall?: boolean;
+  ensureBackend?: boolean;
 }) => {
   const wantCore = Boolean(input?.core);
   const wantBrowser = Boolean(input?.browser);
   const wantGeoip = Boolean(input?.geoip);
   const wantReinstall = Boolean(input?.reinstall);
   const wantUninstall = Boolean(input?.uninstall);
+  const wantEnsureBackend = Boolean(input?.ensureBackend);
   const result: any = { ok: true, core: null, install: null, env: null };
 
   if (wantCore) {
@@ -1017,7 +1019,7 @@ ipcMain.handle('env:repairDeps', async (_evt, input: {
     else args.push('--install');
     if (wantBrowser) args.push('--download-browser');
     if (wantGeoip) args.push('--download-geoip');
-    if (!wantUninstall) args.push('--ensure-backend');
+    if (!wantUninstall && wantEnsureBackend) args.push('--ensure-backend');
     const installRes = await runJson({
       title: 'env repair deps',
       cwd: REPO_ROOT,
