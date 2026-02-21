@@ -8,20 +8,6 @@ import {
   getPlatformForCommandType,
 } from './schedule-task-bridge.mts';
 
-type WeiboTaskType = 'timeline' | 'search' | 'monitor';
-
-function commandTypeToWeiboTaskType(commandType: string): WeiboTaskType {
-  if (commandType === 'weibo-search') return 'search';
-  if (commandType === 'weibo-monitor') return 'monitor';
-  return 'timeline';
-}
-
-function weiboTaskTypeToCommandType(taskType: string): string {
-  if (taskType === 'search') return 'weibo-search';
-  if (taskType === 'monitor') return 'weibo-monitor';
-  return 'weibo-timeline';
-}
-
 export function renderSchedulerPanel(root: HTMLElement, ctx: any) {
   root.innerHTML = '';
 
@@ -307,7 +293,6 @@ export function renderSchedulerPanel(root: HTMLElement, ctx: any) {
       'dry-run': dryRunInput.checked,
     };
     if (commandType.startsWith('weibo')) {
-      argv['task-type'] = commandTypeToWeiboTaskType(commandType);
       argv['user-id'] = userIdInput.value.trim();
     }
     return {
@@ -351,19 +336,16 @@ export function renderSchedulerPanel(root: HTMLElement, ctx: any) {
     updateTypeFields();
   }
 
-  async function runScheduleJson(args: string[], timeoutMs = 60_000) {
-    const script = ctx.api.pathJoin('apps', 'webauto', 'entry', 'schedule.mjs');
-    const ret = await ctx.api.cmdRunJson({
-      title: `schedule ${args.join(' ')}`,
-      cwd: '',
-      args: [script, ...args, '--json'],
-      timeoutMs,
-    });
+  async function invokeSchedule(input: Record<string, any>) {
+    if (typeof ctx.api?.scheduleInvoke !== 'function') {
+      throw new Error('scheduleInvoke unavailable');
+    }
+    const ret = await ctx.api.scheduleInvoke(input);
     if (!ret?.ok) {
-      const reason = String(ret?.error || ret?.stderr || ret?.stdout || 'unknown_error').trim();
+      const reason = String(ret?.error || 'schedule command failed').trim();
       throw new Error(reason || 'schedule command failed');
     }
-    return ret.json || {};
+    return ret?.json ?? ret;
   }
 
   function downloadJson(fileName: string, payload: any) {
@@ -448,7 +430,7 @@ export function renderSchedulerPanel(root: HTMLElement, ctx: any) {
       runBtn.onclick = async () => {
         try {
           setActiveTaskContext(task.id);
-          const out = await runScheduleJson(['run', task.id], 0);
+          const out = await invokeSchedule({ action: 'run', taskId: task.id, timeoutMs: 0 });
           const runId = String(
             out?.result?.runResult?.lastRunId
             || out?.result?.runResult?.runId
@@ -480,7 +462,7 @@ export function renderSchedulerPanel(root: HTMLElement, ctx: any) {
       };
       exportBtn.onclick = async () => {
         try {
-          const out = await runScheduleJson(['export', task.id]);
+          const out = await invokeSchedule({ action: 'export', taskId: task.id });
           downloadJson(`${task.id}.json`, out);
         } catch (err: any) {
           alert(`导出失败: ${err?.message || String(err)}`);
@@ -489,7 +471,7 @@ export function renderSchedulerPanel(root: HTMLElement, ctx: any) {
       delBtn.onclick = async () => {
         if (!confirm(`确认删除任务 ${task.id} ?`)) return;
         try {
-          await runScheduleJson(['delete', task.id]);
+          await invokeSchedule({ action: 'delete', taskId: task.id });
           await refreshList();
         } catch (err: any) {
           alert(`删除失败: ${err?.message || String(err)}`);
@@ -501,7 +483,7 @@ export function renderSchedulerPanel(root: HTMLElement, ctx: any) {
   }
 
   async function refreshList() {
-    const out = await runScheduleJson(['list']);
+    const out = await invokeSchedule({ action: 'list' });
     tasks = parseTaskRows(out);
     if (!pendingFocusTaskId) {
       pendingFocusTaskId = String(ctx?.activeTaskConfigId || '').trim();
@@ -522,50 +504,8 @@ export function renderSchedulerPanel(root: HTMLElement, ctx: any) {
 
   async function saveTask() {
     const payload = readFormAsPayload();
-    if (!payload.name) {
-      alert('任务名不能为空');
-      return;
-    }
-    if (!payload.argv.profile && !payload.argv.profiles && !payload.argv.profilepool) {
-      alert('profile/profiles/profilepool 至少填写一个');
-      return;
-    }
-    const commandType = String(payload.commandType || '').trim();
-    const keywordRequired = commandType === 'xhs-unified' || commandType === 'weibo-search' || commandType === '1688-search';
-    if (keywordRequired && !payload.argv.keyword) {
-      alert('关键词不能为空');
-      return;
-    }
-    if (commandType === 'weibo-monitor' && !payload.argv['user-id']) {
-      alert('微博 monitor 任务需要 user-id');
-      return;
-    }
-    const args = payload.id
-      ? ['update', payload.id]
-      : ['add'];
-    args.push('--name', payload.name);
-    args.push('--enabled', String(payload.enabled));
-    args.push('--command-type', commandType || 'xhs-unified');
-    args.push('--schedule-type', payload.scheduleType);
-    if (payload.scheduleType === 'once') {
-      if (!payload.runAt) {
-        alert('一次性任务需要锚点时间');
-        return;
-      }
-      args.push('--run-at', payload.runAt);
-    } else if (payload.scheduleType === 'daily' || payload.scheduleType === 'weekly') {
-      if (!payload.runAt) {
-        alert(`${payload.scheduleType} 任务需要锚点时间`);
-        return;
-      }
-      args.push('--run-at', payload.runAt);
-    } else {
-      args.push('--interval-minutes', String(Math.max(1, payload.intervalMinutes)));
-    }
-    args.push('--max-runs', payload.maxRuns === null ? '0' : String(payload.maxRuns));
-    args.push('--argv-json', JSON.stringify(payload.argv));
     try {
-      const out = await runScheduleJson(args);
+      const out = await invokeSchedule({ action: 'save', payload });
       const savedId = String(out?.task?.id || payload.id || '').trim();
       pendingFocusTaskId = savedId;
       if (savedId) setActiveTaskContext(savedId);
@@ -577,7 +517,7 @@ export function renderSchedulerPanel(root: HTMLElement, ctx: any) {
 
   async function runDueNow() {
     try {
-      const out = await runScheduleJson(['run-due', '--limit', '20'], 0);
+      const out = await invokeSchedule({ action: 'run-due', limit: 20, timeoutMs: 0 });
       alert(`到点任务执行完成：due=${out.count || 0}, success=${out.success || 0}, failed=${out.failed || 0}`);
       await refreshList();
     } catch (err: any) {
@@ -587,7 +527,7 @@ export function renderSchedulerPanel(root: HTMLElement, ctx: any) {
 
   async function exportAll() {
     try {
-      const out = await runScheduleJson(['export']);
+      const out = await invokeSchedule({ action: 'export' });
       downloadJson('webauto-schedules.json', out);
     } catch (err: any) {
       alert(`导出失败: ${err?.message || String(err)}`);
@@ -603,7 +543,7 @@ export function renderSchedulerPanel(root: HTMLElement, ctx: any) {
       if (!file) return;
       try {
         const text = await file.text();
-        await runScheduleJson(['import', '--payload-json', text, '--mode', 'merge']);
+        await invokeSchedule({ action: 'import', payloadJson: text, mode: 'merge' });
         await refreshList();
       } catch (err: any) {
         alert(`导入失败: ${err?.message || String(err)}`);
@@ -618,13 +558,7 @@ export function renderSchedulerPanel(root: HTMLElement, ctx: any) {
       return;
     }
     const interval = Math.max(5, Number(daemonIntervalInput.value || 30) || 30);
-    const script = ctx.api.pathJoin('apps', 'webauto', 'entry', 'schedule.mjs');
-    const ret = await ctx.api.cmdSpawn({
-      title: `schedule daemon ${interval}s`,
-      cwd: '',
-      args: [script, 'daemon', '--interval-sec', String(interval), '--limit', '20', '--json'],
-      groupKey: 'scheduler',
-    });
+    const ret = await invokeSchedule({ action: 'daemon-start', intervalSec: interval, limit: 20 });
     daemonRunId = String(ret?.runId || '').trim();
     setDaemonStatus(daemonRunId ? `daemon: 运行中 (${daemonRunId})` : 'daemon: 启动失败');
   }

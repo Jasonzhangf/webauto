@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, test } from 'node:test';
 
-import { checkCamoCli, checkEnvironment, checkGeoIP, checkServices } from './env-check.mts';
+import { checkCamoCli, checkEnvironment, checkFirefox, checkGeoIP, checkServices } from './env-check.mts';
 
 let tempRoot = '';
 let prevHome = '';
@@ -13,6 +13,14 @@ let prevUserProfile = '';
 let prevPath = '';
 let prevWebautoRoot = '';
 let originalFetch: any;
+
+function ensureExecutable(filePath: string, content: string) {
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  fs.writeFileSync(filePath, content, 'utf8');
+  if (process.platform !== 'win32') {
+    fs.chmodSync(filePath, 0o755);
+  }
+}
 
 beforeEach(() => {
   tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'webauto-env-check-'));
@@ -87,4 +95,50 @@ test('checkCamoCli and checkEnvironment return structured payloads', async () =>
   assert.equal(typeof env.services.camoRuntime, 'boolean');
   assert.equal(typeof env.firefox.installed, 'boolean');
   assert.equal(typeof env.geoip.installed, 'boolean');
+});
+
+test('checkFirefox supports direct camoufox command path probe', async () => {
+  const installRoot = path.join(tempRoot, 'camoufox-install');
+  fs.mkdirSync(installRoot, { recursive: true });
+  const exeName = process.platform === 'win32' ? 'camoufox.exe' : 'camoufox';
+  fs.writeFileSync(path.join(installRoot, exeName), 'stub');
+
+  const binDir = path.join(tempRoot, 'bin');
+  if (process.platform === 'win32') {
+    ensureExecutable(
+      path.join(binDir, 'camoufox.cmd'),
+      `@echo off\r\necho ${installRoot}\r\n`,
+    );
+  } else {
+    ensureExecutable(
+      path.join(binDir, 'camoufox'),
+      `#!/bin/sh\necho \"${installRoot}\"\n`,
+    );
+  }
+
+  process.env.PATH = binDir;
+  const result = await checkFirefox();
+  assert.equal(result.installed, true);
+  assert.equal(result.path, installRoot);
+});
+
+test('checkEnvironment aligns ready semantics with runtime service fallback', async () => {
+  const binDir = path.join(tempRoot, 'bin');
+  if (process.platform === 'win32') {
+    ensureExecutable(path.join(binDir, 'camo.cmd'), '@echo off\r\necho camo version 0.1.0\r\n');
+  } else {
+    ensureExecutable(path.join(binDir, 'camo'), '#!/bin/sh\necho \"camo version 0.1.0\"\n');
+  }
+  process.env.PATH = binDir;
+  (globalThis as any).fetch = async (url: string) => {
+    if (String(url).includes(':7701')) return { ok: true };
+    if (String(url).includes(':7704')) return { ok: true };
+    return { ok: false };
+  };
+
+  const env = await checkEnvironment();
+  assert.equal(env.camo.installed, true);
+  assert.equal(env.services.unifiedApi, true);
+  assert.equal(env.services.camoRuntime, true);
+  assert.equal(env.allReady, true);
 });

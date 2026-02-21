@@ -8,6 +8,7 @@ type MockBundle = {
   ctx: any;
   calls: {
     cmdRunJson: string[][];
+    scheduleInvoke: any[];
     configSaveLast: any[];
     configExport: any[];
     setActiveTab: string[];
@@ -34,15 +35,10 @@ async function flush(times = 5) {
   }
 }
 
-function readFlag(args: string[], flag: string): string {
-  const idx = args.indexOf(flag);
-  if (idx < 0) return '';
-  return String(args[idx + 1] || '').trim();
-}
-
 function createMockCtx(tasks: any[] = []): MockBundle {
   const calls = {
     cmdRunJson: [] as string[][],
+    scheduleInvoke: [] as any[],
     configSaveLast: [] as any[],
     configExport: [] as any[],
     setActiveTab: [] as string[],
@@ -71,71 +67,70 @@ function createMockCtx(tasks: any[] = []): MockBundle {
           },
         };
       }
-      if (args.some((item: string) => item.endsWith('/schedule.mjs'))) {
-        const cmd = String(args[1] || '').trim();
-        if (cmd === 'list') {
-          return { ok: true, json: { tasks: state.tasks } };
+      return { ok: true, json: {} };
+    },
+    scheduleInvoke: async (input: any) => {
+      calls.scheduleInvoke.push(input);
+      const action = String(input?.action || '').trim();
+      if (action === 'list') {
+        return { ok: true, json: { tasks: state.tasks } };
+      }
+      if (action === 'save') {
+        const payload = input?.payload || {};
+        const argv = payload?.argv || {};
+        if (!argv.profile && !argv.profiles && !argv.profilepool) {
+          return { ok: false, error: 'profile/profiles/profilepool 至少填写一个' };
         }
-        if (cmd === 'update') {
-          const id = String(args[2] || '').trim();
-          const idx = state.tasks.findIndex((item) => String(item.id) === id);
-          if (idx < 0) return { ok: false, error: 'missing_task' };
-          const argv = JSON.parse(readFlag(args, '--argv-json') || '{}');
-          state.tasks[idx] = {
-            ...state.tasks[idx],
-            name: readFlag(args, '--name') || state.tasks[idx].name,
-            enabled: readFlag(args, '--enabled') !== 'false',
-            scheduleType: readFlag(args, '--schedule-type') || 'interval',
-            intervalMinutes: Number(readFlag(args, '--interval-minutes') || 30) || 30,
-            runAt: readFlag(args, '--run-at') || null,
-            maxRuns: Number(readFlag(args, '--max-runs') || 0) > 0 ? Number(readFlag(args, '--max-runs')) : null,
-            commandArgv: argv,
-            updatedAt: new Date().toISOString(),
-          };
-          return { ok: true, json: { task: state.tasks[idx] } };
+        if (!argv.keyword) {
+          return { ok: false, error: '关键词不能为空' };
         }
-        if (cmd === 'add') {
-          const id = `sched-${String(state.nextId).padStart(4, '0')}`;
-          state.nextId += 1;
-          const argv = JSON.parse(readFlag(args, '--argv-json') || '{}');
-          const row = {
-            id,
-            seq: state.nextId,
-            name: readFlag(args, '--name') || id,
-            enabled: readFlag(args, '--enabled') !== 'false',
-            scheduleType: readFlag(args, '--schedule-type') || 'interval',
-            intervalMinutes: Number(readFlag(args, '--interval-minutes') || 30) || 30,
-            runAt: readFlag(args, '--run-at') || null,
-            maxRuns: Number(readFlag(args, '--max-runs') || 0) > 0 ? Number(readFlag(args, '--max-runs')) : null,
-            nextRunAt: null,
-            commandType: 'xhs-unified',
-            commandArgv: argv,
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
-            lastRunAt: null,
-            lastStatus: null,
-            lastError: null,
-            runCount: 0,
-            failCount: 0,
-          };
+        if ((payload.scheduleType === 'once' || payload.scheduleType === 'daily' || payload.scheduleType === 'weekly') && !payload.runAt) {
+          return { ok: false, error: `${payload.scheduleType} 任务需要锚点时间` };
+        }
+        const id = String(payload.id || '').trim() || `sched-${String(state.nextId).padStart(4, '0')}`;
+        const idx = state.tasks.findIndex((item) => String(item.id) === id);
+        const row = {
+          ...(idx >= 0 ? state.tasks[idx] : {}),
+          id,
+          seq: idx >= 0 ? state.tasks[idx].seq : state.nextId,
+          name: String(payload.name || id),
+          enabled: payload.enabled !== false,
+          scheduleType: String(payload.scheduleType || 'interval'),
+          intervalMinutes: Number(payload.intervalMinutes || 30) || 30,
+          runAt: payload.runAt || null,
+          maxRuns: Number(payload.maxRuns || 0) > 0 ? Number(payload.maxRuns) : null,
+          nextRunAt: null,
+          commandType: String(payload.commandType || 'xhs-unified'),
+          commandArgv: payload.argv || {},
+          createdAt: idx >= 0 ? state.tasks[idx].createdAt : new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          lastRunAt: idx >= 0 ? state.tasks[idx].lastRunAt : null,
+          lastStatus: idx >= 0 ? state.tasks[idx].lastStatus : null,
+          lastError: idx >= 0 ? state.tasks[idx].lastError : null,
+          runCount: idx >= 0 ? state.tasks[idx].runCount : 0,
+          failCount: idx >= 0 ? state.tasks[idx].failCount : 0,
+        };
+        if (idx >= 0) state.tasks[idx] = row;
+        else {
           state.tasks.push(row);
-          return { ok: true, json: { task: row } };
+          state.nextId += 1;
         }
-        if (cmd === 'run') {
-          const id = String(args[2] || '').trim();
-          return {
-            ok: true,
-            json: {
-              result: {
-                taskId: id,
-                runResult: {
-                  id,
-                  lastRunId: 'rid-from-schedule',
-                },
+        return { ok: true, json: { task: row } };
+      }
+      if (action === 'run') {
+        const id = String(input?.taskId || '').trim();
+        return {
+          ok: true,
+          json: {
+            result: {
+              taskId: id,
+              runResult: {
+                id,
+                lastRunId: 'rid-from-schedule',
               },
             },
-          };
-        }
+          },
+        };
       }
       return { ok: true, json: {} };
     },
@@ -273,12 +268,12 @@ test('config panel defaults to latest task and supports update/save-as-new/run',
   assert.equal(dirtyStateText.textContent, '未保存');
   saveCurrentBtn.click();
   await flush(5);
-  assert.equal(bundle.calls.cmdRunJson.some((args) => args[1] === 'update' && args[2] === 'sched-0001'), true);
+  assert.equal(bundle.calls.scheduleInvoke.some((item) => item.action === 'save' && item.payload?.id === 'sched-0001'), true);
   assert.equal(dirtyStateText.textContent, '已保存');
 
   saveNewBtn.click();
   await flush(5);
-  assert.equal(bundle.calls.cmdRunJson.some((args) => args[1] === 'add'), true);
+  assert.equal(bundle.calls.scheduleInvoke.some((item) => item.action === 'save' && !item.payload?.id), true);
   assert.equal(taskSelect.value.startsWith('sched-'), true);
 
   saveOpenSchedulerBtn.click();
@@ -287,7 +282,7 @@ test('config panel defaults to latest task and supports update/save-as-new/run',
 
   runBtn.click();
   await flush(8);
-  assert.equal(bundle.calls.cmdRunJson.some((args) => args[1] === 'run'), true);
+  assert.equal(bundle.calls.scheduleInvoke.some((item) => item.action === 'run'), true);
   assert.equal(bundle.calls.setActiveTab.includes('dashboard'), true);
   assert.equal(bundle.calls.logs.some((line) => line.includes('schedule run task=')), true);
 });
@@ -312,5 +307,5 @@ test('config panel validates runAt for once/daily/weekly schedules', async () =>
   saveCurrentBtn.click();
   await flush(3);
 
-  assert.equal(alerts.some((item) => item.includes('once 任务需要设置执行时间')), true);
+  assert.equal(alerts.some((item) => item.includes('once 任务需要锚点时间')), true);
 });

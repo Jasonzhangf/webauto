@@ -68,6 +68,21 @@ function createMockCtx(): MockBundle {
   const api: any = {
     settings,
     pathJoin: (...parts: string[]) => parts.filter(Boolean).join('/'),
+    envCheckAll: async () => {
+      const browserReady = Boolean(state.env.firefox.installed || state.env.services.camoRuntime);
+      return {
+        ...state.env,
+        browserReady,
+        missing: {
+          core: !state.env.services.unifiedApi,
+          runtimeService: !state.env.services.camoRuntime,
+          camo: !state.env.camo.installed,
+          runtime: !browserReady,
+          geoip: !state.env.geoip.installed,
+        },
+        allReady: Boolean(state.env.camo.installed && state.env.services.unifiedApi && browserReady),
+      };
+    },
     envCheckCamo: async () => state.env.camo,
     envCheckServices: async () => state.env.services,
     envCheckFirefox: async () => state.env.firefox,

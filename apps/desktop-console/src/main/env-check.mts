@@ -116,6 +116,17 @@ function resolvePathFromOutput(stdout: string) {
   return '';
 }
 
+function resolveCamoufoxExecutable(installRoot: string) {
+  return process.platform === 'win32'
+    ? path.join(installRoot, 'camoufox.exe')
+    : path.join(installRoot, 'camoufox');
+}
+
+function isValidCamoufoxInstallRoot(installRoot: string) {
+  if (!installRoot || !existsSync(installRoot)) return false;
+  return existsSync(resolveCamoufoxExecutable(installRoot));
+}
+
 /**
  * Check if camo CLI can be resolved.
  * Supports PATH/global install, local dependency bin, and npx package fallback.
@@ -180,11 +191,13 @@ export async function checkFirefox(): Promise<{ installed: boolean; path?: strin
   const candidates =
     process.platform === 'win32'
       ? [
+          { command: 'camoufox', args: ['path'] },
           { command: 'python', args: ['-m', 'camoufox', 'path'] },
           { command: 'py', args: ['-3', '-m', 'camoufox', 'path'] },
           { command: resolveNpxBin(), args: ['--yes', '--package=camoufox', 'camoufox', 'path'] },
         ]
       : [
+          { command: 'camoufox', args: ['path'] },
           { command: 'python3', args: ['-m', 'camoufox', 'path'] },
           { command: resolveNpxBin(), args: ['--yes', '--package=camoufox', 'camoufox', 'path'] },
         ];
@@ -197,7 +210,10 @@ export async function checkFirefox(): Promise<{ installed: boolean; path?: strin
       });
       if (ret.status !== 0) continue;
       const resolvedPath = resolvePathFromOutput(String(ret.stdout || ''));
-      return resolvedPath ? { installed: true, path: resolvedPath } : { installed: true };
+      if (resolvedPath && isValidCamoufoxInstallRoot(resolvedPath)) {
+        return { installed: true, path: resolvedPath };
+      }
+      if (!resolvedPath) return { installed: true };
     } catch {
       // continue probing next candidate
     }
@@ -221,6 +237,14 @@ export async function checkEnvironment(): Promise<{
   services: ServicesCheckResult;
   firefox: { installed: boolean; path?: string };
   geoip: GeoIPCheckResult;
+  browserReady: boolean;
+  missing: {
+    core: boolean;
+    runtimeService: boolean;
+    camo: boolean;
+    runtime: boolean;
+    geoip: boolean;
+  };
   allReady: boolean;
 }> {
   const [camo, services, firefox, geoip] = await Promise.all([
@@ -230,9 +254,14 @@ export async function checkEnvironment(): Promise<{
     checkGeoIP(),
   ]);
 
-  const allReady =
-    camo.installed &&
-    services.unifiedApi &&
-    firefox.installed;
-  return { camo, services, firefox, geoip, allReady };
+  const browserReady = Boolean(firefox.installed || services.camoRuntime);
+  const missing = {
+    core: !services.unifiedApi,
+    runtimeService: !services.camoRuntime,
+    camo: !camo.installed,
+    runtime: !browserReady,
+    geoip: !geoip.installed,
+  };
+  const allReady = camo.installed && services.unifiedApi && browserReady;
+  return { camo, services, firefox, geoip, browserReady, missing, allReady };
 }

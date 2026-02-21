@@ -13,6 +13,7 @@ type SchedulePayload = {
   id: string;
   name: string;
   enabled: boolean;
+  commandType: string;
   scheduleType: ScheduleTask['scheduleType'];
   intervalMinutes: number;
   runAt: string | null;
@@ -396,6 +397,7 @@ export function renderConfigPanel(root: HTMLElement, ctx: any) {
       id: String(withId || '').trim(),
       name: taskNameInput.value.trim() || toTaskNameFallback(),
       enabled: taskEnabledCb.checked,
+      commandType: 'xhs-unified',
       scheduleType: String(scheduleTypeSelect.value || 'interval') as ScheduleTask['scheduleType'],
       intervalMinutes: readNumber(scheduleIntervalInput, 30, 1),
       runAt: toIsoOrNull(scheduleRunAtInput.value),
@@ -404,43 +406,16 @@ export function renderConfigPanel(root: HTMLElement, ctx: any) {
     };
   }
 
-  function validateSchedulePayload(payload: SchedulePayload): string | null {
-    if (!payload.argv.profile) return '请选择账户';
-    if (!payload.argv.keyword) return '请输入关键词';
-    if (payload.scheduleType === 'once' || payload.scheduleType === 'daily' || payload.scheduleType === 'weekly') {
-      if (!payload.runAt) return `${payload.scheduleType} 任务需要设置执行时间`;
+  async function invokeSchedule(input: Record<string, any>) {
+    if (typeof ctx.api?.scheduleInvoke !== 'function') {
+      throw new Error('scheduleInvoke unavailable');
     }
-    return null;
-  }
-
-  function buildSaveArgs(payload: SchedulePayload, mode: 'add' | 'update'): string[] {
-    const args = mode === 'update' ? ['update', payload.id] : ['add'];
-    args.push('--name', payload.name);
-    args.push('--enabled', String(payload.enabled));
-    args.push('--schedule-type', payload.scheduleType);
-    if (payload.scheduleType === 'once' || payload.scheduleType === 'daily' || payload.scheduleType === 'weekly') {
-      args.push('--run-at', String(payload.runAt || ''));
-    } else {
-      args.push('--interval-minutes', String(payload.intervalMinutes));
-    }
-    args.push('--max-runs', payload.maxRuns === null ? '0' : String(payload.maxRuns));
-    args.push('--argv-json', JSON.stringify(payload.argv));
-    return args;
-  }
-
-  async function runScheduleJson(args: string[], timeoutMs = 60_000) {
-    const script = ctx.api.pathJoin('apps', 'webauto', 'entry', 'schedule.mjs');
-    const ret = await ctx.api.cmdRunJson({
-      title: `schedule ${args.join(' ')}`,
-      cwd: '',
-      args: [script, ...args, '--json'],
-      timeoutMs,
-    });
+    const ret = await ctx.api.scheduleInvoke(input);
     if (!ret?.ok) {
-      const reason = String(ret?.error || ret?.stderr || ret?.stdout || 'unknown_error').trim();
+      const reason = String(ret?.error || 'schedule command failed').trim();
       throw new Error(reason || 'schedule command failed');
     }
-    return ret.json || {};
+    return ret?.json ?? ret;
   }
 
   function applyTaskToForm(task: ScheduleTask) {
@@ -544,7 +519,7 @@ export function renderConfigPanel(root: HTMLElement, ctx: any) {
 
   async function refreshTaskList(preferredTaskId = '') {
     try {
-      const out = await runScheduleJson(['list']);
+      const out = await invokeSchedule({ action: 'list' });
       taskRows = parseTaskRows(out).filter((row) => row.commandType === 'xhs-unified');
       renderTaskSelectOptions(preferredTaskId);
       if (taskRows.length === 0) {
@@ -578,15 +553,13 @@ export function renderConfigPanel(root: HTMLElement, ctx: any) {
 
   async function persistTask(mode: 'add' | 'update') {
     const payload = buildSchedulePayload(mode === 'update' ? selectedTaskId : '');
-    const validationError = validateSchedulePayload(payload);
-    if (validationError) {
-      alert(validationError);
-      return '';
-    }
     if (mode === 'update' && !payload.id) {
       return persistTask('add');
     }
-    const out = await runScheduleJson(buildSaveArgs(payload, mode));
+    const out = await invokeSchedule({
+      action: 'save',
+      payload: mode === 'add' ? { ...payload, id: '' } : payload,
+    });
     const taskId = String(out?.task?.id || payload.id || '').trim();
     if (!taskId) return '';
     selectedTaskId = taskId;
@@ -655,7 +628,7 @@ export function renderConfigPanel(root: HTMLElement, ctx: any) {
         ? await persistTask('update')
         : await persistTask('add');
       if (!taskId) return;
-      const out = await runScheduleJson(['run', taskId], 0);
+      const out = await invokeSchedule({ action: 'run', taskId, timeoutMs: 0 });
       const runId = String(out?.result?.runResult?.lastRunId || '').trim();
       ctx.xhsCurrentRun = {
         runId: runId || null,

@@ -14,6 +14,8 @@ contextBridge.exposeInMainWorld('api', {
   cmdSpawn: (spec) => ipcRenderer.invoke('cmd:spawn', spec),
   cmdKill: (runId) => ipcRenderer.invoke('cmd:kill', { runId }),
   cmdRunJson: (spec) => ipcRenderer.invoke('cmd:runJson', spec),
+  scheduleInvoke: (spec) => ipcRenderer.invoke('schedule:invoke', spec),
+  taskRunEphemeral: (spec) => ipcRenderer.invoke('task:runEphemeral', spec),
 
   resultsScan: (spec) => ipcRenderer.invoke('results:scan', spec),
   fsListDir: (spec) => ipcRenderer.invoke('fs:listDir', spec),

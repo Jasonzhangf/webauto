@@ -14,15 +14,14 @@ async function getSrc() {
 test('scheduler panel wires schedule cli operations and daemon controls', async () => {
   const src = await getSrc();
   assert.match(src, /from '\.\/schedule-task-bridge\.mts'/);
-  assert.match(src, /apps', 'webauto', 'entry', 'schedule\.mjs'/);
-  assert.match(src, /runScheduleJson\(\['list'\]\)/);
-  assert.match(src, /runScheduleJson\(\['run-due', '--limit', '20'\]/);
-  assert.match(src, /runScheduleJson\(\['export'\]\)/);
-  assert.match(src, /runScheduleJson\(\['import', '--payload-json', text, '--mode', 'merge'\]\)/);
+  assert.match(src, /invokeSchedule\(\{ action: 'list' \}\)/);
+  assert.match(src, /invokeSchedule\(\{ action: 'run-due', limit: 20, timeoutMs: 0 \}\)/);
+  assert.match(src, /invokeSchedule\(\{ action: 'export' \}\)/);
+  assert.match(src, /invokeSchedule\(\{ action: 'import', payloadJson: text, mode: 'merge' \}\)/);
   assert.match(src, /<option value="daily">每天<\/option>/);
   assert.match(src, /<option value="weekly">每周<\/option>/);
-  assert.match(src, /--max-runs/);
-  assert.match(src, /cmdSpawn\(\{\s*title: `schedule daemon/);
+  assert.match(src, /scheduleInvoke/);
+  assert.match(src, /action: 'daemon-start'/);
   assert.match(src, /cmdKill\(\{ runId: daemonRunId \}\)/);
   assert.match(src, /pendingFocusTaskId/);
   assert.doesNotMatch(src, /card\.innerHTML\s*=/);

@@ -8,7 +8,8 @@ type MockBundle = {
   ctx: any;
   calls: {
     cmdRunJson: string[][];
-    cmdSpawn: any[];
+    scheduleInvoke: any[];
+    taskRunEphemeral: any[];
     setActiveTab: string[];
     setStatus: string[];
   };
@@ -32,25 +33,11 @@ async function flush(times = 5) {
   for (let i = 0; i < times; i += 1) await tick();
 }
 
-function readFlag(args: string[], flag: string): string {
-  const idx = args.indexOf(flag);
-  if (idx < 0) return '';
-  return String(args[idx + 1] || '').trim();
-}
-
-function isScheduleCommand(args: string[]) {
-  return args.some((item) => item.endsWith('/schedule.mjs') || item.endsWith('\\schedule.mjs'));
-}
-
-function parseScheduleCommand(args: string[]): string {
-  if (!isScheduleCommand(args)) return '';
-  return String(args[1] || '').trim();
-}
-
 function createMockCtx(): MockBundle {
   const calls = {
     cmdRunJson: [] as string[][],
-    cmdSpawn: [] as any[],
+    scheduleInvoke: [] as any[],
+    taskRunEphemeral: [] as any[],
     setActiveTab: [] as string[],
     setStatus: [] as string[],
   };
@@ -130,66 +117,53 @@ function createMockCtx(): MockBundle {
           },
         };
       }
-      if (isScheduleCommand(args)) {
-        const cmd = parseScheduleCommand(args);
-        if (cmd === 'list') {
-          return { ok: true, json: { tasks: state.tasks } };
-        }
-        if (cmd === 'add') {
-          const id = `sched-${String(state.nextId).padStart(4, '0')}`;
-          state.nextId += 1;
-          const argvRaw = readFlag(args, '--argv-json');
-          let argv: any = {};
-          try { argv = JSON.parse(argvRaw || '{}'); } catch { argv = {}; }
-          const row = {
-            id,
-            seq: state.nextId,
-            name: readFlag(args, '--name') || id,
-            enabled: readFlag(args, '--enabled') !== 'false',
-            scheduleType: readFlag(args, '--schedule-type') || 'interval',
-            intervalMinutes: Number(readFlag(args, '--interval-minutes') || 30) || 30,
-            runAt: readFlag(args, '--run-at') || null,
-            maxRuns: Number(readFlag(args, '--max-runs') || 0) > 0 ? Number(readFlag(args, '--max-runs')) : null,
-            nextRunAt: null,
-            commandType: readFlag(args, '--command-type') || 'xhs-unified',
-            commandArgv: argv,
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
-            runCount: 0,
-            failCount: 0,
-          };
+      return { ok: true, json: {} };
+    },
+    scheduleInvoke: async (input: any) => {
+      calls.scheduleInvoke.push(input);
+      const action = String(input?.action || '').trim();
+      if (action === 'list') {
+        return { ok: true, json: { tasks: state.tasks } };
+      }
+      if (action === 'save') {
+        const payload = input?.payload || {};
+        const id = String(payload.id || '').trim() || `sched-${String(state.nextId).padStart(4, '0')}`;
+        const idx = state.tasks.findIndex((row) => String(row.id) === id);
+        const row = {
+          ...(idx >= 0 ? state.tasks[idx] : {}),
+          id,
+          seq: idx >= 0 ? state.tasks[idx].seq : state.nextId,
+          name: String(payload.name || id),
+          enabled: payload.enabled !== false,
+          scheduleType: String(payload.scheduleType || 'interval'),
+          intervalMinutes: Number(payload.intervalMinutes || 30) || 30,
+          runAt: payload.runAt || null,
+          maxRuns: Number(payload.maxRuns || 0) > 0 ? Number(payload.maxRuns) : null,
+          nextRunAt: null,
+          commandType: String(payload.commandType || 'xhs-unified'),
+          commandArgv: payload.argv || {},
+          createdAt: idx >= 0 ? state.tasks[idx].createdAt : new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          runCount: idx >= 0 ? state.tasks[idx].runCount : 0,
+          failCount: idx >= 0 ? state.tasks[idx].failCount : 0,
+        };
+        if (idx >= 0) {
+          state.tasks[idx] = row;
+        } else {
           state.tasks.push(row);
-          return { ok: true, json: { task: row } };
+          state.nextId += 1;
         }
-        if (cmd === 'update') {
-          const id = String(args[2] || '').trim();
-          const idx = state.tasks.findIndex((row) => String(row.id) === id);
-          if (idx < 0) return { ok: false, error: 'missing_task' };
-          const argvRaw = readFlag(args, '--argv-json');
-          let argv: any = {};
-          try { argv = JSON.parse(argvRaw || '{}'); } catch { argv = {}; }
-          state.tasks[idx] = {
-            ...state.tasks[idx],
-            name: readFlag(args, '--name') || state.tasks[idx].name,
-            scheduleType: readFlag(args, '--schedule-type') || 'interval',
-            intervalMinutes: Number(readFlag(args, '--interval-minutes') || 30) || 30,
-            runAt: readFlag(args, '--run-at') || null,
-            commandType: readFlag(args, '--command-type') || state.tasks[idx].commandType,
-            commandArgv: argv,
-            updatedAt: new Date().toISOString(),
-          };
-          return { ok: true, json: { task: state.tasks[idx] } };
-        }
-        if (cmd === 'run') {
-          const id = String(args[2] || '').trim();
-          return { ok: true, json: { result: { runResult: { lastRunId: `rid-${id}` } } } };
-        }
+        return { ok: true, json: { task: row } };
+      }
+      if (action === 'run') {
+        const id = String(input?.taskId || '').trim();
+        return { ok: true, json: { result: { runResult: { lastRunId: `rid-${id}` } } } };
       }
       return { ok: true, json: {} };
     },
-    cmdSpawn: async (spec: any) => {
-      calls.cmdSpawn.push(spec);
-      return { runId: `spawn-${calls.cmdSpawn.length}` };
+    taskRunEphemeral: async (spec: any) => {
+      calls.taskRunEphemeral.push(spec);
+      return { ok: true, runId: `spawn-${calls.taskRunEphemeral.length}` };
     },
     configLoadLast: async () => ({ lastProfileId: 'xhs-0', keyword: 'legacy' }),
     onCmdEvent: (cb: (evt: any) => void) => {
@@ -252,11 +226,8 @@ test('history select supports edit and clone for save-as', async () => {
   profileInput.value = profileInput.value || 'xhs-1';
   saveBtn.click();
   await flush(6);
-  const scheduleCommands = bundle.calls.cmdRunJson
-    .filter((args) => isScheduleCommand(args))
-    .map((args) => parseScheduleCommand(args));
-  assert.equal(scheduleCommands.includes('add'), true);
-  assert.equal(scheduleCommands.includes('update'), false);
+  const scheduleCommands = bundle.calls.scheduleInvoke.map((item) => String(item?.action || ''));
+  assert.equal(scheduleCommands.includes('save'), true);
 });
 
 test('run-ephemeral executes directly without schedule save', async () => {
@@ -268,27 +239,18 @@ test('run-ephemeral executes directly without schedule save', async () => {
   const keywordInput = root.querySelector('#task-keyword') as HTMLInputElement;
   const profileInput = root.querySelector('#task-profile') as HTMLInputElement;
   const runEphemeralBtn = root.querySelector('#task-run-ephemeral-btn') as HTMLButtonElement;
-  const beforeCommands = bundle.calls.cmdRunJson
-    .filter((args) => isScheduleCommand(args))
-    .map((args) => parseScheduleCommand(args));
+  const beforeCommands = bundle.calls.scheduleInvoke.length;
 
   keywordInput.value = '春晚';
   profileInput.value = 'xhs-0';
   runEphemeralBtn.click();
   await flush(4);
 
-  assert.equal(bundle.calls.cmdSpawn.length, 1);
-  const spawnSpec = bundle.calls.cmdSpawn[0];
-  assert.equal(Array.isArray(spawnSpec.args), true);
-  assert.equal(spawnSpec.title, 'xhs unified: 春晚');
-  assert.equal(String(spawnSpec.args[0]).endsWith('/xhs-unified.mjs'), true);
-  assert.equal(spawnSpec.args.includes('--keyword'), true);
-  assert.equal(spawnSpec.args.includes('春晚'), true);
-
-  const afterCommands = bundle.calls.cmdRunJson
-    .filter((args) => isScheduleCommand(args))
-    .map((args) => parseScheduleCommand(args));
-  assert.deepEqual(afterCommands, beforeCommands);
+  assert.equal(bundle.calls.taskRunEphemeral.length, 1);
+  const runSpec = bundle.calls.taskRunEphemeral[0];
+  assert.equal(runSpec.commandType, 'xhs-unified');
+  assert.equal(runSpec.argv.keyword, '春晚');
+  assert.equal(bundle.calls.scheduleInvoke.length, beforeCommands);
 });
 
 test('save and run uses schedule run and no direct spawn', async () => {
@@ -306,12 +268,10 @@ test('save and run uses schedule run and no direct spawn', async () => {
   runBtn.click();
   await flush(8);
 
-  const scheduleCommands = bundle.calls.cmdRunJson
-    .filter((args) => isScheduleCommand(args))
-    .map((args) => parseScheduleCommand(args));
-  assert.equal(scheduleCommands.includes('add'), true);
+  const scheduleCommands = bundle.calls.scheduleInvoke.map((item) => String(item?.action || ''));
+  assert.equal(scheduleCommands.includes('save'), true);
   assert.equal(scheduleCommands.includes('run'), true);
-  assert.equal(bundle.calls.cmdSpawn.length, 0);
+  assert.equal(bundle.calls.taskRunEphemeral.length, 0);
   assert.equal(bundle.calls.setActiveTab.includes('dashboard'), true);
   assert.equal(alerts.length, 0);
 });

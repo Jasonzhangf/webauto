@@ -65,6 +65,7 @@ type UiSettings = DesktopConsoleSettings;
 import { stateBridge } from './state-bridge.mts';
 import { checkCamoCli, checkServices, checkFirefox, checkGeoIP, checkEnvironment } from './env-check.mts';
 import { UiCliBridge } from './ui-cli-bridge.mts';
+import { runEphemeralTask, scheduleInvoke } from './task-gateway.mts';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const APP_ROOT = path.resolve(__dirname, '../..'); // apps/desktop-console/dist/main -> apps/desktop-console
@@ -983,6 +984,26 @@ ipcMain.handle('cmd:runJson', async (_evt, spec: RunJsonSpec) => {
   const args = Array.isArray(spec?.args) ? spec.args : [];
   return runJson({ ...spec, cwd, args });
 });
+ipcMain.handle('schedule:invoke', async (_evt, input) => (
+  scheduleInvoke(
+    {
+      repoRoot: REPO_ROOT,
+      runJson: (spec) => runJson(spec),
+      spawnCommand: (spec) => spawnCommand(spec),
+    },
+    input || { action: 'list' },
+  )
+));
+ipcMain.handle('task:runEphemeral', async (_evt, input) => (
+  runEphemeralTask(
+    {
+      repoRoot: REPO_ROOT,
+      runJson: (spec) => runJson(spec),
+      spawnCommand: (spec) => spawnCommand(spec),
+    },
+    input || {},
+  )
+));
 
 ipcMain.handle('results:scan', async (_evt, spec: { downloadRoot?: string }) => scanResults(spec || {}));
 ipcMain.handle('fs:listDir', async (_evt, spec: { root: string; recursive?: boolean; maxEntries?: number }) => listDir(spec));

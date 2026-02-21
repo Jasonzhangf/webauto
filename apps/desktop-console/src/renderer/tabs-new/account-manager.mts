@@ -128,16 +128,18 @@ export function renderAccountManager(root: HTMLElement, ctx: any) {
   // Check environment
   async function checkEnvironment() {
     try {
-      const [camo, services, firefox] = await Promise.all([
-        ctx.api.envCheckCamo(),
-        ctx.api.envCheckServices(),
-        ctx.api.envCheckFirefox()
-      ]);
-
-      updateEnvItem('env-camo', camo.installed);
-      updateEnvItem('env-unified', services.unifiedApi);
-      updateEnvItem('env-browser', services.camoRuntime);
-      updateEnvItem('env-firefox', firefox.installed);
+      if (typeof ctx.api?.envCheckAll !== 'function') {
+        throw new Error('envCheckAll unavailable');
+      }
+      const unified = await ctx.api.envCheckAll();
+      if (!unified || typeof unified !== 'object') {
+        throw new Error('invalid envCheckAll response');
+      }
+      const browserReady = Boolean(unified.browserReady);
+      updateEnvItem('env-camo', Boolean(unified.camo?.installed));
+      updateEnvItem('env-unified', Boolean(unified.services?.unifiedApi));
+      updateEnvItem('env-browser', Boolean(unified.services?.camoRuntime));
+      updateEnvItem('env-firefox', browserReady);
     } catch (err) {
       console.error('Environment check failed:', err);
     }

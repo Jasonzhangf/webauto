@@ -202,6 +202,82 @@ function createMockCtx(): MockBundle {
       }
       return { ok: true, json: {} };
     },
+    scheduleInvoke: async (input: any) => {
+      const action = String(input?.action || '').trim();
+      if (action === 'list') {
+        return { ok: true, json: { tasks: scheduleTasks } };
+      }
+      if (action === 'save') {
+        const payload = input?.payload || {};
+        const id = String(payload.id || '').trim() || `sched-${String(scheduleSeq).padStart(4, '0')}`;
+        const idx = scheduleTasks.findIndex((item) => String(item.id) === id);
+        const row = {
+          ...(idx >= 0 ? scheduleTasks[idx] : {}),
+          id,
+          seq: idx >= 0 ? scheduleTasks[idx].seq : scheduleSeq,
+          name: String(payload.name || id),
+          enabled: payload.enabled !== false,
+          scheduleType: String(payload.scheduleType || 'interval'),
+          intervalMinutes: Number(payload.intervalMinutes || 30) || 30,
+          runAt: payload.runAt || null,
+          maxRuns: Number(payload.maxRuns || 0) > 0 ? Number(payload.maxRuns) : null,
+          nextRunAt: null,
+          commandType: String(payload.commandType || 'xhs-unified'),
+          commandArgv: payload.argv || {},
+          createdAt: idx >= 0 ? scheduleTasks[idx].createdAt : new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          runCount: idx >= 0 ? scheduleTasks[idx].runCount : 0,
+          failCount: idx >= 0 ? scheduleTasks[idx].failCount : 0,
+        };
+        if (idx >= 0) {
+          scheduleTasks[idx] = row;
+        } else {
+          scheduleTasks.push(row);
+          scheduleSeq += 1;
+        }
+        return { ok: true, json: { task: row } };
+      }
+      if (action === 'run') {
+        const id = String(input?.taskId || '').trim();
+        return { ok: true, json: { result: { taskId: id, runResult: { id, lastRunId: 'rid-schedule-1' } } } };
+      }
+      if (action === 'delete') {
+        const id = String(input?.taskId || '').trim();
+        const idx = scheduleTasks.findIndex((item) => String(item.id) === id);
+        if (idx >= 0) scheduleTasks.splice(idx, 1);
+        return { ok: true, json: { id } };
+      }
+      if (action === 'run-due') {
+        return { ok: true, json: { count: 1, success: 1, failed: 0 } };
+      }
+      if (action === 'export') {
+        const id = String(input?.taskId || '').trim();
+        if (!id) return { ok: true, json: { tasks: scheduleTasks } };
+        const row = scheduleTasks.find((item) => String(item.id) === id);
+        return { ok: true, json: row ? { task: row } : {} };
+      }
+      if (action === 'import') {
+        const payloadRaw = String(input?.payloadJson || '');
+        try {
+          const parsed = JSON.parse(payloadRaw);
+          const items = Array.isArray(parsed?.tasks) ? parsed.tasks : [];
+          for (const row of items) {
+            if (!row?.id) continue;
+            const id = String(row.id);
+            const idx = scheduleTasks.findIndex((item) => String(item.id) === id);
+            if (idx >= 0) scheduleTasks[idx] = { ...scheduleTasks[idx], ...row };
+            else scheduleTasks.push(row);
+          }
+        } catch {
+          // ignore parse errors in tests
+        }
+        return { ok: true, json: {} };
+      }
+      if (action === 'daemon-start') {
+        return { ok: true, runId: `daemon-run-${scheduleSeq}` };
+      }
+      return { ok: true, json: {} };
+    },
     cmdSpawn: async (spec: any) => {
       calls.spawns.push(spec);
       return { runId: `rid-${calls.spawns.length}` };

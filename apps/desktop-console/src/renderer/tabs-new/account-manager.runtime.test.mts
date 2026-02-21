@@ -79,6 +79,21 @@ function createMockCtx(): MockBundle {
   const api: any = {
     settings,
     pathJoin: (...parts: string[]) => parts.filter(Boolean).join('/'),
+    envCheckAll: async () => ({
+      camo: { installed: true },
+      services: { unifiedApi: true, camoRuntime: true },
+      firefox: { installed: true },
+      geoip: { installed: false },
+      browserReady: true,
+      missing: {
+        core: false,
+        runtimeService: false,
+        camo: false,
+        runtime: false,
+        geoip: true,
+      },
+      allReady: true,
+    }),
     envCheckCamo: async () => ({ installed: true }),
     envCheckServices: async () => ({ unifiedApi: true, camoRuntime: true }),
     envCheckFirefox: async () => ({ installed: true }),
@@ -209,6 +224,35 @@ test('account manager supports add/check/refresh flows', async () => {
     assert.equal(calls.cleanup, 1);
   } finally {
     console.error = originalConsoleError;
+    if (typeof dispose === 'function') dispose();
+  }
+});
+
+test('account manager uses envCheckAll readiness semantics when available', async () => {
+  const { ctx } = createMockCtx();
+  let allCalled = 0;
+  ctx.api.envCheckAll = async () => {
+    allCalled += 1;
+    return {
+      camo: { installed: true },
+      services: { unifiedApi: true, camoRuntime: true },
+      firefox: { installed: false },
+      geoip: { installed: false },
+      browserReady: true,
+      allReady: true,
+    };
+  };
+  ctx.api.envCheckFirefox = async () => ({ installed: false });
+
+  (window as any).api = ctx.api;
+  const root = document.createElement('div');
+  const dispose = renderAccountManager(root, ctx) as (() => void) | void;
+  try {
+    await flush(4);
+    assert.equal(allCalled > 0, true);
+    const icon = root.querySelector('#env-firefox .icon') as HTMLSpanElement;
+    assert.equal(String(icon?.textContent || '').trim(), '✓');
+  } finally {
     if (typeof dispose === 'function') dispose();
   }
 });

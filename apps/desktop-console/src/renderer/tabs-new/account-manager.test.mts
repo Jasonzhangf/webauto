@@ -44,7 +44,8 @@ test('account manager UI labels runtime as camo', async () => {
   assert.match(src, />Camo Runtime Service \(7704，可选\)</);
   assert.match(src, />浏览器内核（Camoufox Firefox）</);
   assert.match(src, /id="env-cleanup-btn"/);
-  assert.match(src, /services\.camoRuntime/);
+  assert.match(src, /envCheckAll/);
+  assert.match(src, /browserReady/);
   assert.doesNotMatch(src, /browserService/);
 });
 

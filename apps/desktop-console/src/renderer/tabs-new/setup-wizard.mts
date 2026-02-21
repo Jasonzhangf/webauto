@@ -133,38 +133,50 @@ export function renderSetupWizard(root: HTMLElement, ctx: any) {
     services: any;
     firefox: any;
     geoip: any;
+    allReady?: boolean;
+    browserReady?: boolean;
+    missing?: {
+      core: boolean;
+      runtimeService: boolean;
+      camo: boolean;
+      runtime: boolean;
+      geoip: boolean;
+    };
   };
 
-  const isEnvReady = (snapshot: EnvSnapshot) =>
-    Boolean(
-      snapshot?.camo?.installed &&
-      snapshot?.services?.unifiedApi &&
-      snapshot?.firefox?.installed,
-    );
+  const getMissing = (snapshot: EnvSnapshot) =>
+    snapshot?.missing || {
+      core: true,
+      runtimeService: true,
+      camo: true,
+      runtime: true,
+      geoip: true,
+    };
 
-  const getMissing = (snapshot: EnvSnapshot) => ({
-    core: !snapshot?.services?.unifiedApi,
-    runtimeService: !snapshot?.services?.camoRuntime,
-    camo: !snapshot?.camo?.installed,
-    runtime: !snapshot?.firefox?.installed,
-    geoip: !snapshot?.geoip?.installed,
-  });
+  const isEnvReady = (snapshot: EnvSnapshot) => Boolean(snapshot?.allReady);
 
   async function collectEnvironment(): Promise<EnvSnapshot> {
-    const [camo, services, firefox, geoip] = await Promise.all([
-      ctx.api.envCheckCamo(),
-      ctx.api.envCheckServices(),
-      ctx.api.envCheckFirefox(),
-      ctx.api.envCheckGeoIP(),
-    ]);
-    return { camo, services, firefox, geoip };
+    if (typeof ctx.api?.envCheckAll !== 'function') {
+      throw new Error('envCheckAll unavailable');
+    }
+    const snapshot = await ctx.api.envCheckAll();
+    if (snapshot && typeof snapshot === 'object' && snapshot.camo && snapshot.services) {
+      return snapshot as EnvSnapshot;
+    }
+    throw new Error('invalid envCheckAll response');
   }
 
   function applyEnvironment(snapshot: EnvSnapshot) {
+    const browserReady = Boolean(snapshot.browserReady);
+    const browserDetail = snapshot.firefox?.installed
+      ? '已安装'
+      : snapshot.services?.camoRuntime
+        ? '由 Runtime 服务提供'
+        : '未安装';
     updateEnvItem('env-camo', snapshot.camo?.installed, snapshot.camo?.version || (snapshot.camo?.installed ? '已安装' : '未安装'));
     updateEnvItem('env-unified', snapshot.services?.unifiedApi, '7701');
     updateEnvItem('env-browser', snapshot.services?.camoRuntime, '7704');
-    updateEnvItem('env-firefox', snapshot.firefox?.installed, snapshot.firefox?.path ? '已安装' : '未安装');
+    updateEnvItem('env-firefox', browserReady, snapshot.firefox?.path || browserDetail);
     updateEnvItem('env-geoip', snapshot.geoip?.installed, snapshot.geoip?.installed ? '已安装（可选）' : '未安装（可选）');
     envReady = isEnvReady(snapshot);
     syncRepairButtons(snapshot);
@@ -337,13 +349,13 @@ export function renderSetupWizard(root: HTMLElement, ctx: any) {
         updateCompleteStatus();
         if (!detail) {
           if (label.includes('浏览器内核') || label.includes('Camoufox') || label.includes('Runtime')) {
-            ok = Boolean(latest.firefox?.installed);
+            ok = Boolean(latest.browserReady);
           } else if (label.includes('CLI') || label.includes('camo')) {
             ok = Boolean(latest.camo?.installed);
           } else if (label.includes('核心')) {
             ok = Boolean(latest.services?.unifiedApi && latest.services?.camoRuntime);
           } else {
-            ok = isEnvReady(latest);
+            ok = Boolean(latest.allReady);
           }
         }
       }
@@ -370,12 +382,13 @@ export function renderSetupWizard(root: HTMLElement, ctx: any) {
       updateCompleteStatus();
 
       if (!envReady) {
+        const missingFlags = getMissing(snapshot);
         const missing: string[] = [];
-        if (!snapshot?.camo?.installed) missing.push('camo-cli');
-        if (!snapshot?.services?.unifiedApi) missing.push('unified-api');
-        if (!snapshot?.firefox?.installed) missing.push('browser-kernel');
+        if (missingFlags.camo) missing.push('camo-cli');
+        if (missingFlags.core) missing.push('unified-api');
+        if (missingFlags.runtime) missing.push('browser-kernel');
         setupStatusText.textContent = `存在待修复项: ${missing.join(', ')}`;
-        if (!snapshot?.services?.camoRuntime) {
+        if (missingFlags.runtimeService) {
           setupStatusText.textContent += '（camo-runtime 未就绪，当前为可选）';
         }
       } else if (!snapshot?.geoip?.installed) {

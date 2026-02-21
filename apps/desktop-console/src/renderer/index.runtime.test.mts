@@ -57,7 +57,11 @@ test('renderer index boots onboarding tabs and responds to cmd events', async ()
   (window as any).api = {
     settingsGet: async () => settings,
     settingsSet: async (payload: any) => Object.assign(settings, payload),
-    envCheckAll: async () => ({ allReady: false }),
+    envCheckAll: async () => ({
+      allReady: false,
+      browserReady: false,
+      missing: { core: true, runtimeService: true, camo: false, runtime: true, geoip: true },
+    }),
     desktopHeartbeat: async () => {
       heartbeatCalls.push(Date.now());
       return { ok: true };
@@ -112,6 +116,15 @@ test('renderer index boots onboarding tabs and responds to cmd events', async ()
       }
       return { ok: true, json: {} };
     },
+    scheduleInvoke: async (input: any) => {
+      const action = String(input?.action || '').trim();
+      if (action === 'list') return { ok: true, json: { tasks: [] } };
+      if (action === 'save') return { ok: true, json: { task: { id: 'sched-0001' } } };
+      if (action === 'run') return { ok: true, json: { result: { runResult: { lastRunId: 'rid-schedule' } } } };
+      if (action === 'daemon-start') return { ok: true, runId: 'rid-daemon' };
+      return { ok: true, json: {} };
+    },
+    taskRunEphemeral: async () => ({ ok: true, runId: 'rid-ephemeral' }),
     cmdSpawn: async (spec: any) => {
       spawns.push(spec);
       return { runId: `rid-${spawns.length}` };

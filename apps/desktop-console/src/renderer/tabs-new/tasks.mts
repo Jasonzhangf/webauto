@@ -55,22 +55,6 @@ function parseSortableTime(value: string | null | undefined): number {
   return Number.isFinite(ts) ? ts : 0;
 }
 
-function isKeywordRequired(taskType: string): boolean {
-  return taskType === 'xhs-unified' || taskType === 'weibo-search' || taskType === '1688-search';
-}
-
-function commandTypeToWeiboTaskType(commandType: string): string {
-  if (commandType === 'weibo-search') return 'search';
-  if (commandType === 'weibo-monitor') return 'monitor';
-  return 'timeline';
-}
-
-function fallbackTaskName(data: TaskFormData): string {
-  const keyword = String(data.keyword || '').trim();
-  const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-  return keyword ? `${data.taskType}-${keyword}` : `${data.taskType}-${stamp}`;
-}
-
 export function renderTasksPanel(root: HTMLElement, ctx: any) {
   root.innerHTML = '';
 
@@ -282,10 +266,7 @@ export function renderTasksPanel(root: HTMLElement, ctx: any) {
     if (typeof ctx?.api?.pathJoin === 'function') return ctx.api.pathJoin(...parts);
     return parts.filter(Boolean).join('/');
   };
-  const scheduleScript = joinPath('apps', 'webauto', 'entry', 'schedule.mjs');
   const quotaScript = joinPath('apps', 'webauto', 'entry', 'lib', 'quota-status.mjs');
-  const xhsScript = joinPath('apps', 'webauto', 'entry', 'xhs-unified.mjs');
-  const weiboScript = joinPath('apps', 'webauto', 'entry', 'weibo-unified.mjs');
 
   function getTaskById(taskId: string): ScheduleTask | null {
     const id = String(taskId || '').trim();
@@ -470,22 +451,28 @@ export function renderTasksPanel(root: HTMLElement, ctx: any) {
     statToday.textContent = String(totalRunCount);
   }
 
-  async function runJsonScript(scriptPath: string, args: string[], timeoutMs = 60_000) {
-    const ret = await ctx.api.cmdRunJson({
-      title: `task-panel ${args.join(' ')}`.trim(),
-      cwd: '',
-      args: [scriptPath, ...args, '--json'],
-      timeoutMs,
-    });
-    if (!ret?.ok) {
-      const reason = String(ret?.error || ret?.stderr || ret?.stdout || 'unknown_error').trim();
-      throw new Error(reason || 'command failed');
+  async function invokeSchedule(input: Record<string, any>) {
+    if (typeof ctx.api?.scheduleInvoke !== 'function') {
+      throw new Error('scheduleInvoke unavailable');
     }
-    return ret.json || {};
+    const ret = await ctx.api.scheduleInvoke(input);
+    if (!ret?.ok) {
+      const reason = String(ret?.error || 'schedule command failed').trim();
+      throw new Error(reason || 'schedule command failed');
+    }
+    return ret?.json ?? ret;
   }
 
-  async function runScheduleJson(args: string[], timeoutMs = 60_000) {
-    return runJsonScript(scheduleScript, args, timeoutMs);
+  async function invokeTaskRunEphemeral(input: Record<string, any>) {
+    if (typeof ctx.api?.taskRunEphemeral !== 'function') {
+      throw new Error('taskRunEphemeral unavailable');
+    }
+    const ret = await ctx.api.taskRunEphemeral(input);
+    if (!ret?.ok) {
+      const reason = String(ret?.error || 'run ephemeral failed').trim();
+      throw new Error(reason || 'run ephemeral failed');
+    }
+    return ret;
   }
 
   async function loadQuotaStatus() {
@@ -516,7 +503,7 @@ export function renderTasksPanel(root: HTMLElement, ctx: any) {
 
   async function loadTasks() {
     try {
-      const out = await runScheduleJson(['list']);
+      const out = await invokeSchedule({ action: 'list' });
       tasks = parseTaskRows(out);
       renderHistorySelect();
       renderRecentTasks();
@@ -539,38 +526,27 @@ export function renderTasksPanel(root: HTMLElement, ctx: any) {
       'like-keywords': data.likeKeywords,
     };
     if (String(data.taskType || '').startsWith('weibo-')) {
-      argv['task-type'] = commandTypeToWeiboTaskType(data.taskType);
       if (data.userId) argv['user-id'] = data.userId;
     }
     return argv;
   }
 
-  function validateBeforeSave(data: TaskFormData): string | null {
-    if (!data.profileId) return '请输入 Profile ID';
-    if (isKeywordRequired(data.taskType) && !data.keyword) return '请输入关键词';
-    if (data.taskType === 'weibo-monitor' && !data.userId) return '微博 monitor 任务需要 user-id';
-    if (data.scheduleType !== 'interval' && !data.runAt) return `${data.scheduleType} 任务需要执行时间`;
-    return null;
-  }
-
-  function buildSaveArgs(data: TaskFormData): string[] {
-    const args = data.id ? ['update', data.id] : ['add'];
-    args.push('--name', data.name || fallbackTaskName(data));
-    args.push('--enabled', String(data.enabled));
-    args.push('--command-type', data.taskType || 'xhs-unified');
-    args.push('--schedule-type', data.scheduleType);
-    if (data.scheduleType === 'interval') {
-      args.push('--interval-minutes', String(data.intervalMinutes));
-    } else {
-      args.push('--run-at', String(data.runAt || ''));
-    }
-    args.push('--max-runs', data.maxRuns === null ? '0' : String(data.maxRuns));
-    args.push('--argv-json', JSON.stringify(buildCommandArgv(data)));
-    return args;
+  function toSchedulePayload(data: TaskFormData): Record<string, any> {
+    return {
+      id: data.id || '',
+      name: data.name || '',
+      enabled: data.enabled,
+      commandType: data.taskType || 'xhs-unified',
+      scheduleType: data.scheduleType,
+      intervalMinutes: data.intervalMinutes,
+      runAt: data.runAt,
+      maxRuns: data.maxRuns,
+      argv: buildCommandArgv(data),
+    };
   }
 
   async function runSavedTask(taskId: string, data: TaskFormData) {
-    const out = await runScheduleJson(['run', taskId], 0);
+    const out = await invokeSchedule({ action: 'run', taskId, timeoutMs: 0 });
     const runId = String(
       out?.result?.runResult?.lastRunId
       || out?.result?.runResult?.runId
@@ -598,16 +574,11 @@ export function renderTasksPanel(root: HTMLElement, ctx: any) {
 
   async function saveTask(runImmediately = false) {
     const data = collectFormData();
-    const invalidReason = validateBeforeSave(data);
-    if (invalidReason) {
-      alert(invalidReason);
-      return;
-    }
     saveBtn.disabled = true;
     runBtn.disabled = true;
     runEphemeralBtn.disabled = true;
     try {
-      const out = await runScheduleJson(buildSaveArgs(data));
+      const out = await invokeSchedule({ action: 'save', payload: toSchedulePayload(data) });
       const taskId = String(out?.task?.id || data.id || '').trim();
       if (!taskId) {
         throw new Error('task id missing after save');
@@ -630,71 +601,13 @@ export function renderTasksPanel(root: HTMLElement, ctx: any) {
     }
   }
 
-  function buildEphemeralRunSpec(data: TaskFormData): { args: string[]; title: string; groupKey: string } | null {
-    if (!data.profileId) return null;
-    if (data.taskType === 'xhs-unified') {
-      if (!data.keyword) return null;
-      return {
-        title: `xhs unified: ${data.keyword}`,
-        groupKey: 'xhs-unified',
-        args: [
-          xhsScript,
-          '--profile', data.profileId,
-          '--keyword', data.keyword,
-          '--target', String(data.targetCount),
-          '--max-notes', String(data.targetCount),
-          '--env', data.env,
-          '--do-comments', String(data.collectComments),
-          '--fetch-body', String(data.collectBody),
-          '--do-likes', String(data.doLikes),
-          '--like-keywords', data.likeKeywords,
-        ],
-      };
-    }
-    if (data.taskType === 'weibo-search') {
-      if (!data.keyword) return null;
-      return {
-        title: `weibo: ${data.keyword}`,
-        groupKey: 'weibo-search',
-        args: [
-          weiboScript,
-          'search',
-          '--profile', data.profileId,
-          '--keyword', data.keyword,
-          '--target', String(data.targetCount),
-          '--env', data.env,
-        ],
-      };
-    }
-    return null;
-  }
-
   async function runWithoutSave() {
     const data = collectFormData();
-    if (!data.profileId) {
-      alert('请输入 Profile ID');
-      return;
-    }
-    if (isKeywordRequired(data.taskType) && !data.keyword) {
-      alert('请输入关键词');
-      return;
-    }
-    if (data.taskType === 'weibo-monitor' && !data.userId) {
-      alert('微博 monitor 任务需要 user-id');
-      return;
-    }
-    const spec = buildEphemeralRunSpec(data);
-    if (!spec) {
-      alert(`当前任务类型暂不支持仅执行(不保存): ${data.taskType}`);
-      return;
-    }
     runEphemeralBtn.disabled = true;
     try {
-      const ret = await ctx.api.cmdSpawn({
-        title: spec.title,
-        cwd: '',
-        args: spec.args,
-        groupKey: spec.groupKey,
+      const ret = await invokeTaskRunEphemeral({
+        commandType: data.taskType,
+        argv: buildCommandArgv(data),
       });
       const runId = String(ret?.runId || '').trim();
       if (runId) {
@@ -702,7 +615,7 @@ export function renderTasksPanel(root: HTMLElement, ctx: any) {
         updateStats();
       }
       if (typeof ctx.setStatus === 'function') {
-        ctx.setStatus(`started: ${spec.title}`);
+        ctx.setStatus(`started: ${data.taskType}`);
       }
       if (data.taskType === 'xhs-unified' && ctx && typeof ctx === 'object') {
         ctx.xhsCurrentRun = {

@@ -7,8 +7,7 @@ import { renderSchedulerPanel } from './scheduler.mts';
 type MockBundle = {
   ctx: any;
   calls: {
-    cmdRunJson: string[][];
-    cmdSpawn: any[];
+    scheduleInvoke: any[];
     cmdKill: any[];
     setActiveTab: string[];
     setStatus: string[];
@@ -40,12 +39,6 @@ async function flush(times = 4) {
   for (let i = 0; i < times; i += 1) await tick();
 }
 
-function readFlag(args: string[], flag: string): string {
-  const idx = args.indexOf(flag);
-  if (idx < 0) return '';
-  return String(args[idx + 1] || '').trim();
-}
-
 function findButtonByText(root: HTMLElement, text: string, nth = 0): HTMLButtonElement {
   const buttons = Array.from(root.querySelectorAll('button')) as HTMLButtonElement[];
   const matched = buttons.filter((btn) => String(btn.textContent || '').includes(text));
@@ -64,8 +57,7 @@ function findButtonByTextIn(container: HTMLElement, text: string, nth = 0): HTML
 
 function createMockCtx(): MockBundle {
   const calls = {
-    cmdRunJson: [] as string[][],
-    cmdSpawn: [] as any[],
+    scheduleInvoke: [] as any[],
     cmdKill: [] as any[],
     setActiveTab: [] as string[],
     setStatus: [] as string[],
@@ -114,96 +106,85 @@ function createMockCtx(): MockBundle {
   };
 
   const api: any = {
-    pathJoin: (...parts: string[]) => parts.filter(Boolean).join('/'),
-    cmdRunJson: async (spec: any) => {
-      const args = Array.isArray(spec?.args) ? spec.args.map((x: any) => String(x)) : [];
-      calls.cmdRunJson.push(args);
-      const cmd = String(args[1] || '').trim();
-      if (cmd === 'list') {
+    scheduleInvoke: async (input: any) => {
+      calls.scheduleInvoke.push(input);
+      const action = String(input?.action || '').trim();
+      if (action === 'list') {
         if (state.failListOnce) {
           state.failListOnce = false;
           return { ok: false, error: 'list_failed' };
         }
         return { ok: true, json: { tasks: state.tasks } };
       }
-      if (cmd === 'add') {
-        const id = `sched-${String(state.nextId).padStart(4, '0')}`;
-        state.nextId += 1;
-        const scheduleType = (readFlag(args, '--schedule-type') || 'interval') as any;
-        const intervalMinutes = Number(readFlag(args, '--interval-minutes') || 30) || 30;
-        const runAt = readFlag(args, '--run-at') || null;
-        const maxRunsRaw = Number(readFlag(args, '--max-runs') || 0);
-        const argvRaw = readFlag(args, '--argv-json');
-        let argv: any = {};
-        try { argv = argvRaw ? JSON.parse(argvRaw) : {}; } catch { argv = {}; }
-        state.tasks.push({
-          id,
-          name: readFlag(args, '--name') || id,
-          enabled: readFlag(args, '--enabled') !== 'false',
-          scheduleType,
-          intervalMinutes,
-          runAt,
-          maxRuns: maxRunsRaw > 0 ? maxRunsRaw : null,
-          nextRunAt: null,
-          commandType: 'xhs-unified',
-          commandArgv: argv,
-          lastRunAt: null,
-          lastStatus: null,
-          lastError: null,
-          runCount: 0,
-          failCount: 0,
-        });
-        return { ok: true, json: { id } };
-      }
-      if (cmd === 'update') {
-        const id = String(args[2] || '').trim();
+      if (action === 'save') {
+        const payload = input?.payload || {};
+        const argv = payload?.argv || {};
+        const commandType = String(payload?.commandType || 'xhs-unified');
+        if (!argv.profile && !argv.profiles && !argv.profilepool) {
+          return { ok: false, error: 'profile/profiles/profilepool 至少填写一个' };
+        }
+        if ((commandType === 'xhs-unified' || commandType === 'weibo-search' || commandType === '1688-search') && !argv.keyword) {
+          return { ok: false, error: '关键词不能为空' };
+        }
+        if (commandType === 'weibo-monitor' && !argv['user-id']) {
+          return { ok: false, error: '微博 monitor 任务需要 user-id' };
+        }
+        if ((payload.scheduleType === 'once' || payload.scheduleType === 'daily' || payload.scheduleType === 'weekly') && !payload.runAt) {
+          return { ok: false, error: `${payload.scheduleType} 任务需要锚点时间` };
+        }
+        const id = String(payload.id || '').trim() || `sched-${String(state.nextId).padStart(4, '0')}`;
         const idx = state.tasks.findIndex((x) => String(x.id) === id);
-        if (idx < 0) return { ok: false, error: 'missing_task' };
-        const scheduleType = (readFlag(args, '--schedule-type') || 'interval') as any;
-        const intervalMinutes = Number(readFlag(args, '--interval-minutes') || 30) || 30;
-        const runAt = readFlag(args, '--run-at') || null;
-        const maxRunsRaw = Number(readFlag(args, '--max-runs') || 0);
-        const argvRaw = readFlag(args, '--argv-json');
-        let argv: any = {};
-        try { argv = argvRaw ? JSON.parse(argvRaw) : {}; } catch { argv = {}; }
-        state.tasks[idx] = {
-          ...state.tasks[idx],
-          name: readFlag(args, '--name') || state.tasks[idx].name,
-          enabled: readFlag(args, '--enabled') !== 'false',
-          scheduleType,
-          intervalMinutes,
-          runAt,
-          maxRuns: maxRunsRaw > 0 ? maxRunsRaw : null,
-          commandArgv: argv,
+        const row = {
+          ...(idx >= 0 ? state.tasks[idx] : {}),
+          id,
+          name: String(payload.name || id),
+          enabled: payload.enabled !== false,
+          scheduleType: String(payload.scheduleType || 'interval'),
+          intervalMinutes: Number(payload.intervalMinutes || 30) || 30,
+          runAt: payload.runAt || null,
+          maxRuns: Number(payload.maxRuns || 0) > 0 ? Number(payload.maxRuns) : null,
+          nextRunAt: null,
+          commandType: String(payload.commandType || 'xhs-unified'),
+          commandArgv: payload.argv || {},
+          lastRunAt: idx >= 0 ? state.tasks[idx].lastRunAt : null,
+          lastStatus: idx >= 0 ? state.tasks[idx].lastStatus : null,
+          lastError: idx >= 0 ? state.tasks[idx].lastError : null,
+          runCount: idx >= 0 ? state.tasks[idx].runCount : 0,
+          failCount: idx >= 0 ? state.tasks[idx].failCount : 0,
         };
-        return { ok: true, json: { id } };
+        if (idx >= 0) state.tasks[idx] = row;
+        else {
+          state.tasks.push(row);
+          state.nextId += 1;
+        }
+        return { ok: true, json: { task: row } };
       }
-      if (cmd === 'run') {
-        const id = String(args[2] || '').trim();
+      if (action === 'run') {
+        const id = String(input?.taskId || '').trim();
         const row = state.tasks.find((x) => String(x.id) === id);
         if (row) {
           row.runCount = Number(row.runCount || 0) + 1;
           row.lastStatus = 'success';
           row.lastRunAt = new Date().toISOString();
         }
-        return { ok: true, json: { id } };
+        return { ok: true, json: { result: { runResult: { lastRunId: `rid-${id}` } } } };
       }
-      if (cmd === 'delete') {
-        const id = String(args[2] || '').trim();
+      if (action === 'delete') {
+        const id = String(input?.taskId || '').trim();
         state.tasks = state.tasks.filter((x) => String(x.id) !== id);
         return { ok: true, json: { id } };
       }
-      if (cmd === 'run-due') {
+      if (action === 'run-due') {
         return { ok: true, json: { count: 1, success: 1, failed: 0 } };
       }
-      if (cmd === 'export') {
-        const maybeId = String(args[2] || '').trim();
+      if (action === 'export') {
+        const maybeId = String(input?.taskId || '').trim();
         if (!maybeId) return { ok: true, json: { tasks: state.tasks } };
         const row = state.tasks.find((x) => String(x.id) === maybeId);
         return { ok: true, json: row ? { task: row } : {} };
       }
-      if (cmd === 'import') {
-        const payloadRaw = readFlag(args, '--payload-json');
+      if (action === 'import') {
+        const payloadRaw = String(input?.payloadJson || '');
         try {
           const parsed = JSON.parse(payloadRaw);
           const tasks = Array.isArray(parsed?.tasks) ? parsed.tasks : [];
@@ -219,11 +200,11 @@ function createMockCtx(): MockBundle {
         }
         return { ok: true, json: {} };
       }
+      if (action === 'daemon-start') {
+        const runId = `daemon-run-${calls.scheduleInvoke.filter((item) => item.action === 'daemon-start').length}`;
+        return { ok: true, runId };
+      }
       return { ok: true, json: {} };
-    },
-    cmdSpawn: async (spec: any) => {
-      calls.cmdSpawn.push(spec);
-      return { runId: `daemon-run-${calls.cmdSpawn.length}` };
     },
     cmdKill: async (payload: any) => {
       calls.cmdKill.push(payload);
@@ -331,15 +312,20 @@ test('scheduler panel supports validate + add/update/delete/import + daemon life
   const intervalWrap = root.querySelector('#scheduler-interval-wrap') as HTMLDivElement;
   const runAtWrap = root.querySelector('#scheduler-runat-wrap') as HTMLDivElement;
 
+  resetBtn.click();
+  await flush(1);
   saveBtn.click();
-  assert.equal(alertMessages.some((x) => x.includes('任务名不能为空')), true);
+  await flush(2);
+  assert.equal(alertMessages.some((x) => x.includes('profile/profiles/profilepool 至少填写一个')), true);
 
   nameInput.value = 'missing-profile';
   saveBtn.click();
+  await flush(2);
   assert.equal(alertMessages.some((x) => x.includes('profile/profiles/profilepool 至少填写一个')), true);
 
   profileInput.value = 'xiaohongshu-batch-0';
   saveBtn.click();
+  await flush(2);
   assert.equal(alertMessages.some((x) => x.includes('关键词不能为空')), true);
 
   keywordInput.value = '春晚';
@@ -348,12 +334,13 @@ test('scheduler panel supports validate + add/update/delete/import + daemon life
   assert.equal(runAtWrap.style.display === 'none', false);
   assert.equal(intervalWrap.style.display, 'none');
   saveBtn.click();
-  assert.equal(alertMessages.some((x) => x.includes('一次性任务需要锚点时间')), true);
+  await flush(2);
+  assert.equal(alertMessages.some((x) => x.includes('once 任务需要锚点时间')), true);
 
   runAtInput.value = '2026-02-20T10:30';
   saveBtn.click();
   await flush(4);
-  assert.equal(calls.cmdRunJson.some((args) => args.includes('add')), true);
+  assert.equal(calls.scheduleInvoke.some((item) => item.action === 'save'), true);
 
   const listAfterAdd = root.querySelector('#scheduler-list') as HTMLDivElement;
   assert.equal(String(listAfterAdd.textContent || '').includes('missing-profile'), true);
@@ -367,7 +354,7 @@ test('scheduler panel supports validate + add/update/delete/import + daemon life
   maxNotesInput.value = '99';
   saveBtn.click();
   await flush(4);
-  assert.equal(calls.cmdRunJson.some((args) => args.includes('update')), true);
+  assert.equal(calls.scheduleInvoke.filter((item) => item.action === 'save').length >= 2, true);
 
   findButtonByTextIn(schedulerList, '载入配置', 0).click();
   await flush(2);
@@ -375,7 +362,7 @@ test('scheduler panel supports validate + add/update/delete/import + daemon life
 
   findButtonByTextIn(schedulerList, '执行', 0).click();
   await flush(3);
-  assert.equal(calls.cmdRunJson.some((args) => args[1] === 'run'), true);
+  assert.equal(calls.scheduleInvoke.some((item) => item.action === 'run'), true);
   assert.equal(calls.setStatus.some((text) => text.includes('running: sched-0001')), true);
   assert.equal(calls.setActiveTab.includes('dashboard'), true);
 
@@ -385,11 +372,11 @@ test('scheduler panel supports validate + add/update/delete/import + daemon life
 
   findButtonByTextIn(schedulerList, '导出', 0).click();
   await flush(3);
-  assert.equal(calls.cmdRunJson.some((args) => args[1] === 'export' && args.length >= 3), true);
+  assert.equal(calls.scheduleInvoke.some((item) => item.action === 'export' && item.taskId), true);
 
   findButtonByTextIn(schedulerList, '删除', 0).click();
   await flush(3);
-  assert.equal(calls.cmdRunJson.some((args) => args[1] === 'delete'), true);
+  assert.equal(calls.scheduleInvoke.some((item) => item.action === 'delete'), true);
 
   const refreshBtn = root.querySelector('#scheduler-refresh-btn') as HTMLButtonElement;
   const runDueBtn = root.querySelector('#scheduler-run-due-btn') as HTMLButtonElement;
@@ -419,9 +406,9 @@ test('scheduler panel supports validate + add/update/delete/import + daemon life
   }
   (document as any).createElement = originalCreateElement;
   await flush(8);
-  assert.equal(calls.cmdRunJson.some((args) => args[1] === 'run-due'), true);
-  assert.equal(calls.cmdRunJson.some((args) => args[1] === 'export' && args[2] === '--json'), true);
-  assert.equal(calls.cmdRunJson.some((args) => args[1] === 'import'), true);
+  assert.equal(calls.scheduleInvoke.some((item) => item.action === 'run-due'), true);
+  assert.equal(calls.scheduleInvoke.some((item) => item.action === 'export' && !item.taskId), true);
+  assert.equal(calls.scheduleInvoke.some((item) => item.action === 'import'), true);
   assert.equal(String((root.querySelector('#scheduler-list') as HTMLDivElement).textContent || '').includes('imported'), true);
 
   const daemonStatus = root.querySelector('#scheduler-daemon-status') as HTMLSpanElement;
@@ -432,7 +419,7 @@ test('scheduler panel supports validate + add/update/delete/import + daemon life
 
   daemonStartBtn.click();
   await flush(2);
-  assert.equal(calls.cmdSpawn.length, 1);
+  assert.equal(calls.scheduleInvoke.some((item) => item.action === 'daemon-start'), true);
   assert.equal(daemonStatus.textContent?.includes('运行中'), true);
   state.cmdEventCb?.({ runId: 'daemon-run-1', type: 'exit' });
   await flush(2);
