@@ -47,3 +47,45 @@ test('resolveNpxBin uses npx on non-win32 platform', async () => {
   const resolved = internals.resolveNpxBin('darwin', '/usr/local/bin:/usr/bin');
   assert.equal(resolved, 'npx');
 });
+
+test('resolveModeAndSelection keeps check mode defaults', async () => {
+  const internals = await loadInternals();
+  const resolved = internals.resolveModeAndSelection({});
+  assert.equal(resolved.mode, 'check');
+  assert.equal(resolved.browser, true);
+  assert.equal(resolved.geoip, false);
+});
+
+test('resolveModeAndSelection supports reinstall all by default', async () => {
+  const internals = await loadInternals();
+  const resolved = internals.resolveModeAndSelection({ reinstall: true });
+  assert.equal(resolved.mode, 'reinstall');
+  assert.equal(resolved.browser, true);
+  assert.equal(resolved.geoip, true);
+});
+
+test('resolveModeAndSelection supports legacy download flags', async () => {
+  const internals = await loadInternals();
+  const resolved = internals.resolveModeAndSelection({ 'download-browser': true });
+  assert.equal(resolved.mode, 'install');
+  assert.equal(resolved.browser, true);
+  assert.equal(resolved.geoip, false);
+});
+
+test('resolveModeAndSelection supports check --all', async () => {
+  const internals = await loadInternals();
+  const resolved = internals.resolveModeAndSelection({ all: true });
+  assert.equal(resolved.mode, 'check');
+  assert.equal(resolved.browser, true);
+  assert.equal(resolved.geoip, true);
+});
+
+test('resolveWebautoRoot prefers WEBAUTO_ROOT when provided', async () => {
+  const internals = await loadInternals();
+  const prevRoot = process.env.WEBAUTO_ROOT;
+  process.env.WEBAUTO_ROOT = path.join(tempDirs[0] || makeDir(), 'portable');
+  const root = internals.resolveWebautoRoot();
+  assert.match(root, /\.webauto$/);
+  if (prevRoot === undefined) delete process.env.WEBAUTO_ROOT;
+  else process.env.WEBAUTO_ROOT = prevRoot;
+});

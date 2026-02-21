@@ -59,6 +59,7 @@ export function renderSetupWizard(root: HTMLElement, ctx: any) {
     <div style="margin-top: var(--gap);">
       <button id="env-check-btn" class="secondary" style="width: 100%;">检查环境</button>
       <button id="env-repair-all-btn" style="width: 100%; margin-top: 8px; display: none;">一键修复缺失项</button>
+      <button id="env-reinstall-all-btn" class="secondary" style="width: 100%; margin-top: 8px;">一键卸载重装资源</button>
     </div>
     <div id="env-repair-history" class="muted" style="margin-top: 10px; font-size: 12px;"></div>
   `;
@@ -68,7 +69,7 @@ export function renderSetupWizard(root: HTMLElement, ctx: any) {
   const accountCard = createEl('div', { className: 'bento-cell' });
   accountCard.innerHTML = `
     <div class="bento-title">账户设置</div>
-    <div class="account-list" id="account-list" style="margin-bottom: var(--gap); max-height: 200px; overflow: auto;">
+    <div class="account-list" id="account-list" style="margin-bottom: var(--gap);">
       <div style="padding:12px; text-align:center; color:#8b93a6;">暂无账户，请点击下方按钮添加</div>
     </div>
     <div class="row">
@@ -105,6 +106,7 @@ export function renderSetupWizard(root: HTMLElement, ctx: any) {
   // Elements
   const envCheckBtn = root.querySelector('#env-check-btn') as HTMLButtonElement;
   const envRepairAllBtn = root.querySelector('#env-repair-all-btn') as HTMLButtonElement;
+  const envReinstallAllBtn = root.querySelector('#env-reinstall-all-btn') as HTMLButtonElement;
   const repairCamoBtn = root.querySelector('#repair-camo-btn') as HTMLButtonElement;
   const repairCoreBtn = root.querySelector('#repair-core-btn') as HTMLButtonElement;
   const repairCore2Btn = root.querySelector('#repair-core2-btn') as HTMLButtonElement;
@@ -215,21 +217,42 @@ export function renderSetupWizard(root: HTMLElement, ctx: any) {
     return { ok: false, detail: '不支持修复核心服务' };
   }
 
-  async function repairInstall({ browser, geoip }: { browser?: boolean; geoip?: boolean }): Promise<{ ok: boolean; detail?: string }> {
+  async function repairInstall(
+    { browser, geoip, reinstall, uninstall }: { browser?: boolean; geoip?: boolean; reinstall?: boolean; uninstall?: boolean },
+  ): Promise<{ ok: boolean; detail?: string }> {
     if (typeof ctx.api?.envRepairDeps === 'function') {
-      setupStatusText.textContent = geoip && browser ? '正在安装依赖（Camoufox/GeoIP）...' : geoip ? '正在安装 GeoIP（可选）...' : '正在安装 Camoufox...';
-      const res = await ctx.api.envRepairDeps({ browser: Boolean(browser), geoip: Boolean(geoip) }).catch((err: any) => ({ ok: false, error: err?.message || String(err) }));
+      setupStatusText.textContent = reinstall
+        ? '正在卸载并重装资源（Camoufox/GeoIP）...'
+        : geoip && browser
+          ? '正在安装依赖（Camoufox/GeoIP）...'
+          : geoip
+            ? '正在安装 GeoIP（可选）...'
+            : '正在安装 Camoufox...';
+      const res = await ctx.api.envRepairDeps({
+        browser: Boolean(browser),
+        geoip: Boolean(geoip),
+        reinstall: Boolean(reinstall),
+        uninstall: Boolean(uninstall),
+      }).catch((err: any) => ({ ok: false, error: err?.message || String(err) }));
       const ok = res?.ok !== false;
       const detail = res?.error || (ok ? '' : '依赖安装失败');
       return { ok, detail };
     }
     if (typeof ctx.api?.cmdRunJson === 'function') {
-      setupStatusText.textContent = geoip && browser ? '正在安装依赖（Camoufox/GeoIP）...' : geoip ? '正在安装 GeoIP（可选）...' : '正在安装 Camoufox...';
+      setupStatusText.textContent = reinstall
+        ? '正在卸载并重装资源（Camoufox/GeoIP）...'
+        : geoip && browser
+          ? '正在安装依赖（Camoufox/GeoIP）...'
+          : geoip
+            ? '正在安装 GeoIP（可选）...'
+            : '正在安装 Camoufox...';
       const script = ctx.api.pathJoin('apps', 'webauto', 'entry', 'xhs-install.mjs');
       const args = [script];
+      if (reinstall) args.push('--reinstall');
+      else if (uninstall) args.push('--uninstall');
       if (browser) args.push('--download-browser');
       if (geoip) args.push('--download-geoip');
-      args.push('--ensure-backend');
+      if (!uninstall) args.push('--ensure-backend');
       const res = await ctx.api
         .cmdRunJson({
           title: 'setup auto repair',
@@ -282,6 +305,7 @@ export function renderSetupWizard(root: HTMLElement, ctx: any) {
   async function runRepair(label: string, action: () => Promise<any>) {
     envCheckBtn.disabled = true;
     envRepairAllBtn.disabled = true;
+    envReinstallAllBtn.disabled = true;
     repairCamoBtn.disabled = true;
     repairCoreBtn.disabled = true;
     repairCore2Btn.disabled = true;
@@ -319,6 +343,7 @@ export function renderSetupWizard(root: HTMLElement, ctx: any) {
         detail: detail || undefined,
       });
       envCheckBtn.disabled = false;
+      envReinstallAllBtn.disabled = false;
     }
   }
 
@@ -604,6 +629,8 @@ export function renderSetupWizard(root: HTMLElement, ctx: any) {
     const snapshot = await collectEnvironment();
     return await repairMissing(snapshot);
   });
+  envReinstallAllBtn.onclick = () => void runRepair('一键卸载重装资源', () =>
+    repairInstall({ browser: true, geoip: true, reinstall: true }));
   repairCoreBtn.onclick = () => void runRepair('修复核心服务', repairCoreServices);
   repairCore2Btn.onclick = () => void runRepair('修复核心服务', repairCoreServices);
   repairCamoBtn.onclick = () => void runRepair('修复 Camoufox CLI/Runtime', () => repairInstall({ browser: true }));

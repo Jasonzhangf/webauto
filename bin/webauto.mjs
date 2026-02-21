@@ -81,12 +81,14 @@ Usage:
   webauto --help
   webauto account --help
   webauto schedule --help
+  webauto deps --help
   webauto ui --help
   webauto xhs --help
 
 Core Commands:
   webauto account <list|sync|add|get|update|delete|login|sync-alias> [options]
   webauto schedule <list|get|add|update|delete|import|export|run|run-due|daemon> [options]
+  webauto deps <check|auto|install|uninstall|reinstall> [options]
   webauto ui console [--build] [--install] [--check]
   webauto ui cli <action> [options]
   webauto xhs install [--download-browser] [--download-geoip] [--ensure-backend]
@@ -108,6 +110,8 @@ Examples (standard):
   webauto schedule add --name "工作服-半小时" --schedule-type interval --interval-minutes 30 --profile xiaohongshu-batch-1 --keyword "工作服定制" --max-notes 50 --env debug
   webauto schedule list
   webauto schedule daemon --interval-sec 30
+  webauto deps install --all
+  webauto deps reinstall --all
   webauto ui console --check
   webauto ui console --build
   webauto ui console --install
@@ -181,13 +185,13 @@ function printXhsHelp() {
   console.log(`webauto xhs
 
 Usage:
-  webauto xhs install [--download-browser] [--download-geoip] [--ensure-backend]
+  webauto xhs install [--download-browser] [--download-geoip] [--ensure-backend] [--install|--reinstall|--uninstall] [--browser|--geoip|--all]
   webauto xhs unified --profile <id> --keyword <kw> [options...]
   webauto xhs status [--run-id <id>] [--json]
   webauto xhs orchestrate --profile <id> --keyword <kw> [options...]
 
 Subcommands:
-  install      运行 xhs-install，检查/安装 camoufox、geoip，按需拉起 backend
+  install      运行资源管理（兼容旧入口），支持检查/安装/卸载/重装 camoufox、geoip，按需拉起 backend
   unified      运行统一脚本（搜索 + 打开详情 + 评论抓取 + 点赞）
   status       查询当前任务状态与错误摘要（支持 runId 详情）
   orchestrate  运行编排入口（默认调用 unified 模式）
@@ -305,6 +309,31 @@ Examples:
   webauto schedule list
   webauto schedule run-due --json
   webauto schedule daemon --interval-sec 30
+`);
+}
+
+function printDepsHelp() {
+  console.log(`webauto deps
+
+Usage:
+  webauto deps --help
+  webauto deps check [--browser|--geoip|--all] [--json]
+  webauto deps auto [--browser|--geoip|--all] [--json]
+  webauto deps install [--browser|--geoip|--all] [--ensure-backend] [--json]
+  webauto deps uninstall [--browser|--geoip|--all] [--json]
+  webauto deps reinstall [--browser|--geoip|--all] [--ensure-backend] [--json]
+
+Notes:
+  - 不指定资源范围时默认 --all
+  - install/reinstall 默认会追加 --ensure-backend（可用 --no-ensure-backend 关闭）
+  - auto 模式用于 npm 安装后自动补齐缺失资源
+
+Examples:
+  webauto deps check --all --json
+  webauto deps install --all
+  webauto deps install --browser --ensure-backend
+  webauto deps uninstall --geoip
+  webauto deps reinstall --all --json
 `);
 }
 
@@ -490,6 +519,10 @@ async function main() {
       printScheduleHelp();
       return;
     }
+    if (cmd === 'deps') {
+      printDepsHelp();
+      return;
+    }
     if (cmd === 'ui') {
       printUiConsoleHelp();
       return;
@@ -582,6 +615,48 @@ async function main() {
   if (cmd === 'schedule') {
     const script = path.join(ROOT, 'apps', 'webauto', 'entry', 'schedule.mjs');
     await run(process.execPath, [script, ...rawArgv.slice(1)]);
+    return;
+  }
+
+  if (cmd === 'deps') {
+    if (!sub || sub === 'help') {
+      printDepsHelp();
+      return;
+    }
+    const script = path.join(ROOT, 'apps', 'webauto', 'entry', 'xhs-install.mjs');
+    const passthrough = rawArgv.slice(2);
+    const hasSelection = passthrough.some((item) => (
+      item === '--browser'
+      || item === '--geoip'
+      || item === '--all'
+      || item === '--download-browser'
+      || item === '--download-geoip'
+    ));
+    const disableEnsureBackend = passthrough.includes('--no-ensure-backend');
+    const modeArgs = [];
+    if (sub === 'check') {
+      // keep default mode from xhs-install (check).
+    } else if (sub === 'auto') {
+      modeArgs.push('--auto');
+      if (!hasSelection) modeArgs.push('--all');
+    } else if (sub === 'install') {
+      modeArgs.push('--install');
+      if (!hasSelection) modeArgs.push('--all');
+      if (!disableEnsureBackend) modeArgs.push('--ensure-backend');
+    } else if (sub === 'uninstall' || sub === 'remove') {
+      modeArgs.push('--uninstall');
+      if (!hasSelection) modeArgs.push('--all');
+    } else if (sub === 'reinstall') {
+      modeArgs.push('--reinstall');
+      if (!hasSelection) modeArgs.push('--all');
+      if (!disableEnsureBackend) modeArgs.push('--ensure-backend');
+    } else {
+      console.error(`❌ 未知 deps 子命令: ${sub}`);
+      printDepsHelp();
+      process.exit(2);
+    }
+    const forwarded = passthrough.filter((item) => item !== '--no-ensure-backend');
+    await run(process.execPath, [script, ...modeArgs, ...forwarded]);
     return;
   }
 

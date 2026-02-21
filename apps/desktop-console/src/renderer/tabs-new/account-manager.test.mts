@@ -42,6 +42,19 @@ test('account manager UI labels runtime as camo', async () => {
   const src = await getSrc();
   assert.match(src, />Camo CLI</);
   assert.match(src, />Camo Runtime（可选）</);
+  assert.match(src, /id="env-cleanup-btn"/);
   assert.match(src, /services\.camoRuntime/);
   assert.doesNotMatch(src, /browserService/);
+});
+
+test('account manager exposes platform badge and open\\/fix actions', async () => {
+  const src = await getSrc();
+  assert.match(src, /const PLATFORM_ICON/);
+  assert.match(src, /const PLATFORM_LABEL/);
+  assert.match(src, /\['检查'\]/);
+  assert.match(src, /\['打开'\]/);
+  assert.match(src, /\['修复'\]/);
+  assert.match(src, /function getPlatformInfo/);
+  assert.match(src, /openAccountLogin\(account/);
+  assert.match(src, /fixAccount\(account/);
 });

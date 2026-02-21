@@ -173,7 +173,7 @@ export function renderSchedulerPanel(root: HTMLElement, ctx: any) {
   const listCell = createEl('div', { className: 'bento-cell' });
   listCell.innerHTML = `
     <div class="bento-title">任务列表</div>
-    <div id="scheduler-list" style="max-height: 560px; overflow: auto;"></div>
+    <div id="scheduler-list"></div>
   `;
   grid.appendChild(listCell);
   root.appendChild(grid);

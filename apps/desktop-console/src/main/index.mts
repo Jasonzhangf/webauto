@@ -105,6 +105,8 @@ class GroupQueue {
 
 const groupQueues = new Map<string, GroupQueue>();
 const runs = new Map<string, { child: ReturnType<typeof spawn>; title: string; startedAt: number; profiles?: string[] }>();
+const trackedRunPids = new Set<number>();
+let appExitCleanupPromise: Promise<void> | null = null;
 
 const UI_HEARTBEAT_TIMEOUT_MS = resolveUiHeartbeatTimeoutMs(process.env);
 let lastUiHeartbeatAt = Date.now();
@@ -262,6 +264,103 @@ function killAllRuns(reason = 'ui_heartbeat_timeout') {
   if (reason === 'ui_heartbeat_timeout' || reason === 'window_closed') {
     void stopCoreServicesBestEffort(reason);
   }
+}
+
+function trackRunPid(child: ReturnType<typeof spawn>) {
+  const pid = Number(child?.pid || 0);
+  if (pid > 0) trackedRunPids.add(pid);
+}
+
+function untrackRunPid(child: ReturnType<typeof spawn>) {
+  const pid = Number(child?.pid || 0);
+  if (pid > 0) trackedRunPids.delete(pid);
+}
+
+async function cleanupTrackedRunPidsBestEffort(reason: string) {
+  for (const pid of Array.from(trackedRunPids.values())) {
+    try {
+      if (process.platform === 'win32') {
+        spawn('taskkill', ['/PID', String(pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true });
+      } else {
+        spawn('pkill', ['-TERM', '-P', String(pid)], { stdio: 'ignore' }).on('error', () => {});
+        process.kill(pid, 'SIGTERM');
+      }
+    } catch {
+      // ignore
+    }
+    trackedRunPids.delete(pid);
+  }
+  if (trackedRunPids.size > 0) {
+    console.warn(`[desktop-console] residual run pids after cleanup (${reason}): ${trackedRunPids.size}`);
+    trackedRunPids.clear();
+  }
+}
+
+async function cleanupCamoSessionsBestEffort(reason: string, includeLocks: boolean) {
+  const camoCli = path.join(REPO_ROOT, 'bin', 'camoufox-cli.mjs');
+  const invoke = async (args: string[], timeoutMs = 60_000) =>
+    runJson({
+      title: `camo ${args.join(' ')}`,
+      cwd: REPO_ROOT,
+      args: [camoCli, ...args, '--json'],
+      timeoutMs,
+    }).catch((err: any) => ({ ok: false, error: err?.message || String(err) }));
+
+  const stopAll = await invoke(['stop', 'all']);
+  if (!stopAll?.ok) {
+    console.warn(`[desktop-console] camo stop all failed (${reason})`, stopAll?.error || stopAll?.stderr || stopAll?.stdout || stopAll);
+  }
+
+  if (!includeLocks) return;
+  const cleanupLocks = await invoke(['cleanup', 'locks']);
+  if (!cleanupLocks?.ok) {
+    console.warn(`[desktop-console] camo cleanup locks failed (${reason})`, cleanupLocks?.error || cleanupLocks?.stderr || cleanupLocks?.stdout || cleanupLocks);
+  }
+}
+
+type CleanupOptions = {
+  stopUiBridge?: boolean;
+  stopHeartbeat?: boolean;
+  stopCoreServices?: boolean;
+  stopStateBridge?: boolean;
+  includeLockCleanup?: boolean;
+};
+
+async function cleanupRuntimeEnvironment(reason: string, options: CleanupOptions = {}) {
+  killAllRuns(reason);
+  await cleanupTrackedRunPidsBestEffort(reason);
+  await cleanupCamoSessionsBestEffort(reason, options.includeLockCleanup !== false);
+
+  if (options.stopUiBridge) {
+    await uiCliBridge.stop().catch(() => null);
+  }
+  if (options.stopHeartbeat) {
+    stopCoreServiceHeartbeat();
+  }
+  if (heartbeatWatchdog) {
+    clearInterval(heartbeatWatchdog);
+    heartbeatWatchdog = null;
+  }
+  if (options.stopCoreServices) {
+    await stopCoreServicesBestEffort(reason);
+  }
+  if (options.stopStateBridge) {
+    stateBridge.stop();
+  }
+}
+
+function ensureAppExitCleanup(reason: string, options: CleanupOptions = {}) {
+  if (appExitCleanupPromise) return appExitCleanupPromise;
+  appExitCleanupPromise = cleanupRuntimeEnvironment(reason, {
+    stopUiBridge: true,
+    stopHeartbeat: true,
+    stopCoreServices: true,
+    stopStateBridge: options.stopStateBridge === true,
+    includeLockCleanup: true,
+  }).finally(() => {
+    appExitCleanupPromise = null;
+  });
+  return appExitCleanupPromise;
 }
 
 function ensureHeartbeatWatchdog() {
@@ -430,6 +529,7 @@ async function spawnCommand(spec: SpawnSpec) {
           windowsHide: true,
         });
 
+        trackRunPid(child);
         runs.set(runId, { child, title: spec.title, startedAt: now(), profiles: requestedProfiles });
         sendEvent({ type: 'started', runId, title: spec.title, pid: child.pid ?? -1, ts: now() });
 
@@ -451,6 +551,7 @@ async function spawnCommand(spec: SpawnSpec) {
           exitSignal = signal;
         });
         child.on('close', (code, signal) => {
+          untrackRunPid(child);
           stdoutLines.flush();
           stderrLines.flush();
           finalize(exitCode ?? code ?? null, exitSignal ?? signal ?? null);
@@ -691,30 +792,18 @@ function createWindow() {
 }
 
 app.on('window-all-closed', () => {
-  killAllRuns('window_closed');
-  void uiCliBridge.stop();
+  void ensureAppExitCleanup('window_closed');
   // macOS 下关闭窗口后也退出应用，避免命令行挂起
   app.quit();
 });
 
 // 确保窗口关闭时命令行能退出
 app.on('before-quit', () => {
-  killAllRuns('before_quit');
-  void uiCliBridge.stop();
-  stopCoreServiceHeartbeat();
-  void stopCoreServicesBestEffort('before_quit');
-  if (heartbeatWatchdog) {
-    clearInterval(heartbeatWatchdog);
-    heartbeatWatchdog = null;
-  }
+  void ensureAppExitCleanup('before_quit');
 });
 
 app.on('will-quit', () => {
-  killAllRuns('will_quit');
-  void uiCliBridge.stop();
-  stopCoreServiceHeartbeat();
-  void stopCoreServicesBestEffort('will_quit');
-  stateBridge.stop();
+  void ensureAppExitCleanup('will_quit', { stopStateBridge: true });
 });
 
 app.whenReady().then(async () => {
@@ -898,10 +987,18 @@ ipcMain.handle('env:repairCore', async () => {
   const services = await checkServices().catch(() => ({ unifiedApi: false, camoRuntime: false }));
   return { ok, services };
 });
-ipcMain.handle('env:repairDeps', async (_evt, input: { core?: boolean; browser?: boolean; geoip?: boolean }) => {
+ipcMain.handle('env:repairDeps', async (_evt, input: {
+  core?: boolean;
+  browser?: boolean;
+  geoip?: boolean;
+  reinstall?: boolean;
+  uninstall?: boolean;
+}) => {
   const wantCore = Boolean(input?.core);
   const wantBrowser = Boolean(input?.browser);
   const wantGeoip = Boolean(input?.geoip);
+  const wantReinstall = Boolean(input?.reinstall);
+  const wantUninstall = Boolean(input?.uninstall);
   const result: any = { ok: true, core: null, install: null, env: null };
 
   if (wantCore) {
@@ -915,9 +1012,12 @@ ipcMain.handle('env:repairDeps', async (_evt, input: { core?: boolean; browser?:
 
   if (wantBrowser || wantGeoip) {
     const args = [path.join('apps', 'webauto', 'entry', 'xhs-install.mjs')];
+    if (wantReinstall) args.push('--reinstall');
+    else if (wantUninstall) args.push('--uninstall');
+    else args.push('--install');
     if (wantBrowser) args.push('--download-browser');
     if (wantGeoip) args.push('--download-geoip');
-    args.push('--ensure-backend');
+    if (!wantUninstall) args.push('--ensure-backend');
     const installRes = await runJson({
       title: 'env repair deps',
       cwd: REPO_ROOT,
@@ -930,6 +1030,20 @@ ipcMain.handle('env:repairDeps', async (_evt, input: { core?: boolean; browser?:
 
   result.env = await checkEnvironment().catch(() => null);
   return result;
+});
+ipcMain.handle('env:cleanup', async () => {
+  markUiHeartbeat('env_cleanup');
+  await cleanupRuntimeEnvironment('env_cleanup', {
+    stopUiBridge: false,
+    stopHeartbeat: false,
+    stopCoreServices: false,
+    stopStateBridge: false,
+    includeLockCleanup: true,
+  });
+  return {
+    ok: true,
+    services: await checkServices().catch(() => ({ unifiedApi: false, camoRuntime: false })),
+  };
 });
 ipcMain.handle('config:saveLast', async (_evt, config: CrawlConfig) => {
   await saveCrawlConfig({ appRoot: APP_ROOT, repoRoot: REPO_ROOT }, config);

@@ -182,3 +182,20 @@ test('setup wizard checks env, repairs missing deps, creates account and enters 
 
   if (typeof dispose === 'function') dispose();
 });
+
+test('setup wizard supports one-click reinstall resources', async () => {
+  const { ctx, calls } = createMockCtx();
+  (window as any).api = ctx.api;
+
+  const root = document.createElement('div');
+  const dispose = renderSetupWizard(root, ctx) as (() => void) | void;
+  await flush(4);
+
+  const reinstallBtn = root.querySelector('#env-reinstall-all-btn') as HTMLButtonElement;
+  assert.ok(reinstallBtn);
+  reinstallBtn.click();
+  await flush(4);
+  assert.equal(calls.repairs.some((item) => item?.reinstall === true && item?.browser === true && item?.geoip === true), true);
+
+  if (typeof dispose === 'function') dispose();
+});

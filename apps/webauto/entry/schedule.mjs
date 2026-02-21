@@ -2,19 +2,43 @@
 import minimist from 'minimist';
 import fs from 'node:fs';
 import {
+  acquireScheduleDaemonLease,
   addScheduleTask,
+  claimScheduleTask,
   exportScheduleTasks,
   getScheduleTask,
+  getSchedulerPolicy,
   importScheduleTasks,
   listDueScheduleTasks,
   listScheduleTasks,
   markScheduleTaskResult,
+  normalizeSchedulerPolicy,
+  releaseScheduleDaemonLease,
+  releaseScheduleTaskClaim,
   removeScheduleTask,
+  renewScheduleDaemonLease,
+  renewScheduleTaskClaim,
+  setSchedulerPolicy,
   resolveSchedulesRoot,
   updateScheduleTask,
 } from './lib/schedule-store.mjs';
-import { runUnified } from './xhs-unified.mjs';
-import { runWeiboUnified } from './weibo-unified.mjs';
+
+let xhsRunnerPromise = null;
+let weiboRunnerPromise = null;
+
+async function getXhsRunner() {
+  if (!xhsRunnerPromise) {
+    xhsRunnerPromise = import('./xhs-unified.mjs').then((mod) => mod.runUnified);
+  }
+  return xhsRunnerPromise;
+}
+
+async function getWeiboRunner() {
+  if (!weiboRunnerPromise) {
+    weiboRunnerPromise = import('./weibo-unified.mjs').then((mod) => mod.runWeiboUnified);
+  }
+  return weiboRunnerPromise;
+}
 
 function output(payload, jsonMode) {
   if (jsonMode) {
@@ -149,6 +173,45 @@ function parseTaskInput(argv, mode = 'add') {
   return patch;
 }
 
+function createOwnerId(prefix = 'schedule') {
+  return `${prefix}-${process.pid}-${Date.now().toString(36)}-${Math.random().toString(16).slice(2, 8)}`;
+}
+
+function parseLeaseMs(value, fallbackMs) {
+  if (value === undefined || value === null || value === '') return fallbackMs;
+  const seconds = Number(value);
+  if (!Number.isFinite(seconds) || seconds <= 0) return fallbackMs;
+  return Math.max(1_000, Math.floor(seconds * 1000));
+}
+
+function mergePolicy(base, override) {
+  const left = base && typeof base === 'object' ? base : {};
+  const right = override && typeof override === 'object' ? override : {};
+  return {
+    ...left,
+    ...right,
+    maxConcurrencyByPlatform: {
+      ...(left.maxConcurrencyByPlatform || {}),
+      ...(right.maxConcurrencyByPlatform || {}),
+    },
+    resourceMutex: {
+      ...(left.resourceMutex || {}),
+      ...(right.resourceMutex || {}),
+    },
+  };
+}
+
+function resolveRuntimePolicy(argv = {}) {
+  const basePolicy = getSchedulerPolicy();
+  const policyOverride = argv['policy-json'] !== undefined
+    ? parseJson(argv['policy-json'], {})
+    : {};
+  const merged = mergePolicy(basePolicy, policyOverride);
+  const concurrencyOverride = parsePositiveInt(argv['max-concurrency'] ?? argv.concurrency, Number(merged.maxConcurrency || 1));
+  merged.maxConcurrency = concurrencyOverride;
+  return normalizeSchedulerPolicy(merged);
+}
+
 async function withConsoleSilenced(enabled, fn) {
   if (!enabled) return fn();
   const originalLog = console.log;
@@ -170,15 +233,45 @@ async function withConsoleSilenced(enabled, fn) {
 }
 
 async function executeTask(task, options = {}) {
+  const ownerId = String(options.ownerId || '').trim() || createOwnerId('runner');
+  const runToken = createOwnerId('claim');
+  const taskLeaseMs = parseLeaseMs(options.taskLeaseSec, 30 * 60 * 1000);
+  const policy = options.policy && typeof options.policy === 'object'
+    ? options.policy
+    : resolveRuntimePolicy({});
+  const claim = claimScheduleTask(task, {
+    ownerId,
+    runToken,
+    leaseMs: taskLeaseMs,
+    policy,
+  });
+  if (!claim.ok) {
+    return {
+      ok: false,
+      skipped: true,
+      taskId: task?.id || null,
+      name: task?.name || null,
+      reason: claim.reason || 'claim_failed',
+      details: claim.details || null,
+    };
+  }
+
+  const heartbeatMs = Math.max(5_000, Math.floor(taskLeaseMs / 3));
+  const heartbeat = setInterval(() => {
+    renewScheduleTaskClaim(task.id, { ownerId, runToken, leaseMs: taskLeaseMs });
+  }, heartbeatMs);
+  heartbeat.unref?.();
   const startedAt = Date.now();
   const quietExecutors = options.quietExecutors === true;
   try {
     const commandType = String(task?.commandType || 'xhs-unified').trim();
     const result = await withConsoleSilenced(quietExecutors, async () => {
       if (commandType === 'xhs-unified') {
+        const runUnified = await getXhsRunner();
         return runUnified(task.commandArgv || {});
       }
       if (commandType.startsWith('weibo-')) {
+        const runWeiboUnified = await getWeiboRunner();
         return runWeiboUnified(task.commandArgv || {});
       }
       if (commandType === '1688-search') {
@@ -195,6 +288,7 @@ async function executeTask(task, options = {}) {
     });
     return {
       ok: true,
+      skipped: false,
       taskId: task.id,
       name: task.name,
       durationMs,
@@ -215,26 +309,41 @@ async function executeTask(task, options = {}) {
     });
     return {
       ok: false,
+      skipped: false,
       taskId: task.id,
       name: task.name,
       durationMs,
       error: message,
       runResult,
     };
+  } finally {
+    clearInterval(heartbeat);
+    releaseScheduleTaskClaim(task.id, { ownerId, runToken });
   }
 }
 
 async function runDue(limit, options = {}) {
   const dueTasks = listDueScheduleTasks(limit);
+  const maxConcurrency = Math.max(1, Math.min(
+    Number(options?.policy?.maxConcurrency) || 1,
+    dueTasks.length || 1,
+  ));
+  const queue = [...dueTasks];
   const results = [];
-  for (const task of dueTasks) {
-    const item = await executeTask(task, options);
-    results.push(item);
+  async function worker() {
+    while (queue.length > 0) {
+      const task = queue.shift();
+      if (!task) break;
+      const item = await executeTask(task, options);
+      results.push(item);
+    }
   }
+  await Promise.all(Array.from({ length: maxConcurrency }, () => worker()));
   return {
     count: dueTasks.length,
     success: results.filter((item) => item.ok).length,
-    failed: results.filter((item) => !item.ok).length,
+    skipped: results.filter((item) => item.skipped === true).length,
+    failed: results.filter((item) => !item.ok && item.skipped !== true).length,
     results,
   };
 }
@@ -251,6 +360,8 @@ Usage:
   webauto schedule delete <taskId> [--json]
   webauto schedule import [--file <path> | --payload-json <json>] [--mode merge|replace] [--json]
   webauto schedule export [taskId] [--file <path>] [--json]
+  webauto schedule policy [--json]
+  webauto schedule policy set [--file <path> | --payload-json <json>] [--json]
   webauto schedule run <taskId> [--json]
   webauto schedule run-due [--limit <n>] [--json]
   webauto schedule daemon [--interval-sec <n>] [--limit <n>] [--once] [--json]
@@ -264,6 +375,10 @@ Task Options:
   --max-runs <n>             最大执行次数（>0；为空=不限）
   --command-type xhs-unified|weibo-timeline|weibo-search|weibo-monitor|1688-search
   --argv-json <json>         透传给任务执行器的参数对象
+  --max-concurrency <n>      调度并发上限（默认来自 policy）
+  --task-lease-sec <n>       单任务 claim lease 秒数（默认 1800）
+  --daemon-lease-sec <n>     daemon lease 秒数（默认 120）
+  --policy-json <json>       运行时策略覆盖（不落盘）
 
 Common xhs argv shortcuts (optional):
   --profile <id> --profiles <a,b> --profilepool <prefix>
@@ -327,16 +442,48 @@ async function cmdExport(taskId, argv, jsonMode) {
   output({ ok: true, ...payload }, jsonMode);
 }
 
-async function cmdRun(taskId, jsonMode) {
+async function cmdPolicy(arg1, argv, jsonMode) {
+  const action = String(arg1 || '').trim().toLowerCase();
+  if (!action || action === 'get' || action === 'show') {
+    output({ ok: true, policy: getSchedulerPolicy() }, jsonMode);
+    return;
+  }
+  if (action === 'set') {
+    const payloadText = argv['payload-json'];
+    const filePath = argv.file;
+    if (!payloadText && !filePath) {
+      throw new Error('policy set requires --file or --payload-json');
+    }
+    const payload = payloadText ? parseJson(payloadText, {}) : safeReadJsonFile(String(filePath || ''));
+    const policy = setSchedulerPolicy(payload);
+    output({ ok: true, policy }, jsonMode);
+    return;
+  }
+  throw new Error(`unknown policy command: ${action}`);
+}
+
+async function cmdRun(taskId, argv, jsonMode) {
   const task = getScheduleTask(taskId);
-  const result = await executeTask(task, { quietExecutors: jsonMode });
+  const policy = resolveRuntimePolicy(argv);
+  const result = await executeTask(task, {
+    quietExecutors: jsonMode,
+    ownerId: createOwnerId('run'),
+    taskLeaseSec: argv['task-lease-sec'],
+    policy,
+  });
   output({ ok: result.ok, result }, jsonMode);
-  if (!result.ok) process.exitCode = 1;
+  if (!result.ok || result.skipped) process.exitCode = 1;
 }
 
 async function cmdRunDue(argv, jsonMode) {
   const limit = parsePositiveInt(argv.limit, 20);
-  const result = await runDue(limit, { quietExecutors: jsonMode });
+  const policy = resolveRuntimePolicy(argv);
+  const result = await runDue(limit, {
+    quietExecutors: jsonMode,
+    ownerId: createOwnerId('run-due'),
+    taskLeaseSec: argv['task-lease-sec'],
+    policy,
+  });
   const ok = result.failed === 0;
   output({ ok, ...result }, jsonMode);
   if (!ok) process.exitCode = 1;
@@ -347,22 +494,57 @@ async function cmdDaemon(argv, jsonMode) {
   const limit = parsePositiveInt(argv.limit, 20);
   const runOnce = argv.once === true;
   if (runOnce) {
-    const onceResult = await runDue(limit, { quietExecutors: jsonMode });
+    const policy = resolveRuntimePolicy(argv);
+    const onceResult = await runDue(limit, {
+      quietExecutors: jsonMode,
+      ownerId: createOwnerId('daemon-once'),
+      taskLeaseSec: argv['task-lease-sec'],
+      policy,
+    });
     const ok = onceResult.failed === 0;
     output({ ok, mode: 'once', intervalSec, ...onceResult }, jsonMode);
     if (!ok) process.exitCode = 1;
     return;
   }
+  const ownerId = createOwnerId('daemon');
+  const daemonLeaseMs = parseLeaseMs(argv['daemon-lease-sec'], 2 * 60 * 1000);
+  const daemonLease = acquireScheduleDaemonLease({
+    ownerId,
+    leaseMs: daemonLeaseMs,
+  });
+  if (!daemonLease.ok) {
+    output({
+      ok: false,
+      mode: 'daemon',
+      error: 'daemon_lease_busy',
+      lease: daemonLease.lease || null,
+    }, jsonMode);
+    process.exitCode = 1;
+    return;
+  }
+  const policy = resolveRuntimePolicy(argv);
   output({
     ok: true,
     mode: 'daemon',
     root: resolveSchedulesRoot(),
     intervalSec,
     limit,
+    ownerId,
+    policy,
     startedAt: new Date().toISOString(),
   }, jsonMode);
+  const leaseHeartbeatMs = Math.max(5_000, Math.floor(daemonLeaseMs / 3));
+  const leaseHeartbeat = setInterval(() => {
+    renewScheduleDaemonLease({ ownerId, leaseMs: daemonLeaseMs });
+  }, leaseHeartbeatMs);
+  leaseHeartbeat.unref?.();
   const tick = async () => {
-    const result = await runDue(limit, { quietExecutors: jsonMode });
+    const result = await runDue(limit, {
+      quietExecutors: jsonMode,
+      ownerId,
+      taskLeaseSec: argv['task-lease-sec'],
+      policy,
+    });
     const line = {
       ts: new Date().toISOString(),
       event: 'schedule.tick',
@@ -370,6 +552,7 @@ async function cmdDaemon(argv, jsonMode) {
       limit,
       dueCount: result.count,
       success: result.success,
+      skipped: result.skipped,
       failed: result.failed,
       taskIds: result.results.map((item) => item.taskId),
     };
@@ -381,6 +564,8 @@ async function cmdDaemon(argv, jsonMode) {
   }, intervalSec * 1000);
   const shutdown = () => {
     clearInterval(timer);
+    clearInterval(leaseHeartbeat);
+    releaseScheduleDaemonLease({ ownerId });
     console.log(JSON.stringify({
       ts: new Date().toISOString(),
       event: 'schedule.stopped',
@@ -412,7 +597,8 @@ async function main() {
   if (cmd === 'delete' || cmd === 'remove' || cmd === 'rm') return cmdDelete(arg1, jsonMode);
   if (cmd === 'import') return cmdImport(argv, jsonMode);
   if (cmd === 'export') return cmdExport(arg1, argv, jsonMode);
-  if (cmd === 'run') return cmdRun(arg1, jsonMode);
+  if (cmd === 'policy') return cmdPolicy(arg1, argv, jsonMode);
+  if (cmd === 'run') return cmdRun(arg1, argv, jsonMode);
   if (cmd === 'run-due') return cmdRunDue(argv, jsonMode);
   if (cmd === 'daemon') return cmdDaemon(argv, jsonMode);
 

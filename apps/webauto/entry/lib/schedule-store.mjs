@@ -13,6 +13,23 @@ const SUPPORTED_COMMAND_TYPES = [
 ];
 const DEFAULT_INTERVAL_MINUTES = 30;
 const DAY_MS = 24 * 60 * 60 * 1000;
+const POLICY_FILE = 'policy.json';
+const LOCKS_DIR = 'locks';
+const DAEMON_LEASE_FILE = 'daemon-lease.json';
+const CLAIM_MUTEX_FILE = 'claim-mutex.json';
+const TASK_CLAIMS_DIR = 'task-claims';
+const RESOURCE_CLAIMS_DIR = 'resource-claims';
+const DEFAULT_TASK_LEASE_MS = 30 * 60 * 1000;
+const DEFAULT_DAEMON_LEASE_MS = 2 * 60 * 1000;
+const DEFAULT_SCHEDULER_POLICY = Object.freeze({
+  maxConcurrency: 1,
+  maxConcurrencyByPlatform: {},
+  resourceMutex: {
+    enabled: true,
+    dimensions: ['account', 'profile'],
+    allowCrossPlatformSameAccount: false,
+  },
+});
 
 function nowIso() {
   return new Date().toISOString();
@@ -81,6 +98,305 @@ export function resolveSchedulesRoot() {
 
 function resolveIndexPath() {
   return path.join(resolveSchedulesRoot(), INDEX_FILE);
+}
+
+function resolvePolicyPath() {
+  return path.join(resolveSchedulesRoot(), POLICY_FILE);
+}
+
+function resolveLocksRoot() {
+  return path.join(resolveSchedulesRoot(), LOCKS_DIR);
+}
+
+function resolveDaemonLeasePath() {
+  return path.join(resolveLocksRoot(), DAEMON_LEASE_FILE);
+}
+
+function resolveClaimMutexPath() {
+  return path.join(resolveLocksRoot(), CLAIM_MUTEX_FILE);
+}
+
+function resolveTaskClaimsRoot() {
+  return path.join(resolveLocksRoot(), TASK_CLAIMS_DIR);
+}
+
+function resolveResourceClaimsRoot() {
+  return path.join(resolveLocksRoot(), RESOURCE_CLAIMS_DIR);
+}
+
+function encodeLockKey(value) {
+  const raw = Buffer.from(String(value || ''), 'utf8').toString('base64');
+  return raw.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '') || 'empty';
+}
+
+function resolveTaskClaimPath(taskId) {
+  return path.join(resolveTaskClaimsRoot(), `${encodeLockKey(taskId)}.json`);
+}
+
+function resolveResourceClaimPath(resourceKey) {
+  return path.join(resolveResourceClaimsRoot(), `${encodeLockKey(resourceKey)}.json`);
+}
+
+function parseIsoTs(value) {
+  const ts = Date.parse(String(value || ''));
+  return Number.isFinite(ts) ? ts : null;
+}
+
+function buildLeasePayload({ ownerId, runToken = null, leaseMs, meta = {}, nowMs = Date.now() }) {
+  const ttl = Math.max(1_000, Math.floor(Number(leaseMs) || DEFAULT_TASK_LEASE_MS));
+  const iso = new Date(nowMs).toISOString();
+  return {
+    ownerId: String(ownerId || ''),
+    runToken: normalizeText(runToken),
+    createdAt: iso,
+    updatedAt: iso,
+    expiresAt: new Date(nowMs + ttl).toISOString(),
+    ...meta,
+  };
+}
+
+function isLeaseExpired(payload, nowMs = Date.now()) {
+  const expiryTs = parseIsoTs(payload?.expiresAt);
+  return !Number.isFinite(expiryTs) || expiryTs <= nowMs;
+}
+
+function safeUnlink(filePath) {
+  try {
+    fs.unlinkSync(filePath);
+  } catch {
+    // ignore
+  }
+}
+
+function readLease(filePath) {
+  return readJson(filePath, null);
+}
+
+function writeLease(filePath, payload) {
+  writeJson(filePath, payload);
+}
+
+function tryCreateLease(filePath, payload) {
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  let fd = null;
+  try {
+    fd = fs.openSync(filePath, 'wx');
+    fs.writeFileSync(fd, `${JSON.stringify(payload, null, 2)}\n`, 'utf8');
+    return { ok: true, lease: payload };
+  } catch (error) {
+    if (error?.code === 'EEXIST') return { ok: false, reason: 'exists' };
+    throw error;
+  } finally {
+    if (fd !== null) {
+      try {
+        fs.closeSync(fd);
+      } catch {
+        // ignore
+      }
+    }
+  }
+}
+
+function leaseOwnedBy(payload, ownerId, runToken = null) {
+  if (!payload || String(payload.ownerId || '') !== String(ownerId || '')) return false;
+  if (runToken === null || runToken === undefined || runToken === '') return true;
+  return String(payload.runToken || '') === String(runToken || '');
+}
+
+function acquireLease(filePath, { ownerId, runToken = null, leaseMs, meta = {}, nowMs = Date.now() }) {
+  const nextLease = buildLeasePayload({ ownerId, runToken, leaseMs, meta, nowMs });
+  const created = tryCreateLease(filePath, nextLease);
+  if (created.ok) {
+    return { ok: true, acquired: true, renewed: false, lease: created.lease };
+  }
+
+  const existing = readLease(filePath);
+  if (leaseOwnedBy(existing, ownerId, runToken)) {
+    const renewed = {
+      ...existing,
+      ...nextLease,
+      createdAt: existing?.createdAt || nextLease.createdAt,
+    };
+    writeLease(filePath, renewed);
+    return { ok: true, acquired: false, renewed: true, lease: renewed };
+  }
+
+  if (!isLeaseExpired(existing, nowMs)) {
+    return { ok: false, reason: 'busy', lease: existing };
+  }
+
+  safeUnlink(filePath);
+  const reclaimed = tryCreateLease(filePath, nextLease);
+  if (reclaimed.ok) {
+    return { ok: true, acquired: true, renewed: false, lease: reclaimed.lease, reclaimed: true };
+  }
+  return { ok: false, reason: 'busy', lease: readLease(filePath) };
+}
+
+function renewLease(filePath, { ownerId, runToken = null, leaseMs, nowMs = Date.now() }) {
+  const existing = readLease(filePath);
+  if (!existing) return { ok: false, reason: 'missing' };
+  if (!leaseOwnedBy(existing, ownerId, runToken)) return { ok: false, reason: 'owner_mismatch', lease: existing };
+  const nextLease = {
+    ...existing,
+    updatedAt: new Date(nowMs).toISOString(),
+    expiresAt: new Date(nowMs + Math.max(1_000, Math.floor(Number(leaseMs) || DEFAULT_TASK_LEASE_MS))).toISOString(),
+  };
+  writeLease(filePath, nextLease);
+  return { ok: true, lease: nextLease };
+}
+
+function releaseLease(filePath, { ownerId, runToken = null }) {
+  const existing = readLease(filePath);
+  if (!existing) return { ok: true, released: false, reason: 'missing' };
+  if (!leaseOwnedBy(existing, ownerId, runToken)) return { ok: false, released: false, reason: 'owner_mismatch', lease: existing };
+  safeUnlink(filePath);
+  return { ok: true, released: true, lease: existing };
+}
+
+function listActiveLeases(rootDir, nowMs = Date.now()) {
+  if (!fs.existsSync(rootDir)) return [];
+  const entries = fs.readdirSync(rootDir, { withFileTypes: true });
+  const leases = [];
+  for (const entry of entries) {
+    if (!entry.isFile() || !entry.name.endsWith('.json')) continue;
+    const fullPath = path.join(rootDir, entry.name);
+    const payload = readLease(fullPath);
+    if (!payload || isLeaseExpired(payload, nowMs)) {
+      safeUnlink(fullPath);
+      continue;
+    }
+    leases.push({ path: fullPath, lease: payload });
+  }
+  return leases;
+}
+
+function normalizeDimensions(raw) {
+  const input = Array.isArray(raw) ? raw : [];
+  const out = [];
+  for (const item of input) {
+    const value = String(item || '').trim().toLowerCase();
+    if (!value) continue;
+    if (!out.includes(value)) out.push(value);
+  }
+  return out;
+}
+
+function normalizeConcurrencyMap(raw) {
+  const source = raw && typeof raw === 'object' ? raw : {};
+  const out = {};
+  for (const [key, value] of Object.entries(source)) {
+    const name = String(key || '').trim().toLowerCase();
+    if (!name) continue;
+    const count = Number(value);
+    if (Number.isFinite(count) && count > 0) out[name] = Math.floor(count);
+  }
+  return out;
+}
+
+function extractTaskPlatform(task) {
+  const commandType = String(task?.commandType || DEFAULT_COMMAND_TYPE).trim();
+  const platform = commandType.split('-')[0];
+  return String(platform || 'unknown').toLowerCase();
+}
+
+function extractTaskIdentity(task) {
+  const argv = task?.commandArgv && typeof task.commandArgv === 'object' ? task.commandArgv : {};
+  return {
+    platform: extractTaskPlatform(task),
+    profile: normalizeText(argv.profile),
+    account: normalizeText(argv.accountId ?? argv['account-id'] ?? argv.account ?? argv.uid ?? argv.userId ?? argv['user-id']),
+  };
+}
+
+function buildResourceKeys(task, policy) {
+  const mutex = policy?.resourceMutex || {};
+  if (mutex.enabled === false) return [];
+  const dimensions = normalizeDimensions(mutex.dimensions || DEFAULT_SCHEDULER_POLICY.resourceMutex.dimensions);
+  const identity = extractTaskIdentity(task);
+  const keys = [];
+  for (const dimension of dimensions) {
+    if (dimension === 'profile' && identity.profile) {
+      keys.push(`profile:${identity.profile}`);
+      continue;
+    }
+    if (dimension === 'account' && identity.account) {
+      if (mutex.allowCrossPlatformSameAccount === true && identity.platform) {
+        keys.push(`account:${identity.account}:platform:${identity.platform}`);
+      } else {
+        keys.push(`account:${identity.account}`);
+      }
+    }
+  }
+  return [...new Set(keys)].sort();
+}
+
+export function normalizeSchedulerPolicy(input = {}) {
+  const source = input && typeof input === 'object' && !Array.isArray(input)
+    ? input
+    : {};
+  const mutexInput = source.resourceMutex && typeof source.resourceMutex === 'object'
+    ? source.resourceMutex
+    : {};
+  const dimensions = normalizeDimensions(mutexInput.dimensions || DEFAULT_SCHEDULER_POLICY.resourceMutex.dimensions);
+  const maxConcurrency = normalizePositiveInt(
+    source.maxConcurrency ?? source.maxGlobalConcurrency,
+    DEFAULT_SCHEDULER_POLICY.maxConcurrency,
+  );
+  return {
+    maxConcurrency,
+    maxConcurrencyByPlatform: normalizeConcurrencyMap(source.maxConcurrencyByPlatform),
+    resourceMutex: {
+      enabled: normalizeBoolean(mutexInput.enabled, DEFAULT_SCHEDULER_POLICY.resourceMutex.enabled),
+      dimensions: dimensions.length > 0 ? dimensions : [...DEFAULT_SCHEDULER_POLICY.resourceMutex.dimensions],
+      allowCrossPlatformSameAccount: normalizeBoolean(
+        mutexInput.allowCrossPlatformSameAccount,
+        DEFAULT_SCHEDULER_POLICY.resourceMutex.allowCrossPlatformSameAccount,
+      ),
+    },
+  };
+}
+
+export function getSchedulerPolicy() {
+  const envRaw = normalizeText(process.env.WEBAUTO_SCHEDULE_POLICY_JSON);
+  if (envRaw) {
+    try {
+      return normalizeSchedulerPolicy(JSON.parse(envRaw));
+    } catch {
+      return normalizeSchedulerPolicy(DEFAULT_SCHEDULER_POLICY);
+    }
+  }
+  return normalizeSchedulerPolicy(readJson(resolvePolicyPath(), DEFAULT_SCHEDULER_POLICY));
+}
+
+export function setSchedulerPolicy(input = {}) {
+  const policy = normalizeSchedulerPolicy(input);
+  writeJson(resolvePolicyPath(), policy);
+  return policy;
+}
+
+function checkConcurrencyAllowance(task, policy, nowMs = Date.now()) {
+  const active = listActiveLeases(resolveTaskClaimsRoot(), nowMs).map((item) => item.lease);
+  const globalLimit = normalizePositiveInt(policy?.maxConcurrency, DEFAULT_SCHEDULER_POLICY.maxConcurrency);
+  if (active.length >= globalLimit) {
+    return { ok: false, reason: 'max_concurrency', activeCount: active.length, limit: globalLimit };
+  }
+  const platformLimits = normalizeConcurrencyMap(policy?.maxConcurrencyByPlatform);
+  const platform = extractTaskPlatform(task);
+  const limit = Number(platformLimits[platform] || 0);
+  if (limit > 0) {
+    const used = active.filter((lease) => String(lease?.platform || '').trim().toLowerCase() === platform).length;
+    if (used >= limit) {
+      return {
+        ok: false,
+        reason: 'platform_max_concurrency',
+        platform,
+        activeCount: used,
+        limit,
+      };
+    }
+  }
+  return { ok: true };
 }
 
 function loadIndex() {
@@ -316,6 +632,172 @@ export function getScheduleTask(id) {
   const task = normalizeTaskRecord(target);
   if (!task) throw new Error(`invalid task: ${id}`);
   return sanitizeTaskForOutput(task);
+}
+
+export function acquireScheduleDaemonLease(options = {}) {
+  const ownerId = normalizeText(options.ownerId) || `daemon-${process.pid}`;
+  const leaseMs = normalizePositiveInt(options.leaseMs, DEFAULT_DAEMON_LEASE_MS);
+  const payload = acquireLease(resolveDaemonLeasePath(), {
+    ownerId,
+    leaseMs,
+    meta: {
+      kind: 'schedule-daemon',
+      pid: process.pid,
+    },
+  });
+  if (!payload.ok) {
+    return { ok: false, reason: payload.reason, lease: payload.lease };
+  }
+  return { ok: true, ownerId, leaseMs, lease: payload.lease };
+}
+
+export function renewScheduleDaemonLease(options = {}) {
+  const ownerId = normalizeText(options.ownerId) || `daemon-${process.pid}`;
+  const leaseMs = normalizePositiveInt(options.leaseMs, DEFAULT_DAEMON_LEASE_MS);
+  return renewLease(resolveDaemonLeasePath(), { ownerId, leaseMs });
+}
+
+export function releaseScheduleDaemonLease(options = {}) {
+  const ownerId = normalizeText(options.ownerId) || `daemon-${process.pid}`;
+  return releaseLease(resolveDaemonLeasePath(), { ownerId });
+}
+
+function releaseResourceClaims(resourceKeys, ownerId, runToken = null) {
+  const outcomes = [];
+  for (const key of resourceKeys) {
+    const lockPath = resolveResourceClaimPath(key);
+    outcomes.push({
+      resourceKey: key,
+      ...releaseLease(lockPath, { ownerId, runToken }),
+    });
+  }
+  return outcomes;
+}
+
+export function claimScheduleTask(task, options = {}) {
+  const normalizedTask = normalizeTaskRecord(task);
+  if (!normalizedTask?.id) throw new Error('claim requires task with id');
+  const ownerId = normalizeText(options.ownerId) || `runner-${process.pid}`;
+  const runToken = normalizeText(options.runToken) || `run-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
+  const leaseMs = normalizePositiveInt(options.leaseMs, DEFAULT_TASK_LEASE_MS);
+  const policy = normalizeSchedulerPolicy(options.policy || getSchedulerPolicy());
+  const mutex = acquireLease(resolveClaimMutexPath(), {
+    ownerId,
+    runToken,
+    leaseMs: Math.min(leaseMs, 5_000),
+    meta: {
+      kind: 'schedule-claim-mutex',
+      pid: process.pid,
+    },
+  });
+  if (!mutex.ok) {
+    return { ok: false, claimed: false, reason: 'claim_mutex_busy', lease: mutex.lease };
+  }
+  try {
+    const concurrency = checkConcurrencyAllowance(normalizedTask, policy, Date.now());
+    if (!concurrency.ok) {
+      return { ok: false, claimed: false, reason: concurrency.reason, details: concurrency };
+    }
+    const platform = extractTaskPlatform(normalizedTask);
+    const resourceKeys = buildResourceKeys(normalizedTask, policy);
+    const taskLock = acquireLease(resolveTaskClaimPath(normalizedTask.id), {
+      ownerId,
+      runToken,
+      leaseMs,
+      meta: {
+        kind: 'schedule-task',
+        taskId: normalizedTask.id,
+        platform,
+        resourceKeys,
+        pid: process.pid,
+      },
+    });
+    if (!taskLock.ok) {
+      return { ok: false, claimed: false, reason: 'task_busy', lease: taskLock.lease };
+    }
+    const claimedResourceKeys = [];
+    for (const resourceKey of resourceKeys) {
+      const resourceLock = acquireLease(resolveResourceClaimPath(resourceKey), {
+        ownerId,
+        runToken,
+        leaseMs,
+        meta: {
+          kind: 'schedule-resource',
+          taskId: normalizedTask.id,
+          resourceKey,
+          platform,
+          pid: process.pid,
+        },
+      });
+      if (!resourceLock.ok) {
+        releaseResourceClaims(claimedResourceKeys, ownerId, runToken);
+        releaseLease(resolveTaskClaimPath(normalizedTask.id), { ownerId, runToken });
+        return {
+          ok: false,
+          claimed: false,
+          reason: 'resource_busy',
+          resourceKey,
+          lease: resourceLock.lease,
+        };
+      }
+      claimedResourceKeys.push(resourceKey);
+    }
+    return {
+      ok: true,
+      claimed: true,
+      taskId: normalizedTask.id,
+      ownerId,
+      runToken,
+      leaseMs,
+      platform,
+      resourceKeys: claimedResourceKeys,
+      policy,
+    };
+  } finally {
+    releaseLease(resolveClaimMutexPath(), { ownerId, runToken });
+  }
+}
+
+export function renewScheduleTaskClaim(taskId, options = {}) {
+  const id = String(taskId || '').trim();
+  if (!id) throw new Error('task id is required');
+  const ownerId = normalizeText(options.ownerId) || `runner-${process.pid}`;
+  const runToken = normalizeText(options.runToken) || null;
+  const leaseMs = normalizePositiveInt(options.leaseMs, DEFAULT_TASK_LEASE_MS);
+  const taskPath = resolveTaskClaimPath(id);
+  const head = renewLease(taskPath, { ownerId, runToken, leaseMs });
+  if (!head.ok) return head;
+  const claim = readLease(taskPath);
+  const resourceKeys = Array.isArray(claim?.resourceKeys) ? claim.resourceKeys : [];
+  for (const key of resourceKeys) {
+    const ret = renewLease(resolveResourceClaimPath(key), { ownerId, runToken, leaseMs });
+    if (!ret.ok) {
+      return {
+        ok: false,
+        reason: 'resource_renew_failed',
+        resourceKey: key,
+      };
+    }
+  }
+  return { ok: true, taskId: id, lease: readLease(taskPath) };
+}
+
+export function releaseScheduleTaskClaim(taskId, options = {}) {
+  const id = String(taskId || '').trim();
+  if (!id) throw new Error('task id is required');
+  const ownerId = normalizeText(options.ownerId) || `runner-${process.pid}`;
+  const runToken = normalizeText(options.runToken) || null;
+  const taskPath = resolveTaskClaimPath(id);
+  const claim = readLease(taskPath);
+  const resourceKeys = Array.isArray(claim?.resourceKeys) ? claim.resourceKeys : [];
+  const resources = releaseResourceClaims(resourceKeys, ownerId, runToken);
+  const taskLock = releaseLease(taskPath, { ownerId, runToken });
+  return {
+    ok: taskLock.ok,
+    taskId: id,
+    taskLock,
+    resources,
+  };
 }
 
 export function addScheduleTask(input = {}) {

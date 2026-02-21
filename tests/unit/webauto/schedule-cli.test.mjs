@@ -131,6 +131,30 @@ describe('schedule cli', () => {
     assert.equal(fs.existsSync(exportPath), true);
   });
 
+  it('supports policy get/set', () => {
+    const root = newRoot();
+    const setRes = runSchedule([
+      'policy',
+      'set',
+      '--payload-json',
+      JSON.stringify({
+        maxConcurrency: 2,
+        resourceMutex: {
+          enabled: true,
+          dimensions: ['profile'],
+        },
+      }),
+      '--json',
+    ], root);
+    assert.equal(setRes.ok, true);
+    assert.equal(setRes.policy.maxConcurrency, 2);
+
+    const getRes = runSchedule(['policy', '--json'], root);
+    assert.equal(getRes.ok, true);
+    assert.equal(getRes.policy.maxConcurrency, 2);
+    assert.deepEqual(getRes.policy.resourceMutex.dimensions, ['profile']);
+  });
+
   it('supports importing BOM-encoded json file on windows/mac/linux', () => {
     const root = newRoot();
     const filePath = path.join(root, 'imports', 'bom-schedules.json');
@@ -281,5 +305,32 @@ describe('schedule cli', () => {
     assert.equal(code, 0, stderr || `unexpected exit code: ${code}`);
     assert.match(stdout, /\"event\":\"schedule\.tick\"/);
     assert.match(stdout, /\"event\":\"schedule\.stopped\"/);
+  });
+
+  it('rejects second daemon when first daemon lease is active', async () => {
+    const root = newRoot();
+    const first = spawn(process.execPath, [
+      scheduleCliPath,
+      'daemon',
+      '--interval-sec', '1',
+      '--limit', '1',
+      '--daemon-lease-sec', '30',
+      '--json',
+    ], {
+      cwd: repoRoot,
+      env: makeEnv(root),
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 600));
+
+    const second = runScheduleRaw(['daemon', '--json'], root);
+    assert.equal(second.status, 1);
+    const secondPayload = JSON.parse(String(second.stdout || '{}'));
+    assert.equal(secondPayload.ok, false);
+    assert.equal(secondPayload.error, 'daemon_lease_busy');
+
+    first.kill('SIGTERM');
+    await new Promise((resolve) => first.on('exit', resolve));
   });
 });

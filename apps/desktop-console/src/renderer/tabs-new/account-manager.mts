@@ -1,6 +1,52 @@
 import { createEl } from '../ui-components.mts';
 import { listAccountProfiles, type UiAccountProfile } from '../account-source.mts';
 
+const PLATFORM_ICON: Record<string, string> = {
+  xiaohongshu: '📕',
+  xhs: '📕',
+  weibo: '🧣',
+};
+
+const PLATFORM_LABEL: Record<string, string> = {
+  xiaohongshu: '小红书',
+  xhs: '小红书',
+  weibo: '微博',
+};
+
+function normalizePlatform(value: string | null | undefined): string {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (!normalized) return 'xiaohongshu';
+  if (normalized === 'xhs') return 'xiaohongshu';
+  return normalized;
+}
+
+function getPlatformInfo(platform: string | null | undefined) {
+  const key = normalizePlatform(platform);
+  return {
+    key,
+    icon: PLATFORM_ICON[key] || '🌐',
+    label: PLATFORM_LABEL[key] || key,
+    loginUrl: key === 'weibo' ? 'https://weibo.com' : 'https://www.xiaohongshu.com',
+  };
+}
+
+function formatTs(value: number | null | undefined): string {
+  if (!Number.isFinite(value) || Number(value) <= 0) return '未检查';
+  try {
+    return new Date(Number(value)).toLocaleString('zh-CN');
+  } catch {
+    return '未检查';
+  }
+}
+
+function toTimestamp(value: string | null | undefined): number | null {
+  const text = String(value || '').trim();
+  if (!text) return null;
+  const parsed = Date.parse(text);
+  if (!Number.isFinite(parsed)) return null;
+  return parsed;
+}
+
 export function renderAccountManager(root: HTMLElement, ctx: any) {
   root.innerHTML = '';
   const autoSyncTimers = new Map<string, ReturnType<typeof setInterval>>();
@@ -30,8 +76,9 @@ export function renderAccountManager(root: HTMLElement, ctx: any) {
         <span>Camoufox Browser</span>
       </div>
     </div>
-    <div style="margin-top: var(--gap);">
-      <button id="recheck-env-btn" class="secondary" style="width: 100%;">重新检查</button>
+    <div class="btn-group" style="margin-top: var(--gap);">
+      <button id="recheck-env-btn" class="secondary" style="flex: 1;">重新检查</button>
+      <button id="env-cleanup-btn" class="secondary" style="flex: 1;">一键清理</button>
     </div>
   `;
   bentoGrid.appendChild(envCard);
@@ -47,7 +94,7 @@ export function renderAccountManager(root: HTMLElement, ctx: any) {
       <input id="new-account-alias-input" placeholder="别名可选（登录后自动识别）" style="flex: 1; min-width: 180px;" />
       <button id="add-account-confirm-btn" class="secondary" style="flex: 0 0 auto;">创建并登录</button>
     </div>
-    <div id="account-list" class="account-list" style="margin-bottom: var(--gap); max-height: 300px; overflow: auto;"></div>
+    <div id="account-list" class="account-list" style="margin-bottom: var(--gap);"></div>
     <div style="margin-top: var(--gap);">
       <div class="btn-group">
         <button id="check-all-btn" class="secondary" style="flex: 1;">检查所有</button>
@@ -60,6 +107,7 @@ export function renderAccountManager(root: HTMLElement, ctx: any) {
 
   // Elements
   const recheckEnvBtn = root.querySelector('#recheck-env-btn') as HTMLButtonElement;
+  const envCleanupBtn = root.querySelector('#env-cleanup-btn') as HTMLButtonElement;
   const addAccountBtn = root.querySelector('#add-account-btn') as HTMLButtonElement;
   const addAccountConfirmBtn = root.querySelector('#add-account-confirm-btn') as HTMLButtonElement;
   const newAccountAliasInput = root.querySelector('#new-account-alias-input') as HTMLInputElement;
@@ -70,7 +118,7 @@ export function renderAccountManager(root: HTMLElement, ctx: any) {
   // State
   type Account = UiAccountProfile & {
     statusView: 'valid' | 'expired' | 'pending' | 'checking';
-    lastCheck?: string;
+    lastCheckAt?: number | null;
   };
   let accounts: Account[] = [];
   let envCheckInFlight = false;
@@ -119,7 +167,9 @@ export function renderAccountManager(root: HTMLElement, ctx: any) {
       const rows = await listAccountProfiles(ctx.api);
       accounts = rows.map((row) => ({
         ...row,
+        platform: normalizePlatform(row.platform),
         statusView: row.valid ? 'valid' : (row.status === 'pending' ? 'pending' : 'expired'),
+        lastCheckAt: toTimestamp(row.updatedAt),
       }));
 
       renderAccountList();
@@ -151,19 +201,27 @@ export function renderAccountManager(root: HTMLElement, ctx: any) {
       return;
     }
 
-    accounts.forEach(acc => {
+    accounts.forEach((acc) => {
+      const platform = getPlatformInfo(acc.platform);
       const row = createEl('div', {
         className: 'account-item',
-        style: 'display: grid; grid-template-columns: 1fr 120px 100px 100px; gap: var(--gap-sm); padding: var(--gap-sm); align-items: center; border-bottom: 1px solid var(--border);'
+        style: 'display: flex; gap: var(--gap-sm); padding: var(--gap-sm); align-items: center; border-bottom: 1px solid var(--border);'
       });
 
-      const nameDiv = createEl('div', {}, [
-        createEl('div', { className: 'account-name' }, [acc.alias || acc.name || acc.profileId]),
-        createEl('div', { className: 'account-alias' }, [acc.profileId])
+      const nameDiv = createEl('div', { style: 'min-width: 0; flex: 1;' }, [
+        createEl('div', { className: 'account-name', style: 'display: flex; gap: 6px; align-items: center;' }, [
+          createEl('span', { style: 'font-size: 13px;' }, [platform.icon]),
+          createEl('span', {}, [acc.alias || acc.name || acc.profileId]),
+          createEl('span', { style: 'font-size: 11px; color: var(--text-3);' }, [platform.label]),
+        ]),
+        createEl('div', { className: 'account-alias', style: 'font-size: 11px; color: var(--text-3);' }, [
+          `profile: ${acc.profileId} · 上次检查: ${formatTs(acc.lastCheckAt)}`
+        ])
       ]);
 
       const statusBadge = createEl('span', {
-        className: `status-badge ${acc.statusView === 'valid' ? 'status-valid' : acc.statusView === 'expired' ? 'status-expired' : 'status-pending'}`
+        className: `status-badge ${acc.statusView === 'valid' ? 'status-valid' : acc.statusView === 'expired' ? 'status-expired' : 'status-pending'}`,
+        style: 'min-width: 76px; text-align: center;'
       }, [
         acc.statusView === 'valid'
           ? '✓ 有效'
@@ -174,12 +232,13 @@ export function renderAccountManager(root: HTMLElement, ctx: any) {
               : '⏳ 待登录'
       ]);
 
-      const checkBtn = createEl('button', {
-        className: 'secondary',
-        style: 'padding: 6px 10px; font-size: 11px;'
-      }, ['检查']) as HTMLButtonElement;
-
-      const actionsDiv = createEl('div', { className: 'btn-group', style: 'flex: 0;' });
+      const actionsDiv = createEl('div', {
+        className: 'btn-group',
+        style: 'display: flex; flex-wrap: wrap; gap: 4px; justify-content: flex-end; flex: 0 0 auto;'
+      });
+      const checkBtn = createEl('button', { className: 'secondary', style: 'padding: 6px 8px; font-size: 10px;' }, ['检查']) as HTMLButtonElement;
+      const openBtn = createEl('button', { className: 'secondary', style: 'padding: 6px 8px; font-size: 10px;' }, ['打开']) as HTMLButtonElement;
+      const fixBtn = createEl('button', { className: 'secondary', style: 'padding: 6px 8px; font-size: 10px;' }, ['修复']) as HTMLButtonElement;
       const detailBtn = createEl('button', {
         className: 'secondary',
         style: 'padding: 6px 8px; font-size: 10px;'
@@ -188,20 +247,30 @@ export function renderAccountManager(root: HTMLElement, ctx: any) {
         className: 'danger',
         style: 'padding: 6px 8px; font-size: 10px;'
       }, ['删除']) as HTMLButtonElement;
+      actionsDiv.appendChild(checkBtn);
+      actionsDiv.appendChild(openBtn);
+      actionsDiv.appendChild(fixBtn);
       actionsDiv.appendChild(detailBtn);
       actionsDiv.appendChild(deleteBtn);
 
       row.appendChild(nameDiv);
       row.appendChild(statusBadge);
-      row.appendChild(checkBtn);
       row.appendChild(actionsDiv);
 
       // Check account status
-      checkBtn.onclick = () => checkAccountStatus(acc.profileId, { resolveAlias: true });
+      checkBtn.onclick = () => {
+        void checkAccountStatus(acc.profileId, { resolveAlias: true });
+      };
+      openBtn.onclick = () => {
+        void openAccountLogin(acc, { reason: 'manual_open' });
+      };
+      fixBtn.onclick = () => {
+        void fixAccount(acc);
+      };
 
       // Show details
       detailBtn.onclick = () => {
-        alert(`账户详情:\n\nProfile ID: ${acc.profileId}\n账号ID: ${acc.accountId || '未识别'}\n别名: ${acc.alias || '未设置'}\n状态: ${acc.status}\n原因: ${acc.reason || '-'}\n最后检查: ${acc.lastCheck || '未检查'}`);
+        alert(`账户详情:\n\n平台: ${platform.label}\nProfile ID: ${acc.profileId}\n账号ID: ${acc.accountId || '未识别'}\n别名: ${acc.alias || '未设置'}\n状态: ${acc.status}\n原因: ${acc.reason || '-'}\n最后检查: ${formatTs(acc.lastCheckAt)}\n登录入口: ${platform.loginUrl}`);
       };
 
       // Delete account
@@ -236,7 +305,10 @@ export function renderAccountManager(root: HTMLElement, ctx: any) {
   }
 
   // Check single account status
-  async function checkAccountStatus(profileId: string, options: { pendingWhileLogin?: boolean; resolveAlias?: boolean } = {}) {
+  async function checkAccountStatus(
+    profileId: string,
+    options: { pendingWhileLogin?: boolean; resolveAlias?: boolean } = {},
+  ) {
     const account = accounts.find(a => a.profileId === profileId);
     if (!account) return false;
 
@@ -261,6 +333,7 @@ export function renderAccountManager(root: HTMLElement, ctx: any) {
         account.accountId = String(profile.accountId || '').trim() || null;
         const detectedAlias = String(profile.alias || '').trim();
         account.alias = detectedAlias || account.alias;
+        account.platform = normalizePlatform(String(profile.platform || account.platform || '').trim());
         account.status = String(profile.status || '').trim() || account.status;
         account.valid = profile.valid === true && Boolean(account.accountId);
         account.reason = String(profile.reason || '').trim() || null;
@@ -275,13 +348,50 @@ export function renderAccountManager(root: HTMLElement, ctx: any) {
       account.statusView = account.valid
         ? 'valid'
         : (account.status === 'pending' ? 'pending' : 'expired');
-      account.lastCheck = new Date().toLocaleString('zh-CN');
+      account.lastCheckAt = Date.now();
     } catch (err) {
       account.statusView = options.pendingWhileLogin ? 'pending' : 'expired';
+      account.lastCheckAt = Date.now();
     }
 
     renderAccountList();
     return Boolean(account.valid);
+  }
+
+  async function openAccountLogin(account: Account, options: { reason?: string } = {}) {
+    if (!String(account.profileId || '').trim()) return false;
+    const platform = getPlatformInfo(account.platform);
+    const timeoutSec = Math.max(30, Number(ctx.api?.settings?.timeouts?.loginTimeoutSec || 900));
+    account.status = 'pending';
+    account.statusView = 'pending';
+    account.reason = String(options.reason || 'manual_relogin');
+    account.lastCheckAt = Date.now();
+    renderAccountList();
+    await ctx.api.cmdSpawn({
+      title: `登录 ${account.alias || account.profileId}`,
+      cwd: '',
+      args: [
+        ctx.api.pathJoin('apps', 'webauto', 'entry', 'profilepool.mjs'),
+        'login-profile',
+        account.profileId,
+        '--url',
+        platform.loginUrl,
+        '--wait-sync',
+        'false',
+        '--timeout-sec',
+        String(timeoutSec),
+        '--keep-session',
+      ],
+      groupKey: 'profilepool',
+    });
+    startAutoSyncProfile(account.profileId);
+    return true;
+  }
+
+  async function fixAccount(account: Account) {
+    const ok = await checkAccountStatus(account.profileId, { resolveAlias: true });
+    if (ok) return;
+    await openAccountLogin(account, { reason: 'fix_relogin' });
   }
 
   // Add new account
@@ -404,20 +514,7 @@ export function renderAccountManager(root: HTMLElement, ctx: any) {
 
     for (const acc of expired) {
       try {
-        const accountKey = acc.accountRecordId || acc.profileId;
-        await ctx.api.cmdSpawn({
-          title: `重新登录 ${acc.alias || acc.profileId}`,
-          cwd: '',
-          args: [
-            ctx.api.pathJoin('apps', 'webauto', 'entry', 'account.mjs'),
-            'login',
-            accountKey,
-            '--url',
-            'https://www.xiaohongshu.com',
-            '--json',
-          ],
-          groupKey: 'profilepool'
-        });
+        await openAccountLogin(acc, { reason: 'refresh_expired' });
       } catch (err) {
         console.error(`Failed to refresh ${acc.profileId}:`, err);
       }
@@ -427,8 +524,31 @@ export function renderAccountManager(root: HTMLElement, ctx: any) {
     refreshExpiredBtn.textContent = '刷新失效';
   }
 
+  async function cleanupEnvironment() {
+    if (!envCleanupBtn) return;
+    envCleanupBtn.disabled = true;
+    const previous = envCleanupBtn.textContent;
+    envCleanupBtn.textContent = '清理中...';
+    try {
+      const result = typeof ctx.api?.envCleanup === 'function'
+        ? await ctx.api.envCleanup()
+        : await ctx.api.invoke?.('env:cleanup');
+      if (!result?.ok) {
+        alert(`环境清理失败: ${result?.error || '未知错误'}`);
+      }
+      await tickEnvironment();
+      await tickAccounts();
+    } catch (err: any) {
+      alert(`环境清理失败: ${err?.message || String(err)}`);
+    } finally {
+      envCleanupBtn.disabled = false;
+      envCleanupBtn.textContent = previous || '一键清理';
+    }
+  }
+
   // Event handlers
   recheckEnvBtn.onclick = checkEnvironment;
+  if (envCleanupBtn) envCleanupBtn.onclick = () => { void cleanupEnvironment(); };
   addAccountBtn.onclick = addAccount;
   addAccountConfirmBtn.onclick = addAccount;
   newAccountAliasInput.onkeydown = (ev) => {

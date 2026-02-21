@@ -1,6 +1,7 @@
 export type UiAccountProfile = {
   profileId: string;
   accountRecordId: string | null;
+  platform: string;
   accountId: string | null;
   alias: string | null;
   name: string | null;
@@ -21,6 +22,7 @@ function normalizeRow(row: any): UiAccountProfile | null {
   return {
     profileId,
     accountRecordId: asText(row?.accountRecordId),
+    platform: asText(row?.platform) || 'xiaohongshu',
     accountId: asText(row?.accountId),
     alias: asText(row?.alias),
     name: asText(row?.name),

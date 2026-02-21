@@ -69,6 +69,7 @@ contextBridge.exposeInMainWorld('api', {
   envCheckAll: () => ipcRenderer.invoke("env:checkAll"),
   envRepairCore: () => ipcRenderer.invoke("env:repairCore"),
   envRepairDeps: (spec) => ipcRenderer.invoke("env:repairDeps", spec),
+  envCleanup: () => ipcRenderer.invoke("env:cleanup"),
   configSaveLast: (config) => ipcRenderer.invoke("config:saveLast", config),
   configLoadLast: () => ipcRenderer.invoke("config:loadLast"),
   configExport: (spec) => ipcRenderer.invoke("config:export", spec),

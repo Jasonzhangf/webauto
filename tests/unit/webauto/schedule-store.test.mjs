@@ -5,14 +5,22 @@ import os from 'node:os';
 import path from 'node:path';
 
 import {
+  acquireScheduleDaemonLease,
   addScheduleTask,
+  claimScheduleTask,
   exportScheduleTasks,
   getScheduleTask,
+  getSchedulerPolicy,
   importScheduleTasks,
   listDueScheduleTasks,
   listScheduleTasks,
   markScheduleTaskResult,
   removeScheduleTask,
+  releaseScheduleDaemonLease,
+  releaseScheduleTaskClaim,
+  renewScheduleDaemonLease,
+  renewScheduleTaskClaim,
+  setSchedulerPolicy,
   updateScheduleTask,
 } from '../../../apps/webauto/entry/lib/schedule-store.mjs';
 
@@ -261,5 +269,121 @@ describe('schedule-store', () => {
 
     assert.throws(() => removeScheduleTask(created.id), /task not found/i);
     assert.throws(() => exportScheduleTasks(created.id), /task not found/i);
+  });
+
+  it('enforces daemon lease single-owner semantics', () => {
+    useTempSchedulesRoot();
+    const first = acquireScheduleDaemonLease({ ownerId: 'daemon-a', leaseMs: 5_000 });
+    assert.equal(first.ok, true);
+
+    const second = acquireScheduleDaemonLease({ ownerId: 'daemon-b', leaseMs: 5_000 });
+    assert.equal(second.ok, false);
+    assert.equal(second.reason, 'busy');
+
+    const renewed = renewScheduleDaemonLease({ ownerId: 'daemon-a', leaseMs: 5_000 });
+    assert.equal(renewed.ok, true);
+
+    const released = releaseScheduleDaemonLease({ ownerId: 'daemon-a' });
+    assert.equal(released.ok, true);
+    assert.equal(released.released, true);
+
+    const third = acquireScheduleDaemonLease({ ownerId: 'daemon-c', leaseMs: 5_000 });
+    assert.equal(third.ok, true);
+  });
+
+  it('supports task claim lifecycle and blocks duplicate task claim', () => {
+    useTempSchedulesRoot();
+    const task = addScheduleTask({
+      name: 'claim-target',
+      scheduleType: 'interval',
+      intervalMinutes: 2,
+      commandType: 'xhs-unified',
+      commandArgv: { profile: 'p-claim', keyword: 'k-claim' },
+    });
+
+    const first = claimScheduleTask(task, {
+      ownerId: 'runner-a',
+      runToken: 'token-a',
+      leaseMs: 5_000,
+      policy: { maxConcurrency: 2 },
+    });
+    assert.equal(first.ok, true);
+    assert.equal(first.claimed, true);
+
+    const second = claimScheduleTask(task, {
+      ownerId: 'runner-b',
+      runToken: 'token-b',
+      leaseMs: 5_000,
+      policy: { maxConcurrency: 2 },
+    });
+    assert.equal(second.ok, false);
+    assert.equal(second.reason, 'task_busy');
+
+    const renewed = renewScheduleTaskClaim(task.id, {
+      ownerId: 'runner-a',
+      runToken: 'token-a',
+      leaseMs: 5_000,
+    });
+    assert.equal(renewed.ok, true);
+
+    const released = releaseScheduleTaskClaim(task.id, {
+      ownerId: 'runner-a',
+      runToken: 'token-a',
+    });
+    assert.equal(released.ok, true);
+
+    const third = claimScheduleTask(task, {
+      ownerId: 'runner-c',
+      runToken: 'token-c',
+      leaseMs: 5_000,
+      policy: { maxConcurrency: 2 },
+    });
+    assert.equal(third.ok, true);
+  });
+
+  it('enforces profile resource mutex and supports policy persistence', () => {
+    useTempSchedulesRoot();
+    const policy = setSchedulerPolicy({
+      maxConcurrency: 3,
+      resourceMutex: {
+        enabled: true,
+        dimensions: ['profile'],
+      },
+    });
+    assert.equal(policy.maxConcurrency, 3);
+    assert.deepEqual(policy.resourceMutex.dimensions, ['profile']);
+    assert.equal(getSchedulerPolicy().maxConcurrency, 3);
+
+    const taskA = addScheduleTask({
+      name: 'resource-a',
+      scheduleType: 'interval',
+      intervalMinutes: 3,
+      commandType: 'xhs-unified',
+      commandArgv: { profile: 'shared-profile', keyword: 'k1' },
+    });
+    const taskB = addScheduleTask({
+      name: 'resource-b',
+      scheduleType: 'interval',
+      intervalMinutes: 3,
+      commandType: 'xhs-unified',
+      commandArgv: { profile: 'shared-profile', keyword: 'k2' },
+    });
+
+    const claimA = claimScheduleTask(taskA, {
+      ownerId: 'worker-a',
+      runToken: 'ra',
+      leaseMs: 5_000,
+      policy,
+    });
+    assert.equal(claimA.ok, true);
+
+    const claimB = claimScheduleTask(taskB, {
+      ownerId: 'worker-b',
+      runToken: 'rb',
+      leaseMs: 5_000,
+      policy,
+    });
+    assert.equal(claimB.ok, false);
+    assert.equal(claimB.reason, 'resource_busy');
   });
 });

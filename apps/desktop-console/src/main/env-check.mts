@@ -26,6 +26,11 @@ export type GeoIPCheckResult = {
   path?: string;
 };
 
+function resolveWebautoRoot() {
+  const portableRoot = String(process.env.WEBAUTO_PORTABLE_ROOT || process.env.WEBAUTO_ROOT || '').trim();
+  return portableRoot ? path.join(portableRoot, '.webauto') : path.join(os.homedir(), '.webauto');
+}
+
 function resolveNpxBin() {
   if (process.platform !== 'win32') return 'npx';
   const resolved = resolveOnPath(['npx.cmd', 'npx.exe', 'npx.bat', 'npx.ps1']);
@@ -214,7 +219,7 @@ export async function checkFirefox(): Promise<{ installed: boolean; path?: strin
 }
 
 export async function checkGeoIP(): Promise<GeoIPCheckResult> {
-  const geoIpPath = path.join(os.homedir(), '.webauto', 'geoip', 'GeoLite2-City.mmdb');
+  const geoIpPath = path.join(resolveWebautoRoot(), 'geoip', 'GeoLite2-City.mmdb');
   if (existsSync(geoIpPath)) {
     return { installed: true, path: geoIpPath };
   }

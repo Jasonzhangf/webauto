@@ -18,3 +18,12 @@ test('spawnCommand uses buffered line emitter and flushes on close', async () =>
   assert.match(src, /stderrLines\.push\(chunk\);/);
   assert.match(src, /stdoutLines\.flush\(\);\s*stderrLines\.flush\(\);\s*finalize\(/s);
 });
+
+test('main process wires deterministic cleanup for app quit and env cleanup api', async () => {
+  const src = await readFile(mainPath, 'utf8');
+  assert.match(src, /function ensureAppExitCleanup\(reason: string/);
+  assert.match(src, /app\.on\('before-quit', \(\) => \{\s*void ensureAppExitCleanup\('before_quit'\);/s);
+  assert.match(src, /app\.on\('will-quit', \(\) => \{\s*void ensureAppExitCleanup\('will_quit'/s);
+  assert.match(src, /ipcMain\.handle\('env:cleanup'/);
+  assert.match(src, /cleanupCamoSessionsBestEffort/);
+});

@@ -3,7 +3,7 @@ import minimist from 'minimist';
 import { spawnSync } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
-import { existsSync } from 'node:fs';
+import { existsSync, rmSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 function run(cmd, args) {
@@ -57,6 +57,16 @@ function resolveNpxBin(platform = process.platform, pathEnv = process.env.PATH |
   return resolved || 'npx.cmd';
 }
 
+function resolveWebautoRoot() {
+  const portableRoot = String(process.env.WEBAUTO_PORTABLE_ROOT || process.env.WEBAUTO_ROOT || '').trim();
+  if (portableRoot) return path.join(portableRoot, '.webauto');
+  return path.join(os.homedir(), '.webauto');
+}
+
+function resolveGeoIPPath() {
+  return path.join(resolveWebautoRoot(), 'geoip', 'GeoLite2-City.mmdb');
+}
+
 function checkCamoufoxInstalled() {
   const candidates =
     process.platform === 'win32'
@@ -78,12 +88,56 @@ function installCamoufox() {
 }
 
 function checkGeoIPInstalled() {
-  return existsSync(path.join(os.homedir(), '.webauto', 'geoip', 'GeoLite2-City.mmdb'));
+  return existsSync(resolveGeoIPPath());
 }
 
 function installGeoIP() {
   const ret = run(resolveNpxBin(), ['--yes', '--package=@web-auto/camo', 'camo', 'init', 'geoip']);
   return ret.status === 0;
+}
+
+function uninstallCamoufox() {
+  const ret = run(resolveNpxBin(), ['--yes', '--package=camoufox', 'camoufox', 'remove']);
+  return ret.status === 0;
+}
+
+function uninstallGeoIP() {
+  const geoipDir = path.join(resolveWebautoRoot(), 'geoip');
+  try {
+    rmSync(geoipDir, { recursive: true, force: true });
+  } catch {
+    // ignore
+  }
+  return !checkGeoIPInstalled();
+}
+
+function resolveModeAndSelection(argv = {}) {
+  const legacyDownloadBrowser = argv['download-browser'] === true;
+  const legacyDownloadGeoip = argv['download-geoip'] === true;
+  const checkBrowserOnly = argv['check-browser-only'] === true;
+
+  let mode = 'check';
+  if (argv.auto === true) mode = 'auto';
+  else if (argv.reinstall === true) mode = 'reinstall';
+  else if (argv.uninstall === true || argv.remove === true) mode = 'uninstall';
+  else if (argv.install === true || legacyDownloadBrowser || legacyDownloadGeoip) mode = 'install';
+
+  const explicitBrowser = argv.browser === true || legacyDownloadBrowser || checkBrowserOnly;
+  const explicitGeoip = argv.geoip === true || legacyDownloadGeoip;
+  const explicitAll = argv.all === true;
+  const explicitAny = explicitBrowser || explicitGeoip || explicitAll;
+
+  let browser = false;
+  let geoip = false;
+  if (mode === 'check') {
+    browser = explicitBrowser || explicitAll || !explicitAny;
+    geoip = explicitGeoip || explicitAll;
+  } else {
+    browser = explicitBrowser || explicitAll || !explicitAny;
+    geoip = explicitGeoip || explicitAll || !explicitAny;
+  }
+
+  return { mode, browser, geoip };
 }
 
 async function checkBackendHealth() {
@@ -96,19 +150,79 @@ async function checkBackendHealth() {
 }
 
 async function main() {
-  const argv = minimist(process.argv.slice(2));
-  const download = argv['download-browser'] === true;
-  const downloadGeoip = argv['download-geoip'] === true;
+  const argv = minimist(process.argv.slice(2), {
+    boolean: [
+      'auto',
+      'install',
+      'uninstall',
+      'remove',
+      'reinstall',
+      'check-browser-only',
+      'download-browser',
+      'download-geoip',
+      'browser',
+      'geoip',
+      'all',
+      'ensure-backend',
+      'json',
+    ],
+  });
+  const { mode, browser, geoip } = resolveModeAndSelection(argv);
   const ensureBackend = argv['ensure-backend'] === true;
   const provider = String(process.env.WEBAUTO_BROWSER_PROVIDER || 'camo').trim().toLowerCase();
-  let camoufoxInstalled = checkCamoufoxInstalled();
-  let geoipInstalled = checkGeoIPInstalled();
+  const before = {
+    camoufoxInstalled: checkCamoufoxInstalled(),
+    geoipInstalled: checkGeoIPInstalled(),
+    backendHealthy: await checkBackendHealth(),
+  };
+  const actions = {
+    browserInstalled: false,
+    browserUninstalled: false,
+    geoipInstalled: false,
+    geoipUninstalled: false,
+  };
 
-  if (!camoufoxInstalled && download) {
-    camoufoxInstalled = installCamoufox();
+  let camoufoxInstalled = before.camoufoxInstalled;
+  let geoipInstalled = before.geoipInstalled;
+  let operationError = null;
+
+  if (mode === 'auto' || mode === 'install') {
+    if (browser && !camoufoxInstalled) {
+      actions.browserInstalled = installCamoufox();
+      camoufoxInstalled = checkCamoufoxInstalled();
+      if (!camoufoxInstalled) operationError = operationError || 'camoufox_install_failed';
+    }
+    if (geoip && !geoipInstalled) {
+      actions.geoipInstalled = installGeoIP();
+      geoipInstalled = checkGeoIPInstalled();
+      if (!geoipInstalled) operationError = operationError || 'geoip_install_failed';
+    }
   }
-  if (!geoipInstalled && downloadGeoip) {
-    geoipInstalled = installGeoIP();
+
+  if (mode === 'uninstall' || mode === 'reinstall') {
+    if (browser) {
+      actions.browserUninstalled = uninstallCamoufox();
+      camoufoxInstalled = checkCamoufoxInstalled();
+      if (camoufoxInstalled) operationError = operationError || 'camoufox_uninstall_failed';
+    }
+    if (geoip) {
+      actions.geoipUninstalled = uninstallGeoIP();
+      geoipInstalled = checkGeoIPInstalled();
+      if (geoipInstalled) operationError = operationError || 'geoip_uninstall_failed';
+    }
+  }
+
+  if (mode === 'reinstall') {
+    if (browser) {
+      actions.browserInstalled = installCamoufox();
+      camoufoxInstalled = checkCamoufoxInstalled();
+      if (!camoufoxInstalled) operationError = operationError || 'camoufox_install_failed';
+    }
+    if (geoip) {
+      actions.geoipInstalled = installGeoIP();
+      geoipInstalled = checkGeoIPInstalled();
+      if (!geoipInstalled) operationError = operationError || 'geoip_install_failed';
+    }
   }
 
   let backendEnsured = false;
@@ -123,20 +237,49 @@ async function main() {
     }
   }
 
-  const backendHealthy = await checkBackendHealth();
-  const dependencyReady = camoufoxInstalled || backendHealthy;
-  const geoipReady = downloadGeoip ? geoipInstalled : true;
-  const ok = dependencyReady && geoipReady;
+  const after = {
+    camoufoxInstalled,
+    geoipInstalled,
+    backendHealthy: await checkBackendHealth(),
+  };
+  const browserReady =
+    mode === 'uninstall'
+      ? !browser || !after.camoufoxInstalled
+      : !browser || after.camoufoxInstalled || after.backendHealthy;
+  const geoipReady = mode === 'uninstall' ? !geoip || !after.geoipInstalled : !geoip || after.geoipInstalled;
+  const ok =
+    browserReady &&
+    geoipReady &&
+    operationError === null &&
+    (!ensureBackend || backendEnsured || after.backendHealthy);
 
   const result = {
     ok,
-    camoufoxInstalled,
+    mode,
+    selection: {
+      browser,
+      geoip,
+      ensureBackend,
+    },
+    before,
+    actions,
+    after,
+    camoufoxInstalled: after.camoufoxInstalled,
     provider,
     backendEnsured,
     ensureBackendError,
-    backendHealthy,
-    geoipInstalled,
-    message: ok ? 'Camo 后端就绪' : (downloadGeoip && !geoipInstalled ? 'GeoIP 未安装' : 'Camoufox 未安装'),
+    backendHealthy: after.backendHealthy,
+    geoipInstalled: after.geoipInstalled,
+    operationError,
+    message: ok
+      ? '资源状态就绪'
+      : operationError
+        ? `资源操作失败: ${operationError}`
+        : browser && !after.camoufoxInstalled
+          ? 'Camoufox 未安装'
+          : geoip && !after.geoipInstalled
+            ? 'GeoIP 未安装'
+            : '资源状态未就绪',
   };
 
   console.log(JSON.stringify(result));
@@ -154,4 +297,7 @@ if (isEntrypoint) {
 export const __internals = {
   resolveOnPath,
   resolveNpxBin,
+  resolveWebautoRoot,
+  resolveGeoIPPath,
+  resolveModeAndSelection,
 };

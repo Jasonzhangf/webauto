@@ -127,7 +127,7 @@ export function renderDashboard(root: HTMLElement, ctx: any) {
       实时日志
       <button id="toggle-logs-btn" class="secondary" style="margin-left: auto; padding: 4px 10px; font-size: 11px;">展开</button>
     </div>
-    <div id="logs-container" class="log-container" style="display: none; max-height: 300px;"></div>
+    <div id="logs-container" class="log-container" style="display: none;"></div>
 
     <div style="margin-top: var(--gap);">
       <div class="btn-group">

@@ -47,6 +47,7 @@
     "ws": "^8.19.0"
   },
   "scripts": {
+    "postinstall": "node scripts/postinstall-resources.mjs",
     "start:mcp:browser": "npx @browsermcp/mcp@latest",
     "build": "npm run prebuild && npm run build:services && npm run self-check:post-build && npm run ui:test && npm --prefix apps/desktop-console run build",
     "build:services": "tsc -p tsconfig.services.json",

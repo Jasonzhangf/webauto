@@ -40,6 +40,7 @@ function createMockCtx(): MockBundle {
     settingsSet: [],
     deletes: [],
     sync: [],
+    cleanup: 0,
   };
   let failRefreshOnce = true;
 
@@ -47,6 +48,7 @@ function createMockCtx(): MockBundle {
     {
       profileId: 'xhs-1',
       accountRecordId: 'acc-1',
+      platform: 'xiaohongshu',
       accountId: 'uid-1',
       alias: '主号',
       name: '主号',
@@ -58,6 +60,7 @@ function createMockCtx(): MockBundle {
     {
       profileId: 'xhs-2',
       accountRecordId: 'acc-2',
+      platform: 'xiaohongshu',
       accountId: '',
       alias: '',
       name: '',
@@ -128,6 +131,10 @@ function createMockCtx(): MockBundle {
       Object.assign(settings, payload);
       return settings;
     },
+    envCleanup: async () => {
+      calls.cleanup += 1;
+      return { ok: true };
+    },
     profileDelete: async (payload: any) => {
       calls.deletes.push(payload);
       return { ok: true };
@@ -178,16 +185,28 @@ test('account manager supports add/check/refresh flows', async () => {
 
     findButtonByText(root, '刷新失效').click();
     await flush(3);
-    assert.equal(calls.spawns.some((spec) => String(spec?.args?.join(' ') || '').includes('account.mjs login')), true);
+    assert.equal(calls.spawns.some((spec) => String(spec?.args?.join(' ') || '').includes('profilepool.mjs login-profile xhs-2')), true);
 
     findButtonByText(root, '检查所有').click();
     await flush(4);
     assert.equal(calls.sync.includes('xhs-2'), true);
     assert.equal(calls.settingsSet.length > 0, true);
 
+    findButtonByText(root, '打开').click();
+    await flush(2);
+    assert.equal(calls.spawns.some((spec) => String(spec?.args?.join(' ') || '').includes('profilepool.mjs login-profile xhs-1')), true);
+
+    findButtonByText(root, '修复').click();
+    await flush(3);
+    assert.equal(calls.sync.length >= 3, true);
+
     findButtonByText(root, '刷新失效').click();
     await flush(2);
     assert.equal(alerts.some((msg) => msg.includes('没有失效的账户需要刷新')), true);
+
+    findButtonByText(root, '一键清理').click();
+    await flush(2);
+    assert.equal(calls.cleanup, 1);
   } finally {
     console.error = originalConsoleError;
     if (typeof dispose === 'function') dispose();

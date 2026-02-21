@@ -327,9 +327,11 @@ function buildProfileAccountView(profileId, record = null) {
   const accountId = normalizeText(record?.accountId);
   const status = normalizeStatus(record?.status || (accountId ? STATUS_VALID : STATUS_INVALID));
   const valid = status === STATUS_VALID && Boolean(accountId);
+  const platform = normalizePlatform(record?.platform);
   return {
     profileId,
     accountRecordId: record?.id || null,
+    platform,
     accountId,
     alias: normalizeText(record?.alias),
     name: normalizeText(record?.name),

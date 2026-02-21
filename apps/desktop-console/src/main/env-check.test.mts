@@ -11,6 +11,7 @@ let tempRoot = '';
 let prevHome = '';
 let prevUserProfile = '';
 let prevPath = '';
+let prevWebautoRoot = '';
 let originalFetch: any;
 
 beforeEach(() => {
@@ -18,6 +19,7 @@ beforeEach(() => {
   prevHome = process.env.HOME || '';
   prevUserProfile = process.env.USERPROFILE || '';
   prevPath = process.env.PATH || '';
+  prevWebautoRoot = process.env.WEBAUTO_ROOT || '';
   process.env.HOME = tempRoot;
   process.env.USERPROFILE = tempRoot;
   originalFetch = (globalThis as any).fetch;
@@ -27,6 +29,7 @@ afterEach(() => {
   process.env.HOME = prevHome;
   process.env.USERPROFILE = prevUserProfile;
   process.env.PATH = prevPath;
+  process.env.WEBAUTO_ROOT = prevWebautoRoot;
   (globalThis as any).fetch = originalFetch;
   fs.rmSync(tempRoot, { recursive: true, force: true });
 });
@@ -42,6 +45,18 @@ test('checkGeoIP detects missing/present database', async () => {
   const second = await checkGeoIP();
   assert.equal(second.installed, true);
   assert.equal(second.path, geoPath);
+});
+
+test('checkGeoIP honors WEBAUTO_ROOT override', async () => {
+  const portableRoot = path.join(tempRoot, 'portable-data');
+  process.env.WEBAUTO_ROOT = portableRoot;
+  const geoPath = path.join(portableRoot, '.webauto', 'geoip', 'GeoLite2-City.mmdb');
+  await fsp.mkdir(path.dirname(geoPath), { recursive: true });
+  await fsp.writeFile(geoPath, 'x', 'utf8');
+
+  const result = await checkGeoIP();
+  assert.equal(result.installed, true);
+  assert.equal(result.path, geoPath);
 });
 
 test('checkServices maps endpoint health booleans', async () => {

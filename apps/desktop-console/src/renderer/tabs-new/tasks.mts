@@ -234,7 +234,7 @@ export function renderTasksPanel(root: HTMLElement, ctx: any) {
       <button id="task-history-clone-btn" class="secondary">载入另存</button>
       <button id="task-history-refresh-btn" class="secondary">刷新</button>
     </div>
-    <div id="recent-tasks-list" style="max-height: 220px; overflow: auto;"></div>
+    <div id="recent-tasks-list"></div>
   `;
   root.appendChild(recentCard);
 
