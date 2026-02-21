@@ -229,7 +229,17 @@ async function cmdLogin(idOrAlias, argv, jsonMode) {
   const account = getAccount(idOrAlias);
   await ensureProfile(account.profileId);
   const url = String(argv.url || inferLoginUrl(account.platform)).trim();
+  // Default idle timeout: 30 minutes, configurable via env or CLI
   const idleTimeout = String(argv['idle-timeout'] || process.env.WEBAUTO_LOGIN_IDLE_TIMEOUT || '30m').trim() || '30m';
+  
+  // Validate idle timeout format (e.g., "30m", "1h", "1800s")
+  if (!/^\d+[mhs]$/.test(idleTimeout)) {
+    output({
+      ok: false,
+      error: 'Invalid idle-timeout format. Use: 30m, 1h, or 1800s',
+    }, jsonMode);
+    process.exit(1);
+  }
 
   const pendingProfile = await syncXhsAccountByProfile(account.profileId, { pendingWhileLogin: true }).catch((error) => ({
     profileId: account.profileId,

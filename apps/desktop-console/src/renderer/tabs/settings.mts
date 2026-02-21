@@ -11,6 +11,7 @@ export function renderSettings(root: HTMLElement, ctx: any) {
   const keyword = createEl('input', { value: ctx.settings?.defaultKeyword || '' }) as HTMLInputElement;
   const loginTimeout = createEl('input', { value: String(ctx.settings?.timeouts?.loginTimeoutSec || 900), type: 'number', min: '30' }) as HTMLInputElement;
   const cmdTimeout = createEl('input', { value: String(ctx.settings?.timeouts?.cmdTimeoutSec || 0), type: 'number', min: '0' }) as HTMLInputElement;
+  const idleTimeout = createEl('input', { value: ctx.settings?.idleTimeout || '30m', placeholder: '30m' }) as HTMLInputElement;
   // AI Reply Configuration
   const aiEnabled = createEl('input', { type: 'checkbox', checked: ctx.settings?.aiReply?.enabled ?? false }) as HTMLInputElement;
   const aiBaseUrl = createEl('input', { value: ctx.settings?.aiReply?.baseUrl || 'http://127.0.0.1:5520', placeholder: 'http://127.0.0.1:5520' }) as HTMLInputElement;
@@ -76,6 +77,7 @@ export function renderSettings(root: HTMLElement, ctx: any) {
         loginTimeoutSec: Number(loginTimeout.value || '900'),
         cmdTimeoutSec: Number(cmdTimeout.value || '0'),
       },
+      idleTimeout: idleTimeout.value.trim() || '30m',
       aiReply: {
         enabled: aiEnabled.checked,
         baseUrl: aiBaseUrl.value.trim(),
@@ -106,6 +108,7 @@ export function renderSettings(root: HTMLElement, ctx: any) {
       createEl('div', { className: 'row' }, [
         labeledInput('loginTimeoutSec', loginTimeout),
         labeledInput('cmdTimeoutSec', cmdTimeout),
+        labeledInput('idleTimeout (e.g., 30m, 1h)', idleTimeout),
       ]),
       createEl('div', { className: 'row' }, [
         createEl('button', {}, ['保存']),
