@@ -4,7 +4,9 @@ import { existsSync } from 'fs';
 import { fileURLToPath } from 'url';
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../..');
-const CORE_HEALTH_URLS = ['http://127.0.0.1:7701/health', 'http://127.0.0.1:7704/health'];
+const UNIFIED_API_HEALTH_URL = 'http://127.0.0.1:7701/health';
+const CAMO_RUNTIME_HEALTH_URL = 'http://127.0.0.1:7704/health';
+const CORE_HEALTH_URLS = [UNIFIED_API_HEALTH_URL, CAMO_RUNTIME_HEALTH_URL];
 const START_API_SCRIPT = path.join(REPO_ROOT, 'runtime', 'infra', 'utils', 'scripts', 'service', 'start-api.mjs');
 const STOP_API_SCRIPT = path.join(REPO_ROOT, 'runtime', 'infra', 'utils', 'scripts', 'service', 'stop-api.mjs');
 
@@ -62,6 +64,10 @@ async function checkHttpHealth(url: string) {
 async function areCoreServicesHealthy() {
   const health = await Promise.all(CORE_HEALTH_URLS.map((url) => checkHttpHealth(url)));
   return health.every(Boolean);
+}
+
+async function isUnifiedApiHealthy() {
+  return checkHttpHealth(UNIFIED_API_HEALTH_URL);
 }
 
 async function runNodeScript(scriptPath: string, timeoutMs: number) {
@@ -154,16 +160,20 @@ export async function startCoreDaemon(): Promise<boolean> {
     40_000,
   );
   if (!startedBrowser) {
-    console.error('[CoreDaemonManager] Failed to start camo browser backend');
-    return false;
+    console.warn('[CoreDaemonManager] Failed to start camo browser backend, continue in degraded mode');
   }
 
   for (let i = 0; i < 20; i += 1) {
-    if (await areCoreServicesHealthy()) return true;
+    const [allHealthy, unifiedHealthy] = await Promise.all([
+      areCoreServicesHealthy(),
+      isUnifiedApiHealthy(),
+    ]);
+    if (allHealthy) return true;
+    if (unifiedHealthy) return true;
     await sleep(300);
   }
 
-  console.error('[CoreDaemonManager] Services still unhealthy after start');
+  console.error('[CoreDaemonManager] Unified API still unhealthy after start');
   return false;
 }
 

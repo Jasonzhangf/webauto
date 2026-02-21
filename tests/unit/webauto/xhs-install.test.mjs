@@ -89,3 +89,21 @@ test('resolveWebautoRoot prefers WEBAUTO_ROOT when provided', async () => {
   if (prevRoot === undefined) delete process.env.WEBAUTO_ROOT;
   else process.env.WEBAUTO_ROOT = prevRoot;
 });
+
+test('resolvePathFromOutput extracts absolute path from noisy output', async () => {
+  const internals = await loadInternals();
+  const out = '\x1b[38;5;10mC:\\Users\\huawei\\AppData\\Local\\camoufox\\camoufox\\Cache\x1b[m';
+  const resolved = internals.resolvePathFromOutput(out, '');
+  assert.equal(resolved, 'C:\\Users\\huawei\\AppData\\Local\\camoufox\\camoufox\\Cache');
+});
+
+test('commandReportsExistingPath returns false when reported path does not exist', async () => {
+  const internals = await loadInternals();
+  const missingPath = 'C:\\__missing_camoufox_cache__';
+  const ok = internals.commandReportsExistingPath({
+    status: 0,
+    stdout: `${missingPath}\n`,
+    stderr: '',
+  });
+  assert.equal(ok, false);
+});

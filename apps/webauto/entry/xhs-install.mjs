@@ -83,6 +83,30 @@ function resolveGeoIPPath() {
   return path.join(resolveWebautoRoot(), 'geoip', 'GeoLite2-City.mmdb');
 }
 
+function stripAnsi(input) {
+  return String(input || '').replace(/\x1b\[[0-9;]*m/g, '');
+}
+
+function resolvePathFromOutput(stdout, stderr) {
+  const merged = `${stripAnsi(stdout)}\n${stripAnsi(stderr)}`;
+  const lines = merged
+    .split(/\r?\n/)
+    .map((x) => x.trim())
+    .filter(Boolean);
+  for (let i = lines.length - 1; i >= 0; i -= 1) {
+    const line = lines[i];
+    if (line.startsWith('/') || /^[A-Z]:\\/i.test(line)) return line;
+  }
+  return '';
+}
+
+function commandReportsExistingPath(ret) {
+  if (!ret || ret.status !== 0) return false;
+  const resolvedPath = resolvePathFromOutput(ret.stdout, ret.stderr);
+  if (!resolvedPath) return false;
+  return existsSync(resolvedPath);
+}
+
 function checkCamoufoxInstalled() {
   const candidates =
     process.platform === 'win32'
@@ -93,10 +117,10 @@ function checkCamoufoxInstalled() {
       : [{ cmd: 'python3', args: ['-m', 'camoufox', 'path'] }];
   for (const candidate of candidates) {
     const ret = run(candidate.cmd, candidate.args);
-    if (ret.status === 0) return true;
+    if (commandReportsExistingPath(ret)) return true;
   }
   const npxRet = runPackageCommand('camoufox', ['camoufox', 'path']);
-  if (npxRet.status === 0) return true;
+  if (commandReportsExistingPath(npxRet)) return true;
   return false;
 }
 
@@ -318,4 +342,6 @@ export const __internals = {
   resolveWebautoRoot,
   resolveGeoIPPath,
   resolveModeAndSelection,
+  resolvePathFromOutput,
+  commandReportsExistingPath,
 };
