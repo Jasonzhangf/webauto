@@ -241,8 +241,77 @@ function buildAliasResolveScript() {
   })()`;
 }
 
+function buildGotoSelfTabScript() {
+  return `(() => {
+    const normalize = (value) => String(value || '').replace(/\\s+/g, ' ').trim();
+    const isSelfLabel = (value) => {
+      const text = normalize(value);
+      if (!text) return false;
+      return text === '我' || text === '我的' || text === '个人主页' || text === '我的主页';
+    };
+    const isVisible = (node) => {
+      if (!(node instanceof HTMLElement)) return false;
+      const style = window.getComputedStyle(node);
+      if (!style) return false;
+      if (style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity || '1') === 0) return false;
+      const rect = node.getBoundingClientRect();
+      return rect.width > 0 && rect.height > 0;
+    };
+    const candidates = Array.from(document.querySelectorAll('a, button, [role="tab"], [role="link"], [class*="tab"]'))
+      .map((node) => {
+        const text = normalize(node.textContent || '');
+        const title = normalize(node.getAttribute?.('title') || '');
+        const aria = normalize(node.getAttribute?.('aria-label') || '');
+        return {
+          node,
+          text,
+          title,
+          aria,
+        };
+      })
+      .filter((item) => isSelfLabel(item.text) || isSelfLabel(item.title) || isSelfLabel(item.aria));
+    const target = candidates.find((item) => isVisible(item.node)) || candidates[0] || null;
+    if (!target?.node) {
+      return { clicked: false, reason: 'self_tab_not_found' };
+    }
+    try {
+      target.node.click();
+      return {
+        clicked: true,
+        reason: 'ok',
+        label: target.text || target.title || target.aria || null,
+      };
+    } catch (error) {
+      return { clicked: false, reason: String(error?.message || error || 'click_failed') };
+    }
+  })()`;
+}
+
+async function resolveAliasFromSelfTab(profileId) {
+  if (!profileId) return null;
+  try {
+    await callAPI('evaluate', { profileId, script: buildGotoSelfTabScript() });
+    await sleep(900);
+    const payload = await callAPI('evaluate', { profileId, script: buildAliasResolveScript() });
+    const result = payload?.result || payload?.data || payload || {};
+    const alias = normalizeText(result.alias);
+    if (!alias) return null;
+    return {
+      alias,
+      source: normalizeText(result.source) ? `self_tab:${normalizeText(result.source)}` : 'self_tab',
+      candidates: Array.isArray(result.candidates) ? result.candidates : [],
+    };
+  } catch {
+    return null;
+  }
+}
+
 async function resolveAliasFromProfilePage(profileId, accountId) {
   if (!profileId || !accountId) return null;
+  const fromSelfTab = await resolveAliasFromSelfTab(profileId);
+  if (fromSelfTab?.alias) {
+    return fromSelfTab;
+  }
   let originalUrl = null;
   try {
     const urlPayload = await callAPI('evaluate', { profileId, script: 'window.location.href' });

@@ -59,6 +59,11 @@ export function renderDashboard(root: HTMLElement, ctx: any) {
       <div id="recent-errors-empty" class="muted" style="font-size: 12px;">暂无错误</div>
       <ul id="recent-errors-list" style="margin: 6px 0 0 16px; padding: 0; font-size: 12px; line-height: 1.5; display:none;"></ul>
     </div>
+    <div style="margin-top: 10px;">
+      <label>点赞链接（最多 30 条）</label>
+      <div id="liked-links-empty" class="muted" style="font-size: 12px;">暂无点赞记录</div>
+      <ul id="liked-links-list" style="margin: 6px 0 0 16px; padding: 0; font-size: 12px; line-height: 1.5; display:none;"></ul>
+    </div>
   `;
   runSummaryGrid.appendChild(runSummaryCard);
   root.appendChild(runSummaryGrid);
@@ -161,6 +166,8 @@ export function renderDashboard(root: HTMLElement, ctx: any) {
   const errorCountText = root.querySelector('#error-count-text') as HTMLDivElement;
   const recentErrorsEmpty = root.querySelector('#recent-errors-empty') as HTMLDivElement;
   const recentErrorsList = root.querySelector('#recent-errors-list') as HTMLUListElement;
+  const likedLinksEmpty = root.querySelector('#liked-links-empty') as HTMLDivElement;
+  const likedLinksList = root.querySelector('#liked-links-list') as HTMLUListElement;
   const logsContainer = root.querySelector('#logs-container') as HTMLDivElement;
   const toggleLogsBtn = root.querySelector('#toggle-logs-btn') as HTMLButtonElement;
   const pauseBtn = root.querySelector('#pause-btn') as HTMLButtonElement;
@@ -183,12 +190,23 @@ export function renderDashboard(root: HTMLElement, ctx: any) {
   let unsubscribeState: (() => void) | null = null;
   let unsubscribeCmd: (() => void) | null = null;
   const contextRun = ctx?.xhsCurrentRun && typeof ctx.xhsCurrentRun === 'object' ? ctx.xhsCurrentRun : null;
+  const contextStartedAtMs = Date.parse(String(contextRun?.startedAt || ''));
   let activeRunId = String(contextRun?.runId || ctx?.activeRunId || '').trim();
+  let activeProfileId = String(contextRun?.profileId || '').trim();
   let activeStatus = '';
   let errorCountTotal = 0;
-  const recentErrors: Array<{ ts: string; source: string; message: string }> = [];
+  const recentErrors: Array<{ ts: string; source: string; message: string; details: string | null }> = [];
+  const likedLinks = new Map<string, {
+    url: string;
+    noteId: string | null;
+    source: string;
+    profileId: string | null;
+    ts: string;
+    count: number;
+  }>();
   const maxLogs = 500;
   const maxRecentErrors = 8;
+  const maxLikedLinks = 30;
   const initialTaskId = String(contextRun?.taskId || ctx?.activeTaskConfigId || '').trim();
   if (initialTaskId) {
     taskConfigId.textContent = initialTaskId;
@@ -214,12 +232,142 @@ export function renderDashboard(root: HTMLElement, ctx: any) {
       const aliases = ctx.api?.settings?.profileAliases || {};
       const profileId = String(contextRun.profileId);
       taskAccount.textContent = aliases[profileId] || profileId;
+      activeProfileId = profileId;
     }
     if (hasRenderableValue(contextRun.taskId)) taskConfigId.textContent = String(contextRun.taskId);
     const startedAtTs = Date.parse(String(contextRun.startedAt || ''));
     if (Number.isFinite(startedAtTs) && startedAtTs > 0) {
       startTime = startedAtTs;
       updateElapsed();
+    }
+  }
+
+  function normalizeDetails(details: any): string | null {
+    if (details === undefined || details === null) return null;
+    try {
+      const text = typeof details === 'string' ? details : JSON.stringify(details, null, 2);
+      const trimmed = String(text || '').trim();
+      if (!trimmed) return null;
+      return trimmed.length > 2000 ? `${trimmed.slice(0, 2000)}\n...` : trimmed;
+    } catch {
+      return String(details || '').trim() || null;
+    }
+  }
+
+  function normalizeNoteId(value: any): string | null {
+    const text = String(value || '').trim();
+    if (!text) return null;
+    if (/^[a-zA-Z0-9_-]{6,}$/.test(text)) return text;
+    return null;
+  }
+
+  function normalizeLink(urlLike: any, noteIdLike: any): { url: string; noteId: string | null } | null {
+    const rawUrl = String(urlLike || '').trim();
+    const noteId = normalizeNoteId(noteIdLike);
+    if (rawUrl) {
+      if (/^https?:\/\//i.test(rawUrl)) return { url: rawUrl, noteId };
+      if (rawUrl.startsWith('/')) return { url: `https://www.xiaohongshu.com${rawUrl}`, noteId };
+      if (/^[a-zA-Z0-9_-]{6,}$/.test(rawUrl)) {
+        return { url: `https://www.xiaohongshu.com/explore/${rawUrl}`, noteId: noteId || rawUrl };
+      }
+    }
+    if (noteId) {
+      return { url: `https://www.xiaohongshu.com/explore/${noteId}`, noteId };
+    }
+    return null;
+  }
+
+  function pushLikedLink(
+    entry: { url: string; noteId: string | null; source: string; profileId?: string | null; ts?: string | null },
+  ) {
+    const url = String(entry.url || '').trim();
+    if (!url) return;
+    const previous = likedLinks.get(url);
+    likedLinks.set(url, {
+      url,
+      noteId: entry.noteId || previous?.noteId || null,
+      source: entry.source || previous?.source || 'comment_like',
+      profileId: entry.profileId || previous?.profileId || activeProfileId || null,
+      ts: entry.ts || previous?.ts || new Date().toLocaleTimeString('zh-CN', { hour12: false }),
+      count: (previous?.count || 0) + 1,
+    });
+    const keys = Array.from(likedLinks.keys());
+    if (keys.length > maxLikedLinks) {
+      likedLinks.delete(keys[0]);
+    }
+  }
+
+  function renderLikedLinks() {
+    likedLinksList.innerHTML = '';
+    const entries = Array.from(likedLinks.values());
+    if (entries.length === 0) {
+      likedLinksEmpty.style.display = 'block';
+      likedLinksList.style.display = 'none';
+      return;
+    }
+    likedLinksEmpty.style.display = 'none';
+    likedLinksList.style.display = 'block';
+    for (const item of entries) {
+      const li = document.createElement('li');
+      const wrap = document.createElement('div');
+      wrap.style.display = 'flex';
+      wrap.style.alignItems = 'center';
+      wrap.style.gap = '6px';
+      wrap.style.flexWrap = 'wrap';
+
+      const label = document.createElement('span');
+      label.textContent = `[${item.ts}]`;
+      wrap.appendChild(label);
+
+      const link = document.createElement('a');
+      link.href = '#';
+      link.textContent = item.noteId ? `note:${item.noteId}` : '打开链接';
+      link.onclick = (evt) => {
+        evt.preventDefault();
+        void openLikedLink(item.url, item.profileId || activeProfileId || null);
+      };
+      wrap.appendChild(link);
+
+      const hint = document.createElement('span');
+      hint.style.color = 'var(--text-4)';
+      hint.textContent = `(${item.source}${item.count > 1 ? ` x${item.count}` : ''})`;
+      wrap.appendChild(hint);
+
+      li.appendChild(wrap);
+      likedLinksList.appendChild(li);
+    }
+  }
+
+  async function openLikedLink(url: string, profileId: string | null) {
+    const targetUrl = String(url || '').trim();
+    if (!targetUrl) return;
+    const pid = String(profileId || '').trim();
+    try {
+      if (pid && typeof ctx.api?.cmdRunJson === 'function') {
+        const ret = await ctx.api.cmdRunJson({
+          title: `goto ${pid}`,
+          cwd: '',
+          args: [
+            ctx.api.pathJoin('apps', 'webauto', 'entry', 'profilepool.mjs'),
+            'goto-profile',
+            pid,
+            '--url',
+            targetUrl,
+            '--json',
+          ],
+          timeoutMs: 30_000,
+        });
+        if (ret?.ok) {
+          addLog(`已在 ${pid} 打开点赞链接`, 'info');
+          return;
+        }
+      }
+      if (typeof ctx.api?.osOpenPath === 'function') {
+        await ctx.api.osOpenPath(targetUrl);
+        addLog('已通过系统打开点赞链接', 'warn');
+      }
+    } catch (err: any) {
+      pushRecentError('点赞链接打开失败', 'like_link', err?.message || String(err));
     }
   }
 
@@ -239,12 +387,28 @@ export function renderDashboard(root: HTMLElement, ctx: any) {
     recentErrorsList.style.display = 'block';
     recentErrors.forEach((item) => {
       const li = document.createElement('li');
-      li.textContent = `[${item.ts}] ${item.source}: ${item.message}`;
+      const line = document.createElement('div');
+      line.textContent = `[${item.ts}] ${item.source}: ${item.message}`;
+      li.appendChild(line);
+      if (item.details) {
+        const details = document.createElement('details');
+        const summary = document.createElement('summary');
+        summary.textContent = '详情';
+        const pre = document.createElement('pre');
+        pre.style.margin = '4px 0 0 0';
+        pre.style.whiteSpace = 'pre-wrap';
+        pre.style.wordBreak = 'break-word';
+        pre.textContent = item.details;
+        details.appendChild(summary);
+        details.appendChild(pre);
+        li.appendChild(details);
+      }
       recentErrorsList.appendChild(li);
     });
+    renderLikedLinks();
   }
 
-  function pushRecentError(message: string, source = 'runtime') {
+  function pushRecentError(message: string, source = 'runtime', details: any = null) {
     const msg = String(message || '').trim();
     if (!msg) return;
     errorCountTotal += 1;
@@ -252,6 +416,7 @@ export function renderDashboard(root: HTMLElement, ctx: any) {
       ts: new Date().toLocaleTimeString('zh-CN', { hour12: false }),
       source: String(source || 'runtime').trim() || 'runtime',
       message: msg,
+      details: normalizeDetails(details),
     });
     while (recentErrors.length > maxRecentErrors) recentErrors.shift();
     renderRunSummary();
@@ -311,9 +476,49 @@ export function renderDashboard(root: HTMLElement, ctx: any) {
     }
   }
 
+  function resetDashboardForNewRun(reason: string, startedAtMs?: number) {
+    commentsCount = 0;
+    likesCount = 0;
+    likesSkippedCount = 0;
+    likesAlreadyCount = 0;
+    likesDedupCount = 0;
+    errorCountTotal = 0;
+    recentErrors.length = 0;
+    likedLinks.clear();
+    logsContainer.innerHTML = '';
+    statCollected.textContent = '0';
+    statSuccess.textContent = '0';
+    statFailed.textContent = '0';
+    statRemaining.textContent = '0';
+    statComments.textContent = '0条';
+    statLikes.textContent = '0次 (跳过:0, 已赞:0, 去重:0)';
+    progressPercent.textContent = '0%';
+    progressBar.style.width = '0%';
+    currentAction.textContent = reason || '-';
+    currentPhase.textContent = '运行中';
+    startTime = Number.isFinite(Number(startedAtMs)) && Number(startedAtMs) > 0
+      ? Number(startedAtMs)
+      : Date.now();
+    stoppedAt = null;
+    updateElapsed();
+    startElapsedTimer();
+    renderRunSummary();
+  }
+
   // Update stats from task state
   function updateFromTaskState(state: any) {
     if (!state) return;
+    const incomingRunId = String(state.runId || '').trim();
+    if (
+      incomingRunId
+      && activeRunId
+      && incomingRunId !== activeRunId
+      && (isTerminalStatus(activeStatus) || !isRunningStatus(activeStatus))
+      && isRunningStatus(state.status)
+    ) {
+      activeRunId = incomingRunId;
+      resetDashboardForNewRun('切换到新任务');
+    }
 
     const progressObj = state.progress && typeof state.progress === 'object' ? state.progress : null;
     const processedRaw = progressObj?.processed ?? progressObj?.current ?? state.progress ?? state.collected ?? state.current ?? 0;
@@ -372,6 +577,7 @@ export function renderDashboard(root: HTMLElement, ctx: any) {
     if (state.profileId) {
       const aliases = ctx.api?.settings?.profileAliases || {};
       taskAccount.textContent = aliases[state.profileId] || state.profileId;
+      activeProfileId = String(state.profileId || '').trim();
     }
     const taskId = String(state.taskId || state.scheduleTaskId || state.configTaskId || '').trim();
     if (taskId) {
@@ -413,7 +619,7 @@ export function renderDashboard(root: HTMLElement, ctx: any) {
       }
     }
     if (state.error) {
-      pushRecentError(String(state.error), 'state');
+      pushRecentError(String(state.error), 'state', state);
     }
   }
 
@@ -434,6 +640,12 @@ export function renderDashboard(root: HTMLElement, ctx: any) {
       if (running) return running;
       return null;
     }
+    const launchingFresh = Number.isFinite(contextStartedAtMs)
+      && contextStartedAtMs > 0
+      && (Date.now() - contextStartedAtMs) < 120_000;
+    if (launchingFresh) {
+      return running || null;
+    }
     return running || latest || null;
   }
 
@@ -444,29 +656,14 @@ export function renderDashboard(root: HTMLElement, ctx: any) {
       currentPhase.textContent = '运行中';
       currentAction.textContent = '启动 autoscript';
       activeStatus = 'running';
-      statCollected.textContent = '0';
-      statSuccess.textContent = '0';
-      statFailed.textContent = '0';
-      statRemaining.textContent = '0';
-      progressPercent.textContent = '0%';
-      progressBar.style.width = '0%';
-      commentsCount = 0;
-      likesCount = 0;
-      likesSkippedCount = 0;
-      likesAlreadyCount = 0;
-      likesDedupCount = 0;
-      statComments.textContent = `0条`;
-      statLikes.textContent = `0次 (跳过:0, 已赞:0, 去重:0)`;
       const ts = Date.parse(String(payload.ts || '')) || Date.now();
-      startTime = ts;
-      stoppedAt = null;
-      updateElapsed();
-      startElapsedTimer();
       if (payload.runId) {
         activeRunId = String(payload.runId || '').trim() || activeRunId;
       }
+      resetDashboardForNewRun('新任务启动', ts);
       if (payload.keyword) taskKeyword.textContent = String(payload.keyword);
       if (payload.maxNotes) taskTarget.textContent = String(payload.maxNotes);
+      if (payload.profileId) activeProfileId = String(payload.profileId || '').trim();
       if (payload.taskId) {
         const taskId = String(payload.taskId || '').trim();
         if (taskId) {
@@ -515,6 +712,23 @@ export function renderDashboard(root: HTMLElement, ctx: any) {
         likesAlreadyCount = Math.max(0, likesAlreadyCount + already);
         likesDedupCount = Math.max(0, likesDedupCount + dedup);
         statLikes.textContent = `${likesCount}次 (跳过:${likesSkippedCount}, 已赞:${likesAlreadyCount}, 去重:${likesDedupCount})`;
+        const candidates: Array<{ url: string; noteId: string | null; source: string }> = [];
+        const direct = normalizeLink(opResult?.noteUrl || opResult?.url || opResult?.href || opResult?.link, opResult?.noteId);
+        if (direct) candidates.push({ ...direct, source: 'comment_like' });
+        const likedComments = Array.isArray(opResult?.likedComments) ? opResult.likedComments : [];
+        for (const row of likedComments) {
+          const item = normalizeLink(row?.noteUrl || row?.url || row?.href || row?.link, row?.noteId || opResult?.noteId);
+          if (!item) continue;
+          candidates.push({ ...item, source: 'liked_comment' });
+        }
+        for (const item of candidates) {
+          pushLikedLink({
+            ...item,
+            profileId: activeProfileId || null,
+            ts: new Date().toLocaleTimeString('zh-CN', { hour12: false }),
+          });
+        }
+        renderRunSummary();
       }
       return;
     }
@@ -523,7 +737,7 @@ export function renderDashboard(root: HTMLElement, ctx: any) {
       statFailed.textContent = String(failed + 1);
       const opId = String(payload?.operationId || '').trim();
       const err = String(payload?.error || payload?.message || payload?.code || event).trim();
-      pushRecentError(opId ? `${opId}: ${err}` : err, event);
+      pushRecentError(opId ? `${opId}: ${err}` : err, event, payload);
       return;
     }
     if (event === 'xhs.unified.merged') {
@@ -545,7 +759,7 @@ export function renderDashboard(root: HTMLElement, ctx: any) {
       currentPhase.textContent = reason && reason !== 'script_failure' ? '已结束' : '失败';
       currentAction.textContent = reason || 'stop';
       if (reason && !successReasons.has(reason)) {
-        pushRecentError(`stop reason=${reason}`, event);
+        pushRecentError(`stop reason=${reason}`, event, payload);
       }
       renderRunSummary();
     }
@@ -612,6 +826,7 @@ export function renderDashboard(root: HTMLElement, ctx: any) {
     if (profile?.profileId) {
       const aliases = ctx.api?.settings?.profileAliases || {};
       taskAccount.textContent = aliases[profile.profileId] || profile.profileId;
+      activeProfileId = String(profile.profileId || '').trim();
     }
 
     const runId = String(profile?.runId || summary?.runId || '').trim();
@@ -699,7 +914,7 @@ export function renderDashboard(root: HTMLElement, ctx: any) {
           if (payload.action) addLog(String(payload.action), 'info');
           if (payload.error) {
             addLog(String(payload.error), 'error');
-            pushRecentError(String(payload.error), 'state');
+            pushRecentError(String(payload.error), 'state', payload);
           }
         }
       });
@@ -733,7 +948,7 @@ export function renderDashboard(root: HTMLElement, ctx: any) {
         if (shouldAdoptStartedRun) {
           activeRunId = runId;
           activeStatus = 'running';
-          stoppedAt = null;
+          resetDashboardForNewRun('进程启动');
           renderRunSummary();
         }
         if (activeRunId && runId && runId !== activeRunId) return;
@@ -743,7 +958,7 @@ export function renderDashboard(root: HTMLElement, ctx: any) {
           parseLineEvent(String(evt.line || '').trim());
         } else if (evt.type === 'stderr') {
           addLog(evt.line, 'error');
-          pushRecentError(String(evt.line || ''), 'stderr');
+          pushRecentError(String(evt.line || ''), 'stderr', evt);
           const failed = Number(statFailed.textContent || '0') || 0;
           statFailed.textContent = String(failed + 1);
         } else if (evt.type === 'exit') {
@@ -758,7 +973,7 @@ export function renderDashboard(root: HTMLElement, ctx: any) {
             stopElapsedTimer();
           }
           if (Number(evt.exitCode || 0) !== 0) {
-            pushRecentError(`进程退出 code=${evt.exitCode ?? 'null'}`, 'exit');
+            pushRecentError(`进程退出 code=${evt.exitCode ?? 'null'}`, 'exit', evt);
           }
           renderRunSummary();
         }

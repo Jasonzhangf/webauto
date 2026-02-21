@@ -447,12 +447,15 @@ test('config panel can load, export and run current schedule config', async () =
 
   const accountSel = root.querySelector('#account-select') as HTMLSelectElement;
   const keyword = root.querySelector('#keyword-input') as HTMLInputElement;
+  const scheduleType = root.querySelector('#schedule-type-select') as HTMLSelectElement;
   const saveCurrentBtn = root.querySelector('#save-current-btn') as HTMLButtonElement;
   const start = root.querySelector('#start-btn') as HTMLButtonElement;
   const exportBtn = root.querySelector('#export-btn') as HTMLButtonElement;
   assert.ok(accountSel.options.length >= 2);
   accountSel.value = 'xhs-1';
   keyword.value = 'deepseek';
+  scheduleType.value = 'periodic';
+  scheduleType.dispatchEvent(new Event('change', { bubbles: true }));
 
   exportBtn.click();
   await flush();

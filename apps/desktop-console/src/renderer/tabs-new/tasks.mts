@@ -2,6 +2,7 @@ import { createEl } from '../ui-components.mts';
 import {
   getPlatformForCommandType,
   getTasksForPlatform,
+  inferUiScheduleEditorState,
   parseTaskRows,
   toIsoOrNull,
   toLocalDatetimeValue,
@@ -383,14 +384,9 @@ export function renderTasksPanel(root: HTMLElement, ctx: any) {
     bodyInput.checked = task.commandArgv?.['fetch-body'] !== false;
     likesInput.checked = task.commandArgv?.['do-likes'] === true;
     likeKeywordsInput.value = String(task.commandArgv?.['like-keywords'] || '').trim();
-    const rawScheduleType = String(task.scheduleType || 'once').trim();
-    if (rawScheduleType === 'interval' || rawScheduleType === 'daily' || rawScheduleType === 'weekly') {
-      scheduleTypeSelect.value = 'periodic';
-      periodicTypeSelect.value = rawScheduleType as TaskFormData['periodicType'];
-    } else {
-      scheduleTypeSelect.value = 'scheduled';
-      periodicTypeSelect.value = 'interval';
-    }
+    const uiSchedule = inferUiScheduleEditorState(task);
+    scheduleTypeSelect.value = uiSchedule.mode;
+    periodicTypeSelect.value = uiSchedule.periodicType;
     intervalInput.value = String(task.intervalMinutes || 30);
     runAtInput.value = toLocalDatetimeValue(task.runAt);
     maxRunsInput.value = task.maxRuns ? String(task.maxRuns) : '';
@@ -664,7 +660,7 @@ export function renderTasksPanel(root: HTMLElement, ctx: any) {
         target: data.targetCount,
         startedAt: new Date().toISOString(),
       };
-      ctx.activeRunId = runId || ctx.activeRunId || null;
+      ctx.activeRunId = runId || null;
     }
     if (typeof ctx.setActiveTab === 'function') {
       ctx.setActiveTab(data.taskType === 'xhs-unified' ? 'dashboard' : 'scheduler');
@@ -681,6 +677,10 @@ export function renderTasksPanel(root: HTMLElement, ctx: any) {
 
   async function saveTask(runImmediately = false) {
     const data = collectFormData();
+    if (runImmediately && data.scheduleMode === 'immediate') {
+      await runWithoutSave();
+      return;
+    }
     saveBtn.disabled = true;
     runBtn.disabled = true;
     runEphemeralBtn.disabled = true;
@@ -738,7 +738,7 @@ export function renderTasksPanel(root: HTMLElement, ctx: any) {
           target: data.targetCount,
           startedAt: new Date().toISOString(),
         };
-        ctx.activeRunId = runId || ctx.activeRunId || null;
+        ctx.activeRunId = runId || null;
       }
       if (typeof ctx.setActiveTab === 'function') {
         ctx.setActiveTab(data.taskType === 'xhs-unified' ? 'dashboard' : 'scheduler');

@@ -603,6 +603,7 @@ export function renderSetupWizard(root: HTMLElement, ctx: any) {
         'sync',
         id,
         '--pending-while-login',
+        '--resolve-alias',
         '--json',
       ],
       timeoutMs: 20_000,

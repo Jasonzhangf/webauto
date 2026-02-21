@@ -60,9 +60,42 @@ async function publishAccountEvent(type, payload) {
 
 async function detectAliasFromActivePage(profileId, selector) {
   const { callAPI } = await import('../../../modules/camo-runtime/src/utils/browser-service.mjs');
-  const script = `(() => {
+  const script = `(async () => {
+    const normalize = (value) => String(value || '').replace(/\\s+/g, ' ').trim();
+    const isVisible = (node) => {
+      if (!(node instanceof HTMLElement)) return false;
+      const style = window.getComputedStyle(node);
+      if (!style) return false;
+      if (style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity || '1') === 0) return false;
+      const rect = node.getBoundingClientRect();
+      return rect.width > 0 && rect.height > 0;
+    };
+    const isSelfTabText = (value) => {
+      const text = normalize(value);
+      return text === '我' || text === '我的' || text === '个人主页' || text === '我的主页';
+    };
+    const selfTabCandidates = Array.from(document.querySelectorAll('a, button, [role="tab"], [role="link"], [class*="tab"]'))
+      .map((node) => ({
+        node,
+        text: normalize(node.textContent || ''),
+        title: normalize(node.getAttribute?.('title') || ''),
+        aria: normalize(node.getAttribute?.('aria-label') || ''),
+      }))
+      .filter((item) => isSelfTabText(item.text) || isSelfTabText(item.title) || isSelfTabText(item.aria));
+    const selfTarget = selfTabCandidates.find((item) => isVisible(item.node)) || selfTabCandidates[0] || null;
+    if (selfTarget?.node) {
+      try {
+        selfTarget.node.click();
+        await new Promise((resolve) => setTimeout(resolve, 900));
+      } catch {
+        // ignore self-tab click failure
+      }
+    }
+
     const requested = ${JSON.stringify(String(selector || '').trim())};
     const defaultSelectors = [
+      '[data-testid*="nickname"]',
+      '[class*="profile"] [class*="name"]',
       '[class*="user"] [class*="name"]',
       '[class*="nickname"]',
       '[class*="account"] [class*="name"]',
@@ -76,14 +109,19 @@ async function detectAliasFromActivePage(profileId, selector) {
     for (const sel of selectors) {
       const nodes = Array.from(document.querySelectorAll(sel)).slice(0, 6);
       for (const node of nodes) {
-        const text = clean(node.textContent || '');
+        const text = clean(node.textContent || node.getAttribute?.('title') || '');
         if (!text) continue;
         candidates.push({ text, selector: sel });
       }
     }
+    const userInfo = document.querySelector('[class*="user"] [class*="nickname"], [class*="profile"] [class*="nickname"]');
+    if (userInfo) {
+      const text = clean(userInfo.textContent || '');
+      if (text) candidates.push({ text, selector: 'profile.nickname' });
+    }
     const title = clean(document.title || '');
     if (title) candidates.push({ text: title, selector: 'document.title' });
-    const bad = ['小红书', '登录', '注册', '搜索'];
+    const bad = ['小红书', '登录', '注册', '搜索', '我', '消息', '通知'];
     const picked = candidates.find((item) => {
       if (!item?.text) return false;
       if (item.text.length < 2) return false;

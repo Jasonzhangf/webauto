@@ -1,4 +1,5 @@
 export type ScheduleType = 'interval' | 'once' | 'daily' | 'weekly';
+export type UiScheduleMode = 'immediate' | 'periodic' | 'scheduled';
 
 export type Platform = 'xiaohongshu' | 'weibo' | '1688';
 
@@ -51,6 +52,11 @@ export type ScheduleTask = {
   runCount: number;
   failCount: number;
   runHistory?: Array<{ timestamp: string; status: 'success' | 'failure'; durationMs: number }>;
+};
+
+export type UiScheduleEditorState = {
+  mode: UiScheduleMode;
+  periodicType: 'interval' | 'daily' | 'weekly';
 };
 
 function normalizeScheduleType(value: any): ScheduleType {
@@ -121,6 +127,25 @@ export function parseTaskRows(payload: any): ScheduleTask[] {
       runHistory: parseRunHistory(row?.runHistory),
     }))
     .filter((row) => row.id);
+}
+
+export function inferUiScheduleEditorState(
+  task: Pick<ScheduleTask, 'scheduleType' | 'runAt'>,
+  nowMs = Date.now(),
+): UiScheduleEditorState {
+  const scheduleType = normalizeScheduleType(task?.scheduleType);
+  if (scheduleType === 'interval') {
+    return { mode: 'periodic', periodicType: 'interval' };
+  }
+  if (scheduleType === 'daily' || scheduleType === 'weekly') {
+    return { mode: 'periodic', periodicType: scheduleType };
+  }
+  const runAtText = String(task?.runAt || '').trim();
+  const runAtMs = Date.parse(runAtText);
+  if (Number.isFinite(runAtMs) && runAtMs > nowMs + 60_000) {
+    return { mode: 'scheduled', periodicType: 'interval' };
+  }
+  return { mode: 'immediate', periodicType: 'interval' };
 }
 
 function parseSortableTime(value: string | null): number {

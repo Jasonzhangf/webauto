@@ -2,6 +2,7 @@ import { createEl } from '../ui-components.mts';
 import { listAccountProfiles, type UiAccountProfile } from '../account-source.mts';
 import {
   asCsvText,
+  inferUiScheduleEditorState,
   parseTaskRows,
   pickLatestTask,
   toIsoOrNull,
@@ -348,6 +349,7 @@ export function renderConfigPanel(root: HTMLElement, ctx: any) {
     if (mode === 'immediate' || mode === 'scheduled') {
       scheduleMaxRunsInput.value = '';
     }
+    startBtn.textContent = mode === 'immediate' ? '立即执行' : '保存并执行';
     renderConfigStatus();
   }
 
@@ -486,17 +488,9 @@ export function renderConfigPanel(root: HTMLElement, ctx: any) {
       taskConfigSelect.value = task.id;
       taskNameInput.value = task.name || '';
       taskEnabledCb.checked = task.enabled !== false;
-      scheduleTypeSelect.value = task.scheduleType;
-      if (task.scheduleType === 'interval') {
-        scheduleTypeSelect.value = 'periodic';
-        schedulePeriodicTypeSelect.value = 'interval';
-      } else if (task.scheduleType === 'daily' || task.scheduleType === 'weekly') {
-        scheduleTypeSelect.value = 'periodic';
-        schedulePeriodicTypeSelect.value = task.scheduleType;
-      } else {
-        scheduleTypeSelect.value = 'scheduled';
-        schedulePeriodicTypeSelect.value = 'interval';
-      }
+      const uiSchedule = inferUiScheduleEditorState(task);
+      scheduleTypeSelect.value = uiSchedule.mode;
+      schedulePeriodicTypeSelect.value = uiSchedule.periodicType;
       scheduleIntervalInput.value = String(task.intervalMinutes || 30);
       scheduleRunAtInput.value = toLocalDatetimeValue(task.runAt);
       scheduleMaxRunsInput.value = task.maxRuns ? String(task.maxRuns) : '';
@@ -702,6 +696,11 @@ export function renderConfigPanel(root: HTMLElement, ctx: any) {
   }
 
   async function runCurrentConfig() {
+    const mode = String(scheduleTypeSelect.value || 'immediate').trim();
+    if (mode === 'immediate') {
+      await runNowWithoutSave();
+      return;
+    }
     startBtn.disabled = true;
     const prevText = startBtn.textContent;
     startBtn.textContent = '执行中...';
@@ -720,7 +719,7 @@ export function renderConfigPanel(root: HTMLElement, ctx: any) {
         target: readNumber(targetInput, DEFAULT_MAX_NOTES, 1),
         startedAt: new Date().toISOString(),
       };
-      ctx.activeRunId = runId || ctx.activeRunId || null;
+      ctx.activeRunId = runId || null;
       if (typeof ctx.appendLog === 'function') {
         ctx.appendLog(`[ui] schedule run task=${taskId} runId=${runId || '-'}`);
       }
@@ -758,7 +757,7 @@ export function renderConfigPanel(root: HTMLElement, ctx: any) {
         target: Number(payload.argv['max-notes'] || DEFAULT_MAX_NOTES) || DEFAULT_MAX_NOTES,
         startedAt: new Date().toISOString(),
       };
-      ctx.activeRunId = runId || ctx.activeRunId || null;
+      ctx.activeRunId = runId || null;
       if (typeof ctx.setStatus === 'function') {
         ctx.setStatus('started: xhs-unified');
       }

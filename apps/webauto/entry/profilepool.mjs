@@ -173,6 +173,46 @@ async function cmdMigrateFingerprints(jsonMode) {
   output({ ok: true, checked: profiles.length, ensured: created.length }, jsonMode);
 }
 
+async function cmdGotoProfile(profileId, argv, jsonMode) {
+  const id = String(profileId || '').trim();
+  if (!id) throw new Error('profileId is required');
+  const url = String(argv.url || argv._?.[2] || '').trim();
+  if (!url) throw new Error('url is required');
+  await ensureProfile(id);
+
+  const gotoRet = runCamo(['goto', id, url], { rootDir: ROOT, timeoutMs: 30000 });
+  if (gotoRet.ok) {
+    output({
+      ok: true,
+      profileId: id,
+      url,
+      mode: 'goto',
+      result: gotoRet.json || null,
+    }, jsonMode);
+    return;
+  }
+
+  const idleTimeout = String(argv['idle-timeout'] || process.env.WEBAUTO_LOGIN_IDLE_TIMEOUT || '30m').trim() || '30m';
+  const startRet = runCamo(['start', id, '--url', url, '--idle-timeout', idleTimeout], { rootDir: ROOT });
+  if (!startRet.ok) {
+    output({
+      ok: false,
+      profileId: id,
+      url,
+      mode: 'start',
+      error: startRet.stderr || startRet.stdout || gotoRet.stderr || gotoRet.stdout || 'goto/start failed',
+    }, jsonMode);
+    process.exit(1);
+  }
+  output({
+    ok: true,
+    profileId: id,
+    url,
+    mode: 'start',
+    session: startRet.json || null,
+  }, jsonMode);
+}
+
 async function main() {
   const argv = minimist(process.argv.slice(2));
   const cmd = String(argv._[0] || '').trim();
@@ -180,13 +220,14 @@ async function main() {
   const jsonMode = argv.json === true;
 
   if (!cmd || cmd === 'help' || cmd === '--help' || cmd === '-h') {
-    console.log('Usage: node apps/webauto/entry/profilepool.mjs <list|add|login|login-profile|migrate-fingerprints> ... [--json]');
+    console.log('Usage: node apps/webauto/entry/profilepool.mjs <list|add|login|login-profile|goto-profile|migrate-fingerprints> ... [--json]');
     return;
   }
 
   if (cmd === 'list') return cmdList(arg1, jsonMode);
   if (cmd === 'add') return cmdAdd(arg1 || 'xiaohongshu-batch', jsonMode);
   if (cmd === 'login-profile') return cmdLoginProfile(arg1, argv, jsonMode);
+  if (cmd === 'goto-profile') return cmdGotoProfile(arg1, argv, jsonMode);
   if (cmd === 'login') return cmdLogin(arg1 || 'xiaohongshu-batch', argv, jsonMode);
   if (cmd === 'migrate-fingerprints') return cmdMigrateFingerprints(jsonMode);
 

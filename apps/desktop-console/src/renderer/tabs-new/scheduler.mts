@@ -1,5 +1,6 @@
 import { createEl } from '../ui-components.mts';
 import {
+  inferUiScheduleEditorState,
   parseTaskRows,
   toIsoOrNull,
   toLocalDatetimeValue,
@@ -356,16 +357,9 @@ export function renderSchedulerPanel(root: HTMLElement, ctx: any) {
     editingIdInput.value = task.id;
     nameInput.value = task.name || '';
     enabledInput.checked = task.enabled !== false;
-    if (task.scheduleType === 'interval') {
-      typeSelect.value = 'periodic';
-      periodicTypeSelect.value = 'interval';
-    } else if (task.scheduleType === 'daily' || task.scheduleType === 'weekly') {
-      typeSelect.value = 'periodic';
-      periodicTypeSelect.value = task.scheduleType;
-    } else {
-      typeSelect.value = 'scheduled';
-      periodicTypeSelect.value = 'interval';
-    }
+    const uiSchedule = inferUiScheduleEditorState(task);
+    typeSelect.value = uiSchedule.mode;
+    periodicTypeSelect.value = uiSchedule.periodicType;
     intervalInput.value = String(task.intervalMinutes || 30);
     runAtInput.value = toLocalDatetimeValue(task.runAt);
     maxRunsInput.value = task.maxRuns ? String(task.maxRuns) : '';
@@ -507,7 +501,7 @@ export function renderSchedulerPanel(root: HTMLElement, ctx: any) {
               target: Number(argv['max-notes'] || argv.target || 0) || 0,
               startedAt: new Date().toISOString(),
             };
-            ctx.activeRunId = runId || ctx.activeRunId || null;
+            ctx.activeRunId = runId || null;
           }
           if (typeof ctx.setStatus === 'function') {
             ctx.setStatus(`running: ${task.id}`);
@@ -595,7 +589,7 @@ export function renderSchedulerPanel(root: HTMLElement, ctx: any) {
           target: Number(payload.argv['max-notes'] || payload.argv.target || 0) || 0,
           startedAt: new Date().toISOString(),
         };
-        ctx.activeRunId = runId || ctx.activeRunId || null;
+        ctx.activeRunId = runId || null;
       }
       if (typeof ctx.setStatus === 'function') {
         ctx.setStatus(`started: ${payload.commandType}`);
