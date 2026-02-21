@@ -10,11 +10,15 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const APP_ROOT = path.resolve(__dirname, '..');
 const DIST_MAIN = path.join(APP_ROOT, 'dist', 'main', 'index.mjs');
 
-const args = minimist(process.argv.slice(2), {
-  boolean: ['build', 'install', 'check', 'help', 'headless', 'no-daemon', 'dry-run', 'no-dry-run', 'parallel', 'do-likes'],
+const rawArgv = process.argv.slice(2);
+const args = minimist(rawArgv, {
+  boolean: ['build', 'install', 'check', 'help', 'headless', 'no-daemon', 'foreground', 'dry-run', 'no-dry-run', 'parallel', 'do-likes'],
   string: ['profile', 'profiles', 'keyword', 'target', 'scenario', 'output', 'concurrency', 'like-keywords', 'max-likes'],
   alias: { h: 'help', p: 'profile', k: 'keyword', t: 'target', o: 'output' }
 });
+// minimist treats `--no-foo` as negation of `foo`, so `--no-daemon` must be
+// detected from raw argv to keep backward-compatible CLI behavior.
+const noDaemon = rawArgv.includes('--no-daemon') || rawArgv.includes('--foreground') || args.foreground === true;
 
 function printHelp() {
   console.log(`webauto ui console
@@ -35,6 +39,7 @@ Options:
   --build      Auto-build if missing
   --install    Auto-install if missing deps
   --no-daemon  Run in foreground mode
+  --foreground Alias of --no-daemon
   --scenario   Test scenario name
   --profile    Test profile ID
   --profiles   Test profile IDs (comma-separated)
@@ -677,7 +682,7 @@ async function main() {
     return;
   }
 
-  await startConsole(args['no-daemon']);
+  await startConsole(noDaemon);
 }
 
 main().catch((err) => {

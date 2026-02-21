@@ -523,6 +523,7 @@ async function main() {
 
   const cmd = String(args._[0] || '').trim();
   const sub = String(args._[1] || '').trim();
+  const noDaemon = rawArgv.includes('--no-daemon') || rawArgv.includes('--foreground') || args['no-daemon'] === true;
 
   if (args.help) {
     if (cmd === 'account') {
@@ -560,7 +561,7 @@ async function main() {
       build: false,
       install: false,
       checkOnly: false,
-      noDaemon: args['no-daemon'] === true,
+      noDaemon,
     });
     return;
   }
@@ -608,7 +609,7 @@ async function main() {
       build: args.build === true,
       install: args.install === true,
       checkOnly: args.check === true,
-      noDaemon: args['no-daemon'] === true,
+      noDaemon,
     });
     return;
   }
