@@ -25,6 +25,7 @@ const DEFAULT_MAX_NOTES = 50;
 
 export function renderConfigPanel(root: HTMLElement, ctx: any) {
   root.innerHTML = '';
+  const ONCE_RUN_BUFFER_MINUTES = 2;
 
   const pageIndicator = createEl('div', { className: 'page-indicator' }, [
     '当前: ',
@@ -92,8 +93,8 @@ export function renderConfigPanel(root: HTMLElement, ctx: any) {
         <div>
           <label>循环模式</label>
           <select id="schedule-type-select" style="width: 140px;">
-            <option value="interval">循环间隔</option>
             <option value="once">一次性</option>
+            <option value="interval">循环间隔</option>
             <option value="daily">每天</option>
             <option value="weekly">每周</option>
           </select>
@@ -194,7 +195,7 @@ export function renderConfigPanel(root: HTMLElement, ctx: any) {
       </div>
       <div>
         <label>调度预览</label>
-        <div id="config-schedule-preview" class="muted">每 30 分钟</div>
+        <div id="config-schedule-preview" class="muted">一次性（立即执行）</div>
       </div>
     </div>
     <div id="config-last-action" class="muted" style="margin-top: 6px; font-size: 12px;">最近操作：-</div>
@@ -265,8 +266,24 @@ export function renderConfigPanel(root: HTMLElement, ctx: any) {
     return new Date().toLocaleTimeString('zh-CN', { hour12: false });
   }
 
+  function toLocalRunAtFromNow(bufferMinutes = ONCE_RUN_BUFFER_MINUTES): string {
+    const when = new Date(Date.now() + Math.max(1, bufferMinutes) * 60_000);
+    const yyyy = when.getFullYear();
+    const mm = String(when.getMonth() + 1).padStart(2, '0');
+    const dd = String(when.getDate()).padStart(2, '0');
+    const hh = String(when.getHours()).padStart(2, '0');
+    const min = String(when.getMinutes()).padStart(2, '0');
+    return `${yyyy}-${mm}-${dd}T${hh}:${min}`;
+  }
+
+  function ensureOnceRunAtDefault() {
+    if (scheduleTypeSelect.value === 'once' && !String(scheduleRunAtInput.value || '').trim()) {
+      scheduleRunAtInput.value = toLocalRunAtFromNow();
+    }
+  }
+
   function scheduleSummaryText() {
-    const mode = String(scheduleTypeSelect.value || 'interval').trim();
+    const mode = String(scheduleTypeSelect.value || 'once').trim();
     const maxRunsRaw = scheduleMaxRunsInput.value.trim();
     const maxRuns = maxRunsRaw ? `，最多 ${Math.max(1, Number(maxRunsRaw) || 1)} 次` : '，不限次数';
     if (mode === 'interval') {
@@ -274,7 +291,9 @@ export function renderConfigPanel(root: HTMLElement, ctx: any) {
       return `每 ${interval} 分钟${maxRuns}`;
     }
     const modeLabel = mode === 'once' ? '一次性' : mode === 'daily' ? '每日' : '每周';
-    const runAtText = scheduleRunAtInput.value ? scheduleRunAtInput.value.replace('T', ' ') : '未设置时间';
+    const runAtText = scheduleRunAtInput.value
+      ? scheduleRunAtInput.value.replace('T', ' ')
+      : (mode === 'once' ? '立即执行（+2分钟）' : '未设置时间');
     return `${modeLabel}，${runAtText}${maxRuns}`;
   }
 
@@ -320,6 +339,7 @@ export function renderConfigPanel(root: HTMLElement, ctx: any) {
   function updateScheduleFields() {
     const mode = String(scheduleTypeSelect.value || 'interval');
     const useRunAt = mode === 'once' || mode === 'daily' || mode === 'weekly';
+    ensureOnceRunAtDefault();
     scheduleRunAtWrap.style.display = useRunAt ? '' : 'none';
     scheduleIntervalWrap.style.display = useRunAt ? 'none' : '';
     renderConfigStatus();
@@ -378,6 +398,8 @@ export function renderConfigPanel(root: HTMLElement, ctx: any) {
   function buildSchedulePayload(withId: string): SchedulePayload {
     const maxRunsRaw = scheduleMaxRunsInput.value.trim();
     const maxRuns = maxRunsRaw ? Math.max(1, Number(maxRunsRaw) || 1) : null;
+    const scheduleType = String(scheduleTypeSelect.value || 'once') as ScheduleTask['scheduleType'];
+    const runAtValue = String(scheduleRunAtInput.value || '').trim();
     const argv = {
       profile: accountSelect.value.trim(),
       keyword: keywordInput.value.trim(),
@@ -398,9 +420,11 @@ export function renderConfigPanel(root: HTMLElement, ctx: any) {
       name: taskNameInput.value.trim() || toTaskNameFallback(),
       enabled: taskEnabledCb.checked,
       commandType: 'xhs-unified',
-      scheduleType: String(scheduleTypeSelect.value || 'interval') as ScheduleTask['scheduleType'],
+      scheduleType,
       intervalMinutes: readNumber(scheduleIntervalInput, 30, 1),
-      runAt: toIsoOrNull(scheduleRunAtInput.value),
+      runAt: scheduleType === 'once'
+        ? toIsoOrNull(runAtValue || toLocalRunAtFromNow())
+        : toIsoOrNull(runAtValue),
       maxRuns,
       argv,
     };
@@ -499,9 +523,9 @@ export function renderConfigPanel(root: HTMLElement, ctx: any) {
         maxLikesInput.value = String(config.maxLikes ?? 0);
         headlessCb.checked = config.headless === true;
         dryRunCb.checked = config.dryRun === true;
-        scheduleTypeSelect.value = String(config.scheduleType || 'interval');
+        scheduleTypeSelect.value = String(config.scheduleType || 'once');
         scheduleIntervalInput.value = String(config.intervalMinutes || 30);
-        scheduleRunAtInput.value = toLocalDatetimeValue(config.runAt || null);
+        scheduleRunAtInput.value = toLocalDatetimeValue(config.runAt || null) || toLocalRunAtFromNow();
         scheduleMaxRunsInput.value = config.maxRuns ? String(config.maxRuns) : '';
         const preferredProfileId = String(config.lastProfileId || '').trim();
         ensureAccountOption(preferredProfileId);
@@ -705,9 +729,9 @@ export function renderConfigPanel(root: HTMLElement, ctx: any) {
           maxLikesInput.value = String(config.maxLikes ?? 0);
           headlessCb.checked = config.headless === true;
           dryRunCb.checked = config.dryRun === true;
-          scheduleTypeSelect.value = String(config.scheduleType || 'interval');
+          scheduleTypeSelect.value = String(config.scheduleType || 'once');
           scheduleIntervalInput.value = String(config.intervalMinutes || 30);
-          scheduleRunAtInput.value = toLocalDatetimeValue(config.runAt || null);
+          scheduleRunAtInput.value = toLocalDatetimeValue(config.runAt || null) || toLocalRunAtFromNow();
           scheduleMaxRunsInput.value = config.maxRuns ? String(config.maxRuns) : '';
           const profileId = String(config.lastProfileId || config.profile || '').trim();
           if (profileId) {
@@ -802,6 +826,8 @@ export function renderConfigPanel(root: HTMLElement, ctx: any) {
     }
   });
 
+  scheduleTypeSelect.value = 'once';
+  scheduleRunAtInput.value = toLocalRunAtFromNow();
   updateScheduleFields();
   updateLikeKeywordsState();
   renderConfigStatus();

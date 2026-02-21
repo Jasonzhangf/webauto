@@ -668,7 +668,7 @@ export function renderSetupWizard(root: HTMLElement, ctx: any) {
   addAccountBtn.onclick = addAccount;
   enterMainBtn.onclick = () => {
     if (typeof ctx.setActiveTab === 'function') {
-      ctx.setActiveTab('config');
+      ctx.setActiveTab('tasks');
     }
   };
 

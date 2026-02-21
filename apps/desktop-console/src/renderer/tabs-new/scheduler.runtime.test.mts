@@ -329,13 +329,14 @@ test('scheduler panel supports validate + add/update/delete/import + daemon life
   assert.equal(alertMessages.some((x) => x.includes('关键词不能为空')), true);
 
   keywordInput.value = '春晚';
-  typeSelect.value = 'once';
+  typeSelect.value = 'daily';
   typeSelect.dispatchEvent(new Event('change', { bubbles: true }));
   assert.equal(runAtWrap.style.display === 'none', false);
   assert.equal(intervalWrap.style.display, 'none');
+  runAtInput.value = '';
   saveBtn.click();
   await flush(2);
-  assert.equal(alertMessages.some((x) => x.includes('once 任务需要锚点时间')), true);
+  assert.equal(alertMessages.some((x) => x.includes('daily 任务需要锚点时间')), true);
 
   runAtInput.value = '2026-02-20T10:30';
   saveBtn.click();
@@ -358,7 +359,7 @@ test('scheduler panel supports validate + add/update/delete/import + daemon life
 
   findButtonByTextIn(schedulerList, '载入配置', 0).click();
   await flush(2);
-  assert.equal(calls.setActiveTab.includes('config'), true);
+  assert.equal(calls.setActiveTab.includes('tasks'), true);
 
   findButtonByTextIn(schedulerList, '执行', 0).click();
   await flush(3);
@@ -368,7 +369,7 @@ test('scheduler panel supports validate + add/update/delete/import + daemon life
 
   openConfigBtn.click();
   await flush(2);
-  assert.equal(calls.setActiveTab.filter((id) => id === 'config').length >= 2, true);
+  assert.equal(calls.setActiveTab.filter((id) => id === 'tasks').length >= 2, true);
 
   findButtonByTextIn(schedulerList, '导出', 0).click();
   await flush(3);

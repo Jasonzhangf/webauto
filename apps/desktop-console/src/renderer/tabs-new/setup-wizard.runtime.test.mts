@@ -193,7 +193,7 @@ test('setup wizard checks env, repairs missing deps, creates account and enters 
   const enterBtn = root.querySelector('#enter-main-btn') as HTMLButtonElement;
   assert.equal(enterBtn.disabled, false);
   enterBtn.click();
-  assert.equal(calls.setActiveTab.includes('config'), true);
+  assert.equal(calls.setActiveTab.includes('tasks'), true);
 
   if (typeof dispose === 'function') dispose();
 });

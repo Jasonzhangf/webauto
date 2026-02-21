@@ -140,10 +140,10 @@ test('dashboard reacts to runtime streams and control actions', async () => {
   stopBtn.click();
   await flush(2);
   assert.equal(killCalled, 1);
-  assert.equal(activeTab, 'config');
+  assert.equal(activeTab, 'tasks');
 
   backConfigBtn.click();
-  assert.equal(activeTab, 'config');
+  assert.equal(activeTab, 'tasks');
 
   cleanup();
   assert.equal(unsubState, true);
@@ -208,7 +208,7 @@ test('dashboard handles loading errors and bus-only progress events', async () =
   stopBtn.click();
   await flush(2);
 
-  assert.equal(setTab, 'config');
+  assert.equal(setTab, 'tasks');
   assert.match(String((root.querySelector('#task-keyword') as HTMLDivElement).textContent || ''), /工作服/);
   assert.match(String((root.querySelector('#current-action') as HTMLSpanElement).textContent || ''), /exit|terminal|script_failure/i);
   assert.match(String((root.querySelector('#stat-likes') as HTMLSpanElement).textContent || ''), /跳过/);

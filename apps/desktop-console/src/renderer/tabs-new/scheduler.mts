@@ -10,6 +10,7 @@ import {
 
 export function renderSchedulerPanel(root: HTMLElement, ctx: any) {
   root.innerHTML = '';
+  const ONCE_RUN_BUFFER_MINUTES = 2;
 
   const pageIndicator = createEl('div', { className: 'page-indicator' }, [
     '当前: ',
@@ -79,8 +80,8 @@ export function renderSchedulerPanel(root: HTMLElement, ctx: any) {
       <div>
         <label>调度类型</label>
         <select id="scheduler-type" style="width: 140px;">
-          <option value="interval">循环间隔</option>
           <option value="once">一次性</option>
+          <option value="interval">循环间隔</option>
           <option value="daily">每天</option>
           <option value="weekly">每周</option>
         </select>
@@ -90,7 +91,7 @@ export function renderSchedulerPanel(root: HTMLElement, ctx: any) {
         <input id="scheduler-interval" type="number" min="1" value="30" style="width: 120px;" />
       </div>
       <div id="scheduler-runat-wrap" style="display:none;">
-        <label>锚点时间</label>
+        <label>执行时间</label>
         <input id="scheduler-runat" type="datetime-local" style="width: 220px;" />
       </div>
       <div>
@@ -221,13 +222,30 @@ export function renderSchedulerPanel(root: HTMLElement, ctx: any) {
   function openConfigTab(taskId: string) {
     setActiveTaskContext(taskId);
     if (typeof ctx.setActiveTab === 'function') {
-      ctx.setActiveTab('config');
+      ctx.setActiveTab('tasks');
+    }
+  }
+
+  function toLocalRunAtFromNow(bufferMinutes = ONCE_RUN_BUFFER_MINUTES): string {
+    const when = new Date(Date.now() + Math.max(1, bufferMinutes) * 60_000);
+    const yyyy = when.getFullYear();
+    const mm = String(when.getMonth() + 1).padStart(2, '0');
+    const dd = String(when.getDate()).padStart(2, '0');
+    const hh = String(when.getHours()).padStart(2, '0');
+    const min = String(when.getMinutes()).padStart(2, '0');
+    return `${yyyy}-${mm}-${dd}T${hh}:${min}`;
+  }
+
+  function ensureOnceRunAtDefault() {
+    if (typeSelect.value === 'once' && !String(runAtInput.value || '').trim()) {
+      runAtInput.value = toLocalRunAtFromNow();
     }
   }
 
   function updateTypeFields() {
     const mode = typeSelect.value;
     const useRunAt = mode === 'once' || mode === 'daily' || mode === 'weekly';
+    ensureOnceRunAtDefault();
     runAtWrap.style.display = useRunAt ? '' : 'none';
     intervalWrap.style.display = useRunAt ? 'none' : '';
   }
@@ -256,9 +274,9 @@ export function renderSchedulerPanel(root: HTMLElement, ctx: any) {
     editingIdInput.value = '';
     nameInput.value = '';
     enabledInput.checked = true;
-    typeSelect.value = 'interval';
+    typeSelect.value = 'once';
     intervalInput.value = '30';
-    runAtInput.value = '';
+    runAtInput.value = toLocalRunAtFromNow();
     maxRunsInput.value = '';
     profileInput.value = '';
     keywordInput.value = '';
@@ -302,7 +320,9 @@ export function renderSchedulerPanel(root: HTMLElement, ctx: any) {
       commandType,
       scheduleType: typeSelect.value as ScheduleTask['scheduleType'],
       intervalMinutes: Number(intervalInput.value || 30) || 30,
-      runAt: toIsoOrNull(runAtInput.value),
+      runAt: typeSelect.value === 'once'
+        ? toIsoOrNull(String(runAtInput.value || '').trim() || toLocalRunAtFromNow())
+        : toIsoOrNull(runAtInput.value),
       maxRuns,
       argv,
     };

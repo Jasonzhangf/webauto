@@ -29,6 +29,7 @@ type TaskFormData = {
   runAt: string | null;
   maxRuns: number | null;
 };
+type RunMeta = Pick<TaskFormData, 'taskType' | 'profileId' | 'keyword' | 'targetCount'>;
 
 const DEFAULT_FORM: TaskFormData = {
   name: '',
@@ -44,7 +45,7 @@ const DEFAULT_FORM: TaskFormData = {
   collectBody: true,
   doLikes: false,
   likeKeywords: '',
-  scheduleType: 'interval',
+  scheduleType: 'once',
   intervalMinutes: 30,
   runAt: null,
   maxRuns: null,
@@ -57,6 +58,7 @@ function parseSortableTime(value: string | null | undefined): number {
 
 export function renderTasksPanel(root: HTMLElement, ctx: any) {
   root.innerHTML = '';
+  const ONCE_RUN_BUFFER_MINUTES = 2;
 
   const pageIndicator = createEl('div', { className: 'page-indicator' }, [
     '当前: ',
@@ -153,8 +155,8 @@ export function renderTasksPanel(root: HTMLElement, ctx: any) {
       <div class="row">
         <div>
           <select id="task-schedule-type" style="width: 100px;">
-            <option value="interval">循环间隔</option>
             <option value="once">一次性</option>
+            <option value="interval">循环间隔</option>
             <option value="daily">每天</option>
             <option value="weekly">每周</option>
           </select>
@@ -209,15 +211,17 @@ export function renderTasksPanel(root: HTMLElement, ctx: any) {
 
   const recentCard = createEl('div', { className: 'bento-cell', style: 'margin-top: var(--gap);' });
   recentCard.innerHTML = `
-    <div class="bento-title">历史任务</div>
+    <div class="bento-title">已保存任务列表</div>
     <div class="row" style="margin-bottom: var(--gap-sm);">
       <select id="task-history-select" style="min-width: 320px;">
         <option value="">选择历史任务...</option>
       </select>
       <button id="task-history-edit-btn" class="secondary">载入编辑</button>
       <button id="task-history-clone-btn" class="secondary">载入另存</button>
+      <button id="task-history-run-btn">立即执行</button>
       <button id="task-history-refresh-btn" class="secondary">刷新</button>
     </div>
+    <div class="muted" style="font-size:12px; margin-bottom:6px;">双击列表项可直接切换为当前任务。</div>
     <div id="recent-tasks-list"></div>
   `;
   root.appendChild(recentCard);
@@ -252,6 +256,7 @@ export function renderTasksPanel(root: HTMLElement, ctx: any) {
   const historySelect = recentCard.querySelector('#task-history-select') as HTMLSelectElement;
   const historyEditBtn = recentCard.querySelector('#task-history-edit-btn') as HTMLButtonElement;
   const historyCloneBtn = recentCard.querySelector('#task-history-clone-btn') as HTMLButtonElement;
+  const historyRunBtn = recentCard.querySelector('#task-history-run-btn') as HTMLButtonElement;
   const historyRefreshBtn = recentCard.querySelector('#task-history-refresh-btn') as HTMLButtonElement;
   const recentTasksList = recentCard.querySelector('#recent-tasks-list') as HTMLDivElement;
   const statRunning = statsCard.querySelector('#stat-running') as HTMLDivElement;
@@ -304,8 +309,25 @@ export function renderTasksPanel(root: HTMLElement, ctx: any) {
     userIdWrap.style.display = isWeiboMonitor ? '' : 'none';
   }
 
+  function toLocalRunAtFromNow(bufferMinutes = ONCE_RUN_BUFFER_MINUTES): string {
+    const when = new Date(Date.now() + Math.max(1, bufferMinutes) * 60_000);
+    const yyyy = when.getFullYear();
+    const mm = String(when.getMonth() + 1).padStart(2, '0');
+    const dd = String(when.getDate()).padStart(2, '0');
+    const hh = String(when.getHours()).padStart(2, '0');
+    const min = String(when.getMinutes()).padStart(2, '0');
+    return `${yyyy}-${mm}-${dd}T${hh}:${min}`;
+  }
+
+  function ensureOnceRunAtDefault() {
+    if (scheduleTypeSelect.value === 'once' && !String(runAtInput.value || '').trim()) {
+      runAtInput.value = toLocalRunAtFromNow();
+    }
+  }
+
   function updateScheduleVisibility() {
     const scheduleType = String(scheduleTypeSelect.value || 'interval').trim();
+    ensureOnceRunAtDefault();
     intervalWrap.style.display = scheduleType === 'interval' ? 'inline-flex' : 'none';
     runAtWrap.style.display = scheduleType === 'once' || scheduleType === 'daily' || scheduleType === 'weekly'
       ? 'inline-flex'
@@ -319,6 +341,8 @@ export function renderTasksPanel(root: HTMLElement, ctx: any) {
   function collectFormData(): TaskFormData {
     const maxRunsRaw = String(maxRunsInput.value || '').trim();
     const maxRunsNum = maxRunsRaw ? Number(maxRunsRaw) : 0;
+    const scheduleType = scheduleTypeSelect.value as TaskFormData['scheduleType'];
+    const runAtText = String(runAtInput.value || '').trim();
     return {
       id: String(editingIdInput.value || '').trim() || undefined,
       name: String(nameInput.value || '').trim(),
@@ -334,9 +358,11 @@ export function renderTasksPanel(root: HTMLElement, ctx: any) {
       collectBody: bodyInput.checked,
       doLikes: likesInput.checked,
       likeKeywords: String(likeKeywordsInput.value || '').trim(),
-      scheduleType: scheduleTypeSelect.value as TaskFormData['scheduleType'],
+      scheduleType,
       intervalMinutes: Math.max(1, Number(intervalInput.value || 30) || 30),
-      runAt: toIsoOrNull(String(runAtInput.value || '')),
+      runAt: scheduleType === 'once'
+        ? toIsoOrNull(runAtText || toLocalRunAtFromNow())
+        : toIsoOrNull(runAtText),
       maxRuns: Number.isFinite(maxRunsNum) && maxRunsNum > 0 ? Math.max(1, Math.floor(maxRunsNum)) : null,
     };
   }
@@ -359,7 +385,7 @@ export function renderTasksPanel(root: HTMLElement, ctx: any) {
     bodyInput.checked = task.commandArgv?.['fetch-body'] !== false;
     likesInput.checked = task.commandArgv?.['do-likes'] === true;
     likeKeywordsInput.value = String(task.commandArgv?.['like-keywords'] || '').trim();
-    scheduleTypeSelect.value = String(task.scheduleType || 'interval') as TaskFormData['scheduleType'];
+    scheduleTypeSelect.value = String(task.scheduleType || 'once') as TaskFormData['scheduleType'];
     intervalInput.value = String(task.intervalMinutes || 30);
     runAtInput.value = toLocalDatetimeValue(task.runAt);
     maxRunsInput.value = task.maxRuns ? String(task.maxRuns) : '';
@@ -385,7 +411,7 @@ export function renderTasksPanel(root: HTMLElement, ctx: any) {
     likeKeywordsInput.value = DEFAULT_FORM.likeKeywords;
     scheduleTypeSelect.value = DEFAULT_FORM.scheduleType;
     intervalInput.value = String(DEFAULT_FORM.intervalMinutes);
-    runAtInput.value = '';
+    runAtInput.value = toLocalRunAtFromNow();
     maxRunsInput.value = '';
     updatePlatformFields();
     updateScheduleVisibility();
@@ -420,19 +446,29 @@ export function renderTasksPanel(root: HTMLElement, ctx: any) {
   }
 
   function renderRecentTasks() {
-    const rows = sortedTasksByRecent().slice(0, 8);
+    const rows = sortedTasksByRecent();
     if (rows.length === 0) {
       recentTasksList.innerHTML = '<div class="muted" style="font-size:12px;">暂无任务</div>';
       return;
     }
     recentTasksList.innerHTML = rows.map((task) => `
-      <div class="task-row" style="display:flex;gap:var(--gap-sm);padding:var(--gap-xs)0;border-bottom:1px solid var(--border-subtle);align-items:center;">
+      <div class="task-row task-item" data-id="${task.id}" style="display:flex;gap:var(--gap-sm);padding:var(--gap-xs)0;border-bottom:1px solid var(--border-subtle);align-items:center;cursor:pointer;">
         <span style="flex:1;font-size:12px;">${task.name || task.id}</span>
         <span style="font-size:11px;color:var(--text-tertiary);">${task.commandType}</span>
         <span style="font-size:11px;color:${task.enabled ? 'var(--accent-success)' : 'var(--text-muted)'};">${task.enabled ? '启用' : '禁用'}</span>
         <button class="secondary edit-task-btn" data-id="${task.id}" style="padding:2px 6px;font-size:10px;height:auto;">编辑</button>
+        <button class="run-task-btn" data-id="${task.id}" style="padding:2px 6px;font-size:10px;height:auto;">立即执行</button>
       </div>
     `).join('');
+    recentTasksList.querySelectorAll('.task-item').forEach((item) => {
+      item.addEventListener('dblclick', () => {
+        const taskId = (item as HTMLDivElement).dataset.id || '';
+        const task = getTaskById(taskId);
+        if (!task) return;
+        historySelect.value = task.id;
+        applyTaskToForm(task, 'edit');
+      });
+    });
     recentTasksList.querySelectorAll('.edit-task-btn').forEach((btn) => {
       btn.addEventListener('click', () => {
         const taskId = (btn as HTMLButtonElement).dataset.id || '';
@@ -440,6 +476,14 @@ export function renderTasksPanel(root: HTMLElement, ctx: any) {
         if (!task) return;
         historySelect.value = task.id;
         applyTaskToForm(task, 'edit');
+      });
+    });
+    recentTasksList.querySelectorAll('.run-task-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const taskId = (btn as HTMLButtonElement).dataset.id || '';
+        const task = getTaskById(taskId);
+        if (!task) return;
+        void runTaskImmediately(task);
       });
     });
   }
@@ -545,7 +589,16 @@ export function renderTasksPanel(root: HTMLElement, ctx: any) {
     };
   }
 
-  async function runSavedTask(taskId: string, data: TaskFormData) {
+  function taskToRunMeta(task: ScheduleTask): RunMeta {
+    return {
+      taskType: String(task.commandType || 'xhs-unified').trim() || 'xhs-unified',
+      profileId: String(task.commandArgv?.profile || task.commandArgv?.profileId || '').trim(),
+      keyword: String(task.commandArgv?.keyword || task.commandArgv?.k || '').trim(),
+      targetCount: Math.max(1, Number(task.commandArgv?.['max-notes'] ?? task.commandArgv?.target ?? 50) || 50),
+    };
+  }
+
+  async function runSavedTask(taskId: string, data: RunMeta) {
     const out = await invokeSchedule({ action: 'run', taskId, timeoutMs: 0 });
     const runId = String(
       out?.result?.runResult?.lastRunId
@@ -572,6 +625,14 @@ export function renderTasksPanel(root: HTMLElement, ctx: any) {
     }
   }
 
+  async function runTaskImmediately(task: ScheduleTask) {
+    const taskId = String(task.id || '').trim();
+    if (!taskId) return;
+    historySelect.value = taskId;
+    applyTaskToForm(task, 'edit');
+    await runSavedTask(taskId, taskToRunMeta(task));
+  }
+
   async function saveTask(runImmediately = false) {
     const data = collectFormData();
     saveBtn.disabled = true;
@@ -588,7 +649,12 @@ export function renderTasksPanel(root: HTMLElement, ctx: any) {
       await loadTasks();
       historySelect.value = taskId;
       if (runImmediately) {
-        await runSavedTask(taskId, data);
+        await runSavedTask(taskId, {
+          taskType: data.taskType,
+          profileId: data.profileId,
+          keyword: data.keyword,
+          targetCount: data.targetCount,
+        });
       } else {
         alert('任务已保存');
       }
@@ -685,6 +751,14 @@ export function renderTasksPanel(root: HTMLElement, ctx: any) {
       return;
     }
     applyTaskToForm(task, 'clone');
+  });
+  historyRunBtn.addEventListener('click', () => {
+    const task = selectedHistoryTask();
+    if (!task) {
+      alert('请先选择历史任务');
+      return;
+    }
+    void runTaskImmediately(task);
   });
   gotoSchedulerBtn.addEventListener('click', () => {
     if (typeof ctx.setActiveTab === 'function') {

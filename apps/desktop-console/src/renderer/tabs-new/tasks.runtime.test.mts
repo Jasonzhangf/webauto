@@ -275,3 +275,27 @@ test('save and run uses schedule run and no direct spawn', async () => {
   assert.equal(bundle.calls.setActiveTab.includes('dashboard'), true);
   assert.equal(alerts.length, 0);
 });
+
+test('saved task list supports double-click load and immediate run ignoring schedule', async () => {
+  const bundle = createMockCtx();
+  const root = document.createElement('div');
+  renderTasksPanel(root, bundle.ctx);
+  await flush(8);
+
+  const historySelect = root.querySelector('#task-history-select') as HTMLSelectElement;
+  const historyRunBtn = root.querySelector('#task-history-run-btn') as HTMLButtonElement;
+  const editingId = root.querySelector('#task-editing-id') as HTMLInputElement;
+  const taskRow = root.querySelector('.task-item[data-id="sched-0002"]') as HTMLDivElement;
+
+  assert.ok(taskRow);
+  taskRow.dispatchEvent(new Event('dblclick', { bubbles: true }));
+  assert.equal(editingId.value, 'sched-0002');
+  assert.equal(historySelect.value, 'sched-0002');
+
+  historySelect.value = 'sched-0001';
+  historyRunBtn.click();
+  await flush(6);
+
+  assert.equal(bundle.calls.scheduleInvoke.some((item) => item.action === 'run' && item.taskId === 'sched-0001'), true);
+  assert.equal(bundle.calls.setActiveTab.includes('dashboard'), true);
+});

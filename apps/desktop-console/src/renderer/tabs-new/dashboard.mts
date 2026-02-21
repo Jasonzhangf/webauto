@@ -853,7 +853,7 @@ export function renderDashboard(root: HTMLElement, ctx: any) {
 
       setTimeout(() => {
         if (typeof ctx.setActiveTab === 'function') {
-          ctx.setActiveTab('config');
+          ctx.setActiveTab('tasks');
         }
       }, 1500);
     }
@@ -861,7 +861,7 @@ export function renderDashboard(root: HTMLElement, ctx: any) {
 
   backConfigBtn.onclick = () => {
     if (typeof ctx.setActiveTab === 'function') {
-      ctx.setActiveTab('config');
+      ctx.setActiveTab('tasks');
     }
   };
 

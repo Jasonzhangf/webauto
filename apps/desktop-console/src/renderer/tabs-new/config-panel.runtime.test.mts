@@ -287,7 +287,7 @@ test('config panel defaults to latest task and supports update/save-as-new/run',
   assert.equal(bundle.calls.logs.some((line) => line.includes('schedule run task=')), true);
 });
 
-test('config panel validates runAt for once/daily/weekly schedules', async () => {
+test('config panel validates runAt for daily/weekly schedules', async () => {
   const bundle = createMockCtx([]);
   const root = document.createElement('div');
   renderConfigPanel(root, bundle.ctx);
@@ -301,11 +301,11 @@ test('config panel validates runAt for once/daily/weekly schedules', async () =>
 
   keywordInput.value = '春晚';
   accountSelect.value = 'xhs-0';
-  scheduleTypeSelect.value = 'once';
+  scheduleTypeSelect.value = 'daily';
   scheduleTypeSelect.dispatchEvent(new Event('change', { bubbles: true }));
   scheduleRunAtInput.value = '';
   saveCurrentBtn.click();
   await flush(3);
 
-  assert.equal(alerts.some((item) => item.includes('once 任务需要锚点时间')), true);
+  assert.equal(alerts.some((item) => item.includes('daily 任务需要锚点时间')), true);
 });
