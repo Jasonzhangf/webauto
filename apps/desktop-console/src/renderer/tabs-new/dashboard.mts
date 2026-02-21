@@ -179,15 +179,17 @@ export function renderDashboard(root: HTMLElement, ctx: any) {
   let startTime = Date.now();
   let stoppedAt: number | null = null;
   let elapsedTimer: ReturnType<typeof setInterval> | null = null;
+  let statePollTimer: ReturnType<typeof setInterval> | null = null;
   let unsubscribeState: (() => void) | null = null;
   let unsubscribeCmd: (() => void) | null = null;
-  let activeRunId = String(ctx?.xhsCurrentRun?.runId || '').trim();
+  const contextRun = ctx?.xhsCurrentRun && typeof ctx.xhsCurrentRun === 'object' ? ctx.xhsCurrentRun : null;
+  let activeRunId = String(contextRun?.runId || ctx?.activeRunId || '').trim();
   let activeStatus = '';
   let errorCountTotal = 0;
   const recentErrors: Array<{ ts: string; source: string; message: string }> = [];
   const maxLogs = 500;
   const maxRecentErrors = 8;
-  const initialTaskId = String(ctx?.xhsCurrentRun?.taskId || ctx?.activeTaskConfigId || '').trim();
+  const initialTaskId = String(contextRun?.taskId || ctx?.activeTaskConfigId || '').trim();
   if (initialTaskId) {
     taskConfigId.textContent = initialTaskId;
   }
@@ -195,9 +197,37 @@ export function renderDashboard(root: HTMLElement, ctx: any) {
   const normalizeStatus = (value: any) => String(value || '').trim().toLowerCase();
   const isRunningStatus = (value: any) => ['running', 'queued', 'pending', 'starting'].includes(normalizeStatus(value));
   const isTerminalStatus = (value: any) => ['completed', 'done', 'success', 'succeeded', 'failed', 'error', 'stopped', 'canceled'].includes(normalizeStatus(value));
+  const isXhsCommandTitle = (title: any) => {
+    const normalized = String(title || '').trim().toLowerCase();
+    if (!normalized) return false;
+    return normalized.includes('xhs unified') || normalized.startsWith('xhs:') || normalized.startsWith('xhs unified:');
+  };
+  const hasRenderableValue = (value: any) => {
+    const text = String(value ?? '').trim();
+    return text.length > 0 && text !== '-';
+  };
+
+  if (contextRun) {
+    if (hasRenderableValue(contextRun.keyword)) taskKeyword.textContent = String(contextRun.keyword);
+    if (Number(contextRun.target) > 0) taskTarget.textContent = String(Number(contextRun.target));
+    if (hasRenderableValue(contextRun.profileId)) {
+      const aliases = ctx.api?.settings?.profileAliases || {};
+      const profileId = String(contextRun.profileId);
+      taskAccount.textContent = aliases[profileId] || profileId;
+    }
+    if (hasRenderableValue(contextRun.taskId)) taskConfigId.textContent = String(contextRun.taskId);
+    const startedAtTs = Date.parse(String(contextRun.startedAt || ''));
+    if (Number.isFinite(startedAtTs) && startedAtTs > 0) {
+      startTime = startedAtTs;
+      updateElapsed();
+    }
+  }
 
   function renderRunSummary() {
     runIdText.textContent = activeRunId || '-';
+    if (ctx && typeof ctx === 'object') {
+      ctx.activeRunId = activeRunId || null;
+    }
     errorCountText.textContent = String(errorCountTotal);
     recentErrorsList.innerHTML = '';
     if (recentErrors.length === 0) {
@@ -246,6 +276,21 @@ export function renderDashboard(root: HTMLElement, ctx: any) {
     if (!elapsedTimer) return;
     clearInterval(elapsedTimer);
     elapsedTimer = null;
+  }
+
+  function startStatePoll() {
+    if (statePollTimer) return;
+    if (typeof ctx.api?.stateGetTasks !== 'function') return;
+    statePollTimer = setInterval(() => {
+      if (paused) return;
+      void fetchCurrentState();
+    }, 5000);
+  }
+
+  function stopStatePoll() {
+    if (!statePollTimer) return;
+    clearInterval(statePollTimer);
+    statePollTimer = null;
   }
 
   // Add log line
@@ -384,11 +429,10 @@ export function renderDashboard(root: HTMLElement, ctx: any) {
     if (target) {
       const matched = tasks.find((item) => String(item?.runId || '').trim() === target);
       if (matched) {
-        if (isRunningStatus(matched?.status)) return matched;
-        if (running) return running;
-        if (latest && String(latest?.runId || '').trim() !== target) return latest;
         return matched;
       }
+      if (running) return running;
+      return null;
     }
     return running || latest || null;
   }
@@ -675,7 +719,18 @@ export function renderDashboard(root: HTMLElement, ctx: any) {
       unsubscribeCmd = ctx.api.onCmdEvent((evt: any) => {
         if (paused) return;
         const runId = String(evt?.runId || '').trim();
-        if ((isTerminalStatus(activeStatus) || !activeRunId) && evt?.type === 'started' && String(evt?.title || '').includes('xhs unified')) {
+        const preferredRunId = String(ctx?.activeRunId || '').trim();
+        const shouldAdoptStartedRun = (
+          evt?.type === 'started'
+          && runId
+          && isXhsCommandTitle(evt?.title)
+          && (
+            !activeRunId
+            || isTerminalStatus(activeStatus)
+            || (preferredRunId && preferredRunId === runId)
+          )
+        );
+        if (shouldAdoptStartedRun) {
           activeRunId = runId;
           activeStatus = 'running';
           stoppedAt = null;
@@ -716,14 +771,18 @@ export function renderDashboard(root: HTMLElement, ctx: any) {
     try {
       const config = await ctx.api.configLoadLast();
       if (config) {
-        taskKeyword.textContent = config.keyword || '-';
-        taskTarget.textContent = String(config.target || 50);
+        if (!hasRenderableValue(contextRun?.keyword)) {
+          taskKeyword.textContent = config.keyword || '-';
+        }
+        if (!(Number(contextRun?.target) > 0)) {
+          taskTarget.textContent = String(config.target || 50);
+        }
 
-        if (config.lastProfileId) {
+        if (!hasRenderableValue(contextRun?.profileId) && config.lastProfileId) {
           const aliases = ctx.api?.settings?.profileAliases || {};
           taskAccount.textContent = aliases[config.lastProfileId] || config.lastProfileId;
         }
-        const taskId = String(config.taskId || ctx?.activeTaskConfigId || '').trim();
+        const taskId = String(contextRun?.taskId || config.taskId || ctx?.activeTaskConfigId || '').trim();
         if (taskId) {
           taskConfigId.textContent = taskId;
         }
@@ -811,6 +870,7 @@ export function renderDashboard(root: HTMLElement, ctx: any) {
   loadTaskInfo();
   subscribeToUpdates();
   fetchCurrentState();
+  startStatePoll();
 
   // Start elapsed timer
   startElapsedTimer();
@@ -818,6 +878,7 @@ export function renderDashboard(root: HTMLElement, ctx: any) {
   // Cleanup
   return () => {
     stopElapsedTimer();
+    stopStatePoll();
     if (unsubscribeState) unsubscribeState();
     if (unsubscribeCmd) unsubscribeCmd();
     if (unsubscribeBus) unsubscribeBus();

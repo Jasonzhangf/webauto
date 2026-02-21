@@ -280,6 +280,7 @@ test('run-ephemeral executes directly without schedule save', async () => {
   assert.equal(bundle.calls.cmdSpawn.length, 1);
   const spawnSpec = bundle.calls.cmdSpawn[0];
   assert.equal(Array.isArray(spawnSpec.args), true);
+  assert.equal(spawnSpec.title, 'xhs unified: 春晚');
   assert.equal(String(spawnSpec.args[0]).endsWith('/xhs-unified.mjs'), true);
   assert.equal(spawnSpec.args.includes('--keyword'), true);
   assert.equal(spawnSpec.args.includes('春晚'), true);

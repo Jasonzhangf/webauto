@@ -589,6 +589,7 @@ export function renderTasksPanel(root: HTMLElement, ctx: any) {
         target: data.targetCount,
         startedAt: new Date().toISOString(),
       };
+      ctx.activeRunId = runId || ctx.activeRunId || null;
     }
     if (typeof ctx.setActiveTab === 'function') {
       ctx.setActiveTab(data.taskType === 'xhs-unified' ? 'dashboard' : 'scheduler');
@@ -634,7 +635,7 @@ export function renderTasksPanel(root: HTMLElement, ctx: any) {
     if (data.taskType === 'xhs-unified') {
       if (!data.keyword) return null;
       return {
-        title: `xhs: ${data.keyword}`,
+        title: `xhs unified: ${data.keyword}`,
         groupKey: 'xhs-unified',
         args: [
           xhsScript,
@@ -712,6 +713,7 @@ export function renderTasksPanel(root: HTMLElement, ctx: any) {
           target: data.targetCount,
           startedAt: new Date().toISOString(),
         };
+        ctx.activeRunId = runId || ctx.activeRunId || null;
       }
       if (typeof ctx.setActiveTab === 'function') {
         ctx.setActiveTab(data.taskType === 'xhs-unified' ? 'dashboard' : 'scheduler');

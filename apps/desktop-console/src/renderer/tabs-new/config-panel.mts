@@ -665,6 +665,7 @@ export function renderConfigPanel(root: HTMLElement, ctx: any) {
         target: readNumber(targetInput, DEFAULT_MAX_NOTES, 1),
         startedAt: new Date().toISOString(),
       };
+      ctx.activeRunId = runId || ctx.activeRunId || null;
       if (typeof ctx.appendLog === 'function') {
         ctx.appendLog(`[ui] schedule run task=${taskId} runId=${runId || '-'}`);
       }

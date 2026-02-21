@@ -129,6 +129,20 @@ function buildSnapshotScript() {
       if ('value' in el) return String(el.value ?? '');
       return String(el.textContent || '').trim();
     };
+    const firstText = (selectors) => {
+      for (const sel of selectors) {
+        const v = text(sel);
+        if (v) return v;
+      }
+      return '';
+    };
+    const firstValue = (selectors) => {
+      for (const sel of selectors) {
+        const v = value(sel);
+        if (v) return v;
+      }
+      return '';
+    };
     const activeTab = document.querySelector('.tab.active');
     const errors = Array.from(document.querySelectorAll('#recent-errors-list li'))
       .map((el) => String(el.textContent || '').trim())
@@ -144,10 +158,10 @@ function buildSnapshotScript() {
       currentPhase: text('#current-phase'),
       currentAction: text('#current-action'),
       progressPercent: text('#progress-percent'),
-      keyword: value('#keyword-input'),
-      target: value('#target-input'),
-      account: value('#account-select'),
-      env: value('#env-select'),
+      keyword: firstValue(['#task-keyword', '#keyword-input', '#task-keyword-input']),
+      target: firstValue(['#task-target', '#target-input', '#task-target-input']),
+      account: firstValue(['#task-account', '#task-profile', '#account-select']),
+      env: firstValue(['#task-env', '#env-select']),
       recentErrors: errors,
       ts: new Date().toISOString(),
     };

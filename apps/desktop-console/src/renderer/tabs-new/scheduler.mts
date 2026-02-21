@@ -465,6 +465,7 @@ export function renderSchedulerPanel(root: HTMLElement, ctx: any) {
               target: Number(argv['max-notes'] || argv.target || 0) || 0,
               startedAt: new Date().toISOString(),
             };
+            ctx.activeRunId = runId || ctx.activeRunId || null;
           }
           if (typeof ctx.setStatus === 'function') {
             ctx.setStatus(`running: ${task.id}`);

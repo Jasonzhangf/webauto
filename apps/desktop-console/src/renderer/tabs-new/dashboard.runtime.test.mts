@@ -216,3 +216,51 @@ test('dashboard handles loading errors and bus-only progress events', async () =
 
   cleanup();
 });
+
+test('dashboard keeps context run and task metadata when state list only has stale runs', async () => {
+  const ctx: any = {
+    xhsCurrentRun: {
+      runId: 'rid-new',
+      taskId: null,
+      profileId: 'xhs-0',
+      keyword: '宇树机器人',
+      target: 200,
+      startedAt: '2026-02-21T03:00:00.000Z',
+    },
+    activeRunId: 'rid-new',
+    api: {
+      settings: {
+        profileAliases: {
+          'xhs-0': 'batch-0',
+        },
+      },
+      async configLoadLast() {
+        return { keyword: '春晚', target: 222, lastProfileId: 'xhs-old', taskId: 'sched-old' };
+      },
+      async stateGetTasks() {
+        return [{ runId: 'rid-old', status: 'completed', keyword: '春晚', target: 222 }];
+      },
+      onStateUpdate() {
+        return () => {};
+      },
+      onCmdEvent() {
+        return () => {};
+      },
+      onBusEvent() {
+        return () => {};
+      },
+    },
+  };
+
+  const root = document.createElement('div');
+  document.body.appendChild(root);
+  const cleanup = renderDashboard(root, ctx);
+  await flush(4);
+
+  assert.equal((root.querySelector('#run-id-text') as HTMLDivElement).textContent, 'rid-new');
+  assert.equal((root.querySelector('#task-keyword') as HTMLDivElement).textContent, '宇树机器人');
+  assert.equal((root.querySelector('#task-target') as HTMLDivElement).textContent, '200');
+  assert.equal((root.querySelector('#task-account') as HTMLDivElement).textContent, 'batch-0');
+
+  cleanup();
+});

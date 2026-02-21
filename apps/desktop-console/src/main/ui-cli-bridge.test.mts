@@ -105,6 +105,21 @@ test('ui-cli-bridge probe forwards detailed flag into action script payload', as
   assert.match(captured, /"detailed":true/);
 });
 
+test('ui-cli-bridge status snapshot script supports dashboard and task selectors', async () => {
+  let captured = '';
+  const bridge = createBridge(async (script) => {
+    captured = script;
+    return { ready: true };
+  });
+  const out = await (bridge as any).status(true);
+  assert.equal(out.ok, true);
+  assert.match(captured, /#task-keyword/);
+  assert.match(captured, /#keyword-input/);
+  assert.match(captured, /#task-target/);
+  assert.match(captured, /#target-input/);
+  assert.match(captured, /firstValue/);
+});
+
 test('ui-cli-bridge action execution failure returns structured error with details', async () => {
   const bridge = createBridge(async () => {
     throw new Error('execute_failed');
