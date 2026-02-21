@@ -35,6 +35,32 @@ type RunJsonSpec = {
   timeoutMs?: number;
 };
 
+// Track all spawned browser processes for cleanup on UI close
+const spawnedBrowserProcesses = new Set<number>();
+
+function trackBrowserProcess(pid: number) {
+  if (pid > 0) {
+    spawnedBrowserProcesses.add(pid);
+  }
+}
+
+function cleanupAllBrowserProcesses(reason: string = 'ui_close') {
+  console.log(`[process-cleanup] Cleaning up ${spawnedBrowserProcesses.size} browser process(s) (${reason})`);
+  for (const pid of spawnedBrowserProcesses) {
+    try {
+      if (process.platform === 'win32') {
+        spawn('taskkill', ['/PID', String(pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true });
+      } else {
+        process.kill(pid, 'SIGTERM');
+      }
+    } catch (err) {
+      console.warn(`[process-cleanup] Failed to kill PID ${pid}:`, err);
+    }
+  }
+  spawnedBrowserProcesses.clear();
+  console.log(`[process-cleanup] Cleanup complete`);
+}
+
 type UiSettings = DesktopConsoleSettings;
 import { stateBridge } from './state-bridge.mts';
 import { checkCamoCli, checkServices, checkFirefox, checkGeoIP, checkEnvironment } from './env-check.mts';
@@ -330,6 +356,9 @@ async function cleanupRuntimeEnvironment(reason: string, options: CleanupOptions
   killAllRuns(reason);
   await cleanupTrackedRunPidsBestEffort(reason);
   await cleanupCamoSessionsBestEffort(reason, options.includeLockCleanup !== false);
+  
+  // Cleanup all tracked browser processes
+  cleanupAllBrowserProcesses(reason);
 
   if (options.stopUiBridge) {
     await uiCliBridge.stop().catch(() => null);
@@ -529,7 +558,11 @@ async function spawnCommand(spec: SpawnSpec) {
           windowsHide: true,
         });
 
-        trackRunPid(child);
+        // Track browser process for cleanup
+        if (child.pid) {
+          trackBrowserProcess(child.pid);
+        }
+        
         runs.set(runId, { child, title: spec.title, startedAt: now(), profiles: requestedProfiles });
         sendEvent({ type: 'started', runId, title: spec.title, pid: child.pid ?? -1, ts: now() });
 

@@ -104,29 +104,66 @@ function commandReportsExistingPath(ret) {
   if (!ret || ret.status !== 0) return false;
   const resolvedPath = resolvePathFromOutput(ret.stdout, ret.stderr);
   if (!resolvedPath) return false;
-  return existsSync(resolvedPath);
+  if (!existsSync(resolvedPath)) return false;
+  const executable =
+    process.platform === 'win32'
+      ? path.join(resolvedPath, 'camoufox.exe')
+      : path.join(resolvedPath, 'camoufox');
+  return existsSync(executable);
 }
 
-function checkCamoufoxInstalled() {
+function summarizeCommand(ret) {
+  if (!ret) return '';
+  const bits = [
+    ret?.error?.message || '',
+    stripAnsi(ret?.stderr || '').trim(),
+    stripAnsi(ret?.stdout || '').trim(),
+  ].filter(Boolean);
+  return bits.length ? bits.join(' | ').slice(0, 900) : '';
+}
+
+function runCamoufoxCommand(args) {
+  const pyArgs = ['-m', 'camoufox', ...args];
   const candidates =
     process.platform === 'win32'
       ? [
-          { cmd: 'python', args: ['-m', 'camoufox', 'path'] },
-          { cmd: 'py', args: ['-3', '-m', 'camoufox', 'path'] },
+          { cmd: 'camoufox', args },
+          { cmd: 'python', args: pyArgs },
+          { cmd: 'py', args: ['-3', ...pyArgs] },
         ]
-      : [{ cmd: 'python3', args: ['-m', 'camoufox', 'path'] }];
+      : [
+          { cmd: 'camoufox', args },
+          { cmd: 'python3', args: pyArgs },
+        ];
+  const attempts = [];
   for (const candidate of candidates) {
     const ret = run(candidate.cmd, candidate.args);
-    if (commandReportsExistingPath(ret)) return true;
+    attempts.push({
+      command: `${candidate.cmd} ${candidate.args.join(' ')}`.trim(),
+      status: ret?.status ?? null,
+      error: ret?.error?.message || null,
+      detail: summarizeCommand(ret),
+    });
+    if (ret.status === 0) return { ok: true, ret, attempts };
   }
-  const npxRet = runPackageCommand('camoufox', ['camoufox', 'path']);
-  if (commandReportsExistingPath(npxRet)) return true;
-  return false;
+  const viaPackage = runPackageCommand('camoufox', ['camoufox', ...args]);
+  attempts.push({
+    command: `npx/npm exec camoufox ${args.join(' ')}`.trim(),
+    status: viaPackage?.status ?? null,
+    error: viaPackage?.error?.message || null,
+    detail: summarizeCommand(viaPackage),
+  });
+  return { ok: viaPackage.status === 0, ret: viaPackage, attempts };
+}
+
+function checkCamoufoxInstalled() {
+  const pathCheck = runCamoufoxCommand(['path']);
+  if (!pathCheck.ok) return false;
+  return commandReportsExistingPath(pathCheck.ret);
 }
 
 function installCamoufox() {
-  const ret = runPackageCommand('camoufox', ['camoufox', 'fetch']);
-  return ret.status === 0;
+  return runCamoufoxCommand(['fetch']);
 }
 
 function checkGeoIPInstalled() {
@@ -139,8 +176,7 @@ function installGeoIP() {
 }
 
 function uninstallCamoufox() {
-  const ret = runPackageCommand('camoufox', ['camoufox', 'remove']);
-  return ret.status === 0;
+  return runCamoufoxCommand(['remove']);
 }
 
 function uninstallGeoIP() {
@@ -227,6 +263,7 @@ async function main() {
   let camoufoxInstalled = before.camoufoxInstalled;
   let geoipInstalled = before.geoipInstalled;
   let operationError = null;
+  let operationDetail = '';
 
   if (mode === 'auto' || mode === 'install') {
     if (browser && !camoufoxInstalled) {
@@ -243,9 +280,13 @@ async function main() {
 
   if (mode === 'uninstall' || mode === 'reinstall') {
     if (browser) {
-      actions.browserUninstalled = uninstallCamoufox();
+      const removeResult = uninstallCamoufox();
+      actions.browserUninstalled = removeResult.ok;
       camoufoxInstalled = checkCamoufoxInstalled();
-      if (camoufoxInstalled) operationError = operationError || 'camoufox_uninstall_failed';
+      if (camoufoxInstalled) {
+        operationError = operationError || 'camoufox_uninstall_failed';
+        operationDetail = operationDetail || summarizeCommand(removeResult.ret);
+      }
     }
     if (geoip) {
       actions.geoipUninstalled = uninstallGeoIP();
@@ -256,9 +297,13 @@ async function main() {
 
   if (mode === 'reinstall') {
     if (browser) {
-      actions.browserInstalled = installCamoufox();
+      const installResult = installCamoufox();
+      actions.browserInstalled = installResult.ok;
       camoufoxInstalled = checkCamoufoxInstalled();
-      if (!camoufoxInstalled) operationError = operationError || 'camoufox_install_failed';
+      if (!camoufoxInstalled) {
+        operationError = operationError || 'camoufox_install_failed';
+        operationDetail = operationDetail || summarizeCommand(installResult.ret);
+      }
     }
     if (geoip) {
       actions.geoipInstalled = installGeoIP();
@@ -313,10 +358,11 @@ async function main() {
     backendHealthy: after.backendHealthy,
     geoipInstalled: after.geoipInstalled,
     operationError,
+    operationDetail: operationDetail || null,
     message: ok
       ? '资源状态就绪'
       : operationError
-        ? `资源操作失败: ${operationError}`
+        ? `资源操作失败: ${operationError}${operationDetail ? ` (${operationDetail})` : ''}`
         : browser && !after.camoufoxInstalled
           ? 'Camoufox 未安装'
           : geoip && !after.geoipInstalled
@@ -344,4 +390,5 @@ export const __internals = {
   resolveModeAndSelection,
   resolvePathFromOutput,
   commandReportsExistingPath,
+  runCamoufoxCommand,
 };

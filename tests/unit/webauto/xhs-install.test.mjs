@@ -107,3 +107,23 @@ test('commandReportsExistingPath returns false when reported path does not exist
   });
   assert.equal(ok, false);
 });
+
+test('commandReportsExistingPath requires camoufox executable in reported path', async () => {
+  const internals = await loadInternals();
+  const cacheDir = makeDir();
+  const withoutExe = internals.commandReportsExistingPath({
+    status: 0,
+    stdout: `${cacheDir}\n`,
+    stderr: '',
+  });
+  assert.equal(withoutExe, false);
+
+  const exeName = process.platform === 'win32' ? 'camoufox.exe' : 'camoufox';
+  fs.writeFileSync(path.join(cacheDir, exeName), '', 'utf8');
+  const withExe = internals.commandReportsExistingPath({
+    status: 0,
+    stdout: `${cacheDir}\n`,
+    stderr: '',
+  });
+  assert.equal(withExe, true);
+});
