@@ -1022,11 +1022,17 @@ ipcMain.handle('env:repairCore', async () => {
   return { ok, services };
 });
 ipcMain.handle('env:cleanup', async () => {
+  markUiHeartbeat('env_cleanup');
   console.log('[env:cleanup] Starting environment cleanup...');
-  
-  // Stop all browser processes
-  cleanupAllBrowserProcesses('env_cleanup_requested');
-  
+
+  await cleanupRuntimeEnvironment('env_cleanup_requested', {
+    stopUiBridge: false,
+    stopHeartbeat: false,
+    stopCoreServices: false,
+    stopStateBridge: false,
+    includeLockCleanup: true,
+  });
+
   // Clear profile locks
   let locksCleared = 0;
   try {
@@ -1063,7 +1069,7 @@ ipcMain.handle('env:cleanup', async () => {
     coreRestarted: restarted,
     services,
     firefox,
-    camo
+    camo,
   };
 });
 ipcMain.handle('env:repairDeps', async (_evt, input: {
@@ -1111,20 +1117,6 @@ ipcMain.handle('env:repairDeps', async (_evt, input: {
 
   result.env = await checkEnvironment().catch(() => null);
   return result;
-});
-ipcMain.handle('env:cleanup', async () => {
-  markUiHeartbeat('env_cleanup');
-  await cleanupRuntimeEnvironment('env_cleanup', {
-    stopUiBridge: false,
-    stopHeartbeat: false,
-    stopCoreServices: false,
-    stopStateBridge: false,
-    includeLockCleanup: true,
-  });
-  return {
-    ok: true,
-    services: await checkServices().catch(() => ({ unifiedApi: false, camoRuntime: false })),
-  };
 });
 ipcMain.handle('config:saveLast', async (_evt, config: CrawlConfig) => {
   await saveCrawlConfig({ appRoot: APP_ROOT, repoRoot: REPO_ROOT }, config);
