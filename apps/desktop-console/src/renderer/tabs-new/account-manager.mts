@@ -61,7 +61,7 @@ export function renderAccountManager(root: HTMLElement, ctx: any) {
     <div class="env-status-grid">
       <div class="env-item" id="env-camo">
         <span class="icon" style="color: var(--text-4);">○</span>
-        <span>Camo CLI</span>
+        <span>Camo CLI (@web-auto/camo)</span>
       </div>
       <div class="env-item" id="env-unified">
         <span class="icon" style="color: var(--text-4);">○</span>
@@ -69,11 +69,11 @@ export function renderAccountManager(root: HTMLElement, ctx: any) {
       </div>
       <div class="env-item" id="env-browser">
         <span class="icon" style="color: var(--text-4);">○</span>
-        <span>Camo Runtime（可选）</span>
+        <span>Camo Runtime Service (7704，可选)</span>
       </div>
       <div class="env-item" id="env-firefox">
         <span class="icon" style="color: var(--text-4);">○</span>
-        <span>Camoufox Browser</span>
+        <span>Camoufox Runtime (python -m camoufox)</span>
       </div>
     </div>
     <div class="btn-group" style="margin-top: var(--gap);">

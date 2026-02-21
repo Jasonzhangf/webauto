@@ -40,8 +40,9 @@ test('account manager writes detected alias after sync and runs auto polling', a
 
 test('account manager UI labels runtime as camo', async () => {
   const src = await getSrc();
-  assert.match(src, />Camo CLI</);
-  assert.match(src, />Camo Runtime（可选）</);
+  assert.match(src, />Camo CLI \(@web-auto\/camo\)</);
+  assert.match(src, />Camo Runtime Service \(7704，可选\)</);
+  assert.match(src, />Camoufox Runtime \(python -m camoufox\)</);
   assert.match(src, /id="env-cleanup-btn"/);
   assert.match(src, /services\.camoRuntime/);
   assert.doesNotMatch(src, /browserService/);

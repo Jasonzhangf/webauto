@@ -1,12 +1,9 @@
 // apps/desktop-console/src/main/env-check.mts
 // Environment and service health check utilities
-import { promisify } from 'node:util';
-import { exec, spawnSync } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-
-const execAsync = promisify(exec);
 
 export type CamoCheckResult = {
   installed: boolean;
@@ -107,6 +104,18 @@ function runVersionCheck(command: string, args: string[], explicitPath?: string)
   }
 }
 
+function resolvePathFromOutput(stdout: string) {
+  const lines = String(stdout || '')
+    .split(/\r?\n/)
+    .map((x) => x.trim())
+    .filter(Boolean);
+  for (let i = lines.length - 1; i >= 0; i -= 1) {
+    const line = lines[i];
+    if (line.startsWith('/') || /^[A-Z]:\\/i.test(line)) return line;
+  }
+  return '';
+}
+
 /**
  * Check if camo CLI can be resolved.
  * Supports PATH/global install, local dependency bin, and npx package fallback.
@@ -167,55 +176,33 @@ export async function checkServices(): Promise<ServicesCheckResult> {
   return { unifiedApi, camoRuntime, searchGate };
 }
 
-/**
- * Keep legacy API name, but actually check camoufox runtime availability first.
- */
 export async function checkFirefox(): Promise<{ installed: boolean; path?: string }> {
-  try {
-    const pythonBin = process.platform === 'win32' ? 'python' : 'python3';
-    const ret = spawnSync(pythonBin, ['-m', 'camoufox', 'path'], {
-      encoding: 'utf8',
-      timeout: 8000,
-      windowsHide: true,
-    });
-    if (ret.status === 0) {
-      const lines = String(ret.stdout || '').split(/\r?\n/).map((x) => x.trim()).filter(Boolean);
-      for (let i = lines.length - 1; i >= 0; i -= 1) {
-        const line = lines[i];
-        if (line && (line.startsWith('/') || /^[A-Z]:\\/.test(line))) return { installed: true, path: line };
-      }
-      return { installed: true };
+  const candidates =
+    process.platform === 'win32'
+      ? [
+          { command: 'python', args: ['-m', 'camoufox', 'path'] },
+          { command: 'py', args: ['-3', '-m', 'camoufox', 'path'] },
+          { command: resolveNpxBin(), args: ['--yes', '--package=camoufox', 'camoufox', 'path'] },
+        ]
+      : [
+          { command: 'python3', args: ['-m', 'camoufox', 'path'] },
+          { command: resolveNpxBin(), args: ['--yes', '--package=camoufox', 'camoufox', 'path'] },
+        ];
+  for (const candidate of candidates) {
+    try {
+      const ret = spawnSync(candidate.command, candidate.args, {
+        encoding: 'utf8',
+        timeout: 8000,
+        windowsHide: true,
+      });
+      if (ret.status !== 0) continue;
+      const resolvedPath = resolvePathFromOutput(String(ret.stdout || ''));
+      return resolvedPath ? { installed: true, path: resolvedPath } : { installed: true };
+    } catch {
+      // continue probing next candidate
     }
-  } catch {
-    // fallback below
   }
-
-  const platform = process.platform;
-  try {
-    if (platform === 'win32') {
-      const programFiles = process.env.PROGRAMFILES || 'C:\\Program Files';
-      const programFilesX86 = process.env['PROGRAMFILES(X86)'] || 'C:\\Program Files (x86)';
-      const localAppData = process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local');
-      const possiblePaths = [
-        path.join(programFiles, 'Mozilla Firefox', 'firefox.exe'),
-        path.join(programFilesX86, 'Mozilla Firefox', 'firefox.exe'),
-        path.join(localAppData, 'Mozilla Firefox', 'firefox.exe'),
-      ];
-      for (const firefoxPath of possiblePaths) {
-        if (existsSync(firefoxPath)) return { installed: true, path: firefoxPath };
-      }
-      return { installed: false };
-    }
-
-    const macBundle = '/Applications/Firefox.app/Contents/MacOS/firefox';
-    if (platform === 'darwin' && existsSync(macBundle)) return { installed: true, path: macBundle };
-
-    const { stdout } = await execAsync('which firefox', { timeout: 3000 });
-    const firefoxPath = String(stdout || '').trim();
-    return firefoxPath ? { installed: true, path: firefoxPath } : { installed: false };
-  } catch {
-    return { installed: false };
-  }
+  return { installed: false };
 }
 
 export async function checkGeoIP(): Promise<GeoIPCheckResult> {

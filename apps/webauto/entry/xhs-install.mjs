@@ -57,6 +57,22 @@ function resolveNpxBin(platform = process.platform, pathEnv = process.env.PATH |
   return resolved || 'npx.cmd';
 }
 
+function resolveNpmBin(platform = process.platform, pathEnv = process.env.PATH || process.env.Path || '') {
+  if (platform !== 'win32') return 'npm';
+  const resolved = resolveOnPath(
+    ['npm.cmd', 'npm.exe', 'npm.bat', 'npm.ps1'],
+    pathEnv,
+    ';',
+  );
+  return resolved || 'npm.cmd';
+}
+
+function runPackageCommand(packageName, commandArgs) {
+  const viaNpx = run(resolveNpxBin(), ['--yes', `--package=${packageName}`, ...commandArgs]);
+  if (viaNpx.status === 0) return viaNpx;
+  return run(resolveNpmBin(), ['exec', '--yes', `--package=${packageName}`, '--', ...commandArgs]);
+}
+
 function resolveWebautoRoot() {
   const portableRoot = String(process.env.WEBAUTO_PORTABLE_ROOT || process.env.WEBAUTO_ROOT || '').trim();
   if (portableRoot) return path.join(portableRoot, '.webauto');
@@ -79,11 +95,13 @@ function checkCamoufoxInstalled() {
     const ret = run(candidate.cmd, candidate.args);
     if (ret.status === 0) return true;
   }
+  const npxRet = runPackageCommand('camoufox', ['camoufox', 'path']);
+  if (npxRet.status === 0) return true;
   return false;
 }
 
 function installCamoufox() {
-  const ret = run(resolveNpxBin(), ['--yes', '--package=camoufox', 'camoufox', 'fetch']);
+  const ret = runPackageCommand('camoufox', ['camoufox', 'fetch']);
   return ret.status === 0;
 }
 
@@ -92,12 +110,12 @@ function checkGeoIPInstalled() {
 }
 
 function installGeoIP() {
-  const ret = run(resolveNpxBin(), ['--yes', '--package=@web-auto/camo', 'camo', 'init', 'geoip']);
+  const ret = runPackageCommand('@web-auto/camo', ['camo', 'init', 'geoip']);
   return ret.status === 0;
 }
 
 function uninstallCamoufox() {
-  const ret = run(resolveNpxBin(), ['--yes', '--package=camoufox', 'camoufox', 'remove']);
+  const ret = runPackageCommand('camoufox', ['camoufox', 'remove']);
   return ret.status === 0;
 }
 

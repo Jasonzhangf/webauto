@@ -1,5 +1,6 @@
 import { spawn } from 'child_process';
 import path from 'path';
+import { existsSync } from 'fs';
 import { fileURLToPath } from 'url';
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../..');
@@ -16,11 +17,37 @@ function resolveNodeBin() {
   if (explicit) return explicit;
   const npmNode = String(process.env.npm_node_execpath || '').trim();
   if (npmNode) return npmNode;
-  return process.platform === 'win32' ? 'node.exe' : 'node';
+  const fromPath = resolveOnPath(process.platform === 'win32' ? ['node.exe', 'node.cmd', 'node'] : ['node']);
+  if (fromPath) return fromPath;
+  return process.execPath;
 }
 
 function resolveNpxBin() {
+  const fromPath = resolveOnPath(
+    process.platform === 'win32'
+      ? ['npx.cmd', 'npx.exe', 'npx.bat', 'npx.ps1']
+      : ['npx'],
+  );
+  if (fromPath) return fromPath;
   return process.platform === 'win32' ? 'npx.cmd' : 'npx';
+}
+
+function resolveOnPath(candidates: string[]): string | null {
+  const pathEnv = process.env.PATH || process.env.Path || '';
+  const dirs = pathEnv.split(path.delimiter).filter(Boolean);
+  for (const dir of dirs) {
+    for (const name of candidates) {
+      const full = path.join(dir, name);
+      if (existsSync(full)) return full;
+    }
+  }
+  return null;
+}
+
+function quoteCmdArg(value: string) {
+  if (!value) return '""';
+  if (!/[\s"]/u.test(value)) return value;
+  return `"${value.replace(/"/g, '""')}"`;
 }
 
 async function checkHttpHealth(url: string) {
@@ -72,7 +99,18 @@ async function runNodeScript(scriptPath: string, timeoutMs: number) {
 
 async function runCommand(command: string, args: string[], timeoutMs: number) {
   return new Promise<boolean>((resolve) => {
-    const child = spawn(command, args, {
+    const lower = String(command || '').toLowerCase();
+    let spawnCommand = command;
+    let spawnArgs = args;
+    if (process.platform === 'win32' && (lower.endsWith('.cmd') || lower.endsWith('.bat'))) {
+      spawnCommand = 'cmd.exe';
+      const cmdLine = [quoteCmdArg(command), ...args.map(quoteCmdArg)].join(' ');
+      spawnArgs = ['/d', '/s', '/c', cmdLine];
+    } else if (process.platform === 'win32' && lower.endsWith('.ps1')) {
+      spawnCommand = 'powershell.exe';
+      spawnArgs = ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', command, ...args];
+    }
+    const child = spawn(spawnCommand, spawnArgs, {
       cwd: REPO_ROOT,
       stdio: 'ignore',
       windowsHide: true,
@@ -110,7 +148,11 @@ export async function startCoreDaemon(): Promise<boolean> {
     return false;
   }
 
-  const startedBrowser = await runCommand(resolveNpxBin(), ['--yes', '@web-auto/camo', 'init'], 40_000);
+  const startedBrowser = await runCommand(
+    resolveNpxBin(),
+    ['--yes', '--package=@web-auto/camo', 'camo', 'init'],
+    40_000,
+  );
   if (!startedBrowser) {
     console.error('[CoreDaemonManager] Failed to start camo browser backend');
     return false;
