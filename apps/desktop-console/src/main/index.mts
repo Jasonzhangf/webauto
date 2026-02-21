@@ -1020,6 +1020,51 @@ ipcMain.handle('env:repairCore', async () => {
   const services = await checkServices().catch(() => ({ unifiedApi: false, camoRuntime: false }));
   return { ok, services };
 });
+ipcMain.handle('env:cleanup', async () => {
+  console.log('[env:cleanup] Starting environment cleanup...');
+  
+  // Stop all browser processes
+  cleanupAllBrowserProcesses('env_cleanup_requested');
+  
+  // Clear profile locks
+  let locksCleared = 0;
+  try {
+    const profiles = await profileStore.listProfiles();
+    for (const p of profiles) {
+      const lockFile = path.join(p.path, '.lock');
+      try {
+        await fs.unlink(lockFile);
+        locksCleared++;
+        console.log(`[env:cleanup] Cleared lock for profile ${p.profileId}`);
+      } catch (err: any) {
+        if (err?.code !== 'ENOENT') {
+          console.warn(`[env:cleanup] Failed to clear lock for ${p.profileId}:`, err.message);
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('[env:cleanup] Failed to list profiles:', err);
+  }
+  
+  // Stop core services and restart
+  await stopCoreDaemon().catch(() => null);
+  const restarted = await startCoreDaemon().catch(() => false);
+  
+  const services = await checkServices().catch(() => ({ unifiedApi: false, camoRuntime: false }));
+  const firefox = await checkFirefox().catch(() => ({ installed: false }));
+  const camo = await checkCamoCli().catch(() => ({ installed: false }));
+  
+  console.log('[env:cleanup] Cleanup complete:', { locksCleared, restarted, services, firefox, camo });
+  
+  return {
+    ok: true,
+    locksCleared,
+    coreRestarted: restarted,
+    services,
+    firefox,
+    camo
+  };
+});
 ipcMain.handle('env:repairDeps', async (_evt, input: {
   core?: boolean;
   browser?: boolean;

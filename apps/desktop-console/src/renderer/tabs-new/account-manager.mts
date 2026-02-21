@@ -153,6 +153,21 @@ export function renderAccountManager(root: HTMLElement, ctx: any) {
     }
   }
 
+  // Environment cleanup
+  async function cleanupEnvironment() {
+    try {
+      console.log('[account-manager] Starting environment cleanup...');
+      const result = await ctx.api.envCleanup();
+      console.log('[account-manager] Cleanup result:', result);
+      alert('环境清理完成！\\n' + JSON.stringify(result, null, 2));
+      // Re-check environment after cleanup
+      await checkEnvironment();
+    } catch (err) {
+      console.error('Environment cleanup failed:', err);
+      alert('环境清理失败：' + (err as Error).message);
+    }
+  }
+
   function updateEnvItem(id: string, ok: boolean) {
     const el = root.querySelector(`#${id}`);
     if (!el) return;
