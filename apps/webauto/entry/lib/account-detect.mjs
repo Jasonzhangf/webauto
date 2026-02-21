@@ -14,7 +14,33 @@ function sleep(ms) {
 
 function buildDetectScript() {
   return `(() => {
-    const guard = Boolean(document.querySelector('.login-container, .login-dialog, #login-container'));
+    const isVisible = (node) => {
+      if (!(node instanceof HTMLElement)) return false;
+      const style = window.getComputedStyle(node);
+      if (!style) return false;
+      if (style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity || '1') === 0) return false;
+      const rect = node.getBoundingClientRect();
+      return rect.width > 0 && rect.height > 0;
+    };
+    const loginGuardSelectors = [
+      '.login-container',
+      '.login-dialog',
+      '#login-container',
+      '[class*="login"]',
+      '[data-testid*="login"]',
+      '[class*="passport"]',
+      '[class*="sign-in"]',
+    ];
+    const loginGuardNodes = loginGuardSelectors
+      .flatMap((selector) => Array.from(document.querySelectorAll(selector)));
+    const visibleLoginGuardNodes = loginGuardNodes.filter((node) => isVisible(node));
+    const loginGuardText = visibleLoginGuardNodes
+      .slice(0, 6)
+      .map((node) => String(node.textContent || '').replace(/\\s+/g, ' ').trim())
+      .join(' ');
+    const hasLoginText = /登录|扫码|验证码|手机号|请先登录|注册|sign\\s*in/i.test(loginGuardText);
+    const loginUrl = /\\/login|signin|passport|account\\/login/i.test(String(location.href || ''));
+    const hasGuardSignal = (visibleLoginGuardNodes.length > 0 && hasLoginText) || loginUrl;
     const candidates = [];
     const normalizeAlias = (value) => {
       const text = String(value || '').replace(/\\s+/g, ' ').trim();
@@ -169,9 +195,10 @@ function buildDetectScript() {
       const picked = findAliasFromDom();
       if (picked) alias = picked;
     }
+    const hasAccountSignal = Boolean(best && best.id);
     return {
       url: location.href,
-      hasLoginGuard: guard,
+      hasLoginGuard: hasGuardSignal && !hasAccountSignal,
       accountId: best ? best.id : null,
       alias: alias || null,
       source: best ? best.source : null,
@@ -365,10 +392,11 @@ export async function detectXhsAccountIdentity(profileId, options = {}) {
   };
 
   let detected = await runDetect();
-  const shouldRetry = !detected.hasLoginGuard && (
+  const shouldRetry = (
     !detected.accountId
     || detected.source === 'localStorage.search_history'
     || !detected.alias
+    || detected.hasLoginGuard
   );
   if (shouldRetry) {
     await sleep(1200);
@@ -383,6 +411,12 @@ export async function detectXhsAccountIdentity(profileId, options = {}) {
       if (!detected.source) detected.source = retry.source || detected.source;
     }
     if (retry.url && !detected.url) detected.url = retry.url;
+    if (detected.hasLoginGuard && !retry.hasLoginGuard) {
+      detected.hasLoginGuard = false;
+    }
+  }
+  if (detected.accountId && detected.hasLoginGuard) {
+    detected.hasLoginGuard = false;
   }
   if (options?.resolveAlias === true && detected.accountId && !detected.alias) {
     const resolved = await resolveAliasFromProfilePage(detected.profileId, detected.accountId);
@@ -408,6 +442,9 @@ export async function syncXhsAccountByProfile(profileId, options = {}) {
       resolveAlias: shouldResolveAlias,
     });
     if (detected.hasLoginGuard) {
+      if (existing?.valid === true && String(existing?.accountId || '').trim()) {
+        return existing;
+      }
       if (pendingWhileLogin) {
         return markProfilePending(normalizedProfileId, 'waiting_login_guard');
       }
