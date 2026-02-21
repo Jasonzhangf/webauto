@@ -9,6 +9,7 @@ type MockBundle = {
   calls: {
     cmdRunJson: string[][];
     scheduleInvoke: any[];
+    taskRunEphemeral: any[];
     configSaveLast: any[];
     configExport: any[];
     setActiveTab: string[];
@@ -39,6 +40,7 @@ function createMockCtx(tasks: any[] = []): MockBundle {
   const calls = {
     cmdRunJson: [] as string[][],
     scheduleInvoke: [] as any[],
+    taskRunEphemeral: [] as any[],
     configSaveLast: [] as any[],
     configExport: [] as any[],
     setActiveTab: [] as string[],
@@ -133,6 +135,10 @@ function createMockCtx(tasks: any[] = []): MockBundle {
         };
       }
       return { ok: true, json: {} };
+    },
+    taskRunEphemeral: async (input: any) => {
+      calls.taskRunEphemeral.push(input);
+      return { ok: true, runId: `ephemeral-${calls.taskRunEphemeral.length}` };
     },
     configLoadLast: async () => ({
       keyword: 'legacy-keyword',
@@ -308,4 +314,34 @@ test('config panel validates runAt for daily/weekly schedules', async () => {
   await flush(3);
 
   assert.equal(alerts.some((item) => item.includes('daily 任务需要锚点时间')), true);
+});
+
+test('config panel supports immediate run without save and without schedule runAt', async () => {
+  const bundle = createMockCtx([]);
+  const root = document.createElement('div');
+  renderConfigPanel(root, bundle.ctx);
+  await flush(6);
+
+  const keywordInput = root.querySelector('#keyword-input') as HTMLInputElement;
+  const accountSelect = root.querySelector('#account-select') as HTMLSelectElement;
+  const scheduleTypeSelect = root.querySelector('#schedule-type-select') as HTMLSelectElement;
+  const scheduleRunAtInput = root.querySelector('#schedule-runat-input') as HTMLInputElement;
+  const runNowBtn = root.querySelector('#start-now-btn') as HTMLButtonElement;
+
+  keywordInput.value = '春晚';
+  accountSelect.value = 'xhs-0';
+  scheduleTypeSelect.value = 'once';
+  scheduleTypeSelect.dispatchEvent(new Event('change', { bubbles: true }));
+  scheduleRunAtInput.value = '';
+
+  const saveCountBefore = bundle.calls.scheduleInvoke.filter((item) => item.action === 'save').length;
+  const runCountBefore = bundle.calls.scheduleInvoke.filter((item) => item.action === 'run').length;
+  runNowBtn.click();
+  await flush(6);
+
+  assert.equal(bundle.calls.taskRunEphemeral.length, 1);
+  assert.equal(bundle.calls.taskRunEphemeral[0]?.argv?.keyword, '春晚');
+  assert.equal(bundle.calls.scheduleInvoke.filter((item) => item.action === 'save').length, saveCountBefore);
+  assert.equal(bundle.calls.scheduleInvoke.filter((item) => item.action === 'run').length, runCountBefore);
+  assert.equal(bundle.calls.setActiveTab.includes('dashboard'), true);
 });

@@ -8,6 +8,7 @@ type MockBundle = {
   ctx: any;
   calls: {
     scheduleInvoke: any[];
+    taskRunEphemeral: any[];
     cmdKill: any[];
     setActiveTab: string[];
     setStatus: string[];
@@ -58,6 +59,7 @@ function findButtonByTextIn(container: HTMLElement, text: string, nth = 0): HTML
 function createMockCtx(): MockBundle {
   const calls = {
     scheduleInvoke: [] as any[],
+    taskRunEphemeral: [] as any[],
     cmdKill: [] as any[],
     setActiveTab: [] as string[],
     setStatus: [] as string[],
@@ -206,6 +208,10 @@ function createMockCtx(): MockBundle {
       }
       return { ok: true, json: {} };
     },
+    taskRunEphemeral: async (input: any) => {
+      calls.taskRunEphemeral.push(input);
+      return { ok: true, runId: `ephemeral-${calls.taskRunEphemeral.length}` };
+    },
     cmdKill: async (payload: any) => {
       calls.cmdKill.push(payload);
       return { ok: true };
@@ -308,6 +314,7 @@ test('scheduler panel supports validate + add/update/delete/import + daemon life
   const openConfigBtn = root.querySelector('#scheduler-open-config-btn') as HTMLButtonElement;
   const activeTaskText = root.querySelector('#scheduler-active-task-id') as HTMLElement;
   const saveBtn = root.querySelector('#scheduler-save-btn') as HTMLButtonElement;
+  const runNowBtn = root.querySelector('#scheduler-run-now-btn') as HTMLButtonElement;
   const resetBtn = root.querySelector('#scheduler-reset-btn') as HTMLButtonElement;
   const intervalWrap = root.querySelector('#scheduler-interval-wrap') as HTMLDivElement;
   const runAtWrap = root.querySelector('#scheduler-runat-wrap') as HTMLDivElement;
@@ -329,14 +336,14 @@ test('scheduler panel supports validate + add/update/delete/import + daemon life
   assert.equal(alertMessages.some((x) => x.includes('关键词不能为空')), true);
 
   keywordInput.value = '春晚';
-  typeSelect.value = 'daily';
+  typeSelect.value = 'once';
   typeSelect.dispatchEvent(new Event('change', { bubbles: true }));
   assert.equal(runAtWrap.style.display === 'none', false);
   assert.equal(intervalWrap.style.display, 'none');
   runAtInput.value = '';
   saveBtn.click();
   await flush(2);
-  assert.equal(alertMessages.some((x) => x.includes('daily 任务需要锚点时间')), true);
+  assert.equal(alertMessages.some((x) => x.includes('once 任务需要锚点时间')), true);
 
   runAtInput.value = '2026-02-20T10:30';
   saveBtn.click();
@@ -366,6 +373,16 @@ test('scheduler panel supports validate + add/update/delete/import + daemon life
   assert.equal(calls.scheduleInvoke.some((item) => item.action === 'run'), true);
   assert.equal(calls.setStatus.some((text) => text.includes('running: sched-0001')), true);
   assert.equal(calls.setActiveTab.includes('dashboard'), true);
+
+  typeSelect.value = 'once';
+  typeSelect.dispatchEvent(new Event('change', { bubbles: true }));
+  runAtInput.value = '';
+  profileInput.value = 'xiaohongshu-batch-0';
+  keywordInput.value = '立即执行';
+  runNowBtn.click();
+  await flush(3);
+  assert.equal(calls.taskRunEphemeral.length >= 1, true);
+  assert.equal(calls.taskRunEphemeral.at(-1)?.argv?.keyword, '立即执行');
 
   openConfigBtn.click();
   await flush(2);

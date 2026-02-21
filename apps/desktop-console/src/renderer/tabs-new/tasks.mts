@@ -58,7 +58,6 @@ function parseSortableTime(value: string | null | undefined): number {
 
 export function renderTasksPanel(root: HTMLElement, ctx: any) {
   root.innerHTML = '';
-  const ONCE_RUN_BUFFER_MINUTES = 2;
 
   const pageIndicator = createEl('div', { className: 'page-indicator' }, [
     '当前: ',
@@ -178,7 +177,7 @@ export function renderTasksPanel(root: HTMLElement, ctx: any) {
     <div class="btn-group" style="margin-top: var(--gap);">
       <button id="task-save-btn" style="flex:1;">保存任务</button>
       <button id="task-run-btn" class="primary" style="flex:1;">保存并执行</button>
-      <button id="task-run-ephemeral-btn" class="secondary" style="flex:1;">仅执行(不保存)</button>
+      <button id="task-run-ephemeral-btn" class="secondary" style="flex:1;">立即执行(不保存)</button>
       <button id="task-reset-btn" class="secondary" style="flex:0.6;">重置</button>
     </div>
   `;
@@ -309,25 +308,8 @@ export function renderTasksPanel(root: HTMLElement, ctx: any) {
     userIdWrap.style.display = isWeiboMonitor ? '' : 'none';
   }
 
-  function toLocalRunAtFromNow(bufferMinutes = ONCE_RUN_BUFFER_MINUTES): string {
-    const when = new Date(Date.now() + Math.max(1, bufferMinutes) * 60_000);
-    const yyyy = when.getFullYear();
-    const mm = String(when.getMonth() + 1).padStart(2, '0');
-    const dd = String(when.getDate()).padStart(2, '0');
-    const hh = String(when.getHours()).padStart(2, '0');
-    const min = String(when.getMinutes()).padStart(2, '0');
-    return `${yyyy}-${mm}-${dd}T${hh}:${min}`;
-  }
-
-  function ensureOnceRunAtDefault() {
-    if (scheduleTypeSelect.value === 'once' && !String(runAtInput.value || '').trim()) {
-      runAtInput.value = toLocalRunAtFromNow();
-    }
-  }
-
   function updateScheduleVisibility() {
     const scheduleType = String(scheduleTypeSelect.value || 'interval').trim();
-    ensureOnceRunAtDefault();
     intervalWrap.style.display = scheduleType === 'interval' ? 'inline-flex' : 'none';
     runAtWrap.style.display = scheduleType === 'once' || scheduleType === 'daily' || scheduleType === 'weekly'
       ? 'inline-flex'
@@ -360,9 +342,7 @@ export function renderTasksPanel(root: HTMLElement, ctx: any) {
       likeKeywords: String(likeKeywordsInput.value || '').trim(),
       scheduleType,
       intervalMinutes: Math.max(1, Number(intervalInput.value || 30) || 30),
-      runAt: scheduleType === 'once'
-        ? toIsoOrNull(runAtText || toLocalRunAtFromNow())
-        : toIsoOrNull(runAtText),
+      runAt: toIsoOrNull(runAtText),
       maxRuns: Number.isFinite(maxRunsNum) && maxRunsNum > 0 ? Math.max(1, Math.floor(maxRunsNum)) : null,
     };
   }
@@ -411,7 +391,7 @@ export function renderTasksPanel(root: HTMLElement, ctx: any) {
     likeKeywordsInput.value = DEFAULT_FORM.likeKeywords;
     scheduleTypeSelect.value = DEFAULT_FORM.scheduleType;
     intervalInput.value = String(DEFAULT_FORM.intervalMinutes);
-    runAtInput.value = toLocalRunAtFromNow();
+    runAtInput.value = '';
     maxRunsInput.value = '';
     updatePlatformFields();
     updateScheduleVisibility();

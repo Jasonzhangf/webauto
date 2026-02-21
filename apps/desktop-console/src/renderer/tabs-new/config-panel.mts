@@ -25,7 +25,6 @@ const DEFAULT_MAX_NOTES = 50;
 
 export function renderConfigPanel(root: HTMLElement, ctx: any) {
   root.innerHTML = '';
-  const ONCE_RUN_BUFFER_MINUTES = 2;
 
   const pageIndicator = createEl('div', { className: 'page-indicator' }, [
     '当前: ',
@@ -195,7 +194,7 @@ export function renderConfigPanel(root: HTMLElement, ctx: any) {
       </div>
       <div>
         <label>调度预览</label>
-        <div id="config-schedule-preview" class="muted">一次性（立即执行）</div>
+        <div id="config-schedule-preview" class="muted">一次性（需设时间）</div>
       </div>
     </div>
     <div id="config-last-action" class="muted" style="margin-top: 6px; font-size: 12px;">最近操作：-</div>
@@ -210,7 +209,8 @@ export function renderConfigPanel(root: HTMLElement, ctx: any) {
       <button id="save-current-btn" class="secondary">保存当前配置</button>
       <button id="save-new-btn" class="secondary">另存为新配置</button>
       <button id="save-open-scheduler-btn" class="secondary">保存并前往任务页</button>
-      <button id="start-btn" style="padding: 12px 44px; font-size: 15px;">执行当前配置</button>
+      <button id="start-btn" style="padding: 12px 44px; font-size: 15px;">保存并执行</button>
+      <button id="start-now-btn" class="secondary" style="padding: 12px 24px; font-size: 14px;">立即执行(不保存)</button>
     </div>
   `;
   actionRow.appendChild(actionCard);
@@ -247,6 +247,7 @@ export function renderConfigPanel(root: HTMLElement, ctx: any) {
   const saveNewBtn = root.querySelector('#save-new-btn') as HTMLButtonElement;
   const saveOpenSchedulerBtn = root.querySelector('#save-open-scheduler-btn') as HTMLButtonElement;
   const startBtn = root.querySelector('#start-btn') as HTMLButtonElement;
+  const startNowBtn = root.querySelector('#start-now-btn') as HTMLButtonElement;
   const configActiveTaskId = root.querySelector('#config-active-task-id') as HTMLDivElement;
   const configEditMode = root.querySelector('#config-edit-mode') as HTMLDivElement;
   const configDirtyState = root.querySelector('#config-dirty-state') as HTMLDivElement;
@@ -266,22 +267,6 @@ export function renderConfigPanel(root: HTMLElement, ctx: any) {
     return new Date().toLocaleTimeString('zh-CN', { hour12: false });
   }
 
-  function toLocalRunAtFromNow(bufferMinutes = ONCE_RUN_BUFFER_MINUTES): string {
-    const when = new Date(Date.now() + Math.max(1, bufferMinutes) * 60_000);
-    const yyyy = when.getFullYear();
-    const mm = String(when.getMonth() + 1).padStart(2, '0');
-    const dd = String(when.getDate()).padStart(2, '0');
-    const hh = String(when.getHours()).padStart(2, '0');
-    const min = String(when.getMinutes()).padStart(2, '0');
-    return `${yyyy}-${mm}-${dd}T${hh}:${min}`;
-  }
-
-  function ensureOnceRunAtDefault() {
-    if (scheduleTypeSelect.value === 'once' && !String(scheduleRunAtInput.value || '').trim()) {
-      scheduleRunAtInput.value = toLocalRunAtFromNow();
-    }
-  }
-
   function scheduleSummaryText() {
     const mode = String(scheduleTypeSelect.value || 'once').trim();
     const maxRunsRaw = scheduleMaxRunsInput.value.trim();
@@ -291,9 +276,7 @@ export function renderConfigPanel(root: HTMLElement, ctx: any) {
       return `每 ${interval} 分钟${maxRuns}`;
     }
     const modeLabel = mode === 'once' ? '一次性' : mode === 'daily' ? '每日' : '每周';
-    const runAtText = scheduleRunAtInput.value
-      ? scheduleRunAtInput.value.replace('T', ' ')
-      : (mode === 'once' ? '立即执行（+2分钟）' : '未设置时间');
+    const runAtText = scheduleRunAtInput.value ? scheduleRunAtInput.value.replace('T', ' ') : '未设置时间';
     return `${modeLabel}，${runAtText}${maxRuns}`;
   }
 
@@ -339,7 +322,6 @@ export function renderConfigPanel(root: HTMLElement, ctx: any) {
   function updateScheduleFields() {
     const mode = String(scheduleTypeSelect.value || 'interval');
     const useRunAt = mode === 'once' || mode === 'daily' || mode === 'weekly';
-    ensureOnceRunAtDefault();
     scheduleRunAtWrap.style.display = useRunAt ? '' : 'none';
     scheduleIntervalWrap.style.display = useRunAt ? 'none' : '';
     renderConfigStatus();
@@ -422,9 +404,7 @@ export function renderConfigPanel(root: HTMLElement, ctx: any) {
       commandType: 'xhs-unified',
       scheduleType,
       intervalMinutes: readNumber(scheduleIntervalInput, 30, 1),
-      runAt: scheduleType === 'once'
-        ? toIsoOrNull(runAtValue || toLocalRunAtFromNow())
-        : toIsoOrNull(runAtValue),
+      runAt: toIsoOrNull(runAtValue),
       maxRuns,
       argv,
     };
@@ -440,6 +420,18 @@ export function renderConfigPanel(root: HTMLElement, ctx: any) {
       throw new Error(reason || 'schedule command failed');
     }
     return ret?.json ?? ret;
+  }
+
+  async function invokeTaskRunEphemeral(input: Record<string, any>) {
+    if (typeof ctx.api?.taskRunEphemeral !== 'function') {
+      throw new Error('taskRunEphemeral unavailable');
+    }
+    const ret = await ctx.api.taskRunEphemeral(input);
+    if (!ret?.ok) {
+      const reason = String(ret?.error || 'run ephemeral failed').trim();
+      throw new Error(reason || 'run ephemeral failed');
+    }
+    return ret;
   }
 
   function applyTaskToForm(task: ScheduleTask) {
@@ -525,7 +517,7 @@ export function renderConfigPanel(root: HTMLElement, ctx: any) {
         dryRunCb.checked = config.dryRun === true;
         scheduleTypeSelect.value = String(config.scheduleType || 'once');
         scheduleIntervalInput.value = String(config.intervalMinutes || 30);
-        scheduleRunAtInput.value = toLocalDatetimeValue(config.runAt || null) || toLocalRunAtFromNow();
+        scheduleRunAtInput.value = toLocalDatetimeValue(config.runAt || null);
         scheduleMaxRunsInput.value = config.maxRuns ? String(config.maxRuns) : '';
         const preferredProfileId = String(config.lastProfileId || '').trim();
         ensureAccountOption(preferredProfileId);
@@ -681,6 +673,41 @@ export function renderConfigPanel(root: HTMLElement, ctx: any) {
     }
   }
 
+  async function runNowWithoutSave() {
+    startNowBtn.disabled = true;
+    const prevText = startNowBtn.textContent;
+    startNowBtn.textContent = '执行中...';
+    try {
+      const payload = buildSchedulePayload(selectedTaskId || '');
+      const ret = await invokeTaskRunEphemeral({
+        commandType: payload.commandType,
+        argv: payload.argv,
+      });
+      const runId = String(ret?.runId || '').trim();
+      ctx.xhsCurrentRun = {
+        runId: runId || null,
+        taskId: null,
+        profileId: String(payload.argv.profile || ''),
+        keyword: String(payload.argv.keyword || ''),
+        target: Number(payload.argv['max-notes'] || DEFAULT_MAX_NOTES) || DEFAULT_MAX_NOTES,
+        startedAt: new Date().toISOString(),
+      };
+      ctx.activeRunId = runId || ctx.activeRunId || null;
+      if (typeof ctx.setStatus === 'function') {
+        ctx.setStatus('started: xhs-unified');
+      }
+      markDirty('已立即执行（未保存）');
+      if (typeof ctx.setActiveTab === 'function') {
+        ctx.setActiveTab('dashboard');
+      }
+    } catch (err: any) {
+      alert(`执行失败: ${err?.message || String(err)}`);
+    } finally {
+      startNowBtn.disabled = false;
+      startNowBtn.textContent = prevText || '立即执行(不保存)';
+    }
+  }
+
   async function openSchedulerEditor() {
     if (selectedTaskId && ctx && typeof ctx === 'object') {
       ctx.activeTaskConfigId = selectedTaskId;
@@ -731,7 +758,7 @@ export function renderConfigPanel(root: HTMLElement, ctx: any) {
           dryRunCb.checked = config.dryRun === true;
           scheduleTypeSelect.value = String(config.scheduleType || 'once');
           scheduleIntervalInput.value = String(config.intervalMinutes || 30);
-          scheduleRunAtInput.value = toLocalDatetimeValue(config.runAt || null) || toLocalRunAtFromNow();
+          scheduleRunAtInput.value = toLocalDatetimeValue(config.runAt || null);
           scheduleMaxRunsInput.value = config.maxRuns ? String(config.maxRuns) : '';
           const profileId = String(config.lastProfileId || config.profile || '').trim();
           if (profileId) {
@@ -795,6 +822,9 @@ export function renderConfigPanel(root: HTMLElement, ctx: any) {
   startBtn.onclick = () => {
     void runCurrentConfig();
   };
+  startNowBtn.onclick = () => {
+    void runNowWithoutSave();
+  };
 
   [
     taskNameInput,
@@ -827,7 +857,7 @@ export function renderConfigPanel(root: HTMLElement, ctx: any) {
   });
 
   scheduleTypeSelect.value = 'once';
-  scheduleRunAtInput.value = toLocalRunAtFromNow();
+  scheduleRunAtInput.value = '';
   updateScheduleFields();
   updateLikeKeywordsState();
   renderConfigStatus();

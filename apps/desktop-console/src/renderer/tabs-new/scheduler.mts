@@ -10,7 +10,6 @@ import {
 
 export function renderSchedulerPanel(root: HTMLElement, ctx: any) {
   root.innerHTML = '';
-  const ONCE_RUN_BUFFER_MINUTES = 2;
 
   const pageIndicator = createEl('div', { className: 'page-indicator' }, [
     '当前: ',
@@ -152,6 +151,7 @@ export function renderSchedulerPanel(root: HTMLElement, ctx: any) {
     </div>
     <div class="btn-group" style="margin-top: var(--gap);">
       <button id="scheduler-save-btn" style="flex:1;">保存任务</button>
+      <button id="scheduler-run-now-btn" class="secondary" style="flex:1;">立即执行(不保存)</button>
       <button id="scheduler-reset-btn" class="secondary" style="flex:1;">清空表单</button>
     </div>
   `;
@@ -200,6 +200,7 @@ export function renderSchedulerPanel(root: HTMLElement, ctx: any) {
   const dryRunInput = root.querySelector('#scheduler-dryrun') as HTMLInputElement;
   const likeKeywordsInput = root.querySelector('#scheduler-like-keywords') as HTMLInputElement;
   const saveBtn = root.querySelector('#scheduler-save-btn') as HTMLButtonElement;
+  const runNowBtn = root.querySelector('#scheduler-run-now-btn') as HTMLButtonElement;
   const resetBtn = root.querySelector('#scheduler-reset-btn') as HTMLButtonElement;
 
   let tasks: ScheduleTask[] = [];
@@ -226,26 +227,9 @@ export function renderSchedulerPanel(root: HTMLElement, ctx: any) {
     }
   }
 
-  function toLocalRunAtFromNow(bufferMinutes = ONCE_RUN_BUFFER_MINUTES): string {
-    const when = new Date(Date.now() + Math.max(1, bufferMinutes) * 60_000);
-    const yyyy = when.getFullYear();
-    const mm = String(when.getMonth() + 1).padStart(2, '0');
-    const dd = String(when.getDate()).padStart(2, '0');
-    const hh = String(when.getHours()).padStart(2, '0');
-    const min = String(when.getMinutes()).padStart(2, '0');
-    return `${yyyy}-${mm}-${dd}T${hh}:${min}`;
-  }
-
-  function ensureOnceRunAtDefault() {
-    if (typeSelect.value === 'once' && !String(runAtInput.value || '').trim()) {
-      runAtInput.value = toLocalRunAtFromNow();
-    }
-  }
-
   function updateTypeFields() {
     const mode = typeSelect.value;
     const useRunAt = mode === 'once' || mode === 'daily' || mode === 'weekly';
-    ensureOnceRunAtDefault();
     runAtWrap.style.display = useRunAt ? '' : 'none';
     intervalWrap.style.display = useRunAt ? 'none' : '';
   }
@@ -276,7 +260,7 @@ export function renderSchedulerPanel(root: HTMLElement, ctx: any) {
     enabledInput.checked = true;
     typeSelect.value = 'once';
     intervalInput.value = '30';
-    runAtInput.value = toLocalRunAtFromNow();
+    runAtInput.value = '';
     maxRunsInput.value = '';
     profileInput.value = '';
     keywordInput.value = '';
@@ -320,9 +304,7 @@ export function renderSchedulerPanel(root: HTMLElement, ctx: any) {
       commandType,
       scheduleType: typeSelect.value as ScheduleTask['scheduleType'],
       intervalMinutes: Number(intervalInput.value || 30) || 30,
-      runAt: typeSelect.value === 'once'
-        ? toIsoOrNull(String(runAtInput.value || '').trim() || toLocalRunAtFromNow())
-        : toIsoOrNull(runAtInput.value),
+      runAt: toIsoOrNull(runAtInput.value),
       maxRuns,
       argv,
     };
@@ -366,6 +348,18 @@ export function renderSchedulerPanel(root: HTMLElement, ctx: any) {
       throw new Error(reason || 'schedule command failed');
     }
     return ret?.json ?? ret;
+  }
+
+  async function invokeTaskRunEphemeral(input: Record<string, any>) {
+    if (typeof ctx.api?.taskRunEphemeral !== 'function') {
+      throw new Error('taskRunEphemeral unavailable');
+    }
+    const ret = await ctx.api.taskRunEphemeral(input);
+    if (!ret?.ok) {
+      const reason = String(ret?.error || 'run ephemeral failed').trim();
+      throw new Error(reason || 'run ephemeral failed');
+    }
+    return ret;
   }
 
   function downloadJson(fileName: string, payload: any) {
@@ -535,6 +529,42 @@ export function renderSchedulerPanel(root: HTMLElement, ctx: any) {
     }
   }
 
+  async function runNowFromForm() {
+    runNowBtn.disabled = true;
+    const prevText = runNowBtn.textContent;
+    runNowBtn.textContent = '执行中...';
+    try {
+      const payload = readFormAsPayload();
+      const ret = await invokeTaskRunEphemeral({
+        commandType: payload.commandType,
+        argv: payload.argv,
+      });
+      const runId = String(ret?.runId || '').trim();
+      if (payload.commandType === 'xhs-unified' && ctx && typeof ctx === 'object') {
+        ctx.xhsCurrentRun = {
+          runId: runId || null,
+          taskId: null,
+          profileId: String(payload.argv.profile || ''),
+          keyword: String(payload.argv.keyword || ''),
+          target: Number(payload.argv['max-notes'] || payload.argv.target || 0) || 0,
+          startedAt: new Date().toISOString(),
+        };
+        ctx.activeRunId = runId || ctx.activeRunId || null;
+      }
+      if (typeof ctx.setStatus === 'function') {
+        ctx.setStatus(`started: ${payload.commandType}`);
+      }
+      if (payload.commandType === 'xhs-unified' && typeof ctx.setActiveTab === 'function') {
+        ctx.setActiveTab('dashboard');
+      }
+    } catch (err: any) {
+      alert(`执行失败: ${err?.message || String(err)}`);
+    } finally {
+      runNowBtn.disabled = false;
+      runNowBtn.textContent = prevText || '立即执行(不保存)';
+    }
+  }
+
   async function runDueNow() {
     try {
       const out = await invokeSchedule({ action: 'run-due', limit: 20, timeoutMs: 0 });
@@ -602,6 +632,7 @@ export function renderSchedulerPanel(root: HTMLElement, ctx: any) {
 
   typeSelect.addEventListener('change', updateTypeFields);
   saveBtn.onclick = () => void saveTask();
+  runNowBtn.onclick = () => void runNowFromForm();
   resetBtn.onclick = () => resetForm();
   refreshBtn.onclick = () => void refreshList();
   runDueBtn.onclick = () => void runDueNow();

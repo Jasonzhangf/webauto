@@ -262,9 +262,12 @@ test('save and run uses schedule run and no direct spawn', async () => {
   const keywordInput = root.querySelector('#task-keyword') as HTMLInputElement;
   const profileInput = root.querySelector('#task-profile') as HTMLInputElement;
   const runBtn = root.querySelector('#task-run-btn') as HTMLButtonElement;
+  const scheduleTypeSelect = root.querySelector('#task-schedule-type') as HTMLSelectElement;
 
   keywordInput.value = '工作服';
   profileInput.value = 'xhs-1';
+  scheduleTypeSelect.value = 'interval';
+  scheduleTypeSelect.dispatchEvent(new Event('change', { bubbles: true }));
   runBtn.click();
   await flush(8);
 
