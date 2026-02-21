@@ -6,12 +6,20 @@ import path from 'node:path';
 import { existsSync, rmSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
-function run(cmd, args) {
+const DEFAULT_COMMAND_TIMEOUT_MS = (() => {
+  const raw = Number(process.env.WEBAUTO_INSTALL_TIMEOUT_MS || 600000);
+  return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : 600000;
+})();
+
+function run(cmd, args, options = {}) {
+  const timeoutMs = Number.isFinite(Number(options?.timeoutMs))
+    ? Math.max(1000, Number(options.timeoutMs))
+    : DEFAULT_COMMAND_TIMEOUT_MS;
   const lower = String(cmd || '').toLowerCase();
   const spawnOptions = {
     encoding: 'utf8',
     windowsHide: true,
-    timeout: 120000,
+    timeout: timeoutMs,
   };
   if (process.platform === 'win32' && (lower.endsWith('.cmd') || lower.endsWith('.bat'))) {
     const cmdLine = [quoteCmdArg(cmd), ...args.map(quoteCmdArg)].join(' ');
@@ -156,6 +164,29 @@ function runCamoufoxCommand(args) {
   return { ok: viaPackage.status === 0, ret: viaPackage, attempts };
 }
 
+function runCamoCommand(args) {
+  const candidates = [{ cmd: 'camo', args }];
+  const attempts = [];
+  for (const candidate of candidates) {
+    const ret = run(candidate.cmd, candidate.args);
+    attempts.push({
+      command: `${candidate.cmd} ${candidate.args.join(' ')}`.trim(),
+      status: ret?.status ?? null,
+      error: ret?.error?.message || null,
+      detail: summarizeCommand(ret),
+    });
+    if (ret.status === 0) return { ok: true, ret, attempts };
+  }
+  const viaPackage = runPackageCommand('@web-auto/camo', ['camo', ...args]);
+  attempts.push({
+    command: `npx/npm exec camo ${args.join(' ')}`.trim(),
+    status: viaPackage?.status ?? null,
+    error: viaPackage?.error?.message || null,
+    detail: summarizeCommand(viaPackage),
+  });
+  return { ok: viaPackage.status === 0, ret: viaPackage, attempts };
+}
+
 function checkCamoufoxInstalled() {
   const pathCheck = runCamoufoxCommand(['path']);
   if (!pathCheck.ok) return false;
@@ -171,8 +202,7 @@ function checkGeoIPInstalled() {
 }
 
 function installGeoIP() {
-  const ret = runPackageCommand('@web-auto/camo', ['camo', 'init', 'geoip']);
-  return ret.status === 0;
+  return runCamoCommand(['init', 'geoip']);
 }
 
 function uninstallCamoufox() {
@@ -272,9 +302,13 @@ async function main() {
       if (!camoufoxInstalled) operationError = operationError || 'camoufox_install_failed';
     }
     if (geoip && !geoipInstalled) {
-      actions.geoipInstalled = installGeoIP();
+      const geoResult = installGeoIP();
+      actions.geoipInstalled = geoResult.ok;
       geoipInstalled = checkGeoIPInstalled();
-      if (!geoipInstalled) operationError = operationError || 'geoip_install_failed';
+      if (!geoipInstalled) {
+        operationError = operationError || 'geoip_install_failed';
+        operationDetail = operationDetail || summarizeCommand(geoResult.ret);
+      }
     }
   }
 
@@ -306,9 +340,13 @@ async function main() {
       }
     }
     if (geoip) {
-      actions.geoipInstalled = installGeoIP();
+      const geoResult = installGeoIP();
+      actions.geoipInstalled = geoResult.ok;
       geoipInstalled = checkGeoIPInstalled();
-      if (!geoipInstalled) operationError = operationError || 'geoip_install_failed';
+      if (!geoipInstalled) {
+        operationError = operationError || 'geoip_install_failed';
+        operationDetail = operationDetail || summarizeCommand(geoResult.ret);
+      }
     }
   }
 
