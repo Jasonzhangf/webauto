@@ -3,6 +3,7 @@ import path from 'node:path';
 import os from 'node:os';
 
 contextBridge.exposeInMainWorld('api', {
+  appGetVersion: () => ipcRenderer.invoke('app:getVersion'),
   settingsGet: () => ipcRenderer.invoke('settings:get'),
   settingsSet: (next) => ipcRenderer.invoke('settings:set', next),
 

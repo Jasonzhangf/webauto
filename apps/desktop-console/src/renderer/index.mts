@@ -32,6 +32,8 @@ const tabs: Array<{ id: TabId; label: string; render: TabRender; hidden?: boolea
 const tabsEl = document.getElementById('tabs')!;
 const contentEl = document.getElementById('content')!;
 const statusEl = document.getElementById('status')!;
+const appTitleEl = document.getElementById('app-title');
+const appVersionEl = document.getElementById('app-version');
 let activeTabCleanup: (() => void) | null = null;
 const mutableApi: any = { ...(window.api || {}), settings: null };
 
@@ -110,6 +112,26 @@ function startDesktopHeartbeat() {
 
 async function loadSettings() {
   await ctx.refreshSettings();
+}
+
+async function applyVersionBadge() {
+  try {
+    if (typeof window.api?.appGetVersion !== 'function') return;
+    const info = await window.api.appGetVersion();
+    const webauto = String(info?.webauto || '').trim();
+    const desktop = String(info?.desktop || '').trim();
+    const badge = String(info?.badge || '').trim();
+    if (appTitleEl && webauto) {
+      appTitleEl.textContent = `WebAuto Console v${webauto}`;
+    }
+    if (appVersionEl) {
+      appVersionEl.textContent = badge || (desktop && desktop !== webauto
+        ? `webauto v${webauto} · console v${desktop}`
+        : (webauto ? `v${webauto}` : 'v-'));
+    }
+  } catch {
+    // ignore version display errors
+  }
 }
 
 function focusTabButton(tabId: TabId) {
@@ -230,6 +252,7 @@ async function detectStartupTab(): Promise<TabId> {
 
 async function main() {
   startDesktopHeartbeat();
+  await applyVersionBadge();
   await loadSettings();
   installCmdEvents();
   const startupTab = await detectStartupTab();

@@ -115,6 +115,13 @@
         -webkit-text-fill-color: transparent;
         background-clip: text;
       }
+      header .version-badge {
+        font-size: 11px;
+        color: var(--text-tertiary);
+        margin-right: var(--space-3);
+        font-family: var(--font-mono);
+        white-space: nowrap;
+      }
       header .tabs { 
         display: flex; 
         gap: var(--space-1); 
@@ -701,9 +708,10 @@
   </head>
   <body>
     <header>
-      <div class="title">WebAuto Console</div>
+      <div class="title" id="app-title">WebAuto Console</div>
       <nav class="tabs" id="tabs"></nav>
       <div style="flex:1"></div>
+      <div class="version-badge" id="app-version">v-</div>
       <div class="muted" id="status"></div>
     </header>
     <div id="main">

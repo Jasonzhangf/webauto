@@ -23,7 +23,7 @@ function findTabByText(root: HTMLElement, text: string): HTMLDivElement {
 }
 
 beforeEach(() => {
-  dom = setupDom('<!doctype html><html><body><div id="tabs"></div><div id="content"></div><div id="status"></div></body></html>');
+  dom = setupDom('<!doctype html><html><body><div id="app-title"></div><div id="app-version"></div><div id="tabs"></div><div id="content"></div><div id="status"></div></body></html>');
 });
 
 afterEach(() => {
@@ -55,6 +55,11 @@ test('renderer index boots onboarding tabs and responds to cmd events', async ()
   };
 
   (window as any).api = {
+    appGetVersion: async () => ({
+      webauto: '0.1.9',
+      desktop: '0.1.9',
+      badge: 'v0.1.9',
+    }),
     settingsGet: async () => settings,
     settingsSet: async (payload: any) => Object.assign(settings, payload),
     envCheckAll: async () => ({
@@ -155,6 +160,8 @@ test('renderer index boots onboarding tabs and responds to cmd events', async ()
   const tabsRoot = document.getElementById('tabs') as HTMLDivElement;
   const contentRoot = document.getElementById('content') as HTMLDivElement;
   const statusRoot = document.getElementById('status') as HTMLDivElement;
+  const appTitleRoot = document.getElementById('app-title') as HTMLDivElement;
+  const appVersionRoot = document.getElementById('app-version') as HTMLDivElement;
 
   try {
     assert.ok(findTabByText(tabsRoot, '初始化'));
@@ -187,6 +194,8 @@ test('renderer index boots onboarding tabs and responds to cmd events', async ()
     assert.match(String(contentRoot.textContent || ''), /账户列表/);
 
     assert.equal(heartbeatCalls.length > 0, true);
+    assert.match(String(appTitleRoot.textContent || ''), /WebAuto Console v0\.1\.9/);
+    assert.equal(String(appVersionRoot.textContent || ''), 'v0.1.9');
   } finally {
     window.dispatchEvent(new Event('beforeunload'));
     await flush();

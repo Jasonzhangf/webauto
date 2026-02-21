@@ -78,6 +78,17 @@ function uiConsoleScriptPath() {
   return path.join(ROOT, 'apps', 'desktop-console', 'entry', 'ui-console.mjs');
 }
 
+function readRootVersion() {
+  try {
+    const pkg = JSON.parse(readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
+    return String(pkg.version || '').trim() || '0.0.0';
+  } catch {
+    return '0.0.0';
+  }
+}
+
+const ROOT_VERSION = readRootVersion();
+
 function printMainHelp() {
   console.log(`webauto CLI
 
@@ -100,10 +111,14 @@ Core Commands:
   webauto xhs unified [xhs options...]
   webauto xhs status [--run-id <id>] [--json]
   webauto xhs orchestrate [xhs options...]
+  webauto version [--json]
+  webauto version bump [patch|minor|major]
 
 Build & Release:
   webauto build:dev        # Local link mode
-  webauto build:release    # Full release gate (tests/build/pack)
+  webauto build:release    # Full release gate (默认自动 bump patch 版本)
+  webauto build:release -- --bump minor
+  webauto build:release -- --no-bump
   webauto build:release -- --skip-tests
   webauto build:release -- --skip-pack
 
@@ -132,6 +147,7 @@ Tips:
   - account 命令会转发到 apps/webauto/entry/account.mjs
   - schedule 命令会转发到 apps/webauto/entry/schedule.mjs
   - 全量参数请看: webauto xhs --help
+  - 当前 CLI 版本: ${ROOT_VERSION}
 `);
 }
 
@@ -342,6 +358,21 @@ Examples:
 `);
 }
 
+function printVersionHelp() {
+  console.log(`webauto version
+
+Usage:
+  webauto version [--json]
+  webauto version bump [patch|minor|major] [--json]
+
+Examples:
+  webauto version
+  webauto version --json
+  webauto version bump
+  webauto version bump minor
+`);
+}
+
 function exists(p) {
   try {
     return existsSync(p);
@@ -454,6 +485,7 @@ async function ensureDepsAndBuild() {
 }
 
 async function uiConsole({ build, install, checkOnly, noDaemon }) {
+  console.log(`[webauto] version ${ROOT_VERSION}`);
   const okServices = checkServicesBuilt();
   const okDeps = checkDesktopConsoleDeps();
   const okUiBuilt = checkDesktopConsoleBuilt();
@@ -517,7 +549,8 @@ async function uiConsole({ build, install, checkOnly, noDaemon }) {
 async function main() {
   const rawArgv = process.argv.slice(2);
   const args = minimist(process.argv.slice(2), {
-    boolean: ['help', 'build', 'install', 'check', 'full', 'link', 'skip-tests', 'skip-pack', 'no-daemon'],
+    boolean: ['help', 'build', 'install', 'check', 'full', 'link', 'skip-tests', 'skip-pack', 'no-daemon', 'no-bump', 'json'],
+    string: ['bump'],
     alias: { h: 'help' },
   });
 
@@ -552,6 +585,10 @@ async function main() {
       printXhsHelp();
       return;
     }
+    if (cmd === 'version') {
+      printVersionHelp();
+      return;
+    }
     printMainHelp();
     return;
   }
@@ -563,6 +600,32 @@ async function main() {
       checkOnly: false,
       noDaemon,
     });
+    return;
+  }
+
+  if (cmd === 'version') {
+    const jsonMode = args.json === true;
+    const action = String(args._[1] || '').trim();
+    if (!action) {
+      const out = { name: '@web-auto/webauto', version: ROOT_VERSION };
+      if (jsonMode) console.log(JSON.stringify(out, null, 2));
+      else console.log(`@web-auto/webauto v${ROOT_VERSION}`);
+      return;
+    }
+    if (action !== 'bump') {
+      console.error(`Unknown version action: ${action}`);
+      printVersionHelp();
+      process.exit(2);
+    }
+    const bumpType = String(args._[2] || args.bump || 'patch').trim().toLowerCase();
+    if (!['patch', 'minor', 'major'].includes(bumpType)) {
+      console.error(`Unsupported bump type: ${bumpType}`);
+      process.exit(2);
+    }
+    const script = path.join(ROOT, 'scripts', 'bump-version.mjs');
+    const cmdArgs = [script, bumpType];
+    if (jsonMode) cmdArgs.push('--json');
+    await run(process.execPath, cmdArgs);
     return;
   }
 
@@ -581,8 +644,20 @@ async function main() {
   if (cmd === 'build:release') {
     const skipTests = args['skip-tests'] === true;
     const skipPack = args['skip-pack'] === true;
+    const noBump = args['no-bump'] === true;
+    const bumpType = String(args.bump || 'patch').trim().toLowerCase();
+    if (!['patch', 'minor', 'major'].includes(bumpType)) {
+      console.error(`Unsupported --bump value: ${bumpType}`);
+      process.exit(2);
+    }
     console.log('[webauto] Running release gate...');
     const npm = npmRunner();
+    if (!noBump) {
+      const bumpScript = path.join(ROOT, 'scripts', 'bump-version.mjs');
+      await run(process.execPath, [bumpScript, bumpType]);
+    } else {
+      console.log('[webauto] Skip version bump (--no-bump)');
+    }
     await run(npm.cmd, [...npm.prefix, 'run', 'prebuild']);
     if (!skipTests) {
       await run(npm.cmd, [...npm.prefix, 'run', 'test:ci']);

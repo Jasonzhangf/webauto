@@ -5,7 +5,7 @@ import { spawn } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { mkdirSync, promises as fs } from 'node:fs';
+import { mkdirSync, readFileSync, promises as fs } from 'node:fs';
 
 import { readDesktopConsoleSettings, resolveDefaultDownloadRoot, writeDesktopConsoleSettings, saveCrawlConfig, loadCrawlConfig, exportConfigToFile, importConfigFromFile, type CrawlConfig } from './desktop-settings.mts';
 import type { DesktopConsoleSettings } from './desktop-settings.mts';
@@ -70,6 +70,34 @@ import { runEphemeralTask, scheduleInvoke } from './task-gateway.mts';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const APP_ROOT = path.resolve(__dirname, '../..'); // apps/desktop-console/dist/main -> apps/desktop-console
 const REPO_ROOT = path.resolve(APP_ROOT, '../..');
+
+type VersionInfo = {
+  webauto: string;
+  desktop: string;
+  windowTitle: string;
+  badge: string;
+};
+
+function readJsonVersion(filePath: string): string {
+  try {
+    const json = JSON.parse(readFileSync(filePath, 'utf8'));
+    return String(json?.version || '').trim();
+  } catch {
+    return '';
+  }
+}
+
+function resolveVersionInfo(): VersionInfo {
+  const webauto = readJsonVersion(path.join(REPO_ROOT, 'package.json')) || '0.0.0';
+  const desktop = readJsonVersion(path.join(APP_ROOT, 'package.json')) || webauto;
+  const windowTitle = `WebAuto Desktop v${webauto}`;
+  const badge = desktop === webauto
+    ? `v${webauto}`
+    : `webauto v${webauto} · console v${desktop}`;
+  return { webauto, desktop, windowTitle, badge };
+}
+
+const VERSION_INFO = resolveVersionInfo();
 const DESKTOP_HEARTBEAT_FILE = path.join(
   os.homedir(),
   '.webauto',
@@ -806,7 +834,7 @@ async function listDir(input: { root: string; recursive?: boolean; maxEntries?: 
 
 function createWindow() {
   win = new BrowserWindow({
-    title: "WebAuto Desktop v0.1.1",
+    title: VERSION_INFO.windowTitle,
     width: 1280,
     height: 900,
     minWidth: 920,
@@ -862,6 +890,7 @@ ipcMain.on('preload:test', () => {
 });
 
 ipcMain.handle('settings:get', async () => readDesktopConsoleSettings({ appRoot: APP_ROOT, repoRoot: REPO_ROOT }));
+ipcMain.handle('app:getVersion', async () => VERSION_INFO);
 ipcMain.handle('settings:set', async (_evt, next) => {
   const updated = await writeDesktopConsoleSettings({ appRoot: APP_ROOT, repoRoot: REPO_ROOT }, next || {});
   // Broadcast to all tabs so they can refresh aliases/colors without manual reload.
