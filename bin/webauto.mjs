@@ -74,10 +74,15 @@ function npmRunner() {
   return wrapWindowsRunner(resolved);
 }
 
+function uiConsoleScriptPath() {
+  return path.join(ROOT, 'apps', 'desktop-console', 'entry', 'ui-console.mjs');
+}
+
 function printMainHelp() {
   console.log(`webauto CLI
 
 Usage:
+  webauto               # 直接启动 UI Console
   webauto --help
   webauto account --help
   webauto schedule --help
@@ -385,6 +390,7 @@ async function runInDir(dir, cmd, args) {
 }
 
 function checkDesktopConsoleDeps() {
+  if (isGlobalInstall()) return true;
   // Check for electron in various locations:
   // 1. Global npm root (when installed globally alongside webauto)
   // 2. Package's own node_modules
@@ -415,6 +421,18 @@ async function ensureDepsAndBuild() {
     process.exit(1);
   }
 
+  // Global package should already ship renderer build.
+  if (isGlobalInstall()) {
+    if (!checkDesktopConsoleBuilt()) {
+      console.error('❌ desktop-console dist missing from package. Please reinstall @web-auto/webauto.');
+      process.exit(1);
+    }
+    const pkgJson = JSON.parse(readFileSync(path.join(ROOT, 'package.json'), 'utf-8'));
+    saveState({ initialized: true, version: pkgJson.version });
+    console.log('[webauto] Setup complete!');
+    return;
+  }
+
   // Install deps if needed
   if (!checkDesktopConsoleDeps()) {
     console.log('[webauto] Installing desktop-console dependencies...');
@@ -435,7 +453,7 @@ async function ensureDepsAndBuild() {
   console.log('[webauto] Setup complete!');
 }
 
-async function uiConsole({ build, install, checkOnly }) {
+async function uiConsole({ build, install, checkOnly, noDaemon }) {
   const okServices = checkServicesBuilt();
   const okDeps = checkDesktopConsoleDeps();
   const okUiBuilt = checkDesktopConsoleBuilt();
@@ -490,14 +508,16 @@ async function uiConsole({ build, install, checkOnly }) {
     await runInDir(path.join(ROOT, 'apps', 'desktop-console'), npm.cmd, [...npm.prefix, 'run', 'build']);
   }
 
-  const npm = npmRunner();
-  await runInDir(path.join(ROOT, 'apps', 'desktop-console'), npm.cmd, [...npm.prefix, 'start']);
+  const uiScript = uiConsoleScriptPath();
+  const uiArgs = [];
+  if (noDaemon) uiArgs.push('--no-daemon');
+  await run(process.execPath, [uiScript, ...uiArgs]);
 }
 
 async function main() {
   const rawArgv = process.argv.slice(2);
   const args = minimist(process.argv.slice(2), {
-    boolean: ['help', 'build', 'install', 'check', 'full', 'link', 'skip-tests', 'skip-pack'],
+    boolean: ['help', 'build', 'install', 'check', 'full', 'link', 'skip-tests', 'skip-pack', 'no-daemon'],
     alias: { h: 'help' },
   });
 
@@ -536,7 +556,12 @@ async function main() {
   }
 
   if (!cmd) {
-    printMainHelp();
+    await uiConsole({
+      build: false,
+      install: false,
+      checkOnly: false,
+      noDaemon: args['no-daemon'] === true,
+    });
     return;
   }
 
@@ -583,6 +608,7 @@ async function main() {
       build: args.build === true,
       install: args.install === true,
       checkOnly: args.check === true,
+      noDaemon: args['no-daemon'] === true,
     });
     return;
   }
