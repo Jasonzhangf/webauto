@@ -558,11 +558,12 @@ async function spawnCommand(spec: SpawnSpec) {
           windowsHide: true,
         });
 
+        trackRunPid(child);
         // Track browser process for cleanup
         if (child.pid) {
           trackBrowserProcess(child.pid);
         }
-        
+
         runs.set(runId, { child, title: spec.title, startedAt: now(), profiles: requestedProfiles });
         sendEvent({ type: 'started', runId, title: spec.title, pid: child.pid ?? -1, ts: now() });
 

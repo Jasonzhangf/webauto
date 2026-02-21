@@ -229,14 +229,16 @@ async function cmdLogin(idOrAlias, argv, jsonMode) {
   const account = getAccount(idOrAlias);
   await ensureProfile(account.profileId);
   const url = String(argv.url || inferLoginUrl(account.platform)).trim();
-  // Default idle timeout: 30 minutes, configurable via env or CLI
+  // Default idle timeout: 30 minutes, configurable via env or CLI.
+  // Keep validation semantics aligned with camo parseDurationMs.
   const idleTimeout = String(argv['idle-timeout'] || process.env.WEBAUTO_LOGIN_IDLE_TIMEOUT || '30m').trim() || '30m';
-  
-  // Validate idle timeout format (e.g., "30m", "1h", "1800s")
-  if (!/^\d+[mhs]$/.test(idleTimeout)) {
+
+  const idleTimeoutLower = idleTimeout.toLowerCase();
+  const idleTimeoutOk = /^(?:\d+(?:\.\d+)?(?:ms|s|m|h)?|0|off|none|disable|disabled)$/.test(idleTimeoutLower);
+  if (!idleTimeoutOk) {
     output({
       ok: false,
-      error: 'Invalid idle-timeout format. Use: 30m, 1h, or 1800s',
+      error: 'Invalid idle-timeout format. Use forms like 30m, 1800s, 5000ms, 1h, 0, off.',
     }, jsonMode);
     process.exit(1);
   }
