@@ -3,7 +3,7 @@ import minimist from 'minimist';
 import { spawnSync } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
-import { existsSync, rmSync, mkdirSync, writeFileSync, renameSync } from 'node:fs';
+import { existsSync, rmSync, mkdirSync, writeFileSync, renameSync, statSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 const DEFAULT_COMMAND_TIMEOUT_MS = (() => {
@@ -12,83 +12,54 @@ const DEFAULT_COMMAND_TIMEOUT_MS = (() => {
 })();
 
 function run(cmd, args, options = {}) {
+  const command = normalizeCommand(cmd);
   const timeoutMs = Number.isFinite(Number(options?.timeoutMs))
     ? Math.max(1000, Number(options.timeoutMs))
     : DEFAULT_COMMAND_TIMEOUT_MS;
-  const lower = String(cmd || '').toLowerCase();
+  const lower = String(command || '').toLowerCase();
   const spawnOptions = {
     encoding: 'utf8',
     windowsHide: true,
     timeout: timeoutMs,
   };
   if (process.platform === 'win32' && (lower.endsWith('.cmd') || lower.endsWith('.bat'))) {
-    const cmdLine = [quoteCmdArg(cmd), ...args.map(quoteCmdArg)].join(' ');
+    const cmdLine = [quoteCmdArg(command), ...args.map(quoteCmdArg)].join(' ');
     return spawnSync('cmd.exe', ['/d', '/s', '/c', cmdLine], spawnOptions);
   }
   if (process.platform === 'win32' && lower.endsWith('.ps1')) {
     return spawnSync(
       'powershell.exe',
-      ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', cmd, ...args],
+      ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', command, ...args],
       spawnOptions,
     );
   }
-  return spawnSync(cmd, args, spawnOptions);
+  return spawnSync(command, args, spawnOptions);
 }
 
 function quoteCmdArg(value) {
-  if (!value) return '""';
-  if (!/[\s"]/u.test(value)) return value;
-  return `"${String(value).replace(/"/g, '""')}"`;
+  const normalized = normalizeCommand(value);
+  if (!normalized) return '""';
+  if (!/[\s"]/u.test(normalized)) return normalized;
+  return `"${String(normalized).replace(/"/g, '""')}"`;
 }
 
-function resolveOnPath(candidates, pathEnv = process.env.PATH || process.env.Path || '', delimiter = path.delimiter) {
-  const dirs = String(pathEnv)
-    .split(delimiter)
-    .map((x) => x.trim())
-    .filter(Boolean);
-  for (const dir of dirs) {
-    for (const name of candidates) {
-      const full = path.join(dir, name);
-      if (existsSync(full)) return full;
-    }
+function normalizeCommand(value) {
+  const text = String(value || '').trim();
+  if (!text) return '';
+  if ((text.startsWith('"') && text.endsWith('"')) || (text.startsWith("'") && text.endsWith("'"))) {
+    return text.slice(1, -1).trim();
   }
-  return null;
+  return text;
 }
 
-function resolveNpxBin(platform = process.platform, pathEnv = process.env.PATH || process.env.Path || '') {
-  if (platform !== 'win32') return 'npx';
-  const resolved = resolveOnPath(
-    ['npx.cmd', 'npx.exe', 'npx.bat', 'npx.ps1'],
-    pathEnv,
-    ';',
-  );
-  return resolved || 'npx.cmd';
-}
-
-function resolveNpmBin(platform = process.platform, pathEnv = process.env.PATH || process.env.Path || '') {
-  if (platform !== 'win32') return 'npm';
-  const resolved = resolveOnPath(
-    ['npm.cmd', 'npm.exe', 'npm.bat', 'npm.ps1'],
-    pathEnv,
-    ';',
-  );
-  return resolved || 'npm.cmd';
-}
-
-function runPackageCommand(packageName, commandArgs) {
-  const viaNpx = run(resolveNpxBin(), ['--yes', `--package=${packageName}`, ...commandArgs]);
-  if (viaNpx.status === 0) return viaNpx;
-  return run(resolveNpmBin(), ['exec', '--yes', `--package=${packageName}`, '--', ...commandArgs]);
-}
-
-function resolveWebautoRoot() {
-  const portableRoot = String(process.env.WEBAUTO_PORTABLE_ROOT || process.env.WEBAUTO_ROOT || '').trim();
-  if (portableRoot) return path.join(portableRoot, '.webauto');
-  return path.join(os.homedir(), '.webauto');
-}
-
-function resolveGeoIPPath() {
-  return path.join(resolveWebautoRoot(), 'geoip', 'GeoLite2-City.mmdb');
+function hasValidGeoIPFile(filePath) {
+  try {
+    if (!existsSync(filePath)) return false;
+    const stat = statSync(filePath);
+    return Number(stat?.size || 0) > 1024;
+  } catch {
+    return false;
+  }
 }
 
 function stripAnsi(input) {
@@ -198,7 +169,7 @@ function installCamoufox() {
 }
 
 function checkGeoIPInstalled() {
-  return existsSync(resolveGeoIPPath());
+  return hasValidGeoIPFile(resolveGeoIPPath());
 }
 
 function installGeoIP() {
@@ -240,6 +211,57 @@ async function ensureGeoIPInstalled() {
     };
   }
 }
+
+function resolveOnPath(candidates, pathEnv = process.env.PATH || process.env.Path || '', delimiter = path.delimiter) {
+  const dirs = String(pathEnv)
+    .split(delimiter)
+    .map((x) => x.trim())
+    .filter(Boolean);
+  for (const dir of dirs) {
+    for (const name of candidates) {
+      const full = path.join(dir, name);
+      if (existsSync(full)) return full;
+    }
+  }
+  return null;
+}
+
+function resolveNpxBin(platform = process.platform, pathEnv = process.env.PATH || process.env.Path || '') {
+  if (platform !== 'win32') return 'npx';
+  const resolved = resolveOnPath(
+    ['npx.cmd', 'npx.exe', 'npx.bat', 'npx.ps1'],
+    pathEnv,
+    ';',
+  );
+  return resolved || 'npx.cmd';
+}
+
+function resolveNpmBin(platform = process.platform, pathEnv = process.env.PATH || process.env.Path || '') {
+  if (platform !== 'win32') return 'npm';
+  const resolved = resolveOnPath(
+    ['npm.cmd', 'npm.exe', 'npm.bat', 'npm.ps1'],
+    pathEnv,
+    ';',
+  );
+  return resolved || 'npm.cmd';
+}
+
+function runPackageCommand(packageName, commandArgs) {
+  const viaNpx = run(resolveNpxBin(), ['--yes', `--package=${packageName}`, ...commandArgs]);
+  if (viaNpx.status === 0) return viaNpx;
+  return run(resolveNpmBin(), ['exec', '--yes', `--package=${packageName}`, '--', ...commandArgs]);
+}
+
+function resolveWebautoRoot() {
+  const portableRoot = String(process.env.WEBAUTO_PORTABLE_ROOT || process.env.WEBAUTO_ROOT || '').trim();
+  if (portableRoot) return path.join(portableRoot, '.webauto');
+  return path.join(os.homedir(), '.webauto');
+}
+
+function resolveGeoIPPath() {
+  return path.join(resolveWebautoRoot(), 'geoip', 'GeoLite2-City.mmdb');
+}
+
 
 function uninstallCamoufox() {
   return runCamoufoxCommand(['remove']);
