@@ -3,7 +3,7 @@ import minimist from 'minimist';
 import { spawnSync } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
-import { existsSync, rmSync } from 'node:fs';
+import { existsSync, rmSync, mkdirSync, writeFileSync, renameSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 const DEFAULT_COMMAND_TIMEOUT_MS = (() => {
@@ -205,6 +205,42 @@ function installGeoIP() {
   return runCamoCommand(['init', 'geoip']);
 }
 
+async function installGeoIPDirect() {
+  const target = resolveGeoIPPath();
+  const tmp = `${target}.tmp`;
+  const timeoutMs = (() => {
+    const raw = Number(process.env.WEBAUTO_GEOIP_TIMEOUT_MS || 300000);
+    return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : 300000;
+  })();
+  const url = String(process.env.WEBAUTO_GEOIP_URL || 'https://git.io/GeoLite2-City.mmdb').trim();
+  mkdirSync(path.dirname(target), { recursive: true });
+  const res = await fetch(url, { signal: AbortSignal.timeout(timeoutMs) });
+  if (!res.ok) throw new Error(`geoip_download_http_${res.status}`);
+  const bytes = Buffer.from(await res.arrayBuffer());
+  if (!bytes || bytes.length < 1024) throw new Error('geoip_download_too_small');
+  writeFileSync(tmp, bytes);
+  renameSync(tmp, target);
+  return target;
+}
+
+async function ensureGeoIPInstalled() {
+  const commandResult = installGeoIP();
+  if (checkGeoIPInstalled()) {
+    return { ok: true, source: 'camo', ret: commandResult.ret };
+  }
+  try {
+    await installGeoIPDirect();
+    return { ok: checkGeoIPInstalled(), source: 'direct', ret: commandResult.ret };
+  } catch (error) {
+    return {
+      ok: false,
+      source: 'none',
+      ret: commandResult.ret,
+      detail: error?.message || String(error),
+    };
+  }
+}
+
 function uninstallCamoufox() {
   return runCamoufoxCommand(['remove']);
 }
@@ -302,12 +338,12 @@ async function main() {
       if (!camoufoxInstalled) operationError = operationError || 'camoufox_install_failed';
     }
     if (geoip && !geoipInstalled) {
-      const geoResult = installGeoIP();
+      const geoResult = await ensureGeoIPInstalled();
       actions.geoipInstalled = geoResult.ok;
       geoipInstalled = checkGeoIPInstalled();
       if (!geoipInstalled) {
         operationError = operationError || 'geoip_install_failed';
-        operationDetail = operationDetail || summarizeCommand(geoResult.ret);
+        operationDetail = operationDetail || geoResult.detail || summarizeCommand(geoResult.ret);
       }
     }
   }
@@ -340,12 +376,12 @@ async function main() {
       }
     }
     if (geoip) {
-      const geoResult = installGeoIP();
+      const geoResult = await ensureGeoIPInstalled();
       actions.geoipInstalled = geoResult.ok;
       geoipInstalled = checkGeoIPInstalled();
       if (!geoipInstalled) {
         operationError = operationError || 'geoip_install_failed';
-        operationDetail = operationDetail || summarizeCommand(geoResult.ret);
+        operationDetail = operationDetail || geoResult.detail || summarizeCommand(geoResult.ret);
       }
     }
   }
