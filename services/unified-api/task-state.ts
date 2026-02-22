@@ -37,10 +37,12 @@ export interface TaskState {
   runId: string;
   profileId: string;
   keyword: string;
+  uiTriggerId?: string;
   phase: TaskPhase;
   status: TaskStatus;
   progress: TaskProgress;
   stats: TaskStats;
+  createdAt: number;
   startedAt: number;
   updatedAt: number;
   completedAt?: number;
@@ -71,6 +73,7 @@ class TaskStateRegistry {
     runId: string;
     profileId: string;
     keyword: string;
+    uiTriggerId?: string;
     phase?: TaskPhase;
   }): TaskState {
     const now = Date.now();
@@ -78,6 +81,7 @@ class TaskStateRegistry {
       runId: partial.runId,
       profileId: partial.profileId,
       keyword: partial.keyword,
+      uiTriggerId: partial.uiTriggerId ? String(partial.uiTriggerId).trim() : undefined,
       phase: partial.phase || 'unknown',
       status: 'starting',
       progress: { total: 0, processed: 0, failed: 0 },
@@ -89,6 +93,7 @@ class TaskStateRegistry {
         imagesDownloaded: 0,
         ocrProcessed: 0,
       },
+      createdAt: now,
       startedAt: now,
       updatedAt: now,
       details: {

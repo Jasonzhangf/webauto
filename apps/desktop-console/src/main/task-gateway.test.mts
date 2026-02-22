@@ -85,11 +85,12 @@ test('runEphemeralTask spawns xhs unified command', async () => {
   });
   assert.equal(result.ok, true);
   assert.equal(result.runId, 'rid-1');
+  assert.match(String(result.uiTriggerId || ''), /^ui-\d+-[a-f0-9]+$/);
   const args = calls.spawn[0]?.args || [];
   assert.equal(args.some((item: string) => item.endsWith('/xhs-unified.mjs')), true);
   assert.equal(args.includes('--profile'), true);
   assert.equal(args.includes('xhs-1'), true);
   assert.equal(args.includes('--keyword'), true);
   assert.equal(args.includes('工作服'), true);
+  assert.equal(args.includes('--ui-trigger-id'), true);
 });
-

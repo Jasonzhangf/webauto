@@ -1,7 +1,7 @@
 import electron from 'electron';
 const { app, BrowserWindow, ipcMain, shell, clipboard } = electron;
 
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -160,8 +160,50 @@ class GroupQueue {
 
 const groupQueues = new Map<string, GroupQueue>();
 const runs = new Map<string, { child: ReturnType<typeof spawn>; title: string; startedAt: number; profiles?: string[] }>();
+type RunLifecycleState = 'queued' | 'running' | 'exited';
+type RunLifecycleEntry = {
+  runId: string;
+  state: RunLifecycleState;
+  title: string;
+  queuedAt: number;
+  startedAt?: number;
+  exitedAt?: number;
+  pid?: number;
+  exitCode?: number | null;
+  signal?: string | null;
+  lastError?: string;
+};
+const runLifecycle = new Map<string, RunLifecycleEntry>();
 const trackedRunPids = new Set<number>();
 let appExitCleanupPromise: Promise<void> | null = null;
+
+function setRunLifecycle(runId: string, patch: Partial<RunLifecycleEntry>) {
+  const rid = String(runId || '').trim();
+  if (!rid) return;
+  const current = runLifecycle.get(rid) || {
+    runId: rid,
+    state: 'queued' as RunLifecycleState,
+    title: '',
+    queuedAt: now(),
+  };
+  const next: RunLifecycleEntry = {
+    ...current,
+    ...patch,
+    runId: rid,
+  };
+  runLifecycle.set(rid, next);
+  if (runLifecycle.size > 400) {
+    const rows = Array.from(runLifecycle.values()).sort((a, b) => (a.queuedAt || 0) - (b.queuedAt || 0));
+    const toDrop = rows.slice(0, Math.max(0, rows.length - 200));
+    for (const row of toDrop) runLifecycle.delete(row.runId);
+  }
+}
+
+function getRunLifecycle(runId: string): RunLifecycleEntry | null {
+  const rid = String(runId || '').trim();
+  if (!rid) return null;
+  return runLifecycle.get(rid) || null;
+}
 
 const UI_HEARTBEAT_TIMEOUT_MS = resolveUiHeartbeatTimeoutMs(process.env);
 let lastUiHeartbeatAt = Date.now();
@@ -170,6 +212,17 @@ let heartbeatTimeoutHandled = false;
 let coreServicesStopRequested = false;
 let coreServiceHeartbeatTimer: NodeJS.Timeout | null = null;
 let coreServiceHeartbeatStopped = false;
+const RUN_LOG_DIR = path.join(os.homedir(), '.webauto', 'logs');
+
+function appendRunLog(runId: string, line: string) {
+  const rid = String(runId || '').trim();
+  const text = String(line || '').replace(/\r?\n/g, ' ').trim();
+  if (!rid || !text) return;
+  const logPath = path.join(RUN_LOG_DIR, `ui-run-${rid}.log`);
+  void fs.mkdir(RUN_LOG_DIR, { recursive: true })
+    .then(() => fs.appendFile(logPath, `${text}\n`, 'utf8'))
+    .catch(() => {});
+}
 
 async function writeCoreServiceHeartbeat(status: 'running' | 'stopped') {
   const filePath = String(process.env.WEBAUTO_HEARTBEAT_FILE || DESKTOP_HEARTBEAT_FILE).trim() || DESKTOP_HEARTBEAT_FILE;
@@ -471,13 +524,14 @@ function generateRunId() {
 
 type StreamEventType = 'stdout' | 'stderr';
 
-function createLineEmitter(runId: string, type: StreamEventType) {
+function createLineEmitter(runId: string, type: StreamEventType, onLine?: (line: string) => void) {
   let pending = '';
 
   const emit = (line: string) => {
     const normalized = String(line || '').replace(/\r$/, '');
     if (!normalized) return;
     sendEvent({ type, runId, line: normalized, ts: now() });
+    if (typeof onLine === 'function') onLine(normalized);
   };
 
   return {
@@ -503,7 +557,11 @@ function resolveNodeBin() {
   const explicit = String(process.env.WEBAUTO_NODE_BIN || '').trim();
   if (explicit) return explicit;
   const npmNode = String(process.env.npm_node_execpath || '').trim();
-  if (npmNode) return npmNode;
+  if (npmNode) {
+    const base = path.basename(npmNode).toLowerCase();
+    const isNode = base === 'node' || base === 'node.exe';
+    if (isNode) return npmNode;
+  }
   return process.platform === 'win32' ? 'node.exe' : 'node';
 }
 
@@ -511,6 +569,28 @@ function resolveCwd(input?: string) {
   const raw = String(input || '').trim();
   if (!raw) return REPO_ROOT;
   return path.isAbsolute(raw) ? raw : path.resolve(REPO_ROOT, raw);
+}
+
+function isPidAlive(pid: number): boolean {
+  const target = Number(pid || 0);
+  if (!Number.isFinite(target) || target <= 0) return false;
+  if (process.platform === 'win32') {
+    const ret = spawnSync('tasklist', ['/FI', `PID eq ${target}`], {
+      windowsHide: true,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
+    const out = String(ret.stdout || '');
+    if (!out) return false;
+    const lines = out.split(/\r?\n/g).map((line) => line.trim()).filter(Boolean);
+    return lines.some((line) => line.includes(` ${target}`));
+  }
+  try {
+    process.kill(target, 0);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 let cachedStateMod: any = null;
@@ -532,6 +612,12 @@ async function spawnCommand(spec: SpawnSpec) {
   const q = getQueue(groupKey);
   const cwd = resolveCwd(spec.cwd);
   const args = Array.isArray(spec.args) ? spec.args : [];
+  appendRunLog(runId, `[queued] title=${String(spec.title || '').trim() || '-'} cwd=${cwd}`);
+  setRunLifecycle(runId, {
+    state: 'queued',
+    title: String(spec.title || ''),
+    queuedAt: now(),
+  });
 
   const isXhsRunCommand = args.some((item) => /xhs-(orchestrate|unified)\.mjs$/i.test(String(item || '').replace(/\\/g, '/')));
   const extractProfilesFromArgs = (argv: string[]) => {
@@ -567,25 +653,103 @@ async function spawnCommand(spec: SpawnSpec) {
         let finished = false;
         let exitCode: number | null = null;
         let exitSignal: string | null = null;
+        let orphanCheckTimer: NodeJS.Timeout | null = null;
         const finalize = (code: number | null, signal: string | null) => {
           if (finished) return;
           finished = true;
+          if (orphanCheckTimer) {
+            clearInterval(orphanCheckTimer);
+            orphanCheckTimer = null;
+          }
+          setRunLifecycle(runId, {
+            state: 'exited',
+            exitedAt: now(),
+            exitCode: code,
+            signal,
+          });
           sendEvent({ type: 'exit', runId, exitCode: code, signal, ts: now() });
+          appendRunLog(runId, `[exit] code=${code ?? 'null'} signal=${signal ?? 'null'}`);
           runs.delete(runId);
           resolve();
         };
 
-        const child = spawn(resolveNodeBin(), args, {
-          cwd,
-          env: {
-            ...process.env,
-            WEBAUTO_DAEMON: '1',
-            WEBAUTO_UI_HEARTBEAT: '1',
-            ...(spec.env || {}),
-          },
-          stdio: ['ignore', 'pipe', 'pipe'],
-          windowsHide: true,
-        });
+        let child: ReturnType<typeof spawn>;
+        try {
+          const nodeBin = resolveNodeBin();
+          appendRunLog(runId, `[cmd] ${nodeBin}`);
+          child = spawn(nodeBin, args, {
+            cwd,
+            env: {
+              ...process.env,
+              ...(spec.env || {}),
+            },
+            stdio: ['ignore', 'pipe', 'pipe'],
+            windowsHide: true,
+          });
+        } catch (err: any) {
+          const message = err?.message || String(err);
+          setRunLifecycle(runId, {
+            state: 'exited',
+            exitedAt: now(),
+            exitCode: null,
+            signal: 'spawn_exception',
+            lastError: message,
+          });
+          sendEvent({ type: 'stderr', runId, line: `[spawn-throw] ${message}`, ts: now() });
+          appendRunLog(runId, `[spawn-throw] ${message}`);
+          finalize(null, 'spawn_exception');
+          return;
+        }
+
+        const stdoutLines = createLineEmitter(runId, 'stdout', (line) => appendRunLog(runId, `[stdout] ${line}`));
+        const stderrLines = createLineEmitter(runId, 'stderr', (line) => appendRunLog(runId, `[stderr] ${line}`));
+        try {
+          child.stdout?.on('data', (chunk: Buffer) => {
+            stdoutLines.push(chunk);
+          });
+          child.stderr?.on('data', (chunk: Buffer) => {
+            const text = chunk.toString('utf8');
+            const lines = text.split(/\r?\n/g).map((line) => line.trim()).filter(Boolean);
+            if (lines.length > 0) {
+              setRunLifecycle(runId, { lastError: lines[lines.length - 1] });
+            }
+            stderrLines.push(chunk);
+          });
+          child.on('error', (err: any) => {
+            const message = err?.message || String(err);
+            setRunLifecycle(runId, { lastError: message });
+            sendEvent({ type: 'stderr', runId, line: `[spawn-error] ${message}`, ts: now() });
+            appendRunLog(runId, `[spawn-error] ${message}`);
+            finalize(null, 'error');
+          });
+          child.on('exit', (code, signal) => {
+            exitCode = code;
+            exitSignal = signal;
+            const timer = setTimeout(() => {
+              if (finished) return;
+              untrackRunPid(child);
+              stdoutLines.flush();
+              stderrLines.flush();
+              finalize(exitCode ?? null, exitSignal ?? null);
+            }, 200);
+            if (timer && typeof (timer as any).unref === 'function') {
+              (timer as any).unref();
+            }
+          });
+          child.on('close', (code, signal) => {
+            untrackRunPid(child);
+            stdoutLines.flush();
+            stderrLines.flush();
+            finalize(exitCode ?? code ?? null, exitSignal ?? signal ?? null);
+          });
+        } catch (err: any) {
+          const message = err?.message || String(err);
+          setRunLifecycle(runId, { lastError: message });
+          sendEvent({ type: 'stderr', runId, line: `[spawn-setup-error] ${message}`, ts: now() });
+          appendRunLog(runId, `[spawn-setup-error] ${message}`);
+          finalize(null, 'setup_error');
+          return;
+        }
 
         trackRunPid(child);
         // Track browser process for cleanup
@@ -594,31 +758,33 @@ async function spawnCommand(spec: SpawnSpec) {
         }
 
         runs.set(runId, { child, title: spec.title, startedAt: now(), profiles: requestedProfiles });
+        setRunLifecycle(runId, {
+          state: 'running',
+          startedAt: now(),
+          pid: child.pid || -1,
+          title: String(spec.title || ''),
+        });
         sendEvent({ type: 'started', runId, title: spec.title, pid: child.pid ?? -1, ts: now() });
-
-        const stdoutLines = createLineEmitter(runId, 'stdout');
-        const stderrLines = createLineEmitter(runId, 'stderr');
-
-        child.stdout?.on('data', (chunk: Buffer) => {
-          stdoutLines.push(chunk);
-        });
-        child.stderr?.on('data', (chunk: Buffer) => {
-          stderrLines.push(chunk);
-        });
-        child.on('error', (err: any) => {
-          sendEvent({ type: 'stderr', runId, line: `[spawn-error] ${err?.message || String(err)}`, ts: now() });
-          finalize(null, 'error');
-        });
-        child.on('exit', (code, signal) => {
-          exitCode = code;
-          exitSignal = signal;
-        });
-        child.on('close', (code, signal) => {
-          untrackRunPid(child);
-          stdoutLines.flush();
-          stderrLines.flush();
-          finalize(exitCode ?? code ?? null, exitSignal ?? signal ?? null);
-        });
+        appendRunLog(runId, `[started] pid=${child.pid ?? -1} title=${String(spec.title || '').trim() || '-'}`);
+        if (args.length > 0) {
+          appendRunLog(runId, `[args] ${args.join(' ')}`);
+        }
+        const pid = Number(child.pid || 0);
+        if (pid > 0) {
+          orphanCheckTimer = setInterval(() => {
+            if (finished) return;
+            if (!isPidAlive(pid)) {
+              untrackRunPid(child);
+              stdoutLines.flush();
+              stderrLines.flush();
+              appendRunLog(runId, '[watchdog] child pid disappeared before close/exit event');
+              finalize(exitCode, exitSignal || 'pid_gone');
+            }
+          }, 1000);
+          if (orphanCheckTimer && typeof (orphanCheckTimer as any).unref === 'function') {
+            (orphanCheckTimer as any).unref();
+          }
+        }
       }),
   );
 
@@ -667,6 +833,133 @@ async function runJson(spec: RunJsonSpec) {
   } catch {
     return { ok: true, code, stdout: out, stderr: err };
   }
+}
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, Math.max(0, ms)));
+}
+
+function toEpochMs(value: any): number {
+  const raw = String(value ?? '').trim();
+  if (!raw) return 0;
+  const asNum = Number(raw);
+  if (Number.isFinite(asNum) && asNum > 0) return asNum;
+  const asDate = Date.parse(raw);
+  return Number.isFinite(asDate) ? asDate : 0;
+}
+
+function resolveUnifiedApiBaseUrl() {
+  return String(
+    process.env.WEBAUTO_UNIFIED_API
+    || process.env.WEBAUTO_UNIFIED_URL
+    || 'http://127.0.0.1:7701',
+  ).trim().replace(/\/+$/, '');
+}
+
+async function listUnifiedTasks() {
+  const baseUrl = resolveUnifiedApiBaseUrl();
+  const res = await fetch(`${baseUrl}/api/v1/tasks`, { signal: AbortSignal.timeout(3000) });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const payload = await res.json().catch(() => ({} as any));
+  return Array.isArray(payload?.data) ? payload.data : [];
+}
+
+function pickUnifiedRunId(tasks: any[], options: {
+  profileId: string;
+  keyword: string;
+  uiTriggerId?: string;
+  minTs: number;
+  baselineRunIds?: Set<string>;
+}) {
+  const profileId = String(options.profileId || '').trim();
+  const keyword = String(options.keyword || '').trim();
+  const uiTriggerId = String(options.uiTriggerId || '').trim();
+  const minTs = Number(options.minTs || 0);
+  const baselineRunIds = options.baselineRunIds instanceof Set ? options.baselineRunIds : new Set<string>();
+  const rows = tasks
+    .filter((task) => {
+      const runId = String(task?.runId || task?.id || '').trim();
+      if (!runId) return false;
+      if (baselineRunIds.has(runId)) return false;
+      const phase = String(task?.phase || task?.lastPhase || '').trim().toLowerCase();
+      if (phase !== 'unified') return false;
+      const taskProfile = String(task?.profileId || '').trim();
+      const taskKeyword = String(task?.keyword || '').trim();
+      const taskTrigger = String(
+        task?.uiTriggerId
+        || task?.triggerId
+        || task?.meta?.uiTriggerId
+        || task?.context?.uiTriggerId
+        || '',
+      ).trim();
+      if (uiTriggerId && taskTrigger !== uiTriggerId) return false;
+      if (profileId && taskProfile && taskProfile !== profileId) return false;
+      if (keyword && taskKeyword && taskKeyword !== keyword) return false;
+      const createdTs = toEpochMs(task?.createdAt);
+      const startedTs = toEpochMs(task?.startedAt);
+      const ts = createdTs || startedTs;
+      return ts >= minTs;
+    })
+    .sort((a, b) => {
+      const ta = toEpochMs(a?.createdAt) || toEpochMs(a?.startedAt);
+      const tb = toEpochMs(b?.createdAt) || toEpochMs(b?.startedAt);
+      return tb - ta;
+    });
+  const picked = rows[0] || null;
+  return String(picked?.runId || picked?.id || '').trim();
+}
+
+async function waitForUnifiedRunRegistration(input: {
+  desktopRunId: string;
+  profileId: string;
+  keyword: string;
+  uiTriggerId?: string;
+  baselineRunIds?: Set<string>;
+  timeoutMs?: number;
+}) {
+  const desktopRunId = String(input.desktopRunId || '').trim();
+  const profileId = String(input.profileId || '').trim();
+  const keyword = String(input.keyword || '').trim();
+  const uiTriggerId = String(input.uiTriggerId || '').trim();
+  const timeoutMs = Math.max(2_000, Number(input.timeoutMs || 20_000) || 20_000);
+  const startedAt = Date.now();
+  const minTs = startedAt - 30_000;
+  const baselineRunIds = input.baselineRunIds instanceof Set ? input.baselineRunIds : new Set<string>();
+  let lastFetchError = '';
+
+  while ((Date.now() - startedAt) < timeoutMs) {
+    try {
+      const tasks = await listUnifiedTasks();
+      const unifiedRunId = pickUnifiedRunId(tasks, {
+        profileId,
+        keyword,
+        uiTriggerId,
+        minTs,
+        baselineRunIds,
+      });
+      if (unifiedRunId) return { ok: true, runId: unifiedRunId };
+      lastFetchError = '';
+    } catch (err: any) {
+      lastFetchError = err?.message || String(err);
+    }
+
+    const lifecycle = getRunLifecycle(desktopRunId);
+    if (lifecycle?.state === 'exited') {
+      const detail = lifecycle.lastError || `exit=${lifecycle.exitCode ?? 'null'}`;
+      return { ok: false, error: `任务进程提前退出，未注册 unified runId (${detail})` };
+    }
+    await sleep(500);
+  }
+
+  const lifecycle = getRunLifecycle(desktopRunId);
+  if (lifecycle?.state === 'queued') {
+    return { ok: false, error: '任务仍在排队，未进入运行态（请检查是否有同类任务占用）' };
+  }
+  if (lifecycle?.state === 'running') {
+    return { ok: false, error: '任务进程已启动，但在超时内未注册 unified runId' };
+  }
+  const suffix = lastFetchError ? `: ${lastFetchError}` : '';
+  return { ok: false, error: `未检测到 unified runId${suffix}` };
 }
 
 async function scanResults(input: { downloadRoot?: string }) {
@@ -1023,16 +1316,73 @@ ipcMain.handle('schedule:invoke', async (_evt, input) => (
     input || { action: 'list' },
   )
 ));
-ipcMain.handle('task:runEphemeral', async (_evt, input) => (
-  runEphemeralTask(
+ipcMain.handle('task:runEphemeral', async (_evt, input) => {
+  const payload = input || {};
+  let baselineRunIds = new Set<string>();
+  try {
+    const baselineTasks = await listUnifiedTasks();
+    baselineRunIds = new Set(
+      baselineTasks
+        .map((task: any) => String(task?.runId || task?.id || '').trim())
+        .filter(Boolean),
+    );
+  } catch {
+    baselineRunIds = new Set<string>();
+  }
+
+  const result = await runEphemeralTask(
     {
       repoRoot: REPO_ROOT,
       runJson: (spec) => runJson(spec),
       spawnCommand: (spec) => spawnCommand(spec),
     },
-    input || {},
-  )
-));
+    payload,
+  );
+
+  if (!result?.ok) return result;
+
+  const commandType = String(result?.commandType || payload?.commandType || '').trim().toLowerCase();
+  const desktopRunId = String(result?.runId || '').trim();
+  if (commandType !== 'xhs-unified' || !desktopRunId) {
+    return result;
+  }
+
+  const profileId = String(result?.profile || payload?.argv?.profile || '').trim();
+  const keyword = String(payload?.argv?.keyword || payload?.argv?.k || '').trim();
+  const uiTriggerId = String(result?.uiTriggerId || payload?.argv?.['ui-trigger-id'] || '').trim();
+  appendRunLog(
+    desktopRunId,
+    `[wait-register] profile=${profileId || '-'} keyword=${keyword || '-'} uiTriggerId=${uiTriggerId || '-'}`,
+  );
+  const waited = await waitForUnifiedRunRegistration({
+    desktopRunId,
+    profileId,
+    keyword,
+    uiTriggerId,
+    baselineRunIds,
+    timeoutMs: 20_000,
+  });
+  if (!waited.ok) {
+    appendRunLog(desktopRunId, `[wait-register-failed] ${String(waited.error || 'unknown_error')}`);
+    return {
+      ok: false,
+      error: waited.error,
+      runId: desktopRunId,
+      commandType: result?.commandType || 'xhs-unified',
+      profile: profileId,
+      uiTriggerId,
+    };
+  }
+
+  appendRunLog(desktopRunId, `[wait-register-ok] unifiedRunId=${waited.runId || '-'} uiTriggerId=${uiTriggerId || '-'}`);
+
+  return {
+    ...result,
+    runId: desktopRunId,
+    unifiedRunId: waited.runId,
+    uiTriggerId,
+  };
+});
 
 ipcMain.handle('results:scan', async (_evt, spec: { downloadRoot?: string }) => scanResults(spec || {}));
 ipcMain.handle('fs:listDir', async (_evt, spec: { root: string; recursive?: boolean; maxEntries?: number }) => listDir(spec));

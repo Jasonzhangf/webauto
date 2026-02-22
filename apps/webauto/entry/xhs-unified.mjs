@@ -243,6 +243,7 @@ function createTaskReporter(seed = {}) {
     profileId: String(seed.profileId || 'unknown').trim() || 'unknown',
     keyword: String(seed.keyword || '').trim(),
     phase: 'unified',
+    uiTriggerId: String(seed.uiTriggerId || '').trim(),
   };
   const createdRunIds = new Set();
 
@@ -318,6 +319,7 @@ function buildTemplateOptions(argv, profileId, overrides = {}) {
   const likeKeywords = String(argv['like-keywords'] || '').trim();
   const replyText = String(argv['reply-text'] || '感谢分享，已关注').trim() || '感谢分享，已关注';
   const outputRoot = String(argv['output-root'] || '').trim();
+  const uiTriggerId = String(argv['ui-trigger-id'] || process.env.WEBAUTO_UI_TRIGGER_ID || '').trim();
   const resume = parseBool(argv.resume, false);
   const incrementalMax = parseBool(argv['incremental-max'], true);
   const sharedHarvestPath = String(overrides.sharedHarvestPath ?? argv['shared-harvest-path'] ?? '').trim();
@@ -342,6 +344,7 @@ function buildTemplateOptions(argv, profileId, overrides = {}) {
     inputMode,
     headless,
     ocrCommand,
+    uiTriggerId,
     outputRoot,
     throttle,
     tabCount,
@@ -550,6 +553,7 @@ async function runProfile(spec, argv, baseOverrides = {}) {
   const reporter = createTaskReporter({
     profileId,
     keyword: options.keyword,
+    uiTriggerId: options.uiTriggerId,
   });
   let activeRunId = '';
   const pushTaskSnapshot = (status = 'running') => {

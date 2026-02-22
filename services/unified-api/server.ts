@@ -296,11 +296,13 @@ class UnifiedApiServer {
           if (existing) return existing;
           const profileId = String(seed?.profileId || 'unknown').trim() || 'unknown';
           const keyword = String(seed?.keyword || '').trim();
+          const uiTriggerId = String(seed?.uiTriggerId || seed?.triggerId || '').trim();
           const phase = normalizeTaskPhase(seed?.phase);
           return this.taskRegistry.createTask({
             runId: normalizedRunId,
             profileId,
             keyword,
+            uiTriggerId,
             phase,
           });
         };
@@ -311,11 +313,13 @@ class UnifiedApiServer {
           const phase = normalizeTaskPhase(payload?.phase);
           const profileId = String(payload?.profileId || '').trim();
           const keyword = String(payload?.keyword || '').trim();
+          const uiTriggerId = String(payload?.uiTriggerId || payload?.triggerId || '').trim();
           const details = payload?.details && typeof payload.details === 'object' ? payload.details : undefined;
           const patch: any = {};
           if (phase !== 'unknown') patch.phase = phase;
           if (profileId) patch.profileId = profileId;
           if (keyword) patch.keyword = keyword;
+          if (uiTriggerId) patch.uiTriggerId = uiTriggerId;
           if (details) patch.details = details;
           if (Object.keys(patch).length > 0) {
             this.taskRegistry.updateTask(normalizedRunId, patch);

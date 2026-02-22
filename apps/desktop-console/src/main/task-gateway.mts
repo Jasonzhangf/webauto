@@ -140,6 +140,10 @@ function normalizeWeiboTaskType(commandType: string): string {
   return 'timeline';
 }
 
+function createUiTriggerId(): string {
+  return `ui-${Date.now()}-${Math.random().toString(16).slice(2, 10)}`;
+}
+
 function normalizeSavePayload(payload: ScheduleTaskPayload | undefined) {
   const commandType = asText(payload?.commandType) || 'xhs-unified';
   const argv = (payload?.argv && typeof payload.argv === 'object')
@@ -282,6 +286,7 @@ export async function runEphemeralTask(options: GatewayOptions, input: TaskRunEp
     }
 
     if (commandType === 'xhs-unified') {
+      const uiTriggerId = createUiTriggerId();
       const script = path.join(options.repoRoot, 'apps', 'webauto', 'entry', 'xhs-unified.mjs');
       const ret = await options.spawnCommand({
         title: `xhs unified: ${keyword}`,
@@ -298,9 +303,10 @@ export async function runEphemeralTask(options: GatewayOptions, input: TaskRunEp
           '--fetch-body', String(asBool(argv['fetch-body'], true)),
           '--do-likes', String(asBool(argv['do-likes'], false)),
           '--like-keywords', asText(argv['like-keywords']),
+          '--ui-trigger-id', uiTriggerId,
         ],
       });
-      return { ok: true, runId: asText(ret?.runId), commandType, profile };
+      return { ok: true, runId: asText(ret?.runId), commandType, profile, uiTriggerId };
     }
 
     if (commandType === 'weibo-search') {
