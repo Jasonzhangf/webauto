@@ -150,8 +150,6 @@ function buildDetectScript() {
       const labels = readLabelCandidates(anchor);
       if (labels.some(isSelfLabel)) {
         pushCandidate(matched[1], alias, 'anchor.self');
-      } else {
-        pushCandidate(matched[1], alias, 'anchor');
       }
     }
 
@@ -168,8 +166,6 @@ function buildDetectScript() {
       .find((item) => item.source === 'initial_state.user_info')
       || candidates.find((item) => item.source === 'nav.self')
       || candidates.find((item) => item.source === 'anchor.self')
-      || candidates.find((item) => item.source === 'anchor' && item.alias)
-      || candidates.find((item) => item.source === 'anchor')
       || candidates.find((item) => item.id && item.id.length >= 6)
       || candidates[0]
       || null;
