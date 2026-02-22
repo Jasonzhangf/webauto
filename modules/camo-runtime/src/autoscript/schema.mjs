@@ -126,10 +126,19 @@ function normalizeSubscription(item, index, defaults) {
   const id = toTrimmedString(item.id) || `subscription_${index + 1}`;
   const selector = toTrimmedString(item.selector);
   if (!selector) return null;
+  const pageUrlIncludes = toArray(item.pageUrlIncludes || item.urlIncludes)
+    .map((value) => toTrimmedString(value))
+    .filter(Boolean);
+  const pageUrlExcludes = toArray(item.pageUrlExcludes || item.urlExcludes)
+    .map((value) => toTrimmedString(value))
+    .filter(Boolean);
   const events = toArray(item.events).map((name) => toTrimmedString(name)).filter(Boolean);
   return {
     id,
     selector,
+    visible: item.visible === false ? false : true,
+    pageUrlIncludes,
+    pageUrlExcludes,
     events: events.length > 0 ? events : ['appear', 'exist', 'disappear', 'change'],
     dependsOn: toArray(item.dependsOn).map((x) => toTrimmedString(x)).filter(Boolean),
     retry: normalizeRetry(item.retry, defaults.retry),

@@ -215,6 +215,7 @@ function buildDomSnapshotScript(maxDepth, maxChildren) {
     const root = collect(document.body || document.documentElement, 0, 'root');
     return {
       dom_tree: root,
+      current_url: String(window.location.href || ''),
       viewport: {
         width: viewportWidth,
         height: viewportHeight,
@@ -237,6 +238,9 @@ export async function getDomSnapshotByProfile(profileId, options = {}) {
       width: Number(payload.viewport.width) || 0,
       height: Number(payload.viewport.height) || 0,
     };
+  }
+  if (tree && payload.current_url) {
+    tree.__url = String(payload.current_url);
   }
   return tree;
 }

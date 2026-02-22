@@ -213,6 +213,12 @@ export function buildOpenDetailScript(params = {}) {
       '.note-detail-mask .interaction-container',
       '.note-detail-mask .comments-container',
     ];
+    const searchSelectors = [
+      '.note-item',
+      '.search-result-list',
+      '#search-input',
+      '.feeds-page',
+    ];
     const isVisible = (node) => {
       if (!node || !(node instanceof HTMLElement)) return false;
       const style = window.getComputedStyle(node);
@@ -221,7 +227,16 @@ export function buildOpenDetailScript(params = {}) {
       const rect = node.getBoundingClientRect();
       return rect.width > 1 && rect.height > 1;
     };
-    const isDetailReady = () => detailSelectors.some((selector) => isVisible(document.querySelector(selector)));
+    const hasVisible = (selectors) => selectors.some((selector) => isVisible(document.querySelector(selector)));
+    const isDetailReady = () => {
+      const detailVisible = hasVisible(detailSelectors);
+      if (!detailVisible) return false;
+      const href = String(window.location.href || '');
+      const isDetailUrl = href.includes('/explore/') && !href.includes('/search_result');
+      if (isDetailUrl) return true;
+      const searchVisible = hasVisible(searchSelectors);
+      return !searchVisible;
+    };
 
     next.cover.scrollIntoView({ behavior: 'auto', block: 'center' });
     await new Promise((resolve) => setTimeout(resolve, 140));

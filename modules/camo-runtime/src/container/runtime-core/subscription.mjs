@@ -18,8 +18,22 @@ export async function watchSubscriptions({
       const id = String(item.id || `sub_${index + 1}`);
       const selector = String(item.selector || '').trim();
       if (!selector) return null;
+      const visible = item.visible !== false;
+      const pageUrlIncludes = normalizeArray(item.pageUrlIncludes || item.urlIncludes)
+        .map((value) => String(value || '').trim())
+        .filter(Boolean);
+      const pageUrlExcludes = normalizeArray(item.pageUrlExcludes || item.urlExcludes)
+        .map((value) => String(value || '').trim())
+        .filter(Boolean);
       const events = normalizeArray(item.events).map((name) => String(name).trim()).filter(Boolean);
-      return { id, selector, events: events.length > 0 ? new Set(events) : null };
+      return {
+        id,
+        selector,
+        visible,
+        pageUrlIncludes,
+        pageUrlExcludes,
+        events: events.length > 0 ? new Set(events) : null,
+      };
     })
     .filter(Boolean);
 
@@ -40,9 +54,17 @@ export async function watchSubscriptions({
     try {
       const snapshot = await getDomSnapshotByProfile(resolvedProfile);
       const ts = new Date().toISOString();
+      const currentUrl = String(snapshot?.__url || '');
       for (const item of items) {
         const prev = state.get(item.id) || { exists: false, stateSig: '', appearCount: 0 };
-        const elements = notifier.findElements(snapshot, { css: item.selector });
+        const includeOk = item.pageUrlIncludes.length === 0
+          || item.pageUrlIncludes.some((token) => currentUrl.includes(token));
+        const excludeHit = item.pageUrlExcludes.length > 0
+          && item.pageUrlExcludes.some((token) => currentUrl.includes(token));
+        const pageUrlMatched = includeOk && !excludeHit;
+        const elements = pageUrlMatched
+          ? notifier.findElements(snapshot, { css: item.selector, visible: item.visible })
+          : [];
         const exists = elements.length > 0;
         const stateSig = elements.map((node) => node.path).sort().join(',');
         const changed = stateSig !== prev.stateSig;
