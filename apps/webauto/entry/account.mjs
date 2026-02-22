@@ -46,6 +46,12 @@ function normalizeAlias(input) {
   return value || null;
 }
 
+function normalizePlatform(input, fallback = 'xiaohongshu') {
+  const raw = String(input || fallback).trim().toLowerCase();
+  if (!raw || raw === 'xhs') return 'xiaohongshu';
+  return raw;
+}
+
 async function publishAccountEvent(type, payload) {
   try {
     await publishBusEvent({
@@ -152,7 +158,7 @@ function printHelp() {
 
 Usage:
   webauto account --help
-  webauto account list [--json]
+  webauto account list [--platform <name>] [--json]
   webauto account list --records [--json]
   webauto account add [--platform <name>] [--alias <alias>] [--name <name>] [--username <username>] [--profile <id>] [--fingerprint <id>] [--status pending|active|disabled|archived] [--json]
   webauto account get <id|alias> [--json]
@@ -181,8 +187,9 @@ Examples:
 `);
 }
 
-async function cmdList(jsonMode) {
-  const result = listAccountProfiles();
+async function cmdList(jsonMode, platformArg = '') {
+  const platform = normalizeAlias(platformArg) ? normalizePlatform(platformArg) : '';
+  const result = listAccountProfiles(platform ? { platform } : {});
   output({ ok: true, ...result }, jsonMode);
 }
 
@@ -390,9 +397,13 @@ async function cmdSyncAlias(idOrAlias, argv, jsonMode) {
 async function cmdSync(target, argv, jsonMode) {
   const pendingWhileLogin = parseBoolean(argv['pending-while-login'], false);
   const resolveAlias = parseBoolean(argv['resolve-alias'], false);
+  const platform = normalizePlatform(argv.platform || 'xiaohongshu');
   const value = String(target || '').trim().toLowerCase();
   if (!value || value === 'all') {
-    const rows = listAccountProfiles().profiles;
+    if (platform !== 'xiaohongshu') {
+      throw new Error(`account sync currently supports platform=xiaohongshu only, got: ${platform}`);
+    }
+    const rows = listAccountProfiles({ platform: 'xiaohongshu' }).profiles;
     const profileIds = rows.map((item) => item.profileId);
     const synced = await syncXhsAccountsByProfiles(profileIds, { pendingWhileLogin, resolveAlias });
     output({ ok: true, count: synced.length, profiles: synced }, jsonMode);
@@ -423,7 +434,7 @@ async function main() {
     return;
   }
 
-  if (cmd === 'list') return argv.records ? cmdListRecords(jsonMode) : cmdList(jsonMode);
+  if (cmd === 'list') return argv.records ? cmdListRecords(jsonMode) : cmdList(jsonMode, argv.platform);
   if (cmd === 'add') return cmdAdd(argv, jsonMode);
   if (cmd === 'get') return cmdGet(arg1, jsonMode);
   if (cmd === 'update') return cmdUpdate(arg1, argv, jsonMode);

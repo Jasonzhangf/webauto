@@ -1,4 +1,5 @@
 import { createEl } from '../ui-components.mts';
+import { listAccountProfiles, type UiAccountProfile } from '../account-source.mts';
 import {
   getPlatformForCommandType,
   getTasksForPlatform,
@@ -117,8 +118,9 @@ export function renderTasksPanel(root: HTMLElement, ctx: any) {
         <input id="task-target" type="number" min="1" value="50" style="width: 80px;" />
       </div>
       <div>
-        <label>Profile</label>
-        <input id="task-profile" placeholder="xiaohongshu-batch-1" style="width: 160px;" />
+        <label>Profile（可留空自动选）</label>
+        <input id="task-profile" placeholder="留空自动选择该平台有效账号" style="width: 220px;" />
+        <div id="task-profile-hint" class="muted" style="font-size:11px; margin-top:2px;">推荐: -</div>
       </div>
       <div>
         <label>环境</label>
@@ -241,6 +243,7 @@ export function renderTasksPanel(root: HTMLElement, ctx: any) {
   const keywordInput = formCard.querySelector('#task-keyword') as HTMLInputElement;
   const targetInput = formCard.querySelector('#task-target') as HTMLInputElement;
   const profileInput = formCard.querySelector('#task-profile') as HTMLInputElement;
+  const profileHint = formCard.querySelector('#task-profile-hint') as HTMLDivElement;
   const envSelect = formCard.querySelector('#task-env') as HTMLSelectElement;
   const userIdWrap = formCard.querySelector('#task-user-id-wrap') as HTMLDivElement;
   const userIdInput = formCard.querySelector('#task-user-id') as HTMLInputElement;
@@ -274,6 +277,7 @@ export function renderTasksPanel(root: HTMLElement, ctx: any) {
   const statSaved = statsCard.querySelector('#stat-saved') as HTMLDivElement;
 
   let tasks: ScheduleTask[] = [];
+  let accountRows: UiAccountProfile[] = [];
   const activeRunIds = new Set<string>();
   let unsubscribeActiveRuns: (() => void) | null = null;
 
@@ -282,6 +286,55 @@ export function renderTasksPanel(root: HTMLElement, ctx: any) {
     return parts.filter(Boolean).join('/');
   };
   const quotaScript = joinPath('apps', 'webauto', 'entry', 'lib', 'quota-status.mjs');
+
+  function normalizePlatform(value: string): Platform {
+    const raw = String(value || '').trim().toLowerCase();
+    if (raw === 'weibo') return 'weibo';
+    if (raw === '1688') return '1688';
+    return 'xiaohongshu';
+  }
+
+  function platformToAccountPlatform(value: Platform): string {
+    return value === 'xiaohongshu' ? 'xiaohongshu' : value;
+  }
+
+  async function refreshPlatformAccountRows(platform: Platform) {
+    try {
+      accountRows = await listAccountProfiles(ctx.api, { platform: platformToAccountPlatform(platform) });
+    } catch {
+      accountRows = [];
+    }
+  }
+
+  function getRecommendedProfile(platform: Platform): UiAccountProfile | null {
+    const candidates = accountRows
+      .filter((row) => row.valid)
+      .sort((a, b) => {
+        const ta = Date.parse(String(a.updatedAt || '')) || 0;
+        const tb = Date.parse(String(b.updatedAt || '')) || 0;
+        if (tb !== ta) return tb - ta;
+        return String(a.profileId || '').localeCompare(String(b.profileId || ''));
+      });
+    return candidates[0] || null;
+  }
+
+  function updateProfileHint(platform: Platform) {
+    const recommended = getRecommendedProfile(platform);
+    if (!recommended) {
+      profileHint.textContent = `推荐: 当前平台(${platform})无有效账号，请先到账号页登录`;
+      return;
+    }
+    const label = recommended.alias || recommended.name || recommended.profileId;
+    profileHint.textContent = `推荐: ${label} (${recommended.profileId})`;
+  }
+
+  function maybeAutofillProfile(platform: Platform) {
+    const current = String(profileInput.value || '').trim();
+    if (current) return;
+    const recommended = getRecommendedProfile(platform);
+    if (!recommended) return;
+    profileInput.value = recommended.profileId;
+  }
 
   function getTaskById(taskId: string): ScheduleTask | null {
     const id = String(taskId || '').trim();
@@ -302,7 +355,7 @@ export function renderTasksPanel(root: HTMLElement, ctx: any) {
   }
 
   function updateTaskTypeOptions(preferredType = '') {
-    const platform = platformSelect.value as Platform;
+    const platform = normalizePlatform(platformSelect.value);
     const options = getTasksForPlatform(platform);
     taskTypeSelect.innerHTML = options
       .map((item) => `<option value="${item.type}">${item.icon} ${item.label}</option>`)
@@ -311,6 +364,10 @@ export function renderTasksPanel(root: HTMLElement, ctx: any) {
     const matched = options.find((item) => item.type === target);
     taskTypeSelect.value = matched?.type || options[0]?.type || '';
     updatePlatformFields();
+    void refreshPlatformAccountRows(platform).then(() => {
+      updateProfileHint(platform);
+      maybeAutofillProfile(platform);
+    });
   }
 
   function updatePlatformFields() {
@@ -561,7 +618,6 @@ export function renderTasksPanel(root: HTMLElement, ctx: any) {
 
   function buildCommandArgv(data: TaskFormData): Record<string, any> {
     const argv: Record<string, any> = {
-      profile: data.profileId,
       keyword: data.keyword,
       'max-notes': data.targetCount,
       target: data.targetCount,
@@ -571,6 +627,8 @@ export function renderTasksPanel(root: HTMLElement, ctx: any) {
       'do-likes': data.doLikes,
       'like-keywords': data.likeKeywords,
     };
+    const profileId = String(data.profileId || '').trim();
+    if (profileId) argv.profile = profileId;
     if (String(data.taskType || '').startsWith('weibo-')) {
       if (data.userId) argv['user-id'] = data.userId;
     }
@@ -695,9 +753,10 @@ export function renderTasksPanel(root: HTMLElement, ctx: any) {
       await loadTasks();
       historySelect.value = taskId;
       if (runImmediately) {
+        const resolvedProfile = String(out?.task?.commandArgv?.profile || data.profileId || '').trim();
         await runSavedTask(taskId, {
           taskType: data.taskType,
-          profileId: data.profileId,
+          profileId: resolvedProfile,
           keyword: data.keyword,
           targetCount: data.targetCount,
         });
@@ -730,10 +789,11 @@ export function renderTasksPanel(root: HTMLElement, ctx: any) {
         ctx.setStatus(`started: ${data.taskType}`);
       }
       if (data.taskType === 'xhs-unified' && ctx && typeof ctx === 'object') {
+        const resolvedProfile = String(ret?.profile || data.profileId || '').trim();
         ctx.xhsCurrentRun = {
           runId: runId || null,
           taskId: null,
-          profileId: data.profileId,
+          profileId: resolvedProfile,
           keyword: data.keyword,
           target: data.targetCount,
           startedAt: new Date().toISOString(),

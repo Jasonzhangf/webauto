@@ -464,20 +464,11 @@ function validateCommand(task) {
 
 function validateXhsCommand(argv) {
   const keyword = normalizeText(argv.keyword || argv.k);
-  const profile = normalizeText(argv.profile);
-  const profiles = normalizeText(argv.profiles);
-  const profilepool = normalizeText(argv.profilepool);
   if (!keyword) throw new Error('task command argv missing keyword');
-  if (!profile && !profiles && !profilepool) {
-    throw new Error('task command argv missing profile/profiles/profilepool');
-  }
 }
 
 function validateGenericCommand(argv, platform, commandType = '') {
   const keyword = normalizeText(argv.keyword || argv.k);
-  const profile = normalizeText(argv.profile);
-  const profiles = normalizeText(argv.profiles);
-  const profilepool = normalizeText(argv.profilepool);
   let weiboTaskType = '';
   if (platform === 'weibo') {
     weiboTaskType = String(argv['task-type'] || argv.taskType || '').trim();
@@ -494,9 +485,6 @@ function validateGenericCommand(argv, platform, commandType = '') {
   }
   if (!keyword && (platform !== 'weibo' || weiboTaskType === 'search')) {
     throw new Error('task command argv missing keyword');
-  }
-  if (!profile && !profiles && !profilepool) {
-    throw new Error('task command argv missing profile/profiles/profilepool');
   }
 }
 

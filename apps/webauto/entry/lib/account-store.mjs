@@ -11,6 +11,7 @@ import {
 const INDEX_FILE = 'index.json';
 const META_FILE = 'meta.json';
 const DEFAULT_PLATFORM = 'xiaohongshu';
+const DEFAULT_PROFILE_PREFIX = 'profile';
 const STATUS_ACTIVE = 'active';
 const STATUS_VALID = 'valid';
 const STATUS_INVALID = 'invalid';
@@ -213,21 +214,31 @@ function saveIndex(index) {
   return payload;
 }
 
-function resolveProfilePrefix(platform) {
+function resolveLegacyProfilePrefix(platform) {
   if (platform === 'xiaohongshu') return 'xiaohongshu-batch';
   const slug = toSlug(platform) || 'account';
   return `${slug}-account`;
 }
 
+function resolveProfilePrefix() {
+  return DEFAULT_PROFILE_PREFIX;
+}
+
 function resolveProfileSeq(profileId, platform) {
   const value = String(profileId || '').trim();
   if (!value) return null;
-  const prefix = resolveProfilePrefix(platform);
-  const match = value.match(new RegExp(`^${prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}-([0-9]+)$`));
-  if (!match) return null;
-  const seq = Number(match[1]);
-  if (!Number.isFinite(seq) || seq < 0) return null;
-  return seq;
+  const prefixes = [
+    resolveProfilePrefix(),
+    resolveLegacyProfilePrefix(platform),
+  ].filter(Boolean);
+  for (const prefix of prefixes) {
+    const match = value.match(new RegExp(`^${prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}-([0-9]+)$`));
+    if (!match) continue;
+    const seq = Number(match[1]);
+    if (!Number.isFinite(seq) || seq < 0) return null;
+    return seq;
+  }
+  return null;
 }
 
 function resolveUsedAutoSeq(index, platform) {
@@ -280,23 +291,34 @@ function resolveAccountOrThrow(index, key) {
   throw new Error(`account not found: ${idOrAlias}`);
 }
 
-function resolveAccountByProfile(index, profileId) {
+function resolveBindingKey(profileId, platform) {
+  const pid = String(profileId || '').trim();
+  const pf = normalizePlatform(platform);
+  if (!pid) return '';
+  return `${pid}::${pf}`;
+}
+
+function resolveAccountByProfile(index, profileId, platform = null) {
   const value = String(profileId || '').trim();
   if (!value) return null;
+  const wantedPlatform = platform ? normalizePlatform(platform) : null;
   let matched = null;
   for (const item of index.accounts) {
     if (String(item?.profileId || '').trim() !== value) continue;
+    if (wantedPlatform && normalizePlatform(item?.platform) !== wantedPlatform) continue;
     matched = pickNewerRecord(matched, item);
   }
   return matched;
 }
 
-function resolveAccountByAccountId(index, accountId) {
+function resolveAccountByAccountId(index, accountId, platform = null) {
   const value = normalizeText(accountId);
   if (!value) return null;
+  const wantedPlatform = platform ? normalizePlatform(platform) : null;
   let matched = null;
   for (const item of index.accounts) {
     if (normalizeText(item?.accountId) !== value) continue;
+    if (wantedPlatform && normalizePlatform(item?.platform) !== wantedPlatform) continue;
     matched = pickNewerRecord(matched, item);
   }
   return matched;
@@ -342,39 +364,76 @@ function buildProfileAccountView(profileId, record = null) {
   };
 }
 
-export function listAccountProfiles() {
+export function listAccountProfiles(options = {}) {
   const index = loadIndex();
+  const platformFilter = normalizeText(options?.platform) ? normalizePlatform(options.platform) : null;
   const byAccountId = new Map();
   for (const record of index.accounts) {
+    const recordPlatform = normalizePlatform(record?.platform);
+    if (platformFilter && recordPlatform !== platformFilter) continue;
     const accountId = normalizeText(record?.accountId);
     if (!accountId) continue;
-    byAccountId.set(accountId, pickNewerRecord(byAccountId.get(accountId), record));
+    const key = `${recordPlatform}::${accountId}`;
+    byAccountId.set(key, pickNewerRecord(byAccountId.get(key), record));
   }
   const deduped = [];
   for (const record of index.accounts) {
+    const recordPlatform = normalizePlatform(record?.platform);
+    if (platformFilter && recordPlatform !== platformFilter) continue;
     const accountId = normalizeText(record?.accountId);
     if (accountId) {
-      if (byAccountId.get(accountId) !== record) continue;
+      const key = `${recordPlatform}::${accountId}`;
+      if (byAccountId.get(key) !== record) continue;
     }
     deduped.push(record);
   }
-  const byProfile = new Map();
+  const byBinding = new Map();
   for (const record of deduped) {
     const profileId = normalizeText(record?.profileId);
     if (!profileId) continue;
-    byProfile.set(profileId, pickNewerRecord(byProfile.get(profileId), record));
+    const key = resolveBindingKey(profileId, record?.platform);
+    if (!key) continue;
+    byBinding.set(key, pickNewerRecord(byBinding.get(key), record));
   }
-  const rows = Array.from(byProfile.entries())
-    .sort((a, b) => (Number(a[1]?.seq || 0) - Number(b[1]?.seq || 0)))
-    .map(([profileId, record]) => buildProfileAccountView(profileId, record));
-  const validProfiles = rows.filter((item) => item.valid).map((item) => item.profileId);
-  const invalidProfiles = rows.filter((item) => !item.valid).map((item) => item.profileId);
+  const rows = Array.from(byBinding.values())
+    .sort((a, b) => {
+      const seqCmp = Number(a?.seq || 0) - Number(b?.seq || 0);
+      if (seqCmp !== 0) return seqCmp;
+      const pCmp = String(a?.profileId || '').localeCompare(String(b?.profileId || ''));
+      if (pCmp !== 0) return pCmp;
+      return normalizePlatform(a?.platform).localeCompare(normalizePlatform(b?.platform));
+    })
+    .map((record) => buildProfileAccountView(record?.profileId, record));
+  const validProfilesSet = new Set();
+  const invalidProfilesSet = new Set();
+  const validProfilesByPlatform = {};
+  const invalidProfilesByPlatform = {};
+  for (const row of rows) {
+    const platform = normalizePlatform(row.platform);
+    if (!validProfilesByPlatform[platform]) validProfilesByPlatform[platform] = [];
+    if (!invalidProfilesByPlatform[platform]) invalidProfilesByPlatform[platform] = [];
+    if (row.valid) {
+      validProfilesSet.add(row.profileId);
+      if (!validProfilesByPlatform[platform].includes(row.profileId)) {
+        validProfilesByPlatform[platform].push(row.profileId);
+      }
+    } else {
+      invalidProfilesSet.add(row.profileId);
+      if (!invalidProfilesByPlatform[platform].includes(row.profileId)) {
+        invalidProfilesByPlatform[platform].push(row.profileId);
+      }
+    }
+  }
+  const validProfiles = Array.from(validProfilesSet);
+  const invalidProfiles = Array.from(invalidProfilesSet).filter((profileId) => !validProfilesSet.has(profileId));
   return {
     root: resolveAccountsRoot(),
     count: rows.length,
     profiles: rows,
     validProfiles,
     invalidProfiles,
+    validProfilesByPlatform,
+    invalidProfilesByPlatform,
   };
 }
 
@@ -426,6 +485,39 @@ export async function addAccount(input = {}) {
     status === STATUS_VALID
       ? null
       : (status === STATUS_PENDING ? 'waiting_login' : 'missing_account_id');
+
+  if (accountId) {
+    const existing = resolveAccountByAccountId(index, accountId, platform);
+    if (existing) {
+      const next = {
+        ...existing,
+        platform,
+        status,
+        valid: status === STATUS_VALID,
+        reason,
+        accountId,
+        name: accountId,
+        alias: alias || existing.alias || null,
+        username: normalizeText(input.username) || existing.username || null,
+        profileId,
+        fingerprintId,
+        updatedAt: createdAt,
+        aliasSource: alias ? (normalizeAlias(input.alias) ? 'manual' : 'username') : existing.aliasSource || null,
+      };
+      if (alias) ensureAliasUnique(index.accounts, alias, existing.id);
+      const rowIndex = index.accounts.findIndex((item) => item?.id === existing.id);
+      if (rowIndex < 0) throw new Error(`account not found: ${existing.id}`);
+      index.accounts[rowIndex] = next;
+      saveIndex(index);
+      persistAccountMeta(next);
+      return {
+        root: resolveAccountsRoot(),
+        account: next,
+        deduped: true,
+      };
+    }
+  }
+
   const account = {
     id,
     seq,
@@ -553,8 +645,8 @@ export function upsertProfileAccountState(input = {}) {
   const status = accountId ? STATUS_VALID : (pendingMode ? STATUS_PENDING : STATUS_INVALID);
 
   const index = loadIndex();
-  const existingByProfile = resolveAccountByProfile(index, profileId);
-  const existingByAccountId = accountId ? resolveAccountByAccountId(index, accountId) : null;
+  const existingByProfile = resolveAccountByProfile(index, profileId, platform);
+  const existingByAccountId = accountId ? resolveAccountByAccountId(index, accountId, platform) : null;
   let target = existingByAccountId || existingByProfile || null;
   const purgeIds = new Set();
 
@@ -611,7 +703,11 @@ export function upsertProfileAccountState(input = {}) {
     }
 
     const staleIds = index.accounts
-      .filter((item) => String(item?.profileId || '').trim() === profileId && !hasPersistentAccountId(item))
+      .filter((item) => (
+        String(item?.profileId || '').trim() === profileId
+        && normalizePlatform(item?.platform) === platform
+        && !hasPersistentAccountId(item)
+      ))
       .map((item) => String(item?.id || '').trim())
       .filter(Boolean);
     if (staleIds.length > 0) {
@@ -677,6 +773,7 @@ export function upsertProfileAccountState(input = {}) {
   if (accountId) {
     for (const row of index.accounts) {
       if (!row || row.id === target.id) continue;
+      if (normalizePlatform(row?.platform) !== platform) continue;
       if (normalizeText(row.accountId) === accountId) {
         purgeIds.add(row.id);
       }
@@ -727,6 +824,7 @@ export function markProfileInvalid(profileId, reason = 'login_guard') {
   const id = ensureSafeName(normalizeText(profileId), 'profileId');
   return upsertProfileAccountState({
     profileId: id,
+    platform: DEFAULT_PLATFORM,
     accountId: null,
     reason,
   });
@@ -736,6 +834,7 @@ export function markProfilePending(profileId, reason = 'waiting_login') {
   const id = ensureSafeName(normalizeText(profileId), 'profileId');
   return upsertProfileAccountState({
     profileId: id,
+    platform: DEFAULT_PLATFORM,
     accountId: null,
     status: STATUS_PENDING,
     reason,

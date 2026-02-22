@@ -1,6 +1,15 @@
 import { createEl } from '../ui-components.mts';
 import { listAccountProfiles, type UiAccountProfile } from '../account-source.mts';
 
+function formatProfileTag(profileId: string): string {
+  const id = String(profileId || '').trim();
+  const m = id.match(/^profile-(\d+)$/i);
+  if (!m) return id;
+  const seq = Number(m[1]);
+  if (!Number.isFinite(seq)) return id;
+  return `P${String(seq).padStart(3, '0')}`;
+}
+
 export function renderSetupWizard(root: HTMLElement, ctx: any) {
   root.innerHTML = '';
   const autoSyncTimers = new Map<string, ReturnType<typeof setInterval>>();
@@ -473,8 +482,8 @@ export function renderSetupWizard(root: HTMLElement, ctx: any) {
         style: 'display:flex; justify-content:space-between; align-items:center; padding:8px 12px; border-bottom:1px solid var(--border);'
       }, [
         createEl('div', {}, [
-          createEl('div', { style: 'font-weight:600; margin-bottom:2px;' }, [acc.alias || acc.name || acc.profileId]),
-          createEl('div', { className: 'muted', style: 'font-size:11px;' }, [acc.profileId])
+          createEl('div', { style: 'font-weight:600; margin-bottom:2px;' }, [acc.alias || acc.name || formatProfileTag(acc.profileId)]),
+          createEl('div', { className: 'muted', style: 'font-size:11px;' }, [`${formatProfileTag(acc.profileId)} (${acc.profileId}) · ${String(acc.platform || 'xiaohongshu')}`])
         ]),
         createEl('span', {
           className: `status-badge ${statusClass}`

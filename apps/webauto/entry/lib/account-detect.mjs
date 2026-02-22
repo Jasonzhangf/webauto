@@ -411,7 +411,7 @@ export async function syncXhsAccountByProfile(profileId, options = {}) {
   if (!normalizedProfileId) throw new Error('profileId is required');
   const pendingWhileLogin = options?.pendingWhileLogin === true;
   try {
-    const existing = listAccountProfiles().profiles.find(
+    const existing = listAccountProfiles({ platform: 'xiaohongshu' }).profiles.find(
       (item) => String(item?.profileId || '').trim() === normalizedProfileId,
     );
     const shouldResolveAlias = options?.resolveAlias === true
@@ -443,7 +443,7 @@ export async function syncXhsAccountByProfile(profileId, options = {}) {
     const msg = String(error?.message || error || '');
     if (msg.toLowerCase().includes('operation is insecure')) {
       try {
-        const existing = listAccountProfiles().profiles.find((item) => String(item?.profileId || '').trim() === normalizedProfileId);
+        const existing = listAccountProfiles({ platform: 'xiaohongshu' }).profiles.find((item) => String(item?.profileId || '').trim() === normalizedProfileId);
         if (existing && existing.valid) return existing;
       } catch {
         // ignore fallback lookup

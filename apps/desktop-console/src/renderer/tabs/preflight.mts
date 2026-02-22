@@ -27,7 +27,7 @@ export function renderPreflight(root: HTMLElement, ctx: any) {
 
   const onboardingSummary = createEl('div', { className: 'muted' }, ['正在加载 profile 信息...']) as HTMLDivElement;
   const onboardingTips = createEl('div', { className: 'muted', style: 'font-size:12px; margin-top:6px;' }, [
-    '首次使用建议：输入账号名后，系统自动按 <账号名>-batch-1/2/3 命名；留空默认 xiaohongshu-batch-1/2/3。登录后可设置 alias（账号名）用于区分，默认会自动获取用户名。',
+    '首次使用建议：Profile 使用中性命名 profile-0/1/2；登录后可设置 alias（账号名）用于区分，默认会自动获取用户名。',
   ]) as HTMLDivElement;
   const gotoXhsBtn = createEl('button', { className: 'secondary', type: 'button' }, ['去小红书首页']) as HTMLButtonElement;
   const browserStatus = createEl('div', { className: 'muted' }, ['浏览器状态：未检查']) as HTMLDivElement;
@@ -366,7 +366,7 @@ export function renderPreflight(root: HTMLElement, ctx: any) {
   );
 
   // keep: ProfilePool helper (create profiles + bulk login)
-  const keywordInput = createEl('input', { value: 'xiaohongshu', placeholder: '账号名（可选），系统自动拼接为 <账号名>-batch-1/2/3；留空默认 xiaohongshu-batch' }) as HTMLInputElement;
+  const keywordInput = createEl('input', { value: 'profile', placeholder: 'Profile 前缀（可选），默认 profile，生成如 profile-0/profile-1' }) as HTMLInputElement;
   const ensureCountInput = createEl('input', { value: '0', type: 'number', min: '0' }) as HTMLInputElement;
   const timeoutInput = createEl('input', { value: String(ctx.settings?.timeouts?.loginTimeoutSec || 900), type: 'number', min: '30' }) as HTMLInputElement;
   const keepSession = createEl('input', { type: 'checkbox' }) as HTMLInputElement;

@@ -9,7 +9,7 @@ import { buildXhsUnifiedAutoscript } from '../../../modules/camo-runtime/src/aut
 import { normalizeAutoscript, validateAutoscript } from '../../../modules/camo-runtime/src/autoscript/schema.mjs';
 import { AutoscriptRunner } from '../../../modules/camo-runtime/src/autoscript/runtime.mjs';
 import { syncXhsAccountsByProfiles } from './lib/account-detect.mjs';
-import { markProfileInvalid } from './lib/account-store.mjs';
+import { listAccountProfiles, markProfileInvalid } from './lib/account-store.mjs';
 import { listProfilesForPool } from './lib/profilepool.mjs';
 import { runCamo } from './lib/camo-cli.mjs';
 import { publishBusEvent } from './lib/bus-publish.mjs';
@@ -58,6 +58,19 @@ function parseProfiles(argv) {
   }
   if (profile) return [profile];
   return [];
+}
+
+function resolveDefaultXhsProfiles() {
+  const rows = listAccountProfiles({ platform: 'xiaohongshu' }).profiles || [];
+  const valid = rows
+    .filter((row) => row?.valid === true && String(row?.accountId || '').trim())
+    .sort((a, b) => {
+      const ta = Date.parse(String(a?.updatedAt || '')) || 0;
+      const tb = Date.parse(String(b?.updatedAt || '')) || 0;
+      if (tb !== ta) return tb - ta;
+      return String(a?.profileId || '').localeCompare(String(b?.profileId || ''));
+    });
+  return Array.from(new Set(valid.map((row) => String(row.profileId || '').trim()).filter(Boolean)));
 }
 
 function sanitizeForPath(name, fallback = 'unknown') {
@@ -919,8 +932,18 @@ export async function runUnified(argv, overrides = {}) {
 
   const env = String(argv.env || 'prod').trim() || 'prod';
   const busEnabled = parseBool(argv['bus-events'], false) || process.env.WEBAUTO_BUS_EVENTS === '1';
-  const profiles = parseProfiles(argv);
-  if (profiles.length === 0) throw new Error('missing --profile or --profiles or --profilepool');
+  let profiles = parseProfiles(argv);
+  if (profiles.length === 0) {
+    profiles = resolveDefaultXhsProfiles();
+    if (profiles.length > 0) {
+      console.log(JSON.stringify({
+        event: 'xhs.unified.auto_profiles_selected',
+        platform: 'xiaohongshu',
+        profiles,
+      }));
+    }
+  }
+  if (profiles.length === 0) throw new Error('missing --profile/--profiles/--profilepool and no valid xiaohongshu account profile found');
   await Promise.all(profiles.map((profileId) => ensureProfileSession(profileId)));
   const defaultMaxNotes = parseIntFlag(argv['max-notes'] ?? argv.target, 30, 1);
   const totalNotes = parseNonNegativeInt(argv['total-notes'] ?? argv['total-target'], 0);

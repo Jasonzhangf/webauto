@@ -611,7 +611,7 @@ export function renderConfigPanel(root: HTMLElement, ctx: any) {
 
   async function loadAccounts() {
     try {
-      accountRows = await listAccountProfiles(ctx.api);
+      accountRows = await listAccountProfiles(ctx.api, { platform: 'xiaohongshu' });
       const validRows = accountRows.filter((row) => row.valid);
       const current = String(accountSelect.value || '').trim();
       accountSelect.innerHTML = '<option value="">请选择账户...</option>';

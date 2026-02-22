@@ -89,6 +89,51 @@ function deriveTaskName(commandType: string, argv: Record<string, any>): string 
   return keyword ? `${commandType}-${keyword}` : `${commandType}-${stamp}`;
 }
 
+function getPlatformFromCommandType(commandType: string): 'xiaohongshu' | 'weibo' | '1688' {
+  const value = asText(commandType).toLowerCase();
+  if (value.startsWith('weibo')) return 'weibo';
+  if (value.startsWith('1688')) return '1688';
+  return 'xiaohongshu';
+}
+
+function hasExplicitProfileArg(argv: Record<string, any>): boolean {
+  return Boolean(asText(argv?.profile) || asText(argv?.profiles) || asText(argv?.profilepool));
+}
+
+async function pickDefaultProfileForPlatform(options: GatewayOptions, platform: 'xiaohongshu' | 'weibo' | '1688'): Promise<string> {
+  const accountScript = path.join(options.repoRoot, 'apps', 'webauto', 'entry', 'account.mjs');
+  const ret = await options.runJson({
+    title: `account list --platform ${platform}`,
+    cwd: options.repoRoot,
+    args: [accountScript, 'list', '--platform', platform, '--json'],
+    timeoutMs: 20_000,
+  });
+  if (!ret?.ok) return '';
+  const rows = Array.isArray(ret?.json?.profiles) ? ret.json.profiles : [];
+  const validRows = rows
+    .filter((row: any) => row?.valid === true && asText(row?.accountId))
+    .sort((a: any, b: any) => {
+      const ta = Date.parse(asText(a?.updatedAt) || '') || 0;
+      const tb = Date.parse(asText(b?.updatedAt) || '') || 0;
+      if (tb !== ta) return tb - ta;
+      return asText(a?.profileId).localeCompare(asText(b?.profileId));
+    });
+  return asText(validRows[0]?.profileId) || '';
+}
+
+async function ensureProfileArg(options: GatewayOptions, commandType: string, argv: Record<string, any>): Promise<Record<string, any>> {
+  if (hasExplicitProfileArg(argv)) return argv;
+  const platform = getPlatformFromCommandType(commandType);
+  const profileId = await pickDefaultProfileForPlatform(options, platform);
+  if (!profileId) {
+    throw new Error(`未指定 Profile，且未找到平台(${platform})有效账号。请先在账号页登录并校验后重试。`);
+  }
+  return {
+    ...argv,
+    profile: profileId,
+  };
+}
+
 function normalizeWeiboTaskType(commandType: string): string {
   if (commandType === 'weibo-search') return 'search';
   if (commandType === 'weibo-monitor') return 'monitor';
@@ -111,9 +156,6 @@ function normalizeSavePayload(payload: ScheduleTaskPayload | undefined) {
   const enabled = asBool(payload?.enabled, true);
   const id = asText(payload?.id);
 
-  if (!asText(argv.profile) && !asText(argv.profiles) && !asText(argv.profilepool)) {
-    throw new Error('profile/profiles/profilepool 至少填写一个');
-  }
   if (KEYWORD_REQUIRED_TYPES.has(commandType) && !asText(argv.keyword)) {
     throw new Error('关键词不能为空');
   }
@@ -167,6 +209,7 @@ export async function scheduleInvoke(options: GatewayOptions, input: ScheduleInv
     }
     if (action === 'save') {
       const payload = normalizeSavePayload(input?.payload);
+      payload.argv = await ensureProfileArg(options, payload.commandType, payload.argv);
       const args = payload.id ? ['update', payload.id] : ['add'];
       args.push('--name', payload.name);
       args.push('--enabled', String(payload.enabled));
@@ -226,7 +269,8 @@ export async function scheduleInvoke(options: GatewayOptions, input: ScheduleInv
 export async function runEphemeralTask(options: GatewayOptions, input: TaskRunEphemeralInput) {
   try {
     const commandType = asText(input?.commandType) || 'xhs-unified';
-    const argv = (input?.argv && typeof input.argv === 'object') ? { ...input.argv } : {};
+    let argv = (input?.argv && typeof input.argv === 'object') ? { ...input.argv } : {};
+    argv = await ensureProfileArg(options, commandType, argv);
     const profile = asText(argv.profile);
     const keyword = asText(argv.keyword);
     const target = asPositiveInt(argv['max-notes'] ?? argv.target, 50);
@@ -256,7 +300,7 @@ export async function runEphemeralTask(options: GatewayOptions, input: TaskRunEp
           '--like-keywords', asText(argv['like-keywords']),
         ],
       });
-      return { ok: true, runId: asText(ret?.runId), commandType };
+      return { ok: true, runId: asText(ret?.runId), commandType, profile };
     }
 
     if (commandType === 'weibo-search') {
@@ -274,7 +318,7 @@ export async function runEphemeralTask(options: GatewayOptions, input: TaskRunEp
           '--env', env,
         ],
       });
-      return { ok: true, runId: asText(ret?.runId), commandType };
+      return { ok: true, runId: asText(ret?.runId), commandType, profile };
     }
 
     return { ok: false, error: `当前任务类型暂不支持仅执行(不保存): ${commandType}` };

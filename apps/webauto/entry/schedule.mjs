@@ -22,6 +22,7 @@ import {
   resolveSchedulesRoot,
   updateScheduleTask,
 } from './lib/schedule-store.mjs';
+import { listAccountProfiles } from './lib/account-store.mjs';
 
 let xhsRunnerPromise = null;
 let weiboRunnerPromise = null;
@@ -68,6 +69,46 @@ function parseJson(text, fallback = {}) {
   if (text === undefined || text === null || text === '') return fallback;
   const raw = String(text);
   return JSON.parse(raw.replace(/^\uFEFF/, ''));
+}
+
+function normalizePlatformByCommandType(commandType) {
+  const value = String(commandType || '').trim().toLowerCase();
+  if (value.startsWith('weibo')) return 'weibo';
+  if (value.startsWith('1688')) return '1688';
+  return 'xiaohongshu';
+}
+
+function hasProfileArg(argv = {}) {
+  return Boolean(
+    String(argv?.profile || '').trim()
+    || String(argv?.profiles || '').trim()
+    || String(argv?.profilepool || '').trim(),
+  );
+}
+
+function pickAutoProfile(platform) {
+  const rows = listAccountProfiles({ platform }).profiles || [];
+  const validRows = rows
+    .filter((row) => row?.valid === true && String(row?.accountId || '').trim())
+    .sort((a, b) => {
+      const ta = Date.parse(String(a?.updatedAt || '')) || 0;
+      const tb = Date.parse(String(b?.updatedAt || '')) || 0;
+      if (tb !== ta) return tb - ta;
+      return String(a?.profileId || '').localeCompare(String(b?.profileId || ''));
+    });
+  return String(validRows[0]?.profileId || '').trim();
+}
+
+function ensureProfileArgForTask(commandType, commandArgv = {}) {
+  const argv = commandArgv && typeof commandArgv === 'object' ? { ...commandArgv } : {};
+  if (hasProfileArg(argv)) return argv;
+  const platform = normalizePlatformByCommandType(commandType);
+  const profile = pickAutoProfile(platform);
+  if (!profile) {
+    throw new Error(`missing profile/profiles/profilepool and no valid account for platform=${platform}`);
+  }
+  argv.profile = profile;
+  return argv;
 }
 
 function safeReadJsonFile(filePath) {
@@ -265,14 +306,15 @@ async function executeTask(task, options = {}) {
   const quietExecutors = options.quietExecutors === true;
   try {
     const commandType = String(task?.commandType || 'xhs-unified').trim();
+    const commandArgv = ensureProfileArgForTask(commandType, task?.commandArgv || {});
     const result = await withConsoleSilenced(quietExecutors, async () => {
       if (commandType === 'xhs-unified') {
         const runUnified = await getXhsRunner();
-        return runUnified(task.commandArgv || {});
+        return runUnified(commandArgv);
       }
       if (commandType.startsWith('weibo-')) {
         const runWeiboUnified = await getWeiboRunner();
-        return runWeiboUnified(task.commandArgv || {});
+        return runWeiboUnified(commandArgv);
       }
       if (commandType === '1688-search') {
         throw new Error(`executor_not_implemented: ${commandType}`);

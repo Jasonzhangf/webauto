@@ -4,7 +4,7 @@ import { runWorkflowById } from '../../../dist/modules/workflow/src/runner.js';
 import { pathToFileURL } from 'node:url';
 
 const WEIBO_HOME_URL = 'https://www.weibo.com';
-const DEFAULT_PROFILE = 'xiaohongshu-batch-1'; // Use shared profile for now
+const DEFAULT_PROFILE = 'profile-0';
 
 async function runCommand(argv) {
   const profile = String(argv.profile || DEFAULT_PROFILE).trim();
@@ -106,7 +106,7 @@ if (isDirectExec) {
 export async function runWeiboUnified(argv) {
   const workflowId = String(argv.workflow || 'weibo-search-v1').trim();
   const keyword = String(argv.keyword || argv.k || '').trim();
-  const profile = String(argv.profile || 'xiaohongshu-batch-1').trim();
+  const profile = String(argv.profile || DEFAULT_PROFILE).trim();
   const targetCount = Number(argv['max-notes'] || argv.target || argv['max-notes'] || 50);
   const maxComments = Number(argv['max-comments'] || 0);
   const env = String(argv.env || 'debug').trim();

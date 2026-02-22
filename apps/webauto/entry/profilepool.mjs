@@ -221,14 +221,15 @@ async function main() {
 
   if (!cmd || cmd === 'help' || cmd === '--help' || cmd === '-h') {
     console.log('Usage: node apps/webauto/entry/profilepool.mjs <list|add|login|login-profile|goto-profile|migrate-fingerprints> ... [--json]');
+    console.log('Default profile prefix: profile (e.g. profile-0, profile-1)');
     return;
   }
 
   if (cmd === 'list') return cmdList(arg1, jsonMode);
-  if (cmd === 'add') return cmdAdd(arg1 || 'xiaohongshu-batch', jsonMode);
+  if (cmd === 'add') return cmdAdd(arg1 || 'profile', jsonMode);
   if (cmd === 'login-profile') return cmdLoginProfile(arg1, argv, jsonMode);
   if (cmd === 'goto-profile') return cmdGotoProfile(arg1, argv, jsonMode);
-  if (cmd === 'login') return cmdLogin(arg1 || 'xiaohongshu-batch', argv, jsonMode);
+  if (cmd === 'login') return cmdLogin(arg1 || 'profile', argv, jsonMode);
   if (cmd === 'migrate-fingerprints') return cmdMigrateFingerprints(jsonMode);
 
   throw new Error(`unknown command: ${cmd}`);

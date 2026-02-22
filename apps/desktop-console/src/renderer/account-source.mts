@@ -11,6 +11,10 @@ export type UiAccountProfile = {
   updatedAt: string | null;
 };
 
+export type ListAccountProfileOptions = {
+  platform?: string;
+};
+
 function asText(value: unknown): string | null {
   const text = String(value ?? '').trim();
   return text || null;
@@ -33,12 +37,13 @@ function normalizeRow(row: any): UiAccountProfile | null {
   };
 }
 
-export async function listAccountProfiles(api: any): Promise<UiAccountProfile[]> {
+export async function listAccountProfiles(api: any, options: ListAccountProfileOptions = {}): Promise<UiAccountProfile[]> {
   const script = api.pathJoin('apps', 'webauto', 'entry', 'account.mjs');
+  const platform = asText(options?.platform);
   const out = await api.cmdRunJson({
     title: 'account list',
     cwd: '',
-    args: [script, 'list', '--json'],
+    args: [script, 'list', ...(platform ? ['--platform', platform] : []), '--json'],
     timeoutMs: 20_000,
   });
   const rows = Array.isArray(out?.json?.profiles) ? out.json.profiles : [];

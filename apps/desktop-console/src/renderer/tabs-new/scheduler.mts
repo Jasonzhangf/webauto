@@ -1,4 +1,5 @@
 import { createEl } from '../ui-components.mts';
+import { listAccountProfiles, type UiAccountProfile } from '../account-source.mts';
 import {
   inferUiScheduleEditorState,
   parseTaskRows,
@@ -108,8 +109,9 @@ export function renderSchedulerPanel(root: HTMLElement, ctx: any) {
     </div>
     <div class="row">
       <div>
-        <label>Profile</label>
-        <input id="scheduler-profile" placeholder="xiaohongshu-batch-1" style="width: 220px;" />
+        <label>Profile（可留空自动选）</label>
+        <input id="scheduler-profile" placeholder="留空自动选择该平台有效账号" style="width: 260px;" />
+        <div id="scheduler-profile-hint" class="muted" style="font-size:11px; margin-top:2px;">推荐: -</div>
       </div>
       <div>
         <label>关键词</label>
@@ -199,6 +201,7 @@ export function renderSchedulerPanel(root: HTMLElement, ctx: any) {
   const runAtInput = root.querySelector('#scheduler-runat') as HTMLInputElement;
   const maxRunsInput = root.querySelector('#scheduler-max-runs') as HTMLInputElement;
   const profileInput = root.querySelector('#scheduler-profile') as HTMLInputElement;
+  const profileHint = root.querySelector('#scheduler-profile-hint') as HTMLDivElement;
   const keywordInput = root.querySelector('#scheduler-keyword') as HTMLInputElement;
   const userIdWrap = root.querySelector('#scheduler-user-id-wrap') as HTMLDivElement;
   const userIdInput = root.querySelector('#scheduler-user-id') as HTMLInputElement;
@@ -214,6 +217,7 @@ export function renderSchedulerPanel(root: HTMLElement, ctx: any) {
   const resetBtn = root.querySelector('#scheduler-reset-btn') as HTMLButtonElement;
 
   let tasks: ScheduleTask[] = [];
+  let accountRows: UiAccountProfile[] = [];
   let daemonRunId = '';
   let unsubscribeCmd: (() => void) | null = null;
   let pendingFocusTaskId = String(ctx?.activeTaskConfigId || '').trim();
@@ -261,6 +265,40 @@ export function renderSchedulerPanel(root: HTMLElement, ctx: any) {
       taskTypeSelect.value = taskTypeSelect.options[0]?.value || '';
     }
     updatePlatformFields();
+    void refreshPlatformAccounts(platform);
+  }
+
+  function normalizePlatform(value: string): 'xiaohongshu' | 'weibo' | '1688' {
+    const raw = String(value || '').trim().toLowerCase();
+    if (raw === 'weibo') return 'weibo';
+    if (raw === '1688') return '1688';
+    return 'xiaohongshu';
+  }
+
+  async function refreshPlatformAccounts(platformValue: string) {
+    const platform = normalizePlatform(platformValue);
+    try {
+      accountRows = await listAccountProfiles(ctx.api, { platform: platform === 'xiaohongshu' ? 'xiaohongshu' : platform });
+    } catch {
+      accountRows = [];
+    }
+    const recommended = accountRows
+      .filter((row) => row.valid)
+      .sort((a, b) => {
+        const ta = Date.parse(String(a.updatedAt || '')) || 0;
+        const tb = Date.parse(String(b.updatedAt || '')) || 0;
+        if (tb !== ta) return tb - ta;
+        return String(a.profileId || '').localeCompare(String(b.profileId || ''));
+      })[0];
+    if (!recommended) {
+      profileHint.textContent = `推荐: 当前平台(${platform})无有效账号`;
+      return;
+    }
+    const label = recommended.alias || recommended.name || recommended.profileId;
+    profileHint.textContent = `推荐: ${label} (${recommended.profileId})`;
+    if (!String(profileInput.value || '').trim()) {
+      profileInput.value = recommended.profileId;
+    }
   }
 
   function updatePlatformFields() {
@@ -302,7 +340,6 @@ export function renderSchedulerPanel(root: HTMLElement, ctx: any) {
       : null;
     const commandType = String(taskTypeSelect.value || 'xhs-unified').trim();
     const argv: Record<string, any> = {
-      profile: profileInput.value.trim(),
       keyword: keywordInput.value.trim(),
       'max-notes': Number(maxNotesInput.value || 50) || 50,
       env: envSelect.value,
@@ -312,6 +349,8 @@ export function renderSchedulerPanel(root: HTMLElement, ctx: any) {
       headless: headlessInput.checked,
       'dry-run': dryRunInput.checked,
     };
+    const profileValue = profileInput.value.trim();
+    if (profileValue) argv.profile = profileValue;
     if (commandType.startsWith('weibo')) {
       argv['user-id'] = userIdInput.value.trim();
     }

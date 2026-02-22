@@ -47,6 +47,15 @@ function toTimestamp(value: string | null | undefined): number | null {
   return parsed;
 }
 
+function formatProfileTag(profileId: string): string {
+  const id = String(profileId || '').trim();
+  const m = id.match(/^profile-(\d+)$/i);
+  if (!m) return id;
+  const seq = Number(m[1]);
+  if (!Number.isFinite(seq)) return id;
+  return `P${String(seq).padStart(3, '0')}`;
+}
+
 export function renderAccountManager(root: HTMLElement, ctx: any) {
   root.innerHTML = '';
   const autoSyncTimers = new Map<string, ReturnType<typeof setInterval>>();
@@ -187,7 +196,11 @@ export function renderAccountManager(root: HTMLElement, ctx: any) {
         platform: normalizePlatform(row.platform),
         statusView: row.valid ? 'valid' : (row.status === 'pending' ? 'pending' : 'expired'),
         lastCheckAt: toTimestamp(row.updatedAt),
-      }));
+      })).sort((a, b) => {
+        const p = String(a.profileId || '').localeCompare(String(b.profileId || ''));
+        if (p !== 0) return p;
+        return String(a.platform || '').localeCompare(String(b.platform || ''));
+      });
 
       renderAccountList();
     } catch (err) {
@@ -228,11 +241,11 @@ export function renderAccountManager(root: HTMLElement, ctx: any) {
       const nameDiv = createEl('div', { style: 'min-width: 0; flex: 1;' }, [
         createEl('div', { className: 'account-name', style: 'display: flex; gap: 6px; align-items: center;' }, [
           createEl('span', { style: 'font-size: 13px;' }, [platform.icon]),
-          createEl('span', {}, [acc.alias || acc.name || acc.profileId]),
+          createEl('span', {}, [acc.alias || acc.name || formatProfileTag(acc.profileId)]),
           createEl('span', { style: 'font-size: 11px; color: var(--text-3);' }, [platform.label]),
         ]),
         createEl('div', { className: 'account-alias', style: 'font-size: 11px; color: var(--text-3);' }, [
-          `profile: ${acc.profileId} · 上次检查: ${formatTs(acc.lastCheckAt)}`
+          `profile: ${formatProfileTag(acc.profileId)} (${acc.profileId}) · 上次检查: ${formatTs(acc.lastCheckAt)}`
         ])
       ]);
 
