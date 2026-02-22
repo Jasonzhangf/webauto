@@ -40,6 +40,105 @@ export const XHS_CHECKPOINTS = {
   ],
 };
 
+function extractEvaluateResult(payload) {
+  if (!payload || typeof payload !== 'object') return {};
+  if (payload.result && typeof payload.result === 'object') return payload.result;
+  if (payload.data && typeof payload.data === 'object') return payload.data;
+  return payload;
+}
+
+async function detectXhsLoginSignal(profileId) {
+  const script = `(() => {
+    const normalize = (value) => String(value || '').replace(/\\s+/g, ' ').trim();
+    const selectors = ${JSON.stringify(XHS_CHECKPOINTS.login_guard)};
+    const isVisible = (node) => {
+      if (!(node instanceof HTMLElement)) return false;
+      const style = window.getComputedStyle(node);
+      if (!style) return false;
+      if (style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity || '1') === 0) return false;
+      const rect = node.getBoundingClientRect();
+      return rect.width > 0 && rect.height > 0;
+    };
+    const nodes = selectors.flatMap((selector) => Array.from(document.querySelectorAll(selector)));
+    const visibleNodes = nodes.filter((node) => isVisible(node));
+    const guardText = visibleNodes
+      .slice(0, 10)
+      .map((node) => normalize(node.textContent || ''))
+      .filter(Boolean)
+      .join(' ');
+    const hasLoginText = /登录|扫码|验证码|手机号|请先登录|注册|sign\\s*in/i.test(guardText);
+    const loginUrl = /\\/login|signin|passport|account\\/login/i.test(String(location.href || ''));
+
+    let accountId = '';
+    try {
+      const initialState = (typeof window !== 'undefined' && window.__INITIAL_STATE__) || null;
+      const rawUserInfo = initialState && initialState.user && initialState.user.userInfo
+        ? (
+          (initialState.user.userInfo._rawValue && typeof initialState.user.userInfo._rawValue === 'object' && initialState.user.userInfo._rawValue)
+          || (initialState.user.userInfo._value && typeof initialState.user.userInfo._value === 'object' && initialState.user.userInfo._value)
+          || (typeof initialState.user.userInfo === 'object' ? initialState.user.userInfo : null)
+        )
+        : null;
+      accountId = normalize(rawUserInfo?.user_id || rawUserInfo?.userId || '');
+    } catch {}
+
+    if (!accountId) {
+      const selfAnchor = Array.from(document.querySelectorAll('a[href*="/user/profile/"]'))
+        .find((node) => {
+          const text = normalize(node.textContent || '');
+          const title = normalize(node.getAttribute('title') || '');
+          const aria = normalize(node.getAttribute('aria-label') || '');
+          return ['我', '我的', '个人主页', '我的主页'].includes(text)
+            || ['我', '我的', '个人主页', '我的主页'].includes(title)
+            || ['我', '我的', '个人主页', '我的主页'].includes(aria);
+        });
+      if (selfAnchor) {
+        const href = normalize(selfAnchor.getAttribute('href') || '');
+        const matched = href.match(/\\/user\\/profile\\/([^/?#]+)/);
+        if (matched && matched[1]) accountId = normalize(matched[1]);
+      }
+    }
+
+    const hasAccountSignal = Boolean(accountId);
+    const hasLoginGuard = ((visibleNodes.length > 0 && hasLoginText) || loginUrl) && !hasAccountSignal;
+    return {
+      hasLoginGuard,
+      hasLoginText,
+      hasAccountSignal,
+      accountId: accountId || null,
+      visibleGuardCount: visibleNodes.length,
+      guardTextPreview: guardText.slice(0, 240),
+      loginUrl,
+    };
+  })()`;
+
+  try {
+    const ret = await callAPI('evaluate', { profileId, script });
+    const data = extractEvaluateResult(ret);
+    return {
+      hasLoginGuard: data?.hasLoginGuard === true,
+      hasLoginText: data?.hasLoginText === true,
+      hasAccountSignal: data?.hasAccountSignal === true,
+      accountId: String(data?.accountId || '').trim() || null,
+      visibleGuardCount: Math.max(0, Number(data?.visibleGuardCount || 0) || 0),
+      guardTextPreview: String(data?.guardTextPreview || '').trim(),
+      loginUrl: data?.loginUrl === true,
+      ok: true,
+    };
+  } catch {
+    return {
+      hasLoginGuard: false,
+      hasLoginText: false,
+      hasAccountSignal: false,
+      accountId: null,
+      visibleGuardCount: 0,
+      guardTextPreview: '',
+      loginUrl: false,
+      ok: false,
+    };
+  }
+}
+
 export async function detectCheckpoint({ profileId, platform = 'xiaohongshu' }) {
   if (platform !== 'xiaohongshu') {
     return asErrorPayload('UNSUPPORTED_PLATFORM', `Unsupported platform: ${platform}`);
@@ -72,10 +171,16 @@ export async function detectCheckpoint({ profileId, platform = 'xiaohongshu' }) 
     addCount('login_guard', XHS_CHECKPOINTS.login_guard);
     addCount('risk_control', XHS_CHECKPOINTS.risk_control);
 
+    const loginSignal = await detectXhsLoginSignal(resolvedProfile);
+    const loginGuardBySelector = signals.some((item) => item.startsWith('login_guard:'));
+    const loginGuardConfirmed = loginSignal.ok
+      ? loginSignal.hasLoginGuard
+      : loginGuardBySelector;
+
     let checkpoint = 'unknown';
     if (!url || !url.includes('xiaohongshu.com')) checkpoint = 'offsite';
     else if (isCheckpointRiskUrl(url)) checkpoint = 'risk_control';
-    else if (signals.some((item) => item.startsWith('login_guard:'))) checkpoint = 'login_guard';
+    else if (loginGuardConfirmed) checkpoint = 'login_guard';
     else if (signals.some((item) => item.startsWith('comments_ready:'))) checkpoint = 'comments_ready';
     else if (signals.some((item) => item.startsWith('detail_ready:'))) checkpoint = 'detail_ready';
     else if (signals.some((item) => item.startsWith('search_ready:'))) checkpoint = 'search_ready';
@@ -92,6 +197,7 @@ export async function detectCheckpoint({ profileId, platform = 'xiaohongshu' }) 
         url,
         signals,
         selectorHits: counter,
+        loginSignal,
       },
     };
   } catch (err) {
