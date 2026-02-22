@@ -126,14 +126,6 @@ function buildDetectScript() {
       }
     }
 
-    const searchHistoryKey = Object.keys(localStorage || {}).find((key) => String(key || '').startsWith('xhs-pc-search-history-'));
-    if (searchHistoryKey) {
-      const matched = String(searchHistoryKey).match(/^xhs-pc-search-history-(.+)$/);
-      if (matched && matched[1]) {
-        pushCandidate(matched[1], null, 'localStorage.search_history');
-      }
-    }
-
     const selfNavEntry = Array.from(document.querySelectorAll('a[href*="/user/profile/"]'))
       .find((node) => {
         const labels = readLabelCandidates(node);
@@ -172,15 +164,13 @@ function buildDetectScript() {
       }
     }
 
-    const strongCandidates = candidates.filter((item) => item.source !== 'localStorage.search_history');
-    const best = strongCandidates
+    const best = candidates
       .find((item) => item.source === 'initial_state.user_info')
-      || strongCandidates.find((item) => item.source === 'nav.self')
-      || strongCandidates.find((item) => item.source === 'anchor.self')
-      || strongCandidates.find((item) => item.source === 'anchor' && item.alias)
-      || strongCandidates.find((item) => item.source === 'anchor')
-      || strongCandidates.find((item) => item.id && item.id.length >= 6)
-      || candidates.find((item) => item.source === 'localStorage.search_history')
+      || candidates.find((item) => item.source === 'nav.self')
+      || candidates.find((item) => item.source === 'anchor.self')
+      || candidates.find((item) => item.source === 'anchor' && item.alias)
+      || candidates.find((item) => item.source === 'anchor')
+      || candidates.find((item) => item.id && item.id.length >= 6)
       || candidates[0]
       || null;
     let alias = best ? best.alias : null;
@@ -394,14 +384,13 @@ export async function detectXhsAccountIdentity(profileId, options = {}) {
   let detected = await runDetect();
   const shouldRetry = (
     !detected.accountId
-    || detected.source === 'localStorage.search_history'
     || !detected.alias
     || detected.hasLoginGuard
   );
   if (shouldRetry) {
     await sleep(1200);
     const retry = await runDetect();
-    if (retry.accountId && (!detected.accountId || detected.source === 'localStorage.search_history')) {
+    if (retry.accountId && !detected.accountId) {
       detected.accountId = retry.accountId;
       detected.source = retry.source || detected.source;
       detected.candidates = retry.candidates;

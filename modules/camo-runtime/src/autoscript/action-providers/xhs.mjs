@@ -323,14 +323,6 @@ function buildAssertLoggedInScript(params = {}) {
       }
     }
 
-    if (!accountId) {
-      const searchHistoryKey = Object.keys(localStorage || {}).find((key) => String(key || '').startsWith('xhs-pc-search-history-'));
-      if (searchHistoryKey) {
-        const matched = String(searchHistoryKey).match(/^xhs-pc-search-history-(.+)$/);
-        if (matched && matched[1]) accountId = normalize(matched[1]);
-      }
-    }
-
     const hasAccountSignal = Boolean(accountId);
     const hasLoginGuard = ((visibleGuardNodes.length > 0 && hasLoginText) || loginUrl) && !hasAccountSignal;
 
