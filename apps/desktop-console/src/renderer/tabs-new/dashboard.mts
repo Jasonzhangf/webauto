@@ -625,12 +625,12 @@ export function renderDashboard(root: HTMLElement, ctx: any) {
 
   function pickTaskFromList(tasks: any[]) {
     const target = activeRunId;
-    const running = tasks.find((item) => isRunningStatus(item?.status));
     const sorted = [...tasks].sort((a, b) => {
       const aTs = Number(a?.updatedAt ?? a?.completedAt ?? a?.startedAt ?? 0) || 0;
       const bTs = Number(b?.updatedAt ?? b?.completedAt ?? b?.startedAt ?? 0) || 0;
       return bTs - aTs;
     });
+    const running = sorted.find((item) => isRunningStatus(item?.status)) || null;
     const latest = sorted[0] || null;
     if (target) {
       const matched = tasks.find((item) => String(item?.runId || '').trim() === target);
