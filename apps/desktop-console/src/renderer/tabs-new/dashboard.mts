@@ -632,17 +632,20 @@ export function renderDashboard(root: HTMLElement, ctx: any) {
     });
     const running = sorted.find((item) => isRunningStatus(item?.status)) || null;
     const latest = sorted[0] || null;
+    const launchingFresh = Number.isFinite(contextStartedAtMs)
+      && contextStartedAtMs > 0
+      && (Date.now() - contextStartedAtMs) < 120_000;
     if (target) {
       const matched = tasks.find((item) => String(item?.runId || '').trim() === target);
       if (matched) {
         return matched;
       }
+      if (launchingFresh) {
+        return null;
+      }
       if (running) return running;
       return null;
     }
-    const launchingFresh = Number.isFinite(contextStartedAtMs)
-      && contextStartedAtMs > 0
-      && (Date.now() - contextStartedAtMs) < 120_000;
     if (launchingFresh) {
       return running || null;
     }
