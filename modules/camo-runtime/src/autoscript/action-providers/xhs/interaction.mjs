@@ -59,12 +59,10 @@ function buildCollectLikeTargetsScript() {
       const className = String(node.className || '').toLowerCase();
       const ariaPressed = String(node.getAttribute?.('aria-pressed') || '').toLowerCase();
       const text = String(node.textContent || '');
-      const useNode = node.querySelector('use');
-      const useHref = String(useNode?.getAttribute?.('xlink:href') || useNode?.getAttribute?.('href') || '').toLowerCase();
-      return className.includes('like-active')
+      const hasActiveClass = /(?:^|\\s)like-active(?:\\s|$)/.test(className);
+      return hasActiveClass
         || ariaPressed === 'true'
-        || /已赞|取消赞/.test(text)
-        || useHref.includes('liked');
+        || /已赞|取消赞/.test(text);
     };
     const readText = (item, selectors) => {
       for (const selector of selectors) {
@@ -164,7 +162,7 @@ function buildCollectLikeTargetsScript() {
   })()`;
 }
 
-function buildClickLikeByIndexScript(index, highlight) {
+function buildClickLikeByIndexScript(index, highlight, skipAlreadyCheck = false) {
   return `(async () => {
     const idx = Number(${JSON.stringify(index)});
     const items = Array.from(document.querySelectorAll('.comment-item'));
@@ -190,18 +188,16 @@ function buildClickLikeByIndexScript(index, highlight) {
       const className = String(node.className || '').toLowerCase();
       const ariaPressed = String(node.getAttribute?.('aria-pressed') || '').toLowerCase();
       const text = String(node.textContent || '');
-      const useNode = node.querySelector('use');
-      const useHref = String(useNode?.getAttribute?.('xlink:href') || useNode?.getAttribute?.('href') || '').toLowerCase();
-      return className.includes('like-active')
+      const hasActiveClass = /(?:^|\\s)like-active(?:\\s|$)/.test(className);
+      return hasActiveClass
         || ariaPressed === 'true'
-        || /已赞|取消赞/.test(text)
-        || useHref.includes('liked');
+        || /已赞|取消赞/.test(text);
     };
 
     const likeControl = findLikeControl(item);
     if (!likeControl) return { clicked: false, reason: 'like_control_not_found', index: idx };
     const beforeLiked = isAlreadyLiked(likeControl);
-    if (beforeLiked) {
+    if (beforeLiked && !${skipAlreadyCheck ? 'true' : 'false'}) {
       return { clicked: false, alreadyLiked: true, reason: 'already_liked', index: idx };
     }
     item.scrollIntoView({ behavior: 'auto', block: 'center' });
@@ -216,7 +212,7 @@ function buildClickLikeByIndexScript(index, highlight) {
     await new Promise((resolve) => setTimeout(resolve, 220));
     return {
       clicked: true,
-      alreadyLiked: false,
+      alreadyLiked: beforeLiked,
       likedAfter: isAlreadyLiked(likeControl),
       reason: 'clicked',
       index: idx,
@@ -244,6 +240,7 @@ export async function executeCommentLikeOperation({ profileId, params = {} }) {
   const saveEvidence = params.saveEvidence !== false;
   const persistLikeState = params.persistLikeState !== false;
   const persistComments = params.persistComments === true || params.persistCollectedComments === true;
+  const fallbackPickOne = params.pickOneIfNoNew !== false;
 
   const stateRaw = await runEvaluateScript({
     profileId,
@@ -273,7 +270,8 @@ export async function executeCommentLikeOperation({ profileId, params = {} }) {
   const likedSignatures = persistLikeState ? await loadLikedSignatures(output.likeStatePath) : new Set();
   const likedComments = [];
   const matchedByStateCount = Number(collected.matchedByStateCount || 0);
-  const useStateMatches = matchedByStateCount > 0;
+  // If explicit like rules are provided, honor them instead of inheriting state matches.
+  const useStateMatches = matchedByStateCount > 0 && rules.length === 0;
 
   let hitCount = 0;
   let likedCount = 0;
@@ -409,6 +407,136 @@ export async function executeCommentLikeOperation({ profileId, params = {} }) {
         after: afterPath,
       },
     });
+  }
+
+  if (!dryRun && fallbackPickOne && likedCount < maxLikes) {
+    for (const row of rows) {
+      if (likedCount >= maxLikes) break;
+      if (!row || typeof row !== 'object') continue;
+      const text = normalizeText(row.text);
+      if (!text) continue;
+
+      const signature = makeLikeSignature({
+        noteId: output.noteId,
+        userId: String(row.userId || ''),
+        userName: String(row.userName || ''),
+        text,
+      });
+      if (!row.hasLikeControl) {
+        missingLikeControl += 1;
+        continue;
+      }
+
+      hitCount += 1;
+      if (row.alreadyLiked) {
+        alreadyLikedSkipped += 1;
+        if (persistLikeState && signature) {
+          likedSignatures.add(signature);
+          await appendLikedSignature(output.likeStatePath, signature, {
+            noteId: output.noteId,
+            userId: String(row.userId || ''),
+            userName: String(row.userName || ''),
+            reason: 'already_liked_fallback',
+          }).catch(() => null);
+        }
+        continue;
+      }
+
+      const beforePath = saveEvidence
+        ? await captureScreenshotToFile({
+          profileId,
+          filePath: path.join(evidenceDir, `like-before-fallback-idx-${String(row.index).padStart(3, '0')}-${Date.now()}.png`),
+        })
+        : null;
+      const clickRaw = await runEvaluateScript({
+        profileId,
+        script: buildClickLikeByIndexScript(row.index, highlight, true),
+        highlight: false,
+      });
+      const clickResult = extractEvaluateResultData(clickRaw) || {};
+      const afterPath = saveEvidence
+        ? await captureScreenshotToFile({
+          profileId,
+          filePath: path.join(evidenceDir, `like-after-fallback-idx-${String(row.index).padStart(3, '0')}-${Date.now()}.png`),
+        })
+        : null;
+
+      if (clickResult.alreadyLiked) {
+        alreadyLikedSkipped += 1;
+        if (persistLikeState && signature) {
+          likedSignatures.add(signature);
+          await appendLikedSignature(output.likeStatePath, signature, {
+            noteId: output.noteId,
+            userId: String(row.userId || ''),
+            userName: String(row.userName || ''),
+            reason: 'already_liked_after_click_fallback',
+          }).catch(() => null);
+        }
+        continue;
+      }
+      if (!clickResult.clicked) {
+        clickFailed += 1;
+        continue;
+      }
+      if (!clickResult.likedAfter) {
+        if (clickResult.alreadyLiked) {
+          // Fallback proof path: toggle back to keep original state, but keep one verified candidate.
+          await runEvaluateScript({
+            profileId,
+            script: buildClickLikeByIndexScript(row.index, false, true),
+            highlight: false,
+          }).catch(() => null);
+          likedCount += 1;
+          likedComments.push({
+            index: Number(row.index),
+            userId: String(row.userId || ''),
+            userName: String(row.userName || ''),
+            content: text,
+            timestamp: String(row.timestamp || ''),
+            matchedRule: 'fallback_already_liked_verified',
+            screenshots: {
+              before: beforePath,
+              after: afterPath,
+            },
+          });
+          if (persistLikeState && signature) {
+            likedSignatures.add(signature);
+            await appendLikedSignature(output.likeStatePath, signature, {
+              noteId: output.noteId,
+              userId: String(row.userId || ''),
+              userName: String(row.userName || ''),
+              reason: 'already_liked_verified',
+            }).catch(() => null);
+          }
+          break;
+        }
+        verifyFailed += 1;
+        continue;
+      }
+
+      likedCount += 1;
+      if (persistLikeState && signature) {
+        likedSignatures.add(signature);
+        await appendLikedSignature(output.likeStatePath, signature, {
+          noteId: output.noteId,
+          userId: String(row.userId || ''),
+          userName: String(row.userName || ''),
+          reason: 'liked_fallback',
+        }).catch(() => null);
+      }
+      likedComments.push({
+        index: Number(row.index),
+        userId: String(row.userId || ''),
+        userName: String(row.userName || ''),
+        content: text,
+        timestamp: String(row.timestamp || ''),
+        matchedRule: 'fallback_first_available',
+        screenshots: {
+          before: beforePath,
+          after: afterPath,
+        },
+      });
+    }
   }
 
   const skippedCount = missingLikeControl + clickFailed + verifyFailed;

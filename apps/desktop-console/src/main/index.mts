@@ -126,6 +126,17 @@ function configureElectronPaths() {
     app.setPath('cache', cacheRoot);
     app.commandLine.appendSwitch('disk-cache-dir', cacheRoot);
     app.commandLine.appendSwitch('gpu-cache-dir', gpuCacheRoot);
+
+    // Remote Windows sessions often fail DirectComposition/ANGLE initialization.
+    const disableGpuByDefault = process.platform === 'win32'
+      && String(process.env.WEBAUTO_ELECTRON_DISABLE_GPU || '1').trim() !== '0';
+    if (disableGpuByDefault) {
+      try { app.disableHardwareAcceleration(); } catch {}
+      app.commandLine.appendSwitch('disable-gpu');
+      app.commandLine.appendSwitch('disable-gpu-compositing');
+      app.commandLine.appendSwitch('disable-direct-composition');
+      app.commandLine.appendSwitch('use-angle', 'swiftshader');
+    }
   } catch (err) {
     console.warn('[desktop-console] failed to configure cache paths', err);
   }
