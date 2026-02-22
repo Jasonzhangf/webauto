@@ -360,10 +360,19 @@ export class AutoscriptRunner {
 
   resolveTimeoutMs(operation) {
     const pacing = this.resolvePacing(operation);
-    const disableTimeout = Boolean(
-      operation?.disableTimeout ?? this.script?.defaults?.disableTimeout,
-    );
-    if (disableTimeout) return 0;
+    const operationDisableTimeout = operation?.disableTimeout;
+    if (operationDisableTimeout === true) return 0;
+
+    const rawOperationTimeout = operation?.timeoutMs ?? operation?.pacing?.timeoutMs;
+    const hasOperationTimeout = Number.isFinite(Number(rawOperationTimeout))
+      && Number(rawOperationTimeout) > 0;
+    const defaultDisableTimeout = Boolean(this.script?.defaults?.disableTimeout);
+
+    // Keep default "no-timeout" mode, but allow operation-level timeout to opt in.
+    if (defaultDisableTimeout && operationDisableTimeout !== false && !hasOperationTimeout) {
+      return 0;
+    }
+
     if (pacing.timeoutMs === 0) return 0;
     if (Number.isFinite(pacing.timeoutMs) && pacing.timeoutMs > 0) return pacing.timeoutMs;
     return this.getDefaultTimeoutMs(operation);
