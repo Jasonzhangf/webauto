@@ -600,9 +600,9 @@ async function runProfile(spec, argv, baseOverrides = {}) {
       pushTaskSnapshot('running');
     }
     if (
-      merged.event === 'autoscript:event'
-      && merged.subscriptionId === 'login_guard'
-      && (merged.type === 'appear' || merged.type === 'exist')
+      merged.event === 'autoscript:operation_error'
+      && String(merged.operationId || '').trim() === 'abort_on_login_guard'
+      && String(merged.message || '').includes('LOGIN_GUARD_DETECTED')
     ) {
       try {
         markProfileInvalid(profileId, 'login_guard_runtime');

@@ -340,6 +340,7 @@ export class AutoscriptRunner {
       'sync_window_viewport',
       'verify_subscriptions',
       'xhs_submit_search',
+      'xhs_assert_logged_in',
       'xhs_open_detail',
       'xhs_detail_harvest',
       'xhs_expand_replies',

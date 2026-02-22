@@ -884,7 +884,7 @@ export function buildXhsUnifiedAutoscript(rawOptions = {}) {
       },
       {
         id: 'abort_on_login_guard',
-        action: 'raise_error',
+        action: 'xhs_assert_logged_in',
         params: { code: 'LOGIN_GUARD_DETECTED' },
         trigger: 'login_guard.appear',
         once: false,
