@@ -427,9 +427,6 @@ export async function syncXhsAccountByProfile(profileId, options = {}) {
       resolveAlias: shouldResolveAlias,
     });
     if (detected.hasLoginGuard) {
-      if (existing?.valid === true && String(existing?.accountId || '').trim()) {
-        return existing;
-      }
       if (pendingWhileLogin) {
         return markProfilePending(normalizedProfileId, 'waiting_login_guard');
       }
