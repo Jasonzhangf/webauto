@@ -100,7 +100,7 @@ async function detectXhsLoginSignal(profileId) {
     }
 
     const hasAccountSignal = Boolean(accountId);
-    const hasLoginGuard = ((visibleNodes.length > 0 && hasLoginText) || loginUrl) && !hasAccountSignal;
+    const hasLoginGuard = (visibleNodes.length > 0 && hasLoginText) || loginUrl;
     return {
       hasLoginGuard,
       hasLoginText,

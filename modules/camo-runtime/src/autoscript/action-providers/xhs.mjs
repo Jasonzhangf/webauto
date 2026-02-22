@@ -260,10 +260,6 @@ function buildAssertLoggedInScript(params = {}) {
       '.login-container',
       '.login-dialog',
       '#login-container',
-      '[class*="login"]',
-      '[data-testid*="login"]',
-      '[class*="passport"]',
-      '[class*="sign-in"]',
     ];
   const loginPattern = String(
     params.loginPattern || '登录|扫码|验证码|手机号|请先登录|注册|sign\\s*in',
@@ -324,7 +320,7 @@ function buildAssertLoggedInScript(params = {}) {
     }
 
     const hasAccountSignal = Boolean(accountId);
-    const hasLoginGuard = ((visibleGuardNodes.length > 0 && hasLoginText) || loginUrl) && !hasAccountSignal;
+    const hasLoginGuard = (visibleGuardNodes.length > 0 && hasLoginText) || loginUrl;
 
     return {
       hasLoginGuard,

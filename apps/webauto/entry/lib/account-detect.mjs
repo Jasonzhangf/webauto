@@ -26,10 +26,6 @@ function buildDetectScript() {
       '.login-container',
       '.login-dialog',
       '#login-container',
-      '[class*="login"]',
-      '[data-testid*="login"]',
-      '[class*="passport"]',
-      '[class*="sign-in"]',
     ];
     const loginGuardNodes = loginGuardSelectors
       .flatMap((selector) => Array.from(document.querySelectorAll(selector)));
@@ -184,7 +180,7 @@ function buildDetectScript() {
     const hasAccountSignal = Boolean(best && best.id);
     return {
       url: location.href,
-      hasLoginGuard: hasGuardSignal && !hasAccountSignal,
+      hasLoginGuard: hasGuardSignal,
       accountId: best ? best.id : null,
       alias: alias || null,
       source: best ? best.source : null,
@@ -399,9 +395,6 @@ export async function detectXhsAccountIdentity(profileId, options = {}) {
     if (detected.hasLoginGuard && !retry.hasLoginGuard) {
       detected.hasLoginGuard = false;
     }
-  }
-  if (detected.accountId && detected.hasLoginGuard) {
-    detected.hasLoginGuard = false;
   }
   if (options?.resolveAlias === true && detected.accountId && !detected.alias) {
     const resolved = await resolveAliasFromProfilePage(detected.profileId, detected.accountId);
