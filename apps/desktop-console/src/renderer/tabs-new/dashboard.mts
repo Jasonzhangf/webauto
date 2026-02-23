@@ -1,4 +1,5 @@
 import { createEl } from '../ui-components.mts';
+import { listAccountProfiles } from '../account-source.mts';
 
 type DashboardOptions = {
   api: any;
@@ -187,6 +188,7 @@ export function renderDashboard(root: HTMLElement, ctx: any) {
   let stoppedAt: number | null = null;
   let elapsedTimer: ReturnType<typeof setInterval> | null = null;
   let statePollTimer: ReturnType<typeof setInterval> | null = null;
+  let accountLabelPollTimer: ReturnType<typeof setInterval> | null = null;
   let unsubscribeState: (() => void) | null = null;
   let unsubscribeCmd: (() => void) | null = null;
   const contextRun = ctx?.xhsCurrentRun && typeof ctx.xhsCurrentRun === 'object' ? ctx.xhsCurrentRun : null;
@@ -207,6 +209,10 @@ export function renderDashboard(root: HTMLElement, ctx: any) {
   const maxLogs = 500;
   const maxRecentErrors = 8;
   const maxLikedLinks = 30;
+  const accountLabelByProfile = new Map<string, string>();
+  let accountLabelRefreshInFlight = false;
+  let accountLabelRefreshedAt = 0;
+  const accountLabelRefreshTtlMs = 15_000;
   const initialTaskId = String(contextRun?.taskId || ctx?.activeTaskConfigId || '').trim();
   if (initialTaskId) {
     taskConfigId.textContent = initialTaskId;
@@ -224,15 +230,51 @@ export function renderDashboard(root: HTMLElement, ctx: any) {
     const text = String(value ?? '').trim();
     return text.length > 0 && text !== '-';
   };
+  const resolveAccountLabel = (profileIdLike: any) => {
+    const profileId = String(profileIdLike || '').trim();
+    if (!profileId) return '-';
+    return accountLabelByProfile.get(profileId) || profileId;
+  };
+  const applyAccountLabel = (profileIdLike: any) => {
+    const profileId = String(profileIdLike || '').trim();
+    if (!profileId) return;
+    activeProfileId = profileId;
+    taskAccount.textContent = resolveAccountLabel(profileId);
+    if (!accountLabelByProfile.has(profileId)) {
+      void refreshAccountLabels(true);
+    }
+  };
+  async function refreshAccountLabels(force = false) {
+    if (accountLabelRefreshInFlight) return;
+    if (!force && (Date.now() - accountLabelRefreshedAt) < accountLabelRefreshTtlMs) return;
+    if (typeof ctx.api?.cmdRunJson !== 'function') return;
+    if (typeof ctx.api?.pathJoin !== 'function') return;
+    accountLabelRefreshInFlight = true;
+    try {
+      const rows = await listAccountProfiles(ctx.api, { platform: 'xiaohongshu' });
+      accountLabelByProfile.clear();
+      for (const row of rows) {
+        const profileId = String(row?.profileId || '').trim();
+        if (!profileId) continue;
+        const label = String(row?.alias || row?.name || profileId).trim() || profileId;
+        accountLabelByProfile.set(profileId, label);
+      }
+      accountLabelRefreshedAt = Date.now();
+      if (activeProfileId) {
+        taskAccount.textContent = resolveAccountLabel(activeProfileId);
+      }
+    } catch {
+      // ignore account label refresh errors; keep profile id fallback
+    } finally {
+      accountLabelRefreshInFlight = false;
+    }
+  }
 
   if (contextRun) {
     if (hasRenderableValue(contextRun.keyword)) taskKeyword.textContent = String(contextRun.keyword);
     if (Number(contextRun.target) > 0) taskTarget.textContent = String(Number(contextRun.target));
     if (hasRenderableValue(contextRun.profileId)) {
-      const aliases = ctx.api?.settings?.profileAliases || {};
-      const profileId = String(contextRun.profileId);
-      taskAccount.textContent = aliases[profileId] || profileId;
-      activeProfileId = profileId;
+      applyAccountLabel(contextRun.profileId);
     }
     if (hasRenderableValue(contextRun.taskId)) taskConfigId.textContent = String(contextRun.taskId);
     const startedAtTs = Date.parse(String(contextRun.startedAt || ''));
@@ -458,6 +500,20 @@ export function renderDashboard(root: HTMLElement, ctx: any) {
     statePollTimer = null;
   }
 
+  function startAccountLabelPoll() {
+    if (accountLabelPollTimer) return;
+    accountLabelPollTimer = setInterval(() => {
+      if (paused) return;
+      void refreshAccountLabels(false);
+    }, 30_000);
+  }
+
+  function stopAccountLabelPoll() {
+    if (!accountLabelPollTimer) return;
+    clearInterval(accountLabelPollTimer);
+    accountLabelPollTimer = null;
+  }
+
   // Add log line
   function addLog(line: string, type: 'info' | 'success' | 'error' | 'warn' = 'info') {
     const ts = new Date().toLocaleTimeString('zh-CN', { hour12: false });
@@ -575,9 +631,7 @@ export function renderDashboard(root: HTMLElement, ctx: any) {
       taskTarget.textContent = String(state.target);
     }
     if (state.profileId) {
-      const aliases = ctx.api?.settings?.profileAliases || {};
-      taskAccount.textContent = aliases[state.profileId] || state.profileId;
-      activeProfileId = String(state.profileId || '').trim();
+      applyAccountLabel(state.profileId);
     }
     const taskId = String(state.taskId || state.scheduleTaskId || state.configTaskId || '').trim();
     if (taskId) {
@@ -666,7 +720,7 @@ export function renderDashboard(root: HTMLElement, ctx: any) {
       resetDashboardForNewRun('新任务启动', ts);
       if (payload.keyword) taskKeyword.textContent = String(payload.keyword);
       if (payload.maxNotes) taskTarget.textContent = String(payload.maxNotes);
-      if (payload.profileId) activeProfileId = String(payload.profileId || '').trim();
+      if (payload.profileId) applyAccountLabel(payload.profileId);
       if (payload.taskId) {
         const taskId = String(payload.taskId || '').trim();
         if (taskId) {
@@ -827,9 +881,7 @@ export function renderDashboard(root: HTMLElement, ctx: any) {
     if (summary.keyword) taskKeyword.textContent = String(summary.keyword);
     if (assigned) taskTarget.textContent = String(assigned);
     if (profile?.profileId) {
-      const aliases = ctx.api?.settings?.profileAliases || {};
-      taskAccount.textContent = aliases[profile.profileId] || profile.profileId;
-      activeProfileId = String(profile.profileId || '').trim();
+      applyAccountLabel(profile.profileId);
     }
 
     const runId = String(profile?.runId || summary?.runId || '').trim();
@@ -997,8 +1049,7 @@ export function renderDashboard(root: HTMLElement, ctx: any) {
         }
 
         if (!hasRenderableValue(contextRun?.profileId) && config.lastProfileId) {
-          const aliases = ctx.api?.settings?.profileAliases || {};
-          taskAccount.textContent = aliases[config.lastProfileId] || config.lastProfileId;
+          applyAccountLabel(config.lastProfileId);
         }
         const taskId = String(contextRun?.taskId || config.taskId || ctx?.activeTaskConfigId || '').trim();
         if (taskId) {
@@ -1085,10 +1136,12 @@ export function renderDashboard(root: HTMLElement, ctx: any) {
 
   // Initialize
   renderRunSummary();
+  void refreshAccountLabels(true);
   loadTaskInfo();
   subscribeToUpdates();
   fetchCurrentState();
   startStatePoll();
+  startAccountLabelPoll();
 
   // Start elapsed timer
   startElapsedTimer();
@@ -1097,6 +1150,7 @@ export function renderDashboard(root: HTMLElement, ctx: any) {
   return () => {
     stopElapsedTimer();
     stopStatePoll();
+    stopAccountLabelPoll();
     if (unsubscribeState) unsubscribeState();
     if (unsubscribeCmd) unsubscribeCmd();
     if (unsubscribeBus) unsubscribeBus();

@@ -472,8 +472,28 @@ export function buildXhsUnifiedAutoscript(rawOptions = {}) {
   const env = toTrimmedString(rawOptions.env, 'prod');
   const outputRoot = toTrimmedString(rawOptions.outputRoot, '');
   const throttle = toPositiveInt(rawOptions.throttle, 900, 100);
-  const tabCount = toPositiveInt(rawOptions.tabCount, 4, 1);
+  const tabCount = toPositiveInt(rawOptions.tabCount, 1, 1);
+  const tabOpenDelayMs = toNonNegativeInt(rawOptions.tabOpenDelayMs, 1400);
   const noteIntervalMs = toPositiveInt(rawOptions.noteIntervalMs, 1200, 200);
+  const submitMethod = toTrimmedString(rawOptions.submitMethod, 'click').toLowerCase();
+  const submitActionDelayMinMs = toPositiveInt(rawOptions.submitActionDelayMinMs, 180, 20);
+  const submitActionDelayMaxMs = toPositiveInt(rawOptions.submitActionDelayMaxMs, 620, submitActionDelayMinMs);
+  const submitSettleMinMs = toPositiveInt(rawOptions.submitSettleMinMs, 1200, 60);
+  const submitSettleMaxMs = toPositiveInt(rawOptions.submitSettleMaxMs, 2600, submitSettleMinMs);
+  const openDetailPreClickMinMs = toPositiveInt(rawOptions.openDetailPreClickMinMs, 220, 60);
+  const openDetailPreClickMaxMs = toPositiveInt(rawOptions.openDetailPreClickMaxMs, 700, openDetailPreClickMinMs);
+  const openDetailPollDelayMinMs = toPositiveInt(rawOptions.openDetailPollDelayMinMs, 130, 80);
+  const openDetailPollDelayMaxMs = toPositiveInt(rawOptions.openDetailPollDelayMaxMs, 320, openDetailPollDelayMinMs);
+  const openDetailPostOpenMinMs = toPositiveInt(rawOptions.openDetailPostOpenMinMs, 420, 120);
+  const openDetailPostOpenMaxMs = toPositiveInt(rawOptions.openDetailPostOpenMaxMs, 1100, openDetailPostOpenMinMs);
+  const commentsScrollStepMin = toPositiveInt(rawOptions.commentsScrollStepMin, 280, 120);
+  const commentsScrollStepMax = toPositiveInt(rawOptions.commentsScrollStepMax, 420, commentsScrollStepMin);
+  const commentsSettleMinMs = toPositiveInt(rawOptions.commentsSettleMinMs, 280, 80);
+  const commentsSettleMaxMs = toPositiveInt(rawOptions.commentsSettleMaxMs, 820, commentsSettleMinMs);
+  const defaultOperationMinIntervalMs = toNonNegativeInt(rawOptions.defaultOperationMinIntervalMs, 1200);
+  const defaultEventCooldownMs = toNonNegativeInt(rawOptions.defaultEventCooldownMs, 700);
+  const defaultPacingJitterMs = toNonNegativeInt(rawOptions.defaultPacingJitterMs, 900);
+  const navigationMinIntervalMs = toNonNegativeInt(rawOptions.navigationMinIntervalMs, 2200);
   const maxNotes = toPositiveInt(rawOptions.maxNotes, 30, 1);
   const maxComments = toNonNegativeInt(rawOptions.maxComments, 0);
   const resume = toBoolean(rawOptions.resume, false);
@@ -529,10 +549,10 @@ export function buildXhsUnifiedAutoscript(rawOptions = {}) {
       validationMode: 'none',
       recovery,
       pacing: {
-        operationMinIntervalMs: 700,
-        eventCooldownMs: 300,
-        jitterMs: 220,
-        navigationMinIntervalMs: 1800,
+        operationMinIntervalMs: defaultOperationMinIntervalMs,
+        eventCooldownMs: defaultEventCooldownMs,
+        jitterMs: defaultPacingJitterMs,
+        navigationMinIntervalMs,
         timeoutMs: 0,
       },
       timeoutMs: 0,
@@ -542,7 +562,27 @@ export function buildXhsUnifiedAutoscript(rawOptions = {}) {
       env,
       outputRoot,
       tabCount,
+      tabOpenDelayMs,
       noteIntervalMs,
+      submitMethod,
+      submitActionDelayMinMs,
+      submitActionDelayMaxMs,
+      submitSettleMinMs,
+      submitSettleMaxMs,
+      openDetailPreClickMinMs,
+      openDetailPreClickMaxMs,
+      openDetailPollDelayMinMs,
+      openDetailPollDelayMaxMs,
+      openDetailPostOpenMinMs,
+      openDetailPostOpenMaxMs,
+      commentsScrollStepMin,
+      commentsScrollStepMax,
+      commentsSettleMinMs,
+      commentsSettleMaxMs,
+      defaultOperationMinIntervalMs,
+      defaultEventCooldownMs,
+      defaultPacingJitterMs,
+      navigationMinIntervalMs,
       maxNotes,
       maxComments,
       maxLikesPerRound,
@@ -645,6 +685,11 @@ export function buildXhsUnifiedAutoscript(rawOptions = {}) {
           keyword,
           searchSerialKey,
           sharedHarvestPath,
+          method: submitMethod,
+          actionDelayMinMs: submitActionDelayMinMs,
+          actionDelayMaxMs: submitActionDelayMaxMs,
+          settleMinMs: submitSettleMinMs,
+          settleMaxMs: submitSettleMaxMs,
         },
         trigger: 'home_search_input.exist',
         dependsOn: ['fill_keyword'],
@@ -672,6 +717,12 @@ export function buildXhsUnifiedAutoscript(rawOptions = {}) {
           sharedHarvestPath,
           seedCollectCount,
           seedCollectMaxRounds,
+          preClickDelayMinMs: openDetailPreClickMinMs,
+          preClickDelayMaxMs: openDetailPreClickMaxMs,
+          pollDelayMinMs: openDetailPollDelayMinMs,
+          pollDelayMaxMs: openDetailPollDelayMaxMs,
+          postOpenDelayMinMs: openDetailPostOpenMinMs,
+          postOpenDelayMaxMs: openDetailPostOpenMaxMs,
         },
         trigger: 'search_result_item.exist',
         dependsOn: ['submit_search'],
@@ -732,8 +783,12 @@ export function buildXhsUnifiedAutoscript(rawOptions = {}) {
           persistComments,
           commentsLimit: maxComments,
           maxRounds: 48,
-          scrollStep: 360,
-          settleMs: 260,
+          scrollStep: commentsScrollStepMin,
+          scrollStepMin: commentsScrollStepMin,
+          scrollStepMax: commentsScrollStepMax,
+          settleMs: commentsSettleMinMs,
+          settleMinMs: commentsSettleMinMs,
+          settleMaxMs: commentsSettleMaxMs,
           stallRounds: 8,
           recoveryNoProgressRounds: 3,
           recoveryStuckRounds: 2,
@@ -874,6 +929,12 @@ export function buildXhsUnifiedAutoscript(rawOptions = {}) {
           resume,
           incrementalMax,
           sharedHarvestPath,
+          preClickDelayMinMs: openDetailPreClickMinMs,
+          preClickDelayMaxMs: openDetailPreClickMaxMs,
+          pollDelayMinMs: openDetailPollDelayMinMs,
+          pollDelayMaxMs: openDetailPollDelayMaxMs,
+          postOpenDelayMinMs: openDetailPostOpenMinMs,
+          postOpenDelayMaxMs: openDetailPostOpenMaxMs,
         },
         trigger: 'search_result_item.exist',
         dependsOn: ['switch_tab_round_robin'],
@@ -924,7 +985,7 @@ export function buildXhsUnifiedAutoscript(rawOptions = {}) {
         action: 'ensure_tab_pool',
         params: {
           tabCount,
-          openDelayMs: 1200,
+          openDelayMs: tabOpenDelayMs,
           normalizeTabs: false,
         },
         trigger: 'search_result_item.exist',

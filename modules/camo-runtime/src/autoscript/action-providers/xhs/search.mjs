@@ -1,5 +1,10 @@
 export function buildSubmitSearchScript(params = {}) {
   const keyword = String(params.keyword || '').trim();
+  const method = String(params.method || params.submitMethod || 'click').trim().toLowerCase();
+  const actionDelayMinMs = Math.max(20, Number(params.actionDelayMinMs ?? 180) || 180);
+  const actionDelayMaxMs = Math.max(actionDelayMinMs, Number(params.actionDelayMaxMs ?? 620) || 620);
+  const settleMinMs = Math.max(60, Number(params.settleMinMs ?? 1200) || 1200);
+  const settleMaxMs = Math.max(settleMinMs, Number(params.settleMaxMs ?? 2600) || 2600);
   return `(async () => {
     const state = window.__camoXhsState || (window.__camoXhsState = {});
     const metrics = state.metrics && typeof state.metrics === 'object' ? state.metrics : {};
@@ -17,6 +22,18 @@ export function buildSubmitSearchScript(params = {}) {
     if (!(input instanceof HTMLInputElement)) {
       throw new Error('SEARCH_INPUT_NOT_FOUND');
     }
+    const randomBetween = (min, max) => {
+      const lo = Math.max(0, Math.floor(Number(min) || 0));
+      const hi = Math.max(lo, Math.floor(Number(max) || 0));
+      if (hi <= lo) return lo;
+      return lo + Math.floor(Math.random() * (hi - lo + 1));
+    };
+    const waitRandom = async (min, max, stage) => {
+      const waitMs = randomBetween(min, max);
+      pushTrace({ kind: 'wait', stage, waitMs });
+      await new Promise((resolve) => setTimeout(resolve, waitMs));
+      return waitMs;
+    };
     const targetKeyword = ${JSON.stringify(keyword)};
     if (targetKeyword && input.value !== targetKeyword) {
       input.focus();
@@ -24,38 +41,63 @@ export function buildSubmitSearchScript(params = {}) {
       input.dispatchEvent(new Event('input', { bubbles: true }));
       input.dispatchEvent(new Event('change', { bubbles: true }));
     }
-    const enterEvent = { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true };
+    const requestedMethod = ${JSON.stringify(method)};
+    const normalizedMethod = ['click', 'enter', 'form'].includes(requestedMethod) ? requestedMethod : 'click';
     const beforeUrl = window.location.href;
     input.focus();
-    input.dispatchEvent(new KeyboardEvent('keydown', enterEvent));
-    input.dispatchEvent(new KeyboardEvent('keypress', enterEvent));
-    input.dispatchEvent(new KeyboardEvent('keyup', enterEvent));
     const candidates = ['.input-button .search-icon', '.input-button', 'button.min-width-search-icon'];
+    let methodUsed = normalizedMethod;
     let clickedSelector = null;
-    for (const selector of candidates) {
-      const button = document.querySelector(selector);
-      if (!button) continue;
-      if (button instanceof HTMLElement) {
-        pushTrace({ kind: 'scroll', stage: 'submit_search', selector, via: 'scrollIntoView' });
-        button.scrollIntoView({ behavior: 'auto', block: 'center' });
-      }
-      await new Promise((resolve) => setTimeout(resolve, 80));
-      pushTrace({ kind: 'click', stage: 'submit_search', selector });
-      button.click();
-      clickedSelector = selector;
-      break;
-    }
     const form = input.closest('form');
-    if (form) {
-      if (typeof form.requestSubmit === 'function') form.requestSubmit();
-      else form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    if (normalizedMethod === 'click') {
+      let clicked = false;
+      for (const selector of candidates) {
+        const button = document.querySelector(selector);
+        if (!button) continue;
+        if (button instanceof HTMLElement) {
+          pushTrace({ kind: 'scroll', stage: 'submit_search', selector, via: 'scrollIntoView' });
+          button.scrollIntoView({ behavior: 'auto', block: 'center' });
+        }
+        await waitRandom(${actionDelayMinMs}, ${actionDelayMaxMs}, 'submit_pre_click');
+        pushTrace({ kind: 'click', stage: 'submit_search', selector });
+        button.click();
+        clickedSelector = selector;
+        clicked = true;
+        break;
+      }
+      if (!clicked) {
+        methodUsed = 'form';
+      }
     }
-    await new Promise((resolve) => setTimeout(resolve, 320));
+    if (methodUsed === 'enter') {
+      await waitRandom(${actionDelayMinMs}, ${actionDelayMaxMs}, 'submit_pre_enter');
+      const enterEvent = { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true };
+      pushTrace({ kind: 'key', stage: 'submit_search', key: 'Enter' });
+      input.dispatchEvent(new KeyboardEvent('keydown', enterEvent));
+      input.dispatchEvent(new KeyboardEvent('keypress', enterEvent));
+      input.dispatchEvent(new KeyboardEvent('keyup', enterEvent));
+    } else if (methodUsed === 'form') {
+      await waitRandom(${actionDelayMinMs}, ${actionDelayMaxMs}, 'submit_pre_form');
+      if (form) {
+        pushTrace({ kind: 'submit', stage: 'submit_search', via: 'form' });
+        if (typeof form.requestSubmit === 'function') form.requestSubmit();
+        else form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+      } else {
+        methodUsed = 'enter';
+        const enterEvent = { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true };
+        pushTrace({ kind: 'key', stage: 'submit_search', key: 'Enter', fallback: true });
+        input.dispatchEvent(new KeyboardEvent('keydown', enterEvent));
+        input.dispatchEvent(new KeyboardEvent('keypress', enterEvent));
+        input.dispatchEvent(new KeyboardEvent('keyup', enterEvent));
+      }
+    }
+    await waitRandom(${settleMinMs}, ${settleMaxMs}, 'submit_settle');
     return {
       submitted: true,
-      via: clickedSelector || 'enter_or_form_submit',
+      via: clickedSelector || methodUsed,
       beforeUrl,
       afterUrl: window.location.href,
+      method: methodUsed,
       searchCount: metrics.searchCount,
       actionTrace,
     };
@@ -79,9 +121,21 @@ export function buildOpenDetailScript(params = {}) {
   const nextSeekRounds = Math.max(0, Number(params.nextSeekRounds || 8) || 8);
   const nextSeekStep = Math.max(0, Number(params.nextSeekStep || 0) || 0);
   const nextSeekSettleMs = Math.max(120, Number(params.nextSeekSettleMs || 320) || 320);
+  const preClickDelayMinMs = Math.max(60, Number(params.preClickDelayMinMs ?? 220) || 220);
+  const preClickDelayMaxMs = Math.max(preClickDelayMinMs, Number(params.preClickDelayMaxMs ?? 700) || 700);
+  const pollDelayMinMs = Math.max(80, Number(params.pollDelayMinMs ?? 130) || 130);
+  const pollDelayMaxMs = Math.max(pollDelayMinMs, Number(params.pollDelayMaxMs ?? 320) || 320);
+  const postOpenDelayMinMs = Math.max(120, Number(params.postOpenDelayMinMs ?? 420) || 420);
+  const postOpenDelayMaxMs = Math.max(postOpenDelayMinMs, Number(params.postOpenDelayMaxMs ?? 1100) || 1100);
 
   return `(async () => {
     const STATE_KEY = '__camoXhsState';
+    const randomBetween = (min, max) => {
+      const lo = Math.max(0, Math.floor(Number(min) || 0));
+      const hi = Math.max(lo, Math.floor(Number(max) || 0));
+      if (hi <= lo) return lo;
+      return lo + Math.floor(Math.random() * (hi - lo + 1));
+    };
     const normalizeVisited = (value) => {
       if (!Array.isArray(value)) return [];
       return value
@@ -282,7 +336,9 @@ export function buildOpenDetailScript(params = {}) {
       via: 'scrollIntoView',
     });
     next.cover.scrollIntoView({ behavior: 'auto', block: 'center' });
-    await new Promise((resolve) => setTimeout(resolve, 140));
+    const preClickDelay = randomBetween(${preClickDelayMinMs}, ${preClickDelayMaxMs});
+    pushTrace({ kind: 'wait', stage: 'open_detail_pre_click', noteId: next.noteId, waitMs: preClickDelay });
+    await new Promise((resolve) => setTimeout(resolve, preClickDelay));
     const beforeUrl = window.location.href;
     pushTrace({
       kind: 'click',
@@ -298,12 +354,15 @@ export function buildOpenDetailScript(params = {}) {
         detailReady = true;
         break;
       }
-      await new Promise((resolve) => setTimeout(resolve, 120));
+      const pollDelay = randomBetween(${pollDelayMinMs}, ${pollDelayMaxMs});
+      await new Promise((resolve) => setTimeout(resolve, pollDelay));
     }
     if (!detailReady) {
       throw new Error('DETAIL_OPEN_TIMEOUT');
     }
-    await new Promise((resolve) => setTimeout(resolve, 220));
+    const postOpenDelay = randomBetween(${postOpenDelayMinMs}, ${postOpenDelayMaxMs});
+    pushTrace({ kind: 'wait', stage: 'open_detail_post_open', noteId: next.noteId, waitMs: postOpenDelay });
+    await new Promise((resolve) => setTimeout(resolve, postOpenDelay));
     const afterUrl = window.location.href;
 
     if (!state.visitedNoteIds.includes(next.noteId)) state.visitedNoteIds.push(next.noteId);

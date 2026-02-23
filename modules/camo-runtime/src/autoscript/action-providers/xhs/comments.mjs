@@ -1,7 +1,11 @@
 export function buildCommentsHarvestScript(params = {}) {
   const maxRounds = Math.max(1, Number(params.maxRounds ?? params.maxScrollRounds ?? 14) || 14);
-  const scrollStep = Math.max(120, Number(params.scrollStep ?? 420) || 420);
-  const settleMs = Math.max(80, Number(params.settleMs ?? 180) || 180);
+  const scrollStepMin = Math.max(120, Number(params.scrollStepMin ?? params.scrollStep ?? 420) || 420);
+  const scrollStepMax = Math.max(scrollStepMin, Number(params.scrollStepMax ?? scrollStepMin) || scrollStepMin);
+  const scrollStepBase = Math.max(scrollStepMin, Math.floor((scrollStepMin + scrollStepMax) / 2));
+  const settleMinMs = Math.max(80, Number(params.settleMinMs ?? params.settleMs ?? 180) || 180);
+  const settleMaxMs = Math.max(settleMinMs, Number(params.settleMaxMs ?? settleMinMs) || settleMinMs);
+  const settleMs = settleMinMs;
   const stallRounds = Math.max(1, Number(params.stallRounds ?? 2) || 2);
   const requireBottom = params.requireBottom !== false;
   const includeComments = params.includeComments !== false;
@@ -10,12 +14,12 @@ export function buildCommentsHarvestScript(params = {}) {
   const recoveryUpRounds = Math.max(1, Number(params.recoveryUpRounds ?? 2) || 2);
   const recoveryDownRounds = Math.max(1, Number(params.recoveryDownRounds ?? 3) || 3);
   const maxRecoveries = Math.max(0, Number(params.maxRecoveries ?? 3) || 3);
-  const recoveryUpStep = Math.max(80, Number(params.recoveryUpStep ?? Math.floor(scrollStep * 0.75)) || Math.floor(scrollStep * 0.75));
-  const recoveryDownStep = Math.max(120, Number(params.recoveryDownStep ?? Math.floor(scrollStep * 1.3)) || Math.floor(scrollStep * 1.3));
+  const recoveryUpStep = Math.max(80, Number(params.recoveryUpStep ?? Math.floor(scrollStepBase * 0.75)) || Math.floor(scrollStepBase * 0.75));
+  const recoveryDownStep = Math.max(120, Number(params.recoveryDownStep ?? Math.floor(scrollStepBase * 1.3)) || Math.floor(scrollStepBase * 1.3));
   const recoveryNoProgressRounds = Math.max(1, Number(params.recoveryNoProgressRounds ?? 3) || 3);
   const progressDiffThreshold = Math.max(2, Number(
-    params.progressDiffThreshold ?? Math.max(12, Math.floor(scrollStep * 0.08)),
-  ) || Math.max(12, Math.floor(scrollStep * 0.08)));
+    params.progressDiffThreshold ?? Math.max(12, Math.floor(scrollStepBase * 0.08)),
+  ) || Math.max(12, Math.floor(scrollStepBase * 0.08)));
   const recoveryDownBoostPerAttempt = Math.max(0, Number(params.recoveryDownBoostPerAttempt ?? 1) || 1);
   const maxRecoveryDownBoost = Math.max(0, Number(params.maxRecoveryDownBoost ?? 2) || 2);
   const adaptiveMaxRounds = params.adaptiveMaxRounds !== false;
@@ -165,7 +169,10 @@ export function buildCommentsHarvestScript(params = {}) {
     };
 
     const configuredMaxRounds = Number(${maxRounds});
-    const scrollStep = Number(${scrollStep});
+    const scrollStepMin = Number(${scrollStepMin});
+    const scrollStepMax = Number(${scrollStepMax});
+    const settleMinMs = Number(${settleMinMs});
+    const settleMaxMs = Number(${settleMaxMs});
     const settleMs = Number(${settleMs});
     const stallRounds = Number(${stallRounds});
     const requireBottom = ${requireBottom ? 'true' : 'false'};
@@ -186,6 +193,12 @@ export function buildCommentsHarvestScript(params = {}) {
     const adaptiveBufferRounds = Number(${adaptiveBufferRounds});
     const adaptiveMinBoostRounds = Number(${adaptiveMinBoostRounds});
     const adaptiveMaxRoundsCap = Number(${adaptiveMaxRoundsCap});
+    const randomBetween = (min, max) => {
+      const lo = Math.max(0, Math.floor(Number(min) || 0));
+      const hi = Math.max(lo, Math.floor(Number(max) || 0));
+      if (hi <= lo) return lo;
+      return lo + Math.floor(Math.random() * (hi - lo + 1));
+    };
     let maxRounds = configuredMaxRounds;
     let maxRoundsSource = 'configured';
     let budgetExpectedCommentsCount = null;
@@ -216,10 +229,14 @@ export function buildCommentsHarvestScript(params = {}) {
       no_new_comments: 0,
     };
     const performScroll = async (deltaY, waitMs = settleMs, meta = {}) => {
+      const waitFloor = Math.max(settleMinMs, Math.floor(Number(waitMs) || settleMinMs));
+      const waitCeil = Math.max(waitFloor, Math.max(settleMaxMs, Math.floor(Number(waitMs) || settleMaxMs)));
+      const waitActual = randomBetween(waitFloor, waitCeil);
       pushTrace({
         kind: 'scroll',
         stage: 'xhs_comments_harvest',
         deltaY: Number(deltaY),
+        waitMs: waitActual,
         ...meta,
       });
       if (typeof scroller?.scrollBy === 'function') {
@@ -227,7 +244,7 @@ export function buildCommentsHarvestScript(params = {}) {
       } else {
         window.scrollBy({ top: deltaY, behavior: 'auto' });
       }
-      await new Promise((resolve) => setTimeout(resolve, waitMs));
+      await new Promise((resolve) => setTimeout(resolve, waitActual));
     };
 
     for (let round = 1; round <= maxRounds; round += 1) {
@@ -253,7 +270,8 @@ export function buildCommentsHarvestScript(params = {}) {
       }
 
       const prevTop = beforeMetrics.scrollTop;
-      await performScroll(scrollStep, settleMs, {
+      const roundScrollStep = randomBetween(scrollStepMin, scrollStepMax);
+      await performScroll(roundScrollStep, settleMs, {
         round,
         reason: 'main_scroll',
       });
@@ -261,16 +279,18 @@ export function buildCommentsHarvestScript(params = {}) {
       let afterMetrics = readMetrics();
       let moved = Math.abs(afterMetrics.scrollTop - prevTop) > 1;
       if (!moved && typeof window.scrollBy === 'function') {
-        const fallbackStep = Math.max(120, Math.floor(scrollStep / 2));
+        const fallbackStep = Math.max(120, Math.floor(roundScrollStep / 2));
+        const fallbackWaitMs = randomBetween(settleMinMs, settleMaxMs);
         pushTrace({
           kind: 'scroll',
           stage: 'xhs_comments_harvest',
           round,
           reason: 'fallback_scroll',
           deltaY: Number(fallbackStep),
+          waitMs: fallbackWaitMs,
         });
         window.scrollBy({ top: fallbackStep, behavior: 'auto' });
-        await new Promise((resolve) => setTimeout(resolve, settleMs));
+        await new Promise((resolve) => setTimeout(resolve, fallbackWaitMs));
         collect(round);
         afterMetrics = readMetrics();
         moved = Math.abs(afterMetrics.scrollTop - prevTop) > 1;

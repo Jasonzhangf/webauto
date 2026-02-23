@@ -253,6 +253,32 @@ test('run-ephemeral executes directly without schedule save', async () => {
   assert.equal(bundle.calls.scheduleInvoke.length, beforeCommands);
 });
 
+test('save and run in immediate mode still persists task before run', async () => {
+  const bundle = createMockCtx();
+  const root = document.createElement('div');
+  renderTasksPanel(root, bundle.ctx);
+  await flush(6);
+
+  const keywordInput = root.querySelector('#task-keyword') as HTMLInputElement;
+  const profileInput = root.querySelector('#task-profile') as HTMLInputElement;
+  const runBtn = root.querySelector('#task-run-btn') as HTMLButtonElement;
+  const scheduleTypeSelect = root.querySelector('#task-schedule-type') as HTMLSelectElement;
+
+  keywordInput.value = '立即保存执行';
+  profileInput.value = 'xhs-1';
+  scheduleTypeSelect.value = 'immediate';
+  scheduleTypeSelect.dispatchEvent(new Event('change', { bubbles: true }));
+  runBtn.click();
+  await flush(8);
+
+  const scheduleCommands = bundle.calls.scheduleInvoke.map((item) => String(item?.action || ''));
+  assert.equal(scheduleCommands.includes('save'), true);
+  assert.equal(scheduleCommands.includes('run'), true);
+  assert.equal(bundle.calls.taskRunEphemeral.length, 0);
+  assert.equal(bundle.calls.setActiveTab.includes('dashboard'), true);
+  assert.equal(alerts.length, 0);
+});
+
 test('save and run uses schedule run and no direct spawn', async () => {
   const bundle = createMockCtx();
   const root = document.createElement('div');

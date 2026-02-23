@@ -13,6 +13,7 @@ import { listAccountProfiles, markProfileInvalid } from './lib/account-store.mjs
 import { listProfilesForPool } from './lib/profilepool.mjs';
 import { runCamo } from './lib/camo-cli.mjs';
 import { publishBusEvent } from './lib/bus-publish.mjs';
+import { resolvePlatformFlowGate } from './lib/flow-gate.mjs';
 
 function nowIso() {
   return new Date().toISOString();
@@ -43,6 +44,13 @@ function parseNonNegativeInt(value, fallback = 0) {
   const num = Number(value);
   if (!Number.isFinite(num)) return fallback;
   return Math.max(0, Math.floor(num));
+}
+
+function pickRandomInt(min, max) {
+  const floorMin = Math.max(0, Math.floor(Number(min) || 0));
+  const floorMax = Math.max(floorMin, Math.floor(Number(max) || 0));
+  if (floorMax <= floorMin) return floorMin;
+  return floorMin + Math.floor(Math.random() * (floorMax - floorMin + 1));
 }
 
 function parseProfiles(argv) {
@@ -301,7 +309,7 @@ function createTaskReporter(seed = {}) {
   };
 }
 
-function buildTemplateOptions(argv, profileId, overrides = {}) {
+async function buildTemplateOptions(argv, profileId, overrides = {}) {
   const keyword = String(argv.keyword || argv.k || '').trim();
   const env = String(argv.env || 'prod').trim() || 'prod';
   const inputMode = String(argv['input-mode'] || 'protocol').trim() || 'protocol';
@@ -309,9 +317,63 @@ function buildTemplateOptions(argv, profileId, overrides = {}) {
   const ocrCommand = String(argv['ocr-command'] || '').trim();
   const maxNotes = parseIntFlag(argv['max-notes'] ?? argv.target, 30, 1);
   const maxComments = parseNonNegativeInt(argv['max-comments'], 0);
-  const throttle = parseIntFlag(argv.throttle, 500, 100);
-  const tabCount = parseIntFlag(argv['tab-count'], 4, 1);
-  const noteIntervalMs = parseIntFlag(argv['note-interval'], 900, 200);
+  let flowGate = null;
+  try {
+    flowGate = await resolvePlatformFlowGate('xiaohongshu');
+  } catch {
+    flowGate = null;
+  }
+
+  const throttleMin = parseIntFlag(flowGate?.throttle?.minMs, 900, 100);
+  const throttleMax = parseIntFlag(flowGate?.throttle?.maxMs, 1800, throttleMin);
+  const noteIntervalMin = parseIntFlag(flowGate?.noteInterval?.minMs, 2200, 200);
+  const noteIntervalMax = parseIntFlag(flowGate?.noteInterval?.maxMs, 4200, noteIntervalMin);
+  const tabCountDefault = parseIntFlag(flowGate?.tabPool?.tabCount, 1, 1);
+  const tabOpenDelayMin = parseIntFlag(flowGate?.tabPool?.openDelayMinMs, 1400, 0);
+  const tabOpenDelayMax = parseIntFlag(flowGate?.tabPool?.openDelayMaxMs, 2800, tabOpenDelayMin);
+  const submitMethodDefault = String(flowGate?.submitSearch?.method || 'click').trim().toLowerCase() || 'click';
+  const submitActionDelayMinDefault = parseIntFlag(flowGate?.submitSearch?.actionDelayMinMs, 180, 20);
+  const submitActionDelayMaxDefault = parseIntFlag(flowGate?.submitSearch?.actionDelayMaxMs, 620, submitActionDelayMinDefault);
+  const submitSettleMinDefault = parseIntFlag(flowGate?.submitSearch?.settleMinMs, 1200, 60);
+  const submitSettleMaxDefault = parseIntFlag(flowGate?.submitSearch?.settleMaxMs, 2600, submitSettleMinDefault);
+  const openDetailPreClickMinDefault = parseIntFlag(flowGate?.openDetail?.preClickMinMs, 220, 60);
+  const openDetailPreClickMaxDefault = parseIntFlag(flowGate?.openDetail?.preClickMaxMs, 700, openDetailPreClickMinDefault);
+  const openDetailPollDelayMinDefault = parseIntFlag(flowGate?.openDetail?.pollDelayMinMs, 130, 80);
+  const openDetailPollDelayMaxDefault = parseIntFlag(flowGate?.openDetail?.pollDelayMaxMs, 320, openDetailPollDelayMinDefault);
+  const openDetailPostOpenMinDefault = parseIntFlag(flowGate?.openDetail?.postOpenMinMs, 420, 120);
+  const openDetailPostOpenMaxDefault = parseIntFlag(flowGate?.openDetail?.postOpenMaxMs, 1100, openDetailPostOpenMinDefault);
+  const commentsScrollStepMinDefault = parseIntFlag(flowGate?.commentsHarvest?.scrollStepMin, 280, 120);
+  const commentsScrollStepMaxDefault = parseIntFlag(flowGate?.commentsHarvest?.scrollStepMax, 420, commentsScrollStepMinDefault);
+  const commentsSettleMinDefault = parseIntFlag(flowGate?.commentsHarvest?.settleMinMs, 280, 80);
+  const commentsSettleMaxDefault = parseIntFlag(flowGate?.commentsHarvest?.settleMaxMs, 820, commentsSettleMinDefault);
+  const defaultOperationMinIntervalDefault = parseIntFlag(flowGate?.pacing?.defaultOperationMinIntervalMs, 1200, 0);
+  const defaultEventCooldownDefault = parseIntFlag(flowGate?.pacing?.defaultEventCooldownMs, 700, 0);
+  const defaultPacingJitterDefault = parseIntFlag(flowGate?.pacing?.defaultJitterMs, 900, 0);
+  const navigationMinIntervalDefault = parseIntFlag(flowGate?.pacing?.navigationMinIntervalMs, 2200, 0);
+
+  const throttle = parseIntFlag(argv.throttle, pickRandomInt(throttleMin, throttleMax), 100);
+  const tabCount = parseIntFlag(argv['tab-count'], tabCountDefault, 1);
+  const noteIntervalMs = parseIntFlag(argv['note-interval'], pickRandomInt(noteIntervalMin, noteIntervalMax), 200);
+  const tabOpenDelayMs = parseIntFlag(argv['tab-open-delay'], pickRandomInt(tabOpenDelayMin, tabOpenDelayMax), 0);
+  const submitMethod = String(argv['search-submit-method'] || submitMethodDefault).trim().toLowerCase() || 'click';
+  const submitActionDelayMinMs = parseIntFlag(argv['submit-action-delay-min'], submitActionDelayMinDefault, 20);
+  const submitActionDelayMaxMs = parseIntFlag(argv['submit-action-delay-max'], submitActionDelayMaxDefault, submitActionDelayMinMs);
+  const submitSettleMinMs = parseIntFlag(argv['submit-settle-min'], submitSettleMinDefault, 60);
+  const submitSettleMaxMs = parseIntFlag(argv['submit-settle-max'], submitSettleMaxDefault, submitSettleMinMs);
+  const openDetailPreClickMinMs = parseIntFlag(argv['open-detail-preclick-min'], openDetailPreClickMinDefault, 60);
+  const openDetailPreClickMaxMs = parseIntFlag(argv['open-detail-preclick-max'], openDetailPreClickMaxDefault, openDetailPreClickMinMs);
+  const openDetailPollDelayMinMs = parseIntFlag(argv['open-detail-poll-min'], openDetailPollDelayMinDefault, 80);
+  const openDetailPollDelayMaxMs = parseIntFlag(argv['open-detail-poll-max'], openDetailPollDelayMaxDefault, openDetailPollDelayMinMs);
+  const openDetailPostOpenMinMs = parseIntFlag(argv['open-detail-postopen-min'], openDetailPostOpenMinDefault, 120);
+  const openDetailPostOpenMaxMs = parseIntFlag(argv['open-detail-postopen-max'], openDetailPostOpenMaxDefault, openDetailPostOpenMinMs);
+  const commentsScrollStepMin = parseIntFlag(argv['comments-scroll-step-min'], commentsScrollStepMinDefault, 120);
+  const commentsScrollStepMax = parseIntFlag(argv['comments-scroll-step-max'], commentsScrollStepMaxDefault, commentsScrollStepMin);
+  const commentsSettleMinMs = parseIntFlag(argv['comments-settle-min'], commentsSettleMinDefault, 80);
+  const commentsSettleMaxMs = parseIntFlag(argv['comments-settle-max'], commentsSettleMaxDefault, commentsSettleMinMs);
+  const defaultOperationMinIntervalMs = parseIntFlag(argv['operation-min-interval'], defaultOperationMinIntervalDefault, 0);
+  const defaultEventCooldownMs = parseIntFlag(argv['event-cooldown'], defaultEventCooldownDefault, 0);
+  const defaultPacingJitterMs = parseIntFlag(argv['pacing-jitter'], defaultPacingJitterDefault, 0);
+  const navigationMinIntervalMs = parseIntFlag(argv['navigation-min-interval'], navigationMinIntervalDefault, 0);
   const maxLikesPerRound = parseNonNegativeInt(argv['max-likes'], 0);
   const matchMode = String(argv['match-mode'] || 'any').trim() || 'any';
   const matchMinHits = parseIntFlag(argv['match-min-hits'], 1, 1);
@@ -348,7 +410,27 @@ function buildTemplateOptions(argv, profileId, overrides = {}) {
     outputRoot,
     throttle,
     tabCount,
+    tabOpenDelayMs,
     noteIntervalMs,
+    submitMethod,
+    submitActionDelayMinMs,
+    submitActionDelayMaxMs,
+    submitSettleMinMs,
+    submitSettleMaxMs,
+    openDetailPreClickMinMs,
+    openDetailPreClickMaxMs,
+    openDetailPollDelayMinMs,
+    openDetailPollDelayMaxMs,
+    openDetailPostOpenMinMs,
+    openDetailPostOpenMaxMs,
+    commentsScrollStepMin,
+    commentsScrollStepMax,
+    commentsSettleMinMs,
+    commentsSettleMaxMs,
+    defaultOperationMinIntervalMs,
+    defaultEventCooldownMs,
+    defaultPacingJitterMs,
+    navigationMinIntervalMs,
     maxNotes,
     maxComments,
     maxLikesPerRound,
@@ -543,7 +625,24 @@ async function runProfile(spec, argv, baseOverrides = {}) {
   if (spec.seedCollectMaxRounds !== undefined && spec.seedCollectMaxRounds !== null) {
     overrides.seedCollectMaxRounds = parseNonNegativeInt(spec.seedCollectMaxRounds, 0);
   }
-  const options = buildTemplateOptions(argv, profileId, overrides);
+  const options = await buildTemplateOptions(argv, profileId, overrides);
+  console.log(JSON.stringify({
+    event: 'xhs.unified.flow_gate',
+    profileId,
+    throttle: options.throttle,
+    noteIntervalMs: options.noteIntervalMs,
+    tabCount: options.tabCount,
+    tabOpenDelayMs: options.tabOpenDelayMs,
+    submitMethod: options.submitMethod,
+    submitActionDelayMinMs: options.submitActionDelayMinMs,
+    submitActionDelayMaxMs: options.submitActionDelayMaxMs,
+    submitSettleMinMs: options.submitSettleMinMs,
+    submitSettleMaxMs: options.submitSettleMaxMs,
+    commentsScrollStepMin: options.commentsScrollStepMin,
+    commentsScrollStepMax: options.commentsScrollStepMax,
+    commentsSettleMinMs: options.commentsSettleMinMs,
+    commentsSettleMaxMs: options.commentsSettleMaxMs,
+  }));
   const script = buildXhsUnifiedAutoscript(options);
   const normalized = normalizeAutoscript(script, `xhs-unified:${profileId}`);
   const validation = validateAutoscript(normalized);
@@ -1283,6 +1382,11 @@ async function main() {
       '  --seed-collect-rounds <n>    首账号预采样滚动轮数（默认6）',
       '  --search-serial-key <key>    搜索阶段串行锁key（默认自动生成）',
       '  --shared-harvest-path <path> 共享harvest去重列表路径（默认自动生成）',
+      '  --search-submit-method <m>   搜索提交方式 click|enter|form（默认 flow-gate）',
+      '  --tab-open-delay <ms>        新开 tab 间隔（默认 flow-gate 区间随机）',
+      '  --operation-min-interval <ms> 基础操作最小间隔（默认 flow-gate）',
+      '  --event-cooldown <ms>        基础事件冷却（默认 flow-gate）',
+      '  --pacing-jitter <ms>         基础抖动区间（默认 flow-gate）',
     ].join('\n'));
     return;
   }

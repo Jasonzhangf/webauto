@@ -735,10 +735,6 @@ export function renderTasksPanel(root: HTMLElement, ctx: any) {
 
   async function saveTask(runImmediately = false) {
     const data = collectFormData();
-    if (runImmediately && data.scheduleMode === 'immediate') {
-      await runWithoutSave();
-      return;
-    }
     saveBtn.disabled = true;
     runBtn.disabled = true;
     runEphemeralBtn.disabled = true;

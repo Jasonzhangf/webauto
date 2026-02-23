@@ -167,6 +167,7 @@ Core Commands:
   webauto xhs install [--download-browser] [--download-geoip] [--ensure-backend]
   webauto xhs unified [xhs options...]
   webauto xhs status [--run-id <id>] [--json]
+  webauto xhs gate <get|list|set|reset|path> [--platform <name>] [--patch-json <json>] [--json]
   webauto xhs orchestrate [xhs options...]
   webauto version [--json]
   webauto version bump [patch|minor|major]
@@ -266,12 +267,14 @@ Usage:
   webauto xhs install [--download-browser] [--download-geoip] [--ensure-backend] [--install|--reinstall|--uninstall] [--browser|--geoip|--all]
   webauto xhs unified --profile <id> --keyword <kw> [options...]
   webauto xhs status [--run-id <id>] [--json]
+  webauto xhs gate <get|list|set|reset|path> [--platform <name>] [--patch-json <json>] [--json]
   webauto xhs orchestrate --profile <id> --keyword <kw> [options...]
 
 Subcommands:
   install      运行资源管理（兼容旧入口），支持检查/安装/卸载/重装 camoufox、geoip，按需拉起 backend
   unified      运行统一脚本（搜索 + 打开详情 + 评论抓取 + 点赞）
   status       查询当前任务状态与错误摘要（支持 runId 详情）
+  gate         管理平台流控参数（默认配置可修改并自动生效）
   orchestrate  运行编排入口（默认调用 unified 模式）
 
 Unified Required:
@@ -286,8 +289,8 @@ Unified Common Options:
   --concurrency <n>        并行度（默认=账号数）
   --plan-only              仅生成分片计划，不执行
   --tab-count <n>          轮询 tab 数，默认 4
-  --throttle <ms>          操作节流，默认 500
-  --note-interval <ms>     帖子间等待，默认 900
+  --throttle <ms>          操作节流（默认走 flow-gate 平台配置并随机化）
+  --note-interval <ms>     帖子间等待（默认走 flow-gate 平台配置并随机化）
   --env <name>             输出环境目录，默认 debug
   --output-root <path>     自定义输出根目录
   --dry-run                干跑（禁用点赞/回复）
@@ -331,6 +334,10 @@ Standard Workflows:
   6) 查看运行状态与错误
      webauto xhs status
      webauto xhs status --run-id <runId> --json
+
+  7) 查看/修改流控 gate（按平台隔离）
+     webauto xhs gate get --platform xiaohongshu --json
+     webauto xhs gate set --platform xiaohongshu --patch-json '{"noteInterval":{"minMs":2600,"maxMs":5200}}' --json
 
 Output:
   默认目录: ~/.webauto/download/xiaohongshu/<env>/<keyword>/
@@ -865,6 +872,12 @@ async function main() {
 
     if (sub === 'status') {
       const script = path.join(ROOT, 'apps', 'webauto', 'entry', 'xhs-status.mjs');
+      await run(process.execPath, [script, ...rawArgv.slice(2)]);
+      return;
+    }
+
+    if (sub === 'gate') {
+      const script = path.join(ROOT, 'apps', 'webauto', 'entry', 'flow-gate.mjs');
       await run(process.execPath, [script, ...rawArgv.slice(2)]);
       return;
     }

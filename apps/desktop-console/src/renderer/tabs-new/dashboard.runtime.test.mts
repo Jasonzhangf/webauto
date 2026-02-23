@@ -48,10 +48,19 @@ test('dashboard reacts to runtime streams and control actions', async () => {
     xhsCurrentRun: { runId: 'rid-1', taskId: 'sched-0009' },
     setActiveTab: (id: string) => { activeTab = id; },
     api: {
-      settings: {
-        profileAliases: {
-          'xhs-1': '主账号',
-        },
+      pathJoin: (...parts: string[]) => parts.filter(Boolean).join('/'),
+      async cmdRunJson(spec: any) {
+        if (String(spec?.title || '').trim() === 'account list') {
+          return {
+            ok: true,
+            json: {
+              profiles: [
+                { profileId: 'xhs-1', alias: '主账号', name: '主账号', valid: true, accountId: 'acct-1' },
+              ],
+            },
+          };
+        }
+        return { ok: true, json: {} };
       },
       async configLoadLast() {
         return { keyword: '春晚', target: 100, lastProfileId: 'xhs-1' };
@@ -166,7 +175,10 @@ test('dashboard handles loading errors and bus-only progress events', async () =
     xhsCurrentRun: { runId: '', taskId: 'sched-start' },
     setActiveTab: (id: string) => { setTab = id; },
     api: {
-      settings: { profileAliases: {} },
+      pathJoin: (...parts: string[]) => parts.filter(Boolean).join('/'),
+      async cmdRunJson() {
+        return { ok: true, json: { profiles: [] } };
+      },
       async configLoadLast() {
         throw new Error('load_fail');
       },
@@ -229,10 +241,19 @@ test('dashboard keeps context run and task metadata when state list only has sta
     },
     activeRunId: 'rid-new',
     api: {
-      settings: {
-        profileAliases: {
-          'xhs-0': 'batch-0',
-        },
+      pathJoin: (...parts: string[]) => parts.filter(Boolean).join('/'),
+      async cmdRunJson(spec: any) {
+        if (String(spec?.title || '').trim() === 'account list') {
+          return {
+            ok: true,
+            json: {
+              profiles: [
+                { profileId: 'xhs-0', alias: 'batch-0', name: 'batch-0', valid: true, accountId: 'acct-0' },
+              ],
+            },
+          };
+        }
+        return { ok: true, json: {} };
       },
       async configLoadLast() {
         return { keyword: '春晚', target: 222, lastProfileId: 'xhs-old', taskId: 'sched-old' };
