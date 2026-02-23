@@ -69,7 +69,7 @@ function createMockCtx(): MockBundle {
     settings,
     pathJoin: (...parts: string[]) => parts.filter(Boolean).join('/'),
     envCheckAll: async () => {
-      const browserReady = Boolean(state.env.firefox.installed || state.env.services.camoRuntime);
+      const browserReady = Boolean(state.env.services.camoRuntime);
       return {
         ...state.env,
         browserReady,
@@ -80,7 +80,7 @@ function createMockCtx(): MockBundle {
           runtime: !browserReady,
           geoip: !state.env.geoip.installed,
         },
-        allReady: Boolean(state.env.camo.installed && state.env.services.unifiedApi && browserReady),
+        allReady: Boolean(state.env.camo.installed && state.env.services.unifiedApi && state.env.services.camoRuntime),
       };
     },
     envCheckCamo: async () => state.env.camo,

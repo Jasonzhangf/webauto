@@ -46,7 +46,7 @@ export function renderSetupWizard(root: HTMLElement, ctx: any) {
       <div class="env-item" id="env-browser" style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
         <span style="display:flex; align-items:center; gap:8px; min-width:0;">
           <span class="icon" style="color: var(--text-4);">○</span>
-          <span class="env-label">Camo Runtime Service (7704，可选)</span>
+          <span class="env-label">Camo Runtime Service (7704)</span>
         </span>
         <button id="repair-core2-btn" class="secondary" style="display:none; flex:0 0 auto;">一键修复</button>
       </div>
@@ -397,13 +397,8 @@ export function renderSetupWizard(root: HTMLElement, ctx: any) {
         if (missingFlags.core) missing.push('unified-api');
         if (missingFlags.runtime) missing.push('browser-kernel');
         setupStatusText.textContent = `存在待修复项: ${missing.join(', ')}`;
-        if (missingFlags.runtimeService) {
-          setupStatusText.textContent += '（camo-runtime 未就绪，当前为可选）';
-        }
       } else if (!snapshot?.geoip?.installed) {
         setupStatusText.textContent = '环境就绪（GeoIP 可选，未安装不影响使用）';
-      } else if (!snapshot?.services?.camoRuntime) {
-        setupStatusText.textContent = '环境就绪（camo-runtime 未就绪，当前不阻塞）';
       }
     } catch (err) {
       console.error('Environment check failed:', err);

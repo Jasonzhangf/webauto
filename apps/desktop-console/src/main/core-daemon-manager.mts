@@ -9,8 +9,6 @@ const CAMO_RUNTIME_HEALTH_URL = 'http://127.0.0.1:7704/health';
 const CORE_HEALTH_URLS = [UNIFIED_API_HEALTH_URL, CAMO_RUNTIME_HEALTH_URL];
 const START_API_SCRIPT = path.join(REPO_ROOT, 'runtime', 'infra', 'utils', 'scripts', 'service', 'start-api.mjs');
 const STOP_API_SCRIPT = path.join(REPO_ROOT, 'runtime', 'infra', 'utils', 'scripts', 'service', 'stop-api.mjs');
-const DIST_UNIFIED_ENTRY = path.join(REPO_ROOT, 'dist', 'apps', 'webauto', 'server.js');
-let fallbackUnifiedApiPid: number | null = null;
 
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -68,10 +66,6 @@ async function areCoreServicesHealthy() {
   return health.every(Boolean);
 }
 
-async function isUnifiedApiHealthy() {
-  return checkHttpHealth(UNIFIED_API_HEALTH_URL);
-}
-
 async function runNodeScript(scriptPath: string, timeoutMs: number) {
   return new Promise<boolean>((resolve) => {
     const nodeBin = resolveNodeBin();
@@ -101,49 +95,6 @@ async function runNodeScript(scriptPath: string, timeoutMs: number) {
     child.once('exit', (code) => {
       clearTimeout(timer);
       resolve(code === 0);
-    });
-  });
-}
-
-async function runLongLivedNodeScript(scriptPath: string) {
-  return new Promise<boolean>((resolve) => {
-    const nodeBin = resolveNodeBin();
-    const child = spawn(nodeBin, [scriptPath], {
-      cwd: REPO_ROOT,
-      stdio: 'ignore',
-      windowsHide: true,
-      detached: false,
-      env: {
-        ...process.env,
-        WEBAUTO_RUNTIME_MODE: 'unified',
-      },
-    });
-
-    let settled = false;
-    const timer = setTimeout(() => {
-      if (settled) return;
-      settled = true;
-      fallbackUnifiedApiPid = typeof child.pid === 'number' ? child.pid : null;
-      resolve(true);
-    }, 200);
-
-    child.once('error', () => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      resolve(false);
-    });
-
-    child.once('exit', () => {
-      if (!settled) {
-        settled = true;
-        clearTimeout(timer);
-        resolve(false);
-        return;
-      }
-      if (fallbackUnifiedApiPid && child.pid === fallbackUnifiedApiPid) {
-        fallbackUnifiedApiPid = null;
-      }
     });
   });
 }
@@ -193,9 +144,11 @@ async function runCommand(command: string, args: string[], timeoutMs: number) {
 export async function startCoreDaemon(): Promise<boolean> {
   if (await areCoreServicesHealthy()) return true;
 
-  const startedApi = existsSync(START_API_SCRIPT)
-    ? await runNodeScript(START_API_SCRIPT, 40_000)
-    : (existsSync(DIST_UNIFIED_ENTRY) ? await runLongLivedNodeScript(DIST_UNIFIED_ENTRY) : false);
+  if (!existsSync(START_API_SCRIPT)) {
+    console.error('[CoreDaemonManager] Unified API start script not found');
+    return false;
+  }
+  const startedApi = await runNodeScript(START_API_SCRIPT, 40_000);
   if (!startedApi) {
     console.error('[CoreDaemonManager] Failed to start unified API service');
     return false;
@@ -207,32 +160,25 @@ export async function startCoreDaemon(): Promise<boolean> {
     40_000,
   );
   if (!startedBrowser) {
-    console.warn('[CoreDaemonManager] Failed to start camo browser backend, continue in degraded mode');
+    console.error('[CoreDaemonManager] Failed to start camo browser backend');
+    return false;
   }
 
   for (let i = 0; i < 60; i += 1) {
-    const [allHealthy, unifiedHealthy] = await Promise.all([
-      areCoreServicesHealthy(),
-      isUnifiedApiHealthy(),
-    ]);
+    const allHealthy = await areCoreServicesHealthy();
     if (allHealthy) return true;
-    if (unifiedHealthy) return true;
     await sleep(500);
   }
 
-  console.error('[CoreDaemonManager] Unified API still unhealthy after start');
+  console.error('[CoreDaemonManager] Core services still unhealthy after start');
   return false;
 }
 
 export async function stopCoreDaemon(): Promise<boolean> {
-  if (fallbackUnifiedApiPid) {
-    try {
-      process.kill(fallbackUnifiedApiPid, 'SIGTERM');
-    } catch {}
-    fallbackUnifiedApiPid = null;
+  if (!existsSync(STOP_API_SCRIPT)) {
+    console.error('[CoreDaemonManager] Unified API stop script not found');
+    return false;
   }
-
-  if (!existsSync(STOP_API_SCRIPT)) return true;
 
   const stoppedApi = await runNodeScript(STOP_API_SCRIPT, 20_000);
   if (!stoppedApi) {

@@ -137,23 +137,33 @@ test('checkFirefox supports direct camoufox command path probe', async () => {
   assert.equal(result.path, installRoot);
 });
 
-test('checkEnvironment aligns ready semantics with runtime service fallback', async () => {
+test('checkEnvironment requires camo runtime service for readiness', async () => {
   const binDir = path.join(tempRoot, 'bin');
   if (process.platform === 'win32') {
     ensureExecutable(path.join(binDir, 'camo.cmd'), '@echo off\r\necho camo version 0.1.0\r\n');
+    ensureExecutable(path.join(binDir, 'camoufox.cmd'), '@echo off\r\necho C:\\camoufox-install\r\n');
   } else {
     ensureExecutable(path.join(binDir, 'camo'), '#!/bin/sh\necho \"camo version 0.1.0\"\n');
+    ensureExecutable(path.join(binDir, 'camoufox'), '#!/bin/sh\necho \"/tmp/camoufox-install\"\n');
   }
+  const installRoot = process.platform === 'win32' ? 'C:\\camoufox-install' : '/tmp/camoufox-install';
+  fs.mkdirSync(installRoot, { recursive: true });
+  const exeName = process.platform === 'win32' ? 'camoufox.exe' : 'camoufox';
+  fs.writeFileSync(path.join(installRoot, exeName), 'stub');
   process.env.PATH = binDir;
   (globalThis as any).fetch = async (url: string) => {
     if (String(url).includes(':7701')) return { ok: true };
-    if (String(url).includes(':7704')) return { ok: true };
+    if (String(url).includes(':7704')) return { ok: false };
     return { ok: false };
   };
 
   const env = await checkEnvironment();
   assert.equal(env.camo.installed, true);
   assert.equal(env.services.unifiedApi, true);
-  assert.equal(env.services.camoRuntime, true);
-  assert.equal(env.allReady, true);
+  assert.equal(env.services.camoRuntime, false);
+  assert.equal(env.firefox.installed, true);
+  assert.equal(env.browserReady, false);
+  assert.equal(env.missing.runtimeService, true);
+  assert.equal(env.missing.runtime, true);
+  assert.equal(env.allReady, false);
 });

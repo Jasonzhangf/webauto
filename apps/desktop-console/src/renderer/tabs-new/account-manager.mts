@@ -78,7 +78,7 @@ export function renderAccountManager(root: HTMLElement, ctx: any) {
       </div>
       <div class="env-item" id="env-browser">
         <span class="icon" style="color: var(--text-4);">○</span>
-        <span>Camo Runtime Service (7704，可选)</span>
+        <span>Camo Runtime Service (7704)</span>
       </div>
       <div class="env-item" id="env-firefox">
         <span class="icon" style="color: var(--text-4);">○</span>

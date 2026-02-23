@@ -278,7 +278,7 @@ export async function checkEnvironment(): Promise<{
     checkGeoIP(),
   ]);
 
-  const browserReady = Boolean(firefox.installed || services.camoRuntime);
+  const browserReady = Boolean(services.camoRuntime);
   const missing = {
     core: !services.unifiedApi,
     runtimeService: !services.camoRuntime,
@@ -286,6 +286,6 @@ export async function checkEnvironment(): Promise<{
     runtime: !browserReady,
     geoip: !geoip.installed,
   };
-  const allReady = camo.installed && services.unifiedApi && browserReady;
+  const allReady = camo.installed && services.unifiedApi && services.camoRuntime;
   return { camo, services, firefox, geoip, browserReady, missing, allReady };
 }

@@ -131,7 +131,7 @@ apps/desktop-console/
 
 ### 环境检查 API
 - `envCheckCamo()` - 检查 Camoufox CLI
-- `envCheckServices()` - 检查服务状态 (7701，7704 为可选)
+- `envCheckServices()` - 检查服务状态 (7701 + 7704 必须就绪)
 - `envCheckFirefox()` - 检查 Firefox 浏览器
 - `envCheckAll()` - 完整环境检查
 
