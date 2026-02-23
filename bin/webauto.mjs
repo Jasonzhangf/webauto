@@ -516,12 +516,7 @@ async function ensureDepsAndBuild() {
       process.exit(1);
     }
     if (!checkDesktopConsoleBuilt()) {
-      console.log('[webauto] desktop-console dist missing, rebuilding...');
-      const npm = npmRunner();
-      await run(npm.cmd, [...npm.prefix, '--prefix', appDir, '--workspaces=false', 'run', 'build']);
-    }
-    if (!checkDesktopConsoleBuilt()) {
-      console.error('❌ desktop-console dist missing after rebuild.');
+      console.error('❌ desktop-console dist missing from package. Please reinstall @web-auto/webauto.');
       process.exit(1);
     }
     const pkgJson = JSON.parse(readFileSync(path.join(ROOT, 'package.json'), 'utf-8'));

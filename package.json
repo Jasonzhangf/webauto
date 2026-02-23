@@ -14,6 +14,7 @@
     "services/",
     "apps/desktop-console/dist/",
     "apps/desktop-console/default-settings.json",
+    "apps/desktop-console/package.json",
     "apps/desktop-console/entry/ui-console.mjs",
     "apps/desktop-console/entry/ui-cli.mjs",
     "apps/webauto/",
