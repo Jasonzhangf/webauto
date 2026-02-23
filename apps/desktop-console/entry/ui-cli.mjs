@@ -680,7 +680,7 @@ async function main() {
   }
 
   if (cmd === 'status' || cmd === 'snapshot') {
-    const pathName = cmd === 'snapshot' ? '/snapshot' : '/status';
+    const pathName = cmd === 'snapshot' ? '/snapshot' : '/health';
     const statusTimeoutMs = parseIntSafe(args.timeout, DEFAULT_STATUS_TIMEOUT_MS);
     const ret = await requestJson(endpoint, pathName, {
       timeoutMs: statusTimeoutMs,
