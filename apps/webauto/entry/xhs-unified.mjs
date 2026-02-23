@@ -524,6 +524,7 @@ async function runProfile(spec, argv, baseOverrides = {}) {
     'xhs.unified.stop_screenshot',
     'xhs.unified.profile_failed',
     'autoscript:operation_done',
+    'autoscript:operation_progress',
     'autoscript:operation_error',
     'autoscript:operation_terminal',
     'autoscript:operation_recovery_failed',
@@ -601,6 +602,7 @@ async function runProfile(spec, argv, baseOverrides = {}) {
       || eventName === 'autoscript:stop'
       || eventName === 'autoscript:impact'
       || eventName === 'autoscript:operation_start'
+      || eventName === 'autoscript:operation_progress'
       || eventName === 'autoscript:operation_done'
       || eventName === 'autoscript:operation_error'
       || eventName === 'autoscript:operation_recovery_failed'
