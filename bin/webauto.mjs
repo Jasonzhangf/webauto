@@ -506,11 +506,21 @@ async function ensureDepsAndBuild() {
   // Global package should already ship renderer build.
   if (isGlobalInstall()) {
     if (!checkDesktopConsoleDeps()) {
-      console.error('❌ electron runtime missing from package. Please reinstall @web-auto/webauto.');
+      console.log('[webauto] Installing desktop-console runtime dependencies...');
+      const npm = npmRunner();
+      await runInDir(appDir, npm.cmd, [...npm.prefix, 'install', '--omit=dev']);
+    }
+    if (!checkDesktopConsoleDeps()) {
+      console.error('❌ electron runtime installation failed for desktop-console.');
       process.exit(1);
     }
     if (!checkDesktopConsoleBuilt()) {
-      console.error('❌ desktop-console dist missing from package. Please reinstall @web-auto/webauto.');
+      console.log('[webauto] desktop-console dist missing, rebuilding...');
+      const npm = npmRunner();
+      await runInDir(appDir, npm.cmd, [...npm.prefix, 'run', 'build']);
+    }
+    if (!checkDesktopConsoleBuilt()) {
+      console.error('❌ desktop-console dist missing after rebuild.');
       process.exit(1);
     }
     const pkgJson = JSON.parse(readFileSync(path.join(ROOT, 'package.json'), 'utf-8'));
@@ -541,9 +551,9 @@ async function ensureDepsAndBuild() {
 
 async function uiConsole({ build, install, checkOnly, noDaemon }) {
   console.log(`[webauto] version ${ROOT_VERSION}`);
-  const okServices = checkServicesBuilt();
-  const okDeps = checkDesktopConsoleDeps();
-  const okUiBuilt = checkDesktopConsoleBuilt();
+  let okServices = checkServicesBuilt();
+  let okDeps = checkDesktopConsoleDeps();
+  let okUiBuilt = checkDesktopConsoleBuilt();
 
   if (checkOnly) {
     console.log(`[check] repoRoot: ${ROOT}`);
@@ -558,8 +568,10 @@ async function uiConsole({ build, install, checkOnly, noDaemon }) {
   if (isGlobalInstall()) {
     const state = loadState();
     const pkgJson = JSON.parse(readFileSync(path.join(ROOT, 'package.json'), 'utf-8'));
-    if (!state.initialized || state.version !== pkgJson.version) {
+    if (!state.initialized || state.version !== pkgJson.version || !okDeps || !okUiBuilt) {
       await ensureDepsAndBuild();
+      okDeps = checkDesktopConsoleDeps();
+      okUiBuilt = checkDesktopConsoleBuilt();
     }
   } else {
     // Local dev mode - require explicit build
@@ -570,6 +582,7 @@ async function uiConsole({ build, install, checkOnly, noDaemon }) {
       }
       const npm = npmRunner();
       await run(npm.cmd, [...npm.prefix, 'run', 'build:services']);
+      okServices = checkServicesBuilt();
     }
   }
 
