@@ -6,6 +6,13 @@ export function buildSubmitSearchScript(params = {}) {
     state.metrics = metrics;
     metrics.searchCount = Number(metrics.searchCount || 0) + 1;
     metrics.lastSearchAt = new Date().toISOString();
+    const actionTrace = [];
+    const pushTrace = (payload) => {
+      actionTrace.push({
+        ts: new Date().toISOString(),
+        ...payload,
+      });
+    };
     const input = document.querySelector('#search-input, input.search-input');
     if (!(input instanceof HTMLInputElement)) {
       throw new Error('SEARCH_INPUT_NOT_FOUND');
@@ -28,8 +35,12 @@ export function buildSubmitSearchScript(params = {}) {
     for (const selector of candidates) {
       const button = document.querySelector(selector);
       if (!button) continue;
-      if (button instanceof HTMLElement) button.scrollIntoView({ behavior: 'auto', block: 'center' });
+      if (button instanceof HTMLElement) {
+        pushTrace({ kind: 'scroll', stage: 'submit_search', selector, via: 'scrollIntoView' });
+        button.scrollIntoView({ behavior: 'auto', block: 'center' });
+      }
       await new Promise((resolve) => setTimeout(resolve, 80));
+      pushTrace({ kind: 'click', stage: 'submit_search', selector });
       button.click();
       clickedSelector = selector;
       break;
@@ -46,6 +57,7 @@ export function buildSubmitSearchScript(params = {}) {
       beforeUrl,
       afterUrl: window.location.href,
       searchCount: metrics.searchCount,
+      actionTrace,
     };
   })()`;
 }
@@ -100,6 +112,13 @@ export function buildOpenDetailScript(params = {}) {
     };
 
     const state = loadState();
+    const actionTrace = [];
+    const pushTrace = (payload) => {
+      actionTrace.push({
+        ts: new Date().toISOString(),
+        ...payload,
+      });
+    };
     if (!Array.isArray(state.visitedNoteIds)) state.visitedNoteIds = [];
     const requestedKeyword = ${JSON.stringify(keyword)};
     const mode = ${JSON.stringify(mode)};
@@ -156,11 +175,23 @@ export function buildOpenDetailScript(params = {}) {
       const maxRounds = Number(${seedCollectMaxRounds});
       const targetCount = Number(${seedCollectCount});
       for (let round = 0; round < maxRounds && seedCollectedSet.size < targetCount; round += 1) {
+        pushTrace({
+          kind: 'scroll',
+          stage: 'seed_collect',
+          round: round + 1,
+          deltaY: Number(${seedCollectStep}),
+        });
         window.scrollBy({ top: Number(${seedCollectStep}), left: 0, behavior: 'auto' });
         await new Promise((resolve) => setTimeout(resolve, Number(${seedCollectSettleMs})));
         collectVisible();
       }
       if (${seedResetToTop ? 'true' : 'false'}) {
+        pushTrace({
+          kind: 'scroll',
+          stage: 'seed_collect',
+          round: 'reset_to_top',
+          toTop: true,
+        });
         window.scrollTo({ top: 0, behavior: 'auto' });
         await new Promise((resolve) => setTimeout(resolve, Number(${seedCollectSettleMs})));
       }
@@ -190,6 +221,12 @@ export function buildOpenDetailScript(params = {}) {
       let stagnantRounds = 0;
       for (let round = 0; !next && round < Number(${nextSeekRounds}); round += 1) {
         const beforeTop = window.scrollY || document.documentElement.scrollTop || document.body.scrollTop || 0;
+        pushTrace({
+          kind: 'scroll',
+          stage: 'seek_next_detail',
+          round: round + 1,
+          deltaY: seekStep,
+        });
         window.scrollBy({ top: seekStep, left: 0, behavior: 'auto' });
         await new Promise((resolve) => setTimeout(resolve, Number(${nextSeekSettleMs})));
         nodes = mapNodes();
@@ -238,9 +275,21 @@ export function buildOpenDetailScript(params = {}) {
       return !searchVisible;
     };
 
+    pushTrace({
+      kind: 'scroll',
+      stage: 'open_detail',
+      noteId: next.noteId,
+      via: 'scrollIntoView',
+    });
     next.cover.scrollIntoView({ behavior: 'auto', block: 'center' });
     await new Promise((resolve) => setTimeout(resolve, 140));
     const beforeUrl = window.location.href;
+    pushTrace({
+      kind: 'click',
+      stage: 'open_detail',
+      noteId: next.noteId,
+      selector: 'a.cover',
+    });
     next.cover.click();
 
     let detailReady = false;
@@ -274,6 +323,7 @@ export function buildOpenDetailScript(params = {}) {
       excludedCount: excludedNoteIds.size,
       seedCollectedCount: seedCollectedSet.size,
       seedCollectedNoteIds: Array.from(seedCollectedSet),
+      actionTrace,
     };
   })()`;
 }

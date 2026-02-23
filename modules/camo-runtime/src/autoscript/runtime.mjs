@@ -640,6 +640,20 @@ export class AutoscriptRunner {
         attempt,
         maxAttempts,
         runtime: this.runtimeContext,
+        emitProgress: (payload = {}) => {
+          const detail = payload && typeof payload === 'object'
+            ? { ...payload }
+            : { value: payload };
+          const kind = String(detail.kind || '').trim() || 'trace';
+          if (Object.prototype.hasOwnProperty.call(detail, 'kind')) delete detail.kind;
+          this.log('autoscript:operation_progress', {
+            operationId: operation.id,
+            action: operation.action,
+            attempt,
+            kind,
+            ...detail,
+          });
+        },
       };
 
       await this.applyPacingBeforeAttempt(operation, attempt);

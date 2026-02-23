@@ -25,6 +25,39 @@ import { buildOpenDetailScript, buildSubmitSearchScript } from './xhs/search.mjs
 
 const XHS_OPERATION_LOCKS = new Map();
 
+function emitOperationProgress(context, payload = {}) {
+  const emit = context?.emitProgress;
+  if (typeof emit !== 'function') return;
+  emit(payload);
+}
+
+function emitActionTrace(context, actionTrace = [], extra = {}) {
+  if (!Array.isArray(actionTrace) || actionTrace.length === 0) return;
+  for (let i = 0; i < actionTrace.length; i += 1) {
+    const row = actionTrace[i];
+    if (!row || typeof row !== 'object') continue;
+    const kind = String(row.kind || row.action || '').trim().toLowerCase() || 'trace';
+    emitOperationProgress(context, {
+      kind,
+      step: i + 1,
+      ...extra,
+      ...row,
+    });
+  }
+}
+
+function replaceEvaluateResultData(rawData, payload) {
+  if (rawData && typeof rawData === 'object') {
+    if (Object.prototype.hasOwnProperty.call(rawData, 'result')) {
+      return { ...rawData, result: payload };
+    }
+    if (rawData.data && typeof rawData.data === 'object' && Object.prototype.hasOwnProperty.call(rawData.data, 'result')) {
+      return { ...rawData, data: { ...rawData.data, result: payload } };
+    }
+  }
+  return payload;
+}
+
 function toLockKey(text, fallback = '') {
   const value = String(text || '').trim();
   return value || fallback;
@@ -104,19 +137,40 @@ async function saveSharedClaimDoc(filePath, doc) {
   await fsp.writeFile(filePath, `${JSON.stringify(payload, null, 2)}\n`, 'utf8');
 }
 
-async function executeSubmitSearchOperation({ profileId, params = {} }) {
+async function executeSubmitSearchOperation({
+  profileId,
+  params = {},
+  context = {},
+}) {
   const script = buildSubmitSearchScript(params);
   const highlight = params.highlight !== false;
   const lockKey = resolveSearchLockKey(params);
-  return withSerializedLock(lockKey ? `xhs_submit_search:${lockKey}` : '', () => evaluateWithScript({
-    profileId,
-    script,
-    message: 'xhs_submit_search done',
-    highlight,
-  }));
+  return withSerializedLock(lockKey ? `xhs_submit_search:${lockKey}` : '', async () => {
+    const operationResult = await evaluateWithScript({
+      profileId,
+      script,
+      message: 'xhs_submit_search done',
+      highlight,
+    });
+    const payload = extractEvaluateResultData(operationResult.data) || {};
+    const actionTrace = Array.isArray(payload.actionTrace) ? payload.actionTrace : [];
+    if (actionTrace.length > 0) {
+      emitActionTrace(context, actionTrace, { stage: 'xhs_submit_search' });
+      delete payload.actionTrace;
+      return {
+        ...operationResult,
+        data: replaceEvaluateResultData(operationResult.data, payload),
+      };
+    }
+    return operationResult;
+  });
 }
 
-async function executeOpenDetailOperation({ profileId, params = {} }) {
+async function executeOpenDetailOperation({
+  profileId,
+  params = {},
+  context = {},
+}) {
   const highlight = params.highlight !== false;
   const claimPath = resolveSharedClaimPath(params);
   const lockKey = claimPath ? `xhs_open_detail:${claimPath}` : '';
@@ -156,8 +210,15 @@ async function executeOpenDetailOperation({ profileId, params = {} }) {
       highlight,
     });
     const payload = extractEvaluateResultData(operationResult.data) || {};
+    const actionTrace = Array.isArray(payload.actionTrace) ? payload.actionTrace : [];
+    if (actionTrace.length > 0) {
+      emitActionTrace(context, actionTrace, { stage: 'xhs_open_detail' });
+      delete payload.actionTrace;
+    }
     return {
-      operationResult,
+      operationResult: actionTrace.length > 0
+        ? { ...operationResult, data: replaceEvaluateResultData(operationResult.data, payload) }
+        : operationResult,
       payload: payload && typeof payload === 'object' ? payload : {},
     };
   };
@@ -361,7 +422,11 @@ async function handleRaiseError({ params }) {
   return asErrorPayload('OPERATION_FAILED', code || 'AUTOSCRIPT_ABORT');
 }
 
-async function executeCommentsHarvestOperation({ profileId, params = {} }) {
+async function executeCommentsHarvestOperation({
+  profileId,
+  params = {},
+  context = {},
+}) {
   const script = buildCommentsHarvestScript(params);
   const highlight = params.highlight !== false;
   const operationResult = await evaluateWithScript({
@@ -372,6 +437,11 @@ async function executeCommentsHarvestOperation({ profileId, params = {} }) {
   });
 
   const payload = extractEvaluateResultData(operationResult.data) || {};
+  const actionTrace = Array.isArray(payload.actionTrace) ? payload.actionTrace : [];
+  if (actionTrace.length > 0) {
+    emitActionTrace(context, actionTrace, { stage: 'xhs_comments_harvest' });
+    delete payload.actionTrace;
+  }
   const shouldPersistComments = params.persistComments === true || params.persistCollectedComments === true;
   const includeComments = params.includeComments !== false;
   const comments = Array.isArray(payload.comments) ? payload.comments : [];
@@ -379,12 +449,12 @@ async function executeCommentsHarvestOperation({ profileId, params = {} }) {
   if (!shouldPersistComments || !includeComments || comments.length === 0) {
     return {
       ...operationResult,
-      data: {
+      data: replaceEvaluateResultData(operationResult.data, {
         ...payload,
         commentsPath: null,
         commentsAdded: 0,
         commentsTotal: Number(payload.collected || comments.length || 0),
-      },
+      }),
     };
   }
 
@@ -434,10 +504,16 @@ export function isXhsAutoscriptAction(action) {
   return normalized === 'raise_error' || normalized.startsWith('xhs_');
 }
 
-export async function executeXhsAutoscriptOperation({ profileId, action, params = {} }) {
+export async function executeXhsAutoscriptOperation({
+  profileId,
+  action,
+  params = {},
+  operation = null,
+  context = {},
+}) {
   const handler = XHS_ACTION_HANDLERS[action];
   if (!handler) {
     return asErrorPayload('UNSUPPORTED_OPERATION', `Unsupported xhs operation: ${action}`);
   }
-  return handler({ profileId, params });
+  return handler({ profileId, params, operation, context });
 }

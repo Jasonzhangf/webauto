@@ -29,6 +29,13 @@ export function buildCommentsHarvestScript(params = {}) {
     const metricsState = state.metrics && typeof state.metrics === 'object' ? state.metrics : {};
     state.metrics = metricsState;
     metricsState.searchCount = Number(metricsState.searchCount || 0);
+    const actionTrace = [];
+    const pushTrace = (payload) => {
+      actionTrace.push({
+        ts: new Date().toISOString(),
+        ...payload,
+      });
+    };
     const detailSelectors = [
       '.note-detail-mask',
       '.note-detail-page',
@@ -208,7 +215,13 @@ export function buildCommentsHarvestScript(params = {}) {
       no_effect: 0,
       no_new_comments: 0,
     };
-    const performScroll = async (deltaY, waitMs = settleMs) => {
+    const performScroll = async (deltaY, waitMs = settleMs, meta = {}) => {
+      pushTrace({
+        kind: 'scroll',
+        stage: 'xhs_comments_harvest',
+        deltaY: Number(deltaY),
+        ...meta,
+      });
       if (typeof scroller?.scrollBy === 'function') {
         scroller.scrollBy({ top: deltaY, behavior: 'auto' });
       } else {
@@ -240,17 +253,23 @@ export function buildCommentsHarvestScript(params = {}) {
       }
 
       const prevTop = beforeMetrics.scrollTop;
-      if (typeof scroller?.scrollBy === 'function') {
-        scroller.scrollBy({ top: scrollStep, behavior: 'auto' });
-      } else {
-        window.scrollBy({ top: scrollStep, behavior: 'auto' });
-      }
-      await new Promise((resolve) => setTimeout(resolve, settleMs));
+      await performScroll(scrollStep, settleMs, {
+        round,
+        reason: 'main_scroll',
+      });
       collect(round);
       let afterMetrics = readMetrics();
       let moved = Math.abs(afterMetrics.scrollTop - prevTop) > 1;
       if (!moved && typeof window.scrollBy === 'function') {
-        window.scrollBy({ top: Math.max(120, Math.floor(scrollStep / 2)), behavior: 'auto' });
+        const fallbackStep = Math.max(120, Math.floor(scrollStep / 2));
+        pushTrace({
+          kind: 'scroll',
+          stage: 'xhs_comments_harvest',
+          round,
+          reason: 'fallback_scroll',
+          deltaY: Number(fallbackStep),
+        });
+        window.scrollBy({ top: fallbackStep, behavior: 'auto' });
         await new Promise((resolve) => setTimeout(resolve, settleMs));
         collect(round);
         afterMetrics = readMetrics();
@@ -298,13 +317,23 @@ export function buildCommentsHarvestScript(params = {}) {
         recoveries += 1;
         recoveryReasonCounts[recoveryTrigger] += 1;
         for (let i = 0; i < recoveryUpRounds; i += 1) {
-          await performScroll(-recoveryUpStep, settleMs + 120);
+          await performScroll(-recoveryUpStep, settleMs + 120, {
+            round,
+            reason: 'recovery_up',
+            recoveryTrigger,
+            recoveryStep: i + 1,
+          });
           collect(round);
         }
         const downBoost = Math.min(maxRecoveryDownBoost, Math.max(0, recoveries - 1) * recoveryDownBoostPerAttempt);
         const downRounds = recoveryDownRounds + downBoost;
         for (let i = 0; i < downRounds; i += 1) {
-          await performScroll(recoveryDownStep, settleMs + 180);
+          await performScroll(recoveryDownStep, settleMs + 180, {
+            round,
+            reason: 'recovery_down',
+            recoveryTrigger,
+            recoveryStep: i + 1,
+          });
           collect(round);
         }
         const recoveredMetrics = readMetrics();
@@ -405,6 +434,7 @@ export function buildCommentsHarvestScript(params = {}) {
       budgetExpectedCommentsCount,
       scroll: metrics,
     };
+    payload.actionTrace = actionTrace;
     if (includeComments) {
       const bounded = commentsLimit > 0 ? comments.slice(0, commentsLimit) : comments;
       payload.comments = bounded;

@@ -165,9 +165,16 @@ function buildCollectLikeTargetsScript() {
 function buildClickLikeByIndexScript(index, highlight, skipAlreadyCheck = false) {
   return `(async () => {
     const idx = Number(${JSON.stringify(index)});
+    const actionTrace = [];
+    const pushTrace = (payload) => {
+      actionTrace.push({
+        ts: new Date().toISOString(),
+        ...payload,
+      });
+    };
     const items = Array.from(document.querySelectorAll('.comment-item'));
     const item = items[idx];
-    if (!item) return { clicked: false, reason: 'comment_item_not_found', index: idx };
+    if (!item) return { clicked: false, reason: 'comment_item_not_found', index: idx, actionTrace };
     const findLikeControl = (node) => {
       const selectors = [
         '.like-wrapper',
@@ -195,12 +202,14 @@ function buildClickLikeByIndexScript(index, highlight, skipAlreadyCheck = false)
     };
 
     const likeControl = findLikeControl(item);
-    if (!likeControl) return { clicked: false, reason: 'like_control_not_found', index: idx };
+    if (!likeControl) return { clicked: false, reason: 'like_control_not_found', index: idx, actionTrace };
     const beforeLiked = isAlreadyLiked(likeControl);
     if (beforeLiked && !${skipAlreadyCheck ? 'true' : 'false'}) {
-      return { clicked: false, alreadyLiked: true, reason: 'already_liked', index: idx };
+      return { clicked: false, alreadyLiked: true, reason: 'already_liked', index: idx, actionTrace };
     }
+    pushTrace({ kind: 'scroll', stage: 'xhs_comment_like', index: idx, target: 'comment_item', via: 'scrollIntoView' });
     item.scrollIntoView({ behavior: 'auto', block: 'center' });
+    pushTrace({ kind: 'scroll', stage: 'xhs_comment_like', index: idx, target: 'like_control', via: 'scrollIntoView' });
     likeControl.scrollIntoView({ behavior: 'auto', block: 'center' });
     await new Promise((resolve) => setTimeout(resolve, 120));
     if (${highlight ? 'true' : 'false'}) {
@@ -208,6 +217,7 @@ function buildClickLikeByIndexScript(index, highlight, skipAlreadyCheck = false)
       likeControl.style.outline = '2px solid #00d6ff';
       setTimeout(() => { likeControl.style.outline = prev; }, 450);
     }
+    pushTrace({ kind: 'click', stage: 'xhs_comment_like', index: idx, target: 'like_control' });
     likeControl.click();
     await new Promise((resolve) => setTimeout(resolve, 220));
     return {
@@ -216,6 +226,7 @@ function buildClickLikeByIndexScript(index, highlight, skipAlreadyCheck = false)
       likedAfter: isAlreadyLiked(likeControl),
       reason: 'clicked',
       index: idx,
+      actionTrace,
     };
   })()`;
 }
@@ -231,7 +242,28 @@ async function captureScreenshotToFile({ profileId, filePath }) {
   }
 }
 
-export async function executeCommentLikeOperation({ profileId, params = {} }) {
+function emitProgress(context, payload = {}) {
+  const emit = context?.emitProgress;
+  if (typeof emit !== 'function') return;
+  emit(payload);
+}
+
+function emitActionTrace(context, actionTrace = [], extra = {}) {
+  if (!Array.isArray(actionTrace) || actionTrace.length === 0) return;
+  for (let i = 0; i < actionTrace.length; i += 1) {
+    const row = actionTrace[i];
+    if (!row || typeof row !== 'object') continue;
+    const kind = String(row.kind || row.action || '').trim().toLowerCase() || 'trace';
+    emitProgress(context, {
+      kind,
+      step: i + 1,
+      ...extra,
+      ...row,
+    });
+  }
+}
+
+export async function executeCommentLikeOperation({ profileId, params = {}, context = {} }) {
   const maxLikes = Math.max(1, Number(params.maxLikes ?? params.maxLikesPerRound ?? 1) || 1);
   const rawKeywords = normalizeArray(params.keywords || params.likeKeywords);
   const rules = compileLikeRules(rawKeywords);
@@ -353,6 +385,16 @@ export async function executeCommentLikeOperation({ profileId, params = {} }) {
       highlight: false,
     });
     const clickResult = extractEvaluateResultData(clickRaw) || {};
+    const clickTrace = Array.isArray(clickResult.actionTrace) ? clickResult.actionTrace : [];
+    if (clickTrace.length > 0) {
+      emitActionTrace(context, clickTrace, {
+        stage: 'xhs_comment_like',
+        noteId: output.noteId,
+        commentIndex: Number(row.index),
+        fallback: false,
+      });
+      delete clickResult.actionTrace;
+    }
 
     const afterPath = saveEvidence
       ? await captureScreenshotToFile({
@@ -454,6 +496,16 @@ export async function executeCommentLikeOperation({ profileId, params = {} }) {
         highlight: false,
       });
       const clickResult = extractEvaluateResultData(clickRaw) || {};
+      const clickTrace = Array.isArray(clickResult.actionTrace) ? clickResult.actionTrace : [];
+      if (clickTrace.length > 0) {
+        emitActionTrace(context, clickTrace, {
+          stage: 'xhs_comment_like',
+          noteId: output.noteId,
+          commentIndex: Number(row.index),
+          fallback: true,
+        });
+        delete clickResult.actionTrace;
+      }
       const afterPath = saveEvidence
         ? await captureScreenshotToFile({
           profileId,
