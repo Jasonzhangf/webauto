@@ -39,8 +39,8 @@ type UiCliBridgeOptions = {
 
 const DEFAULT_HOST = '127.0.0.1';
 const DEFAULT_PORT = 7716;
-const DEFAULT_SNAPSHOT_TIMEOUT_MS = 12_000;
-const DEFAULT_ACTION_TIMEOUT_MS = 12_000;
+const DEFAULT_SNAPSHOT_TIMEOUT_MS = 20_000;
+const DEFAULT_ACTION_TIMEOUT_MS = 25_000;
 const DEFAULT_WAIT_PROBE_TIMEOUT_MS = 3_000;
 
 function normalizePathForPlatform(raw: string, platform = process.platform) {
