@@ -107,7 +107,7 @@ webauto account sync-alias xhs-0001
 
 :: 调度任务
 webauto schedule list
-webauto schedule run --id <scheduleId>
+webauto schedule run <taskId>
 ```
 
 ## 7. XHS 运行前初始化
