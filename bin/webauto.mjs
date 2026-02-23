@@ -509,7 +509,7 @@ async function ensureDepsAndBuild() {
     if (!checkDesktopConsoleDeps()) {
       console.log('[webauto] Installing desktop-console runtime dependencies...');
       const npm = npmRunner();
-      await runInDir(appDir, npm.cmd, [...npm.prefix, 'install', '--omit=dev']);
+      await run(npm.cmd, [...npm.prefix, '--prefix', appDir, '--workspaces=false', 'install', '--omit=dev']);
     }
     if (!checkDesktopConsoleDeps()) {
       console.error('❌ electron runtime installation failed for desktop-console.');
@@ -518,7 +518,7 @@ async function ensureDepsAndBuild() {
     if (!checkDesktopConsoleBuilt()) {
       console.log('[webauto] desktop-console dist missing, rebuilding...');
       const npm = npmRunner();
-      await runInDir(appDir, npm.cmd, [...npm.prefix, 'run', 'build']);
+      await run(npm.cmd, [...npm.prefix, '--prefix', appDir, '--workspaces=false', 'run', 'build']);
     }
     if (!checkDesktopConsoleBuilt()) {
       console.error('❌ desktop-console dist missing after rebuild.');
