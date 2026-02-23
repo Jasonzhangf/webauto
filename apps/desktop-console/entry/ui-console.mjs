@@ -136,18 +136,22 @@ async function startConsole(noDaemon = false) {
   if (noDaemon) env.WEBAUTO_NO_DAEMON = '1';
   const detached = !noDaemon;
   const stdio = detached ? 'ignore' : 'inherit';
-
-  const useCmd = process.platform === 'win32';
-  const spawnCmd = useCmd ? 'cmd.exe' : npxBin;
-  const spawnArgs = useCmd
-    ? ['/d', '/s', '/c', npxBin, 'electron', DIST_MAIN]
-    : ['electron', DIST_MAIN];
+  const electronBin = process.platform === 'win32'
+    ? path.join(APP_ROOT, 'node_modules', 'electron', 'dist', 'electron.exe')
+    : path.join(APP_ROOT, 'node_modules', 'electron', 'dist', 'electron');
+  const useDirectElectron = existsSync(electronBin);
+  const useCmd = process.platform === 'win32' && !useDirectElectron;
+  const spawnCmd = useDirectElectron ? electronBin : (useCmd ? 'cmd.exe' : npxBin);
+  const spawnArgs = useDirectElectron
+    ? [DIST_MAIN]
+    : (useCmd ? ['/d', '/s', '/c', npxBin, 'electron', DIST_MAIN] : ['electron', DIST_MAIN]);
 
   const child = spawn(spawnCmd, spawnArgs, {
     cwd: APP_ROOT,
     env,
     stdio,
-    detached
+    detached,
+    windowsHide: true,
   });
 
   if (noDaemon) {
