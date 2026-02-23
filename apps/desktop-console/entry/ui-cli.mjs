@@ -18,6 +18,7 @@ const readEnvPositiveInt = (name, fallback) => {
 const DEFAULT_HTTP_TIMEOUT_MS = readEnvPositiveInt('WEBAUTO_UI_CLI_HTTP_TIMEOUT_MS', 25_000);
 const DEFAULT_HTTP_RETRIES = readEnvPositiveInt('WEBAUTO_UI_CLI_HTTP_RETRIES', 1);
 const DEFAULT_START_HEALTH_TIMEOUT_MS = readEnvPositiveInt('WEBAUTO_UI_CLI_START_HEALTH_TIMEOUT_MS', 8_000);
+const DEFAULT_STATUS_TIMEOUT_MS = readEnvPositiveInt('WEBAUTO_UI_CLI_STATUS_TIMEOUT_MS', 45_000);
 
 function normalizePathForPlatform(raw, platform = process.platform) {
   const input = String(raw || '').trim();
@@ -680,8 +681,9 @@ async function main() {
 
   if (cmd === 'status' || cmd === 'snapshot') {
     const pathName = cmd === 'snapshot' ? '/snapshot' : '/status';
+    const statusTimeoutMs = parseIntSafe(args.timeout, DEFAULT_STATUS_TIMEOUT_MS);
     const ret = await requestJson(endpoint, pathName, {
-      timeoutMs: parseIntSafe(args.timeout, DEFAULT_HTTP_TIMEOUT_MS),
+      timeoutMs: statusTimeoutMs,
       retries: DEFAULT_HTTP_RETRIES,
     });
     if (!ret.ok) throw new Error(ret.json?.error || `http_${ret.status}`);
