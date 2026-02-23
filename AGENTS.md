@@ -166,6 +166,14 @@ npm --prefix apps/desktop-console run test:renderer:coverage
 - UI：纯展示与触发（不做编排/逻辑判断）。
 - App/Orchestrator：负责编排与生命周期管理，把 UI 输入归一化成脚本/模块可执行参数。
 
+### 2.1 仓库边界与路径（强制）
+
+- `webauto` 仓库路径：`~/Documents/github/webauto`（本仓库，承载业务编排）。
+- `camo` 仓库路径：`~/Documents/code/camo`（通用 runtime/会话/路径能力仓库）。
+- `webauto` 允许承载具体业务逻辑（例如 XHS 编排、业务策略与流程）。
+- `camo` 禁止承载具体业务编排；若发现业务代码进入 `camo`，应拆回 `webauto`。
+- 当 `webauto` 依赖 `camo` 新能力时，发布顺序必须是：先发 `@web-auto/camo`，再发 `@web-auto/webauto`。
+
 ## 3. 小红书风控安全规则（一级规则）
 
 - 禁止构造 URL 直达搜索/详情；必须“页面内输入框搜索 + 回车”。
