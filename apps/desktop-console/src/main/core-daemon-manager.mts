@@ -2,6 +2,7 @@ import { spawn } from 'child_process';
 import path from 'path';
 import { existsSync } from 'fs';
 import { fileURLToPath } from 'url';
+import { createRequire } from 'module';
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../..');
 const UNIFIED_API_HEALTH_URL = 'http://127.0.0.1:7701/health';
@@ -9,6 +10,7 @@ const CAMO_RUNTIME_HEALTH_URL = 'http://127.0.0.1:7704/health';
 const CORE_HEALTH_URLS = [UNIFIED_API_HEALTH_URL, CAMO_RUNTIME_HEALTH_URL];
 const START_API_SCRIPT = path.join(REPO_ROOT, 'runtime', 'infra', 'utils', 'scripts', 'service', 'start-api.mjs');
 const STOP_API_SCRIPT = path.join(REPO_ROOT, 'runtime', 'infra', 'utils', 'scripts', 'service', 'stop-api.mjs');
+const requireFromRepo = createRequire(path.join(REPO_ROOT, 'package.json'));
 
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -24,16 +26,6 @@ function resolveNodeBin() {
   return process.execPath;
 }
 
-function resolveNpxBin() {
-  const fromPath = resolveOnPath(
-    process.platform === 'win32'
-      ? ['npx.cmd', 'npx.exe', 'npx.bat', 'npx.ps1']
-      : ['npx'],
-  );
-  if (fromPath) return fromPath;
-  return process.platform === 'win32' ? 'npx.cmd' : 'npx';
-}
-
 function resolveOnPath(candidates: string[]): string | null {
   const pathEnv = process.env.PATH || process.env.Path || '';
   const dirs = pathEnv.split(path.delimiter).filter(Boolean);
@@ -46,10 +38,16 @@ function resolveOnPath(candidates: string[]): string | null {
   return null;
 }
 
-function quoteCmdArg(value: string) {
-  if (!value) return '""';
-  if (!/[\s"]/u.test(value)) return value;
-  return `"${value.replace(/"/g, '""')}"`;
+function resolveCamoCliEntry() {
+  const direct = path.join(REPO_ROOT, 'node_modules', '@web-auto', 'camo', 'bin', 'camo.mjs');
+  if (existsSync(direct)) return direct;
+  try {
+    const resolved = requireFromRepo.resolve('@web-auto/camo/bin/camo.mjs');
+    if (resolved && existsSync(resolved)) return resolved;
+  } catch {
+    // ignore resolution errors
+  }
+  return null;
 }
 
 async function checkHttpHealth(url: string) {
@@ -66,77 +64,67 @@ async function areCoreServicesHealthy() {
   return health.every(Boolean);
 }
 
-async function runNodeScript(scriptPath: string, timeoutMs: number) {
-  return new Promise<boolean>((resolve) => {
+type RunResult = {
+  ok: boolean;
+  code: number | null;
+  error: string;
+};
+
+async function runNodeScript(scriptPath: string, timeoutMs: number, args: string[] = [], envExtra: Record<string, string> = {}) {
+  return new Promise<RunResult>((resolve) => {
     const nodeBin = resolveNodeBin();
-    const child = spawn(nodeBin, [scriptPath], {
+    const child = spawn(nodeBin, [scriptPath, ...args], {
       cwd: REPO_ROOT,
-      stdio: 'ignore',
+      stdio: ['ignore', 'pipe', 'pipe'],
       windowsHide: true,
       detached: false,
       env: {
         ...process.env,
-        BROWSER_SERVICE_AUTO_EXIT: '0',
+        ...envExtra,
       },
     });
+    const stderrLines: string[] = [];
+    const stdoutLines: string[] = [];
+    child.stdout?.on('data', (chunk) => {
+      const text = String(chunk || '').trim();
+      if (!text) return;
+      stdoutLines.push(text);
+      if (stdoutLines.length > 6) stdoutLines.shift();
+    });
+    child.stderr?.on('data', (chunk) => {
+      const text = String(chunk || '').trim();
+      if (!text) return;
+      stderrLines.push(text);
+      if (stderrLines.length > 6) stderrLines.shift();
+    });
+
+    const summarize = (prefix: string) => {
+      const stderr = stderrLines.join('\n').trim();
+      const stdout = stdoutLines.join('\n').trim();
+      if (stderr) return `${prefix}: ${stderr}`;
+      if (stdout) return `${prefix}: ${stdout}`;
+      return prefix;
+    };
 
     const timer = setTimeout(() => {
       try {
         child.kill('SIGTERM');
       } catch {}
-      resolve(false);
+      resolve({ ok: false, code: null, error: summarize('timeout') });
     }, timeoutMs);
 
-    child.once('error', () => {
+    child.once('error', (err) => {
       clearTimeout(timer);
-      resolve(false);
+      resolve({ ok: false, code: null, error: summarize(err?.message || 'spawn_error') });
     });
 
     child.once('exit', (code) => {
       clearTimeout(timer);
-      resolve(code === 0);
-    });
-  });
-}
-
-async function runCommand(command: string, args: string[], timeoutMs: number) {
-  return new Promise<boolean>((resolve) => {
-    const lower = String(command || '').toLowerCase();
-    let spawnCommand = command;
-    let spawnArgs = args;
-    if (process.platform === 'win32' && (lower.endsWith('.cmd') || lower.endsWith('.bat'))) {
-      spawnCommand = 'cmd.exe';
-      const cmdLine = [quoteCmdArg(command), ...args.map(quoteCmdArg)].join(' ');
-      spawnArgs = ['/d', '/s', '/c', cmdLine];
-    } else if (process.platform === 'win32' && lower.endsWith('.ps1')) {
-      spawnCommand = 'powershell.exe';
-      spawnArgs = ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', command, ...args];
-    }
-    const child = spawn(spawnCommand, spawnArgs, {
-      cwd: REPO_ROOT,
-      stdio: 'ignore',
-      windowsHide: true,
-      detached: false,
-      env: {
-        ...process.env,
-      },
-    });
-
-    const timer = setTimeout(() => {
-      try {
-        child.kill('SIGTERM');
-      } catch {}
-      resolve(false);
-    }, timeoutMs);
-
-    child.once('error', () => {
-      clearTimeout(timer);
-      resolve(false);
-    });
-
-    child.once('exit', (code) => {
-      clearTimeout(timer);
-      resolve(code === 0);
+      if (code === 0) {
+        resolve({ ok: true, code, error: '' });
+        return;
+      }
+      resolve({ ok: false, code, error: summarize(`exit ${code ?? 'null'}`) });
     });
   });
 }
@@ -148,19 +136,22 @@ export async function startCoreDaemon(): Promise<boolean> {
     console.error('[CoreDaemonManager] Unified API start script not found');
     return false;
   }
-  const startedApi = await runNodeScript(START_API_SCRIPT, 40_000);
-  if (!startedApi) {
-    console.error('[CoreDaemonManager] Failed to start unified API service');
+  const startedApi = await runNodeScript(START_API_SCRIPT, 40_000, [], {
+    BROWSER_SERVICE_AUTO_EXIT: '0',
+  });
+  if (!startedApi.ok) {
+    console.error(`[CoreDaemonManager] Failed to start unified API service (${startedApi.error || 'unknown'})`);
     return false;
   }
 
-  const startedBrowser = await runCommand(
-    resolveNpxBin(),
-    ['--yes', '--package=@web-auto/camo', 'camo', 'init'],
-    40_000,
-  );
-  if (!startedBrowser) {
-    console.error('[CoreDaemonManager] Failed to start camo browser backend');
+  const camoEntry = resolveCamoCliEntry();
+  if (!camoEntry) {
+    console.error('[CoreDaemonManager] Camo CLI entry not found: @web-auto/camo/bin/camo.mjs');
+    return false;
+  }
+  const startedBrowser = await runNodeScript(camoEntry, 60_000, ['init']);
+  if (!startedBrowser.ok) {
+    console.error(`[CoreDaemonManager] Failed to start camo browser backend (${startedBrowser.error || 'unknown'})`);
     return false;
   }
 
@@ -181,8 +172,8 @@ export async function stopCoreDaemon(): Promise<boolean> {
   }
 
   const stoppedApi = await runNodeScript(STOP_API_SCRIPT, 20_000);
-  if (!stoppedApi) {
-    console.error('[CoreDaemonManager] Failed to stop core services');
+  if (!stoppedApi.ok) {
+    console.error(`[CoreDaemonManager] Failed to stop core services (${stoppedApi.error || 'unknown'})`);
     return false;
   }
   return true;
