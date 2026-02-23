@@ -154,7 +154,7 @@ async function startConsole(noDaemon = false) {
     const filePath = useDirectElectron ? electronBin : npxBin;
     const argList = useDirectElectron ? [DIST_MAIN] : ['electron', DIST_MAIN];
     const psArgList = argList.map((item) => `'${quotePsSingle(item)}'`).join(',');
-    const psScript = `$p = Start-Process -FilePath '${quotePsSingle(filePath)}' -ArgumentList @(${psArgList}) -WorkingDirectory '${quotePsSingle(APP_ROOT)}' -WindowStyle Hidden -PassThru; Write-Output $p.Id`;
+    const psScript = `$p = Start-Process -FilePath '${quotePsSingle(filePath)}' -ArgumentList @(${psArgList}) -WorkingDirectory '${quotePsSingle(APP_ROOT)}' -PassThru; Write-Output $p.Id`;
     await new Promise((resolve, reject) => {
       const child = spawn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', psScript], {
         cwd: APP_ROOT,
