@@ -60,9 +60,11 @@ function extractErrorEvents(events = [], limit = 20) {
   for (const event of events) {
     const payload = event?.data && typeof event.data === 'object' ? event.data : event;
     const type = asText(payload?.type || payload?.event || '').toLowerCase();
+    if (type.includes('operation_progress')) continue;
     const hasErrorType = type.includes('error') || type.includes('fail');
+    const hasExplicitError = Boolean(payload?.error);
     const errText = asText(payload?.error || payload?.message || payload?.reason || '');
-    if (!hasErrorType && !errText) continue;
+    if (!hasErrorType && !hasExplicitError) continue;
     items.push({
       ts: asText(payload?.timestamp || payload?.ts || ''),
       type: type || 'error',
