@@ -549,11 +549,68 @@ async function ensureDepsAndBuild() {
   console.log('[webauto] Setup complete!');
 }
 
-async function uiConsole({ build, install, checkOnly, noDaemon }) {
-  console.log(`[webauto] version ${ROOT_VERSION}`);
+async function ensureUiRuntimeReady({ build, install }) {
   let okServices = checkServicesBuilt();
   let okDeps = checkDesktopConsoleDeps();
   let okUiBuilt = checkDesktopConsoleBuilt();
+
+  if (isGlobalInstall()) {
+    const state = loadState();
+    const pkgJson = JSON.parse(readFileSync(path.join(ROOT, 'package.json'), 'utf-8'));
+    if (!state.initialized || state.version !== pkgJson.version || !okDeps || !okUiBuilt) {
+      await ensureDepsAndBuild();
+      okDeps = checkDesktopConsoleDeps();
+      okUiBuilt = checkDesktopConsoleBuilt();
+    }
+  } else if (!okServices) {
+    if (!build) {
+      console.error('❌ missing dist/ (services/modules). Run: npm run build:services');
+      process.exit(2);
+    }
+    const npm = npmRunner();
+    await run(npm.cmd, [...npm.prefix, 'run', 'build:services']);
+    okServices = checkServicesBuilt();
+  }
+
+  if (!okDeps) {
+    if (isGlobalInstall()) {
+      console.error('❌ electron runtime missing from installed package after setup.');
+      process.exit(2);
+    }
+    if (!install && !build) {
+      console.error('❌ missing apps/desktop-console/node_modules. Run: npm --prefix apps/desktop-console install');
+      process.exit(2);
+    }
+    const npm = npmRunner();
+    await runInDir(path.join(ROOT, 'apps', 'desktop-console'), npm.cmd, [...npm.prefix, 'install']);
+    okDeps = checkDesktopConsoleDeps();
+  }
+
+  if (!okUiBuilt) {
+    if (isGlobalInstall()) {
+      console.error('❌ missing apps/desktop-console/dist in installed package after setup.');
+      process.exit(2);
+    }
+    if (!build) {
+      console.error('❌ missing apps/desktop-console/dist. Run: npm --prefix apps/desktop-console run build');
+      process.exit(2);
+    }
+    const npm = npmRunner();
+    await runInDir(path.join(ROOT, 'apps', 'desktop-console'), npm.cmd, [...npm.prefix, 'run', 'build']);
+    okUiBuilt = checkDesktopConsoleBuilt();
+  }
+
+  if (!okDeps || !okUiBuilt || (!isGlobalInstall() && !okServices)) {
+    console.error('❌ ui runtime prerequisites are not ready');
+    process.exit(2);
+  }
+}
+
+async function uiConsole({ build, install, checkOnly, noDaemon }) {
+  console.log(`[webauto] version ${ROOT_VERSION}`);
+  const okServices = checkServicesBuilt();
+  const okDeps = checkDesktopConsoleDeps();
+  const okUiBuilt = checkDesktopConsoleBuilt();
 
   if (checkOnly) {
     console.log(`[check] repoRoot: ${ROOT}`);
@@ -564,49 +621,7 @@ async function uiConsole({ build, install, checkOnly, noDaemon }) {
     return;
   }
 
-  // For global install, auto-setup on first run
-  if (isGlobalInstall()) {
-    const state = loadState();
-    const pkgJson = JSON.parse(readFileSync(path.join(ROOT, 'package.json'), 'utf-8'));
-    if (!state.initialized || state.version !== pkgJson.version || !okDeps || !okUiBuilt) {
-      await ensureDepsAndBuild();
-      okDeps = checkDesktopConsoleDeps();
-      okUiBuilt = checkDesktopConsoleBuilt();
-    }
-  } else {
-    // Local dev mode - require explicit build
-    if (!okServices) {
-      if (!build) {
-        console.error('❌ missing dist/ (services/modules). Run: npm run build:services');
-        process.exit(2);
-      }
-      const npm = npmRunner();
-      await run(npm.cmd, [...npm.prefix, 'run', 'build:services']);
-      okServices = checkServicesBuilt();
-    }
-  }
-
-  if (!okDeps) {
-    if (isGlobalInstall()) {
-      console.error('❌ electron runtime missing from installed package. Please reinstall @web-auto/webauto.');
-      process.exit(2);
-    }
-    if (!install && !build) {
-      console.error('❌ missing apps/desktop-console/node_modules. Run: npm --prefix apps/desktop-console install');
-      process.exit(2);
-    }
-    const npm = npmRunner();
-    await runInDir(path.join(ROOT, 'apps', 'desktop-console'), npm.cmd, [...npm.prefix, 'install']);
-  }
-
-  if (!okUiBuilt) {
-    if (!build) {
-      console.error('❌ missing apps/desktop-console/dist. Run: npm --prefix apps/desktop-console run build');
-      process.exit(2);
-    }
-    const npm = npmRunner();
-    await runInDir(path.join(ROOT, 'apps', 'desktop-console'), npm.cmd, [...npm.prefix, 'run', 'build']);
-  }
+  await ensureUiRuntimeReady({ build, install });
 
   const uiScript = uiConsoleScriptPath();
   const uiArgs = [];
@@ -758,6 +773,10 @@ async function main() {
   }
 
   if (cmd === 'ui' && sub === 'cli') {
+    await ensureUiRuntimeReady({
+      build: args.build === true,
+      install: args.install === true,
+    });
     const script = path.join(ROOT, 'apps', 'desktop-console', 'entry', 'ui-cli.mjs');
     await run(process.execPath, [script, ...rawArgv.slice(2)]);
     return;
