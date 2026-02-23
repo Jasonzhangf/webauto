@@ -12,6 +12,7 @@ let prevHome = '';
 let prevUserProfile = '';
 let prevPath = '';
 let prevWebautoRoot = '';
+let prevWebautoHome = '';
 let originalFetch: any;
 
 function ensureExecutable(filePath: string, content: string) {
@@ -28,6 +29,7 @@ beforeEach(() => {
   prevUserProfile = process.env.USERPROFILE || '';
   prevPath = process.env.PATH || '';
   prevWebautoRoot = process.env.WEBAUTO_ROOT || '';
+  prevWebautoHome = process.env.WEBAUTO_HOME || '';
   process.env.HOME = tempRoot;
   process.env.USERPROFILE = tempRoot;
   originalFetch = (globalThis as any).fetch;
@@ -38,6 +40,7 @@ afterEach(() => {
   process.env.USERPROFILE = prevUserProfile;
   process.env.PATH = prevPath;
   process.env.WEBAUTO_ROOT = prevWebautoRoot;
+  process.env.WEBAUTO_HOME = prevWebautoHome;
   (globalThis as any).fetch = originalFetch;
   fs.rmSync(tempRoot, { recursive: true, force: true });
 });
@@ -59,6 +62,18 @@ test('checkGeoIP honors WEBAUTO_ROOT override', async () => {
   const portableRoot = path.join(tempRoot, 'portable-data');
   process.env.WEBAUTO_ROOT = portableRoot;
   const geoPath = path.join(portableRoot, '.webauto', 'geoip', 'GeoLite2-City.mmdb');
+  await fsp.mkdir(path.dirname(geoPath), { recursive: true });
+  await fsp.writeFile(geoPath, 'x', 'utf8');
+
+  const result = await checkGeoIP();
+  assert.equal(result.installed, true);
+  assert.equal(result.path, geoPath);
+});
+
+test('checkGeoIP honors WEBAUTO_HOME override as direct root', async () => {
+  const homeRoot = path.join(tempRoot, 'custom-webauto');
+  process.env.WEBAUTO_HOME = homeRoot;
+  const geoPath = path.join(homeRoot, 'geoip', 'GeoLite2-City.mmdb');
   await fsp.mkdir(path.dirname(geoPath), { recursive: true });
   await fsp.writeFile(geoPath, 'x', 'utf8');
 

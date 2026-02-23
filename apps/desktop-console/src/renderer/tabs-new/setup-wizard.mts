@@ -535,12 +535,15 @@ export function renderSetupWizard(root: HTMLElement, ctx: any) {
       await refreshAccounts();
       setupStatusText.textContent = `账号 ${profileId} 已创建，等待登录...`;
 
-      // Open login window
-      const timeoutSec = ctx.api.settings?.timeouts?.loginTimeoutSec || 900;
+     // Open login window
+     const timeoutSec = ctx.api.settings?.timeouts?.loginTimeoutSec || 900;
+      const idleTimeout = String(ctx.api?.settings?.idleTimeout || '30m').trim() || '30m';
       const loginArgs = [
         ctx.api.pathJoin('apps', 'webauto', 'entry', 'profilepool.mjs'),
         'login-profile',
         profileId,
+        '--idle-timeout',
+        idleTimeout,
         '--wait-sync',
         'false',
         '--timeout-sec',

@@ -1,6 +1,6 @@
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
+import { resolveWebautoRoot } from './profilepool.mjs';
 
 const INDEX_FILE = 'index.json';
 const DEFAULT_COMMAND_TYPE = 'xhs-unified';
@@ -76,18 +76,6 @@ function normalizeMaxRuns(value, fallback = null) {
   if (!Number.isFinite(n)) return fallback;
   if (n <= 0) return null;
   return Math.max(1, Math.floor(n));
-}
-
-function resolvePortableRoot() {
-  const root = String(process.env.WEBAUTO_PORTABLE_ROOT || process.env.WEBAUTO_ROOT || '').trim();
-  return root ? path.join(root, '.webauto') : '';
-}
-
-function resolveWebautoRoot() {
-  const portableRoot = resolvePortableRoot();
-  if (portableRoot) return portableRoot;
-  const home = process.env.HOME || process.env.USERPROFILE || os.homedir();
-  return path.join(home, '.webauto');
 }
 
 export function resolveSchedulesRoot() {

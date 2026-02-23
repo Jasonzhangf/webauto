@@ -252,10 +252,37 @@ function runPackageCommand(packageName, commandArgs) {
   return run(resolveNpmBin(), ['exec', '--yes', `--package=${packageName}`, '--', ...commandArgs]);
 }
 
-function resolveWebautoRoot() {
-  const portableRoot = String(process.env.WEBAUTO_PORTABLE_ROOT || process.env.WEBAUTO_ROOT || '').trim();
-  if (portableRoot) return path.join(portableRoot, '.webauto');
-  return path.join(os.homedir(), '.webauto');
+function normalizePathForPlatform(raw, platform = process.platform) {
+  const input = String(raw || '').trim();
+  const isWinPath = platform === 'win32' || /^[A-Za-z]:[\\/]/.test(input);
+  const pathApi = isWinPath ? path.win32 : path;
+  return isWinPath ? pathApi.normalize(input) : path.resolve(input);
+}
+
+function normalizeLegacyWebautoRoot(raw, platform = process.platform) {
+  const pathApi = platform === 'win32' ? path.win32 : path;
+  const resolved = normalizePathForPlatform(raw, platform);
+  const base = pathApi.basename(resolved).toLowerCase();
+  if (base === '.webauto' || base === 'webauto') return resolved;
+  return pathApi.join(resolved, '.webauto');
+}
+
+function resolveWebautoRoot(options = {}) {
+  const env = options.env || process.env;
+  const platform = String(options.platform || process.platform);
+  const pathApi = platform === 'win32' ? path.win32 : path;
+  const homeDir = String(options.homeDir || os.homedir());
+  const explicitHome = String(env.WEBAUTO_HOME || '').trim();
+  if (explicitHome) return normalizePathForPlatform(explicitHome, platform);
+
+  const legacyRoot = String(env.WEBAUTO_ROOT || env.WEBAUTO_PORTABLE_ROOT || '').trim();
+  if (legacyRoot) return normalizeLegacyWebautoRoot(legacyRoot, platform);
+
+  const hasDDrive = typeof options.hasDDrive === 'boolean'
+    ? options.hasDDrive
+    : (platform === 'win32' && existsSync('D:\\'));
+  if (platform === 'win32') return hasDDrive ? 'D:\\webauto' : pathApi.join(homeDir, '.webauto');
+  return pathApi.join(homeDir, '.webauto');
 }
 
 function resolveGeoIPPath() {

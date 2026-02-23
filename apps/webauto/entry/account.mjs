@@ -169,7 +169,7 @@ Usage:
   webauto account sync <profileId|all> [--pending-while-login] [--resolve-alias] [--json]
 
 Notes:
-  - 账号数据默认保存到 ~/.webauto/accounts（可用 WEBAUTO_PATHS_ACCOUNTS 覆盖）
+  - 账号数据默认保存到 WEBAUTO 根目录下的 accounts（Windows 优先 D:/webauto，缺失时回落 ~/.webauto，可用 WEBAUTO_HOME 覆盖）
   - list 默认按 profile 展示账号有效态（valid/invalid）
   - add 会自动创建并关联 profile/fingerprint（未指定时自动编号）
   - login 会通过 @web-auto/camo 拉起浏览器并绑定账号 profile

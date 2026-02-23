@@ -2,11 +2,67 @@
 import minimist from 'minimist';
 import { spawn } from 'node:child_process';
 import { existsSync, writeFileSync, readFileSync, mkdirSync } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const STATE_FILE = path.join(process.env.HOME || process.env.USERPROFILE || '.', '.webauto', 'cli-state.json');
+
+function normalizePathForPlatform(raw, platform = process.platform) {
+  const input = String(raw || '').trim();
+  const isWinPath = platform === 'win32' || /^[A-Za-z]:[\\/]/.test(input);
+  const pathApi = isWinPath ? path.win32 : path;
+  return isWinPath ? pathApi.normalize(input) : path.resolve(input);
+}
+
+function normalizeLegacyWebautoRoot(raw, platform = process.platform) {
+  const pathApi = platform === 'win32' ? path.win32 : path;
+  const resolved = normalizePathForPlatform(raw, platform);
+  const base = pathApi.basename(resolved).toLowerCase();
+  return (base === '.webauto' || base === 'webauto')
+    ? resolved
+    : pathApi.join(resolved, '.webauto');
+}
+
+function resolveWebautoHome(env = process.env, platform = process.platform) {
+  const explicitHome = String(env.WEBAUTO_HOME || '').trim();
+  if (explicitHome) return normalizePathForPlatform(explicitHome, platform);
+
+  const legacyRoot = String(env.WEBAUTO_ROOT || env.WEBAUTO_PORTABLE_ROOT || '').trim();
+  if (legacyRoot) return normalizeLegacyWebautoRoot(legacyRoot, platform);
+
+  const homeDir = platform === 'win32'
+    ? (env.USERPROFILE || os.homedir())
+    : (env.HOME || os.homedir());
+  if (platform === 'win32') {
+    try {
+      if (existsSync('D:\\')) return 'D:\\webauto';
+    } catch {
+      // ignore drive detection errors
+    }
+    return path.win32.join(homeDir, '.webauto');
+  }
+  return path.join(homeDir, '.webauto');
+}
+
+function applyDefaultRuntimeEnv() {
+  if (!String(process.env.WEBAUTO_REPO_ROOT || '').trim()) {
+    process.env.WEBAUTO_REPO_ROOT = ROOT;
+  }
+  if (isGlobalInstall() && !String(process.env.WEBAUTO_SKIP_BUILD_CHECK || '').trim()) {
+    process.env.WEBAUTO_SKIP_BUILD_CHECK = '1';
+  }
+  if (
+    !String(process.env.WEBAUTO_HOME || '').trim()
+    && !String(process.env.WEBAUTO_ROOT || process.env.WEBAUTO_PORTABLE_ROOT || '').trim()
+  ) {
+    process.env.WEBAUTO_HOME = resolveWebautoHome();
+  }
+}
+
+applyDefaultRuntimeEnv();
+
+const STATE_FILE = path.join(resolveWebautoHome(), 'cli-state.json');
 
 function loadState() {
   try {

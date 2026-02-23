@@ -5,7 +5,29 @@ import os from 'node:os';
 import path from 'node:path';
 import { setTimeout as wait } from 'node:timers/promises';
 
-const RUN_DIR = path.join(os.homedir(), '.webauto', 'run');
+function resolveWebautoRoot() {
+  const explicitHome = String(process.env.WEBAUTO_HOME || '').trim();
+  if (explicitHome) return path.resolve(explicitHome);
+
+  const legacyRoot = String(process.env.WEBAUTO_ROOT || process.env.WEBAUTO_PORTABLE_ROOT || '').trim();
+  if (legacyRoot) {
+    const normalized = path.resolve(legacyRoot);
+    const base = path.basename(normalized).toLowerCase();
+    if (base === '.webauto' || base === 'webauto') return normalized;
+    return path.join(normalized, '.webauto');
+  }
+
+  if (process.platform === 'win32') {
+    try {
+      if (fs.existsSync('D:\\')) return 'D:\\webauto';
+    } catch {
+      // ignore probing errors
+    }
+  }
+  return path.join(os.homedir(), '.webauto');
+}
+
+const RUN_DIR = path.join(resolveWebautoRoot(), 'run');
 const PID_FILE = path.join(RUN_DIR, 'browser-service.pid');
 const DEFAULT_HOST = process.env.WEBAUTO_BROWSER_HOST || '127.0.0.1';
 const DEFAULT_PORT = Number(process.env.WEBAUTO_BROWSER_PORT || 7704);
@@ -77,6 +99,7 @@ function latestMtimeMs(targetPath) {
 function shouldRebuild(distEntry) {
   if (!fs.existsSync(distEntry)) return true;
   if (String(process.env.WEBAUTO_SKIP_BUILD_CHECK || '') === '1') return false;
+  if (!fs.existsSync(path.resolve('tsconfig.services.json'))) return false;
   const distMtime = Number(fs.statSync(distEntry).mtimeMs || 0);
   const watchRoots = [
     path.resolve('modules/camo-backend/src'),

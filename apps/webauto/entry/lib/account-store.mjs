@@ -1,11 +1,11 @@
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import {
   ensureProfile,
   resolveFingerprintsRoot,
   resolveNextProfileId,
   resolveProfilesRoot,
+  resolveWebautoRoot,
 } from './profilepool.mjs';
 
 const INDEX_FILE = 'index.json';
@@ -117,18 +117,6 @@ function ensureSafeName(name, field) {
   if (value.includes('/') || value.includes('\\')) throw new Error(`${field} is invalid`);
   if (value === '.' || value === '..') throw new Error(`${field} is invalid`);
   return value;
-}
-
-function resolvePortableRoot() {
-  const root = String(process.env.WEBAUTO_PORTABLE_ROOT || process.env.WEBAUTO_ROOT || '').trim();
-  return root ? path.join(root, '.webauto') : '';
-}
-
-export function resolveWebautoRoot() {
-  const portableRoot = resolvePortableRoot();
-  if (portableRoot) return portableRoot;
-  const home = process.env.HOME || process.env.USERPROFILE || os.homedir();
-  return path.join(home, '.webauto');
 }
 
 export function resolveAccountsRoot() {

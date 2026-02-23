@@ -24,8 +24,32 @@ export type GeoIPCheckResult = {
 };
 
 function resolveWebautoRoot() {
-  const portableRoot = String(process.env.WEBAUTO_PORTABLE_ROOT || process.env.WEBAUTO_ROOT || '').trim();
-  return portableRoot ? path.join(portableRoot, '.webauto') : path.join(os.homedir(), '.webauto');
+  const normalizePathForPlatform = (raw: string, platform = process.platform) => {
+    const input = String(raw || '').trim();
+    const isWinPath = platform === 'win32' || /^[A-Za-z]:[\\/]/.test(input);
+    const pathApi = isWinPath ? path.win32 : path;
+    return isWinPath ? pathApi.normalize(input) : path.resolve(input);
+  };
+
+  const normalizeLegacyWebautoRoot = (raw: string, platform = process.platform) => {
+    const pathApi = platform === 'win32' ? path.win32 : path;
+    const resolved = normalizePathForPlatform(raw, platform);
+    const base = pathApi.basename(resolved).toLowerCase();
+    return (base === '.webauto' || base === 'webauto')
+      ? resolved
+      : pathApi.join(resolved, '.webauto');
+  };
+
+  const explicitHome = String(process.env.WEBAUTO_HOME || '').trim();
+  if (explicitHome) return normalizePathForPlatform(explicitHome);
+
+  const legacyRoot = String(process.env.WEBAUTO_ROOT || process.env.WEBAUTO_PORTABLE_ROOT || '').trim();
+  if (legacyRoot) return normalizeLegacyWebautoRoot(legacyRoot);
+
+  if (process.platform === 'win32') {
+    return existsSync('D:\\') ? 'D:\\webauto' : path.join(os.homedir(), '.webauto');
+  }
+  return path.join(os.homedir(), '.webauto');
 }
 
 function resolveNpxBin() {

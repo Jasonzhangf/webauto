@@ -399,13 +399,15 @@ export function createAccountFlowController(opts: AccountFlowOptions): AccountFl
       alert('新增账号失败：未创建任何 profile');
       return;
     }
-    const loginArgs = [
-      window.api.pathJoin('apps', 'webauto', 'entry', 'profilepool.mjs'),
-      'login-profile',
-      targetProfile,
-      '--timeout-sec',
-      String(timeoutSec),
-      '--keep-session',
+   const loginArgs = [
+     window.api.pathJoin('apps', 'webauto', 'entry', 'profilepool.mjs'),
+     'login-profile',
+     targetProfile,
+     '--idle-timeout',
+     String(window.api?.settings?.idleTimeout || '30m').trim() || '30m',
+     '--timeout-sec',
+     String(timeoutSec),
+     '--keep-session',
     ];
     api?.appendLog?.(`[ui] spawn profilepool login-profile profile=${targetProfile} timeout=${timeoutSec}s`);
     try {

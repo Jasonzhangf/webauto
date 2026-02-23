@@ -391,6 +391,7 @@ export function renderAccountManager(root: HTMLElement, ctx: any) {
   async function openAccountLogin(account: Account, options: { reason?: string } = {}) {
     if (!String(account.profileId || '').trim()) return false;
     const platform = getPlatformInfo(account.platform);
+    const idleTimeout = String(ctx.api?.settings?.idleTimeout || '30m').trim() || '30m';
     const timeoutSec = Math.max(30, Number(ctx.api?.settings?.timeouts?.loginTimeoutSec || 900));
     account.status = 'pending';
     account.statusView = 'pending';
@@ -406,6 +407,8 @@ export function renderAccountManager(root: HTMLElement, ctx: any) {
         account.profileId,
         '--url',
         platform.loginUrl,
+        '--idle-timeout',
+        idleTimeout,
         '--wait-sync',
         'false',
         '--timeout-sec',
@@ -461,6 +464,7 @@ export function renderAccountManager(root: HTMLElement, ctx: any) {
       }
 
       // Open login window
+      const idleTimeout = String(ctx.api?.settings?.idleTimeout || '30m').trim() || '30m';
       const timeoutSec = ctx.api.settings?.timeouts?.loginTimeoutSec || 900;
       await ctx.api.cmdSpawn({
         title: `登录 ${alias || profileId}`,
@@ -469,6 +473,8 @@ export function renderAccountManager(root: HTMLElement, ctx: any) {
           ctx.api.pathJoin('apps', 'webauto', 'entry', 'profilepool.mjs'),
           'login-profile',
           profileId,
+          '--idle-timeout',
+          idleTimeout,
           '--wait-sync',
           'false',
           '--timeout-sec',

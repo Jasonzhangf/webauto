@@ -90,6 +90,46 @@ test('resolveWebautoRoot prefers WEBAUTO_ROOT when provided', async () => {
   else process.env.WEBAUTO_ROOT = prevRoot;
 });
 
+test('resolveWebautoRoot supports explicit WEBAUTO_HOME without appending .webauto', async () => {
+  const internals = await loadInternals();
+  const root = internals.resolveWebautoRoot({
+    platform: 'win32',
+    hasDDrive: true,
+    env: { WEBAUTO_HOME: 'D:\\webauto' },
+  });
+  assert.equal(path.normalize(root), path.normalize('D:\\webauto'));
+});
+
+test('resolveWebautoRoot uses WEBAUTO_HOME as direct root path', async () => {
+  const internals = await loadInternals();
+  const root = internals.resolveWebautoRoot({
+    platform: 'darwin',
+    env: { WEBAUTO_HOME: '/tmp/custom-webauto-home' },
+  });
+  assert.equal(root, '/tmp/custom-webauto-home');
+});
+
+test('resolveWebautoRoot defaults to D:\\webauto when D drive exists on win32', async () => {
+  const internals = await loadInternals();
+  const root = internals.resolveWebautoRoot({
+    platform: 'win32',
+    hasDDrive: true,
+    env: {},
+  });
+  assert.equal(path.normalize(root), path.normalize('D:\\webauto'));
+});
+
+test('resolveWebautoRoot falls back to home .webauto when D drive is missing on win32', async () => {
+  const internals = await loadInternals();
+  const root = internals.resolveWebautoRoot({
+    platform: 'win32',
+    hasDDrive: false,
+    homeDir: 'C:\\Users\\tester',
+    env: {},
+  });
+  assert.equal(path.normalize(root), path.normalize('C:\\Users\\tester\\.webauto'));
+});
+
 test('resolvePathFromOutput extracts absolute path from noisy output', async () => {
   const internals = await loadInternals();
   const out = '\x1b[38;5;10mC:\\Users\\huawei\\AppData\\Local\\camoufox\\camoufox\\Cache\x1b[m';

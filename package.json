@@ -1,6 +1,6 @@
 {
   "name": "@web-auto/webauto",
-  "version": "0.1.8",
+  "version": "0.1.11",
   "type": "module",
   "bin": {
     "webauto": "bin/webauto.mjs"
@@ -9,6 +9,7 @@
     "bin/",
     "dist/",
     "modules/",
+    "runtime/",
     "scripts/",
     "services/",
     "apps/desktop-console/dist/",
@@ -65,6 +66,11 @@
     "test:webauto:schedule:unit": "node --test tests/unit/webauto/schedule-store.test.mjs tests/unit/webauto/schedule-cli.test.mjs",
     "test:webauto:ui-cli:unit": "node --test tests/unit/webauto/ui-cli-command.test.mjs",
     "test:webauto:install:unit": "node --test tests/unit/webauto/xhs-install.test.mjs",
+    "test:e2e-ui": "npx vitest --config tests/e2e-ui/vitest.config.ts",
+    "test:e2e-ui:l0": "npx vitest --config tests/e2e-ui/vitest.config.ts tests/e2e-ui/contracts/api.test.ts",
+    "test:e2e-ui:l1": "npx vitest --config tests/e2e-ui/vitest.config.ts tests/e2e-ui/controls/full-cover.test.ts",
+    "test:e2e-ui:l2": "npx vitest --config tests/e2e-ui/vitest.config.ts tests/e2e-ui/flows/task-run.test.ts",
+    "test:e2e-ui:l3": "npx vitest --config tests/e2e-ui/vitest.config.ts tests/e2e-ui/stability/restart.test.ts",
     "test:webauto:schedule:coverage": "c8 --reporter=text --reporter=text-summary --check-coverage --lines 85 --functions 85 --branches 60 --statements 85 --include apps/webauto/entry/lib/schedule-store.mjs --include apps/webauto/entry/schedule.mjs node --test tests/unit/webauto/schedule-store.test.mjs tests/unit/webauto/schedule-cli.test.mjs",
     "test:ci": "npm test && npm --prefix apps/desktop-console run test:renderer",
     "coverage:ci": "node scripts/test/run-coverage.mjs",
@@ -103,6 +109,7 @@
     "playwright": "^1.58.2",
     "ts-node": "^10.9.2",
     "tsx": "^4.16.5",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.18"
   }
 }

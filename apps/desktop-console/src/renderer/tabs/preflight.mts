@@ -413,13 +413,16 @@ export function renderPreflight(root: HTMLElement, ctx: any) {
     if (!createdProfileId) return;
     if (typeof window.api?.cmdSpawn !== 'function') return;
 
-    const timeoutSec = Math.max(30, Math.floor(Number(timeoutInput.value || '900')));
-    const loginArgs = buildArgs([
-      window.api.pathJoin('apps', 'webauto', 'entry', 'profilepool.mjs'),
-      'login-profile',
-      createdProfileId,
-      '--timeout-sec',
-      String(timeoutSec),
+   const timeoutSec = Math.max(30, Math.floor(Number(timeoutInput.value || '900')));
+   const idleTimeout = String(window.api?.settings?.idleTimeout || '30m').trim() || '30m';
+   const loginArgs = buildArgs([
+     window.api.pathJoin('apps', 'webauto', 'entry', 'profilepool.mjs'),
+     'login-profile',
+     createdProfileId,
+     '--idle-timeout',
+     idleTimeout,
+     '--timeout-sec',
+     String(timeoutSec),
       '--check-interval-sec',
       '2',
       '--keep-session',

@@ -2,32 +2,64 @@ import os from 'node:os';
 import path from 'node:path';
 import fs from 'node:fs';
 
-function resolvePortableRoot() {
-  const root = String(process.env.WEBAUTO_PORTABLE_ROOT || process.env.WEBAUTO_ROOT || '').trim();
-  return root ? path.join(root, '.webauto') : '';
+function hasDrive(letter) {
+  if (process.platform !== 'win32') return false;
+  try {
+    return fs.existsSync(`${String(letter || '').replace(/[^A-Za-z]/g, '').toUpperCase()}:\\`);
+  } catch {
+    return false;
+  }
 }
 
-function resolveHomeDir() {
-  if (process.platform === 'win32') {
-    return process.env.USERPROFILE || os.homedir();
-  }
+function normalizePathForPlatform(input, platform = process.platform) {
+  const raw = String(input || '').trim();
+  const isWinPath = platform === 'win32' || /^[A-Za-z]:[\\/]/.test(raw);
+  const pathApi = isWinPath ? path.win32 : path;
+  return isWinPath ? pathApi.normalize(raw) : path.resolve(raw);
+}
+
+function normalizeLegacyWebautoRoot(input, platform = process.platform) {
+  const pathApi = platform === 'win32' ? path.win32 : path;
+  const resolved = normalizePathForPlatform(input, platform);
+  const base = pathApi.basename(resolved).toLowerCase();
+  if (base === '.webauto' || base === 'webauto') return resolved;
+  return pathApi.join(resolved, '.webauto');
+}
+
+function resolveHomeDir(platform = process.platform) {
+  if (platform === 'win32') return process.env.USERPROFILE || os.homedir();
   return process.env.HOME || os.homedir();
+}
+
+export function resolveWebautoRoot(options = {}) {
+  const env = options.env || process.env;
+  const platform = String(options.platform || process.platform);
+  const homeDir = String(options.homeDir || resolveHomeDir(platform));
+  const pathApi = platform === 'win32' ? path.win32 : path;
+
+  const explicitHome = String(env.WEBAUTO_HOME || '').trim();
+  if (explicitHome) return normalizePathForPlatform(explicitHome, platform);
+
+  const legacyRoot = String(env.WEBAUTO_ROOT || env.WEBAUTO_PORTABLE_ROOT || '').trim();
+  if (legacyRoot) return normalizeLegacyWebautoRoot(legacyRoot, platform);
+
+  if (platform === 'win32') {
+    const dDriveExists = typeof options.hasDDrive === 'boolean' ? options.hasDDrive : hasDrive('D');
+    return dDriveExists ? 'D:\\webauto' : pathApi.join(homeDir, '.webauto');
+  }
+  return pathApi.join(homeDir, '.webauto');
 }
 
 export function resolveProfilesRoot() {
   const envProfiles = String(process.env.WEBAUTO_PATHS_PROFILES || '').trim();
   if (envProfiles) return envProfiles;
-  const portableRoot = resolvePortableRoot();
-  if (portableRoot) return path.join(portableRoot, 'profiles');
-  return path.join(resolveHomeDir(), '.webauto', 'profiles');
+  return path.join(resolveWebautoRoot(), 'profiles');
 }
 
 export function resolveFingerprintsRoot() {
   const envFps = String(process.env.WEBAUTO_PATHS_FINGERPRINTS || '').trim();
   if (envFps) return envFps;
-  const portableRoot = resolvePortableRoot();
-  if (portableRoot) return path.join(portableRoot, 'fingerprints');
-  return path.join(resolveHomeDir(), '.webauto', 'fingerprints');
+  return path.join(resolveWebautoRoot(), 'fingerprints');
 }
 
 export function listProfiles() {
