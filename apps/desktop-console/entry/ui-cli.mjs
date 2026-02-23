@@ -19,6 +19,7 @@ const DEFAULT_HTTP_TIMEOUT_MS = readEnvPositiveInt('WEBAUTO_UI_CLI_HTTP_TIMEOUT_
 const DEFAULT_HTTP_RETRIES = readEnvPositiveInt('WEBAUTO_UI_CLI_HTTP_RETRIES', 1);
 const DEFAULT_START_HEALTH_TIMEOUT_MS = readEnvPositiveInt('WEBAUTO_UI_CLI_START_HEALTH_TIMEOUT_MS', 8_000);
 const DEFAULT_STATUS_TIMEOUT_MS = readEnvPositiveInt('WEBAUTO_UI_CLI_STATUS_TIMEOUT_MS', 45_000);
+const DEFAULT_ACTION_HTTP_TIMEOUT_MS = readEnvPositiveInt('WEBAUTO_UI_CLI_ACTION_HTTP_TIMEOUT_MS', 40_000);
 
 function normalizePathForPlatform(raw, platform = process.platform) {
   const input = String(raw || '').trim();
@@ -222,10 +223,10 @@ function printOutput(payload) {
 }
 
 async function sendAction(endpoint, payload) {
-  const waitBudgetMs = payload?.action === 'wait'
+  const actionBudgetMs = payload?.action === 'wait'
     ? parseIntSafe(payload?.timeoutMs, 15_000) + 5_000
-    : 0;
-  const timeoutMs = Math.max(DEFAULT_HTTP_TIMEOUT_MS, waitBudgetMs);
+    : DEFAULT_ACTION_HTTP_TIMEOUT_MS;
+  const timeoutMs = Math.max(DEFAULT_HTTP_TIMEOUT_MS, actionBudgetMs);
   const retries = payload?.action === 'wait' ? 0 : DEFAULT_HTTP_RETRIES;
   return requestJson(endpoint, '/action', {
     method: 'POST',
