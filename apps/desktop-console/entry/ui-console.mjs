@@ -94,6 +94,10 @@ function checkBuildStatus() {
   return existsSync(DIST_MAIN);
 }
 
+function quotePsSingle(value) {
+  return String(value || '').replace(/'/g, "''");
+}
+
 async function build() {
   return new Promise((resolve, reject) => {
     console.log('[ui-console] Building...');
@@ -145,6 +149,36 @@ async function startConsole(noDaemon = false) {
   const spawnArgs = useDirectElectron
     ? [DIST_MAIN]
     : (useCmd ? ['/d', '/s', '/c', npxBin, 'electron', DIST_MAIN] : ['electron', DIST_MAIN]);
+
+  if (process.platform === 'win32' && detached) {
+    const filePath = useDirectElectron ? electronBin : npxBin;
+    const argList = useDirectElectron ? [DIST_MAIN] : ['electron', DIST_MAIN];
+    const psArgList = argList.map((item) => `'${quotePsSingle(item)}'`).join(',');
+    const psScript = `$p = Start-Process -FilePath '${quotePsSingle(filePath)}' -ArgumentList @(${psArgList}) -WorkingDirectory '${quotePsSingle(APP_ROOT)}' -WindowStyle Hidden -PassThru; Write-Output $p.Id`;
+    await new Promise((resolve, reject) => {
+      const child = spawn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', psScript], {
+        cwd: APP_ROOT,
+        env,
+        stdio: ['ignore', 'pipe', 'pipe'],
+        windowsHide: true,
+      });
+      let stdout = '';
+      let stderr = '';
+      child.stdout.on('data', (chunk) => { stdout += String(chunk || ''); });
+      child.stderr.on('data', (chunk) => { stderr += String(chunk || ''); });
+      child.on('error', reject);
+      child.on('close', (code) => {
+        if (code === 0) {
+          const pid = String(stdout || '').trim().split(/\s+/).pop();
+          console.log(`[ui-console] Started (PID: ${pid || 'unknown'})`);
+          resolve(pid || 'unknown');
+        } else {
+          reject(new Error(`Start-Process failed (${code}): ${stderr.trim() || stdout.trim() || 'unknown error'}`));
+        }
+      });
+    });
+    return;
+  }
 
   const child = spawn(spawnCmd, spawnArgs, {
     cwd: APP_ROOT,
