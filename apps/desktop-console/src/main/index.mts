@@ -1175,16 +1175,30 @@ app.on('will-quit', () => {
 
 app.whenReady().then(async () => {
   startCoreServiceHeartbeat();
-  const started = await startCoreDaemon().catch(() => false);
+  const started = await startCoreDaemon().catch((err) => {
+    console.error('[desktop-console] core services startup failed', err);
+    return false;
+  });
   if (!started) {
-    console.warn('[desktop-console] core services are not healthy at startup');
+    console.error('[desktop-console] core services are not healthy at startup; exiting');
+    await ensureAppExitCleanup('core_startup_failed', { stopStateBridge: true }).catch(() => null);
+    app.exit(1);
+    return;
   }
   markUiHeartbeat('main_ready');
   ensureHeartbeatWatchdog();
   createWindow();
-  await uiCliBridge.start().catch((err) => {
-    console.warn('[desktop-console] ui-cli bridge start failed', err);
-  });
+  try {
+    await uiCliBridge.start();
+  } catch (err) {
+    console.error('[desktop-console] ui-cli bridge start failed', err);
+    await ensureAppExitCleanup('ui_cli_bridge_start_failed', { stopStateBridge: true }).catch(() => null);
+    app.exit(1);
+  }
+}).catch(async (err) => {
+  console.error('[desktop-console] fatal startup error', err);
+  await ensureAppExitCleanup('startup_exception', { stopStateBridge: true }).catch(() => null);
+  app.exit(1);
 });
 
 ipcMain.on('preload:test', () => {

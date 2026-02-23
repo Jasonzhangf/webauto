@@ -172,10 +172,6 @@ function checkGeoIPInstalled() {
   return hasValidGeoIPFile(resolveGeoIPPath());
 }
 
-function installGeoIP() {
-  return runCamoCommand(['init', 'geoip']);
-}
-
 async function installGeoIPDirect() {
   const target = resolveGeoIPPath();
   const tmp = `${target}.tmp`;
@@ -195,18 +191,14 @@ async function installGeoIPDirect() {
 }
 
 async function ensureGeoIPInstalled() {
-  const commandResult = installGeoIP();
-  if (checkGeoIPInstalled()) {
-    return { ok: true, source: 'camo', ret: commandResult.ret };
-  }
   try {
     await installGeoIPDirect();
-    return { ok: checkGeoIPInstalled(), source: 'direct', ret: commandResult.ret };
+    return { ok: checkGeoIPInstalled(), source: 'direct', ret: null, detail: '' };
   } catch (error) {
     return {
       ok: false,
-      source: 'none',
-      ret: commandResult.ret,
+      source: 'direct',
+      ret: null,
       detail: error?.message || String(error),
     };
   }

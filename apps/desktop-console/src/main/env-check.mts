@@ -52,24 +52,6 @@ function resolveWebautoRoot() {
   return path.join(os.homedir(), '.webauto');
 }
 
-function resolveNpxBin() {
-  if (process.platform !== 'win32') return 'npx';
-  const resolved = resolveOnPath(['npx.cmd', 'npx.exe', 'npx.bat', 'npx.ps1']);
-  return resolved || 'npx.cmd';
-}
-
-function resolveOnPath(candidates: string[]): string | null {
-  const pathEnv = process.env.PATH || process.env.Path || '';
-  const dirs = pathEnv.split(path.delimiter).filter(Boolean);
-  for (const dir of dirs) {
-    for (const name of candidates) {
-      const full = path.join(dir, name);
-      if (existsSync(full)) return full;
-    }
-  }
-  return null;
-}
-
 function resolveCamoVersionFromText(stdout: string, stderr: string) {
   const merged = `${String(stdout || '')}\n${String(stderr || '')}`.trim();
   if (!merged) return 'unknown';
@@ -153,7 +135,7 @@ function isValidCamoufoxInstallRoot(installRoot: string) {
 
 /**
  * Check if camo CLI can be resolved.
- * Supports PATH/global install, local dependency bin, and npx package fallback.
+ * Supports PATH/global install and local dependency bin only.
  */
 export async function checkCamoCli(): Promise<CamoCheckResult> {
   const camoCandidates = process.platform === 'win32'
@@ -179,16 +161,9 @@ export async function checkCamoCli(): Promise<CamoCheckResult> {
     }
   }
 
-  const npxCheck = runVersionCheck(
-    resolveNpxBin(),
-    ['--yes', '--package=@web-auto/camo', 'camo', 'help'],
-    'npx:@web-auto/camo',
-  );
-  if (npxCheck.installed) return npxCheck;
-
   return {
     installed: false,
-    error: 'camo not found in PATH/local bin, and npx @web-auto/camo failed',
+    error: 'camo not found in PATH/local bin',
   };
 }
 
@@ -218,12 +193,10 @@ export async function checkFirefox(): Promise<{ installed: boolean; path?: strin
           { command: 'camoufox', args: ['path'] },
           { command: 'python', args: ['-m', 'camoufox', 'path'] },
           { command: 'py', args: ['-3', '-m', 'camoufox', 'path'] },
-          { command: resolveNpxBin(), args: ['--yes', '--package=camoufox', 'camoufox', 'path'] },
         ]
       : [
           { command: 'camoufox', args: ['path'] },
           { command: 'python3', args: ['-m', 'camoufox', 'path'] },
-          { command: resolveNpxBin(), args: ['--yes', '--package=camoufox', 'camoufox', 'path'] },
         ];
   for (const candidate of candidates) {
     try {

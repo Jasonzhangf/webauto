@@ -98,6 +98,41 @@ function quotePsSingle(value) {
   return String(value || '').replace(/'/g, "''");
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function waitForCoreServicesHealthy(timeoutMs = 90000) {
+  const startedAt = Date.now();
+  while ((Date.now() - startedAt) <= timeoutMs) {
+    try {
+      const [coreRes, runtimeRes] = await Promise.all([
+        fetch('http://127.0.0.1:7701/health', { signal: AbortSignal.timeout(1500) }),
+        fetch('http://127.0.0.1:7704/health', { signal: AbortSignal.timeout(1500) }),
+      ]);
+      if (coreRes.ok && runtimeRes.ok) return true;
+    } catch {
+      // keep polling
+    }
+    await sleep(500);
+  }
+  return false;
+}
+
+function terminateProcessTree(pid) {
+  const target = Number(pid || 0);
+  if (!Number.isFinite(target) || target <= 0) return;
+  try {
+    if (process.platform === 'win32') {
+      spawn('taskkill', ['/PID', String(target), '/T', '/F'], { stdio: 'ignore', windowsHide: true });
+      return;
+    }
+    process.kill(target, 'SIGTERM');
+  } catch {
+    // ignore cleanup errors
+  }
+}
+
 async function build() {
   return new Promise((resolve, reject) => {
     console.log('[ui-console] Building...');
@@ -135,7 +170,6 @@ async function startConsole(noDaemon = false) {
   }
 
   console.log('[ui-console] Starting Desktop Console...');
-  const npxBin = process.platform === 'win32' ? 'npx.cmd' : 'npx';
   const env = { ...process.env };
   if (noDaemon) env.WEBAUTO_NO_DAEMON = '1';
   const detached = !noDaemon;
@@ -143,19 +177,18 @@ async function startConsole(noDaemon = false) {
   const electronBin = process.platform === 'win32'
     ? path.join(APP_ROOT, 'node_modules', 'electron', 'dist', 'electron.exe')
     : path.join(APP_ROOT, 'node_modules', 'electron', 'dist', 'electron');
-  const useDirectElectron = existsSync(electronBin);
-  const useCmd = process.platform === 'win32' && !useDirectElectron;
-  const spawnCmd = useDirectElectron ? electronBin : (useCmd ? 'cmd.exe' : npxBin);
-  const spawnArgs = useDirectElectron
-    ? [DIST_MAIN]
-    : (useCmd ? ['/d', '/s', '/c', npxBin, 'electron', DIST_MAIN] : ['electron', DIST_MAIN]);
+  if (!existsSync(electronBin)) {
+    throw new Error(`electron binary not found: ${electronBin}`);
+  }
+  const spawnCmd = electronBin;
+  const spawnArgs = [DIST_MAIN];
 
   if (process.platform === 'win32' && detached) {
-    const filePath = useDirectElectron ? electronBin : npxBin;
-    const argList = useDirectElectron ? [DIST_MAIN] : ['electron', DIST_MAIN];
+    const filePath = electronBin;
+    const argList = [DIST_MAIN];
     const psArgList = argList.map((item) => `'${quotePsSingle(item)}'`).join(',');
     const psScript = `$p = Start-Process -FilePath '${quotePsSingle(filePath)}' -ArgumentList @(${psArgList}) -WorkingDirectory '${quotePsSingle(APP_ROOT)}' -PassThru; Write-Output $p.Id`;
-    await new Promise((resolve, reject) => {
+    const pid = await new Promise((resolve, reject) => {
       const child = spawn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', psScript], {
         cwd: APP_ROOT,
         env,
@@ -170,13 +203,18 @@ async function startConsole(noDaemon = false) {
       child.on('close', (code) => {
         if (code === 0) {
           const pid = String(stdout || '').trim().split(/\s+/).pop();
-          console.log(`[ui-console] Started (PID: ${pid || 'unknown'})`);
           resolve(pid || 'unknown');
         } else {
           reject(new Error(`Start-Process failed (${code}): ${stderr.trim() || stdout.trim() || 'unknown error'}`));
         }
       });
     });
+    const healthy = await waitForCoreServicesHealthy();
+    if (!healthy) {
+      terminateProcessTree(pid);
+      throw new Error('desktop console started but core services did not become healthy');
+    }
+    console.log(`[ui-console] Started (PID: ${pid || 'unknown'})`);
     return;
   }
 
@@ -194,6 +232,11 @@ async function startConsole(noDaemon = false) {
       process.exit(code);
     });
   } else {
+    const healthy = await waitForCoreServicesHealthy();
+    if (!healthy) {
+      terminateProcessTree(child.pid);
+      throw new Error('desktop console started but core services did not become healthy');
+    }
     child.unref();
     console.log(`[ui-console] Started (PID: ${child.pid})`);
   }

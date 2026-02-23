@@ -477,17 +477,12 @@ async function runInDir(dir, cmd, args) {
 }
 
 function checkDesktopConsoleDeps() {
-  if (isGlobalInstall()) return true;
-  // Check for electron in various locations:
-  // 1. Global npm root (when installed globally alongside webauto)
-  // 2. Package's own node_modules
-  // 3. apps/desktop-console/node_modules (local dev)
-  const globalRoot = path.resolve(ROOT, '..', '..');
-  return (
-    exists(path.join(globalRoot, 'electron')) ||
-    exists(path.join(ROOT, 'node_modules', 'electron')) ||
-    exists(path.join(ROOT, 'apps', 'desktop-console', 'node_modules', 'electron'))
-  );
+  const electronName = process.platform === 'win32' ? 'electron.exe' : 'electron';
+  const candidates = [
+    path.join(ROOT, 'node_modules', 'electron', 'dist', electronName),
+    path.join(ROOT, 'apps', 'desktop-console', 'node_modules', 'electron', 'dist', electronName),
+  ];
+  return candidates.some((p) => exists(p));
 }
 
 function checkDesktopConsoleBuilt() {
@@ -510,6 +505,10 @@ async function ensureDepsAndBuild() {
 
   // Global package should already ship renderer build.
   if (isGlobalInstall()) {
+    if (!checkDesktopConsoleDeps()) {
+      console.error('❌ electron runtime missing from package. Please reinstall @web-auto/webauto.');
+      process.exit(1);
+    }
     if (!checkDesktopConsoleBuilt()) {
       console.error('❌ desktop-console dist missing from package. Please reinstall @web-auto/webauto.');
       process.exit(1);
@@ -575,16 +574,16 @@ async function uiConsole({ build, install, checkOnly, noDaemon }) {
   }
 
   if (!okDeps) {
-    // For global install, okDeps is always true since we check global electron
-    // For local dev, require explicit --install or --build
-    if (!isGlobalInstall() && !install && !build) {
+    if (isGlobalInstall()) {
+      console.error('❌ electron runtime missing from installed package. Please reinstall @web-auto/webauto.');
+      process.exit(2);
+    }
+    if (!install && !build) {
       console.error('❌ missing apps/desktop-console/node_modules. Run: npm --prefix apps/desktop-console install');
       process.exit(2);
     }
-    if (!isGlobalInstall()) {
-      const npm = npmRunner();
-      await runInDir(path.join(ROOT, 'apps', 'desktop-console'), npm.cmd, [...npm.prefix, 'install']);
-    }
+    const npm = npmRunner();
+    await runInDir(path.join(ROOT, 'apps', 'desktop-console'), npm.cmd, [...npm.prefix, 'install']);
   }
 
   if (!okUiBuilt) {

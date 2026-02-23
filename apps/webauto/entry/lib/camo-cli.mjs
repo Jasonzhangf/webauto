@@ -44,7 +44,6 @@ export function getCamoRunner(rootDir = process.cwd()) {
   const isWin = process.platform === 'win32';
   const localBin = path.join(rootDir, 'node_modules', '.bin');
   const camoNames = isWin ? ['camo.cmd', 'camo.exe', 'camo.bat', 'camo.ps1'] : ['camo'];
-  const npxNames = isWin ? ['npx.cmd', 'npx.exe', 'npx.bat', 'npx.ps1'] : ['npx'];
 
   const local = resolveInDir(localBin, camoNames);
   if (local) return wrapWindowsRunner(local);
@@ -52,8 +51,7 @@ export function getCamoRunner(rootDir = process.cwd()) {
   const global = resolveOnPath(camoNames);
   if (global) return wrapWindowsRunner(global);
 
-  const npx = resolveOnPath(npxNames) || (isWin ? 'npx.cmd' : 'npx');
-  return wrapWindowsRunner(npx, ['--yes', '--package=@web-auto/camo', 'camo']);
+  return null;
 }
 
 function parseLastJson(stdout) {
@@ -74,6 +72,15 @@ export function runCamo(args, options = {}) {
   const rootDir = String(options.rootDir || process.cwd());
   const timeoutMs = Number(options.timeoutMs) > 0 ? Number(options.timeoutMs) : 60000;
   const runner = getCamoRunner(rootDir);
+  if (!runner) {
+    return {
+      ok: false,
+      code: null,
+      stdout: '',
+      stderr: 'camo cli not found in node_modules/.bin or PATH',
+      json: null,
+    };
+  }
   const ret = spawnSync(runner.cmd, [...runner.prefix, ...args], {
     cwd: rootDir,
     env: { ...process.env, ...(options.env || {}) },

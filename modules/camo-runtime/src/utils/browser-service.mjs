@@ -1,9 +1,58 @@
 #!/usr/bin/env node
-import { execSync } from 'node:child_process';
+import { execSync, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { createRequire } from 'node:module';
+import { fileURLToPath } from 'node:url';
 import { BROWSER_SERVICE_URL, loadConfig, setRepoRoot } from './config.mjs';
+
+const requireFromHere = createRequire(import.meta.url);
+const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
+
+function resolveNodeBin() {
+  const explicit = String(process.env.WEBAUTO_NODE_BIN || '').trim();
+  if (explicit) return explicit;
+  const npmNode = String(process.env.npm_node_execpath || '').trim();
+  if (npmNode) return npmNode;
+  return process.execPath;
+}
+
+function resolveCamoCliEntry() {
+  try {
+    const resolved = requireFromHere.resolve('@web-auto/camo/bin/camo.mjs');
+    if (resolved && fs.existsSync(resolved)) return resolved;
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+function runCamoCli(args = [], options = {}) {
+  const entry = resolveCamoCliEntry();
+  if (!entry) {
+    return {
+      ok: false,
+      code: null,
+      stdout: '',
+      stderr: '@web-auto/camo/bin/camo.mjs not found',
+      entry: null,
+    };
+  }
+  const ret = spawnSync(resolveNodeBin(), [entry, ...args], {
+    encoding: 'utf8',
+    windowsHide: true,
+    stdio: options.stdio || 'pipe',
+    env: { ...process.env, ...(options.env || {}) },
+  });
+  return {
+    ok: ret.status === 0,
+    code: ret.status,
+    stdout: String(ret.stdout || ''),
+    stderr: String(ret.stderr || ''),
+    entry,
+  };
+}
 
 export async function callAPI(action, payload = {}) {
   const r = await fetch(`${BROWSER_SERVICE_URL}/command`, {
@@ -320,20 +369,13 @@ function scanCommonRepoRoots() {
 
 export function findRepoRootCandidate() {
   const cfg = loadConfig();
+  const cwdRoot = walkUpForRepoRoot(process.cwd());
+  const moduleRoot = walkUpForRepoRoot(MODULE_DIR);
   const candidates = [
     process.env.WEBAUTO_REPO_ROOT,
-    process.cwd(),
     cfg.repoRoot,
-    path.join('/Volumes', 'extension', 'code', 'webauto'),
-    path.join('/Volumes', 'extension', 'code', 'WebAuto'),
-    path.join(os.homedir(), 'Documents', 'github', 'webauto'),
-    path.join(os.homedir(), 'Documents', 'github', 'WebAuto'),
-    path.join(os.homedir(), 'github', 'webauto'),
-    path.join(os.homedir(), 'github', 'WebAuto'),
-    path.join('C:', 'code', 'webauto'),
-    path.join('C:', 'code', 'WebAuto'),
-    path.join('C:', 'Users', os.userInfo().username, 'code', 'webauto'),
-    path.join('C:', 'Users', os.userInfo().username, 'code', 'WebAuto'),
+    moduleRoot,
+    cwdRoot,
   ].filter(Boolean);
 
   for (const root of candidates) {
@@ -343,22 +385,6 @@ export function findRepoRootCandidate() {
       setRepoRoot(resolved);
     }
     return resolved;
-  }
-
-  const walked = walkUpForRepoRoot(process.cwd());
-  if (walked) {
-    if (cfg.repoRoot !== walked) {
-      setRepoRoot(walked);
-    }
-    return walked;
-  }
-
-  const scanned = scanCommonRepoRoots();
-  if (scanned) {
-    if (cfg.repoRoot !== scanned) {
-      setRepoRoot(scanned);
-    }
-    return scanned;
   }
 
   return null;
@@ -384,12 +410,7 @@ export function detectCamoufoxPath() {
 
 export function ensureCamoufox() {
   if (detectCamoufoxPath()) return;
-  console.log('Camoufox is not found. Installing...');
-  execSync('npx --yes --package=camoufox camoufox fetch', { stdio: 'inherit' });
-  if (!detectCamoufoxPath()) {
-    throw new Error('Camoufox install finished but executable was not detected');
-  }
-  console.log('Camoufox installed.');
+  throw new Error('Camoufox is not installed. Run: webauto xhs install --download-browser');
 }
 
 export async function ensureBrowserService() {
@@ -405,19 +426,20 @@ export async function ensureBrowserService() {
 
   if (provider === 'camo') {
     const repoRoot = findRepoRootCandidate();
-    if (repoRoot) {
-      try {
-        execSync(`npx --yes @web-auto/camo config repo-root ${JSON.stringify(repoRoot)}`, { stdio: 'ignore' });
-      } catch {
-        // best-effort only; init will still try using current config
-      }
+    if (!repoRoot) {
+      throw new Error('WEBAUTO_REPO_ROOT is not set and no valid repo root was found');
+    }
+    const configRet = runCamoCli(['config', 'repo-root', repoRoot], { stdio: 'pipe' });
+    if (!configRet.ok) {
+      throw new Error(
+        `camo config repo-root failed: ${configRet.stderr.trim() || configRet.stdout.trim() || `exit ${configRet.code ?? 'null'}`}`,
+      );
     }
 
-    try {
-      console.log('Starting browser backend via camo init...');
-      execSync('npx --yes @web-auto/camo init', { stdio: 'inherit' });
-    } catch (error) {
-      throw new Error(`camo init failed: ${error?.message || String(error)}`);
+    console.log('Starting browser backend via camo init...');
+    const initRet = runCamoCli(['init'], { stdio: 'inherit' });
+    if (!initRet.ok) {
+      throw new Error(`camo init failed: ${initRet.stderr.trim() || initRet.stdout.trim() || `exit ${initRet.code ?? 'null'}`}`);
     }
 
     for (let i = 0; i < 20; i += 1) {
