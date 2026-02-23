@@ -1,6 +1,6 @@
 {
   "name": "@web-auto/webauto",
-  "version": "0.1.11",
+  "version": "0.1.12",
   "type": "module",
   "bin": {
     "webauto": "bin/webauto.mjs"
@@ -36,7 +36,7 @@
     "!apps/desktop-console/dist/**/*.map"
   ],
   "dependencies": {
-    "@web-auto/camo": "^0.1.6",
+    "@web-auto/camo": "^0.1.13",
     "ajv": "^8.18.0",
     "esbuild-register": "^3.6.0",
     "iconv-lite": "^0.6.3",
