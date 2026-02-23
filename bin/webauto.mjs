@@ -108,6 +108,7 @@ function resolveOnPath(candidates) {
 function wrapWindowsRunner(cmdPath, prefix = []) {
   if (process.platform !== 'win32') return { cmd: cmdPath, prefix };
   const lower = String(cmdPath || '').toLowerCase();
+  const quotedCmdPath = /\s/.test(String(cmdPath || '')) ? `"${cmdPath}"` : cmdPath;
   if (lower.endsWith('.ps1')) {
     return {
       cmd: 'powershell.exe',
@@ -117,7 +118,7 @@ function wrapWindowsRunner(cmdPath, prefix = []) {
   if (lower.endsWith('.cmd') || lower.endsWith('.bat')) {
     return {
       cmd: 'cmd.exe',
-      prefix: ['/d', '/s', '/c', cmdPath, ...prefix],
+      prefix: ['/d', '/s', '/c', quotedCmdPath, ...prefix],
     };
   }
   return { cmd: cmdPath, prefix };
