@@ -126,9 +126,9 @@ function wrapWindowsRunner(cmdPath, prefix = []) {
 
 function npmRunner() {
   if (process.platform !== 'win32') return { cmd: 'npm', prefix: [] };
-  const npmNames = ['npm.cmd', 'npm.exe', 'npm.bat', 'npm.ps1'];
-  const resolved = resolveOnPath(npmNames) || 'npm.cmd';
-  return wrapWindowsRunner(resolved);
+  // Always prefer PATH-resolved npm.cmd to avoid space-path quoting issues
+  // like "C:\Program Files\..." when invoking via cmd /c.
+  return wrapWindowsRunner('npm.cmd');
 }
 
 function uiConsoleScriptPath() {
