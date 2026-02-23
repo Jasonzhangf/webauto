@@ -39,6 +39,9 @@ type UiCliBridgeOptions = {
 
 const DEFAULT_HOST = '127.0.0.1';
 const DEFAULT_PORT = 7716;
+const DEFAULT_SNAPSHOT_TIMEOUT_MS = 12_000;
+const DEFAULT_ACTION_TIMEOUT_MS = 12_000;
+const DEFAULT_WAIT_PROBE_TIMEOUT_MS = 3_000;
 
 function normalizePathForPlatform(raw: string, platform = process.platform) {
   const input = String(raw || '').trim();
@@ -127,6 +130,22 @@ function toActionError(input: Partial<UiCliAction> | null | undefined, error: st
     ...extra,
   };
   return payload;
+}
+
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
+  const ms = readInt(timeoutMs, 0);
+  if (ms <= 0) return promise;
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_resolve, reject) => {
+        timer = setTimeout(() => reject(new Error(`${label}_timeout:${ms}`)), ms);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 async function writeControlFile(host: string, port: number) {
@@ -535,7 +554,11 @@ export class UiCliBridge {
     let snapshot: any;
     if (includeSnapshot) {
       try {
-        snapshot = await win!.webContents.executeJavaScript(buildSnapshotScript(), true);
+        snapshot = await withTimeout(
+          win!.webContents.executeJavaScript(buildSnapshotScript(), true),
+          readInt(process.env.WEBAUTO_UI_CLI_SNAPSHOT_TIMEOUT_MS, DEFAULT_SNAPSHOT_TIMEOUT_MS),
+          'snapshot',
+        );
       } catch (err: any) {
         return {
           ok: false,
@@ -571,7 +594,12 @@ export class UiCliBridge {
     const win = this.options.getWindow();
     if (!isUiReady(win)) return toActionError(input, 'window_not_ready');
     try {
-      const out = await win!.webContents.executeJavaScript(buildActionScript(input), true);
+      const timeoutMs = readInt(input?.timeoutMs, readInt(process.env.WEBAUTO_UI_CLI_ACTION_TIMEOUT_MS, DEFAULT_ACTION_TIMEOUT_MS));
+      const out = await withTimeout(
+        win!.webContents.executeJavaScript(buildActionScript(input), true),
+        timeoutMs,
+        'action',
+      );
       return out && typeof out === 'object' ? out : toActionError(input, 'empty_result');
     } catch (err: any) {
       return toActionError(input, err?.message || String(err), { details: err?.stack || null });
@@ -604,7 +632,11 @@ export class UiCliBridge {
           const disabled = Boolean(el && 'disabled' in el && el.disabled === true);
           return { exists: Boolean(el), visible, text, value, disabled };
         })()`;
-        const state = await win!.webContents.executeJavaScript(checkScript, true);
+        const state = await withTimeout(
+          win!.webContents.executeJavaScript(checkScript, true),
+          readInt(process.env.WEBAUTO_UI_CLI_WAIT_PROBE_TIMEOUT_MS, DEFAULT_WAIT_PROBE_TIMEOUT_MS),
+          'wait_probe',
+        );
         const exists = Boolean(state?.exists);
         const visible = Boolean(state?.visible);
         const text = String(state?.text || '');

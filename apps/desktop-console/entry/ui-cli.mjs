@@ -11,6 +11,13 @@ const APP_ROOT = path.resolve(__dirname, '..');
 const ROOT = path.resolve(APP_ROOT, '..', '..');
 const DEFAULT_HOST = process.env.WEBAUTO_UI_CLI_HOST || '127.0.0.1';
 const DEFAULT_PORT = Number(process.env.WEBAUTO_UI_CLI_PORT || 7716);
+const readEnvPositiveInt = (name, fallback) => {
+  const n = Number(process.env[name]);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : fallback;
+};
+const DEFAULT_HTTP_TIMEOUT_MS = readEnvPositiveInt('WEBAUTO_UI_CLI_HTTP_TIMEOUT_MS', 25_000);
+const DEFAULT_HTTP_RETRIES = readEnvPositiveInt('WEBAUTO_UI_CLI_HTTP_RETRIES', 1);
+const DEFAULT_START_HEALTH_TIMEOUT_MS = readEnvPositiveInt('WEBAUTO_UI_CLI_START_HEALTH_TIMEOUT_MS', 8_000);
 
 function normalizePathForPlatform(raw, platform = process.platform) {
   const input = String(raw || '').trim();
@@ -121,9 +128,37 @@ function resolveEndpoint() {
 
 async function requestJson(endpoint, pathname, init = {}) {
   const url = `http://${endpoint.host}:${endpoint.port}${pathname}`;
-  const res = await fetch(url, init);
-  const json = await res.json().catch(() => ({}));
-  return { ok: res.ok, status: res.status, json };
+  const timeoutMs = parseIntSafe(init?.timeoutMs, DEFAULT_HTTP_TIMEOUT_MS);
+  const retries = Math.max(0, parseIntSafe(init?.retries, DEFAULT_HTTP_RETRIES));
+  const retryDelayMs = parseIntSafe(init?.retryDelayMs, 300);
+  const requestInit = { ...init };
+  delete requestInit.timeoutMs;
+  delete requestInit.retries;
+  delete requestInit.retryDelayMs;
+
+  let lastErr = null;
+  for (let attempt = 0; attempt <= retries; attempt += 1) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const res = await fetch(url, { ...requestInit, signal: controller.signal });
+      clearTimeout(timeout);
+      const json = await res.json().catch(() => ({}));
+      return { ok: res.ok, status: res.status, json };
+    } catch (err) {
+      clearTimeout(timeout);
+      lastErr = err;
+      if (attempt < retries) {
+        await sleep(retryDelayMs * (attempt + 1));
+        continue;
+      }
+    }
+  }
+
+  const msg = lastErr?.name === 'AbortError'
+    ? `request_timeout:${pathname}:${timeoutMs}`
+    : (lastErr?.message || String(lastErr));
+  throw new Error(msg);
 }
 
 function sleep(ms) {
@@ -134,7 +169,7 @@ async function waitForHealth(endpoint, timeoutMs = 30_000) {
   const started = Date.now();
   while (Date.now() - started <= timeoutMs) {
     try {
-      const ret = await requestJson(endpoint, '/health');
+      const ret = await requestJson(endpoint, '/health', { timeoutMs: 2500, retries: 0 });
       if (ret.ok && ret.json?.ok) return ret.json;
     } catch {
       // keep polling
@@ -145,7 +180,7 @@ async function waitForHealth(endpoint, timeoutMs = 30_000) {
 }
 
 async function startConsoleIfNeeded(endpoint) {
-  const health = await waitForHealth(endpoint, 1500);
+  const health = await waitForHealth(endpoint, 3000);
   if (health) return health;
 
   const uiConsoleScript = path.join(APP_ROOT, 'entry', 'ui-console.mjs');
@@ -186,10 +221,17 @@ function printOutput(payload) {
 }
 
 async function sendAction(endpoint, payload) {
+  const waitBudgetMs = payload?.action === 'wait'
+    ? parseIntSafe(payload?.timeoutMs, 15_000) + 5_000
+    : 0;
+  const timeoutMs = Math.max(DEFAULT_HTTP_TIMEOUT_MS, waitBudgetMs);
+  const retries = payload?.action === 'wait' ? 0 : DEFAULT_HTTP_RETRIES;
   return requestJson(endpoint, '/action', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
+    timeoutMs,
+    retries,
   });
 }
 
@@ -629,7 +671,8 @@ async function main() {
   }
 
   if (cmd === 'start') {
-    const status = await waitForHealth(endpoint, 1000);
+    const startWaitMs = parseIntSafe(args.timeout, DEFAULT_START_HEALTH_TIMEOUT_MS);
+    const status = await waitForHealth(endpoint, startWaitMs);
     if (!status) throw new Error('ui cli bridge not healthy');
     printOutput({ ok: true, endpoint, status });
     return;
@@ -637,7 +680,10 @@ async function main() {
 
   if (cmd === 'status' || cmd === 'snapshot') {
     const pathName = cmd === 'snapshot' ? '/snapshot' : '/status';
-    const ret = await requestJson(endpoint, pathName);
+    const ret = await requestJson(endpoint, pathName, {
+      timeoutMs: parseIntSafe(args.timeout, DEFAULT_HTTP_TIMEOUT_MS),
+      retries: DEFAULT_HTTP_RETRIES,
+    });
     if (!ret.ok) throw new Error(ret.json?.error || `http_${ret.status}`);
     printOutput(ret.json);
     return;

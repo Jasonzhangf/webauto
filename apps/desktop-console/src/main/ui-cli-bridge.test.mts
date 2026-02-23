@@ -134,3 +134,18 @@ test('ui-cli-bridge action execution failure returns structured error with detai
   assert.equal(out.selector, '#start-btn');
   assert.equal(typeof out.details, 'string');
 });
+
+test('ui-cli-bridge action timeout returns structured timeout error', async () => {
+  const bridge = createBridge(
+    async () => new Promise(() => { /* intentional pending promise */ }),
+  );
+  const out = await (bridge as any).handleAction({
+    action: 'click',
+    selector: '#start-btn',
+    timeoutMs: 5,
+  });
+  assert.equal(out.ok, false);
+  assert.equal(out.action, 'click');
+  assert.equal(out.selector, '#start-btn');
+  assert.match(String(out.error || ''), /action_timeout/);
+});
