@@ -267,16 +267,57 @@ function ensureAliasUnique(accounts, alias, exceptId = '') {
   }
 }
 
-function resolveAccountOrThrow(index, key) {
-  const idOrAlias = String(key || '').trim();
-  if (!idOrAlias) throw new Error('account id or alias is required');
-  const byId = index.accounts.find((item) => item?.id === idOrAlias);
-  if (byId) return byId;
-  const target = idOrAlias.toLowerCase();
-  const byAlias = index.accounts.filter((item) => String(item?.alias || '').trim().toLowerCase() === target);
-  if (byAlias.length === 1) return byAlias[0];
-  if (byAlias.length > 1) throw new Error(`alias is not unique: ${idOrAlias}`);
-  throw new Error(`account not found: ${idOrAlias}`);
+function filterByPlatform(records, platform = null) {
+  const wanted = normalizeText(platform) ? normalizePlatform(platform) : null;
+  if (!wanted) return records;
+  return records.filter((item) => normalizePlatform(item?.platform) === wanted);
+}
+
+function resolveSingleOrThrow(records, field, key, platform = null) {
+  if (!Array.isArray(records) || records.length === 0) return null;
+  if (records.length === 1) return records[0];
+  const platformText = normalizeText(platform) ? ` under platform=${normalizePlatform(platform)}` : '';
+  const detail = records.map((item) => `${String(item?.id || '?')}(${normalizePlatform(item?.platform)})`).join(', ');
+  throw new Error(`${field} is not unique${platformText}: ${key} -> [${detail}]`);
+}
+
+function resolveAccountOrThrow(index, key, options = {}) {
+  const lookup = String(key || '').trim();
+  if (!lookup) throw new Error('account id, alias, profileId, or accountId is required');
+  const platform = normalizeText(options?.platform) ? normalizePlatform(options.platform) : null;
+  const rows = Array.isArray(index?.accounts) ? index.accounts : [];
+
+  const byId = filterByPlatform(rows.filter((item) => String(item?.id || '').trim() === lookup), platform);
+  const idMatch = resolveSingleOrThrow(byId, 'account id', lookup, platform);
+  if (idMatch) return idMatch;
+
+  const aliasTarget = lookup.toLowerCase();
+  const byAlias = filterByPlatform(
+    rows.filter((item) => String(item?.alias || '').trim().toLowerCase() === aliasTarget),
+    platform,
+  );
+  const aliasMatch = resolveSingleOrThrow(byAlias, 'alias', lookup, platform);
+  if (aliasMatch) return aliasMatch;
+
+  const byProfile = filterByPlatform(
+    rows.filter((item) => String(item?.profileId || '').trim() === lookup),
+    platform,
+  );
+  const profileMatch = resolveSingleOrThrow(byProfile, 'profileId', lookup, platform);
+  if (profileMatch) return profileMatch;
+
+  const accountIdTarget = normalizeText(lookup);
+  if (accountIdTarget) {
+    const byAccountId = filterByPlatform(
+      rows.filter((item) => normalizeText(item?.accountId) === accountIdTarget),
+      platform,
+    );
+    const accountIdMatch = resolveSingleOrThrow(byAccountId, 'accountId', lookup, platform);
+    if (accountIdMatch) return accountIdMatch;
+  }
+
+  const platformHint = platform ? ` under platform=${platform}` : '';
+  throw new Error(`account not found${platformHint}: ${lookup}`);
 }
 
 function resolveBindingKey(profileId, platform) {
@@ -425,9 +466,9 @@ export function listAccountProfiles(options = {}) {
   };
 }
 
-export function getAccount(idOrAlias) {
+export function getAccount(idOrAlias, options = {}) {
   const index = loadIndex();
-  return resolveAccountOrThrow(index, idOrAlias);
+  return resolveAccountOrThrow(index, idOrAlias, options);
 }
 
 export async function addAccount(input = {}) {

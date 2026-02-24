@@ -55,6 +55,36 @@ function hasCookie(cookies, name, domain) {
   ));
 }
 
+function resolveExistingProfileState(profileId, platform) {
+  const pid = String(profileId || '').trim();
+  if (!pid) return null;
+  const rows = listAccountProfiles({ platform }).profiles || [];
+  return rows.find((item) => String(item?.profileId || '').trim() === pid) || null;
+}
+
+function isTransientSyncError(error) {
+  const message = String(error?.message || error || '').toLowerCase();
+  if (!message) return false;
+  const transientMarkers = [
+    'fetch failed',
+    'failed to fetch',
+    'network error',
+    'networkerror',
+    'socket hang up',
+    'econnrefused',
+    'etimedout',
+    'timed out',
+    'service unavailable',
+    'http 502',
+    'http 503',
+    'http 504',
+    'operation is insecure',
+    'browser service',
+    'connection refused',
+  ];
+  return transientMarkers.some((marker) => message.includes(marker));
+}
+
 async function getProfileCookies(profileId) {
   const payload = await callAPI('getCookies', { profileId });
   const body = extractResult(payload);
@@ -491,14 +521,13 @@ export async function syncXhsAccountByProfile(profileId, options = {}) {
       detectedAt: new Date().toISOString(),
     });
   } catch (error) {
-    const msg = String(error?.message || error || '');
-    if (msg.toLowerCase().includes('operation is insecure')) {
-      try {
-        const existing = listAccountProfiles({ platform: 'xiaohongshu' }).profiles.find((item) => String(item?.profileId || '').trim() === normalizedProfileId);
-        if (existing && existing.valid) return existing;
-      } catch {
-        // ignore fallback lookup
+    const existing = resolveExistingProfileState(normalizedProfileId, 'xiaohongshu');
+    if (isTransientSyncError(error)) {
+      if (existing) return existing;
+      if (pendingWhileLogin) {
+        return markProfilePending(normalizedProfileId, `waiting_login_sync:${error?.message || String(error)}`);
       }
+      return markProfilePending(normalizedProfileId, `sync_unreachable:${error?.message || String(error)}`);
     }
     if (pendingWhileLogin) {
       return markProfilePending(normalizedProfileId, `waiting_login_sync:${error?.message || String(error)}`);
@@ -811,6 +840,14 @@ export async function syncWeiboAccountByProfile(profileId, options = {}) {
       detectedAt: new Date().toISOString(),
     });
   } catch (error) {
+    const existing = resolveExistingProfileState(normalizedProfileId, 'weibo');
+    if (isTransientSyncError(error)) {
+      if (existing) return existing;
+      if (pendingWhileLogin) {
+        return markProfilePending(normalizedProfileId, `waiting_login_sync:${error?.message || String(error)}`, 'weibo');
+      }
+      return markProfilePending(normalizedProfileId, `sync_unreachable:${error?.message || String(error)}`, 'weibo');
+    }
     if (pendingWhileLogin) {
       return markProfilePending(normalizedProfileId, `waiting_login_sync:${error?.message || String(error)}`, 'weibo');
     }

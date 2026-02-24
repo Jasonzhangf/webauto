@@ -240,11 +240,11 @@ Usage:
   webauto account list [--platform <name>] [--json]
   webauto account list --records [--json]
   webauto account add [--platform <name>] [--alias <alias>] [--name <name>] [--username <username>] [--profile <id>] [--fingerprint <id>] [--status pending|active|disabled|archived] [--json]
-  webauto account get <id|alias> [--json]
-  webauto account update <id|alias> [--alias <alias>|--clear-alias] [--name <name>] [--username <name>] [--profile <id>] [--fingerprint <id>] [--status pending|active|disabled|archived] [--json]
-  webauto account delete <id|alias> [--delete-profile] [--delete-fingerprint] [--json]
-  webauto account login <id|alias> [--url <url>] [--idle-timeout <duration>] [--sync-alias] [--json]
-  webauto account sync-alias <id|alias> [--selector <css>] [--alias <value>] [--json]
+  webauto account get <id|alias|profileId|accountId> [--platform <name>] [--json]
+  webauto account update <id|alias|profileId|accountId> [--alias <alias>|--clear-alias] [--name <name>] [--username <name>] [--profile <id>] [--fingerprint <id>] [--status pending|active|disabled|archived] [--json]
+  webauto account delete <id|alias|profileId|accountId> [--delete-profile] [--delete-fingerprint] [--json]
+  webauto account login <id|alias|profileId|accountId> [--platform <name>] [--url <url>] [--idle-timeout <duration>] [--sync-alias] [--json]
+  webauto account sync-alias <id|alias|profileId|accountId> [--platform <name>] [--selector <css>] [--alias <value>] [--json]
   webauto account sync <profileId|all> [--platform <xiaohongshu|weibo>] [--pending-while-login] [--resolve-alias] [--json]
 
 Notes:
@@ -299,12 +299,13 @@ async function cmdAdd(argv, jsonMode) {
   });
 }
 
-async function cmdGet(idOrAlias, jsonMode) {
-  const account = getAccount(idOrAlias);
+async function cmdGet(idOrAlias, argv, jsonMode) {
+  const account = getAccount(idOrAlias, { platform: argv.platform });
   output({ ok: true, account }, jsonMode);
 }
 
 async function cmdUpdate(idOrAlias, argv, jsonMode) {
+  const target = getAccount(idOrAlias);
   const patch = {};
   if (argv.platform !== undefined) patch.platform = argv.platform;
   if (argv.name !== undefined) patch.name = argv.name;
@@ -326,7 +327,7 @@ async function cmdUpdate(idOrAlias, argv, jsonMode) {
   if (!Object.keys(patch).length) {
     throw new Error('no update fields provided');
   }
-  const account = await updateAccount(idOrAlias, patch);
+  const account = await updateAccount(target.id, patch);
   output({ ok: true, account }, jsonMode);
   await publishAccountEvent('account:update', {
     profileId: account?.profileId || null,
@@ -338,7 +339,8 @@ async function cmdUpdate(idOrAlias, argv, jsonMode) {
 }
 
 async function cmdDelete(idOrAlias, argv, jsonMode) {
-  const result = removeAccount(idOrAlias, {
+  const target = getAccount(idOrAlias);
+  const result = removeAccount(target.id, {
     deleteProfile: argv['delete-profile'] === true,
     deleteFingerprint: argv['delete-fingerprint'] === true,
   });
@@ -351,7 +353,7 @@ async function cmdDelete(idOrAlias, argv, jsonMode) {
 }
 
 async function cmdLogin(idOrAlias, argv, jsonMode) {
-  const account = getAccount(idOrAlias);
+  const account = getAccount(idOrAlias, { platform: argv.platform });
   const accountPlatform = normalizePlatform(account.platform || 'xiaohongshu');
   await ensureProfile(account.profileId);
   const url = String(argv.url || inferLoginUrl(accountPlatform)).trim();
@@ -453,7 +455,7 @@ async function cmdLogin(idOrAlias, argv, jsonMode) {
 }
 
 async function cmdSyncAlias(idOrAlias, argv, jsonMode) {
-  const account = getAccount(idOrAlias);
+  const account = getAccount(idOrAlias, { platform: argv.platform });
   let alias = normalizeAlias(argv.alias);
   let source = 'manual';
   let candidates = [];
@@ -529,7 +531,7 @@ async function main() {
 
   if (cmd === 'list') return argv.records ? cmdListRecords(jsonMode) : cmdList(jsonMode, argv.platform);
   if (cmd === 'add') return cmdAdd(argv, jsonMode);
-  if (cmd === 'get') return cmdGet(arg1, jsonMode);
+  if (cmd === 'get') return cmdGet(arg1, argv, jsonMode);
   if (cmd === 'update') return cmdUpdate(arg1, argv, jsonMode);
   if (cmd === 'delete' || cmd === 'remove' || cmd === 'rm') return cmdDelete(arg1, argv, jsonMode);
   if (cmd === 'login') return cmdLogin(arg1, argv, jsonMode);
