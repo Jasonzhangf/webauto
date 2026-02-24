@@ -207,7 +207,6 @@ export async function execute(input: EnsureSessionInput): Promise<EnsureSessionO
     }
 
     async function clearCssZoom(): Promise<void> {
-      if (!profileId.startsWith('xiaohongshu_')) return;
       try {
         await fetch(statusUrl, {
           method: 'POST',
@@ -230,7 +229,6 @@ export async function execute(input: EnsureSessionInput): Promise<EnsureSessionO
     }
 
     async function applyZoom(): Promise<void> {
-      if (!profileId.startsWith('xiaohongshu_')) return;
       const metrics = await loadMetrics();
       const zoom = resolveZoom(metrics);
       if (zoom === null) {
@@ -281,7 +279,6 @@ export async function execute(input: EnsureSessionInput): Promise<EnsureSessionO
     }
 
     async function applyBrowserZoom(): Promise<void> {
-      if (!profileId.startsWith('xiaohongshu_')) return;
       const target = resolveBrowserZoomTarget();
       if (!target || Math.abs(target - 1) < 0.01) return;
       const zoomOutSteps = [0.9, 0.8, 0.67, 0.5, 0.33, 0.25];
@@ -327,7 +324,6 @@ export async function execute(input: EnsureSessionInput): Promise<EnsureSessionO
     }
 
     async function resetBrowserZoom(): Promise<void> {
-      if (!profileId.startsWith('xiaohongshu_')) return;
       if (process.env.WEBAUTO_RESET_BROWSER_ZOOM === '0') return;
       const key = os.platform() === 'darwin' ? 'Meta+0' : 'Control+0';
       try {

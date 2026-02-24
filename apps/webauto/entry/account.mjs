@@ -11,12 +11,18 @@ import {
   updateAccount,
 } from './lib/account-store.mjs';
 import { ensureProfile } from './lib/profilepool.mjs';
-import { syncXhsAccountByProfile, syncXhsAccountsByProfiles } from './lib/account-detect.mjs';
+import {
+  syncWeiboAccountByProfile,
+  syncWeiboAccountsByProfiles,
+  syncXhsAccountByProfile,
+  syncXhsAccountsByProfiles,
+} from './lib/account-detect.mjs';
 import { publishBusEvent } from './lib/bus-publish.mjs';
 import { runCamo } from './lib/camo-cli.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 const XHS_HOME_URL = 'https://www.xiaohongshu.com';
+const WEIBO_HOME_URL = 'https://weibo.com';
 
 function output(payload, jsonMode) {
   if (jsonMode) {
@@ -35,9 +41,44 @@ function parseBoolean(value, fallback = false) {
   return fallback;
 }
 
+function parseIntWithFallback(value, fallback) {
+  const parsed = Math.floor(Number(value));
+  if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
+  return parsed;
+}
+
+function resolveLoginViewport() {
+  const width = Math.max(900, parseIntWithFallback(process.env.WEBAUTO_VIEWPORT_WIDTH, 1440));
+  const height = Math.max(700, parseIntWithFallback(process.env.WEBAUTO_VIEWPORT_HEIGHT, 1100));
+  return { width, height };
+}
+
+async function applyLoginViewport(profileId) {
+  const id = String(profileId || '').trim();
+  if (!id) return { ok: false, error: 'missing_profile_id' };
+  const viewport = resolveLoginViewport();
+  try {
+    const { callAPI } = await import('../../../modules/camo-runtime/src/utils/browser-service.mjs');
+    const payload = await callAPI('page:setViewport', {
+      profileId: id,
+      width: viewport.width,
+      height: viewport.height,
+    });
+    const result = payload?.result || payload?.body || payload || {};
+    return {
+      ok: true,
+      width: Number(result.width) || viewport.width,
+      height: Number(result.height) || viewport.height,
+    };
+  } catch (error) {
+    return { ok: false, error: error?.message || String(error) };
+  }
+}
+
 function inferLoginUrl(platform) {
   const value = String(platform || '').trim().toLowerCase();
   if (!value || value === 'xiaohongshu' || value === 'xhs') return XHS_HOME_URL;
+  if (value === 'weibo' || value === 'wb') return WEIBO_HOME_URL;
   return 'https://example.com';
 }
 
@@ -49,7 +90,45 @@ function normalizeAlias(input) {
 function normalizePlatform(input, fallback = 'xiaohongshu') {
   const raw = String(input || fallback).trim().toLowerCase();
   if (!raw || raw === 'xhs') return 'xiaohongshu';
+  if (raw === 'wb') return 'weibo';
   return raw;
+}
+
+function isSupportedSyncPlatform(platform) {
+  return platform === 'xiaohongshu' || platform === 'weibo';
+}
+
+function resolveSyncPlatformByProfile(profileId, fallback = 'xiaohongshu') {
+  const id = String(profileId || '').trim();
+  if (!id) return normalizePlatform(fallback);
+  const candidates = ['xiaohongshu', 'weibo'];
+  for (const platform of candidates) {
+    const rows = listAccountProfiles({ platform }).profiles || [];
+    if (rows.some((row) => String(row?.profileId || '').trim() === id)) return platform;
+  }
+  return normalizePlatform(fallback);
+}
+
+async function syncByProfileAndPlatform(profileId, platform, options = {}) {
+  const normalizedPlatform = normalizePlatform(platform || 'xiaohongshu');
+  if (normalizedPlatform === 'xiaohongshu') {
+    return syncXhsAccountByProfile(profileId, options);
+  }
+  if (normalizedPlatform === 'weibo') {
+    return syncWeiboAccountByProfile(profileId, options);
+  }
+  throw new Error(`account sync unsupported platform: ${normalizedPlatform}`);
+}
+
+async function syncProfilesByPlatform(profileIds, platform, options = {}) {
+  const normalizedPlatform = normalizePlatform(platform || 'xiaohongshu');
+  if (normalizedPlatform === 'xiaohongshu') {
+    return syncXhsAccountsByProfiles(profileIds, options);
+  }
+  if (normalizedPlatform === 'weibo') {
+    return syncWeiboAccountsByProfiles(profileIds, options);
+  }
+  throw new Error(`account sync unsupported platform: ${normalizedPlatform}`);
 }
 
 async function publishAccountEvent(type, payload) {
@@ -166,7 +245,7 @@ Usage:
   webauto account delete <id|alias> [--delete-profile] [--delete-fingerprint] [--json]
   webauto account login <id|alias> [--url <url>] [--idle-timeout <duration>] [--sync-alias] [--json]
   webauto account sync-alias <id|alias> [--selector <css>] [--alias <value>] [--json]
-  webauto account sync <profileId|all> [--pending-while-login] [--resolve-alias] [--json]
+  webauto account sync <profileId|all> [--platform <xiaohongshu|weibo>] [--pending-while-login] [--resolve-alias] [--json]
 
 Notes:
   - 账号数据默认保存到 WEBAUTO 根目录下的 accounts（Windows 优先 D:/webauto，缺失时回落 ~/.webauto，可用 WEBAUTO_HOME 覆盖）
@@ -180,6 +259,7 @@ Examples:
   webauto account add --platform xiaohongshu --alias 主号
   webauto account list
   webauto account sync all
+  webauto account sync all --platform weibo
   webauto account login xhs-0001 --url https://www.xiaohongshu.com --idle-timeout 30m
   webauto account sync-alias xhs-0001
   webauto account update xhs-0001 --alias 运营1号
@@ -272,8 +352,9 @@ async function cmdDelete(idOrAlias, argv, jsonMode) {
 
 async function cmdLogin(idOrAlias, argv, jsonMode) {
   const account = getAccount(idOrAlias);
+  const accountPlatform = normalizePlatform(account.platform || 'xiaohongshu');
   await ensureProfile(account.profileId);
-  const url = String(argv.url || inferLoginUrl(account.platform)).trim();
+  const url = String(argv.url || inferLoginUrl(accountPlatform)).trim();
   // Default idle timeout: 30 minutes, configurable via env or CLI.
   // Keep validation semantics aligned with camo parseDurationMs.
   const idleTimeout = String(argv['idle-timeout'] || process.env.WEBAUTO_LOGIN_IDLE_TIMEOUT || '30m').trim() || '30m';
@@ -288,8 +369,9 @@ async function cmdLogin(idOrAlias, argv, jsonMode) {
     process.exit(1);
   }
 
-  const pendingProfile = await syncXhsAccountByProfile(account.profileId, { pendingWhileLogin: true }).catch((error) => ({
+  const pendingProfile = await syncByProfileAndPlatform(account.profileId, accountPlatform, { pendingWhileLogin: true }).catch((error) => ({
     profileId: account.profileId,
+    platform: accountPlatform,
     valid: false,
     status: 'pending',
     reason: `waiting_login_sync:${error?.message || String(error)}`,
@@ -317,6 +399,7 @@ async function cmdLogin(idOrAlias, argv, jsonMode) {
     }, jsonMode);
     process.exit(1);
   }
+  const viewport = await applyLoginViewport(account.profileId);
 
   const cookieAuto = runCamo(['cookies', 'auto', 'start', account.profileId, '--interval', '5000'], {
     rootDir: ROOT,
@@ -337,8 +420,9 @@ async function cmdLogin(idOrAlias, argv, jsonMode) {
     }
   }
 
-  const accountSync = await syncXhsAccountByProfile(account.profileId, { pendingWhileLogin: true }).catch((error) => ({
+  const accountSync = await syncByProfileAndPlatform(account.profileId, accountPlatform, { pendingWhileLogin: true }).catch((error) => ({
     profileId: account.profileId,
+    platform: accountPlatform,
     valid: false,
     status: 'pending',
     reason: `waiting_login_sync:${error?.message || String(error)}`,
@@ -351,6 +435,7 @@ async function cmdLogin(idOrAlias, argv, jsonMode) {
     url,
     idleTimeout,
     camo: startResult.json || startResult.stdout || null,
+    viewport,
     pendingProfile,
     cookieAuto: cookieAuto.ok
       ? { ok: true }
@@ -397,25 +482,33 @@ async function cmdSyncAlias(idOrAlias, argv, jsonMode) {
 async function cmdSync(target, argv, jsonMode) {
   const pendingWhileLogin = parseBoolean(argv['pending-while-login'], false);
   const resolveAlias = parseBoolean(argv['resolve-alias'], false);
-  const platform = normalizePlatform(argv.platform || 'xiaohongshu');
+  const explicitPlatform = normalizeAlias(argv.platform) ? normalizePlatform(argv.platform) : '';
   const value = String(target || '').trim().toLowerCase();
   if (!value || value === 'all') {
-    if (platform !== 'xiaohongshu') {
-      throw new Error(`account sync currently supports platform=xiaohongshu only, got: ${platform}`);
+    const platform = explicitPlatform || 'xiaohongshu';
+    if (!isSupportedSyncPlatform(platform)) {
+      throw new Error(`account sync unsupported platform: ${platform}`);
     }
-    const rows = listAccountProfiles({ platform: 'xiaohongshu' }).profiles;
+    const rows = listAccountProfiles({ platform }).profiles;
     const profileIds = rows.map((item) => item.profileId);
-    const synced = await syncXhsAccountsByProfiles(profileIds, { pendingWhileLogin, resolveAlias });
+    const synced = await syncProfilesByPlatform(profileIds, platform, { pendingWhileLogin, resolveAlias });
     output({ ok: true, count: synced.length, profiles: synced }, jsonMode);
     await publishAccountEvent('account:sync', {
+      platform,
       count: synced.length,
       profiles: synced,
     });
     return;
   }
-  const synced = await syncXhsAccountByProfile(target, { pendingWhileLogin, resolveAlias });
+  const profileId = String(target || '').trim();
+  const platform = explicitPlatform || resolveSyncPlatformByProfile(profileId, 'xiaohongshu');
+  if (!isSupportedSyncPlatform(platform)) {
+    throw new Error(`account sync unsupported platform: ${platform}`);
+  }
+  const synced = await syncByProfileAndPlatform(profileId, platform, { pendingWhileLogin, resolveAlias });
   output({ ok: true, profile: synced }, jsonMode);
   await publishAccountEvent('account:sync', {
+    platform,
     profile: synced,
   });
 }

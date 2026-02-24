@@ -2,6 +2,8 @@ import { callAPI } from '../../../../modules/camo-runtime/src/utils/browser-serv
 import { listAccountProfiles, markProfileInvalid, markProfilePending, upsertProfileAccountState } from './account-store.mjs';
 
 const XHS_PROFILE_URL = 'https://www.xiaohongshu.com/user/profile';
+const WEIBO_HOME_URL = 'https://weibo.com';
+const WEIBO_PROFILE_INFO_ENDPOINT = '/ajax/profile/info';
 
 function normalizeText(value) {
   const text = String(value ?? '').trim();
@@ -10,6 +12,55 @@ function normalizeText(value) {
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function extractResult(payload) {
+  if (payload && typeof payload === 'object') {
+    if (Object.prototype.hasOwnProperty.call(payload, 'result')) return payload.result;
+    if (Object.prototype.hasOwnProperty.call(payload, 'data')) return payload.data;
+  }
+  return payload || {};
+}
+
+function normalizeWeiboUid(value) {
+  const text = String(value ?? '').trim();
+  if (!text) return null;
+  const matched = text.match(/\d{4,}/);
+  if (!matched || !matched[0]) return null;
+  return matched[0];
+}
+
+function isDomainCookie(cookie, domain) {
+  const cookieDomain = String(cookie?.domain || '').trim().toLowerCase();
+  if (!cookieDomain) return false;
+  const wanted = String(domain || '').trim().toLowerCase();
+  if (!wanted) return false;
+  return cookieDomain === wanted || cookieDomain === `.${wanted}` || cookieDomain.endsWith(`.${wanted}`);
+}
+
+function isCookieExpired(cookie) {
+  const expires = Number(cookie?.expires);
+  if (!Number.isFinite(expires)) return false;
+  if (expires <= 0) return false;
+  return expires * 1000 <= Date.now();
+}
+
+function hasCookie(cookies, name, domain) {
+  const wantedName = String(name || '').trim().toUpperCase();
+  if (!wantedName) return false;
+  return (Array.isArray(cookies) ? cookies : []).some((cookie) => (
+    String(cookie?.name || '').trim().toUpperCase() === wantedName
+    && isDomainCookie(cookie, domain)
+    && !isCookieExpired(cookie)
+  ));
+}
+
+async function getProfileCookies(profileId) {
+  const payload = await callAPI('getCookies', { profileId });
+  const body = extractResult(payload);
+  if (Array.isArray(body?.cookies)) return body.cookies;
+  if (Array.isArray(body)) return body;
+  return [];
 }
 
 function buildDetectScript() {
@@ -461,6 +512,317 @@ export async function syncXhsAccountsByProfiles(profileIds = [], options = {}) {
   const out = [];
   for (const profileId of list) {
     const state = await syncXhsAccountByProfile(profileId, options);
+    out.push(state);
+  }
+  return out;
+}
+
+function buildWeiboDetectScript() {
+  return `(() => {
+    const normalize = (value) => String(value || '').replace(/\\s+/g, ' ').trim();
+    const toAlias = (value) => {
+      const text = normalize(value);
+      if (!text) return null;
+      if (text === '微博' || text === '首页' || text === '登录') return null;
+      return text;
+    };
+    const isVisible = (node) => {
+      if (!(node instanceof HTMLElement)) return false;
+      const style = window.getComputedStyle(node);
+      if (!style) return false;
+      if (style.display === 'none' || style.visibility === 'hidden') return false;
+      if (Number(style.opacity || '1') === 0) return false;
+      const rect = node.getBoundingClientRect();
+      return rect.width > 0 && rect.height > 0;
+    };
+    const href = String(location.href || '');
+    const host = String(location.host || '');
+    const loginUrl = (
+      host.includes('passport.weibo.com')
+      || /\\/signin|\\/login|passport/i.test(href)
+    );
+    const guardSelectors = [
+      '.LoginCard',
+      'div[class*="LoginCard"]',
+      'div[class*="login"]',
+      'form[action*="passport"]',
+      'input[name="username"]',
+      'input[type="password"]'
+    ];
+    const guardNodes = guardSelectors
+      .flatMap((sel) => Array.from(document.querySelectorAll(sel)))
+      .filter((node) => isVisible(node));
+    const guardText = guardNodes
+      .slice(0, 8)
+      .map((node) => normalize(node.textContent || ''))
+      .join(' ');
+    const hasLoginText = /登录|注册|验证码|手机号|扫码|sign\\s*in|password/i.test(guardText);
+    const hasLoginGuard = loginUrl || (guardNodes.length > 0 && hasLoginText);
+
+    const uidCandidates = [];
+    const aliasCandidates = [];
+    const pushUid = (value, source) => {
+      const text = normalize(value);
+      if (!text) return;
+      uidCandidates.push({ value: text, source: source || null });
+    };
+    const pushAlias = (value, source) => {
+      const text = toAlias(value);
+      if (!text) return;
+      aliasCandidates.push({ value: text, source: source || null });
+    };
+
+    const config = (typeof window !== 'undefined' && window.$CONFIG) || null;
+    if (config && typeof config === 'object') {
+      pushUid(config.uid, 'config.uid');
+      pushUid(config.oid, 'config.oid');
+      pushAlias(config.nick || config.nickName || config.name, 'config.nick');
+    }
+
+    const initialState = (typeof window !== 'undefined' && window.__INITIAL_STATE__) || null;
+    if (initialState && typeof initialState === 'object') {
+      const me = initialState.user || initialState.login || initialState.loginInfo || initialState.userInfo || null;
+      if (me && typeof me === 'object') {
+        pushUid(me.uid || me.idstr || me.id || me.userId || null, 'state.user');
+        pushAlias(me.screen_name || me.nick || me.nickname || me.name || null, 'state.user');
+      }
+    }
+
+    const meLink = Array.from(document.querySelectorAll('a[href*="/u/"], a[href*="/n/"]'))
+      .find((node) => {
+        const text = normalize(node.textContent || '');
+        const title = normalize(node.getAttribute?.('title') || '');
+        return text === '我' || text === '我的' || title === '我' || title === '我的';
+      });
+    if (meLink) {
+      const meHref = String(meLink.getAttribute('href') || '').trim();
+      const uidMatch = meHref.match(/\\/u\\/(\\d{4,})/);
+      if (uidMatch && uidMatch[1]) pushUid(uidMatch[1], 'anchor.self');
+      pushAlias(meLink.textContent || '', 'anchor.self');
+    }
+
+    const anchors = Array.from(document.querySelectorAll('a[href*="/u/"], a[href*="/n/"]')).slice(0, 120);
+    for (const anchor of anchors) {
+      const ahref = String(anchor.getAttribute('href') || '').trim();
+      if (!ahref) continue;
+      const uidMatch = ahref.match(/\\/u\\/(\\d{4,})/);
+      if (uidMatch && uidMatch[1]) pushUid(uidMatch[1], 'anchor.any');
+      if (uidMatch && uidMatch[1]) pushAlias(anchor.textContent || '', 'anchor.any');
+    }
+
+    const aliasSelectors = [
+      'h1',
+      'header h1',
+      '[class*="ProfileHeader_name"]',
+      '[class*="profile"] [class*="name"]',
+      '[class*="userinfo"] [class*="name"]',
+      'a[href*="/u/"] span'
+    ];
+    for (const sel of aliasSelectors) {
+      const nodes = Array.from(document.querySelectorAll(sel)).slice(0, 8);
+      for (const node of nodes) {
+        pushAlias(node.textContent || node.getAttribute?.('title') || '', sel);
+      }
+    }
+    const title = normalize(document.title || '').replace(/\\s*[-|_].*$/, '').trim();
+    if (title) pushAlias(title, 'document.title');
+
+    const uid = uidCandidates[0]?.value || null;
+    const alias = aliasCandidates[0]?.value || null;
+    return {
+      url: href,
+      hasLoginGuard,
+      uid,
+      alias,
+      uidCandidates,
+      aliasCandidates,
+    };
+  })()`;
+}
+
+function buildWeiboWhoamiScript(uid) {
+  return `(async () => {
+    const expectedUid = String(${JSON.stringify(String(uid || ''))}).trim();
+    if (!expectedUid) {
+      return { ok: false, uid: null, reason: 'missing_uid' };
+    }
+    const endpoint = ${JSON.stringify(WEIBO_PROFILE_INFO_ENDPOINT)};
+    const url = endpoint + '?uid=' + encodeURIComponent(expectedUid);
+    try {
+      const response = await fetch(url, {
+        method: 'GET',
+        credentials: 'include',
+        headers: { 'accept': 'application/json, text/plain, */*' },
+      });
+      const text = await response.text();
+      let json = null;
+      try {
+        json = JSON.parse(text);
+      } catch {
+        return {
+          ok: false,
+          uid: null,
+          status: response.status,
+          reason: 'invalid_json',
+          bodySnippet: String(text || '').slice(0, 120),
+        };
+      }
+      const dataUser = (json && json.data && (json.data.user || json.data)) || {};
+      const foundUid = String(
+        (dataUser && (dataUser.idstr || dataUser.id || dataUser.uid))
+        || json.uid
+        || '',
+      ).trim();
+      const hasData = Boolean(foundUid);
+      const code = json && (json.code || json.errno || json.status) ? String(json.code || json.errno || json.status) : null;
+      const okFlag = response.ok && (json.ok === 1 || json.ok === true || hasData);
+      return {
+        ok: okFlag,
+        uid: foundUid || null,
+        status: response.status,
+        code,
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        uid: null,
+        reason: String(error?.message || error || 'whoami_failed'),
+      };
+    }
+  })()`;
+}
+
+export async function detectWeiboAccountIdentity(profileId) {
+  const normalizedProfileId = String(profileId || '').trim();
+  if (!normalizedProfileId) throw new Error('profileId is required');
+  const runDetect = async () => {
+    const payload = await callAPI('evaluate', {
+      profileId: normalizedProfileId,
+      script: buildWeiboDetectScript(),
+    });
+    const result = extractResult(payload);
+    const uidCandidates = Array.isArray(result?.uidCandidates) ? result.uidCandidates : [];
+    const normalizedCandidates = uidCandidates
+      .map((item) => ({
+        value: normalizeWeiboUid(item?.value),
+        source: normalizeText(item?.source),
+      }))
+      .filter((item) => Boolean(item.value));
+    const accountId = normalizeWeiboUid(result?.uid) || normalizedCandidates[0]?.value || null;
+    const alias = normalizeText(result?.alias) || null;
+    return {
+      profileId: normalizedProfileId,
+      url: normalizeText(result?.url) || WEIBO_HOME_URL,
+      hasLoginGuard: result?.hasLoginGuard === true,
+      accountId,
+      alias,
+      uidCandidates: normalizedCandidates,
+    };
+  };
+
+  let detected = await runDetect();
+  if (!detected.accountId || detected.hasLoginGuard) {
+    await sleep(1200);
+    const retry = await runDetect();
+    if (!detected.accountId && retry.accountId) detected.accountId = retry.accountId;
+    if (!detected.alias && retry.alias) detected.alias = retry.alias;
+    if (detected.hasLoginGuard && !retry.hasLoginGuard) detected.hasLoginGuard = false;
+    if (!detected.url && retry.url) detected.url = retry.url;
+    if ((!detected.uidCandidates || detected.uidCandidates.length === 0) && retry.uidCandidates?.length) {
+      detected.uidCandidates = retry.uidCandidates;
+    }
+  }
+
+  let cookies = [];
+  try {
+    cookies = await getProfileCookies(normalizedProfileId);
+  } catch {
+    cookies = [];
+  }
+  const hasSub = hasCookie(cookies, 'SUB', 'weibo.com');
+  const hasSubp = hasCookie(cookies, 'SUBP', 'weibo.com');
+  const hasCookieAuth = hasSub && hasSubp;
+
+  let apiVerified = false;
+  let apiUid = null;
+  let apiReason = null;
+  if (detected.accountId && !detected.hasLoginGuard && hasCookieAuth) {
+    try {
+      const payload = await callAPI('evaluate', {
+        profileId: normalizedProfileId,
+        script: buildWeiboWhoamiScript(detected.accountId),
+      });
+      const probe = extractResult(payload);
+      apiUid = normalizeWeiboUid(probe?.uid);
+      const uidMatched = !apiUid || apiUid === detected.accountId;
+      apiVerified = probe?.ok === true && uidMatched;
+      if (!apiVerified) {
+        apiReason = normalizeText(probe?.reason) || normalizeText(probe?.code) || 'whoami_failed';
+      }
+    } catch (error) {
+      apiVerified = false;
+      apiReason = `whoami_failed:${error?.message || String(error)}`;
+    }
+  } else if (!hasCookieAuth) {
+    apiReason = 'cookie_missing';
+  }
+
+  return {
+    ...detected,
+    hasCookieAuth,
+    cookieSignals: {
+      SUB: hasSub,
+      SUBP: hasSubp,
+    },
+    apiVerified,
+    apiUid,
+    apiReason,
+  };
+}
+
+export async function syncWeiboAccountByProfile(profileId, options = {}) {
+  const normalizedProfileId = String(profileId || '').trim();
+  if (!normalizedProfileId) throw new Error('profileId is required');
+  const pendingWhileLogin = options?.pendingWhileLogin === true;
+  try {
+    const detected = await detectWeiboAccountIdentity(normalizedProfileId);
+    if (detected.hasLoginGuard) {
+      if (pendingWhileLogin) return markProfilePending(normalizedProfileId, 'waiting_login_guard', 'weibo');
+      return markProfileInvalid(normalizedProfileId, 'login_guard', 'weibo');
+    }
+    if (!detected.hasCookieAuth) {
+      if (pendingWhileLogin) return markProfilePending(normalizedProfileId, 'waiting_cookie_auth', 'weibo');
+      return markProfileInvalid(normalizedProfileId, 'cookie_missing', 'weibo');
+    }
+    if (!detected.accountId) {
+      if (pendingWhileLogin) return markProfilePending(normalizedProfileId, 'waiting_account_id', 'weibo');
+      return markProfileInvalid(normalizedProfileId, 'missing_account_id', 'weibo');
+    }
+    if (!detected.apiVerified) {
+      if (pendingWhileLogin) return markProfilePending(normalizedProfileId, `waiting_whoami:${detected.apiReason || 'whoami_failed'}`, 'weibo');
+      return markProfileInvalid(normalizedProfileId, `whoami_failed:${detected.apiReason || 'unknown'}`, 'weibo');
+    }
+    return upsertProfileAccountState({
+      profileId: normalizedProfileId,
+      platform: 'weibo',
+      accountId: detected.accountId,
+      alias: detected.alias,
+      reason: null,
+      detectedAt: new Date().toISOString(),
+    });
+  } catch (error) {
+    if (pendingWhileLogin) {
+      return markProfilePending(normalizedProfileId, `waiting_login_sync:${error?.message || String(error)}`, 'weibo');
+    }
+    return markProfileInvalid(normalizedProfileId, `sync_failed:${error?.message || String(error)}`, 'weibo');
+  }
+}
+
+export async function syncWeiboAccountsByProfiles(profileIds = [], options = {}) {
+  const list = Array.from(new Set((Array.isArray(profileIds) ? profileIds : []).map((item) => String(item || '').trim()).filter(Boolean)));
+  const out = [];
+  for (const profileId of list) {
+    const state = await syncWeiboAccountByProfile(profileId, options);
     out.push(state);
   }
   return out;

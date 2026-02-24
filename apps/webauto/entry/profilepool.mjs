@@ -26,6 +26,40 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function parseIntWithFallback(value, fallback) {
+  const parsed = Math.floor(Number(value));
+  if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
+  return parsed;
+}
+
+function resolveLoginViewport() {
+  const width = Math.max(900, parseIntWithFallback(process.env.WEBAUTO_VIEWPORT_WIDTH, 1440));
+  const height = Math.max(700, parseIntWithFallback(process.env.WEBAUTO_VIEWPORT_HEIGHT, 1100));
+  return { width, height };
+}
+
+async function applyLoginViewport(profileId) {
+  const id = String(profileId || '').trim();
+  if (!id) return { ok: false, error: 'missing_profile_id' };
+  const viewport = resolveLoginViewport();
+  try {
+    const { callAPI } = await import('../../../modules/camo-runtime/src/utils/browser-service.mjs');
+    const payload = await callAPI('page:setViewport', {
+      profileId: id,
+      width: viewport.width,
+      height: viewport.height,
+    });
+    const result = payload?.result || payload?.body || payload || {};
+    return {
+      ok: true,
+      width: Number(result.width) || viewport.width,
+      height: Number(result.height) || viewport.height,
+    };
+  } catch (error) {
+    return { ok: false, error: error?.message || String(error) };
+  }
+}
+
 async function waitForAccountSync(profileId, timeoutSec, intervalSec) {
   const timeoutMs = Math.max(30, Math.floor(Number(timeoutSec || 900))) * 1000;
   const intervalMs = Math.max(1, Math.floor(Number(intervalSec || 2))) * 1000;
@@ -105,6 +139,7 @@ async function cmdLoginProfile(profileId, argv, jsonMode) {
     output({ ok: false, code: startRet.code, step: 'start', stderr: startRet.stderr || startRet.stdout }, jsonMode);
     process.exit(1);
   }
+  const viewport = await applyLoginViewport(id);
   const cookieAutoRet = runCamo(['cookies', 'auto', 'start', id, '--interval', String(cookieIntervalMs)], {
     rootDir: ROOT,
     timeoutMs: 20000,
@@ -121,6 +156,7 @@ async function cmdLoginProfile(profileId, argv, jsonMode) {
       url,
       idleTimeout,
       session: startRet.json || null,
+      viewport,
       pendingProfile,
       cookieMonitor,
       waitSync: null,
@@ -136,6 +172,7 @@ async function cmdLoginProfile(profileId, argv, jsonMode) {
     url,
     idleTimeout,
     session: startRet.json || null,
+    viewport,
     pendingProfile,
     cookieMonitor,
     waitSync: syncResult,
@@ -158,7 +195,12 @@ async function cmdLogin(prefix, argv, jsonMode) {
   const idleTimeout = String(argv['idle-timeout'] || process.env.WEBAUTO_LOGIN_IDLE_TIMEOUT || '30m').trim() || '30m';
   for (const profileId of all) {
     const ret = runCamo(['start', profileId, '--url', 'https://www.xiaohongshu.com', '--idle-timeout', idleTimeout], { rootDir: ROOT });
-    if (ret.ok) started.push(profileId);
+    if (ret.ok) {
+      started.push(profileId);
+      // Keep login windows readable by default across all platforms.
+      // This does not depend on workflow-level EnsureSession.
+      await applyLoginViewport(profileId);
+    }
   }
   output({ ok: true, keyword: prefix, profiles: all, created, started }, jsonMode);
 }
@@ -182,11 +224,13 @@ async function cmdGotoProfile(profileId, argv, jsonMode) {
 
   const gotoRet = runCamo(['goto', id, url], { rootDir: ROOT, timeoutMs: 30000 });
   if (gotoRet.ok) {
+    const viewport = await applyLoginViewport(id);
     output({
       ok: true,
       profileId: id,
       url,
       mode: 'goto',
+      viewport,
       result: gotoRet.json || null,
     }, jsonMode);
     return;
@@ -204,11 +248,13 @@ async function cmdGotoProfile(profileId, argv, jsonMode) {
     }, jsonMode);
     process.exit(1);
   }
+  const viewport = await applyLoginViewport(id);
   output({
     ok: true,
     profileId: id,
     url,
     mode: 'start',
+    viewport,
     session: startRet.json || null,
   }, jsonMode);
 }

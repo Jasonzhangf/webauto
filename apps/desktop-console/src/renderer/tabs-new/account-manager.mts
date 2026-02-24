@@ -353,6 +353,8 @@ export function renderAccountManager(root: HTMLElement, ctx: any) {
           ctx.api.pathJoin('apps', 'webauto', 'entry', 'account.mjs'),
           'sync',
           profileId,
+          '--platform',
+          normalizePlatform(account.platform || 'xiaohongshu'),
           ...(options.pendingWhileLogin ? ['--pending-while-login'] : []),
           ...(options.resolveAlias ? ['--resolve-alias'] : []),
           '--json',

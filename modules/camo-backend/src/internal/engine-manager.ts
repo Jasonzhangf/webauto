@@ -176,17 +176,13 @@ export async function launchEngineContext(opts: EngineLaunchOptions): Promise<Br
     const workW = Number(dm?.workWidth || physicalW || 4096);
     const workH = Number(dm?.workHeight || physicalH || 2190);
     
-    // Use provided viewport as MAXIMUM (e.g., from fingerprint or explicit opt), default to full work area
-    const maxViewportW = Number(opts.viewport?.width || workW);
-    const maxViewportH = Number(opts.viewport?.height || workH);
-    
-    // Target: fill work area, but don't exceed explicit viewport caps if provided
-    const targetW = maxViewportW > 0 ? Math.min(maxViewportW, workW) : workW;
-    const targetH = maxViewportH > 0 ? Math.min(maxViewportH, workH) : workH;
-
-    // Use targetW/targetH as viewport (even in headless) to match headful size
-    const viewportW = Math.max(1440, Math.floor(Number(targetW) || 4096));
-    const viewportH = Math.max(900, Math.floor(Number(targetH) || 2190));
+    // Base viewport target:
+    // - prefer explicit/fingerprint viewport if provided
+    // - otherwise use a deterministic default for stable first-run UX
+    const requestedW = Number(opts.viewport?.width || process.env.WEBAUTO_VIEWPORT_WIDTH || 1440);
+    const requestedH = Number(opts.viewport?.height || process.env.WEBAUTO_VIEWPORT_HEIGHT || 1100);
+    const viewportW = Math.max(900, Math.floor(Number(requestedW) || 1440));
+    const viewportH = Math.max(700, Math.floor(Number(requestedH) || 1100));
 
     const envHeadlessW = Number(process.env.WEBAUTO_HEADLESS_WIDTH || 0);
     const envHeadlessH = Number(process.env.WEBAUTO_HEADLESS_HEIGHT || 0);
@@ -198,9 +194,12 @@ export async function launchEngineContext(opts: EngineLaunchOptions): Promise<Br
     
     const headless = Boolean(opts.headless);
 
-    // Final window size: maximize to fill work area (leave small margin for chrome/window decorations)
-    const winW = headless ? headlessW : Math.max(1440, Math.floor(workW * 0.95));
-    const winH = headless ? headlessH : Math.max(900, Math.floor(workH - 80));
+    // Final headful window size:
+    // align window with viewport by default and keep it inside available work area.
+    const maxHeadfulW = workW > 0 ? Math.max(900, workW - 40) : 1920;
+    const maxHeadfulH = workH > 0 ? Math.max(700, workH - 80) : 1200;
+    const winW = headless ? headlessW : Math.min(viewportW, maxHeadfulW);
+    const winH = headless ? headlessH : Math.min(viewportH, maxHeadfulH);
     
     // Ensure integer types for Camoufox
     const screenW = Math.floor(physicalW) | 0;
@@ -247,7 +246,7 @@ export async function launchEngineContext(opts: EngineLaunchOptions): Promise<Br
       headless,
       os: targetOS,
       window: [intWinW, intWinH],
-      viewport: { width: headless ? headlessW : viewportW, height: headless ? headlessH : viewportH },
+      viewport: headless ? { width: headlessW, height: headlessH } : null,
       firefox_user_prefs,
       config,
       data_dir: opts.profileDir,

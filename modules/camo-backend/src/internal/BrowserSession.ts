@@ -56,6 +56,7 @@ export class BrowserSession {
   private bridgedPages = new WeakSet<Page>();
   private recorderBridgePages = new WeakSet<Page>();
   private lastViewport: { width: number; height: number } | null = null;
+  private followWindowViewport = false;
   private fingerprint: any = null;
   private recordingStream: fs.WriteStream | null = null;
   private recording: RecordingState = {
@@ -129,13 +130,15 @@ export class BrowserSession {
       userAgent: fingerprint.userAgent?.substring(0, 50) + '...',
     });
 
-    const viewport = this.options.viewport || { width: 3840, height: 2046 };
+    const viewport = this.options.viewport || { width: 1440, height: 1100 };
+    const headless = !!this.options.headless;
+    this.followWindowViewport = !headless;
     const deviceScaleFactor = this.resolveDeviceScaleFactor();
 
     // 使用 EngineManager 启动上下文（Chromium 已移除，仅支持 Camoufox）
     this.context = await launchEngineContext({
       engine,
-      headless: !!this.options.headless,
+      headless,
       profileDir: this.profileDir,
       viewport: fingerprint?.viewport || viewport,
       userAgent: fingerprint?.userAgent,
@@ -148,7 +151,9 @@ export class BrowserSession {
 
     // NOTE: deviceScaleFactor override was Chromium-only (CDP). Chromium removed.
 
-    this.lastViewport = { width: viewport.width, height: viewport.height };
+    this.lastViewport = this.followWindowViewport
+      ? null
+      : { width: viewport.width, height: viewport.height };
     this.browser = this.context.browser();
     this.browser.on('disconnected', () => this.notifyExit());
     this.context.on('close', () => this.notifyExit());
@@ -158,6 +163,9 @@ export class BrowserSession {
 
     this.setupPageHooks(this.page);
     this.context.on('page', (p) => this.setupPageHooks(p));
+    if (this.followWindowViewport) {
+      await this.refreshViewportFromWindow(this.page).catch(() => {});
+    }
 
     if (initialUrl) {
       await this.goto(initialUrl);
@@ -863,6 +871,10 @@ export class BrowserSession {
   }
 
   private async ensurePageViewport(page: Page): Promise<void> {
+    if (this.followWindowViewport) {
+      await this.refreshViewportFromWindow(page).catch(() => {});
+      return;
+    }
     if (!this.lastViewport) return;
     const current = page.viewportSize();
     if (current && current.width === this.lastViewport.width && current.height === this.lastViewport.height) {
@@ -876,6 +888,31 @@ export class BrowserSession {
     await this.syncDeviceScaleFactor(page, { ...this.lastViewport });
   }
 
+  private async readWindowInnerSize(page: Page): Promise<{ width: number; height: number } | null> {
+    try {
+      const metrics = await page.evaluate(() => ({
+        width: Math.floor(Number(window.innerWidth || 0)),
+        height: Math.floor(Number(window.innerHeight || 0)),
+      }));
+      const width = Number(metrics?.width);
+      const height = Number(metrics?.height);
+      if (!Number.isFinite(width) || !Number.isFinite(height)) return null;
+      if (width < 300 || height < 200) return null;
+      return { width, height };
+    } catch {
+      return null;
+    }
+  }
+
+  private async refreshViewportFromWindow(page: Page): Promise<void> {
+    const inner = await this.readWindowInnerSize(page);
+    if (!inner) return;
+    this.lastViewport = {
+      width: Math.max(800, Math.floor(inner.width)),
+      height: Math.max(700, Math.floor(inner.height)),
+    };
+  }
+
   private ensureContext(): BrowserContext {
     if (!this.context) {
       throw new Error('browser context not ready');
@@ -887,6 +924,11 @@ export class BrowserSession {
     const ctx = this.ensureContext();
     const existing = this.getActivePage();
     if (existing) {
+      try {
+        await this.ensurePageViewport(existing);
+      } catch {
+        /* ignore */
+      }
       return existing;
     }
     this.page = await ctx.newPage();
@@ -1383,6 +1425,16 @@ export class BrowserSession {
     const height = Math.max(700, Math.floor(Number(opts.height) || 0));
     if (!width || !height) {
       throw new Error('invalid_viewport_size');
+    }
+    if (this.followWindowViewport && !this.options.headless) {
+      await page.evaluate(({ w, h }) => {
+        try { window.resizeTo(w, h); } catch {}
+      }, { w: width, h: height });
+      await page.waitForTimeout(150);
+      await this.refreshViewportFromWindow(page).catch(() => {});
+      const next = this.lastViewport || { width, height };
+      await this.maybeCenterWindow(page, next).catch(() => {});
+      return next;
     }
     await page.setViewportSize({ width, height });
     await this.syncWindowBounds(page, { width, height });

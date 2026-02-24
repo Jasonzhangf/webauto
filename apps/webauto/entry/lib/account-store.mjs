@@ -808,21 +808,21 @@ export function upsertProfileAccountState(input = {}) {
   return buildProfileAccountView(profileId, next);
 }
 
-export function markProfileInvalid(profileId, reason = 'login_guard') {
+export function markProfileInvalid(profileId, reason = 'login_guard', platform = DEFAULT_PLATFORM) {
   const id = ensureSafeName(normalizeText(profileId), 'profileId');
   return upsertProfileAccountState({
     profileId: id,
-    platform: DEFAULT_PLATFORM,
+    platform: normalizePlatform(platform),
     accountId: null,
     reason,
   });
 }
 
-export function markProfilePending(profileId, reason = 'waiting_login') {
+export function markProfilePending(profileId, reason = 'waiting_login', platform = DEFAULT_PLATFORM) {
   const id = ensureSafeName(normalizeText(profileId), 'profileId');
   return upsertProfileAccountState({
     profileId: id,
-    platform: DEFAULT_PLATFORM,
+    platform: normalizePlatform(platform),
     accountId: null,
     status: STATUS_PENDING,
     reason,
