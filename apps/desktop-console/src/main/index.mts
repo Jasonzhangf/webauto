@@ -803,7 +803,8 @@ async function spawnCommand(spec: SpawnSpec) {
 }
 
 async function runJson(spec: RunJsonSpec) {
-  const timeoutMs = typeof spec.timeoutMs === 'number' ? spec.timeoutMs : 20_000;
+  const timeoutRaw = Number(spec.timeoutMs);
+  const timeoutMs = Number.isFinite(timeoutRaw) ? Math.floor(timeoutRaw) : 20_000;
   const cwd = resolveCwd(spec.cwd);
   const child = spawn(resolveNodeBin(), spec.args, {
     cwd,
@@ -818,18 +819,21 @@ async function runJson(spec: RunJsonSpec) {
   child.stdout?.on('data', (c: Buffer) => stdout.push(c));
   child.stderr?.on('data', (c: Buffer) => stderr.push(c));
 
-  const timer = setTimeout(() => {
-    try {
-      child.kill('SIGTERM');
-    } catch {
-      // ignore
-    }
-  }, timeoutMs);
+  let timer: NodeJS.Timeout | null = null;
+  if (timeoutMs > 0) {
+    timer = setTimeout(() => {
+      try {
+        child.kill('SIGTERM');
+      } catch {
+        // ignore
+      }
+    }, timeoutMs);
+  }
 
   const { code } = await new Promise<{ code: number | null }>((resolve) => {
     child.on('exit', (c) => resolve({ code: c }));
   });
-  clearTimeout(timer);
+  if (timer) clearTimeout(timer);
 
   const out = Buffer.concat(stdout).toString('utf8').trim();
   const err = Buffer.concat(stderr).toString('utf8').trim();
