@@ -1,0 +1,74 @@
+import { it } from 'node:test';
+import assert from 'node:assert/strict';
+
+import { buildXhsUnifiedAutoscript } from '../../../modules/camo-runtime/src/autoscript/xhs-unified-template.mjs';
+
+function getOperation(script, id) {
+  return (script.operations || []).find((item) => item?.id === id) || null;
+}
+
+it('links stage enables search+collect only and terminates after link collection', () => {
+  const script = buildXhsUnifiedAutoscript({
+    profileId: 'xhs-stage-1',
+    keyword: '城市漫步',
+    stage: 'links',
+    stageLinksEnabled: true,
+    stageContentEnabled: false,
+    stageLikeEnabled: false,
+    stageReplyEnabled: false,
+    doHomepage: false,
+    doImages: false,
+    doComments: false,
+    doLikes: false,
+    doReply: false,
+    doOcr: false,
+  });
+
+  assert.equal(getOperation(script, 'collect_links')?.enabled, true);
+  assert.equal(getOperation(script, 'collect_links')?.params?.collectOpenLinksOnly, true);
+  assert.equal(getOperation(script, 'open_first_detail')?.enabled, false);
+  assert.equal(getOperation(script, 'detail_harvest')?.enabled, false);
+  assert.equal(getOperation(script, 'comment_like')?.enabled, false);
+  assert.equal(getOperation(script, 'comment_reply')?.enabled, false);
+  assert.equal(getOperation(script, 'finish_after_collect_links')?.enabled, true);
+});
+
+it('reply stage enables reply flow and keeps like flow off', () => {
+  const script = buildXhsUnifiedAutoscript({
+    profileId: 'xhs-stage-2',
+    keyword: '咖啡店',
+    stage: 'reply',
+    stageLinksEnabled: true,
+    stageContentEnabled: true,
+    stageLikeEnabled: false,
+    stageReplyEnabled: true,
+    doComments: true,
+    doLikes: false,
+    doReply: true,
+  });
+
+  assert.equal(getOperation(script, 'open_first_detail')?.enabled, true);
+  assert.equal(getOperation(script, 'collect_links')?.params?.collectOpenLinksOnly, false);
+  assert.equal(getOperation(script, 'comments_harvest')?.enabled, true);
+  assert.equal(getOperation(script, 'comment_match_gate')?.enabled, true);
+  assert.equal(getOperation(script, 'comment_like')?.enabled, false);
+  assert.equal(getOperation(script, 'comment_reply')?.enabled, true);
+});
+
+it('comments_harvest should not wait for expand_replies to run', () => {
+  const script = buildXhsUnifiedAutoscript({
+    profileId: 'xhs-stage-3',
+    keyword: '春晚',
+    stage: 'like',
+    stageLinksEnabled: true,
+    stageContentEnabled: true,
+    stageLikeEnabled: true,
+    stageReplyEnabled: false,
+    doComments: true,
+    doLikes: true,
+    doReply: false,
+  });
+
+  assert.deepEqual(getOperation(script, 'comments_harvest')?.dependsOn, ['detail_harvest']);
+  assert.deepEqual(getOperation(script, 'expand_replies')?.dependsOn, ['detail_harvest']);
+});

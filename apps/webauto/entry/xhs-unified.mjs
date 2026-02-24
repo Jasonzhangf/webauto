@@ -116,8 +116,10 @@ export async function runUnified(argv, overrides = {}) {
   let maxWaves = parseIntFlag(argv['max-waves'], 40, 1);
   let parallelRequested = parseBool(argv.parallel, false);
   let configuredConcurrency = parseIntFlag(argv.concurrency, profiles.length || 1, 1);
-  const seedCollectCountFlag = parseNonNegativeInt(argv['seed-collect-count'], 0);
-  const seedCollectRoundsFlag = parseNonNegativeInt(argv['seed-collect-rounds'], 6);
+  const hasSeedCollectCountFlag = argv['seed-collect-count'] !== undefined && argv['seed-collect-count'] !== null && argv['seed-collect-count'] !== '';
+  const hasSeedCollectRoundsFlag = argv['seed-collect-rounds'] !== undefined && argv['seed-collect-rounds'] !== null && argv['seed-collect-rounds'] !== '';
+  const seedCollectCountFlag = hasSeedCollectCountFlag ? parseNonNegativeInt(argv['seed-collect-count'], 0) : 0;
+  const seedCollectRoundsFlag = hasSeedCollectRoundsFlag ? parseNonNegativeInt(argv['seed-collect-rounds'], 0) : 0;
 
   if (stage === 'links') {
     if (profiles.length !== 1) {
@@ -280,17 +282,19 @@ export async function runUnified(argv, overrides = {}) {
       ? Math.min(plan.length, configuredConcurrency)
       : 1;
     const waveTag = `wave-${String(wave).padStart(3, '0')}`;
+    const waveAssignedNotes = plan.reduce((sum, item) => sum + Math.max(0, Number(item?.assignedNotes || 0)), 0);
     const specs = plan.map((item, index) => {
       const shardId = sanitizeForPath(item.profileId, 'profile');
       const shardOutputRoot = useShardRoots
         ? path.join(baseOutputRoot, 'shards', shardId)
         : outputRootArg;
-      const defaultSeedCollectCount = Math.max(1, Math.min(
-        Number(item.assignedNotes || 1),
-        Math.max(1, plan.length * 2),
-      ));
+      const defaultSeedCollectCount = Math.max(1, waveAssignedNotes || Number(item.assignedNotes || 1) || 1);
       const seedCollectCount = index === 0
         ? (seedCollectCountFlag > 0 ? seedCollectCountFlag : defaultSeedCollectCount)
+        : 0;
+      const defaultSeedCollectMaxRounds = Math.max(6, Math.ceil(Math.max(1, seedCollectCount) / 2));
+      const seedCollectMaxRounds = index === 0
+        ? (seedCollectRoundsFlag > 0 ? seedCollectRoundsFlag : defaultSeedCollectMaxRounds)
         : 0;
       return {
         ...item,
@@ -302,7 +306,7 @@ export async function runUnified(argv, overrides = {}) {
         sharedHarvestPath,
         searchSerialKey,
         seedCollectCount,
-        seedCollectMaxRounds: index === 0 ? seedCollectRoundsFlag : 0,
+        seedCollectMaxRounds,
       };
     });
 

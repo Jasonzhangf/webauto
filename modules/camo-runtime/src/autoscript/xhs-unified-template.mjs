@@ -47,429 +47,6 @@ function pickCloseDependency(options) {
   return 'open_first_detail';
 }
 
-function buildOpenFirstDetailScript(maxNotes, keyword) {
-  return `(async () => {
-  const STATE_KEY = '__camoXhsState';
-  const loadState = () => {
-    const inMemory = window.__camoXhsState && typeof window.__camoXhsState === 'object'
-      ? window.__camoXhsState
-      : {};
-    try {
-      const stored = localStorage.getItem(STATE_KEY);
-      if (!stored) return { ...inMemory };
-      const parsed = JSON.parse(stored);
-      if (!parsed || typeof parsed !== 'object') return { ...inMemory };
-      return { ...parsed, ...inMemory };
-    } catch {
-      return { ...inMemory };
-    }
-  };
-  const saveState = (nextState) => {
-    window.__camoXhsState = nextState;
-    try {
-      localStorage.setItem(STATE_KEY, JSON.stringify(nextState));
-    } catch {}
-  };
-
-  const state = loadState();
-  if (!Array.isArray(state.visitedNoteIds)) state.visitedNoteIds = [];
-  state.maxNotes = Number(${maxNotes});
-  state.keyword = ${JSON.stringify(keyword)};
-
-  const nodes = Array.from(document.querySelectorAll('.note-item'))
-    .map((item, index) => {
-      const cover = item.querySelector('a.cover');
-      if (!cover) return null;
-      const href = String(cover.getAttribute('href') || '').trim();
-      const lastSegment = href.split('/').filter(Boolean).pop() || '';
-      const normalized = lastSegment.split('?')[0].split('#')[0];
-      const noteId = normalized || ('idx_' + index);
-      return { item, cover, href, noteId };
-    })
-    .filter(Boolean);
-
-  if (nodes.length === 0) {
-    throw new Error('NO_SEARCH_RESULT_ITEM');
-  }
-
-  const next = nodes.find((row) => !state.visitedNoteIds.includes(row.noteId)) || nodes[0];
-  next.cover.scrollIntoView({ behavior: 'auto', block: 'center' });
-  await new Promise((resolve) => setTimeout(resolve, 120));
-  next.cover.click();
-  if (!state.visitedNoteIds.includes(next.noteId)) state.visitedNoteIds.push(next.noteId);
-  state.currentNoteId = next.noteId;
-  state.currentHref = next.href;
-  saveState(state);
-  return {
-    opened: true,
-    source: 'open_first_detail',
-    noteId: next.noteId,
-    visited: state.visitedNoteIds.length,
-    maxNotes: state.maxNotes,
-  };
-})()`;
-}
-
-function buildOpenNextDetailScript(maxNotes) {
-  return `(async () => {
-  const STATE_KEY = '__camoXhsState';
-  const loadState = () => {
-    const inMemory = window.__camoXhsState && typeof window.__camoXhsState === 'object'
-      ? window.__camoXhsState
-      : {};
-    try {
-      const stored = localStorage.getItem(STATE_KEY);
-      if (!stored) return { ...inMemory };
-      const parsed = JSON.parse(stored);
-      if (!parsed || typeof parsed !== 'object') return { ...inMemory };
-      return { ...parsed, ...inMemory };
-    } catch {
-      return { ...inMemory };
-    }
-  };
-  const saveState = (nextState) => {
-    window.__camoXhsState = nextState;
-    try {
-      localStorage.setItem(STATE_KEY, JSON.stringify(nextState));
-    } catch {}
-  };
-
-  const state = loadState();
-  if (!Array.isArray(state.visitedNoteIds)) state.visitedNoteIds = [];
-  state.maxNotes = Number(${maxNotes});
-
-  if (state.visitedNoteIds.length >= state.maxNotes) {
-    throw new Error('AUTOSCRIPT_DONE_MAX_NOTES');
-  }
-
-  const nodes = Array.from(document.querySelectorAll('.note-item'))
-    .map((item, index) => {
-      const cover = item.querySelector('a.cover');
-      if (!cover) return null;
-      const href = String(cover.getAttribute('href') || '').trim();
-      const lastSegment = href.split('/').filter(Boolean).pop() || '';
-      const normalized = lastSegment.split('?')[0].split('#')[0];
-      const noteId = normalized || ('idx_' + index);
-      return { item, cover, href, noteId };
-    })
-    .filter(Boolean);
-
-  const next = nodes.find((row) => !state.visitedNoteIds.includes(row.noteId));
-  if (!next) {
-    throw new Error('AUTOSCRIPT_DONE_NO_MORE_NOTES');
-  }
-
-  next.cover.scrollIntoView({ behavior: 'auto', block: 'center' });
-  await new Promise((resolve) => setTimeout(resolve, 120));
-  next.cover.click();
-  state.visitedNoteIds.push(next.noteId);
-  state.currentNoteId = next.noteId;
-  state.currentHref = next.href;
-  saveState(state);
-  return {
-    opened: true,
-    source: 'open_next_detail',
-    noteId: next.noteId,
-    visited: state.visitedNoteIds.length,
-    maxNotes: state.maxNotes,
-  };
-})()`;
-}
-
-function buildSubmitSearchScript(keyword) {
-  return `(async () => {
-  const input = document.querySelector('#search-input, input.search-input');
-  if (!(input instanceof HTMLInputElement)) {
-    throw new Error('SEARCH_INPUT_NOT_FOUND');
-  }
-
-  const targetKeyword = ${JSON.stringify(keyword)};
-  if (targetKeyword && input.value !== targetKeyword) {
-    input.focus();
-    input.value = targetKeyword;
-    input.dispatchEvent(new Event('input', { bubbles: true }));
-    input.dispatchEvent(new Event('change', { bubbles: true }));
-  }
-
-  const enterEvent = { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true };
-  const beforeUrl = window.location.href;
-  input.focus();
-  input.dispatchEvent(new KeyboardEvent('keydown', enterEvent));
-  input.dispatchEvent(new KeyboardEvent('keypress', enterEvent));
-  input.dispatchEvent(new KeyboardEvent('keyup', enterEvent));
-
-  const candidates = [
-    '.input-button .search-icon',
-    '.input-button',
-    'button.min-width-search-icon',
-  ];
-  let clickedSelector = null;
-  for (const selector of candidates) {
-    const button = document.querySelector(selector);
-    if (!button) continue;
-    if (button instanceof HTMLElement) {
-      button.scrollIntoView({ behavior: 'auto', block: 'center' });
-    }
-    await new Promise((resolve) => setTimeout(resolve, 80));
-    button.click();
-    clickedSelector = selector;
-    break;
-  }
-
-  const form = input.closest('form');
-  if (form) {
-    if (typeof form.requestSubmit === 'function') form.requestSubmit();
-    else form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
-  }
-
-  await new Promise((resolve) => setTimeout(resolve, 320));
-  return {
-    submitted: true,
-    via: clickedSelector || 'enter_or_form_submit',
-    beforeUrl,
-    afterUrl: window.location.href,
-  };
-})()`;
-}
-
-function buildDetailHarvestScript() {
-  return `(async () => {
-  const state = window.__camoXhsState || (window.__camoXhsState = {});
-  const scroller = document.querySelector('.note-scroller')
-    || document.querySelector('.comments-el')
-    || document.scrollingElement
-    || document.documentElement;
-  for (let i = 0; i < 3; i += 1) {
-    scroller.scrollBy({ top: 360, behavior: 'auto' });
-    await new Promise((resolve) => setTimeout(resolve, 120));
-  }
-  const title = (document.querySelector('.note-title') || {}).textContent || '';
-  const content = (document.querySelector('.note-content') || {}).textContent || '';
-  state.lastDetail = {
-    title: String(title).trim().slice(0, 200),
-    contentLength: String(content).trim().length,
-    capturedAt: new Date().toISOString(),
-  };
-  return { harvested: true, detail: state.lastDetail };
-})()`;
-}
-
-function buildExpandRepliesScript() {
-  return `(async () => {
-  const buttons = Array.from(document.querySelectorAll('.show-more, .reply-expand, [class*="expand"]'));
-  let clicked = 0;
-  for (const button of buttons.slice(0, 8)) {
-    if (!(button instanceof HTMLElement)) continue;
-    const text = (button.textContent || '').trim();
-    if (!text) continue;
-    button.scrollIntoView({ behavior: 'auto', block: 'center' });
-    await new Promise((resolve) => setTimeout(resolve, 60));
-    button.click();
-    clicked += 1;
-    await new Promise((resolve) => setTimeout(resolve, 120));
-  }
-  return { expanded: clicked, scanned: buttons.length };
-})()`;
-}
-
-function buildCommentsHarvestScript() {
-  return `(async () => {
-  const state = window.__camoXhsState || (window.__camoXhsState = {});
-  const comments = Array.from(document.querySelectorAll('.comment-item'))
-    .map((item, index) => {
-      const textNode = item.querySelector('.content, .comment-content, p');
-      const likeNode = item.querySelector('.like-wrapper');
-      return {
-        index,
-        text: String((textNode && textNode.textContent) || '').trim(),
-        liked: Boolean(likeNode && /like-active/.test(String(likeNode.className || ''))),
-      };
-    })
-    .filter((row) => row.text);
-
-  state.currentComments = comments;
-  state.commentsCollectedAt = new Date().toISOString();
-  return {
-    collected: comments.length,
-    firstComment: comments[0] || null,
-  };
-})()`;
-}
-
-function buildCommentMatchScript(matchKeywords, matchMode, matchMinHits) {
-  return `(async () => {
-  const state = window.__camoXhsState || (window.__camoXhsState = {});
-  const rows = Array.isArray(state.currentComments) ? state.currentComments : [];
-  const keywords = ${JSON.stringify(matchKeywords)};
-  const mode = ${JSON.stringify(matchMode)};
-  const minHits = Number(${matchMinHits});
-
-  const normalize = (value) => String(value || '').toLowerCase().replace(/\\s+/g, ' ').trim();
-  const tokens = keywords.map((item) => normalize(item)).filter(Boolean);
-  const matches = [];
-  for (const row of rows) {
-    const text = normalize(row.text);
-    if (!text || tokens.length === 0) continue;
-    const hits = tokens.filter((token) => text.includes(token));
-    if (mode === 'all' && hits.length < tokens.length) continue;
-    if (mode === 'atLeast' && hits.length < Math.max(1, minHits)) continue;
-    if (mode !== 'all' && mode !== 'atLeast' && hits.length === 0) continue;
-    matches.push({ index: row.index, hits });
-  }
-
-  state.matchedComments = matches;
-  state.matchRule = { tokens, mode, minHits };
-  return {
-    matchCount: matches.length,
-    mode,
-    minHits: Math.max(1, minHits),
-  };
-})()`;
-}
-
-function buildCommentLikeScript(likeKeywords, maxLikesPerRound) {
-  return `(async () => {
-  const state = window.__camoXhsState || (window.__camoXhsState = {});
-  const keywords = ${JSON.stringify(likeKeywords)};
-  const maxLikes = Number(${maxLikesPerRound});
-  const maxLikesLimit = maxLikes > 0 ? maxLikes : Number.POSITIVE_INFINITY;
-  const nodes = Array.from(document.querySelectorAll('.comment-item'));
-  const matches = Array.isArray(state.matchedComments) ? state.matchedComments : [];
-  const targetIndexes = new Set(matches.map((row) => Number(row.index)));
-
-  let likedCount = 0;
-  let skippedActive = 0;
-  for (let idx = 0; idx < nodes.length; idx += 1) {
-    if (likedCount >= maxLikesLimit) break;
-    if (targetIndexes.size > 0 && !targetIndexes.has(idx)) continue;
-    const item = nodes[idx];
-    const text = String((item.querySelector('.content, .comment-content, p') || {}).textContent || '').trim();
-    if (!text) continue;
-    if (keywords.length > 0) {
-      const lower = text.toLowerCase();
-      const hit = keywords.some((token) => lower.includes(String(token).toLowerCase()));
-      if (!hit) continue;
-    }
-    const likeWrapper = item.querySelector('.like-wrapper');
-    if (!likeWrapper) continue;
-    if (/like-active/.test(String(likeWrapper.className || ''))) {
-      skippedActive += 1;
-      continue;
-    }
-    likeWrapper.scrollIntoView({ behavior: 'auto', block: 'center' });
-    await new Promise((resolve) => setTimeout(resolve, 90));
-    likeWrapper.click();
-    likedCount += 1;
-    await new Promise((resolve) => setTimeout(resolve, 150));
-  }
-
-  state.lastLike = { likedCount, skippedActive, at: new Date().toISOString() };
-  return state.lastLike;
-})()`;
-}
-
-function buildCommentReplyScript(replyText) {
-  return `(async () => {
-  const state = window.__camoXhsState || (window.__camoXhsState = {});
-  const replyText = ${JSON.stringify(replyText)};
-  const matches = Array.isArray(state.matchedComments) ? state.matchedComments : [];
-  if (matches.length === 0) {
-    return { typed: false, reason: 'no_match' };
-  }
-
-  const index = Number(matches[0].index);
-  const nodes = Array.from(document.querySelectorAll('.comment-item'));
-  const target = nodes[index];
-  if (!target) {
-    return { typed: false, reason: 'match_not_visible', index };
-  }
-
-  target.scrollIntoView({ behavior: 'auto', block: 'center' });
-  await new Promise((resolve) => setTimeout(resolve, 100));
-  target.click();
-  await new Promise((resolve) => setTimeout(resolve, 120));
-
-  const input = document.querySelector('textarea, input[placeholder*="说点"], [contenteditable="true"]');
-  if (!input) {
-    return { typed: false, reason: 'reply_input_not_found', index };
-  }
-
-  if (input instanceof HTMLTextAreaElement || input instanceof HTMLInputElement) {
-    input.focus();
-    input.value = replyText;
-    input.dispatchEvent(new Event('input', { bubbles: true }));
-  } else {
-    input.focus();
-    input.textContent = replyText;
-    input.dispatchEvent(new Event('input', { bubbles: true }));
-  }
-
-  await new Promise((resolve) => setTimeout(resolve, 120));
-  const sendButton = Array.from(document.querySelectorAll('button'))
-    .find((button) => /发送|回复/.test(String(button.textContent || '').trim()));
-  if (sendButton) {
-    sendButton.click();
-  }
-
-  state.lastReply = { typed: true, index, at: new Date().toISOString() };
-  return state.lastReply;
-})()`;
-}
-
-function buildCloseDetailScript() {
-  return `(async () => {
-  const modalSelectors = [
-    '.note-detail-mask',
-    '.note-detail',
-    '.detail-container',
-    '.media-container',
-  ];
-  const isModalVisible = () => modalSelectors.some((selector) => {
-    const node = document.querySelector(selector);
-    if (!node || !(node instanceof HTMLElement)) return false;
-    const style = window.getComputedStyle(node);
-    if (!style) return false;
-    if (style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity || '1') === 0) {
-      return false;
-    }
-    const rect = node.getBoundingClientRect();
-    return rect.width > 1 && rect.height > 1;
-  });
-  const waitForClosed = async () => {
-    for (let i = 0; i < 30; i += 1) {
-      if (!isModalVisible()) return true;
-      await new Promise((resolve) => setTimeout(resolve, 120));
-    }
-    return !isModalVisible();
-  };
-
-  const selectors = [
-    '.note-detail-mask .close-box',
-    '.note-detail-mask .close-circle',
-    'a[href*="/explore?channel_id=homefeed_recommend"]',
-  ];
-  for (const selector of selectors) {
-    const target = document.querySelector(selector);
-    if (!target) continue;
-    target.scrollIntoView({ behavior: 'auto', block: 'center' });
-    await new Promise((resolve) => setTimeout(resolve, 80));
-    target.click();
-    return { closed: await waitForClosed(), via: selector };
-  }
-  if (window.history.length > 1) {
-    window.history.back();
-    return { closed: await waitForClosed(), via: 'history.back' };
-  }
-  return { closed: false, via: null, modalVisible: isModalVisible() };
-})()`;
-}
-
-function buildAbortScript(code) {
-  return `(async () => {
-  throw new Error(${JSON.stringify(code)});
-})()`;
-}
-
 export function buildXhsUnifiedAutoscript(rawOptions = {}) {
   const profileId = toTrimmedString(rawOptions.profileId, 'xiaohongshu-batch-1');
   const keyword = toTrimmedString(rawOptions.keyword, '手机膜');
@@ -508,8 +85,11 @@ export function buildXhsUnifiedAutoscript(rawOptions = {}) {
   const replyText = toTrimmedString(rawOptions.replyText, '感谢分享，已关注');
   const sharedHarvestPath = toTrimmedString(rawOptions.sharedHarvestPath, '');
   const searchSerialKey = toTrimmedString(rawOptions.searchSerialKey, `${env}:${keyword}`);
-  const seedCollectCount = toNonNegativeInt(rawOptions.seedCollectCount, 0);
-  const seedCollectMaxRounds = toNonNegativeInt(rawOptions.seedCollectMaxRounds, 0);
+  const seedCollectCount = toNonNegativeInt(rawOptions.seedCollectCount, maxNotes);
+  const seedCollectMaxRounds = toNonNegativeInt(
+    rawOptions.seedCollectMaxRounds,
+    Math.max(6, Math.ceil(maxNotes / 2)),
+  );
 
   const doHomepage = toBoolean(rawOptions.doHomepage, true);
   const doImages = toBoolean(rawOptions.doImages, false);
@@ -518,17 +98,24 @@ export function buildXhsUnifiedAutoscript(rawOptions = {}) {
   const doReply = toBoolean(rawOptions.doReply, false);
   const doOcr = toBoolean(rawOptions.doOcr, false);
   const persistComments = toBoolean(rawOptions.persistComments, true);
+  const stage = toTrimmedString(rawOptions.stage, 'full').toLowerCase();
+  const stageLinksEnabled = toBoolean(rawOptions.stageLinksEnabled, true);
+  const stageContentEnabled = toBoolean(rawOptions.stageContentEnabled, true);
+  const stageLikeEnabled = toBoolean(rawOptions.stageLikeEnabled, doLikes);
+  const stageReplyEnabled = toBoolean(rawOptions.stageReplyEnabled, doReply);
 
   const matchKeywords = splitCsv(rawOptions.matchKeywords || keyword);
   const likeKeywordsSeed = splitCsv(rawOptions.likeKeywords || '');
   const likeKeywords = likeKeywordsSeed.length > 0 ? likeKeywordsSeed : matchKeywords;
 
-  const detailHarvestEnabled = doHomepage || doImages || doComments || doLikes || doReply || doOcr;
-  const commentsHarvestEnabled = doComments || doLikes || doReply;
-  const matchGateEnabled = doLikes || doReply;
+  const detailLoopEnabled = stageContentEnabled || stageLikeEnabled || stageReplyEnabled;
+  const detailHarvestEnabled = detailLoopEnabled && (doHomepage || doImages || doComments || doOcr);
+  const commentsHarvestEnabled = detailLoopEnabled && (doComments || stageLikeEnabled || stageReplyEnabled);
+  const matchGateEnabled = stageLikeEnabled || stageReplyEnabled;
+  const collectLinksTimeoutMs = Math.max(180000, maxNotes * 6000);
   const closeDependsOn = pickCloseDependency({
-    doReply,
-    doLikes,
+    doReply: stageReplyEnabled,
+    doLikes: stageLikeEnabled,
     matchGateEnabled,
     commentsHarvestEnabled,
     detailHarvestEnabled,
@@ -595,9 +182,14 @@ export function buildXhsUnifiedAutoscript(rawOptions = {}) {
       doHomepage,
       doImages,
       doComments,
-      doLikes,
-      doReply,
+      doLikes: stageLikeEnabled,
+      doReply: stageReplyEnabled,
       doOcr,
+      stage,
+      stageLinksEnabled,
+      stageContentEnabled,
+      stageLikeEnabled,
+      stageReplyEnabled,
       persistComments,
       matchMode,
       matchMinHits,
@@ -608,6 +200,7 @@ export function buildXhsUnifiedAutoscript(rawOptions = {}) {
       searchSerialKey,
       seedCollectCount,
       seedCollectMaxRounds,
+      collectOpenLinksOnly: stageLinksEnabled && !detailLoopEnabled,
       notes: [
         'open_next_detail intentionally stops script by throwing AUTOSCRIPT_DONE_* when exhausted.',
         'dev mode uses deterministic no-recovery policy (checkpoint recovery disabled).',
@@ -621,10 +214,7 @@ export function buildXhsUnifiedAutoscript(rawOptions = {}) {
       { id: 'search_result_item', selector: '.note-item', events: ['appear', 'exist', 'change'] },
       {
         id: 'detail_modal',
-        selector: 'body',
-        visible: false,
-        pageUrlIncludes: ['/explore/'],
-        pageUrlExcludes: ['/search_result'],
+        selector: '.note-detail-mask, .note-detail-page, .note-detail-dialog',
         events: ['appear', 'exist', 'disappear'],
       },
       { id: 'detail_comment_item', selector: '.comment-item, [class*="comment-item"]', events: ['appear', 'exist', 'change'] },
@@ -710,7 +300,33 @@ export function buildXhsUnifiedAutoscript(rawOptions = {}) {
         },
       },
       {
+        id: 'collect_links',
+        enabled: stageLinksEnabled,
+        action: 'xhs_open_detail',
+        params: {
+          mode: 'collect',
+          maxNotes,
+          env,
+          keyword,
+          outputRoot,
+          resume,
+          incrementalMax,
+          sharedHarvestPath,
+          seedCollectCount,
+          seedCollectMaxRounds,
+          collectOpenLinksOnly: stageLinksEnabled && !detailLoopEnabled,
+        },
+        trigger: 'search_result_item.exist',
+        dependsOn: ['ensure_tab_pool'],
+        once: true,
+        timeoutMs: collectLinksTimeoutMs,
+        retry: { attempts: 1, backoffMs: 0 },
+        impact: 'script',
+        onFailure: 'stop_all',
+      },
+      {
         id: 'open_first_detail',
+        enabled: detailLoopEnabled,
         action: 'xhs_open_detail',
         params: {
           mode: 'first',
@@ -729,16 +345,29 @@ export function buildXhsUnifiedAutoscript(rawOptions = {}) {
           postOpenDelayMaxMs: openDetailPostOpenMaxMs,
         },
         trigger: 'search_result_item.exist',
-        dependsOn: ['ensure_tab_pool'],
+        dependsOn: [stageLinksEnabled ? 'collect_links' : 'submit_search'],
         once: true,
         timeoutMs: 90000,
-        onFailure: 'continue',
+        onFailure: 'stop_all',
+        impact: 'script',
         validation: { mode: 'none' },
         checkpoint: {
           containerId: 'xiaohongshu_search.search_result_item',
           targetCheckpoint: 'detail_ready',
           recovery,
         },
+      },
+      {
+        id: 'finish_after_collect_links',
+        enabled: stageLinksEnabled && !detailLoopEnabled,
+        action: 'raise_error',
+        params: { code: 'AUTOSCRIPT_DONE_LINKS_COLLECTED' },
+        trigger: 'search_result_item.exist',
+        dependsOn: ['collect_links'],
+        once: true,
+        retry: { attempts: 1, backoffMs: 0 },
+        impact: 'script',
+        onFailure: 'stop_all',
       },
       {
         id: 'detail_harvest',
@@ -808,7 +437,7 @@ export function buildXhsUnifiedAutoscript(rawOptions = {}) {
           includeComments: persistComments,
         },
         trigger: 'detail_modal.exist',
-        dependsOn: [commentsHarvestEnabled ? 'expand_replies' : (detailHarvestEnabled ? 'detail_harvest' : 'open_first_detail')],
+        dependsOn: [detailHarvestEnabled ? 'detail_harvest' : 'open_first_detail'],
         once: false,
         oncePerAppear: true,
         timeoutMs: 180000,
@@ -846,7 +475,7 @@ export function buildXhsUnifiedAutoscript(rawOptions = {}) {
       },
       {
         id: 'comment_like',
-        enabled: doLikes,
+        enabled: stageLikeEnabled,
         action: 'xhs_comment_like',
         params: {
           env,
@@ -869,11 +498,11 @@ export function buildXhsUnifiedAutoscript(rawOptions = {}) {
       },
       {
         id: 'comment_reply',
-        enabled: doReply,
+        enabled: stageReplyEnabled,
         action: 'xhs_comment_reply',
         params: { replyText },
         trigger: 'detail_modal.exist',
-        dependsOn: [doLikes ? 'comment_like' : 'comment_match_gate'],
+        dependsOn: [stageLikeEnabled ? 'comment_like' : 'comment_match_gate'],
         once: false,
         oncePerAppear: true,
         timeoutMs: 90000,
@@ -884,6 +513,7 @@ export function buildXhsUnifiedAutoscript(rawOptions = {}) {
       },
       {
         id: 'close_detail',
+        enabled: detailLoopEnabled,
         action: 'xhs_close_detail',
         params: {},
         trigger: 'detail_modal.exist',
@@ -900,6 +530,7 @@ export function buildXhsUnifiedAutoscript(rawOptions = {}) {
       },
       {
         id: 'wait_between_notes',
+        enabled: detailLoopEnabled,
         action: 'wait',
         params: { ms: noteIntervalMs },
         trigger: 'search_result_item.exist',
@@ -913,6 +544,7 @@ export function buildXhsUnifiedAutoscript(rawOptions = {}) {
       },
       {
         id: 'switch_tab_round_robin',
+        enabled: detailLoopEnabled,
         action: 'tab_pool_switch_next',
         params: { settleMs: 450 },
         trigger: 'search_result_item.exist',
@@ -926,6 +558,7 @@ export function buildXhsUnifiedAutoscript(rawOptions = {}) {
       },
       {
         id: 'open_next_detail',
+        enabled: detailLoopEnabled,
         action: 'xhs_open_detail',
         params: {
           mode: 'next',

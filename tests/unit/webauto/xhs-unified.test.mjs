@@ -133,4 +133,25 @@ describe('xhs-unified', () => {
       /stage=links does not support --total-notes\/--total-target sharding/i,
     );
   });
+
+  it('links stage plan allocates seed collection to max-notes by default', async () => {
+    const root = useTempRoots();
+    fs.mkdirSync(path.join(root, 'profiles', 'xhs-qa-1'), { recursive: true });
+    seedSavedProfile('xhs-qa-1');
+
+    const result = await runUnified({
+      profile: 'xhs-qa-1',
+      keyword: 'links-seed-default',
+      stage: 'links',
+      'plan-only': true,
+      'max-notes': 40,
+    });
+    const plan = JSON.parse(fs.readFileSync(result.planPath, 'utf8'));
+    const firstWave = plan.waves?.[0];
+    const firstSpec = firstWave?.specs?.[0];
+
+    assert.equal(firstSpec.profileId, 'xhs-qa-1');
+    assert.equal(firstSpec.seedCollectCount, 40);
+    assert.equal(firstSpec.seedCollectMaxRounds, 20);
+  });
 });

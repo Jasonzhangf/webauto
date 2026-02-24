@@ -536,7 +536,12 @@ export class AutoscriptRunner {
       return { ok: false, code: post.code || 'VALIDATION_FAILED', message: post.message || 'post validation failed', data: { phase: 'post', detail: post } };
     }
 
-    return { ok: true, code: 'OPERATION_DONE', message: 'operation done', data: execution.data || execution };
+    return {
+      ok: true,
+      code: execution.code || 'OPERATION_DONE',
+      message: execution.message || 'operation done',
+      data: execution.data || execution,
+    };
   }
 
   async applyPacingBeforeAttempt(operation, attempt) {
@@ -717,6 +722,35 @@ export class AutoscriptRunner {
         }),
       );
       const latencyMs = Date.now() - startedAt;
+      const terminalDoneCode = extractTerminalDoneCode(result);
+      if (terminalDoneCode) {
+        this.operationState.set(operation.id, {
+          status: 'done',
+          runs: Number(this.operationState.get(operation.id)?.runs || 0) + 1,
+          lastError: null,
+          updatedAt: nowIso(),
+          result: { terminalDoneCode },
+        });
+        this.log('autoscript:operation_terminal', {
+          operationId: operation.id,
+          action: operation.action,
+          attempt,
+          latencyMs,
+          code: terminalDoneCode,
+        });
+        this.stop('script_complete');
+        return {
+          ok: true,
+          terminalState: 'done_terminal',
+          result: {
+            ok: true,
+            code: terminalDoneCode,
+            message: 'autoscript completed',
+            data: { terminalDoneCode },
+          },
+        };
+      }
+
       if (result.ok) {
         if (this.isNavigationAction(operation?.action)) {
           this.lastNavigationAt = Date.now();
@@ -774,35 +808,6 @@ export class AutoscriptRunner {
               trigger,
               currentSubscriptionState: subState,
             },
-          },
-        };
-      }
-
-      const terminalDoneCode = extractTerminalDoneCode(result);
-      if (terminalDoneCode) {
-        this.operationState.set(operation.id, {
-          status: 'done',
-          runs: Number(this.operationState.get(operation.id)?.runs || 0) + 1,
-          lastError: null,
-          updatedAt: nowIso(),
-          result: { terminalDoneCode },
-        });
-        this.log('autoscript:operation_terminal', {
-          operationId: operation.id,
-          action: operation.action,
-          attempt,
-          latencyMs,
-          code: terminalDoneCode,
-        });
-        this.stop('script_complete');
-        return {
-          ok: true,
-          terminalState: 'done_terminal',
-          result: {
-            ok: true,
-            code: terminalDoneCode,
-            message: 'autoscript completed',
-            data: { terminalDoneCode },
           },
         };
       }
