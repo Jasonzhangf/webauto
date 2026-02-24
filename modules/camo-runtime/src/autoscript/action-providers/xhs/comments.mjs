@@ -140,6 +140,13 @@ export function buildCommentsHarvestScript(params = {}) {
       || document.querySelector('.comments-container')
       || document.scrollingElement
       || document.documentElement;
+    const hasCommentsContext = () => Boolean(
+      document.querySelector('.comments-container')
+      || document.querySelector('.comment-list')
+      || document.querySelector('.comment-item')
+      || document.querySelector('[class*="comment-item"]')
+      || document.querySelector('.note-scroller')
+    );
     const readMetrics = () => {
       const target = scroller || document.documentElement;
       return {
@@ -246,6 +253,27 @@ export function buildCommentsHarvestScript(params = {}) {
       }
       await new Promise((resolve) => setTimeout(resolve, waitActual));
     };
+
+    // Before any scrolling, wait until detail context is stable.
+    // This avoids scrolling the search/list page when detail hasn't fully entered.
+    let detailReady = false;
+    for (let probe = 0; probe < 40; probe += 1) {
+      if (isDetailVisible() && hasCommentsContext()) {
+        detailReady = true;
+        break;
+      }
+      const probeWaitMs = randomBetween(settleMinMs, settleMaxMs);
+      pushTrace({
+        kind: 'wait',
+        stage: 'comments_precheck',
+        probe: probe + 1,
+        waitMs: probeWaitMs,
+      });
+      await new Promise((resolve) => setTimeout(resolve, probeWaitMs));
+    }
+    if (!detailReady) {
+      throw new Error('DETAIL_NOT_READY_BEFORE_SCROLL');
+    }
 
     for (let round = 1; round <= maxRounds; round += 1) {
       rounds = round;

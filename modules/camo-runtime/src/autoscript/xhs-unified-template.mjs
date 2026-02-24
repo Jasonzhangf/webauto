@@ -39,6 +39,10 @@ function splitCsv(value) {
 }
 
 function pickCloseDependency(options) {
+  if (options.doReply) return 'comment_reply';
+  if (options.doLikes) return 'comment_like';
+  if (options.matchGateEnabled) return 'comment_match_gate';
+  if (options.commentsHarvestEnabled) return 'comments_harvest';
   if (options.detailHarvestEnabled) return 'detail_harvest';
   return 'open_first_detail';
 }
@@ -725,7 +729,7 @@ export function buildXhsUnifiedAutoscript(rawOptions = {}) {
           postOpenDelayMaxMs: openDetailPostOpenMaxMs,
         },
         trigger: 'search_result_item.exist',
-        dependsOn: ['submit_search'],
+        dependsOn: ['ensure_tab_pool'],
         once: true,
         timeoutMs: 90000,
         onFailure: 'continue',
@@ -804,7 +808,7 @@ export function buildXhsUnifiedAutoscript(rawOptions = {}) {
           includeComments: persistComments,
         },
         trigger: 'detail_modal.exist',
-        dependsOn: [detailHarvestEnabled ? 'detail_harvest' : 'open_first_detail'],
+        dependsOn: [commentsHarvestEnabled ? 'expand_replies' : (detailHarvestEnabled ? 'detail_harvest' : 'open_first_detail')],
         once: false,
         oncePerAppear: true,
         timeoutMs: 180000,
@@ -835,7 +839,7 @@ export function buildXhsUnifiedAutoscript(rawOptions = {}) {
         action: 'xhs_comment_match',
         params: { keywords: matchKeywords, mode: matchMode, minHits: matchMinHits },
         trigger: 'detail_modal.exist',
-        dependsOn: [detailHarvestEnabled ? 'detail_harvest' : 'open_first_detail'],
+        dependsOn: ['comments_harvest'],
         once: false,
         oncePerAppear: true,
         pacing: { operationMinIntervalMs: 2400, eventCooldownMs: 1200, jitterMs: 160 },
@@ -869,7 +873,7 @@ export function buildXhsUnifiedAutoscript(rawOptions = {}) {
         action: 'xhs_comment_reply',
         params: { replyText },
         trigger: 'detail_modal.exist',
-        dependsOn: ['comment_match_gate'],
+        dependsOn: [doLikes ? 'comment_like' : 'comment_match_gate'],
         once: false,
         oncePerAppear: true,
         timeoutMs: 90000,
@@ -989,7 +993,7 @@ export function buildXhsUnifiedAutoscript(rawOptions = {}) {
           normalizeTabs: false,
         },
         trigger: 'search_result_item.exist',
-        dependsOn: ['wait_between_notes'],
+        dependsOn: ['submit_search'],
         once: true,
         timeoutMs: 180000,
         retry: { attempts: 2, backoffMs: 500 },

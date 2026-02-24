@@ -530,6 +530,61 @@ function toNumber(value, fallback = 0) {
   return Number.isFinite(num) ? num : fallback;
 }
 
+function resolveUnifiedPhaseLabel(operationId, fallback = '运行中') {
+  const op = String(operationId || '').trim();
+  if (!op) return fallback;
+  if (
+    op === 'sync_window_viewport'
+    || op === 'goto_home'
+    || op === 'fill_keyword'
+    || op === 'submit_search'
+    || op === 'xhs_assert_logged_in'
+    || op === 'abort_on_login_guard'
+    || op === 'abort_on_risk_guard'
+  ) {
+    return '登录校验';
+  }
+  if (op === 'ensure_tab_pool' || op === 'verify_subscriptions_all_pages') {
+    return '采集链接';
+  }
+  if (
+    op === 'open_first_detail'
+    || op === 'open_next_detail'
+    || op === 'wait_between_notes'
+    || op === 'switch_tab_round_robin'
+  ) {
+    return '打开详情';
+  }
+  if (
+    op === 'detail_harvest'
+    || op === 'expand_replies'
+    || op === 'comments_harvest'
+    || op === 'comment_match_gate'
+    || op === 'comment_like'
+    || op === 'comment_reply'
+    || op === 'close_detail'
+  ) {
+    return '详情采集点赞';
+  }
+  return fallback;
+}
+
+function resolveUnifiedActionLabel(eventName, payload = {}, fallback = '运行中') {
+  const opId = String(payload?.operationId || '').trim();
+  if (opId) {
+    if (eventName === 'autoscript:operation_error' || eventName === 'autoscript:operation_recovery_failed') {
+      const err = String(payload?.code || payload?.message || '').trim();
+      return err ? `${opId}: ${err}` : `${opId}: failed`;
+    }
+    const stage = String(payload?.stage || '').trim();
+    if (stage) return `${opId}:${stage}`;
+    return opId;
+  }
+  const msg = String(payload?.message || payload?.reason || '').trim();
+  if (msg) return msg;
+  return fallback;
+}
+
 function updateProfileStatsFromEvent(stats, payload) {
   const event = String(payload?.event || '').trim();
   if (!event) return;
@@ -656,11 +711,18 @@ async function runProfile(spec, argv, baseOverrides = {}) {
     uiTriggerId: options.uiTriggerId,
   });
   let activeRunId = '';
+  let runtimePhaseLabel = '登录校验';
+  let runtimeActionLabel = '启动 autoscript';
+  let lastSnapshotTs = 0;
   const pushTaskSnapshot = (status = 'running') => {
     if (!activeRunId) return;
+    const nowTs = Date.now();
+    if (status === 'running' && (nowTs - lastSnapshotTs) < 900) return;
+    lastSnapshotTs = nowTs;
     void reporter.update(activeRunId, {
       status,
-      phase: 'unified',
+      phase: runtimePhaseLabel,
+      action: runtimeActionLabel,
       progress: {
         total: Math.max(0, Number(spec.assignedNotes) || 0),
         processed: Math.max(0, Number(stats.openedNotes) || 0),
@@ -694,6 +756,25 @@ async function runProfile(spec, argv, baseOverrides = {}) {
     const eventName = String(merged.event || '').trim();
     const mergedRunId = String(merged.runId || '').trim();
     if (mergedRunId) activeRunId = mergedRunId;
+    if (
+      eventName === 'autoscript:operation_start'
+      || eventName === 'autoscript:operation_progress'
+      || eventName === 'autoscript:operation_done'
+      || eventName === 'autoscript:operation_error'
+      || eventName === 'autoscript:operation_recovery_failed'
+    ) {
+      runtimePhaseLabel = resolveUnifiedPhaseLabel(merged.operationId, runtimePhaseLabel);
+      runtimeActionLabel = resolveUnifiedActionLabel(eventName, merged, runtimeActionLabel);
+    }
+    if (eventName === 'xhs.unified.start') {
+      runtimePhaseLabel = '登录校验';
+      runtimeActionLabel = '启动 autoscript';
+    }
+    if (eventName === 'xhs.unified.stop') {
+      const reason = String(merged.reason || '').trim();
+      runtimePhaseLabel = reason === 'script_failure' ? '失败' : '已结束';
+      runtimeActionLabel = reason || 'stop';
+    }
     const shouldReportEvent = (
       eventName === 'xhs.unified.start'
       || eventName === 'xhs.unified.stop'
@@ -710,11 +791,27 @@ async function runProfile(spec, argv, baseOverrides = {}) {
       void reporter.pushEvent(activeRunId, eventName, merged);
     }
     if (
+      eventName === 'autoscript:operation_start'
+      || eventName === 'autoscript:operation_progress'
+      || eventName === 'xhs.unified.start'
+      || eventName === 'xhs.unified.stop'
+      || eventName === 'autoscript:stop'
+      || eventName === 'autoscript:start'
+      || eventName === 'autoscript:operation_terminal'
+      || eventName === 'autoscript:operation_done'
+      || eventName === 'autoscript:operation_error'
+      || eventName === 'autoscript:operation_recovery_failed'
+      || eventName === 'autoscript:impact'
+    ) {
+      pushTaskSnapshot(eventName === 'xhs.unified.stop' ? (runtimePhaseLabel === '失败' ? 'failed' : 'completed') : 'running');
+    }
+    if (
       eventName === 'autoscript:operation_done'
       || eventName === 'autoscript:operation_error'
       || eventName === 'autoscript:operation_recovery_failed'
       || eventName === 'autoscript:impact'
     ) {
+      // Keep compatibility for existing update cadence logic.
       pushTaskSnapshot('running');
     }
     if (
@@ -741,7 +838,8 @@ async function runProfile(spec, argv, baseOverrides = {}) {
   if (activeRunId) {
     await reporter.ensureCreated(activeRunId, {
       status: 'starting',
-      phase: 'unified',
+      phase: runtimePhaseLabel,
+      action: runtimeActionLabel,
       progress: {
         total: Math.max(0, Number(spec.assignedNotes) || 0),
         processed: 0,
@@ -750,7 +848,8 @@ async function runProfile(spec, argv, baseOverrides = {}) {
     });
     await reporter.update(activeRunId, {
       status: 'running',
-      phase: 'unified',
+      phase: runtimePhaseLabel,
+      action: runtimeActionLabel,
       progress: {
         total: Math.max(0, Number(spec.assignedNotes) || 0),
         processed: 0,
@@ -810,7 +909,8 @@ async function runProfile(spec, argv, baseOverrides = {}) {
     const failed = stopPayload.reason === 'script_failure';
     await reporter.update(finalRunId, {
       status: failed ? 'failed' : 'completed',
-      phase: 'unified',
+      phase: failed ? '失败' : '已结束',
+      action: String(stopPayload.reason || (failed ? 'script_failure' : 'completed')),
       progress: {
         total: Math.max(0, Number(spec.assignedNotes) || 0),
         processed: Math.max(0, Number(stats.openedNotes) || 0),

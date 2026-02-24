@@ -221,6 +221,57 @@ export function renderDashboard(root: HTMLElement, ctx: any) {
   const normalizeStatus = (value: any) => String(value || '').trim().toLowerCase();
   const isRunningStatus = (value: any) => ['running', 'queued', 'pending', 'starting'].includes(normalizeStatus(value));
   const isTerminalStatus = (value: any) => ['completed', 'done', 'success', 'succeeded', 'failed', 'error', 'stopped', 'canceled'].includes(normalizeStatus(value));
+  const resolveUnifiedPhaseFromOp = (operationId: any, fallback = '运行中') => {
+    const op = String(operationId || '').trim();
+    if (!op) return fallback;
+    if (
+      op === 'sync_window_viewport'
+      || op === 'goto_home'
+      || op === 'fill_keyword'
+      || op === 'submit_search'
+      || op === 'xhs_assert_logged_in'
+      || op === 'abort_on_login_guard'
+      || op === 'abort_on_risk_guard'
+    ) {
+      return '登录校验';
+    }
+    if (op === 'ensure_tab_pool' || op === 'verify_subscriptions_all_pages') {
+      return '采集链接';
+    }
+    if (
+      op === 'open_first_detail'
+      || op === 'open_next_detail'
+      || op === 'wait_between_notes'
+      || op === 'switch_tab_round_robin'
+    ) {
+      return '打开详情';
+    }
+    if (
+      op === 'detail_harvest'
+      || op === 'expand_replies'
+      || op === 'comments_harvest'
+      || op === 'comment_match_gate'
+      || op === 'comment_like'
+      || op === 'comment_reply'
+      || op === 'close_detail'
+    ) {
+      return '详情采集点赞';
+    }
+    return fallback;
+  };
+  const resolveUnifiedActionFromEvent = (eventName: string, payload: any, fallback = '-') => {
+    const opId = String(payload?.operationId || '').trim();
+    if (opId) {
+      if (eventName === 'autoscript:operation_error' || eventName === 'autoscript:operation_recovery_failed') {
+        const err = String(payload?.error || payload?.message || payload?.code || '').trim();
+        return err ? `${opId}: ${err}` : `${opId}: failed`;
+      }
+      const stage = String(payload?.stage || '').trim();
+      return stage ? `${opId}:${stage}` : opId;
+    }
+    const message = String(payload?.message || payload?.reason || '').trim();
+    return message || fallback;
+  };
   const isXhsCommandTitle = (title: any) => {
     const normalized = String(title || '').trim().toLowerCase();
     if (!normalized) return false;
@@ -733,9 +784,16 @@ export function renderDashboard(root: HTMLElement, ctx: any) {
       renderRunSummary();
       return;
     }
+    if (event === 'autoscript:operation_start' || event === 'autoscript:operation_progress') {
+      const opId = String(payload?.operationId || '').trim();
+      currentPhase.textContent = resolveUnifiedPhaseFromOp(opId, currentPhase.textContent || '运行中');
+      currentAction.textContent = resolveUnifiedActionFromEvent(event, payload, currentAction.textContent || '-');
+      return;
+    }
     if (event === 'autoscript:operation_done') {
       const opId = String(payload.operationId || '').trim();
-      currentAction.textContent = opId || currentAction.textContent;
+      currentPhase.textContent = resolveUnifiedPhaseFromOp(opId, currentPhase.textContent || '运行中');
+      currentAction.textContent = resolveUnifiedActionFromEvent(event, payload, currentAction.textContent || '-');
       const result = payload.result && typeof payload.result === 'object' ? payload.result : {};
       const opResult = (result && typeof result === 'object' && 'result' in result) ? result.result : result;
       if (opId === 'open_first_detail' || opId === 'open_next_detail') {
@@ -793,6 +851,10 @@ export function renderDashboard(root: HTMLElement, ctx: any) {
       const failed = Number(statFailed.textContent || '0') || 0;
       statFailed.textContent = String(failed + 1);
       const opId = String(payload?.operationId || '').trim();
+      if (opId) {
+        currentPhase.textContent = resolveUnifiedPhaseFromOp(opId, currentPhase.textContent || '运行中');
+      }
+      currentAction.textContent = resolveUnifiedActionFromEvent(event, payload, currentAction.textContent || '-');
       const err = String(payload?.error || payload?.message || payload?.code || event).trim();
       pushRecentError(opId ? `${opId}: ${err}` : err, event, payload);
       return;
