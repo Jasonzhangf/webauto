@@ -1,9 +1,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {
-  ensureProfile,
+  listProfiles,
   resolveFingerprintsRoot,
-  resolveNextProfileId,
   resolveProfilesRoot,
   resolveWebautoRoot,
 } from './profilepool.mjs';
@@ -16,6 +15,7 @@ const STATUS_ACTIVE = 'active';
 const STATUS_VALID = 'valid';
 const STATUS_INVALID = 'invalid';
 const STATUS_PENDING = 'pending';
+export const REQUIRED_ACCOUNT_PLATFORMS = Object.freeze(['xiaohongshu', 'weibo']);
 
 function nowIso() {
   return new Date().toISOString();
@@ -143,8 +143,16 @@ function removeAccountDirById(id) {
 }
 
 function hasPersistentAccountId(record) {
-  if (normalizeText(record?.accountId)) return true;
-  return normalizeStatus(record?.status) === STATUS_PENDING;
+  return Boolean(normalizeText(record?.accountId));
+}
+
+function assertExistingProfile(profileId) {
+  const id = ensureSafeName(profileId, 'profileId');
+  const { profiles } = listProfiles();
+  if (!profiles.includes(id)) {
+    throw new Error(`profile not found: ${id}. create/login account profile first`);
+  }
+  return id;
 }
 
 function isWithinDir(rootDir, targetPath) {
@@ -393,6 +401,28 @@ function buildProfileAccountView(profileId, record = null) {
   };
 }
 
+function resolveProfileCoverage(rows) {
+  const byProfile = new Map();
+  for (const row of rows) {
+    const profileId = normalizeText(row?.profileId);
+    if (!profileId) continue;
+    if (!byProfile.has(profileId)) {
+      byProfile.set(profileId, {
+        profileId,
+        platforms: new Set(),
+      });
+    }
+    if (row?.valid === true && normalizeText(row?.accountId)) {
+      byProfile.get(profileId).platforms.add(normalizePlatform(row.platform));
+    }
+  }
+  return byProfile;
+}
+
+function isProfileFullyBound(platforms) {
+  return REQUIRED_ACCOUNT_PLATFORMS.every((platform) => platforms.has(platform));
+}
+
 export function listAccountProfiles(options = {}) {
   const index = loadIndex();
   const platformFilter = normalizeText(options?.platform) ? normalizePlatform(options.platform) : null;
@@ -433,8 +463,6 @@ export function listAccountProfiles(options = {}) {
       return normalizePlatform(a?.platform).localeCompare(normalizePlatform(b?.platform));
     })
     .map((record) => buildProfileAccountView(record?.profileId, record));
-  const validProfilesSet = new Set();
-  const invalidProfilesSet = new Set();
   const validProfilesByPlatform = {};
   const invalidProfilesByPlatform = {};
   for (const row of rows) {
@@ -442,28 +470,47 @@ export function listAccountProfiles(options = {}) {
     if (!validProfilesByPlatform[platform]) validProfilesByPlatform[platform] = [];
     if (!invalidProfilesByPlatform[platform]) invalidProfilesByPlatform[platform] = [];
     if (row.valid) {
-      validProfilesSet.add(row.profileId);
       if (!validProfilesByPlatform[platform].includes(row.profileId)) {
         validProfilesByPlatform[platform].push(row.profileId);
       }
     } else {
-      invalidProfilesSet.add(row.profileId);
       if (!invalidProfilesByPlatform[platform].includes(row.profileId)) {
         invalidProfilesByPlatform[platform].push(row.profileId);
       }
     }
   }
-  const validProfiles = Array.from(validProfilesSet);
-  const invalidProfiles = Array.from(invalidProfilesSet).filter((profileId) => !validProfilesSet.has(profileId));
+  const coverage = resolveProfileCoverage(rows);
+  const savedProfiles = [];
+  const unsavedProfiles = [];
+  for (const [profileId, entry] of coverage.entries()) {
+    if (isProfileFullyBound(entry.platforms)) savedProfiles.push(profileId);
+    else unsavedProfiles.push(profileId);
+  }
+  savedProfiles.sort((a, b) => a.localeCompare(b));
+  unsavedProfiles.sort((a, b) => a.localeCompare(b));
+  const validProfiles = savedProfiles;
+  const invalidProfiles = unsavedProfiles;
   return {
     root: resolveAccountsRoot(),
     count: rows.length,
     profiles: rows,
     validProfiles,
     invalidProfiles,
+    savedProfiles,
+    unsavedProfiles,
     validProfilesByPlatform,
     invalidProfilesByPlatform,
   };
+}
+
+export function listSavedProfiles() {
+  return listAccountProfiles().savedProfiles || [];
+}
+
+export function isProfileSaved(profileId) {
+  const id = normalizeText(profileId);
+  if (!id) return false;
+  return listSavedProfiles().includes(id);
 }
 
 export function getAccount(idOrAlias, options = {}) {
@@ -476,21 +523,12 @@ export async function addAccount(input = {}) {
   const platform = normalizePlatform(input.platform);
   const hasCustomId = Boolean(normalizeText(input.id));
   const explicitProfileId = normalizeText(input.profileId);
-  const autoPrefix = resolveProfilePrefix(platform);
-  let seq = null;
-  let profileId = explicitProfileId;
-
-  if (!hasCustomId && !explicitProfileId) {
-    // Default path: account/profile share the same minimal available slot.
-    seq = resolveNextAutoSeq(index, platform, null);
-    profileId = `${autoPrefix}-${seq}`;
-  } else {
-    profileId = explicitProfileId || resolveNextProfileId(autoPrefix);
-    const profileSeq = resolveProfileSeq(profileId, platform);
-    seq = resolveNextAutoSeq(index, platform, hasCustomId ? null : profileSeq);
+  if (!explicitProfileId) {
+    throw new Error('profileId is required; automatic profile creation is disabled');
   }
-
-  await ensureProfile(profileId);
+  const profileId = assertExistingProfile(explicitProfileId);
+  const profileSeq = resolveProfileSeq(profileId, platform);
+  const seq = resolveNextAutoSeq(index, platform, hasCustomId ? null : profileSeq);
 
   const id = ensureSafeName(
     hasCustomId ? normalizeId(input.id, platform, seq) : buildAutoAccountId(platform, seq),
@@ -601,9 +639,8 @@ export async function updateAccount(idOrAlias, patch = {}) {
     next.reason = normalizeText(patch.reason);
   }
   if (Object.prototype.hasOwnProperty.call(patch, 'profileId')) {
-    const profileId = ensureSafeName(normalizeText(patch.profileId), 'profileId');
+    const profileId = assertExistingProfile(normalizeText(patch.profileId));
     if (profileId !== next.profileId) {
-      await ensureProfile(profileId);
       next.profileId = profileId;
       if (!Object.prototype.hasOwnProperty.call(patch, 'fingerprintId')) {
         next.fingerprintId = profileId;
@@ -664,6 +701,7 @@ export async function updateAccount(idOrAlias, patch = {}) {
 
 export function upsertProfileAccountState(input = {}) {
   const profileId = ensureSafeName(normalizeText(input.profileId), 'profileId');
+  assertExistingProfile(profileId);
   const platform = normalizePlatform(input.platform);
   const accountId = normalizeText(input.accountId || input.platformAccountId || null);
   const alias = normalizeAlias(input.alias);
@@ -680,76 +718,26 @@ export function upsertProfileAccountState(input = {}) {
   const purgeIds = new Set();
 
   if (!accountId) {
-    if (target && hasPersistentAccountId(target)) {
-      const nextStatus = pendingMode ? STATUS_PENDING : STATUS_INVALID;
-      const next = {
-        ...target,
-        platform,
-        profileId,
-        fingerprintId: profileId,
-        status: nextStatus,
-        valid: false,
-        reason: reason || (nextStatus === STATUS_PENDING ? 'waiting_login' : 'invalid'),
-        detectedAt,
-        updatedAt: nowIso(),
-      };
-      const rowIndex = index.accounts.findIndex((item) => item?.id === target.id);
-      if (rowIndex < 0) throw new Error(`account not found: ${target.id}`);
-      index.accounts[rowIndex] = next;
-      saveIndex(index);
-      persistAccountMeta(next);
-      return buildProfileAccountView(profileId, next);
+    if (!pendingMode) {
+      const staleIds = index.accounts
+        .filter((item) => (
+          String(item?.profileId || '').trim() === profileId
+          && normalizePlatform(item?.platform) === platform
+        ))
+        .map((item) => String(item?.id || '').trim())
+        .filter(Boolean);
+      if (staleIds.length > 0) {
+        index.accounts = index.accounts.filter((item) => {
+          const id = String(item?.id || '').trim();
+          return !staleIds.includes(id);
+        });
+        saveIndex(index);
+        for (const id of staleIds) deleteAccountMeta(id);
+      }
     }
-
-    if (pendingMode) {
-      const profileSeq = resolveProfileSeq(profileId, platform);
-      const seq = resolveNextAutoSeq(index, platform, profileSeq);
-      const id = ensureSafeName(buildAutoAccountId(platform, seq), 'id');
-      const createdAt = nowIso();
-      const record = {
-        id,
-        seq,
-        platform,
-        status: STATUS_PENDING,
-        valid: false,
-        reason: reason || 'waiting_login',
-        accountId: null,
-        name: `${platform}-${profileId}`,
-        alias: alias || null,
-        username: null,
-        profileId,
-        fingerprintId: profileId,
-        createdAt,
-        updatedAt: createdAt,
-        detectedAt,
-        aliasSource: alias ? 'auto' : null,
-      };
-      index.accounts.push(record);
-      index.nextSeq = Math.max(Number(index.nextSeq) || 1, seq + 1);
-      saveIndex(index);
-      persistAccountMeta(record);
-      return buildProfileAccountView(profileId, record);
-    }
-
-    const staleIds = index.accounts
-      .filter((item) => (
-        String(item?.profileId || '').trim() === profileId
-        && normalizePlatform(item?.platform) === platform
-        && !hasPersistentAccountId(item)
-      ))
-      .map((item) => String(item?.id || '').trim())
-      .filter(Boolean);
-    if (staleIds.length > 0) {
-      index.accounts = index.accounts.filter((item) => {
-        const id = String(item?.id || '').trim();
-        return !staleIds.includes(id);
-      });
-      saveIndex(index);
-      for (const id of staleIds) deleteAccountMeta(id);
-    }
-
     return buildProfileAccountView(profileId, {
       profileId,
+      platform,
       accountId: null,
       alias: null,
       status,
@@ -868,6 +856,64 @@ export function markProfilePending(profileId, reason = 'waiting_login', platform
     status: STATUS_PENDING,
     reason,
   });
+}
+
+export function cleanupIncompleteProfiles(options = {}) {
+  const deleteProfileDirs = options?.deleteProfileDirs !== false;
+  const index = loadIndex();
+  const byProfile = new Map();
+  for (const row of index.accounts) {
+    const profileId = normalizeText(row?.profileId);
+    if (!profileId) continue;
+    if (!byProfile.has(profileId)) {
+      byProfile.set(profileId, {
+        profileId,
+        accountRecordIds: [],
+        platforms: new Set(),
+      });
+    }
+    const entry = byProfile.get(profileId);
+    if (row?.id) entry.accountRecordIds.push(row.id);
+    if (normalizeText(row?.accountId) && normalizeStatus(row?.status) === STATUS_VALID) {
+      entry.platforms.add(normalizePlatform(row?.platform));
+    }
+  }
+
+  const removedProfiles = [];
+  const removedRecordIds = [];
+  const purgeRecordIds = new Set();
+  for (const entry of byProfile.values()) {
+    if (isProfileFullyBound(entry.platforms)) continue;
+    removedProfiles.push(entry.profileId);
+    for (const id of entry.accountRecordIds) purgeRecordIds.add(id);
+  }
+  if (purgeRecordIds.size === 0) {
+    return { removedProfiles, removedRecords: removedRecordIds };
+  }
+
+  index.accounts = index.accounts.filter((row) => {
+    const id = String(row?.id || '').trim();
+    if (!id || !purgeRecordIds.has(id)) return true;
+    removedRecordIds.push(id);
+    return false;
+  });
+  saveIndex(index);
+  for (const id of removedRecordIds) {
+    deleteAccountMeta(id);
+  }
+
+  if (deleteProfileDirs) {
+    const profilesRoot = resolveProfilesRoot();
+    for (const profileId of removedProfiles) {
+      const profilePath = path.join(profilesRoot, profileId);
+      if (!isWithinDir(profilesRoot, profilePath)) continue;
+      fs.rmSync(profilePath, { recursive: true, force: true });
+    }
+  }
+  return {
+    removedProfiles,
+    removedRecords: removedRecordIds,
+  };
 }
 
 export function removeAccount(idOrAlias, options = {}) {

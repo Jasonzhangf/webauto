@@ -1,57 +1,44 @@
 #!/usr/bin/env node
 import minimist from 'minimist';
-import fs from 'node:fs';
 import fsp from 'node:fs/promises';
-import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { buildXhsUnifiedAutoscript } from '../../../modules/camo-runtime/src/autoscript/xhs-unified-template.mjs';
-import { normalizeAutoscript, validateAutoscript } from '../../../modules/camo-runtime/src/autoscript/schema.mjs';
-import { AutoscriptRunner } from '../../../modules/camo-runtime/src/autoscript/runtime.mjs';
 import { syncXhsAccountsByProfiles } from './lib/account-detect.mjs';
-import { listAccountProfiles, markProfileInvalid } from './lib/account-store.mjs';
+import {
+  cleanupIncompleteProfiles,
+  listAccountProfiles,
+  listSavedProfiles,
+} from './lib/account-store.mjs';
 import { listProfilesForPool } from './lib/profilepool.mjs';
-import { runCamo } from './lib/camo-cli.mjs';
+import { assertProfilesUsable } from './lib/profile-policy.mjs';
 import { publishBusEvent } from './lib/bus-publish.mjs';
-import { resolvePlatformFlowGate } from './lib/flow-gate.mjs';
-
-function nowIso() {
-  return new Date().toISOString();
-}
-
-function formatRunLabel() {
-  return new Date().toISOString().replace(/[:.]/g, '-');
-}
-
-function parseBool(value, fallback = false) {
-  if (value === undefined || value === null || value === '') return fallback;
-  if (typeof value === 'boolean') return value;
-  const text = String(value).trim().toLowerCase();
-  if (['1', 'true', 'yes', 'on'].includes(text)) return true;
-  if (['0', 'false', 'no', 'off'].includes(text)) return false;
-  return fallback;
-}
-
-function parseIntFlag(value, fallback, min = 1) {
-  if (value === undefined || value === null || value === '') return fallback;
-  const num = Number(value);
-  if (!Number.isFinite(num)) return fallback;
-  return Math.max(min, Math.floor(num));
-}
-
-function parseNonNegativeInt(value, fallback = 0) {
-  if (value === undefined || value === null || value === '') return fallback;
-  const num = Number(value);
-  if (!Number.isFinite(num)) return fallback;
-  return Math.max(0, Math.floor(num));
-}
-
-function pickRandomInt(min, max) {
-  const floorMin = Math.max(0, Math.floor(Number(min) || 0));
-  const floorMax = Math.max(floorMin, Math.floor(Number(max) || 0));
-  if (floorMax <= floorMin) return floorMin;
-  return floorMin + Math.floor(Math.random() * (floorMax - floorMin + 1));
-}
+import {
+  ensureProfileSession,
+  resolveXhsStage,
+  runProfile,
+} from './lib/xhs-unified-profile-blocks.mjs';
+import {
+  resolveDownloadRoot,
+  collectCompletedNoteIds,
+} from './lib/xhs-unified-output-blocks.mjs';
+import {
+  buildEvenShardPlan,
+  buildDynamicWavePlan,
+  runWithConcurrency,
+} from './lib/xhs-unified-plan-blocks.mjs';
+import {
+  nowIso,
+  formatRunLabel,
+  parseBool,
+  parseIntFlag,
+  parseNonNegativeInt,
+  sanitizeForPath,
+  resetTaskServices,
+} from './lib/xhs-unified-blocks.mjs';
+import {
+  toNumber,
+  mergeProfileOutputs,
+} from './lib/xhs-unified-runtime-blocks.mjs';
 
 function parseProfiles(argv) {
   const profile = String(argv.profile || '').trim();
@@ -69,9 +56,14 @@ function parseProfiles(argv) {
 }
 
 function resolveDefaultXhsProfiles() {
+  const savedProfiles = new Set(listSavedProfiles());
   const rows = listAccountProfiles({ platform: 'xiaohongshu' }).profiles || [];
   const valid = rows
-    .filter((row) => row?.valid === true && String(row?.accountId || '').trim())
+    .filter((row) => (
+      row?.valid === true
+      && String(row?.accountId || '').trim()
+      && savedProfiles.has(String(row?.profileId || '').trim())
+    ))
     .sort((a, b) => {
       const ta = Date.parse(String(a?.updatedAt || '')) || 0;
       const tb = Date.parse(String(b?.updatedAt || '')) || 0;
@@ -79,132 +71,6 @@ function resolveDefaultXhsProfiles() {
       return String(a?.profileId || '').localeCompare(String(b?.profileId || ''));
     });
   return Array.from(new Set(valid.map((row) => String(row.profileId || '').trim()).filter(Boolean)));
-}
-
-function sanitizeForPath(name, fallback = 'unknown') {
-  const text = String(name || '').trim();
-  if (!text) return fallback;
-  const cleaned = text.replace(/[\\/:"*?<>|]+/g, '_').trim();
-  return cleaned || fallback;
-}
-
-const XHS_HOME_URL = 'https://www.xiaohongshu.com';
-
-async function ensureProfileSession(profileId) {
-  const id = String(profileId || '').trim();
-  if (!id) return false;
-  const ret = runCamo(['start', id, '--url', XHS_HOME_URL], {
-    rootDir: process.cwd(),
-    timeoutMs: 60000,
-  });
-  if (ret?.ok) {
-    runCamo(['goto', id, XHS_HOME_URL], { rootDir: process.cwd(), timeoutMs: 60000 });
-  }
-  return Boolean(ret?.ok);
-}
-
-function buildStopScreenshotPath(profileId, reason, outputDir) {
-  const safeProfile = sanitizeForPath(profileId, 'profile');
-  const safeReason = sanitizeForPath(reason || 'stop', 'stop');
-  const file = `stop-${safeProfile}-${safeReason}.png`;
-  return path.join(outputDir, file);
-}
-
-async function captureStopScreenshot({ profileId, reason, outputDir }) {
-  const outDir = String(outputDir || '').trim();
-  if (!outDir) return null;
-  try {
-    await fsp.mkdir(outDir, { recursive: true });
-  } catch {}
-  const outputPath = buildStopScreenshotPath(profileId, reason, outDir);
-  const tryCapture = () => runCamo(['screenshot', profileId, '--output', outputPath], {
-    rootDir: process.cwd(),
-    timeoutMs: 60000,
-  });
-  let ret = tryCapture();
-  if (!ret?.ok) {
-    await ensureProfileSession(profileId);
-    ret = tryCapture();
-  }
-  if (ret?.ok) return outputPath;
-  return null;
-}
-
-function sanitizeKeywordDirParts({ env, keyword }) {
-  return {
-    safeEnv: sanitizeForPath(env, 'prod'),
-    safeKeyword: sanitizeForPath(keyword, 'unknown'),
-  };
-}
-
-function resolveDownloadRoot(customRoot = '') {
-  const fromArg = String(customRoot || '').trim();
-  if (fromArg) return path.resolve(fromArg);
-  const fromEnv = String(process.env.WEBAUTO_DOWNLOAD_ROOT || process.env.WEBAUTO_DOWNLOAD_DIR || '').trim();
-  if (fromEnv) return path.resolve(fromEnv);
-  if (process.platform === 'win32') {
-    try {
-      if (fs.existsSync('D:\\')) return 'D:\\webauto';
-    } catch {
-      // ignore
-    }
-    const home = process.env.HOME || process.env.USERPROFILE || os.homedir();
-    return path.join(home, '.webauto');
-  }
-  const home = process.env.HOME || process.env.USERPROFILE || os.homedir();
-  return path.join(home, '.webauto', 'download');
-}
-
-const NON_NOTE_DIR_NAMES = new Set([
-  'merged',
-  'profiles',
-  'like-evidence',
-  'virtual-like',
-  'smart-reply',
-  'comment-match',
-  'discover-fallback',
-]);
-
-async function collectKeywordDirs(baseOutputRoot, env, keyword) {
-  const { safeEnv, safeKeyword } = sanitizeKeywordDirParts({ env, keyword });
-  const dirs = [
-    path.join(baseOutputRoot, 'xiaohongshu', safeEnv, safeKeyword),
-  ];
-  const shardsRoot = path.join(baseOutputRoot, 'shards');
-  try {
-    const entries = await fsp.readdir(shardsRoot, { withFileTypes: true });
-    for (const entry of entries) {
-      if (!entry.isDirectory()) continue;
-      dirs.push(path.join(shardsRoot, entry.name, 'xiaohongshu', safeEnv, safeKeyword));
-    }
-  } catch {
-    // ignore
-  }
-  return Array.from(new Set(dirs));
-}
-
-async function collectCompletedNoteIds(baseOutputRoot, env, keyword) {
-  const keywordDirs = await collectKeywordDirs(baseOutputRoot, env, keyword);
-  const completed = new Set();
-  for (const keywordDir of keywordDirs) {
-    let entries = [];
-    try {
-      entries = await fsp.readdir(keywordDir, { withFileTypes: true });
-    } catch {
-      continue;
-    }
-    for (const entry of entries) {
-      if (!entry.isDirectory()) continue;
-      const noteId = String(entry.name || '').trim();
-      if (!noteId || noteId.startsWith('.') || noteId.startsWith('_')) continue;
-      if (NON_NOTE_DIR_NAMES.has(noteId)) continue;
-      completed.add(noteId);
-    }
-  }
-  return {
-    count: completed.size,
-    noteIds: Array.from(completed),
-  };
 }
 
 async function ensureDir(dirPath) {
@@ -221,920 +87,12 @@ async function appendJsonl(filePath, payload) {
   await fsp.appendFile(filePath, `${JSON.stringify(payload)}\n`, 'utf8');
 }
 
-function resolveUnifiedApiBaseUrl() {
-  const raw = String(
-    process.env.WEBAUTO_UNIFIED_API
-    || process.env.WEBAUTO_UNIFIED_URL
-    || 'http://127.0.0.1:7701',
-  ).trim();
-  return raw.replace(/\/+$/, '');
-}
-
-async function postUnifiedTaskRequest(baseUrl, pathname, payload) {
-  try {
-    const response = await fetch(`${baseUrl}${pathname}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload || {}),
-      signal: AbortSignal.timeout(2000),
-    });
-    if (!response.ok) return false;
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function createTaskReporter(seed = {}) {
-  const baseUrl = resolveUnifiedApiBaseUrl();
-  const staticSeed = {
-    profileId: String(seed.profileId || 'unknown').trim() || 'unknown',
-    keyword: String(seed.keyword || '').trim(),
-    phase: 'unified',
-    uiTriggerId: String(seed.uiTriggerId || '').trim(),
-  };
-  const createdRunIds = new Set();
-
-  const ensureCreated = async (runId, extra = {}) => {
-    const rid = String(runId || '').trim();
-    if (!rid) return false;
-    if (createdRunIds.has(rid)) return true;
-    const ok = await postUnifiedTaskRequest(baseUrl, '/api/v1/tasks', {
-      runId: rid,
-      ...staticSeed,
-      ...extra,
-    });
-    if (ok) createdRunIds.add(rid);
-    return ok;
-  };
-
-  const update = async (runId, patch = {}) => {
-    const rid = String(runId || '').trim();
-    if (!rid) return false;
-    await ensureCreated(rid, patch);
-    return postUnifiedTaskRequest(baseUrl, `/api/v1/tasks/${encodeURIComponent(rid)}/update`, {
-      ...staticSeed,
-      ...patch,
-    });
-  };
-
-  const pushEvent = async (runId, type, data = {}) => {
-    const rid = String(runId || '').trim();
-    if (!rid) return false;
-    await ensureCreated(rid, data);
-    return postUnifiedTaskRequest(baseUrl, `/api/v1/tasks/${encodeURIComponent(rid)}/events`, {
-      type: String(type || 'event').trim() || 'event',
-      data,
-    });
-  };
-
-  const setError = async (runId, message, code = 'TASK_ERROR', recoverable = false) => {
-    const rid = String(runId || '').trim();
-    if (!rid) return false;
-    return update(rid, {
-      error: {
-        message: String(message || 'task_error'),
-        code: String(code || 'TASK_ERROR'),
-        timestamp: Date.now(),
-        recoverable: recoverable === true,
-      },
-    });
-  };
-
-  return {
-    ensureCreated,
-    update,
-    pushEvent,
-    setError,
-  };
-}
-
-async function buildTemplateOptions(argv, profileId, overrides = {}) {
-  const keyword = String(argv.keyword || argv.k || '').trim();
-  const env = String(argv.env || 'prod').trim() || 'prod';
-  const inputMode = String(argv['input-mode'] || 'protocol').trim() || 'protocol';
-  const headless = parseBool(argv.headless, false);
-  const ocrCommand = String(argv['ocr-command'] || '').trim();
-  const maxNotes = parseIntFlag(argv['max-notes'] ?? argv.target, 30, 1);
-  const maxComments = parseNonNegativeInt(argv['max-comments'], 0);
-  let flowGate = null;
-  try {
-    flowGate = await resolvePlatformFlowGate('xiaohongshu');
-  } catch {
-    flowGate = null;
-  }
-
-  const throttleMin = parseIntFlag(flowGate?.throttle?.minMs, 900, 100);
-  const throttleMax = parseIntFlag(flowGate?.throttle?.maxMs, 1800, throttleMin);
-  const noteIntervalMin = parseIntFlag(flowGate?.noteInterval?.minMs, 2200, 200);
-  const noteIntervalMax = parseIntFlag(flowGate?.noteInterval?.maxMs, 4200, noteIntervalMin);
-  const tabCountDefault = parseIntFlag(flowGate?.tabPool?.tabCount, 1, 1);
-  const tabOpenDelayMin = parseIntFlag(flowGate?.tabPool?.openDelayMinMs, 1400, 0);
-  const tabOpenDelayMax = parseIntFlag(flowGate?.tabPool?.openDelayMaxMs, 2800, tabOpenDelayMin);
-  const submitMethodDefault = String(flowGate?.submitSearch?.method || 'click').trim().toLowerCase() || 'click';
-  const submitActionDelayMinDefault = parseIntFlag(flowGate?.submitSearch?.actionDelayMinMs, 180, 20);
-  const submitActionDelayMaxDefault = parseIntFlag(flowGate?.submitSearch?.actionDelayMaxMs, 620, submitActionDelayMinDefault);
-  const submitSettleMinDefault = parseIntFlag(flowGate?.submitSearch?.settleMinMs, 1200, 60);
-  const submitSettleMaxDefault = parseIntFlag(flowGate?.submitSearch?.settleMaxMs, 2600, submitSettleMinDefault);
-  const openDetailPreClickMinDefault = parseIntFlag(flowGate?.openDetail?.preClickMinMs, 220, 60);
-  const openDetailPreClickMaxDefault = parseIntFlag(flowGate?.openDetail?.preClickMaxMs, 700, openDetailPreClickMinDefault);
-  const openDetailPollDelayMinDefault = parseIntFlag(flowGate?.openDetail?.pollDelayMinMs, 130, 80);
-  const openDetailPollDelayMaxDefault = parseIntFlag(flowGate?.openDetail?.pollDelayMaxMs, 320, openDetailPollDelayMinDefault);
-  const openDetailPostOpenMinDefault = parseIntFlag(flowGate?.openDetail?.postOpenMinMs, 420, 120);
-  const openDetailPostOpenMaxDefault = parseIntFlag(flowGate?.openDetail?.postOpenMaxMs, 1100, openDetailPostOpenMinDefault);
-  const commentsScrollStepMinDefault = parseIntFlag(flowGate?.commentsHarvest?.scrollStepMin, 280, 120);
-  const commentsScrollStepMaxDefault = parseIntFlag(flowGate?.commentsHarvest?.scrollStepMax, 420, commentsScrollStepMinDefault);
-  const commentsSettleMinDefault = parseIntFlag(flowGate?.commentsHarvest?.settleMinMs, 280, 80);
-  const commentsSettleMaxDefault = parseIntFlag(flowGate?.commentsHarvest?.settleMaxMs, 820, commentsSettleMinDefault);
-  const defaultOperationMinIntervalDefault = parseIntFlag(flowGate?.pacing?.defaultOperationMinIntervalMs, 1200, 0);
-  const defaultEventCooldownDefault = parseIntFlag(flowGate?.pacing?.defaultEventCooldownMs, 700, 0);
-  const defaultPacingJitterDefault = parseIntFlag(flowGate?.pacing?.defaultJitterMs, 900, 0);
-  const navigationMinIntervalDefault = parseIntFlag(flowGate?.pacing?.navigationMinIntervalMs, 2200, 0);
-
-  const throttle = parseIntFlag(argv.throttle, pickRandomInt(throttleMin, throttleMax), 100);
-  const tabCount = parseIntFlag(argv['tab-count'], tabCountDefault, 1);
-  const noteIntervalMs = parseIntFlag(argv['note-interval'], pickRandomInt(noteIntervalMin, noteIntervalMax), 200);
-  const tabOpenDelayMs = parseIntFlag(argv['tab-open-delay'], pickRandomInt(tabOpenDelayMin, tabOpenDelayMax), 0);
-  const submitMethod = String(argv['search-submit-method'] || submitMethodDefault).trim().toLowerCase() || 'click';
-  const submitActionDelayMinMs = parseIntFlag(argv['submit-action-delay-min'], submitActionDelayMinDefault, 20);
-  const submitActionDelayMaxMs = parseIntFlag(argv['submit-action-delay-max'], submitActionDelayMaxDefault, submitActionDelayMinMs);
-  const submitSettleMinMs = parseIntFlag(argv['submit-settle-min'], submitSettleMinDefault, 60);
-  const submitSettleMaxMs = parseIntFlag(argv['submit-settle-max'], submitSettleMaxDefault, submitSettleMinMs);
-  const openDetailPreClickMinMs = parseIntFlag(argv['open-detail-preclick-min'], openDetailPreClickMinDefault, 60);
-  const openDetailPreClickMaxMs = parseIntFlag(argv['open-detail-preclick-max'], openDetailPreClickMaxDefault, openDetailPreClickMinMs);
-  const openDetailPollDelayMinMs = parseIntFlag(argv['open-detail-poll-min'], openDetailPollDelayMinDefault, 80);
-  const openDetailPollDelayMaxMs = parseIntFlag(argv['open-detail-poll-max'], openDetailPollDelayMaxDefault, openDetailPollDelayMinMs);
-  const openDetailPostOpenMinMs = parseIntFlag(argv['open-detail-postopen-min'], openDetailPostOpenMinDefault, 120);
-  const openDetailPostOpenMaxMs = parseIntFlag(argv['open-detail-postopen-max'], openDetailPostOpenMaxDefault, openDetailPostOpenMinMs);
-  const commentsScrollStepMin = parseIntFlag(argv['comments-scroll-step-min'], commentsScrollStepMinDefault, 120);
-  const commentsScrollStepMax = parseIntFlag(argv['comments-scroll-step-max'], commentsScrollStepMaxDefault, commentsScrollStepMin);
-  const commentsSettleMinMs = parseIntFlag(argv['comments-settle-min'], commentsSettleMinDefault, 80);
-  const commentsSettleMaxMs = parseIntFlag(argv['comments-settle-max'], commentsSettleMaxDefault, commentsSettleMinMs);
-  const defaultOperationMinIntervalMs = parseIntFlag(argv['operation-min-interval'], defaultOperationMinIntervalDefault, 0);
-  const defaultEventCooldownMs = parseIntFlag(argv['event-cooldown'], defaultEventCooldownDefault, 0);
-  const defaultPacingJitterMs = parseIntFlag(argv['pacing-jitter'], defaultPacingJitterDefault, 0);
-  const navigationMinIntervalMs = parseIntFlag(argv['navigation-min-interval'], navigationMinIntervalDefault, 0);
-  const maxLikesPerRound = parseNonNegativeInt(argv['max-likes'], 0);
-  const matchMode = String(argv['match-mode'] || 'any').trim() || 'any';
-  const matchMinHits = parseIntFlag(argv['match-min-hits'], 1, 1);
-  const matchKeywords = String(argv['match-keywords'] || keyword).trim();
-  const likeKeywords = String(argv['like-keywords'] || '').trim();
-  const replyText = String(argv['reply-text'] || '感谢分享，已关注').trim() || '感谢分享，已关注';
-  const outputRoot = String(argv['output-root'] || '').trim();
-  const uiTriggerId = String(argv['ui-trigger-id'] || process.env.WEBAUTO_UI_TRIGGER_ID || '').trim();
-  const resume = parseBool(argv.resume, false);
-  const incrementalMax = parseBool(argv['incremental-max'], true);
-  const sharedHarvestPath = String(overrides.sharedHarvestPath ?? argv['shared-harvest-path'] ?? '').trim();
-  const searchSerialKey = String(overrides.searchSerialKey ?? argv['search-serial-key'] ?? '').trim();
-  const seedCollectCount = parseNonNegativeInt(
-    overrides.seedCollectCount ?? argv['seed-collect-count'],
-    0,
-  );
-  const seedCollectMaxRounds = parseNonNegativeInt(
-    overrides.seedCollectMaxRounds ?? argv['seed-collect-rounds'],
-    0,
-  );
-
-  const dryRun = parseBool(argv['dry-run'], false);
-  const disableDryRun = parseBool(argv['no-dry-run'], false);
-  const effectiveDryRun = disableDryRun ? false : dryRun;
-
-  const base = {
-    profileId,
-    keyword,
-    env,
-    inputMode,
-    headless,
-    ocrCommand,
-    uiTriggerId,
-    outputRoot,
-    throttle,
-    tabCount,
-    tabOpenDelayMs,
-    noteIntervalMs,
-    submitMethod,
-    submitActionDelayMinMs,
-    submitActionDelayMaxMs,
-    submitSettleMinMs,
-    submitSettleMaxMs,
-    openDetailPreClickMinMs,
-    openDetailPreClickMaxMs,
-    openDetailPollDelayMinMs,
-    openDetailPollDelayMaxMs,
-    openDetailPostOpenMinMs,
-    openDetailPostOpenMaxMs,
-    commentsScrollStepMin,
-    commentsScrollStepMax,
-    commentsSettleMinMs,
-    commentsSettleMaxMs,
-    defaultOperationMinIntervalMs,
-    defaultEventCooldownMs,
-    defaultPacingJitterMs,
-    navigationMinIntervalMs,
-    maxNotes,
-    maxComments,
-    maxLikesPerRound,
-    resume,
-    incrementalMax,
-    matchMode,
-    matchMinHits,
-    matchKeywords,
-    likeKeywords,
-    replyText,
-    doHomepage: parseBool(argv['do-homepage'], true),
-    doImages: parseBool(argv['do-images'], false),
-    doComments: parseBool(argv['do-comments'], true),
-    doLikes: parseBool(argv['do-likes'], false) && !effectiveDryRun,
-    doReply: parseBool(argv['do-reply'], false) && !effectiveDryRun,
-    doOcr: parseBool(argv['do-ocr'], false),
-    persistComments: parseBool(argv['persist-comments'], !effectiveDryRun),
-    sharedHarvestPath,
-    searchSerialKey,
-    seedCollectCount,
-    seedCollectMaxRounds,
-  };
-  return { ...base, ...overrides };
-}
-
-function buildEvenShardPlan({ profiles, totalNotes, defaultMaxNotes }) {
-  const uniqueProfiles = Array.from(new Set(profiles.map((item) => String(item || '').trim()).filter(Boolean)));
-  if (uniqueProfiles.length === 0) return [];
-
-  if (!Number.isFinite(totalNotes) || totalNotes <= 0) {
-    return uniqueProfiles.map((profileId) => ({ profileId, assignedNotes: defaultMaxNotes }));
-  }
-
-  const base = Math.floor(totalNotes / uniqueProfiles.length);
-  const remainder = totalNotes % uniqueProfiles.length;
-  const plan = uniqueProfiles.map((profileId, index) => ({
-    profileId,
-    assignedNotes: base + (index < remainder ? 1 : 0),
-  }));
-  return plan.filter((item) => item.assignedNotes > 0);
-}
-
-function buildDynamicWavePlan({ profiles, remainingNotes }) {
-  const uniqueProfiles = Array.from(new Set(profiles.map((item) => String(item || '').trim()).filter(Boolean)));
-  if (uniqueProfiles.length === 0) return [];
-  const remaining = Math.max(0, Number(remainingNotes) || 0);
-  if (remaining <= 0) return [];
-
-  if (remaining < uniqueProfiles.length) {
-    return uniqueProfiles.slice(0, remaining).map((profileId) => ({
-      profileId,
-      assignedNotes: 1,
-    }));
-  }
-
-  const waveTotal = remaining - (remaining % uniqueProfiles.length);
-  return buildEvenShardPlan({
-    profiles: uniqueProfiles,
-    totalNotes: waveTotal > 0 ? waveTotal : remaining,
-    defaultMaxNotes: 1,
-  });
-}
-
-function createProfileStats(spec) {
-  return {
-    assignedNotes: spec.assignedNotes,
-    openedNotes: 0,
-    commentsHarvestRuns: 0,
-    commentsCollected: 0,
-    commentsExpected: 0,
-    commentsReachedBottomCount: 0,
-    likesHitCount: 0,
-    likesNewCount: 0,
-    likesSkippedCount: 0,
-    likesAlreadyCount: 0,
-    likesDedupCount: 0,
-    searchCount: 0,
-    rollbackCount: 0,
-    returnToSearchCount: 0,
-    operationErrors: 0,
-    recoveryFailed: 0,
-    terminalCode: null,
-    commentPaths: [],
-    likeSummaryPaths: [],
-    likeStatePaths: [],
-  };
-}
-
-function pushUnique(arr, value) {
-  const text = String(value || '').trim();
-  if (!text) return;
-  if (!arr.includes(text)) arr.push(text);
-}
-
-function toNumber(value, fallback = 0) {
-  const num = Number(value);
-  return Number.isFinite(num) ? num : fallback;
-}
-
-function resolveUnifiedPhaseLabel(operationId, fallback = '运行中') {
-  const op = String(operationId || '').trim();
-  if (!op) return fallback;
-  if (
-    op === 'sync_window_viewport'
-    || op === 'goto_home'
-    || op === 'fill_keyword'
-    || op === 'submit_search'
-    || op === 'xhs_assert_logged_in'
-    || op === 'abort_on_login_guard'
-    || op === 'abort_on_risk_guard'
-  ) {
-    return '登录校验';
-  }
-  if (op === 'ensure_tab_pool' || op === 'verify_subscriptions_all_pages') {
-    return '采集链接';
-  }
-  if (
-    op === 'open_first_detail'
-    || op === 'open_next_detail'
-    || op === 'wait_between_notes'
-    || op === 'switch_tab_round_robin'
-  ) {
-    return '打开详情';
-  }
-  if (
-    op === 'detail_harvest'
-    || op === 'expand_replies'
-    || op === 'comments_harvest'
-    || op === 'comment_match_gate'
-    || op === 'comment_like'
-    || op === 'comment_reply'
-    || op === 'close_detail'
-  ) {
-    return '详情采集点赞';
-  }
-  return fallback;
-}
-
-function resolveUnifiedActionLabel(eventName, payload = {}, fallback = '运行中') {
-  const opId = String(payload?.operationId || '').trim();
-  if (opId) {
-    if (eventName === 'autoscript:operation_error' || eventName === 'autoscript:operation_recovery_failed') {
-      const err = String(payload?.code || payload?.message || '').trim();
-      return err ? `${opId}: ${err}` : `${opId}: failed`;
-    }
-    const stage = String(payload?.stage || '').trim();
-    if (stage) return `${opId}:${stage}`;
-    return opId;
-  }
-  const msg = String(payload?.message || payload?.reason || '').trim();
-  if (msg) return msg;
-  return fallback;
-}
-
-function updateProfileStatsFromEvent(stats, payload) {
-  const event = String(payload?.event || '').trim();
-  if (!event) return;
-
-  if (event === 'autoscript:operation_error') {
-    stats.operationErrors += 1;
-    return;
-  }
-  if (event === 'autoscript:operation_recovery_failed') {
-    stats.recoveryFailed += 1;
-    return;
-  }
-  if (event === 'autoscript:operation_terminal') {
-    stats.terminalCode = String(payload.code || '').trim() || stats.terminalCode;
-    return;
-  }
-  if (event !== 'autoscript:operation_done') return;
-
-  const operationId = String(payload.operationId || '').trim();
-  const rawResult = payload.result && typeof payload.result === 'object' ? payload.result : {};
-  const result = rawResult.result && typeof rawResult.result === 'object'
-    ? rawResult.result
-    : rawResult;
-
-  if (operationId === 'open_first_detail' || operationId === 'open_next_detail') {
-    if (result.opened === true) {
-      stats.openedNotes += 1;
-    }
-    return;
-  }
-
-  if (operationId === 'submit_search') {
-    stats.searchCount = Math.max(stats.searchCount, toNumber(result.searchCount, stats.searchCount));
-    return;
-  }
-
-  if (operationId === 'comments_harvest') {
-    stats.commentsHarvestRuns += 1;
-    stats.commentsCollected += toNumber(result.collected, 0);
-    stats.commentsExpected += Math.max(0, toNumber(result.expectedCommentsCount, 0));
-    if (result.reachedBottom === true) stats.commentsReachedBottomCount += 1;
-    pushUnique(stats.commentPaths, result.commentsPath);
-    return;
-  }
-
-  if (operationId === 'comment_like') {
-    stats.likesHitCount += toNumber(result.hitCount, 0);
-    stats.likesNewCount += toNumber(result.likedCount, 0);
-    stats.likesSkippedCount += toNumber(result.skippedCount, 0);
-    stats.likesAlreadyCount += toNumber(result.alreadyLikedSkipped, 0);
-    stats.likesDedupCount += toNumber(result.dedupSkipped, 0);
-    pushUnique(stats.likeSummaryPaths, result.summaryPath);
-    pushUnique(stats.likeStatePaths, result.likeStatePath);
-    pushUnique(stats.commentPaths, result.commentsPath);
-    return;
-  }
-
-  if (operationId === 'close_detail') {
-    stats.rollbackCount = Math.max(stats.rollbackCount, toNumber(result.rollbackCount, stats.rollbackCount));
-    stats.returnToSearchCount = Math.max(stats.returnToSearchCount, toNumber(result.returnToSearchCount, stats.returnToSearchCount));
-  }
-}
-
-function isObject(value) {
-  return value !== null && typeof value === 'object' && !Array.isArray(value);
-}
-
-async function runProfile(spec, argv, baseOverrides = {}) {
-  const profileId = spec.profileId;
-  const busEnabled = parseBool(argv['bus-events'], false) || process.env.WEBAUTO_BUS_EVENTS === '1';
-  const busPublishable = new Set([
-    'xhs.unified.start',
-    'xhs.unified.stop',
-    'xhs.unified.stop_screenshot',
-    'xhs.unified.profile_failed',
-    'autoscript:operation_done',
-    'autoscript:operation_progress',
-    'autoscript:operation_error',
-    'autoscript:operation_terminal',
-    'autoscript:operation_recovery_failed',
-  ]);
-  let currentRunId = null;
-  const overrides = {
-    ...baseOverrides,
-    maxNotes: spec.assignedNotes,
-    outputRoot: spec.outputRoot,
-  };
-  if (spec.sharedHarvestPath) overrides.sharedHarvestPath = spec.sharedHarvestPath;
-  if (spec.searchSerialKey) overrides.searchSerialKey = spec.searchSerialKey;
-  if (spec.seedCollectCount !== undefined && spec.seedCollectCount !== null) {
-    overrides.seedCollectCount = parseNonNegativeInt(spec.seedCollectCount, 0);
-  }
-  if (spec.seedCollectMaxRounds !== undefined && spec.seedCollectMaxRounds !== null) {
-    overrides.seedCollectMaxRounds = parseNonNegativeInt(spec.seedCollectMaxRounds, 0);
-  }
-  const options = await buildTemplateOptions(argv, profileId, overrides);
-  console.log(JSON.stringify({
-    event: 'xhs.unified.flow_gate',
-    profileId,
-    throttle: options.throttle,
-    noteIntervalMs: options.noteIntervalMs,
-    tabCount: options.tabCount,
-    tabOpenDelayMs: options.tabOpenDelayMs,
-    submitMethod: options.submitMethod,
-    submitActionDelayMinMs: options.submitActionDelayMinMs,
-    submitActionDelayMaxMs: options.submitActionDelayMaxMs,
-    submitSettleMinMs: options.submitSettleMinMs,
-    submitSettleMaxMs: options.submitSettleMaxMs,
-    commentsScrollStepMin: options.commentsScrollStepMin,
-    commentsScrollStepMax: options.commentsScrollStepMax,
-    commentsSettleMinMs: options.commentsSettleMinMs,
-    commentsSettleMaxMs: options.commentsSettleMaxMs,
-  }));
-  const script = buildXhsUnifiedAutoscript(options);
-  const normalized = normalizeAutoscript(script, `xhs-unified:${profileId}`);
-  const validation = validateAutoscript(normalized);
-  if (!validation.ok) throw new Error(`autoscript validation failed for ${profileId}: ${validation.errors.join('; ')}`);
-
-  await ensureDir(path.dirname(spec.logPath));
-  const stats = createProfileStats(spec);
-  const reporter = createTaskReporter({
-    profileId,
-    keyword: options.keyword,
-    uiTriggerId: options.uiTriggerId,
-  });
-  let activeRunId = '';
-  let runtimePhaseLabel = '登录校验';
-  let runtimeActionLabel = '启动 autoscript';
-  let lastSnapshotTs = 0;
-  const pushTaskSnapshot = (status = 'running') => {
-    if (!activeRunId) return;
-    const nowTs = Date.now();
-    if (status === 'running' && (nowTs - lastSnapshotTs) < 900) return;
-    lastSnapshotTs = nowTs;
-    void reporter.update(activeRunId, {
-      status,
-      phase: runtimePhaseLabel,
-      action: runtimeActionLabel,
-      progress: {
-        total: Math.max(0, Number(spec.assignedNotes) || 0),
-        processed: Math.max(0, Number(stats.openedNotes) || 0),
-        failed: Math.max(0, Number(stats.operationErrors) || 0),
-      },
-      stats: {
-        notesProcessed: Math.max(0, Number(stats.openedNotes) || 0),
-        commentsCollected: Math.max(0, Number(stats.commentsCollected) || 0),
-        likesPerformed: Math.max(0, Number(stats.likesNewCount) || 0),
-        repliesGenerated: 0,
-        imagesDownloaded: 0,
-        ocrProcessed: 0,
-      },
-    });
-  };
-
-  const logEvent = (payload) => {
-    const eventPayload = isObject(payload) ? payload : { event: 'autoscript:raw', payload };
-    const merged = {
-      ts: eventPayload.ts || nowIso(),
-      profileId,
-      ...eventPayload,
-    };
-    if (!merged.runId && currentRunId) merged.runId = currentRunId;
-    fs.appendFileSync(spec.logPath, `${JSON.stringify(merged)}\n`, 'utf8');
-    console.log(JSON.stringify(merged));
-    updateProfileStatsFromEvent(stats, merged);
-    if (busEnabled && busPublishable.has(String(merged.event || '').trim())) {
-      void publishBusEvent(merged);
-    }
-    const eventName = String(merged.event || '').trim();
-    const mergedRunId = String(merged.runId || '').trim();
-    if (mergedRunId) activeRunId = mergedRunId;
-    if (
-      eventName === 'autoscript:operation_start'
-      || eventName === 'autoscript:operation_progress'
-      || eventName === 'autoscript:operation_done'
-      || eventName === 'autoscript:operation_error'
-      || eventName === 'autoscript:operation_recovery_failed'
-    ) {
-      runtimePhaseLabel = resolveUnifiedPhaseLabel(merged.operationId, runtimePhaseLabel);
-      runtimeActionLabel = resolveUnifiedActionLabel(eventName, merged, runtimeActionLabel);
-    }
-    if (eventName === 'xhs.unified.start') {
-      runtimePhaseLabel = '登录校验';
-      runtimeActionLabel = '启动 autoscript';
-    }
-    if (eventName === 'xhs.unified.stop') {
-      const reason = String(merged.reason || '').trim();
-      runtimePhaseLabel = reason === 'script_failure' ? '失败' : '已结束';
-      runtimeActionLabel = reason || 'stop';
-    }
-    const shouldReportEvent = (
-      eventName === 'xhs.unified.start'
-      || eventName === 'xhs.unified.stop'
-      || eventName === 'autoscript:start'
-      || eventName === 'autoscript:stop'
-      || eventName === 'autoscript:impact'
-      || eventName === 'autoscript:operation_start'
-      || eventName === 'autoscript:operation_progress'
-      || eventName === 'autoscript:operation_done'
-      || eventName === 'autoscript:operation_error'
-      || eventName === 'autoscript:operation_recovery_failed'
-    );
-    if (activeRunId && shouldReportEvent) {
-      void reporter.pushEvent(activeRunId, eventName, merged);
-    }
-    if (
-      eventName === 'autoscript:operation_start'
-      || eventName === 'autoscript:operation_progress'
-      || eventName === 'xhs.unified.start'
-      || eventName === 'xhs.unified.stop'
-      || eventName === 'autoscript:stop'
-      || eventName === 'autoscript:start'
-      || eventName === 'autoscript:operation_terminal'
-      || eventName === 'autoscript:operation_done'
-      || eventName === 'autoscript:operation_error'
-      || eventName === 'autoscript:operation_recovery_failed'
-      || eventName === 'autoscript:impact'
-    ) {
-      pushTaskSnapshot(eventName === 'xhs.unified.stop' ? (runtimePhaseLabel === '失败' ? 'failed' : 'completed') : 'running');
-    }
-    if (
-      eventName === 'autoscript:operation_done'
-      || eventName === 'autoscript:operation_error'
-      || eventName === 'autoscript:operation_recovery_failed'
-      || eventName === 'autoscript:impact'
-    ) {
-      // Keep compatibility for existing update cadence logic.
-      pushTaskSnapshot('running');
-    }
-    if (
-      merged.event === 'autoscript:operation_error'
-      && String(merged.operationId || '').trim() === 'abort_on_login_guard'
-      && String(merged.message || '').includes('LOGIN_GUARD_DETECTED')
-    ) {
-      try {
-        markProfileInvalid(profileId, 'login_guard_runtime');
-      } catch {
-        // ignore account state update errors during runtime logging
-      }
-    }
-  };
-
-  const runner = new AutoscriptRunner(normalized, {
-    profileId,
-    log: logEvent,
-  });
-
-  const running = await runner.start();
-  currentRunId = running?.runId || currentRunId;
-  activeRunId = String(running?.runId || '').trim();
-  if (activeRunId) {
-    await reporter.ensureCreated(activeRunId, {
-      status: 'starting',
-      phase: runtimePhaseLabel,
-      action: runtimeActionLabel,
-      progress: {
-        total: Math.max(0, Number(spec.assignedNotes) || 0),
-        processed: 0,
-        failed: 0,
-      },
-    });
-    await reporter.update(activeRunId, {
-      status: 'running',
-      phase: runtimePhaseLabel,
-      action: runtimeActionLabel,
-      progress: {
-        total: Math.max(0, Number(spec.assignedNotes) || 0),
-        processed: 0,
-        failed: 0,
-      },
-      stats: {
-        notesProcessed: 0,
-        commentsCollected: 0,
-        likesPerformed: 0,
-        repliesGenerated: 0,
-        imagesDownloaded: 0,
-        ocrProcessed: 0,
-      },
-    });
-  }
-  logEvent({
-    event: 'xhs.unified.start',
-    runId: running?.runId || null,
-    keyword: options.keyword,
-    env: options.env,
-    maxNotes: options.maxNotes,
-    assignedNotes: spec.assignedNotes,
-    outputRoot: options.outputRoot,
-    parallelRunLabel: spec.runLabel,
-  });
-  const done = await running.done;
-
-  const stopPayload = {
-    event: 'xhs.unified.stop',
-    profileId,
-    runId: done?.runId || running.runId,
-    reason: done?.reason || null,
-    startedAt: done?.startedAt || null,
-    stoppedAt: done?.stoppedAt || null,
-  };
-  logEvent(stopPayload);
-
-  const stopScreenshotPath = await captureStopScreenshot({
-    profileId,
-    reason: stopPayload.reason || 'stop',
-    outputDir: path.dirname(spec.logPath),
-  });
-  if (stopScreenshotPath) {
-    logEvent({
-      event: 'xhs.unified.stop_screenshot',
-      profileId,
-      runId: stopPayload.runId,
-      reason: stopPayload.reason || null,
-      path: stopScreenshotPath,
-    });
-  }
-
-  stats.stopReason = stopPayload.reason;
-  const finalRunId = String(stopPayload.runId || activeRunId || '').trim();
-  if (finalRunId) {
-    activeRunId = finalRunId;
-    const failed = stopPayload.reason === 'script_failure';
-    await reporter.update(finalRunId, {
-      status: failed ? 'failed' : 'completed',
-      phase: failed ? '失败' : '已结束',
-      action: String(stopPayload.reason || (failed ? 'script_failure' : 'completed')),
-      progress: {
-        total: Math.max(0, Number(spec.assignedNotes) || 0),
-        processed: Math.max(0, Number(stats.openedNotes) || 0),
-        failed: Math.max(0, Number(stats.operationErrors) || 0),
-      },
-      stats: {
-        notesProcessed: Math.max(0, Number(stats.openedNotes) || 0),
-        commentsCollected: Math.max(0, Number(stats.commentsCollected) || 0),
-        likesPerformed: Math.max(0, Number(stats.likesNewCount) || 0),
-        repliesGenerated: 0,
-        imagesDownloaded: 0,
-        ocrProcessed: 0,
-      },
-    });
-    if (failed) {
-      await reporter.setError(finalRunId, `autoscript stopped: ${stopPayload.reason || 'script_failure'}`, 'SCRIPT_FAILURE', false);
-    }
-  }
-
-  const profileResult = {
-    ok: stopPayload.reason !== 'script_failure',
-    profileId,
-    runId: stopPayload.runId,
-    reason: stopPayload.reason,
-    assignedNotes: spec.assignedNotes,
-    outputRoot: options.outputRoot,
-    logPath: spec.logPath,
-    stopScreenshotPath: stopScreenshotPath || null,
-    stats,
-  };
-
-  await writeJson(spec.summaryPath, profileResult);
-  return profileResult;
-}
-
-async function runWithConcurrency(items, concurrency, worker) {
-  const limit = Math.max(1, Math.min(items.length || 1, concurrency || 1));
-  const results = new Array(items.length);
-  let cursor = 0;
-
-  async function consume() {
-    for (;;) {
-      const index = cursor;
-      cursor += 1;
-      if (index >= items.length) return;
-      results[index] = await worker(items[index], index);
-    }
-  }
-
-  await Promise.all(Array.from({ length: limit }, () => consume()));
-  return results;
-}
-
-async function readJsonlRows(filePath) {
-  try {
-    const text = await fsp.readFile(filePath, 'utf8');
-    return text
-      .split('\n')
-      .map((line) => line.trim())
-      .filter(Boolean)
-      .map((line) => {
-        try {
-          return JSON.parse(line);
-        } catch {
-          return null;
-        }
-      })
-      .filter(Boolean);
-  } catch {
-    return [];
-  }
-}
-
-function buildCommentDedupKey(row) {
-  const noteId = String(row?.noteId || '').trim();
-  const userId = String(row?.userId || '').trim();
-  const content = String(row?.content || '').replace(/\s+/g, ' ').trim();
-  return `${noteId}|${userId}|${content}`;
-}
-
-async function mergeProfileOutputs({
-  results,
-  mergedDir,
-  keyword,
-  env,
-  totalNotes,
-  parallel,
-  concurrency,
-  skippedProfiles = [],
-}) {
-  const success = results.filter((item) => item && item.ok);
-  const failed = results.filter((item) => !item || item.ok === false);
-
-  const mergedComments = [];
-  const seenCommentKeys = new Set();
-  const mergedLikeSummaries = [];
-
-  for (const result of success) {
-    for (const commentsPath of result.stats.commentPaths || []) {
-      const rows = await readJsonlRows(commentsPath);
-      for (const row of rows) {
-        const key = buildCommentDedupKey(row);
-        if (!key || seenCommentKeys.has(key)) continue;
-        seenCommentKeys.add(key);
-        mergedComments.push({
-          profileId: result.profileId,
-          ...row,
-        });
-      }
-    }
-
-    for (const summaryPath of result.stats.likeSummaryPaths || []) {
-      try {
-        const raw = await fsp.readFile(summaryPath, 'utf8');
-        const summary = JSON.parse(raw);
-        mergedLikeSummaries.push({ profileId: result.profileId, summaryPath, summary });
-      } catch {
-        continue;
-      }
-    }
-  }
-
-  await ensureDir(mergedDir);
-  const mergedCommentsPath = path.join(mergedDir, 'comments.merged.jsonl');
-  if (mergedComments.length > 0) {
-    const payload = mergedComments.map((row) => JSON.stringify(row)).join('\n');
-    await fsp.writeFile(mergedCommentsPath, `${payload}\n`, 'utf8');
-  }
-
-  const mergedLikeSummaryPath = path.join(mergedDir, 'likes.merged.json');
-  const likeTotals = {
-    noteSummaries: mergedLikeSummaries.length,
-    scannedCount: 0,
-    hitCount: 0,
-    likedCount: 0,
-    skippedCount: 0,
-    reachedBottomCount: 0,
-  };
-  for (const item of mergedLikeSummaries) {
-    const summary = item.summary || {};
-    likeTotals.scannedCount += toNumber(summary.scannedCount, 0);
-    likeTotals.hitCount += toNumber(summary.hitCount, 0);
-    likeTotals.likedCount += toNumber(summary.likedCount, 0);
-    likeTotals.skippedCount += toNumber(summary.skippedCount, 0);
-    if (summary.reachedBottom === true) likeTotals.reachedBottomCount += 1;
-  }
-  await writeJson(mergedLikeSummaryPath, {
-    generatedAt: nowIso(),
-    totals: likeTotals,
-    items: mergedLikeSummaries,
-  });
-
-  const totals = {
-    profilesTotal: results.length,
-    profilesSucceeded: success.length,
-    profilesFailed: failed.length,
-    assignedNotes: 0,
-    openedNotes: 0,
-    commentsHarvestRuns: 0,
-    commentsCollected: 0,
-    commentsExpected: 0,
-    commentsReachedBottomCount: 0,
-    likesHitCount: 0,
-    likesNewCount: 0,
-    likesSkippedCount: 0,
-    likesAlreadyCount: 0,
-    likesDedupCount: 0,
-    searchCount: 0,
-    rollbackCount: 0,
-    returnToSearchCount: 0,
-    operationErrors: 0,
-    recoveryFailed: 0,
-  };
-
-  for (const result of results) {
-    const stats = result?.stats || {};
-    totals.assignedNotes += toNumber(result?.assignedNotes ?? stats.assignedNotes, 0);
-    totals.openedNotes += toNumber(stats.openedNotes, 0);
-    totals.commentsHarvestRuns += toNumber(stats.commentsHarvestRuns, 0);
-    totals.commentsCollected += toNumber(stats.commentsCollected, 0);
-    totals.commentsExpected += toNumber(stats.commentsExpected, 0);
-    totals.commentsReachedBottomCount += toNumber(stats.commentsReachedBottomCount, 0);
-    totals.likesHitCount += toNumber(stats.likesHitCount, 0);
-    totals.likesNewCount += toNumber(stats.likesNewCount, 0);
-    totals.likesSkippedCount += toNumber(stats.likesSkippedCount, 0);
-    totals.likesAlreadyCount += toNumber(stats.likesAlreadyCount, 0);
-    totals.likesDedupCount += toNumber(stats.likesDedupCount, 0);
-    totals.searchCount += toNumber(stats.searchCount, 0);
-    totals.rollbackCount += toNumber(stats.rollbackCount, 0);
-    totals.returnToSearchCount += toNumber(stats.returnToSearchCount, 0);
-    totals.operationErrors += toNumber(stats.operationErrors, 0);
-    totals.recoveryFailed += toNumber(stats.recoveryFailed, 0);
-  }
-
-  const mergedSummary = {
-    generatedAt: nowIso(),
-    keyword,
-    env,
-    totalNotes: Number.isFinite(totalNotes) ? totalNotes : null,
-    execution: {
-      parallel,
-      concurrency,
-    },
-    skippedProfiles,
-    totals,
-    artifacts: {
-      mergedCommentsPath: mergedComments.length > 0 ? mergedCommentsPath : null,
-      mergedLikeSummaryPath,
-    },
-    profiles: results,
-  };
-
-  const summaryPath = path.join(mergedDir, 'summary.json');
-  await writeJson(summaryPath, mergedSummary);
-  return {
-    summaryPath,
-    mergedSummary,
-  };
-}
-
 export async function runUnified(argv, overrides = {}) {
   const keyword = String(argv.keyword || argv.k || '').trim();
   if (!keyword) throw new Error('missing --keyword');
+  cleanupIncompleteProfiles();
 
+  const stage = resolveXhsStage(argv);
   const env = String(argv.env || 'prod').trim() || 'prod';
   const busEnabled = parseBool(argv['bus-events'], false) || process.env.WEBAUTO_BUS_EVENTS === '1';
   let profiles = parseProfiles(argv);
@@ -1149,16 +107,29 @@ export async function runUnified(argv, overrides = {}) {
     }
   }
   if (profiles.length === 0) throw new Error('missing --profile/--profiles/--profilepool and no valid xiaohongshu account profile found');
-  await Promise.all(profiles.map((profileId) => ensureProfileSession(profileId)));
+  profiles = assertProfilesUsable(profiles);
+  const planOnly = parseBool(argv['plan-only'], false);
+  const headless = parseBool(argv.headless, false);
   const defaultMaxNotes = parseIntFlag(argv['max-notes'] ?? argv.target, 30, 1);
   const totalNotes = parseNonNegativeInt(argv['total-notes'] ?? argv['total-target'], 0);
   const hasTotalTarget = totalNotes > 0;
-  const maxWaves = parseIntFlag(argv['max-waves'], 40, 1);
-  const parallelRequested = parseBool(argv.parallel, false);
-  const configuredConcurrency = parseIntFlag(argv.concurrency, profiles.length || 1, 1);
-  const planOnly = parseBool(argv['plan-only'], false);
+  let maxWaves = parseIntFlag(argv['max-waves'], 40, 1);
+  let parallelRequested = parseBool(argv.parallel, false);
+  let configuredConcurrency = parseIntFlag(argv.concurrency, profiles.length || 1, 1);
   const seedCollectCountFlag = parseNonNegativeInt(argv['seed-collect-count'], 0);
   const seedCollectRoundsFlag = parseNonNegativeInt(argv['seed-collect-rounds'], 6);
+
+  if (stage === 'links') {
+    if (profiles.length !== 1) {
+      throw new Error('stage=links requires exactly one profile (no sharding)');
+    }
+    if (hasTotalTarget) {
+      throw new Error('stage=links does not support --total-notes/--total-target sharding');
+    }
+    maxWaves = 1;
+    parallelRequested = false;
+    configuredConcurrency = 1;
+  }
 
   const runLabel = formatRunLabel();
   const baseOutputRoot = resolveDownloadRoot(argv['output-root']);
@@ -1176,6 +147,21 @@ export async function runUnified(argv, overrides = {}) {
     'merged',
     `run-${runLabel}`,
   );
+  if (!planOnly) {
+    const serviceReset = await resetTaskServices(argv, {
+      rootDir: process.cwd(),
+      debugActionLogPath: path.join(mergedDir, 'profiles', 'input-actions.jsonl'),
+    });
+    console.log(JSON.stringify({
+      event: 'xhs.unified.service_reset',
+      ok: serviceReset.ok,
+      skipped: serviceReset.skipped === true,
+      reason: serviceReset.reason || null,
+      actionLogPath: serviceReset.actionLogPath || null,
+      statusReady: Boolean(serviceReset.status?.json?.ready),
+    }));
+    await Promise.all(profiles.map((profileId) => ensureProfileSession(profileId, { headless })));
+  }
   const planPath = path.join(mergedDir, 'plan.json');
   const completedAtStart = hasTotalTarget
     ? await collectCompletedNoteIds(baseOutputRoot, env, keyword)
@@ -1203,6 +189,8 @@ export async function runUnified(argv, overrides = {}) {
         error: error?.message || String(error),
         stats: {
           assignedNotes: spec.assignedNotes,
+          linksCollected: 0,
+          linksPaths: [],
           openedNotes: 0,
           commentsHarvestRuns: 0,
           commentsCollected: 0,
@@ -1476,10 +464,12 @@ async function main() {
       '  --concurrency <n>            并行度（默认=账号数）',
       '  --resume <bool>              断点续传（默认 false）',
       '  --incremental-max <bool>     max-notes 作为增量配额（默认 true）',
+      '  --stage <name>               阶段：full|links|content|like|reply（默认 full）',
+      '                              links: 搜索+逐条点开采链(xsec_token, 单账号不分片); content: 搜索+采链+内容; like: 搜索+采链+内容+点赞; reply: 搜索+采链+内容+回复',
       '  --plan-only                  只生成分片计划，不执行',
       '  --output-root <path>         输出根目录（并行时自动分 profile shard）',
-      '  --seed-collect-count <n>     首账号预采样去重ID数量（默认按分片自动）',
-      '  --seed-collect-rounds <n>    首账号预采样滚动轮数（默认6）',
+      '  --seed-collect-count <n>     链接预采样数量（默认=max-notes）',
+      '  --seed-collect-rounds <n>    链接预采样滚动轮数（默认=max(6,ceil(max-notes/2)))',
       '  --search-serial-key <key>    搜索阶段串行锁key（默认自动生成）',
       '  --shared-harvest-path <path> 共享harvest去重列表路径（默认自动生成）',
       '  --search-submit-method <m>   搜索提交方式 click|enter|form（默认 flow-gate）',
@@ -1487,6 +477,7 @@ async function main() {
       '  --operation-min-interval <ms> 基础操作最小间隔（默认 flow-gate）',
       '  --event-cooldown <ms>        基础事件冷却（默认 flow-gate）',
       '  --pacing-jitter <ms>         基础抖动区间（默认 flow-gate）',
+      '  --service-reset <bool>       任务前复位并重启 ui cli 服务（默认 true）',
     ].join('\n'));
     return;
   }
