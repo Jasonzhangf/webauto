@@ -117,7 +117,7 @@ function buildDetectScript() {
       .join(' ');
     const hasLoginText = /登录|扫码|验证码|手机号|请先登录|注册|sign\\s*in/i.test(loginGuardText);
     const loginUrl = /\\/login|signin|passport|account\\/login/i.test(String(location.href || ''));
-    const hasGuardSignal = (visibleLoginGuardNodes.length > 0 && hasLoginText) || loginUrl;
+    const hasGuardSignalRaw = (visibleLoginGuardNodes.length > 0 && hasLoginText) || loginUrl;
     const candidates = [];
     const normalizeAlias = (value) => {
       const text = String(value || '').replace(/\\s+/g, ' ').trim();
@@ -259,6 +259,8 @@ function buildDetectScript() {
       if (picked) alias = picked;
     }
     const hasAccountSignal = Boolean(best && best.id);
+    // If we can reliably resolve the self account id, treat login guard UI as non-blocking.
+    const hasGuardSignal = hasAccountSignal ? false : hasGuardSignalRaw;
     return {
       url: location.href,
       hasLoginGuard: hasGuardSignal,
@@ -500,7 +502,7 @@ export async function syncXhsAccountByProfile(profileId, options = {}) {
     const detected = await detectXhsAccountIdentity(normalizedProfileId, {
       resolveAlias: shouldResolveAlias,
     });
-    if (detected.hasLoginGuard) {
+    if (detected.hasLoginGuard && !detected.accountId) {
       if (pendingWhileLogin) {
         return markProfilePending(normalizedProfileId, 'waiting_login_guard');
       }
