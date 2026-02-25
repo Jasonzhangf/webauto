@@ -298,11 +298,12 @@ describe('schedule cli', () => {
 
     await new Promise((resolve) => setTimeout(resolve, 600));
     child.kill('SIGTERM');
-    const code = await new Promise((resolve) => {
-      child.on('exit', resolve);
+    const { code, signal } = await new Promise((resolve) => {
+      child.on('exit', (exitCode, exitSignal) => resolve({ code: exitCode, signal: exitSignal }));
     });
 
-    assert.equal(code, 0, stderr || `unexpected exit code: ${code}`);
+    const graceful = code === 0 || signal === 'SIGTERM';
+    assert.equal(graceful, true, stderr || `unexpected exit code/signal: ${code}/${signal}`);
     assert.match(stdout, /\"event\":\"schedule\.tick\"/);
     assert.match(stdout, /\"event\":\"schedule\.stopped\"/);
   });

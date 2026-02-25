@@ -67,7 +67,10 @@ test('heartbeat watcher exits when stale', async (t) => {
   });
 
   const stop = startHeartbeatWatcher({ serviceName: 'svc', filePath, staleMs: 1, intervalMs: 1 });
-  await exitPromise;
+  await Promise.race([
+    exitPromise,
+    new Promise((_, reject) => setTimeout(() => reject(new Error('wait process.exit timeout')), 500)),
+  ]);
   stop();
   assert.equal(exitCode, 0);
 });
@@ -96,7 +99,10 @@ test('heartbeat watcher exits when status=stopped', async (t) => {
   });
 
   const stop = startHeartbeatWatcher({ serviceName: 'svc', filePath, staleMs: 10_000, intervalMs: 1 });
-  await exitPromise;
+  await Promise.race([
+    exitPromise,
+    new Promise((_, reject) => setTimeout(() => reject(new Error('wait process.exit timeout')), 500)),
+  ]);
   stop();
   assert.equal(exitCode, 0);
 });
