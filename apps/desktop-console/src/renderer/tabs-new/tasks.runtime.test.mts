@@ -320,6 +320,67 @@ test('save with same params does not create duplicate task', async () => {
   assert.equal(String(saveCalls[1]?.payload?.id || ''), firstId);
 });
 
+test('save waits latest list snapshot before dedup when list is slow', async () => {
+  const bundle = createMockCtx();
+  bundle.state.tasks.push({
+    id: 'sched-0099',
+    seq: 99,
+    name: 'xhs-unified-竞态去重',
+    enabled: true,
+    scheduleType: 'once',
+    intervalMinutes: 30,
+    runAt: '2026-02-25T00:00:00.000Z',
+    maxRuns: 1,
+    nextRunAt: null,
+    commandType: 'xhs-unified',
+    commandArgv: {
+      profile: 'xhs-race',
+      keyword: '竞态去重',
+      'max-notes': 30,
+      target: 30,
+      env: 'debug',
+      'do-comments': true,
+      'do-likes': false,
+      'fetch-body': true,
+      'like-keywords': '',
+    },
+    createdAt: '2026-02-25T00:00:00.000Z',
+    updatedAt: '2026-02-25T00:00:00.000Z',
+    runCount: 0,
+    failCount: 0,
+  });
+
+  const rawScheduleInvoke = bundle.ctx.api.scheduleInvoke;
+  bundle.ctx.api.scheduleInvoke = async (input: any) => {
+    if (String(input?.action || '') === 'list') {
+      await new Promise((resolve) => setTimeout(resolve, 80));
+    }
+    return rawScheduleInvoke(input);
+  };
+
+  const root = document.createElement('div');
+  renderTasksPanel(root, bundle.ctx);
+  await flush(2);
+
+  const keywordInput = root.querySelector('#task-keyword') as HTMLInputElement;
+  const profileInput = root.querySelector('#task-profile') as HTMLInputElement;
+  const targetInput = root.querySelector('#task-target') as HTMLInputElement;
+  const saveBtn = root.querySelector('#task-save-btn') as HTMLButtonElement;
+
+  keywordInput.value = '竞态去重';
+  profileInput.value = 'xhs-race';
+  targetInput.value = '30';
+  saveBtn.click();
+  await new Promise((resolve) => setTimeout(resolve, 120));
+  await flush(8);
+
+  const dedupRows = bundle.state.tasks.filter(
+    (row: any) => String(row.commandArgv?.profile || '') === 'xhs-race' && String(row.commandArgv?.keyword || '') === '竞态去重',
+  );
+  assert.equal(dedupRows.length, 1);
+  assert.equal(String(dedupRows[0]?.id || ''), 'sched-0099');
+});
+
 test('save and run uses schedule run and no direct spawn', async () => {
   const bundle = createMockCtx();
   const root = document.createElement('div');

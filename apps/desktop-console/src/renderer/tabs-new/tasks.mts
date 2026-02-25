@@ -931,6 +931,8 @@ export function renderTasksPanel(root: HTMLElement, ctx: any) {
   }
 
   async function saveTask(runImmediately = false) {
+    // Ensure dedup uses latest persisted tasks even when UI just mounted.
+    await loadTasks();
     const data = collectFormData();
     if (!String(data.id || '').trim()) {
       const duplicate = findDuplicateTaskByParams(data);
