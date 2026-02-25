@@ -322,8 +322,8 @@ async function startConsoleIfNeeded(endpoint) {
     });
   };
 
-  if (args.install) await runUiConsole(['--install']);
   if (args.build) await runUiConsole(['--build']);
+  if (args.install || args.build) await runUiConsole(['--install']);
   await runUiConsole([]);
 
   const ready = await waitForHealth(endpoint, 45_000);
@@ -512,6 +512,37 @@ async function runFullCover(endpoint) {
     runAction(`wait:${selector}`, { action: 'wait', selector, timeoutMs, state });
   const clickText = async (text, selector = 'button', optional = false) =>
     runAction(`click_text:${text}`, { action: 'click_text', selector, text }, { optional });
+  const ensureSchedulerInteractive = async (stage = 'scheduler') => {
+    const ok = await ensureTabActive('定时任务', 'scheduler');
+    pushStep(`ensureTab:scheduler:${stage}`, ok, { expectedTab: 'scheduler' });
+    if (!ok) throw new Error(`tab_failed:scheduler:${stage}`);
+    await wait('#scheduler-name', 12000, 'visible');
+    return true;
+  };
+  const runSchedulerProbe = async (selector, extra = {}, options = {}) => {
+    for (let attempt = 1; attempt <= 2; attempt += 1) {
+      try {
+        return await runProbe('scheduler', selector, extra, options);
+      } catch (err) {
+        if (attempt >= 2) throw err;
+        await ensureSchedulerInteractive(`probe-retry-${attempt}`);
+      }
+    }
+    return null;
+  };
+  const selectInScheduler = async (selector, value, retries = 3) => {
+    for (let attempt = 1; attempt <= Math.max(1, retries); attempt += 1) {
+      try {
+        return await select(selector, value);
+      } catch (err) {
+        const message = String(err?.message || err || '');
+        if (!message.includes('select_not_found') || attempt >= retries) throw err;
+        await ensureSchedulerInteractive(`select-retry-${attempt}`);
+        await wait(selector, 8000, 'visible');
+      }
+    }
+    throw new Error(`select_failed_after_retry:${selector}`);
+  };
 
   const taskName = `ui-cli-full-${Date.now()}`;
   const keywordSeed = taskName;
@@ -607,68 +638,73 @@ async function runFullCover(endpoint) {
     await click('#pause-btn');
     await click('#stop-btn', true);
 
-    await tab('定时任务');
-    await wait('#scheduler-name');
-    await runProbe('scheduler', '#scheduler-refresh-btn');
-    await runProbe('scheduler', '#scheduler-run-due-btn');
-    await runProbe('scheduler', '#scheduler-export-all-btn');
-    await runProbe('scheduler', '#scheduler-import-btn');
-    await runProbe('scheduler', '#scheduler-daemon-interval');
-    await runProbe('scheduler', '#scheduler-daemon-start-btn');
-    await runProbe('scheduler', '#scheduler-daemon-stop-btn');
-    await runProbe('scheduler', '#scheduler-daemon-status');
-    await runProbe('scheduler', '#scheduler-editing-id');
-    await runProbe('scheduler', '#scheduler-name');
-    await runProbe('scheduler', '#scheduler-enabled');
-    await runProbe('scheduler', '#scheduler-type');
-    await runProbe('scheduler', '#scheduler-periodic-type-wrap');
-    await runProbe('scheduler', '#scheduler-periodic-type');
-    await runProbe('scheduler', '#scheduler-interval-wrap');
-    await runProbe('scheduler', '#scheduler-runat-wrap');
-    await runProbe('scheduler', '#scheduler-interval');
-    await runProbe('scheduler', '#scheduler-runat');
-    await runProbe('scheduler', '#scheduler-max-runs');
-    await runProbe('scheduler', '#scheduler-profile');
-    await runProbe('scheduler', '#scheduler-keyword');
-    await runProbe('scheduler', '#scheduler-max-notes');
-    await runProbe('scheduler', '#scheduler-env');
-    await runProbe('scheduler', '#scheduler-comments');
-    await runProbe('scheduler', '#scheduler-likes');
-    await runProbe('scheduler', '#scheduler-headless');
-    await runProbe('scheduler', '#scheduler-dryrun');
-    await runProbe('scheduler', '#scheduler-like-keywords');
-    await runProbe('scheduler', '#scheduler-save-btn');
-    await runProbe('scheduler', '#scheduler-run-now-btn');
-    await runProbe('scheduler', '#scheduler-reset-btn');
-    await select('#scheduler-type', 'immediate');
+    await ensureSchedulerInteractive('entry');
+    const schedulerSelectors = [
+      '#scheduler-refresh-btn',
+      '#scheduler-run-due-btn',
+      '#scheduler-export-all-btn',
+      '#scheduler-import-btn',
+      '#scheduler-daemon-interval',
+      '#scheduler-daemon-start-btn',
+      '#scheduler-daemon-stop-btn',
+      '#scheduler-daemon-status',
+      '#scheduler-editing-id',
+      '#scheduler-name',
+      '#scheduler-enabled',
+      '#scheduler-type',
+      '#scheduler-periodic-type-wrap',
+      '#scheduler-periodic-type',
+      '#scheduler-interval-wrap',
+      '#scheduler-runat-wrap',
+      '#scheduler-interval',
+      '#scheduler-runat',
+      '#scheduler-max-runs',
+      '#scheduler-profile',
+      '#scheduler-keyword',
+      '#scheduler-max-notes',
+      '#scheduler-env',
+      '#scheduler-comments',
+      '#scheduler-likes',
+      '#scheduler-headless',
+      '#scheduler-dryrun',
+      '#scheduler-like-keywords',
+      '#scheduler-save-btn',
+      '#scheduler-run-now-btn',
+      '#scheduler-reset-btn',
+    ];
+    for (const selector of schedulerSelectors) {
+      await runSchedulerProbe(selector);
+    }
+    await ensureSchedulerInteractive('before-select');
+    await selectInScheduler('#scheduler-type', 'immediate');
     await wait('#scheduler-periodic-type-wrap', 8000, 'hidden');
     await wait('#scheduler-runat-wrap', 8000, 'hidden');
     await wait('#scheduler-interval-wrap', 8000, 'hidden');
-    await select('#scheduler-type', 'periodic');
+    await selectInScheduler('#scheduler-type', 'periodic');
     await wait('#scheduler-periodic-type-wrap', 8000, 'visible');
     await wait('#scheduler-interval-wrap', 8000, 'visible');
     await wait('#scheduler-runat-wrap', 8000, 'hidden');
-    await select('#scheduler-periodic-type', 'daily');
+    await selectInScheduler('#scheduler-periodic-type', 'daily');
     await wait('#scheduler-runat-wrap', 8000, 'visible');
     await wait('#scheduler-interval-wrap', 8000, 'hidden');
-    await select('#scheduler-periodic-type', 'weekly');
+    await selectInScheduler('#scheduler-periodic-type', 'weekly');
     await wait('#scheduler-runat-wrap', 8000, 'visible');
     await wait('#scheduler-interval-wrap', 8000, 'hidden');
-    await select('#scheduler-periodic-type', 'interval');
+    await selectInScheduler('#scheduler-periodic-type', 'interval');
     await wait('#scheduler-runat-wrap', 8000, 'hidden');
     await wait('#scheduler-interval-wrap', 8000, 'visible');
-    await select('#scheduler-type', 'scheduled');
+    await selectInScheduler('#scheduler-type', 'scheduled');
     await wait('#scheduler-periodic-type-wrap', 8000, 'hidden');
     await wait('#scheduler-runat-wrap', 8000, 'visible');
     await wait('#scheduler-interval-wrap', 8000, 'hidden');
     await input('#scheduler-name', taskName);
-    await select('#scheduler-type', 'periodic');
-    await select('#scheduler-periodic-type', 'interval');
+    await selectInScheduler('#scheduler-type', 'periodic');
+    await selectInScheduler('#scheduler-periodic-type', 'interval');
     await input('#scheduler-interval', '20');
     await input('#scheduler-profile', '');
     await input('#scheduler-keyword', keywordSeed);
     await input('#scheduler-max-notes', '20');
-    await select('#scheduler-env', 'debug');
+    await selectInScheduler('#scheduler-env', 'debug');
     await click('#scheduler-comments');
     await click('#scheduler-comments');
     await click('#scheduler-likes');
@@ -677,7 +713,7 @@ async function runFullCover(endpoint) {
     await input('#scheduler-like-keywords', '真牛逼,购买链接');
     await click('#scheduler-save-btn');
     await waitForElement('#scheduler-list', 40, 250);
-    await runProbe('scheduler', '#scheduler-list');
+    await runSchedulerProbe('#scheduler-list');
     // Record whether the newly saved task name is visible, but don't fail hard here.
     // The scheduler list can transiently refresh and reorder under active datasets.
     const taskNameProbe = await probeRaw('#scheduler-list', { text: taskName });
@@ -685,10 +721,10 @@ async function runFullCover(endpoint) {
       payload: { selector: '#scheduler-list', text: taskName },
       result: taskNameProbe,
     });
-    await runProbe('scheduler', '#scheduler-list button', { text: '编辑' });
-    await runProbe('scheduler', '#scheduler-list button', { text: '执行' });
-    await runProbe('scheduler', '#scheduler-list button', { text: '导出' });
-    await runProbe('scheduler', '#scheduler-list button', { text: '删除' });
+    await runSchedulerProbe('#scheduler-list button', { text: '编辑' });
+    await runSchedulerProbe('#scheduler-list button', { text: '执行' });
+    await runSchedulerProbe('#scheduler-list button', { text: '导出' });
+    await runSchedulerProbe('#scheduler-list button', { text: '删除' });
     await clickText('编辑', '#scheduler-list button', true);
     await click('#scheduler-refresh-btn');
     await input('#scheduler-daemon-interval', '7');

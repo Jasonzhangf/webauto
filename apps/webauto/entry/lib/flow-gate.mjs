@@ -58,12 +58,12 @@ const DEFAULT_PLATFORM_GATES = Object.freeze({
       settleMaxMs: 2600,
     },
     openDetail: {
-      preClickMinMs: 220,
-      preClickMaxMs: 700,
-      pollDelayMinMs: 130,
-      pollDelayMaxMs: 320,
-      postOpenMinMs: 420,
-      postOpenMaxMs: 1100,
+      preClickMinMs: 700,
+      preClickMaxMs: 2200,
+      pollDelayMinMs: 260,
+      pollDelayMaxMs: 700,
+      postOpenMinMs: 5000,
+      postOpenMaxMs: 10000,
     },
     commentsHarvest: {
       scrollStepMin: 280,
