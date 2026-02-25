@@ -142,6 +142,15 @@ function clipText(value: unknown, maxLen = 220): string {
 }
 
 function summarizeAction(input: Partial<UiCliAction> | null | undefined) {
+  const rawClient = (input as any)?._client;
+  const client = rawClient && typeof rawClient === 'object'
+    ? {
+        client: clipText((rawClient as any).client ?? '', 80) || null,
+        cmd: clipText((rawClient as any).cmd ?? '', 80) || null,
+        pid: Number.isFinite(Number((rawClient as any).pid)) ? Math.floor(Number((rawClient as any).pid)) : null,
+        ppid: Number.isFinite(Number((rawClient as any).ppid)) ? Math.floor(Number((rawClient as any).ppid)) : null,
+      }
+    : null;
   return {
     action: String(input?.action || '').trim() || null,
     selector: String(input?.selector || '').trim() || null,
@@ -156,6 +165,7 @@ function summarizeAction(input: Partial<UiCliAction> | null | undefined) {
     nth: Number.isFinite(Number(input?.nth)) ? Math.floor(Number(input?.nth)) : null,
     exact: input?.exact === true ? true : null,
     detailed: input?.detailed === true ? true : null,
+    client,
   };
 }
 
@@ -574,6 +584,9 @@ export class UiCliBridge {
         actionId,
         method,
         path: url.pathname,
+        remoteAddress: req.socket?.remoteAddress || null,
+        remotePort: Number.isFinite(Number(req.socket?.remotePort)) ? Number(req.socket?.remotePort) : null,
+        userAgent: clipText(req.headers?.['user-agent'] || '', 160) || null,
         payload: summarizeAction(body || {}),
       });
       const result = await this.handleAction(body || {});

@@ -3,7 +3,7 @@ import minimist from 'minimist';
 import { spawn } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -110,15 +110,38 @@ function parseIntSafe(input, fallback) {
   return Number.isFinite(n) && n > 0 ? Math.floor(n) : fallback;
 }
 
+function buildUiCliClientMeta(cmd = '') {
+  return {
+    client: 'webauto-ui-cli',
+    cmd: String(cmd || '').trim() || null,
+    pid: process.pid,
+    ppid: process.ppid,
+  };
+}
+
 function readControlFile() {
   try {
     if (!existsSync(CONTROL_FILE)) return null;
     const raw = JSON.parse(readFileSync(CONTROL_FILE, 'utf8'));
     const host = String(raw?.host || '').trim() || DEFAULT_HOST;
     const port = parseIntSafe(raw?.port, DEFAULT_PORT);
-    return { host, port };
+    const pid = parseIntSafe(raw?.pid, 0);
+    return {
+      host,
+      port,
+      pid: pid > 0 ? pid : null,
+      startedAt: String(raw?.startedAt || '').trim() || null,
+    };
   } catch {
     return null;
+  }
+}
+
+function removeControlFileIfPresent() {
+  try {
+    rmSync(CONTROL_FILE, { force: true });
+  } catch {
+    // ignore
   }
 }
 
@@ -168,6 +191,18 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function isProcessAlive(pid) {
+  const targetPid = parseIntSafe(pid, 0);
+  if (targetPid <= 0) return false;
+  try {
+    process.kill(targetPid, 0);
+    return true;
+  } catch (err) {
+    if (err?.code === 'ESRCH') return false;
+    return true;
+  }
+}
+
 async function terminatePid(pid) {
   const targetPid = parseIntSafe(pid, 0);
   if (targetPid <= 0) return { ok: false, error: 'invalid_pid' };
@@ -182,6 +217,9 @@ async function terminatePid(pid) {
       child.on('error', (err) => resolve({ ok: false, error: err?.message || String(err) }));
       child.on('close', (code) => {
         if (code === 0) return resolve({ ok: true, pid: targetPid });
+        if (!isProcessAlive(targetPid)) {
+          return resolve({ ok: true, pid: targetPid, alreadyStopped: true });
+        }
         return resolve({
           ok: false,
           pid: targetPid,
@@ -194,6 +232,7 @@ async function terminatePid(pid) {
     process.kill(targetPid, 'SIGTERM');
     return { ok: true, pid: targetPid };
   } catch (err) {
+    if (err?.code === 'ESRCH') return { ok: true, pid: targetPid, alreadyStopped: true };
     return { ok: false, pid: targetPid, error: err?.message || String(err) };
   }
 }
@@ -212,9 +251,60 @@ async function waitForHealth(endpoint, timeoutMs = 30_000) {
   return null;
 }
 
+async function waitForHealthDown(endpoint, timeoutMs = 15_000) {
+  const started = Date.now();
+  while (Date.now() - started <= timeoutMs) {
+    try {
+      const ret = await requestJson(endpoint, '/health', { timeoutMs: 1500, retries: 0 });
+      if (!ret.ok || !ret.json?.ok) return true;
+    } catch {
+      return true;
+    }
+    await sleep(300);
+  }
+  return false;
+}
+
+async function probeActionChannel(endpoint, timeoutMs = 6000) {
+  try {
+    const ret = await requestJson(endpoint, '/action', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'probe', selector: 'body', _client: buildUiCliClientMeta('probe') }),
+      timeoutMs,
+      retries: 0,
+    });
+    return ret.ok && Boolean(ret.json?.ok);
+  } catch {
+    return false;
+  }
+}
+
+function resolveKnownPid(statusRet = null) {
+  const fromHealth = parseIntSafe(statusRet?.json?.pid, 0);
+  if (fromHealth > 0) return fromHealth;
+  const fromFile = parseIntSafe(readControlFile()?.pid, 0);
+  if (fromFile > 0) return fromFile;
+  return 0;
+}
+
 async function startConsoleIfNeeded(endpoint) {
   const health = await waitForHealth(endpoint, 3000);
-  if (health) return health;
+  if (health) {
+    const channelReady = await probeActionChannel(endpoint);
+    if (channelReady) return health;
+    const pid = parseIntSafe(health?.pid, 0) || parseIntSafe(readControlFile()?.pid, 0);
+    if (pid > 0) await terminatePid(pid);
+    removeControlFileIfPresent();
+    await sleep(500);
+  } else {
+    const stalePid = parseIntSafe(readControlFile()?.pid, 0);
+    if (stalePid > 0) {
+      await terminatePid(stalePid);
+      removeControlFileIfPresent();
+      await sleep(500);
+    }
+  }
 
   const uiConsoleScript = path.join(APP_ROOT, 'entry', 'ui-console.mjs');
   const runUiConsole = async (extraArgs = []) => {
@@ -238,6 +328,13 @@ async function startConsoleIfNeeded(endpoint) {
 
   const ready = await waitForHealth(endpoint, 45_000);
   if (!ready) throw new Error('ui cli bridge is not ready after start');
+  const readyChannel = await probeActionChannel(endpoint);
+  if (!readyChannel) {
+    const pid = parseIntSafe(ready?.pid, 0);
+    if (pid > 0) await terminatePid(pid);
+    removeControlFileIfPresent();
+    throw new Error('ui cli bridge action channel is not ready after start');
+  }
   return ready;
 }
 
@@ -259,10 +356,15 @@ async function sendAction(endpoint, payload) {
     : DEFAULT_ACTION_HTTP_TIMEOUT_MS;
   const timeoutMs = Math.max(DEFAULT_HTTP_TIMEOUT_MS, actionBudgetMs);
   const retries = payload?.action === 'wait' ? 0 : DEFAULT_HTTP_RETRIES;
+  const baseCmd = String(args._[0] || '').trim();
+  const bodyPayload = {
+    ...(payload || {}),
+    _client: buildUiCliClientMeta(baseCmd || payload?.action || ''),
+  };
   return requestJson(endpoint, '/action', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
+    body: JSON.stringify(bodyPayload),
     timeoutMs,
     retries,
   });
@@ -728,34 +830,61 @@ async function main() {
     let statusRet = null;
     try {
       statusRet = await requestJson(endpoint, '/health', {
-        timeoutMs: parseIntSafe(args.timeout, DEFAULT_HTTP_TIMEOUT_MS),
-        retries: DEFAULT_HTTP_RETRIES,
+        timeoutMs: Math.min(8000, parseIntSafe(args.timeout, DEFAULT_HTTP_TIMEOUT_MS)),
+        retries: 0,
       });
     } catch {
       statusRet = null;
     }
-    const knownPid = Number(statusRet?.json?.pid || 0);
-    const ret = await sendAction(endpoint, { action: 'close_window' }).catch((error) => ({
+    const knownPid = resolveKnownPid(statusRet);
+    const ret = await requestJson(endpoint, '/action', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'close_window', _client: buildUiCliClientMeta('stop') }),
+      timeoutMs: Math.min(8000, parseIntSafe(args.timeout, DEFAULT_ACTION_HTTP_TIMEOUT_MS)),
+      retries: 0,
+    }).catch((error) => ({
       ok: false,
       status: 0,
       json: { ok: false, error: error?.message || String(error) },
     }));
-    if (ret.ok) {
+    if (ret.ok && ret.json?.ok) {
+      const down = await waitForHealthDown(endpoint, 12_000);
+      if (down) {
+        removeControlFileIfPresent();
+        printOutput(ret.json);
+        return;
+      }
+      if (knownPid > 0) {
+        const killed = await terminatePid(knownPid);
+        if (!killed.ok) {
+          throw new Error(`close_window pending, force-stop failed: ${killed.error || 'unknown_error'}`);
+        }
+        removeControlFileIfPresent();
+        printOutput({
+          ok: true,
+          forced: true,
+          pid: knownPid,
+          reason: 'close_window_timeout',
+        });
+        return;
+      }
       printOutput(ret.json);
       return;
     }
 
     const actionError = String(ret?.json?.error || `http_${ret?.status || 'request'}`).trim() || 'unknown_error';
-    if ((actionError === 'window_not_ready' || actionError.includes('window_not_ready')) && knownPid > 0) {
+    if (knownPid > 0) {
       const killed = await terminatePid(knownPid);
       if (!killed.ok) {
-        throw new Error(`window_not_ready, force-stop failed: ${killed.error || 'unknown_error'}`);
+        throw new Error(`force-stop failed: ${killed.error || 'unknown_error'}`);
       }
+      removeControlFileIfPresent();
       printOutput({
         ok: true,
         forced: true,
         pid: knownPid,
-        reason: 'window_not_ready',
+        reason: actionError || 'request_failed',
       });
       return;
     }
@@ -766,22 +895,41 @@ async function main() {
     let statusRet = null;
     try {
       statusRet = await requestJson(endpoint, '/health', {
-        timeoutMs: parseIntSafe(args.timeout, DEFAULT_HTTP_TIMEOUT_MS),
-        retries: DEFAULT_HTTP_RETRIES,
+        timeoutMs: Math.min(8000, parseIntSafe(args.timeout, DEFAULT_HTTP_TIMEOUT_MS)),
+        retries: 0,
       });
     } catch {
       statusRet = null;
     }
-    const knownPid = Number(statusRet?.json?.pid || 0);
+    const knownPid = resolveKnownPid(statusRet);
     const restartReason = String(args.reason || '').trim() || 'ui_cli';
-    const ret = await sendAction(endpoint, { action: 'restart', reason: restartReason }).catch((error) => ({
+    const ret = await requestJson(endpoint, '/action', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'restart', reason: restartReason, _client: buildUiCliClientMeta('restart') }),
+      timeoutMs: Math.min(8000, parseIntSafe(args.timeout, DEFAULT_ACTION_HTTP_TIMEOUT_MS)),
+      retries: 0,
+    }).catch((error) => ({
       ok: false,
       status: 0,
       json: { ok: false, error: error?.message || String(error) },
     }));
     if (!ret.ok || !ret.json?.ok) {
       const actionError = String(ret?.json?.error || `http_${ret?.status || 'request'}`).trim() || 'unknown_error';
-      throw new Error(actionError);
+      if (knownPid > 0) {
+        await terminatePid(knownPid);
+        removeControlFileIfPresent();
+      }
+      const recovered = await startConsoleIfNeeded(endpoint);
+      printOutput({
+        ok: true,
+        restarting: true,
+        reason: restartReason,
+        recoveredByForceRestart: true,
+        previousPid: knownPid > 0 ? knownPid : null,
+        status: recovered,
+      });
+      return;
     }
 
     const transitionBudgetMs = Math.min(15_000, Math.max(2_000, parseIntSafe(args.timeout, 60_000)));
@@ -799,10 +947,13 @@ async function main() {
     }
 
     const restartWaitMs = parseIntSafe(args.timeout, 90_000);
-    const status = await waitForHealth(endpoint, restartWaitMs);
-    if (!status) throw new Error('ui cli bridge not healthy after restart');
-    if (knownPid > 0 && Number(status?.pid || 0) === knownPid) {
-      throw new Error('restart pid unchanged');
+    let status = await waitForHealth(endpoint, restartWaitMs);
+    if (!status || (knownPid > 0 && Number(status?.pid || 0) === knownPid)) {
+      if (knownPid > 0) {
+        await terminatePid(knownPid);
+        removeControlFileIfPresent();
+      }
+      status = await startConsoleIfNeeded(endpoint);
     }
     printOutput({
       ok: true,
