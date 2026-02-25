@@ -89,7 +89,7 @@ it('rejects temporary profile ids even when directory exists', () => {
   assert.throws(() => assertProfileUsable('profile-0'), /forbidden temporary profileId/i);
 });
 
-it('rejects profile that is not fully saved with xhs+weibo account ids', () => {
+it('accepts profile with one valid platform binding', () => {
   const profilesRoot = withTempProfileRoot();
   fs.mkdirSync(path.join(profilesRoot, 'xhs-only-1'), { recursive: true });
   upsertProfileAccountState({
@@ -98,8 +98,5 @@ it('rejects profile that is not fully saved with xhs+weibo account ids', () => {
     accountId: 'xhs-only',
   });
 
-  assert.throws(
-    () => assertProfileUsable('xhs-only-1'),
-    /profile not saved/i,
-  );
+  assert.equal(assertProfileUsable('xhs-only-1'), 'xhs-only-1');
 });

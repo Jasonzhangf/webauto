@@ -10,7 +10,9 @@ import {
   isProfileSaved,
   listAccountProfiles,
   listSavedProfiles,
+  markProfileInvalid,
   markProfilePending,
+  updateAccount,
   upsertProfileAccountState,
 } from '../../../apps/webauto/entry/lib/account-store.mjs';
 
@@ -70,7 +72,7 @@ it('addAccount blocks auto profile creation and requires existing profile dir', 
   assert.equal(result.account.profileId, 'existing-1');
 });
 
-it('profile becomes saved only after xiaohongshu + weibo account ids are both bound', () => {
+it('profile becomes saved once any platform account id is validly bound', () => {
   const root = useTempRoot();
   fs.mkdirSync(path.join(root, 'profiles', 'dual-1'), { recursive: true });
 
@@ -79,7 +81,7 @@ it('profile becomes saved only after xiaohongshu + weibo account ids are both bo
     platform: 'xiaohongshu',
     accountId: 'xhs-dual-1',
   });
-  assert.equal(isProfileSaved('dual-1'), false);
+  assert.equal(isProfileSaved('dual-1'), true);
 
   upsertProfileAccountState({
     profileId: 'dual-1',
@@ -105,10 +107,34 @@ it('pending state without accountId is not persisted', () => {
   assert.equal(isProfileSaved('pending-1'), false);
 });
 
-it('cleanupIncompleteProfiles removes partially bound profiles and keeps fully bound profiles', () => {
+it('cleanup purges profile when accountId exists but platform state is invalid', async () => {
+  const root = useTempRoot();
+  fs.mkdirSync(path.join(root, 'profiles', 'stale-id-1'), { recursive: true });
+
+  const state = upsertProfileAccountState({
+    profileId: 'stale-id-1',
+    platform: 'xiaohongshu',
+    accountId: 'xhs-stale-id-1',
+  });
+  assert.equal(isProfileSaved('stale-id-1'), true);
+
+  await updateAccount(state.accountRecordId, {
+    status: 'invalid',
+    valid: false,
+    reason: 'login_guard',
+  });
+
+  const cleanup = cleanupIncompleteProfiles();
+  assert.deepEqual(cleanup.removedProfiles, ['stale-id-1']);
+  assert.equal(isProfileSaved('stale-id-1'), false);
+  assert.equal(fs.existsSync(path.join(root, 'profiles', 'stale-id-1')), false);
+});
+
+it('cleanupIncompleteProfiles keeps profiles with any valid binding and purges profiles with no valid binding', () => {
   const root = useTempRoot();
   fs.mkdirSync(path.join(root, 'profiles', 'partial-1'), { recursive: true });
   fs.mkdirSync(path.join(root, 'profiles', 'full-1'), { recursive: true });
+  fs.mkdirSync(path.join(root, 'profiles', 'invalid-1'), { recursive: true });
 
   upsertProfileAccountState({
     profileId: 'partial-1',
@@ -127,9 +153,17 @@ it('cleanupIncompleteProfiles removes partially bound profiles and keeps fully b
     accountId: 'wb-full-1',
   });
 
+  upsertProfileAccountState({
+    profileId: 'invalid-1',
+    platform: 'xiaohongshu',
+    accountId: 'xhs-invalid-1',
+  });
+  markProfileInvalid('invalid-1', 'login_guard', 'xiaohongshu');
+
   const cleanup = cleanupIncompleteProfiles();
-  assert.deepEqual(cleanup.removedProfiles, ['partial-1']);
-  assert.equal(fs.existsSync(path.join(root, 'profiles', 'partial-1')), false);
+  assert.deepEqual(cleanup.removedProfiles, ['invalid-1']);
+  assert.equal(fs.existsSync(path.join(root, 'profiles', 'partial-1')), true);
+  assert.equal(fs.existsSync(path.join(root, 'profiles', 'invalid-1')), false);
   assert.equal(fs.existsSync(path.join(root, 'profiles', 'full-1')), true);
-  assert.deepEqual(listSavedProfiles(), ['full-1']);
+  assert.deepEqual(listSavedProfiles(), ['full-1', 'partial-1']);
 });

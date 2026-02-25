@@ -32,7 +32,7 @@ export function assertProfileUsable(profileId) {
     throw new Error(`profile not found: ${id}. create/login account profile first`);
   }
   if (!isProfileSaved(id)) {
-    throw new Error(`profile not saved: ${id}. require both xiaohongshu + weibo accountId bindings`);
+    throw new Error(`profile not saved: ${id}. require at least one valid social account binding`);
   }
   return id;
 }

@@ -16,6 +16,7 @@ const STATUS_VALID = 'valid';
 const STATUS_INVALID = 'invalid';
 const STATUS_PENDING = 'pending';
 export const REQUIRED_ACCOUNT_PLATFORMS = Object.freeze(['xiaohongshu', 'weibo']);
+const MIN_REQUIRED_ACCOUNT_BINDINGS = 1;
 
 function nowIso() {
   return new Date().toISOString();
@@ -420,7 +421,7 @@ function resolveProfileCoverage(rows) {
 }
 
 function isProfileFullyBound(platforms) {
-  return REQUIRED_ACCOUNT_PLATFORMS.every((platform) => platforms.has(platform));
+  return (platforms instanceof Set ? platforms.size : 0) >= MIN_REQUIRED_ACCOUNT_BINDINGS;
 }
 
 export function listAccountProfiles(options = {}) {
@@ -882,24 +883,28 @@ export function cleanupIncompleteProfiles(options = {}) {
   const removedProfiles = [];
   const removedRecordIds = [];
   const purgeRecordIds = new Set();
-  for (const entry of byProfile.values()) {
+  const profileIds = new Set([...byProfile.keys(), ...listProfiles().profiles]);
+  for (const profileId of profileIds) {
+    const entry = byProfile.get(profileId) || {
+      profileId,
+      accountRecordIds: [],
+      platforms: new Set(),
+    };
     if (isProfileFullyBound(entry.platforms)) continue;
     removedProfiles.push(entry.profileId);
     for (const id of entry.accountRecordIds) purgeRecordIds.add(id);
   }
-  if (purgeRecordIds.size === 0) {
-    return { removedProfiles, removedRecords: removedRecordIds };
-  }
-
-  index.accounts = index.accounts.filter((row) => {
-    const id = String(row?.id || '').trim();
-    if (!id || !purgeRecordIds.has(id)) return true;
-    removedRecordIds.push(id);
-    return false;
-  });
-  saveIndex(index);
-  for (const id of removedRecordIds) {
-    deleteAccountMeta(id);
+  if (purgeRecordIds.size > 0) {
+    index.accounts = index.accounts.filter((row) => {
+      const id = String(row?.id || '').trim();
+      if (!id || !purgeRecordIds.has(id)) return true;
+      removedRecordIds.push(id);
+      return false;
+    });
+    saveIndex(index);
+    for (const id of removedRecordIds) {
+      deleteAccountMeta(id);
+    }
   }
 
   if (deleteProfileDirs) {
