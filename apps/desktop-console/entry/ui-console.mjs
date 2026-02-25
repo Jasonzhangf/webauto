@@ -128,6 +128,26 @@ async function waitForCoreServicesHealthy(timeoutMs = 90000) {
   return false;
 }
 
+async function readWindowsSessionId(pid) {
+  const targetPid = Number(pid || 0);
+  if (!Number.isFinite(targetPid) || targetPid <= 0 || process.platform !== 'win32') return null;
+  return new Promise((resolve) => {
+    const child = spawn('wmic', ['process', 'where', `processid=${targetPid}`, 'get', 'SessionId', '/value'], {
+      windowsHide: true,
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
+    let stdout = '';
+    child.stdout.on('data', (chunk) => { stdout += String(chunk || ''); });
+    child.on('error', () => resolve(null));
+    child.on('close', () => {
+      const match = stdout.match(/SessionId\s*=\s*(\d+)/i);
+      if (!match) return resolve(null);
+      const sessionId = Number(match[1]);
+      resolve(Number.isFinite(sessionId) ? sessionId : null);
+    });
+  });
+}
+
 function terminateProcessTree(pid) {
   const target = Number(pid || 0);
   if (!Number.isFinite(target) || target <= 0) return;
@@ -221,7 +241,11 @@ async function startConsole(noDaemon = false) {
       terminateProcessTree(pid);
       throw new Error('desktop console started but core services did not become healthy');
     }
+    const sessionId = await readWindowsSessionId(pid);
     console.log(`[ui-console] Started (PID: ${pid || 'unknown'})`);
+    if (sessionId === 0) {
+      console.warn('[ui-console] started in Session 0 (service/non-interactive). UI bridge is available, but desktop window will not be visible.');
+    }
     return;
   }
 
