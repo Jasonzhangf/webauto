@@ -777,7 +777,7 @@ export function renderTasksPanel(root: HTMLElement, ctx: any) {
   }
 
   async function runSavedTask(taskId: string, data: RunMeta) {
-    const out = await invokeSchedule({ action: 'run', taskId, timeoutMs: 0 });
+    const out = await invokeSchedule({ action: 'run', taskId, timeoutMs: 0, background: true });
     const runId = String(
       out?.result?.runResult?.lastRunId
       || out?.result?.runResult?.runId

@@ -276,7 +276,7 @@ test('save and run in immediate mode still persists task before run', async () =
   assert.equal(scheduleCommands.includes('run'), true);
   assert.equal(bundle.calls.taskRunEphemeral.length, 0);
   assert.equal(bundle.calls.setActiveTab.includes('dashboard'), true);
-  assert.equal(alerts.length, 0);
+  assert.equal(alerts.length, 0, JSON.stringify(alerts));
 });
 
 test('save with same params does not create duplicate task', async () => {

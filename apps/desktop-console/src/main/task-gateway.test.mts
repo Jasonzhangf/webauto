@@ -68,6 +68,22 @@ test('scheduleInvoke save builds argv-json and command-type', async () => {
   assert.equal(args.includes('--argv-json'), true);
 });
 
+test('scheduleInvoke run supports background spawn mode', async () => {
+  const { calls, gateway } = createGateway();
+  const result = await scheduleInvoke(gateway, {
+    action: 'run',
+    taskId: 'sched-0009',
+    background: true,
+  });
+  assert.equal(result.ok, true);
+  assert.equal(calls.spawn.length, 1);
+  assert.equal(calls.runJson.length, 0);
+  const args = calls.spawn[0]?.args || [];
+  assert.equal(args.some((item: string) => item.endsWith('/schedule.mjs')), true);
+  assert.equal(args.includes('run'), true);
+  assert.equal(args.includes('sched-0009'), true);
+});
+
 test('runEphemeralTask spawns xhs unified command', async () => {
   const { calls, gateway } = createGateway();
   const result = await runEphemeralTask(gateway, {

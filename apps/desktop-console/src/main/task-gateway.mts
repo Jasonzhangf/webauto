@@ -19,6 +19,7 @@ export type ScheduleInvokeInput = {
   taskId?: string;
   payload?: ScheduleTaskPayload;
   timeoutMs?: number;
+  background?: boolean;
   limit?: number;
   mode?: 'merge' | 'replace';
   payloadJson?: string;
@@ -231,6 +232,25 @@ export async function scheduleInvoke(options: GatewayOptions, input: ScheduleInv
     if (action === 'run') {
       const taskId = asText(input?.taskId);
       if (!taskId) return { ok: false, error: 'missing taskId' };
+      if (input?.background === true) {
+        const script = path.join(options.repoRoot, 'apps', 'webauto', 'entry', 'schedule.mjs');
+        const ret = await options.spawnCommand({
+          title: `schedule run ${taskId}`,
+          cwd: options.repoRoot,
+          args: [script, 'run', taskId, '--json'],
+          groupKey: `schedule-run:${taskId}`,
+        });
+        const runId = asText(ret?.runId);
+        return {
+          ok: true,
+          json: {
+            ok: true,
+            background: true,
+            runId: runId || null,
+            runResult: runId ? { runId } : {},
+          },
+        };
+      }
       return runScheduleJson(options, ['run', taskId], timeoutMs);
     }
     if (action === 'delete') {
