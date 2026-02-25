@@ -34,6 +34,12 @@ function readNumber(value: string | undefined): number | null {
   return parsed;
 }
 
+function readPositiveNumber(value: any): number | null {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) return null;
+  return parsed;
+}
+
 function getDisplayMetrics() {
   const envWidth = readNumber(process.env.WEBAUTO_SCREEN_WIDTH);
   const envHeight = readNumber(process.env.WEBAUTO_SCREEN_HEIGHT);
@@ -139,6 +145,29 @@ function getDisplayMetrics() {
   } catch {
     return null;
   }
+}
+
+function resolveStartViewport(args: any): { width: number; height: number } | null {
+  const explicitWidth = readPositiveNumber(args?.width ?? args?.viewportWidth ?? args?.viewport?.width);
+  const explicitHeight = readPositiveNumber(args?.height ?? args?.viewportHeight ?? args?.viewport?.height);
+  if (explicitWidth && explicitHeight) {
+    return {
+      width: Math.floor(explicitWidth),
+      height: Math.floor(explicitHeight),
+    };
+  }
+  if (Boolean(args?.headless)) return null;
+  const display = getDisplayMetrics();
+  if (!display) return null;
+  const reserveRaw = Number(process.env.WEBAUTO_WINDOW_VERTICAL_RESERVE ?? 0);
+  const reserve = Number.isFinite(reserveRaw) ? Math.max(0, Math.min(240, Math.floor(reserveRaw))) : 0;
+  const baseWidth = readPositiveNumber((display as any).workWidth) || readPositiveNumber(display.width);
+  const baseHeight = readPositiveNumber((display as any).workHeight) || readPositiveNumber(display.height);
+  if (!baseWidth || !baseHeight) return null;
+  return {
+    width: Math.max(960, Math.floor(baseWidth)),
+    height: Math.max(700, Math.floor(baseHeight - reserve)),
+  };
 }
 
 export async function startBrowserService(opts: BrowserServiceOptions = {}) {
@@ -298,6 +327,7 @@ async function handleCommand(
 
   switch (action) {
     case 'start': {
+      const startViewport = resolveStartViewport(args);
       const opts: CreateSessionPayload = {
         profileId: args.profileId || 'default',
         sessionName: args.profileId || 'default',
@@ -305,6 +335,7 @@ async function handleCommand(
         initialUrl: args.url,
         engine: args.engine || 'camoufox',
         fingerprintPlatform: args.fingerprintPlatform || null,
+        ...(startViewport ? { viewport: startViewport } : {}),
         ...(args.ownerPid ? { ownerPid: args.ownerPid } : {}),
       };
       const res = await manager.createSession(opts);

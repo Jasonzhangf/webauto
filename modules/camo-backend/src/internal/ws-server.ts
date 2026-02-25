@@ -40,6 +40,19 @@ function appendLog(target: string, event: string, payload: Record<string, any> =
 const appendDomPickerLog = (event: string, payload: Record<string, any> = {}) => appendLog(domPickerLogPath, event, payload);
 const appendHighlightLog = (event: string, payload: Record<string, any> = {}) => appendLog(highlightLogPath, event, payload);
 
+function legacySelectorActionDisabled(source: string, action: 'click' | 'type') {
+  return {
+    success: false,
+    code: 'LEGACY_ACTION_DISABLED',
+    error: `[${source}] legacy selector action "${action}" is disabled; use mouse:* and keyboard:* protocol actions instead`,
+    data: {
+      source,
+      action,
+      replacements: ['mouse:move', 'mouse:click', 'mouse:wheel', 'keyboard:press', 'keyboard:type'],
+    },
+  };
+}
+
 export class BrowserWsServer {
   private wss?: WebSocketServer;
   private matcher = new ContainerMatcher();
@@ -687,10 +700,10 @@ export class BrowserWsServer {
     const op = parameters.operation_type;
     if (!op) throw new Error('operation_type required');
    if (op === 'click') {
-     return this.handleNodeExecute(sessionId, { command_type: 'node_execute', node_type: 'click', parameters: parameters.target || parameters });
+     return legacySelectorActionDisabled('user_action.operation', 'click');
    }
    if (op === 'type') {
-     return this.handleNodeExecute(sessionId, { command_type: 'node_execute', node_type: 'type', parameters: parameters.target || parameters });
+     return legacySelectorActionDisabled('user_action.operation', 'type');
    }
    if (op === 'scroll') {
      const session = this.options.sessionManager.getSession(sessionId);
@@ -1000,23 +1013,10 @@ export class BrowserWsServer {
         };
       }
       case 'click': {
-        const selector = parameters.selector;
-        if (!selector) throw new Error('Click node requires selector');
-        await session.click(selector);
-        return {
-          success: true,
-          data: { action: 'clicked', selector },
-        };
+        return legacySelectorActionDisabled('node_execute', 'click');
       }
       case 'type': {
-        const selector = parameters.selector;
-        if (!selector) throw new Error('Type node requires selector');
-        const text = parameters.text ?? parameters.value ?? '';
-        await session.fill(selector, String(text));
-        return {
-          success: true,
-          data: { action: 'typed', selector, text },
-        };
+        return legacySelectorActionDisabled('node_execute', 'type');
       }
       case 'screenshot': {
         const filename = parameters.filename || `screenshot_${Date.now()}.png`;

@@ -42,6 +42,36 @@ interface RecordingState {
   lastError: string | null;
 }
 
+type NavigationWaitUntil = 'load' | 'domcontentloaded' | 'networkidle' | 'commit';
+
+function resolveInputActionTimeoutMs(): number {
+  const raw = Number(process.env.CAMO_INPUT_ACTION_TIMEOUT_MS ?? process.env.CAMO_API_TIMEOUT_MS ?? 30000);
+  return Math.max(1000, Number.isFinite(raw) ? raw : 30000);
+}
+
+function resolveNavigationWaitUntil(): NavigationWaitUntil {
+  const raw = String(process.env.CAMO_NAV_WAIT_UNTIL ?? 'commit').trim().toLowerCase();
+  if (raw === 'load') return 'load';
+  if (raw === 'domcontentloaded' || raw === 'dom') return 'domcontentloaded';
+  if (raw === 'networkidle') return 'networkidle';
+  return 'commit';
+}
+
+function resolveInputActionMaxAttempts(): number {
+  const raw = Number(process.env.CAMO_INPUT_ACTION_MAX_ATTEMPTS ?? 2);
+  return Math.max(1, Math.min(3, Number.isFinite(raw) ? Math.floor(raw) : 2));
+}
+
+function resolveInputRecoveryDelayMs(): number {
+  const raw = Number(process.env.CAMO_INPUT_RECOVERY_DELAY_MS ?? 120);
+  return Math.max(0, Number.isFinite(raw) ? Math.floor(raw) : 120);
+}
+
+function resolveInputRecoveryBringToFrontTimeoutMs(): number {
+  const raw = Number(process.env.CAMO_INPUT_RECOVERY_BRING_TO_FRONT_TIMEOUT_MS ?? 800);
+  return Math.max(100, Number.isFinite(raw) ? Math.floor(raw) : 800);
+}
+
 export class BrowserSession {
   private browser?: Browser;
   private context?: BrowserContext;
@@ -57,6 +87,7 @@ export class BrowserSession {
   private recorderBridgePages = new WeakSet<Page>();
   private lastViewport: { width: number; height: number } | null = null;
   private followWindowViewport = false;
+  private inputActionTail: Promise<void> = Promise.resolve();
   private fingerprint: any = null;
   private recordingStream: fs.WriteStream | null = null;
   private recording: RecordingState = {
@@ -130,7 +161,16 @@ export class BrowserSession {
       userAgent: fingerprint.userAgent?.substring(0, 50) + '...',
     });
 
-    const viewport = this.options.viewport || { width: 1440, height: 1100 };
+    const fallbackViewport = { width: 1440, height: 1100 };
+    const explicitViewport = this.options.viewport
+      && Number(this.options.viewport.width) > 0
+      && Number(this.options.viewport.height) > 0
+      ? {
+        width: Math.floor(Number(this.options.viewport.width)),
+        height: Math.floor(Number(this.options.viewport.height)),
+      }
+      : null;
+    const viewport = explicitViewport || fingerprint?.viewport || fallbackViewport;
     const headless = !!this.options.headless;
     this.followWindowViewport = !headless;
     const deviceScaleFactor = this.resolveDeviceScaleFactor();
@@ -140,7 +180,7 @@ export class BrowserSession {
       engine,
       headless,
       profileDir: this.profileDir,
-      viewport: fingerprint?.viewport || viewport,
+      viewport,
       userAgent: fingerprint?.userAgent,
       locale: 'zh-CN',
       timezoneId: fingerprint?.timezoneId || 'Asia/Shanghai',
@@ -955,9 +995,10 @@ export class BrowserSession {
 
   async goBack(): Promise<{ ok: boolean; url: string }> {
     const page = await this.ensurePrimaryPage();
+    const waitUntil = resolveNavigationWaitUntil();
     try {
       const res = await page
-        .goBack({ waitUntil: 'domcontentloaded' })
+        .goBack({ waitUntil })
         .catch((): null => null);
       await ensurePageRuntime(page, true).catch(() => {});
       this.lastKnownUrl = page.url();
@@ -1043,7 +1084,7 @@ export class BrowserSession {
       /* ignore */
     }
     if (url) {
-      await page.goto(url, { waitUntil: 'domcontentloaded' });
+      await page.goto(url, { waitUntil: resolveNavigationWaitUntil() });
       await ensurePageRuntime(page);
       this.lastKnownUrl = url;
     }
@@ -1191,7 +1232,7 @@ export class BrowserSession {
 
   async goto(url: string): Promise<void> {
     const page = await this.ensurePrimaryPage();
-    await page.goto(url, { waitUntil: 'domcontentloaded' });
+    await page.goto(url, { waitUntil: resolveNavigationWaitUntil() });
     await ensurePageRuntime(page);
     this.lastKnownUrl = url;
   }
@@ -1201,19 +1242,8 @@ export class BrowserSession {
     return page.screenshot({ fullPage });
   }
 
-  async click(selector: string): Promise<void> {
-    const page = await this.ensurePrimaryPage();
-    await page.click(selector, { timeout: 20000 });
-  }
-
-  async fill(selector: string, text: string): Promise<void> {
-    const page = await this.ensurePrimaryPage();
-    await page.fill(selector, text, { timeout: 20000 });
-  }
-
   private async ensureInputReady(page: Page): Promise<void> {
     if (this.options.headless) return;
-    if (os.platform() !== 'win32') return;
     let needsFocus = false;
     try {
       const state = await page.evaluate(() => ({
@@ -1235,30 +1265,112 @@ export class BrowserSession {
     }
   }
 
+  private async withInputActionTimeout<T>(label: string, run: () => Promise<T>): Promise<T> {
+    const timeoutMs = resolveInputActionTimeoutMs();
+    let timer: NodeJS.Timeout | null = null;
+    try {
+      return await Promise.race<T>([
+        run(),
+        new Promise<T>((_resolve, reject) => {
+          timer = setTimeout(() => {
+            reject(new Error(`${label} timed out after ${timeoutMs}ms`));
+          }, timeoutMs);
+        }),
+      ]);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+
+  private async recoverInputPipeline(page: Page): Promise<Page> {
+    const bringToFrontTimeoutMs = resolveInputRecoveryBringToFrontTimeoutMs();
+    let bringToFrontTimer: NodeJS.Timeout | null = null;
+    try {
+      await Promise.race<void>([
+        page.bringToFront(),
+        new Promise<void>((_resolve, reject) => {
+          bringToFrontTimer = setTimeout(() => {
+            reject(new Error(`input recovery bringToFront timed out after ${bringToFrontTimeoutMs}ms`));
+          }, bringToFrontTimeoutMs);
+        }),
+      ]);
+    } catch {
+      // Best-effort recovery only.
+    } finally {
+      if (bringToFrontTimer) clearTimeout(bringToFrontTimer);
+    }
+    const delayMs = resolveInputRecoveryDelayMs();
+    if (delayMs > 0) {
+      try {
+        await page.waitForTimeout(delayMs);
+      } catch {
+        // Best-effort recovery only.
+      }
+    }
+    return page;
+  }
+
+  private async runInputAction<T>(page: Page, label: string, run: (activePage: Page) => Promise<T>): Promise<T> {
+    const maxAttempts = resolveInputActionMaxAttempts();
+    let lastError: unknown = null;
+    let activePage = page;
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      try {
+        return await this.withInputActionTimeout(`${label} (attempt ${attempt}/${maxAttempts})`, () => run(activePage));
+      } catch (error) {
+        lastError = error;
+        if (attempt >= maxAttempts) break;
+        activePage = await this.recoverInputPipeline(activePage);
+      }
+    }
+    if (lastError instanceof Error) throw lastError;
+    throw new Error(`${label} failed`);
+  }
+
+  private async withInputActionLock<T>(run: () => Promise<T>): Promise<T> {
+    const previous = this.inputActionTail;
+    let release: (() => void) | null = null;
+    this.inputActionTail = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await previous.catch(() => {});
+    try {
+      return await run();
+    } finally {
+      if (release) release();
+    }
+  }
+
   /**
    * 基于屏幕坐标的系统级鼠标点击（Playwright 原生）
    * @param opts 屏幕坐标及点击选项
    */
   async mouseClick(opts: { x: number; y: number; button?: 'left' | 'right' | 'middle'; clicks?: number; delay?: number }): Promise<void> {
     const page = await this.ensurePrimaryPage();
-    await this.ensureInputReady(page);
-    const { x, y, button = 'left', clicks = 1, delay = 50 } = opts;
+    await this.withInputActionLock(async () => {
+      await this.runInputAction(page, 'input:ready', (activePage) => this.ensureInputReady(activePage));
+      const { x, y, button = 'left', clicks = 1, delay = 50 } = opts;
 
-    // 移动鼠标到目标位置（模拟轨迹）
-    await page.mouse.move(x, y, { steps: 3 });
-
-    // 执行点击（支持多次、间隔随机抖动）
-    for (let i = 0; i < clicks; i++) {
-      if (i > 0) {
-        // 多次点击间隔 100-200ms
-        await new Promise(r => setTimeout(r, 100 + Math.random() * 100));
+      // Avoid page.mouse.click() composite hangs by using explicit down/up sequence.
+      for (let i = 0; i < clicks; i++) {
+        if (i > 0) {
+          // 多次点击间隔 100-200ms
+          await new Promise(r => setTimeout(r, 100 + Math.random() * 100));
+        }
+        await this.runInputAction(page, 'mouse:move(pre-click)', (activePage) => activePage.mouse.move(x, y, { steps: 1 }));
+        await this.runInputAction(page, 'mouse:down', (activePage) => activePage.mouse.down({
+          button,
+          clickCount: 1,
+        }));
+        if (delay > 0) {
+          await page.waitForTimeout(delay);
+        }
+        await this.runInputAction(page, 'mouse:up', (activePage) => activePage.mouse.up({
+          button,
+          clickCount: 1,
+        }));
       }
-      await page.mouse.click(x, y, {
-        button,
-        clickCount: 1,
-        delay // 按键间隔
-      });
-    }
+    });
   }
 
   /**
@@ -1267,10 +1379,11 @@ export class BrowserSession {
    */
   async mouseMove(opts: { x: number; y: number; steps?: number }): Promise<void> {
     const page = await this.ensurePrimaryPage();
-    await this.ensureInputReady(page);
-    const { x, y, steps = 3 } = opts;
-
-    await page.mouse.move(x, y, { steps });
+    await this.withInputActionLock(async () => {
+      await this.runInputAction(page, 'input:ready', (activePage) => this.ensureInputReady(activePage));
+      const { x, y, steps = 3 } = opts;
+      await this.runInputAction(page, 'mouse:move', (activePage) => activePage.mouse.move(x, y, { steps }));
+    });
   }
 
   /**
@@ -1278,23 +1391,27 @@ export class BrowserSession {
    */
   async keyboardType(opts: { text: string; delay?: number; submit?: boolean }): Promise<void> {
     const page = await this.ensurePrimaryPage();
-    await this.ensureInputReady(page);
-    const { text, delay = 80, submit } = opts;
+    await this.withInputActionLock(async () => {
+      await this.runInputAction(page, 'input:ready', (activePage) => this.ensureInputReady(activePage));
+      const { text, delay = 80, submit } = opts;
 
-    if (text && text.length > 0) {
-      await page.keyboard.type(text, { delay });
-    }
+      if (text && text.length > 0) {
+        await this.runInputAction(page, 'keyboard:type', (activePage) => activePage.keyboard.type(text, { delay }));
+      }
 
-    if (submit) {
-      await page.keyboard.press('Enter');
-    }
+      if (submit) {
+        await this.runInputAction(page, 'keyboard:press', (activePage) => activePage.keyboard.press('Enter'));
+      }
+    });
   }
 
   async keyboardPress(opts: { key: string; delay?: number }): Promise<void> {
     const page = await this.ensurePrimaryPage();
-    await this.ensureInputReady(page);
-    const { key, delay } = opts;
-    await page.keyboard.press(key, typeof delay === 'number' ? { delay } : undefined);
+    await this.withInputActionLock(async () => {
+      await this.runInputAction(page, 'input:ready', (activePage) => this.ensureInputReady(activePage));
+      const { key, delay } = opts;
+      await this.runInputAction(page, 'keyboard:press', (activePage) => activePage.keyboard.press(key, typeof delay === 'number' ? { delay } : undefined));
+    });
   }
 
   /**
@@ -1303,9 +1420,11 @@ export class BrowserSession {
    */
   async mouseWheel(opts: { deltaY: number; deltaX?: number }): Promise<void> {
     const page = await this.ensurePrimaryPage();
-    await this.ensureInputReady(page);
-    const { deltaX = 0, deltaY } = opts;
-    await page.mouse.wheel(Number(deltaX) || 0, Number(deltaY) || 0);
+    await this.withInputActionLock(async () => {
+      await this.runInputAction(page, 'input:ready', (activePage) => this.ensureInputReady(activePage));
+      const { deltaX = 0, deltaY } = opts;
+      await this.runInputAction(page, 'mouse:wheel', (activePage) => activePage.mouse.wheel(Number(deltaX) || 0, Number(deltaY) || 0));
+    });
   }
 
   private async syncWindowBounds(
