@@ -59,7 +59,7 @@ const CONTROL_FILE = path.join(resolveWebautoRoot(), 'run', 'ui-cli.json');
 
 const args = minimist(process.argv.slice(2), {
   boolean: ['help', 'json', 'auto-start', 'build', 'install', 'continue-on-error', 'exact', 'keep-open', 'detailed'],
-  string: ['host', 'port', 'selector', 'value', 'text', 'key', 'tab', 'label', 'state', 'file', 'output', 'timeout', 'interval', 'nth'],
+  string: ['host', 'port', 'selector', 'value', 'text', 'key', 'tab', 'label', 'state', 'file', 'output', 'timeout', 'interval', 'nth', 'reason'],
   alias: { h: 'help' },
   default: { 'auto-start': false, json: false, 'keep-open': false },
 });
@@ -84,6 +84,7 @@ Usage:
   webauto ui cli full-cover [--build] [--install] [--output <report.json>] [--keep-open]
   webauto ui cli run --file <steps.json> [--continue-on-error]
   webauto ui cli stop
+  webauto ui cli restart [--reason <text>] [--timeout <ms>]
 
 Options:
   --host <host>          UI CLI bridge host (default 127.0.0.1)
@@ -165,6 +166,36 @@ async function requestJson(endpoint, pathname, init = {}) {
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function terminatePid(pid) {
+  const targetPid = parseIntSafe(pid, 0);
+  if (targetPid <= 0) return { ok: false, error: 'invalid_pid' };
+  if (process.platform === 'win32') {
+    return new Promise((resolve) => {
+      const child = spawn('taskkill', ['/PID', String(targetPid), '/T', '/F'], {
+        windowsHide: true,
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+      let stderr = '';
+      child.stderr.on('data', (chunk) => { stderr += String(chunk || ''); });
+      child.on('error', (err) => resolve({ ok: false, error: err?.message || String(err) }));
+      child.on('close', (code) => {
+        if (code === 0) return resolve({ ok: true, pid: targetPid });
+        return resolve({
+          ok: false,
+          pid: targetPid,
+          error: stderr.trim() || `taskkill_exit_${code}`,
+        });
+      });
+    });
+  }
+  try {
+    process.kill(targetPid, 'SIGTERM');
+    return { ok: true, pid: targetPid };
+  } catch (err) {
+    return { ok: false, pid: targetPid, error: err?.message || String(err) };
+  }
 }
 
 async function waitForHealth(endpoint, timeoutMs = 30_000) {
@@ -693,9 +724,92 @@ async function main() {
   }
 
   if (cmd === 'stop') {
-    const ret = await sendAction(endpoint, { action: 'close_window' });
-    if (!ret.ok) throw new Error(ret.json?.error || `http_${ret.status}`);
-    printOutput(ret.json);
+    let statusRet = null;
+    try {
+      statusRet = await requestJson(endpoint, '/health', {
+        timeoutMs: parseIntSafe(args.timeout, DEFAULT_HTTP_TIMEOUT_MS),
+        retries: DEFAULT_HTTP_RETRIES,
+      });
+    } catch {
+      statusRet = null;
+    }
+    const knownPid = Number(statusRet?.json?.pid || 0);
+    const ret = await sendAction(endpoint, { action: 'close_window' }).catch((error) => ({
+      ok: false,
+      status: 0,
+      json: { ok: false, error: error?.message || String(error) },
+    }));
+    if (ret.ok) {
+      printOutput(ret.json);
+      return;
+    }
+
+    const actionError = String(ret?.json?.error || `http_${ret?.status || 'request'}`).trim() || 'unknown_error';
+    if ((actionError === 'window_not_ready' || actionError.includes('window_not_ready')) && knownPid > 0) {
+      const killed = await terminatePid(knownPid);
+      if (!killed.ok) {
+        throw new Error(`window_not_ready, force-stop failed: ${killed.error || 'unknown_error'}`);
+      }
+      printOutput({
+        ok: true,
+        forced: true,
+        pid: knownPid,
+        reason: 'window_not_ready',
+      });
+      return;
+    }
+    throw new Error(actionError);
+  }
+
+  if (cmd === 'restart') {
+    let statusRet = null;
+    try {
+      statusRet = await requestJson(endpoint, '/health', {
+        timeoutMs: parseIntSafe(args.timeout, DEFAULT_HTTP_TIMEOUT_MS),
+        retries: DEFAULT_HTTP_RETRIES,
+      });
+    } catch {
+      statusRet = null;
+    }
+    const knownPid = Number(statusRet?.json?.pid || 0);
+    const restartReason = String(args.reason || '').trim() || 'ui_cli';
+    const ret = await sendAction(endpoint, { action: 'restart', reason: restartReason }).catch((error) => ({
+      ok: false,
+      status: 0,
+      json: { ok: false, error: error?.message || String(error) },
+    }));
+    if (!ret.ok || !ret.json?.ok) {
+      const actionError = String(ret?.json?.error || `http_${ret?.status || 'request'}`).trim() || 'unknown_error';
+      throw new Error(actionError);
+    }
+
+    const transitionBudgetMs = Math.min(15_000, Math.max(2_000, parseIntSafe(args.timeout, 60_000)));
+    const transitionStart = Date.now();
+    while (Date.now() - transitionStart <= transitionBudgetMs) {
+      try {
+        const probe = await requestJson(endpoint, '/health', { timeoutMs: 1500, retries: 0 });
+        const probePid = Number(probe?.json?.pid || 0);
+        if (!probe.ok || !probe.json?.ok) break;
+        if (knownPid > 0 && probePid > 0 && probePid !== knownPid) break;
+      } catch {
+        break;
+      }
+      await sleep(250);
+    }
+
+    const restartWaitMs = parseIntSafe(args.timeout, 90_000);
+    const status = await waitForHealth(endpoint, restartWaitMs);
+    if (!status) throw new Error('ui cli bridge not healthy after restart');
+    if (knownPid > 0 && Number(status?.pid || 0) === knownPid) {
+      throw new Error('restart pid unchanged');
+    }
+    printOutput({
+      ok: true,
+      restarting: true,
+      reason: restartReason,
+      previousPid: knownPid > 0 ? knownPid : null,
+      status,
+    });
     return;
   }
 

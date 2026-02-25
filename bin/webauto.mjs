@@ -163,6 +163,7 @@ Core Commands:
   webauto schedule <list|get|add|update|delete|import|export|run|run-due|daemon> [options]
   webauto deps <check|auto|install|uninstall|reinstall> [options]
   webauto ui console [--build] [--install] [--check]
+  webauto ui restart [--build] [--install] [--timeout <ms>] [--reason <text>]
   webauto ui cli <action> [options]
   webauto xhs install [--download-browser] [--download-geoip] [--ensure-backend]
   webauto xhs unified [xhs options...]
@@ -193,6 +194,7 @@ Examples (standard):
   webauto ui console --check
   webauto ui console --build
   webauto ui console --install
+  webauto ui restart --build --reason "reload-after-pull"
   webauto ui cli start --build
   webauto ui cli tab --tab 配置
   webauto ui cli input --selector "#keyword-input" --value "seedance2.0"
@@ -214,6 +216,7 @@ function printUiConsoleHelp() {
 
 Usage:
   webauto ui console [--build] [--install] [--check] [--no-daemon]
+  webauto ui restart [--build] [--install] [--timeout <ms>] [--reason <text>]
   webauto ui cli <action> [options]
 
 Options:
@@ -224,6 +227,7 @@ Options:
 
 CLI Actions:
   start         启动 UI（可配合 --build/--install）
+  restart       广播重启消息，应用自停并自启（可配合 --reason）
   status        获取 UI 运行状态（含 runId/错误计数）
   snapshot      获取 UI 快照（含当前 tab 与关键控件值）
   tab           切换 tab（--tab config 或 --label 配置）
@@ -250,6 +254,7 @@ Examples:
   webauto ui console --check
   webauto ui console --build
   webauto ui console --install
+  webauto ui restart --reason "git pull"
   webauto ui cli start --build
   webauto ui cli status --json
   webauto ui cli tab --tab 配置
@@ -485,11 +490,14 @@ async function runInDir(dir, cmd, args) {
 }
 
 function checkDesktopConsoleDeps() {
-  const electronName = process.platform === 'win32' ? 'electron.exe' : 'electron';
-  const candidates = [
-    path.join(ROOT, 'node_modules', 'electron', 'dist', electronName),
-    path.join(ROOT, 'apps', 'desktop-console', 'node_modules', 'electron', 'dist', electronName),
+  const electronNames = process.platform === 'win32'
+    ? ['electron.exe']
+    : (process.platform === 'darwin' ? ['electron', path.join('Electron.app', 'Contents', 'MacOS', 'Electron')] : ['electron']);
+  const roots = [
+    path.join(ROOT, 'node_modules', 'electron', 'dist'),
+    path.join(ROOT, 'apps', 'desktop-console', 'node_modules', 'electron', 'dist'),
   ];
+  const candidates = roots.flatMap((base) => electronNames.map((name) => path.join(base, name)));
   return candidates.some((p) => exists(p));
 }
 
@@ -772,6 +780,16 @@ async function main() {
       checkOnly: args.check === true,
       noDaemon,
     });
+    return;
+  }
+
+  if (cmd === 'ui' && sub === 'restart') {
+    await ensureUiRuntimeReady({
+      build: args.build === true,
+      install: args.install === true,
+    });
+    const script = path.join(ROOT, 'apps', 'desktop-console', 'entry', 'ui-cli.mjs');
+    await run(process.execPath, [script, 'restart', ...rawArgv.slice(2)]);
     return;
   }
 

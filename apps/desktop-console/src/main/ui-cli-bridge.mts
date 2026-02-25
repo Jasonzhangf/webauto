@@ -10,6 +10,7 @@ type UiCliAction = {
   value?: string;
   text?: string;
   key?: string;
+  reason?: string;
   tabId?: string;
   tabLabel?: string;
   state?: 'exists' | 'visible' | 'hidden' | 'text_contains' | 'text_equals' | 'value_equals' | 'not_disabled';
@@ -33,6 +34,7 @@ type UiCliStatus = {
 
 type UiCliBridgeOptions = {
   getWindow: () => BrowserWindow | null;
+  onRestart?: (input: { reason: string; source: 'ui_cli_bridge' }) => Promise<any> | any;
   host?: string;
   port?: number;
 };
@@ -587,6 +589,10 @@ export class UiCliBridge {
     const action = String(input?.action || '').trim();
     if (!action) return toActionError(input, 'missing_action');
 
+    if (action === 'restart') {
+      return this.handleRestart(input);
+    }
+
     if (action === 'wait') {
       return this.waitForSelector(input);
     }
@@ -601,6 +607,23 @@ export class UiCliBridge {
         'action',
       );
       return out && typeof out === 'object' ? out : toActionError(input, 'empty_result');
+    } catch (err: any) {
+      return toActionError(input, err?.message || String(err), { details: err?.stack || null });
+    }
+  }
+
+  private async handleRestart(input: UiCliAction) {
+    const onRestart = this.options.onRestart;
+    if (typeof onRestart !== 'function') {
+      return toActionError(input, 'restart_not_supported');
+    }
+    const reason = String(input?.reason || input?.value || '').trim() || 'ui_cli';
+    try {
+      const out = await Promise.resolve(onRestart({ reason, source: 'ui_cli_bridge' }));
+      if (out && typeof out === 'object') {
+        return { ok: true, restarting: true, reason, ...out };
+      }
+      return { ok: true, restarting: true, reason };
     } catch (err: any) {
       return toActionError(input, err?.message || String(err), { details: err?.stack || null });
     }

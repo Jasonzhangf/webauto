@@ -17,6 +17,7 @@ test('webauto ui cli --help prints ui cli usage', () => {
   const ret = run(['ui', 'cli', '--help']);
   assert.equal(ret.status, 0, ret.stderr || ret.stdout);
   assert.match(ret.stdout, /webauto ui cli/);
+  assert.match(ret.stdout, /restart/);
   assert.match(ret.stdout, /click --selector/);
   assert.match(ret.stdout, /full-cover/);
   assert.match(ret.stdout, /probe/);
@@ -28,5 +29,6 @@ test('webauto ui --help includes ui cli actions', () => {
   const ret = run(['ui', '--help']);
   assert.equal(ret.status, 0, ret.stderr || ret.stdout);
   assert.match(ret.stdout, /webauto ui cli/);
+  assert.match(ret.stdout, /webauto ui restart/);
   assert.match(ret.stdout, /status/);
 });

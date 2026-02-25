@@ -149,3 +149,26 @@ test('ui-cli-bridge action timeout returns structured timeout error', async () =
   assert.equal(out.selector, '#start-btn');
   assert.match(String(out.error || ''), /action_timeout/);
 });
+
+test('ui-cli-bridge restart delegates to onRestart handler', async () => {
+  let called = 0;
+  let receivedReason = '';
+  const bridge = new UiCliBridge({
+    getWindow: () => null,
+    onRestart: ({ reason }) => {
+      called += 1;
+      receivedReason = String(reason || '');
+      return { accepted: true };
+    },
+  });
+  const out = await (bridge as any).handleAction({
+    action: 'restart',
+    reason: 'pull-latest',
+  });
+  assert.equal(called, 1);
+  assert.equal(receivedReason, 'pull-latest');
+  assert.equal(out.ok, true);
+  assert.equal(out.restarting, true);
+  assert.equal(out.reason, 'pull-latest');
+  assert.equal(out.accepted, true);
+});

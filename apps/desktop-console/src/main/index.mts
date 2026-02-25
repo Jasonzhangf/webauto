@@ -44,8 +44,17 @@ function trackBrowserProcess(pid: number) {
   }
 }
 
+function safeConsole(method: 'log' | 'warn', ...args: any[]) {
+  try {
+    const fn = console[method];
+    if (typeof fn === 'function') fn(...args);
+  } catch {
+    // Ignore EPIPE/stream-closed console errors during shutdown.
+  }
+}
+
 function cleanupAllBrowserProcesses(reason: string = 'ui_close') {
-  console.log(`[process-cleanup] Cleaning up ${spawnedBrowserProcesses.size} browser process(s) (${reason})`);
+  safeConsole('log', `[process-cleanup] Cleaning up ${spawnedBrowserProcesses.size} browser process(s) (${reason})`);
   for (const pid of spawnedBrowserProcesses) {
     try {
       if (process.platform === 'win32') {
@@ -54,11 +63,11 @@ function cleanupAllBrowserProcesses(reason: string = 'ui_close') {
         process.kill(pid, 'SIGTERM');
       }
     } catch (err) {
-      console.warn(`[process-cleanup] Failed to kill PID ${pid}:`, err);
+      safeConsole('warn', `[process-cleanup] Failed to kill PID ${pid}:`, err);
     }
   }
   spawnedBrowserProcesses.clear();
-  console.log(`[process-cleanup] Cleanup complete`);
+  safeConsole('log', '[process-cleanup] Cleanup complete');
 }
 
 type UiSettings = DesktopConsoleSettings;
@@ -223,6 +232,7 @@ let heartbeatTimeoutHandled = false;
 let coreServicesStopRequested = false;
 let coreServiceHeartbeatTimer: NodeJS.Timeout | null = null;
 let coreServiceHeartbeatStopped = false;
+let restartRequested = false;
 const RUN_LOG_DIR = path.join(os.homedir(), '.webauto', 'logs');
 
 function appendRunLog(runId: string, line: string) {
@@ -285,7 +295,10 @@ function ensureStateBridge() {
 }
 
 let win: BrowserWindow | null = null;
-const uiCliBridge = new UiCliBridge({ getWindow: getWin });
+const uiCliBridge = new UiCliBridge({
+  getWindow: getWin,
+  onRestart: ({ reason }) => requestAppRestart(reason),
+});
 
 configureElectronPaths();
 
@@ -297,6 +310,42 @@ if (!singleInstanceLock) {
 function getWin() {
   if (!win || win.isDestroyed()) return null;
   return win;
+}
+
+function requestAppRestart(reason = 'ui_cli') {
+  const normalizedReason = String(reason || '').trim() || 'ui_cli';
+  if (restartRequested) {
+    return { accepted: false, reason: normalizedReason };
+  }
+  restartRequested = true;
+  console.warn(`[desktop-console] restart requested: ${normalizedReason}`);
+  const w = getWin();
+  if (w) {
+    try {
+      w.webContents.send('app:restart-requested', {
+        reason: normalizedReason,
+        ts: new Date().toISOString(),
+      });
+    } catch {
+      // ignore renderer notify errors
+    }
+  }
+  setTimeout(() => {
+    void Promise.race([
+      ensureAppExitCleanup(`restart:${normalizedReason}`, { stopStateBridge: true }),
+      sleep(1500),
+    ]).catch(() => null).finally(() => {
+      try {
+        app.relaunch();
+      } catch (err) {
+        restartRequested = false;
+        console.error('[desktop-console] relaunch failed', err);
+        return;
+      }
+      app.exit(0);
+    });
+  }, 25);
+  return { accepted: true, reason: normalizedReason };
 }
 
 if (singleInstanceLock) {
