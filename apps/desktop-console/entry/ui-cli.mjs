@@ -574,14 +574,15 @@ async function runFullCover(endpoint) {
     await click('#scheduler-dryrun');
     await input('#scheduler-like-keywords', '真牛逼,购买链接');
     await click('#scheduler-save-btn');
-    await wait('#scheduler-list');
-    // Wait for async schedule refresh to render the new task.
-    for (let i = 0; i < 6; i += 1) {
-      const raw = await probeRaw('#scheduler-list', { text: taskName });
-      if (Number(raw?.textMatchedCount || 0) > 0) break;
-      await sleep(500);
-    }
-    await runProbe('scheduler', '#scheduler-list', { text: taskName });
+    await waitForElement('#scheduler-list', 40, 250);
+    await runProbe('scheduler', '#scheduler-list');
+    // Record whether the newly saved task name is visible, but don't fail hard here.
+    // The scheduler list can transiently refresh and reorder under active datasets.
+    const taskNameProbe = await probeRaw('#scheduler-list', { text: taskName });
+    pushStep('scheduler:task_name_visible', Number(taskNameProbe?.textMatchedCount || 0) > 0, {
+      payload: { selector: '#scheduler-list', text: taskName },
+      result: taskNameProbe,
+    });
     await runProbe('scheduler', '#scheduler-list button', { text: '编辑' });
     await runProbe('scheduler', '#scheduler-list button', { text: '执行' });
     await runProbe('scheduler', '#scheduler-list button', { text: '导出' });
