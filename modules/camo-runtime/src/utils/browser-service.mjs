@@ -9,7 +9,7 @@ import { BROWSER_SERVICE_URL, loadConfig, setRepoRoot } from './config.mjs';
 
 const requireFromHere = createRequire(import.meta.url);
 const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
-const DEFAULT_API_TIMEOUT_MS = 30000;
+const DEFAULT_API_TIMEOUT_MS = 90000;
 
 function resolveNodeBin() {
   const explicit = String(process.env.WEBAUTO_NODE_BIN || '').trim();
