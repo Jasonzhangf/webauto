@@ -1511,10 +1511,6 @@ async function executeOpenDetailOperation({
       if (rows.length === 0) throw new Error('NO_SEARCH_RESULT_ITEM');
 
       for (let round = 0; round < targetSeedCollectMaxRounds && seedCollectedSet.size < targetSeedCollectCount; round += 1) {
-        const center = await resolveSelectorTarget(profileId, ['.search-result-list', '.feeds-page', 'body'], { requireViewport: true });
-        if (center?.center) {
-          await moveMouse(profileId, center.center.x, center.center.y, 2);
-        }
         pushTrace({ kind: 'scroll', stage: 'collect_links', round: round + 1, deltaY: seedCollectStep });
         await wheel(profileId, seedCollectStep);
         await sleep(seedCollectSettleMs);
@@ -1954,7 +1950,6 @@ async function executeExpandRepliesOperation({ profileId, context = {} }) {
     if (!next) break;
     seen.add(next.signature);
 
-    await moveMouse(profileId, next.center.x, next.center.y, 2);
     await sleepRandom(500, 1200, pushTrace, 'expand_pre_click', { round: round + 1, text: String(next.text || '').slice(0, 40) });
     await clickPoint(profileId, next.center, { steps: 3 });
     pushTrace({ kind: 'click', stage: 'xhs_expand_replies', round: round + 1, text: String(next.text || '').slice(0, 40) });
@@ -2164,9 +2159,6 @@ async function executeCommentsHarvestOperation({
       break;
     }
 
-    if (lastScrollerCenter?.x && lastScrollerCenter?.y) {
-      await moveMouse(profileId, lastScrollerCenter.x, lastScrollerCenter.y, 2);
-    }
     const roundStep = randomBetween(scrollStepMin, scrollStepMax);
     pushTrace({ kind: 'scroll', stage: 'xhs_comments_harvest', round, deltaY: roundStep });
     await wheel(profileId, roundStep);
