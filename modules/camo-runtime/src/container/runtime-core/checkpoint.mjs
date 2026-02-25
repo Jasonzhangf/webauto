@@ -261,15 +261,48 @@ export async function restoreCheckpoint({
       actionResult = { selector: effectiveSelector, count: matches.length };
     } else if (action === 'scroll_into_view') {
       if (!effectiveSelector) return asErrorPayload('CONTAINER_NOT_FOUND', 'Selector is required for scroll_into_view');
-      actionResult = await callAPI('evaluate', {
+      const resolved = await callAPI('evaluate', {
         profileId: resolvedProfile,
-        script: `(async () => {
-          const el = document.querySelector(${JSON.stringify(effectiveSelector)});
-          if (!el) throw new Error('Element not found');
-          el.scrollIntoView({ behavior: 'auto', block: 'center', inline: 'nearest' });
-          return { ok: true, selector: ${JSON.stringify(effectiveSelector)} };
+        script: `(() => {
+          const selector = ${JSON.stringify(effectiveSelector)};
+          const nodes = Array.from(document.querySelectorAll(selector));
+          const target = nodes.find((node) => {
+            if (!(node instanceof Element)) return false;
+            const rect = node.getBoundingClientRect?.();
+            return Boolean(rect && rect.width > 0 && rect.height > 0);
+          }) || nodes[0] || null;
+          if (!target) return { ok: false, selector };
+          const rect = target.getBoundingClientRect?.() || { left: 0, top: 0, width: 1, height: 1 };
+          const rawCenterY = Number(rect.top) + Math.max(1, Number(rect.height) / 2);
+          return {
+            ok: true,
+            selector,
+            center: {
+              x: Math.max(1, Math.min((window.innerWidth || 1) - 1, Math.round(Number(rect.left) + Math.max(1, Number(rect.width) / 2)))),
+              y: Math.max(1, Math.min((window.innerHeight || 1) - 1, Math.round(rawCenterY))),
+            },
+            rawCenterY,
+            viewportHeight: Number(window.innerHeight || 0),
+          };
         })()`,
       });
+      const target = resolved?.result || resolved?.data?.result || resolved?.data || resolved || null;
+      if (!target || target.ok !== true) {
+        return asErrorPayload('CONTAINER_NOT_FOUND', `Container selector not found: ${effectiveSelector}`);
+      }
+      const viewportHeight = Number(target.viewportHeight || 0);
+      const rawCenterY = Number(target.rawCenterY || 0);
+      if (Number.isFinite(viewportHeight) && viewportHeight > 0 && Number.isFinite(rawCenterY)) {
+        const deltaY = Math.round(rawCenterY - viewportHeight / 2);
+        if (Math.abs(deltaY) > 48) {
+          await callAPI('mouse:wheel', {
+            profileId: resolvedProfile,
+            deltaX: 0,
+            deltaY: Math.max(-900, Math.min(900, deltaY)),
+          });
+        }
+      }
+      actionResult = { selector: effectiveSelector, center: target.center || null };
     } else if (action === 'page_back') {
       actionResult = await callAPI('page:back', { profileId: resolvedProfile });
     } else if (action === 'goto_checkpoint_url') {

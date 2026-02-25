@@ -114,6 +114,18 @@ export async function ensureProfile(profileId) {
   return { root, profileDir, profileId: id };
 }
 
+export function assertProfileExists(profileId) {
+  const id = String(profileId || '').trim();
+  if (!id) throw new Error('profileId is required');
+  if (id.includes('/') || id.includes('\\')) throw new Error('invalid profileId');
+  const root = resolveProfilesRoot();
+  const profileDir = path.join(root, id);
+  if (!fs.existsSync(profileDir) || !fs.statSync(profileDir).isDirectory()) {
+    throw new Error(`profile not found: ${id}. create/login account profile first`);
+  }
+  return { root, profileDir, profileId: id };
+}
+
 async function ensureFingerprint(profileId) {
   try {
     const modulePath = path.resolve(process.cwd(), 'dist', 'modules', 'camo-backend', 'src', 'internal', 'fingerprint.js');

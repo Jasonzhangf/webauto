@@ -3,6 +3,7 @@ import minimist from 'minimist';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
+  assertProfileExists,
   ensureProfile,
   listProfilesForPool,
   output,
@@ -112,7 +113,7 @@ async function cmdAdd(prefix, jsonMode) {
 async function cmdLoginProfile(profileId, argv, jsonMode) {
   const id = String(profileId || '').trim();
   if (!id) throw new Error('profileId is required');
-  await ensureProfile(id);
+  assertProfileExists(id);
   const url = String(argv.url || 'https://www.xiaohongshu.com').trim();
   const idleTimeout = String(argv['idle-timeout'] || process.env.WEBAUTO_LOGIN_IDLE_TIMEOUT || '30m').trim() || '30m';
   const timeoutSec = Math.max(30, Math.floor(Number(argv['timeout-sec'] || 900)));
@@ -181,16 +182,16 @@ async function cmdLoginProfile(profileId, argv, jsonMode) {
 
 async function cmdLogin(prefix, argv, jsonMode) {
   const ensureCount = Math.max(0, Number(argv['ensure-count'] || 0) || 0);
+  if (ensureCount > 0) {
+    throw new Error('ensure-count is disabled; automatic profile creation is forbidden');
+  }
   const known = listProfilesForPool(prefix).profiles;
   const created = [];
-  while (known.length + created.length < ensureCount) {
-    const profileId = resolveNextProfileId(prefix);
-    await ensureProfile(profileId);
-    created.push(profileId);
-    known.push(profileId);
-  }
 
   const all = [...known];
+  if (all.length === 0) {
+    throw new Error(`no profiles found for prefix: ${prefix}`);
+  }
   const started = [];
   const idleTimeout = String(argv['idle-timeout'] || process.env.WEBAUTO_LOGIN_IDLE_TIMEOUT || '30m').trim() || '30m';
   for (const profileId of all) {
@@ -220,7 +221,7 @@ async function cmdGotoProfile(profileId, argv, jsonMode) {
   if (!id) throw new Error('profileId is required');
   const url = String(argv.url || argv._?.[2] || '').trim();
   if (!url) throw new Error('url is required');
-  await ensureProfile(id);
+  assertProfileExists(id);
 
   const gotoRet = runCamo(['goto', id, url], { rootDir: ROOT, timeoutMs: 30000 });
   if (gotoRet.ok) {

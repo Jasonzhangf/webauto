@@ -10,7 +10,7 @@ import {
   removeAccount,
   updateAccount,
 } from './lib/account-store.mjs';
-import { ensureProfile } from './lib/profilepool.mjs';
+import { assertProfileExists } from './lib/profilepool.mjs';
 import {
   syncWeiboAccountByProfile,
   syncWeiboAccountsByProfiles,
@@ -250,7 +250,7 @@ Usage:
 Notes:
   - 账号数据默认保存到 WEBAUTO 根目录下的 accounts（Windows 优先 D:/webauto，缺失时回落 ~/.webauto，可用 WEBAUTO_HOME 覆盖）
   - list 默认按 profile 展示账号有效态（valid/invalid）
-  - add 会自动创建并关联 profile/fingerprint（未指定时自动编号）
+  - add 不会自动创建 profile；必须传入已存在的 --profile
   - login 会通过 @web-auto/camo 拉起浏览器并绑定账号 profile
   - 只有识别到账号 id 的 profile 才会进入 valid 状态
   - sync --pending-while-login 会在登录过程中保持待登录状态，避免过早标记失效
@@ -279,13 +279,17 @@ async function cmdListRecords(jsonMode) {
 }
 
 async function cmdAdd(argv, jsonMode) {
+  const profileId = String(argv.profile || argv['profile-id'] || '').trim();
+  if (!profileId) {
+    throw new Error('missing --profile, automatic profile creation is disabled');
+  }
   const result = await addAccount({
     id: argv.id,
     platform: argv.platform,
     alias: argv.alias,
     name: argv.name,
     username: argv.username,
-    profileId: argv.profile || argv['profile-id'],
+    profileId,
     fingerprintId: argv.fingerprint || argv['fingerprint-id'],
     status: argv.status,
   });
@@ -355,7 +359,7 @@ async function cmdDelete(idOrAlias, argv, jsonMode) {
 async function cmdLogin(idOrAlias, argv, jsonMode) {
   const account = getAccount(idOrAlias, { platform: argv.platform });
   const accountPlatform = normalizePlatform(account.platform || 'xiaohongshu');
-  await ensureProfile(account.profileId);
+  assertProfileExists(account.profileId);
   const url = String(argv.url || inferLoginUrl(accountPlatform)).trim();
   // Default idle timeout: 30 minutes, configurable via env or CLI.
   // Keep validation semantics aligned with camo parseDurationMs.

@@ -15,9 +15,7 @@ export const PLATFORM_TASKS: Record<Platform, TaskDefinition[]> = {
     { type: 'xhs-unified', label: '搜索任务', icon: '📕', platform: 'xiaohongshu' }
   ],
   weibo: [
-    { type: 'weibo-timeline', label: '主页时间线', icon: '📰', platform: 'weibo' },
-    { type: 'weibo-search', label: '搜索任务', icon: '🔍', platform: 'weibo' },
-    { type: 'weibo-monitor', label: '监控个人主页', icon: '👁️', platform: 'weibo' }
+    { type: 'weibo-search', label: '搜索任务', icon: '🔍', platform: 'weibo' }
   ],
   '1688': [
     { type: '1688-search', label: '搜索任务', icon: '🛒', platform: '1688' }
@@ -26,9 +24,7 @@ export const PLATFORM_TASKS: Record<Platform, TaskDefinition[]> = {
 
 export const SUPPORTED_COMMAND_TYPES = [
   'xhs-unified',
-  'weibo-timeline',
   'weibo-search',
-  'weibo-monitor',
   '1688-search',
 ];
 

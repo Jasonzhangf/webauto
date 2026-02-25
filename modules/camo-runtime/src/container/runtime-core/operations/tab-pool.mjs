@@ -242,34 +242,6 @@ async function waitForTabCountIncrease({
   };
 }
 
-async function tryOpenTabWithAnchor(profileId, seedUrl, timeoutMs) {
-  try {
-    const popupResult = await callApiWithTimeout('evaluate', {
-      profileId,
-      script: `(() => {
-        const href = ${JSON.stringify(seedUrl || 'about:blank')};
-        const anchor = document.createElement('a');
-        anchor.href = href;
-        anchor.target = '_blank';
-        anchor.rel = 'noopener noreferrer';
-        anchor.style.position = 'fixed';
-        anchor.style.left = '-9999px';
-        anchor.style.top = '-9999px';
-        document.body.appendChild(anchor);
-        const evt = new MouseEvent('click', { bubbles: true, cancelable: true, view: window });
-        const dispatched = anchor.dispatchEvent(evt);
-        anchor.click();
-        anchor.remove();
-        return { opened: true, dispatched };
-      })()`,
-    }, timeoutMs);
-    const popupData = popupResult?.result || popupResult || {};
-    return { ok: Boolean(popupData?.opened || popupData?.ok), error: null };
-  } catch (err) {
-    return { ok: false, error: err };
-  }
-}
-
 async function openTabBestEffort({
   profileId,
   seedUrl,
@@ -333,57 +305,6 @@ async function openTabBestEffort({
     }
   } catch (err) {
     openError = err;
-  }
-
-  try {
-    const popupResult = await callApiWithTimeout('evaluate', {
-      profileId,
-      script: `(() => {
-        const popup = window.open(${JSON.stringify(seedUrl || 'about:blank')}, '_blank');
-        return { opened: !!popup };
-      })()`,
-    }, apiTimeoutMs);
-    const popupData = popupResult?.result || popupResult || {};
-    if (Boolean(popupData?.opened || popupData?.ok)) {
-      await settle();
-      const popupOpened = await waitForTab();
-      if (popupOpened.ok) {
-        await seedNewestTabIfNeeded({
-          profileId,
-          seedUrl,
-          openDelayMs,
-          apiTimeoutMs,
-          navigationTimeoutMs,
-          syncConfig,
-        });
-        return { ok: true, mode: 'window.open', error: null };
-      }
-    }
-  } catch (err) {
-    openError = err;
-  }
-
-  const anchorResult = await tryOpenTabWithAnchor(
-    profileId,
-    seedUrl,
-    Math.max(1200, Math.min(apiTimeoutMs, 5000)),
-  );
-  if (anchorResult.ok) {
-    await settle();
-    const anchorOpened = await waitForTab();
-    if (anchorOpened.ok) {
-      await seedNewestTabIfNeeded({
-        profileId,
-        seedUrl,
-        openDelayMs,
-        apiTimeoutMs,
-        navigationTimeoutMs,
-        syncConfig,
-      });
-      return { ok: true, mode: 'anchor_click', error: null };
-    }
-  } else {
-    openError = anchorResult.error || openError;
   }
 
   return { ok: false, mode: null, error: openError };

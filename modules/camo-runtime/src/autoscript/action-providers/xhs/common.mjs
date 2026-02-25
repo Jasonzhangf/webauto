@@ -1,4 +1,5 @@
 import { callAPI } from '../../../utils/browser-service.mjs';
+import { assertNoForbiddenJsAction } from '../../../utils/js-policy.mjs';
 
 export function withOperationHighlight(script, color = '#ff7a00') {
   return `(() => {
@@ -37,8 +38,17 @@ export function withOperationHighlight(script, color = '#ff7a00') {
   })()`;
 }
 
-export async function runEvaluateScript({ profileId, script, highlight = true }) {
-  const wrappedScript = highlight ? withOperationHighlight(script) : script;
+export async function runEvaluateScript({
+  profileId,
+  script,
+  highlight = true,
+  allowUnsafeJs = false,
+}) {
+  const sourceScript = String(script || '');
+  if (!allowUnsafeJs) {
+    assertNoForbiddenJsAction(sourceScript, 'xhs provider evaluate');
+  }
+  const wrappedScript = highlight && allowUnsafeJs ? withOperationHighlight(sourceScript) : sourceScript;
   return callAPI('evaluate', { profileId, script: wrappedScript });
 }
 

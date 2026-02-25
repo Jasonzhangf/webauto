@@ -39,6 +39,7 @@ export function resolveXhsOutputContext({
     noteId: note,
     keywordDir,
     noteDir,
+    linksPath: path.join(keywordDir, 'links.collected.jsonl'),
     commentsPath: path.join(noteDir, 'comments.jsonl'),
     likeStatePath: path.join(keywordDir, '.like-state.jsonl'),
     likeEvidenceDir: path.join(keywordDir, 'like-evidence', note),
@@ -93,6 +94,38 @@ function commentDedupKey(row) {
   return `${String(row?.userId || '')}:${String(row?.content || '')}`;
 }
 
+function readXsecToken(url) {
+  const href = String(url || '').trim();
+  if (!href) return '';
+  try {
+    const parsed = new URL(href);
+    return String(parsed.searchParams.get('xsec_token') || '').trim();
+  } catch {
+    return '';
+  }
+}
+
+function normalizeLinkRow(row) {
+  const noteId = String(row?.noteId || '').trim();
+  const noteUrl = String(row?.noteUrl || row?.url || '').trim();
+  const listUrl = String(row?.listUrl || '').trim();
+  const xsecToken = String(row?.xsecToken || readXsecToken(noteUrl)).trim();
+  return {
+    noteId,
+    noteUrl,
+    listUrl,
+    xsecToken,
+    ts: new Date().toISOString(),
+  };
+}
+
+function linkDedupKey(row) {
+  const noteId = String(row?.noteId || '').trim();
+  if (noteId) return `note:${noteId}`;
+  const noteUrl = String(row?.noteUrl || '').trim();
+  return noteUrl ? `url:${noteUrl}` : '';
+}
+
 export async function mergeCommentsJsonl({ filePath, noteId, comments = [] }) {
   const existing = await readJsonlRows(filePath);
   const seen = new Set(
@@ -108,6 +141,30 @@ export async function mergeCommentsJsonl({ filePath, noteId, comments = [] }) {
     const key = commentDedupKey(normalized);
     if (!key || key.endsWith(':')) continue;
     if (seen.has(key)) continue;
+    seen.add(key);
+    added.push(normalized);
+  }
+
+  await appendJsonlRows(filePath, added);
+  return {
+    filePath,
+    added: added.length,
+    existing: existing.length,
+    total: existing.length + added.length,
+    rowsAdded: added,
+  };
+}
+
+export async function mergeLinksJsonl({ filePath, links = [] }) {
+  const existing = await readJsonlRows(filePath);
+  const seen = new Set(existing.map((row) => linkDedupKey(row)).filter(Boolean));
+
+  const added = [];
+  for (const row of links) {
+    const normalized = normalizeLinkRow(row);
+    if (!normalized.noteUrl || !normalized.xsecToken) continue;
+    const key = linkDedupKey(normalized);
+    if (!key || seen.has(key)) continue;
     seen.add(key);
     added.push(normalized);
   }

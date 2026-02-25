@@ -17,6 +17,8 @@ export interface WeiboCollectFromLinksInput {
   targetCount: number;
   maxComments?: number;
   collectComments?: boolean;
+  tabCount?: number;
+  tabOpenDelayMs?: number;
   serviceUrl?: string;
 }
 
@@ -30,6 +32,7 @@ export interface WeiboCollectFromLinksOutput {
     postsProcessed: number;
     totalComments: number;
     errors: number;
+    tabsUsed: number;
   };
   error?: string;
 }
@@ -140,11 +143,15 @@ export async function execute(input: WeiboCollectFromLinksInput): Promise<WeiboC
     targetCount,
     maxComments = 0,
     collectComments: enableComments = false,  // 默认不采集评论，加快速度
+    tabCount: requestedTabCount = 1,
+    tabOpenDelayMs: requestedTabOpenDelayMs = 800,
     serviceUrl = 'http://127.0.0.1:7704',
   } = input;
 
   const profile = sessionId;
   const controllerUrl = `${serviceUrl}/command`;
+  const tabCount = Math.max(1, Math.min(8, Number(requestedTabCount || 1) || 1));
+  const tabOpenDelayMs = Math.max(0, Number(requestedTabOpenDelayMs || 0) || 0);
   
   const keywordDir = path.join(resolveDownloadRoot(), 'weibo', env, sanitizeFilenamePart(keyword));
   const linksPath = path.join(keywordDir, 'phase2-links.jsonl');
@@ -157,7 +164,7 @@ export async function execute(input: WeiboCollectFromLinksInput): Promise<WeiboC
       linksPath,
       processedCount: 0,
       persistedCount: 0,
-      stats: { postsProcessed: 0, totalComments: 0, errors: 0 },
+      stats: { postsProcessed: 0, totalComments: 0, errors: 0, tabsUsed: 0 },
       error: 'No links found in phase2-links.jsonl',
     };
   }
@@ -196,6 +203,65 @@ export async function execute(input: WeiboCollectFromLinksInput): Promise<WeiboC
   async function gotoUrl(url: string): Promise<void> {
     await controllerAction('goto', { url });
     await new Promise(r => setTimeout(r, 500));  // 减少间隔  // 减少等待时间
+  }
+
+  async function listPagesDetailed(): Promise<Array<{ index: number; url: string; active: boolean }>> {
+    const res = await controllerAction('browser:page:list', { profileId: profile });
+    const value = unwrapResult(res);
+    const pages = Array.isArray(value?.pages) ? value.pages : (Array.isArray(value) ? value : []);
+    return pages
+      .map((item: any) => ({
+        index: Number(item?.index),
+        url: String(item?.url || ''),
+        active: item?.active === true,
+      }))
+      .filter((item: { index: number }) => Number.isFinite(item.index));
+  }
+
+  async function switchToPage(index: number): Promise<void> {
+    await controllerAction('browser:page:switch', { profileId: profile, index });
+    await new Promise((r) => setTimeout(r, 260));
+  }
+
+  async function openNewTabAndResolveIndex(existingIndexes: Set<number>): Promise<number | null> {
+    await controllerAction('system:shortcut', { app: 'camoufox', shortcut: 'new-tab' });
+    if (tabOpenDelayMs > 0) {
+      await new Promise((r) => setTimeout(r, tabOpenDelayMs));
+    }
+    const after = await listPagesDetailed();
+    const active = after.find((item) => item.active);
+    if (active && !existingIndexes.has(active.index)) return active.index;
+    const added = after.find((item) => !existingIndexes.has(item.index));
+    if (added) return added.index;
+    const fallback = after
+      .map((item) => item.index)
+      .filter((idx) => !existingIndexes.has(idx))
+      .sort((a, b) => a - b);
+    return fallback.length > 0 ? fallback[fallback.length - 1] : null;
+  }
+
+  async function ensureTabPool(count: number): Promise<number[]> {
+    const pages = await listPagesDetailed().catch(() => [] as Array<{ index: number; url: string; active: boolean }>);
+    const active = pages.find((item) => item.active);
+    const pool: number[] = [];
+    if (active && Number.isFinite(active.index)) {
+      pool.push(active.index);
+    } else if (pages.length > 0) {
+      pool.push(pages[0].index);
+    } else {
+      pool.push(0);
+    }
+    while (pool.length < count) {
+      const idx = await openNewTabAndResolveIndex(new Set(pool));
+      if (!Number.isFinite(Number(idx))) break;
+      const next = Number(idx);
+      if (pool.includes(next)) break;
+      pool.push(next);
+    }
+    if (pool.length > 0) {
+      await switchToPage(pool[0]).catch((): null => null);
+    }
+    return pool;
   }
   
   async function extractPostContent(): Promise<string> {
@@ -272,15 +338,23 @@ export async function execute(input: WeiboCollectFromLinksInput): Promise<WeiboC
   let persistedCount = 0;
   let totalComments = 0;
   let errors = 0;
+  let tabsUsed = 1;
   
   try {
-    const targetLinks = links.slice(0, targetCount);
-    
-    for (const link of targetLinks) {
+    const targetLinks = links.slice(0, Math.max(1, Number(targetCount || 0) || 1));
+    const tabPool = await ensureTabPool(tabCount).catch(() => [0]);
+    const roundRobinTabs = tabPool.length > 0 ? tabPool : [0];
+    tabsUsed = roundRobinTabs.length;
+    console.log(`[WeiboCollectFromLinks] tab pool ready: [${roundRobinTabs.join(', ')}]`);
+
+    for (let idx = 0; idx < targetLinks.length; idx += 1) {
+      const link = targetLinks[idx];
       processedCount++;
-      console.log(`[WeiboCollectFromLinks] Processing: ${link.statusId}`);
+      const tabIndex = roundRobinTabs[idx % roundRobinTabs.length];
+      console.log(`[WeiboCollectFromLinks] Processing: ${link.statusId} (tab=${tabIndex})`);
       
       try {
+        await switchToPage(tabIndex);
         await gotoUrl(link.safeUrl);
         let currentUrl = await getCurrentUrl();
         if (!currentUrl) {
@@ -322,6 +396,7 @@ export async function execute(input: WeiboCollectFromLinksInput): Promise<WeiboC
         postsProcessed: processedCount,
         totalComments,
         errors,
+        tabsUsed,
       },
     };
   } catch (error: any) {
@@ -331,7 +406,7 @@ export async function execute(input: WeiboCollectFromLinksInput): Promise<WeiboC
       linksPath,
       processedCount,
       persistedCount,
-      stats: { postsProcessed: processedCount, totalComments, errors },
+      stats: { postsProcessed: processedCount, totalComments, errors, tabsUsed },
       error: error.message,
     };
   }

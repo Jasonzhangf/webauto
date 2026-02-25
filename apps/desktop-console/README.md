@@ -1,5 +1,8 @@
 # WebAuto Desktop Console & UI Automation
 
+> 面向最终用户（特别是 Windows 安装/启动/UI CLI 使用/路径设置）的文档入口：
+> `../../README.md`
+
 目标：提供一个 Electron（跨平台）多 Tab 管理台，用于管理 profile 登录池、流程调用与结果浏览。UI 仅负责参数/交互，实际业务执行仍走现有 `scripts/` 与 `dist/`。
 
 ## 开发

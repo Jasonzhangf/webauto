@@ -40,6 +40,8 @@ export const weiboSearchWorkflowV1 = {
         targetCount: '$targetCount',
         maxComments: '$maxComments',
         collectComments: '$collectComments',
+        tabCount: '$tabCount',
+        tabOpenDelayMs: '$tabOpenDelayMs',
         serviceUrl: '$serviceUrl',
       },
     },

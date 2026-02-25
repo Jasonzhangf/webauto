@@ -1,10 +1,6 @@
 import { callAPI, getDomSnapshotByProfile } from '../../../utils/browser-service.mjs';
+import { isJsExecutionEnabled } from '../../../utils/js-policy.mjs';
 import { executeTabPoolOperation } from './tab-pool.mjs';
-import {
-  buildSelectorClickScript,
-  buildSelectorScrollIntoViewScript,
-  buildSelectorTypeScript,
-} from './selector-scripts.mjs';
 import { executeViewportOperation } from './viewport.mjs';
 import {
   asErrorPayload,
@@ -54,6 +50,7 @@ async function executeExternalOperationIfAny({
 }
 
 async function flashOperationViewport(profileId, params = {}) {
+  if (!isJsExecutionEnabled()) return;
   if (params.highlight === false) return;
   try {
     await callAPI('evaluate', {
@@ -77,6 +74,150 @@ async function flashOperationViewport(profileId, params = {}) {
   }
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function clamp(value, min, max) {
+  return Math.min(Math.max(value, min), max);
+}
+
+function isTargetFullyInViewport(target, margin = 6) {
+  const rect = target?.rect && typeof target.rect === 'object' ? target.rect : null;
+  const viewport = target?.viewport && typeof target.viewport === 'object' ? target.viewport : null;
+  if (!rect || !viewport) return true;
+  const vw = Number(viewport.width || 0);
+  const vh = Number(viewport.height || 0);
+  if (!Number.isFinite(vw) || !Number.isFinite(vh) || vw <= 0 || vh <= 0) return true;
+  const left = Number(rect.left || 0);
+  const top = Number(rect.top || 0);
+  const width = Math.max(0, Number(rect.width || 0));
+  const height = Math.max(0, Number(rect.height || 0));
+  const right = left + width;
+  const bottom = top + height;
+  const m = Math.max(0, Number(margin) || 0);
+  return left >= m && top >= m && right <= (vw - m) && bottom <= (vh - m);
+}
+
+function resolveScrollDeltaY(target, margin = 6) {
+  const rect = target?.rect && typeof target.rect === 'object' ? target.rect : null;
+  const viewport = target?.viewport && typeof target.viewport === 'object' ? target.viewport : null;
+  if (!rect || !viewport) return 0;
+  const vh = Number(viewport.height || 0);
+  if (!Number.isFinite(vh) || vh <= 0) return 0;
+  const top = Number(rect.top || 0);
+  const height = Math.max(0, Number(rect.height || 0));
+  const bottom = top + height;
+  const m = Math.max(0, Number(margin) || 0);
+  if (top < m) {
+    return clamp(Math.round(top - m - 24), -900, -80);
+  }
+  if (bottom > (vh - m)) {
+    return clamp(Math.round(bottom - (vh - m) + 24), 80, 900);
+  }
+  return 0;
+}
+
+async function resolveSelectorTarget(profileId, selector) {
+  const selectorLiteral = JSON.stringify(String(selector || '').trim());
+  const payload = await callAPI('evaluate', {
+    profileId,
+    script: `(() => {
+      const selector = ${selectorLiteral};
+      const nodes = Array.from(document.querySelectorAll(selector));
+      const isVisible = (node) => {
+        if (!(node instanceof Element)) return false;
+        const rect = node.getBoundingClientRect?.();
+        if (!rect || rect.width <= 0 || rect.height <= 0) return false;
+        try {
+          const style = window.getComputedStyle(node);
+          if (!style) return false;
+          if (style.display === 'none') return false;
+          if (style.visibility === 'hidden' || style.visibility === 'collapse') return false;
+          const opacity = Number.parseFloat(String(style.opacity || '1'));
+          if (Number.isFinite(opacity) && opacity <= 0.01) return false;
+        } catch {
+          return false;
+        }
+        return true;
+      };
+      const hitVisible = (node) => {
+        if (!(node instanceof Element)) return false;
+        const rect = node.getBoundingClientRect?.();
+        if (!rect) return false;
+        const x = Math.max(0, Math.min((window.innerWidth || 1) - 1, rect.left + rect.width / 2));
+        const y = Math.max(0, Math.min((window.innerHeight || 1) - 1, rect.top + rect.height / 2));
+        const top = document.elementFromPoint(x, y);
+        if (!top) return false;
+        return top === node || node.contains(top) || top.contains(node);
+      };
+      const target = nodes.find((item) => isVisible(item) && hitVisible(item))
+        || nodes.find((item) => isVisible(item))
+        || nodes[0]
+        || null;
+      if (!target) {
+        return { ok: false, error: 'selector_not_found', selector };
+      }
+      const rect = target.getBoundingClientRect?.() || { left: 0, top: 0, width: 1, height: 1 };
+      const rawCenterX = Number(rect.left) + Math.max(1, Number(rect.width) / 2);
+      const rawCenterY = Number(rect.top) + Math.max(1, Number(rect.height) / 2);
+      const viewport = {
+        width: Number(window.innerWidth || 0),
+        height: Number(window.innerHeight || 0),
+      };
+      const center = {
+        x: Math.max(1, Math.min((viewport.width || 1) - 1, Math.round(rawCenterX))),
+        y: Math.max(1, Math.min((viewport.height || 1) - 1, Math.round(rawCenterY))),
+      };
+      return {
+        ok: true,
+        selector,
+        matchedIndex: Math.max(0, nodes.indexOf(target)),
+        center,
+        rawCenter: {
+          x: rawCenterX,
+          y: rawCenterY,
+        },
+        rect: {
+          left: Number(rect.left || 0),
+          top: Number(rect.top || 0),
+          width: Number(rect.width || 0),
+          height: Number(rect.height || 0),
+        },
+        viewport,
+      };
+    })()`,
+  });
+  const result = payload?.result || payload?.data?.result || payload?.data || payload || null;
+  if (!result || result.ok !== true || !result.center) {
+    throw new Error(`Element not found: ${selector}`);
+  }
+  return result;
+}
+
+async function scrollTargetIntoViewport(profileId, selector, initialTarget, params = {}) {
+  let target = initialTarget;
+  const maxSteps = Math.max(0, Math.min(8, Number(params.maxScrollSteps ?? 3) || 3));
+  const settleMs = Math.max(0, Number(params.scrollSettleMs ?? 0) || 0);
+  const margin = Math.max(0, Number(params.viewportMargin ?? 6) || 6);
+  for (let i = 0; i < maxSteps; i += 1) {
+    if (isTargetFullyInViewport(target, margin)) break;
+    const deltaY = resolveScrollDeltaY(target, margin);
+    if (!Number.isFinite(deltaY) || Math.abs(deltaY) < 1) break;
+    const vw = Number(target?.viewport?.width || 0);
+    const vh = Number(target?.viewport?.height || 0);
+    if (Number.isFinite(vw) && vw > 2 && Number.isFinite(vh) && vh > 2) {
+      const anchorX = clamp(Math.round(vw / 2), 1, Math.max(1, vw - 1));
+      const anchorY = clamp(Math.round(vh / 2), 1, Math.max(1, vh - 1));
+      await callAPI('mouse:move', { profileId, x: anchorX, y: anchorY, steps: 1 });
+    }
+    await callAPI('mouse:wheel', { profileId, deltaX: 0, deltaY });
+    if (settleMs > 0) await sleep(settleMs);
+    target = await resolveSelectorTarget(profileId, selector);
+  }
+  return target;
+}
+
 async function executeSelectorOperation({ profileId, action, operation, params }) {
   const selector = maybeSelector({
     profileId,
@@ -85,22 +226,66 @@ async function executeSelectorOperation({ profileId, action, operation, params }
   });
   if (!selector) return asErrorPayload('CONTAINER_NOT_FOUND', `${action} requires selector/containerId`);
 
-  const highlight = params.highlight !== false;
+  let target = await resolveSelectorTarget(profileId, selector);
+  target = await scrollTargetIntoViewport(profileId, selector, target, params);
+
   if (action === 'scroll_into_view') {
-    const script = buildSelectorScrollIntoViewScript({ selector, highlight });
-    const result = await callAPI('evaluate', {
-      profileId,
-      script,
-    });
-    return { ok: true, code: 'OPERATION_DONE', message: 'scroll_into_view done', data: result };
+    await callAPI('mouse:move', { profileId, x: target.center.x, y: target.center.y, steps: 2 });
+    return {
+      ok: true,
+      code: 'OPERATION_DONE',
+      message: 'scroll_into_view done',
+      data: { selector, target },
+    };
   }
 
-  const typeText = String(params.text ?? params.value ?? '');
-  const script = action === 'click'
-    ? buildSelectorClickScript({ selector, highlight })
-    : buildSelectorTypeScript({ selector, highlight, text: typeText });
-  const result = await callAPI('evaluate', { profileId, script });
-  return { ok: true, code: 'OPERATION_DONE', message: `${action} done`, data: result };
+  if (action === 'click') {
+    const button = String(params.button || 'left').trim() || 'left';
+    const clicks = Math.max(1, Number(params.clicks ?? 1) || 1);
+    const delay = Number(params.delay);
+    const result = await callAPI('mouse:click', {
+      profileId,
+      x: target.center.x,
+      y: target.center.y,
+      button,
+      clicks,
+      ...(Number.isFinite(delay) && delay >= 0 ? { delay } : {}),
+    });
+    return { ok: true, code: 'OPERATION_DONE', message: 'click done', data: { selector, target, result } };
+  }
+
+  const text = String(params.text ?? params.value ?? '');
+  await callAPI('mouse:click', {
+    profileId,
+    x: target.center.x,
+    y: target.center.y,
+    button: 'left',
+    clicks: 1,
+    delay: 30,
+  });
+  const clearBeforeType = params.clear !== false;
+  if (clearBeforeType) {
+    await callAPI('keyboard:press', {
+      profileId,
+      key: process.platform === 'darwin' ? 'Meta+A' : 'Control+A',
+    });
+    await callAPI('keyboard:press', { profileId, key: 'Backspace' });
+  }
+  const delay = Number(params.keyDelayMs ?? params.delay);
+  await callAPI('keyboard:type', {
+    profileId,
+    text,
+    ...(Number.isFinite(delay) && delay >= 0 ? { delay } : {}),
+  });
+  if (params.pressEnter === true) {
+    await callAPI('keyboard:press', { profileId, key: 'Enter' });
+  }
+  return {
+    ok: true,
+    code: 'OPERATION_DONE',
+    message: 'type done',
+    data: { selector, target, length: text.length },
+  };
 }
 
 async function executeVerifySubscriptions({ profileId, params }) {
@@ -365,26 +550,11 @@ export async function executeOperation({ profileId, operation, context = {} }) {
     if (action === 'press_key') {
       const key = String(params.key || params.value || '').trim();
       if (!key) return asErrorPayload('OPERATION_FAILED', 'press_key requires params.key');
-      const result = await callAPI('evaluate', {
+      const delay = Number(params.delay);
+      const result = await callAPI('keyboard:press', {
         profileId: resolvedProfile,
-        script: `(async () => {
-          const target = document.activeElement || document.body || document.documentElement;
-          const key = ${JSON.stringify(key)};
-          const code = key.length === 1 ? 'Key' + key.toUpperCase() : key;
-          const opts = { key, code, bubbles: true, cancelable: true };
-          target.dispatchEvent(new KeyboardEvent('keydown', opts));
-          target.dispatchEvent(new KeyboardEvent('keypress', opts));
-          target.dispatchEvent(new KeyboardEvent('keyup', opts));
-          if (key === 'Escape') {
-            const closeButton = document.querySelector('.note-detail-mask .close-box, .note-detail-mask .close-circle');
-            if (closeButton instanceof HTMLElement) closeButton.click();
-          }
-          if (key === 'Enter' && target instanceof HTMLInputElement && target.form) {
-            if (typeof target.form.requestSubmit === 'function') target.form.requestSubmit();
-            else target.form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
-          }
-          return { key, targetTag: target?.tagName || null };
-        })()`,
+        key,
+        ...(Number.isFinite(delay) && delay >= 0 ? { delay } : {}),
       });
       return { ok: true, code: 'OPERATION_DONE', message: 'press_key done', data: result };
     }
@@ -394,10 +564,7 @@ export async function executeOperation({ profileId, operation, context = {} }) {
     }
 
     if (action === 'evaluate') {
-      const script = String(params.script || '').trim();
-      if (!script) return asErrorPayload('OPERATION_FAILED', 'evaluate requires params.script');
-      const result = await callAPI('evaluate', { profileId: resolvedProfile, script });
-      return { ok: true, code: 'OPERATION_DONE', message: 'evaluate done', data: result };
+      return asErrorPayload('JS_DISABLED', 'evaluate is disabled in webauto runtime');
     }
 
     if (action === 'click' || action === 'type' || action === 'scroll_into_view') {
