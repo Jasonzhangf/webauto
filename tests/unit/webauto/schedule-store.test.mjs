@@ -33,6 +33,11 @@ function useTempSchedulesRoot() {
   return root;
 }
 
+function encodeLockKey(value) {
+  const raw = Buffer.from(String(value || ''), 'utf8').toString('base64');
+  return raw.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '') || 'empty';
+}
+
 afterEach(() => {
   delete process.env.WEBAUTO_PATHS_SCHEDULES;
   while (tempRoots.length > 0) {
@@ -339,6 +344,62 @@ describe('schedule-store', () => {
       policy: { maxConcurrency: 2 },
     });
     assert.equal(third.ok, true);
+  });
+
+  it('reclaims stale task/resource claims when owner pid is dead', () => {
+    const root = useTempSchedulesRoot();
+    const task = addScheduleTask({
+      name: 'stale-claim-target',
+      scheduleType: 'interval',
+      intervalMinutes: 2,
+      commandType: 'xhs-unified',
+      commandArgv: { profile: 'stale-profile', keyword: 'k-stale' },
+    });
+
+    const locksRoot = path.join(root, 'locks');
+    const taskClaimsRoot = path.join(locksRoot, 'task-claims');
+    const resourceClaimsRoot = path.join(locksRoot, 'resource-claims');
+    fs.mkdirSync(taskClaimsRoot, { recursive: true });
+    fs.mkdirSync(resourceClaimsRoot, { recursive: true });
+
+    const staleLease = {
+      ownerId: 'runner-stale',
+      runToken: 'token-stale',
+      createdAt: new Date(Date.now() - 1_000).toISOString(),
+      updatedAt: new Date(Date.now() - 1_000).toISOString(),
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      pid: 999999,
+      kind: 'schedule-task',
+      taskId: task.id,
+      resourceKeys: ['profile:stale-profile'],
+      platform: 'xhs',
+    };
+    const staleResource = {
+      ...staleLease,
+      kind: 'schedule-resource',
+      resourceKey: 'profile:stale-profile',
+    };
+
+    fs.writeFileSync(
+      path.join(taskClaimsRoot, `${encodeLockKey(task.id)}.json`),
+      `${JSON.stringify(staleLease, null, 2)}\n`,
+      'utf8',
+    );
+    fs.writeFileSync(
+      path.join(resourceClaimsRoot, `${encodeLockKey('profile:stale-profile')}.json`),
+      `${JSON.stringify(staleResource, null, 2)}\n`,
+      'utf8',
+    );
+
+    const claimed = claimScheduleTask(task, {
+      ownerId: 'runner-fresh',
+      runToken: 'token-fresh',
+      leaseMs: 5_000,
+      policy: { maxConcurrency: 2 },
+    });
+    assert.equal(claimed.ok, true);
+    assert.equal(claimed.claimed, true);
+    assert.equal(claimed.ownerId, 'runner-fresh');
   });
 
   it('enforces profile resource mutex and supports policy persistence', () => {

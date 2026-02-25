@@ -130,6 +130,25 @@ function parseIsoTs(value) {
   return Number.isFinite(ts) ? ts : null;
 }
 
+function parsePid(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return Math.floor(n);
+}
+
+function isPidAlive(pid) {
+  if (!Number.isFinite(pid) || pid <= 0) return true;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    const code = String(error?.code || '').toUpperCase();
+    if (code === 'ESRCH') return false;
+    // EPERM/UNKNOWN should be treated as alive to avoid false reclamation.
+    return true;
+  }
+}
+
 function buildLeasePayload({ ownerId, runToken = null, leaseMs, meta = {}, nowMs = Date.now() }) {
   const ttl = Math.max(1_000, Math.floor(Number(leaseMs) || DEFAULT_TASK_LEASE_MS));
   const iso = new Date(nowMs).toISOString();
@@ -146,6 +165,14 @@ function buildLeasePayload({ ownerId, runToken = null, leaseMs, meta = {}, nowMs
 function isLeaseExpired(payload, nowMs = Date.now()) {
   const expiryTs = parseIsoTs(payload?.expiresAt);
   return !Number.isFinite(expiryTs) || expiryTs <= nowMs;
+}
+
+function isLeaseStale(payload, nowMs = Date.now()) {
+  if (!payload || typeof payload !== 'object') return true;
+  if (isLeaseExpired(payload, nowMs)) return true;
+  const pid = parsePid(payload?.pid);
+  if (!pid) return false;
+  return !isPidAlive(pid);
 }
 
 function safeUnlink(filePath) {
@@ -209,7 +236,7 @@ function acquireLease(filePath, { ownerId, runToken = null, leaseMs, meta = {}, 
     return { ok: true, acquired: false, renewed: true, lease: renewed };
   }
 
-  if (!isLeaseExpired(existing, nowMs)) {
+  if (!isLeaseStale(existing, nowMs)) {
     return { ok: false, reason: 'busy', lease: existing };
   }
 
@@ -250,7 +277,7 @@ function listActiveLeases(rootDir, nowMs = Date.now()) {
     if (!entry.isFile() || !entry.name.endsWith('.json')) continue;
     const fullPath = path.join(rootDir, entry.name);
     const payload = readLease(fullPath);
-    if (!payload || isLeaseExpired(payload, nowMs)) {
+    if (!payload || isLeaseStale(payload, nowMs)) {
       safeUnlink(fullPath);
       continue;
     }
