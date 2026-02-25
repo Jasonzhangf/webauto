@@ -113,6 +113,12 @@ const DESKTOP_HEARTBEAT_FILE = path.join(
   'run',
   'desktop-console-heartbeat.json',
 );
+const DESKTOP_LIFECYCLE_LOG_FILE = path.join(
+  os.homedir(),
+  '.webauto',
+  'logs',
+  'desktop-lifecycle.jsonl',
+);
 const profileStore = createProfileStore({ repoRoot: REPO_ROOT });
 const XHS_SCRIPTS_ROOT = path.join(REPO_ROOT, 'scripts', 'xiaohongshu');
 const XHS_FULL_COLLECT_RE = /collect-content\.mjs$/;
@@ -153,6 +159,21 @@ function configureElectronPaths() {
 
 function now() {
   return Date.now();
+}
+
+async function appendDesktopLifecycle(event: string, extra: Record<string, any> = {}) {
+  const payload = {
+    ts: new Date().toISOString(),
+    event: String(event || 'unknown').trim() || 'unknown',
+    pid: process.pid,
+    ...extra,
+  };
+  try {
+    await fs.mkdir(path.dirname(DESKTOP_LIFECYCLE_LOG_FILE), { recursive: true });
+    await fs.appendFile(DESKTOP_LIFECYCLE_LOG_FILE, `${JSON.stringify(payload)}\n`, 'utf8');
+  } catch {
+    // ignore lifecycle log failures
+  }
 }
 
 class GroupQueue {
@@ -304,6 +325,7 @@ configureElectronPaths();
 
 const singleInstanceLock = app.requestSingleInstanceLock();
 if (!singleInstanceLock) {
+  void appendDesktopLifecycle('single_instance_lock_failed');
   app.quit();
 }
 
@@ -318,6 +340,7 @@ function requestAppRestart(reason = 'ui_cli') {
     return { accepted: false, reason: normalizedReason };
   }
   restartRequested = true;
+  void appendDesktopLifecycle('restart_requested', { reason: normalizedReason });
   console.warn(`[desktop-console] restart requested: ${normalizedReason}`);
   const w = getWin();
   if (w) {
@@ -1207,11 +1230,40 @@ function createWindow() {
   });
 
   const htmlPath = path.join(APP_ROOT, 'dist', 'renderer', 'index.html');
+  void appendDesktopLifecycle('window_created', {
+    width: win.getBounds().width,
+    height: win.getBounds().height,
+    title: VERSION_INFO.windowTitle,
+  });
+  win.on('close', () => {
+    void appendDesktopLifecycle('window_close');
+  });
+  win.on('closed', () => {
+    void appendDesktopLifecycle('window_closed');
+  });
+  win.on('unresponsive', () => {
+    void appendDesktopLifecycle('window_unresponsive');
+  });
+  win.webContents.on('render-process-gone', (_event, details) => {
+    void appendDesktopLifecycle('render_process_gone', {
+      reason: String(details?.reason || '').trim() || null,
+      exitCode: Number.isFinite(Number(details?.exitCode)) ? Number(details?.exitCode) : null,
+    });
+  });
+  win.webContents.on('did-fail-load', (_event, code, desc, validatedURL, isMainFrame) => {
+    void appendDesktopLifecycle('did_fail_load', {
+      code,
+      desc: String(desc || ''),
+      url: String(validatedURL || ''),
+      isMainFrame: Boolean(isMainFrame),
+    });
+  });
   void win.loadFile(htmlPath);
   ensureStateBridge();
 }
 
 app.on('window-all-closed', () => {
+  void appendDesktopLifecycle('window_all_closed');
   void ensureAppExitCleanup('window_closed');
   // macOS 下关闭窗口后也退出应用，避免命令行挂起
   app.quit();
@@ -1219,14 +1271,25 @@ app.on('window-all-closed', () => {
 
 // 确保窗口关闭时命令行能退出
 app.on('before-quit', () => {
+  void appendDesktopLifecycle('before_quit');
   void ensureAppExitCleanup('before_quit');
 });
 
 app.on('will-quit', () => {
+  void appendDesktopLifecycle('will_quit');
   void ensureAppExitCleanup('will_quit', { stopStateBridge: true });
 });
 
+app.on('quit', (_evt, exitCode) => {
+  void appendDesktopLifecycle('quit', { exitCode });
+});
+
+process.on('exit', (code) => {
+  void appendDesktopLifecycle('process_exit', { code });
+});
+
 app.whenReady().then(async () => {
+  void appendDesktopLifecycle('app_ready');
   startCoreServiceHeartbeat();
   const started = await startCoreDaemon().catch((err) => {
     console.error('[desktop-console] core services startup failed', err);
@@ -1243,12 +1306,19 @@ app.whenReady().then(async () => {
   createWindow();
   try {
     await uiCliBridge.start();
+    void appendDesktopLifecycle('ui_cli_bridge_started');
   } catch (err) {
+    void appendDesktopLifecycle('ui_cli_bridge_start_failed', {
+      error: (err as any)?.message || String(err),
+    });
     console.error('[desktop-console] ui-cli bridge start failed', err);
     await ensureAppExitCleanup('ui_cli_bridge_start_failed', { stopStateBridge: true }).catch(() => null);
     app.exit(1);
   }
 }).catch(async (err) => {
+  void appendDesktopLifecycle('app_startup_exception', {
+    error: (err as any)?.message || String(err),
+  });
   console.error('[desktop-console] fatal startup error', err);
   await ensureAppExitCleanup('startup_exception', { stopStateBridge: true }).catch(() => null);
   app.exit(1);

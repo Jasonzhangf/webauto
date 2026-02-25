@@ -44,6 +44,7 @@ const DEFAULT_PORT = 7716;
 const DEFAULT_SNAPSHOT_TIMEOUT_MS = 35_000;
 const DEFAULT_ACTION_TIMEOUT_MS = 30_000;
 const DEFAULT_WAIT_PROBE_TIMEOUT_MS = 3_000;
+const UI_CLI_ACTION_LOG_FILE = path.join(resolveWebautoRoot(), 'logs', 'ui-cli-actions.jsonl');
 
 function normalizePathForPlatform(raw: string, platform = process.platform) {
   const input = String(raw || '').trim();
@@ -132,6 +133,40 @@ function toActionError(input: Partial<UiCliAction> | null | undefined, error: st
     ...extra,
   };
   return payload;
+}
+
+function clipText(value: unknown, maxLen = 220): string {
+  const text = String(value ?? '');
+  if (text.length <= maxLen) return text;
+  return `${text.slice(0, Math.max(0, maxLen - 3))}...`;
+}
+
+function summarizeAction(input: Partial<UiCliAction> | null | undefined) {
+  return {
+    action: String(input?.action || '').trim() || null,
+    selector: String(input?.selector || '').trim() || null,
+    tabId: String(input?.tabId || '').trim() || null,
+    tabLabel: String(input?.tabLabel || '').trim() || null,
+    state: String(input?.state || '').trim() || null,
+    key: String(input?.key || '').trim() || null,
+    text: clipText(input?.text ?? '', 160) || null,
+    value: clipText(input?.value ?? '', 160) || null,
+    timeoutMs: readInt(input?.timeoutMs, 0) || null,
+    intervalMs: readInt(input?.intervalMs, 0) || null,
+    nth: Number.isFinite(Number(input?.nth)) ? Math.floor(Number(input?.nth)) : null,
+    exact: input?.exact === true ? true : null,
+    detailed: input?.detailed === true ? true : null,
+  };
+}
+
+async function appendActionLog(entry: Record<string, any>) {
+  const payload = { ts: new Date().toISOString(), ...entry };
+  try {
+    await fs.mkdir(path.dirname(UI_CLI_ACTION_LOG_FILE), { recursive: true });
+    await fs.appendFile(UI_CLI_ACTION_LOG_FILE, `${JSON.stringify(payload)}\n`, 'utf8');
+  } catch {
+    // ignore action log failures
+  }
 }
 
 async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
@@ -532,7 +567,23 @@ export class UiCliBridge {
     }
     if (method === 'POST' && url.pathname === '/action') {
       const body = await parseBody(req);
+      const actionId = `act-${Date.now().toString(36)}-${Math.random().toString(16).slice(2, 8)}`;
+      const startedAt = Date.now();
+      await appendActionLog({
+        event: 'action.request',
+        actionId,
+        method,
+        path: url.pathname,
+        payload: summarizeAction(body || {}),
+      });
       const result = await this.handleAction(body || {});
+      await appendActionLog({
+        event: 'action.response',
+        actionId,
+        elapsedMs: Date.now() - startedAt,
+        ok: result?.ok === true,
+        error: result?.ok === true ? null : String(result?.error || 'action_failed'),
+      });
       return sendJson(res, result.ok ? 200 : 400, result);
     }
     return sendJson(res, 404, { ok: false, error: 'not_found' });
