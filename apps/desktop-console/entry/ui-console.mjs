@@ -94,8 +94,17 @@ function checkBuildStatus() {
   return existsSync(DIST_MAIN);
 }
 
-function quotePsSingle(value) {
-  return String(value || '').replace(/'/g, "''");
+function resolveElectronBin() {
+  const distDir = path.join(APP_ROOT, 'node_modules', 'electron', 'dist');
+  const candidates = process.platform === 'win32'
+    ? [path.join(distDir, 'electron.exe')]
+    : (process.platform === 'darwin'
+      ? [
+        path.join(distDir, 'electron'),
+        path.join(distDir, 'Electron.app', 'Contents', 'MacOS', 'Electron'),
+      ]
+      : [path.join(distDir, 'electron')]);
+  return candidates.find((item) => existsSync(item)) || candidates[0];
 }
 
 function sleep(ms) {
@@ -174,9 +183,7 @@ async function startConsole(noDaemon = false) {
   if (noDaemon) env.WEBAUTO_NO_DAEMON = '1';
   const detached = !noDaemon;
   const stdio = detached ? 'ignore' : 'inherit';
-  const electronBin = process.platform === 'win32'
-    ? path.join(APP_ROOT, 'node_modules', 'electron', 'dist', 'electron.exe')
-    : path.join(APP_ROOT, 'node_modules', 'electron', 'dist', 'electron');
+  const electronBin = resolveElectronBin();
   if (!existsSync(electronBin)) {
     throw new Error(`electron binary not found: ${electronBin}`);
   }
@@ -184,12 +191,12 @@ async function startConsole(noDaemon = false) {
   const spawnArgs = [DIST_MAIN];
 
   if (process.platform === 'win32' && detached) {
-    const filePath = electronBin;
-    const argList = [DIST_MAIN];
-    const psArgList = argList.map((item) => `'${quotePsSingle(item)}'`).join(',');
-    const psScript = `$p = Start-Process -FilePath '${quotePsSingle(filePath)}' -ArgumentList @(${psArgList}) -WorkingDirectory '${quotePsSingle(APP_ROOT)}' -PassThru; Write-Output $p.Id`;
+    const escaped = (input) => String(input || '').replace(/"/g, '""');
+    const commandLine = [`"${escaped(electronBin)}"`]
+      .concat(spawnArgs.map((arg) => `"${escaped(arg)}"`))
+      .join(' ');
     const pid = await new Promise((resolve, reject) => {
-      const child = spawn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', psScript], {
+      const child = spawn('wmic', ['process', 'call', 'create', commandLine], {
         cwd: APP_ROOT,
         env,
         stdio: ['ignore', 'pipe', 'pipe'],
@@ -201,12 +208,12 @@ async function startConsole(noDaemon = false) {
       child.stderr.on('data', (chunk) => { stderr += String(chunk || ''); });
       child.on('error', reject);
       child.on('close', (code) => {
-        if (code === 0) {
-          const pid = String(stdout || '').trim().split(/\s+/).pop();
-          resolve(pid || 'unknown');
-        } else {
-          reject(new Error(`Start-Process failed (${code}): ${stderr.trim() || stdout.trim() || 'unknown error'}`));
+        if (code !== 0) {
+          reject(new Error(`wmic create failed (${code}): ${stderr.trim() || stdout.trim() || 'unknown error'}`));
+          return;
         }
+        const match = stdout.match(/ProcessId\s*=\s*(\d+)/i);
+        resolve(match?.[1] || 'unknown');
       });
     });
     const healthy = await waitForCoreServicesHealthy();
