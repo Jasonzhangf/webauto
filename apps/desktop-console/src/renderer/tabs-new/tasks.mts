@@ -700,6 +700,8 @@ export function renderTasksPanel(root: HTMLElement, ctx: any) {
       'max-notes': data.targetCount,
       target: data.targetCount,
       env: data.env,
+      // Desktop-triggered runs must keep UI alive; service reset would call ui cli stop/start.
+      'service-reset': false,
       'do-comments': data.collectComments,
       'fetch-body': data.collectBody,
       'do-likes': data.doLikes,

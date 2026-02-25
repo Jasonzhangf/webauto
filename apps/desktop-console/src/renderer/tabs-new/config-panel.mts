@@ -432,6 +432,8 @@ export function renderConfigPanel(root: HTMLElement, ctx: any) {
       keyword: keywordInput.value.trim(),
       'max-notes': readNumber(targetInput, DEFAULT_MAX_NOTES, 1),
       env: envSelect.value || 'debug',
+      // Keep desktop UI alive for console-initiated runs.
+      'service-reset': false,
       'fetch-body': fetchBodyCb.checked,
       'do-comments': fetchCommentsCb.checked,
       'persist-comments': fetchCommentsCb.checked,

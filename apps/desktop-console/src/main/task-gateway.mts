@@ -321,6 +321,7 @@ export async function runEphemeralTask(options: GatewayOptions, input: TaskRunEp
           '--env', env,
           '--do-comments', String(asBool(argv['do-comments'], true)),
           '--fetch-body', String(asBool(argv['fetch-body'], true)),
+          '--service-reset', String(asBool(argv['service-reset'], false)),
           '--do-likes', String(asBool(argv['do-likes'], false)),
           '--like-keywords', asText(argv['like-keywords']),
           '--ui-trigger-id', uiTriggerId,
