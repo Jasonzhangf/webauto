@@ -294,7 +294,9 @@ async function moveMouse(profileId, x, y, steps = 2) {
 }
 
 async function clickPoint(profileId, point, options = {}) {
-  await moveMouse(profileId, point.x, point.y, options.steps ?? 3);
+  if (options.moveFirst === true) {
+    await moveMouse(profileId, point.x, point.y, options.steps ?? 3);
+  }
   await callAPI('mouse:click', {
     profileId,
     x: Math.max(1, Math.round(Number(point.x) || 1)),
