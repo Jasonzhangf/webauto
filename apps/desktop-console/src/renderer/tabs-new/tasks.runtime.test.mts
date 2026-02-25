@@ -279,6 +279,47 @@ test('save and run in immediate mode still persists task before run', async () =
   assert.equal(alerts.length, 0);
 });
 
+test('save with same params does not create duplicate task', async () => {
+  const bundle = createMockCtx();
+  const root = document.createElement('div');
+  renderTasksPanel(root, bundle.ctx);
+  await flush(8);
+
+  const keywordInput = root.querySelector('#task-keyword') as HTMLInputElement;
+  const profileInput = root.querySelector('#task-profile') as HTMLInputElement;
+  const targetInput = root.querySelector('#task-target') as HTMLInputElement;
+  const saveBtn = root.querySelector('#task-save-btn') as HTMLButtonElement;
+  const resetBtn = root.querySelector('#task-reset-btn') as HTMLButtonElement;
+
+  keywordInput.value = '春晚';
+  profileInput.value = 'xhs-dedup';
+  targetInput.value = '88';
+  saveBtn.click();
+  await flush(8);
+
+  const firstMatch = bundle.state.tasks.find((row: any) => String(row.commandArgv?.profile || '') === 'xhs-dedup');
+  assert.ok(firstMatch);
+  const firstId = String(firstMatch.id);
+  const countAfterFirst = bundle.state.tasks.length;
+
+  resetBtn.click();
+  await flush(2);
+  keywordInput.value = '春晚';
+  profileInput.value = 'xhs-dedup';
+  targetInput.value = '88';
+  saveBtn.click();
+  await flush(8);
+
+  const dedupRows = bundle.state.tasks.filter((row: any) => String(row.commandArgv?.profile || '') === 'xhs-dedup');
+  assert.equal(dedupRows.length, 1);
+  assert.equal(String(dedupRows[0].id), firstId);
+  assert.equal(bundle.state.tasks.length, countAfterFirst);
+
+  const saveCalls = bundle.calls.scheduleInvoke.filter((item) => String(item?.action || '') === 'save');
+  assert.equal(saveCalls.length >= 2, true);
+  assert.equal(String(saveCalls[1]?.payload?.id || ''), firstId);
+});
+
 test('save and run uses schedule run and no direct spawn', async () => {
   const bundle = createMockCtx();
   const root = document.createElement('div');

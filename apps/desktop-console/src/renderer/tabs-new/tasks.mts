@@ -33,6 +33,23 @@ type TaskFormData = {
   maxRuns: number | null;
 };
 type RunMeta = Pick<TaskFormData, 'taskType' | 'profileId' | 'keyword' | 'targetCount'>;
+type TaskDedupFingerprint = {
+  taskType: string;
+  profileId: string;
+  keyword: string;
+  targetCount: number;
+  env: 'debug' | 'prod';
+  userId: string;
+  collectComments: boolean;
+  collectBody: boolean;
+  doLikes: boolean;
+  likeKeywords: string;
+  scheduleMode: TaskFormData['scheduleMode'];
+  periodicType: TaskFormData['periodicType'];
+  intervalMinutes: number;
+  runAt: string | null;
+  maxRuns: number | null;
+};
 
 const DEFAULT_FORM: TaskFormData = {
   name: '',
@@ -58,6 +75,22 @@ const DEFAULT_FORM: TaskFormData = {
 function parseSortableTime(value: string | null | undefined): number {
   const ts = Date.parse(String(value || ''));
   return Number.isFinite(ts) ? ts : 0;
+}
+
+function normalizeCsvKeywords(value: string): string {
+  return String(value || '')
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .join(',');
+}
+
+function normalizeIsoOrNull(value: string | null | undefined): string | null {
+  const text = String(value || '').trim();
+  if (!text) return null;
+  const ts = Date.parse(text);
+  if (!Number.isFinite(ts)) return text;
+  return new Date(ts).toISOString();
 }
 
 export function renderTasksPanel(root: HTMLElement, ctx: any) {
@@ -229,6 +262,11 @@ export function renderTasksPanel(root: HTMLElement, ctx: any) {
       <button id="task-history-edit-btn" class="secondary">载入编辑</button>
       <button id="task-history-clone-btn" class="secondary">载入另存</button>
       <button id="task-history-run-btn">立即执行</button>
+      <label style="display:flex;align-items:center;gap:6px;margin-left:6px;">
+        <input id="task-select-all" type="checkbox" />
+        <span style="font-size:12px;">全选</span>
+      </label>
+      <button id="task-history-delete-btn" class="secondary">批量删除</button>
       <button id="task-history-refresh-btn" class="secondary">刷新</button>
     </div>
     <div class="muted" style="font-size:12px; margin-bottom:6px;">双击列表项可直接切换为当前任务。</div>
@@ -270,6 +308,8 @@ export function renderTasksPanel(root: HTMLElement, ctx: any) {
   const historyEditBtn = recentCard.querySelector('#task-history-edit-btn') as HTMLButtonElement;
   const historyCloneBtn = recentCard.querySelector('#task-history-clone-btn') as HTMLButtonElement;
   const historyRunBtn = recentCard.querySelector('#task-history-run-btn') as HTMLButtonElement;
+  const taskSelectAll = recentCard.querySelector('#task-select-all') as HTMLInputElement;
+  const historyDeleteBtn = recentCard.querySelector('#task-history-delete-btn') as HTMLButtonElement;
   const historyRefreshBtn = recentCard.querySelector('#task-history-refresh-btn') as HTMLButtonElement;
   const recentTasksList = recentCard.querySelector('#recent-tasks-list') as HTMLDivElement;
   const statRunning = statsCard.querySelector('#stat-running') as HTMLDivElement;
@@ -279,6 +319,7 @@ export function renderTasksPanel(root: HTMLElement, ctx: any) {
   let tasks: ScheduleTask[] = [];
   let accountRows: UiAccountProfile[] = [];
   const activeRunIds = new Set<string>();
+  const selectedTaskIds = new Set<string>();
   let unsubscribeActiveRuns: (() => void) | null = null;
 
   const joinPath = (...parts: string[]) => {
@@ -504,21 +545,50 @@ export function renderTasksPanel(root: HTMLElement, ctx: any) {
     }
   }
 
+  function updateSelectionUi(rows: ScheduleTask[]) {
+    const availableIds = new Set(rows.map((row) => row.id));
+    for (const id of Array.from(selectedTaskIds)) {
+      if (!availableIds.has(id)) selectedTaskIds.delete(id);
+    }
+    const total = rows.length;
+    const selected = rows.filter((row) => selectedTaskIds.has(row.id)).length;
+    taskSelectAll.checked = total > 0 && selected === total;
+    taskSelectAll.indeterminate = selected > 0 && selected < total;
+    historyDeleteBtn.disabled = selected === 0;
+    historyDeleteBtn.textContent = selected > 0 ? `批量删除(${selected})` : '批量删除';
+  }
+
   function renderRecentTasks() {
     const rows = sortedTasksByRecent();
     if (rows.length === 0) {
       recentTasksList.innerHTML = '<div class="muted" style="font-size:12px;">暂无任务</div>';
+      updateSelectionUi([]);
       return;
     }
     recentTasksList.innerHTML = rows.map((task) => `
       <div class="task-row task-item" data-id="${task.id}" style="display:flex;gap:var(--gap-sm);padding:var(--gap-xs)0;border-bottom:1px solid var(--border-subtle);align-items:center;cursor:pointer;">
+        <input class="task-select-checkbox" data-id="${task.id}" type="checkbox" style="margin:0;" ${selectedTaskIds.has(task.id) ? 'checked' : ''} />
         <span style="flex:1;font-size:12px;">${task.name || task.id}</span>
         <span style="font-size:11px;color:var(--text-tertiary);">${task.commandType}</span>
         <span style="font-size:11px;color:${task.enabled ? 'var(--accent-success)' : 'var(--text-muted)'};">${task.enabled ? '启用' : '禁用'}</span>
         <button class="secondary edit-task-btn" data-id="${task.id}" style="padding:2px 6px;font-size:10px;height:auto;">编辑</button>
         <button class="run-task-btn" data-id="${task.id}" style="padding:2px 6px;font-size:10px;height:auto;">立即执行</button>
+        <button class="secondary delete-task-btn" data-id="${task.id}" style="padding:2px 6px;font-size:10px;height:auto;">删除</button>
       </div>
     `).join('');
+    recentTasksList.querySelectorAll('.task-select-checkbox').forEach((checkbox) => {
+      checkbox.addEventListener('click', (event) => {
+        event.stopPropagation();
+      });
+      checkbox.addEventListener('change', () => {
+        const input = checkbox as HTMLInputElement;
+        const taskId = String(input.dataset.id || '').trim();
+        if (!taskId) return;
+        if (input.checked) selectedTaskIds.add(taskId);
+        else selectedTaskIds.delete(taskId);
+        updateSelectionUi(rows);
+      });
+    });
     recentTasksList.querySelectorAll('.task-item').forEach((item) => {
       item.addEventListener('dblclick', () => {
         const taskId = (item as HTMLDivElement).dataset.id || '';
@@ -545,6 +615,14 @@ export function renderTasksPanel(root: HTMLElement, ctx: any) {
         void runTaskImmediately(task);
       });
     });
+    recentTasksList.querySelectorAll('.delete-task-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const taskId = String((btn as HTMLButtonElement).dataset.id || '').trim();
+        if (!taskId) return;
+        void deleteTasks([taskId]);
+      });
+    });
+    updateSelectionUi(rows);
   }
 
   function updateStats() {
@@ -733,24 +811,160 @@ export function renderTasksPanel(root: HTMLElement, ctx: any) {
     await runSavedTask(taskId, taskToRunMeta(task));
   }
 
+  function toTaskDedupFingerprintFromForm(data: TaskFormData): TaskDedupFingerprint {
+    const scheduleMode = data.scheduleMode;
+    const periodicType = scheduleMode === 'periodic' ? data.periodicType : 'interval';
+    const intervalMinutes = scheduleMode === 'periodic' ? Math.max(1, Number(data.intervalMinutes || 30) || 30) : 0;
+    const runAt = scheduleMode === 'scheduled'
+      || (scheduleMode === 'periodic' && (periodicType === 'daily' || periodicType === 'weekly'))
+      ? normalizeIsoOrNull(data.runAt)
+      : null;
+    const maxRuns = scheduleMode === 'periodic'
+      ? (Number.isFinite(Number(data.maxRuns || 0)) && Number(data.maxRuns) > 0 ? Math.max(1, Math.floor(Number(data.maxRuns))) : null)
+      : null;
+    return {
+      taskType: String(data.taskType || 'xhs-unified').trim() || 'xhs-unified',
+      profileId: String(data.profileId || '').trim(),
+      keyword: String(data.keyword || '').trim(),
+      targetCount: Math.max(1, Number(data.targetCount || 50) || 50),
+      env: String(data.env || 'debug').trim() === 'prod' ? 'prod' : 'debug',
+      userId: String(data.userId || '').trim(),
+      collectComments: data.collectComments !== false,
+      collectBody: data.collectBody !== false,
+      doLikes: data.doLikes === true,
+      likeKeywords: normalizeCsvKeywords(data.likeKeywords),
+      scheduleMode,
+      periodicType,
+      intervalMinutes,
+      runAt,
+      maxRuns,
+    };
+  }
+
+  function toTaskDedupFingerprintFromTask(task: ScheduleTask): TaskDedupFingerprint {
+    const uiSchedule = inferUiScheduleEditorState(task);
+    const scheduleMode = uiSchedule.mode;
+    const periodicType = uiSchedule.periodicType;
+    const intervalMinutes = scheduleMode === 'periodic'
+      ? Math.max(1, Number(task.intervalMinutes || 30) || 30)
+      : 0;
+    const runAt = scheduleMode === 'scheduled'
+      || (scheduleMode === 'periodic' && (periodicType === 'daily' || periodicType === 'weekly'))
+      ? normalizeIsoOrNull(task.runAt)
+      : null;
+    const maxRuns = scheduleMode === 'periodic'
+      ? (Number.isFinite(Number(task.maxRuns || 0)) && Number(task.maxRuns) > 0
+        ? Math.max(1, Math.floor(Number(task.maxRuns)))
+        : null)
+      : null;
+    return {
+      taskType: String(task.commandType || 'xhs-unified').trim() || 'xhs-unified',
+      profileId: String(task.commandArgv?.profile || task.commandArgv?.profileId || '').trim(),
+      keyword: String(task.commandArgv?.keyword || task.commandArgv?.k || '').trim(),
+      targetCount: Math.max(1, Number(task.commandArgv?.['max-notes'] ?? task.commandArgv?.target ?? 50) || 50),
+      env: String(task.commandArgv?.env || 'debug').trim() === 'prod' ? 'prod' : 'debug',
+      userId: String(task.commandArgv?.['user-id'] || task.commandArgv?.userId || '').trim(),
+      collectComments: task.commandArgv?.['do-comments'] !== false,
+      collectBody: task.commandArgv?.['fetch-body'] !== false,
+      doLikes: task.commandArgv?.['do-likes'] === true,
+      likeKeywords: normalizeCsvKeywords(String(task.commandArgv?.['like-keywords'] || '').trim()),
+      scheduleMode,
+      periodicType,
+      intervalMinutes,
+      runAt,
+      maxRuns,
+    };
+  }
+
+  function toDedupKey(fingerprint: TaskDedupFingerprint): string {
+    return JSON.stringify(fingerprint);
+  }
+
+  function findDuplicateTaskByParams(data: TaskFormData): ScheduleTask | null {
+    const editingId = String(data.id || '').trim();
+    if (editingId) return getTaskById(editingId);
+    const dedupKey = toDedupKey(toTaskDedupFingerprintFromForm(data));
+    const rows = sortedTasksByRecent();
+    for (const row of rows) {
+      if (toDedupKey(toTaskDedupFingerprintFromTask(row)) === dedupKey) return row;
+    }
+    return null;
+  }
+
+  async function deleteTasks(taskIds: string[]) {
+    const uniqueIds = Array.from(new Set(taskIds.map((item) => String(item || '').trim()).filter(Boolean)));
+    if (uniqueIds.length === 0) {
+      alert('请先选择要删除的任务');
+      return;
+    }
+    const confirmed = window.confirm(`确认删除 ${uniqueIds.length} 个任务吗？此操作不可撤销。`);
+    if (!confirmed) return;
+
+    historyDeleteBtn.disabled = true;
+    try {
+      const failed: string[] = [];
+      const deleted = new Set<string>();
+      for (const taskId of uniqueIds) {
+        try {
+          await invokeSchedule({ action: 'delete', taskId });
+          deleted.add(taskId);
+        } catch {
+          failed.push(taskId);
+        }
+      }
+      for (const taskId of deleted) {
+        selectedTaskIds.delete(taskId);
+      }
+      if (deleted.has(String(editingIdInput.value || '').trim())) {
+        resetForm();
+      }
+      if (deleted.has(String(historySelect.value || '').trim())) {
+        historySelect.value = '';
+      }
+      await loadTasks();
+      if (failed.length > 0) {
+        alert(`已删除 ${deleted.size} 个任务，失败 ${failed.length} 个`);
+      }
+    } finally {
+      historyDeleteBtn.disabled = false;
+    }
+  }
+
   async function saveTask(runImmediately = false) {
     const data = collectFormData();
+    if (!String(data.id || '').trim()) {
+      const duplicate = findDuplicateTaskByParams(data);
+      if (duplicate) {
+        data.id = duplicate.id;
+        editingIdInput.value = duplicate.id;
+        updateFormTitle('edit');
+      }
+    }
     saveBtn.disabled = true;
     runBtn.disabled = true;
     runEphemeralBtn.disabled = true;
+    let savedTaskId = '';
+    let resolvedProfile = String(data.profileId || '').trim();
     try {
       const out = await invokeSchedule({ action: 'save', payload: toSchedulePayload(data) });
       const taskId = String(out?.task?.id || data.id || '').trim();
       if (!taskId) {
         throw new Error('task id missing after save');
       }
+      savedTaskId = taskId;
       editingIdInput.value = taskId;
       updateFormTitle('edit');
       await loadTasks();
       historySelect.value = taskId;
+      resolvedProfile = String(out?.task?.commandArgv?.profile || data.profileId || '').trim();
+    } catch (err: any) {
+      alert(`保存失败: ${err?.message || String(err)}`);
+      return;
+    }
+
+    try {
       if (runImmediately) {
-        const resolvedProfile = String(out?.task?.commandArgv?.profile || data.profileId || '').trim();
-        await runSavedTask(taskId, {
+        await runSavedTask(savedTaskId, {
           taskType: data.taskType,
           profileId: resolvedProfile,
           keyword: data.keyword,
@@ -760,7 +974,11 @@ export function renderTasksPanel(root: HTMLElement, ctx: any) {
         alert('任务已保存');
       }
     } catch (err: any) {
-      alert(`保存失败: ${err?.message || String(err)}`);
+      if (runImmediately) {
+        alert(`任务已保存，但执行失败: ${err?.message || String(err)}`);
+      } else {
+        alert(`执行失败: ${err?.message || String(err)}`);
+      }
     } finally {
       saveBtn.disabled = false;
       runBtn.disabled = false;
@@ -839,6 +1057,18 @@ export function renderTasksPanel(root: HTMLElement, ctx: any) {
   resetBtn.addEventListener('click', resetForm);
   quotaRefreshBtn.addEventListener('click', () => { void loadQuotaStatus(); });
   historyRefreshBtn.addEventListener('click', () => { void loadTasks(); });
+  taskSelectAll.addEventListener('change', () => {
+    const rows = sortedTasksByRecent();
+    if (taskSelectAll.checked) {
+      for (const row of rows) selectedTaskIds.add(row.id);
+    } else {
+      selectedTaskIds.clear();
+    }
+    renderRecentTasks();
+  });
+  historyDeleteBtn.addEventListener('click', () => {
+    void deleteTasks(Array.from(selectedTaskIds));
+  });
   historyEditBtn.addEventListener('click', () => {
     const task = selectedHistoryTask();
     if (!task) {
