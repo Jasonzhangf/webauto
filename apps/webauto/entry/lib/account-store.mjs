@@ -413,7 +413,7 @@ function resolveProfileCoverage(rows) {
         platforms: new Set(),
       });
     }
-    if (row?.valid === true && normalizeText(row?.accountId)) {
+    if (hasPersistentAccountId(row)) {
       byProfile.get(profileId).platforms.add(normalizePlatform(row.platform));
     }
   }
@@ -840,9 +840,29 @@ export function upsertProfileAccountState(input = {}) {
 
 export function markProfileInvalid(profileId, reason = 'login_guard', platform = DEFAULT_PLATFORM) {
   const id = ensureSafeName(normalizeText(profileId), 'profileId');
+  const normalizedPlatform = normalizePlatform(platform);
+  const index = loadIndex();
+  const existing = resolveAccountByProfile(index, id, normalizedPlatform);
+  if (existing && hasPersistentAccountId(existing)) {
+    const next = {
+      ...existing,
+      status: STATUS_INVALID,
+      valid: false,
+      reason: normalizeText(reason) || 'invalid',
+      detectedAt: nowIso(),
+      updatedAt: nowIso(),
+    };
+    const rowIndex = index.accounts.findIndex((item) => item?.id === existing.id);
+    if (rowIndex >= 0) {
+      index.accounts[rowIndex] = next;
+      saveIndex(index);
+      persistAccountMeta(next);
+      return buildProfileAccountView(id, next);
+    }
+  }
   return upsertProfileAccountState({
     profileId: id,
-    platform: normalizePlatform(platform),
+    platform: normalizedPlatform,
     accountId: null,
     reason,
   });
@@ -875,7 +895,7 @@ export function cleanupIncompleteProfiles(options = {}) {
     }
     const entry = byProfile.get(profileId);
     if (row?.id) entry.accountRecordIds.push(row.id);
-    if (normalizeText(row?.accountId) && normalizeStatus(row?.status) === STATUS_VALID) {
+    if (hasPersistentAccountId(row)) {
       entry.platforms.add(normalizePlatform(row?.platform));
     }
   }

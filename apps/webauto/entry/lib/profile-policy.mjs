@@ -32,7 +32,7 @@ export function assertProfileUsable(profileId) {
     throw new Error(`profile not found: ${id}. create/login account profile first`);
   }
   if (!isProfileSaved(id)) {
-    throw new Error(`profile not saved: ${id}. require at least one valid social account binding`);
+    throw new Error(`profile not saved: ${id}. require at least one persisted social account binding`);
   }
   return id;
 }
