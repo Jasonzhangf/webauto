@@ -434,7 +434,24 @@ export function renderAccountManager(root: HTMLElement, ctx: any) {
     const alias = newAccountAliasInput.value.trim();
 
     try {
-      // Create account + profile + fingerprint first.
+      // Explicitly create profile first; account add no longer allows implicit profile creation.
+      const profileOut = await ctx.api.cmdRunJson({
+        title: 'profile add',
+        cwd: '',
+        args: [
+          ctx.api.pathJoin('apps', 'webauto', 'entry', 'profilepool.mjs'),
+          'add',
+          'profile',
+          '--json',
+        ],
+      });
+      const createdProfileId = String(profileOut?.json?.profileId || '').trim();
+      if (!profileOut?.ok || !createdProfileId) {
+        alert('创建 profile 失败: ' + (profileOut?.error || '未知错误'));
+        return;
+      }
+
+      // Create account record on created profile.
       const out = await ctx.api.cmdRunJson({
         title: 'account add',
         cwd: '',
@@ -443,6 +460,8 @@ export function renderAccountManager(root: HTMLElement, ctx: any) {
           'add',
           '--platform',
           'xiaohongshu',
+          '--profile',
+          createdProfileId,
           '--status',
           'pending',
           ...(alias ? ['--alias', alias] : []),
@@ -450,7 +469,7 @@ export function renderAccountManager(root: HTMLElement, ctx: any) {
         ],
       });
 
-      const profileId = String(out?.json?.account?.profileId || '').trim();
+      const profileId = String(out?.json?.account?.profileId || createdProfileId).trim();
       if (!out?.ok || !profileId) {
         alert('创建账号失败: ' + (out?.error || '未知错误'));
         return;
