@@ -17,6 +17,7 @@ import {
   ensureDir,
   loadLikedSignatures,
   makeLikeSignature,
+  readJsonlRows,
   mergeLinksJsonl,
   mergeCommentsJsonl,
   resolveXhsOutputContext,
@@ -270,6 +271,26 @@ async function sleepRandom(minMs, maxMs, pushTrace, stage, extra = {}) {
   return waitMs;
 }
 
+async function withTimeout(promise, timeoutMs, code = 'OP_TIMEOUT') {
+  const ms = Math.max(0, Number(timeoutMs) || 0);
+  if (ms <= 0) return promise;
+  let timer = null;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise((_, reject) => {
+        timer = setTimeout(() => {
+          const error = new Error(code);
+          error.code = code;
+          reject(error);
+        }, ms);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 async function evaluateReadonly(profileId, script) {
   const payload = await runEvaluateScript({
     profileId,
@@ -279,9 +300,21 @@ async function evaluateReadonly(profileId, script) {
   return extractEvaluateResultData(payload) || payload?.result || payload?.data || payload || {};
 }
 
-async function readLocation(profileId) {
-  const payload = await evaluateReadonly(profileId, '(() => String(location.href || ""))()');
-  return String(payload || '');
+async function readLocation(profileId, options = {}) {
+  const timeoutMs = Math.max(300, Number(options.timeoutMs ?? 8000) || 8000);
+  const fallback = String(options.fallback ?? '');
+  const throwOnError = options.throwOnError === true;
+  try {
+    const payload = await withTimeout(
+      evaluateReadonly(profileId, '(() => String(location.href || ""))()'),
+      timeoutMs,
+      'READ_LOCATION_TIMEOUT',
+    );
+    return String(payload || '');
+  } catch (error) {
+    if (throwOnError) throw error;
+    return fallback;
+  }
 }
 
 async function moveMouse(profileId, x, y, steps = 2) {
@@ -587,7 +620,7 @@ async function readSearchCandidateByNoteId(profileId, noteId, options = {}) {
   const normalizedNoteId = String(noteId || '').trim();
   if (!normalizedNoteId) return { found: false };
   const visibilityMargin = Math.max(0, Number(options.visibilityMargin ?? 8) || 8);
-  const minVisibleRatio = clamp(Number(options.minVisibleRatio ?? 0.5) || 0.5, 0, 1);
+  const minVisibleRatio = clamp(Number(options.minVisibleRatio ?? 0) || 0, 0, 1);
   const script = `(() => {
     const noteId = ${JSON.stringify(normalizedNoteId)};
     const visibilityMargin = ${JSON.stringify(visibilityMargin)};
@@ -670,7 +703,8 @@ async function readSearchCandidateByNoteId(profileId, noteId, options = {}) {
 async function ensureSearchCandidateFullyVisible(profileId, noteId, options = {}) {
   const maxScrollAttempts = Math.max(1, Number(options.maxScrollAttempts ?? 3) || 3);
   const visibilityMargin = Math.max(0, Number(options.visibilityMargin ?? 8) || 8);
-  const minVisibleRatio = clamp(Number(options.minVisibleRatio ?? 0.5) || 0.5, 0, 1);
+  const minVisibleRatioRaw = Number(options.minVisibleRatio ?? 0);
+  const minVisibleRatio = clamp(Number.isFinite(minVisibleRatioRaw) ? minVisibleRatioRaw : 0, 0, 1);
   const settleMs = Math.max(60, Number(options.settleMs ?? 260) || 260);
   let latest = null;
 
@@ -679,7 +713,7 @@ async function ensureSearchCandidateFullyVisible(profileId, noteId, options = {}
     if (!latest?.found) {
       return { ok: false, code: 'NOTE_TARGET_NOT_FOUND', autoScrolled: attempt, target: null };
     }
-    if (latest.visibleEnough === true) {
+    if (latest.inViewport === true) {
       return { ok: true, code: 'TARGET_READY', autoScrolled: attempt, target: latest };
     }
     if (attempt >= maxScrollAttempts) break;
@@ -1548,27 +1582,23 @@ async function executeOpenDetailOperation({
           data: { stopReason: 'no_more_notes' },
         };
       }
-      if (mode === 'first') return null;
-      return {
-        ok: true,
-        code: 'OPERATION_SKIPPED_NO_SEARCH_RESULT_ITEM',
-        message: 'search result item missing',
-        data: { skipped: true },
-      };
+      return null;
     }
     return null;
   };
 
   const runWithExclude = async (excludeNoteIds) => {
     const profileState = getProfileState(profileId);
+    const metrics = profileState.metrics || (profileState.metrics = {});
     const { actionTrace, pushTrace } = buildTraceRecorder();
     const mode = String(params.mode || 'first').trim().toLowerCase();
+    const stage = String(params.stage || '').trim().toLowerCase();
+    const detailOnlyMode = stage === 'detail';
     const maxNotes = Math.max(1, Number(params.maxNotes ?? params.limit ?? 20) || 20);
     const keyword = String(params.keyword || '').trim();
     const resume = params.resume !== false;
     const incrementalMax = params.incrementalMax !== false;
     const preservePreCollected = params.preservePreCollected === true;
-    const allowSeedCollectFallback = params.allowSeedCollectFallback === true;
     const excluded = new Set(normalizeNoteIdList(excludeNoteIds));
 
     const previousKeyword = String(profileState.keyword || '').trim();
@@ -1576,6 +1606,7 @@ async function executeOpenDetailOperation({
     if (mode === 'collect') {
       if (!resume || keywordChanged) {
         profileState.visitedNoteIds = [];
+        if (detailOnlyMode) metrics.detailLoopCount = 0;
         profileState.preCollectedNoteIds = [];
         profileState.preCollectedAt = null;
       }
@@ -1587,13 +1618,17 @@ async function executeOpenDetailOperation({
     } else if (mode === 'first') {
       if (!resume || keywordChanged) {
         profileState.visitedNoteIds = [];
+        if (detailOnlyMode) metrics.detailLoopCount = 0;
         if (!preservePreCollected) {
           profileState.preCollectedNoteIds = [];
           profileState.preCollectedAt = null;
         }
       }
       if (incrementalMax && resume && !keywordChanged) {
-        profileState.maxNotes = Number(normalizeNoteIdList(profileState.visitedNoteIds).length || 0) + maxNotes;
+        const baseCount = detailOnlyMode
+          ? Math.max(0, Number(metrics.detailLoopCount || 0) || 0)
+          : Number(normalizeNoteIdList(profileState.visitedNoteIds).length || 0);
+        profileState.maxNotes = baseCount + maxNotes;
       } else {
         profileState.maxNotes = maxNotes;
       }
@@ -1602,7 +1637,10 @@ async function executeOpenDetailOperation({
     }
     if (keyword) profileState.keyword = keyword;
 
-    if (mode === 'next' && normalizeNoteIdList(profileState.visitedNoteIds).length >= Number(profileState.maxNotes || maxNotes)) {
+    const visitedQuotaCount = detailOnlyMode
+      ? Math.max(0, Number(metrics.detailLoopCount || 0) || 0)
+      : Number(normalizeNoteIdList(profileState.visitedNoteIds).length || 0);
+    if (mode === 'next' && visitedQuotaCount >= Number(profileState.maxNotes || maxNotes)) {
       throw new Error('AUTOSCRIPT_DONE_MAX_NOTES');
     }
 
@@ -1617,8 +1655,10 @@ async function executeOpenDetailOperation({
       seedCollectMaxRounds || Math.max(6, Math.ceil(targetSeedCollectCount / 2)),
     );
 
-    const seekRounds = Math.max(0, Number(params.nextSeekRounds || 8) || 8);
-    const seekStep = Math.max(240, Number(params.nextSeekStep || 0) || 0) || 0;
+    const seekStepRaw = Number(params.nextSeekStep ?? 0);
+    const seekStep = Number.isFinite(seekStepRaw) && seekStepRaw > 0
+      ? Math.max(240, Math.floor(seekStepRaw))
+      : 0;
     const seekSettleMs = Math.max(280, Number(params.nextSeekSettleMs || 620) || 620);
 
     const preClickDelayMinMs = Math.max(500, Number(params.preClickDelayMinMs ?? 600) || 600);
@@ -1627,6 +1667,7 @@ async function executeOpenDetailOperation({
     const pollDelayMaxMs = Math.max(pollDelayMinMs, Number(params.pollDelayMaxMs ?? 600) || 600);
     const postOpenDelayMinMs = Math.max(500, Number(params.postOpenDelayMinMs ?? 5000) || 5000);
     const postOpenDelayMaxMs = Math.max(postOpenDelayMinMs, Number(params.postOpenDelayMaxMs ?? 10000) || 10000);
+    const openDetailMinVisibleRatio = clamp(Number(params.openDetailMinVisibleRatio ?? 0) || 0, 0, 1);
     const collectOpenLinksOnly = params.collectOpenLinksOnly === true;
 
     const waitDetailReady = async () => {
@@ -1642,6 +1683,24 @@ async function executeOpenDetailOperation({
       const snapshot = await readSearchCandidates(profileId);
       const rows = Array.isArray(snapshot?.rows) ? snapshot.rows : [];
       return rows;
+    };
+
+    const hydratePreCollectedFromPersistedLinks = async () => {
+      const output = resolveXhsOutputContext({
+        params,
+        state: profileState,
+        noteId: 'links',
+      });
+      const rows = await readJsonlRows(output.linksPath);
+      const noteIds = normalizeNoteIdList(rows.map((row) => row?.noteId));
+      if (noteIds.length > 0) {
+        profileState.preCollectedNoteIds = noteIds;
+        profileState.preCollectedAt = new Date().toISOString();
+      }
+      return {
+        linksPath: output.linksPath,
+        noteIds,
+      };
     };
 
     const collectLinksFirst = async () => {
@@ -1786,7 +1845,7 @@ async function executeOpenDetailOperation({
         const visibility = await ensureSearchCandidateFullyVisible(profileId, noteId, {
           maxScrollAttempts: 3,
           visibilityMargin: 8,
-          minVisibleRatio: 0.5,
+          minVisibleRatio: openDetailMinVisibleRatio,
           settleMs: Math.max(140, Math.floor(seedCollectSettleMs / 2)),
         });
         emitOperationProgress(context, {
@@ -1914,9 +1973,46 @@ async function executeOpenDetailOperation({
     };
 
     let nodes = await collectVisibleRows();
-    if (nodes.length === 0) throw new Error('NO_SEARCH_RESULT_ITEM');
+    if (mode === 'collect' && nodes.length === 0) throw new Error('NO_SEARCH_RESULT_ITEM');
 
     if (mode === 'collect') {
+      const persisted = await hydratePreCollectedFromPersistedLinks();
+      const persistedNoteIds = normalizeNoteIdList(persisted.noteIds);
+      if (collectOpenLinksOnly && persistedNoteIds.length >= targetSeedCollectCount) {
+        emitActionTrace(context, actionTrace, { stage: 'xhs_collect_links' });
+        return {
+          operationResult: {
+            ok: true,
+            code: 'OPERATION_DONE',
+            message: 'xhs_collect_links done',
+            data: {
+              collected: persistedNoteIds.length,
+              target: targetSeedCollectCount,
+              maxRounds: targetSeedCollectMaxRounds,
+              noteIds: persistedNoteIds,
+              seedCollectedCount: persistedNoteIds.length,
+              seedCollectedNoteIds: persistedNoteIds,
+              linksPath: persisted.linksPath || null,
+              linksWithXsecToken: persistedNoteIds.length,
+              searchOnly: false,
+              source: 'persisted_links',
+            },
+          },
+          payload: {
+            opened: false,
+            source: 'collect_links',
+            collected: persistedNoteIds.length,
+            target: targetSeedCollectCount,
+            maxRounds: targetSeedCollectMaxRounds,
+            noteIds: persistedNoteIds,
+            seedCollectedCount: persistedNoteIds.length,
+            seedCollectedNoteIds: persistedNoteIds,
+            linksPath: persisted.linksPath || null,
+            linksWithXsecToken: persistedNoteIds.length,
+            searchOnly: false,
+          },
+        };
+      }
       const collected = collectOpenLinksOnly
         ? await collectLinksByOpening()
         : await collectLinksFirst();
@@ -1957,16 +2053,15 @@ async function executeOpenDetailOperation({
 
     let preCollectedSet = new Set(normalizeNoteIdList(profileState.preCollectedNoteIds));
     if (preCollectedSet.size === 0) {
-      if (!allowSeedCollectFallback) {
-        throw new Error('PRECOLLECTED_LINKS_REQUIRED');
-      }
-      const collected = await collectLinksFirst();
-      preCollectedSet = new Set(collected.collectedNoteIds);
-      nodes = collected.rows;
+      const persisted = await hydratePreCollectedFromPersistedLinks();
+      preCollectedSet = new Set(normalizeNoteIdList(persisted.noteIds));
+    }
+    if (!detailOnlyMode && preCollectedSet.size === 0) {
+      throw new Error('PRECOLLECTED_LINKS_REQUIRED');
     }
 
     const visitedSet = new Set(normalizeNoteIdList(profileState.visitedNoteIds));
-    if (preCollectedSet.size > 0 && mode === 'next') {
+    if (!detailOnlyMode && preCollectedSet.size > 0 && mode === 'next') {
       const pending = Array.from(preCollectedSet).filter((noteId) => !visitedSet.has(noteId) && !excluded.has(noteId));
       if (pending.length === 0) {
         throw new Error('AUTOSCRIPT_DONE_NO_MORE_NOTES');
@@ -1977,9 +2072,14 @@ async function executeOpenDetailOperation({
       const noteId = String(row.noteId || '').trim();
       if (!noteId) return false;
       if (excluded.has(noteId)) return false;
+      if (detailOnlyMode) return true;
       if (visitedSet.has(noteId)) return false;
       if (preCollectedSet.size > 0 && !preCollectedSet.has(noteId)) return false;
       return true;
+    };
+    const getPendingPreCollectedNoteIds = () => {
+      if (detailOnlyMode) return [];
+      return Array.from(preCollectedSet).filter((noteId) => !visitedSet.has(noteId) && !excluded.has(noteId));
     };
 
     const pickRandom = (rows) => {
@@ -1990,7 +2090,7 @@ async function executeOpenDetailOperation({
       const eligibleRows = rows.filter((row) => isEligible(row));
       const inViewport = eligibleRows.filter((row) => row.inViewport === true);
       const visibleEnough = inViewport.filter((row) => row.visibleEnough === true);
-      const candidateRows = visibleEnough.length > 0 ? visibleEnough : (inViewport.length > 0 ? inViewport : eligibleRows);
+      const candidateRows = visibleEnough.length > 0 ? visibleEnough : inViewport;
       const next = pickRandom(candidateRows);
       return { next, candidateRows };
     };
@@ -2013,30 +2113,69 @@ async function executeOpenDetailOperation({
     };
 
     let picked = pickNode(nodes);
+    if (mode === 'first' || mode === 'next') {
+      const detailSnapshot = await isDetailVisible(profileId);
+      if (detailSnapshot?.detailVisible === true) {
+        emitOperationProgress(context, {
+          kind: 'block',
+          stage: mode === 'next' ? 'open_next_detail' : 'open_first_detail',
+          block: 'close_detail_before_open',
+        });
+        const closed = await closeDetailToSearch(profileId, pushTrace);
+        emitOperationProgress(context, {
+          kind: 'block',
+          stage: mode === 'next' ? 'open_next_detail' : 'open_first_detail',
+          block: 'close_detail_before_open_result',
+          closed,
+        });
+        if (!closed) {
+          throw new Error('DETAIL_CLOSE_BEFORE_OPEN_FAILED');
+        }
+        await sleep(Math.max(120, Math.floor(seekSettleMs / 2)));
+        nodes = await collectVisibleRows();
+        picked = pickNode(nodes);
+      }
+    }
     await paintDetailSelection(picked.candidateRows, '');
     let next = picked.next;
     const dynamicSeekStep = seekStep || Math.max(260, Math.floor((Number(nodes?.[0]?.viewport?.height || 900) || 900) * 0.9));
     if (!next) {
-      for (let round = 0; round < seekRounds; round += 1) {
-        pushTrace({ kind: 'scroll', stage: 'seek_next_detail', round: round + 1, deltaY: dynamicSeekStep });
-        await wheel(profileId, dynamicSeekStep);
+      let downRound = 0;
+      while (!next) {
+        const pending = getPendingPreCollectedNoteIds();
+        if (pending.length === 0) break;
+        downRound += 1;
+        const deltaY = dynamicSeekStep;
+        pushTrace({ kind: 'scroll', stage: 'seek_next_detail', round: downRound, deltaY, direction: 'down' });
+        emitOperationProgress(context, {
+          kind: 'block',
+          stage: mode === 'next' ? 'open_next_detail' : 'open_first_detail',
+          block: 'seek_down',
+          round: downRound,
+          deltaY,
+          pendingCount: pending.length,
+        });
+        await wheel(profileId, deltaY);
         await sleep(seekSettleMs);
         nodes = await collectVisibleRows();
         picked = pickNode(nodes);
         await paintDetailSelection(picked.candidateRows, '');
         next = picked.next;
-        if (next) break;
       }
     }
 
     if (!next) {
+      const pending = getPendingPreCollectedNoteIds();
+      if (pending.length > 0) {
+        throw new Error(`PENDING_PRECOLLECTED_NOT_IN_VIEWPORT:${pending.length}`);
+      }
       throw new Error('AUTOSCRIPT_DONE_NO_MORE_NOTES');
     }
     await paintDetailSelection(picked.candidateRows, next.noteId);
     const visibility = await ensureSearchCandidateFullyVisible(profileId, next.noteId, {
       maxScrollAttempts: 3,
       visibilityMargin: 8,
-      minVisibleRatio: 0.5,
+      minVisibleRatio: openDetailMinVisibleRatio,
       settleMs: Math.max(160, Math.floor(seekSettleMs / 2)),
     });
     emitOperationProgress(context, {
@@ -2076,7 +2215,9 @@ async function executeOpenDetailOperation({
     await sleepRandom(postOpenDelayMinMs, postOpenDelayMaxMs, pushTrace, 'open_detail_post_open', { noteId: next.noteId });
     const afterUrl = await readLocation(profileId);
 
-    if (!visitedSet.has(next.noteId)) {
+    if (detailOnlyMode) {
+      metrics.detailLoopCount = Math.max(0, Number(metrics.detailLoopCount || 0) || 0) + 1;
+    } else if (!visitedSet.has(next.noteId)) {
       visitedSet.add(next.noteId);
       profileState.visitedNoteIds = Array.from(visitedSet);
     }
@@ -2095,7 +2236,9 @@ async function executeOpenDetailOperation({
           opened: true,
           source: mode === 'next' ? 'open_next_detail' : 'open_first_detail',
           noteId: next.noteId,
-          visited: profileState.visitedNoteIds.length,
+          visited: detailOnlyMode
+            ? Math.max(0, Number(metrics.detailLoopCount || 0) || 0)
+            : profileState.visitedNoteIds.length,
           maxNotes: Number(profileState.maxNotes || maxNotes),
           openByClick: true,
           beforeUrl,

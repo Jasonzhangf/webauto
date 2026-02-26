@@ -103,17 +103,18 @@ export function buildXhsUnifiedAutoscript(rawOptions = {}) {
   const stageContentEnabled = toBoolean(rawOptions.stageContentEnabled, true);
   const stageLikeEnabled = toBoolean(rawOptions.stageLikeEnabled, doLikes);
   const stageReplyEnabled = toBoolean(rawOptions.stageReplyEnabled, doReply);
+  const stageDetailEnabled = toBoolean(rawOptions.stageDetailEnabled, stage === 'detail');
 
   const matchKeywords = splitCsv(rawOptions.matchKeywords || keyword);
   const likeKeywordsSeed = splitCsv(rawOptions.likeKeywords || '');
   const likeKeywords = likeKeywordsSeed.length > 0 ? likeKeywordsSeed : matchKeywords;
 
-  const detailLoopEnabled = stageContentEnabled || stageLikeEnabled || stageReplyEnabled;
+  const detailLoopEnabled = stageDetailEnabled || stageContentEnabled || stageLikeEnabled || stageReplyEnabled;
   const stageLinksEnabled = stageLinksRequested || detailLoopEnabled;
   const collectOpenLinksOnly = stageLinksEnabled;
-  const detailHarvestEnabled = detailLoopEnabled && (doHomepage || doImages || doComments || doOcr);
-  const commentsHarvestEnabled = detailLoopEnabled && (doComments || stageLikeEnabled || stageReplyEnabled);
-  const matchGateEnabled = stageLikeEnabled || stageReplyEnabled;
+  const detailHarvestEnabled = !stageDetailEnabled && detailLoopEnabled && (doHomepage || doImages || doComments || doOcr);
+  const commentsHarvestEnabled = !stageDetailEnabled && detailLoopEnabled && (doComments || stageLikeEnabled || stageReplyEnabled);
+  const matchGateEnabled = !stageDetailEnabled && (stageLikeEnabled || stageReplyEnabled);
   const collectPerNoteBudgetMs = toPositiveInt(rawOptions.collectPerNoteBudgetMs ?? rawOptions.collectPerNoteMs, 15000, 5000);
   const collectLinksTimeoutMinMs = toPositiveInt(rawOptions.collectLinksTimeoutMinMs, 600000, 60000);
   const collectLinksTimeoutMs = toPositiveInt(
@@ -203,6 +204,7 @@ export function buildXhsUnifiedAutoscript(rawOptions = {}) {
       stageContentEnabled,
       stageLikeEnabled,
       stageReplyEnabled,
+      stageDetailEnabled,
       persistComments,
       matchMode,
       matchMinHits,
@@ -348,6 +350,7 @@ export function buildXhsUnifiedAutoscript(rawOptions = {}) {
         action: 'xhs_open_detail',
         params: {
           mode: 'first',
+          stage,
           maxNotes,
           keyword,
           resume,
@@ -582,6 +585,7 @@ export function buildXhsUnifiedAutoscript(rawOptions = {}) {
         action: 'xhs_open_detail',
         params: {
           mode: 'next',
+          stage,
           maxNotes,
           resume,
           incrementalMax,

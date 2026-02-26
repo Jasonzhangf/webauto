@@ -74,3 +74,34 @@ it('comments_harvest should not wait for expand_replies to run', () => {
   assert.deepEqual(getOperation(script, 'expand_replies')?.dependsOn, ['detail_harvest']);
   assert.equal(getOperation(script, 'comment_like')?.params?.pickOneIfNoNew, false);
 });
+
+it('detail stage runs open/close loop without content/comment/like actions', () => {
+  const script = buildXhsUnifiedAutoscript({
+    profileId: 'xhs-stage-4',
+    keyword: 'deepseek',
+    stage: 'detail',
+    stageLinksEnabled: true,
+    stageContentEnabled: false,
+    stageLikeEnabled: false,
+    stageReplyEnabled: false,
+    stageDetailEnabled: true,
+    doComments: false,
+    doLikes: false,
+    doReply: false,
+    doHomepage: false,
+    doImages: false,
+    doOcr: false,
+  });
+
+  assert.equal(getOperation(script, 'collect_links')?.enabled, true);
+  assert.equal(getOperation(script, 'open_first_detail')?.enabled, true);
+  assert.equal(getOperation(script, 'open_next_detail')?.enabled, true);
+  assert.equal(getOperation(script, 'open_first_detail')?.params?.stage, 'detail');
+  assert.equal(getOperation(script, 'open_next_detail')?.params?.stage, 'detail');
+  assert.equal(getOperation(script, 'close_detail')?.enabled, true);
+  assert.equal(getOperation(script, 'detail_harvest')?.enabled, false);
+  assert.equal(getOperation(script, 'comments_harvest')?.enabled, false);
+  assert.equal(getOperation(script, 'comment_match_gate')?.enabled, false);
+  assert.equal(getOperation(script, 'comment_like')?.enabled, false);
+  assert.equal(getOperation(script, 'comment_reply')?.enabled, false);
+});

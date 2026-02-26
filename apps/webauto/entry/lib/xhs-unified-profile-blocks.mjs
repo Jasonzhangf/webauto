@@ -71,9 +71,9 @@ async function captureStopScreenshot({ profileId, reason, outputDir }) {
 export function resolveXhsStage(argv = {}) {
   const raw = String(argv.stage || argv['xhs-stage'] || 'full').trim().toLowerCase();
   const stage = raw || 'full';
-  const allowed = new Set(['full', 'links', 'content', 'like', 'reply']);
+  const allowed = new Set(['full', 'links', 'content', 'like', 'reply', 'detail']);
   if (!allowed.has(stage)) {
-    throw new Error(`invalid --stage: ${stage}. use full|links|content|like|reply`);
+    throw new Error(`invalid --stage: ${stage}. use full|links|content|like|reply|detail`);
   }
   return stage;
 }
@@ -176,6 +176,7 @@ async function buildTemplateOptions(argv, profileId, overrides = {}) {
     Math.max(6, Math.ceil(Math.max(1, maxNotes) / 2)),
   );
   const stage = resolveXhsStage(argv);
+  const stageDetailEnabled = stage === 'detail';
 
   const dryRun = parseBool(argv['dry-run'], false);
   const disableDryRun = parseBool(argv['no-dry-run'], false);
@@ -235,6 +236,7 @@ async function buildTemplateOptions(argv, profileId, overrides = {}) {
     stageContentEnabled,
     stageLikeEnabled,
     stageReplyEnabled,
+    stageDetailEnabled,
     doHomepage: stageContentEnabled && parseBool(argv['do-homepage'], true),
     doImages: stageContentEnabled && parseBool(argv['do-images'], false),
     doComments,
