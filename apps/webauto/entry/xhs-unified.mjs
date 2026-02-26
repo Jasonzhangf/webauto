@@ -90,7 +90,7 @@ async function appendJsonl(filePath, payload) {
 export async function runUnified(argv, overrides = {}) {
   const keyword = String(argv.keyword || argv.k || '').trim();
   if (!keyword) throw new Error('missing --keyword');
-  cleanupIncompleteProfiles();
+  cleanupIncompleteProfiles({ deleteProfileDirs: false });
 
   const stage = resolveXhsStage(argv);
   const env = String(argv.env || 'prod').trim() || 'prod';

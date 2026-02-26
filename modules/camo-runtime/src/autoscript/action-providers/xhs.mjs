@@ -1435,18 +1435,33 @@ async function executeOpenDetailOperation({
     const keyword = String(params.keyword || '').trim();
     const resume = params.resume !== false;
     const incrementalMax = params.incrementalMax !== false;
+    const preservePreCollected = params.preservePreCollected === true;
+    const allowSeedCollectFallback = params.allowSeedCollectFallback === true;
     const excluded = new Set(normalizeNoteIdList(excludeNoteIds));
 
     const previousKeyword = String(profileState.keyword || '').trim();
     const keywordChanged = Boolean(keyword && previousKeyword && keyword !== previousKeyword);
-    if (mode === 'first' || mode === 'collect') {
+    if (mode === 'collect') {
       if (!resume || keywordChanged) {
         profileState.visitedNoteIds = [];
         profileState.preCollectedNoteIds = [];
         profileState.preCollectedAt = null;
       }
       if (incrementalMax && resume && !keywordChanged) {
-        profileState.maxNotes = Number(profileState.visitedNoteIds.length || 0) + maxNotes;
+        profileState.maxNotes = Number(normalizeNoteIdList(profileState.preCollectedNoteIds).length || 0) + maxNotes;
+      } else {
+        profileState.maxNotes = maxNotes;
+      }
+    } else if (mode === 'first') {
+      if (!resume || keywordChanged) {
+        profileState.visitedNoteIds = [];
+        if (!preservePreCollected) {
+          profileState.preCollectedNoteIds = [];
+          profileState.preCollectedAt = null;
+        }
+      }
+      if (incrementalMax && resume && !keywordChanged) {
+        profileState.maxNotes = Number(normalizeNoteIdList(profileState.visitedNoteIds).length || 0) + maxNotes;
       } else {
         profileState.maxNotes = maxNotes;
       }
@@ -1537,91 +1552,179 @@ async function executeOpenDetailOperation({
         noteId: 'links',
       });
       const visitedSet = new Set(normalizeNoteIdList(profileState.visitedNoteIds));
-      const collectedSet = new Set();
+      const collectedSet = new Set(normalizeNoteIdList(profileState.preCollectedNoteIds));
+      const nonCollectibleSet = new Set([...visitedSet, ...collectedSet]);
       const targetCount = Number(profileState.maxNotes || maxNotes);
       let stagnantRounds = 0;
       const maxStagnantRounds = Math.max(8, targetSeedCollectMaxRounds);
       const collectStallTimeoutMs = Math.max(30_000, Number(params.collectStallTimeoutMs || 180_000) || 180_000);
       let lastProgressAt = Date.now();
-      let lastVisitedCount = visitedSet.size;
+      let lastCollectedCount = collectedSet.size;
+      const pickRandom = (rows) => {
+        if (!Array.isArray(rows) || rows.length === 0) return null;
+        return rows[Math.floor(Math.random() * rows.length)] || null;
+      };
+      const runSearchReadyBlock = async () => {
+        const snapshot = await readSearchViewportReady(profileId);
+        const readySelector = String(snapshot?.readySelector || '').trim();
+        const visibleNoteCount = Math.max(0, Number(snapshot?.visibleNoteCount || 0) || 0);
+        emitOperationProgress(context, {
+          kind: 'block',
+          stage: 'collect_links',
+          block: 'search_ready',
+          readySelector: readySelector || null,
+          visibleNoteCount,
+        });
+        if (!readySelector && visibleNoteCount <= 0) {
+          throw new Error('SEARCH_VIEWPORT_NOT_READY');
+        }
+      };
+      const runListSelectBlock = async () => {
+        const rows = await collectVisibleRows();
+        if (rows.length === 0) {
+          if (collectedSet.size === 0) throw new Error('NO_SEARCH_RESULT_ITEM');
+          return { kind: 'done' };
+        }
+        const eligibleInViewport = rows.filter((row) => (
+          row
+          && row.inViewport === true
+          && row.center
+          && !excluded.has(String(row.noteId || '').trim())
+          && !nonCollectibleSet.has(String(row.noteId || '').trim())
+        ));
+        const candidateIds = normalizeNoteIdList(eligibleInViewport.map((row) => row.noteId));
+        const processedIds = normalizeNoteIdList(Array.from(nonCollectibleSet));
+        await paintSearchCandidates(profileId, {
+          candidateNoteIds: candidateIds,
+          selectedNoteId: '',
+          processedNoteIds: processedIds,
+        });
+        emitOperationProgress(context, {
+          kind: 'block',
+          stage: 'collect_links',
+          block: 'list_select',
+          candidateCount: candidateIds.length,
+          processedCount: processedIds.length,
+        });
+        if (eligibleInViewport.length === 0) {
+          stagnantRounds += 1;
+          if (stagnantRounds > maxStagnantRounds) return { kind: 'done' };
+          pushTrace({
+            kind: 'scroll',
+            stage: 'collect_links_list_select_scroll',
+            round: stagnantRounds,
+            deltaY: seedCollectStep,
+          });
+          emitOperationProgress(context, {
+            kind: 'block',
+            stage: 'collect_links',
+            block: 'list_select_scroll',
+            round: stagnantRounds,
+            deltaY: seedCollectStep,
+          });
+          await wheel(profileId, seedCollectStep);
+          await sleep(seedCollectSettleMs);
+          return { kind: 'continue' };
+        }
+        stagnantRounds = 0;
+        const next = pickRandom(eligibleInViewport);
+        if (!next?.center) return { kind: 'continue' };
+        await paintSearchCandidates(profileId, {
+          candidateNoteIds: candidateIds,
+          selectedNoteId: String(next.noteId || '').trim(),
+          processedNoteIds: processedIds,
+        });
+        emitOperationProgress(context, {
+          kind: 'block',
+          stage: 'collect_links',
+          block: 'list_select_target',
+          targetNoteId: String(next.noteId || '').trim(),
+        });
+        return {
+          kind: 'selected',
+          next,
+          candidateIds,
+          processedIds,
+        };
+      };
+      const runOpenDetailBlock = async (next) => {
+        const noteId = String(next?.noteId || '').trim();
+        emitOperationProgress(context, {
+          kind: 'block',
+          stage: 'collect_links',
+          block: 'open_detail',
+          noteId,
+        });
+        const beforeUrl = await readLocation(profileId);
+        await sleepRandom(preClickDelayMinMs, preClickDelayMaxMs, pushTrace, 'open_detail_pre_click', { noteId, mode: 'collect' });
+        pushTrace({ kind: 'click', stage: 'open_detail', noteId, selector: 'a.cover', mode: 'collect' });
+        await clickPoint(profileId, next.center, { steps: 4 });
+        const detailReady = await waitDetailReady();
+        if (!detailReady) throw new Error('DETAIL_OPEN_TIMEOUT');
+        await sleepRandom(postOpenDelayMinMs, postOpenDelayMaxMs, pushTrace, 'open_detail_post_open', { noteId, mode: 'collect' });
+        return { beforeUrl };
+      };
+      const runCaptureUrlBlock = async (next, beforeUrl) => {
+        const afterUrl = await readLocation(profileId);
+        const resolvedNoteId = extractNoteIdFromHref(afterUrl) || String(next?.noteId || '').trim();
+        if (!resolvedNoteId) throw new Error('LINK_NOTE_ID_MISSING');
+        if (!String(afterUrl || '').includes('xsec_token=')) {
+          throw new Error(`LINK_WITHOUT_XSEC_TOKEN:${resolvedNoteId}`);
+        }
+        emitOperationProgress(context, {
+          kind: 'block',
+          stage: 'collect_links',
+          block: 'capture_url',
+          noteId: resolvedNoteId,
+          hasXsecToken: true,
+        });
+        return {
+          resolvedNoteId,
+          noteUrl: afterUrl,
+          listUrl: beforeUrl || null,
+        };
+      };
+      const runCloseDetailBlock = async (resolvedNoteId) => {
+        emitOperationProgress(context, {
+          kind: 'block',
+          stage: 'collect_links',
+          block: 'close_detail',
+          noteId: resolvedNoteId,
+        });
+        const closed = await closeDetailToSearch(profileId, pushTrace);
+        if (!closed) throw new Error(`DETAIL_CLOSE_FAILED:${resolvedNoteId}`);
+      };
 
-      while (visitedSet.size < targetCount) {
+      while (collectedSet.size < targetCount) {
         emitOperationProgress(context, {
           kind: 'loop',
           stage: 'collect_links',
-          visitedCount: visitedSet.size,
+          collectedCount: collectedSet.size,
           targetCount,
           stagnantRounds,
           stallTimeoutMs: collectStallTimeoutMs,
           elapsedSinceProgressMs: Math.max(0, Date.now() - lastProgressAt),
         });
         if ((Date.now() - lastProgressAt) > collectStallTimeoutMs) {
-          throw new Error(`COLLECT_LINKS_STALL:${visitedSet.size}/${targetCount}`);
+          throw new Error(`COLLECT_LINKS_STALL:${collectedSet.size}/${targetCount}`);
         }
 
-        const rows = await collectVisibleRows();
-        if (rows.length === 0) {
-          if (visitedSet.size === 0) throw new Error('NO_SEARCH_RESULT_ITEM');
-          break;
-        }
+        await runSearchReadyBlock();
+        const selection = await runListSelectBlock();
+        if (!selection || selection.kind === 'continue') continue;
+        if (selection.kind === 'done') break;
+        const next = selection.next;
+        const openResult = await runOpenDetailBlock(next);
+        const captured = await runCaptureUrlBlock(next, openResult.beforeUrl);
+        const resolvedNoteId = captured.resolvedNoteId;
 
-        const eligibleInViewport = rows.filter((row) => (
-          row
-          && row.inViewport === true
-          && row.center
-          && !excluded.has(String(row.noteId || '').trim())
-          && !visitedSet.has(String(row.noteId || '').trim())
-        ));
-        const candidateIds = normalizeNoteIdList(eligibleInViewport.map((row) => row.noteId));
-        const processedIds = normalizeNoteIdList(Array.from(visitedSet));
-        await paintSearchCandidates(profileId, {
-          candidateNoteIds: candidateIds,
-          selectedNoteId: '',
-          processedNoteIds: processedIds,
-        });
-
-        if (eligibleInViewport.length === 0) {
-          stagnantRounds += 1;
-          if (stagnantRounds > maxStagnantRounds) break;
-          pushTrace({ kind: 'scroll', stage: 'collect_links_seek_next_page', round: stagnantRounds, deltaY: seedCollectStep });
-          await wheel(profileId, seedCollectStep);
-          await sleep(seedCollectSettleMs);
-          continue;
-        }
-
-        stagnantRounds = 0;
-        const next = eligibleInViewport[Math.floor(Math.random() * eligibleInViewport.length)] || null;
-        if (!next?.center) continue;
-        await paintSearchCandidates(profileId, {
-          candidateNoteIds: candidateIds,
-          selectedNoteId: String(next.noteId || '').trim(),
-          processedNoteIds: processedIds,
-        });
-
-        const beforeUrl = await readLocation(profileId);
-        await sleepRandom(preClickDelayMinMs, preClickDelayMaxMs, pushTrace, 'open_detail_pre_click', { noteId: next.noteId, mode: 'collect' });
-        pushTrace({ kind: 'click', stage: 'open_detail', noteId: next.noteId, selector: 'a.cover', mode: 'collect' });
-        await clickPoint(profileId, next.center, { steps: 4 });
-
-        const detailReady = await waitDetailReady();
-        if (!detailReady) throw new Error('DETAIL_OPEN_TIMEOUT');
-        await sleepRandom(postOpenDelayMinMs, postOpenDelayMaxMs, pushTrace, 'open_detail_post_open', { noteId: next.noteId, mode: 'collect' });
-
-        const afterUrl = await readLocation(profileId);
-        const resolvedNoteId = extractNoteIdFromHref(afterUrl) || String(next.noteId || '').trim();
-        if (!resolvedNoteId) throw new Error('LINK_NOTE_ID_MISSING');
-        if (!String(afterUrl || '').includes('xsec_token=')) {
-          throw new Error(`LINK_WITHOUT_XSEC_TOKEN:${resolvedNoteId}`);
-        }
-
-        visitedSet.add(resolvedNoteId);
         collectedSet.add(resolvedNoteId);
-        profileState.visitedNoteIds = Array.from(visitedSet);
+        nonCollectibleSet.add(resolvedNoteId);
         profileState.currentNoteId = resolvedNoteId;
-        profileState.currentHref = afterUrl || null;
-        profileState.lastListUrl = beforeUrl || null;
-        if (visitedSet.size > lastVisitedCount) {
-          lastVisitedCount = visitedSet.size;
+        profileState.currentHref = captured.noteUrl || null;
+        profileState.lastListUrl = captured.listUrl || null;
+        if (collectedSet.size > lastCollectedCount) {
+          lastCollectedCount = collectedSet.size;
           lastProgressAt = Date.now();
         }
 
@@ -1629,19 +1732,18 @@ async function executeOpenDetailOperation({
           filePath: output.linksPath,
           links: [{
             noteId: resolvedNoteId,
-            noteUrl: afterUrl,
-            listUrl: beforeUrl,
+            noteUrl: captured.noteUrl,
+            listUrl: captured.listUrl,
           }],
         });
 
         await paintSearchCandidates(profileId, {
-          candidateNoteIds: candidateIds,
+          candidateNoteIds: selection.candidateIds,
           selectedNoteId: '',
-          processedNoteIds: normalizeNoteIdList(Array.from(visitedSet)),
+          processedNoteIds: normalizeNoteIdList(Array.from(nonCollectibleSet)),
         });
 
-        const closed = await closeDetailToSearch(profileId, pushTrace);
-        if (!closed) throw new Error(`DETAIL_CLOSE_FAILED:${resolvedNoteId}`);
+        await runCloseDetailBlock(resolvedNoteId);
       }
 
       const collectedNoteIds = normalizeNoteIdList(Array.from(collectedSet));
@@ -1650,7 +1752,7 @@ async function executeOpenDetailOperation({
       await paintSearchCandidates(profileId, {
         candidateNoteIds: [],
         selectedNoteId: '',
-        processedNoteIds: normalizeNoteIdList(Array.from(visitedSet)),
+        processedNoteIds: normalizeNoteIdList(Array.from(nonCollectibleSet)),
       });
       return {
         collectedNoteIds,
@@ -1681,7 +1783,7 @@ async function executeOpenDetailOperation({
             seedCollectedNoteIds: collectedNoteIds,
             linksPath: collected?.linksPath || null,
             linksWithXsecToken: collectOpenLinksOnly ? collectedNoteIds.length : 0,
-            searchOnly: true,
+            searchOnly: collectOpenLinksOnly !== true,
           },
         },
         payload: {
@@ -1695,13 +1797,16 @@ async function executeOpenDetailOperation({
           seedCollectedNoteIds: collectedNoteIds,
           linksPath: collected?.linksPath || null,
           linksWithXsecToken: collectOpenLinksOnly ? collectedNoteIds.length : 0,
-          searchOnly: true,
+          searchOnly: collectOpenLinksOnly !== true,
         },
       };
     }
 
     let preCollectedSet = new Set(normalizeNoteIdList(profileState.preCollectedNoteIds));
     if (preCollectedSet.size === 0) {
+      if (!allowSeedCollectFallback) {
+        throw new Error('PRECOLLECTED_LINKS_REQUIRED');
+      }
       const collected = await collectLinksFirst();
       preCollectedSet = new Set(collected.collectedNoteIds);
       nodes = collected.rows;
@@ -1729,13 +1834,33 @@ async function executeOpenDetailOperation({
       return rows[Math.floor(Math.random() * rows.length)] || null;
     };
     const pickNode = (rows) => {
-      const inViewport = rows.filter((row) => isEligible(row) && row.inViewport);
-      if (inViewport.length > 0) return pickRandom(inViewport);
-      const fallback = rows.filter((row) => isEligible(row));
-      return pickRandom(fallback);
+      const eligibleRows = rows.filter((row) => isEligible(row));
+      const inViewport = eligibleRows.filter((row) => row.inViewport === true);
+      const candidateRows = inViewport.length > 0 ? inViewport : eligibleRows;
+      const next = pickRandom(candidateRows);
+      return { next, candidateRows };
+    };
+    const paintDetailSelection = async (rows, selectedNoteId = '') => {
+      const candidateIds = normalizeNoteIdList((Array.isArray(rows) ? rows : []).map((row) => row?.noteId));
+      const processedIds = normalizeNoteIdList(Array.from(visitedSet));
+      await paintSearchCandidates(profileId, {
+        candidateNoteIds: candidateIds,
+        selectedNoteId: String(selectedNoteId || '').trim(),
+        processedNoteIds: processedIds,
+      });
+      emitOperationProgress(context, {
+        kind: 'block',
+        stage: mode === 'next' ? 'open_next_detail' : 'open_first_detail',
+        block: 'list_select',
+        candidateCount: candidateIds.length,
+        selectedNoteId: String(selectedNoteId || '').trim() || null,
+        processedCount: processedIds.length,
+      });
     };
 
-    let next = pickNode(nodes);
+    let picked = pickNode(nodes);
+    await paintDetailSelection(picked.candidateRows, '');
+    let next = picked.next;
     const dynamicSeekStep = seekStep || Math.max(260, Math.floor((Number(nodes?.[0]?.viewport?.height || 900) || 900) * 0.9));
     if (!next) {
       for (let round = 0; round < seekRounds; round += 1) {
@@ -1743,7 +1868,9 @@ async function executeOpenDetailOperation({
         await wheel(profileId, dynamicSeekStep);
         await sleep(seekSettleMs);
         nodes = await collectVisibleRows();
-        next = pickNode(nodes);
+        picked = pickNode(nodes);
+        await paintDetailSelection(picked.candidateRows, '');
+        next = picked.next;
         if (next) break;
       }
     }
@@ -1751,6 +1878,7 @@ async function executeOpenDetailOperation({
     if (!next) {
       throw new Error('AUTOSCRIPT_DONE_NO_MORE_NOTES');
     }
+    await paintDetailSelection(picked.candidateRows, next.noteId);
 
     const beforeUrl = await readLocation(profileId);
     await sleepRandom(preClickDelayMinMs, preClickDelayMaxMs, pushTrace, 'open_detail_pre_click', { noteId: next.noteId });

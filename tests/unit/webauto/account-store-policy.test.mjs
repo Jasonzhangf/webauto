@@ -129,7 +129,7 @@ it('cleanup keeps profile when accountId exists even if markProfileInvalid is ca
   assert.equal(fs.existsSync(path.join(root, 'profiles', 'stale-id-1')), true);
 });
 
-it('cleanupIncompleteProfiles keeps profiles with any persisted binding and purges profiles with no binding', async () => {
+it('cleanupIncompleteProfiles keeps bound profiles and does not delete orphan dirs by default', async () => {
   const root = useTempRoot();
   fs.mkdirSync(path.join(root, 'profiles', 'partial-1'), { recursive: true });
   fs.mkdirSync(path.join(root, 'profiles', 'full-1'), { recursive: true });
@@ -165,15 +165,19 @@ it('cleanupIncompleteProfiles keeps profiles with any persisted binding and purg
   });
 
   const cleanup = cleanupIncompleteProfiles();
-  assert.deepEqual(cleanup.removedProfiles, ['empty-1']);
+  assert.deepEqual(cleanup.removedProfiles, []);
   assert.equal(fs.existsSync(path.join(root, 'profiles', 'partial-1')), true);
   assert.equal(fs.existsSync(path.join(root, 'profiles', 'invalid-1')), true);
   assert.equal(fs.existsSync(path.join(root, 'profiles', 'full-1')), true);
-  assert.equal(fs.existsSync(path.join(root, 'profiles', 'empty-1')), false);
+  assert.equal(fs.existsSync(path.join(root, 'profiles', 'empty-1')), true);
   assert.deepEqual(listSavedProfiles(), ['full-1', 'invalid-1', 'partial-1']);
+
+  const cleanupWithOrphans = cleanupIncompleteProfiles({ includeOrphanProfileDirs: true });
+  assert.deepEqual(cleanupWithOrphans.removedProfiles, ['empty-1']);
+  assert.equal(fs.existsSync(path.join(root, 'profiles', 'empty-1')), false);
 });
 
-it('cleanupIncompleteProfiles tolerates EPERM when deleting stale profile dir', () => {
+it('cleanupIncompleteProfiles tolerates EPERM when deleting stale orphan profile dir', () => {
   const root = useTempRoot();
   const staleDir = path.join(root, 'profiles', 'stale-locked-1');
   fs.mkdirSync(staleDir, { recursive: true });
@@ -188,7 +192,7 @@ it('cleanupIncompleteProfiles tolerates EPERM when deleting stale profile dir', 
     return originalRmSync(targetPath, options);
   };
   try {
-    const cleanup = cleanupIncompleteProfiles();
+    const cleanup = cleanupIncompleteProfiles({ includeOrphanProfileDirs: true });
     assert.deepEqual(cleanup.removedProfiles, ['stale-locked-1']);
     assert.equal(Array.isArray(cleanup.failedProfileDirDeletes), true);
     assert.equal(cleanup.failedProfileDirDeletes.length, 1);

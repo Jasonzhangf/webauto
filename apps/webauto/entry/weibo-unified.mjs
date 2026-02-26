@@ -44,7 +44,7 @@ function resolveWeiboWorkflow(argv = {}) {
 }
 
 async function runCommand(argv) {
-  cleanupIncompleteProfiles();
+  cleanupIncompleteProfiles({ deleteProfileDirs: false });
   const profile = assertProfileUsable(String(argv.profile || DEFAULT_PROFILE).trim());
   if (!profile) {
     throw new Error('Profile ID is required. Use --profile <id>');
@@ -159,7 +159,7 @@ if (isDirectExec) {
 }
 
 export async function runWeiboUnified(argv) {
-  cleanupIncompleteProfiles();
+  cleanupIncompleteProfiles({ deleteProfileDirs: false });
   const workflowId = resolveWeiboWorkflow(argv);
   const keyword = String(argv.keyword || argv.k || '').trim();
   const profile = assertProfileUsable(String(argv.profile || DEFAULT_PROFILE).trim());

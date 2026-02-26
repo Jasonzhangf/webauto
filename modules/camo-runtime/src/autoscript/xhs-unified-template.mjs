@@ -99,7 +99,7 @@ export function buildXhsUnifiedAutoscript(rawOptions = {}) {
   const doOcr = toBoolean(rawOptions.doOcr, false);
   const persistComments = toBoolean(rawOptions.persistComments, true);
   const stage = toTrimmedString(rawOptions.stage, 'full').toLowerCase();
-  const stageLinksEnabled = toBoolean(rawOptions.stageLinksEnabled, true);
+  const stageLinksRequested = toBoolean(rawOptions.stageLinksEnabled, true);
   const stageContentEnabled = toBoolean(rawOptions.stageContentEnabled, true);
   const stageLikeEnabled = toBoolean(rawOptions.stageLikeEnabled, doLikes);
   const stageReplyEnabled = toBoolean(rawOptions.stageReplyEnabled, doReply);
@@ -109,6 +109,8 @@ export function buildXhsUnifiedAutoscript(rawOptions = {}) {
   const likeKeywords = likeKeywordsSeed.length > 0 ? likeKeywordsSeed : matchKeywords;
 
   const detailLoopEnabled = stageContentEnabled || stageLikeEnabled || stageReplyEnabled;
+  const stageLinksEnabled = stageLinksRequested || detailLoopEnabled;
+  const collectOpenLinksOnly = stageLinksEnabled;
   const detailHarvestEnabled = detailLoopEnabled && (doHomepage || doImages || doComments || doOcr);
   const commentsHarvestEnabled = detailLoopEnabled && (doComments || stageLikeEnabled || stageReplyEnabled);
   const matchGateEnabled = stageLikeEnabled || stageReplyEnabled;
@@ -200,7 +202,7 @@ export function buildXhsUnifiedAutoscript(rawOptions = {}) {
       searchSerialKey,
       seedCollectCount,
       seedCollectMaxRounds,
-      collectOpenLinksOnly: stageLinksEnabled && !detailLoopEnabled,
+      collectOpenLinksOnly,
       notes: [
         'open_next_detail intentionally stops script by throwing AUTOSCRIPT_DONE_* when exhausted.',
         'dev mode uses deterministic no-recovery policy (checkpoint recovery disabled).',
@@ -314,7 +316,7 @@ export function buildXhsUnifiedAutoscript(rawOptions = {}) {
           sharedHarvestPath,
           seedCollectCount,
           seedCollectMaxRounds,
-          collectOpenLinksOnly: stageLinksEnabled && !detailLoopEnabled,
+          collectOpenLinksOnly,
         },
         trigger: 'search_result_item.exist',
         dependsOn: ['ensure_tab_pool'],
@@ -335,6 +337,7 @@ export function buildXhsUnifiedAutoscript(rawOptions = {}) {
           resume,
           incrementalMax,
           sharedHarvestPath,
+          preservePreCollected: stageLinksEnabled,
           seedCollectCount,
           seedCollectMaxRounds,
           preClickDelayMinMs: openDetailPreClickMinMs,

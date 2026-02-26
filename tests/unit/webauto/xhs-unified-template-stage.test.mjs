@@ -48,7 +48,8 @@ it('reply stage enables reply flow and keeps like flow off', () => {
   });
 
   assert.equal(getOperation(script, 'open_first_detail')?.enabled, true);
-  assert.equal(getOperation(script, 'collect_links')?.params?.collectOpenLinksOnly, false);
+  assert.equal(getOperation(script, 'collect_links')?.params?.collectOpenLinksOnly, true);
+  assert.equal(getOperation(script, 'open_first_detail')?.params?.preservePreCollected, true);
   assert.equal(getOperation(script, 'comments_harvest')?.enabled, true);
   assert.equal(getOperation(script, 'comment_match_gate')?.enabled, true);
   assert.equal(getOperation(script, 'comment_like')?.enabled, false);

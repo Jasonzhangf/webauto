@@ -881,6 +881,7 @@ export function markProfilePending(profileId, reason = 'waiting_login', platform
 
 export function cleanupIncompleteProfiles(options = {}) {
   const deleteProfileDirs = options?.deleteProfileDirs !== false;
+  const includeOrphanProfileDirs = options?.includeOrphanProfileDirs === true;
   const index = loadIndex();
   const byProfile = new Map();
   for (const row of index.accounts) {
@@ -904,7 +905,9 @@ export function cleanupIncompleteProfiles(options = {}) {
   const removedRecordIds = [];
   const failedProfileDirDeletes = [];
   const purgeRecordIds = new Set();
-  const profileIds = new Set([...byProfile.keys(), ...listProfiles().profiles]);
+  const profileIds = includeOrphanProfileDirs
+    ? new Set([...byProfile.keys(), ...listProfiles().profiles])
+    : new Set([...byProfile.keys()]);
   for (const profileId of profileIds) {
     const entry = byProfile.get(profileId) || {
       profileId,
