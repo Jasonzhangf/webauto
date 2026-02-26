@@ -41,6 +41,19 @@ function parseBoolean(value, fallback = false) {
   return fallback;
 }
 
+function resetProfileSessionForHeadful(profileId) {
+  const id = String(profileId || '').trim();
+  if (!id) return { attempted: false, ok: false, reason: 'missing_profile_id' };
+  const stopRet = runCamo(['stop', id], { rootDir: ROOT, timeoutMs: 20000 });
+  return {
+    attempted: true,
+    ok: stopRet.ok,
+    code: stopRet.code,
+    stderr: stopRet.stderr || null,
+    stdout: stopRet.stdout || null,
+  };
+}
+
 function parseIntWithFallback(value, fallback) {
   const parsed = Math.floor(Number(value));
   if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
@@ -393,6 +406,7 @@ async function cmdLogin(idOrAlias, argv, jsonMode) {
     }, jsonMode);
     process.exit(1);
   }
+  const resetSession = resetProfileSessionForHeadful(account.profileId);
 
   const startResult = runCamo(['start', account.profileId, '--url', url, '--idle-timeout', idleTimeout], { rootDir: ROOT });
   if (!startResult.ok) {
@@ -441,6 +455,7 @@ async function cmdLogin(idOrAlias, argv, jsonMode) {
     url,
     idleTimeout,
     camo: startResult.json || startResult.stdout || null,
+    resetSession,
     viewport,
     pendingProfile,
     cookieAuto: cookieAuto.ok

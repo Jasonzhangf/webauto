@@ -97,11 +97,10 @@ export function renderAccountManager(root: HTMLElement, ctx: any) {
   accountCard.innerHTML = `
     <div class="bento-title">
       账户列表
-      <button id="add-account-btn" style="margin-left: auto; padding: 6px 12px; font-size: 12px;">添加账户</button>
     </div>
     <div class="row" style="margin: 8px 0; gap: 8px; align-items: center;">
       <input id="new-account-alias-input" placeholder="别名可选（登录后自动识别）" style="flex: 1; min-width: 180px;" />
-      <button id="add-account-confirm-btn" class="secondary" style="flex: 0 0 auto;">创建并登录</button>
+      <button id="add-account-btn" class="secondary" style="flex: 0 0 auto;">添加账户</button>
     </div>
     <div id="account-list" class="account-list" style="margin-bottom: var(--gap);"></div>
     <div style="margin-top: var(--gap);">
@@ -118,7 +117,6 @@ export function renderAccountManager(root: HTMLElement, ctx: any) {
   const recheckEnvBtn = root.querySelector('#recheck-env-btn') as HTMLButtonElement;
   const envCleanupBtn = root.querySelector('#env-cleanup-btn') as HTMLButtonElement;
   const addAccountBtn = root.querySelector('#add-account-btn') as HTMLButtonElement;
-  const addAccountConfirmBtn = root.querySelector('#add-account-confirm-btn') as HTMLButtonElement;
   const newAccountAliasInput = root.querySelector('#new-account-alias-input') as HTMLInputElement;
   const checkAllBtn = root.querySelector('#check-all-btn') as HTMLButtonElement;
   const refreshExpiredBtn = root.querySelector('#refresh-expired-btn') as HTMLButtonElement;
@@ -607,7 +605,6 @@ export function renderAccountManager(root: HTMLElement, ctx: any) {
   recheckEnvBtn.onclick = checkEnvironment;
   if (envCleanupBtn) envCleanupBtn.onclick = () => { void cleanupEnvironment(); };
   addAccountBtn.onclick = addAccount;
-  addAccountConfirmBtn.onclick = addAccount;
   newAccountAliasInput.onkeydown = (ev) => {
     if (ev.key === 'Enter') {
       ev.preventDefault();

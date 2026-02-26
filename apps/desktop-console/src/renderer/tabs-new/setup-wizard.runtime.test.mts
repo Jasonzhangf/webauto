@@ -99,11 +99,15 @@ function createMockCtx(): MockBundle {
     },
     cmdRunJson: async (spec: any) => {
       const args = Array.isArray(spec?.args) ? spec.args.map((x: any) => String(x)) : [];
+      if (args.some((x: string) => x.endsWith('/profilepool.mjs')) && args.includes('add')) {
+        return { ok: true, json: { profileId: 'profile-9' } };
+      }
       if (args.some((x: string) => x.endsWith('/account.mjs')) && args.includes('list')) {
         return { ok: true, json: { profiles: state.accounts } };
       }
       if (args.some((x: string) => x.endsWith('/account.mjs')) && args.includes('add')) {
-        const profileId = 'xiaohongshu-batch-9';
+        const profileIdx = args.indexOf('--profile');
+        const profileId = profileIdx >= 0 ? String(args[profileIdx + 1] || '').trim() : 'profile-9';
         state.accounts.push({
           profileId,
           accountRecordId: null,

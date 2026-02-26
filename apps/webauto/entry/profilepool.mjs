@@ -61,6 +61,19 @@ async function applyLoginViewport(profileId) {
   }
 }
 
+function resetProfileSessionForHeadful(profileId) {
+  const id = String(profileId || '').trim();
+  if (!id) return { attempted: false, ok: false, reason: 'missing_profile_id' };
+  const stopRet = runCamo(['stop', id], { rootDir: ROOT, timeoutMs: 20000 });
+  return {
+    attempted: true,
+    ok: stopRet.ok,
+    code: stopRet.code,
+    stderr: stopRet.stderr || null,
+    stdout: stopRet.stdout || null,
+  };
+}
+
 async function waitForAccountSync(profileId, timeoutSec, intervalSec) {
   const timeoutMs = Math.max(30, Math.floor(Number(timeoutSec || 900))) * 1000;
   const intervalMs = Math.max(1, Math.floor(Number(intervalSec || 2))) * 1000;
@@ -135,6 +148,7 @@ async function cmdLoginProfile(profileId, argv, jsonMode) {
     output({ ok: false, code: initRet.code, step: 'init', stderr: initRet.stderr || initRet.stdout }, jsonMode);
     process.exit(1);
   }
+  const resetSession = resetProfileSessionForHeadful(id);
   const startRet = runCamo(['start', id, '--url', url, '--idle-timeout', idleTimeout], { rootDir: ROOT });
   if (!startRet.ok) {
     output({ ok: false, code: startRet.code, step: 'start', stderr: startRet.stderr || startRet.stdout }, jsonMode);
@@ -158,6 +172,7 @@ async function cmdLoginProfile(profileId, argv, jsonMode) {
       idleTimeout,
       session: startRet.json || null,
       viewport,
+      resetSession,
       pendingProfile,
       cookieMonitor,
       waitSync: null,
@@ -174,6 +189,7 @@ async function cmdLoginProfile(profileId, argv, jsonMode) {
     idleTimeout,
     session: startRet.json || null,
     viewport,
+    resetSession,
     pendingProfile,
     cookieMonitor,
     waitSync: syncResult,
@@ -195,6 +211,7 @@ async function cmdLogin(prefix, argv, jsonMode) {
   const started = [];
   const idleTimeout = String(argv['idle-timeout'] || process.env.WEBAUTO_LOGIN_IDLE_TIMEOUT || '30m').trim() || '30m';
   for (const profileId of all) {
+    resetProfileSessionForHeadful(profileId);
     const ret = runCamo(['start', profileId, '--url', 'https://www.xiaohongshu.com', '--idle-timeout', idleTimeout], { rootDir: ROOT });
     if (ret.ok) {
       started.push(profileId);

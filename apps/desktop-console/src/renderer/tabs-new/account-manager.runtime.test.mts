@@ -99,6 +99,12 @@ function createMockCtx(): MockBundle {
     envCheckFirefox: async () => ({ installed: true }),
     cmdRunJson: async (spec: any) => {
       const args = Array.isArray(spec?.args) ? spec.args.map((x: any) => String(x)) : [];
+      if (args.some((x: string) => x.endsWith('/profilepool.mjs')) && args.includes('add')) {
+        return {
+          ok: true,
+          json: { profileId: 'profile-9' },
+        };
+      }
       if (args.some((x: string) => x.endsWith('/account.mjs')) && args.includes('list')) {
         return { ok: true, json: { profiles: accounts } };
       }
@@ -117,10 +123,12 @@ function createMockCtx(): MockBundle {
         return { ok: true, json: { profile } };
       }
       if (args.some((x: string) => x.endsWith('/account.mjs')) && args.includes('add')) {
+        const profileIdx = args.indexOf('--profile');
+        const profileId = profileIdx >= 0 ? String(args[profileIdx + 1] || '').trim() : 'profile-9';
         return {
           ok: true,
           json: {
-            account: { id: 'xhs-0009', profileId: 'xiaohongshu-batch-9', status: 'pending', valid: false },
+            account: { id: 'xhs-0009', profileId, status: 'pending', valid: false },
           },
         };
       }

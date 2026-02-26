@@ -749,7 +749,6 @@ async function runFullCover(endpoint) {
     await runProbe('account', '#account-list');
     await runProbe('account', '#new-account-alias-input');
     await runProbe('account', '#add-account-btn');
-    await runProbe('account', '#add-account-confirm-btn');
     await runProbe('account', '#check-all-btn');
     await runProbe('account', '#refresh-expired-btn');
     await input('#new-account-alias-input', 'full-cover');
