@@ -510,6 +510,7 @@ async function readSearchInput(profileId) {
 
 async function readSearchCandidates(profileId) {
   const script = `(() => {
+    const minVisibleRatio = 0.5;
     const nodes = Array.from(document.querySelectorAll('.note-item'));
     const isVisible = (node) => {
       if (!(node instanceof Element)) return false;
@@ -541,12 +542,24 @@ async function readSearchCandidates(profileId) {
       const vh = Number(window.innerHeight || 0);
       const inViewport = rect.right > 0 && rect.bottom > 0 && rect.left < vw && rect.top < vh;
       const fullyVisible = rect.left >= 0 && rect.top >= 0 && rect.right <= vw && rect.bottom <= vh;
+      const visibleLeft = Math.max(0, rect.left);
+      const visibleTop = Math.max(0, rect.top);
+      const visibleRight = Math.min(vw, rect.right);
+      const visibleBottom = Math.min(vh, rect.bottom);
+      const visibleWidth = Math.max(0, visibleRight - visibleLeft);
+      const visibleHeight = Math.max(0, visibleBottom - visibleTop);
+      const visibleArea = visibleWidth * visibleHeight;
+      const totalArea = Math.max(1, Number(rect.width || 0) * Number(rect.height || 0));
+      const visibleRatio = Math.max(0, Math.min(1, visibleArea / totalArea));
+      const visibleEnough = visibleRatio >= minVisibleRatio;
       rows.push({
         index,
         noteId,
         href,
         inViewport,
         fullyVisible,
+        visibleRatio,
+        visibleEnough,
         center: {
           x: Math.max(1, Math.min(Math.max(1, vw - 1), Math.round(rect.left + rect.width / 2))),
           y: Math.max(1, Math.min(Math.max(1, vh - 1), Math.round(rect.top + rect.height / 2))),
@@ -574,9 +587,11 @@ async function readSearchCandidateByNoteId(profileId, noteId, options = {}) {
   const normalizedNoteId = String(noteId || '').trim();
   if (!normalizedNoteId) return { found: false };
   const visibilityMargin = Math.max(0, Number(options.visibilityMargin ?? 8) || 8);
+  const minVisibleRatio = clamp(Number(options.minVisibleRatio ?? 0.5) || 0.5, 0, 1);
   const script = `(() => {
     const noteId = ${JSON.stringify(normalizedNoteId)};
     const visibilityMargin = ${JSON.stringify(visibilityMargin)};
+    const minVisibleRatio = ${JSON.stringify(minVisibleRatio)};
     const nodes = Array.from(document.querySelectorAll('.note-item a.cover'));
     const toNoteId = (href, idx) => {
       const raw = String(href || '').trim();
@@ -593,16 +608,30 @@ async function readSearchCandidateByNoteId(profileId, noteId, options = {}) {
       const vw = Number(window.innerWidth || 0);
       const vh = Number(window.innerHeight || 0);
       const inViewport = rect.right > 0 && rect.bottom > 0 && rect.left < vw && rect.top < vh;
+      const safeLeft = visibilityMargin;
+      const safeTop = visibilityMargin;
+      const safeRight = Math.max(safeLeft, vw - visibilityMargin);
+      const safeBottom = Math.max(safeTop, vh - visibilityMargin);
       const fullyVisible = rect.left >= visibilityMargin
         && rect.top >= visibilityMargin
-        && rect.right <= Math.max(0, vw - visibilityMargin)
-        && rect.bottom <= Math.max(0, vh - visibilityMargin);
+        && rect.right <= safeRight
+        && rect.bottom <= safeBottom;
+      const visibleLeft = Math.max(safeLeft, rect.left);
+      const visibleTop = Math.max(safeTop, rect.top);
+      const visibleRight = Math.min(safeRight, rect.right);
+      const visibleBottom = Math.min(safeBottom, rect.bottom);
+      const visibleWidth = Math.max(0, visibleRight - visibleLeft);
+      const visibleHeight = Math.max(0, visibleBottom - visibleTop);
+      const visibleArea = visibleWidth * visibleHeight;
+      const totalArea = Math.max(1, Number(rect.width || 0) * Number(rect.height || 0));
+      const visibleRatio = Math.max(0, Math.min(1, visibleArea / totalArea));
+      const visibleEnough = visibleRatio >= minVisibleRatio;
       let recommendedDeltaY = 0;
-      if (!fullyVisible) {
+      if (!visibleEnough) {
         if (rect.top < visibilityMargin) {
           recommendedDeltaY = rect.top - visibilityMargin;
-        } else if (rect.bottom > (vh - visibilityMargin)) {
-          recommendedDeltaY = rect.bottom - (vh - visibilityMargin);
+        } else if (rect.bottom > safeBottom) {
+          recommendedDeltaY = rect.bottom - safeBottom;
         }
       }
       return {
@@ -611,6 +640,9 @@ async function readSearchCandidateByNoteId(profileId, noteId, options = {}) {
         href,
         inViewport,
         fullyVisible,
+        visibleEnough,
+        visibleRatio,
+        minVisibleRatio,
         recommendedDeltaY,
         center: {
           x: Math.max(1, Math.min(Math.max(1, vw - 1), Math.round(rect.left + rect.width / 2))),
@@ -638,15 +670,16 @@ async function readSearchCandidateByNoteId(profileId, noteId, options = {}) {
 async function ensureSearchCandidateFullyVisible(profileId, noteId, options = {}) {
   const maxScrollAttempts = Math.max(1, Number(options.maxScrollAttempts ?? 3) || 3);
   const visibilityMargin = Math.max(0, Number(options.visibilityMargin ?? 8) || 8);
+  const minVisibleRatio = clamp(Number(options.minVisibleRatio ?? 0.5) || 0.5, 0, 1);
   const settleMs = Math.max(60, Number(options.settleMs ?? 260) || 260);
   let latest = null;
 
   for (let attempt = 0; attempt <= maxScrollAttempts; attempt += 1) {
-    latest = await readSearchCandidateByNoteId(profileId, noteId, { visibilityMargin });
+    latest = await readSearchCandidateByNoteId(profileId, noteId, { visibilityMargin, minVisibleRatio });
     if (!latest?.found) {
       return { ok: false, code: 'NOTE_TARGET_NOT_FOUND', autoScrolled: attempt, target: null };
     }
-    if (latest.fullyVisible === true) {
+    if (latest.visibleEnough === true) {
       return { ok: true, code: 'TARGET_READY', autoScrolled: attempt, target: latest };
     }
     if (attempt >= maxScrollAttempts) break;
@@ -661,7 +694,7 @@ async function ensureSearchCandidateFullyVisible(profileId, noteId, options = {}
 
   return {
     ok: false,
-    code: 'TARGET_NOT_FULLY_VISIBLE',
+    code: 'TARGET_NOT_VISIBLE_ENOUGH',
     autoScrolled: maxScrollAttempts,
     target: latest,
   };
@@ -1691,8 +1724,8 @@ async function executeOpenDetailOperation({
           && !excluded.has(String(row.noteId || '').trim())
           && !nonCollectibleSet.has(String(row.noteId || '').trim())
         ));
-        const eligibleFullyVisible = eligibleInViewport.filter((row) => row.fullyVisible === true);
-        const selectableRows = eligibleFullyVisible.length > 0 ? eligibleFullyVisible : eligibleInViewport;
+        const eligibleVisibleEnough = eligibleInViewport.filter((row) => row.visibleEnough === true);
+        const selectableRows = eligibleVisibleEnough.length > 0 ? eligibleVisibleEnough : eligibleInViewport;
         const candidateIds = normalizeNoteIdList(eligibleInViewport.map((row) => row.noteId));
         const processedIds = normalizeNoteIdList(Array.from(nonCollectibleSet));
         await paintSearchCandidates(profileId, {
@@ -1753,6 +1786,7 @@ async function executeOpenDetailOperation({
         const visibility = await ensureSearchCandidateFullyVisible(profileId, noteId, {
           maxScrollAttempts: 3,
           visibilityMargin: 8,
+          minVisibleRatio: 0.5,
           settleMs: Math.max(140, Math.floor(seedCollectSettleMs / 2)),
         });
         emitOperationProgress(context, {
@@ -1761,7 +1795,10 @@ async function executeOpenDetailOperation({
           block: 'open_detail_visibility',
           noteId,
           autoScrolled: visibility.autoScrolled,
-          fullyVisible: visibility.ok,
+          fullyVisible: visibility.target?.fullyVisible === true,
+          visibleEnough: visibility.ok,
+          visibleRatio: Number(visibility?.target?.visibleRatio || 0),
+          minVisibleRatio: Number(visibility?.target?.minVisibleRatio || 0.5),
           code: visibility.code,
         });
         if (!visibility.ok) throw new Error(`${visibility.code}:${noteId}`);
@@ -1952,8 +1989,8 @@ async function executeOpenDetailOperation({
     const pickNode = (rows) => {
       const eligibleRows = rows.filter((row) => isEligible(row));
       const inViewport = eligibleRows.filter((row) => row.inViewport === true);
-      const fullyVisible = inViewport.filter((row) => row.fullyVisible === true);
-      const candidateRows = fullyVisible.length > 0 ? fullyVisible : (inViewport.length > 0 ? inViewport : eligibleRows);
+      const visibleEnough = inViewport.filter((row) => row.visibleEnough === true);
+      const candidateRows = visibleEnough.length > 0 ? visibleEnough : (inViewport.length > 0 ? inViewport : eligibleRows);
       const next = pickRandom(candidateRows);
       return { next, candidateRows };
     };
@@ -1999,6 +2036,7 @@ async function executeOpenDetailOperation({
     const visibility = await ensureSearchCandidateFullyVisible(profileId, next.noteId, {
       maxScrollAttempts: 3,
       visibilityMargin: 8,
+      minVisibleRatio: 0.5,
       settleMs: Math.max(160, Math.floor(seekSettleMs / 2)),
     });
     emitOperationProgress(context, {
@@ -2007,7 +2045,10 @@ async function executeOpenDetailOperation({
       block: 'open_detail_visibility',
       noteId: next.noteId,
       autoScrolled: visibility.autoScrolled,
-      fullyVisible: visibility.ok,
+      fullyVisible: visibility.target?.fullyVisible === true,
+      visibleEnough: visibility.ok,
+      visibleRatio: Number(visibility?.target?.visibleRatio || 0),
+      minVisibleRatio: Number(visibility?.target?.minVisibleRatio || 0.5),
       code: visibility.code,
     });
     if (!visibility.ok) {
