@@ -504,6 +504,7 @@ export function buildXhsUnifiedAutoscript(rawOptions = {}) {
           saveEvidence: true,
           keywords: likeKeywords,
           maxLikes: maxLikesPerRound,
+          pickOneIfNoNew: false,
         },
         trigger: 'detail_modal.exist',
         dependsOn: ['comment_match_gate'],

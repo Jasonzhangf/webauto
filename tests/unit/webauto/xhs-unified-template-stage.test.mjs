@@ -72,4 +72,5 @@ it('comments_harvest should not wait for expand_replies to run', () => {
 
   assert.deepEqual(getOperation(script, 'comments_harvest')?.dependsOn, ['detail_harvest']);
   assert.deepEqual(getOperation(script, 'expand_replies')?.dependsOn, ['detail_harvest']);
+  assert.equal(getOperation(script, 'comment_like')?.params?.pickOneIfNoNew, false);
 });
