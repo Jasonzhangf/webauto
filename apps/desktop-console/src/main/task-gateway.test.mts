@@ -18,7 +18,7 @@ function createGateway() {
     runJson: async (spec: any) => {
       calls.runJson.push(spec);
       const args = Array.isArray(spec?.args) ? spec.args.map((item: any) => String(item || '')) : [];
-      if (args.some((item: string) => item.endsWith('/account.mjs')) && args.includes('list')) {
+      if (args.some((item: string) => includesScript(item, 'account.mjs')) && args.includes('list')) {
         return { ok: true, json: { profiles: accountProfiles } };
       }
       return { ok: true, json: { ok: true, spec } };
