@@ -16,7 +16,7 @@ export function renderLogs(root: HTMLElement, ctx: any) {
   activeOnlyCheckbox.checked = true;
   const activeOnlyLabel = createEl('label', { htmlFor: 'logs-active-only', style: 'cursor:pointer; user-select:none;' }, ['仅显示活跃分片']) as HTMLLabelElement;
   const showGlobalCheckbox = createEl('input', { type: 'checkbox', id: 'logs-show-global' }) as HTMLInputElement;
-  showGlobalCheckbox.checked = false;
+  showGlobalCheckbox.checked = true;
   const showGlobalLabel = createEl('label', { htmlFor: 'logs-show-global', style: 'cursor:pointer; user-select:none;' }, ['显示公共日志']) as HTMLLabelElement;
   toolbar.appendChild(clearBtn);
   toolbar.appendChild(copyGlobalBtn);

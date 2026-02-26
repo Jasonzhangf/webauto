@@ -4,6 +4,7 @@ import { afterEach, beforeEach, test } from 'node:test';
 import { setupDom, type DomHarness } from './test-dom.mts';
 
 type CmdListener = (evt: any) => void;
+type BusListener = (evt: any) => void;
 
 let dom: DomHarness;
 
@@ -32,6 +33,7 @@ afterEach(() => {
 
 test('renderer index boots onboarding tabs and responds to cmd events', async () => {
   let cmdListener: CmdListener | null = null;
+  const busListeners = new Set<BusListener>();
   const heartbeatCalls: number[] = [];
   const spawns: any[] = [];
 
@@ -75,6 +77,12 @@ test('renderer index boots onboarding tabs and responds to cmd events', async ()
       cmdListener = cb;
       return () => {
         cmdListener = null;
+      };
+    },
+    onBusEvent: (cb: BusListener) => {
+      busListeners.add(cb);
+      return () => {
+        busListeners.delete(cb);
       };
     },
     onSettingsChanged: (_cb: any) => () => {},
@@ -186,12 +194,19 @@ test('renderer index boots onboarding tabs and responds to cmd events', async ()
     cmdListener({ type: 'stderr', runId: 'rid-1', line: 'warn timeout' });
     cmdListener({ type: 'exit', runId: 'rid-1', exitCode: 0, signal: null });
     cmdListener({ type: 'exit', runId: 'rid-2', exitCode: 0, signal: null });
+    busListeners.forEach((listener) => listener({ type: 'announcement', message: '维护通知: 今晚升级' }));
+    console.info('renderer console smoke log');
     await flush(2);
     assert.match(String(statusRoot.textContent || ''), /idle|running/);
 
     findTabByText(tabsRoot, '账户管理').click();
     await flush(3);
     assert.match(String(contentRoot.textContent || ''), /账户列表/);
+
+    findTabByText(tabsRoot, '日志').click();
+    await flush(3);
+    assert.match(String(contentRoot.textContent || ''), /维护通知: 今晚升级/);
+    assert.match(String(contentRoot.textContent || ''), /renderer console smoke log/);
 
     assert.equal(heartbeatCalls.length > 0, true);
     assert.match(String(appTitleRoot.textContent || ''), /WebAuto Console v0\.1\.9/);

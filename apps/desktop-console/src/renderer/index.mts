@@ -92,6 +92,68 @@ const ctx: any = {
   },
 };
 
+function formatBusLogLine(evt: any): string {
+  const payload = evt && typeof evt === 'object' ? evt : {};
+  const type = String(payload?.type || payload?.event || 'bus').trim() || 'bus';
+  const directMessage = [
+    payload?.message,
+    payload?.text,
+    payload?.title,
+    payload?.detail,
+    payload?.reason,
+    payload?.error,
+  ].find((item) => String(item || '').trim().length > 0);
+  const nestedMessage = [
+    payload?.payload?.message,
+    payload?.payload?.text,
+    payload?.payload?.title,
+    payload?.payload?.detail,
+  ].find((item) => String(item || '').trim().length > 0);
+  if (String(directMessage || nestedMessage || '').trim()) {
+    return `[bus:${type}] ${String(directMessage || nestedMessage).trim()}`;
+  }
+  if (type === 'env:unified' && typeof payload?.ok === 'boolean') {
+    return `[bus:${type}] ${payload.ok ? 'connected' : 'disconnected'}`;
+  }
+  try {
+    return `[bus:${type}] ${JSON.stringify(payload)}`;
+  } catch {
+    return `[bus:${type}] [unserializable]`;
+  }
+}
+
+function installRendererConsoleLogBridge() {
+  const guardKey = '__webauto_renderer_console_bridge_installed__';
+  if ((window as any)[guardKey]) return;
+  (window as any)[guardKey] = true;
+  const methods: Array<'log' | 'info' | 'warn' | 'error'> = ['log', 'info', 'warn', 'error'];
+
+  const formatArg = (arg: unknown): string => {
+    if (typeof arg === 'string') return arg;
+    if (arg instanceof Error) return `${arg.name}: ${arg.message}`;
+    if (arg === undefined) return 'undefined';
+    if (arg === null) return 'null';
+    try {
+      return JSON.stringify(arg);
+    } catch {
+      return String(arg);
+    }
+  };
+
+  methods.forEach((method) => {
+    const original = console[method].bind(console);
+    console[method] = (...args: any[]) => {
+      original(...args);
+      try {
+        const text = args.map((item) => formatArg(item)).join(' ').trim();
+        if (text) ctx.appendLog(`[console.${method}] ${text}`);
+      } catch {
+        // ignore console bridge errors
+      }
+    };
+  });
+}
+
 function startDesktopHeartbeat() {
   const sendHeartbeat = async () => {
     try {
@@ -237,6 +299,11 @@ function installCmdEvents() {
       ctx.setStatus(ctx._activeRunIds.size > 0 ? `running: ${ctx._activeRunIds.size} tasks` : 'idle');
     }
   });
+  if (typeof window.api?.onBusEvent === 'function') {
+    window.api.onBusEvent((evt: any) => {
+      ctx.appendLog(formatBusLogLine(evt));
+    });
+  }
 }
 
 async function detectStartupTab(): Promise<TabId> {
@@ -251,6 +318,7 @@ async function detectStartupTab(): Promise<TabId> {
 }
 
 async function main() {
+  installRendererConsoleLogBridge();
   startDesktopHeartbeat();
   await applyVersionBadge();
   await loadSettings();

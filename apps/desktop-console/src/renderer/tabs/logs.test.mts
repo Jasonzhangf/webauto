@@ -25,3 +25,8 @@ test('logs tab supports keyboard shortcuts for copy', async () => {
   assert.match(src, /code === 'KeyC' \|\| key === 'c'/);
   assert.match(src, /copySelected/);
 });
+
+test('logs tab shows global logs by default', async () => {
+  const src = await readFile(logsPath, 'utf8');
+  assert.match(src, /showGlobalCheckbox\.checked = true/);
+});
