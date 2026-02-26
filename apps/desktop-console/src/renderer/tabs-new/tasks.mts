@@ -377,6 +377,15 @@ export function renderTasksPanel(root: HTMLElement, ctx: any) {
     profileInput.value = recommended.profileId;
   }
 
+  function resolveUsableProfileId(platform: Platform, preferredProfileId: string): string {
+    const preferred = String(preferredProfileId || '').trim();
+    if (preferred && accountRows.some((row) => row.valid && row.profileId === preferred)) {
+      return preferred;
+    }
+    const recommended = getRecommendedProfile(platform);
+    return String(recommended?.profileId || '').trim();
+  }
+
   function getTaskById(taskId: string): ScheduleTask | null {
     const id = String(taskId || '').trim();
     if (!id) return null;
@@ -475,7 +484,8 @@ export function renderTasksPanel(root: HTMLElement, ctx: any) {
       : String(task.name || '').trim();
     keywordInput.value = String(task.commandArgv?.keyword || task.commandArgv?.k || '').trim();
     targetInput.value = String(task.commandArgv?.['max-notes'] ?? task.commandArgv?.target ?? 50);
-    profileInput.value = String(task.commandArgv?.profile || task.commandArgv?.profileId || '').trim();
+    const loadedProfile = String(task.commandArgv?.profile || task.commandArgv?.profileId || '').trim();
+    profileInput.value = loadedProfile;
     envSelect.value = String(task.commandArgv?.env || 'debug').trim() === 'prod' ? 'prod' : 'debug';
     userIdInput.value = String(task.commandArgv?.['user-id'] || task.commandArgv?.userId || '').trim();
     commentsInput.checked = task.commandArgv?.['do-comments'] !== false;
@@ -492,6 +502,14 @@ export function renderTasksPanel(root: HTMLElement, ctx: any) {
     updateScheduleVisibility();
     updateLikeKeywordsState();
     updateFormTitle(mode);
+    void refreshPlatformAccountRows(platform).then(() => {
+      updateProfileHint(platform);
+      // Keep historical profile only when it is still valid for current platform.
+      // Otherwise switch to current usable profile (or clear when none available).
+      const current = String(profileInput.value || '').trim();
+      if (current !== loadedProfile) return;
+      profileInput.value = resolveUsableProfileId(platform, loadedProfile);
+    });
   }
 
   function resetForm() {
@@ -808,9 +826,13 @@ export function renderTasksPanel(root: HTMLElement, ctx: any) {
   async function runTaskImmediately(task: ScheduleTask) {
     const taskId = String(task.id || '').trim();
     if (!taskId) return;
-    historySelect.value = taskId;
-    applyTaskToForm(task, 'edit');
-    await runSavedTask(taskId, taskToRunMeta(task));
+    try {
+      historySelect.value = taskId;
+      applyTaskToForm(task, 'edit');
+      await runSavedTask(taskId, taskToRunMeta(task));
+    } catch (err: any) {
+      alert(`执行失败: ${err?.message || String(err)}`);
+    }
   }
 
   function toTaskDedupFingerprintFromForm(data: TaskFormData): TaskDedupFingerprint {

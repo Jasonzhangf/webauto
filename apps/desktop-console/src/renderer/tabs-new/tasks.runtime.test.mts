@@ -230,6 +230,40 @@ test('history select supports edit and clone for save-as', async () => {
   assert.equal(scheduleCommands.includes('save'), true);
 });
 
+test('history edit replaces unavailable profile with current valid profile', async () => {
+  const bundle = createMockCtx();
+  bundle.state.tasks[0].commandArgv.profile = 'legacy-xhs-9';
+  const rawCmdRunJson = bundle.ctx.api.cmdRunJson;
+  bundle.ctx.api.cmdRunJson = async (spec: any) => {
+    const args = Array.isArray(spec?.args) ? spec.args.map((x: any) => String(x)) : [];
+    if (args.some((x: string) => x.endsWith('/account.mjs') || x.endsWith('\\account.mjs')) && args.includes('list')) {
+      return {
+        ok: true,
+        json: {
+          profiles: [
+            { profileId: 'xhs-1', platform: 'xiaohongshu', accountId: 'uid-1', valid: true, updatedAt: '2026-02-26T00:00:00.000Z' },
+            { profileId: 'legacy-xhs-9', platform: 'xiaohongshu', accountId: '', valid: false, updatedAt: '2026-02-25T00:00:00.000Z' },
+          ],
+        },
+      };
+    }
+    return rawCmdRunJson(spec);
+  };
+
+  const root = document.createElement('div');
+  renderTasksPanel(root, bundle.ctx);
+  await flush(8);
+
+  const historySelect = root.querySelector('#task-history-select') as HTMLSelectElement;
+  const historyEditBtn = root.querySelector('#task-history-edit-btn') as HTMLButtonElement;
+  const profileInput = root.querySelector('#task-profile') as HTMLInputElement;
+
+  historySelect.value = 'sched-0001';
+  historyEditBtn.click();
+  await flush(8);
+  assert.equal(profileInput.value, 'xhs-1');
+});
+
 test('run-ephemeral executes directly without schedule save', async () => {
   const bundle = createMockCtx();
   const root = document.createElement('div');
@@ -429,4 +463,27 @@ test('saved task list supports double-click load and immediate run ignoring sche
 
   assert.equal(bundle.calls.scheduleInvoke.some((item) => item.action === 'run' && item.taskId === 'sched-0001'), true);
   assert.equal(bundle.calls.setActiveTab.includes('dashboard'), true);
+});
+
+test('history immediate run shows alert on run failure instead of crashing', async () => {
+  const bundle = createMockCtx();
+  const rawScheduleInvoke = bundle.ctx.api.scheduleInvoke;
+  bundle.ctx.api.scheduleInvoke = async (input: any) => {
+    if (String(input?.action || '') === 'run') {
+      throw new Error('run_boom');
+    }
+    return rawScheduleInvoke(input);
+  };
+
+  const root = document.createElement('div');
+  renderTasksPanel(root, bundle.ctx);
+  await flush(8);
+
+  const historySelect = root.querySelector('#task-history-select') as HTMLSelectElement;
+  const historyRunBtn = root.querySelector('#task-history-run-btn') as HTMLButtonElement;
+  historySelect.value = 'sched-0001';
+  historyRunBtn.click();
+  await flush(8);
+
+  assert.equal(alerts.some((msg) => msg.includes('执行失败: run_boom')), true);
 });
