@@ -354,6 +354,49 @@ test('save with same params does not create duplicate task', async () => {
   assert.equal(String(saveCalls[1]?.payload?.id || ''), firstId);
 });
 
+test('save and run overwrites duplicate task with latest form fields', async () => {
+  const bundle = createMockCtx();
+  const root = document.createElement('div');
+  renderTasksPanel(root, bundle.ctx);
+  await flush(8);
+
+  const nameInput = root.querySelector('#task-name') as HTMLInputElement;
+  const keywordInput = root.querySelector('#task-keyword') as HTMLInputElement;
+  const profileInput = root.querySelector('#task-profile') as HTMLInputElement;
+  const targetInput = root.querySelector('#task-target') as HTMLInputElement;
+  const scheduleTypeSelect = root.querySelector('#task-schedule-type') as HTMLSelectElement;
+  const periodicTypeSelect = root.querySelector('#task-periodic-type') as HTMLSelectElement;
+  const intervalInput = root.querySelector('#task-interval') as HTMLInputElement;
+  const runBtn = root.querySelector('#task-run-btn') as HTMLButtonElement;
+
+  scheduleTypeSelect.value = 'periodic';
+  scheduleTypeSelect.dispatchEvent(new Event('change', { bubbles: true }));
+  periodicTypeSelect.value = 'interval';
+  periodicTypeSelect.dispatchEvent(new Event('change', { bubbles: true }));
+
+  nameInput.value = '覆盖后的任务名';
+  keywordInput.value = 'old';
+  profileInput.value = 'xhs-0';
+  targetInput.value = '20';
+  intervalInput.value = '20';
+
+  const countBefore = bundle.state.tasks.length;
+  runBtn.click();
+  await flush(8);
+
+  const saveCalls = bundle.calls.scheduleInvoke.filter((item) => String(item?.action || '') === 'save');
+  const runCalls = bundle.calls.scheduleInvoke.filter((item) => String(item?.action || '') === 'run');
+  const deleteCalls = bundle.calls.scheduleInvoke.filter((item) => String(item?.action || '') === 'delete');
+
+  assert.equal(saveCalls.length >= 1, true);
+  assert.equal(String(saveCalls.at(-1)?.payload?.id || ''), 'sched-0001');
+  assert.equal(String(saveCalls.at(-1)?.payload?.name || ''), '覆盖后的任务名');
+  assert.equal(String(runCalls.at(-1)?.taskId || ''), 'sched-0001');
+  assert.equal(deleteCalls.length, 0);
+  assert.equal(bundle.state.tasks.length, countBefore);
+  assert.equal(String(bundle.state.tasks.find((row: any) => row.id === 'sched-0001')?.name || ''), '覆盖后的任务名');
+});
+
 test('save waits latest list snapshot before dedup when list is slow', async () => {
   const bundle = createMockCtx();
   bundle.state.tasks.push({

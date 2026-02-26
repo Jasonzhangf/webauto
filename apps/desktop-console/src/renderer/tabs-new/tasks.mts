@@ -905,14 +905,24 @@ export function renderTasksPanel(root: HTMLElement, ctx: any) {
   }
 
   function findDuplicateTaskByParams(data: TaskFormData): ScheduleTask | null {
-    const editingId = String(data.id || '').trim();
-    if (editingId) return getTaskById(editingId);
     const dedupKey = toDedupKey(toTaskDedupFingerprintFromForm(data));
     const rows = sortedTasksByRecent();
     for (const row of rows) {
       if (toDedupKey(toTaskDedupFingerprintFromTask(row)) === dedupKey) return row;
     }
     return null;
+  }
+
+  function resolveSaveTargetTask(data: TaskFormData): ScheduleTask | null {
+    const editingId = String(data.id || '').trim();
+    if (editingId) {
+      const editingTask = getTaskById(editingId);
+      if (editingTask) return editingTask;
+      data.id = undefined;
+      editingIdInput.value = '';
+      updateFormTitle('new');
+    }
+    return findDuplicateTaskByParams(data);
   }
 
   async function deleteTasks(taskIds: string[]) {
@@ -958,13 +968,11 @@ export function renderTasksPanel(root: HTMLElement, ctx: any) {
     // Ensure dedup uses latest persisted tasks even when UI just mounted.
     await loadTasks();
     const data = collectFormData();
-    if (!String(data.id || '').trim()) {
-      const duplicate = findDuplicateTaskByParams(data);
-      if (duplicate) {
-        data.id = duplicate.id;
-        editingIdInput.value = duplicate.id;
-        updateFormTitle('edit');
-      }
+    const saveTarget = resolveSaveTargetTask(data);
+    if (saveTarget) {
+      data.id = saveTarget.id;
+      editingIdInput.value = saveTarget.id;
+      updateFormTitle('edit');
     }
     saveBtn.disabled = true;
     runBtn.disabled = true;
