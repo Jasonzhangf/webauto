@@ -282,14 +282,7 @@ export function renderSchedulerPanel(root: HTMLElement, ctx: any) {
     } catch {
       accountRows = [];
     }
-    const recommended = accountRows
-      .filter((row) => row.valid)
-      .sort((a, b) => {
-        const ta = Date.parse(String(a.updatedAt || '')) || 0;
-        const tb = Date.parse(String(b.updatedAt || '')) || 0;
-        if (tb !== ta) return tb - ta;
-        return String(a.profileId || '').localeCompare(String(b.profileId || ''));
-      })[0];
+    const recommended = getRecommendedProfile();
     if (!recommended) {
       profileHint.textContent = `推荐: 当前平台(${platform})无有效账号`;
       return;
@@ -299,6 +292,37 @@ export function renderSchedulerPanel(root: HTMLElement, ctx: any) {
     if (!String(profileInput.value || '').trim()) {
       profileInput.value = recommended.profileId;
     }
+  }
+
+  function getRecommendedProfile(): UiAccountProfile | null {
+    const rows = accountRows
+      .filter((row) => row.valid)
+      .sort((a, b) => {
+        const ta = Date.parse(String(a.updatedAt || '')) || 0;
+        const tb = Date.parse(String(b.updatedAt || '')) || 0;
+        if (tb !== ta) return tb - ta;
+        return String(a.profileId || '').localeCompare(String(b.profileId || ''));
+      });
+    return rows[0] || null;
+  }
+
+  function isValidProfileForCurrentPlatform(profileId: string): boolean {
+    const id = String(profileId || '').trim();
+    if (!id) return false;
+    return accountRows.some((row) => row.valid && row.profileId === id);
+  }
+
+  async function ensureUsableProfileBeforeSubmit(): Promise<string> {
+    await refreshPlatformAccounts(platformSelect.value);
+    const current = String(profileInput.value || '').trim();
+    if (isValidProfileForCurrentPlatform(current)) return current;
+    const recommended = getRecommendedProfile();
+    const recommendedId = String(recommended?.profileId || '').trim();
+    if (recommendedId) {
+      profileInput.value = recommendedId;
+      return recommendedId;
+    }
+    return current;
   }
 
   function updatePlatformFields() {
@@ -596,6 +620,7 @@ export function renderSchedulerPanel(root: HTMLElement, ctx: any) {
   }
 
   async function saveTask() {
+    await ensureUsableProfileBeforeSubmit();
     const payload = readFormAsPayload();
     try {
       const out = await invokeSchedule({ action: 'save', payload });
@@ -613,6 +638,7 @@ export function renderSchedulerPanel(root: HTMLElement, ctx: any) {
     const prevText = runNowBtn.textContent;
     runNowBtn.textContent = '执行中...';
     try {
+      await ensureUsableProfileBeforeSubmit();
       const payload = readFormAsPayload();
       const ret = await invokeTaskRunEphemeral({
         commandType: payload.commandType,

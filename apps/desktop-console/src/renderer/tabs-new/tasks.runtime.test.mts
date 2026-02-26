@@ -264,6 +264,82 @@ test('history edit replaces unavailable profile with current valid profile', asy
   assert.equal(profileInput.value, 'xhs-1');
 });
 
+test('save auto-selects valid profile when profile input is empty', async () => {
+  const bundle = createMockCtx();
+  const rawCmdRunJson = bundle.ctx.api.cmdRunJson;
+  bundle.ctx.api.cmdRunJson = async (spec: any) => {
+    const args = Array.isArray(spec?.args) ? spec.args.map((x: any) => String(x)) : [];
+    if (args.some((x: string) => x.endsWith('/account.mjs') || x.endsWith('\\account.mjs')) && args.includes('list')) {
+      return {
+        ok: true,
+        json: {
+          profiles: [
+            { profileId: 'xhs-2', platform: 'xiaohongshu', accountId: 'uid-2', valid: true, updatedAt: '2026-02-26T01:00:00.000Z' },
+            { profileId: 'xhs-1', platform: 'xiaohongshu', accountId: 'uid-1', valid: true, updatedAt: '2026-02-25T01:00:00.000Z' },
+          ],
+        },
+      };
+    }
+    return rawCmdRunJson(spec);
+  };
+
+  const root = document.createElement('div');
+  renderTasksPanel(root, bundle.ctx);
+  await flush(8);
+
+  const keywordInput = root.querySelector('#task-keyword') as HTMLInputElement;
+  const profileInput = root.querySelector('#task-profile') as HTMLInputElement;
+  const saveBtn = root.querySelector('#task-save-btn') as HTMLButtonElement;
+
+  keywordInput.value = '春晚';
+  profileInput.value = '';
+  saveBtn.click();
+  await flush(8);
+
+  const saveCalls = bundle.calls.scheduleInvoke.filter((item) => String(item?.action || '') === 'save');
+  assert.equal(saveCalls.length > 0, true);
+  const lastSave = saveCalls.at(-1);
+  assert.equal(String(lastSave?.payload?.argv?.profile || ''), 'xhs-2');
+  assert.equal(profileInput.value, 'xhs-2');
+  assert.equal(alerts.some((msg) => msg.includes('保存失败')), false, JSON.stringify(alerts));
+});
+
+test('run-ephemeral auto-selects valid profile when profile input is empty', async () => {
+  const bundle = createMockCtx();
+  const rawCmdRunJson = bundle.ctx.api.cmdRunJson;
+  bundle.ctx.api.cmdRunJson = async (spec: any) => {
+    const args = Array.isArray(spec?.args) ? spec.args.map((x: any) => String(x)) : [];
+    if (args.some((x: string) => x.endsWith('/account.mjs') || x.endsWith('\\account.mjs')) && args.includes('list')) {
+      return {
+        ok: true,
+        json: {
+          profiles: [
+            { profileId: 'xhs-9', platform: 'xiaohongshu', accountId: 'uid-9', valid: true, updatedAt: '2026-02-26T02:00:00.000Z' },
+          ],
+        },
+      };
+    }
+    return rawCmdRunJson(spec);
+  };
+
+  const root = document.createElement('div');
+  renderTasksPanel(root, bundle.ctx);
+  await flush(6);
+
+  const keywordInput = root.querySelector('#task-keyword') as HTMLInputElement;
+  const profileInput = root.querySelector('#task-profile') as HTMLInputElement;
+  const runEphemeralBtn = root.querySelector('#task-run-ephemeral-btn') as HTMLButtonElement;
+
+  keywordInput.value = '年夜饭';
+  profileInput.value = '';
+  runEphemeralBtn.click();
+  await flush(6);
+
+  assert.equal(bundle.calls.taskRunEphemeral.length, 1);
+  assert.equal(String(bundle.calls.taskRunEphemeral[0]?.argv?.profile || ''), 'xhs-9');
+  assert.equal(profileInput.value, 'xhs-9');
+});
+
 test('run-ephemeral executes directly without schedule save', async () => {
   const bundle = createMockCtx();
   const root = document.createElement('div');

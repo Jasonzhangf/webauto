@@ -386,6 +386,26 @@ export function renderTasksPanel(root: HTMLElement, ctx: any) {
     return String(recommended?.profileId || '').trim();
   }
 
+  function isValidProfileForPlatform(profileId: string): boolean {
+    const id = String(profileId || '').trim();
+    if (!id) return false;
+    return accountRows.some((row) => row.valid && row.profileId === id);
+  }
+
+  async function ensureUsableProfileBeforeSubmit(platform: Platform): Promise<string> {
+    await refreshPlatformAccountRows(platform);
+    updateProfileHint(platform);
+    const current = String(profileInput.value || '').trim();
+    if (isValidProfileForPlatform(current)) return current;
+    const recommended = getRecommendedProfile(platform);
+    const recommendedId = String(recommended?.profileId || '').trim();
+    if (recommendedId) {
+      profileInput.value = recommendedId;
+      return recommendedId;
+    }
+    return current;
+  }
+
   function getTaskById(taskId: string): ScheduleTask | null {
     const id = String(taskId || '').trim();
     if (!id) return null;
@@ -967,6 +987,8 @@ export function renderTasksPanel(root: HTMLElement, ctx: any) {
   async function saveTask(runImmediately = false) {
     // Ensure dedup uses latest persisted tasks even when UI just mounted.
     await loadTasks();
+    const platform = normalizePlatform(platformSelect.value);
+    await ensureUsableProfileBeforeSubmit(platform);
     const data = collectFormData();
     const saveTarget = resolveSaveTargetTask(data);
     if (saveTarget) {
@@ -1021,6 +1043,8 @@ export function renderTasksPanel(root: HTMLElement, ctx: any) {
   }
 
   async function runWithoutSave() {
+    const platform = normalizePlatform(platformSelect.value);
+    await ensureUsableProfileBeforeSubmit(platform);
     const data = collectFormData();
     runEphemeralBtn.disabled = true;
     try {
@@ -1073,6 +1097,8 @@ export function renderTasksPanel(root: HTMLElement, ctx: any) {
       if (!keywordInput.value && config?.keyword) {
         keywordInput.value = String(config.keyword || '');
       }
+      const platform = normalizePlatform(platformSelect.value);
+      await ensureUsableProfileBeforeSubmit(platform);
     } catch {
       // ignore
     }

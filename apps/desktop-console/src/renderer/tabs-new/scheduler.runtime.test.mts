@@ -461,6 +461,45 @@ test('scheduler panel supports validate + add/update/delete/import + daemon life
   assert.equal(state.unsubscribed, true);
 });
 
+test('scheduler save auto-selects valid profile when profile input is empty', async () => {
+  const { ctx, calls } = createMockCtx();
+  ctx.api.pathJoin = (...parts: string[]) => parts.filter(Boolean).join('/');
+  ctx.api.cmdRunJson = async (spec: any) => {
+    const args = Array.isArray(spec?.args) ? spec.args.map((x: any) => String(x)) : [];
+    if (args.some((x: string) => x.endsWith('/account.mjs') || x.endsWith('\\account.mjs')) && args.includes('list')) {
+      return {
+        ok: true,
+        json: {
+          profiles: [
+            { profileId: 'xiaohongshu-batch-8', platform: 'xiaohongshu', accountId: 'uid-8', valid: true, updatedAt: '2026-02-26T03:00:00.000Z' },
+            { profileId: 'xiaohongshu-batch-1', platform: 'xiaohongshu', accountId: 'uid-1', valid: true, updatedAt: '2026-02-25T03:00:00.000Z' },
+          ],
+        },
+      };
+    }
+    return { ok: true, json: {} };
+  };
+
+  const root = document.createElement('div');
+  renderSchedulerPanel(root, ctx);
+  await flush(6);
+
+  const keywordInput = root.querySelector('#scheduler-keyword') as HTMLInputElement;
+  const profileInput = root.querySelector('#scheduler-profile') as HTMLInputElement;
+  const saveBtn = root.querySelector('#scheduler-save-btn') as HTMLButtonElement;
+
+  keywordInput.value = '春晚';
+  profileInput.value = '';
+  saveBtn.click();
+  await flush(6);
+
+  const saveCalls = calls.scheduleInvoke.filter((item) => String(item?.action || '') === 'save');
+  assert.equal(saveCalls.length > 0, true);
+  assert.equal(String(saveCalls.at(-1)?.payload?.argv?.profile || ''), 'xiaohongshu-batch-8');
+  assert.equal(profileInput.value, 'xiaohongshu-batch-8');
+  assert.equal(alertMessages.length, 0, JSON.stringify(alertMessages));
+});
+
 test('scheduler panel renders list failure fallback when list command errors', async () => {
   const bundle = createMockCtx();
   bundle.state.failListOnce = true;
