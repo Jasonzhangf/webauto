@@ -10,6 +10,7 @@ import { BROWSER_SERVICE_URL, loadConfig, setRepoRoot } from './config.mjs';
 const requireFromHere = createRequire(import.meta.url);
 const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_API_TIMEOUT_MS = 90000;
+const DEFAULT_API_TIMEOUT_MULTIPLIER = 3;
 
 function resolveNodeBin() {
   const explicit = String(process.env.WEBAUTO_NODE_BIN || '').trim();
@@ -57,14 +58,35 @@ function runCamoCli(args = [], options = {}) {
 
 function resolveApiTimeoutMs(options = {}) {
   const optionValue = Number(options?.timeoutMs);
+  const optionMultiplier = Number(options?.timeoutMultiplier);
+  const envMultiplier = Number(
+    process.env.CAMO_API_TIMEOUT_MULTIPLIER
+    || process.env.WEBAUTO_TIMEOUT_MULTIPLIER
+    || '',
+  );
+  const timeoutMultiplier = Number.isFinite(optionMultiplier) && optionMultiplier >= 1
+    ? Math.floor(optionMultiplier)
+    : (Number.isFinite(envMultiplier) && envMultiplier >= 1
+      ? Math.floor(envMultiplier)
+      : DEFAULT_API_TIMEOUT_MULTIPLIER);
+  const normalizeTimeout = (value) => {
+    const n = Number(value);
+    if (!Number.isFinite(n) || n <= 0) return 0;
+    return Math.max(1000, Math.floor(n));
+  };
+  const applyMultiplier = (value) => {
+    const normalized = normalizeTimeout(value);
+    if (normalized <= 0) return 0;
+    return Math.min(15 * 60 * 1000, normalized * timeoutMultiplier);
+  };
   if (Number.isFinite(optionValue) && optionValue > 0) {
-    return Math.max(1000, Math.floor(optionValue));
+    return applyMultiplier(optionValue);
   }
   const envValue = Number(process.env.CAMO_API_TIMEOUT_MS);
   if (Number.isFinite(envValue) && envValue > 0) {
-    return Math.max(1000, Math.floor(envValue));
+    return applyMultiplier(envValue);
   }
-  return DEFAULT_API_TIMEOUT_MS;
+  return applyMultiplier(DEFAULT_API_TIMEOUT_MS);
 }
 
 function isTimeoutError(error) {

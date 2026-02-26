@@ -540,11 +540,13 @@ async function readSearchCandidates(profileId) {
       const vw = Number(window.innerWidth || 0);
       const vh = Number(window.innerHeight || 0);
       const inViewport = rect.right > 0 && rect.bottom > 0 && rect.left < vw && rect.top < vh;
+      const fullyVisible = rect.left >= 0 && rect.top >= 0 && rect.right <= vw && rect.bottom <= vh;
       rows.push({
         index,
         noteId,
         href,
         inViewport,
+        fullyVisible,
         center: {
           x: Math.max(1, Math.min(Math.max(1, vw - 1), Math.round(rect.left + rect.width / 2))),
           y: Math.max(1, Math.min(Math.max(1, vh - 1), Math.round(rect.top + rect.height / 2))),
@@ -566,6 +568,103 @@ async function readSearchCandidates(profileId) {
     };
   })()`;
   return evaluateReadonly(profileId, script);
+}
+
+async function readSearchCandidateByNoteId(profileId, noteId, options = {}) {
+  const normalizedNoteId = String(noteId || '').trim();
+  if (!normalizedNoteId) return { found: false };
+  const visibilityMargin = Math.max(0, Number(options.visibilityMargin ?? 8) || 8);
+  const script = `(() => {
+    const noteId = ${JSON.stringify(normalizedNoteId)};
+    const visibilityMargin = ${JSON.stringify(visibilityMargin)};
+    const nodes = Array.from(document.querySelectorAll('.note-item a.cover'));
+    const toNoteId = (href, idx) => {
+      const raw = String(href || '').trim();
+      const seg = raw.split('/').filter(Boolean).pop() || '';
+      return (seg.split('?')[0].split('#')[0] || ('idx_' + idx)).trim();
+    };
+    for (let index = 0; index < nodes.length; index += 1) {
+      const cover = nodes[index];
+      if (!(cover instanceof Element)) continue;
+      const href = String(cover.getAttribute('href') || '').trim();
+      const rowNoteId = toNoteId(href, index);
+      if (rowNoteId !== noteId) continue;
+      const rect = cover.getBoundingClientRect();
+      const vw = Number(window.innerWidth || 0);
+      const vh = Number(window.innerHeight || 0);
+      const inViewport = rect.right > 0 && rect.bottom > 0 && rect.left < vw && rect.top < vh;
+      const fullyVisible = rect.left >= visibilityMargin
+        && rect.top >= visibilityMargin
+        && rect.right <= Math.max(0, vw - visibilityMargin)
+        && rect.bottom <= Math.max(0, vh - visibilityMargin);
+      let recommendedDeltaY = 0;
+      if (!fullyVisible) {
+        if (rect.top < visibilityMargin) {
+          recommendedDeltaY = rect.top - visibilityMargin;
+        } else if (rect.bottom > (vh - visibilityMargin)) {
+          recommendedDeltaY = rect.bottom - (vh - visibilityMargin);
+        }
+      }
+      return {
+        found: true,
+        noteId: rowNoteId,
+        href,
+        inViewport,
+        fullyVisible,
+        recommendedDeltaY,
+        center: {
+          x: Math.max(1, Math.min(Math.max(1, vw - 1), Math.round(rect.left + rect.width / 2))),
+          y: Math.max(1, Math.min(Math.max(1, vh - 1), Math.round(rect.top + rect.height / 2))),
+        },
+        rect: {
+          left: Number(rect.left || 0),
+          top: Number(rect.top || 0),
+          width: Number(rect.width || 0),
+          height: Number(rect.height || 0),
+          right: Number(rect.right || 0),
+          bottom: Number(rect.bottom || 0),
+        },
+        viewport: {
+          width: vw,
+          height: vh,
+        },
+      };
+    }
+    return { found: false };
+  })()`;
+  return evaluateReadonly(profileId, script);
+}
+
+async function ensureSearchCandidateFullyVisible(profileId, noteId, options = {}) {
+  const maxScrollAttempts = Math.max(1, Number(options.maxScrollAttempts ?? 3) || 3);
+  const visibilityMargin = Math.max(0, Number(options.visibilityMargin ?? 8) || 8);
+  const settleMs = Math.max(60, Number(options.settleMs ?? 260) || 260);
+  let latest = null;
+
+  for (let attempt = 0; attempt <= maxScrollAttempts; attempt += 1) {
+    latest = await readSearchCandidateByNoteId(profileId, noteId, { visibilityMargin });
+    if (!latest?.found) {
+      return { ok: false, code: 'NOTE_TARGET_NOT_FOUND', autoScrolled: attempt, target: null };
+    }
+    if (latest.fullyVisible === true) {
+      return { ok: true, code: 'TARGET_READY', autoScrolled: attempt, target: latest };
+    }
+    if (attempt >= maxScrollAttempts) break;
+    let deltaY = Number(latest.recommendedDeltaY || 0);
+    if (!Number.isFinite(deltaY) || Math.abs(deltaY) < 12) {
+      const top = Number(latest?.rect?.top || 0);
+      deltaY = top < visibilityMargin ? -260 : 260;
+    }
+    await wheel(profileId, clamp(Math.round(deltaY), -900, 900));
+    await sleep(settleMs);
+  }
+
+  return {
+    ok: false,
+    code: 'TARGET_NOT_FULLY_VISIBLE',
+    autoScrolled: maxScrollAttempts,
+    target: latest,
+  };
 }
 
 async function readSearchViewportReady(profileId) {
@@ -1592,6 +1691,8 @@ async function executeOpenDetailOperation({
           && !excluded.has(String(row.noteId || '').trim())
           && !nonCollectibleSet.has(String(row.noteId || '').trim())
         ));
+        const eligibleFullyVisible = eligibleInViewport.filter((row) => row.fullyVisible === true);
+        const selectableRows = eligibleFullyVisible.length > 0 ? eligibleFullyVisible : eligibleInViewport;
         const candidateIds = normalizeNoteIdList(eligibleInViewport.map((row) => row.noteId));
         const processedIds = normalizeNoteIdList(Array.from(nonCollectibleSet));
         await paintSearchCandidates(profileId, {
@@ -1627,7 +1728,7 @@ async function executeOpenDetailOperation({
           return { kind: 'continue' };
         }
         stagnantRounds = 0;
-        const next = pickRandom(eligibleInViewport);
+        const next = pickRandom(selectableRows);
         if (!next?.center) return { kind: 'continue' };
         await paintSearchCandidates(profileId, {
           candidateNoteIds: candidateIds,
@@ -1649,6 +1750,21 @@ async function executeOpenDetailOperation({
       };
       const runOpenDetailBlock = async (next) => {
         const noteId = String(next?.noteId || '').trim();
+        const visibility = await ensureSearchCandidateFullyVisible(profileId, noteId, {
+          maxScrollAttempts: 3,
+          visibilityMargin: 8,
+          settleMs: Math.max(140, Math.floor(seedCollectSettleMs / 2)),
+        });
+        emitOperationProgress(context, {
+          kind: 'block',
+          stage: 'collect_links',
+          block: 'open_detail_visibility',
+          noteId,
+          autoScrolled: visibility.autoScrolled,
+          fullyVisible: visibility.ok,
+          code: visibility.code,
+        });
+        if (!visibility.ok) throw new Error(`${visibility.code}:${noteId}`);
         emitOperationProgress(context, {
           kind: 'block',
           stage: 'collect_links',
@@ -1658,7 +1774,7 @@ async function executeOpenDetailOperation({
         const beforeUrl = await readLocation(profileId);
         await sleepRandom(preClickDelayMinMs, preClickDelayMaxMs, pushTrace, 'open_detail_pre_click', { noteId, mode: 'collect' });
         pushTrace({ kind: 'click', stage: 'open_detail', noteId, selector: 'a.cover', mode: 'collect' });
-        await clickPoint(profileId, next.center, { steps: 4 });
+        await clickPoint(profileId, visibility.target?.center || next.center, { steps: 4 });
         const detailReady = await waitDetailReady();
         if (!detailReady) throw new Error('DETAIL_OPEN_TIMEOUT');
         await sleepRandom(postOpenDelayMinMs, postOpenDelayMaxMs, pushTrace, 'open_detail_post_open', { noteId, mode: 'collect' });
@@ -1836,7 +1952,8 @@ async function executeOpenDetailOperation({
     const pickNode = (rows) => {
       const eligibleRows = rows.filter((row) => isEligible(row));
       const inViewport = eligibleRows.filter((row) => row.inViewport === true);
-      const candidateRows = inViewport.length > 0 ? inViewport : eligibleRows;
+      const fullyVisible = inViewport.filter((row) => row.fullyVisible === true);
+      const candidateRows = fullyVisible.length > 0 ? fullyVisible : (inViewport.length > 0 ? inViewport : eligibleRows);
       const next = pickRandom(candidateRows);
       return { next, candidateRows };
     };
@@ -1879,11 +1996,28 @@ async function executeOpenDetailOperation({
       throw new Error('AUTOSCRIPT_DONE_NO_MORE_NOTES');
     }
     await paintDetailSelection(picked.candidateRows, next.noteId);
+    const visibility = await ensureSearchCandidateFullyVisible(profileId, next.noteId, {
+      maxScrollAttempts: 3,
+      visibilityMargin: 8,
+      settleMs: Math.max(160, Math.floor(seekSettleMs / 2)),
+    });
+    emitOperationProgress(context, {
+      kind: 'block',
+      stage: mode === 'next' ? 'open_next_detail' : 'open_first_detail',
+      block: 'open_detail_visibility',
+      noteId: next.noteId,
+      autoScrolled: visibility.autoScrolled,
+      fullyVisible: visibility.ok,
+      code: visibility.code,
+    });
+    if (!visibility.ok) {
+      throw new Error(`${visibility.code}:${next.noteId}`);
+    }
 
     const beforeUrl = await readLocation(profileId);
     await sleepRandom(preClickDelayMinMs, preClickDelayMaxMs, pushTrace, 'open_detail_pre_click', { noteId: next.noteId });
     pushTrace({ kind: 'click', stage: 'open_detail', noteId: next.noteId, selector: 'a.cover' });
-    await clickPoint(profileId, next.center, { steps: 4 });
+    await clickPoint(profileId, visibility.target?.center || next.center, { steps: 4 });
 
     let detailReady = false;
     for (let i = 0; i < 60; i += 1) {

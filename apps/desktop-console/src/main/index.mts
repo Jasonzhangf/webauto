@@ -1003,12 +1003,22 @@ async function waitForUnifiedRunRegistration(input: {
   uiTriggerId?: string;
   baselineRunIds?: Set<string>;
   timeoutMs?: number;
+  timeoutMultiplier?: number;
 }) {
   const desktopRunId = String(input.desktopRunId || '').trim();
   const profileId = String(input.profileId || '').trim();
   const keyword = String(input.keyword || '').trim();
   const uiTriggerId = String(input.uiTriggerId || '').trim();
-  const timeoutMs = Math.max(2_000, Number(input.timeoutMs || 20_000) || 20_000);
+  const baseTimeoutMs = Math.max(2_000, Number(input.timeoutMs || 20_000) || 20_000);
+  const timeoutMultiplierRaw = Number(
+    input.timeoutMultiplier
+    ?? process.env.WEBAUTO_RUN_REGISTER_TIMEOUT_MULTIPLIER
+    ?? 3,
+  );
+  const timeoutMultiplier = Number.isFinite(timeoutMultiplierRaw) && timeoutMultiplierRaw >= 1
+    ? Math.floor(timeoutMultiplierRaw)
+    : 3;
+  const timeoutMs = baseTimeoutMs * timeoutMultiplier;
   const startedAt = Date.now();
   const minTs = startedAt - 30_000;
   const baselineRunIds = input.baselineRunIds instanceof Set ? input.baselineRunIds : new Set<string>();
@@ -1040,13 +1050,22 @@ async function waitForUnifiedRunRegistration(input: {
 
   const lifecycle = getRunLifecycle(desktopRunId);
   if (lifecycle?.state === 'queued') {
-    return { ok: false, error: '任务仍在排队，未进入运行态（请检查是否有同类任务占用）' };
+    return {
+      ok: false,
+      error: `任务仍在排队，未进入运行态（已等待 ${Math.round(timeoutMs / 1000)}s，基础超时 ${Math.round(baseTimeoutMs / 1000)}s x${timeoutMultiplier}）`,
+    };
   }
   if (lifecycle?.state === 'running') {
-    return { ok: false, error: '任务进程已启动，但在超时内未注册 unified runId' };
+    return {
+      ok: false,
+      error: `任务进程已启动，但在超时内未注册 unified runId（已等待 ${Math.round(timeoutMs / 1000)}s，基础超时 ${Math.round(baseTimeoutMs / 1000)}s x${timeoutMultiplier}）`,
+    };
   }
   const suffix = lastFetchError ? `: ${lastFetchError}` : '';
-  return { ok: false, error: `未检测到 unified runId${suffix}` };
+  return {
+    ok: false,
+    error: `未检测到 unified runId（已等待 ${Math.round(timeoutMs / 1000)}s，基础超时 ${Math.round(baseTimeoutMs / 1000)}s x${timeoutMultiplier}）${suffix}`,
+  };
 }
 
 async function scanResults(input: { downloadRoot?: string }) {
@@ -1508,7 +1527,8 @@ ipcMain.handle('task:runEphemeral', async (_evt, input) => {
     keyword,
     uiTriggerId,
     baselineRunIds,
-    timeoutMs: 20_000,
+    timeoutMs: 30_000,
+    timeoutMultiplier: 3,
   });
   if (!waited.ok) {
     appendRunLog(desktopRunId, `[wait-register-failed] ${String(waited.error || 'unknown_error')}`);

@@ -114,7 +114,18 @@ export function buildXhsUnifiedAutoscript(rawOptions = {}) {
   const detailHarvestEnabled = detailLoopEnabled && (doHomepage || doImages || doComments || doOcr);
   const commentsHarvestEnabled = detailLoopEnabled && (doComments || stageLikeEnabled || stageReplyEnabled);
   const matchGateEnabled = stageLikeEnabled || stageReplyEnabled;
-  const collectLinksTimeoutMs = Math.max(180000, maxNotes * 6000);
+  const collectPerNoteBudgetMs = toPositiveInt(rawOptions.collectPerNoteBudgetMs ?? rawOptions.collectPerNoteMs, 15000, 5000);
+  const collectLinksTimeoutMinMs = toPositiveInt(rawOptions.collectLinksTimeoutMinMs, 600000, 60000);
+  const collectLinksTimeoutMs = toPositiveInt(
+    rawOptions.collectLinksTimeoutMs,
+    Math.max(collectLinksTimeoutMinMs, maxNotes * collectPerNoteBudgetMs),
+    60000,
+  );
+  const collectStallTimeoutMs = toPositiveInt(
+    rawOptions.collectStallTimeoutMs,
+    Math.max(180000, Math.min(300000, collectLinksTimeoutMs)),
+    30000,
+  );
   const closeDependsOn = pickCloseDependency({
     doReply: stageReplyEnabled,
     doLikes: stageLikeEnabled,
@@ -203,6 +214,10 @@ export function buildXhsUnifiedAutoscript(rawOptions = {}) {
       seedCollectCount,
       seedCollectMaxRounds,
       collectOpenLinksOnly,
+      collectPerNoteBudgetMs,
+      collectLinksTimeoutMinMs,
+      collectLinksTimeoutMs,
+      collectStallTimeoutMs,
       notes: [
         'open_next_detail intentionally stops script by throwing AUTOSCRIPT_DONE_* when exhausted.',
         'dev mode uses deterministic no-recovery policy (checkpoint recovery disabled).',
@@ -317,6 +332,7 @@ export function buildXhsUnifiedAutoscript(rawOptions = {}) {
           seedCollectCount,
           seedCollectMaxRounds,
           collectOpenLinksOnly,
+          collectStallTimeoutMs,
         },
         trigger: 'search_result_item.exist',
         dependsOn: ['ensure_tab_pool'],

@@ -378,6 +378,62 @@ export class AutoscriptRunner {
     return this.getDefaultTimeoutMs(operation);
   }
 
+  resolveTimeoutMultiplier(operation) {
+    const raw = Number(
+      operation?.timeoutMultiplier
+      ?? this.script?.defaults?.timeoutMultiplier
+      ?? process.env.WEBAUTO_AUTOSCRIPT_TIMEOUT_MULTIPLIER
+      ?? 3,
+    );
+    if (!Number.isFinite(raw) || raw < 1) return 3;
+    return Math.floor(raw);
+  }
+
+  resolveBlockingTimeoutMs(operation, baseTimeoutMs) {
+    const timeoutMs = Math.max(0, Number(baseTimeoutMs) || 0);
+    if (timeoutMs <= 0) return { timeoutMs: 0, multiplier: 1, blocking: false };
+    const onFailure = String(operation?.onFailure || '').trim().toLowerCase();
+    const blocking = onFailure !== 'continue';
+    if (!blocking) return { timeoutMs, multiplier: 1, blocking: false };
+    const multiplier = this.resolveTimeoutMultiplier(operation);
+    return {
+      timeoutMs: timeoutMs * multiplier,
+      multiplier,
+      blocking: true,
+    };
+  }
+
+  isNonBlockingOperation(operation) {
+    const onFailure = String(operation?.onFailure || '').trim().toLowerCase();
+    return onFailure === 'continue';
+  }
+
+  resolveNonBlockingTimeoutRetries(operation) {
+    if (!this.isNonBlockingOperation(operation)) return 0;
+    const raw = Number(
+      operation?.timeoutRetries
+      ?? operation?.timeoutGraceRetries
+      ?? this.script?.defaults?.timeoutRetries
+      ?? process.env.WEBAUTO_AUTOSCRIPT_TIMEOUT_RETRIES
+      ?? 2,
+    );
+    if (!Number.isFinite(raw) || raw < 0) return 2;
+    return Math.floor(raw);
+  }
+
+  resolveTimeoutRetryBackoffMs(operation, retryIndex, timeoutMs) {
+    const raw = Number(
+      operation?.timeoutRetryBackoffMs
+      ?? this.script?.defaults?.timeoutRetryBackoffMs
+      ?? process.env.WEBAUTO_AUTOSCRIPT_TIMEOUT_RETRY_BACKOFF_MS
+      ?? 800,
+    );
+    const base = Number.isFinite(raw) && raw >= 0 ? Math.floor(raw) : 800;
+    const scaled = base * Math.max(1, Number(retryIndex) || 1);
+    if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) return scaled;
+    return Math.max(0, Math.min(scaled, Math.floor(timeoutMs / 4)));
+  }
+
   buildTriggerKey(operation, event) {
     const trigger = operation?.trigger || { type: 'startup' };
     if (trigger.type === 'startup') return 'startup';
@@ -635,15 +691,18 @@ export class AutoscriptRunner {
 
   async runOperation(operation, event) {
     const retry = operation.retry || {};
-    const maxAttempts = Math.max(1, Number(retry.attempts) || 1);
+    const baseAttempts = Math.max(1, Number(retry.attempts) || 1);
     const backoffMs = Math.max(0, Number(retry.backoffMs) || 0);
+    const timeoutGraceRetries = this.resolveNonBlockingTimeoutRetries(operation);
+    let timeoutGraceUsed = 0;
+    let totalAttempts = baseAttempts;
 
-    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    for (let attempt = 1; attempt <= totalAttempts; attempt += 1) {
       const context = {
         runId: this.runId,
         event,
         attempt,
-        maxAttempts,
+        maxAttempts: totalAttempts,
         runtime: this.runtimeContext,
         emitProgress: (payload = {}) => {
           const detail = payload && typeof payload === 'object'
@@ -704,21 +763,30 @@ export class AutoscriptRunner {
         operationId: operation.id,
         action: operation.action,
         attempt,
-        maxAttempts,
+        maxAttempts: totalAttempts,
         trigger: operation.trigger,
         subscriptionId: event.subscriptionId || null,
       });
 
       const startedAt = Date.now();
-      const timeoutMs = this.resolveTimeoutMs(operation);
+      const baseTimeoutMs = this.resolveTimeoutMs(operation);
+      const timeoutBudget = this.resolveBlockingTimeoutMs(operation, baseTimeoutMs);
+      const timeoutMs = timeoutBudget.timeoutMs;
       const result = await withTimeout(
         this.executeOnce(operation, context),
         timeoutMs,
         () => ({
           ok: false,
           code: 'OPERATION_TIMEOUT',
-          message: `operation timed out after ${timeoutMs}ms`,
-          data: { timeoutMs },
+          message: timeoutBudget.blocking && timeoutBudget.multiplier > 1
+            ? `operation timed out after ${timeoutMs}ms (base=${baseTimeoutMs}ms x${timeoutBudget.multiplier})`
+            : `operation timed out after ${timeoutMs}ms`,
+          data: {
+            timeoutMs,
+            baseTimeoutMs,
+            timeoutMultiplier: timeoutBudget.multiplier,
+            blockingTimeout: timeoutBudget.blocking,
+          },
         }),
       );
       const latencyMs = Date.now() - startedAt;
@@ -847,7 +915,30 @@ export class AutoscriptRunner {
         });
       }
 
-      if (attempt < maxAttempts) {
+      const failureCode = String(result?.code || '').trim().toUpperCase();
+      const nonBlockingTimeout = failureCode === 'OPERATION_TIMEOUT' && this.isNonBlockingOperation(operation);
+      if (nonBlockingTimeout && timeoutGraceUsed < timeoutGraceRetries) {
+        timeoutGraceUsed += 1;
+        totalAttempts += 1;
+        const timeoutRetryBackoffMs = this.resolveTimeoutRetryBackoffMs(operation, timeoutGraceUsed, timeoutMs);
+        this.log('autoscript:operation_timeout_retry', {
+          operationId: operation.id,
+          action: operation.action,
+          attempt,
+          code: result.code || 'OPERATION_TIMEOUT',
+          message: result.message || 'operation timed out',
+          timeoutMs,
+          timeoutGraceUsed,
+          timeoutGraceRetries,
+          nextAttempt: attempt + 1,
+          totalAttempts,
+          backoffMs: timeoutRetryBackoffMs,
+        });
+        if (timeoutRetryBackoffMs > 0) await sleep(timeoutRetryBackoffMs);
+        continue;
+      }
+
+      if (attempt < totalAttempts) {
         if (backoffMs > 0) await sleep(backoffMs);
         continue;
       }

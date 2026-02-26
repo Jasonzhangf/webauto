@@ -263,8 +263,14 @@ export function renderDashboard(root: HTMLElement, ctx: any) {
     const opId = String(payload?.operationId || '').trim();
     if (opId) {
       if (eventName === 'autoscript:operation_error' || eventName === 'autoscript:operation_recovery_failed') {
-        const err = String(payload?.error || payload?.message || payload?.code || '').trim();
-        return err ? `${opId}: ${err}` : `${opId}: failed`;
+        const code = String(payload?.code || '').trim();
+        const err = String(payload?.error || payload?.message || '').trim();
+        const latencyMs = Math.max(0, Number(payload?.latencyMs || 0) || 0);
+        const details: string[] = [];
+        if (code) details.push(code);
+        if (err) details.push(err);
+        if (latencyMs > 0) details.push(`latency=${latencyMs}ms`);
+        return details.length > 0 ? `${opId}: ${details.join(' | ')}` : `${opId}: failed`;
       }
       const stage = String(payload?.stage || '').trim();
       return stage ? `${opId}:${stage}` : opId;
@@ -854,9 +860,9 @@ export function renderDashboard(root: HTMLElement, ctx: any) {
       if (opId) {
         currentPhase.textContent = resolveUnifiedPhaseFromOp(opId, currentPhase.textContent || '运行中');
       }
-      currentAction.textContent = resolveUnifiedActionFromEvent(event, payload, currentAction.textContent || '-');
-      const err = String(payload?.error || payload?.message || payload?.code || event).trim();
-      pushRecentError(opId ? `${opId}: ${err}` : err, event, payload);
+      const summary = resolveUnifiedActionFromEvent(event, payload, currentAction.textContent || '-');
+      currentAction.textContent = summary;
+      pushRecentError(summary || String(event), event, payload);
       return;
     }
     if (event === 'xhs.unified.merged') {
