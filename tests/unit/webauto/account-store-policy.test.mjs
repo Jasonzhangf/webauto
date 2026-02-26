@@ -172,3 +172,29 @@ it('cleanupIncompleteProfiles keeps profiles with any persisted binding and purg
   assert.equal(fs.existsSync(path.join(root, 'profiles', 'empty-1')), false);
   assert.deepEqual(listSavedProfiles(), ['full-1', 'invalid-1', 'partial-1']);
 });
+
+it('cleanupIncompleteProfiles tolerates EPERM when deleting stale profile dir', () => {
+  const root = useTempRoot();
+  const staleDir = path.join(root, 'profiles', 'stale-locked-1');
+  fs.mkdirSync(staleDir, { recursive: true });
+
+  const originalRmSync = fs.rmSync;
+  fs.rmSync = (targetPath, options) => {
+    if (String(targetPath) === staleDir) {
+      const err = new Error(`EPERM: operation not permitted, unlink '${targetPath}'`);
+      err.code = 'EPERM';
+      throw err;
+    }
+    return originalRmSync(targetPath, options);
+  };
+  try {
+    const cleanup = cleanupIncompleteProfiles();
+    assert.deepEqual(cleanup.removedProfiles, ['stale-locked-1']);
+    assert.equal(Array.isArray(cleanup.failedProfileDirDeletes), true);
+    assert.equal(cleanup.failedProfileDirDeletes.length, 1);
+    assert.equal(cleanup.failedProfileDirDeletes[0].profileId, 'stale-locked-1');
+    assert.equal(fs.existsSync(staleDir), true);
+  } finally {
+    fs.rmSync = originalRmSync;
+  }
+});

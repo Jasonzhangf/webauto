@@ -902,6 +902,7 @@ export function cleanupIncompleteProfiles(options = {}) {
 
   const removedProfiles = [];
   const removedRecordIds = [];
+  const failedProfileDirDeletes = [];
   const purgeRecordIds = new Set();
   const profileIds = new Set([...byProfile.keys(), ...listProfiles().profiles]);
   for (const profileId of profileIds) {
@@ -932,12 +933,21 @@ export function cleanupIncompleteProfiles(options = {}) {
     for (const profileId of removedProfiles) {
       const profilePath = path.join(profilesRoot, profileId);
       if (!isWithinDir(profilesRoot, profilePath)) continue;
-      fs.rmSync(profilePath, { recursive: true, force: true });
+      try {
+        fs.rmSync(profilePath, { recursive: true, force: true });
+      } catch (error) {
+        failedProfileDirDeletes.push({
+          profileId,
+          profilePath,
+          error: error?.message || String(error),
+        });
+      }
     }
   }
   return {
     removedProfiles,
     removedRecords: removedRecordIds,
+    failedProfileDirDeletes,
   };
 }
 
