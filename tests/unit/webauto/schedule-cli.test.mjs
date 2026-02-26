@@ -12,9 +12,14 @@ const scheduleCliPath = path.join(repoRoot, 'apps', 'webauto', 'entry', 'schedul
 const roots = [];
 
 function makeEnv(root) {
+  const profilesRoot = path.join(root, 'profiles');
+  const accountsRoot = path.join(root, 'accounts');
   return {
     ...process.env,
+    WEBAUTO_HOME: root,
     WEBAUTO_PATHS_SCHEDULES: root,
+    WEBAUTO_PATHS_PROFILES: profilesRoot,
+    WEBAUTO_PATHS_ACCOUNTS: accountsRoot,
   };
 }
 
@@ -39,6 +44,36 @@ function newRoot() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'webauto-schedule-cli-'));
   roots.push(root);
   return root;
+}
+
+function seedValidProfile(root, { profileId = 'profile-0', platform = 'xiaohongshu', accountId = 'acc-u1' } = {}) {
+  const profilesRoot = path.join(root, 'profiles');
+  const accountsRoot = path.join(root, 'accounts');
+  fs.mkdirSync(path.join(profilesRoot, profileId), { recursive: true });
+  fs.mkdirSync(accountsRoot, { recursive: true });
+  fs.writeFileSync(path.join(accountsRoot, 'index.json'), JSON.stringify({
+    version: 1,
+    nextSeq: 2,
+    updatedAt: new Date().toISOString(),
+    accounts: [
+      {
+        id: 'acc-0001',
+        seq: 1,
+        platform,
+        status: 'valid',
+        valid: true,
+        reason: null,
+        accountId,
+        name: accountId,
+        alias: '主号',
+        username: null,
+        profileId,
+        fingerprintId: profileId,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      },
+    ],
+  }, null, 2));
 }
 
 afterEach(() => {
@@ -241,6 +276,7 @@ describe('schedule cli', () => {
 
   it('supports run/run-due failure paths with json output', () => {
     const root = newRoot();
+    seedValidProfile(root, { profileId: 'p1', platform: '1688', accountId: 'acc-1688-1' });
     const addRes = runSchedule([
       'add',
       '--name', 'run-fail',
@@ -271,6 +307,33 @@ describe('schedule cli', () => {
     const runDueRes = runSchedule(['run-due', '--limit', '5', '--json'], root, 1);
     assert.equal(runDueRes.ok, false);
     assert.equal(Number(runDueRes.failed) >= 1, true);
+  });
+
+  it('schedule run replaces unavailable historical profile with valid profile', () => {
+    const root = newRoot();
+    seedValidProfile(root, { profileId: 'profile-0', platform: 'xiaohongshu', accountId: 'xhs-u1' });
+    const addRes = runSchedule([
+      'add',
+      '--name', 'xhs-fallback-profile',
+      '--command-type', 'xhs-unified',
+      '--schedule-type', 'once',
+      '--run-at', new Date(Date.now() - 1_000).toISOString(),
+      '--argv-json',
+      JSON.stringify({
+        profile: 'legacy-xhs-9',
+        keyword: '春晚',
+        'max-notes': 1,
+        'plan-only': true,
+        env: 'debug',
+      }),
+      '--json',
+    ], root);
+    const taskId = addRes.task.id;
+
+    const runRes = runSchedule(['run', taskId, '--json'], root);
+    assert.equal(runRes.ok, true);
+    assert.equal(runRes.result.ok, true);
+    assert.equal(Boolean(runRes.result.error), false);
   });
 
   it('supports daemon loop mode and graceful shutdown', async () => {

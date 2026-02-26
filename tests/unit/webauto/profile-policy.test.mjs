@@ -79,14 +79,18 @@ it('rejects missing profiles', () => {
 it('rejects temporary profile ids even when directory exists', () => {
   const profilesRoot = withTempProfileRoot();
   fs.mkdirSync(path.join(profilesRoot, 'test-profile'), { recursive: true });
-  fs.mkdirSync(path.join(profilesRoot, 'profile-0'), { recursive: true });
   seedSavedProfile('test-profile');
-  seedSavedProfile('profile-0');
 
   assert.equal(isTemporaryProfileId('test-profile'), true);
-  assert.equal(isTemporaryProfileId('profile-0'), true);
+  assert.equal(isTemporaryProfileId('profile-0'), false);
   assert.throws(() => assertProfileUsable('test-profile'), /forbidden temporary profileId/i);
-  assert.throws(() => assertProfileUsable('profile-0'), /forbidden temporary profileId/i);
+});
+
+it('accepts unified profile ids like profile-0', () => {
+  const profilesRoot = withTempProfileRoot();
+  fs.mkdirSync(path.join(profilesRoot, 'profile-0'), { recursive: true });
+  seedSavedProfile('profile-0');
+  assert.equal(assertProfileUsable('profile-0'), 'profile-0');
 });
 
 it('accepts profile with one valid platform binding', () => {

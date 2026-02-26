@@ -118,9 +118,10 @@ async function cmdList(prefix, jsonMode) {
 }
 
 async function cmdAdd(prefix, jsonMode) {
-  const profileId = resolveNextProfileId(prefix);
+  const namingPrefix = 'profile';
+  const profileId = resolveNextProfileId(namingPrefix);
   const created = await ensureProfile(profileId);
-  output({ ok: true, keyword: prefix, root: created.root, profileId, profileDir: created.profileDir }, jsonMode);
+  output({ ok: true, keyword: namingPrefix, root: created.root, profileId, profileDir: created.profileDir }, jsonMode);
 }
 
 async function cmdLoginProfile(profileId, argv, jsonMode) {

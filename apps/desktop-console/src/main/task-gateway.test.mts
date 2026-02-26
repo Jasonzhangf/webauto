@@ -8,15 +8,23 @@ function createGateway() {
     runJson: [] as any[],
     spawn: [] as any[],
   };
+  let accountProfiles: any[] = [];
   const gateway = {
     repoRoot: '/repo',
     runJson: async (spec: any) => {
       calls.runJson.push(spec);
+      const args = Array.isArray(spec?.args) ? spec.args.map((item: any) => String(item || '')) : [];
+      if (args.some((item: string) => item.endsWith('/account.mjs')) && args.includes('list')) {
+        return { ok: true, json: { profiles: accountProfiles } };
+      }
       return { ok: true, json: { ok: true, spec } };
     },
     spawnCommand: async (spec: any) => {
       calls.spawn.push(spec);
       return { runId: `rid-${calls.spawn.length}` };
+    },
+    setAccountProfiles: (rows: any[]) => {
+      accountProfiles = Array.isArray(rows) ? rows.map((row) => ({ ...row })) : [];
     },
   };
   return { calls, gateway };
@@ -43,6 +51,14 @@ test('scheduleInvoke save validates weibo monitor user-id', async () => {
 
 test('scheduleInvoke save builds argv-json and command-type', async () => {
   const { calls, gateway } = createGateway();
+  gateway.setAccountProfiles([
+    {
+      profileId: 'xhs-1',
+      valid: true,
+      accountId: 'xhs-u1',
+      updatedAt: '2026-02-26T00:00:00.000Z',
+    },
+  ]);
   const result = await scheduleInvoke(gateway, {
     action: 'save',
     payload: {
@@ -59,7 +75,10 @@ test('scheduleInvoke save builds argv-json and command-type', async () => {
     },
   });
   assert.equal(result.ok, true);
-  const args = calls.runJson[0]?.args || [];
+  const scheduleCall = calls.runJson.find((item: any) =>
+    Array.isArray(item?.args) && item.args.some((value: string) => String(value).endsWith('/schedule.mjs')),
+  );
+  const args = scheduleCall?.args || [];
   assert.equal(args.some((item: string) => item.endsWith('/schedule.mjs')), true);
   assert.equal(args.includes('update'), true);
   assert.equal(args.includes('task-1'), true);
@@ -86,6 +105,14 @@ test('scheduleInvoke run supports background spawn mode', async () => {
 
 test('runEphemeralTask spawns xhs unified command', async () => {
   const { calls, gateway } = createGateway();
+  gateway.setAccountProfiles([
+    {
+      profileId: 'xhs-1',
+      valid: true,
+      accountId: 'xhs-u1',
+      updatedAt: '2026-02-26T00:00:00.000Z',
+    },
+  ]);
   const result = await runEphemeralTask(gateway, {
     commandType: 'xhs-unified',
     argv: {
@@ -109,4 +136,66 @@ test('runEphemeralTask spawns xhs unified command', async () => {
   assert.equal(args.includes('--keyword'), true);
   assert.equal(args.includes('工作服'), true);
   assert.equal(args.includes('--ui-trigger-id'), true);
+});
+
+test('scheduleInvoke save replaces unavailable explicit profile with valid profile', async () => {
+  const { calls, gateway } = createGateway();
+  gateway.setAccountProfiles([
+    {
+      profileId: 'profile-0',
+      valid: true,
+      accountId: 'xhs-u0',
+      updatedAt: '2026-02-26T00:00:00.000Z',
+    },
+  ]);
+  const result = await scheduleInvoke(gateway, {
+    action: 'save',
+    payload: {
+      id: 'task-fallback-1',
+      name: 'xhs-fallback',
+      commandType: 'xhs-unified',
+      scheduleType: 'interval',
+      intervalMinutes: 15,
+      argv: {
+        profile: 'legacy-xhs-9',
+        keyword: '春晚',
+        'max-notes': 20,
+      },
+    },
+  });
+  assert.equal(result.ok, true);
+  const scheduleCall = calls.runJson.find((item: any) =>
+    Array.isArray(item?.args) && item.args.some((value: string) => String(value).endsWith('/schedule.mjs')),
+  );
+  const args = scheduleCall?.args || [];
+  const argvIdx = args.indexOf('--argv-json');
+  assert.ok(argvIdx >= 0);
+  const argvJson = JSON.parse(String(args[argvIdx + 1] || '{}'));
+  assert.equal(argvJson.profile, 'profile-0');
+});
+
+test('runEphemeralTask replaces unavailable explicit profile with valid profile', async () => {
+  const { calls, gateway } = createGateway();
+  gateway.setAccountProfiles([
+    {
+      profileId: 'profile-0',
+      valid: true,
+      accountId: 'xhs-u0',
+      updatedAt: '2026-02-26T00:00:00.000Z',
+    },
+  ]);
+  const result = await runEphemeralTask(gateway, {
+    commandType: 'xhs-unified',
+    argv: {
+      profile: 'legacy-xhs-9',
+      keyword: '春晚',
+      'max-notes': 20,
+      env: 'debug',
+    },
+  });
+  assert.equal(result.ok, true);
+  const args = calls.spawn[0]?.args || [];
+  const profileIdx = args.indexOf('--profile');
+  assert.ok(profileIdx >= 0);
+  assert.equal(args[profileIdx + 1], 'profile-0');
 });

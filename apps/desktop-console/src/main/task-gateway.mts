@@ -101,7 +101,10 @@ function hasExplicitProfileArg(argv: Record<string, any>): boolean {
   return Boolean(asText(argv?.profile) || asText(argv?.profiles) || asText(argv?.profilepool));
 }
 
-async function pickDefaultProfileForPlatform(options: GatewayOptions, platform: 'xiaohongshu' | 'weibo' | '1688'): Promise<string> {
+async function listValidProfilesForPlatform(
+  options: GatewayOptions,
+  platform: 'xiaohongshu' | 'weibo' | '1688',
+): Promise<string[]> {
   const accountScript = path.join(options.repoRoot, 'apps', 'webauto', 'entry', 'account.mjs');
   const ret = await options.runJson({
     title: `account list --platform ${platform}`,
@@ -109,23 +112,43 @@ async function pickDefaultProfileForPlatform(options: GatewayOptions, platform: 
     args: [accountScript, 'list', '--platform', platform, '--json'],
     timeoutMs: 20_000,
   });
-  if (!ret?.ok) return '';
+  if (!ret?.ok) return [];
   const rows = Array.isArray(ret?.json?.profiles) ? ret.json.profiles : [];
-  const validRows = rows
+  return rows
     .filter((row: any) => row?.valid === true && asText(row?.accountId))
     .sort((a: any, b: any) => {
       const ta = Date.parse(asText(a?.updatedAt) || '') || 0;
       const tb = Date.parse(asText(b?.updatedAt) || '') || 0;
       if (tb !== ta) return tb - ta;
       return asText(a?.profileId).localeCompare(asText(b?.profileId));
-    });
-  return asText(validRows[0]?.profileId) || '';
+    })
+    .map((row: any) => asText(row?.profileId))
+    .filter(Boolean);
 }
 
 async function ensureProfileArg(options: GatewayOptions, commandType: string, argv: Record<string, any>): Promise<Record<string, any>> {
-  if (hasExplicitProfileArg(argv)) return argv;
   const platform = getPlatformFromCommandType(commandType);
-  const profileId = await pickDefaultProfileForPlatform(options, platform);
+  const validProfiles = await listValidProfilesForPlatform(options, platform);
+  const explicitProfile = asText(argv?.profile);
+  const explicitProfiles = asText(argv?.profiles);
+  const explicitPool = asText(argv?.profilepool);
+
+  if (explicitProfile) {
+    if (validProfiles.includes(explicitProfile)) return argv;
+    const fallbackProfile = validProfiles[0] || '';
+    if (!fallbackProfile) {
+      throw new Error(`指定 Profile(${explicitProfile}) 不可用，且未找到平台(${platform})有效账号。请先在账号页登录并校验后重试。`);
+    }
+    return {
+      ...argv,
+      profile: fallbackProfile,
+    };
+  }
+
+  if (explicitProfiles || explicitPool) return argv;
+  if (hasExplicitProfileArg(argv)) return argv;
+
+  const profileId = validProfiles[0] || '';
   if (!profileId) {
     throw new Error(`未指定 Profile，且未找到平台(${platform})有效账号。请先在账号页登录并校验后重试。`);
   }

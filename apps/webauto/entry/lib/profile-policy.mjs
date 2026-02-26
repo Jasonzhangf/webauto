@@ -5,7 +5,6 @@ const TEMP_PROFILE_PATTERNS = [
   /^test(?:$|[-_])/i,
   /^tmp(?:$|[-_])/i,
   /^temp(?:$|[-_])/i,
-  /^profile-\d+$/i,
   /^debug(?:$|[-_])/i,
 ];
 

@@ -99,10 +99,41 @@ function pickAutoProfile(platform) {
   return String(validRows[0]?.profileId || '').trim();
 }
 
+function listValidProfilesByPlatform(platform) {
+  const rows = listAccountProfiles({ platform }).profiles || [];
+  return rows
+    .filter((row) => row?.valid === true && String(row?.accountId || '').trim())
+    .sort((a, b) => {
+      const ta = Date.parse(String(a?.updatedAt || '')) || 0;
+      const tb = Date.parse(String(b?.updatedAt || '')) || 0;
+      if (tb !== ta) return tb - ta;
+      return String(a?.profileId || '').localeCompare(String(b?.profileId || ''));
+    })
+    .map((row) => String(row?.profileId || '').trim())
+    .filter(Boolean);
+}
+
 function ensureProfileArgForTask(commandType, commandArgv = {}) {
   const argv = commandArgv && typeof commandArgv === 'object' ? { ...commandArgv } : {};
-  if (hasProfileArg(argv)) return argv;
   const platform = normalizePlatformByCommandType(commandType);
+  const explicitProfile = String(argv?.profile || '').trim();
+  const explicitProfiles = String(argv?.profiles || '').trim();
+  const explicitPool = String(argv?.profilepool || '').trim();
+
+  if (explicitProfile) {
+    const validProfiles = listValidProfilesByPlatform(platform);
+    if (validProfiles.includes(explicitProfile)) return argv;
+    const fallbackProfile = validProfiles[0] || '';
+    if (!fallbackProfile) {
+      throw new Error(`profile unavailable: ${explicitProfile}; no valid account for platform=${platform}`);
+    }
+    argv.profile = fallbackProfile;
+    return argv;
+  }
+
+  if (explicitProfiles || explicitPool) return argv;
+  if (hasProfileArg(argv)) return argv;
+
   const profile = pickAutoProfile(platform);
   if (!profile) {
     throw new Error(`missing profile/profiles/profilepool and no valid account for platform=${platform}`);
