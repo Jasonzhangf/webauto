@@ -169,3 +169,119 @@ test('mouseClick uses explicit move/down/up pipeline', async () => {
     restoreTimeout();
   }
 });
+
+test('mouseClick pre-click move retries quickly before down/up', async () => {
+  const restoreTimeout = setEnv('CAMO_INPUT_ACTION_TIMEOUT_MS', '200');
+  const restoreAttempts = setEnv('CAMO_INPUT_ACTION_MAX_ATTEMPTS', '1');
+  const restoreDelay = setEnv('CAMO_INPUT_RECOVERY_DELAY_MS', '0');
+  const restorePreClickTimeout = setEnv('CAMO_PRECLICK_MOVE_TIMEOUT_MS', '20');
+  const restorePreClickAttempts = setEnv('CAMO_PRECLICK_MOVE_MAX_ATTEMPTS', '3');
+  try {
+    let moveCalls = 0;
+    const calls: string[] = [];
+    const page = {
+      mouse: {
+        move: async () => {
+          moveCalls += 1;
+          calls.push(`move:${moveCalls}`);
+          if (moveCalls < 3) return await new Promise<void>(() => {});
+        },
+        click: async () => {
+          calls.push('click');
+        },
+        down: async () => {
+          calls.push('down');
+        },
+        up: async () => {
+          calls.push('up');
+        },
+      },
+      bringToFront: async () => {},
+      waitForTimeout: async () => {},
+    };
+    const session = createSessionWithPage(page);
+    await session.mouseClick({ x: 15, y: 25, delay: 0 });
+    assert.deepEqual(calls, ['move:1', 'move:2', 'move:3', 'down', 'up']);
+  } finally {
+    restorePreClickAttempts();
+    restorePreClickTimeout();
+    restoreDelay();
+    restoreAttempts();
+    restoreTimeout();
+  }
+});
+
+test('mouseClick falls back to direct click after repeated pre-click move timeouts', async () => {
+  const restoreTimeout = setEnv('CAMO_INPUT_ACTION_TIMEOUT_MS', '200');
+  const restoreAttempts = setEnv('CAMO_INPUT_ACTION_MAX_ATTEMPTS', '1');
+  const restoreDelay = setEnv('CAMO_INPUT_RECOVERY_DELAY_MS', '0');
+  const restorePreClickTimeout = setEnv('CAMO_PRECLICK_MOVE_TIMEOUT_MS', '20');
+  const restorePreClickAttempts = setEnv('CAMO_PRECLICK_MOVE_MAX_ATTEMPTS', '2');
+  try {
+    const calls: string[] = [];
+    const page = {
+      mouse: {
+        move: async () => {
+          calls.push('move');
+          return await new Promise<void>(() => {});
+        },
+        click: async () => {
+          calls.push('click');
+        },
+        down: async () => {
+          calls.push('down');
+        },
+        up: async () => {
+          calls.push('up');
+        },
+      },
+      bringToFront: async () => {},
+      waitForTimeout: async () => {},
+    };
+    const session = createSessionWithPage(page);
+    await session.mouseClick({ x: 16, y: 26, delay: 0 });
+    assert.deepEqual(calls, ['move', 'move', 'click']);
+  } finally {
+    restorePreClickAttempts();
+    restorePreClickTimeout();
+    restoreDelay();
+    restoreAttempts();
+    restoreTimeout();
+  }
+});
+
+test('mouseClick can skip pre-click move and click directly', async () => {
+  const restoreTimeout = setEnv('CAMO_INPUT_ACTION_TIMEOUT_MS', '200');
+  const restoreAttempts = setEnv('CAMO_INPUT_ACTION_MAX_ATTEMPTS', '1');
+  const restoreDelay = setEnv('CAMO_INPUT_RECOVERY_DELAY_MS', '0');
+  const restorePreMove = setEnv('CAMO_CLICK_PREMOVE', 'false');
+  try {
+    const calls: string[] = [];
+    const page = {
+      mouse: {
+        move: async () => {
+          calls.push('move');
+        },
+        click: async () => {
+          calls.push('click');
+        },
+        down: async () => {
+          calls.push('down');
+        },
+        up: async () => {
+          calls.push('up');
+        },
+      },
+      bringToFront: async () => {},
+      waitForTimeout: async () => {},
+    };
+    const session = createSessionWithPage(page);
+    await session.mouseClick({ x: 18, y: 28, delay: 0 });
+    assert.deepEqual(calls, ['click']);
+  } finally {
+    restorePreMove();
+    restoreDelay();
+    restoreAttempts();
+    restoreTimeout();
+  }
+});
