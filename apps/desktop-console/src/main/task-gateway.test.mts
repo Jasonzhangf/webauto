@@ -78,7 +78,7 @@ test('scheduleInvoke save builds argv-json and command-type', async () => {
       },
     },
   });
-  assert.equal(result.ok, true);
+  assert.equal(result.ok, true, JSON.stringify(result));
   const scheduleCall = calls.runJson.find((item: any) =>
     Array.isArray(item?.args) && item.args.some((value: string) => includesScript(value, 'schedule.mjs')),
   );
@@ -98,7 +98,7 @@ test('scheduleInvoke run supports background spawn mode', async () => {
     taskId: 'sched-0009',
     background: true,
   });
-  assert.equal(result.ok, true);
+  assert.equal(result.ok, true, JSON.stringify(result));
   assert.equal(calls.spawn.length, 1);
   assert.equal(calls.runJson.length, 0);
   const args = calls.spawn[0]?.args || [];
@@ -130,7 +130,7 @@ test('runEphemeralTask spawns xhs unified command', async () => {
       'like-keywords': '购买链接',
     },
   });
-  assert.equal(result.ok, true);
+  assert.equal(result.ok, true, JSON.stringify(result));
   assert.equal(result.runId, 'rid-1');
   assert.match(String(result.uiTriggerId || ''), /^ui-\d+-[a-f0-9]+$/);
   const args = calls.spawn[0]?.args || [];
@@ -167,7 +167,7 @@ test('scheduleInvoke save replaces unavailable explicit profile with valid profi
       },
     },
   });
-  assert.equal(result.ok, true);
+  assert.equal(result.ok, true, JSON.stringify(result));
   const scheduleCall = calls.runJson.find((item: any) =>
     Array.isArray(item?.args) && item.args.some((value: string) => includesScript(value, 'schedule.mjs')),
   );
