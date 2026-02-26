@@ -3,6 +3,10 @@ import { test } from 'node:test';
 
 import { runEphemeralTask, scheduleInvoke } from './task-gateway.mts';
 
+function isScriptPath(value: any, baseName: string): boolean {
+  return new RegExp(`[\\\\/]${baseName.replace('.', '\\.')}$`).test(String(value || ''));
+}
+
 function createGateway() {
   const calls = {
     runJson: [] as any[],
@@ -76,10 +80,10 @@ test('scheduleInvoke save builds argv-json and command-type', async () => {
   });
   assert.equal(result.ok, true);
   const scheduleCall = calls.runJson.find((item: any) =>
-    Array.isArray(item?.args) && item.args.some((value: string) => String(value).endsWith('/schedule.mjs')),
+    Array.isArray(item?.args) && item.args.some((value: string) => isScriptPath(value, 'schedule.mjs')),
   );
   const args = scheduleCall?.args || [];
-  assert.equal(args.some((item: string) => item.endsWith('/schedule.mjs')), true);
+  assert.equal(args.some((item: string) => isScriptPath(item, 'schedule.mjs')), true);
   assert.equal(args.includes('update'), true);
   assert.equal(args.includes('task-1'), true);
   assert.equal(args.includes('--command-type'), true);
@@ -98,7 +102,7 @@ test('scheduleInvoke run supports background spawn mode', async () => {
   assert.equal(calls.spawn.length, 1);
   assert.equal(calls.runJson.length, 0);
   const args = calls.spawn[0]?.args || [];
-  assert.equal(args.some((item: string) => item.endsWith('/schedule.mjs')), true);
+  assert.equal(args.some((item: string) => isScriptPath(item, 'schedule.mjs')), true);
   assert.equal(args.includes('run'), true);
   assert.equal(args.includes('sched-0009'), true);
 });
@@ -130,7 +134,7 @@ test('runEphemeralTask spawns xhs unified command', async () => {
   assert.equal(result.runId, 'rid-1');
   assert.match(String(result.uiTriggerId || ''), /^ui-\d+-[a-f0-9]+$/);
   const args = calls.spawn[0]?.args || [];
-  assert.equal(args.some((item: string) => item.endsWith('/xhs-unified.mjs')), true);
+  assert.equal(args.some((item: string) => isScriptPath(item, 'xhs-unified.mjs')), true);
   assert.equal(args.includes('--profile'), true);
   assert.equal(args.includes('xhs-1'), true);
   assert.equal(args.includes('--keyword'), true);
@@ -165,7 +169,7 @@ test('scheduleInvoke save replaces unavailable explicit profile with valid profi
   });
   assert.equal(result.ok, true);
   const scheduleCall = calls.runJson.find((item: any) =>
-    Array.isArray(item?.args) && item.args.some((value: string) => String(value).endsWith('/schedule.mjs')),
+    Array.isArray(item?.args) && item.args.some((value: string) => isScriptPath(value, 'schedule.mjs')),
   );
   const args = scheduleCall?.args || [];
   const argvIdx = args.indexOf('--argv-json');
