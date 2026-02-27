@@ -135,6 +135,10 @@ function uiConsoleScriptPath() {
   return path.join(ROOT, 'apps', 'desktop-console', 'entry', 'ui-console.mjs');
 }
 
+function daemonScriptPath() {
+  return path.join(ROOT, 'apps', 'webauto', 'entry', 'daemon.mjs');
+}
+
 function readRootVersion() {
   try {
     const pkg = JSON.parse(readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
@@ -156,6 +160,7 @@ Usage:
   webauto schedule --help
   webauto deps --help
   webauto ui --help
+  webauto daemon --help
   webauto xhs --help
 
 Core Commands:
@@ -165,6 +170,7 @@ Core Commands:
   webauto ui console [--build] [--install] [--check]
   webauto ui restart [--build] [--install] [--timeout <ms>] [--reason <text>]
   webauto ui cli <action> [options]
+  webauto daemon <start|stop|status|run|relay|autostart>
   webauto xhs install [--download-browser] [--download-geoip] [--ensure-backend]
   webauto xhs unified [xhs options...]
   webauto xhs status [--run-id <id>] [--json]
@@ -199,6 +205,10 @@ Examples (standard):
   webauto ui cli tab --tab 配置
   webauto ui cli input --selector "#keyword-input" --value "seedance2.0"
   webauto ui cli click --selector "#start-btn"
+  webauto --daemon
+  webauto --daemon stop
+  webauto --daemon relay -- xhs unified --profile profile-8 --keyword 春晚 --max-notes 20 --stage links
+  webauto daemon autostart install
   webauto xhs install --ensure-backend
   webauto xhs unified --profile xiaohongshu-batch-1 --keyword "seedance2.0" --max-notes 100 --do-comments true --persist-comments true --do-likes true --like-keywords "真牛逼" --env debug --tab-count 4
 
@@ -262,6 +272,26 @@ Examples:
   webauto ui cli click --selector "#start-btn"
   webauto ui cli probe --selector "#start-btn" --detailed
   webauto ui cli full-cover --build --output ./.tmp/ui-cli-full-cover.json
+`);
+}
+
+function printDaemonHelp() {
+  console.log(`webauto daemon
+
+Usage:
+  webauto --daemon
+  webauto --daemon start|stop|status|run
+  webauto --daemon relay [--detach] -- <webauto args...>
+  webauto daemon <start|stop|status|run|relay|autostart>
+
+Examples:
+  webauto --daemon
+  webauto --daemon status --json
+  webauto --daemon stop
+  webauto --daemon relay -- xhs unified --profile profile-8 --keyword 春晚 --max-notes 20 --stage links
+  webauto --daemon relay --detach -- xhs unified --profile profile-8 --keyword 春晚 --max-notes 100 --stage links
+  webauto daemon autostart install
+  webauto daemon autostart status --json
 `);
 }
 
@@ -640,16 +670,49 @@ async function uiConsole({ build, install, checkOnly, noDaemon }) {
   await run(process.execPath, [uiScript, ...uiArgs]);
 }
 
+async function daemonProxy(rawArgv) {
+  const daemonScript = daemonScriptPath();
+  const filtered = rawArgv.filter((item) => item !== '--daemon');
+  const controlSet = new Set([
+    'start',
+    'stop',
+    'status',
+    'run',
+    'relay',
+    'ui-start',
+    'ui-stop',
+    'ui-status',
+    'service-status',
+    'job-status',
+    'job-list',
+    'autostart',
+    'help',
+    '--help',
+    '-h',
+  ]);
+  let daemonArgs = [];
+  if (filtered.length === 0) {
+    daemonArgs = ['start'];
+  } else if (controlSet.has(String(filtered[0] || '').trim().toLowerCase())) {
+    daemonArgs = filtered;
+  } else {
+    daemonArgs = ['relay', '--', ...filtered];
+  }
+  await run(process.execPath, [daemonScript, ...daemonArgs]);
+}
+
 async function main() {
   const rawArgv = process.argv.slice(2);
   const args = minimist(process.argv.slice(2), {
-    boolean: ['help', 'build', 'install', 'check', 'full', 'link', 'skip-tests', 'skip-pack', 'no-daemon', 'no-bump', 'json'],
+    boolean: ['help', 'build', 'install', 'check', 'full', 'link', 'skip-tests', 'skip-pack', 'no-daemon', 'no-bump', 'json', 'daemon'],
     string: ['bump'],
     alias: { h: 'help' },
   });
 
   const cmd = String(args._[0] || '').trim();
   const sub = String(args._[1] || '').trim();
+  const daemonBypass = String(process.env.WEBAUTO_DAEMON_BYPASS || '').trim() === '1';
+  const daemonFlag = !daemonBypass && (rawArgv.includes('--daemon') || args.daemon === true);
   const noDaemon = rawArgv.includes('--no-daemon') || rawArgv.includes('--foreground') || args['no-daemon'] === true;
 
   if (args.help) {
@@ -675,6 +738,10 @@ async function main() {
       printUiConsoleHelp();
       return;
     }
+    if (cmd === 'daemon' || daemonFlag) {
+      printDaemonHelp();
+      return;
+    }
     if (cmd === 'xhs') {
       printXhsHelp();
       return;
@@ -688,12 +755,27 @@ async function main() {
   }
 
   if (!cmd) {
+    if (daemonFlag) {
+      await daemonProxy(rawArgv);
+      return;
+    }
     await uiConsole({
       build: false,
       install: false,
       checkOnly: false,
       noDaemon,
     });
+    return;
+  }
+
+  if (daemonFlag) {
+    await daemonProxy(rawArgv);
+    return;
+  }
+
+  if (cmd === 'daemon') {
+    const daemonScript = daemonScriptPath();
+    await run(process.execPath, [daemonScript, ...rawArgv.slice(1)]);
     return;
   }
 
