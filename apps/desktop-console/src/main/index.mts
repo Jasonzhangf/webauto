@@ -216,7 +216,18 @@ type RunLifecycleEntry = {
 };
 const runLifecycle = new Map<string, RunLifecycleEntry>();
 const trackedRunPids = new Set<number>();
+const APP_EXIT_CLEANUP_WAIT_MS = (() => {
+  const value = Number(process.env.WEBAUTO_APP_EXIT_CLEANUP_WAIT_MS || 45_000);
+  return Number.isFinite(value) && value > 0 ? Math.floor(value) : 45_000;
+})();
+const CAMO_CLEANUP_TIMEOUT_MS = (() => {
+  const value = Number(process.env.WEBAUTO_CAMO_CLEANUP_TIMEOUT_MS || 20_000);
+  return Number.isFinite(value) && value > 0 ? Math.floor(value) : 20_000;
+})();
 let appExitCleanupPromise: Promise<void> | null = null;
+let appExitDrainPromise: Promise<void> | null = null;
+let appExitCleanupCompleted = false;
+let appExitReasonHint = 'before_quit';
 
 function setRunLifecycle(runId: string, patch: Partial<RunLifecycleEntry>) {
   const rid = String(runId || '').trim();
@@ -342,6 +353,7 @@ function requestAppRestart(reason = 'ui_cli') {
   restartRequested = true;
   void appendDesktopLifecycle('restart_requested', { reason: normalizedReason });
   console.warn(`[desktop-console] restart requested: ${normalizedReason}`);
+  appExitReasonHint = `restart:${normalizedReason}`;
   const w = getWin();
   if (w) {
     try {
@@ -354,19 +366,14 @@ function requestAppRestart(reason = 'ui_cli') {
     }
   }
   setTimeout(() => {
-    void Promise.race([
-      ensureAppExitCleanup(`restart:${normalizedReason}`, { stopStateBridge: true }),
-      sleep(1500),
-    ]).catch(() => null).finally(() => {
-      try {
-        app.relaunch();
-      } catch (err) {
-        restartRequested = false;
-        console.error('[desktop-console] relaunch failed', err);
-        return;
-      }
-      app.exit(0);
-    });
+    try {
+      app.relaunch();
+    } catch (err) {
+      restartRequested = false;
+      console.error('[desktop-console] relaunch failed', err);
+      return;
+    }
+    app.quit();
   }, 25);
   return { accepted: true, reason: normalizedReason };
 }
@@ -489,7 +496,7 @@ async function cleanupTrackedRunPidsBestEffort(reason: string) {
 
 async function cleanupCamoSessionsBestEffort(reason: string, includeLocks: boolean) {
   const camoCli = path.join(REPO_ROOT, 'bin', 'camoufox-cli.mjs');
-  const invoke = async (args: string[], timeoutMs = 60_000) =>
+  const invoke = async (args: string[], timeoutMs = CAMO_CLEANUP_TIMEOUT_MS) =>
     runJson({
       title: `camo ${args.join(' ')}`,
       cwd: REPO_ROOT,
@@ -543,6 +550,27 @@ async function cleanupRuntimeEnvironment(reason: string, options: CleanupOptions
   }
 }
 
+async function resetRuntimeForStartup() {
+  await appendDesktopLifecycle('startup_runtime_reset_start');
+  try {
+    await cleanupRuntimeEnvironment('startup_runtime_reset', {
+      stopUiBridge: false,
+      stopHeartbeat: false,
+      stopCoreServices: true,
+      stopStateBridge: false,
+      includeLockCleanup: true,
+    });
+    // Startup reset may stop daemon; allow normal shutdown cleanup to run again later in this process.
+    coreServicesStopRequested = false;
+    await appendDesktopLifecycle('startup_runtime_reset_done');
+  } catch (err: any) {
+    await appendDesktopLifecycle('startup_runtime_reset_failed', {
+      error: err?.message || String(err),
+    });
+    throw err;
+  }
+}
+
 function ensureAppExitCleanup(reason: string, options: CleanupOptions = {}) {
   if (appExitCleanupPromise) return appExitCleanupPromise;
   appExitCleanupPromise = cleanupRuntimeEnvironment(reason, {
@@ -555,6 +583,61 @@ function ensureAppExitCleanup(reason: string, options: CleanupOptions = {}) {
     appExitCleanupPromise = null;
   });
   return appExitCleanupPromise;
+}
+
+function waitForAppExitCleanup(reason: string, options: CleanupOptions = {}) {
+  const normalizedReason = String(reason || '').trim() || appExitReasonHint || 'before_quit';
+  appExitReasonHint = normalizedReason;
+  if (appExitDrainPromise) return appExitDrainPromise;
+
+  appExitDrainPromise = (async () => {
+    const startedAt = Date.now();
+    let timedOut = false;
+    await appendDesktopLifecycle('app_exit_cleanup_start', {
+      reason: normalizedReason,
+      waitMs: APP_EXIT_CLEANUP_WAIT_MS,
+    });
+    try {
+      await Promise.race([
+        ensureAppExitCleanup(normalizedReason, options),
+        sleep(APP_EXIT_CLEANUP_WAIT_MS).then(() => {
+          timedOut = true;
+        }),
+      ]);
+      if (timedOut) {
+        console.warn(`[desktop-console] app exit cleanup timeout after ${APP_EXIT_CLEANUP_WAIT_MS}ms (${normalizedReason})`);
+        await appendDesktopLifecycle('app_exit_cleanup_timeout', {
+          reason: normalizedReason,
+          waitMs: APP_EXIT_CLEANUP_WAIT_MS,
+        });
+      } else {
+        const remainingRuns = runs.size;
+        const remainingRunPids = trackedRunPids.size;
+        if (remainingRuns > 0 || remainingRunPids > 0) {
+          console.warn(
+            `[desktop-console] app exit cleanup completed with residual state (${normalizedReason}): runs=${remainingRuns}, pids=${remainingRunPids}`,
+          );
+        }
+        await appendDesktopLifecycle('app_exit_cleanup_done', {
+          reason: normalizedReason,
+          elapsedMs: Date.now() - startedAt,
+          remainingRuns,
+          remainingRunPids,
+        });
+      }
+    } catch (err: any) {
+      console.warn(`[desktop-console] app exit cleanup failed (${normalizedReason})`, err);
+      await appendDesktopLifecycle('app_exit_cleanup_failed', {
+        reason: normalizedReason,
+        error: err?.message || String(err),
+      });
+    } finally {
+      appExitCleanupCompleted = true;
+    }
+  })().finally(() => {
+    appExitDrainPromise = null;
+  });
+  return appExitDrainPromise;
 }
 
 function ensureHeartbeatWatchdog() {
@@ -1283,20 +1366,26 @@ function createWindow() {
 
 app.on('window-all-closed', () => {
   void appendDesktopLifecycle('window_all_closed');
-  void ensureAppExitCleanup('window_closed');
+  appExitReasonHint = 'window_closed';
   // macOS 下关闭窗口后也退出应用，避免命令行挂起
   app.quit();
 });
 
 // 确保窗口关闭时命令行能退出
-app.on('before-quit', () => {
+app.on('before-quit', (event) => {
   void appendDesktopLifecycle('before_quit');
-  void ensureAppExitCleanup('before_quit');
+  if (appExitCleanupCompleted) return;
+  event.preventDefault();
+  const reason = appExitReasonHint || (restartRequested ? 'restart_requested' : 'before_quit');
+  void waitForAppExitCleanup(reason, { stopStateBridge: true })
+    .catch(() => null)
+    .finally(() => {
+      app.quit();
+    });
 });
 
 app.on('will-quit', () => {
   void appendDesktopLifecycle('will_quit');
-  void ensureAppExitCleanup('will_quit', { stopStateBridge: true });
 });
 
 app.on('quit', (_evt, exitCode) => {
@@ -1309,7 +1398,14 @@ process.on('exit', (code) => {
 
 app.whenReady().then(async () => {
   void appendDesktopLifecycle('app_ready');
-  startCoreServiceHeartbeat();
+  try {
+    await resetRuntimeForStartup();
+  } catch (err) {
+    console.error('[desktop-console] startup runtime reset failed', err);
+    await ensureAppExitCleanup('startup_runtime_reset_failed', { stopStateBridge: true }).catch(() => null);
+    app.exit(1);
+    return;
+  }
   const started = await startCoreDaemon().catch((err) => {
     console.error('[desktop-console] core services startup failed', err);
     return false;
@@ -1320,6 +1416,19 @@ app.whenReady().then(async () => {
     app.exit(1);
     return;
   }
+  const startupServices = await checkServices().catch(() => ({ unifiedApi: false, camoRuntime: false }));
+  void appendDesktopLifecycle('startup_self_check', {
+    unifiedApi: Boolean(startupServices?.unifiedApi),
+    camoRuntime: Boolean(startupServices?.camoRuntime),
+  });
+  if (!startupServices?.unifiedApi || !startupServices?.camoRuntime) {
+    console.error('[desktop-console] startup self-check failed', startupServices);
+    await ensureAppExitCleanup('startup_self_check_failed', { stopStateBridge: true }).catch(() => null);
+    app.exit(1);
+    return;
+  }
+  coreServicesStopRequested = false;
+  startCoreServiceHeartbeat();
   markUiHeartbeat('main_ready');
   ensureHeartbeatWatchdog();
   createWindow();

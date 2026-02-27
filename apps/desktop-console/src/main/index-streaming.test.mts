@@ -22,8 +22,18 @@ test('spawnCommand uses buffered line emitter and flushes on close', async () =>
 test('main process wires deterministic cleanup for app quit and env cleanup api', async () => {
   const src = await readFile(mainPath, 'utf8');
   assert.match(src, /function ensureAppExitCleanup\(reason: string/);
-  assert.match(src, /app\.on\('before-quit', \(\) => \{[\s\S]*?void ensureAppExitCleanup\('before_quit'\);/);
-  assert.match(src, /app\.on\('will-quit', \(\) => \{[\s\S]*?void ensureAppExitCleanup\('will_quit'/);
+  assert.match(src, /function waitForAppExitCleanup\(reason: string, options: CleanupOptions = \{\}\)/);
+  assert.match(src, /app\.on\('before-quit', \(event\) => \{[\s\S]*?event\.preventDefault\(\);[\s\S]*?waitForAppExitCleanup\(reason, \{ stopStateBridge: true \}\)/);
+  assert.match(src, /app_exit_cleanup_start/);
+  const willQuitBlock = src.match(/app\.on\('will-quit', \(\) => \{([\s\S]*?)\}\);/);
+  assert.ok(willQuitBlock, 'will-quit hook should exist');
+  assert.doesNotMatch(willQuitBlock[1], /ensureAppExitCleanup/);
+  assert.match(src, /async function resetRuntimeForStartup\(\)/);
+  assert.match(src, /startup_runtime_reset_start/);
+  assert.match(src, /await resetRuntimeForStartup\(\)/);
+  assert.match(src, /startup_self_check/);
+  assert.match(src, /remainingRuns/);
+  assert.match(src, /remainingRunPids/);
   assert.match(src, /ipcMain\.handle\('env:cleanup'/);
   assert.match(src, /cleanupCamoSessionsBestEffort/);
 });

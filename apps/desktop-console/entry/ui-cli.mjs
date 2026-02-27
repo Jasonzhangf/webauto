@@ -963,7 +963,8 @@ async function main() {
       json: { ok: false, error: error?.message || String(error) },
     }));
     if (ret.ok && ret.json?.ok) {
-      const down = await waitForHealthDown(endpoint, 12_000);
+      const stopWaitMs = Math.max(12_000, parseIntSafe(args.timeout, DEFAULT_STATUS_TIMEOUT_MS));
+      const down = await waitForHealthDown(endpoint, stopWaitMs);
       if (down) {
         removeControlFileIfPresent();
         printOutput(ret.json);
@@ -979,7 +980,7 @@ async function main() {
           ok: true,
           forced: true,
           pid: knownPid,
-          reason: 'close_window_timeout',
+          reason: `close_window_timeout_${stopWaitMs}ms`,
         });
         return;
       }
