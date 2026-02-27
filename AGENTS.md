@@ -337,7 +337,10 @@ bd 搜索速查（全文检索 + 字段过滤）：
 - **Windows Session 约束（新增，强制）**：
   - **禁止在 Session 0 启动任何业务相关进程**（daemon / UI / xhs 任务 / camo 会话）。
   - **只允许与非 Session 0 的 daemon 交互**（通常由桌面用户会话手动启动）。
-  - **禁止在 Session 0 重启/启动 daemon**（只允许 stop/清理/状态查询）。
+  - **Session 0 只允许 stop/清理/状态查询，禁止启动 UI/daemon（允许查询）**。
+  - **允许在 Session 0 使用 UI CLI 控制桌面进行运行**。
+  - **Session 0 仅限制 webauto 的调试与运行，不限制 build 等其他操作**。
+  - **可通过非 Session 0 的 daemon 启动 UI**（UI 会继承 daemon 会话）。
   - UI 测试必须走 daemon 拉起：先 `webauto --daemon start`，再 `webauto --daemon ui-start`，然后才执行 `webauto ui cli ...`。
   - 若当前终端位于 Session 0，只允许执行停止/清理命令，不允许执行 UI 启动或业务执行命令。
 - 使用方式：

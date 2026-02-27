@@ -1686,7 +1686,7 @@ async function executeOpenDetailOperation({
         y: Math.max(1, Math.round(Number(point?.y) || 1)),
       };
       let lastError = null;
-      for (let attempt = 1; attempt <= 2; attempt += 1) {
+      for (let attempt = 1; attempt <= 3; attempt += 1) {
         if (attempt > 1) {
           emitOperationProgress(context, {
             kind: 'block',
@@ -1988,6 +1988,7 @@ async function executeOpenDetailOperation({
         } catch (openErr) {
           const reason = String(openErr?.message || openErr || 'OPEN_DETAIL_FAILED');
           if (nextNoteId) nonCollectibleSet.add(nextNoteId);
+          lastProgressAt = Date.now();
           emitOperationProgress(context, {
             kind: 'block',
             stage: 'collect_links',
