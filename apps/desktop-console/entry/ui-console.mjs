@@ -175,40 +175,6 @@ async function startConsole(noDaemon = false) {
   const spawnCmd = electronBin;
   const spawnArgs = [DIST_MAIN];
 
-  if (process.platform === 'win32' && detached) {
-    const escaped = (input) => String(input || '').replace(/"/g, '""');
-    const commandLine = [`"${escaped(electronBin)}"`]
-      .concat(spawnArgs.map((arg) => `"${escaped(arg)}"`))
-      .join(' ');
-    const pid = await new Promise((resolve, reject) => {
-      const child = spawn('wmic', ['process', 'call', 'create', commandLine], {
-        cwd: APP_ROOT,
-        env,
-        stdio: ['ignore', 'pipe', 'pipe'],
-        windowsHide: true,
-      });
-      let stdout = '';
-      let stderr = '';
-      child.stdout.on('data', (chunk) => { stdout += String(chunk || ''); });
-      child.stderr.on('data', (chunk) => { stderr += String(chunk || ''); });
-      child.on('error', reject);
-      child.on('close', (code) => {
-        if (code !== 0) {
-          reject(new Error(`wmic create failed (${code}): ${stderr.trim() || stdout.trim() || 'unknown error'}`));
-          return;
-        }
-        const match = stdout.match(/ProcessId\s*=\s*(\d+)/i);
-        resolve(match?.[1] || 'unknown');
-      });
-    });
-    const sessionId = await readWindowsSessionId(pid);
-    console.log(`[ui-console] Started (PID: ${pid || 'unknown'})`);
-    if (sessionId === 0) {
-      console.warn('[ui-console] started in Session 0 (service/non-interactive). UI bridge is available, but desktop window will not be visible.');
-    }
-    return;
-  }
-
   const child = spawn(spawnCmd, spawnArgs, {
     cwd: APP_ROOT,
     env,
@@ -225,6 +191,12 @@ async function startConsole(noDaemon = false) {
   } else {
     child.unref();
     console.log(`[ui-console] Started (PID: ${child.pid})`);
+    if (process.platform === 'win32') {
+      const sessionId = await readWindowsSessionId(child.pid);
+      if (sessionId === 0) {
+        console.warn('[ui-console] started in Session 0 (service/non-interactive). UI bridge is available, but desktop window will not be visible.');
+      }
+    }
   }
 }
 

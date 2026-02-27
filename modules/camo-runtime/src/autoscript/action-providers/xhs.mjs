@@ -318,13 +318,22 @@ async function readLocation(profileId, options = {}) {
 }
 
 async function clickPoint(profileId, point, options = {}) {
-  await callAPI('mouse:click', {
+  const nudgeBefore = options?.nudgeBefore === true;
+  const retryOnFailure = options?.retryOnFailure !== false && !nudgeBefore;
+  const payload = {
     profileId,
     x: Math.max(1, Math.round(Number(point.x) || 1)),
     y: Math.max(1, Math.round(Number(point.y) || 1)),
     button: String(options.button || 'left').trim() || 'left',
     clicks: Math.max(1, Number(options.clicks ?? 1) || 1),
-  });
+    ...(nudgeBefore ? { nudgeBefore: true } : {}),
+  };
+  try {
+    await callAPI('mouse:click', payload);
+  } catch (error) {
+    if (!retryOnFailure) throw error;
+    await callAPI('mouse:click', { ...payload, nudgeBefore: true });
+  }
 }
 
 async function wheel(profileId, deltaY) {
@@ -1666,6 +1675,63 @@ async function executeOpenDetailOperation({
       }
       return false;
     };
+    const clickOpenDetailWithRetry = async ({
+      noteId,
+      point,
+      progressStage,
+      traceMode = '',
+    }) => {
+      const targetPoint = {
+        x: Math.max(1, Math.round(Number(point?.x) || 1)),
+        y: Math.max(1, Math.round(Number(point?.y) || 1)),
+      };
+      let lastError = null;
+      for (let attempt = 1; attempt <= 2; attempt += 1) {
+        if (attempt > 1) {
+          emitOperationProgress(context, {
+            kind: 'block',
+            stage: progressStage,
+            block: 'open_detail_retry',
+            noteId: String(noteId || '').trim() || null,
+            attempt,
+            reason: String(lastError?.message || lastError || 'DETAIL_NOT_READY'),
+          });
+          await sleepRandom(220, 520, pushTrace, 'open_detail_retry_wait', {
+            noteId: String(noteId || '').trim() || null,
+            mode: traceMode,
+            attempt,
+          });
+        } else {
+          await sleepRandom(preClickDelayMinMs, preClickDelayMaxMs, pushTrace, 'open_detail_pre_click', {
+            noteId: String(noteId || '').trim() || null,
+            mode: traceMode,
+            attempt,
+          });
+        }
+        pushTrace({
+          kind: 'click',
+          stage: 'open_detail',
+          noteId: String(noteId || '').trim() || null,
+          selector: 'a.cover',
+          mode: traceMode,
+          attempt,
+        });
+        try {
+          await clickPoint(profileId, targetPoint, {
+            steps: 4,
+            nudgeBefore: attempt > 1,
+          });
+        } catch (error) {
+          lastError = error;
+          continue;
+        }
+        const detailReady = await waitDetailReady();
+        if (detailReady) return;
+        lastError = new Error('DETAIL_OPEN_TIMEOUT');
+      }
+      if (lastError instanceof Error) throw lastError;
+      throw new Error(String(lastError || 'DETAIL_OPEN_FAILED'));
+    };
 
     const collectVisibleRows = async () => {
       const snapshot = await readSearchCandidates(profileId);
@@ -1856,11 +1922,12 @@ async function executeOpenDetailOperation({
           noteId,
         });
         const beforeUrl = await readLocation(profileId);
-        await sleepRandom(preClickDelayMinMs, preClickDelayMaxMs, pushTrace, 'open_detail_pre_click', { noteId, mode: 'collect' });
-        pushTrace({ kind: 'click', stage: 'open_detail', noteId, selector: 'a.cover', mode: 'collect' });
-        await clickPoint(profileId, visibility.target?.center || next.center, { steps: 4 });
-        const detailReady = await waitDetailReady();
-        if (!detailReady) throw new Error('DETAIL_OPEN_TIMEOUT');
+        await clickOpenDetailWithRetry({
+          noteId,
+          point: visibility.target?.center || next.center,
+          progressStage: 'collect_links',
+          traceMode: 'collect',
+        });
         await sleepRandom(postOpenDelayMinMs, postOpenDelayMaxMs, pushTrace, 'open_detail_post_open', { noteId, mode: 'collect' });
         return { beforeUrl };
       };
@@ -2171,7 +2238,94 @@ async function executeOpenDetailOperation({
           deltaY,
           pendingCount: pending.length,
         });
-        await wheel(profileId, deltaY);
+        let wheelOk = false;
+        let wheelError = null;
+        for (let wheelAttempt = 1; wheelAttempt <= 3; wheelAttempt += 1) {
+          try {
+            await wheel(profileId, deltaY);
+            wheelOk = true;
+            if (wheelAttempt > 1) {
+              emitOperationProgress(context, {
+                kind: 'block',
+                stage: mode === 'next' ? 'open_next_detail' : 'open_first_detail',
+                block: 'seek_down_retry_ok',
+                round: downRound,
+                wheelAttempt,
+                deltaY,
+              });
+            }
+            break;
+          } catch (error) {
+            wheelError = error;
+            emitOperationProgress(context, {
+              kind: 'block',
+              stage: mode === 'next' ? 'open_next_detail' : 'open_first_detail',
+              block: 'seek_down_retry_failed',
+              round: downRound,
+              wheelAttempt,
+              deltaY,
+              error: error?.message || String(error),
+            });
+            if (wheelAttempt < 3) {
+              await sleep(randomBetween(350, 900));
+            }
+          }
+        }
+        if (!wheelOk) {
+          const rollbackPages = randomBetween(3, 5);
+          const rollbackStep = Math.max(420, Math.floor(dynamicSeekStep * 0.8));
+          emitOperationProgress(context, {
+            kind: 'block',
+            stage: mode === 'next' ? 'open_next_detail' : 'open_first_detail',
+            block: 'seek_down_rollback_start',
+            round: downRound,
+            rollbackPages,
+            rollbackStep,
+          });
+          for (let rollback = 1; rollback <= rollbackPages; rollback += 1) {
+            try {
+              await wheel(profileId, -rollbackStep);
+            } catch (error) {
+              emitOperationProgress(context, {
+                kind: 'block',
+                stage: mode === 'next' ? 'open_next_detail' : 'open_first_detail',
+                block: 'seek_down_rollback_failed',
+                round: downRound,
+                rollback,
+                rollbackPages,
+                rollbackStep,
+                error: error?.message || String(error),
+              });
+              continue;
+            }
+            await sleep(randomBetween(180, 420));
+          }
+          await sleep(randomBetween(220, 520));
+          try {
+            await wheel(profileId, deltaY);
+            wheelOk = true;
+            emitOperationProgress(context, {
+              kind: 'block',
+              stage: mode === 'next' ? 'open_next_detail' : 'open_first_detail',
+              block: 'seek_down_rollback_recover_ok',
+              round: downRound,
+              deltaY,
+            });
+          } catch (error) {
+            wheelError = error || wheelError;
+            emitOperationProgress(context, {
+              kind: 'block',
+              stage: mode === 'next' ? 'open_next_detail' : 'open_first_detail',
+              block: 'seek_down_rollback_recover_failed',
+              round: downRound,
+              deltaY,
+              error: error?.message || String(error),
+            });
+          }
+        }
+        if (!wheelOk) {
+          throw wheelError instanceof Error ? wheelError : new Error(String(wheelError || 'SEEK_DOWN_SCROLL_FAILED'));
+        }
         await sleep(seekSettleMs);
         nodes = await collectVisibleRows();
         picked = pickNode(nodes);
@@ -2211,22 +2365,12 @@ async function executeOpenDetailOperation({
     }
 
     const beforeUrl = await readLocation(profileId);
-    await sleepRandom(preClickDelayMinMs, preClickDelayMaxMs, pushTrace, 'open_detail_pre_click', { noteId: next.noteId });
-    pushTrace({ kind: 'click', stage: 'open_detail', noteId: next.noteId, selector: 'a.cover' });
-    await clickPoint(profileId, visibility.target?.center || next.center, { steps: 4 });
-
-    let detailReady = false;
-    for (let i = 0; i < 60; i += 1) {
-      const snapshot = await isDetailVisible(profileId);
-      if (snapshot?.detailReady === true) {
-        detailReady = true;
-        break;
-      }
-      await sleep(randomBetween(pollDelayMinMs, pollDelayMaxMs));
-    }
-    if (!detailReady) {
-      throw new Error('DETAIL_OPEN_TIMEOUT');
-    }
+    await clickOpenDetailWithRetry({
+      noteId: next.noteId,
+      point: visibility.target?.center || next.center,
+      progressStage: mode === 'next' ? 'open_next_detail' : 'open_first_detail',
+      traceMode: mode,
+    });
 
     await sleepRandom(postOpenDelayMinMs, postOpenDelayMaxMs, pushTrace, 'open_detail_post_open', { noteId: next.noteId });
     const afterUrl = await readLocation(profileId);

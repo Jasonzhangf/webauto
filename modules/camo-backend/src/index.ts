@@ -579,8 +579,8 @@ async function handleCommand(
       const profileId = args.profileId || 'default';
       const session = manager.getSession(profileId);
       if (!session) throw new Error(`session for profile ${profileId} not started`);
-      const { x, y, button, clicks, delay } = args;
-      await session.mouseClick({ x: Number(x), y: Number(y), button, clicks, delay });
+      const { x, y, button, clicks, delay, nudgeBefore } = args;
+      await session.mouseClick({ x: Number(x), y: Number(y), button, clicks, delay, nudgeBefore: nudgeBefore === true });
       return { ok: true, body: { ok: true } };
     }
     case 'mouse:move': {

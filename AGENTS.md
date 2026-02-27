@@ -334,6 +334,12 @@ bd 搜索速查（全文检索 + 字段过滤）：
 ### 9.1 Daemon 模式（强制）
 - **所有后续执行必须使用 daemon 模式**，禁止前台阻塞执行
 - 目的：避免会话中断导致任务终止，保证长任务（采集、互动）持续运行
+- **Windows Session 约束（新增，强制）**：
+  - **禁止在 Session 0 启动任何业务相关进程**（daemon / UI / xhs 任务 / camo 会话）。
+  - **只允许与非 Session 0 的 daemon 交互**（通常由桌面用户会话手动启动）。
+  - **禁止在 Session 0 重启/启动 daemon**（只允许 stop/清理/状态查询）。
+  - UI 测试必须走 daemon 拉起：先 `webauto --daemon start`，再 `webauto --daemon ui-start`，然后才执行 `webauto ui cli ...`。
+  - 若当前终端位于 Session 0，只允许执行停止/清理命令，不允许执行 UI 启动或业务执行命令。
 - 使用方式：
   ```bash
   # 正确（daemon 模式，立即返回，后台持续执行）
