@@ -159,6 +159,15 @@ function createMockCtx(): MockBundle {
         const id = String(input?.taskId || '').trim();
         return { ok: true, json: { result: { runResult: { lastRunId: `rid-${id}` } } } };
       }
+      if (action === 'delete') {
+        const id = String(input?.taskId || '').trim();
+        const before = state.tasks.length;
+        state.tasks = state.tasks.filter((row: any) => String(row?.id || '') !== id);
+        const deleted = state.tasks.length !== before;
+        return deleted
+          ? { ok: true, json: { ok: true, id } }
+          : { ok: false, error: `task_not_found:${id}` };
+      }
       return { ok: true, json: {} };
     },
     taskRunEphemeral: async (spec: any) => {
@@ -302,6 +311,88 @@ test('save auto-selects valid profile when profile input is empty', async () => 
   assert.equal(String(lastSave?.payload?.argv?.profile || ''), 'xhs-2');
   assert.equal(profileInput.value, 'xhs-2');
   assert.equal(alerts.some((msg) => msg.includes('保存失败')), false, JSON.stringify(alerts));
+});
+
+test('save failure does not leave form controls stuck', async () => {
+  const bundle = createMockCtx();
+  const rawScheduleInvoke = bundle.ctx.api.scheduleInvoke;
+  bundle.ctx.api.scheduleInvoke = async (input: any) => {
+    if (String(input?.action || '') === 'save') {
+      return { ok: false, error: 'save_boom' };
+    }
+    return rawScheduleInvoke(input);
+  };
+
+  const root = document.createElement('div');
+  renderTasksPanel(root, bundle.ctx);
+  await flush(8);
+
+  const nameInput = root.querySelector('#task-name') as HTMLInputElement;
+  const keywordInput = root.querySelector('#task-keyword') as HTMLInputElement;
+  const likesInput = root.querySelector('#task-likes') as HTMLInputElement;
+  const likeKeywordsInput = root.querySelector('#task-like-keywords') as HTMLInputElement;
+  const saveBtn = root.querySelector('#task-save-btn') as HTMLButtonElement;
+  const runBtn = root.querySelector('#task-run-btn') as HTMLButtonElement;
+  const runEphemeralBtn = root.querySelector('#task-run-ephemeral-btn') as HTMLButtonElement;
+
+  nameInput.value = '失败后仍可编辑';
+  keywordInput.value = '失败后仍可编辑';
+  saveBtn.click();
+  await flush(8);
+
+  assert.equal(saveBtn.disabled, false);
+  assert.equal(runBtn.disabled, false);
+  assert.equal(runEphemeralBtn.disabled, false);
+
+  nameInput.value = '可继续改名';
+  keywordInput.value = '可继续改关键词';
+  likesInput.checked = true;
+  likesInput.dispatchEvent(new Event('change', { bubbles: true }));
+  assert.equal(likeKeywordsInput.disabled, false);
+  likeKeywordsInput.value = '真牛逼,购买链接';
+  assert.equal(nameInput.value, '可继续改名');
+  assert.equal(keywordInput.value, '可继续改关键词');
+  assert.equal(likeKeywordsInput.value, '真牛逼,购买链接');
+  assert.equal(alerts.some((msg) => msg.includes('保存失败: save_boom')), true);
+});
+
+test('deleting all history tasks still allows creating a new task', async () => {
+  const bundle = createMockCtx();
+  const originalGlobalConfirm = (globalThis as any).confirm;
+  const originalWindowConfirm = (window as any).confirm;
+  (globalThis as any).confirm = () => true;
+  (window as any).confirm = () => true;
+  try {
+    const root = document.createElement('div');
+    renderTasksPanel(root, bundle.ctx);
+    await flush(8);
+
+    const nameInput = root.querySelector('#task-name') as HTMLInputElement;
+    const keywordInput = root.querySelector('#task-keyword') as HTMLInputElement;
+    const likesInput = root.querySelector('#task-likes') as HTMLInputElement;
+    const likeKeywordsInput = root.querySelector('#task-like-keywords') as HTMLInputElement;
+
+    while (true) {
+      const deleteBtn = root.querySelector('.delete-task-btn') as HTMLButtonElement | null;
+      if (!deleteBtn) break;
+      deleteBtn.click();
+      await flush(10);
+    }
+
+    assert.equal(bundle.state.tasks.length, 0);
+    nameInput.value = '删除后新建';
+    keywordInput.value = '删除后新建关键词';
+    likesInput.checked = true;
+    likesInput.dispatchEvent(new Event('change', { bubbles: true }));
+    assert.equal(likeKeywordsInput.disabled, false);
+    likeKeywordsInput.value = '点赞关键词';
+    assert.equal(nameInput.value, '删除后新建');
+    assert.equal(keywordInput.value, '删除后新建关键词');
+    assert.equal(likeKeywordsInput.value, '点赞关键词');
+  } finally {
+    (globalThis as any).confirm = originalGlobalConfirm;
+    (window as any).confirm = originalWindowConfirm;
+  }
 });
 
 test('run-ephemeral auto-selects valid profile when profile input is empty', async () => {

@@ -608,6 +608,50 @@ async function runFullCover(endpoint) {
     await click('#task-comments');
     await click('#task-run-btn');
 
+    // Regression: deleting history tasks must not leave form fields non-editable.
+    const hasTaskRows = await probeRaw('.task-select-checkbox');
+    const taskRowCount = Number(hasTaskRows?.count || 0);
+    if (taskRowCount > 1) {
+      await click('.delete-task-btn', true);
+      await wait('#task-keyword', 10000, 'visible');
+      pushStep('tasks:delete_one_history_row', true, {
+        payload: { selector: '.delete-task-btn' },
+        result: { taskRowCountBefore: taskRowCount },
+      });
+    } else {
+      pushStep('tasks:delete_one_history_row_skipped', true, {
+        payload: { selector: '.delete-task-btn' },
+        result: { taskRowCountBefore: taskRowCount },
+      });
+    }
+    const postDeleteName = `${taskName}-post-delete`;
+    const postDeleteKeyword = `${keywordSeed}-post-delete`;
+    await input('#task-name', postDeleteName);
+    await runAction('wait:#task-name:value_equals', {
+      action: 'wait',
+      selector: '#task-name',
+      state: 'value_equals',
+      value: postDeleteName,
+      timeoutMs: 8000,
+    });
+    await input('#task-keyword', postDeleteKeyword);
+    await runAction('wait:#task-keyword:value_equals', {
+      action: 'wait',
+      selector: '#task-keyword',
+      state: 'value_equals',
+      value: postDeleteKeyword,
+      timeoutMs: 8000,
+    });
+    await wait('#task-like-keywords', 8000, 'not_disabled');
+    await input('#task-like-keywords', '回归关键词');
+    await runAction('wait:#task-like-keywords:value_equals', {
+      action: 'wait',
+      selector: '#task-like-keywords',
+      state: 'value_equals',
+      value: '回归关键词',
+      timeoutMs: 8000,
+    });
+
     await tab('看板');
     await wait('#toggle-logs-btn');
     await runProbe('dashboard', '#stat-collected');
@@ -723,15 +767,48 @@ async function runFullCover(endpoint) {
       payload: { selector: '#scheduler-list', text: taskName },
       result: { ...taskNameProbe, taskNameMatched },
     });
-    await runSchedulerProbe('#scheduler-list button', { text: '编辑' });
-    await runSchedulerProbe('#scheduler-list button', { text: '执行' });
-    await runSchedulerProbe('#scheduler-list button', { text: '导出' });
-    await runSchedulerProbe('#scheduler-list button', { text: '删除' });
-    await clickText('编辑', '#scheduler-list button', true);
-    await click('#scheduler-refresh-btn');
+    const schedulerEditProbe = await probeRaw('#scheduler-list button', { text: '编辑' });
+    const schedulerRunProbe = await probeRaw('#scheduler-list button', { text: '执行' });
+    const schedulerExportProbe = await probeRaw('#scheduler-list button', { text: '导出' });
+    const schedulerDeleteProbe = await probeRaw('#scheduler-list button', { text: '删除' });
+    const schedulerEditVisible = Number(schedulerEditProbe?.textMatchedCount || 0) > 0;
+    pushStep('scheduler:button_visible:编辑', true, {
+      payload: { selector: '#scheduler-list button', text: '编辑' },
+      result: { ...schedulerEditProbe, matched: schedulerEditVisible },
+    });
+    pushStep('scheduler:button_visible:执行', true, {
+      payload: { selector: '#scheduler-list button', text: '执行' },
+      result: { ...schedulerRunProbe, matched: Number(schedulerRunProbe?.textMatchedCount || 0) > 0 },
+    });
+    pushStep('scheduler:button_visible:导出', true, {
+      payload: { selector: '#scheduler-list button', text: '导出' },
+      result: { ...schedulerExportProbe, matched: Number(schedulerExportProbe?.textMatchedCount || 0) > 0 },
+    });
+    pushStep('scheduler:button_visible:删除', true, {
+      payload: { selector: '#scheduler-list button', text: '删除' },
+      result: { ...schedulerDeleteProbe, matched: Number(schedulerDeleteProbe?.textMatchedCount || 0) > 0 },
+    });
+    if (schedulerEditVisible) {
+      await clickText('编辑', '#scheduler-list button', true);
+    } else {
+      pushStep('scheduler:click_edit_skipped', true, {
+        payload: { selector: '#scheduler-list button', text: '编辑' },
+        result: { reason: 'button_not_found' },
+      });
+    }
+    await ensureSchedulerInteractive('before-daemon');
+    const schedulerRefreshProbe = await probeRaw('#scheduler-refresh-btn');
+    if (schedulerRefreshProbe?.exists) {
+      await click('#scheduler-refresh-btn');
+    } else {
+      pushStep('scheduler:refresh_skipped', true, {
+        payload: { selector: '#scheduler-refresh-btn' },
+        result: { reason: 'selector_not_found' },
+      });
+    }
     await input('#scheduler-daemon-interval', '7');
     await click('#scheduler-daemon-start-btn');
-    await wait('#scheduler-daemon-status', 10000, 'exists');
+    await runSchedulerProbe('#scheduler-daemon-status');
     await click('#scheduler-daemon-stop-btn');
     await click('#scheduler-reset-btn');
 

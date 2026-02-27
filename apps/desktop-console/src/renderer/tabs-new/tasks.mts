@@ -999,41 +999,43 @@ export function renderTasksPanel(root: HTMLElement, ctx: any) {
     saveBtn.disabled = true;
     runBtn.disabled = true;
     runEphemeralBtn.disabled = true;
-    let savedTaskId = '';
-    let resolvedProfile = String(data.profileId || '').trim();
     try {
-      const out = await invokeSchedule({ action: 'save', payload: toSchedulePayload(data) });
-      const taskId = String(out?.task?.id || data.id || '').trim();
-      if (!taskId) {
-        throw new Error('task id missing after save');
+      let savedTaskId = '';
+      let resolvedProfile = String(data.profileId || '').trim();
+      try {
+        const out = await invokeSchedule({ action: 'save', payload: toSchedulePayload(data) });
+        const taskId = String(out?.task?.id || data.id || '').trim();
+        if (!taskId) {
+          throw new Error('task id missing after save');
+        }
+        savedTaskId = taskId;
+        editingIdInput.value = taskId;
+        updateFormTitle('edit');
+        await loadTasks();
+        historySelect.value = taskId;
+        resolvedProfile = String(out?.task?.commandArgv?.profile || data.profileId || '').trim();
+      } catch (err: any) {
+        alert(`保存失败: ${err?.message || String(err)}`);
+        return;
       }
-      savedTaskId = taskId;
-      editingIdInput.value = taskId;
-      updateFormTitle('edit');
-      await loadTasks();
-      historySelect.value = taskId;
-      resolvedProfile = String(out?.task?.commandArgv?.profile || data.profileId || '').trim();
-    } catch (err: any) {
-      alert(`保存失败: ${err?.message || String(err)}`);
-      return;
-    }
 
-    try {
-      if (runImmediately) {
-        await runSavedTask(savedTaskId, {
-          taskType: data.taskType,
-          profileId: resolvedProfile,
-          keyword: data.keyword,
-          targetCount: data.targetCount,
-        });
-      } else {
-        alert('任务已保存');
-      }
-    } catch (err: any) {
-      if (runImmediately) {
-        alert(`任务已保存，但执行失败: ${err?.message || String(err)}`);
-      } else {
-        alert(`执行失败: ${err?.message || String(err)}`);
+      try {
+        if (runImmediately) {
+          await runSavedTask(savedTaskId, {
+            taskType: data.taskType,
+            profileId: resolvedProfile,
+            keyword: data.keyword,
+            targetCount: data.targetCount,
+          });
+        } else {
+          alert('任务已保存');
+        }
+      } catch (err: any) {
+        if (runImmediately) {
+          alert(`任务已保存，但执行失败: ${err?.message || String(err)}`);
+        } else {
+          alert(`执行失败: ${err?.message || String(err)}`);
+        }
       }
     } finally {
       saveBtn.disabled = false;
