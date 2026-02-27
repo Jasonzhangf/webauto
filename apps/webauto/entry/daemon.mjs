@@ -225,6 +225,12 @@ async function runUiCli(args = []) {
   };
 }
 
+async function stopUiCliForShutdown(maxWaitMs = 8_000) {
+  const stopTask = runUiCli(['stop', '--json']).catch(() => null);
+  const timeoutTask = sleep(Math.max(1_000, Number(maxWaitMs) || 8_000)).then(() => ({ timeout: true }));
+  return Promise.race([stopTask, timeoutTask]);
+}
+
 async function runServiceCheck() {
   const ret = await runNode([XHS_INSTALL_SCRIPT, '--check', '--all', '--json']);
   const parsed = parseJsonFromMixedOutput(ret.stdout, ret.stderr);
@@ -502,7 +508,7 @@ async function startDaemonServer() {
     if (method === 'shutdown') {
       state.shuttingDown = true;
       state.desiredUi = false;
-      void enqueueUi(() => runUiCli(['stop', '--json']).catch(() => null)).finally(() => {
+      void enqueueUi(() => stopUiCliForShutdown(8_000)).finally(() => {
         try { server.close(); } catch {}
         cleanupRuntimeFiles();
         process.exit(0);
