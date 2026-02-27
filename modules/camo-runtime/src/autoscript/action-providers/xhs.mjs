@@ -701,7 +701,7 @@ async function ensureSearchCandidateFullyVisible(profileId, noteId, options = {}
     if (!latest?.found) {
       return { ok: false, code: 'NOTE_TARGET_NOT_FOUND', autoScrolled: attempt, target: null };
     }
-    if (latest.inViewport === true) {
+    if (latest.inViewport === true && latest.visibleEnough === true) {
       return { ok: true, code: 'TARGET_READY', autoScrolled: attempt, target: latest };
     }
     if (attempt >= maxScrollAttempts) break;
@@ -1914,7 +1914,35 @@ async function executeOpenDetailOperation({
         if (!selection || selection.kind === 'continue') continue;
         if (selection.kind === 'done') break;
         const next = selection.next;
-        const openResult = await runOpenDetailBlock(next);
+        const nextNoteId = String(next?.noteId || '').trim();
+        let openResult = null;
+        try {
+          openResult = await runOpenDetailBlock(next);
+        } catch (openErr) {
+          const reason = String(openErr?.message || openErr || 'OPEN_DETAIL_FAILED');
+          if (nextNoteId) nonCollectibleSet.add(nextNoteId);
+          emitOperationProgress(context, {
+            kind: 'block',
+            stage: 'collect_links',
+            block: 'open_detail_skip',
+            noteId: nextNoteId || null,
+            reason,
+          });
+          pushTrace({
+            kind: 'warn',
+            stage: 'open_detail_skip',
+            noteId: nextNoteId || null,
+            reason,
+          });
+          await closeDetailToSearch(profileId, pushTrace).catch(() => false);
+          await paintSearchCandidates(profileId, {
+            candidateNoteIds: selection.candidateIds,
+            selectedNoteId: '',
+            processedNoteIds: normalizeNoteIdList(Array.from(nonCollectibleSet)),
+          });
+          await sleep(Math.max(220, Math.floor(seedCollectSettleMs / 2)));
+          continue;
+        }
         const captured = await runCaptureUrlBlock(next, openResult.beforeUrl);
         const resolvedNoteId = captured.resolvedNoteId;
 
