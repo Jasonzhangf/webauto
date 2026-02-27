@@ -49,23 +49,6 @@ function resolveInputActionTimeoutMs(): number {
   return Math.max(1000, Number.isFinite(raw) ? raw : 30000);
 }
 
-function resolvePreClickMoveTimeoutMs(): number {
-  const raw = Number(process.env.CAMO_PRECLICK_MOVE_TIMEOUT_MS ?? 3000);
-  return Math.max(300, Number.isFinite(raw) ? Math.floor(raw) : 3000);
-}
-
-function resolvePreClickMoveMaxAttempts(): number {
-  const raw = Number(process.env.CAMO_PRECLICK_MOVE_MAX_ATTEMPTS ?? 3);
-  return Math.max(1, Math.min(5, Number.isFinite(raw) ? Math.floor(raw) : 3));
-}
-
-function resolveClickPreMoveEnabled(): boolean {
-  const raw = String(process.env.CAMO_CLICK_PREMOVE ?? 'true').trim().toLowerCase();
-  if (!raw) return true;
-  if (raw === '0' || raw === 'false' || raw === 'off' || raw === 'no') return false;
-  return true;
-}
-
 function resolveNavigationWaitUntil(): NavigationWaitUntil {
   const raw = String(process.env.CAMO_NAV_WAIT_UNTIL ?? 'commit').trim().toLowerCase();
   if (raw === 'load') return 'load';
@@ -1370,68 +1353,15 @@ export class BrowserSession {
     await this.withInputActionLock(async () => {
       await this.runInputAction(page, 'input:ready', (activePage) => this.ensureInputReady(activePage));
       const { x, y, button = 'left', clicks = 1, delay = 50 } = opts;
-      const isMovePreClickTimeout = (error: unknown) => {
-        const message = error instanceof Error ? String(error.message || '') : String(error || '');
-        return /mouse:move\(pre-click\)/.test(message) && /timed out/i.test(message);
-      };
-      const preMoveEnabled = resolveClickPreMoveEnabled();
-      const preClickMoveTimeoutMs = resolvePreClickMoveTimeoutMs();
-      const preClickMoveMaxAttempts = resolvePreClickMoveMaxAttempts();
-
-      // Avoid page.mouse.click() composite hangs by using explicit down/up sequence.
       for (let i = 0; i < clicks; i++) {
         if (i > 0) {
           // 多次点击间隔 100-200ms
           await new Promise(r => setTimeout(r, 100 + Math.random() * 100));
         }
-        let activePage = page;
-        if (!preMoveEnabled) {
-          await this.runInputAction(activePage, 'mouse:click(direct)', (clickPage) => clickPage.mouse.click(x, y, {
-            button,
-            clickCount: 1,
-            delay: Math.max(0, Number(delay) || 0),
-          }));
-          continue;
-        }
-        let moved = false;
-        let moveError: unknown = null;
-        for (let moveAttempt = 1; moveAttempt <= preClickMoveMaxAttempts; moveAttempt += 1) {
-          try {
-            await this.withInputActionTimeout(
-              `mouse:move(pre-click) (attempt ${moveAttempt}/${preClickMoveMaxAttempts})`,
-              () => activePage.mouse.move(x, y, { steps: 1 }),
-              preClickMoveTimeoutMs,
-            );
-            moved = true;
-            break;
-          } catch (error) {
-            moveError = error;
-            if (moveAttempt >= preClickMoveMaxAttempts) break;
-            activePage = await this.recoverInputPipeline(activePage);
-          }
-        }
-        if (!moved) {
-          const error = moveError;
-          if (!isMovePreClickTimeout(error)) throw error;
-          // Keep click pipeline alive when Firefox move occasionally hangs:
-          // fallback to a direct click at coordinates instead of aborting whole task.
-          await this.runInputAction(activePage, 'mouse:click(direct-fallback)', (fallbackPage) => fallbackPage.mouse.click(x, y, {
-            button,
-            clickCount: 1,
-            delay: Math.max(0, Number(delay) || 0),
-          }));
-          continue;
-        }
-        await this.runInputAction(activePage, 'mouse:down', (clickPage) => clickPage.mouse.down({
+        await this.runInputAction(page, 'mouse:click(direct)', (clickPage) => clickPage.mouse.click(x, y, {
           button,
           clickCount: 1,
-        }));
-        if (delay > 0) {
-          await activePage.waitForTimeout(delay);
-        }
-        await this.runInputAction(activePage, 'mouse:up', (clickPage) => clickPage.mouse.up({
-          button,
-          clickCount: 1,
+          delay: Math.max(0, Number(delay) || 0),
         }));
       }
     });
@@ -1442,12 +1372,9 @@ export class BrowserSession {
    * @param opts 目标坐标及移动选项
    */
   async mouseMove(opts: { x: number; y: number; steps?: number }): Promise<void> {
-    const page = await this.ensurePrimaryPage();
-    await this.withInputActionLock(async () => {
-      await this.runInputAction(page, 'input:ready', (activePage) => this.ensureInputReady(activePage));
-      const { x, y, steps = 3 } = opts;
-      await this.runInputAction(page, 'mouse:move', (activePage) => activePage.mouse.move(x, y, { steps }));
-    });
+    const x = Number(opts?.x);
+    const y = Number(opts?.y);
+    throw new Error(`mouse:move disabled (x=${Number.isFinite(x) ? x : 'NaN'}, y=${Number.isFinite(y) ? y : 'NaN'})`);
   }
 
   /**

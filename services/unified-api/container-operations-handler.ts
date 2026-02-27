@@ -62,17 +62,13 @@ export async function handleContainerOperations(
             ? {
                 click: async (x: number, y: number, options?: { button?: string; clickCount?: number }) =>
                   page.mouse.click(x, y, options as any),
-                move: async (x: number, y: number, options?: { steps?: number }) =>
-                  page.mouse.move(x, y, options as any),
                 wheel: async (deltaX: number, deltaY: number) => page.mouse.wheel(deltaX, deltaY),
               }
             : undefined,
         },
         systemInput: {
-          mouseMove: async (x: number, y: number, steps?: number) => {
-            if (!page.mouse?.move) throw new Error('Page mouse.move not available');
-            await page.mouse.move(x, y, { steps: steps || 1 });
-            return { success: true };
+          mouseMove: async (_x: number, _y: number, _steps?: number) => {
+            throw new Error('mouse:move disabled');
           },
           mouseClick: async (x: number, y: number, button?: string, clicks?: number) => {
             if (!page.mouse?.click) throw new Error('Page mouse.click not available');

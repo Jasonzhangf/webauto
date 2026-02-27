@@ -42,8 +42,8 @@ export class RemoteBrowserSession {
       },
       url: () => this.getCurrentUrl() || '',
       mouse: {
-        move: async (x: number, y: number, options?: any) => {
-          return this.sendCommand('mouse:move', { x, y, steps: options?.steps || 3 });
+        move: async (_x: number, _y: number, _options?: any) => {
+          throw new Error('mouse:move disabled');
         },
         click: async (x: number, y: number, options?: any) => {
           // 注意：options可能包含button、clicks、delay

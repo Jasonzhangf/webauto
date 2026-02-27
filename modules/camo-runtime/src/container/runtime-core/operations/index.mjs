@@ -204,13 +204,6 @@ async function scrollTargetIntoViewport(profileId, selector, initialTarget, para
     if (isTargetFullyInViewport(target, margin)) break;
     const deltaY = resolveScrollDeltaY(target, margin);
     if (!Number.isFinite(deltaY) || Math.abs(deltaY) < 1) break;
-    const vw = Number(target?.viewport?.width || 0);
-    const vh = Number(target?.viewport?.height || 0);
-    if (Number.isFinite(vw) && vw > 2 && Number.isFinite(vh) && vh > 2) {
-      const anchorX = clamp(Math.round(vw / 2), 1, Math.max(1, vw - 1));
-      const anchorY = clamp(Math.round(vh / 2), 1, Math.max(1, vh - 1));
-      await callAPI('mouse:move', { profileId, x: anchorX, y: anchorY, steps: 1 });
-    }
     await callAPI('mouse:wheel', { profileId, deltaX: 0, deltaY });
     if (settleMs > 0) await sleep(settleMs);
     target = await resolveSelectorTarget(profileId, selector);
@@ -230,7 +223,6 @@ async function executeSelectorOperation({ profileId, action, operation, params }
   target = await scrollTargetIntoViewport(profileId, selector, target, params);
 
   if (action === 'scroll_into_view') {
-    await callAPI('mouse:move', { profileId, x: target.center.x, y: target.center.y, steps: 2 });
     return {
       ok: true,
       code: 'OPERATION_DONE',

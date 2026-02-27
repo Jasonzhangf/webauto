@@ -297,7 +297,7 @@ export class BrowserWsServer {
       return { success: false, error: prep?.error || 'loopback_prep_failed' };
     }
 
-    await page.mouse.move(prep.point.x, prep.point.y);
+    // mouse:move is globally disabled for runtime stability.
     if (settleMs > 0) {
       await new Promise((r) => setTimeout(r, settleMs));
     }
@@ -718,10 +718,6 @@ export class BrowserWsServer {
        parameters.deltaY ?? target.deltaY ?? parameters.delta_y ?? target.delta_y ?? 0,
      );
 
-     if (coordinates && typeof coordinates.x === 'number' && typeof coordinates.y === 'number') {
-       await page.mouse.move(coordinates.x, coordinates.y);
-     }
-
      await page.mouse.wheel(0, deltaY);
 
      this.broadcastEvent('user_action.completed', sessionId, {
@@ -789,15 +785,12 @@ export class BrowserWsServer {
      }
    }
 
-   if (opType === 'move') {
-     if (coords) {
-       await page.mouse.move(coords.x, coords.y);
-     }
-   } else if (opType === 'down') {
-     if (coords) {
-       await page.mouse.move(coords.x, coords.y);
-       await page.mouse.down();
-     }
+  if (opType === 'move') {
+    throw new Error('mouse:move disabled');
+  } else if (opType === 'down') {
+    if (coords) {
+      await page.mouse.down();
+    }
    } else if (opType === 'up') {
      await page.mouse.up();
    } else if (opType === 'key') {

@@ -407,17 +407,12 @@ export async function browserServiceCommand(
 }
 
 export async function systemHoverAt(
-  profileId: string,
-  x: number,
-  y: number,
-  browserServiceUrl = 'http://127.0.0.1:7704',
+  _profileId: string,
+  _x: number,
+  _y: number,
+  _browserServiceUrl = 'http://127.0.0.1:7704',
 ): Promise<void> {
-  await browserServiceCommand(
-    browserServiceUrl,
-    'mouse:move',
-    { profileId, x: Math.floor(x), y: Math.floor(y), steps: 3 },
-    8000,
-  ).catch(() => { });
+  return;
 }
 
 export async function systemClickAt(
@@ -537,8 +532,6 @@ export async function systemClickAt(
     highlightTag: hi?.tag ?? null,
   });
 
-  await systemHoverAt(profileId, x, y, browserServiceUrl);
-  await new Promise((r) => setTimeout(r, 80));
   await browserServiceCommand(
     browserServiceUrl,
     'mouse:click',
@@ -608,10 +601,6 @@ export async function systemMouseWheel(options: {
   });
 
   try {
-    if (focusPoint) {
-      await systemHoverAt(profileId, focusPoint.x, focusPoint.y, browserServiceUrl);
-      await new Promise((r) => setTimeout(r, 60));
-    }
     await browserServiceCommand(
       browserServiceUrl,
       'mouse:wheel',

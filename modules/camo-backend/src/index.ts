@@ -584,12 +584,7 @@ async function handleCommand(
       return { ok: true, body: { ok: true } };
     }
     case 'mouse:move': {
-      const profileId = args.profileId || 'default';
-      const session = manager.getSession(profileId);
-      if (!session) throw new Error(`session for profile ${profileId} not started`);
-      const { x, y, steps } = args;
-      await session.mouseMove({ x: Number(x), y: Number(y), steps });
-      return { ok: true, body: { ok: true } };
+      throw new Error('mouse:move disabled');
     }
     case 'mouse:wheel': {
       const profileId = args.profileId || 'default';

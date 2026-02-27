@@ -317,19 +317,7 @@ async function readLocation(profileId, options = {}) {
   }
 }
 
-async function moveMouse(profileId, x, y, steps = 2) {
-  await callAPI('mouse:move', {
-    profileId,
-    x: Math.max(1, Math.round(Number(x) || 1)),
-    y: Math.max(1, Math.round(Number(y) || 1)),
-    steps: Math.max(1, Number(steps) || 1),
-  });
-}
-
 async function clickPoint(profileId, point, options = {}) {
-  if (options.moveFirst === true) {
-    await moveMouse(profileId, point.x, point.y, options.steps ?? 3);
-  }
   await callAPI('mouse:click', {
     profileId,
     x: Math.max(1, Math.round(Number(point.x) || 1)),
