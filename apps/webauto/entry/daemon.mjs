@@ -284,6 +284,45 @@ async function waitForDaemonExit(timeoutMs = 15_000) {
   return { ok: false, error: `daemon_stop_timeout_${timeoutMs}ms` };
 }
 
+function detectConnectErrorCode(errorText = '') {
+  const text = String(errorText || '').toUpperCase();
+  if (text.includes('EPERM')) return 'EPERM';
+  if (text.includes('EACCES')) return 'EACCES';
+  if (text.includes('ENOENT')) return 'ENOENT';
+  if (text.includes('ECONNREFUSED')) return 'ECONNREFUSED';
+  return '';
+}
+
+async function forceStopByPidFile() {
+  const pidMeta = readJson(PID_FILE, {}) || {};
+  const pid = Number(pidMeta?.pid || 0);
+  if (!Number.isFinite(pid) || pid <= 0) {
+    cleanupRuntimeFiles();
+    return { ok: true, stopped: true, alreadyStopped: true, fallback: 'no_pid_file' };
+  }
+  if (!isPidAlive(pid)) {
+    cleanupRuntimeFiles();
+    return { ok: true, stopped: true, alreadyStopped: true, pid, fallback: 'stale_pid_file' };
+  }
+  const terminated = await terminatePidTree(pid);
+  if (!terminated?.ok) {
+    return {
+      ok: false,
+      error: 'pid_terminate_failed',
+      pid,
+      terminateCode: terminated?.code ?? null,
+      terminateStdout: terminated?.stdout || '',
+      terminateStderr: terminated?.stderr || '',
+    };
+  }
+  await sleep(500);
+  if (isPidAlive(pid)) {
+    return { ok: false, error: 'pid_still_alive_after_terminate', pid };
+  }
+  cleanupRuntimeFiles();
+  return { ok: true, stopped: true, alreadyStopped: false, pid, fallback: 'pid_file' };
+}
+
 async function runUiCli(args = [], options = {}) {
   const ret = await runNode([UI_CLI_SCRIPT, ...args], { env: options.env || {} });
   const parsed = parseJsonFromMixedOutput(ret.stdout, ret.stderr);
@@ -1076,9 +1115,31 @@ async function main() {
   if (cmd === 'stop') {
     const ret = await requestDaemon({ method: 'shutdown', params: {} }).catch((error) => ({ ok: false, error: error?.message || String(error) }));
     if (!ret?.ok) {
-      const errText = String(ret?.error || '');
-      if (errText.includes('ENOENT') || errText.includes('ECONNREFUSED')) {
-        print({ ok: true, alreadyStopped: true, stopped: true }, jsonMode);
+      const errText = String(ret?.error || '').trim();
+      const connectErrCode = detectConnectErrorCode(errText);
+      if (connectErrCode === 'ENOENT' || connectErrCode === 'ECONNREFUSED' || connectErrCode === 'EPERM' || connectErrCode === 'EACCES') {
+        const forced = await forceStopByPidFile();
+        if (forced?.ok) {
+          print({
+            ok: true,
+            stopped: true,
+            alreadyStopped: forced.alreadyStopped === true,
+            pid: Number.isFinite(Number(forced.pid)) ? Number(forced.pid) : null,
+            fallback: forced.fallback || null,
+            connectError: errText || null,
+          }, jsonMode);
+          return;
+        }
+        print({
+          ok: false,
+          error: forced?.error || 'forced_stop_failed',
+          connectError: errText || null,
+          pid: Number.isFinite(Number(forced?.pid)) ? Number(forced.pid) : null,
+          terminateCode: forced?.terminateCode ?? null,
+          terminateStdout: forced?.terminateStdout || '',
+          terminateStderr: forced?.terminateStderr || '',
+        }, jsonMode);
+        process.exit(1);
         return;
       }
       print(ret, jsonMode);
