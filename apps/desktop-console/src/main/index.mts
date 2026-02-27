@@ -2,6 +2,7 @@ import electron from 'electron';
 const { app, BrowserWindow, ipcMain, shell, clipboard } = electron;
 
 import { spawn, spawnSync } from 'node:child_process';
+import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -266,6 +267,149 @@ let coreServiceHeartbeatTimer: NodeJS.Timeout | null = null;
 let coreServiceHeartbeatStopped = false;
 let restartRequested = false;
 const RUN_LOG_DIR = path.join(os.homedir(), '.webauto', 'logs');
+type DaemonWorkerConfig = {
+  socketPath: string;
+  workerId: string;
+  token: string;
+  intervalMs: number;
+  missLimit: number;
+  timeoutMs: number;
+};
+let daemonWorkerHeartbeatTimer: NodeJS.Timeout | null = null;
+let daemonWorkerMisses = 0;
+let daemonWorkerStopping = false;
+let daemonWorkerExitSent = false;
+
+function parsePositiveInt(value: unknown, fallback: number): number {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0) return fallback;
+  return Math.floor(n);
+}
+
+function resolveDaemonWorkerConfig(env: NodeJS.ProcessEnv = process.env): DaemonWorkerConfig | null {
+  const socketPath = String(env.WEBAUTO_DAEMON_SOCKET || '').trim();
+  const workerId = String(env.WEBAUTO_DAEMON_WORKER_ID || '').trim();
+  const token = String(env.WEBAUTO_DAEMON_WORKER_TOKEN || '').trim();
+  if (!socketPath || !workerId || !token) return null;
+  const intervalMs = parsePositiveInt(env.WEBAUTO_DAEMON_HEARTBEAT_INTERVAL_MS, 30_000);
+  const missLimit = parsePositiveInt(env.WEBAUTO_DAEMON_HEARTBEAT_MISS_LIMIT, 5);
+  const timeoutMs = Math.min(8_000, Math.max(1_500, Math.floor(intervalMs * 0.6)));
+  return { socketPath, workerId, token, intervalMs, missLimit, timeoutMs };
+}
+
+const daemonWorkerConfig = resolveDaemonWorkerConfig();
+
+function daemonSocketRequest(payload: Record<string, any>, timeoutMs: number): Promise<Record<string, any>> {
+  if (!daemonWorkerConfig?.socketPath) return Promise.reject(new Error('daemon_worker_not_configured'));
+  return new Promise((resolve, reject) => {
+    const client = net.createConnection(daemonWorkerConfig.socketPath);
+    let timer: NodeJS.Timeout | null = setTimeout(() => {
+      timer = null;
+      client.destroy(new Error(`daemon_request_timeout_${timeoutMs}ms`));
+    }, timeoutMs);
+    let buffer = '';
+    client.on('error', (error) => {
+      if (timer) clearTimeout(timer);
+      reject(error);
+    });
+    client.on('connect', () => {
+      client.write(`${JSON.stringify(payload)}\n`);
+    });
+    client.on('data', (chunk) => {
+      buffer += String(chunk || '');
+      const idx = buffer.indexOf('\n');
+      if (idx < 0) return;
+      const line = buffer.slice(0, idx).trim();
+      if (timer) clearTimeout(timer);
+      try {
+        resolve(JSON.parse(line || '{}'));
+      } catch (error) {
+        reject(error);
+      } finally {
+        client.end();
+      }
+    });
+    client.on('close', () => {
+      if (timer) clearTimeout(timer);
+      timer = null;
+    });
+  });
+}
+
+async function sendDaemonWorkerExit(source = 'desktop-main') {
+  if (!daemonWorkerConfig || daemonWorkerExitSent) return;
+  daemonWorkerExitSent = true;
+  try {
+    await daemonSocketRequest({
+      method: 'worker.exit',
+      params: {
+        workerId: daemonWorkerConfig.workerId,
+        token: daemonWorkerConfig.token,
+        pid: process.pid,
+        source,
+        ts: new Date().toISOString(),
+      },
+    }, daemonWorkerConfig.timeoutMs);
+  } catch {
+    // daemon may already be down
+  }
+}
+
+async function requestDaemonLinkedExit(reason: string) {
+  if (daemonWorkerStopping) return;
+  daemonWorkerStopping = true;
+  appExitReasonHint = `daemon:${reason}`;
+  await appendDesktopLifecycle('daemon_worker_exit_requested', { reason });
+  await waitForAppExitCleanup(`daemon:${reason}`, { stopStateBridge: true }).catch(() => null);
+  app.quit();
+}
+
+function startDaemonWorkerHeartbeat() {
+  if (!daemonWorkerConfig || daemonWorkerHeartbeatTimer) return;
+  const emitHeartbeat = async (source = 'interval') => {
+    if (!daemonWorkerConfig || daemonWorkerStopping) return;
+    try {
+      const ret = await daemonSocketRequest({
+        method: 'worker.heartbeat',
+        params: {
+          workerId: daemonWorkerConfig.workerId,
+          token: daemonWorkerConfig.token,
+          pid: process.pid,
+          source: `desktop-main:${source}`,
+          ts: new Date().toISOString(),
+        },
+      }, daemonWorkerConfig.timeoutMs);
+      if (ret?.ok) {
+        daemonWorkerMisses = 0;
+        if (ret.shuttingDown === true) {
+          await requestDaemonLinkedExit('daemon_shutting_down');
+        }
+        return;
+      }
+      daemonWorkerMisses += 1;
+    } catch {
+      daemonWorkerMisses += 1;
+    }
+    if (daemonWorkerMisses >= daemonWorkerConfig.missLimit) {
+      await requestDaemonLinkedExit('daemon_heartbeat_lost');
+    }
+  };
+
+  void emitHeartbeat('init');
+  daemonWorkerHeartbeatTimer = setInterval(() => {
+    void emitHeartbeat('tick');
+  }, daemonWorkerConfig.intervalMs);
+  daemonWorkerHeartbeatTimer.unref();
+}
+
+function stopDaemonWorkerHeartbeat(reason = 'stop') {
+  if (daemonWorkerHeartbeatTimer) {
+    clearInterval(daemonWorkerHeartbeatTimer);
+    daemonWorkerHeartbeatTimer = null;
+  }
+  if (!daemonWorkerConfig) return;
+  void sendDaemonWorkerExit(`desktop:${reason}`);
+}
 
 function appendRunLog(runId: string, line: string) {
   const rid = String(runId || '').trim();
@@ -525,6 +669,7 @@ type CleanupOptions = {
 };
 
 async function cleanupRuntimeEnvironment(reason: string, options: CleanupOptions = {}) {
+  stopDaemonWorkerHeartbeat(reason);
   killAllRuns(reason);
   await cleanupTrackedRunPidsBestEffort(reason);
   await cleanupCamoSessionsBestEffort(reason, options.includeLockCleanup !== false);
@@ -1393,6 +1538,7 @@ app.on('quit', (_evt, exitCode) => {
 });
 
 process.on('exit', (code) => {
+  stopDaemonWorkerHeartbeat(`process_exit_${code}`);
   void appendDesktopLifecycle('process_exit', { code });
 });
 
@@ -1429,6 +1575,7 @@ app.whenReady().then(async () => {
   }
   coreServicesStopRequested = false;
   startCoreServiceHeartbeat();
+  startDaemonWorkerHeartbeat();
   markUiHeartbeat('main_ready');
   ensureHeartbeatWatchdog();
   createWindow();

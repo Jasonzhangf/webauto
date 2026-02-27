@@ -69,6 +69,10 @@ const SOCKET_PATH = process.platform === 'win32'
 const WEBAUTO_BIN = path.join(ROOT, 'bin', 'webauto.mjs');
 const UI_CLI_SCRIPT = path.join(ROOT, 'apps', 'desktop-console', 'entry', 'ui-cli.mjs');
 const XHS_INSTALL_SCRIPT = path.join(ROOT, 'apps', 'webauto', 'entry', 'xhs-install.mjs');
+const WORKER_HEARTBEAT_INTERVAL_MS = 30_000;
+const WORKER_HEARTBEAT_MISS_LIMIT = 5;
+const WORKER_HEARTBEAT_STALE_MS = WORKER_HEARTBEAT_INTERVAL_MS * WORKER_HEARTBEAT_MISS_LIMIT;
+const DAEMON_SHUTDOWN_GRACE_MS = WORKER_HEARTBEAT_INTERVAL_MS + 5_000;
 
 function ensureDirs() {
   mkdirSync(RUN_DIR, { recursive: true });
@@ -206,6 +210,61 @@ function cleanupRuntimeFiles() {
   }
 }
 
+function isPidAlive(pid) {
+  const target = Number(pid || 0);
+  if (!Number.isFinite(target) || target <= 0) return false;
+  if (process.platform === 'win32') {
+    const ret = spawnSync('tasklist', ['/FI', `PID eq ${target}`], {
+      windowsHide: true,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
+    const out = String(ret.stdout || '');
+    if (!out) return false;
+    const rows = out.split(/\r?\n/g).map((line) => line.trim()).filter(Boolean);
+    return rows.some((line) => line.includes(` ${target}`));
+  }
+  try {
+    process.kill(target, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function terminatePidTree(pid) {
+  const target = Number(pid || 0);
+  if (!Number.isFinite(target) || target <= 0) return { ok: false, error: 'invalid_pid' };
+  if (process.platform === 'win32') {
+    const ret = spawnSync('taskkill', ['/PID', String(target), '/T', '/F'], {
+      windowsHide: true,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    return {
+      ok: ret.status === 0 || !isPidAlive(target),
+      code: ret.status,
+      stdout: String(ret.stdout || '').trim(),
+      stderr: String(ret.stderr || '').trim(),
+    };
+  }
+
+  try {
+    process.kill(target, 'SIGTERM');
+  } catch {
+    // ignore
+  }
+  await sleep(600);
+  if (!isPidAlive(target)) return { ok: true };
+  try {
+    process.kill(target, 'SIGKILL');
+  } catch {
+    // ignore
+  }
+  await sleep(200);
+  return { ok: !isPidAlive(target) };
+}
+
 async function waitForDaemonExit(timeoutMs = 15_000) {
   const startedAt = Date.now();
   while (Date.now() - startedAt <= timeoutMs) {
@@ -216,8 +275,8 @@ async function waitForDaemonExit(timeoutMs = 15_000) {
   return { ok: false, error: `daemon_stop_timeout_${timeoutMs}ms` };
 }
 
-async function runUiCli(args = []) {
-  const ret = await runNode([UI_CLI_SCRIPT, ...args]);
+async function runUiCli(args = [], options = {}) {
+  const ret = await runNode([UI_CLI_SCRIPT, ...args], { env: options.env || {} });
   const parsed = parseJsonFromMixedOutput(ret.stdout, ret.stderr);
   return {
     ...ret,
@@ -225,8 +284,8 @@ async function runUiCli(args = []) {
   };
 }
 
-async function runUiCliBounded(args = [], maxWaitMs = 20_000) {
-  const uiTask = runUiCli(args);
+async function runUiCliBounded(args = [], maxWaitMs = 20_000, options = {}) {
+  const uiTask = runUiCli(args, options);
   const timeoutTask = sleep(Math.max(1_000, Number(maxWaitMs) || 20_000)).then(() => ({
     ok: false,
     code: null,
@@ -385,7 +444,13 @@ async function startDaemonServer() {
     desiredUi: false,
     jobs: new Map(),
     jobsOrder: [],
+    workers: new Map(),
+    workersOrder: [],
+    uiWorkerId: null,
     shuttingDown: false,
+    shutdownReason: null,
+    shutdownStartedAt: null,
+    shutdownTimer: null,
   };
   let uiQueue = Promise.resolve();
   const enqueueUi = async (fn) => {
@@ -393,6 +458,20 @@ async function startDaemonServer() {
     uiQueue = next.catch(() => null);
     return next;
   };
+  let server = null;
+
+  const summarizeWorker = (worker) => ({
+    id: worker.id,
+    kind: worker.kind,
+    source: worker.source || null,
+    status: worker.status,
+    pid: worker.pid || null,
+    jobId: worker.jobId || null,
+    startedAt: worker.startedAt || null,
+    lastHeartbeatAt: worker.lastHeartbeatAt || null,
+    finishedAt: worker.finishedAt || null,
+    staleMs: Math.max(0, Date.now() - Number(worker.lastHeartbeatMs || state.startedAt)),
+  });
 
   const updateHeartbeat = () => {
     const jobs = state.jobsOrder
@@ -407,10 +486,19 @@ async function startDaemonServer() {
         pid: job.pid || null,
         code: job.code ?? null,
       }));
+    const workers = state.workersOrder
+      .slice(-50)
+      .map((workerId) => state.workers.get(workerId))
+      .filter(Boolean)
+      .map((worker) => summarizeWorker(worker));
     writeJson(HEARTBEAT_FILE, buildHeartbeat({
       desiredUi: state.desiredUi,
+      shuttingDown: state.shuttingDown,
+      shutdownReason: state.shutdownReason,
+      shutdownStartedAt: state.shutdownStartedAt,
       uptimeMs: Date.now() - state.startedAt,
       jobs,
+      workers,
     }));
   };
 
@@ -422,6 +510,100 @@ async function startDaemonServer() {
     }
   };
 
+  const trimWorkerBuffer = () => {
+    while (state.workersOrder.length > 300) {
+      const oldest = state.workersOrder.shift();
+      if (!oldest) continue;
+      if (oldest === state.uiWorkerId) continue;
+      const worker = state.workers.get(oldest);
+      if (!worker) continue;
+      if (worker.status === 'running') {
+        state.workersOrder.push(oldest);
+        break;
+      }
+      state.workers.delete(oldest);
+    }
+  };
+
+  const registerWorker = (input = {}) => {
+    const id = String(input.id || '').trim();
+    const token = String(input.token || '').trim();
+    if (!id || !token) return null;
+    const nowMs = Date.now();
+    const existing = state.workers.get(id);
+    const worker = {
+      id,
+      token,
+      kind: String(input.kind || 'relay').trim() || 'relay',
+      source: String(input.source || '').trim() || null,
+      pid: Number.isFinite(Number(input.pid)) ? Math.floor(Number(input.pid)) : null,
+      jobId: String(input.jobId || '').trim() || null,
+      status: String(input.status || 'running').trim() || 'running',
+      startedAt: String(input.startedAt || nowIso()),
+      lastHeartbeatMs: nowMs,
+      lastHeartbeatAt: nowIso(),
+      finishedAt: null,
+      finishReason: null,
+    };
+    if (existing) {
+      worker.startedAt = existing.startedAt || worker.startedAt;
+      worker.lastHeartbeatMs = Number(existing.lastHeartbeatMs || nowMs) || nowMs;
+      worker.lastHeartbeatAt = existing.lastHeartbeatAt || worker.lastHeartbeatAt;
+      worker.finishedAt = existing.finishedAt || null;
+      worker.finishReason = existing.finishReason || null;
+      if (!worker.source) worker.source = existing.source || null;
+      if (!worker.jobId) worker.jobId = existing.jobId || null;
+      if (!(worker.pid > 0)) worker.pid = existing.pid || null;
+      if (!worker.kind) worker.kind = existing.kind || 'relay';
+    } else {
+      state.workersOrder.push(id);
+    }
+    state.workers.set(id, worker);
+    trimWorkerBuffer();
+    return worker;
+  };
+
+  const markWorkerStopped = (workerId, reason = 'stopped', patch = {}) => {
+    const id = String(workerId || '').trim();
+    if (!id) return null;
+    const worker = state.workers.get(id);
+    if (!worker) return null;
+    worker.status = String(patch.status || reason || 'stopped');
+    worker.finishedAt = nowIso();
+    worker.finishReason = String(reason || '').trim() || null;
+    if (Number.isFinite(Number(patch.pid)) && Number(patch.pid) > 0) {
+      worker.pid = Math.floor(Number(patch.pid));
+    }
+    if (typeof patch.code !== 'undefined') worker.code = patch.code;
+    if (typeof patch.source === 'string' && patch.source.trim()) worker.source = patch.source.trim();
+    return worker;
+  };
+
+  const buildWorkerEnv = (worker) => ({
+    WEBAUTO_DAEMON_BYPASS: '1',
+    WEBAUTO_DAEMON_SOCKET: SOCKET_PATH,
+    WEBAUTO_DAEMON_WORKER_ID: worker.id,
+    WEBAUTO_DAEMON_WORKER_TOKEN: worker.token,
+    WEBAUTO_DAEMON_WORKER_KIND: worker.kind,
+    WEBAUTO_DAEMON_HEARTBEAT_INTERVAL_MS: String(WORKER_HEARTBEAT_INTERVAL_MS),
+    WEBAUTO_DAEMON_HEARTBEAT_MISS_LIMIT: String(WORKER_HEARTBEAT_MISS_LIMIT),
+  });
+
+  const allocateUiWorker = () => {
+    const currentId = String(state.uiWorkerId || '').trim();
+    const current = currentId ? state.workers.get(currentId) : null;
+    if (current && current.status === 'running') return current;
+    const worker = registerWorker({
+      id: `ui_${Date.now()}_${randomUUID().slice(0, 8)}`,
+      token: randomUUID(),
+      kind: 'ui-desktop',
+      source: 'daemon-ui-start',
+      status: 'running',
+    });
+    state.uiWorkerId = worker?.id || null;
+    return worker;
+  };
+
   const startRelayJob = async (params = {}) => {
     const args = safeTrimArray(params.args);
     if (args.length === 0) {
@@ -431,11 +613,19 @@ async function startDaemonServer() {
     const jobId = `job_${Date.now()}_${randomUUID().slice(0, 8)}`;
     const logPath = path.join(JOB_LOG_DIR, `${jobId}.log`);
     const logStream = createWriteStream(logPath, { flags: 'a' });
+    const worker = registerWorker({
+      id: `relay_${jobId}`,
+      token: randomUUID(),
+      kind: 'relay',
+      source: 'daemon-relay',
+      jobId,
+      status: 'running',
+    });
     const child = spawn(process.execPath, [WEBAUTO_BIN, ...args], {
       cwd: ROOT,
       env: {
         ...process.env,
-        WEBAUTO_DAEMON_BYPASS: '1',
+        ...buildWorkerEnv(worker),
       },
       stdio: ['ignore', 'pipe', 'pipe'],
       windowsHide: true,
@@ -449,7 +639,9 @@ async function startDaemonServer() {
       startedAt: nowIso(),
       finishedAt: null,
       logPath,
+      workerId: worker?.id || null,
     };
+    if (worker) worker.pid = Number(child.pid || 0) || null;
     let stdoutTail = '';
     let stderrTail = '';
     state.jobs.set(jobId, job);
@@ -471,6 +663,10 @@ async function startDaemonServer() {
       job.status = code === 0 ? 'done' : 'failed';
       job.code = Number.isFinite(Number(code)) ? Number(code) : null;
       job.finishedAt = nowIso();
+      markWorkerStopped(job.workerId, job.status === 'done' ? 'process_exit_ok' : 'process_exit_failed', {
+        code: job.code,
+        source: 'child-close',
+      });
       updateHeartbeat();
       try { logStream.end(); } catch {}
     });
@@ -478,6 +674,7 @@ async function startDaemonServer() {
       job.status = 'failed';
       job.code = null;
       job.finishedAt = nowIso();
+      markWorkerStopped(job.workerId, 'process_error', { source: 'child-error' });
       logStream.write(`[error] ${err?.message || String(err)}\n`);
       updateHeartbeat();
       try { logStream.end(); } catch {}
@@ -508,6 +705,11 @@ async function startDaemonServer() {
         .slice(-20)
         .map((id) => state.jobs.get(id))
         .filter(Boolean);
+      const workers = state.workersOrder
+        .slice(-50)
+        .map((id) => state.workers.get(id))
+        .filter(Boolean)
+        .map((worker) => summarizeWorker(worker));
       return {
         ok: true,
         pid: process.pid,
@@ -515,32 +717,96 @@ async function startDaemonServer() {
         uptimeMs: Date.now() - state.startedAt,
         desiredUi: state.desiredUi,
         shuttingDown: state.shuttingDown,
+        shutdownReason: state.shutdownReason,
+        shutdownStartedAt: state.shutdownStartedAt,
         socket: SOCKET_PATH,
         jobs,
+        workers,
+      };
+    }
+    if (method === 'worker.heartbeat') {
+      const workerId = String(params.workerId || '').trim();
+      const token = String(params.token || '').trim();
+      if (!workerId || !token) return { ok: false, error: 'missing_worker_credentials' };
+      const worker = state.workers.get(workerId);
+      if (!worker) return { ok: false, error: `worker_not_found:${workerId}` };
+      if (worker.token !== token) return { ok: false, error: `worker_token_mismatch:${workerId}` };
+      const nowMs = Date.now();
+      worker.lastHeartbeatMs = nowMs;
+      worker.lastHeartbeatAt = nowIso();
+      worker.status = 'running';
+      const pid = Number(params.pid || 0);
+      if (Number.isFinite(pid) && pid > 0) worker.pid = Math.floor(pid);
+      const source = String(params.source || '').trim();
+      if (source) worker.source = source;
+      updateHeartbeat();
+      return {
+        ok: true,
+        daemonTs: nowIso(),
+        shuttingDown: state.shuttingDown,
+        heartbeatIntervalMs: WORKER_HEARTBEAT_INTERVAL_MS,
+        heartbeatMissLimit: WORKER_HEARTBEAT_MISS_LIMIT,
+      };
+    }
+    if (method === 'worker.exit') {
+      const workerId = String(params.workerId || '').trim();
+      const token = String(params.token || '').trim();
+      if (!workerId || !token) return { ok: false, error: 'missing_worker_credentials' };
+      const worker = state.workers.get(workerId);
+      if (!worker) return { ok: false, error: `worker_not_found:${workerId}` };
+      if (worker.token !== token) return { ok: false, error: `worker_token_mismatch:${workerId}` };
+      markWorkerStopped(workerId, 'worker_exit', {
+        source: String(params.source || '').trim() || 'worker',
+      });
+      updateHeartbeat();
+      return { ok: true, acknowledged: true };
+    }
+    if (state.shuttingDown && method !== 'autostart.status') {
+      return {
+        ok: false,
+        error: `daemon_shutting_down:${state.shutdownReason || 'requested'}`,
       };
     }
     if (method === 'shutdown') {
       state.shuttingDown = true;
+      state.shutdownReason = 'rpc_shutdown';
+      state.shutdownStartedAt = nowIso();
       state.desiredUi = false;
-      void stopUiCliForShutdown(8_000).finally(() => {
-        try { server.close(); } catch {}
-        cleanupRuntimeFiles();
-        process.exit(0);
-      });
+      updateHeartbeat();
+      if (!state.shutdownTimer) {
+        state.shutdownTimer = setTimeout(() => {
+          try { server?.close(); } catch {}
+          cleanupRuntimeFiles();
+          process.exit(0);
+        }, DAEMON_SHUTDOWN_GRACE_MS);
+        state.shutdownTimer.unref();
+      }
       return { ok: true, shuttingDown: true, pid: process.pid };
     }
     if (method === 'ui.start') {
       state.desiredUi = true;
-      const ret = await enqueueUi(() => runUiCliBounded(['start', '--json'], 90_000));
+      const uiWorker = allocateUiWorker();
+      const env = uiWorker ? buildWorkerEnv(uiWorker) : {};
+      const ret = await enqueueUi(() => runUiCliBounded(['start', '--json'], 90_000, { env }));
+      const statusPid = Number(ret?.json?.status?.pid || 0);
+      if (uiWorker && Number.isFinite(statusPid) && statusPid > 0) uiWorker.pid = Math.floor(statusPid);
       return { ok: ret.ok, result: ret.json || null, code: ret.code, stdout: ret.stdout, stderr: ret.stderr };
     }
     if (method === 'ui.stop') {
       state.desiredUi = false;
       const ret = await enqueueUi(() => runUiCliBounded(['stop', '--json'], 20_000));
+      if (state.uiWorkerId) {
+        markWorkerStopped(state.uiWorkerId, 'ui_stop_requested', { source: 'daemon-ui-stop' });
+      }
       return { ok: ret.ok, result: ret.json || null, code: ret.code, stdout: ret.stdout, stderr: ret.stderr };
     }
     if (method === 'ui.status') {
       const ret = await enqueueUi(() => runUiCliBounded(['status', '--json'], 20_000));
+      const statusPid = Number(ret?.json?.pid || 0);
+      if (state.uiWorkerId && Number.isFinite(statusPid) && statusPid > 0) {
+        const worker = state.workers.get(state.uiWorkerId);
+        if (worker) worker.pid = Math.floor(statusPid);
+      }
       return { ok: ret.ok, result: ret.json || null, code: ret.code, stdout: ret.stdout, stderr: ret.stderr };
     }
     if (method === 'service.status') {
@@ -578,7 +844,7 @@ async function startDaemonServer() {
     return { ok: false, error: `unsupported_method:${method}` };
   };
 
-  const server = net.createServer((socket) => {
+  server = net.createServer((socket) => {
     let buf = '';
     socket.on('data', (chunk) => {
       buf += String(chunk || '');
@@ -617,28 +883,73 @@ async function startDaemonServer() {
   const heartbeatTimer = setInterval(updateHeartbeat, 5_000);
   heartbeatTimer.unref();
 
+  const workerWatchdog = setInterval(() => {
+    let dirty = false;
+    for (const workerId of state.workersOrder) {
+      const worker = state.workers.get(workerId);
+      if (!worker) continue;
+      if (worker.status !== 'running') continue;
+      const staleMs = Date.now() - Number(worker.lastHeartbeatMs || state.startedAt);
+      if (staleMs <= WORKER_HEARTBEAT_STALE_MS) continue;
+
+      const pid = Number(worker.pid || 0);
+      if (!Number.isFinite(pid) || pid <= 0 || !isPidAlive(pid)) {
+        markWorkerStopped(workerId, 'worker_gone', { source: 'watchdog' });
+        dirty = true;
+        continue;
+      }
+
+      if (state.shuttingDown) continue;
+      void terminatePidTree(pid).then(() => {
+        markWorkerStopped(workerId, 'worker_heartbeat_timeout_killed', {
+          source: 'watchdog',
+          pid,
+        });
+        updateHeartbeat();
+      });
+      dirty = true;
+    }
+    if (dirty) updateHeartbeat();
+  }, WORKER_HEARTBEAT_INTERVAL_MS);
+  workerWatchdog.unref();
+
   const uiWatchdog = setInterval(() => {
     if (!state.desiredUi || state.shuttingDown) return;
     void enqueueUi(async () => {
       const status = await runUiCli(['status', '--json']).catch(() => ({ ok: false }));
       if (status?.ok && status?.json?.ok) return;
-      await runUiCli(['start', '--json']).catch(() => null);
+      const uiWorker = allocateUiWorker();
+      const env = uiWorker ? buildWorkerEnv(uiWorker) : {};
+      await runUiCli(['start', '--json'], { env }).catch(() => null);
     });
   }, 10_000);
   uiWatchdog.unref();
 
-  const shutdown = () => {
+  const shutdown = (reason = 'signal') => {
+    if (state.shuttingDown) return;
     state.shuttingDown = true;
-    try { clearInterval(heartbeatTimer); } catch {}
-    try { clearInterval(uiWatchdog); } catch {}
-    try { server.close(); } catch {}
-    cleanupRuntimeFiles();
-    process.exit(0);
+    state.shutdownReason = String(reason || '').trim() || 'signal';
+    state.shutdownStartedAt = nowIso();
+    state.desiredUi = false;
+    updateHeartbeat();
+    if (state.shutdownTimer) return;
+    state.shutdownTimer = setTimeout(() => {
+      try { clearInterval(heartbeatTimer); } catch {}
+      try { clearInterval(workerWatchdog); } catch {}
+      try { clearInterval(uiWatchdog); } catch {}
+      try { server?.close(); } catch {}
+      cleanupRuntimeFiles();
+      process.exit(0);
+    }, DAEMON_SHUTDOWN_GRACE_MS);
+    state.shutdownTimer.unref();
   };
 
-  process.on('SIGINT', shutdown);
-  process.on('SIGTERM', shutdown);
+  process.on('SIGINT', () => shutdown('sigint'));
+  process.on('SIGTERM', () => shutdown('sigterm'));
   process.on('exit', () => {
+    try { clearInterval(heartbeatTimer); } catch {}
+    try { clearInterval(workerWatchdog); } catch {}
+    try { clearInterval(uiWatchdog); } catch {}
     cleanupRuntimeFiles();
   });
 }
@@ -647,9 +958,10 @@ async function ensureDaemonStarted(timeoutMs = 15_000) {
   const alive = await pingDaemon();
   if (alive?.ok && alive?.shuttingDown !== true) return alive;
   if (alive?.ok && alive?.shuttingDown === true) {
-    const waitRet = await waitForDaemonExit(Math.min(timeoutMs, 8_000));
+    const shutdownWaitMs = Math.max(Number(timeoutMs) || 15_000, DAEMON_SHUTDOWN_GRACE_MS + 10_000, 8_000);
+    const waitRet = await waitForDaemonExit(shutdownWaitMs);
     if (!waitRet?.ok) {
-      throw new Error(waitRet.error || `daemon_stop_timeout_${Math.min(timeoutMs, 8_000)}ms`);
+      throw new Error(waitRet.error || `daemon_stop_timeout_${shutdownWaitMs}ms`);
     }
   }
 
@@ -740,7 +1052,7 @@ async function main() {
       process.exit(1);
       return;
     }
-    const stopped = await waitForDaemonExit(15_000);
+    const stopped = await waitForDaemonExit(Math.max(20_000, DAEMON_SHUTDOWN_GRACE_MS + 10_000));
     const out = {
       ...ret,
       stopped: stopped?.ok === true,

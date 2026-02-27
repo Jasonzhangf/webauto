@@ -2,11 +2,159 @@
 import minimist from 'minimist';
 import { spawn } from 'node:child_process';
 import { existsSync, writeFileSync, readFileSync, mkdirSync } from 'node:fs';
+import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const activeChildren = new Set();
+
+function parsePositiveInt(raw, fallback) {
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n <= 0) return fallback;
+  return Math.floor(n);
+}
+
+function daemonSocketRequest(socketPath, payload, timeoutMs = 5000) {
+  return new Promise((resolve, reject) => {
+    const client = net.createConnection(socketPath);
+    let timer = setTimeout(() => {
+      timer = null;
+      client.destroy(new Error(`daemon_request_timeout_${timeoutMs}ms`));
+    }, timeoutMs);
+    let buffer = '';
+    client.on('error', (error) => {
+      if (timer) clearTimeout(timer);
+      reject(error);
+    });
+    client.on('connect', () => {
+      client.write(`${JSON.stringify(payload)}\n`);
+    });
+    client.on('data', (chunk) => {
+      buffer += String(chunk || '');
+      const idx = buffer.indexOf('\n');
+      if (idx < 0) return;
+      const line = buffer.slice(0, idx).trim();
+      if (timer) clearTimeout(timer);
+      try {
+        resolve(JSON.parse(line || '{}'));
+      } catch (error) {
+        reject(error);
+      } finally {
+        client.end();
+      }
+    });
+    client.on('close', () => {
+      if (timer) clearTimeout(timer);
+    });
+  });
+}
+
+function stopActiveChildrenBestEffort() {
+  for (const child of Array.from(activeChildren.values())) {
+    try {
+      child.kill('SIGTERM');
+    } catch {
+      // ignore
+    }
+  }
+}
+
+function createDaemonWorkerSupervisor() {
+  const socketPath = String(process.env.WEBAUTO_DAEMON_SOCKET || '').trim();
+  const workerId = String(process.env.WEBAUTO_DAEMON_WORKER_ID || '').trim();
+  const token = String(process.env.WEBAUTO_DAEMON_WORKER_TOKEN || '').trim();
+  if (!socketPath || !workerId || !token) {
+    return {
+      stop: async () => {},
+    };
+  }
+
+  const intervalMs = parsePositiveInt(process.env.WEBAUTO_DAEMON_HEARTBEAT_INTERVAL_MS, 30_000);
+  const missLimit = parsePositiveInt(process.env.WEBAUTO_DAEMON_HEARTBEAT_MISS_LIMIT, 5);
+  const timeoutMs = Math.min(8_000, Math.max(1_500, Math.floor(intervalMs * 0.6)));
+  let misses = 0;
+  let closing = false;
+  let timer = null;
+
+  const sendWorkerExit = async (source = 'webauto-bin') => {
+    try {
+      await daemonSocketRequest(socketPath, {
+        method: 'worker.exit',
+        params: {
+          workerId,
+          token,
+          pid: process.pid,
+          source,
+          ts: new Date().toISOString(),
+        },
+      }, timeoutMs);
+    } catch {
+      // daemon may already be down
+    }
+  };
+
+  const selfCleanupExit = async (reason) => {
+    if (closing) return;
+    closing = true;
+    if (timer) {
+      clearInterval(timer);
+      timer = null;
+    }
+    stopActiveChildrenBestEffort();
+    await sendWorkerExit(`self_cleanup:${reason}`);
+    process.exit(0);
+  };
+
+  const heartbeat = async (source = 'tick') => {
+    if (closing) return;
+    try {
+      const ret = await daemonSocketRequest(socketPath, {
+        method: 'worker.heartbeat',
+        params: {
+          workerId,
+          token,
+          pid: process.pid,
+          source: `webauto-bin:${source}`,
+          ts: new Date().toISOString(),
+        },
+      }, timeoutMs);
+      if (ret?.ok) {
+        misses = 0;
+        if (ret.shuttingDown === true) {
+          await selfCleanupExit('daemon_shutting_down');
+        }
+        return;
+      }
+      misses += 1;
+    } catch {
+      misses += 1;
+    }
+    if (misses >= missLimit) {
+      await selfCleanupExit('daemon_heartbeat_lost');
+    }
+  };
+
+  void heartbeat('init');
+  timer = setInterval(() => {
+    void heartbeat('interval');
+  }, intervalMs);
+  timer.unref();
+
+  return {
+    stop: async () => {
+      if (timer) {
+        clearInterval(timer);
+        timer = null;
+      }
+      if (!closing) {
+        closing = true;
+        await sendWorkerExit('stop');
+      }
+    },
+  };
+}
 
 function normalizePathForPlatform(raw, platform = process.platform) {
   const input = String(raw || '').trim();
@@ -488,8 +636,13 @@ async function run(cmd, args, options = {}) {
       stdio: 'inherit',
       ...options,
     });
-    child.on('error', reject);
+    activeChildren.add(child);
+    child.on('error', (error) => {
+      activeChildren.delete(child);
+      reject(error);
+    });
     child.on('exit', (code) => {
+      activeChildren.delete(child);
       if (code === 0) return resolve();
       if (process.platform === 'win32' && code === 3221226505) {
         console.warn(`[webauto] Ignored spurious exit on Windows (code ${code})`);
@@ -507,8 +660,13 @@ async function runInDir(dir, cmd, args) {
       env: process.env,
       stdio: 'inherit',
     });
-    child.on('error', reject);
+    activeChildren.add(child);
+    child.on('error', (error) => {
+      activeChildren.delete(child);
+      reject(error);
+    });
     child.on('exit', (code) => {
+      activeChildren.delete(child);
       if (code === 0) return resolve();
       if (process.platform === 'win32' && code === 3221226505) {
         console.warn(`[webauto] Ignored spurious exit on Windows (code ${code})`);
@@ -1002,7 +1160,14 @@ async function main() {
   process.exit(1);
 }
 
-main().catch((err) => {
-  console.error(err?.stack || err?.message || String(err));
-  process.exit(1);
-});
+const daemonWorkerSupervisor = createDaemonWorkerSupervisor();
+
+main()
+  .then(async () => {
+    await daemonWorkerSupervisor.stop();
+  })
+  .catch(async (err) => {
+    await daemonWorkerSupervisor.stop();
+    console.error(err?.stack || err?.message || String(err));
+    process.exit(1);
+  });
