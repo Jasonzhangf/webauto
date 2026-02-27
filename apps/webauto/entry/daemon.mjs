@@ -225,8 +225,22 @@ async function runUiCli(args = []) {
   };
 }
 
+async function runUiCliBounded(args = [], maxWaitMs = 20_000) {
+  const uiTask = runUiCli(args);
+  const timeoutTask = sleep(Math.max(1_000, Number(maxWaitMs) || 20_000)).then(() => ({
+    ok: false,
+    code: null,
+    stdout: '',
+    stderr: '',
+    json: null,
+    timeout: true,
+    error: `ui_cli_timeout_${Math.max(1_000, Number(maxWaitMs) || 20_000)}ms`,
+  }));
+  return Promise.race([uiTask, timeoutTask]);
+}
+
 async function stopUiCliForShutdown(maxWaitMs = 8_000) {
-  const stopTask = runUiCli(['stop', '--json']).catch(() => null);
+  const stopTask = runUiCliBounded(['stop', '--json'], Math.max(1_000, Number(maxWaitMs) || 8_000)).catch(() => null);
   const timeoutTask = sleep(Math.max(1_000, Number(maxWaitMs) || 8_000)).then(() => ({ timeout: true }));
   return Promise.race([stopTask, timeoutTask]);
 }
@@ -508,7 +522,7 @@ async function startDaemonServer() {
     if (method === 'shutdown') {
       state.shuttingDown = true;
       state.desiredUi = false;
-      void enqueueUi(() => stopUiCliForShutdown(8_000)).finally(() => {
+      void stopUiCliForShutdown(8_000).finally(() => {
         try { server.close(); } catch {}
         cleanupRuntimeFiles();
         process.exit(0);
@@ -517,16 +531,16 @@ async function startDaemonServer() {
     }
     if (method === 'ui.start') {
       state.desiredUi = true;
-      const ret = await enqueueUi(() => runUiCli(['start', '--json']));
+      const ret = await enqueueUi(() => runUiCliBounded(['start', '--json'], 90_000));
       return { ok: ret.ok, result: ret.json || null, code: ret.code, stdout: ret.stdout, stderr: ret.stderr };
     }
     if (method === 'ui.stop') {
       state.desiredUi = false;
-      const ret = await enqueueUi(() => runUiCli(['stop', '--json']));
+      const ret = await enqueueUi(() => runUiCliBounded(['stop', '--json'], 20_000));
       return { ok: ret.ok, result: ret.json || null, code: ret.code, stdout: ret.stdout, stderr: ret.stderr };
     }
     if (method === 'ui.status') {
-      const ret = await enqueueUi(() => runUiCli(['status', '--json']));
+      const ret = await enqueueUi(() => runUiCliBounded(['status', '--json'], 20_000));
       return { ok: ret.ok, result: ret.json || null, code: ret.code, stdout: ret.stdout, stderr: ret.stderr };
     }
     if (method === 'service.status') {
@@ -746,21 +760,21 @@ async function main() {
 
   if (cmd === 'ui-start') {
     await ensureDaemonStarted();
-    const ret = await requestDaemon({ method: 'ui.start', params: {} });
+    const ret = await requestDaemon({ method: 'ui.start', params: {} }, 120_000);
     print(ret, jsonMode);
     if (!ret?.ok) process.exit(1);
     return;
   }
   if (cmd === 'ui-stop') {
     await ensureDaemonStarted();
-    const ret = await requestDaemon({ method: 'ui.stop', params: {} });
+    const ret = await requestDaemon({ method: 'ui.stop', params: {} }, 30_000);
     print(ret, jsonMode);
     if (!ret?.ok) process.exit(1);
     return;
   }
   if (cmd === 'ui-status') {
     await ensureDaemonStarted();
-    const ret = await requestDaemon({ method: 'ui.status', params: {} });
+    const ret = await requestDaemon({ method: 'ui.status', params: {} }, 30_000);
     print(ret, jsonMode);
     if (!ret?.ok) process.exit(1);
     return;
