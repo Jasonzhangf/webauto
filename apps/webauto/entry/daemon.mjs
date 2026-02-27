@@ -69,6 +69,8 @@ const SOCKET_PATH = process.platform === 'win32'
 const WEBAUTO_BIN = path.join(ROOT, 'bin', 'webauto.mjs');
 const UI_CLI_SCRIPT = path.join(ROOT, 'apps', 'desktop-console', 'entry', 'ui-cli.mjs');
 const XHS_INSTALL_SCRIPT = path.join(ROOT, 'apps', 'webauto', 'entry', 'xhs-install.mjs');
+const DAEMON_ENTRY_MARKER = String(fileURLToPath(import.meta.url) || '').replace(/\\/g, '/').toLowerCase();
+const DESKTOP_MAIN_MARKER = String(path.join(ROOT, 'apps', 'desktop-console', 'dist', 'main', 'index.mjs') || '').replace(/\\/g, '/').toLowerCase();
 const WORKER_HEARTBEAT_INTERVAL_MS = 30_000;
 const WORKER_HEARTBEAT_MISS_LIMIT = 5;
 const WORKER_HEARTBEAT_STALE_MS = WORKER_HEARTBEAT_INTERVAL_MS * WORKER_HEARTBEAT_MISS_LIMIT;
@@ -321,6 +323,93 @@ async function forceStopByPidFile() {
   }
   cleanupRuntimeFiles();
   return { ok: true, stopped: true, alreadyStopped: false, pid, fallback: 'pid_file' };
+}
+
+function normalizeCommandLine(raw = '') {
+  return String(raw || '').replace(/\\/g, '/').toLowerCase();
+}
+
+function parsePidsFromWindowsProcessList(exeName = 'node.exe') {
+  if (process.platform !== 'win32') return [];
+  const ret = spawnSync('powershell', [
+    '-NoProfile',
+    '-Command',
+    [
+      '[Console]::OutputEncoding=[System.Text.Encoding]::UTF8',
+      `$rows = Get-CimInstance Win32_Process -Filter "name='${exeName}'" | Select-Object ProcessId,CommandLine`,
+      '$rows | ConvertTo-Json -Compress',
+    ].join('; '),
+  ], {
+    windowsHide: true,
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  if (ret.status !== 0) return [];
+  let parsed = null;
+  try {
+    parsed = JSON.parse(String(ret.stdout || '').trim() || 'null');
+  } catch {
+    parsed = null;
+  }
+  const rows = Array.isArray(parsed) ? parsed : (parsed ? [parsed] : []);
+  return rows
+    .map((row) => ({
+      pid: Number(row?.ProcessId || 0),
+      commandLine: String(row?.CommandLine || ''),
+    }))
+    .filter((row) => Number.isFinite(row.pid) && row.pid > 0);
+}
+
+function listManagedRuntimePids() {
+  if (process.platform !== 'win32') return { daemonPids: [], uiPids: [] };
+  const daemonPids = parsePidsFromWindowsProcessList('node.exe')
+    .filter((row) => {
+      const cmd = normalizeCommandLine(row.commandLine);
+      return cmd.includes(DAEMON_ENTRY_MARKER) && cmd.includes(' daemon.mjs run');
+    })
+    .map((row) => Math.floor(row.pid));
+  const uiPids = parsePidsFromWindowsProcessList('electron.exe')
+    .filter((row) => normalizeCommandLine(row.commandLine).includes(DESKTOP_MAIN_MARKER))
+    .map((row) => Math.floor(row.pid));
+  return {
+    daemonPids: Array.from(new Set(daemonPids)),
+    uiPids: Array.from(new Set(uiPids)),
+  };
+}
+
+async function sweepManagedRuntimeProcesses(options = {}) {
+  const excluded = new Set((Array.isArray(options.excludePids) ? options.excludePids : [])
+    .map((pid) => Number(pid || 0))
+    .filter((pid) => Number.isFinite(pid) && pid > 0));
+  const discovered = listManagedRuntimePids();
+  const targets = Array.from(new Set([
+    ...discovered.daemonPids,
+    ...discovered.uiPids,
+  ])).filter((pid) => pid > 0 && !excluded.has(pid));
+  const killed = [];
+  const failed = [];
+  for (const pid of targets) {
+    const ret = await terminatePidTree(pid);
+    if (ret?.ok) {
+      killed.push(pid);
+    } else {
+      failed.push({
+        pid,
+        error: ret?.error || 'terminate_failed',
+        code: ret?.code ?? null,
+        stderr: ret?.stderr || '',
+      });
+    }
+  }
+  if (targets.length > 0) cleanupRuntimeFiles();
+  return {
+    ok: failed.length === 0,
+    daemonPids: discovered.daemonPids,
+    uiPids: discovered.uiPids,
+    targets,
+    killed,
+    failed,
+  };
 }
 
 async function runUiCli(args = [], options = {}) {
@@ -1119,15 +1208,18 @@ async function main() {
       const connectErrCode = detectConnectErrorCode(errText);
       if (connectErrCode === 'ENOENT' || connectErrCode === 'ECONNREFUSED' || connectErrCode === 'EPERM' || connectErrCode === 'EACCES') {
         const forced = await forceStopByPidFile();
+        const sweep = await sweepManagedRuntimeProcesses();
         if (forced?.ok) {
           print({
             ok: true,
-            stopped: true,
+            stopped: sweep.ok === true,
             alreadyStopped: forced.alreadyStopped === true,
             pid: Number.isFinite(Number(forced.pid)) ? Number(forced.pid) : null,
             fallback: forced.fallback || null,
             connectError: errText || null,
+            sweep,
           }, jsonMode);
+          if (!sweep.ok) process.exit(1);
           return;
         }
         print({
@@ -1138,22 +1230,29 @@ async function main() {
           terminateCode: forced?.terminateCode ?? null,
           terminateStdout: forced?.terminateStdout || '',
           terminateStderr: forced?.terminateStderr || '',
+          sweep,
         }, jsonMode);
         process.exit(1);
         return;
       }
-      print(ret, jsonMode);
+      const sweep = await sweepManagedRuntimeProcesses();
+      print({
+        ...ret,
+        sweep,
+      }, jsonMode);
       process.exit(1);
       return;
     }
     const stopped = await waitForDaemonExit(Math.max(20_000, DAEMON_SHUTDOWN_GRACE_MS + 10_000));
+    const sweep = await sweepManagedRuntimeProcesses();
     const out = {
       ...ret,
-      stopped: stopped?.ok === true,
+      stopped: stopped?.ok === true && sweep.ok === true,
       stopWaitError: stopped?.ok ? null : (stopped?.error || 'unknown_stop_wait_error'),
+      sweep,
     };
     print(out, jsonMode);
-    if (!stopped?.ok) process.exit(1);
+    if (!stopped?.ok || !sweep.ok) process.exit(1);
     return;
   }
 

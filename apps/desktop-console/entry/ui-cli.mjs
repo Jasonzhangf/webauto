@@ -300,6 +300,53 @@ function runCommandCapture(cmd, argv = [], timeoutMs = 12_000) {
   });
 }
 
+async function resolveWindowsProcessSessionId(pid, timeoutMs = 4_000) {
+  if (process.platform !== 'win32') return null;
+  const targetPid = parseIntSafe(pid, 0);
+  if (targetPid <= 0) return null;
+  const psScript = [
+    `$p = Get-CimInstance Win32_Process -Filter "ProcessId=${targetPid}" | Select-Object -First 1 -ExpandProperty SessionId`,
+    'if ($null -ne $p) { Write-Output $p }',
+  ].join('; ');
+  const ret = await runCommandCapture('powershell', ['-NoProfile', '-Command', psScript], timeoutMs);
+  if (!ret.ok) return null;
+  const sid = Number(String(ret.stdout || '').trim());
+  return Number.isFinite(sid) ? Math.floor(sid) : null;
+}
+
+let cachedCurrentWindowsSessionId = null;
+async function resolveCurrentWindowsSessionId() {
+  if (process.platform !== 'win32') return null;
+  if (Number.isFinite(cachedCurrentWindowsSessionId)) return cachedCurrentWindowsSessionId;
+  const sid = await resolveWindowsProcessSessionId(process.pid, 3_000);
+  if (!Number.isFinite(sid)) return null;
+  cachedCurrentWindowsSessionId = sid;
+  return sid;
+}
+
+async function detectWindowsSessionMismatch(targetPid) {
+  if (process.platform !== 'win32') {
+    return { mismatch: false, currentSessionId: null, targetSessionId: null };
+  }
+  const pid = parseIntSafe(targetPid, 0);
+  if (pid <= 0) {
+    return { mismatch: false, currentSessionId: null, targetSessionId: null };
+  }
+  const [currentSessionId, targetSessionId] = await Promise.all([
+    resolveCurrentWindowsSessionId(),
+    resolveWindowsProcessSessionId(pid),
+  ]);
+  const mismatch = Number.isFinite(currentSessionId)
+    && Number.isFinite(targetSessionId)
+    && currentSessionId > 0
+    && targetSessionId === 0;
+  return {
+    mismatch,
+    currentSessionId: Number.isFinite(currentSessionId) ? currentSessionId : null,
+    targetSessionId: Number.isFinite(targetSessionId) ? targetSessionId : null,
+  };
+}
+
 async function findDesktopMainPids() {
   if (process.platform === 'win32') {
     const psScript = [
@@ -431,12 +478,22 @@ function resolveKnownPid(statusRet = null) {
 async function startConsoleIfNeeded(endpoint) {
   const health = await waitForHealth(endpoint, 3000);
   if (health) {
-    const channelReady = await probeActionChannel(endpoint);
-    if (channelReady) return health;
     const pid = parseIntSafe(health?.pid, 0) || parseIntSafe(readControlFile()?.pid, 0);
-    if (pid > 0) await terminatePid(pid);
-    removeControlFileIfPresent();
-    await sleep(500);
+    const sessionMismatch = await detectWindowsSessionMismatch(pid);
+    if (sessionMismatch.mismatch) {
+      if (!args.json) {
+        console.log(`[ui-console] Existing UI session=${sessionMismatch.targetSessionId}, current=${sessionMismatch.currentSessionId}; restarting for visible desktop.`);
+      }
+      if (pid > 0) await terminatePid(pid);
+      removeControlFileIfPresent();
+      await sleep(700);
+    } else {
+      const channelReady = await probeActionChannel(endpoint);
+      if (channelReady) return health;
+      if (pid > 0) await terminatePid(pid);
+      removeControlFileIfPresent();
+      await sleep(500);
+    }
   } else {
     const stalePid = parseIntSafe(readControlFile()?.pid, 0);
     if (stalePid > 0) {
@@ -483,6 +540,20 @@ async function startConsoleIfNeeded(endpoint) {
     }
   }
   if (!ready) throw new Error('ui cli bridge is not ready after start');
+  let readyPid = parseIntSafe(ready?.pid, 0);
+  let readySessionMismatch = await detectWindowsSessionMismatch(readyPid);
+  if (readySessionMismatch.mismatch) {
+    if (readyPid > 0) await terminatePid(readyPid);
+    removeControlFileIfPresent();
+    await sleep(700);
+    await runUiConsole([]);
+    ready = await waitForHealth(endpoint, readyWaitMs);
+    readyPid = parseIntSafe(ready?.pid, 0);
+    readySessionMismatch = await detectWindowsSessionMismatch(readyPid);
+  }
+  if (readySessionMismatch.mismatch) {
+    throw new Error(`ui_started_in_session0_current=${readySessionMismatch.currentSessionId}`);
+  }
   const readyChannel = await waitForActionChannel(endpoint);
   if (!readyChannel) {
     const pid = parseIntSafe(ready?.pid, 0);
