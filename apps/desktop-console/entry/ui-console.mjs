@@ -107,27 +107,6 @@ function resolveElectronBin() {
   return candidates.find((item) => existsSync(item)) || candidates[0];
 }
 
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-async function waitForCoreServicesHealthy(timeoutMs = 90000) {
-  const startedAt = Date.now();
-  while ((Date.now() - startedAt) <= timeoutMs) {
-    try {
-      const [coreRes, runtimeRes] = await Promise.all([
-        fetch('http://127.0.0.1:7701/health', { signal: AbortSignal.timeout(1500) }),
-        fetch('http://127.0.0.1:7704/health', { signal: AbortSignal.timeout(1500) }),
-      ]);
-      if (coreRes.ok && runtimeRes.ok) return true;
-    } catch {
-      // keep polling
-    }
-    await sleep(500);
-  }
-  return false;
-}
-
 async function readWindowsSessionId(pid) {
   const targetPid = Number(pid || 0);
   if (!Number.isFinite(targetPid) || targetPid <= 0 || process.platform !== 'win32') return null;
@@ -146,20 +125,6 @@ async function readWindowsSessionId(pid) {
       resolve(Number.isFinite(sessionId) ? sessionId : null);
     });
   });
-}
-
-function terminateProcessTree(pid) {
-  const target = Number(pid || 0);
-  if (!Number.isFinite(target) || target <= 0) return;
-  try {
-    if (process.platform === 'win32') {
-      spawn('taskkill', ['/PID', String(target), '/T', '/F'], { stdio: 'ignore', windowsHide: true });
-      return;
-    }
-    process.kill(target, 'SIGTERM');
-  } catch {
-    // ignore cleanup errors
-  }
 }
 
 async function build() {
@@ -236,11 +201,6 @@ async function startConsole(noDaemon = false) {
         resolve(match?.[1] || 'unknown');
       });
     });
-    const healthy = await waitForCoreServicesHealthy();
-    if (!healthy) {
-      terminateProcessTree(pid);
-      throw new Error('desktop console started but core services did not become healthy');
-    }
     const sessionId = await readWindowsSessionId(pid);
     console.log(`[ui-console] Started (PID: ${pid || 'unknown'})`);
     if (sessionId === 0) {
@@ -263,11 +223,6 @@ async function startConsole(noDaemon = false) {
       process.exit(code);
     });
   } else {
-    const healthy = await waitForCoreServicesHealthy();
-    if (!healthy) {
-      terminateProcessTree(child.pid);
-      throw new Error('desktop console started but core services did not become healthy');
-    }
     child.unref();
     console.log(`[ui-console] Started (PID: ${child.pid})`);
   }

@@ -790,7 +790,15 @@ async function startDaemonServer() {
       const ret = await enqueueUi(() => runUiCliBounded(['start', '--json'], 90_000, { env }));
       const statusPid = Number(ret?.json?.status?.pid || 0);
       if (uiWorker && Number.isFinite(statusPid) && statusPid > 0) uiWorker.pid = Math.floor(statusPid);
-      return { ok: ret.ok, result: ret.json || null, code: ret.code, stdout: ret.stdout, stderr: ret.stderr };
+      return {
+        ok: ret.ok,
+        result: ret.json || null,
+        code: ret.code,
+        stdout: ret.stdout,
+        stderr: ret.stderr,
+        timeout: ret.timeout === true,
+        error: ret.error || ret?.json?.error || null,
+      };
     }
     if (method === 'ui.stop') {
       state.desiredUi = false;
@@ -798,7 +806,15 @@ async function startDaemonServer() {
       if (state.uiWorkerId) {
         markWorkerStopped(state.uiWorkerId, 'ui_stop_requested', { source: 'daemon-ui-stop' });
       }
-      return { ok: ret.ok, result: ret.json || null, code: ret.code, stdout: ret.stdout, stderr: ret.stderr };
+      return {
+        ok: ret.ok,
+        result: ret.json || null,
+        code: ret.code,
+        stdout: ret.stdout,
+        stderr: ret.stderr,
+        timeout: ret.timeout === true,
+        error: ret.error || ret?.json?.error || null,
+      };
     }
     if (method === 'ui.status') {
       const ret = await enqueueUi(() => runUiCliBounded(['status', '--json'], 20_000));
@@ -807,7 +823,15 @@ async function startDaemonServer() {
         const worker = state.workers.get(state.uiWorkerId);
         if (worker) worker.pid = Math.floor(statusPid);
       }
-      return { ok: ret.ok, result: ret.json || null, code: ret.code, stdout: ret.stdout, stderr: ret.stderr };
+      return {
+        ok: ret.ok,
+        result: ret.json || null,
+        code: ret.code,
+        stdout: ret.stdout,
+        stderr: ret.stderr,
+        timeout: ret.timeout === true,
+        error: ret.error || ret?.json?.error || null,
+      };
     }
     if (method === 'service.status') {
       const ret = await runServiceCheck();
