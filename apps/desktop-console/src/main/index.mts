@@ -6,7 +6,7 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { mkdirSync, readFileSync, promises as fs } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, promises as fs } from 'node:fs';
 
 import { readDesktopConsoleSettings, resolveDefaultDownloadRoot, writeDesktopConsoleSettings, saveCrawlConfig, loadCrawlConfig, exportConfigToFile, importConfigFromFile, type CrawlConfig } from './desktop-settings.mts';
 import type { DesktopConsoleSettings } from './desktop-settings.mts';
@@ -871,7 +871,44 @@ function resolveNodeBin() {
   if (npmNode) {
     const base = path.basename(npmNode).toLowerCase();
     const isNode = base === 'node' || base === 'node.exe';
-    if (isNode) return npmNode;
+    if (isNode && existsSync(npmNode)) return npmNode;
+  }
+
+  const pathEnv = String(process.env.PATH || process.env.Path || '').trim();
+  if (pathEnv) {
+    const dirs = pathEnv.split(path.delimiter).filter(Boolean);
+    const names = process.platform === 'win32' ? ['node.exe', 'node.cmd', 'node'] : ['node'];
+    for (const dir of dirs) {
+      for (const name of names) {
+        const full = path.join(dir, name);
+        if (existsSync(full)) return full;
+      }
+    }
+  }
+
+  if (process.platform === 'darwin') {
+    const macCandidates = [
+      '/opt/homebrew/bin/node',
+      '/usr/local/bin/node',
+      '/usr/bin/node',
+    ];
+    for (const candidate of macCandidates) {
+      if (existsSync(candidate)) return candidate;
+    }
+  } else if (process.platform === 'linux') {
+    const linuxCandidates = ['/usr/bin/node', '/usr/local/bin/node'];
+    for (const candidate of linuxCandidates) {
+      if (existsSync(candidate)) return candidate;
+    }
+  } else if (process.platform === 'win32') {
+    const winCandidates = [
+      path.join(String(process.env.ProgramFiles || 'C:\\Program Files'), 'nodejs', 'node.exe'),
+      path.join(String(process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)'), 'nodejs', 'node.exe'),
+      path.join(String(process.env.LOCALAPPDATA || ''), 'Programs', 'nodejs', 'node.exe'),
+    ].filter((item) => String(item || '').trim().length > 0);
+    for (const candidate of winCandidates) {
+      if (existsSync(candidate)) return candidate;
+    }
   }
   return process.platform === 'win32' ? 'node.exe' : 'node';
 }

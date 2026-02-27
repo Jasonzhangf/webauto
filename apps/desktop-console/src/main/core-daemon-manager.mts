@@ -20,10 +20,30 @@ function resolveNodeBin() {
   const explicit = String(process.env.WEBAUTO_NODE_BIN || '').trim();
   if (explicit) return explicit;
   const npmNode = String(process.env.npm_node_execpath || '').trim();
-  if (npmNode) return npmNode;
+  if (npmNode && existsSync(npmNode)) return npmNode;
   const fromPath = resolveOnPath(process.platform === 'win32' ? ['node.exe', 'node.cmd', 'node'] : ['node']);
   if (fromPath) return fromPath;
-  return process.execPath;
+  if (process.platform === 'darwin') {
+    for (const candidate of ['/opt/homebrew/bin/node', '/usr/local/bin/node', '/usr/bin/node']) {
+      if (existsSync(candidate)) return candidate;
+    }
+  }
+  if (process.platform === 'linux') {
+    for (const candidate of ['/usr/bin/node', '/usr/local/bin/node']) {
+      if (existsSync(candidate)) return candidate;
+    }
+  }
+  if (process.platform === 'win32') {
+    const winCandidates = [
+      path.join(String(process.env.ProgramFiles || 'C:\\Program Files'), 'nodejs', 'node.exe'),
+      path.join(String(process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)'), 'nodejs', 'node.exe'),
+      path.join(String(process.env.LOCALAPPDATA || ''), 'Programs', 'nodejs', 'node.exe'),
+    ].filter((item) => String(item || '').trim().length > 0);
+    for (const candidate of winCandidates) {
+      if (existsSync(candidate)) return candidate;
+    }
+  }
+  return process.platform === 'win32' ? 'node.exe' : 'node';
 }
 
 function resolveOnPath(candidates: string[]): string | null {

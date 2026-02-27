@@ -74,6 +74,15 @@ const WORKER_HEARTBEAT_MISS_LIMIT = 5;
 const WORKER_HEARTBEAT_STALE_MS = WORKER_HEARTBEAT_INTERVAL_MS * WORKER_HEARTBEAT_MISS_LIMIT;
 const DAEMON_SHUTDOWN_GRACE_MS = WORKER_HEARTBEAT_INTERVAL_MS + 5_000;
 
+function readEnvPositiveInt(name, fallback) {
+  const n = Number(process.env[name]);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : fallback;
+}
+
+const UI_CLI_START_TIMEOUT_MS = readEnvPositiveInt('WEBAUTO_DAEMON_UI_START_TIMEOUT_MS', 150_000);
+const UI_CLI_STATUS_TIMEOUT_MS = readEnvPositiveInt('WEBAUTO_DAEMON_UI_STATUS_TIMEOUT_MS', 20_000);
+const UI_CLI_STOP_TIMEOUT_MS = readEnvPositiveInt('WEBAUTO_DAEMON_UI_STOP_TIMEOUT_MS', 20_000);
+
 function ensureDirs() {
   mkdirSync(RUN_DIR, { recursive: true });
   mkdirSync(LOG_DIR, { recursive: true });
@@ -787,7 +796,7 @@ async function startDaemonServer() {
       state.desiredUi = true;
       const uiWorker = allocateUiWorker();
       const env = uiWorker ? buildWorkerEnv(uiWorker) : {};
-      const ret = await enqueueUi(() => runUiCliBounded(['start', '--json'], 90_000, { env }));
+      const ret = await enqueueUi(() => runUiCliBounded(['start', '--json'], UI_CLI_START_TIMEOUT_MS, { env }));
       const statusPid = Number(ret?.json?.status?.pid || 0);
       if (uiWorker && Number.isFinite(statusPid) && statusPid > 0) uiWorker.pid = Math.floor(statusPid);
       return {
@@ -802,7 +811,7 @@ async function startDaemonServer() {
     }
     if (method === 'ui.stop') {
       state.desiredUi = false;
-      const ret = await enqueueUi(() => runUiCliBounded(['stop', '--json'], 20_000));
+      const ret = await enqueueUi(() => runUiCliBounded(['stop', '--json'], UI_CLI_STOP_TIMEOUT_MS));
       if (state.uiWorkerId) {
         markWorkerStopped(state.uiWorkerId, 'ui_stop_requested', { source: 'daemon-ui-stop' });
       }
@@ -817,7 +826,7 @@ async function startDaemonServer() {
       };
     }
     if (method === 'ui.status') {
-      const ret = await enqueueUi(() => runUiCliBounded(['status', '--json'], 20_000));
+      const ret = await enqueueUi(() => runUiCliBounded(['status', '--json'], UI_CLI_STATUS_TIMEOUT_MS));
       const statusPid = Number(ret?.json?.pid || 0);
       if (state.uiWorkerId && Number.isFinite(statusPid) && statusPid > 0) {
         const worker = state.workers.get(state.uiWorkerId);
@@ -940,11 +949,11 @@ async function startDaemonServer() {
   const uiWatchdog = setInterval(() => {
     if (!state.desiredUi || state.shuttingDown) return;
     void enqueueUi(async () => {
-      const status = await runUiCli(['status', '--json']).catch(() => ({ ok: false }));
+      const status = await runUiCliBounded(['status', '--json'], UI_CLI_STATUS_TIMEOUT_MS).catch(() => ({ ok: false }));
       if (status?.ok && status?.json?.ok) return;
       const uiWorker = allocateUiWorker();
       const env = uiWorker ? buildWorkerEnv(uiWorker) : {};
-      await runUiCli(['start', '--json'], { env }).catch(() => null);
+      await runUiCliBounded(['start', '--json'], UI_CLI_START_TIMEOUT_MS, { env }).catch(() => null);
     });
   }, 10_000);
   uiWatchdog.unref();
@@ -1096,21 +1105,22 @@ async function main() {
 
   if (cmd === 'ui-start') {
     await ensureDaemonStarted();
-    const ret = await requestDaemon({ method: 'ui.start', params: {} }, 120_000);
+    const requestTimeoutMs = Math.max(120_000, UI_CLI_START_TIMEOUT_MS + 30_000);
+    const ret = await requestDaemon({ method: 'ui.start', params: {} }, requestTimeoutMs);
     print(ret, jsonMode);
     if (!ret?.ok) process.exit(1);
     return;
   }
   if (cmd === 'ui-stop') {
     await ensureDaemonStarted();
-    const ret = await requestDaemon({ method: 'ui.stop', params: {} }, 30_000);
+    const ret = await requestDaemon({ method: 'ui.stop', params: {} }, Math.max(30_000, UI_CLI_STOP_TIMEOUT_MS + 10_000));
     print(ret, jsonMode);
     if (!ret?.ok) process.exit(1);
     return;
   }
   if (cmd === 'ui-status') {
     await ensureDaemonStarted();
-    const ret = await requestDaemon({ method: 'ui.status', params: {} }, 30_000);
+    const ret = await requestDaemon({ method: 'ui.status', params: {} }, Math.max(30_000, UI_CLI_STATUS_TIMEOUT_MS + 10_000));
     print(ret, jsonMode);
     if (!ret?.ok) process.exit(1);
     return;

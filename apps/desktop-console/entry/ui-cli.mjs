@@ -20,6 +20,8 @@ const DEFAULT_HTTP_RETRIES = readEnvPositiveInt('WEBAUTO_UI_CLI_HTTP_RETRIES', 1
 const DEFAULT_START_HEALTH_TIMEOUT_MS = readEnvPositiveInt('WEBAUTO_UI_CLI_START_HEALTH_TIMEOUT_MS', 8_000);
 const DEFAULT_STATUS_TIMEOUT_MS = readEnvPositiveInt('WEBAUTO_UI_CLI_STATUS_TIMEOUT_MS', 45_000);
 const DEFAULT_ACTION_HTTP_TIMEOUT_MS = readEnvPositiveInt('WEBAUTO_UI_CLI_ACTION_HTTP_TIMEOUT_MS', 40_000);
+const DEFAULT_START_READY_TIMEOUT_MS = readEnvPositiveInt('WEBAUTO_UI_CLI_START_READY_TIMEOUT_MS', 90_000);
+const DEFAULT_START_ACTION_READY_TIMEOUT_MS = readEnvPositiveInt('WEBAUTO_UI_CLI_START_ACTION_READY_TIMEOUT_MS', 20_000);
 
 function normalizePathForPlatform(raw, platform = process.platform) {
   const input = String(raw || '').trim();
@@ -56,6 +58,8 @@ function resolveWebautoRoot() {
 }
 
 const CONTROL_FILE = path.join(resolveWebautoRoot(), 'run', 'ui-cli.json');
+const DIST_MAIN = path.join(APP_ROOT, 'dist', 'main', 'index.mjs');
+const DESKTOP_MAIN_MARKER = String(DIST_MAIN || '').replace(/\\/g, '/').toLowerCase();
 
 const args = minimist(process.argv.slice(2), {
   boolean: ['help', 'json', 'auto-start', 'build', 'install', 'continue-on-error', 'exact', 'keep-open', 'detailed'],
@@ -237,6 +241,131 @@ async function terminatePid(pid) {
   }
 }
 
+function commandLineMatchesDesktopMain(commandLine) {
+  const normalized = String(commandLine || '').replace(/\\/g, '/').toLowerCase();
+  if (!normalized) return false;
+  return normalized.includes(DESKTOP_MAIN_MARKER);
+}
+
+function runCommandCapture(cmd, argv = [], timeoutMs = 12_000) {
+  const budgetMs = Math.max(1_000, Number(timeoutMs) || 12_000);
+  return new Promise((resolve) => {
+    const child = spawn(cmd, argv, {
+      windowsHide: true,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    let stdout = '';
+    let stderr = '';
+    let settled = false;
+    const finish = (payload) => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      resolve(payload);
+    };
+    const timer = setTimeout(() => {
+      try {
+        child.kill('SIGTERM');
+      } catch {
+        // ignore
+      }
+      finish({
+        ok: false,
+        code: null,
+        stdout,
+        stderr,
+        error: `command_timeout_${budgetMs}ms`,
+      });
+    }, budgetMs);
+    child.stdout?.on('data', (chunk) => { stdout += String(chunk || ''); });
+    child.stderr?.on('data', (chunk) => { stderr += String(chunk || ''); });
+    child.on('error', (err) => {
+      finish({
+        ok: false,
+        code: null,
+        stdout,
+        stderr,
+        error: err?.message || String(err),
+      });
+    });
+    child.on('close', (code) => {
+      finish({
+        ok: code === 0,
+        code,
+        stdout,
+        stderr,
+        error: code === 0 ? null : `command_exit_${code}`,
+      });
+    });
+  });
+}
+
+async function findDesktopMainPids() {
+  if (process.platform === 'win32') {
+    const psScript = [
+      '[Console]::OutputEncoding=[System.Text.Encoding]::UTF8',
+      '$rows = Get-CimInstance Win32_Process -Filter "name=\'electron.exe\'" | Select-Object ProcessId,CommandLine',
+      '$rows | ConvertTo-Json -Compress',
+    ].join('; ');
+    const ret = await runCommandCapture('powershell', ['-NoProfile', '-Command', psScript], 12_000);
+    if (!ret.ok) return [];
+    let parsed = null;
+    try {
+      parsed = JSON.parse(String(ret.stdout || '').trim() || 'null');
+    } catch {
+      parsed = null;
+    }
+    const rows = Array.isArray(parsed)
+      ? parsed
+      : (parsed && typeof parsed === 'object' ? [parsed] : []);
+    return rows
+      .map((row) => ({
+        pid: parseIntSafe(row?.ProcessId, 0),
+        commandLine: String(row?.CommandLine || '').trim(),
+      }))
+      .filter((row) => row.pid > 0 && commandLineMatchesDesktopMain(row.commandLine))
+      .map((row) => row.pid);
+  }
+
+  const ret = await runCommandCapture('ps', ['-ax', '-o', 'pid=', '-o', 'command='], 8_000);
+  if (!ret.ok) return [];
+  const lines = String(ret.stdout || '').split(/\r?\n/g);
+  const pids = [];
+  for (const line of lines) {
+    const match = String(line || '').trim().match(/^(\d+)\s+(.+)$/);
+    if (!match) continue;
+    const pid = parseIntSafe(match[1], 0);
+    const commandLine = match[2];
+    if (pid <= 0) continue;
+    if (!commandLineMatchesDesktopMain(commandLine)) continue;
+    pids.push(pid);
+  }
+  return pids;
+}
+
+async function cleanupStaleDesktopProcesses(options = {}) {
+  const excluded = new Set((Array.isArray(options.excludePids) ? options.excludePids : [])
+    .map((pid) => parseIntSafe(pid, 0))
+    .filter((pid) => pid > 0));
+  const discovered = await findDesktopMainPids();
+  const targets = discovered.filter((pid) => pid > 0 && !excluded.has(pid));
+  const killed = [];
+  const failed = [];
+  for (const pid of targets) {
+    const ret = await terminatePid(pid);
+    if (ret?.ok) killed.push(pid);
+    else failed.push({ pid, error: ret?.error || 'unknown_error' });
+  }
+  if (killed.length > 0) {
+    removeControlFileIfPresent();
+  }
+  return {
+    targets,
+    killed,
+    failed,
+  };
+}
+
 async function waitForHealth(endpoint, timeoutMs = 30_000) {
   const started = Date.now();
   while (Date.now() - started <= timeoutMs) {
@@ -249,6 +378,17 @@ async function waitForHealth(endpoint, timeoutMs = 30_000) {
     await sleep(300);
   }
   return null;
+}
+
+async function waitForActionChannel(endpoint, timeoutMs = DEFAULT_START_ACTION_READY_TIMEOUT_MS) {
+  const budget = Math.max(2_000, Number(timeoutMs) || DEFAULT_START_ACTION_READY_TIMEOUT_MS);
+  const started = Date.now();
+  while (Date.now() - started <= budget) {
+    const ready = await probeActionChannel(endpoint, Math.min(6_000, Math.max(2_000, budget)));
+    if (ready) return true;
+    await sleep(300);
+  }
+  return false;
 }
 
 async function waitForHealthDown(endpoint, timeoutMs = 15_000) {
@@ -304,6 +444,12 @@ async function startConsoleIfNeeded(endpoint) {
       removeControlFileIfPresent();
       await sleep(500);
     }
+    const stale = await cleanupStaleDesktopProcesses({
+      excludePids: stalePid > 0 ? [stalePid] : [],
+    });
+    if (stale.killed.length > 0) {
+      await sleep(800);
+    }
   }
 
   const uiConsoleScript = path.join(APP_ROOT, 'entry', 'ui-console.mjs');
@@ -326,9 +472,18 @@ async function startConsoleIfNeeded(endpoint) {
   if (args.install || args.build) await runUiConsole(['--install']);
   await runUiConsole([]);
 
-  const ready = await waitForHealth(endpoint, 45_000);
+  const readyWaitMs = Math.max(20_000, parseIntSafe(args.timeout, DEFAULT_START_READY_TIMEOUT_MS));
+  let ready = await waitForHealth(endpoint, readyWaitMs);
+  if (!ready) {
+    const stale = await cleanupStaleDesktopProcesses();
+    if (stale.killed.length > 0) {
+      await sleep(800);
+      await runUiConsole([]);
+      ready = await waitForHealth(endpoint, readyWaitMs);
+    }
+  }
   if (!ready) throw new Error('ui cli bridge is not ready after start');
-  const readyChannel = await probeActionChannel(endpoint);
+  const readyChannel = await waitForActionChannel(endpoint);
   if (!readyChannel) {
     const pid = parseIntSafe(ready?.pid, 0);
     if (pid > 0) await terminatePid(pid);
@@ -999,6 +1154,17 @@ async function main() {
         ok: true,
         forced: true,
         pid: knownPid,
+        reason: actionError || 'request_failed',
+      });
+      return;
+    }
+    const stale = await cleanupStaleDesktopProcesses();
+    if (stale.killed.length > 0) {
+      removeControlFileIfPresent();
+      printOutput({
+        ok: true,
+        forced: true,
+        pids: stale.killed,
         reason: actionError || 'request_failed',
       });
       return;
