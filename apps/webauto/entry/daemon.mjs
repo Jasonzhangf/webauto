@@ -1332,7 +1332,8 @@ async function startDaemonServer() {
   });
 }
 
-async function ensureDaemonStarted(timeoutMs = 15_000) {
+async function ensureDaemonStarted(timeoutMs = 15_000, options = {}) {
+  const allowStart = options.allowStart !== false;
   const alive = await pingDaemon();
   if (alive?.ok && alive?.shuttingDown !== true) return alive;
   if (alive?.ok && alive?.shuttingDown === true) {
@@ -1341,6 +1342,10 @@ async function ensureDaemonStarted(timeoutMs = 15_000) {
     if (!waitRet?.ok) {
       throw new Error(waitRet.error || `daemon_stop_timeout_${shutdownWaitMs}ms`);
     }
+  }
+
+  if (!allowStart) {
+    throw new Error('daemon_not_running_session0');
   }
 
   ensureDirs();
@@ -1402,6 +1407,7 @@ async function main() {
   const jsonMode = args.json === true;
   const cmd = String(args._[0] || 'start').trim().toLowerCase();
   const sessionZero = isWindowsSessionZero();
+  const allowDaemonStart = !sessionZero;
 
   if (!args.help && sessionZero && (cmd === 'start' || cmd === 'run')) {
     const message = `[daemon] Session 0 blocked: "${cmd}" must be started from a non-Session 0 desktop session. If daemon is already running, use "webauto --daemon ui-start".`;
@@ -1424,7 +1430,7 @@ async function main() {
   }
 
   if (cmd === 'start') {
-    const status = await ensureDaemonStarted();
+    const status = await ensureDaemonStarted(undefined, { allowStart: allowDaemonStart });
     print(status, jsonMode);
     return;
   }
@@ -1492,7 +1498,7 @@ async function main() {
   }
 
   if (cmd === 'ui-start') {
-    await ensureDaemonStarted();
+    await ensureDaemonStarted(undefined, { allowStart: allowDaemonStart });
     const requestTimeoutMs = Math.max(120_000, UI_CLI_START_TIMEOUT_MS + 30_000);
     const ret = await requestDaemon({ method: 'ui.start', params: {} }, requestTimeoutMs);
     print(ret, jsonMode);
@@ -1500,14 +1506,14 @@ async function main() {
     return;
   }
   if (cmd === 'ui-stop') {
-    await ensureDaemonStarted();
+    await ensureDaemonStarted(undefined, { allowStart: allowDaemonStart });
     const ret = await requestDaemon({ method: 'ui.stop', params: {} }, Math.max(30_000, UI_CLI_STOP_TIMEOUT_MS + 10_000));
     print(ret, jsonMode);
     if (!ret?.ok) process.exit(1);
     return;
   }
   if (cmd === 'ui-status') {
-    await ensureDaemonStarted();
+    await ensureDaemonStarted(undefined, { allowStart: allowDaemonStart });
     const ret = await requestDaemon({ method: 'ui.status', params: {} }, Math.max(30_000, UI_CLI_STATUS_TIMEOUT_MS + 10_000));
     print(ret, jsonMode);
     if (!ret?.ok) process.exit(1);
@@ -1515,7 +1521,7 @@ async function main() {
   }
 
   if (cmd === 'service-status') {
-    await ensureDaemonStarted();
+    await ensureDaemonStarted(undefined, { allowStart: allowDaemonStart });
     const ret = await requestDaemon({ method: 'service.status', params: {} });
     print(ret, jsonMode);
     if (!ret?.ok) process.exit(1);
@@ -1523,7 +1529,7 @@ async function main() {
   }
 
   if (cmd === 'job-status') {
-    await ensureDaemonStarted();
+    await ensureDaemonStarted(undefined, { allowStart: allowDaemonStart });
     const id = String(args['job-id'] || args._[1] || '').trim();
     const ret = await requestDaemon({ method: 'relay.status', params: { id } });
     print(ret, jsonMode);
@@ -1532,7 +1538,7 @@ async function main() {
   }
 
   if (cmd === 'job-list') {
-    await ensureDaemonStarted();
+    await ensureDaemonStarted(undefined, { allowStart: allowDaemonStart });
     const limit = Number(args._[1] || 20) || 20;
     const ret = await requestDaemon({ method: 'relay.list', params: { limit } });
     print(ret, jsonMode);
@@ -1561,7 +1567,7 @@ async function main() {
       return;
     }
     const wait = args.detach !== true;
-    await ensureDaemonStarted();
+    await ensureDaemonStarted(undefined, { allowStart: allowDaemonStart });
     const ret = await requestDaemon({
       method: 'relay.start',
       params: { args: relayArgs, wait },
@@ -1574,7 +1580,7 @@ async function main() {
 
   // Unknown command under daemon entry: treat as relay args for convenience.
   const wait = args.detach !== true;
-  await ensureDaemonStarted();
+  await ensureDaemonStarted(undefined, { allowStart: allowDaemonStart });
   const ret = await requestDaemon({
     method: 'relay.start',
     params: { args: rawArgv, wait },
@@ -1585,6 +1591,11 @@ async function main() {
 }
 
 main().catch((err) => {
-  console.error(err?.stack || err?.message || String(err));
+  const message = String(err?.message || '').trim();
+  if (message === 'daemon_not_running_session0') {
+    console.error('[daemon] Session 0 blocked: daemon is not running. Start daemon from a non-Session 0 desktop session, then retry.');
+  } else {
+    console.error(err?.stack || err?.message || String(err));
+  }
   process.exit(1);
 });

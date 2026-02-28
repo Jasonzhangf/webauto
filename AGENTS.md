@@ -339,7 +339,7 @@ bd 搜索速查（全文检索 + 字段过滤）：
   - **禁止在 Session 0 启动任何业务相关进程**（daemon / UI / xhs 任务 / camo 会话）。
   - **只允许与非 Session 0 的 daemon 交互**（通常由桌面用户会话手动启动）。
   - **Session 0 只允许 stop/清理/状态查询，禁止启动 UI/daemon（允许查询）**。
-  - **Session 0 禁止任何 webauto 运行类操作（包含 UI CLI 触发运行/启动），仅允许 stop/清理/状态查询**。
+  - **Session 0 禁止直接运行（包含 UI CLI 触发运行/启动），但允许通过 `webauto --daemon relay` 将任务交给已运行的非 Session 0 daemon**。
   - **Session 0 仅限制 webauto 的运行，不限制 build 等其他操作**。
   - **可通过非 Session 0 的 daemon 启动 UI**（UI 会继承 daemon 会话）。
   - **所有 WebAuto 资源访问必须通过 daemon**（包括 UI 启动、任务运行、camo 会话），禁止绕过 daemon 的直接运行。

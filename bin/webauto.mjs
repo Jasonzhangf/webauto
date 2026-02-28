@@ -934,6 +934,7 @@ async function main() {
       'ui-start',
       'ui-status',
       'ui-stop',
+      'relay',
       'job-status',
       'job-list',
       'service-status',
@@ -943,7 +944,7 @@ async function main() {
     ]);
     if (cmd === 'daemon' || daemonFlag) {
       if (!allowedDaemon.has(daemonSub)) {
-        console.error('[webauto] Session 0 blocked: daemon start/run/relay must be executed from a non-Session 0 desktop session.');
+        console.error('[webauto] Session 0 blocked: daemon start/run must be executed from a non-Session 0 desktop session.');
         console.error('[webauto] If daemon is already running, use: webauto --daemon ui-start (or --daemon status).');
         process.exit(2);
       }
