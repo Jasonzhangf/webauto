@@ -1058,17 +1058,22 @@ async function startDaemonServer() {
     if (method === 'ui.stop') {
       state.desiredUi = false;
       const ret = await enqueueUi(() => runUiCliBounded(['stop', '--json'], UI_CLI_STOP_TIMEOUT_MS));
+      let sweep = null;
+      if (!ret.ok || ret.timeout === true) {
+        sweep = await sweepManagedRuntimeProcesses({ excludePids: [process.pid] });
+      }
       if (state.uiWorkerId) {
         markWorkerStopped(state.uiWorkerId, 'ui_stop_requested', { source: 'daemon-ui-stop' });
       }
       return {
-        ok: ret.ok,
+        ok: ret.ok || (sweep?.ok === true),
         result: ret.json || null,
         code: ret.code,
         stdout: ret.stdout,
         stderr: ret.stderr,
         timeout: ret.timeout === true,
         error: ret.error || ret?.json?.error || null,
+        sweep,
       };
     }
     if (method === 'ui.status') {
