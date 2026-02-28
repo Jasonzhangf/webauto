@@ -414,7 +414,7 @@ export function renderPreflight(root: HTMLElement, ctx: any) {
     if (typeof window.api?.cmdSpawn !== 'function') return;
 
    const timeoutSec = Math.max(0, Math.floor(Number(timeoutInput.value || '0')));
-   const idleTimeout = String(window.api?.settings?.idleTimeout || '30m').trim() || '30m';
+   const idleTimeout = 'off';
    const loginArgs = buildArgs([
      window.api.pathJoin('apps', 'webauto', 'entry', 'profilepool.mjs'),
      'login-profile',

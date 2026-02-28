@@ -404,7 +404,7 @@ export function createAccountFlowController(opts: AccountFlowOptions): AccountFl
      'login-profile',
      targetProfile,
      '--idle-timeout',
-     String(window.api?.settings?.idleTimeout || '30m').trim() || '30m',
+     'off',
      ...(timeoutSec > 0 ? ['--timeout-sec', String(timeoutSec)] : []),
      '--keep-session',
     ];

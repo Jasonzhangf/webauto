@@ -551,7 +551,7 @@ export function renderSetupWizard(root: HTMLElement, ctx: any) {
 
      // Open login window
      const timeoutSec = Math.max(0, Number(ctx.api.settings?.timeouts?.loginTimeoutSec || 0));
-      const idleTimeout = String(ctx.api?.settings?.idleTimeout || '30m').trim() || '30m';
+      const idleTimeout = 'off';
       const loginArgs = [
         ctx.api.pathJoin('apps', 'webauto', 'entry', 'profilepool.mjs'),
         'login-profile',

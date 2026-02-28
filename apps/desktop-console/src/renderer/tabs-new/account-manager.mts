@@ -391,7 +391,7 @@ export function renderAccountManager(root: HTMLElement, ctx: any) {
   async function openAccountLogin(account: Account, options: { reason?: string } = {}) {
     if (!String(account.profileId || '').trim()) return false;
     const platform = getPlatformInfo(account.platform);
-    const idleTimeout = String(ctx.api?.settings?.idleTimeout || '30m').trim() || '30m';
+    const idleTimeout = 'off';
     const timeoutSec = Math.max(0, Number(ctx.api?.settings?.timeouts?.loginTimeoutSec || 0));
     account.status = 'pending';
     account.statusView = 'pending';
@@ -482,7 +482,7 @@ export function renderAccountManager(root: HTMLElement, ctx: any) {
       }
 
       // Open login window
-      const idleTimeout = String(ctx.api?.settings?.idleTimeout || '30m').trim() || '30m';
+      const idleTimeout = 'off';
       const timeoutSec = Math.max(0, Number(ctx.api.settings?.timeouts?.loginTimeoutSec || 0));
       await ctx.api.cmdSpawn({
         title: `登录 ${alias || profileId}`,
