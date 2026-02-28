@@ -347,6 +347,26 @@ bd 搜索速查（全文检索 + 字段过滤）：
   - **Session 0 允许执行 `webauto --daemon status` 查询；`webauto --daemon ui-start` 仅可在 daemon 已由非 Session 0 启动后执行；严禁在 Session 0 执行 `webauto --daemon start`**。
   - UI 测试必须走 daemon 拉起：先 `webauto --daemon start`，再 `webauto --daemon ui-start`，然后才执行 `webauto ui cli ...`。
   - 若当前终端位于 Session 0，只允许执行停止/清理命令，不允许执行 UI 启动或业务执行命令。
+
+### 9.1.1 标准构建与测试流程（强制）
+- **远端构建（允许在 Session 0 执行）**：
+  - `git reset --hard && git clean -fd && git pull --rebase`
+  - `npm --prefix apps/desktop-console run build`
+  - `npm run build:services`
+- **运行与测试必须通过 daemon relay**（禁止直接前台/非 daemon 运行）：
+  - `webauto --daemon relay -- <webauto args...>`
+  - 例：`webauto --daemon relay -- xhs unified --profile <profile> --keyword "<kw>" --max-notes 100 --stage links`
+  - UI CLI 仅用于桌面可视化验证，运行任务一律通过 daemon relay。
+
+### 9.1.1 标准构建与测试流程（强制）
+- **远端构建（允许在 Session 0 执行）**：
+  - `git reset --hard && git clean -fd && git pull --rebase`
+  - `npm --prefix apps/desktop-console run build`
+  - `npm run build:services`
+- **运行与测试必须通过 daemon relay**（禁止直接前台/非 daemon 运行）：
+  - `webauto --daemon relay -- <webauto args...>`
+  - 例：`webauto --daemon relay -- xhs unified --profile <profile> --keyword "<kw>" --max-notes 100 --stage links`
+  - UI CLI 仅用于桌面可视化验证，运行任务一律通过 daemon relay。
 - 使用方式：
   ```bash
   # 正确（daemon 模式，立即返回，后台持续执行）
