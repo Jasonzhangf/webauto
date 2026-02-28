@@ -165,12 +165,12 @@ function normalizeSettings(defaults: Partial<DesktopConsoleSettings>, input: Par
     defaultDryRun: Boolean((input as any).defaultDryRun ?? (defaults as any).defaultDryRun ?? false),
     timeouts: {
       loginTimeoutSec: Math.max(
-        30,
+        0,
         Math.floor(
           Number(
             (input.timeouts as any)?.loginTimeoutSec ??
               (defaults.timeouts as any)?.loginTimeoutSec ??
-              900,
+              0,
           ),
         ),
       ),

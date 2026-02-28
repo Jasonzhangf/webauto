@@ -9,7 +9,7 @@ export function renderSettings(root: HTMLElement, ctx: any) {
   ['debug', 'prod'].forEach((x) => env.appendChild(createEl('option', { value: x }, [x])));
   env.value = ctx.settings?.defaultEnv || 'prod';
   const keyword = createEl('input', { value: ctx.settings?.defaultKeyword || '' }) as HTMLInputElement;
-  const loginTimeout = createEl('input', { value: String(ctx.settings?.timeouts?.loginTimeoutSec || 900), type: 'number', min: '30' }) as HTMLInputElement;
+  const loginTimeout = createEl('input', { value: String(ctx.settings?.timeouts?.loginTimeoutSec || 0), type: 'number', min: '0' }) as HTMLInputElement;
   const cmdTimeout = createEl('input', { value: String(ctx.settings?.timeouts?.cmdTimeoutSec || 0), type: 'number', min: '0' }) as HTMLInputElement;
   const idleTimeout = createEl('input', { value: ctx.settings?.idleTimeout || '30m', placeholder: '30m' }) as HTMLInputElement;
   // AI Reply Configuration
@@ -74,7 +74,7 @@ export function renderSettings(root: HTMLElement, ctx: any) {
       defaultEnv: env.value,
       defaultKeyword: keyword.value,
       timeouts: {
-        loginTimeoutSec: Number(loginTimeout.value || '900'),
+        loginTimeoutSec: Number(loginTimeout.value || '0'),
         cmdTimeoutSec: Number(cmdTimeout.value || '0'),
       },
       idleTimeout: idleTimeout.value.trim() || '30m',

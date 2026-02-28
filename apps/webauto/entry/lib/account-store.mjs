@@ -892,11 +892,13 @@ export function cleanupIncompleteProfiles(options = {}) {
         profileId,
         accountRecordIds: [],
         platforms: new Set(),
+        hasAccountId: false,
       });
     }
     const entry = byProfile.get(profileId);
     if (row?.id) entry.accountRecordIds.push(row.id);
     if (hasPersistentAccountId(row)) {
+      entry.hasAccountId = true;
       entry.platforms.add(normalizePlatform(row?.platform));
     }
   }
@@ -913,8 +915,10 @@ export function cleanupIncompleteProfiles(options = {}) {
       profileId,
       accountRecordIds: [],
       platforms: new Set(),
+      hasAccountId: false,
     };
     if (isProfileFullyBound(entry.platforms)) continue;
+    if (entry.hasAccountId) continue;
     removedProfiles.push(entry.profileId);
     for (const id of entry.accountRecordIds) purgeRecordIds.add(id);
   }

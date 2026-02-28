@@ -368,7 +368,7 @@ export function renderPreflight(root: HTMLElement, ctx: any) {
   // keep: ProfilePool helper (create profiles + bulk login)
   const keywordInput = createEl('input', { value: 'profile', placeholder: 'Profile 前缀（可选），默认 profile，生成如 profile-0/profile-1' }) as HTMLInputElement;
   const ensureCountInput = createEl('input', { value: '0', type: 'number', min: '0' }) as HTMLInputElement;
-  const timeoutInput = createEl('input', { value: String(ctx.settings?.timeouts?.loginTimeoutSec || 900), type: 'number', min: '30' }) as HTMLInputElement;
+  const timeoutInput = createEl('input', { value: String(ctx.settings?.timeouts?.loginTimeoutSec || 0), type: 'number', min: '0' }) as HTMLInputElement;
   const keepSession = createEl('input', { type: 'checkbox' }) as HTMLInputElement;
   const poolListBox = createEl('div', { className: 'list' });
   const poolStatus = createEl('div', { className: 'muted' }, ['']);
@@ -413,7 +413,7 @@ export function renderPreflight(root: HTMLElement, ctx: any) {
     if (!createdProfileId) return;
     if (typeof window.api?.cmdSpawn !== 'function') return;
 
-   const timeoutSec = Math.max(30, Math.floor(Number(timeoutInput.value || '900')));
+   const timeoutSec = Math.max(0, Math.floor(Number(timeoutInput.value || '0')));
    const idleTimeout = String(window.api?.settings?.idleTimeout || '30m').trim() || '30m';
    const loginArgs = buildArgs([
      window.api.pathJoin('apps', 'webauto', 'entry', 'profilepool.mjs'),
@@ -421,8 +421,7 @@ export function renderPreflight(root: HTMLElement, ctx: any) {
      createdProfileId,
      '--idle-timeout',
      idleTimeout,
-     '--timeout-sec',
-     String(timeoutSec),
+     ...(timeoutSec > 0 ? ['--timeout-sec', String(timeoutSec)] : []),
       '--check-interval-sec',
       '2',
       '--keep-session',
@@ -441,13 +440,12 @@ export function renderPreflight(root: HTMLElement, ctx: any) {
     ctx.clearLog();
     const kw = resolveBatchPrefix();
     const ensureCount = Math.max(0, Math.floor(Number(ensureCountInput.value || '0')));
-    const timeoutSec = Math.max(30, Math.floor(Number(timeoutInput.value || '900')));
+    const timeoutSec = Math.max(0, Math.floor(Number(timeoutInput.value || '0')));
     const args = buildArgs([
       window.api.pathJoin('apps', 'webauto', 'entry', 'profilepool.mjs'),
       'login',
       kw,
-      '--timeout-sec',
-      String(timeoutSec),
+      ...(timeoutSec > 0 ? ['--timeout-sec', String(timeoutSec)] : []),
       ...(ensureCount > 0 ? ['--ensure-count', String(ensureCount)] : []),
       ...(keepSession.checked ? ['--keep-session'] : []),
     ]);

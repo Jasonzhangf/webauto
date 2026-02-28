@@ -550,7 +550,7 @@ export function renderSetupWizard(root: HTMLElement, ctx: any) {
       setupStatusText.textContent = `账号 ${profileId} 已创建，等待登录...`;
 
      // Open login window
-     const timeoutSec = ctx.api.settings?.timeouts?.loginTimeoutSec || 900;
+     const timeoutSec = Math.max(0, Number(ctx.api.settings?.timeouts?.loginTimeoutSec || 0));
       const idleTimeout = String(ctx.api?.settings?.idleTimeout || '30m').trim() || '30m';
       const loginArgs = [
         ctx.api.pathJoin('apps', 'webauto', 'entry', 'profilepool.mjs'),
@@ -560,8 +560,7 @@ export function renderSetupWizard(root: HTMLElement, ctx: any) {
         idleTimeout,
         '--wait-sync',
         'false',
-        '--timeout-sec',
-        String(timeoutSec),
+        ...(timeoutSec > 0 ? ['--timeout-sec', String(timeoutSec)] : []),
         '--keep-session'
       ];
 
@@ -654,9 +653,9 @@ export function renderSetupWizard(root: HTMLElement, ctx: any) {
     if (!id) return;
     const existing = autoSyncTimers.get(id);
     if (existing) clearInterval(existing);
-    const timeoutSec = Math.max(30, Number(ctx.api?.settings?.timeouts?.loginTimeoutSec || 900));
+    const timeoutSec = Math.max(0, Number(ctx.api?.settings?.timeouts?.loginTimeoutSec || 0));
     const intervalMs = 2_000;
-    const maxAttempts = Math.ceil((timeoutSec * 1000) / intervalMs);
+    const maxAttempts = timeoutSec > 0 ? Math.ceil((timeoutSec * 1000) / intervalMs) : Number.POSITIVE_INFINITY;
     let attempts = 0;
     void syncProfileAccount(id);
     const timer = setInterval(() => {
