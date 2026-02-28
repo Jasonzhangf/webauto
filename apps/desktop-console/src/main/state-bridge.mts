@@ -16,9 +16,17 @@ class StateBridge {
   private win: BrowserWindow | null = null;
   private tasks: Map<string, TaskState> = new Map();
   private handlersRegistered = false;
+  private safeSend(channel: string, payload: any) {
+    const win = this.win;
+    if (!win || win.isDestroyed() || win.webContents.isDestroyed()) return;
+    try {
+      win.webContents.send(channel, payload);
+    } catch {
+      // Ignore send errors when the window is closing or destroyed.
+    }
+  }
   private emitBusEvent(payload: any) {
-    if (!this.win) return;
-    this.win.webContents.send('bus:event', payload);
+    this.safeSend('bus:event', payload);
   }
 
   start(win: BrowserWindow) {
@@ -87,7 +95,7 @@ class StateBridge {
     if (task) {
       this.tasks.set(update.runId, { ...task, ...update.data });
     }
-    this.win?.webContents.send('state:update', update);
+    this.safeSend('state:update', update);
   }
 
   private setupIPCHandlers() {
