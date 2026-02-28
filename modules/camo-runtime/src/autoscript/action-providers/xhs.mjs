@@ -337,11 +337,13 @@ async function clickPoint(profileId, point, options = {}) {
 }
 
 async function wheel(profileId, deltaY) {
-  await callAPI('mouse:wheel', {
-    profileId,
-    deltaX: 0,
-    deltaY: clamp(Math.round(Number(deltaY) || 0), -1200, 1200),
-  });
+  const raw = Number(deltaY) || 0;
+  const key = raw >= 0 ? 'PageDown' : 'PageUp';
+  const steps = Math.max(1, Math.min(8, Math.round(Math.abs(raw) / 420) || 1));
+  for (let step = 0; step < steps; step += 1) {
+    await pressKey(profileId, key);
+    await sleep(80);
+  }
 }
 
 async function pressKey(profileId, key) {
@@ -366,10 +368,12 @@ async function resolveSelectorTarget(profileId, selectors, options = {}) {
     .map((item) => String(item || '').trim())
     .filter(Boolean);
   if (normalizedSelectors.length === 0) return null;
+  const minVisibleRatio = clamp(Number(options.minVisibleRatio ?? 0) || 0, 0, 1);
   const script = `(() => {
     const selectors = ${JSON.stringify(normalizedSelectors)};
     const requireViewport = ${options.requireViewport !== false ? 'true' : 'false'};
     const includeText = ${options.includeText === true ? 'true' : 'false'};
+    const minVisibleRatio = ${JSON.stringify(minVisibleRatio)};
     const isVisible = (node) => {
       if (!(node instanceof Element)) return false;
       const rect = node.getBoundingClientRect?.();
@@ -424,17 +428,37 @@ async function resolveSelectorTarget(profileId, selectors, options = {}) {
       if (includeText) payload.text = String(node.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 180);
       return payload;
     };
+    const meetsVisibleRatio = (rect) => {
+      if (!rect) return false;
+      if (minVisibleRatio <= 0) return true;
+      const vw = Number(window.innerWidth || 0);
+      const vh = Number(window.innerHeight || 0);
+      if (vw <= 0 || vh <= 0) return false;
+      const visibleLeft = Math.max(0, rect.left);
+      const visibleTop = Math.max(0, rect.top);
+      const visibleRight = Math.min(vw, rect.right);
+      const visibleBottom = Math.min(vh, rect.bottom);
+      const visibleWidth = Math.max(0, visibleRight - visibleLeft);
+      const visibleHeight = Math.max(0, visibleBottom - visibleTop);
+      const visibleArea = visibleWidth * visibleHeight;
+      const totalArea = Math.max(1, Number(rect.width || 0) * Number(rect.height || 0));
+      const visibleRatio = Math.max(0, Math.min(1, visibleArea / totalArea));
+      return visibleRatio >= minVisibleRatio;
+    };
     for (const selector of selectors) {
       const nodes = Array.from(document.querySelectorAll(selector));
       for (const node of nodes) {
         if (!isVisible(node)) continue;
         const rect = node.getBoundingClientRect();
+        if (!meetsVisibleRatio(rect)) continue;
         if (requireViewport && !inViewport(rect)) continue;
         if (requireViewport && !hitVisible(node, rect)) continue;
         return { ok: true, target: toPayload(selector, node) };
       }
       for (const node of nodes) {
         if (!isVisible(node)) continue;
+        const rect = node.getBoundingClientRect();
+        if (!meetsVisibleRatio(rect)) continue;
         return { ok: true, target: toPayload(selector, node) };
       }
     }
@@ -930,6 +954,7 @@ async function readDetailSnapshot(profileId) {
 
 async function readExpandButtons(profileId) {
   const script = `(() => {
+    const minVisibleRatio = 0.5;
     const selectors = [
       '.note-detail-mask .show-more',
       '.note-detail-mask .reply-expand',
@@ -961,6 +986,16 @@ async function readExpandButtons(profileId) {
       const text = String(node.textContent || '').replace(/\s+/g, ' ').trim();
       if (!text) continue;
       const rect = node.getBoundingClientRect();
+      const visibleLeft = Math.max(0, rect.left);
+      const visibleTop = Math.max(0, rect.top);
+      const visibleRight = Math.min(vw, rect.right);
+      const visibleBottom = Math.min(vh, rect.bottom);
+      const visibleWidth = Math.max(0, visibleRight - visibleLeft);
+      const visibleHeight = Math.max(0, visibleBottom - visibleTop);
+      const visibleArea = visibleWidth * visibleHeight;
+      const totalArea = Math.max(1, Number(rect.width || 0) * Number(rect.height || 0));
+      const visibleRatio = Math.max(0, Math.min(1, visibleArea / totalArea));
+      if (visibleRatio < minVisibleRatio) continue;
       out.push({
         text,
         signature: String(text)
@@ -972,6 +1007,7 @@ async function readExpandButtons(profileId) {
           x: Math.max(1, Math.min(Math.max(1, vw - 1), Math.round(rect.left + rect.width / 2))),
           y: Math.max(1, Math.min(Math.max(1, vh - 1), Math.round(rect.top + rect.height / 2))),
         },
+        visibleRatio,
       });
     }
     return { rows: out };
@@ -1185,6 +1221,7 @@ async function readLikeTargetByIndex(profileId, index) {
   const idx = Math.max(0, Number(index) || 0);
   const script = `(() => {
     const index = Number(${JSON.stringify(idx)});
+    const minVisibleRatio = 0.5;
     const findLikeControl = (item) => {
       const selectors = [
         '.like-wrapper',
@@ -1215,6 +1252,16 @@ async function readLikeTargetByIndex(profileId, index) {
     const rect = likeNode.getBoundingClientRect();
     const vw = Number(window.innerWidth || 0);
     const vh = Number(window.innerHeight || 0);
+    const visibleLeft = Math.max(0, rect.left);
+    const visibleTop = Math.max(0, rect.top);
+    const visibleRight = Math.min(vw, rect.right);
+    const visibleBottom = Math.min(vh, rect.bottom);
+    const visibleWidth = Math.max(0, visibleRight - visibleLeft);
+    const visibleHeight = Math.max(0, visibleBottom - visibleTop);
+    const visibleArea = visibleWidth * visibleHeight;
+    const totalArea = Math.max(1, Number(rect.width || 0) * Number(rect.height || 0));
+    const visibleRatio = Math.max(0, Math.min(1, visibleArea / totalArea));
+    if (visibleRatio < minVisibleRatio) return { ok: false, reason: 'like_control_not_visible_enough', visibleRatio, minVisibleRatio };
     return {
       ok: true,
       index,
@@ -1232,12 +1279,25 @@ async function readReplyTargetByIndex(profileId, index) {
   const idx = Math.max(0, Number(index) || 0);
   const script = `(() => {
     const index = Number(${JSON.stringify(idx)});
+    const minVisibleRatio = 0.5;
     const rows = Array.from(document.querySelectorAll('.comment-item, [class*="comment-item"]'));
     const target = rows[index];
     if (!(target instanceof Element)) return { ok: false, reason: 'match_not_visible' };
     const targetRect = target.getBoundingClientRect();
     const vw = Number(window.innerWidth || 0);
     const vh = Number(window.innerHeight || 0);
+    const visibleLeft = Math.max(0, targetRect.left);
+    const visibleTop = Math.max(0, targetRect.top);
+    const visibleRight = Math.min(vw, targetRect.right);
+    const visibleBottom = Math.min(vh, targetRect.bottom);
+    const visibleWidth = Math.max(0, visibleRight - visibleLeft);
+    const visibleHeight = Math.max(0, visibleBottom - visibleTop);
+    const visibleArea = visibleWidth * visibleHeight;
+    const totalArea = Math.max(1, Number(targetRect.width || 0) * Number(targetRect.height || 0));
+    const visibleRatio = Math.max(0, Math.min(1, visibleArea / totalArea));
+    if (visibleRatio < minVisibleRatio) {
+      return { ok: false, reason: 'match_not_visible_enough', visibleRatio, minVisibleRatio };
+    }
     const center = {
       x: Math.max(1, Math.min(Math.max(1, vw - 1), Math.round(targetRect.left + targetRect.width / 2))),
       y: Math.max(1, Math.min(Math.max(1, vh - 1), Math.round(targetRect.top + Math.min(32, Math.max(12, targetRect.height / 3))))),
@@ -1252,11 +1312,12 @@ async function readReplyInputTarget(profileId) {
     'textarea',
     'input[placeholder*="说点"]',
     '[contenteditable="true"]',
-  ]);
+  ], { requireViewport: false, minVisibleRatio: 0.5 });
 }
 
 async function readReplySendButtonTarget(profileId) {
   const script = `(() => {
+    const minVisibleRatio = 0.5;
     const buttons = Array.from(document.querySelectorAll('button'));
     const vw = Number(window.innerWidth || 0);
     const vh = Number(window.innerHeight || 0);
@@ -1281,6 +1342,16 @@ async function readReplySendButtonTarget(profileId) {
     }) || null;
     if (!target) return { ok: false };
     const rect = target.getBoundingClientRect();
+    const visibleLeft = Math.max(0, rect.left);
+    const visibleTop = Math.max(0, rect.top);
+    const visibleRight = Math.min(vw, rect.right);
+    const visibleBottom = Math.min(vh, rect.bottom);
+    const visibleWidth = Math.max(0, visibleRight - visibleLeft);
+    const visibleHeight = Math.max(0, visibleBottom - visibleTop);
+    const visibleArea = visibleWidth * visibleHeight;
+    const totalArea = Math.max(1, Number(rect.width || 0) * Number(rect.height || 0));
+    const visibleRatio = Math.max(0, Math.min(1, visibleArea / totalArea));
+    if (visibleRatio < minVisibleRatio) return { ok: false, reason: 'send_button_not_visible_enough' };
     return {
       ok: true,
       center: {
@@ -1664,7 +1735,7 @@ async function executeOpenDetailOperation({
     const pollDelayMaxMs = Math.max(pollDelayMinMs, Number(params.pollDelayMaxMs ?? 600) || 600);
     const postOpenDelayMinMs = Math.max(500, Number(params.postOpenDelayMinMs ?? 5000) || 5000);
     const postOpenDelayMaxMs = Math.max(postOpenDelayMinMs, Number(params.postOpenDelayMaxMs ?? 10000) || 10000);
-    const openDetailMinVisibleRatio = clamp(Number(params.openDetailMinVisibleRatio ?? 0) || 0, 0, 1);
+    const openDetailMinVisibleRatio = clamp(Number(params.openDetailMinVisibleRatio ?? 0.5) || 0.5, 0, 1);
     const collectOpenLinksOnly = params.collectOpenLinksOnly === true;
 
     const waitDetailReady = async () => {
@@ -1838,8 +1909,8 @@ async function executeOpenDetailOperation({
           && !nonCollectibleSet.has(String(row.noteId || '').trim())
         ));
         const eligibleVisibleEnough = eligibleInViewport.filter((row) => row.visibleEnough === true);
-        const selectableRows = eligibleVisibleEnough.length > 0 ? eligibleVisibleEnough : eligibleInViewport;
-        const candidateIds = normalizeNoteIdList(eligibleInViewport.map((row) => row.noteId));
+        const selectableRows = eligibleVisibleEnough;
+        const candidateIds = normalizeNoteIdList(eligibleVisibleEnough.map((row) => row.noteId));
         const processedIds = normalizeNoteIdList(Array.from(nonCollectibleSet));
         await paintSearchCandidates(profileId, {
           candidateNoteIds: candidateIds,
@@ -1853,7 +1924,7 @@ async function executeOpenDetailOperation({
           candidateCount: candidateIds.length,
           processedCount: processedIds.length,
         });
-        if (eligibleInViewport.length === 0) {
+        if (eligibleVisibleEnough.length === 0) {
           stagnantRounds += 1;
           if (stagnantRounds > maxStagnantRounds) return { kind: 'done' };
           pushTrace({
@@ -1911,7 +1982,9 @@ async function executeOpenDetailOperation({
           fullyVisible: visibility.target?.fullyVisible === true,
           visibleEnough: visibility.ok,
           visibleRatio: Number(visibility?.target?.visibleRatio || 0),
-          minVisibleRatio: Number(visibility?.target?.minVisibleRatio || 0.5),
+          minVisibleRatio: Number.isFinite(visibility?.target?.minVisibleRatio)
+            ? Number(visibility.target.minVisibleRatio)
+            : 0.5,
           code: visibility.code,
         });
         if (!visibility.ok) throw new Error(`${visibility.code}:${noteId}`);
@@ -2174,7 +2247,7 @@ async function executeOpenDetailOperation({
       const eligibleRows = rows.filter((row) => isEligible(row));
       const inViewport = eligibleRows.filter((row) => row.inViewport === true);
       const visibleEnough = inViewport.filter((row) => row.visibleEnough === true);
-      const candidateRows = visibleEnough.length > 0 ? visibleEnough : inViewport;
+      const candidateRows = visibleEnough;
       const next = pickRandom(candidateRows);
       return { next, candidateRows };
     };
@@ -2358,7 +2431,9 @@ async function executeOpenDetailOperation({
       fullyVisible: visibility.target?.fullyVisible === true,
       visibleEnough: visibility.ok,
       visibleRatio: Number(visibility?.target?.visibleRatio || 0),
-      minVisibleRatio: Number(visibility?.target?.minVisibleRatio || 0.5),
+      minVisibleRatio: Number.isFinite(visibility?.target?.minVisibleRatio)
+        ? Number(visibility.target.minVisibleRatio)
+        : 0.5,
       code: visibility.code,
     });
     if (!visibility.ok) {
