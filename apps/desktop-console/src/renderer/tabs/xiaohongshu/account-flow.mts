@@ -370,7 +370,6 @@ export function createAccountFlowController(opts: AccountFlowOptions): AccountFl
       return;
     }
     const addCount = Math.max(1, Math.floor(Number(addAccountCountInput.value || '1')));
-    const timeoutSec = Math.max(0, Math.floor(Number(api?.settings?.timeouts?.loginTimeoutSec || 0)));
     const createdProfiles: string[] = [];
     api?.appendLog?.(`[ui] add-account start batch=${kw} count=${addCount}`);
     setNavHint(`正在创建新账号（批次=${kw}, count=${addCount}）...`);
@@ -405,10 +404,11 @@ export function createAccountFlowController(opts: AccountFlowOptions): AccountFl
      targetProfile,
      '--idle-timeout',
      'off',
-     ...(timeoutSec > 0 ? ['--timeout-sec', String(timeoutSec)] : []),
+     '--wait-sync',
+     'false',
      '--keep-session',
     ];
-    api?.appendLog?.(`[ui] spawn profilepool login-profile profile=${targetProfile} timeout=${timeoutSec > 0 ? `${timeoutSec}s` : 'disabled'}`);
+    api?.appendLog?.(`[ui] spawn profilepool login-profile profile=${targetProfile} wait-sync=disabled`);
     try {
       const ret = await window.api.cmdSpawn({
         title: `profilepool login-profile ${targetProfile} (headful)`,

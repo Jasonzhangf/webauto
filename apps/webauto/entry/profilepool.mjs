@@ -33,6 +33,16 @@ function parseIntWithFallback(value, fallback) {
   return parsed;
 }
 
+function parseTimeoutSec(value, fallback = 0) {
+  if (value === undefined || value === null) return fallback;
+  const normalized = String(value).trim().toLowerCase();
+  if (!normalized) return fallback;
+  if (['0', 'off', 'none', 'disable', 'disabled'].includes(normalized)) return 0;
+  const parsed = Math.floor(Number(normalized));
+  if (!Number.isFinite(parsed) || parsed < 0) return fallback;
+  return parsed;
+}
+
 function resolveLoginViewport() {
   const width = Math.max(900, parseIntWithFallback(process.env.WEBAUTO_VIEWPORT_WIDTH, 1440));
   const height = Math.max(700, parseIntWithFallback(process.env.WEBAUTO_VIEWPORT_HEIGHT, 1100));
@@ -74,8 +84,17 @@ function resetProfileSessionForHeadful(profileId) {
   };
 }
 
+function navigateProfileBestEffort(profileId, url, timeoutMs = 35000) {
+  const id = String(profileId || '').trim();
+  const targetUrl = String(url || '').trim();
+  if (!id || !targetUrl) {
+    return { ok: false, code: null, stderr: 'missing_profile_or_url', stdout: '', json: null };
+  }
+  return runCamo(['goto', id, targetUrl], { rootDir: ROOT, timeoutMs });
+}
+
 async function waitForAccountSync(profileId, timeoutSec, intervalSec) {
-  const timeoutMs = Math.max(30, Math.floor(Number(timeoutSec || 900))) * 1000;
+  const timeoutMs = timeoutSec > 0 ? timeoutSec * 1000 : Number.POSITIVE_INFINITY;
   const intervalMs = Math.max(1, Math.floor(Number(intervalSec || 2))) * 1000;
   const startedAt = Date.now();
   let attempts = 0;
@@ -130,7 +149,7 @@ async function cmdLoginProfile(profileId, argv, jsonMode) {
   assertProfileExists(id);
   const url = String(argv.url || 'https://www.xiaohongshu.com').trim();
   const idleTimeout = String(argv['idle-timeout'] || process.env.WEBAUTO_LOGIN_IDLE_TIMEOUT || 'off').trim() || 'off';
-  const timeoutSec = Math.max(30, Math.floor(Number(argv['timeout-sec'] || 900)));
+  const timeoutSec = parseTimeoutSec(argv['timeout-sec'], 0);
   const intervalSec = Math.max(1, Math.floor(Number(argv['check-interval-sec'] || 2)));
   const cookieIntervalMs = Math.max(1000, Math.floor(Number(argv['cookie-interval-ms'] || 5000)));
   const waitSync = parseBoolean(argv['wait-sync'], true);
@@ -150,11 +169,12 @@ async function cmdLoginProfile(profileId, argv, jsonMode) {
     process.exit(1);
   }
   const resetSession = resetProfileSessionForHeadful(id);
-  const startRet = runCamo(['start', id, '--url', url, '--idle-timeout', idleTimeout], { rootDir: ROOT });
+  const startRet = runCamo(['start', id, '--idle-timeout', idleTimeout], { rootDir: ROOT });
   if (!startRet.ok) {
     output({ ok: false, code: startRet.code, step: 'start', stderr: startRet.stderr || startRet.stdout }, jsonMode);
     process.exit(1);
   }
+  const gotoRet = navigateProfileBestEffort(id, url);
   const viewport = await applyLoginViewport(id);
   const cookieAutoRet = runCamo(['cookies', 'auto', 'start', id, '--interval', String(cookieIntervalMs)], {
     rootDir: ROOT,
@@ -171,6 +191,11 @@ async function cmdLoginProfile(profileId, argv, jsonMode) {
       started: true,
       url,
       idleTimeout,
+      goto: {
+        ok: gotoRet.ok,
+        code: gotoRet.code,
+        stderr: gotoRet.ok ? null : (gotoRet.stderr || gotoRet.stdout || 'goto failed'),
+      },
       session: startRet.json || null,
       viewport,
       resetSession,
@@ -188,6 +213,11 @@ async function cmdLoginProfile(profileId, argv, jsonMode) {
     started: true,
     url,
     idleTimeout,
+    goto: {
+      ok: gotoRet.ok,
+      code: gotoRet.code,
+      stderr: gotoRet.ok ? null : (gotoRet.stderr || gotoRet.stdout || 'goto failed'),
+    },
     session: startRet.json || null,
     viewport,
     resetSession,
@@ -213,9 +243,10 @@ async function cmdLogin(prefix, argv, jsonMode) {
   const idleTimeout = String(argv['idle-timeout'] || process.env.WEBAUTO_LOGIN_IDLE_TIMEOUT || 'off').trim() || 'off';
   for (const profileId of all) {
     resetProfileSessionForHeadful(profileId);
-    const ret = runCamo(['start', profileId, '--url', 'https://www.xiaohongshu.com', '--idle-timeout', idleTimeout], { rootDir: ROOT });
+    const ret = runCamo(['start', profileId, '--idle-timeout', idleTimeout], { rootDir: ROOT });
     if (ret.ok) {
       started.push(profileId);
+      navigateProfileBestEffort(profileId, 'https://www.xiaohongshu.com');
       // Keep login windows readable by default across all platforms.
       // This does not depend on workflow-level EnsureSession.
       await applyLoginViewport(profileId);
@@ -256,7 +287,7 @@ async function cmdGotoProfile(profileId, argv, jsonMode) {
   }
 
   const idleTimeout = String(argv['idle-timeout'] || process.env.WEBAUTO_LOGIN_IDLE_TIMEOUT || 'off').trim() || 'off';
-  const startRet = runCamo(['start', id, '--url', url, '--idle-timeout', idleTimeout], { rootDir: ROOT });
+  const startRet = runCamo(['start', id, '--idle-timeout', idleTimeout], { rootDir: ROOT });
   if (!startRet.ok) {
     output({
       ok: false,
@@ -264,6 +295,19 @@ async function cmdGotoProfile(profileId, argv, jsonMode) {
       url,
       mode: 'start',
       error: startRet.stderr || startRet.stdout || gotoRet.stderr || gotoRet.stdout || 'goto/start failed',
+    }, jsonMode);
+    process.exit(1);
+  }
+  const startGotoRet = runCamo(['goto', id, url], { rootDir: ROOT, timeoutMs: 30000 });
+  if (!startGotoRet.ok) {
+    output({
+      ok: false,
+      profileId: id,
+      url,
+      mode: 'start',
+      step: 'goto',
+      error: startGotoRet.stderr || startGotoRet.stdout || 'goto failed after start',
+      session: startRet.json || null,
     }, jsonMode);
     process.exit(1);
   }

@@ -63,6 +63,15 @@ function resetProfileSessionForHeadful(profileId) {
   };
 }
 
+function navigateProfileBestEffort(profileId, url, timeoutMs = 35000) {
+  const id = String(profileId || '').trim();
+  const targetUrl = String(url || '').trim();
+  if (!id || !targetUrl) {
+    return { ok: false, code: null, stderr: 'missing_profile_or_url', stdout: '', json: null };
+  }
+  return runCamo(['goto', id, targetUrl], { rootDir: ROOT, timeoutMs });
+}
+
 function parseIntWithFallback(value, fallback) {
   const parsed = Math.floor(Number(value));
   if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
@@ -418,7 +427,7 @@ async function cmdLogin(idOrAlias, argv, jsonMode) {
   }
   const resetSession = resetProfileSessionForHeadful(account.profileId);
 
-  const startResult = runCamo(['start', account.profileId, '--url', url, '--idle-timeout', idleTimeout], { rootDir: ROOT });
+  const startResult = runCamo(['start', account.profileId, '--idle-timeout', idleTimeout], { rootDir: ROOT });
   if (!startResult.ok) {
     output({
       ok: false,
@@ -429,6 +438,7 @@ async function cmdLogin(idOrAlias, argv, jsonMode) {
     }, jsonMode);
     process.exit(1);
   }
+  const gotoResult = navigateProfileBestEffort(account.profileId, url);
   const viewport = await applyLoginViewport(account.profileId);
 
   const cookieAuto = runCamo(['cookies', 'auto', 'start', account.profileId, '--interval', '5000'], {
@@ -464,6 +474,11 @@ async function cmdLogin(idOrAlias, argv, jsonMode) {
     profileId: account.profileId,
     url,
     idleTimeout,
+    goto: {
+      ok: gotoResult.ok,
+      code: gotoResult.code,
+      error: gotoResult.ok ? null : (gotoResult.stderr || gotoResult.stdout || 'goto failed'),
+    },
     camo: startResult.json || startResult.stdout || null,
     resetSession,
     viewport,
