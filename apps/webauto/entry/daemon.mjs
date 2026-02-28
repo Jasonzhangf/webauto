@@ -62,6 +62,9 @@ const LOG_DIR = path.join(WEBAUTO_HOME, 'logs');
 const JOB_LOG_DIR = path.join(LOG_DIR, 'daemon-jobs');
 const PID_FILE = path.join(RUN_DIR, 'webauto-daemon.pid');
 const HEARTBEAT_FILE = path.join(RUN_DIR, 'webauto-daemon-heartbeat.json');
+const DESKTOP_HEARTBEAT_FILE = path.join(RUN_DIR, 'desktop-console-heartbeat.json');
+const ALT_WEBAUTO_HOME = path.join(os.homedir(), '.webauto');
+const ALT_DESKTOP_HEARTBEAT_FILE = path.join(ALT_WEBAUTO_HOME, 'run', 'desktop-console-heartbeat.json');
 const AUTOSTART_MAC_PLIST = path.join(os.homedir(), 'Library', 'LaunchAgents', 'com.webauto.daemon.plist');
 const SOCKET_PATH = process.platform === 'win32'
   ? '\\\\.\\pipe\\webauto-daemon'
@@ -245,6 +248,10 @@ function buildHeartbeat(extra = {}) {
 function cleanupRuntimeFiles() {
   try { rmSync(PID_FILE, { force: true }); } catch {}
   try { rmSync(HEARTBEAT_FILE, { force: true }); } catch {}
+  try { rmSync(DESKTOP_HEARTBEAT_FILE, { force: true }); } catch {}
+  if (ALT_DESKTOP_HEARTBEAT_FILE !== DESKTOP_HEARTBEAT_FILE) {
+    try { rmSync(ALT_DESKTOP_HEARTBEAT_FILE, { force: true }); } catch {}
+  }
   if (process.platform !== 'win32') {
     try { unlinkSync(SOCKET_PATH); } catch {}
   }
@@ -389,6 +396,19 @@ function parsePidsFromWindowsProcessList(exeName = 'node.exe') {
     .filter((row) => Number.isFinite(row.pid) && row.pid > 0);
 }
 
+function listDesktopHeartbeatPids() {
+  if (process.platform !== 'win32') return [];
+  const paths = Array.from(new Set([DESKTOP_HEARTBEAT_FILE, ALT_DESKTOP_HEARTBEAT_FILE]));
+  const pids = [];
+  for (const filePath of paths) {
+    const payload = readJson(filePath, null);
+    const pid = Number(payload?.pid || 0);
+    if (!Number.isFinite(pid) || pid <= 0) continue;
+    if (isPidAlive(pid)) pids.push(Math.floor(pid));
+  }
+  return Array.from(new Set(pids));
+}
+
 function listManagedRuntimePids() {
   if (process.platform !== 'win32') return { daemonPids: [], uiPids: [] };
   const daemonPids = parsePidsFromWindowsProcessList('node.exe')
@@ -400,9 +420,10 @@ function listManagedRuntimePids() {
   const uiPids = parsePidsFromWindowsProcessList('electron.exe')
     .filter((row) => normalizeCommandLine(row.commandLine).includes(DESKTOP_MAIN_MARKER))
     .map((row) => Math.floor(row.pid));
+  const heartbeatPids = listDesktopHeartbeatPids();
   return {
     daemonPids: Array.from(new Set(daemonPids)),
-    uiPids: Array.from(new Set(uiPids)),
+    uiPids: Array.from(new Set([...uiPids, ...heartbeatPids])),
   };
 }
 
