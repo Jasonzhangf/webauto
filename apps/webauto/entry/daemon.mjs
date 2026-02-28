@@ -396,6 +396,49 @@ function parsePidsFromWindowsProcessList(exeName = 'node.exe') {
     .filter((row) => Number.isFinite(row.pid) && row.pid > 0);
 }
 
+function parseWindowsProcessListWithSession(exeName) {
+  if (process.platform !== 'win32') return [];
+  const safeName = String(exeName || '').trim() || 'electron.exe';
+  const ret = spawnSync('powershell', [
+    '-NoProfile',
+    '-Command',
+    [
+      '[Console]::OutputEncoding=[System.Text.Encoding]::UTF8',
+      `$rows = Get-CimInstance Win32_Process -Filter "name='${safeName}'" | Select-Object ProcessId,CommandLine,SessionId`,
+      '$rows | ConvertTo-Json -Compress',
+    ].join('; '),
+  ], {
+    windowsHide: true,
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  if (ret.status !== 0) return [];
+  let parsed = null;
+  try {
+    parsed = JSON.parse(String(ret.stdout || '').trim() || 'null');
+  } catch {
+    parsed = null;
+  }
+  const rows = Array.isArray(parsed) ? parsed : (parsed ? [parsed] : []);
+  return rows
+    .map((row) => ({
+      pid: Number(row?.ProcessId || 0),
+      sessionId: Number(row?.SessionId || 0),
+      commandLine: String(row?.CommandLine || ''),
+    }))
+    .filter((row) => Number.isFinite(row.pid) && row.pid > 0);
+}
+
+function listDesktopConsoleProcesses() {
+  if (process.platform !== 'win32') return [];
+  return parseWindowsProcessListWithSession('electron.exe')
+    .filter((row) => normalizeCommandLine(row.commandLine).includes(DESKTOP_MAIN_MARKER))
+    .map((row) => ({
+      pid: Math.floor(row.pid),
+      sessionId: Number.isFinite(row.sessionId) ? Math.floor(row.sessionId) : null,
+    }));
+}
+
 function listDesktopHeartbeatPids() {
   if (process.platform !== 'win32') return [];
   const paths = Array.from(new Set([DESKTOP_HEARTBEAT_FILE, ALT_DESKTOP_HEARTBEAT_FILE]));
@@ -460,6 +503,30 @@ async function sweepManagedRuntimeProcesses(options = {}) {
     killed,
     failed,
   };
+}
+
+async function cleanupUiSessionMismatch() {
+  if (process.platform !== 'win32') return { ok: true, killed: [], failed: [] };
+  const currentSessionId = resolveWindowsSessionIdSync();
+  if (!Number.isFinite(currentSessionId)) return { ok: true, killed: [], failed: [] };
+  const candidates = listDesktopConsoleProcesses()
+    .filter((row) => Number.isFinite(row.sessionId) && row.sessionId !== currentSessionId);
+  const killed = [];
+  const failed = [];
+  for (const row of candidates) {
+    const ret = await terminatePidTree(row.pid);
+    if (ret?.ok) {
+      killed.push(row.pid);
+    } else {
+      failed.push({
+        pid: row.pid,
+        error: ret?.error || 'terminate_failed',
+        code: ret?.code ?? null,
+        stderr: ret?.stderr || '',
+      });
+    }
+  }
+  return { ok: failed.length === 0, killed, failed };
 }
 
 async function runUiCli(args = [], options = {}) {
@@ -972,6 +1039,7 @@ async function startDaemonServer() {
     }
     if (method === 'ui.start') {
       state.desiredUi = true;
+      await cleanupUiSessionMismatch();
       const uiWorker = allocateUiWorker();
       const env = uiWorker ? buildWorkerEnv(uiWorker) : {};
       const ret = await enqueueUi(() => runUiCliBounded(['start', '--json'], UI_CLI_START_TIMEOUT_MS, { env }));
