@@ -62,9 +62,33 @@ const DIST_MAIN = path.join(APP_ROOT, 'dist', 'main', 'index.mjs');
 const DESKTOP_MAIN_MARKER = String(DIST_MAIN || '').replace(/\\/g, '/').toLowerCase();
 
 const args = minimist(process.argv.slice(2), {
-  boolean: ['help', 'json', 'auto-start', 'build', 'install', 'continue-on-error', 'exact', 'keep-open', 'detailed'],
-  string: ['host', 'port', 'selector', 'value', 'text', 'key', 'tab', 'label', 'state', 'file', 'output', 'timeout', 'interval', 'nth', 'reason'],
-  alias: { h: 'help' },
+  boolean: ['help', 'json', 'auto-start', 'build', 'install', 'continue-on-error', 'exact', 'keep-open', 'detailed', 'dry-run', 'headless'],
+  string: [
+    'host',
+    'port',
+    'selector',
+    'value',
+    'text',
+    'key',
+    'tab',
+    'label',
+    'state',
+    'file',
+    'output',
+    'timeout',
+    'interval',
+    'nth',
+    'reason',
+    'mode',
+    'keyword',
+    'env',
+    'profile',
+    'profiles',
+    'profilepool',
+    'target',
+    'max-notes',
+  ],
+  alias: { h: 'help', k: 'keyword' },
   default: { 'auto-start': false, json: false, 'keep-open': false },
 });
 
@@ -86,6 +110,7 @@ Usage:
   webauto ui cli dialogs --value silent|restore
   webauto ui cli wait --selector <css> [--state visible|exists|hidden|text_contains|text_equals|value_equals|not_disabled] [--value <text>] [--timeout 15000] [--interval 250]
   webauto ui cli full-cover [--build] [--install] [--output <report.json>] [--keep-open]
+  webauto ui cli stage --mode <login-collect|login-detail> --keyword <kw> [--env <debug|prod>] [--target <n>] [--profile <id>|--profiles <a,b>|--profilepool <prefix>]
   webauto ui cli run --file <steps.json> [--continue-on-error]
   webauto ui cli stop
   webauto ui cli restart [--reason <text>] [--timeout <ms>]
@@ -298,6 +323,93 @@ function runCommandCapture(cmd, argv = [], timeoutMs = 12_000) {
       });
     });
   });
+}
+
+function runCommandStream(cmd, argv = [], options = {}) {
+  const budgetMs = Number(options.timeoutMs) || 0;
+  const forwardOutput = options.forwardOutput === true;
+  const env = options.env ? { ...process.env, ...options.env } : process.env;
+  const cwd = options.cwd || process.cwd();
+  return new Promise((resolve) => {
+    const child = spawn(cmd, argv, {
+      windowsHide: true,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env,
+      cwd,
+    });
+    let stdout = '';
+    let stderr = '';
+    let settled = false;
+    const finish = (payload) => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      resolve(payload);
+    };
+    const timer = budgetMs > 0
+      ? setTimeout(() => {
+        try {
+          child.kill('SIGTERM');
+        } catch {
+          // ignore
+        }
+        finish({
+          ok: false,
+          code: null,
+          stdout,
+          stderr,
+          error: `command_timeout_${budgetMs}ms`,
+          timedOut: true,
+        });
+      }, budgetMs)
+      : null;
+    child.stdout?.on('data', (chunk) => {
+      const text = String(chunk || '');
+      stdout += text;
+      if (forwardOutput) process.stdout.write(text);
+    });
+    child.stderr?.on('data', (chunk) => {
+      const text = String(chunk || '');
+      stderr += text;
+      if (forwardOutput) process.stderr.write(text);
+    });
+    child.on('error', (err) => {
+      finish({
+        ok: false,
+        code: null,
+        stdout,
+        stderr,
+        error: err?.message || String(err),
+      });
+    });
+    child.on('close', (code) => {
+      finish({
+        ok: code === 0,
+        code,
+        stdout,
+        stderr,
+        error: code === 0 ? null : `command_exit_${code}`,
+      });
+    });
+  });
+}
+
+function resolveStageMode(value) {
+  const raw = String(value || '').trim().toLowerCase();
+  if (!raw) return null;
+  if (raw === 'login-collect' || raw === 'collect' || raw === 'links') {
+    return { mode: 'login-collect', stage: 'links' };
+  }
+  if (raw === 'login-detail' || raw === 'detail') {
+    return { mode: 'login-detail', stage: 'detail' };
+  }
+  return null;
+}
+
+function clipText(input, maxLen = 4000) {
+  const text = String(input || '');
+  if (text.length <= maxLen) return text;
+  return `${text.slice(0, maxLen)}...(+${text.length - maxLen} chars)`;
 }
 
 async function resolveWindowsProcessSessionId(pid, timeoutMs = 4_000) {
@@ -1322,6 +1434,85 @@ async function main() {
     if (!filePath) throw new Error('missing --file');
     const result = await runSteps(endpoint, filePath);
     printOutput(result);
+    if (!result.ok) process.exit(1);
+    return;
+  }
+
+  if (cmd === 'stage') {
+    const resolved = resolveStageMode(args.mode);
+    if (!resolved) throw new Error('stage requires --mode login-collect|login-detail');
+    const keyword = String(args.keyword || '').trim();
+    if (!keyword) throw new Error('stage requires --keyword');
+    const env = String(args.env || 'debug').trim() || 'debug';
+    const target = parseIntSafe(args.target ?? args['max-notes'], 30);
+    const profile = String(args.profile || '').trim();
+    const profiles = String(args.profiles || '').trim();
+    const profilepool = String(args.profilepool || '').trim();
+
+    if (resolved.stage === 'links') {
+      if (profiles) throw new Error('stage login-collect does not support --profiles');
+      if (profilepool) throw new Error('stage login-collect does not support --profilepool');
+      if (profile.includes(',')) throw new Error('stage login-collect requires a single --profile');
+    }
+
+    const uiTriggerId = `ui-cli-stage-${resolved.mode}-${Date.now()}`;
+    const stageArgs = [
+      'xhs',
+      'unified',
+      '--stage',
+      resolved.stage,
+      '--keyword',
+      keyword,
+      '--max-notes',
+      String(target),
+      '--env',
+      env,
+      '--ui-trigger-id',
+      uiTriggerId,
+    ];
+    if (profile) stageArgs.push('--profile', profile);
+    if (profiles) stageArgs.push('--profiles', profiles);
+    if (profilepool) stageArgs.push('--profilepool', profilepool);
+    if (args.headless === true) stageArgs.push('--headless');
+    if (args['dry-run'] === true) stageArgs.push('--dry-run');
+
+    const binPath = path.join(ROOT, 'bin', 'webauto.mjs');
+    const relayArgs = [binPath, '--daemon', 'relay', '--', ...stageArgs];
+    const timeoutMs = parseIntSafe(args.timeout, 0);
+    const result = await runCommandStream(process.execPath, relayArgs, {
+      cwd: ROOT,
+      timeoutMs,
+      forwardOutput: !args.json,
+    });
+    let relayJson = null;
+    try {
+      relayJson = JSON.parse(String(result.stdout || '').trim());
+    } catch {
+      relayJson = null;
+    }
+    const payload = {
+      ok: result.ok,
+      mode: resolved.mode,
+      stage: resolved.stage,
+      keyword,
+      env,
+      target,
+      profile: profile || null,
+      profiles: profiles || null,
+      profilepool: profilepool || null,
+      uiTriggerId,
+      command: {
+        bin: binPath,
+        argv: relayArgs.slice(1),
+        cwd: ROOT,
+      },
+      relay: relayJson,
+      stdout: args.json ? clipText(result.stdout) : undefined,
+      stderr: args.json ? clipText(result.stderr) : undefined,
+      code: result.code ?? null,
+      timedOut: result.timedOut === true,
+    };
+    printOutput(payload);
     if (!result.ok) process.exit(1);
     return;
   }
