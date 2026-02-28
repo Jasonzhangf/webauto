@@ -559,6 +559,10 @@ function markUiHeartbeat(source = 'renderer') {
 }
 
 function terminateRunProcess(runId: string, reason = 'manual') {
+  if (reason === 'window_closed') {
+    sendEvent({ type: 'stderr', runId, line: '[watchdog] skip kill on window_closed; use ui stop', ts: now() });
+    return false;
+  }
   const run = runs.get(runId);
   if (!run) return false;
   const child = run.child;
@@ -571,8 +575,7 @@ function terminateRunProcess(runId: string, reason = 'manual') {
       }
     } else {
       if (pid > 0) {
-        // Best-effort: terminate direct children first, then root process.
-        spawn('pkill', ['-TERM', '-P', String(pid)], { stdio: 'ignore' }).on('error', () => {});
+        try { process.kill(pid, 'SIGTERM'); } catch {}
       }
     }
   } catch {
@@ -603,7 +606,7 @@ function killAllRuns(reason = 'ui_heartbeat_timeout') {
   for (const runId of Array.from(runs.keys())) {
     terminateRunProcess(runId, reason);
   }
-  if (reason === 'ui_heartbeat_timeout' || reason === 'window_closed') {
+  if (reason === 'ui_heartbeat_timeout') {
     void stopCoreServicesBestEffort(reason);
   }
 }
@@ -624,7 +627,6 @@ async function cleanupTrackedRunPidsBestEffort(reason: string) {
       if (process.platform === 'win32') {
         spawn('taskkill', ['/PID', String(pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true });
       } else {
-        spawn('pkill', ['-TERM', '-P', String(pid)], { stdio: 'ignore' }).on('error', () => {});
         process.kill(pid, 'SIGTERM');
       }
     } catch {

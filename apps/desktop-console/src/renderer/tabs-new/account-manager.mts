@@ -415,6 +415,7 @@ export function renderAccountManager(root: HTMLElement, ctx: any) {
         '--keep-session',
       ],
       groupKey: 'profilepool',
+      timeoutMs: 0,
     });
     startAutoSyncProfile(account.profileId);
     return true;
@@ -498,7 +499,8 @@ export function renderAccountManager(root: HTMLElement, ctx: any) {
           ...(timeoutSec > 0 ? ['--timeout-sec', String(timeoutSec)] : []),
           '--keep-session'
         ],
-        groupKey: 'profilepool'
+        groupKey: 'profilepool',
+        timeoutMs: 0,
       });
 
       await loadAccounts();

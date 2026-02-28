@@ -122,6 +122,8 @@ export function createAccountFlowController(opts: AccountFlowOptions): AccountFl
     return out;
   };
   const isNewFormatProfileId = (id: string) => /.+-batch-\d+$/.test(String(id || '').trim());
+  const isLegacyProfileId = (id: string) => /^profile-\d+$/i.test(String(id || '').trim());
+  const isVisibleProfileId = (id: string) => isNewFormatProfileId(id) || isLegacyProfileId(id);
   const renderSingleProfileHint = () => {
     const current = String(profilePickSel.value || '').trim();
     if (!current) {
@@ -270,11 +272,11 @@ export function createAccountFlowController(opts: AccountFlowOptions): AccountFl
     const prevSelected = selectedNow.length > 0 ? new Set(selectedNow) : new Set(persistedShardProfiles);
     const scan = await window.api.profilesScan().catch(() => null);
     const entries: any[] = Array.isArray(scan?.entries) ? scan.entries : [];
-    const profiles: string[] = uniqueProfileIds(entries.map((e: any) => String(e?.profileId || '').trim())).filter(isNewFormatProfileId);
+    const profiles: string[] = uniqueProfileIds(entries.map((e: any) => String(e?.profileId || '').trim())).filter(isVisibleProfileId);
     const profileDirs = new Map<string, string>();
     entries.forEach((e: any) => {
       const pid = String(e?.profileId || '').trim();
-      if (!pid || !isNewFormatProfileId(pid)) return;
+      if (!pid || !isVisibleProfileId(pid)) return;
       if (!profileDirs.has(pid)) profileDirs.set(pid, String(e?.profileDir || '').trim());
     });
     if (seq !== refreshSeq) return;
@@ -416,6 +418,7 @@ export function createAccountFlowController(opts: AccountFlowOptions): AccountFl
         args: loginArgs,
         groupKey: 'profilepool',
         env: { WEBAUTO_DAEMON: '1' },
+        timeoutMs: 0,
       });
       if (!ret || !ret.runId) {
         api?.appendLog?.('[ui] spawn returned empty runId');

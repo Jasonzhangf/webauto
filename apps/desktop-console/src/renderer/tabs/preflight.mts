@@ -432,6 +432,7 @@ export function renderPreflight(root: HTMLElement, ctx: any) {
       args: loginArgs,
       groupKey: 'profilepool',
       env: { WEBAUTO_DAEMON: '1' },
+      timeoutMs: 0,
     });
     ctx.appendLog(`[preflight] 已创建并启动登录: ${createdProfileId}`);
   }
