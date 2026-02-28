@@ -94,6 +94,7 @@ function createDaemonWorkerSupervisor() {
   const socketPath = String(process.env.WEBAUTO_DAEMON_SOCKET || '').trim();
   const workerId = String(process.env.WEBAUTO_DAEMON_WORKER_ID || '').trim();
   const token = String(process.env.WEBAUTO_DAEMON_WORKER_TOKEN || '').trim();
+  const daemonSessionId = Number(process.env.WEBAUTO_DAEMON_SESSION_ID);
   if (!socketPath || !workerId || !token) {
     return {
       stop: async () => {},
@@ -101,11 +102,12 @@ function createDaemonWorkerSupervisor() {
   }
 
   const intervalMs = parsePositiveInt(process.env.WEBAUTO_DAEMON_HEARTBEAT_INTERVAL_MS, 30_000);
-  const missLimit = parsePositiveInt(process.env.WEBAUTO_DAEMON_HEARTBEAT_MISS_LIMIT, 5);
+  const missLimit = parsePositiveInt(process.env.WEBAUTO_DAEMON_HEARTBEAT_MISS_LIMIT, 3);
   const timeoutMs = Math.min(8_000, Math.max(1_500, Math.floor(intervalMs * 0.6)));
   let misses = 0;
   let closing = false;
   let timer = null;
+  const localSessionId = resolveWindowsSessionIdSync();
 
   const sendWorkerExit = async (source = 'webauto-bin') => {
     try {
@@ -136,8 +138,20 @@ function createDaemonWorkerSupervisor() {
     process.exit(0);
   };
 
+  const ensureSessionMatch = async () => {
+    if (process.platform !== 'win32') return true;
+    if (!Number.isFinite(daemonSessionId)) return true;
+    if (!Number.isFinite(localSessionId)) return true;
+    if (daemonSessionId !== localSessionId) {
+      await selfCleanupExit('daemon_session_mismatch');
+      return false;
+    }
+    return true;
+  };
+
   const heartbeat = async (source = 'tick') => {
     if (closing) return;
+    if (!(await ensureSessionMatch())) return;
     try {
       const ret = await daemonSocketRequest(socketPath, {
         method: 'worker.heartbeat',
@@ -145,6 +159,7 @@ function createDaemonWorkerSupervisor() {
           workerId,
           token,
           pid: process.pid,
+          sessionId: Number.isFinite(localSessionId) ? localSessionId : null,
           source: `webauto-bin:${source}`,
           ts: new Date().toISOString(),
         },

@@ -74,8 +74,12 @@ const UI_CLI_SCRIPT = path.join(ROOT, 'apps', 'desktop-console', 'entry', 'ui-cl
 const XHS_INSTALL_SCRIPT = path.join(ROOT, 'apps', 'webauto', 'entry', 'xhs-install.mjs');
 const DAEMON_ENTRY_MARKER = String(fileURLToPath(import.meta.url) || '').replace(/\\/g, '/').toLowerCase();
 const DESKTOP_MAIN_MARKER = String(path.join(ROOT, 'apps', 'desktop-console', 'dist', 'main', 'index.mjs') || '').replace(/\\/g, '/').toLowerCase();
+const WEBAUTO_ENTRY_MARKER = normalizeCommandLine(path.join(ROOT, 'apps', 'webauto', 'entry'));
+const WEBAUTO_BIN_MARKER = normalizeCommandLine(WEBAUTO_BIN);
+const UI_CLI_MARKER = normalizeCommandLine(UI_CLI_SCRIPT);
+const XHS_SCRIPTS_MARKER = normalizeCommandLine(path.join(ROOT, 'scripts', 'xiaohongshu'));
 const WORKER_HEARTBEAT_INTERVAL_MS = 30_000;
-const WORKER_HEARTBEAT_MISS_LIMIT = 5;
+const WORKER_HEARTBEAT_MISS_LIMIT = 3;
 const WORKER_HEARTBEAT_STALE_MS = WORKER_HEARTBEAT_INTERVAL_MS * WORKER_HEARTBEAT_MISS_LIMIT;
 const DAEMON_SHUTDOWN_GRACE_MS = WORKER_HEARTBEAT_INTERVAL_MS + 5_000;
 let cachedWindowsSessionId = null;
@@ -365,6 +369,22 @@ function normalizeCommandLine(raw = '') {
   return String(raw || '').replace(/\\/g, '/').toLowerCase();
 }
 
+function isDaemonRunCommand(commandLine = '') {
+  const cmd = normalizeCommandLine(commandLine);
+  return cmd.includes(DAEMON_ENTRY_MARKER) && cmd.includes(' daemon.mjs run');
+}
+
+function isWebautoNodeCommand(commandLine = '') {
+  const cmd = normalizeCommandLine(commandLine);
+  if (!cmd) return false;
+  if (cmd.includes(DAEMON_ENTRY_MARKER)) return true;
+  if (cmd.includes(WEBAUTO_BIN_MARKER)) return true;
+  if (cmd.includes(WEBAUTO_ENTRY_MARKER)) return true;
+  if (cmd.includes(UI_CLI_MARKER)) return true;
+  if (cmd.includes(XHS_SCRIPTS_MARKER)) return true;
+  return false;
+}
+
 function parsePidsFromWindowsProcessList(exeName = 'node.exe') {
   if (process.platform !== 'win32') return [];
   const ret = spawnSync('powershell', [
@@ -439,6 +459,17 @@ function listDesktopConsoleProcesses() {
     }));
 }
 
+function listWebautoNodeProcessesWithSession() {
+  if (process.platform !== 'win32') return [];
+  return parseWindowsProcessListWithSession('node.exe')
+    .filter((row) => isWebautoNodeCommand(row.commandLine))
+    .map((row) => ({
+      pid: Math.floor(row.pid),
+      sessionId: Number.isFinite(row.sessionId) ? Math.floor(row.sessionId) : null,
+      commandLine: row.commandLine || '',
+    }));
+}
+
 function listDesktopHeartbeatPids() {
   if (process.platform !== 'win32') return [];
   const paths = Array.from(new Set([DESKTOP_HEARTBEAT_FILE, ALT_DESKTOP_HEARTBEAT_FILE]));
@@ -452,32 +483,49 @@ function listDesktopHeartbeatPids() {
   return Array.from(new Set(pids));
 }
 
+function listManagedRuntimeProcessesWithSession() {
+  if (process.platform !== 'win32') return { daemon: [], app: [], ui: [] };
+  const nodeRows = parseWindowsProcessListWithSession('node.exe');
+  const daemon = nodeRows
+    .filter((row) => isDaemonRunCommand(row.commandLine))
+    .map((row) => ({
+      pid: Math.floor(row.pid),
+      sessionId: Number.isFinite(row.sessionId) ? Math.floor(row.sessionId) : null,
+    }));
+  const app = nodeRows
+    .filter((row) => isWebautoNodeCommand(row.commandLine))
+    .map((row) => ({
+      pid: Math.floor(row.pid),
+      sessionId: Number.isFinite(row.sessionId) ? Math.floor(row.sessionId) : null,
+    }));
+  const ui = listDesktopConsoleProcesses();
+  return { daemon, app, ui };
+}
+
 function listManagedRuntimePids() {
   if (process.platform !== 'win32') return { daemonPids: [], uiPids: [] };
-  const daemonPids = parsePidsFromWindowsProcessList('node.exe')
-    .filter((row) => {
-      const cmd = normalizeCommandLine(row.commandLine);
-      return cmd.includes(DAEMON_ENTRY_MARKER) && cmd.includes(' daemon.mjs run');
-    })
-    .map((row) => Math.floor(row.pid));
-  const uiPids = parsePidsFromWindowsProcessList('electron.exe')
-    .filter((row) => normalizeCommandLine(row.commandLine).includes(DESKTOP_MAIN_MARKER))
-    .map((row) => Math.floor(row.pid));
+  const discovered = listManagedRuntimeProcessesWithSession();
+  const daemonPids = discovered.daemon.map((row) => row.pid);
+  const appPids = discovered.app.map((row) => row.pid);
+  const uiPids = discovered.ui.map((row) => row.pid);
   const heartbeatPids = listDesktopHeartbeatPids();
   return {
     daemonPids: Array.from(new Set(daemonPids)),
     uiPids: Array.from(new Set([...uiPids, ...heartbeatPids])),
+    appPids: Array.from(new Set(appPids)),
   };
 }
 
 async function sweepManagedRuntimeProcesses(options = {}) {
   const excluded = new Set((Array.isArray(options.excludePids) ? options.excludePids : [])
+    .concat(process.pid)
     .map((pid) => Number(pid || 0))
     .filter((pid) => Number.isFinite(pid) && pid > 0));
   const discovered = listManagedRuntimePids();
   const targets = Array.from(new Set([
     ...discovered.daemonPids,
     ...discovered.uiPids,
+    ...(Array.isArray(discovered.appPids) ? discovered.appPids : []),
   ])).filter((pid) => pid > 0 && !excluded.has(pid));
   const killed = [];
   const failed = [];
@@ -499,10 +547,44 @@ async function sweepManagedRuntimeProcesses(options = {}) {
     ok: failed.length === 0,
     daemonPids: discovered.daemonPids,
     uiPids: discovered.uiPids,
+    appPids: Array.isArray(discovered.appPids) ? discovered.appPids : [],
     targets,
     killed,
     failed,
   };
+}
+
+async function sweepRuntimeProcessesOtherSessions(currentSessionId, options = {}) {
+  if (process.platform !== 'win32') return { ok: true, targets: [], killed: [], failed: [] };
+  if (!Number.isFinite(currentSessionId)) return { ok: true, targets: [], killed: [], failed: [] };
+  const excluded = new Set((Array.isArray(options.excludePids) ? options.excludePids : [])
+    .map((pid) => Number(pid || 0))
+    .filter((pid) => Number.isFinite(pid) && pid > 0));
+  const discovered = listManagedRuntimeProcessesWithSession();
+  const targets = Array.from(new Set([
+    ...discovered.daemon,
+    ...discovered.app,
+    ...discovered.ui,
+  ]
+    .filter((row) => Number.isFinite(row.sessionId) && row.sessionId !== currentSessionId)
+    .map((row) => row.pid)))
+    .filter((pid) => pid > 0 && !excluded.has(pid));
+  const killed = [];
+  const failed = [];
+  for (const pid of targets) {
+    const ret = await terminatePidTree(pid);
+    if (ret?.ok) {
+      killed.push(pid);
+    } else {
+      failed.push({
+        pid,
+        error: ret?.error || 'terminate_failed',
+        code: ret?.code ?? null,
+        stderr: ret?.stderr || '',
+      });
+    }
+  }
+  return { ok: failed.length === 0, targets, killed, failed };
 }
 
 async function cleanupUiSessionMismatch() {
@@ -691,6 +773,8 @@ async function autostartStatus() {
 
 async function startDaemonServer() {
   ensureDirs();
+  const sessionId = resolveWindowsSessionIdSync();
+  await sweepRuntimeProcessesOtherSessions(sessionId, { excludePids: [process.pid] });
   cleanupRuntimeFiles();
 
   const state = {
@@ -751,6 +835,7 @@ async function startDaemonServer() {
       shutdownReason: state.shutdownReason,
       shutdownStartedAt: state.shutdownStartedAt,
       uptimeMs: Date.now() - state.startedAt,
+      sessionId,
       jobs,
       workers,
     }));
@@ -841,6 +926,7 @@ async function startDaemonServer() {
     WEBAUTO_DAEMON_WORKER_KIND: worker.kind,
     WEBAUTO_DAEMON_HEARTBEAT_INTERVAL_MS: String(WORKER_HEARTBEAT_INTERVAL_MS),
     WEBAUTO_DAEMON_HEARTBEAT_MISS_LIMIT: String(WORKER_HEARTBEAT_MISS_LIMIT),
+    WEBAUTO_DAEMON_SESSION_ID: Number.isFinite(sessionId) ? String(sessionId) : '',
   });
 
   const allocateUiWorker = () => {
@@ -985,6 +1071,13 @@ async function startDaemonServer() {
       const worker = state.workers.get(workerId);
       if (!worker) return { ok: false, error: `worker_not_found:${workerId}` };
       if (worker.token !== token) return { ok: false, error: `worker_token_mismatch:${workerId}` };
+      if (process.platform === 'win32') {
+        const daemonSessionId = resolveWindowsSessionIdSync();
+        const workerSessionId = Number(params.sessionId);
+        if (Number.isFinite(daemonSessionId) && Number.isFinite(workerSessionId) && daemonSessionId !== workerSessionId) {
+          return { ok: false, error: `worker_session_mismatch:${workerSessionId}`, daemonSessionId };
+        }
+      }
       const nowMs = Date.now();
       worker.lastHeartbeatMs = nowMs;
       worker.lastHeartbeatAt = nowIso();
@@ -1000,6 +1093,7 @@ async function startDaemonServer() {
         shuttingDown: state.shuttingDown,
         heartbeatIntervalMs: WORKER_HEARTBEAT_INTERVAL_MS,
         heartbeatMissLimit: WORKER_HEARTBEAT_MISS_LIMIT,
+        sessionId,
       };
     }
     if (method === 'worker.exit') {

@@ -335,12 +335,16 @@ bd 搜索速查（全文检索 + 字段过滤）：
 - **所有后续执行必须使用 daemon 模式**，禁止前台阻塞执行
 - 目的：避免会话中断导致任务终止，保证长任务（采集、互动）持续运行
 - **Windows Session 约束（新增，强制）**：
+  - **Session 0 指通过 SSH 进入 Windows 机器的会话（非桌面交互会话）**。
   - **禁止在 Session 0 启动任何业务相关进程**（daemon / UI / xhs 任务 / camo 会话）。
   - **只允许与非 Session 0 的 daemon 交互**（通常由桌面用户会话手动启动）。
   - **Session 0 只允许 stop/清理/状态查询，禁止启动 UI/daemon（允许查询）**。
-  - **允许在 Session 0 使用 UI CLI 控制桌面进行运行**。
-  - **Session 0 仅限制 webauto 的调试与运行，不限制 build 等其他操作**。
+  - **Session 0 禁止任何 webauto 运行类操作（包含 UI CLI 触发运行/启动），仅允许 stop/清理/状态查询**。
+  - **Session 0 仅限制 webauto 的运行，不限制 build 等其他操作**。
   - **可通过非 Session 0 的 daemon 启动 UI**（UI 会继承 daemon 会话）。
+  - **所有 WebAuto 资源访问必须通过 daemon**（包括 UI 启动、任务运行、camo 会话），禁止绕过 daemon 的直接运行。
+  - **远程可以 build，但不能直接运行；运行必须由 daemon 启动/管理**。
+  - **Session 0 允许执行 `webauto --daemon status` 查询；`webauto --daemon ui-start` 仅可在 daemon 已由非 Session 0 启动后执行；严禁在 Session 0 执行 `webauto --daemon start`**。
   - UI 测试必须走 daemon 拉起：先 `webauto --daemon start`，再 `webauto --daemon ui-start`，然后才执行 `webauto ui cli ...`。
   - 若当前终端位于 Session 0，只允许执行停止/清理命令，不允许执行 UI 启动或业务执行命令。
 - 使用方式：
