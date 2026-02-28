@@ -75,6 +75,35 @@ const WORKER_HEARTBEAT_INTERVAL_MS = 30_000;
 const WORKER_HEARTBEAT_MISS_LIMIT = 5;
 const WORKER_HEARTBEAT_STALE_MS = WORKER_HEARTBEAT_INTERVAL_MS * WORKER_HEARTBEAT_MISS_LIMIT;
 const DAEMON_SHUTDOWN_GRACE_MS = WORKER_HEARTBEAT_INTERVAL_MS + 5_000;
+let cachedWindowsSessionId = null;
+
+function resolveWindowsSessionIdSync() {
+  if (process.platform !== 'win32') return null;
+  if (Number.isFinite(cachedWindowsSessionId)) return cachedWindowsSessionId;
+  try {
+    const psScript = [
+      '[Console]::OutputEncoding=[System.Text.Encoding]::UTF8',
+      `$p = Get-CimInstance Win32_Process -Filter "ProcessId=${process.pid}" | Select-Object -First 1 -ExpandProperty SessionId`,
+      'if ($null -ne $p) { Write-Output $p }',
+    ].join('; ');
+    const ret = spawnSync('powershell', ['-NoProfile', '-Command', psScript], {
+      encoding: 'utf8',
+      timeout: 4_000,
+      windowsHide: true,
+    });
+    if (ret.status !== 0) return null;
+    const sid = Number(String(ret.stdout || '').trim());
+    cachedWindowsSessionId = Number.isFinite(sid) ? Math.floor(sid) : null;
+    return cachedWindowsSessionId;
+  } catch {
+    return null;
+  }
+}
+
+function isWindowsSessionZero() {
+  const sid = resolveWindowsSessionIdSync();
+  return Number.isFinite(sid) && sid === 0;
+}
 
 function readEnvPositiveInt(name, fallback) {
   const n = Number(process.env[name]);
@@ -1184,6 +1213,17 @@ async function main() {
   });
   const jsonMode = args.json === true;
   const cmd = String(args._[0] || 'start').trim().toLowerCase();
+  const sessionZero = isWindowsSessionZero();
+
+  if (!args.help && sessionZero && (cmd === 'start' || cmd === 'run')) {
+    const message = `[daemon] Session 0 blocked: "${cmd}" must be started from a non-Session 0 desktop session. If daemon is already running, use "webauto --daemon ui-start".`;
+    if (jsonMode) {
+      console.log(JSON.stringify({ ok: false, error: message, code: 'SESSION0_BLOCKED' }, null, 2));
+    } else {
+      console.error(message);
+    }
+    process.exit(2);
+  }
 
   if (args.help) {
     printHelp();

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import minimist from 'minimist';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, writeFileSync, readFileSync, mkdirSync } from 'node:fs';
 import net from 'node:net';
 import os from 'node:os';
@@ -9,6 +9,35 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const activeChildren = new Set();
+let cachedWindowsSessionId = null;
+
+function resolveWindowsSessionIdSync() {
+  if (process.platform !== 'win32') return null;
+  if (Number.isFinite(cachedWindowsSessionId)) return cachedWindowsSessionId;
+  try {
+    const psScript = [
+      '[Console]::OutputEncoding=[System.Text.Encoding]::UTF8',
+      `$p = Get-CimInstance Win32_Process -Filter "ProcessId=${process.pid}" | Select-Object -First 1 -ExpandProperty SessionId`,
+      'if ($null -ne $p) { Write-Output $p }',
+    ].join('; ');
+    const ret = spawnSync('powershell', ['-NoProfile', '-Command', psScript], {
+      encoding: 'utf8',
+      timeout: 4_000,
+      windowsHide: true,
+    });
+    if (ret.status !== 0) return null;
+    const sid = Number(String(ret.stdout || '').trim());
+    cachedWindowsSessionId = Number.isFinite(sid) ? Math.floor(sid) : null;
+    return cachedWindowsSessionId;
+  } catch {
+    return null;
+  }
+}
+
+function isWindowsSessionZero() {
+  const sid = resolveWindowsSessionIdSync();
+  return Number.isFinite(sid) && sid === 0;
+}
 
 function parsePositiveInt(raw, fallback) {
   const n = Number(raw);
@@ -329,6 +358,7 @@ Core Commands:
 
 Build & Release:
   webauto build:dev        # Local link mode
+  webauto build:daemon     # Daemon build (isolated / no-op by default)
   webauto build:release    # Full release gate (默认自动 bump patch 版本)
   webauto build:release -- --bump minor
   webauto build:release -- --no-bump
@@ -872,6 +902,47 @@ async function main() {
   const daemonBypass = String(process.env.WEBAUTO_DAEMON_BYPASS || '').trim() === '1';
   const daemonFlag = !daemonBypass && (rawArgv.includes('--daemon') || args.daemon === true);
   const noDaemon = rawArgv.includes('--no-daemon') || rawArgv.includes('--foreground') || args['no-daemon'] === true;
+  const sessionZero = isWindowsSessionZero();
+
+  const getDaemonSubcommand = () => {
+    if (cmd === 'daemon') return String(args._[1] || 'start').trim().toLowerCase();
+    if (!daemonFlag) return '';
+    const filtered = rawArgv.filter((item) => item !== '--daemon');
+    return String(filtered[0] || 'start').trim().toLowerCase();
+  };
+
+  if (sessionZero) {
+    const daemonSub = getDaemonSubcommand();
+    const allowedDaemon = new Set([
+      'status',
+      'stop',
+      'ui-start',
+      'ui-status',
+      'ui-stop',
+      'job-status',
+      'job-list',
+      'service-status',
+      'help',
+      '--help',
+      '-h',
+    ]);
+    if (cmd === 'daemon' || daemonFlag) {
+      if (!allowedDaemon.has(daemonSub)) {
+        console.error('[webauto] Session 0 blocked: daemon start/run/relay must be executed from a non-Session 0 desktop session.');
+        console.error('[webauto] If daemon is already running, use: webauto --daemon ui-start (or --daemon status).');
+        process.exit(2);
+      }
+    } else {
+      const isHelp = args.help === true;
+      const isXhsStatus = cmd === 'xhs' && String(sub || '').trim().toLowerCase() === 'status';
+      const allowedCmds = new Set(['version', 'deps', 'build:dev', 'build:release', 'build:daemon']);
+      if (!isHelp && !isXhsStatus && !allowedCmds.has(cmd)) {
+        console.error(`[webauto] Session 0 blocked: ${cmd || 'ui'} is not allowed.`);
+        console.error('[webauto] Use a non-Session 0 desktop session to start daemon, then use: webauto --daemon ui-start.');
+        process.exit(2);
+      }
+    }
+  }
 
   if (args.help) {
     if (cmd === 'account') {
@@ -971,6 +1042,11 @@ async function main() {
     await runInDir(path.join(ROOT, 'apps', 'desktop-console'), npm.cmd, [...npm.prefix, 'install']);
     await runInDir(path.join(ROOT, 'apps', 'desktop-console'), npm.cmd, [...npm.prefix, 'run', 'build']);
     console.log('[webauto] Dev setup complete');
+    return;
+  }
+
+  if (cmd === 'build:daemon') {
+    console.log('[webauto] Daemon build is isolated and skipped by default (daemon runs from source).');
     return;
   }
 
