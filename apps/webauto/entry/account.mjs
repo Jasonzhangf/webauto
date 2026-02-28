@@ -41,6 +41,15 @@ function parseBoolean(value, fallback = false) {
   return fallback;
 }
 
+function normalizeIdleTimeout(input) {
+  const raw = String(input || '').trim();
+  if (!raw) return 'off';
+  const lower = raw.toLowerCase();
+  if (['0', 'off', 'none', 'disable', 'disabled'].includes(lower)) return 'off';
+  if (/^\\d+(?:\\.\\d+)?$/.test(lower)) return `${lower}m`;
+  return raw;
+}
+
 function resetProfileSessionForHeadful(profileId) {
   const id = String(profileId || '').trim();
   if (!id) return { attempted: false, ok: false, reason: 'missing_profile_id' };
@@ -265,6 +274,7 @@ Notes:
   - list 默认按 profile 展示账号有效态（valid/invalid）
   - add 不会自动创建 profile；必须传入已存在的 --profile
   - login 会通过 @web-auto/camo 拉起浏览器并绑定账号 profile
+  - login 默认 idle-timeout=off，避免登录窗口自动关闭
   - 只有识别到账号 id 的 profile 才会进入 valid 状态
   - sync --pending-while-login 会在登录过程中保持待登录状态，避免过早标记失效
 
@@ -273,7 +283,7 @@ Examples:
   webauto account list
   webauto account sync all
   webauto account sync all --platform weibo
-  webauto account login xhs-0001 --url https://www.xiaohongshu.com --idle-timeout 30m
+  webauto account login xhs-0001 --url https://www.xiaohongshu.com --idle-timeout off
   webauto account sync-alias xhs-0001
   webauto account update xhs-0001 --alias 运营1号
   webauto account delete xhs-0001 --delete-profile --delete-fingerprint
@@ -374,9 +384,9 @@ async function cmdLogin(idOrAlias, argv, jsonMode) {
   const accountPlatform = normalizePlatform(account.platform || 'xiaohongshu');
   assertProfileExists(account.profileId);
   const url = String(argv.url || inferLoginUrl(accountPlatform)).trim();
-  // Default idle timeout: 30 minutes, configurable via env or CLI.
+  // Default idle timeout: off for login, configurable via env or CLI.
   // Keep validation semantics aligned with camo parseDurationMs.
-  const idleTimeout = String(argv['idle-timeout'] || process.env.WEBAUTO_LOGIN_IDLE_TIMEOUT || '30m').trim() || '30m';
+  const idleTimeout = normalizeIdleTimeout(argv['idle-timeout'] || process.env.WEBAUTO_LOGIN_IDLE_TIMEOUT || 'off');
 
   const idleTimeoutLower = idleTimeout.toLowerCase();
   const idleTimeoutOk = /^(?:\d+(?:\.\d+)?(?:ms|s|m|h)?|0|off|none|disable|disabled)$/.test(idleTimeoutLower);

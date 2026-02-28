@@ -129,7 +129,7 @@ async function cmdLoginProfile(profileId, argv, jsonMode) {
   if (!id) throw new Error('profileId is required');
   assertProfileExists(id);
   const url = String(argv.url || 'https://www.xiaohongshu.com').trim();
-  const idleTimeout = String(argv['idle-timeout'] || process.env.WEBAUTO_LOGIN_IDLE_TIMEOUT || '30m').trim() || '30m';
+  const idleTimeout = String(argv['idle-timeout'] || process.env.WEBAUTO_LOGIN_IDLE_TIMEOUT || 'off').trim() || 'off';
   const timeoutSec = Math.max(30, Math.floor(Number(argv['timeout-sec'] || 900)));
   const intervalSec = Math.max(1, Math.floor(Number(argv['check-interval-sec'] || 2)));
   const cookieIntervalMs = Math.max(1000, Math.floor(Number(argv['cookie-interval-ms'] || 5000)));
@@ -210,7 +210,7 @@ async function cmdLogin(prefix, argv, jsonMode) {
     throw new Error(`no profiles found for prefix: ${prefix}`);
   }
   const started = [];
-  const idleTimeout = String(argv['idle-timeout'] || process.env.WEBAUTO_LOGIN_IDLE_TIMEOUT || '30m').trim() || '30m';
+  const idleTimeout = String(argv['idle-timeout'] || process.env.WEBAUTO_LOGIN_IDLE_TIMEOUT || 'off').trim() || 'off';
   for (const profileId of all) {
     resetProfileSessionForHeadful(profileId);
     const ret = runCamo(['start', profileId, '--url', 'https://www.xiaohongshu.com', '--idle-timeout', idleTimeout], { rootDir: ROOT });
@@ -255,7 +255,7 @@ async function cmdGotoProfile(profileId, argv, jsonMode) {
     return;
   }
 
-  const idleTimeout = String(argv['idle-timeout'] || process.env.WEBAUTO_LOGIN_IDLE_TIMEOUT || '30m').trim() || '30m';
+  const idleTimeout = String(argv['idle-timeout'] || process.env.WEBAUTO_LOGIN_IDLE_TIMEOUT || 'off').trim() || 'off';
   const startRet = runCamo(['start', id, '--url', url, '--idle-timeout', idleTimeout], { rootDir: ROOT });
   if (!startRet.ok) {
     output({
