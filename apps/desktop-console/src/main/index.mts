@@ -1503,6 +1503,7 @@ function createWindow() {
     height: 900,
     minWidth: 920,
     minHeight: 800,
+    show: true,
     webPreferences: {
       preload: path.join(APP_ROOT, 'dist', 'main', 'preload.mjs'),
       contextIsolation: true,
@@ -1542,6 +1543,37 @@ function createWindow() {
       isMainFrame: Boolean(isMainFrame),
     });
   });
+  win.once('ready-to-show', () => {
+    try {
+      if (win?.isMinimized()) win.restore();
+      win?.show();
+      win?.focus();
+      try { win?.setAlwaysOnTop(true); } catch {}
+      setTimeout(() => {
+        try { win?.setAlwaysOnTop(false); } catch {}
+      }, 1200);
+      void appendDesktopLifecycle('window_ready_show', {
+        visible: win?.isVisible() ?? null,
+        minimized: win?.isMinimized() ?? null,
+      });
+    } catch {
+      // ignore show/focus errors
+    }
+  });
+  setTimeout(() => {
+    if (!win || win.isDestroyed()) return;
+    try {
+      if (win.isMinimized()) win.restore();
+      if (!win.isVisible()) win.show();
+      win.focus();
+      void appendDesktopLifecycle('window_show_retry', {
+        visible: win.isVisible(),
+        minimized: win.isMinimized(),
+      });
+    } catch {
+      // ignore show/focus errors
+    }
+  }, 2000);
   void win.loadFile(htmlPath);
   ensureStateBridge();
 }
