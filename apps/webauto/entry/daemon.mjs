@@ -57,6 +57,7 @@ function resolveWebautoHome(env = process.env, platform = process.platform) {
 }
 
 const WEBAUTO_HOME = resolveWebautoHome();
+process.env.WEBAUTO_HOME = WEBAUTO_HOME;
 const RUN_DIR = path.join(WEBAUTO_HOME, 'run');
 const LOG_DIR = path.join(WEBAUTO_HOME, 'logs');
 const JOB_LOG_DIR = path.join(LOG_DIR, 'daemon-jobs');
