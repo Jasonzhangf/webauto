@@ -111,25 +111,25 @@ function buildDetectScript() {
       .slice(0, 6)
       .map((node) => String(node.textContent || '').replace(/\\s+/g, ' ').trim())
       .join(' ');
-    const hasLoginText = /鐧诲綍|鎵爜|楠岃瘉鐮亅鎵嬫満鍙穦璇峰厛鐧诲綍|娉ㄥ唽|sign\\s*in/i.test(loginGuardText);
+    const hasLoginText = /(\\u767b\\u5f55|\\u626b\\u7801|\\u9a8c\\u8bc1\\u7801|\\u624b\\u673a\\u53f7|\\u8bf7\\u5148\\u767b\\u5f55|\\u6ce8\\u518c|sign\\s*in)/i.test(loginGuardText);
     const loginUrl = /\\/login|signin|passport|account\\/login/i.test(String(location.href || ''));
     const hasGuardSignalRaw = (visibleLoginGuardNodes.length > 0 && hasLoginText) || loginUrl;
     const candidates = [];
     const normalizeAlias = (value) => {
       const text = String(value || '').replace(/\\s+/g, ' ').trim();
       if (!text) return null;
-      if (text === '鎴? || text === '鎴戠殑' || text === '涓汉涓婚〉') return null;
+      if (text === '\\u6211' || text === '\\u6211\\u7684' || text === '\\u4e2a\\u4eba\\u4e3b\\u9875') return null;
       return text;
     };
     const isSelfLabel = (value) => {
       const text = String(value || '').replace(/\\s+/g, ' ').trim();
       if (!text) return false;
       return (
-        text === '鎴?
-        || text === '鎴戠殑'
-        || text === '涓汉涓婚〉'
-        || text === '鎴戠殑涓婚〉'
-        || text === '鎴戠殑璐﹀彿'
+        text === '\\u6211'
+        || text === '\\u6211\\u7684'
+        || text === '\\u4e2a\\u4eba\\u4e3b\\u9875'
+        || text === '\\u6211\\u7684\\u4e3b\\u9875'
+        || text === '\\u6211\\u7684\\u8d26\\u53f7'
       );
     };
     const readLabelCandidates = (node) => {
@@ -142,9 +142,9 @@ function buildDetectScript() {
     const cleanAlias = (value) => {
       let text = normalizeAlias(value);
       if (!text) return null;
-      text = text.replace(/\\s*[-鈥撯€擼\\s*(灏忕孩涔XiaoHongShu|xiaohongshu).*$/i, '').trim();
+      text = text.replace(/\\s*[-\\u2014\\u2013]\\s*(\\u5c0f\\u7ea2\\u4e66|XiaoHongShu|xiaohongshu).*$/i, '').trim();
       if (!text) return null;
-      const blocked = ['灏忕孩涔?, '鐧诲綍', '娉ㄥ唽', '鎼滅储'];
+      const blocked = ['\\u5c0f\\u7ea2\\u4e66', '\\u767b\\u5f55', '\\u6ce8\\u518c', '\\u641c\\u7d22'];
       if (blocked.includes(text)) return null;
       return text;
     };
