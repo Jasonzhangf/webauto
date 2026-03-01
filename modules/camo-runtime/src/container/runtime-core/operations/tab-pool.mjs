@@ -219,7 +219,7 @@ async function waitForTabCountIncrease({
   const startedAt = Date.now();
   const effectivePollMs = Math.max(80, Number(pollMs) || 250);
   const waitMs = Math.max(400, Number(maxWaitMs) || 4000);
-  const listTimeoutMs = Math.max(500, Math.min(resolveTimeoutMs(apiTimeoutMs, DEFAULT_API_TIMEOUT_MS), 2500));
+  const listTimeoutMs = Math.max(1000, Math.min(resolveTimeoutMs(apiTimeoutMs, DEFAULT_API_TIMEOUT_MS), 8000));
   let lastError = null;
 
   while (Date.now() - startedAt <= waitMs) {
