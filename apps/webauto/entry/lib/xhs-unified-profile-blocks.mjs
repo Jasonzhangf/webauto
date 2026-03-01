@@ -10,6 +10,7 @@ import { runCamo } from './camo-cli.mjs';
 import { ensureSessionInitialized } from './session-init.mjs';
 import { publishBusEvent } from './bus-publish.mjs';
 import { resolvePlatformFlowGate } from './flow-gate.mjs';
+import { resolveXhsStage } from './xhs-unified-stages.mjs';
 import {
   nowIso,
   parseBool,
@@ -68,16 +69,6 @@ async function captureStopScreenshot({ profileId, reason, outputDir }) {
   return null;
 }
 
-export function resolveXhsStage(argv = {}) {
-  const raw = String(argv.stage || argv['xhs-stage'] || 'full').trim().toLowerCase();
-  const stage = raw || 'full';
-  const allowed = new Set(['full', 'links', 'content', 'like', 'reply', 'detail']);
-  if (!allowed.has(stage)) {
-    throw new Error(`invalid --stage: ${stage}. use full|links|content|like|reply|detail`);
-  }
-  return stage;
-}
-
 export async function ensureProfileSession(profileId, options = {}) {
   const id = String(profileId || '').trim();
   if (!id) return false;
@@ -110,6 +101,8 @@ async function buildTemplateOptions(argv, profileId, overrides = {}) {
   const noteIntervalMin = parseIntFlag(flowGate?.noteInterval?.minMs, 2200, 200);
   const noteIntervalMax = parseIntFlag(flowGate?.noteInterval?.maxMs, 4200, noteIntervalMin);
   const tabCountDefault = parseIntFlag(flowGate?.tabPool?.tabCount, 1, 1);
+  const tabCountFlag = argv['tab-count'];
+  const tabCountProvided = tabCountFlag !== undefined && tabCountFlag !== null && tabCountFlag !== '';
   const tabOpenDelayMin = parseIntFlag(flowGate?.tabPool?.openDelayMinMs, 1400, 0);
   const tabOpenDelayMax = parseIntFlag(flowGate?.tabPool?.openDelayMaxMs, 2800, tabOpenDelayMin);
   const submitMethodDefault = String(flowGate?.submitSearch?.method || 'click').trim().toLowerCase() || 'click';
@@ -133,7 +126,7 @@ async function buildTemplateOptions(argv, profileId, overrides = {}) {
   const navigationMinIntervalDefault = parseIntFlag(flowGate?.pacing?.navigationMinIntervalMs, 2200, 0);
 
   const throttle = parseIntFlag(argv.throttle, pickRandomInt(throttleMin, throttleMax), 100);
-  const tabCount = parseIntFlag(argv['tab-count'], tabCountDefault, 1);
+  let tabCount = parseIntFlag(tabCountFlag, tabCountDefault, 1);
   const noteIntervalMs = parseIntFlag(argv['note-interval'], pickRandomInt(noteIntervalMin, noteIntervalMax), 200);
   const tabOpenDelayMs = parseIntFlag(argv['tab-open-delay'], pickRandomInt(tabOpenDelayMin, tabOpenDelayMax), 0);
   const submitMethod = String(argv['search-submit-method'] || submitMethodDefault).trim().toLowerCase() || 'click';
@@ -175,19 +168,33 @@ async function buildTemplateOptions(argv, profileId, overrides = {}) {
     overrides.seedCollectMaxRounds ?? argv['seed-collect-rounds'],
     Math.max(6, Math.ceil(Math.max(1, maxNotes) / 2)),
   );
-  const stage = resolveXhsStage(argv);
-  const stageDetailEnabled = stage === 'detail';
-
   const dryRun = parseBool(argv['dry-run'], false);
   const disableDryRun = parseBool(argv['no-dry-run'], false);
   const effectiveDryRun = disableDryRun ? false : dryRun;
+  const stage = resolveXhsStage(argv, overrides);
+  if (!tabCountProvided && (stage === 'detail' || stage === 'full')) {
+    tabCount = 4;
+  }
+  const stageDetailEnabled = stage === 'detail';
   const stageLinksEnabled = true;
-  const stageContentEnabled = stage === 'full' || stage === 'content' || stage === 'like' || stage === 'reply';
+  const stageContentEnabled = stage === 'detail' || stage === 'full' || stage === 'content' || stage === 'like' || stage === 'reply';
+  const likeRequested = parseBool(overrides.doLikes ?? argv['do-likes'], stage === 'like');
+  const replyRequested = parseBool(overrides.doReply ?? argv['do-reply'], stage === 'reply');
   const stageLikeEnabled = (stage === 'like' || stage === 'full')
-    && (parseBool(argv['do-likes'], stage === 'like') && !effectiveDryRun);
+    && likeRequested
+    && !effectiveDryRun;
   const stageReplyEnabled = (stage === 'reply' || stage === 'full')
-    && (parseBool(argv['do-reply'], stage === 'reply') && !effectiveDryRun);
-  const doComments = stageContentEnabled || stageLikeEnabled || stageReplyEnabled;
+    && replyRequested
+    && !effectiveDryRun;
+  const commentsRequested = parseBool(
+    overrides.doComments ?? argv['do-comments'],
+    stageContentEnabled || stageLikeEnabled || stageReplyEnabled,
+  );
+  const doComments = commentsRequested;
+  const doHomepage = stageContentEnabled && parseBool(overrides.doHomepage ?? argv['do-homepage'], true);
+  const doImages = stageContentEnabled && parseBool(overrides.doImages ?? argv['do-images'], false);
+  const doOcr = stageContentEnabled && parseBool(overrides.doOcr ?? argv['do-ocr'], false);
+  const persistComments = doComments && parseBool(overrides.persistComments ?? argv['persist-comments'], !effectiveDryRun);
 
   const base = {
     profileId,
@@ -237,19 +244,35 @@ async function buildTemplateOptions(argv, profileId, overrides = {}) {
     stageLikeEnabled,
     stageReplyEnabled,
     stageDetailEnabled,
-    doHomepage: stageContentEnabled && parseBool(argv['do-homepage'], true),
-    doImages: stageContentEnabled && parseBool(argv['do-images'], false),
     doComments,
     doLikes: stageLikeEnabled,
     doReply: stageReplyEnabled,
-    doOcr: stageContentEnabled && parseBool(argv['do-ocr'], false),
-    persistComments: doComments && parseBool(argv['persist-comments'], !effectiveDryRun),
+    doHomepage,
+    doImages,
+    doOcr,
+    persistComments,
     sharedHarvestPath,
     searchSerialKey,
     seedCollectCount,
     seedCollectMaxRounds,
   };
-  return { ...base, ...overrides };
+  const merged = { ...base, ...overrides };
+  return {
+    ...merged,
+    stage,
+    stageLinksEnabled,
+    stageContentEnabled,
+    stageLikeEnabled,
+    stageReplyEnabled,
+    stageDetailEnabled,
+    doComments,
+    doLikes: stageLikeEnabled,
+    doReply: stageReplyEnabled,
+    doHomepage,
+    doImages,
+    doOcr,
+    persistComments,
+  };
 }
 
 export async function runProfile(spec, argv, baseOverrides = {}) {

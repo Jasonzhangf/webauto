@@ -686,6 +686,7 @@ export function buildXhsUnifiedAutoscript(rawOptions = {}) {
       {
         id: 'verify_subscriptions_all_pages',
         action: 'verify_subscriptions',
+        enabled: !detailLinksStartup,
         params: {
           acrossPages: true,
           settleMs: 320,
