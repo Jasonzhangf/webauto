@@ -141,6 +141,17 @@ function extractNoteIdFromHref(href) {
   return String(seg).split('?')[0].split('#')[0].trim();
 }
 
+function readXsecTokenFromUrl(rawUrl) {
+  const text = String(rawUrl || '').trim();
+  if (!text) return '';
+  try {
+    const parsed = new URL(text);
+    return String(parsed.searchParams.get('xsec_token') || '').trim();
+  } catch {
+    return '';
+  }
+}
+
 function resolveSharedClaimPath(params = {}) {
   const raw = String(params.sharedHarvestPath || params.sharedClaimPath || '').trim();
   return raw ? path.resolve(raw) : '';
@@ -2045,6 +2056,12 @@ async function executeOpenDetailOperation({
         if (detailOnlyMode) metrics.detailLoopCount = 0;
         profileState.preCollectedNoteIds = [];
         profileState.preCollectedAt = null;
+        profileState.preCollectedLinks = [];
+        profileState.preCollectedLinksAt = null;
+        profileState.preCollectedLinkCursor = 0;
+        profileState.preCollectedLinks = [];
+        profileState.preCollectedLinksAt = null;
+        profileState.preCollectedLinkCursor = 0;
       }
       if (incrementalMax && resume && !keywordChanged) {
         profileState.maxNotes = Number(normalizeNoteIdList(profileState.preCollectedNoteIds).length || 0) + maxNotes;
@@ -2105,6 +2122,9 @@ async function executeOpenDetailOperation({
     const postOpenDelayMaxMs = Math.max(postOpenDelayMinMs, Number(params.postOpenDelayMaxMs ?? 10000) || 10000);
     const openDetailMinVisibleRatio = clamp(Number(params.openDetailMinVisibleRatio ?? 0.5) || 0.5, 0, 1);
     const collectOpenLinksOnly = params.collectOpenLinksOnly === true;
+    const openByLinks = params.openByLinks === true
+      || String(params.openByLinks || '').trim().toLowerCase() === 'true';
+    const openByLinksMaxAttempts = Math.max(1, Number(params.openByLinksMaxAttempts ?? 3) || 3);
 
     const waitDetailReady = async () => {
       for (let i = 0; i < 60; i += 1) {
@@ -2279,7 +2299,27 @@ async function executeOpenDetailOperation({
         noteId: 'links',
       });
       const rows = await readJsonlRows(output.linksPath);
-      const noteIds = normalizeNoteIdList(rows.map((row) => row?.noteId));
+      const normalizedLinks = rows
+        .map((row) => {
+          if (!row || typeof row !== 'object') return null;
+          const noteUrl = String(row.noteUrl || row.url || '').trim();
+          if (!noteUrl) return null;
+          const xsecToken = String(row.xsecToken || readXsecTokenFromUrl(noteUrl)).trim();
+          if (!xsecToken) return null;
+          const noteId = String(row.noteId || extractNoteIdFromHref(noteUrl)).trim();
+          return {
+            noteId,
+            noteUrl,
+            listUrl: String(row.listUrl || '').trim(),
+            xsecToken,
+          };
+        })
+        .filter(Boolean);
+      const noteIds = normalizeNoteIdList(normalizedLinks.map((row) => row.noteId));
+      if (normalizedLinks.length > 0) {
+        profileState.preCollectedLinks = normalizedLinks;
+        profileState.preCollectedLinksAt = new Date().toISOString();
+      }
       if (noteIds.length > 0) {
         profileState.preCollectedNoteIds = noteIds;
         profileState.preCollectedAt = new Date().toISOString();
@@ -2287,6 +2327,7 @@ async function executeOpenDetailOperation({
       return {
         linksPath: output.linksPath,
         noteIds,
+        links: normalizedLinks,
       };
     };
 
@@ -2675,9 +2716,7 @@ async function executeOpenDetailOperation({
       };
     };
 
-    let nodes = await collectVisibleRows();
-    if (mode === 'collect' && nodes.length === 0) throw new Error('NO_SEARCH_RESULT_ITEM');
-
+    let nodes = [];
     if (mode === 'collect') {
       const persisted = await hydratePreCollectedFromPersistedLinks();
       const persistedNoteIds = normalizeNoteIdList(persisted.noteIds);
@@ -2716,6 +2755,8 @@ async function executeOpenDetailOperation({
           },
         };
       }
+      nodes = await collectVisibleRows();
+      if (nodes.length === 0) throw new Error('NO_SEARCH_RESULT_ITEM');
       const collected = collectOpenLinksOnly
         ? await collectLinksByOpening()
         : await collectLinksFirst();
@@ -2754,6 +2795,8 @@ async function executeOpenDetailOperation({
       };
     }
 
+    nodes = await collectVisibleRows();
+
     let preCollectedSet = new Set(normalizeNoteIdList(profileState.preCollectedNoteIds));
     if (preCollectedSet.size === 0) {
       const persisted = await hydratePreCollectedFromPersistedLinks();
@@ -2770,6 +2813,190 @@ async function executeOpenDetailOperation({
         throw new Error('AUTOSCRIPT_DONE_NO_MORE_NOTES');
       }
     }
+    if (openByLinks) {
+      const normalizeLinkRow = (row) => {
+        if (!row || typeof row !== 'object') return null;
+        const noteUrl = String(row.noteUrl || row.url || '').trim();
+        if (!noteUrl) return null;
+        const xsecToken = String(row.xsecToken || readXsecTokenFromUrl(noteUrl)).trim();
+        if (!xsecToken) return null;
+        const noteId = String(row.noteId || extractNoteIdFromHref(noteUrl)).trim();
+        if (!noteId) return null;
+        return {
+          noteId,
+          noteUrl,
+          listUrl: String(row.listUrl || '').trim(),
+          xsecToken,
+        };
+      };
+
+      let preCollectedLinks = normalizeArray(profileState.preCollectedLinks)
+        .map((row) => normalizeLinkRow(row))
+        .filter(Boolean);
+      if (preCollectedLinks.length === 0) {
+        const persisted = await hydratePreCollectedFromPersistedLinks();
+        preCollectedLinks = normalizeArray(persisted.links)
+          .map((row) => normalizeLinkRow(row))
+          .filter(Boolean);
+      }
+      if (preCollectedLinks.length === 0) {
+        throw new Error('PRECOLLECTED_LINKS_REQUIRED');
+      }
+
+      const linkNoteIds = normalizeNoteIdList(preCollectedLinks.map((row) => row.noteId));
+      if (linkNoteIds.length > 0) {
+        preCollectedSet = new Set(linkNoteIds);
+        profileState.preCollectedNoteIds = linkNoteIds;
+        profileState.preCollectedAt = new Date().toISOString();
+      }
+      profileState.preCollectedLinks = preCollectedLinks;
+      profileState.preCollectedLinksAt = new Date().toISOString();
+      profileState.preCollectedLinkCursor = Math.max(0, Number(profileState.preCollectedLinkCursor || 0) || 0);
+
+      const isEligibleLink = (row) => {
+        if (!row || typeof row !== 'object') return false;
+        const noteId = String(row.noteId || '').trim();
+        if (!noteId) return false;
+        if (excluded.has(noteId)) return false;
+        if (preCollectedSet.size > 0 && !preCollectedSet.has(noteId)) return false;
+        if (visitedSet.has(noteId)) return false;
+        return true;
+      };
+
+      const pickNextLink = () => {
+        const total = preCollectedLinks.length;
+        if (total === 0) return null;
+        const startAt = Math.max(0, Number(profileState.preCollectedLinkCursor || 0) || 0);
+        for (let offset = 0; offset < total; offset += 1) {
+          const idx = (startAt + offset) % total;
+          const row = preCollectedLinks[idx];
+          if (!isEligibleLink(row)) continue;
+          profileState.preCollectedLinkCursor = (idx + 1) % total;
+          return { ...row, index: idx };
+        }
+        return null;
+      };
+
+      let lastError = null;
+      for (let attempt = 1; attempt <= openByLinksMaxAttempts; attempt += 1) {
+        const nextLink = pickNextLink();
+        if (!nextLink) {
+          throw new Error('AUTOSCRIPT_DONE_NO_MORE_NOTES');
+        }
+        const progressStage = mode === 'next' ? 'open_next_detail' : 'open_first_detail';
+        const noteId = String(nextLink.noteId || '').trim();
+        const beforeUrl = await readLocation(profileId);
+        emitOperationProgress(context, {
+          kind: 'block',
+          stage: progressStage,
+          block: 'open_detail_by_link',
+          noteId,
+          linkIndex: Number.isFinite(Number(nextLink.index)) ? Number(nextLink.index) : null,
+          url: nextLink.noteUrl,
+          attempt,
+        });
+        pushTrace({
+          kind: 'nav',
+          stage: 'open_detail_by_link',
+          noteId,
+          url: nextLink.noteUrl,
+          attempt,
+        });
+
+        try {
+          await callAPI('goto', { profileId, url: nextLink.noteUrl });
+        } catch (error) {
+          lastError = error;
+          if (noteId) {
+            visitedSet.add(noteId);
+            profileState.visitedNoteIds = Array.from(visitedSet);
+          }
+          emitOperationProgress(context, {
+            kind: 'block',
+            stage: progressStage,
+            block: 'open_detail_by_link_failed',
+            noteId,
+            attempt,
+            error: error?.message || String(error),
+          });
+          continue;
+        }
+
+        const ready = await waitDetailReady();
+        if (!ready) {
+          lastError = new Error('DETAIL_OPEN_TIMEOUT');
+          if (noteId) {
+            visitedSet.add(noteId);
+            profileState.visitedNoteIds = Array.from(visitedSet);
+          }
+          emitOperationProgress(context, {
+            kind: 'block',
+            stage: progressStage,
+            block: 'open_detail_by_link_timeout',
+            noteId,
+            attempt,
+          });
+          continue;
+        }
+
+
+        const afterUrl = await readLocation(profileId);
+        if (noteId && !visitedSet.has(noteId)) {
+          visitedSet.add(noteId);
+          profileState.visitedNoteIds = Array.from(visitedSet);
+        }
+        if (detailOnlyMode) {
+          metrics.detailLoopCount = Math.max(0, Number(metrics.detailLoopCount || 0) || 0) + 1;
+        }
+        profileState.currentNoteId = noteId;
+        profileState.currentHref = afterUrl || nextLink.noteUrl || null;
+        profileState.lastListUrl = beforeUrl || null;
+
+        emitActionTrace(context, actionTrace, { stage: 'xhs_open_detail' });
+
+        return {
+          operationResult: {
+            ok: true,
+            code: 'OPERATION_DONE',
+            message: 'xhs_open_detail done',
+            data: {
+              opened: true,
+              source: progressStage,
+              noteId,
+              visited: profileState.visitedNoteIds.length,
+              maxNotes: Number(profileState.maxNotes || maxNotes),
+              openByClick: false,
+              openByLink: true,
+              noteUrl: nextLink.noteUrl,
+              beforeUrl,
+              afterUrl,
+              excludedCount: excluded.size,
+              seedCollectedCount: preCollectedSet.size,
+              seedCollectedNoteIds: Array.from(preCollectedSet),
+            },
+          },
+          payload: {
+            opened: true,
+            source: progressStage,
+            noteId,
+            visited: profileState.visitedNoteIds.length,
+            maxNotes: Number(profileState.maxNotes || maxNotes),
+            openByClick: false,
+            openByLink: true,
+            noteUrl: nextLink.noteUrl,
+            beforeUrl,
+            afterUrl,
+            excludedCount: excluded.size,
+            seedCollectedCount: preCollectedSet.size,
+            seedCollectedNoteIds: Array.from(preCollectedSet),
+          },
+        };
+      }
+
+      if (lastError instanceof Error) throw lastError;
+      throw new Error(String(lastError || 'DETAIL_OPEN_FAILED'));
+    }
+
     const isEligible = (row) => {
       if (!row || typeof row !== 'object') return false;
       const noteId = String(row.noteId || '').trim();

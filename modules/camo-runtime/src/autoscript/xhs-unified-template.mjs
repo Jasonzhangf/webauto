@@ -53,7 +53,10 @@ export function buildXhsUnifiedAutoscript(rawOptions = {}) {
   const env = toTrimmedString(rawOptions.env, 'prod');
   const outputRoot = toTrimmedString(rawOptions.outputRoot, '');
   const throttle = toPositiveInt(rawOptions.throttle, 900, 100);
-  const tabCount = toPositiveInt(rawOptions.tabCount, 1, 1);
+  const tabCountProvided = rawOptions.tabCount !== undefined
+    && rawOptions.tabCount !== null
+    && rawOptions.tabCount !== '';
+  let tabCount = toPositiveInt(rawOptions.tabCount, 1, 1);
   const tabOpenDelayMs = toNonNegativeInt(rawOptions.tabOpenDelayMs, 1400);
   const noteIntervalMs = toPositiveInt(rawOptions.noteIntervalMs, 1200, 200);
   const submitMethod = toTrimmedString(rawOptions.submitMethod, 'click').toLowerCase();
@@ -112,8 +115,12 @@ export function buildXhsUnifiedAutoscript(rawOptions = {}) {
   const detailLoopEnabled = stageDetailEnabled || stageContentEnabled || stageLikeEnabled || stageReplyEnabled;
   const stageLinksEnabled = stageLinksRequested || detailLoopEnabled;
   const collectOpenLinksOnly = stageLinksEnabled;
-  const detailHarvestEnabled = !stageDetailEnabled && detailLoopEnabled && (doHomepage || doImages || doComments || doOcr);
-  const commentsHarvestEnabled = !stageDetailEnabled && detailLoopEnabled && (doComments || stageLikeEnabled || stageReplyEnabled);
+  const detailOpenByLinks = toBoolean(rawOptions.detailOpenByLinks, stageLinksEnabled && detailLoopEnabled);
+  const openByLinksMaxAttempts = toPositiveInt(rawOptions.openByLinksMaxAttempts, 3, 1);
+  const detailLinksStartup = detailOpenByLinks && stage === 'detail';
+  if (!tabCountProvided && detailOpenByLinks) tabCount = 4;
+  const detailHarvestEnabled = detailLoopEnabled && (doHomepage || doImages || doComments || doOcr);
+  const commentsHarvestEnabled = detailLoopEnabled && (doComments || stageLikeEnabled || stageReplyEnabled);
   const matchGateEnabled = !stageDetailEnabled && (stageLikeEnabled || stageReplyEnabled);
   const collectPerNoteBudgetMs = toPositiveInt(rawOptions.collectPerNoteBudgetMs ?? rawOptions.collectPerNoteMs, 15000, 5000);
   const collectLinksTimeoutMinMs = toPositiveInt(rawOptions.collectLinksTimeoutMinMs, 600000, 60000);
@@ -167,6 +174,8 @@ export function buildXhsUnifiedAutoscript(rawOptions = {}) {
       env,
       outputRoot,
       tabCount,
+      detailOpenByLinks,
+      openByLinksMaxAttempts,
       tabOpenDelayMs,
       noteIntervalMs,
       submitMethod,
@@ -275,6 +284,7 @@ export function buildXhsUnifiedAutoscript(rawOptions = {}) {
       },
       {
         id: 'fill_keyword',
+        enabled: !detailLinksStartup,
         action: 'type',
         params: { selector: '#search-input', text: keyword },
         trigger: 'home_search_input.exist',
@@ -293,6 +303,7 @@ export function buildXhsUnifiedAutoscript(rawOptions = {}) {
       },
       {
         id: 'submit_search',
+        enabled: !detailLinksStartup,
         action: 'xhs_submit_search',
         params: {
           keyword,
@@ -336,7 +347,7 @@ export function buildXhsUnifiedAutoscript(rawOptions = {}) {
           collectOpenLinksOnly,
           collectStallTimeoutMs,
         },
-        trigger: 'search_result_item.exist',
+        trigger: detailLinksStartup ? 'startup' : 'search_result_item.exist',
         dependsOn: ['ensure_tab_pool'],
         once: true,
         timeoutMs: collectLinksTimeoutMs,
@@ -365,8 +376,10 @@ export function buildXhsUnifiedAutoscript(rawOptions = {}) {
           pollDelayMaxMs: openDetailPollDelayMaxMs,
           postOpenDelayMinMs: openDetailPostOpenMinMs,
           postOpenDelayMaxMs: openDetailPostOpenMaxMs,
+          openByLinks: detailOpenByLinks,
+          openByLinksMaxAttempts,
         },
-        trigger: 'search_result_item.exist',
+        trigger: detailLinksStartup ? 'startup' : 'search_result_item.exist',
         dependsOn: [stageLinksEnabled ? 'collect_links' : 'submit_search'],
         once: true,
         timeoutMs: 90000,
@@ -455,7 +468,7 @@ export function buildXhsUnifiedAutoscript(rawOptions = {}) {
           adaptiveBufferRounds: 22,
           adaptiveMinBoostRounds: 36,
           adaptiveMaxRoundsCap: 320,
-          requireBottom: true,
+          requireBottom: maxComments <= 0,
           includeComments: persistComments,
         },
         trigger: 'detail_modal.exist',
@@ -556,7 +569,7 @@ export function buildXhsUnifiedAutoscript(rawOptions = {}) {
         enabled: detailLoopEnabled,
         action: 'wait',
         params: { ms: noteIntervalMs },
-        trigger: 'search_result_item.exist',
+        trigger: detailOpenByLinks ? 'detail_modal.exist' : 'search_result_item.exist',
         dependsOn: ['close_detail'],
         once: false,
         oncePerAppear: false,
@@ -570,7 +583,7 @@ export function buildXhsUnifiedAutoscript(rawOptions = {}) {
         enabled: detailLoopEnabled,
         action: 'tab_pool_switch_next',
         params: { settleMs: 450 },
-        trigger: 'search_result_item.exist',
+        trigger: detailOpenByLinks ? 'detail_modal.exist' : 'search_result_item.exist',
         dependsOn: ['wait_between_notes', 'ensure_tab_pool'],
         once: false,
         oncePerAppear: false,
@@ -596,8 +609,10 @@ export function buildXhsUnifiedAutoscript(rawOptions = {}) {
           pollDelayMaxMs: openDetailPollDelayMaxMs,
           postOpenDelayMinMs: openDetailPostOpenMinMs,
           postOpenDelayMaxMs: openDetailPostOpenMaxMs,
+          openByLinks: detailOpenByLinks,
+          openByLinksMaxAttempts,
         },
-        trigger: 'search_result_item.exist',
+        trigger: detailOpenByLinks ? 'detail_modal.exist' : 'search_result_item.exist',
         dependsOn: ['switch_tab_round_robin'],
         once: false,
         oncePerAppear: false,
@@ -649,8 +664,8 @@ export function buildXhsUnifiedAutoscript(rawOptions = {}) {
           openDelayMs: tabOpenDelayMs,
           normalizeTabs: false,
         },
-        trigger: 'search_result_item.exist',
-        dependsOn: ['submit_search'],
+        trigger: detailLinksStartup ? 'startup' : 'search_result_item.exist',
+        dependsOn: [detailLinksStartup ? 'goto_home' : 'submit_search'],
         once: true,
         timeoutMs: 180000,
         retry: { attempts: 2, backoffMs: 500 },
