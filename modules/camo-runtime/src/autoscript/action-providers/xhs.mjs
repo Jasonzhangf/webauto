@@ -492,6 +492,12 @@ async function isDetailVisible(profileId) {
       '.note-detail-mask .note-content',
       '.note-detail-mask .interaction-container',
       '.note-detail-mask .comments-container',
+      '.note-scroller',
+      '.note-content',
+      '.interaction-container',
+      '.media-container',
+      '.comments-container',
+      '.comments-el',
     ];
     const searchSelectors = ['.note-item', '.search-result-list', '#search-input', '.feeds-page'];
     const isVisible = (node, opts = {}) => {
@@ -1270,6 +1276,12 @@ async function readCommentsSnapshot(profileId) {
       '.note-detail-mask .note-content',
       '.note-detail-mask .interaction-container',
       '.note-detail-mask .comments-container',
+      '.note-scroller',
+      '.note-content',
+      '.interaction-container',
+      '.media-container',
+      '.comments-container',
+      '.comments-el',
     ];
     const detailVisible = detailSelectors.some((selector) => isVisible(document.querySelector(selector)));
     const hasCommentsContext = Boolean(
@@ -1277,6 +1289,7 @@ async function readCommentsSnapshot(profileId) {
       || document.querySelector('.comment-list')
       || document.querySelector('.comment-item')
       || document.querySelector('[class*="comment-item"]')
+      || document.querySelector('.comments-el')
       || document.querySelector('.note-scroller')
     );
     const scopeSelectors = [
@@ -1284,6 +1297,10 @@ async function readCommentsSnapshot(profileId) {
       '.note-detail-mask .comments-container',
       '.note-detail-page .interaction-container',
       '.note-detail-page .comments-container',
+      '.interaction-container',
+      '.comments-container',
+      '.comments-el',
+      '.note-scroller',
       '.note-detail-mask',
       '.note-detail-page',
     ];
@@ -1614,6 +1631,12 @@ function buildTimeoutDomSnapshotScript() {
       '.note-detail-mask .note-content',
       '.note-detail-mask .interaction-container',
       '.note-detail-mask .comments-container',
+      '.note-scroller',
+      '.note-content',
+      '.interaction-container',
+      '.media-container',
+      '.comments-container',
+      '.comments-el',
     ];
     const searchSelectors = ['.note-item', '.search-result-list', '#search-input', '.feeds-page'];
     const isVisible = (node, opts = {}) => {
@@ -2047,6 +2070,26 @@ async function executeOpenDetailOperation({
     const incrementalMax = params.incrementalMax !== false;
     const preservePreCollected = params.preservePreCollected === true;
     const excluded = new Set(normalizeNoteIdList(excludeNoteIds));
+    const captureOpenSkipSnapshot = async ({ noteId, reason, stage }) => {
+      try {
+        await executeTimeoutSnapshotOperation({
+          profileId,
+          params: {
+            runId: context.runId,
+            operationId: stage,
+            operationAction: stage,
+            failureCode: reason,
+            failureMessage: reason,
+            noteId,
+            keyword: params.keyword,
+            env: params.env,
+          },
+          context,
+        });
+      } catch {
+        // ignore snapshot failures
+      }
+    };
 
     const previousKeyword = String(profileState.keyword || '').trim();
     const keywordChanged = Boolean(keyword && previousKeyword && keyword !== previousKeyword);
@@ -2215,7 +2258,9 @@ async function executeOpenDetailOperation({
         return check.ok;
       };
       let lastError = null;
-      for (let attempt = 1; attempt <= 3; attempt += 1) {
+      const maxAttempts = 3;
+      const openDetailTimeoutMs = 10000;
+      for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
         if (attempt > 1) {
           emitOperationProgress(context, {
             kind: 'block',
@@ -2256,31 +2301,23 @@ async function executeOpenDetailOperation({
           });
         } catch (error) {
           lastError = error;
-          const openedAfterClickError = await waitDetailReadyOnce(3200);
+          const openedAfterClickError = await waitDetailReadyOnce(openDetailTimeoutMs);
           if (openedAfterClickError) return;
-          if (recoverOnFailure) {
-            await recoverSearchViewportAfterOpenFailure({
-              noteId,
-              reason: String(lastError?.message || lastError || 'CLICK_POINT_FAILED'),
-              attempt,
-            });
-          }
           continue;
         }
-        const detailReady = await waitDetailReadyOnce(3200);
+        const detailReady = await waitDetailReadyOnce(openDetailTimeoutMs);
         if (detailReady) return;
-        const postAnchorOk = await ensureAnchorMatch('open_detail_post_anchor');
-        if (!postAnchorOk) {
-          throw new Error('OPEN_DETAIL_POST_ANCHOR_MISMATCH');
-        }
+        const postState = await isDetailVisible(profileId).catch(() => null);
+        if (postState?.detailVisible === true) return;
+        await ensureAnchorMatch('open_detail_post_anchor');
         lastError = new Error('DETAIL_OPEN_TIMEOUT');
-        if (recoverOnFailure) {
-          await recoverSearchViewportAfterOpenFailure({
-            noteId,
-            reason: 'DETAIL_OPEN_TIMEOUT',
-            attempt,
-          });
-        }
+      }
+      if (recoverOnFailure) {
+        await recoverSearchViewportAfterOpenFailure({
+          noteId,
+          reason: String(lastError?.message || lastError || 'DETAIL_OPEN_FAILED'),
+          attempt: maxAttempts,
+        });
       }
       if (lastError instanceof Error) throw lastError;
       throw new Error(String(lastError || 'DETAIL_OPEN_FAILED'));
@@ -2365,6 +2402,26 @@ async function executeOpenDetailOperation({
     };
 
     const collectLinksByOpening = async () => {
+      const captureSkipSnapshot = async ({ noteId, reason, stage }) => {
+        try {
+          await executeTimeoutSnapshotOperation({
+            profileId,
+            params: {
+              runId: context.runId,
+              operationId: stage,
+              operationAction: stage,
+              failureCode: reason,
+              failureMessage: reason,
+              noteId,
+              keyword: params.keyword,
+              env: params.env,
+            },
+            context,
+          });
+        } catch {
+          // ignore snapshot failures
+        }
+      };
       const output = resolveXhsOutputContext({
         params,
         state: profileState,
@@ -2528,7 +2585,7 @@ async function executeOpenDetailOperation({
           point: visibility.target?.center || next.center,
           progressStage: 'collect_links',
           traceMode: 'collect',
-          recoverOnFailure: false,
+          recoverOnFailure: true,
         });
         await sleepRandom(postOpenDelayMinMs, postOpenDelayMaxMs, pushTrace, 'open_detail_post_open', { noteId, mode: 'collect' });
         return { beforeUrl };
@@ -2608,17 +2665,6 @@ async function executeOpenDetailOperation({
           openResult = await runOpenDetailBlock(next);
         } catch (openErr) {
           const reason = String(openErr?.message || openErr || 'OPEN_DETAIL_FAILED');
-          const fatalOpen = /DETAIL_OPEN_TIMEOUT|OPEN_DETAIL_PRE_ANCHOR_MISMATCH|OPEN_DETAIL_POST_ANCHOR_MISMATCH/.test(reason);
-          if (fatalOpen) {
-            emitOperationProgress(context, {
-              kind: 'block',
-              stage: 'collect_links',
-              block: 'open_detail_fatal',
-              noteId: nextNoteId || null,
-              reason,
-            });
-            throw openErr;
-          }
           if (nextNoteId) nonCollectibleSet.add(nextNoteId);
           lastProgressAt = Date.now();
           emitOperationProgress(context, {
@@ -2628,6 +2674,7 @@ async function executeOpenDetailOperation({
             noteId: nextNoteId || null,
             reason,
           });
+          await captureSkipSnapshot({ noteId: nextNoteId || null, reason, stage: 'collect_links_open_detail' });
           pushTrace({
             kind: 'warn',
             stage: 'open_detail_skip',
@@ -2657,6 +2704,7 @@ async function executeOpenDetailOperation({
             noteId: nextNoteId || null,
             reason,
           });
+          await captureSkipSnapshot({ noteId: nextNoteId || null, reason, stage: 'collect_links_capture_url' });
           pushTrace({
             kind: 'warn',
             stage: 'capture_url_skip',
@@ -3042,7 +3090,12 @@ async function executeOpenDetailOperation({
       });
     };
 
-    let picked = pickNode(nodes);
+    const maxOpenAttempts = Math.max(3, Number(params.openDetailMaxAttempts ?? 6) || 6);
+    let lastOpenError = null;
+    for (let openAttempt = 1; openAttempt <= maxOpenAttempts; openAttempt += 1) {
+      let activeNoteId = null;
+      try {
+        let picked = pickNode(nodes);
     if (mode === 'first' || mode === 'next') {
       const detailSnapshot = await isDetailVisible(profileId);
       if (detailSnapshot?.detailVisible === true) {
@@ -3188,6 +3241,7 @@ async function executeOpenDetailOperation({
       }
       throw new Error('AUTOSCRIPT_DONE_NO_MORE_NOTES');
     }
+    activeNoteId = next.noteId;
     await paintDetailSelection(picked.candidateRows, next.noteId);
     const visibility = await ensureSearchCandidateFullyVisible(profileId, next.noteId, {
       maxScrollAttempts: 3,
@@ -3222,6 +3276,7 @@ async function executeOpenDetailOperation({
       point: visibility.target?.center || next.center,
       progressStage: mode === 'next' ? 'open_next_detail' : 'open_first_detail',
       traceMode: mode,
+      recoverOnFailure: true,
     });
 
     await sleepRandom(postOpenDelayMinMs, postOpenDelayMaxMs, pushTrace, 'open_detail_post_open', { noteId: next.noteId });
@@ -3274,6 +3329,33 @@ async function executeOpenDetailOperation({
         seedCollectedNoteIds: Array.from(preCollectedSet),
       },
     };
+      }
+      catch (error) {
+        const reason = String(error?.message || error || 'OPEN_DETAIL_FAILED');
+        lastOpenError = error instanceof Error ? error : new Error(reason);
+        if (activeNoteId) {
+          excluded.add(activeNoteId);
+          visitedSet.add(activeNoteId);
+          profileState.visitedNoteIds = Array.from(visitedSet);
+        }
+        emitOperationProgress(context, {
+          kind: 'block',
+          stage: mode === 'next' ? 'open_next_detail' : 'open_first_detail',
+          block: 'open_detail_skip',
+          noteId: activeNoteId || null,
+          reason,
+          attempt: openAttempt,
+        });
+        await captureOpenSkipSnapshot({ noteId: activeNoteId || null, reason, stage: 'open_detail_attempt' });
+        await closeDetailToSearch(profileId, pushTrace).catch(() => false);
+        await sleep(Math.max(200, Math.floor(seekSettleMs / 2)));
+        nodes = await collectVisibleRows();
+        continue;
+      }
+    }
+
+    if (lastOpenError instanceof Error) throw lastOpenError;
+    throw new Error('OPEN_DETAIL_ATTEMPTS_EXHAUSTED');
   };
 
   if (!claimPath) {
