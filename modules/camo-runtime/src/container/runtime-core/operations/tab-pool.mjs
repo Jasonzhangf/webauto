@@ -179,13 +179,17 @@ async function seedNewestTabIfNeeded({
   if (Number(activeIndex) !== targetIndex) {
     await callApiWithTimeout('page:switch', { profileId, index: targetIndex }, apiTimeoutMs);
   }
-  if (shouldNavigateToSeed(newest.url, seedUrl)) {
-    await callApiWithTimeout('goto', { profileId, url: seedUrl }, navigationTimeoutMs);
-    if (openDelayMs > 0) await sleep(Math.min(openDelayMs, 1200));
-  }
-  const syncResult = await syncTabViewportIfNeeded({ profileId, syncConfig });
-  if (!syncResult?.ok) {
-    throw new Error(syncResult?.message || 'sync_window_viewport failed');
+  try {
+    if (shouldNavigateToSeed(newest.url, seedUrl)) {
+      await callApiWithTimeout('goto', { profileId, url: seedUrl }, navigationTimeoutMs);
+      if (openDelayMs > 0) await sleep(Math.min(openDelayMs, 1200));
+    }
+    const syncResult = await syncTabViewportIfNeeded({ profileId, syncConfig });
+    if (!syncResult?.ok) {
+      throw new Error(syncResult?.message || 'sync_window_viewport failed');
+    }
+  } catch {
+    // Best-effort seeding; failing to navigate/sync shouldn't block tab pool init.
   }
 }
 
