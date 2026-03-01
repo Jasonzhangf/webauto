@@ -322,7 +322,7 @@ export async function executeTabPoolOperation({ profileId, action, params = {}, 
     const shortcutTimeoutMs = resolveTimeoutMs(params.shortcutTimeoutMs, SHORTCUT_OPEN_TIMEOUT_MS);
     const tabAppearTimeoutMs = resolveTimeoutMs(
       params.tabAppearTimeoutMs,
-      Math.max(3000, openDelayMs + 2200),
+      Math.max(8000, openDelayMs + 7000),
     );
     const syncConfig = resolveViewportSyncConfig({ params });
     const configuredSeedUrl = normalizeSeedUrl(String(params.url || '').trim());
