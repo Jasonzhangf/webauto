@@ -505,7 +505,8 @@ async function handleCommand(
       const session = manager.getSession(profileId);
       if (!session) throw new Error(`session for profile ${profileId} not started`);
       const url = args.url ? String(args.url) : undefined;
-      const result = await session.newPage(url);
+      const strictShortcut = args.strictShortcut === true;
+      const result = await session.newPage(url, { strictShortcut });
       broadcast('page:created', { profileId, index: result.index, url: result.url });
       return { ok: true, body: { ok: true, ...result } };
     }

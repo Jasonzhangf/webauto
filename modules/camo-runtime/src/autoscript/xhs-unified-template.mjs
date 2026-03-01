@@ -242,7 +242,20 @@ export function buildXhsUnifiedAutoscript(rawOptions = {}) {
       { id: 'search_result_item', selector: '.note-item', events: ['appear', 'exist', 'change'] },
       {
         id: 'detail_modal',
-        selector: '.note-detail-mask, .note-detail-page, .note-detail-dialog',
+        selector: [
+          '.note-detail-mask',
+          '.note-detail-page',
+          '.note-detail-dialog',
+          '#noteContainer',
+          '.note-container',
+          '.note-scroller',
+          '.note-content',
+          '#detail-title',
+          '#detail-desc',
+          '.author-wrapper',
+          '.interaction-container',
+          '#comment',
+        ].join(', '),
         events: ['appear', 'exist', 'disappear'],
       },
       { id: 'detail_comment_item', selector: '.comment-item, [class*="comment-item"]', events: ['appear', 'exist', 'change'] },
@@ -319,7 +332,7 @@ export function buildXhsUnifiedAutoscript(rawOptions = {}) {
         dependsOn: ['fill_keyword'],
         once: true,
         timeoutMs: 120000,
-        validation: {
+        validation: detailLinksStartup ? undefined : {
           mode: 'post',
           post: { page: { hostIncludes: ['xiaohongshu.com'], checkpointIn: ['search_ready', 'home_ready'] } },
         },
@@ -663,6 +676,8 @@ export function buildXhsUnifiedAutoscript(rawOptions = {}) {
           tabCount,
           openDelayMs: tabOpenDelayMs,
           normalizeTabs: false,
+          seedOnOpen: !detailLinksStartup,
+          shortcutOnly: true,
         },
         trigger: detailLinksStartup ? 'startup' : 'search_result_item.exist',
         dependsOn: [detailLinksStartup ? 'goto_home' : 'submit_search'],
@@ -671,10 +686,12 @@ export function buildXhsUnifiedAutoscript(rawOptions = {}) {
         retry: { attempts: 2, backoffMs: 500 },
         impact: 'script',
         onFailure: 'stop_all',
-        validation: {
-          mode: 'post',
-          post: { page: { hostIncludes: ['xiaohongshu.com'], checkpointIn: ['search_ready', 'home_ready'] } },
-        },
+        validation: detailLinksStartup
+          ? undefined
+          : {
+              mode: 'post',
+              post: { page: { hostIncludes: ['xiaohongshu.com'], checkpointIn: ['search_ready', 'home_ready'] } },
+            },
         checkpoint: {
           targetCheckpoint: 'search_ready',
           recovery: {

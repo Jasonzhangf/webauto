@@ -457,6 +457,22 @@ class UnifiedApiServer {
         return;
       }
 
+      if (req.method === 'POST' && url.pathname.includes('/api/v1/tasks/') && url.pathname.endsWith('/stop')) {
+        const parts = url.pathname.split('/');
+        const tasksIndex = parts.indexOf('tasks');
+        const runId = parts[tasksIndex + 1];
+        try {
+          ensureTask(runId, {});
+          this.taskRegistry.setStatus(runId, 'aborted');
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: true }));
+        } catch (err: any) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: false, error: err?.message || String(err) }));
+        }
+        return;
+      }
+
       if (req.method === 'DELETE' && url.pathname.startsWith('/api/v1/tasks/')) {
         const parts = url.pathname.split('/');
         const runId = parts[parts.length - 1];

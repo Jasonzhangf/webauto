@@ -74,6 +74,9 @@ function isTransientSyncError(error) {
     'operation is insecure',
     'browser service',
     'connection refused',
+    'session for profile',
+    'session not started',
+    'profile not started',
   ];
   return transientMarkers.some((marker) => message.includes(marker));
 }
@@ -486,15 +489,34 @@ export async function syncXhsAccountByProfile(profileId, options = {}) {
   const normalizedProfileId = String(profileId || '').trim();
   if (!normalizedProfileId) throw new Error('profileId is required');
   const pendingWhileLogin = options?.pendingWhileLogin === true;
+  let existing = null;
+  let fallbackAccountId = '';
+  let fallbackAlias = null;
   try {
-    const existing = listAccountProfiles({ platform: 'xiaohongshu' }).profiles.find(
+    existing = listAccountProfiles({ platform: 'xiaohongshu' }).profiles.find(
       (item) => String(item?.profileId || '').trim() === normalizedProfileId,
     );
+    fallbackAccountId = String(existing?.accountId || '').trim();
+    fallbackAlias = existing?.alias || null;
     const shouldResolveAlias = options?.resolveAlias === true
       || (!existing?.alias && options?.resolveAlias !== false);
     const detected = await detectXhsAccountIdentity(normalizedProfileId, {
       resolveAlias: shouldResolveAlias,
     });
+    const shouldAssumeValid = (
+      !detected.accountId
+      && !detected.hasLoginGuard
+      && fallbackAccountId
+    );
+    if (shouldAssumeValid) {
+      return upsertProfileAccountState({
+        profileId: normalizedProfileId,
+        platform: 'xiaohongshu',
+        accountId: fallbackAccountId,
+        alias: fallbackAlias,
+        detectedAt: new Date().toISOString(),
+      });
+    }
     if (detected.hasLoginGuard && !detected.accountId) {
       if (pendingWhileLogin) {
         return markProfilePending(normalizedProfileId, 'waiting_login_guard');
@@ -516,6 +538,15 @@ export async function syncXhsAccountByProfile(profileId, options = {}) {
       detectedAt: new Date().toISOString(),
     });
   } catch (error) {
+    if (fallbackAccountId && isTransientSyncError(error)) {
+      return upsertProfileAccountState({
+        profileId: normalizedProfileId,
+        platform: 'xiaohongshu',
+        accountId: fallbackAccountId,
+        alias: fallbackAlias,
+        detectedAt: new Date().toISOString(),
+      });
+    }
     if (isTransientSyncError(error)) {
       if (pendingWhileLogin) {
         return markProfilePending(normalizedProfileId, `waiting_login_sync:${error?.message || String(error)}`);
@@ -806,8 +837,31 @@ export async function syncWeiboAccountByProfile(profileId, options = {}) {
   const normalizedProfileId = String(profileId || '').trim();
   if (!normalizedProfileId) throw new Error('profileId is required');
   const pendingWhileLogin = options?.pendingWhileLogin === true;
+  let existing = null;
+  let fallbackAccountId = '';
+  let fallbackAlias = null;
   try {
+    existing = listAccountProfiles({ platform: 'weibo' }).profiles.find(
+      (item) => String(item?.profileId || '').trim() === normalizedProfileId,
+    );
     const detected = await detectWeiboAccountIdentity(normalizedProfileId);
+    fallbackAccountId = String(existing?.accountId || '').trim();
+    fallbackAlias = existing?.alias || null;
+    const shouldAssumeValid = (
+      !detected.accountId
+      && !detected.hasLoginGuard
+      && detected.hasCookieAuth
+      && fallbackAccountId
+    );
+    if (shouldAssumeValid) {
+      return upsertProfileAccountState({
+        profileId: normalizedProfileId,
+        platform: 'weibo',
+        accountId: fallbackAccountId,
+        alias: fallbackAlias,
+        detectedAt: new Date().toISOString(),
+      });
+    }
     if (detected.hasLoginGuard) {
       if (pendingWhileLogin) return markProfilePending(normalizedProfileId, 'waiting_login_guard', 'weibo');
       return markProfileInvalid(normalizedProfileId, 'login_guard', 'weibo');
@@ -833,6 +887,15 @@ export async function syncWeiboAccountByProfile(profileId, options = {}) {
       detectedAt: new Date().toISOString(),
     });
   } catch (error) {
+    if (fallbackAccountId && isTransientSyncError(error)) {
+      return upsertProfileAccountState({
+        profileId: normalizedProfileId,
+        platform: 'weibo',
+        accountId: fallbackAccountId,
+        alias: fallbackAlias,
+        detectedAt: new Date().toISOString(),
+      });
+    }
     if (isTransientSyncError(error)) {
       if (pendingWhileLogin) {
         return markProfilePending(normalizedProfileId, `waiting_login_sync:${error?.message || String(error)}`, 'weibo');

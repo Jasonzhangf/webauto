@@ -266,6 +266,7 @@ export function renderAccountManager(root: HTMLElement, ctx: any) {
       });
       const checkBtn = createEl('button', { className: 'secondary', style: 'padding: 6px 8px; font-size: 10px;' }, ['检查']) as HTMLButtonElement;
       const openBtn = createEl('button', { className: 'secondary', style: 'padding: 6px 8px; font-size: 10px;' }, ['打开']) as HTMLButtonElement;
+      const browserBtn = createEl('button', { className: 'secondary', style: 'padding: 6px 8px; font-size: 10px;' }, ['启动浏览器']) as HTMLButtonElement;
       const fixBtn = createEl('button', { className: 'secondary', style: 'padding: 6px 8px; font-size: 10px;' }, ['修复']) as HTMLButtonElement;
       const detailBtn = createEl('button', {
         className: 'secondary',
@@ -277,6 +278,7 @@ export function renderAccountManager(root: HTMLElement, ctx: any) {
       }, ['删除']) as HTMLButtonElement;
       actionsDiv.appendChild(checkBtn);
       actionsDiv.appendChild(openBtn);
+      actionsDiv.appendChild(browserBtn);
       actionsDiv.appendChild(fixBtn);
       actionsDiv.appendChild(detailBtn);
       actionsDiv.appendChild(deleteBtn);
@@ -291,6 +293,9 @@ export function renderAccountManager(root: HTMLElement, ctx: any) {
       };
       openBtn.onclick = () => {
         void openAccountLogin(acc, { reason: 'manual_open' });
+      };
+      browserBtn.onclick = () => {
+        void openBrowserOnly(acc);
       };
       fixBtn.onclick = () => {
         void fixAccount(acc);
@@ -418,6 +423,33 @@ export function renderAccountManager(root: HTMLElement, ctx: any) {
       timeoutMs: 0,
     });
     startAutoSyncProfile(account.profileId);
+    return true;
+  }
+
+  async function openBrowserOnly(account: Account) {
+    if (!String(account.profileId || '').trim()) return false;
+    const platform = getPlatformInfo(account.platform);
+    const idleTimeout = 'off';
+    const timeoutSec = Math.max(0, Number(ctx.api?.settings?.timeouts?.loginTimeoutSec || 0));
+    await ctx.api.cmdSpawn({
+      title: `启动浏览器 ${account.alias || account.profileId}`,
+      cwd: '',
+      args: [
+        ctx.api.pathJoin('apps', 'webauto', 'entry', 'profilepool.mjs'),
+        'login-profile',
+        account.profileId,
+        '--url',
+        platform.loginUrl,
+        '--idle-timeout',
+        idleTimeout,
+        '--wait-sync',
+        'false',
+        ...(timeoutSec > 0 ? ['--timeout-sec', String(timeoutSec)] : []),
+        '--keep-session',
+      ],
+      groupKey: 'profilepool',
+      timeoutMs: 0,
+    });
     return true;
   }
 

@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import crypto from 'node:crypto';
+import { spawnSync } from 'node:child_process';
 import type { BrowserContext, Page, Browser } from 'playwright';
 import { ProfileLock } from './ProfileLock.js';
 import { ensurePageRuntime } from './pageRuntime.js';
@@ -1034,7 +1035,21 @@ export class BrowserSession {
     }));
   }
 
-  async newPage(url?: string): Promise<{ index: number; url: string }> {
+  private tryOsNewTabShortcut(): boolean {
+    if (this.options.headless) return false;
+    if (process.platform === 'darwin') {
+      const res = spawnSync('osascript', ['-e', 'tell application "System Events" to keystroke "t" using command down'], { windowsHide: true });
+      return res.status === 0;
+    }
+    if (process.platform === 'win32') {
+      const script = 'Add-Type -AssemblyName System.Windows.Forms; $ws = New-Object -ComObject WScript.Shell; $ws.SendKeys("^t");';
+      const res = spawnSync('powershell', ['-NoProfile', '-Command', script], { windowsHide: true });
+      return res.status === 0;
+    }
+    return false;
+  }
+
+  async newPage(url?: string, options: { strictShortcut?: boolean } = {}): Promise<{ index: number; url: string }> {
     const ctx = this.ensureContext();
     const isMac = process.platform === 'darwin';
     const shortcut = isMac ? 'Meta+t' : 'Control+t';
@@ -1063,16 +1078,30 @@ export class BrowserSession {
 
     let after = ctx.pages().filter((p) => !p.isClosed()).length;
     if (!page || after <= before) {
-      try {
-        page = await ctx.newPage();
-        await page.waitForLoadState('domcontentloaded', { timeout: 8000 }).catch((): any => null);
-      } catch {
-        // ignore fallback errors
+      const waitPage = ctx.waitForEvent('page', { timeout: 8000 }).catch((): any => null);
+      const osShortcutOk = this.tryOsNewTabShortcut();
+      if (osShortcutOk) {
+        page = await waitPage;
       }
-      after = ctx.pages().filter((p) => !p.isClosed()).length;
+      const pagesNow = ctx.pages().filter((p) => !p.isClosed());
+      after = pagesNow.length;
       if (!page && after > before) {
-        const pagesNow = ctx.pages().filter((p) => !p.isClosed());
         page = pagesNow[pagesNow.length - 1] || null;
+      }
+    }
+    if (!page || after <= before) {
+      if (!options?.strictShortcut) {
+        try {
+          page = await ctx.newPage();
+          await page.waitForLoadState('domcontentloaded', { timeout: 8000 }).catch((): any => null);
+        } catch {
+          // ignore fallback errors
+        }
+        after = ctx.pages().filter((p) => !p.isClosed()).length;
+        if (!page && after > before) {
+          const pagesNow = ctx.pages().filter((p) => !p.isClosed());
+          page = pagesNow[pagesNow.length - 1] || null;
+        }
       }
     }
     if (!page || after <= before) {

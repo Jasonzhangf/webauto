@@ -55,8 +55,10 @@ test('account manager exposes platform badge and open\\/fix actions', async () =
   assert.match(src, /const PLATFORM_LABEL/);
   assert.match(src, /\['检查'\]/);
   assert.match(src, /\['打开'\]/);
+  assert.match(src, /\['启动浏览器'\]/);
   assert.match(src, /\['修复'\]/);
   assert.match(src, /function getPlatformInfo/);
   assert.match(src, /openAccountLogin\(account/);
+  assert.match(src, /openBrowserOnly\(account/);
   assert.match(src, /fixAccount\(account/);
 });

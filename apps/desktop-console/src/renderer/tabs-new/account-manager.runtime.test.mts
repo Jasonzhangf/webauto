@@ -219,6 +219,10 @@ test('account manager supports add/check/refresh flows', async () => {
     await flush(2);
     assert.equal(calls.spawns.some((spec) => String(spec?.args?.join(' ') || '').includes('profilepool.mjs login-profile xhs-1')), true);
 
+    findButtonByText(root, '启动浏览器').click();
+    await flush(2);
+    assert.equal(calls.spawns.some((spec) => String(spec?.title || '').includes('启动浏览器')), true);
+
     findButtonByText(root, '修复').click();
     await flush(3);
     assert.equal(calls.sync.length >= 3, true);
