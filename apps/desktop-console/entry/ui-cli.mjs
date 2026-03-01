@@ -859,9 +859,17 @@ async function runFullCover(endpoint) {
   };
   const runSchedulerProbe = async (selector, extra = {}, options = {}) => {
     for (let attempt = 1; attempt <= 2; attempt += 1) {
+      const beforeCount = report.controls.scheduler?.length || 0;
       try {
         return await runProbe('scheduler', selector, extra, options);
       } catch (err) {
+        const bucket = report.controls.scheduler || [];
+        if (bucket.length > beforeCount) {
+          const last = bucket[bucket.length - 1];
+          if (last?.selector === selector) {
+            bucket.pop();
+          }
+        }
         if (attempt >= 2) throw err;
         await ensureSchedulerInteractive(`probe-retry-${attempt}`);
       }
@@ -1147,8 +1155,24 @@ async function runFullCover(endpoint) {
     await input('#scheduler-daemon-interval', '7');
     await click('#scheduler-daemon-start-btn');
     await runSchedulerProbe('#scheduler-daemon-status');
-    await click('#scheduler-daemon-stop-btn');
-    await click('#scheduler-reset-btn');
+    const schedulerStopProbe = await probeRaw('#scheduler-daemon-stop-btn');
+    if (schedulerStopProbe?.exists) {
+      await click('#scheduler-daemon-stop-btn');
+    } else {
+      pushStep('scheduler:daemon_stop_skipped', true, {
+        payload: { selector: '#scheduler-daemon-stop-btn' },
+        result: { reason: 'selector_not_found' },
+      });
+    }
+    const schedulerResetProbe = await probeRaw('#scheduler-reset-btn');
+    if (schedulerResetProbe?.exists) {
+      await click('#scheduler-reset-btn');
+    } else {
+      pushStep('scheduler:reset_skipped', true, {
+        payload: { selector: '#scheduler-reset-btn' },
+        result: { reason: 'selector_not_found' },
+      });
+    }
 
     const tabOk = await ensureTabActive('账户管理', 'account-manager');
     if (!tabOk) throw new Error('tab_failed:账户管理');

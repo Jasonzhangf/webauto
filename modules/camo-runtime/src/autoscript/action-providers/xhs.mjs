@@ -215,7 +215,7 @@ function sanitizeAuthorText(raw, commentText = '') {
   if (!text) return '';
   if (commentText && text === commentText) return '';
   if (text.length > 40) return '';
-  if (/^(回复|展开|收起|查看更多|评论|赞|分享|发送)$/.test(text)) return '';
+  if (/^(回复|展开|收起|查看更多|评论|赞|分享|发�?)$/.test(text)) return '';
   return text;
 }
 
@@ -483,7 +483,7 @@ async function isDetailVisible(profileId) {
       '.note-detail-mask .comments-container',
     ];
     const searchSelectors = ['.note-item', '.search-result-list', '#search-input', '.feeds-page'];
-    const isVisible = (node) => {
+    const isVisible = (node, opts = {}) => {
       if (!(node instanceof Element)) return false;
       const rect = node.getBoundingClientRect?.();
       if (!rect || rect.width <= 1 || rect.height <= 1) return false;
@@ -497,48 +497,203 @@ async function isDetailVisible(profileId) {
       } catch {
         return false;
       }
+      const requireHit = opts?.requireHit !== false;
+      if (!requireHit) return true;
       const sampleX = Math.max(0, Math.min((window.innerWidth || 1) - 1, rect.left + rect.width / 2));
       const sampleY = Math.max(0, Math.min((window.innerHeight || 1) - 1, rect.top + rect.height / 2));
       const top = document.elementFromPoint(sampleX, sampleY);
       if (!top) return false;
       return top === node || node.contains(top) || top.contains(node);
     };
-    const hasVisible = (selectors) => selectors.some((selector) => isVisible(document.querySelector(selector)));
-    const detailVisible = hasVisible(detailSelectors);
-    const searchVisible = hasVisible(searchSelectors);
+    const hasVisible = (selectors, opts) => selectors.some((selector) => isVisible(document.querySelector(selector), opts));
     const href = String(location.href || '');
+    const detailUrlHit = /xsec_token=/i.test(href) || /\\/explore\\//i.test(href) || /\\/discovery\\/item\\//i.test(href);
+    const detailVisible = detailUrlHit || hasVisible(detailSelectors, { requireHit: false });
+    const searchVisible = hasVisible(searchSelectors, { requireHit: true });
     return {
       detailVisible,
       searchVisible,
       detailReady: detailVisible,
       href,
+      detailUrlHit,
     };
   })()`;
   return evaluateReadonly(profileId, script);
 }
 
-async function closeDetailToSearch(profileId, pushTrace = null) {
-  const waitForCloseAnimation = async () => {
-    for (let i = 0; i < 45; i += 1) {
-      const s = await isDetailVisible(profileId);
-      if (s?.detailVisible !== true && s?.searchVisible === true) return true;
-      await sleep(120);
-    }
-    const s = await isDetailVisible(profileId);
-    return s?.detailVisible !== true && s?.searchVisible === true;
-  };
+async function readDetailCloseTarget(profileId) {
+  const selectors = [
+    'button.close-icon',
+    '.note-detail-mask button.close-icon',
+    '.note-detail-mask .close-icon',
+    '.note-detail-close',
+    'button[aria-label*="close"]',
+    '[aria-label*="close"]',
+  ];
+  const script = `(() => {
+    const selectors = ${JSON.stringify(selectors)};
+    const vw = Number(window.innerWidth || 0);
+    const vh = Number(window.innerHeight || 0);
+    const clamp = (value, max) => Math.max(1, Math.min(Math.max(1, max - 1), Math.round(value)));
+    const toPoint = (x, y) => ({ x: clamp(x, vw), y: clamp(y, vh) });
+    const isVisible = (node) => {
+      if (!(node instanceof Element)) return false;
+      const rect = node.getBoundingClientRect?.();
+      if (!rect || rect.width <= 0 || rect.height <= 0) return false;
+      try {
+        const style = window.getComputedStyle(node);
+        if (!style) return false;
+        if (style.display === 'none') return false;
+        if (style.visibility === 'hidden' || style.visibility === 'collapse') return false;
+        const opacity = Number.parseFloat(String(style.opacity || '1'));
+        if (Number.isFinite(opacity) && opacity <= 0.01) return false;
+      } catch {
+        return false;
+      }
+      return true;
+    };
+    const isCloseLike = (node) => {
+      if (!(node instanceof Element)) return false;
+      const cls = String(node.className || '').toLowerCase();
+      const id = String(node.id || '').toLowerCase();
+      const aria = String(node.getAttribute('aria-label') || '').toLowerCase();
+      const title = String(node.getAttribute('title') || '').toLowerCase();
+      return cls.includes('close') || id.includes('close') || aria.includes('close') || title.includes('close');
+    };
+    const samplePoints = (rect) => {
+      const right = Number.isFinite(rect.right) ? rect.right : rect.left + rect.width;
+      const bottom = Number.isFinite(rect.bottom) ? rect.bottom : rect.top + rect.height;
+      const offset = Math.max(2, Math.min(8, rect.width / 4, rect.height / 4));
+      const points = [
+        toPoint(rect.left + rect.width / 2, rect.top + rect.height / 2),
+        toPoint(rect.left + offset, rect.top + offset),
+        toPoint(right - offset, rect.top + offset),
+        toPoint(rect.left + offset, bottom - offset),
+        toPoint(right - offset, bottom - offset),
+      ];
+      const seen = new Set();
+      return points.filter((point) => {
+        const key = point.x + ':' + point.y;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+    };
+    const describeHit = (hit) => ({
+      tag: hit ? String(hit.tagName || '') : '',
+      className: hit ? String(hit.className || '') : '',
+    });
+    const matchesHit = (node, hit) => {
+      if (!(hit instanceof Element)) return false;
+      return hit === node || node.contains(hit) || hit.contains(node) || isCloseLike(hit);
+    };
 
-  for (let attempt = 1; attempt <= 4; attempt += 1) {
+    let fallback = null;
+    for (const selector of selectors) {
+      const nodes = Array.from(document.querySelectorAll(selector));
+      for (const node of nodes) {
+        if (!isVisible(node)) continue;
+        const rect = node.getBoundingClientRect();
+        if (!rect || rect.width <= 0 || rect.height <= 0) continue;
+        const points = samplePoints(rect);
+        for (const point of points) {
+          const hit = document.elementFromPoint(point.x, point.y);
+          if (!matchesHit(node, hit)) continue;
+          const hitDesc = describeHit(hit);
+          return {
+            ok: true,
+            target: {
+              selector,
+              center: point,
+              hitOk: true,
+              hitTag: hitDesc.tag,
+              hitClass: hitDesc.className,
+              rect: {
+                left: Number(rect.left || 0),
+                top: Number(rect.top || 0),
+                width: Number(rect.width || 0),
+                height: Number(rect.height || 0),
+              },
+              viewport: { width: vw, height: vh },
+            },
+          };
+        }
+        if (!fallback) {
+          const center = toPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+          const hit = document.elementFromPoint(center.x, center.y);
+          const hitDesc = describeHit(hit);
+          fallback = {
+            selector,
+            center,
+            hitOk: false,
+            hitTag: hitDesc.tag,
+            hitClass: hitDesc.className,
+            rect: {
+              left: Number(rect.left || 0),
+              top: Number(rect.top || 0),
+              width: Number(rect.width || 0),
+              height: Number(rect.height || 0),
+            },
+            viewport: { width: vw, height: vh },
+          };
+        }
+      }
+    }
+
+    const probePoints = [
+      toPoint(vw - 24, 20),
+      toPoint(vw - 24, 40),
+      toPoint(vw - 40, 20),
+    ];
+    for (const point of probePoints) {
+      const hit = document.elementFromPoint(point.x, point.y);
+      if (!isCloseLike(hit)) continue;
+      const hitDesc = describeHit(hit);
+      return {
+        ok: true,
+        target: {
+          selector: '__top_right_probe__',
+          center: point,
+          hitOk: true,
+          hitTag: hitDesc.tag,
+          hitClass: hitDesc.className,
+          rect: { left: point.x, top: point.y, width: 0, height: 0 },
+          viewport: { width: vw, height: vh },
+        },
+      };
+    }
+
+    if (fallback) return { ok: true, target: fallback };
+    return { ok: false };
+  })()`;
+  const payload = await evaluateReadonly(profileId, script);
+  if (!payload || payload.ok !== true || !payload.target?.center) return null;
+  return payload.target;
+}
+
+async function closeDetailToSearch(profileId, pushTrace = null) {
+  const waitForCloseOnce = async (maxWaitMs = 3200) => {
+    const startedAt = Date.now();
+    while ((Date.now() - startedAt) < maxWaitMs) {
+      const s = await isDetailVisible(profileId);
+      if (s?.detailVisible !== true) return s;
+      await sleep(randomBetween(160, 320));
+    }
+    return isDetailVisible(profileId);
+  };
+  const initial = await isDetailVisible(profileId);
+  if (initial?.detailVisible !== true) {
+    return initial?.searchVisible === true;
+  }
+  for (let attempt = 1; attempt <= 5; attempt += 1) {
     await pressKey(profileId, 'Escape');
     if (typeof pushTrace === 'function') {
       pushTrace({ kind: 'key', stage: 'collect_links_close', key: 'Escape', attempt });
     }
-    await sleep(randomBetween(220, 480));
-    if (await waitForCloseAnimation()) return true;
+    const after = await waitForCloseOnce(3200);
+    if (after?.searchVisible === true) return true;
   }
-
-  const snapshot = await isDetailVisible(profileId);
-  return snapshot?.detailVisible !== true && snapshot?.searchVisible === true;
+  return false;
 }
 
 async function readSearchInput(profileId) {
@@ -670,6 +825,22 @@ async function readSearchCandidateByNoteId(profileId, noteId, options = {}) {
         && rect.top >= visibilityMargin
         && rect.right <= safeRight
         && rect.bottom <= safeBottom;
+      const centerX = Math.max(1, Math.min(Math.max(1, vw - 1), Math.round(rect.left + rect.width / 2)));
+      const centerY = Math.max(1, Math.min(Math.max(1, vh - 1), Math.round(rect.top + rect.height / 2)));
+      let centerHitOk = false;
+      let centerHitTag = '';
+      let centerHitClass = '';
+      try {
+        const hit = document.elementFromPoint(centerX, centerY);
+        if (hit) {
+          centerHitTag = String(hit.tagName || '');
+          centerHitClass = String(hit.className || '');
+          const hitCover = typeof hit.closest === 'function' ? hit.closest('.note-item a.cover') : null;
+          centerHitOk = hit === cover || cover.contains(hit) || hitCover === cover;
+        }
+      } catch {
+        centerHitOk = false;
+      }
       const visibleLeft = Math.max(safeLeft, rect.left);
       const visibleTop = Math.max(safeTop, rect.top);
       const visibleRight = Math.min(safeRight, rect.right);
@@ -681,11 +852,14 @@ async function readSearchCandidateByNoteId(profileId, noteId, options = {}) {
       const visibleRatio = Math.max(0, Math.min(1, visibleArea / totalArea));
       const visibleEnough = visibleRatio >= minVisibleRatio;
       let recommendedDeltaY = 0;
-      if (!visibleEnough) {
+      if (!visibleEnough || !centerHitOk) {
         if (rect.top < visibilityMargin) {
           recommendedDeltaY = rect.top - visibilityMargin;
         } else if (rect.bottom > safeBottom) {
           recommendedDeltaY = rect.bottom - safeBottom;
+        }
+        if (!recommendedDeltaY) {
+          recommendedDeltaY = rect.top < visibilityMargin ? rect.top - visibilityMargin : 160;
         }
       }
       return {
@@ -697,10 +871,13 @@ async function readSearchCandidateByNoteId(profileId, noteId, options = {}) {
         visibleEnough,
         visibleRatio,
         minVisibleRatio,
+        centerHitOk,
+        centerHitTag,
+        centerHitClass,
         recommendedDeltaY,
         center: {
-          x: Math.max(1, Math.min(Math.max(1, vw - 1), Math.round(rect.left + rect.width / 2))),
-          y: Math.max(1, Math.min(Math.max(1, vh - 1), Math.round(rect.top + rect.height / 2))),
+          x: centerX,
+          y: centerY,
         },
         rect: {
           left: Number(rect.left || 0),
@@ -721,6 +898,38 @@ async function readSearchCandidateByNoteId(profileId, noteId, options = {}) {
   return evaluateReadonly(profileId, script);
 }
 
+async function readSearchHitAtPoint(profileId, point) {
+  const x = Math.max(1, Math.round(Number(point?.x) || 1));
+  const y = Math.max(1, Math.round(Number(point?.y) || 1));
+  const script = `(() => {
+    const x = ${JSON.stringify(x)};
+    const y = ${JSON.stringify(y)};
+    const hit = document.elementFromPoint(x, y);
+    if (!hit) return { ok: false, reason: 'NO_HIT' };
+    const cover = typeof hit.closest === 'function' ? hit.closest('.note-item a.cover') : null;
+    if (!(cover instanceof Element)) {
+      return {
+        ok: false,
+        reason: 'HIT_NOT_COVER',
+        hitTag: hit.tagName || '',
+        hitClass: String(hit.className || ''),
+      };
+    }
+    const href = String(cover.getAttribute('href') || '').trim();
+    const seg = href.split('/').filter(Boolean).pop() || '';
+    const noteId = (seg.split('?')[0].split('#')[0] || '').trim();
+    return {
+      ok: true,
+      noteId,
+      href,
+      hitTag: hit.tagName || '',
+      hitClass: String(hit.className || ''),
+      coverClass: String(cover.className || ''),
+    };
+  })()`;
+  return evaluateReadonly(profileId, script);
+}
+
 async function ensureSearchCandidateFullyVisible(profileId, noteId, options = {}) {
   const maxScrollAttempts = Math.max(1, Number(options.maxScrollAttempts ?? 3) || 3);
   const visibilityMargin = Math.max(0, Number(options.visibilityMargin ?? 8) || 8);
@@ -734,7 +943,7 @@ async function ensureSearchCandidateFullyVisible(profileId, noteId, options = {}
     if (!latest?.found) {
       return { ok: false, code: 'NOTE_TARGET_NOT_FOUND', autoScrolled: attempt, target: null };
     }
-    if (latest.inViewport === true && latest.visibleEnough === true) {
+    if (latest.inViewport === true && latest.visibleEnough === true && latest.centerHitOk === true) {
       return { ok: true, code: 'TARGET_READY', autoScrolled: attempt, target: latest };
     }
     if (attempt >= maxScrollAttempts) break;
@@ -1068,9 +1277,9 @@ async function readCommentsSnapshot(profileId) {
       '.note-detail-page',
     ];
     const patterns = [
-      /([0-9]+(?:\\.[0-9]+)?(?:万|w|W)?)\\s*条?评论/,
+      /([0-9]+(?:\\.[0-9]+)?(?:万|w|W)?)\\s*�?评论/,
       /评论\\s*([0-9]+(?:\\.[0-9]+)?(?:万|w|W)?)/,
-      /共\\s*([0-9]+(?:\\.[0-9]+)?(?:万|w|W)?)\\s*条/,
+      /共\\s*([0-9]+(?:\\.[0-9]+)?(?:万|w|W)?)\\s*�?,
     ];
     let expectedCommentsCount = null;
     for (const selector of scopeSelectors) {
@@ -1161,7 +1370,7 @@ async function readCommentsSnapshot(profileId) {
         '.interactions .like-wrapper',
         '.interactions [class*="like"]',
         'button[class*="like"]',
-        '[aria-label*="赞"]',
+        '[aria-label*="�?]',
       ];
       for (const selector of selectors) {
         const node = item.querySelector(selector);
@@ -1174,7 +1383,7 @@ async function readCommentsSnapshot(profileId) {
       const className = String(node.className || '').toLowerCase();
       const ariaPressed = String(node.getAttribute?.('aria-pressed') || '').toLowerCase();
       const text = String(node.textContent || '');
-      return /(?:^|\\s)like-active(?:\\s|$)/.test(className) || ariaPressed === 'true' || /已赞|取消赞/.test(text);
+      return /(?:^|\\s)like-active(?:\\s|$)/.test(className) || ariaPressed === 'true' || /已赞|取消�?.test(text);
     };
 
     const rows = [];
@@ -1229,7 +1438,7 @@ async function readLikeTargetByIndex(profileId, index) {
         '.interactions .like-wrapper',
         '.interactions [class*="like"]',
         'button[class*="like"]',
-        '[aria-label*="赞"]',
+        '[aria-label*="�?]',
       ];
       for (const selector of selectors) {
         const node = item.querySelector(selector);
@@ -1242,7 +1451,7 @@ async function readLikeTargetByIndex(profileId, index) {
       const className = String(node.className || '').toLowerCase();
       const ariaPressed = String(node.getAttribute?.('aria-pressed') || '').toLowerCase();
       const text = String(node.textContent || '');
-      return /(?:^|\\s)like-active(?:\\s|$)/.test(className) || ariaPressed === 'true' || /已赞|取消赞/.test(text);
+      return /(?:^|\\s)like-active(?:\\s|$)/.test(className) || ariaPressed === 'true' || /已赞|取消�?.test(text);
     };
     const nodes = Array.from(document.querySelectorAll('.comment-item, [class*="comment-item"]'));
     const target = nodes[index];
@@ -1375,6 +1584,165 @@ async function captureScreenshotToFile({ profileId, filePath }) {
   }
 }
 
+function sanitizeFileComponent(value, fallback = 'unknown') {
+  const text = String(value || '').trim();
+  if (!text) return fallback;
+  const cleaned = text.replace(/[\\/:*?"<>|]+/g, '_').trim();
+  return cleaned || fallback;
+}
+
+function buildTimeoutDomSnapshotScript() {
+  return `(() => {
+    const detailSelectors = [
+      '.note-detail-mask',
+      '.note-detail-page',
+      '.note-detail-dialog',
+      '.note-detail-mask .detail-container',
+      '.note-detail-mask .media-container',
+      '.note-detail-mask .note-scroller',
+      '.note-detail-mask .note-content',
+      '.note-detail-mask .interaction-container',
+      '.note-detail-mask .comments-container',
+    ];
+    const searchSelectors = ['.note-item', '.search-result-list', '#search-input', '.feeds-page'];
+    const isVisible = (node, opts = {}) => {
+      if (!(node instanceof Element)) return false;
+      const rect = node.getBoundingClientRect?.();
+      if (!rect || rect.width <= 1 || rect.height <= 1) return false;
+      try {
+        const style = window.getComputedStyle(node);
+        if (!style) return false;
+        if (style.display === 'none') return false;
+        if (style.visibility === 'hidden' || style.visibility === 'collapse') return false;
+        const opacity = Number.parseFloat(String(style.opacity || '1'));
+        if (Number.isFinite(opacity) && opacity <= 0.01) return false;
+      } catch {
+        return false;
+      }
+      const requireHit = opts?.requireHit !== false;
+      if (!requireHit) return true;
+      const sampleX = Math.max(0, Math.min((window.innerWidth || 1) - 1, rect.left + rect.width / 2));
+      const sampleY = Math.max(0, Math.min((window.innerHeight || 1) - 1, rect.top + rect.height / 2));
+      const top = document.elementFromPoint(sampleX, sampleY);
+      if (!top) return false;
+      return top === node || node.contains(top) || top.contains(node);
+    };
+    const hasVisible = (selectors, opts) => selectors.some((selector) => isVisible(document.querySelector(selector), opts));
+    const href = String(location.href || '');
+    const detailUrlHit = /xsec_token=/i.test(href) || /\/explore\//i.test(href) || /\/discovery\/item\//i.test(href);
+    const detailVisible = detailUrlHit || hasVisible(detailSelectors, { requireHit: false });
+    const searchVisible = hasVisible(searchSelectors, { requireHit: true });
+    const closeNode = document.querySelector('.note-detail-mask .close-icon, .note-detail-mask button.close-icon, .note-detail-close');
+    const closeRect = closeNode ? closeNode.getBoundingClientRect() : null;
+    const html = document.documentElement ? document.documentElement.outerHTML : '';
+    const active = document.activeElement instanceof Element ? document.activeElement : null;
+    return {
+      href,
+      title: String(document.title || ''),
+      readyState: String(document.readyState || ''),
+      viewport: {
+        width: Number(window.innerWidth || 0),
+        height: Number(window.innerHeight || 0),
+        scrollX: Number(window.scrollX || 0),
+        scrollY: Number(window.scrollY || 0),
+      },
+      detailVisible,
+      searchVisible,
+      counts: {
+        noteItem: Number(document.querySelectorAll('.note-item').length || 0),
+        commentItem: Number(document.querySelectorAll('.comment-item, [class*="comment-item"]').length || 0),
+      },
+      active: active
+        ? {
+          tag: String(active.tagName || ''),
+          id: String(active.id || ''),
+          className: String(active.className || '').slice(0, 180),
+        }
+        : null,
+      closeRect: closeRect
+        ? {
+          left: Number(closeRect.left || 0),
+          top: Number(closeRect.top || 0),
+          width: Number(closeRect.width || 0),
+          height: Number(closeRect.height || 0),
+        }
+        : null,
+      domLength: html.length,
+      domSnippet: html.slice(0, 50000),
+      capturedAt: new Date().toISOString(),
+    };
+  })()`;
+}
+
+async function executeTimeoutSnapshotOperation({ profileId, params = {}, context = {} }) {
+  const state = getProfileState(profileId);
+  const output = resolveXhsOutputContext({
+    params,
+    state,
+    noteId: state.currentNoteId || params.noteId,
+  });
+  const diagnosticsDir = path.join(output.keywordDir, 'diagnostics', 'timeouts');
+  await ensureDir(diagnosticsDir);
+
+  const runId = String(params.runId || context.runId || '').trim();
+  const operationId = String(params.operationId || params.operationAction || 'operation').trim();
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const baseName = `timeout-${sanitizeFileComponent(runId, 'run')}-${sanitizeFileComponent(operationId, 'operation')}-${stamp}`;
+  const jsonPath = path.join(diagnosticsDir, `${baseName}.json`);
+  const pngPath = path.join(diagnosticsDir, `${baseName}.png`);
+
+  let domSnapshot = null;
+  let domError = null;
+  try {
+    domSnapshot = await evaluateReadonly(profileId, buildTimeoutDomSnapshotScript());
+  } catch (err) {
+    domError = String(err?.message || err || 'dom_snapshot_failed');
+  }
+
+  const screenshotPath = await captureScreenshotToFile({ profileId, filePath: pngPath });
+
+  const payload = {
+    runId: runId || null,
+    operationId: params.operationId || null,
+    operationAction: params.operationAction || null,
+    timeoutMs: Number(params.timeoutMs || 0),
+    failureCode: params.failureCode || null,
+    failureMessage: params.failureMessage || null,
+    subscriptionId: params.subscriptionId || null,
+    keyword: params.keyword || output.keyword,
+    env: params.env || output.env,
+    outputRoot: output.root,
+    capturedAt: new Date().toISOString(),
+    screenshotPath,
+    domError,
+    domSnapshot,
+  };
+
+  await writeJsonFile(jsonPath, payload);
+
+  emitOperationProgress(context, {
+    kind: 'timeout_snapshot',
+    jsonPath,
+    screenshotPath,
+    href: domSnapshot?.href || null,
+    detailVisible: domSnapshot?.detailVisible === true,
+    searchVisible: domSnapshot?.searchVisible === true,
+  });
+
+  return {
+    ok: true,
+    code: 'OPERATION_DONE',
+    message: 'xhs_timeout_snapshot done',
+    data: {
+      jsonPath,
+      screenshotPath,
+      domError,
+      detailVisible: domSnapshot?.detailVisible === true,
+      searchVisible: domSnapshot?.searchVisible === true,
+    },
+  };
+}
+
 function buildAssertLoggedInScript(params = {}) {
   const selectors = Array.isArray(params.loginSelectors) && params.loginSelectors.length > 0
     ? params.loginSelectors.map((item) => String(item || '').trim()).filter(Boolean)
@@ -1430,9 +1798,9 @@ function buildAssertLoggedInScript(params = {}) {
           const text = normalize(node.textContent || '');
           const title = normalize(node.getAttribute('title') || '');
           const aria = normalize(node.getAttribute('aria-label') || '');
-          return ['我', '我的', '个人主页', '我的主页'].includes(text)
-            || ['我', '我的', '个人主页', '我的主页'].includes(title)
-            || ['我', '我的', '个人主页', '我的主页'].includes(aria);
+          return ['�?, '我的', '个人主页', '我的主页'].includes(text)
+            || ['�?, '我的', '个人主页', '我的主页'].includes(title)
+            || ['�?, '我的', '个人主页', '我的主页'].includes(aria);
         });
       if (selfAnchor) {
         const href = normalize(selfAnchor.getAttribute('href') || '');
@@ -1746,15 +2114,85 @@ async function executeOpenDetailOperation({
       }
       return false;
     };
+    const waitDetailReadyOnce = async (maxWaitMs = 3200) => {
+      const startedAt = Date.now();
+      while ((Date.now() - startedAt) < maxWaitMs) {
+        const snapshot = await isDetailVisible(profileId);
+        if (snapshot?.detailReady === true) return true;
+        await sleep(randomBetween(pollDelayMinMs, pollDelayMaxMs));
+      }
+      return false;
+    };
+    const recoverSearchViewportAfterOpenFailure = async ({ noteId, reason, attempt }) => {
+      const snapshot = await isDetailVisible(profileId).catch(() => null);
+      if (snapshot?.detailVisible === true) {
+        emitOperationProgress(context, {
+          kind: 'block',
+          stage: 'collect_links',
+          block: 'detail_open_detected',
+          detailVisible: true,
+          noteId: String(noteId || '').trim() || null,
+          reason,
+          attempt,
+        });
+        await closeDetailToSearch(profileId, pushTrace).catch(() => false);
+        await sleep(Math.max(180, Math.floor(seedCollectSettleMs / 2)));
+      }
+      const pageUpCount = Math.max(3, Math.min(5, Math.floor(randomBetween(3, 6))));
+      for (let i = 0; i < pageUpCount; i += 1) {
+        await pressKey(profileId, 'PageUp');
+        await sleep(100);
+      }
+      await pressKey(profileId, 'PageDown');
+      await sleep(Math.max(200, Math.floor(seedCollectSettleMs / 2)));
+    };
     const clickOpenDetailWithRetry = async ({
       noteId,
       point,
       progressStage,
       traceMode = '',
+      recoverOnFailure = false,
     }) => {
-      const targetPoint = {
+      let targetPoint = {
         x: Math.max(1, Math.round(Number(point?.x) || 1)),
         y: Math.max(1, Math.round(Number(point?.y) || 1)),
+      };
+      const normalizedNoteId = String(noteId || '').trim();
+      const verifyAnchor = async (block) => {
+        const hit = await readSearchHitAtPoint(profileId, targetPoint).catch(() => null);
+        const actualNoteId = String(hit?.noteId || '').trim();
+        const ok = hit?.ok === true && (!normalizedNoteId || actualNoteId === normalizedNoteId);
+        emitOperationProgress(context, {
+          kind: 'block',
+          stage: progressStage,
+          block,
+          noteId: normalizedNoteId || null,
+          actualNoteId: actualNoteId || null,
+          ok,
+          point: { ...targetPoint },
+          hitTag: hit?.hitTag || null,
+          hitClass: hit?.hitClass || null,
+          coverClass: hit?.coverClass || null,
+          reason: hit?.reason || null,
+        });
+        return { ok, hit };
+      };
+      const ensureAnchorMatch = async (block) => {
+        let check = await verifyAnchor(block);
+        if (check.ok) return true;
+        if (!normalizedNoteId) return false;
+        const refreshed = await readSearchCandidateByNoteId(profileId, normalizedNoteId, {
+          visibilityMargin: 8,
+          minVisibleRatio: openDetailMinVisibleRatio,
+        }).catch(() => null);
+        if (refreshed?.found && refreshed.center) {
+          targetPoint = {
+            x: Math.max(1, Math.round(Number(refreshed.center.x) || 1)),
+            y: Math.max(1, Math.round(Number(refreshed.center.y) || 1)),
+          };
+        }
+        check = await verifyAnchor(`${block}_retry`);
+        return check.ok;
       };
       let lastError = null;
       for (let attempt = 1; attempt <= 3; attempt += 1) {
@@ -1779,6 +2217,10 @@ async function executeOpenDetailOperation({
             attempt,
           });
         }
+        const anchorOk = await ensureAnchorMatch('open_detail_pre_anchor');
+        if (!anchorOk) {
+          throw new Error('OPEN_DETAIL_PRE_ANCHOR_MISMATCH');
+        }
         pushTrace({
           kind: 'click',
           stage: 'open_detail',
@@ -1794,11 +2236,31 @@ async function executeOpenDetailOperation({
           });
         } catch (error) {
           lastError = error;
+          const openedAfterClickError = await waitDetailReadyOnce(3200);
+          if (openedAfterClickError) return;
+          if (recoverOnFailure) {
+            await recoverSearchViewportAfterOpenFailure({
+              noteId,
+              reason: String(lastError?.message || lastError || 'CLICK_POINT_FAILED'),
+              attempt,
+            });
+          }
           continue;
         }
-        const detailReady = await waitDetailReady();
+        const detailReady = await waitDetailReadyOnce(3200);
         if (detailReady) return;
+        const postAnchorOk = await ensureAnchorMatch('open_detail_post_anchor');
+        if (!postAnchorOk) {
+          throw new Error('OPEN_DETAIL_POST_ANCHOR_MISMATCH');
+        }
         lastError = new Error('DETAIL_OPEN_TIMEOUT');
+        if (recoverOnFailure) {
+          await recoverSearchViewportAfterOpenFailure({
+            noteId,
+            reason: 'DETAIL_OPEN_TIMEOUT',
+            attempt,
+          });
+        }
       }
       if (lastError instanceof Error) throw lastError;
       throw new Error(String(lastError || 'DETAIL_OPEN_FAILED'));
@@ -1881,6 +2343,18 @@ async function executeOpenDetailOperation({
         return rows[Math.floor(Math.random() * rows.length)] || null;
       };
       const runSearchReadyBlock = async () => {
+        let detailClosed = false;
+        const detailSnapshot = await isDetailVisible(profileId);
+        if (detailSnapshot?.detailVisible === true) {
+          emitOperationProgress(context, {
+            kind: 'block',
+            stage: 'collect_links',
+            block: 'detail_open_detected',
+            detailVisible: true,
+          });
+          detailClosed = await closeDetailToSearch(profileId, pushTrace).catch(() => false);
+          await sleep(Math.max(180, Math.floor(seedCollectSettleMs / 2)));
+        }
         const snapshot = await readSearchViewportReady(profileId);
         const readySelector = String(snapshot?.readySelector || '').trim();
         const visibleNoteCount = Math.max(0, Number(snapshot?.visibleNoteCount || 0) || 0);
@@ -1890,10 +2364,20 @@ async function executeOpenDetailOperation({
           block: 'search_ready',
           readySelector: readySelector || null,
           visibleNoteCount,
+          detailClosed,
         });
         if (!readySelector && visibleNoteCount <= 0) {
-          throw new Error('SEARCH_VIEWPORT_NOT_READY');
+          emitOperationProgress(context, {
+            kind: 'block',
+            stage: 'collect_links',
+            block: 'search_not_ready',
+            readySelector: readySelector || null,
+            visibleNoteCount,
+            detailClosed,
+          });
+          return false;
         }
+        return true;
       };
       const runListSelectBlock = async () => {
         const rows = await collectVisibleRows();
@@ -1982,6 +2466,9 @@ async function executeOpenDetailOperation({
           fullyVisible: visibility.target?.fullyVisible === true,
           visibleEnough: visibility.ok,
           visibleRatio: Number(visibility?.target?.visibleRatio || 0),
+          centerHitOk: visibility.target?.centerHitOk === true,
+          centerHitTag: visibility.target?.centerHitTag || null,
+          centerHitClass: visibility.target?.centerHitClass || null,
           minVisibleRatio: Number.isFinite(visibility?.target?.minVisibleRatio)
             ? Number(visibility.target.minVisibleRatio)
             : 0.5,
@@ -2000,6 +2487,7 @@ async function executeOpenDetailOperation({
           point: visibility.target?.center || next.center,
           progressStage: 'collect_links',
           traceMode: 'collect',
+          recoverOnFailure: false,
         });
         await sleepRandom(postOpenDelayMinMs, postOpenDelayMaxMs, pushTrace, 'open_detail_post_open', { noteId, mode: 'collect' });
         return { beforeUrl };
@@ -2032,7 +2520,22 @@ async function executeOpenDetailOperation({
           noteId: resolvedNoteId,
         });
         const closed = await closeDetailToSearch(profileId, pushTrace);
-        if (!closed) throw new Error(`DETAIL_CLOSE_FAILED:${resolvedNoteId}`);
+        emitOperationProgress(context, {
+          kind: 'block',
+          stage: 'collect_links',
+          block: 'close_detail_result',
+          noteId: resolvedNoteId,
+          closed,
+        });
+        if (!closed) {
+          emitOperationProgress(context, {
+            kind: 'block',
+            stage: 'collect_links',
+            block: 'close_detail_failed',
+            noteId: resolvedNoteId,
+          });
+          await sleep(Math.max(220, Math.floor(seedCollectSettleMs / 2)));
+        }
       };
 
       while (collectedSet.size < targetCount) {
@@ -2049,7 +2552,11 @@ async function executeOpenDetailOperation({
           throw new Error(`COLLECT_LINKS_STALL:${collectedSet.size}/${targetCount}`);
         }
 
-        await runSearchReadyBlock();
+        const searchReady = await runSearchReadyBlock();
+        if (!searchReady) {
+          await sleep(Math.max(220, Math.floor(seedCollectSettleMs / 2)));
+          continue;
+        }
         const selection = await runListSelectBlock();
         if (!selection || selection.kind === 'continue') continue;
         if (selection.kind === 'done') break;
@@ -2060,6 +2567,17 @@ async function executeOpenDetailOperation({
           openResult = await runOpenDetailBlock(next);
         } catch (openErr) {
           const reason = String(openErr?.message || openErr || 'OPEN_DETAIL_FAILED');
+          const fatalOpen = /DETAIL_OPEN_TIMEOUT|OPEN_DETAIL_PRE_ANCHOR_MISMATCH|OPEN_DETAIL_POST_ANCHOR_MISMATCH/.test(reason);
+          if (fatalOpen) {
+            emitOperationProgress(context, {
+              kind: 'block',
+              stage: 'collect_links',
+              block: 'open_detail_fatal',
+              noteId: nextNoteId || null,
+              reason,
+            });
+            throw openErr;
+          }
           if (nextNoteId) nonCollectibleSet.add(nextNoteId);
           lastProgressAt = Date.now();
           emitOperationProgress(context, {
@@ -2084,7 +2602,35 @@ async function executeOpenDetailOperation({
           await sleep(Math.max(220, Math.floor(seedCollectSettleMs / 2)));
           continue;
         }
-        const captured = await runCaptureUrlBlock(next, openResult.beforeUrl);
+        let captured = null;
+        try {
+          captured = await runCaptureUrlBlock(next, openResult.beforeUrl);
+        } catch (captureErr) {
+          const reason = String(captureErr?.message || captureErr || 'CAPTURE_URL_FAILED');
+          if (nextNoteId) nonCollectibleSet.add(nextNoteId);
+          lastProgressAt = Date.now();
+          emitOperationProgress(context, {
+            kind: 'block',
+            stage: 'collect_links',
+            block: 'capture_url_skip',
+            noteId: nextNoteId || null,
+            reason,
+          });
+          pushTrace({
+            kind: 'warn',
+            stage: 'capture_url_skip',
+            noteId: nextNoteId || null,
+            reason,
+          });
+          await closeDetailToSearch(profileId, pushTrace).catch(() => false);
+          await paintSearchCandidates(profileId, {
+            candidateNoteIds: selection.candidateIds,
+            selectedNoteId: '',
+            processedNoteIds: normalizeNoteIdList(Array.from(nonCollectibleSet)),
+          });
+          await sleep(Math.max(220, Math.floor(seedCollectSettleMs / 2)));
+          continue;
+        }
         const resolvedNoteId = captured.resolvedNoteId;
 
         collectedSet.add(resolvedNoteId);
@@ -2431,6 +2977,9 @@ async function executeOpenDetailOperation({
       fullyVisible: visibility.target?.fullyVisible === true,
       visibleEnough: visibility.ok,
       visibleRatio: Number(visibility?.target?.visibleRatio || 0),
+      centerHitOk: visibility.target?.centerHitOk === true,
+      centerHitTag: visibility.target?.centerHitTag || null,
+      centerHitClass: visibility.target?.centerHitClass || null,
       minVisibleRatio: Number.isFinite(visibility?.target?.minVisibleRatio)
         ? Number(visibility.target.minVisibleRatio)
         : 0.5,
@@ -3452,11 +4001,11 @@ async function executeCloseDetailOperation({ profileId, context = {} }) {
   const waitForCloseAnimation = async () => {
     for (let i = 0; i < 45; i += 1) {
       const s = await isDetailVisible(profileId);
-      if (s?.detailVisible !== true && s?.searchVisible === true) return true;
+      if (s?.detailVisible !== true) return true;
       await sleep(120);
     }
     const s = await isDetailVisible(profileId);
-    return s?.detailVisible !== true && s?.searchVisible === true;
+    return s?.detailVisible !== true;
   };
 
   for (let attempt = 1; attempt <= 4; attempt += 1) {
@@ -3478,6 +4027,88 @@ async function executeCloseDetailOperation({ profileId, context = {} }) {
         data: {
           closed: true,
           via: 'escape',
+          attempts: attempt,
+          searchVisible,
+          searchCount: Number(metrics.searchCount || 0),
+          rollbackCount: Number(metrics.rollbackCount || 0),
+          returnToSearchCount: Number(metrics.returnToSearchCount || 0),
+          returnedToSearch: searchVisible,
+          ...exitMeta,
+        },
+      };
+    }
+  }
+
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
+    const target = await readDetailCloseTarget(profileId);
+    if (!target?.center) break;
+    if (target.hitOk !== true) {
+      pushTrace({
+        kind: 'guard',
+        stage: 'xhs_close_detail',
+        reason: 'close_target_not_confirmed',
+        hitOk: target.hitOk === true,
+        hitTag: target.hitTag || '',
+        hitClass: target.hitClass || '',
+        selector: target.selector || '',
+        attempt,
+      });
+      break;
+    }
+    await clickPoint(profileId, target.center, { steps: 2, nudgeBefore: attempt > 1 });
+    pushTrace({
+      kind: 'click',
+      stage: 'xhs_close_detail',
+      target: target.selector || 'detail_close',
+      attempt,
+    });
+    await sleep(randomBetween(240, 520));
+    if (await waitForCloseAnimation()) {
+      const s = await isDetailVisible(profileId);
+      const searchVisible = s?.searchVisible === true;
+      if (searchVisible) {
+        metrics.returnToSearchCount += 1;
+        metrics.lastReturnToSearchAt = new Date().toISOString();
+      }
+      emitActionTrace(context, actionTrace, { stage: 'xhs_close_detail' });
+      return {
+        ok: true,
+        code: 'OPERATION_DONE',
+        message: 'xhs_close_detail done',
+        data: {
+          closed: true,
+          via: 'close_button',
+          attempts: attempt,
+          searchVisible,
+          searchCount: Number(metrics.searchCount || 0),
+          rollbackCount: Number(metrics.rollbackCount || 0),
+          returnToSearchCount: Number(metrics.returnToSearchCount || 0),
+          returnedToSearch: searchVisible,
+          ...exitMeta,
+        },
+      };
+    }
+  }
+
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
+    await callAPI('page:back', { profileId });
+    pushTrace({ kind: 'nav', stage: 'xhs_close_detail', action: 'page:back', attempt });
+    await sleep(randomBetween(240, 520));
+    if (await waitForCloseAnimation()) {
+      const s = await isDetailVisible(profileId);
+      const searchVisible = s?.searchVisible === true;
+      if (searchVisible) {
+        metrics.returnToSearchCount += 1;
+        metrics.lastReturnToSearchAt = new Date().toISOString();
+      }
+      emitActionTrace(context, actionTrace, { stage: 'xhs_close_detail' });
+      return {
+        ok: true,
+        code: 'OPERATION_DONE',
+        message: 'xhs_close_detail done',
+        data: {
+          closed: true,
+          via: 'browser_back',
           attempts: attempt,
           searchVisible,
           searchCount: Number(metrics.searchCount || 0),
@@ -3527,6 +4158,7 @@ const XHS_ACTION_HANDLERS = {
   xhs_comment_like: executeCommentLikeOperation,
   xhs_comment_reply: executeCommentReplyOperation,
   xhs_close_detail: executeCloseDetailOperation,
+  xhs_timeout_snapshot: executeTimeoutSnapshotOperation,
 };
 
 export function isXhsAutoscriptAction(action) {
@@ -3559,3 +4191,5 @@ export async function executeXhsAutoscriptOperation({
 export function __unsafe_getProfileStateForTests(profileId) {
   return getProfileState(profileId);
 }
+
+

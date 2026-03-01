@@ -689,6 +689,61 @@ export class AutoscriptRunner {
     };
   }
 
+  async captureTimeoutDiagnostics({ operation, event, result, context, timeoutMs }) {
+    if (typeof this.executeExternalOperation !== 'function') return null;
+    const metadata = this.script?.metadata && typeof this.script.metadata === 'object'
+      ? this.script.metadata
+      : {};
+    const params = {
+      ...metadata,
+      runId: this.runId,
+      operationId: operation?.id || null,
+      operationAction: operation?.action || null,
+      timeoutMs,
+      failureCode: result?.code || 'OPERATION_TIMEOUT',
+      failureMessage: result?.message || 'operation timed out',
+      subscriptionId: event?.subscriptionId || null,
+    };
+    const snapshotContext = {
+      ...context,
+      runId: this.runId,
+      runtime: this.runtimeContext,
+    };
+    try {
+      const snapshot = await withTimeout(
+        this.executeExternalOperation({
+          profileId: this.profileId,
+          action: 'xhs_timeout_snapshot',
+          params,
+          operation,
+          context: snapshotContext,
+        }),
+        15000,
+        () => ({
+          ok: false,
+          code: 'TIMEOUT_SNAPSHOT_TIMEOUT',
+          message: 'timeout snapshot capture timed out',
+          data: { timeoutMs: 15000 },
+        }),
+      );
+      this.log('autoscript:operation_timeout_snapshot', {
+        operationId: operation?.id || null,
+        action: operation?.action || null,
+        code: snapshot?.code || null,
+        ok: snapshot?.ok === true,
+        data: snapshot?.data || null,
+      });
+      return snapshot;
+    } catch (err) {
+      this.log('autoscript:operation_timeout_snapshot_failed', {
+        operationId: operation?.id || null,
+        action: operation?.action || null,
+        message: String(err?.message || err || 'timeout snapshot failed'),
+      });
+      return null;
+    }
+  }
+
   async runOperation(operation, event) {
     const retry = operation.retry || {};
     const baseAttempts = Math.max(1, Number(retry.attempts) || 1);
@@ -897,6 +952,26 @@ export class AutoscriptRunner {
         message: result.message || 'operation failed',
       });
 
+      const failureCode = String(result?.code || '').trim().toUpperCase();
+      if (failureCode === 'OPERATION_TIMEOUT') {
+        await this.captureTimeoutDiagnostics({
+          operation,
+          event,
+          result,
+          context,
+          timeoutMs,
+        });
+        this.log('autoscript:operation_timeout_stop', {
+          operationId: operation.id,
+          action: operation.action,
+          attempt,
+          timeoutMs,
+          message: result.message || 'operation timed out',
+        });
+        this.stop('operation_timeout');
+        return { ok: false, terminalState: 'failed', result };
+      }
+
       const recoveryResult = await this.runRecovery(operation, event, result);
       if (recoveryResult.ok) {
         this.log('autoscript:operation_recovered', {
@@ -915,7 +990,6 @@ export class AutoscriptRunner {
         });
       }
 
-      const failureCode = String(result?.code || '').trim().toUpperCase();
       const nonBlockingTimeout = failureCode === 'OPERATION_TIMEOUT' && this.isNonBlockingOperation(operation);
       if (nonBlockingTimeout && timeoutGraceUsed < timeoutGraceRetries) {
         timeoutGraceUsed += 1;

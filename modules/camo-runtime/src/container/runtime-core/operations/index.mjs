@@ -419,14 +419,29 @@ async function executeVerifySubscriptions({ profileId, params }) {
   }
 
   if (acrossPages && hasPageFilter && requireMatchedPages && matchedPageCount === 0) {
-    return asErrorPayload('SUBSCRIPTION_MISMATCH', 'no page matched verify_subscriptions pageUrl filter', {
-      acrossPages,
-      pageUrlIncludes,
-      pageUrlExcludes,
-      pageUrlRegex: pageUrlRegex || null,
-      pageUrlNotRegex: pageUrlNotRegex || null,
-      pages: pagesResult,
-    });
+    const fallback = await collectForCurrentPage();
+    const fallbackOk = fallback.matches.every((item) => item.count >= item.minCount);
+    if (fallbackOk) {
+      matchedPageCount = 1;
+      overallOk = true;
+      pagesResult.push({
+        index: Number.isFinite(activeIndex) ? activeIndex : null,
+        urlMatched: false,
+        fallback: 'dom_match',
+        ok: true,
+        ...fallback,
+      });
+    } else {
+      return asErrorPayload('SUBSCRIPTION_MISMATCH', 'no page matched verify_subscriptions pageUrl filter', {
+        acrossPages,
+        pageUrlIncludes,
+        pageUrlExcludes,
+        pageUrlRegex: pageUrlRegex || null,
+        pageUrlNotRegex: pageUrlNotRegex || null,
+        pages: pagesResult,
+        fallback,
+      });
+    }
   }
 
   if (!overallOk) {
