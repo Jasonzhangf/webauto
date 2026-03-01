@@ -1,4 +1,4 @@
-﻿import path from 'node:path';
+import path from 'node:path';
 import fsp from 'node:fs/promises';
 import { asErrorPayload, normalizeArray } from '../../container/runtime-core/utils.mjs';
 import { callAPI } from '../../utils/browser-service.mjs';
@@ -226,7 +226,7 @@ function sanitizeAuthorText(raw, commentText = '') {
   if (!text) return '';
   if (commentText && text === commentText) return '';
   if (text.length > 40) return '';
-  if (/^(回复|展开|收起|查看更多|评论|赞|分享|发�?)$/.test(text)) return '';
+  if (/^(回复|展开|收起|查看更多|评论|赞|分享|发送)$/.test(text)) return '';
   return text;
 }
 
@@ -483,18 +483,6 @@ async function resolveSelectorTarget(profileId, selectors, options = {}) {
 async function isDetailVisible(profileId) {
   const script = `(() => {
     const detailSelectors = [
-      '#noteContainer',
-      '.note-container',
-      '.note-scroller',
-      '.note-content',
-      '#detail-title',
-      '#detail-desc',
-      '.author-wrapper',
-      '.author',
-      '.username',
-      '.interaction-container',
-      '.comments-container',
-      '#comment',
       '.note-detail-mask',
       '.note-detail-page',
       '.note-detail-dialog',
@@ -530,22 +518,15 @@ async function isDetailVisible(profileId) {
     };
     const hasVisible = (selectors, opts) => selectors.some((selector) => isVisible(document.querySelector(selector), opts));
     const href = String(location.href || '');
-    const detailUrlHit = /xsec_token=/i.test(href) || /\/explore\//i.test(href) || /\/discovery\/item\//i.test(href);
-    const anchorSelectors = ['#detail-title', '#detail-desc', '.note-content', '.note-text'];
-    const authorSelectors = ['.author-wrapper', '.author', '.username'];
-    const hasAnchor = anchorSelectors.some((selector) => Boolean(document.querySelector(selector)));
-    const hasAuthor = authorSelectors.some((selector) => Boolean(document.querySelector(selector)));
-    const detailVisible = hasVisible(detailSelectors, { requireHit: false });
-    const detailReady = detailVisible && hasAnchor && hasAuthor;
+    const detailUrlHit = /xsec_token=/i.test(href) || /\\/explore\\//i.test(href) || /\\/discovery\\/item\\//i.test(href);
+    const detailVisible = detailUrlHit || hasVisible(detailSelectors, { requireHit: false });
     const searchVisible = hasVisible(searchSelectors, { requireHit: true });
     return {
       detailVisible,
       searchVisible,
-      detailReady,
+      detailReady: detailVisible,
       href,
       detailUrlHit,
-      hasAnchor,
-      hasAuthor,
     };
   })()`;
   return evaluateReadonly(profileId, script);
@@ -1138,22 +1119,13 @@ async function readDetailSnapshot(profileId) {
       }
       return true;
     };
-    const detailRoot = document.querySelector('#noteContainer')
-      || document.querySelector('.note-container')
-      || document.querySelector('.note-detail-mask')
+    const detailRoot = document.querySelector('.note-detail-mask')
       || document.querySelector('.note-detail-page')
       || document.querySelector('.note-detail-dialog')
       || document.body;
-    const text = (selectors) => {
-      const list = Array.isArray(selectors) ? selectors : [selectors];
-      for (const selector of list) {
-        const value = normalize(detailRoot?.querySelector(selector)?.textContent || '');
-        if (value) return value;
-      }
-      return '';
-    };
-    const title = text(['#detail-title', '.note-title', '.title']).slice(0, 200);
-    const content = text(['#detail-desc', '.note-content', '.desc', '.note-text']);
+    const text = (selector) => normalize(detailRoot?.querySelector(selector)?.textContent || '');
+    const title = text('.note-title').slice(0, 200);
+    const content = text('.note-content');
     const href = String(location.href || '');
     const noteMatch = href.match(/\\/explore\\/([^/?#]+)/);
     const imageNodes = Array.from(detailRoot?.querySelectorAll?.('.note-content img, .swiper-wrapper img, .media-container img, img') || []);
@@ -1181,8 +1153,6 @@ async function readDetailSnapshot(profileId) {
       || detailRoot?.querySelector?.('.comment-item')
       || detailRoot?.querySelector?.('[class*="comment-item"]')
       || detailRoot?.querySelector?.('.note-scroller')
-      || detailRoot?.querySelector?.('#comment')
-      || detailRoot?.querySelector?.('.interaction-container')
     );
     return {
       title,
@@ -1206,12 +1176,6 @@ async function readExpandButtons(profileId) {
   const script = `(() => {
     const minVisibleRatio = 0.5;
     const selectors = [
-      '#noteContainer .show-more',
-      '#noteContainer .reply-expand',
-      '#noteContainer [class*="expand"]',
-      '.note-container .show-more',
-      '.note-container .reply-expand',
-      '.note-container [class*="expand"]',
       '.note-detail-mask .show-more',
       '.note-detail-mask .reply-expand',
       '.note-detail-mask [class*="expand"]',
@@ -1297,18 +1261,6 @@ async function readCommentsSnapshot(profileId) {
       return true;
     };
     const detailSelectors = [
-      '#noteContainer',
-      '.note-container',
-      '.note-scroller',
-      '.note-content',
-      '#detail-title',
-      '#detail-desc',
-      '.author-wrapper',
-      '.author',
-      '.username',
-      '.interaction-container',
-      '.comments-container',
-      '#comment',
       '.note-detail-mask',
       '.note-detail-page',
       '.note-detail-dialog',
@@ -1328,12 +1280,6 @@ async function readCommentsSnapshot(profileId) {
       || document.querySelector('.note-scroller')
     );
     const scopeSelectors = [
-      '#noteContainer',
-      '.note-container',
-      '.note-scroller',
-      '.interaction-container',
-      '.comments-container',
-      '#comment',
       '.note-detail-mask .interaction-container',
       '.note-detail-mask .comments-container',
       '.note-detail-page .interaction-container',
@@ -1342,9 +1288,9 @@ async function readCommentsSnapshot(profileId) {
       '.note-detail-page',
     ];
     const patterns = [
-      /([0-9]+(?:\\.[0-9]+)?(?:万|w|W)?)\\s*�?评论/,
+      /([0-9]+(?:\.[0-9]+)?(?:万|w|W)?)\s*条?评论/,
       /评论\\s*([0-9]+(?:\\.[0-9]+)?(?:万|w|W)?)/,
-      /共\\s*([0-9]+(?:\\.[0-9]+)?(?:万|w|W)?)\\s*�?,
+      /共\s*([0-9]+(?:\.[0-9]+)?(?:万|w|W)?)\s*条/,
     ];
     let expectedCommentsCount = null;
     for (const selector of scopeSelectors) {
@@ -1435,7 +1381,7 @@ async function readCommentsSnapshot(profileId) {
         '.interactions .like-wrapper',
         '.interactions [class*="like"]',
         'button[class*="like"]',
-        '[aria-label*="�?]',
+        '[aria-label*="赞"]',
       ];
       for (const selector of selectors) {
         const node = item.querySelector(selector);
@@ -1448,7 +1394,7 @@ async function readCommentsSnapshot(profileId) {
       const className = String(node.className || '').toLowerCase();
       const ariaPressed = String(node.getAttribute?.('aria-pressed') || '').toLowerCase();
       const text = String(node.textContent || '');
-      return /(?:^|\\s)like-active(?:\\s|$)/.test(className) || ariaPressed === 'true' || /已赞|取消�?.test(text);
+      return /(?:^|\s)like-active(?:\s|$)/.test(className) || ariaPressed === 'true' || /已赞|取消赞/.test(text);
     };
 
     const rows = [];
@@ -1503,7 +1449,7 @@ async function readLikeTargetByIndex(profileId, index) {
         '.interactions .like-wrapper',
         '.interactions [class*="like"]',
         'button[class*="like"]',
-        '[aria-label*="�?]',
+        '[aria-label*="赞"]',
       ];
       for (const selector of selectors) {
         const node = item.querySelector(selector);
@@ -1516,7 +1462,7 @@ async function readLikeTargetByIndex(profileId, index) {
       const className = String(node.className || '').toLowerCase();
       const ariaPressed = String(node.getAttribute?.('aria-pressed') || '').toLowerCase();
       const text = String(node.textContent || '');
-      return /(?:^|\\s)like-active(?:\\s|$)/.test(className) || ariaPressed === 'true' || /已赞|取消�?.test(text);
+      return /(?:^|\s)like-active(?:\s|$)/.test(className) || ariaPressed === 'true' || /已赞|取消赞/.test(text);
     };
     const nodes = Array.from(document.querySelectorAll('.comment-item, [class*="comment-item"]'));
     const target = nodes[index];
@@ -1659,18 +1605,6 @@ function sanitizeFileComponent(value, fallback = 'unknown') {
 function buildTimeoutDomSnapshotScript() {
   return `(() => {
     const detailSelectors = [
-      '#noteContainer',
-      '.note-container',
-      '.note-scroller',
-      '.note-content',
-      '#detail-title',
-      '#detail-desc',
-      '.author-wrapper',
-      '.author',
-      '.username',
-      '.interaction-container',
-      '.comments-container',
-      '#comment',
       '.note-detail-mask',
       '.note-detail-page',
       '.note-detail-dialog',
@@ -1707,11 +1641,7 @@ function buildTimeoutDomSnapshotScript() {
     const hasVisible = (selectors, opts) => selectors.some((selector) => isVisible(document.querySelector(selector), opts));
     const href = String(location.href || '');
     const detailUrlHit = /xsec_token=/i.test(href) || /\/explore\//i.test(href) || /\/discovery\/item\//i.test(href);
-    const anchorSelectors = ['#detail-title', '#detail-desc', '.note-content', '.note-text'];
-    const authorSelectors = ['.author-wrapper', '.author', '.username'];
-    const hasAnchor = anchorSelectors.some((selector) => Boolean(document.querySelector(selector)));
-    const hasAuthor = authorSelectors.some((selector) => Boolean(document.querySelector(selector)));
-    const detailVisible = hasVisible(detailSelectors, { requireHit: false });
+    const detailVisible = detailUrlHit || hasVisible(detailSelectors, { requireHit: false });
     const searchVisible = hasVisible(searchSelectors, { requireHit: true });
     const closeNode = document.querySelector('.note-detail-mask .close-icon, .note-detail-mask button.close-icon, .note-detail-close');
     const closeRect = closeNode ? closeNode.getBoundingClientRect() : null;
@@ -1879,9 +1809,9 @@ function buildAssertLoggedInScript(params = {}) {
           const text = normalize(node.textContent || '');
           const title = normalize(node.getAttribute('title') || '');
           const aria = normalize(node.getAttribute('aria-label') || '');
-          return ['�?, '我的', '个人主页', '我的主页'].includes(text)
-            || ['�?, '我的', '个人主页', '我的主页'].includes(title)
-            || ['�?, '我的', '个人主页', '我的主页'].includes(aria);
+          return ['我', '我的', '个人主页', '我的主页'].includes(text)
+            || ['我', '我的', '个人主页', '我的主页'].includes(title)
+            || ['我', '我的', '个人主页', '我的主页'].includes(aria);
         });
       if (selfAnchor) {
         const href = normalize(selfAnchor.getAttribute('href') || '');
