@@ -289,7 +289,7 @@ async function openTabBestEffort({
     ? { profileId, url: seedUrl }
     : { profileId };
   try {
-    await callApiWithTimeout('newPage', payload, Math.max(1200, Math.min(apiTimeoutMs, 6000)));
+    await callApiWithTimeout('newPage', payload, Math.max(6000, apiTimeoutMs));
     await settle();
     const newPageOpened = await waitForTab();
     if (newPageOpened.ok) {
@@ -322,7 +322,7 @@ export async function executeTabPoolOperation({ profileId, action, params = {}, 
     const shortcutTimeoutMs = resolveTimeoutMs(params.shortcutTimeoutMs, SHORTCUT_OPEN_TIMEOUT_MS);
     const tabAppearTimeoutMs = resolveTimeoutMs(
       params.tabAppearTimeoutMs,
-      Math.max(8000, openDelayMs + 7000),
+      Math.max(20000, openDelayMs + 15000),
     );
     const syncConfig = resolveViewportSyncConfig({ params });
     const configuredSeedUrl = normalizeSeedUrl(String(params.url || '').trim());
