@@ -270,30 +270,11 @@ async function openTabBestEffort({
   };
 
   let openError = null;
-  const shortcutResult = await tryOpenTabWithShortcut(profileId, shortcutTimeoutMs);
-  if (shortcutResult.ok) {
-    await settle();
-    const shortcutOpened = await waitForTab();
-    if (shortcutOpened.ok) {
-      await seedNewestTabIfNeeded({
-        profileId,
-        seedUrl,
-        openDelayMs,
-        apiTimeoutMs,
-        navigationTimeoutMs,
-        syncConfig,
-      });
-      return { ok: true, mode: `shortcut:${shortcutResult.key}`, error: null };
-    }
-  } else {
-    openError = shortcutResult.error;
-  }
-
   const payload = seedUrl
     ? { profileId, url: seedUrl }
     : { profileId };
   try {
-    await callApiWithTimeout('newPage', payload, Math.max(6000, apiTimeoutMs));
+    await callApiWithTimeout('newPage', payload, Math.max(30000, apiTimeoutMs));
     await settle();
     const newPageOpened = await waitForTab();
     if (newPageOpened.ok) {
@@ -309,6 +290,25 @@ async function openTabBestEffort({
     }
   } catch (err) {
     openError = err;
+  }
+
+  const shortcutResult = await tryOpenTabWithShortcut(profileId, shortcutTimeoutMs);
+  if (shortcutResult.ok) {
+    await settle();
+    const shortcutOpened = await waitForTab();
+    if (shortcutOpened.ok) {
+      await seedNewestTabIfNeeded({
+        profileId,
+        seedUrl,
+        openDelayMs,
+        apiTimeoutMs,
+        navigationTimeoutMs,
+        syncConfig,
+      });
+      return { ok: true, mode: `shortcut:${shortcutResult.key}`, error: null };
+    }
+  } else if (!openError) {
+    openError = shortcutResult.error;
   }
 
   return { ok: false, mode: null, error: openError };
@@ -345,6 +345,8 @@ export async function executeTabPoolOperation({ profileId, action, params = {}, 
       if (recoveredListUrl) fallbackSeedUrl = recoveredListUrl;
     }
     fallbackSeedUrl = normalizeSeedUrl(fallbackSeedUrl);
+    let openFailures = 0;
+    const maxOpenFailures = Math.max(3, tabCount);
 
     while (pages.length < tabCount) {
       const beforeCount = pages.length;
@@ -362,14 +364,24 @@ export async function executeTabPoolOperation({ profileId, action, params = {}, 
       listed = await callApiWithTimeout('page:list', { profileId }, apiTimeoutMs);
       ({ pages, activeIndex } = extractPageList(listed));
       if (!openResult.ok || pages.length <= beforeCount) {
-        return asErrorPayload('OPERATION_FAILED', 'new_tab_failed', {
-          tabCount,
-          beforeCount,
-          afterCount: pages.length,
-          seedUrl: fallbackSeedUrl || null,
-          mode: openResult.mode || null,
-          reason: openResult.error?.message || 'cannot open new tab',
-        });
+        openFailures += 1;
+        if (openFailures >= maxOpenFailures) {
+          return asErrorPayload('OPERATION_FAILED', 'new_tab_failed', {
+            tabCount,
+            beforeCount,
+            afterCount: pages.length,
+            seedUrl: fallbackSeedUrl || null,
+            mode: openResult.mode || null,
+            reason: openResult.error?.message || 'cannot open new tab',
+            attempts: openFailures,
+          });
+        }
+        if (openDelayMs > 0) {
+          await sleep(Math.min(openDelayMs, 1200));
+        } else {
+          await sleep(300);
+        }
+        continue;
       }
     }
 
