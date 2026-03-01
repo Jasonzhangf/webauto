@@ -4317,7 +4317,7 @@ async function executeCloseDetailOperation({ profileId, context = {} }) {
     return s?.detailVisible !== true;
   };
 
-  for (let attempt = 1; attempt <= 4; attempt += 1) {
+  for (let attempt = 1; attempt <= 5; attempt += 1) {
     await pressKey(profileId, 'Escape');
     pushTrace({ kind: 'key', stage: 'xhs_close_detail', key: 'Escape', attempt });
     await sleep(randomBetween(220, 480));
@@ -4347,107 +4347,29 @@ async function executeCloseDetailOperation({ profileId, context = {} }) {
       };
     }
   }
-
-  for (let attempt = 1; attempt <= 2; attempt += 1) {
-    const target = await readDetailCloseTarget(profileId);
-    if (!target?.center) break;
-    if (target.hitOk !== true) {
-      pushTrace({
-        kind: 'guard',
-        stage: 'xhs_close_detail',
-        reason: 'close_target_not_confirmed',
-        hitOk: target.hitOk === true,
-        hitTag: target.hitTag || '',
-        hitClass: target.hitClass || '',
-        selector: target.selector || '',
-        attempt,
-      });
-      break;
-    }
-    await clickPoint(profileId, target.center, { steps: 2, nudgeBefore: attempt > 1 });
-    pushTrace({
-      kind: 'click',
-      stage: 'xhs_close_detail',
-      target: target.selector || 'detail_close',
-      attempt,
-    });
-    await sleep(randomBetween(240, 520));
-    if (await waitForCloseAnimation()) {
-      const s = await isDetailVisible(profileId);
-      const searchVisible = s?.searchVisible === true;
-      if (searchVisible) {
-        metrics.returnToSearchCount += 1;
-        metrics.lastReturnToSearchAt = new Date().toISOString();
-      }
-      emitActionTrace(context, actionTrace, { stage: 'xhs_close_detail' });
-      return {
-        ok: true,
-        code: 'OPERATION_DONE',
-        message: 'xhs_close_detail done',
-        data: {
-          closed: true,
-          via: 'close_button',
-          attempts: attempt,
-          searchVisible,
-          searchCount: Number(metrics.searchCount || 0),
-          rollbackCount: Number(metrics.rollbackCount || 0),
-          returnToSearchCount: Number(metrics.returnToSearchCount || 0),
-          returnedToSearch: searchVisible,
-          ...exitMeta,
-        },
-      };
-    }
-  }
-
-  for (let attempt = 1; attempt <= 2; attempt += 1) {
-    await callAPI('page:back', { profileId });
-    pushTrace({ kind: 'nav', stage: 'xhs_close_detail', action: 'page:back', attempt });
-    await sleep(randomBetween(240, 520));
-    if (await waitForCloseAnimation()) {
-      const s = await isDetailVisible(profileId);
-      const searchVisible = s?.searchVisible === true;
-      if (searchVisible) {
-        metrics.returnToSearchCount += 1;
-        metrics.lastReturnToSearchAt = new Date().toISOString();
-      }
-      emitActionTrace(context, actionTrace, { stage: 'xhs_close_detail' });
-      return {
-        ok: true,
-        code: 'OPERATION_DONE',
-        message: 'xhs_close_detail done',
-        data: {
-          closed: true,
-          via: 'browser_back',
-          attempts: attempt,
-          searchVisible,
-          searchCount: Number(metrics.searchCount || 0),
-          rollbackCount: Number(metrics.rollbackCount || 0),
-          returnToSearchCount: Number(metrics.returnToSearchCount || 0),
-          returnedToSearch: searchVisible,
-          ...exitMeta,
-        },
-      };
-    }
-  }
-
   const finalSnapshot = await isDetailVisible(profileId);
-  emitActionTrace(context, actionTrace, { stage: 'xhs_close_detail' });
-  return {
-    ok: true,
-    code: 'OPERATION_DONE',
-    message: 'xhs_close_detail done',
-    data: {
-      closed: false,
-      via: 'escape_failed',
-      detailVisible: finalSnapshot?.detailVisible === true,
-      searchVisible: finalSnapshot?.searchVisible === true,
-      searchCount: Number(metrics.searchCount || 0),
-      rollbackCount: Number(metrics.rollbackCount || 0),
-      returnToSearchCount: Number(metrics.returnToSearchCount || 0),
-      returnedToSearch: false,
-      ...exitMeta,
+  await executeTimeoutSnapshotOperation({
+    profileId,
+    params: {
+      runId: context.runId,
+      operationId: 'close_detail',
+      operationAction: 'xhs_close_detail',
+      failureCode: 'CLOSE_DETAIL_TIMEOUT',
+      failureMessage: 'detail not closed after escape retries',
+      keyword: state.keyword || null,
+      env: context?.params?.env,
     },
-  };
+    context,
+  });
+  emitActionTrace(context, actionTrace, { stage: 'xhs_close_detail' });
+  return asErrorPayload('OPERATION_FAILED', 'CLOSE_DETAIL_TIMEOUT', {
+    detailVisible: finalSnapshot?.detailVisible === true,
+    searchVisible: finalSnapshot?.searchVisible === true,
+    searchCount: Number(metrics.searchCount || 0),
+    rollbackCount: Number(metrics.rollbackCount || 0),
+    returnToSearchCount: Number(metrics.returnToSearchCount || 0),
+    ...exitMeta,
+  });
 }
 
 async function handleRaiseError({ params }) {
