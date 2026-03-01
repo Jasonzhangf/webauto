@@ -1,12 +1,12 @@
-/**
+﻿/**
  * Workflow Block: XiaohongshuFullCollectBlock
  *
- * Phase 3-4 编排：在搜索结果页批量打开详情 → 提取详情 → 采集评论 → 持久化 → 关闭详情。
+ * Phase 3-4 缂栨帓锛氬湪鎼滅储缁撴灉椤垫壒閲忔墦寮€璇︽儏 鈫?鎻愬彇璇︽儏 鈫?閲囬泦璇勮 鈫?鎸佷箙鍖?鈫?鍏抽棴璇︽儏銆?
  *
- * 约定：
- * - 已由上游步骤完成 EnsureSession / EnsureLogin / WaitSearchPermit / GoToSearch；
- * - 本 Block 不做任何 URL 构造导航，只通过容器点击进入详情；
- * - 所有点击/滚动/输入均走系统级能力（container:operation / keyboard:press / mouse:wheel）。
+ * 绾﹀畾锛?
+ * - 宸茬敱涓婃父姝ラ瀹屾垚 EnsureSession / EnsureLogin / WaitSearchPermit / GoToSearch锛?
+ * - 鏈?Block 涓嶅仛浠讳綍 URL 鏋勯€犲鑸紝鍙€氳繃瀹瑰櫒鐐瑰嚮杩涘叆璇︽儏锛?
+ * - 鎵€鏈夌偣鍑?婊氬姩/杈撳叆鍧囪蛋绯荤粺绾ц兘鍔涳紙container:operation / keyboard:press / PageDown/PageUp锛夈€?
  */
 
 import { execute as collectSearchList } from './CollectSearchListBlock.js';
@@ -205,7 +205,7 @@ export async function execute(input: XiaohongshuFullCollectInput): Promise<Xiaoh
   }
 
   async function ensureClosed(): Promise<boolean> {
-    // 已在搜索结果页，直接视为关闭成功
+    // 宸插湪鎼滅储缁撴灉椤碉紝鐩存帴瑙嗕负鍏抽棴鎴愬姛
     const url0 = await getCurrentUrl();
     if (url0.includes('/search_result') && urlMatchesKeyword(url0)) {
       return true;
@@ -300,7 +300,7 @@ export async function execute(input: XiaohongshuFullCollectInput): Promise<Xiaoh
     const raw = url || '';
     if (!raw.includes('/search_result')) return false;
 
-    // 严格等于：必须能解析出 keyword=... 且解码后完全等于目标 keyword
+    // 涓ユ牸绛変簬锛氬繀椤昏兘瑙ｆ瀽鍑?keyword=... 涓旇В鐮佸悗瀹屽叏绛変簬鐩爣 keyword
     try {
       const u = new URL(raw);
       const kw = u.searchParams.get('keyword');
@@ -308,7 +308,7 @@ export async function execute(input: XiaohongshuFullCollectInput): Promise<Xiaoh
       const decodedKw = safeDecodeURIComponent(safeDecodeURIComponent(kw)).trim();
       return decodedKw === String(keyword || '').trim();
     } catch {
-      // 兼容某些情况下 keyword 可能被双重编码导致 URL 解析失败
+      // 鍏煎鏌愪簺鎯呭喌涓?keyword 鍙兘琚弻閲嶇紪鐮佸鑷?URL 瑙ｆ瀽澶辫触
       const decoded = safeDecodeURIComponent(safeDecodeURIComponent(raw));
       if (!decoded.includes('/search_result')) return false;
       try {
@@ -357,7 +357,7 @@ export async function execute(input: XiaohongshuFullCollectInput): Promise<Xiaoh
   async function scrollSearchList(direction: 'down' | 'up', amount: number): Promise<boolean> {
     const before = await getSearchListScrollState();
 
-    // ✅ 系统级滚动：优先走容器 scroll operation
+    // 鉁?绯荤粺绾ф粴鍔細浼樺厛璧板鍣?scroll operation
     try {
       const op = await controllerAction('container:operation', {
         containerId: 'xiaohongshu_search.search_result_list',
@@ -376,7 +376,7 @@ export async function execute(input: XiaohongshuFullCollectInput): Promise<Xiaoh
           Math.abs(after.feedsY - before.feedsY) >= 10);
       return ok && moved;
     } catch {
-      // fallback：PageUp/PageDown（系统级）
+      // fallback锛歅ageUp/PageDown锛堢郴缁熺骇锛?
       try {
         await controllerAction('keyboard:press', {
           profileId: sessionId,
@@ -396,7 +396,7 @@ export async function execute(input: XiaohongshuFullCollectInput): Promise<Xiaoh
     }
   }
 
-  // 1) 逐屏处理：每次只采集当前视口内的卡片（maxScrollRounds=1），处理完再滚动下一屏
+  // 1) 閫愬睆澶勭悊锛氭瘡娆″彧閲囬泦褰撳墠瑙嗗彛鍐呯殑鍗＄墖锛坢axScrollRounds=1锛夛紝澶勭悊瀹屽啀婊氬姩涓嬩竴灞?
   let scrollSteps = 0;
   let stagnantRounds = 0;
   let noScrollMoveRounds = 0;
@@ -437,7 +437,7 @@ export async function execute(input: XiaohongshuFullCollectInput): Promise<Xiaoh
     const list = await collectSearchList({
       sessionId,
       targetCount: Math.min(remaining, 30),
-      maxScrollRounds: 1, // 只采集当前视口，避免 domIndex 漂移/虚拟列表导致 selector 不存在
+      maxScrollRounds: 1, // 鍙噰闆嗗綋鍓嶈鍙ｏ紝閬垮厤 domIndex 婕傜Щ/铏氭嫙鍒楄〃瀵艰嚧 selector 涓嶅瓨鍦?
       serviceUrl,
     });
 
@@ -477,7 +477,7 @@ export async function execute(input: XiaohongshuFullCollectInput): Promise<Xiaoh
 
     let processedThisRound = 0;
 
-    // 倒序处理：优先处理当前更可能在视口内的卡片
+    // 鍊掑簭澶勭悊锛氫紭鍏堝鐞嗗綋鍓嶆洿鍙兘鍦ㄨ鍙ｅ唴鐨勫崱鐗?
     for (const item of list.items.slice().reverse()) {
       if (persistedCount >= targetCount) break;
 
@@ -503,8 +503,8 @@ export async function execute(input: XiaohongshuFullCollectInput): Promise<Xiaoh
       try {
         const beforePersistCount = persistedCount;
 
-        // 开发阶段：严格禁止 keyword 漂移。若在处理列表项前 URL 已变为其它 keyword（search_result），立即停止并保留调试信息。
-        // 另外：若此时仍停留在详情页（/explore），优先判定为“未能退出详情”，直接 fail-fast。
+        // 寮€鍙戦樁娈碉細涓ユ牸绂佹 keyword 婕傜Щ銆傝嫢鍦ㄥ鐞嗗垪琛ㄩ」鍓?URL 宸插彉涓哄叾瀹?keyword锛坰earch_result锛夛紝绔嬪嵆鍋滄骞朵繚鐣欒皟璇曚俊鎭€?
+        // 鍙﹀锛氳嫢姝ゆ椂浠嶅仠鐣欏湪璇︽儏椤碉紙/explore锛夛紝浼樺厛鍒ゅ畾涓衡€滄湭鑳介€€鍑鸿鎯呪€濓紝鐩存帴 fail-fast銆?
         const urlBeforeOpen = await getCurrentUrl();
         if (urlBeforeOpen && urlBeforeOpen.includes('/explore/')) {
           await saveEnsureClosedDebug('unexpected_in_detail_before_open_detail', {
@@ -558,7 +558,7 @@ export async function execute(input: XiaohongshuFullCollectInput): Promise<Xiaoh
             error: opened.error || 'OpenDetailBlock failed',
           });
 
-          // 开发阶段：不做兜底纠错/自动补偿。任何“打开详情失败”（尤其是风控/验证码/误点）都应立即停下，保留证据排查。
+          // 寮€鍙戦樁娈碉細涓嶅仛鍏滃簳绾犻敊/鑷姩琛ュ伩銆備换浣曗€滄墦寮€璇︽儏澶辫触鈥濓紙灏ゅ叾鏄鎺?楠岃瘉鐮?璇偣锛夐兘搴旂珛鍗冲仠涓嬶紝淇濈暀璇佹嵁鎺掓煡銆?
           const closed = await ensureClosed();
           if (!closed) return buildStuckInDetailResult('stuck_in_detail_after_open_detail_failed');
 
@@ -654,8 +654,8 @@ export async function execute(input: XiaohongshuFullCollectInput): Promise<Xiaoh
           ...(persisted.success ? {} : { error: persisted.error || 'PersistXhsNoteBlock failed' }),
         });
 
-        // OCR + merged.md 后台并行：与后续的“开详情/抓评论”并行，不阻塞主流程。
-        // 注意：仅做本地文件处理，不涉及浏览器操作，不会触发风控。
+        // OCR + merged.md 鍚庡彴骞惰锛氫笌鍚庣画鐨勨€滃紑璇︽儏/鎶撹瘎璁衡€濆苟琛岋紝涓嶉樆濉炰富娴佺▼銆?
+        // 娉ㄦ剰锛氫粎鍋氭湰鍦版枃浠跺鐞嗭紝涓嶆秹鍙婃祻瑙堝櫒鎿嶄綔锛屼笉浼氳Е鍙戦鎺с€?
         if (persisted.success && ocrQueue && persisted.outputDir) {
           const noteDir = String(persisted.outputDir);
           const noteIdForJob = String(opened.noteId);
@@ -735,7 +735,7 @@ export async function execute(input: XiaohongshuFullCollectInput): Promise<Xiaoh
           };
         }
 
-        // 每次成功后立即进入下一轮（重新采集当前视口），避免列表重渲染导致 selector/href 失效
+        // 姣忔鎴愬姛鍚庣珛鍗宠繘鍏ヤ笅涓€杞紙閲嶆柊閲囬泦褰撳墠瑙嗗彛锛夛紝閬垮厤鍒楄〃閲嶆覆鏌撳鑷?selector/href 澶辨晥
         if (persistedCount > beforePersistCount) {
           break;
         }
@@ -771,7 +771,7 @@ export async function execute(input: XiaohongshuFullCollectInput): Promise<Xiaoh
 
     if (persistedCount >= targetCount) break;
 
-    // 若连续多轮无新增，先尝试“回滚一次再下滚”来触发虚拟列表重排（不改变 keyword，不做纠错）
+    // 鑻ヨ繛缁杞棤鏂板锛屽厛灏濊瘯鈥滃洖婊氫竴娆″啀涓嬫粴鈥濇潵瑙﹀彂铏氭嫙鍒楄〃閲嶆帓锛堜笉鏀瑰彉 keyword锛屼笉鍋氱籂閿欙級
     if (stagnantRounds >= 4 && bounceAttempts < 3) {
       bounceAttempts += 1;
       console.log(`[FullCollect] stagnantRounds=${stagnantRounds}, bounce=${bounceAttempts} (up then down)`);
@@ -785,8 +785,8 @@ export async function execute(input: XiaohongshuFullCollectInput): Promise<Xiaoh
     if (!scrolled) {
       noScrollMoveRounds += 1;
       console.log(`[FullCollect] scroll did not move (round=${noScrollMoveRounds})`);
-      // 滚不动：往回滚几次再继续往前滚，触发虚拟列表重排
-      // 注意：这里只是滚动策略，不做 keyword 纠错/重搜
+      // 婊氫笉鍔細寰€鍥炴粴鍑犳鍐嶇户缁線鍓嶆粴锛岃Е鍙戣櫄鎷熷垪琛ㄩ噸鎺?
+      // 娉ㄦ剰锛氳繖閲屽彧鏄粴鍔ㄧ瓥鐣ワ紝涓嶅仛 keyword 绾犻敊/閲嶆悳
       for (let j = 0; j < 3; j += 1) {
         await scrollSearchList('up', 520);
       }
@@ -796,7 +796,7 @@ export async function execute(input: XiaohongshuFullCollectInput): Promise<Xiaoh
         continue;
       }
 
-      // 连续 3 次滚动都不动：基本可判定触底/卡死，退出避免无限循环
+      // 杩炵画 3 娆℃粴鍔ㄩ兘涓嶅姩锛氬熀鏈彲鍒ゅ畾瑙﹀簳/鍗℃锛岄€€鍑洪伩鍏嶆棤闄愬惊鐜?
       if (noScrollMoveRounds >= 3) {
         await saveSearchListScrollDebug('search_list_scroll_stuck', {
           persistedCount,
@@ -834,7 +834,7 @@ export async function execute(input: XiaohongshuFullCollectInput): Promise<Xiaoh
     ...(mode === 'phase34' ? { requireCommentsDone: true } : {}),
   });
 
-  // 等待后台 OCR 收尾（已与采集过程并行执行）
+  // 绛夊緟鍚庡彴 OCR 鏀跺熬锛堝凡涓庨噰闆嗚繃绋嬪苟琛屾墽琛岋級
   if (ocrQueue) {
     console.log(`[FullCollect][ocr] draining... pending=${ocrQueue.getPendingCount()} running=${ocrQueue.getRunningCount()}`);
     await ocrQueue.drain();
@@ -882,3 +882,4 @@ export async function execute(input: XiaohongshuFullCollectInput): Promise<Xiaoh
         : { error: `only processed ${finalCount}/${targetCount}` }),
   };
 }
+

@@ -295,11 +295,13 @@ export async function restoreCheckpoint({
       if (Number.isFinite(viewportHeight) && viewportHeight > 0 && Number.isFinite(rawCenterY)) {
         const deltaY = Math.round(rawCenterY - viewportHeight / 2);
         if (Math.abs(deltaY) > 48) {
-          await callAPI('mouse:wheel', {
-            profileId: resolvedProfile,
-            deltaX: 0,
-            deltaY: Math.max(-900, Math.min(900, deltaY)),
-          });
+          const clamped = Math.max(-900, Math.min(900, deltaY));
+          const key = clamped >= 0 ? 'PageDown' : 'PageUp';
+          const steps = Math.max(1, Math.min(8, Math.round(Math.abs(clamped) / 420) || 1));
+          for (let step = 0; step < steps; step += 1) {
+            await callAPI('keyboard:press', { profileId: resolvedProfile, key });
+            await sleep(80);
+          }
         }
       }
       actionResult = { selector: effectiveSelector, center: target.center || null };

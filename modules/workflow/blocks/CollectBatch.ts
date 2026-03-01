@@ -136,18 +136,23 @@ export async function execute(input: CollectBatchInput): Promise<CollectBatchOut
         break;
       }
 
-      await fetch(commandUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'mouse:wheel',
-          args: {
-            profileId: sessionId,
-            deltaX: 0,
-            deltaY: Math.max(-800, Math.min(800, Number(scrollDistance) || 0)),
-          }
-        })
-      });
+      const deltaY = Math.max(-800, Math.min(800, Number(scrollDistance) || 0));
+      const key = deltaY >= 0 ? 'PageDown' : 'PageUp';
+      const steps = Math.max(1, Math.min(8, Math.round(Math.abs(deltaY) / 420) || 1));
+      for (let step = 0; step < steps; step += 1) {
+        await fetch(commandUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'keyboard:press',
+            args: {
+              profileId: sessionId,
+              key,
+            }
+          })
+        });
+        await new Promise(resolve => setTimeout(resolve, 80));
+      }
 
       await new Promise(resolve => setTimeout(resolve, stableWait));
     }

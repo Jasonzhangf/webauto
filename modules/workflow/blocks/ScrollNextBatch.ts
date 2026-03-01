@@ -43,26 +43,31 @@ export async function execute(input: ScrollNextBatchInput): Promise<ScrollNextBa
     const beforeData = await beforeRes.json().catch(() => ({} as any));
     const previousPosition = Number(beforeData?.data?.result ?? beforeData?.body?.result ?? beforeData?.result ?? 0) || 0;
 
-    const wheelRes = await fetch(commandUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        action: 'mouse:wheel',
-        args: {
-          profileId: sessionId,
-          deltaX: 0,
-          deltaY: Math.max(-800, Math.min(800, Number(distance) || 0)),
-        },
-      }),
-    });
-    const wheelData = await wheelRes.json().catch(() => ({} as any));
-    if (wheelData?.ok === false || wheelData?.success === false) {
-      return {
-        scrolled: false,
-        previousPosition,
-        newPosition: previousPosition,
-        error: wheelData?.error || 'mouse_wheel_failed',
-      };
+    const deltaY = Math.max(-800, Math.min(800, Number(distance) || 0));
+    const key = deltaY >= 0 ? 'PageDown' : 'PageUp';
+    const steps = Math.max(1, Math.min(8, Math.round(Math.abs(deltaY) / 420) || 1));
+    for (let step = 0; step < steps; step += 1) {
+      const keyRes = await fetch(commandUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'keyboard:press',
+          args: {
+            profileId: sessionId,
+            key,
+          },
+        }),
+      });
+      const keyData = await keyRes.json().catch(() => ({} as any));
+      if (keyData?.ok === false || keyData?.success === false) {
+        return {
+          scrolled: false,
+          previousPosition,
+          newPosition: previousPosition,
+          error: keyData?.error || 'keyboard_press_failed',
+        };
+      }
+      await new Promise((resolve) => setTimeout(resolve, 80));
     }
 
     await new Promise((resolve) => setTimeout(resolve, 800));

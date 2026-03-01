@@ -208,9 +208,15 @@ export async function execute(input: WeiboCollectCommentsInput): Promise<WeiboCo
     return clicked;
   }
 
-  // scroll comments using protocol wheel
+  // scroll comments using PageDown/PageUp
   async function scrollComments(): Promise<boolean> {
-    await controllerAction('mouse:wheel', { deltaX: 0, deltaY: 500 });
+    const deltaY = 500;
+    const key = deltaY >= 0 ? 'PageDown' : 'PageUp';
+    const steps = Math.max(1, Math.min(8, Math.round(Math.abs(deltaY) / 420) || 1));
+    for (let step = 0; step < steps; step += 1) {
+      await controllerAction('keyboard:press', { key });
+      await new Promise(r => setTimeout(r, 80));
+    }
     await new Promise(r => setTimeout(r, 1000));
     return true;
   }

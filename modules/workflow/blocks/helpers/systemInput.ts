@@ -505,7 +505,6 @@ export async function systemMouseWheel(options: {
     deltaY,
     focusPoint,
     browserServiceUrl = 'http://127.0.0.1:7704',
-    browserWsUrl = process.env.WEBAUTO_BROWSER_WS_URL || 'ws://127.0.0.1:8765',
     context,
   } = options;
 
@@ -514,7 +513,7 @@ export async function systemMouseWheel(options: {
     await saveDebugScreenshot(`captcha_detected_wheel_${context || 'system'}`, profileId, { deltaY, focusPoint, context });
     logError({
       kind: 'system_scroll_blocked',
-      action: 'mouse:wheel',
+      action: 'keyboard:press',
       sessionId: profileId,
       context: context || null,
       reason: 'captcha_detected',
@@ -525,7 +524,7 @@ export async function systemMouseWheel(options: {
   }
   const scrollOpId = logOperation({
     kind: 'system_scroll_attempt',
-    action: 'mouse:wheel',
+    action: 'keyboard:press',
     sessionId: profileId,
     context: context || null,
     reason: context || null,
@@ -533,15 +532,20 @@ export async function systemMouseWheel(options: {
   });
 
   try {
-    await browserServiceCommand(
-      browserServiceUrl,
-      'mouse:wheel',
-      { profileId, deltaX: 0, deltaY },
-      8000,
-    );
+    const key = Number(deltaY) >= 0 ? 'PageDown' : 'PageUp';
+    const steps = Math.max(1, Math.min(8, Math.round(Math.abs(Number(deltaY) || 0) / 420) || 1));
+    for (let step = 0; step < steps; step += 1) {
+      await browserServiceCommand(
+        browserServiceUrl,
+        'keyboard:press',
+        { profileId, key },
+        8000,
+      );
+      await new Promise((resolve) => setTimeout(resolve, 80));
+    }
     logOperation({
       kind: 'system_scroll_done',
-      action: 'mouse:wheel',
+      action: 'keyboard:press',
       sessionId: profileId,
       context: context || null,
       reason: context || null,
@@ -550,117 +554,18 @@ export async function systemMouseWheel(options: {
     });
     return;
   } catch (err: any) {
-    console.warn(
-      '[WarmupComments] browser-service mouse:wheel failed, fallback to ws:',
-      err?.message || err,
-    );
-  }
-
-  try {
-    await browserServiceWsScroll({
-      profileId,
-      deltaY,
-      browserWsUrl,
-      coordinates: focusPoint ? { x: focusPoint.x, y: focusPoint.y } : null,
-    });
-    logOperation({
-      kind: 'system_scroll_done',
-      action: 'mouse:wheel',
-      sessionId: profileId,
-      context: context || null,
-      reason: context || null,
-      target: { deltaY, focusPoint },
-      meta: { opId: scrollOpId, via: 'ws' },
-    });
-  } catch (error) {
     logError({
       kind: 'system_scroll_failed',
-      action: 'mouse:wheel',
+      action: 'keyboard:press',
       sessionId: profileId,
       context: context || null,
       reason: context || null,
-      error: error instanceof Error ? error.message : String(error),
+      error: err instanceof Error ? err.message : String(err),
       payload: { deltaY, focusPoint },
       opId: scrollOpId,
     });
-    throw error;
+    throw err;
   }
-}
-
-async function browserServiceWsScroll(options: {
-  profileId: string;
-  deltaY: number;
-  browserWsUrl: string;
-  coordinates: { x: number; y: number } | null;
-}): Promise<void> {
-  const { profileId, deltaY, browserWsUrl, coordinates } = options;
-  const { default: WebSocket } = await import('ws');
-  const requestId = `${Date.now().toString(36)}_${Math.random().toString(36).slice(2)}`;
-  return new Promise<void>((resolve, reject) => {
-    const timer = setTimeout(() => {
-      try {
-        ws.close();
-      } catch { }
-      reject(new Error('browser-service ws timeout'));
-    }, 15000);
-
-    const ws = new WebSocket(browserWsUrl);
-
-    const cleanup = () => {
-      clearTimeout(timer);
-      try {
-        ws.close();
-      } catch { }
-    };
-
-    ws.on('open', () => {
-      try {
-        ws.send(
-          JSON.stringify({
-            type: 'command',
-            request_id: requestId,
-            session_id: profileId,
-            data: {
-              command_type: 'user_action',
-              action: 'operation',
-              parameters: {
-                operation_type: 'scroll',
-                ...(coordinates ? { target: { coordinates } } : {}),
-                deltaY,
-              },
-            },
-          }),
-        );
-      } catch (err) {
-        cleanup();
-        reject(err);
-      }
-    });
-
-    ws.on('message', (buf: any) => {
-      try {
-        const msg = JSON.parse(String(buf || ''));
-        if (msg?.type !== 'response') return;
-        if (String(msg?.request_id || '') !== requestId) return;
-        const payload = msg?.data || {};
-        if (payload?.success === false) {
-          cleanup();
-          reject(new Error(payload?.error || 'browser-service ws scroll failed'));
-          return;
-        }
-        cleanup();
-        resolve();
-      } catch (err) {
-        cleanup();
-        reject(err);
-      }
-    });
-
-    ws.on('error', (err: any) => {
-      cleanup();
-      reject(err);
-    });
-  });
 }
 
 

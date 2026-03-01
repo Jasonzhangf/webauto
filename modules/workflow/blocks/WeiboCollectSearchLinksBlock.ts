@@ -273,7 +273,11 @@ export async function execute(input: WeiboCollectSearchLinksInput): Promise<Weib
       for (let attempt = 0; attempt < 3; attempt += 1) {
         const next = await findNextPageCenter();
         if (!next.ok || !Number.isFinite(next.x) || !Number.isFinite(next.y)) {
-          await controllerAction('mouse:wheel', { deltaX: 0, deltaY: 900 }).catch((): null => null);
+          const steps = Math.max(1, Math.min(8, Math.round(900 / 420) || 1));
+          for (let step = 0; step < steps; step += 1) {
+            await controllerAction('keyboard:press', { key: 'PageDown' }).catch((): null => null);
+            await new Promise((r) => setTimeout(r, 80));
+          }
           await new Promise((r) => setTimeout(r, 400));
           continue;
         }

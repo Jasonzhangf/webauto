@@ -78,6 +78,17 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+async function pageScroll(profileId, deltaY, delayMs = 80) {
+  const raw = Number(deltaY) || 0;
+  if (!Number.isFinite(raw) || raw === 0) return;
+  const key = raw >= 0 ? 'PageDown' : 'PageUp';
+  const steps = Math.max(1, Math.min(8, Math.round(Math.abs(raw) / 420) || 1));
+  for (let step = 0; step < steps; step += 1) {
+    await callAPI('keyboard:press', { profileId, key });
+    if (delayMs > 0) await sleep(delayMs);
+  }
+}
+
 function clamp(value, min, max) {
   return Math.min(Math.max(value, min), max);
 }
@@ -204,7 +215,7 @@ async function scrollTargetIntoViewport(profileId, selector, initialTarget, para
     if (isTargetFullyInViewport(target, margin)) break;
     const deltaY = resolveScrollDeltaY(target, margin);
     if (!Number.isFinite(deltaY) || Math.abs(deltaY) < 1) break;
-    await callAPI('mouse:wheel', { profileId, deltaX: 0, deltaY });
+    await pageScroll(profileId, deltaY);
     if (settleMs > 0) await sleep(settleMs);
     target = await resolveSelectorTarget(profileId, selector);
   }
@@ -545,7 +556,7 @@ export async function executeOperation({ profileId, operation, context = {} }) {
         deltaX = amount;
         deltaY = 0;
       }
-      const result = await callAPI('mouse:wheel', { profileId: resolvedProfile, deltaX, deltaY });
+      const result = await pageScroll(resolvedProfile, deltaY);
       return {
         ok: true,
         code: 'OPERATION_DONE',
