@@ -1,11 +1,7 @@
-/**
+﻿/**
  * Workflow Block: WeiboCollectCommentsBlock
  *
- * 微博评论采集 - 类似小红书结构
- * - 点击评论图标展开评论区
- * - 滚动加载主评论
- * - 展开回复（支持多级）
- * - 触底检测和统计
+ * Weibo comment collection (protocol-only interactions).
  */
 
 import os from 'node:os';
@@ -58,7 +54,7 @@ export async function execute(input: WeiboCollectCommentsInput): Promise<WeiboCo
   const {
     sessionId,
     serviceUrl = 'http://127.0.0.1:7704',
-    maxComments = 0, // 0 = no limit
+    maxComments = 0,
     maxRounds = 30,
     expandReplies = true,
   } = input;
@@ -97,7 +93,7 @@ export async function execute(input: WeiboCollectCommentsInput): Promise<WeiboCo
     return response;
   }
 
-  // 点击评论图标展开评论区
+  // click comment icon using protocol click (no DOM click)
   async function clickCommentIcon(): Promise<boolean> {
     const script = `
       (() => {
@@ -105,26 +101,34 @@ export async function execute(input: WeiboCollectCommentsInput): Promise<WeiboCo
         if (!icon) return { success: false, error: 'comment_icon_not_found' };
         const btn = icon.closest('div[role=button], .woo-box-flex, button') || icon.parentElement;
         if (!btn) return { success: false, error: 'comment_button_not_found' };
-        btn.click();
-        return { success: true, rect: btn.getBoundingClientRect().toJSON() };
+        const rect = btn.getBoundingClientRect();
+        return {
+          success: true,
+          rect: { x: rect.left, y: rect.top, width: rect.width, height: rect.height },
+          center: { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 },
+        };
       })()
     `;
     const res = await controllerAction('evaluate', { script });
     const result = unwrapResult(res);
-    return result?.success === true;
+    if (!result?.success || !result?.center) return false;
+    const x = Math.round(Number(result.center.x));
+    const y = Math.round(Number(result.center.y));
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return false;
+    await controllerAction('mouse:click', { x, y, clicks: 1 });
+    return true;
   }
 
-  // 获取评论区容器
+  // get comment container
   async function getCommentContainer(): Promise<Element | null> {
     const script = `
       (() => {
-        // 微博评论区可能在展开后的不同位置
         const containers = [
           document.querySelector('[class*="comment_list"]'),
           document.querySelector('[class*="Comment_list"]'),
           document.querySelector('[class*="comment-list"]'),
           document.querySelector('section[class*="comment"]'),
-          document.querySelector('article + div'), // 文章后面的评论区
+          document.querySelector('article + div'),
         ];
         const found = containers.find(el => el && el.children.length > 0);
         return found ? { found: true, className: found.className } : { found: false };
@@ -134,7 +138,7 @@ export async function execute(input: WeiboCollectCommentsInput): Promise<WeiboCo
     return unwrapResult(res);
   }
 
-  // 提取当前可见的评论
+  // extract current visible comments
   async function extractComments(): Promise<WeiboComment[]> {
     const script = `
       (() => {
@@ -145,13 +149,12 @@ export async function execute(input: WeiboCollectCommentsInput): Promise<WeiboCo
           const contentEl = item.querySelector('[class*="content"], .WB_text, .txt, [class*="text"]');
           const likeEl = item.querySelector('[class*="like"], .praised, [class*="agree"]');
           const timeEl = item.querySelector('time, [class*="time"], [class*="date"]');
-          
-          // 检测是否为回复
+
           const isReply = item.className.toLowerCase().includes('reply') || 
                          item.closest('[class*="reply"]') !== null;
-          
+
           const id = item.getAttribute('data-id') || item.id || 'item_' + index;
-          
+
           results.push({
             id,
             author: authorEl?.textContent?.trim() || '匿名',
@@ -170,7 +173,7 @@ export async function execute(input: WeiboCollectCommentsInput): Promise<WeiboCo
     return Array.isArray(result) ? result : [];
   }
 
-  // 查找并点击展开回复按钮
+  // expand reply buttons with protocol click
   async function expandReplyButtons(): Promise<number> {
     const script = `
       (() => {
@@ -183,44 +186,36 @@ export async function execute(input: WeiboCollectCommentsInput): Promise<WeiboCo
             const rect = el.getBoundingClientRect();
             return rect.top > 0 && rect.bottom < window.innerHeight && rect.width > 0;
           });
-        
-        let clicked = 0;
-        buttons.slice(0, 3).forEach(btn => {
-          btn.click();
-          clicked++;
+
+        return buttons.slice(0, 3).map(btn => {
+          const rect = btn.getBoundingClientRect();
+          return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
         });
-        return clicked;
       })()
     `;
     const res = await controllerAction('evaluate', { script });
     const result = unwrapResult(res);
-    return typeof result === 'number' ? result : 0;
+    const targets = Array.isArray(result) ? result : [];
+    let clicked = 0;
+    for (const target of targets) {
+      const x = Math.round(Number(target?.x));
+      const y = Math.round(Number(target?.y));
+      if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+      await controllerAction('mouse:click', { x, y, clicks: 1 });
+      clicked += 1;
+      await new Promise(r => setTimeout(r, 200));
+    }
+    return clicked;
   }
 
-  // 滚动评论区
+  // scroll comments using protocol wheel
   async function scrollComments(): Promise<boolean> {
-    const script = `
-      (() => {
-        const container = document.querySelector('[class*="comment_list"], [class*="Comment_list"]') || 
-                         document.scrollingElement;
-        if (!container) return { hasMore: false };
-        
-        const beforeScroll = container.scrollTop;
-        container.scrollTop += 500;
-        
-        // 检查是否还能滚动
-        const hasMore = container.scrollTop > beforeScroll || 
-                       container.scrollHeight - container.scrollTop > container.clientHeight + 100;
-        
-        return { hasMore, scrollTop: container.scrollTop, scrollHeight: container.scrollHeight };
-      })()
-    `;
-    await controllerAction('evaluate', { script });
+    await controllerAction('mouse:wheel', { deltaX: 0, deltaY: 500 });
     await new Promise(r => setTimeout(r, 1000));
     return true;
   }
 
-  // 检测是否到底
+  // check end state
   async function checkEndState(): Promise<{ reachedEnd: boolean; emptyState: boolean }> {
     const script = `
       (() => {
@@ -239,7 +234,6 @@ export async function execute(input: WeiboCollectCommentsInput): Promise<WeiboCo
   }
 
   try {
-    // 1. 点击评论图标展开评论区
     const clicked = await clickCommentIcon();
     if (!clicked) {
       return {
@@ -253,24 +247,20 @@ export async function execute(input: WeiboCollectCommentsInput): Promise<WeiboCo
       };
     }
 
-    // 等待评论区加载
     await new Promise(r => setTimeout(r, 2000));
 
-    // 2. 循环滚动和采集
     while (scrollRounds < maxRounds) {
       if (maxComments > 0 && comments.length >= maxComments) break;
 
-      // 展开回复按钮
       if (expandReplies) {
         const expanded = await expandReplyButtons();
         expandedCount += expanded;
         if (expanded > 0) await new Promise(r => setTimeout(r, 800));
       }
 
-      // 提取评论
       const newComments = await extractComments();
       let addedCount = 0;
-      
+
       for (const comment of newComments) {
         const key = `${comment.author}:${comment.content.slice(0, 30)}`;
         if (!seenIds.has(key)) {
@@ -282,7 +272,6 @@ export async function execute(input: WeiboCollectCommentsInput): Promise<WeiboCo
 
       console.log(`[WeiboComments] Round ${scrollRounds + 1}: collected ${comments.length} comments, new: ${addedCount}`);
 
-      // 检测是否到底
       const endState = await checkEndState();
       if (endState.reachedEnd || endState.emptyState) {
         reachedEnd = endState.reachedEnd;
@@ -290,11 +279,9 @@ export async function execute(input: WeiboCollectCommentsInput): Promise<WeiboCo
         break;
       }
 
-      // 滚动
       await scrollComments();
       scrollRounds++;
-      
-      // 如果没有新增，再试一次后退出
+
       if (addedCount === 0 && scrollRounds > 3) {
         const endCheck = await checkEndState();
         if (endCheck.reachedEnd) {
@@ -337,3 +324,4 @@ export async function execute(input: WeiboCollectCommentsInput): Promise<WeiboCo
     };
   }
 }
+

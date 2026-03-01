@@ -1,8 +1,8 @@
-/**
+﻿/**
  * System Input Helper (browser-service)
  *
- * 统一封装系统级鼠标/键盘/滚轮操作，避免在各 Block 内重复实现。
- * 注意：这里只做"系统事件发送"，不做任何 DOM click/scroll 等 JS 行为。
+ * 缁熶竴灏佽绯荤粺绾ч紶鏍?閿洏/婊氳疆鎿嶄綔锛岄伩鍏嶅湪鍚?Block 鍐呴噸澶嶅疄鐜般€?
+ * 娉ㄦ剰锛氳繖閲屽彧鍋?绯荤粺浜嬩欢鍙戦€?锛屼笉鍋氫换浣?DOM click/scroll 绛?JS 琛屼负銆?
  */
 
 import os from 'node:os';
@@ -17,7 +17,7 @@ import {
   logOperation,
 } from './operationLogger.js';
 
-// 调试截图保存目录
+// 璋冭瘯鎴浘淇濆瓨鐩綍
 function resolveDownloadRoot(): string {
   const custom = process.env.WEBAUTO_DOWNLOAD_ROOT || process.env.WEBAUTO_DOWNLOAD_DIR;
   if (custom && custom.trim()) return custom;
@@ -33,7 +33,7 @@ const DEBUG_SCREENSHOT_DIR = DEBUG_ENABLED
 const DEFAULT_CONTROLLER_URL = process.env.WEBAUTO_CONTROLLER_URL || 'http://127.0.0.1:7701/v1/controller/action';
 
 /**
- * 保存调试截图
+ * 淇濆瓨璋冭瘯鎴浘
  */
 async function saveDebugScreenshot(
   kind: string,
@@ -50,7 +50,7 @@ async function saveDebugScreenshot(
 
     const controllerUrl = DEFAULT_CONTROLLER_URL;
 
-    // 截图
+    // 鎴浘
     async function takeShot(): Promise<any> {
       const response = await fetch(controllerUrl, {
         method: 'POST',
@@ -76,7 +76,7 @@ async function saveDebugScreenshot(
       }
     }
 
-    // 提取 base64
+    // 鎻愬彇 base64
     const b64 =
       shot?.data?.data ??
       shot?.data?.body?.data ??
@@ -89,7 +89,7 @@ async function saveDebugScreenshot(
       await fs.writeFile(pngPath, Buffer.from(b64, 'base64'));
     }
 
-    // 保存元数据
+    // 淇濆瓨鍏冩暟鎹?
     await fs.writeFile(
       jsonPath,
       JSON.stringify({ ts, kind, sessionId, ...meta, pngPath: b64 ? pngPath : null }, null, 2),
@@ -150,9 +150,9 @@ async function probePoint(profileId: string, x: number, y: number): Promise<{
 
         const modal = document.querySelector('.r-captcha-modal, .captcha-modal-content');
         const modalText = modal ? (modal.textContent || '') : '';
-        const isCaptcha = Boolean(modal) || modalText.includes('请通过验证') || modalText.includes('扫码验证');
+        const isCaptcha = Boolean(modal) || modalText.includes('璇烽€氳繃楠岃瘉') || modalText.includes('鎵爜楠岃瘉');
 
-        // 图片查看器/媒体预览层：出现时禁止继续点击（开发阶段不做兜底纠错）
+        // 鍥剧墖鏌ョ湅鍣?濯掍綋棰勮灞傦細鍑虹幇鏃剁姝㈢户缁偣鍑伙紙寮€鍙戦樁娈典笉鍋氬厹搴曠籂閿欙級
         const dialog = document.querySelector('[aria-modal=\"true\"], [role=\"dialog\"][aria-modal=\"true\"], [role=\"dialog\"]');
         const hasBigImage = Array.from(document.querySelectorAll('img')).some((img) => {
           try {
@@ -220,11 +220,11 @@ async function isCaptchaOverlayVisible(profileId: string): Promise<boolean> {
         const titleText = title ? (title.textContent || '') : '';
         return (
           Boolean(modal) ||
-          titleText.includes('请通过验证') ||
-          modalText.includes('请通过验证') ||
-          modalText.includes('扫码验证') ||
-          modalText.includes('二维码') ||
-          modalText.includes('问题反馈')
+          titleText.includes('璇烽€氳繃楠岃瘉') ||
+          modalText.includes('璇烽€氳繃楠岃瘉') ||
+          modalText.includes('鎵爜楠岃瘉') ||
+          modalText.includes('浜岀淮鐮?) ||
+          modalText.includes('闂鍙嶉')
         );
       })()`,
     });
@@ -245,7 +245,7 @@ export async function assertNoCaptcha(profileId: string, context?: string): Prom
 function shouldGuardAgainstImageClick(context?: string): boolean {
   const c = String(context || '').trim();
   if (!c) return false;
-  // 详情页/评论相关的坐标点击：禁止落在图片/视频上（避免打开图片查看器触发风控）
+  // 璇︽儏椤?璇勮鐩稿叧鐨勫潗鏍囩偣鍑伙細绂佹钀藉湪鍥剧墖/瑙嗛涓婏紙閬垮厤鎵撳紑鍥剧墖鏌ョ湅鍣ㄨЕ鍙戦鎺э級
   return (
     c.includes('scroll') ||
     c.includes('comment') ||
@@ -257,14 +257,14 @@ function shouldGuardAgainstImageClick(context?: string): boolean {
 function shouldStopOnMediaViewer(context?: string): boolean {
   const c = String(context || '').trim();
   if (!c) return false;
-  // 开发阶段：评论/滚动相关任何点击遇到媒体查看器，直接停
+  // 寮€鍙戦樁娈碉細璇勮/婊氬姩鐩稿叧浠讳綍鐐瑰嚮閬囧埌濯掍綋鏌ョ湅鍣紝鐩存帴鍋?
   return c.includes('scroll') || c.includes('comment') || c.includes('reply');
 }
 
 function isDangerousHrefInDetail(href: string | null): boolean {
   const h = typeof href === 'string' ? href : '';
   if (!h) return false;
-  // 在详情/评论区域，点击到链接通常意味着误点（头像/话题/推荐等）
+  // 鍦ㄨ鎯?璇勮鍖哄煙锛岀偣鍑诲埌閾炬帴閫氬父鎰忓懗鐫€璇偣锛堝ご鍍?璇濋/鎺ㄨ崘绛夛級
   return (
     h.includes('/user/') ||
     h.includes('/user/profile') ||
@@ -276,39 +276,7 @@ function isDangerousHrefInDetail(href: string | null): boolean {
 }
 
 async function highlightClickPoint(profileId: string, x: number, y: number, color = '#ff3b30', durationMs = 900) {
-  try {
-    const size = 18;
-    await controllerAction('browser:execute', {
-      profile: profileId,
-      script: `(() => {
-        const p = { x: ${JSON.stringify(x)}, y: ${JSON.stringify(y)} };
-        const size = ${JSON.stringify(size)};
-        let el = document.getElementById('webauto-click-point');
-        if (!el) {
-          el = document.createElement('div');
-          el.id = 'webauto-click-point';
-          el.style.position = 'fixed';
-          el.style.pointerEvents = 'none';
-          el.style.zIndex = '2147483647';
-          el.style.borderRadius = '50%';
-          el.style.boxSizing = 'border-box';
-          document.body.appendChild(el);
-        }
-        el.style.left = (p.x - size / 2) + 'px';
-        el.style.top = (p.y - size / 2) + 'px';
-        el.style.width = size + 'px';
-        el.style.height = size + 'px';
-        el.style.border = '3px solid ${color}';
-        el.style.background = 'rgba(255, 59, 48, 0.08)';
-        setTimeout(() => {
-          try { el && el.parentElement && el.parentElement.removeChild(el); } catch {}
-        }, ${durationMs});
-        return true;
-      })()`,
-    });
-  } catch {
-    // ignore
-  }
+  return;
 }
 
 async function highlightTargetRectAtPoint(options: {
@@ -330,7 +298,7 @@ async function highlightTargetRectAtPoint(options: {
         if (!el || !(el instanceof HTMLElement)) return null;
 
         const tag = el.tagName ? String(el.tagName) : null;
-        // 优先高亮“可点击目标”本身（展开回复/更多评论等），避免只画一个点看不出点了啥
+        // 浼樺厛楂樹寒鈥滃彲鐐瑰嚮鐩爣鈥濇湰韬紙灞曞紑鍥炲/鏇村璇勮绛夛級锛岄伩鍏嶅彧鐢讳竴涓偣鐪嬩笉鍑虹偣浜嗗暐
         let target = el;
         if (context.includes('reply') || context.includes('expand') || context.includes('comment')) {
           const t =
@@ -344,27 +312,6 @@ async function highlightTargetRectAtPoint(options: {
         }
         const r = target.getBoundingClientRect();
         if (!r || !r.width || !r.height) return null;
-
-        let overlay = document.getElementById('webauto-click-target-rect');
-        if (!overlay) {
-          overlay = document.createElement('div');
-          overlay.id = 'webauto-click-target-rect';
-          overlay.style.position = 'fixed';
-          overlay.style.pointerEvents = 'none';
-          overlay.style.zIndex = '2147483647';
-          overlay.style.boxSizing = 'border-box';
-          overlay.style.borderRadius = '6px';
-          document.body.appendChild(overlay);
-        }
-        overlay.style.left = r.left + 'px';
-        overlay.style.top = r.top + 'px';
-        overlay.style.width = r.width + 'px';
-        overlay.style.height = r.height + 'px';
-        overlay.style.border = '3px solid ${color}';
-        overlay.style.background = 'rgba(255, 59, 48, 0.05)';
-        setTimeout(() => {
-          try { overlay && overlay.parentElement && overlay.parentElement.removeChild(overlay); } catch {}
-        }, ${durationMs});
 
         return { tag, rect: { x: r.left, y: r.top, width: r.width, height: r.height } };
       })()`,
@@ -422,21 +369,6 @@ export async function systemClickAt(
   browserServiceUrl = 'http://127.0.0.1:7704',
   context?: string,
 ): Promise<void> {
-  // 先尝试将目标元素滚动到视口中心（如果元素在视口外）
-  try {
-    const { scrollElementAtPointIntoView } = await import('./scrollIntoView.js');
-    const scrollResult = await scrollElementAtPointIntoView(profileId, x, y);
-    if (scrollResult.success && !scrollResult.visible) {
-      // 元素滚动后仍不可见，可能需要调整坐标或元素已消失
-      console.warn(`[systemInput] Element scrolled but not visible at (${x}, ${y})`);
-    }
-    // 等待滚动稳定
-    await new Promise((r) => setTimeout(r, 200));
-  } catch (e: any) {
-    // 滚动失败不影响后续点击尝试（可能元素本身就在视口内）
-    console.warn(`[systemInput] scrollIntoView failed: ${e?.message || e}`);
-  }
-
   const probe = await probePoint(profileId, x, y);
   const clickOpId = logOperation({
     kind: 'system_click_attempt',
@@ -447,7 +379,7 @@ export async function systemClickAt(
     target: { x, y, probe },
   });
 
-  // 风控/验证码：出现就立即停下（开发阶段不做重试/兜底），保留证据便于人工处理
+  // 椋庢帶/楠岃瘉鐮侊細鍑虹幇灏辩珛鍗冲仠涓嬶紙寮€鍙戦樁娈典笉鍋氶噸璇?鍏滃簳锛夛紝淇濈暀璇佹嵁渚夸簬浜哄伐澶勭悊
   if (probe.isCaptcha) {
     await saveDebugScreenshot(`captcha_detected_${context || 'system'}`, profileId, { x, y, context, probe });
     logError({
@@ -463,7 +395,7 @@ export async function systemClickAt(
     throw new Error(`captcha_modal_detected (context=${context || 'system'})`);
   }
 
-  // 媒体查看器/预览层：出现就立即停下（避免乱点）
+  // 濯掍綋鏌ョ湅鍣?棰勮灞傦細鍑虹幇灏辩珛鍗冲仠涓嬶紙閬垮厤涔辩偣锛?
   if (shouldStopOnMediaViewer(context) && probe.isMediaViewerOpen) {
     await saveDebugScreenshot(`media_viewer_open_${context || 'system'}`, profileId, { x, y, context, probe });
     logError({
@@ -479,7 +411,7 @@ export async function systemClickAt(
     throw new Error(`media_viewer_open (context=${context || 'system'})`);
   }
 
-  // 详情页/评论相关点击：禁止点到链接（通常是头像/话题/推荐/外链）
+  // 璇︽儏椤?璇勮鐩稿叧鐐瑰嚮锛氱姝㈢偣鍒伴摼鎺ワ紙閫氬父鏄ご鍍?璇濋/鎺ㄨ崘/澶栭摼锛?
   if (shouldGuardAgainstImageClick(context) && isDangerousHrefInDetail(probe.href)) {
     await saveDebugScreenshot(`unsafe_click_href_${context || 'system'}`, profileId, { x, y, context, probe });
     logError({
@@ -495,7 +427,7 @@ export async function systemClickAt(
     throw new Error(`unsafe_click_href_in_detail (context=${context || 'system'})`);
   }
 
-  // 详情页/评论滚动相关点击：禁止点到图片/视频（会打开查看器/新层）
+  // 璇︽儏椤?璇勮婊氬姩鐩稿叧鐐瑰嚮锛氱姝㈢偣鍒板浘鐗?瑙嗛锛堜細鎵撳紑鏌ョ湅鍣?鏂板眰锛?
   if (shouldGuardAgainstImageClick(context) && probe.isImageLike) {
     await saveDebugScreenshot(`unsafe_click_image_${context || 'system'}`, profileId, { x, y, context, probe });
     logError({
@@ -511,7 +443,7 @@ export async function systemClickAt(
     throw new Error(`unsafe_click_image_in_detail (context=${context || 'system'})`);
   }
 
-  // 高亮后再截图（便于复盘点位是否正确）
+  // 楂樹寒鍚庡啀鎴浘锛堜究浜庡鐩樼偣浣嶆槸鍚︽纭級
   const hi = await highlightTargetRectAtPoint({
     profileId,
     x,
@@ -520,7 +452,7 @@ export async function systemClickAt(
     color: '#ff3b30',
     durationMs: 1100,
   });
-  // 同时保留点位小圆点，便于确认“点到的确切坐标”
+  // 鍚屾椂淇濈暀鐐逛綅灏忓渾鐐癸紝渚夸簬纭鈥滅偣鍒扮殑纭垏鍧愭爣鈥?
   await highlightClickPoint(profileId, x, y, '#ff3b30', 1100);
   await new Promise((r) => setTimeout(r, 180));
   await saveDebugScreenshot(`before_click_${context || 'system'}`, profileId, {
@@ -577,7 +509,7 @@ export async function systemMouseWheel(options: {
     context,
   } = options;
 
-  // 风控/验证码：出现就立即停下（开发阶段不做重试/兜底），保留证据便于人工处理
+  // 椋庢帶/楠岃瘉鐮侊細鍑虹幇灏辩珛鍗冲仠涓嬶紙寮€鍙戦樁娈典笉鍋氶噸璇?鍏滃簳锛夛紝淇濈暀璇佹嵁渚夸簬浜哄伐澶勭悊
   if (await isCaptchaOverlayVisible(profileId)) {
     await saveDebugScreenshot(`captcha_detected_wheel_${context || 'system'}`, profileId, { deltaY, focusPoint, context });
     logError({
@@ -730,3 +662,6 @@ async function browserServiceWsScroll(options: {
     });
   });
 }
+
+
+

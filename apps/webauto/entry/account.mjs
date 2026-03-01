@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+﻿#!/usr/bin/env node
 import minimist from 'minimist';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -176,8 +176,8 @@ async function publishAccountEvent(type, payload) {
 
 async function detectAliasFromActivePage(profileId, selector) {
   const { callAPI } = await import('../../../modules/camo-runtime/src/utils/browser-service.mjs');
-  const script = `(async () => {
-    const normalize = (value) => String(value || '').replace(/\\s+/g, ' ').trim();
+  const selfTabScript = `(() => {
+    const normalize = (value) => String(value || '').replace(/\s+/g, ' ').trim();
     const isVisible = (node) => {
       if (!(node instanceof HTMLElement)) return false;
       const style = window.getComputedStyle(node);
@@ -199,15 +199,17 @@ async function detectAliasFromActivePage(profileId, selector) {
       }))
       .filter((item) => isSelfTabText(item.text) || isSelfTabText(item.title) || isSelfTabText(item.aria));
     const selfTarget = selfTabCandidates.find((item) => isVisible(item.node)) || selfTabCandidates[0] || null;
-    if (selfTarget?.node) {
-      try {
-        selfTarget.node.click();
-        await new Promise((resolve) => setTimeout(resolve, 900));
-      } catch {
-        // ignore self-tab click failure
-      }
-    }
+    if (!selfTarget?.node) return { ok: false, reason: 'self_tab_not_found' };
+    const rect = selfTarget.node.getBoundingClientRect();
+    return {
+      ok: true,
+      reason: 'ok',
+      rect: { x: rect.left, y: rect.top, width: rect.width, height: rect.height },
+      center: { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 },
+    };
+  })()`;
 
+  const aliasScript = `(async () => {
     const requested = ${JSON.stringify(String(selector || '').trim())};
     const defaultSelectors = [
       '[data-testid*="nickname"]',
@@ -220,7 +222,7 @@ async function detectAliasFromActivePage(profileId, selector) {
       'nav a[href*="/user"] span'
     ];
     const selectors = requested ? [requested] : defaultSelectors;
-    const clean = (value) => String(value || '').replace(/\\s+/g, ' ').trim();
+    const clean = (value) => String(value || '').replace(/\s+/g, ' ').trim();
     const candidates = [];
     for (const sel of selectors) {
       const nodes = Array.from(document.querySelectorAll(sel)).slice(0, 6);
@@ -250,7 +252,18 @@ async function detectAliasFromActivePage(profileId, selector) {
     };
   })()`;
 
-  const result = await callAPI('evaluate', { profileId, script });
+  const selfResult = await callAPI('evaluate', { profileId, script: selfTabScript });
+  const selfPayload = selfResult?.result || selfResult || {};
+  if (selfPayload?.ok && selfPayload?.center) {
+    const x = Math.round(Number(selfPayload.center.x));
+    const y = Math.round(Number(selfPayload.center.y));
+    if (Number.isFinite(x) && Number.isFinite(y)) {
+      await callAPI('mouse:click', { profileId, x, y, clicks: 1 });
+      await new Promise((resolve) => setTimeout(resolve, 900));
+    }
+  }
+
+  const result = await callAPI('evaluate', { profileId, script: aliasScript });
   const payload = result?.result || result || {};
   const alias = normalizeAlias(payload.alias);
   if (!alias) {
@@ -279,22 +292,22 @@ Usage:
   webauto account sync <profileId|all> [--platform <xiaohongshu|weibo>] [--pending-while-login] [--resolve-alias] [--json]
 
 Notes:
-  - 账号数据默认保存到 WEBAUTO 根目录下的 accounts（Windows 优先 D:/webauto，缺失时回落 ~/.webauto，可用 WEBAUTO_HOME 覆盖）
-  - list 默认按 profile 展示账号有效态（valid/invalid）
-  - add 不会自动创建 profile；必须传入已存在的 --profile
-  - login 会通过 @web-auto/camo 拉起浏览器并绑定账号 profile
-  - login 默认 idle-timeout=off，避免登录窗口自动关闭
-  - 只有识别到账号 id 的 profile 才会进入 valid 状态
-  - sync --pending-while-login 会在登录过程中保持待登录状态，避免过早标记失效
+  - 璐﹀彿鏁版嵁榛樿淇濆瓨鍒?WEBAUTO 鏍圭洰褰曚笅鐨?accounts锛圵indows 浼樺厛 D:/webauto锛岀己澶辨椂鍥炶惤 ~/.webauto锛屽彲鐢?WEBAUTO_HOME 瑕嗙洊锛?
+  - list 榛樿鎸?profile 灞曠ず璐﹀彿鏈夋晥鎬侊紙valid/invalid锛?
+  - add 涓嶄細鑷姩鍒涘缓 profile锛涘繀椤讳紶鍏ュ凡瀛樺湪鐨?--profile
+  - login 浼氶€氳繃 @web-auto/camo 鎷夎捣娴忚鍣ㄥ苟缁戝畾璐﹀彿 profile
+  - login 榛樿 idle-timeout=off锛岄伩鍏嶇櫥褰曠獥鍙ｈ嚜鍔ㄥ叧闂?
+  - 鍙湁璇嗗埆鍒拌处鍙?id 鐨?profile 鎵嶄細杩涘叆 valid 鐘舵€?
+  - sync --pending-while-login 浼氬湪鐧诲綍杩囩▼涓繚鎸佸緟鐧诲綍鐘舵€侊紝閬垮厤杩囨棭鏍囪澶辨晥
 
 Examples:
-  webauto account add --platform xiaohongshu --alias 主号
+  webauto account add --platform xiaohongshu --alias 涓诲彿
   webauto account list
   webauto account sync all
   webauto account sync all --platform weibo
   webauto account login xhs-0001 --url https://www.xiaohongshu.com --idle-timeout off
   webauto account sync-alias xhs-0001
-  webauto account update xhs-0001 --alias 运营1号
+  webauto account update xhs-0001 --alias 杩愯惀1鍙?
   webauto account delete xhs-0001 --delete-profile --delete-fingerprint
 `);
 }
@@ -590,3 +603,4 @@ main().catch((error) => {
   console.error(message);
   process.exit(1);
 });
+

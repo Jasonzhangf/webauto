@@ -203,6 +203,7 @@ npm --prefix apps/desktop-console run test:renderer:coverage
 - 同一 `profile` 的用户动作必须严格串行执行：任意时刻仅允�?1 �?in-flight 动作（`mouse/keyboard/click/type/scroll/back/switchPage` 等）；禁止并发下发动作，避免触发平台风控高危特征�?
 - 当多订阅事件同时命中时，编排层必须入队按序执行动作，禁止并发执行“抢占式”动作�?
 
+- 禁止一切 JS 调用的操作（包括 click/scroll/输入/导航/打开标签等）。JS 仅允许用于读取状态（rect/可见性/文本/属性）；任何 JS 操作必须改为协议级操作（mouse/keyboard/container）。
 ### 4.1 统一流程基线（强制）
 
 - 所有平台统一为：`账号有效性检�?-> 链接列表采集 -> 帖子逐条处理`�?

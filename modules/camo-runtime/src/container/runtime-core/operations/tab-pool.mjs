@@ -193,22 +193,6 @@ async function seedNewestTabIfNeeded({
   }
 }
 
-async function tryOpenTabWithShortcut(profileId, timeoutMs) {
-  const candidates = process.platform === 'darwin'
-    ? ['Meta+t', 'Control+t']
-    : ['Control+t', 'Meta+t'];
-  let lastError = null;
-  for (const key of candidates) {
-    try {
-      await callApiWithTimeout('keyboard:press', { profileId, key }, timeoutMs);
-      return { ok: true, key };
-    } catch (err) {
-      lastError = err;
-    }
-  }
-  return { ok: false, error: lastError };
-}
-
 async function waitForTabCountIncrease({
   profileId,
   beforeCount,
@@ -272,58 +256,6 @@ async function openTabBestEffort({
   };
 
   let openError = null;
-  if (shortcutOnly) {
-    const payload = seedOnOpen && seedUrl
-      ? { profileId, url: seedUrl, strictShortcut: true }
-      : { profileId, strictShortcut: true };
-    try {
-      await callApiWithTimeout('newPage', payload, Math.max(30000, apiTimeoutMs));
-      await settle();
-      const shortcutOpened = await waitForTab();
-      if (shortcutOpened.ok) {
-        if (seedOnOpen && seedUrl) {
-          await seedNewestTabIfNeeded({
-            profileId,
-            seedUrl,
-            openDelayMs,
-            apiTimeoutMs,
-            navigationTimeoutMs,
-            syncConfig,
-          });
-        }
-        return { ok: true, mode: 'newPage:shortcut', error: null };
-      }
-    } catch (err) {
-      openError = err;
-    }
-    return { ok: false, mode: null, error: openError };
-  }
-
-  const shortcutResult = await tryOpenTabWithShortcut(profileId, shortcutTimeoutMs);
-  if (shortcutResult.ok) {
-    await settle();
-    const shortcutOpened = await waitForTab();
-    if (shortcutOpened.ok) {
-      if (seedOnOpen && seedUrl) {
-        await seedNewestTabIfNeeded({
-          profileId,
-          seedUrl,
-          openDelayMs,
-          apiTimeoutMs,
-          navigationTimeoutMs,
-          syncConfig,
-        });
-      }
-      return { ok: true, mode: `shortcut:${shortcutResult.key}`, error: null };
-    }
-  } else if (!openError) {
-    openError = shortcutResult.error;
-  }
-
-  if (shortcutOnly) {
-    return { ok: false, mode: null, error: openError };
-  }
-
   const payload = seedOnOpen && seedUrl
     ? { profileId, url: seedUrl }
     : { profileId };
@@ -508,12 +440,11 @@ export async function executeTabPoolOperation({ profileId, action, params = {}, 
           throw new Error(syncResult?.message || 'tab viewport sync failed');
         }
       } catch (err) {
-        const activePage = slots[0];
         if (runtimeState) {
           runtimeState.tabPool = {
-            slots: activePage ? [activePage] : [],
+            slots,
             cursor: 0,
-            count: activePage ? 1 : 0,
+            count: slots.length,
             syncConfig,
             apiTimeoutMs,
             initializedAt: new Date().toISOString(),
@@ -524,12 +455,12 @@ export async function executeTabPoolOperation({ profileId, action, params = {}, 
           code: 'OPERATION_DEGRADED',
           message: 'ensure_tab_pool degraded on final switch',
           data: {
-            tabCount: activePage ? 1 : 0,
+            tabCount: slots.length,
             normalized: false,
             degraded: true,
             reason: err?.message || 'page switch failed',
-            slots: activePage ? [activePage] : [],
-            pages: activePage ? [activePage] : [],
+            slots,
+            pages: slots,
           },
         };
       }

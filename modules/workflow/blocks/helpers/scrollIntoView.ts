@@ -1,7 +1,5 @@
-/**
+﻿/**
  * Scroll Into View Helper
- *
- * 在点击元素前将其滚动到视口可见区域，避免点击视口外元素失败
  */
 
 import {
@@ -17,6 +15,9 @@ export interface ScrollIntoViewOptions {
   coordinates?: { x: number; y: number };
   block?: 'start' | 'center' | 'end' | 'nearest';
   behavior?: 'auto' | 'instant' | 'smooth';
+  maxSteps?: number;
+  scrollSettleMs?: number;
+  viewportMargin?: number;
 }
 
 export interface ScrollIntoViewResult {
@@ -31,20 +32,15 @@ export interface ScrollIntoViewResult {
   error?: string;
 }
 
-/**
- * 将元素滚动到视口可见区域
- * 
- * @param options - 滚动选项
- * @returns Promise<ScrollIntoViewResult>
- */
 export async function scrollIntoView(options: ScrollIntoViewOptions): Promise<ScrollIntoViewResult> {
   const {
     sessionId,
     serviceUrl = 'http://127.0.0.1:7701',
     selector,
     coordinates,
-    block = 'center',
-    behavior = 'instant',
+    maxSteps,
+    scrollSettleMs,
+    viewportMargin,
   } = options;
 
   const controllerUrl = `${serviceUrl}/v1/controller/action`;
@@ -71,112 +67,73 @@ export async function scrollIntoView(options: ScrollIntoViewOptions): Promise<Sc
     }
   }
 
-  try {
-    // 构建脚本：根据 selector 或 coordinates 查找元素并滚动
-    const script = selector
-      ? `(() => {
-          const selector = ${JSON.stringify(selector)};
-          const el = document.querySelector(selector);
-          if (!el || !(el instanceof HTMLElement)) {
-            return { success: false, visible: false, error: 'Element not found' };
-          }
-          
-          // 滚动到视口中心
-          try {
-            el.scrollIntoView({ behavior: '${behavior}', block: '${block}' });
-          } catch (e) {
-            return { success: false, visible: false, error: 'scrollIntoView failed: ' + e.message };
-          }
-          
-          // 等待一小段时间让滚动完成
-          const rect = el.getBoundingClientRect();
-          const viewportH = window.innerHeight || 0;
-          const visible = rect.top >= 0 && rect.top < viewportH;
-          
-          return {
-            success: true,
-            visible,
-            rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height }
-          };
-        })()`
-      : coordinates
-      ? `(() => {
-          const x = ${JSON.stringify(coordinates.x)};
-          const y = ${JSON.stringify(coordinates.y)};
-          const el = document.elementFromPoint(x, y);
-          if (!el || !(el instanceof HTMLElement)) {
-            return { success: false, visible: false, error: 'No element at coordinates' };
-          }
-          
-          // 滚动到视口中心
-          try {
-            el.scrollIntoView({ behavior: '${behavior}', block: '${block}' });
-          } catch (e) {
-            return { success: false, visible: false, error: 'scrollIntoView failed: ' + e.message };
-          }
-          
-          // 等待一小段时间让滚动完成
-          const rect = el.getBoundingClientRect();
-          const viewportH = window.innerHeight || 0;
-          const visible = rect.top >= 0 && rect.top < viewportH;
-          
-          return {
-            success: true,
-            visible,
-            rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height }
-          };
-        })()`
-      : `(() => { return { success: false, visible: false, error: 'No selector or coordinates provided' }; })()`;
+  if (!selector) {
+    return {
+      success: false,
+      visible: false,
+      error: coordinates ? 'scroll_into_view_requires_selector' : 'selector_required',
+    };
+  }
 
-    const result = await controllerAction('browser:execute', {
-      profile: sessionId,
-      script,
+  try {
+    const result = await controllerAction('scroll_into_view', {
+      profileId: sessionId,
+      selector,
+      ...(Number.isFinite(maxSteps) ? { maxSteps } : {}),
+      ...(Number.isFinite(scrollSettleMs) ? { scrollSettleMs } : {}),
+      ...(Number.isFinite(viewportMargin) ? { viewportMargin } : {}),
     });
 
-    const payload = result?.result || result;
-
-    if (!payload?.success) {
+    const payload = (result as any)?.data ?? result;
+    const target = payload?.data?.target ?? payload?.target ?? payload?.result?.target ?? null;
+    if (!target || !target.rect || !target.viewport) {
       return {
         success: false,
         visible: false,
-        error: payload?.error || 'Scroll into view failed',
+        error: payload?.error || 'scroll_into_view_failed',
       };
     }
 
+    const rect = target.rect as { top?: number; left?: number; width?: number; height?: number; x?: number; y?: number };
+    const viewport = target.viewport as { width?: number; height?: number };
+    const vw = Number(viewport.width || 0);
+    const vh = Number(viewport.height || 0);
+    const left = Number(rect.left ?? rect.x ?? 0);
+    const top = Number(rect.top ?? rect.y ?? 0);
+    const width = Math.max(0, Number(rect.width ?? 0));
+    const height = Math.max(0, Number(rect.height ?? 0));
+    const right = left + width;
+    const bottom = top + height;
+    const visible = vw > 0
+      && vh > 0
+      && right >= 0
+      && bottom >= 0
+      && left <= vw
+      && top <= vh;
+
     return {
       success: true,
-      visible: payload.visible ?? false,
-      rect: payload.rect,
+      visible,
+      rect: { x: left, y: top, width, height },
     };
   } catch (error: any) {
     return {
       success: false,
       visible: false,
-      error: `scrollIntoView failed: ${error.message}`,
+      error: `scrollIntoView failed: ${error?.message || String(error)}`,
     };
   }
 }
 
-/**
- * 通过坐标点滚动元素到视口
- * 
- * @param profileId - 会话ID
- * @param x - X坐标
- * @param y - Y坐标  
- * @param serviceUrl - 服务URL
- * @returns Promise<ScrollIntoViewResult>
- */
 export async function scrollElementAtPointIntoView(
-  profileId: string,
-  x: number,
-  y: number,
-  serviceUrl = 'http://127.0.0.1:7701',
+  _profileId: string,
+  _x: number,
+  _y: number,
+  _serviceUrl = 'http://127.0.0.1:7701',
 ): Promise<ScrollIntoViewResult> {
-  return scrollIntoView({
-    sessionId: profileId,
-    serviceUrl,
-    coordinates: { x, y },
-    block: 'center',
-    behavior: 'instant',
-  });
+  return {
+    success: false,
+    visible: false,
+    error: 'scroll_into_view_requires_selector',
+  };
 }

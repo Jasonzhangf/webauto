@@ -1,4 +1,4 @@
-import { callAPI } from '../../../../modules/camo-runtime/src/utils/browser-service.mjs';
+﻿import { callAPI } from '../../../../modules/camo-runtime/src/utils/browser-service.mjs';
 import { listAccountProfiles, markProfileInvalid, markProfilePending, upsertProfileAccountState } from './account-store.mjs';
 
 const XHS_PROFILE_URL = 'https://www.xiaohongshu.com/user/profile';
@@ -111,25 +111,25 @@ function buildDetectScript() {
       .slice(0, 6)
       .map((node) => String(node.textContent || '').replace(/\\s+/g, ' ').trim())
       .join(' ');
-    const hasLoginText = /登录|扫码|验证码|手机号|请先登录|注册|sign\\s*in/i.test(loginGuardText);
+    const hasLoginText = /鐧诲綍|鎵爜|楠岃瘉鐮亅鎵嬫満鍙穦璇峰厛鐧诲綍|娉ㄥ唽|sign\\s*in/i.test(loginGuardText);
     const loginUrl = /\\/login|signin|passport|account\\/login/i.test(String(location.href || ''));
     const hasGuardSignalRaw = (visibleLoginGuardNodes.length > 0 && hasLoginText) || loginUrl;
     const candidates = [];
     const normalizeAlias = (value) => {
       const text = String(value || '').replace(/\\s+/g, ' ').trim();
       if (!text) return null;
-      if (text === '我' || text === '我的' || text === '个人主页') return null;
+      if (text === '鎴? || text === '鎴戠殑' || text === '涓汉涓婚〉') return null;
       return text;
     };
     const isSelfLabel = (value) => {
       const text = String(value || '').replace(/\\s+/g, ' ').trim();
       if (!text) return false;
       return (
-        text === '我'
-        || text === '我的'
-        || text === '个人主页'
-        || text === '我的主页'
-        || text === '我的账号'
+        text === '鎴?
+        || text === '鎴戠殑'
+        || text === '涓汉涓婚〉'
+        || text === '鎴戠殑涓婚〉'
+        || text === '鎴戠殑璐﹀彿'
       );
     };
     const readLabelCandidates = (node) => {
@@ -142,9 +142,9 @@ function buildDetectScript() {
     const cleanAlias = (value) => {
       let text = normalizeAlias(value);
       if (!text) return null;
-      text = text.replace(/\\s*[-–—]\\s*(小红书|XiaoHongShu|xiaohongshu).*$/i, '').trim();
+      text = text.replace(/\\s*[-鈥撯€擼\\s*(灏忕孩涔XiaoHongShu|xiaohongshu).*$/i, '').trim();
       if (!text) return null;
-      const blocked = ['小红书', '登录', '注册', '搜索'];
+      const blocked = ['灏忕孩涔?, '鐧诲綍', '娉ㄥ唽', '鎼滅储'];
       if (blocked.includes(text)) return null;
       return text;
     };
@@ -274,15 +274,15 @@ function buildAliasResolveScript() {
     const normalizeAlias = (value) => {
       const text = String(value || '').replace(/\\s+/g, ' ').trim();
       if (!text) return null;
-      if (text === '我' || text === '我的' || text === '个人主页') return null;
+      if (text === '鎴? || text === '鎴戠殑' || text === '涓汉涓婚〉') return null;
       return text;
     };
     const cleanAlias = (value) => {
       let text = normalizeAlias(value);
       if (!text) return null;
-      text = text.replace(/\\s*[-—–]\\s*(小红书|xiaohongshu).*$/i, '').trim();
+      text = text.replace(/\\s*[-鈥斺€揮\\s*(灏忕孩涔xiaohongshu).*$/i, '').trim();
       if (!text) return null;
-      const blocked = ['小红书', '登录', '注册', '搜索'];
+      const blocked = ['灏忕孩涔?, '鐧诲綍', '娉ㄥ唽', '鎼滅储'];
       if (blocked.includes(text)) return null;
       return text;
     };
@@ -331,7 +331,7 @@ function buildAliasResolveScript() {
 
 function buildGotoSelfTabScript() {
   return `(() => {
-    const normalize = (value) => String(value || '').replace(/\\s+/g, ' ').trim();
+    const normalize = (value) => String(value || '').replace(/\s+/g, ' ').trim();
     const isSelfLabel = (value) => {
       const text = normalize(value);
       if (!text) return false;
@@ -360,26 +360,32 @@ function buildGotoSelfTabScript() {
       .filter((item) => isSelfLabel(item.text) || isSelfLabel(item.title) || isSelfLabel(item.aria));
     const target = candidates.find((item) => isVisible(item.node)) || candidates[0] || null;
     if (!target?.node) {
-      return { clicked: false, reason: 'self_tab_not_found' };
+      return { ok: false, reason: 'self_tab_not_found' };
     }
-    try {
-      target.node.click();
-      return {
-        clicked: true,
-        reason: 'ok',
-        label: target.text || target.title || target.aria || null,
-      };
-    } catch (error) {
-      return { clicked: false, reason: String(error?.message || error || 'click_failed') };
-    }
+    const rect = target.node.getBoundingClientRect();
+    return {
+      ok: true,
+      reason: 'ok',
+      label: target.text || target.title || target.aria || null,
+      rect: { x: rect.left, y: rect.top, width: rect.width, height: rect.height },
+      center: { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 },
+    };
   })()`;
 }
 
 async function resolveAliasFromSelfTab(profileId) {
   if (!profileId) return null;
   try {
-    await callAPI('evaluate', { profileId, script: buildGotoSelfTabScript() });
-    await sleep(900);
+    const gotoPayload = await callAPI('evaluate', { profileId, script: buildGotoSelfTabScript() });
+    const gotoResult = gotoPayload?.result || gotoPayload?.data || gotoPayload || {};
+    if (gotoResult?.ok && gotoResult?.center) {
+      const x = Math.round(Number(gotoResult.center.x));
+      const y = Math.round(Number(gotoResult.center.y));
+      if (Number.isFinite(x) && Number.isFinite(y)) {
+        await callAPI('mouse:click', { profileId, x, y, clicks: 1 });
+        await sleep(900);
+      }
+    }
     const payload = await callAPI('evaluate', { profileId, script: buildAliasResolveScript() });
     const result = payload?.result || payload?.data || payload || {};
     const alias = normalizeText(result.alias);
@@ -576,7 +582,7 @@ function buildWeiboDetectScript() {
     const toAlias = (value) => {
       const text = normalize(value);
       if (!text) return null;
-      if (text === '微博' || text === '首页' || text === '登录') return null;
+      if (text === '寰崥' || text === '棣栭〉' || text === '鐧诲綍') return null;
       return text;
     };
     const isVisible = (node) => {
@@ -609,7 +615,7 @@ function buildWeiboDetectScript() {
       .slice(0, 8)
       .map((node) => normalize(node.textContent || ''))
       .join(' ');
-    const hasLoginText = /登录|注册|验证码|手机号|扫码|sign\\s*in|password/i.test(guardText);
+    const hasLoginText = /鐧诲綍|娉ㄥ唽|楠岃瘉鐮亅鎵嬫満鍙穦鎵爜|sign\\s*in|password/i.test(guardText);
     const hasLoginGuard = loginUrl || (guardNodes.length > 0 && hasLoginText);
 
     const uidCandidates = [];
@@ -645,7 +651,7 @@ function buildWeiboDetectScript() {
       .find((node) => {
         const text = normalize(node.textContent || '');
         const title = normalize(node.getAttribute?.('title') || '');
-        return text === '我' || text === '我的' || title === '我' || title === '我的';
+        return text === '鎴? || text === '鎴戠殑' || title === '鎴? || title === '鎴戠殑';
       });
     if (meLink) {
       const meHref = String(meLink.getAttribute('href') || '').trim();
@@ -918,3 +924,6 @@ export async function syncWeiboAccountsByProfiles(profileIds = [], options = {})
   }
   return out;
 }
+
+
+

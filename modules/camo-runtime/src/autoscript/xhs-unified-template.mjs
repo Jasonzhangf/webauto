@@ -677,7 +677,7 @@ export function buildXhsUnifiedAutoscript(rawOptions = {}) {
           openDelayMs: tabOpenDelayMs,
           normalizeTabs: false,
           seedOnOpen: !detailLinksStartup,
-          shortcutOnly: true,
+          shortcutOnly: false,
         },
         trigger: detailLinksStartup ? 'startup' : 'search_result_item.exist',
         dependsOn: [detailLinksStartup ? 'goto_home' : 'submit_search'],
