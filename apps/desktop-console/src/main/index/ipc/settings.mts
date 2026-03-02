@@ -5,6 +5,7 @@ import type { IpcDeps } from '../ipc-handlers.mts';
 export function registerSettingsHandlers(deps: IpcDeps) {
   ipcMain.handle('settings:get', async () => deps.readDesktopConsoleSettings({ appRoot: deps.appRoot, repoRoot: deps.repoRoot }));
   ipcMain.handle('app:getVersion', async () => deps.versionInfo);
+  ipcMain.handle('app:repoRoot', async () => deps.repoRoot);
   ipcMain.handle('settings:set', async (_evt, next) => {
     const updated = await deps.writeDesktopConsoleSettings({ appRoot: deps.appRoot, repoRoot: deps.repoRoot }, next || {});
     const w = deps.getWin();

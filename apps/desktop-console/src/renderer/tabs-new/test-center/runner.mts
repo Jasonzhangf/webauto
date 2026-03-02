@@ -23,7 +23,7 @@ export class TestRunner {
     return this.running;
   }
 
-  // Auto-spawn daemon if Unified API is not healthy
+  // Do not auto-start daemon or UI; only check health.
   async ensureUnifiedApi(): Promise<{ ok: boolean; error?: string }> {
     try {
       const res = await fetch(`${UNIFIED_API_URL}/health`, { method: 'GET' });
@@ -31,42 +31,9 @@ export class TestRunner {
         this.log('[runner] Unified API is healthy');
         return { ok: true };
       }
-    } catch {
-      // Not running, try to start
-    }
-
-    this.log('[runner] Unified API not available, starting daemon...');
-    try {
-      // Use UI CLI to start daemon which will bring up Unified API
-      const startResult = await (window as any).api.cmdRunJson({
-        cmd: 'node',
-        args: ['scripts/run.mjs', 'ui', 'cli', 'start', '--build'],
-        cwd: this.repoRoot,
-        timeout: 60000,
-      });
-
-      if (!startResult || !startResult.ok) {
-        return { ok: false, error: startResult?.stderr || 'Failed to start daemon via ui cli' };
-      }
-
-      // Wait for health with timeout
-      const deadline = Date.now() + HEALTH_TIMEOUT_MS;
-      while (Date.now() < deadline) {
-        try {
-          const res = await fetch(`${UNIFIED_API_URL}/health`, { method: 'GET' });
-          if (res.ok) {
-            this.log('[runner] Unified API is now healthy');
-            return { ok: true };
-          }
-        } catch {
-          // Continue waiting
-        }
-        await this.sleep(1000);
-      }
-
-      return { ok: false, error: 'Unified API did not become healthy within 30s' };
+      return { ok: false, error: `Unified API unhealthy (${res.status})` };
     } catch (err: any) {
-      return { ok: false, error: err?.message || String(err) };
+      return { ok: false, error: err?.message || 'Unified API not reachable' };
     }
   }
 
@@ -136,10 +103,10 @@ export class TestRunner {
     try {
       // Use cmdSpawn to run vitest
       const spec = {
-        cmd: 'npx',
-        args: ['vitest', 'run', file, '--reporter=json'],
+        title: `vitest run ${file}`,
+        args: ['node_modules/vitest/vitest.mjs', 'run', file, '--reporter=json'],
         cwd: this.repoRoot,
-        timeout: 120000,
+        timeoutMs: 120000,
       };
 
       const result = await (window as any).api.cmdRunJson(spec);
@@ -168,6 +135,45 @@ export class TestRunner {
             this.onResult(testResult);
           }
         }
+      } else if (result.ok && result.stdout) {
+        // Try to parse stdout JSON (Vitest may write JSON to stdout even when cmdRunJson fails to parse)
+        try {
+          const parsed = JSON.parse(result.stdout);
+          const suites = parsed?.testResults || [];
+
+          for (const suite of suites) {
+            const suiteName = suite.name || file;
+            const assertions = suite.assertionResults || [];
+
+            for (const assertion of assertions) {
+              const testResult: TestRunResult = {
+                suite: suiteName,
+                name: assertion.title || 'unknown',
+                status: assertion.status === 'passed' ? 'passed' :
+                        assertion.status === 'skipped' ? 'skipped' : 'failed',
+                duration: assertion.duration || 0,
+                error: assertion.failureMessages?.join('\n'),
+                logs: [],
+              };
+
+              this.results.push(testResult);
+              this.onResult(testResult);
+            }
+          }
+        } catch {
+          // Fallback: treat as single failed test
+          this.log(`[runner] Failed to parse vitest output for ${file}`);
+          const testResult: TestRunResult = {
+            suite: file,
+            name: 'run',
+            status: 'failed',
+            duration: 0,
+            error: result.stderr || result.stdout || 'Unknown error',
+            logs: [result.stdout || '', result.stderr || ''],
+          };
+          this.results.push(testResult);
+          this.onResult(testResult);
+        }
       } else {
         // Fallback: treat as single failed test
         this.log(`[runner] Failed to parse vitest output for ${file}`);
@@ -176,7 +182,7 @@ export class TestRunner {
           name: 'run',
           status: 'failed',
           duration: 0,
-          error: result.stderr || 'Unknown error',
+          error: result.stderr || result.stdout || 'Unknown error',
           logs: [result.stdout || '', result.stderr || ''],
         };
         this.results.push(testResult);

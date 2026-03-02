@@ -23,7 +23,7 @@ export function renderTestCenter(root: HTMLElement, ctx: any) {
   root.textContent = '';
 
   const state = createTestCenterState();
-  const repoRoot = (window as any).api.pathJoin((window as any).api.osHomedir(), 'Documents', 'github', 'webauto');
+  let repoRoot = (window as any).api.pathJoin((window as any).api.osHomedir(), 'Documents', 'github', 'webauto');
   const runner = new TestRunner(repoRoot);
 
   const ui = renderTestCenterLayout(root);
@@ -43,7 +43,15 @@ export function renderTestCenter(root: HTMLElement, ctx: any) {
   );
 
   // Initial scan
-  scanAndRender();
+  (async () => {
+    try {
+      const resolved = await (window as any).api.appGetRepoRoot?.();
+      if (resolved) repoRoot = resolved;
+    } catch {
+      // keep fallback
+    }
+    scanAndRender();
+  })();
 
   // Event handlers
   ui.refreshBtn.onclick = scanAndRender;
