@@ -2,33 +2,9 @@
 
 ## 检查范围
 - `modules/collection-manager/`
-- `modules/task-scheduler/`
 
 ## 发现的问题
 
-### 1. `task-scheduler/index.ts:205` - 进程终止信号
-
-**问题代码:**
-```typescript
-process.kill(task.pid, 'SIGTERM');
-```
-
-**Windows 风险:**
-- Windows 不支持 `SIGTERM` 信号
-- 需要使用 `taskkill` 命令
-
-**修复方案:**
-```typescript
-import { execSync } from 'child_process';
-
-function terminateProcess(pid: number): void {
-  if (process.platform === 'win32') {
-    execSync(`taskkill /PID ${pid} /T /F`, { stdio: 'ignore' });
-  } else {
-    process.kill(pid, 'SIGTERM');
-  }
-}
-```
 
 ### 2. `collection-manager/index.ts` - 路径处理
 
@@ -82,36 +58,11 @@ collectedAtLocal: '2026-02-20 23:30:00.000 +08:00'
 
 | 文件 | 行号 | 问题 | 优先级 | 状态 |
 |------|------|------|--------|------|
-| `task-scheduler/index.ts` | 205 | SIGTERM 信号 | 高 | ✅ 已修复 |
 | `collection-manager/index.ts` | 71,266,286 | homedir 路径 | 低 | ✅ 已兼容 |
 | `collection-manager/types.ts` | 115 | 文件名 sanitization | 中 | ✅ 已处理 |
 
 ## 已修复详情
 
-### `task-scheduler/index.ts` - 跨平台进程终止
-
-**修复后代码:**
-```typescript
-import { execSync } from 'child_process';
-
-private terminateProcess(pid: number): void {
-  if (process.platform === 'win32') {
-    try {
-      execSync(`taskkill /PID ${pid} /T /F`, { stdio: 'ignore' });
-    } catch {
-      // Ignore errors if process already terminated
-    }
-  } else {
-    try {
-      process.kill(pid, 'SIGTERM');
-    } catch {
-      // Ignore errors if process already terminated
-    }
-  }
-}
-```
-
-**测试:** ✅ 7/7 测试通过
 
 ## 其他注意事项
 
@@ -139,7 +90,6 @@ set WEBAUTO_DOWNLOAD_ROOT=C:\temp\webauto
 
 ```bash
 # Windows PowerShell 测试
-pnpm test -- --run modules/task-scheduler/index.test.ts
 pnpm test -- --run modules/collection-manager/index.test.ts
 
 # 验证路径处理
