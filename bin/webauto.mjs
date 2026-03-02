@@ -363,6 +363,7 @@ Core Commands:
   webauto ui restart [--build] [--install] [--timeout <ms>] [--reason <text>]
   webauto ui cli <action> [options]
   webauto daemon <start|stop|status|run|relay|autostart>
+  webauto test [--layer <l0|l1|l2|l3|all>] [--output <path>] [--json]
   webauto xhs install [--download-browser] [--download-geoip] [--ensure-backend]
   webauto xhs unified [xhs options...]
   webauto xhs status [--run-id <id>] [--json]
@@ -411,6 +412,29 @@ Tips:
   - schedule 命令会转发到 apps/webauto/entry/schedule.mjs
   - 全量参数请看: webauto xhs --help
   - 当前 CLI 版本: ${ROOT_VERSION}
+`);
+}
+
+function printTestHelp() {
+  console.log(`webauto test
+
+Usage:
+  webauto test [--layer <l0|l1|l2|l3|all>] [--output <path>] [--json]
+
+Options:
+  --layer, -l   Which layer(s) to run (default: all)
+  --output, -o  JSON report output path (default: ./.tmp/ui-test-report-<timestamp>.json)
+  --json        Print JSON report to stdout (summary suppressed)
+  --headless    Set HEADLESS=1 for UI tests
+  --profile     Pass WEBAUTO_TEST_PROFILE to tests
+  --keyword     Pass WEBAUTO_TEST_KEYWORD to tests
+  --target      Pass WEBAUTO_TEST_TARGET to tests
+
+Examples:
+  webauto test
+  webauto test --layer l0
+  webauto test --layer l0,l1 --output ./.tmp/ui-test-report.json
+  webauto test --json
 `);
 }
 
@@ -465,6 +489,7 @@ Examples:
   webauto ui cli click --selector "#start-btn"
   webauto ui cli probe --selector "#start-btn" --detailed
   webauto ui cli full-cover --build --output ./.tmp/ui-cli-full-cover.json
+  webauto test --layer l0
 `);
 }
 
@@ -995,6 +1020,10 @@ async function main() {
       printVersionHelp();
       return;
     }
+    if (cmd === 'test') {
+      printTestHelp();
+      return;
+    }
     printMainHelp();
     return;
   }
@@ -1023,6 +1052,12 @@ async function main() {
     await run(process.execPath, [daemonScript, ...rawArgv.slice(1)]);
     return;
   }
+  if (cmd === 'test') {
+    const script = path.join(ROOT, 'apps', 'webauto', 'entry', 'test.mjs');
+    await run(process.execPath, [script, ...rawArgv.slice(1)]);
+    return;
+  }
+
 
   if (cmd === 'version') {
     const jsonMode = args.json === true;
