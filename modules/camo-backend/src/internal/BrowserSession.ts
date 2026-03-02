@@ -1,34 +1,24 @@
 import fs from 'fs';
 import path from 'path';
-import os from 'os';
-import crypto from 'node:crypto';
-import { spawnSync } from 'node:child_process';
 import type { BrowserContext, Page, Browser } from 'playwright';
 import { ProfileLock } from './ProfileLock.js';
-import { ensurePageRuntime } from './pageRuntime.js';
 import { BrowserSessionRecording } from './browser-session/recording.js';
-import { buildRecorderBootstrapScript } from './browser-session/page-hooks.js';
+import { createPageHooksManager } from './browser-session/page-hooks.js';
+import { BrowserSessionCookies } from './browser-session/cookies.js';
+import { BrowserSessionPageManagement } from './browser-session/page-management.js';
+import { BrowserInputPipeline } from './browser-session/input-pipeline.js';
+import { BrowserSessionInputOps } from './browser-session/input-ops.js';
+import { createRuntimeEventManager } from './browser-session/runtime-events.js';
+import { BrowserSessionNavigation } from './browser-session/navigation.js';
+import { BrowserSessionViewportManager } from './browser-session/viewport-manager.js';
 import { logDebug } from '../../../../modules/logging/src/index.js';
-import { getStateBus } from './state-bus.js';
 import { loadOrGenerateFingerprint, applyFingerprint } from './fingerprint.js';
 import { launchEngineContext } from './engine-manager.js';
-import { resolveCookiesRoot, resolveProfilesRoot, resolveRecordsRoot } from './storage-paths.js';
+import { resolveProfilesRoot } from './storage-paths.js';
 
-import type { RecordingState, NavigationWaitUntil, BrowserSessionOptions, RecordingOptions } from './browser-session/types.js';
-import {
-  resolveInputActionTimeoutMs,
-  resolveNavigationWaitUntil,
-  resolveInputActionMaxAttempts,
-  resolveInputRecoveryDelayMs,
-  resolveInputRecoveryBringToFrontTimeoutMs,
-  resolveInputReadySettleMs,
-  isTimeoutLikeError,
-  normalizeUrl,
-} from './browser-session/utils.js';
+import type { RecordingState, BrowserSessionOptions, RecordingOptions } from './browser-session/types.js';
 
 export type { BrowserSessionOptions, RecordingOptions } from './browser-session/types.js';
-
-const stateBus = getStateBus();
 
 export class BrowserSession {
   private browser?: Browser;
@@ -38,17 +28,14 @@ export class BrowserSession {
   private profileDir: string;
   private lastKnownUrl: string | null = null;
   private mode: 'dev' | 'run' = 'dev';
-  private lastCookieSignature: string | null = null;
-  private lastCookieSaveTs = 0;
-  private runtimeObservers = new Set<(event: any) => void>();
-  private bridgedPages = new WeakSet<Page>();
-  private recorderBridgePages = new WeakSet<Page>();
-  private lastViewport: { width: number; height: number } | null = null;
-  private followWindowViewport = false;
-  private inputActionTail: Promise<void> = Promise.resolve();
-  private wheelMode: 'wheel' | 'keyboard' = String(process.env.CAMO_SCROLL_INPUT_MODE || '').trim().toLowerCase() === 'keyboard'
-    ? 'keyboard'
-    : 'wheel';
+  private cookiesManager: BrowserSessionCookies;
+  private runtimeEvents: ReturnType<typeof createRuntimeEventManager>;
+  private pageHooks: ReturnType<typeof createPageHooksManager>;
+  private viewportManager: BrowserSessionViewportManager;
+  private pageManager: BrowserSessionPageManagement;
+  private navigation: BrowserSessionNavigation;
+  private inputPipeline: BrowserInputPipeline;
+  private inputOps: BrowserSessionInputOps;
   private fingerprint: any = null;
   private recordingManager: BrowserSessionRecording;
 
@@ -66,6 +53,55 @@ export class BrowserSession {
       () => this.getCurrentUrl(),
       () => this.context,
     );
+    this.cookiesManager = new BrowserSessionCookies(
+      profileId,
+      () => this.context,
+      () => this.getActivePage(),
+    );
+    this.inputPipeline = new BrowserInputPipeline(
+      () => this.ensurePrimaryPage(),
+      () => this.options.headless === true,
+    );
+    this.inputOps = new BrowserSessionInputOps(
+      () => this.ensurePrimaryPage(),
+      (page) => this.inputPipeline.ensureInputReady(page),
+      (page, label, run) => this.inputPipeline.runInputAction(page, label, run),
+      (run) => this.inputPipeline.withInputActionLock(run),
+    );
+    this.viewportManager = new BrowserSessionViewportManager(
+      profileId,
+      () => this.context,
+      () => String(this.options.engine ?? 'camoufox'),
+      () => this.options.headless === true,
+    );
+    this.runtimeEvents = createRuntimeEventManager(profileId);
+    this.pageHooks = createPageHooksManager({
+      profileId,
+      getRecording: () => this.recordingManager.getRecordingStatus(),
+      emitRuntimeEvent: (event) => this.runtimeEvents.emit(event),
+      recordPageVisit: (page, reason) => {
+        this.lastKnownUrl = page?.url?.() || this.lastKnownUrl;
+        this.recordingManager.recordPageVisit(page, reason);
+      },
+      handleRecorderEvent: (page, evt) => this.recordingManager.handleRecorderEvent(page, evt),
+    });
+    this.pageManager = new BrowserSessionPageManagement({
+      ensureContext: () => this.ensureContext(),
+      getActivePage: () => this.getActivePage(),
+      getCurrentUrl: () => this.getCurrentUrl(),
+      setActivePage: (page) => { this.page = page; },
+      setupPageHooks: (page) => this.setupPageHooks(page),
+      ensurePageViewport: (page) => this.ensurePageViewport(page),
+      maybeCenterPage: (page, viewport) => this.viewportManager.maybeCenter(page, viewport),
+      recordLastKnownUrl: (url) => { if (url) this.lastKnownUrl = url; },
+      isHeadless: () => this.options.headless === true,
+    });
+    this.navigation = new BrowserSessionNavigation({
+      ensurePrimaryPage: () => this.pageManager.ensurePrimaryPage(),
+      getActivePage: () => this.getActivePage(),
+      recordLastKnownUrl: (url) => { if (url) this.lastKnownUrl = url; },
+      getLastKnownUrl: () => this.lastKnownUrl,
+    });
   }
 
   get id(): string {
@@ -125,8 +161,7 @@ export class BrowserSession {
       : null;
     const viewport = explicitViewport || fingerprint?.viewport || fallbackViewport;
     const headless = !!this.options.headless;
-    this.followWindowViewport = !headless;
-    const deviceScaleFactor = this.resolveDeviceScaleFactor();
+    const followWindowViewport = !headless;
 
     // 使用 EngineManager 启动上下文（Chromium 已移除，仅支持 Camoufox）
     this.context = await launchEngineContext({
@@ -144,9 +179,7 @@ export class BrowserSession {
 
     // NOTE: deviceScaleFactor override was Chromium-only (CDP). Chromium removed.
 
-    this.lastViewport = this.followWindowViewport
-      ? null
-      : { width: viewport.width, height: viewport.height };
+    this.viewportManager.setInitialViewport(viewport, followWindowViewport);
     this.browser = this.context.browser();
     this.browser.on('disconnected', () => this.notifyExit());
     this.context.on('close', () => this.notifyExit());
@@ -156,8 +189,8 @@ export class BrowserSession {
 
     this.setupPageHooks(this.page);
     this.context.on('page', (p) => this.setupPageHooks(p));
-    if (this.followWindowViewport) {
-      await this.refreshViewportFromWindow(this.page).catch(() => {});
+    if (this.viewportManager.isFollowingWindow()) {
+      await this.viewportManager.refreshFromWindow(this.page).catch(() => {});
     }
 
     if (initialUrl) {
@@ -166,167 +199,11 @@ export class BrowserSession {
   }
 
   private setupPageHooks(page: Page) {
-    const profileTag = `[session:${this.options.profileId}]`;
-    const ensure = (reason: string) => {
-      ensurePageRuntime(page, true).catch((err) => {
-        console.warn(`${profileTag} ensure runtime failed (${reason})`, err?.message || err);
-      });
-    };
-    this.bindRuntimeBridge(page);
-    this.bindRecorderBridge(page);
-    page.on('domcontentloaded', () => {
-    ensure('domcontentloaded');
-      const recordingStatus = this.recordingManager.getRecordingStatus();
-      if (recordingStatus.active) {
-        void this.installRecorderRuntime(page, 'domcontentloaded');
-      }
-    });
-    page.on('framenavigated', (frame) => {
-      if (frame === page.mainFrame()) {
-        ensure('framenavigated');
-        this.recordPageVisit(page, 'framenavigated');
-      }
-    });
-    page.on('pageerror', (error) => {
-      console.warn(`${profileTag} pageerror`, error?.message || error);
-    });
-    page.on('console', (msg) => {
-      if (msg.type() === 'error') {
-        console.warn(`${profileTag} console.error`, msg.text());
-      }
-    });
-
-    ensure('initial');
-    const recordingStatus = this.recordingManager.getRecordingStatus();
-    if (recordingStatus.active) {
-      void this.installRecorderRuntime(page, 'initial');
-    }
+    this.pageHooks.setupPageHooks(page);
   }
 
   addRuntimeEventObserver(observer: (event: any) => void): () => void {
-    this.runtimeObservers.add(observer);
-    logDebug('browser-service', 'runtimeObserver:add', { sessionId: this.id, total: this.runtimeObservers.size });
-    return () => {
-      this.runtimeObservers.delete(observer);
-      logDebug('browser-service', 'runtimeObserver:remove', { sessionId: this.id, total: this.runtimeObservers.size });
-    };
-  }
-
-  private emitRuntimeEvent(event: any) {
-    const payload = {
-      ts: Date.now(),
-      sessionId: this.id,
-      ...event,
-    };
-    logDebug('browser-service', 'runtimeEvent', {
-      sessionId: this.id,
-      type: event?.type || 'unknown',
-      observers: this.runtimeObservers.size,
-    });
-    this.runtimeObservers.forEach((observer) => {
-      try {
-        observer(payload);
-      } catch (err) {
-        console.warn('[BrowserSession] runtime observer error', err);
-      }
-    });
-    this.publishRuntimeState(payload);
-  }
-
-  private publishRuntimeState(payload: any) {
-    try {
-      stateBus.setState(`browser-session:${this.id}`, {
-        status: 'running',
-        lastRuntimeEvent: payload?.type || 'unknown',
-        lastUrl: payload?.pageUrl || this.getCurrentUrl(),
-        lastUpdate: payload?.ts || Date.now(),
-      });
-      stateBus.publish('browser.runtime.event', payload);
-    } catch (err) {
-      logDebug('browser-service', 'runtimeEvent:stateBus:error', {
-        sessionId: this.id,
-        error: (err as Error)?.message || err,
-      });
-    }
-  }
-
-  private bindRuntimeBridge(page: Page) {
-    if (this.bridgedPages.has(page)) return;
-    this.bridgedPages.add(page);
-    page.exposeFunction('webauto_dispatch', (evt: any) => {
-      this.emitRuntimeEvent({
-        ...evt,
-        pageUrl: page.url(),
-      });
-    }).catch((err) => {
-      console.warn(`[session:${this.id}] failed to expose webauto_dispatch`, err?.message || err);
-    });
-  }
-  private buildRecorderBootstrapScript(): string {
-    return buildRecorderBootstrapScript();
-  }
-
-
-  private bindRecorderBridge(page: Page) {
-    if (this.recorderBridgePages.has(page)) return;
-    this.recorderBridgePages.add(page);
-    page.exposeFunction('webauto_recorder_dispatch', (evt: any) => {
-      this.handleRecorderEvent(page, evt);
-    }).catch((err) => {
-      console.warn(`[session:${this.id}] failed to expose webauto_recorder_dispatch`, err?.message || err);
-    });
-  }
-
-  private async installRecorderRuntime(page: Page, reason: string): Promise<void> {
-    if (!page || page.isClosed()) return;
-    try {
-      await page.evaluate(this.buildRecorderBootstrapScript());
-    } catch {
-      return;
-    }
-    const recordingStatus = this.recordingManager.getRecordingStatus();
-    if (recordingStatus.active) {
-      await this.syncRecorderStateToPage(page).catch(() => {});
-      this.recordPageVisit(page, reason);
-    }
-  }
-
-  private async syncRecorderStateToPage(page: Page): Promise<void> {
-    if (!page || page.isClosed()) return;
-    await page.evaluate(
-      (options) => {
-        const runtime = (window as any).__camoRecorderV1__;
-        if (!runtime || typeof runtime.setOptions !== 'function') return null;
-        return runtime.setOptions(options);
-      },
-      { enabled: this.recordingManager.getRecordingStatus().enabled, overlay: this.recordingManager.getRecordingStatus().overlay },
-    );
-  }
-
-  private async destroyRecorderRuntimeOnPage(page: Page): Promise<void> {
-    if (!page || page.isClosed()) return;
-    await page.evaluate(() => {
-      const runtime = (window as any).__camoRecorderV1__;
-      if (!runtime || typeof runtime.destroy !== 'function') return null;
-      return runtime.destroy();
-    });
-  }
-
-
-  private writeRecordingEvent(
-    type: string,
-    payload: any = {},
-    options: { pageUrl?: string; allowWhenDisabled?: boolean } = {},
-  ): void {
-    this.recordingManager.writeRecordingEvent(type, payload, options);
-  }
-
-  private handleRecorderEvent(page: Page, evt: any): void {
-    this.recordingManager.handleRecorderEvent(page, evt);
-  }
-
-  private recordPageVisit(page: Page, reason: string): void {
-    this.recordingManager.recordPageVisit(page, reason);
+    return this.runtimeEvents.addObserver(observer);
   }
 
   getRecordingStatus(): RecordingState {
@@ -334,8 +211,8 @@ export class BrowserSession {
   }
 
   async startRecording(options: RecordingOptions = {}): Promise<RecordingState> {
-    this.recordingManager.setBindRecorderBridge((page) => this.bindRecorderBridge(page));
-    this.recordingManager.setInstallRecorderRuntime((page, reason) => this.installRecorderRuntime(page, reason));
+    this.recordingManager.setBindRecorderBridge((page) => this.pageHooks.bindRecorderBridge(page));
+    this.recordingManager.setInstallRecorderRuntime((page, reason) => this.pageHooks.installRecorderRuntime(page, reason));
     return this.recordingManager.startRecording(options);
   }
 
@@ -357,77 +234,8 @@ export class BrowserSession {
     return null;
   }
 
-  private resolveDeviceScaleFactor(): number | null {
-    const raw = String(process.env.WEBAUTO_DEVICE_SCALE || '').trim();
-    if (raw) {
-      const parsed = Number(raw);
-      if (Number.isFinite(parsed) && parsed > 0) return parsed;
-    }
-    if (os.platform() === 'win32' && this.options.profileId?.startsWith('xiaohongshu_')) {
-      return 1;
-    }
-    return null;
-  }
-
-  private async syncDeviceScaleFactor(page: Page, viewport: { width: number; height: number }): Promise<void> {
-    if (String(this.options.engine ?? 'camoufox') !== 'chromium') return;
-    const desired = this.resolveDeviceScaleFactor();
-    if (!desired || !this.context) return;
-    try {
-      const client = await this.context.newCDPSession(page);
-      await client.send('Emulation.setDeviceMetricsOverride', {
-        width: viewport.width,
-        height: viewport.height,
-        deviceScaleFactor: desired,
-        mobile: false,
-        scale: 1,
-      });
-    } catch (error: any) {
-      console.warn(`[browser-session] sync device scale failed: ${error?.message || String(error)}`);
-    }
-  }
-
   private async ensurePageViewport(page: Page): Promise<void> {
-    if (this.followWindowViewport) {
-      await this.refreshViewportFromWindow(page).catch(() => {});
-      return;
-    }
-    if (!this.lastViewport) return;
-    const current = page.viewportSize();
-    if (current && current.width === this.lastViewport.width && current.height === this.lastViewport.height) {
-      return;
-    }
-    await page.setViewportSize({
-      width: this.lastViewport.width,
-      height: this.lastViewport.height,
-    });
-    await this.syncWindowBounds(page, { ...this.lastViewport });
-    await this.syncDeviceScaleFactor(page, { ...this.lastViewport });
-  }
-
-  private async readWindowInnerSize(page: Page): Promise<{ width: number; height: number } | null> {
-    try {
-      const metrics = await page.evaluate(() => ({
-        width: Math.floor(Number(window.innerWidth || 0)),
-        height: Math.floor(Number(window.innerHeight || 0)),
-      }));
-      const width = Number(metrics?.width);
-      const height = Number(metrics?.height);
-      if (!Number.isFinite(width) || !Number.isFinite(height)) return null;
-      if (width < 300 || height < 200) return null;
-      return { width, height };
-    } catch {
-      return null;
-    }
-  }
-
-  private async refreshViewportFromWindow(page: Page): Promise<void> {
-    const inner = await this.readWindowInnerSize(page);
-    if (!inner) return;
-    this.lastViewport = {
-      width: Math.max(800, Math.floor(inner.width)),
-      height: Math.max(700, Math.floor(inner.height)),
-    };
+    await this.viewportManager.ensurePageViewport(page);
   }
 
   private ensureContext(): BrowserContext {
@@ -438,308 +246,55 @@ export class BrowserSession {
   }
 
   private async ensurePrimaryPage(): Promise<Page> {
-    const ctx = this.ensureContext();
-    const existing = this.getActivePage();
-    if (existing) {
-      try {
-        await this.ensurePageViewport(existing);
-      } catch {
-        /* ignore */
-      }
-      return existing;
-    }
-    this.page = await ctx.newPage();
-    this.setupPageHooks(this.page);
-    try {
-      await this.ensurePageViewport(this.page);
-    } catch {
-      /* ignore */
-    }
-    return this.page;
+    return this.pageManager.ensurePrimaryPage();
   }
 
   async ensurePage(url?: string): Promise<Page> {
-    let page = await this.ensurePrimaryPage();
-    if (url) {
-      const current = this.getCurrentUrl();
-      if (!current || this.normalizeUrl(current) !== this.normalizeUrl(url)) {
-        await this.goto(url);
-        page = await this.ensurePrimaryPage();
-      }
-    }
-    return page;
+    return this.pageManager.ensurePage(url);
   }
 
   async goBack(): Promise<{ ok: boolean; url: string }> {
-    const page = await this.ensurePrimaryPage();
-    const waitUntil = resolveNavigationWaitUntil();
-    try {
-      const res = await page
-        .goBack({ waitUntil })
-        .catch((): null => null);
-      await ensurePageRuntime(page, true).catch(() => {});
-      this.lastKnownUrl = page.url();
-      return { ok: Boolean(res), url: page.url() };
-    } catch {
-      await ensurePageRuntime(page, true).catch(() => {});
-      this.lastKnownUrl = page.url();
-      return { ok: false, url: page.url() };
-    }
+    return this.navigation.goBack();
   }
 
   listPages(): { index: number; url: string; active: boolean }[] {
-    if (!this.context) return [];
-    const pages = this.context.pages().filter((p) => !p.isClosed());
-    const active = this.getActivePage();
-    return pages.map((p, index) => ({
-      index,
-      url: p.url(),
-      active: active === p,
-    }));
-  }
-
-  private tryOsNewTabShortcut(): boolean {
-    if (this.options.headless) return false;
-    if (process.platform === 'darwin') {
-      const res = spawnSync('osascript', ['-e', 'tell application "System Events" to keystroke "t" using command down'], { windowsHide: true });
-      return res.status === 0;
-    }
-    if (process.platform === 'win32') {
-      const script = 'Add-Type -AssemblyName System.Windows.Forms; $ws = New-Object -ComObject WScript.Shell; $ws.SendKeys("^t");';
-      const res = spawnSync('powershell', ['-NoProfile', '-Command', script], { windowsHide: true });
-      return res.status === 0;
-    }
-    return false;
+    return this.pageManager.listPages();
   }
 
   async newPage(url?: string, options: { strictShortcut?: boolean } = {}): Promise<{ index: number; url: string }> {
-    const ctx = this.ensureContext();
-    const isMac = process.platform === 'darwin';
-    const shortcut = isMac ? 'Meta+t' : 'Control+t';
-    let page = null;
-
-    // Strictly use keyboard shortcut to create a new tab in the same window
-    const opener = this.page || ctx.pages()[0];
-    if (!opener) throw new Error('no_opener_page');
-
-    await opener.bringToFront().catch((): any => null);
-    const before = ctx.pages().filter((p) => !p.isClosed()).length;
-    for (let attempt = 1; attempt <= 3; attempt += 1) {
-      const waitPage = ctx.waitForEvent('page', { timeout: 8000 }).catch((): any => null);
-      await opener.keyboard.press(shortcut).catch((): any => null);
-      page = await waitPage;
-
-      const pagesNow = ctx.pages().filter((p) => !p.isClosed());
-      const after = pagesNow.length;
-      if (page && after > before) break;
-      if (!page && after > before) {
-        page = pagesNow[pagesNow.length - 1] || null;
-        break;
-      }
-      await new Promise((r) => setTimeout(r, 250));
-    }
-
-    let after = ctx.pages().filter((p) => !p.isClosed()).length;
-    if (!page || after <= before) {
-      const waitPage = ctx.waitForEvent('page', { timeout: 8000 }).catch((): any => null);
-      const osShortcutOk = this.tryOsNewTabShortcut();
-      if (osShortcutOk) {
-        page = await waitPage;
-      }
-      const pagesNow = ctx.pages().filter((p) => !p.isClosed());
-      after = pagesNow.length;
-      if (!page && after > before) {
-        page = pagesNow[pagesNow.length - 1] || null;
-      }
-    }
-    if (!page || after <= before) {
-      if (!options?.strictShortcut) {
-        try {
-          page = await ctx.newPage();
-          await page.waitForLoadState('domcontentloaded', { timeout: 8000 }).catch((): any => null);
-        } catch {
-          // ignore fallback errors
-        }
-        after = ctx.pages().filter((p) => !p.isClosed()).length;
-        if (!page && after > before) {
-          const pagesNow = ctx.pages().filter((p) => !p.isClosed());
-          page = pagesNow[pagesNow.length - 1] || null;
-        }
-      }
-    }
-    if (!page || after <= before) {
-      throw new Error('new_tab_failed');
-    }
-
-    this.setupPageHooks(page);
-    this.page = page;
-    try {
-      await this.ensurePageViewport(page);
-    } catch {
-      /* ignore */
-    }
-    try {
-      await this.maybeCenterWindow(page, this.lastViewport || { width: 1920, height: 1080 });
-    } catch {
-      /* ignore */
-    }
-    try {
-      await page.bringToFront();
-    } catch {
-      /* ignore */
-    }
-    if (url) {
-      await page.goto(url, { waitUntil: resolveNavigationWaitUntil() });
-      await ensurePageRuntime(page);
-      this.lastKnownUrl = url;
-    }
-    const pages = ctx.pages().filter((p) => !p.isClosed());
-    return { index: Math.max(0, pages.indexOf(page)), url: page.url() };
+    return this.pageManager.newPage(url, options);
   }
 
   async switchPage(index: number): Promise<{ index: number; url: string }> {
-    const ctx = this.ensureContext();
-    const pages = ctx.pages().filter((p) => !p.isClosed());
-    const idx = Number(index);
-    if (!Number.isFinite(idx) || idx < 0 || idx >= pages.length) {
-      throw new Error(`invalid_page_index: ${index}`);
-    }
-    const page = pages[idx];
-    this.page = page;
-    try {
-      await this.ensurePageViewport(page);
-    } catch {
-      /* ignore */
-    }
-    try {
-      await page.bringToFront();
-    } catch {
-      /* ignore */
-    }
-    await ensurePageRuntime(page, true).catch(() => {});
-    this.lastKnownUrl = page.url();
-    return { index: idx, url: page.url() };
+    return this.pageManager.switchPage(index);
   }
 
   async closePage(index?: number): Promise<{ closedIndex: number; activeIndex: number; total: number }> {
-    const ctx = this.ensureContext();
-    const pages = ctx.pages().filter((p) => !p.isClosed());
-    if (pages.length === 0) {
-      return { closedIndex: -1, activeIndex: -1, total: 0 };
-    }
-    const active = this.getActivePage();
-    const requested = typeof index === 'number' && Number.isFinite(index) ? index : null;
-    const closedIndex =
-      requested !== null ? requested : Math.max(0, pages.findIndex((p) => p === active));
-    if (closedIndex < 0 || closedIndex >= pages.length) {
-      throw new Error(`invalid_page_index: ${index}`);
-    }
-    const page = pages[closedIndex];
-    await page.close().catch(() => {});
-
-    const remaining = ctx.pages().filter((p) => !p.isClosed());
-    const nextIndex = remaining.length === 0 ? -1 : Math.min(Math.max(0, closedIndex - 1), remaining.length - 1);
-    if (nextIndex >= 0) {
-      const nextPage = remaining[nextIndex];
-      this.page = nextPage;
-      try {
-        await nextPage.bringToFront();
-      } catch {
-        /* ignore */
-      }
-      await ensurePageRuntime(nextPage, true).catch(() => {});
-      this.lastKnownUrl = nextPage.url();
-    } else {
-      this.page = undefined;
-    }
-    return { closedIndex, activeIndex: nextIndex, total: remaining.length };
+    return this.pageManager.closePage(index);
   }
 
   async saveCookiesForActivePage(): Promise<{ path: string; count: number }[]> {
-    if (!this.context) return [];
-    const page = this.getActivePage();
-    if (!page) return [];
-    const cookies = await this.context.cookies();
-    if (!cookies.length) return [];
-
-    const digest = this.hashCookies(cookies);
-    const now = Date.now();
-    if (digest === this.lastCookieSignature && now - this.lastCookieSaveTs < 2000) {
-      return [];
-    }
-
-    const targets = this.resolveCookieTargets(page.url());
-    if (!targets.length) return [];
-
-    const payload = JSON.stringify(
-      {
-        timestamp: now,
-        profileId: this.options.profileId,
-        url: page.url(),
-        cookies,
-      },
-      null,
-      2,
-    );
-    const results: { path: string; count: number }[] = [];
-    for (const target of targets) {
-      await fs.promises.mkdir(path.dirname(target), { recursive: true });
-      await fs.promises.writeFile(target, payload, 'utf-8');
-      results.push({ path: target, count: cookies.length });
-    }
-
-    this.lastCookieSignature = digest;
-    this.lastCookieSaveTs = now;
-    return results;
+    return this.cookiesManager.saveCookiesForActivePage();
   }
 
   async getCookies(): Promise<any[]> {
-    if (!this.context) return [];
-    return this.context.cookies();
+    return this.cookiesManager.getCookies();
   }
 
   async saveCookiesToFile(filePath: string): Promise<{ path: string; count: number }> {
-    const cookies = await this.getCookies();
-    await fs.promises.mkdir(path.dirname(filePath), { recursive: true });
-    await fs.promises.writeFile(filePath, JSON.stringify({ timestamp: Date.now(), cookies }, null, 2), 'utf-8');
-    return { path: filePath, count: cookies.length };
+    return this.cookiesManager.saveCookiesToFile(filePath);
   }
 
   async saveCookiesIfStable(filePath: string, opts: { minDelayMs?: number } = {}): Promise<{ path: string; count: number } | null> {
-    const minDelayMs = Math.max(1000, Number(opts.minDelayMs) || 2000);
-    const page = this.getActivePage();
-    if (!page) return null;
-    const html = await page.content();
-    const isLoggedIn = html.includes('Frame_wrap_') && !html.includes('LoginCard') && !html.includes('passport');
-    if (!isLoggedIn) return null;
-    const cookies = await this.getCookies();
-    if (!cookies.length) return null;
-    const digest = this.hashCookies(cookies);
-    const now = Date.now();
-    if (digest === this.lastCookieSignature && now - this.lastCookieSaveTs < minDelayMs) {
-      return null;
-    }
-    await fs.promises.mkdir(path.dirname(filePath), { recursive: true });
-    await fs.promises.writeFile(filePath, JSON.stringify({ timestamp: now, cookies }, null, 2), 'utf-8');
-    this.lastCookieSignature = digest;
-    this.lastCookieSaveTs = now;
-    return { path: filePath, count: cookies.length };
+    return this.cookiesManager.saveCookiesIfStable(filePath, opts);
   }
 
   async injectCookiesFromFile(filePath: string): Promise<{ count: number }> {
-    if (!this.context) throw new Error('context not ready');
-    const raw = JSON.parse(await fs.promises.readFile(filePath, 'utf-8'));
-    const cookies = Array.isArray(raw) ? raw : Array.isArray(raw?.cookies) ? raw.cookies : [];
-    if (!cookies.length) return { count: 0 };
-    await this.context.addCookies(cookies);
-    return { count: cookies.length };
+    return this.cookiesManager.injectCookiesFromFile(filePath);
   }
 
   async goto(url: string): Promise<void> {
-    const page = await this.ensurePrimaryPage();
-    await page.goto(url, { waitUntil: resolveNavigationWaitUntil() });
-    await ensurePageRuntime(page);
-    this.lastKnownUrl = url;
+    return this.navigation.goto(url);
   }
 
   async screenshot(fullPage = true) {
@@ -747,179 +302,12 @@ export class BrowserSession {
     return page.screenshot({ fullPage });
   }
 
-  private async ensureInputReady(page: Page): Promise<void> {
-    if (this.options.headless) return;
-    const bringToFrontTimeoutMs = resolveInputRecoveryBringToFrontTimeoutMs();
-    let bringToFrontTimer: NodeJS.Timeout | null = null;
-    try {
-      await Promise.race<void>([
-        page.bringToFront(),
-        new Promise<void>((_resolve, reject) => {
-          bringToFrontTimer = setTimeout(() => {
-            reject(new Error(`input ready bringToFront timed out after ${bringToFrontTimeoutMs}ms`));
-          }, bringToFrontTimeoutMs);
-        }),
-      ]);
-    } catch {
-      // Best-effort only; continue with existing page state if focusing fails.
-    } finally {
-      if (bringToFrontTimer) clearTimeout(bringToFrontTimer);
-    }
-    const settleMs = resolveInputReadySettleMs();
-    if (settleMs > 0) {
-      await page.waitForTimeout(settleMs).catch(() => {});
-    }
-  }
-
-  private async resolveInputPage(preferredPage: Page): Promise<Page> {
-    try {
-      const page = await this.ensurePrimaryPage();
-      if (page && !page.isClosed()) return page;
-    } catch {
-      // fall through to preferred page.
-    }
-    if (preferredPage && !preferredPage.isClosed()) return preferredPage;
-    return this.ensurePrimaryPage();
-  }
-
-  private async withInputActionTimeout<T>(label: string, run: () => Promise<T>, timeoutOverrideMs?: number): Promise<T> {
-    const resolvedOverride = Number(timeoutOverrideMs);
-    const timeoutMs = Number.isFinite(resolvedOverride) && resolvedOverride > 0
-      ? Math.floor(resolvedOverride)
-      : resolveInputActionTimeoutMs();
-    let timer: NodeJS.Timeout | null = null;
-    try {
-      return await Promise.race<T>([
-        run(),
-        new Promise<T>((_resolve, reject) => {
-          timer = setTimeout(() => {
-            reject(new Error(`${label} timed out after ${timeoutMs}ms`));
-          }, timeoutMs);
-        }),
-      ]);
-    } finally {
-      if (timer) clearTimeout(timer);
-    }
-  }
-
-  private async recoverInputPipeline(page: Page): Promise<Page> {
-    const activePage = await this.resolveInputPage(page).catch(() => page);
-    const bringToFrontTimeoutMs = resolveInputRecoveryBringToFrontTimeoutMs();
-    let bringToFrontTimer: NodeJS.Timeout | null = null;
-    try {
-      await Promise.race<void>([
-        activePage.bringToFront(),
-        new Promise<void>((_resolve, reject) => {
-          bringToFrontTimer = setTimeout(() => {
-            reject(new Error(`input recovery bringToFront timed out after ${bringToFrontTimeoutMs}ms`));
-          }, bringToFrontTimeoutMs);
-        }),
-      ]);
-    } catch {
-      // Best-effort recovery only.
-    } finally {
-      if (bringToFrontTimer) clearTimeout(bringToFrontTimer);
-    }
-    const delayMs = resolveInputRecoveryDelayMs();
-    if (delayMs > 0) {
-      try {
-        await activePage.waitForTimeout(delayMs);
-      } catch {
-        // Best-effort recovery only.
-      }
-    }
-    await ensurePageRuntime(activePage, true).catch(() => {});
-    return this.resolveInputPage(activePage).catch(() => activePage);
-  }
-
-  private async runInputAction<T>(page: Page, label: string, run: (activePage: Page) => Promise<T>): Promise<T> {
-    const maxAttempts = resolveInputActionMaxAttempts();
-    let lastError: unknown = null;
-    let activePage = page;
-    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-      activePage = await this.resolveInputPage(activePage).catch(() => activePage);
-      try {
-        return await this.withInputActionTimeout(`${label} (attempt ${attempt}/${maxAttempts})`, () => run(activePage));
-      } catch (error) {
-        lastError = error;
-        if (attempt >= maxAttempts) break;
-        activePage = await this.recoverInputPipeline(activePage);
-      }
-    }
-    if (lastError instanceof Error) throw lastError;
-    throw new Error(`${label} failed`);
-  }
-
-  private async withInputActionLock<T>(run: () => Promise<T>): Promise<T> {
-    const previous = this.inputActionTail;
-    let release: (() => void) | null = null;
-    this.inputActionTail = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    await previous.catch(() => {});
-    try {
-      return await run();
-    } finally {
-      if (release) release();
-    }
-  }
-
   /**
    * 基于屏幕坐标的系统级鼠标点击（Playwright 原生）
    * @param opts 屏幕坐标及点击选项
    */
   async mouseClick(opts: { x: number; y: number; button?: 'left' | 'right' | 'middle'; clicks?: number; delay?: number; nudgeBefore?: boolean }): Promise<void> {
-    const page = await this.ensurePrimaryPage();
-    await this.withInputActionLock(async () => {
-      await this.runInputAction(page, 'input:ready', (activePage) => this.ensureInputReady(activePage));
-      const { x, y, button = 'left', clicks = 1, delay = 50, nudgeBefore = false } = opts;
-      const moveToTarget = async (clickPage: Page) => {
-        try {
-          await clickPage.mouse.move(x, y, { steps: 1 });
-        } catch {
-          // Best effort only.
-        }
-      };
-      const nudgePointer = async (clickPage: Page) => {
-        const viewport = clickPage.viewportSize();
-        const maxX = Math.max(2, Number(viewport?.width || 1280) - 2);
-        const maxY = Math.max(2, Number(viewport?.height || 720) - 2);
-        const nudgeX = Math.max(2, Math.min(maxX, Math.round(Math.max(24, x * 0.2))));
-        const nudgeY = Math.max(2, Math.min(maxY, Math.round(Math.max(24, y * 0.2))));
-        await clickPage.mouse.move(nudgeX, nudgeY, { steps: 3 }).catch(() => {});
-        await clickPage.waitForTimeout(40).catch(() => {});
-      };
-      for (let i = 0; i < clicks; i++) {
-        if (i > 0) {
-          // 多次点击间隔 100-200ms
-          await new Promise(r => setTimeout(r, 100 + Math.random() * 100));
-        }
-        try {
-          await this.runInputAction(page, 'mouse:click(direct)', async (clickPage) => {
-            if (nudgeBefore) {
-              await nudgePointer(clickPage);
-            }
-            await moveToTarget(clickPage);
-            await clickPage.mouse.click(x, y, {
-              button,
-              clickCount: 1,
-              delay: Math.max(0, Number(delay) || 0),
-            });
-          });
-        } catch (error) {
-          if (!isTimeoutLikeError(error)) throw error;
-          await this.runInputAction(page, 'mouse:click(retry)', async (clickPage) => {
-            await nudgePointer(clickPage);
-            await moveToTarget(clickPage);
-            await clickPage.mouse.click(x, y, {
-              button,
-              clickCount: 1,
-              delay: Math.max(0, Number(delay) || 0),
-            });
-          });
-        }
-      }
-    });
+    return this.inputOps.mouseClick(opts);
   }
 
   /**
@@ -927,37 +315,18 @@ export class BrowserSession {
    * @param opts 目标坐标及移动选项
    */
   async mouseMove(opts: { x: number; y: number; steps?: number }): Promise<void> {
-    const x = Number(opts?.x);
-    const y = Number(opts?.y);
-    throw new Error(`mouse:move disabled (x=${Number.isFinite(x) ? x : 'NaN'}, y=${Number.isFinite(y) ? y : 'NaN'})`);
+    return this.inputOps.mouseMove(opts);
   }
 
   /**
    * 基于键盘的系统输入（Playwright keyboard）
    */
   async keyboardType(opts: { text: string; delay?: number; submit?: boolean }): Promise<void> {
-    const page = await this.ensurePrimaryPage();
-    await this.withInputActionLock(async () => {
-      await this.runInputAction(page, 'input:ready', (activePage) => this.ensureInputReady(activePage));
-      const { text, delay = 80, submit } = opts;
-
-      if (text && text.length > 0) {
-        await this.runInputAction(page, 'keyboard:type', (activePage) => activePage.keyboard.type(text, { delay }));
-      }
-
-      if (submit) {
-        await this.runInputAction(page, 'keyboard:press', (activePage) => activePage.keyboard.press('Enter'));
-      }
-    });
+    return this.inputOps.keyboardType(opts);
   }
 
   async keyboardPress(opts: { key: string; delay?: number }): Promise<void> {
-    const page = await this.ensurePrimaryPage();
-    await this.withInputActionLock(async () => {
-      await this.runInputAction(page, 'input:ready', (activePage) => this.ensureInputReady(activePage));
-      const { key, delay } = opts;
-      await this.runInputAction(page, 'keyboard:press', (activePage) => activePage.keyboard.press(key, typeof delay === 'number' ? { delay } : undefined));
-    });
+    return this.inputOps.keyboardPress(opts);
   }
 
   /**
@@ -965,184 +334,12 @@ export class BrowserSession {
    * @param opts deltaY 为垂直滚动（正=向下，负=向上），deltaX 可选
    */
   async mouseWheel(opts: { deltaY: number; deltaX?: number }): Promise<void> {
-    const page = await this.ensurePrimaryPage();
-    await this.withInputActionLock(async () => {
-      await this.runInputAction(page, 'input:ready', (activePage) => this.ensureInputReady(activePage));
-      const { deltaX = 0, deltaY } = opts;
-      const normalizedDeltaX = Number(deltaX) || 0;
-      const normalizedDeltaY = Number(deltaY) || 0;
-      if (normalizedDeltaY === 0 && normalizedDeltaX === 0) return;
-      const keyboardKey = normalizedDeltaY > 0 ? 'PageDown' : 'PageUp';
-      const keyboardTimes = Math.max(1, Math.min(4, Math.round(Math.abs(normalizedDeltaY) / 420) || 1));
-      const runKeyboardWheel = async () => {
-        for (let i = 0; i < keyboardTimes; i += 1) {
-          await this.runInputAction(page, `mouse:wheel:keyboard:${keyboardKey}`, (activePage) => activePage.keyboard.press(keyboardKey));
-          if (i + 1 < keyboardTimes) {
-            await page.waitForTimeout(80).catch(() => {});
-          }
-        }
-      };
-      if (this.wheelMode === 'keyboard') {
-        await runKeyboardWheel();
-        return;
-      }
-      try {
-        await this.runInputAction(page, 'mouse:wheel', async (activePage) => {
-          // Camoufox wheel may stall on some hosts; priming cursor movement helps in known cases.
-          try {
-            const viewport = activePage.viewportSize();
-            const moveX = Math.max(1, Math.floor(((viewport?.width || 1280) * 0.5)));
-            const moveY = Math.max(1, Math.floor(((viewport?.height || 720) * 0.5)));
-            await activePage.mouse.move(moveX, moveY, { steps: 1 });
-          } catch {
-            // Keep wheel path best-effort; fallback policy is handled below.
-          }
-          await activePage.mouse.wheel(normalizedDeltaX, normalizedDeltaY);
-        });
-      } catch (error) {
-        if (!isTimeoutLikeError(error) || normalizedDeltaX !== 0 || normalizedDeltaY === 0) {
-          throw error;
-        }
-        this.wheelMode = 'keyboard';
-        await runKeyboardWheel();
-      }
-    });
-  }
-
-  private async syncWindowBounds(
-    page: Page,
-    viewport: { width: number; height: number },
-  ): Promise<void> {
-    const engine = String(this.options.engine ?? 'camoufox');
-    // Log viewport metrics for diagnosis
-    try {
-      const metrics = await page.evaluate(() => ({
-        innerWidth: window.innerWidth || 0,
-        innerHeight: window.innerHeight || 0,
-        outerWidth: window.outerWidth || 0,
-        outerHeight: window.outerHeight || 0,
-        screenX: Math.floor(window.screenX || 0),
-        screenY: Math.floor(window.screenY || 0),
-        devicePixelRatio: window.devicePixelRatio || 1,
-        visualViewport: window.visualViewport ? {
-          width: window.visualViewport.width || 0,
-          height: window.visualViewport.height || 0,
-          offsetLeft: window.visualViewport.offsetLeft || 0,
-          offsetTop: window.visualViewport.offsetTop || 0,
-          scale: window.visualViewport.scale || 1,
-        } : null,
-      }));
-      console.log(`[viewport-metrics] target=${viewport.width}x${viewport.height} inner=${metrics.innerWidth}x${metrics.innerHeight} outer=${metrics.outerWidth}x${metrics.outerHeight} screen=(${metrics.screenX},${metrics.screenY}) dpr=${metrics.devicePixelRatio} visual=${JSON.stringify(metrics.visualViewport)}`);
-
-      // If inner dimensions don't match target, retry setViewportSize
-      const widthDelta = Math.abs(metrics.innerWidth - viewport.width);
-      const heightDelta = Math.abs(metrics.innerHeight - viewport.height);
-      if (widthDelta > 50 || heightDelta > 50) {
-        console.warn(`[viewport-metrics] MISMATCH detected: widthDelta=${widthDelta} heightDelta=${heightDelta}, retrying setViewportSize...`);
-        await page.setViewportSize({ width: viewport.width, height: viewport.height });
-        await page.waitForTimeout(500);
-        const retry = await page.evaluate(() => ({
-          innerWidth: window.innerWidth || 0,
-          innerHeight: window.innerHeight || 0,
-        }));
-        console.log(`[viewport-metrics] after retry: inner=${retry.innerWidth}x${retry.innerHeight}`);
-      }
-    } catch (err) {
-      console.warn(`[viewport-metrics] log failed: ${err?.message || String(err)}`);
-    }
-
-    if (engine !== 'chromium') return;
-    if (this.options.headless) return;
-    if (!this.context) return;
-
-    try {
-      const client = await this.context.newCDPSession(page);
-      const { windowId } = await client.send('Browser.getWindowForTarget');
-      const metrics = await page.evaluate(() => ({
-        innerWidth: window.innerWidth || 0,
-        innerHeight: window.innerHeight || 0,
-        outerWidth: window.outerWidth || 0,
-        outerHeight: window.outerHeight || 0,
-      }));
-
-      const deltaW = Math.max(0, Math.floor((metrics.outerWidth || 0) - (metrics.innerWidth || 0)));
-      const deltaH = Math.max(0, Math.floor((metrics.outerHeight || 0) - (metrics.innerHeight || 0)));
-      const targetWidth = Math.max(300, Math.floor(Number(viewport.width) + deltaW));
-      const targetHeight = Math.max(300, Math.floor(Number(viewport.height) + deltaH));
-
-      await client.send('Browser.setWindowBounds', {
-        windowId,
-        bounds: { width: targetWidth, height: targetHeight },
-      });
-    } catch (error: any) {
-      console.warn(`[browser-session] sync window bounds failed: ${error?.message || String(error)}`);
-    }
-  }
-
-  private async maybeCenterWindow(page: Page, viewport: { width: number; height: number }): Promise<void> {
-    if (this.options.headless) return;
-    try {
-      const metrics = await page.evaluate(() => ({
-        screenX: Math.floor(window.screenX || 0),
-        screenY: Math.floor(window.screenY || 0),
-        outerWidth: Math.floor(window.outerWidth || 0),
-        outerHeight: Math.floor(window.outerHeight || 0),
-        innerWidth: Math.floor(window.innerWidth || 0),
-        innerHeight: Math.floor(window.innerHeight || 0),
-        screenWidth: Math.floor(window.screen?.availWidth || window.screen?.width || 0),
-        screenHeight: Math.floor(window.screen?.availHeight || window.screen?.height || 0),
-      }));
-
-      const sw = Math.max(metrics.screenWidth || 0, viewport.width);
-      const sh = Math.max(metrics.screenHeight || 0, viewport.height);
-
-      // Try to resize outer window to fit viewport (inner) + chrome delta
-      const deltaW = Math.max(0, (metrics.outerWidth || 0) - (metrics.innerWidth || 0));
-      const deltaH = Math.max(0, (metrics.outerHeight || 0) - (metrics.innerHeight || 0));
-      const targetOuterW = Math.max(viewport.width + deltaW, 300);
-      const targetOuterH = Math.max(viewport.height + deltaH, 300);
-
-      await page.evaluate(({w, h}) => { try { window.resizeTo(w, h); } catch {} }, { w: targetOuterW, h: targetOuterH });
-      await page.waitForTimeout(200);
-
-      const ow = Math.max(metrics.outerWidth || 0, targetOuterW);
-      const oh = Math.max(metrics.outerHeight || 0, targetOuterH);
-      const targetX = Math.max(0, Math.floor((sw - ow) / 2));
-      const targetY = Math.max(0, Math.floor((sh - oh) / 2));
-
-      // Only move if we're clearly off-center
-      if (Math.abs(metrics.screenX - targetX) > 5 || Math.abs(metrics.screenY - targetY) > 5) {
-        await page.evaluate(({x, y}) => { try { window.moveTo(x, y); } catch {} }, { x: targetX, y: targetY });
-        await page.waitForTimeout(200);
-      }
-    } catch (err: any) {
-      console.warn('[browser-session] maybeCenterWindow failed:', err?.message || String(err));
-    }
+    return this.inputOps.mouseWheel(opts);
   }
 
   async setViewportSize(opts: { width: number; height: number }): Promise<{ width: number; height: number }> {
     const page = await this.ensurePrimaryPage();
-    const width = Math.max(800, Math.floor(Number(opts.width) || 0));
-    const height = Math.max(700, Math.floor(Number(opts.height) || 0));
-    if (!width || !height) {
-      throw new Error('invalid_viewport_size');
-    }
-    if (this.followWindowViewport && !this.options.headless) {
-      await page.evaluate(({ w, h }) => {
-        try { window.resizeTo(w, h); } catch {}
-      }, { w: width, h: height });
-      await page.waitForTimeout(150);
-      await this.refreshViewportFromWindow(page).catch(() => {});
-      const next = this.lastViewport || { width, height };
-      await this.maybeCenterWindow(page, next).catch(() => {});
-      return next;
-    }
-    await page.setViewportSize({ width, height });
-    await this.syncWindowBounds(page, { width, height });
-    await this.syncDeviceScaleFactor(page, { width, height });
-    await this.maybeCenterWindow(page, { width, height });
-    this.lastViewport = { width, height };
-    return { width, height };
+    return this.viewportManager.setViewportSize(page, opts);
   }
 
   async evaluate(expression: string, arg?: any) {
@@ -1154,61 +351,9 @@ export class BrowserSession {
   }
 
   getCurrentUrl(): string | null {
-    const page = this.getActivePage();
-    if (page) {
-      return page.url() || this.lastKnownUrl;
-    }
-    return this.lastKnownUrl;
+    return this.navigation.getCurrentUrl();
   }
 
-  private resolveCookieTargets(currentUrl?: string | null): string[] {
-    const cookieDir = resolveCookiesRoot();
-    const targets = new Set<string>([path.join(cookieDir, `${this.options.profileId}.json`)]);
-
-    if (currentUrl) {
-      try {
-        const { hostname } = new URL(currentUrl);
-        const hostSegment = this.sanitizeHost(hostname);
-        if (hostSegment) {
-          targets.add(path.join(cookieDir, `${hostSegment}-latest.json`));
-        }
-        if (hostname && hostname.includes('weibo')) {
-          targets.add(path.join(cookieDir, 'weibo.com-latest.json'));
-        }
-      } catch {
-        targets.add(path.join(cookieDir, 'default-latest.json'));
-      }
-    }
-    return Array.from(targets);
-  }
-
-  private sanitizeHost(host?: string | null): string {
-    if (!host) return 'default';
-    return host.replace(/[^a-z0-9.-]/gi, '_');
-  }
-
-  private hashCookies(cookies: any[]): string {
-    const normalized = cookies
-      .map((c) => ({
-        name: c.name,
-        value: c.value,
-        domain: c.domain,
-        path: c.path,
-        expires: c.expires,
-        httpOnly: !!c.httpOnly,
-        secure: !!c.secure,
-      }))
-      .sort((a, b) => {
-        if (a.domain === b.domain) {
-          if (a.name === b.name) return (a.path || '').localeCompare(b.path || '');
-          return a.name.localeCompare(b.name);
-        }
-        return (a.domain || '').localeCompare(b.domain || '');
-      });
-    const hash = crypto.createHash('sha1');
-    hash.update(JSON.stringify(normalized));
-    return hash.digest('hex');
-  }
 
   async close(): Promise<void> {
     try {
@@ -1217,7 +362,7 @@ export class BrowserSession {
     } finally {
       await this.browser?.close();
       this.lock.release();
-      this.runtimeObservers.clear();
+      this.runtimeEvents.clearObservers();
       this.notifyExit();
     }
   }
@@ -1226,9 +371,5 @@ export class BrowserSession {
     if (this.exitNotified) return;
     this.exitNotified = true;
     this.onExit?.(this.options.profileId);
-  }
-
- private normalizeUrl(raw: string) {
-    return normalizeUrl(raw);
   }
 }

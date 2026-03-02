@@ -1,46 +1,46 @@
-import { Page } from 'playwright';
-import { resolveNavigationWaitUntil } from './utils.js';
+import type { Page } from 'playwright';
+import { ensurePageRuntime } from '../pageRuntime.js';
+import { normalizeUrl, resolveNavigationWaitUntil } from './utils.js';
+
+export interface NavigationDeps {
+  ensurePrimaryPage: () => Promise<Page>;
+  getActivePage: () => Page | null;
+  recordLastKnownUrl: (url: string | null) => void;
+  getLastKnownUrl: () => string | null;
+}
 
 export class BrowserSessionNavigation {
-  private lastKnownUrl: string | null = null;
-
-  constructor(private ensurePrimaryPage: () => Promise<Page>) {}
+  constructor(private deps: NavigationDeps) {}
 
   async goto(url: string): Promise<void> {
-    const page = await this.ensurePrimaryPage();
+    const page = await this.deps.ensurePrimaryPage();
     await page.goto(url, { waitUntil: resolveNavigationWaitUntil() });
-    this.lastKnownUrl = url;
+    await ensurePageRuntime(page);
+    this.deps.recordLastKnownUrl(url);
   }
 
   async goBack(): Promise<{ ok: boolean; url: string }> {
-    const page = await this.ensurePrimaryPage();
+    const page = await this.deps.ensurePrimaryPage();
+    const waitUntil = resolveNavigationWaitUntil();
     try {
-      await page.goBack({ waitUntil: resolveNavigationWaitUntil() });
-      this.lastKnownUrl = page.url();
-      return { ok: true, url: this.lastKnownUrl };
+      const res = await page.goBack({ waitUntil }).catch((): null => null);
+      await ensurePageRuntime(page, true).catch(() => {});
+      this.deps.recordLastKnownUrl(page.url());
+      return { ok: Boolean(res), url: page.url() };
     } catch {
-      return { ok: false, url: this.lastKnownUrl || '' };
+      await ensurePageRuntime(page, true).catch(() => {});
+      this.deps.recordLastKnownUrl(page.url());
+      return { ok: false, url: page.url() };
     }
   }
 
   getCurrentUrl(): string | null {
-    const page = this.ensurePrimaryPageSync?.();
-    if (page) return page.url() || this.lastKnownUrl;
-    return this.lastKnownUrl;
-  }
-
-  private ensurePrimaryPageSync?: () => Page | null;
-
-  setEnsurePrimaryPageSync(fn: () => Page | null) {
-    this.ensurePrimaryPageSync = fn;
+    const page = this.deps.getActivePage();
+    if (page) return page.url() || this.deps.getLastKnownUrl();
+    return this.deps.getLastKnownUrl();
   }
 
   normalizeUrl(raw: string): string {
-    try {
-      const url = new URL(raw);
-      return `${url.origin}${url.pathname}`;
-    } catch {
-      return raw;
-    }
+    return normalizeUrl(raw);
   }
 }

@@ -4,9 +4,15 @@ import path from 'node:path';
 
 const root = process.cwd();
 const args = new Set(process.argv.slice(2));
+const disabled = args.has('--disabled');
 const limitArg = process.argv.find((arg) => arg.startsWith('--limit='));
 const limit = Number(limitArg ? limitArg.split('=')[1] : 500) || 500;
 const quick = args.has('--quick');
+
+if (disabled) {
+  console.log('[check-max-lines] skipped (--disabled)');
+  process.exit(0);
+}
 
 const allowedExt = new Set([
   '.js', '.jsx', '.ts', '.tsx',
