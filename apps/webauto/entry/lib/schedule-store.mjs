@@ -6,9 +6,6 @@ const INDEX_FILE = 'index.json';
 const DEFAULT_COMMAND_TYPE = 'xhs-unified';
 const SUPPORTED_COMMAND_TYPES = [
   'xhs-unified',
-  'weibo-timeline',
-  'weibo-search',
-  'weibo-monitor',
   '1688-search',
 ];
 const DEFAULT_INTERVAL_MINUTES = 30;

@@ -1,12 +1,12 @@
 import { buildXhsAutoscriptBase } from './xhs-autoscript-base.mjs';
 import {
   buildXhsBootstrapOperations,
-  buildXhsCollectOperations,
   buildXhsDetailOperations,
   buildXhsGuardOperations,
   buildXhsSearchOperations,
   buildXhsTabPoolOperation,
 } from './xhs-autoscript-ops.mjs';
+import { buildXhsCollectOperations } from './xhs-autoscript-collect.mjs';
 
 export function buildXhsUnifiedAutoscript(rawOptions = {}) {
   const { options, base } = buildXhsAutoscriptBase(rawOptions, {

@@ -15,7 +15,7 @@ const STATUS_ACTIVE = 'active';
 const STATUS_VALID = 'valid';
 const STATUS_INVALID = 'invalid';
 const STATUS_PENDING = 'pending';
-export const REQUIRED_ACCOUNT_PLATFORMS = Object.freeze(['xiaohongshu', 'weibo']);
+export const REQUIRED_ACCOUNT_PLATFORMS = Object.freeze(['xiaohongshu']);
 const MIN_REQUIRED_ACCOUNT_BINDINGS = 1;
 
 function nowIso() {

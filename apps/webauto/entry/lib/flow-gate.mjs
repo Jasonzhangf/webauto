@@ -352,7 +352,6 @@ function buildDefaultDoc() {
     updatedAt: nowIso(),
     platforms: {
       xiaohongshu: cloneDefaultPlatformGate('xiaohongshu'),
-      weibo: cloneDefaultPlatformGate('weibo'),
       '1688': cloneDefaultPlatformGate('1688'),
     },
   };

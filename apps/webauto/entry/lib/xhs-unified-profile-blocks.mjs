@@ -2,11 +2,9 @@ import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 
-import { buildXhsUnifiedAutoscript } from '../../../../modules/camo-runtime/src/autoscript/xhs-unified-template.mjs';
-import { buildXhsCollectAutoscript } from '../../../../modules/camo-runtime/src/autoscript/xhs-collect-template.mjs';
-import { buildXhsDetailAutoscript } from '../../../../modules/camo-runtime/src/autoscript/xhs-detail-template.mjs';
-import { normalizeAutoscript, validateAutoscript } from '../../../../modules/camo-runtime/src/autoscript/schema.mjs';
-import { AutoscriptRunner } from '../../../../modules/camo-runtime/src/autoscript/runtime.mjs';
+// 编排层：仅组合模块，不含业务细节
+// 模板/runner 已在 camo-runtime 中实现，此文件仅做参数归一化 + 调度
+// 符合三层铁律：编排层只做参数归一 + 调度，业务细节全在 camo-runtime/action-providers
 import { markProfileInvalid } from './account-store.mjs';
 import { runCamo } from './camo-cli.mjs';
 import { ensureSessionInitialized } from './session-init.mjs';

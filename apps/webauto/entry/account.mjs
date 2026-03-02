@@ -12,8 +12,6 @@ import {
 } from './lib/account-store.mjs';
 import { assertProfileExists } from './lib/profilepool.mjs';
 import {
-  syncWeiboAccountByProfile,
-  syncWeiboAccountsByProfiles,
   syncXhsAccountByProfile,
   syncXhsAccountsByProfiles,
 } from './lib/account-detect.mjs';
@@ -22,7 +20,6 @@ import { runCamo } from './lib/camo-cli.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 const XHS_HOME_URL = 'https://www.xiaohongshu.com';
-const WEIBO_HOME_URL = 'https://weibo.com';
 
 function output(payload, jsonMode) {
   if (jsonMode) {
@@ -109,7 +106,6 @@ async function applyLoginViewport(profileId) {
 function inferLoginUrl(platform) {
   const value = String(platform || '').trim().toLowerCase();
   if (!value || value === 'xiaohongshu' || value === 'xhs') return XHS_HOME_URL;
-  if (value === 'weibo' || value === 'wb') return WEIBO_HOME_URL;
   return 'https://example.com';
 }
 
@@ -121,18 +117,17 @@ function normalizeAlias(input) {
 function normalizePlatform(input, fallback = 'xiaohongshu') {
   const raw = String(input || fallback).trim().toLowerCase();
   if (!raw || raw === 'xhs') return 'xiaohongshu';
-  if (raw === 'wb') return 'weibo';
   return raw;
 }
 
 function isSupportedSyncPlatform(platform) {
-  return platform === 'xiaohongshu' || platform === 'weibo';
+  return platform === 'xiaohongshu';
 }
 
 function resolveSyncPlatformByProfile(profileId, fallback = 'xiaohongshu') {
   const id = String(profileId || '').trim();
   if (!id) return normalizePlatform(fallback);
-  const candidates = ['xiaohongshu', 'weibo'];
+  const candidates = ['xiaohongshu'];
   for (const platform of candidates) {
     const rows = listAccountProfiles({ platform }).profiles || [];
     if (rows.some((row) => String(row?.profileId || '').trim() === id)) return platform;
@@ -145,9 +140,6 @@ async function syncByProfileAndPlatform(profileId, platform, options = {}) {
   if (normalizedPlatform === 'xiaohongshu') {
     return syncXhsAccountByProfile(profileId, options);
   }
-  if (normalizedPlatform === 'weibo') {
-    return syncWeiboAccountByProfile(profileId, options);
-  }
   throw new Error(`account sync unsupported platform: ${normalizedPlatform}`);
 }
 
@@ -155,9 +147,6 @@ async function syncProfilesByPlatform(profileIds, platform, options = {}) {
   const normalizedPlatform = normalizePlatform(platform || 'xiaohongshu');
   if (normalizedPlatform === 'xiaohongshu') {
     return syncXhsAccountsByProfiles(profileIds, options);
-  }
-  if (normalizedPlatform === 'weibo') {
-    return syncWeiboAccountsByProfiles(profileIds, options);
   }
   throw new Error(`account sync unsupported platform: ${normalizedPlatform}`);
 }
@@ -289,7 +278,7 @@ Usage:
   webauto account delete <id|alias|profileId|accountId> [--delete-profile] [--delete-fingerprint] [--json]
   webauto account login <id|alias|profileId|accountId> [--platform <name>] [--url <url>] [--idle-timeout <duration>] [--sync-alias] [--json]
   webauto account sync-alias <id|alias|profileId|accountId> [--platform <name>] [--selector <css>] [--alias <value>] [--json]
-  webauto account sync <profileId|all> [--platform <xiaohongshu|weibo>] [--pending-while-login] [--resolve-alias] [--json]
+  webauto account sync <profileId|all> [--platform <xiaohongshu>] [--pending-while-login] [--resolve-alias] [--json]
 
 Notes:
   - 璐﹀彿鏁版嵁榛樿淇濆瓨鍒?WEBAUTO 鏍圭洰褰曚笅鐨?accounts锛圵indows 浼樺厛 D:/webauto锛岀己澶辨椂鍥炶惤 ~/.webauto锛屽彲鐢?WEBAUTO_HOME 瑕嗙洊锛?
@@ -304,7 +293,6 @@ Examples:
   webauto account add --platform xiaohongshu --alias 涓诲彿
   webauto account list
   webauto account sync all
-  webauto account sync all --platform weibo
   webauto account login xhs-0001 --url https://www.xiaohongshu.com --idle-timeout off
   webauto account sync-alias xhs-0001
   webauto account update xhs-0001 --alias 杩愯惀1鍙?

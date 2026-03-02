@@ -1,11 +1,11 @@
 import { buildXhsAutoscriptBase } from './xhs-autoscript-base.mjs';
 import {
   buildXhsBootstrapOperations,
-  buildXhsCollectOperations,
   buildXhsGuardOperations,
   buildXhsSearchOperations,
   buildXhsTabPoolOperation,
 } from './xhs-autoscript-ops.mjs';
+import { buildXhsCollectOperations } from './xhs-autoscript-collect.mjs';
 
 export function buildXhsCollectAutoscript(rawOptions = {}) {
   const stage = rawOptions.stage ? String(rawOptions.stage || '').trim().toLowerCase() : 'links';
