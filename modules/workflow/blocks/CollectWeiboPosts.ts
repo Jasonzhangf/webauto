@@ -197,16 +197,16 @@ async function generateMarkdown(posts: any[], filename: string) {
   ];
 
   posts.forEach((post: any, index: number) => {
-    lines.push(`## ${index + 1}. ${post.author || '鏈煡浣滆€?}`);
+    lines.push(`## ${index + 1}. ${post.author || 'Unknown Author'}`);
     lines.push('');
 
     if (post.content) {
-      lines.push(`**鍐呭锛?* ${post.content.substring(0, 500)}${post.content.length > 500 ? '...' : ''}`);
+      lines.push(`**Content:** ${post.content.substring(0, 500)}${post.content.length > 500 ? '...' : ''}`);
       lines.push('');
     }
 
     if (post.url) {
-      lines.push(`**閾炬帴锛?* ${post.url}`);
+      lines.push(`**URL:** ${post.url}`);
       lines.push('');
     }
 
@@ -258,4 +258,3 @@ async function main(input: { count?: number; output?: string }) {
 }
 
 export { main as execute };
-
