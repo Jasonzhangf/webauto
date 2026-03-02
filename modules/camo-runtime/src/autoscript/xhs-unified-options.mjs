@@ -1,0 +1,222 @@
+function toTrimmedString(value, fallback = '') {
+  const text = typeof value === 'string' ? value.trim() : '';
+  return text || fallback;
+}
+
+function toBoolean(value, fallback) {
+  if (value === undefined || value === null || value === '') return fallback;
+  if (typeof value === 'boolean') return value;
+  const text = String(value).trim().toLowerCase();
+  if (['1', 'true', 'yes', 'on'].includes(text)) return true;
+  if (['0', 'false', 'no', 'off'].includes(text)) return false;
+  return fallback;
+}
+
+function toPositiveInt(value, fallback, min = 1) {
+  if (value === null || value === undefined || value === '') return fallback;
+  const num = Number(value);
+  if (!Number.isFinite(num)) return fallback;
+  return Math.max(min, Math.floor(num));
+}
+
+function toNonNegativeInt(value, fallback = 0) {
+  if (value === null || value === undefined || value === '') return fallback;
+  const num = Number(value);
+  if (!Number.isFinite(num)) return fallback;
+  return Math.max(0, Math.floor(num));
+}
+
+function splitCsv(value) {
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => toTrimmedString(item))
+      .filter(Boolean);
+  }
+  return String(value || '')
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function pickCloseDependency(options) {
+  if (options.doReply) return 'comment_reply';
+  if (options.doLikes) return 'comment_like';
+  if (options.matchGateEnabled) return 'comment_match_gate';
+  if (options.commentsHarvestEnabled) return 'comments_harvest';
+  if (options.detailHarvestEnabled) return 'detail_harvest';
+  return 'open_first_detail';
+}
+
+export function resolveXhsUnifiedOptions(rawOptions = {}) {
+  const profileId = toTrimmedString(rawOptions.profileId, 'xiaohongshu-batch-1');
+  const keyword = toTrimmedString(rawOptions.keyword, '手机膜');
+  const env = toTrimmedString(rawOptions.env, 'prod');
+  const outputRoot = toTrimmedString(rawOptions.outputRoot, '');
+  const throttle = toPositiveInt(rawOptions.throttle, 900, 100);
+  const tabCountProvided = rawOptions.tabCount !== undefined
+    && rawOptions.tabCount !== null
+    && rawOptions.tabCount !== '';
+  let tabCount = toPositiveInt(rawOptions.tabCount, 1, 1);
+  const tabOpenDelayMs = toNonNegativeInt(rawOptions.tabOpenDelayMs, 1400);
+  const noteIntervalMs = toPositiveInt(rawOptions.noteIntervalMs, 1200, 200);
+  const submitMethod = toTrimmedString(rawOptions.submitMethod, 'click').toLowerCase();
+  const submitActionDelayMinMs = toPositiveInt(rawOptions.submitActionDelayMinMs, 180, 20);
+  const submitActionDelayMaxMs = toPositiveInt(rawOptions.submitActionDelayMaxMs, 620, submitActionDelayMinMs);
+  const submitSettleMinMs = toPositiveInt(rawOptions.submitSettleMinMs, 1200, 60);
+  const submitSettleMaxMs = toPositiveInt(rawOptions.submitSettleMaxMs, 2600, submitSettleMinMs);
+  const openDetailPreClickMinMs = toPositiveInt(rawOptions.openDetailPreClickMinMs, 700, 60);
+  const openDetailPreClickMaxMs = toPositiveInt(rawOptions.openDetailPreClickMaxMs, 2200, openDetailPreClickMinMs);
+  const openDetailPollDelayMinMs = toPositiveInt(rawOptions.openDetailPollDelayMinMs, 260, 80);
+  const openDetailPollDelayMaxMs = toPositiveInt(rawOptions.openDetailPollDelayMaxMs, 700, openDetailPollDelayMinMs);
+  const openDetailPostOpenMinMs = toPositiveInt(rawOptions.openDetailPostOpenMinMs, 5000, 120);
+  const openDetailPostOpenMaxMs = toPositiveInt(rawOptions.openDetailPostOpenMaxMs, 10000, openDetailPostOpenMinMs);
+  const commentsScrollStepMin = toPositiveInt(rawOptions.commentsScrollStepMin, 280, 120);
+  const commentsScrollStepMax = toPositiveInt(rawOptions.commentsScrollStepMax, 420, commentsScrollStepMin);
+  const commentsSettleMinMs = toPositiveInt(rawOptions.commentsSettleMinMs, 280, 80);
+  const commentsSettleMaxMs = toPositiveInt(rawOptions.commentsSettleMaxMs, 820, commentsSettleMinMs);
+  const defaultOperationMinIntervalMs = toNonNegativeInt(rawOptions.defaultOperationMinIntervalMs, 1200);
+  const defaultEventCooldownMs = toNonNegativeInt(rawOptions.defaultEventCooldownMs, 700);
+  const defaultPacingJitterMs = toNonNegativeInt(rawOptions.defaultPacingJitterMs, 900);
+  const navigationMinIntervalMs = toNonNegativeInt(rawOptions.navigationMinIntervalMs, 2200);
+  const maxNotes = toPositiveInt(rawOptions.maxNotes, 30, 1);
+  const maxComments = toNonNegativeInt(rawOptions.maxComments, 0);
+  const resume = toBoolean(rawOptions.resume, false);
+  const incrementalMax = toBoolean(rawOptions.incrementalMax, true);
+  const maxLikesPerRound = toNonNegativeInt(rawOptions.maxLikesPerRound ?? rawOptions.maxLikes, 0);
+  const matchMode = toTrimmedString(rawOptions.matchMode, 'any');
+  const matchMinHits = toPositiveInt(rawOptions.matchMinHits, 1, 1);
+  const replyText = toTrimmedString(rawOptions.replyText, '感谢分享，已关注');
+  const sharedHarvestPath = toTrimmedString(rawOptions.sharedHarvestPath, '');
+  const searchSerialKey = toTrimmedString(rawOptions.searchSerialKey, `${env}:${keyword}`);
+  const seedCollectCount = toNonNegativeInt(rawOptions.seedCollectCount, maxNotes);
+  const seedCollectMaxRounds = toNonNegativeInt(
+    rawOptions.seedCollectMaxRounds,
+    Math.max(6, Math.ceil(maxNotes / 2)),
+  );
+
+  const doHomepage = toBoolean(rawOptions.doHomepage, true);
+  const doImages = toBoolean(rawOptions.doImages, false);
+  const doComments = toBoolean(rawOptions.doComments, true);
+  const doLikes = toBoolean(rawOptions.doLikes, false);
+  const doReply = toBoolean(rawOptions.doReply, false);
+  const doOcr = toBoolean(rawOptions.doOcr, false);
+  const persistComments = toBoolean(rawOptions.persistComments, true);
+  const stage = toTrimmedString(rawOptions.stage, 'full').toLowerCase();
+  const stageLinksRequested = toBoolean(rawOptions.stageLinksEnabled, true);
+  const stageContentEnabled = toBoolean(rawOptions.stageContentEnabled, true);
+  const stageLikeEnabled = toBoolean(rawOptions.stageLikeEnabled, doLikes);
+  const stageReplyEnabled = toBoolean(rawOptions.stageReplyEnabled, doReply);
+  const stageDetailEnabled = toBoolean(rawOptions.stageDetailEnabled, stage === 'detail');
+
+  const matchKeywords = splitCsv(rawOptions.matchKeywords || keyword);
+  const likeKeywordsSeed = splitCsv(rawOptions.likeKeywords || '');
+  const likeKeywords = likeKeywordsSeed.length > 0 ? likeKeywordsSeed : matchKeywords;
+
+  const detailLoopEnabled = stageDetailEnabled || stageContentEnabled || stageLikeEnabled || stageReplyEnabled;
+  const stageLinksEnabled = stageLinksRequested || detailLoopEnabled;
+  const collectOpenLinksOnly = stageLinksEnabled;
+  const detailOpenByLinks = toBoolean(rawOptions.detailOpenByLinks, stageLinksEnabled && detailLoopEnabled);
+  const openByLinksMaxAttempts = toPositiveInt(rawOptions.openByLinksMaxAttempts, 3, 1);
+  const detailLinksStartup = detailOpenByLinks && stage === 'detail';
+  if (!tabCountProvided && detailOpenByLinks) tabCount = 4;
+  const detailHarvestEnabled = detailLoopEnabled && (doHomepage || doImages || doComments || doOcr);
+  const commentsHarvestEnabled = detailLoopEnabled && (doComments || stageLikeEnabled || stageReplyEnabled);
+  const matchGateEnabled = !stageDetailEnabled && (stageLikeEnabled || stageReplyEnabled);
+  const collectPerNoteBudgetMs = toPositiveInt(rawOptions.collectPerNoteBudgetMs ?? rawOptions.collectPerNoteMs, 15000, 5000);
+  const collectLinksTimeoutMinMs = toPositiveInt(rawOptions.collectLinksTimeoutMinMs, 600000, 60000);
+  const collectLinksTimeoutMs = toPositiveInt(
+    rawOptions.collectLinksTimeoutMs,
+    Math.max(collectLinksTimeoutMinMs, maxNotes * collectPerNoteBudgetMs),
+    60000,
+  );
+  const collectStallTimeoutMs = toPositiveInt(
+    rawOptions.collectStallTimeoutMs,
+    Math.max(180000, Math.min(300000, collectLinksTimeoutMs)),
+    30000,
+  );
+
+  const closeDependsOn = pickCloseDependency({
+    doReply: stageReplyEnabled,
+    doLikes: stageLikeEnabled,
+    matchGateEnabled,
+    commentsHarvestEnabled,
+    detailHarvestEnabled,
+  });
+
+  const recovery = {
+    attempts: 0,
+    actions: [],
+  };
+
+  return {
+    profileId,
+    keyword,
+    env,
+    outputRoot,
+    throttle,
+    tabCount,
+    tabCountProvided,
+    tabOpenDelayMs,
+    noteIntervalMs,
+    submitMethod,
+    submitActionDelayMinMs,
+    submitActionDelayMaxMs,
+    submitSettleMinMs,
+    submitSettleMaxMs,
+    openDetailPreClickMinMs,
+    openDetailPreClickMaxMs,
+    openDetailPollDelayMinMs,
+    openDetailPollDelayMaxMs,
+    openDetailPostOpenMinMs,
+    openDetailPostOpenMaxMs,
+    commentsScrollStepMin,
+    commentsScrollStepMax,
+    commentsSettleMinMs,
+    commentsSettleMaxMs,
+    defaultOperationMinIntervalMs,
+    defaultEventCooldownMs,
+    defaultPacingJitterMs,
+    navigationMinIntervalMs,
+    maxNotes,
+    maxComments,
+    maxLikesPerRound,
+    resume,
+    incrementalMax,
+    doHomepage,
+    doImages,
+    doComments,
+    doLikes: stageLikeEnabled,
+    doReply: stageReplyEnabled,
+    doOcr,
+    stage,
+    stageLinksEnabled,
+    stageContentEnabled,
+    stageLikeEnabled,
+    stageReplyEnabled,
+    stageDetailEnabled,
+    persistComments,
+    matchMode,
+    matchMinHits,
+    matchKeywords,
+    likeKeywords,
+    replyText,
+    sharedHarvestPath,
+    searchSerialKey,
+    seedCollectCount,
+    seedCollectMaxRounds,
+    collectOpenLinksOnly,
+    detailOpenByLinks,
+    openByLinksMaxAttempts,
+    detailLinksStartup,
+    detailLoopEnabled,
+    detailHarvestEnabled,
+    commentsHarvestEnabled,
+    matchGateEnabled,
+    collectPerNoteBudgetMs,
+    collectLinksTimeoutMinMs,
+    collectLinksTimeoutMs,
+    collectStallTimeoutMs,
+    closeDependsOn,
+    recovery,
+  };
+}

@@ -1,1061 +1,153 @@
-import { createEl } from '../ui-components.mts';
-import { listAccountProfiles } from '../account-source.mts';
-
-type DashboardOptions = {
-  api: any;
-  setActiveTab: (id: string) => void;
-};
+import { renderDashboardLayout } from './dashboard/layout.mts';
+import { createElapsedTracker } from './dashboard/elapsed.mts';
+import { createLogWriter } from './dashboard/logs.mts';
+import { createAccountLabelManager } from './dashboard/account-labels.mts';
+import { createRunSummaryManager } from './dashboard/summary.mts';
+import { createDashboardStateUpdater } from './dashboard/state-update.mts';
+import { createDashboardEventHandlers } from './dashboard/events.mts';
+import { DashboardState } from './dashboard/types.mts';
+import { hasRenderableValue, isRunningStatus, isTerminalStatus, normalizeStatus, isXhsCommandTitle } from './dashboard/helpers.mts';
 
 export function renderDashboard(root: HTMLElement, ctx: any) {
-  root.innerHTML = '';
+  const ui = renderDashboardLayout(root);
 
-  // Page indicator
-  const pageIndicator = createEl('div', { className: 'page-indicator' }, [
-    '当前: ',
-    createEl('span', {}, ['看板页']),
-    ' ← 从配置页跳入 | 完成后返回 ',
-    createEl('span', {}, ['配置页'])
-  ]);
-  root.appendChild(pageIndicator);
+  const state: DashboardState = {
+    logsExpanded: false,
+    paused: false,
+    commentsCount: 0,
+    likesCount: 0,
+    likesSkippedCount: 0,
+    likesAlreadyCount: 0,
+    likesDedupCount: 0,
+    startTime: Date.now(),
+    stoppedAt: null,
+    elapsedTimer: null,
+    statePollTimer: null,
+    accountLabelPollTimer: null,
+    unsubscribeState: null,
+    unsubscribeCmd: null,
+    unsubscribeBus: null,
+    contextRun: ctx?.xhsCurrentRun && typeof ctx.xhsCurrentRun === 'object' ? ctx.xhsCurrentRun : null,
+    contextStartedAtMs: Date.parse(String(ctx?.xhsCurrentRun?.startedAt || '')),
+    activeRunId: String(ctx?.xhsCurrentRun?.runId || ctx?.activeRunId || '').trim(),
+    activeProfileId: String(ctx?.xhsCurrentRun?.profileId || '').trim(),
+    activeStatus: '',
+    errorCountTotal: 0,
+    recentErrors: [],
+    likedLinks: new Map(),
+    maxLogs: 500,
+    maxRecentErrors: 8,
+    maxLikedLinks: 30,
+    accountLabelByProfile: new Map(),
+    accountLabelRefreshInFlight: false,
+    accountLabelRefreshedAt: 0,
+    accountLabelRefreshTtlMs: 15_000,
+    initialTaskId: String(ctx?.xhsCurrentRun?.taskId || ctx?.activeTaskConfigId || '').trim(),
+  };
 
-  // Stats Grid (Top)
-  const statsGrid = createEl('div', { className: 'bento-grid bento-4', style: 'margin-bottom: var(--gap);' });
-  statsGrid.innerHTML = `
-    <div class="stat-card info">
-      <div class="stat-value" id="stat-collected">0</div>
-      <div class="stat-label">已采集</div>
-    </div>
-    <div class="stat-card success">
-      <div class="stat-value" id="stat-success">0</div>
-      <div class="stat-label">成功</div>
-    </div>
-    <div class="stat-card danger">
-      <div class="stat-value" id="stat-failed">0</div>
-      <div class="stat-label">失败</div>
-    </div>
-    <div class="stat-card warning">
-      <div class="stat-value" id="stat-remaining">0</div>
-      <div class="stat-label">剩余</div>
-    </div>
-  `;
-  root.appendChild(statsGrid);
-
-  // Run Summary Card
-  const runSummaryGrid = createEl('div', { className: 'bento-grid', style: 'margin-bottom: var(--gap);' });
-  const runSummaryCard = createEl('div', { className: 'bento-cell highlight' });
-  runSummaryCard.innerHTML = `
-    <div class="bento-title">运行摘要</div>
-    <div style="display:grid; grid-template-columns: minmax(200px, 1fr) 160px; gap: var(--gap); margin-bottom: var(--gap-sm);">
-      <div>
-        <label>当前 Run ID</label>
-        <div id="run-id-text" style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--text-1); word-break: break-all;">-</div>
-      </div>
-      <div>
-        <label>累计错误</label>
-        <div id="error-count-text" style="font-weight:700; color: var(--danger); font-size: 18px;">0</div>
-      </div>
-    </div>
-    <div>
-      <label>最近错误（最多 8 条）</label>
-      <div id="recent-errors-empty" class="muted" style="font-size: 12px;">暂无错误</div>
-      <ul id="recent-errors-list" style="margin: 6px 0 0 16px; padding: 0; font-size: 12px; line-height: 1.5; display:none;"></ul>
-    </div>
-    <div style="margin-top: 10px;">
-      <label>点赞链接（最多 30 条）</label>
-      <div id="liked-links-empty" class="muted" style="font-size: 12px;">暂无点赞记录</div>
-      <ul id="liked-links-list" style="margin: 6px 0 0 16px; padding: 0; font-size: 12px; line-height: 1.5; display:none;"></ul>
-    </div>
-  `;
-  runSummaryGrid.appendChild(runSummaryCard);
-  root.appendChild(runSummaryGrid);
-
-  // Main Content Grid
-  const mainGrid = createEl('div', { className: 'bento-grid bento-aside' });
-
-  // Left: Task Info
-  const taskCard = createEl('div', { className: 'bento-cell' });
-  taskCard.innerHTML = `
-    <div class="bento-title">当前任务</div>
-
-    <div class="row" style="margin-bottom: var(--gap);">
-      <div>
-        <label>关键词</label>
-        <div id="task-keyword" style="font-weight: 600; color: var(--text-1);">-</div>
-      </div>
-      <div>
-        <label>目标数量</label>
-        <div id="task-target" style="font-weight: 600; color: var(--text-1);">-</div>
-      </div>
-      <div>
-        <label>使用账户</label>
-        <div id="task-account" style="font-weight: 600; color: var(--text-1);">-</div>
-      </div>
-      <div>
-        <label>配置ID</label>
-        <div id="task-config-id" style="font-weight: 600; color: var(--text-1);">-</div>
-      </div>
-    </div>
-
-    <div class="phase-indicator" style="margin-bottom: var(--gap);">
-      <div style="display: flex; justify-content: space-between; margin-bottom: 6px;">
-        <span style="color: var(--text-3); font-size: 12px;">当前阶段</span>
-        <span id="current-phase" style="font-weight: 600; color: var(--accent-light);">待启动</span>
-      </div>
-      <div style="display: flex; justify-content: space-between;">
-        <span style="color: var(--text-3); font-size: 12px;">当前操作</span>
-        <span id="current-action" style="color: var(--text-1);">-</span>
-      </div>
-    </div>
-
-    <div style="margin-bottom: var(--gap);">
-      <div style="display: flex; justify-content: space-between; margin-bottom: 6px;">
-        <span style="font-size: 12px; color: var(--text-3);">整体进度</span>
-        <span id="progress-percent" style="font-size: 12px; color: var(--text-1);">0%</span>
-      </div>
-      <div class="progress-bar-container">
-        <div id="progress-bar" class="progress-bar" style="width: 0%;"></div>
-      </div>
-    </div>
-
-    <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: var(--gap-sm);">
-      <div style="font-size: 12px;"><span style="color: var(--text-4);">评论采集：</span><span id="stat-comments">0条</span></div>
-      <div style="font-size: 12px;"><span style="color: var(--text-4);">点赞操作：</span><span id="stat-likes">0次</span></div>
-      <div style="font-size: 12px;"><span style="color: var(--text-4);">限流次数：</span><span id="stat-ratelimit" style="color: var(--warning);">0次</span></div>
-      <div style="font-size: 12px;"><span style="color: var(--text-4);">运行时间：</span><span id="stat-elapsed">00:00:00</span></div>
-    </div>
-  `;
-  mainGrid.appendChild(taskCard);
-
-  // Right: Logs
-  const logsCard = createEl('div', { className: 'bento-cell' });
-  logsCard.innerHTML = `
-    <div class="bento-title">
-      实时日志
-      <button id="toggle-logs-btn" class="secondary" style="margin-left: auto; padding: 4px 10px; font-size: 11px;">展开</button>
-    </div>
-    <div id="logs-container" class="log-container" style="display: none;"></div>
-
-    <div style="margin-top: var(--gap);">
-      <div class="btn-group">
-        <button id="pause-btn" class="secondary" style="flex: 1;">暂停</button>
-        <button id="stop-btn" class="danger" style="flex: 1;">停止</button>
-        <button id="back-config-btn" class="secondary" style="flex: 1;">返回配置</button>
-      </div>
-    </div>
-  `;
-  mainGrid.appendChild(logsCard);
-  root.appendChild(mainGrid);
-
-  // Elements
-  const statCollected = root.querySelector('#stat-collected') as HTMLDivElement;
-  const statSuccess = root.querySelector('#stat-success') as HTMLDivElement;
-  const statFailed = root.querySelector('#stat-failed') as HTMLDivElement;
-  const statRemaining = root.querySelector('#stat-remaining') as HTMLDivElement;
-  const taskKeyword = root.querySelector('#task-keyword') as HTMLDivElement;
-  const taskTarget = root.querySelector('#task-target') as HTMLDivElement;
-  const taskAccount = root.querySelector('#task-account') as HTMLDivElement;
-  const taskConfigId = root.querySelector('#task-config-id') as HTMLDivElement;
-  const currentPhase = root.querySelector('#current-phase') as HTMLSpanElement;
-  const currentAction = root.querySelector('#current-action') as HTMLSpanElement;
-  const progressPercent = root.querySelector('#progress-percent') as HTMLSpanElement;
-  const progressBar = root.querySelector('#progress-bar') as HTMLDivElement;
-  const statComments = root.querySelector('#stat-comments') as HTMLSpanElement;
-  const statLikes = root.querySelector('#stat-likes') as HTMLSpanElement;
-  const statRatelimit = root.querySelector('#stat-ratelimit') as HTMLSpanElement;
-  const statElapsed = root.querySelector('#stat-elapsed') as HTMLSpanElement;
-  const runIdText = root.querySelector('#run-id-text') as HTMLDivElement;
-  const errorCountText = root.querySelector('#error-count-text') as HTMLDivElement;
-  const recentErrorsEmpty = root.querySelector('#recent-errors-empty') as HTMLDivElement;
-  const recentErrorsList = root.querySelector('#recent-errors-list') as HTMLUListElement;
-  const likedLinksEmpty = root.querySelector('#liked-links-empty') as HTMLDivElement;
-  const likedLinksList = root.querySelector('#liked-links-list') as HTMLUListElement;
-  const logsContainer = root.querySelector('#logs-container') as HTMLDivElement;
-  const toggleLogsBtn = root.querySelector('#toggle-logs-btn') as HTMLButtonElement;
-  const pauseBtn = root.querySelector('#pause-btn') as HTMLButtonElement;
-  const stopBtn = root.querySelector('#stop-btn') as HTMLButtonElement;
-  const backConfigBtn = root.querySelector('#back-config-btn') as HTMLButtonElement;
-
-  // State
-  let logsExpanded = false;
-  let paused = false;
-  let unsubscribeBus: (() => void) | null = null;
-  let commentsCount = 0;
-  let likesCount = 0;
-  let likesSkippedCount = 0;
-  let likesAlreadyCount = 0;
-  let likesDedupCount = 0;
-  let startTime = Date.now();
-  let stoppedAt: number | null = null;
-  let elapsedTimer: ReturnType<typeof setInterval> | null = null;
-  let statePollTimer: ReturnType<typeof setInterval> | null = null;
-  let accountLabelPollTimer: ReturnType<typeof setInterval> | null = null;
-  let unsubscribeState: (() => void) | null = null;
-  let unsubscribeCmd: (() => void) | null = null;
-  const contextRun = ctx?.xhsCurrentRun && typeof ctx.xhsCurrentRun === 'object' ? ctx.xhsCurrentRun : null;
-  const contextStartedAtMs = Date.parse(String(contextRun?.startedAt || ''));
-  let activeRunId = String(contextRun?.runId || ctx?.activeRunId || '').trim();
-  let activeProfileId = String(contextRun?.profileId || '').trim();
-  let activeStatus = '';
-  let errorCountTotal = 0;
-  const recentErrors: Array<{ ts: string; source: string; message: string; details: string | null }> = [];
-  const likedLinks = new Map<string, {
-    url: string;
-    noteId: string | null;
-    source: string;
-    profileId: string | null;
-    ts: string;
-    count: number;
-  }>();
-  const maxLogs = 500;
-  const maxRecentErrors = 8;
-  const maxLikedLinks = 30;
-  const accountLabelByProfile = new Map<string, string>();
-  let accountLabelRefreshInFlight = false;
-  let accountLabelRefreshedAt = 0;
-  const accountLabelRefreshTtlMs = 15_000;
-  const initialTaskId = String(contextRun?.taskId || ctx?.activeTaskConfigId || '').trim();
-  if (initialTaskId) {
-    taskConfigId.textContent = initialTaskId;
+  if (state.initialTaskId) {
+    ui.taskConfigId.textContent = state.initialTaskId;
   }
 
-  const normalizeStatus = (value: any) => String(value || '').trim().toLowerCase();
-  const isRunningStatus = (value: any) => ['running', 'queued', 'pending', 'starting'].includes(normalizeStatus(value));
-  const isTerminalStatus = (value: any) => ['completed', 'done', 'success', 'succeeded', 'failed', 'error', 'stopped', 'canceled'].includes(normalizeStatus(value));
-  const resolveUnifiedPhaseFromOp = (operationId: any, fallback = '运行中') => {
-    const op = String(operationId || '').trim();
-    if (!op) return fallback;
-    if (
-      op === 'sync_window_viewport'
-      || op === 'goto_home'
-      || op === 'fill_keyword'
-      || op === 'submit_search'
-      || op === 'xhs_assert_logged_in'
-      || op === 'abort_on_login_guard'
-      || op === 'abort_on_risk_guard'
-    ) {
-      return '登录校验';
-    }
-    if (op === 'ensure_tab_pool' || op === 'verify_subscriptions_all_pages') {
-      return '采集链接';
-    }
-    if (
-      op === 'open_first_detail'
-      || op === 'open_next_detail'
-      || op === 'wait_between_notes'
-      || op === 'switch_tab_round_robin'
-    ) {
-      return '打开详情';
-    }
-    if (
-      op === 'detail_harvest'
-      || op === 'expand_replies'
-      || op === 'comments_harvest'
-      || op === 'comment_match_gate'
-      || op === 'comment_like'
-      || op === 'comment_reply'
-      || op === 'close_detail'
-    ) {
-      return '详情采集点赞';
-    }
-    return fallback;
-  };
-  const resolveUnifiedActionFromEvent = (eventName: string, payload: any, fallback = '-') => {
-    const opId = String(payload?.operationId || '').trim();
-    if (opId) {
-      if (eventName === 'autoscript:operation_error' || eventName === 'autoscript:operation_recovery_failed') {
-        const code = String(payload?.code || '').trim();
-        const err = String(payload?.error || payload?.message || '').trim();
-        const latencyMs = Math.max(0, Number(payload?.latencyMs || 0) || 0);
-        const details: string[] = [];
-        if (code) details.push(code);
-        if (err) details.push(err);
-        if (latencyMs > 0) details.push(`latency=${latencyMs}ms`);
-        return details.length > 0 ? `${opId}: ${details.join(' | ')}` : `${opId}: failed`;
-      }
-      const stage = String(payload?.stage || '').trim();
-      return stage ? `${opId}:${stage}` : opId;
-    }
-    const message = String(payload?.message || payload?.reason || '').trim();
-    return message || fallback;
-  };
-  const isXhsCommandTitle = (title: any) => {
-    const normalized = String(title || '').trim().toLowerCase();
-    if (!normalized) return false;
-    return normalized.includes('xhs unified') || normalized.startsWith('xhs:') || normalized.startsWith('xhs unified:');
-  };
-  const hasRenderableValue = (value: any) => {
-    const text = String(value ?? '').trim();
-    return text.length > 0 && text !== '-';
-  };
-  const resolveAccountLabel = (profileIdLike: any) => {
-    const profileId = String(profileIdLike || '').trim();
-    if (!profileId) return '-';
-    return accountLabelByProfile.get(profileId) || profileId;
-  };
-  const applyAccountLabel = (profileIdLike: any) => {
-    const profileId = String(profileIdLike || '').trim();
-    if (!profileId) return;
-    activeProfileId = profileId;
-    taskAccount.textContent = resolveAccountLabel(profileId);
-    if (!accountLabelByProfile.has(profileId)) {
-      void refreshAccountLabels(true);
-    }
-  };
-  async function refreshAccountLabels(force = false) {
-    if (accountLabelRefreshInFlight) return;
-    if (!force && (Date.now() - accountLabelRefreshedAt) < accountLabelRefreshTtlMs) return;
-    if (typeof ctx.api?.cmdRunJson !== 'function') return;
-    if (typeof ctx.api?.pathJoin !== 'function') return;
-    accountLabelRefreshInFlight = true;
-    try {
-      const rows = await listAccountProfiles(ctx.api, { platform: 'xiaohongshu' });
-      accountLabelByProfile.clear();
-      for (const row of rows) {
-        const profileId = String(row?.profileId || '').trim();
-        if (!profileId) continue;
-        const label = String(row?.alias || row?.name || profileId).trim() || profileId;
-        accountLabelByProfile.set(profileId, label);
-      }
-      accountLabelRefreshedAt = Date.now();
-      if (activeProfileId) {
-        taskAccount.textContent = resolveAccountLabel(activeProfileId);
-      }
-    } catch {
-      // ignore account label refresh errors; keep profile id fallback
-    } finally {
-      accountLabelRefreshInFlight = false;
-    }
-  }
+  const elapsed = createElapsedTracker(ui, state);
+  const logs = createLogWriter(ui, state);
+  const accountLabels = createAccountLabelManager(ctx, ui, state);
+  const runSummary = createRunSummaryManager(ctx, ui, state, {
+    addLog: logs.addLog,
+    updateElapsed: elapsed.updateElapsed,
+    startElapsedTimer: elapsed.startElapsedTimer,
+  });
+  const stateUpdater = createDashboardStateUpdater({
+    ctx,
+    ui,
+    state,
+    accountLabels,
+    runSummary,
+    elapsed,
+  });
+  const events = createDashboardEventHandlers({
+    ctx,
+    ui,
+    state,
+    accountLabels,
+    runSummary,
+    elapsed,
+  });
 
-  if (contextRun) {
-    if (hasRenderableValue(contextRun.keyword)) taskKeyword.textContent = String(contextRun.keyword);
-    if (Number(contextRun.target) > 0) taskTarget.textContent = String(Number(contextRun.target));
-    if (hasRenderableValue(contextRun.profileId)) {
-      applyAccountLabel(contextRun.profileId);
+  if (state.contextRun) {
+    if (hasRenderableValue(state.contextRun.keyword)) ui.taskKeyword.textContent = String(state.contextRun.keyword);
+    if (Number(state.contextRun.target) > 0) ui.taskTarget.textContent = String(Number(state.contextRun.target));
+    if (hasRenderableValue(state.contextRun.profileId)) {
+      accountLabels.applyAccountLabel(state.contextRun.profileId);
     }
-    if (hasRenderableValue(contextRun.taskId)) taskConfigId.textContent = String(contextRun.taskId);
-    const startedAtTs = Date.parse(String(contextRun.startedAt || ''));
+    if (hasRenderableValue(state.contextRun.taskId)) ui.taskConfigId.textContent = String(state.contextRun.taskId);
+    const startedAtTs = Date.parse(String(state.contextRun.startedAt || ''));
     if (Number.isFinite(startedAtTs) && startedAtTs > 0) {
-      startTime = startedAtTs;
-      updateElapsed();
+      state.startTime = startedAtTs;
+      elapsed.updateElapsed();
     }
-  }
-
-  function normalizeDetails(details: any): string | null {
-    if (details === undefined || details === null) return null;
-    try {
-      const text = typeof details === 'string' ? details : JSON.stringify(details, null, 2);
-      const trimmed = String(text || '').trim();
-      if (!trimmed) return null;
-      return trimmed.length > 2000 ? `${trimmed.slice(0, 2000)}\n...` : trimmed;
-    } catch {
-      return String(details || '').trim() || null;
-    }
-  }
-
-  function normalizeNoteId(value: any): string | null {
-    const text = String(value || '').trim();
-    if (!text) return null;
-    if (/^[a-zA-Z0-9_-]{6,}$/.test(text)) return text;
-    return null;
-  }
-
-  function normalizeLink(urlLike: any, noteIdLike: any): { url: string; noteId: string | null } | null {
-    const rawUrl = String(urlLike || '').trim();
-    const noteId = normalizeNoteId(noteIdLike);
-    if (rawUrl) {
-      if (/^https?:\/\//i.test(rawUrl)) return { url: rawUrl, noteId };
-      if (rawUrl.startsWith('/')) return { url: `https://www.xiaohongshu.com${rawUrl}`, noteId };
-      if (/^[a-zA-Z0-9_-]{6,}$/.test(rawUrl)) {
-        return { url: `https://www.xiaohongshu.com/explore/${rawUrl}`, noteId: noteId || rawUrl };
-      }
-    }
-    if (noteId) {
-      return { url: `https://www.xiaohongshu.com/explore/${noteId}`, noteId };
-    }
-    return null;
-  }
-
-  function pushLikedLink(
-    entry: { url: string; noteId: string | null; source: string; profileId?: string | null; ts?: string | null },
-  ) {
-    const url = String(entry.url || '').trim();
-    if (!url) return;
-    const previous = likedLinks.get(url);
-    likedLinks.set(url, {
-      url,
-      noteId: entry.noteId || previous?.noteId || null,
-      source: entry.source || previous?.source || 'comment_like',
-      profileId: entry.profileId || previous?.profileId || activeProfileId || null,
-      ts: entry.ts || previous?.ts || new Date().toLocaleTimeString('zh-CN', { hour12: false }),
-      count: (previous?.count || 0) + 1,
-    });
-    const keys = Array.from(likedLinks.keys());
-    if (keys.length > maxLikedLinks) {
-      likedLinks.delete(keys[0]);
-    }
-  }
-
-  function renderLikedLinks() {
-    likedLinksList.innerHTML = '';
-    const entries = Array.from(likedLinks.values());
-    if (entries.length === 0) {
-      likedLinksEmpty.style.display = 'block';
-      likedLinksList.style.display = 'none';
-      return;
-    }
-    likedLinksEmpty.style.display = 'none';
-    likedLinksList.style.display = 'block';
-    for (const item of entries) {
-      const li = document.createElement('li');
-      const wrap = document.createElement('div');
-      wrap.style.display = 'flex';
-      wrap.style.alignItems = 'center';
-      wrap.style.gap = '6px';
-      wrap.style.flexWrap = 'wrap';
-
-      const label = document.createElement('span');
-      label.textContent = `[${item.ts}]`;
-      wrap.appendChild(label);
-
-      const link = document.createElement('a');
-      link.href = '#';
-      link.textContent = item.noteId ? `note:${item.noteId}` : '打开链接';
-      link.onclick = (evt) => {
-        evt.preventDefault();
-        void openLikedLink(item.url, item.profileId || activeProfileId || null);
-      };
-      wrap.appendChild(link);
-
-      const hint = document.createElement('span');
-      hint.style.color = 'var(--text-4)';
-      hint.textContent = `(${item.source}${item.count > 1 ? ` x${item.count}` : ''})`;
-      wrap.appendChild(hint);
-
-      li.appendChild(wrap);
-      likedLinksList.appendChild(li);
-    }
-  }
-
-  async function openLikedLink(url: string, profileId: string | null) {
-    const targetUrl = String(url || '').trim();
-    if (!targetUrl) return;
-    const pid = String(profileId || '').trim();
-    try {
-      if (pid && typeof ctx.api?.cmdRunJson === 'function') {
-        const ret = await ctx.api.cmdRunJson({
-          title: `goto ${pid}`,
-          cwd: '',
-          args: [
-            ctx.api.pathJoin('apps', 'webauto', 'entry', 'profilepool.mjs'),
-            'goto-profile',
-            pid,
-            '--url',
-            targetUrl,
-            '--json',
-          ],
-          timeoutMs: 30_000,
-        });
-        if (ret?.ok) {
-          addLog(`已在 ${pid} 打开点赞链接`, 'info');
-          return;
-        }
-      }
-      if (typeof ctx.api?.osOpenPath === 'function') {
-        await ctx.api.osOpenPath(targetUrl);
-        addLog('已通过系统打开点赞链接', 'warn');
-      }
-    } catch (err: any) {
-      pushRecentError('点赞链接打开失败', 'like_link', err?.message || String(err));
-    }
-  }
-
-  function renderRunSummary() {
-    runIdText.textContent = activeRunId || '-';
-    if (ctx && typeof ctx === 'object') {
-      ctx.activeRunId = activeRunId || null;
-    }
-    errorCountText.textContent = String(errorCountTotal);
-    recentErrorsList.innerHTML = '';
-    if (recentErrors.length === 0) {
-      recentErrorsEmpty.style.display = 'block';
-      recentErrorsList.style.display = 'none';
-      return;
-    }
-    recentErrorsEmpty.style.display = 'none';
-    recentErrorsList.style.display = 'block';
-    recentErrors.forEach((item) => {
-      const li = document.createElement('li');
-      const line = document.createElement('div');
-      line.textContent = `[${item.ts}] ${item.source}: ${item.message}`;
-      li.appendChild(line);
-      if (item.details) {
-        const details = document.createElement('details');
-        const summary = document.createElement('summary');
-        summary.textContent = '详情';
-        const pre = document.createElement('pre');
-        pre.style.margin = '4px 0 0 0';
-        pre.style.whiteSpace = 'pre-wrap';
-        pre.style.wordBreak = 'break-word';
-        pre.textContent = item.details;
-        details.appendChild(summary);
-        details.appendChild(pre);
-        li.appendChild(details);
-      }
-      recentErrorsList.appendChild(li);
-    });
-    renderLikedLinks();
-  }
-
-  function pushRecentError(message: string, source = 'runtime', details: any = null) {
-    const msg = String(message || '').trim();
-    if (!msg) return;
-    errorCountTotal += 1;
-    recentErrors.push({
-      ts: new Date().toLocaleTimeString('zh-CN', { hour12: false }),
-      source: String(source || 'runtime').trim() || 'runtime',
-      message: msg,
-      details: normalizeDetails(details),
-    });
-    while (recentErrors.length > maxRecentErrors) recentErrors.shift();
-    renderRunSummary();
-  }
-
-  // Update elapsed time
-  function updateElapsed() {
-    const base = stoppedAt ?? Date.now();
-    const elapsed = Math.max(0, Math.floor((base - startTime) / 1000));
-    const h = Math.floor(elapsed / 3600);
-    const m = Math.floor((elapsed % 3600) / 60);
-    const s = elapsed % 60;
-    statElapsed.textContent = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
-  }
-
-  function startElapsedTimer() {
-    if (elapsedTimer) return;
-    elapsedTimer = setInterval(updateElapsed, 1000);
-  }
-
-  function stopElapsedTimer() {
-    if (!elapsedTimer) return;
-    clearInterval(elapsedTimer);
-    elapsedTimer = null;
   }
 
   function startStatePoll() {
-    if (statePollTimer) return;
+    if (state.statePollTimer) return;
     if (typeof ctx.api?.stateGetTasks !== 'function') return;
-    statePollTimer = setInterval(() => {
-      if (paused) return;
-      void fetchCurrentState();
+    state.statePollTimer = setInterval(() => {
+      if (state.paused) return;
+      void stateUpdater.fetchCurrentState();
     }, 5000);
   }
 
   function stopStatePoll() {
-    if (!statePollTimer) return;
-    clearInterval(statePollTimer);
-    statePollTimer = null;
+    if (!state.statePollTimer) return;
+    clearInterval(state.statePollTimer);
+    state.statePollTimer = null;
   }
 
-  function startAccountLabelPoll() {
-    if (accountLabelPollTimer) return;
-    accountLabelPollTimer = setInterval(() => {
-      if (paused) return;
-      void refreshAccountLabels(false);
-    }, 30_000);
-  }
-
-  function stopAccountLabelPoll() {
-    if (!accountLabelPollTimer) return;
-    clearInterval(accountLabelPollTimer);
-    accountLabelPollTimer = null;
-  }
-
-  // Add log line
-  function addLog(line: string, type: 'info' | 'success' | 'error' | 'warn' = 'info') {
-    const ts = new Date().toLocaleTimeString('zh-CN', { hour12: false });
-    const logLine = createEl('div', { className: 'log-line' });
-    logLine.innerHTML = `<span class="log-time">[${ts}]</span> <span class="log-${type}">${line}</span>`;
-    logsContainer.appendChild(logLine);
-
-    // Keep max logs
-    while (logsContainer.children.length > maxLogs) {
-      logsContainer.removeChild(logsContainer.firstChild!);
-    }
-
-    // Auto-scroll
-    if (logsExpanded) {
-      logsContainer.scrollTop = logsContainer.scrollHeight;
-    }
-  }
-
-  function resetDashboardForNewRun(reason: string, startedAtMs?: number) {
-    commentsCount = 0;
-    likesCount = 0;
-    likesSkippedCount = 0;
-    likesAlreadyCount = 0;
-    likesDedupCount = 0;
-    errorCountTotal = 0;
-    recentErrors.length = 0;
-    likedLinks.clear();
-    logsContainer.innerHTML = '';
-    statCollected.textContent = '0';
-    statSuccess.textContent = '0';
-    statFailed.textContent = '0';
-    statRemaining.textContent = '0';
-    statComments.textContent = '0条';
-    statLikes.textContent = '0次 (跳过:0, 已赞:0, 去重:0)';
-    progressPercent.textContent = '0%';
-    progressBar.style.width = '0%';
-    currentAction.textContent = reason || '-';
-    currentPhase.textContent = '运行中';
-    startTime = Number.isFinite(Number(startedAtMs)) && Number(startedAtMs) > 0
-      ? Number(startedAtMs)
-      : Date.now();
-    stoppedAt = null;
-    updateElapsed();
-    startElapsedTimer();
-    renderRunSummary();
-  }
-
-  // Update stats from task state
-  function updateFromTaskState(state: any) {
-    if (!state) return;
-    const incomingRunId = String(state.runId || '').trim();
-    if (
-      incomingRunId
-      && activeRunId
-      && incomingRunId !== activeRunId
-      && (isTerminalStatus(activeStatus) || !isRunningStatus(activeStatus))
-      && isRunningStatus(state.status)
-    ) {
-      activeRunId = incomingRunId;
-      resetDashboardForNewRun('切换到新任务');
-    }
-
-    const progressObj = state.progress && typeof state.progress === 'object' ? state.progress : null;
-    const processedRaw = progressObj?.processed ?? progressObj?.current ?? state.progress ?? state.collected ?? state.current ?? 0;
-    const totalRaw = progressObj?.total ?? state.total ?? state.target ?? state.maxNotes ?? 0;
-    const failedRaw = progressObj?.failed ?? state.failed ?? state.errors ?? 0;
-    const collected = Number(processedRaw) || 0;
-    const target = Number(totalRaw) || 0;
-    const success = Number(state.success ?? collected) || 0;
-    const failed = Number(failedRaw) || 0;
-    const remaining = Math.max(0, target - collected);
-
-    statCollected.textContent = String(collected);
-    statSuccess.textContent = String(success);
-    statFailed.textContent = String(failed);
-    statRemaining.textContent = String(remaining);
-
-    let percent = 0;
-    if (target > 0) {
-      percent = Math.round((collected / target) * 100);
-    } else if (progressObj && Number.isFinite(Number(progressObj.percent))) {
-      const pct = Number(progressObj.percent);
-      percent = pct <= 1 ? Math.round(pct * 100) : Math.round(pct);
-    }
-    progressPercent.textContent = `${percent}%`;
-    progressBar.style.width = `${percent}%`;
-
-    if (state.phase) {
-      currentPhase.textContent = state.phase;
-    }
-    const action = String(state.action || state.message || state.step || '').trim();
-    if (action) {
-      currentAction.textContent = action;
-    }
-    const stats = state.stats && typeof state.stats === 'object' ? state.stats : null;
-    const comments = Number(stats?.commentsCollected ?? state.comments);
-    if (Number.isFinite(comments)) {
-      commentsCount = Math.max(0, Math.floor(comments));
-      statComments.textContent = `${commentsCount}条`;
-    }
-    const likes = Number(stats?.likesPerformed ?? state.likes);
-    if (Number.isFinite(likes)) {
-      likesCount = Math.max(0, Math.floor(likes));
-      statLikes.textContent = `${likesCount}次 (跳过:${likesSkippedCount}, 已赞:${likesAlreadyCount}, 去重:${likesDedupCount})`;
-    }
-    if (state.ratelimits) {
-      statRatelimit.textContent = `${state.ratelimits}次`;
-    }
-
-    // Update task info
-    if (state.keyword) {
-      taskKeyword.textContent = state.keyword;
-    }
-    if (state.target) {
-      taskTarget.textContent = String(state.target);
-    }
-    if (state.profileId) {
-      applyAccountLabel(state.profileId);
-    }
-    const taskId = String(state.taskId || state.scheduleTaskId || state.configTaskId || '').trim();
-    if (taskId) {
-      taskConfigId.textContent = taskId;
-      if (ctx && typeof ctx === 'object') {
-        ctx.activeTaskConfigId = taskId;
-      }
-    }
-    if (state.runId) {
-      activeRunId = String(state.runId);
-      renderRunSummary();
-    }
-    if (state.startedAt) {
-      const ts = Number(state.startedAt) || Date.parse(String(state.startedAt));
-      if (Number.isFinite(ts) && ts > 0) {
-        startTime = ts;
-        if (!stoppedAt) {
-          updateElapsed();
-          startElapsedTimer();
-        }
-      }
-    }
-    const status = normalizeStatus(state.status);
-    if (status) {
-      activeStatus = status;
-    }
-    if (status === 'completed' || status === 'done' || status === 'success' || status === 'succeeded') {
-      if (!stoppedAt) {
-        stoppedAt = Date.now();
-        updateElapsed();
-        stopElapsedTimer();
-      }
-    }
-    if (status === 'failed' || status === 'error') {
-      if (!stoppedAt) {
-        stoppedAt = Date.now();
-        updateElapsed();
-        stopElapsedTimer();
-      }
-    }
-    if (state.error) {
-      pushRecentError(String(state.error), 'state', state);
-    }
-  }
-
-  function pickTaskFromList(tasks: any[]) {
-    const target = activeRunId;
-    const sorted = [...tasks].sort((a, b) => {
-      const aTs = Number(a?.updatedAt ?? a?.completedAt ?? a?.startedAt ?? 0) || 0;
-      const bTs = Number(b?.updatedAt ?? b?.completedAt ?? b?.startedAt ?? 0) || 0;
-      return bTs - aTs;
-    });
-    const running = sorted.find((item) => isRunningStatus(item?.status)) || null;
-    const latest = sorted[0] || null;
-    const launchingFresh = Number.isFinite(contextStartedAtMs)
-      && contextStartedAtMs > 0
-      && (Date.now() - contextStartedAtMs) < 120_000;
-    if (target) {
-      const matched = tasks.find((item) => String(item?.runId || '').trim() === target);
-      if (matched) {
-        return matched;
-      }
-      if (launchingFresh) {
-        return null;
-      }
-      if (running) return running;
-      return null;
-    }
-    if (launchingFresh) {
-      return running || null;
-    }
-    return running || latest || null;
-  }
-
-  function updateFromEventPayload(payload: any) {
-    const event = String(payload?.event || '').trim();
-    if (!event) return;
-    if (event === 'xhs.unified.start') {
-      currentPhase.textContent = '运行中';
-      currentAction.textContent = '启动 autoscript';
-      activeStatus = 'running';
-      const ts = Date.parse(String(payload.ts || '')) || Date.now();
-      if (payload.runId) {
-        activeRunId = String(payload.runId || '').trim() || activeRunId;
-      }
-      resetDashboardForNewRun('新任务启动', ts);
-      if (payload.keyword) taskKeyword.textContent = String(payload.keyword);
-      if (payload.maxNotes) taskTarget.textContent = String(payload.maxNotes);
-      if (payload.profileId) applyAccountLabel(payload.profileId);
-      if (payload.taskId) {
-        const taskId = String(payload.taskId || '').trim();
-        if (taskId) {
-          taskConfigId.textContent = taskId;
-          if (ctx && typeof ctx === 'object') {
-            ctx.activeTaskConfigId = taskId;
-          }
-        }
-      }
-      renderRunSummary();
-      return;
-    }
-    if (event === 'autoscript:operation_start' || event === 'autoscript:operation_progress') {
-      const opId = String(payload?.operationId || '').trim();
-      currentPhase.textContent = resolveUnifiedPhaseFromOp(opId, currentPhase.textContent || '运行中');
-      currentAction.textContent = resolveUnifiedActionFromEvent(event, payload, currentAction.textContent || '-');
-      return;
-    }
-    if (event === 'autoscript:operation_done') {
-      const opId = String(payload.operationId || '').trim();
-      currentPhase.textContent = resolveUnifiedPhaseFromOp(opId, currentPhase.textContent || '运行中');
-      currentAction.textContent = resolveUnifiedActionFromEvent(event, payload, currentAction.textContent || '-');
-      const result = payload.result && typeof payload.result === 'object' ? payload.result : {};
-      const opResult = (result && typeof result === 'object' && 'result' in result) ? result.result : result;
-      if (opId === 'open_first_detail' || opId === 'open_next_detail') {
-        const visited = Number(opResult?.visited || 0);
-        const maxNotes = Number(opResult?.maxNotes || 0);
-        if (visited > 0) {
-          statCollected.textContent = String(visited);
-          statSuccess.textContent = String(visited);
-          if (maxNotes > 0) {
-            const remaining = Math.max(0, maxNotes - visited);
-            statRemaining.textContent = String(remaining);
-            taskTarget.textContent = String(maxNotes);
-            const pct = Math.round((visited / maxNotes) * 100);
-            progressPercent.textContent = `${pct}%`;
-            progressBar.style.width = `${pct}%`;
-          }
-        }
-      }
-      if (opId === 'comments_harvest') {
-        const added = Number(opResult?.collected || 0);
-        commentsCount = Math.max(0, commentsCount + added);
-        statComments.textContent = `${commentsCount}条`;
-      }
-      if (opId === 'comment_like') {
-        const added = Number(opResult?.likedCount || 0);
-        const skipped = Number(opResult?.skippedCount || 0);
-        const already = Number(opResult?.alreadyLikedSkipped || 0);
-        const dedup = Number(opResult?.dedupSkipped || 0);
-        likesCount = Math.max(0, likesCount + added);
-        likesSkippedCount = Math.max(0, likesSkippedCount + skipped);
-        likesAlreadyCount = Math.max(0, likesAlreadyCount + already);
-        likesDedupCount = Math.max(0, likesDedupCount + dedup);
-        statLikes.textContent = `${likesCount}次 (跳过:${likesSkippedCount}, 已赞:${likesAlreadyCount}, 去重:${likesDedupCount})`;
-        const candidates: Array<{ url: string; noteId: string | null; source: string }> = [];
-        const direct = normalizeLink(opResult?.noteUrl || opResult?.url || opResult?.href || opResult?.link, opResult?.noteId);
-        if (direct) candidates.push({ ...direct, source: 'comment_like' });
-        const likedComments = Array.isArray(opResult?.likedComments) ? opResult.likedComments : [];
-        for (const row of likedComments) {
-          const item = normalizeLink(row?.noteUrl || row?.url || row?.href || row?.link, row?.noteId || opResult?.noteId);
-          if (!item) continue;
-          candidates.push({ ...item, source: 'liked_comment' });
-        }
-        for (const item of candidates) {
-          pushLikedLink({
-            ...item,
-            profileId: activeProfileId || null,
-            ts: new Date().toLocaleTimeString('zh-CN', { hour12: false }),
-          });
-        }
-        renderRunSummary();
-      }
-      return;
-    }
-    if (event === 'autoscript:operation_error' || event === 'autoscript:operation_recovery_failed' || event === 'xhs.unified.profile_failed') {
-      const failed = Number(statFailed.textContent || '0') || 0;
-      statFailed.textContent = String(failed + 1);
-      const opId = String(payload?.operationId || '').trim();
-      if (opId) {
-        currentPhase.textContent = resolveUnifiedPhaseFromOp(opId, currentPhase.textContent || '运行中');
-      }
-      const summary = resolveUnifiedActionFromEvent(event, payload, currentAction.textContent || '-');
-      currentAction.textContent = summary;
-      pushRecentError(summary || String(event), event, payload);
-      return;
-    }
-    if (event === 'xhs.unified.merged') {
-      currentPhase.textContent = '已完成';
-      currentAction.textContent = '结果合并完成';
-      if (payload.profilesFailed) {
-        statFailed.textContent = String(Number(payload.profilesFailed) || 0);
-      }
-      return;
-    }
-    if (event === 'xhs.unified.stop') {
-      const reason = String(payload.reason || '').trim();
-      const stoppedTs = Date.parse(String(payload.stoppedAt || payload.ts || '')) || Date.now();
-      stoppedAt = stoppedTs;
-      activeStatus = reason ? normalizeStatus(reason) || 'stopped' : 'stopped';
-      updateElapsed();
-      stopElapsedTimer();
-      const successReasons = new Set(['completed', 'script_complete']);
-      currentPhase.textContent = reason && reason !== 'script_failure' ? '已结束' : '失败';
-      currentAction.textContent = reason || 'stop';
-      if (reason && !successReasons.has(reason)) {
-        pushRecentError(`stop reason=${reason}`, event, payload);
-      }
-      renderRunSummary();
-    }
-    if (event === 'autoscript:operation_terminal') {
-      const code = String(payload.code || '').trim();
-      currentAction.textContent = code ? `terminal:${code}` : 'terminal';
-      renderRunSummary();
-    }
-  }
-
-  function parseLineEvent(line: string) {
-    const text = String(line || '').trim();
-    if (!text.startsWith('{') || !text.endsWith('}')) return;
-    try {
-      const payload = JSON.parse(text);
-      updateFromEventPayload(payload);
-    } catch {
-      // ignore non-json log lines
-    }
-  }
-
-  function applySummary(summary: any) {
-    if (!summary || typeof summary !== 'object') return;
-    const totals = summary?.totals && typeof summary.totals === 'object' ? summary.totals : {};
-    const profiles = Array.isArray(summary?.profiles) ? summary.profiles : [];
-    const profile = profiles[0] || null;
-    const stats = profile?.stats && typeof profile.stats === 'object' ? profile.stats : totals;
-
-    const assigned = Number(stats?.assignedNotes ?? totals?.assignedNotes ?? summary?.target ?? 0) || 0;
-    const opened = Number(stats?.openedNotes ?? totals?.openedNotes ?? totals?.assignedNotes ?? 0) || 0;
-    const failed = Number(totals?.operationErrors ?? 0) || 0;
-    const remaining = Math.max(0, assigned - opened);
-
-    statCollected.textContent = String(opened);
-    statSuccess.textContent = String(opened);
-    statFailed.textContent = String(failed);
-    statRemaining.textContent = String(remaining);
-
-    let percent = 0;
-    if (assigned > 0) {
-      percent = Math.round((opened / assigned) * 100);
-    }
-    progressPercent.textContent = `${percent}%`;
-    progressBar.style.width = `${percent}%`;
-
-    const comments = Number(stats?.commentsCollected ?? totals?.commentsCollected ?? 0);
-    if (Number.isFinite(comments)) {
-      commentsCount = Math.max(0, Math.floor(comments));
-      statComments.textContent = `${commentsCount}条`;
-    }
-
-    const likesNew = Number(stats?.likesNewCount ?? totals?.likesNewCount ?? 0);
-    const likesSkipped = Number(stats?.likesSkippedCount ?? totals?.likesSkippedCount ?? 0);
-    const likesAlready = Number(stats?.likesAlreadyCount ?? totals?.likesAlreadyCount ?? 0);
-    const likesDedup = Number(stats?.likesDedupCount ?? totals?.likesDedupCount ?? 0);
-    likesCount = Math.max(0, Math.floor(likesNew || 0));
-    likesSkippedCount = Math.max(0, Math.floor(likesSkipped || 0));
-    likesAlreadyCount = Math.max(0, Math.floor(likesAlready || 0));
-    likesDedupCount = Math.max(0, Math.floor(likesDedup || 0));
-    statLikes.textContent = `${likesCount}次(跳过:${likesSkippedCount}, 已赞:${likesAlreadyCount}, 去重:${likesDedupCount})`;
-
-    if (summary.keyword) taskKeyword.textContent = String(summary.keyword);
-    if (assigned) taskTarget.textContent = String(assigned);
-    if (profile?.profileId) {
-      applyAccountLabel(profile.profileId);
-    }
-
-    const runId = String(profile?.runId || summary?.runId || '').trim();
-    if (runId) {
-      activeRunId = runId;
-      renderRunSummary();
-    }
-
-    const reason = String(profile?.reason || summary?.status || '').trim();
-    if (reason) {
-      const okReasons = new Set(['script_complete', 'completed', 'success', 'succeeded']);
-      currentPhase.textContent = okReasons.has(reason) ? '已结束' : '失败';
-      currentAction.textContent = reason;
-      activeStatus = normalizeStatus(reason) || activeStatus;
-    }
-
-    const summaryTs = Date.parse(String(summary?.generatedAt || '')) || Date.now();
-    stoppedAt = summaryTs;
-    updateElapsed();
-    stopElapsedTimer();
-
-    const errorTotal = Number(totals?.operationErrors ?? 0) + Number(totals?.recoveryFailed ?? 0);
-    if (Number.isFinite(errorTotal)) {
-      errorCountTotal = Math.max(0, Math.floor(errorTotal));
-      renderRunSummary();
-    }
-  }
-
-  async function loadLatestSummary() {
-    if (typeof ctx.api?.resultsScan !== 'function') return null;
-    if (typeof ctx.api?.fsListDir !== 'function') return null;
-    if (typeof ctx.api?.fsReadTextPreview !== 'function') return null;
-
-    const res = await ctx.api.resultsScan({ downloadRoot: ctx.settings?.downloadRoot });
-    if (!res?.ok || !Array.isArray(res?.entries) || res.entries.length === 0) return null;
-
-    const keyword = String(taskKeyword.textContent || '').trim();
-    const matched = keyword ? res.entries.find((e: any) => e?.keyword === keyword) : null;
-    const entry = matched || res.entries[0];
-    if (!entry?.path) return null;
-
-    const mergedRoot = ctx.api.pathJoin(entry.path, 'merged');
-    const list = await ctx.api.fsListDir({ root: mergedRoot, recursive: true, maxEntries: 3000 });
-    if (!list?.ok || !Array.isArray(list?.entries)) return null;
-    const summaries = list.entries.filter((e: any) => !e?.isDir && e?.name === 'summary.json');
-    if (summaries.length === 0) return null;
-    summaries.sort((a: any, b: any) => (b?.mtimeMs || 0) - (a?.mtimeMs || 0));
-    const summaryPath = summaries[0].path;
-    if (!summaryPath) return null;
-
-    const textRes = await ctx.api.fsReadTextPreview({ path: summaryPath, maxBytes: 1_000_000, maxLines: 20_000 });
-    if (!textRes?.ok || !textRes?.text) return null;
-    try {
-      return JSON.parse(textRes.text);
-    } catch {
-      return null;
-    }
-  }
-
-  // Subscribe to state updates
   function subscribeToUpdates() {
     if (typeof ctx.api?.onStateUpdate === 'function') {
-      unsubscribeState = ctx.api.onStateUpdate((update: any) => {
-        if (paused) return;
+      state.unsubscribeState = ctx.api.onStateUpdate((update: any) => {
+        if (state.paused) return;
         const runId = String(update?.runId || '').trim();
         const status = normalizeStatus(update?.data?.status);
-        if (activeRunId && runId && runId !== activeRunId) {
-          if (isTerminalStatus(activeStatus) && (isRunningStatus(status) || status)) {
-            activeRunId = runId;
-            activeStatus = status || 'running';
-            stoppedAt = null;
-            renderRunSummary();
+        if (state.activeRunId && runId && runId !== state.activeRunId) {
+          if (isTerminalStatus(state.activeStatus) && (isRunningStatus(status) || status)) {
+            state.activeRunId = runId;
+            state.activeStatus = status || 'running';
+            state.stoppedAt = null;
+            runSummary.renderRunSummary();
           } else {
             return;
           }
         }
-        if (!activeRunId && runId) {
-          activeRunId = runId;
-          renderRunSummary();
+        if (!state.activeRunId && runId) {
+          state.activeRunId = runId;
+          runSummary.renderRunSummary();
         }
 
         if (update?.data && typeof update.data === 'object') {
           const payload = { ...(update.data || {}), runId };
-          updateFromTaskState(payload);
-          if (payload.action) addLog(String(payload.action), 'info');
+          stateUpdater.updateFromTaskState(payload);
+          if (payload.action) logs.addLog(String(payload.action), 'info');
           if (payload.error) {
-            addLog(String(payload.error), 'error');
-            pushRecentError(String(payload.error), 'state', payload);
+            logs.addLog(String(payload.error), 'error');
+            runSummary.pushRecentError(String(payload.error), 'state', payload);
           }
         }
       });
     }
 
-    // Also subscribe to cmd events for logs
     if (typeof ctx.api?.onBusEvent === 'function') {
-      unsubscribeBus = ctx.api.onBusEvent((payload: any) => {
-        if (paused) return;
+      state.unsubscribeBus = ctx.api.onBusEvent((payload: any) => {
+        if (state.paused) return;
         if (payload && payload.event) {
-          updateFromEventPayload(payload);
+          events.updateFromEventPayload(payload);
         }
       });
     }
 
     if (typeof ctx.api?.onCmdEvent === 'function') {
-      unsubscribeCmd = ctx.api.onCmdEvent((evt: any) => {
-        if (paused) return;
+      state.unsubscribeCmd = ctx.api.onCmdEvent((evt: any) => {
+        if (state.paused) return;
         const runId = String(evt?.runId || '').trim();
         const preferredRunId = String(ctx?.activeRunId || '').trim();
         const shouldAdoptStartedRun = (
@@ -1063,126 +155,77 @@ export function renderDashboard(root: HTMLElement, ctx: any) {
           && runId
           && isXhsCommandTitle(evt?.title)
           && (
-            !activeRunId
-            || isTerminalStatus(activeStatus)
+            !state.activeRunId
+            || isTerminalStatus(state.activeStatus)
             || (preferredRunId && preferredRunId === runId)
           )
         );
         if (shouldAdoptStartedRun) {
-          activeRunId = runId;
-          activeStatus = 'running';
-          resetDashboardForNewRun('进程启动');
-          renderRunSummary();
+          state.activeRunId = runId;
+          state.activeStatus = 'running';
+          runSummary.resetDashboardForNewRun('进程启动');
+          runSummary.renderRunSummary();
         }
-        if (activeRunId && runId && runId !== activeRunId) return;
+        if (state.activeRunId && runId && runId !== state.activeRunId) return;
 
         if (evt.type === 'stdout') {
-          addLog(evt.line, 'info');
-          parseLineEvent(String(evt.line || '').trim());
+          logs.addLog(evt.line, 'info');
+          events.parseLineEvent(String(evt.line || '').trim());
         } else if (evt.type === 'stderr') {
-          addLog(evt.line, 'error');
-          pushRecentError(String(evt.line || ''), 'stderr', evt);
-          const failed = Number(statFailed.textContent || '0') || 0;
-          statFailed.textContent = String(failed + 1);
+          logs.addLog(evt.line, 'error');
+          runSummary.pushRecentError(String(evt.line || ''), 'stderr', evt);
+          const failed = Number(ui.statFailed.textContent || '0') || 0;
+          ui.statFailed.textContent = String(failed + 1);
         } else if (evt.type === 'exit') {
-          if (!stoppedAt) {
-            currentPhase.textContent = Number(evt.exitCode || 0) === 0 ? '已结束' : '失败';
-            currentAction.textContent = `exit(${evt.exitCode ?? 'null'})`;
+          if (!state.stoppedAt) {
+            ui.currentPhase.textContent = Number(evt.exitCode || 0) === 0 ? '已结束' : '失败';
+            ui.currentAction.textContent = `exit(${evt.exitCode ?? 'null'})`;
           }
-          addLog(`进程退出: code=${evt.exitCode}`, evt.exitCode === 0 ? 'success' : 'error');
-          if (!stoppedAt) {
-            stoppedAt = Date.now();
-            updateElapsed();
-            stopElapsedTimer();
+          logs.addLog(`进程退出: code=${evt.exitCode}`, evt.exitCode === 0 ? 'success' : 'error');
+          if (!state.stoppedAt) {
+            state.stoppedAt = Date.now();
+            elapsed.updateElapsed();
+            elapsed.stopElapsedTimer();
           }
           if (Number(evt.exitCode || 0) !== 0) {
-            pushRecentError(`进程退出 code=${evt.exitCode ?? 'null'}`, 'exit', evt);
+            runSummary.pushRecentError(`进程退出 code=${evt.exitCode ?? 'null'}`, 'exit', evt);
           }
-          renderRunSummary();
+          runSummary.renderRunSummary();
         }
       });
     }
   }
 
-  // Load last config for display
-  async function loadTaskInfo() {
-    try {
-      const config = await ctx.api.configLoadLast();
-      if (config) {
-        if (!hasRenderableValue(contextRun?.keyword)) {
-          taskKeyword.textContent = config.keyword || '-';
-        }
-        if (!(Number(contextRun?.target) > 0)) {
-          taskTarget.textContent = String(config.target || 50);
-        }
-
-        if (!hasRenderableValue(contextRun?.profileId) && config.lastProfileId) {
-          applyAccountLabel(config.lastProfileId);
-        }
-        const taskId = String(contextRun?.taskId || config.taskId || ctx?.activeTaskConfigId || '').trim();
-        if (taskId) {
-          taskConfigId.textContent = taskId;
-        }
-      }
-    } catch (err) {
-      console.error('Failed to load task info:', err);
-    }
-  }
-
-  // Fetch current task state
-  async function fetchCurrentState() {
-    try {
-      const tasks = await ctx.api.stateGetTasks();
-      if (Array.isArray(tasks) && tasks.length > 0) {
-        const picked = pickTaskFromList(tasks);
-        if (picked) {
-          const runId = String(picked?.runId || '').trim();
-          if (runId) {
-            activeRunId = runId;
-            renderRunSummary();
-          }
-          updateFromTaskState(picked);
-        }
-      } else {
-        const summary = await loadLatestSummary();
-        if (summary) applySummary(summary);
-      }
-    } catch (err) {
-      console.error('Failed to fetch state:', err);
-    }
-  }
-
-  // Event handlers
-  toggleLogsBtn.onclick = () => {
-    logsExpanded = !logsExpanded;
-    logsContainer.style.display = logsExpanded ? 'block' : 'none';
-    toggleLogsBtn.textContent = logsExpanded ? '收起' : '展开';
+  ui.toggleLogsBtn.onclick = () => {
+    state.logsExpanded = !state.logsExpanded;
+    ui.logsContainer.style.display = state.logsExpanded ? 'block' : 'none';
+    ui.toggleLogsBtn.textContent = state.logsExpanded ? '收起' : '展开';
   };
 
-  pauseBtn.onclick = () => {
-    paused = !paused;
-    pauseBtn.textContent = paused ? '继续' : '暂停';
-    if (paused) {
-      addLog('任务已暂停', 'warn');
+  ui.pauseBtn.onclick = () => {
+    state.paused = !state.paused;
+    ui.pauseBtn.textContent = state.paused ? '继续' : '暂停';
+    if (state.paused) {
+      logs.addLog('任务已暂停', 'warn');
     } else {
-      addLog('任务继续执行', 'info');
+      logs.addLog('任务继续执行', 'info');
     }
   };
 
-  stopBtn.onclick = async () => {
+  ui.stopBtn.onclick = async () => {
     if (confirm('确定要停止当前任务吗？')) {
       try {
         const tasks = await ctx.api.stateGetTasks();
-        let runIdToStop = String(activeRunId || '').trim();
+        let runIdToStop = String(state.activeRunId || '').trim();
         if (!runIdToStop && Array.isArray(tasks)) {
           const running = tasks.find((item: any) => ['running', 'queued', 'pending', 'starting'].includes(String(item?.status || '').toLowerCase()));
           runIdToStop = String(running?.runId || tasks[0]?.runId || '').trim();
         }
         if (runIdToStop) {
           await ctx.api.cmdKill(runIdToStop);
-          addLog('任务已停止', 'warn');
+          logs.addLog('任务已停止', 'warn');
         } else {
-          addLog('未找到可停止的运行任务', 'warn');
+          logs.addLog('未找到可停止的运行任务', 'warn');
         }
       } catch (err) {
         console.error('Failed to stop task:', err);
@@ -1196,31 +239,27 @@ export function renderDashboard(root: HTMLElement, ctx: any) {
     }
   };
 
-  backConfigBtn.onclick = () => {
+  ui.backConfigBtn.onclick = () => {
     if (typeof ctx.setActiveTab === 'function') {
       ctx.setActiveTab('tasks');
     }
   };
 
-  // Initialize
-  renderRunSummary();
-  void refreshAccountLabels(true);
-  loadTaskInfo();
+  runSummary.renderRunSummary();
+  void accountLabels.refreshAccountLabels(true);
+  void stateUpdater.loadTaskInfo();
+  void stateUpdater.fetchCurrentState();
   subscribeToUpdates();
-  fetchCurrentState();
   startStatePoll();
-  startAccountLabelPoll();
+  accountLabels.startAccountLabelPoll();
+  elapsed.startElapsedTimer();
 
-  // Start elapsed timer
-  startElapsedTimer();
-
-  // Cleanup
   return () => {
-    stopElapsedTimer();
+    elapsed.stopElapsedTimer();
     stopStatePoll();
-    stopAccountLabelPoll();
-    if (unsubscribeState) unsubscribeState();
-    if (unsubscribeCmd) unsubscribeCmd();
-    if (unsubscribeBus) unsubscribeBus();
+    accountLabels.stopAccountLabelPoll();
+    if (state.unsubscribeState) state.unsubscribeState();
+    if (state.unsubscribeCmd) state.unsubscribeCmd();
+    if (state.unsubscribeBus) state.unsubscribeBus();
   };
 }

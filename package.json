@@ -93,7 +93,7 @@
     "service:kill-port": "node runtime/infra/utils/scripts/service/kill-port.mjs",
     "browser:camoufox:install": "python3 -m camoufox remove && python3 -m camoufox fetch",
     "test:state:coverage": "c8 --reporter=text --reporter=lcov tsx --test modules/state/src/*.test.ts",
-    "prebuild": "node scripts/self-check.mjs --quick && node scripts/check-root-layout.mjs && node scripts/check-legacy-refs.mjs && node scripts/check-docs-legacy.mjs && node scripts/check-untracked-sources.mjs && node scripts/check-sub-dist.mjs",
+    "prebuild": "node scripts/self-check.mjs --quick && node scripts/check-root-layout.mjs && node scripts/check-legacy-refs.mjs && node scripts/check-docs-legacy.mjs && node scripts/check-untracked-sources.mjs && node scripts/check-sub-dist.mjs && node scripts/check-max-lines.mjs --limit=500",
     "self-check": "node scripts/self-check.mjs",
     "self-check:quick": "node scripts/self-check.mjs --quick",
     "self-check:fix": "node scripts/self-check.mjs --fix",

@@ -1552,6 +1552,20 @@ async function readReplyInputTarget(profileId) {
   ], { requireViewport: false, minVisibleRatio: 0.5 });
 }
 
+async function readReplyInputValue(profileId) {
+  const script = `(() => {
+    const input = document.querySelector('textarea, input[placeholder*="说点"], [contenteditable="true"]');
+    if (!(input instanceof HTMLElement)) return { ok: false };
+    if (input instanceof HTMLInputElement || input instanceof HTMLTextAreaElement) {
+      return { ok: true, value: String(input.value || '') };
+    }
+    return { ok: true, value: String(input.textContent || '') };
+  })()`;
+  const payload = await evaluateReadonly(profileId, script);
+  if (!payload || payload.ok !== true) return { ok: false, value: '' };
+  return { ok: true, value: String(payload.value || '') };
+}
+
 async function readReplySendButtonTarget(profileId) {
   const script = `(() => {
     const minVisibleRatio = 0.5;
@@ -1617,6 +1631,58 @@ function sanitizeFileComponent(value, fallback = 'unknown') {
   if (!text) return fallback;
   const cleaned = text.replace(/[\\/:*?"<>|]+/g, '_').trim();
   return cleaned || fallback;
+}
+
+async function captureOperationFailure({
+  profileId,
+  params = {},
+  context = {},
+  stage = 'operation',
+  noteId = '',
+  reason = 'operation_failed',
+  extra = {},
+}) {
+  const state = getProfileState(profileId);
+  const output = resolveXhsOutputContext({
+    params,
+    state,
+    noteId: state.currentNoteId || noteId || params.noteId,
+  });
+  const diagnosticsDir = path.join(output.keywordDir, 'diagnostics', 'operation-failures');
+  await ensureDir(diagnosticsDir);
+
+  const runId = String(params.runId || context.runId || '').trim();
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const baseName = `failure-${sanitizeFileComponent(runId, 'run')}-${sanitizeFileComponent(stage, 'stage')}-${sanitizeFileComponent(noteId || 'note', 'note')}-${stamp}`;
+  const jsonPath = path.join(diagnosticsDir, `${baseName}.json`);
+  const pngPath = path.join(diagnosticsDir, `${baseName}.png`);
+
+  const screenshotPath = await captureScreenshotToFile({ profileId, filePath: pngPath });
+  const payload = {
+    runId: runId || null,
+    stage,
+    noteId: String(noteId || '').trim() || null,
+    reason: String(reason || '').trim() || null,
+    keyword: params.keyword || output.keyword,
+    env: params.env || output.env,
+    outputRoot: output.root,
+    capturedAt: new Date().toISOString(),
+    screenshotPath,
+    extra,
+  };
+
+  await writeJsonFile(jsonPath, payload);
+
+  emitOperationProgress(context, {
+    kind: 'failure_snapshot',
+    stage,
+    noteId: payload.noteId,
+    reason: payload.reason,
+    jsonPath,
+    screenshotPath,
+  });
+
+  return { jsonPath, screenshotPath };
 }
 
 function buildTimeoutDomSnapshotScript() {
@@ -2168,21 +2234,52 @@ async function executeOpenDetailOperation({
     const openByLinks = params.openByLinks === true
       || String(params.openByLinks || '').trim().toLowerCase() === 'true';
     const openByLinksMaxAttempts = Math.max(1, Number(params.openByLinksMaxAttempts ?? 3) || 3);
+    const operationTimeoutMs = Math.max(1000, Number(params.operationTimeoutMs ?? params.operationTimeout ?? 10000) || 10000);
+    const operationStartedAt = Date.now();
+    const timeRemaining = () => (Number.isFinite(operationTimeoutMs) && operationTimeoutMs > 0
+      ? operationTimeoutMs - (Date.now() - operationStartedAt)
+      : Number.POSITIVE_INFINITY);
+    const ensureTimeRemaining = () => {
+      if (timeRemaining() <= 0) throw new Error('DETAIL_OPEN_TIMEOUT');
+    };
+    const sleepWithBudget = async (ms) => {
+      ensureTimeRemaining();
+      const remaining = timeRemaining();
+      const waitMs = Math.max(0, Math.min(Number(ms) || 0, remaining));
+      if (waitMs <= 0) return 0;
+      await sleep(waitMs);
+      return waitMs;
+    };
+    const sleepRandomWithBudget = async (minMs, maxMs, trace, stage, extra = {}) => {
+      ensureTimeRemaining();
+      const remaining = timeRemaining();
+      const boundedMax = Math.max(0, Math.min(Number(maxMs) || 0, remaining));
+      const boundedMin = Math.max(0, Math.min(Number(minMs) || 0, boundedMax));
+      return sleepRandom(boundedMin, Math.max(boundedMin, boundedMax), trace, stage, extra);
+    };
 
     const waitDetailReady = async () => {
       for (let i = 0; i < 60; i += 1) {
+        ensureTimeRemaining();
         const snapshot = await isDetailVisible(profileId);
         if (snapshot?.detailReady === true) return true;
-        await sleep(randomBetween(pollDelayMinMs, pollDelayMaxMs));
+        const remaining = timeRemaining();
+        const waitMs = Math.max(0, Math.min(randomBetween(pollDelayMinMs, pollDelayMaxMs), remaining));
+        if (waitMs <= 0) return false;
+        await sleep(waitMs);
       }
       return false;
     };
     const waitDetailReadyOnce = async (maxWaitMs = 3200) => {
       const startedAt = Date.now();
       while ((Date.now() - startedAt) < maxWaitMs) {
+        ensureTimeRemaining();
         const snapshot = await isDetailVisible(profileId);
         if (snapshot?.detailReady === true) return true;
-        await sleep(randomBetween(pollDelayMinMs, pollDelayMaxMs));
+        const remaining = Math.min(timeRemaining(), maxWaitMs - (Date.now() - startedAt));
+        const waitMs = Math.max(0, Math.min(randomBetween(pollDelayMinMs, pollDelayMaxMs), remaining));
+        if (waitMs <= 0) return false;
+        await sleep(waitMs);
       }
       return false;
     };
@@ -2270,13 +2367,13 @@ async function executeOpenDetailOperation({
             attempt,
             reason: String(lastError?.message || lastError || 'DETAIL_NOT_READY'),
           });
-          await sleepRandom(220, 520, pushTrace, 'open_detail_retry_wait', {
+          await sleepRandomWithBudget(220, 520, pushTrace, 'open_detail_retry_wait', {
             noteId: String(noteId || '').trim() || null,
             mode: traceMode,
             attempt,
           });
         } else {
-          await sleepRandom(preClickDelayMinMs, preClickDelayMaxMs, pushTrace, 'open_detail_pre_click', {
+          await sleepRandomWithBudget(preClickDelayMinMs, preClickDelayMaxMs, pushTrace, 'open_detail_pre_click', {
             noteId: String(noteId || '').trim() || null,
             mode: traceMode,
             attempt,
@@ -2317,6 +2414,13 @@ async function executeOpenDetailOperation({
           noteId,
           reason: String(lastError?.message || lastError || 'DETAIL_OPEN_FAILED'),
           attempt: maxAttempts,
+        });
+      }
+      if (recoverOnFailure) {
+        await recoverSearchViewportAfterOpenFailure({
+          noteId,
+          reason: String(lastError?.message || lastError || 'DETAIL_OPEN_FAILED'),
+          attempt: 3,
         });
       }
       if (lastError instanceof Error) throw lastError;
@@ -2587,7 +2691,7 @@ async function executeOpenDetailOperation({
           traceMode: 'collect',
           recoverOnFailure: true,
         });
-        await sleepRandom(postOpenDelayMinMs, postOpenDelayMaxMs, pushTrace, 'open_detail_post_open', { noteId, mode: 'collect' });
+        await sleepRandomWithBudget(postOpenDelayMinMs, postOpenDelayMaxMs, pushTrace, 'open_detail_post_open', { noteId, mode: 'collect' });
         return { beforeUrl };
       };
       const runCaptureUrlBlock = async (next, beforeUrl) => {
@@ -2687,6 +2791,15 @@ async function executeOpenDetailOperation({
             selectedNoteId: '',
             processedNoteIds: normalizeNoteIdList(Array.from(nonCollectibleSet)),
           });
+          await captureOperationFailure({
+            profileId,
+            params,
+            context,
+            stage: 'collect_links',
+            noteId: nextNoteId || '',
+            reason,
+            extra: { block: 'open_detail_skip' },
+          }).catch(() => null);
           await sleep(Math.max(220, Math.floor(seedCollectSettleMs / 2)));
           continue;
         }
@@ -2717,6 +2830,15 @@ async function executeOpenDetailOperation({
             selectedNoteId: '',
             processedNoteIds: normalizeNoteIdList(Array.from(nonCollectibleSet)),
           });
+          await captureOperationFailure({
+            profileId,
+            params,
+            context,
+            stage: 'collect_links',
+            noteId: nextNoteId || '',
+            reason,
+            extra: { block: 'capture_url_skip' },
+          }).catch(() => null);
           await sleep(Math.max(220, Math.floor(seedCollectSettleMs / 2)));
           continue;
         }
@@ -2967,6 +3089,15 @@ async function executeOpenDetailOperation({
             attempt,
             error: error?.message || String(error),
           });
+          await captureOperationFailure({
+            profileId,
+            params,
+            context,
+            stage: progressStage,
+            noteId,
+            reason: error?.message || String(error),
+            extra: { block: 'open_detail_by_link_failed', attempt },
+          }).catch(() => null);
           continue;
         }
 
@@ -2984,6 +3115,15 @@ async function executeOpenDetailOperation({
             noteId,
             attempt,
           });
+          await captureOperationFailure({
+            profileId,
+            params,
+            context,
+            stage: progressStage,
+            noteId,
+            reason: 'DETAIL_OPEN_TIMEOUT',
+            extra: { block: 'open_detail_by_link_timeout', attempt },
+          }).catch(() => null);
           continue;
         }
 
@@ -3279,7 +3419,7 @@ async function executeOpenDetailOperation({
       recoverOnFailure: true,
     });
 
-    await sleepRandom(postOpenDelayMinMs, postOpenDelayMaxMs, pushTrace, 'open_detail_post_open', { noteId: next.noteId });
+    await sleepRandomWithBudget(postOpenDelayMinMs, postOpenDelayMaxMs, pushTrace, 'open_detail_post_open', { noteId: next.noteId });
     const afterUrl = await readLocation(profileId);
 
     if (detailOnlyMode) {
@@ -4007,6 +4147,9 @@ async function executeCommentLikeOperation({ profileId, params = {}, context = {
   })).filter((row) => row.text);
 
   const tryLikeRow = async (row, matchedRule = 'fallback') => {
+    const operationTimeoutMs = Math.max(1000, Number(params.operationTimeoutMs ?? params.operationTimeout ?? 10000) || 10000);
+    const startedAt = Date.now();
+    const timeRemaining = () => operationTimeoutMs - (Date.now() - startedAt);
     const signature = makeLikeSignature({
       noteId: output.noteId,
       userId: String(row.userId || ''),
@@ -4047,21 +4190,34 @@ async function executeCommentLikeOperation({ profileId, params = {}, context = {
       })
       : null;
 
-    const targetBefore = await readLikeTargetByIndex(profileId, row.index);
-    if (!targetBefore || targetBefore.ok !== true || !targetBefore.center) {
-      clickFailed += 1;
-      return false;
-    }
-    if (targetBefore.alreadyLiked) {
-      alreadyLikedSkipped += 1;
-      return false;
-    }
+    let likedOk = false;
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      if (timeRemaining() <= 0) break;
+      const targetBefore = await readLikeTargetByIndex(profileId, row.index);
+      if (!targetBefore || targetBefore.ok !== true || !targetBefore.center) {
+        clickFailed += 1;
+        continue;
+      }
+      if (targetBefore.alreadyLiked) {
+        alreadyLikedSkipped += 1;
+        return false;
+      }
 
-    await clickPoint(profileId, targetBefore.center, { steps: 4 });
-    pushTrace({ kind: 'click', stage: 'xhs_comment_like', commentIndex: Number(row.index) });
-    await sleepRandom(500, 1600, pushTrace, 'like_post_click', { commentIndex: Number(row.index) });
+      try {
+        await clickPoint(profileId, targetBefore.center, { steps: 4 });
+      } catch {
+        clickFailed += 1;
+      }
+      pushTrace({ kind: 'click', stage: 'xhs_comment_like', commentIndex: Number(row.index), attempt });
+      await sleepRandom(500, 1600, pushTrace, 'like_post_click', { commentIndex: Number(row.index), attempt });
 
-    const targetAfter = await readLikeTargetByIndex(profileId, row.index);
+      const targetAfter = await readLikeTargetByIndex(profileId, row.index);
+      if (targetAfter && targetAfter.ok === true && targetAfter.alreadyLiked) {
+        likedOk = true;
+        break;
+      }
+      verifyFailed += 1;
+    }
     const afterPath = saveEvidence
       ? await captureScreenshotToFile({
         profileId,
@@ -4069,12 +4225,16 @@ async function executeCommentLikeOperation({ profileId, params = {}, context = {
       })
       : null;
 
-    if (!targetAfter || targetAfter.ok !== true) {
-      verifyFailed += 1;
-      return false;
-    }
-    if (!targetAfter.alreadyLiked) {
-      verifyFailed += 1;
+    if (!likedOk) {
+      await captureOperationFailure({
+        profileId,
+        params,
+        context,
+        stage: 'xhs_comment_like',
+        noteId: output.noteId,
+        reason: 'like_verify_failed',
+        extra: { commentIndex: Number(row.index) },
+      }).catch(() => null);
       return false;
     }
 
@@ -4422,5 +4582,3 @@ export async function executeXhsAutoscriptOperation({
 export function __unsafe_getProfileStateForTests(profileId) {
   return getProfileState(profileId);
 }
-
-

@@ -3,6 +3,8 @@ import fsp from 'node:fs/promises';
 import path from 'node:path';
 
 import { buildXhsUnifiedAutoscript } from '../../../../modules/camo-runtime/src/autoscript/xhs-unified-template.mjs';
+import { buildXhsCollectAutoscript } from '../../../../modules/camo-runtime/src/autoscript/xhs-collect-template.mjs';
+import { buildXhsDetailAutoscript } from '../../../../modules/camo-runtime/src/autoscript/xhs-detail-template.mjs';
 import { normalizeAutoscript, validateAutoscript } from '../../../../modules/camo-runtime/src/autoscript/schema.mjs';
 import { AutoscriptRunner } from '../../../../modules/camo-runtime/src/autoscript/runtime.mjs';
 import { markProfileInvalid } from './account-store.mjs';
@@ -275,6 +277,13 @@ async function buildTemplateOptions(argv, profileId, overrides = {}) {
   };
 }
 
+function resolveAutoscriptBuilder(stage) {
+  const normalized = String(stage || '').trim().toLowerCase();
+  if (normalized === 'links') return buildXhsCollectAutoscript;
+  if (normalized === 'detail') return buildXhsDetailAutoscript;
+  return buildXhsUnifiedAutoscript;
+}
+
 export async function runProfile(spec, argv, baseOverrides = {}) {
   const profileId = spec.profileId;
   const busEnabled = parseBool(argv['bus-events'], false) || process.env.WEBAUTO_BUS_EVENTS === '1';
@@ -321,7 +330,8 @@ export async function runProfile(spec, argv, baseOverrides = {}) {
     commentsSettleMinMs: options.commentsSettleMinMs,
     commentsSettleMaxMs: options.commentsSettleMaxMs,
   }));
-  const script = buildXhsUnifiedAutoscript(options);
+  const buildScript = resolveAutoscriptBuilder(options.stage);
+  const script = buildScript(options);
   const normalized = normalizeAutoscript(script, `xhs-unified:${profileId}`);
   const validation = validateAutoscript(normalized);
   if (!validation.ok) throw new Error(`autoscript validation failed for ${profileId}: ${validation.errors.join('; ')}`);
