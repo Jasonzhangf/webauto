@@ -59,10 +59,10 @@ export async function scanTestBuckets(repoRoot: string): Promise<TestBucket[]> {
 
     try {
       // Use fsListDir to get files in the bucket directory
-      const listResult = await (window as any).api.fsListDir({ dir: `${repoRoot}/${bucketPath}`, recursive: false });
-      if (!listResult || !listResult.files) continue;
+      const listResult = await (window as any).api.fsListDir({ root: `${repoRoot}/${bucketPath}`, recursive: false });
+      if (!listResult || !listResult.ok || !listResult.entries) continue;
 
-      const testFiles = listResult.files.filter((f: any) => f.name.endsWith('.test.ts') && f.isFile);
+      const testFiles = listResult.entries.filter((f: any) => f.name.endsWith('.test.ts') && !f.isDir);
 
       for (const tf of testFiles) {
         const filePath = `${bucketPath}/${tf.name}`;
@@ -75,15 +75,15 @@ export async function scanTestBuckets(repoRoot: string): Promise<TestBucket[]> {
       }
 
       // Check for sub-buckets (e.g., controls/elements)
-      const subDirs = listResult.files.filter((f: any) => f.isDirectory && !f.name.startsWith('.'));
+      const subDirs = listResult.entries.filter((f: any) => f.isDir && !f.name.startsWith('.'));
       if (subDirs.length > 0 && dir === 'controls') {
         bucket.subBuckets = [];
         for (const sub of subDirs) {
           const subBucketPath = `${bucketPath}/${sub.name}`;
-          const subList = await (window as any).api.fsListDir({ dir: `${repoRoot}/${subBucketPath}`, recursive: false });
+          const subList = await (window as any).api.fsListDir({ root: `${repoRoot}/${subBucketPath}`, recursive: false });
           if (!subList || !subList.files) continue;
 
-          const subTestFiles = subList.files.filter((f: any) => f.name.endsWith('.test.ts') && f.isFile);
+          const subTestFiles = subList.entries.filter((f: any) => f.name.endsWith('.test.ts') && !f.isDir);
           const subBucket: TestBucket = {
             id: `${dir}/${sub.name}`,
             label: sub.name,

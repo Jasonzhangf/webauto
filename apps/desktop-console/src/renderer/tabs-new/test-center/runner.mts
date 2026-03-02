@@ -6,7 +6,6 @@ const HEALTH_TIMEOUT_MS = 30000;
 
 export class TestRunner {
   private running = false;
-  private currentProcess: any = null;
   private logs: string[] = [];
   private results: TestRunResult[] = [];
   private onLog: (line: string) => void = () => {};
@@ -38,10 +37,16 @@ export class TestRunner {
 
     this.log('[runner] Unified API not available, starting daemon...');
     try {
-      // Use IPC to start daemon
-      const startResult = await (window as any).api.invoke('daemon:start');
+      // Use UI CLI to start daemon which will bring up Unified API
+      const startResult = await (window as any).api.cmdRunJson({
+        cmd: 'node',
+        args: ['scripts/run.mjs', 'ui', 'cli', 'start', '--build'],
+        cwd: this.repoRoot,
+        timeout: 60000,
+      });
+
       if (!startResult || !startResult.ok) {
-        return { ok: false, error: startResult?.error || 'Failed to start daemon' };
+        return { ok: false, error: startResult?.stderr || 'Failed to start daemon via ui cli' };
       }
 
       // Wait for health with timeout

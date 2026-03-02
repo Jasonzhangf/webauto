@@ -23,6 +23,7 @@ contextBridge.exposeInMainWorld('api', {
   fsReadTextPreview: (spec) => ipcRenderer.invoke('fs:readTextPreview', spec),
   fsReadTextTail: (spec) => ipcRenderer.invoke('fs:readTextTail', spec),
   fsReadFileBase64: (spec) => ipcRenderer.invoke('fs:readFileBase64', spec),
+  fsListDir: (spec) => ipcRenderer.invoke('fs:listDir', spec),
   profilesList: () => ipcRenderer.invoke('profiles:list'),
   profilesScan: () => ipcRenderer.invoke('profiles:scan'),
   scriptsXhsFullCollect: () => ipcRenderer.invoke('scripts:xhsFullCollect'),

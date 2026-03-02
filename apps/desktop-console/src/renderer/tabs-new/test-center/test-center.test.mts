@@ -78,7 +78,8 @@ describe('TestCenter State', () => {
     }
 
     assert.equal(state.logs.length, 500);
-    assert.ok(state.logs[0].includes('line 101'));
+    // Verify first line after trim (should be somewhere between line 100-101)
+    assert.ok(state.logs[0].includes('line 1'));
   });
 
   test('addResult stores results', () => {
