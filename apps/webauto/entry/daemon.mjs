@@ -1292,17 +1292,20 @@ async function startDaemonServer() {
   }, WORKER_HEARTBEAT_INTERVAL_MS);
   workerWatchdog.unref();
 
-  const uiWatchdog = setInterval(() => {
-    if (!state.desiredUi || state.shuttingDown) return;
-    void enqueueUi(async () => {
-      const status = await runUiCliBounded(['status', '--json'], UI_CLI_STATUS_TIMEOUT_MS).catch(() => ({ ok: false }));
-      if (status?.ok && status?.json?.ok) return;
-      const uiWorker = allocateUiWorker();
-      const env = uiWorker ? buildWorkerEnv(uiWorker) : {};
-      await runUiCliBounded(['start', '--json'], UI_CLI_START_TIMEOUT_MS, { env }).catch(() => null);
-    });
-  }, 10_000);
-  uiWatchdog.unref();
+  const uiWatchdogEnabled = String(process.env.WEBAUTO_DAEMON_UI_WATCHDOG || '1') === '1';
+  const uiWatchdog = uiWatchdogEnabled
+    ? setInterval(() => {
+        if (!state.desiredUi || state.shuttingDown) return;
+        void enqueueUi(async () => {
+          const status = await runUiCliBounded(['status', '--json'], UI_CLI_STATUS_TIMEOUT_MS).catch(() => ({ ok: false }));
+          if (status?.ok && status?.json?.ok) return;
+          const uiWorker = allocateUiWorker();
+          const env = uiWorker ? buildWorkerEnv(uiWorker) : {};
+          await runUiCliBounded(['start', '--json'], UI_CLI_START_TIMEOUT_MS, { env }).catch(() => null);
+        });
+      }, 10_000)
+    : null;
+  if (uiWatchdog) uiWatchdog.unref();
 
   const shutdown = (reason = 'signal') => {
     if (state.shuttingDown) return;
@@ -1315,7 +1318,9 @@ async function startDaemonServer() {
     state.shutdownTimer = setTimeout(() => {
       try { clearInterval(heartbeatTimer); } catch {}
       try { clearInterval(workerWatchdog); } catch {}
-      try { clearInterval(uiWatchdog); } catch {}
+      if (uiWatchdog) {
+        try { clearInterval(uiWatchdog); } catch {}
+      }
       try { server?.close(); } catch {}
       cleanupRuntimeFiles();
       process.exit(0);
@@ -1328,7 +1333,9 @@ async function startDaemonServer() {
   process.on('exit', () => {
     try { clearInterval(heartbeatTimer); } catch {}
     try { clearInterval(workerWatchdog); } catch {}
-    try { clearInterval(uiWatchdog); } catch {}
+    if (uiWatchdog) {
+      try { clearInterval(uiWatchdog); } catch {}
+    }
     cleanupRuntimeFiles();
   });
 }
