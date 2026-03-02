@@ -17,9 +17,6 @@ export function buildCommandArgv(data: TaskFormData): Record<string, any> {
   };
   const profileId = String(data.profileId || '').trim();
   if (profileId) argv.profile = profileId;
-  if (String(data.taskType || '').startsWith('weibo-')) {
-    if (data.userId) argv['user-id'] = data.userId;
-  }
   return argv;
 }
 

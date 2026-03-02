@@ -23,7 +23,10 @@
       "timeout": 60000,
       "parallel": false,
       "stopOnFailure": false,
-      "requires": ["unit", "integration"]
+      "requires": [
+        "unit",
+        "integration"
+      ]
     }
   ],
   "services": {
@@ -41,9 +44,6 @@
   "profiles": {
     "test": {
       "url": "http://localhost:8080/test-page.html"
-    },
-    "weibo_fresh": {
-      "url": "https://weibo.com"
     }
   },
   "reporting": {

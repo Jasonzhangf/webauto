@@ -34,7 +34,6 @@ export function createSchedulerFormActions(
 
   function updatePlatformFields() {
     const commandType = String(ui.taskTypeSelect.value || '').trim();
-    const isWeiboMonitor = commandType === 'weibo-monitor';
     ui.userIdWrap.style.display = isWeiboMonitor ? '' : 'none';
   }
 
@@ -95,9 +94,6 @@ export function createSchedulerFormActions(
     };
     const profileValue = ui.profileInput.value.trim();
     if (profileValue) argv.profile = profileValue;
-    if (commandType.startsWith('weibo')) {
-      argv['user-id'] = ui.userIdInput.value.trim();
-    }
     const mode = String(ui.typeSelect.value || 'immediate').trim();
     const periodicType = String(ui.periodicTypeSelect.value || 'interval').trim();
     let scheduleType: ScheduleTask['scheduleType'] = 'once';

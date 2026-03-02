@@ -109,11 +109,8 @@ export function createMockCtx(): MockBundle {
         if (!argv.profile && !argv.profiles && !argv.profilepool) {
           return { ok: false, error: 'profile/profiles/profilepool 至少填写一个' };
         }
-        if ((commandType === 'xhs-unified' || commandType === 'weibo-search' || commandType === '1688-search') && !argv.keyword) {
+        if ((commandType === 'xhs-unified' || commandType === '1688-search') && !argv.keyword) {
           return { ok: false, error: '关键词不能为空' };
-        }
-        if (commandType === 'weibo-monitor' && !argv['user-id']) {
-          return { ok: false, error: '微博 monitor 任务需要 user-id' };
         }
         if ((payload.scheduleType === 'once' || payload.scheduleType === 'daily' || payload.scheduleType === 'weekly') && !payload.runAt) {
           return { ok: false, error: `${payload.scheduleType} 任务需要锚点时间` };

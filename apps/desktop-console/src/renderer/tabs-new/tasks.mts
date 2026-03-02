@@ -52,7 +52,6 @@ export function renderTasksPanel(root: HTMLElement, ctx: any) {
         <label>平台</label>
         <select id="task-platform" style="width: 130px;">
           <option value="xiaohongshu">📕 小红书</option>
-          <option value="weibo">📰 微博</option>
           <option value="1688">🛒 1688</option>
         </select>
       </div>
@@ -255,7 +254,6 @@ export function renderTasksPanel(root: HTMLElement, ctx: any) {
 
   function normalizePlatform(value: string): Platform {
     const raw = String(value || '').trim().toLowerCase();
-    if (raw === 'weibo') return 'weibo';
     if (raw === '1688') return '1688';
     return 'xiaohongshu';
   }
@@ -367,7 +365,6 @@ export function renderTasksPanel(root: HTMLElement, ctx: any) {
 
   function updatePlatformFields() {
     const taskType = String(taskTypeSelect.value || '').trim();
-    const isWeiboMonitor = taskType === 'weibo-monitor';
     userIdWrap.style.display = isWeiboMonitor ? '' : 'none';
   }
 
@@ -672,9 +669,6 @@ export function renderTasksPanel(root: HTMLElement, ctx: any) {
     };
     const profileId = String(data.profileId || '').trim();
     if (profileId) argv.profile = profileId;
-    if (String(data.taskType || '').startsWith('weibo-')) {
-      if (data.userId) argv['user-id'] = data.userId;
-    }
     return argv;
   }
 

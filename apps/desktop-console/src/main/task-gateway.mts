@@ -51,7 +51,7 @@ type GatewayOptions = {
   spawnCommand: SpawnLike;
 };
 
-const KEYWORD_REQUIRED_TYPES = new Set(['xhs-unified', 'weibo-search', '1688-search']);
+const KEYWORD_REQUIRED_TYPES = new Set(['xhs-unified', '1688-search']);
 const RUN_AT_TYPES = new Set<ScheduleType>(['once', 'daily', 'weekly']);
 
 function asText(value: any): string {
@@ -90,9 +90,8 @@ function deriveTaskName(commandType: string, argv: Record<string, any>): string 
   return keyword ? `${commandType}-${keyword}` : `${commandType}-${stamp}`;
 }
 
-function getPlatformFromCommandType(commandType: string): 'xiaohongshu' | 'weibo' | '1688' {
+function getPlatformFromCommandType(commandType: string): 'xiaohongshu' | '1688' {
   const value = asText(commandType).toLowerCase();
-  if (value.startsWith('weibo')) return 'weibo';
   if (value.startsWith('1688')) return '1688';
   return 'xiaohongshu';
 }
@@ -103,7 +102,7 @@ function hasExplicitProfileArg(argv: Record<string, any>): boolean {
 
 async function listValidProfilesForPlatform(
   options: GatewayOptions,
-  platform: 'xiaohongshu' | 'weibo' | '1688',
+  platform: 'xiaohongshu' | '1688',
 ): Promise<string[]> {
   const accountScript = path.join(options.repoRoot, 'apps', 'webauto', 'entry', 'account.mjs');
   const ret = await options.runJson({
@@ -158,12 +157,6 @@ async function ensureProfileArg(options: GatewayOptions, commandType: string, ar
   };
 }
 
-function normalizeWeiboTaskType(commandType: string): string {
-  if (commandType === 'weibo-search') return 'search';
-  if (commandType === 'weibo-monitor') return 'monitor';
-  return 'timeline';
-}
-
 function createUiTriggerId(): string {
   return `ui-${Date.now()}-${Math.random().toString(16).slice(2, 10)}`;
 }
@@ -186,12 +179,6 @@ function normalizeSavePayload(payload: ScheduleTaskPayload | undefined) {
 
   if (KEYWORD_REQUIRED_TYPES.has(commandType) && !asText(argv.keyword)) {
     throw new Error('关键词不能为空');
-  }
-  if (commandType.startsWith('weibo-')) {
-    argv['task-type'] = asText(argv['task-type']) || normalizeWeiboTaskType(commandType);
-    if (commandType === 'weibo-monitor' && !asText(argv['user-id'])) {
-      throw new Error('微博 monitor 任务需要 user-id');
-    }
   }
   if (RUN_AT_TYPES.has(scheduleType) && !runAt) {
     throw new Error(`${scheduleType} 任务需要锚点时间`);
@@ -353,23 +340,6 @@ export async function runEphemeralTask(options: GatewayOptions, input: TaskRunEp
       return { ok: true, runId: asText(ret?.runId), commandType, profile, uiTriggerId };
     }
 
-    if (commandType === 'weibo-search') {
-      const script = path.join(options.repoRoot, 'apps', 'webauto', 'entry', 'weibo-unified.mjs');
-      const ret = await options.spawnCommand({
-        title: `weibo: ${keyword}`,
-        cwd: options.repoRoot,
-        groupKey: 'weibo-search',
-        args: [
-          script,
-          'search',
-          '--profile', profile,
-          '--keyword', keyword,
-          '--target', String(target),
-          '--env', env,
-        ],
-      });
-      return { ok: true, runId: asText(ret?.runId), commandType, profile };
-    }
 
     return { ok: false, error: `当前任务类型暂不支持仅执行(不保存): ${commandType}` };
   } catch (err: any) {
