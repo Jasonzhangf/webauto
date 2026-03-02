@@ -21,6 +21,14 @@ export function registerFileHandlers(deps: IpcDeps) {
     readTextTail(spec),
   );
   ipcMain.handle('fs:readFileBase64', async (_evt, spec: { path: string; maxBytes?: number }) => readFileBase64(spec));
+  ipcMain.handle('fs:writeFile', async (_evt, spec: { path: string; content: string }) => {
+    const fs = await import('node:fs/promises');
+    const pathModule = await import('node:path');
+    const dir = pathModule.dirname(spec.path);
+    await fs.mkdir(dir, { recursive: true });
+    await fs.writeFile(spec.path, spec.content, 'utf8');
+    return { ok: true, path: spec.path };
+  });
   ipcMain.handle('profiles:list', async () => deps.profileStore.listProfiles());
   ipcMain.handle('profiles:scan', async () => deps.profileStore.scanProfiles());
   ipcMain.handle('scripts:xhsFullCollect', async () => listXhsFullCollectScripts(deps.xhsScriptsRoot, deps.xhsFullCollectRe));

@@ -6,6 +6,7 @@ import { renderTasksPanel } from './tabs-new/tasks.mts';
 import { renderDashboard } from './tabs-new/dashboard.mts';
 import { renderAccountManager } from './tabs-new/account-manager.mts';
 import { renderSchedulerPanel } from './tabs-new/scheduler.mts';
+import { renderTestCenter } from './tabs-new/test-center/index.mts';
 import { createEl } from './ui-components.mts';
 
 declare global {
@@ -14,7 +15,7 @@ declare global {
   }
 }
 
-type TabId = 'setup-wizard' | 'tasks' | 'dashboard' | 'scheduler' | 'account-manager' | 'preflight' | 'logs' | 'settings';
+type TabId = 'setup-wizard' | 'tasks' | 'dashboard' | 'scheduler' | 'account-manager' | 'preflight' | 'logs' | 'settings' | 'test-center';
 
 type TabRender = (root: HTMLElement, ctx: any) => void | (() => void);
 
@@ -27,6 +28,7 @@ const tabs: Array<{ id: TabId; label: string; render: TabRender; hidden?: boolea
   { id: 'preflight', label: '旧预处理', render: renderPreflight, hidden: true },
   { id: 'logs', label: '日志', render: renderLogs },
   { id: 'settings', label: '设置', render: renderSettings },
+  { id: 'test-center', label: '测试中心', render: renderTestCenter },
 ];
 
 const tabsEl = document.getElementById('tabs')!;
@@ -47,6 +49,7 @@ const tabIcons: Record<TabId, string> = {
   'preflight': '🔧',
   'logs': '📝',
   'settings': '🔨',
+  'test-center': '🧪',
 };
 
 const ctx: any = {

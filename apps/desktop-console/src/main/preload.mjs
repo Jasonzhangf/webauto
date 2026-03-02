@@ -45,6 +45,11 @@ contextBridge.exposeInMainWorld('api', {
   // Generic IPC invoke for extensibility
   invoke: (channel, ...args) => ipcRenderer.invoke(channel, ...args),
 
+  // File system operations for test center
+  fsListFiles: (dir) => ipcRenderer.invoke('fs:listFiles', { dir }),
+  fsReadFile: (path) => ipcRenderer.invoke('fs:readFile', { path }),
+  fsWriteFile: (spec) => ipcRenderer.invoke('fs:writeFile', spec),
+
   // Event listeners
   onSettingsChanged: (handler) => {
     const fn = (_, payload) => handler(payload);
