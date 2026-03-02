@@ -7,6 +7,10 @@ import { nowIso, parseBool, parseIntFlag, parseNonNegativeInt, sanitizeForPath }
 import { resolveDownloadRoot } from '../../../../apps/webauto/entry/lib/xhs-unified-output-blocks.mjs';
 import { buildEvenShardPlan, buildDynamicWavePlan } from '../../../../apps/webauto/entry/lib/xhs-unified-plan-blocks.mjs';
 
+// Import collect modules
+import { buildXhsCollectOperations } from '../../../../modules/camo-runtime/src/autoscript/xhs-autoscript-collect.mjs';
+import { buildXhsCollectAutoscript } from '../../../../modules/camo-runtime/src/autoscript/xhs-collect-template.mjs';
+
 const baseOptions = {
   profileId: 'test-profile',
   keyword: 'unit-test',
@@ -15,6 +19,165 @@ const baseOptions = {
   noteIntervalMs: 1000,
   maxNotes: 3,
 };
+
+// ============================================
+// Collect operations tests (core module)
+// ============================================
+test('buildXhsCollectOperations: collect_links enabled when stageLinksEnabled=true', () => {
+  const ops = buildXhsCollectOperations({
+    ...baseOptions,
+    stageLinksEnabled: true,
+    detailLoopEnabled: false,
+  });
+  const collectLinks = ops.find(op => op.id === 'collect_links');
+  assert.ok(collectLinks, 'collect_links operation exists');
+  assert.equal(collectLinks.enabled, true);
+  assert.ok(collectLinks.dependsOn.includes('ensure_tab_pool'));
+  assert.equal(collectLinks.once, true);
+});
+
+test('buildXhsCollectOperations: collect_links disabled when stageLinksEnabled=false', () => {
+  const ops = buildXhsCollectOperations({
+    ...baseOptions,
+    stageLinksEnabled: false,
+    detailLoopEnabled: false,
+  });
+  const collectLinks = ops.find(op => op.id === 'collect_links');
+  assert.ok(collectLinks, 'collect_links operation exists');
+  assert.equal(collectLinks.enabled, false);
+});
+
+test('buildXhsCollectOperations: finish_after_collect_links enabled when stageLinksEnabled=true and detailLoopEnabled=false', () => {
+  const ops = buildXhsCollectOperations({
+    ...baseOptions,
+    stageLinksEnabled: true,
+    detailLoopEnabled: false,
+  });
+  const finishOp = ops.find(op => op.id === 'finish_after_collect_links');
+  assert.ok(finishOp, 'finish_after_collect_links operation exists');
+  assert.equal(finishOp.enabled, true);
+  assert.equal(finishOp.action, 'raise_error');
+  assert.equal(finishOp.params.code, 'AUTOSCRIPT_DONE_LINKS_COLLECTED');
+});
+
+test('buildXhsCollectOperations: finish_after_collect_links disabled when detailLoopEnabled=true', () => {
+  const ops = buildXhsCollectOperations({
+    ...baseOptions,
+    stageLinksEnabled: true,
+    detailLoopEnabled: true,
+  });
+  const finishOp = ops.find(op => op.id === 'finish_after_collect_links');
+  assert.ok(finishOp, 'finish_after_collect_links operation exists');
+  assert.equal(finishOp.enabled, false);
+});
+
+test('buildXhsCollectOperations: finish_after_collect_links disabled when stageLinksEnabled=false', () => {
+  const ops = buildXhsCollectOperations({
+    ...baseOptions,
+    stageLinksEnabled: false,
+    detailLoopEnabled: false,
+  });
+  const finishOp = ops.find(op => op.id === 'finish_after_collect_links');
+  assert.ok(finishOp, 'finish_after_collect_links operation exists');
+  assert.equal(finishOp.enabled, false);
+});
+
+test('buildXhsCollectOperations: trigger is startup when detailLinksStartup=true', () => {
+  const ops = buildXhsCollectOperations({
+    ...baseOptions,
+    stageLinksEnabled: true,
+    detailLinksStartup: true,
+  });
+  const collectLinks = ops.find(op => op.id === 'collect_links');
+  assert.ok(collectLinks);
+  assert.equal(collectLinks.trigger, 'startup');
+});
+
+test('buildXhsCollectOperations: trigger is search_result_item.exist when detailLinksStartup=false', () => {
+  const ops = buildXhsCollectOperations({
+    ...baseOptions,
+    stageLinksEnabled: true,
+    detailLinksStartup: false,
+  });
+  const collectLinks = ops.find(op => op.id === 'collect_links');
+  assert.ok(collectLinks);
+  assert.equal(collectLinks.trigger, 'search_result_item.exist');
+});
+
+test('buildXhsCollectOperations: collect_links has correct dependencies', () => {
+  const ops = buildXhsCollectOperations({
+    ...baseOptions,
+    stageLinksEnabled: true,
+  });
+  const collectLinks = ops.find(op => op.id === 'collect_links');
+  assert.ok(collectLinks);
+  assert.ok(Array.isArray(collectLinks.dependsOn));
+  assert.ok(collectLinks.dependsOn.includes('ensure_tab_pool'));
+});
+
+test('buildXhsCollectOperations: finish_after_collect_links depends on collect_links', () => {
+  const ops = buildXhsCollectOperations({
+    ...baseOptions,
+    stageLinksEnabled: true,
+    detailLoopEnabled: false,
+  });
+  const finishOp = ops.find(op => op.id === 'finish_after_collect_links');
+  assert.ok(finishOp);
+  assert.ok(Array.isArray(finishOp.dependsOn));
+  assert.ok(finishOp.dependsOn.includes('collect_links'));
+});
+
+test('buildXhsCollectOperations: timeout and retry configured', () => {
+  const ops = buildXhsCollectOperations({
+    ...baseOptions,
+    stageLinksEnabled: true,
+    collectLinksTimeoutMs: 60000,
+  });
+  const collectLinks = ops.find(op => op.id === 'collect_links');
+  assert.ok(collectLinks);
+  assert.equal(collectLinks.timeoutMs, 60000);
+  assert.deepEqual(collectLinks.retry, { attempts: 1, backoffMs: 0 });
+});
+
+// ============================================
+// Collect template tests
+// ============================================
+test('buildXhsCollectAutoscript: includes all operation types', () => {
+  const script = buildXhsCollectAutoscript({
+    ...baseOptions,
+    stage: 'links',
+    stageLinksEnabled: true,
+  });
+  assert.ok(Array.isArray(script.operations));
+  const opIds = script.operations.map(op => op.id);
+  assert.ok(opIds.includes('sync_window_viewport'), 'has bootstrap ops');
+  assert.ok(opIds.includes('fill_keyword'), 'has search ops');
+  assert.ok(opIds.includes('ensure_tab_pool'), 'has tab pool ops');
+  assert.ok(opIds.includes('collect_links'), 'has collect ops');
+  assert.ok(opIds.includes('abort_on_login_guard'), 'has guard ops');
+});
+
+test('buildXhsCollectAutoscript: defaults to links stage', () => {
+  const script = buildXhsCollectAutoscript(baseOptions);
+  assert.ok(script.name.includes('collect'));
+  assert.ok(Array.isArray(script.operations));
+  assert.ok(script.operations.length > 0);
+});
+
+test('buildXhsCollectAutoscript: respects stage parameter', () => {
+  const script = buildXhsCollectAutoscript({
+    ...baseOptions,
+    stage: 'links',
+  });
+  assert.ok(script.operations.some(op => op.id === 'collect_links'));
+});
+
+test('buildXhsCollectAutoscript: has valid metadata', () => {
+  const script = buildXhsCollectAutoscript(baseOptions);
+  assert.ok(script.name, 'has name');
+  assert.ok(script.source, 'has source');
+  assert.ok(script.version, 'has version');
+});
 
 // ============================================
 // Stage resolution tests
