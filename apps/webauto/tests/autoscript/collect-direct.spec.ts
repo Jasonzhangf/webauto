@@ -34,9 +34,10 @@ test('DIRECT: buildXhsCollectOperations returns exact structure with defaults', 
   assert.equal(collectLinks.impact, 'script', 'collect_links.impact=script');
   assert.equal(collectLinks.params.mode, 'collect', 'collect_links.params.mode=collect');
   assert.equal(collectLinks.params.env, 'debug', 'collect_links.params.env from options');
-  assert.equal(collectLinks.params.keyword, 'test-kw', 'collect_links.params.keyword from options');
+ assert.equal(collectLinks.params.keyword, 'test-kw', 'collect_links.params.keyword from options');
+  assert.equal(collectLinks.params.maxNotes, 10, 'collect_links.params.maxNotes from options');
 
-  // Verify exact structure of finish_after_collect_links
+ // Verify exact structure of finish_after_collect_links
   const finishOp = ops.find(op => op.id === 'finish_after_collect_links');
   assert.ok(finishOp, 'finish_after_collect_links exists');
   assert.equal(finishOp.enabled, true, 'finish_after_collect_links.enabled=true when stageLinksEnabled=true && !detailLoopEnabled');
