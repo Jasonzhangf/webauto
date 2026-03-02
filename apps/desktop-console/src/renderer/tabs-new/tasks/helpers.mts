@@ -1,7 +1,6 @@
 import type { Platform, ScheduleTask } from '../../schedule-task-bridge.mts';
 import type { UiAccountProfile } from '../../account-source.mts';
-
-export { listAccountProfiles } from '../../account-source.mts';
+import { listAccountProfiles } from '../../account-source.mts';
 
 export function normalizePlatform(value: string): Platform {
   const raw = String(value || '').trim().toLowerCase();
@@ -16,7 +15,6 @@ export function platformToAccountPlatform(value: Platform): string {
 
 export async function refreshPlatformAccountRows(api: any, platform: Platform): Promise<UiAccountProfile[]> {
   try {
-    const { listAccountProfiles } = await import('../../account-source.mts');
     return await listAccountProfiles(api, { platform: platformToAccountPlatform(platform) });
   } catch {
     return [];
@@ -48,26 +46,6 @@ export function resolveUsableProfileId(accountRows: UiAccountProfile[], preferre
   }
   const recommended = getRecommendedProfile(accountRows);
   return String(recommended?.profileId || '').trim();
-}
-
-export async function ensureUsableProfileBeforeSubmit(
-  api: any,
-  platform: Platform,
-  accountRows: UiAccountProfile[],
-  profileInput: HTMLInputElement,
-): Promise<string> {
-  const rows = await refreshPlatformAccountRows(api, platform);
-  accountRows.length = 0;
-  accountRows.push(...rows);
-  const current = String(profileInput.value || '').trim();
-  if (isValidProfileForPlatform(accountRows, current)) return current;
-  const recommended = getRecommendedProfile(accountRows);
-  const recommendedId = String(recommended?.profileId || '').trim();
-  if (recommendedId) {
-    profileInput.value = recommendedId;
-    return recommendedId;
-  }
-  return current;
 }
 
 export function getTaskById(tasks: ScheduleTask[], taskId: string): ScheduleTask | null {
