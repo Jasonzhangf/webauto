@@ -12,76 +12,21 @@ import { loadOrGenerateFingerprint, applyFingerprint } from './fingerprint.js';
 import { launchEngineContext } from './engine-manager.js';
 import { resolveCookiesRoot, resolveProfilesRoot, resolveRecordsRoot } from './storage-paths.js';
 
+import type { RecordingState, NavigationWaitUntil, BrowserSessionOptions, RecordingOptions } from './browser-session/types.js';
+import {
+  resolveInputActionTimeoutMs,
+  resolveNavigationWaitUntil,
+  resolveInputActionMaxAttempts,
+  resolveInputRecoveryDelayMs,
+  resolveInputRecoveryBringToFrontTimeoutMs,
+  resolveInputReadySettleMs,
+  isTimeoutLikeError,
+  normalizeUrl,
+} from './browser-session/utils.js';
+
+export type { BrowserSessionOptions, RecordingOptions } from './browser-session/types.js';
+
 const stateBus = getStateBus();
-
-export interface BrowserSessionOptions {
-  profileId: string;
-  sessionName?: string;
-  headless?: boolean;
-  viewport?: { width: number; height: number };
-  userAgent?: string;
-  engine?: 'camoufox' | null;
-  fingerprintPlatform?: 'windows' | 'macos' | null;
-}
-
-export interface RecordingOptions {
-  name?: string;
-  outputPath?: string;
-  overlay?: boolean;
-}
-
-interface RecordingState {
-  active: boolean;
-  enabled: boolean;
-  name: string | null;
-  outputPath: string | null;
-  overlay: boolean;
-  startedAt: number | null;
-  endedAt: number | null;
-  eventCount: number;
-  lastEventAt: number | null;
-  lastError: string | null;
-}
-
-type NavigationWaitUntil = 'load' | 'domcontentloaded' | 'networkidle' | 'commit';
-
-function resolveInputActionTimeoutMs(): number {
-  const raw = Number(process.env.CAMO_INPUT_ACTION_TIMEOUT_MS ?? process.env.CAMO_API_TIMEOUT_MS ?? 30000);
-  return Math.max(1000, Number.isFinite(raw) ? raw : 30000);
-}
-
-function resolveNavigationWaitUntil(): NavigationWaitUntil {
-  const raw = String(process.env.CAMO_NAV_WAIT_UNTIL ?? 'commit').trim().toLowerCase();
-  if (raw === 'load') return 'load';
-  if (raw === 'domcontentloaded' || raw === 'dom') return 'domcontentloaded';
-  if (raw === 'networkidle') return 'networkidle';
-  return 'commit';
-}
-
-function resolveInputActionMaxAttempts(): number {
-  const raw = Number(process.env.CAMO_INPUT_ACTION_MAX_ATTEMPTS ?? 2);
-  return Math.max(1, Math.min(3, Number.isFinite(raw) ? Math.floor(raw) : 2));
-}
-
-function resolveInputRecoveryDelayMs(): number {
-  const raw = Number(process.env.CAMO_INPUT_RECOVERY_DELAY_MS ?? 120);
-  return Math.max(0, Number.isFinite(raw) ? Math.floor(raw) : 120);
-}
-
-function resolveInputRecoveryBringToFrontTimeoutMs(): number {
-  const raw = Number(process.env.CAMO_INPUT_RECOVERY_BRING_TO_FRONT_TIMEOUT_MS ?? 800);
-  return Math.max(100, Number.isFinite(raw) ? Math.floor(raw) : 800);
-}
-
-function resolveInputReadySettleMs(): number {
-  const raw = Number(process.env.CAMO_INPUT_READY_SETTLE_MS ?? 80);
-  return Math.max(0, Number.isFinite(raw) ? Math.floor(raw) : 80);
-}
-
-function isTimeoutLikeError(error: unknown): boolean {
-  const message = String((error as any)?.message || error || '').toLowerCase();
-  return message.includes('timed out') || message.includes('timeout');
-}
 
 export class BrowserSession {
   private browser?: Browser;
@@ -1765,12 +1710,7 @@ export class BrowserSession {
     this.onExit?.(this.options.profileId);
   }
 
-  private normalizeUrl(raw: string) {
-    try {
-      const url = new URL(raw);
-      return `${url.origin}${url.pathname}`;
-    } catch {
-      return raw;
-    }
+ private normalizeUrl(raw: string) {
+    return normalizeUrl(raw);
   }
 }

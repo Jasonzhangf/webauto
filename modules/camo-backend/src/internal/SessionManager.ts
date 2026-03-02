@@ -1,4 +1,5 @@
-import { BrowserSession, BrowserSessionOptions } from './BrowserSession.js';
+import { BrowserSession } from './BrowserSession.js';
+import type { BrowserSessionOptions } from './BrowserSession.js';
 
 export interface CreateSessionPayload extends BrowserSessionOptions {
   initialUrl?: string;
