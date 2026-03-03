@@ -2,7 +2,31 @@ import { getProfileState, withSerializedLock } from './state.mjs';
 import { buildTraceRecorder, emitActionTrace } from './trace.mjs';
 import { resolveSearchLockKey, randomBetween } from './utils.mjs';
 import { sleep, readLocation, clickPoint, clearAndType, pressKey, resolveSelectorTarget, sleepRandom } from './dom-ops.mjs';
-import { readSearchInput, readSearchViewportReady } from './search-ops.mjs';
+import { readSearchInput, readSearchViewportReady, readSearchCandidates } from './search-ops.mjs';
+
+
+async function readCandidateWindow(profileId, index) {
+  const data = await readSearchCandidates(profileId);
+  const rows = Array.isArray(data?.rows) ? data.rows : [];
+  const centerIndex = Math.max(0, Number(index) || 0);
+  const start = Math.max(0, centerIndex - 5);
+  const end = Math.min(rows.length - 1, centerIndex + 5);
+  const windowRows = rows.slice(start, end + 1);
+  return {
+    centerIndex,
+    start,
+    end,
+    total: rows.length,
+    window: windowRows.map((row) => ({
+      index: row.index,
+      noteId: row.noteId || null,
+      href: row.href || null,
+      rect: row.rect || null,
+      inViewport: row.inViewport === true,
+      visibleRatio: row.visibleRatio,
+    })),
+  };
+}
 
 export async function executeSubmitSearchOperation({ profileId, params = {}, context = {} }) {
   const lockKey = resolveSearchLockKey(params);
@@ -98,13 +122,15 @@ export async function executeSubmitSearchOperation({ profileId, params = {}, con
       throw new Error('SEARCH_VIEWPORT_READY_TIMEOUT');
     }
 
+    const windowBefore = await readCandidateWindow(profileId, Number(params.index ?? 0));
     const afterUrl = await readLocation(profileId);
+    const windowAfter = await readCandidateWindow(profileId, Number(params.index ?? 0));
     profileState.keyword = keyword || profileState.keyword;
     profileState.lastListUrl = afterUrl || beforeUrl || null;
     metrics.searchCount = Math.max(0, Number(metrics.searchCount || 0) || 0) + 1;
     metrics.lastSearchAt = new Date().toISOString();
 
     emitActionTrace(context, actionTrace, { stage: 'xhs_submit_search' });
-    return { ok: true, code: 'OPERATION_DONE', message: 'xhs_submit_search done', data: { keyword: keyword || null, method: via, beforeUrl, afterUrl, searchReady: readyResult.ready, readySelector: readyResult.readySelector || null, visibleNoteCount: readyResult.visibleNoteCount, elapsedMs: readyResult.elapsedMs, searchCount: metrics.searchCount } };
+    return { ok: true, code: 'OPERATION_DONE', message: 'xhs_submit_search done', data: { keyword: keyword || null, method: via, beforeUrl, afterUrl, searchReady: readyResult.ready, readySelector: readyResult.readySelector || null, visibleNoteCount: readyResult.visibleNoteCount, elapsedMs: readyResult.elapsedMs, searchCount: metrics.searchCount, indexWindowBefore: windowBefore, indexWindowAfter: windowAfter } };
   });
 }
