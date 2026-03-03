@@ -66,6 +66,9 @@ export function buildXhsAutoscriptBase(rawOptions = {}, overrides = {}) {
     collectLinksTimeoutMinMs,
     collectLinksTimeoutMs,
     collectStallTimeoutMs,
+    collectIndexStart,
+    collectIndexMaxAttempts,
+    collectIndexFailurePolicy,
     recovery,
     strictFailure,
   } = options;

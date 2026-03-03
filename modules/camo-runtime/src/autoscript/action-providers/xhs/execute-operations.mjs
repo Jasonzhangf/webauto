@@ -372,6 +372,13 @@ export async function executeOpenDetailOperation({ profileId, params = {}, conte
   if (!noteId && !noteUrl) {
     return asErrorPayload('INVALID_PARAMS', 'noteId or noteUrl required');
   }
+
+  const openMode = String(params.mode || '').trim();
+  const collectIndexMaxAttempts = Math.max(1, Number(params.collectIndexMaxAttempts ?? 3) || 3);
+  const collectIndexFailurePolicy = String(params.collectIndexFailurePolicy || 'retry').trim().toLowerCase();
+  const shouldCollectIndex = openMode === 'collect';
+  let collectIndex = Number(params.collectIndexStart ?? 0) || 0;
+  let collectAttempts = 0;
   const beforeUrl = await readLocation(profileId);
   const detailVisible = await isDetailVisible(profileId);
   if (detailVisible?.detailVisible === true) {
@@ -381,6 +388,41 @@ export async function executeOpenDetailOperation({ profileId, params = {}, conte
   if (noteUrl) {
     await callAPI('goto', { profileId, url: noteUrl });
     await sleep(1000);
+  } else if (shouldCollectIndex) {
+    const candidates = await readSearchCandidates(profileId);
+    const rows = Array.isArray(candidates?.rows) ? candidates.rows : [];
+    const total = rows.length;
+    const startIndex = Math.max(0, Math.min(collectIndex, Math.max(0, total - 1)));
+    collectIndex = startIndex;
+    let opened = false;
+    while (collectAttempts < collectIndexMaxAttempts && total > 0) {
+      collectAttempts += 1;
+      const target = rows.find((row) => row.index === collectIndex) || null;
+      if (!target || !target.center) {
+        if (collectIndexFailurePolicy === 'skip') {
+          collectIndex += 1;
+          continue;
+        }
+        return asErrorPayload('COLLECT_INDEX_NOT_FOUND', `Index ${collectIndex} not found`);
+      }
+      if (!target.inViewport) {
+        await ensureSearchCandidateFullyVisible(profileId, target.noteId || '');
+      }
+      await clickPoint(profileId, target.center, { steps: 3 });
+      pushTrace({ kind: 'click', stage: 'open_detail', noteId: target.noteId, selector: target.selector, collectIndex });
+      await sleep(1500);
+      const detailSnapshot = await readDetailSnapshot(profileId);
+      if (detailSnapshot?.noteIdFromUrl) {
+        opened = true;
+        break;
+      }
+      if (collectIndexFailurePolicy === 'skip') {
+        collectIndex += 1;
+      }
+    }
+    if (!opened) {
+      return asErrorPayload('COLLECT_INDEX_OPEN_FAILED', `Index ${collectIndex} open failed after ${collectAttempts}`);
+    }
   } else {
     const candidate = await readSearchCandidateByNoteId(profileId, noteId);
     if (!candidate?.found) {
@@ -399,7 +441,7 @@ export async function executeOpenDetailOperation({ profileId, params = {}, conte
   state.currentHref = afterUrl || null;
   state.lastListUrl = beforeUrl || null;
   emitActionTrace(context, actionTrace, { stage: 'xhs_open_detail' });
-  return { ok: true, code: 'OPERATION_DONE', message: 'xhs_open_detail done', data: { opened: true, noteId: noteId || detailSnapshot?.noteIdFromUrl, beforeUrl, afterUrl, detailVisible: true } };
+  return { ok: true, code: 'OPERATION_DONE', message: 'xhs_open_detail done', data: { opened: true, noteId: noteId || detailSnapshot?.noteIdFromUrl, beforeUrl, afterUrl, detailVisible: true, collectIndex: shouldCollectIndex ? collectIndex : null, collectAttempts: shouldCollectIndex ? collectAttempts : null, collectFailurePolicy: shouldCollectIndex ? collectIndexFailurePolicy : null } };
 }
 
 export async function readXhsRuntimeState(profileId) {

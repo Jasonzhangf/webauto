@@ -137,6 +137,10 @@ export function resolveXhsUnifiedOptions(rawOptions = {}) {
     30000,
   );
 
+  const collectIndexStart = toNonNegativeInt(rawOptions.collectIndexStart ?? rawOptions.collectIndex, 0);
+  const collectIndexMaxAttempts = toPositiveInt(rawOptions.collectIndexMaxAttempts, 3, 1);
+  const collectIndexFailurePolicy = toTrimmedString(rawOptions.collectIndexFailurePolicy, 'retry').toLowerCase();
+
   const closeDependsOn = pickCloseDependency({
     doReply: stageReplyEnabled,
     doLikes: stageLikeEnabled,
