@@ -3,6 +3,8 @@ import { afterEach, beforeEach, test } from 'node:test';
 
 import { setupDom, type DomHarness } from '../test-dom.mts';
 import { renderSetupWizard } from './setup-wizard.mts';
+import { TABS_CONFIG } from '../../index.mts';
+
 
 type MockBundle = {
   ctx: any;
@@ -105,22 +107,6 @@ function createMockCtx(): MockBundle {
       if (args.some((x: string) => x.endsWith('/account.mjs')) && args.includes('list')) {
         return { ok: true, json: { profiles: state.accounts } };
       }
-      if (args.some((x: string) => x.endsWith('/account.mjs')) && args.includes('add')) {
-        const profileIdx = args.indexOf('--profile');
-        const profileId = profileIdx >= 0 ? String(args[profileIdx + 1] || '').trim() : 'profile-9';
-        state.accounts.push({
-          profileId,
-          accountRecordId: null,
-          accountId: null,
-          alias: '',
-          status: 'pending',
-          valid: false,
-        });
-        return {
-          ok: true,
-          json: { account: { id: 'xhs-0009', profileId, status: 'pending', valid: false } },
-        };
-      }
       if (args.some((x: string) => x.endsWith('/account.mjs')) && args.includes('sync')) {
         const profileId = String(args[2] || '').trim();
         const profile = {
@@ -171,6 +157,13 @@ afterEach(() => {
   (globalThis as any).alert = originalAlert;
   (globalThis as any).confirm = originalConfirm;
   dom.cleanup();
+});
+
+test('setup wizard tab list matches TABS_CONFIG', async () => {
+  const tabs = TABS_CONFIG.filter((t) => !t.hidden).map((t) => t.label);
+  assert.ok(tabs.includes('设置'), 'TABS_CONFIG should include settings tab');
+  assert.ok(tabs.includes('账户管理'), 'TABS_CONFIG should include account-manager tab');
+  assert.ok(tabs.includes('任务'), 'TABS_CONFIG should include tasks tab');
 });
 
 test('setup wizard checks env, repairs missing deps, creates account and enters main tab', async () => {

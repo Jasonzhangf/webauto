@@ -545,6 +545,9 @@ export async function addAccount(input = {}) {
   const fingerprintId = normalizeText(input.fingerprintId) || profileId;
   const createdAt = nowIso();
   const accountId = normalizeText(input.accountId || input.platformAccountId || null);
+  if (!accountId) {
+    throw new Error('accountId is required; login first and run account sync to create a valid account');
+  }
   const requestedStatus = normalizeStatus(input.status);
   const status = accountId
     ? STATUS_VALID
@@ -634,7 +637,11 @@ export async function updateAccount(idOrAlias, patch = {}) {
     next.status = normalizeStatus(patch.status);
   }
   if (Object.prototype.hasOwnProperty.call(patch, 'accountId')) {
-    next.accountId = normalizeText(patch.accountId);
+    const nextAccountId = normalizeText(patch.accountId);
+    if (!nextAccountId) {
+      throw new Error('accountId cannot be cleared; login first and run account sync to remove invalid accounts');
+    }
+    next.accountId = nextAccountId;
   }
   if (Object.prototype.hasOwnProperty.call(patch, 'reason')) {
     next.reason = normalizeText(patch.reason);

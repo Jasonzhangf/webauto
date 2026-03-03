@@ -64,6 +64,27 @@ it('addAccount blocks auto profile creation and requires existing profile dir', 
   );
 
   fs.mkdirSync(path.join(root, 'profiles', 'existing-1'), { recursive: true });
+
+it('addAccount and updateAccount reject missing accountId', async () => {
+  const root = useTempRoot();
+  fs.mkdirSync(path.join(root, 'profiles', 'accountless-1'), { recursive: true });
+
+  await assert.rejects(
+    () => addAccount({ platform: 'xiaohongshu', profileId: 'accountless-1' }),
+    /accountId is required/i,
+  );
+
+  const created = await addAccount({
+    platform: 'xiaohongshu',
+    profileId: 'accountless-1',
+    accountId: 'xhs-acc-1',
+  });
+  await assert.rejects(
+    () => updateAccount(created.account.id, { accountId: '' }),
+    /accountId cannot be cleared/i,
+  );
+});
+
   const result = await addAccount({
     platform: 'xiaohongshu',
     profileId: 'existing-1',

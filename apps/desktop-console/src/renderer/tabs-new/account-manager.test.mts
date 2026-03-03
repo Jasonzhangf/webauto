@@ -13,17 +13,16 @@ async function getSrc() {
 
 test('account manager keeps alias optional and starts profilepool login', async () => {
   const src = await getSrc();
-  assert.match(src, /const alias = newAccountAliasInput\.value\.trim\(\);/);
-  assert.match(src, /\.\.\.\(alias \? \['--alias', alias\] : \[\]\)/);
-  assert.match(src, /'account\.mjs'/);
-  assert.match(src, /'add'/);
-  assert.match(src, /'--status'/);
-  assert.match(src, /'pending'/);
-  assert.match(src, /title: `登录 \$\{alias \|\| profileId\}`/);
-  assert.match(src, /'profilepool\.mjs'/);
+  assert.match(src, /const alias = newAccountAliasInput.value.trim();/);
+  assert.match(src, /title: `登录 ${alias || profileId}`/);
+  assert.match(src, /'profilepool.mjs'/);
   assert.match(src, /'login-profile'/);
   assert.match(src, /'--wait-sync'/);
   assert.match(src, /'false'/);
+  assert.doesNotMatch(src, /'account.mjs'/);
+  assert.doesNotMatch(src, /'add'/);
+  assert.doesNotMatch(src, /'--status'/);
+  assert.doesNotMatch(src, /'pending'/);
 });
 
 test('account manager writes detected alias after sync and runs auto polling', async () => {
@@ -47,6 +46,14 @@ test('account manager UI labels runtime as camo', async () => {
   assert.match(src, /envCheckAll/);
   assert.match(src, /browserReady/);
   assert.doesNotMatch(src, /browserService/);
+});
+
+test('account manager add flow only uses profilepool login + account sync', async () => {
+  const src = await getSrc();
+  assert.match(src, /'profilepool\.mjs'/);
+  assert.match(src, /'login-profile'/);
+  assert.match(src, /'account\.mjs'\s*,\s*'sync'/);
+  assert.doesNotMatch(src, /'account\.mjs'\s*,\s*'add'/);
 });
 
 test('account manager exposes platform badge and open\\/fix actions', async () => {

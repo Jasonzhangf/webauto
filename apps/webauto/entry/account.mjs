@@ -1,8 +1,9 @@
-﻿#!/usr/bin/env node
+#!/usr/bin/env node
 import minimist from 'minimist';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
+  cleanupIncompleteProfiles,
   addAccount,
   getAccount,
   listAccountProfiles,
@@ -272,17 +273,19 @@ Usage:
   webauto account --help
   webauto account list [--platform <name>] [--json]
   webauto account list --records [--json]
-  webauto account add [--platform <name>] [--alias <alias>] [--name <name>] [--username <username>] [--profile <id>] [--fingerprint <id>] [--status pending|active|disabled|archived] [--json]
+  webauto account add --account-id <id> [--platform <name>] [--alias <alias>] [--name <name>] [--username <username>] [--profile <id>] [--fingerprint <id>] [--json]
   webauto account get <id|alias|profileId|accountId> [--platform <name>] [--json]
   webauto account update <id|alias|profileId|accountId> [--alias <alias>|--clear-alias] [--name <name>] [--username <name>] [--profile <id>] [--fingerprint <id>] [--status pending|active|disabled|archived] [--json]
   webauto account delete <id|alias|profileId|accountId> [--delete-profile] [--delete-fingerprint] [--json]
   webauto account login <id|alias|profileId|accountId> [--platform <name>] [--url <url>] [--idle-timeout <duration>] [--sync-alias] [--json]
   webauto account sync-alias <id|alias|profileId|accountId> [--platform <name>] [--selector <css>] [--alias <value>] [--json]
   webauto account sync <profileId|all> [--platform <xiaohongshu>] [--pending-while-login] [--resolve-alias] [--json]
+  webauto account cleanup [--delete-profiles] [--include-orphans] [--json]
 
 Notes:
   - 璐﹀彿鏁版嵁榛樿淇濆瓨鍒?WEBAUTO 鏍圭洰褰曚笅鐨?accounts锛圵indows 浼樺厛 D:/webauto锛岀己澶辨椂鍥炶惤 ~/.webauto锛屽彲鐢?WEBAUTO_HOME 瑕嗙洊锛?
   - list 榛樿鎸?profile 灞曠ず璐﹀彿鏈夋晥鎬侊紙valid/invalid锛?
+  - add 仅允许写入已识别的 accountId（不允许 pending/无 accountId 记录）
   - add 涓嶄細鑷姩鍒涘缓 profile锛涘繀椤讳紶鍏ュ凡瀛樺湪鐨?--profile
   - login 浼氶€氳繃 @web-auto/camo 鎷夎捣娴忚鍣ㄥ苟缁戝畾璐﹀彿 profile
   - login 榛樿 idle-timeout=off锛岄伩鍏嶇櫥褰曠獥鍙ｈ嚜鍔ㄥ叧闂?
@@ -290,7 +293,13 @@ Notes:
   - sync --pending-while-login 浼氬湪鐧诲綍杩囩▼涓繚鎸佸緟鐧诲綍鐘舵€侊紝閬垮厤杩囨棭鏍囪澶辨晥
 
 Examples:
-  webauto account add --platform xiaohongshu --alias 涓诲彿
+  # 标准流程：创建 profile -> 登录 -> sync
+  webauto profilepool add profile --json
+  webauto profilepool login-profile <profileId> --idle-timeout off --wait-sync false
+  webauto account sync <profileId> --platform xiaohongshu --pending-while-login --json
+
+  # 仅当你已经拿到 accountId 时，才允许 add
+  webauto account add --account-id <id> --platform xiaohongshu --profile <profileId> --alias 涓诲彿
   webauto account list
   webauto account sync all
   webauto account login xhs-0001 --url https://www.xiaohongshu.com --idle-timeout off
@@ -308,6 +317,14 @@ async function cmdList(jsonMode, platformArg = '') {
 
 async function cmdListRecords(jsonMode) {
   const result = listAccounts();
+  output({ ok: true, ...result }, jsonMode);
+}
+
+
+async function cmdCleanup(jsonMode, options = {}) {
+  const deleteProfileDirs = options['delete-profiles'] !== false;
+  const includeOrphanProfileDirs = options['include-orphans'] === true;
+  const result = cleanupIncompleteProfiles({ deleteProfileDirs, includeOrphanProfileDirs });
   output({ ok: true, ...result }, jsonMode);
 }
 
@@ -582,6 +599,7 @@ async function main() {
   if (cmd === 'login') return cmdLogin(arg1, argv, jsonMode);
   if (cmd === 'sync-alias') return cmdSyncAlias(arg1, argv, jsonMode);
   if (cmd === 'sync') return cmdSync(arg1, argv, jsonMode);
+  if (cmd === 'cleanup') return cmdCleanup(jsonMode, argv);
 
   throw new Error(`unknown account command: ${cmd}`);
 }

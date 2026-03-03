@@ -297,6 +297,15 @@ export function buildActionScript(action: UiCliAction) {
         textMatchedCount,
       };
     }
+    if (payload.action === 'start') {
+      return { ok: true, started: true };
+    }
+    if (payload.action === 'status') {
+      return { ok: true, status: true };
+    }
+    if (payload.action === 'stop') {
+      return { ok: true, stopped: true };
+    }
     if (payload.action === 'close_window') {
       window.close();
       return { ok: true };
