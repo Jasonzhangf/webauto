@@ -1,6 +1,8 @@
 import { callAPI } from '../../../utils/browser-service.mjs';
 import { getProfileState } from './state.mjs';
 import { buildTraceRecorder, emitActionTrace } from './trace.mjs';
+import { sleep, clickPoint } from './dom-ops.mjs';
+import { isDetailVisible, readDetailCloseTarget } from './detail-ops.mjs';
 import { normalizeNoteIdList } from './utils.mjs';
 import { sleep, readLocation, clickPoint } from './dom-ops.mjs';
 import { readSearchCandidateByNoteId, ensureSearchCandidateFullyVisible } from './search-ops.mjs';
@@ -44,9 +46,65 @@ export async function executeOpenDetailOperation({ profileId, params = {}, conte
   return { ok: true, code: 'OPERATION_DONE', message: 'xhs_open_detail done', data: { opened: true, noteId: noteId || detailSnapshot?.noteIdFromUrl, beforeUrl, afterUrl, detailVisible: true } };
 }
 
-export async function executeCloseDetailOperation({ profileId, context = {} }) {
+export async function executeCloseDetailOperation({ profileId, params = {}, context = {} }) {
   const { actionTrace, pushTrace } = buildTraceRecorder();
-  const closed = await closeDetailToSearch(profileId, pushTrace);
+  const retryPolicy = String(params.retryPolicy || 'esc_then_x').trim().toLowerCase();
+  const attempts = Math.max(1, Number(params.retryAttempts ?? 2) || 2);
+  let closed = false;
+  let used = null;
+
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    if (retryPolicy == 'esc') {
+      await callAPI('keyboard:press', { profileId, key: 'Escape' });
+      pushTrace({ kind: 'key', stage: 'close_detail', key: 'Escape', attempt });
+      await sleep(400);
+      const visible = await isDetailVisible(profileId);
+      if (!visible?.detailVisible) {
+        closed = true;
+        used = 'esc';
+        break;
+      }
+    } else if (retryPolicy == 'x') {
+      const target = await readDetailCloseTarget(profileId);
+      if (target?.found && target.center) {
+        await clickPoint(profileId, target.center, { steps: 2 });
+        pushTrace({ kind: 'click', stage: 'close_detail', selector: target.selector, attempt });
+        await sleep(400);
+        const visible = await isDetailVisible(profileId);
+        if (!visible?.detailVisible) {
+          closed = true;
+          used = 'x';
+          break;
+        }
+      }
+    } else {
+      // esc_then_x (default)
+      if (attempt == 1) {
+        await callAPI('keyboard:press', { profileId, key: 'Escape' });
+        pushTrace({ kind: 'key', stage: 'close_detail', key: 'Escape', attempt });
+        await sleep(400);
+        const visible = await isDetailVisible(profileId);
+        if (!visible?.detailVisible) {
+          closed = true;
+          used = 'esc';
+          break;
+        }
+      }
+      const target = await readDetailCloseTarget(profileId);
+      if (target?.found && target.center) {
+        await clickPoint(profileId, target.center, { steps: 2 });
+        pushTrace({ kind: 'click', stage: 'close_detail', selector: target.selector, attempt });
+        await sleep(400);
+        const visible = await isDetailVisible(profileId);
+        if (!visible?.detailVisible) {
+          closed = true;
+          used = 'x';
+          break;
+        }
+      }
+    }
+  }
+
   emitActionTrace(context, actionTrace, { stage: 'xhs_close_detail' });
-  return { ok: closed, code: closed ? 'OPERATION_DONE' : 'CLOSE_FAILED', message: 'xhs_close_detail done', data: { closed } };
+  return { ok: closed, code: closed ? 'OPERATION_DONE' : 'CLOSE_FAILED', message: 'xhs_close_detail done', data: { closed, method: used, attempts } };
 }

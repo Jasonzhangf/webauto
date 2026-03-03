@@ -86,6 +86,8 @@ export function buildXhsAutoscriptBase(rawOptions = {}, overrides = {}) {
       onFailure: strictFailure ? 'stop_all' : 'chain_stop',
       validationMode: 'none',
       recovery,
+      closeDetailRetryPolicy: 'esc_then_x',
+      closeDetailRetryAttempts: 2,
       pacing: {
         operationMinIntervalMs: defaultOperationMinIntervalMs,
         eventCooldownMs: defaultEventCooldownMs,
