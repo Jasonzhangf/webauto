@@ -42,6 +42,11 @@ export function buildXhsCollectOperations(options) {
       retry: { attempts: 1, backoffMs: 0 },
       impact: 'script',
       onFailure: 'stop_all',
+      checkpoint: {
+        containerId: 'xiaohongshu_search.search_result_item',
+        targetCheckpoint: 'search_ready',
+        recovery: options.recovery,
+      },
     },
     {
       id: 'finish_after_collect_links',
@@ -54,6 +59,11 @@ export function buildXhsCollectOperations(options) {
       retry: { attempts: 1, backoffMs: 0 },
       impact: 'script',
       onFailure: 'stop_all',
+      checkpoint: {
+        containerId: 'xiaohongshu_search.search_result_item',
+        targetCheckpoint: 'search_ready',
+        recovery: options.recovery,
+      },
     },
   ];
 }

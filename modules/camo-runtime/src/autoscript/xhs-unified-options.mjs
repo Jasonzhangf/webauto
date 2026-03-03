@@ -51,6 +51,8 @@ export function resolveXhsUnifiedOptions(rawOptions = {}) {
   const profileId = toTrimmedString(rawOptions.profileId, 'xiaohongshu-batch-1');
   const keyword = toTrimmedString(rawOptions.keyword, '手机膜');
   const env = toTrimmedString(rawOptions.env, 'prod');
+  const strictFailure = env === 'debug';
+  const recoveryEnabled = strictFailure ? false : toBoolean(rawOptions.recoveryEnabled, true);
   const outputRoot = toTrimmedString(rawOptions.outputRoot, '');
   const throttle = toPositiveInt(rawOptions.throttle, 900, 100);
   const tabCountProvided = rawOptions.tabCount !== undefined
@@ -143,10 +145,9 @@ export function resolveXhsUnifiedOptions(rawOptions = {}) {
     detailHarvestEnabled,
   });
 
-  const recovery = {
-    attempts: 0,
-    actions: [],
-  };
+  const recovery = recoveryEnabled
+    ? { attempts: 1, actions: ['requery_container'] }
+    : { attempts: 0, actions: [] };
 
   return {
     profileId,
@@ -218,5 +219,6 @@ export function resolveXhsUnifiedOptions(rawOptions = {}) {
     collectStallTimeoutMs,
     closeDependsOn,
     recovery,
+    strictFailure,
   };
 }

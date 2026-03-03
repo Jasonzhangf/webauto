@@ -67,6 +67,7 @@ export function buildXhsAutoscriptBase(rawOptions = {}, overrides = {}) {
     collectLinksTimeoutMs,
     collectStallTimeoutMs,
     recovery,
+    strictFailure,
   } = options;
 
   const base = {
@@ -76,10 +77,10 @@ export function buildXhsAutoscriptBase(rawOptions = {}, overrides = {}) {
     profileId,
     throttle,
     defaults: {
-      disableTimeout: true,
+      disableTimeout: strictFailure ? false : true,
       retry: { attempts: 2, backoffMs: 500 },
       impact: 'subscription',
-      onFailure: 'chain_stop',
+      onFailure: strictFailure ? 'stop_all' : 'chain_stop',
       validationMode: 'none',
       recovery,
       pacing: {
