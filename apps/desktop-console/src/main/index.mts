@@ -53,6 +53,12 @@ let restartRequested = false;
 const daemonWorkerController = createDaemonWorkerController();
 let runManager: ReturnType<typeof createRunManager> | null = null;
 
+function sleep(ms: number) {
+  return new Promise<void>((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
 function startDaemonWorkerHeartbeat() {
   daemonWorkerController.startDaemonWorkerHeartbeat((hint) => waitForAppExitCleanup(hint, { stopStateBridge: true }).catch(() => null));
 }
