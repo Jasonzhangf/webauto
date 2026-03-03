@@ -1,6 +1,7 @@
 export const TABS_CONFIG = [
   { id: 'setup-wizard', label: '初始化' },
   { id: 'tasks', label: '任务' },
+  { id: 'xiaohongshu', label: '小红书' },
   { id: 'dashboard', label: '看板' },
   { id: 'scheduler', label: '定时任务' },
   { id: 'account-manager', label: '账户管理' },

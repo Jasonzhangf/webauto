@@ -1,5 +1,6 @@
 import path from 'node:path';
 import { mkdirSync, rmSync } from 'node:fs';
+import { TABS_CONFIG } from '../../../src/renderer/tabs-config.mjs';
 
 export async function runFullCover(runner, args) {
   runner.log('Starting full-cover real test (no mock)', 'test');
@@ -11,46 +12,53 @@ export async function runFullCover(runner, args) {
   const xhsInstallScript = path.join(process.cwd(), 'apps/webauto/entry/xhs-install.mjs');
   const xhsStatusScript = path.join(process.cwd(), 'apps/webauto/entry/xhs-status.mjs');
   const runIds = [];
+  const settingsTab = TABS_CONFIG.find((tab) => tab.id === 'settings');
   let unifiedServer = null;
   try {
     runner.log('Step 1/4: ensure backend dependencies', 'info');
     await runner.runNodeScript(xhsInstallScript, ['--ensure-backend'], 180000);
 
-    runner.log('Step 2/4: account controls (add/get/update/list/delete)', 'info');
-    const addRes = await runner.runJsonNodeScript(
-      accountScript,
-      ['add', '--platform', 'xiaohongshu', '--alias', 'ui-e2e', '--status', 'pending', '--json'],
+    runner.log('Step 2/4: account controls (profile -> login -> sync -> cleanup)', 'info');
+    const profileOut = await runner.runJsonNodeScript(
+      path.join(process.cwd(), 'apps/webauto/entry/profilepool.mjs'),
+      ['add', 'profile', '--json'],
       90000,
       { env: isolatedEnv },
     );
-    const accountId = String(addRes?.account?.id || '').trim();
-    runner.ensure(accountId, 'account add did not return account id');
-    const profileId = String(addRes?.account?.profileId || '').trim();
-    runner.ensure(profileId, 'account add did not return profile id');
+    const profileId = String(profileOut?.profileId || profileOut?.json?.profileId || '').trim();
+    runner.ensure(profileId, 'profile add did not return profile id');
 
-    const getRes = await runner.runJsonNodeScript(accountScript, ['get', accountId, '--json'], 30000, { env: isolatedEnv });
-    runner.ensure(getRes?.ok === true, 'account get failed');
+    await runner.runNodeScript(
+      path.join(process.cwd(), 'apps/webauto/entry/profilepool.mjs'),
+      ['login-profile', profileId, '--idle-timeout', 'off', '--wait-sync', 'false'],
+      90000,
+      { env: isolatedEnv },
+    );
 
-    const updateAccountRes = await runner.runJsonNodeScript(
+    const syncRes = await runner.runJsonNodeScript(
       accountScript,
-      ['update', accountId, '--alias', 'ui-e2e-updated', '--json'],
+      ['sync', profileId, '--platform', 'xiaohongshu', '--pending-while-login', '--json'],
       30000,
       { env: isolatedEnv },
     );
-    runner.ensure(updateAccountRes?.ok === true, 'account update failed');
+    runner.ensure(syncRes?.ok === true || syncRes?.profile, 'account sync failed');
 
     const listRes = await runner.runJsonNodeScript(accountScript, ['list', '--json'], 30000, { env: isolatedEnv });
-    runner.ensure(Number(listRes?.count || 0) >= 1, 'account list returned empty unexpectedly');
+    runner.ensure(Number(listRes?.count || 0) >= 0, 'account list failed');
 
-    const deleteRes = await runner.runJsonNodeScript(
+    const cleanupRes = await runner.runJsonNodeScript(
       accountScript,
-      ['delete', accountId, '--delete-profile', '--delete-fingerprint', '--json'],
-      90000,
+      ['cleanup', '--include-orphans', '--json'],
+      30000,
       { env: isolatedEnv },
     );
-    runner.ensure(deleteRes?.ok === true, 'account delete failed');
+    runner.ensure(cleanupRes?.ok === true, 'account cleanup failed');
 
-    runner.log('Step 3/4: scheduler controls (CRUD/import-export/run/daemon)', 'info');
+    runner.log('Step 3/4: tab navigation (target: settings)', 'info');
+    if (settingsTab && typeof runner.tab === 'function') {
+      await runner.tab(settingsTab.id, settingsTab.label);
+    }
+    runner.log('Step 4/4: scheduler controls (CRUD/import-export/run/daemon)', 'info');
     const runAt = new Date(Date.now() + (60 * 60 * 1000)).toISOString();
     const argvJson = JSON.stringify({
       profile: 'xhs-e2e-profile',

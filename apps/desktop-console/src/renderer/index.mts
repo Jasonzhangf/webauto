@@ -7,7 +7,9 @@ import { renderDashboard } from './tabs-new/dashboard.mts';
 import { renderAccountManager } from './tabs-new/account-manager.mts';
 import { renderSchedulerPanel } from './tabs-new/scheduler.mts';
 import { renderTestCenter } from './tabs-new/test-center/index.mts';
+import { renderXiaohongshuTab } from './tabs/xiaohongshu.mts';
 import { createEl } from './ui-components.mts';
+import { TABS_CONFIG } from './tabs-config.mjs';
 
 declare global {
   interface Window {
@@ -15,26 +17,15 @@ declare global {
   }
 }
 
-type TabId = 'setup-wizard' | 'tasks' | 'dashboard' | 'scheduler' | 'account-manager' | 'preflight' | 'logs' | 'settings' | 'test-center';
+type TabId = 'setup-wizard' | 'tasks' | 'xiaohongshu' | 'dashboard' | 'scheduler' | 'account-manager' | 'preflight' | 'logs' | 'settings' | 'test-center';
 
 type TabRender = (root: HTMLElement, ctx: any) => void | (() => void);
-
-export const TABS_CONFIG: Array<{ id: TabId; label: string; hidden?: boolean }> = [
-  { id: 'setup-wizard', label: '初始化' },
-  { id: 'tasks', label: '任务' },
-  { id: 'dashboard', label: '看板' },
-  { id: 'scheduler', label: '定时任务' },
-  { id: 'account-manager', label: '账户管理' },
-  { id: 'preflight', label: '旧预处理', hidden: true },
-  { id: 'logs', label: '日志' },
-  { id: 'settings', label: '设置' },
-  { id: 'test-center', label: '测试中心' },
-];
 
 const tabs: Array<{ id: TabId; label: string; render: TabRender; hidden?: boolean }> = TABS_CONFIG.map((cfg) => {
   const renderMap: Record<TabId, TabRender> = {
     'setup-wizard': renderSetupWizard,
     'tasks': renderTasksPanel,
+    'xiaohongshu': renderXiaohongshuTab,
     'dashboard': renderDashboard,
     'scheduler': renderSchedulerPanel,
     'account-manager': renderAccountManager,

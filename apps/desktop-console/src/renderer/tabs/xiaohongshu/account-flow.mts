@@ -49,6 +49,7 @@ type AccountFlowController = {
   renderShardHints: () => void;
   resolveAddBatchPrefix: () => string;
   syncAddBatchPlaceholder: () => void;
+  startAddAccountFlow: () => Promise<void>;
 };
 export function createAccountFlowController(opts: AccountFlowOptions): AccountFlowController {
   const {
@@ -484,5 +485,6 @@ export function createAccountFlowController(opts: AccountFlowOptions): AccountFl
     renderShardHints,
     resolveAddBatchPrefix,
     syncAddBatchPlaceholder,
+    startAddAccountFlow,
   };
 }

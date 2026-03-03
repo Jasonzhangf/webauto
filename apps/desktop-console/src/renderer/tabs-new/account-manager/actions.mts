@@ -141,13 +141,14 @@ export function createAccountActions(deps: AccountsDeps) {
   }
 
   async function addAccount(alias: string) {
+    const keyword = alias || 'profile';
     const profileOut = await ctx.api.cmdRunJson({
       title: 'profile add',
       cwd: '',
       args: [
         ctx.api.pathJoin('apps', 'webauto', 'entry', 'profilepool.mjs'),
         'add',
-        'profile',
+        keyword,
         '--json',
       ],
     });
@@ -156,27 +157,7 @@ export function createAccountActions(deps: AccountsDeps) {
       throw new Error('创建 profile 失败: ' + (profileOut?.error || '未知错误'));
     }
 
-    const out = await ctx.api.cmdRunJson({
-      title: 'account add',
-      cwd: '',
-      args: [
-        ctx.api.pathJoin('apps', 'webauto', 'entry', 'account.mjs'),
-        'add',
-        '--platform',
-        'xiaohongshu',
-        '--profile',
-        createdProfileId,
-        '--status',
-        'pending',
-        ...(alias ? ['--alias', alias] : []),
-        '--json',
-      ],
-    });
-
-    const profileId = String(out?.json?.account?.profileId || createdProfileId).trim();
-    if (!out?.ok || !profileId) {
-      throw new Error('创建账号失败: ' + (out?.error || '未知错误'));
-    }
+    const profileId = createdProfileId;
 
     if (alias) {
       const aliases = { ...ctx.api.settings?.profileAliases, [profileId]: alias };

@@ -279,6 +279,8 @@ Test CLI 输出：
 
 AGENTS.md 只放规则；所有具体任�?进度/证据都必须写�?bd�?
 
+bd 默认 assignee：`webauto-bot`
+
 ### bd �?git 同步最佳实践（强制，团队统一�?
 
 目标：团队只通过 git 同步 `.beads/issues.jsonl`（以及必要的元数据文件）�?*不提交本地数据库文件**，并把“忘了导�?导入”的风险降到最低�?

@@ -3,7 +3,7 @@ import { afterEach, beforeEach, test } from 'node:test';
 
 import { setupDom, type DomHarness } from '../test-dom.mts';
 import { renderSetupWizard } from './setup-wizard.mts';
-import { TABS_CONFIG } from '../../index.mts';
+import { TABS_CONFIG } from '../tabs-config.mjs';
 
 
 type MockBundle = {
@@ -164,6 +164,12 @@ test('setup wizard tab list matches TABS_CONFIG', async () => {
   assert.ok(tabs.includes('设置'), 'TABS_CONFIG should include settings tab');
   assert.ok(tabs.includes('账户管理'), 'TABS_CONFIG should include account-manager tab');
   assert.ok(tabs.includes('任务'), 'TABS_CONFIG should include tasks tab');
+});
+
+test('TABS_CONFIG includes settings tab', () => {
+  const settings = TABS_CONFIG.find((t) => t.id === 'settings');
+  assert.ok(settings, 'settings tab should exist in TABS_CONFIG');
+  assert.equal(settings.label, '设置', 'settings tab label should be 设置');
 });
 
 test('setup wizard checks env, repairs missing deps, creates account and enters main tab', async () => {

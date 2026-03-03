@@ -726,6 +726,60 @@ export function upsertProfileAccountState(input = {}) {
   const purgeIds = new Set();
 
   if (!accountId) {
+    if (pendingMode) {
+      const profileSeq = resolveProfileSeq(profileId, platform);
+      if (!target) {
+        const seq = resolveNextAutoSeq(index, platform, profileSeq);
+        const id = ensureSafeName(buildAutoAccountId(platform, seq), 'id');
+        const createdAt = nowIso();
+        const record = {
+          id,
+          seq,
+          platform,
+          status: STATUS_PENDING,
+          valid: false,
+          reason: reason || 'waiting_login',
+          accountId: null,
+          name: resolveAccountName(null, platform, seq),
+          alias: alias || null,
+          username: null,
+          profileId,
+          fingerprintId: profileId,
+          createdAt,
+          updatedAt: createdAt,
+          detectedAt,
+          aliasSource: alias ? 'manual' : null,
+        };
+        index.accounts.push(record);
+        index.nextSeq = Math.max(Number(index.nextSeq) || 1, seq + 1);
+        saveIndex(index);
+        persistAccountMeta(record);
+        return buildProfileAccountView(profileId, record);
+      }
+
+      const next = {
+        ...target,
+        platform,
+        profileId,
+        fingerprintId: profileId,
+        status: STATUS_PENDING,
+        valid: false,
+        reason: reason || 'waiting_login',
+        detectedAt,
+        updatedAt: nowIso(),
+      };
+      if (alias) {
+        ensureAliasUnique(index.accounts, alias, target.id);
+        next.alias = alias;
+        next.aliasSource = 'manual';
+      }
+      const rowIndex = index.accounts.findIndex((item) => item?.id === target.id);
+      if (rowIndex < 0) throw new Error(`account not found: ${target.id}`);
+      index.accounts[rowIndex] = next;
+      saveIndex(index);
+      persistAccountMeta(next);
+      return buildProfileAccountView(profileId, next);
+    }
     if (!pendingMode) {
       const staleIds = index.accounts
         .filter((item) => (

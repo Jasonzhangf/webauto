@@ -19,7 +19,7 @@ import { createLiveStatsController } from './xiaohongshu/live-stats.mjs';
 import { createAccountFlowController } from './xiaohongshu/account-flow.mjs';
 import { createRunFlowController } from './xiaohongshu/run-flow.mjs';
 import { buildXhsLayout } from './xiaohongshu/layout-block.mjs';
-import { consumeNavTarget, runGuideBrowserCheck } from './xiaohongshu/guide-browser-check.mjs';
+import { consumeNavTarget, runGuideBrowserCheck, runGuideBrowserRepair } from './xiaohongshu/guide-browser-check.mjs';
 let xhsCmdUnsubscribe: (() => void) | null = null, xhsSettingsUnsubscribe: (() => void) | null = null;
 let startupBrowserChecked = false;
 let startupBrowserCheckDone = false;
@@ -61,16 +61,20 @@ const GUIDE_STATE_KEY = 'webauto.xhs.guideState.v1';
  const guideStepsGrid = createEl('div', { className: 'xhs-guide-grid' }) as HTMLDivElement;
  const browserStep = createEl('div', { className: 'xhs-guide-step' }) as HTMLDivElement;
  browserStep.appendChild(createEl('span', {}, ['1. ']));
- const browserStatus = createEl('span', { style: 'color:#f59e0b;' }, ['⏳ 检查浏览器']) as HTMLSpanElement;
+ const browserStatus = createEl('span', { style: 'color:#f59e0b; flex:1;' }, ['⏳ 检查浏览器']) as HTMLSpanElement;
+ const browserFixBtn = createEl('button', { type: 'button', className: 'secondary', style: 'margin-left:8px;' }, ['一键修复']) as HTMLButtonElement;
  browserStep.appendChild(browserStatus);
+ browserStep.appendChild(browserFixBtn);
  guideStepsGrid.appendChild(browserStep);
  const accountStep = createEl('div', { className: 'xhs-guide-step' }) as HTMLDivElement;
  accountStep.appendChild(createEl('span', {}, ['2. ']));
- const accountStatus = createEl('span', { style: 'color:#f59e0b;' }, ['⏳ 配置账号']) as HTMLSpanElement;
+ const accountStatus = createEl('span', { style: 'color:#f59e0b; flex:1;' }, ['⏳ 配置账号']) as HTMLSpanElement;
  accountStatus.style.cursor = 'pointer';
  accountStatus.title = '点击开始账号检查与交互配置';
  accountStatus.addEventListener('click', () => runInteractiveAccountCheck());
+ const accountFixBtn = createEl('button', { type: 'button', className: 'secondary', style: 'margin-left:8px;' }, ['一键修复']) as HTMLButtonElement;
  accountStep.appendChild(accountStatus);
+ accountStep.appendChild(accountFixBtn);
  guideStepsGrid.appendChild(accountStep);
  const keywordStep = createEl('div', { className: 'xhs-guide-step' }) as HTMLDivElement;
  keywordStep.appendChild(createEl('span', {}, ['3. ']));
@@ -147,6 +151,15 @@ const GUIDE_STATE_KEY = 'webauto.xhs.guideState.v1';
     browserCheckAttempted = true;
     startupBrowserCheckDone = true;
     await runGuideBrowserCheck(api, guideState, browserStatus, saveGuideState);
+    browserFixBtn.style.display = guideState.browserReady ? 'none' : '';
+  };
+  const runBrowserRepair = async () => {
+    const result = await runGuideBrowserRepair(api, guideState, browserStatus, saveGuideState);
+    browserFixBtn.style.display = guideState.browserReady ? 'none' : '';
+    applyGuideLock();
+    if (!result.ok) {
+      navStepHint.textContent = '浏览器修复失败，请查看日志。';
+    }
   };
  const applyGuideLock = () => {
     const accountReady = guideState.accountReady;
@@ -206,7 +219,6 @@ const GUIDE_STATE_KEY = 'webauto.xhs.guideState.v1';
       setActiveTile('account');
       if (typeof api?.setActiveTab === 'function') api.setActiveTab('preflight');
       navStepHint.textContent = '请先新增账号并完成登录，再进行账号检查。';
-      alert('请先新增账号并完成登录，再进行账号检查。');
       return;
     }
     const ok = await runBrowserStatusCheck(selectedProfile, 'guide-step');
@@ -214,10 +226,17 @@ const GUIDE_STATE_KEY = 'webauto.xhs.guideState.v1';
       setActiveTile('account');
       if (typeof api?.setActiveTab === 'function') api.setActiveTab('preflight');
       navStepHint.textContent = '账号检查失败，请在账号区重新触发登录。';
-      alert('账号检查失败：cmdSpawn 不可用，请查看日志');
       return;
     }
     void refreshProfileChoices(selectedProfile);
+  };
+  const runAccountRepair = async () => {
+    if (typeof accountFlow?.startAddAccountFlow === 'function') {
+      await accountFlow.startAddAccountFlow();
+      applyGuideLock();
+      return;
+    }
+    navStepHint.textContent = '账号修复不可用，请在账号区手动新增/登录。';
   };
  card.appendChild(guideCard);
   const persistedConfig = readLastConfig();
@@ -299,6 +318,8 @@ const GUIDE_STATE_KEY = 'webauto.xhs.guideState.v1';
     },
     runBrowserStatusCheck,
   });
+  accountFixBtn.onclick = () => { void runAccountRepair(); };
+  browserFixBtn.onclick = () => { void runBrowserRepair(); };
   const {
     refreshProfileChoices,
     startAccountAutoRefresh,
