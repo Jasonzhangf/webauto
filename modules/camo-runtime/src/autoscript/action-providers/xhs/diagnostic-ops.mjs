@@ -2,10 +2,8 @@ import path from 'node:path';
 import { getProfileState } from './state.mjs';
 import { emitOperationProgress } from './trace.mjs';
 import { ensureDir, writeJsonFile, savePngBase64, resolveXhsOutputContext } from './persistence.mjs';
-import { sanitizeFileComponent } from './execute-operations.mjs';
+import { sanitizeFileComponent, captureScreenshotToFile } from './diagnostic-utils.mjs';
 import { evaluateReadonly } from './dom-ops.mjs';
-import { extractScreenshotBase64 } from './common.mjs';
-import { callAPI } from '../../../utils/browser-service.mjs';
 
 export function buildTimeoutDomSnapshotScript() {
   return `(() => {
@@ -45,14 +43,6 @@ export function buildTimeoutDomSnapshotScript() {
       capturedAt: new Date().toISOString(),
     };
   })()`;
-}
-
-export async function captureScreenshotToFile({ profileId, filePath }) {
-  const payload = await callAPI('screenshot:capture', { profileId });
-  const base64 = extractScreenshotBase64(payload);
-  if (!base64) throw new Error('SCREENSHOT_CAPTURE_FAILED');
-  await savePngBase64(base64, filePath);
-  return filePath;
 }
 
 export async function captureOperationFailure({ profileId, params = {}, context = {}, stage = '', noteId = '', reason = '', extra = {} }) {

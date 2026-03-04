@@ -148,18 +148,30 @@ export async function runUnified(argv, overrides = {}) {
     `run-${runLabel}`,
   );
   if (!planOnly) {
-    const serviceReset = await resetTaskServices(argv, {
-      rootDir: process.cwd(),
-      debugActionLogPath: path.join(mergedDir, 'profiles', 'input-actions.jsonl'),
-    });
-    console.log(JSON.stringify({
-      event: 'xhs.unified.service_reset',
-      ok: serviceReset.ok,
-      skipped: serviceReset.skipped === true,
-      reason: serviceReset.reason || null,
-      actionLogPath: serviceReset.actionLogPath || null,
-      statusReady: Boolean(serviceReset.status?.json?.ready),
-    }));
+    // Skip UI CLI service reset for collect mode - use camo directly
+    if (stage !== 'links') {
+      const serviceReset = await resetTaskServices(argv, {
+        rootDir: process.cwd(),
+        debugActionLogPath: path.join(mergedDir, 'profiles', 'input-actions.jsonl'),
+      });
+      console.log(JSON.stringify({
+        event: 'xhs.unified.service_reset',
+        ok: serviceReset.ok,
+        skipped: serviceReset.skipped === true,
+        reason: serviceReset.reason || null,
+        actionLogPath: serviceReset.actionLogPath || null,
+        statusReady: Boolean(serviceReset.status?.json?.ready),
+      }));
+    } else {
+      console.log(JSON.stringify({
+        event: 'xhs.unified.service_reset',
+        ok: true,
+        skipped: true,
+        reason: 'collect_mode_uses_camo_directly',
+        actionLogPath: null,
+        statusReady: true,
+      }));
+    }
     await Promise.all(profiles.map((profileId) => ensureProfileSession(profileId, { headless })));
   }
   const planPath = path.join(mergedDir, 'plan.json');
@@ -479,5 +491,4 @@ export function printUnifiedHelp() {
     '  --service-reset <bool>       Reset ui cli services before task',
   ].join("\n"));
 }
-
 

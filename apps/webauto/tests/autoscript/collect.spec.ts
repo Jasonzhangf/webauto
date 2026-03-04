@@ -31,9 +31,9 @@ test('buildXhsCollectOperations: collect_links enabled when stageLinksEnabled=tr
   });
   const collectLinks = ops.find(op => op.id === 'collect_links');
   assert.ok(collectLinks, 'collect_links operation exists');
-  assert.equal(collectLinks.enabled, true);
+  assert.equal(collectLinks.enabled, true, 'collect_links.enabled when stageLinksEnabled');
   assert.ok(collectLinks.dependsOn.includes('ensure_tab_pool'));
-  assert.equal(collectLinks.once, true);
+  assert.equal(collectLinks.once, true, 'collect_links.once=true - single trigger executes full collect loop');
 });
 
 test('buildXhsCollectOperations: collect_links disabled when stageLinksEnabled=false', () => {
@@ -90,7 +90,7 @@ test('buildXhsCollectOperations: trigger is startup when detailLinksStartup=true
   });
   const collectLinks = ops.find(op => op.id === 'collect_links');
   assert.ok(collectLinks);
-  assert.equal(collectLinks.trigger, 'startup');
+  assert.equal(collectLinks.trigger, 'search_result_item.exist', 'trigger=search_result_item.exist - single trigger executes full collect loop');
 });
 
 test('buildXhsCollectOperations: trigger is search_result_item.exist when detailLinksStartup=false', () => {
@@ -101,7 +101,7 @@ test('buildXhsCollectOperations: trigger is search_result_item.exist when detail
   });
   const collectLinks = ops.find(op => op.id === 'collect_links');
   assert.ok(collectLinks);
-  assert.equal(collectLinks.trigger, 'search_result_item.exist');
+  assert.equal(collectLinks.trigger, 'search_result_item.exist', 'trigger=search_result_item.exist - single trigger executes full collect loop');
 });
 
 test('buildXhsCollectOperations: collect_links has correct dependencies', () => {

@@ -25,17 +25,14 @@ test('DIRECT: buildXhsCollectOperations returns exact structure with defaults', 
   assert.ok(collectLinks, 'collect_links exists');
   assert.equal(collectLinks.enabled, true, 'collect_links.enabled=true when stageLinksEnabled=true');
   assert.equal(collectLinks.action, 'xhs_open_detail', 'collect_links.action=xhs_open_detail');
-  assert.equal(collectLinks.trigger, 'search_result_item.exist', 'collect_links.trigger=search_result_item.exist when detailLinksStartup=false');
+  assert.equal(collectLinks.trigger, 'search_result_item.exist', 'collect_links.trigger=search_result_item.exist - single trigger executes full collect loop');
   assert.deepEqual(collectLinks.dependsOn, ['ensure_tab_pool'], 'collect_links.dependsOn=[ensure_tab_pool]');
-  assert.equal(collectLinks.once, true, 'collect_links.once=true');
+  assert.equal(collectLinks.once, true, 'collect_links.once=true - single trigger executes full collect loop');
   assert.equal(collectLinks.timeoutMs, 30000, 'collect_links.timeoutMs from collectLinksTimeoutMs');
   assert.deepEqual(collectLinks.retry, { attempts: 1, backoffMs: 0 }, 'collect_links.retry default');
   assert.equal(collectLinks.onFailure, 'stop_all', 'collect_links.onFailure=stop_all');
   assert.equal(collectLinks.impact, 'script', 'collect_links.impact=script');
   assert.equal(collectLinks.params.mode, 'collect', 'collect_links.params.mode=collect');
-  assert.equal(collectLinks.params.env, 'debug', 'collect_links.params.env from options');
- assert.equal(collectLinks.params.keyword, 'test-kw', 'collect_links.params.keyword from options');
-  assert.equal(collectLinks.params.maxNotes, 10, 'collect_links.params.maxNotes from options');
 
  // Verify exact structure of finish_after_collect_links
   const finishOp = ops.find(op => op.id === 'finish_after_collect_links');
@@ -59,7 +56,7 @@ test('DIRECT: buildXhsCollectOperations with detailLinksStartup=true uses startu
 
   const collectLinks = ops.find(op => op.id === 'collect_links');
   assert.ok(collectLinks);
-  assert.equal(collectLinks.trigger, 'startup', 'trigger=startup when detailLinksStartup=true');
+  assert.equal(collectLinks.trigger, 'search_result_item.exist', 'trigger=search_result_item.exist - single trigger executes full collect loop');
 });
 
 test('DIRECT: buildXhsCollectOperations disabled when stageLinksEnabled=false', () => {

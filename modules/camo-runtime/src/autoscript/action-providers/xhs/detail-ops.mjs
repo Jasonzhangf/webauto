@@ -1,6 +1,15 @@
 import { evaluateReadonly } from './dom-ops.mjs';
 import { getProfileState } from './state.mjs';
 
+export async function readDetailLinks(profileId) {
+  const href = await evaluateReadonly(profileId, 'String(location.href || "")');
+  const noteMatch = href?.match?.(/\/explore\/([^/?#]+)/);
+  return {
+    currentUrl: href || null,
+    noteIdFromUrl: noteMatch && noteMatch[1] ? String(noteMatch[1]) : null,
+  };
+}
+
 export async function readDetailSnapshot(profileId) {
   const script = `(() => {
     const normalize = (value) => String(value || '').replace(/\\s+/g, ' ').trim();
@@ -100,11 +109,41 @@ export async function readExpandButtons(profileId) {
 
 export async function isDetailVisible(profileId) {
   const script = `(() => {
-    const mask = document.querySelector('.note-detail-mask');
-    const page = document.querySelector('.note-detail-page');
-    const dialog = document.querySelector('.note-detail-dialog');
-    const detailVisible = !!(mask || page || dialog);
-    return { detailVisible, href: String(location.href || '') };
+    const selectors = [
+      '.note-detail-mask',
+      '.note-detail-page',
+      '.note-detail-dialog',
+      '#noteContainer',
+      '.note-container',
+      '.note-scroller',
+      '.note-content',
+      '#detail-title',
+      '#detail-desc',
+      '.author-wrapper',
+      '.interaction-container',
+      '#comment',
+    ];
+    const isVisible = (node) => {
+      if (!(node instanceof Element)) return false;
+      const rect = node.getBoundingClientRect?.();
+      if (!rect || rect.width <= 1 || rect.height <= 1) return false;
+      try {
+        const style = window.getComputedStyle(node);
+        if (!style) return false;
+        if (style.display === 'none') return false;
+        if (style.visibility === 'hidden' || style.visibility === 'collapse') return false;
+        const opacity = Number.parseFloat(String(style.opacity || '1'));
+        if (Number.isFinite(opacity) && opacity <= 0.01) return false;
+      } catch { return false; }
+      return true;
+    };
+    for (const selector of selectors) {
+      const node = document.querySelector(selector);
+      if (node && isVisible(node)) {
+        return { detailVisible: true, selector, href: String(location.href || '') };
+      }
+    }
+    return { detailVisible: false, selector: null, href: String(location.href || '') };
   })()`;
   return evaluateReadonly(profileId, script);
 }
