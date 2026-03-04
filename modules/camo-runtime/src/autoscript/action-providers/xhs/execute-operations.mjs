@@ -363,27 +363,23 @@ export async function executeSubmitSearchOperation({ profileId, params = {}, con
 }
 
 export async function executeOpenDetailOperation({ profileId, params = {}, context = {} }) {
-  // 简化版本 - 完整实现需要约 800 行
   const state = getProfileState(profileId);
   const { actionTrace, pushTrace } = buildTraceRecorder();
   const noteId = String(params.noteId || '').trim();
   const noteUrl = String(params.noteUrl || '').trim();
-  if (!noteId && !noteUrl) {
-    return asErrorPayload('INVALID_PARAMS', 'noteId or noteUrl required');
-  }
-
   const openMode = String(params.mode || '').trim();
-  const collectIndexMaxAttempts = Math.max(1, Number(params.collectIndexMaxAttempts ?? 3) || 3);
-  const collectIndexFailurePolicy = String(params.collectIndexFailurePolicy || 'retry').trim().toLowerCase();
   const shouldCollectIndex = openMode === 'collect';
-  let collectIndex = Number(params.collectIndexStart ?? 0) || 0;
-  let collectAttempts = 0;
   const beforeUrl = await readLocation(profileId);
   const detailVisible = await isDetailVisible(profileId);
   if (detailVisible?.detailVisible === true) {
     await closeDetailToSearch(profileId, pushTrace);
     await sleep(300);
   }
+
+  if (!noteId && !noteUrl && !shouldCollectIndex) {
+    return asErrorPayload('INVALID_PARAMS', 'noteId or noteUrl required');
+  }
+
   if (noteUrl) {
     await callAPI('goto', { profileId, url: noteUrl });
     await sleep(1000);
@@ -391,9 +387,15 @@ export async function executeOpenDetailOperation({ profileId, params = {}, conte
     const candidates = await readSearchCandidates(profileId);
     const rows = Array.isArray(candidates?.rows) ? candidates.rows : [];
     const total = rows.length;
-    const startIndex = Math.max(0, Math.min(collectIndex, Math.max(0, total - 1)));
-    collectIndex = startIndex;
+    if (total <= 0) {
+      return asErrorPayload('COLLECT_INDEX_NOT_FOUND', 'no search candidates');
+    }
+    const collectIndexMaxAttempts = Math.max(1, Number(params.collectIndexMaxAttempts ?? 3) || 3);
+    const collectIndexFailurePolicy = String(params.collectIndexFailurePolicy || 'retry').trim().toLowerCase();
+    let collectIndex = Number(params.collectIndexStart ?? 0) || 0;
+    collectIndex = Math.max(0, Math.min(collectIndex, Math.max(0, total - 1)));
     let opened = false;
+    let collectAttempts = 0;
     while (collectAttempts < collectIndexMaxAttempts && total > 0) {
       collectAttempts += 1;
       const target = rows.find((row) => row.index === collectIndex) || null;
@@ -413,6 +415,8 @@ export async function executeOpenDetailOperation({ profileId, params = {}, conte
       const detailSnapshot = await readDetailSnapshot(profileId);
       if (detailSnapshot?.noteIdFromUrl) {
         opened = true;
+        state.currentNoteId = detailSnapshot.noteIdFromUrl;
+        state.currentHref = detailSnapshot.href || null;
         break;
       }
       if (collectIndexFailurePolicy === 'skip') {
@@ -434,151 +438,26 @@ export async function executeOpenDetailOperation({ profileId, params = {}, conte
     pushTrace({ kind: 'click', stage: 'open_detail', noteId, selector: candidate.selector });
     await sleep(1500);
   }
+
   const afterUrl = await readLocation(profileId);
   const detailSnapshot = await readDetailSnapshot(profileId);
-  state.currentNoteId = noteId || detailSnapshot?.noteIdFromUrl || null;
+  state.currentNoteId = noteId || detailSnapshot?.noteIdFromUrl || state.currentNoteId || null;
   state.currentHref = afterUrl || null;
   state.lastListUrl = beforeUrl || null;
   emitActionTrace(context, actionTrace, { stage: 'xhs_open_detail' });
-  return { ok: true, code: 'OPERATION_DONE', message: 'xhs_open_detail done', data: { opened: true, noteId: noteId || detailSnapshot?.noteIdFromUrl, beforeUrl, afterUrl, detailVisible: true, collectIndex: shouldCollectIndex ? collectIndex : null, collectAttempts: shouldCollectIndex ? collectAttempts : null, collectFailurePolicy: shouldCollectIndex ? collectIndexFailurePolicy : null } };
-}
-
-export async function readXhsRuntimeState(profileId) {
-  const state = getProfileState(profileId);
-  return { keyword: state.keyword || null, currentNoteId: state.currentNoteId || null, lastCommentsHarvest: state.lastCommentsHarvest && typeof state.lastCommentsHarvest === 'object' ? state.lastCommentsHarvest : null };
-}
-
-export async function executeDetailHarvestOperation({ profileId, context = {} }) {
-  const state = getProfileState(profileId);
-  const { actionTrace } = buildTraceRecorder();
-  const detail = await readDetailSnapshot(profileId);
-  const commentsSnapshot = await readCommentsSnapshot(profileId);
-  const elementMeta = buildElementCollectability(detail, commentsSnapshot);
-  if (detail?.noteIdFromUrl) {
-    state.currentNoteId = String(detail.noteIdFromUrl);
-  }
-  state.lastDetail = { title: String(detail?.title || '').trim().slice(0, 200), contentLength: Number(detail?.contentLength || 0), href: String(detail?.href || '').trim() || null, textPresent: detail?.textPresent === true, imageCount: Number(detail?.imageCount || 0), imageUrls: Array.isArray(detail?.imageUrls) ? detail.imageUrls : [], videoPresent: detail?.videoPresent === true, videoUrl: String(detail?.videoUrl || '').trim() || null, commentsContextAvailable: commentsSnapshot?.hasCommentsContext === true || detail?.commentsContextAvailable === true, collectability: elementMeta.collectability, skippedElements: elementMeta.skippedElements, fallbackCaptured: elementMeta.fallbackCaptured, capturedAt: detail?.capturedAt || new Date().toISOString() };
-  emitActionTrace(context, actionTrace, { stage: 'xhs_detail_harvest' });
-  return { ok: true, code: 'OPERATION_DONE', message: 'xhs_detail_harvest done', data: { harvested: true, detail: state.lastDetail, collectability: elementMeta.collectability, skippedElements: elementMeta.skippedElements, fallbackCaptured: elementMeta.fallbackCaptured } };
-}
-
-export async function executeExpandRepliesOperation({ profileId, context = {} }) {
-  const { actionTrace, pushTrace } = buildTraceRecorder();
-  const buttons = await readExpandButtons(profileId);
-  const rows = buttons?.rows || [];
-  let expanded = 0;
-  for (const btn of rows) {
-    if (!btn?.center) continue;
-    await clickPoint(profileId, btn.center, { steps: 2 });
-    pushTrace({ kind: 'click', stage: 'expand_replies', target: btn.text || 'expand' });
-    await sleep(200);
-    expanded += 1;
-  }
-  emitActionTrace(context, actionTrace, { stage: 'xhs_expand_replies' });
-  return { ok: true, code: 'OPERATION_DONE', message: 'xhs_expand_replies done', data: { expanded, scanned: rows.length } };
-}
-
-export async function executeCommentsHarvestOperation({ profileId, params = {}, context = {} }) {
-  const state = getProfileState(profileId);
-  const { actionTrace, pushTrace } = buildTraceRecorder();
-  const snapshot = await readCommentsSnapshot(profileId);
-  if (!snapshot?.hasCommentsContext) {
-    return { ok: false, code: 'COMMENTS_CONTEXT_MISSING', message: 'Comments context not available', data: { commentCount: 0 } };
-  }
-  const existingRows = state.lastCommentsHarvest?.comments || [];
-  const existingIds = new Set(existingRows.map((c) => `${c.author}::${c.content?.slice(0, 50)}`));
-  const newComments = (snapshot.comments || []).filter((c) => !existingIds.has(`${c.author}::${c.content?.slice(0, 50)}`));
-  state.lastCommentsHarvest = { commentCount: snapshot.commentCount, expectedCommentsCount: snapshot.expectedCommentsCount, comments: [...existingRows, ...newComments], capturedAt: new Date().toISOString() };
-  emitActionTrace(context, actionTrace, { stage: 'xhs_comments_harvest' });
-  return { ok: true, code: 'OPERATION_DONE', message: 'xhs_comments_harvest done', data: { commentsPath: null, commentsAdded: newComments.length, commentsTotal: state.lastCommentsHarvest.comments.length, noteId: state.currentNoteId, searchCount: 0, collected: newComments.length, expectedCommentsCount: snapshot.expectedCommentsCount, commentCoverageRate: snapshot.expectedCommentsCount ? (state.lastCommentsHarvest.comments.length / snapshot.expectedCommentsCount).toFixed(2) : null, recoveries: 0, maxRecoveries: params.maxRecoveries || 3, firstComment: state.lastCommentsHarvest.comments[0] || null, reachedBottom: false, exitReason: 'harvest_complete', commentsSkippedReason: null, rounds: 1, configuredMaxRounds: 1, maxRounds: 1, maxRoundsSource: 'params', budgetExpectedCommentsCount: snapshot.expectedCommentsCount, scroll: null, collectability: snapshot.collectability, skippedElements: [], fallbackCaptured: {}, actionTrace } };
-}
-
-export async function executeCommentMatchOperation({ profileId, params = {} }) {
-  const snapshot = await readCommentsSnapshot(profileId);
-  const comments = snapshot?.comments || [];
-  const keywords = String(params.keywords || '').split(',').map((k) => k.trim()).filter(Boolean);
-  const mode = String(params.mode || 'any').trim().toLowerCase();
-  const minHits = Math.max(1, Number(params.minHits || 1) || 1);
-  let matchCount = 0;
-  for (const comment of comments) {
-    const text = normalizeInlineText(`${comment.author} ${comment.content}`);
-    const hits = keywords.filter((kw) => text.includes(kw)).length;
-    if ((mode === 'any' && hits > 0) || (mode === 'all' && hits >= keywords.length) || (mode === 'min' && hits >= minHits)) {
-      matchCount += 1;
-    }
-  }
-  return { ok: true, code: 'OPERATION_DONE', message: 'xhs_comment_match done', data: { matchCount, mode, minHits } };
-}
-
-export async function executeCommentLikeOperation({ profileId, params = {}, context = {} }) {
-  const state = getProfileState(profileId);
-  const { actionTrace, pushTrace } = buildTraceRecorder();
-  const keywords = String(params.keywords || '').split(',').map((k) => k.trim()).filter(Boolean);
-  const maxComments = Math.max(1, Number(params.maxComments || 50) || 50);
-  const snapshot = await readCommentsSnapshot(profileId);
-  const comments = snapshot?.comments || [];
-  let hitCount = 0;
-  let likedCount = 0;
-  let skippedCount = 0;
-  const likedComments = [];
-  for (let i = 0; i < Math.min(comments.length, maxComments); i += 1) {
-    const comment = comments[i];
-    const text = normalizeInlineText(`${comment.author} ${comment.content}`);
-    const matched = keywords.length === 0 || keywords.some((kw) => text.includes(kw));
-    if (!matched) {
-      skippedCount += 1;
-      continue;
-    }
-    hitCount += 1;
-    const target = await readLikeTargetByIndex(profileId, i);
-    if (!target?.found) {
-      skippedCount += 1;
-      continue;
-    }
-    await clickPoint(profileId, target.center, { steps: 2 });
-    pushTrace({ kind: 'click', stage: 'comment_like', index: i });
-    await sleep(300);
-    likedCount += 1;
-    likedComments.push({ index: i, author: comment.author, content: comment.content?.slice(0, 100) });
-  }
-  emitActionTrace(context, actionTrace, { stage: 'xhs_comment_like' });
-  return { ok: true, code: 'OPERATION_DONE', message: 'xhs_comment_like done', data: { noteId: state.currentNoteId, scannedCount: Math.min(comments.length, maxComments), hitCount, likedCount, skippedCount, likedTotal: likedCount, hitCheckOk: hitCount > 0, dedupSkipped: 0, alreadyLikedSkipped: 0, missingLikeControl: skippedCount, clickFailed: 0, verifyFailed: 0, likedComments, commentsPath: null, likeStatePath: null, evidenceDir: null, summaryPath: null, reachedBottom: true, stopReason: 'max_comments_reached' } };
-}
-
-export async function executeCommentReplyOperation({ profileId, params = {}, context = {} }) {
-  const state = getProfileState(profileId);
-  const { actionTrace, pushTrace } = buildTraceRecorder();
-  const replyText = String(params.replyText || '').trim();
-  if (!replyText) {
-    return asErrorPayload('INVALID_PARAMS', 'replyText required');
-  }
-  const index = Math.max(0, Number(params.index || 0) || 0);
-  const target = await readReplyTargetByIndex(profileId, index);
-  if (!target?.found) {
-    return asErrorPayload('REPLY_TARGET_NOT_FOUND', `Comment index ${index} not found`);
-  }
-  await clickPoint(profileId, target.center, { steps: 2 });
-  pushTrace({ kind: 'click', stage: 'comment_reply', target: 'reply_button', index });
-  await sleep(500);
-  const inputTarget = await readReplyInputTarget(profileId);
-  if (!inputTarget?.found) {
-    return asErrorPayload('REPLY_INPUT_NOT_FOUND', 'Reply input not found');
-  }
-  await clickPoint(profileId, inputTarget.center, { steps: 2 });
-  pushTrace({ kind: 'click', stage: 'comment_reply', target: 'reply_input' });
-  await sleep(300);
-  await clearAndType(profileId, replyText, 60);
-  pushTrace({ kind: 'type', stage: 'comment_reply', length: replyText.length });
-  await sleep(500);
-  const sendTarget = await readReplySendButtonTarget(profileId);
-  if (!sendTarget?.found) {
-    return asErrorPayload('REPLY_SEND_NOT_FOUND', 'Send button not found');
-  }
-  await clickPoint(profileId, sendTarget.center, { steps: 2 });
-  pushTrace({ kind: 'click', stage: 'comment_reply', target: 'send_button' });
-  await sleep(1000);
-  emitActionTrace(context, actionTrace, { stage: 'xhs_comment_reply' });
-  return { ok: true, code: 'OPERATION_DONE', message: 'xhs_comment_reply done', data: { replied: true, index, replyText: replyText.slice(0, 100) } };
+  return {
+    ok: true,
+    code: 'OPERATION_DONE',
+    message: 'xhs_open_detail done',
+    data: {
+      opened: true,
+      noteId: noteId || detailSnapshot?.noteIdFromUrl || state.currentNoteId || null,
+      beforeUrl,
+      afterUrl,
+      detailVisible: true,
+      collectIndex: shouldCollectIndex ? Number(params.collectIndexStart ?? 0) || 0 : null,
+    },
+  };
 }
 
 export async function executeCloseDetailOperation({ profileId, context = {} }) {

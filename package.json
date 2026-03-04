@@ -37,7 +37,7 @@
     "!apps/desktop-console/dist/**/*.map"
   ],
   "dependencies": {
-    "@web-auto/camo": "^0.1.20",
+    "@web-auto/camo": "^0.1.21",
     "ajv": "^8.18.0",
     "esbuild-register": "^3.6.0",
     "iconv-lite": "^0.6.3",
@@ -91,7 +91,6 @@
     "ui:console:run": "npm --prefix apps/desktop-console start",
     "ui:test:driver": "node runtime/infra/utils/scripts/development/eval-in-session.mjs",
     "ui:state": "node runtime/infra/utils/scripts/development/highlight-search-containers.mjs",
-    "service:controller:start": "node services/controller/src/server.mjs",
     "service:kill-port": "node runtime/infra/utils/scripts/service/kill-port.mjs",
     "browser:camoufox:install": "python3 -m camoufox remove && python3 -m camoufox fetch",
     "test:state:coverage": "c8 --reporter=text --reporter=lcov tsx --test modules/state/src/*.test.ts",

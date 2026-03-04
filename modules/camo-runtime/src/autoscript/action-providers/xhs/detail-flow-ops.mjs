@@ -3,7 +3,7 @@ import { getProfileState } from './state.mjs';
 import { buildTraceRecorder, emitActionTrace } from './trace.mjs';
 import { normalizeNoteIdList } from './utils.mjs';
 import { sleep, readLocation, clickPoint } from './dom-ops.mjs';
-import { readSearchCandidateByNoteId, ensureSearchCandidateFullyVisible } from './search-ops.mjs';
+import { readSearchCandidateByNoteId, ensureSearchCandidateFullyVisible, readSearchCandidates } from './search-ops.mjs';
 import { isDetailVisible, readDetailCloseTarget, closeDetailToSearch, readDetailSnapshot } from './detail-ops.mjs';
 
 export async function executeOpenDetailOperation({ profileId, params = {}, context = {} }) {
@@ -11,7 +11,9 @@ export async function executeOpenDetailOperation({ profileId, params = {}, conte
   const { actionTrace, pushTrace } = buildTraceRecorder();
   const noteId = String(params.noteId || '').trim();
   const noteUrl = String(params.noteUrl || '').trim();
-  if (!noteId && !noteUrl) {
+  const openMode = String(params.mode || '').trim();
+  const shouldCollectIndex = openMode === 'collect';
+  if (!noteId && !noteUrl && !shouldCollectIndex) {
     return { ok: false, code: 'INVALID_PARAMS', message: 'noteId or noteUrl required' };
   }
   const beforeUrl = await readLocation(profileId);
@@ -23,6 +25,23 @@ export async function executeOpenDetailOperation({ profileId, params = {}, conte
   if (noteUrl) {
     await callAPI('goto', { profileId, url: noteUrl });
     await sleep(1000);
+  } else if (shouldCollectIndex) {
+    const candidates = await readSearchCandidates(profileId);
+    const rows = Array.isArray(candidates?.rows) ? candidates.rows : [];
+    if (rows.length === 0) {
+      return { ok: false, code: 'COLLECT_INDEX_NOT_FOUND', message: 'no search candidates' };
+    }
+    const collectIndex = Math.max(0, Math.min(Number(params.collectIndexStart ?? 0) || 0, rows.length - 1));
+    const target = rows.find((row) => row.index === collectIndex) || rows[0];
+    if (!target || !target.center) {
+      return { ok: false, code: 'COLLECT_INDEX_NOT_FOUND', message: `Index ${collectIndex} not found` };
+    }
+    if (!target.inViewport) {
+      await ensureSearchCandidateFullyVisible(profileId, target.noteId || '');
+    }
+    await clickPoint(profileId, target.center, { steps: 3 });
+    pushTrace({ kind: 'click', stage: 'open_detail', noteId: target.noteId, selector: target.selector, collectIndex });
+    await sleep(1500);
   } else {
     const candidate = await readSearchCandidateByNoteId(profileId, noteId);
     if (!candidate?.found) {

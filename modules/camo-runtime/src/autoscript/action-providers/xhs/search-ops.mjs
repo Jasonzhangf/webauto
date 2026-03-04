@@ -142,10 +142,20 @@ export async function ensureSearchCandidateFullyVisible(profileId, noteId, optio
 
 export async function readSearchViewportReady(profileId) {
   const script = `(() => {
-    const list = document.querySelector('.feeds-page, .note-item, .search-result-list');
+    const list = document.querySelector('.feeds-page, .search-result-list');
+    const items = Array.from(document.querySelectorAll('.note-item'));
     const input = document.querySelector('#search-input, input.search-input');
+    const visibleCount = items.filter((node) => {
+      if (!(node instanceof Element)) return false;
+      const rect = node.getBoundingClientRect();
+      if (!rect || rect.width <= 1 || rect.height <= 1) return false;
+      return rect.bottom > 0 && rect.top < window.innerHeight;
+    }).length;
+    const readySelector = items.length > 0 ? '.note-item' : (list ? '.search-result-list' : '');
     return {
-      hasList: !!list,
+      readySelector,
+      visibleNoteCount: visibleCount,
+      hasList: !!list || items.length > 0,
       hasInput: !!input,
       inputHasValue: input instanceof HTMLInputElement && !!input.value,
       href: String(location.href || ''),
