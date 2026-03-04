@@ -11,7 +11,7 @@ export function buildXhsCollectOperations(options) {
     {
       id: 'collect_links',
       enabled: stageLinksEnabled,
-      action: 'xhs_open_detail',
+      action: 'xhs_collect_links',
       params: {
         mode: 'collect',
         maxNotes: options.maxNotes,

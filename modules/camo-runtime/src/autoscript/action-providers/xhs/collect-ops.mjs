@@ -2,7 +2,9 @@ import { getProfileState, withSerializedLock } from './state.mjs';
 import { buildTraceRecorder, emitActionTrace } from './trace.mjs';
 import { resolveSearchLockKey, randomBetween } from './utils.mjs';
 import { sleep, readLocation, clickPoint, clearAndType, pressKey, resolveSelectorTarget, sleepRandom } from './dom-ops.mjs';
-import { readSearchInput, readSearchViewportReady, readSearchCandidates } from './search-ops.mjs';
+import { readSearchInput, readSearchViewportReady, readSearchCandidates, ensureSearchCandidateFullyVisible } from './search-ops.mjs';
+import { isDetailVisible, closeDetailToSearch, readDetailSnapshot, readDetailLinks } from './detail-ops.mjs';
+import { resolveXhsOutputContext, mergeLinksJsonl, readJsonlRows } from './persistence.mjs';
 
 
 async function readCandidateWindow(profileId, index) {
@@ -26,6 +28,33 @@ async function readCandidateWindow(profileId, index) {
       visibleRatio: row.visibleRatio,
     })),
   };
+}
+
+async function waitForCondition(conditionFn, timeoutMs = 5000, intervalMs = 200) {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    const result = await conditionFn();
+    if (result) return result;
+    await sleep(intervalMs);
+  }
+  return null;
+}
+
+async function waitForDetailVisible(profileId, timeoutMs = 5000) {
+  return waitForCondition(async () => {
+    const detailVisible = await isDetailVisible(profileId);
+    return detailVisible?.detailVisible === true ? detailVisible : null;
+  }, timeoutMs, 200);
+}
+
+async function waitForSearchReady(profileId, timeoutMs = 5000) {
+  return waitForCondition(async () => {
+    const candidates = await readSearchCandidates(profileId);
+    const rows = Array.isArray(candidates?.rows) ? candidates.rows : [];
+    if (rows.length > 0) return { rows, page: candidates.page || null };
+    const input = await readSearchInput(profileId);
+    return input?.ok ? { rows: [], page: candidates?.page || null } : null;
+  }, timeoutMs, 200);
 }
 
 export async function executeSubmitSearchOperation({ profileId, params = {}, context = {} }) {
@@ -133,4 +162,134 @@ export async function executeSubmitSearchOperation({ profileId, params = {}, con
     emitActionTrace(context, actionTrace, { stage: 'xhs_submit_search' });
     return { ok: true, code: 'OPERATION_DONE', message: 'xhs_submit_search done', data: { keyword: keyword || null, method: via, beforeUrl, afterUrl, searchReady: readyResult.ready, readySelector: readyResult.readySelector || null, visibleNoteCount: readyResult.visibleNoteCount, elapsedMs: readyResult.elapsedMs, searchCount: metrics.searchCount, indexWindowBefore: windowBefore, indexWindowAfter: windowAfter } };
   });
+}
+
+export async function executeCollectLinksOperation({ profileId, params = {}, context = {} }) {
+  const state = getProfileState(profileId);
+  const { actionTrace, pushTrace } = buildTraceRecorder();
+  const maxNotes = Math.max(1, Number(params.maxNotes ?? 21) || 21);
+  const keyword = String(params.keyword || state.keyword || 'unknown').trim();
+  const env = String(params.env || 'debug').trim();
+  const outputCtx = resolveXhsOutputContext({ params: { keyword, env }, state });
+  const linksPath = outputCtx.linksPath;
+
+  state.collectIndex = typeof state.collectIndex === 'number' ? state.collectIndex : 0;
+  state.collectCount = typeof state.collectCount === 'number' ? state.collectCount : 0;
+  state.preCollectedNoteIds = Array.isArray(state.preCollectedNoteIds) ? state.preCollectedNoteIds : [];
+
+  if (state.preCollectedNoteIds.length === 0) {
+    const existing = await readJsonlRows(linksPath);
+    for (const row of existing) {
+      const noteId = String(row?.noteId || '').trim();
+      if (noteId && !state.preCollectedNoteIds.includes(noteId)) {
+        state.preCollectedNoteIds.push(noteId);
+      }
+    }
+  }
+
+  while (state.collectCount < maxNotes) {
+    const detailVisible = await waitForDetailVisible(profileId, 5000);
+    if (detailVisible?.detailVisible === true) {
+      const detailLinks = await readDetailLinks(profileId);
+      if (detailLinks?.currentUrl && detailLinks.noteIdFromUrl) {
+        if (!state.preCollectedNoteIds.includes(detailLinks.noteIdFromUrl)) {
+          state.preCollectedNoteIds.push(detailLinks.noteIdFromUrl);
+          await mergeLinksJsonl({
+            filePath: linksPath,
+            links: [{
+              noteId: detailLinks.noteIdFromUrl,
+              noteUrl: detailLinks.currentUrl,
+              listUrl: state.lastListUrl,
+            }],
+          });
+          state.collectCount = (state.collectCount || 0) + 1;
+          pushTrace({ kind: 'collect', stage: 'link_collected', noteId: detailLinks.noteIdFromUrl, collectCount: state.collectCount });
+        }
+      }
+      await closeDetailToSearch(profileId, pushTrace);
+      await waitForSearchReady(profileId, 5000);
+      await sleep(300);
+      continue;
+    }
+
+    const searchReady = await waitForSearchReady(profileId, 5000);
+    if (!searchReady) {
+      await pressKey(profileId, 'Escape');
+      await sleep(300);
+      continue;
+    }
+
+    const rows = Array.isArray(searchReady.rows) ? searchReady.rows : [];
+    if (rows.length === 0) {
+      await pressKey(profileId, 'PageDown');
+      await sleep(400);
+      continue;
+    }
+
+    const targetIndex = state.collectIndex || 0;
+    if (targetIndex >= rows.length) {
+      await pressKey(profileId, 'PageDown');
+      await sleep(400);
+      continue;
+    }
+
+    const target = rows.find((row) => row.index === targetIndex) || rows[0];
+    if (!target?.center) {
+      state.collectIndex = (state.collectIndex || 0) + 1;
+      continue;
+    }
+
+    if (state.preCollectedNoteIds.includes(target.noteId)) {
+      state.collectIndex = (state.collectIndex || 0) + 1;
+      continue;
+    }
+
+    if (!target.inViewport) {
+      await ensureSearchCandidateFullyVisible(profileId, target.noteId || '');
+    }
+
+    await clickPoint(profileId, target.center, { steps: 3 });
+    pushTrace({ kind: 'click', stage: 'open_detail', noteId: target.noteId, selector: target.selector, collectIndex: targetIndex });
+
+    const openedDetail = await waitForDetailVisible(profileId, 5000);
+    if (!openedDetail?.detailVisible) {
+      state.collectIndex = (state.collectIndex || 0) + 1;
+      continue;
+    }
+
+    const afterUrl = await readLocation(profileId);
+    const detailSnapshot = await readDetailSnapshot(profileId);
+    if (detailSnapshot?.noteIdFromUrl && !state.preCollectedNoteIds.includes(detailSnapshot.noteIdFromUrl)) {
+      state.preCollectedNoteIds.push(detailSnapshot.noteIdFromUrl);
+      await mergeLinksJsonl({
+        filePath: linksPath,
+        links: [{
+          noteId: detailSnapshot.noteIdFromUrl,
+          noteUrl: afterUrl,
+          listUrl: state.lastListUrl,
+        }],
+      });
+      state.collectCount = (state.collectCount || 0) + 1;
+      pushTrace({ kind: 'collect', stage: 'link_collected', noteId: detailSnapshot.noteIdFromUrl, url: afterUrl, collectCount: state.collectCount });
+    }
+
+    state.collectIndex = (state.collectIndex || 0) + 1;
+    await closeDetailToSearch(profileId, pushTrace);
+    await waitForSearchReady(profileId, 5000);
+    await sleep(300);
+  }
+
+  emitActionTrace(context, actionTrace, { stage: 'xhs_collect_links' });
+  return {
+    ok: true,
+    code: 'COLLECT_DONE',
+    message: `Collected ${state.collectCount} notes (max: ${maxNotes})`,
+    data: {
+      collectCount: state.collectCount,
+      collectIndex: state.collectIndex,
+      maxNotes,
+      done: true,
+      linksPath,
+    },
+  };
 }
