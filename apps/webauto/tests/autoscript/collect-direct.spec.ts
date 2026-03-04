@@ -112,7 +112,7 @@ test('DIRECT: buildXhsCollectAutoscript metadata and stage parameter', () => {
 
   assert.ok(script.source, 'script.source exists');
   assert.ok(typeof script.source === 'string', 'script.source is string');
-  assert.ok(script.source.includes('webauto'), 'script.source contains webauto path');
+  assert.ok(script.source.includes('phase2-collect.mjs'), 'script.source contains phase2-collect path');
 
   // version is optional in base metadata
 
