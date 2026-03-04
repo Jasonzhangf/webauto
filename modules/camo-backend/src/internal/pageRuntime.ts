@@ -13,7 +13,7 @@ export async function ensurePageRuntime(page: Page, forceReinject = false): Prom
     injectedPages.add(page);
   }
   try {
-    await page.waitForFunction(() => Boolean((window as any).__webautoRuntime && (window as any).__webautoRuntime.ready), {
+    await page.waitForFunction(() => Boolean((window as any).__camoRuntime && (window as any).__camoRuntime.ready), {
       timeout: 4000,
     });
   } catch (err) {

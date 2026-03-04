@@ -72,8 +72,39 @@ export async function runUiCli(args) {
       status: 0,
       json: { ok: false, error: error?.message || String(error) },
     }));
+    if (!ret.ok || !ret.json?.ok) {
+      const down = await waitForHealthDown(endpoint, 3000);
+      if (down) {
+        printOutput(args, { ok: true, stopped: true, reason: 'already_down' });
+        return;
+      }
+      const pid = resolveKnownPid();
+      if (pid > 0) {
+        const terminated = await terminatePid(pid);
+        const downAfterKill = await waitForHealthDown(endpoint, 5000);
+        if (downAfterKill) {
+          printOutput(args, {
+            ok: true,
+            stopped: true,
+            pid,
+            terminated: Boolean(terminated?.ok),
+          });
+          return;
+        }
+        printOutput(args, {
+          ok: false,
+          error: ret.json?.error || `http_${ret.status}`,
+          pid,
+          terminate: terminated || null,
+        });
+        process.exit(1);
+        return;
+      }
+      printOutput(args, ret.json || { ok: false, error: `http_${ret.status}` });
+      process.exit(1);
+      return;
+    }
     printOutput(args, ret.json || { ok: false, error: `http_${ret.status}` });
-    if (!ret.ok || !ret.json?.ok) process.exit(1);
     return;
   }
 

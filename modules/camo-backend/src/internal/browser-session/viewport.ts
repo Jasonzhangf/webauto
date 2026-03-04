@@ -8,7 +8,7 @@ export interface ViewportState {
 }
 
 export function resolveDeviceScaleFactor(profileId?: string): number | null {
-  const raw = String(process.env.WEBAUTO_DEVICE_SCALE || '').trim();
+  const raw = String(process.env.CAMO_DEVICE_SCALE || '').trim();
   if (raw) {
     const parsed = Number(raw);
     if (Number.isFinite(parsed) && parsed > 0) return parsed;

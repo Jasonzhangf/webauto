@@ -12,10 +12,10 @@ function sanitizeForPath(name, fallback = 'unknown') {
 function resolveDownloadRoot(customRoot) {
   const fromParams = String(customRoot || '').trim();
   if (fromParams) return path.resolve(fromParams);
-  const fromEnv = String(process.env.WEBAUTO_DOWNLOAD_ROOT || process.env.WEBAUTO_DOWNLOAD_DIR || '').trim();
+  const fromEnv = String(process.env.CAMO_DOWNLOAD_ROOT || process.env.CAMO_DOWNLOAD_DIR || '').trim();
   if (fromEnv) return path.resolve(fromEnv);
   const home = process.env.HOME || process.env.USERPROFILE || os.homedir();
-  return path.join(home, '.webauto', 'download');
+  return path.join(home, '.camo', 'download');
 }
 
 export function resolveXhsOutputContext({

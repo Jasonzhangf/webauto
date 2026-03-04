@@ -616,7 +616,7 @@ export class ContainerMatcher {
     const runtimeTree = await page
       .evaluate(
         (config: { selector?: string; maxDepth: number; maxChildren: number, forcePaths?: string[] }): any => {
-          const runtime = (window as any).__webautoRuntime;
+          const runtime = (window as any).__camoRuntime;
           if (!runtime?.dom?.getBranch) {
             return null;
           }
@@ -756,7 +756,7 @@ export class ContainerMatcher {
     const runtimeBranch = await page
       .evaluate(
         (config: { selector: string; path: string; maxDepth: number; maxChildren: number }): any => {
-          const runtime = (window as any).__webautoRuntime;
+          const runtime = (window as any).__camoRuntime;
           if (!runtime?.dom?.getBranch) {
             return null;
           }

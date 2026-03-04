@@ -6,6 +6,7 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { applyCamoEnv } from '../apps/webauto/entry/lib/camo-env.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const activeChildren = new Set();
@@ -250,6 +251,7 @@ function applyDefaultRuntimeEnv() {
   ) {
     process.env.WEBAUTO_HOME = resolveWebautoHome();
   }
+  applyCamoEnv({ env: process.env, repoRoot: ROOT });
 }
 
 applyDefaultRuntimeEnv();
@@ -363,7 +365,7 @@ Core Commands:
   webauto ui restart [--build] [--install] [--timeout <ms>] [--reason <text>]
   webauto ui cli <action> [options]
   webauto daemon <start|stop|status|run|relay|autostart>
-  webauto test [--layer <l0|l1|l2|l3|all>] [--output <path>] [--json]
+  webauto test [--layer <l0|l1|l2|l3|xhs_collect|all>] [--output <path>] [--json]
   webauto xhs install [--download-browser] [--download-geoip] [--ensure-backend]
   webauto xhs unified [xhs options...]
   webauto xhs status [--run-id <id>] [--json]
@@ -419,7 +421,7 @@ function printTestHelp() {
   console.log(`webauto test
 
 Usage:
-  webauto test [--layer <l0|l1|l2|l3|all>] [--output <path>] [--json]
+  webauto test [--layer <l0|l1|l2|l3|xhs_collect|all>] [--output <path>] [--json]
 
 Options:
   --layer, -l   Which layer(s) to run (default: all)
@@ -429,11 +431,14 @@ Options:
   --profile     Pass WEBAUTO_TEST_PROFILE to tests
   --keyword     Pass WEBAUTO_TEST_KEYWORD to tests
   --target      Pass WEBAUTO_TEST_TARGET to tests
+  --xhs-collect Run collect minimal script (xhs collect)
 
 Examples:
   webauto test
   webauto test --layer l0
   webauto test --layer l0,l1 --output ./.tmp/ui-test-report.json
+  webauto test --layer xhs_collect
+  webauto test --layer xhs_collect --xhs-collect --profile <id>
   webauto test --json
 `);
 }
@@ -519,6 +524,7 @@ function printXhsHelp() {
 Usage:
   webauto xhs install [--download-browser] [--download-geoip] [--ensure-backend] [--install|--reinstall|--uninstall] [--browser|--geoip|--all]
   webauto xhs unified --profile <id> --keyword <kw> [options...]
+  webauto xhs collect --profile <id> --keyword <kw> [options...]
   webauto xhs status [--run-id <id>] [--json]
   webauto xhs gate <get|list|set|reset|path> [--platform <name>] [--patch-json <json>] [--json]
   webauto xhs orchestrate --profile <id> --keyword <kw> [options...]
@@ -526,6 +532,7 @@ Usage:
 Subcommands:
   install      运行资源管理（兼容旧入口），支持检查/安装/卸载/重装 camoufox、geoip，按需拉起 backend
   unified      运行统一脚本（搜索 + 打开详情 + 评论抓取 + 点赞）
+  collect      仅采集链接（links-only 模式）
   status       查询当前任务状态与错误摘要（支持 runId 详情）
   gate         管理平台流控参数（默认配置可修改并自动生效）
   orchestrate  运行编排入口（默认调用 unified 模式）
@@ -573,6 +580,9 @@ Standard Workflows:
      webauto xhs install --download-geoip --ensure-backend
 
   2) 全功能采集（搜索 + 评论 + 点赞）
+
+  2) 仅采集链接（links-only）
+     webauto xhs collect --profile xiaohongshu-batch-1 --keyword "seedance2.0" --max-notes 100 --env debug
      webauto xhs unified --profile xiaohongshu-batch-1 --keyword "seedance2.0" --max-notes 100 --do-comments true --persist-comments true --do-likes true --like-keywords "真牛逼" --env debug --tab-count 4
 
   3) 只做搜索 + 评论抓取（不点赞）
@@ -1245,6 +1255,12 @@ async function main() {
 
     if (sub === 'install') {
       const script = path.join(ROOT, 'apps', 'webauto', 'entry', 'xhs-install.mjs');
+      await run(process.execPath, [script, ...rawArgv.slice(2)]);
+      return;
+    }
+
+    if (sub === 'collect') {
+      const script = path.join(ROOT, 'apps', 'webauto', 'entry', 'xhs-collect.mjs');
       await run(process.execPath, [script, ...rawArgv.slice(2)]);
       return;
     }

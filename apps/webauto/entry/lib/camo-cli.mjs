@@ -1,6 +1,7 @@
 import path from 'node:path';
 import { existsSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
+import { applyCamoEnv } from './camo-env.mjs';
 
 function resolveOnPath(candidates) {
   const pathEnv = process.env.PATH || process.env.Path || '';
@@ -81,9 +82,10 @@ export function runCamo(args, options = {}) {
       json: null,
     };
   }
+  const env = applyCamoEnv({ env: { ...process.env, ...(options.env || {}) }, repoRoot: rootDir });
   const ret = spawnSync(runner.cmd, [...runner.prefix, ...args], {
     cwd: rootDir,
-    env: { ...process.env, ...(options.env || {}) },
+    env,
     encoding: 'utf8',
     timeout: timeoutMs,
     windowsHide: true,

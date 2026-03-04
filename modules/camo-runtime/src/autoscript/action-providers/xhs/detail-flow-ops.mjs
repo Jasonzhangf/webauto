@@ -1,8 +1,6 @@
 import { callAPI } from '../../../utils/browser-service.mjs';
 import { getProfileState } from './state.mjs';
 import { buildTraceRecorder, emitActionTrace } from './trace.mjs';
-import { sleep, clickPoint } from './dom-ops.mjs';
-import { isDetailVisible, readDetailCloseTarget } from './detail-ops.mjs';
 import { normalizeNoteIdList } from './utils.mjs';
 import { sleep, readLocation, clickPoint } from './dom-ops.mjs';
 import { readSearchCandidateByNoteId, ensureSearchCandidateFullyVisible } from './search-ops.mjs';

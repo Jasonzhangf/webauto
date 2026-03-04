@@ -9,35 +9,35 @@ function resolveHomeDir() {
 }
 
 function resolvePortableRoot() {
-  return String(process.env.WEBAUTO_PORTABLE_ROOT || process.env.WEBAUTO_ROOT || '').trim();
+  return String(process.env.CAMO_PORTABLE_ROOT || process.env.CAMO_ROOT || '').trim();
 }
 
 function resolveDataRoot() {
   const portableRoot = resolvePortableRoot();
-  if (portableRoot) return path.join(portableRoot, '.webauto');
-  return path.join(resolveHomeDir(), '.webauto');
+  if (portableRoot) return path.join(portableRoot, '.camo');
+  return path.join(resolveHomeDir(), '.camo');
 }
 
 export function resolveProfilesRoot() {
-  const envRoot = String(process.env.WEBAUTO_PATHS_PROFILES || '').trim();
+  const envRoot = String(process.env.CAMO_PATHS_PROFILES || '').trim();
   if (envRoot) return envRoot;
   return path.join(resolveDataRoot(), 'profiles');
 }
 
 export function resolveCookiesRoot() {
-  const envRoot = String(process.env.WEBAUTO_PATHS_COOKIES || '').trim();
+  const envRoot = String(process.env.CAMO_PATHS_COOKIES || '').trim();
   if (envRoot) return envRoot;
   return path.join(resolveDataRoot(), 'cookies');
 }
 
 export function resolveLocksRoot() {
-  const envRoot = String(process.env.WEBAUTO_PATHS_LOCKS || '').trim();
+  const envRoot = String(process.env.CAMO_PATHS_LOCKS || '').trim();
   if (envRoot) return envRoot;
   return path.join(resolveDataRoot(), 'locks');
 }
 
 export function resolveRecordsRoot() {
-  const envRoot = String(process.env.WEBAUTO_PATHS_RECORDS || '').trim();
+  const envRoot = String(process.env.CAMO_PATHS_RECORDS || '').trim();
   if (envRoot) return envRoot;
   return path.join(resolveDataRoot(), 'records');
 }

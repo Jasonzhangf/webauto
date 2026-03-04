@@ -14,7 +14,7 @@ export function buildXhsDetailAutoscript(rawOptions = {}) {
     stage: stage || 'detail',
   }, {
     name: 'xhs-detail-harvest-autoscript',
-    source: '/Users/fanzhang/Documents/github/webauto/scripts/xiaohongshu/phase3-detail.mjs',
+    source: 'scripts/xiaohongshu/phase3-detail.mjs',
   });
 
   const operations = [

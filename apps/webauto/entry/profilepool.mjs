@@ -11,8 +11,10 @@ import {
 } from './lib/profilepool.mjs';
 import { syncXhsAccountByProfile } from './lib/account-detect.mjs';
 import { runCamo } from './lib/camo-cli.mjs';
+import { applyCamoEnv } from './lib/camo-env.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
+applyCamoEnv({ env: process.env, repoRoot: ROOT });
 
 function parseBoolean(value, fallback = false) {
   if (value === undefined || value === null) return fallback;

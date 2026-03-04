@@ -6,6 +6,17 @@ import { withSerializedLock, getProfileState } from './state.mjs';
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, Math.max(0, ms)));
 
+export async function sleepRandom(minMs, maxMs, pushTrace, stage = 'sleep_random') {
+  const min = Math.max(0, Number(minMs) || 0);
+  const max = Math.max(min, Number(maxMs) || min);
+  const waitMs = Math.floor(min + Math.random() * (max - min + 1));
+  if (typeof pushTrace === 'function') {
+    pushTrace({ kind: 'wait', stage, waitMs, minMs: min, maxMs: max });
+  }
+  await sleep(waitMs);
+  return waitMs;
+}
+
 function withTimeout(promise, timeoutMs, code = 'OP_TIMEOUT') {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {

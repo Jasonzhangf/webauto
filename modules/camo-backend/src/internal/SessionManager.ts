@@ -26,7 +26,7 @@ export class SessionManager {
   private ownerWatchdogBusy = false;
 
   private debugLog(label: string, data: any) {
-    if (process.env.DEBUG !== '1' && process.env.WEBAUTO_DEBUG !== '1') return;
+    if (process.env.DEBUG !== '1' && process.env.CAMO_DEBUG !== '1') return;
     try {
       console.log(`[browser-service:${label}] ${JSON.stringify(data)}`);
     } catch {

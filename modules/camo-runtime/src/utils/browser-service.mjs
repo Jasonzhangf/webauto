@@ -13,7 +13,7 @@ const DEFAULT_API_TIMEOUT_MS = 90000;
 const DEFAULT_API_TIMEOUT_MULTIPLIER = 3;
 
 function resolveNodeBin() {
-  const explicit = String(process.env.WEBAUTO_NODE_BIN || '').trim();
+  const explicit = String(process.env.CAMO_NODE_BIN || '').trim();
   if (explicit) return explicit;
   const npmNode = String(process.env.npm_node_execpath || '').trim();
   if (npmNode) return npmNode;
@@ -59,11 +59,7 @@ function runCamoCli(args = [], options = {}) {
 function resolveApiTimeoutMs(options = {}) {
   const optionValue = Number(options?.timeoutMs);
   const optionMultiplier = Number(options?.timeoutMultiplier);
-  const envMultiplier = Number(
-    process.env.CAMO_API_TIMEOUT_MULTIPLIER
-    || process.env.WEBAUTO_TIMEOUT_MULTIPLIER
-    || '',
-  );
+  const envMultiplier = Number(process.env.CAMO_API_TIMEOUT_MULTIPLIER || '');
   const timeoutMultiplier = Number.isFinite(optionMultiplier) && optionMultiplier >= 1
     ? Math.floor(optionMultiplier)
     : (Number.isFinite(envMultiplier) && envMultiplier >= 1
@@ -374,8 +370,12 @@ export async function checkBrowserService() {
 function hasContainerLibrary(repoRoot) {
   if (!repoRoot) return false;
   const root = path.resolve(String(repoRoot));
-  const candidate = path.join(root, 'apps', 'webauto', 'resources', 'container-library');
-  return fs.existsSync(candidate);
+  const candidates = [
+    path.join(root, 'container-library'),
+    path.join(root, 'resources', 'container-library'),
+    path.join(root, 'apps', 'resources', 'container-library'),
+  ];
+  return candidates.some((candidate) => fs.existsSync(candidate));
 }
 
 function walkUpForRepoRoot(startDir) {
@@ -391,7 +391,12 @@ function walkUpForRepoRoot(startDir) {
 
 function scanCommonRepoRoots() {
   const home = os.homedir();
+  const customRoots = String(process.env.CAMO_REPO_ROOTS || '').trim();
+  const extraRoots = customRoots
+    ? customRoots.split(path.delimiter).map((item) => item.trim()).filter(Boolean)
+    : [];
   const roots = [
+    ...extraRoots,
     path.join(home, 'Documents', 'github'),
     path.join(home, 'github'),
     path.join(home, 'code'),
@@ -412,7 +417,6 @@ function scanCommonRepoRoots() {
       const entries = fs.readdirSync(root, { withFileTypes: true });
       for (const entry of entries) {
         if (!entry.isDirectory()) continue;
-        if (!entry.name.toLowerCase().includes('webauto')) continue;
         const candidate = path.join(root, entry.name);
         if (hasContainerLibrary(candidate)) return candidate;
       }
@@ -426,10 +430,19 @@ function scanCommonRepoRoots() {
 
 export function findRepoRootCandidate() {
   const cfg = loadConfig();
+  const explicitContainerRoot = String(process.env.CAMO_CONTAINER_LIBRARY_ROOT || '').trim();
+  if (explicitContainerRoot && fs.existsSync(explicitContainerRoot)) {
+    const preferred = String(process.env.CAMO_REPO_ROOT || cfg.repoRoot || process.cwd());
+    const resolved = path.resolve(preferred);
+    if (cfg.repoRoot !== resolved) {
+      setRepoRoot(resolved);
+    }
+    return resolved;
+  }
   const cwdRoot = walkUpForRepoRoot(process.cwd());
   const moduleRoot = walkUpForRepoRoot(MODULE_DIR);
   const candidates = [
-    process.env.WEBAUTO_REPO_ROOT,
+    process.env.CAMO_REPO_ROOT,
     cfg.repoRoot,
     moduleRoot,
     cwdRoot,
@@ -444,6 +457,22 @@ export function findRepoRootCandidate() {
     return resolved;
   }
 
+  return null;
+}
+
+export function findContainerLibraryRoot() {
+  const candidate = process.env.CAMO_CONTAINER_LIBRARY_ROOT || '';
+  if (candidate && hasContainerLibrary(candidate)) return path.resolve(String(candidate));
+  const repoRoot = findRepoRootCandidate();
+  if (!repoRoot) return null;
+  const candidates = [
+    path.join(repoRoot, 'container-library'),
+    path.join(repoRoot, 'resources', 'container-library'),
+    path.join(repoRoot, 'apps', 'resources', 'container-library'),
+  ];
+  for (const candidatePath of candidates) {
+    if (fs.existsSync(candidatePath)) return candidatePath;
+  }
   return null;
 }
 
@@ -467,24 +496,24 @@ export function detectCamoufoxPath() {
 
 export function ensureCamoufox() {
   if (detectCamoufoxPath()) return;
-  throw new Error('Camoufox is not installed. Run: webauto xhs install --download-browser');
+  throw new Error('Camoufox is not installed. Install it via camoufox (e.g. `python -m camoufox fetch`).');
 }
 
 export async function ensureBrowserService() {
   if (await checkBrowserService()) return;
 
-  const provider = String(process.env.WEBAUTO_BROWSER_PROVIDER || 'camo').trim().toLowerCase();
+  const provider = String(process.env.CAMO_BROWSER_PROVIDER || 'camo').trim().toLowerCase();
   if (provider === 'none' || provider === 'external') {
     throw new Error(
       `Browser backend is not healthy at ${BROWSER_SERVICE_URL} (provider=${provider}). ` +
-      'Start backend manually or set WEBAUTO_BROWSER_PROVIDER=camo.',
+      'Start backend manually or set CAMO_BROWSER_PROVIDER=camo.',
     );
   }
 
   if (provider === 'camo') {
     const repoRoot = findRepoRootCandidate();
     if (!repoRoot) {
-      throw new Error('WEBAUTO_REPO_ROOT is not set and no valid repo root was found');
+      throw new Error('CAMO_REPO_ROOT is not set and no valid repo root was found');
     }
     const configRet = runCamoCli(['config', 'repo-root', repoRoot], { stdio: 'pipe' });
     if (!configRet.ok) {
@@ -510,5 +539,5 @@ export async function ensureBrowserService() {
     throw new Error('Browser backend failed to become healthy after camo init');
   }
 
-  throw new Error(`Unsupported WEBAUTO_BROWSER_PROVIDER=${provider}; only "camo" is supported.`);
+  throw new Error(`Unsupported CAMO_BROWSER_PROVIDER=${provider}; only "camo" is supported.`);
 }

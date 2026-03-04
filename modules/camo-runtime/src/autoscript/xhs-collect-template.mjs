@@ -14,7 +14,7 @@ export function buildXhsCollectAutoscript(rawOptions = {}) {
     stage: stage || 'links',
   }, {
     name: 'xhs-collect-links-autoscript',
-    source: '/Users/fanzhang/Documents/github/webauto/scripts/xiaohongshu/phase2-collect.mjs',
+    source: 'scripts/xiaohongshu/phase2-collect.mjs',
   });
 
   const operations = [

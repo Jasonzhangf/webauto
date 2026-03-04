@@ -55,23 +55,23 @@ export function createPageHooksManager(deps: PageHooksDeps) {
   function bindRuntimeBridge(page: Page): void {
     if (bridgedPages.has(page)) return;
     bridgedPages.add(page);
-    page.exposeFunction('webauto_dispatch', (evt: any) => {
+    page.exposeFunction('camo_dispatch', (evt: any) => {
       deps.emitRuntimeEvent({
         ...evt,
         pageUrl: page.url(),
       });
     }).catch((err) => {
-      console.warn(`[session:${deps.profileId}] failed to expose webauto_dispatch`, err?.message || err);
+      console.warn(`[session:${deps.profileId}] failed to expose camo_dispatch`, err?.message || err);
     });
   }
 
   function bindRecorderBridge(page: Page): void {
     if (recorderBridgePages.has(page)) return;
     recorderBridgePages.add(page);
-    page.exposeFunction('webauto_recorder_dispatch', (evt: any) => {
+    page.exposeFunction('camo_recorder_dispatch', (evt: any) => {
       deps.handleRecorderEvent(page, evt);
     }).catch((err) => {
-      console.warn(`[session:${deps.profileId}] failed to expose webauto_recorder_dispatch`, err?.message || err);
+      console.warn(`[session:${deps.profileId}] failed to expose camo_recorder_dispatch`, err?.message || err);
     });
   }
 
@@ -264,9 +264,9 @@ const RECORDER_BOOTSTRAP_SCRIPT = `(() => {
     };
 
     const emit = (type, payload = {}) => {
-      if (typeof window.webauto_recorder_dispatch !== 'function') return;
+      if (typeof window.camo_recorder_dispatch !== 'function') return;
       try {
-        window.webauto_recorder_dispatch({
+        window.camo_recorder_dispatch({
           ts: now(),
           type,
           payload,

@@ -19,7 +19,7 @@ interface CommandPayload {
   [key: string]: any;
 }
 
-const logsDir = path.join(os.homedir(), '.webauto', 'logs');
+const logsDir = path.join(os.homedir(), '.camo', 'logs');
 const domPickerLogPath = path.join(logsDir, 'dom-picker-debug.log');
 const highlightLogPath = path.join(logsDir, 'highlight-debug.log');
 
@@ -258,10 +258,10 @@ export class BrowserWsServer {
 
     // Real loopback: compute element center, move the real browser mouse, then read picker state.
     const prep = await page.evaluate((sel: string) => {
-      const runtime: any = (window as any).__webautoRuntime;
+      const runtime: any = (window as any).__camoRuntime;
       const picker: any = (window as any).__domPicker;
       if (!runtime || !runtime.ready) {
-        return { ok: false, error: '__webautoRuntime not ready' };
+        return { ok: false, error: '__camoRuntime not ready' };
       }
       if (!picker || typeof picker.startSession !== 'function' || typeof picker.getLastState !== 'function') {
         return { ok: false, error: '__domPicker unavailable' };
@@ -308,7 +308,7 @@ export class BrowserWsServer {
     });
 
     await page.evaluate((sel: string) => {
-      const runtime: any = (window as any).__webautoRuntime;
+      const runtime: any = (window as any).__camoRuntime;
       runtime?.highlight?.highlightSelector?.(sel, { persistent: true, channel: 'dom-picker-loopback' });
     }, prep.selector);
 
@@ -625,7 +625,7 @@ export class BrowserWsServer {
     await ensurePageRuntime(page);
 
     const domTree = await page.evaluate((config) => {
-      const runtime: any = (window as any).__webautoRuntime;
+      const runtime: any = (window as any).__camoRuntime;
       if (!runtime?.getDomBranch) {
         throw new Error('runtime.getDomBranch unavailable');
       }
@@ -668,7 +668,7 @@ export class BrowserWsServer {
     await ensurePageRuntime(page);
 
     const snapshot = await page.evaluate((config) => {
-      const runtime: any = (window as any).__webautoRuntime;
+      const runtime: any = (window as any).__camoRuntime;
       if (!runtime?.getDomBranch) {
         throw new Error('runtime.getDomBranch unavailable');
       }
@@ -765,7 +765,7 @@ export class BrowserWsServer {
     } else if (domPath) {
      await ensurePageRuntime(page);
      const result = await page.evaluate((config) => {
-       const runtime: any = (window as any).__webautoRuntime;
+       const runtime: any = (window as any).__camoRuntime;
        if (!runtime?.dom?.resolveByPath) return null;
        const el = runtime.dom.resolveByPath(config.path, config.rootSelector);
        if (!el) return null;
@@ -1170,10 +1170,10 @@ export class BrowserWsServer {
         const page = await session.ensurePage();
         const result = await page.evaluate(
           (config) => {
-            if (!(window as any).__webautoRuntime?.highlight?.highlightSelector) {
+            if (!(window as any).__camoRuntime?.highlight?.highlightSelector) {
               throw new Error('highlight runtime unavailable');
             }
-            const res = (window as any).__webautoRuntime.highlight.highlightSelector(config.selector, {
+            const res = (window as any).__camoRuntime.highlight.highlightSelector(config.selector, {
               channel: config.channel,
               ...(config.style ? { style: config.style } : {}),
               ...(Number.isFinite(config.duration) && config.duration > 0 ? { duration: config.duration } : {}),
@@ -1193,7 +1193,7 @@ export class BrowserWsServer {
         appendHighlightLog('clear', { sessionId, channel });
         const page = await session.ensurePage();
         await page.evaluate((ch) => {
-          (window as any).__webautoRuntime?.highlight?.clear?.(ch);
+          (window as any).__camoRuntime?.highlight?.clear?.(ch);
         }, channel);
         return {
           success: true,
@@ -1214,7 +1214,7 @@ export class BrowserWsServer {
         const page = await session.ensurePage();
         const result = await page.evaluate(
           (config) => {
-            const runtime: any = (window as any).__webautoRuntime;
+            const runtime: any = (window as any).__camoRuntime;
             if (!runtime?.highlight?.highlightElements) {
               throw new Error('highlight runtime unavailable');
             }
@@ -1263,11 +1263,11 @@ export class BrowserWsServer {
   private async cancelDomPicker(session: any) {
     const page = await session.ensurePage();
     return page.evaluate(() => {
-      const cancel = (window as any).__webautoDomPickerCancel;
+      const cancel = (window as any).__camoDomPickerCancel;
       if (typeof cancel === 'function') {
         try {
           cancel();
-          (window as any).__webautoDomPickerCancel = null;
+          (window as any).__camoDomPickerCancel = null;
           return { cancelled: true };
         } catch (err) {
           return { cancelled: false, error: (err as Error).message };

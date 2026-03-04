@@ -16,8 +16,7 @@
     "modules/camo-backend/**/*.ts",
     "modules/workflow/**/*.ts",
     "modules/xiaohongshu/app/**/*.ts",
-    "apps/webauto/server.ts",
-    "services/controller/**/*.ts"
+    "apps/webauto/server.ts"
   ],
   "exclude": [
     "node_modules",

@@ -1,12 +1,14 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import os from 'node:os';
-import { findRepoRootCandidate } from '../utils/browser-service.mjs';
+import { findContainerLibraryRoot } from '../utils/browser-service.mjs';
+import { resolveCamoRoot } from '../utils/config.mjs';
 
-const CONTAINER_ROOT_ENV = process.env.WEBAUTO_CONTAINER_ROOT;
+const CONTAINER_ROOT_ENV = process.env.CAMO_CONTAINER_ROOT;
+const SUBSCRIPTION_ROOT_ENV = process.env.CAMO_SUBSCRIPTION_ROOT;
+const BASE_ROOT = resolveCamoRoot();
 
-export const USER_CONTAINER_ROOT = CONTAINER_ROOT_ENV || path.join(os.homedir(), '.webauto', 'container-lib');
-export const SUBSCRIPTION_ROOT = path.join(os.homedir(), '.webauto', 'container-subscriptions');
+export const USER_CONTAINER_ROOT = CONTAINER_ROOT_ENV || path.join(BASE_ROOT, 'container-lib');
+export const SUBSCRIPTION_ROOT = SUBSCRIPTION_ROOT_ENV || path.join(BASE_ROOT, 'container-subscriptions');
 export const SUBSCRIPTION_SETS_DIR = path.join(SUBSCRIPTION_ROOT, 'sets');
 export const SUBSCRIPTION_INDEX_FILE = path.join(SUBSCRIPTION_ROOT, 'index.json');
 export const SUBSCRIPTION_TARGETS_FILE = path.join(SUBSCRIPTION_ROOT, 'targets.json');
@@ -223,10 +225,7 @@ function collectJsonFiles(dirPath) {
 
 function detectContainerLibraryRoot(explicitRoot) {
   if (explicitRoot) return explicitRoot;
-  const repoRoot = findRepoRootCandidate();
-  if (!repoRoot) return null;
-  const candidate = path.join(repoRoot, 'apps/webauto/resources/container-library');
-  return fs.existsSync(candidate) ? candidate : null;
+  return findContainerLibraryRoot();
 }
 
 function bootstrapUserContainerRoot(containerLibraryRoot, options = {}) {
@@ -251,7 +250,7 @@ export function initContainerSubscriptionDirectory(options = {}) {
   const containerLibraryRoot = detectContainerLibraryRoot(options.containerLibraryRoot);
   if (!containerLibraryRoot || !fs.existsSync(containerLibraryRoot)) {
     throw new Error(
-      'container-library not found. Set WEBAUTO_REPO_ROOT or run `camo config repo-root <webauto-path>` first.',
+      'container-library not found. Set CAMO_REPO_ROOT or run `camo config repo-root <path>` first.',
     );
   }
 

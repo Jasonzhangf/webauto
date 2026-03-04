@@ -1,5 +1,5 @@
 import { logDebug } from '../../modules/logging/src/index.js';
-import { UiController } from '../../services/controller/src/controller.js';
+import { UiController } from '@web-auto/camo/src/services/controller/controller.js';
 import { handleContainerOperations } from './container-operations-handler.js';
 // @ts-ignore
 // import { setupContainerOperationsRoutes } from './container-operations.mjs';
@@ -7,6 +7,7 @@ import { WebSocketServer, WebSocket } from 'ws';
 import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
+import { applyCamoEnv } from '../../apps/webauto/entry/lib/camo-env.mjs';
 import { RemoteSessionManager } from './RemoteSessionManager.js';
 import { ensureBuiltinOperations } from '../../modules/operations/src/builtin.js';
 import { getContainerExecutor } from '../../modules/operations/src/executor.js';
@@ -22,19 +23,30 @@ import { getStateRegistry } from './state-registry.js';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const { logEvent } = installServiceProcessLogger({ serviceName: 'unified-api' });
 
-const DEFAULT_PORT = Number(process.env.WEBAUTO_UNIFIED_PORT || 7701);
-const DEFAULT_HOST = process.env.WEBAUTO_UNIFIED_HOST || '127.0.0.1';
+const fallbackRepoRoot = path.resolve(__dirname, '../../..');
+applyCamoEnv({ repoRoot: fallbackRepoRoot });
+
+const dataRoot = process.env.CAMO_DATA_ROOT;
+if (!dataRoot) {
+  throw new Error('CAMO_DATA_ROOT is required for Unified API server.');
+}
+const containerIndexPath = process.env.CAMO_CONTAINER_INDEX;
+if (!containerIndexPath) {
+  throw new Error('CAMO_CONTAINER_INDEX is required for Unified API server.');
+}
+
+const DEFAULT_PORT = Number(process.env.CAMO_UNIFIED_PORT || 7701);
+const DEFAULT_HOST = process.env.CAMO_UNIFIED_HOST || '127.0.0.1';
 
 // 注意：运行时 server.js 位于 dist/services/unified-api/，因此需要回退三级到仓库根目录
 // 源码构建时同样兼容（__dirname 为 services/unified-api/），此写法在两种场景下都能得到仓库根目录
-const repoRoot = path.resolve(__dirname, '../../..');
-const userContainerRoot = process.env.WEBAUTO_USER_CONTAINER_ROOT || path.join(os.homedir(), '.webauto', 'container-lib');
-const containerIndexPath = process.env.WEBAUTO_CONTAINER_INDEX || path.join(repoRoot, 'apps/webauto/resources/container-library.index.json');
-const defaultWsHost = process.env.WEBAUTO_WS_HOST || '127.0.0.1';
-const defaultWsPort = Number(process.env.WEBAUTO_WS_PORT || 8765);
-const defaultHttpHost = process.env.WEBAUTO_BROWSER_HTTP_HOST || '127.0.0.1';
-const defaultHttpPort = Number(process.env.WEBAUTO_BROWSER_HTTP_PORT || 7704);
-const defaultHttpProtocol = process.env.WEBAUTO_BROWSER_HTTP_PROTO || 'http';
+const repoRoot = process.env.CAMO_REPO_ROOT || fallbackRepoRoot;
+const userContainerRoot = process.env.CAMO_CONTAINER_ROOT || path.join(dataRoot, 'container-lib');
+const defaultWsHost = process.env.CAMO_WS_HOST || '127.0.0.1';
+const defaultWsPort = Number(process.env.CAMO_WS_PORT || 8765);
+const defaultHttpHost = process.env.CAMO_BROWSER_HTTP_HOST || '127.0.0.1';
+const defaultHttpPort = Number(process.env.CAMO_BROWSER_HTTP_PORT || 7704);
+const defaultHttpProtocol = process.env.CAMO_BROWSER_HTTP_PROTO || 'http';
 const cliTargets = {
   'session-manager': path.join(repoRoot, 'dist/modules/session-manager/src/cli.js'),
   logging: path.join(repoRoot, 'dist/modules/logging/src/cli.js'),
@@ -530,21 +542,54 @@ class UnifiedApiServer {
         return;
       }
 
-      if (req.method === 'GET' && url.pathname === '/v1/system/sessions') {
-        const profileId = url.searchParams.get('profileId');
+     if (req.method === 'GET' && url.pathname === '/v1/system/sessions') {
+       const profileId = url.searchParams.get('profileId');
+       const sessions = this.stateRegistry.getAllSessionStates();
+       if (profileId) {
+         const session = sessions[profileId];
+         res.writeHead(200, { 'Content-Type': 'application/json' });
+         res.end(JSON.stringify({ success: true, data: session ? [session] : [] }));
+         return;
+       }
+       res.writeHead(200, { 'Content-Type': 'application/json' });
+       res.end(JSON.stringify({ success: true, data: Object.values(sessions) }));
+       return;
+     }
+
+      // API v1 compatibility aliases
+      if (req.method === 'GET' && url.pathname === '/api/v1/sessions') {
         const sessions = this.stateRegistry.getAllSessionStates();
-        if (profileId) {
-          const session = sessions[profileId];
-          res.writeHead(200, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ success: true, data: session ? [session] : [] }));
-          return;
-        }
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ success: true, data: Object.values(sessions) }));
         return;
       }
 
-      if (req.method === 'POST' && url.pathname === '/v1/system/sessionPhase') {
+      if (req.method === 'GET' && url.pathname === '/api/v1/env') {
+        const envState = this.stateRegistry.getEnvState();
+        const result = {
+          services: {
+            unifiedApi: true,
+            camoRuntime: false,
+          },
+          camo: {
+            installed: true,
+          },
+          browserReady: false,
+          configPaths: envState?.configPaths || {},
+          featureFlags: envState?.featureFlags || {},
+        };
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(result));
+        return;
+      }
+
+      if (req.method === 'GET' && url.pathname === '/api/v1/settings') {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: true, data: {} }));
+        return;
+      }
+
+     if (req.method === 'POST' && url.pathname === '/v1/system/sessionPhase') {
         try {
           const payload = await this.readJsonBody(req);
           const profileId = payload?.profileId;

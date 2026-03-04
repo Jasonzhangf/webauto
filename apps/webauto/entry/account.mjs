@@ -18,8 +18,10 @@ import {
 } from './lib/account-detect.mjs';
 import { publishBusEvent } from './lib/bus-publish.mjs';
 import { runCamo } from './lib/camo-cli.mjs';
+import { applyCamoEnv } from './lib/camo-env.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
+applyCamoEnv({ env: process.env, repoRoot: ROOT });
 const XHS_HOME_URL = 'https://www.xiaohongshu.com';
 
 function output(payload, jsonMode) {
@@ -609,4 +611,3 @@ main().catch((error) => {
   console.error(message);
   process.exit(1);
 });
-

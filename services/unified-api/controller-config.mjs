@@ -4,23 +4,35 @@
  */
 
 import path from 'node:path';
-import os from 'node:os';
 import { fileURLToPath } from 'node:url';
+import { applyCamoEnv } from '../../apps/webauto/entry/lib/camo-env.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const fallbackRepoRoot = path.resolve(__dirname, '../..');
+applyCamoEnv({ repoRoot: fallbackRepoRoot });
+
+const repoRoot = process.env.CAMO_REPO_ROOT || fallbackRepoRoot;
+const dataRoot = process.env.CAMO_DATA_ROOT;
+if (!dataRoot) {
+  throw new Error('CAMO_DATA_ROOT is required for Unified API controller config.');
+}
+const containerIndexPath = process.env.CAMO_CONTAINER_INDEX;
+if (!containerIndexPath) {
+  throw new Error('CAMO_CONTAINER_INDEX is required for Unified API controller config.');
+}
 
 export const controllerConfig = {
-  repoRoot: process.env.WEBAUTO_REPO_ROOT || path.resolve(__dirname, '../..'),
-  userContainerRoot: process.env.WEBAUTO_USER_CONTAINER_ROOT || path.join(os.homedir(), '.webauto', 'container-lib'),
-  containerIndexPath: process.env.WEBAUTO_CONTAINER_INDEX || path.join(path.resolve(__dirname, '../..'), 'apps/webauto/resources/container-library.index.json'),
+  repoRoot,
+  userContainerRoot: process.env.CAMO_CONTAINER_ROOT || path.join(dataRoot, 'container-lib'),
+  containerIndexPath,
   cliTargets: {
-    'session-manager': path.join(path.resolve(__dirname, '../..'), 'modules/session-manager/src/cli.ts'),
-    logging: path.join(path.resolve(__dirname, '../..'), 'modules/logging/src/cli.ts'),
-    operations: path.join(path.resolve(__dirname, '../..'), 'modules/operations/src/cli.ts'),
+    'session-manager': path.join(repoRoot, 'modules/session-manager/src/cli.ts'),
+    logging: path.join(repoRoot, 'modules/logging/src/cli.ts'),
+    operations: path.join(repoRoot, 'modules/operations/src/cli.ts'),
   },
-  defaultWsHost: process.env.WEBAUTO_WS_HOST || '127.0.0.1',
-  defaultWsPort: Number(process.env.WEBAUTO_WS_PORT || 8765),
-  defaultHttpHost: process.env.WEBAUTO_BROWSER_HTTP_HOST || '127.0.0.1',
-  defaultHttpPort: Number(process.env.WEBAUTO_BROWSER_HTTP_PORT || 7704),
-  defaultHttpProtocol: process.env.WEBAUTO_BROWSER_HTTP_PROTO || 'http',
+  defaultWsHost: process.env.CAMO_WS_HOST || '127.0.0.1',
+  defaultWsPort: Number(process.env.CAMO_WS_PORT || 8765),
+  defaultHttpHost: process.env.CAMO_BROWSER_HTTP_HOST || '127.0.0.1',
+  defaultHttpPort: Number(process.env.CAMO_BROWSER_HTTP_PORT || 7704),
+  defaultHttpProtocol: process.env.CAMO_BROWSER_HTTP_PROTO || 'http',
 };

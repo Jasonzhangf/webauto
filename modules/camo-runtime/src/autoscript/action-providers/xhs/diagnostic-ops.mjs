@@ -1,10 +1,11 @@
 import path from 'node:path';
 import { getProfileState } from './state.mjs';
 import { emitOperationProgress } from './trace.mjs';
-import { resolveXhsOutputContext, sanitizeFileComponent } from './utils.mjs';
-import { ensureDir, writeJsonFile, savePngBase64 } from './persistence.mjs';
+import { ensureDir, writeJsonFile, savePngBase64, resolveXhsOutputContext } from './persistence.mjs';
+import { sanitizeFileComponent } from './execute-operations.mjs';
 import { evaluateReadonly } from './dom-ops.mjs';
-import { callAPI, extractScreenshotBase64 } from './common.mjs';
+import { extractScreenshotBase64 } from './common.mjs';
+import { callAPI } from '../../../utils/browser-service.mjs';
 
 export function buildTimeoutDomSnapshotScript() {
   return `(() => {

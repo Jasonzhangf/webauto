@@ -87,35 +87,33 @@ export async function runFullCover(args, endpoint) {
     };
   }
 
-  const statusRet = await requestJson(endpoint, '/action', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ action: 'status', _client: buildUiCliClientMeta('full-cover') }),
+  const healthRet = await requestJson(endpoint, '/health', {
+    method: 'GET',
     timeoutMs: DEFAULT_ACTION_HTTP_TIMEOUT_MS,
     retries: 0,
   });
-  if (!statusRet.ok || !statusRet.json?.ok) {
+  if (!healthRet.ok) {
     return {
       ok: false,
-      step: 'status',
+      step: 'health',
       reportPath,
-      error: statusRet.json?.error || `http_${statusRet.status}`,
+      error: healthRet.json?.error || `http_${healthRet.status}`,
     };
   }
 
-  const stopRet = await requestJson(endpoint, '/action', {
+  const closeRet = await requestJson(endpoint, '/action', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ action: 'stop', _client: buildUiCliClientMeta('full-cover') }),
+    body: JSON.stringify({ action: 'close_window', _client: buildUiCliClientMeta('full-cover') }),
     timeoutMs: DEFAULT_ACTION_HTTP_TIMEOUT_MS,
     retries: 0,
   });
-  if (!stopRet.ok || !stopRet.json?.ok) {
+  if (!closeRet.ok || !closeRet.json?.ok) {
     return {
       ok: false,
-      step: 'stop',
+      step: 'close_window',
       reportPath,
-      error: stopRet.json?.error || `http_${stopRet.status}`,
+      error: closeRet.json?.error || `http_${closeRet.status}`,
     };
   }
 
@@ -125,12 +123,13 @@ export async function runFullCover(args, endpoint) {
     elapsedMs: Date.now() - start,
     steps: {
       start: startRet.json,
-      status: statusRet.json,
-      stop: stopRet.json,
+      health: healthRet.json,
+      close_window: closeRet.json,
     },
   };
   try {
-    writeFileSync(reportPath, `${JSON.stringify(report, null, 2)}\n`, 'utf8');
+    writeFileSync(reportPath, `${JSON.stringify(report, null, 2)}
+`, 'utf8');
   } catch {
     // ignore report write failure
   }

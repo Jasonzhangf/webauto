@@ -382,7 +382,7 @@ export class AutoscriptRunner {
     const raw = Number(
       operation?.timeoutMultiplier
       ?? this.script?.defaults?.timeoutMultiplier
-      ?? process.env.WEBAUTO_AUTOSCRIPT_TIMEOUT_MULTIPLIER
+      ?? process.env.CAMO_AUTOSCRIPT_TIMEOUT_MULTIPLIER
       ?? 3,
     );
     if (!Number.isFinite(raw) || raw < 1) return 3;
@@ -414,7 +414,7 @@ export class AutoscriptRunner {
       operation?.timeoutRetries
       ?? operation?.timeoutGraceRetries
       ?? this.script?.defaults?.timeoutRetries
-      ?? process.env.WEBAUTO_AUTOSCRIPT_TIMEOUT_RETRIES
+      ?? process.env.CAMO_AUTOSCRIPT_TIMEOUT_RETRIES
       ?? 2,
     );
     if (!Number.isFinite(raw) || raw < 0) return 2;
@@ -425,7 +425,7 @@ export class AutoscriptRunner {
     const raw = Number(
       operation?.timeoutRetryBackoffMs
       ?? this.script?.defaults?.timeoutRetryBackoffMs
-      ?? process.env.WEBAUTO_AUTOSCRIPT_TIMEOUT_RETRY_BACKOFF_MS
+      ?? process.env.CAMO_AUTOSCRIPT_TIMEOUT_RETRY_BACKOFF_MS
       ?? 800,
     );
     const base = Number.isFinite(raw) && raw >= 0 ? Math.floor(raw) : 800;

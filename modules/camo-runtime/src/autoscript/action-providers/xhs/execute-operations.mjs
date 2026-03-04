@@ -18,7 +18,6 @@ import {
   resolveSearchLockKey,
   resolveSharedClaimPath,
   normalizeNoteIdList,
-  sanitizeFileComponent,
   randomBetween,
 } from './utils.mjs';
 import {

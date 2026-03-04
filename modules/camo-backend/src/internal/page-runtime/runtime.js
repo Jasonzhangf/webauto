@@ -8,7 +8,7 @@
 
   const DEFAULT_TIMEOUT = 25000;
   const HOVER_STYLE = '2px dashed #fbbc05';
-  const HIGHLIGHT_CHANNEL = '__webauto_dom_picker';
+  const HIGHLIGHT_CHANNEL = '__camo_dom_picker';
 
   const domPickerState = {
     active: false,
@@ -20,7 +20,7 @@
   };
 
   const overlayApi = () => {
-    const runtime = window.__webautoRuntime;
+    const runtime = window.__camoRuntime;
     if (!runtime || !runtime.highlight || !runtime.highlight.highlightElements) {
       return null;
     }
@@ -35,7 +35,7 @@
 
   function createPickerShield() {
     if (typeof window === 'undefined') return null;
-    const SHIELD_CLASS = '__webauto_picker_shield__';
+    const SHIELD_CLASS = '__camo_picker_shield__';
     const instances = new Map();
     const observers = new Map();
     const frameLoadListeners = new Map();
@@ -283,14 +283,14 @@
         return;
       }
       attachToWindow(childWindow, frame);
-      frame.dataset.__webautoPickerAttached = 'true';
+      frame.dataset.__camoPickerAttached = 'true';
       const reloadHandler = () => tryAttachFrame(frame);
       frame.addEventListener('load', reloadHandler);
       frameLoadListeners.set(frame, reloadHandler);
     };
 
     const markFrameUnavailable = (frame) => {
-      frame.dataset.__webautoPickerBlocked = 'true';
+      frame.dataset.__camoPickerBlocked = 'true';
       if (callbacksRef?.onFrameBlocked) {
         try {
           callbacksRef.onFrameBlocked(frame);
@@ -449,7 +449,7 @@
     const extractPath = (el) => {
       if (!el) return null;
       try {
-        const runtime = window.__webautoRuntime;
+        const runtime = window.__camoRuntime;
         if (!runtime || !runtime.dom || !runtime.dom.buildPathForElement) {
           console.warn('[dom-picker] buildPathForElement missing');
           return null;
@@ -489,7 +489,7 @@
       const rejectSet = new Set();
 
       // Exclude overlays created by our highlight layer
-      const overlayLayer = document.getElementById('__webauto_highlight_layer');
+      const overlayLayer = document.getElementById('__camo_highlight_layer');
       if (overlayLayer && overlayLayer.contains) {
         stack.forEach((el) => {
           if (overlayLayer.contains(el)) rejectSet.add(el);
@@ -819,7 +819,7 @@
     }
     const center = findElementCenter(selector);
     if (!center) return { error: 'element_not_found', selector };
-    const runtime = window.__webautoRuntime;
+    const runtime = window.__camoRuntime;
     const buildPath = runtime?.dom?.buildPathForElement;
     const targetPath = buildPath && center.element instanceof Element ? buildPath(center.element, null) : null;
     const fromPoint = document.elementFromPoint(center.x, center.y);
@@ -869,11 +869,11 @@
   if (typeof window === 'undefined') {
     return;
   }
-  if (window.__webautoRuntime && window.__webautoRuntime.ready) {
+  if (window.__camoRuntime && window.__camoRuntime.ready) {
     return;
   }
 
-  window.__webautoRuntimeBootCount = (window.__webautoRuntimeBootCount || 0) + 1;
+  window.__camoRuntimeBootCount = (window.__camoRuntimeBootCount || 0) + 1;
 
   const VERSION = '0.1.0';
   const DEFAULT_STYLE = null;
@@ -881,10 +881,10 @@
 
   function dispatchBridgeEvent(type, data = {}) {
     try {
-      if (typeof window.webauto_dispatch === 'function') {
-        window.webauto_dispatch({ ts: Date.now(), type, data });
+      if (typeof window.camo_dispatch === 'function') {
+        window.camo_dispatch({ ts: Date.now(), type, data });
       }
-      window.dispatchEvent(new CustomEvent(`webauto:${type}`, { detail: data }));
+      window.dispatchEvent(new CustomEvent(`camo:${type}`, { detail: data }));
     } catch {
       /* ignore bridge errors */
     }
@@ -899,7 +899,7 @@
       href: window.location.href,
       hostname: window.location.hostname,
       runtimeVersion: VERSION,
-      bootCount: window.__webautoRuntimeBootCount || 1,
+      bootCount: window.__camoRuntimeBootCount || 1,
     });
   }
 
@@ -1038,11 +1038,11 @@
   };
 
   function ensureOverlayLayer() {
-    let layer = document.getElementById('__webauto_highlight_layer');
+    let layer = document.getElementById('__camo_highlight_layer');
     if (layer && layer.parentElement === document.body) return layer;
     if (!layer) {
       layer = document.createElement('div');
-      layer.id = '__webauto_highlight_layer';
+      layer.id = '__camo_highlight_layer';
     }
     Object.assign(layer.style, {
       position: 'fixed',
@@ -1062,7 +1062,7 @@
   function createOverlay(rect, style) {
     const layer = ensureOverlayLayer();
     const el = document.createElement('div');
-    el.className = '__webauto_highlight_box';
+    el.className = '__camo_highlight_box';
     Object.assign(el.style, {
       position: 'absolute',
       boxSizing: 'border-box',
@@ -1294,7 +1294,7 @@
         return window.__domPicker || null;
       },
     };
-    Object.defineProperty(window, '__webautoRuntime', {
+    Object.defineProperty(window, '__camoRuntime', {
       value: runtime,
       configurable: true,
       enumerable: false,

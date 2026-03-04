@@ -1,4 +1,9 @@
 import { spawnSync } from 'node:child_process';
+import path from 'node:path';
+import { applyCamoEnv } from './entry/lib/camo-env.mjs';
+
+const ROOT = path.resolve(process.cwd());
+applyCamoEnv({ env: process.env, repoRoot: ROOT });
 
 const runtimeMode = String(process.env.WEBAUTO_RUNTIME_MODE || 'autoscript')
   .trim()

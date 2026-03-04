@@ -41,7 +41,7 @@ async function resolveStartWindow(profileOptions = {}) {
 
 export function computeStartWindowSize(metrics, options = {}) {
   const display = metrics?.metrics || metrics || {};
-  const reserveFromEnv = toNumber(process.env.WEBAUTO_WINDOW_VERTICAL_RESERVE, 0);
+  const reserveFromEnv = toNumber(process.env.CAMO_WINDOW_VERTICAL_RESERVE, 0);
   const reserve = clamp(
     toNumber(options.reservePx, reserveFromEnv),
     0,

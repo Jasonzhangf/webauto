@@ -41,8 +41,8 @@ function readPositiveNumber(value: any): number | null {
 }
 
 function getDisplayMetrics() {
-  const envWidth = readNumber(process.env.WEBAUTO_SCREEN_WIDTH);
-  const envHeight = readNumber(process.env.WEBAUTO_SCREEN_HEIGHT);
+  const envWidth = readNumber(process.env.CAMO_SCREEN_WIDTH);
+  const envHeight = readNumber(process.env.CAMO_SCREEN_HEIGHT);
   if (envWidth && envHeight) {
     return { width: envWidth, height: envHeight, source: 'env' };
   }
@@ -159,7 +159,7 @@ function resolveStartViewport(args: any): { width: number; height: number } | nu
   if (Boolean(args?.headless)) return null;
   const display = getDisplayMetrics();
   if (!display) return null;
-  const reserveRaw = Number(process.env.WEBAUTO_WINDOW_VERTICAL_RESERVE ?? 0);
+  const reserveRaw = Number(process.env.CAMO_WINDOW_VERTICAL_RESERVE ?? 0);
   const reserve = Number.isFinite(reserveRaw) ? Math.max(0, Math.min(240, Math.floor(reserveRaw))) : 0;
   const baseWidth = readPositiveNumber((display as any).workWidth) || readPositiveNumber(display.width);
   const baseHeight = readPositiveNumber((display as any).workHeight) || readPositiveNumber(display.height);

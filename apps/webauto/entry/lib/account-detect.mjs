@@ -1,7 +1,8 @@
 ﻿import { callAPI } from '../../../../modules/camo-runtime/src/utils/browser-service.mjs';
-import { listAccountProfiles, markProfileInvalid, markProfilePending, upsertProfileAccountState } from './account-store.mjs';
+import { listAccountProfiles, markProfileInvalid, markProfilePending, upsertProfileAccountState, normalizeText } from './account-store.mjs';
 
 const XHS_PROFILE_URL = 'https://www.xiaohongshu.com/user/profile';
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, Math.max(0, Number(ms) || 0)));
 function isDomainCookie(cookie, domain) {
   const cookieDomain = String(cookie?.domain || '').trim().toLowerCase();
   if (!cookieDomain) return false;
@@ -547,5 +548,4 @@ export async function syncXhsAccountsByProfiles(profileIds = [], options = {}) {
   }
   return out;
 }
-
 

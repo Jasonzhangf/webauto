@@ -1,6 +1,6 @@
 import { resolveXhsUnifiedOptions } from './xhs-unified-options.mjs';
 
-const DEFAULT_SOURCE = '/Users/fanzhang/Documents/github/webauto/scripts/xiaohongshu/phase-unified-harvest.mjs';
+const DEFAULT_SOURCE = 'scripts/xiaohongshu/phase-unified-harvest.mjs';
 
 export function buildXhsAutoscriptBase(rawOptions = {}, overrides = {}) {
   const options = resolveXhsUnifiedOptions(rawOptions);

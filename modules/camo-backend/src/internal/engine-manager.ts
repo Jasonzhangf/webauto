@@ -21,8 +21,8 @@ function readNumber(v: any): number | null {
 
 function getDisplayMetrics() {
 
-  const envWidth = readNumber(process.env.WEBAUTO_SCREEN_WIDTH);
-  const envHeight = readNumber(process.env.WEBAUTO_SCREEN_HEIGHT);
+  const envWidth = readNumber(process.env.CAMO_SCREEN_WIDTH);
+  const envHeight = readNumber(process.env.CAMO_SCREEN_HEIGHT);
   if (envWidth && envHeight) {
     return { width: envWidth, height: envHeight, source: 'env' };
   }
@@ -179,13 +179,13 @@ export async function launchEngineContext(opts: EngineLaunchOptions): Promise<Br
     // Base viewport target:
     // - prefer explicit/fingerprint viewport if provided
     // - otherwise use a deterministic default for stable first-run UX
-    const requestedW = Number(opts.viewport?.width || process.env.WEBAUTO_VIEWPORT_WIDTH || 1440);
-    const requestedH = Number(opts.viewport?.height || process.env.WEBAUTO_VIEWPORT_HEIGHT || 1100);
+    const requestedW = Number(opts.viewport?.width || process.env.CAMO_VIEWPORT_WIDTH || 1440);
+    const requestedH = Number(opts.viewport?.height || process.env.CAMO_VIEWPORT_HEIGHT || 1100);
     const viewportW = Math.max(900, Math.floor(Number(requestedW) || 1440));
     const viewportH = Math.max(700, Math.floor(Number(requestedH) || 1100));
 
-    const envHeadlessW = Number(process.env.WEBAUTO_HEADLESS_WIDTH || 0);
-    const envHeadlessH = Number(process.env.WEBAUTO_HEADLESS_HEIGHT || 0);
+    const envHeadlessW = Number(process.env.CAMO_HEADLESS_WIDTH || 0);
+    const envHeadlessH = Number(process.env.CAMO_HEADLESS_HEIGHT || 0);
     const headlessW = envHeadlessW > 0 ? envHeadlessW : viewportW;
     const headlessH = envHeadlessH > 0 ? envHeadlessH : viewportH;
     if (!Number.isFinite(headlessW) || !Number.isFinite(headlessH)) {

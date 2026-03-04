@@ -9,11 +9,11 @@ import { join, dirname } from 'path';
 import { homedir } from 'os';
 
 function resolveFingerprintDir() {
-  const envDir = String(process.env.WEBAUTO_PATHS_FINGERPRINTS || '').trim();
+  const envDir = String(process.env.CAMO_PATHS_FINGERPRINTS || '').trim();
   if (envDir) return envDir;
-  const portableRoot = String(process.env.WEBAUTO_PORTABLE_ROOT || process.env.WEBAUTO_ROOT || '').trim();
-  if (portableRoot) return join(portableRoot, '.webauto', 'fingerprints');
-  return join(homedir(), '.webauto', 'fingerprints');
+  const portableRoot = String(process.env.CAMO_PORTABLE_ROOT || process.env.CAMO_ROOT || '').trim();
+  if (portableRoot) return join(portableRoot, '.camo', 'fingerprints');
+  return join(homedir(), '.camo', 'fingerprints');
 }
 
 const PLATFORM_FINGERPRINTS = {

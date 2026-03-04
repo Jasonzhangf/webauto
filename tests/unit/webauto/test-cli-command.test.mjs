@@ -20,6 +20,8 @@ test('webauto test --help prints test cli usage', () => {
   assert.match(ret.stdout, /--layer/);
   assert.match(ret.stdout, /--output/);
   assert.match(ret.stdout, /--json/);
+  assert.match(ret.stdout, /--xhs-collect/);
+  assert.match(ret.stdout, /xhs_collect/);
 });
 
 test('webauto --help includes test command', () => {

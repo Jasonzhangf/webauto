@@ -3,7 +3,7 @@ import minimist from 'minimist';
 import { printTestHelp, runTestCli } from './lib/test-cli.mjs';
 
 const args = minimist(process.argv.slice(2), {
-  boolean: ['help', 'json', 'headless'],
+  boolean: ['help', 'json', 'headless', 'xhs-collect'],
   string: ['layer', 'output', 'profile', 'keyword', 'target'],
   alias: { h: 'help', l: 'layer', o: 'output' },
 });

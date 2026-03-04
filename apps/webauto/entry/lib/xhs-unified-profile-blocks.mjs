@@ -3,6 +3,7 @@ import fsp from 'node:fs/promises';
 import path from 'node:path';
 import { normalizeAutoscript, validateAutoscript } from '../../../../modules/camo-runtime/src/autoscript/schema.mjs';
 import { AutoscriptRunner } from '../../../../modules/camo-runtime/src/autoscript/runtime.mjs';
+import { getSessionByProfile } from '../../../../modules/camo-runtime/src/utils/browser-service.mjs';
 
 // 编排层：仅组合模块，不含业务细节
 // 模板/runner 已在 camo-runtime 中实现，此文件仅做参数归一化 + 调度
@@ -17,6 +18,7 @@ import {
   parseBool,
   parseNonNegativeInt,
   sanitizeForPath,
+  sleepMs,
 } from './xhs-unified-blocks.mjs';
 import {
   createTaskReporter,
@@ -68,6 +70,18 @@ async function captureStopScreenshot({ profileId, reason, outputDir }) {
   return null;
 }
 
+async function waitForActiveSession(profileId, options = {}) {
+  const timeoutMs = Math.max(2000, Number(options.timeoutMs) || 15000);
+  const intervalMs = Math.max(200, Number(options.intervalMs) || 600);
+  const start = Date.now();
+  while (Date.now() - start <= timeoutMs) {
+    const session = await getSessionByProfile(profileId).catch(() => null);
+    if (session) return { ok: true, session };
+    await sleepMs(intervalMs);
+  }
+  return { ok: false, error: 'session_not_ready' };
+}
+
 export async function ensureProfileSession(profileId, options = {}) {
   const id = String(profileId || '').trim();
   if (!id) return false;
@@ -77,7 +91,12 @@ export async function ensureProfileSession(profileId, options = {}) {
     timeoutMs: 60000,
     headless: options?.headless === true,
   });
-  return Boolean(ret?.ok);
+  if (!ret?.ok) return false;
+  const ready = await waitForActiveSession(id, {
+    timeoutMs: options?.sessionTimeoutMs,
+    intervalMs: options?.sessionIntervalMs,
+  });
+  return Boolean(ready?.ok);
 }
 
 export async function runProfile(spec, argv, baseOverrides = {}) {

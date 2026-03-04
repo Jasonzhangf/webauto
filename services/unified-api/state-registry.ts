@@ -1,17 +1,17 @@
 /**
- * State Registry - Unified state management for WebAuto
+ * State Registry - Unified state management
  * 
  * Records and exposes:
  * - Service states (unified-api, browser-service, search-gate)
  * - Session states (active browser sessions)
  * - Environment states (build version, config paths, feature flags)
  * 
- * Persistence: ~/.webauto/state/core-state.json
+ * Persistence: ${CAMO_DATA_ROOT}/state/core-state.json
  */
 
 import fs from 'node:fs';
 import path from 'node:path';
-import os from 'node:os';
+import { applyCamoEnv } from '../../apps/webauto/entry/lib/camo-env.mjs';
 
 // ===== Types =====
 
@@ -57,11 +57,15 @@ export interface CoreState {
 // ===== State Registry Class =====
 
 function resolveStatePaths() {
-  const home = os.homedir();
-  const stateDir = path.join(home, '.webauto', 'state');
-  const logDir = path.join(home, '.webauto', 'logs');
+  applyCamoEnv();
+  const dataRoot = process.env.CAMO_DATA_ROOT || process.env.CAMO_HOME;
+  if (!dataRoot) {
+    throw new Error('CAMO_DATA_ROOT or CAMO_HOME is required for state registry.');
+  }
+  const stateDir = path.join(dataRoot, 'state');
+  const logDir = path.join(dataRoot, 'logs');
   return {
-    home,
+    home: dataRoot,
     stateDir,
     logDir,
     stateFile: path.join(stateDir, 'core-state.json'),
@@ -338,7 +342,7 @@ let registryInstance: StateRegistry | null = null;
 let registryHome: string | null = null;
 
 export function getStateRegistry(): StateRegistry {
-  const currentHome = os.homedir();
+  const currentHome = resolveStatePaths().home;
   if (!registryInstance || registryHome !== currentHome) {
     registryInstance = new StateRegistry();
     registryHome = currentHome;

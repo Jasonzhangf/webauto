@@ -1,5 +1,5 @@
 // services/unified-api/task-state.ts
-// Unified task state registry for UI ↔ script data sync (webauto-04b)
+// Unified task state registry for UI ↔ script data sync
 
 export type TaskPhase = 'phase1' | 'phase2' | 'phase3' | 'phase4' | 'unified' | 'orchestrate' | 'unknown';
 export type TaskStatus = 'starting' | 'running' | 'paused' | 'completed' | 'failed' | 'aborted';

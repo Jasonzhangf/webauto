@@ -4,19 +4,20 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../..');
-const LAYER_ORDER = ['l0', 'l1', 'l2', 'l3'];
+const LAYER_ORDER = ['l0', 'l1', 'l2', 'l3', 'xhs_collect'];
 const LAYER_SCRIPTS = {
   l0: 'test:e2e-ui:l0',
   l1: 'test:e2e-ui:l1',
   l2: 'test:e2e-ui:l2',
   l3: 'test:e2e-ui:l3',
+  xhs_collect: 'test:xhs:collect',
 };
 
 export function printTestHelp() {
   console.log(`webauto test
 
 Usage:
-  webauto test [--layer <l0|l1|l2|l3|all>] [--output <path>] [--json]
+  webauto test [--layer <l0|l1|l2|l3|xhs_collect|all>] [--output <path>] [--json]
 
 Options:
   --layer, -l   Which layer(s) to run (default: all)
@@ -26,11 +27,14 @@ Options:
   --profile     Pass WEBAUTO_TEST_PROFILE to tests
   --keyword     Pass WEBAUTO_TEST_KEYWORD to tests
   --target      Pass WEBAUTO_TEST_TARGET to tests
+  --xhs-collect Run collect minimal script (xhs collect)
 
 Examples:
   webauto test
   webauto test --layer l0
   webauto test --layer l0,l1 --output ./.tmp/ui-test-report.json
+  webauto test --layer xhs_collect
+  webauto test --layer xhs_collect --xhs-collect --profile <id>
   webauto test --json
 `);
 }
@@ -102,6 +106,7 @@ function runNpmScript(script, env) {
 
 function buildEnv(args) {
   const env = { ...process.env };
+  if (args.xhsCollect === true) env.WEBAUTO_TEST_XHS_COLLECT = '1';
   if (args.headless === true) env.HEADLESS = '1';
   const profile = String(args.profile || '').trim();
   if (profile) env.WEBAUTO_TEST_PROFILE = profile;
@@ -128,6 +133,17 @@ export async function runTestCli(args) {
   const startedAt = new Date().toISOString();
   const startTime = Date.now();
   const env = buildEnv(args);
+  const runCollectSmoke = args.xhsCollect === true;
+
+  if (runCollectSmoke) {
+    const collectStart = Date.now();
+    const ret = await runNpmScript('test:xhs:collect', env);
+    const durationMs = Date.now() - collectStart;
+    results.push({ layer: 'xhs_collect_smoke', ok: ret.ok === true, durationMs, error: ret.ok ? undefined : (ret.error || 'unknown error') });
+    if (!ret.ok) {
+      overallOk = false;
+    }
+  }
 
   const results = [];
   let overallOk = true;

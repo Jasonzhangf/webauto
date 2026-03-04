@@ -50,7 +50,7 @@ function normalizePlatform(input) {
   return raw;
 }
 
-function normalizeText(input) {
+export function normalizeText(input) {
   const value = String(input ?? '').trim();
   return value || null;
 }

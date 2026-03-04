@@ -1,6 +1,6 @@
 # camo-runtime (vendored)
 
-This directory vendors non-CLI runtime capabilities from `@web-auto/camo` for webauto app-side orchestration.
+This directory vendors non-CLI runtime capabilities from `@web-auto/camo` for app-side orchestration.
 
 Included:
 - autoscript schema/runtime/template/action providers

@@ -3,10 +3,55 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 
-export const CONFIG_DIR = path.join(os.homedir(), '.webauto');
-export const PROFILES_DIR = path.join(CONFIG_DIR, 'profiles');
+function resolveHomeDir(platform = process.platform) {
+  if (platform === 'win32') return process.env.USERPROFILE || os.homedir();
+  return process.env.HOME || os.homedir();
+}
+
+function normalizePathForPlatform(input, platform = process.platform) {
+  const raw = String(input || '').trim();
+  const isWinPath = platform === 'win32' || /^[A-Za-z]:[\\/]/.test(raw);
+  const pathApi = isWinPath ? path.win32 : path;
+  return isWinPath ? pathApi.normalize(raw) : path.resolve(raw);
+}
+
+function normalizeRootSuffix(input, suffix, platform = process.platform) {
+  const pathApi = platform === 'win32' ? path.win32 : path;
+  const resolved = normalizePathForPlatform(input, platform);
+  const base = pathApi.basename(resolved).toLowerCase();
+  if (base === suffix || base === `.${suffix}`) return resolved;
+  return pathApi.join(resolved, `.${suffix}`);
+}
+
+export function resolveCamoRoot(options = {}) {
+  const env = options.env || process.env;
+  const platform = String(options.platform || process.platform);
+  const homeDir = String(options.homeDir || resolveHomeDir(platform));
+  const pathApi = platform === 'win32' ? path.win32 : path;
+
+  const explicitHome = String(env.CAMO_HOME || '').trim();
+  if (explicitHome) return normalizePathForPlatform(explicitHome, platform);
+
+  const explicitRoot = String(env.CAMO_ROOT || env.CAMO_PORTABLE_ROOT || '').trim();
+  if (explicitRoot) return normalizeRootSuffix(explicitRoot, 'camo', platform);
+
+  return pathApi.join(homeDir, '.camo');
+}
+
+export function resolveProfilesRoot(options = {}) {
+  const env = options.env || process.env;
+  const camoProfiles = String(env.CAMO_PATHS_PROFILES || env.CAMO_PROFILE_ROOT || '').trim();
+  if (camoProfiles) return normalizePathForPlatform(camoProfiles, options.platform);
+  return path.join(resolveCamoRoot(options), 'profiles');
+}
+
+export const CONFIG_DIR = resolveCamoRoot();
+export const PROFILES_DIR = resolveProfilesRoot();
 export const CONFIG_FILE = path.join(CONFIG_DIR, 'camo-cli.json');
-export const BROWSER_SERVICE_URL = process.env.WEBAUTO_BROWSER_URL || 'http://127.0.0.1:7704';
+export const BROWSER_SERVICE_URL =
+  process.env.CAMO_BROWSER_URL
+  || process.env.CAMO_BROWSER_HTTP_URL
+  || 'http://127.0.0.1:7704';
 
 export function ensureDir(p) {
   if (!fs.existsSync(p)) fs.mkdirSync(p, { recursive: true });

@@ -582,7 +582,7 @@ export async function executeOperation({ profileId, operation, context = {} }) {
     }
 
     if (action === 'evaluate') {
-      return asErrorPayload('JS_DISABLED', 'evaluate is disabled in webauto runtime');
+      return asErrorPayload('JS_DISABLED', 'evaluate is disabled in camo runtime');
     }
 
     if (action === 'click' || action === 'type' || action === 'scroll_into_view') {
