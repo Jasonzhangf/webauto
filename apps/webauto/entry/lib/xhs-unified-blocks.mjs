@@ -96,6 +96,73 @@ function runWebautoCli(args, options = {}) {
   };
 }
 
+export async function ensureTaskServices(argv, options = {}) {
+  const rootDir = String(options.rootDir || process.cwd()).trim() || process.cwd();
+  const stage = String(options.stage || '').trim();
+  const envName = String(argv.env || 'prod').trim() || 'prod';
+  const debugMode = envName === 'debug';
+  const debugActionLogPath = String(options.debugActionLogPath || '').trim();
+  const actionLogPath = debugMode
+    ? (debugActionLogPath || path.join(os.homedir(), '.webauto', 'logs', `input-actions-${Date.now()}.jsonl`))
+    : null;
+
+  let serviceReset = {
+    ok: true,
+    skipped: true,
+    reason: 'service_reset_disabled',
+    actionLogPath: null,
+  };
+  const enableServiceReset = parseBool(argv['service-reset'], true);
+  if (enableServiceReset && stage !== 'links') {
+    serviceReset = await resetTaskServices(argv, {
+      rootDir,
+      debugActionLogPath: actionLogPath || undefined,
+    });
+  } else if (stage === 'links') {
+    serviceReset = {
+      ok: true,
+      skipped: true,
+      reason: 'collect_mode_uses_camo_directly',
+      actionLogPath: null,
+    };
+  }
+
+  const searchGateEnabled = parseBool(argv['search-gate'], true);
+  let searchGate = {
+    ok: true,
+    skipped: true,
+    reason: 'search_gate_disabled',
+  };
+  if (searchGateEnabled) {
+    const timeoutMs = Math.max(1000, Number(options.searchGateTimeoutMs) || 60000);
+    const scriptPath = path.join(rootDir, 'runtime', 'infra', 'utils', 'scripts', 'service', 'start-search-gate.mjs');
+    const ret = spawnSync(process.execPath, [scriptPath], {
+      cwd: rootDir,
+      env: { ...process.env, ...(options.env || {}) },
+      encoding: 'utf8',
+      timeout: timeoutMs,
+      windowsHide: true,
+    });
+    const stdout = String(ret.stdout || '').trim();
+    const stderr = String(ret.stderr || '').trim();
+    if (ret.status !== 0) {
+      throw new Error(`search gate start failed: ${stderr || stdout || 'unknown error'}`);
+    }
+    searchGate = {
+      ok: true,
+      skipped: false,
+      stdout,
+      stderr,
+    };
+  }
+
+  return {
+    actionLogPath,
+    serviceReset,
+    searchGate,
+  };
+}
+
 export async function resetTaskServices(argv, options = {}) {
   const enabled = parseBool(argv['service-reset'], true);
   const rootDir = String(options.rootDir || process.cwd()).trim() || process.cwd();

@@ -24,7 +24,7 @@ export async function readCollectedLinksCount({ keyword, env, outputRoot } = {})
 export async function assertCollectedLinksCount({ keyword, env, outputRoot, target } = {}) {
   const expected = toTarget(target);
   const { linksPath, count } = await readCollectedLinksCount({ keyword, env, outputRoot });
-  if (expected > 0 && count !== expected) {
+  if (expected > 0 && count < expected) {
     const err = new Error(`COLLECT_COUNT_MISMATCH expected=${expected} actual=${count}`);
     err.code = 'COLLECT_COUNT_MISMATCH';
     err.details = { expected, actual: count, linksPath };

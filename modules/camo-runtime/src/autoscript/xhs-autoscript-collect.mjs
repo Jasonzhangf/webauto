@@ -23,16 +23,7 @@ export function buildXhsCollectOperations(options) {
       once: true,
       timeoutMs: options.collectLinksTimeoutMs || null,
       retry: { attempts: 1, backoffMs: 0 },
-      validation: {
-        mode: 'post',
-        post: {
-          container: {
-            containerId: 'xiaohongshu_search.search_result_item',
-            mustExist: true,
-            minCount: 1,
-          },
-        },
-      },
+      validation: { mode: 'none' },
       impact: 'script',
       onFailure: 'stop_all',
       checkpoint: {

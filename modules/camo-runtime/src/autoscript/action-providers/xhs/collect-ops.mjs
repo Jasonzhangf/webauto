@@ -5,11 +5,11 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { sleep, readLocation, clickPoint, clearAndType, pressKey, resolveSelectorTarget, sleepRandom, evaluateReadonly } from './dom-ops.mjs';
-import { readSearchInput, readSearchViewportReady, readSearchCandidates, ensureSearchCandidateFullyVisible } from './search-ops.mjs';
-import { closeDetailToSearch, readDetailSnapshot, readDetailLinks } from './detail-ops.mjs';
+import { readSearchInput, readSearchViewportReady, readSearchCandidates } from './search-ops.mjs';
+import { closeDetailToSearch } from './detail-ops.mjs';
 import { buildSelectorCheck, ensureActiveSession, maybeSelector } from '../../../container/runtime-core/index.mjs';
 import { getDomSnapshotByProfile } from '../../../utils/browser-service.mjs';
-import { resolveXhsOutputContext, mergeLinksJsonl, readJsonlRows, writeContentMarkdown } from './persistence.mjs';
+import { resolveXhsOutputContext, mergeLinksJsonl, readJsonlRows } from './persistence.mjs';
 import { dumpNoProgressDiagnostics } from './diagnostic-ops.mjs';
 
 const SEARCH_LIST_SELECTOR = '.feeds-container';
@@ -142,50 +142,6 @@ function normalizeAnchorsSample(sample) {
       noteId: item?.noteId ? String(item.noteId) : null,
       href: item?.href ? String(item.href) : null,
     }));
-}
-
-function buildClickTargetInfoScript(noteId, href) {
-  const noteLiteral = JSON.stringify(String(noteId || '').trim());
-  const hrefLiteral = JSON.stringify(String(href || '').trim());
-  return `(() => {
-    const targetNoteId = ${noteLiteral};
-    const targetHref = ${hrefLiteral};
-    const items = Array.from(document.querySelectorAll('.note-item'));
-    const normalize = (value) => String(value || '').replace(/\s+/g, ' ').trim();
-    const parseNoteId = (href) => {
-      if (!href) return '';
-      const cleaned = String(href).split('#')[0];
-      const base = cleaned.split('?')[0];
-      const seg = base.split('/').filter(Boolean).pop() || '';
-      return seg.trim();
-    };
-    const pickMatch = () => {
-      for (const item of items) {
-        let noteId = item.getAttribute('data-note-id') || item.dataset?.noteId || '';
-        const cover = item.querySelector('a.cover');
-        const href = String(cover?.getAttribute('href') || '').trim();
-        if (!noteId && href) noteId = parseNoteId(href);
-        if (targetNoteId && noteId === targetNoteId) return { item, href, noteId };
-        if (targetHref && href && (href === targetHref || href.includes(targetHref))) {
-          return { item, href, noteId: noteId || null };
-        }
-      }
-      return null;
-    };
-    const match = pickMatch();
-    const text = match?.item ? normalize(match.item.textContent || '') : '';
-    const selector = match?.noteId ? '.note-item[data-note-id="' + String(match.noteId) + '"]' : '.note-item';
-    return {
-      selector,
-      noteId: match?.noteId || targetNoteId || null,
-      url: match?.href || targetHref || null,
-      text: text ? text.slice(0, 200) : null,
-    };
-  })()`;
-}
-
-async function readClickTargetInfo(profileId, { noteId, href } = {}) {
-  return evaluateReadonly(profileId, buildClickTargetInfoScript(noteId, href));
 }
 
 async function readAnchorsSample(profileId) {
@@ -647,82 +603,10 @@ export async function executeCollectLinksOperation({ profileId, params = {}, con
     const selectorsMeta = await loadSearchSelectors();
     const detailVisible = await waitForDetailVisible(profileId, 5000);
     if (detailVisible?.detailVisible === true) {
-    const detailLinks = await readDetailLinks(profileId);
-    const detailSnapshot = await readDetailSnapshot(profileId);
-    if (detailLinks?.currentUrl && detailLinks.noteIdFromUrl) {
-      if (!state.preCollectedNoteIds.includes(detailLinks.noteIdFromUrl)) {
-        state.preCollectedNoteIds.push(detailLinks.noteIdFromUrl);
-        const beforeCount = state.collectPersistedCount;
-        emitOperationProgress(context, { kind: 'collect_candidate', stage: 'detail_links', candidateCount: 1, persistPath: linksPath });
-        const collectedAt = new Date().toISOString();
-        const linkPayload = {
-          noteId: detailLinks.noteIdFromUrl,
-          safeDetailUrl: detailLinks.currentUrl,
-          noteUrl: detailLinks.currentUrl,
-          listUrl: state.lastListUrl,
-          title: detailSnapshot?.title || null,
-          author: {
-            name: detailSnapshot?.authorName || null,
-            id: detailSnapshot?.authorId || null,
-            link: detailSnapshot?.authorLink || null,
-          },
-          collectedAt,
-        };
-        const mergeResult = await mergeLinksJsonl({
-          filePath: linksPath,
-          links: [linkPayload],
-        });
-        if (phase2LinksPath) {
-          await mergeLinksJsonl({ filePath: phase2LinksPath, links: [linkPayload] }).catch(() => {});
-        }
-          emitOperationProgress(context, {
-            kind: 'collect_persist',
-            stage: 'detail_links',
-            added: mergeResult.added,
-            deduped: mergeResult.existing + mergeResult.added - mergeResult.total,
-            totalBefore: beforeCount,
-            totalAfter: mergeResult.total,
-            persistPath: linksPath,
-          });
-        if (mergeResult.added > 0) {
-          state.collectPersistedCount = mergeResult.total;
-          state.collectCount = mergeResult.total;
-          markProgress();
-          resetNoProgress();
-          resetAddedZero();
-          progressedThisRound = true;
-          state.collectLastAnchor = detailLinks.noteIdFromUrl;
-          state.collectLastUrl = detailLinks.currentUrl;
-          if (detailSnapshot?.noteIdFromUrl) {
-            const outputCtxForNote = resolveXhsOutputContext({ params: { keyword, env }, state, noteId: detailSnapshot.noteIdFromUrl });
-            try {
-              await writeContentMarkdown({
-                filePath: outputCtxForNote.contentPath,
-                imagesDir: outputCtxForNote.imagesDir,
-                noteId: detailSnapshot.noteIdFromUrl,
-                keyword,
-                detailUrl: detailLinks.currentUrl,
-                detail: detailSnapshot,
-                includeImages: Boolean(params.doImages),
-              });
-            } catch {
-              // ignore detail persist failure
-            }
-          }
-        } else {
-          progressedThisRound = false;
-          markAddedZero();
-        }
-          pushTrace({ kind: 'collect', stage: 'link_collected', noteId: detailLinks.noteIdFromUrl, collectCount: state.collectCount });
-          emitOperationProgress(context, { kind: 'collect', stage: 'link_collected', noteId: detailLinks.noteIdFromUrl, collectCount: state.collectCount });
-        }
-      }
       await closeDetailToSearch(profileId, pushTrace);
       await waitForSearchReady(profileId, 5000);
       await sleep(300);
-      if (!progressedThisRound) {
-        markNoProgress();
-      }
+      markNoProgress();
       continue;
     }
 
@@ -749,17 +633,28 @@ export async function executeCollectLinksOperation({ profileId, params = {}, con
           };
         }).filter(Boolean);
         if (candidates.length > 0) {
+          const remaining = Math.max(0, maxNotes - state.collectPersistedCount);
+          if (remaining <= 0) {
+            continue;
+          }
+          const filtered = [];
           for (const candidate of candidates) {
             const noteId = String(candidate?.noteId || '').trim();
             if (noteId && !state.preCollectedNoteIds.includes(noteId)) {
               state.preCollectedNoteIds.push(noteId);
+              filtered.push(candidate);
             }
+            if (filtered.length >= remaining) break;
+          }
+          if (filtered.length === 0) {
+            markAddedZero();
+            continue;
           }
           const beforeCount = state.collectPersistedCount;
-          emitOperationProgress(context, { kind: 'collect_candidate', stage: 'search_result_tokens', candidateCount: candidates.length, persistPath: linksPath });
-          const mergeResult = await mergeLinksJsonl({ filePath: linksPath, links: candidates });
+          emitOperationProgress(context, { kind: 'collect_candidate', stage: 'search_result_tokens', candidateCount: filtered.length, persistPath: linksPath });
+          const mergeResult = await mergeLinksJsonl({ filePath: linksPath, links: filtered });
           if (phase2LinksPath) {
-            await mergeLinksJsonl({ filePath: phase2LinksPath, links: candidates }).catch(() => {});
+            await mergeLinksJsonl({ filePath: phase2LinksPath, links: filtered }).catch(() => {});
           }
           emitOperationProgress(context, {
             kind: 'collect_persist',
@@ -777,6 +672,9 @@ export async function executeCollectLinksOperation({ profileId, params = {}, con
             resetNoProgress();
             resetAddedZero();
             progressedThisRound = true;
+            const lastCandidate = candidates[candidates.length - 1];
+            state.collectLastAnchor = lastCandidate?.noteId || state.collectLastAnchor;
+            state.collectLastUrl = lastCandidate?.safeDetailUrl || state.collectLastUrl || state.lastListUrl || null;
           } else {
             markAddedZero();
           }
@@ -786,7 +684,7 @@ export async function executeCollectLinksOperation({ profileId, params = {}, con
         }
       }
     }
-    if (anchorSnapshot.anchorCount === 0) {
+    if (anchorSnapshot.visibleCount === 0) {
       await pressKey(profileId, 'PageDown');
       await sleep(400);
       const retried = await readSearchAnchors(profileId, {
@@ -797,12 +695,12 @@ export async function executeCollectLinksOperation({ profileId, params = {}, con
       anchorSnapshot = retried;
       state.collectAnchorsSample = normalizeAnchorsSample(await readAnchorsSample(profileId));
     }
-    if (anchorSnapshot.anchorCount === 0) {
+    if (anchorSnapshot.visibleCount === 0 && anchorSnapshot.containerVisible === false) {
       state.collectAnchorEmptyRounds = (state.collectAnchorEmptyRounds || 0) + 1;
     } else {
       state.collectAnchorEmptyRounds = 0;
     }
-    if (anchorSnapshot.containerVisible === false || state.collectAnchorEmptyRounds >= collectAnchorEmptyRounds) {
+    if (state.collectAnchorEmptyRounds >= collectAnchorEmptyRounds) {
       const lastUrl = await readLocation(profileId, { timeoutMs: 3000 });
       await handleCollectAnchorEmpty({
         profileId,
@@ -821,49 +719,21 @@ export async function executeCollectLinksOperation({ profileId, params = {}, con
         selectors: anchorSnapshot.selectors,
       });
     }
-
-    const searchReady = await waitForSearchReady(profileId, 5000);
-    if (!searchReady) {
-      await pressKey(profileId, 'Escape');
-      await sleep(300);
+    if (!progressedThisRound && state.collectCount < maxNotes) {
       markNoProgress();
-      continue;
     }
-
-    const rows = Array.isArray(searchReady.rows) ? searchReady.rows : [];
-    if (rows.length === 0) {
-      await pressKey(profileId, 'PageDown');
-      await sleep(400);
-      markNoProgress();
-      continue;
-    }
-
-    const candidatesSample = rows.slice(0, 10).map((row) => ({
-      noteId: row?.noteId ? String(row.noteId) : null,
-      href: row?.href ? String(row.href) : null,
-    }));
-    if (candidatesSample.length > 0) {
-      state.collectAnchorsSample = candidatesSample;
-    }
-
-    const targetIndex = state.collectIndex || 0;
-    if (targetIndex >= rows.length) {
-      await pressKey(profileId, 'PageDown');
-      await sleep(400);
-      markNoProgress();
-      continue;
-    }
-
-    const target = rows.find((row) => row.index === targetIndex) || rows[0];
-    if (target?.noteId || target?.href) {
-      state.collectLastClickTarget = {
-        noteId: target?.noteId ? String(target.noteId) : null,
-        selector: anchorSnapshot.anchorSelector || '.note-item',
-        idx: targetIndex,
-        text: null,
-        url: target?.href ? String(target.href) : null,
+    if (anchorSnapshot.anchorCount > 0 && (state.collectAddedZeroRounds || 0) >= collectAddedZeroRounds) {
+      const error = new Error('COLLECT_ADDED_ZERO');
+      error.code = 'COLLECT_ADDED_ZERO';
+      error.details = {
+        stage: 'collect_links',
+        expected: maxNotes,
+        actual: state.collectPersistedCount,
+        persistPath: linksPath,
+        anchorsSample: state.collectAnchorsSample,
+        lastClickTarget: state.collectLastClickTarget,
       };
-      state.lastClickTarget = state.collectLastClickTarget;
+      throw error;
     }
 
     await handleCollectNoProgress({
@@ -887,147 +757,9 @@ export async function executeCollectLinksOperation({ profileId, params = {}, con
       noProgressRounds: state.collectNoProgressRounds,
       maxNoProgressRounds: collectNoProgressRounds,
     });
-    if (!target?.center) {
-      state.collectIndex = (state.collectIndex || 0) + 1;
-      markNoProgress();
-      continue;
-    }
 
-    if (state.preCollectedNoteIds.includes(target.noteId)) {
-      state.collectIndex = (state.collectIndex || 0) + 1;
-      markNoProgress();
-      continue;
-    }
-
-    if (!target.inViewport) {
-      await ensureSearchCandidateFullyVisible(profileId, target.noteId || '');
-    }
-    const clickInfo = await readClickTargetInfo(profileId, {
-      noteId: target.noteId || '',
-      href: target.href || '',
-    });
-    state.collectLastClickTarget = {
-      noteId: target.noteId || clickInfo?.noteId || null,
-      selector: clickInfo?.selector || anchorSnapshot.anchorSelector || null,
-      idx: targetIndex,
-      text: clickInfo?.text || null,
-      url: clickInfo?.url || target.href || null,
-    };
-    state.lastClickTarget = state.collectLastClickTarget;
-    await clickPoint(profileId, target.center, { steps: 3 });
-    pushTrace({ kind: 'click', stage: 'open_detail', noteId: target.noteId, selector: target.selector, collectIndex: targetIndex });
-
-    let openedDetail = await waitForDetailVisible(profileId, 5000);
-    if (!openedDetail?.detailVisible) {
-      let recovered = false;
-      for (let attempt = 2; attempt <= collectIndexMaxAttempts; attempt += 1) {
-        await clickPoint(profileId, target.center, { steps: 3 });
-        pushTrace({ kind: 'click', stage: 'open_detail_retry', noteId: target.noteId, selector: target.selector, collectIndex: targetIndex, attempt });
-        openedDetail = await waitForDetailVisible(profileId, 5000);
-        if (openedDetail?.detailVisible) {
-          recovered = true;
-          break;
-        }
-      }
-      if (!recovered) {
-        if (collectIndexFailurePolicy === 'skip') {
-          state.collectIndex = (state.collectIndex || 0) + 1;
-          markNoProgress();
-          continue;
-        }
-        return { ok: false, code: 'COLLECT_INDEX_OPEN_FAILED', message: `Index ${targetIndex} open failed after ${collectIndexMaxAttempts}` };
-      }
-    }
-
-    const afterUrl = await readLocation(profileId);
-      const detailSnapshot = await readDetailSnapshot(profileId);
-    if (detailSnapshot?.noteIdFromUrl && !state.preCollectedNoteIds.includes(detailSnapshot.noteIdFromUrl)) {
-      state.preCollectedNoteIds.push(detailSnapshot.noteIdFromUrl);
-      const beforeCount = state.collectPersistedCount;
-      emitOperationProgress(context, { kind: 'collect_candidate', stage: 'detail_snapshot', candidateCount: 1, persistPath: linksPath });
-      const collectedAt = new Date().toISOString();
-      const linkPayload = {
-        noteId: detailSnapshot.noteIdFromUrl,
-        safeDetailUrl: afterUrl,
-        noteUrl: afterUrl,
-        listUrl: state.lastListUrl,
-        title: detailSnapshot?.title || null,
-        author: {
-          name: detailSnapshot?.authorName || null,
-          id: detailSnapshot?.authorId || null,
-          link: detailSnapshot?.authorLink || null,
-        },
-        collectedAt,
-      };
-      const mergeResult = await mergeLinksJsonl({
-        filePath: linksPath,
-        links: [linkPayload],
-      });
-      if (phase2LinksPath) {
-        await mergeLinksJsonl({ filePath: phase2LinksPath, links: [linkPayload] }).catch(() => {});
-      }
-      emitOperationProgress(context, {
-        kind: 'collect_persist',
-        stage: 'detail_snapshot',
-        added: mergeResult.added,
-        deduped: mergeResult.existing + mergeResult.added - mergeResult.total,
-        totalBefore: beforeCount,
-        totalAfter: mergeResult.total,
-        persistPath: linksPath,
-      });
-      if (mergeResult.added > 0) {
-        state.collectPersistedCount = mergeResult.total;
-        state.collectCount = mergeResult.total;
-        markProgress();
-        resetNoProgress();
-        progressedThisRound = true;
-        state.collectLastAnchor = detailSnapshot.noteIdFromUrl;
-        state.collectLastUrl = afterUrl;
-        resetAddedZero();
-        if (detailSnapshot?.noteIdFromUrl) {
-          const outputCtxForNote = resolveXhsOutputContext({ params: { keyword, env }, state, noteId: detailSnapshot.noteIdFromUrl });
-          try {
-            await writeContentMarkdown({
-              filePath: outputCtxForNote.contentPath,
-              imagesDir: outputCtxForNote.imagesDir,
-              noteId: detailSnapshot.noteIdFromUrl,
-              keyword,
-              detailUrl: afterUrl,
-              detail: detailSnapshot,
-              includeImages: Boolean(params.doImages),
-            });
-          } catch {
-            // ignore detail persist failure
-          }
-        }
-      } else {
-        progressedThisRound = false;
-        markAddedZero();
-      }
-      pushTrace({ kind: 'collect', stage: 'link_collected', noteId: detailSnapshot.noteIdFromUrl, url: afterUrl, collectCount: state.collectCount });
-      emitOperationProgress(context, { kind: 'collect', stage: 'link_collected', noteId: detailSnapshot.noteIdFromUrl, url: afterUrl, collectCount: state.collectCount });
-    }
-
-    state.collectIndex = (state.collectIndex || 0) + 1;
-    await closeDetailToSearch(profileId, pushTrace);
-    await waitForSearchReady(profileId, 5000);
-    await sleep(300);
-    if (!progressedThisRound && state.collectCount < maxNotes) {
-      markNoProgress();
-    }
-    if (anchorSnapshot.anchorCount > 0 && (state.collectAddedZeroRounds || 0) >= collectAddedZeroRounds) {
-      const error = new Error('COLLECT_ADDED_ZERO');
-      error.code = 'COLLECT_ADDED_ZERO';
-      error.details = {
-        stage: 'collect_links',
-        expected: maxNotes,
-        actual: state.collectPersistedCount,
-        persistPath: linksPath,
-        anchorsSample: state.collectAnchorsSample,
-        lastClickTarget: state.collectLastClickTarget,
-      };
-      throw error;
-    }
+    await pressKey(profileId, 'PageDown');
+    await sleep(400);
   }
 
   state.tabState = {

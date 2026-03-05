@@ -27,11 +27,11 @@ import {
 import {
   nowIso,
   formatRunLabel,
+  ensureTaskServices,
   parseBool,
   parseIntFlag,
   parseNonNegativeInt,
   sanitizeForPath,
-  resetTaskServices,
 } from './xhs-unified-blocks.mjs';
 import {
   toNumber,
@@ -148,30 +148,26 @@ export async function runUnified(argv, overrides = {}) {
     `run-${runLabel}`,
   );
   if (!planOnly) {
-    // Skip UI CLI service reset for collect mode - use camo directly
-    if (stage !== 'links') {
-      const serviceReset = await resetTaskServices(argv, {
-        rootDir: process.cwd(),
-        debugActionLogPath: path.join(mergedDir, 'profiles', 'input-actions.jsonl'),
-      });
-      console.log(JSON.stringify({
-        event: 'xhs.unified.service_reset',
-        ok: serviceReset.ok,
-        skipped: serviceReset.skipped === true,
-        reason: serviceReset.reason || null,
-        actionLogPath: serviceReset.actionLogPath || null,
-        statusReady: Boolean(serviceReset.status?.json?.ready),
-      }));
-    } else {
-      console.log(JSON.stringify({
-        event: 'xhs.unified.service_reset',
-        ok: true,
-        skipped: true,
-        reason: 'collect_mode_uses_camo_directly',
-        actionLogPath: null,
-        statusReady: true,
-      }));
-    }
+    const services = await ensureTaskServices(argv, {
+      rootDir: process.cwd(),
+      stage,
+      debugActionLogPath: path.join(mergedDir, 'profiles', 'input-actions.jsonl'),
+      searchGateTimeoutMs: 60000,
+    });
+    console.log(JSON.stringify({
+      event: 'xhs.unified.service_reset',
+      ok: services.serviceReset.ok,
+      skipped: services.serviceReset.skipped === true,
+      reason: services.serviceReset.reason || null,
+      actionLogPath: services.serviceReset.actionLogPath || null,
+      statusReady: Boolean(services.serviceReset.status?.json?.ready),
+    }));
+    console.log(JSON.stringify({
+      event: 'xhs.unified.search_gate',
+      ok: services.searchGate.ok,
+      skipped: services.searchGate.skipped === true,
+      reason: services.searchGate.reason || null,
+    }));
     await Promise.all(profiles.map((profileId) => ensureProfileSession(profileId, { headless })));
   }
   const planPath = path.join(mergedDir, 'plan.json');
@@ -491,4 +487,3 @@ export function printUnifiedHelp() {
     '  --service-reset <bool>       Reset ui cli services before task',
   ].join("\n"));
 }
-
