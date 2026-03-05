@@ -31,6 +31,12 @@ export async function readCommentsSnapshot(profileId) {
     const scopeSelectors = ['.note-detail-mask .interaction-container', '.note-detail-mask .comments-container', '.note-detail-page .interaction-container', '.note-detail-page .comments-container', '.interaction-container', '.comments-container', '.comments-el', '.note-scroller', '.note-detail-mask', '.note-detail-page'];
     const patterns = [/([0-9]+(?:\\.[0-9]+)?(?:万|w|W)?)\\s*条?评论/, /评论\\s*([0-9]+(?:\\.[0-9]+)?(?:万|w|W)?)/, /共\\s*([0-9]+(?:\\.[0-9]+)?(?:万|w|W)?)\\s*条/];
     let expectedCommentsCount = null;
+    const chatCountEl = document.querySelector('.chat-wrapper .count');
+    const chatCountText = String(chatCountEl?.textContent || '').trim();
+    const chatCountParsed = chatCountText ? parseCountToken(chatCountText) : null;
+    if (Number.isFinite(chatCountParsed) && chatCountParsed >= 0) {
+      expectedCommentsCount = chatCountParsed;
+    }
     for (const selector of scopeSelectors) {
       const root = document.querySelector(selector);
       if (!root) continue;
@@ -52,16 +58,34 @@ export async function readCommentsSnapshot(profileId) {
       const rect = node.getBoundingClientRect();
       const authorEl = node.querySelector('.author, .nickname, [class*="author"], [class*="nickname"]');
       const contentEl = node.querySelector('.content, .comment-text, [class*="content"], [class*="comment-text"]');
+      const nodeId = node.getAttribute('data-id') || node.getAttribute('data-comment-id') || node.id || '';
+      const metaUserId = node.getAttribute('data-user-id') || node.getAttribute('data-userid') || node.getAttribute('data-uid') || '';
+      const authorLinkEl = authorEl?.querySelector?.('a[href]') || null;
+      const authorLink = String(authorLinkEl?.href || authorLinkEl?.getAttribute?.('href') || '').trim();
+      let authorId = String(metaUserId || '').trim();
+      if (!authorId && authorLink) {
+        const match = authorLink.match(/\/user\/profile\/([^/?#]+)/) || authorLink.match(/\/user\/([^/?#]+)/);
+        if (match && match[1]) authorId = String(match[1]);
+      }
+      const levelToken = node.getAttribute('data-level') || node.getAttribute('data-layer') || '';
+      const level = Number.isFinite(Number(levelToken)) ? Number(levelToken) : (node.classList?.contains('sub-comment') ? 2 : 1);
       const author = String(authorEl?.textContent || '').replace(/[:：]$/, '').trim() || '匿名用户';
       const content = String(contentEl?.textContent || '').trim();
       const vw = Number(window.innerWidth || 0);
       const vh = Number(window.innerHeight || 0);
       comments.push({
-        index, author, content, inViewport: rect.right > 0 && rect.bottom > 0 && rect.left < vw && rect.top < vh,
+        index,
+        commentId: String(nodeId || ''),
+        author,
+        authorId: authorId || null,
+        authorLink: authorLink || null,
+        content,
+        level,
+        inViewport: rect.right > 0 && rect.bottom > 0 && rect.left < vw && rect.top < vh,
         rect: { left: Number(rect.left || 0), top: Number(rect.top || 0), width: Number(rect.width || 0), height: Number(rect.height || 0) },
       });
     }
-    return { detailVisible, hasCommentsContext, expectedCommentsCount, commentCount: comments.length, comments };
+    return { detailVisible, hasCommentsContext, expectedCommentsCount, commentCount: comments.length, comments, commentCountFromUi: chatCountParsed ?? null, commentCountFromUiText: chatCountText || null };
   })()`;
   return evaluateReadonly(profileId, script);
 }

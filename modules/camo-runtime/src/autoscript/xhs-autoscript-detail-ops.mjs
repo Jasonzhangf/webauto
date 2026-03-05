@@ -37,6 +37,8 @@ export function buildXhsDetailOperations(options) {
     maxLikesPerRound,
     replyText,
     noteIntervalMs,
+    tabCount,
+    autoCloseDetail,
   } = options;
 
   const matchGateEnabled = !options.stageDetailEnabled && (stageLikeEnabled || stageReplyEnabled);
@@ -120,6 +122,8 @@ export function buildXhsDetailOperations(options) {
       enabled: commentsHarvestEnabled,
       action: 'xhs_comments_harvest',
       params: {
+        tabCount,
+        commentBudget: 50,
         env,
         keyword,
         outputRoot,
@@ -135,8 +139,8 @@ export function buildXhsDetailOperations(options) {
         stallRounds: 8,
         recoveryNoProgressRounds: 3,
         recoveryStuckRounds: 2,
-        recoveryUpRounds: 2,
-        recoveryDownRounds: 3,
+        recoveryUpRounds: 3,
+        recoveryDownRounds: 1,
         maxRecoveries: 3,
         adaptiveMaxRounds: true,
         adaptiveExpectedPerRound: 6,
@@ -224,7 +228,7 @@ export function buildXhsDetailOperations(options) {
     },
     {
       id: 'close_detail',
-      enabled: options.detailLoopEnabled,
+      enabled: options.detailLoopEnabled && autoCloseDetail !== false,
       action: 'xhs_close_detail',
       params: {},
       trigger: 'detail_modal.exist',
@@ -254,16 +258,15 @@ export function buildXhsDetailOperations(options) {
       pacing: { operationMinIntervalMs: noteIntervalMs, eventCooldownMs: Math.max(400, Math.floor(noteIntervalMs / 2)), jitterMs: 160 },
     },
     {
-      id: 'switch_tab_round_robin',
+      id: 'tab_switch_if_needed',
       enabled: options.detailLoopEnabled,
-      action: 'tab_pool_switch_next',
-      params: { settleMs: 450 },
-      trigger: detailOpenByLinks ? 'detail_modal.exist' : 'search_result_item.exist',
-      dependsOn: ['wait_between_notes', 'ensure_tab_pool'],
+      action: 'xhs_tab_switch_if_needed',
+      params: { tabCount, commentBudget: 50 },
+      trigger: 'detail_modal.exist',
+      dependsOn: ['comments_harvest'],
       once: false,
-      oncePerAppear: false,
-      timeoutMs: 180000,
-      retry: { attempts: 2, backoffMs: 500 },
+      oncePerAppear: true,
+      retry: { attempts: 1, backoffMs: 0 },
       impact: 'op',
       onFailure: 'continue',
     },
@@ -288,7 +291,7 @@ export function buildXhsDetailOperations(options) {
         openByLinksMaxAttempts,
       },
       trigger: detailOpenByLinks ? 'detail_modal.exist' : 'search_result_item.exist',
-      dependsOn: ['switch_tab_round_robin'],
+      dependsOn: ['wait_between_notes', 'ensure_tab_pool', 'tab_switch_if_needed', 'comments_harvest'],
       once: false,
       oncePerAppear: false,
       timeoutMs: 90000,
@@ -303,4 +306,3 @@ export function buildXhsDetailOperations(options) {
     },
   ];
 }
-

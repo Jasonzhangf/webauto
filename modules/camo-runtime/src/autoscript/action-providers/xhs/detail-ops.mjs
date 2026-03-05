@@ -1,4 +1,4 @@
-import { evaluateReadonly } from './dom-ops.mjs';
+import { evaluateReadonly, pressKey, sleep } from './dom-ops.mjs';
 import { getProfileState } from './state.mjs';
 
 export async function readDetailLinks(profileId) {
@@ -28,9 +28,37 @@ export async function readDetailSnapshot(profileId) {
     const detailRoot = document.querySelector('.note-detail-mask') || document.querySelector('.note-detail-page') || document.querySelector('.note-detail-dialog') || document.body;
     const text = (selector) => normalize(detailRoot?.querySelector(selector)?.textContent || '');
     const title = text('.note-title').slice(0, 200);
-    const content = text('.note-content');
+    const contentText = text('.note-content');
     const href = String(location.href || '');
     const noteMatch = href.match(/\\/explore\\/([^/?#]+)/);
+    const resolveAuthorInfo = () => {
+      const wrapper = detailRoot?.querySelector?.('.author-wrapper')
+        || detailRoot?.querySelector?.('.author')
+        || detailRoot?.querySelector?.('[class*="author"]')
+        || document.querySelector('.author-wrapper')
+        || document.querySelector('.author')
+        || document.querySelector('[class*="author"]');
+      const nameNode = wrapper?.querySelector?.('.name, .nickname, .author-name, [class*="name"], [class*="nickname"]') || wrapper;
+      const authorName = normalize(nameNode?.textContent || '');
+      const linkNode = wrapper?.querySelector?.('a[href]') || document.querySelector('.author-wrapper a[href]') || null;
+      const rawLink = normalize(linkNode?.href || linkNode?.getAttribute?.('href') || '');
+      const dataSources = [wrapper, linkNode].filter(Boolean);
+      let authorId = '';
+      for (const node of dataSources) {
+        const ds = node?.dataset || {};
+        authorId = normalize(ds.userId || ds.userid || ds.uid || ds.id || ds.authorId || '') || authorId;
+        if (!authorId && node?.getAttribute) {
+          authorId = normalize(node.getAttribute('data-user-id') || node.getAttribute('data-userid') || node.getAttribute('data-uid') || node.getAttribute('data-id') || node.getAttribute('data-author-id') || '') || authorId;
+        }
+        if (authorId) break;
+      }
+      if (!authorId && rawLink) {
+        const match = rawLink.match(/\\/user\\/profile\\/([^/?#]+)/) || rawLink.match(/\\/user\\/([^/?#]+)/);
+        if (match && match[1]) authorId = String(match[1]);
+      }
+      return { authorName, authorId: authorId || null, authorLink: rawLink || null };
+    };
+    const author = resolveAuthorInfo();
     const imageNodes = Array.from(detailRoot?.querySelectorAll?.('.note-content img, .swiper-wrapper img, .media-container img, img') || []);
     const imageSet = new Set();
     for (const node of imageNodes) {
@@ -52,10 +80,22 @@ export async function readDetailSnapshot(profileId) {
     }
     const commentsContextAvailable = Boolean(detailRoot?.querySelector?.('.comments-container') || detailRoot?.querySelector?.('.comment-list') || detailRoot?.querySelector?.('.comment-item') || detailRoot?.querySelector?.('[class*="comment-item"]') || detailRoot?.querySelector?.('.note-scroller'));
     return {
-      title, contentLength: content.length, contentPreview: content.slice(0, 500),
-      noteIdFromUrl: noteMatch && noteMatch[1] ? String(noteMatch[1]) : null, href,
-      textPresent: Boolean(title || content), imageCount: imageSet.size, imageUrls: Array.from(imageSet).slice(0, 24),
-      videoPresent, videoUrl: videoUrl || null, commentsContextAvailable, capturedAt: new Date().toISOString(),
+      title,
+      contentLength: contentText.length,
+      contentText,
+      contentPreview: contentText.slice(0, 500),
+      noteIdFromUrl: noteMatch && noteMatch[1] ? String(noteMatch[1]) : null,
+      href,
+      authorName: author.authorName || null,
+      authorId: author.authorId || null,
+      authorLink: author.authorLink || null,
+      textPresent: Boolean(title || contentText),
+      imageCount: imageSet.size,
+      imageUrls: Array.from(imageSet).slice(0, 24),
+      videoPresent,
+      videoUrl: videoUrl || null,
+      commentsContextAvailable,
+      capturedAt: new Date().toISOString(),
     };
   })()`;
   return evaluateReadonly(profileId, script);
@@ -171,9 +211,22 @@ export async function readDetailCloseTarget(profileId) {
 }
 
 export async function closeDetailToSearch(profileId, pushTrace = null) {
+  await pressKey(profileId, 'Escape');
+  if (typeof pushTrace === 'function') {
+    pushTrace({ kind: 'key', stage: 'close_detail', key: 'Escape' });
+  }
+  await sleep(300);
+  const escVisible = await isDetailVisible(profileId);
+  if (!escVisible?.detailVisible) return { ok: true, method: 'esc' };
+
   const closeTarget = await readDetailCloseTarget(profileId);
   if (!closeTarget?.found) return { ok: false, reason: 'no_close_button' };
   const { clickPoint } = await import('./dom-ops.mjs');
   await clickPoint(profileId, closeTarget.center);
-  return { ok: true };
+  if (typeof pushTrace === 'function') {
+    pushTrace({ kind: 'click', stage: 'close_detail', selector: closeTarget.selector || null });
+  }
+  await sleep(300);
+  const visible = await isDetailVisible(profileId);
+  return { ok: !visible?.detailVisible, method: 'x' };
 }

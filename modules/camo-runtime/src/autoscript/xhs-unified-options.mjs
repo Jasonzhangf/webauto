@@ -103,6 +103,7 @@ export function resolveXhsUnifiedOptions(rawOptions = {}) {
   const doReply = toBoolean(rawOptions.doReply, false);
   const doOcr = toBoolean(rawOptions.doOcr, false);
   const persistComments = toBoolean(rawOptions.persistComments, true);
+  const autoCloseDetail = toBoolean(rawOptions.autoCloseDetail, true);
   const stage = toTrimmedString(rawOptions.stage, 'full').toLowerCase();
   const stageLinksRequested = toBoolean(rawOptions.stageLinksEnabled, true);
   const stageContentEnabled = toBoolean(rawOptions.stageContentEnabled, true);
@@ -120,7 +121,7 @@ export function resolveXhsUnifiedOptions(rawOptions = {}) {
   const detailOpenByLinks = toBoolean(rawOptions.detailOpenByLinks, stageLinksEnabled && detailLoopEnabled);
   const openByLinksMaxAttempts = toPositiveInt(rawOptions.openByLinksMaxAttempts, 3, 1);
   const detailLinksStartup = detailOpenByLinks && stage === 'detail';
-  if (!tabCountProvided && detailOpenByLinks) tabCount = 4;
+  if (!tabCountProvided && detailLoopEnabled) tabCount = 4;
   const detailHarvestEnabled = detailLoopEnabled && (doHomepage || doImages || doComments || doOcr);
   const commentsHarvestEnabled = detailLoopEnabled && (doComments || stageLikeEnabled || stageReplyEnabled);
   const matchGateEnabled = !stageDetailEnabled && (stageLikeEnabled || stageReplyEnabled);
@@ -200,6 +201,7 @@ export function resolveXhsUnifiedOptions(rawOptions = {}) {
     stageReplyEnabled,
     stageDetailEnabled,
     persistComments,
+    autoCloseDetail,
     matchMode,
     matchMinHits,
     matchKeywords,

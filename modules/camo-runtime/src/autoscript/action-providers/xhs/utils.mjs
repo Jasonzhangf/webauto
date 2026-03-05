@@ -42,6 +42,39 @@ export function readXsecTokenFromUrl(rawUrl) {
   return matched && matched[1] ? String(matched[1]).trim() : '';
 }
 
+export function readXsecSourceFromUrl(rawUrl) {
+  const text = String(rawUrl || '').trim();
+  if (!text) return '';
+  const matched = text.match(/[?&]xsec_source=([^&#]+)/);
+  return matched && matched[1] ? String(matched[1]).trim() : '';
+}
+
+export function resolveSearchResultTokenLink(rawHref, baseOrigin = 'https://www.xiaohongshu.com') {
+  const href = String(rawHref || '').trim();
+  if (!href) return null;
+  const absolute = href.startsWith('http') ? href : `${baseOrigin}${href.startsWith('/') ? '' : '/'}${href}`;
+  let url;
+  try {
+    url = new URL(absolute);
+  } catch {
+    return null;
+  }
+  const noteId = extractNoteIdFromHref(url.pathname || '') || extractNoteIdFromHref(href);
+  if (!noteId) return null;
+  const token = String(url.searchParams.get('xsec_token') || '').trim();
+  const xsecSource = String(url.searchParams.get('xsec_source') || '').trim();
+  const detailUrl = token
+    ? `${baseOrigin}/explore/${noteId}?xsec_token=${token}${xsecSource ? `&xsec_source=${xsecSource}` : ''}&source=web_explore_feed`
+    : '';
+  return {
+    noteId,
+    token,
+    xsecSource,
+    searchUrl: url.toString(),
+    detailUrl,
+  };
+}
+
 export function resolveSharedClaimPath(params = {}) {
   const explicit = String(params.sharedClaimPath || params.sharedHarvestPath || '').trim();
   if (explicit) return explicit;

@@ -40,6 +40,7 @@ export function buildXhsSearchOperations(options) {
     keyword,
     searchSerialKey,
     sharedHarvestPath,
+    profileId,
     submitMethod,
     submitActionDelayMinMs,
     submitActionDelayMaxMs,
@@ -51,12 +52,33 @@ export function buildXhsSearchOperations(options) {
 
   return [
     {
+      id: 'wait_search_permit',
+      enabled: !detailLinksStartup,
+      action: 'xhs_wait_search_permit',
+      params: {
+        key: profileId,
+        keyword,
+      },
+      trigger: 'home_search_input.exist',
+      dependsOn: ['goto_home'],
+      once: true,
+      timeoutMs: 300000,
+      retry: { attempts: 1, backoffMs: 0 },
+      impact: 'script',
+      onFailure: 'stop_all',
+      checkpoint: {
+        containerId: 'xiaohongshu_home.search_input',
+        targetCheckpoint: 'search_ready',
+        recovery,
+      },
+    },
+    {
       id: 'fill_keyword',
       enabled: !detailLinksStartup,
       action: 'type',
       params: { selector: '#search-input', text: keyword },
       trigger: 'home_search_input.exist',
-      dependsOn: ['goto_home'],
+      dependsOn: ['wait_search_permit'],
       once: true,
       validation: {
         mode: 'both',

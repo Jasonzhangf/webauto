@@ -9,6 +9,9 @@ export function sanitizeFileComponent(value, fallback = 'unknown') {
 }
 
 export async function captureScreenshotToFile({ profileId, filePath }) {
+  if (process.env.CAMO_DIAGNOSTICS_NO_SCREENSHOT === '1') {
+    return null;
+  }
   const payload = await callAPI('screenshot:capture', { profileId });
   const base64 = extractScreenshotBase64(payload);
   if (!base64) throw new Error('SCREENSHOT_CAPTURE_FAILED');

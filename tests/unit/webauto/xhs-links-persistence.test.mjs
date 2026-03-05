@@ -23,7 +23,7 @@ describe('xhs link persistence', () => {
   it('keeps only xsec_token links and deduplicates by note id', async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'webauto-xhs-links-'));
     tempRoots.push(root);
-    const linksPath = path.join(root, 'links.collected.jsonl');
+    const linksPath = path.join(root, 'safe-detail-urls.jsonl');
 
     const first = await mergeLinksJsonl({
       filePath: linksPath,

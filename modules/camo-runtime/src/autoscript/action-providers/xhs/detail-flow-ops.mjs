@@ -3,6 +3,7 @@ import { getProfileState } from './state.mjs';
 import { buildTraceRecorder, emitActionTrace } from './trace.mjs';
 import { sleep, readLocation, clickPoint } from './dom-ops.mjs';
 import { readSearchCandidateByNoteId, ensureSearchCandidateFullyVisible } from './search-ops.mjs';
+import { getCurrentTabIndex, getOrAssignLinkForTab } from './tab-state.mjs';
 import { isDetailVisible, readDetailCloseTarget, closeDetailToSearch, readDetailSnapshot } from './detail-ops.mjs';
 
 
@@ -19,7 +20,23 @@ export async function executeOpenDetailOperation({ profileId, params = {}, conte
   const noteId = String(params.noteId || '').trim() || null;
   const noteUrl = String(params.noteUrl || '').trim() || null;
 
-  if (!noteId && !noteUrl) {
+  const useLinks = String(params.openByLinks || '').toLowerCase() === 'true' || params.openByLinks === true;
+  let effectiveNoteUrl = noteUrl;
+  if (useLinks && !effectiveNoteUrl) {
+    const tabIndex = getCurrentTabIndex(state, { tabCount: params.tabCount });
+    const link = await getOrAssignLinkForTab(state, params, tabIndex);
+    if (link?.noteUrl) {
+      effectiveNoteUrl = link.noteUrl;
+    } else {
+      return { ok: false, code: 'LINKS_EXHAUSTED', message: 'no more collected links for tab' };
+    }
+  }
+
+  if (effectiveNoteUrl && !String(effectiveNoteUrl).includes('xsec_token=')) {
+    return { ok: false, code: 'MISSING_XSEC_TOKEN', message: 'detail url missing xsec_token' };
+  }
+
+  if (!noteId && !effectiveNoteUrl) {
     return { ok: false, code: 'INVALID_PARAMS', message: 'noteId or noteUrl required in single mode' };
   }
 
@@ -30,8 +47,8 @@ export async function executeOpenDetailOperation({ profileId, params = {}, conte
     await sleep(300);
   }
 
-  if (noteUrl) {
-    await callAPI('goto', { profileId, url: noteUrl });
+  if (effectiveNoteUrl) {
+    await callAPI('goto', { profileId, url: effectiveNoteUrl });
     await sleep(1000);
   } else {
     const candidate = await readSearchCandidateByNoteId(profileId, noteId);
@@ -42,8 +59,17 @@ export async function executeOpenDetailOperation({ profileId, params = {}, conte
       await ensureSearchCandidateFullyVisible(profileId, noteId);
     }
     await clickPoint(profileId, candidate.center, { steps: 3 });
-    pushTrace({ kind: 'click', stage: 'open_detail', noteId, selector: candidate.selector });
+    pushTrace({ kind: 'click', stage: 'open_detail', noteId, selector: candidate.selector, attempt: 1 });
     await sleep(1500);
+    const opened = await isDetailVisible(profileId);
+    if (!opened?.detailVisible) {
+      const retryCandidate = await readSearchCandidateByNoteId(profileId, noteId);
+      if (retryCandidate?.found && retryCandidate.center) {
+        await clickPoint(profileId, retryCandidate.center, { steps: 3 });
+        pushTrace({ kind: 'click', stage: 'open_detail_retry', noteId, selector: retryCandidate.selector, attempt: 2 });
+        await sleep(1500);
+      }
+    }
   }
 
   const afterUrl = await readLocation(profileId);
@@ -121,6 +147,17 @@ export async function executeCloseDetailOperation({ profileId, params = {}, cont
           used = 'x';
           break;
         }
+      }
+    }
+  }
+
+  if (!closed) {
+    const anchorNoteId = String(getProfileState(profileId)?.currentNoteId || '').trim();
+    if (anchorNoteId) {
+      const anchor = await readSearchCandidateByNoteId(profileId, anchorNoteId, { visibilityMargin: 8 });
+      if (anchor?.found && anchor.inViewport) {
+        closed = true;
+        used = 'anchor';
       }
     }
   }
