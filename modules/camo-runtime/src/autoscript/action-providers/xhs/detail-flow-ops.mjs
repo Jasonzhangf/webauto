@@ -172,7 +172,7 @@ export async function executeCloseDetailOperation({ profileId, params = {}, cont
   }
 
   if (!closed && openByLinks) {
-    await callAPI('back', { profileId });
+    await callAPI('page:back', { profileId });
     await sleep(600);
     const backVisible = await isDetailVisible(profileId);
     if (!backVisible?.detailVisible) {
