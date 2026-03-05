@@ -556,7 +556,7 @@ export async function executeCollectLinksOperation({ profileId, params = {}, con
   const env = String(params.env || 'debug').trim();
   const outputCtx = resolveXhsOutputContext({ params: { keyword, env }, state });
   const linksPath = outputCtx.safeDetailPath || outputCtx.linksPath;
-  const phase2LinksPath = outputCtx.phase2LinksPath;
+  const phase2LinksPath = null;
 
   state.collectIndex = typeof state.collectIndex === 'number' ? state.collectIndex : collectIndexStart;
   state.collectCount = typeof state.collectCount === 'number' ? state.collectCount : 0;

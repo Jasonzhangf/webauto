@@ -135,23 +135,25 @@ export async function runUnified(argv, overrides = {}) {
   const baseOutputRoot = resolveDownloadRoot(argv['output-root']);
   const outputRootArg = String(argv['output-root'] || '').trim();
   const useShardRoots = profiles.length > 1;
-  const sharedHarvestPath = profiles.length > 1
-    ? path.join(baseOutputRoot, 'xiaohongshu', sanitizeForPath(env, 'prod'), sanitizeForPath(keyword, 'unknown'), 'merged', `run-${runLabel}`, 'coord', 'harvest-note-claims.json')
-    : '';
-  const searchSerialKey = `${sanitizeForPath(env, 'prod')}:${sanitizeForPath(keyword, 'unknown')}:${runLabel}`;
-  const mergedDir = path.join(
+  const keywordDir = path.join(
     baseOutputRoot,
     'xiaohongshu',
     sanitizeForPath(env, 'prod'),
     sanitizeForPath(keyword, 'unknown'),
-    'merged',
-    `run-${runLabel}`,
   );
+  const searchSerialKey = `${sanitizeForPath(env, 'prod')}:${sanitizeForPath(keyword, 'unknown')}:${runLabel}`;
+  const mergedDir = path.join(keywordDir, 'merged', `run-${runLabel}`);
+  const collectRunDir = path.join(keywordDir, 'collect', `run-${runLabel}`);
+  const writeMerged = stage !== 'links';
+  const runDir = writeMerged ? mergedDir : collectRunDir;
+  const sharedHarvestPath = profiles.length > 1
+    ? path.join(mergedDir, 'coord', 'harvest-note-claims.json')
+    : '';
   if (!planOnly) {
     const services = await ensureTaskServices(argv, {
       rootDir: process.cwd(),
       stage,
-      debugActionLogPath: path.join(mergedDir, 'profiles', 'input-actions.jsonl'),
+      debugActionLogPath: path.join(runDir, 'profiles', 'input-actions.jsonl'),
       searchGateTimeoutMs: 60000,
     });
     console.log(JSON.stringify({
@@ -170,7 +172,9 @@ export async function runUnified(argv, overrides = {}) {
     }));
     await Promise.all(profiles.map((profileId) => ensureProfileSession(profileId, { headless })));
   }
-  const planPath = path.join(mergedDir, 'plan.json');
+  const planPath = writeMerged
+    ? path.join(mergedDir, 'plan.json')
+    : path.join(collectRunDir, 'plan.json');
   const completedAtStart = hasTotalTarget
     ? await collectCompletedNoteIds(baseOutputRoot, env, keyword)
     : { count: 0, noteIds: [] };
@@ -307,8 +311,8 @@ export async function runUnified(argv, overrides = {}) {
         runLabel,
         waveTag,
         outputRoot: shardOutputRoot,
-        logPath: path.join(mergedDir, 'profiles', `${waveTag}.${shardId}.events.jsonl`),
-        summaryPath: path.join(mergedDir, 'profiles', `${waveTag}.${shardId}.summary.json`),
+        logPath: path.join(runDir, 'profiles', `${waveTag}.${shardId}.events.jsonl`),
+        summaryPath: path.join(runDir, 'profiles', `${waveTag}.${shardId}.summary.json`),
         sharedHarvestPath,
         searchSerialKey,
         seedCollectCount,
@@ -393,42 +397,44 @@ export async function runUnified(argv, overrides = {}) {
     throw new Error(`no executable waves generated, see ${planPath}`);
   }
 
-  const merged = await mergeProfileOutputs({
-    results,
-    mergedDir,
-    keyword,
-    env,
-    totalNotes,
-    parallel: parallelRequested,
-    concurrency: configuredConcurrency,
-    skippedProfiles,
-  });
+  if (writeMerged) {
+    const merged = await mergeProfileOutputs({
+      results,
+      mergedDir,
+      keyword,
+      env,
+      totalNotes,
+      parallel: parallelRequested,
+      concurrency: configuredConcurrency,
+      skippedProfiles,
+    });
 
-  const mergedSummary = {
-    ...merged.mergedSummary,
-    progress: {
-      completedAtStart: completedAtStart.count,
-      completedDuringRun: toNumber(merged.mergedSummary?.totals?.openedNotes, 0),
-      targetTotal: hasTotalTarget ? totalNotes : null,
-      remainingAfterRun: hasTotalTarget ? Math.max(0, remainingNotes) : null,
-      reachedTarget: hasTotalTarget ? remainingNotes <= 0 : null,
-    },
-    waves: wavePlans,
-  };
-  await writeJson(merged.summaryPath, mergedSummary);
+    const mergedSummary = {
+      ...merged.mergedSummary,
+      progress: {
+        completedAtStart: completedAtStart.count,
+        completedDuringRun: toNumber(merged.mergedSummary?.totals?.openedNotes, 0),
+        targetTotal: hasTotalTarget ? totalNotes : null,
+        remainingAfterRun: hasTotalTarget ? Math.max(0, remainingNotes) : null,
+        reachedTarget: hasTotalTarget ? remainingNotes <= 0 : null,
+      },
+      waves: wavePlans,
+    };
+    await writeJson(merged.summaryPath, mergedSummary);
 
-  const mergedEvent = {
-    event: 'xhs.unified.merged',
-    summaryPath: merged.summaryPath,
-    waves: wavePlans.length,
-    profilesTotal: results.length,
-    profilesSucceeded: results.filter((item) => item.ok).length,
-    profilesFailed: results.filter((item) => !item.ok).length,
-    remainingNotes: hasTotalTarget ? remainingNotes : null,
-  };
-  console.log(JSON.stringify(mergedEvent));
-  if (busEnabled) {
-    void publishBusEvent(mergedEvent);
+    const mergedEvent = {
+      event: 'xhs.unified.merged',
+      summaryPath: merged.summaryPath,
+      waves: wavePlans.length,
+      profilesTotal: results.length,
+      profilesSucceeded: results.filter((item) => item.ok).length,
+      profilesFailed: results.filter((item) => !item.ok).length,
+      remainingNotes: hasTotalTarget ? remainingNotes : null,
+    };
+    console.log(JSON.stringify(mergedEvent));
+    if (busEnabled) {
+      void publishBusEvent(mergedEvent);
+    }
   }
 
   const failedResults = results.filter((item) => !item.ok);
@@ -439,20 +445,20 @@ export async function runUnified(argv, overrides = {}) {
     if (hasTotalTarget && remainingNotes <= 0) {
       console.warn(JSON.stringify({
         event: 'xhs.unified.partial_failures_tolerated',
-        summaryPath: merged.summaryPath,
+        summaryPath: writeMerged ? path.join(mergedDir, 'summary.json') : planPath,
         failedProfiles: failedResults.map((item) => ({
           profileId: item.profileId,
           reason: item.reason || null,
         })),
       }));
     } else {
-      throw new Error(`unified finished with failures, see ${merged.summaryPath}`);
+      throw new Error(`unified finished with failures, see ${planPath}`);
     }
   }
 
   return {
     ok: true,
-    summaryPath: merged.summaryPath,
+    summaryPath: writeMerged ? path.join(mergedDir, 'summary.json') : planPath,
     results,
   };
 }
