@@ -230,7 +230,10 @@ export function buildXhsDetailOperations(options) {
       id: 'close_detail',
       enabled: options.detailLoopEnabled && autoCloseDetail !== false,
       action: 'xhs_close_detail',
-      params: {},
+      params: {
+        openByLinks: detailOpenByLinks,
+        allowKeepDetail: detailOpenByLinks,
+      },
       trigger: 'detail_modal.exist',
       dependsOn: [closeDependsOn],
       once: false,

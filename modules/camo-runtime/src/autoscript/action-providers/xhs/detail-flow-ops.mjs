@@ -42,7 +42,7 @@ export async function executeOpenDetailOperation({ profileId, params = {}, conte
 
   const beforeUrl = await readLocation(profileId);
   const detailVisible = await isDetailVisible(profileId);
-  if (detailVisible?.detailVisible === true) {
+  if (detailVisible?.detailVisible === true && !useLinks) {
     await closeDetailToSearch(profileId, pushTrace);
     await sleep(300);
   }
@@ -95,10 +95,19 @@ export async function executeOpenDetailOperation({ profileId, params = {}, conte
 
 export async function executeCloseDetailOperation({ profileId, params = {}, context = {} }) {
   const { actionTrace, pushTrace } = buildTraceRecorder();
+  const state = getProfileState(profileId);
   const retryPolicy = String(params.retryPolicy || 'esc_then_x').trim().toLowerCase();
   const attempts = Math.max(1, Number(params.retryAttempts ?? 2) || 2);
+  const openByLinks = String(params.openByLinks || '').toLowerCase() === 'true' || params.openByLinks === true;
+  const allowKeepDetail = String(params.allowKeepDetail || '').toLowerCase() === 'true' || params.allowKeepDetail === true;
   let closed = false;
   let used = null;
+
+  const initialVisible = await isDetailVisible(profileId);
+  if (!initialVisible?.detailVisible) {
+    emitActionTrace(context, actionTrace, { stage: 'xhs_close_detail' });
+    return { ok: true, code: 'OPERATION_DONE', message: 'xhs_close_detail already closed', data: { closed: true, method: 'already_closed', attempts: 0 } };
+  }
 
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
     if (retryPolicy == 'esc') {
@@ -162,6 +171,27 @@ export async function executeCloseDetailOperation({ profileId, params = {}, cont
     }
   }
 
+  if (!closed && openByLinks) {
+    await callAPI('back', { profileId });
+    await sleep(600);
+    const backVisible = await isDetailVisible(profileId);
+    if (!backVisible?.detailVisible) {
+      closed = true;
+      used = 'back';
+    } else if (state?.lastListUrl) {
+      await callAPI('goto', { profileId, url: state.lastListUrl });
+      await sleep(800);
+      const gotoVisible = await isDetailVisible(profileId);
+      if (!gotoVisible?.detailVisible) {
+        closed = true;
+        used = 'goto_list';
+      }
+    }
+  }
+
   emitActionTrace(context, actionTrace, { stage: 'xhs_close_detail' });
+  if (!closed && allowKeepDetail) {
+    return { ok: true, code: 'OPERATION_DONE', message: 'xhs_close_detail skipped for direct link', data: { closed: false, method: used || 'keep_open', attempts } };
+  }
   return { ok: closed, code: closed ? 'OPERATION_DONE' : 'CLOSE_FAILED', message: 'xhs_close_detail done', data: { closed, method: used, attempts } };
 }
