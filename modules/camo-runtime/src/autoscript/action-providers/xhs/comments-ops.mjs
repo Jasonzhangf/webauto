@@ -29,7 +29,11 @@ export async function readCommentsSnapshot(profileId) {
     const detailVisible = detailSelectors.some((selector) => isVisible(document.querySelector(selector)));
     const hasCommentsContext = Boolean(document.querySelector('.comments-container') || document.querySelector('.comment-list') || document.querySelector('.comment-item') || document.querySelector('[class*="comment-item"]') || document.querySelector('.comments-el') || document.querySelector('.note-scroller'));
     const scopeSelectors = ['.note-detail-mask .interaction-container', '.note-detail-mask .comments-container', '.note-detail-page .interaction-container', '.note-detail-page .comments-container', '.interaction-container', '.comments-container', '.comments-el', '.note-scroller', '.note-detail-mask', '.note-detail-page'];
-    const patterns = [/([0-9]+(?:\\.[0-9]+)?(?:万|w|W)?)\\s*条?评论/, /评论\\s*([0-9]+(?:\\.[0-9]+)?(?:万|w|W)?)/, /共\\s*([0-9]+(?:\\.[0-9]+)?(?:万|w|W)?)\\s*条/];
+    const patterns = [
+      new RegExp('([0-9]+(?:\\\\.[0-9]+)?(?:\\\\u4e07|w|W)?)\\\\s*\\\\u6761?\\\\u8bc4\\\\u8bba'),
+      new RegExp('\\\\u8bc4\\\\u8bba\\\\s*([0-9]+(?:\\\\.[0-9]+)?(?:\\\\u4e07|w|W)?)'),
+      new RegExp('\\\\u5171\\\\s*([0-9]+(?:\\\\.[0-9]+)?(?:\\\\u4e07|w|W)?)\\\\s*\\\\u6761'),
+    ];
     let expectedCommentsCount = null;
     const chatCountEl = document.querySelector('.chat-wrapper .count');
     const chatCountText = String(chatCountEl?.textContent || '').trim();
@@ -64,8 +68,15 @@ export async function readCommentsSnapshot(profileId) {
       const authorLink = String(authorLinkEl?.href || authorLinkEl?.getAttribute?.('href') || '').trim();
       let authorId = String(metaUserId || '').trim();
       if (!authorId && authorLink) {
-        const match = authorLink.match(/\/user\/profile\/([^/?#]+)/) || authorLink.match(/\/user\/([^/?#]+)/);
-        if (match && match[1]) authorId = String(match[1]);
+        try {
+          const linkUrl = new URL(authorLink, location.origin);
+          const parts = linkUrl.pathname.split('/').filter(Boolean);
+          if (parts[0] === 'user' && parts[1] === 'profile' && parts[2]) {
+            authorId = String(parts[2]);
+          } else if (parts[0] === 'user' && parts[1]) {
+            authorId = String(parts[1]);
+          }
+        } catch { /* ignore */ }
       }
       const levelToken = node.getAttribute('data-level') || node.getAttribute('data-layer') || '';
       const level = Number.isFinite(Number(levelToken)) ? Number(levelToken) : (node.classList?.contains('sub-comment') ? 2 : 1);

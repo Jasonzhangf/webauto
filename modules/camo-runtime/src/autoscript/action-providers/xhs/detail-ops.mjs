@@ -30,7 +30,14 @@ export async function readDetailSnapshot(profileId) {
     const title = text('.note-title').slice(0, 200);
     const contentText = text('.note-content');
     const href = String(location.href || '');
-    const noteMatch = href.match(/\\/explore\\/([^/?#]+)/);
+    let noteIdFromUrl = null;
+    try {
+      const url = new URL(href);
+      const parts = url.pathname.split('/').filter(Boolean);
+      if (parts[0] === 'explore' && parts[1]) {
+        noteIdFromUrl = String(parts[1]);
+      }
+    } catch { /* ignore */ }
     const resolveAuthorInfo = () => {
       const wrapper = detailRoot?.querySelector?.('.author-wrapper')
         || detailRoot?.querySelector?.('.author')
@@ -53,8 +60,15 @@ export async function readDetailSnapshot(profileId) {
         if (authorId) break;
       }
       if (!authorId && rawLink) {
-        const match = rawLink.match(/\\/user\\/profile\\/([^/?#]+)/) || rawLink.match(/\\/user\\/([^/?#]+)/);
-        if (match && match[1]) authorId = String(match[1]);
+        try {
+          const linkUrl = new URL(rawLink, location.origin);
+          const parts = linkUrl.pathname.split('/').filter(Boolean);
+          if (parts[0] === 'user' && parts[1] === 'profile' && parts[2]) {
+            authorId = String(parts[2]);
+          } else if (parts[0] === 'user' && parts[1]) {
+            authorId = String(parts[1]);
+          }
+        } catch { /* ignore */ }
       }
       return { authorName, authorId: authorId || null, authorLink: rawLink || null };
     };
@@ -84,7 +98,7 @@ export async function readDetailSnapshot(profileId) {
       contentLength: contentText.length,
       contentText,
       contentPreview: contentText.slice(0, 500),
-      noteIdFromUrl: noteMatch && noteMatch[1] ? String(noteMatch[1]) : null,
+      noteIdFromUrl,
       href,
       authorName: author.authorName || null,
       authorId: author.authorId || null,
