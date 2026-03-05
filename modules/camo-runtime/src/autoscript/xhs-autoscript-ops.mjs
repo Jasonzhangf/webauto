@@ -47,8 +47,11 @@ export function buildXhsSearchOperations(options) {
     submitSettleMinMs,
     submitSettleMaxMs,
     detailLinksStartup,
+    detailLoopEnabled,
     recovery,
   } = options;
+
+  const verifyDependsOn = detailLoopEnabled ? 'ensure_tab_pool' : 'submit_search';
 
   return [
     {
@@ -134,7 +137,7 @@ export function buildXhsSearchOperations(options) {
         ],
       },
       trigger: 'search_result_item.exist',
-      dependsOn: ['ensure_tab_pool'],
+      dependsOn: [verifyDependsOn],
       once: true,
       timeoutMs: 90000,
     },

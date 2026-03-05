@@ -10,6 +10,8 @@ const CAMO_RUNTIME_HEALTH_URL = 'http://127.0.0.1:7704/health';
 const CORE_HEALTH_URLS = [UNIFIED_API_HEALTH_URL, CAMO_RUNTIME_HEALTH_URL];
 const START_API_SCRIPT = path.join(REPO_ROOT, 'runtime', 'infra', 'utils', 'scripts', 'service', 'start-api.mjs');
 const STOP_API_SCRIPT = path.join(REPO_ROOT, 'runtime', 'infra', 'utils', 'scripts', 'service', 'stop-api.mjs');
+const START_SEARCH_GATE_SCRIPT = path.join(REPO_ROOT, 'runtime', 'infra', 'utils', 'scripts', 'service', 'start-search-gate.mjs');
+const STOP_SEARCH_GATE_SCRIPT = path.join(REPO_ROOT, 'runtime', 'infra', 'utils', 'scripts', 'service', 'stop-search-gate.mjs');
 const requireFromRepo = createRequire(path.join(REPO_ROOT, 'package.json'));
 
 function sleep(ms: number) {
@@ -81,7 +83,8 @@ async function checkHttpHealth(url: string) {
 
 async function areCoreServicesHealthy() {
   const health = await Promise.all(CORE_HEALTH_URLS.map((url) => checkHttpHealth(url)));
-  return health.every(Boolean);
+  const searchGateHealthy = await checkHttpHealth('http://127.0.0.1:7790/health');
+  return health.every(Boolean) && searchGateHealthy;
 }
 
 type RunResult = {
@@ -175,6 +178,18 @@ export async function startCoreDaemon(): Promise<boolean> {
     return false;
   }
 
+  if (!existsSync(START_SEARCH_GATE_SCRIPT)) {
+    console.error('[CoreDaemonManager] SearchGate start script not found');
+    return false;
+  }
+  const startedGate = await runNodeScript(START_SEARCH_GATE_SCRIPT, 40_000, [], {
+    WEBAUTO_SEARCH_GATE_DISABLE_HEARTBEAT: '1',
+  });
+  if (!startedGate.ok) {
+    console.error(`[CoreDaemonManager] Failed to start SearchGate (${startedGate.error || 'unknown'})`);
+    return false;
+  }
+
   for (let i = 0; i < 60; i += 1) {
     const allHealthy = await areCoreServicesHealthy();
     if (allHealthy) return true;
@@ -188,6 +203,17 @@ export async function startCoreDaemon(): Promise<boolean> {
 export async function stopCoreDaemon(): Promise<boolean> {
   if (!existsSync(STOP_API_SCRIPT)) {
     console.error('[CoreDaemonManager] Unified API stop script not found');
+    return false;
+  }
+
+  if (existsSync(STOP_SEARCH_GATE_SCRIPT)) {
+    const stoppedGate = await runNodeScript(STOP_SEARCH_GATE_SCRIPT, 20_000);
+    if (!stoppedGate.ok) {
+      console.error(`[CoreDaemonManager] Failed to stop SearchGate (${stoppedGate.error || 'unknown'})`);
+      return false;
+    }
+  } else {
+    console.error('[CoreDaemonManager] SearchGate stop script not found');
     return false;
   }
 

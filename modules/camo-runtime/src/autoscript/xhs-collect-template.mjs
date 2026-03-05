@@ -3,7 +3,6 @@ import {
   buildXhsBootstrapOperations,
   buildXhsGuardOperations,
   buildXhsSearchOperations,
-  buildXhsTabPoolOperation,
 } from './xhs-autoscript-ops.mjs';
 import { buildXhsCollectOperations } from './xhs-autoscript-collect.mjs';
 
@@ -20,7 +19,6 @@ export function buildXhsCollectAutoscript(rawOptions = {}) {
   const operations = [
     ...buildXhsBootstrapOperations(options),
     ...buildXhsSearchOperations(options),
-    ...buildXhsTabPoolOperation(options),
     ...buildXhsCollectOperations(options),
     ...buildXhsGuardOperations(options),
   ];

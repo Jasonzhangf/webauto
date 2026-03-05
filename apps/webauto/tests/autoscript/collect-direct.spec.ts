@@ -26,7 +26,7 @@ test('DIRECT: buildXhsCollectOperations returns exact structure with defaults', 
   assert.equal(collectLinks.enabled, true, 'collect_links.enabled=true when stageLinksEnabled=true');
   assert.equal(collectLinks.action, 'xhs_collect_links', 'collect_links.action=xhs_collect_links');
   assert.equal(collectLinks.trigger, 'search_result_item.exist', 'collect_links.trigger=search_result_item.exist - single trigger executes full collect loop');
-  assert.deepEqual(collectLinks.dependsOn, ['ensure_tab_pool'], 'collect_links.dependsOn=[ensure_tab_pool]');
+  assert.deepEqual(collectLinks.dependsOn, ['submit_search'], 'collect_links.dependsOn=[submit_search]');
   assert.equal(collectLinks.once, true, 'collect_links.once=true - single trigger executes full collect loop');
   assert.equal(collectLinks.timeoutMs, 30000, 'collect_links.timeoutMs from collectLinksTimeoutMs');
   assert.deepEqual(collectLinks.retry, { attempts: 1, backoffMs: 0 }, 'collect_links.retry default');
@@ -176,7 +176,7 @@ test('DIRECT: buildXhsCollectAutoscript metadata and stage parameter', () => {
   const opIds = script.operations.map(op => op.id);
   assert.ok(opIds.includes('sync_window_viewport'), 'includes bootstrap ops');
   assert.ok(opIds.includes('fill_keyword'), 'includes search ops');
-  assert.ok(opIds.includes('ensure_tab_pool'), 'includes tab pool ops');
+  assert.ok(!opIds.includes('ensure_tab_pool'), 'does not include tab pool ops');
   assert.ok(opIds.includes('abort_on_login_guard'), 'includes guard ops');
 });
 

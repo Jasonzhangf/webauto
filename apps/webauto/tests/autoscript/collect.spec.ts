@@ -32,7 +32,7 @@ test('buildXhsCollectOperations: collect_links enabled when stageLinksEnabled=tr
   const collectLinks = ops.find(op => op.id === 'collect_links');
   assert.ok(collectLinks, 'collect_links operation exists');
   assert.equal(collectLinks.enabled, true, 'collect_links.enabled when stageLinksEnabled');
-  assert.ok(collectLinks.dependsOn.includes('ensure_tab_pool'));
+  assert.ok(collectLinks.dependsOn.includes('submit_search'));
   assert.equal(collectLinks.once, true, 'collect_links.once=true - single trigger executes full collect loop');
 });
 
@@ -112,7 +112,7 @@ test('buildXhsCollectOperations: collect_links has correct dependencies', () => 
   const collectLinks = ops.find(op => op.id === 'collect_links');
   assert.ok(collectLinks);
   assert.ok(Array.isArray(collectLinks.dependsOn));
-  assert.ok(collectLinks.dependsOn.includes('ensure_tab_pool'));
+  assert.ok(collectLinks.dependsOn.includes('submit_search'));
 });
 
 test('buildXhsCollectOperations: finish_after_collect_links depends on collect_links', () => {
@@ -152,7 +152,7 @@ test('buildXhsCollectAutoscript: includes all operation types', () => {
   const opIds = script.operations.map(op => op.id);
   assert.ok(opIds.includes('sync_window_viewport'), 'has bootstrap ops');
   assert.ok(opIds.includes('fill_keyword'), 'has search ops');
-  assert.ok(opIds.includes('ensure_tab_pool'), 'has tab pool ops');
+  assert.ok(!opIds.includes('ensure_tab_pool'), 'does not include tab pool ops');
   assert.ok(opIds.includes('collect_links'), 'has collect ops');
   assert.ok(opIds.includes('abort_on_login_guard'), 'has guard ops');
 });
