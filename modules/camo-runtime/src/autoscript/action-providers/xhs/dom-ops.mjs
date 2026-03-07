@@ -37,6 +37,220 @@ export async function evaluateReadonly(profileId, script) {
   return extractEvaluateResultData(payload) || payload?.result || payload?.data || payload || {};
 }
 
+const HIGHLIGHT_STATE_STYLE = {
+  matched: {
+    color: 'rgba(34, 197, 94, 0.96)',
+    fill: 'rgba(34, 197, 94, 0.10)',
+    point: 'rgba(34, 197, 94, 0.98)',
+  },
+  focus: {
+    color: 'rgba(250, 204, 21, 0.98)',
+    fill: 'rgba(250, 204, 21, 0.12)',
+    point: 'rgba(250, 204, 21, 0.98)',
+  },
+  processed: {
+    color: 'rgba(59, 130, 246, 0.98)',
+    fill: 'rgba(59, 130, 246, 0.12)',
+    point: 'rgba(59, 130, 246, 0.98)',
+  },
+};
+
+function resolveHighlightStyle(state = 'focus') {
+  return HIGHLIGHT_STATE_STYLE[String(state || 'focus').trim().toLowerCase()] || HIGHLIGHT_STATE_STYLE.focus;
+}
+
+function buildVisualHighlightScript(config = {}) {
+  return `(() => {
+    const config = ${JSON.stringify(config)};
+    const layerId = '__xhs_operation_visual_layer';
+    const registryKey = '__xhsOperationVisualRegistry';
+    const ensureLayer = () => {
+      let layer = document.getElementById(layerId);
+      if (!(layer instanceof HTMLElement)) {
+        layer = document.createElement('div');
+        layer.id = layerId;
+        layer.style.cssText = [
+          'position:fixed',
+          'inset:0',
+          'pointer-events:none',
+          'z-index:2147483647',
+        ].join(';');
+        document.documentElement.appendChild(layer);
+      }
+      return layer;
+    };
+    const registry = window[registryKey] && typeof window[registryKey] === 'object'
+      ? window[registryKey]
+      : (window[registryKey] = Object.create(null));
+    const clearChannel = (channel) => {
+      if (!channel) return;
+      const entry = registry[channel];
+      if (!entry) return;
+      if (entry.timer) {
+        try { clearTimeout(entry.timer); } catch {}
+      }
+      const nodes = Array.isArray(entry.nodes) ? entry.nodes : [];
+      for (const node of nodes) {
+        try { node.remove(); } catch {}
+      }
+      delete registry[channel];
+    };
+    if (config.clearOnly === true) {
+      clearChannel(String(config.channel || 'default'));
+      return { ok: true, cleared: true, channel: String(config.channel || 'default') };
+    }
+    const channel = String(config.channel || 'default');
+    clearChannel(channel);
+    const layer = ensureLayer();
+    const nodes = [];
+    const color = String(config.color || 'rgba(250, 204, 21, 0.98)');
+    const fill = String(config.fill || 'rgba(250, 204, 21, 0.12)');
+    const pointColor = String(config.pointColor || color);
+    const label = String(config.label || '').trim();
+    const addNode = (node) => {
+      if (!(node instanceof HTMLElement)) return;
+      layer.appendChild(node);
+      nodes.push(node);
+    };
+    const rect = config.rect && typeof config.rect === 'object' ? config.rect : null;
+    if (rect && Number(rect.width || 0) > 1 && Number(rect.height || 0) > 1) {
+      const box = document.createElement('div');
+      box.style.cssText = [
+        'position:fixed',
+        'pointer-events:none',
+        'box-sizing:border-box',
+        'border-radius:10px',
+        'box-shadow:0 0 0 2px ' + color + ', 0 0 0 9999px rgba(0,0,0,0)',
+        'border:2px solid ' + color,
+        'background:' + fill,
+        'transition:opacity 120ms ease',
+      ].join(';');
+      box.style.left = Math.round(Number(rect.left || 0)) + 'px';
+      box.style.top = Math.round(Number(rect.top || 0)) + 'px';
+      box.style.width = Math.max(2, Math.round(Number(rect.width || 0))) + 'px';
+      box.style.height = Math.max(2, Math.round(Number(rect.height || 0))) + 'px';
+      addNode(box);
+      if (label) {
+        const tag = document.createElement('div');
+        tag.textContent = label;
+        tag.style.cssText = [
+          'position:fixed',
+          'pointer-events:none',
+          'padding:2px 8px',
+          'border-radius:999px',
+          'font:600 12px/1.4 -apple-system,BlinkMacSystemFont,Segoe UI,sans-serif',
+          'letter-spacing:0.02em',
+          'background:' + color,
+          'color:#111827',
+          'box-shadow:0 6px 18px rgba(0,0,0,0.18)',
+          'white-space:nowrap',
+        ].join(';');
+        tag.style.left = Math.max(4, Math.round(Number(rect.left || 0))) + 'px';
+        tag.style.top = Math.max(4, Math.round(Number(rect.top || 0) - 26)) + 'px';
+        addNode(tag);
+      }
+    }
+    const center = config.center && typeof config.center === 'object' ? config.center : null;
+    if (center && Number.isFinite(Number(center.x)) && Number.isFinite(Number(center.y))) {
+      const x = Math.round(Number(center.x || 0));
+      const y = Math.round(Number(center.y || 0));
+      const dot = document.createElement('div');
+      dot.style.cssText = [
+        'position:fixed',
+        'pointer-events:none',
+        'width:16px',
+        'height:16px',
+        'border-radius:999px',
+        'border:3px solid ' + pointColor,
+        'background:rgba(255,255,255,0.92)',
+        'transform:translate(-50%, -50%)',
+        'box-shadow:0 0 0 4px rgba(17,24,39,0.12)',
+      ].join(';');
+      dot.style.left = x + 'px';
+      dot.style.top = y + 'px';
+      addNode(dot);
+      const crossH = document.createElement('div');
+      crossH.style.cssText = [
+        'position:fixed',
+        'pointer-events:none',
+        'width:24px',
+        'height:2px',
+        'background:' + pointColor,
+        'transform:translate(-50%, -50%)',
+      ].join(';');
+      crossH.style.left = x + 'px';
+      crossH.style.top = y + 'px';
+      addNode(crossH);
+      const crossV = document.createElement('div');
+      crossV.style.cssText = [
+        'position:fixed',
+        'pointer-events:none',
+        'width:2px',
+        'height:24px',
+        'background:' + pointColor,
+        'transform:translate(-50%, -50%)',
+      ].join(';');
+      crossV.style.left = x + 'px';
+      crossV.style.top = y + 'px';
+      addNode(crossV);
+    }
+    const sticky = config.sticky === true;
+    const duration = Math.max(0, Number(config.duration || 0));
+    const entry = { nodes, timer: null };
+    if (!sticky && duration > 0) {
+      entry.timer = setTimeout(() => clearChannel(channel), duration);
+    }
+    registry[channel] = entry;
+    return { ok: true, channel, count: nodes.length };
+  })()`;
+}
+
+export async function highlightVisualTarget(profileId, target, options = {}) {
+  const style = resolveHighlightStyle(options.state || 'focus');
+  const rect = target?.rect && typeof target.rect === 'object'
+    ? {
+        left: Number(target.rect.left || 0),
+        top: Number(target.rect.top || 0),
+        width: Number(target.rect.width || 0),
+        height: Number(target.rect.height || 0),
+      }
+    : null;
+  const center = target?.center && typeof target.center === 'object'
+    ? {
+        x: Math.max(1, Math.round(Number(target.center.x) || 1)),
+        y: Math.max(1, Math.round(Number(target.center.y) || 1)),
+      }
+    : null;
+  await runEvaluateScript({
+    profileId,
+    script: buildVisualHighlightScript({
+      channel: String(options.channel || 'default').trim() || 'default',
+      color: options.color || style.color,
+      fill: options.fill || style.fill,
+      pointColor: options.pointColor || style.point,
+      label: String(options.label || '').trim(),
+      sticky: options.sticky === true,
+      duration: Math.max(0, Number(options.duration ?? 1800) || 0),
+      rect,
+      center,
+    }),
+    highlight: false,
+    allowUnsafeJs: true,
+  });
+}
+
+export async function clearVisualHighlight(profileId, channel) {
+  await runEvaluateScript({
+    profileId,
+    script: buildVisualHighlightScript({
+      channel: String(channel || 'default').trim() || 'default',
+      clearOnly: true,
+    }),
+    highlight: false,
+    allowUnsafeJs: true,
+  });
+}
+
 export async function readLocation(profileId, options = {}) {
   const timeoutMs = Math.max(300, Number(options.timeoutMs ?? 8000) || 8000);
   const fallback = String(options.fallback ?? '');
@@ -71,6 +285,84 @@ export async function clickPoint(profileId, point, options = {}) {
     if (!retryOnFailure) throw error;
     await callAPI('mouse:click', { ...payload, nudgeBefore: true });
   }
+}
+
+export async function scrollBySelector(profileId, selector, options = {}) {
+  const normalizedSelector = String(selector || '').trim();
+  if (!normalizedSelector) throw new Error('scrollBySelector requires selector');
+  const amount = Math.max(1, Math.round(Number(options.amount ?? 300) || 300));
+  const direction = String(options.direction || 'down').trim().toLowerCase() === 'up' ? 'up' : 'down';
+  const target = await evaluateReadonly(profileId, `(() => {
+    const node = document.querySelector("${normalizedSelector}");
+    if (!(node instanceof Element)) return { found: false, reason: 'selector_not_found' };
+    const rect = node.getBoundingClientRect?.();
+    if (!rect || rect.width <= 1 || rect.height <= 1) return { found: false, reason: 'selector_not_visible' };
+    return {
+      found: true,
+      rect: {
+        left: Number(rect.left || 0),
+        top: Number(rect.top || 0),
+        width: Number(rect.width || 0),
+        height: Number(rect.height || 0),
+      },
+      center: {
+        x: Math.max(1, Math.round(rect.left + rect.width / 2)),
+        y: Math.max(1, Math.round(rect.top + Math.min(rect.height / 2, 48))),
+      },
+    };
+  })()`);
+  if (!target?.found || !target?.center) {
+    throw new Error(`scrollBySelector target unavailable: ${target?.reason || 'unknown'}`);
+  }
+  const focusTarget = options.focusTarget && typeof options.focusTarget === 'object' && options.focusTarget.center
+    ? {
+        ...target,
+        rect: options.focusTarget.rect && typeof options.focusTarget.rect === 'object'
+          ? { ...options.focusTarget.rect }
+          : target.rect,
+        center: {
+          x: Math.max(1, Math.round(Number(options.focusTarget.center.x) || target.center.x || 1)),
+          y: Math.max(1, Math.round(Number(options.focusTarget.center.y) || target.center.y || 1)),
+        },
+      }
+    : target;
+  if (options.highlight !== false) {
+    await highlightVisualTarget(profileId, focusTarget, {
+      channel: 'xhs-scroll-anchor',
+      state: 'focus',
+      label: `scroll ${direction}`,
+      duration: 1800,
+    });
+  }
+  if (options.skipFocusClick !== true) {
+    await callAPI('mouse:click', {
+      profileId,
+      x: focusTarget.center.x,
+      y: focusTarget.center.y,
+      button: 'left',
+      clicks: 1,
+      delay: 30,
+      nudgeBefore: true,
+    });
+    await sleep(1200);
+  } else {
+    await sleep(240);
+  }
+  const axis = direction === 'up' || direction === 'down' ? 'vertical' : 'horizontal';
+  const primaryKey = direction === 'up' ? 'PageUp' : direction === 'down' ? 'PageDown' : direction === 'left' ? 'ArrowLeft' : 'ArrowRight';
+  const fallbackKey = direction === 'up' ? 'ArrowUp' : direction === 'down' ? 'ArrowDown' : primaryKey;
+  const steps = axis === 'vertical'
+    ? Math.max(2, Math.min(8, Math.round(amount / 420) + 1))
+    : Math.max(1, Math.min(6, Math.round(amount / 240) + 1));
+  for (let step = 0; step < steps; step += 1) {
+    await callAPI('keyboard:press', { profileId, key: primaryKey });
+    await sleep(220);
+  }
+  if (axis === 'vertical') {
+    await callAPI('keyboard:press', { profileId, key: fallbackKey });
+    await sleep(180);
+  }
+  return { ok: true, mode: 'keyboard', key: primaryKey, fallbackKey, steps, amount, selector: normalizedSelector };
 }
 
 export async function wheel(profileId, deltaY) {

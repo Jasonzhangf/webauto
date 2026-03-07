@@ -3,9 +3,20 @@ import { getProfileState } from './state.mjs';
 import { buildTraceRecorder, emitActionTrace } from './trace.mjs';
 import { sleep, readLocation, clickPoint } from './dom-ops.mjs';
 import { readSearchCandidateByNoteId, ensureSearchCandidateFullyVisible } from './search-ops.mjs';
-import { getCurrentTabIndex, getOrAssignLinkForTab } from './tab-state.mjs';
+import { getCurrentTabIndex, getOrAssignLinkForTab, readActiveLinkForTab, requeueTabLinkToTail, markTabLinkDone } from './tab-state.mjs';
 import { isDetailVisible, readDetailCloseTarget, closeDetailToSearch, readDetailSnapshot } from './detail-ops.mjs';
 
+
+async function waitForDetailClose(profileId, attempts = 6, minMs = 220, maxMs = 520) {
+  let lastVisible = await isDetailVisible(profileId).catch(() => null);
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    if (!lastVisible?.detailVisible) return { closed: true, visible: lastVisible, attempts: attempt };
+    const waitMs = Math.floor(minMs + Math.random() * Math.max(0, maxMs - minMs));
+    await sleep(waitMs);
+    lastVisible = await isDetailVisible(profileId).catch(() => null);
+  }
+  return { closed: !lastVisible?.detailVisible, visible: lastVisible, attempts };
+}
 
 export async function executeOpenDetailOperation({ profileId, params = {}, context = {} }) {
   const state = getProfileState(profileId);
@@ -21,14 +32,20 @@ export async function executeOpenDetailOperation({ profileId, params = {}, conte
   const noteUrl = String(params.noteUrl || '').trim() || null;
 
   const useLinks = String(params.openByLinks || '').toLowerCase() === 'true' || params.openByLinks === true;
+  const modeNext = mode === 'next';
   let effectiveNoteUrl = noteUrl;
+  let assignedLink = null;
+  let currentTabIndex = null;
   if (useLinks && !effectiveNoteUrl) {
-    const tabIndex = getCurrentTabIndex(state, { tabCount: params.tabCount });
-    const link = await getOrAssignLinkForTab(state, params, tabIndex);
+    currentTabIndex = getCurrentTabIndex(state, { tabCount: params.tabCount });
+    const link = await getOrAssignLinkForTab(state, params, currentTabIndex);
+    assignedLink = link;
     if (link?.noteUrl) {
-      effectiveNoteUrl = link.noteUrl;
+      effectiveNoteUrl = String(link.noteUrl)
+        .replace('/search_result/', '/explore/')
+        .replace(/([?&]source=)[^&#]*/i, '$1web_explore_feed');
     } else {
-      return { ok: false, code: 'LINKS_EXHAUSTED', message: 'no more collected links for tab' };
+      throw new Error('AUTOSCRIPT_DONE_DETAIL_LINKS_EXHAUSTED');
     }
   }
 
@@ -49,7 +66,35 @@ export async function executeOpenDetailOperation({ profileId, params = {}, conte
 
   if (effectiveNoteUrl) {
     await callAPI('goto', { profileId, url: effectiveNoteUrl });
-    await sleep(1000);
+    const pollMin = Math.max(80, Number(params.pollDelayMinMs ?? 120) || 120);
+    const pollMax = Math.max(pollMin, Number(params.pollDelayMaxMs ?? 240) || 240);
+    const attempts = Math.max(4, Number(params.openByLinksMaxAttempts ?? params.openDetailMaxAttempts ?? 8) || 8);
+    let opened = await isDetailVisible(profileId);
+    for (let attempt = 1; attempt <= attempts; attempt += 1) {
+      if (opened?.detailVisible) break;
+      const waitMs = Math.floor(pollMin + Math.random() * (pollMax - pollMin + 1));
+      await sleep(waitMs);
+      opened = await isDetailVisible(profileId);
+    }
+    if (!opened?.detailVisible) {
+      if (useLinks) {
+        const requeueTabIndex = currentTabIndex || getCurrentTabIndex(state, { tabCount: params.tabCount });
+        const requeue = requeueTabLinkToTail(state, params, requeueTabIndex, {
+          reason: 'open_detail_failed',
+          code: 'DETAIL_NOT_VISIBLE',
+          mode: modeNext ? 'next' : mode,
+          url: effectiveNoteUrl || null,
+        });
+        state.detailLinkState = {
+          ...(state.detailLinkState && typeof state.detailLinkState === 'object' ? state.detailLinkState : {}),
+          activeFailed: true,
+          lastFailureCode: 'DETAIL_NOT_VISIBLE',
+          lastFailureAt: new Date().toISOString(),
+          lastRequeue: requeue,
+        };
+      }
+      return { ok: false, code: 'DETAIL_NOT_VISIBLE', message: 'detail not visible after open-by-links' };
+    }
   } else {
     const candidate = await readSearchCandidateByNoteId(profileId, noteId);
     if (!candidate?.found) {
@@ -77,6 +122,22 @@ export async function executeOpenDetailOperation({ profileId, params = {}, conte
   state.currentNoteId = noteId || detailSnapshot?.noteIdFromUrl || null;
   state.currentHref = afterUrl || null;
   state.lastListUrl = beforeUrl || null;
+  if (useLinks) {
+    const tabIndex = currentTabIndex || getCurrentTabIndex(state, { tabCount: params.tabCount });
+    const activeEntry = readActiveLinkForTab(state, tabIndex);
+    const detailState = state.detailLinkState && typeof state.detailLinkState === 'object'
+      ? state.detailLinkState
+      : { opened: 0 };
+    detailState.opened = Math.max(0, Number(detailState.opened || 0)) + 1;
+    detailState.activeTabIndex = tabIndex;
+    detailState.activeLink = activeEntry?.link || assignedLink || null;
+    detailState.activeLinkRetryCount = Math.max(0, Number(activeEntry?.retryCount || 0));
+    detailState.activeFailed = false;
+    detailState.lastAssignedNoteId = String(assignedLink?.noteId || detailSnapshot?.noteIdFromUrl || '').trim() || null;
+    detailState.lastOpenedNoteId = String(detailSnapshot?.noteIdFromUrl || '').trim() || null;
+    detailState.lastOpenSucceededAt = new Date().toISOString();
+    state.detailLinkState = detailState;
+  }
   emitActionTrace(context, actionTrace, { stage: 'xhs_open_detail' });
   return {
     ok: true,
@@ -89,6 +150,7 @@ export async function executeOpenDetailOperation({ profileId, params = {}, conte
       afterUrl,
       detailVisible: true,
       done: false,
+      doneByLinks: false,
     },
   };
 }
@@ -160,33 +222,80 @@ export async function executeCloseDetailOperation({ profileId, params = {}, cont
     }
   }
 
-  if (!closed) {
+  if (!closed && !openByLinks) {
     const anchorNoteId = String(getProfileState(profileId)?.currentNoteId || '').trim();
     if (anchorNoteId) {
       const anchor = await readSearchCandidateByNoteId(profileId, anchorNoteId, { visibilityMargin: 8 });
       if (anchor?.found && anchor.inViewport) {
-        closed = true;
-        used = 'anchor';
+        const visible = await isDetailVisible(profileId).catch(() => null);
+        if (!visible?.detailVisible) {
+          closed = true;
+          used = 'anchor';
+        }
       }
     }
   }
 
   if (!closed && openByLinks) {
-    await callAPI('page:back', { profileId });
+    try {
+      await callAPI('page:back', { profileId });
+      pushTrace({ kind: 'nav', stage: 'close_detail', action: 'page:back' });
+    } catch (error) {
+      pushTrace({ kind: 'error', stage: 'close_detail', action: 'page:back', message: String(error?.message || error) });
+    }
     await sleep(600);
-    const backVisible = await isDetailVisible(profileId);
-    if (!backVisible?.detailVisible) {
+    const backState = await waitForDetailClose(profileId, 4, 180, 420);
+    if (backState.closed) {
       closed = true;
       used = 'back';
     } else if (state?.lastListUrl) {
-      await callAPI('goto', { profileId, url: state.lastListUrl });
+      try {
+        await callAPI('goto', { profileId, url: state.lastListUrl });
+        pushTrace({ kind: 'nav', stage: 'close_detail', action: 'goto', url: state.lastListUrl });
+      } catch (error) {
+        pushTrace({ kind: 'error', stage: 'close_detail', action: 'goto', message: String(error?.message || error), url: state.lastListUrl });
+      }
       await sleep(800);
-      const gotoVisible = await isDetailVisible(profileId);
-      if (!gotoVisible?.detailVisible) {
+      const gotoState = await waitForDetailClose(profileId, 8, 220, 520);
+      if (gotoState.closed) {
         closed = true;
         used = 'goto_list';
       }
     }
+  }
+
+  if (!closed) {
+    const finalState = await waitForDetailClose(profileId, 6, 200, 480).catch(() => null);
+    if (finalState?.closed) {
+      closed = true;
+      used = used || 'detail_disappeared';
+    }
+  }
+
+  if (closed && openByLinks) {
+    const tabIndex = Number(state?.detailLinkState?.activeTabIndex || getCurrentTabIndex(state, { tabCount: params.tabCount })) || 1;
+    const shouldRequeue = state?.detailLinkState?.activeFailed === true;
+    const queueResult = shouldRequeue
+      ? requeueTabLinkToTail(state, params, tabIndex, {
+        reason: 'detail_flow_failed',
+        code: String(state?.detailLinkState?.lastFailureCode || 'DETAIL_FLOW_FAILED').trim() || 'DETAIL_FLOW_FAILED',
+        noteId: state.currentNoteId || null,
+        url: state.currentHref || null,
+      })
+      : markTabLinkDone(state, tabIndex, {
+        reason: 'detail_flow_done',
+        noteId: state.currentNoteId || null,
+        url: state.currentHref || null,
+      });
+    state.detailLinkState = {
+      ...(state.detailLinkState && typeof state.detailLinkState === 'object' ? state.detailLinkState : {}),
+      activeTabIndex: null,
+      activeLink: null,
+      activeLinkRetryCount: 0,
+      activeFailed: false,
+      lastQueueOutcome: queueResult,
+      lastClosedAt: new Date().toISOString(),
+    };
   }
 
   emitActionTrace(context, actionTrace, { stage: 'xhs_close_detail' });
