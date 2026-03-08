@@ -176,7 +176,7 @@ export function buildXhsDetailOperations(options) {
         includeComments: persistComments,
       },
       trigger: 'detail_modal.exist',
-      dependsOn: [detailHarvestEnabled ? 'detail_harvest' : 'open_first_detail'],
+      dependsOn: ['warmup_comments_context'],
       once: false,
       oncePerAppear: true,
       timeoutMs: 180000,
@@ -255,7 +255,10 @@ export function buildXhsDetailOperations(options) {
       enabled: options.detailLoopEnabled,
       action: 'wait',
       params: { ms: noteIntervalMs },
-      trigger: detailOpenByLinks ? 'detail_modal.exist' : 'search_result_item.exist',
+      // In safe-link detail mode the close -> wait chain is the single source of truth.
+      // Using detail_modal.disappear here causes duplicate scheduling because the same
+      // close cycle can trigger both the raw disappear event and the dependency force-run.
+      trigger: detailOpenByLinks ? 'manual' : 'search_result_item.exist',
       dependsOn: waitBetweenNotesDependsOn,
       once: false,
       oncePerAppear: false,
@@ -266,14 +269,13 @@ export function buildXhsDetailOperations(options) {
     },
     {
       id: 'tab_switch_if_needed',
-      enabled: options.detailLoopEnabled,
+      enabled: options.detailLoopEnabled && closeDetailEnabled && Number(tabCount || 1) > 1,
       action: 'xhs_tab_switch_if_needed',
       params: { tabCount, commentBudget: 50 },
-      trigger: 'detail_modal.exist',
-      dependsOn: ['comments_harvest'],
-      conditions: [{ type: 'subscription_exist', subscriptionId: 'detail_modal' }],
+      trigger: 'manual',
+      dependsOn: ['close_detail'],
       once: false,
-      oncePerAppear: true,
+      oncePerAppear: false,
       retry: { attempts: 1, backoffMs: 0 },
       impact: 'op',
       onFailure: 'continue',
@@ -298,8 +300,11 @@ export function buildXhsDetailOperations(options) {
         openByLinks: detailOpenByLinks,
         openByLinksMaxAttempts,
       },
-      trigger: detailOpenByLinks ? 'detail_modal.exist' : 'search_result_item.exist',
+      // In safe-link detail mode the wait operation is the only allowed opener gate.
+      // Raw disappear events would otherwise schedule a second open for the same slot.
+      trigger: detailOpenByLinks ? 'manual' : 'search_result_item.exist',
       dependsOn: openNextDependsOn,
+      conditions: detailOpenByLinks ? [{ type: 'subscription_not_exist', subscriptionId: 'detail_modal' }] : [],
       once: false,
       oncePerAppear: false,
       timeoutMs: 90000,

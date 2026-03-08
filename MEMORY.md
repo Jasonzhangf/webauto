@@ -69,3 +69,24 @@
 - `readLikeTargetByIndex()` must stay scoped to the active visible comment container, not `document.querySelectorAll(...)` over all comment nodes in the page. Global indexing drifts to off-screen comments and causes false `like_target_missing` / negative-rect failures.
 - Live single-link validation on the preserved `deepseek` safe links proved the current baseline on note `699e8712000000001a033e9f`: detail content persisted, comments persisted, and inline visible-comment likes succeeded with `likedCount=2` on visible indexes `[14,19]`.
 - `executeDetailHarvestOperation()` must persist `content.md` via the existing content writer so single-link detail validation produces the same content artifact shape as later batch detail runs.
+
+## 2026-03-08 Detail Open Progression
+- In safe-link `detail` mode, `open_next_detail` must not listen to raw `detail_modal.disappear`. The reliable progression is `close_detail -> wait_between_notes -> open_next_detail`.
+- Runtime now supports `subscription_not_exist` conditions. `open_next_detail` uses it to block any re-trigger while `detail_modal` is already visible.
+- Validation evidence:
+  - Run `72fa976a-3710-4b62-980c-cb15ba10a2d4` at `~/.webauto/download/xiaohongshu/debug/deepseek/merged/run-2026-03-08T10-11-14-441Z/` showed one real `open_next_detail` and one extra harmless `reused:true` open.
+  - Run `b0b36b6d-f8d1-4f89-a133-cb28382395cd` at `~/.webauto/download/xiaohongshu/debug/deepseek/merged/run-2026-03-08T10-14-10-468Z/` showed only one `open_next_detail` occurrence (lines 346/352/360 in `profiles/wave-001.xhs-qa-1.events.jsonl`) with no second duplicate scheduling.
+- Multi-tab state machine now has direct unit coverage for unique per-tab assignment, failed-link requeue-to-tail, paused-slot reuse, completed-slot closeability, and failed-slot closeability.
+- 2026-03-08: fixed autoscript dependency force-run semantics so subscription-triggered detail ops cannot run under unrelated events; see `memory/2026-03-08-runtime-force-run-trigger-guard.md`.
+- 2026-03-08: safe-link `detail` mode must cap progression at the first `maxNotes` unique links from `safe-detail-urls.jsonl`; do not treat the whole file as runnable when the run only assigned a smaller budget.
+- Single source of truth for that cap is `modules/camo-runtime/src/autoscript/action-providers/xhs/tab-state.mjs`, where cached safe links are normalized and limited before queue assignment.
+- Live validation:
+  - `run-2026-03-08T10-54-44-168Z` stopped after exactly 1 opened note and 1 comments harvest, then ended with `AUTOSCRIPT_DONE_DETAIL_LINKS_EXHAUSTED`.
+  - `run-2026-03-08T10-56-03-136Z` stopped after exactly 2 opened notes and 2 comments harvest runs, then ended with `AUTOSCRIPT_DONE_DETAIL_LINKS_EXHAUSTED`.
+- 2026-03-08: safe-link `detail` open results must report the settled canonical note identity, not the pre-settle assigned link id.
+- Live redirect-settle evidence from `run-2026-03-08T11-03-54-124Z`:
+  - first note stayed stable: `open_first_detail -> detail_harvest -> comments_harvest` all used `698de0c8000000001a01e38d`.
+  - second assigned safe link was `6997df4d00000000150207fd`, but live settle observed a redirect to `684bdeeb0000000023014875`; `xhs_open_detail` now reports `684bdeeb0000000023014875`, and later `detail_harvest` / `comments_harvest` use the same id.
+- Single source of truth for that canonical identity is now `modules/camo-runtime/src/autoscript/action-providers/xhs/detail-flow-ops.mjs`, which re-reads href/noteId after open and persists the settled value into runtime state.
+- 2026-03-08: multi-tab `detail` rotation cannot rely on `detail_modal.exist` after `close_detail`. `tab_switch_if_needed` must be a manual dependency of `close_detail`; otherwise it is skipped as `stale_trigger` every cycle and rotation never happens.
+- Pre-fix live evidence from `run-2026-03-08T11-10-56-693Z`: 5 safe links completed with `AUTOSCRIPT_DONE_DETAIL_LINKS_EXHAUSTED`, but `tab_switch_if_needed` was skipped 4 times as stale, so all notes still ran on slot 1 and tab budget climbed `20 -> 29 -> 44 -> 64 -> 84`.

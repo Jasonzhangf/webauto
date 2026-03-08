@@ -56,7 +56,7 @@ it('reply stage enables reply flow and keeps like flow off', () => {
   assert.equal(getOperation(script, 'comment_reply')?.enabled, true);
 });
 
-it('comments_harvest should not wait for expand_replies to run', () => {
+it('comments_harvest should wait for warmup but not expand_replies', () => {
   const script = buildXhsUnifiedAutoscript({
     profileId: 'xhs-stage-3',
     keyword: '春晚',
@@ -70,7 +70,7 @@ it('comments_harvest should not wait for expand_replies to run', () => {
     doReply: false,
   });
 
-  assert.deepEqual(getOperation(script, 'comments_harvest')?.dependsOn, ['detail_harvest']);
+  assert.deepEqual(getOperation(script, 'comments_harvest')?.dependsOn, ['warmup_comments_context']);
   assert.deepEqual(getOperation(script, 'expand_replies')?.dependsOn, ['detail_harvest']);
   assert.equal(getOperation(script, 'comment_like'), null);
   assert.equal(getOperation(script, 'comments_harvest')?.params?.doLikes, true);
@@ -129,4 +129,28 @@ it('single-note detail stage keeps modal open by default and uses larger comment
   assert.equal(getOperation(script, 'close_detail')?.enabled, false);
   assert.equal(getOperation(script, 'comments_harvest')?.params?.scrollStepMin, 520);
   assert.equal(getOperation(script, 'comments_harvest')?.params?.scrollStepMax, 760);
+});
+
+it('multi-tab detail stage switches tabs after close using a manual dependency chain', () => {
+  const script = buildXhsUnifiedAutoscript({
+    profileId: 'xhs-stage-6',
+    keyword: 'deepseek',
+    stage: 'detail',
+    stageLinksEnabled: true,
+    stageContentEnabled: true,
+    stageLikeEnabled: false,
+    stageReplyEnabled: false,
+    stageDetailEnabled: true,
+    doComments: true,
+    doLikes: false,
+    doReply: false,
+    autoCloseDetail: true,
+    tabCount: 4,
+  });
+
+  assert.equal(getOperation(script, 'tab_switch_if_needed')?.enabled, true);
+  assert.equal(getOperation(script, 'tab_switch_if_needed')?.trigger, 'manual');
+  assert.deepEqual(getOperation(script, 'tab_switch_if_needed')?.dependsOn, ['close_detail']);
+  assert.equal(getOperation(script, 'tab_switch_if_needed')?.oncePerAppear, false);
+  assert.ok(getOperation(script, 'open_next_detail')?.dependsOn?.includes('tab_switch_if_needed'));
 });
