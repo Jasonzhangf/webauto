@@ -591,8 +591,14 @@ async function handleCommand(
       const profileId = args.profileId || 'default';
       const session = manager.getSession(profileId);
       if (!session) throw new Error(`session for profile ${profileId} not started`);
-      const { deltaY, deltaX } = args;
-      await session.mouseWheel({ deltaY: Number(deltaY) || 0, deltaX: Number(deltaX) || 0 });
+      const { deltaY, deltaX, anchorX, anchorY } = args;
+      await session.mouseWheel({
+        deltaY: Number(deltaY) || 0,
+        deltaX: Number(deltaX) || 0,
+        ...(Number.isFinite(Number(anchorX)) && Number.isFinite(Number(anchorY))
+          ? { anchorX: Number(anchorX), anchorY: Number(anchorY) }
+          : {}),
+      });
       return { ok: true, body: { ok: true } };
     }
     case 'keyboard:type': {

@@ -2,7 +2,7 @@ import { getProfileState } from './state.mjs';
 import { emitActionTrace, buildTraceRecorder, emitOperationProgress } from './trace.mjs';
 import { buildElementCollectability, normalizeInlineText } from './utils.mjs';
 import { readDetailSnapshot, readDetailState } from './detail-ops.mjs';
-import { readCommentsSnapshot, readCommentEntryPoint, readCommentTotalTarget, readCommentScrollContainerTarget, readVisibleCommentTarget, readLikeTargetByIndex, readReplyTargetByIndex, readReplyInputTarget, readReplySendButtonTarget } from './comments-ops.mjs';
+import { readCommentsSnapshot, readCommentEntryPoint, readCommentTotalTarget, readCommentScrollContainerTarget, readVisibleCommentTarget, readLikeTargetByIndex, readReplyTargetByIndex, readReplyInputTarget, readReplySendButtonTarget, readExpandReplyTargets } from './comments-ops.mjs';
 import { consumeTabBudget } from './tab-state.mjs';
 import { markDetailSlotProgress } from './detail-slot-state.mjs';
 import { resolveXhsOutputContext, mergeCommentsJsonl, writeCommentsMd, writeContentMarkdown, appendLikeStateRows, writeLikeSummary } from './persistence.mjs';
@@ -1195,15 +1195,6 @@ export async function executeExpandRepliesOperation({ profileId, context = {} })
   const { actionTrace, pushTrace } = buildTraceRecorder();
   const event = context?.event || {};
   const rawElements = Array.isArray(event.elements) ? event.elements : [];
-  const scanned = rawElements.length;
-  if (scanned === 0) {
-    return {
-      ok: false,
-      code: 'EXPAND_REPLIES_NO_TARGETS',
-      message: 'no show-more targets in subscription event',
-      data: { expanded: 0, scanned: 0 },
-    };
-  }
 
   const matchesShowMore = (node) => {
     if (!node || typeof node !== 'object') return false;
@@ -1214,7 +1205,7 @@ export async function executeExpandRepliesOperation({ profileId, context = {} })
     return classes.includes('show-more') || String(node.selector || '').includes('.show-more');
   };
 
-  const candidates = rawElements
+  let candidates = rawElements
     .filter(matchesShowMore)
     .map((node) => {
       const rect = node.rect || null;
@@ -1233,6 +1224,28 @@ export async function executeExpandRepliesOperation({ profileId, context = {} })
       };
     })
     .filter(Boolean);
+
+  if (candidates.length === 0) {
+    const liveTargets = await readExpandReplyTargets(profileId).catch(() => null);
+    const scannedLive = Array.isArray(liveTargets?.targets) ? liveTargets.targets.length : 0;
+    candidates = Array.isArray(liveTargets?.targets)
+      ? liveTargets.targets.map((node) => ({
+        path: '',
+        text: String(node.text || '').replace(/\s+/g, ' ').trim(),
+        rect: node.rect || null,
+        center: node.center || null,
+      })).filter((node) => node.rect && node.center)
+      : [];
+    if (candidates.length === 0) {
+      return {
+        ok: false,
+        code: 'EXPAND_REPLIES_NO_TARGETS',
+        message: 'no visible show-more targets',
+        data: { expanded: 0, scanned: Math.max(rawElements.length, scannedLive) },
+      };
+    }
+  }
+  const scanned = Math.max(rawElements.length, candidates.length);
 
   const dedup = new Map();
   for (const item of candidates) {

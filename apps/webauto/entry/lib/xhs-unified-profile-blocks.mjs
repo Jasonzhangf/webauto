@@ -39,6 +39,11 @@ async function writeJson(filePath, payload) {
   await fsp.writeFile(filePath, `${JSON.stringify(payload, null, 2)}\n`, 'utf8');
 }
 
+async function appendJsonl(filePath, payload) {
+  await ensureDir(path.dirname(filePath));
+  await fsp.appendFile(filePath, `${JSON.stringify(payload)}\n`, 'utf8');
+}
+
 function isObject(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
@@ -153,6 +158,7 @@ export async function runProfile(spec, argv, baseOverrides = {}) {
 
   await ensureDir(path.dirname(spec.logPath));
   const stats = createProfileStats(spec);
+  const detailModalTracePath = path.join(path.dirname(spec.logPath), `${profileId}.detail-modal-trace.jsonl`);
   const reporter = createTaskReporter({
     profileId,
     keyword: options.keyword,
@@ -180,6 +186,13 @@ export async function runProfile(spec, argv, baseOverrides = {}) {
         notesProcessed: Math.max(0, Number(stats.openedNotes) || 0),
         commentsCollected: Math.max(0, Number(stats.commentsCollected) || 0),
         likesPerformed: Math.max(0, Number(stats.likesNewCount) || 0),
+        likesSkippedTotal: Math.max(0, Number(stats.likesSkippedCount) || 0),
+        likeAlreadySkipped: Math.max(0, Number(stats.likesAlreadyCount) || 0),
+        likeDedupSkipped: Math.max(0, Number(stats.likesDedupCount) || 0),
+        detailContentRuns: Math.max(0, Number(stats.detailContentRuns) || 0),
+        detailImageCount: Math.max(0, Number(stats.detailImageCount) || 0),
+        detailVideoCount: Math.max(0, Number(stats.detailVideoCount) || 0),
+        detailAuthorCount: Math.max(0, Number(stats.detailAuthorCount) || 0),
         repliesGenerated: 0,
         imagesDownloaded: 0,
         ocrProcessed: 0,
@@ -197,6 +210,12 @@ export async function runProfile(spec, argv, baseOverrides = {}) {
     if (!merged.runId && currentRunId) merged.runId = currentRunId;
     fs.appendFileSync(spec.logPath, `${JSON.stringify(merged)}\n`, 'utf8');
     console.log(JSON.stringify(merged));
+    if (
+      String(merged.subscriptionId || '').trim() === 'detail_modal'
+      || String(merged.operationId || '').trim() === 'comments_harvest'
+    ) {
+      void appendJsonl(detailModalTracePath, merged).catch(() => null);
+    }
     updateProfileStatsFromEvent(stats, merged);
     if (busEnabled && busPublishable.has(String(merged.event || '').trim())) {
       void publishBusEvent(merged);
@@ -304,6 +323,13 @@ export async function runProfile(spec, argv, baseOverrides = {}) {
         notesProcessed: 0,
         commentsCollected: 0,
         likesPerformed: 0,
+        likesSkippedTotal: 0,
+        likeAlreadySkipped: 0,
+        likeDedupSkipped: 0,
+        detailContentRuns: 0,
+        detailImageCount: 0,
+        detailVideoCount: 0,
+        detailAuthorCount: 0,
         repliesGenerated: 0,
         imagesDownloaded: 0,
         ocrProcessed: 0,
@@ -365,6 +391,13 @@ export async function runProfile(spec, argv, baseOverrides = {}) {
         notesProcessed: Math.max(0, Number(stats.openedNotes) || 0),
         commentsCollected: Math.max(0, Number(stats.commentsCollected) || 0),
         likesPerformed: Math.max(0, Number(stats.likesNewCount) || 0),
+        likesSkippedTotal: Math.max(0, Number(stats.likesSkippedCount) || 0),
+        likeAlreadySkipped: Math.max(0, Number(stats.likesAlreadyCount) || 0),
+        likeDedupSkipped: Math.max(0, Number(stats.likesDedupCount) || 0),
+        detailContentRuns: Math.max(0, Number(stats.detailContentRuns) || 0),
+        detailImageCount: Math.max(0, Number(stats.detailImageCount) || 0),
+        detailVideoCount: Math.max(0, Number(stats.detailVideoCount) || 0),
+        detailAuthorCount: Math.max(0, Number(stats.detailAuthorCount) || 0),
         repliesGenerated: 0,
         imagesDownloaded: 0,
         ocrProcessed: 0,

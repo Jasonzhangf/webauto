@@ -87,12 +87,15 @@ async function appendJsonl(filePath, payload) {
 
 export async function runUnified(argv, overrides = {}) {
   const keyword = String(argv.keyword || argv.k || '').trim();
-  if (!keyword) throw new Error('missing --keyword');
+  const detailOpenByLinks = parseBool(overrides.detailOpenByLinks ?? argv['detail-open-by-links'], false);
+  const sharedHarvestPathArg = String(overrides.sharedHarvestPath ?? argv['shared-harvest-path'] ?? '').trim();
+  if (!keyword && !(detailOpenByLinks && sharedHarvestPathArg)) throw new Error('missing --keyword');
   cleanupIncompleteProfiles({ deleteProfileDirs: false });
 
   const stage = resolveXhsStage(argv, overrides);
   const env = String(argv.env || 'prod').trim() || 'prod';
   const busEnabled = parseBool(argv['bus-events'], false) || process.env.WEBAUTO_BUS_EVENTS === '1';
+  const skipAccountSync = parseBool(overrides.skipAccountSync ?? argv['skip-account-sync'], false);
   let profiles = parseProfiles(argv);
   if (profiles.length === 0) {
     profiles = resolveDefaultXhsProfiles();
@@ -105,7 +108,9 @@ export async function runUnified(argv, overrides = {}) {
     }
   }
   if (profiles.length === 0) throw new Error('missing --profile/--profiles/--profilepool and no valid xiaohongshu account profile found');
-  profiles = assertProfilesUsable(profiles);
+  if (!skipAccountSync) {
+    profiles = assertProfilesUsable(profiles);
+  }
   const planOnly = parseBool(argv['plan-only'], false);
   const headless = parseBool(argv.headless, false);
   const defaultMaxNotes = parseIntFlag(argv['max-notes'] ?? argv.target, 30, 1);
@@ -143,12 +148,12 @@ export async function runUnified(argv, overrides = {}) {
   );
   const searchSerialKey = `${sanitizeForPath(env, 'prod')}:${sanitizeForPath(keyword, 'unknown')}:${runLabel}`;
   const mergedDir = path.join(keywordDir, 'merged', `run-${runLabel}`);
-  const collectRunDir = path.join(keywordDir, 'collect', `run-${runLabel}`);
+  const collectRunDir = path.join(keywordDir, env === 'debug' ? 'collect' : 'links', `run-${runLabel}`);
   const writeMerged = stage !== 'links';
   const runDir = writeMerged ? mergedDir : collectRunDir;
-  const sharedHarvestPath = profiles.length > 1
+  const sharedHarvestPath = sharedHarvestPathArg || (profiles.length > 1
     ? path.join(mergedDir, 'coord', 'harvest-note-claims.json')
-    : '';
+    : '');
   if (!planOnly) {
     const services = await ensureTaskServices(argv, {
       rootDir: process.cwd(),
@@ -189,7 +194,7 @@ export async function runUnified(argv, overrides = {}) {
 
   const execute = async (spec) => {
     try {
-      return await runProfile(spec, argv, overrides);
+      return await runProfile(spec, argv, { ...overrides, skipAccountSync });
     } catch (error) {
       const failure = {
         ok: false,
@@ -246,7 +251,7 @@ export async function runUnified(argv, overrides = {}) {
     if (!hasTotalTarget && wave > 1) break;
 
     let executableProfiles = [];
-    if (planOnly) {
+    if (planOnly || skipAccountSync) {
       executableProfiles = profiles.slice();
       finalAccountStates = executableProfiles.map((profileId) => ({
         profileId,
@@ -480,6 +485,7 @@ export function printUnifiedHelp() {
     '  --incremental-max <bool>     Treat max-notes as incremental cap',
     '  --stage <name>               full|links|content|like|reply|detail',
     '  --plan-only                  Plan only, do not execute',
+    '  --skip-account-sync         Skip business account sync (debug default)',
     '  --output-root <path>         Output root path',
     '  --seed-collect-count <n>     Seed collect count',
     '  --seed-collect-rounds <n>    Seed collect rounds',

@@ -117,7 +117,7 @@ export function sanitizeAuthorText(raw, commentText = '') {
 
 export function buildElementCollectability(detail = {}, commentsSnapshot = null) {
   const collectability = {
-    detailContextAvailable: detail?.detailVisible === true,
+    detailContextAvailable: detail?.detailVisible === true || Boolean(detail?.noteIdFromUrl || detail?.href),
     commentsContextAvailable: commentsSnapshot?.hasCommentsContext === true,
   };
 

@@ -63,3 +63,77 @@ test('rejects legacy selector actions in user_action.operation', async () => {
   assert.equal(typeResult.code, 'LEGACY_ACTION_DISABLED');
   assert.match(typeResult.error, /user_action\.operation/);
 });
+
+test('tears down runtime bridge after unsubscribe removes last runtime topic', async () => {
+  let unsubscribed = false;
+  const fakeSessionManager = {
+    getSession() {
+      return {
+        addRuntimeEventObserver() {
+          return () => {
+            unsubscribed = true;
+          };
+        },
+      };
+    },
+  };
+  const server = new BrowserWsServer({ sessionManager: fakeSessionManager as any }) as any;
+  const sent = [] as any[];
+  const socket = {
+    send(payload: string) {
+      sent.push(JSON.parse(payload));
+    },
+  };
+
+  await server.handleSubscribe(socket, {
+    request_id: 'sub-1',
+    session_id: 'profile-a',
+    data: { topics: ['browser.runtime.event'] },
+  });
+
+  assert.equal(unsubscribed, false);
+
+  await server.handleUnsubscribe(socket, {
+    request_id: 'unsub-1',
+    session_id: 'profile-a',
+    data: { topics: ['browser.runtime.event'] },
+  });
+
+  assert.equal(unsubscribed, true);
+  assert.equal(server.runtimeBridgeUnsub.has('profile-a'), false);
+  assert.equal(server.sessionSubscribers.has('profile-a'), false);
+  assert.equal(server.socketSessionTopics.has(socket), false);
+  assert.equal(sent.at(-1)?.data?.success, true);
+});
+
+test('tears down runtime bridge when last subscribed socket closes', async () => {
+  let unsubscribed = false;
+  const fakeSessionManager = {
+    getSession() {
+      return {
+        addRuntimeEventObserver() {
+          return () => {
+            unsubscribed = true;
+          };
+        },
+      };
+    },
+  };
+  const server = new BrowserWsServer({ sessionManager: fakeSessionManager as any }) as any;
+  const socket = {
+    send() {},
+  };
+
+  await server.handleSubscribe(socket, {
+    request_id: 'sub-2',
+    session_id: 'profile-b',
+    data: { topics: ['browser.runtime.event.dom_mutation'] },
+  });
+
+  server.handleSocketClose(socket);
+
+  assert.equal(unsubscribed, true);
+  assert.equal(server.runtimeBridgeUnsub.has('profile-b'), false);
+  assert.equal(server.sessionSubscribers.has('profile-b'), false);
+  assert.equal(server.socketSessionTopics.has(socket), false);
+});

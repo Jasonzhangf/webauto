@@ -14,6 +14,14 @@ function extractActiveIndex(payload) {
   return null;
 }
 
+function getRuntimeTabSlot(context, tabIndex) {
+  const slots = Array.isArray(context?.runtime?.tabPool?.slots)
+    ? context.runtime.tabPool.slots
+    : [];
+  const slotIndex = Math.max(1, Number(tabIndex) || 1);
+  return slots.find((slot) => Number(slot?.slotIndex) === slotIndex) || null;
+}
+
 export async function executeSwitchTabIfNeeded({ profileId, params = {}, context = {} }) {
   const state = getProfileState(profileId);
   const tabState = ensureTabState(state, {
@@ -28,17 +36,48 @@ export async function executeSwitchTabIfNeeded({ profileId, params = {}, context
   }
 
   const next = advanceTab(state, { tabCount: tabState.tabCount, commentBudget: tabState.limit });
+  const targetSlot = getRuntimeTabSlot(context, next.tabIndex);
+  if (!targetSlot || !Number.isFinite(Number(targetSlot.tabRealIndex))) {
+    return {
+      ok: false,
+      code: 'TAB_POOL_SLOT_MISSING',
+      message: `tab slot ${next.tabIndex} is not initialized in runtime tab pool`,
+      data: { tabIndex: next.tabIndex },
+    };
+  }
+
   const pageList = await callAPI('page:list', { profileId });
   const pages = extractPageList(pageList);
   const activeIndex = extractActiveIndex(pageList);
-  const targetSlot = next.tabIndex - 1;
-  const slot = pages[targetSlot];
-  if (!slot || !Number.isFinite(Number(slot.index))) {
-    return { ok: false, code: 'TAB_POOL_NOT_READY', message: `tab slot ${next.tabIndex} not available` };
+  const targetIndex = Number(targetSlot.tabRealIndex);
+  const slot = pages.find((page) => Number(page?.index) === targetIndex) || null;
+  if (!slot) {
+    return {
+      ok: false,
+      code: 'TAB_POOL_SLOT_CLOSED',
+      message: `tab slot ${next.tabIndex} is no longer available`,
+      data: { tabIndex: next.tabIndex, targetIndex },
+    };
   }
-  const targetIndex = Number(slot.index);
   if (Number(activeIndex) !== targetIndex) {
     await callAPI('page:switch', { profileId, index: targetIndex });
   }
-  return { ok: true, code: 'OPERATION_DONE', message: 'tab switch done', data: { tabIndex: next.tabIndex, used: next.used, limit: next.limit } };
+  if (context?.runtime && typeof context.runtime === 'object') {
+    context.runtime.currentTab = {
+      slotIndex: next.tabIndex,
+      tabRealIndex: targetIndex,
+      url: String(slot.url || ''),
+    };
+  }
+  return {
+    ok: true,
+    code: 'OPERATION_DONE',
+    message: 'tab switch done',
+    data: {
+      tabIndex: next.tabIndex,
+      used: next.used,
+      limit: next.limit,
+      targetIndex,
+    },
+  };
 }

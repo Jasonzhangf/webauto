@@ -179,7 +179,7 @@ export function buildXhsDetailOperations(options) {
       dependsOn: ['warmup_comments_context'],
       once: false,
       oncePerAppear: true,
-      timeoutMs: 180000,
+      timeoutMs: 600000,
       retry: { attempts: 1, backoffMs: 0 },
       impact: 'script',
       onFailure: 'continue',

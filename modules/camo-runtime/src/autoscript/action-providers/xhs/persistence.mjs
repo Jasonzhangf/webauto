@@ -50,6 +50,7 @@ export function resolveXhsOutputContext({
     commentsMdPath: path.join(noteDir, 'comments.md'),
     imagesDir: path.join(noteDir, 'images'),
     likeStatePath: path.join(keywordDir, '.like-state.jsonl'),
+    likeSummaryPath: path.join(noteDir, 'likes.summary.json'),
     likeEvidenceDir: path.join(keywordDir, 'like-evidence', note),
     virtualLikeEvidenceDir: path.join(keywordDir, 'virtual-like', note),
   };
@@ -127,6 +128,11 @@ async function appendJsonlRows(filePath, rows) {
   await fs.appendFile(filePath, `${payload}\n`, 'utf8');
 }
 
+async function writeJson(filePath, payload) {
+  await ensureDir(path.dirname(filePath));
+  await fs.writeFile(filePath, `${JSON.stringify(payload, null, 2)}\n`, 'utf8');
+}
+
 function normalizeCommentRow(noteId, row) {
   return {
     noteId: String(noteId || ''),
@@ -202,6 +208,23 @@ function linkDedupKey(row) {
   if (noteId) return `note:${noteId}`;
   const noteUrl = String(row?.safeDetailUrl || row?.noteUrl || '').trim();
   return noteUrl ? `url:${noteUrl}` : '';
+}
+
+export async function appendLikeStateRows({ filePath, rows = [] }) {
+  const normalized = Array.isArray(rows)
+    ? rows.filter((row) => row && typeof row === 'object')
+    : [];
+  await appendJsonlRows(filePath, normalized);
+  return {
+    filePath,
+    added: normalized.length,
+    rowsAdded: normalized,
+  };
+}
+
+export async function writeLikeSummary({ filePath, summary = {} }) {
+  await writeJson(filePath, summary);
+  return { filePath, summary };
 }
 
 export async function mergeCommentsJsonl({ filePath, noteId, comments = [] }) {

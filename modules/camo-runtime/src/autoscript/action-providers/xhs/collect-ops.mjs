@@ -6,7 +6,6 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { sleep, readLocation, clickPoint, clearAndType, pressKey, resolveSelectorTarget, sleepRandom, evaluateReadonly } from './dom-ops.mjs';
 import { readSearchInput, readSearchViewportReady, readSearchCandidates } from './search-ops.mjs';
-import { closeDetailToSearch } from './detail-ops.mjs';
 import { buildSelectorCheck, ensureActiveSession, maybeSelector } from '../../../container/runtime-core/index.mjs';
 import { getDomSnapshotByProfile } from '../../../utils/browser-service.mjs';
 import { resolveXhsOutputContext, mergeLinksJsonl, readJsonlRows } from './persistence.mjs';
@@ -419,20 +418,6 @@ async function waitForContainerReady(profileId, containerId, timeoutMs = 5000, i
   return { ok: false, code: 'CONTAINER_TIMEOUT', message: `container not ready within ${timeoutMs}ms`, data: { selector } };
 }
 
-async function waitForDetailVisible(profileId, timeoutMs = 5000) {
-  const ready = await waitForContainerReady(profileId, 'xiaohongshu_detail.modal_shell', timeoutMs, 200);
-  return ready?.ok ? { detailVisible: true, container: ready } : null;
-}
-
-async function waitForSearchReady(profileId, timeoutMs = 5000) {
-  const ready = await waitForContainerReady(profileId, 'xiaohongshu_search.search_result_item', timeoutMs, 200);
-  if (!ready?.ok) return null;
-  const candidates = await readSearchCandidates(profileId);
-  const rows = Array.isArray(candidates?.rows) ? candidates.rows : [];
-  return { rows, page: candidates.page || null, container: ready };
-}
-
-
 export async function executeSubmitSearchOperation({ profileId, params = {}, context = {} }) {
   const lockKey = resolveSearchLockKey(params);
   return withSerializedLock(lockKey ? `xhs_submit_search:${lockKey}` : '', async () => {
@@ -451,6 +436,7 @@ export async function executeSubmitSearchOperation({ profileId, params = {}, con
     const searchReadyPollMinMs = Math.max(120, Number(params.searchReadyPollMinMs ?? 260) || 260);
     const searchReadyPollMaxMs = Math.max(searchReadyPollMinMs, Number(params.searchReadyPollMaxMs ?? 700) || 700);
     const searchReadyRetryCount = Math.max(1, Number(params.searchReadyRetryCount ?? 3) || 3);
+
 
     const input = await readSearchInput(profileId);
     if (!input || input.ok !== true || !input.center) {
@@ -601,14 +587,6 @@ export async function executeCollectLinksOperation({ profileId, params = {}, con
   while (state.collectCount < maxNotes) {
     let progressedThisRound = false;
     const selectorsMeta = await loadSearchSelectors();
-    const detailVisible = await waitForDetailVisible(profileId, 5000);
-    if (detailVisible?.detailVisible === true) {
-      await closeDetailToSearch(profileId, pushTrace);
-      await waitForSearchReady(profileId, 5000);
-      await sleep(300);
-      markNoProgress();
-      continue;
-    }
 
     let anchorSnapshot = await readSearchAnchors(profileId, {
       listSelector: selectorsMeta.listSelector,

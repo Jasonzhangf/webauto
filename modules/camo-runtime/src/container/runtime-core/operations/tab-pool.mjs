@@ -288,7 +288,11 @@ export async function executeTabPoolOperation({ profileId, action, params = {}, 
 
   if (action === 'ensure_tab_pool') {
     const tabCount = Math.max(1, Number(params.tabCount ?? params.count ?? 1) || 1);
-    const openDelayMs = Math.max(0, Number(params.openDelayMs ?? 350) || 350);
+    const minOpenDelayMs = Math.max(0, Number(params.minDelayMs ?? params.minOpenDelayMs ?? 0) || 0);
+    const openDelayMs = Math.max(
+      minOpenDelayMs,
+      Math.max(0, Number(params.openDelayMs ?? 350) || 350),
+    );
     const normalizeTabs = params.normalizeTabs === true;
     const seedOnOpen = params.seedOnOpen !== false;
     const shortcutOnly = params.shortcutOnly === true;
@@ -475,6 +479,13 @@ export async function executeTabPoolOperation({ profileId, action, params = {}, 
         apiTimeoutMs,
         initializedAt: new Date().toISOString(),
       };
+      runtimeState.currentTab = slots[0]
+        ? {
+            slotIndex: Number(slots[0].slotIndex),
+            tabRealIndex: Number(slots[0].tabRealIndex),
+            url: String(slots[0].url || ''),
+          }
+        : null;
     }
 
     return {
@@ -535,9 +546,10 @@ export async function executeTabPoolOperation({ profileId, action, params = {}, 
       });
     }
     runtimeState.currentTab = {
-      slotIndex: selected.slotIndex,
+      slotIndex: Number(selected.slotIndex),
       tabRealIndex: targetIndex,
       activeIndex,
+      url: String(selected.url || ''),
     };
 
     return {
@@ -593,9 +605,10 @@ export async function executeTabPoolOperation({ profileId, action, params = {}, 
       });
     }
     runtimeState.currentTab = {
-      slotIndex: slot.slotIndex,
+      slotIndex: Number(slot.slotIndex),
       tabRealIndex: targetIndex,
       activeIndex,
+      url: String(slot.url || ''),
     };
     return {
       ok: true,

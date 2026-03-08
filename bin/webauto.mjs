@@ -354,6 +354,7 @@ Usage:
   webauto schedule --help
   webauto deps --help
   webauto ui --help
+  webauto ui cli --help
   webauto daemon --help
   webauto xhs --help
 
@@ -397,6 +398,7 @@ Examples (standard):
   webauto ui console --build
   webauto ui console --install
   webauto ui restart --build --reason "reload-after-pull"
+  webauto ui cli --help
   webauto ui cli start --build
   webauto ui cli tab --tab 配置
   webauto ui cli input --selector "#keyword-input" --value "seedance2.0"

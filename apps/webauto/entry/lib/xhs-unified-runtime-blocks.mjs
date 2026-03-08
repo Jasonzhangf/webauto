@@ -154,6 +154,10 @@ export function createProfileStats(spec) {
     likesSkippedCount: 0,
     likesAlreadyCount: 0,
     likesDedupCount: 0,
+    detailContentRuns: 0,
+    detailImageCount: 0,
+    detailVideoCount: 0,
+    detailAuthorCount: 0,
     searchCount: 0,
     rollbackCount: 0,
     returnToSearchCount: 0,
@@ -266,18 +270,33 @@ export function updateProfileStatsFromEvent(stats, payload) {
     return;
   }
 
+  if (operationId === 'detail_harvest') {
+    stats.detailContentRuns += 1;
+    stats.detailImageCount += Math.max(0, toNumber(result.detail?.imageCount, 0));
+    stats.detailVideoCount += result.detail?.videoPresent === true ? 1 : Math.max(0, toNumber(result.detail?.videoCount, 0));
+    stats.detailAuthorCount += result.detail?.authorId || result.detail?.authorName ? 1 : 0;
+    return;
+  }
+
   if (operationId === 'comments_harvest') {
     stats.commentsHarvestRuns += 1;
-    stats.commentsCollected += toNumber(result.collected, 0);
+    stats.commentsCollected += toNumber(result.collected ?? result.commentsAdded, 0);
     stats.commentsExpected += Math.max(0, toNumber(result.expectedCommentsCount, 0));
     if (result.reachedBottom === true) stats.commentsReachedBottomCount += 1;
+    stats.likesHitCount += toNumber(result.hitCount, 0);
+    stats.likesNewCount += toNumber(result.likedCount ?? result.liked, 0);
+    stats.likesSkippedCount += toNumber(result.skippedCount, 0);
+    stats.likesAlreadyCount += toNumber(result.alreadyLikedSkipped, 0);
+    stats.likesDedupCount += toNumber(result.dedupSkipped, 0);
     pushUnique(stats.commentPaths, result.commentsPath);
+    pushUnique(stats.likeSummaryPaths, result.summaryPath);
+    pushUnique(stats.likeStatePaths, result.likeStatePath);
     return;
   }
 
   if (operationId === 'comment_like') {
     stats.likesHitCount += toNumber(result.hitCount, 0);
-    stats.likesNewCount += toNumber(result.likedCount, 0);
+    stats.likesNewCount += toNumber(result.likedCount ?? result.liked, 0);
     stats.likesSkippedCount += toNumber(result.skippedCount, 0);
     stats.likesAlreadyCount += toNumber(result.alreadyLikedSkipped, 0);
     stats.likesDedupCount += toNumber(result.dedupSkipped, 0);

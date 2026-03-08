@@ -196,6 +196,13 @@ export function applyCamoEnv({ env = process.env, repoRoot = process.cwd() } = {
     const fromWebauto = String(env.WEBAUTO_INPUT_READY_SETTLE_MS || '').trim();
     if (fromWebauto) env.CAMO_INPUT_READY_SETTLE_MS = fromWebauto;
   }
+  if (!String(env.WEBAUTO_BRING_TO_FRONT_MODE || '').trim()) {
+    env.WEBAUTO_BRING_TO_FRONT_MODE = 'never';
+  }
+  if (!String(env.CAMO_BRING_TO_FRONT_MODE || '').trim()) {
+    const fromWebauto = String(env.WEBAUTO_BRING_TO_FRONT_MODE || '').trim();
+    env.CAMO_BRING_TO_FRONT_MODE = fromWebauto || 'never';
+  }
   if (!String(env.CAMO_NAV_WAIT_UNTIL || '').trim()) {
     const fromWebauto = String(env.WEBAUTO_NAV_WAIT_UNTIL || '').trim();
     if (fromWebauto) env.CAMO_NAV_WAIT_UNTIL = fromWebauto;

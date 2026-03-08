@@ -139,22 +139,29 @@ export function buildXhsSearchOperations(options) {
       trigger: 'search_result_item.exist',
       dependsOn: [verifyDependsOn],
       once: true,
-      timeoutMs: 90000,
+      timeoutMs: 300000,
+      onFailure: 'continue',
+      impact: 'op',
     },
   ];
 }
 
 export function buildXhsTabPoolOperation(options) {
-  const { tabCount, tabOpenDelayMs, detailLinksStartup } = options;
+  const { tabCount, tabOpenDelayMs, tabOpenMinDelayMs, detailLinksStartup } = options;
+  const seedUrl = detailLinksStartup ? 'https://www.xiaohongshu.com/explore' : undefined;
   return [
     {
       id: 'ensure_tab_pool',
       action: 'ensure_tab_pool',
       params: {
+        ...(seedUrl ? { url: seedUrl } : {}),
         tabCount,
         openDelayMs: tabOpenDelayMs,
-        normalizeTabs: false,
-        seedOnOpen: !detailLinksStartup,
+        minDelayMs: tabOpenMinDelayMs,
+        // Safe-link detail startup must normalize every tab back to a clean list shell.
+        // Otherwise stale detail pages from previous runs leak into the tab pool state.
+        normalizeTabs: detailLinksStartup,
+        seedOnOpen: true,
         shortcutOnly: false,
       },
       trigger: detailLinksStartup ? 'startup' : 'search_result_item.exist',
@@ -162,8 +169,8 @@ export function buildXhsTabPoolOperation(options) {
       once: true,
       timeoutMs: 180000,
       retry: { attempts: 2, backoffMs: 500 },
-      impact: 'script',
-      onFailure: 'stop_all',
+      impact: 'op',
+      onFailure: 'continue',
       validation: detailLinksStartup
         ? undefined
         : {
@@ -178,10 +185,13 @@ export function buildXhsTabPoolOperation(options) {
   ];
 }
 
-export function buildXhsGuardOperations() {
+export function buildXhsGuardOperations(options = {}) {
+  const env = String(options.env || 'debug').trim().toLowerCase();
+  const loginGuardEnabled = true;
   return [
     {
       id: 'abort_on_login_guard',
+      enabled: loginGuardEnabled,
       action: 'xhs_assert_logged_in',
       params: { code: 'LOGIN_GUARD_DETECTED' },
       trigger: 'login_guard.appear',

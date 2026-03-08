@@ -87,4 +87,30 @@ describe('xhs detail slot state', () => {
     assert.equal(shouldCloseCurrentDetail(state, { tabCount: 4, openByLinks: true }), true);
     assert.equal(shouldReuseDetailForCurrentTab(state, { tabCount: 4, openByLinks: true }), false);
   });
+
+  it('marks failed slot as closeable and not reusable', () => {
+    const state = buildState();
+    writeDetailSlotState(state, 2, {
+      link: { noteId: 'note-2', noteUrl: 'https://www.xiaohongshu.com/explore/note-2?xsec_token=2' },
+      lastOpenedNoteId: 'note-2',
+      lastOpenedHref: 'https://www.xiaohongshu.com/explore/note-2?xsec_token=2',
+      status: 'active',
+    });
+
+    markDetailSlotProgress(state, { tabCount: 4, openByLinks: true }, {
+      failed: true,
+      completed: false,
+      paused: false,
+      exitReason: 'detail_flow_failed',
+      failureCode: 'DETAIL_FLOW_FAILED',
+      commentsAdded: 3,
+    });
+
+    const slot = readDetailSlotState(state, 2, { tabCount: 4 });
+    assert.equal(slot.status, 'failed');
+    assert.equal(slot.failed, true);
+    assert.equal(slot.lastFailureCode, 'DETAIL_FLOW_FAILED');
+    assert.equal(shouldCloseCurrentDetail(state, { tabCount: 4, openByLinks: true }), true);
+    assert.equal(shouldReuseDetailForCurrentTab(state, { tabCount: 4, openByLinks: true }), false);
+  });
 });

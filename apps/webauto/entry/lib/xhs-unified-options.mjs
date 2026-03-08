@@ -40,8 +40,8 @@ export async function buildUnifiedOptions(argv, profileId, overrides = {}) {
   const openDetailPollDelayMaxDefault = parseIntFlag(flowGate?.openDetail?.pollDelayMaxMs, 700, openDetailPollDelayMinDefault);
   const openDetailPostOpenMinDefault = parseIntFlag(flowGate?.openDetail?.postOpenMinMs, 5000, 120);
   const openDetailPostOpenMaxDefault = parseIntFlag(flowGate?.openDetail?.postOpenMaxMs, 10000, openDetailPostOpenMinDefault);
-  const commentsScrollStepMinDefault = parseIntFlag(flowGate?.commentsHarvest?.scrollStepMin, 280, 120);
-  const commentsScrollStepMaxDefault = parseIntFlag(flowGate?.commentsHarvest?.scrollStepMax, 420, commentsScrollStepMinDefault);
+  const commentsScrollStepMinDefault = parseIntFlag(flowGate?.commentsHarvest?.scrollStepMin, 960, 120);
+  const commentsScrollStepMaxDefault = parseIntFlag(flowGate?.commentsHarvest?.scrollStepMax, 1280, commentsScrollStepMinDefault);
   const commentsSettleMinDefault = parseIntFlag(flowGate?.commentsHarvest?.settleMinMs, 280, 80);
   const commentsSettleMaxDefault = parseIntFlag(flowGate?.commentsHarvest?.settleMaxMs, 820, commentsSettleMinDefault);
   const defaultOperationMinIntervalDefault = parseIntFlag(flowGate?.pacing?.defaultOperationMinIntervalMs, 1200, 0);
@@ -51,7 +51,10 @@ export async function buildUnifiedOptions(argv, profileId, overrides = {}) {
 
   const throttle = parseIntFlag(argv.throttle, pickRandomInt(throttleMin, throttleMax), 100);
   let tabCount = parseIntFlag(tabCountFlag, tabCountDefault, 1);
-  const noteIntervalMs = parseIntFlag(argv['note-interval'], pickRandomInt(noteIntervalMin, noteIntervalMax), 200);
+  let noteIntervalMs = parseIntFlag(argv['note-interval'], pickRandomInt(noteIntervalMin, noteIntervalMax), 200);
+  if (String(env).trim().toLowerCase() === 'debug') {
+    noteIntervalMs = Math.max(noteIntervalMs, 10000);
+  }
   const tabOpenDelayMs = parseIntFlag(argv['tab-open-delay'], pickRandomInt(tabOpenDelayMin, tabOpenDelayMax), 0);
   const submitMethod = String(argv['search-submit-method'] || submitMethodDefault).trim().toLowerCase() || 'click';
   const submitActionDelayMinMs = parseIntFlag(argv['submit-action-delay-min'], submitActionDelayMinDefault, 20);
@@ -64,8 +67,8 @@ export async function buildUnifiedOptions(argv, profileId, overrides = {}) {
   const openDetailPollDelayMaxMs = parseIntFlag(argv['open-detail-poll-max'], openDetailPollDelayMaxDefault, openDetailPollDelayMinMs);
   const openDetailPostOpenMinMs = parseIntFlag(argv['open-detail-postopen-min'], openDetailPostOpenMinDefault, 120);
   const openDetailPostOpenMaxMs = parseIntFlag(argv['open-detail-postopen-max'], openDetailPostOpenMaxDefault, openDetailPostOpenMinMs);
-  const commentsScrollStepMin = parseIntFlag(argv['comments-scroll-step-min'], commentsScrollStepMinDefault, 120);
-  const commentsScrollStepMax = parseIntFlag(argv['comments-scroll-step-max'], commentsScrollStepMaxDefault, commentsScrollStepMin);
+  let commentsScrollStepMin = parseIntFlag(argv['comments-scroll-step-min'], commentsScrollStepMinDefault, 120);
+  let commentsScrollStepMax = parseIntFlag(argv['comments-scroll-step-max'], commentsScrollStepMaxDefault, commentsScrollStepMin);
   const commentsSettleMinMs = parseIntFlag(argv['comments-settle-min'], commentsSettleMinDefault, 80);
   const commentsSettleMaxMs = parseIntFlag(argv['comments-settle-max'], commentsSettleMaxDefault, commentsSettleMinMs);
   const defaultOperationMinIntervalMs = parseIntFlag(argv['operation-min-interval'], defaultOperationMinIntervalDefault, 0);
@@ -93,9 +96,21 @@ export async function buildUnifiedOptions(argv, profileId, overrides = {}) {
     Math.max(6, Math.ceil(Math.max(1, maxNotes) / 2)),
   );
   const dryRun = parseBool(argv['dry-run'], false);
+  const skipAccountSync = parseBool(overrides.skipAccountSync ?? argv['skip-account-sync'], false);
   const disableDryRun = parseBool(argv['no-dry-run'], false);
   const effectiveDryRun = disableDryRun ? false : dryRun;
   const stage = resolveXhsStage(argv, overrides);
+  const detailOpenByLinks = parseBool(overrides.detailOpenByLinks ?? argv['detail-open-by-links'], false);
+  const openByLinksMaxAttempts = parseIntFlag(argv['open-by-links-max-attempts'], 3, 1);
+  const detailLinksStartup = detailOpenByLinks && stage === 'detail';
+  const autoCloseDetail = parseBool(
+    overrides.autoCloseDetail ?? argv['auto-close-detail'],
+    !(stage === 'detail' && maxNotes <= 1),
+  );
+  if (stage === 'detail' || stage === 'full' || parseBool(overrides.doComments ?? argv['do-comments'], false)) {
+    commentsScrollStepMin = Math.max(commentsScrollStepMin, 960);
+    commentsScrollStepMax = Math.max(commentsScrollStepMax, 1280, commentsScrollStepMin);
+  }
   if (!tabCountProvided && (stage === 'detail' || stage === 'full')) {
     tabCount = 4;
   }
@@ -104,10 +119,10 @@ export async function buildUnifiedOptions(argv, profileId, overrides = {}) {
   const stageContentEnabled = stage === 'detail' || stage === 'full' || stage === 'content' || stage === 'like' || stage === 'reply';
   const likeRequested = parseBool(overrides.doLikes ?? argv['do-likes'], stage === 'like');
   const replyRequested = parseBool(overrides.doReply ?? argv['do-reply'], stage === 'reply');
-  const stageLikeEnabled = (stage === 'like' || stage === 'full')
+  const stageLikeEnabled = (stage === 'detail' || stage === 'like' || stage === 'full')
     && likeRequested
     && !effectiveDryRun;
-  const stageReplyEnabled = (stage === 'reply' || stage === 'full')
+  const stageReplyEnabled = (stage === 'detail' || stage === 'reply' || stage === 'full')
     && replyRequested
     && !effectiveDryRun;
   const commentsRequested = parseBool(
@@ -131,6 +146,7 @@ export async function buildUnifiedOptions(argv, profileId, overrides = {}) {
     outputRoot,
     throttle,
     tabCount,
+    tabOpenMinDelayMs: 10000,
     tabOpenDelayMs,
     noteIntervalMs,
     submitMethod,
@@ -179,6 +195,11 @@ export async function buildUnifiedOptions(argv, profileId, overrides = {}) {
     searchSerialKey,
     seedCollectCount,
     seedCollectMaxRounds,
+    detailOpenByLinks,
+    openByLinksMaxAttempts,
+    detailLinksStartup,
+    autoCloseDetail,
+    skipAccountSync,
   };
   const merged = { ...base, ...overrides };
   return {

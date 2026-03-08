@@ -248,6 +248,7 @@ export function normalizeAutoscript(raw, sourcePath = null) {
     name: toTrimmedString(raw?.name) || (sourcePath ? path.basename(sourcePath) : 'autoscript'),
     profileId: toTrimmedString(raw?.profileId) || null,
     throttle: Math.max(100, Number(raw?.throttle || 500) || 500),
+    metadata: raw?.metadata && typeof raw.metadata === 'object' ? { ...raw.metadata } : null,
     defaults: {
       retry: normalizeRetry(defaults.retry, {}),
       impact: toTrimmedString(defaults.impact || 'op') || 'op',
@@ -305,7 +306,7 @@ export function validateAutoscript(script) {
       if (condition.type === 'operation_done' && condition.operationId && !operationIds.has(condition.operationId)) {
         errors.push(`operation ${operation.id}: unknown condition operation ${condition.operationId}`);
       }
-      if ((condition.type === 'subscription_exist' || condition.type === 'subscription_appear')
+      if ((condition.type === 'subscription_exist' || condition.type === 'subscription_not_exist' || condition.type === 'subscription_appear')
           && condition.subscriptionId && !subscriptionIds.has(condition.subscriptionId)) {
         errors.push(`operation ${operation.id}: unknown condition subscription ${condition.subscriptionId}`);
       }

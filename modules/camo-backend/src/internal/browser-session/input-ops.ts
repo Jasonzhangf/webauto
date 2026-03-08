@@ -19,6 +19,8 @@ export interface MouseMoveOpts {
 export interface MouseWheelOpts {
   deltaY: number;
   deltaX?: number;
+  anchorX?: number;
+  anchorY?: number;
 }
 
 export interface KeyboardTypeOpts {
@@ -93,9 +95,11 @@ export class BrowserSessionInputOps {
     const page = await this.ensurePrimaryPage();
     await this.withInputActionLock(async () => {
       await this.runInputAction(page, 'input:ready', (activePage) => this.ensureInputReady(activePage));
-      const { deltaX = 0, deltaY } = opts;
+      const { deltaX = 0, deltaY, anchorX, anchorY } = opts;
       const normalizedDeltaX = Number(deltaX) || 0;
       const normalizedDeltaY = Number(deltaY) || 0;
+      const normalizedAnchorX = Number(anchorX);
+      const normalizedAnchorY = Number(anchorY);
       if (normalizedDeltaY === 0 && normalizedDeltaX === 0) return;
       const keyboardKey = normalizedDeltaY > 0 ? 'PageDown' : 'PageUp';
       const keyboardTimes = Math.max(1, Math.min(4, Math.round(Math.abs(normalizedDeltaY) / 420) || 1));
@@ -114,8 +118,12 @@ export class BrowserSessionInputOps {
       try {
         await this.runInputAction(page, 'mouse:wheel', async (activePage) => {
           const viewport = activePage.viewportSize();
-          const moveX = Math.max(1, Math.floor(((viewport?.width || 1280) * 0.5)));
-          const moveY = Math.max(1, Math.floor(((viewport?.height || 720) * 0.5)));
+          const moveX = Number.isFinite(normalizedAnchorX)
+            ? Math.max(1, Math.min(Math.max(1, Number(viewport?.width || 1280) - 1), Math.round(normalizedAnchorX)))
+            : Math.max(1, Math.floor(((viewport?.width || 1280) * 0.5)));
+          const moveY = Number.isFinite(normalizedAnchorY)
+            ? Math.max(1, Math.min(Math.max(1, Number(viewport?.height || 720) - 1), Math.round(normalizedAnchorY)))
+            : Math.max(1, Math.floor(((viewport?.height || 720) * 0.5)));
           await activePage.mouse.move(moveX, moveY, { steps: 1 }).catch(() => {});
           await activePage.mouse.wheel(normalizedDeltaX, normalizedDeltaY);
         });

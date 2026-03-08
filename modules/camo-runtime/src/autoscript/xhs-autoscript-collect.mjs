@@ -9,11 +9,36 @@ export function buildXhsCollectOperations(options) {
 
   return [
     {
+      id: 'verify_collect_subscriptions',
+      enabled: stageLinksEnabled,
+      action: 'verify_subscriptions',
+      params: {
+        acrossPages: true,
+        settleMs: 320,
+        pageUrlIncludes: ['/search_result'],
+        requireMatchedPages: false,
+        selectors: [
+          { id: 'home_search_input', selector: '#search-input, input.search-input' },
+          { id: 'search_result_item', selector: '.note-item', visible: false, minCount: 1 },
+        ],
+      },
+      trigger: 'search_result_item.exist',
+      dependsOn: ['submit_search'],
+      once: true,
+      timeoutMs: 90000,
+      onFailure: 'continue',
+      impact: 'op',
+    },
+    {
       id: 'collect_links',
       enabled: stageLinksEnabled,
       action: 'xhs_collect_links',
       params: {
         maxNotes: options.maxNotes,
+        keyword: options.keyword,
+        env: options.env,
+        outputRoot: options.outputRoot,
+        collectOpenLinksOnly: options.collectOpenLinksOnly === true,
         collectIndexStart: collectIndexStart ?? 0,
         collectIndexMaxAttempts: collectIndexMaxAttempts ?? 3,
         collectIndexFailurePolicy: collectIndexFailurePolicy || 'retry',
@@ -21,6 +46,7 @@ export function buildXhsCollectOperations(options) {
       trigger: 'search_result_item.exist',
       dependsOn: ['submit_search'],
       once: true,
+      oncePerAppear: true,
       timeoutMs: options.collectLinksTimeoutMs || null,
       retry: { attempts: 1, backoffMs: 0 },
       validation: { mode: 'none' },

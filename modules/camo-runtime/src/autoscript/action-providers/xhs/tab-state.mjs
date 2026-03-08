@@ -17,6 +17,26 @@ function createQueueEntry(link, retryCount = 0) {
   };
 }
 
+function limitCollectedLinks(rows, params = {}) {
+  const hasMaxNotes = Object.prototype.hasOwnProperty.call(params, 'maxNotes')
+    && params.maxNotes !== null
+    && params.maxNotes !== '';
+  const maxNotes = hasMaxNotes ? Math.max(1, Number(params.maxNotes) || 0) : 0;
+  if (!Array.isArray(rows) || rows.length === 0) return [];
+  if (maxNotes <= 0) return rows.map((row) => cloneLinkPayload(row));
+
+  const seen = new Set();
+  const limited = [];
+  for (const row of rows) {
+    const key = createLinkKey(row);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    limited.push(cloneLinkPayload(row));
+    if (limited.length >= maxNotes) break;
+  }
+  return limited;
+}
+
 export function ensureTabState(state, params = {}) {
   const tabCount = Math.max(1, Number(params.tabCount ?? state?.tabState?.tabCount ?? 4) || 4);
   const limit = Math.max(1, Number(params.commentBudget ?? state?.tabState?.limit ?? 50) || 50);
@@ -89,7 +109,7 @@ function syncQueueFromCache(state, params = {}) {
   const outputCtx = resolveXhsOutputContext({ params, state });
   const linksPath = String(params.sharedHarvestPath || params.sharedClaimPath || outputCtx.linksPath || '').trim();
   const cachePath = String(state.linksCachePath || '').trim();
-  const cacheRows = Array.isArray(state.linksCache) ? state.linksCache : [];
+  const cacheRows = limitCollectedLinks(Array.isArray(state.linksCache) ? state.linksCache : [], params);
   if (linksState.sourcePath === linksPath && linksState.sourcePath === cachePath) return linksState;
   linksState.sourcePath = linksPath || cachePath || null;
   linksState.queue = cacheRows.map((row) => createQueueEntry(row, 0));
@@ -113,10 +133,15 @@ function clearTabAssignment(linksState, tabKey, extra = {}) {
 export async function loadCollectedLinks(state, params = {}) {
   const outputCtx = resolveXhsOutputContext({ params, state });
   const linksPath = String(params.sharedHarvestPath || params.sharedClaimPath || outputCtx.linksPath || '').trim();
-  if (!state.linksCache || state.linksCachePath !== linksPath) {
+  const hasMaxNotes = Object.prototype.hasOwnProperty.call(params, 'maxNotes')
+    && params.maxNotes !== null
+    && params.maxNotes !== '';
+  const cacheMaxNotes = hasMaxNotes ? Math.max(1, Number(params.maxNotes) || 0) : 0;
+  if (!state.linksCache || state.linksCachePath !== linksPath || Number(state.linksCacheMaxNotes || 0) !== cacheMaxNotes) {
     const rows = await readJsonlRows(linksPath);
-    state.linksCache = Array.isArray(rows) ? rows : [];
+    state.linksCache = limitCollectedLinks(Array.isArray(rows) ? rows : [], params);
     state.linksCachePath = linksPath;
+    state.linksCacheMaxNotes = cacheMaxNotes;
   }
   syncQueueFromCache(state, params);
   return state.linksCache;
@@ -213,4 +238,29 @@ export function requeueTabLinkToTail(state, params = {}, tabIndex, meta = {}) {
   };
   clearTabAssignment(linksState, tabKey, { reason: exhausted ? 'retry_exhausted' : 'requeued' });
   return result;
+}
+
+export function readTabSlotState(state, tabIndex) {
+  const linksState = ensureLinksState(state);
+  const tabKey = String(tabIndex || '1');
+  const entry = linksState.byTab[tabKey];
+  if (!entry || typeof entry !== 'object') return null;
+  return {
+    ...entry,
+    link: cloneLinkPayload(entry.link),
+  };
+}
+
+export function writeTabSlotState(state, tabIndex, patch = {}) {
+  const linksState = ensureLinksState(state);
+  const tabKey = String(tabIndex || '1');
+  const current = linksState.byTab[tabKey] && typeof linksState.byTab[tabKey] === 'object'
+    ? linksState.byTab[tabKey]
+    : { index: -1, link: null, key: null, retryCount: 0, done: true };
+  linksState.byTab[tabKey] = {
+    ...current,
+    ...patch,
+    link: Object.prototype.hasOwnProperty.call(patch, 'link') ? cloneLinkPayload(patch.link) : current.link,
+  };
+  return readTabSlotState(state, tabIndex);
 }

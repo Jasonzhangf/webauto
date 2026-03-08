@@ -40,7 +40,6 @@ function splitCsv(value) {
 
 function pickCloseDependency(options) {
   if (options.doReply) return 'comment_reply';
-  if (options.doLikes) return 'comment_like';
   if (options.matchGateEnabled) return 'comment_match_gate';
   if (options.commentsHarvestEnabled) return 'comments_harvest';
   if (options.detailHarvestEnabled) return 'detail_harvest';
@@ -60,6 +59,7 @@ export function resolveXhsUnifiedOptions(rawOptions = {}) {
     && rawOptions.tabCount !== '';
   let tabCount = toPositiveInt(rawOptions.tabCount, 1, 1);
   const tabOpenDelayMs = toNonNegativeInt(rawOptions.tabOpenDelayMs, 1400);
+  const tabOpenMinDelayMs = toNonNegativeInt(rawOptions.tabOpenMinDelayMs, 10000);
   const noteIntervalMs = toPositiveInt(rawOptions.noteIntervalMs, 1200, 200);
   const submitMethod = toTrimmedString(rawOptions.submitMethod, 'click').toLowerCase();
   const submitActionDelayMinMs = toPositiveInt(rawOptions.submitActionDelayMinMs, 180, 20);
@@ -72,8 +72,8 @@ export function resolveXhsUnifiedOptions(rawOptions = {}) {
   const openDetailPollDelayMaxMs = toPositiveInt(rawOptions.openDetailPollDelayMaxMs, 700, openDetailPollDelayMinMs);
   const openDetailPostOpenMinMs = toPositiveInt(rawOptions.openDetailPostOpenMinMs, 5000, 120);
   const openDetailPostOpenMaxMs = toPositiveInt(rawOptions.openDetailPostOpenMaxMs, 10000, openDetailPostOpenMinMs);
-  const commentsScrollStepMin = toPositiveInt(rawOptions.commentsScrollStepMin, 280, 120);
-  const commentsScrollStepMax = toPositiveInt(rawOptions.commentsScrollStepMax, 420, commentsScrollStepMin);
+  const commentsScrollStepMin = toPositiveInt(rawOptions.commentsScrollStepMin, 960, 120);
+  const commentsScrollStepMax = toPositiveInt(rawOptions.commentsScrollStepMax, 1280, commentsScrollStepMin);
   const commentsSettleMinMs = toPositiveInt(rawOptions.commentsSettleMinMs, 280, 80);
   const commentsSettleMaxMs = toPositiveInt(rawOptions.commentsSettleMaxMs, 820, commentsSettleMinMs);
   const defaultOperationMinIntervalMs = toNonNegativeInt(rawOptions.defaultOperationMinIntervalMs, 1200);
@@ -84,7 +84,7 @@ export function resolveXhsUnifiedOptions(rawOptions = {}) {
   const maxComments = toNonNegativeInt(rawOptions.maxComments, 0);
   const resume = toBoolean(rawOptions.resume, false);
   const incrementalMax = toBoolean(rawOptions.incrementalMax, true);
-  const maxLikesPerRound = toNonNegativeInt(rawOptions.maxLikesPerRound ?? rawOptions.maxLikes, 0);
+  const maxLikesPerRound = toNonNegativeInt(rawOptions.maxLikesPerRound ?? rawOptions.maxLikes, 5);
   const matchMode = toTrimmedString(rawOptions.matchMode, 'any');
   const matchMinHits = toPositiveInt(rawOptions.matchMinHits, 1, 1);
   const replyText = toTrimmedString(rawOptions.replyText, '感谢分享，已关注');
@@ -103,13 +103,17 @@ export function resolveXhsUnifiedOptions(rawOptions = {}) {
   const doReply = toBoolean(rawOptions.doReply, false);
   const doOcr = toBoolean(rawOptions.doOcr, false);
   const persistComments = toBoolean(rawOptions.persistComments, true);
-  const autoCloseDetail = toBoolean(rawOptions.autoCloseDetail, true);
   const stage = toTrimmedString(rawOptions.stage, 'full').toLowerCase();
+  const autoCloseDetail = toBoolean(
+    rawOptions.autoCloseDetail,
+    !(stage === 'detail' && maxNotes <= 1),
+  );
   const stageLinksRequested = toBoolean(rawOptions.stageLinksEnabled, true);
   const stageContentEnabled = toBoolean(rawOptions.stageContentEnabled, true);
   const stageLikeEnabled = toBoolean(rawOptions.stageLikeEnabled, doLikes);
   const stageReplyEnabled = toBoolean(rawOptions.stageReplyEnabled, doReply);
   const stageDetailEnabled = toBoolean(rawOptions.stageDetailEnabled, stage === 'detail');
+  const skipAccountSync = toBoolean(rawOptions.skipAccountSync, env === 'debug');
 
   const matchKeywords = splitCsv(rawOptions.matchKeywords || keyword);
   const likeKeywordsSeed = splitCsv(rawOptions.likeKeywords || '');
@@ -120,7 +124,7 @@ export function resolveXhsUnifiedOptions(rawOptions = {}) {
   const collectOpenLinksOnly = stageLinksEnabled;
   const detailOpenByLinks = toBoolean(rawOptions.detailOpenByLinks, stageLinksEnabled && detailLoopEnabled);
   const openByLinksMaxAttempts = toPositiveInt(rawOptions.openByLinksMaxAttempts, 3, 1);
-  const detailLinksStartup = detailOpenByLinks && stage === 'detail';
+  const detailLinksStartup = detailOpenByLinks && (stage === 'detail' || stage === 'full');
   if (!tabCountProvided && detailLoopEnabled) tabCount = 4;
   const detailHarvestEnabled = detailLoopEnabled && (doHomepage || doImages || doComments || doOcr);
   const commentsHarvestEnabled = detailLoopEnabled && (doComments || stageLikeEnabled || stageReplyEnabled);
@@ -163,6 +167,7 @@ export function resolveXhsUnifiedOptions(rawOptions = {}) {
     tabCount,
     tabCountProvided,
     tabOpenDelayMs,
+    tabOpenMinDelayMs,
     noteIntervalMs,
     submitMethod,
     submitActionDelayMinMs,
@@ -226,5 +231,6 @@ export function resolveXhsUnifiedOptions(rawOptions = {}) {
     closeDependsOn,
     recovery,
     strictFailure,
+    skipAccountSync,
   };
 }

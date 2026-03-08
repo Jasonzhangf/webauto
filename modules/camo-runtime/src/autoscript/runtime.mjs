@@ -115,6 +115,7 @@ export class AutoscriptRunner {
         ? options.forceRunOperationIds.map((item) => String(item || '').trim()).filter(Boolean)
         : [],
     );
+    this.lastOperationEvent = new Map();
 
     for (const subscription of script.subscriptions || []) {
       this.subscriptionState.set(subscription.id, {
@@ -249,6 +250,9 @@ export class AutoscriptRunner {
     }
     if (condition.type === 'subscription_exist') {
       return this.subscriptionState.get(condition.subscriptionId)?.exists === true;
+    }
+    if (condition.type === 'subscription_not_exist') {
+      return this.subscriptionState.get(condition.subscriptionId)?.exists !== true;
     }
     if (condition.type === 'subscription_appear') {
       return Number(this.subscriptionState.get(condition.subscriptionId)?.appearCount || 0) > 0;
@@ -467,7 +471,8 @@ export class AutoscriptRunner {
   shouldSchedule(operation, event) {
     const forceRun = this.forceRunOperationIds.has(operation.id);
     if (!operation.enabled) return false;
-    if (!forceRun && !this.isTriggered(operation, event)) return false;
+    if (!this.isTriggered(operation, event)) return false;
+    if (forceRun && !this.isTriggerStillValid(operation)) return false;
     if (operation.once && this.operationState.get(operation.id)?.status === 'done') return false;
     if (!this.isDependencySatisfied(operation)) return false;
     if (!this.areConditionsSatisfied(operation)) return false;
@@ -532,10 +537,56 @@ export class AutoscriptRunner {
     }
   }
 
-  scheduleReadyOperations(event) {
+  scheduleReadyOperations(event, options = {}) {
+    const excludeOperationId = String(options?.excludeOperationId || '').trim();
     for (const operation of this.script.operations || []) {
+      if (excludeOperationId && operation?.id === excludeOperationId) continue;
       if (!this.shouldSchedule(operation, event)) continue;
       this.enqueueOperation(operation, event);
+    }
+  }
+
+  buildRescheduleEvent(event) {
+    return {
+      ...(event && typeof event === 'object' ? event : {}),
+      type: String(event?.type || '').trim() || 'manual',
+      subscriptionId: event?.subscriptionId || null,
+      timestamp: nowIso(),
+    };
+  }
+
+  buildForcedEventForOperation(operation, baseEvent) {
+    const trigger = operation?.trigger || { type: 'startup' };
+    if (trigger.type === 'startup') {
+      return { type: 'startup', subscriptionId: null, timestamp: nowIso() };
+    }
+    if (trigger.type === 'manual') {
+      return { type: 'manual', subscriptionId: null, timestamp: nowIso() };
+    }
+    if (trigger.type === 'subscription_event') {
+      return {
+        type: trigger.event,
+        subscriptionId: trigger.subscriptionId,
+        timestamp: nowIso(),
+      };
+    }
+    return this.buildRescheduleEvent(baseEvent);
+  }
+
+  scheduleDependentOperations(operationId, event) {
+    const dependencyId = String(operationId || '').trim();
+    if (!dependencyId) return;
+    const baseEvent = this.lastOperationEvent.get(dependencyId) || event;
+    for (const operation of this.script.operations || []) {
+      const deps = Array.isArray(operation?.dependsOn) ? operation.dependsOn : [];
+      if (!deps.includes(dependencyId)) continue;
+      this.forceRunOperationIds.add(operation.id);
+      const forcedEvent = this.buildForcedEventForOperation(operation, baseEvent);
+      if (!this.shouldSchedule(operation, forcedEvent)) {
+        this.forceRunOperationIds.delete(operation.id);
+        continue;
+      }
+      this.enqueueOperation(operation, forcedEvent);
     }
   }
 
@@ -753,6 +804,8 @@ export class AutoscriptRunner {
     let totalAttempts = baseAttempts;
 
     for (let attempt = 1; attempt <= totalAttempts; attempt += 1) {
+      const scheduledState = this.operationScheduleState.get(operation.id) || {};
+      const forcedExecution = scheduledState.lastForced === true;
       const context = {
         runId: this.runId,
         event,
@@ -777,7 +830,7 @@ export class AutoscriptRunner {
 
       await this.applyPacingBeforeAttempt(operation, attempt);
 
-      if (!this.isTriggerStillValid(operation)) {
+      if (!forcedExecution && !this.isTriggerStillValid(operation)) {
         const trigger = operation?.trigger || {};
         const subState = this.subscriptionState.get(trigger.subscriptionId) || null;
         this.operationState.set(operation.id, {
@@ -799,6 +852,7 @@ export class AutoscriptRunner {
           trigger,
           currentSubscriptionState: subState,
         });
+        this.scheduleDependentOperations(operation.id, event);
         return {
           ok: true,
           terminalState: 'skipped_stale',
@@ -893,7 +947,8 @@ export class AutoscriptRunner {
           result: result.data || null,
         });
         // Re-evaluate graph on the same event so dependencies can continue in one trigger chain.
-        this.scheduleReadyOperations(event);
+        this.scheduleReadyOperations(event, { excludeOperationId: operation.id });
+        this.scheduleDependentOperations(operation.id, event);
         return { ok: true, terminalState: 'done', result };
       }
 
@@ -920,6 +975,7 @@ export class AutoscriptRunner {
           currentSubscriptionState: subState,
           validation: result.data?.detail || null,
         });
+        this.scheduleDependentOperations(operation.id, event);
         return {
           ok: true,
           terminalState: 'skipped_stale_pre_validation',
@@ -1039,7 +1095,8 @@ export class AutoscriptRunner {
           });
         }
         // allow dependent operations to continue on the same trigger
-        this.scheduleReadyOperations(event);
+        this.scheduleReadyOperations(event, { excludeOperationId: operation.id });
+        this.scheduleDependentOperations(operation.id, event);
         return { ok: true, terminalState: 'skipped_nonblocking', result };
       }
 
@@ -1056,7 +1113,9 @@ export class AutoscriptRunner {
     if (this.pendingOperations.has(operation.id)) return;
     if (!this.state.active) return;
 
+    this.lastOperationEvent.set(operation.id, event);
     const scheduleState = this.operationScheduleState.get(operation.id) || {};
+    scheduleState.lastForced = this.forceRunOperationIds.has(operation.id);
     scheduleState.lastScheduledAt = Date.now();
     scheduleState.lastEventAt = Date.now();
     scheduleState.lastTriggerKey = this.buildTriggerKey(operation, event);

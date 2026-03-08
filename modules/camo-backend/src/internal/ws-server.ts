@@ -59,6 +59,7 @@ export class BrowserWsServer {
   private capabilityMap = new Map<string, string[]>();
   private subscriptions = new Map<WebSocket, Set<string>>();
   private sessionSubscribers = new Map<string, Set<WebSocket>>();
+  private socketSessionTopics = new Map<WebSocket, Map<string, Set<string>>>();
   private runtimeBridgeUnsub = new Map<string, () => void>();
 
   constructor(private options: WsServerOptions) {
@@ -446,16 +447,21 @@ export class BrowserWsServer {
 
     const clientTopics = this.subscriptions.get(socket) || new Set();
     const sessionClients = this.sessionSubscribers.get(sessionId) || new Set();
+    const sessionTopicMap = this.socketSessionTopics.get(socket) || new Map<string, Set<string>>();
+    const sessionTopicSet = sessionTopicMap.get(sessionId) || new Set<string>();
 
     const requiresRuntimeBridge = topics.some((topic) => topic === 'browser.runtime.event' || topic.startsWith('browser.runtime.event.'));
 
     topics.forEach((topic) => {
       clientTopics.add(topic);
       sessionClients.add(socket);
+      sessionTopicSet.add(topic);
     });
 
     this.subscriptions.set(socket, clientTopics);
     this.sessionSubscribers.set(sessionId, sessionClients);
+    sessionTopicMap.set(sessionId, sessionTopicSet);
+    this.socketSessionTopics.set(socket, sessionTopicMap);
     if (requiresRuntimeBridge) {
       this.ensureRuntimeEventBridge(sessionId);
     }
@@ -474,6 +480,7 @@ export class BrowserWsServer {
     const topics: string[] = Array.isArray(payload.data?.topics) ? payload.data.topics : [];
 
     const clientTopics = this.subscriptions.get(socket);
+    const sessionTopicMap = this.socketSessionTopics.get(socket);
     if (!clientTopics) {
       this.send(socket, {
         type: 'response',
@@ -489,6 +496,31 @@ export class BrowserWsServer {
       this.subscriptions.delete(socket);
     }
 
+    if (sessionId && sessionTopicMap?.has(sessionId)) {
+      const sessionTopicSet = sessionTopicMap.get(sessionId) || new Set<string>();
+      topics.forEach((topic) => sessionTopicSet.delete(topic));
+      if (sessionTopicSet.size === 0) {
+        sessionTopicMap.delete(sessionId);
+        const sessionClients = this.sessionSubscribers.get(sessionId);
+        if (sessionClients) {
+          sessionClients.delete(socket);
+          if (sessionClients.size === 0) {
+            this.sessionSubscribers.delete(sessionId);
+          }
+        }
+      } else {
+        sessionTopicMap.set(sessionId, sessionTopicSet);
+      }
+
+      if (sessionTopicMap.size === 0) {
+        this.socketSessionTopics.delete(socket);
+      } else {
+        this.socketSessionTopics.set(socket, sessionTopicMap);
+      }
+
+      this.maybeTeardownRuntimeEventBridge(sessionId);
+    }
+
     this.send(socket, {
       type: 'response',
       request_id: requestId,
@@ -499,12 +531,52 @@ export class BrowserWsServer {
 
   private handleSocketClose(socket: WebSocket) {
     this.subscriptions.delete(socket);
+    const sessionTopicMap = this.socketSessionTopics.get(socket);
+    this.socketSessionTopics.delete(socket);
+
+    if (sessionTopicMap) {
+      for (const sessionId of sessionTopicMap.keys()) {
+        const clients = this.sessionSubscribers.get(sessionId);
+        if (!clients) continue;
+        clients.delete(socket);
+        if (clients.size === 0) {
+          this.sessionSubscribers.delete(sessionId);
+        }
+        this.maybeTeardownRuntimeEventBridge(sessionId);
+      }
+      return;
+    }
+
     for (const [sessionId, clients] of this.sessionSubscribers.entries()) {
       clients.delete(socket);
       if (clients.size === 0) {
         this.sessionSubscribers.delete(sessionId);
+        this.maybeTeardownRuntimeEventBridge(sessionId);
       }
     }
+  }
+
+  private sessionNeedsRuntimeBridge(sessionId: string) {
+    if (!sessionId) return false;
+    const clients = this.sessionSubscribers.get(sessionId);
+    if (!clients || clients.size === 0) return false;
+    for (const socket of clients) {
+      const sessionTopicMap = this.socketSessionTopics.get(socket);
+      const sessionTopics = sessionTopicMap?.get(sessionId);
+      if (!sessionTopics || sessionTopics.size === 0) continue;
+      for (const topic of sessionTopics) {
+        if (topic === 'browser.runtime.event' || topic.startsWith('browser.runtime.event.')) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  private maybeTeardownRuntimeEventBridge(sessionId: string) {
+    if (!sessionId) return;
+    if (this.sessionNeedsRuntimeBridge(sessionId)) return;
+    this.teardownRuntimeEventBridge(sessionId);
   }
 
   private broadcastEvent(topic: string, sessionId: string, data: any) {

@@ -19,7 +19,6 @@ export function buildXhsDetailAutoscript(rawOptions = {}) {
 
   const operations = [
     ...buildXhsBootstrapOperations(options),
-    ...buildXhsSearchOperations(options),
     ...buildXhsTabPoolOperation(options),
     ...buildXhsDetailOperations(options),
     ...buildXhsGuardOperations(options),

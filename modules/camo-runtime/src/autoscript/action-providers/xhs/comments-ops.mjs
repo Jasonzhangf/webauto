@@ -315,6 +315,102 @@ export async function readVisibleCommentTargets(profileId) {
   return evaluateReadonly(profileId, script);
 }
 
+export async function readExpandReplyTargets(profileId) {
+  const script = `(() => {
+    const detailRoot = document.querySelector('.note-detail-mask')
+      || document.querySelector('.note-detail-page')
+      || document.querySelector('.note-detail-dialog')
+      || document.querySelector('.note-container')
+      || document.querySelector('.outer-link-container')
+      || document.querySelector('.main-content');
+    if (!detailRoot) return { found: false, reason: 'no_detail_root', targets: [] };
+
+    const vw = Number(window.innerWidth || 0);
+    const vh = Number(window.innerHeight || 0);
+    const viewportRect = { left: 0, top: 0, right: vw, bottom: vh };
+    const readRect = (node) => node?.getBoundingClientRect?.() || null;
+    const intersectionArea = (a, b) => {
+      const left = Math.max(Number(a.left || 0), Number(b.left || 0));
+      const right = Math.min(Number(a.right || 0), Number(b.right || 0));
+      const top = Math.max(Number(a.top || 0), Number(b.top || 0));
+      const bottom = Math.min(Number(a.bottom || 0), Number(b.bottom || 0));
+      const width = Math.max(0, right - left);
+      const height = Math.max(0, bottom - top);
+      return width * height;
+    };
+    const toCenter = (rect) => ({
+      x: Math.max(1, Math.min(vw - 1, Math.round(Number(rect.left || 0) + Number(rect.width || 0) * 0.5))),
+      y: Math.max(1, Math.min(vh - 1, Math.round(Number(rect.top || 0) + Number(rect.height || 0) * 0.5))),
+    });
+    const isVisible = (node) => {
+      if (!(node instanceof Element)) return false;
+      const rect = readRect(node);
+      if (!rect || rect.width <= 1 || rect.height <= 1) return false;
+      const area = Math.max(1, Number(rect.width || 0) * Number(rect.height || 0));
+      const visibleArea = intersectionArea(rect, viewportRect);
+      if ((visibleArea / area) < 0.4) return false;
+      const style = window.getComputedStyle(node);
+      if (!style) return false;
+      if (style.display === 'none') return false;
+      if (style.visibility === 'hidden' || style.visibility === 'collapse') return false;
+      if (Number(style.opacity || '1') <= 0.01) return false;
+      return true;
+    };
+
+    const nodes = Array.from(detailRoot.querySelectorAll([
+      '.show-more',
+      '.reply-expand',
+      '[class*="show-more"]',
+      '[class*="reply-expand"]',
+    ].join(', ')));
+
+    const seen = new Set();
+    const targets = [];
+    for (const node of nodes) {
+      if (!(node instanceof Element)) continue;
+      if (!isVisible(node)) continue;
+      const text = String(node.textContent || '').replace(/\\s+/g, ' ').trim();
+      if (!text) continue;
+      if (!(/展开/.test(text) && /回复/.test(text))) continue;
+      const rect = readRect(node);
+      if (!rect) continue;
+      const key = [
+        Math.round(Number(rect.left || 0)),
+        Math.round(Number(rect.top || 0)),
+        Math.round(Number(rect.width || 0)),
+        Math.round(Number(rect.height || 0)),
+        text,
+      ].join(':');
+      if (seen.has(key)) continue;
+      seen.add(key);
+      targets.push({
+        text,
+        selector: node.matches('.show-more, [class*="show-more"]') ? '.show-more' : '.reply-expand',
+        rect: {
+          left: Number(rect.left || 0),
+          top: Number(rect.top || 0),
+          width: Number(rect.width || 0),
+          height: Number(rect.height || 0),
+        },
+        center: toCenter(rect),
+      });
+    }
+
+    targets.sort((a, b) => {
+      const topDiff = Number(a.rect.top || 0) - Number(b.rect.top || 0);
+      if (Math.abs(topDiff) > 1) return topDiff;
+      return Number(a.rect.left || 0) - Number(b.rect.left || 0);
+    });
+
+    return {
+      found: targets.length > 0,
+      reason: targets.length > 0 ? null : 'no_visible_expand_reply_targets',
+      targets,
+    };
+  })()`;
+  return evaluateReadonly(profileId, script);
+}
+
 export async function readCommentScrollContainerTarget(profileId) {
   const script = `(() => {
     const detailRoot = document.querySelector('.note-detail-mask')
