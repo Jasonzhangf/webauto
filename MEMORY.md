@@ -90,3 +90,19 @@
 - Single source of truth for that canonical identity is now `modules/camo-runtime/src/autoscript/action-providers/xhs/detail-flow-ops.mjs`, which re-reads href/noteId after open and persists the settled value into runtime state.
 - 2026-03-08: multi-tab `detail` rotation cannot rely on `detail_modal.exist` after `close_detail`. `tab_switch_if_needed` must be a manual dependency of `close_detail`; otherwise it is skipped as `stale_trigger` every cycle and rotation never happens.
 - Pre-fix live evidence from `run-2026-03-08T11-10-56-693Z`: 5 safe links completed with `AUTOSCRIPT_DONE_DETAIL_LINKS_EXHAUSTED`, but `tab_switch_if_needed` was skipped 4 times as stale, so all notes still ran on slot 1 and tab budget climbed `20 -> 29 -> 44 -> 64 -> 84`.
+
+
+
+## 2026-03-08 21:29:04 - 100-link Test Status
+
+
+**Status**: In Progress (14/100 notes opened)
+**Root Cause**: 
+- `ensure_tab_pool` new_tab_failed at bootstrap
+- `comments_harvest` timeout (180s) on note 15
+- Only 14 unique notes opened out of 100 target
+
+**Next Steps**:
+1. Fix timeout handling to retry/skip instead of exit
+2. Increase tab pool initialization robustness
+3. Re-run 100-link test
