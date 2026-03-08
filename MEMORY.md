@@ -59,3 +59,13 @@
 - 最小验证：本地队列语义验证通过，顺序为 `a fail -> requeue tail -> b done -> c done -> a retry done`；当 `detailLinkRetryMax=2` 时，第 3 次失败进入 exhausted，不再死循环。
 - 2026-03-07: `readVisibleCommentTarget()` for XHS detail must select from the current visible comment area inside the comment scroll container, not the first viewport comment node. Use viewport+container dual-visibility scoring so highlight probes do not drift to正文/边缘元素 during scroll settle.
 - 2026-03-07: XHS detail 评论滚动中，普通轮次禁止重复点击评论滚动容器；否则会偶发点开正文图片。应将“滚动容器 selector”和“焦点参考 target”解耦：selector 固定评论容器，focusTarget 优先当前 visible comment；普通滚动只 probe 不 click，只有 initial/recovery 阶段才允许重新 focus click。
+
+## 2026-03-07 Inline Visible Comment Like
+- XHS detail 点赞已改为 `comments_harvest` 轮次内联执行：每轮读取当前可视评论后立刻对可视命中评论点赞，不再依赖 harvest 结束后的 standalone `comment_like` 阶段。
+- 已点赞评论不再点击，但会统计为 `liked`，并累计到 `alreadyLikedSkipped`。
+- unified task/WS like 统计要从 `comments_harvest` 的 result 直接读取，而不是等待 `comment_like` 事件。
+
+## 2026-03-08 Single-Link Detail Validation
+- `readLikeTargetByIndex()` must stay scoped to the active visible comment container, not `document.querySelectorAll(...)` over all comment nodes in the page. Global indexing drifts to off-screen comments and causes false `like_target_missing` / negative-rect failures.
+- Live single-link validation on the preserved `deepseek` safe links proved the current baseline on note `699e8712000000001a033e9f`: detail content persisted, comments persisted, and inline visible-comment likes succeeded with `likedCount=2` on visible indexes `[14,19]`.
+- `executeDetailHarvestOperation()` must persist `content.md` via the existing content writer so single-link detail validation produces the same content artifact shape as later batch detail runs.

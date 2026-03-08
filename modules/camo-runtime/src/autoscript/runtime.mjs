@@ -1027,6 +1027,22 @@ export class AutoscriptRunner {
         blockedOperations: impact.blockedOperations,
       });
 
+      if (this.isNonBlockingOperation(operation)) {
+        const env = String(this.script?.metadata?.env || '').trim().toLowerCase();
+        if (env === 'debug') {
+          this.log('autoscript:operation_nonblocking_failure', {
+            operationId: operation.id,
+            action: operation.action,
+            attempt,
+            code: result?.code || 'OPERATION_FAILED',
+            message: result?.message || 'operation failed',
+          });
+        }
+        // allow dependent operations to continue on the same trigger
+        this.scheduleReadyOperations(event);
+        return { ok: true, terminalState: 'skipped_nonblocking', result };
+      }
+
       if (impact.scriptStopped) {
         this.stop('script_failure');
       }

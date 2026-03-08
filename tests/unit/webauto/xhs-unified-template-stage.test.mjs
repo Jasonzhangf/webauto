@@ -28,7 +28,7 @@ it('links stage enables search+collect only and terminates after link collection
   assert.equal(getOperation(script, 'collect_links')?.params?.collectOpenLinksOnly, true);
   assert.equal(getOperation(script, 'open_first_detail')?.enabled, false);
   assert.equal(getOperation(script, 'detail_harvest')?.enabled, false);
-  assert.equal(getOperation(script, 'comment_like')?.enabled, false);
+  assert.equal(getOperation(script, 'comment_like'), null);
   assert.equal(getOperation(script, 'comment_reply')?.enabled, false);
   assert.equal(getOperation(script, 'finish_after_collect_links')?.enabled, true);
 });
@@ -52,7 +52,7 @@ it('reply stage enables reply flow and keeps like flow off', () => {
   assert.equal(getOperation(script, 'open_first_detail')?.params?.preservePreCollected, true);
   assert.equal(getOperation(script, 'comments_harvest')?.enabled, true);
   assert.equal(getOperation(script, 'comment_match_gate')?.enabled, true);
-  assert.equal(getOperation(script, 'comment_like')?.enabled, false);
+  assert.equal(getOperation(script, 'comment_like'), null);
   assert.equal(getOperation(script, 'comment_reply')?.enabled, true);
 });
 
@@ -72,7 +72,8 @@ it('comments_harvest should not wait for expand_replies to run', () => {
 
   assert.deepEqual(getOperation(script, 'comments_harvest')?.dependsOn, ['detail_harvest']);
   assert.deepEqual(getOperation(script, 'expand_replies')?.dependsOn, ['detail_harvest']);
-  assert.equal(getOperation(script, 'comment_like')?.params?.pickOneIfNoNew, false);
+  assert.equal(getOperation(script, 'comment_like'), null);
+  assert.equal(getOperation(script, 'comments_harvest')?.params?.doLikes, true);
 });
 
 it('detail stage runs open/close loop without content/comment/like actions', () => {
@@ -102,6 +103,30 @@ it('detail stage runs open/close loop without content/comment/like actions', () 
   assert.equal(getOperation(script, 'detail_harvest')?.enabled, false);
   assert.equal(getOperation(script, 'comments_harvest')?.enabled, false);
   assert.equal(getOperation(script, 'comment_match_gate')?.enabled, false);
-  assert.equal(getOperation(script, 'comment_like')?.enabled, false);
+  assert.equal(getOperation(script, 'comment_like'), null);
   assert.equal(getOperation(script, 'comment_reply')?.enabled, false);
+});
+
+it('single-note detail stage keeps modal open by default and uses larger comment scroll steps', () => {
+  const script = buildXhsUnifiedAutoscript({
+    profileId: 'xhs-stage-5',
+    keyword: 'deepseek',
+    stage: 'detail',
+    maxNotes: 1,
+    autoCloseDetail: false,
+    stageLinksEnabled: true,
+    stageContentEnabled: true,
+    stageLikeEnabled: false,
+    stageReplyEnabled: false,
+    stageDetailEnabled: true,
+    doComments: true,
+    doLikes: false,
+    doReply: false,
+    commentsScrollStepMin: 520,
+    commentsScrollStepMax: 760,
+  });
+
+  assert.equal(getOperation(script, 'close_detail')?.enabled, false);
+  assert.equal(getOperation(script, 'comments_harvest')?.params?.scrollStepMin, 520);
+  assert.equal(getOperation(script, 'comments_harvest')?.params?.scrollStepMax, 760);
 });

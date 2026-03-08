@@ -10,6 +10,52 @@ export async function readDetailLinks(profileId) {
   };
 }
 
+export async function readDetailState(profileId) {
+  const script = `(() => {
+    const href = String(location.href || '');
+    let noteIdFromUrl = null;
+    try {
+      const url = new URL(href);
+      const parts = url.pathname.split('/').filter(Boolean);
+      if (parts[0] === 'explore' && parts[1]) noteIdFromUrl = String(parts[1]);
+    } catch { /* ignore */ }
+    const detailSelectors = [
+      '.note-detail-mask',
+      '.note-detail-page',
+      '.note-detail-dialog',
+      '#noteContainer',
+      '.note-container',
+      '.note-detail-mask .detail-container',
+      '.note-detail-mask .media-container',
+      '.note-detail-mask .note-scroller',
+      '.note-detail-page .detail-container',
+      '.note-detail-page .media-container',
+      '.note-detail-page .note-scroller',
+    ];
+    const isVisible = (node) => {
+      if (!(node instanceof Element)) return false;
+      const rect = node.getBoundingClientRect?.();
+      if (!rect || rect.width <= 1 || rect.height <= 1) return false;
+      try {
+        const style = window.getComputedStyle(node);
+        if (!style) return false;
+        if (style.display === 'none') return false;
+        if (style.visibility === 'hidden' || style.visibility === 'collapse') return false;
+      } catch { return false; }
+      return true;
+    };
+    const matchedSelector = detailSelectors.find((selector) => isVisible(document.querySelector(selector))) || null;
+    return {
+      href,
+      noteIdFromUrl,
+      detailVisible: Boolean(matchedSelector),
+      selector: matchedSelector,
+      commentsContextAvailable: Boolean(document.querySelector('.comments-container, .comment-list, .comment-item, [class*="comment-item"], .note-scroller')),
+    };
+  })()`;
+  return evaluateReadonly(profileId, script);
+}
+
 export async function readDetailSnapshot(profileId) {
   const script = `(() => {
     const normalize = (value) => String(value || '').replace(/\\s+/g, ' ').trim();
@@ -168,14 +214,12 @@ export async function isDetailVisible(profileId) {
       '.note-detail-page',
       '.note-detail-dialog',
       '#noteContainer',
-      '.note-container',
-      '.note-scroller',
-      '.note-content',
-      '#detail-title',
-      '#detail-desc',
-      '.author-wrapper',
-      '.interaction-container',
-      '#comment',
+      '.note-detail-mask .detail-container',
+      '.note-detail-mask .media-container',
+      '.note-detail-mask .note-scroller',
+      '.note-detail-page .detail-container',
+      '.note-detail-page .media-container',
+      '.note-detail-page .note-scroller',
     ];
     const isVisible = (node) => {
       if (!(node instanceof Element)) return false;

@@ -41,7 +41,10 @@ export function buildXhsDetailOperations(options) {
     autoCloseDetail,
   } = options;
 
-  const matchGateEnabled = !options.stageDetailEnabled && (stageLikeEnabled || stageReplyEnabled);
+  const matchGateEnabled = stageReplyEnabled;
+  const closeDetailEnabled = options.detailLoopEnabled && autoCloseDetail !== false;
+  const waitBetweenNotesDependsOn = ['close_detail'];
+  const openNextDependsOn = ['wait_between_notes', 'ensure_tab_pool', 'tab_switch_if_needed', 'comments_harvest'];
 
   return [
     {
@@ -105,6 +108,7 @@ export function buildXhsDetailOperations(options) {
     {
       id: 'expand_replies',
       enabled: commentsHarvestEnabled,
+      waitFor: { mode: 'or', subscriptions: ['detail_modal', 'detail_comment_item', 'detail_comment_list', 'detail_comment_section'] },
       action: 'xhs_expand_replies',
       params: {},
       trigger: 'detail_show_more.exist',
@@ -118,8 +122,22 @@ export function buildXhsDetailOperations(options) {
       pacing: { operationMinIntervalMs: 2500, eventCooldownMs: 1500, jitterMs: 220 },
     },
     {
+      id: 'warmup_comments_context',
+      enabled: commentsHarvestEnabled,
+      waitFor: { mode: 'or', subscriptions: ['detail_modal', 'detail_comment_item', 'detail_comment_list', 'detail_comment_section'] },
+      action: 'wait',
+      params: { ms: 1200 },
+      trigger: 'detail_modal.exist',
+      dependsOn: [detailHarvestEnabled ? 'detail_harvest' : 'open_first_detail'],
+      once: false,
+      oncePerAppear: true,
+      onFailure: 'continue',
+      impact: 'op',
+    },
+    {
       id: 'comments_harvest',
       enabled: commentsHarvestEnabled,
+      waitFor: { mode: 'or', subscriptions: ['detail_modal', 'detail_comment_item', 'detail_comment_list', 'detail_comment_section'] },
       action: 'xhs_comments_harvest',
       params: {
         tabCount,
@@ -128,6 +146,13 @@ export function buildXhsDetailOperations(options) {
         keyword,
         outputRoot,
         persistComments,
+        doLikes: stageLikeEnabled,
+        likeKeywords,
+        matchMode,
+        matchMinHits,
+        maxLikesPerRound,
+        persistLikeState: true,
+        saveEvidence: true,
         commentsLimit: maxComments,
         maxRounds: 48,
         scrollStep: commentsScrollStepMin,
@@ -160,7 +185,7 @@ export function buildXhsDetailOperations(options) {
       onFailure: 'continue',
       pacing: { operationMinIntervalMs: 2400, eventCooldownMs: 1500, jitterMs: 280 },
       validation: {
-        mode: 'both',
+        mode: 'none',
         pre: {
           page: { hostIncludes: ['xiaohongshu.com'], checkpointIn: ['detail_ready', 'comments_ready'] },
           container: { selector: '.note-detail-mask, .note-detail-page, .note-detail-dialog', mustExist: true, minCount: 1 },
@@ -169,6 +194,7 @@ export function buildXhsDetailOperations(options) {
           page: { hostIncludes: ['xiaohongshu.com'], checkpointIn: ['detail_ready', 'comments_ready'] },
           container: { selector: '.comment-item, [class*="comment-item"]', mustExist: false, minCount: 0 },
         },
+        onPreFailure: 'continue',
       },
       checkpoint: {
         containerId: 'xiaohongshu_detail.comment_section.comment_item',
@@ -183,33 +209,10 @@ export function buildXhsDetailOperations(options) {
       params: { keywords: matchKeywords, mode: matchMode, minHits: matchMinHits },
       trigger: 'detail_modal.exist',
       dependsOn: ['comments_harvest'],
+      conditions: [{ type: 'subscription_exist', subscriptionId: 'detail_modal' }],
       once: false,
       oncePerAppear: true,
       pacing: { operationMinIntervalMs: 2400, eventCooldownMs: 1200, jitterMs: 160 },
-    },
-    {
-      id: 'comment_like',
-      enabled: stageLikeEnabled,
-      action: 'xhs_comment_like',
-      params: {
-        env,
-        keyword,
-        outputRoot,
-        persistLikeState: true,
-        saveEvidence: true,
-        keywords: likeKeywords,
-        maxLikes: maxLikesPerRound,
-        pickOneIfNoNew: false,
-      },
-      trigger: 'detail_modal.exist',
-      dependsOn: ['comment_match_gate'],
-      once: false,
-      oncePerAppear: true,
-      timeoutMs: 90000,
-      retry: { attempts: 1, backoffMs: 0 },
-      onFailure: 'continue',
-      impact: 'op',
-      pacing: { operationMinIntervalMs: 2600, eventCooldownMs: 1500, jitterMs: 300 },
     },
     {
       id: 'comment_reply',
@@ -217,7 +220,7 @@ export function buildXhsDetailOperations(options) {
       action: 'xhs_comment_reply',
       params: { replyText },
       trigger: 'detail_modal.exist',
-      dependsOn: [stageLikeEnabled ? 'comment_like' : 'comment_match_gate'],
+      dependsOn: [matchGateEnabled ? 'comment_match_gate' : 'comments_harvest'],
       once: false,
       oncePerAppear: true,
       timeoutMs: 90000,
@@ -228,14 +231,15 @@ export function buildXhsDetailOperations(options) {
     },
     {
       id: 'close_detail',
-      enabled: options.detailLoopEnabled && autoCloseDetail !== false,
+      enabled: closeDetailEnabled,
       action: 'xhs_close_detail',
       params: {
         openByLinks: detailOpenByLinks,
-        allowKeepDetail: detailOpenByLinks,
+        allowKeepDetail: false,
       },
       trigger: 'detail_modal.exist',
       dependsOn: [closeDependsOn],
+      conditions: [{ type: 'operation_done', operationId: closeDependsOn }],
       once: false,
       oncePerAppear: true,
       pacing: { operationMinIntervalMs: 2500, eventCooldownMs: 1300, jitterMs: 180 },
@@ -252,7 +256,7 @@ export function buildXhsDetailOperations(options) {
       action: 'wait',
       params: { ms: noteIntervalMs },
       trigger: detailOpenByLinks ? 'detail_modal.exist' : 'search_result_item.exist',
-      dependsOn: ['close_detail'],
+      dependsOn: waitBetweenNotesDependsOn,
       once: false,
       oncePerAppear: false,
       retry: { attempts: 1, backoffMs: 0 },
@@ -267,6 +271,7 @@ export function buildXhsDetailOperations(options) {
       params: { tabCount, commentBudget: 50 },
       trigger: 'detail_modal.exist',
       dependsOn: ['comments_harvest'],
+      conditions: [{ type: 'subscription_exist', subscriptionId: 'detail_modal' }],
       once: false,
       oncePerAppear: true,
       retry: { attempts: 1, backoffMs: 0 },
@@ -294,7 +299,7 @@ export function buildXhsDetailOperations(options) {
         openByLinksMaxAttempts,
       },
       trigger: detailOpenByLinks ? 'detail_modal.exist' : 'search_result_item.exist',
-      dependsOn: ['wait_between_notes', 'ensure_tab_pool', 'tab_switch_if_needed', 'comments_harvest'],
+      dependsOn: openNextDependsOn,
       once: false,
       oncePerAppear: false,
       timeoutMs: 90000,
