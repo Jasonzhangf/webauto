@@ -12,3 +12,78 @@
 - 2026-03-09: `xhs_debug_snapshot` real落盘故障来自 `savePngBase64()` 参数顺序传反；修复后 debug probe 已能生成 JSON+PNG 证据到 `~/.webauto/download/xiaohongshu/debug/deepseek/diagnostics/debug-ops/`。Tags: xhs, diagnostics, debug-snapshot
 - 2026-03-09: safe-link detail 5 条真实验证已通过，runId `260200a3-3e3b-4ca2-b68a-dd028cace423`，运行根目录 `~/.webauto/download/xiaohongshu/debug/deepseek/merged/run-2026-03-09T05-06-06-293Z/`；结果为 `openedNotes=5`、`commentsHarvestRuns=5`、`commentsCollected=687`、`commentsReachedBottomCount=5`、terminal=`AUTOSCRIPT_DONE_DETAIL_LINKS_EXHAUSTED`。Tags: xhs, detail, safe-links, validation
 - 2026-03-09: Multi-tab XHS detail flow must bind inputs, outputs, browser actions, WS events, and dedup state by `noteId`; `tab` is only the page container. Effective runtime identity is `slot/tab + noteId`. Before comment focus/scroll/like/persist, verify current page `noteId` matches the expected slot binding from `detailLinkState.activeByTab`/`linksState.byTab`; only single-tab mode may fall back to global `state.currentNoteId/currentHref`. This rule comes from run `3f04bcf0-881a-4204-ad67-17ab08dd5aa4`, where tab switch executed but comment harvest reused the previous note context. Tags: xhs, detail, noteid, multi-tab, binding, state-machine
+
+## 2026-03-09 Detail 脚本实测结果 (runId e8e2d635)
+
+**配置**: `--tab-count 2 --max-notes 2 --do-comments --do-likes`
+
+**结果**:
+- 58 个帖子目录有 comments.jsonl
+- 评论总数 1845 条
+- 点赞记录 297 条 (全部 reason=already_liked/null)
+
+**问题**:
+1. **多 tab 未生效**: 配置 `--tab-count 2`，所有操作仍在 `tabIndex: 1`
+2. **滚动停滞**: exitReason 全部是 `scroll_stalled_after_recovery`
+3. **评论覆盖率低**: 481 条预期评论只采 20 条 (4%)
+4. **脚本未完成**: 无 AUTOSCRIPT_DONE 事件
+5. **点赞未执行**: 无 reason=liked 记录
+
+**证据路径**:
+- events: `~/.webauto/download/xiaohongshu/debug/deepseek/merged/run-2026-03-09T10-26-00-040Z/profiles/wave-001.xhs-qa-1.events.jsonl`
+- like-state: `~/.webauto/download/xiaohongshu/debug/deepseek/.like-state.jsonl`
+
+Tags: xhs, detail, test-result, tab-pool, scroll, like
+
+## 2026-03-09 Tab Pool 压力测试结果
+
+- 初始 6 个 tab (index 0-5)
+- 切换 10 次全部成功
+- 关闭 tab 5/4/3/2 命令全部返回 ok=true
+- 但关闭后 list-pages 仍显示 6 个 tab，其中 4 个是 `about:newtab`
+
+**结论**: camo close-page 命令返回 ok=true，但实际 tab 未真正关闭，只是被重置为 `about:newtab`
+
+Tags: camo, tab-pool, close-page, bug
+
+## 2026-03-09 滚动压力测试结果
+
+### mouse:wheel 命令
+- **结果**: 滚动完全无效
+- 初始 top=710，15 次向下滚动后仍然是 top=710
+- 原因: mouse:wheel 不带 anchor 参数时，wheel 事件没有正确发送到目标容器
+
+### camo scroll 命令 (带 --selector)
+- **结果**: 有效
+- 初始 top=860，滚动后到达 top=3710
+- 向上/向下滚动都有效
+- 但 scrollTop (4460) 超过了 scrollHeight-clientHeight (3970-1624=2346)
+- **问题**: max 计算有误，或 scrollHeight 在动态增长
+
+### 结论
+1. `mouse:wheel` 无 anchor 时不工作，必须使用 `scroll --selector` 命令
+2. webauto detail 脚本应使用 `scroll` 命令而非 `mouse:wheel`
+3. scrollHeight 动态变化，需要实时读取
+
+Tags: camo, scroll, wheel, bug, detail
+
+## 2026-03-09 camo 修复 (v0.1.24)
+
+### close-page bug
+- 问题: close-page 返回 ok=true，但 tab 变成 about:newtab，未真正关闭
+- 根因: Playwright page.close() 有时不生效，页面变成占位符
+- 修复:
+  - closePage() 使用 { runBeforeUnload: false }
+  - 失败时先 goto about:blank 再关闭
+  - listPages() 过滤 about:newtab/about:blank
+
+### mouse:wheel vs scroll
+- 问题: mouse:wheel 不带 anchor 时滚动完全无效
+- 压力测试: mouse wheel --deltay 300 执行 15 次，scrollTop 完全不变
+- 修复: 使用 scroll --down --amount 300 --selector .note-scroller 代替
+
+### 测试结果
+- Tab: 创建 5 个关闭 1 个，total=4 与 list 一致 ✓
+- 滚动: scroll --selector 有效，scrollTop 从 860 到 3710 ✓
+
+Tags: camo, close-page, scroll, wheel, bug-fix
