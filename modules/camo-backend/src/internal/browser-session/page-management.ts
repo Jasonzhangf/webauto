@@ -18,6 +18,45 @@ export interface PageManagementDeps {
 export class BrowserSessionPageManagement {
   constructor(private deps: PageManagementDeps) {}
 
+  private async openPageViaContext(
+    ctx: BrowserContext,
+    beforeCount: number,
+  ): Promise<Page | null> {
+    try {
+      const page = await ctx.newPage();
+      await page.waitForLoadState('domcontentloaded', { timeout: 1500 }).catch((): any => null);
+      const after = ctx.pages().filter((p) => !p.isClosed()).length;
+      if (after > beforeCount) {
+        return page;
+      }
+    } catch {
+      // Fall through to shortcut-based creation below.
+    }
+    return null;
+  }
+
+  private async openPageViaShortcut(
+    ctx: BrowserContext,
+    opener: Page,
+    shortcut: string,
+    beforeCount: number,
+  ): Promise<Page | null> {
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      const waitPage = ctx.waitForEvent('page', { timeout: 1200 }).catch((): any => null);
+      await opener.keyboard.press(shortcut).catch((): any => null);
+      const page = await waitPage;
+
+      const pagesNow = ctx.pages().filter((p) => !p.isClosed());
+      const after = pagesNow.length;
+      if (page && after > beforeCount) return page;
+      if (!page && after > beforeCount) {
+        return pagesNow[pagesNow.length - 1] || null;
+      }
+      await new Promise((r) => setTimeout(r, 250));
+    }
+    return null;
+  }
+
   private tryOsNewTabShortcut(): boolean {
     if (this.deps.isHeadless()) return false;
     if (process.platform === 'darwin') {
@@ -94,24 +133,17 @@ export class BrowserSessionPageManagement {
 
     await opener.bringToFront().catch((): any => null);
     const before = ctx.pages().filter((p) => !p.isClosed()).length;
-    for (let attempt = 1; attempt <= 3; attempt += 1) {
-      const waitPage = ctx.waitForEvent('page', { timeout: 8000 }).catch((): any => null);
-      await opener.keyboard.press(shortcut).catch((): any => null);
-      page = await waitPage;
+    if (!options?.strictShortcut) {
+      page = await this.openPageViaContext(ctx, before);
+    }
 
-      const pagesNow = ctx.pages().filter((p) => !p.isClosed());
-      const after = pagesNow.length;
-      if (page && after > before) break;
-      if (!page && after > before) {
-        page = pagesNow[pagesNow.length - 1] || null;
-        break;
-      }
-      await new Promise((r) => setTimeout(r, 250));
+    if (!page) {
+      page = await this.openPageViaShortcut(ctx, opener, shortcut, before);
     }
 
     let after = ctx.pages().filter((p) => !p.isClosed()).length;
     if (!page || after <= before) {
-      const waitPage = ctx.waitForEvent('page', { timeout: 8000 }).catch((): any => null);
+      const waitPage = ctx.waitForEvent('page', { timeout: 1200 }).catch((): any => null);
       const osShortcutOk = this.tryOsNewTabShortcut();
       if (osShortcutOk) {
         page = await waitPage;
@@ -125,12 +157,7 @@ export class BrowserSessionPageManagement {
 
     if (!page || after <= before) {
       if (!options?.strictShortcut) {
-        try {
-          page = await ctx.newPage();
-          await page.waitForLoadState('domcontentloaded', { timeout: 8000 }).catch((): any => null);
-        } catch {
-          // ignore fallback errors
-        }
+        page = await this.openPageViaContext(ctx, before);
         after = ctx.pages().filter((p) => !p.isClosed()).length;
         if (!page && after > before) {
           const pagesNow = ctx.pages().filter((p) => !p.isClosed());

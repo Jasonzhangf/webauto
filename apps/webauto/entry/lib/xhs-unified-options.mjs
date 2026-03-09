@@ -100,7 +100,11 @@ export async function buildUnifiedOptions(argv, profileId, overrides = {}) {
   const disableDryRun = parseBool(argv['no-dry-run'], false);
   const effectiveDryRun = disableDryRun ? false : dryRun;
   const stage = resolveXhsStage(argv, overrides);
-  const detailOpenByLinks = parseBool(overrides.detailOpenByLinks ?? argv['detail-open-by-links'], false);
+  const stageLinksEnabled = true;
+  const detailOpenByLinks = parseBool(
+    overrides.detailOpenByLinks ?? argv['detail-open-by-links'],
+    stageLinksEnabled && (stage === 'detail' || stage === 'full'),
+  );
   const openByLinksMaxAttempts = parseIntFlag(argv['open-by-links-max-attempts'], 3, 1);
   const detailLinksStartup = detailOpenByLinks && stage === 'detail';
   const autoCloseDetail = parseBool(
@@ -115,7 +119,6 @@ export async function buildUnifiedOptions(argv, profileId, overrides = {}) {
     tabCount = 4;
   }
   const stageDetailEnabled = stage === 'detail';
-  const stageLinksEnabled = true;
   const stageContentEnabled = stage === 'detail' || stage === 'full' || stage === 'content' || stage === 'like' || stage === 'reply';
   const likeRequested = parseBool(overrides.doLikes ?? argv['do-likes'], stage === 'like');
   const replyRequested = parseBool(overrides.doReply ?? argv['do-reply'], stage === 'reply');

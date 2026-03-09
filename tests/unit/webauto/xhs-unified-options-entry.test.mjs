@@ -21,9 +21,20 @@ describe('xhs unified entry options', () => {
       keyword: 'deepseek',
       stage: 'detail',
       'max-notes': 1,
+      'detail-open-by-links': false,
     }, 'xhs-qa-1');
 
     assert.equal(options.detailOpenByLinks, false);
     assert.equal(options.autoCloseDetail, false);
+  });
+
+  it('full mode defaults to safe-link detail opening', async () => {
+    const options = await buildUnifiedOptions({
+      keyword: 'deepseek',
+      stage: 'full',
+      'max-notes': 2,
+    }, 'xhs-qa-1');
+
+    assert.equal(options.detailOpenByLinks, true);
   });
 });
