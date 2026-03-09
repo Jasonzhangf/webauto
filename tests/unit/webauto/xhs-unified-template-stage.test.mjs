@@ -148,6 +148,7 @@ it('single-note detail stage keeps modal open by default and uses larger comment
   assert.equal(getOperation(script, 'close_detail')?.enabled, false);
   assert.equal(getOperation(script, 'comments_harvest')?.params?.scrollStepMin, 520);
   assert.equal(getOperation(script, 'comments_harvest')?.params?.scrollStepMax, 760);
+  assert.equal(getOperation(script, 'comments_harvest')?.params?.scrollStep, 760);
 });
 
 it('single-note safe-link detail stage auto-closes by default so failure can advance the loop', () => {
@@ -187,8 +188,8 @@ it('safe-link detail stage serializes modal ops through manual dependency chain'
     doReply: false,
   });
 
-  assert.equal(getOperation(script, 'detail_harvest')?.trigger, 'manual');
-  assert.deepEqual(getOperation(script, 'detail_harvest')?.conditions, [{ type: 'subscription_exist', subscriptionId: 'detail_modal' }]);
+  assert.equal(getOperation(script, 'detail_harvest')?.trigger, 'detail_modal.exist');
+  assert.equal(getOperation(script, 'detail_harvest')?.conditions, undefined);
   assert.equal(getOperation(script, 'warmup_comments_context')?.trigger, 'manual');
   assert.deepEqual(getOperation(script, 'warmup_comments_context')?.conditions, [{ type: 'subscription_exist', subscriptionId: 'detail_modal' }]);
   assert.equal(getOperation(script, 'comments_harvest')?.trigger, 'manual');

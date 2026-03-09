@@ -816,6 +816,95 @@ export class AutoscriptRunner {
     }
   }
 
+  shouldCaptureDebugSnapshot(operation, result = null) {
+    const metadata = this.script?.metadata && typeof this.script.metadata === 'object'
+      ? this.script.metadata
+      : {};
+    const env = String(metadata.env || '').trim().toLowerCase();
+    if (env !== 'debug') return false;
+    const action = String(operation?.action || '').trim().toLowerCase();
+    if (action === 'wait') return false;
+    if (result && result.ok === true) {
+      if (action === 'ensure_tab_pool') {
+        return result?.data?.degraded === true;
+      }
+      return false;
+    }
+    return true;
+  }
+
+  buildDebugSnapshotId(operation, attempt, phase) {
+    return [this.runId, String(operation?.id || 'operation').trim(), String(attempt || 1), String(phase || 'point').trim()]
+      .filter(Boolean)
+      .join(':');
+  }
+
+  async captureDebugSnapshot({ operation, event, result, context, attempt, phase }) {
+    if (!this.shouldCaptureDebugSnapshot(operation, result)) return null;
+    if (typeof this.executeExternalOperation !== 'function') return null;
+    const metadata = this.script?.metadata && typeof this.script.metadata === 'object'
+      ? this.script.metadata
+      : {};
+    const snapshotId = this.buildDebugSnapshotId(operation, attempt, phase);
+    const params = {
+      ...metadata,
+      runId: this.runId,
+      operationId: operation?.id || null,
+      operationAction: operation?.action || null,
+      attempt,
+      phase,
+      snapshotId,
+      failureCode: result?.ok === false ? (result?.code || 'OPERATION_FAILED') : null,
+      failureMessage: result?.ok === false ? (result?.message || 'operation failed') : null,
+      subscriptionId: event?.subscriptionId || null,
+      trigger: event?.type || null,
+      result: result?.data || null,
+    };
+    const snapshotContext = {
+      ...context,
+      runId: this.runId,
+      runtime: this.runtimeContext,
+    };
+    try {
+      const snapshot = await withTimeout(
+        this.executeExternalOperation({
+          profileId: this.profileId,
+          action: 'xhs_debug_snapshot',
+          params,
+          operation,
+          context: snapshotContext,
+        }),
+        15000,
+        () => ({
+          ok: false,
+          code: 'DEBUG_SNAPSHOT_TIMEOUT',
+          message: 'debug snapshot capture timed out',
+          data: { timeoutMs: 15000 },
+        }),
+      );
+      this.log('autoscript:debug_snapshot', {
+        operationId: operation?.id || null,
+        action: operation?.action || null,
+        attempt,
+        phase,
+        snapshotId,
+        ok: snapshot?.ok === true,
+        data: snapshot?.data || null,
+      });
+      return snapshot;
+    } catch (err) {
+      this.log('autoscript:debug_snapshot_failed', {
+        operationId: operation?.id || null,
+        action: operation?.action || null,
+        attempt,
+        phase,
+        snapshotId,
+        message: String(err?.message || err || 'debug snapshot failed'),
+      });
+      return null;
+    }
+  }
+
   async runOperation(operation, event) {
     const retry = operation.retry || {};
     const baseAttempts = Math.max(1, Number(retry.attempts) || 1);
@@ -967,6 +1056,14 @@ export class AutoscriptRunner {
           latencyMs,
           result: result.data || null,
         });
+        await this.captureDebugSnapshot({
+          operation,
+          event,
+          result,
+          context,
+          attempt,
+          phase: 'done',
+        });
         // Re-evaluate graph on the same event so dependencies can continue in one trigger chain.
         this.scheduleReadyOperations(event, { excludeOperationId: operation.id });
         this.scheduleDependentOperations(operation.id, event);
@@ -1027,6 +1124,14 @@ export class AutoscriptRunner {
         latencyMs,
         code: result.code || 'OPERATION_FAILED',
         message: result.message || 'operation failed',
+      });
+      await this.captureDebugSnapshot({
+        operation,
+        event,
+        result,
+        context,
+        attempt,
+        phase: 'error',
       });
 
       const failureCode = String(result?.code || '').trim().toUpperCase();

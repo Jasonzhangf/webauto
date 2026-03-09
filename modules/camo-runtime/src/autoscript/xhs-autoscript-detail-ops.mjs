@@ -49,6 +49,7 @@ export function buildXhsDetailOperations(options) {
     openNextDependsOn.push('tab_switch_if_needed');
   }
   const modalChainTrigger = detailOpenByLinks ? 'manual' : 'detail_modal.exist';
+  const detailHarvestTrigger = 'detail_modal.exist';
   const modalExistConditions = detailOpenByLinks
     ? [{ type: 'subscription_exist', subscriptionId: 'detail_modal' }]
     : undefined;
@@ -96,9 +97,9 @@ export function buildXhsDetailOperations(options) {
       enabled: detailHarvestEnabled,
       action: 'xhs_detail_harvest',
       params: {},
-      trigger: modalChainTrigger,
+      trigger: detailHarvestTrigger,
       dependsOn: ['open_first_detail'],
-      conditions: modalExistConditions,
+      conditions: detailOpenByLinks ? undefined : modalExistConditions,
       once: false,
       oncePerAppear: true,
       timeoutMs: 90000,
@@ -164,7 +165,7 @@ export function buildXhsDetailOperations(options) {
         saveEvidence: true,
         commentsLimit: maxComments,
         maxRounds: 48,
-        scrollStep: commentsScrollStepMin,
+        scrollStep: commentsScrollStepMax,
         scrollStepMin: commentsScrollStepMin,
         scrollStepMax: commentsScrollStepMax,
         settleMs: commentsSettleMinMs,

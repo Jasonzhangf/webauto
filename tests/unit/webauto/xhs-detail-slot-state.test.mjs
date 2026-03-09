@@ -88,6 +88,30 @@ describe('xhs detail slot state', () => {
     assert.equal(shouldReuseDetailForCurrentTab(state, { tabCount: 4, openByLinks: true }), false);
   });
 
+  it('marks coverage-satisfied slot as completed and closeable', () => {
+    const state = buildState();
+    writeDetailSlotState(state, 2, {
+      link: { noteId: 'note-2', noteUrl: 'https://www.xiaohongshu.com/explore/note-2?xsec_token=2' },
+      lastOpenedNoteId: 'note-2',
+      lastOpenedHref: 'https://www.xiaohongshu.com/explore/note-2?xsec_token=2',
+      status: 'active',
+    });
+
+    markDetailSlotProgress(state, { tabCount: 4, openByLinks: true }, {
+      completed: true,
+      reachedBottom: false,
+      commentsAdded: 88,
+      exitReason: 'coverage_satisfied',
+    });
+
+    const slot = readDetailSlotState(state, 2, { tabCount: 4 });
+    assert.equal(slot.status, 'completed');
+    assert.equal(slot.completed, true);
+    assert.equal(slot.lastHarvestExitReason, 'coverage_satisfied');
+    assert.equal(shouldCloseCurrentDetail(state, { tabCount: 4, openByLinks: true }), true);
+    assert.equal(shouldReuseDetailForCurrentTab(state, { tabCount: 4, openByLinks: true }), false);
+  });
+
   it('marks failed slot as closeable and not reusable', () => {
     const state = buildState();
     writeDetailSlotState(state, 2, {

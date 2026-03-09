@@ -133,6 +133,78 @@ export async function captureOperationFailure({ profileId, params = {}, context 
   return { jsonPath, screenshotPath };
 }
 
+export async function executeDebugSnapshotOperation({ profileId, params = {}, context = {} }) {
+  const state = getProfileState(profileId);
+  const output = resolveXhsOutputContext({ params, state, noteId: state.currentNoteId || params.noteId });
+  const diagnosticsDir = path.join(output.keywordDir, 'diagnostics', 'debug-ops');
+  await ensureDir(diagnosticsDir);
+  const runId = String(params.runId || context.runId || '').trim();
+  const operationId = String(params.operationId || params.operationAction || 'operation').trim();
+  const phase = String(params.phase || 'point').trim().toLowerCase() || 'point';
+  const attempt = Math.max(1, Number(params.attempt || 1) || 1);
+  const snapshotId = String(params.snapshotId || `${runId || 'run'}:${operationId}:${attempt}:${phase}`).trim();
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const baseName = `${sanitizeFileComponent(snapshotId, 'snapshot')}-${stamp}`;
+  const jsonPath = path.join(diagnosticsDir, `${baseName}.json`);
+  const pngPath = path.join(diagnosticsDir, `${baseName}.png`);
+  let domSnapshot = null;
+  let domError = null;
+  try {
+    domSnapshot = await evaluateReadonly(profileId, buildTimeoutDomSnapshotScript());
+  } catch (err) {
+    domError = String(err?.message || err || 'dom_snapshot_failed');
+  }
+  const screenshotPath = await captureScreenshotToFile({ profileId, filePath: pngPath });
+  const payload = {
+    snapshotId,
+    runId: runId || null,
+    operationId: params.operationId || null,
+    operationAction: params.operationAction || null,
+    phase,
+    attempt,
+    trigger: params.trigger || null,
+    subscriptionId: params.subscriptionId || null,
+    keyword: params.keyword || output.keyword,
+    env: params.env || output.env,
+    outputRoot: output.root,
+    noteId: state.currentNoteId || params.noteId || null,
+    failureCode: params.failureCode || null,
+    failureMessage: params.failureMessage || null,
+    result: params.result && typeof params.result === 'object' ? params.result : null,
+    capturedAt: new Date().toISOString(),
+    screenshotPath,
+    domError,
+    domSnapshot,
+  };
+  await writeJsonFile(jsonPath, payload);
+  emitOperationProgress(context, {
+    kind: 'debug_snapshot',
+    snapshotId,
+    phase,
+    operationId: params.operationId || null,
+    operationAction: params.operationAction || null,
+    attempt,
+    jsonPath,
+    screenshotPath,
+    href: domSnapshot?.href || null,
+    detailVisible: domSnapshot?.detailVisible === true,
+    searchVisible: domSnapshot?.searchVisible === true,
+  });
+  return {
+    ok: true,
+    code: 'OPERATION_DONE',
+    message: 'xhs_debug_snapshot done',
+    data: {
+      snapshotId,
+      jsonPath,
+      screenshotPath,
+      domError,
+      detailVisible: domSnapshot?.detailVisible === true,
+      searchVisible: domSnapshot?.searchVisible === true,
+    },
+  };
+}
+
 export async function executeTimeoutSnapshotOperation({ profileId, params = {}, context = {} }) {
   const state = getProfileState(profileId);
   const output = resolveXhsOutputContext({ params, state, noteId: state.currentNoteId || params.noteId });

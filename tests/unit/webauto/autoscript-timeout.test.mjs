@@ -110,7 +110,7 @@ describe('autoscript timeout priority', () => {
     });
 
     assert.equal(outcome.ok, false);
-    assert.equal(logs.filter((entry) => entry.event === 'autoscript:operation_start').length, 3);
-    assert.equal(logs.filter((entry) => entry.event === 'autoscript:operation_timeout_retry').length, 2);
+    assert.equal(logs.filter((entry) => entry.event === 'autoscript:operation_start').length, 1);
+    assert.equal(logs.filter((entry) => entry.event === 'autoscript:operation_timeout_retry').length, 0);
   });
 });

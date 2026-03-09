@@ -21,7 +21,14 @@ async function ensureDetailInteractionState(profileId) {
 
 export async function readXhsRuntimeState(profileId) {
   const state = getProfileState(profileId);
-  return { keyword: state.keyword || null, currentNoteId: state.currentNoteId || null, lastCommentsHarvest: state.lastCommentsHarvest && typeof state.lastCommentsHarvest === 'object' ? state.lastCommentsHarvest : null };
+  const binding = resolveRuntimeNoteBinding(state);
+  return {
+    keyword: state.keyword || null,
+    currentNoteId: state.currentNoteId || null,
+    expectedNoteId: binding.noteId || null,
+    currentTabIndex: binding.tabIndex,
+    lastCommentsHarvest: state.lastCommentsHarvest && typeof state.lastCommentsHarvest === 'object' ? state.lastCommentsHarvest : null,
+  };
 }
 
 function markActiveDetailFailure(state, code, data = null) {
@@ -60,8 +67,53 @@ function splitKeywords(value) {
     .filter(Boolean);
 }
 
+function resolveRuntimeNoteBinding(state, params = {}) {
+  const tabState = state?.tabState && typeof state.tabState === 'object' ? state.tabState : {};
+  const configuredTabCount = Math.max(1, Number(params.tabCount ?? tabState.tabCount ?? 1) || 1);
+  const tabIndex = Math.max(1, Number(params.tabIndex ?? tabState.cursor ?? 1) || 1);
+  const detailSlots = state?.detailLinkState?.activeByTab && typeof state.detailLinkState.activeByTab === 'object'
+    ? state.detailLinkState.activeByTab
+    : {};
+  const linkSlots = state?.linksState?.byTab && typeof state.linksState.byTab === 'object'
+    ? state.linksState.byTab
+    : {};
+  const detailSlot = detailSlots[String(tabIndex)] && typeof detailSlots[String(tabIndex)] === 'object'
+    ? detailSlots[String(tabIndex)]
+    : null;
+  const linkEntry = linkSlots[String(tabIndex)] && typeof linkSlots[String(tabIndex)] === 'object'
+    ? linkSlots[String(tabIndex)]
+    : null;
+  const link = detailSlot?.link && typeof detailSlot.link === 'object'
+    ? detailSlot.link
+    : (linkEntry?.link && typeof linkEntry.link === 'object' ? linkEntry.link : null);
+  const allowGlobalFallback = configuredTabCount <= 1;
+  const noteId = String(
+    params.noteId
+      || detailSlot?.noteId
+      || detailSlot?.lastOpenedNoteId
+      || link?.noteId
+      || (allowGlobalFallback ? state?.currentNoteId : ''),
+  ).trim() || null;
+  const href = String(
+    params.noteUrl
+      || detailSlot?.href
+      || detailSlot?.lastOpenedHref
+      || link?.noteUrl
+      || (allowGlobalFallback ? state?.currentHref : ''),
+  ).trim() || null;
+  return {
+    tabIndex,
+    tabCount: configuredTabCount,
+    noteId,
+    href,
+    detailSlot,
+    linkEntry,
+    link,
+  };
+}
+
 function buildCommentLikeDedupKey(state, row, index) {
-  const noteId = String(state?.currentNoteId || '').trim() || 'note';
+  const noteId = String(resolveRuntimeNoteBinding(state).noteId || state?.currentNoteId || '').trim() || 'note';
   const commentId = String(row?.commentId || row?.id || '').trim();
   if (commentId) return `${noteId}:${commentId}`;
   const userId = String(row?.authorId || row?.userId || '').trim();
@@ -71,10 +123,13 @@ function buildCommentLikeDedupKey(state, row, index) {
 }
 
 async function persistVisibleLikeArtifacts({ state, params, session }) {
-  if (!state?.currentNoteId || !session || !Array.isArray(session.stateRows)) {
+  const binding = resolveRuntimeNoteBinding(state, params);
+  const boundNoteId = String(binding.noteId || state?.currentNoteId || '').trim() || null;
+  const boundHref = String(binding.href || state?.currentHref || '').trim() || null;
+  if (!boundNoteId || !session || !Array.isArray(session.stateRows)) {
     return { summaryPath: null, likeStatePath: null };
   }
-  const outputCtx = resolveXhsOutputContext({ params, state, noteId: state.currentNoteId });
+  const outputCtx = resolveXhsOutputContext({ params, state, noteId: boundNoteId });
   let likeStatePath = null;
   let summaryPath = null;
   if (params.persistLikeState === true && session.stateRows.length > 0) {
@@ -87,8 +142,8 @@ async function persistVisibleLikeArtifacts({ state, params, session }) {
   }
   if (params.saveEvidence === true || session.summaryDirty === true) {
     const summary = {
-      noteId: state.currentNoteId || null,
-      detailUrl: state.currentHref || null,
+      noteId: boundNoteId,
+      detailUrl: boundHref,
       keyword: String(params.keyword || state.keyword || '').trim() || null,
       updatedAt: new Date().toISOString(),
       hitCount: session.hitCount,
@@ -124,6 +179,9 @@ async function processVisibleCommentLikes({ profileId, state, params, current, s
     return { hitCount: 0, likedCount: 0, skippedCount: 0, alreadyLikedSkipped: 0, dedupSkipped: 0 };
   }
   const comments = Array.isArray(current?.comments) ? current.comments : [];
+  const binding = resolveRuntimeNoteBinding(state, params);
+  const boundNoteId = String(binding.noteId || state.currentNoteId || '').trim() || null;
+  const boundHref = String(binding.href || state.currentHref || '').trim() || null;
   const keywordsLower = keywords.map((kw) => String(kw).toLowerCase());
   const matchedRows = [];
   for (const row of comments) {
@@ -171,6 +229,7 @@ async function processVisibleCommentLikes({ profileId, state, params, current, s
     }
     const preLikeDetailState = await readDetailState(profileId).catch(() => null);
     const preLikeDetail = await readDetailSnapshot(profileId).catch(() => null);
+    const preLikeNoteId = String(preLikeDetail?.noteIdFromUrl || '').trim() || null;
     emitOperationProgress(context, {
       kind: 'pre_like_state',
       stage: 'inline_comment_like',
@@ -179,9 +238,16 @@ async function processVisibleCommentLikes({ profileId, state, params, current, s
       noteIdFromUrl: preLikeDetail?.noteIdFromUrl || null,
       detailVisible: Boolean(preLikeDetail && (preLikeDetail.noteIdFromUrl || preLikeDetail.commentsContextAvailable || preLikeDetail.textPresent || preLikeDetail.imageCount > 0 || preLikeDetail.videoPresent)),
       commentsContextAvailable: preLikeDetail?.commentsContextAvailable === true,
-      currentNoteId: state.currentNoteId || null,
+      currentNoteId: boundNoteId,
       commentPreview: String(row?.content || '').slice(0, 160),
     });
+    if (boundNoteId && preLikeNoteId && preLikeNoteId !== boundNoteId) {
+      roundSkippedCount += 1;
+      session.skippedCount += 1;
+      session.skippedIndexes.push(idx);
+      pushTrace({ kind: 'skip', stage: 'inline_comment_like', index: idx, reason: 'note_binding_mismatch', expectedNoteId: boundNoteId, actualNoteId: preLikeNoteId });
+      continue;
+    }
     const target = await readLikeTargetByIndex(profileId, idx);
     if (!target?.found || !target?.center) {
       roundSkippedCount += 1;
@@ -200,8 +266,8 @@ async function processVisibleCommentLikes({ profileId, state, params, current, s
       session.alreadyLikedIndexes.push(idx);
       session.stateRows.push({
         ts: new Date().toISOString(),
-        noteId: state.currentNoteId || null,
-        detailUrl: state.currentHref || null,
+          noteId: boundNoteId,
+          detailUrl: boundHref,
         commentId: String(row?.commentId || '').trim() || null,
         index: idx,
         userId: String(row?.authorId || row?.userId || '').trim() || null,
@@ -237,7 +303,7 @@ async function processVisibleCommentLikes({ profileId, state, params, current, s
       noteIdFromUrl: postLikeDetail?.noteIdFromUrl || null,
       detailVisible: Boolean(postLikeDetail && (postLikeDetail.noteIdFromUrl || postLikeDetail.commentsContextAvailable || postLikeDetail.textPresent || postLikeDetail.imageCount > 0 || postLikeDetail.videoPresent)),
       commentsContextAvailable: postLikeDetail?.commentsContextAvailable === true,
-      currentNoteId: state.currentNoteId || null,
+      currentNoteId: boundNoteId,
       commentPreview: String(row?.content || '').slice(0, 160),
     });
     session.processedKeys.add(dedupKey);
@@ -246,8 +312,8 @@ async function processVisibleCommentLikes({ profileId, state, params, current, s
     session.likedIndexes.push(idx);
     session.stateRows.push({
       ts: new Date().toISOString(),
-      noteId: state.currentNoteId || null,
-      detailUrl: state.currentHref || null,
+        noteId: boundNoteId,
+        detailUrl: boundHref,
       commentId: String(row?.commentId || '').trim() || null,
       index: idx,
       userId: String(row?.authorId || row?.userId || '').trim() || null,
@@ -334,11 +400,57 @@ export async function executeDetailHarvestOperation({ profileId, context = {} })
 export async function executeCommentsHarvestOperation({ profileId, params = {}, context = {} }) {
   const state = getProfileState(profileId);
   const { actionTrace, pushTrace } = buildTraceRecorder();
+  const readExpectedBinding = () => resolveRuntimeNoteBinding(state, params);
+  const progress = (kind, data = {}) => emitOperationProgress(context, {
+    stage: 'comments_harvest',
+    kind,
+    noteId: readExpectedBinding().noteId || state.currentNoteId || null,
+    expectedNoteId: readExpectedBinding().noteId || null,
+    tabIndex: readExpectedBinding().tabIndex,
+    ...data,
+  });
+  const initialBinding = readExpectedBinding();
   const detailSnapshotBefore = await readDetailSnapshot(profileId).catch(() => null);
-  if (detailSnapshotBefore?.noteIdFromUrl) {
-    state.currentNoteId = String(detailSnapshotBefore.noteIdFromUrl);
+  const detailSnapshotNoteId = String(detailSnapshotBefore?.noteIdFromUrl || '').trim() || null;
+  const expectedNoteId = String(initialBinding.noteId || '').trim() || null;
+  if (expectedNoteId && detailSnapshotNoteId && detailSnapshotNoteId !== expectedNoteId) {
+    progress('note_binding_mismatch', {
+      actualNoteId: detailSnapshotNoteId,
+      actualHref: String(detailSnapshotBefore?.href || '').trim() || null,
+      expectedHref: initialBinding.href || null,
+    });
+    await clearVisualHighlight(profileId, 'xhs-detail-comment-like').catch(() => null);
+    return {
+      ok: true,
+      code: 'OPERATION_DONE',
+      message: 'xhs_comments_harvest skipped due to note binding mismatch',
+      data: {
+        commentsPath: null,
+        commentsMdPath: null,
+        commentsAdded: 0,
+        commentsTotal: 0,
+        noteId: detailSnapshotNoteId,
+        expectedNoteId,
+        collected: 0,
+        expectedCommentsCount: 0,
+        commentCoverageRate: null,
+        recoveries: 0,
+        maxRecoveries: Math.max(1, Number(params.maxRecoveries ?? 3) || 3),
+        reachedBottom: false,
+        exitReason: 'note_binding_mismatch',
+        commentsSkippedReason: 'note_binding_mismatch',
+        rounds: 0,
+        maxRounds: Math.max(1, Number(params.maxRounds ?? 1) || 1),
+        tabIndex: initialBinding.tabIndex,
+      },
+    };
   }
-  state.currentHref = String(detailSnapshotBefore?.href || state.currentHref || '').trim() || null;
+  if (detailSnapshotNoteId) {
+    state.currentNoteId = detailSnapshotNoteId;
+  } else if (expectedNoteId) {
+    state.currentNoteId = expectedNoteId;
+  }
+  state.currentHref = String(detailSnapshotBefore?.href || initialBinding.href || state.currentHref || '').trim() || null;
   const highlightStep = async (channel, target, stateName, label, duration = 2400) => {
     if (!target?.center) return;
     await highlightVisualTarget(profileId, target, {
@@ -362,10 +474,14 @@ export async function executeCommentsHarvestOperation({ profileId, params = {}, 
     if (!interactionState?.ok) return false;
     const res = await readDetailSnapshot(profileId);
     if (!res) return false;
-    if (!res.noteIdFromUrl || !state.currentNoteId) return true;
-    return String(res.noteIdFromUrl) === String(state.currentNoteId);
+    const binding = readExpectedBinding();
+    const expected = String(binding.noteId || state.currentNoteId || '').trim() || null;
+    const actual = String(res.noteIdFromUrl || '').trim() || null;
+    if (!actual || !expected) return true;
+    return actual === expected;
   };
   const focusCommentContext = async (mode = 'initial') => {
+    progress('focus_comment_context_start', { mode });
     let commentTotal = await readCommentTotalTarget(profileId);
     let commentScroll = await readCommentScrollContainerTarget(profileId);
     let visibleComment = await readVisibleCommentTarget(profileId);
@@ -392,6 +508,7 @@ export async function executeCommentsHarvestOperation({ profileId, params = {}, 
         await clickPoint(profileId, entry.center, { steps: 2 });
         await highlightStep('xhs-detail-comment-entry', entry, 'processed', 'comment entry', 4200);
         await sleep(5000);
+        progress('focus_comment_context_after_entry_click', { mode });
         commentTotal = await readCommentTotalTarget(profileId);
         commentScroll = await readCommentScrollContainerTarget(profileId);
         visibleComment = await readVisibleCommentTarget(profileId);
@@ -427,18 +544,39 @@ export async function executeCommentsHarvestOperation({ profileId, params = {}, 
         await clickPoint(profileId, commentScroll.center, { steps: 2 });
         await highlightStep('xhs-detail-comment-scroll', commentScroll, 'processed', 'comment scroll', 4200);
         await sleep(5000);
+        progress('focus_comment_context_after_scroll_focus', {
+          mode,
+          selector: commentScroll.selector || null,
+        });
       }
+      progress('focus_comment_context_done', {
+        mode,
+        selector: commentScroll.selector || null,
+        hasVisibleComment: Boolean(visibleComment?.found && visibleComment.center),
+      });
       return { ok: true, scrollTarget: commentScroll, visibleCommentTarget: visibleComment || null, didFocusClick: mode !== 'probe' };
     }
+    progress('focus_comment_context_done', {
+      mode,
+      selector: null,
+      hasVisibleComment: Boolean(visibleComment?.found && visibleComment.center),
+    });
     return { ok: true, scrollTarget: null };
   };
+  progress('operation_start');
   const interactionState = await ensureDetailInteractionState(profileId);
+  progress('after_detail_interaction_state', { ok: interactionState?.ok === true });
   if (!interactionState?.ok) {
     await clearCommentHighlights();
     markActiveDetailFailure(state, 'DETAIL_INTERACTION_STATE_INVALID', { stage: 'comments_harvest_start' });
     return { ok: false, code: 'DETAIL_INTERACTION_STATE_INVALID', message: 'detail interaction state invalid before comments harvest' };
   }
   const focusResult = await focusCommentContext('initial');
+  progress('after_initial_focus', {
+    ok: focusResult?.ok !== false,
+    commentsUnavailable: focusResult?.commentsUnavailable === true,
+    selector: focusResult?.scrollTarget?.selector || null,
+  });
   if (focusResult?.ok === false) {
     await clearCommentHighlights();
     markActiveDetailFailure(state, focusResult.code || 'COMMENTS_CONTEXT_FOCUS_FAILED', focusResult.data || null);
@@ -479,7 +617,16 @@ export async function executeCommentsHarvestOperation({ profileId, params = {}, 
     };
   }
   let commentScroll = focusResult?.scrollTarget || null;
-  const snapshot = await readCommentsSnapshot(profileId);
+  progress('before_initial_comments_snapshot', {
+    selector: commentScroll?.selector || null,
+  });
+  let snapshot = await readCommentsSnapshot(profileId);
+  progress('after_initial_comments_snapshot', {
+    hasCommentsContext: snapshot?.hasCommentsContext === true,
+    detailVisible: snapshot?.detailVisible === true,
+    visibleCount: Array.isArray(snapshot?.comments) ? snapshot.comments.length : 0,
+    expectedCommentsCount: Number(snapshot?.expectedCommentsCount ?? 0) || 0,
+  });
   if (!snapshot?.hasCommentsContext) {
     await clearCommentHighlights();
     markActiveDetailFailure(state, 'COMMENTS_CONTEXT_MISSING', { commentCount: 0 });
@@ -497,8 +644,8 @@ export async function executeCommentsHarvestOperation({ profileId, params = {}, 
   const minBoostRounds = Math.max(0, Number(params.adaptiveMinBoostRounds ?? 36) || 36);
   const maxRoundsCap = Math.max(maxRounds, Number(params.adaptiveMaxRoundsCap ?? 320) || 320);
   const maxComments = Number(params.commentsLimit ?? params.maxComments ?? 0) || 0;
-  const scrollStepMin = Math.max(120, Number(params.scrollStepMin ?? params.scrollStep ?? 280) || 280);
-  const scrollStepMax = Math.max(scrollStepMin, Number(params.scrollStepMax ?? params.scrollStep ?? 420) || 420);
+  const scrollStepMin = Math.max(240, Number(params.scrollStepMin ?? params.scrollStep ?? 560) || 560);
+  const scrollStepMax = Math.max(scrollStepMin, Number(params.scrollStepMax ?? params.scrollStep ?? 840) || 840);
   const settleMinMs = Math.max(80, Number(params.settleMinMs ?? params.settleMs ?? 280) || 280);
   const settleMaxMs = Math.max(settleMinMs, Number(params.settleMaxMs ?? params.settleMs ?? 820) || 820);
   const scrollDelayMinMs = Math.max(600, Number(params.scrollDelayMinMs ?? params.scrollDelayMs ?? 1200) || 1200);
@@ -550,6 +697,8 @@ export async function executeCommentsHarvestOperation({ profileId, params = {}, 
   let reachedBottom = false;
   let commentsEmpty = false;
   let exitReason = 'harvest_complete';
+  let lastExpectedCommentsCount = Number(snapshot?.expectedCommentsCount ?? 0) || 0;
+  let lastScrollMeta = snapshot?.scroll && typeof snapshot.scroll === 'object' ? { ...snapshot.scroll } : null;
 
   const makeSignature = (rows = []) => {
     if (!rows.length) return '';
@@ -594,9 +743,8 @@ export async function executeCommentsHarvestOperation({ profileId, params = {}, 
 
   const applyVisibleLikePass = async (currentSnapshot) => {
     const kw = splitKeywords(params.likeKeywords || params.keywords || state.keyword || '');
-    emitOperationProgress(context, {
+    progress('visible_like_pass_start', {
       kind: 'visible_comments_probe',
-      stage: 'inline_comment_like',
       visibleCount: Array.isArray(currentSnapshot?.comments) ? currentSnapshot.comments.length : 0,
       sampleComments: Array.isArray(currentSnapshot?.comments)
         ? currentSnapshot.comments.slice(0, 12).map((c) => ({
@@ -646,18 +794,40 @@ export async function executeCommentsHarvestOperation({ profileId, params = {}, 
       inlineLikeSummaryPath = persisted.summaryPath || inlineLikeSummaryPath;
       inlineLikeStatePath = persisted.likeStatePath || inlineLikeStatePath;
     }
+    progress('visible_like_pass_done', {
+      hitCount: inlineLikeStats.hitCount,
+      likedCount: inlineLikeStats.likedCount,
+      skippedCount: inlineLikeStats.skippedCount,
+    });
     return inlineLikeStats;
   };
 
   while (rounds < effectiveMaxRounds) {
     rounds += 1;
+    progress('loop_round_start', {
+      round: rounds,
+      effectiveMaxRounds,
+      collectedCount: collectedRows.length,
+      noProgressRounds,
+      recoveries,
+    });
     const loopInteractionState = await ensureDetailInteractionState(profileId);
+    progress('after_loop_detail_interaction_state', { round: rounds, ok: loopInteractionState?.ok === true });
     if (!loopInteractionState?.ok) {
       await clearCommentHighlights();
       markActiveDetailFailure(state, 'DETAIL_INTERACTION_STATE_INVALID', { stage: 'comments_harvest_loop', commentCount: collectedRows.length });
       return { ok: false, code: 'DETAIL_INTERACTION_STATE_INVALID', message: 'detail interaction state invalid during comments harvest', data: { commentCount: collectedRows.length } };
     }
+    progress('before_loop_comments_snapshot', { round: rounds, firstRound: rounds === 1 });
     const current = rounds === 1 ? snapshot : await readCommentsSnapshot(profileId);
+    progress('after_loop_comments_snapshot', {
+      round: rounds,
+      detailVisible: current?.detailVisible === true,
+      hasCommentsContext: current?.hasCommentsContext === true,
+      visibleCount: Array.isArray(current?.comments) ? current.comments.length : 0,
+      expectedCommentsCount: Number(current?.expectedCommentsCount ?? 0) || 0,
+      atBottom: current?.scroll?.atBottom === true,
+    });
     if (!current?.detailVisible || !current?.hasCommentsContext) {
       await clearCommentHighlights();
       markActiveDetailFailure(state, 'COMMENTS_CONTEXT_LOST', { commentCount: collectedRows.length });
@@ -674,6 +844,8 @@ export async function executeCommentsHarvestOperation({ profileId, params = {}, 
     const list = Array.isArray(current?.comments) ? current.comments : [];
     const scrollMeta = current?.scroll && typeof current.scroll === 'object' ? current.scroll : null;
     const expectedCommentsCount = Number(current?.expectedCommentsCount ?? 0) || 0;
+    lastExpectedCommentsCount = expectedCommentsCount;
+    lastScrollMeta = current?.scroll && typeof current.scroll === 'object' ? { ...current.scroll } : null;
     commentsEmpty = expectedCommentsCount === 0 || (list.length === 0 && expectedCommentsCount <= 0);
     reachedBottom = scrollMeta?.atBottom === true;
     const newComments = list.filter((c) => {
@@ -689,6 +861,11 @@ export async function executeCommentsHarvestOperation({ profileId, params = {}, 
       totalAdded += newComments.length;
       lastProgressAt = Date.now();
       await flushCommentArtifacts(collectedRows, current.expectedCommentsCount);
+      progress('comments_flushed', {
+        round: rounds,
+        newComments: newComments.length,
+        collectedCount: collectedRows.length,
+      });
     }
 
     await applyVisibleLikePass(current);
@@ -718,10 +895,16 @@ export async function executeCommentsHarvestOperation({ profileId, params = {}, 
     }
 
     if (noProgressRounds >= recoveryNoProgressRounds) {
+      progress('recovery_start', {
+        round: rounds,
+        noProgressRounds,
+        recoveries,
+      });
       const noChangeElapsedMs = Date.now() - lastProgressAt;
       if (noChangeElapsedMs < noChangeTimeoutMs) {
         const waitMs = Math.min(2000, Math.max(600, noChangeTimeoutMs - noChangeElapsedMs));
         await sleep(waitMs);
+        progress('recovery_wait_before_refocus', { round: rounds, waitMs });
       }
       recoveries += 1;
       let refocus = await focusCommentContext('recovery').catch((error) => ({ ok: false, code: 'COMMENTS_CONTEXT_RECOVERY_CLICK_TIMEOUT', message: error?.message || 'focus comment context failed', data: { reason: 'exception' } }));
@@ -730,6 +913,11 @@ export async function executeCommentsHarvestOperation({ profileId, params = {}, 
         refocus = { ok: true, scrollTarget: commentScroll || null, degradedRecovery: true, recoveryError: refocus?.message || refocus?.code || 'focus_failed' };
       }
       commentScroll = refocus?.scrollTarget || commentScroll;
+      progress('recovery_after_refocus', {
+        round: rounds,
+        selector: commentScroll?.selector || null,
+        degradedRecovery: refocus?.degradedRecovery === true,
+      });
       const scrollSelector = String(commentScroll?.selector || '').trim();
       if (!scrollSelector) {
         await clearCommentHighlights();
@@ -737,20 +925,33 @@ export async function executeCommentsHarvestOperation({ profileId, params = {}, 
         return { ok: false, code: 'COMMENTS_SCROLL_CONTAINER_MISSING', message: 'comment scroll container missing before recovery' };
       }
       const preRecoverySnapshot = await readCommentsSnapshot(profileId).catch(() => null);
+      progress('recovery_pre_snapshot', {
+        round: rounds,
+        hasCommentsContext: preRecoverySnapshot?.hasCommentsContext === true,
+        detailVisible: preRecoverySnapshot?.detailVisible === true,
+      });
       if (preRecoverySnapshot?.detailVisible && preRecoverySnapshot?.hasCommentsContext) {
         await applyVisibleLikePass(preRecoverySnapshot);
       }
       for (let i = 0; i < recoveryUpRounds; i += 1) {
+        progress('recovery_scroll_up', { round: rounds, step: i + 1, total: recoveryUpRounds });
         await scrollBySelector(profileId, scrollSelector, { direction: 'up', amount: 420, highlight: true, skipFocusClick: true, focusTarget: commentScroll });
         await sleep(900);
       }
       for (let i = 0; i < recoveryDownRounds; i += 1) {
+        progress('recovery_scroll_down', { round: rounds, step: i + 1, total: recoveryDownRounds });
         await scrollBySelector(profileId, scrollSelector, { direction: 'down', amount: 420, highlight: true, skipFocusClick: true, focusTarget: commentScroll });
         await sleep(900);
       }
       const scrollDelayAfterRecovery = Math.floor(scrollDelayMinMs + Math.random() * (scrollDelayMaxMs - scrollDelayMinMs + 1));
       await sleep(scrollDelayAfterRecovery);
       const postRecoverySnapshot = await readCommentsSnapshot(profileId).catch(() => null);
+      progress('recovery_post_snapshot', {
+        round: rounds,
+        hasCommentsContext: postRecoverySnapshot?.hasCommentsContext === true,
+        detailVisible: postRecoverySnapshot?.detailVisible === true,
+        visibleCount: Array.isArray(postRecoverySnapshot?.comments) ? postRecoverySnapshot.comments.length : 0,
+      });
       if (postRecoverySnapshot?.detailVisible && postRecoverySnapshot?.hasCommentsContext) {
         await applyVisibleLikePass(postRecoverySnapshot);
         const postSignature = makeSignature(Array.isArray(postRecoverySnapshot.comments) ? postRecoverySnapshot.comments : []);
@@ -769,7 +970,13 @@ export async function executeCommentsHarvestOperation({ profileId, params = {}, 
       }
     } else {
       const deltaRaw = Math.floor(scrollStepMin + Math.random() * (scrollStepMax - scrollStepMin + 1));
+      progress('before_scroll_probe', { round: rounds, deltaRaw });
       const probe = await focusCommentContext('probe');
+      progress('after_scroll_probe', {
+        round: rounds,
+        ok: probe?.ok !== false,
+        selector: probe?.scrollTarget?.selector || null,
+      });
       if (probe?.ok === false) {
         await clearCommentHighlights();
         markActiveDetailFailure(state, probe.code || 'COMMENTS_CONTEXT_SCROLL_FAILED', probe.data || null);
@@ -788,8 +995,14 @@ export async function executeCommentsHarvestOperation({ profileId, params = {}, 
           Number(current?.scroll?.clientHeight || commentScroll?.rect?.height || 0) || 0,
         ) || 120,
       );
-      const maxDelta = Math.max(120, viewportScreen - 80);
+      const maxDelta = Math.max(240, Math.floor(viewportScreen * 0.95));
       const delta = Math.min(deltaRaw, maxDelta);
+      progress('before_scroll_action', {
+        round: rounds,
+        selector: scrollSelector,
+        delta,
+        viewportScreen,
+      });
       await scrollBySelector(profileId, scrollSelector, {
         direction: 'down',
         amount: delta,
@@ -797,15 +1010,16 @@ export async function executeCommentsHarvestOperation({ profileId, params = {}, 
         skipFocusClick: true,
         focusTarget: commentScroll,
       });
+    progress('after_scroll_action', { round: rounds, selector: scrollSelector, delta });
     const scrollDelay = Math.floor(scrollDelayMinMs + Math.random() * (scrollDelayMaxMs - scrollDelayMinMs + 1));
     await sleep(scrollDelay);
+    progress('after_scroll_delay', { round: rounds, scrollDelay });
 
     const afterScrollHref = await readLocation(profileId, { timeoutMs: 3000, fallback: '' }).catch(() => '');
     const afterScrollDetailState = await readDetailState(profileId).catch(() => null);
     const afterScrollDetail = await readDetailSnapshot(profileId).catch(() => null);
-    emitOperationProgress(context, {
+    progress('post_scroll_state', {
       kind: 'post_scroll_state',
-      stage: 'inline_comment_like',
       href: afterScrollHref || afterScrollDetailState?.href || null,
       noteIdFromUrl: afterScrollDetail?.noteIdFromUrl || null,
       detailVisible: Boolean(afterScrollDetail && (afterScrollDetail.noteIdFromUrl || afterScrollDetail.commentsContextAvailable || afterScrollDetail.textPresent || afterScrollDetail.imageCount > 0 || afterScrollDetail.videoPresent)),
@@ -816,8 +1030,15 @@ export async function executeCommentsHarvestOperation({ profileId, params = {}, 
 
     const settle = Math.floor(settleMinMs + Math.random() * (settleMaxMs - settleMinMs + 1));
     await sleep(settle);
+    progress('after_settle_delay', { round: rounds, settle });
 
     const postScrollSnapshot = await readCommentsSnapshot(profileId).catch(() => null);
+    progress('after_post_scroll_snapshot', {
+      round: rounds,
+      hasCommentsContext: postScrollSnapshot?.hasCommentsContext === true,
+      detailVisible: postScrollSnapshot?.detailVisible === true,
+      visibleCount: Array.isArray(postScrollSnapshot?.comments) ? postScrollSnapshot.comments.length : 0,
+    });
     if (postScrollSnapshot?.detailVisible && postScrollSnapshot?.hasCommentsContext) {
       await applyVisibleLikePass(postScrollSnapshot);
     }
@@ -828,10 +1049,31 @@ export async function executeCommentsHarvestOperation({ profileId, params = {}, 
     }
   }
 
+  if (rounds >= effectiveMaxRounds && exitReason === 'harvest_complete') {
+    const expectedForCompletion = Math.max(0, Number(lastExpectedCommentsCount || 0) || 0);
+    const collectedCount = collectedRows.length;
+    const coverageRate = expectedForCompletion > 0 ? (collectedCount / expectedForCompletion) : null;
+    const coverageEnough = expectedForCompletion > 0 && coverageRate >= 0.9;
+    const noCommentsExpected = expectedForCompletion === 0;
+    const scrollAtBottom = lastScrollMeta?.atBottom === true;
+    if (coverageEnough) {
+      exitReason = 'coverage_satisfied';
+      reachedBottom = scrollAtBottom;
+    } else if (noCommentsExpected) {
+      exitReason = 'comments_empty';
+      commentsEmpty = true;
+    } else if (scrollAtBottom) {
+      exitReason = 'reached_bottom';
+      reachedBottom = true;
+    } else {
+      exitReason = 'max_rounds_reached';
+    }
+  }
+
   state.lastCommentsHarvest = {
     noteId: state.currentNoteId || null,
     commentCount: collectedRows.length,
-    expectedCommentsCount: snapshot.expectedCommentsCount,
+    expectedCommentsCount: lastExpectedCommentsCount,
     comments: collectedRows,
     capturedAt: new Date().toISOString(),
   };
@@ -849,14 +1091,17 @@ export async function executeCommentsHarvestOperation({ profileId, params = {}, 
   inlineLikeSummaryPath = finalLikeArtifacts.summaryPath || inlineLikeSummaryPath;
   inlineLikeStatePath = finalLikeArtifacts.likeStatePath || inlineLikeStatePath;
 
-  const { commentsPath, commentsMdPath } = await flushCommentArtifacts(collectedRows, snapshot.expectedCommentsCount);
+  const { commentsPath, commentsMdPath } = await flushCommentArtifacts(collectedRows, lastExpectedCommentsCount);
 
   const tabBudget = consumeTabBudget(state, totalAdded, {
     tabCount: params.tabCount,
     commentBudget: params.commentBudget,
   });
   const budgetExhausted = tabBudget.exhausted === true;
-  const completed = commentsEmpty || reachedBottom || (maxComments > 0 && collectedRows.length >= maxComments);
+  const completed = commentsEmpty
+    || reachedBottom
+    || exitReason === 'coverage_satisfied'
+    || (maxComments > 0 && collectedRows.length >= maxComments);
   const paused = !completed && budgetExhausted;
   const failed = !completed && !paused;
 
@@ -877,7 +1122,7 @@ export async function executeCommentsHarvestOperation({ profileId, params = {}, 
       recoveries,
       maxRecoveries,
       commentCount: collectedRows.length,
-      expectedCommentsCount: snapshot.expectedCommentsCount,
+      expectedCommentsCount: lastExpectedCommentsCount,
     } : null,
   });
 
@@ -888,6 +1133,14 @@ export async function executeCommentsHarvestOperation({ profileId, params = {}, 
     lastHarvestStage: 'comments_harvest',
   };
   emitActionTrace(context, actionTrace, { stage: 'xhs_comments_harvest' });
+  progress('operation_done', {
+    commentsAdded: totalAdded,
+    commentsTotal: state.lastCommentsHarvest.comments.length,
+    rounds,
+    exitReason,
+    reachedBottom,
+    commentsEmpty,
+  });
   await clearCommentHighlights();
   return {
     ok: true,
@@ -901,8 +1154,8 @@ export async function executeCommentsHarvestOperation({ profileId, params = {}, 
       noteId: state.currentNoteId,
       searchCount: 0,
       collected: totalAdded,
-      expectedCommentsCount: snapshot.expectedCommentsCount,
-      commentCoverageRate: snapshot.expectedCommentsCount ? (state.lastCommentsHarvest.comments.length / snapshot.expectedCommentsCount).toFixed(2) : null,
+      expectedCommentsCount: lastExpectedCommentsCount,
+      commentCoverageRate: lastExpectedCommentsCount ? (state.lastCommentsHarvest.comments.length / lastExpectedCommentsCount).toFixed(2) : null,
       recoveries,
       maxRecoveries,
       firstComment: state.lastCommentsHarvest.comments[0] || null,
@@ -913,8 +1166,8 @@ export async function executeCommentsHarvestOperation({ profileId, params = {}, 
       configuredMaxRounds: maxRounds,
       maxRounds: effectiveMaxRounds,
       maxRoundsSource: adaptiveMaxRounds ? 'adaptive' : 'params',
-      budgetExpectedCommentsCount: snapshot.expectedCommentsCount,
-      scroll: snapshot?.scroll || null,
+      budgetExpectedCommentsCount: lastExpectedCommentsCount,
+      scroll: lastScrollMeta || null,
       collectability: snapshot.collectability,
       skippedElements: [],
       fallbackCaptured: {},

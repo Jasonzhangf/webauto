@@ -2,6 +2,15 @@ import { getDomSnapshotByProfile } from '../../utils/browser-service.mjs';
 import { ChangeNotifier } from '../change-notifier.mjs';
 import { ensureActiveSession, normalizeArray } from './utils.mjs';
 
+export function isTransientSubscriptionError(error) {
+  const message = String(error?.message || error || '').trim().toLowerCase();
+  if (!message) return false;
+  return message.includes('execution context was destroyed')
+    || message.includes('most likely because of a navigation')
+    || message.includes('cannot find context with specified id')
+    || message.includes('target closed');
+}
+
 export async function watchSubscriptions({
   profileId,
   subscriptions,
@@ -91,6 +100,7 @@ export async function watchSubscriptions({
       }
       await emit({ type: 'tick', profileId: resolvedProfile, timestamp: ts });
     } catch (err) {
+      if (isTransientSubscriptionError(err)) return;
       onError(err);
     }
   };

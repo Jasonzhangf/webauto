@@ -56,6 +56,27 @@ Tags: xhs, detail, comments, recovery, tab-pool, safe-links, validation
 - `node --test tests/unit/webauto/xhs-unified-template-stage.test.mjs tests/unit/webauto/autoscript-stale-trigger-resume.test.mjs tests/unit/webauto/xhs-tab-pool-startup.test.mjs tests/unit/webauto/xhs-unified-options-entry.test.mjs tests/unit/webauto/xhs-tab-switch.test.mjs tests/unit/webauto/xhs-detail-slot-state.test.mjs tests/unit/webauto/xhs-tab-links.test.mjs tests/unit/webauto/xhs-tab-pool-config.test.mjs`
 - Result: `28/28 pass`
 
+## Scroll Step Update
+- Detail comment scrolling was adjusted to use a larger default step while still remaining inside one visible portrait screen.
+- Code changes:
+  - `modules/camo-runtime/src/autoscript/action-providers/xhs/harvest-ops.mjs`
+    - default `scrollStepMin/scrollStepMax` increased from `280/420` to `560/840`
+    - real per-scroll cap changed to `floor(commentViewportHeight * 0.95)` so a single scroll never exceeds one screen
+  - `modules/camo-runtime/src/autoscript/xhs-autoscript-detail-ops.mjs`
+    - `comments_harvest.params.scrollStep` now uses `commentsScrollStepMax`
+- Regression update:
+  - `tests/unit/webauto/xhs-unified-template-stage.test.mjs` now asserts `scrollStep === scrollStepMax` for single-note detail stage
+
+## Live Recheck Note
+- Pre-change live run still provides the stable evidence for comment-container progress:
+  - runId: `19ac31ae-65a6-482b-9c66-6092a08ecd91`
+  - event log: `/Users/fanzhang/.webauto/download/xiaohongshu/debug/deepseek/merged/run-2026-03-09T03-36-46-297Z/profiles/wave-001.xhs-qa-1.events.jsonl`
+  - `commentsScroll.top` advanced up to `32606.5`, with `comments.jsonl` at `288` rows
+- Post-change rerun:
+  - runId: `d6424539-7a1b-4c10-ace2-d1a75c29f4ac`
+  - event log: `/Users/fanzhang/.webauto/download/xiaohongshu/debug/deepseek/merged/run-2026-03-09T03-44-00-469Z/profiles/wave-001.xhs-qa-1.events.jsonl`
+  - observation: run was interrupted before it re-entered the detail harvest segment; logs showed `SUBSCRIPTION_WATCH_FAILED` during navigation, so this rerun is not valid evidence for the new step size.
+
 
 ## Live Rerun Evidence
 - Command:

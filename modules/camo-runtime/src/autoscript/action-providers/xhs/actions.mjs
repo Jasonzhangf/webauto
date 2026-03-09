@@ -5,7 +5,7 @@ import { executeWaitSearchPermitOperation } from './search-gate-ops.mjs';
 import { executeSwitchTabIfNeeded } from './tab-ops.mjs';
 import { executeOpenDetailOperation, executeCloseDetailOperation } from './detail-flow-ops.mjs';
 import { executeDetailHarvestOperation, executeExpandRepliesOperation, executeCommentsHarvestOperation, executeCommentMatchOperation, executeCommentLikeOperation, executeCommentReplyOperation } from './harvest-ops.mjs';
-import { executeTimeoutSnapshotOperation } from './diagnostic-ops.mjs';
+import { executeTimeoutSnapshotOperation, executeDebugSnapshotOperation } from './diagnostic-ops.mjs';
 
 export const XHS_ACTION_HANDLERS = {
   raise_error: handleRaiseError,
@@ -23,4 +23,5 @@ export const XHS_ACTION_HANDLERS = {
   xhs_comment_reply: executeCommentReplyOperation,
   xhs_close_detail: executeCloseDetailOperation,
   xhs_timeout_snapshot: executeTimeoutSnapshotOperation,
+  xhs_debug_snapshot: executeDebugSnapshotOperation,
 };
