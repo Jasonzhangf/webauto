@@ -56,6 +56,25 @@ it('reply stage enables reply flow and keeps like flow off', () => {
   assert.equal(getOperation(script, 'comment_reply')?.enabled, true);
 });
 
+it('like stage enables match gate without reply flow', () => {
+  const script = buildXhsUnifiedAutoscript({
+    profileId: 'xhs-stage-2b',
+    keyword: '咖啡店',
+    stage: 'like',
+    stageLinksEnabled: true,
+    stageContentEnabled: true,
+    stageLikeEnabled: true,
+    stageReplyEnabled: false,
+    doComments: true,
+    doLikes: true,
+    doReply: false,
+  });
+
+  assert.equal(getOperation(script, 'comments_harvest')?.enabled, true);
+  assert.equal(getOperation(script, 'comment_match_gate')?.enabled, true);
+  assert.equal(getOperation(script, 'comment_reply')?.enabled, false);
+});
+
 it('comments_harvest should wait for warmup but not expand_replies', () => {
   const script = buildXhsUnifiedAutoscript({
     profileId: 'xhs-stage-3',
@@ -129,6 +148,56 @@ it('single-note detail stage keeps modal open by default and uses larger comment
   assert.equal(getOperation(script, 'close_detail')?.enabled, false);
   assert.equal(getOperation(script, 'comments_harvest')?.params?.scrollStepMin, 520);
   assert.equal(getOperation(script, 'comments_harvest')?.params?.scrollStepMax, 760);
+});
+
+it('single-note safe-link detail stage auto-closes by default so failure can advance the loop', () => {
+  const script = buildXhsUnifiedAutoscript({
+    profileId: 'xhs-stage-5b',
+    keyword: 'deepseek',
+    stage: 'detail',
+    maxNotes: 1,
+    detailOpenByLinks: true,
+    stageLinksEnabled: true,
+    stageContentEnabled: true,
+    stageLikeEnabled: false,
+    stageReplyEnabled: false,
+    stageDetailEnabled: true,
+    doComments: true,
+    doLikes: false,
+    doReply: false,
+  });
+
+  assert.equal(getOperation(script, 'close_detail')?.enabled, true);
+});
+
+it('safe-link detail stage serializes modal ops through manual dependency chain', () => {
+  const script = buildXhsUnifiedAutoscript({
+    profileId: 'xhs-stage-5c',
+    keyword: 'deepseek',
+    stage: 'detail',
+    maxNotes: 1,
+    detailOpenByLinks: true,
+    stageLinksEnabled: true,
+    stageContentEnabled: true,
+    stageLikeEnabled: false,
+    stageReplyEnabled: false,
+    stageDetailEnabled: true,
+    doComments: true,
+    doLikes: false,
+    doReply: false,
+  });
+
+  assert.equal(getOperation(script, 'detail_harvest')?.trigger, 'manual');
+  assert.deepEqual(getOperation(script, 'detail_harvest')?.conditions, [{ type: 'subscription_exist', subscriptionId: 'detail_modal' }]);
+  assert.equal(getOperation(script, 'warmup_comments_context')?.trigger, 'manual');
+  assert.deepEqual(getOperation(script, 'warmup_comments_context')?.conditions, [{ type: 'subscription_exist', subscriptionId: 'detail_modal' }]);
+  assert.equal(getOperation(script, 'comments_harvest')?.trigger, 'manual');
+  assert.deepEqual(getOperation(script, 'comments_harvest')?.conditions, [{ type: 'subscription_exist', subscriptionId: 'detail_modal' }]);
+  assert.equal(getOperation(script, 'close_detail')?.trigger, 'manual');
+  assert.deepEqual(getOperation(script, 'close_detail')?.conditions, [
+    { type: 'operation_done', operationId: 'comments_harvest' },
+    { type: 'subscription_exist', subscriptionId: 'detail_modal' },
+  ]);
 });
 
 it('multi-tab detail stage switches tabs after close using a manual dependency chain', () => {

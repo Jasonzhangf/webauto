@@ -104,10 +104,6 @@ export function resolveXhsUnifiedOptions(rawOptions = {}) {
   const doOcr = toBoolean(rawOptions.doOcr, false);
   const persistComments = toBoolean(rawOptions.persistComments, true);
   const stage = toTrimmedString(rawOptions.stage, 'full').toLowerCase();
-  const autoCloseDetail = toBoolean(
-    rawOptions.autoCloseDetail,
-    !(stage === 'detail' && maxNotes <= 1),
-  );
   const stageLinksRequested = toBoolean(rawOptions.stageLinksEnabled, true);
   const stageContentEnabled = toBoolean(rawOptions.stageContentEnabled, true);
   const stageLikeEnabled = toBoolean(rawOptions.stageLikeEnabled, doLikes);
@@ -123,6 +119,10 @@ export function resolveXhsUnifiedOptions(rawOptions = {}) {
   const stageLinksEnabled = stageLinksRequested || detailLoopEnabled;
   const collectOpenLinksOnly = stageLinksEnabled;
   const detailOpenByLinks = toBoolean(rawOptions.detailOpenByLinks, stageLinksEnabled && detailLoopEnabled);
+  const autoCloseDetail = toBoolean(
+    rawOptions.autoCloseDetail,
+    detailOpenByLinks || !(stage === 'detail' && maxNotes <= 1),
+  );
   const openByLinksMaxAttempts = toPositiveInt(rawOptions.openByLinksMaxAttempts, 3, 1);
   const detailLinksStartup = detailOpenByLinks && (stage === 'detail' || stage === 'full');
   if (!tabCountProvided && detailLoopEnabled) tabCount = 4;

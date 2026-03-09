@@ -41,10 +41,17 @@ export function buildXhsDetailOperations(options) {
     autoCloseDetail,
   } = options;
 
-  const matchGateEnabled = stageReplyEnabled;
+  const matchGateEnabled = options.matchGateEnabled === true;
   const closeDetailEnabled = options.detailLoopEnabled && autoCloseDetail !== false;
   const waitBetweenNotesDependsOn = ['close_detail'];
-  const openNextDependsOn = ['wait_between_notes', 'ensure_tab_pool', 'tab_switch_if_needed', 'comments_harvest'];
+  const openNextDependsOn = ['wait_between_notes', 'ensure_tab_pool', 'comments_harvest'];
+  if (options.detailLoopEnabled && closeDetailEnabled && Number(tabCount || 1) > 1) {
+    openNextDependsOn.push('tab_switch_if_needed');
+  }
+  const modalChainTrigger = detailOpenByLinks ? 'manual' : 'detail_modal.exist';
+  const modalExistConditions = detailOpenByLinks
+    ? [{ type: 'subscription_exist', subscriptionId: 'detail_modal' }]
+    : undefined;
 
   return [
     {
@@ -89,8 +96,9 @@ export function buildXhsDetailOperations(options) {
       enabled: detailHarvestEnabled,
       action: 'xhs_detail_harvest',
       params: {},
-      trigger: 'detail_modal.exist',
+      trigger: modalChainTrigger,
       dependsOn: ['open_first_detail'],
+      conditions: modalExistConditions,
       once: false,
       oncePerAppear: true,
       timeoutMs: 90000,
@@ -127,8 +135,9 @@ export function buildXhsDetailOperations(options) {
       waitFor: { mode: 'or', subscriptions: ['detail_modal', 'detail_comment_item', 'detail_comment_list', 'detail_comment_section'] },
       action: 'wait',
       params: { ms: 1200 },
-      trigger: 'detail_modal.exist',
+      trigger: modalChainTrigger,
       dependsOn: [detailHarvestEnabled ? 'detail_harvest' : 'open_first_detail'],
+      conditions: modalExistConditions,
       once: false,
       oncePerAppear: true,
       onFailure: 'continue',
@@ -175,8 +184,9 @@ export function buildXhsDetailOperations(options) {
         requireBottom: maxComments <= 0,
         includeComments: persistComments,
       },
-      trigger: 'detail_modal.exist',
+      trigger: modalChainTrigger,
       dependsOn: ['warmup_comments_context'],
+      conditions: modalExistConditions,
       once: false,
       oncePerAppear: true,
       timeoutMs: 600000,
@@ -207,9 +217,9 @@ export function buildXhsDetailOperations(options) {
       enabled: matchGateEnabled,
       action: 'xhs_comment_match',
       params: { keywords: matchKeywords, mode: matchMode, minHits: matchMinHits },
-      trigger: 'detail_modal.exist',
+      trigger: modalChainTrigger,
       dependsOn: ['comments_harvest'],
-      conditions: [{ type: 'subscription_exist', subscriptionId: 'detail_modal' }],
+      conditions: modalExistConditions,
       once: false,
       oncePerAppear: true,
       pacing: { operationMinIntervalMs: 2400, eventCooldownMs: 1200, jitterMs: 160 },
@@ -219,8 +229,9 @@ export function buildXhsDetailOperations(options) {
       enabled: stageReplyEnabled,
       action: 'xhs_comment_reply',
       params: { replyText },
-      trigger: 'detail_modal.exist',
+      trigger: modalChainTrigger,
       dependsOn: [matchGateEnabled ? 'comment_match_gate' : 'comments_harvest'],
+      conditions: modalExistConditions,
       once: false,
       oncePerAppear: true,
       timeoutMs: 90000,
@@ -237,9 +248,12 @@ export function buildXhsDetailOperations(options) {
         openByLinks: detailOpenByLinks,
         allowKeepDetail: false,
       },
-      trigger: 'detail_modal.exist',
+      trigger: modalChainTrigger,
       dependsOn: [closeDependsOn],
-      conditions: [{ type: 'operation_done', operationId: closeDependsOn }],
+      conditions: [
+        { type: 'operation_done', operationId: closeDependsOn },
+        ...(Array.isArray(modalExistConditions) ? modalExistConditions : []),
+      ],
       once: false,
       oncePerAppear: true,
       pacing: { operationMinIntervalMs: 2500, eventCooldownMs: 1300, jitterMs: 180 },

@@ -14,6 +14,7 @@ describe('xhs tab pool config', () => {
 
     assert.equal(operation.id, 'ensure_tab_pool');
     assert.equal(operation.params.url, 'https://www.xiaohongshu.com/explore');
+    assert.equal(operation.params.reuseOnly, false);
     assert.equal(operation.params.normalizeTabs, true);
     assert.equal(operation.params.seedOnOpen, true);
   });

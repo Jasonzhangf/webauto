@@ -256,11 +256,16 @@ async function openTabBestEffort({
   };
 
   let openError = null;
+  const openCommandTimeoutMs = Math.max(
+    60000,
+    resolveTimeoutMs(apiTimeoutMs, DEFAULT_API_TIMEOUT_MS),
+    resolveTimeoutMs(tabAppearTimeoutMs, 0) + Math.max(30000, Math.min(openDelayMs || 0, 20000)),
+  );
   const payload = seedOnOpen && seedUrl
     ? { profileId, url: seedUrl }
     : { profileId };
   try {
-    await callApiWithTimeout('newPage', payload, Math.max(30000, apiTimeoutMs));
+    await callApiWithTimeout('newPage', payload, openCommandTimeoutMs);
     await settle();
     const newPageOpened = await waitForTab();
     if (newPageOpened.ok) {
@@ -296,6 +301,7 @@ export async function executeTabPoolOperation({ profileId, action, params = {}, 
     const normalizeTabs = params.normalizeTabs === true;
     const seedOnOpen = params.seedOnOpen !== false;
     const shortcutOnly = params.shortcutOnly === true;
+    const reuseOnly = params.reuseOnly === true;
     const apiTimeoutMs = resolveTimeoutMs(params.apiTimeoutMs, DEFAULT_API_TIMEOUT_MS);
     const navigationTimeoutMs = resolveTimeoutMs(params.navigationTimeoutMs ?? params.gotoTimeoutMs, DEFAULT_NAV_TIMEOUT_MS);
     const shortcutTimeoutMs = resolveTimeoutMs(params.shortcutTimeoutMs, SHORTCUT_OPEN_TIMEOUT_MS);
@@ -324,6 +330,9 @@ export async function executeTabPoolOperation({ profileId, action, params = {}, 
     const maxOpenFailures = Math.max(3, tabCount);
 
     while (pages.length < tabCount) {
+      if (reuseOnly) {
+        break;
+      }
       const beforeCount = pages.length;
       const openResult = await openTabBestEffort({
         profileId,
@@ -360,6 +369,12 @@ export async function executeTabPoolOperation({ profileId, action, params = {}, 
         }
         continue;
       }
+    }
+
+    if (reuseOnly && pages.length === 0) {
+      return asErrorPayload('TAB_POOL_EMPTY', 'reuse_only_tab_pool_requires_existing_tabs', {
+        tabCount,
+      });
     }
 
     const sortedPages = [...pages].sort((a, b) => Number(a.index) - Number(b.index));

@@ -442,6 +442,7 @@ export class AutoscriptRunner {
     const trigger = operation?.trigger || { type: 'startup' };
     if (trigger.type === 'startup') return 'startup';
     if (trigger.type === 'manual') {
+      if (this.forceRunOperationIds.has(operation?.id)) return `force:${String(operation?.id || '')}`;
       return `manual:${event?.timestamp || event?.type || 'event'}`;
     }
     if (trigger.type !== 'subscription_event') {
@@ -458,11 +459,31 @@ export class AutoscriptRunner {
     return `${trigger.subscriptionId}:${trigger.event}:v${Number(subState?.version || 0)}`;
   }
 
-  getTriggerAppearCount(operation) {
+  getOperationCycleSubscriptionId(operation) {
     const trigger = operation?.trigger || {};
-    if (trigger.type !== 'subscription_event') return null;
-    if (!trigger.subscriptionId) return null;
-    const subState = this.subscriptionState.get(trigger.subscriptionId) || null;
+    if (trigger.type === 'subscription_event' && trigger.subscriptionId) {
+      return trigger.subscriptionId;
+    }
+    if (operation?.oncePerAppear !== true) return null;
+    const conditions = Array.isArray(operation?.conditions) ? operation.conditions : [];
+    for (const condition of conditions) {
+      if (!condition || typeof condition !== 'object') continue;
+      if (
+        (condition.type === 'subscription_exist'
+          || condition.type === 'subscription_not_exist'
+          || condition.type === 'subscription_appear')
+        && condition.subscriptionId
+      ) {
+        return condition.subscriptionId;
+      }
+    }
+    return null;
+  }
+
+  getTriggerAppearCount(operation) {
+    const subscriptionId = this.getOperationCycleSubscriptionId(operation);
+    if (!subscriptionId) return null;
+    const subState = this.subscriptionState.get(subscriptionId) || null;
     const appearCount = Number(subState?.appearCount || 0);
     if (!Number.isFinite(appearCount) || appearCount <= 0) return null;
     return appearCount;

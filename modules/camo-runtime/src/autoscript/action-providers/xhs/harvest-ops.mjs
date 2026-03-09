@@ -505,9 +505,11 @@ export async function executeCommentsHarvestOperation({ profileId, params = {}, 
   const scrollDelayMaxMs = Math.max(scrollDelayMinMs, Number(params.scrollDelayMaxMs ?? params.scrollDelayMs ?? 2200) || 2200);
   const stallRounds = Math.max(1, Number(params.stallRounds ?? 8) || 8);
   const recoveryNoProgressRounds = Math.max(1, Number(params.recoveryNoProgressRounds ?? 3) || 3);
-  const recoveryUpRounds = Math.max(1, Number(params.recoveryUpRounds ?? 4) || 4);
+  const recoveryUpRounds = Math.max(3, Number(params.recoveryUpRounds ?? 4) || 4);
   const recoveryDownRounds = Math.max(1, Number(params.recoveryDownRounds ?? 1) || 1);
   const maxRecoveries = Math.max(1, Number(params.maxRecoveries ?? 3) || 3);
+  const noChangeTimeoutMs = Math.max(30000, Number(params.noChangeTimeoutMs ?? 30000) || 30000);
+  const refocusRetryDelayMs = Math.max(800, Number(params.refocusRetryDelayMs ?? 1200) || 1200);
 
   const existingRows = Array.isArray(state.lastCommentsHarvest?.comments)
     && String(state.lastCommentsHarvest?.noteId || '') === String(state.currentNoteId || '')
@@ -544,6 +546,7 @@ export async function executeCommentsHarvestOperation({ profileId, params = {}, 
   let noProgressRounds = 0;
   let recoveries = 0;
   let lastSignature = '';
+  let lastProgressAt = Date.now();
   let reachedBottom = false;
   let commentsEmpty = false;
   let exitReason = 'harvest_complete';
@@ -684,6 +687,7 @@ export async function executeCommentsHarvestOperation({ profileId, params = {}, 
       }
       collectedRows = [...collectedRows, ...newComments];
       totalAdded += newComments.length;
+      lastProgressAt = Date.now();
       await flushCommentArtifacts(collectedRows, current.expectedCommentsCount);
     }
 
@@ -695,6 +699,7 @@ export async function executeCommentsHarvestOperation({ profileId, params = {}, 
     } else {
       noProgressRounds = 0;
       lastSignature = signature || lastSignature;
+      if (signature) lastProgressAt = Date.now();
     }
 
     if (maxComments > 0 && collectedRows.length >= maxComments) {
@@ -713,16 +718,16 @@ export async function executeCommentsHarvestOperation({ profileId, params = {}, 
     }
 
     if (noProgressRounds >= recoveryNoProgressRounds) {
-      if (collectedRows.length > 0) {
-        exitReason = reachedBottom ? 'reached_bottom' : 'no_progress_with_comments';
-        break;
+      const noChangeElapsedMs = Date.now() - lastProgressAt;
+      if (noChangeElapsedMs < noChangeTimeoutMs) {
+        const waitMs = Math.min(2000, Math.max(600, noChangeTimeoutMs - noChangeElapsedMs));
+        await sleep(waitMs);
       }
       recoveries += 1;
-      const refocus = await focusCommentContext('recovery');
+      let refocus = await focusCommentContext('recovery').catch((error) => ({ ok: false, code: 'COMMENTS_CONTEXT_RECOVERY_CLICK_TIMEOUT', message: error?.message || 'focus comment context failed', data: { reason: 'exception' } }));
       if (refocus?.ok === false) {
-        await clearCommentHighlights();
-        markActiveDetailFailure(state, refocus.code || 'COMMENTS_CONTEXT_RECOVERY_FAILED', refocus.data || null);
-        return refocus;
+        await sleep(refocusRetryDelayMs);
+        refocus = { ok: true, scrollTarget: commentScroll || null, degradedRecovery: true, recoveryError: refocus?.message || refocus?.code || 'focus_failed' };
       }
       commentScroll = refocus?.scrollTarget || commentScroll;
       const scrollSelector = String(commentScroll?.selector || '').trim();
@@ -736,12 +741,6 @@ export async function executeCommentsHarvestOperation({ profileId, params = {}, 
         await applyVisibleLikePass(preRecoverySnapshot);
       }
       for (let i = 0; i < recoveryUpRounds; i += 1) {
-        if (commentScroll?.found && commentScroll.center) {
-          await highlightStep('xhs-detail-comment-scroll', commentScroll, 'focus', 'comment scroll');
-          await clickPoint(profileId, commentScroll.center, { steps: 2 });
-          await highlightStep('xhs-detail-comment-scroll', commentScroll, 'processed', 'comment scroll', 4200);
-          await sleep(900);
-        }
         await scrollBySelector(profileId, scrollSelector, { direction: 'up', amount: 420, highlight: true, skipFocusClick: true, focusTarget: commentScroll });
         await sleep(900);
       }
@@ -754,10 +753,18 @@ export async function executeCommentsHarvestOperation({ profileId, params = {}, 
       const postRecoverySnapshot = await readCommentsSnapshot(profileId).catch(() => null);
       if (postRecoverySnapshot?.detailVisible && postRecoverySnapshot?.hasCommentsContext) {
         await applyVisibleLikePass(postRecoverySnapshot);
+        const postSignature = makeSignature(Array.isArray(postRecoverySnapshot.comments) ? postRecoverySnapshot.comments : []);
+        if (postSignature && postSignature !== lastSignature) {
+          lastSignature = postSignature;
+          lastProgressAt = Date.now();
+          noProgressRounds = 0;
+        } else if ((Date.now() - lastProgressAt) >= noChangeTimeoutMs && recoveries >= maxRecoveries) {
+          exitReason = reachedBottom ? 'reached_bottom' : 'scroll_stalled_after_recovery';
+          break;
+        }
       }
-      noProgressRounds = 0;
-      if (recoveries >= maxRecoveries) {
-        exitReason = reachedBottom ? 'reached_bottom' : 'scroll_stalled';
+      if ((Date.now() - lastProgressAt) >= noChangeTimeoutMs && recoveries >= maxRecoveries) {
+        exitReason = reachedBottom ? 'reached_bottom' : 'scroll_stalled_after_recovery';
         break;
       }
     } else {
@@ -815,8 +822,8 @@ export async function executeCommentsHarvestOperation({ profileId, params = {}, 
       await applyVisibleLikePass(postScrollSnapshot);
     }
 
-    if (rounds >= stallRounds && noProgressRounds >= recoveryNoProgressRounds) {
-      exitReason = reachedBottom ? 'reached_bottom' : 'scroll_stalled';
+    if (rounds >= stallRounds && noProgressRounds >= recoveryNoProgressRounds && (Date.now() - lastProgressAt) >= noChangeTimeoutMs) {
+      exitReason = reachedBottom ? 'reached_bottom' : 'scroll_stalled_after_recovery';
       break;
     }
   }

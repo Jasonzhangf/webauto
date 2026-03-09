@@ -105,7 +105,7 @@ export async function buildUnifiedOptions(argv, profileId, overrides = {}) {
   const detailLinksStartup = detailOpenByLinks && stage === 'detail';
   const autoCloseDetail = parseBool(
     overrides.autoCloseDetail ?? argv['auto-close-detail'],
-    !(stage === 'detail' && maxNotes <= 1),
+    detailOpenByLinks || !(stage === 'detail' && maxNotes <= 1),
   );
   if (stage === 'detail' || stage === 'full' || parseBool(overrides.doComments ?? argv['do-comments'], false)) {
     commentsScrollStepMin = Math.max(commentsScrollStepMin, 960);
