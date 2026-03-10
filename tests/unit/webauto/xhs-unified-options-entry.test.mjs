@@ -37,4 +37,15 @@ describe('xhs unified entry options', () => {
 
     assert.equal(options.detailOpenByLinks, true);
   });
+
+  it('comments-enabled full run defaults to 4 tabs', async () => {
+    const options = await buildUnifiedOptions({
+      keyword: 'deepseek',
+      stage: 'full',
+      'max-notes': 5,
+      'do-comments': true,
+    }, 'xhs-qa-1');
+
+    assert.equal(options.tabCount, 4);
+  });
 });

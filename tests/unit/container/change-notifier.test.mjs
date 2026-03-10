@@ -1,7 +1,6 @@
-@@ -0,0 +1,184 @@
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert';
-import { ChangeNotifier, getChangeNotifier, destroyChangeNotifier } from '../../../src/container/change-notifier.mjs';
+import { ChangeNotifier, getChangeNotifier, destroyChangeNotifier } from '../../../modules/camo-runtime/src/container/change-notifier.mjs';
 
 describe('ChangeNotifier', () => {
   let notifier;
@@ -47,15 +46,17 @@ describe('ChangeNotifier', () => {
 
   describe('watch', () => {
     it('should register element watcher', () => {
-      let appeared = false;
-      notifier.watch('.my-selector', { onAppear: () => { appeared = true; } });
-      assert.strictEqual(notifier.elementWatchers.has('.my-selector'), true);
+      notifier.watch('.my-selector', { onAppear: () => {} });
+      const keys = Array.from(notifier.elementWatchers.keys());
+      assert.strictEqual(keys.length, 1);
+      assert.match(keys[0], /my-selector/);
     });
 
     it('should return unsubscribe function', () => {
       const unsub = notifier.watch('.selector', {});
+      const key = Array.from(notifier.elementWatchers.keys())[0];
       unsub();
-      assert.strictEqual(notifier.elementWatchers.has('.selector'), false);
+      assert.strictEqual(notifier.elementWatchers.has(key), false);
     });
   });
 
@@ -138,6 +139,28 @@ describe('ChangeNotifier', () => {
       const results = notifier.findElements(tree, { css: '.item' });
       assert.strictEqual(results.length, 2);
     });
+
+    it('should match descendant selectors against ancestor chain', () => {
+      const tree = {
+        selector: '.root',
+        children: [
+          {
+            classes: ['note-detail-mask'],
+            children: [
+              { classes: ['show-more'] },
+              { classes: ['reply-expand'] },
+            ],
+          },
+          {
+            classes: ['show-more'],
+          },
+        ],
+      };
+
+      const results = notifier.findElements(tree, { css: '.note-detail-mask .show-more' });
+      assert.strictEqual(results.length, 1);
+      assert.deepStrictEqual(results[0].classes, ['show-more']);
+    });
   });
 
   describe('nodeMatchesSelector', () => {
@@ -159,6 +182,19 @@ describe('ChangeNotifier', () => {
     it('should return false for no match', () => {
       const node = { classes: ['x'] };
       assert.strictEqual(notifier.nodeMatchesSelector(node, { classes: ['y'] }), false);
+    });
+
+    it('should require descendant selectors to match ancestors instead of the same node', () => {
+      const node = { classes: ['show-more'] };
+      const ancestors = [{ classes: ['note-detail-mask'] }];
+      assert.strictEqual(
+        notifier.nodeMatchesSelector(node, { css: '.note-detail-mask .show-more' }, ancestors),
+        true,
+      );
+      assert.strictEqual(
+        notifier.nodeMatchesSelector(node, { css: '.note-detail-mask .show-more' }, []),
+        false,
+      );
     });
   });
 

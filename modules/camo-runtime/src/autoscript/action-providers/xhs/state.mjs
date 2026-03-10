@@ -4,6 +4,10 @@ const XHS_PROFILE_STATE = new Map();
 export function defaultProfileState() {
   return {
     keyword: null,
+    env: null,
+    outputRoot: null,
+    downloadRoot: null,
+    rootDir: null,
     currentNoteId: null,
     currentHref: null,
     lastListUrl: null,
@@ -34,6 +38,48 @@ export function getProfileState(profileId) {
     XHS_PROFILE_STATE.set(key, defaultProfileState());
   }
   return XHS_PROFILE_STATE.get(key);
+}
+
+export function clearXhsPendingQueues(profileId, meta = {}) {
+  const state = getProfileState(profileId);
+  const now = new Date().toISOString();
+  const code = String(meta.code || 'RISK_CONTROL_DETECTED').trim() || 'RISK_CONTROL_DETECTED';
+  const reason = String(meta.reason || code).trim() || code;
+  state.linksState = {
+    sourcePath: state?.linksState?.sourcePath || null,
+    queue: [],
+    byTab: {},
+    completed: state?.linksState?.completed && typeof state.linksState.completed === 'object'
+      ? { ...state.linksState.completed }
+      : {},
+    exhausted: state?.linksState?.exhausted && typeof state.linksState.exhausted === 'object'
+      ? { ...state.linksState.exhausted }
+      : {},
+  };
+  state.detailLinkState = {
+    ...(state?.detailLinkState && typeof state.detailLinkState === 'object' ? state.detailLinkState : {}),
+    activeTabIndex: null,
+    activeLink: null,
+    activeLinkRetryCount: 0,
+    activeFailed: true,
+    lastFailureCode: code,
+    lastFailureAt: now,
+    lastRequeue: {
+      requeued: false,
+      exhausted: true,
+      guardStop: true,
+      reason,
+      code,
+      clearedAt: now,
+    },
+  };
+  state.guardStop = {
+    code,
+    reason,
+    stage: meta.stage ? String(meta.stage).trim() || null : null,
+    detectedAt: now,
+  };
+  return state;
 }
 
 function toLockKey(text, fallback = '') {

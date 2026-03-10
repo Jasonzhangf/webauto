@@ -348,33 +348,10 @@ export async function scrollBySelector(profileId, selector, options = {}) {
   } else {
     await sleep(240);
   }
+  // Skip mouse:wheel and go directly to keyboard-based scrolling
+  // mouse:wheel with anchor coordinates often fails to scroll the correct container
+  // Keyboard PageUp/PageDown is more reliable for container-specific scrolling
   const axis = direction === 'up' || direction === 'down' ? 'vertical' : 'horizontal';
-  const wheelDelta = direction === 'up'
-    ? -amount
-    : direction === 'down'
-      ? amount
-      : 0;
-  if (axis === 'vertical' && wheelDelta !== 0) {
-    try {
-      await callAPI('mouse:wheel', {
-        profileId,
-        deltaY: wheelDelta,
-        anchorX: focusTarget.center.x,
-        anchorY: focusTarget.center.y,
-      });
-      await sleep(320);
-      return {
-        ok: true,
-        mode: 'wheel',
-        amount,
-        deltaY: wheelDelta,
-        selector: normalizedSelector,
-        anchor: focusTarget.center,
-      };
-    } catch {
-      // Fallback to keyboard paging if protocol wheel is unavailable for this runtime build.
-    }
-  }
   const primaryKey = direction === 'up' ? 'PageUp' : direction === 'down' ? 'PageDown' : direction === 'left' ? 'ArrowLeft' : 'ArrowRight';
   const fallbackKey = direction === 'up' ? 'ArrowUp' : direction === 'down' ? 'ArrowDown' : primaryKey;
   const steps = axis === 'vertical'

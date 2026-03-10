@@ -1,11 +1,22 @@
 import { callAPI } from '../../../utils/browser-service.mjs';
+import { isCheckpointRiskUrl } from '../../../container/runtime-core/utils.mjs';
 import { getProfileState } from './state.mjs';
 import { buildTraceRecorder, emitActionTrace } from './trace.mjs';
 import { sleep, readLocation, clickPoint } from './dom-ops.mjs';
 import { readSearchCandidateByNoteId, ensureSearchCandidateFullyVisible } from './search-ops.mjs';
-import { getCurrentTabIndex, getOrAssignLinkForTab, readActiveLinkForTab, writeTabSlotState, requeueTabLinkToTail, markTabLinkDone } from './tab-state.mjs';
+import { getCurrentTabIndex, loadCollectedLinks, readCollectedLinksCache, readActiveLinkForTab, writeTabSlotState } from './tab-state.mjs';
 import { readDetailSlotState, shouldCloseCurrentDetail, shouldReuseDetailForCurrentTab, writeDetailSlotState } from './detail-slot-state.mjs';
 import { isDetailVisible, readDetailCloseTarget, closeDetailToSearch, readDetailSnapshot } from './detail-ops.mjs';
+import { readXhsInteractionGuard, buildXhsGuardFailure } from './auth-ops.mjs';
+import {
+  requestXhsGatePermit,
+  confirmXhsGateUsage,
+  initXhsDetailLinkQueue,
+  claimXhsDetailLink,
+  completeXhsDetailLink,
+  releaseXhsDetailLink,
+  clearXhsDetailLinkQueue,
+} from './search-gate-ops.mjs';
 
 const XHS_DISCOVER_URL = 'https://www.xiaohongshu.com/explore?channel_id=homefeed_recommend';
 
@@ -16,7 +27,10 @@ function extractNoteIdFromUrl(rawUrl) {
   return matched?.[1] ? String(matched[1]).trim() || null : null;
 }
 
-async function settleOpenedDetailState(profileId, params = {}, pushTrace, expectedNoteId = null) {
+async function settleOpenedDetailState(profileId, params = {}, pushTrace, expectedNoteId = null, deps = {}) {
+  const sleepImpl = typeof deps.sleep === 'function' ? deps.sleep : sleep;
+  const readLocationImpl = typeof deps.readLocation === 'function' ? deps.readLocation : readLocation;
+  const readDetailSnapshotImpl = typeof deps.readDetailSnapshot === 'function' ? deps.readDetailSnapshot : readDetailSnapshot;
   const pollMin = Math.max(120, Number(params.pollDelayMinMs ?? 160) || 160);
   const pollMax = Math.max(pollMin, Number(params.pollDelayMaxMs ?? 320) || 320);
   const minObserveMs = Math.max(700, Math.min(2500, Number(params.postOpenDelayMinMs ?? 1200) || 1200));
@@ -30,8 +44,8 @@ async function settleOpenedDetailState(profileId, params = {}, pushTrace, expect
   let lastSnapshot = null;
 
   while (Date.now() <= deadline) {
-    const snapshot = await readDetailSnapshot(profileId).catch(() => null);
-    const href = String(snapshot?.href || await readLocation(profileId).catch(() => '') || '').trim() || null;
+    const snapshot = await readDetailSnapshotImpl(profileId).catch(() => null);
+    const href = String(snapshot?.href || await readLocationImpl(profileId).catch(() => '') || '').trim() || null;
     const noteId = String(snapshot?.noteIdFromUrl || extractNoteIdFromUrl(href) || '').trim() || null;
     const key = `${noteId || ''}|${href || ''}`;
     if (key && key === lastKey) {
@@ -60,7 +74,7 @@ async function settleOpenedDetailState(profileId, params = {}, pushTrace, expect
       break;
     }
     const waitMs = Math.floor(pollMin + Math.random() * Math.max(1, pollMax - pollMin + 1));
-    await sleep(waitMs);
+    await sleepImpl(waitMs);
   }
 
   return {
@@ -93,14 +107,249 @@ function resolveReturnUrl(candidateUrl) {
   return XHS_DISCOVER_URL;
 }
 
-function markOpenFailure(state, requeue) {
+function markOpenFailure(state, requeue, failureCode = null) {
   state.detailLinkState = {
     ...(state.detailLinkState && typeof state.detailLinkState === 'object' ? state.detailLinkState : {}),
     activeFailed: true,
-    lastFailureCode: 'DETAIL_NOT_VISIBLE',
+    lastFailureCode: String(failureCode || requeue?.code || 'DETAIL_OPEN_FAILED').trim() || 'DETAIL_OPEN_FAILED',
     lastFailureAt: new Date().toISOString(),
     lastRequeue: requeue,
   };
+}
+
+function createOpenFailureResult(code, message) {
+  return {
+    ok: false,
+    code: String(code || 'OPERATION_FAILED').trim() || 'OPERATION_FAILED',
+    message: String(message || 'open detail failed').trim() || 'open detail failed',
+  };
+}
+
+function classifyOpenRedirectBlocker(rawUrl) {
+  const text = String(rawUrl || '').trim();
+  if (!text) return null;
+  const lower = text.toLowerCase();
+  if (/\/login|signin|passport|account\/login/i.test(lower)) {
+    return {
+      code: 'LOGIN_GUARD_DETECTED',
+      message: 'detail redirected to login',
+    };
+  }
+  if (
+    isCheckpointRiskUrl(lower)
+    || lower.includes('/website-login/error')
+    || lower.includes('httpstatus=461')
+    || lower.includes('verifytype=400')
+  ) {
+    return {
+      code: 'RISK_CONTROL_DETECTED',
+      message: 'detail redirected to risk control',
+    };
+  }
+  return null;
+}
+
+function extractOpenLinkKey(activeEntry, assignedLink, effectiveNoteUrl) {
+  return String(
+    activeEntry?.key
+      || activeEntry?.link?.noteId
+      || assignedLink?.noteId
+      || assignedLink?.noteUrl
+      || effectiveNoteUrl
+      || '',
+  ).trim() || null;
+}
+
+function createDetailGateKey(profileId, params = {}, state = null) {
+  return String(
+    params.detailGateKey
+      || params.openGateKey
+      || params.searchKey
+      || state?.keyword
+      || profileId
+      || '',
+  ).trim() || profileId;
+}
+
+function createDetailGateConsumerId(tabIndex) {
+  const normalizedTabIndex = Math.max(1, Number(tabIndex || 1) || 1);
+  return `tab-${normalizedTabIndex}`;
+}
+
+async function ensureDetailGateQueueInitialized({
+  profileId,
+  params = {},
+  state,
+  pushTrace,
+  testingOverrides,
+}) {
+  await loadCollectedLinks(state, params);
+  const gateKey = createDetailGateKey(profileId, params, state);
+  const sourcePath = String(state.linksCachePath || '').trim() || String(params.sharedHarvestPath || params.sharedClaimPath || '').trim() || null;
+  const links = readCollectedLinksCache(state);
+  const cacheSignature = `${sourcePath || 'inline'}::${links.map((item) => String(item?.noteId || item?.noteUrl || '').trim()).join('|')}`;
+  const detailGateState = state.detailGateState && typeof state.detailGateState === 'object' ? state.detailGateState : {};
+  if (detailGateState.key === gateKey && detailGateState.queueSignature === cacheSignature && detailGateState.initialized === true) {
+    return { gateKey, links, initialized: false };
+  }
+  const initResult = await initXhsDetailLinkQueue({
+    profileId,
+    params: { key: gateKey, links },
+    state,
+    pushTrace,
+    stage: 'detail_links_init',
+    testingOverrides,
+  });
+  state.detailGateState = {
+    ...detailGateState,
+    key: gateKey,
+    queueSignature: cacheSignature,
+    initialized: true,
+    sourcePath,
+    totalLinks: Math.max(0, Number(initResult?.response?.totalLinks || links.length) || 0),
+    initializedAt: new Date().toISOString(),
+  };
+  return { gateKey, links, initialized: true, initResult };
+}
+
+async function claimDetailLinkForTab({
+  profileId,
+  params = {},
+  state,
+  currentTabIndex,
+  pushTrace,
+  testingOverrides,
+}) {
+  const gateInit = await ensureDetailGateQueueInitialized({ profileId, params, state, pushTrace, testingOverrides });
+  const consumerId = createDetailGateConsumerId(currentTabIndex);
+  const claimResult = await claimXhsDetailLink({
+    profileId,
+    params: { key: gateInit.gateKey, consumerId },
+    state,
+    pushTrace,
+    stage: 'detail_links_claim',
+    testingOverrides,
+  });
+  const link = claimResult?.response?.link && typeof claimResult.response.link === 'object'
+    ? { ...claimResult.response.link }
+    : null;
+  if (!link) return { gateKey: gateInit.gateKey, consumerId, response: claimResult?.response || null, link: null };
+  writeTabSlotState(state, currentTabIndex, {
+    link,
+    key: String(claimResult?.response?.linkKey || link.noteId || link.noteUrl || '').trim() || null,
+    done: false,
+    assignedAt: new Date().toISOString(),
+    gateKey: gateInit.gateKey,
+    consumerId,
+  });
+  return {
+    gateKey: gateInit.gateKey,
+    consumerId,
+    response: claimResult?.response || null,
+    link,
+  };
+}
+
+async function releaseClaimedDetailLink({
+  profileId,
+  params = {},
+  state,
+  currentTabIndex,
+  activeEntry = null,
+  pushTrace,
+  testingOverrides,
+  reason = 'detail_link_release',
+  skip = false,
+}) {
+  const tabIndex = Math.max(1, Number(currentTabIndex || 1) || 1);
+  const entry = activeEntry || readActiveLinkForTab(state, tabIndex);
+  const gateKey = String(entry?.gateKey || state?.detailGateState?.key || createDetailGateKey(profileId, params, state)).trim() || profileId;
+  const consumerId = String(entry?.consumerId || createDetailGateConsumerId(tabIndex)).trim() || createDetailGateConsumerId(tabIndex);
+  const link = entry?.link || null;
+  const response = await releaseXhsDetailLink({
+    profileId,
+    params: {
+      key: gateKey,
+      consumerId,
+      noteId: link?.noteId,
+      noteUrl: link?.noteUrl,
+      resourceKey: String(entry?.key || link?.noteId || link?.noteUrl || '').trim() || null,
+      reason,
+      skip,
+      link,
+    },
+    state,
+    pushTrace,
+    stage: reason,
+    testingOverrides,
+  });
+  writeTabSlotState(state, tabIndex, {
+    link: null,
+    key: null,
+    done: true,
+    gateKey,
+    consumerId,
+    reason,
+  });
+  return response;
+}
+
+async function completeClaimedDetailLink({
+  profileId,
+  params = {},
+  state,
+  currentTabIndex,
+  activeEntry = null,
+  pushTrace,
+  testingOverrides,
+  noteId = null,
+  url = null,
+}) {
+  const tabIndex = Math.max(1, Number(currentTabIndex || 1) || 1);
+  const entry = activeEntry || readActiveLinkForTab(state, tabIndex);
+  const gateKey = String(entry?.gateKey || state?.detailGateState?.key || createDetailGateKey(profileId, params, state)).trim() || profileId;
+  const consumerId = String(entry?.consumerId || createDetailGateConsumerId(tabIndex)).trim() || createDetailGateConsumerId(tabIndex);
+  const link = entry?.link || null;
+  const response = await completeXhsDetailLink({
+    profileId,
+    params: {
+      key: gateKey,
+      consumerId,
+      noteId: noteId || link?.noteId,
+      noteUrl: link?.noteUrl,
+      url: url || link?.noteUrl,
+      resourceKey: String(entry?.key || noteId || link?.noteId || link?.noteUrl || '').trim() || null,
+      link,
+    },
+    state,
+    pushTrace,
+    stage: 'detail_links_done',
+    testingOverrides,
+  });
+  writeTabSlotState(state, tabIndex, {
+    link: null,
+    key: null,
+    done: true,
+    gateKey,
+    consumerId,
+    reason: 'detail_flow_done',
+  });
+  return response;
+}
+
+async function clearDetailGateQueueOnGuard({ profileId, params = {}, state, pushTrace, testingOverrides, stage }) {
+  try {
+    await clearXhsDetailLinkQueue({
+      profileId,
+      params: { key: createDetailGateKey(profileId, params, state) },
+      state,
+      pushTrace,
+      stage,
+      testingOverrides,
+    });
+  } catch (error) {
+    pushTrace({ kind: 'detail_gate', stage, action: 'clear_failed', message: String(error?.message || error) });
+  }
 }
 
 async function waitForLinkOpenGate(state, params, pushTrace) {
@@ -133,39 +382,48 @@ export async function executeOpenDetailOperation({ profileId, params = {}, conte
   const noteUrl = String(params.noteUrl || '').trim() || null;
   const useLinks = String(params.openByLinks || '').toLowerCase() === 'true' || params.openByLinks === true;
   const modeNext = mode === 'next';
+  const testingOverrides = context?.testingOverrides && typeof context.testingOverrides === 'object'
+    ? context.testingOverrides
+    : null;
+  const callApiImpl = typeof testingOverrides?.callAPI === 'function' ? testingOverrides.callAPI : callAPI;
+  const sleepImpl = typeof testingOverrides?.sleep === 'function' ? testingOverrides.sleep : sleep;
+  const readLocationImpl = typeof testingOverrides?.readLocation === 'function' ? testingOverrides.readLocation : readLocation;
+  const isDetailVisibleImpl = typeof testingOverrides?.isDetailVisible === 'function'
+    ? testingOverrides.isDetailVisible
+    : isDetailVisible;
+  const readDetailSnapshotImpl = typeof testingOverrides?.readDetailSnapshot === 'function'
+    ? testingOverrides.readDetailSnapshot
+    : readDetailSnapshot;
+  const assertNoGuard = async (stage) => {
+    const guard = await readXhsInteractionGuard({ profileId, params, testingOverrides });
+    if (guard?.stopCode) {
+      if (useLinks) {
+        await clearDetailGateQueueOnGuard({ profileId, params, state, pushTrace, testingOverrides, stage: `${stage}_clear_queue` });
+      }
+      pushTrace({ kind: 'guard', stage, code: guard.stopCode, url: guard.url || null });
+      return buildXhsGuardFailure({ profileId, guard, stage, codeMode: 'guard' });
+    }
+    return null;
+  };
+  let openGatePermit = null;
   let effectiveNoteUrl = noteUrl;
   let assignedLink = null;
   let currentTabIndex = null;
   let slotState = null;
+  const attemptedLinkKeys = new Set();
 
   if (useLinks) {
     currentTabIndex = getCurrentTabIndex(state, { tabCount: params.tabCount });
     slotState = readDetailSlotState(state, currentTabIndex, { tabCount: params.tabCount });
   }
 
-  if (useLinks && !effectiveNoteUrl) {
-    const link = await getOrAssignLinkForTab(state, params, currentTabIndex);
-    assignedLink = link;
-    slotState = readDetailSlotState(state, currentTabIndex, { tabCount: params.tabCount });
-    if (!link?.noteUrl) {
-      throw new Error('AUTOSCRIPT_DONE_DETAIL_LINKS_EXHAUSTED');
-    }
-    effectiveNoteUrl = String(link.noteUrl)
-      .replace('/search_result/', '/explore/')
-      .replace(/([?&]source=)[^&#]*/i, '$1web_explore_feed');
-  }
-
-  if (effectiveNoteUrl && !String(effectiveNoteUrl).includes('xsec_token=')) {
-    return { ok: false, code: 'MISSING_XSEC_TOKEN', message: 'detail url missing xsec_token' };
-  }
-
-  if (!noteId && !effectiveNoteUrl) {
+  if (!noteId && !effectiveNoteUrl && !useLinks) {
     return { ok: false, code: 'INVALID_PARAMS', message: 'noteId or noteUrl required in single mode' };
   }
 
-  const beforeUrl = await readLocation(profileId);
-  const detailVisible = await isDetailVisible(profileId);
-  const detailSnapshotBefore = detailVisible?.detailVisible ? await readDetailSnapshot(profileId).catch(() => null) : null;
+  const beforeUrl = await readLocationImpl(profileId);
+  const detailVisible = await isDetailVisibleImpl(profileId);
+  const detailSnapshotBefore = detailVisible?.detailVisible ? await readDetailSnapshotImpl(profileId).catch(() => null) : null;
   const currentMatchesTargetLink = Boolean(
     useLinks
       && detailVisible?.detailVisible === true
@@ -188,45 +446,289 @@ export async function executeOpenDetailOperation({ profileId, params = {}, conte
 
   if (detailVisible?.detailVisible === true && !useLinks) {
     await closeDetailToSearch(profileId, pushTrace);
-    await sleep(300);
+    await sleepImpl(300);
   }
 
-  if (effectiveNoteUrl) {
-    if (!shouldReuseOpenDetail) {
-      if (useLinks) {
-        await waitForLinkOpenGate(state, params, pushTrace);
-      }
-      await callAPI('goto', { profileId, url: effectiveNoteUrl });
-      const pollMin = Math.max(80, Number(params.pollDelayMinMs ?? 120) || 120);
-      const pollMax = Math.max(pollMin, Number(params.pollDelayMaxMs ?? 240) || 240);
-      const attempts = Math.max(4, Number(params.openByLinksMaxAttempts ?? params.openDetailMaxAttempts ?? 8) || 8);
-      let opened = await isDetailVisible(profileId);
-      for (let attempt = 1; attempt <= attempts; attempt += 1) {
-        if (opened?.detailVisible) break;
-        const waitMs = Math.floor(pollMin + Math.random() * (pollMax - pollMin + 1));
-        await sleep(waitMs);
-        opened = await isDetailVisible(profileId);
-      }
-      if (!opened?.detailVisible) {
-        if (useLinks) {
-          const requeueTabIndex = currentTabIndex || getCurrentTabIndex(state, { tabCount: params.tabCount });
-          const requeue = requeueTabLinkToTail(state, params, requeueTabIndex, {
-            reason: 'open_detail_failed',
-            code: 'DETAIL_NOT_VISIBLE',
-            mode: modeNext ? 'next' : mode,
-            url: effectiveNoteUrl || null,
-          });
-          markOpenFailure(state, requeue);
+  const guardBeforeOpen = await assertNoGuard('open_detail_before_open');
+  if (guardBeforeOpen) return guardBeforeOpen;
+
+  if (effectiveNoteUrl || useLinks) {
+    while (true) {
+      if (useLinks && !effectiveNoteUrl) {
+        const claim = await claimDetailLinkForTab({
+          profileId,
+          params,
+          state,
+          currentTabIndex,
+          pushTrace,
+          testingOverrides,
+        });
+        const link = claim?.link || null;
+        assignedLink = link;
+        slotState = readDetailSlotState(state, currentTabIndex, { tabCount: params.tabCount });
+        if (!link?.noteUrl) {
+          throw new Error('AUTOSCRIPT_DONE_DETAIL_LINKS_EXHAUSTED');
         }
-        return { ok: false, code: 'DETAIL_NOT_VISIBLE', message: 'detail not visible after open-by-links' };
+        effectiveNoteUrl = String(link.noteUrl)
+          .replace('/search_result/', '/explore/')
+          .replace(/([?&]source=)[^&#]*/i, '$1web_explore_feed');
       }
-    } else {
-      pushTrace({
-        kind: 'reuse',
-        stage: 'open_detail',
-        noteId: slotState?.lastOpenedNoteId || slotState?.noteId || null,
-        url: beforeUrl || effectiveNoteUrl || null,
-      });
+
+      const activeEntry = useLinks
+        ? readActiveLinkForTab(state, currentTabIndex || getCurrentTabIndex(state, { tabCount: params.tabCount }))
+        : null;
+      const activeLinkKey = useLinks ? extractOpenLinkKey(activeEntry, assignedLink, effectiveNoteUrl) : null;
+      if (useLinks && activeLinkKey) {
+        if (attemptedLinkKeys.has(activeLinkKey)) {
+          throw new Error('AUTOSCRIPT_DONE_DETAIL_LINKS_EXHAUSTED');
+        }
+        attemptedLinkKeys.add(activeLinkKey);
+      }
+
+        if (effectiveNoteUrl && !String(effectiveNoteUrl).includes('xsec_token=')) {
+          if (!useLinks) {
+            return createOpenFailureResult('MISSING_XSEC_TOKEN', 'detail url missing xsec_token');
+          }
+        const requeueTabIndex = currentTabIndex || getCurrentTabIndex(state, { tabCount: params.tabCount });
+        const activeEntry = readActiveLinkForTab(state, requeueTabIndex);
+        await releaseClaimedDetailLink({
+          profileId,
+          params,
+          state,
+          currentTabIndex: requeueTabIndex,
+          activeEntry,
+          pushTrace,
+          testingOverrides,
+          reason: 'open_detail_missing_xsec_release',
+        });
+        const requeue = { requeued: true, exhausted: false, key: activeEntry?.key || assignedLink?.noteId || null, link: activeEntry?.link || assignedLink || null };
+        markOpenFailure(state, requeue, 'MISSING_XSEC_TOKEN');
+        pushTrace({ kind: 'error', stage: 'open_detail', code: 'MISSING_XSEC_TOKEN', url: effectiveNoteUrl || null });
+        effectiveNoteUrl = null;
+        assignedLink = null;
+        slotState = readDetailSlotState(state, currentTabIndex, { tabCount: params.tabCount });
+        continue;
+      }
+
+      if (!shouldReuseOpenDetail) {
+        let gateParams = null;
+        try {
+          const guardBeforeGoto = await assertNoGuard('open_detail_before_goto');
+          if (guardBeforeGoto) return guardBeforeGoto;
+          if (useLinks) {
+            gateParams = {
+              kind: 'open_link',
+              key: params.openGateKey || params.searchKey || profileId,
+              resourceKey: String(assignedLink?.noteId || extractNoteIdFromUrl(effectiveNoteUrl) || effectiveNoteUrl || '').trim() || null,
+              windowMs: params.openGateWindowMs ?? 180_000,
+              maxCount: params.openGateMaxCount ?? 12,
+              sameResourceMaxConsecutive: params.openGateSameResourceMaxConsecutive ?? 2,
+              denyOnConsecutiveSame: params.openGateDenyOnConsecutiveSame !== false,
+              gateUrl: params.openGateUrl,
+            };
+            try {
+              openGatePermit = await requestXhsGatePermit({
+                profileId,
+                params: gateParams,
+                state,
+                pushTrace,
+                stage: 'open_detail_gate',
+                testingOverrides,
+              });
+            } catch (gateError) {
+              const code = String(gateError?.code || '').trim();
+              if (code === 'OPEN_LINK_GATE_REJECTED' || code === 'OPEN_LINK_GATE_DENIED') {
+                const requeueTabIndex = currentTabIndex || getCurrentTabIndex(state, { tabCount: params.tabCount });
+                const activeEntry = readActiveLinkForTab(state, requeueTabIndex);
+                await releaseClaimedDetailLink({
+                  profileId,
+                  params,
+                  state,
+                  currentTabIndex: requeueTabIndex,
+                  activeEntry,
+                  pushTrace,
+                  testingOverrides,
+                  reason: 'open_detail_gate_rejected_release',
+                });
+                const requeue = {
+                  requeued: true,
+                  exhausted: false,
+                  key: activeEntry?.key || gateParams.resourceKey || null,
+                  link: activeEntry?.link || assignedLink || null,
+                  gate: gateError.response || null,
+                };
+                markOpenFailure(state, requeue, code);
+                pushTrace({
+                  kind: 'error',
+                  stage: 'open_detail_gate',
+                  code,
+                  url: effectiveNoteUrl || null,
+                  resourceKey: gateParams.resourceKey || null,
+                });
+                effectiveNoteUrl = null;
+                assignedLink = null;
+                slotState = readDetailSlotState(state, currentTabIndex, { tabCount: params.tabCount });
+                continue;
+              }
+              throw gateError;
+            }
+          }
+          if (useLinks) {
+            await waitForLinkOpenGate(state, params, pushTrace);
+          }
+          await callApiImpl('goto', { profileId, url: effectiveNoteUrl });
+          const pollMin = Math.max(80, Number(params.pollDelayMinMs ?? 120) || 120);
+          const pollMax = Math.max(pollMin, Number(params.pollDelayMaxMs ?? 240) || 240);
+          const attempts = Math.max(4, Number(params.openByLinksMaxAttempts ?? params.openDetailMaxAttempts ?? 8) || 8);
+          let opened = await isDetailVisibleImpl(profileId);
+          for (let attempt = 1; attempt <= attempts; attempt += 1) {
+            const guardDuringOpen = await assertNoGuard(`open_detail_wait_visible_${attempt}`);
+            if (guardDuringOpen) return guardDuringOpen;
+            if (opened?.detailVisible) break;
+            const waitMs = Math.floor(pollMin + Math.random() * (pollMax - pollMin + 1));
+            await sleepImpl(waitMs);
+            opened = await isDetailVisibleImpl(profileId);
+          }
+          if (!opened?.detailVisible) {
+            const redirectedUrl = await readLocationImpl(profileId).catch(() => '');
+            const guardAfterGoto = await readXhsInteractionGuard({ profileId, params, testingOverrides });
+            if (guardAfterGoto?.stopCode) {
+              await clearDetailGateQueueOnGuard({ profileId, params, state, pushTrace, testingOverrides, stage: 'open_detail_after_goto_clear_queue' });
+              pushTrace({ kind: 'guard', stage: 'open_detail_after_goto', code: guardAfterGoto.stopCode, url: guardAfterGoto.url || redirectedUrl || effectiveNoteUrl || null });
+              return buildXhsGuardFailure({ profileId, guard: guardAfterGoto, stage: 'open_detail_after_goto', codeMode: 'guard' });
+            }
+            const openBlocker = classifyOpenRedirectBlocker(redirectedUrl);
+            if (openBlocker) {
+              await clearDetailGateQueueOnGuard({ profileId, params, state, pushTrace, testingOverrides, stage: 'open_detail_redirect_blocker_clear_queue' });
+              pushTrace({
+                kind: 'error',
+                stage: 'open_detail',
+                code: openBlocker.code,
+                message: openBlocker.message,
+                url: redirectedUrl || effectiveNoteUrl || null,
+              });
+              return buildXhsGuardFailure({
+                profileId,
+                guard: {
+                  stopCode: openBlocker.code,
+                  url: redirectedUrl || effectiveNoteUrl || null,
+                  hasLoginGuard: openBlocker.code === 'LOGIN_GUARD_DETECTED',
+                  hasRiskGuard: openBlocker.code === 'RISK_CONTROL_DETECTED',
+                },
+                stage: 'open_detail_redirect_blocker',
+                codeMode: 'guard',
+              });
+            }
+            if (!useLinks) {
+              return createOpenFailureResult('DETAIL_NOT_VISIBLE', 'detail not visible after open-by-links');
+            }
+            const requeueTabIndex = currentTabIndex || getCurrentTabIndex(state, { tabCount: params.tabCount });
+            const activeEntry = readActiveLinkForTab(state, requeueTabIndex);
+            await releaseClaimedDetailLink({
+              profileId,
+              params,
+              state,
+              currentTabIndex: requeueTabIndex,
+              activeEntry,
+              pushTrace,
+              testingOverrides,
+              reason: 'open_detail_not_visible_release',
+            });
+            const requeue = { requeued: true, exhausted: false, key: activeEntry?.key || assignedLink?.noteId || null, link: activeEntry?.link || assignedLink || null };
+            markOpenFailure(state, requeue, 'DETAIL_NOT_VISIBLE');
+            pushTrace({ kind: 'error', stage: 'open_detail', code: 'DETAIL_NOT_VISIBLE', url: effectiveNoteUrl || null });
+            effectiveNoteUrl = null;
+            assignedLink = null;
+            slotState = readDetailSlotState(state, currentTabIndex, { tabCount: params.tabCount });
+            continue;
+          }
+          if (useLinks && openGatePermit?.payload) {
+            await confirmXhsGateUsage({
+              profileId,
+              params: {
+                ...gateParams,
+                ...openGatePermit.payload,
+              },
+              state,
+              pushTrace,
+              stage: 'open_detail_gate_confirm',
+              testingOverrides,
+            });
+            openGatePermit = null;
+          }
+        } catch (error) {
+          if (!useLinks) throw error;
+          const failureMessage = String(error?.message || error || 'open detail failed');
+          const gateRejectCode = String(error?.code || '').trim();
+          if ((gateRejectCode === 'OPEN_LINK_GATE_REJECTED' || gateRejectCode === 'OPEN_LINK_GATE_DENIED') && gateParams) {
+            const requeueTabIndex = currentTabIndex || getCurrentTabIndex(state, { tabCount: params.tabCount });
+            const activeEntry = readActiveLinkForTab(state, requeueTabIndex);
+            await releaseClaimedDetailLink({
+              profileId,
+              params,
+              state,
+              currentTabIndex: requeueTabIndex,
+              activeEntry,
+              pushTrace,
+              testingOverrides,
+              reason: 'open_detail_gate_error_release',
+            });
+            const requeue = {
+              requeued: true,
+              exhausted: false,
+              key: activeEntry?.key || gateParams.resourceKey || null,
+              link: activeEntry?.link || assignedLink || null,
+              gate: error?.response || null,
+            };
+            markOpenFailure(state, requeue, gateRejectCode);
+            pushTrace({
+              kind: 'error',
+              stage: 'open_detail_gate',
+              code: gateRejectCode,
+              url: effectiveNoteUrl || null,
+              resourceKey: gateParams.resourceKey || null,
+            });
+            effectiveNoteUrl = null;
+            assignedLink = null;
+            slotState = readDetailSlotState(state, currentTabIndex, { tabCount: params.tabCount });
+            openGatePermit = null;
+            continue;
+          }
+          const requeueTabIndex = currentTabIndex || getCurrentTabIndex(state, { tabCount: params.tabCount });
+          const activeEntry = readActiveLinkForTab(state, requeueTabIndex);
+          await releaseClaimedDetailLink({
+            profileId,
+            params,
+            state,
+            currentTabIndex: requeueTabIndex,
+            activeEntry,
+            pushTrace,
+            testingOverrides,
+            reason: 'open_detail_navigation_failed_release',
+          });
+          const requeue = {
+            requeued: true,
+            exhausted: false,
+            key: activeEntry?.key || assignedLink?.noteId || null,
+            link: activeEntry?.link || assignedLink || null,
+            message: failureMessage,
+          };
+          markOpenFailure(state, requeue, 'OPEN_DETAIL_NAVIGATION_FAILED');
+          pushTrace({ kind: 'error', stage: 'open_detail', code: 'OPEN_DETAIL_NAVIGATION_FAILED', message: failureMessage, url: effectiveNoteUrl || null });
+          effectiveNoteUrl = null;
+          assignedLink = null;
+          slotState = readDetailSlotState(state, currentTabIndex, { tabCount: params.tabCount });
+          continue;
+        }
+      } else {
+        pushTrace({
+          kind: 'reuse',
+          stage: 'open_detail',
+          noteId: slotState?.lastOpenedNoteId || slotState?.noteId || null,
+          url: beforeUrl || effectiveNoteUrl || null,
+        });
+      }
+      break;
     }
   } else {
     const candidate = await readSearchCandidateByNoteId(profileId, noteId);
@@ -250,13 +752,17 @@ export async function executeOpenDetailOperation({ profileId, params = {}, conte
     }
   }
 
-  const afterUrl = await readLocation(profileId);
+  const afterUrl = await readLocationImpl(profileId);
   const activeEntry = useLinks
     ? readActiveLinkForTab(state, currentTabIndex || getCurrentTabIndex(state, { tabCount: params.tabCount }))
     : null;
   const expectedNoteId = String(noteId || activeEntry?.link?.noteId || assignedLink?.noteId || '').trim() || null;
-  const settled = await settleOpenedDetailState(profileId, params, pushTrace, expectedNoteId);
-  const detailSnapshot = settled.snapshot || await readDetailSnapshot(profileId).catch(() => null);
+  const settled = await settleOpenedDetailState(profileId, params, pushTrace, expectedNoteId, {
+    sleep: sleepImpl,
+    readLocation: readLocationImpl,
+    readDetailSnapshot: readDetailSnapshotImpl,
+  });
+  const detailSnapshot = settled.snapshot || await readDetailSnapshotImpl(profileId).catch(() => null);
   const resolvedHref = settled.href || afterUrl || effectiveNoteUrl || null;
   const resolvedNoteId = noteId || detailSnapshot?.noteIdFromUrl || extractNoteIdFromUrl(resolvedHref) || null;
   state.currentNoteId = resolvedNoteId;
@@ -334,6 +840,18 @@ export async function executeOpenDetailOperation({ profileId, params = {}, conte
 export async function executeCloseDetailOperation({ profileId, params = {}, context = {} }) {
   const { actionTrace, pushTrace } = buildTraceRecorder();
   const state = getProfileState(profileId);
+  const testingOverrides = context?.testingOverrides && typeof context.testingOverrides === 'object'
+    ? context.testingOverrides
+    : null;
+  const callApiImpl = typeof testingOverrides?.callAPI === 'function' ? testingOverrides.callAPI : callAPI;
+  const isDetailVisibleImpl = typeof testingOverrides?.isDetailVisible === 'function'
+    ? testingOverrides.isDetailVisible
+    : isDetailVisible;
+  const readDetailCloseTargetImpl = typeof testingOverrides?.readDetailCloseTarget === 'function'
+    ? testingOverrides.readDetailCloseTarget
+    : readDetailCloseTarget;
+  const clickPointImpl = typeof testingOverrides?.clickPoint === 'function' ? testingOverrides.clickPoint : clickPoint;
+  const sleepImpl = typeof testingOverrides?.sleep === 'function' ? testingOverrides.sleep : sleep;
   const retryPolicy = String(params.retryPolicy || 'esc_then_x').trim().toLowerCase();
   const attempts = Math.max(1, Number(params.retryAttempts ?? 2) || 2);
   const openByLinks = String(params.openByLinks || '').toLowerCase() === 'true' || params.openByLinks === true;
@@ -351,18 +869,54 @@ export async function executeCloseDetailOperation({ profileId, params = {}, cont
     };
   }
 
-  const initialVisible = await isDetailVisible(profileId);
+  const initialVisible = await isDetailVisibleImpl(profileId);
   if (!initialVisible?.detailVisible) {
+    if (openByLinks) {
+      const tabIndex = Number(state?.detailLinkState?.activeTabIndex || getCurrentTabIndex(state, { tabCount: params.tabCount })) || 1;
+      const activeSlot = readDetailSlotState(state, tabIndex, { tabCount: params.tabCount });
+      const activeEntry = readActiveLinkForTab(state, tabIndex);
+      const queueResult = await releaseClaimedDetailLink({
+        profileId,
+        params,
+        state,
+        currentTabIndex: tabIndex,
+        activeEntry,
+        pushTrace,
+        testingOverrides,
+        reason: 'stale_closed',
+        skip: true,
+      });
+      const detailState = state.detailLinkState && typeof state.detailLinkState === 'object' ? state.detailLinkState : {};
+      const activeByTab = detailState.activeByTab && typeof detailState.activeByTab === 'object' ? { ...detailState.activeByTab } : {};
+      delete activeByTab[String(tabIndex)];
+      state.detailLinkState = {
+        ...detailState,
+        activeByTab,
+        activeTabIndex: null,
+        activeLink: null,
+        activeLinkRetryCount: 0,
+        activeFailed: false,
+        lastQueueOutcome: queueResult,
+        lastClosedAt: new Date().toISOString(),
+      };
+      emitActionTrace(context, actionTrace, { stage: 'xhs_close_detail' });
+      return {
+        ok: true,
+        code: 'OPERATION_DONE',
+        message: 'xhs_close_detail already closed',
+        data: { closed: true, method: 'already_closed', attempts: 0, queueSkipped: true },
+      };
+    }
     emitActionTrace(context, actionTrace, { stage: 'xhs_close_detail' });
     return { ok: true, code: 'OPERATION_DONE', message: 'xhs_close_detail already closed', data: { closed: true, method: 'already_closed', attempts: 0 } };
   }
 
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
     if (retryPolicy === 'esc') {
-      await callAPI('keyboard:press', { profileId, key: 'Escape' });
+      await callApiImpl('keyboard:press', { profileId, key: 'Escape' });
       pushTrace({ kind: 'key', stage: 'close_detail', key: 'Escape', attempt });
-      await sleep(400);
-      const visible = await isDetailVisible(profileId);
+      await sleepImpl(400);
+      const visible = await isDetailVisibleImpl(profileId);
       if (!visible?.detailVisible) {
         closed = true;
         used = 'esc';
@@ -372,12 +926,12 @@ export async function executeCloseDetailOperation({ profileId, params = {}, cont
     }
 
     if (retryPolicy === 'x') {
-      const target = await readDetailCloseTarget(profileId);
+      const target = await readDetailCloseTargetImpl(profileId);
       if (target?.found && target.center) {
-        await clickPoint(profileId, target.center, { steps: 2 });
+        await clickPointImpl(profileId, target.center, { steps: 2 });
         pushTrace({ kind: 'click', stage: 'close_detail', selector: target.selector, attempt });
-        await sleep(400);
-        const visible = await isDetailVisible(profileId);
+        await sleepImpl(400);
+        const visible = await isDetailVisibleImpl(profileId);
         if (!visible?.detailVisible) {
           closed = true;
           used = 'x';
@@ -388,10 +942,10 @@ export async function executeCloseDetailOperation({ profileId, params = {}, cont
     }
 
     if (attempt === 1) {
-      await callAPI('keyboard:press', { profileId, key: 'Escape' });
+      await callApiImpl('keyboard:press', { profileId, key: 'Escape' });
       pushTrace({ kind: 'key', stage: 'close_detail', key: 'Escape', attempt });
-      await sleep(400);
-      const visible = await isDetailVisible(profileId);
+      await sleepImpl(400);
+      const visible = await isDetailVisibleImpl(profileId);
       if (!visible?.detailVisible) {
         closed = true;
         used = 'esc';
@@ -399,12 +953,12 @@ export async function executeCloseDetailOperation({ profileId, params = {}, cont
       }
     }
 
-    const target = await readDetailCloseTarget(profileId);
+    const target = await readDetailCloseTargetImpl(profileId);
     if (target?.found && target.center) {
-      await clickPoint(profileId, target.center, { steps: 2 });
+      await clickPointImpl(profileId, target.center, { steps: 2 });
       pushTrace({ kind: 'click', stage: 'close_detail', selector: target.selector, attempt });
-      await sleep(400);
-      const visible = await isDetailVisible(profileId);
+      await sleepImpl(400);
+      const visible = await isDetailVisibleImpl(profileId);
       if (!visible?.detailVisible) {
         closed = true;
         used = 'x';
@@ -418,7 +972,7 @@ export async function executeCloseDetailOperation({ profileId, params = {}, cont
     if (anchorNoteId) {
       const anchor = await readSearchCandidateByNoteId(profileId, anchorNoteId, { visibilityMargin: 8 });
       if (anchor?.found && anchor.inViewport) {
-        const visible = await isDetailVisible(profileId).catch(() => null);
+        const visible = await isDetailVisibleImpl(profileId).catch(() => null);
         if (!visible?.detailVisible) {
           closed = true;
           used = 'anchor';
@@ -429,12 +983,12 @@ export async function executeCloseDetailOperation({ profileId, params = {}, cont
 
   if (!closed && openByLinks) {
     try {
-      await callAPI('page:back', { profileId });
+      await callApiImpl('page:back', { profileId });
       pushTrace({ kind: 'nav', stage: 'close_detail', action: 'page:back' });
     } catch (error) {
       pushTrace({ kind: 'error', stage: 'close_detail', action: 'page:back', message: String(error?.message || error) });
     }
-    await sleep(600);
+    await sleepImpl(600);
     const backState = await waitForDetailClose(profileId, 4, 180, 420);
     if (backState.closed) {
       closed = true;
@@ -442,12 +996,12 @@ export async function executeCloseDetailOperation({ profileId, params = {}, cont
     } else {
       const returnUrl = resolveReturnUrl(state?.lastListUrl);
       try {
-        await callAPI('goto', { profileId, url: returnUrl });
+        await callApiImpl('goto', { profileId, url: returnUrl });
         pushTrace({ kind: 'nav', stage: 'close_detail', action: 'goto', url: returnUrl });
       } catch (error) {
         pushTrace({ kind: 'error', stage: 'close_detail', action: 'goto', message: String(error?.message || error), url: returnUrl });
       }
-      await sleep(800);
+      await sleepImpl(800);
       const gotoState = await waitForDetailClose(profileId, 8, 220, 520);
       if (gotoState.closed) {
         closed = true;
@@ -467,17 +1021,28 @@ export async function executeCloseDetailOperation({ profileId, params = {}, cont
   if (closed && openByLinks) {
     const tabIndex = Number(state?.detailLinkState?.activeTabIndex || getCurrentTabIndex(state, { tabCount: params.tabCount })) || 1;
     const activeSlot = readDetailSlotState(state, tabIndex, { tabCount: params.tabCount });
+    const activeEntry = readActiveLinkForTab(state, tabIndex);
     const slotFailed = activeSlot?.failed === true;
     const shouldRequeue = state?.detailLinkState?.activeFailed === true || slotFailed;
     const queueResult = shouldRequeue
-      ? requeueTabLinkToTail(state, params, tabIndex, {
-        reason: 'detail_flow_failed',
-        code: String(state?.detailLinkState?.lastFailureCode || activeSlot?.lastFailureCode || 'DETAIL_FLOW_FAILED').trim() || 'DETAIL_FLOW_FAILED',
-        noteId: state.currentNoteId || activeSlot?.lastOpenedNoteId || null,
-        url: state.currentHref || activeSlot?.lastOpenedHref || null,
+      ? await releaseClaimedDetailLink({
+        profileId,
+        params,
+        state,
+        currentTabIndex: tabIndex,
+        activeEntry,
+        pushTrace,
+        testingOverrides: context?.testingOverrides && typeof context.testingOverrides === 'object' ? context.testingOverrides : null,
+        reason: 'detail_flow_failed_release',
       })
-      : markTabLinkDone(state, tabIndex, {
-        reason: 'detail_flow_done',
+      : await completeClaimedDetailLink({
+        profileId,
+        params,
+        state,
+        currentTabIndex: tabIndex,
+        activeEntry,
+        pushTrace,
+        testingOverrides: context?.testingOverrides && typeof context.testingOverrides === 'object' ? context.testingOverrides : null,
         noteId: state.currentNoteId || activeSlot?.lastOpenedNoteId || null,
         url: state.currentHref || activeSlot?.lastOpenedHref || null,
       });

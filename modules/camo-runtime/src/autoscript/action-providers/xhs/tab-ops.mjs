@@ -30,8 +30,8 @@ export async function executeSwitchTabIfNeeded({ profileId, params = {}, context
   });
   const current = getCurrentTabIndex(state, { tabCount: tabState.tabCount });
   const used = Number(tabState.used[current - 1] || 0);
-  const limit = Number(tabState.limit || 50);
-  if (used < limit) {
+  const limit = Math.max(0, Number(tabState.limit || 0));
+  if (limit <= 0 || used < limit) {
     return { ok: true, code: 'OPERATION_DONE', message: 'tab switch skipped', data: { tabIndex: current, used, limit } };
   }
 

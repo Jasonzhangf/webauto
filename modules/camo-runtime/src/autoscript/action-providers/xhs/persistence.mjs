@@ -28,7 +28,14 @@ export function resolveXhsOutputContext({
   const keywordRaw = String(params.keyword || state.keyword || 'unknown').trim();
   const envRaw = String(params.env || state.env || 'debug').trim();
   const resolvedNoteId = String(noteId || params.noteId || state.currentNoteId || 'unknown').trim();
-  const root = resolveDownloadRoot(params.outputRoot || params.downloadRoot || params.rootDir);
+  const root = resolveDownloadRoot(
+    params.outputRoot
+    || params.downloadRoot
+    || params.rootDir
+    || state.outputRoot
+    || state.downloadRoot
+    || state.rootDir,
+  );
   const keyword = sanitizeForPath(keywordRaw, 'unknown');
   const env = sanitizeForPath(envRaw, 'debug');
   const note = sanitizeForPath(resolvedNoteId, 'unknown');

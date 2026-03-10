@@ -8,15 +8,61 @@ import { markDetailSlotProgress } from './detail-slot-state.mjs';
 import { resolveXhsOutputContext, mergeCommentsJsonl, writeCommentsMd, writeContentMarkdown, appendLikeStateRows, writeLikeSummary } from './persistence.mjs';
 import { clickPoint, sleep, clearAndType, pressKey, scrollBySelector, highlightVisualTarget, clearVisualHighlight, readLocation } from './dom-ops.mjs';
 
-async function ensureDetailInteractionState(profileId) {
-  const state = await readDetailSnapshot(profileId).catch(() => null);
+function shouldPauseForTabBudget(state, params = {}, pendingAdded = 0) {
+  const tabCount = Math.max(1, Number(params.tabCount || 1) || 1);
+  if (tabCount <= 1) return false;
+  const rawBudget = Number(params.commentBudget ?? 0);
+  const commentBudget = Number.isFinite(rawBudget) ? Math.max(0, rawBudget) : 0;
+  if (commentBudget <= 0) return false;
+  const tabState = state?.tabState && typeof state.tabState === 'object' ? state.tabState : null;
+  const currentIndex = Math.max(1, Math.min(tabCount, Number(tabState?.cursor || 1) || 1));
+  const used = Math.max(0, Number(tabState?.used?.[currentIndex - 1] || 0) || 0);
+  return used + Math.max(0, Number(pendingAdded || 0) || 0) >= commentBudget;
+}
+
+async function ensureDetailInteractionState(profileId, deps = {}) {
+  const readDetailSnapshotImpl = typeof deps.readDetailSnapshot === 'function'
+    ? deps.readDetailSnapshot
+    : readDetailSnapshot;
+  const pressKeyImpl = typeof deps.pressKey === 'function' ? deps.pressKey : pressKey;
+  const sleepImpl = typeof deps.sleep === 'function' ? deps.sleep : sleep;
+  const state = await readDetailSnapshotImpl(profileId).catch(() => null);
   const detailVisible = state && (state.noteIdFromUrl || state.commentsContextAvailable || state.textPresent || state.imageCount > 0 || state.videoPresent);
   if (detailVisible) return { ok: true, escaped: false };
-  await pressKey(profileId, 'Escape');
-  await sleep(1200);
-  const recovered = await readDetailSnapshot(profileId).catch(() => null);
+  await pressKeyImpl(profileId, 'Escape');
+  await sleepImpl(1200);
+  const recovered = await readDetailSnapshotImpl(profileId).catch(() => null);
   const recoveredVisible = recovered && (recovered.noteIdFromUrl || recovered.commentsContextAvailable || recovered.textPresent || recovered.imageCount > 0 || recovered.videoPresent);
   return { ok: Boolean(recoveredVisible), escaped: true };
+}
+
+function isUsableCommentFocusTarget(target) {
+  return Boolean(target && typeof target === 'object' && target.center);
+}
+
+export function resolveCommentFocusTarget({ visibleComment = null, commentTotal = null, commentScroll = null } = {}) {
+  if (isUsableCommentFocusTarget(visibleComment)) {
+    return {
+      ...visibleComment,
+      source: 'visible_comment',
+      selector: String(visibleComment.selector || '.comment-item').trim() || '.comment-item',
+    };
+  }
+  if (isUsableCommentFocusTarget(commentTotal)) {
+    return {
+      ...commentTotal,
+      source: 'comment_total',
+      selector: String(commentTotal.selector || '.total').trim() || '.total',
+    };
+  }
+  if (isUsableCommentFocusTarget(commentScroll)) {
+    return {
+      ...commentScroll,
+      source: 'comment_scroll',
+      selector: String(commentScroll.selector || '').trim() || null,
+    };
+  }
+  return null;
 }
 
 export async function readXhsRuntimeState(profileId) {
@@ -400,6 +446,50 @@ export async function executeDetailHarvestOperation({ profileId, context = {} })
 export async function executeCommentsHarvestOperation({ profileId, params = {}, context = {} }) {
   const state = getProfileState(profileId);
   const { actionTrace, pushTrace } = buildTraceRecorder();
+  const testingOverrides = context?.testingOverrides && typeof context.testingOverrides === 'object'
+    ? context.testingOverrides
+    : null;
+  const readDetailSnapshotImpl = typeof testingOverrides?.readDetailSnapshot === 'function'
+    ? testingOverrides.readDetailSnapshot
+    : readDetailSnapshot;
+  const readDetailStateImpl = typeof testingOverrides?.readDetailState === 'function'
+    ? testingOverrides.readDetailState
+    : readDetailState;
+  const readCommentsSnapshotImpl = typeof testingOverrides?.readCommentsSnapshot === 'function'
+    ? testingOverrides.readCommentsSnapshot
+    : readCommentsSnapshot;
+  const readCommentEntryPointImpl = typeof testingOverrides?.readCommentEntryPoint === 'function'
+    ? testingOverrides.readCommentEntryPoint
+    : readCommentEntryPoint;
+  const readCommentTotalTargetImpl = typeof testingOverrides?.readCommentTotalTarget === 'function'
+    ? testingOverrides.readCommentTotalTarget
+    : readCommentTotalTarget;
+  const readCommentScrollContainerTargetImpl = typeof testingOverrides?.readCommentScrollContainerTarget === 'function'
+    ? testingOverrides.readCommentScrollContainerTarget
+    : readCommentScrollContainerTarget;
+  const readVisibleCommentTargetImpl = typeof testingOverrides?.readVisibleCommentTarget === 'function'
+    ? testingOverrides.readVisibleCommentTarget
+    : readVisibleCommentTarget;
+  const readLocationImpl = typeof testingOverrides?.readLocation === 'function'
+    ? testingOverrides.readLocation
+    : readLocation;
+  const clickPointImpl = typeof testingOverrides?.clickPoint === 'function' ? testingOverrides.clickPoint : clickPoint;
+  const sleepImpl = typeof testingOverrides?.sleep === 'function' ? testingOverrides.sleep : sleep;
+  const scrollBySelectorImpl = typeof testingOverrides?.scrollBySelector === 'function'
+    ? testingOverrides.scrollBySelector
+    : scrollBySelector;
+  const highlightVisualTargetImpl = typeof testingOverrides?.highlightVisualTarget === 'function'
+    ? testingOverrides.highlightVisualTarget
+    : highlightVisualTarget;
+  const clearVisualHighlightImpl = typeof testingOverrides?.clearVisualHighlight === 'function'
+    ? testingOverrides.clearVisualHighlight
+    : clearVisualHighlight;
+  const mergeCommentsJsonlImpl = typeof testingOverrides?.mergeCommentsJsonl === 'function'
+    ? testingOverrides.mergeCommentsJsonl
+    : mergeCommentsJsonl;
+  const writeCommentsMdImpl = typeof testingOverrides?.writeCommentsMd === 'function'
+    ? testingOverrides.writeCommentsMd
+    : writeCommentsMd;
   const readExpectedBinding = () => resolveRuntimeNoteBinding(state, params);
   const progress = (kind, data = {}) => emitOperationProgress(context, {
     stage: 'comments_harvest',
@@ -410,7 +500,7 @@ export async function executeCommentsHarvestOperation({ profileId, params = {}, 
     ...data,
   });
   const initialBinding = readExpectedBinding();
-  const detailSnapshotBefore = await readDetailSnapshot(profileId).catch(() => null);
+  const detailSnapshotBefore = await readDetailSnapshotImpl(profileId).catch(() => null);
   const detailSnapshotNoteId = String(detailSnapshotBefore?.noteIdFromUrl || '').trim() || null;
   const expectedNoteId = String(initialBinding.noteId || '').trim() || null;
   if (expectedNoteId && detailSnapshotNoteId && detailSnapshotNoteId !== expectedNoteId) {
@@ -419,7 +509,7 @@ export async function executeCommentsHarvestOperation({ profileId, params = {}, 
       actualHref: String(detailSnapshotBefore?.href || '').trim() || null,
       expectedHref: initialBinding.href || null,
     });
-    await clearVisualHighlight(profileId, 'xhs-detail-comment-like').catch(() => null);
+    await clearVisualHighlightImpl(profileId, 'xhs-detail-comment-like').catch(() => null);
     return {
       ok: true,
       code: 'OPERATION_DONE',
@@ -453,7 +543,7 @@ export async function executeCommentsHarvestOperation({ profileId, params = {}, 
   state.currentHref = String(detailSnapshotBefore?.href || initialBinding.href || state.currentHref || '').trim() || null;
   const highlightStep = async (channel, target, stateName, label, duration = 2400) => {
     if (!target?.center) return;
-    await highlightVisualTarget(profileId, target, {
+    await highlightVisualTargetImpl(profileId, target, {
       channel,
       state: stateName,
       label,
@@ -462,17 +552,21 @@ export async function executeCommentsHarvestOperation({ profileId, params = {}, 
   };
   const clearCommentHighlights = async () => {
     await Promise.allSettled([
-      clearVisualHighlight(profileId, 'xhs-detail-comment-entry'),
-      clearVisualHighlight(profileId, 'xhs-detail-comment-total'),
-      clearVisualHighlight(profileId, 'xhs-detail-comment-item'),
-      clearVisualHighlight(profileId, 'xhs-detail-comment-scroll'),
-      clearVisualHighlight(profileId, 'xhs-detail-comment-like'),
+      clearVisualHighlightImpl(profileId, 'xhs-detail-comment-entry'),
+      clearVisualHighlightImpl(profileId, 'xhs-detail-comment-total'),
+      clearVisualHighlightImpl(profileId, 'xhs-detail-comment-item'),
+      clearVisualHighlightImpl(profileId, 'xhs-detail-comment-scroll'),
+      clearVisualHighlightImpl(profileId, 'xhs-detail-comment-like'),
     ]);
   };
   const ensureExpectedDetail = async () => {
-    const interactionState = await ensureDetailInteractionState(profileId);
+    const interactionState = await ensureDetailInteractionState(profileId, {
+      readDetailSnapshot: readDetailSnapshotImpl,
+      pressKey: testingOverrides?.pressKey,
+      sleep: sleepImpl,
+    });
     if (!interactionState?.ok) return false;
-    const res = await readDetailSnapshot(profileId);
+    const res = await readDetailSnapshotImpl(profileId);
     if (!res) return false;
     const binding = readExpectedBinding();
     const expected = String(binding.noteId || state.currentNoteId || '').trim() || null;
@@ -482,9 +576,9 @@ export async function executeCommentsHarvestOperation({ profileId, params = {}, 
   };
   const focusCommentContext = async (mode = 'initial') => {
     progress('focus_comment_context_start', { mode });
-    let commentTotal = await readCommentTotalTarget(profileId);
-    let commentScroll = await readCommentScrollContainerTarget(profileId);
-    let visibleComment = await readVisibleCommentTarget(profileId);
+    let commentTotal = await readCommentTotalTargetImpl(profileId);
+    let commentScroll = await readCommentScrollContainerTargetImpl(profileId);
+    let visibleComment = await readVisibleCommentTargetImpl(profileId);
     let entry = null;
     const hasVisibleComments = visibleComment?.found && visibleComment.center;
     const hasCommentTotal = commentTotal?.found && commentTotal.center;
@@ -497,7 +591,7 @@ export async function executeCommentsHarvestOperation({ profileId, params = {}, 
     }
 
     if (!hasVisibleComments) {
-      entry = await readCommentEntryPoint(profileId);
+      entry = await readCommentEntryPointImpl(profileId);
       if (entry?.found && entry.center) {
         await highlightStep('xhs-detail-comment-entry', entry, 'matched', 'comment entry');
         const ok = await ensureExpectedDetail();
@@ -505,18 +599,23 @@ export async function executeCommentsHarvestOperation({ profileId, params = {}, 
           return { ok: false, code: 'DETAIL_NOTEID_MISMATCH', message: 'Detail noteId mismatch before comment entry', data: { expected: state.currentNoteId || null } };
         }
         await highlightStep('xhs-detail-comment-entry', entry, 'focus', 'comment entry');
-        await clickPoint(profileId, entry.center, { steps: 2 });
+        await clickPointImpl(profileId, entry.center, { steps: 2 });
         await highlightStep('xhs-detail-comment-entry', entry, 'processed', 'comment entry', 4200);
-        await sleep(5000);
+        await sleepImpl(5000);
         progress('focus_comment_context_after_entry_click', { mode });
-        commentTotal = await readCommentTotalTarget(profileId);
-        commentScroll = await readCommentScrollContainerTarget(profileId);
-        visibleComment = await readVisibleCommentTarget(profileId);
+        commentTotal = await readCommentTotalTargetImpl(profileId);
+        commentScroll = await readCommentScrollContainerTargetImpl(profileId);
+        visibleComment = await readVisibleCommentTargetImpl(profileId);
       }
     }
 
     const hasVisibleCommentsAfterEntry = visibleComment?.found && visibleComment.center;
     const hasCommentTotalAfterEntry = commentTotal?.found && commentTotal.center;
+    const focusTarget = resolveCommentFocusTarget({
+      visibleComment,
+      commentTotal,
+      commentScroll,
+    });
 
     if (hasVisibleCommentsAfterEntry) {
       await highlightStep('xhs-detail-comment-item', visibleComment, 'matched', 'visible comment');
@@ -540,21 +639,42 @@ export async function executeCommentsHarvestOperation({ profileId, params = {}, 
         return { ok: false, code: 'DETAIL_NOTEID_MISMATCH', message: 'Detail noteId mismatch before comment scroll focus', data: { expected: state.currentNoteId || null } };
       }
       if (mode !== 'probe') {
-        await highlightStep('xhs-detail-comment-scroll', commentScroll, 'focus', 'comment scroll');
-        await clickPoint(profileId, commentScroll.center, { steps: 2 });
-        await highlightStep('xhs-detail-comment-scroll', commentScroll, 'processed', 'comment scroll', 4200);
-        await sleep(5000);
+        const focusChannel = focusTarget?.source === 'visible_comment'
+          ? 'xhs-detail-comment-item'
+          : focusTarget?.source === 'comment_total'
+            ? 'xhs-detail-comment-total'
+            : 'xhs-detail-comment-scroll';
+        const focusLabel = focusTarget?.source === 'visible_comment'
+          ? 'visible comment'
+          : focusTarget?.source === 'comment_total'
+            ? 'comment total'
+            : 'comment scroll';
+        const clickableTarget = focusTarget || commentScroll;
+        await highlightStep(focusChannel, clickableTarget, 'focus', focusLabel);
+        await clickPointImpl(profileId, clickableTarget.center, { steps: 2 });
+        await highlightStep(focusChannel, clickableTarget, 'processed', focusLabel, 4200);
+        await sleepImpl(5000);
         progress('focus_comment_context_after_scroll_focus', {
           mode,
           selector: commentScroll.selector || null,
+          focusSource: clickableTarget?.source || 'comment_scroll',
+          focusSelector: clickableTarget?.selector || null,
         });
       }
       progress('focus_comment_context_done', {
         mode,
         selector: commentScroll.selector || null,
         hasVisibleComment: Boolean(visibleComment?.found && visibleComment.center),
+        focusSource: focusTarget?.source || 'comment_scroll',
+        focusSelector: focusTarget?.selector || null,
       });
-      return { ok: true, scrollTarget: commentScroll, visibleCommentTarget: visibleComment || null, didFocusClick: mode !== 'probe' };
+      return {
+        ok: true,
+        scrollTarget: commentScroll,
+        visibleCommentTarget: visibleComment || null,
+        focusTarget: focusTarget || commentScroll,
+        didFocusClick: mode !== 'probe',
+      };
     }
     progress('focus_comment_context_done', {
       mode,
@@ -564,7 +684,11 @@ export async function executeCommentsHarvestOperation({ profileId, params = {}, 
     return { ok: true, scrollTarget: null };
   };
   progress('operation_start');
-  const interactionState = await ensureDetailInteractionState(profileId);
+  const interactionState = await ensureDetailInteractionState(profileId, {
+    readDetailSnapshot: readDetailSnapshotImpl,
+    pressKey: testingOverrides?.pressKey,
+    sleep: sleepImpl,
+  });
   progress('after_detail_interaction_state', { ok: interactionState?.ok === true });
   if (!interactionState?.ok) {
     await clearCommentHighlights();
@@ -620,7 +744,7 @@ export async function executeCommentsHarvestOperation({ profileId, params = {}, 
   progress('before_initial_comments_snapshot', {
     selector: commentScroll?.selector || null,
   });
-  let snapshot = await readCommentsSnapshot(profileId);
+  let snapshot = await readCommentsSnapshotImpl(profileId);
   progress('after_initial_comments_snapshot', {
     hasCommentsContext: snapshot?.hasCommentsContext === true,
     detailVisible: snapshot?.detailVisible === true,
@@ -715,7 +839,7 @@ export async function executeCommentsHarvestOperation({ profileId, params = {}, 
     const outputCtx = resolveXhsOutputContext({ params: { keyword, env }, state, noteId: state.currentNoteId });
     if (persistComments) {
       try {
-        const merged = await mergeCommentsJsonl({
+        const merged = await mergeCommentsJsonlImpl({
           filePath: outputCtx.commentsPath,
           noteId: state.currentNoteId,
           comments: rows,
@@ -726,7 +850,7 @@ export async function executeCommentsHarvestOperation({ profileId, params = {}, 
       }
     }
     try {
-      const mdRes = await writeCommentsMd({
+      const mdRes = await writeCommentsMdImpl({
         filePath: outputCtx.commentsMdPath,
         noteId: state.currentNoteId,
         keyword,
@@ -811,7 +935,11 @@ export async function executeCommentsHarvestOperation({ profileId, params = {}, 
       noProgressRounds,
       recoveries,
     });
-    const loopInteractionState = await ensureDetailInteractionState(profileId);
+    const loopInteractionState = await ensureDetailInteractionState(profileId, {
+      readDetailSnapshot: readDetailSnapshotImpl,
+      pressKey: testingOverrides?.pressKey,
+      sleep: sleepImpl,
+    });
     progress('after_loop_detail_interaction_state', { round: rounds, ok: loopInteractionState?.ok === true });
     if (!loopInteractionState?.ok) {
       await clearCommentHighlights();
@@ -819,7 +947,7 @@ export async function executeCommentsHarvestOperation({ profileId, params = {}, 
       return { ok: false, code: 'DETAIL_INTERACTION_STATE_INVALID', message: 'detail interaction state invalid during comments harvest', data: { commentCount: collectedRows.length } };
     }
     progress('before_loop_comments_snapshot', { round: rounds, firstRound: rounds === 1 });
-    const current = rounds === 1 ? snapshot : await readCommentsSnapshot(profileId);
+    const current = rounds === 1 ? snapshot : await readCommentsSnapshotImpl(profileId);
     progress('after_loop_comments_snapshot', {
       round: rounds,
       detailVisible: current?.detailVisible === true,
@@ -866,6 +994,10 @@ export async function executeCommentsHarvestOperation({ profileId, params = {}, 
         newComments: newComments.length,
         collectedCount: collectedRows.length,
       });
+      if (shouldPauseForTabBudget(state, params, totalAdded)) {
+        exitReason = 'tab_comment_budget_reached';
+        break;
+      }
     }
 
     await applyVisibleLikePass(current);
@@ -881,6 +1013,11 @@ export async function executeCommentsHarvestOperation({ profileId, params = {}, 
 
     if (maxComments > 0 && collectedRows.length >= maxComments) {
       exitReason = 'max_comments_reached';
+      break;
+    }
+
+    if (shouldPauseForTabBudget(state, params, totalAdded)) {
+      exitReason = 'tab_comment_budget_reached';
       break;
     }
 
@@ -903,13 +1040,13 @@ export async function executeCommentsHarvestOperation({ profileId, params = {}, 
       const noChangeElapsedMs = Date.now() - lastProgressAt;
       if (noChangeElapsedMs < noChangeTimeoutMs) {
         const waitMs = Math.min(2000, Math.max(600, noChangeTimeoutMs - noChangeElapsedMs));
-        await sleep(waitMs);
+        await sleepImpl(waitMs);
         progress('recovery_wait_before_refocus', { round: rounds, waitMs });
       }
       recoveries += 1;
       let refocus = await focusCommentContext('recovery').catch((error) => ({ ok: false, code: 'COMMENTS_CONTEXT_RECOVERY_CLICK_TIMEOUT', message: error?.message || 'focus comment context failed', data: { reason: 'exception' } }));
       if (refocus?.ok === false) {
-        await sleep(refocusRetryDelayMs);
+        await sleepImpl(refocusRetryDelayMs);
         refocus = { ok: true, scrollTarget: commentScroll || null, degradedRecovery: true, recoveryError: refocus?.message || refocus?.code || 'focus_failed' };
       }
       commentScroll = refocus?.scrollTarget || commentScroll;
@@ -924,7 +1061,7 @@ export async function executeCommentsHarvestOperation({ profileId, params = {}, 
         markActiveDetailFailure(state, 'COMMENTS_SCROLL_CONTAINER_MISSING', { stage: 'recovery' });
         return { ok: false, code: 'COMMENTS_SCROLL_CONTAINER_MISSING', message: 'comment scroll container missing before recovery' };
       }
-      const preRecoverySnapshot = await readCommentsSnapshot(profileId).catch(() => null);
+      const preRecoverySnapshot = await readCommentsSnapshotImpl(profileId).catch(() => null);
       progress('recovery_pre_snapshot', {
         round: rounds,
         hasCommentsContext: preRecoverySnapshot?.hasCommentsContext === true,
@@ -935,17 +1072,17 @@ export async function executeCommentsHarvestOperation({ profileId, params = {}, 
       }
       for (let i = 0; i < recoveryUpRounds; i += 1) {
         progress('recovery_scroll_up', { round: rounds, step: i + 1, total: recoveryUpRounds });
-        await scrollBySelector(profileId, scrollSelector, { direction: 'up', amount: 420, highlight: true, skipFocusClick: true, focusTarget: commentScroll });
-        await sleep(900);
+        await scrollBySelectorImpl(profileId, scrollSelector, { direction: 'up', amount: 420, highlight: true, skipFocusClick: true, focusTarget: commentScroll });
+        await sleepImpl(900);
       }
       for (let i = 0; i < recoveryDownRounds; i += 1) {
         progress('recovery_scroll_down', { round: rounds, step: i + 1, total: recoveryDownRounds });
-        await scrollBySelector(profileId, scrollSelector, { direction: 'down', amount: 420, highlight: true, skipFocusClick: true, focusTarget: commentScroll });
-        await sleep(900);
+        await scrollBySelectorImpl(profileId, scrollSelector, { direction: 'down', amount: 420, highlight: true, skipFocusClick: true, focusTarget: commentScroll });
+        await sleepImpl(900);
       }
       const scrollDelayAfterRecovery = Math.floor(scrollDelayMinMs + Math.random() * (scrollDelayMaxMs - scrollDelayMinMs + 1));
-      await sleep(scrollDelayAfterRecovery);
-      const postRecoverySnapshot = await readCommentsSnapshot(profileId).catch(() => null);
+      await sleepImpl(scrollDelayAfterRecovery);
+      const postRecoverySnapshot = await readCommentsSnapshotImpl(profileId).catch(() => null);
       progress('recovery_post_snapshot', {
         round: rounds,
         hasCommentsContext: postRecoverySnapshot?.hasCommentsContext === true,
@@ -1003,7 +1140,7 @@ export async function executeCommentsHarvestOperation({ profileId, params = {}, 
         delta,
         viewportScreen,
       });
-      await scrollBySelector(profileId, scrollSelector, {
+      await scrollBySelectorImpl(profileId, scrollSelector, {
         direction: 'down',
         amount: delta,
         highlight: true,
@@ -1012,12 +1149,12 @@ export async function executeCommentsHarvestOperation({ profileId, params = {}, 
       });
     progress('after_scroll_action', { round: rounds, selector: scrollSelector, delta });
     const scrollDelay = Math.floor(scrollDelayMinMs + Math.random() * (scrollDelayMaxMs - scrollDelayMinMs + 1));
-    await sleep(scrollDelay);
+    await sleepImpl(scrollDelay);
     progress('after_scroll_delay', { round: rounds, scrollDelay });
 
-    const afterScrollHref = await readLocation(profileId, { timeoutMs: 3000, fallback: '' }).catch(() => '');
-    const afterScrollDetailState = await readDetailState(profileId).catch(() => null);
-    const afterScrollDetail = await readDetailSnapshot(profileId).catch(() => null);
+    const afterScrollHref = await readLocationImpl(profileId, { timeoutMs: 3000, fallback: '' }).catch(() => '');
+    const afterScrollDetailState = await readDetailStateImpl(profileId).catch(() => null);
+    const afterScrollDetail = await readDetailSnapshotImpl(profileId).catch(() => null);
     progress('post_scroll_state', {
       kind: 'post_scroll_state',
       href: afterScrollHref || afterScrollDetailState?.href || null,
@@ -1029,10 +1166,10 @@ export async function executeCommentsHarvestOperation({ profileId, params = {}, 
     }
 
     const settle = Math.floor(settleMinMs + Math.random() * (settleMaxMs - settleMinMs + 1));
-    await sleep(settle);
+    await sleepImpl(settle);
     progress('after_settle_delay', { round: rounds, settle });
 
-    const postScrollSnapshot = await readCommentsSnapshot(profileId).catch(() => null);
+    const postScrollSnapshot = await readCommentsSnapshotImpl(profileId).catch(() => null);
     progress('after_post_scroll_snapshot', {
       round: rounds,
       hasCommentsContext: postScrollSnapshot?.hasCommentsContext === true,
@@ -1455,6 +1592,61 @@ export async function executeExpandRepliesOperation({ profileId, context = {} })
   const { actionTrace, pushTrace } = buildTraceRecorder();
   const event = context?.event || {};
   const rawElements = Array.isArray(event.elements) ? event.elements : [];
+  const testingOverrides = context?.testingOverrides && typeof context.testingOverrides === 'object'
+    ? context.testingOverrides
+    : null;
+  const readExpandReplyTargetsImpl = typeof testingOverrides?.readExpandReplyTargets === 'function'
+    ? testingOverrides.readExpandReplyTargets
+    : readExpandReplyTargets;
+  const clickPointImpl = typeof testingOverrides?.clickPoint === 'function'
+    ? testingOverrides.clickPoint
+    : clickPoint;
+  const sleepImpl = typeof testingOverrides?.sleep === 'function'
+    ? testingOverrides.sleep
+    : sleep;
+
+  const buildTargetKey = (target) => {
+    if (!target || typeof target !== 'object') return '';
+    const rect = target.rect || {};
+    const path = String(target.path || '').trim();
+    const text = String(target.text || '').replace(/\s+/g, ' ').trim();
+    if (path) return `${path}::${text}`;
+    return [
+      Math.round(Number(rect.left || 0)),
+      Math.round(Number(rect.top || 0)),
+      Math.round(Number(rect.width || 0)),
+      Math.round(Number(rect.height || 0)),
+      text,
+    ].join(':');
+  };
+
+  const normalizeTargets = (targets) => {
+    const dedup = new Map();
+    for (const target of Array.isArray(targets) ? targets : []) {
+      if (!target || typeof target !== 'object') continue;
+      const rect = target.rect || null;
+      const center = target.center || null;
+      if (!rect || !center) continue;
+      const width = Number(rect.width || 0);
+      const height = Number(rect.height || 0);
+      if (width <= 1 || height <= 1) continue;
+      const text = String(target.text || '').replace(/\s+/g, ' ').trim();
+      const normalized = {
+        path: String(target.path || ''),
+        text,
+        rect,
+        center,
+      };
+      const key = buildTargetKey(normalized);
+      if (!key || dedup.has(key)) continue;
+      dedup.set(key, normalized);
+    }
+    return Array.from(dedup.values()).sort((a, b) => {
+      const topDiff = Number(a.rect.top || 0) - Number(b.rect.top || 0);
+      if (Math.abs(topDiff) > 1) return topDiff;
+      return Number(a.rect.left || 0) - Number(b.rect.left || 0);
+    });
+  };
 
   const matchesShowMore = (node) => {
     if (!node || typeof node !== 'object') return false;
@@ -1465,7 +1657,7 @@ export async function executeExpandRepliesOperation({ profileId, context = {} })
     return classes.includes('show-more') || String(node.selector || '').includes('.show-more');
   };
 
-  let candidates = rawElements
+  const rawCandidates = rawElements
     .filter(matchesShowMore)
     .map((node) => {
       const rect = node.rect || null;
@@ -1484,46 +1676,42 @@ export async function executeExpandRepliesOperation({ profileId, context = {} })
       };
     })
     .filter(Boolean);
+  let scanned = rawElements.length;
+  const clickedKeys = new Set();
+  const maxExpand = Math.max(1, Math.min(24, Number(event.count || rawCandidates.length || 12) || 12));
 
-  if (candidates.length === 0) {
-    const liveTargets = await readExpandReplyTargets(profileId).catch(() => null);
-    const scannedLive = Array.isArray(liveTargets?.targets) ? liveTargets.targets.length : 0;
-    candidates = Array.isArray(liveTargets?.targets)
+  let expanded = 0;
+  for (let step = 1; step <= maxExpand; step += 1) {
+    const liveTargets = await readExpandReplyTargetsImpl(profileId).catch(() => null);
+    const liveCandidates = normalizeTargets(Array.isArray(liveTargets?.targets)
       ? liveTargets.targets.map((node) => ({
         path: '',
         text: String(node.text || '').replace(/\s+/g, ' ').trim(),
         rect: node.rect || null,
         center: node.center || null,
-      })).filter((node) => node.rect && node.center)
-      : [];
-    if (candidates.length === 0) {
-      return {
-        ok: false,
-        code: 'EXPAND_REPLIES_NO_TARGETS',
-        message: 'no visible show-more targets',
-        data: { expanded: 0, scanned: Math.max(rawElements.length, scannedLive) },
-      };
+      }))
+      : []);
+    scanned = Math.max(scanned, Array.isArray(liveTargets?.targets) ? liveTargets.targets.length : 0, liveCandidates.length);
+    const fallbackCandidates = normalizeTargets(rawCandidates);
+    const target = [...liveCandidates, ...fallbackCandidates]
+      .find((candidate) => !clickedKeys.has(buildTargetKey(candidate)));
+
+    if (!target) {
+      if (expanded === 0) {
+        return {
+          ok: false,
+          code: 'EXPAND_REPLIES_NO_TARGETS',
+          message: 'no visible show-more targets',
+          data: { expanded: 0, scanned },
+        };
+      }
+      break;
     }
-  }
-  const scanned = Math.max(rawElements.length, candidates.length);
 
-  const dedup = new Map();
-  for (const item of candidates) {
-    const key = item.path || `${Math.round(item.rect.left || 0)}:${Math.round(item.rect.top || 0)}:${Math.round(item.rect.width || 0)}:${Math.round(item.rect.height || 0)}`;
-    if (!dedup.has(key)) dedup.set(key, item);
-  }
-
-  const targets = Array.from(dedup.values()).sort((a, b) => {
-    const topDiff = Number(a.rect.top || 0) - Number(b.rect.top || 0);
-    if (Math.abs(topDiff) > 1) return topDiff;
-    return Number(a.rect.left || 0) - Number(b.rect.left || 0);
-  });
-
-  let expanded = 0;
-  for (const target of targets) {
-    await clickPoint(profileId, target.center, { steps: 2 });
+    clickedKeys.add(buildTargetKey(target));
+    await clickPointImpl(profileId, target.center, { steps: 2 });
     pushTrace({ kind: 'click', stage: 'expand_replies', text: target.text.slice(0, 60), center: target.center });
-    await sleep(350);
+    await sleepImpl(350);
     expanded += 1;
   }
 

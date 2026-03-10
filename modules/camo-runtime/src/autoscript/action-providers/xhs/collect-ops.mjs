@@ -10,6 +10,7 @@ import { buildSelectorCheck, ensureActiveSession, maybeSelector } from '../../..
 import { getDomSnapshotByProfile } from '../../../utils/browser-service.mjs';
 import { resolveXhsOutputContext, mergeLinksJsonl, readJsonlRows } from './persistence.mjs';
 import { dumpNoProgressDiagnostics } from './diagnostic-ops.mjs';
+import { readXhsInteractionGuard, buildXhsGuardFailure } from './auth-ops.mjs';
 
 const SEARCH_LIST_SELECTOR = '.feeds-container';
 const SEARCH_ANCHOR_SELECTOR = '.note-item:has(a.cover)';
@@ -424,10 +425,35 @@ export async function executeSubmitSearchOperation({ profileId, params = {}, con
     const profileState = getProfileState(profileId);
     const metrics = profileState.metrics || (profileState.metrics = {});
     const { actionTrace, pushTrace } = buildTraceRecorder();
+    const testingOverrides = context?.testingOverrides && typeof context.testingOverrides === 'object'
+      ? context.testingOverrides
+      : null;
+    const readSearchInputImpl = typeof testingOverrides?.readSearchInput === 'function' ? testingOverrides.readSearchInput : readSearchInput;
+    const clickPointImpl = typeof testingOverrides?.clickPoint === 'function' ? testingOverrides.clickPoint : clickPoint;
+    const sleepRandomImpl = typeof testingOverrides?.sleepRandom === 'function' ? testingOverrides.sleepRandom : sleepRandom;
+    const clearAndTypeImpl = typeof testingOverrides?.clearAndType === 'function' ? testingOverrides.clearAndType : clearAndType;
+    const readLocationImpl = typeof testingOverrides?.readLocation === 'function' ? testingOverrides.readLocation : readLocation;
+    const readCandidateWindowImpl = typeof testingOverrides?.readCandidateWindow === 'function' ? testingOverrides.readCandidateWindow : readCandidateWindow;
+    const resolveSelectorTargetImpl = typeof testingOverrides?.resolveSelectorTarget === 'function' ? testingOverrides.resolveSelectorTarget : resolveSelectorTarget;
+    const pressKeyImpl = typeof testingOverrides?.pressKey === 'function' ? testingOverrides.pressKey : pressKey;
+    const readSearchViewportReadyImpl = typeof testingOverrides?.readSearchViewportReady === 'function'
+      ? testingOverrides.readSearchViewportReady
+      : readSearchViewportReady;
+
+    const assertNoGuard = async (stage) => {
+      const guard = await readXhsInteractionGuard({ profileId, params, testingOverrides });
+      if (guard?.stopCode) {
+        pushTrace({ kind: 'guard', stage, code: guard.stopCode, url: guard.url || null });
+        return buildXhsGuardFailure({ profileId, guard, stage, codeMode: 'guard' });
+      }
+      return null;
+    };
 
     const methodRequested = String(params.method || params.submitMethod || 'click').trim().toLowerCase();
     const method = ['click', 'enter', 'form'].includes(methodRequested) ? methodRequested : 'click';
     const keyword = String(params.keyword || '').trim();
+    const env = String(params.env || profileState.env || 'debug').trim();
+    const outputRoot = String(params.outputRoot || params.downloadRoot || params.rootDir || profileState.outputRoot || '').trim();
     const actionDelayMinMs = Math.max(300, Number(params.actionDelayMinMs ?? 500) || 500);
     const actionDelayMaxMs = Math.max(actionDelayMinMs, Number(params.actionDelayMaxMs ?? 1600) || 1600);
     const settleMinMs = Math.max(500, Number(params.settleMinMs ?? 1200) || 1200);
@@ -438,38 +464,44 @@ export async function executeSubmitSearchOperation({ profileId, params = {}, con
     const searchReadyRetryCount = Math.max(1, Number(params.searchReadyRetryCount ?? 3) || 3);
 
 
-    const input = await readSearchInput(profileId);
+    const guardBeforeInput = await assertNoGuard('submit_search_before_input');
+    if (guardBeforeInput) return guardBeforeInput;
+
+    const input = await readSearchInputImpl(profileId);
     if (!input || input.ok !== true || !input.center) {
       throw new Error('SEARCH_INPUT_NOT_FOUND');
     }
 
-    await clickPoint(profileId, input.center, { steps: 3 });
+    await clickPointImpl(profileId, input.center, { steps: 3 });
     pushTrace({ kind: 'click', stage: 'submit_search', target: 'search_input' });
-    await sleepRandom(actionDelayMinMs, actionDelayMaxMs, pushTrace, 'submit_pre_type');
+    await sleepRandomImpl(actionDelayMinMs, actionDelayMaxMs, pushTrace, 'submit_pre_type');
 
     if (keyword && String(input.value || '') !== keyword) {
-      await clearAndType(profileId, keyword, Number(params.keyDelayMs ?? 65) || 65);
+      await clearAndTypeImpl(profileId, keyword, Number(params.keyDelayMs ?? 65) || 65);
       pushTrace({ kind: 'type', stage: 'submit_search', target: 'search_input', length: keyword.length });
-      await sleepRandom(actionDelayMinMs, actionDelayMaxMs, pushTrace, 'submit_after_type');
+      await sleepRandomImpl(actionDelayMinMs, actionDelayMaxMs, pushTrace, 'submit_after_type');
     }
 
-    const beforeUrl = await readLocation(profileId);
+    const guardBeforeSubmit = await assertNoGuard('submit_search_before_submit');
+    if (guardBeforeSubmit) return guardBeforeSubmit;
+
+    const beforeUrl = await readLocationImpl(profileId);
     let via = method;
     const triggerSubmitOnce = async (attempt = 1) => {
       if (method === 'click') {
-        const target = await resolveSelectorTarget(profileId, ['.input-button .search-icon', '.input-button', 'button.min-width-search-icon'], { requireViewport: true });
+        const target = await resolveSelectorTargetImpl(profileId, ['.input-button .search-icon', '.input-button', 'button.min-width-search-icon'], { requireViewport: true });
         if (target && target.center) {
-          await clickPoint(profileId, target.center, { steps: 3 });
+          await clickPointImpl(profileId, target.center, { steps: 3 });
           via = target.selector || 'click';
           pushTrace({ kind: 'click', stage: 'submit_search', selector: via, attempt });
           return;
         }
-        await pressKey(profileId, 'Enter');
+        await pressKeyImpl(profileId, 'Enter');
         via = 'enter_fallback';
         pushTrace({ kind: 'key', stage: 'submit_search', key: 'Enter', fallback: true, attempt });
         return;
       }
-      await pressKey(profileId, 'Enter');
+      await pressKeyImpl(profileId, 'Enter');
       via = 'Enter';
       pushTrace({ kind: 'key', stage: 'submit_search', key: 'Enter', attempt });
     };
@@ -478,7 +510,9 @@ export async function executeSubmitSearchOperation({ profileId, params = {}, con
       const startedAt = Date.now();
       let lastSnapshot = null;
       while ((Date.now() - startedAt) < searchReadyTimeoutMs) {
-        lastSnapshot = await readSearchViewportReady(profileId);
+        const guardDuringWait = await assertNoGuard(`submit_search_wait_ready_${attempt}`);
+        if (guardDuringWait) return { ready: false, guardResult: guardDuringWait };
+        lastSnapshot = await readSearchViewportReadyImpl(profileId);
         const readySelector = String(lastSnapshot?.readySelector || '').trim();
         const visibleNoteCount = Math.max(0, Number(lastSnapshot?.visibleNoteCount || 0) || 0);
         if (readySelector || visibleNoteCount > 0) {
@@ -492,13 +526,17 @@ export async function executeSubmitSearchOperation({ profileId, params = {}, con
     };
 
     await triggerSubmitOnce(1);
-    await sleepRandom(settleMinMs, settleMaxMs, pushTrace, 'submit_after_trigger');
+    await sleepRandomImpl(settleMinMs, settleMaxMs, pushTrace, 'submit_after_trigger');
     const readyResult = await waitSearchReadyOnce(1);
+    if (readyResult.guardResult) return readyResult.guardResult;
     if (!readyResult.ready) {
       for (let retry = 2; retry <= searchReadyRetryCount; retry += 1) {
+        const guardBeforeRetry = await assertNoGuard(`submit_search_before_retry_${retry}`);
+        if (guardBeforeRetry) return guardBeforeRetry;
         await triggerSubmitOnce(retry);
-        await sleepRandom(settleMinMs, settleMaxMs, pushTrace, 'submit_retry_settle');
+        await sleepRandomImpl(settleMinMs, settleMaxMs, pushTrace, 'submit_retry_settle');
         const retryResult = await waitSearchReadyOnce(retry);
+        if (retryResult.guardResult) return retryResult.guardResult;
         if (retryResult.ready) {
           readyResult.ready = true;
           readyResult.readySelector = retryResult.readySelector;
@@ -513,10 +551,14 @@ export async function executeSubmitSearchOperation({ profileId, params = {}, con
       throw new Error('SEARCH_VIEWPORT_READY_TIMEOUT');
     }
 
-    const windowBefore = await readCandidateWindow(profileId, Number(params.index ?? 0));
-    const afterUrl = await readLocation(profileId);
-    const windowAfter = await readCandidateWindow(profileId, Number(params.index ?? 0));
+    const windowBefore = await readCandidateWindowImpl(profileId, Number(params.index ?? 0));
+    const afterUrl = await readLocationImpl(profileId);
+    const windowAfter = await readCandidateWindowImpl(profileId, Number(params.index ?? 0));
     profileState.keyword = keyword || profileState.keyword;
+    profileState.env = env || profileState.env;
+    profileState.outputRoot = outputRoot || profileState.outputRoot;
+    profileState.downloadRoot = outputRoot || profileState.downloadRoot;
+    profileState.rootDir = outputRoot || profileState.rootDir;
     profileState.lastListUrl = afterUrl || beforeUrl || null;
     metrics.searchCount = Math.max(0, Number(metrics.searchCount || 0) || 0) + 1;
     metrics.lastSearchAt = new Date().toISOString();
@@ -529,6 +571,10 @@ export async function executeSubmitSearchOperation({ profileId, params = {}, con
 export async function executeCollectLinksOperation({ profileId, params = {}, context = {} }) {
   const state = getProfileState(profileId);
   const { actionTrace, pushTrace } = buildTraceRecorder();
+  const testingOverrides = context?.testingOverrides && typeof context.testingOverrides === 'object'
+    ? context.testingOverrides
+    : null;
+  const readJsonlRowsImpl = typeof testingOverrides?.readJsonlRows === 'function' ? testingOverrides.readJsonlRows : readJsonlRows;
   const maxNotes = Math.max(1, Number(params.maxNotes ?? 21) || 21);
   const collectIndexStart = Math.max(0, Number(params.collectIndexStart ?? 0) || 0);
   const collectIndexMaxAttempts = Math.max(1, Number(params.collectIndexMaxAttempts ?? 3) || 3);
@@ -539,8 +585,21 @@ export async function executeCollectLinksOperation({ profileId, params = {}, con
   const tabCount = Math.max(1, Number(params.tabCount ?? 4) || 4);
   const commentBudget = Math.max(1, Number(params.commentBudget ?? 50) || 50);
   const keyword = String(params.keyword || state.keyword || 'unknown').trim();
-  const env = String(params.env || 'debug').trim();
-  const outputCtx = resolveXhsOutputContext({ params: { keyword, env }, state });
+  const env = String(params.env || state.env || 'debug').trim();
+  const outputRoot = String(params.outputRoot || params.downloadRoot || params.rootDir || state.outputRoot || '').trim();
+  state.keyword = keyword || state.keyword;
+  state.env = env || state.env;
+  state.outputRoot = outputRoot || state.outputRoot;
+  state.downloadRoot = outputRoot || state.downloadRoot;
+  state.rootDir = outputRoot || state.rootDir;
+  const outputCtx = resolveXhsOutputContext({
+    params: {
+      keyword,
+      env,
+      outputRoot,
+    },
+    state,
+  });
   const linksPath = outputCtx.safeDetailPath || outputCtx.linksPath;
   const phase2LinksPath = null;
 
@@ -557,7 +616,7 @@ export async function executeCollectLinksOperation({ profileId, params = {}, con
   state.collectLastUrl = state.collectLastUrl || null;
 
   if (state.preCollectedNoteIds.length === 0) {
-    const existing = await readJsonlRows(linksPath);
+    const existing = await readJsonlRowsImpl(linksPath);
     for (const row of existing) {
       const noteId = String(row?.noteId || '').trim();
       if (noteId && !state.preCollectedNoteIds.includes(noteId)) {

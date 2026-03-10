@@ -1,5 +1,5 @@
 import { Page } from 'playwright';
-import { isTimeoutLikeError } from './utils.js';
+import { isRetryableMouseClickError, isTimeoutLikeError } from './utils.js';
 
 export interface MouseClickOpts {
   x: number;
@@ -74,7 +74,7 @@ export class BrowserSessionInputOps {
             await clickPage.mouse.click(x, y, { button, clickCount: 1, delay: Math.max(0, Number(delay) || 0) });
           });
         } catch (error) {
-          if (!isTimeoutLikeError(error)) throw error;
+          if (!isRetryableMouseClickError(error)) throw error;
           await this.runInputAction(page, 'mouse:click(retry)', async (clickPage) => {
             await nudgePointer(clickPage);
             await moveToTarget(clickPage);

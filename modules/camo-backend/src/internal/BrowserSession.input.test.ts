@@ -18,6 +18,13 @@ function createSessionWithPage(page: any) {
   return session as BrowserSession;
 }
 
+function withViewportPage(page: any) {
+  return {
+    viewportSize: () => ({ width: 1000, height: 700 }),
+    ...page,
+  };
+}
+
 test('mouseMove is disabled to avoid unstable pointer movement path', async () => {
   const page = {
     mouse: {
@@ -182,8 +189,47 @@ test('mouseClick falls back to down/up when direct click times out', async () =>
   }
 });
 
+test('mouseClick retries on dispatchMouseEvent protocol error', async () => {
+  const restoreTimeout = setEnv('CAMO_INPUT_ACTION_TIMEOUT_MS', '80');
+  const restoreAttempts = setEnv('CAMO_INPUT_ACTION_MAX_ATTEMPTS', '1');
+  const restoreDelay = setEnv('CAMO_INPUT_RECOVERY_DELAY_MS', '0');
+  const restoreBringToFrontTimeout = setEnv('CAMO_INPUT_RECOVERY_BRING_TO_FRONT_TIMEOUT_MS', '50');
+  const restoreReadySettle = setEnv('CAMO_INPUT_READY_SETTLE_MS', '0');
+  try {
+    const calls: string[] = [];
+    const page = {
+      isClosed: () => false,
+      viewportSize: () => ({ width: 1000, height: 700 }),
+      bringToFront: async () => {},
+      waitForTimeout: async () => {},
+      mouse: {
+        clickAttempts: 0,
+        click: async function click() {
+          this.clickAttempts += 1;
+          if (this.clickAttempts === 1) {
+            throw new Error('mouse.click: Protocol error (Page.dispatchMouseEvent): win.windowUtils.sendMouseEvent is not a function');
+          }
+          calls.push('click_retry');
+        },
+        move: async () => {
+          calls.push('move');
+        },
+      },
+    };
+    const session = createSessionWithPage(page);
+    await session.mouseClick({ x: 11, y: 22, delay: 0 });
+    assert.equal(calls.includes('click_retry'), true);
+  } finally {
+    restoreReadySettle();
+    restoreBringToFrontTimeout();
+    restoreDelay();
+    restoreAttempts();
+    restoreTimeout();
+  }
+});
+
 test('ensureInputReady brings page to front even when document reports focus', async () => {
-  const page = {
+  const page = withViewportPage({
     bringToFrontCount: 0,
     waitCount: 0,
     bringToFront: async function bringToFront() {
@@ -198,9 +244,9 @@ test('ensureInputReady brings page to front even when document reports focus', a
       visibilityState: 'visible',
     }),
     isClosed: () => false,
-  };
+  });
   const session = new BrowserSession({ profileId: `test-input-ready-${Date.now()}` }) as any;
-  await session.ensureInputReady(page);
+  await session.inputPipeline.ensureInputReady(page);
   assert.equal(page.bringToFrontCount, 1);
   assert.equal(page.waitCount, 1);
 });
@@ -213,24 +259,26 @@ test('mouseWheel retries with refreshed active page after timeout', async () => 
   const restoreReadySettle = setEnv('CAMO_INPUT_READY_SETTLE_MS', '0');
   try {
     const calls: string[] = [];
-    const page1 = {
+    const page1 = withViewportPage({
       isClosed: () => false,
       bringToFront: async () => {},
       waitForTimeout: async () => {},
       mouse: {
+        move: async () => {},
         wheel: async () => new Promise(() => {}),
       },
-    };
-    const page2 = {
+    });
+    const page2 = withViewportPage({
       isClosed: () => false,
       bringToFront: async () => {},
       waitForTimeout: async () => {},
       mouse: {
+        move: async () => {},
         wheel: async () => {
           calls.push('wheel_ok');
         },
       },
-    };
+    });
     const session = new BrowserSession({ profileId: `test-input-refresh-${Date.now()}` }) as any;
     let ensurePrimaryPageCalls = 0;
     session.ensureInputReady = async () => {};
@@ -258,11 +306,12 @@ test('mouseWheel falls back to keyboard paging when wheel keeps timing out', asy
   const restoreReadySettle = setEnv('CAMO_INPUT_READY_SETTLE_MS', '0');
   try {
     const calls: string[] = [];
-    const page = {
+    const page = withViewportPage({
       isClosed: () => false,
       bringToFront: async () => {},
       waitForTimeout: async () => {},
       mouse: {
+        move: async () => {},
         wheel: async () => new Promise(() => {}),
       },
       keyboard: {
@@ -270,7 +319,7 @@ test('mouseWheel falls back to keyboard paging when wheel keeps timing out', asy
           calls.push(`press:${key}`);
         },
       },
-    };
+    });
     const session = new BrowserSession({ profileId: `test-input-fallback-${Date.now()}` }) as any;
     session.ensureInputReady = async () => {};
     session.ensurePrimaryPage = async () => page;
@@ -294,11 +343,12 @@ test('mouseWheel uses keyboard mode directly when CAMO_SCROLL_INPUT_MODE=keyboar
   const restoreReadySettle = setEnv('CAMO_INPUT_READY_SETTLE_MS', '0');
   try {
     const calls: string[] = [];
-    const page = {
+    const page = withViewportPage({
       isClosed: () => false,
       bringToFront: async () => {},
       waitForTimeout: async () => {},
       mouse: {
+        move: async () => {},
         wheel: async () => {
           calls.push('wheel');
         },
@@ -308,7 +358,7 @@ test('mouseWheel uses keyboard mode directly when CAMO_SCROLL_INPUT_MODE=keyboar
           calls.push(`press:${key}`);
         },
       },
-    };
+    });
     const session = new BrowserSession({ profileId: `test-input-mode-${Date.now()}` }) as any;
     session.ensureInputReady = async () => {};
     session.ensurePrimaryPage = async () => page;

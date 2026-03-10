@@ -40,6 +40,7 @@ export function buildXhsDetailOperations(options) {
     tabCount,
     autoCloseDetail,
   } = options;
+  const commentBudget = maxComments > 0 ? maxComments : 0;
 
   const matchGateEnabled = options.matchGateEnabled === true;
   const closeDetailEnabled = options.detailLoopEnabled && autoCloseDetail !== false;
@@ -53,6 +54,12 @@ export function buildXhsDetailOperations(options) {
   const modalExistConditions = detailOpenByLinks
     ? [{ type: 'subscription_exist', subscriptionId: 'detail_modal' }]
     : undefined;
+  const closeDetailConditions = detailOpenByLinks
+    ? [{ type: 'operation_done', operationId: closeDependsOn }]
+    : [
+        { type: 'operation_done', operationId: closeDependsOn },
+        ...(Array.isArray(modalExistConditions) ? modalExistConditions : []),
+      ];
 
   return [
     {
@@ -120,11 +127,11 @@ export function buildXhsDetailOperations(options) {
       waitFor: { mode: 'or', subscriptions: ['detail_modal', 'detail_comment_item', 'detail_comment_list', 'detail_comment_section'] },
       action: 'xhs_expand_replies',
       params: {},
-      trigger: 'detail_show_more.exist',
+      trigger: 'manual',
       dependsOn: [detailHarvestEnabled ? 'detail_harvest' : 'open_first_detail'],
       conditions: [{ type: 'subscription_exist', subscriptionId: 'detail_modal' }],
       once: false,
-      oncePerAppear: true,
+      oncePerAppear: false,
       retry: { attempts: 1, backoffMs: 0 },
       onFailure: 'continue',
       impact: 'op',
@@ -151,7 +158,7 @@ export function buildXhsDetailOperations(options) {
       action: 'xhs_comments_harvest',
       params: {
         tabCount,
-        commentBudget: 50,
+        commentBudget,
         env,
         keyword,
         outputRoot,
@@ -186,7 +193,7 @@ export function buildXhsDetailOperations(options) {
         includeComments: persistComments,
       },
       trigger: modalChainTrigger,
-      dependsOn: ['warmup_comments_context'],
+      dependsOn: ['warmup_comments_context', 'expand_replies'],
       conditions: modalExistConditions,
       once: false,
       oncePerAppear: true,
@@ -251,10 +258,7 @@ export function buildXhsDetailOperations(options) {
       },
       trigger: modalChainTrigger,
       dependsOn: [closeDependsOn],
-      conditions: [
-        { type: 'operation_done', operationId: closeDependsOn },
-        ...(Array.isArray(modalExistConditions) ? modalExistConditions : []),
-      ],
+      conditions: closeDetailConditions,
       once: false,
       oncePerAppear: true,
       pacing: { operationMinIntervalMs: 2500, eventCooldownMs: 1300, jitterMs: 180 },
@@ -286,7 +290,7 @@ export function buildXhsDetailOperations(options) {
       id: 'tab_switch_if_needed',
       enabled: options.detailLoopEnabled && closeDetailEnabled && Number(tabCount || 1) > 1,
       action: 'xhs_tab_switch_if_needed',
-      params: { tabCount, commentBudget: 50 },
+      params: { tabCount, commentBudget },
       trigger: 'manual',
       dependsOn: ['close_detail'],
       once: false,
@@ -303,9 +307,13 @@ export function buildXhsDetailOperations(options) {
         mode: 'next',
         stage,
         maxNotes,
+        keyword,
+        env,
+        outputRoot,
         resume,
         incrementalMax,
         sharedHarvestPath,
+        tabCount,
         preClickDelayMinMs: openDetailPreClickMinMs,
         preClickDelayMaxMs: openDetailPreClickMaxMs,
         pollDelayMinMs: openDetailPollDelayMinMs,

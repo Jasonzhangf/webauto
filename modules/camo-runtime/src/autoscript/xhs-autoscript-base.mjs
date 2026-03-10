@@ -167,7 +167,11 @@ export function buildXhsAutoscriptBase(rawOptions = {}, overrides = {}) {
     subscriptions: [
       { id: 'home_search_input', selector: '#search-input, input.search-input', events: ['appear', 'exist', 'disappear'] },
       { id: 'home_search_button', selector: '.input-button, .input-button .search-icon', events: ['exist'] },
-      { id: 'search_result_item', selector: '.note-item', events: ['appear', 'exist', 'change'] },
+      {
+        id: 'search_result_item',
+        selector: '#search-result .note-item:has(a.cover), [class*="search-result"] .note-item:has(a.cover), .feeds-container .note-item:has(a.cover)',
+        events: ['appear', 'exist', 'change'],
+      },
       {
         id: 'detail_modal',
         selector: [
@@ -186,7 +190,11 @@ export function buildXhsAutoscriptBase(rawOptions = {}, overrides = {}) {
         events: ['appear', 'exist', 'disappear'],
       },
       { id: 'detail_comment_item', selector: '.comment-item, [class*="comment-item"]', events: ['appear', 'exist', 'change'] },
-      { id: 'detail_show_more', selector: '.note-detail-mask .show-more, .note-detail-mask .reply-expand, .note-detail-page .show-more, .note-detail-page .reply-expand', events: ['appear', 'exist'] },
+      {
+        id: 'detail_show_more',
+        selector: '.note-detail-mask .show-more, .note-detail-mask .reply-expand, .note-detail-page .show-more, .note-detail-page .reply-expand, #noteContainer .show-more, #noteContainer .reply-expand, .note-container .show-more, .note-container .reply-expand, .note-scroller .show-more, .note-scroller .reply-expand, .comments-container .show-more, .comments-container .reply-expand, .comments-el .show-more, .comments-el .reply-expand',
+        events: ['appear', 'exist'],
+      },
       { id: 'detail_discover_button', selector: 'a[href*="/explore?channel_id=homefeed_recommend"]', events: ['appear', 'exist'] },
       { id: 'login_guard', selector: '.login-container, .login-dialog, #login-container', events: ['appear', 'exist'] },
       { id: 'risk_guard', selector: '.qrcode-box, .captcha-container, [class*="captcha"]', events: ['appear', 'exist'] },

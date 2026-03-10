@@ -148,24 +148,18 @@ export function buildXhsSearchOperations(options) {
 
 export function buildXhsTabPoolOperation(options) {
   const { tabCount, tabOpenDelayMs, tabOpenMinDelayMs, detailLinksStartup } = options;
-  const seedUrl = detailLinksStartup ? 'https://www.xiaohongshu.com/explore' : undefined;
   return [
     {
       id: 'ensure_tab_pool',
       action: 'ensure_tab_pool',
       params: {
-        ...(seedUrl ? { url: seedUrl } : {}),
         tabCount,
         openDelayMs: tabOpenDelayMs,
         minDelayMs: tabOpenMinDelayMs,
-        // Safe-link detail startup must pre-open the pool to tabCount, then later reuse those slots.
-        // This startup operation runs once, so disabling reuseOnly here allows initial fill without
-        // reintroducing dynamic refill during normal detail progression.
         reuseOnly: false,
-        // Safe-link detail startup must normalize every tab back to a clean list shell.
-        // Otherwise stale detail pages from previous runs leak into the tab pool state.
-        normalizeTabs: detailLinksStartup,
-        seedOnOpen: true,
+        // Detail tab startup should create clean slots without repeatedly loading the XHS home shell.
+        normalizeTabs: false,
+        seedOnOpen: false,
         shortcutOnly: false,
       },
       trigger: detailLinksStartup ? 'startup' : 'search_result_item.exist',

@@ -24,7 +24,7 @@ export async function buildUnifiedOptions(argv, profileId, overrides = {}) {
   const throttleMax = parseIntFlag(flowGate?.throttle?.maxMs, 1800, throttleMin);
   const noteIntervalMin = parseIntFlag(flowGate?.noteInterval?.minMs, 2200, 200);
   const noteIntervalMax = parseIntFlag(flowGate?.noteInterval?.maxMs, 4200, noteIntervalMin);
-  const tabCountDefault = parseIntFlag(flowGate?.tabPool?.tabCount, 1, 1);
+  const tabCountDefault = parseIntFlag(flowGate?.tabPool?.tabCount, 4, 1);
   const tabCountFlag = argv['tab-count'];
   const tabCountProvided = tabCountFlag !== undefined && tabCountFlag !== null && tabCountFlag !== '';
   const tabOpenDelayMin = parseIntFlag(flowGate?.tabPool?.openDelayMinMs, 1400, 0);
@@ -115,7 +115,7 @@ export async function buildUnifiedOptions(argv, profileId, overrides = {}) {
     commentsScrollStepMin = Math.max(commentsScrollStepMin, 960);
     commentsScrollStepMax = Math.max(commentsScrollStepMax, 1280, commentsScrollStepMin);
   }
-  if (!tabCountProvided && (stage === 'detail' || stage === 'full')) {
+  if (!tabCountProvided && (stage === 'detail' || stage === 'full' || parseBool(overrides.doComments ?? argv['do-comments'], false))) {
     tabCount = 4;
   }
   const stageDetailEnabled = stage === 'detail';

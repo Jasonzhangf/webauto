@@ -73,4 +73,44 @@ describe('xhs tab switch reuse', () => {
     assert.equal(context.runtime.currentTab.slotIndex, 2);
     assert.equal(context.runtime.currentTab.tabRealIndex, 11);
   });
+
+  it('skips switching when comment budget is uncapped', async () => {
+    const profileId = `test-profile-uncapped-${Date.now()}`;
+    const state = getProfileState(profileId);
+    state.tabState = {
+      tabCount: 2,
+      limit: 0,
+      cursor: 1,
+      used: [999, 0],
+    };
+
+    const context = {
+      runtime: {
+        tabPool: {
+          slots: [
+            { slotIndex: 1, tabRealIndex: 7, url: 'https://example.com/a' },
+            { slotIndex: 2, tabRealIndex: 11, url: 'https://example.com/b' },
+          ],
+        },
+      },
+    };
+
+    const calls = [];
+    global.fetch = async (_url, options) => {
+      const body = JSON.parse(String(options?.body || '{}'));
+      calls.push(body.action);
+      throw new Error(`unexpected action: ${body.action}`);
+    };
+
+    const result = await executeSwitchTabIfNeeded({
+      profileId,
+      params: { tabCount: 2, commentBudget: 0 },
+      context,
+    });
+
+    assert.equal(result.ok, true);
+    assert.equal(result.data.tabIndex, 1);
+    assert.equal(result.data.limit, 0);
+    assert.deepEqual(calls, []);
+  });
 });

@@ -327,7 +327,9 @@ function buildDomSnapshotScript(maxDepth, maxChildren) {
 }
 
 export async function getDomSnapshotByProfile(profileId, options = {}) {
-  const maxDepth = Math.max(1, Math.min(20, Number(options.maxDepth) || 10));
+  // XHS detail comments place `.show-more` around depth 14 from `body`.
+  // Keeping the default at 10 truncates reply controls out of the snapshot.
+  const maxDepth = Math.max(1, Math.min(20, Number(options.maxDepth) || 16));
   const maxChildren = Math.max(1, Math.min(500, Number(options.maxChildren) || 120));
   const response = await callAPI('evaluate', {
     profileId,

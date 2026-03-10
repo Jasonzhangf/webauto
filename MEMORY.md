@@ -4,6 +4,10 @@
 - 2026-03-09: Safe-link XHS detail flow must not use raw `detail_modal.exist` as the sole scheduling source for `detail_harvest -> warmup_comments_context -> comments_harvest -> close_detail` in `detailOpenByLinks` mode. In safe-link mode this chain must be serialized through manual dependency scheduling, with `detail_modal` only as a visibility condition. Runtime `oncePerAppear` accounting must also understand manual ops that are cycle-bound by subscription conditions, otherwise the same modal can retrigger comment harvest on budget pause/failure. Tags: xhs, detail, safe-link, autoscript, runtime, state-machine
 ## 2026-03-09 Detail Loop Notes
 
+- 2026-03-10: XHS 测试流程约束更新。1) `collect` 已验证稳定且快，后续真实验证优先跑 `detail`。2) 做 `detail` 前先换热点新闻语料，生成约 20 个关键词，并按“每 2 次搜索换一个关键词”轮换，避免对同一搜索词高频重复。3) `detail` 验证必须持续换不同 safe links，禁止重复消费同一个 link。Tags: xhs, testing, risk-control, detail, keyword-rotation, safe-links
+- 2026-03-10: XHS `open_link` 风控语义要求补充。若某个 safe link 因 gate reject 被拒绝，运行时必须把该 link 排到队尾并继续尝试后续 link，因为只要不连续访问同一资源，后续再访问它不应继续被 reject。未完成 link 的续跑不应被当作新的连续命中。Tags: xhs, search-gate, open-link, queue, risk-control
+- 2026-03-10: XHS detail 第二流程的链接队列真源已明确迁到 SearchGate。流程必须是：detail 启动先把整批 linklist `init` 到 gate；每次开帖前由 gate `next/claim` 发一个 link，同时默认把该 link 轮转到队尾；完成后 worker 发送 `done` 才从 gate 队列移除；如果未完成或 gate reject，则只 `release` 不移除，后续继续轮转；若出现 login/risk guard，必须立即停机并清空 gate 队列，不能跳过。Tags: xhs, detail, search-gate, queue, risk-control, guard
+
 - Safe-link detail orchestration now uses a manual dependency chain for modal-stage ops (`detail_harvest -> warmup_comments_context -> comments_harvest -> close_detail -> wait_between_notes -> open_next_detail`) so the same `detail_modal.exist` heartbeat cannot reschedule work on the same modal.
 - Safe-link startup should pre-open the tab pool once, then reuse slots only; dynamic refill during detail progression is treated as a bug.
 - `comments_harvest` no-progress recovery rule: only treat as stalled after comment content stays unchanged for 30s; recovery pattern is up-scroll 3-5 times, then one down-scroll, repeat up to 3 cycles before exiting the note with `scroll_stalled_after_recovery`.
@@ -87,3 +91,7 @@ Tags: camo, scroll, wheel, bug, detail
 - 滚动: scroll --selector 有效，scrollTop 从 860 到 3710 ✓
 
 Tags: camo, close-page, scroll, wheel, bug-fix
+
+- 2026-03-10: 4-tab detail regression guardrails tightened. Verified by unit tests that safe-link `close_detail` can finish via `page:back` without forced homepage `goto`, and `comments_harvest` now exits with `tab_comment_budget_reached` once current tab budget is hit, marking the slot `paused` for rotation instead of scrolling a single post to bottom. Live run `2459ed86-2aea-48b5-a8cb-c1691806ab5f` then showed a different blocker: startup stalled inside `ensure_tab_pool` before first detail open, so the next debug target is tab-pool initialization rather than comment harvesting. Tags: xhs, detail, 4-tab, close-detail, tab-budget, ensure-tab-pool, validation
+
+- 2026-03-10: Real 4-tab detail run `2459ed86-2aea-48b5-a8cb-c1691806ab5f` completed after recovering from two `ensure_tab_pool` `new_tab_failed` errors, but exposed a remaining queue bug: with `assignedNotes=4`, `open_next_detail` reopened note `698def79000000000b008360` twice, so `openedNotes/commentsHarvestRuns` became `5/5` instead of staying within the assigned set. Remaining live debug targets are tab-pool startup flakiness and duplicate reopen/done semantics for safe-link detail rotation. Tags: xhs, detail, 4-tab, ensure-tab-pool, duplicate-open, queue, validation

@@ -1,4 +1,5 @@
 import { callAPI, getDomSnapshotByProfile } from '../../utils/browser-service.mjs';
+import { normalizeXhsLoginSignal } from '../../utils/xhs-login-signal.mjs';
 import {
   asErrorPayload,
   buildSelectorCheck,
@@ -115,7 +116,7 @@ async function detectXhsLoginSignal(profileId) {
   try {
     const ret = await callAPI('evaluate', { profileId, script });
     const data = extractEvaluateResult(ret);
-    return {
+    const normalized = normalizeXhsLoginSignal({
       hasLoginGuard: data?.hasLoginGuard === true,
       hasLoginText: data?.hasLoginText === true,
       hasAccountSignal: data?.hasAccountSignal === true,
@@ -124,7 +125,8 @@ async function detectXhsLoginSignal(profileId) {
       guardTextPreview: String(data?.guardTextPreview || '').trim(),
       loginUrl: data?.loginUrl === true,
       ok: true,
-    };
+    });
+    return normalized;
   } catch {
     return {
       hasLoginGuard: false,

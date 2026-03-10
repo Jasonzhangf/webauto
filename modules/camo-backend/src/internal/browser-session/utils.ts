@@ -39,6 +39,12 @@ export function isTimeoutLikeError(error: unknown): boolean {
   return message.includes('timed out') || message.includes('timeout');
 }
 
+export function isRetryableMouseClickError(error: unknown): boolean {
+  const message = String((error as any)?.message || error || '').toLowerCase();
+  return isTimeoutLikeError(error)
+    || (message.includes('dispatchmouseevent') && message.includes('sendmouseevent is not a function'));
+}
+
 export function normalizeUrl(raw: string): string {
   try {
     const url = new URL(raw);

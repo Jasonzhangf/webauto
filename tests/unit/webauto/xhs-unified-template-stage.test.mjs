@@ -7,6 +7,10 @@ function getOperation(script, id) {
   return (script.operations || []).find((item) => item?.id === id) || null;
 }
 
+function getSubscription(script, id) {
+  return (script.subscriptions || []).find((item) => item?.id === id) || null;
+}
+
 it('links stage enables search+collect only and terminates after link collection', () => {
   const script = buildXhsUnifiedAutoscript({
     profileId: 'xhs-stage-1',
@@ -75,7 +79,7 @@ it('like stage enables match gate without reply flow', () => {
   assert.equal(getOperation(script, 'comment_reply')?.enabled, false);
 });
 
-it('comments_harvest should wait for warmup but not expand_replies', () => {
+it('comments_harvest should wait for warmup and expand_replies in detail flow', () => {
   const script = buildXhsUnifiedAutoscript({
     profileId: 'xhs-stage-3',
     keyword: '春晚',
@@ -89,10 +93,27 @@ it('comments_harvest should wait for warmup but not expand_replies', () => {
     doReply: false,
   });
 
-  assert.deepEqual(getOperation(script, 'comments_harvest')?.dependsOn, ['warmup_comments_context']);
+  assert.deepEqual(getOperation(script, 'comments_harvest')?.dependsOn, ['warmup_comments_context', 'expand_replies']);
   assert.deepEqual(getOperation(script, 'expand_replies')?.dependsOn, ['detail_harvest']);
+  assert.equal(getOperation(script, 'expand_replies')?.trigger, 'manual');
+  assert.equal(getOperation(script, 'expand_replies')?.oncePerAppear, false);
   assert.equal(getOperation(script, 'comment_like'), null);
   assert.equal(getOperation(script, 'comments_harvest')?.params?.doLikes, true);
+});
+
+it('detail_show_more subscription covers direct-detail comment trees', () => {
+  const script = buildXhsUnifiedAutoscript({
+    profileId: 'xhs-stage-3b',
+    keyword: 'deepseek',
+    stage: 'detail',
+    doComments: true,
+  });
+
+  const selector = String(getSubscription(script, 'detail_show_more')?.selector || '');
+  assert.match(selector, /\.note-container \.show-more/);
+  assert.match(selector, /\.note-scroller \.show-more/);
+  assert.match(selector, /\.comments-container \.show-more/);
+  assert.match(selector, /\.comments-el \.show-more/);
 });
 
 it('detail stage runs open/close loop without content/comment/like actions', () => {
@@ -197,7 +218,6 @@ it('safe-link detail stage serializes modal ops through manual dependency chain'
   assert.equal(getOperation(script, 'close_detail')?.trigger, 'manual');
   assert.deepEqual(getOperation(script, 'close_detail')?.conditions, [
     { type: 'operation_done', operationId: 'comments_harvest' },
-    { type: 'subscription_exist', subscriptionId: 'detail_modal' },
   ]);
 });
 
@@ -205,6 +225,8 @@ it('multi-tab detail stage switches tabs after close using a manual dependency c
   const script = buildXhsUnifiedAutoscript({
     profileId: 'xhs-stage-6',
     keyword: 'deepseek',
+    env: 'debug',
+    outputRoot: '/tmp/webauto-out',
     stage: 'detail',
     stageLinksEnabled: true,
     stageContentEnabled: true,
@@ -223,4 +245,31 @@ it('multi-tab detail stage switches tabs after close using a manual dependency c
   assert.deepEqual(getOperation(script, 'tab_switch_if_needed')?.dependsOn, ['close_detail']);
   assert.equal(getOperation(script, 'tab_switch_if_needed')?.oncePerAppear, false);
   assert.ok(getOperation(script, 'open_next_detail')?.dependsOn?.includes('tab_switch_if_needed'));
+  assert.equal(getOperation(script, 'open_next_detail')?.params?.keyword, 'deepseek');
+  assert.equal(getOperation(script, 'open_next_detail')?.params?.env, 'debug');
+  assert.equal(getOperation(script, 'open_next_detail')?.params?.outputRoot, '/tmp/webauto-out');
+  assert.equal(getOperation(script, 'open_next_detail')?.params?.tabCount, 4);
+});
+
+it('uncapped detail comments do not inject a fixed tab comment budget', () => {
+  const script = buildXhsUnifiedAutoscript({
+    profileId: 'xhs-stage-6b',
+    keyword: 'deepseek',
+    stage: 'detail',
+    stageLinksEnabled: true,
+    stageContentEnabled: true,
+    stageLikeEnabled: false,
+    stageReplyEnabled: false,
+    stageDetailEnabled: true,
+    doComments: true,
+    doLikes: false,
+    doReply: false,
+    autoCloseDetail: true,
+    tabCount: 2,
+    maxComments: 0,
+  });
+
+  assert.equal(getOperation(script, 'comments_harvest')?.params?.commentBudget, 0);
+  assert.equal(getOperation(script, 'tab_switch_if_needed')?.params?.commentBudget, 0);
+  assert.equal(getOperation(script, 'comments_harvest')?.params?.requireBottom, true);
 });

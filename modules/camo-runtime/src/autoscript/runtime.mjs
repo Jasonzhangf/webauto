@@ -121,6 +121,9 @@ export class AutoscriptRunner {
       this.subscriptionState.set(subscription.id, {
         exists: false,
         appearCount: 0,
+        presenceVersion: 0,
+        currentElementKeys: [],
+        stateKey: '',
         lastEventAt: null,
         version: 0,
       });
@@ -140,6 +143,8 @@ export class AutoscriptRunner {
         lastTriggerKey: null,
         lastScheduledAppearCount: null,
         lastCompletedAppearCount: null,
+        lastScheduledCycleKey: null,
+        lastCompletedCycleKey: null,
       });
     }
     this.applyInitialState(options.initialState || null);
@@ -158,6 +163,11 @@ export class AutoscriptRunner {
       this.subscriptionState.set(key, {
         exists: value.exists === true,
         appearCount: Math.max(0, Number(value.appearCount ?? prev.appearCount ?? 0) || 0),
+        presenceVersion: Math.max(0, Number(value.presenceVersion ?? prev.presenceVersion ?? 0) || 0),
+        currentElementKeys: Array.isArray(value.currentElementKeys)
+          ? [...value.currentElementKeys]
+          : (Array.isArray(prev.currentElementKeys) ? [...prev.currentElementKeys] : []),
+        stateKey: String(value.stateKey ?? prev.stateKey ?? '').trim(),
         lastEventAt: value.lastEventAt || prev.lastEventAt || null,
         version: Math.max(0, Number(value.version ?? prev.version ?? 0) || 0),
       });
@@ -188,6 +198,8 @@ export class AutoscriptRunner {
         lastTriggerKey: value.lastTriggerKey ?? null,
         lastScheduledAppearCount: value.lastScheduledAppearCount ?? null,
         lastCompletedAppearCount: value.lastCompletedAppearCount ?? null,
+        lastScheduledCycleKey: value.lastScheduledCycleKey ?? null,
+        lastCompletedCycleKey: value.lastCompletedCycleKey ?? null,
       });
     }
 
@@ -255,7 +267,8 @@ export class AutoscriptRunner {
       return this.subscriptionState.get(condition.subscriptionId)?.exists !== true;
     }
     if (condition.type === 'subscription_appear') {
-      return Number(this.subscriptionState.get(condition.subscriptionId)?.appearCount || 0) > 0;
+      const state = this.subscriptionState.get(condition.subscriptionId) || null;
+      return Number(state?.presenceVersion || state?.appearCount || 0) > 0;
     }
     return false;
   }
@@ -265,6 +278,21 @@ export class AutoscriptRunner {
       if (!this.isConditionSatisfied(condition)) return false;
     }
     return true;
+  }
+
+  getCurrentConditionState(operation) {
+    const conditions = Array.isArray(operation?.conditions) ? operation.conditions : [];
+    return conditions.map((condition) => {
+      const subscriptionId = condition?.subscriptionId || null;
+      const subscriptionState = subscriptionId
+        ? (this.subscriptionState.get(subscriptionId) || null)
+        : null;
+      return {
+        ...condition,
+        satisfied: this.isConditionSatisfied(condition),
+        subscriptionState,
+      };
+    });
   }
 
   isTriggered(operation, event) {
@@ -449,12 +477,16 @@ export class AutoscriptRunner {
       return `${trigger.type || 'unknown'}:${event?.timestamp || event?.type || 'event'}`;
     }
 
+    const explicitEventKey = String(event?.eventKey || '').trim();
+    if (explicitEventKey) return explicitEventKey;
     const subState = this.subscriptionState.get(trigger.subscriptionId);
+    const presenceVersion = Math.max(0, Number(subState?.presenceVersion || subState?.appearCount || 0) || 0);
     if (trigger.event === 'exist') {
-      return `${trigger.subscriptionId}:exist:a${Number(subState?.appearCount || 0)}`;
+      const stateKey = String(event?.stateKey || subState?.stateKey || '').trim() || 'none';
+      return `${trigger.subscriptionId}:exist:p${presenceVersion}:k${stateKey}`;
     }
     if (trigger.event === 'appear') {
-      return `${trigger.subscriptionId}:appear:n${Number(subState?.appearCount || 0)}`;
+      return `${trigger.subscriptionId}:appear:p${presenceVersion}`;
     }
     return `${trigger.subscriptionId}:${trigger.event}:v${Number(subState?.version || 0)}`;
   }
@@ -480,13 +512,37 @@ export class AutoscriptRunner {
     return null;
   }
 
-  getTriggerAppearCount(operation) {
+  getOperationCycleKey(operation, event = null) {
+    if (operation?.oncePerAppear !== true) return null;
+    const trigger = operation?.trigger || {};
+    if (trigger.type === 'subscription_event' && trigger.subscriptionId) {
+      const explicitEventKey = String(event?.eventKey || '').trim();
+      if (explicitEventKey) return explicitEventKey;
+      const subState = this.subscriptionState.get(trigger.subscriptionId) || null;
+      const presenceVersion = Math.max(0, Number(subState?.presenceVersion || subState?.appearCount || 0) || 0);
+      if (trigger.event === 'exist') {
+        const stateKey = String(event?.stateKey || subState?.stateKey || '').trim() || 'none';
+        if (presenceVersion > 0 || stateKey !== 'none') {
+          return `${trigger.subscriptionId}:exist:p${presenceVersion}:k${stateKey}`;
+        }
+      }
+      if (trigger.event === 'appear' && presenceVersion > 0) {
+        return `${trigger.subscriptionId}:appear:p${presenceVersion}`;
+      }
+      if (trigger.event === 'disappear') {
+        const version = Number(subState?.version || 0);
+        if (Number.isFinite(version) && version > 0) {
+          return `${trigger.subscriptionId}:disappear:v${version}`;
+        }
+      }
+    }
+
     const subscriptionId = this.getOperationCycleSubscriptionId(operation);
     if (!subscriptionId) return null;
     const subState = this.subscriptionState.get(subscriptionId) || null;
-    const appearCount = Number(subState?.appearCount || 0);
-    if (!Number.isFinite(appearCount) || appearCount <= 0) return null;
-    return appearCount;
+    const presenceVersion = Math.max(0, Number(subState?.presenceVersion || subState?.appearCount || 0) || 0);
+    if (!Number.isFinite(presenceVersion) || presenceVersion <= 0) return null;
+    return `${subscriptionId}:presence:${presenceVersion}`;
   }
 
   shouldSchedule(operation, event) {
@@ -503,7 +559,7 @@ export class AutoscriptRunner {
     const scheduleState = this.operationScheduleState.get(operation.id) || {};
     const pacing = this.resolvePacing(operation);
     const now = Date.now();
-    const appearCount = this.getTriggerAppearCount(operation);
+    const cycleKey = this.getOperationCycleKey(operation, event);
 
     if (pacing.operationMinIntervalMs > 0 && scheduleState.lastStartedAt) {
       if ((now - scheduleState.lastStartedAt) < pacing.operationMinIntervalMs) return false;
@@ -515,11 +571,10 @@ export class AutoscriptRunner {
 
     if (
       operation?.oncePerAppear === true
-      && Number.isFinite(appearCount)
-      && appearCount > 0
+      && cycleKey
       && (
-        Number(scheduleState.lastScheduledAppearCount || 0) === appearCount
-        || Number(scheduleState.lastCompletedAppearCount || 0) === appearCount
+        scheduleState.lastScheduledCycleKey === cycleKey
+        || scheduleState.lastCompletedCycleKey === cycleKey
       )
     ) {
       return false;
@@ -978,6 +1033,40 @@ export class AutoscriptRunner {
         };
       }
 
+      if (!this.areConditionsSatisfied(operation)) {
+        const conditionState = this.getCurrentConditionState(operation);
+        this.operationState.set(operation.id, {
+          status: 'skipped',
+          runs: Number(this.operationState.get(operation.id)?.runs || 0) + 1,
+          lastError: null,
+          updatedAt: nowIso(),
+          result: {
+            code: 'OPERATION_SKIPPED_STALE_CONDITIONS',
+            conditions: conditionState,
+          },
+        });
+        this.log('autoscript:operation_skipped', {
+          operationId: operation.id,
+          action: operation.action,
+          attempt,
+          reason: 'stale_conditions',
+          conditions: conditionState,
+        });
+        this.scheduleDependentOperations(operation.id, event);
+        return {
+          ok: true,
+          terminalState: 'skipped_stale_conditions',
+          result: {
+            ok: true,
+            code: 'OPERATION_SKIPPED_STALE_CONDITIONS',
+            message: 'operation skipped because conditions are no longer satisfied',
+            data: {
+              conditions: conditionState,
+            },
+          },
+        };
+      }
+
       this.log('autoscript:operation_start', {
         operationId: operation.id,
         action: operation.action,
@@ -1245,9 +1334,15 @@ export class AutoscriptRunner {
     scheduleState.lastScheduledAt = Date.now();
     scheduleState.lastEventAt = Date.now();
     scheduleState.lastTriggerKey = this.buildTriggerKey(operation, event);
-    const scheduledAppearCount = this.getTriggerAppearCount(operation);
+    const scheduledCycleKey = this.getOperationCycleKey(operation, event);
+    const scheduledAppearCount = this.getOperationCycleSubscriptionId(operation)
+      ? Math.max(0, Number(this.subscriptionState.get(this.getOperationCycleSubscriptionId(operation))?.appearCount || 0) || 0)
+      : 0;
     if (Number.isFinite(scheduledAppearCount) && scheduledAppearCount > 0) {
       scheduleState.lastScheduledAppearCount = scheduledAppearCount;
+    }
+    if (scheduledCycleKey) {
+      scheduleState.lastScheduledCycleKey = scheduledCycleKey;
     }
     this.operationScheduleState.set(operation.id, scheduleState);
     this.forceRunOperationIds.delete(operation.id);
@@ -1263,13 +1358,16 @@ export class AutoscriptRunner {
         if (
           outcome
           && operation?.oncePerAppear === true
-          && Number.isFinite(scheduledAppearCount)
-          && scheduledAppearCount > 0
+          && scheduledCycleKey
           && outcome.terminalState !== 'skipped_stale'
           && outcome.terminalState !== 'skipped_stale_pre_validation'
+          && outcome.terminalState !== 'skipped_stale_conditions'
         ) {
           const completedState = this.operationScheduleState.get(operation.id) || {};
-          completedState.lastCompletedAppearCount = scheduledAppearCount;
+          completedState.lastCompletedCycleKey = scheduledCycleKey;
+          if (Number.isFinite(scheduledAppearCount) && scheduledAppearCount > 0) {
+            completedState.lastCompletedAppearCount = scheduledAppearCount;
+          }
           this.operationScheduleState.set(operation.id, completedState);
         }
       })
@@ -1281,20 +1379,52 @@ export class AutoscriptRunner {
   async handleEvent(event) {
     if (!this.state.active) return;
     if (event.subscriptionId) {
-      const prev = this.subscriptionState.get(event.subscriptionId) || { exists: false, appearCount: 0, lastEventAt: null };
+      const prev = this.subscriptionState.get(event.subscriptionId) || {
+        exists: false,
+        appearCount: 0,
+        presenceVersion: 0,
+        currentElementKeys: [],
+        stateKey: '',
+        lastEventAt: null,
+        version: 0,
+      };
       const next = { ...prev, lastEventAt: event.timestamp || nowIso() };
+      const currentElementKeys = Array.isArray(event.elementKeys)
+        ? [...event.elementKeys]
+        : (Array.isArray(prev.currentElementKeys) ? [...prev.currentElementKeys] : []);
+      const stateKey = String(event.stateKey ?? next.stateKey ?? '').trim();
       if (event.type === 'appear') {
         next.exists = true;
         next.appearCount = Number(prev.appearCount || 0) + 1;
+        next.presenceVersion = Math.max(
+          Number(event.presenceVersion || 0) || 0,
+          Number(prev.presenceVersion || 0) + 1,
+        );
+        next.currentElementKeys = currentElementKeys;
+        next.stateKey = stateKey;
         next.version = Number(prev.version || 0) + 1;
         this.resetCycleOperationsForSubscription(event.subscriptionId);
       } else if (event.type === 'disappear') {
         next.exists = false;
+        next.currentElementKeys = [];
+        next.stateKey = '';
         next.version = Number(prev.version || 0) + 1;
       } else if (event.type === 'exist') {
         next.exists = true;
+        next.presenceVersion = Math.max(
+          Number(event.presenceVersion || 0) || 0,
+          Number(prev.presenceVersion || 0) || 0,
+        );
+        next.currentElementKeys = currentElementKeys;
+        next.stateKey = stateKey;
       } else if (event.type === 'change') {
-        next.exists = Number(event.count || 0) > 0 || prev.exists === true;
+        next.exists = Number(event.count || 0) > 0 || currentElementKeys.length > 0 || prev.exists === true;
+        next.presenceVersion = Math.max(
+          Number(event.presenceVersion || 0) || 0,
+          Number(prev.presenceVersion || 0) || 0,
+        );
+        next.currentElementKeys = currentElementKeys;
+        next.stateKey = stateKey;
         next.version = Number(prev.version || 0) + 1;
       }
       this.subscriptionState.set(event.subscriptionId, next);

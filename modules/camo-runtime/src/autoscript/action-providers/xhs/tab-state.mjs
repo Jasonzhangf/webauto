@@ -39,7 +39,14 @@ function limitCollectedLinks(rows, params = {}) {
 
 export function ensureTabState(state, params = {}) {
   const tabCount = Math.max(1, Number(params.tabCount ?? state?.tabState?.tabCount ?? 4) || 4);
-  const limit = Math.max(1, Number(params.commentBudget ?? state?.tabState?.limit ?? 50) || 50);
+  const hasCommentBudget = Object.prototype.hasOwnProperty.call(params, 'commentBudget')
+    && params.commentBudget !== null
+    && params.commentBudget !== undefined
+    && params.commentBudget !== '';
+  const nextLimit = hasCommentBudget
+    ? Math.max(0, Number(params.commentBudget) || 0)
+    : Number(state?.tabState?.limit ?? 50);
+  const limit = Math.max(0, Number.isFinite(nextLimit) ? nextLimit : 50);
   if (!state.tabState || state.tabState.tabCount !== tabCount || !Array.isArray(state.tabState.used)) {
     state.tabState = {
       tabCount,
@@ -63,11 +70,12 @@ export function consumeTabBudget(state, count = 0, params = {}) {
   const index = getCurrentTabIndex(state, params) - 1;
   const add = Math.max(0, Number(count) || 0);
   tab.used[index] = Math.max(0, Number(tab.used[index] || 0)) + add;
+  const exhausted = tab.limit > 0 && tab.used[index] >= tab.limit;
   return {
     tabIndex: index + 1,
     used: tab.used[index],
     limit: tab.limit,
-    exhausted: tab.used[index] >= tab.limit,
+    exhausted,
   };
 }
 
@@ -77,7 +85,7 @@ export function advanceTab(state, params = {}) {
   const next = (current % tab.tabCount) + 1;
   tab.cursor = next;
   const nextIdx = next - 1;
-  if (Number(tab.used[nextIdx] || 0) >= tab.limit) {
+  if (tab.limit > 0 && Number(tab.used[nextIdx] || 0) >= tab.limit) {
     tab.used[nextIdx] = 0;
   }
   return {
@@ -145,6 +153,10 @@ export async function loadCollectedLinks(state, params = {}) {
   }
   syncQueueFromCache(state, params);
   return state.linksCache;
+}
+
+export function readCollectedLinksCache(state) {
+  return Array.isArray(state?.linksCache) ? state.linksCache.map((row) => cloneLinkPayload(row)) : [];
 }
 
 export async function getOrAssignLinkForTab(state, params = {}, tabIndex) {

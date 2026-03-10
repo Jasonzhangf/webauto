@@ -18,6 +18,17 @@
 import http from 'node:http';
 import { URL } from 'node:url';
 import fs from 'node:fs';
+import {
+  createSearchGateState,
+  evaluateSearchGatePermit,
+  confirmSearchGateUsage,
+  initDetailLinkQueue,
+  claimDetailLink,
+  completeDetailLink,
+  releaseDetailLink,
+  clearDetailLinkQueue,
+  summarizeDetailQueues,
+} from '../runtime/infra/utils/search-gate-core.mjs';
 
 const HOST = String(process.env.WEBAUTO_SEARCH_GATE_HOST || '127.0.0.1').trim();
 const PORT = Number(process.env.WEBAUTO_SEARCH_GATE_PORT || 7790);
@@ -25,9 +36,12 @@ const DEFAULT_WINDOW_MS = Number(process.env.WEBAUTO_SEARCH_GATE_WINDOW_MS || 60
 const DEFAULT_MAX_COUNT = Number(process.env.WEBAUTO_SEARCH_GATE_MAX_COUNT || 5);
 const DEFAULT_LIKE_WINDOW_MS = Number(process.env.WEBAUTO_LIKE_GATE_WINDOW_MS || 60_000);
 const DEFAULT_LIKE_MAX_COUNT = Number(process.env.WEBAUTO_LIKE_GATE_MAX_COUNT || 6);
+const DEFAULT_OPEN_WINDOW_MS = Number(process.env.WEBAUTO_OPEN_GATE_WINDOW_MS || 180_000);
+const DEFAULT_OPEN_MAX_COUNT = Number(process.env.WEBAUTO_OPEN_GATE_MAX_COUNT || 12);
 const KEYWORD_WINDOW_MS = Number(process.env.WEBAUTO_SEARCH_GATE_KEYWORD_WINDOW_MS || 180_000);
 const KEYWORD_MAX_COUNT = Number(process.env.WEBAUTO_SEARCH_GATE_KEYWORD_MAX_COUNT || 3);
 const DEV_MAX_CONSECUTIVE_SAME_KEYWORD = Number(process.env.WEBAUTO_SEARCH_GATE_DEV_MAX_CONSECUTIVE_SAME_KEYWORD || 2);
+const DEFAULT_SAME_RESOURCE_MAX_CONSECUTIVE = Number(process.env.WEBAUTO_GATE_SAME_RESOURCE_MAX_CONSECUTIVE || 2);
 
 function startHeartbeatWatcher() {
   const filePath = process.env.WEBAUTO_HEARTBEAT_FILE;
@@ -88,109 +102,7 @@ if (String(process.env.WEBAUTO_SEARCH_GATE_DISABLE_HEARTBEAT || '').trim() !== '
   console.warn('[SearchGate] heartbeat watcher disabled via WEBAUTO_SEARCH_GATE_DISABLE_HEARTBEAT=1');
 }
 
-const buckets = new Map();
-const likeBuckets = new Map();
-const keywordBuckets = new Map();
-const keywordHistory = new Map();
-
-function nowMs() {
-  return Date.now();
-}
-
-function computeLikePermit(key, windowMs, maxCount) {
-  const now = nowMs();
-  const records = likeBuckets.get(key) || [];
-  const threshold = now - windowMs;
-  const pruned = records.filter((ts) => ts > threshold);
-
-  if (pruned.length < maxCount) {
-    pruned.push(now);
-    likeBuckets.set(key, pruned);
-    return {
-      allowed: true,
-      waitMs: 0,
-      countInWindow: pruned.length,
-    };
-  }
-
-  const oldest = pruned[0];
-  const waitMs = Math.max(0, windowMs - (now - oldest));
-  likeBuckets.set(key, pruned);
-  return {
-    allowed: false,
-    waitMs,
-    countInWindow: pruned.length,
-  };
-}
-
-function computePermit(key, windowMs, maxCount) {
-  const now = nowMs();
-  const records = buckets.get(key) || [];
-  const threshold = now - windowMs;
-  const pruned = records.filter((ts) => ts > threshold);
-
-  if (pruned.length < maxCount) {
-    pruned.push(now);
-    buckets.set(key, pruned);
-    return {
-      allowed: true,
-      waitMs: 0,
-      countInWindow: pruned.length,
-    };
-  }
-
-  const oldest = pruned[0];
-  const waitMs = Math.max(0, windowMs - (now - oldest));
-  buckets.set(key, pruned);
-  return {
-    allowed: false,
-    waitMs,
-    countInWindow: pruned.length,
-  };
-}
-
-function checkKeywordPermit(key, keyword, windowMs, maxCount) {
-  const now = nowMs();
-  const bucketKey = `${key}::${keyword}`;
-  const records = keywordBuckets.get(bucketKey) || [];
-  const threshold = now - windowMs;
-  const pruned = records.filter((ts) => ts > threshold);
-
-  if (pruned.length < maxCount) {
-    return {
-      allowed: true,
-      waitMs: 0,
-      countInWindow: pruned.length,
-      bucketKey,
-      pruned,
-    };
-  }
-
-  const oldest = pruned[0];
-  const waitMs = Math.max(0, windowMs - (now - oldest));
-  return {
-    allowed: false,
-    waitMs,
-    countInWindow: pruned.length,
-    bucketKey,
-    pruned,
-  };
-}
-
-function recordKeywordPermit(bucketKey, pruned) {
-  const now = nowMs();
-  const updated = [...pruned, now];
-  keywordBuckets.set(bucketKey, updated);
-  return updated;
-}
-
-function recordKeywordHistory(key, keyword) {
-  if (!key || !keyword) return 0;
-  const history = keywordHistory.get(key) || [];
-  const nextHistory = [keyword, ...history.filter((item) => item && item !== keyword)].slice(0, 6);
-  keywordHistory.set(key, nextHistory);
-  return nextHistory.filter((item) => item === keyword).length;
-}
+const gateState = createSearchGateState();
 
 function parseBody(req) {
   return new Promise((resolve) => {
@@ -214,36 +126,6 @@ function json(res, status, payload) {
   res.end(JSON.stringify(payload));
 }
 
-function buildPermitResponse({
-  key,
-  keyword,
-  windowMs,
-  maxCount,
-  allowed,
-  waitMs,
-  countInWindow,
-  reason,
-  deny,
-  dev,
-  devTag,
-}) {
-  return {
-    ok: true,
-    allowed: Boolean(allowed),
-    waitMs: Math.max(0, Number(waitMs) || 0),
-    retryAfterMs: Math.max(0, Number(waitMs) || 0),
-    reason: reason || null,
-    deny: deny || null,
-    windowMs,
-    maxCount,
-    countInWindow: Number(countInWindow || 0),
-    key,
-    keyword: keyword || null,
-    dev: dev === true,
-    devTag: devTag || null,
-  };
-}
-
 const server = http.createServer(async (req, res) => {
   try {
     const url = new URL(req.url || '/', `http://${HOST}:${PORT}`);
@@ -253,14 +135,71 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'GET' && url.pathname === '/stats') {
       return json(res, 200, {
         ok: true,
-        buckets: Array.from(buckets.entries()),
-        keywordHistory: Array.from(keywordHistory.entries()),
+        buckets: Array.from(gateState.buckets.entries()),
+        likeBuckets: Array.from(gateState.likeBuckets.entries()),
+        keywordBuckets: Array.from(gateState.keywordBuckets.entries()),
+        keywordHistory: Array.from(gateState.keywordHistory.entries()),
+        resourceHistory: Array.from(gateState.resourceHistory.entries()),
+        detailQueues: summarizeDetailQueues(gateState),
       });
     }
     if (req.method === 'POST' && url.pathname === '/shutdown') {
       json(res, 200, { ok: true });
       setTimeout(() => process.exit(0), 200);
       return;
+    }
+
+    if (req.method === 'POST' && url.pathname === '/confirm') {
+      const body = await parseBody(req);
+      const response = confirmSearchGateUsage(gateState, body || {}, {
+        defaultWindowMs: DEFAULT_WINDOW_MS,
+        defaultMaxCount: DEFAULT_MAX_COUNT,
+        defaultLikeWindowMs: DEFAULT_LIKE_WINDOW_MS,
+        defaultLikeMaxCount: DEFAULT_LIKE_MAX_COUNT,
+        defaultOpenWindowMs: DEFAULT_OPEN_WINDOW_MS,
+        defaultOpenMaxCount: DEFAULT_OPEN_MAX_COUNT,
+        keywordWindowMs: KEYWORD_WINDOW_MS,
+        keywordMaxCount: KEYWORD_MAX_COUNT,
+        devMaxConsecutiveSameKeyword: DEV_MAX_CONSECUTIVE_SAME_KEYWORD,
+        defaultSameResourceMaxConsecutive: DEFAULT_SAME_RESOURCE_MAX_CONSECUTIVE,
+      });
+      console.log('[SearchGate] confirm', JSON.stringify({ key: response.key, kind: response.kind, resourceKey: response.resourceKey, reason: response.reason, countInWindow: response.countInWindow }));
+      return json(res, 200, response);
+    }
+
+    if (req.method === 'POST' && url.pathname === '/detail-links/init') {
+      const body = await parseBody(req);
+      const response = initDetailLinkQueue(gateState, body || {});
+      console.log('[SearchGate] detail-links init', JSON.stringify({ key: response.key, totalLinks: response.totalLinks, queueLength: response.queueLength }));
+      return json(res, 200, response);
+    }
+
+    if (req.method === 'POST' && url.pathname === '/detail-links/next') {
+      const body = await parseBody(req);
+      const response = claimDetailLink(gateState, body || {});
+      console.log('[SearchGate] detail-links next', JSON.stringify({ key: response.key, consumerId: body?.consumerId || null, found: response.found, exhausted: response.exhausted, blocked: response.blocked, linkKey: response.linkKey || null }));
+      return json(res, 200, response);
+    }
+
+    if (req.method === 'POST' && url.pathname === '/detail-links/done') {
+      const body = await parseBody(req);
+      const response = completeDetailLink(gateState, body || {});
+      console.log('[SearchGate] detail-links done', JSON.stringify({ key: response.key, consumerId: body?.consumerId || null, removed: response.removed, linkKey: response.linkKey || null }));
+      return json(res, 200, response);
+    }
+
+    if (req.method === 'POST' && url.pathname === '/detail-links/release') {
+      const body = await parseBody(req);
+      const response = releaseDetailLink(gateState, body || {});
+      console.log('[SearchGate] detail-links release', JSON.stringify({ key: response.key, consumerId: body?.consumerId || null, released: response.released, linkKey: response.linkKey || null }));
+      return json(res, 200, response);
+    }
+
+    if (req.method === 'POST' && url.pathname === '/detail-links/clear') {
+      const body = await parseBody(req);
+      const response = clearDetailLinkQueue(gateState, body || {});
+      console.log('[SearchGate] detail-links clear', JSON.stringify({ key: response.key, cleared: response.cleared }));
+      return json(res, 200, response);
     }
 
     if (req.method !== 'POST' || url.pathname !== '/permit') {
@@ -270,80 +209,19 @@ const server = http.createServer(async (req, res) => {
     const body = await parseBody(req);
     const rawKey = body?.key || body?.profileId || 'default';
     const key = String(rawKey || 'default');
-    const keyword = body?.keyword ? String(body.keyword).trim() : '';
-    const windowMs = Number(body?.windowMs || DEFAULT_WINDOW_MS);
-    const maxCount = Number(body?.maxCount || DEFAULT_MAX_COUNT);
-    const likeGate = body?.like === true;
-    const dev = body?.dev === true;
-    const devTag = body?.devTag ? String(body.devTag) : null;
-
-    if (likeGate) {
-      const permit = computeLikePermit(key, windowMs || DEFAULT_LIKE_WINDOW_MS, maxCount || DEFAULT_LIKE_MAX_COUNT);
-      const response = buildPermitResponse({
-        key,
-        keyword,
-        windowMs: windowMs || DEFAULT_LIKE_WINDOW_MS,
-        maxCount: maxCount || DEFAULT_LIKE_MAX_COUNT,
-        ...permit,
-      });
-      console.log('[SearchGate] permit', JSON.stringify({ key, allowed: response.allowed, reason: null, waitMs: response.waitMs, countInWindow: response.countInWindow, dev, devTag }));
-      return json(res, 200, response);
-    }
-
-    if (keyword) {
-      const keywordPermit = checkKeywordPermit(key, keyword, KEYWORD_WINDOW_MS, KEYWORD_MAX_COUNT);
-      if (!keywordPermit.allowed) {
-        const response = buildPermitResponse({
-          key,
-          keyword,
-          windowMs: KEYWORD_WINDOW_MS,
-          maxCount: KEYWORD_MAX_COUNT,
-          allowed: false,
-          waitMs: keywordPermit.waitMs,
-          countInWindow: keywordPermit.countInWindow,
-          reason: 'keyword_rate_limit',
-          deny: 'keyword_rate_limit',
-          dev,
-          devTag,
-        });
-        console.log('[SearchGate] permit', JSON.stringify({ key, allowed: false, reason: 'keyword_rate_limit', waitMs: response.waitMs, countInWindow: response.countInWindow, keyword, dev, devTag }));
-        return json(res, 200, response);
-      }
-      recordKeywordPermit(keywordPermit.bucketKey, keywordPermit.pruned);
-
-      if (dev) {
-        const consecutive = recordKeywordHistory(key, keyword);
-        if (consecutive > DEV_MAX_CONSECUTIVE_SAME_KEYWORD) {
-          const response = buildPermitResponse({
-            key,
-            keyword,
-            windowMs,
-            maxCount,
-            allowed: false,
-            waitMs: 0,
-            countInWindow: consecutive,
-            reason: 'dev_consecutive_keyword_limit',
-            deny: 'dev_consecutive_keyword_limit',
-            dev,
-            devTag,
-          });
-          console.log('[SearchGate] permit', JSON.stringify({ key, allowed: false, reason: 'dev_consecutive_keyword_limit', keyword, consecutive, dev, devTag }));
-          return json(res, 200, response);
-        }
-      }
-    }
-
-    const permit = computePermit(key, windowMs, maxCount);
-    const response = buildPermitResponse({
-      key,
-      keyword,
-      windowMs,
-      maxCount,
-      ...permit,
-      dev,
-      devTag,
+    const response = evaluateSearchGatePermit(gateState, body || {}, {
+      defaultWindowMs: DEFAULT_WINDOW_MS,
+      defaultMaxCount: DEFAULT_MAX_COUNT,
+      defaultLikeWindowMs: DEFAULT_LIKE_WINDOW_MS,
+      defaultLikeMaxCount: DEFAULT_LIKE_MAX_COUNT,
+      defaultOpenWindowMs: DEFAULT_OPEN_WINDOW_MS,
+      defaultOpenMaxCount: DEFAULT_OPEN_MAX_COUNT,
+      keywordWindowMs: KEYWORD_WINDOW_MS,
+      keywordMaxCount: KEYWORD_MAX_COUNT,
+      devMaxConsecutiveSameKeyword: DEV_MAX_CONSECUTIVE_SAME_KEYWORD,
+      defaultSameResourceMaxConsecutive: DEFAULT_SAME_RESOURCE_MAX_CONSECUTIVE,
     });
-    console.log('[SearchGate] permit', JSON.stringify({ key, allowed: response.allowed, reason: response.reason, waitMs: response.waitMs, countInWindow: response.countInWindow, keyword, dev, devTag }));
+    console.log('[SearchGate] permit', JSON.stringify({ key, kind: response.kind, resourceKey: response.resourceKey, allowed: response.allowed, reason: response.reason, waitMs: response.waitMs, countInWindow: response.countInWindow, consecutiveCount: response.consecutiveCount, sameResourceMaxConsecutive: response.sameResourceMaxConsecutive, keyword: response.keyword, dev: response.dev, devTag: response.devTag }));
     return json(res, 200, response);
   } catch (err) {
     console.error('[SearchGate] error', err?.message || String(err));
@@ -352,5 +230,5 @@ const server = http.createServer(async (req, res) => {
 });
 
 server.listen(PORT, HOST, () => {
-  console.log(`[SearchGate] listening on http://${HOST}:${PORT} (window: ${DEFAULT_WINDOW_MS / 1000}s, max: ${DEFAULT_MAX_COUNT} searches per key, keyword window: ${KEYWORD_WINDOW_MS / 1000}s, keyword max: ${KEYWORD_MAX_COUNT})`);
+  console.log(`[SearchGate] listening on http://${HOST}:${PORT} (search window: ${DEFAULT_WINDOW_MS / 1000}s/${DEFAULT_MAX_COUNT}, open window: ${DEFAULT_OPEN_WINDOW_MS / 1000}s/${DEFAULT_OPEN_MAX_COUNT}, keyword window: ${KEYWORD_WINDOW_MS / 1000}s/${KEYWORD_MAX_COUNT}, same resource max consecutive: ${DEFAULT_SAME_RESOURCE_MAX_CONSECUTIVE + 1}th denied)`);
 });

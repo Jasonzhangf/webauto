@@ -230,6 +230,59 @@ async function waitForTabCountIncrease({
   };
 }
 
+async function hydrateBlankNewestTab({
+  profileId,
+  beforeCount,
+  seedUrl,
+  openDelayMs,
+  apiTimeoutMs,
+  navigationTimeoutMs,
+  tabAppearTimeoutMs,
+  syncConfig,
+}) {
+  if (!seedUrl) {
+    return { ok: false, reason: 'missing_seed_url' };
+  }
+  const listed = await callApiWithTimeout('page:list', { profileId }, apiTimeoutMs);
+  const { pages } = extractPageList(listed);
+  const candidates = [...pages]
+    .filter((page) => Number.isFinite(Number(page?.index)))
+    .sort((a, b) => Number(b.index) - Number(a.index));
+  const newest = candidates[0] || null;
+  if (!newest) {
+    return { ok: false, reason: 'no_pages' };
+  }
+  const currentCount = pages.length;
+  if (currentCount <= beforeCount) {
+    return { ok: false, reason: 'count_not_increased' };
+  }
+  const currentUrl = String(newest.url || '').trim().toLowerCase();
+  const isBlank = !currentUrl || currentUrl === 'about:blank';
+  if (!isBlank) {
+    return { ok: true, reason: 'newest_already_navigated', afterCount: currentCount };
+  }
+  await callApiWithTimeout('page:switch', { profileId, index: Number(newest.index) }, apiTimeoutMs);
+  await callApiWithTimeout('goto', { profileId, url: seedUrl }, navigationTimeoutMs);
+  if (openDelayMs > 0) {
+    await sleep(Math.min(openDelayMs, 1200));
+  }
+  const syncResult = await syncTabViewportIfNeeded({ profileId, syncConfig });
+  if (!syncResult?.ok) {
+    throw new Error(syncResult?.message || 'sync_window_viewport failed');
+  }
+  const after = await waitForTabCountIncrease({
+    profileId,
+    beforeCount,
+    apiTimeoutMs,
+    maxWaitMs: Math.max(1500, Math.min(tabAppearTimeoutMs, 6000)),
+  });
+  return {
+    ok: true,
+    reason: 'blank_tab_hydrated',
+    afterCount: after?.afterCount || currentCount,
+  };
+}
+
 async function openTabBestEffort({
   profileId,
   seedUrl,
@@ -280,6 +333,22 @@ async function openTabBestEffort({
         });
       }
       return { ok: true, mode: 'newPage', error: null };
+    }
+    const hydrated = await hydrateBlankNewestTab({
+      profileId,
+      beforeCount,
+      seedUrl,
+      openDelayMs,
+      apiTimeoutMs,
+      navigationTimeoutMs,
+      tabAppearTimeoutMs,
+      syncConfig,
+    }).catch((error) => ({ ok: false, error }));
+    if (hydrated?.ok) {
+      return { ok: true, mode: 'newPage_hydrated_blank', error: null };
+    }
+    if (hydrated?.error) {
+      openError = hydrated.error;
     }
   } catch (err) {
     openError = err;

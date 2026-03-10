@@ -32,3 +32,545 @@ Tags: xhs, detail, expand-replies, show-more, comments, autoscript, deepseek
 ## Notes
 - 这次修复解决的是“订阅已命中但 action 拿不到目标”的问题。
 - detail loop 里仍有独立问题：`open_next_detail` 存在重复调度，需要单独继续收敛。
+
+## 2026-03-09 Follow-up
+- 新结论：`detail_show_more` 的更深层根因在 subscription/runtime 语义，不只是 action 取不到目标。
+- 当前实现把一个 selector 的所有可见元素压成“集合级状态”：
+  - `subscription.mjs` 只在整组从 `exists=false -> true` 时累计 `appearCount`
+  - `runtime.mjs` 的 `oncePerAppear` 也按这个集合级 `appearCount` 去重
+- 这会导致同一详情页里后续滚动进视口的新 `.show-more` 按钮，即使实际是新元素进入视口，也不会重新触发 `expand_replies`。
+- 正确语义应为元素级生命周期：
+  - 哪个元素进入视口，就为该元素发一次 `appear`
+  - 该元素当前在视口内，则 `exist` 对该元素生效
+  - 离开视口则对该元素发 `disappear`
+  - 调度去重应该基于元素事件键或元素可见集键，而不是集合级 `appearCount`
+- 修复方向：
+  - 在 `modules/camo-runtime/src/container/runtime-core/subscription.mjs` 为事件补充元素级 `eventKey/elementKeys`
+  - 在 `modules/camo-runtime/src/autoscript/runtime.mjs` 让 `oncePerAppear` 改按元素事件键/可见周期键去重
+  - `detail_show_more` 继续作为订阅配置消费层，不在 XHS 业务层重复实现集合语义
+
+## 2026-03-10 Progress
+- 已启动本地每小时提醒器：
+  - 脚本：`scripts/ops/hourly-progress-reminder.mjs`
+  - 启动器：`scripts/ops/start-hourly-progress-reminder.mjs`
+  - 状态文件：`.tmp/xhs-progress-status.txt`
+  - 后台 PID 文件：`.tmp/xhs-progress-reminder.pid`
+- 开始真实 5 帖 / 每帖 50 评论 / 2-tab 轮换验证：
+  - 命令：
+    - `node bin/webauto.mjs xhs unified --profile xhs-qa-1 --keyword deepseek --max-notes 5 --max-comments 50 --do-comments true --persist-comments true --do-likes false --env debug --tab-count 2`
+  - runId：
+    - `345064ed-942a-4451-94bc-a4f7fba863a6`
+  - 输出目录：
+    - `~/.webauto/download/xiaohongshu/debug/deepseek/merged/run-2026-03-09T16-15-07-945Z/`
+  - 启动证据：
+    - `xhs.unified.flow_gate` 显示 `tabCount=2`
+    - `xhs.unified.start` 显示 `maxNotes=5 assignedNotes=5`
+    - autoscript 已进入运行态：`subscriptions=9 operations=23`
+
+## 2026-03-10 Root Cause And Fix
+- 新 blocker 不是 `expand_replies`，而是 detail loop 的第二帖链接池被清空。
+- 根因：`modules/camo-runtime/src/autoscript/xhs-autoscript-detail-ops.mjs` 的 `open_next_detail` 没把 `keyword/env/outputRoot/tabCount` 继续传给 `xhs_open_detail`。
+  - `loadCollectedLinks()` 每次都会重新算 `resolveXhsOutputContext()`。
+  - 第二次 open 时因缺少 `keyword/env`，路径退化成 `~/.webauto/download/xiaohongshu/debug/unknown/safe-detail-urls.jsonl`。
+  - 结果 queue 被空 links cache 覆盖，`getOrAssignLinkForTab()` 直接返回空，触发 `AUTOSCRIPT_DONE_DETAIL_LINKS_EXHAUSTED`。
+- 修复：
+  - 在 `open_next_detail.params` 增加 `keyword`、`env`、`outputRoot`、`tabCount`，保证 next-loop 与 first-loop 使用同一输出上下文和 tab 语义。
+  - 在 `tests/unit/webauto/xhs-unified-template-stage.test.mjs` 增加断言，锁住这些参数不会再次丢失。
+
+## 2026-03-10 Validation After Fix
+- 模板单测：
+  - `node --test tests/unit/webauto/xhs-unified-template-stage.test.mjs`
+  - 结果：`10/10 pass`
+- UI CLI 最小链路：
+  - `node bin/webauto.mjs ui cli start --build`
+  - `node bin/webauto.mjs ui cli status --json`
+  - `node bin/webauto.mjs ui cli stop`
+  - 结果：start/status/stop 全部 `ok=true`
+- 真实 unified 回归：
+  - 命令：
+    - `node bin/webauto.mjs xhs unified --profile xhs-qa-1 --keyword deepseek --max-notes 5 --max-comments 50 --do-comments true --persist-comments true --do-likes false --env debug --tab-count 2`
+  - runId：
+    - `3de5a531-3bab-4c21-8a8f-fb55c2259064`
+  - 输出目录：
+    - `~/.webauto/download/xiaohongshu/debug/deepseek/merged/run-2026-03-09T16-36-27-383Z/`
+  - `summary.json` 关键结果：
+    - `assignedNotes=5`
+    - `openedNotes=5`
+    - `commentsHarvestRuns=5`
+    - `commentsCollected=231`
+    - `commentsReachedBottomCount=2`
+  - 事件证据：
+    - `profiles/wave-001.xhs-qa-1.events.jsonl` 中 `open_next_detail` 成功打开第 2/3/4/5 帖，说明 early-stop 已消失。
+    - 最终 terminal 仍是 `AUTOSCRIPT_DONE_DETAIL_LINKS_EXHAUSTED`，但这是 5 帖全部消费完成后的正常终止，不再是第 1 帖后误停。
+
+## 2026-03-10 Uncapped Comments Fix
+- 用户新增要求：不能再有每帖最大评论数限制，应该尽量滚到底。
+- 新发现：即使不传 `--max-comments`，runtime 仍被隐藏的 tab 预算截断。
+  - 失败证据运行：`runId=54471494-a2d9-459a-ac23-b5dc19ce9fff`
+  - 目录：`~/.webauto/download/xiaohongshu/debug/deepseek/merged/run-2026-03-09T17-14-07-918Z/`
+  - `events.jsonl` 中 3 帖仍出现 `exitReason=max_comments_reached`
+- 根因：
+  - `modules/camo-runtime/src/autoscript/xhs-autoscript-detail-ops.mjs` 把 `comments_harvest.commentBudget` 和 `tab_switch_if_needed.commentBudget` 硬编码成 `50`
+  - `modules/camo-runtime/src/autoscript/action-providers/xhs/tab-state.mjs` / `tab-ops.mjs` 也把 `50` 当默认上限处理
+- 修复：
+  - `maxComments > 0` 时才把 `commentBudget` 设为该值；否则设为 `0` 表示 uncapped
+  - `consumeTabBudget()` 仅在 `limit > 0` 时才认为 exhausted
+  - `executeSwitchTabIfNeeded()` 在 `limit <= 0` 时直接 skip，不做 50 条轮换
+- 单测验证：
+  - `node --test tests/unit/webauto/xhs-unified-template-stage.test.mjs tests/unit/webauto/xhs-tab-switch.test.mjs`
+  - 结果：`13/13 pass`
+- 修复后真实无上限运行：
+  - `runId=49efcced-96b5-4e0c-901d-a4ef3e763bc9`
+  - 目录：`~/.webauto/download/xiaohongshu/debug/deepseek/merged/run-2026-03-09T17-27-17-985Z/`
+  - 最终 `summary.json`：
+    - `openedNotes=5`
+    - `commentsCollected=743`
+    - `commentsReachedBottomCount=5`
+    - `operationErrors=0`
+    - `recoveryFailed=0`
+  - 最终逐帖结果：
+    - `698de0c8000000001a01e38d` -> `271`, `reached_bottom`, `rounds=15`
+    - `6997df4d00000000150207fd` -> `37`, `reached_bottom`, `rounds=3`
+    - `69a46962000000000e03db94` -> `29`, `reached_bottom`, `rounds=3`
+    - `698def79000000000b008360` -> `277`, `reached_bottom`, `rounds=15`
+    - `699e8712000000001a033e9f` -> `129`, `reached_bottom`, `rounds=6`
+  - 结论：`max_comments_reached` 隐藏预算阻塞已彻底消失，uncapped 语义已完成真实验证。
+
+## 2026-03-10 Long-Run Follow-up
+- 用户继续要求把真实任务推进到更大批次，并持续巡查运行状态。
+- 已启动新的 100 帖 uncapped 运行：
+  - 命令：
+    - `node bin/webauto.mjs xhs unified --profile xhs-qa-1 --keyword deepseek --max-notes 100 --do-comments true --persist-comments true --do-likes false --env debug --tab-count 2`
+  - runId：
+    - `d0997668-50a3-48f8-85b7-97a3f6e80bc4`
+  - 输出目录：
+    - `~/.webauto/download/xiaohongshu/debug/deepseek/merged/run-2026-03-09T17-46-41-626Z/`
+- 2026-03-10 02:23 CST 巡查证据：
+  - Unified API：`progress=36/100`、`failed=7`、`commentsCollected=4164`、`detailRuns=49`
+  - 最新完成帖：`693784e7000000001e0245e9` -> `202 comments`, `exitReason=reached_bottom`
+  - `profiles/wave-001.xhs-qa-1.events.jsonl` 证据显示：
+    - `close_detail` 正常完成，`result={"closed":true,"method":"goto_list","attempts":2}`
+    - 随后列表页重新出现 `search_result_item count=26`
+  - 结论：当前长跑任务仍在稳定推进，最新已验证帖子仍然是“滚到底 -> 关闭详情 -> 返回列表 -> 继续下一帖”的正常链路，没有出现新的评论展开或滚动阻塞。
+- 2026-03-10 02:27 CST 追加巡查证据：
+  - Unified API：`progress=37/100`、`failed=7`、`commentsCollected=4164`、`detailRuns=51`
+  - 当前活跃帖：`679918a50000000018005fc0`
+  - `profiles/wave-001.xhs-qa-1.events.jsonl` 显示该帖仍在正常长评论滚动：
+    - `round=38` 时 `comments_flushed` 后 `collectedCount=831`
+    - `round=39` 继续出现 `before_scroll_action -> after_scroll_action -> after_scroll_delay -> post_scroll_state`
+    - `post_scroll_state` 中 `detailVisible=true`、`commentsContextAvailable=true`、`currentNoteId=679918a50000000018005fc0`
+  - 结论：当前不是卡死，而是在处理超大评论帖；滚动链路和评论上下文保持正常，暂时无需介入修复。
+- 2026-03-10 02:42 CST 追加巡查证据：
+  - Unified API：`progress=49/100`、`failed=11`、`commentsCollected=7715`、`detailRuns=70`
+  - 最新完成帖：`69a9025c000000001a0264cd` -> `49 comments`, `exitReason=reached_bottom`, `commentCoverageRate=1.00`
+  - `profiles/wave-001.xhs-qa-1.events.jsonl` 证据显示：
+    - `comments_harvest` 在 `round=3` 结束，`atBottom=true`
+    - `operation_done` 结果里 `budgetExhausted=false`、`reachedBottom=true`
+    - 紧接着出现 `close_detail` 的 `operation_start`
+  - 结论：长跑任务从 37/100 推进到 49/100，没有退回任何隐藏预算截断；最新评论帖依旧是“滚到底后正常关闭详情”的稳定链路。
+- 2026-03-10 02:45 CST 追加巡查证据：
+  - Unified API：`progress=53/100`、`failed=11`、`commentsCollected=7778`、`detailRuns=74`
+  - 当前活跃帖：`689728f0000000000403d3dd`
+  - `profiles/wave-001.xhs-qa-1.events.jsonl` 显示该帖仍在正常采集：
+    - `round=4` 时 `comments_flushed` 后 `collectedCount=44`
+    - 同一时段出现 `detail_show_more count=1`
+    - 但 harvest 仍继续推进，`detailVisible=true`、`commentsContextAvailable=true`
+  - 结论：长跑任务继续前进到 53/100；即使事件流里出现 `detail_show_more`，当前也没有再次出现“展开回复不触发导致卡住”的旧问题，评论采集链路仍在前进。
+- 2026-03-10 03:18 CST 追加巡查证据：
+  - Unified API：`progress=69/100`、`failed=18`、`commentsCollected=9027`、`detailRuns=98`
+  - 最新成功完成的详情帖：`68fa4be9000000000402bd7e`
+  - 该帖关键证据：
+    - `comments_harvest` 中 `visibleCount=183`、`atBottom=true`
+    - 随后 `close_detail` 完成，`result={"closed":true,"method":"goto_list","attempts":2}`
+    - 然后 `expand_replies` 被 `detail_show_more` 触发，真实点击了 2 个目标：`展开更多回复`、`展开 15 条回复`
+  - 新 blocker：
+    - 下一次 `open_next_detail` 在 3 次重试中都失败，错误一致为 `page.goto: NS_ERROR_UNKNOWN_HOST`
+    - 失败目标 URL：`https://www.xiaohongshu.com/explore/67b3cad5000000002902a1ff?xsec_token=ABGPGobqiOLNbICWYthY2W86Uu-mSVPOujJdOAO4NAAUo=&xsec_source=`
+    - 诊断文件：
+      - `~/.webauto/download/xiaohongshu/debug/deepseek/diagnostics/debug-ops/d0997668-50a3-48f8-85b7-97a3f6e80bc4_open_next_detail_3_error-2026-03-09T19-00-50-210Z.json`
+      - `~/.webauto/download/xiaohongshu/debug/deepseek/diagnostics/debug-ops/d0997668-50a3-48f8-85b7-97a3f6e80bc4_open_next_detail_3_error-2026-03-09T19-00-50-210Z.png`
+  - 结论：展开回复逻辑本身在长跑中继续工作正常；当前阻塞已切换成 `open_next_detail` 的网络级导航失败。任务表面上仍是 `running`，但事件流在 2026-03-10 03:00:52 CST 之后只剩 `tick`，说明这轮 run 已进入假活跃卡住状态。
+
+## 2026-03-10 Open Failure Requeue Fix
+- 进一步定位后确认：长跑假活跃的直接原因不是 `expand_replies`，而是 `xhs_open_detail` 在 safe-link 打开失败时把错误上抛到 runtime，触发 `onFailure: continue` 的 `autoscript:operation_nonblocking_failure`，但没有在同一个 action 内继续消费下一条 link。
+- 修复点：`modules/camo-runtime/src/autoscript/action-providers/xhs/detail-flow-ops.mjs`
+  - `executeOpenDetailOperation()` 现在对 safe-link 模式下的以下失败都在 action 内部处理：
+    - `page.goto` / 导航异常 -> `OPEN_DETAIL_NAVIGATION_FAILED`
+    - 打开后详情不可见 -> `DETAIL_NOT_VISIBLE`
+    - link 缺少 `xsec_token` -> `MISSING_XSEC_TOKEN`
+  - 处理方式统一为：`requeueTabLinkToTail()` + `markOpenFailure()`，随后在同一次 `open_next_detail` 调用里继续取下一条 link，而不是让 runtime 停在 nonblocking failure。
+  - 为避免在坏 link 重排后无限循环，新增 `attemptedLinkKeys`，同一轮 `open_next_detail` 不会重复消费同一 key；当本轮候选都用尽时才抛出 `AUTOSCRIPT_DONE_DETAIL_LINKS_EXHAUSTED`。
+  - 同时加入 `context.testingOverrides` 仅供单测注入 `callAPI/readLocation/isDetailVisible/readDetailSnapshot/sleep`，不影响生产路径。
+
+## 2026-03-10 Validation For Requeue Fix
+- 单测：
+  - `node --test tests/unit/webauto/xhs-open-detail-requeue.test.mjs tests/unit/webauto/xhs-tab-links.test.mjs tests/unit/webauto/xhs-unified-template-stage.test.mjs`
+  - 结果：`15/15 pass`
+  - 新增用例 `tests/unit/webauto/xhs-open-detail-requeue.test.mjs` 锁定行为：首个 safe-link 导航报 `NS_ERROR_UNKNOWN_HOST` 时，坏 link 被重排到队尾，同一次 `executeOpenDetailOperation()` 会继续打开下一条 good link。
+- UI CLI 最小链路：
+  - `node bin/webauto.mjs ui cli start --build`
+  - `node bin/webauto.mjs ui cli status --json`
+  - `node bin/webauto.mjs ui cli stop`
+  - 结果：全部 `ok=true`
+
+## 2026-03-10 Post-Fix Runtime Evidence
+- 旧长跑 `d0997668-50a3-48f8-85b7-97a3f6e80bc4` 后续证据更新：
+  - 不是“仍在 running”，而是后端已进一步退化：
+    - `webauto xhs status --json` 失败，报 `fetch tasks failed: fetch failed`
+    - `curl http://127.0.0.1:7701/health` 失败，而 `curl http://127.0.0.1:7704/health` 正常
+
+## 2026-03-10 Login Guard Risk Rule Tightening
+- 用户新增刚性要求已确认并落实到代码：
+  - 只要出现 `login_guard`，一律视为风控/登录阻塞，不能自动点击关闭，必须停止当前脚本。
+  - comments/detail/full 默认走 `4-tab`，并保留每 `50` 条评论做 tab 轮换的语义；不再默认 `2-tab`。
+- 风险复盘结论：此前最可疑的高频重复动作不是“清 cookie 导致登出”，而是短时间内重复执行首页链路：
+  - fresh collect `b35b51e7-97e2-439e-829b-8ead626764ae` 在 `/explore` 首页误触发 `search_result_item.exist`，随后又执行 `verify_subscriptions -> collect_links -> submit_search`，属于在错误页面上重复做高相似操作。
+  - fresh collect `28eed2ce-9d19-407e-b8a5-b528e48d3658` 中，即便首页误触发已修掉，仍在 `goto_home -> wait_search_permit -> fill_keyword -> submit_search` 之间连续两次出现 `login_guard`，说明当前更接近平台风控拦截，而不是本地账号状态被清空。
+- 代码修正：
+  - `modules/camo-runtime/src/utils/xhs-login-signal.mjs`
+    - `hasLoginGuard` 不再因为检测到 accountId 就被压成 `false`；guard 可见即保持 `true`。
+  - `modules/camo-runtime/src/autoscript/action-providers/xhs/auth-ops.mjs`
+    - 删除 `login_guard` 自动关闭逻辑；`executeAssertLoggedInOperation()` 遇到 guard 直接返回 `LOGIN_GUARD_DETECTED`。
+  - `apps/webauto/entry/lib/xhs-unified-options.mjs`
+    - 默认 `tabCount` 改为 `4`；comments/detail/full 在未显式传参时统一落到 `4-tab`。
+- 验证：
+  - 测试命令：
+    - `node --test tests/unit/webauto/xhs-login-guard-signal.test.mjs tests/unit/webauto/xhs-login-guard-dismiss.test.mjs tests/unit/webauto/xhs-unified-options-entry.test.mjs tests/unit/webauto/xhs-tab-switch.test.mjs tests/unit/webauto/xhs-collect-output-root.test.mjs tests/unit/webauto/verify-subscriptions-fallback.test.mjs tests/unit/webauto/autoscript-stale-trigger-resume.test.mjs tests/unit/webauto/xhs-comments-focus-target.test.mjs tests/unit/webauto/xhs-open-detail-requeue.test.mjs tests/unit/webauto/xhs-tab-links.test.mjs tests/unit/webauto/xhs-unified-template-stage.test.mjs`
+  - 结果：`44/44 pass`
+  - UI CLI 最小链路：
+
+## 2026-03-10 Unified Search/Open Guard Enforcement
+- 用户确认新的刚性要求：
+  - `/search_result` 与 `/explore` 不能靠 URL 当页面状态真源，仍以容器判断为准。
+  - 不重复高频使用同一条 link 做验证。
+  - 只要出现 login/risk guard，必须立刻停止并清空待执行 link 队列。
+  - 搜索和 safe-link 打开共用同一套风控检查。
+- 修复收口点：
+  - `modules/camo-runtime/src/autoscript/action-providers/xhs/auth-ops.mjs`
+    - 新增 `readXhsInteractionGuard()`，统一读取 login guard + risk guard + risk URL 信号。
+    - 新增 `buildXhsGuardFailure()`，一旦 guard 命中就调用 `clearXhsPendingQueues()` 清空 `linksState.queue/byTab`，并返回刚性终止错误。
+  - `modules/camo-runtime/src/autoscript/action-providers/xhs/state.mjs`
+    - 新增 `clearXhsPendingQueues(profileId, meta)`，记录 `guardStop`，同时清空 detail/link 队列状态，避免 guard 后继续消耗旧 link。
+  - `modules/camo-runtime/src/autoscript/action-providers/xhs/collect-ops.mjs`
+    - `xhs_submit_search` 现在在输入前、提交前、等待结果期间、重试前都做统一 guard 检查；任何阶段命中 guard 直接返回 `LOGIN_GUARD_DETECTED` / `RISK_CONTROL_DETECTED`。
+  - `modules/camo-runtime/src/autoscript/action-providers/xhs/detail-flow-ops.mjs`
+    - `xhs_open_detail` 在 goto 前、等待详情可见期间、goto 后重定向检查时都走同一 guard 检测；不再仅靠 detail redirect 分类。
+- `modules/camo-runtime/src/autoscript/xhs-autoscript-base.mjs`
+    - `search_result_item` 改为搜索结果容器锚点 selector：`#search-result ...`, `[class*="search-result"] ...`, `.feeds-container ...`。
+    - 不再靠 `pageUrlIncludes=['/search_result']` 作为唯一状态门，而是让容器本身成为真源。
+
+## 2026-03-10 Expand Replies Drift Fix
+- 新的真实观察：detail 阶段在展开评论回复时，会偶发误点图片区域，导致进入图片查看而不是继续展开回复。
+- 已定位的直接根因：
+  - `modules/camo-runtime/src/autoscript/action-providers/xhs/harvest-ops.mjs` 的 `executeExpandRepliesOperation()` 会先批量收集一组 `show-more` 目标坐标，然后连续点击。
+  - 第一条回复展开后，评论流布局会立刻重排；后续仍复用旧坐标时，点击点可能已经漂移到 media/image 区域。
+- 修复：
+  - `executeExpandRepliesOperation()` 改为每次点击前都重新调用 `readExpandReplyTargets()` 读取“当前评论区内可见目标”。
+  - 加入 target key 去重，只点击尚未点击过的当前目标，不再依赖一次性静态快照。
+  - 保留 `event.elements` 仅作为兜底候选，但优先使用实时 live targets。
+- 回归测试：
+  - `tests/unit/webauto/xhs-detail-close-and-budget.test.mjs`
+  - 新增用例验证：第一次点击后第二次目标坐标发生明显位移时，操作会使用新的 live center，而不是复用旧坐标。
+- 已验证：
+  - `node --test tests/unit/webauto/xhs-detail-close-and-budget.test.mjs tests/unit/webauto/xhs-open-detail-requeue.test.mjs tests/unit/webauto/xhs-unified-template-stage.test.mjs`
+  - 结果：`19/19 pass`
+  - `node bin/webauto.mjs ui cli start --build && node bin/webauto.mjs ui cli status --json && node bin/webauto.mjs ui cli stop`
+  - 结果：start/status/stop 全部 `ok=true`
+
+## 2026-03-10 Safe-Link Close Stale Condition Fix
+- 新的真实证据表明，duplicate reopen 的直接原因不是 gate skip 逻辑没生效，而是 `close_detail` 在 runtime 层被提前 skip 了。
+- 真实运行 `run-2026-03-10T09-04-00-100Z` 中：
+  - 第 4 条 note `698def79000000000b008360` 在 `09:13:21Z` 出现 `close_detail -> autoscript:operation_skipped reason=stale_conditions`
+  - 随后 `09:13:34Z` 又被 `open_next_detail` 重开一次
+  - summary 最终表现为 `assignedNotes=4` 但 `openedNotes=5`
+- 根因：
+  - `modules/camo-runtime/src/autoscript/xhs-autoscript-detail-ops.mjs` 中 safe-link detail 的 `close_detail` 仍然要求 `subscription_exist(detail_modal)`。
+  - 当 `comments_harvest` 滚到底后 modal 先一步消失，runtime 会在真正进入 `executeCloseDetailOperation()` 前直接判定条件失效并 skip。
+  - 这样 action 内部的 `already_closed/stale_closed -> queue skip` 根本没有执行机会。
+- 修复：
+  - safe-link 模式下，`close_detail.conditions` 改为只依赖 `operation_done(comments_harvest)`。
+  - 非 safe-link 模式保留原有 `detail_modal` 存在条件。
+- 回归测试：
+  - `tests/unit/webauto/autoscript-stale-trigger-resume.test.mjs`
+  - 新增用例验证：即使 `comments_harvest` 结束时 `detail_modal` 已先 disappear，`close_detail` 仍会执行，不会再被 `stale_conditions` 跳过。
+  - `tests/unit/webauto/xhs-unified-template-stage.test.mjs` 同步锁定 safe-link 模板条件。
+- 已验证：
+  - `node --test tests/unit/webauto/xhs-unified-template-stage.test.mjs tests/unit/webauto/autoscript-stale-trigger-resume.test.mjs tests/unit/webauto/xhs-detail-close-and-budget.test.mjs tests/unit/webauto/xhs-open-detail-requeue.test.mjs`
+  - 结果：`29/29 pass`
+  - `node bin/webauto.mjs ui cli start --build && node bin/webauto.mjs ui cli status --json && node bin/webauto.mjs ui cli stop`
+  - 结果：start/status/stop 全部 `ok=true`
+
+## 2026-03-10 4-Tab Detail Residual Fixes
+- live 4-tab run `2459ed86-2aea-48b5-a8cb-c1691806ab5f` 最终成功，但暴露了两个残余问题：
+  - `assignedNotes=4` 却 `openedNotes=5`，同一帖子 `698def79000000000b008360` 被 `open_next_detail` 在 `07:48:12Z` 和 `07:49:39Z` 重开。
+  - `ensure_tab_pool` 在启动时两次报 `OPERATION_FAILED/new_tab_failed`，对应 debug snapshot `href=about:blank`。
+- 2026-03-10 17:04 CST 已修复并完成本地验证：
+  - `runtime/infra/utils/search-gate-core.mjs`
+    - detail queue 新增 `skipped` 集合。
+    - `releaseDetailLink(... skip=true|reason=stale_closed)` 会把已经“实际关闭但 close_detail 条件过期”的 link 直接从队列移除并标记跳过，后续 `claimDetailLink()` 不会再重拿它。
+  - `modules/camo-runtime/src/autoscript/action-providers/xhs/detail-flow-ops.mjs`
+    - `executeCloseDetailOperation()` 在 `openByLinks` 且 `initialVisible=false` 时，不再直接返回“already closed”；而是立即把当前 claimed link 记为 `stale_closed/skip`，清掉 active tab state，避免下一个 `open_next_detail` 重开同一帖。
+  - `modules/camo-runtime/src/autoscript/action-providers/xhs/search-gate-ops.mjs`
+    - release payload 透传 `reason/skip` 到 detail gate，保证上面的 skip 语义真正落到 gate 层。
+  - `modules/camo-runtime/src/container/runtime-core/operations/tab-pool.mjs`
+    - `ensure_tab_pool` 在 `newPage()` 后如果计数未立刻增长，会额外检查最新 tab；若是新开的 `about:blank`，则先 `page:switch` 到该 tab 再 `goto(seedUrl)` 做 hydration，然后才决定是否失败。
+- 针对性回归测试：
+  - `tests/unit/webauto/search-gate-core.test.mjs`
+    - 新增 stale-closed link 被 skip 后不可再 claim 的用例。
+  - `tests/unit/webauto/xhs-detail-close-and-budget.test.mjs`
+    - 新增 already-closed safe-link 会触发 queue skip 的用例。
+  - `tests/unit/webauto/xhs-tab-pool-startup.test.mjs`
+    - 新增 `about:blank` 新 tab hydration 后 `ensure_tab_pool` 不误报失败的用例。
+- 验证：
+  - `node --test tests/unit/webauto/search-gate-core.test.mjs tests/unit/webauto/xhs-detail-close-and-budget.test.mjs tests/unit/webauto/xhs-tab-pool-startup.test.mjs tests/unit/webauto/xhs-open-detail-requeue.test.mjs tests/unit/webauto/xhs-interaction-guard.test.mjs tests/unit/webauto/xhs-unified-template-stage.test.mjs tests/unit/webauto/xhs-tab-switch.test.mjs`
+  - 结果：`31/31 pass`
+  - `node bin/webauto.mjs ui cli start --build && node bin/webauto.mjs ui cli status --json && node bin/webauto.mjs ui cli stop`
+  - 结果：全部 `ok=true`
+  - `curl -sf http://127.0.0.1:7701/health`
+  - 结果：`{"ok":true,"service":"unified-api",...}`
+- 真实回归已启动：
+  - session: `61011`
+  - 命令：
+    - `node apps/webauto/entry/xhs-unified.mjs --profile xhs-qa-1 --keyword deepseek --stage detail --detail-open-by-links true --shared-harvest-path /Users/fanzhang/.webauto/download/xiaohongshu/debug/deepseek/safe-detail-urls.jsonl --max-notes 4 --auto-close-detail true --env debug --do-comments true --persist-comments true --skip-account-sync --tab-count 4`
+- 新增回归：
+  - `tests/unit/webauto/xhs-interaction-guard.test.mjs`
+    - 锁定 `submit_search` 在 login guard 出现时立即停下并清空队列。
+    - 锁定 `open_detail` 在 risk guard / website-login 风控出现时立即停下并清空队列。
+- 验证：
+  - `node --test tests/unit/webauto/xhs-login-guard-signal.test.mjs tests/unit/webauto/xhs-login-guard-dismiss.test.mjs tests/unit/webauto/xhs-collect-output-root.test.mjs tests/unit/webauto/xhs-open-detail-requeue.test.mjs tests/unit/webauto/xhs-interaction-guard.test.mjs tests/unit/webauto/xhs-unified-options-entry.test.mjs tests/unit/webauto/xhs-tab-switch.test.mjs tests/unit/webauto/verify-subscriptions-fallback.test.mjs tests/unit/webauto/autoscript-stale-trigger-resume.test.mjs tests/unit/webauto/xhs-comments-focus-target.test.mjs tests/unit/webauto/xhs-tab-links.test.mjs tests/unit/webauto/xhs-unified-template-stage.test.mjs`
+  - 结果：`46/46 pass`
+  - UI CLI 最小链路：`node bin/webauto.mjs ui cli start --build && node bin/webauto.mjs ui cli status --json && node bin/webauto.mjs ui cli stop`，结果全 `ok=true`
+  - 当前运行态核验：`node bin/webauto.mjs xhs status --json` 仍失败，错误为 `fetch tasks failed: fetch failed`；最新 merged 产物仍是 `run-2026-03-09T22-20-36-701Z/summary.json`，说明现在没有活跃 run 可继续，当前 blocker 仍是 Unified API `7701` 不可用，而不是新 guard 逻辑回归。
+
+## 2026-03-10 Gate Unification For Search And Open-Link
+- 用户进一步收紧规则：
+  - 搜索必须先申请许可。
+  - 打开链接也必须先申请许可。
+  - 同一个搜索词或同一条 link 连续重复触发达到阈值后必须拒绝，不允许继续高频重试。
+- 最佳修复点不是在 XHS 业务层分散写节流，而是扩展 Gate 本身成为统一真源：
+  - 新增 `runtime/infra/utils/search-gate-core.mjs`
+    - 抽出纯逻辑 `evaluateSearchGatePermit()`。
+    - 支持 `kind=search|open_link|like`。
+    - 支持 `resourceKey` + `sameResourceMaxConsecutive`，用于拦截“连续重复相同资源”。
+  - 更新 `scripts/search-gate-server.mjs`
+    - `/permit` 现在支持 open-link 场景。
+    - `/stats` 额外输出 `resourceHistory`。
+    - 默认新增 open-link 配额：`WEBAUTO_OPEN_GATE_WINDOW_MS` / `WEBAUTO_OPEN_GATE_MAX_COUNT`。
+  - 更新 `modules/camo-runtime/src/autoscript/action-providers/xhs/search-gate-ops.mjs`
+    - 新增 `requestXhsGatePermit()` 作为统一调用入口。
+    - 对 `deny=consecutive_same_resource_limit` 映射为刚性错误：
+      - 搜索：`SEARCH_GATE_REJECTED`
+      - 开链：`OPEN_LINK_GATE_REJECTED`
+  - 更新 `modules/camo-runtime/src/autoscript/action-providers/xhs/detail-flow-ops.mjs`
+    - safe-link `goto` 前先申请 `kind=open_link` 许可。
+    - 同一条 note/link 连续命中阈值后，不再继续 goto，而是立刻返回 gate reject。
+- 新增回归：
+  - `tests/unit/webauto/search-gate-core.test.mjs`
+    - 锁定同一个搜索词连续第 4 次被拒绝。
+    - 锁定同一条 open-link 连续第 4 次被拒绝。
+  - `tests/unit/webauto/xhs-interaction-guard.test.mjs`
+    - 锁定 `wait_search_permit` 被同资源拒绝时抛 `SEARCH_GATE_REJECTED`。
+    - 锁定 `xhs_open_detail` 被同 link 拒绝时返回 `OPEN_LINK_GATE_REJECTED`。
+- 验证：
+  - `node --test tests/unit/webauto/search-gate-core.test.mjs tests/unit/webauto/xhs-interaction-guard.test.mjs tests/unit/webauto/xhs-open-detail-requeue.test.mjs tests/unit/webauto/xhs-login-guard-signal.test.mjs tests/unit/webauto/xhs-login-guard-dismiss.test.mjs tests/unit/webauto/xhs-collect-output-root.test.mjs tests/unit/webauto/xhs-unified-options-entry.test.mjs tests/unit/webauto/xhs-tab-switch.test.mjs tests/unit/webauto/verify-subscriptions-fallback.test.mjs tests/unit/webauto/autoscript-stale-trigger-resume.test.mjs tests/unit/webauto/xhs-comments-focus-target.test.mjs tests/unit/webauto/xhs-tab-links.test.mjs tests/unit/webauto/xhs-unified-template-stage.test.mjs`
+  - 结果：`50/50 pass`
+  - UI CLI 最小链路：`node bin/webauto.mjs ui cli start --build && node bin/webauto.mjs ui cli status --json && node bin/webauto.mjs ui cli stop`，结果全 `ok=true`
+    - `node bin/webauto.mjs ui cli start --build && node bin/webauto.mjs ui cli status --json && node bin/webauto.mjs ui cli stop`
+  - 结果：全部 `ok=true`
+    - `run-2026-03-09T17-46-41-626Z/profiles/wave-001.xhs-qa-1.events.jsonl` 尾部从单纯 `tick` 进一步变成大量 `autoscript:watch_error`：先是 `fetch failed`，随后变为 `session for profile xhs-qa-1 not started`
+  - 结论：这轮 run 已经彻底死亡，不能再拿来继续验证修复后的 forward progress。
+- 新鲜真实回归 run：
+  - 命令：
+    - `node apps/webauto/entry/xhs-unified.mjs --profile xhs-qa-1 --keyword deepseek --stage detail --detail-open-by-links true --shared-harvest-path /Users/fanzhang/.webauto/download/xiaohongshu/debug/deepseek/safe-detail-urls.jsonl --max-notes 3 --auto-close-detail true --env debug --do-comments true --persist-comments true --skip-account-sync --tab-count 1`
+  - runId：`b821cc13-c7ab-4b13-a195-641f885b6f08`
+  - 输出目录：`~/.webauto/download/xiaohongshu/debug/deepseek/merged/run-2026-03-09T19-48-18-303Z/`
+  - 已验证结果：
+    - run 最终不是假活跃，而是正常以 `autoscript:operation_terminal` / `AUTOSCRIPT_DONE_DETAIL_LINKS_EXHAUSTED` 结束
+    - `open_next_detail` / `close_detail` / `wait_between_notes` 仍能反复推进，不再出现旧的“open 失败后只剩 tick 卡死”形态
+  - 但同时暴露了新 blocker：
+    - `comments_harvest` 多次出现 `DETAIL_NOTEID_MISMATCH` / `note_binding_mismatch`
+    - 例：预期 note `698de0c8000000001a01e38d`，实际 detail 先后漂移到 `6861c7a700000000110004b6`、`6974caf6000000000e00d9cc`
+    - 对应诊断：`~/.webauto/download/xiaohongshu/debug/deepseek/diagnostics/debug-ops/b821cc13-c7ab-4b13-a195-641f885b6f08_comments_harvest_1_error-2026-03-09T19-51-08-018Z.json`
+  - 当前结论：`open_next_detail` 的 fake-alive 问题已修复并通过真实 run 证明不会再把脚本留在假运行态；下一步阻塞已经切换为 detail/comment 绑定漂移，而不是坏 link 导航失败本身。
+
+## 2026-03-10 Comment Focus Drift Fix
+- 对 fresh run `b821cc13-c7ab-4b13-a195-641f885b6f08` 的事件链进一步定位后确认：真正导致 `DETAIL_NOTEID_MISMATCH` 的不是 safe-link open，而是 `comments_harvest` 为了让 PageDown 命中评论容器，选择了 `.note-scroller` 作为 focus click 目标。
+- 证据链：
+  - `b821...events.jsonl` 中 `focus_comment_context_after_scroll_focus` 一直显示 `selector=.note-scroller`
+  - 随后很快出现 `note_binding_mismatch`，实际 URL 漂移到别的帖子
+  - 对应错误截图/诊断里页面已不在预期 note，而是另一个 `/explore/<noteId>`
+- 修复：
+  - 在 `modules/camo-runtime/src/autoscript/action-providers/xhs/harvest-ops.mjs` 新增 `resolveCommentFocusTarget()`
+  - `comments_harvest` 现在优先点击可见 `.comment-item`，其次 `.total` 评论头部，最后才回退到整个 `.note-scroller`
+  - 新 progress trace 会显式记录 `focusSource` / `focusSelector`，便于后续确认点击锚点到底选了什么
+- 新增单测：
+  - `tests/unit/webauto/xhs-comments-focus-target.test.mjs`
+  - 覆盖三种优先级：`visible_comment > comment_total > comment_scroll`
+
+## 2026-03-10 Validation After Focus Fix
+- 单测：
+  - `node --test tests/unit/webauto/xhs-comments-focus-target.test.mjs tests/unit/webauto/xhs-open-detail-requeue.test.mjs tests/unit/webauto/xhs-tab-links.test.mjs tests/unit/webauto/xhs-unified-template-stage.test.mjs`
+  - 结果：`18/18 pass`
+- UI CLI 最小链路：
+  - `node bin/webauto.mjs ui cli start --build`
+  - `node bin/webauto.mjs ui cli status --json`
+  - `node bin/webauto.mjs ui cli stop`
+  - 结果：全部 `ok=true`
+- 新鲜真实回归：
+
+## 2026-03-10 Redirect Loop Fix
+- 新的 uncapped 100-note run `2d5420ca-7f65-4856-b8aa-68d4ff706bdf` 证明最新 blocker 已不再是 stale trigger 或 mouse click，而是 safe-link redirect loop：
+  - `summary.json`：`openedNotes=0`、`commentsHarvestRuns=0`、`operationErrors=1`、`reason=operation_timeout`
+  - `profiles/wave-001.xhs-qa-1.events.jsonl`：`open_first_detail` 于 `2026-03-09T21:33:31.522Z` 开始，`2026-03-09T21:38:01.525Z` 以 `OPERATION_TIMEOUT` 结束
+  - debug/timeout snapshot 都捕获到相同 URL：`https://www.xiaohongshu.com/login?redirectPath=https%3A%2F%2Fwww.xiaohongshu.com%2Fexplore%2F699c26bc...`
+- `/Users/fanzhang/.webauto/logs/browser-service.crash.jsonl` 同时显示从 `2026-03-09T21:33:35Z` 到 `2026-03-09T21:38:59Z` 持续的 `browser.command.start action="goto" profileId="xhs-qa-1"`，说明 runtime 在同一 poisoned safe link 上反复打开后被登录/风控页重定向，再次 requeue，最终超时。
+- 唯一最佳修复点仍在 `modules/camo-runtime/src/autoscript/action-providers/xhs/detail-flow-ops.mjs`：
+  - safe-link 打开后若 `detailVisible=false`，先读取当前 URL
+  - 显式 `/login?...redirectPath=` 直接分类为 `LOGIN_GUARD_DETECTED`
+  - `/website-login/error`、captcha/verify URL、`httpStatus=461`、`verifyType=400` 分类为 `RISK_CONTROL_DETECTED`
+  - 这些 terminal blocker 不再进入 `requeueTabLinkToTail()` 路径，因此不会再把同一坏 link 无限旋转到 `operation_timeout`
+- 新增回归：`tests/unit/webauto/xhs-open-detail-requeue.test.mjs`
+  - 新覆盖 1：safe-link 被显式 login redirect 时，首次 `goto` 后立即返回 `LOGIN_GUARD_DETECTED`，不继续消费下一条，也不 requeue 当前 link
+  - 新覆盖 2：safe-link 被 website-login risk redirect 时，首次 `goto` 后立即返回 `RISK_CONTROL_DETECTED`
+- 验证：
+  - `node --test tests/unit/webauto/xhs-open-detail-requeue.test.mjs tests/unit/webauto/xhs-login-guard-signal.test.mjs tests/unit/webauto/xhs-login-guard-dismiss.test.mjs tests/unit/webauto/autoscript-stale-trigger-resume.test.mjs tests/unit/webauto/xhs-comments-focus-target.test.mjs tests/unit/webauto/xhs-tab-links.test.mjs tests/unit/webauto/xhs-unified-template-stage.test.mjs`
+  - 结果：`34/34 pass`
+  - UI CLI 最小链路再次通过：`node bin/webauto.mjs ui cli start --build`、`status --json`、`stop`
+  - 命令：
+    - `node apps/webauto/entry/xhs-unified.mjs --profile xhs-qa-1 --keyword deepseek --stage detail --detail-open-by-links true --shared-harvest-path /Users/fanzhang/.webauto/download/xiaohongshu/debug/deepseek/safe-detail-urls.jsonl --max-notes 3 --auto-close-detail true --env debug --do-comments true --persist-comments true --skip-account-sync --tab-count 1`
+  - runId：
+    - `e649bf9a-b9b2-49cc-88c8-a673791bde5b`
+  - 输出目录：
+    - `~/.webauto/download/xiaohongshu/debug/deepseek/merged/run-2026-03-09T20-11-08-750Z/`
+  - `summary.json` 关键结果：
+    - `openedNotes=3`
+    - `commentsHarvestRuns=3`
+    - `commentsCollected=332`
+    - `commentsExpected=559`
+    - `commentsReachedBottomCount=3`
+    - terminal=`AUTOSCRIPT_DONE_DETAIL_LINKS_EXHAUSTED`
+    - 没有 `DETAIL_NOTEID_MISMATCH` / `note_binding_mismatch`
+  - 逐帖结果：
+    - `698de0c8000000001a01e38d` -> `271 comments`, `reached_bottom`, `rounds=14`
+    - `6997df4d00000000150207fd` -> `34 comments`, `reached_bottom`, `rounds=3`
+    - `69a46962000000000e03db94` -> `27 comments`, `reached_bottom`, `rounds=3`
+  - 事件证据：
+    - `focus_comment_context_after_scroll_focus` / `focus_comment_context_done` 现在记录 `focusSource="visible_comment"`
+    - `post_scroll_state` 在滚动后仍保持预期 note URL，不再漂移到其他帖子
+
+## 2026-03-10 Expand Replies Retry Fix Validation
+- 针对上一个 clean-ish run `e649bf9a-b9b2-49cc-88c8-a673791bde5b` 里残留的 `expand_replies` 非阻塞错误，已在 camo backend 增加 mouse click retry：
+  - `modules/camo-backend/src/internal/browser-session/utils.ts` 新增 `isRetryableMouseClickError()`
+  - `modules/camo-backend/src/internal/browser-session/input-ops.ts` 让 `mouseClick()` 在 `Page.dispatchMouseEvent` / `win.windowUtils.sendMouseEvent is not a function` 上也会重试
+  - `modules/camo-backend/src/internal/BrowserSession.input.test.ts` 新增回归用例锁住该协议错误
+- 代码级验证：
+  - `npx tsx --test modules/camo-backend/src/internal/BrowserSession.input.test.ts`
+  - 结果：`11/11 pass`
+- 新鲜真实回归：
+  - 命令：
+    - `node apps/webauto/entry/xhs-unified.mjs --profile xhs-qa-1 --keyword deepseek --stage detail --detail-open-by-links true --shared-harvest-path /Users/fanzhang/.webauto/download/xiaohongshu/debug/deepseek/safe-detail-urls.jsonl --max-notes 3 --auto-close-detail true --env debug --do-comments true --persist-comments true --skip-account-sync --tab-count 1`
+  - runId：`b073c142-56f5-425e-ab91-35e3d2e80acf`
+  - 输出目录：`~/.webauto/download/xiaohongshu/debug/deepseek/merged/run-2026-03-09T20-33-20-092Z/`
+  - `summary.json` 关键结果：
+    - `openedNotes=3`
+    - `commentsHarvestRuns=3`
+    - `commentsCollected=335`
+    - `commentsExpected=559`
+    - `commentsReachedBottomCount=3`
+    - `operationErrors=0`
+    - terminal=`AUTOSCRIPT_DONE_DETAIL_LINKS_EXHAUSTED`
+  - 逐帖结果：
+    - `698de0c8000000001a01e38d` -> `271 comments`, `reached_bottom`, `rounds=14`
+    - `6997df4d00000000150207fd` -> `37 comments`, `reached_bottom`, `rounds=3`
+    - `69a46962000000000e03db94` -> `27 comments`, `reached_bottom`, `rounds=3`
+  - 事件证据：
+    - `expand_replies` 在同一 run 内多次成功完成：`expanded=3`、`expanded=2`、`expanded=1`
+    - 全文检索无 `operation_nonblocking_failure`
+    - 全文检索无 `sendMouseEvent` / `dispatchMouseEvent`
+    - 全文检索无 `DETAIL_NOTEID_MISMATCH` / `note_binding_mismatch`
+    - `comments_harvest` 继续记录 `focusSource="visible_comment"`，并且 `post_scroll_state` 始终保持在预期 note URL
+- 当前结论：
+  - `open_next_detail` fake-alive、comment focus drift、`expand_replies` click protocol error 三个 blocker 都已分别被真实 run 证据清除
+  - 下一步不再是细节修 bug，而是直接重启新的 100-note / 2-tab / uncapped 长跑验证，确认修复在长时运行里持续成立
+
+## 2026-03-10 Long-Run Stale Trigger Follow-up
+- 重启 100-note / 2-tab / uncapped 长跑后，又暴露了一个新的 runtime 调度问题，不是 comment drift，也不是 mouse click retry：
+  - 命令：
+    - `node bin/webauto.mjs xhs unified --profile xhs-qa-1 --keyword deepseek --max-notes 100 --do-comments true --persist-comments true --do-likes false --env debug --tab-count 2`
+  - runId：`000ccd14-66b5-4a36-bbfc-40142076d83e`
+  - 输出目录：`~/.webauto/download/xiaohongshu/debug/deepseek/merged/run-2026-03-09T20-43-35-036Z/`
+- 该 run 前段证明评论链路本身仍健康：
+  - `webauto xhs status --run-id 000ccd14-66b5-4a36-bbfc-40142076d83e --json` 曾显示 `processed=4`, `failed=1`, `commentsCollected=327`
+  - `comments_harvest` 在 note `698def79000000000b008360` 上持续推进到 `round=9`, `collectedCount=192`
+  - `focusSource="visible_comment"` 仍成立，`post_scroll_state` 保持在预期 note URL，没有再次发生 `note_binding_mismatch`
+- 新 blocker 的真实证据：
+  - `close_detail` 在 `2026-03-09T20:46:37.000Z` 已完成，页面回到搜索页
+  - 但同一 run 里 `expand_replies` 仍在 `2026-03-09T20:46:48.071Z` 被排队执行
+  - 随后立刻报：`EXPAND_REPLIES_NO_TARGETS`
+  - debug snapshot 明确显示：
+    - `href=https://www.xiaohongshu.com/explore?channel_id=homefeed_recommend`
+    - `detailVisible=false`
+    - `searchVisible=true`
+  - 结论：`detail_show_more.exist` 的旧触发事件在 detail 关闭后还留在队列里，等轮到执行时条件已失效，导致 `expand_replies` 在搜索页误跑
+- 唯一修复点：`modules/camo-runtime/src/autoscript/runtime.mjs`
+  - 之前 runtime 只在执行前检查 trigger 本身是否 stale（`isTriggerStillValid`），但不会重新检查 operation `conditions`
+  - 新增 `getCurrentConditionState()`
+  - 在 `runOperation()` 正式 `operation_start` 前，若 `conditions` 已不满足，则直接：
+    - `autoscript:operation_skipped`
+    - `reason=stale_conditions`
+    - `code=OPERATION_SKIPPED_STALE_CONDITIONS`
+  - 同时避免把这种 skip 计入 `oncePerAppear` 已完成 cycle
+- 新增单测：
+  - `tests/unit/webauto/autoscript-stale-trigger-resume.test.mjs`
+  - 新用例覆盖：`detail_show_more.exist` 已排队，但 `detail_modal` 在执行前已关闭时，`expand_replies` 必须 skip，且不能真正 start
+- 验证：
+  - `node --test tests/unit/webauto/autoscript-stale-trigger-resume.test.mjs`
+  - 结果：`9/9 pass`
+  - 回归合集：
+    - `node --test tests/unit/webauto/xhs-comments-focus-target.test.mjs tests/unit/webauto/xhs-open-detail-requeue.test.mjs tests/unit/webauto/xhs-tab-links.test.mjs tests/unit/webauto/xhs-unified-template-stage.test.mjs tests/unit/webauto/autoscript-stale-trigger-resume.test.mjs`
+  - 结果：`27/27 pass`
+  - UI CLI 最小链路：
+    - `node bin/webauto.mjs ui cli start --build`
+    - `node bin/webauto.mjs ui cli status --json`
+    - `node bin/webauto.mjs ui cli stop`
+  - 结果：全部 `ok=true`
+- 后续状态：
+  - 这轮 run 后半段又因服务层退化而死亡，不可继续作为验证基线：
+    - event tail 后期出现连续 `fetch failed`
+    - `tab_switch_if_needed`、`expand_replies`、`open_next_detail` 都受影响
+    - 最后 `abort_on_login_guard` 触发 `script_failure`
+    - 之后 `7701` / `7704` health 都失败
+  - 当前结论：stale trigger 调度漏洞已经补住；下一步不是继续分析死 run，而是等服务恢复后重启新的 100-note 长跑
+
+## 2026-03-10 Verify Subscriptions Fallback Fix
+- fresh recollect `6db973ea-658a-4116-8be9-cf915070dc55` 进一步暴露了一个 runtime-core bug，而不是新的 XHS 业务问题：
+  - `verify_subscriptions` 的 across-pages fallback 分支引用了作用域外的 `activeIndex`
+  - 实际崩溃点：`modules/camo-runtime/src/container/runtime-core/operations/index.mjs:439`
+  - 结果是 collect 在搜索链路中途直接抛 `ReferenceError: activeIndex is not defined`
+  - 诊断文件：`.tmp/xhs-fresh-links-check/xiaohongshu/debug/deepseek/diagnostics/debug-ops/6db973ea-658a-4116-8be9-cf915070dc55_submit_search_1_error-2026-03-09T22-22-16-844Z.json`
+- 修复：
+  - 在 `modules/camo-runtime/src/container/runtime-core/operations/index.mjs` 中把跨页面当前索引提升为 `activePageIndex`
+  - restore 当前页、fallback page index 记录都统一使用 `activePageIndex`
+  - 因此“没有任何 listed page 命中 URL filter，但当前页 DOM 实际满足 selector”时，不再 crash，而是按 fallback 正常返回
+- 新增并完成回归：`tests/unit/webauto/verify-subscriptions-fallback.test.mjs`
+  - 测试 mock 改成真实路径使用的 `evaluate`：
+    - DOM snapshot `result.dom_tree/current_url/viewport`
+    - `window.location.href`
+  - 覆盖断言：fallback 成功、`matchedPageCount=1`、fallback page index 仍是当前页 `7`
+- 验证：
+  - `node --test tests/unit/webauto/verify-subscriptions-fallback.test.mjs tests/unit/webauto/xhs-open-detail-requeue.test.mjs tests/unit/webauto/xhs-login-guard-signal.test.mjs tests/unit/webauto/xhs-login-guard-dismiss.test.mjs tests/unit/webauto/autoscript-stale-trigger-resume.test.mjs tests/unit/webauto/xhs-comments-focus-target.test.mjs tests/unit/webauto/xhs-tab-links.test.mjs tests/unit/webauto/xhs-unified-template-stage.test.mjs`
+  - 结果：`35/35 pass`
+  - UI CLI 最小链路再次通过：`node bin/webauto.mjs ui cli start --build`、`node bin/webauto.mjs ui cli status --json`、`node bin/webauto.mjs ui cli stop`
+
+## 2026-03-10 Fresh Detail Status After Runtime Fix
+- 当前 fresh recollect 还没能真正重跑，先被基础设施卡住：
+  - `node bin/webauto.mjs xhs status --json` 仍报 `fetch tasks failed: fetch failed`
+  - `curl http://127.0.0.1:7701/health` 仍失败，Unified API 7701 未恢复
+  - `node bin/webauto.mjs xhs install --ensure-backend` 只能确保 browser backend，不会自动拉起 Unified API
+- 业务层最新实证保持不变：旧 safe links 现在是 terminal login guard，而不是 redirect loop：
+  - run：`dc4deb72-363f-4394-a0b2-fd364beccf9a`
+  - summary：`/Users/fanzhang/.webauto/download/xiaohongshu/debug/deepseek/merged/run-2026-03-09T22-20-36-701Z/summary.json`
+  - 结果：`openedNotes=0`、`operationErrors=2`、`reason=script_failure`
+  - events：`open_first_detail` 两次都返回 `LOGIN_GUARD_DETECTED`，跳转到 `/login?redirectPath=.../explore/698de0c8000000001a01e38d...`
+- 同时 `node bin/webauto.mjs account sync xhs-qa-1 --platform xiaohongshu --pending-while-login --json` 仍把账号标为 `valid`（`accountId=69a6e5b0000000002401e93b`, alias=`太阳以西`）。
+- 当前判断：等 7701 恢复后，fresh recollect + fresh-link 1-note detail 对照仍是下一步关键证据；如果 fresh links 也直接掉到同样的 login redirect，就该转向账号有效性判定入口，而不是继续改 safe-link opener。

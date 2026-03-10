@@ -241,6 +241,13 @@ type CleanupOptions = {
   includeLockCleanup?: boolean;
 };
 
+function shouldStopCoreServicesOnAppExit(reason: string, options: CleanupOptions = {}) {
+  if (typeof options.stopCoreServices === 'boolean') return options.stopCoreServices;
+  const normalizedReason = String(reason || '').trim().toLowerCase();
+  if (normalizedReason === 'window_closed') return false;
+  return true;
+}
+
 async function cleanupRuntimeEnvironment(reason: string, options: CleanupOptions = {}) {
   stopDaemonWorkerHeartbeat(reason);
   killAllRuns(reason);
@@ -300,7 +307,7 @@ function ensureAppExitCleanup(reason: string, options: CleanupOptions = {}) {
   appExitCleanupPromise = cleanupRuntimeEnvironment(reason, {
     stopUiBridge: true,
     stopHeartbeat: true,
-    stopCoreServices: true,
+    stopCoreServices: shouldStopCoreServicesOnAppExit(reason, options),
     stopStateBridge: options.stopStateBridge === true,
     includeLockCleanup: true,
   }).finally(() => {
