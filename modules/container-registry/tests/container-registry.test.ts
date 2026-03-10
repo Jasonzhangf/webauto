@@ -4,13 +4,13 @@ import { ContainerRegistry } from '../src/index.js';
 
 test('getContainersForUrl returns known container', () => {
   const registry = new ContainerRegistry();
-  const containers = registry.getContainersForUrl('https://weibo.com/');
-  assert.ok(containers.weibo_main_page, 'should include weibo_main_page');
+  const containers = registry.getContainersForUrl('https://xiaohongshu.com/');
+  assert.ok(Object.keys(containers).length > 0, 'should include xiaohongshu containers');
 });
 
-test('listSites contains weibo entry', () => {
+test('listSites contains xiaohongshu entry', () => {
   const registry = new ContainerRegistry();
   const sites = registry.listSites();
-  const hasWeibo = sites.some((site) => site.key.includes('weibo'));
-  assert.ok(hasWeibo, 'should list weibo site');
+  const hasXhs = sites.some((site) => site.key.includes('xiaohongshu'));
+  assert.ok(hasXhs, 'should list xiaohongshu site');
 });

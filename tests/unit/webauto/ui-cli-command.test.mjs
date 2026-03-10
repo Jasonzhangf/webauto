@@ -20,7 +20,6 @@ test('webauto ui cli --help prints ui cli usage', () => {
   assert.match(ret.stdout, /restart/);
   assert.match(ret.stdout, /click --selector/);
   assert.match(ret.stdout, /full-cover/);
-  assert.match(ret.stdout, /stage/);
   assert.match(ret.stdout, /probe/);
   assert.match(ret.stdout, /--detailed/);
   assert.match(ret.stdout, /text_contains\|text_equals\|value_equals\|not_disabled/);

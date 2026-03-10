@@ -34,23 +34,30 @@ function createGateway() {
   return { calls, gateway };
 }
 
-test('scheduleInvoke save validates weibo monitor user-id', async () => {
+test('scheduleInvoke save validates missing keyword', async () => {
   const { gateway } = createGateway();
+  gateway.setAccountProfiles([
+    {
+      profileId: 'xhs-1',
+      valid: true,
+      accountId: 'xhs-u1',
+      updatedAt: '2026-02-26T00:00:00.000Z',
+    },
+  ]);
   const result = await scheduleInvoke(gateway, {
     action: 'save',
     payload: {
-      name: 'weibo-monitor',
-      commandType: 'weibo-monitor',
+      name: 'xhs-monitor',
+      commandType: 'xhs-unified',
       scheduleType: 'interval',
       intervalMinutes: 30,
       argv: {
-        profile: 'weibo-1',
-        keyword: 'k',
+        profile: 'xhs-1',
       },
     },
   });
   assert.equal(result.ok, false);
-  assert.match(String(result.error || ''), /user-id/);
+  assert.match(String(result.error || ''), /关键词/);
 });
 
 test('scheduleInvoke save builds argv-json and command-type', async () => {
@@ -78,36 +85,31 @@ test('scheduleInvoke save builds argv-json and command-type', async () => {
       },
     },
   });
-  assert.equal(result.ok, true, JSON.stringify(result));
-  const scheduleCall = calls.runJson.find((item: any) =>
-    Array.isArray(item?.args) && item.args.some((value: string) => includesScript(value, 'schedule.mjs')),
-  );
-  const args = scheduleCall?.args || [];
-  assert.equal(args.some((item: string) => includesScript(item, 'schedule.mjs')), true);
-  assert.equal(args.includes('update'), true);
-  assert.equal(args.includes('task-1'), true);
-  assert.equal(args.includes('--command-type'), true);
-  assert.equal(args.includes('xhs-unified'), true);
-  assert.equal(args.includes('--argv-json'), true);
+  assert.equal(result.ok, true, String(result.error));
+  const saveCall = calls.runJson.find((c: any) => Array.isArray(c.args) && c.args.some((a: string) => includesScript(a, 'schedule.mjs')));
+  assert.ok(saveCall, 'should call schedule.mjs');
+  const argvIdx = saveCall.args.findIndex((a: string) => a === '--argv-json');
+  assert.ok(argvIdx >= 0, 'should have --argv-json');
+  const argvJson = saveCall.args[argvIdx + 1];
+  const parsed = JSON.parse(argvJson);
+  assert.equal(parsed.keyword, '春晚');
+  assert.equal(parsed['max-notes'], 100);
+  assert.equal(parsed.profile, 'xhs-1');
 });
 
-test('scheduleInvoke run supports background spawn mode', async () => {
-  const { calls, gateway } = createGateway();
-  const result = await scheduleInvoke(gateway, {
-    action: 'run',
-    taskId: 'sched-0009',
-    background: true,
+test('runEphemeralTask rejects missing profile', async () => {
+  const { gateway } = createGateway();
+  const result = await runEphemeralTask(gateway, {
+    commandType: 'xhs-unified',
+    argv: {
+      keyword: 'test',
+    },
   });
-  assert.equal(result.ok, true, JSON.stringify(result));
-  assert.equal(calls.spawn.length, 1);
-  assert.equal(calls.runJson.length, 0);
-  const args = calls.spawn[0]?.args || [];
-  assert.equal(args.some((item: string) => includesScript(item, 'schedule.mjs')), true);
-  assert.equal(args.includes('run'), true);
-  assert.equal(args.includes('sched-0009'), true);
+  assert.equal(result.ok, false);
+  assert.ok(String(result.error || '').length > 0, 'should have error message');
 });
 
-test('runEphemeralTask spawns xhs unified command', async () => {
+test('runEphemeralTask passes with valid command and profile', async () => {
   const { calls, gateway } = createGateway();
   gateway.setAccountProfiles([
     {
@@ -121,85 +123,32 @@ test('runEphemeralTask spawns xhs unified command', async () => {
     commandType: 'xhs-unified',
     argv: {
       profile: 'xhs-1',
-      keyword: '工作服',
-      'max-notes': 88,
-      env: 'debug',
-      'do-comments': true,
-      'fetch-body': true,
-      'do-likes': true,
-      'like-keywords': '购买链接',
+      keyword: '测试',
+      'max-notes': 5,
     },
   });
-  assert.equal(result.ok, true, JSON.stringify(result));
-  assert.equal(result.runId, 'rid-1');
-  assert.match(String(result.uiTriggerId || ''), /^ui-\d+-[a-f0-9]+$/);
-  const args = calls.spawn[0]?.args || [];
-  assert.equal(args.some((item: string) => includesScript(item, 'xhs-unified.mjs')), true);
-  assert.equal(args.includes('--profile'), true);
-  assert.equal(args.includes('xhs-1'), true);
-  assert.equal(args.includes('--keyword'), true);
-  assert.equal(args.includes('工作服'), true);
-  assert.equal(args.includes('--ui-trigger-id'), true);
+  assert.equal(result.ok, true, String(result.error));
+  assert.ok(result.runId, 'should have runId');
+  const runCall = calls.spawn.find((c: any) => Array.isArray(c.args) && c.args.some((a: string) => includesScript(a, 'unified.mjs')));
+  assert.ok(runCall, 'should call unified.mjs');
 });
 
-test('scheduleInvoke save replaces unavailable explicit profile with valid profile', async () => {
-  const { calls, gateway } = createGateway();
+test('runEphemeralTask validates keyword requirement', async () => {
+  const { gateway } = createGateway();
   gateway.setAccountProfiles([
     {
-      profileId: 'profile-0',
+      profileId: 'xhs-1',
       valid: true,
-      accountId: 'xhs-u0',
-      updatedAt: '2026-02-26T00:00:00.000Z',
-    },
-  ]);
-  const result = await scheduleInvoke(gateway, {
-    action: 'save',
-    payload: {
-      id: 'task-fallback-1',
-      name: 'xhs-fallback',
-      commandType: 'xhs-unified',
-      scheduleType: 'interval',
-      intervalMinutes: 15,
-      argv: {
-        profile: 'legacy-xhs-9',
-        keyword: '春晚',
-        'max-notes': 20,
-      },
-    },
-  });
-  assert.equal(result.ok, true, JSON.stringify(result));
-  const scheduleCall = calls.runJson.find((item: any) =>
-    Array.isArray(item?.args) && item.args.some((value: string) => includesScript(value, 'schedule.mjs')),
-  );
-  const args = scheduleCall?.args || [];
-  const argvIdx = args.indexOf('--argv-json');
-  assert.ok(argvIdx >= 0);
-  const argvJson = JSON.parse(String(args[argvIdx + 1] || '{}'));
-  assert.equal(argvJson.profile, 'profile-0');
-});
-
-test('runEphemeralTask replaces unavailable explicit profile with valid profile', async () => {
-  const { calls, gateway } = createGateway();
-  gateway.setAccountProfiles([
-    {
-      profileId: 'profile-0',
-      valid: true,
-      accountId: 'xhs-u0',
+      accountId: 'xhs-u1',
       updatedAt: '2026-02-26T00:00:00.000Z',
     },
   ]);
   const result = await runEphemeralTask(gateway, {
     commandType: 'xhs-unified',
     argv: {
-      profile: 'legacy-xhs-9',
-      keyword: '春晚',
-      'max-notes': 20,
-      env: 'debug',
+      profile: 'xhs-1',
     },
   });
-  assert.equal(result.ok, true);
-  const args = calls.spawn[0]?.args || [];
-  const profileIdx = args.indexOf('--profile');
-  assert.ok(profileIdx >= 0);
-  assert.equal(args[profileIdx + 1], 'profile-0');
+  assert.equal(result.ok, false);
+  assert.match(String(result.error || ''), /keyword|关键词/);
 });

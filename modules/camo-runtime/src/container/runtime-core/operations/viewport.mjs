@@ -67,10 +67,10 @@ export async function executeViewportOperation({ profileId, action, params = {} 
           const reservePx = Number.isFinite(reserveFromEnv) ? Math.max(0, Math.min(240, Math.floor(reserveFromEnv))) : 0;
           const workWidth = Number(display.workWidth || 0);
           const workHeight = Number(display.workHeight || 0);
-          const width = Number(display.width || 0);
-          const height = Number(display.height || 0);
-          const baseW = Math.floor(workWidth > 0 ? workWidth : width);
-          const baseH = Math.floor(workHeight > 0 ? workHeight : height);
+          const displayWidth = Number(display.width || 0);
+          const displayHeight = Number(display.height || 0);
+          const baseW = Math.floor(workWidth > 0 ? workWidth : displayWidth);
+          const baseH = Math.floor(workHeight > 0 ? workHeight : displayHeight);
           if (baseW > 0 && baseH > 0) {
             windowTarget = {
               width: Math.max(960, baseW),

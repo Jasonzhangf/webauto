@@ -23,6 +23,22 @@ const VIEWPORT_ACTIONS = new Set([
   'get_current_url',
 ]);
 
+const DEFAULT_MODAL_SELECTORS = [
+  '[aria-modal="true"]',
+  '[role="dialog"]',
+  '.modal',
+  '.dialog',
+  '.note-detail-mask',
+  '.note-detail-page',
+  '.note-detail-dialog',
+];
+function resolveFilterMode(input) {
+  const text = String(input || process.env.CAMO_FILTER_MODE || 'strict').trim().toLowerCase();
+  if (!text) return 'strict';
+  if (text === 'legacy') return 'legacy';
+  return 'strict';
+}
+
 async function executeExternalOperationIfAny({
   profileId,
   action,
@@ -110,119 +126,245 @@ function isTargetFullyInViewport(target, margin = 6) {
   return left >= m && top >= m && right <= (vw - m) && bottom <= (vh - m);
 }
 
-function resolveScrollDeltaY(target, margin = 6) {
+function resolveViewportScrollDelta(target, margin = 6) {
   const rect = target?.rect && typeof target.rect === 'object' ? target.rect : null;
   const viewport = target?.viewport && typeof target.viewport === 'object' ? target.viewport : null;
-  if (!rect || !viewport) return 0;
+  if (!rect || !viewport) return { deltaX: 0, deltaY: 0 };
+  const vw = Number(viewport.width || 0);
   const vh = Number(viewport.height || 0);
-  if (!Number.isFinite(vh) || vh <= 0) return 0;
+  if (!Number.isFinite(vw) || !Number.isFinite(vh) || vw <= 0 || vh <= 0) return { deltaX: 0, deltaY: 0 };
+  const left = Number(rect.left || 0);
   const top = Number(rect.top || 0);
+  const width = Math.max(0, Number(rect.width || 0));
   const height = Math.max(0, Number(rect.height || 0));
+  const right = left + width;
   const bottom = top + height;
   const m = Math.max(0, Number(margin) || 0);
+
+  let deltaX = 0;
+  let deltaY = 0;
+
+  if (left < m) {
+    deltaX = Math.round(left - m);
+  } else if (right > (vw - m)) {
+    deltaX = Math.round(right - (vw - m));
+  }
+
   if (top < m) {
-    return clamp(Math.round(top - m - 24), -900, -80);
+    deltaY = Math.round(top - m);
+  } else if (bottom > (vh - m)) {
+    deltaY = Math.round(bottom - (vh - m));
   }
-  if (bottom > (vh - m)) {
-    return clamp(Math.round(bottom - (vh - m) + 24), 80, 900);
+
+  if (Math.abs(deltaY) < 80 && !isTargetFullyInViewport(target, m)) {
+    deltaY = deltaY >= 0 ? 120 : -120;
   }
-  return 0;
+  if (Math.abs(deltaX) < 40 && (left < m || right > (vw - m))) {
+    deltaX = deltaX >= 0 ? 60 : -60;
+  }
+
+  return {
+    deltaX: clamp(deltaX, -900, 900),
+    deltaY: clamp(deltaY, -900, 900),
+  };
 }
 
-async function resolveSelectorTarget(profileId, selector) {
-  const selectorLiteral = JSON.stringify(String(selector || '').trim());
-  const payload = await callAPI('evaluate', {
-    profileId,
-    script: `(() => {
-      const selector = ${selectorLiteral};
-      const nodes = Array.from(document.querySelectorAll(selector));
-      const isVisible = (node) => {
-        if (!(node instanceof Element)) return false;
-        const rect = node.getBoundingClientRect?.();
-        if (!rect || rect.width <= 0 || rect.height <= 0) return false;
-        try {
-          const style = window.getComputedStyle(node);
-          if (!style) return false;
-          if (style.display === 'none') return false;
-          if (style.visibility === 'hidden' || style.visibility === 'collapse') return false;
-          const opacity = Number.parseFloat(String(style.opacity || '1'));
-          if (Number.isFinite(opacity) && opacity <= 0.01) return false;
-        } catch {
-          return false;
-        }
-        return true;
-      };
-      const hitVisible = (node) => {
-        if (!(node instanceof Element)) return false;
-        const rect = node.getBoundingClientRect?.();
-        if (!rect) return false;
-        const x = Math.max(0, Math.min((window.innerWidth || 1) - 1, rect.left + rect.width / 2));
-        const y = Math.max(0, Math.min((window.innerHeight || 1) - 1, rect.top + rect.height / 2));
-        const top = document.elementFromPoint(x, y);
-        if (!top) return false;
-        return top === node || node.contains(top) || top.contains(node);
-      };
-      const target = nodes.find((item) => isVisible(item) && hitVisible(item))
-        || nodes.find((item) => isVisible(item))
-        || nodes[0]
-        || null;
-      if (!target) {
-        return { ok: false, error: 'selector_not_found', selector };
-      }
-      const rect = target.getBoundingClientRect?.() || { left: 0, top: 0, width: 1, height: 1 };
-      const rawCenterX = Number(rect.left) + Math.max(1, Number(rect.width) / 2);
-      const rawCenterY = Number(rect.top) + Math.max(1, Number(rect.height) / 2);
-      const viewport = {
-        width: Number(window.innerWidth || 0),
-        height: Number(window.innerHeight || 0),
-      };
-      const center = {
-        x: Math.max(1, Math.min((viewport.width || 1) - 1, Math.round(rawCenterX))),
-        y: Math.max(1, Math.min((viewport.height || 1) - 1, Math.round(rawCenterY))),
-      };
-      return {
-        ok: true,
+function normalizeRect(node) {
+  const rect = node?.rect && typeof node.rect === 'object' ? node.rect : null;
+  if (!rect) return null;
+  const left = Number(rect.left ?? rect.x ?? 0);
+  const top = Number(rect.top ?? rect.y ?? 0);
+  const width = Number(rect.width ?? 0);
+  const height = Number(rect.height ?? 0);
+  if (!Number.isFinite(left) || !Number.isFinite(top) || !Number.isFinite(width) || !Number.isFinite(height)) {
+    return null;
+  }
+  if (width <= 0 || height <= 0) return null;
+  return { left, top, width, height };
+}
+
+function nodeArea(node) {
+  const rect = normalizeRect(node);
+  if (!rect) return 0;
+  return Number(rect.width || 0) * Number(rect.height || 0);
+}
+
+function nodeCenter(node, viewport = null) {
+  const rect = normalizeRect(node);
+  const vw = Number(viewport?.width || 0);
+  const vh = Number(viewport?.height || 0);
+  if (!rect) return null;
+  const rawX = rect.left + Math.max(1, rect.width / 2);
+  const rawY = rect.top + Math.max(1, rect.height / 2);
+  const centerX = vw > 1
+    ? clamp(Math.round(rawX), 1, Math.max(1, vw - 1))
+    : Math.max(1, Math.round(rawX));
+  const centerY = vh > 1
+    ? clamp(Math.round(rawY), 1, Math.max(1, vh - 1))
+    : Math.max(1, Math.round(rawY));
+  return {
+    center: { x: centerX, y: centerY },
+    rawCenter: { x: rawX, y: rawY },
+    rect,
+  };
+}
+
+function getSnapshotViewport(snapshot) {
+  const width = Number(snapshot?.__viewport?.width || 0);
+  const height = Number(snapshot?.__viewport?.height || 0);
+  return { width, height };
+}
+
+function isPathWithin(path, parentPath) {
+  const child = String(path || '').trim();
+  const parent = String(parentPath || '').trim();
+  if (!child || !parent) return false;
+  return child === parent || child.startsWith(`${parent}/`);
+}
+
+function resolveActiveModal(snapshot) {
+  if (!snapshot) return null;
+  const rows = [];
+  for (const selector of DEFAULT_MODAL_SELECTORS) {
+    const matches = buildSelectorCheck(snapshot, { css: selector, visible: true });
+    for (const node of matches) {
+      if (nodeArea(node) <= 1) continue;
+      rows.push({
         selector,
-        matchedIndex: Math.max(0, nodes.indexOf(target)),
-        center,
-        rawCenter: {
-          x: rawCenterX,
-          y: rawCenterY,
-        },
-        rect: {
-          left: Number(rect.left || 0),
-          top: Number(rect.top || 0),
-          width: Number(rect.width || 0),
-          height: Number(rect.height || 0),
-        },
-        viewport,
-      };
-    })()`,
-  });
-  const result = payload?.result || payload?.data?.result || payload?.data || payload || null;
-  if (!result || result.ok !== true || !result.center) {
-    throw new Error(`Element not found: ${selector}`);
+        path: String(node.path || ''),
+        node,
+        area: nodeArea(node),
+      });
+    }
   }
-  return result;
+  rows.sort((a, b) => b.area - a.area);
+  return rows[0] || null;
 }
 
-async function scrollTargetIntoViewport(profileId, selector, initialTarget, params = {}) {
+async function resolveSelectorTarget(profileId, selector, options = {}) {
+  const filterMode = resolveFilterMode(options.filterMode);
+  const strictFilter = filterMode !== 'legacy';
+  const normalizedSelector = String(selector || '').trim();
+  const snapshot = await getDomSnapshotByProfile(profileId);
+  const viewport = getSnapshotViewport(snapshot);
+  const modal = strictFilter ? resolveActiveModal(snapshot) : null;
+  const visibleMatches = buildSelectorCheck(snapshot, { css: normalizedSelector, visible: true });
+  const allMatches = strictFilter
+    ? visibleMatches
+    : buildSelectorCheck(snapshot, { css: normalizedSelector, visible: false });
+  const scopedVisible = modal
+    ? visibleMatches.filter((item) => isPathWithin(item.path, modal.path))
+    : visibleMatches;
+  const scopedAll = modal
+    ? allMatches.filter((item) => isPathWithin(item.path, modal.path))
+    : allMatches;
+  const candidate = strictFilter
+    ? (scopedVisible[0] || null)
+    : (scopedVisible[0] || scopedAll[0] || null);
+  if (!candidate) {
+    if (modal) {
+      throw new Error(`Modal focus locked for selector: ${normalizedSelector}`);
+    }
+    throw new Error(`Element not found: ${normalizedSelector}`);
+  }
+  const center = nodeCenter(candidate, viewport);
+  if (!center) {
+    throw new Error(`Element not found: ${normalizedSelector}`);
+  }
+  return {
+    ok: true,
+    selector: normalizedSelector,
+    matchedIndex: Math.max(0, scopedAll.indexOf(candidate)),
+    center: center.center,
+    rawCenter: center.rawCenter,
+    rect: center.rect,
+    viewport,
+    modalLocked: Boolean(modal),
+  };
+}
+
+async function scrollTargetIntoViewport(profileId, selector, initialTarget, params = {}, options = {}) {
   let target = initialTarget;
-  const maxSteps = Math.max(0, Math.min(8, Number(params.maxScrollSteps ?? 3) || 3));
-  const settleMs = Math.max(0, Number(params.scrollSettleMs ?? 0) || 0);
-  const margin = Math.max(0, Number(params.viewportMargin ?? 6) || 6);
+  const maxSteps = Math.max(0, Math.min(24, Number(params.maxScrollSteps ?? 8) || 8));
+  const settleMs = Math.max(0, Number(params.scrollSettleMs ?? 140) || 140);
+  const visibilityMargin = Math.max(0, Number(params.visibilityMargin ?? params.viewportMargin ?? 6) || 6);
   for (let i = 0; i < maxSteps; i += 1) {
-    if (isTargetFullyInViewport(target, margin)) break;
-    const deltaY = resolveScrollDeltaY(target, margin);
-    if (!Number.isFinite(deltaY) || Math.abs(deltaY) < 1) break;
+    if (isTargetFullyInViewport(target, visibilityMargin)) break;
+    const delta = resolveViewportScrollDelta(target, visibilityMargin);
+    if (Math.abs(delta.deltaX) < 1 && Math.abs(delta.deltaY) < 1) break;
+    const deltaY = delta.deltaY !== 0 ? delta.deltaY : (delta.deltaX !== 0 ? delta.deltaX : 0);
     await pageScroll(profileId, deltaY);
     if (settleMs > 0) await sleep(settleMs);
-    target = await resolveSelectorTarget(profileId, selector);
+    target = await resolveSelectorTarget(profileId, selector, options);
   }
   return target;
 }
 
-async function executeSelectorOperation({ profileId, action, operation, params }) {
+async function resolveScrollAnchor(profileId, options = {}) {
+  const filterMode = resolveFilterMode(options.filterMode);
+  const strictFilter = filterMode !== 'legacy';
+  const selector = String(options.selector || '').trim();
+  const snapshot = await getDomSnapshotByProfile(profileId);
+  const viewport = getSnapshotViewport(snapshot);
+  const modal = strictFilter ? resolveActiveModal(snapshot) : null;
+
+  if (selector) {
+    const visibleMatches = buildSelectorCheck(snapshot, { css: selector, visible: true });
+    const target = visibleMatches[0] || null;
+    if (target) {
+      if (modal && !isPathWithin(target.path, modal.path)) {
+        const modalCenter = nodeCenter(modal.node, viewport);
+        if (modalCenter) {
+          return {
+            ok: true,
+            source: 'modal',
+            center: modalCenter.center,
+            modalLocked: true,
+            modalSelector: modal.selector,
+            selectorRejectedByModalLock: true,
+          };
+        }
+      } else {
+        const targetCenter = nodeCenter(target, viewport);
+        if (targetCenter) {
+          return {
+            ok: true,
+            source: 'selector',
+            center: targetCenter.center,
+            modalLocked: Boolean(modal),
+          };
+        }
+      }
+    }
+  }
+
+  if (modal) {
+    const modalCenter = nodeCenter(modal.node, viewport);
+    if (modalCenter) {
+      return {
+        ok: true,
+        source: 'modal',
+        center: modalCenter.center,
+        modalLocked: true,
+        modalSelector: modal.selector,
+      };
+    }
+  }
+
+  const width = Number(viewport.width || 0);
+  const height = Number(viewport.height || 0);
+  return {
+    ok: true,
+    source: 'document',
+    center: {
+      x: width > 1 ? Math.round(width / 2) : 1,
+      y: height > 1 ? Math.round(height / 2) : 1,
+    },
+    modalLocked: false,
+  };
+}
+
+async function executeSelectorOperation({ profileId, action, operation, params, filterMode }) {
   const selector = maybeSelector({
     profileId,
     containerId: params.containerId || operation?.containerId || null,
@@ -230,15 +372,24 @@ async function executeSelectorOperation({ profileId, action, operation, params }
   });
   if (!selector) return asErrorPayload('CONTAINER_NOT_FOUND', `${action} requires selector/containerId`);
 
-  let target = await resolveSelectorTarget(profileId, selector);
-  target = await scrollTargetIntoViewport(profileId, selector, target, params);
+  let target = await resolveSelectorTarget(profileId, selector, { filterMode });
+  target = await scrollTargetIntoViewport(profileId, selector, target, params, { filterMode });
+  const visibilityMargin = Math.max(0, Number(params.visibilityMargin ?? params.viewportMargin ?? 6) || 6);
+  const targetFullyVisible = isTargetFullyInViewport(target, visibilityMargin);
+  if (action === 'click' && !targetFullyVisible) {
+    return asErrorPayload('TARGET_NOT_FULLY_VISIBLE', 'click target is not fully visible after auto scroll', {
+      selector,
+      target,
+      visibilityMargin,
+    });
+  }
 
   if (action === 'scroll_into_view') {
     return {
       ok: true,
       code: 'OPERATION_DONE',
       message: 'scroll_into_view done',
-      data: { selector, target },
+      data: { selector, target, targetFullyVisible, visibilityMargin },
     };
   }
 
@@ -254,7 +405,12 @@ async function executeSelectorOperation({ profileId, action, operation, params }
       clicks,
       ...(Number.isFinite(delay) && delay >= 0 ? { delay } : {}),
     });
-    return { ok: true, code: 'OPERATION_DONE', message: 'click done', data: { selector, target, result } };
+    return {
+      ok: true,
+      code: 'OPERATION_DONE',
+      message: 'click done',
+      data: { selector, target, result, targetFullyVisible, visibilityMargin },
+    };
   }
 
   const text = String(params.text ?? params.value ?? '');
@@ -264,7 +420,6 @@ async function executeSelectorOperation({ profileId, action, operation, params }
     y: target.center.y,
     button: 'left',
     clicks: 1,
-    delay: 30,
   });
   const clearBeforeType = params.clear !== false;
   if (clearBeforeType) {
@@ -395,6 +550,7 @@ async function executeVerifySubscriptions({ profileId, params }) {
   let pagesResult = [];
   let overallOk = true;
   let matchedPageCount = 0;
+  let activePageIndex = null;
   if (!acrossPages) {
     const current = await collectForCurrentPage();
     overallOk = current.matches.every((item) => item.count >= item.minCount);
@@ -402,6 +558,7 @@ async function executeVerifySubscriptions({ profileId, params }) {
   } else {
     const listed = await callAPI('page:list', { profileId });
     const { pages, activeIndex } = extractPageList(listed);
+    activePageIndex = Number.isFinite(activeIndex) ? activeIndex : null;
     for (const page of pages) {
       const pageIndex = Number(page.index);
       const listedUrl = String(page.url || '');
@@ -436,7 +593,7 @@ async function executeVerifySubscriptions({ profileId, params }) {
       matchedPageCount = 1;
       overallOk = true;
       pagesResult.push({
-        index: Number.isFinite(activeIndex) ? activeIndex : null,
+        index: Number.isFinite(activePageIndex) ? activePageIndex : null,
         urlMatched: false,
         fallback: 'dom_match',
         ok: true,
@@ -477,6 +634,13 @@ export async function executeOperation({ profileId, operation, context = {} }) {
     const resolvedProfile = session.profileId || profileId;
     const action = String(operation?.action || '').trim();
     const params = operation?.params || operation?.config || {};
+    const filterMode = resolveFilterMode(
+      params.filterMode
+      || operation?.filterMode
+      || context?.filterMode
+      || context?.runtime?.filterMode
+      || null,
+    );
 
     if (!action) {
       return asErrorPayload('OPERATION_FAILED', 'operation.action is required');
@@ -586,7 +750,7 @@ export async function executeOperation({ profileId, operation, context = {} }) {
     }
 
     if (action === 'click' || action === 'type' || action === 'scroll_into_view') {
-      return executeSelectorOperation({
+      return await executeSelectorOperation({
         profileId: resolvedProfile,
         action,
         operation,
