@@ -19,6 +19,7 @@ export function defaultProfileState() {
     matchedComments: [],
     matchRule: null,
     lastCommentsHarvest: null,
+    lastExpandReplies: null,
     lastDetail: null,
     lastReply: null,
     metrics: {

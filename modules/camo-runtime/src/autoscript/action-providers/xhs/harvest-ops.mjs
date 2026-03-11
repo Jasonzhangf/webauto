@@ -1212,6 +1212,9 @@ export async function executeCommentsHarvestOperation({ profileId, params = {}, 
     commentCount: collectedRows.length,
     expectedCommentsCount: lastExpectedCommentsCount,
     comments: collectedRows,
+    showMore: state.lastExpandReplies && typeof state.lastExpandReplies === 'object'
+      ? { ...state.lastExpandReplies }
+      : null,
     capturedAt: new Date().toISOString(),
   };
 
@@ -1293,6 +1296,7 @@ export async function executeCommentsHarvestOperation({ profileId, params = {}, 
       collected: totalAdded,
       expectedCommentsCount: lastExpectedCommentsCount,
       commentCoverageRate: lastExpectedCommentsCount ? (state.lastCommentsHarvest.comments.length / lastExpectedCommentsCount).toFixed(2) : null,
+      showMore: state.lastCommentsHarvest.showMore || null,
       recoveries,
       maxRecoveries,
       firstComment: state.lastCommentsHarvest.comments[0] || null,
@@ -1590,6 +1594,7 @@ export async function executeCommentReplyOperation({ profileId, params = {}, con
 
 export async function executeExpandRepliesOperation({ profileId, context = {} }) {
   const { actionTrace, pushTrace } = buildTraceRecorder();
+  const state = getProfileState(profileId);
   const event = context?.event || {};
   const rawElements = Array.isArray(event.elements) ? event.elements : [];
   const testingOverrides = context?.testingOverrides && typeof context.testingOverrides === 'object'
@@ -1679,6 +1684,13 @@ export async function executeExpandRepliesOperation({ profileId, context = {} })
   let scanned = rawElements.length;
   const clickedKeys = new Set();
   const maxExpand = Math.max(1, Math.min(24, Number(event.count || rawCandidates.length || 12) || 12));
+  const initialCandidates = normalizeTargets(rawCandidates);
+  let observedCandidates = initialCandidates;
+  const visibleInitial = initialCandidates.length;
+  let visibleMax = visibleInitial;
+  const distinctSeenKeys = new Set(initialCandidates.map((target) => buildTargetKey(target)).filter(Boolean));
+  const textsSeen = new Set(initialCandidates.map((target) => String(target.text || '').trim()).filter(Boolean));
+  const clickTimeline = [];
 
   let expanded = 0;
   for (let step = 1; step <= maxExpand; step += 1) {
@@ -1692,29 +1704,111 @@ export async function executeExpandRepliesOperation({ profileId, context = {} })
       }))
       : []);
     scanned = Math.max(scanned, Array.isArray(liveTargets?.targets) ? liveTargets.targets.length : 0, liveCandidates.length);
-    const fallbackCandidates = normalizeTargets(rawCandidates);
+    visibleMax = Math.max(visibleMax, liveCandidates.length);
+    if (liveCandidates.length > 0) observedCandidates = liveCandidates;
+    for (const candidate of liveCandidates) {
+      const key = buildTargetKey(candidate);
+      if (key) distinctSeenKeys.add(key);
+      if (candidate?.text) textsSeen.add(String(candidate.text).trim());
+    }
+    const fallbackCandidates = observedCandidates.filter((candidate) => !clickedKeys.has(buildTargetKey(candidate)));
     const target = [...liveCandidates, ...fallbackCandidates]
       .find((candidate) => !clickedKeys.has(buildTargetKey(candidate)));
 
     if (!target) {
+      state.lastExpandReplies = {
+        noteId: state.currentNoteId || null,
+        capturedAt: new Date().toISOString(),
+        visibleInitial,
+        visibleMax,
+        distinctSeen: textsSeen.size,
+        clicks: expanded,
+        scanned,
+        maxExpand,
+        textsSample: Array.from(textsSeen).slice(0, 20),
+        clickTimeline,
+        exhaustedTargets: true,
+      };
       if (expanded === 0) {
         return {
           ok: false,
           code: 'EXPAND_REPLIES_NO_TARGETS',
           message: 'no visible show-more targets',
-          data: { expanded: 0, scanned },
+          data: {
+            expanded: 0,
+            scanned,
+            visibleInitial,
+            visibleMax,
+            distinctSeen: textsSeen.size,
+            showMoreClicks: 0,
+            textsSample: Array.from(textsSeen).slice(0, 20),
+            clickTimeline,
+          },
         };
       }
       break;
     }
 
-    clickedKeys.add(buildTargetKey(target));
+    const targetKey = buildTargetKey(target);
+    const beforeVisible = liveCandidates.length;
+    clickedKeys.add(targetKey);
     await clickPointImpl(profileId, target.center, { steps: 2 });
     pushTrace({ kind: 'click', stage: 'expand_replies', text: target.text.slice(0, 60), center: target.center });
     await sleepImpl(350);
     expanded += 1;
+    const afterTargets = await readExpandReplyTargetsImpl(profileId).catch(() => null);
+    const afterCandidates = normalizeTargets(Array.isArray(afterTargets?.targets)
+      ? afterTargets.targets.map((node) => ({
+        path: '',
+        text: String(node.text || '').replace(/\s+/g, ' ').trim(),
+        rect: node.rect || null,
+        center: node.center || null,
+      }))
+      : []);
+    if (afterCandidates.length > 0) observedCandidates = afterCandidates;
+    visibleMax = Math.max(visibleMax, afterCandidates.length);
+    for (const candidate of afterCandidates) {
+      const key = buildTargetKey(candidate);
+      if (key) distinctSeenKeys.add(key);
+      if (candidate?.text) textsSeen.add(String(candidate.text).trim());
+    }
+    clickTimeline.push({
+      step,
+      targetKey,
+      text: String(target.text || '').slice(0, 120),
+      beforeVisible,
+      afterVisible: afterCandidates.length,
+    });
   }
 
+  state.lastExpandReplies = {
+    noteId: state.currentNoteId || null,
+    capturedAt: new Date().toISOString(),
+    visibleInitial,
+    visibleMax,
+    distinctSeen: textsSeen.size,
+    clicks: expanded,
+    scanned,
+    maxExpand,
+    textsSample: Array.from(textsSeen).slice(0, 20),
+    clickTimeline,
+    exhaustedTargets: expanded < maxExpand,
+  };
+
   emitActionTrace(context, actionTrace, { stage: 'xhs_expand_replies' });
-  return { ok: true, code: 'OPERATION_DONE', message: 'xhs_expand_replies done', data: { expanded, scanned } };
+  return {
+    ok: true,
+    code: 'OPERATION_DONE',
+    message: 'xhs_expand_replies done',
+    data: {
+      expanded,
+      scanned,
+      visibleInitial,
+      visibleMax,
+      distinctSeen: textsSeen.size,
+      showMoreClicks: expanded,
+      textsSample: Array.from(textsSeen).slice(0, 20),
+      clickTimeline,
+    },
+  };
 }
