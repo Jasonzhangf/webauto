@@ -109,4 +109,40 @@ describe('autoscript debug snapshot capture', () => {
     assert.equal(externalCalls[0].params.subscriptionId, 'detail_modal');
     assert.ok(logs.some((item) => item?.event === 'autoscript:debug_snapshot' && item?.operationId === 'open_first_detail'));
   });
+
+  it('converts unexpected thrown errors into operation_error flow instead of leaving the task hanging', async () => {
+    const logs = [];
+    const externalCalls = [];
+    const runner = createRunner({
+      logs,
+      externalCalls,
+      executeMockOperation: async ({ operation }) => {
+        assert.equal(operation.id, 'comments_harvest');
+        throw new Error('focus_comment_context crashed');
+      },
+    });
+
+    const outcome = await runner.runOperation({
+      id: 'comments_harvest',
+      action: 'xhs_comments_harvest',
+      params: {},
+      retry: { attempts: 1, backoffMs: 0 },
+      onFailure: 'continue',
+    }, {
+      type: 'manual',
+      subscriptionId: 'detail_modal',
+      timestamp: new Date().toISOString(),
+    });
+
+    assert.equal(outcome.ok, true);
+    assert.equal(outcome.terminalState, 'skipped_nonblocking');
+    assert.equal(outcome.result?.code, 'OPERATION_EXCEPTION');
+    assert.match(String(outcome.result?.message || ''), /focus_comment_context crashed/);
+    assert.ok(logs.some((item) => item?.event === 'autoscript:operation_error' && item?.code === 'OPERATION_EXCEPTION'));
+    assert.ok(logs.some((item) => item?.event === 'autoscript:operation_nonblocking_failure' && item?.code === 'OPERATION_EXCEPTION'));
+    assert.equal(externalCalls.length, 1);
+    assert.equal(externalCalls[0].action, 'xhs_debug_snapshot');
+    assert.equal(externalCalls[0].params.phase, 'error');
+    assert.equal(externalCalls[0].params.failureCode, 'OPERATION_EXCEPTION');
+  });
 });

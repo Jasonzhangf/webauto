@@ -6,6 +6,7 @@ export async function cleanupCamoSessionsBestEffort(input: {
   timeoutMs: number;
   reason: string;
   includeLocks: boolean;
+  stopSessions?: boolean;
 }) {
   const camoCli = path.join(input.repoRoot, 'bin', 'camoufox-cli.mjs');
   const invoke = async (args: string[], timeoutMs = input.timeoutMs) =>
@@ -16,9 +17,11 @@ export async function cleanupCamoSessionsBestEffort(input: {
       timeoutMs,
     }).catch((err: any) => ({ ok: false, error: err?.message || String(err) }));
 
-  const stopAll = await invoke(['stop', 'all']);
-  if (!stopAll?.ok) {
-    console.warn(`[desktop-console] camo stop all failed (${input.reason})`, stopAll?.error || stopAll?.stderr || stopAll?.stdout || stopAll);
+  if (input.stopSessions !== false) {
+    const stopAll = await invoke(['stop', 'all']);
+    if (!stopAll?.ok) {
+      console.warn(`[desktop-console] camo stop all failed (${input.reason})`, stopAll?.error || stopAll?.stderr || stopAll?.stdout || stopAll);
+    }
   }
 
   if (!input.includeLocks) return;

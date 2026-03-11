@@ -118,6 +118,10 @@ export async function buildUnifiedOptions(argv, profileId, overrides = {}) {
   if (!tabCountProvided && (stage === 'detail' || stage === 'full' || parseBool(overrides.doComments ?? argv['do-comments'], false))) {
     tabCount = 4;
   }
+  const detailRotateComments = parseNonNegativeInt(
+    overrides.detailRotateComments ?? argv['detail-rotate-comments'],
+    (tabCount > 1 && maxComments <= 0) ? 50 : 0,
+  );
   const stageDetailEnabled = stage === 'detail';
   const stageContentEnabled = stage === 'detail' || stage === 'full' || stage === 'content' || stage === 'like' || stage === 'reply';
   const likeRequested = parseBool(overrides.doLikes ?? argv['do-likes'], stage === 'like');
@@ -173,6 +177,7 @@ export async function buildUnifiedOptions(argv, profileId, overrides = {}) {
     navigationMinIntervalMs,
     maxNotes,
     maxComments,
+    detailRotateComments,
     maxLikesPerRound,
     resume,
     incrementalMax,

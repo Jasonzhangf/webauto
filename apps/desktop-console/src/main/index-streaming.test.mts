@@ -27,10 +27,12 @@ test('main process wires deterministic cleanup for app quit and env cleanup api'
   assert.match(src, /function ensureAppExitCleanup\(reason: string/);
   assert.match(src, /function shouldStopCoreServicesOnAppExit\(reason: string, options: CleanupOptions = \{\}\)/);
   assert.match(src, /if \(normalizedReason === 'window_closed'\) return false;/);
+  assert.match(src, /function shouldStopCamoSessionsOnCleanup\(reason: string\)/);
   assert.match(src, /function waitForAppExitCleanup\(reason: string, options: CleanupOptions = \{\}\)/);
   assert.match(src, /app\.on\('before-quit', \(event\) => \{[\s\S]*?event\.preventDefault\(\);[\s\S]*?waitForAppExitCleanup\(reason, \{ stopStateBridge: true \}\)/);
   assert.match(src, /app_exit_cleanup_start/);
   assert.match(src, /stopCoreServices: shouldStopCoreServicesOnAppExit\(reason, options\),/);
+  assert.match(src, /stopSessions: shouldStopCamoSessionsOnCleanup\(reason\),/);
   const willQuitBlock = src.match(/app\.on\('will-quit', \(\) => \{([\s\S]*?)\}\);/);
   assert.ok(willQuitBlock, 'will-quit hook should exist');
   assert.doesNotMatch(willQuitBlock[1], /ensureAppExitCleanup/);

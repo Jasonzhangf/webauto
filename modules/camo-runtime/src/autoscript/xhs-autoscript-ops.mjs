@@ -148,6 +148,20 @@ export function buildXhsSearchOperations(options) {
 
 export function buildXhsTabPoolOperation(options) {
   const { tabCount, tabOpenDelayMs, tabOpenMinDelayMs, detailLinksStartup } = options;
+  // In detail mode with detailLinksStartup=true, skip tab pool creation.
+  // Detail mode operates on existing safe-detail URLs from a prior collect phase.
+  // Creating about:blank tabs provides no value and causes timeout issues.
+  if (detailLinksStartup) {
+    return [{
+      id: 'ensure_tab_pool',
+      enabled: false,
+      action: 'ensure_tab_pool',
+      params: { tabCount: 1, reuseOnly: true },
+      trigger: 'startup',
+      dependsOn: ['goto_home'],
+      once: true,
+    }];
+  }
   return [
     {
       id: 'ensure_tab_pool',
@@ -157,15 +171,14 @@ export function buildXhsTabPoolOperation(options) {
         openDelayMs: tabOpenDelayMs,
         minDelayMs: tabOpenMinDelayMs,
         reuseOnly: false,
-        // Detail tab startup should create clean slots without repeatedly loading the XHS home shell.
         normalizeTabs: false,
-        seedOnOpen: false,
+        seedOnOpen: true,
         shortcutOnly: false,
       },
-      trigger: detailLinksStartup ? 'startup' : 'search_result_item.exist',
-      dependsOn: [detailLinksStartup ? 'goto_home' : 'submit_search'],
+      trigger: 'search_result_item.exist',
+      dependsOn: ['submit_search'],
       once: true,
-      timeoutMs: 180000,
+      timeoutMs: 60000,
       retry: { attempts: 2, backoffMs: 500 },
       impact: 'op',
       onFailure: 'continue',

@@ -315,6 +315,129 @@ export async function readVisibleCommentTargets(profileId) {
   return evaluateReadonly(profileId, script);
 }
 
+export async function readResumeAnchorPairTarget(profileId, resumeAnchor = null) {
+  const anchorJson = JSON.stringify(resumeAnchor || null);
+  const script = `(() => {
+    const anchor = ${anchorJson};
+    if (!anchor || typeof anchor !== 'object') return { found: false, reason: 'no_resume_anchor' };
+    const firstAnchor = anchor.first && typeof anchor.first === 'object' ? anchor.first : null;
+    const secondAnchor = anchor.second && typeof anchor.second === 'object' ? anchor.second : null;
+    if (!firstAnchor || !secondAnchor) return { found: false, reason: 'invalid_resume_anchor' };
+    const detailRoot = document.querySelector('.note-detail-mask')
+      || document.querySelector('.note-detail-page')
+      || document.querySelector('.note-detail-dialog')
+      || document.querySelector('.note-container')
+      || document.querySelector('.outer-link-container')
+      || document.querySelector('.main-content');
+    if (!detailRoot) return { found: false, reason: 'no_detail_root' };
+    const selectors = ['.note-scroller', '.comments-container', '.comment-list', '.comments-el'];
+    const scrollContainer = selectors
+      .map((selector) => detailRoot.querySelector(selector))
+      .find((node) => node instanceof Element);
+    const scope = scrollContainer || detailRoot;
+    const readRect = (node) => node?.getBoundingClientRect?.() || null;
+    const normalize = (value) => String(value || '').replace(/\s+/g, ' ').trim();
+    const vw = Number(window.innerWidth || 0);
+    const vh = Number(window.innerHeight || 0);
+    const containerRect = readRect(scope);
+    const viewportRect = { left: 0, top: 0, right: vw, bottom: vh };
+    const intersectionArea = (a, b) => {
+      const left = Math.max(Number(a.left || 0), Number(b.left || 0));
+      const right = Math.min(Number(a.right || 0), Number(b.right || 0));
+      const top = Math.max(Number(a.top || 0), Number(b.top || 0));
+      const bottom = Math.min(Number(a.bottom || 0), Number(b.bottom || 0));
+      const width = Math.max(0, right - left);
+      const height = Math.max(0, bottom - top);
+      return width * height;
+    };
+    const visibleRatio = (rect, bounds) => {
+      const area = Math.max(1, Number(rect.width || 0) * Number(rect.height || 0));
+      return intersectionArea(rect, bounds) / area;
+    };
+    const isVisible = (node) => {
+      if (!(node instanceof Element)) return false;
+      const rect = readRect(node);
+      if (!rect || rect.width <= 1 || rect.height <= 1) return false;
+      if (visibleRatio(rect, viewportRect) < 0.25) return false;
+      if (containerRect && visibleRatio(rect, containerRect) < 0.25) return false;
+      try {
+        const style = window.getComputedStyle(node);
+        if (!style) return false;
+        if (style.display === 'none') return false;
+        if (style.visibility === 'hidden' || style.visibility === 'collapse') return false;
+        if (Number(style.opacity || '1') <= 0.01) return false;
+      } catch {
+        return false;
+      }
+      return true;
+    };
+    const getAuthor = (node) => normalize(node.querySelector('.author, .nickname, [class*="author"], [class*="nickname"]')?.textContent || '');
+    const getContent = (node) => normalize(node.querySelector('.content, .comment-text, [class*="content"], [class*="comment-text"]')?.textContent || '');
+    const getCommentId = (node) => normalize(node.getAttribute('data-id') || node.getAttribute('data-comment-id') || node.id || '');
+    const comments = Array.from(scope.querySelectorAll('.comment-item, [class*="comment-item"]'))
+      .map((node, order) => {
+        if (!(node instanceof Element)) return null;
+        if (!isVisible(node)) return null;
+        const rect = readRect(node);
+        if (!rect) return null;
+        return {
+          node,
+          order,
+          commentId: getCommentId(node),
+          author: getAuthor(node),
+          content: getContent(node),
+          rect,
+        };
+      })
+      .filter(Boolean)
+      .sort((a, b) => Number(a.rect.top || 0) - Number(b.rect.top || 0));
+    const matchComment = (comment, expected) => {
+      if (!comment || !expected) return false;
+      const expectedId = normalize(expected.commentId || '');
+      const expectedAuthor = normalize(expected.author || '');
+      const expectedContent = normalize(expected.content || '');
+      if (expectedId && comment.commentId && comment.commentId === expectedId) return true;
+      if (expectedContent && comment.content === expectedContent) {
+        if (!expectedAuthor) return true;
+        return comment.author === expectedAuthor;
+      }
+      return false;
+    };
+    for (let index = 0; index < comments.length - 1; index += 1) {
+      const first = comments[index];
+      const second = comments[index + 1];
+      if (!matchComment(first, firstAnchor)) continue;
+      if (!matchComment(second, secondAnchor)) continue;
+      const targetRect = first.rect;
+      const left = Math.max(1, Math.min(vw - 1, Number(targetRect.left || 0)));
+      const right = Math.max(left + 1, Math.min(vw - 1, Number(targetRect.right || (Number(targetRect.left || 0) + Number(targetRect.width || 0)))));
+      const top = Math.max(1, Math.min(vh - 1, Number(targetRect.top || 0)));
+      const bottom = Math.max(top + 1, Math.min(vh - 1, Number(targetRect.bottom || (Number(targetRect.top || 0) + Number(targetRect.height || 0)))));
+      return {
+        found: true,
+        selector: '.comment-item',
+        center: {
+          x: Math.max(1, Math.round(left + (right - left) * 0.5)),
+          y: Math.max(1, Math.round(top + Math.max(8, Math.min(bottom - top - 8, (bottom - top) * 0.35)))),
+        },
+        first: {
+          commentId: first.commentId || null,
+          author: first.author || null,
+          content: first.content || null,
+        },
+        second: {
+          commentId: second.commentId || null,
+          author: second.author || null,
+          content: second.content || null,
+        },
+        pairText: [first.content || '', second.content || ''].filter(Boolean).join(' | ').slice(0, 240),
+      };
+    }
+    return { found: false, reason: 'resume_anchor_pair_not_visible', visibleCount: comments.length };
+  })()`;
+  return evaluateReadonly(profileId, script);
+}
+
 export async function readExpandReplyTargets(profileId) {
   const script = `(() => {
     const detailRoot = document.querySelector('.note-detail-mask')

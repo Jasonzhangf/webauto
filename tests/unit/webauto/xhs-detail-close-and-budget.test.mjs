@@ -228,6 +228,13 @@ describe('xhs detail close and comment budget behavior', () => {
           },
           readCommentEntryPoint: async () => ({ found: true, center: { x: 50, y: 60 }, selector: '.comments-entry' }),
           readVisibleCommentTarget: async () => ({ found: true, center: { x: 80, y: 120 }, selector: '.comment-item' }),
+          readVisibleCommentTargets: async () => ({
+            found: true,
+            comments: [
+              { commentId: 'c-1-1', author: 'a', content: 'one', index: 1 },
+              { commentId: 'c-1-2', author: 'b', content: 'two', index: 2 },
+            ],
+          }),
           readCommentTotalTarget: async () => ({ found: true, center: { x: 20, y: 20 }, selector: '.total' }),
           readCommentScrollContainerTarget: async () => ({ found: true, center: { x: 80, y: 120 }, selector: '.note-scroller' }),
           readCommentsSnapshot: async () => {
@@ -262,7 +269,197 @@ describe('xhs detail close and comment budget behavior', () => {
     assert.equal(result.data?.tabBudget?.used, 50);
     assert.equal(state.detailLinkState?.activeByTab?.['1']?.status, 'paused');
     assert.equal(state.detailLinkState?.activeByTab?.['1']?.budgetExhausted, true);
+    assert.equal(state.detailLinkState?.activeByTab?.['1']?.resumeAnchor?.first?.commentId, 'c-1-1');
+    assert.equal(state.detailLinkState?.activeByTab?.['1']?.resumeAnchor?.second?.commentId, 'c-1-2');
     assert.equal(state.tabState?.used?.[0], 50);
+  });
+
+  it('tries to restore paused detail from a two-comment anchor before continuing', async () => {
+    const state = getProfileState(budgetProfileId);
+    state.currentNoteId = 'resume-note';
+    state.currentHref = 'https://www.xiaohongshu.com/explore/resume-note?xsec_token=resume';
+    state.tabState = {
+      tabCount: 4,
+      limit: 50,
+      cursor: 1,
+      used: [50, 0, 0, 0],
+    };
+    state.detailLinkState = {
+      activeTabIndex: 1,
+      openByLinks: true,
+      activeFailed: false,
+      activeByTab: {
+        '1': {
+          tabIndex: 1,
+          link: { noteId: 'resume-note', noteUrl: 'https://www.xiaohongshu.com/explore/resume-note?xsec_token=resume' },
+          status: 'paused',
+          failed: false,
+          completed: false,
+          paused: true,
+          resumeAnchor: {
+            first: { commentId: 'resume-c1', author: 'a', content: 'resume one' },
+            second: { commentId: 'resume-c2', author: 'b', content: 'resume two' },
+          },
+        },
+      },
+    };
+
+    const clicks = [];
+    const progress = [];
+    const result = await harvestOps.executeCommentsHarvestOperation({
+      profileId: budgetProfileId,
+      params: {
+        tabCount: 4,
+        commentBudget: 50,
+        commentsLimit: 0,
+        maxRounds: 1,
+        persistComments: false,
+        doLikes: false,
+        env: 'debug',
+        keyword: 'deepseek',
+      },
+      context: {
+        emitProgress: (entry) => progress.push(entry),
+        testingOverrides: {
+          readDetailSnapshot: async () => ({
+            noteIdFromUrl: 'resume-note',
+            commentsContextAvailable: true,
+            textPresent: true,
+            imageCount: 0,
+            videoPresent: false,
+          }),
+          readDetailState: async () => ({ href: state.currentHref, checkpoint: 'comments_ready' }),
+          pressKey: async () => {},
+          sleep: async () => {},
+          clearVisualHighlight: async () => {},
+          highlightVisualTarget: async () => {},
+          clickPoint: async (_profileId, center) => { clicks.push(center); },
+          scrollBySelector: async () => {},
+          readCommentEntryPoint: async () => ({ found: true, center: { x: 50, y: 60 }, selector: '.comments-entry' }),
+          readVisibleCommentTarget: async () => ({ found: true, center: { x: 80, y: 120 }, selector: '.comment-item' }),
+          readCommentTotalTarget: async () => ({ found: true, center: { x: 20, y: 20 }, selector: '.total' }),
+          readCommentScrollContainerTarget: async () => ({ found: true, center: { x: 80, y: 120 }, selector: '.note-scroller' }),
+          readResumeAnchorPairTarget: async () => ({
+            found: true,
+            selector: '.comment-item',
+            center: { x: 88, y: 166 },
+            pairText: 'resume one | resume two',
+          }),
+          readVisibleCommentTargets: async () => ({ found: true, comments: [] }),
+          readCommentsSnapshot: async () => ({
+            detailVisible: true,
+            hasCommentsContext: true,
+            expectedCommentsCount: 400,
+            collectability: { visibleTextCount: 2 },
+            scroll: { atBottom: false, selector: '.note-scroller' },
+            comments: [],
+          }),
+          appendLikeStateRows: async () => ({ ok: true }),
+          writeLikeSummary: async () => ({ ok: true, filePath: '/tmp/likes.json' }),
+          mergeCommentsJsonl: async () => ({ filePath: '/tmp/comments.jsonl' }),
+          writeCommentsMd: async () => ({ filePath: '/tmp/comments.md' }),
+        },
+      },
+    });
+
+    assert.equal(result.ok, true);
+    assert.deepEqual(clicks[0], { x: 80, y: 120 });
+    assert.deepEqual(clicks[1], { x: 88, y: 166 });
+    assert.ok(progress.some((entry) => entry?.kind === 'resume_anchor_probe' && entry?.restored === true));
+  });
+
+  it('restores resume anchor by matching current note binding even when tab cursor already rotated away', async () => {
+    const state = getProfileState(budgetProfileId);
+    state.currentNoteId = 'resume-note';
+    state.currentHref = 'https://www.xiaohongshu.com/explore/resume-note?xsec_token=resume';
+    state.tabState = {
+      tabCount: 4,
+      limit: 50,
+      cursor: 4,
+      used: [50, 0, 0, 0],
+    };
+    state.detailLinkState = {
+      activeTabIndex: 4,
+      openByLinks: true,
+      activeFailed: false,
+      activeByTab: {
+        '1': {
+          tabIndex: 1,
+          noteId: 'resume-note',
+          href: 'https://www.xiaohongshu.com/explore/resume-note?xsec_token=resume',
+          link: { noteId: 'resume-note', noteUrl: 'https://www.xiaohongshu.com/explore/resume-note?xsec_token=resume' },
+          status: 'paused',
+          failed: false,
+          completed: false,
+          paused: true,
+          resumeAnchor: {
+            first: { commentId: 'resume-c1', author: 'a', content: 'resume one' },
+            second: { commentId: 'resume-c2', author: 'b', content: 'resume two' },
+          },
+        },
+      },
+    };
+
+    const progress = [];
+    const result = await harvestOps.executeCommentsHarvestOperation({
+      profileId: budgetProfileId,
+      params: {
+        tabCount: 4,
+        commentBudget: 50,
+        commentsLimit: 0,
+        maxRounds: 1,
+        persistComments: false,
+        doLikes: false,
+        env: 'debug',
+        keyword: 'deepseek',
+      },
+      context: {
+        emitProgress: (entry) => progress.push(entry),
+        testingOverrides: {
+          readDetailSnapshot: async () => ({
+            noteIdFromUrl: 'resume-note',
+            commentsContextAvailable: true,
+            textPresent: true,
+            imageCount: 0,
+            videoPresent: false,
+          }),
+          readDetailState: async () => ({ href: state.currentHref, checkpoint: 'comments_ready' }),
+          pressKey: async () => {},
+          sleep: async () => {},
+          clearVisualHighlight: async () => {},
+          highlightVisualTarget: async () => {},
+          clickPoint: async () => {},
+          scrollBySelector: async () => {},
+          readCommentEntryPoint: async () => ({ found: true, center: { x: 50, y: 60 }, selector: '.comments-entry' }),
+          readVisibleCommentTarget: async () => ({ found: true, center: { x: 80, y: 120 }, selector: '.comment-item' }),
+          readCommentTotalTarget: async () => ({ found: true, center: { x: 20, y: 20 }, selector: '.total' }),
+          readCommentScrollContainerTarget: async () => ({ found: true, center: { x: 80, y: 120 }, selector: '.note-scroller' }),
+          readResumeAnchorPairTarget: async () => ({
+            found: true,
+            selector: '.comment-item',
+            center: { x: 88, y: 166 },
+            pairText: 'resume one | resume two',
+          }),
+          readVisibleCommentTargets: async () => ({ found: true, comments: [] }),
+          readCommentsSnapshot: async () => ({
+            detailVisible: true,
+            hasCommentsContext: true,
+            expectedCommentsCount: 400,
+            collectability: { visibleTextCount: 2 },
+            scroll: { atBottom: false, selector: '.note-scroller' },
+            comments: [],
+          }),
+          appendLikeStateRows: async () => ({ ok: true }),
+          writeLikeSummary: async () => ({ ok: true, filePath: '/tmp/likes.json' }),
+          mergeCommentsJsonl: async () => ({ filePath: '/tmp/comments.jsonl' }),
+          writeCommentsMd: async () => ({ filePath: '/tmp/comments.md' }),
+        },
+      },
+    });
+
+    assert.equal(result.ok, true);
+    const probe = progress.find((entry) => entry?.kind === 'resume_anchor_probe');
+    assert.equal(probe?.restored, true);
   });
 
   it('re-reads visible expand-reply targets after each click so stale coordinates cannot drift into media', async () => {
@@ -340,5 +537,530 @@ describe('xhs detail close and comment budget behavior', () => {
     ]);
     assert.equal(result.data?.expanded, 2);
     assert.ok(reads >= 2);
+  });
+
+  it('runs expand replies on every harvest round and aggregates show-more diagnostics across passes', async () => {
+    const profileId = 'expand-loop-profile';
+    const state = getProfileState(profileId);
+    state.currentNoteId = 'loop-note';
+    state.currentHref = 'https://www.xiaohongshu.com/explore/loop-note?xsec_token=loop';
+    const clicks = [];
+    const expandTargetSets = [
+      [
+        {
+          text: '展开 4 条回复',
+          rect: { left: 10, top: 20, width: 80, height: 20 },
+          center: { x: 50, y: 30 },
+        },
+      ],
+      [],
+      [
+        {
+          text: '展开 2 条回复',
+          rect: { left: 12, top: 60, width: 80, height: 20 },
+          center: { x: 52, y: 70 },
+        },
+      ],
+      [],
+    ];
+    let expandReadIndex = 0;
+    let snapshotReadIndex = 0;
+    const result = await harvestOps.executeCommentsHarvestOperation({
+      profileId,
+      params: {
+        tabCount: 1,
+        commentBudget: 0,
+        commentsLimit: 0,
+        maxRounds: 3,
+        persistComments: false,
+        doLikes: false,
+        adaptiveMaxRounds: false,
+        scrollDelayMinMs: 1,
+        scrollDelayMaxMs: 1,
+        settleMinMs: 1,
+        settleMaxMs: 1,
+        env: 'debug',
+        keyword: 'deepseek',
+      },
+      context: {
+        testingOverrides: {
+          readDetailSnapshot: async () => ({
+            noteIdFromUrl: 'loop-note',
+            commentsContextAvailable: true,
+            textPresent: true,
+            imageCount: 0,
+            videoPresent: false,
+          }),
+          readDetailState: async () => ({ href: state.currentHref, checkpoint: 'comments_ready' }),
+          pressKey: async () => {},
+          sleep: async () => {},
+          clearVisualHighlight: async () => {},
+          highlightVisualTarget: async () => {},
+          clickPoint: async (_profileId, center) => {
+            clicks.push(center);
+          },
+          scrollBySelector: async () => {},
+          readCommentEntryPoint: async () => ({ found: true, center: { x: 50, y: 60 }, selector: '.comments-entry' }),
+          readVisibleCommentTarget: async () => ({ found: true, center: { x: 80, y: 120 }, selector: '.comment-item' }),
+          readCommentTotalTarget: async () => ({ found: true, center: { x: 20, y: 20 }, selector: '.total' }),
+          readCommentScrollContainerTarget: async () => ({ found: true, center: { x: 80, y: 120 }, selector: '.note-scroller' }),
+          readExpandReplyTargets: async () => ({
+            found: true,
+            targets: expandTargetSets[Math.min(expandReadIndex++, expandTargetSets.length - 1)],
+          }),
+          readCommentsSnapshot: async () => {
+            snapshotReadIndex += 1;
+            if (snapshotReadIndex === 1) {
+              return {
+                detailVisible: true,
+                hasCommentsContext: true,
+                expectedCommentsCount: 10,
+                collectability: { visibleTextCount: 1 },
+                scroll: { atBottom: false, selector: '.note-scroller', clientHeight: 900 },
+                comments: [
+                  { commentId: 'c-1', author: 'a', content: 'one', index: 1 },
+                ],
+              };
+            }
+            if (snapshotReadIndex === 2) {
+              return {
+                detailVisible: true,
+                hasCommentsContext: true,
+                expectedCommentsCount: 10,
+                collectability: { visibleTextCount: 2 },
+                scroll: { atBottom: false, selector: '.note-scroller', clientHeight: 900 },
+                comments: [
+                  { commentId: 'c-1', author: 'a', content: 'one', index: 1 },
+                  { commentId: 'c-2', author: 'b', content: 'two', index: 2 },
+                ],
+              };
+            }
+            return {
+              detailVisible: true,
+              hasCommentsContext: true,
+              expectedCommentsCount: 10,
+              collectability: { visibleTextCount: 3 },
+              scroll: { atBottom: true, selector: '.note-scroller', clientHeight: 900 },
+              comments: [
+                { commentId: 'c-1', author: 'a', content: 'one', index: 1 },
+                { commentId: 'c-2', author: 'b', content: 'two', index: 2 },
+                { commentId: 'c-3', author: 'c', content: 'three', index: 3 },
+              ],
+            };
+          },
+          appendLikeStateRows: async () => ({ ok: true }),
+          writeLikeSummary: async () => ({ ok: true, filePath: '/tmp/likes.json' }),
+          mergeCommentsJsonl: async () => ({ filePath: '/tmp/comments.jsonl' }),
+          writeCommentsMd: async () => ({ filePath: '/tmp/comments.md' }),
+          readLocation: async () => state.currentHref,
+        },
+      },
+    });
+
+    assert.equal(result.ok, true);
+    assert.deepEqual(clicks, [
+      { x: 80, y: 120 },
+      { x: 50, y: 30 },
+      { x: 52, y: 70 },
+      { x: 80, y: 120 },
+    ]);
+    assert.equal(result.data?.showMore?.passes, 2);
+    assert.equal(result.data?.showMore?.clicks, 2);
+    assert.equal(result.data?.showMore?.distinctSeen, 2);
+    assert.deepEqual(result.data?.showMore?.textsSample, ['展开 4 条回复', '展开 2 条回复']);
+    assert.equal(result.data?.showMore?.clickTimeline.length, 2);
+    assert.deepEqual(result.data?.showMore?.clickTimeline.map((item) => item.pass), [1, 1]);
+  });
+
+  it('reanchors to the scroll container after expand replies changes the DOM so scroll does not keep using a stale comment item anchor', async () => {
+    const profileId = 'expand-reanchor-profile';
+    const state = getProfileState(profileId);
+    state.currentNoteId = 'reanchor-note';
+    state.currentHref = 'https://www.xiaohongshu.com/explore/reanchor-note?xsec_token=reanchor';
+
+    const clicks = [];
+    const scrollCalls = [];
+    let snapshotReadIndex = 0;
+
+    const result = await harvestOps.executeCommentsHarvestOperation({
+      profileId,
+      params: {
+        tabCount: 1,
+        commentBudget: 0,
+        commentsLimit: 0,
+        maxRounds: 2,
+        persistComments: false,
+        doLikes: false,
+        adaptiveMaxRounds: false,
+        scrollDelayMinMs: 1,
+        scrollDelayMaxMs: 1,
+        settleMinMs: 1,
+        settleMaxMs: 1,
+        env: 'debug',
+        keyword: 'deepseek',
+      },
+      context: {
+        testingOverrides: {
+          readDetailSnapshot: async () => ({
+            noteIdFromUrl: 'reanchor-note',
+            commentsContextAvailable: true,
+            textPresent: true,
+            imageCount: 0,
+            videoPresent: false,
+          }),
+          readDetailState: async () => ({ href: state.currentHref, checkpoint: 'comments_ready' }),
+          pressKey: async () => {},
+          sleep: async () => {},
+          clearVisualHighlight: async () => {},
+          highlightVisualTarget: async () => {},
+          clickPoint: async (_profileId, center) => {
+            clicks.push(center);
+          },
+          scrollBySelector: async (_profileId, selector, options) => {
+            scrollCalls.push({ selector, focusTarget: options.focusTarget });
+          },
+          readCommentEntryPoint: async () => ({ found: true, center: { x: 50, y: 60 }, selector: '.comments-entry' }),
+          readCommentTotalTarget: async () => ({ found: true, center: { x: 24, y: 32 }, selector: '.total' }),
+          readExpandReplyTargets: async () => ({
+            found: true,
+            targets: snapshotReadIndex === 0
+              ? [{ text: '展开 4 条回复', rect: { left: 120, top: 160, width: 80, height: 24 }, center: { x: 160, y: 172 } }]
+              : [],
+          }),
+          readCommentScrollContainerTarget: async () => ({
+            found: true,
+            selector: '.note-scroller',
+            rect: { left: 300, top: 220, width: 320, height: 520 },
+            center: { x: 460, y: 260 },
+          }),
+          readVisibleCommentTarget: async () => ({
+            found: true,
+            selector: '.comment-item',
+            rect: snapshotReadIndex === 0
+              ? { left: 80, top: 180, width: 220, height: 72 }
+              : { left: 18, top: 28, width: 220, height: 72 },
+            center: snapshotReadIndex === 0
+              ? { x: 190, y: 212 }
+              : { x: 128, y: 64 },
+          }),
+          readCommentsSnapshot: async () => {
+            snapshotReadIndex += 1;
+            if (snapshotReadIndex === 1) {
+              return {
+                detailVisible: true,
+                hasCommentsContext: true,
+                expectedCommentsCount: 6,
+                collectability: { visibleTextCount: 1 },
+                scroll: { atBottom: false, selector: '.note-scroller', clientHeight: 900 },
+                comments: [
+                  { commentId: 'c-1', author: 'a', content: 'one', index: 1 },
+                ],
+              };
+            }
+            return {
+              detailVisible: true,
+              hasCommentsContext: true,
+              expectedCommentsCount: 6,
+              collectability: { visibleTextCount: 2 },
+              scroll: { atBottom: true, selector: '.note-scroller', clientHeight: 900 },
+              comments: [
+                { commentId: 'c-1', author: 'a', content: 'one', index: 1 },
+                { commentId: 'c-2', author: 'b', content: 'two', index: 2 },
+              ],
+            };
+          },
+          appendLikeStateRows: async () => ({ ok: true }),
+          writeLikeSummary: async () => ({ ok: true, filePath: '/tmp/likes.json' }),
+          mergeCommentsJsonl: async () => ({ filePath: '/tmp/comments.jsonl' }),
+          writeCommentsMd: async () => ({ filePath: '/tmp/comments.md' }),
+          readLocation: async () => state.currentHref,
+        },
+      },
+    });
+
+    assert.equal(result.ok, true);
+    assert.deepEqual(clicks.slice(0, 2), [
+      { x: 460, y: 260 },
+      { x: 160, y: 172 },
+    ]);
+    assert.ok(clicks.some((point) => point.x === 460 && point.y === 260));
+    assert.ok(!clicks.some((point) => point.x === 190 && point.y === 212));
+    assert.equal(scrollCalls.length, 1);
+    assert.equal(scrollCalls[0].selector, '.note-scroller');
+    assert.deepEqual(scrollCalls[0].focusTarget?.center, { x: 460, y: 260 });
+    assert.equal(result.data?.showMore?.clicks, 1);
+  });
+
+  it('reports the actual clicked reanchor target as comment_scroll while keeping detected visible_comment diagnostics', async () => {
+    const profileId = 'expand-reanchor-logging-profile';
+    const state = getProfileState(profileId);
+    state.currentNoteId = 'reanchor-log-note';
+    state.currentHref = 'https://www.xiaohongshu.com/explore/reanchor-log-note?xsec_token=reanchor-log';
+
+    const progress = [];
+    let snapshotReadIndex = 0;
+
+    const result = await harvestOps.executeCommentsHarvestOperation({
+      profileId,
+      params: {
+        tabCount: 1,
+        commentBudget: 0,
+        commentsLimit: 0,
+        maxRounds: 2,
+        persistComments: false,
+        doLikes: false,
+        adaptiveMaxRounds: false,
+        scrollDelayMinMs: 1,
+        scrollDelayMaxMs: 1,
+        settleMinMs: 1,
+        settleMaxMs: 1,
+        env: 'debug',
+        keyword: 'deepseek',
+      },
+      context: {
+        emitProgress: (entry) => progress.push(entry),
+        testingOverrides: {
+          readDetailSnapshot: async () => ({
+            noteIdFromUrl: 'reanchor-log-note',
+            commentsContextAvailable: true,
+            textPresent: true,
+            imageCount: 0,
+            videoPresent: false,
+          }),
+          readDetailState: async () => ({ href: state.currentHref, checkpoint: 'comments_ready' }),
+          pressKey: async () => {},
+          sleep: async () => {},
+          clearVisualHighlight: async () => {},
+          highlightVisualTarget: async () => {},
+          clickPoint: async () => {},
+          scrollBySelector: async () => {},
+          readCommentEntryPoint: async () => ({ found: true, center: { x: 50, y: 60 }, selector: '.comments-entry' }),
+          readCommentTotalTarget: async () => ({ found: true, center: { x: 24, y: 32 }, selector: '.total' }),
+          readExpandReplyTargets: async () => ({
+            found: true,
+            targets: snapshotReadIndex === 0
+              ? [{ text: '展开 4 条回复', rect: { left: 120, top: 160, width: 80, height: 24 }, center: { x: 160, y: 172 } }]
+              : [],
+          }),
+          readCommentScrollContainerTarget: async () => ({
+            found: true,
+            selector: '.note-scroller',
+            rect: { left: 300, top: 220, width: 320, height: 520 },
+            center: { x: 460, y: 260 },
+          }),
+          readVisibleCommentTarget: async () => ({
+            found: true,
+            selector: '.comment-item',
+            rect: snapshotReadIndex === 0
+              ? { left: 80, top: 180, width: 220, height: 72 }
+              : { left: 18, top: 28, width: 220, height: 72 },
+            center: snapshotReadIndex === 0
+              ? { x: 190, y: 212 }
+              : { x: 128, y: 64 },
+          }),
+          readCommentsSnapshot: async () => {
+            snapshotReadIndex += 1;
+            if (snapshotReadIndex === 1) {
+              return {
+                detailVisible: true,
+                hasCommentsContext: true,
+                expectedCommentsCount: 6,
+                collectability: { visibleTextCount: 1 },
+                scroll: { atBottom: false, selector: '.note-scroller', clientHeight: 900 },
+                comments: [
+                  { commentId: 'c-1', author: 'a', content: 'one', index: 1 },
+                ],
+              };
+            }
+            return {
+              detailVisible: true,
+              hasCommentsContext: true,
+              expectedCommentsCount: 6,
+              collectability: { visibleTextCount: 2 },
+              scroll: { atBottom: true, selector: '.note-scroller', clientHeight: 900 },
+              comments: [
+                { commentId: 'c-1', author: 'a', content: 'one', index: 1 },
+                { commentId: 'c-2', author: 'b', content: 'two', index: 2 },
+              ],
+            };
+          },
+          appendLikeStateRows: async () => ({ ok: true }),
+          writeLikeSummary: async () => ({ ok: true, filePath: '/tmp/likes.json' }),
+          mergeCommentsJsonl: async () => ({ filePath: '/tmp/comments.jsonl' }),
+          writeCommentsMd: async () => ({ filePath: '/tmp/comments.md' }),
+          readLocation: async () => state.currentHref,
+        },
+      },
+    });
+
+    assert.equal(result.ok, true);
+    const reanchor = progress.find((entry) => entry?.kind === 'after_expand_reanchor');
+    assert.ok(reanchor);
+    assert.equal(reanchor?.focusSource, 'comment_scroll');
+    assert.equal(reanchor?.focusSelector, '.note-scroller');
+    assert.equal(reanchor?.detectedFocusSource, 'visible_comment');
+    assert.equal(reanchor?.detectedFocusSelector, '.comment-item');
+  });
+
+  it('clicks the comment scroll container instead of a visible comment item during initial focus', async () => {
+    const profileId = 'comment-scroll-focus-profile';
+    const state = getProfileState(profileId);
+    state.currentNoteId = 'scroll-focus-note';
+    state.currentHref = 'https://www.xiaohongshu.com/explore/scroll-focus-note?xsec_token=scroll';
+
+    const clicks = [];
+
+    const result = await harvestOps.executeCommentsHarvestOperation({
+      profileId,
+      params: {
+        tabCount: 1,
+        commentBudget: 0,
+        commentsLimit: 0,
+        maxRounds: 1,
+        persistComments: false,
+        doLikes: false,
+        adaptiveMaxRounds: false,
+        scrollDelayMinMs: 1,
+        scrollDelayMaxMs: 1,
+        settleMinMs: 1,
+        settleMaxMs: 1,
+        env: 'debug',
+        keyword: 'deepseek',
+      },
+      context: {
+        testingOverrides: {
+          readDetailSnapshot: async () => ({
+            noteIdFromUrl: 'scroll-focus-note',
+            commentsContextAvailable: true,
+            textPresent: true,
+            imageCount: 0,
+            videoPresent: false,
+          }),
+          readDetailState: async () => ({ href: state.currentHref, checkpoint: 'comments_ready' }),
+          pressKey: async () => {},
+          sleep: async () => {},
+          clearVisualHighlight: async () => {},
+          highlightVisualTarget: async () => {},
+          clickPoint: async (_profileId, center) => {
+            clicks.push(center);
+          },
+          scrollBySelector: async () => {},
+          readCommentEntryPoint: async () => ({ found: true, center: { x: 50, y: 60 }, selector: '.comments-entry' }),
+          readCommentTotalTarget: async () => ({ found: true, center: { x: 24, y: 32 }, selector: '.total' }),
+          readCommentScrollContainerTarget: async () => ({
+            found: true,
+            selector: '.note-scroller',
+            rect: { left: 300, top: 220, width: 320, height: 520 },
+            center: { x: 460, y: 260 },
+          }),
+          readVisibleCommentTarget: async () => ({
+            found: true,
+            selector: '.comment-item',
+            rect: { left: 80, top: 180, width: 220, height: 72 },
+            center: { x: 190, y: 212 },
+          }),
+          readExpandReplyTargets: async () => ({ found: false, targets: [] }),
+          readCommentsSnapshot: async () => ({
+            detailVisible: true,
+            hasCommentsContext: true,
+            expectedCommentsCount: 2,
+            collectability: { visibleTextCount: 2 },
+            scroll: { atBottom: true, selector: '.note-scroller', clientHeight: 900 },
+            comments: [
+              { commentId: 'c-1', author: 'a', content: 'one', index: 1 },
+              { commentId: 'c-2', author: 'b', content: 'two', index: 2 },
+            ],
+          }),
+          appendLikeStateRows: async () => ({ ok: true }),
+          writeLikeSummary: async () => ({ ok: true, filePath: '/tmp/likes.json' }),
+          mergeCommentsJsonl: async () => ({ filePath: '/tmp/comments.jsonl' }),
+          writeCommentsMd: async () => ({ filePath: '/tmp/comments.md' }),
+        },
+      },
+    });
+
+    assert.equal(result.ok, true);
+    assert.deepEqual(clicks, [{ x: 460, y: 260 }]);
+  });
+
+  it('does not click the comment entry again when comment total and scroll container already exist but visible comments have not rendered yet', async () => {
+    const profileId = 'comment-entry-skip-profile';
+    const state = getProfileState(profileId);
+    state.currentNoteId = 'entry-skip-note';
+    state.currentHref = 'https://www.xiaohongshu.com/explore/entry-skip-note?xsec_token=entry-skip';
+
+    const clicks = [];
+    const progress = [];
+
+    const result = await harvestOps.executeCommentsHarvestOperation({
+      profileId,
+      params: {
+        tabCount: 1,
+        commentBudget: 0,
+        commentsLimit: 0,
+        maxRounds: 1,
+        persistComments: false,
+        doLikes: false,
+        adaptiveMaxRounds: false,
+        scrollDelayMinMs: 1,
+        scrollDelayMaxMs: 1,
+        settleMinMs: 1,
+        settleMaxMs: 1,
+        env: 'debug',
+        keyword: 'deepseek',
+      },
+      context: {
+        emitProgress: (entry) => progress.push(entry),
+        testingOverrides: {
+          readDetailSnapshot: async () => ({
+            noteIdFromUrl: 'entry-skip-note',
+            commentsContextAvailable: true,
+            textPresent: true,
+            imageCount: 0,
+            videoPresent: false,
+          }),
+          readDetailState: async () => ({ href: state.currentHref, checkpoint: 'comments_ready' }),
+          pressKey: async () => {},
+          sleep: async () => {},
+          clearVisualHighlight: async () => {},
+          highlightVisualTarget: async () => {},
+          clickPoint: async (_profileId, center) => {
+            clicks.push(center);
+          },
+          scrollBySelector: async () => {},
+          readCommentEntryPoint: async () => ({ found: true, center: { x: 50, y: 60 }, selector: '.chat-wrapper .count' }),
+          readCommentTotalTarget: async () => ({ found: true, center: { x: 24, y: 32 }, selector: '.total' }),
+          readCommentScrollContainerTarget: async () => ({
+            found: true,
+            selector: '.note-scroller',
+            rect: { left: 300, top: 220, width: 320, height: 520 },
+            center: { x: 460, y: 260 },
+          }),
+          readVisibleCommentTarget: async () => ({ found: false, reason: 'no_visible_comment' }),
+          readExpandReplyTargets: async () => ({ found: false, targets: [] }),
+          readCommentsSnapshot: async () => ({
+            detailVisible: true,
+            hasCommentsContext: true,
+            expectedCommentsCount: 2,
+            collectability: { visibleTextCount: 2 },
+            scroll: { atBottom: true, selector: '.note-scroller', clientHeight: 900 },
+            comments: [
+              { commentId: 'c-1', author: 'a', content: 'one', index: 1 },
+              { commentId: 'c-2', author: 'b', content: 'two', index: 2 },
+            ],
+          }),
+          appendLikeStateRows: async () => ({ ok: true }),
+          writeLikeSummary: async () => ({ ok: true, filePath: '/tmp/likes.json' }),
+          mergeCommentsJsonl: async () => ({ filePath: '/tmp/comments.jsonl' }),
+          writeCommentsMd: async () => ({ filePath: '/tmp/comments.md' }),
+        },
+      },
+    });
+
+    assert.equal(result.ok, true);
+    assert.equal(result.data?.exitReason, 'reached_bottom');
+    assert.deepEqual(clicks, [{ x: 460, y: 260 }]);
+    assert.ok(progress.some((entry) => entry?.kind === 'focus_comment_context_entry_skip' && entry?.reason === 'existing_comment_context'));
+    assert.equal(progress.some((entry) => entry?.kind === 'focus_comment_context_before_entry_click'), false);
   });
 });

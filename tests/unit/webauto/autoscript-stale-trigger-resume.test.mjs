@@ -422,13 +422,15 @@ it('safe-link modal chain does not restart comments_harvest after budget pause o
       { id: 'detail_modal', container: 'detail_modal' },
     ],
     operations: [
+      { id: 'ensure_tab_pool', action: 'wait', params: { ms: 1 }, trigger: 'startup', once: true, retry: { attempts: 1, backoffMs: 0 }, onFailure: 'continue', impact: 'op' },
       { id: 'open_first_detail', action: 'xhs_open_detail', trigger: 'startup', once: true, retry: { attempts: 1, backoffMs: 0 }, onFailure: 'continue', impact: 'op' },
       { id: 'detail_harvest', action: 'xhs_detail_harvest', trigger: 'manual', dependsOn: ['open_first_detail'], conditions: [{ type: 'subscription_exist', subscriptionId: 'detail_modal' }], once: false, oncePerAppear: true, retry: { attempts: 1, backoffMs: 0 }, onFailure: 'continue', impact: 'op' },
       { id: 'warmup_comments_context', action: 'wait', params: { ms: 1 }, trigger: 'manual', dependsOn: ['detail_harvest'], conditions: [{ type: 'subscription_exist', subscriptionId: 'detail_modal' }], once: false, oncePerAppear: true, retry: { attempts: 1, backoffMs: 0 }, onFailure: 'continue', impact: 'op' },
       { id: 'comments_harvest', action: 'xhs_comments_harvest', trigger: 'manual', dependsOn: ['warmup_comments_context'], conditions: [{ type: 'subscription_exist', subscriptionId: 'detail_modal' }], once: false, oncePerAppear: true, retry: { attempts: 1, backoffMs: 0 }, onFailure: 'continue', impact: 'script' },
-      { id: 'close_detail', action: 'xhs_close_detail', trigger: 'manual', dependsOn: ['comments_harvest'], conditions: [{ type: 'operation_done', operationId: 'comments_harvest' }, { type: 'subscription_exist', subscriptionId: 'detail_modal' }], once: false, oncePerAppear: true, retry: { attempts: 1, backoffMs: 0 }, onFailure: 'continue', impact: 'op' },
+      { id: 'close_detail', action: 'xhs_close_detail', trigger: 'manual', dependsOn: ['comments_harvest'], conditions: [{ type: 'operation_done', operationId: 'comments_harvest' }], once: false, oncePerAppear: true, retry: { attempts: 1, backoffMs: 0 }, onFailure: 'continue', impact: 'op' },
       { id: 'wait_between_notes', action: 'wait', params: { ms: 1 }, trigger: 'manual', dependsOn: ['close_detail'], once: false, retry: { attempts: 1, backoffMs: 0 }, onFailure: 'continue', impact: 'op' },
-      { id: 'open_next_detail', action: 'xhs_open_detail', trigger: 'manual', dependsOn: ['wait_between_notes', 'comments_harvest'], conditions: [{ type: 'subscription_not_exist', subscriptionId: 'detail_modal' }], once: false, retry: { attempts: 1, backoffMs: 0 }, onFailure: 'continue', impact: 'op' },
+      { id: 'tab_switch_if_needed', action: 'xhs_tab_switch_if_needed', trigger: 'manual', dependsOn: ['close_detail'], once: false, retry: { attempts: 1, backoffMs: 0 }, onFailure: 'continue', impact: 'op' },
+      { id: 'open_next_detail', action: 'xhs_open_detail', trigger: 'manual', dependsOn: ['wait_between_notes', 'ensure_tab_pool', 'tab_switch_if_needed'], once: false, retry: { attempts: 1, backoffMs: 0 }, onFailure: 'continue', impact: 'op' },
     ],
   }), {
     log: (payload) => logs.push(payload),
@@ -439,6 +441,9 @@ it('safe-link modal chain does not restart comments_harvest after budget pause o
     stopWhenMockEventsExhausted: false,
     executeMockOperation: async ({ operation }) => {
       queue.push(operation.id);
+      if (operation.id === 'ensure_tab_pool') {
+        return { ok: true, code: 'OPERATION_DONE', data: { slotsReady: true } };
+      }
       if (operation.id === 'open_first_detail') {
         await runner.handleEvent({ type: 'appear', subscriptionId: 'detail_modal', timestamp: new Date().toISOString() });
         await runner.handleEvent({ type: 'exist', subscriptionId: 'detail_modal', timestamp: new Date().toISOString() });
@@ -448,8 +453,10 @@ it('safe-link modal chain does not restart comments_harvest after budget pause o
         return { ok: true, code: 'OPERATION_DONE', data: { paused: true, budgetExhausted: true, commentsAdded: 20 } };
       }
       if (operation.id === 'close_detail') {
-        await runner.handleEvent({ type: 'disappear', subscriptionId: 'detail_modal', timestamp: new Date().toISOString() });
-        return { ok: true, code: 'OPERATION_DONE', data: { closed: true } };
+        return { ok: true, code: 'OPERATION_DONE', data: { closed: false, method: 'deferred_rotation' } };
+      }
+      if (operation.id === 'tab_switch_if_needed') {
+        return { ok: true, code: 'OPERATION_DONE', data: { tabIndex: 2, reason: 'paused_slot_rotation' } };
       }
       if (operation.id === 'open_next_detail') {
         return { ok: true, code: 'AUTOSCRIPT_DONE_DETAIL_LINKS_EXHAUSTED', data: {} };
@@ -463,12 +470,14 @@ it('safe-link modal chain does not restart comments_harvest after budget pause o
 
   assert.equal(runner.state.reason, 'script_complete');
   assert.deepEqual(queue, [
+    'ensure_tab_pool',
     'open_first_detail',
     'detail_harvest',
     'warmup_comments_context',
     'comments_harvest',
     'close_detail',
     'wait_between_notes',
+    'tab_switch_if_needed',
     'open_next_detail',
   ]);
   assert.equal(logs.filter((item) => item?.event === 'autoscript:operation_start' && item?.operationId === 'comments_harvest').length, 1);
@@ -489,13 +498,15 @@ it('safe-link close_detail still runs after comments_harvest when detail modal d
       { id: 'detail_modal', container: 'detail_modal' },
     ],
     operations: [
+      { id: 'ensure_tab_pool', action: 'wait', params: { ms: 1 }, trigger: 'startup', once: true, retry: { attempts: 1, backoffMs: 0 }, onFailure: 'continue', impact: 'op' },
       { id: 'open_first_detail', action: 'xhs_open_detail', trigger: 'startup', once: true, retry: { attempts: 1, backoffMs: 0 }, onFailure: 'continue', impact: 'op' },
       { id: 'detail_harvest', action: 'xhs_detail_harvest', trigger: 'manual', dependsOn: ['open_first_detail'], conditions: [{ type: 'subscription_exist', subscriptionId: 'detail_modal' }], once: false, oncePerAppear: true, retry: { attempts: 1, backoffMs: 0 }, onFailure: 'continue', impact: 'op' },
       { id: 'warmup_comments_context', action: 'wait', params: { ms: 1 }, trigger: 'manual', dependsOn: ['detail_harvest'], conditions: [{ type: 'subscription_exist', subscriptionId: 'detail_modal' }], once: false, oncePerAppear: true, retry: { attempts: 1, backoffMs: 0 }, onFailure: 'continue', impact: 'op' },
       { id: 'comments_harvest', action: 'xhs_comments_harvest', trigger: 'manual', dependsOn: ['warmup_comments_context'], conditions: [{ type: 'subscription_exist', subscriptionId: 'detail_modal' }], once: false, oncePerAppear: true, retry: { attempts: 1, backoffMs: 0 }, onFailure: 'continue', impact: 'script' },
       { id: 'close_detail', action: 'xhs_close_detail', trigger: 'manual', dependsOn: ['comments_harvest'], conditions: [{ type: 'operation_done', operationId: 'comments_harvest' }], once: false, oncePerAppear: true, retry: { attempts: 1, backoffMs: 0 }, onFailure: 'continue', impact: 'op' },
       { id: 'wait_between_notes', action: 'wait', params: { ms: 1 }, trigger: 'manual', dependsOn: ['close_detail'], once: false, oncePerAppear: false, retry: { attempts: 1, backoffMs: 0 }, onFailure: 'continue', impact: 'op' },
-      { id: 'open_next_detail', action: 'xhs_open_detail', trigger: 'manual', dependsOn: ['wait_between_notes', 'comments_harvest'], conditions: [{ type: 'subscription_not_exist', subscriptionId: 'detail_modal' }], once: false, oncePerAppear: false, retry: { attempts: 1, backoffMs: 0 }, onFailure: 'continue', impact: 'op' },
+      { id: 'tab_switch_if_needed', action: 'xhs_tab_switch_if_needed', trigger: 'manual', dependsOn: ['close_detail'], once: false, oncePerAppear: false, retry: { attempts: 1, backoffMs: 0 }, onFailure: 'continue', impact: 'op' },
+      { id: 'open_next_detail', action: 'xhs_open_detail', trigger: 'manual', dependsOn: ['wait_between_notes', 'ensure_tab_pool', 'tab_switch_if_needed'], once: false, oncePerAppear: false, retry: { attempts: 1, backoffMs: 0 }, onFailure: 'continue', impact: 'op' },
     ],
   }), {
     log: (payload) => logs.push(payload),
@@ -506,6 +517,9 @@ it('safe-link close_detail still runs after comments_harvest when detail modal d
     stopWhenMockEventsExhausted: false,
     executeMockOperation: async ({ operation }) => {
       queue.push(operation.id);
+      if (operation.id === 'ensure_tab_pool') {
+        return { ok: true, code: 'OPERATION_DONE', data: { slotsReady: true } };
+      }
       if (operation.id === 'open_first_detail') {
         await runner.handleEvent({ type: 'appear', subscriptionId: 'detail_modal', timestamp: new Date().toISOString() });
         await runner.handleEvent({ type: 'exist', subscriptionId: 'detail_modal', timestamp: new Date().toISOString() });
@@ -517,6 +531,9 @@ it('safe-link close_detail still runs after comments_harvest when detail modal d
       }
       if (operation.id === 'close_detail') {
         return { ok: true, code: 'OPERATION_DONE', data: { closed: true, method: 'already_closed', queueSkipped: true } };
+      }
+      if (operation.id === 'tab_switch_if_needed') {
+        return { ok: true, code: 'OPERATION_DONE', data: { tabIndex: 2, reason: 'post_close_rotation' } };
       }
       if (operation.id === 'open_next_detail') {
         return { ok: true, code: 'AUTOSCRIPT_DONE_DETAIL_LINKS_EXHAUSTED', data: {} };
@@ -530,12 +547,14 @@ it('safe-link close_detail still runs after comments_harvest when detail modal d
 
   assert.equal(runner.state.reason, 'script_complete');
   assert.deepEqual(queue, [
+    'ensure_tab_pool',
     'open_first_detail',
     'detail_harvest',
     'warmup_comments_context',
     'comments_harvest',
     'close_detail',
     'wait_between_notes',
+    'tab_switch_if_needed',
     'open_next_detail',
   ]);
   assert.ok(logs.some((item) => item?.event === 'autoscript:operation_start' && item?.operationId === 'close_detail'));
@@ -555,13 +574,15 @@ it('safe-link modal chain continues through close and terminal open on a live-mo
       { id: 'detail_modal', container: 'detail_modal' },
     ],
     operations: [
+      { id: 'ensure_tab_pool', action: 'wait', params: { ms: 1 }, trigger: 'startup', once: true, retry: { attempts: 1, backoffMs: 0 }, onFailure: 'continue', impact: 'op' },
       { id: 'open_first_detail', action: 'xhs_open_detail', trigger: 'startup', once: true, retry: { attempts: 1, backoffMs: 0 }, onFailure: 'continue', impact: 'op' },
       { id: 'detail_harvest', action: 'xhs_detail_harvest', trigger: 'manual', dependsOn: ['open_first_detail'], conditions: [{ type: 'subscription_exist', subscriptionId: 'detail_modal' }], once: false, oncePerAppear: true, retry: { attempts: 1, backoffMs: 0 }, onFailure: 'continue', impact: 'op' },
       { id: 'warmup_comments_context', action: 'wait', params: { ms: 1 }, trigger: 'manual', dependsOn: ['detail_harvest'], conditions: [{ type: 'subscription_exist', subscriptionId: 'detail_modal' }], once: false, oncePerAppear: true, retry: { attempts: 1, backoffMs: 0 }, onFailure: 'continue', impact: 'op' },
       { id: 'comments_harvest', action: 'xhs_comments_harvest', trigger: 'manual', dependsOn: ['warmup_comments_context'], conditions: [{ type: 'subscription_exist', subscriptionId: 'detail_modal' }], once: false, oncePerAppear: true, retry: { attempts: 1, backoffMs: 0 }, onFailure: 'continue', impact: 'script' },
-      { id: 'close_detail', action: 'xhs_close_detail', trigger: 'manual', dependsOn: ['comments_harvest'], conditions: [{ type: 'operation_done', operationId: 'comments_harvest' }, { type: 'subscription_exist', subscriptionId: 'detail_modal' }], once: false, oncePerAppear: true, retry: { attempts: 1, backoffMs: 0 }, onFailure: 'continue', impact: 'op' },
+      { id: 'close_detail', action: 'xhs_close_detail', trigger: 'manual', dependsOn: ['comments_harvest'], conditions: [{ type: 'operation_done', operationId: 'comments_harvest' }], once: false, oncePerAppear: true, retry: { attempts: 1, backoffMs: 0 }, onFailure: 'continue', impact: 'op' },
       { id: 'wait_between_notes', action: 'wait', params: { ms: 1 }, trigger: 'manual', dependsOn: ['close_detail'], once: false, oncePerAppear: false, retry: { attempts: 1, backoffMs: 0 }, onFailure: 'continue', impact: 'op' },
-      { id: 'open_next_detail', action: 'xhs_open_detail', trigger: 'manual', dependsOn: ['wait_between_notes', 'comments_harvest'], conditions: [{ type: 'subscription_not_exist', subscriptionId: 'detail_modal' }], once: false, oncePerAppear: false, retry: { attempts: 1, backoffMs: 0 }, onFailure: 'continue', impact: 'op' },
+      { id: 'tab_switch_if_needed', action: 'xhs_tab_switch_if_needed', trigger: 'manual', dependsOn: ['close_detail'], once: false, oncePerAppear: false, retry: { attempts: 1, backoffMs: 0 }, onFailure: 'continue', impact: 'op' },
+      { id: 'open_next_detail', action: 'xhs_open_detail', trigger: 'manual', dependsOn: ['wait_between_notes', 'ensure_tab_pool', 'tab_switch_if_needed'], once: false, oncePerAppear: false, retry: { attempts: 1, backoffMs: 0 }, onFailure: 'continue', impact: 'op' },
     ],
   }), {
     log: (payload) => logs.push(payload),
@@ -572,6 +593,9 @@ it('safe-link modal chain continues through close and terminal open on a live-mo
     stopWhenMockEventsExhausted: false,
     executeMockOperation: async ({ operation }) => {
       queue.push(operation.id);
+      if (operation.id === 'ensure_tab_pool') {
+        return { ok: true, code: 'OPERATION_DONE', data: { slotsReady: true } };
+      }
       if (operation.id === 'open_first_detail') {
         await runner.handleEvent({ type: 'appear', subscriptionId: 'detail_modal', timestamp: new Date().toISOString() });
         await runner.handleEvent({ type: 'exist', subscriptionId: 'detail_modal', timestamp: new Date().toISOString() });
@@ -583,6 +607,9 @@ it('safe-link modal chain continues through close and terminal open on a live-mo
       if (operation.id === 'close_detail') {
         await runner.handleEvent({ type: 'disappear', subscriptionId: 'detail_modal', timestamp: new Date().toISOString() });
         return { ok: true, code: 'OPERATION_DONE', data: { closed: true } };
+      }
+      if (operation.id === 'tab_switch_if_needed') {
+        return { ok: true, code: 'OPERATION_DONE', data: { tabIndex: 2, reason: 'post_close_rotation' } };
       }
       if (operation.id === 'open_next_detail') {
         return { ok: true, code: 'AUTOSCRIPT_DONE_DETAIL_LINKS_EXHAUSTED', data: {} };
@@ -596,12 +623,14 @@ it('safe-link modal chain continues through close and terminal open on a live-mo
 
   assert.equal(runner.state.reason, 'script_complete');
   assert.deepEqual(queue, [
+    'ensure_tab_pool',
     'open_first_detail',
     'detail_harvest',
     'warmup_comments_context',
     'comments_harvest',
     'close_detail',
     'wait_between_notes',
+    'tab_switch_if_needed',
     'open_next_detail',
   ]);
   assert.ok(logs.some((item) => item?.event === 'autoscript:operation_done' && item?.operationId === 'close_detail'));
@@ -686,4 +715,434 @@ it('reschedules oncePerAppear exist triggers when a new visible element enters t
   await handle.done;
 
   assert.deepEqual(queue, ['expand_replies', 'expand_replies']);
+});
+
+it('restarts detail_modal oncePerAppear chain when the page path changes under the same modal element key', async () => {
+  const queue = [];
+
+  const runner = new AutoscriptRunner(normalizeAutoscript({
+    version: 1,
+    name: 'detail-modal-page-cycle',
+    profileId: 'xhs-detail-modal-page-cycle',
+    defaults: { disableTimeout: true, timeoutMs: 0 },
+    subscriptions: [
+      { id: 'detail_modal', container: 'detail_modal' },
+    ],
+    operations: [
+      {
+        id: 'detail_harvest',
+        action: 'xhs_detail_harvest',
+        trigger: 'detail_modal.exist',
+        once: false,
+        oncePerAppear: true,
+        retry: { attempts: 1, backoffMs: 0 },
+        onFailure: 'continue',
+        impact: 'op',
+      },
+    ],
+  }), {
+    profileId: 'xhs-detail-modal-page-cycle',
+    mockEvents: [],
+    stopWhenMockEventsExhausted: false,
+    executeMockOperation: async ({ operation }) => {
+      queue.push(operation.id);
+      return { ok: true, code: 'OPERATION_DONE', data: {} };
+    },
+  });
+
+  const handle = await runner.start();
+  await runner.handleEvent({
+    type: 'exist',
+    subscriptionId: 'detail_modal',
+    timestamp: new Date().toISOString(),
+    presenceVersion: 1,
+    elementKeys: ['root/0'],
+    stateKey: 'page:/explore/698de0c8000000001a01e38d::root/0',
+    eventKey: 'detail_modal:exist:p1:kroot/0:spage:/explore/698de0c8000000001a01e38d::root/0',
+  });
+  await runner.operationQueue;
+  await runner.handleEvent({
+    type: 'exist',
+    subscriptionId: 'detail_modal',
+    timestamp: new Date().toISOString(),
+    presenceVersion: 1,
+    elementKeys: ['root/0'],
+    stateKey: 'page:/explore/6997df4d00000000150207fd::root/0',
+    eventKey: 'detail_modal:exist:p1:kroot/0:spage:/explore/6997df4d00000000150207fd::root/0',
+  });
+  await runner.operationQueue;
+  handle.stop('test_complete');
+  await handle.done;
+
+  assert.deepEqual(queue, ['detail_harvest', 'detail_harvest']);
+});
+
+it('does not restart detail_modal oncePerAppear chain when the page path stays the same under the same modal element key', async () => {
+  const queue = [];
+
+  const runner = new AutoscriptRunner(normalizeAutoscript({
+    version: 1,
+    name: 'detail-modal-stable-page-cycle',
+    profileId: 'xhs-detail-modal-stable-page-cycle',
+    defaults: { disableTimeout: true, timeoutMs: 0 },
+    subscriptions: [
+      { id: 'detail_modal', container: 'detail_modal' },
+    ],
+    operations: [
+      {
+        id: 'detail_harvest',
+        action: 'xhs_detail_harvest',
+        trigger: 'detail_modal.exist',
+        once: false,
+        oncePerAppear: true,
+        retry: { attempts: 1, backoffMs: 0 },
+        onFailure: 'continue',
+        impact: 'op',
+      },
+    ],
+  }), {
+    profileId: 'xhs-detail-modal-stable-page-cycle',
+    mockEvents: [],
+    stopWhenMockEventsExhausted: false,
+    executeMockOperation: async ({ operation }) => {
+      queue.push(operation.id);
+      return { ok: true, code: 'OPERATION_DONE', data: {} };
+    },
+  });
+
+  const handle = await runner.start();
+  await runner.handleEvent({
+    type: 'exist',
+    subscriptionId: 'detail_modal',
+    timestamp: new Date().toISOString(),
+    presenceVersion: 1,
+    elementKeys: ['root/0'],
+    stateKey: 'page:/explore/698de0c8000000001a01e38d::root/0',
+    eventKey: 'detail_modal:exist:p1:kroot/0:spage:/explore/698de0c8000000001a01e38d::root/0',
+  });
+  await runner.operationQueue;
+  await runner.handleEvent({
+    type: 'exist',
+    subscriptionId: 'detail_modal',
+    timestamp: new Date().toISOString(),
+    presenceVersion: 1,
+    elementKeys: ['root/0'],
+    stateKey: 'page:/explore/698de0c8000000001a01e38d::root/0',
+    eventKey: 'detail_modal:exist:p1:kroot/0:spage:/explore/698de0c8000000001a01e38d::root/0',
+  });
+  await runner.operationQueue;
+  handle.stop('test_complete');
+  await handle.done;
+
+  assert.deepEqual(queue, ['detail_harvest']);
+});
+
+it('continues safe-link open_next_detail after tab rotation even if detail_modal stays globally present', async () => {
+  const logs = [];
+  const queue = [];
+
+  const runner = new AutoscriptRunner(normalizeAutoscript({
+    version: 1,
+    name: 'safe-link-stale-global-modal-rotation',
+    profileId: 'xhs-safe-link-stale-global-modal-rotation',
+    defaults: { disableTimeout: true, timeoutMs: 0 },
+    subscriptions: [
+      { id: 'detail_modal', container: 'detail_modal' },
+    ],
+    operations: [
+      { id: 'ensure_tab_pool', action: 'wait', params: { ms: 1 }, trigger: 'startup', once: true, retry: { attempts: 1, backoffMs: 0 }, onFailure: 'continue', impact: 'op' },
+      { id: 'open_first_detail', action: 'xhs_open_detail', trigger: 'startup', once: true, retry: { attempts: 1, backoffMs: 0 }, onFailure: 'continue', impact: 'op' },
+      { id: 'detail_harvest', action: 'xhs_detail_harvest', trigger: 'manual', dependsOn: ['open_first_detail'], conditions: [{ type: 'subscription_exist', subscriptionId: 'detail_modal' }], once: false, oncePerAppear: true, retry: { attempts: 1, backoffMs: 0 }, onFailure: 'continue', impact: 'op' },
+      { id: 'warmup_comments_context', action: 'wait', params: { ms: 1 }, trigger: 'manual', dependsOn: ['detail_harvest'], conditions: [{ type: 'subscription_exist', subscriptionId: 'detail_modal' }], once: false, oncePerAppear: true, retry: { attempts: 1, backoffMs: 0 }, onFailure: 'continue', impact: 'op' },
+      { id: 'comments_harvest', action: 'xhs_comments_harvest', trigger: 'manual', dependsOn: ['warmup_comments_context'], conditions: [{ type: 'subscription_exist', subscriptionId: 'detail_modal' }], once: false, oncePerAppear: true, retry: { attempts: 1, backoffMs: 0 }, onFailure: 'continue', impact: 'script' },
+      { id: 'close_detail', action: 'xhs_close_detail', trigger: 'manual', dependsOn: ['comments_harvest'], conditions: [{ type: 'operation_done', operationId: 'comments_harvest' }], once: false, oncePerAppear: true, retry: { attempts: 1, backoffMs: 0 }, onFailure: 'continue', impact: 'op' },
+      { id: 'wait_between_notes', action: 'wait', params: { ms: 1 }, trigger: 'manual', dependsOn: ['close_detail'], once: false, oncePerAppear: false, retry: { attempts: 1, backoffMs: 0 }, onFailure: 'continue', impact: 'op' },
+      { id: 'tab_switch_if_needed', action: 'xhs_tab_switch_if_needed', trigger: 'manual', dependsOn: ['close_detail'], once: false, oncePerAppear: false, retry: { attempts: 1, backoffMs: 0 }, onFailure: 'continue', impact: 'op' },
+      { id: 'open_next_detail', action: 'xhs_open_detail', trigger: 'manual', dependsOn: ['wait_between_notes', 'ensure_tab_pool', 'tab_switch_if_needed'], once: false, oncePerAppear: false, retry: { attempts: 1, backoffMs: 0 }, onFailure: 'continue', impact: 'op' },
+    ],
+  }), {
+    log: (payload) => logs.push(payload),
+    profileId: 'xhs-safe-link-stale-global-modal-rotation',
+    mockEvents: [
+      { type: 'startup', timestamp: new Date().toISOString() },
+    ],
+    stopWhenMockEventsExhausted: false,
+    executeMockOperation: async ({ operation }) => {
+      queue.push(operation.id);
+      if (operation.id === 'open_first_detail') {
+        await runner.handleEvent({
+          type: 'appear',
+          subscriptionId: 'detail_modal',
+          timestamp: new Date().toISOString(),
+          presenceVersion: 1,
+          elementKeys: ['root/0'],
+          stateKey: 'page:/explore/note-a::root/0',
+          eventKey: 'detail_modal:appear:p1:kroot/0:spage:/explore/note-a::root/0',
+        });
+        await runner.handleEvent({
+          type: 'exist',
+          subscriptionId: 'detail_modal',
+          timestamp: new Date().toISOString(),
+          presenceVersion: 1,
+          elementKeys: ['root/0'],
+          stateKey: 'page:/explore/note-a::root/0',
+          eventKey: 'detail_modal:exist:p1:kroot/0:spage:/explore/note-a::root/0',
+        });
+        return { ok: true, code: 'OPERATION_DONE', data: { opened: true } };
+      }
+      if (operation.id === 'comments_harvest') {
+        return { ok: true, code: 'OPERATION_DONE', data: { paused: true, budgetExhausted: true, commentsAdded: 50 } };
+      }
+      if (operation.id === 'close_detail') {
+        return { ok: true, code: 'OPERATION_DONE', data: { closed: false, method: 'deferred_rotation' } };
+      }
+      if (operation.id === 'tab_switch_if_needed') {
+        return { ok: true, code: 'OPERATION_DONE', data: { tabIndex: 2, reason: 'paused_slot_rotation' } };
+      }
+      if (operation.id === 'open_next_detail') {
+        return { ok: true, code: 'AUTOSCRIPT_DONE_DETAIL_LINKS_EXHAUSTED', data: { opened: true } };
+      }
+      return { ok: true, code: 'OPERATION_DONE', data: { id: operation.id } };
+    },
+  });
+
+  const handle = await runner.start();
+  await handle.done;
+
+  assert.equal(runner.state.reason, 'script_complete');
+  assert.deepEqual(queue, [
+    'ensure_tab_pool',
+    'open_first_detail',
+    'detail_harvest',
+    'warmup_comments_context',
+    'comments_harvest',
+    'close_detail',
+    'wait_between_notes',
+    'tab_switch_if_needed',
+    'open_next_detail',
+  ]);
+  assert.equal(logs.some((item) => item?.event === 'autoscript:operation_skipped' && item?.operationId === 'open_next_detail'), false);
+  assert.equal(logs.filter((item) => item?.event === 'autoscript:operation_start' && item?.operationId === 'detail_harvest').length, 1);
+  assert.ok(logs.some((item) => item?.event === 'autoscript:operation_terminal' && item?.operationId === 'open_next_detail'));
+});
+
+it('restarts manual oncePerAppear modal chain when subscription_exist stateKey changes across notes', async () => {
+  const queue = [];
+  let handle = null;
+
+  const runner = new AutoscriptRunner(normalizeAutoscript({
+    version: 1,
+    name: 'manual-modal-chain-statekey-cycle',
+    profileId: 'xhs-manual-modal-chain-statekey-cycle',
+    defaults: { disableTimeout: true, timeoutMs: 0 },
+    subscriptions: [
+      { id: 'detail_modal', container: 'detail_modal' },
+    ],
+    operations: [
+      { id: 'open_first_detail', action: 'xhs_open_detail', trigger: 'startup', once: true, retry: { attempts: 1, backoffMs: 0 }, onFailure: 'continue', impact: 'op' },
+      { id: 'detail_harvest', action: 'xhs_detail_harvest', trigger: 'manual', dependsOn: ['open_first_detail'], conditions: [{ type: 'subscription_exist', subscriptionId: 'detail_modal' }], once: false, oncePerAppear: true, retry: { attempts: 1, backoffMs: 0 }, onFailure: 'continue', impact: 'op' },
+      { id: 'warmup_comments_context', action: 'wait', params: { ms: 1 }, trigger: 'manual', dependsOn: ['detail_harvest'], conditions: [{ type: 'subscription_exist', subscriptionId: 'detail_modal' }], once: false, oncePerAppear: true, retry: { attempts: 1, backoffMs: 0 }, onFailure: 'continue', impact: 'op' },
+      { id: 'comments_harvest', action: 'xhs_comments_harvest', trigger: 'manual', dependsOn: ['warmup_comments_context'], conditions: [{ type: 'subscription_exist', subscriptionId: 'detail_modal' }], once: false, oncePerAppear: true, retry: { attempts: 1, backoffMs: 0 }, onFailure: 'continue', impact: 'script' },
+      { id: 'close_detail', action: 'xhs_close_detail', trigger: 'manual', dependsOn: ['comments_harvest'], conditions: [{ type: 'operation_done', operationId: 'comments_harvest' }], once: false, oncePerAppear: true, retry: { attempts: 1, backoffMs: 0 }, onFailure: 'continue', impact: 'op' },
+      { id: 'wait_between_notes', action: 'wait', params: { ms: 1 }, trigger: 'manual', dependsOn: ['close_detail'], once: false, oncePerAppear: false, retry: { attempts: 1, backoffMs: 0 }, onFailure: 'continue', impact: 'op' },
+      { id: 'open_next_detail', action: 'xhs_open_detail', trigger: 'manual', dependsOn: ['wait_between_notes'], once: false, oncePerAppear: false, retry: { attempts: 1, backoffMs: 0 }, onFailure: 'continue', impact: 'op' },
+    ],
+  }), {
+    profileId: 'xhs-manual-modal-chain-statekey-cycle',
+    mockEvents: [
+      { type: 'startup', timestamp: new Date().toISOString() },
+    ],
+    stopWhenMockEventsExhausted: false,
+    executeMockOperation: async ({ operation }) => {
+      queue.push(operation.id);
+      if (operation.id === 'open_first_detail') {
+        await runner.handleEvent({
+          type: 'appear',
+          subscriptionId: 'detail_modal',
+          timestamp: new Date().toISOString(),
+          presenceVersion: 1,
+          elementKeys: ['root/0'],
+          stateKey: 'page:/explore/note-a::root/0',
+          eventKey: 'detail_modal:appear:p1:kroot/0:spage:/explore/note-a::root/0',
+        });
+        await runner.handleEvent({
+          type: 'exist',
+          subscriptionId: 'detail_modal',
+          timestamp: new Date().toISOString(),
+          presenceVersion: 1,
+          elementKeys: ['root/0'],
+          stateKey: 'page:/explore/note-a::root/0',
+          eventKey: 'detail_modal:exist:p1:kroot/0:spage:/explore/note-a::root/0',
+        });
+        return { ok: true, code: 'OPERATION_DONE', data: { opened: true } };
+      }
+      if (operation.id === 'close_detail') {
+        return { ok: true, code: 'OPERATION_DONE', data: { closed: false, method: 'deferred_rotation' } };
+      }
+      if (operation.id === 'comments_harvest' && queue.filter((id) => id === 'comments_harvest').length >= 2) {
+        setTimeout(() => handle?.stop('test_complete'), 0);
+      }
+      if (operation.id === 'open_next_detail') {
+        await runner.handleEvent({
+          type: 'exist',
+          subscriptionId: 'detail_modal',
+          timestamp: new Date().toISOString(),
+          presenceVersion: 1,
+          elementKeys: ['root/0'],
+          stateKey: 'page:/explore/note-b::root/0',
+          eventKey: 'detail_modal:exist:p1:kroot/0:spage:/explore/note-b::root/0',
+        });
+        return { ok: true, code: 'OPERATION_DONE', data: { opened: true } };
+      }
+      return { ok: true, code: 'OPERATION_DONE', data: { id: operation.id } };
+    },
+  });
+
+  handle = await runner.start();
+  await handle.done;
+
+  assert.equal(queue.filter((id) => id === 'detail_harvest').length, 2);
+  assert.equal(queue.filter((id) => id === 'warmup_comments_context').length, 2);
+  assert.equal(queue.filter((id) => id === 'comments_harvest').length, 2);
+  assert.ok(queue.indexOf('open_next_detail') >= 0);
+});
+
+it('restarts manual oncePerAppear modal chain after a disappear/appear cycle on the same pathname', async () => {
+  const queue = [];
+  let handle = null;
+
+  const runner = new AutoscriptRunner(normalizeAutoscript({
+    version: 1,
+    name: 'manual-modal-chain-presence-cycle',
+    profileId: 'xhs-manual-modal-chain-presence-cycle',
+    defaults: { disableTimeout: true, timeoutMs: 0 },
+    subscriptions: [
+      { id: 'detail_modal', container: 'detail_modal' },
+    ],
+    operations: [
+      { id: 'open_first_detail', action: 'xhs_open_detail', trigger: 'startup', once: true, retry: { attempts: 1, backoffMs: 0 }, onFailure: 'continue', impact: 'op' },
+      { id: 'detail_harvest', action: 'xhs_detail_harvest', trigger: 'manual', dependsOn: ['open_first_detail'], conditions: [{ type: 'subscription_exist', subscriptionId: 'detail_modal' }], once: false, oncePerAppear: true, retry: { attempts: 1, backoffMs: 0 }, onFailure: 'continue', impact: 'op' },
+      { id: 'warmup_comments_context', action: 'wait', params: { ms: 1 }, trigger: 'manual', dependsOn: ['detail_harvest'], conditions: [{ type: 'subscription_exist', subscriptionId: 'detail_modal' }], once: false, oncePerAppear: true, retry: { attempts: 1, backoffMs: 0 }, onFailure: 'continue', impact: 'op' },
+      { id: 'comments_harvest', action: 'xhs_comments_harvest', trigger: 'manual', dependsOn: ['warmup_comments_context'], conditions: [{ type: 'subscription_exist', subscriptionId: 'detail_modal' }], once: false, oncePerAppear: true, retry: { attempts: 1, backoffMs: 0 }, onFailure: 'continue', impact: 'script' },
+      { id: 'close_detail', action: 'xhs_close_detail', trigger: 'manual', dependsOn: ['comments_harvest'], conditions: [{ type: 'operation_done', operationId: 'comments_harvest' }], once: false, oncePerAppear: true, retry: { attempts: 1, backoffMs: 0 }, onFailure: 'continue', impact: 'op' },
+      { id: 'wait_between_notes', action: 'wait', params: { ms: 1 }, trigger: 'manual', dependsOn: ['close_detail'], once: false, oncePerAppear: false, retry: { attempts: 1, backoffMs: 0 }, onFailure: 'continue', impact: 'op' },
+      { id: 'open_next_detail', action: 'xhs_open_detail', trigger: 'manual', dependsOn: ['wait_between_notes'], once: false, oncePerAppear: false, retry: { attempts: 1, backoffMs: 0 }, onFailure: 'continue', impact: 'op' },
+    ],
+  }), {
+    profileId: 'xhs-manual-modal-chain-presence-cycle',
+    mockEvents: [
+      { type: 'startup', timestamp: new Date().toISOString() },
+    ],
+    stopWhenMockEventsExhausted: false,
+    executeMockOperation: async ({ operation }) => {
+      queue.push(operation.id);
+      if (operation.id === 'open_first_detail') {
+        await runner.handleEvent({
+          type: 'appear',
+          subscriptionId: 'detail_modal',
+          timestamp: new Date().toISOString(),
+          presenceVersion: 1,
+          elementKeys: ['root/0'],
+          stateKey: 'page:/explore/note-a::root/0',
+        });
+        await runner.handleEvent({
+          type: 'exist',
+          subscriptionId: 'detail_modal',
+          timestamp: new Date().toISOString(),
+          presenceVersion: 1,
+          elementKeys: ['root/0'],
+          stateKey: 'page:/explore/note-a::root/0',
+        });
+        return { ok: true, code: 'OPERATION_DONE', data: { opened: true } };
+      }
+      if (operation.id === 'close_detail') {
+        await runner.handleEvent({
+          type: 'disappear',
+          subscriptionId: 'detail_modal',
+          timestamp: new Date().toISOString(),
+        });
+        return { ok: true, code: 'OPERATION_DONE', data: { closed: true } };
+      }
+      if (operation.id === 'open_next_detail') {
+        await runner.handleEvent({
+          type: 'appear',
+          subscriptionId: 'detail_modal',
+          timestamp: new Date().toISOString(),
+          presenceVersion: 2,
+          elementKeys: ['root/0'],
+          stateKey: 'page:/explore/note-a::root/0',
+        });
+        await runner.handleEvent({
+          type: 'exist',
+          subscriptionId: 'detail_modal',
+          timestamp: new Date().toISOString(),
+          presenceVersion: 2,
+          elementKeys: ['root/0'],
+          stateKey: 'page:/explore/note-a::root/0',
+        });
+        setTimeout(() => handle?.stop('test_complete'), 0);
+        return { ok: true, code: 'OPERATION_DONE', data: { opened: true } };
+      }
+      return { ok: true, code: 'OPERATION_DONE', data: { id: operation.id } };
+    },
+  });
+
+  handle = await runner.start();
+  await handle.done;
+
+  assert.equal(queue.filter((id) => id === 'detail_harvest').length, 2);
+  assert.equal(queue.filter((id) => id === 'warmup_comments_context').length, 2);
+  assert.equal(queue.filter((id) => id === 'comments_harvest').length, 2);
+  assert.ok(queue.indexOf('open_next_detail') >= 0);
+});
+
+it('does not reschedule sibling manual operations after a manual dependency already advanced the chain', async () => {
+  const queue = [];
+  let handle = null;
+
+  const runner = new AutoscriptRunner(normalizeAutoscript({
+    version: 1,
+    name: 'manual-sibling-no-duplicate-open',
+    profileId: 'xhs-manual-sibling-no-duplicate-open',
+    defaults: { disableTimeout: true, timeoutMs: 0 },
+    subscriptions: [
+      { id: 'detail_modal', container: 'detail_modal' },
+    ],
+    operations: [
+      { id: 'open_first_detail', action: 'xhs_open_detail', trigger: 'startup', once: true, retry: { attempts: 1, backoffMs: 0 }, onFailure: 'continue', impact: 'op' },
+      { id: 'comments_harvest', action: 'xhs_comments_harvest', trigger: 'manual', dependsOn: ['open_first_detail'], conditions: [{ type: 'subscription_exist', subscriptionId: 'detail_modal' }], once: false, oncePerAppear: true, retry: { attempts: 1, backoffMs: 0 }, onFailure: 'continue', impact: 'script' },
+      { id: 'wait_between_notes', action: 'wait', params: { ms: 1 }, trigger: 'manual', dependsOn: ['comments_harvest'], once: false, oncePerAppear: false, retry: { attempts: 1, backoffMs: 0 }, onFailure: 'continue', impact: 'op' },
+      { id: 'open_next_detail', action: 'xhs_open_detail', trigger: 'manual', dependsOn: ['wait_between_notes'], once: false, oncePerAppear: false, retry: { attempts: 1, backoffMs: 0 }, onFailure: 'continue', impact: 'op' },
+      { id: 'warmup_comments_context', action: 'wait', params: { ms: 1 }, trigger: 'manual', dependsOn: ['open_next_detail'], conditions: [{ type: 'subscription_exist', subscriptionId: 'detail_modal' }], once: false, oncePerAppear: true, retry: { attempts: 1, backoffMs: 0 }, onFailure: 'continue', impact: 'op' },
+    ],
+  }), {
+    profileId: 'xhs-manual-sibling-no-duplicate-open',
+    mockEvents: [
+      { type: 'startup', timestamp: new Date().toISOString() },
+    ],
+    stopWhenMockEventsExhausted: false,
+    executeMockOperation: async ({ operation }) => {
+      queue.push(operation.id);
+      if (operation.id === 'open_first_detail') {
+        await runner.handleEvent({
+          type: 'appear',
+          subscriptionId: 'detail_modal',
+          timestamp: new Date().toISOString(),
+          presenceVersion: 1,
+          elementKeys: ['root/0'],
+          stateKey: 'page:/explore/note-a::root/0',
+        });
+      }
+      if (operation.id === 'open_next_detail') {
+        setTimeout(() => handle?.stop('test_complete'), 0);
+      }
+      return { ok: true, code: 'OPERATION_DONE', data: { id: operation.id } };
+    },
+  });
+
+  handle = await runner.start();
+  await handle.done;
+
+  assert.equal(queue.filter((id) => id === 'open_next_detail').length, 1);
+  assert.equal(queue.filter((id) => id === 'warmup_comments_context').length, 1);
 });

@@ -1,6 +1,7 @@
 import { callAPI } from '../../../utils/browser-service.mjs';
 import { asErrorPayload, extractPageList, normalizeArray } from '../utils.mjs';
 import { executeViewportOperation } from './viewport.mjs';
+import { captureCheckpoint } from '../checkpoint.mjs';
 
 const SHORTCUT_OPEN_TIMEOUT_MS = 2500;
 const DEFAULT_API_TIMEOUT_MS = 15000;
@@ -296,6 +297,27 @@ async function openTabBestEffort({
   tabAppearTimeoutMs,
   syncConfig,
 }) {
+  const waitForAnchor = async (timeoutMs) => {
+    const startedAt = Date.now();
+    const maxWaitMs = Math.max(400, Number(timeoutMs) || 4000);
+    const probeIntervalMs = 350;
+    while (Date.now() - startedAt <= maxWaitMs) {
+      try {
+        const checkpoint = await captureCheckpoint({
+          profileId,
+          containerId: 'xiaohongshu_home.search_input',
+          platform: 'xiaohongshu',
+        });
+        if (checkpoint?.ok && Number(checkpoint?.data?.selectorCount || 0) > 0) {
+          return { ok: true, elapsedMs: Date.now() - startedAt };
+        }
+      } catch {
+        // ignore and keep probing
+      }
+      await sleep(probeIntervalMs);
+    }
+    return { ok: false, elapsedMs: Date.now() - startedAt };
+  };
   const waitForTab = async () => waitForTabCountIncrease({
     profileId,
     beforeCount,
@@ -321,6 +343,12 @@ async function openTabBestEffort({
     await callApiWithTimeout('newPage', payload, openCommandTimeoutMs);
     await settle();
     const newPageOpened = await waitForTab();
+    if (!newPageOpened.ok) {
+      const anchorOk = await waitForAnchor(tabAppearTimeoutMs);
+      if (anchorOk.ok) {
+        return { ok: true, mode: 'newPage_anchor', error: null };
+      }
+    }
     if (newPageOpened.ok) {
       if (seedOnOpen && seedUrl) {
         await seedNewestTabIfNeeded({

@@ -79,7 +79,7 @@ it('like stage enables match gate without reply flow', () => {
   assert.equal(getOperation(script, 'comment_reply')?.enabled, false);
 });
 
-it('comments_harvest should wait for warmup and expand_replies in detail flow', () => {
+it('comments_harvest should own reply expansion inside the harvest loop in detail flow', () => {
   const script = buildXhsUnifiedAutoscript({
     profileId: 'xhs-stage-3',
     keyword: '春晚',
@@ -93,10 +93,8 @@ it('comments_harvest should wait for warmup and expand_replies in detail flow', 
     doReply: false,
   });
 
-  assert.deepEqual(getOperation(script, 'comments_harvest')?.dependsOn, ['warmup_comments_context', 'expand_replies']);
-  assert.deepEqual(getOperation(script, 'expand_replies')?.dependsOn, ['detail_harvest']);
-  assert.equal(getOperation(script, 'expand_replies')?.trigger, 'manual');
-  assert.equal(getOperation(script, 'expand_replies')?.oncePerAppear, false);
+  assert.deepEqual(getOperation(script, 'comments_harvest')?.dependsOn, ['warmup_comments_context']);
+  assert.equal(getOperation(script, 'expand_replies'), null);
   assert.equal(getOperation(script, 'comment_like'), null);
   assert.equal(getOperation(script, 'comments_harvest')?.params?.doLikes, true);
 });
@@ -244,14 +242,17 @@ it('multi-tab detail stage switches tabs after close using a manual dependency c
   assert.equal(getOperation(script, 'tab_switch_if_needed')?.trigger, 'manual');
   assert.deepEqual(getOperation(script, 'tab_switch_if_needed')?.dependsOn, ['close_detail']);
   assert.equal(getOperation(script, 'tab_switch_if_needed')?.oncePerAppear, false);
+  assert.deepEqual(getOperation(script, 'detail_harvest')?.dependsOn, ['open_first_detail']);
   assert.ok(getOperation(script, 'open_next_detail')?.dependsOn?.includes('tab_switch_if_needed'));
+  assert.deepEqual(getOperation(script, 'open_next_detail')?.dependsOn, ['wait_between_notes', 'ensure_tab_pool', 'tab_switch_if_needed']);
   assert.equal(getOperation(script, 'open_next_detail')?.params?.keyword, 'deepseek');
   assert.equal(getOperation(script, 'open_next_detail')?.params?.env, 'debug');
   assert.equal(getOperation(script, 'open_next_detail')?.params?.outputRoot, '/tmp/webauto-out');
   assert.equal(getOperation(script, 'open_next_detail')?.params?.tabCount, 4);
+  assert.equal(getOperation(script, 'open_next_detail')?.conditions, undefined);
 });
 
-it('uncapped detail comments do not inject a fixed tab comment budget', () => {
+it('multi-tab uncapped detail comments default to a 50-comment rotate budget', () => {
   const script = buildXhsUnifiedAutoscript({
     profileId: 'xhs-stage-6b',
     keyword: 'deepseek',
@@ -269,7 +270,32 @@ it('uncapped detail comments do not inject a fixed tab comment budget', () => {
     maxComments: 0,
   });
 
-  assert.equal(getOperation(script, 'comments_harvest')?.params?.commentBudget, 0);
-  assert.equal(getOperation(script, 'tab_switch_if_needed')?.params?.commentBudget, 0);
+  assert.equal(getOperation(script, 'comments_harvest')?.params?.commentBudget, 50);
+  assert.equal(getOperation(script, 'tab_switch_if_needed')?.params?.commentBudget, 50);
+  assert.equal(getOperation(script, 'comments_harvest')?.params?.requireBottom, true);
+});
+
+it('multi-tab detail can set a rotate budget independent from total max comments', () => {
+  const script = buildXhsUnifiedAutoscript({
+    profileId: 'xhs-stage-6c',
+    keyword: 'deepseek',
+    stage: 'detail',
+    stageLinksEnabled: true,
+    stageContentEnabled: true,
+    stageLikeEnabled: false,
+    stageReplyEnabled: false,
+    stageDetailEnabled: true,
+    doComments: true,
+    doLikes: false,
+    doReply: false,
+    autoCloseDetail: true,
+    tabCount: 4,
+    maxComments: 0,
+    detailRotateComments: 50,
+  });
+
+  assert.equal(getOperation(script, 'comments_harvest')?.params?.commentBudget, 50);
+  assert.equal(getOperation(script, 'tab_switch_if_needed')?.params?.commentBudget, 50);
+  assert.equal(getOperation(script, 'comments_harvest')?.params?.commentsLimit, 0);
   assert.equal(getOperation(script, 'comments_harvest')?.params?.requireBottom, true);
 });

@@ -2,9 +2,9 @@ import { getProfileState } from './state.mjs';
 import { emitActionTrace, buildTraceRecorder, emitOperationProgress } from './trace.mjs';
 import { buildElementCollectability, normalizeInlineText } from './utils.mjs';
 import { readDetailSnapshot, readDetailState } from './detail-ops.mjs';
-import { readCommentsSnapshot, readCommentEntryPoint, readCommentTotalTarget, readCommentScrollContainerTarget, readVisibleCommentTarget, readLikeTargetByIndex, readReplyTargetByIndex, readReplyInputTarget, readReplySendButtonTarget, readExpandReplyTargets } from './comments-ops.mjs';
+import { readCommentsSnapshot, readCommentEntryPoint, readCommentTotalTarget, readCommentScrollContainerTarget, readVisibleCommentTarget, readVisibleCommentTargets, readResumeAnchorPairTarget, readLikeTargetByIndex, readReplyTargetByIndex, readReplyInputTarget, readReplySendButtonTarget, readExpandReplyTargets } from './comments-ops.mjs';
 import { consumeTabBudget } from './tab-state.mjs';
-import { markDetailSlotProgress } from './detail-slot-state.mjs';
+import { markDetailSlotProgress, readDetailSlotState, writeDetailSlotState } from './detail-slot-state.mjs';
 import { resolveXhsOutputContext, mergeCommentsJsonl, writeCommentsMd, writeContentMarkdown, appendLikeStateRows, writeLikeSummary } from './persistence.mjs';
 import { clickPoint, sleep, clearAndType, pressKey, scrollBySelector, highlightVisualTarget, clearVisualHighlight, readLocation } from './dom-ops.mjs';
 
@@ -113,22 +113,108 @@ function splitKeywords(value) {
     .filter(Boolean);
 }
 
+function createExpandRepliesAggregate(noteId = null) {
+  return {
+    noteId: noteId || null,
+    capturedAt: null,
+    visibleInitial: 0,
+    visibleMax: 0,
+    distinctSeen: 0,
+    clicks: 0,
+    scanned: 0,
+    maxExpand: 0,
+    textsSample: [],
+    clickTimeline: [],
+    exhaustedTargets: false,
+    passes: 0,
+  };
+}
+
+function mergeExpandRepliesAggregate(aggregate, latest) {
+  if (!aggregate || !latest || typeof latest !== 'object') return aggregate;
+  const next = aggregate;
+  const texts = new Set(Array.isArray(next.textsSample) ? next.textsSample : []);
+  if (Array.isArray(latest.textsSample)) {
+    for (const text of latest.textsSample) {
+      const normalized = String(text || '').trim();
+      if (normalized) texts.add(normalized);
+    }
+  }
+  const priorTimelineLength = Array.isArray(next.clickTimeline) ? next.clickTimeline.length : 0;
+  const latestTimeline = Array.isArray(latest.clickTimeline)
+    ? latest.clickTimeline.map((entry, index) => ({
+        ...entry,
+        pass: next.passes + 1,
+        globalStep: priorTimelineLength + index + 1,
+      }))
+    : [];
+  next.noteId = String(next.noteId || latest.noteId || '').trim() || null;
+  if (!next.capturedAt) next.capturedAt = latest.capturedAt || new Date().toISOString();
+  if (next.passes === 0) {
+    next.visibleInitial = Math.max(0, Number(latest.visibleInitial ?? 0) || 0);
+  }
+  next.visibleMax = Math.max(next.visibleMax, Math.max(0, Number(latest.visibleMax ?? 0) || 0));
+  next.clicks += Math.max(0, Number(latest.clicks ?? latest.showMoreClicks ?? latest.expanded ?? 0) || 0);
+  next.scanned += Math.max(0, Number(latest.scanned ?? 0) || 0);
+  next.maxExpand = Math.max(next.maxExpand, Math.max(0, Number(latest.maxExpand ?? 0) || 0));
+  next.textsSample = Array.from(texts).slice(0, 20);
+  next.distinctSeen = next.textsSample.length;
+  next.clickTimeline = [...(Array.isArray(next.clickTimeline) ? next.clickTimeline : []), ...latestTimeline];
+  next.exhaustedTargets = latest.exhaustedTargets === true;
+  next.passes += 1;
+  return next;
+}
+
 function resolveRuntimeNoteBinding(state, params = {}) {
   const tabState = state?.tabState && typeof state.tabState === 'object' ? state.tabState : {};
   const configuredTabCount = Math.max(1, Number(params.tabCount ?? tabState.tabCount ?? 1) || 1);
-  const tabIndex = Math.max(1, Number(params.tabIndex ?? tabState.cursor ?? 1) || 1);
   const detailSlots = state?.detailLinkState?.activeByTab && typeof state.detailLinkState.activeByTab === 'object'
     ? state.detailLinkState.activeByTab
     : {};
   const linkSlots = state?.linksState?.byTab && typeof state.linksState.byTab === 'object'
     ? state.linksState.byTab
     : {};
-  const detailSlot = detailSlots[String(tabIndex)] && typeof detailSlots[String(tabIndex)] === 'object'
-    ? detailSlots[String(tabIndex)]
+  const explicitTabIndex = Object.prototype.hasOwnProperty.call(params, 'tabIndex')
+    ? Math.max(1, Number(params.tabIndex || 1) || 1)
     : null;
-  const linkEntry = linkSlots[String(tabIndex)] && typeof linkSlots[String(tabIndex)] === 'object'
-    ? linkSlots[String(tabIndex)]
-    : null;
+  const activeTabIndex = Math.max(1, Number(state?.detailLinkState?.activeTabIndex ?? 0) || 0) || null;
+  const cursorTabIndex = Math.max(1, Number(tabState.cursor ?? 1) || 1);
+  const currentNoteId = String(state?.currentNoteId || '').trim() || null;
+  const currentHref = String(state?.currentHref || '').trim() || null;
+  const getDetailSlot = (slotIndex) => {
+    const slot = detailSlots[String(slotIndex)];
+    return slot && typeof slot === 'object' ? slot : null;
+  };
+  const getLinkEntry = (slotIndex) => {
+    const entry = linkSlots[String(slotIndex)];
+    return entry && typeof entry === 'object' ? entry : null;
+  };
+  const slotMatchesCurrentDetail = (slot) => {
+    if (!slot || typeof slot !== 'object') return false;
+    const slotNoteId = String(slot.noteId || slot.lastOpenedNoteId || slot.link?.noteId || '').trim() || null;
+    const slotHref = String(slot.href || slot.lastOpenedHref || slot.link?.noteUrl || '').trim() || null;
+    if (currentNoteId && slotNoteId && slotNoteId === currentNoteId) return true;
+    if (currentHref && slotHref && slotHref === currentHref) return true;
+    return false;
+  };
+  let tabIndex = explicitTabIndex || activeTabIndex || cursorTabIndex;
+  let detailSlot = getDetailSlot(tabIndex);
+  let linkEntry = getLinkEntry(tabIndex);
+  const hasBoundLink = Boolean(
+    detailSlot?.link
+    || detailSlot?.noteId
+    || detailSlot?.lastOpenedNoteId
+    || linkEntry?.link,
+  );
+  if (!explicitTabIndex && !hasBoundLink && (currentNoteId || currentHref)) {
+    const matchingTabIndex = Array.from({ length: configuredTabCount }, (_, index) => index + 1)
+      .find((slotIndex) => slotMatchesCurrentDetail(getDetailSlot(slotIndex)));
+    if (matchingTabIndex) {
+      tabIndex = matchingTabIndex;
+      detailSlot = getDetailSlot(tabIndex);
+      linkEntry = getLinkEntry(tabIndex);
+    }
+  }
   const link = detailSlot?.link && typeof detailSlot.link === 'object'
     ? detailSlot.link
     : (linkEntry?.link && typeof linkEntry.link === 'object' ? linkEntry.link : null);
@@ -156,6 +242,36 @@ function resolveRuntimeNoteBinding(state, params = {}) {
     linkEntry,
     link,
   };
+}
+
+function buildResumeAnchorPair(comments = []) {
+  const list = Array.isArray(comments) ? comments : [];
+  for (let index = 0; index < list.length - 1; index += 1) {
+    const first = list[index];
+    const second = list[index + 1];
+    const firstContent = String(first?.content || '').replace(/\s+/g, ' ').trim();
+    const secondContent = String(second?.content || '').replace(/\s+/g, ' ').trim();
+    const firstId = String(first?.commentId || '').trim();
+    const secondId = String(second?.commentId || '').trim();
+    if (!firstContent && !firstId) continue;
+    if (!secondContent && !secondId) continue;
+    return {
+      first: {
+        commentId: firstId || null,
+        author: String(first?.author || '').trim() || null,
+        content: firstContent || null,
+        index: Number.isFinite(Number(first?.index)) ? Number(first.index) : null,
+      },
+      second: {
+        commentId: secondId || null,
+        author: String(second?.author || '').trim() || null,
+        content: secondContent || null,
+        index: Number.isFinite(Number(second?.index)) ? Number(second.index) : null,
+      },
+      capturedAt: new Date().toISOString(),
+    };
+  }
+  return null;
 }
 
 function buildCommentLikeDedupKey(state, row, index) {
@@ -470,6 +586,12 @@ export async function executeCommentsHarvestOperation({ profileId, params = {}, 
   const readVisibleCommentTargetImpl = typeof testingOverrides?.readVisibleCommentTarget === 'function'
     ? testingOverrides.readVisibleCommentTarget
     : readVisibleCommentTarget;
+  const readVisibleCommentTargetsImpl = typeof testingOverrides?.readVisibleCommentTargets === 'function'
+    ? testingOverrides.readVisibleCommentTargets
+    : readVisibleCommentTargets;
+  const readResumeAnchorPairTargetImpl = typeof testingOverrides?.readResumeAnchorPairTarget === 'function'
+    ? testingOverrides.readResumeAnchorPairTarget
+    : readResumeAnchorPairTarget;
   const readLocationImpl = typeof testingOverrides?.readLocation === 'function'
     ? testingOverrides.readLocation
     : readLocation;
@@ -550,6 +672,48 @@ export async function executeCommentsHarvestOperation({ profileId, params = {}, 
       duration,
     });
   };
+  const restoreResumeAnchor = async (mode = 'initial') => {
+    const binding = readExpectedBinding();
+    const slotState = readDetailSlotState(state, binding.tabIndex, { tabCount: params.tabCount });
+    const resumeAnchor = slotState?.resumeAnchor || null;
+    if (!resumeAnchor) return { ok: true, restored: false, reason: 'no_resume_anchor' };
+    const anchorTarget = await readResumeAnchorPairTargetImpl(profileId, resumeAnchor).catch(() => null);
+    progress('resume_anchor_probe', {
+      mode,
+      restored: anchorTarget?.found === true,
+      reason: anchorTarget?.reason || null,
+      firstCommentId: resumeAnchor?.first?.commentId || null,
+      secondCommentId: resumeAnchor?.second?.commentId || null,
+      pairText: anchorTarget?.pairText || null,
+    });
+    if (!anchorTarget?.found || !anchorTarget?.center) {
+      return { ok: true, restored: false, reason: anchorTarget?.reason || 'resume_anchor_not_visible' };
+    }
+    await highlightStep('xhs-detail-comment-item', anchorTarget, 'focus', 'resume anchor');
+    await clickPointImpl(profileId, anchorTarget.center, { steps: 2 });
+    await highlightStep('xhs-detail-comment-item', anchorTarget, 'processed', 'resume anchor', 3200);
+    await sleepImpl(1200);
+    return { ok: true, restored: true, target: anchorTarget };
+  };
+  const saveResumeAnchor = async (reason = 'loop') => {
+    const binding = readExpectedBinding();
+    const visibleTargets = await readVisibleCommentTargetsImpl(profileId).catch(() => null);
+    const anchor = buildResumeAnchorPair(visibleTargets?.comments || []);
+    if (!anchor) {
+      progress('resume_anchor_save', { reason, saved: false, visibleCount: Array.isArray(visibleTargets?.comments) ? visibleTargets.comments.length : 0 });
+      return null;
+    }
+    writeDetailSlotState(state, binding.tabIndex, { resumeAnchor: anchor });
+    progress('resume_anchor_save', {
+      reason,
+      saved: true,
+      firstCommentId: anchor.first?.commentId || null,
+      secondCommentId: anchor.second?.commentId || null,
+      firstContent: anchor.first?.content || null,
+      secondContent: anchor.second?.content || null,
+    });
+    return anchor;
+  };
   const clearCommentHighlights = async () => {
     await Promise.allSettled([
       clearVisualHighlightImpl(profileId, 'xhs-detail-comment-entry'),
@@ -574,14 +738,25 @@ export async function executeCommentsHarvestOperation({ profileId, params = {}, 
     if (!actual || !expected) return true;
     return actual === expected;
   };
-  const focusCommentContext = async (mode = 'initial') => {
+  const focusCommentContext = async (mode = 'initial', options = {}) => {
+    const preferScrollContainerClick = options?.preferScrollContainerClick === true;
     progress('focus_comment_context_start', { mode });
     let commentTotal = await readCommentTotalTargetImpl(profileId);
     let commentScroll = await readCommentScrollContainerTargetImpl(profileId);
     let visibleComment = await readVisibleCommentTargetImpl(profileId);
+    progress('focus_comment_context_targets_read', {
+      mode,
+      commentTotalFound: Boolean(commentTotal?.found && commentTotal?.center),
+      commentScrollFound: Boolean(commentScroll?.found && commentScroll?.center),
+      visibleCommentFound: Boolean(visibleComment?.found && visibleComment?.center),
+      commentScrollSelector: commentScroll?.selector || null,
+      visibleCommentSelector: visibleComment?.selector || null,
+    });
     let entry = null;
-    const hasVisibleComments = visibleComment?.found && visibleComment.center;
-    const hasCommentTotal = commentTotal?.found && commentTotal.center;
+    const hasVisibleComments = Boolean(visibleComment?.found && visibleComment.center);
+    const hasCommentTotal = Boolean(commentTotal?.found && commentTotal.center);
+    const hasCommentScroll = Boolean(commentScroll?.found && commentScroll.center);
+    const hasExistingCommentContext = hasVisibleComments || hasCommentTotal || hasCommentScroll;
 
     if (hasVisibleComments) {
       await highlightStep('xhs-detail-comment-item', visibleComment, 'matched', 'visible comment');
@@ -590,8 +765,14 @@ export async function executeCommentsHarvestOperation({ profileId, params = {}, 
       await highlightStep('xhs-detail-comment-total', commentTotal, 'matched', 'comment total');
     }
 
-    if (!hasVisibleComments) {
+    if (!hasExistingCommentContext) {
       entry = await readCommentEntryPointImpl(profileId);
+      progress('focus_comment_context_entry_probe', {
+        mode,
+        entryFound: Boolean(entry?.found && entry?.center),
+        reason: entry?.reason || null,
+        selector: entry?.selector || null,
+      });
       if (entry?.found && entry.center) {
         await highlightStep('xhs-detail-comment-entry', entry, 'matched', 'comment entry');
         const ok = await ensureExpectedDetail();
@@ -599,6 +780,10 @@ export async function executeCommentsHarvestOperation({ profileId, params = {}, 
           return { ok: false, code: 'DETAIL_NOTEID_MISMATCH', message: 'Detail noteId mismatch before comment entry', data: { expected: state.currentNoteId || null } };
         }
         await highlightStep('xhs-detail-comment-entry', entry, 'focus', 'comment entry');
+        progress('focus_comment_context_before_entry_click', {
+          mode,
+          selector: entry.selector || null,
+        });
         await clickPointImpl(profileId, entry.center, { steps: 2 });
         await highlightStep('xhs-detail-comment-entry', entry, 'processed', 'comment entry', 4200);
         await sleepImpl(5000);
@@ -606,15 +791,49 @@ export async function executeCommentsHarvestOperation({ profileId, params = {}, 
         commentTotal = await readCommentTotalTargetImpl(profileId);
         commentScroll = await readCommentScrollContainerTargetImpl(profileId);
         visibleComment = await readVisibleCommentTargetImpl(profileId);
+        progress('focus_comment_context_targets_reread', {
+          mode,
+          phase: 'after_entry_click',
+          commentTotalFound: Boolean(commentTotal?.found && commentTotal?.center),
+          commentScrollFound: Boolean(commentScroll?.found && commentScroll?.center),
+          visibleCommentFound: Boolean(visibleComment?.found && visibleComment?.center),
+          commentScrollSelector: commentScroll?.selector || null,
+          visibleCommentSelector: visibleComment?.selector || null,
+        });
       }
+    } else if (!hasVisibleComments) {
+      progress('focus_comment_context_entry_skip', {
+        mode,
+        reason: 'existing_comment_context',
+        commentTotalFound: hasCommentTotal,
+        commentScrollFound: hasCommentScroll,
+      });
     }
 
-    const hasVisibleCommentsAfterEntry = visibleComment?.found && visibleComment.center;
-    const hasCommentTotalAfterEntry = commentTotal?.found && commentTotal.center;
+    const hasVisibleCommentsAfterEntry = Boolean(visibleComment?.found && visibleComment.center);
+    const hasCommentTotalAfterEntry = Boolean(commentTotal?.found && commentTotal.center);
+    const hasCommentScrollAfterEntry = Boolean(commentScroll?.found && commentScroll.center);
+    const hasCommentContextAfterEntry = hasVisibleCommentsAfterEntry || hasCommentTotalAfterEntry || hasCommentScrollAfterEntry;
     const focusTarget = resolveCommentFocusTarget({
       visibleComment,
       commentTotal,
       commentScroll,
+    });
+    const resolvedFocusTarget = focusTarget || commentScroll;
+    const clickableScrollTarget = isUsableCommentFocusTarget(commentScroll)
+      ? {
+          ...commentScroll,
+          source: 'comment_scroll',
+          selector: String(commentScroll.selector || '').trim() || null,
+      }
+      : null;
+    progress('focus_comment_context_target_resolved', {
+      mode,
+      preferScrollContainerClick,
+      resolvedSource: resolvedFocusTarget?.source || null,
+      resolvedSelector: resolvedFocusTarget?.selector || null,
+      clickableScrollSource: clickableScrollTarget?.source || null,
+      clickableScrollSelector: clickableScrollTarget?.selector || null,
     });
 
     if (hasVisibleCommentsAfterEntry) {
@@ -624,7 +843,7 @@ export async function executeCommentsHarvestOperation({ profileId, params = {}, 
       await highlightStep('xhs-detail-comment-total', commentTotal, 'matched', 'comment total');
     }
 
-    if (!hasVisibleCommentsAfterEntry && !hasCommentTotalAfterEntry) {
+    if (!hasCommentContextAfterEntry) {
       return { ok: true, scrollTarget: null, commentsUnavailable: true, reason: 'comment_panel_not_opened' };
     }
 
@@ -639,18 +858,24 @@ export async function executeCommentsHarvestOperation({ profileId, params = {}, 
         return { ok: false, code: 'DETAIL_NOTEID_MISMATCH', message: 'Detail noteId mismatch before comment scroll focus', data: { expected: state.currentNoteId || null } };
       }
       if (mode !== 'probe') {
-        const focusChannel = focusTarget?.source === 'visible_comment'
+        const clickableTarget = clickableScrollTarget || resolvedFocusTarget;
+        const focusChannel = clickableTarget?.source === 'visible_comment'
           ? 'xhs-detail-comment-item'
-          : focusTarget?.source === 'comment_total'
+          : clickableTarget?.source === 'comment_total'
             ? 'xhs-detail-comment-total'
             : 'xhs-detail-comment-scroll';
-        const focusLabel = focusTarget?.source === 'visible_comment'
+        const focusLabel = clickableTarget?.source === 'visible_comment'
           ? 'visible comment'
-          : focusTarget?.source === 'comment_total'
+          : clickableTarget?.source === 'comment_total'
             ? 'comment total'
             : 'comment scroll';
-        const clickableTarget = focusTarget || commentScroll;
         await highlightStep(focusChannel, clickableTarget, 'focus', focusLabel);
+        progress('focus_comment_context_before_focus_click', {
+          mode,
+          selector: commentScroll.selector || null,
+          focusSource: clickableTarget?.source || null,
+          focusSelector: clickableTarget?.selector || null,
+        });
         await clickPointImpl(profileId, clickableTarget.center, { steps: 2 });
         await highlightStep(focusChannel, clickableTarget, 'processed', focusLabel, 4200);
         await sleepImpl(5000);
@@ -659,20 +884,25 @@ export async function executeCommentsHarvestOperation({ profileId, params = {}, 
           selector: commentScroll.selector || null,
           focusSource: clickableTarget?.source || 'comment_scroll',
           focusSelector: clickableTarget?.selector || null,
+          detectedSource: resolvedFocusTarget?.source || null,
+          detectedSelector: resolvedFocusTarget?.selector || null,
         });
       }
       progress('focus_comment_context_done', {
         mode,
         selector: commentScroll.selector || null,
         hasVisibleComment: Boolean(visibleComment?.found && visibleComment.center),
-        focusSource: focusTarget?.source || 'comment_scroll',
-        focusSelector: focusTarget?.selector || null,
+        focusSource: (clickableScrollTarget || resolvedFocusTarget)?.source || 'comment_scroll',
+        focusSelector: (clickableScrollTarget || resolvedFocusTarget)?.selector || null,
+        detectedSource: resolvedFocusTarget?.source || null,
+        detectedSelector: resolvedFocusTarget?.selector || null,
       });
       return {
         ok: true,
         scrollTarget: commentScroll,
         visibleCommentTarget: visibleComment || null,
-        focusTarget: focusTarget || commentScroll,
+        focusTarget: resolvedFocusTarget,
+        clickedFocusTarget: mode !== 'probe' ? (clickableScrollTarget || resolvedFocusTarget || null) : null,
         didFocusClick: mode !== 'probe',
       };
     }
@@ -740,7 +970,83 @@ export async function executeCommentsHarvestOperation({ profileId, params = {}, 
       },
     };
   }
+  const resumeRestoreResult = await restoreResumeAnchor('initial');
+  if (resumeRestoreResult?.ok === false) {
+    await clearCommentHighlights();
+    markActiveDetailFailure(state, resumeRestoreResult.code || 'RESUME_ANCHOR_RESTORE_FAILED', resumeRestoreResult.data || null);
+    return resumeRestoreResult;
+  }
   let commentScroll = focusResult?.scrollTarget || null;
+  const expandRepliesAggregate = createExpandRepliesAggregate(state.currentNoteId || null);
+  const reanchorAfterExpandPass = async ({ phase = 'initial', round = 0, passResult = null } = {}) => {
+    const expandedCount = Math.max(0, Number(passResult?.data?.expanded ?? 0) || 0);
+    if (expandedCount <= 0) return { ok: true, reanchored: false };
+    const refocus = await focusCommentContext(`after_expand_${phase}`, { preferScrollContainerClick: true });
+    progress('after_expand_reanchor', {
+      phase,
+      round,
+      ok: refocus?.ok !== false,
+      reanchored: refocus?.ok !== false,
+      selector: refocus?.scrollTarget?.selector || null,
+      focusSource: refocus?.clickedFocusTarget?.source || refocus?.focusTarget?.source || null,
+      focusSelector: refocus?.clickedFocusTarget?.selector || refocus?.focusTarget?.selector || null,
+      detectedFocusSource: refocus?.focusTarget?.source || null,
+      detectedFocusSelector: refocus?.focusTarget?.selector || null,
+      expandedCount,
+    });
+    if (refocus?.ok === false) return refocus;
+    if (refocus?.commentsUnavailable === true) {
+      return {
+        ok: false,
+        code: 'COMMENTS_CONTEXT_LOST_AFTER_EXPAND',
+        message: 'comments context lost after expanding replies',
+        data: { phase, round, expandedCount },
+      };
+    }
+    commentScroll = refocus?.scrollTarget || commentScroll;
+    return {
+      ok: true,
+      reanchored: true,
+      scrollTarget: commentScroll,
+      focusTarget: refocus?.focusTarget || null,
+      clickedFocusTarget: refocus?.clickedFocusTarget || null,
+    };
+  };
+  const runExpandRepliesPass = async ({ phase = 'initial', round = 0 } = {}) => {
+    const passResult = await executeExpandRepliesOperation({
+      profileId,
+      context: {
+        ...context,
+        event: { count: 12, elements: [] },
+      },
+    }).catch((error) => ({
+      ok: false,
+      code: 'EXPAND_REPLIES_FAILED',
+      message: error?.message || 'expand replies failed',
+      data: null,
+    }));
+    if (state.lastExpandReplies && typeof state.lastExpandReplies === 'object') {
+      mergeExpandRepliesAggregate(expandRepliesAggregate, state.lastExpandReplies);
+    }
+    progress('expand_replies_pass', {
+      phase,
+      round,
+      ok: passResult?.ok === true || passResult?.code === 'EXPAND_REPLIES_NO_TARGETS',
+      code: passResult?.code || null,
+      expanded: Math.max(0, Number(passResult?.data?.expanded ?? state.lastExpandReplies?.clicks ?? 0) || 0),
+      visibleMax: Math.max(0, Number(passResult?.data?.visibleMax ?? state.lastExpandReplies?.visibleMax ?? 0) || 0),
+      clicksTotal: expandRepliesAggregate.clicks,
+      passes: expandRepliesAggregate.passes,
+    });
+    return passResult;
+  };
+  const initialExpandPass = await runExpandRepliesPass({ phase: 'initial', round: 0 });
+  const initialReanchor = await reanchorAfterExpandPass({ phase: 'initial', round: 0, passResult: initialExpandPass });
+  if (initialReanchor?.ok === false) {
+    await clearCommentHighlights();
+    markActiveDetailFailure(state, initialReanchor.code || 'COMMENTS_CONTEXT_LOST_AFTER_EXPAND', initialReanchor.data || null);
+    return initialReanchor;
+  }
   progress('before_initial_comments_snapshot', {
     selector: commentScroll?.selector || null,
   });
@@ -946,6 +1252,15 @@ export async function executeCommentsHarvestOperation({ profileId, params = {}, 
       markActiveDetailFailure(state, 'DETAIL_INTERACTION_STATE_INVALID', { stage: 'comments_harvest_loop', commentCount: collectedRows.length });
       return { ok: false, code: 'DETAIL_INTERACTION_STATE_INVALID', message: 'detail interaction state invalid during comments harvest', data: { commentCount: collectedRows.length } };
     }
+    if (rounds > 1) {
+      const loopExpandPass = await runExpandRepliesPass({ phase: 'loop', round: rounds });
+      const loopReanchor = await reanchorAfterExpandPass({ phase: 'loop', round: rounds, passResult: loopExpandPass });
+      if (loopReanchor?.ok === false) {
+        await clearCommentHighlights();
+        markActiveDetailFailure(state, loopReanchor.code || 'COMMENTS_CONTEXT_LOST_AFTER_EXPAND', loopReanchor.data || null);
+        return loopReanchor;
+      }
+    }
     progress('before_loop_comments_snapshot', { round: rounds, firstRound: rounds === 1 });
     const current = rounds === 1 ? snapshot : await readCommentsSnapshotImpl(profileId);
     progress('after_loop_comments_snapshot', {
@@ -995,6 +1310,7 @@ export async function executeCommentsHarvestOperation({ profileId, params = {}, 
         collectedCount: collectedRows.length,
       });
       if (shouldPauseForTabBudget(state, params, totalAdded)) {
+        await saveResumeAnchor('tab_budget_reached_after_collect');
         exitReason = 'tab_comment_budget_reached';
         break;
       }
@@ -1017,6 +1333,7 @@ export async function executeCommentsHarvestOperation({ profileId, params = {}, 
     }
 
     if (shouldPauseForTabBudget(state, params, totalAdded)) {
+      await saveResumeAnchor('tab_budget_reached_before_break');
       exitReason = 'tab_comment_budget_reached';
       break;
     }
@@ -1144,7 +1461,6 @@ export async function executeCommentsHarvestOperation({ profileId, params = {}, 
         direction: 'down',
         amount: delta,
         highlight: true,
-        skipFocusClick: true,
         focusTarget: commentScroll,
       });
     progress('after_scroll_action', { round: rounds, selector: scrollSelector, delta });
@@ -1212,8 +1528,8 @@ export async function executeCommentsHarvestOperation({ profileId, params = {}, 
     commentCount: collectedRows.length,
     expectedCommentsCount: lastExpectedCommentsCount,
     comments: collectedRows,
-    showMore: state.lastExpandReplies && typeof state.lastExpandReplies === 'object'
-      ? { ...state.lastExpandReplies }
+    showMore: expandRepliesAggregate.passes > 0
+      ? { ...expandRepliesAggregate }
       : null,
     capturedAt: new Date().toISOString(),
   };
@@ -1244,6 +1560,12 @@ export async function executeCommentsHarvestOperation({ profileId, params = {}, 
     || (maxComments > 0 && collectedRows.length >= maxComments);
   const paused = !completed && budgetExhausted;
   const failed = !completed && !paused;
+
+  if (paused) {
+    await saveResumeAnchor('final_pause');
+  } else if (completed || failed) {
+    writeDetailSlotState(state, readExpectedBinding().tabIndex, { resumeAnchor: null });
+  }
 
   markDetailSlotProgress(state, params, {
     completed,

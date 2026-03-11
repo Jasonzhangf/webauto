@@ -13,8 +13,25 @@ function joinElementKeys(keys) {
   return Array.isArray(keys) && keys.length > 0 ? keys.join('|') : 'none';
 }
 
-function buildEventKey(subscriptionId, type, presenceVersion, keys) {
-  return `${subscriptionId}:${type}:p${Math.max(0, Number(presenceVersion) || 0)}:k${joinElementKeys(keys)}`;
+function buildPageScopeKey(url) {
+  const href = String(url || '').trim();
+  if (!href) return 'page:none';
+  try {
+    const parsed = new URL(href);
+    const pathname = String(parsed.pathname || '').trim() || '/';
+    return `page:${pathname}`;
+  } catch {
+    return `page:${href.slice(0, 120)}`;
+  }
+}
+
+export function buildSubscriptionStateKey({ currentUrl = '', elementKeys = [] } = {}) {
+  return `${buildPageScopeKey(currentUrl)}::${Array.isArray(elementKeys) && elementKeys.length > 0 ? elementKeys.join(',') : 'none'}`;
+}
+
+function buildEventKey(subscriptionId, type, presenceVersion, keys, stateKey = '') {
+  const normalizedStateKey = String(stateKey || '').trim() || 'none';
+  return `${subscriptionId}:${type}:p${Math.max(0, Number(presenceVersion) || 0)}:k${joinElementKeys(keys)}:s${normalizedStateKey}`;
 }
 
 export function isTransientSubscriptionError(error) {
@@ -118,7 +135,7 @@ export async function watchSubscriptions({
         const elementKeySet = new Set(elementKeys);
         const appearedKeys = elementKeys.filter((key) => !prevElementKeySet.has(key));
         const disappearedKeys = prevElementKeys.filter((key) => !elementKeySet.has(key));
-        const stateSig = elementKeys.join(',');
+        const stateSig = buildSubscriptionStateKey({ currentUrl, elementKeys });
         const changed = stateSig !== prev.stateSig;
         const presenceVersion = prev.presenceVersion + (exists && !prev.exists ? 1 : 0);
         const next = {
@@ -144,7 +161,7 @@ export async function watchSubscriptions({
             elementKeys,
             presenceVersion,
             stateKey: stateSig,
-            eventKey: buildEventKey(item.id, 'appear', presenceVersion, appearedKeys.length > 0 ? appearedKeys : elementKeys),
+            eventKey: buildEventKey(item.id, 'appear', presenceVersion, appearedKeys.length > 0 ? appearedKeys : elementKeys, stateSig),
             timestamp: ts,
           });
         }
@@ -162,7 +179,7 @@ export async function watchSubscriptions({
             departedElementKeys: disappearedKeys,
             presenceVersion: prev.presenceVersion,
             stateKey: '',
-            eventKey: buildEventKey(item.id, 'disappear', prev.presenceVersion, disappearedKeys),
+            eventKey: buildEventKey(item.id, 'disappear', prev.presenceVersion, disappearedKeys, prev.stateSig),
             timestamp: ts,
           });
         }
@@ -179,7 +196,7 @@ export async function watchSubscriptions({
             elementKeys,
             presenceVersion,
             stateKey: stateSig,
-            eventKey: buildEventKey(item.id, 'exist', presenceVersion, elementKeys),
+            eventKey: buildEventKey(item.id, 'exist', presenceVersion, elementKeys, stateSig),
             timestamp: ts,
           });
         }
@@ -198,7 +215,7 @@ export async function watchSubscriptions({
             departedElementKeys: disappearedKeys,
             presenceVersion,
             stateKey: stateSig,
-            eventKey: buildEventKey(item.id, 'change', presenceVersion, elementKeys),
+            eventKey: buildEventKey(item.id, 'change', presenceVersion, elementKeys, stateSig),
             timestamp: ts,
           });
         }

@@ -1,5 +1,32 @@
 import { getCurrentTabIndex, readTabSlotState, writeTabSlotState } from './tab-state.mjs';
 
+function normalizeResumeAnchorComment(comment) {
+  if (!comment || typeof comment !== 'object') return null;
+  const commentId = String(comment.commentId || '').trim() || null;
+  const author = String(comment.author || '').trim() || null;
+  const content = String(comment.content || '').replace(/\s+/g, ' ').trim() || null;
+  const index = Number.isFinite(Number(comment.index)) ? Number(comment.index) : null;
+  if (!commentId && !content) return null;
+  return {
+    commentId,
+    author,
+    content,
+    index,
+  };
+}
+
+function normalizeResumeAnchorPair(value) {
+  if (!value || typeof value !== 'object') return null;
+  const first = normalizeResumeAnchorComment(value.first);
+  const second = normalizeResumeAnchorComment(value.second);
+  if (!first || !second) return null;
+  return {
+    first,
+    second,
+    capturedAt: String(value.capturedAt || '').trim() || null,
+  };
+}
+
 function ensureDetailLinkState(state) {
   if (!state.detailLinkState || typeof state.detailLinkState !== 'object') {
     state.detailLinkState = {};
@@ -45,6 +72,9 @@ export function writeDetailSlotState(state, tabIndex, patch = {}) {
     ...current,
     ...patch,
     link: Object.prototype.hasOwnProperty.call(patch, 'link') ? (patch.link && typeof patch.link === 'object' ? { ...patch.link } : patch.link) : current.link,
+    resumeAnchor: Object.prototype.hasOwnProperty.call(patch, 'resumeAnchor')
+      ? normalizeResumeAnchorPair(patch.resumeAnchor)
+      : normalizeResumeAnchorPair(current.resumeAnchor),
   };
   detailState.activeByTab[key] = next;
   return { ...next };
@@ -99,6 +129,16 @@ export function markDetailSlotProgress(state, params = {}, outcome = {}) {
 }
 
 export function shouldCloseCurrentDetail(state, params = {}) {
+  if (!isMultiTabDetailLoop(state, params)) return true;
+  const slot = readDetailSlotState(state, null, params);
+  if (!slot || !slot.link) return true;
+  if (slot.failed === true) return true;
+  if (slot.completed === true || slot.status === 'completed') return true;
+  if (slot.paused === true || slot.status === 'paused') return false;
+  return true;
+}
+
+export function shouldAdvanceAfterClose(state, params = {}) {
   if (!isMultiTabDetailLoop(state, params)) return true;
   const slot = readDetailSlotState(state, null, params);
   if (!slot || !slot.link) return true;

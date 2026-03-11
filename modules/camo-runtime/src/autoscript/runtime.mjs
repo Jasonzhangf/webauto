@@ -59,6 +59,21 @@ function normalizeExecutionResult(result) {
   };
 }
 
+function normalizeUnexpectedOperationError(error) {
+  const message = String(error?.message || error || 'operation threw unexpectedly');
+  const name = String(error?.name || '').trim() || 'Error';
+  const stack = String(error?.stack || '').trim();
+  return {
+    ok: false,
+    code: 'OPERATION_EXCEPTION',
+    message,
+    data: {
+      name,
+      stack: stack || null,
+    },
+  };
+}
+
 function mapToPlainObject(map) {
   return Object.fromEntries(map.entries());
 }
@@ -541,6 +556,10 @@ export class AutoscriptRunner {
     if (!subscriptionId) return null;
     const subState = this.subscriptionState.get(subscriptionId) || null;
     const presenceVersion = Math.max(0, Number(subState?.presenceVersion || subState?.appearCount || 0) || 0);
+    const stateKey = String(event?.stateKey || subState?.stateKey || '').trim();
+    if (stateKey) {
+      return `${subscriptionId}:exist:p${presenceVersion}:k${stateKey}`;
+    }
     if (!Number.isFinite(presenceVersion) || presenceVersion <= 0) return null;
     return `${subscriptionId}:presence:${presenceVersion}`;
   }
@@ -597,9 +616,8 @@ export class AutoscriptRunner {
     if (!subscriptionId) return;
     for (const operation of this.script.operations || []) {
       if (operation?.oncePerAppear !== true) continue;
-      const trigger = operation?.trigger || {};
-      if (trigger.type !== 'subscription_event') continue;
-      if (trigger.subscriptionId !== subscriptionId) continue;
+      const cycleSubscriptionId = this.getOperationCycleSubscriptionId(operation);
+      if (cycleSubscriptionId !== subscriptionId) continue;
 
       const prevState = this.operationState.get(operation.id);
       if (!prevState || prevState.status === 'pending') continue;
@@ -1080,23 +1098,28 @@ export class AutoscriptRunner {
       const baseTimeoutMs = this.resolveTimeoutMs(operation);
       const timeoutBudget = this.resolveBlockingTimeoutMs(operation, baseTimeoutMs);
       const timeoutMs = timeoutBudget.timeoutMs;
-      const result = await withTimeout(
-        this.executeOnce(operation, context),
-        timeoutMs,
-        () => ({
-          ok: false,
-          code: 'OPERATION_TIMEOUT',
-          message: timeoutBudget.blocking && timeoutBudget.multiplier > 1
-            ? `operation timed out after ${timeoutMs}ms (base=${baseTimeoutMs}ms x${timeoutBudget.multiplier})`
-            : `operation timed out after ${timeoutMs}ms`,
-          data: {
-            timeoutMs,
-            baseTimeoutMs,
-            timeoutMultiplier: timeoutBudget.multiplier,
-            blockingTimeout: timeoutBudget.blocking,
-          },
-        }),
-      );
+      let result;
+      try {
+        result = await withTimeout(
+          this.executeOnce(operation, context),
+          timeoutMs,
+          () => ({
+            ok: false,
+            code: 'OPERATION_TIMEOUT',
+            message: timeoutBudget.blocking && timeoutBudget.multiplier > 1
+              ? `operation timed out after ${timeoutMs}ms (base=${baseTimeoutMs}ms x${timeoutBudget.multiplier})`
+              : `operation timed out after ${timeoutMs}ms`,
+            data: {
+              timeoutMs,
+              baseTimeoutMs,
+              timeoutMultiplier: timeoutBudget.multiplier,
+              blockingTimeout: timeoutBudget.blocking,
+            },
+          }),
+        );
+      } catch (error) {
+        result = normalizeUnexpectedOperationError(error);
+      }
       const latencyMs = Date.now() - startedAt;
       const terminalDoneCode = extractTerminalDoneCode(result);
       if (terminalDoneCode) {
@@ -1153,8 +1176,13 @@ export class AutoscriptRunner {
           attempt,
           phase: 'done',
         });
-        // Re-evaluate graph on the same event so dependencies can continue in one trigger chain.
-        this.scheduleReadyOperations(event, { excludeOperationId: operation.id });
+        // Re-evaluate graph on the same event only for non-manual triggers.
+        // Manual dependency chains are already resumed via scheduleDependentOperations().
+        // Re-running the whole graph on a manual event causes sibling manual operations
+        // such as open_next_detail to be re-scheduled after unrelated manual ops complete.
+        if (String(event?.type || '').trim() !== 'manual') {
+          this.scheduleReadyOperations(event, { excludeOperationId: operation.id });
+        }
         this.scheduleDependentOperations(operation.id, event);
         return { ok: true, terminalState: 'done', result };
       }
@@ -1309,8 +1337,9 @@ export class AutoscriptRunner {
             message: result?.message || 'operation failed',
           });
         }
-        // allow dependent operations to continue on the same trigger
-        this.scheduleReadyOperations(event, { excludeOperationId: operation.id });
+        if (String(event?.type || '').trim() !== 'manual') {
+          this.scheduleReadyOperations(event, { excludeOperationId: operation.id });
+        }
         this.scheduleDependentOperations(operation.id, event);
         return { ok: true, terminalState: 'skipped_nonblocking', result };
       }

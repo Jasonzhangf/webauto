@@ -39,13 +39,18 @@ export function buildXhsDetailOperations(options) {
     noteIntervalMs,
     tabCount,
     autoCloseDetail,
+    detailRotateComments,
   } = options;
-  const commentBudget = maxComments > 0 ? maxComments : 0;
+  const rotateCommentBudget = Math.max(0, Number(detailRotateComments ?? 0) || 0);
+  const commentBudget = maxComments > 0
+    ? maxComments
+    : ((Number(tabCount || 1) > 1 && rotateCommentBudget > 0) ? rotateCommentBudget : 0);
 
   const matchGateEnabled = options.matchGateEnabled === true;
   const closeDetailEnabled = options.detailLoopEnabled && autoCloseDetail !== false;
+  const multiTabSafeLinkLoop = detailOpenByLinks && Number(tabCount || 1) > 1;
   const waitBetweenNotesDependsOn = ['close_detail'];
-  const openNextDependsOn = ['wait_between_notes', 'ensure_tab_pool', 'comments_harvest'];
+  const openNextDependsOn = ['wait_between_notes', 'ensure_tab_pool'];
   if (options.detailLoopEnabled && closeDetailEnabled && Number(tabCount || 1) > 1) {
     openNextDependsOn.push('tab_switch_if_needed');
   }
@@ -122,22 +127,6 @@ export function buildXhsDetailOperations(options) {
       },
     },
     {
-      id: 'expand_replies',
-      enabled: commentsHarvestEnabled,
-      waitFor: { mode: 'or', subscriptions: ['detail_modal', 'detail_comment_item', 'detail_comment_list', 'detail_comment_section'] },
-      action: 'xhs_expand_replies',
-      params: {},
-      trigger: 'manual',
-      dependsOn: [detailHarvestEnabled ? 'detail_harvest' : 'open_first_detail'],
-      conditions: [{ type: 'subscription_exist', subscriptionId: 'detail_modal' }],
-      once: false,
-      oncePerAppear: false,
-      retry: { attempts: 1, backoffMs: 0 },
-      onFailure: 'continue',
-      impact: 'op',
-      pacing: { operationMinIntervalMs: 2500, eventCooldownMs: 1500, jitterMs: 220 },
-    },
-    {
       id: 'warmup_comments_context',
       enabled: commentsHarvestEnabled,
       waitFor: { mode: 'or', subscriptions: ['detail_modal', 'detail_comment_item', 'detail_comment_list', 'detail_comment_section'] },
@@ -193,7 +182,7 @@ export function buildXhsDetailOperations(options) {
         includeComments: persistComments,
       },
       trigger: modalChainTrigger,
-      dependsOn: ['warmup_comments_context', 'expand_replies'],
+      dependsOn: ['warmup_comments_context'],
       conditions: modalExistConditions,
       once: false,
       oncePerAppear: true,
@@ -327,7 +316,13 @@ export function buildXhsDetailOperations(options) {
       // Raw disappear events would otherwise schedule a second open for the same slot.
       trigger: detailOpenByLinks ? 'manual' : 'search_result_item.exist',
       dependsOn: openNextDependsOn,
-      conditions: detailOpenByLinks ? [{ type: 'subscription_not_exist', subscriptionId: 'detail_modal' }] : [],
+      // Multi-tab safe-link runs keep paused details open in background tabs.
+      // A global `detail_modal not exist` condition blocks the chain forever once
+      // any paused slot still has its modal mounted, so let xhs_open_detail decide
+      // whether to reuse the current tab or open a fresh claimed link.
+      conditions: detailOpenByLinks
+        ? (multiTabSafeLinkLoop ? undefined : [{ type: 'subscription_not_exist', subscriptionId: 'detail_modal' }])
+        : [],
       once: false,
       oncePerAppear: false,
       timeoutMs: 90000,

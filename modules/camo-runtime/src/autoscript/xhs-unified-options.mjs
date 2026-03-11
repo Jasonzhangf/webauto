@@ -126,6 +126,10 @@ export function resolveXhsUnifiedOptions(rawOptions = {}) {
   const openByLinksMaxAttempts = toPositiveInt(rawOptions.openByLinksMaxAttempts, 3, 1);
   const detailLinksStartup = detailOpenByLinks && (stage === 'detail' || stage === 'full');
   if (!tabCountProvided && detailLoopEnabled) tabCount = 4;
+  const detailRotateComments = toNonNegativeInt(
+    rawOptions.detailRotateComments,
+    detailLoopEnabled && tabCount > 1 && maxComments <= 0 ? 50 : 0,
+  );
   const detailHarvestEnabled = detailLoopEnabled && (doHomepage || doImages || doComments || doOcr);
   const commentsHarvestEnabled = detailLoopEnabled && (doComments || stageLikeEnabled || stageReplyEnabled);
   const matchGateEnabled = !stageDetailEnabled && (stageLikeEnabled || stageReplyEnabled);
@@ -190,6 +194,7 @@ export function resolveXhsUnifiedOptions(rawOptions = {}) {
     navigationMinIntervalMs,
     maxNotes,
     maxComments,
+    detailRotateComments,
     maxLikesPerRound,
     resume,
     incrementalMax,

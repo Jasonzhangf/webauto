@@ -1,6 +1,7 @@
 import { callAPI } from '../../../utils/browser-service.mjs';
 import { getProfileState } from './state.mjs';
 import { ensureTabState, getCurrentTabIndex, advanceTab } from './tab-state.mjs';
+import { shouldAdvanceAfterClose } from './detail-slot-state.mjs';
 
 function extractPageList(payload) {
   if (payload?.pages && Array.isArray(payload.pages)) return payload.pages;
@@ -31,6 +32,53 @@ export async function executeSwitchTabIfNeeded({ profileId, params = {}, context
   const current = getCurrentTabIndex(state, { tabCount: tabState.tabCount });
   const used = Number(tabState.used[current - 1] || 0);
   const limit = Math.max(0, Number(tabState.limit || 0));
+  if (Number(tabState.tabCount || 1) > 1 && shouldAdvanceAfterClose(state, { tabCount: tabState.tabCount, openByLinks: true }) === false) {
+    const next = advanceTab(state, { tabCount: tabState.tabCount, commentBudget: tabState.limit });
+    const targetSlot = getRuntimeTabSlot(context, next.tabIndex);
+    if (!targetSlot || !Number.isFinite(Number(targetSlot.tabRealIndex))) {
+      return {
+        ok: false,
+        code: 'TAB_POOL_SLOT_MISSING',
+        message: `tab slot ${next.tabIndex} is not initialized in runtime tab pool`,
+        data: { tabIndex: next.tabIndex },
+      };
+    }
+    const pageList = await callAPI('page:list', { profileId });
+    const pages = extractPageList(pageList);
+    const activeIndex = extractActiveIndex(pageList);
+    const targetIndex = Number(targetSlot.tabRealIndex);
+    const slot = pages.find((page) => Number(page?.index) === targetIndex) || null;
+    if (!slot) {
+      return {
+        ok: false,
+        code: 'TAB_POOL_SLOT_CLOSED',
+        message: `tab slot ${next.tabIndex} is no longer available`,
+        data: { tabIndex: next.tabIndex, targetIndex },
+      };
+    }
+    if (Number(activeIndex) !== targetIndex) {
+      await callAPI('page:switch', { profileId, index: targetIndex });
+    }
+    if (context?.runtime && typeof context.runtime === 'object') {
+      context.runtime.currentTab = {
+        slotIndex: next.tabIndex,
+        tabRealIndex: targetIndex,
+        url: String(slot.url || ''),
+      };
+    }
+    return {
+      ok: true,
+      code: 'OPERATION_DONE',
+      message: 'tab switch done',
+      data: {
+        tabIndex: next.tabIndex,
+        used: next.used,
+        limit: next.limit,
+        targetIndex,
+        reason: 'paused_slot_rotation',
+      },
+    };
+  }
   if (limit <= 0 || used < limit) {
     return { ok: true, code: 'OPERATION_DONE', message: 'tab switch skipped', data: { tabIndex: current, used, limit } };
   }

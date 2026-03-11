@@ -248,6 +248,12 @@ function shouldStopCoreServicesOnAppExit(reason: string, options: CleanupOptions
   return true;
 }
 
+function shouldStopCamoSessionsOnCleanup(reason: string) {
+  const normalizedReason = String(reason || '').trim().toLowerCase();
+  if (normalizedReason === 'window_closed') return false;
+  return true;
+}
+
 async function cleanupRuntimeEnvironment(reason: string, options: CleanupOptions = {}) {
   stopDaemonWorkerHeartbeat(reason);
   killAllRuns(reason);
@@ -258,6 +264,7 @@ async function cleanupRuntimeEnvironment(reason: string, options: CleanupOptions
     timeoutMs: CAMO_CLEANUP_TIMEOUT_MS,
     reason,
     includeLocks: options.includeLockCleanup !== false,
+    stopSessions: shouldStopCamoSessionsOnCleanup(reason),
   });
   
   // Cleanup all tracked browser processes

@@ -44,6 +44,10 @@ describe('xhs detail slot state', () => {
       link: { noteId: 'note-2', noteUrl: 'https://www.xiaohongshu.com/explore/note-2?xsec_token=2' },
       lastOpenedNoteId: 'note-2',
       lastOpenedHref: 'https://www.xiaohongshu.com/explore/note-2?xsec_token=2',
+      resumeAnchor: {
+        first: { commentId: 'c1', author: 'u1', content: 'hello' },
+        second: { commentId: 'c2', author: 'u2', content: 'world' },
+      },
       status: 'active',
     });
 
@@ -60,8 +64,23 @@ describe('xhs detail slot state', () => {
     assert.equal(slot.status, 'paused');
     assert.equal(slot.paused, true);
     assert.equal(slot.budgetExhausted, true);
+    assert.equal(slot.resumeAnchor?.first?.commentId, 'c1');
+    assert.equal(slot.resumeAnchor?.second?.commentId, 'c2');
     assert.equal(shouldReuseDetailForCurrentTab(state, { tabCount: 4, openByLinks: true }), true);
     assert.equal(shouldCloseCurrentDetail(state, { tabCount: 4, openByLinks: true }), false);
+  });
+
+  it('normalizes invalid resume anchors to null', () => {
+    const state = buildState();
+    writeDetailSlotState(state, 2, {
+      resumeAnchor: {
+        first: { commentId: '', author: '', content: '' },
+        second: { commentId: 'c2', author: 'u2', content: 'world' },
+      },
+    });
+
+    const slot = readDetailSlotState(state, 2, { tabCount: 4 });
+    assert.equal(slot.resumeAnchor, null);
   });
 
   it('marks reached-bottom slot as completed and closeable', () => {
