@@ -92,7 +92,7 @@ export function buildXhsDetailOperations(options) {
         openByLinksMaxAttempts,
       },
       trigger: detailLinksStartup ? 'startup' : 'search_result_item.exist',
-      dependsOn: [detailLinksStartup ? 'ensure_tab_pool' : (options.stageLinksEnabled ? 'collect_links' : 'submit_search')],
+      dependsOn: [detailLinksStartup ? 'goto_home' : (options.stageLinksEnabled ? 'collect_links' : 'submit_search')],
       once: true,
       timeoutMs: 90000,
       onFailure: 'stop_all',
