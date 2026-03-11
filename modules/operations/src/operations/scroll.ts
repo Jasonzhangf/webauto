@@ -20,119 +20,99 @@ async function runScroll(ctx: OperationContext, config: ScrollConfig) {
   const fullyVisible = config.fullyVisible === true;
   const anchor = config.anchor ?? null;
 
-  // 单次滚动约束：不超过 800px，符合“用户手势范围”
+  // Keep operation-level pacing bounded to a few page gestures.
   const distance = Math.min(800, Math.max(0, Math.floor(Math.abs(rawDistance))));
-  const deltaY = direction === 'up' ? -distance : distance;
   const useSystemMouse = config.useSystemMouse !== false;
+  const keyboard = ctx.page.keyboard;
   const protocolMouse = (ctx.page as any)?.mouse;
 
-  if (useSystemMouse && !ctx.systemInput?.mouseWheel) {
-    return { success: false, error: 'system scroll not available' };
+  if (!keyboard?.press) {
+    return { success: false, error: 'keyboard press not available' };
   }
 
-  // 优先鼠标滚轮（系统级或协议级）
-  if ((useSystemMouse && ctx.systemInput?.mouseWheel) || (!useSystemMouse && protocolMouse?.wheel)) {
-    const selector = typeof config.selector === 'string' ? config.selector.trim() : '';
-    if (selector) {
-      const info = await ctx.page.evaluate(({ sel, fVisible, anchorPoint }) => {
-        const isVisible = (el: Element) => {
-          const r = el.getBoundingClientRect();
-          return r.width > 0 && r.height > 0 && r.bottom > 0 && r.top < window.innerHeight && r.right > 0 && r.left < window.innerWidth;
-        };
-
-        const isFullyVisible = (el: Element) => {
-          const r = el.getBoundingClientRect();
-          return r.width > 0 && r.height > 0 && r.top >= 0 && r.left >= 0 && r.bottom <= window.innerHeight && r.right <= window.innerWidth;
-        };
-
-        const el = document.querySelector(sel);
-        if (!el) return null;
+  const selector = typeof config.selector === 'string' ? config.selector.trim() : '';
+  if (selector) {
+    const info = await ctx.page.evaluate(({ sel, fVisible, anchorPoint }) => {
+      const isVisible = (el: Element) => {
         const r = el.getBoundingClientRect();
-        const visible = isVisible(el);
-        const fVisibleCheck = isFullyVisible(el);
-        if (!visible) return { visible: false, fullyVisible: false, anchorMatch: false, points: [] as Array<{ x: number; y: number }> };
-        if (fVisible && !fVisibleCheck) return { visible, fullyVisible: false, anchorMatch: false, points: [] as Array<{ x: number; y: number }> };
+        return r.width > 0 && r.height > 0 && r.bottom > 0 && r.top < window.innerHeight && r.right > 0 && r.left < window.innerWidth;
+      };
 
-        let anchorMatch = true;
-        if (anchorPoint) {
-          const hit = document.elementFromPoint(anchorPoint.x, anchorPoint.y);
-          anchorMatch = hit !== null && (hit === el || el.contains(hit));
-          if (!anchorMatch) return { visible, fullyVisible: fVisibleCheck, anchorMatch: false, points: [] as Array<{ x: number; y: number }> };
+      const isFullyVisible = (el: Element) => {
+        const r = el.getBoundingClientRect();
+        return r.width > 0 && r.height > 0 && r.top >= 0 && r.left >= 0 && r.bottom <= window.innerHeight && r.right <= window.innerWidth;
+      };
+
+      const el = document.querySelector(sel);
+      if (!el) return null;
+      const r = el.getBoundingClientRect();
+      const visible = isVisible(el);
+      const fVisibleCheck = isFullyVisible(el);
+      if (!visible) return { visible: false, fullyVisible: false, anchorMatch: false, point: null };
+      if (fVisible && !fVisibleCheck) return { visible, fullyVisible: false, anchorMatch: false, point: null };
+
+      let anchorMatch = true;
+      if (anchorPoint) {
+        const hit = document.elementFromPoint(anchorPoint.x, anchorPoint.y);
+        anchorMatch = hit !== null && (hit === el || el.contains(hit));
+        if (!anchorMatch) return { visible, fullyVisible: fVisibleCheck, anchorMatch: false, point: null };
+      }
+
+      const x1 = Math.max(0, r.left);
+      const y1 = Math.max(0, r.top);
+      const x2 = Math.min(window.innerWidth, r.right);
+      const y2 = Math.min(window.innerHeight, r.bottom);
+      const point = {
+        x: Math.round((x1 + x2) / 2),
+        y: Math.round(y1 + Math.min((y2 - y1) / 2, 24)),
+      };
+      return { visible: true, fullyVisible: fVisibleCheck, anchorMatch, point };
+    }, { sel: selector, fVisible: fullyVisible, anchorPoint: anchor });
+
+    if (!info) {
+      return { success: false, error: 'element not found' };
+    }
+    if (!info.visible) {
+      return { success: false, error: 'element not visible' };
+    }
+    if (fullyVisible && !info.fullyVisible) {
+      return { success: false, error: 'element not fully visible in viewport' };
+    }
+    if (anchor && !info.anchorMatch) {
+      return { success: false, error: 'anchor point does not hit target element' };
+    }
+    if (info.point) {
+      const x = Math.round(info.point.x);
+      const y = Math.round(info.point.y);
+      if (useSystemMouse) {
+        if (!ctx.systemInput?.mouseClick) {
+          return { success: false, error: 'system mouse not available' };
         }
-
-        const x1 = Math.max(0, r.left);
-        const y1 = Math.max(0, r.top);
-        const x2 = Math.min(window.innerWidth, r.right);
-        const y2 = Math.min(window.innerHeight, r.bottom);
-
-        const mx = Math.round((x1 + x2) / 2);
-        const pad = 24;
-        const points = [
-          { x: mx, y: Math.round(y1 + pad) }, // top-middle (avoid center overlays)
-          { x: mx, y: Math.round((y1 + y2) / 2) }, // middle
-          { x: mx, y: Math.round(y2 - pad) }, // bottom-middle
-          { x: Math.round(x1 + pad), y: Math.round(y1 + pad) }, // top-left
-          { x: Math.round(x2 - pad), y: Math.round(y1 + pad) }, // top-right
-        ];
-
-        const ok: Array<{ x: number; y: number }> = [];
-        for (const p of points) {
-          if (!Number.isFinite(p.x) || !Number.isFinite(p.y)) continue;
-          if (p.x < 0 || p.y < 0 || p.x > window.innerWidth || p.y > window.innerHeight) continue;
-          const hit = document.elementFromPoint(p.x, p.y);
-          if (hit && (hit === el || el.contains(hit))) {
-            ok.push(p);
-          }
+        if (ctx.systemInput.mouseMove) {
+          await ctx.systemInput.mouseMove(x, y, 2);
         }
-
-        if (!ok.length) ok.push({ x: mx, y: Math.round((y1 + y2) / 2) });
-        return { visible: true, fullyVisible: fVisibleCheck, anchorMatch, points: ok };
-      }, { sel: selector, fVisible: fullyVisible, anchorPoint: anchor });
-
-      if (!info) {
-        return { success: false, error: 'element not found' };
-      }
-      if (!info.visible) {
-        return { success: false, error: 'element not visible' };
-      }
-      if (fullyVisible && !info.fullyVisible) {
-        return { success: false, error: 'element not fully visible in viewport' };
-      }
-      if (anchor && !info.anchorMatch) {
-        return { success: false, error: 'anchor point does not hit target element' };
-      }
-      if (Array.isArray((info as any).points) && (info as any).points.length > 0) {
-        const p = (info as any).points[0];
-        const x = Math.round(p.x);
-        const y = Math.round(p.y);
-        if (useSystemMouse) {
-          if (ctx.systemInput?.mouseMove) {
-            await ctx.systemInput.mouseMove(x, y, 2);
-          }
-        } else if (protocolMouse && typeof protocolMouse.move === 'function') {
+        await ctx.systemInput.mouseClick(x, y);
+      } else {
+        if (!protocolMouse || typeof protocolMouse.click !== 'function') {
+          return { success: false, error: 'protocol mouse not available' };
+        }
+        if (typeof protocolMouse.move === 'function') {
           await protocolMouse.move(x, y, { steps: 2 });
         }
-        await new Promise((r) => setTimeout(r, 80));
+        await protocolMouse.click(x, y);
       }
+      await new Promise((r) => setTimeout(r, 120));
     }
-
-    if (useSystemMouse) {
-      await ctx.systemInput!.mouseWheel!(0, deltaY);
-    } else {
-      await protocolMouse.wheel(0, deltaY);
-    }
-    return { success: true, deltaY, inputMode: useSystemMouse ? 'system' : 'protocol' };
   }
 
-  // fallback：系统键盘滚动（PageDown / PageUp）
-  const keyboard = ctx.page.keyboard;
-  if (keyboard?.press) {
-    const key = direction === 'up' ? 'PageUp' : 'PageDown';
+  const key = direction === 'up' ? 'PageUp' : 'PageDown';
+  const settleMs = 90;
+  const steps = Math.max(1, Math.min(8, Math.round(distance / 420) || 1));
+  for (let step = 0; step < steps; step += 1) {
     await keyboard.press(key);
-    return { success: true, key, inputMode: useSystemMouse ? 'system' : 'protocol' };
+    await new Promise((r) => setTimeout(r, settleMs));
   }
-
-  return { success: false, error: 'no scroll capability available' };
+  return { success: true, key, steps, inputMode: 'keyboard' };
 }
 
 export const scrollOperation: OperationDefinition<ScrollConfig> = {

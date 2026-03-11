@@ -167,7 +167,7 @@ test('click supports protocol mode without system mouse', async () => {
   assert.deepEqual(clicked, { x: 200, y: 150 });
 });
 
-test('scroll moves mouse into selector before wheel', async () => {
+test('scroll focuses selector before keyboard paging', async () => {
   const { document } = installDom(`
     <div class="scroller" id="s"><div id="child"></div></div>
   `);
@@ -180,37 +180,42 @@ test('scroll moves mouse into selector before wheel', async () => {
   (document as any).elementFromPoint = () => child;
 
   let moved: { x: number; y: number } | null = null;
-  let wheel: { dx: number; dy: number } | null = null;
+  let clicked: { x: number; y: number } | null = null;
+  const pressed: string[] = [];
 
   const res = await scrollOperation.run(
     {
       page: {
         evaluate: async (fn: any, arg: any) => fn(arg),
-        keyboard: undefined,
+        keyboard: {
+          press: async (key: string) => {
+            pressed.push(key);
+          },
+        },
       },
       systemInput: {
         mouseMove: async (x: number, y: number) => {
           moved = { x, y };
           return { success: true };
         },
-        mouseWheel: async (dx: number, dy: number) => {
-          wheel = { dx, dy };
+        mouseClick: async (x: number, y: number) => {
+          clicked = { x, y };
           return { success: true };
         },
-        mouseClick: async () => ({ success: true }),
       },
     },
     { selector: '.scroller', direction: 'down', distance: 600 },
   );
 
   assert.equal(res.success, true);
-  // We should move near the top-middle (top + pad=24), not the center.
   assert.deepEqual(moved, { x: 300, y: 124 });
-  assert.deepEqual(wheel, { dx: 0, dy: 600 });
+  assert.deepEqual(clicked, { x: 300, y: 124 });
+  assert.deepEqual(pressed, ['PageDown']);
+  assert.equal(res.inputMode, 'keyboard');
 });
 
 
-test('scroll supports protocol mode without system wheel', async () => {
+test('scroll supports protocol focus click before keyboard paging', async () => {
   const { document } = installDom(`
     <div class="scroller" id="s"><div id="child"></div></div>
   `);
@@ -223,19 +228,24 @@ test('scroll supports protocol mode without system wheel', async () => {
   (document as any).elementFromPoint = () => child;
 
   let moved: { x: number; y: number } | null = null;
-  let wheel: { dx: number; dy: number } | null = null;
+  let clicked: { x: number; y: number } | null = null;
+  const pressed: string[] = [];
 
   const res = await scrollOperation.run(
     {
       page: {
         evaluate: async (fn: any, arg: any) => fn(arg),
-        keyboard: undefined,
+        keyboard: {
+          press: async (key: string) => {
+            pressed.push(key);
+          },
+        },
         mouse: {
           move: async (x: number, y: number) => {
             moved = { x, y };
           },
-          wheel: async (dx: number, dy: number) => {
-            wheel = { dx, dy };
+          click: async (x: number, y: number) => {
+            clicked = { x, y };
           },
         },
       } as any,
@@ -244,7 +254,8 @@ test('scroll supports protocol mode without system wheel', async () => {
   );
 
   assert.equal(res.success, true);
-  assert.equal(res.inputMode, 'protocol');
   assert.deepEqual(moved, { x: 300, y: 124 });
-  assert.deepEqual(wheel, { dx: 0, dy: 600 });
+  assert.deepEqual(clicked, { x: 300, y: 124 });
+  assert.deepEqual(pressed, ['PageDown']);
+  assert.equal(res.inputMode, 'keyboard');
 });
