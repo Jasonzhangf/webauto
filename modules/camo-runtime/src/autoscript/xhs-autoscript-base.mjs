@@ -187,7 +187,7 @@ export function buildXhsAutoscriptBase(rawOptions = {}, overrides = {}) {
           '.note-detail-page .media-container',
           '.note-detail-page .note-scroller',
         ].join(', '),
-        events: ['appear', 'exist', 'disappear'],
+        events: ['appear', 'exist'],
       },
       { id: 'detail_comment_item', selector: '.comment-item, [class*="comment-item"]', events: ['appear', 'exist', 'change'] },
       {
