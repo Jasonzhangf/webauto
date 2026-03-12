@@ -515,3 +515,16 @@ bd 搜索速查（全文检�?+ 字段过滤）：
 - **禁止空文�?占位文件**：禁止为了通过编译检查而创建空文件或无实际功能的占位文件�?
 - **机制**：建议在个人环境配置 alias：`git add` 前运�?`node scripts/check-untracked-sources.mjs --staged-only`（若该脚本支�?staged-only 模式），或人工确认新增文件均为必需代码�?
 - **违规处理**：若发现废文件通过 CI，提交者负责在后续 commit 中清理�?
+
+## 13. Collect 调试基线（2026-03-12）
+
+- 当前基线状态：**collect ready（200 条验证通过）**。
+- 验证命令：
+  - `node bin/webauto.mjs xhs collect --profile xhs-qa-1 --keyword "seedance2.0" --max-notes 200 --env debug --output-root ./.tmp/collect-ready-200`
+- 验证结果：
+  - `runId=63f7d7e2-86ab-4dd1-9f98-b67e31c90bae`
+  - `terminalCode=AUTOSCRIPT_DONE_LINKS_COLLECTED`
+  - `safe-detail-urls.jsonl` 行数 `200`，`noteId` 去重后 `200`
+- 变更约束（强制）：
+  - **不要修改 collect 逻辑**（包括 collect 链路、订阅触发、依赖门禁等），除非属于重大变更。
+  - 若确需重大变更，**必须先征得用户明确同意**，再进入实现与验证。

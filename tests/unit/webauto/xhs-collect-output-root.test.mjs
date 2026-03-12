@@ -130,4 +130,22 @@ describe('xhs collect subscriptions', () => {
     assert.match(String(sub?.selector || ''), /search-result/);
     assert.match(String(sub?.selector || ''), /feeds-container/);
   });
+
+  it('keeps collect operations gated by submit_search to avoid homepage false triggers', () => {
+    const script = buildXhsCollectAutoscript({
+      profileId: 'xhs-collect-deps',
+      keyword: 'deepseek',
+      outputRoot: '/tmp/fresh-links',
+      stage: 'links',
+    });
+
+    const collectOps = (script.operations || []).filter((item) =>
+      ['verify_collect_subscriptions', 'collect_links'].includes(item?.id),
+    );
+
+    assert.equal(collectOps.length, 2);
+    for (const op of collectOps) {
+      assert.deepEqual(op.dependsOn, ['submit_search']);
+    }
+  });
 });

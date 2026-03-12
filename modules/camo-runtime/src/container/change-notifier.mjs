@@ -25,13 +25,18 @@ function selectorKey(selector) {
 function parseCssSelector(css) {
   const raw = typeof css === 'string' ? css.trim() : '';
   if (!raw) return [];
+  const stripPseudoTokens = (selectorText) => String(selectorText || '')
+    // Remove pseudo classes/elements (e.g. :has(...), :nth-child(...), ::before)
+    // so class/id/tag extraction only applies to the outer selector segment.
+    .replace(/::?[\w-]+(?:\([^)]*\))?/g, '');
   const attrRegex = /\[\s*([^\s~|^$*=\]]+)\s*(\*=|\^=|\$=|=)?\s*(?:"([^"]*)"|'([^']*)'|([^\]\s]+))?\s*\]/g;
   const parseSegment = (item) => {
-    const tagMatch = item.match(/^[a-zA-Z][\w-]*/);
-    const idMatch = item.match(/#([\w-]+)/);
-    const classMatches = item.match(/\.([\w-]+)/g) || [];
+    const structuralItem = stripPseudoTokens(item);
+    const tagMatch = structuralItem.match(/^[a-zA-Z][\w-]*/);
+    const idMatch = structuralItem.match(/#([\w-]+)/);
+    const classMatches = structuralItem.match(/\.([\w-]+)/g) || [];
     const attrs = [];
-    let attrMatch = attrRegex.exec(item);
+    let attrMatch = attrRegex.exec(structuralItem);
     while (attrMatch) {
       attrs.push({
         name: String(attrMatch[1] || '').toLowerCase(),

@@ -161,6 +161,29 @@ describe('ChangeNotifier', () => {
       assert.strictEqual(results.length, 1);
       assert.deepStrictEqual(results[0].classes, ['show-more']);
     });
+
+    it('should ignore :has() inner classes when matching outer selector segment', () => {
+      const tree = {
+        children: [
+          {
+            id: 'search-result',
+            children: [
+              {
+                classes: ['note-item'],
+                children: [{ tag: 'a', classes: ['cover'] }],
+              },
+              {
+                classes: ['cover'],
+              },
+            ],
+          },
+        ],
+      };
+
+      const results = notifier.findElements(tree, { css: '#search-result .note-item:has(a.cover)' });
+      assert.strictEqual(results.length, 1);
+      assert.deepStrictEqual(results[0].classes, ['note-item']);
+    });
   });
 
   describe('nodeMatchesSelector', () => {
