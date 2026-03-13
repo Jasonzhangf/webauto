@@ -206,6 +206,7 @@ function buildVisualHighlightScript(config = {}) {
 }
 
 export async function highlightVisualTarget(profileId, target, options = {}) {
+  const timeoutMs = Math.max(30000, Number(options.timeoutMs ?? 60000) || 60000);
   const style = resolveHighlightStyle(options.state || 'focus');
   const rect = target?.rect && typeof target.rect === 'object'
     ? {
@@ -236,6 +237,7 @@ export async function highlightVisualTarget(profileId, target, options = {}) {
     }),
     highlight: false,
     allowUnsafeJs: true,
+    timeoutMs,
   });
 }
 
@@ -271,6 +273,7 @@ export async function readLocation(profileId, options = {}) {
 export async function clickPoint(profileId, point, options = {}) {
   const nudgeBefore = options?.nudgeBefore === true;
   const retryOnFailure = options?.retryOnFailure !== false && !nudgeBefore;
+  const timeoutMs = Math.max(0, Number(options?.timeoutMs ?? 0) || 0);
   const payload = {
     profileId,
     x: Math.max(1, Math.round(Number(point.x) || 1)),
@@ -280,10 +283,16 @@ export async function clickPoint(profileId, point, options = {}) {
     ...(nudgeBefore ? { nudgeBefore: true } : {}),
   };
   try {
-    await callAPI('mouse:click', payload);
+    const task = callAPI('mouse:click', payload);
+    await (timeoutMs > 0 ? withTimeout(task, timeoutMs, 'CLICK_POINT_TIMEOUT') : task);
   } catch (error) {
     if (!retryOnFailure) throw error;
-    await callAPI('mouse:click', { ...payload, nudgeBefore: true });
+    const retryTask = callAPI('mouse:click', { ...payload, nudgeBefore: true });
+    await (timeoutMs > 0 ? withTimeout(retryTask, timeoutMs, 'CLICK_POINT_RETRY_TIMEOUT') : retryTask);
+  }
+  const waitMs = Math.max(0, Number(options.afterClickSleepMs ?? 0) || 0);
+  if (waitMs > 0) {
+    await sleep(waitMs);
   }
 }
 

@@ -43,13 +43,16 @@ export async function runEvaluateScript({
   script,
   highlight = true,
   allowUnsafeJs = false,
+  timeoutMs,
 }) {
   const sourceScript = String(script || '');
   if (!allowUnsafeJs) {
     assertNoForbiddenJsAction(sourceScript, 'xhs provider evaluate');
   }
   const wrappedScript = highlight && allowUnsafeJs ? withOperationHighlight(sourceScript) : sourceScript;
-  return callAPI('evaluate', { profileId, script: wrappedScript });
+  // 使用默认超时或传递的超时
+  const finalTimeoutMs = Number(timeoutMs) > 0 ? timeoutMs : undefined;
+  return callAPI('evaluate', { profileId, script: wrappedScript }, { timeoutMs: finalTimeoutMs });
 }
 
 export function extractEvaluateResultData(payload) {
