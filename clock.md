@@ -1,20 +1,23 @@
-# Clock - 小红书 50 条采集巡检
+# Clock - 小红书 200 条压力测试巡检 (openclaw)
 
 ## 背景
-正在进行小红书完整流程测试（collect + detail 50 条，评论 + 点赞非空）。
+正在进行小红书 200 条压力测试（keyword=openclaw, like-keywords="真牛逼,太强了,厉害"）。
 
 ## 当前阻塞点
-之前遇到 auto-resume 时 `ensure_tab_pool` 误执行导致搜索结果丢失。已修复编译配置，当前验证中。
+任务刚启动，等待搜索完成和详情处理开始。
 
 ## 下次提醒要做的第一步
 检查运行状态：
-1. 检查 runId: 987bfa51-fea1-4196-a08a-42f40eb81827 的最新日志
-2. 确认 `ensure_tab_pool` 是否再次误执行
-3. 确认评论采集和点赞流程是否正常
-4. 检查是否有点赞命中记录
+1. 检查最新的 runId 和日志路径
+2. 确认搜索是否完成，链接数量是否 >= 200
+3. 确认详情处理进度（openedNotes / commentsHarvestRuns）
+4. 确认评论采集和点赞流程是否正常
+5. 检查点赞命中数量（likesNewCount）
 
 ## 不能忘的检查项
-- ensure_tab_pool 操作不应该出现（因为 resume=true）
-- totalLinks 应该是 50（从 safe-detail-urls.jsonl 读取）
-- 评论采集覆盖率应 >= 90%
-- 点赞命中应该非空（like-keywords="整理"）
+- 目标：200 条帖子
+- 点赞关键词：真牛逼,太强了,厉害
+- 评论必须持久化（persist-comments=true）
+- 环境模式：debug（遇到错误立即停止）
+- 4-tab 轮转
+- 关注点：评论采集速度、点赞命中率、recovery 次数
