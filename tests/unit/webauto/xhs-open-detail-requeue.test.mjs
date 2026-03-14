@@ -291,4 +291,54 @@ describe('xhs open detail link failure recovery', () => {
     assert.equal(state.linksState?.queue?.[0]?.link?.noteId, undefined);
     assert.equal(state.detailLinkState?.lastFailureCode, 'RISK_CONTROL_DETECTED');
   });
+
+  it('cleans up detail page only when links are exhausted, then exits with terminal done code', async () => {
+    const state = getProfileState(profileId);
+    state.linksCachePath = '/tmp/fake-links-empty.jsonl';
+    state.linksCache = [];
+
+    const actions = [];
+    let currentUrl = 'https://www.xiaohongshu.com/explore/current-note?xsec_token=abc';
+
+    await assert.rejects(
+      () => detailFlowOps.executeOpenDetailOperation({
+        profileId,
+        params: {
+          mode: 'next',
+          openByLinks: true,
+          tabCount: 1,
+          sharedHarvestPath: '/tmp/fake-links-empty.jsonl',
+          cleanupOnDone: true,
+          preClickDelayMinMs: 0,
+          preClickDelayMaxMs: 0,
+          pollDelayMinMs: 0,
+          pollDelayMaxMs: 0,
+          postOpenDelayMinMs: 0,
+          postOpenDelayMaxMs: 0,
+        },
+        context: {
+          testingOverrides: {
+            readGuardSignal: async () => ({ hasLoginGuard: false, hasRiskGuard: false, url: currentUrl }),
+            callAPI: async (action, payload) => {
+              actions.push({ action, payload });
+              if (action === 'page:back') {
+                currentUrl = 'https://www.xiaohongshu.com/explore?channel_id=homefeed_recommend';
+              }
+              if (action === 'goto') {
+                currentUrl = String(payload?.url || currentUrl);
+              }
+              return { ok: true };
+            },
+            readLocation: async () => currentUrl,
+            sleep: async () => {},
+            isDetailVisible: async () => ({ detailVisible: false }),
+            readDetailSnapshot: async () => null,
+          },
+        },
+      }),
+      /AUTOSCRIPT_DONE_DETAIL_LINKS_EXHAUSTED/,
+    );
+
+    assert.deepEqual(actions.map((item) => item.action), ['page:back']);
+  });
 });

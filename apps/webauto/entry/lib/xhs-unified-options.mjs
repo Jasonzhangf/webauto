@@ -1,3 +1,4 @@
+import path from 'node:path';
 import { resolvePlatformFlowGate } from './flow-gate.mjs';
 import { resolveXhsStage } from './xhs-unified-stages.mjs';
 import {
@@ -5,10 +6,21 @@ import {
   parseIntFlag,
   parseNonNegativeInt,
   pickRandomInt,
+  sanitizeForPath,
 } from './xhs-unified-blocks.mjs';
 import { buildXhsUnifiedAutoscript } from '../../../../modules/camo-runtime/src/autoscript/xhs-unified-template.mjs';
 import { buildXhsCollectAutoscript } from '../../../../modules/camo-runtime/src/autoscript/xhs-collect-template.mjs';
 import { buildXhsDetailAutoscript } from '../../../../modules/camo-runtime/src/autoscript/xhs-detail-template.mjs';
+
+function resolveSharedHarvestPath({ sharedHarvestPath, outputRoot, env, keyword }) {
+  const explicit = String(sharedHarvestPath || '').trim();
+  if (explicit) return path.resolve(explicit);
+  const root = String(outputRoot || '').trim();
+  if (!root) return '';
+  const safeEnv = sanitizeForPath(env, 'debug');
+  const safeKeyword = sanitizeForPath(keyword, 'unknown');
+  return path.join(path.resolve(root), 'xiaohongshu', safeEnv, safeKeyword, 'safe-detail-urls.jsonl');
+}
 
 export async function buildUnifiedOptions(argv, profileId, overrides = {}) {
   const keyword = String(argv.keyword || argv.k || '').trim();
@@ -75,7 +87,7 @@ export async function buildUnifiedOptions(argv, profileId, overrides = {}) {
   const defaultEventCooldownMs = parseIntFlag(argv['event-cooldown'], defaultEventCooldownDefault, 0);
   const defaultPacingJitterMs = parseIntFlag(argv['pacing-jitter'], defaultPacingJitterDefault, 0);
   const navigationMinIntervalMs = parseIntFlag(argv['navigation-min-interval'], navigationMinIntervalDefault, 0);
-  const maxLikesPerRound = parseNonNegativeInt(argv['max-likes'], 0);
+  const maxLikesPerRoundRaw = parseNonNegativeInt(argv['max-likes'], 0);
   const matchMode = String(argv['match-mode'] || 'any').trim() || 'any';
   const matchMinHits = parseIntFlag(argv['match-min-hits'], 1, 1);
   const matchKeywords = String(argv['match-keywords'] || keyword).trim();
@@ -83,9 +95,14 @@ export async function buildUnifiedOptions(argv, profileId, overrides = {}) {
   const replyText = String(argv['reply-text'] || '感谢分享，已关注').trim() || '感谢分享，已关注';
   const outputRoot = String(argv['output-root'] || '').trim();
   const uiTriggerId = String(argv['ui-trigger-id'] || process.env.WEBAUTO_UI_TRIGGER_ID || '').trim();
-  const resume = parseBool(argv.resume, false);
-  const incrementalMax = parseBool(argv['incremental-max'], true);
-  const sharedHarvestPath = String(overrides.sharedHarvestPath ?? argv['shared-harvest-path'] ?? '').trim();
+  const resume = parseBool(overrides.resume ?? argv.resume, false);
+  const incrementalMax = parseBool(overrides.incrementalMax ?? argv['incremental-max'], true);
+  const sharedHarvestPath = resolveSharedHarvestPath({
+    sharedHarvestPath: overrides.sharedHarvestPath ?? argv['shared-harvest-path'] ?? '',
+    outputRoot,
+    env,
+    keyword,
+  });
   const searchSerialKey = String(overrides.searchSerialKey ?? argv['search-serial-key'] ?? '').trim();
   const seedCollectCount = parseNonNegativeInt(
     overrides.seedCollectCount ?? argv['seed-collect-count'],
@@ -101,16 +118,21 @@ export async function buildUnifiedOptions(argv, profileId, overrides = {}) {
   const effectiveDryRun = disableDryRun ? false : dryRun;
   const stage = resolveXhsStage(argv, overrides);
   const stageLinksEnabled = true;
-  const detailOpenByLinks = parseBool(
-    overrides.detailOpenByLinks ?? argv['detail-open-by-links'],
-    stageLinksEnabled && (stage === 'detail' || stage === 'full'),
-  );
-  const openByLinksMaxAttempts = parseIntFlag(argv['open-by-links-max-attempts'], 3, 1);
-  const detailLinksStartup = detailOpenByLinks && stage === 'detail';
-  const autoCloseDetail = parseBool(
-    overrides.autoCloseDetail ?? argv['auto-close-detail'],
-    detailOpenByLinks || !(stage === 'detail' && maxNotes <= 1),
-  );
+ const detailOpenByLinks = parseBool(
+   overrides.detailOpenByLinks ?? argv['detail-open-by-links'],
+   stageLinksEnabled && (stage === 'detail' || stage === 'full'),
+ );
+ const openByLinksMaxAttempts = parseIntFlag(argv['open-by-links-max-attempts'], 3, 1);
+ const detailLinksStartup = detailOpenByLinks && stage === 'detail';
+ // If auto-resume is enabled, ensure we use detail-links mode
+ // to skip collect and directly use existing safe-detail-urls
+ const autoResumeDetailLinksStartup = (stage === 'full' || stage === 'detail')
+   && parseBool(overrides.resume ?? argv.resume, false);
+ const effectiveDetailLinksStartup = autoResumeDetailLinksStartup || detailLinksStartup;
+ const autoCloseDetail = parseBool(
+   overrides.autoCloseDetail ?? argv['auto-close-detail'],
+   detailOpenByLinks || !(stage === 'detail' && maxNotes <= 1),
+ );
   if (stage === 'detail' || stage === 'full' || parseBool(overrides.doComments ?? argv['do-comments'], false)) {
     commentsScrollStepMin = Math.max(commentsScrollStepMin, 960);
     commentsScrollStepMax = Math.max(commentsScrollStepMax, 1280, commentsScrollStepMin);
@@ -137,6 +159,9 @@ export async function buildUnifiedOptions(argv, profileId, overrides = {}) {
     stageContentEnabled || stageLikeEnabled || stageReplyEnabled,
   );
   const doComments = commentsRequested;
+  const maxLikesPerRound = maxLikesPerRoundRaw > 0
+    ? maxLikesPerRoundRaw
+    : (stageLikeEnabled ? 5 : 0);
   const doHomepage = stageContentEnabled && parseBool(overrides.doHomepage ?? argv['do-homepage'], true);
   const doImages = stageContentEnabled && parseBool(overrides.doImages ?? argv['do-images'], false);
   const doOcr = stageContentEnabled && parseBool(overrides.doOcr ?? argv['do-ocr'], false);
@@ -198,14 +223,14 @@ export async function buildUnifiedOptions(argv, profileId, overrides = {}) {
     doHomepage,
     doImages,
     doOcr,
-    persistComments,
-    sharedHarvestPath,
+   persistComments,
+   sharedHarvestPath,
     searchSerialKey,
     seedCollectCount,
     seedCollectMaxRounds,
     detailOpenByLinks,
     openByLinksMaxAttempts,
-    detailLinksStartup,
+    detailLinksStartup: effectiveDetailLinksStartup,
     autoCloseDetail,
     skipAccountSync,
   };

@@ -47,20 +47,27 @@ export function buildXhsDetailOperations(options) {
     : ((Number(tabCount || 1) > 1 && rotateCommentBudget > 0) ? rotateCommentBudget : 0);
 
   const matchGateEnabled = options.matchGateEnabled === true;
-  const closeDetailEnabled = options.detailLoopEnabled && autoCloseDetail !== false;
-  const multiTabSafeLinkLoop = detailOpenByLinks && Number(tabCount || 1) > 1;
-  const waitBetweenNotesDependsOn = ['close_detail'];
-  const openNextDependsOn = ['wait_between_notes', 'ensure_tab_pool'];
-  if (options.detailLoopEnabled && closeDetailEnabled && Number(tabCount || 1) > 1) {
+  // In openByLinks mode we do not close modal per note; we only finalize link/anchor state.
+  const detailFinalizeOnly = detailOpenByLinks === true;
+  const detailTransitionOpId = detailFinalizeOnly ? 'finalize_detail_link' : 'close_detail';
+  const detailTransitionEnabled = options.detailLoopEnabled
+    && (detailFinalizeOnly ? true : autoCloseDetail !== false);
+  const waitBetweenNotesDependsOn = [detailTransitionOpId];
+  const openNextDependsOn = detailLinksStartup
+    ? ['wait_between_notes']
+    : ['wait_between_notes', 'ensure_tab_pool'];
+  if (options.detailLoopEnabled && detailTransitionEnabled && Number(tabCount || 1) > 1) {
     openNextDependsOn.push('tab_switch_if_needed');
   }
   const modalChainTrigger = detailOpenByLinks ? 'manual' : 'detail_modal.exist';
-  const detailHarvestTrigger = 'detail_modal.exist';
+  const detailHarvestTrigger = detailOpenByLinks ? 'manual' : 'detail_modal.exist';
+  const modalChainOncePerAppear = detailOpenByLinks ? false : true;
+  const openNextFollowupOperations = detailOpenByLinks ? ['detail_harvest'] : [];
   const modalExistConditions = detailOpenByLinks
     ? [{ type: 'subscription_exist', subscriptionId: 'detail_modal' }]
     : undefined;
   const closeDetailConditions = detailOpenByLinks
-    ? [{ type: 'operation_done', operationId: closeDependsOn }]
+    ? undefined
     : [
         { type: 'operation_done', operationId: closeDependsOn },
         ...(Array.isArray(modalExistConditions) ? modalExistConditions : []),
@@ -76,6 +83,8 @@ export function buildXhsDetailOperations(options) {
         stage,
         maxNotes,
         keyword,
+        env,
+        outputRoot,
         resume,
         incrementalMax,
         sharedHarvestPath,
@@ -111,9 +120,9 @@ export function buildXhsDetailOperations(options) {
       params: {},
       trigger: detailHarvestTrigger,
       dependsOn: ['open_first_detail'],
-      conditions: detailOpenByLinks ? undefined : modalExistConditions,
+      conditions: modalExistConditions,
       once: false,
-      oncePerAppear: true,
+      oncePerAppear: modalChainOncePerAppear,
       timeoutMs: 90000,
       retry: { attempts: 1, backoffMs: 0 },
       impact: 'op',
@@ -136,7 +145,7 @@ export function buildXhsDetailOperations(options) {
       dependsOn: [detailHarvestEnabled ? 'detail_harvest' : 'open_first_detail'],
       conditions: modalExistConditions,
       once: false,
-      oncePerAppear: true,
+      oncePerAppear: modalChainOncePerAppear,
       onFailure: 'continue',
       impact: 'op',
     },
@@ -185,7 +194,7 @@ export function buildXhsDetailOperations(options) {
       dependsOn: ['warmup_comments_context'],
       conditions: modalExistConditions,
       once: false,
-      oncePerAppear: true,
+      oncePerAppear: modalChainOncePerAppear,
       timeoutMs: 600000,
       retry: { attempts: 1, backoffMs: 0 },
       impact: 'script',
@@ -218,7 +227,7 @@ export function buildXhsDetailOperations(options) {
       dependsOn: ['comments_harvest'],
       conditions: modalExistConditions,
       once: false,
-      oncePerAppear: true,
+      oncePerAppear: modalChainOncePerAppear,
       pacing: { operationMinIntervalMs: 2400, eventCooldownMs: 1200, jitterMs: 160 },
     },
     {
@@ -230,7 +239,7 @@ export function buildXhsDetailOperations(options) {
       dependsOn: [matchGateEnabled ? 'comment_match_gate' : 'comments_harvest'],
       conditions: modalExistConditions,
       once: false,
-      oncePerAppear: true,
+      oncePerAppear: modalChainOncePerAppear,
       timeoutMs: 90000,
       retry: { attempts: 1, backoffMs: 0 },
       onFailure: 'continue',
@@ -238,8 +247,8 @@ export function buildXhsDetailOperations(options) {
       pacing: { operationMinIntervalMs: 2600, eventCooldownMs: 1500, jitterMs: 300 },
     },
     {
-      id: 'close_detail',
-      enabled: closeDetailEnabled,
+      id: detailTransitionOpId,
+      enabled: detailTransitionEnabled,
       action: 'xhs_close_detail',
       params: {
         openByLinks: detailOpenByLinks,
@@ -249,7 +258,7 @@ export function buildXhsDetailOperations(options) {
       dependsOn: [closeDependsOn],
       conditions: closeDetailConditions,
       once: false,
-      oncePerAppear: true,
+      oncePerAppear: modalChainOncePerAppear,
       pacing: { operationMinIntervalMs: 2500, eventCooldownMs: 1300, jitterMs: 180 },
       validation: { mode: 'none' },
       checkpoint: {
@@ -277,11 +286,11 @@ export function buildXhsDetailOperations(options) {
     },
     {
       id: 'tab_switch_if_needed',
-      enabled: options.detailLoopEnabled && closeDetailEnabled && Number(tabCount || 1) > 1,
+      enabled: options.detailLoopEnabled && detailTransitionEnabled && Number(tabCount || 1) > 1,
       action: 'xhs_tab_switch_if_needed',
       params: { tabCount, commentBudget },
       trigger: 'manual',
-      dependsOn: ['close_detail'],
+      dependsOn: [detailTransitionOpId],
       once: false,
       oncePerAppear: false,
       retry: { attempts: 1, backoffMs: 0 },
@@ -311,18 +320,18 @@ export function buildXhsDetailOperations(options) {
         postOpenDelayMaxMs: openDetailPostOpenMaxMs,
         openByLinks: detailOpenByLinks,
         openByLinksMaxAttempts,
+        cleanupOnDone: detailOpenByLinks === true,
       },
+      followupOperations: openNextFollowupOperations,
       // In safe-link detail mode the wait operation is the only allowed opener gate.
       // Raw disappear events would otherwise schedule a second open for the same slot.
       trigger: detailOpenByLinks ? 'manual' : 'search_result_item.exist',
       dependsOn: openNextDependsOn,
-      // Multi-tab safe-link runs keep paused details open in background tabs.
-      // A global `detail_modal not exist` condition blocks the chain forever once
-      // any paused slot still has its modal mounted, so let xhs_open_detail decide
-      // whether to reuse the current tab or open a fresh claimed link.
-      conditions: detailOpenByLinks
-        ? (multiTabSafeLinkLoop ? undefined : [{ type: 'subscription_not_exist', subscriptionId: 'detail_modal' }])
-        : [],
+      // Safe-link detail mode keeps modal/detail context alive by design
+      // (`close_detail` uses link_finalize_only and no modal close action).
+      // Requiring `detail_modal not exist` here blocks the post-wait hop forever.
+      // Let xhs_open_detail own the next-link decision in all openByLinks modes.
+      conditions: detailOpenByLinks ? undefined : [],
       once: false,
       oncePerAppear: false,
       timeoutMs: 90000,

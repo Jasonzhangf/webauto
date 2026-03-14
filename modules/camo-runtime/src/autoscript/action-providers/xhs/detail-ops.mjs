@@ -220,6 +220,13 @@ export async function isDetailVisible(profileId) {
       '.note-detail-page .detail-container',
       '.note-detail-page .media-container',
       '.note-detail-page .note-scroller',
+      // Direct-open detail pages (no modal) should still be treated as detail-visible
+      '.note-title',
+      '.note-content',
+      '.comment-item',
+      '[class*="comment-item"]',
+      '.comments-container',
+      '[class*="comment"]',
     ];
     const isVisible = (node) => {
       if (!(node instanceof Element)) return false;

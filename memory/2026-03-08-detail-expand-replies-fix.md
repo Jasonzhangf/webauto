@@ -574,3 +574,31 @@ Tags: xhs, detail, expand-replies, show-more, comments, autoscript, deepseek
   - events：`open_first_detail` 两次都返回 `LOGIN_GUARD_DETECTED`，跳转到 `/login?redirectPath=.../explore/698de0c8000000001a01e38d...`
 - 同时 `node bin/webauto.mjs account sync xhs-qa-1 --platform xiaohongshu --pending-while-login --json` 仍把账号标为 `valid`（`accountId=69a6e5b0000000002401e93b`, alias=`太阳以西`）。
 - 当前判断：等 7701 恢复后，fresh recollect + fresh-link 1-note detail 对照仍是下一步关键证据；如果 fresh links 也直接掉到同样的 login redirect，就该转向账号有效性判定入口，而不是继续改 safe-link opener。
+ ## 2026-03-12 Collect 阶段卡住问题排查
+
+ ### 问题描述
+ Collect 任务启动后事件文件停止增长，只记录了 autoscript:start、初始 subscription 事件和 pacing_wait，后续无新事件。
+
+ ### 排查证据
+ 1. Browser-service 日志显示 evaluate 调用持续进行（每 2-3 秒一次），说明 watchSubscriptions 轮询正常运行
+ 2. 事件文件只有 13 行，最后一条是 `pacing_wait`，没有 `operation_start` 或 `operation_done`
+ 3. 任务状态显示 running，但 progress 为 0
+
+ ### 可能原因
+ 1. sync_window_viewport 操作的 pacing_wait 后没有成功 enqueueOperation
+ 2. operationQueue 可能被阻塞
+ 3. handleEvent 或 scheduleReadyOperations 可能卡住
+
+ ### 待验证
+ - 检查 enqueueOperation 是否被调用
+ - 检查 operationQueue 是否被阻塞
+ - 检查 runOperation 是否被调用
+
+ ### 修复进度
+ - [x] 订阅选择器简化为 `.note-item`，修复 search_result_item.exist 事件触发
+ - [ ] 排查 sync_window_viewport 操作完成后为什么没有触发后续操作
+
+ ### 相关代码
+ - modules/camo-runtime/src/autoscript/runtime.mjs:1356 enqueueOperation
+ - modules/camo-runtime/src/autoscript/runtime.mjs:1462 scheduleReadyOperations
+ - modules/camo-runtime/src/container/runtime-core/subscription.mjs:62 watchSubscriptions

@@ -140,13 +140,14 @@ export async function runUnified(argv, overrides = {}) {
   const baseOutputRoot = resolveDownloadRoot(argv['output-root']);
   const outputRootArg = String(argv['output-root'] || '').trim();
   const useShardRoots = profiles.length > 1;
-  const keywordDir = path.join(
-    baseOutputRoot,
-    'xiaohongshu',
-    sanitizeForPath(env, 'prod'),
-    sanitizeForPath(keyword, 'unknown'),
-  );
-  const searchSerialKey = `${sanitizeForPath(env, 'prod')}:${sanitizeForPath(keyword, 'unknown')}:${runLabel}`;
+ const keywordDir = path.join(
+   baseOutputRoot,
+   'xiaohongshu',
+   sanitizeForPath(env, 'prod'),
+   sanitizeForPath(keyword, 'unknown'),
+ );
+  const persistentDownloadRoot = path.join(process.env.HOME || process.env.USERPROFILE || os.homedir(), '.webauto', 'download');
+ const searchSerialKey = `${sanitizeForPath(env, 'prod')}:${sanitizeForPath(keyword, 'unknown')}:${runLabel}`;
   const mergedDir = path.join(keywordDir, 'merged', `run-${runLabel}`);
   const collectRunDir = path.join(keywordDir, env === 'debug' ? 'collect' : 'links', `run-${runLabel}`);
   const writeMerged = stage !== 'links';
@@ -180,12 +181,31 @@ export async function runUnified(argv, overrides = {}) {
   const planPath = writeMerged
     ? path.join(mergedDir, 'plan.json')
     : path.join(collectRunDir, 'plan.json');
-  const completedAtStart = hasTotalTarget
-    ? await collectCompletedNoteIds(baseOutputRoot, env, keyword)
-    : { count: 0, noteIds: [] };
+  const resumeFlagProvided = argv.resume !== undefined && argv.resume !== null && argv.resume !== '';
+  const explicitResume = parseBool(overrides.resume ?? argv.resume, false);
+  const completedAtStart = await collectCompletedNoteIds(persistentDownloadRoot, env, keyword);
+  const targetLimit = hasTotalTarget ? totalNotes : defaultMaxNotes;
+  const autoResumeEligible = stage !== 'links' && targetLimit > 0;
+  const autoResume = !resumeFlagProvided
+    && autoResumeEligible
+    && completedAtStart.count > 0
+    && completedAtStart.count < targetLimit;
+  const resumeRequested = resumeFlagProvided ? explicitResume : autoResume;
+  if (autoResume) {
+    console.log(JSON.stringify({
+      event: 'xhs.unified.auto_resume',
+      keyword,
+      env,
+      completed: completedAtStart.count,
+      target: targetLimit,
+    }));
+  }
   let remainingNotes = hasTotalTarget
     ? Math.max(0, totalNotes - completedAtStart.count)
     : defaultMaxNotes;
+  if (!hasTotalTarget && resumeRequested) {
+    remainingNotes = Math.max(0, defaultMaxNotes - completedAtStart.count);
+  }
 
   const skippedProfileMap = new Map();
   const wavePlans = [];
@@ -311,6 +331,9 @@ export async function runUnified(argv, overrides = {}) {
       const seedCollectMaxRounds = index === 0
         ? (seedCollectRoundsFlag > 0 ? seedCollectRoundsFlag : defaultSeedCollectMaxRounds)
         : 0;
+      const resumeOverrides = resumeRequested
+        ? { resume: true, incrementalMax: true, detailLinksStartup: true }
+        : {};
       return {
         ...item,
         runLabel,
@@ -322,6 +345,7 @@ export async function runUnified(argv, overrides = {}) {
         searchSerialKey,
         seedCollectCount,
         seedCollectMaxRounds,
+        ...resumeOverrides,
       };
     });
 
@@ -339,6 +363,7 @@ export async function runUnified(argv, overrides = {}) {
         sharedHarvestPath: item.sharedHarvestPath || null,
         seedCollectCount: item.seedCollectCount || 0,
         seedCollectMaxRounds: item.seedCollectMaxRounds || 0,
+        resume: resumeRequested,
       })),
     });
 

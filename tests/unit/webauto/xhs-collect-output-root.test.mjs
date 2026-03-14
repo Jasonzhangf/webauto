@@ -74,6 +74,36 @@ describe('xhs collect output root persistence', () => {
     assert.equal(state.outputRoot, '/tmp/xhs-fresh-links-check');
   });
 
+  it('uses sharedHarvestPath as the collect/detail handoff path when explicitly configured', async () => {
+    const state = resetState();
+    state.keyword = 'deepseek';
+    state.env = 'debug';
+
+    const result = await executeCollectLinksOperation({
+      profileId,
+      params: {
+        keyword: 'deepseek',
+        env: 'debug',
+        outputRoot: '/tmp/xhs-fresh-links-check',
+        sharedHarvestPath: '/tmp/xhs-phase-handoff/custom-links.jsonl',
+        maxNotes: 2,
+      },
+      context: {
+        testingOverrides: {
+          readJsonlRows: async () => ([
+            { noteId: 'note-1', noteUrl: 'https://www.xiaohongshu.com/search_result/note-1?xsec_token=1' },
+            { noteId: 'note-2', noteUrl: 'https://www.xiaohongshu.com/search_result/note-2?xsec_token=2' },
+          ]),
+        },
+      },
+    });
+
+    assert.equal(result.ok, true);
+    assert.equal(result.data.collectCount, 2);
+    assert.equal(result.data.linksPath, '/tmp/xhs-phase-handoff/custom-links.jsonl');
+    assert.equal(state.outputRoot, '/tmp/xhs-fresh-links-check');
+  });
+
   it('submit_search persists env/outputRoot into profile state for downstream collect/detail ops', async () => {
     resetState();
 

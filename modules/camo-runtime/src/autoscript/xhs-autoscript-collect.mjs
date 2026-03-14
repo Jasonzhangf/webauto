@@ -38,6 +38,7 @@ export function buildXhsCollectOperations(options) {
         keyword: options.keyword,
         env: options.env,
         outputRoot: options.outputRoot,
+        sharedHarvestPath: options.sharedHarvestPath,
         collectOpenLinksOnly: options.collectOpenLinksOnly === true,
         collectIndexStart: collectIndexStart ?? 0,
         collectIndexMaxAttempts: collectIndexMaxAttempts ?? 3,

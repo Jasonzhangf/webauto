@@ -536,12 +536,17 @@ export async function readExpandReplyTargets(profileId) {
 
 export async function readCommentScrollContainerTarget(profileId) {
   const script = `(() => {
-    const detailRoot = document.querySelector('.note-detail-mask')
-      || document.querySelector('.note-detail-page')
-      || document.querySelector('.note-detail-dialog')
-      || document.querySelector('.note-container')
-      || document.querySelector('.outer-link-container')
-      || document.querySelector('.main-content');
+    const allowedScrollSelectors = ['.comments-container', '.comment-list', '.comments-el', '.note-scroller'];
+    const allowedSelectorSet = new Set(allowedScrollSelectors);
+    const detailRootSelector = [
+      '.note-detail-mask',
+      '.note-detail-page',
+      '.note-detail-dialog',
+      '.note-container',
+      '.outer-link-container',
+      '.main-content',
+    ].find((selector) => document.querySelector(selector)) || null;
+    const detailRoot = detailRootSelector ? document.querySelector(detailRootSelector) : null;
     if (!detailRoot) return { found: false, reason: 'no_detail_root' };
     const toVisiblePoint = (rect) => {
       const vw = Number(window.innerWidth || 0);
@@ -555,11 +560,14 @@ export async function readCommentScrollContainerTarget(profileId) {
         y: Math.max(1, Math.round(top + (bottom - top) * 0.16)),
       };
     };
-    const selectors = ['.comments-container', '.comment-list', '.comments-el', '.note-scroller'];
+    const selectors = [...allowedScrollSelectors];
     const isVisible = (node) => {
       if (!(node instanceof Element)) return false;
       const rect = node.getBoundingClientRect?.();
       if (!rect || rect.width <= 1 || rect.height <= 1) return false;
+      const vw = Number(window.innerWidth || 0);
+      const vh = Number(window.innerHeight || 0);
+      if (rect.bottom <= 0 || rect.right <= 0 || rect.left >= vw || rect.top >= vh) return false;
       try {
         const style = window.getComputedStyle(node);
         if (!style) return false;
@@ -626,9 +634,18 @@ export async function readCommentScrollContainerTarget(profileId) {
       if (!(hit instanceof Element)) return false;
       return hit === node || node.contains(hit) || hit.contains(node);
     };
+    const collectNodes = (root, selector) => {
+      if (!(root instanceof Element)) return [];
+      const nodes = [];
+      try {
+        if (root.matches?.(selector)) nodes.push(root);
+      } catch { /* ignore invalid selector */ }
+      return nodes.concat(Array.from(root.querySelectorAll(selector)));
+    };
     const candidates = [];
-    for (const selector of selectors) {
-      const nodes = Array.from(detailRoot.querySelectorAll(selector));
+    const strictSelectors = [...selectors];
+    for (const selector of strictSelectors) {
+      const nodes = collectNodes(detailRoot, selector);
       for (const node of nodes) {
         if (!isVisible(node)) continue;
         if (!hasCommentContext(node)) continue;
@@ -642,17 +659,79 @@ export async function readCommentScrollContainerTarget(profileId) {
         const center = toVisiblePoint(rect);
         const centerHit = hitContainer(node, rect, center);
         const score = (canScroll ? 0 : 30)
-          + (selector === '.note-scroller' ? 18 : 0)
+          + (selector === '.note-scroller' ? 8 : 0)
           + (includesTotal ? 0 : 8)
           + (includesItems ? 0 : 12)
           + (centerHit ? 0 : 40)
           + Math.max(0, Math.round(rect.top));
-        candidates.push({ selector, rect, canScroll, score, className: String(node.className || '').trim(), visibleRatio, includesTotal, includesItems, center, centerHit });
+        candidates.push({
+          selector,
+          rect,
+          canScroll,
+          score,
+          className: String(node.className || '').trim(),
+          visibleRatio,
+          includesTotal,
+          includesItems,
+          center,
+          centerHit,
+          anchorKind: 'comment_context',
+        });
+      }
+    }
+    if (candidates.length === 0) {
+      const fallbackSelectors = [...strictSelectors];
+      const vw = Number(window.innerWidth || 0);
+      for (const selector of fallbackSelectors) {
+        const nodes = collectNodes(detailRoot, selector);
+        for (const node of nodes) {
+          if (!isVisible(node)) continue;
+          const rect = node.getBoundingClientRect?.();
+          if (!rect || rect.width <= 1 || rect.height <= 1) continue;
+          const visibleRatio = readVisibleRatio(rect);
+          if (visibleRatio < 0.4) continue;
+          const canScroll = isScrollable(node);
+          if (!canScroll && Number(rect.height || 0) < 300) continue;
+          const includesTotal = Boolean(node.querySelector?.('.total'));
+          const includesItems = Boolean(node.querySelector?.('.comment-item, [class*="comment-item"]'));
+          if (!canScroll && !includesItems && !includesTotal) continue;
+          const center = toVisiblePoint(rect);
+          const centerHit = hitContainer(node, rect, center);
+          const centerX = Number(rect.left || 0) + (Number(rect.width || 0) / 2);
+          const rightPanePenalty = Math.abs(centerX - (vw * 0.72));
+          const score = (canScroll ? 0 : 18)
+            + (centerHit ? 0 : 28)
+            + (includesItems ? 0 : 14)
+            + (includesTotal ? 0 : 8)
+            + (selector === '.note-scroller' ? -28 : 0)
+            + Math.round(Math.max(0, rightPanePenalty) * 0.05)
+            + Math.max(0, Math.round(rect.top));
+          candidates.push({
+            selector,
+            rect,
+            canScroll,
+            score,
+            className: String(node.className || '').trim(),
+            visibleRatio,
+            includesTotal,
+            includesItems,
+            center,
+            centerHit,
+            anchorKind: 'layout_fallback',
+          });
+        }
       }
     }
     candidates.sort((a, b) => a.score - b.score);
     const target = candidates[0] || null;
     if (!target) return { found: false, reason: 'no_scroll_container' };
+    if (!allowedSelectorSet.has(String(target.selector || '').trim())) {
+      return {
+        found: false,
+        reason: 'unsupported_scroll_selector',
+        selector: String(target.selector || '').trim() || null,
+      };
+    }
     const vw = Number(window.innerWidth || 0);
     const vh = Number(window.innerHeight || 0);
     return {
@@ -664,6 +743,7 @@ export async function readCommentScrollContainerTarget(profileId) {
       includesTotal: target.includesTotal === true,
       includesItems: target.includesItems === true,
       centerHit: target.centerHit === true,
+      anchorKind: String(target.anchorKind || 'comment_context'),
       rect: {
         left: Number(target.rect.left || 0),
         top: Number(target.rect.top || 0),

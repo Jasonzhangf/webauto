@@ -14,6 +14,7 @@ import { readXhsInteractionGuard, buildXhsGuardFailure } from './auth-ops.mjs';
 
 const SEARCH_LIST_SELECTOR = '.feeds-container';
 const SEARCH_ANCHOR_SELECTOR = '.note-item:has(a.cover)';
+const SEARCH_BOTTOM_MARKER_KEYWORDS = ['没有更多', '到底了', '已显示全部', '没有更多内容', '没有更多了'];
 const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_REPO_ROOT = path.resolve(MODULE_DIR, '../../../../../..');
 const CONTAINER_LIB_ROOT = process.env.CAMO_CONTAINER_LIBRARY_ROOT
@@ -163,6 +164,71 @@ async function readSearchAnchors(profileId, { listSelector, anchorSelector, sele
       anchorSelector,
     },
   };
+}
+
+async function readSearchBottomMarker(profileId) {
+  const script = `(() => {
+    const keywords = ${JSON.stringify(SEARCH_BOTTOM_MARKER_KEYWORDS)};
+    const nodes = Array.from(document.querySelectorAll('div,span,p'));
+    for (const node of nodes) {
+      const text = (node.innerText || '').trim();
+      if (!text) continue;
+      if (keywords.some((k) => text.includes(k))) {
+        return { found: true, text, tag: node.tagName, className: node.className || null };
+      }
+    }
+    return { found: false };
+  })()`;
+  const payload = await evaluateReadonly(profileId, script);
+  return payload && typeof payload === 'object' ? payload : { found: false };
+}
+
+function buildCollectScrollStuckError({
+  stage,
+  expected,
+  actual,
+  persistPath,
+  lastUrl,
+  noScrollRounds,
+  maxNoScrollRounds,
+} = {}) {
+  const details = {
+    stage: stage || 'collect_links',
+    expected: Number(expected) || 0,
+    actual: Number(actual) || 0,
+    persistPath: persistPath || null,
+    lastUrl: lastUrl || null,
+    noScrollRounds: Number(noScrollRounds) || 0,
+    maxNoScrollRounds: Number(maxNoScrollRounds) || 0,
+  };
+  const message = `COLLECT_SCROLL_STUCK stage=${details.stage} expected=${details.expected} actual=${details.actual} persistPath=${details.persistPath}`;
+  const err = new Error(message);
+  err.code = 'COLLECT_SCROLL_STUCK';
+  err.details = details;
+  return err;
+}
+
+function buildCollectReachedBottomError({
+  stage,
+  expected,
+  actual,
+  persistPath,
+  lastUrl,
+  marker,
+} = {}) {
+  const details = {
+    stage: stage || 'collect_links',
+    expected: Number(expected) || 0,
+    actual: Number(actual) || 0,
+    persistPath: persistPath || null,
+    lastUrl: lastUrl || null,
+    marker: marker || null,
+  };
+  const message = `COLLECT_REACHED_BOTTOM stage=${details.stage} expected=${details.expected} actual=${details.actual} persistPath=${details.persistPath}`;
+  const err = new Error(message);
+  err.code = 'COLLECT_REACHED_BOTTOM';
+  err.details = details;
+  return err;
 }
 
 async function readSearchTokenLinks(profileId, { limit = 60 } = {}) {
@@ -600,7 +666,8 @@ export async function executeCollectLinksOperation({ profileId, params = {}, con
     },
     state,
   });
-  const linksPath = outputCtx.safeDetailPath || outputCtx.linksPath;
+  const explicitLinksPath = String(params.sharedHarvestPath || params.sharedClaimPath || '').trim();
+  const linksPath = explicitLinksPath || outputCtx.safeDetailPath || outputCtx.linksPath;
   const phase2LinksPath = null;
 
   state.collectIndex = typeof state.collectIndex === 'number' ? state.collectIndex : collectIndexStart;
@@ -613,6 +680,20 @@ export async function executeCollectLinksOperation({ profileId, params = {}, con
   state.collectLastClickTarget = state.collectLastClickTarget || null;
   state.collectAnchorsSample = Array.isArray(state.collectAnchorsSample) ? state.collectAnchorsSample : [];
   state.collectLastAnchor = state.collectLastAnchor || null;
+
+  // Terminal state tracking
+  state.collectScrollStuckRounds = typeof state.collectScrollStuckRounds === 'number' ? state.collectScrollStuckRounds : 0;
+  state.collectDuplicateOnlyRounds = typeof state.collectDuplicateOnlyRounds === 'number' ? state.collectDuplicateOnlyRounds : 0;
+  state.collectLastScrollHeight = typeof state.collectLastScrollHeight === 'number' ? state.collectLastScrollHeight : 0;
+  state.collectScrollRollbackNeeded = false;
+  const maxScrollStuckRounds = 3;
+  const maxDuplicateOnlyRounds = 5;
+
+  const readListScrollInfo = async () => {
+    const script = `(() => { const listNode = document.querySelector(".feeds-container"); return { scrollTop: listNode ? listNode.scrollTop : 0, scrollHeight: listNode ? listNode.scrollHeight : 0, clientHeight: listNode ? listNode.clientHeight : 0 }; })()`;
+    const payload = await evaluateReadonly(profileId, script);
+    return { scrollTop: Number(payload?.scrollTop || 0), scrollHeight: Number(payload?.scrollHeight || 0), clientHeight: Number(payload?.clientHeight || 0) };
+  };
   state.collectLastUrl = state.collectLastUrl || null;
 
   if (state.preCollectedNoteIds.length === 0) {
@@ -633,6 +714,10 @@ export async function executeCollectLinksOperation({ profileId, params = {}, con
   state.collectAnchorsSample = [];
   state.collectLastClickTarget = null;
 
+  state.collectScrollStuckRounds = 0;
+  state.collectDuplicateOnlyRounds = 0;
+  state.collectLastScrollHeight = 0;
+  state.collectScrollRollbackNeeded = false;
   const lastProgressAt = () => Number(state.collectLastProgressAt || 0) || 0;
   const markProgress = () => { state.collectLastProgressAt = Date.now(); };
   const markNoProgress = () => {
@@ -641,6 +726,26 @@ export async function executeCollectLinksOperation({ profileId, params = {}, con
   const resetNoProgress = () => { state.collectNoProgressRounds = 0; };
   const markAddedZero = () => { state.collectAddedZeroRounds = (state.collectAddedZeroRounds || 0) + 1; };
   const resetAddedZero = () => { state.collectAddedZeroRounds = 0; };
+
+  const markScrollStuck = () => { state.collectScrollStuckRounds = (state.collectScrollStuckRounds || 0) + 1; };
+  const resetScrollStuck = () => { state.collectScrollStuckRounds = 0; };
+  const markDuplicateOnly = () => { state.collectDuplicateOnlyRounds = (state.collectDuplicateOnlyRounds || 0) + 1; };
+  const resetDuplicateOnly = () => { state.collectDuplicateOnlyRounds = 0; };
+
+  const checkScrollMove = async (beforeScroll, afterScroll) => {
+    const moved = Math.abs(afterScroll.scrollTop - beforeScroll.scrollTop) > 5 || Math.abs(afterScroll.scrollHeight - beforeScroll.scrollHeight) > 5;
+    return moved;
+  };
+
+  const executeScroll = async () => {
+    if (state.collectScrollRollbackNeeded) {
+      await pressKey(profileId, 'PageUp');
+      await sleep(300);
+      state.collectScrollRollbackNeeded = false;
+    }
+    await pressKey(profileId, 'PageDown');
+    await sleep(400);
+  };
   const seedProgress = () => { if (!lastProgressAt()) markProgress(); };
   seedProgress();
   while (state.collectCount < maxNotes) {
@@ -658,18 +763,20 @@ export async function executeCollectLinksOperation({ profileId, params = {}, con
       const tokenLinks = await readSearchTokenLinks(profileId, { limit: Math.max(40, maxNotes) });
       if (tokenLinks.length > 0) {
         const collectedAt = new Date().toISOString();
-        const candidates = tokenLinks.map((row) => {
-          const resolved = resolveSearchResultTokenLink(row.href);
-          if (!resolved?.searchUrl || !resolved.noteId) return null;
-          return {
-            noteId: resolved.noteId,
-            safeDetailUrl: resolved.searchUrl,
-            noteUrl: resolved.searchUrl,
-            listUrl: state.lastListUrl,
-            collectedAt,
-          };
-        }).filter(Boolean);
-        if (candidates.length > 0) {
+       const candidates = tokenLinks.map((row) => {
+         const resolved = resolveSearchResultTokenLink(row.href);
+         // Only persist links with valid token (detailUrl will be empty if token is missing/invalid)
+          if (!resolved?.detailUrl || !resolved.noteId) return null;
+         return {
+           noteId: resolved.noteId,
+           safeDetailUrl: resolved.detailUrl,
+           noteUrl: resolved.detailUrl,
+           listUrl: state.lastListUrl,
+           collectedAt,
+         };
+       }).filter(Boolean);
+
+       if (candidates.length > 0) {
           const remaining = Math.max(0, maxNotes - state.collectPersistedCount);
           if (remaining <= 0) {
             continue;
@@ -685,8 +792,9 @@ export async function executeCollectLinksOperation({ profileId, params = {}, con
           }
           if (filtered.length === 0) {
             markAddedZero();
-            continue;
-          }
+            markDuplicateOnly();
+            progressedThisRound = false;
+          } else {
           const beforeCount = state.collectPersistedCount;
           emitOperationProgress(context, { kind: 'collect_candidate', stage: 'search_result_tokens', candidateCount: filtered.length, persistPath: linksPath });
           const mergeResult = await mergeLinksJsonl({ filePath: linksPath, links: filtered });
@@ -714,10 +822,13 @@ export async function executeCollectLinksOperation({ profileId, params = {}, con
             state.collectLastUrl = lastCandidate?.safeDetailUrl || state.collectLastUrl || state.lastListUrl || null;
           } else {
             markAddedZero();
+            markDuplicateOnly();
+            progressedThisRound = false;
           }
           if (state.collectCount >= maxNotes) {
             continue;
           }
+        }
         }
       }
     }
@@ -759,20 +870,70 @@ export async function executeCollectLinksOperation({ profileId, params = {}, con
     if (!progressedThisRound && state.collectCount < maxNotes) {
       markNoProgress();
     }
-    if (anchorSnapshot.anchorCount > 0 && (state.collectAddedZeroRounds || 0) >= collectAddedZeroRounds) {
-      const error = new Error('COLLECT_ADDED_ZERO');
-      error.code = 'COLLECT_ADDED_ZERO';
+
+
+
+    // Terminal state checks before scroll
+    const bottomMarker = await readSearchBottomMarker(profileId);
+    if (bottomMarker && bottomMarker.found) {
+      const lastUrl = await readLocation(profileId, { timeoutMs: 3000 });
+      throw buildCollectReachedBottomError({
+        stage: 'collect_links',
+        expected: maxNotes,
+        actual: state.collectPersistedCount,
+        persistPath: linksPath,
+        lastUrl,
+        marker: bottomMarker,
+      });
+    }
+
+    // Check if all links are duplicates
+    if (progressedThisRound === false && state.collectCount < maxNotes) {
+      markDuplicateOnly();    } else {
+      resetDuplicateOnly();    }
+    if (state.collectDuplicateOnlyRounds >= maxDuplicateOnlyRounds) {
+      const lastUrl = await readLocation(profileId, { timeoutMs: 3000 });      const error = new Error('COLLECT_DUPLICATE_EXHAUSTED');
+      error.code = 'COLLECT_DUPLICATE_EXHAUSTED';
       error.details = {
         stage: 'collect_links',
         expected: maxNotes,
         actual: state.collectPersistedCount,
         persistPath: linksPath,
+        lastUrl,
+        duplicateRounds: state.collectDuplicateOnlyRounds,
         anchorsSample: state.collectAnchorsSample,
-        lastClickTarget: state.collectLastClickTarget,
       };
       throw error;
     }
-
+    // Scroll with rollback check
+    const beforeScroll = await readListScrollInfo();
+    await pressKey(profileId, 'PageDown');
+    await sleep(400);
+    const afterScroll = await readListScrollInfo();
+    const moved = await checkScrollMove(beforeScroll, afterScroll);
+    if (!moved) {
+      if (state.collectScrollRollbackNeeded) {
+        markScrollStuck();
+        state.collectScrollRollbackNeeded = false;
+      } else {
+        state.collectScrollRollbackNeeded = true;
+        resetScrollStuck();
+      }
+    } else {
+      resetScrollStuck();
+      state.collectScrollRollbackNeeded = false;
+    }
+    if (state.collectScrollStuckRounds >= maxScrollStuckRounds) {
+      const lastUrl = await readLocation(profileId, { timeoutMs: 3000 });      throw buildCollectScrollStuckError({
+        stage: 'collect_links',
+        expected: maxNotes,
+        actual: state.collectPersistedCount,
+        persistPath: linksPath,
+        lastUrl,
+        noScrollRounds: state.collectScrollStuckRounds,
+        maxNoScrollRounds: maxScrollStuckRounds,
+      });
+    }
     await handleCollectNoProgress({
       profileId,
       params: { ...params, keyword, env },
@@ -795,8 +956,6 @@ export async function executeCollectLinksOperation({ profileId, params = {}, con
       maxNoProgressRounds: collectNoProgressRounds,
     });
 
-    await pressKey(profileId, 'PageDown');
-    await sleep(400);
   }
 
   state.tabState = {

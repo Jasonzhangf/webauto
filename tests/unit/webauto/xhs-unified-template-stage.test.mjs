@@ -114,7 +114,7 @@ it('detail_show_more subscription covers direct-detail comment trees', () => {
   assert.match(selector, /\.comments-el \.show-more/);
 });
 
-it('detail stage runs open/close loop without content/comment/like actions', () => {
+it('detail stage runs open/finalize loop without content/comment/like actions', () => {
   const script = buildXhsUnifiedAutoscript({
     profileId: 'xhs-stage-4',
     keyword: 'deepseek',
@@ -137,7 +137,8 @@ it('detail stage runs open/close loop without content/comment/like actions', () 
   assert.equal(getOperation(script, 'open_next_detail')?.enabled, true);
   assert.equal(getOperation(script, 'open_first_detail')?.params?.stage, 'detail');
   assert.equal(getOperation(script, 'open_next_detail')?.params?.stage, 'detail');
-  assert.equal(getOperation(script, 'close_detail')?.enabled, true);
+  assert.equal(getOperation(script, 'finalize_detail_link')?.enabled, true);
+  assert.equal(getOperation(script, 'close_detail'), null);
   assert.equal(getOperation(script, 'detail_harvest')?.enabled, false);
   assert.equal(getOperation(script, 'comments_harvest')?.enabled, false);
   assert.equal(getOperation(script, 'comment_match_gate')?.enabled, false);
@@ -164,13 +165,14 @@ it('single-note detail stage keeps modal open by default and uses larger comment
     commentsScrollStepMax: 760,
   });
 
-  assert.equal(getOperation(script, 'close_detail')?.enabled, false);
+  assert.equal(getOperation(script, 'finalize_detail_link')?.enabled, true);
+  assert.equal(getOperation(script, 'close_detail'), null);
   assert.equal(getOperation(script, 'comments_harvest')?.params?.scrollStepMin, 520);
   assert.equal(getOperation(script, 'comments_harvest')?.params?.scrollStepMax, 760);
   assert.equal(getOperation(script, 'comments_harvest')?.params?.scrollStep, 760);
 });
 
-it('single-note safe-link detail stage auto-closes by default so failure can advance the loop', () => {
+it('single-note safe-link detail stage keeps finalization enabled so loop can advance without closing modal', () => {
   const script = buildXhsUnifiedAutoscript({
     profileId: 'xhs-stage-5b',
     keyword: 'deepseek',
@@ -187,7 +189,8 @@ it('single-note safe-link detail stage auto-closes by default so failure can adv
     doReply: false,
   });
 
-  assert.equal(getOperation(script, 'close_detail')?.enabled, true);
+  assert.equal(getOperation(script, 'finalize_detail_link')?.enabled, true);
+  assert.equal(getOperation(script, 'close_detail'), null);
 });
 
 it('safe-link detail stage serializes modal ops through manual dependency chain', () => {
@@ -207,16 +210,55 @@ it('safe-link detail stage serializes modal ops through manual dependency chain'
     doReply: false,
   });
 
-  assert.equal(getOperation(script, 'detail_harvest')?.trigger, 'detail_modal.exist');
-  assert.equal(getOperation(script, 'detail_harvest')?.conditions, undefined);
+  assert.equal(getOperation(script, 'detail_harvest')?.trigger, 'manual');
+  assert.deepEqual(getOperation(script, 'detail_harvest')?.dependsOn, ['open_first_detail']);
+  assert.deepEqual(getOperation(script, 'detail_harvest')?.conditions, [{ type: 'subscription_exist', subscriptionId: 'detail_modal' }]);
+  assert.equal(getOperation(script, 'detail_harvest')?.oncePerAppear, false);
   assert.equal(getOperation(script, 'warmup_comments_context')?.trigger, 'manual');
   assert.deepEqual(getOperation(script, 'warmup_comments_context')?.conditions, [{ type: 'subscription_exist', subscriptionId: 'detail_modal' }]);
+  assert.equal(getOperation(script, 'warmup_comments_context')?.oncePerAppear, false);
   assert.equal(getOperation(script, 'comments_harvest')?.trigger, 'manual');
   assert.deepEqual(getOperation(script, 'comments_harvest')?.conditions, [{ type: 'subscription_exist', subscriptionId: 'detail_modal' }]);
-  assert.equal(getOperation(script, 'close_detail')?.trigger, 'manual');
-  assert.deepEqual(getOperation(script, 'close_detail')?.conditions, [
-    { type: 'operation_done', operationId: 'comments_harvest' },
-  ]);
+  assert.equal(getOperation(script, 'comments_harvest')?.oncePerAppear, false);
+  assert.equal(getOperation(script, 'finalize_detail_link')?.trigger, 'manual');
+  assert.equal(getOperation(script, 'finalize_detail_link')?.conditions, undefined);
+  assert.equal(getOperation(script, 'finalize_detail_link')?.oncePerAppear, false);
+  assert.equal(getOperation(script, 'open_next_detail')?.trigger, 'manual');
+  assert.deepEqual(getOperation(script, 'open_next_detail')?.followupOperations, ['detail_harvest']);
+  assert.equal(getOperation(script, 'open_next_detail')?.params?.cleanupOnDone, true);
+  assert.deepEqual(
+    getOperation(script, 'open_next_detail')?.dependsOn,
+    ['wait_between_notes', 'tab_switch_if_needed'],
+  );
+  assert.equal(getOperation(script, 'open_next_detail')?.conditions, undefined);
+});
+
+it('safe-link multi-tab detail stage waits for finalize/wait/tab-switch only (no ensure_tab_pool gate)', () => {
+  const script = buildXhsUnifiedAutoscript({
+    profileId: 'xhs-stage-5d',
+    keyword: 'deepseek',
+    stage: 'detail',
+    detailOpenByLinks: true,
+    stageLinksEnabled: true,
+    stageContentEnabled: true,
+    stageLikeEnabled: true,
+    stageReplyEnabled: false,
+    stageDetailEnabled: true,
+    doComments: true,
+    doLikes: true,
+    doReply: false,
+    autoCloseDetail: true,
+    tabCount: 4,
+    maxComments: 0,
+    detailRotateComments: 50,
+  });
+
+  assert.equal(getOperation(script, 'ensure_tab_pool')?.enabled, false);
+  assert.equal(getOperation(script, 'tab_switch_if_needed')?.enabled, true);
+  assert.deepEqual(
+    getOperation(script, 'open_next_detail')?.dependsOn,
+    ['wait_between_notes', 'tab_switch_if_needed'],
+  );
 });
 
 it('multi-tab detail stage switches tabs after close using a manual dependency chain', () => {
@@ -240,14 +282,26 @@ it('multi-tab detail stage switches tabs after close using a manual dependency c
 
   assert.equal(getOperation(script, 'tab_switch_if_needed')?.enabled, true);
   assert.equal(getOperation(script, 'tab_switch_if_needed')?.trigger, 'manual');
-  assert.deepEqual(getOperation(script, 'tab_switch_if_needed')?.dependsOn, ['close_detail']);
+  assert.deepEqual(getOperation(script, 'tab_switch_if_needed')?.dependsOn, ['finalize_detail_link']);
   assert.equal(getOperation(script, 'tab_switch_if_needed')?.oncePerAppear, false);
   assert.deepEqual(getOperation(script, 'detail_harvest')?.dependsOn, ['open_first_detail']);
+  assert.deepEqual(getOperation(script, 'open_next_detail')?.followupOperations, ['detail_harvest']);
   assert.ok(getOperation(script, 'open_next_detail')?.dependsOn?.includes('tab_switch_if_needed'));
-  assert.deepEqual(getOperation(script, 'open_next_detail')?.dependsOn, ['wait_between_notes', 'ensure_tab_pool', 'tab_switch_if_needed']);
+  assert.deepEqual(getOperation(script, 'open_next_detail')?.dependsOn, ['wait_between_notes', 'tab_switch_if_needed']);
+  assert.equal(getOperation(script, 'open_first_detail')?.params?.keyword, 'deepseek');
+  assert.equal(getOperation(script, 'open_first_detail')?.params?.env, 'debug');
+  assert.equal(getOperation(script, 'open_first_detail')?.params?.outputRoot, '/tmp/webauto-out');
+  assert.equal(
+    getOperation(script, 'open_first_detail')?.params?.sharedHarvestPath,
+    '/tmp/webauto-out/xiaohongshu/debug/deepseek/safe-detail-urls.jsonl',
+  );
   assert.equal(getOperation(script, 'open_next_detail')?.params?.keyword, 'deepseek');
   assert.equal(getOperation(script, 'open_next_detail')?.params?.env, 'debug');
   assert.equal(getOperation(script, 'open_next_detail')?.params?.outputRoot, '/tmp/webauto-out');
+  assert.equal(
+    getOperation(script, 'open_next_detail')?.params?.sharedHarvestPath,
+    '/tmp/webauto-out/xiaohongshu/debug/deepseek/safe-detail-urls.jsonl',
+  );
   assert.equal(getOperation(script, 'open_next_detail')?.params?.tabCount, 4);
   assert.equal(getOperation(script, 'open_next_detail')?.conditions, undefined);
 });

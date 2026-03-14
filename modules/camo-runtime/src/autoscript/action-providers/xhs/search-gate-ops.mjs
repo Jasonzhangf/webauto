@@ -439,8 +439,17 @@ export async function executeWaitSearchPermitOperation({ profileId, params = {},
       const sleepMs = Math.max(500, Math.min(permit.waitMs || 1500, 15_000));
       await new Promise((resolve) => setTimeout(resolve, sleepMs));
     } catch (error) {
-      if (error?.code === 'SEARCH_GATE_REJECTED' || error?.code === 'SEARCH_GATE_DENIED') {
-        throw error;
+      if (error?.code === 'SEARCH_GATE_REJECTED') {
+        pushTrace({ kind: 'permit', stage: 'wait_search_permit', ok: false, code: 'SEARCH_GATE_REJECTED', error: 'Gate rejected due to consecutive same keyword - will retry after backoff', attempt: attempts, consecutiveSameRetry: true });
+        const backoffMs = Math.min(5000 * Math.pow(1.5, Math.min(attempts - 1, 10)), 60_000);
+        await new Promise((resolve) => setTimeout(resolve, backoffMs));
+        continue;
+      }
+      if (error?.code === 'SEARCH_GATE_DENIED') {
+        pushTrace({ kind: 'permit', stage: 'wait_search_permit', ok: false, code: 'SEARCH_GATE_DENIED', error: 'Gate denied - will retry after backoff', attempt: attempts, gateDeniedRetry: true });
+        const backoffMs = Math.min(3000 * Math.pow(1.2, Math.min(attempts - 1, 10)), 30_000);
+        await new Promise((resolve) => setTimeout(resolve, backoffMs));
+        continue;
       }
       if (error?.code === 'OPEN_LINK_GATE_REJECTED' || error?.code === 'OPEN_LINK_GATE_DENIED') {
         throw error;

@@ -1,3 +1,5 @@
+import path from 'node:path';
+
 function toTrimmedString(value, fallback = '') {
   const text = typeof value === 'string' ? value.trim() : '';
   return text || fallback;
@@ -36,6 +38,22 @@ function splitCsv(value) {
     .split(',')
     .map((item) => item.trim())
     .filter(Boolean);
+}
+
+function sanitizePathSegment(value, fallback) {
+  const text = toTrimmedString(value, fallback);
+  const cleaned = text.replace(/[\\/:"*?<>|]+/g, '_').trim();
+  return cleaned || fallback;
+}
+
+function resolveSharedHarvestPath({ sharedHarvestPath, outputRoot, env, keyword }) {
+  const explicit = toTrimmedString(sharedHarvestPath, '');
+  if (explicit) return path.resolve(explicit);
+  const root = toTrimmedString(outputRoot, '');
+  if (!root) return '';
+  const safeEnv = sanitizePathSegment(env, 'debug');
+  const safeKeyword = sanitizePathSegment(keyword, 'unknown');
+  return path.join(path.resolve(root), 'xiaohongshu', safeEnv, safeKeyword, 'safe-detail-urls.jsonl');
 }
 
 function pickCloseDependency(options) {
@@ -88,7 +106,12 @@ export function resolveXhsUnifiedOptions(rawOptions = {}) {
   const matchMode = toTrimmedString(rawOptions.matchMode, 'any');
   const matchMinHits = toPositiveInt(rawOptions.matchMinHits, 1, 1);
   const replyText = toTrimmedString(rawOptions.replyText, '感谢分享，已关注');
-  const sharedHarvestPath = toTrimmedString(rawOptions.sharedHarvestPath, '');
+  const sharedHarvestPath = resolveSharedHarvestPath({
+    sharedHarvestPath: rawOptions.sharedHarvestPath,
+    outputRoot,
+    env,
+    keyword,
+  });
   const searchSerialKey = toTrimmedString(rawOptions.searchSerialKey, `${env}:${keyword}`);
   const seedCollectCount = toNonNegativeInt(rawOptions.seedCollectCount, maxNotes);
   const seedCollectMaxRounds = toNonNegativeInt(
@@ -111,9 +134,8 @@ export function resolveXhsUnifiedOptions(rawOptions = {}) {
   const stageDetailEnabled = toBoolean(rawOptions.stageDetailEnabled, stage === 'detail');
   const skipAccountSync = toBoolean(rawOptions.skipAccountSync, env === 'debug');
 
-  const matchKeywords = splitCsv(rawOptions.matchKeywords || keyword);
-  const likeKeywordsSeed = splitCsv(rawOptions.likeKeywords || '');
-  const likeKeywords = likeKeywordsSeed.length > 0 ? likeKeywordsSeed : matchKeywords;
+  const matchKeywords = splitCsv(rawOptions.matchKeywords || '');
+  const likeKeywords = splitCsv(rawOptions.likeKeywords || '');
 
   const detailLoopEnabled = stageDetailEnabled || stageContentEnabled || stageLikeEnabled || stageReplyEnabled;
   const stageLinksEnabled = stageLinksRequested || detailLoopEnabled;
@@ -124,7 +146,9 @@ export function resolveXhsUnifiedOptions(rawOptions = {}) {
     detailOpenByLinks || !(stage === 'detail' && maxNotes <= 1),
   );
   const openByLinksMaxAttempts = toPositiveInt(rawOptions.openByLinksMaxAttempts, 3, 1);
-  const detailLinksStartup = detailOpenByLinks && (stage === 'detail' || stage === 'full');
+  const detailLinksStartup = detailOpenByLinks && stage === 'detail';
+  const autoResumeDetailLinksStartup = (stage === 'full' || stage === 'detail') && toBoolean(rawOptions.resume, false);
+  const effectiveDetailLinksStartup = autoResumeDetailLinksStartup || detailLinksStartup;
   if (!tabCountProvided && detailLoopEnabled) tabCount = 4;
   const detailRotateComments = toNonNegativeInt(
     rawOptions.detailRotateComments,
@@ -224,7 +248,7 @@ export function resolveXhsUnifiedOptions(rawOptions = {}) {
     collectOpenLinksOnly,
     detailOpenByLinks,
     openByLinksMaxAttempts,
-    detailLinksStartup,
+    detailLinksStartup: effectiveDetailLinksStartup,
     detailLoopEnabled,
     detailHarvestEnabled,
     commentsHarvestEnabled,

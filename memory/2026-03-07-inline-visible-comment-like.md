@@ -54,3 +54,26 @@ Tags: xhs, detail, comments, likes, inline-like, visible-comments, ws-stats, aut
 - 目前 reply 仍保留 `comment_match_gate`，因为 reply 仍然依赖“匹配后的评论集合”。
 - like 的实时统计现在应该通过 `comments_harvest` 的 operation_done 事件进入 unified task state / WS 更新。
 - 下一步需要用单页 detail 实测确认：滚动轮次中已点赞 comment 会被记为 liked 且不重复点击，summary/state 文件持续落盘。
+
+## 2026-03-12 Priority Update
+- 用户确认：`reply` 暂时不是重点，后续再做。
+- 当前迭代主线：只聚焦 **评论获取（comments_harvest）+ 评论点赞（inline like）** 的可靠性与最小测试闭环。
+- 测试策略：
+  - 最小单测集合优先覆盖：
+    - `xhs-detail-close-and-budget`（评论采集循环/预算暂停/恢复锚点）
+    - `xhs-visible-like-inline`（点赞内聚在 comments_harvest，统计回传）
+  - 若最小单测通过，再根据需要补充 live smoke。
+
+### Minimal test evidence (2026-03-12)
+- Command:
+  - `node --test tests/unit/webauto/xhs-detail-close-and-budget.test.mjs tests/unit/webauto/xhs-visible-like-inline.test.mjs`
+- Result:
+  - `13` passed, `0` failed
+  - 覆盖了 comments_harvest 的预算暂停/恢复锚点和 inline like 统计回传
+- UI CLI 最小链路：
+  - `node bin/webauto.mjs ui cli start --build`
+  - `node bin/webauto.mjs ui cli status --json`
+  - `node bin/webauto.mjs ui cli stop`
+  - 结果：通过（ready=true, pid=68431）
+
+Tags: xhs, detail, comments, likes, inline-like, visible-comments, ws-stats, autoscript, priority, minimal-test, reply-deferred

@@ -1420,7 +1420,7 @@ export async function executeCommentsHarvestOperation({ profileId, params = {}, 
     return { commentsPath, commentsMdPath };
   };
 
-  const applyVisibleLikePass = async (currentSnapshot) => {
+const applyVisibleLikePass = async (currentSnapshot) => {
     const kw = splitKeywords(params.likeKeywords || params.keywords || state.keyword || '');
     progress('visible_like_pass_start', {
       kind: 'visible_comments_probe',

@@ -156,7 +156,9 @@ function shouldNavigateToSeed(currentUrl, seedUrl) {
   if (current.origin !== seed.origin) return true;
   if (seedPath.includes('/search_result') && !currentPath.includes('/search_result')) return true;
   if (seedPath === '/explore' && currentIsXhsDetail) return true;
-  if (seedPath.includes('/explore') && !currentPath.includes('/explore') && !currentPath.includes('/search_result')) return true;
+ if (seedPath.includes('/explore') && !currentPath.includes('/explore') && !currentPath.includes('/search_result')) return true;
+  // Do not navigate away from search results when seed is /explore
+  if (currentPath.includes('/search_result')) return false;
   return false;
 }
 

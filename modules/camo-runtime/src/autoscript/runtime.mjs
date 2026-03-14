@@ -263,7 +263,17 @@ export class AutoscriptRunner {
   }
 
   isDependencySatisfied(operation) {
-    const deps = operation.dependsOn || [];
+    const deps = Array.isArray(operation?.dependsOn) ? operation.dependsOn : [];
+    if (deps.length === 0) return true;
+
+    const mode = String(operation?.dependencyMode || 'all').trim().toLowerCase();
+    if (mode === 'any') {
+      return deps.some((dep) => {
+        const depState = this.operationState.get(dep);
+        return depState?.status === 'done' || depState?.status === 'skipped';
+      });
+    }
+
     for (const dep of deps) {
       const depState = this.operationState.get(dep);
       if (depState?.status !== 'done' && depState?.status !== 'skipped') return false;
@@ -681,6 +691,25 @@ export class AutoscriptRunner {
         continue;
       }
       this.enqueueOperation(operation, forcedEvent);
+    }
+  }
+
+  scheduleFollowupOperations(operation, event) {
+    const followupIds = Array.isArray(operation?.followupOperations)
+      ? operation.followupOperations.map((item) => String(item || '').trim()).filter(Boolean)
+      : [];
+    if (followupIds.length === 0) return;
+
+    for (const followupId of followupIds) {
+      const followupOperation = (this.script.operations || []).find((item) => item?.id === followupId);
+      if (!followupOperation) continue;
+      this.forceRunOperationIds.add(followupOperation.id);
+      const forcedEvent = this.buildForcedEventForOperation(followupOperation, event);
+      if (!this.shouldSchedule(followupOperation, forcedEvent)) {
+        this.forceRunOperationIds.delete(followupOperation.id);
+        continue;
+      }
+      this.enqueueOperation(followupOperation, forcedEvent);
     }
   }
 
@@ -1184,6 +1213,7 @@ export class AutoscriptRunner {
           this.scheduleReadyOperations(event, { excludeOperationId: operation.id });
         }
         this.scheduleDependentOperations(operation.id, event);
+        this.scheduleFollowupOperations(operation, event);
         return { ok: true, terminalState: 'done', result };
       }
 

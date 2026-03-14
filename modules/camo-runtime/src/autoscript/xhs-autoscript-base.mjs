@@ -3,7 +3,7 @@ import { resolveXhsUnifiedOptions } from './xhs-unified-options.mjs';
 const DEFAULT_SOURCE = 'scripts/xiaohongshu/phase-unified-harvest.mjs';
 
 export function buildXhsAutoscriptBase(rawOptions = {}, overrides = {}) {
-  const options = resolveXhsUnifiedOptions(rawOptions);
+  const options = resolveXhsUnifiedOptions({ ...rawOptions, ...overrides });
   const {
     profileId,
     keyword,

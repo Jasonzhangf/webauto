@@ -13,6 +13,7 @@
     "services/**/*.d.ts",
     "services/shared/**/*.d.ts",
     "modules/container-registry/**/*.ts",
+    "modules/camo-runtime/src/**/*.mjs",
     "modules/camo-backend/**/*.ts",
     "modules/workflow/**/*.ts",
     "modules/xiaohongshu/app/**/*.ts",

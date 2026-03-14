@@ -369,6 +369,58 @@ async function waitForLinkOpenGate(state, params, pushTrace) {
   };
 }
 
+async function cleanupDetailContextOnDone({
+  profileId,
+  params = {},
+  state,
+  pushTrace,
+  callApiImpl,
+  readLocationImpl,
+  isDetailVisibleImpl,
+  sleepImpl,
+}) {
+  const cleanupOnDone = params.cleanupOnDone !== false;
+  if (!cleanupOnDone) {
+    return { attempted: false, cleaned: false, method: 'disabled' };
+  }
+
+  const currentUrl = String(await readLocationImpl(profileId).catch(() => '') || '').trim();
+  const currentVisible = await isDetailVisibleImpl(profileId).catch(() => null);
+  const maybeInDetail = isDirectDetailUrl(currentUrl) || currentVisible?.detailVisible === true;
+  if (!maybeInDetail) {
+    return { attempted: false, cleaned: true, method: 'not_in_detail', beforeUrl: currentUrl || null };
+  }
+
+  try {
+    await callApiImpl('page:back', { profileId });
+    pushTrace({ kind: 'cleanup', stage: 'open_detail_done_cleanup', action: 'page:back' });
+  } catch (error) {
+    pushTrace({ kind: 'error', stage: 'open_detail_done_cleanup', action: 'page:back', message: String(error?.message || error) });
+  }
+
+  await sleepImpl(520);
+  const afterBackUrl = String(await readLocationImpl(profileId).catch(() => '') || '').trim();
+  const afterBackVisible = await isDetailVisibleImpl(profileId).catch(() => null);
+  if (!isDirectDetailUrl(afterBackUrl) && !afterBackVisible?.detailVisible) {
+    return { attempted: true, cleaned: true, method: 'page_back', beforeUrl: currentUrl || null, afterUrl: afterBackUrl || null };
+  }
+
+  const returnUrl = resolveReturnUrl(state?.lastListUrl);
+  try {
+    await callApiImpl('goto', { profileId, url: returnUrl });
+    pushTrace({ kind: 'cleanup', stage: 'open_detail_done_cleanup', action: 'goto', url: returnUrl });
+  } catch (error) {
+    pushTrace({ kind: 'error', stage: 'open_detail_done_cleanup', action: 'goto', url: returnUrl, message: String(error?.message || error) });
+  }
+  await sleepImpl(760);
+  const afterGotoUrl = String(await readLocationImpl(profileId).catch(() => '') || '').trim();
+  const afterGotoVisible = await isDetailVisibleImpl(profileId).catch(() => null);
+  if (!isDirectDetailUrl(afterGotoUrl) && !afterGotoVisible?.detailVisible) {
+    return { attempted: true, cleaned: true, method: 'goto_list', beforeUrl: currentUrl || null, afterUrl: afterGotoUrl || null };
+  }
+  return { attempted: true, cleaned: false, method: 'not_cleaned', beforeUrl: currentUrl || null, afterUrl: afterGotoUrl || null };
+}
+
 export async function executeOpenDetailOperation({ profileId, params = {}, context = {} }) {
   const state = getProfileState(profileId);
   const { actionTrace, pushTrace } = buildTraceRecorder();
@@ -467,6 +519,18 @@ export async function executeOpenDetailOperation({ profileId, params = {}, conte
         assignedLink = link;
         slotState = readDetailSlotState(state, currentTabIndex, { tabCount: params.tabCount });
         if (!link?.noteUrl) {
+          const cleanupResult = await cleanupDetailContextOnDone({
+            profileId,
+            params,
+            state,
+            pushTrace,
+            callApiImpl,
+            readLocationImpl,
+            isDetailVisibleImpl,
+            sleepImpl,
+          });
+          pushTrace({ kind: 'cleanup', stage: 'open_detail_done_cleanup', result: cleanupResult });
+          emitActionTrace(context, actionTrace, { stage: 'xhs_open_detail' });
           throw new Error('AUTOSCRIPT_DONE_DETAIL_LINKS_EXHAUSTED');
         }
         effectiveNoteUrl = String(link.noteUrl)
@@ -480,6 +544,18 @@ export async function executeOpenDetailOperation({ profileId, params = {}, conte
       const activeLinkKey = useLinks ? extractOpenLinkKey(activeEntry, assignedLink, effectiveNoteUrl) : null;
       if (useLinks && activeLinkKey) {
         if (attemptedLinkKeys.has(activeLinkKey)) {
+          const cleanupResult = await cleanupDetailContextOnDone({
+            profileId,
+            params,
+            state,
+            pushTrace,
+            callApiImpl,
+            readLocationImpl,
+            isDetailVisibleImpl,
+            sleepImpl,
+          });
+          pushTrace({ kind: 'cleanup', stage: 'open_detail_done_cleanup', result: cleanupResult });
+          emitActionTrace(context, actionTrace, { stage: 'xhs_open_detail' });
           throw new Error('AUTOSCRIPT_DONE_DETAIL_LINKS_EXHAUSTED');
         }
         attemptedLinkKeys.add(activeLinkKey);
@@ -855,27 +931,31 @@ export async function executeCloseDetailOperation({ profileId, params = {}, cont
   const retryPolicy = String(params.retryPolicy || 'esc_then_x').trim().toLowerCase();
   const attempts = Math.max(1, Number(params.retryAttempts ?? 2) || 2);
   const openByLinks = String(params.openByLinks || '').toLowerCase() === 'true' || params.openByLinks === true;
+  const requeueFailedLinks = String(params.requeueFailedLinks || '').toLowerCase() === 'true'
+    || params.requeueFailedLinks === true;
   const allowKeepDetail = String(params.allowKeepDetail || '').toLowerCase() === 'true' || params.allowKeepDetail === true;
   let closed = false;
   let used = null;
 
-  if (openByLinks && !shouldCloseCurrentDetail(state, { tabCount: params.tabCount, openByLinks: true })) {
-    emitActionTrace(context, actionTrace, { stage: 'xhs_close_detail' });
-    return {
-      ok: true,
-      code: 'OPERATION_DONE',
-      message: 'xhs_close_detail deferred for tab rotation',
-      data: { closed: false, method: 'deferred_rotation', attempts: 0 },
-    };
-  }
+  if (openByLinks) {
+    const tabIndex = Number(state?.detailLinkState?.activeTabIndex || getCurrentTabIndex(state, { tabCount: params.tabCount })) || 1;
+    const activeSlot = readDetailSlotState(state, tabIndex, { tabCount: params.tabCount });
+    const activeEntry = readActiveLinkForTab(state, tabIndex);
+    if (!shouldCloseCurrentDetail(state, { tabCount: params.tabCount, openByLinks: true })) {
+      emitActionTrace(context, actionTrace, { stage: 'xhs_close_detail' });
+      return {
+        ok: true,
+        code: 'OPERATION_DONE',
+        message: 'xhs_close_detail deferred for tab rotation',
+        data: { closed: false, method: 'deferred_rotation', attempts: 0 },
+      };
+    }
 
-  const initialVisible = await isDetailVisibleImpl(profileId);
-  if (!initialVisible?.detailVisible) {
-    if (openByLinks) {
-      const tabIndex = Number(state?.detailLinkState?.activeTabIndex || getCurrentTabIndex(state, { tabCount: params.tabCount })) || 1;
-      const activeSlot = readDetailSlotState(state, tabIndex, { tabCount: params.tabCount });
-      const activeEntry = readActiveLinkForTab(state, tabIndex);
-      const queueResult = await releaseClaimedDetailLink({
+    const initialVisible = await isDetailVisibleImpl(profileId).catch(() => null);
+    const shouldRequeueFailedLink = requeueFailedLinks
+      && (state?.detailLinkState?.activeFailed === true || activeSlot?.failed === true);
+    const queueResult = !initialVisible?.detailVisible
+      ? await releaseClaimedDetailLink({
         profileId,
         params,
         state,
@@ -885,21 +965,44 @@ export async function executeCloseDetailOperation({ profileId, params = {}, cont
         testingOverrides,
         reason: 'stale_closed',
         skip: true,
-      });
-      const detailState = state.detailLinkState && typeof state.detailLinkState === 'object' ? state.detailLinkState : {};
-      const activeByTab = detailState.activeByTab && typeof detailState.activeByTab === 'object' ? { ...detailState.activeByTab } : {};
-      delete activeByTab[String(tabIndex)];
-      state.detailLinkState = {
-        ...detailState,
-        activeByTab,
-        activeTabIndex: null,
-        activeLink: null,
-        activeLinkRetryCount: 0,
-        activeFailed: false,
-        lastQueueOutcome: queueResult,
-        lastClosedAt: new Date().toISOString(),
-      };
-      emitActionTrace(context, actionTrace, { stage: 'xhs_close_detail' });
+      })
+      : await (shouldRequeueFailedLink
+        ? releaseClaimedDetailLink({
+          profileId,
+          params,
+          state,
+          currentTabIndex: tabIndex,
+          activeEntry,
+          pushTrace,
+          testingOverrides,
+          reason: 'detail_flow_failed_release',
+        })
+        : completeClaimedDetailLink({
+          profileId,
+          params,
+          state,
+          currentTabIndex: tabIndex,
+          activeEntry,
+          pushTrace,
+          testingOverrides,
+          noteId: state.currentNoteId || activeSlot?.lastOpenedNoteId || null,
+          url: state.currentHref || activeSlot?.lastOpenedHref || null,
+        }));
+    const detailState = state.detailLinkState && typeof state.detailLinkState === 'object' ? state.detailLinkState : {};
+    const activeByTab = detailState.activeByTab && typeof detailState.activeByTab === 'object' ? { ...detailState.activeByTab } : {};
+    delete activeByTab[String(tabIndex)];
+    state.detailLinkState = {
+      ...detailState,
+      activeByTab,
+      activeTabIndex: null,
+      activeLink: null,
+      activeLinkRetryCount: 0,
+      activeFailed: false,
+      lastQueueOutcome: queueResult,
+      lastClosedAt: new Date().toISOString(),
+    };
+    emitActionTrace(context, actionTrace, { stage: 'xhs_close_detail' });
+    if (!initialVisible?.detailVisible) {
       return {
         ok: true,
         code: 'OPERATION_DONE',
@@ -907,6 +1010,21 @@ export async function executeCloseDetailOperation({ profileId, params = {}, cont
         data: { closed: true, method: 'already_closed', attempts: 0, queueSkipped: true },
       };
     }
+    return {
+      ok: true,
+      code: 'OPERATION_DONE',
+      message: 'xhs_close_detail finalized for direct-link mode',
+      data: {
+        closed: false,
+        method: 'link_finalize_only',
+        attempts: 0,
+        queueResult: queueResult?.response || null,
+      },
+    };
+  }
+
+  const initialVisible = await isDetailVisibleImpl(profileId);
+  if (!initialVisible?.detailVisible) {
     emitActionTrace(context, actionTrace, { stage: 'xhs_close_detail' });
     return { ok: true, code: 'OPERATION_DONE', message: 'xhs_close_detail already closed', data: { closed: true, method: 'already_closed', attempts: 0 } };
   }
@@ -1023,7 +1141,7 @@ export async function executeCloseDetailOperation({ profileId, params = {}, cont
     const activeSlot = readDetailSlotState(state, tabIndex, { tabCount: params.tabCount });
     const activeEntry = readActiveLinkForTab(state, tabIndex);
     const slotFailed = activeSlot?.failed === true;
-    const shouldRequeue = state?.detailLinkState?.activeFailed === true || slotFailed;
+    const shouldRequeue = requeueFailedLinks && (state?.detailLinkState?.activeFailed === true || slotFailed);
     const queueResult = shouldRequeue
       ? await releaseClaimedDetailLink({
         profileId,

@@ -73,6 +73,12 @@ function normalizeRecovery(value, defaults = {}) {
   return { attempts, actions };
 }
 
+function normalizeDependencyMode(value) {
+  const mode = toTrimmedString(value).toLowerCase();
+  if (mode === 'any') return 'any';
+  return 'all';
+}
+
 function normalizeValidation(value, defaults = {}) {
   const validation = value && typeof value === 'object' ? value : {};
   const mode = toTrimmedString(validation.mode || defaults.validationMode || 'none') || 'none';
@@ -169,6 +175,8 @@ function normalizeOperation(item, index, defaults) {
     params,
     trigger: normalizeTrigger(item.trigger),
     dependsOn: toArray(item.dependsOn).map((x) => toTrimmedString(x)).filter(Boolean),
+    dependencyMode: normalizeDependencyMode(item.dependencyMode),
+    followupOperations: toArray(item.followupOperations || item.resumeOperations).map((x) => toTrimmedString(x)).filter(Boolean),
     conditions: toArray(item.conditions).map(normalizeCondition).filter(Boolean),
     retry: normalizeRetry(item.retry, defaults.retry),
     impact: toTrimmedString(item.impact || defaults.impact || 'op') || 'op',
@@ -301,6 +309,15 @@ export function validateAutoscript(script) {
         errors.push(`operation ${operation.id}: unknown dependency ${dep}`);
       }
     }
+    for (const followupId of operation.followupOperations || []) {
+      if (!operationIds.has(followupId)) {
+        errors.push(`operation ${operation.id}: unknown followup operation ${followupId}`);
+      }
+    }
+
+    if (!['all', 'any'].includes(String(operation.dependencyMode || 'all'))) {
+      errors.push(`operation ${operation.id}: invalid dependencyMode ${operation.dependencyMode}`);
+    }
 
     for (const condition of operation.conditions || []) {
       if (condition.type === 'operation_done' && condition.operationId && !operationIds.has(condition.operationId)) {
@@ -340,6 +357,8 @@ export function explainAutoscript(script) {
       {
         trigger: operation.trigger,
         dependsOn: operation.dependsOn,
+        dependencyMode: operation.dependencyMode,
+        followupOperations: operation.followupOperations,
         impact: operation.impact,
         onFailure: operation.onFailure,
         retry: operation.retry,
