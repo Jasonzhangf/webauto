@@ -89,17 +89,22 @@ export async function requestXhsGatePermit({
     sameResourceMaxConsecutive,
     denyOnConsecutiveSame,
   };
+  const requestTimeoutMs = Math.max(1000, Number(params.requestTimeoutMs ?? params.gateTimeoutMs ?? 8000) || 8000);
 
   let response = null;
   try {
     if (typeof testingOverrides?.requestGatePermit === 'function') {
       response = await testingOverrides.requestGatePermit(payload);
     } else {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), requestTimeoutMs);
       const res = await fetch(gateUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
+        signal: controller.signal,
       });
+      clearTimeout(timeoutId);
       response = await res.json().catch(() => null);
     }
   } catch (error) {
@@ -418,6 +423,7 @@ export async function executeWaitSearchPermitOperation({ profileId, params = {},
   while (Date.now() - startedAt < maxWaitMs) {
     attempts += 1;
     try {
+      pushTrace({ kind: 'permit', stage: 'wait_search_permit_start', attempt: attempts });
       const permit = await requestXhsGatePermit({
         profileId,
         params,
@@ -448,6 +454,12 @@ export async function executeWaitSearchPermitOperation({ profileId, params = {},
       if (error?.code === 'SEARCH_GATE_DENIED') {
         pushTrace({ kind: 'permit', stage: 'wait_search_permit', ok: false, code: 'SEARCH_GATE_DENIED', error: 'Gate denied - will retry after backoff', attempt: attempts, gateDeniedRetry: true });
         const backoffMs = Math.min(3000 * Math.pow(1.2, Math.min(attempts - 1, 10)), 30_000);
+        await new Promise((resolve) => setTimeout(resolve, backoffMs));
+        continue;
+      }
+      if (error?.code === 'SEARCH_GATE_UNREACHABLE') {
+        pushTrace({ kind: 'permit', stage: 'wait_search_permit', ok: false, code: 'SEARCH_GATE_UNREACHABLE', error: 'Gate unreachable - will retry after backoff', attempt: attempts, gateUnreachableRetry: true });
+        const backoffMs = Math.min(4000 * Math.pow(1.3, Math.min(attempts - 1, 10)), 45_000);
         await new Promise((resolve) => setTimeout(resolve, backoffMs));
         continue;
       }

@@ -111,8 +111,8 @@ export async function runUnified(argv, overrides = {}) {
   if (!skipAccountSync) {
     profiles = assertProfilesUsable(profiles);
   }
-  const planOnly = parseBool(argv['plan-only'], false);
-  const headless = parseBool(argv.headless, false);
+ const planOnly = parseBool(argv['plan-only'], false);
+ const headless = parseBool(argv.headless, false);
   const defaultMaxNotes = parseIntFlag(argv['max-notes'] ?? argv.target, 30, 1);
   const totalNotes = parseNonNegativeInt(argv['total-notes'] ?? argv['total-target'], 0);
   const hasTotalTarget = totalNotes > 0;

@@ -171,7 +171,7 @@ async function cmdLoginProfile(profileId, argv, jsonMode) {
     process.exit(1);
   }
   const resetSession = resetProfileSessionForHeadful(id);
-  const startRet = runCamo(['start', id, '--idle-timeout', idleTimeout], { rootDir: ROOT });
+  const startRet = runCamo(['start', id, '--no-headless', '--idle-timeout', idleTimeout], { rootDir: ROOT });
   if (!startRet.ok) {
     output({ ok: false, code: startRet.code, step: 'start', stderr: startRet.stderr || startRet.stdout }, jsonMode);
     process.exit(1);
@@ -289,7 +289,7 @@ async function cmdGotoProfile(profileId, argv, jsonMode) {
   }
 
   const idleTimeout = String(argv['idle-timeout'] || process.env.WEBAUTO_LOGIN_IDLE_TIMEOUT || 'off').trim() || 'off';
-  const startRet = runCamo(['start', id, '--idle-timeout', idleTimeout], { rootDir: ROOT });
+  const startRet = runCamo(['start', id, '--no-headless', '--idle-timeout', idleTimeout], { rootDir: ROOT });
   if (!startRet.ok) {
     output({
       ok: false,

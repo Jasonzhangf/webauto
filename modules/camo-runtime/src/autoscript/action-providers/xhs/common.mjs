@@ -49,10 +49,17 @@ export async function runEvaluateScript({
   if (!allowUnsafeJs) {
     assertNoForbiddenJsAction(sourceScript, 'xhs provider evaluate');
   }
-  const wrappedScript = highlight && allowUnsafeJs ? withOperationHighlight(sourceScript) : sourceScript;
-  // 使用默认超时或传递的超时
+  const wrappedScript = highlight ? withOperationHighlight(sourceScript) : sourceScript;
   const finalTimeoutMs = Number(timeoutMs) > 0 ? timeoutMs : undefined;
-  return callAPI('evaluate', { profileId, script: wrappedScript }, { timeoutMs: finalTimeoutMs });
+  // 添加 runtime 层强制超时保护（防止 fetch timeout 失效导致永久卡住）
+  const RUNTIME_EVAL_TIMEOUT_MS = 30000;
+  const runtimeTimeoutMs = Number(timeoutMs) > 0 ? Math.min(Number(timeoutMs), RUNTIME_EVAL_TIMEOUT_MS) : RUNTIME_EVAL_TIMEOUT_MS;
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`evaluate runtime timeout after ${runtimeTimeoutMs}ms`)), runtimeTimeoutMs);
+    callAPI('evaluate', { profileId, script: wrappedScript }, { timeoutMs: finalTimeoutMs })
+      .then((result) => { clearTimeout(timer); resolve(result); })
+      .catch((error) => { clearTimeout(timer); reject(error); });
+  });
 }
 
 export function extractEvaluateResultData(payload) {

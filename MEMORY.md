@@ -4920,3 +4920,102 @@ Blocking defects:
 
 #### 备注
 - 仍需后续在 detail-only 场景继续验证 scroll guard 生效。
+
+# Short-term Memory
+
+## 2026-03-15: XHS Unified Flow Startup Trigger Fix
+
+### 问题
+Unified flow 在搜索阶段卡住，`wait_search_permit`、`fill_keyword`、`submit_search` 操作从未触发：
+- 只显示 `pacing_wait wait_search_permit`
+- 没有 `operation_start` 事件
+- 进度卡在 0/200
+
+### 根因
+1. 这些操作使用 `trigger: 'startup'`
+2. 它们有依赖链：`wait_search_permit` → `fill_keyword` → `submit_search`
+3. `startup` 事件在脚本启动时触发一次
+4. 具有 `dependsOn` 的 startup 操作需要等待依赖完成
+5. 但 startup 事件已过，它们无法再次被触发
+
+### 修复方案
+在 `modules/camo-runtime/src/autoscript/runtime.mjs` 的 `start()` 方法中：
+
+```javascript
+await this.handleEvent({ type: 'startup', timestamp: nowIso() });
+// 等待初始启动操作完成后再返回
+await Promise.resolve();
+await this.operationQueue;
+```
+
+这确保所有 startup 触发的操作（包括依赖链）在脚本启动时就被调度。
+
+### 依赖链处理
+依赖链通过 `scheduleDependentOperations()` 自动处理：
+- 当一个操作完成时，调用 `scheduleDependentOperations(operation.id, event)`
+- 这会找到所有依赖该操作的其他操作，并为它们创建强制事件
+- 强制事件的类型由 `buildForcedEventForOperation()` 决定
+- startup trigger 的操作会得到 `{ type: 'startup' }` 事件
+
+### 验证结果
+测试命令：`node bin/webauto.mjs xhs unified --profile xhs-qa-1 --keyword "test123" --max-notes 2 --do-comments false --persist-comments false --do-likes false --env debug`
+
+执行链完整：
+1. ✅ `wait_search_permit` start → done (53ms)
+2. ✅ `fill_keyword` start → done (1354ms)
+3. ✅ `submit_search` start → done (2351ms)
+4. ✅ 搜索成功：`searchReady:true, visibleNoteCount:11`
+5. ✅ 所有链接包含 `xsec_token`
+
+### ASCII 流程图
+```
+startup
+  ├─ sync_window_viewport (startup)
+  │    └─ done
+  ├─ goto_home (startup)
+  │    └─ done
+  ├─ wait_search_permit (startup, dependsOn:goto_home)
+  │    ├─ done → scheduleDependentOperations
+  │    └─ fill_keyword (startup, dependsOn:wait_search_permit)
+  │         ├─ done → scheduleDependentOperations
+  │         └─ submit_search (startup, dependsOn:fill_keyword)
+  │              └─ done → scheduleReadyOperations
+  └─ ensure_tab_pool (subscription_event:search_result_item.exist)
+```
+
+### 关键文件
+- `modules/camo-runtime/src/autoscript/runtime.mjs` - 修复位置
+- `modules/camo-runtime/src/autoscript/xhs-autoscript-ops.mjs` - 操作定义
+
+Tags: webauto, xhs, autoscript, startup-trigger, dependency-chain, runtime-scheduler
+
+### Startup Trigger 验证成功（2026-03-15 11:22）
+
+完整操作链验证成功：
+
+1. **wait_search_permit**: 
+   - Start: 03:22:40.902Z
+   - Done: 03:22:40.906Z (4ms)
+   - Search gate permit: allowed=true
+
+2. **fill_keyword**:
+   - Start: 03:22:41.004Z
+   - Done: 03:22:41.401Z (397ms)
+   - Typed "openclaw" into search input
+
+3. **submit_search**:
+   - Start: 03:22:42.584Z
+   - Done: 03:22:45.576Z (2347ms)
+   - Search success: searchReady=true, visibleNoteCount=10, total=22
+   - All links include xsec_token
+
+4. **ensure_tab_pool**:
+   - Start: 03:22:46.178Z
+   - Status: Running (test timed out at 30s)
+   - Timeout configured: 60000ms
+
+**关键发现**：`ensure_tab_pool` 操作启动后未在 30 秒内完成，测试被 timeout 终止。
+
+需要进一步调查 `ensure_tab_pool` 的执行时间问题。
+
+Tags: webauto, xhs, autoscript, startup-trigger, ensure_tab_pool, tab-pool-timeout

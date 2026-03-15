@@ -641,14 +641,15 @@ export class AutoscriptRunner {
     }
   }
 
-  scheduleReadyOperations(event, options = {}) {
-    const excludeOperationId = String(options?.excludeOperationId || '').trim();
-    for (const operation of this.script.operations || []) {
-      if (excludeOperationId && operation?.id === excludeOperationId) continue;
-      if (!this.shouldSchedule(operation, event)) continue;
-      this.enqueueOperation(operation, event);
-    }
-  }
+ scheduleReadyOperations(event, options = {}) {
+   const excludeOperationId = String(options?.excludeOperationId || '').trim();
+   for (const operation of this.script.operations || []) {
+     if (excludeOperationId && operation?.id === excludeOperationId) continue;
+     if (!this.shouldSchedule(operation, event)) continue;
+     this.enqueueOperation(operation, event);
+   }
+
+ }
 
   buildRescheduleEvent(event) {
     return {
@@ -1205,14 +1206,15 @@ export class AutoscriptRunner {
           attempt,
           phase: 'done',
         });
-        // Re-evaluate graph on the same event only for non-manual triggers.
-        // Manual dependency chains are already resumed via scheduleDependentOperations().
-        // Re-running the whole graph on a manual event causes sibling manual operations
-        // such as open_next_detail to be re-scheduled after unrelated manual ops complete.
+       // Re-evaluate graph on the same event only for non-manual triggers.
+       // Manual dependency chains are already resumed via scheduleDependentOperations().
+       // Re-running the whole graph on a manual event causes sibling manual operations
+       // such as open_next_detail to be re-scheduled after unrelated manual ops complete.
+        // Always reschedule for non-manual triggers, including startup
         if (String(event?.type || '').trim() !== 'manual') {
           this.scheduleReadyOperations(event, { excludeOperationId: operation.id });
         }
-        this.scheduleDependentOperations(operation.id, event);
+       this.scheduleDependentOperations(operation.id, event);
         this.scheduleFollowupOperations(operation, event);
         return { ok: true, terminalState: 'done', result };
       }
@@ -1574,15 +1576,19 @@ export class AutoscriptRunner {
             message: err?.message || String(err),
           });
         },
-      });
-    }
+     });
+   }
 
-    await this.handleEvent({ type: 'startup', timestamp: nowIso() });
-    return {
-      runId: this.runId,
-      stop: (reason = 'stopped') => this.stop(reason),
-      done: this.donePromise,
-    };
+   await this.handleEvent({ type: 'startup', timestamp: nowIso() });
+   // Wait for initial startup operations to complete before returning
+   // This ensures all startup-triggered operations get scheduled
+   await Promise.resolve();
+   await this.operationQueue;
+   return {
+     runId: this.runId,
+     stop: (reason = 'stopped') => this.stop(reason),
+     done: this.donePromise,
+   };
   }
 
   stop(reason = 'stopped') {

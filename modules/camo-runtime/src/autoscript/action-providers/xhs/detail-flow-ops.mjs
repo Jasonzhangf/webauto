@@ -565,18 +565,19 @@ export async function executeOpenDetailOperation({ profileId, params = {}, conte
           if (!useLinks) {
             return createOpenFailureResult('MISSING_XSEC_TOKEN', 'detail url missing xsec_token');
           }
-        const requeueTabIndex = currentTabIndex || getCurrentTabIndex(state, { tabCount: params.tabCount });
-        const activeEntry = readActiveLinkForTab(state, requeueTabIndex);
-        await releaseClaimedDetailLink({
-          profileId,
-          params,
-          state,
-          currentTabIndex: requeueTabIndex,
-          activeEntry,
-          pushTrace,
-          testingOverrides,
-          reason: 'open_detail_missing_xsec_release',
-        });
+       const requeueTabIndex = currentTabIndex || getCurrentTabIndex(state, { tabCount: params.tabCount });
+       const activeEntry = readActiveLinkForTab(state, requeueTabIndex);
+       await releaseClaimedDetailLink({
+         profileId,
+         params,
+         state,
+         currentTabIndex: requeueTabIndex,
+         activeEntry,
+         pushTrace,
+         testingOverrides,
+         reason: 'open_detail_missing_xsec_release',
+         skip: true,
+       });
         const requeue = { requeued: true, exhausted: false, key: activeEntry?.key || assignedLink?.noteId || null, link: activeEntry?.link || assignedLink || null };
         markOpenFailure(state, requeue, 'MISSING_XSEC_TOKEN');
         pushTrace({ kind: 'error', stage: 'open_detail', code: 'MISSING_XSEC_TOKEN', url: effectiveNoteUrl || null });
@@ -614,18 +615,19 @@ export async function executeOpenDetailOperation({ profileId, params = {}, conte
             } catch (gateError) {
               const code = String(gateError?.code || '').trim();
               if (code === 'OPEN_LINK_GATE_REJECTED' || code === 'OPEN_LINK_GATE_DENIED') {
-                const requeueTabIndex = currentTabIndex || getCurrentTabIndex(state, { tabCount: params.tabCount });
-                const activeEntry = readActiveLinkForTab(state, requeueTabIndex);
-                await releaseClaimedDetailLink({
-                  profileId,
-                  params,
-                  state,
-                  currentTabIndex: requeueTabIndex,
-                  activeEntry,
-                  pushTrace,
-                  testingOverrides,
-                  reason: 'open_detail_gate_rejected_release',
-                });
+               const requeueTabIndex = currentTabIndex || getCurrentTabIndex(state, { tabCount: params.tabCount });
+               const activeEntry = readActiveLinkForTab(state, requeueTabIndex);
+               await releaseClaimedDetailLink({
+                 profileId,
+                 params,
+                 state,
+                 currentTabIndex: requeueTabIndex,
+                 activeEntry,
+                 pushTrace,
+                 testingOverrides,
+                 reason: 'open_detail_gate_rejected_release',
+                 skip: true,
+               });
                 const requeue = {
                   requeued: true,
                   exhausted: false,
@@ -698,18 +700,19 @@ export async function executeOpenDetailOperation({ profileId, params = {}, conte
             if (!useLinks) {
               return createOpenFailureResult('DETAIL_NOT_VISIBLE', 'detail not visible after open-by-links');
             }
-            const requeueTabIndex = currentTabIndex || getCurrentTabIndex(state, { tabCount: params.tabCount });
-            const activeEntry = readActiveLinkForTab(state, requeueTabIndex);
-            await releaseClaimedDetailLink({
-              profileId,
-              params,
-              state,
-              currentTabIndex: requeueTabIndex,
-              activeEntry,
-              pushTrace,
-              testingOverrides,
-              reason: 'open_detail_not_visible_release',
-            });
+           const requeueTabIndex = currentTabIndex || getCurrentTabIndex(state, { tabCount: params.tabCount });
+           const activeEntry = readActiveLinkForTab(state, requeueTabIndex);
+           await releaseClaimedDetailLink({
+             profileId,
+             params,
+             state,
+             currentTabIndex: requeueTabIndex,
+             activeEntry,
+             pushTrace,
+             testingOverrides,
+             reason: 'open_detail_not_visible_release',
+             skip: true,
+           });
             const requeue = { requeued: true, exhausted: false, key: activeEntry?.key || assignedLink?.noteId || null, link: activeEntry?.link || assignedLink || null };
             markOpenFailure(state, requeue, 'DETAIL_NOT_VISIBLE');
             pushTrace({ kind: 'error', stage: 'open_detail', code: 'DETAIL_NOT_VISIBLE', url: effectiveNoteUrl || null });
@@ -737,18 +740,19 @@ export async function executeOpenDetailOperation({ profileId, params = {}, conte
           const failureMessage = String(error?.message || error || 'open detail failed');
           const gateRejectCode = String(error?.code || '').trim();
           if ((gateRejectCode === 'OPEN_LINK_GATE_REJECTED' || gateRejectCode === 'OPEN_LINK_GATE_DENIED') && gateParams) {
-            const requeueTabIndex = currentTabIndex || getCurrentTabIndex(state, { tabCount: params.tabCount });
-            const activeEntry = readActiveLinkForTab(state, requeueTabIndex);
-            await releaseClaimedDetailLink({
-              profileId,
-              params,
-              state,
-              currentTabIndex: requeueTabIndex,
-              activeEntry,
-              pushTrace,
-              testingOverrides,
-              reason: 'open_detail_gate_error_release',
-            });
+           const requeueTabIndex = currentTabIndex || getCurrentTabIndex(state, { tabCount: params.tabCount });
+           const activeEntry = readActiveLinkForTab(state, requeueTabIndex);
+           await releaseClaimedDetailLink({
+             profileId,
+             params,
+             state,
+             currentTabIndex: requeueTabIndex,
+             activeEntry,
+             pushTrace,
+             testingOverrides,
+             reason: 'open_detail_gate_error_release',
+             skip: true,
+           });
             const requeue = {
               requeued: true,
               exhausted: false,
@@ -770,18 +774,19 @@ export async function executeOpenDetailOperation({ profileId, params = {}, conte
             openGatePermit = null;
             continue;
           }
-          const requeueTabIndex = currentTabIndex || getCurrentTabIndex(state, { tabCount: params.tabCount });
-          const activeEntry = readActiveLinkForTab(state, requeueTabIndex);
-          await releaseClaimedDetailLink({
-            profileId,
-            params,
-            state,
-            currentTabIndex: requeueTabIndex,
-            activeEntry,
-            pushTrace,
-            testingOverrides,
-            reason: 'open_detail_navigation_failed_release',
-          });
+         const requeueTabIndex = currentTabIndex || getCurrentTabIndex(state, { tabCount: params.tabCount });
+         const activeEntry = readActiveLinkForTab(state, requeueTabIndex);
+         await releaseClaimedDetailLink({
+           profileId,
+           params,
+           state,
+           currentTabIndex: requeueTabIndex,
+           activeEntry,
+           pushTrace,
+           testingOverrides,
+           reason: 'open_detail_navigation_failed_release',
+           skip: true,
+         });
           const requeue = {
             requeued: true,
             exhausted: false,
@@ -967,16 +972,17 @@ export async function executeCloseDetailOperation({ profileId, params = {}, cont
         skip: true,
       })
       : await (shouldRequeueFailedLink
-        ? releaseClaimedDetailLink({
-          profileId,
-          params,
-          state,
-          currentTabIndex: tabIndex,
-          activeEntry,
-          pushTrace,
-          testingOverrides,
-          reason: 'detail_flow_failed_release',
-        })
+       ? releaseClaimedDetailLink({
+         profileId,
+         params,
+         state,
+         currentTabIndex: tabIndex,
+         activeEntry,
+         pushTrace,
+         testingOverrides,
+         reason: 'detail_flow_failed_release',
+         skip: true,
+       })
         : completeClaimedDetailLink({
           profileId,
           params,
@@ -1142,17 +1148,18 @@ export async function executeCloseDetailOperation({ profileId, params = {}, cont
     const activeEntry = readActiveLinkForTab(state, tabIndex);
     const slotFailed = activeSlot?.failed === true;
     const shouldRequeue = requeueFailedLinks && (state?.detailLinkState?.activeFailed === true || slotFailed);
-    const queueResult = shouldRequeue
-      ? await releaseClaimedDetailLink({
-        profileId,
-        params,
-        state,
-        currentTabIndex: tabIndex,
-        activeEntry,
-        pushTrace,
-        testingOverrides: context?.testingOverrides && typeof context.testingOverrides === 'object' ? context.testingOverrides : null,
-        reason: 'detail_flow_failed_release',
-      })
+   const queueResult = shouldRequeue
+     ? await releaseClaimedDetailLink({
+       profileId,
+       params,
+       state,
+       currentTabIndex: tabIndex,
+       activeEntry,
+       pushTrace,
+       testingOverrides: context?.testingOverrides && typeof context.testingOverrides === 'object' ? context.testingOverrides : null,
+       reason: 'detail_flow_failed_release',
+       skip: true,
+     })
       : await completeClaimedDetailLink({
         profileId,
         params,

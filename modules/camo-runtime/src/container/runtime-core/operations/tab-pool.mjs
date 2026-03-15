@@ -303,19 +303,28 @@ async function openTabBestEffort({
     const startedAt = Date.now();
     const maxWaitMs = Math.max(400, Number(timeoutMs) || 4000);
     const probeIntervalMs = 350;
-    while (Date.now() - startedAt <= maxWaitMs) {
+    const maxAttempts = Math.max(3, Math.floor(maxWaitMs / probeIntervalMs));
+    let attempts = 0;
+    while (Date.now() - startedAt <= maxWaitMs && attempts < maxAttempts) {
       try {
-        const checkpoint = await captureCheckpoint({
-          profileId,
-          containerId: 'xiaohongshu_home.search_input',
-          platform: 'xiaohongshu',
-        });
+        const checkpoint = await withTimeout(
+          captureCheckpoint({
+            profileId,
+            containerId: 'xiaohongshu_home.search_input',
+            platform: 'xiaohongshu',
+          }),
+          5000,
+          'checkpoint timeout'
+        );
         if (checkpoint?.ok && Number(checkpoint?.data?.selectorCount || 0) > 0) {
           return { ok: true, elapsedMs: Date.now() - startedAt };
         }
-      } catch {
-        // ignore and keep probing
+      } catch (err) {
+        if (!String(err?.message || '').includes('timeout')) {
+          throw err;
+        }
       }
+      attempts += 1;
       await sleep(probeIntervalMs);
     }
     return { ok: false, elapsedMs: Date.now() - startedAt };
@@ -351,6 +360,12 @@ async function openTabBestEffort({
         return { ok: true, mode: 'newPage_anchor', error: null };
       }
     }
+    if (!newPageOpened.ok) {
+      const anchorOk = await waitForAnchor(tabAppearTimeoutMs);
+      if (anchorOk.ok) {
+        return { ok: true, mode: 'newPage_anchor', error: null };
+      }
+    }
     if (newPageOpened.ok) {
       if (seedOnOpen && seedUrl) {
         await seedNewestTabIfNeeded({
@@ -362,14 +377,14 @@ async function openTabBestEffort({
           syncConfig,
         });
       }
-      return { ok: true, mode: 'newPage', error: null };
+      return { ok: true, mode: 'newPage_opened', error: null };
     }
     const hydrated = await hydrateBlankNewestTab({
       profileId,
       beforeCount,
       seedUrl,
       openDelayMs,
-      apiTimeoutMs,
+ apiTimeoutMs,
       navigationTimeoutMs,
       tabAppearTimeoutMs,
       syncConfig,
@@ -380,6 +395,11 @@ async function openTabBestEffort({
     if (hydrated?.error) {
       openError = hydrated.error;
     }
+    return {
+      ok: false,
+      mode: 'newPage_failed',
+      error: openError || new Error('newPage failed to open or hydrate'),
+    };
   } catch (err) {
     openError = err;
   }

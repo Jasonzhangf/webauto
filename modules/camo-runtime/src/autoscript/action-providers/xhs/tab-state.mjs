@@ -168,6 +168,14 @@ export async function getOrAssignLinkForTab(state, params = {}, tabIndex) {
     return entry.link;
   }
   const nextEntry = linksState.queue.shift() || null;
+  // STRICT DEDUP: skip if already completed or exhausted
+  if (nextEntry?.link) {
+    const key = String(nextEntry.key || createLinkKey(nextEntry.link)).trim();
+    if (linksState.completed[key] || linksState.exhausted[key]) {
+      // Drop this entry, it was already processed
+      return getOrAssignLinkForTab(state, params, tabIndex);
+    }
+  }
   if (!nextEntry?.link) return null;
   linksState.byTab[tabKey] = {
     index: -1,
