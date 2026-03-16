@@ -414,13 +414,23 @@ async function executeSelectorOperation({ profileId, action, operation, params, 
   }
 
   const text = String(params.text ?? params.value ?? '');
-  await callAPI('mouse:click', {
-    profileId,
-    x: target.center.x,
-    y: target.center.y,
-    button: 'left',
-    clicks: 1,
-  });
+  // Only click if explicitly requested for type actions.
+  // For input elements, keyboard focus is sufficient.
+  const shouldClick = params.click === true;
+  if (shouldClick) {
+    try {
+      await callAPI('mouse:click', {
+        profileId,
+        x: target.center.x,
+        y: target.center.y,
+        button: 'left',
+        clicks: 1,
+      });
+    } catch (err) {
+      // Click failure is not critical for type operations; continue.
+      console.warn(`[executeSelectorOperation] type: click failed (non-critical): ${err?.message || err}`);
+    }
+  }
   const clearBeforeType = params.clear !== false;
   if (clearBeforeType) {
     await callAPI('keyboard:press', {
@@ -441,8 +451,8 @@ async function executeSelectorOperation({ profileId, action, operation, params, 
   return {
     ok: true,
     code: 'OPERATION_DONE',
-    message: 'type done',
-    data: { selector, target, length: text.length },
+    message: shouldClick ? 'type done (with click)' : 'type done (no click)',
+    data: { selector, target, length: text.length, clicked: shouldClick },
   };
 }
 
