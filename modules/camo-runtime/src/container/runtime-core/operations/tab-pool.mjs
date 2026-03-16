@@ -351,7 +351,7 @@ async function openTabBestEffort({
     ? { profileId, url: seedUrl }
     : { profileId };
   try {
-    await callApiWithTimeout('newPage', payload, openCommandTimeoutMs);
+    await callApiWithTimeout('newTab', payload, openCommandTimeoutMs);
     await settle();
     const newPageOpened = await waitForTab();
     if (!newPageOpened.ok) {

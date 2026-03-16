@@ -4,9 +4,17 @@ import { ensureTabState, getCurrentTabIndex, advanceTab } from './tab-state.mjs'
 import { shouldAdvanceAfterClose } from './detail-slot-state.mjs';
 
 const XHS_DISCOVER_URL = 'https://www.xiaohongshu.com/explore?channel_id=homefeed_recommend';
+const TAB_COUNT = 5;  // 固定5个tab: 1个搜索页 + 4个轮转详情页
+const SWITCH_DELAY_MIN_MS = 2000;
+const SWITCH_DELAY_MAX_MS = 5000;
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function randomDelay(minMs, maxMs) {
+  const delay = Math.floor(Math.random() * (maxMs - minMs + 1)) + minMs;
+  return sleep(delay);
 }
 
 function extractPageList(payload) {
@@ -21,14 +29,9 @@ function extractActiveIndex(payload) {
   return null;
 }
 
-function getRuntimeTabSlot(context, tabIndex) {
-  const slots = Array.isArray(context?.runtime?.tabPool?.slots)
-    ? context.runtime.tabPool.slots
-    : [];
-  const slotIndex = Math.max(1, Number(tabIndex) || 1);
-  return slots.find((slot) => Number(slot?.slotIndex) === slotIndex) || null;
-}
-
+/**
+ * 确保运行时 tabPool 结构存在
+ */
 function ensureRuntimeTabPool(context = {}) {
   if (!context.runtime || typeof context.runtime !== 'object') {
     context.runtime = {};
@@ -38,7 +41,7 @@ function ensureRuntimeTabPool(context = {}) {
       slots: [],
       cursor: 0,
       count: 0,
-      initializedAt: new Date().toISOString(),
+      initializedAt: null,
     };
   }
   if (!Array.isArray(context.runtime.tabPool.slots)) {
@@ -47,247 +50,199 @@ function ensureRuntimeTabPool(context = {}) {
   return context.runtime.tabPool;
 }
 
-function normalizeAndSyncSlots(tabPool, pages = [], activeIndex = null, tabCount = 1) {
-  const limit = Math.max(1, Number(tabCount || 1) || 1);
-  const pageByIndex = new Map(
-    pages
-      .filter((page) => Number.isFinite(Number(page?.index)))
-      .map((page) => [Number(page.index), page]),
-  );
-  const existing = Array.isArray(tabPool?.slots)
-    ? [...tabPool.slots].sort((a, b) => Number(a?.slotIndex || 0) - Number(b?.slotIndex || 0))
-    : [];
-  const dedup = new Set();
-  const valid = [];
-  for (const slot of existing) {
-    const tabRealIndex = Number(slot?.tabRealIndex);
-    if (!Number.isFinite(tabRealIndex)) continue;
-    if (dedup.has(tabRealIndex)) continue;
-    const matched = pageByIndex.get(tabRealIndex);
-    if (!matched) continue;
-    dedup.add(tabRealIndex);
-    valid.push({
-      slotIndex: valid.length + 1,
-      tabRealIndex,
-      url: String(matched.url || slot?.url || ''),
-    });
-    if (valid.length >= limit) break;
+/**
+ * 关闭多余的 tab
+ * @param {string} profileId
+ * @param {number} keepCount 保留的tab数量
+ * @param {object} existingPages 当前页面列表
+ */
+async function closeExcessTabs(profileId, keepCount, existingPages = null) {
+  let pages = existingPages;
+  if (!pages) {
+    const pageList = await callAPI('page:list', { profileId });
+    pages = extractPageList(pageList);
   }
-  if (valid.length === 0) {
-    const active = pages.find((page) => Number(page?.index) === Number(activeIndex)) || null;
-    const ordered = [
-      ...(active ? [active] : []),
-      ...pages.filter((page) => Number(page?.index) !== Number(activeIndex)),
-    ];
-    for (const page of ordered) {
-      const tabRealIndex = Number(page?.index);
-      if (!Number.isFinite(tabRealIndex)) continue;
-      if (dedup.has(tabRealIndex)) continue;
-      dedup.add(tabRealIndex);
-      valid.push({
-        slotIndex: valid.length + 1,
-        tabRealIndex,
-        url: String(page?.url || ''),
-      });
-      if (valid.length >= limit) break;
+
+  if (pages.length <= keepCount) {
+    return { closed: 0, kept: pages.length };
+  }
+
+  // 按index排序，保留前 keepCount 个
+  const sortedPages = [...pages].sort((a, b) => Number(a.index) - Number(b.index));
+  const toClose = sortedPages.slice(keepCount);
+  let closed = 0;
+
+  for (const page of toClose) {
+    try {
+      await callAPI('page:close', { profileId, index: Number(page.index) });
+      closed += 1;
+      await sleep(200);  // 短暂等待
+    } catch (err) {
+      // 忽略关闭失败，继续处理
     }
   }
-  tabPool.slots = valid;
-  tabPool.count = valid.length;
-  return tabPool.slots;
+
+  return { closed, kept: keepCount };
 }
 
-function resolveTabSeedUrl({ state, pages = [], activeIndex = null, context = {} }) {
-  const activePage = pages.find((page) => Number(page?.index) === Number(activeIndex)) || null;
-  const candidates = [
-    state?.lastListUrl,
-    context?.runtime?.currentTab?.url,
-    activePage?.url,
-    pages[0]?.url,
-    XHS_DISCOVER_URL,
-  ];
-  for (const candidate of candidates) {
-    const text = String(candidate || '').trim();
-    if (text) return text;
+/**
+ * 同步 tab pool 状态与实际浏览器
+ */
+async function syncTabPoolWithBrowser(profileId, context) {
+  const pool = ensureRuntimeTabPool(context);
+
+  // 获取实际浏览器中的页面
+  const pageList = await callAPI('page:list', { profileId });
+  const pages = extractPageList(pageList);
+  const activeIndex = extractActiveIndex(pageList);
+
+  // 如果页面数量超过限制，关闭多余的
+  if (pages.length > TAB_COUNT) {
+    await closeExcessTabs(profileId, TAB_COUNT, pages);
+
+    // 重新获取页面列表
+    const newList = await callAPI('page:list', { profileId });
+    pages.length = 0;
+    pages.push(...extractPageList(newList));
   }
-  return XHS_DISCOVER_URL;
+
+  // 重建 slots
+  const sortedPages = [...pages].sort((a, b) => Number(a.index) - Number(b.index));
+  pool.slots = sortedPages.slice(0, TAB_COUNT).map((page, idx) => ({
+    slotIndex: idx + 1,
+    tabRealIndex: Number(page.index),
+    url: String(page.url || ''),
+  }));
+  pool.count = pool.slots.length;
+
+  return { pages: sortedPages, activeIndex, pool };
+}
+
+/**
+ * 创建新的 tab
+ * 只使用 newTab API，确保在同一窗口内创建
+ */
+async function createNewTab(profileId, url) {
+  try {
+    await callAPI('newTab', { profileId, url: url || XHS_DISCOVER_URL });
+
+    // 等待新 tab 出现
+    for (let i = 0; i < 10; i++) {
+      await sleep(300);
+      const pageList = await callAPI('page:list', { profileId });
+      const pages = extractPageList(pageList);
+      if (pages.length > 0) {
+        // 找到最新创建的 tab
+        const sorted = [...pages].sort((a, b) => Number(b.index) - Number(a.index));
+        return sorted[0];
+      }
+    }
+    return null;
+  } catch (err) {
+    return null;
+  }
 }
 
 /**
  * 统一 Tab 状态管理
- * 原则：
- * 1. 只使用 Tab 模式（不混用 Page）
- * 2. 总 Tab 数 = 5（1 个基础搜索 + 4 个轮转）
- * 3. 每次操作前确保焦点在正确的 Tab 上
+ * 
+ * 状态机:
+ * 1. CHECKING: 检查当前 tab 数量
+ * 2. TOO_MANY: 关闭多余 tab
+ * 3. TOO_FEW: 创建新 tab
+ * 4. OK: 数量正确，同步状态
+ * 
+ * Tab 布局:
+ * - Tab 1: 搜索页/主页 (collect 遗留)
+ * - Tab 2-5: 轮转详情页
  */
 async function ensureTabPool({
   profileId,
   state,
   context,
-  tabCount = 5,  // 固定为 5 个 tab
+  tabCount = TAB_COUNT,
 }) {
   const pool = ensureRuntimeTabPool(context);
 
-  // 第一步：获取当前浏览器状态
-  let pageList = await callAPI('page:list', { profileId });
-  let pages = extractPageList(pageList);
-  let activeIndex = extractActiveIndex(pageList);
+  // 第一步：同步当前状态
+  const syncResult = await syncTabPoolWithBrowser(profileId, context);
+  let { pages, activeIndex } = syncResult;
 
-  // 第二步：同步 runtime tab pool
-  normalizeAndSyncSlots(pool, pages, activeIndex, tabCount);
-
-  // 第三步：如果 tab 数量不足，创建新 tab
+  // 第二步：如果 tab 数量不足，创建新 tab
   while (pool.slots.length < tabCount) {
-    const beforeIndexes = new Set(
-      pages.map((page) => Number(page?.index)).filter((index) => Number.isFinite(index)),
-    );
-    const seedUrl = resolveTabSeedUrl({ state, pages, activeIndex, context });
+    const seedUrl = pool.slots.length === 0
+      ? XHS_DISCOVER_URL
+      : (state?.lastListUrl || XHS_DISCOVER_URL);
 
-    // 使用 newTab 而不是 newPage，确保在同一窗口内创建
-    await callAPI('newTab', { profileId, url: seedUrl });
-
-    // 等待新 tab 创建完成
-    for (let poll = 0; poll < 10; poll += 1) {
-      if (poll > 0) await sleep(220);
-      pageList = await callAPI('page:list', { profileId });
-      pages = extractPageList(pageList);
-      activeIndex = extractActiveIndex(pageList);
-
-      const newTab = pages.find((page) => {
-        const index = Number(page?.index);
-        return Number.isFinite(index) && !beforeIndexes.has(index);
-      });
-
-      if (newTab) {
-        pool.slots.push({
-          slotIndex: pool.slots.length + 1,
-          tabRealIndex: Number(newTab.index),
-          url: String(newTab.url || ''),
-        });
-        break;
-      }
+    const newTab = await createNewTab(profileId, seedUrl);
+    if (!newTab) {
+      break;  // 创建失败，停止尝试
     }
+
+    // 重���同步
+    await syncTabPoolWithBrowser(profileId, context);
   }
 
-  // 第四步：确保焦点在第一个 tab（基础搜索页）
+  // 第三步：确保焦点在第一个 tab（搜索页）
   const firstTab = pool.slots[0];
   if (firstTab && activeIndex !== firstTab.tabRealIndex) {
     await callAPI('page:switch', { profileId, index: firstTab.tabRealIndex });
-    activeIndex = firstTab.tabRealIndex;
-    await sleep(300);  // 等待切换完成
+    await sleep(300);
   }
 
   pool.count = pool.slots.length;
+  pool.initializedAt = new Date().toISOString();
 
   return {
     ok: true,
     pool,
     pages,
-    activeIndex,
+    activeIndex: firstTab?.tabRealIndex || null,
   };
 }
 
+/**
+ * 确保 Tab Slot 准备好
+ */
 async function ensureTabSlotReady({
   profileId,
   state,
   context,
-  tabCount,
+  tabCount = TAB_COUNT,
   targetTabIndex,
 }) {
-  // 首先确保 tab pool 已初始化且焦点正确
+  // 首先确保 tab pool 已初始化
   const poolEnsured = await ensureTabPool({ profileId, state, context, tabCount });
   if (!poolEnsured.ok) return poolEnsured;
 
   const pool = ensureRuntimeTabPool(context);
-  let { pages, activeIndex } = poolEnsured;
-  normalizeAndSyncSlots(pool, pages, activeIndex, tabCount);
+  const targetSlot = pool.slots.find(s => s.slotIndex === targetTabIndex);
 
-  let createdTabs = 0;
-  while (pool.slots.length < targetTabIndex && pool.slots.length < tabCount) {
-    const beforeIndexes = new Set(
-      pages
-        .map((page) => Number(page?.index))
-        .filter((index) => Number.isFinite(index)),
-    );
-    const knownSlotIndexes = new Set(
-      pool.slots
-        .map((slot) => Number(slot?.tabRealIndex))
-        .filter((index) => Number.isFinite(index)),
-    );
-    const seedUrl = resolveTabSeedUrl({ state, pages, activeIndex, context });
-    // 使用 newTab 而不是 newPage
-    await callAPI('newTab', { profileId, url: seedUrl });
-
-    let discovered = null;
-    for (let poll = 0; poll < 10; poll += 1) {
-      if (poll > 0) await sleep(220);
-      pageList = await callAPI('page:list', { profileId });
-      pages = extractPageList(pageList);
-      activeIndex = extractActiveIndex(pageList);
-      discovered = pages.find((page) => {
-        const index = Number(page?.index);
-        if (!Number.isFinite(index)) return false;
-        return !beforeIndexes.has(index) && !knownSlotIndexes.has(index);
-      }) || null;
-      if (discovered) break;
-    }
-    if (!discovered) {
-      discovered = [...pages]
-        .filter((page) => {
-          const index = Number(page?.index);
-          return Number.isFinite(index) && !knownSlotIndexes.has(index);
-        })
-        .sort((a, b) => Number(b?.index || 0) - Number(a?.index || 0))[0] || null;
-    }
-    if (!discovered || !Number.isFinite(Number(discovered?.index))) {
-      break;
-    }
-    pool.slots.push({
-      slotIndex: pool.slots.length + 1,
-      tabRealIndex: Number(discovered.index),
-      url: String(discovered.url || ''),
-    });
-    createdTabs += 1;
-    pool.count = pool.slots.length;
-  }
-
-  normalizeAndSyncSlots(pool, pages, activeIndex, tabCount);
-  const targetSlot = getRuntimeTabSlot(context, targetTabIndex);
-  if (!targetSlot || !Number.isFinite(Number(targetSlot?.tabRealIndex))) {
+  if (!targetSlot) {
     return {
       ok: false,
-      code: 'TAB_POOL_SLOT_MISSING',
-      message: `tab slot ${targetTabIndex} is not initialized in runtime tab pool`,
-      data: {
-        tabIndex: targetTabIndex,
-        tabCount,
-        runtimeSlots: pool.slots.length,
-        createdTabs,
-      },
+      code: 'TAB_SLOT_NOT_FOUND',
+      message: `Tab slot ${targetTabIndex} not found`,
     };
   }
+
   return {
     ok: true,
     targetSlot,
-    pages,
-    activeIndex,
-    createdTabs,
+    activeIndex: poolEnsured.activeIndex,
   };
 }
 
+/**
+ * 切换到目标 Tab
+ */
 async function rotateToTargetTab({
   profileId,
   state,
   context,
-  tabCount,
+  tabCount = TAB_COUNT,
   targetTabIndex,
-  used,
-  limit,
-  reason = null,
 }) {
-  const minDelayMs = Math.max(0, Number(state?.tabSwitchDelayMinMs ?? 2000) || 2000);
-  const maxDelayMs = Math.max(minDelayMs, Number(state?.tabSwitchDelayMaxMs ?? 5000) || 5000);
-  const randomDelayMs = Math.floor(Math.random() * (maxDelayMs - minDelayMs + 1)) + minDelayMs;
   const ensured = await ensureTabSlotReady({
     profileId,
     state,
@@ -295,83 +250,103 @@ async function rotateToTargetTab({
     tabCount,
     targetTabIndex,
   });
+
   if (!ensured.ok) return ensured;
 
-  const { targetSlot, pages, activeIndex, createdTabs } = ensured;
+  const { targetSlot, activeIndex } = ensured;
   const targetIndex = Number(targetSlot.tabRealIndex);
-  const slot = pages.find((page) => Number(page?.index) === targetIndex) || null;
-  if (!slot) {
-    return {
-      ok: false,
-      code: 'TAB_POOL_SLOT_CLOSED',
-      message: `tab slot ${targetTabIndex} is no longer available`,
-      data: { tabIndex: targetTabIndex, targetIndex },
-    };
-  }
-  if (Number(activeIndex) !== targetIndex) {
+
+  // 如果不是当前激活的 tab，切换过去
+  if (activeIndex !== targetIndex) {
     await callAPI('page:switch', { profileId, index: targetIndex });
-    if (randomDelayMs > 0) {
-      await new Promise((resolve) => setTimeout(resolve, randomDelayMs));
-    }
+    await randomDelay(SWITCH_DELAY_MIN_MS, SWITCH_DELAY_MAX_MS);
   }
+
+  // 更新运行时状态
   if (context?.runtime && typeof context.runtime === 'object') {
     context.runtime.currentTab = {
       slotIndex: targetTabIndex,
       tabRealIndex: targetIndex,
-      url: String(slot.url || ''),
+      url: String(targetSlot.url || ''),
     };
   }
+
   return {
     ok: true,
     code: 'OPERATION_DONE',
-    message: 'tab switch done',
+    message: 'Tab switch done',
     data: {
       tabIndex: targetTabIndex,
-      used,
-      limit,
       targetIndex,
-      createdTabs,
-      ...(reason ? { reason } : {}),
     },
   };
 }
 
+/**
+ * 执行 Tab 切换（如果需要）
+ */
 export async function executeSwitchTabIfNeeded({ profileId, params = {}, context = {} }) {
   const state = getProfileState(profileId);
   const tabState = ensureTabState(state, {
-    tabCount: params.tabCount,
+    tabCount: params.tabCount || TAB_COUNT,
     commentBudget: params.commentBudget,
   });
-  state.tabSwitchDelayMinMs = Math.max(0, Number(params.tabSwitchDelayMinMs ?? 2000) || 2000);
-  state.tabSwitchDelayMaxMs = Math.max(state.tabSwitchDelayMinMs, Number(params.tabSwitchDelayMaxMs ?? 5000) || 5000);
+
   const current = getCurrentTabIndex(state, { tabCount: tabState.tabCount });
   const used = Number(tabState.used[current - 1] || 0);
   const limit = Math.max(0, Number(tabState.limit || 0));
-  if (Number(tabState.tabCount || 1) > 1 && shouldAdvanceAfterClose(state, { tabCount: tabState.tabCount, openByLinks: true }) === false) {
-    const next = advanceTab(state, { tabCount: tabState.tabCount, commentBudget: tabState.limit });
-    return rotateToTargetTab({
-      profileId,
-      state,
-      context,
-      tabCount: tabState.tabCount,
-      targetTabIndex: next.tabIndex,
-      used: next.used,
-      limit: next.limit,
-      reason: 'paused_slot_rotation',
-    });
-  }
+
+  // 检查是否需要切换 tab
   if (limit <= 0 || used < limit) {
-    return { ok: true, code: 'OPERATION_DONE', message: 'tab switch skipped', data: { tabIndex: current, used, limit } };
+    return {
+      ok: true,
+      code: 'OPERATION_DONE',
+      message: 'Tab switch skipped',
+      data: { tabIndex: current, used, limit }
+    };
   }
 
-  const next = advanceTab(state, { tabCount: tabState.tabCount, commentBudget: tabState.limit });
+  // 切换到下一个 tab
+  const next = advanceTab(state, {
+    tabCount: tabState.tabCount,
+    commentBudget: tabState.limit
+  });
+
   return rotateToTargetTab({
     profileId,
     state,
     context,
     tabCount: tabState.tabCount,
     targetTabIndex: next.tabIndex,
-    used: next.used,
-    limit: next.limit,
   });
 }
+
+/**
+ * 清理 Tab Pool（用于任务结束）
+ */
+export async function cleanupTabPool({ profileId, context }) {
+  const pool = ensureRuntimeTabPool(context);
+
+  // 关闭除第一个外的所有 tab
+  if (pool.slots.length > 1) {
+    const toClose = pool.slots.slice(1);
+    for (const slot of toClose) {
+      try {
+        await callAPI('page:close', { profileId, index: slot.tabRealIndex });
+        await sleep(200);
+      } catch (err) {
+        // 忽略错误
+      }
+    }
+  }
+
+  // 重置状态
+  pool.slots = pool.slots.slice(0, 1);
+  pool.count = pool.slots.length;
+  pool.cursor = 0;
+
+  return { ok: true, message: 'Tab pool cleaned' };
+}
+
+// 导出 ensureTabPool 供其他模块使用
+export { ensureTabPool, ensureTabSlotReady, rotateToTargetTab, TAB_COUNT };
