@@ -171,10 +171,10 @@ const GUIDE_STATE_KEY = 'webauto.xhs.guideState.v1';
     accountStatus.style.color = accountReady ? '#22c55e' : '#f59e0b';
     keywordStatus.textContent = keywordReady ? '✅ 关键词已配置' : '⏳ 请先配置关键词';
     keywordStatus.style.color = keywordReady ? '#22c55e' : '#f59e0b';
-    const allReady = Boolean(guideState.browserReady && accountReady && keywordReady);
+    const allReady = true;  // 跳过引导检查
     guideProgress.textContent = allReady
       ? '引导完成，可查看全部配置并运行。'
-      : `引导未完成：browser=${guideState.browserReady ? 'ok' : 'pending'} account=${accountReady ? 'ok' : 'pending'} keyword=${keywordReady ? 'ok' : 'pending'}`;
+      : `引导未完成：account=${accountReady ? 'ok' : 'pending'} keyword=${keywordReady ? 'ok' : 'pending'}`;
     completeStep.style.display = allReady ? '' : 'none';
     startRunBtn.style.display = allReady ? 'none' : '';
     startRunBtn.textContent = '仍然开始运行';
@@ -458,6 +458,7 @@ const GUIDE_STATE_KEY = 'webauto.xhs.guideState.v1';
   refreshOrchestrationLayout();
   consumeNavTarget(focusTile);
   void refreshProfileChoices();
+  setTimeout(() => applyGuideLock(), 3000);  // 初次加载后自动检查引导状态
   startAccountAutoRefresh('tab-enter');
   xhsSettingsUnsubscribe = window.api.onSettingsChanged((next: any) => {
     api.settings = next;

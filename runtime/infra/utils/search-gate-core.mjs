@@ -32,6 +32,7 @@ function ensureDetailQueueState(state, queueKey) {
       consumerByKey: new Map(),
       completed: new Map(),
       skipped: new Map(),
+      seen: new Map(),
       updatedAt: null,
       initializedAt: null,
     });
@@ -130,6 +131,7 @@ export function initDetailLinkQueue(state, body = {}, now = Date.now()) {
   queue.consumerByKey = new Map();
   queue.completed = new Map();
   queue.skipped = new Map();
+  queue.seen = new Map();
   queue.initializedAt = new Date(now).toISOString();
   queue.updatedAt = queue.initializedAt;
   return buildDetailQueueResponse(queue, {
@@ -180,6 +182,8 @@ export function claimDetailLink(state, body = {}, now = Date.now()) {
     if (!entry?.link) continue;
     if (queue.completed.has(nextKey)) continue;
     if (queue.skipped.has(nextKey)) continue;
+    // STRICT GLOBAL DEDUP: never reclaim if already seen once
+    if (queue.seen.has(nextKey)) continue;
     const owner = String(queue.consumerByKey.get(nextKey) || '').trim();
     if (owner && owner !== consumerId) continue;
 
@@ -194,6 +198,11 @@ export function claimDetailLink(state, body = {}, now = Date.now()) {
       queue.activeByConsumer.set(consumerId, active);
       queue.consumerByKey.set(nextKey, consumerId);
     }
+    // Mark as seen immediately on first claim to prevent reclaims
+    queue.seen.set(nextKey, {
+      consumerId,
+      claimedAt: new Date(now).toISOString(),
+    });
     queue.updatedAt = claimedAt;
     return buildDetailQueueResponse(queue, {
       action: 'claim',
@@ -298,6 +307,7 @@ export function clearDetailLinkQueue(state, body = {}, now = Date.now()) {
   queue.consumerByKey = new Map();
   queue.completed = new Map();
   queue.skipped = new Map();
+  queue.seen = new Map();
   queue.updatedAt = new Date(now).toISOString();
   return buildDetailQueueResponse(queue, {
     action: 'clear',

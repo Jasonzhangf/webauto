@@ -28,7 +28,7 @@ export function buildXhsLayout(opts: BuildLayoutOptions) {
   const maxNotesInput = makeNumberInput('100', '1');
   const dryRunCheckbox = makeCheckbox(true, 'xh-dry-run');
   const protocolModeCheckbox = makeCheckbox(true, 'xh-protocol-mode');
-  const headlessCheckbox = makeCheckbox(true, 'xh-headless');
+  const headlessCheckbox = makeCheckbox(false, 'xh-headless');
   const modeHint = createEl('div', { style: 'margin-bottom:8px; color:#64748b; font-size:12px;' }, [
     '完整编排推荐：先 Phase1 启动，再 Phase2 采集链接，最后 Unified 采集评论/点赞。',
   ]);

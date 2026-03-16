@@ -280,7 +280,12 @@ export async function closeDetailToSearch(profileId, pushTrace = null) {
   if (typeof pushTrace === 'function') {
     pushTrace({ kind: 'key', stage: 'close_detail', key: 'Escape' });
   }
-  await sleep(300);
+  // Anchor wait: wait for detail to close after Escape
+  for (let i = 0; i < 8; i += 1) {
+    const escVisible = await isDetailVisible(profileId);
+    if (!escVisible?.detailVisible) return { ok: true, method: 'esc' };
+    await sleep(120);
+  }
   const escVisible = await isDetailVisible(profileId);
   if (!escVisible?.detailVisible) return { ok: true, method: 'esc' };
 
@@ -291,7 +296,12 @@ export async function closeDetailToSearch(profileId, pushTrace = null) {
   if (typeof pushTrace === 'function') {
     pushTrace({ kind: 'click', stage: 'close_detail', selector: closeTarget.selector || null });
   }
-  await sleep(300);
+  // Anchor wait: wait for detail to close after click
+  for (let i = 0; i < 8; i += 1) {
+    const visible = await isDetailVisible(profileId);
+    if (!visible?.detailVisible) return { ok: true, method: 'x' };
+    await sleep(120);
+  }
   const visible = await isDetailVisible(profileId);
   return { ok: !visible?.detailVisible, method: 'x' };
 }

@@ -592,7 +592,6 @@ export async function executeSubmitSearchOperation({ profileId, params = {}, con
     };
 
     await triggerSubmitOnce(1);
-    await sleepRandomImpl(settleMinMs, settleMaxMs, pushTrace, 'submit_after_trigger');
     const readyResult = await waitSearchReadyOnce(1);
     if (readyResult.guardResult) return readyResult.guardResult;
     if (!readyResult.ready) {
@@ -600,7 +599,6 @@ export async function executeSubmitSearchOperation({ profileId, params = {}, con
         const guardBeforeRetry = await assertNoGuard(`submit_search_before_retry_${retry}`);
         if (guardBeforeRetry) return guardBeforeRetry;
         await triggerSubmitOnce(retry);
-        await sleepRandomImpl(settleMinMs, settleMaxMs, pushTrace, 'submit_retry_settle');
         const retryResult = await waitSearchReadyOnce(retry);
         if (retryResult.guardResult) return retryResult.guardResult;
         if (retryResult.ready) {
@@ -739,12 +737,18 @@ export async function executeCollectLinksOperation({ profileId, params = {}, con
 
   const executeScroll = async () => {
     if (state.collectScrollRollbackNeeded) {
+      const before = await readSearchViewportReady(profileId).catch(() => null);
       await pressKey(profileId, 'PageUp');
-      await sleep(300);
+      await waitSearchReadyOnce(1);
+      const after = await readSearchViewportReady(profileId).catch(() => null);
       state.collectScrollRollbackNeeded = false;
+      return { before, after };
     }
+    const before = await readSearchViewportReady(profileId).catch(() => null);
     await pressKey(profileId, 'PageDown');
-    await sleep(400);
+    await waitSearchReadyOnce(1);
+    const after = await readSearchViewportReady(profileId).catch(() => null);
+    return { before, after };
   };
   const seedProgress = () => { if (!lastProgressAt()) markProgress(); };
   seedProgress();
@@ -828,22 +832,28 @@ export async function executeCollectLinksOperation({ profileId, params = {}, con
           if (state.collectCount >= maxNotes) {
             continue;
           }
+       }
+       }
+     }
+   }
+   if (anchorSnapshot.visibleCount === 0) {
+     await pressKey(profileId, 'PageDown');
+      // Anchor wait: wait for search anchors to appear after PageDown
+      for (let i = 0; i < 6; i += 1) {
+        const retried = await readSearchAnchors(profileId, {
+          listSelector: selectorsMeta.listSelector,
+          anchorSelector: selectorsMeta.anchorSelector,
+          selectorsMeta: selectorsMeta.selectors,
+        });
+        if (retried.visibleCount > 0) {
+          anchorSnapshot = retried;
+          state.collectAnchorsSample = normalizeAnchorsSample(await readAnchorsSample(profileId));
+          break;
         }
-        }
+        await sleep(120);
       }
-    }
-    if (anchorSnapshot.visibleCount === 0) {
-      await pressKey(profileId, 'PageDown');
-      await sleep(400);
-      const retried = await readSearchAnchors(profileId, {
-        listSelector: selectorsMeta.listSelector,
-        anchorSelector: selectorsMeta.anchorSelector,
-        selectorsMeta: selectorsMeta.selectors,
-      });
-      anchorSnapshot = retried;
-      state.collectAnchorsSample = normalizeAnchorsSample(await readAnchorsSample(profileId));
-    }
-    if (anchorSnapshot.visibleCount === 0 && anchorSnapshot.containerVisible === false) {
+   }
+   if (anchorSnapshot.visibleCount === 0 && anchorSnapshot.containerVisible === false) {
       state.collectAnchorEmptyRounds = (state.collectAnchorEmptyRounds || 0) + 1;
     } else {
       state.collectAnchorEmptyRounds = 0;
@@ -902,29 +912,34 @@ export async function executeCollectLinksOperation({ profileId, params = {}, con
         lastUrl,
         duplicateRounds: state.collectDuplicateOnlyRounds,
         anchorsSample: state.collectAnchorsSample,
-      };
-      throw error;
+     };
+     throw error;
+   }
+   // Scroll with rollback check
+   const beforeScroll = await readListScrollInfo();
+   await pressKey(profileId, 'PageDown');
+    // Anchor wait: wait for scroll to move after PageDown
+    let moved = false;
+    for (let i = 0; i < 6; i += 1) {
+      const afterScroll = await readListScrollInfo();
+      moved = await checkScrollMove(beforeScroll, afterScroll);
+      if (moved) break;
+      await sleep(120);
     }
-    // Scroll with rollback check
-    const beforeScroll = await readListScrollInfo();
-    await pressKey(profileId, 'PageDown');
-    await sleep(400);
-    const afterScroll = await readListScrollInfo();
-    const moved = await checkScrollMove(beforeScroll, afterScroll);
-    if (!moved) {
-      if (state.collectScrollRollbackNeeded) {
-        markScrollStuck();
-        state.collectScrollRollbackNeeded = false;
-      } else {
-        state.collectScrollRollbackNeeded = true;
-        resetScrollStuck();
-      }
-    } else {
-      resetScrollStuck();
-      state.collectScrollRollbackNeeded = false;
-    }
-    if (state.collectScrollStuckRounds >= maxScrollStuckRounds) {
-      const lastUrl = await readLocation(profileId, { timeoutMs: 3000 });      throw buildCollectScrollStuckError({
+   if (!moved) {
+     if (state.collectScrollRollbackNeeded) {
+       markScrollStuck();
+       state.collectScrollRollbackNeeded = false;
+     } else {
+       state.collectScrollRollbackNeeded = true;
+       resetScrollStuck();
+     }
+   } else {
+     resetScrollStuck();
+     state.collectScrollRollbackNeeded = false;
+   }
+   if (state.collectScrollStuckRounds >= maxScrollStuckRounds) {
+     const lastUrl = await readLocation(profileId, { timeoutMs: 3000 });      throw buildCollectScrollStuckError({
         stage: 'collect_links',
         expected: maxNotes,
         actual: state.collectPersistedCount,

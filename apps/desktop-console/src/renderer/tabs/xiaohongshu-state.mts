@@ -63,7 +63,7 @@ export function getDefaultConfig(): XhsConfig {
     
     dryRun: true,
     protocolMode: true,
-    headless: true,
+    headless: false,
     
     doHomepage: true,
     doImages: false,
