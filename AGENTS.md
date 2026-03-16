@@ -170,3 +170,52 @@ Windows 优先 `pwsh` / `powershell`。
 
 调试与诊断流程已迁移到文档：
 - `docs/arch/webauto-debugging.md`
+
+## 锚点驱动的超时与验证原则（强制）
+
+### 核心设计原则
+
+**超时 = 最长等待时间，不是固定等待时间**
+- 超时是对"等待锚点出现"的最大时间限制
+- 锚点出现应立即返回成功，不等超时到期
+- 超时时间内锚点未出现才失败
+
+**容器锚点驱动**
+- 所有操作以容器锚点为目标
+- 超时和进度都看容器状态
+- 一个容器不够就看多个容器
+- 登录成功 = 登录容器锚点存在（不等 evaluate 完成）
+
+### 错误示例（禁止）
+
+```javascript
+// 错误：固定等待
+await operation();
+await sleep(30000);  // 无脑等待30秒
+const result = await validatePage();
+```
+
+### 正确示例
+
+```javascript
+// 正确：锚点轮询
+const success = await waitForAnchor({
+  selectors: ['.feeds-page', '.note-item'],
+  timeoutMs: 30000,  // 最长等30秒
+  intervalMs: 500,   // 每500ms检查一次
+});
+```
+
+### 验证策略要求
+
+1. **优先容器 selector 检查**（而非 evaluate）
+2. **使用轮询机制**（而非固定等待）
+3. **超时是最大等待时间**（不是强制等待）
+4. **锚点出现立即返回**（不等待超时）
+
+### 已知反模式
+
+**Post validation 卡住**：
+- 禁止在 validation 中调用无超时保护的 evaluate
+- `goto_home` post validation 应检查容器锚点，不等 DOM snapshot
+

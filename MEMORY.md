@@ -5019,3 +5019,88 @@ Tags: webauto, xhs, autoscript, startup-trigger, dependency-chain, runtime-sched
 需要进一步调查 `ensure_tab_pool` 的执行时间问题。
 
 Tags: webauto, xhs, autoscript, startup-trigger, ensure_tab_pool, tab-pool-timeout
+
+## 锚点驱动的超时与验证机制
+
+### 核心原则：容器锚点驱动
+
+**超时的正确语义**：
+- 超时 = 最长等待时间（最长等多久）
+- 不是固定等待时间
+- 锚点出现立即返回成功
+- 超时时间内锚点未出现才失败
+
+**锚点驱动流程**：
+```
+操作执行 → 轮询容器锚点 → 锚点存在=成功 | 超时=失败
+```
+
+**错误做法**：
+```
+操作执行 → 固定等待（如 sleep(30000)）→ evaluate 检查状态
+```
+
+### 登录锚点判定
+
+**启动成功判定规则**：
+- 登录容器锚点存在 = 成功（如 `.feeds-page`, `.note-item`）
+- 不需要等待 evaluate 完成
+- 不需要等待固定时间
+
+**示例**：
+```javascript
+// 错误：固定等待
+await operation();
+await sleep(30000);
+const result = await validatePage();  // evaluate 检查
+
+// 正确：锚点轮询
+const success = await waitForAnchor({
+  selectors: ['.feeds-page', '.note-item'],
+  timeoutMs: 30000,  // 最长等30秒
+  intervalMs: 500,   // 每500ms检查一次
+});
+// 锚点出现立即返回，超时才失败
+```
+
+### 容器锚点设计
+
+**所有操作以容器为锚点**：
+- 超时和进度都看容器状态
+- 一个容器不够就看多个容器
+- 用锚点做目标
+
+**验证策略**：
+1. **优先使用容器锚点**（selector 检查）
+2. **避免 evaluate 调用**（除非必要）
+3. **使用轮询机制**（而非固定等待）
+4. **超时是最大等待时间**（不是强制等待）
+
+### 已知错误示例
+
+**`goto_home` post validation 卡住**：
+- 问题：调用 `detectCheckpoint()` → `getDomSnapshot()` → `evaluate()`
+- 卡住原因：evaluate 调用没有超时保护
+- 正确做法：检查容器锚点（`.feeds-page`, `.note-item`），不等 evaluate
+
+**正确做法**：
+```javascript
+// Post validation 只检查容器
+const snapshot = await getDomSnapshot();  // 如有必要才调用
+const anchors = buildSelectorCheck(snapshot, ['.feeds-page', '.note-item']);
+if (anchors.length > 0) {
+  return { ok: true };  // 锚点存在，立即成功
+}
+// 超时机制在外层轮询，不是在这里等
+```
+
+### 实施要点
+
+1. **移除不必要的 evaluate 调用**
+2. **使用容器 selector 轮询**
+3. **设置合理的最大等待时间**
+4. **锚点出现立即返回，不等待**
+
+时间：2026-03-16 12:15 CST  
+Tags: timeout, anchor, container, validation, design-pattern
+
