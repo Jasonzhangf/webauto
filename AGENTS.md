@@ -409,3 +409,168 @@ const success = await waitForAnchor({
     - 剩余循环: N轮
     - 下次巡检: 时间
 ```
+
+---
+
+## 🚨 问题处理标准操作（强制）
+
+**遇到任何问题时，立即执行以下流程，不要询问用户意见**：
+
+### 标准流程
+```
+检查日志 → 检查快照/截图 → 现场勘验 → 证据分析 → 直接修复 → 报告结果
+```
+
+### 检查清单
+
+#### 1. 日志检查
+```bash
+# 任务事件日志
+tail -200 ~/.webauto/state/<runId>.events.jsonl
+
+# 桌面日志
+tail -200 ~/.webauto/logs/desktop-lifecycle.jsonl
+
+# 测试日志
+tail -100 /tmp/xhs-test.log
+```
+
+#### 2. 快照/截图检查
+```bash
+# 最新截图
+ls -lt ~/.webauto/download/xiaohongshu/debug/<keyword>/diagnostics/
+
+# 诊断数据
+cat ~/.webauto/download/xiaohongshu/debug/<keyword>/diagnostics/*.json | jq .
+```
+
+#### 3. 现场勘验
+```bash
+# 进程状态
+ps aux | grep -E "camoufox|webauto" | grep -v grep
+
+# Tab 数量
+ps aux | grep "plugin-container.*tab" | grep -v grep | wc -l
+
+# 服务健康
+curl http://127.0.0.1:7701/health
+curl http://127.0.0.1:7704/health
+```
+
+#### 4. 证据分析
+- 预期状态 vs 实际状态
+- 异常操作定位
+- 根因确定
+
+#### 5. 直接修复
+- 不要等待确认
+- 直接修改代码/配置
+- 重启任务验证
+
+### 禁止行为
+- ❌ 询问用户"是否继续"
+- ❌ 询问用户"怎么办"
+- ❌ 只报告不行动
+- ❌ 等待用户介入
+
+### 强制行为
+- ✅ 发现问题立即行动
+- ✅ 先修复后报告
+- ✅ 提供证据（日志/截图/命令输出）
+- ✅ 验证修复效果
+
+---
+
+## 🚨 问题处理标准操作（强制）
+
+**遇到任何问题时，立即执行以下完整流程，不要询问用户意见**：
+
+### 完整流程
+```
+检查日志 → 检查快照/截图 → 现场勘验 → 证据分析 → 定位根因 → 实施修复 → 验证效果
+```
+
+### 关键原则
+1. **不要只报告** - 发现问题必须行动
+2. **不要只定位** - 定位根因后必须修复
+3. **不要只修复** - 修复完成后必须验证
+4. **不要等待确认** - 直接执行修复和验证
+
+### 检查清单
+
+#### 1. 日志检查
+```bash
+# 任务事件日志
+tail -200 ~/.webauto/state/<runId>.events.jsonl
+
+# 桌面日志
+tail -200 ~/.webauto/logs/desktop-lifecycle.jsonl
+
+# 测试日志
+tail -100 /tmp/xhs-test.log
+```
+
+#### 2. 快照/截图检查
+```bash
+# 最新截图
+ls -lt ~/.webauto/download/xiaohongshu/debug/<keyword>/diagnostics/
+
+# 诊断数据
+cat ~/.webauto/download/xiaohongshu/debug/<keyword>/diagnostics/*.json | jq .
+```
+
+#### 3. 现场勘验
+```bash
+# 进程状态
+ps aux | grep -E "camoufox|webauto" | grep -v grep
+
+# Tab 数量
+ps aux | grep "plugin-container.*tab" | grep -v grep | wc -l
+
+# 服务健康
+curl http://127.0.0.1:7701/health
+curl http://127.0.0.1:7704/health
+```
+
+#### 4. 证据分析
+- 预期状态 vs 实际状态
+- 异常操作定位
+- 根因确定
+
+#### 5. 定位根因
+- 找到具体的代码/配置问题
+- 分析为什么会出现这个问题
+- 确定修复方案
+
+#### 6. 实施修复（必须执行）
+- 修改代码/配置
+- 重启任务
+- **禁止只定位不修复**
+
+#### 7. 验证效果（必须执行）
+- 确认问题已解决
+- 任务正常运行
+- 提供验证证据
+- **禁止只修复不验证**
+
+### 禁止行为
+- ❌ 询问用户"是否继续"
+- ❌ 询问用户"怎么办"
+- ❌ 只报告不行动
+- ❌ 只定位不修复
+- ❌ 只修复不验证
+- ❌ 等待用户介入
+
+### 强制行为
+- ✅ 发现问题立即行动
+- ✅ 定位后必须修复
+- ✅ 修复后必须验证
+- ✅ 提供完整证据链
+- ✅ 验证通过才报告
+
+### 证据链要求
+报告时必须提供：
+1. 问题日志片段
+2. 根因分析
+3. 修复内容
+4. 验证结果（命令输出/截图）

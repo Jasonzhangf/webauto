@@ -79,14 +79,14 @@ export function buildXhsSearchOperations(options) {
       id: 'fill_keyword',
       enabled: !detailLinksStartup,
       action: 'type',
-      params: { selector: '#search-input', text: keyword },
+      params: { selector: '#search-input, input.search-input', text: keyword },
       trigger: 'startup',
       dependsOn: ['wait_search_permit'],
       once: true,
       validation: {
         mode: 'both',
         pre: { page: { hostIncludes: ['xiaohongshu.com'], checkpointIn: ['home_ready', 'search_ready'] } },
-        post: { container: { selector: '#search-input', mustExist: true, minCount: 1 } },
+        post: { container: { selector: '#search-input, input.search-input', mustExist: true, minCount: 1 } },
       },
       checkpoint: {
         containerId: 'xiaohongshu_home.search_input',
