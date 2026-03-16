@@ -117,11 +117,16 @@ export async function applyNearFullWindow(profileId, options = {}) {
     for (let i = 0; i < attempts; i += 1) {
       const measured = await probeWindowMetrics(id).catch(() => ({}));
       targetViewport = computeTargetViewportFromWindowMetrics(measured);
-      await callBrowserApi('page:setViewport', {
-        profileId: id,
-        width: targetViewport.width,
-        height: targetViewport.height,
-      });
+      try {
+        await callBrowserApi('page:setViewport', {
+          profileId: id,
+          width: targetViewport.width,
+          height: targetViewport.height,
+        }, { timeoutMs: 30000 }); // 30秒超时
+      } catch (err) {
+        // page:setViewport 超时时不影响整体流程
+        console.warn('page:setViewport timeout or error:', err?.message || String(err));
+      }
       if (i + 1 < attempts) {
         await sleep(Math.max(80, toNumber(options.settleMs, 180)));
       }
@@ -173,12 +178,9 @@ export async function ensureSessionInitialized(profileId, options = {}) {
   if (headless) {
     startArgs.push('--headless');
   } else {
-    startArgs.push(
-      '--width',
-      String(startWindow.width),
-      '--height',
-      String(startWindow.height),
-    );
+    startArgs.push('--no-headless');
+    startArgs.push('--width', String(startWindow.width));
+    startArgs.push('--height', String(startWindow.height));
   }
   if (url) startArgs.push('--url', url);
   const startRet = runCamo(startArgs, {

@@ -176,7 +176,14 @@ export async function runUnified(argv, overrides = {}) {
       skipped: services.searchGate.skipped === true,
       reason: services.searchGate.reason || null,
     }));
-    await Promise.all(profiles.map((profileId) => ensureProfileSession(profileId, { headless })));
+    // 确保所有 profile 的会话都已启动（headful 模式）
+  const sessionResults = await Promise.all(
+    profiles.map((profileId) => ensureProfileSession(profileId, { headless }))
+  );
+  const failedProfiles = profiles.filter((_, i) => !sessionResults[i]);
+  if (failedProfiles.length > 0) {
+    throw new Error(`Failed to initialize sessions for profiles: ${failedProfiles.join(', ')}`);
+  }
   }
   const planPath = writeMerged
     ? path.join(mergedDir, 'plan.json')

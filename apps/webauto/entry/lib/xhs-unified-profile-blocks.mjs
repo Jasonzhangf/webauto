@@ -106,6 +106,11 @@ export async function ensureProfileSession(profileId, options = {}) {
 
 export async function runProfile(spec, argv, baseOverrides = {}) {
   const profileId = spec.profileId;
+  const headless = parseBool(argv.headless, false);
+  const sessionOk = await ensureProfileSession(profileId, { headless });
+  if (!sessionOk) {
+    throw new Error(`No active session for profile: ${profileId}`);
+  }
   const busEnabled = parseBool(argv['bus-events'], false) || process.env.WEBAUTO_BUS_EVENTS === '1';
   const busPublishable = new Set([
     'xhs.unified.start',

@@ -208,6 +208,9 @@ async function rotateToTargetTab({
   limit,
   reason = null,
 }) {
+  const minDelayMs = Math.max(0, Number(state?.tabSwitchDelayMinMs ?? 2000) || 2000);
+  const maxDelayMs = Math.max(minDelayMs, Number(state?.tabSwitchDelayMaxMs ?? 5000) || 5000);
+  const randomDelayMs = Math.floor(Math.random() * (maxDelayMs - minDelayMs + 1)) + minDelayMs;
   const ensured = await ensureTabSlotReady({
     profileId,
     state,
@@ -230,6 +233,9 @@ async function rotateToTargetTab({
   }
   if (Number(activeIndex) !== targetIndex) {
     await callAPI('page:switch', { profileId, index: targetIndex });
+    if (randomDelayMs > 0) {
+      await new Promise((resolve) => setTimeout(resolve, randomDelayMs));
+    }
   }
   if (context?.runtime && typeof context.runtime === 'object') {
     context.runtime.currentTab = {
@@ -259,6 +265,8 @@ export async function executeSwitchTabIfNeeded({ profileId, params = {}, context
     tabCount: params.tabCount,
     commentBudget: params.commentBudget,
   });
+  state.tabSwitchDelayMinMs = Math.max(0, Number(params.tabSwitchDelayMinMs ?? 2000) || 2000);
+  state.tabSwitchDelayMaxMs = Math.max(state.tabSwitchDelayMinMs, Number(params.tabSwitchDelayMaxMs ?? 5000) || 5000);
   const current = getCurrentTabIndex(state, { tabCount: tabState.tabCount });
   const used = Number(tabState.used[current - 1] || 0);
   const limit = Math.max(0, Number(tabState.limit || 0));
