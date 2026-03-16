@@ -5104,3 +5104,173 @@ if (anchors.length > 0) {
 时间：2026-03-16 12:15 CST  
 Tags: timeout, anchor, container, validation, design-pattern
 
+
+---
+
+## 锚点驱动的等待重构（2026-03-16）
+
+**核心原则**：
+- Timeout = 最大等待时间（不是固定 sleep）
+- 锚点出现立即成功（提前退出）
+- 所有操作使用容器锚点
+
+**实施变更**：
+
+### detail-ops.mjs - closeDetailToSearch
+- 移除固定 `await sleep(300)`
+- 改为锚点轮询：最多 8 次，每次间隔 120ms
+- 使用 `isDetailVisible(profileId)` 检查锚点
+
+### detail-flow-ops.mjs - open_detail
+- 移除 `closeDetailToSearch` 后的 `await sleepImpl(300)`
+- 复用 `closeDetailToSearch` 的锚点等待逻辑
+
+### collect-ops.mjs - 搜索锚点检测
+- 移除 PageDown 后的 `await sleep(400)`
+- 改为锚点轮询：最多 6 次，每次间隔 120ms
+- 使用 `readSearchAnchors` 检查锚点
+
+### collect-ops.mjs - 滚动移动检测
+- 移除 PageDown 后的 `await sleep(400)`
+- 改为锚点轮询：最多 6 次，每次间隔 120ms
+- 使用 `readListScrollInfo` + `checkScrollMove` 检测滚动
+
+**测试结果**：
+- 5 条链接测试成功（runId: 6bf49471-ee0b-4501-aa08-d136ea6ae801）
+- 200 条 deepseekAI 压力测试进行中（runId: 1d55e334-bc42-41e8-a183-d9f8d18b70c0）
+
+**保留的固定等待**（符合业务逻辑）：
+- waitForContainerReady：容器就绪轮询（带有 timeout）
+- search-gate-ops.mjs：流控 backoff（exponential backoff）
+- harvest-ops.mjs：评论区滚动延迟（符合用户行为）
+- tab-ops.mjs：新标签页发现轮询（220ms）
+
+---
+
+## UI精简工作（2026-03-16）
+
+### Tab配置精简
+**隐藏的Tab**（release态不暴露）：
+- scheduler（定时任务）- 完全移除
+- test-center（测试中心）- 完全移除
+- tasks（任务）- hidden: true
+- account-manager（账户管理）- hidden: true
+- settings（设置）- hidden: true
+- preflight（旧预处理）- hidden: true
+
+**保留的Tab**：
+- setup-wizard（初始化）
+- xiaohongshu（小红书）
+- dashboard（看板）
+- logs（日志）
+
+### 小红书Tab最小化设计
+**只保留两个核心功能**：
+
+1. **账号登录**：
+   - Profile选择
+   - 登录状态检查
+   - 二维码登录/手动登录
+
+2. **任务设置**：
+   - 关键字输入
+   - 目标数量（max-notes）
+   - 点赞开关（do-likes）
+   - 评论采集开关（do-comments）
+   - 启��/停止按钮
+   - 实时状态显示（progress、status）
+
+**移除的功能**：
+- 定时任务设置
+- 复杂引导流程
+- 多账号并行配置
+- 高级选项（throttle、note-interval、tab-count等）
+
+### 配置文件修改
+- 文件：`apps/desktop-console/src/renderer/tabs-config.mjs`
+- 修改：添加hidden属性，移除scheduler和test-center
+
+### 待完成
+1. 修改HTML渲染逻辑，根据hidden属性过滤Tab
+2. 精简小红书Tab的表单选项
+3. 移除定时任务相关的UI组件
+4. 添加当前任务的状态监控显示
+
+---
+
+## UI精简方案（2026-03-16 16:18:48 CST）
+
+### 背景
+用户要求精简小红书UI，只保留核心功能：账号登录 + 任务设置，移除复杂引导和高级配置。
+
+### 核心保留功能（Release态可见）
+
+**1. 账号登录区**：
+- Profile选择（下拉）
+- 登录状态显示
+- 启动浏览器按钮
+
+**2. 任务设置区**：
+- 关键字输入（必填）
+- 目标数量（max-notes，默认100）
+- 评论采集开关（do-comments，默认true）
+- 点赞开关（do-likes，默认false）
+- 启动/停止按钮
+- 实时进度显示
+
+### 隐藏功能（Release态不可见）
+
+**编排相关**（固定值）：
+- orchestrateModeSelect → unified-only
+- accountModeSelect → single
+- protocolModeCheckbox → false
+- headlessCheckbox → false
+- dryRunCheckbox → false
+
+**高级配置**：
+- envInput → prod
+- maxCommentsInput → 0（不限）
+- commentRoundsInput → 0（不限）
+- gateToggle、matchKeywordsInput、matchModeSelect、matchMinHitsInput
+
+**非核心功能**：
+- homepageToggle、imagesToggle（主页采集、图片下载）
+- replyToggle、replyTextInput（回复功能）
+- ocrToggle、ocrCommandInput（OCR功能）
+- opOrderInput（操作顺序）
+- likeRuleTypeSelect、likeRuleAInput、likeRuleBInput、maxLikesInput（点赞规则）
+
+**分片/多账号**：
+- shardProfilesBox、shardProfilesHint、shardResolvedHint
+
+**引导流程**：
+- guideCard、guideStepsGrid、browserStep、accountStep、keywordStep、completeStep
+
+### 已完成
+- ✅ Tab配置精简（tabs-config.mjs）
+  - 移除：scheduler、test-center
+  - 隐藏：tasks、account-manager、settings
+
+### 待执行
+1. 修改 layout-block.mts - 隐藏非核心配置项
+2. 修改 xiaohongshu.mts - 移除复杂引导流程
+3. 修改 run-flow.mts - 简化启动逻辑
+4. 测试Release构建
+
+### 实现策略
+混合使用环境变量控制 + 源码级隐藏：
+1. 在源码中添加条件渲染逻辑
+2. 通过环境变量控制显示/隐藏
+3. Release构建时移除hidden元素
+
+### 关键文件
+- apps/desktop-console/src/renderer/tabs-config.mjs
+- apps/desktop-console/src/renderer/tabs/xiaohongshu/layout-block.mts
+- apps/desktop-console/src/renderer/tabs/xiaohongshu.mts
+- apps/desktop-console/src/renderer/tabs/xiaohongshu/run-flow.mts
+
+### 当前压力测试状态
+- runId: 1d55e334-bc42-41e8-a183-d9f8d18b70c0
+- 进度：51/200（25.5%）
+- 巡检间隔：30分钟
+- 预计完成：约16:40 CST

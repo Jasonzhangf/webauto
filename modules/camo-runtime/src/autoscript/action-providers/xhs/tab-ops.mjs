@@ -113,6 +113,80 @@ function resolveTabSeedUrl({ state, pages = [], activeIndex = null, context = {}
   return XHS_DISCOVER_URL;
 }
 
+/**
+ * 统一 Tab 状态管理
+ * 原则：
+ * 1. 只使用 Tab 模式（不混用 Page）
+ * 2. 总 Tab 数 = 5（1 个基础搜索 + 4 个轮转）
+ * 3. 每次操作前确保焦点在正确的 Tab 上
+ */
+async function ensureTabPool({
+  profileId,
+  state,
+  context,
+  tabCount = 5,  // 固定为 5 个 tab
+}) {
+  const pool = ensureRuntimeTabPool(context);
+
+  // 第一步：获取当前浏览器状态
+  let pageList = await callAPI('page:list', { profileId });
+  let pages = extractPageList(pageList);
+  let activeIndex = extractActiveIndex(pageList);
+
+  // 第二步：同步 runtime tab pool
+  normalizeAndSyncSlots(pool, pages, activeIndex, tabCount);
+
+  // 第三步：如果 tab 数量不足，创建新 tab
+  while (pool.slots.length < tabCount) {
+    const beforeIndexes = new Set(
+      pages.map((page) => Number(page?.index)).filter((index) => Number.isFinite(index)),
+    );
+    const seedUrl = resolveTabSeedUrl({ state, pages, activeIndex, context });
+
+    // 使用 newTab 而不是 newPage，确保在同一窗口内创建
+    await callAPI('newTab', { profileId, url: seedUrl });
+
+    // 等待新 tab 创建完成
+    for (let poll = 0; poll < 10; poll += 1) {
+      if (poll > 0) await sleep(220);
+      pageList = await callAPI('page:list', { profileId });
+      pages = extractPageList(pageList);
+      activeIndex = extractActiveIndex(pageList);
+
+      const newTab = pages.find((page) => {
+        const index = Number(page?.index);
+        return Number.isFinite(index) && !beforeIndexes.has(index);
+      });
+
+      if (newTab) {
+        pool.slots.push({
+          slotIndex: pool.slots.length + 1,
+          tabRealIndex: Number(newTab.index),
+          url: String(newTab.url || ''),
+        });
+        break;
+      }
+    }
+  }
+
+  // 第四步：确保焦点在第一个 tab（基础搜索页）
+  const firstTab = pool.slots[0];
+  if (firstTab && activeIndex !== firstTab.tabRealIndex) {
+    await callAPI('page:switch', { profileId, index: firstTab.tabRealIndex });
+    activeIndex = firstTab.tabRealIndex;
+    await sleep(300);  // 等待切换完成
+  }
+
+  pool.count = pool.slots.length;
+
+  return {
+    ok: true,
+    pool,
+    pages,
+    activeIndex,
+  };
+}
+
 async function ensureTabSlotReady({
   profileId,
   state,
@@ -120,10 +194,12 @@ async function ensureTabSlotReady({
   tabCount,
   targetTabIndex,
 }) {
+  // 首先确保 tab pool 已初始化且焦点正确
+  const poolEnsured = await ensureTabPool({ profileId, state, context, tabCount });
+  if (!poolEnsured.ok) return poolEnsured;
+
   const pool = ensureRuntimeTabPool(context);
-  let pageList = await callAPI('page:list', { profileId });
-  let pages = extractPageList(pageList);
-  let activeIndex = extractActiveIndex(pageList);
+  let { pages, activeIndex } = poolEnsured;
   normalizeAndSyncSlots(pool, pages, activeIndex, tabCount);
 
   let createdTabs = 0;
@@ -139,7 +215,8 @@ async function ensureTabSlotReady({
         .filter((index) => Number.isFinite(index)),
     );
     const seedUrl = resolveTabSeedUrl({ state, pages, activeIndex, context });
-    await callAPI('newPage', { profileId, url: seedUrl });
+    // 使用 newTab 而不是 newPage
+    await callAPI('newTab', { profileId, url: seedUrl });
 
     let discovered = null;
     for (let poll = 0; poll < 10; poll += 1) {
