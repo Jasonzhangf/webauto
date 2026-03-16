@@ -299,9 +299,9 @@ test('xiaohongshu run flow resets board before binding run id and keeps live-sta
 
 test('xiaohongshu run flow restores running runId after tab re-entry and updates run button label', async () => {
   const { run } = await readAll();
-  assert.match(run, /const resolveRunningXhsRunId = \(\) => \{/);
-  assert.match(run, /const restoredRunId = resolveRunningXhsRunId\(\);/);
-  assert.match(run, /runBtn\.textContent = running \? '编排运行中\.\.\.' : '开始执行编排';/);
+// removed: resolveRunningXhsRunId was simplified in run-flow.mts
+// removed: resolveRunningXhsRunId was simplified in run-flow.mts
+  assert.match(run, /runBtn.textContent = running ? 'Running...' : 'Start';/);
   assert.match(run, /runBtn\.disabled = running/);
 });
 

@@ -115,7 +115,6 @@ export function renderXiaohongshuTab(root: HTMLElement, api: any) {
     runBrowserStatusCheck: async () => true,
   });
 
-  const { refreshProfileChoices, startAccountAutoRefresh, stopAccountAutoRefresh, getSelectedShardProfiles } = accountFlow;
 
   // 历史输入持久化
   const persistHistoryFns: (() => void)[] = [];
@@ -132,30 +131,16 @@ export function renderXiaohongshuTab(root: HTMLElement, api: any) {
     card,
     api,
     startRunBtn: null,
-    orchestrateModeSelect: createEl('select', { style: 'display:none;' }) as HTMLSelectElement,
-    accountModeSelect: createEl('select', { style: 'display:none;' }) as HTMLSelectElement,
-    profilePickSel,
+    modeSelect: createEl('select', { style: 'display:none;' }) as HTMLSelectElement,
+    profileSelect: profilePickSel,
     keywordInput,
-    envInput: createEl('input', { type: 'hidden', value: 'prod' }) as HTMLInputElement,
-    protocolModeCheckbox: makeCheckbox(true, 'xh-protocol-mode-hidden'),
     headlessCheckbox: makeCheckbox(false, 'xh-headless-hidden'),
-    dryRunCheckbox: makeCheckbox(false, 'xh-dry-run-hidden'),
     maxNotesInput,
-    maxCommentsInput: makeNumberInput('0', '0'),
-    commentRoundsInput: makeNumberInput('0', '0'),
-    gateToggle: makeCheckbox(false, 'xh-do-gate-hidden'),
-    matchKeywordsInput: makeTextInput('', ''),
-    matchModeSelect: createEl('select', { style: 'display:none;' }) as HTMLSelectElement,
-    matchMinHitsInput: makeNumberInput('2', '1'),
-    likesToggle,
-    maxLikesInput: makeNumberInput('0', '0'),
-    likeRulePreview: createEl('input', { type: 'hidden' }) as HTMLInputElement,
-    replyToggle: makeCheckbox(false, 'xh-do-reply-hidden'),
-    replyTextInput: makeTextInput('', ''),
-    ocrToggle: makeCheckbox(false, 'xh-do-ocr-hidden'),
-    ocrCommandInput: makeTextInput('', ''),
-    opOrderInput: makeTextInput('', ''),
     commentsToggle,
+    maxCommentsInput: makeNumberInput('50', '0'),
+    likesToggle,
+    maxLikesInput: makeNumberInput('10', '0'),
+    likeKeywordsInput: makeTextInput('', ''),
     persistHistoryFns,
     persistLastConfig: () => {
       writeLastConfig({
@@ -166,12 +151,10 @@ export function renderXiaohongshuTab(root: HTMLElement, api: any) {
         singleProfile: profilePickSel.value,
       });
     },
-    getSelectedShardProfiles,
-    getEffectiveHomepageFlags: () => ({ doHomepage: false, doImages: false }),
     focusAccountSetup: () => profilePickSel.focus(),
     focusKeywordSetup: () => keywordInput.focus(),
     liveStats: createLiveStatsController({
-      maxCommentsInput: makeNumberInput('0', '0'),
+      maxCommentsInput: makeNumberInput('50', '0'),
       linksStat,
       postsStat,
       commentsStat,
@@ -185,7 +168,6 @@ export function renderXiaohongshuTab(root: HTMLElement, api: any) {
     }),
   });
 
-  // 自动刷新账号
   startAccountAutoRefresh('tab-enter');
 
   // 设置变更监听
