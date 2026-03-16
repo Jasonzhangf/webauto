@@ -538,8 +538,8 @@ export async function executeSubmitSearchOperation({ profileId, params = {}, con
       throw new Error('SEARCH_INPUT_NOT_FOUND');
     }
 
-    await clickPointImpl(profileId, input.center, { steps: 3 });
-    pushTrace({ kind: 'click', stage: 'submit_search', target: 'search_input' });
+    // Skip click before type - clearAndType uses keyboard shortcuts (Ctrl+A/Cmd+A) which handle focus
+    pushTrace({ kind: 'skip_click', stage: 'submit_search', target: 'search_input', reason: 'keyboard_type_handles_focus' });
     await sleepRandomImpl(actionDelayMinMs, actionDelayMaxMs, pushTrace, 'submit_pre_type');
 
     if (keyword && String(input.value || '') !== keyword) {

@@ -1,116 +1,102 @@
 # HEARTBEAT.md - 小红书采集压力测试
 
-**Last Updated**: 2026-03-16 22:52 CST
-**Status**: ✅ 完成 - 5 条测试全部成功
+**Last Updated**: 2026-03-16 23:56 CST
+**Status**: ❌ 暂停 - submit_search click 超时问题
 
 ---
 
-## 🎯 当前任务目标
+## 🎯 当前任务
 
-### 主任务
-验证 Tab 池管理修复效果，完成小红书 `deepseekAI` 关键字 5 条测试
+200 条压力测试遇到新问题：`submit_search` 操作 click 超时
 
-### 验证重点
-1. **Tab 数量**: 严格限制为 5 个（1 搜索页 + 4 轮转详情页）
-2. **评论采集**: 所有帖子正常采集评论
-3. **Tab 切换**: 顺序切换，间隔 2-5 秒随机等待
-4. **终态**: 任务正常完成，无泄漏
+---
 
-### 运行参数
-```bash
-keyword: deepseekAI
-target: 5
-profile: xhs-qa-1
-do-comments: true
-do-likes: true
-like-keywords: "真牛"
-headless: false
+## 🔍 问题定位
+
+### 错误信息
+```
+mouse:click(retry) (attempt 2/2) timed out after 30000ms
+operation: submit_search
+runId: 0fd77d3d-b285-4e9c-b4b8-8cc83b26a7cb
 ```
 
-### 当前进度
-- runId: `f75962be-3beb-4916-8a5e-e8470cbb8b90`
-- 进度: **5/5** ✅ **完成**
-- 状态: **completed** ✅
-- 完成时间: 2026-03-16 21:59:24 CST
-- Tab 数量: **5 个** ✅ \(≤5\)
-- 评论总数: **5590 条** ✅
-- 状态: **完成**
+### DOM 状态（失败时）
+- `href`: "https://www.xiaohongshu.com/explore"
+- `searchVisible`: true ✅
+- `detailVisible`: false
+- `activeElement`: search-input ✅
+
+### 根因分析
+
+**问题**: `submit_search` 在 type 前先 click 搜索输入框以获取焦点
+
+**代码位置**: `collect-ops.mjs:550-557`
+```javascript
+await clickPointImpl(profileId, input.center, { steps: 3 });
+pushTrace({ kind: 'click', stage: 'submit_search', target: 'search_input' });
+await sleepRandomImpl(actionDelayMinMs, actionDelayMaxMs, pushTrace, 'submit_pre_type');
+
+if (keyword && String(input.value || '') !== keyword) {
+  await clearAndTypeImpl(profileId, keyword, Number(params.keyDelayMs ?? 65) || 65);
+```
+
+**为什么 click 超时**:
+- 搜索输入框���见但 click 操作响应慢或无响应
+- 30 秒超时后失败
+
+**解决方案**:
+1. `clearAndType` 已经使用键盘操作（Ctrl+A/Cmd+A + Backspace）
+2. 键盘操作可以获取焦点，不需要预先 click
+3. 移除 submit_search 中的 click 操作
 
 ---
 
-## ✅ 测试结果
+## 🔧 修复方案
 
-### 所有 5 个帖子采集完成
+### 修改文件
+`modules/camo-runtime/src/autoscript/action-providers/xhs/collect-ops.mjs`
 
-| 帖子 ID | 评论数 | 内容 | 点赞摘要 | 状态 |
-|---------|--------|------|----------|------|
-| 67bbf030000000002802bf61 | 299 | ✅ | ✅ | ✅ 完成 |
-| 690a05ca000000000700a69e | 43 | ✅ | ✅ | ✅ 完成 |
-| 698c59b6000000000b00a889 | 173 | ✅ | ✅ | ✅ 完成 |
-| 698def79000000000b008360 | 183 | ✅ | ✅ | ✅ 完成 |
-| 699e25e4000000002602fc76 | 52 | ✅ | ✅ | ✅ 完成 |
+### 修改内容
+移除 submit_search 中 type 前的 click 操作
 
-### 验证指标
+**Before**:
+```javascript
+await clickPointImpl(profileId, input.center, { steps: 3 });
+pushTrace({ kind: 'click', stage: 'submit_search', target: 'search_input' });
+await sleepRandomImpl(actionDelayMinMs, actionDelayMaxMs, pushTrace, 'submit_pre_type');
+```
 
-| 指标 | 目标 | 实际 | 状态 |
-|------|------|------|------|
-| Tab 数量 | ≤5 | 5 | ✅ 通过 |
-| 评论采集 | 全部 | 5590 条 | ✅ 通过 |
-| 任务完成 | completed | completed | ✅ 通过 |
-| 终态原因 | script_complete | script_complete | ✅ 通过 |
-| 内容文件 | 全部 | 5/5 | ✅ 通过 |
-| 评论文件 | 全部 | 5/5 | ✅ 通过 |
-| 点赞摘要 | 全部 | 5/5 | ✅ 通过 |
+**After**:
+```javascript
+// Skip click - clearAndType uses keyboard shortcuts (Ctrl+A/Cmd+A) which handle focus
+pushTrace({ kind: 'skip_click', stage: 'submit_search', target: 'search_input', reason: 'keyboard_type_handles_focus' });
+await sleepRandomImpl(actionDelayMinMs, actionDelayMaxMs, pushTrace, 'submit_pre_type');
+```
 
 ---
 
-## 🔧 修复验证
+## 📋 问题总结
 
-### 1. fill_keyword selector 修复 ✅
-- **问题**: 搜索输入框 selector 不匹配
-- **修复**: 扩展 selector 为 `#search-input, input.search-input`
-- **验证**: ✅ 成功，任务从 collect 到 detail 全流程正常运行
+### 已修复
+✅ fill_keyword 的 type 操作 click 超时（已修复，832e2c6e）
+✅ sync_window_viewport 卡住（已修复，重启 daemon）
 
-### 2. Tab 池管理修复 ✅
-- **问题**: 32 个 Tab 泄漏
-- **修复**: 重写 tab-ops.mjs，统一使用 newTab
-- **验证**: ✅ 成功，Tab 数量稳定在 5 个，无泄漏
+### 当前问题
+❌ submit_search 的 type 前置 click 超时
+- 原因：同样的 click 超时问题，但在不同位置
+- 方案：移除 click，依赖键盘操作
 
-### 3. 评论采集流程 ✅
-- 所有帖子正常采集评论
-- 评论落盘完整（comments.jsonl）
-- 无卡死/无异常终止
-
----
-
-## 📝 执行历史
-
-| 时间 | 事件 | 备注 |
-|------|------|------|
-| 22:52 | ✅ 任务完成 | 所有 5 个帖子采集完成 |
-| 21:58 | 第 3 次巡检 | 5/5 运行中，最后一个帖子采集中 |
-| 21:49 | fill_keyword 修复验证成功 | 任务正常运行 1/5 |
-| 21:22 | 定位 fill_keyword 卡住 | 准备修复 |
-| 20:52 | 第 2 次巡检 | Tab=4 个，接近目标 |
-| 20:31 | 任务启动 | Tab 池修复后首次验证 |
-| 20:15 | 代码提交 | fix\(tab-pool\): 修复 Tab 泄漏 |
-| 19:50 | 问题诊断 | 发现 32 个 Tab 泄漏 |
+### 模式
+所有对 input 元素的 type 操作都应该：
+1. **不**预先 click
+2. 直接使用键盘操作（Ctrl+A/Cmd+A + Backspace + type）
+3. 键盘操作会自动获取焦点
 
 ---
 
-## 🚦 下一步
+## ⏰ 下一步
 
-1. ✅ 5 条测试完成，验证通过
-2. 提交代码（HEARTBEAT.md 更新）
-3. 更新长期记忆
-4. 准备 200 条压力测试
-
----
-
-## 📦 成功标准 - 全部满足 ✅
-
-1. ✅ Tab 数量始终 ≤ 5 个
-2. ✅ 所有 5 个帖子处理完毕
-3. ✅ 评论正常落盘（每个帖子有 comments.jsonl）
-4. ✅ 任务终态为 completed
-5. ✅ 无内存泄漏/Tab 泄漏
+1. 修改 `collect-ops.mjs` 移除 submit_search 的 click
+2. 提交代码
+3. 重新���动 200 条测试
+4. 验证修复
