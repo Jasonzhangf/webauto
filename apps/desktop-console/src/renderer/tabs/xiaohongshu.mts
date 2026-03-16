@@ -1,519 +1,225 @@
 import { createEl } from '../ui-components.mjs';
 import {
-  LikeRuleDraft,
-  LikeRuleKind,
-  XHS_DEFAULT_BATCH_KEY,
-  attachTooltip,
   bindInputHistory,
-  bindSectionToggle,
-  likeRuleGuide,
   makeCheckbox,
   makeNumberInput,
   makeTextInput,
-  parseLikeRulesCsv,
   readLastConfig,
-  stringifyLikeRule,
   writeLastConfig,
 } from './xiaohongshu/helpers.mjs';
 import { createLiveStatsController } from './xiaohongshu/live-stats.mjs';
 import { createAccountFlowController } from './xiaohongshu/account-flow.mjs';
 import { createRunFlowController } from './xiaohongshu/run-flow.mjs';
 import { buildXhsLayout } from './xiaohongshu/layout-block.mjs';
-import { consumeNavTarget, runGuideBrowserCheck, runGuideBrowserRepair } from './xiaohongshu/guide-browser-check.mjs';
-let xhsCmdUnsubscribe: (() => void) | null = null, xhsSettingsUnsubscribe: (() => void) | null = null;
-let startupBrowserChecked = false;
-let startupBrowserCheckDone = false;
+
+let xhsCmdUnsubscribe: (() => void) | null = null;
+let xhsSettingsUnsubscribe: (() => void) | null = null;
+
 export function renderXiaohongshuTab(root: HTMLElement, api: any) {
   if (xhsCmdUnsubscribe) {
     xhsCmdUnsubscribe();
     xhsCmdUnsubscribe = null;
   }
- if (xhsSettingsUnsubscribe) {
-   xhsSettingsUnsubscribe();
-   xhsSettingsUnsubscribe = null;
- }
- root.innerHTML = '';
- const card = createEl('div', { className: 'card', style: 'padding:12px;' });
-  const onboardingCard = createEl('div', {
-    style: 'margin-bottom:0; border:1px dashed #2b67ff; border-radius:10px; padding:10px; background:#0d1a33;',
-  }) as HTMLDivElement;
-  const onboardingTitle = createEl('div', { style: 'font-weight:600; margin-bottom:4px; color:#dbeafe;' }, ['首次引导：先配置账号']);
-  const onboardingSummary = createEl('div', { className: 'muted', style: 'font-size:12px; margin-bottom:4px;' }, ['正在加载 profile...']) as HTMLDivElement;
-  const onboardingTips = createEl('div', { className: 'muted', style: 'font-size:12px; margin-bottom:8px;' }, [
-    '请先在预处理页创建 profile，并设置账号名（alias），这里会按“账号名 (profileId)”显示。',
-  ]) as HTMLDivElement;
-  const onboardingGotoPreflightBtn = createEl('button', { type: 'button', className: 'secondary' }, ['去预处理设置账号']) as HTMLButtonElement;
-  onboardingGotoPreflightBtn.onclick = () => { if (typeof api?.setActiveTab === 'function') api.setActiveTab('preflight'); };
-  onboardingCard.appendChild(onboardingTitle);
-  onboardingCard.appendChild(onboardingSummary);
-  onboardingCard.appendChild(onboardingTips);
-  onboardingCard.appendChild(createEl('div', { className: 'row', style: 'margin-bottom:0;' }, [onboardingGotoPreflightBtn]));
- const navStepHint = createEl('div', { className: 'muted', style: 'font-size:12px;' }, ['导航模式：先账号检查，再点赞设置，最后回到运行看板。']) as HTMLDivElement;
-const GUIDE_STATE_KEY = 'webauto.xhs.guideState.v1';
- const readGuideState = () => { try { const raw = window.localStorage.getItem(GUIDE_STATE_KEY); return raw ? JSON.parse(raw) : { browserReady: false, accountReady: false, keywordSet: false }; } catch { return { browserReady: false, accountReady: false, keywordSet: false }; } };
- const saveGuideState = (s: any) => { try { window.localStorage.setItem(GUIDE_STATE_KEY, JSON.stringify(s)); } catch {} };
-  let guideState = readGuideState();
-  let runBtn: HTMLButtonElement | null = null;
-  let browserCheckAttempted = false;
- const guideCard = createEl('div', { style: 'border:1px solid #26437a; background:#0c1830; border-radius:10px; padding:10px; margin-bottom:10px;' }) as HTMLDivElement;
- const guideTitle = createEl('div', { style: 'font-weight:600; margin-bottom:8px; color:#dbeafe;' }, ['🧭 新用户引导']) as HTMLDivElement, guideProgress = createEl('div', { style: 'font-size:12px; color:#8b93a6; margin-bottom:8px;' }, ['检查进度...']) as HTMLDivElement;
- guideCard.appendChild(guideTitle); guideCard.appendChild(guideProgress);
- const guideStepsGrid = createEl('div', { className: 'xhs-guide-grid' }) as HTMLDivElement;
- const browserStep = createEl('div', { className: 'xhs-guide-step' }) as HTMLDivElement;
- browserStep.appendChild(createEl('span', {}, ['1. ']));
- const browserStatus = createEl('span', { style: 'color:#f59e0b; flex:1;' }, ['⏳ 检查浏览器']) as HTMLSpanElement;
- const browserFixBtn = createEl('button', { type: 'button', className: 'secondary', style: 'margin-left:8px;' }, ['一键修复']) as HTMLButtonElement;
- browserStep.appendChild(browserStatus);
- browserStep.appendChild(browserFixBtn);
- guideStepsGrid.appendChild(browserStep);
- const accountStep = createEl('div', { className: 'xhs-guide-step' }) as HTMLDivElement;
- accountStep.appendChild(createEl('span', {}, ['2. ']));
- const accountStatus = createEl('span', { style: 'color:#f59e0b; flex:1;' }, ['⏳ 配置账号']) as HTMLSpanElement;
- accountStatus.style.cursor = 'pointer';
- accountStatus.title = '点击开始账号检查与交互配置';
- accountStatus.addEventListener('click', () => runInteractiveAccountCheck());
- const accountFixBtn = createEl('button', { type: 'button', className: 'secondary', style: 'margin-left:8px;' }, ['一键修复']) as HTMLButtonElement;
- accountStep.appendChild(accountStatus);
- accountStep.appendChild(accountFixBtn);
- guideStepsGrid.appendChild(accountStep);
- const keywordStep = createEl('div', { className: 'xhs-guide-step' }) as HTMLDivElement;
- keywordStep.appendChild(createEl('span', {}, ['3. ']));
- const keywordStatus = createEl('span', { style: 'color:#f59e0b;' }, ['⏳ 配置关键词']) as HTMLSpanElement;
- keywordStep.appendChild(keywordStatus); guideStepsGrid.appendChild(keywordStep);
- const completeStep = createEl('div', { className: 'xhs-guide-step xhs-guide-step--full', style: 'display:none;' }) as HTMLDivElement;
- completeStep.appendChild(createEl('span', {}, ['✅ ']));
- completeStep.appendChild(createEl('span', { style: 'color:#22c55e;' }, ['准备就绪，可以开始运行']));
- guideStepsGrid.appendChild(completeStep);
- guideCard.appendChild(guideStepsGrid);
- const startRunBtn = createEl('button', { type: 'button', style: 'display:none; margin-top:8px; width:100%;' }, ['开始运行']) as HTMLButtonElement;
- guideCard.appendChild(startRunBtn);
- const tileLane = createEl('div', { className: 'xhs-tile-lane' }) as HTMLDivElement;
+  if (xhsSettingsUnsubscribe) {
+    xhsSettingsUnsubscribe();
+    xhsSettingsUnsubscribe = null;
+  }
+
+  root.innerHTML = '';
+  const card = createEl('div', { className: 'card', style: 'padding:12px;' });
+
+  // 简化的 Tile 导航
+  const tileLane = createEl('div', { className: 'xhs-tile-lane' }) as HTMLDivElement;
   const tileRegistry = new Map<string, HTMLDivElement>();
   let activeTileId = 'board';
+
   const setActiveTile = (id: string) => {
     activeTileId = id;
     tileRegistry.forEach((tileEl, tileId) => {
       tileEl.classList.toggle('active', tileId === id);
     });
   };
-  const isInteractiveTarget = (target: EventTarget | null) => {
-    if (!(target instanceof Element)) return false;
-    return Boolean(target.closest('button, input, select, textarea, label, a'));
-  };
+
   const createTile = (id: string, titleText: string) => {
     const tile = createEl('section', { className: `xhs-tile xhs-tile--${id}`, 'data-xhs-tile': id }) as HTMLDivElement;
     const head = createEl('div', { className: 'xhs-tile-head' }, [titleText]);
     const body = createEl('div', { className: 'xhs-tile-body' }) as HTMLDivElement;
-    tile.addEventListener('pointerdown', (evt) => {
-      if (isInteractiveTarget(evt.target)) return;
-      setActiveTile(id);
-    }, { capture: true });
     tile.onclick = () => setActiveTile(id);
     tile.appendChild(head);
     tile.appendChild(body);
     tileRegistry.set(id, tile);
     return { tile, body };
   };
-  const focusTile = (id: string) => {
-    const tile = tileRegistry.get(id);
-    if (!tile) return;
-    setActiveTile(id);
-    tile.scrollIntoView({ behavior: 'smooth', inline: 'start', block: 'nearest' });
-  };
-  const resolveTileIdFromEvent = (target: EventTarget | null) => {
-    if (!(target instanceof Element)) return '';
-    const tileEl = target.closest('[data-xhs-tile]') as HTMLElement | null;
-    return String(tileEl?.dataset?.xhsTile || '').trim();
-  };
-  tileLane.addEventListener(
-    'wheel',
-    (evt) => {
-      const sourceTileId = tileLane.scrollWidth <= tileLane.clientWidth + 4 ? '' : resolveTileIdFromEvent(evt.target);
-      if (!sourceTileId || sourceTileId !== activeTileId) return;
-      const baseDelta = Math.abs(evt.deltaY) >= Math.abs(evt.deltaX) ? evt.deltaY : evt.deltaX;
-      if (!Number.isFinite(baseDelta) || baseDelta === 0) return;
-      const deltaFactor = evt.deltaMode === 1
-        ? 18
-        : evt.deltaMode === 2
-          ? Math.max(240, tileLane.clientWidth * 0.85)
-          : 1;
-      evt.preventDefault();
-      tileLane.scrollLeft += baseDelta * deltaFactor;
-    },
-    { passive: false, capture: true },
-  );
-  const guideLockMask = createEl('div', {
-    style: 'position:absolute; inset:0; background:rgba(10,14,24,0.72); border:1px dashed #26437a; border-radius:10px; display:none; align-items:center; justify-content:center; z-index:5; color:#c7d2fe; text-align:center; padding:12px; font-size:12px; pointer-events:none;',
-  }, ['请先完成引导：浏览器检查、账号登录、关键词配置']) as HTMLDivElement;
-  const isKeywordReady = () => String(keywordInput.value || '').trim().length > 0;
-  const runQuickBrowserCheck = async () => {
-    if (browserCheckAttempted || startupBrowserCheckDone || guideState.browserReady) return;
-    browserCheckAttempted = true;
-    startupBrowserCheckDone = true;
-    await runGuideBrowserCheck(api, guideState, browserStatus, saveGuideState);
-    browserFixBtn.style.display = guideState.browserReady ? 'none' : '';
-  };
-  const runBrowserRepair = async () => {
-    const result = await runGuideBrowserRepair(api, guideState, browserStatus, saveGuideState);
-    browserFixBtn.style.display = guideState.browserReady ? 'none' : '';
-    applyGuideLock();
-    if (!result.ok) {
-      navStepHint.textContent = '浏览器修复失败，请查看日志。';
-    }
-  };
- const applyGuideLock = () => {
-    const accountReady = guideState.accountReady;
-    const keywordReady = isKeywordReady();
-    guideState.keywordSet = keywordReady;
-    keywordInput.style.borderColor = keywordReady ? '' : '#ef4444';
-    keywordInput.style.backgroundColor = keywordReady ? '' : '#2a1515';
-    accountStatus.textContent = accountReady ? '✅ 已有可用账号' : '⏳ 至少登录1个账号';
-    accountStatus.style.color = accountReady ? '#22c55e' : '#f59e0b';
-    keywordStatus.textContent = keywordReady ? '✅ 关键词已配置' : '⏳ 请先配置关键词';
-    keywordStatus.style.color = keywordReady ? '#22c55e' : '#f59e0b';
-    const allReady = true;  // 跳过引导检查
-    guideProgress.textContent = allReady
-      ? '引导完成，可查看全部配置并运行。'
-      : `引导未完成：account=${accountReady ? 'ok' : 'pending'} keyword=${keywordReady ? 'ok' : 'pending'}`;
-    completeStep.style.display = allReady ? '' : 'none';
-    startRunBtn.style.display = allReady ? 'none' : '';
-    startRunBtn.textContent = '仍然开始运行';
-    guideCard.style.display = allReady ? 'none' : '';
-    tileLane.style.pointerEvents = '';
-    tileLane.style.filter = '';
-    guideLockMask.style.display = allReady ? 'none' : 'flex';
-    if (runBtn) {
-      if (!runBtn.disabled) {
-        runBtn.title = allReady ? '' : '引导未完成，仍可直接运行';
-      }
-    }
-    if (!allReady) {
-      setActiveTile('account');
-      const accountTile = tileRegistry.get('account');
-      if (accountTile) accountTile.scrollIntoView({ behavior: 'smooth', inline: 'start', block: 'nearest' });
-    }
-    saveGuideState(guideState);
- };
-  const runBrowserStatusCheck = async (profileId: string, reason = 'account-check') => {
-    if (typeof window.api?.cmdSpawn !== 'function') return false;
-    const args = [
-      window.api.pathJoin('apps', 'webauto', 'entry', 'browser-status.mjs'),
-      profileId,
-      '--site',
-      'xiaohongshu',
-    ];
-    api?.appendLog?.(`[ui] browser-status (${reason}) profile=${profileId}`);
-    await window.api.cmdSpawn({
-      title: `browser-status ${profileId}`,
-      cwd: '',
-      args,
-      groupKey: 'xiaohongshu',
-    });
-    return true;
-  };
-  const runInteractiveAccountCheck = async () => {
-    const selectedProfile = String(profilePickSel.value || '').trim();
-    if (!selectedProfile) {
-      guideState.accountReady = false;
-      applyGuideLock();
-      setActiveTile('account');
-      if (typeof api?.setActiveTab === 'function') api.setActiveTab('preflight');
-      navStepHint.textContent = '请先新增账号并完成登录，再进行账号检查。';
-      return;
-    }
-    const ok = await runBrowserStatusCheck(selectedProfile, 'guide-step');
-    if (!ok) {
-      setActiveTile('account');
-      if (typeof api?.setActiveTab === 'function') api.setActiveTab('preflight');
-      navStepHint.textContent = '账号检查失败，请在账号区重新触发登录。';
-      return;
-    }
-    void refreshProfileChoices(selectedProfile);
-  };
-  const runAccountRepair = async () => {
-    if (typeof accountFlow?.startAddAccountFlow === 'function') {
-      await accountFlow.startAddAccountFlow();
-      applyGuideLock();
-      return;
-    }
-    navStepHint.textContent = '账号修复不可用，请在账号区手动新增/登录。';
-  };
- card.appendChild(guideCard);
+
+  // 构建布局
   const persistedConfig = readLastConfig();
   const layout = buildXhsLayout({
     createTile,
     card,
     tileLane,
-    guideLockMask,
-    onboardingCard,
+    guideLockMask: createEl('div', { style: 'display:none;' }) as HTMLDivElement,
+    onboardingCard: createEl('div', { style: 'display:none;' }) as HTMLDivElement,
     persistedConfig,
   });
+
   const {
-    orchestrateModeSelect, keywordInput, envInput, accountModeSelect, profilePickSel, profileRefreshBtn,
-    shardProfilesBox, shardProfilesHint, shardResolvedHint, maxNotesInput, dryRunCheckbox, protocolModeCheckbox,
-    headlessCheckbox, modeHint, singleProfileRow, singleProfileHint, shardProfilesSection, accountAuditSummary,
-    accountAuditList, accountRefreshBtn, accountLiveProbeBtn, addAccountCountInput, addBatchNameInput,
-    accountAddBtn, accountNextLikeBtn, batchKeyValue, batchNextBtn, homepageToggle, imagesToggle, commentsToggle, maxCommentsInput,
-    commentRoundsInput, gateToggle, matchKeywordsInput, matchModeSelect, matchMinHitsInput, likesToggle,
-    maxLikesInput, likeRuleTypeSelect, likeRuleAInput, likeRuleBInput, addLikeRuleBtn, likeRulePreview,
-    replyToggle, replyTextInput, ocrToggle, ocrCommandInput, opOrderInput, opOrderRow, homeSection,
-    commentsSection, gateSection, likesSection, replySection, ocrSection, likeNextBoardBtn, linksStat,
-    postsStat, commentsStat, likesStat, likesSkipStat, repliesStat, streamStat, shardStatsList, likedList, repliedList,
-    persistedSingleProfile, persistedShardProfiles, bindLikeRulePersistence,
-  } = layout;
-  accountNextLikeBtn.onclick = () => focusTile('like');
-  likeNextBoardBtn.onclick = () => focusTile('board');
-  browserStep.onclick = () => { focusTile('account'); void runQuickBrowserCheck(); };
-  accountStep.onclick = () => { focusTile('account'); void runInteractiveAccountCheck(); };
-  keywordStep.onclick = () => { focusTile('board'); keywordInput.focus(); };
-  keywordInput.addEventListener('input', applyGuideLock);
-  keywordInput.addEventListener('change', applyGuideLock);
-  queueMicrotask(() => {
-    const finalizeGuide = () => { navStepHint.textContent = 'Step 1: complete account check/login, then configure keyword.'; applyGuideLock(); };
-    if (startupBrowserChecked) return void finalizeGuide();
-    startupBrowserChecked = true;
-    runQuickBrowserCheck().finally(finalizeGuide);
-  });
-  const liveStatsController = createLiveStatsController({
-    maxCommentsInput,
+    profilePickSel,
+    profileRefreshBtn,
+    keywordInput,
+    maxNotesInput,
+    commentsToggle,
+    likesToggle,
+    singleProfileHint,
     linksStat,
     postsStat,
     commentsStat,
     likesStat,
-    likesSkipStat,
-    repliesStat,
     streamStat,
     shardStatsList,
     likedList,
     repliedList,
-  });
+    persistedSingleProfile,
+    persistedShardProfiles,
+    bindLikeRulePersistence,
+  } = layout;
+
+  // 账号流程控制器
   const accountFlow = createAccountFlowController({
     api,
     profilePickSel,
-    accountModeSelect,
+    accountModeSelect: createEl('select', { style: 'display:none;' }) as HTMLSelectElement,
     singleProfileHint,
-    shardProfilesBox,
-    shardProfilesHint,
-    shardResolvedHint,
-    accountAuditSummary,
-    accountAuditList,
-    accountRefreshBtn,
-    accountLiveProbeBtn,
-    addAccountCountInput,
-    addBatchNameInput,
-    accountAddBtn,
-    batchKeyValue,
-    batchNextBtn,
-    onboardingSummary,
-    onboardingCard,
-    onboardingTips,
+    shardProfilesBox: createEl('div', { style: 'display:none;' }) as HTMLDivElement,
+    shardProfilesHint: createEl('div', { style: 'display:none;' }) as HTMLDivElement,
+    shardResolvedHint: createEl('div', { style: 'display:none;' }) as HTMLDivElement,
+    accountAuditSummary: createEl('div', { style: 'display:none;' }) as HTMLDivElement,
+    accountAuditList: createEl('div', { style: 'display:none;' }) as HTMLDivElement,
+    accountRefreshBtn: createEl('button', { style: 'display:none;' }) as HTMLButtonElement,
+    accountLiveProbeBtn: createEl('button', { style: 'display:none;' }) as HTMLButtonElement,
+    addAccountCountInput: makeNumberInput('1', '1'),
+    addBatchNameInput: makeTextInput('', ''),
+    accountAddBtn: createEl('button', { style: 'display:none;' }) as HTMLButtonElement,
+    accountNextLikeBtn: createEl('button', { style: 'display:none;' }) as HTMLButtonElement,
+    batchKeyValue: createEl('div', { style: 'display:none;' }) as HTMLDivElement,
+    batchNextBtn: createEl('button', { style: 'display:none;' }) as HTMLButtonElement,
+    onboardingSummary: createEl('div', { style: 'display:none;' }) as HTMLDivElement,
+    onboardingCard: createEl('div', { style: 'display:none;' }) as HTMLDivElement,
+    onboardingTips: createEl('div', { style: 'display:none;' }) as HTMLDivElement,
     persistedSingleProfile,
     persistedShardProfiles,
     setActiveTile,
-    saveGuideState,
-    applyGuideLock,
-    getGuideState: () => guideState,
-    setNavHint: (text: string) => {
-      navStepHint.textContent = text;
-    },
-    runBrowserStatusCheck,
+    saveGuideState: () => {},
+    applyGuideLock: () => {},
+    getGuideState: () => ({ browserReady: true, accountReady: true, keywordSet: true }),
+    setNavHint: () => {},
+    runBrowserStatusCheck: async () => true,
   });
-  accountFixBtn.onclick = () => { void runAccountRepair(); };
-  browserFixBtn.onclick = () => { void runBrowserRepair(); };
-  const {
-    refreshProfileChoices,
-    startAccountAutoRefresh,
-    stopAccountAutoRefresh,
-    getSelectedShardProfiles,
-    renderSingleProfileHint,
-    renderShardHints,
-    syncAddBatchPlaceholder,
-  } = accountFlow;
-  const persistHistoryFns: Array<() => void> = [];
+
+  const { refreshProfileChoices, startAccountAutoRefresh, stopAccountAutoRefresh, getSelectedShardProfiles } = accountFlow;
+
+  // 历史输入持久化
+  const persistHistoryFns: (() => void)[] = [];
   const registerHistoryInput = (input: HTMLInputElement, key: string) => {
     const persist = bindInputHistory(input, key, api);
     persistHistoryFns.push(persist);
     return persist;
   };
   registerHistoryInput(keywordInput, 'keyword');
-  registerHistoryInput(envInput, 'env');
   registerHistoryInput(maxNotesInput, 'target');
-  registerHistoryInput(maxCommentsInput, 'maxComments');
-  registerHistoryInput(commentRoundsInput, 'commentRounds');
-  registerHistoryInput(matchKeywordsInput, 'matchKeywords');
-  registerHistoryInput(matchMinHitsInput, 'matchMinHits');
-  registerHistoryInput(maxLikesInput, 'maxLikes');
-  const persistLikeRuleAHistory = registerHistoryInput(likeRuleAInput, 'likeRuleA');
-  const persistLikeRuleBHistory = registerHistoryInput(likeRuleBInput, 'likeRuleB');
-  registerHistoryInput(replyTextInput, 'replyText');
-  registerHistoryInput(ocrCommandInput, 'ocrCommand');
-  registerHistoryInput(opOrderInput, 'opOrder');
-  const getEffectiveHomepageFlags = () => ({
-    doHomepage: Boolean(homepageToggle.checked),
-    doImages: Boolean(homepageToggle.checked && imagesToggle.checked),
-  });
-  const persistLastConfig = () => {
-    writeLastConfig({
-      orchestrateMode: orchestrateModeSelect.value,
-      keyword: keywordInput.value,
-      env: envInput.value,
-      accountMode: accountModeSelect.value,
-      singleProfile: profilePickSel.value,
-      shardProfiles: getSelectedShardProfiles(),
-      maxNotes: maxNotesInput.value,
-      dryRun: dryRunCheckbox.checked,
-      protocolMode: protocolModeCheckbox.checked,
-      headless: headlessCheckbox.checked,
-      doHomepage: getEffectiveHomepageFlags().doHomepage,
-      doImages: getEffectiveHomepageFlags().doImages,
-      doComments: commentsToggle.checked,
-      maxComments: maxCommentsInput.value,
-      commentRounds: commentRoundsInput.value,
-      doGate: gateToggle.checked,
-      matchKeywords: matchKeywordsInput.value,
-      matchMode: matchModeSelect.value,
-      matchMinHits: matchMinHitsInput.value,
-      doLikes: likesToggle.checked,
-      maxLikes: maxLikesInput.value,
-      likeRules: likeRulePreview.value,
-      doReply: replyToggle.checked,
-      replyText: replyTextInput.value,
-      doOcr: ocrToggle.checked,
-      ocrCommand: ocrCommandInput.value,
-      opOrder: opOrderInput.value,
-    });
-  };
-  bindLikeRulePersistence({
-    persistLastConfig,
-    persistLikeRuleAHistory,
-    persistLikeRuleBHistory,
-  });
-  const bindPersistControl = (el: HTMLElement, evt = 'change') => {
-    el.addEventListener(evt, persistLastConfig);
-  };
-  [
-    orchestrateModeSelect,
-    accountModeSelect,
-    profilePickSel,
-    keywordInput,
-    envInput,
-    maxNotesInput,
-    maxCommentsInput,
-    commentRoundsInput,
-    matchKeywordsInput,
-    matchModeSelect,
-    matchMinHitsInput,
-    maxLikesInput,
-    replyTextInput,
-    ocrCommandInput,
-    opOrderInput,
-    dryRunCheckbox,
-    protocolModeCheckbox,
-    headlessCheckbox,
-    homepageToggle,
-    imagesToggle,
-    commentsToggle,
-    gateToggle,
-    likesToggle,
-    replyToggle,
-    ocrToggle,
-  ].forEach((el) => bindPersistControl(el));
-  likeRuleTypeSelect.addEventListener('change', persistLastConfig);
-  addLikeRuleBtn.addEventListener('click', persistLastConfig);
-  const refreshOrchestrationLayout = () => {
-    const mode = String(orchestrateModeSelect.value || 'phase1-phase2-unified').trim();
-    const unifiedEnabled = mode === 'phase1-phase2-unified' || mode === 'unified-only';
-    const accountMode = String(accountModeSelect.value || 'single').trim();
-    const isSingleMode = accountMode !== 'shards';
-    singleProfileRow.style.display = isSingleMode ? '' : 'none';
-    singleProfileHint.style.display = isSingleMode ? '' : 'none';
-    shardProfilesSection.style.display = isSingleMode ? 'none' : '';
-    if (isSingleMode) renderSingleProfileHint();
-    else renderShardHints();
-    const featureDisplay = unifiedEnabled ? '' : 'none';
-    homeSection.style.display = featureDisplay;
-    commentsSection.style.display = featureDisplay;
-    gateSection.style.display = featureDisplay;
-    likesSection.style.display = featureDisplay;
-    replySection.style.display = featureDisplay;
-    ocrSection.style.display = featureDisplay;
-    opOrderRow.style.display = featureDisplay;
-    if (mode === 'phase1-only') {
-      modeHint.textContent = '仅执行 Phase1：启动/恢复浏览器会话，不做搜索采集与互动。';
-      return;
-    }
-    if (mode === 'phase1-phase2') {
-      modeHint.textContent = '执行 Phase1 + Phase2：启动会话并采集链接，不执行评论/点赞。';
-      return;
-    }
-    if (mode === 'unified-only') {
-      modeHint.textContent = '仅执行 Unified：使用已有 phase2-links.jsonl 执行评论采集/点赞/回复。';
-      return;
-    }
-    modeHint.textContent = '完整编排：先 Phase1 启动，再 Phase2 采集链接，最后 Unified 采集评论/点赞。';
-  };
-  profilePickSel.addEventListener('change', () => { renderSingleProfileHint(); syncAddBatchPlaceholder(); });
-  orchestrateModeSelect.addEventListener('change', refreshOrchestrationLayout);
-  accountModeSelect.addEventListener('change', refreshOrchestrationLayout);
-  refreshOrchestrationLayout();
-  consumeNavTarget(focusTile);
-  void refreshProfileChoices();
-  setTimeout(() => applyGuideLock(), 3000);  // 初次加载后自动检查引导状态
-  startAccountAutoRefresh('tab-enter');
-  xhsSettingsUnsubscribe = window.api.onSettingsChanged((next: any) => {
-    api.settings = next;
-    void refreshProfileChoices();
-  });
+
+  // 运行流程控制器
   const runFlow = createRunFlowController({
     card,
     api,
-    startRunBtn,
-    orchestrateModeSelect,
-    accountModeSelect,
+    startRunBtn: null,
+    orchestrateModeSelect: createEl('select', { style: 'display:none;' }) as HTMLSelectElement,
+    accountModeSelect: createEl('select', { style: 'display:none;' }) as HTMLSelectElement,
     profilePickSel,
     keywordInput,
-    envInput,
-    protocolModeCheckbox,
-    headlessCheckbox,
-    dryRunCheckbox,
+    envInput: createEl('input', { type: 'hidden', value: 'prod' }) as HTMLInputElement,
+    protocolModeCheckbox: makeCheckbox(true, 'xh-protocol-mode-hidden'),
+    headlessCheckbox: makeCheckbox(false, 'xh-headless-hidden'),
+    dryRunCheckbox: makeCheckbox(false, 'xh-dry-run-hidden'),
     maxNotesInput,
-    maxCommentsInput,
-    commentRoundsInput,
-    gateToggle,
-    matchKeywordsInput,
-    matchModeSelect,
-    matchMinHitsInput,
+    maxCommentsInput: makeNumberInput('0', '0'),
+    commentRoundsInput: makeNumberInput('0', '0'),
+    gateToggle: makeCheckbox(false, 'xh-do-gate-hidden'),
+    matchKeywordsInput: makeTextInput('', ''),
+    matchModeSelect: createEl('select', { style: 'display:none;' }) as HTMLSelectElement,
+    matchMinHitsInput: makeNumberInput('2', '1'),
     likesToggle,
-    maxLikesInput,
-    likeRulePreview,
-    replyToggle,
-    replyTextInput,
-    ocrToggle,
-    ocrCommandInput,
-    opOrderInput,
+    maxLikesInput: makeNumberInput('0', '0'),
+    likeRulePreview: createEl('input', { type: 'hidden' }) as HTMLInputElement,
+    replyToggle: makeCheckbox(false, 'xh-do-reply-hidden'),
+    replyTextInput: makeTextInput('', ''),
+    ocrToggle: makeCheckbox(false, 'xh-do-ocr-hidden'),
+    ocrCommandInput: makeTextInput('', ''),
+    opOrderInput: makeTextInput('', ''),
     commentsToggle,
     persistHistoryFns,
-    persistLastConfig,
-    getSelectedShardProfiles,
-    getEffectiveHomepageFlags,
-    focusAccountSetup: () => {
-      focusTile('account');
-      queueMicrotask(() => {
-        if (String(accountModeSelect.value || 'single').trim() === 'shards') {
-          const firstShard = shardProfilesBox.querySelector('input[type=checkbox]') as HTMLInputElement | null;
-          if (firstShard) firstShard.focus();
-          return;
-        }
-        profilePickSel.focus();
+    persistLastConfig: () => {
+      writeLastConfig({
+        keyword: keywordInput.value,
+        maxNotes: maxNotesInput.value,
+        doComments: commentsToggle.checked,
+        doLikes: likesToggle.checked,
+        singleProfile: profilePickSel.value,
       });
     },
-    focusKeywordSetup: () => {
-      focusTile('board');
-      queueMicrotask(() => keywordInput.focus());
-    },
-    liveStats: liveStatsController,
+    getSelectedShardProfiles,
+    getEffectiveHomepageFlags: () => ({ doHomepage: false, doImages: false }),
+    focusAccountSetup: () => profilePickSel.focus(),
+    focusKeywordSetup: () => keywordInput.focus(),
+    liveStats: createLiveStatsController({
+      maxCommentsInput: makeNumberInput('0', '0'),
+      linksStat,
+      postsStat,
+      commentsStat,
+      likesStat,
+      likesSkipStat: createEl('span', { style: 'display:none;' }) as HTMLSpanElement,
+      repliesStat: createEl('span', { style: 'display:none;' }) as HTMLSpanElement,
+      streamStat,
+      shardStatsList,
+      likedList,
+      repliedList,
+    }),
   });
-  runBtn = runFlow.runBtn;
-  xhsCmdUnsubscribe = runFlow.dispose;
+
+  // 自动刷新账号
+  startAccountAutoRefresh('tab-enter');
+
+  // 设置变更监听
+  xhsSettingsUnsubscribe = window.api.onSettingsChanged((next) => {
+    api.settings = next;
+    void refreshProfileChoices();
+  });
+
+  // 渲染 Tile
+  const boardTile = createTile('board', '📊 运行状态');
+  boardTile.body.appendChild(layout.statsSection || createEl('div', {}));
+
+  const accountTile = createTile('account', '👤 账号登录');
+  const accountBento = createEl('div', { className: 'xhs-bento-grid' });
+  accountBento.appendChild(layout.accountSection || createEl('div', {}));
+  accountTile.body.appendChild(accountBento);
+
+  const runTile = createTile('run', '⚙️ 任务设置');
+  const runBento = createEl('div', { className: 'xhs-bento-grid' });
+  runBento.appendChild(layout.taskSection || createEl('div', {}));
+  runTile.body.appendChild(runBento);
+
+  [boardTile.tile, accountTile.tile, runTile.tile].forEach((tile) => tileLane.appendChild(tile));
+  card.appendChild(tileLane);
   root.appendChild(card);
+}
+
+export function disposeXiaohongshuTab() {
+  if (xhsCmdUnsubscribe) {
+    xhsCmdUnsubscribe();
+    xhsCmdUnsubscribe = null;
+  }
+  if (xhsSettingsUnsubscribe) {
+    xhsSettingsUnsubscribe();
+    xhsSettingsUnsubscribe = null;
+  }
 }
