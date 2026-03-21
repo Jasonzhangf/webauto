@@ -118,19 +118,29 @@ export async function buildUnifiedOptions(argv, profileId, overrides = {}) {
   const effectiveDryRun = disableDryRun ? false : dryRun;
   const stage = resolveXhsStage(argv, overrides);
   const stageLinksEnabled = true;
- const detailOpenByLinks = parseBool(
-   overrides.detailOpenByLinks ?? argv['detail-open-by-links'],
-   stageLinksEnabled && (stage === 'detail' || stage === 'full'),
- );
- const openByLinksMaxAttempts = parseIntFlag(argv['open-by-links-max-attempts'], 3, 1);
- const detailLinksStartup = detailOpenByLinks && stage === 'detail';
- // If auto-resume is enabled, ensure we use detail-links mode
- // to skip collect and directly use existing safe-detail-urls
- const autoResumeDetailLinksStartup = (stage === 'full' || stage === 'detail')
-   && parseBool(overrides.resume ?? argv.resume, false);
- const effectiveDetailLinksStartup = autoResumeDetailLinksStartup || detailLinksStartup;
- const autoCloseDetail = parseBool(
-   overrides.autoCloseDetail ?? argv['auto-close-detail'],
+
+  // If auto-resume is enabled, use detail-links mode to skip collect
+  // and directly use existing safe-detail-urls.
+  // Default to URL mode (detailOpenByLinks=true). Click mode is forbidden by policy.
+  const resumeRequested = parseBool(overrides.resume ?? argv.resume, false);
+  const detailLinksByResume = resumeRequested && (stage === 'detail' || stage === 'full');
+
+  const detailOpenByLinks = parseBool(
+    overrides.detailOpenByLinks ?? argv['detail-open-by-links'],
+    true,
+  );
+  if (detailOpenByLinks !== true) {
+    throw new Error('detailOpenByLinks=false (click mode) is not allowed; URL mode only');
+  }
+  const openByLinksMaxAttempts = parseIntFlag(argv['open-by-links-max-attempts'], 3, 1);
+  const detailLinksStartup = detailOpenByLinks && stage === 'detail';
+  // If auto-resume is enabled, ensure we use detail-links mode
+  // to skip collect and directly use existing safe-detail-urls
+  const autoResumeDetailLinksStartup = (stage === 'full' || stage === 'detail')
+    && resumeRequested;
+  const effectiveDetailLinksStartup = autoResumeDetailLinksStartup || detailLinksStartup;
+  const autoCloseDetail = parseBool(
+    overrides.autoCloseDetail ?? argv['auto-close-detail'],
    detailOpenByLinks || !(stage === 'detail' && maxNotes <= 1),
  );
   if (stage === 'detail' || stage === 'full' || parseBool(overrides.doComments ?? argv['do-comments'], false)) {

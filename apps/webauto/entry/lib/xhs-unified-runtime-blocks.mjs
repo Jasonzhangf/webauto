@@ -147,6 +147,7 @@ export function createProfileStats(spec) {
     openedNotes: 0,
     commentsHarvestRuns: 0,
     commentsCollected: 0,
+    newCommentsAdded: 0,
     commentsExpected: 0,
     commentsReachedBottomCount: 0,
     likesHitCount: 0,
@@ -278,9 +279,10 @@ export function updateProfileStatsFromEvent(stats, payload) {
     return;
   }
 
-  if (operationId === 'comments_harvest') {
-    stats.commentsHarvestRuns += 1;
-    stats.commentsCollected += toNumber(result.collected ?? result.commentsAdded, 0);
+ if (operationId === 'comments_harvest') {
+   stats.commentsHarvestRuns += 1;
+    stats.commentsCollected += toNumber(result.commentsProcessed ?? result.collected ?? result.commentsAdded, 0);
+    stats.newCommentsAdded += toNumber(result.newCommentsAdded ?? result.collected ?? result.commentsAdded, 0);
     stats.commentsExpected += Math.max(0, toNumber(result.expectedCommentsCount, 0));
     if (result.reachedBottom === true) stats.commentsReachedBottomCount += 1;
     stats.likesHitCount += toNumber(result.hitCount, 0);
@@ -393,6 +395,7 @@ export async function mergeProfileOutputs({
     openedNotes: 0,
     commentsHarvestRuns: 0,
     commentsCollected: 0,
+    newCommentsAdded: 0,
     commentsExpected: 0,
     commentsReachedBottomCount: 0,
     likesHitCount: 0,
@@ -414,6 +417,7 @@ export async function mergeProfileOutputs({
     totals.openedNotes += toNumber(stats.openedNotes, 0);
     totals.commentsHarvestRuns += toNumber(stats.commentsHarvestRuns, 0);
     totals.commentsCollected += toNumber(stats.commentsCollected, 0);
+    totals.newCommentsAdded += toNumber(stats.newCommentsAdded, 0);
     totals.commentsExpected += toNumber(stats.commentsExpected, 0);
     totals.commentsReachedBottomCount += toNumber(stats.commentsReachedBottomCount, 0);
     totals.likesHitCount += toNumber(stats.likesHitCount, 0);

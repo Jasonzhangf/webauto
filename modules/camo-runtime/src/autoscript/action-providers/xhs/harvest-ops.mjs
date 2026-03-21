@@ -698,7 +698,8 @@ export async function executeCommentsHarvestOperation({ profileId, params = {}, 
       data: {
         commentsPath: null,
         commentsMdPath: null,
-        commentsAdded: 0,
+        commentsProcessed: 0,
+        newCommentsAdded: 0,
         commentsTotal: 0,
         noteId: detailSnapshotNoteId,
         expectedNoteId,
@@ -1122,7 +1123,8 @@ export async function executeCommentsHarvestOperation({ profileId, params = {}, 
       reachedBottom: false,
       commentsEmpty: true,
       exitReason: String(focusResult.reason || 'comment_panel_not_opened'),
-      commentsAdded: 0,
+      commentsProcessed: 0,
+      newCommentsAdded: 0,
     });
     await clearCommentHighlights();
     return {
@@ -1132,7 +1134,8 @@ export async function executeCommentsHarvestOperation({ profileId, params = {}, 
       data: {
         commentsPath: null,
         commentsMdPath: null,
-        commentsAdded: 0,
+        commentsProcessed: 0,
+        newCommentsAdded: 0,
         commentsTotal: 0,
         noteId: state.currentNoteId,
         collected: 0,
@@ -1254,8 +1257,8 @@ export async function executeCommentsHarvestOperation({ profileId, params = {}, 
   const maxComments = Number(params.commentsLimit ?? params.maxComments ?? 0) || 0;
   const scrollStepMin = Math.max(240, Number(params.scrollStepMin ?? params.scrollStep ?? 560) || 560);
   const scrollStepMax = Math.max(scrollStepMin, Number(params.scrollStepMax ?? params.scrollStep ?? 840) || 840);
-  const settleMinMs = Math.max(80, Number(params.settleMinMs ?? params.settleMs ?? 280) || 280);
-  const settleMaxMs = Math.max(settleMinMs, Number(params.settleMaxMs ?? params.settleMs ?? 820) || 820);
+  const settleMinMs = Math.max(80, Number(params.settleMinMs ?? params.settleMs ?? 500) || 500);
+  const settleMaxMs = Math.max(settleMinMs, Number(params.settleMaxMs ?? params.settleMs ?? 1500) || 1500);
   const scrollDelayMinMs = Math.max(600, Number(params.scrollDelayMinMs ?? params.scrollDelayMs ?? 1200) || 1200);
   const scrollDelayMaxMs = Math.max(scrollDelayMinMs, Number(params.scrollDelayMaxMs ?? params.scrollDelayMs ?? 2200) || 2200);
   const stallRounds = Math.max(1, Number(params.stallRounds ?? 8) || 8);
@@ -1490,6 +1493,13 @@ const applyVisibleLikePass = async (currentSnapshot) => {
       noProgressRounds,
       recoveries,
     });
+    // Humanized pre-scroll delay on first round to simulate reading the page
+    if (rounds === 1) {
+      const harvestEntryDelay = Math.floor(400 + Math.random() * 801);
+      await sleepImpl(harvestEntryDelay);
+      progress('harvest_entry_delay', { delayMs: harvestEntryDelay });
+    }
+
     const loopInteractionState = await ensureDetailInteractionState(profileId, {
       readDetailSnapshot: readDetailSnapshotImpl,
       readDetailState: readDetailStateImpl,
@@ -1761,6 +1771,7 @@ const applyVisibleLikePass = async (currentSnapshot) => {
         direction: 'down',
         amount: delta,
         highlight: true,
+        skipFocusClick: true,
         focusTarget: commentScroll,
       });
     progress('after_scroll_action', { round: rounds, selector: scrollSelector, delta });
@@ -1884,6 +1895,7 @@ const applyVisibleLikePass = async (currentSnapshot) => {
     commentsEmpty,
     exitReason,
     commentsAdded: totalAdded,
+    commentsProcessed: collectedRows.length,
     failureCode: failed ? String(exitReason || 'COMMENTS_HARVEST_INCOMPLETE').trim().toUpperCase() : null,
     failureData: failed ? {
       rounds,
@@ -1904,7 +1916,8 @@ const applyVisibleLikePass = async (currentSnapshot) => {
   };
   emitActionTrace(context, actionTrace, { stage: 'xhs_comments_harvest' });
   progress('operation_done', {
-    commentsAdded: totalAdded,
+    commentsProcessed: collectedRows.length,
+    newCommentsAdded: totalAdded,
     commentsTotal: state.lastCommentsHarvest.comments.length,
     rounds,
     exitReason,
@@ -1919,7 +1932,8 @@ const applyVisibleLikePass = async (currentSnapshot) => {
     data: {
       commentsPath,
       commentsMdPath,
-      commentsAdded: totalAdded,
+      commentsProcessed: collectedRows.length,
+      newCommentsAdded: totalAdded,
       commentsTotal: state.lastCommentsHarvest.comments.length,
       noteId: state.currentNoteId,
       searchCount: 0,

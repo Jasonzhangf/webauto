@@ -579,7 +579,10 @@ export class AutoscriptRunner {
     if (!operation.enabled) return false;
     if (!this.isTriggered(operation, event)) return false;
     if (forceRun && !this.isTriggerStillValid(operation)) return false;
-    if (operation.once && this.operationState.get(operation.id)?.status === 'done') return false;
+    if (operation.once) {
+      const opStatus = this.operationState.get(operation.id)?.status;
+      if (opStatus === 'done' || opStatus === 'skipped' || opStatus === 'failed') return false;
+    }
     if (!this.isDependencySatisfied(operation)) return false;
     if (!this.areConditionsSatisfied(operation)) return false;
     if (!this.impactEngine.canRunOperation(operation, event)) return false;
@@ -1344,7 +1347,8 @@ export class AutoscriptRunner {
       }
 
       if (attempt < totalAttempts) {
-        if (backoffMs > 0) await sleep(backoffMs);
+        const exponentialBackoff = backoffMs > 0 ? backoffMs * Math.pow(2, attempt - 1) : 0;
+        if (exponentialBackoff > 0) await sleep(exponentialBackoff);
         continue;
       }
 

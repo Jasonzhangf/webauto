@@ -37,6 +37,7 @@ import {
   toNumber,
   mergeProfileOutputs,
 } from './xhs-unified-runtime-blocks.mjs';
+import { resolveRotatedKeyword } from './xhs-keyword-rotation.mjs';
 
 function parseProfiles(argv) {
   const profile = String(argv.profile || '').trim();
@@ -86,10 +87,18 @@ async function appendJsonl(filePath, payload) {
 }
 
 export async function runUnified(argv, overrides = {}) {
-  const keyword = String(argv.keyword || argv.k || '').trim();
-  const detailOpenByLinks = parseBool(overrides.detailOpenByLinks ?? argv['detail-open-by-links'], false);
+  const detailOpenByLinks = parseBool(overrides.detailOpenByLinks ?? argv['detail-open-by-links'], true);
+  if (detailOpenByLinks !== true) {
+    throw new Error('detailOpenByLinks=false (click mode) is not allowed; URL mode only');
+  }
   const sharedHarvestPathArg = String(overrides.sharedHarvestPath ?? argv['shared-harvest-path'] ?? '').trim();
+  const rotation = await resolveRotatedKeyword(argv, { recordKey: 'xiaohongshu', requireKeyword: !(detailOpenByLinks && sharedHarvestPathArg) });
+  const keyword = String(rotation.keyword || '').trim();
   if (!keyword && !(detailOpenByLinks && sharedHarvestPathArg)) throw new Error('missing --keyword');
+  if (rotation?.event?.ok) {
+    console.log(JSON.stringify(rotation.event));
+    argv.keyword = keyword;
+  }
   cleanupIncompleteProfiles({ deleteProfileDirs: false });
 
   const stage = resolveXhsStage(argv, overrides);
@@ -523,6 +532,9 @@ export function printUnifiedHelp() {
     '  --seed-collect-rounds <n>    Seed collect rounds',
     '  --search-serial-key <key>    Search serial key',
     '  --shared-harvest-path <path> Shared harvest path',
+    '  --keywords <a,b,c>           Comma-separated keyword rotation list',
+    '  --keyword-rotate <bool>      Enable keyword rotation (default true)',
+    '  --keyword-rotate-limit <n>   Max consecutive uses per keyword (default 2)',
     '  --search-submit-method <m>   click|enter|form',
     '  --tab-open-delay <ms>        Delay between opening tabs',
     '  --operation-min-interval <ms> Min operation interval',

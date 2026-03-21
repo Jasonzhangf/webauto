@@ -8,7 +8,7 @@ export function buildXhsBootstrapOperations(options) {
       params: { followWindow: true, settleMs: 220, attempts: 2 },
       trigger: 'startup',
       once: true,
-      retry: { attempts: 1, backoffMs: 0 },
+      retry: { attempts: 3, backoffMs: 500 },
       impact: 'op',
       onFailure: 'continue',
     },
@@ -79,6 +79,8 @@ export function buildXhsSearchOperations(options) {
       id: 'fill_keyword',
       enabled: !detailLinksStartup,
       action: 'type',
+      // Note: avoid click here to prevent camo input pipeline click timeout
+      // Focus is enough for input elements; click retries can cause long stalls without anchor checks.
       params: { selector: '#search-input, input.search-input', text: keyword },
       trigger: 'startup',
       dependsOn: ['wait_search_permit'],
@@ -179,7 +181,7 @@ export function buildXhsTabPoolOperation(options) {
       dependsOn: ['submit_search'],
       once: true,
       timeoutMs: 60000,
-      retry: { attempts: 2, backoffMs: 500 },
+      retry: { attempts: 1, backoffMs: 0 },
       impact: 'op',
       onFailure: 'continue',
       validation: detailLinksStartup

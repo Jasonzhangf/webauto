@@ -1,9 +1,10 @@
+import { normalizeBaseNoteId } from "./utils.mjs";
 import { callAPI } from '../../../utils/browser-service.mjs';
 import { isCheckpointRiskUrl } from '../../../container/runtime-core/utils.mjs';
 import { getProfileState } from './state.mjs';
 import { buildTraceRecorder, emitActionTrace } from './trace.mjs';
 import { sleep, readLocation, clickPoint } from './dom-ops.mjs';
-import { readSearchCandidateByNoteId, ensureSearchCandidateFullyVisible } from './search-ops.mjs';
+import { readSearchCandidateByNoteId, readSearchCandidates, ensureSearchCandidateFullyVisible } from './search-ops.mjs';
 import { getCurrentTabIndex, loadCollectedLinks, readCollectedLinksCache, readActiveLinkForTab, writeTabSlotState } from './tab-state.mjs';
 import { readDetailSlotState, shouldCloseCurrentDetail, shouldReuseDetailForCurrentTab, writeDetailSlotState } from './detail-slot-state.mjs';
 import { isDetailVisible, readDetailCloseTarget, closeDetailToSearch, readDetailSnapshot } from './detail-ops.mjs';
@@ -226,6 +227,7 @@ async function ensureDetailGateQueueInitialized({
     testingOverrides,
   });
   state.detailGateState = {
+    visitedNoteIds: Array.isArray(detailGateState.visitedNoteIds) ? detailGateState.visitedNoteIds : [],
     ...detailGateState,
     key: gateKey,
     queueSignature: cacheSignature,
@@ -449,21 +451,33 @@ async function cleanupDetailContextOnDone({
 export async function executeOpenDetailOperation({ profileId, params = {}, context = {} }) {
   const state = getProfileState(profileId);
   const { actionTrace, pushTrace } = buildTraceRecorder();
+  if (!params.runId && context?.runId) {
+    params.runId = String(context.runId || '').trim();
+  }
   const mode = String(params.mode || '').trim() || 'single';
   const collectMode = mode === 'collect';
   if (collectMode) {
     return { ok: false, code: 'INVALID_MODE', message: 'collect mode must use xhs_collect_links' };
   }
 
-  const noteId = String(params.noteId || '').trim() || null;
+  let noteId = String(params.noteId || '').trim() || null;
   const noteUrl = String(params.noteUrl || '').trim() || null;
   const useLinks = String(params.openByLinks || '').toLowerCase() === 'true' || params.openByLinks === true;
+  if (!useLinks) {
+    throw new Error('detail openByLinks=false (click mode) is not supported');
+  }
   const modeNext = mode === 'next';
   const testingOverrides = context?.testingOverrides && typeof context.testingOverrides === 'object'
     ? context.testingOverrides
     : null;
   const callApiImpl = typeof testingOverrides?.callAPI === 'function' ? testingOverrides.callAPI : callAPI;
   const sleepImpl = typeof testingOverrides?.sleep === 'function' ? testingOverrides.sleep : sleep;
+
+  // Humanized pre-action delay: simulate human reading/browsing behavior
+  const preOpenMinMs = Math.max(400, Number(params.preOpenDelayMinMs) || 400);
+  const preOpenMaxMs = Math.max(preOpenMinMs, Number(params.preOpenDelayMaxMs) || 1200);
+  const preOpenDelay = Math.floor(preOpenMinMs + Math.random() * (preOpenMaxMs - preOpenMinMs + 1));
+  await sleepImpl(preOpenDelay);
   const readLocationImpl = typeof testingOverrides?.readLocation === 'function' ? testingOverrides.readLocation : readLocation;
   const isDetailVisibleImpl = typeof testingOverrides?.isDetailVisible === 'function'
     ? testingOverrides.isDetailVisible
@@ -494,9 +508,6 @@ export async function executeOpenDetailOperation({ profileId, params = {}, conte
     slotState = readDetailSlotState(state, currentTabIndex, { tabCount: params.tabCount });
   }
 
-  if (!noteId && !effectiveNoteUrl && !useLinks) {
-    return { ok: false, code: 'INVALID_PARAMS', message: 'noteId or noteUrl required in single mode' };
-  }
 
   const beforeUrl = await readLocationImpl(profileId);
   const detailVisible = await isDetailVisibleImpl(profileId);
@@ -521,9 +532,7 @@ export async function executeOpenDetailOperation({ profileId, params = {}, conte
      )
    );
 
- if (detailVisible?.detailVisible === true && !useLinks) {
-   await closeDetailToSearch(profileId, pushTrace);
- }
+ // click mode removed; detail close on open is not needed here
 
  const guardBeforeOpen = await assertNoGuard('open_detail_before_open');
   if (guardBeforeOpen) return guardBeforeOpen;
@@ -542,6 +551,24 @@ export async function executeOpenDetailOperation({ profileId, params = {}, conte
         const link = claim?.link || null;
         assignedLink = link;
         slotState = readDetailSlotState(state, currentTabIndex, { tabCount: params.tabCount });
+        
+        const baseNoteId = normalizeBaseNoteId(link?.noteUrl || link?.noteId || null);
+        const visitedNoteIds = Array.isArray(state.detailGateState?.visitedNoteIds) ? state.detailGateState.visitedNoteIds : [];
+        if (baseNoteId && visitedNoteIds.includes(baseNoteId)) {
+          pushTrace({ kind: 'dedup', stage: 'open_detail_dedup_skip', noteId: baseNoteId, reason: 'already_visited' });
+          await releaseClaimedDetailLink({
+            profileId,
+            params,
+            state,
+            currentTabIndex,
+            activeEntry: readActiveLinkForTab(state, currentTabIndex),
+            pushTrace,
+            testingOverrides,
+            reason: 'dedup_skip',
+            skip: true,
+          });
+          continue;
+        }
         if (!link?.noteUrl) {
           const cleanupResult = await cleanupDetailContextOnDone({
             profileId,
@@ -557,9 +584,9 @@ export async function executeOpenDetailOperation({ profileId, params = {}, conte
           emitActionTrace(context, actionTrace, { stage: 'xhs_open_detail' });
           throw new Error('AUTOSCRIPT_DONE_DETAIL_LINKS_EXHAUSTED');
         }
+        // Preserve original xsec_source/source when available; avoid overriding to web_explore_feed
         effectiveNoteUrl = String(link.noteUrl)
-          .replace('/search_result/', '/explore/')
-          .replace(/([?&]source=)[^&#]*/i, '$1web_explore_feed');
+          .replace('/search_result/', '/explore/');
       }
 
       const activeEntry = useLinks
@@ -586,10 +613,7 @@ export async function executeOpenDetailOperation({ profileId, params = {}, conte
       }
 
         if (effectiveNoteUrl && !String(effectiveNoteUrl).includes('xsec_token=')) {
-          if (!useLinks) {
-            return createOpenFailureResult('MISSING_XSEC_TOKEN', 'detail url missing xsec_token');
-          }
-       const requeueTabIndex = currentTabIndex || getCurrentTabIndex(state, { tabCount: params.tabCount });
+          const requeueTabIndex = currentTabIndex || getCurrentTabIndex(state, { tabCount: params.tabCount });
        const activeEntry = readActiveLinkForTab(state, requeueTabIndex);
        await releaseClaimedDetailLink({
          profileId,
@@ -709,6 +733,13 @@ export async function executeOpenDetailOperation({ profileId, params = {}, conte
                 message: openBlocker.message,
                 url: redirectedUrl || effectiveNoteUrl || null,
               });
+              // Risk control cooldown: wait 30-60s before stopping to avoid immediate retry escalation
+              if (openBlocker.code === 'RISK_CONTROL_DETECTED') {
+                const riskCooldownMs = Math.floor(30000 + Math.random() * 30001);
+                pushTrace({ kind: 'risk_control_cooldown', stage: 'open_detail', cooldownMs: riskCooldownMs });
+                await sleep(riskCooldownMs);
+              }
+
               return buildXhsGuardFailure({
                 profileId,
                 guard: {
@@ -721,9 +752,7 @@ export async function executeOpenDetailOperation({ profileId, params = {}, conte
                 codeMode: 'guard',
               });
             }
-            if (!useLinks) {
-              return createOpenFailureResult('DETAIL_NOT_VISIBLE', 'detail not visible after open-by-links');
-            }
+            // click mode removed; always handle as open-by-links
            const requeueTabIndex = currentTabIndex || getCurrentTabIndex(state, { tabCount: params.tabCount });
            const activeEntry = readActiveLinkForTab(state, requeueTabIndex);
            await releaseClaimedDetailLink({
@@ -760,7 +789,6 @@ export async function executeOpenDetailOperation({ profileId, params = {}, conte
             openGatePermit = null;
           }
         } catch (error) {
-          if (!useLinks) throw error;
           const failureMessage = String(error?.message || error || 'open detail failed');
           const gateRejectCode = String(error?.code || '').trim();
           if ((gateRejectCode === 'OPEN_LINK_GATE_REJECTED' || gateRejectCode === 'OPEN_LINK_GATE_DENIED') && gateParams) {
@@ -871,6 +899,21 @@ export async function executeOpenDetailOperation({ profileId, params = {}, conte
   const resolvedNoteId = noteId || detailSnapshot?.noteIdFromUrl || extractNoteIdFromUrl(resolvedHref) || null;
   state.currentNoteId = resolvedNoteId;
   state.currentHref = resolvedHref;
+  
+  const baseNoteId = normalizeBaseNoteId(resolvedNoteId || resolvedHref || null);
+  if (baseNoteId) {
+    const visitedNoteIds = Array.isArray(state.detailGateState?.visitedNoteIds) ? state.detailGateState.visitedNoteIds : [];
+    if (!visitedNoteIds.includes(baseNoteId)) {
+      if (!state.detailGateState) {
+        state.detailGateState = {};
+      }
+      if (!Array.isArray(state.detailGateState.visitedNoteIds)) {
+        state.detailGateState.visitedNoteIds = [];
+      }
+      state.detailGateState.visitedNoteIds.push(baseNoteId);
+      pushTrace({ kind: 'dedup', stage: 'open_detail_mark_visited', noteId: baseNoteId, count: state.detailGateState.visitedNoteIds.length });
+    }
+  }
   if (!shouldReuseOpenDetail) {
     const returnUrl = useLinks ? resolveReturnUrl(beforeUrl || state.lastListUrl || null) : (beforeUrl || state.lastListUrl || null);
     state.lastListUrl = returnUrl || null;

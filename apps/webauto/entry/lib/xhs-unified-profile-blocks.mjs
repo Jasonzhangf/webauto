@@ -190,6 +190,7 @@ export async function runProfile(spec, argv, baseOverrides = {}) {
       stats: {
         notesProcessed: Math.max(0, Number(stats.openedNotes) || 0),
         commentsCollected: Math.max(0, Number(stats.commentsCollected) || 0),
+        newCommentsAdded: Math.max(0, Number(stats.newCommentsAdded) || 0),
         likesPerformed: Math.max(0, Number(stats.likesNewCount) || 0),
         likesSkippedTotal: Math.max(0, Number(stats.likesSkippedCount) || 0),
         likeAlreadySkipped: Math.max(0, Number(stats.likesAlreadyCount) || 0),
@@ -327,6 +328,7 @@ export async function runProfile(spec, argv, baseOverrides = {}) {
       stats: {
         notesProcessed: 0,
         commentsCollected: 0,
+        newCommentsAdded: 0,
         likesPerformed: 0,
         likesSkippedTotal: 0,
         likeAlreadySkipped: 0,
@@ -395,6 +397,7 @@ export async function runProfile(spec, argv, baseOverrides = {}) {
       stats: {
         notesProcessed: Math.max(0, Number(stats.openedNotes) || 0),
         commentsCollected: Math.max(0, Number(stats.commentsCollected) || 0),
+        newCommentsAdded: Math.max(0, Number(stats.newCommentsAdded) || 0),
         likesPerformed: Math.max(0, Number(stats.likesNewCount) || 0),
         likesSkippedTotal: Math.max(0, Number(stats.likesSkippedCount) || 0),
         likeAlreadySkipped: Math.max(0, Number(stats.likesAlreadyCount) || 0),

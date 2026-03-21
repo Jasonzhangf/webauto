@@ -1,9 +1,12 @@
 import { logDebug } from '../../modules/logging/src/index.js';
+import http from 'node:http';
 import { UiController } from '@web-auto/camo/src/services/controller/controller.js';
 import { handleContainerOperations } from './container-operations-handler.js';
 // @ts-ignore
 // import { setupContainerOperationsRoutes } from './container-operations.mjs';
 import { WebSocketServer, WebSocket } from 'ws';
+import { spawnSync } from 'node:child_process';
+import { createRequire } from 'node:module';
 import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -14,13 +17,14 @@ import { getContainerExecutor } from '../../modules/operations/src/executor.js';
 import { installServiceProcessLogger } from '../shared/serviceProcessLogger.js';
 import { startHeartbeatWatcher } from '../shared/heartbeat.js';
 import { taskStateRegistry } from './task-state.js';
-import { saveTaskSnapshot, appendEvent } from './task-persistence.js';
+import { saveTaskSnapshot, appendEvent, loadTaskSnapshot } from './task-persistence.js';
 
 // Ensure builtin operations are registered before handling any operations
 ensureBuiltinOperations();
 import { getStateRegistry } from './state-registry.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const requireFromHere = createRequire(import.meta.url);
 const { logEvent } = installServiceProcessLogger({ serviceName: 'unified-api' });
 
 const fallbackRepoRoot = path.resolve(__dirname, '../../..');
@@ -452,13 +456,27 @@ class UnifiedApiServer {
         const runId = parts[tasksIndex + 1];
         const action = url.searchParams.get('action');
         try {
-          ensureTask(runId, {});
+          let profileId = '';
+          const existingTask = this.taskRegistry.getTask(runId);
+          if (existingTask?.profileId && existingTask.profileId !== 'unknown') {
+            profileId = String(existingTask.profileId).trim();
+          }
+          if (!profileId) {
+            const snapshot = await loadTaskSnapshot(runId);
+            if (snapshot?.profileId && snapshot.profileId !== 'unknown') {
+              profileId = String(snapshot.profileId).trim();
+            }
+          }
+          const profileIdParam = String(url.searchParams.get('profileId') || '').trim();
+          if (!profileId && profileIdParam) profileId = profileIdParam;
+          ensureTask(runId, profileId ? { profileId } : {});
           if (action === 'pause') {
             this.taskRegistry.setStatus(runId, 'paused');
           } else if (action === 'resume') {
             this.taskRegistry.setStatus(runId, 'running');
-          } else if (action === 'stop') {
-            this.taskRegistry.setStatus(runId, 'aborted');
+         } else if (action === 'stop') {
+           this.taskRegistry.setStatus(runId, 'aborted');
+            if (profileId) resetProfileSession(profileId);
           }
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ success: true }));
@@ -474,8 +492,22 @@ class UnifiedApiServer {
         const tasksIndex = parts.indexOf('tasks');
         const runId = parts[tasksIndex + 1];
         try {
-          ensureTask(runId, {});
+          let profileId = '';
+          const existingTask = this.taskRegistry.getTask(runId);
+          if (existingTask?.profileId && existingTask.profileId !== 'unknown') {
+            profileId = String(existingTask.profileId).trim();
+          }
+          if (!profileId) {
+            const snapshot = await loadTaskSnapshot(runId);
+            if (snapshot?.profileId && snapshot.profileId !== 'unknown') {
+              profileId = String(snapshot.profileId).trim();
+            }
+          }
+          const profileIdParam = String(url.searchParams.get('profileId') || '').trim();
+          if (!profileId && profileIdParam) profileId = profileIdParam;
+          ensureTask(runId, profileId ? { profileId } : {});
           this.taskRegistry.setStatus(runId, 'aborted');
+          if (profileId) resetProfileSession(profileId);
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ success: true }));
         } catch (err: any) {
@@ -817,6 +849,59 @@ process.on('uncaughtException', (err) => {
     process.exit(1);
   }, 5000);
 });
+
+function resolveCamoCliEntry() {
+  try {
+    const resolved = requireFromHere.resolve('@web-auto/camo/bin/camo.mjs');
+    return resolved || null;
+  } catch {
+    return null;
+  }
+}
+
+function cleanupProfileSession(profileId: string) {
+  if (!profileId) return;
+  const entry = resolveCamoCliEntry();
+  if (!entry) return;
+  try {
+    const ret = spawnSync(process.execPath, [entry, 'cleanup', profileId, '--json'], {
+      encoding: 'utf8',
+      windowsHide: true,
+      env: { ...process.env },
+    });
+    if (ret.status !== 0) {
+      console.warn('[unified-api] camo cleanup failed:', ret.stderr || ret.stdout || `exit ${ret.status}`);
+    }
+  } catch (err: any) {
+    console.warn('[unified-api] camo cleanup error:', err?.message || String(err));
+  }
+}
+
+function resetProfileSession(profileId: string) {
+  if (!profileId) return;
+  try {
+    const payload = JSON.stringify({ action: 'goto', profileId, url: 'https://www.xiaohongshu.com/explore' });
+    const req = http.request({
+      hostname: '127.0.0.1',
+      port: 7704,
+      path: '/api/command',
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(payload),
+      },
+    }, (res) => {
+      res.on('data', () => {});
+    });
+    req.on('error', (err: any) => {
+      console.warn('[unified-api] resetProfileSession error:', err?.message || String(err));
+    });
+    req.write(payload);
+    req.end();
+  } catch (err: any) {
+    console.warn('[unified-api] resetProfileSession exception:', err?.message || String(err));
+  }
+}
 
 // 监听进程退出信号
 process.on('SIGTERM', () => {
