@@ -83146,3 +83146,40 @@ sessionId: 019d0120-eac0-72f2-b35b-9e311d09871b
 model: gpt-5.4
 provider: openai-responses
 -->
+
+### Assistant · 2026/03/22 12:12:57
+
+Jason，剩余 `onFailure: 'stop_all'` 逐项分析：
+
+| 文件 | 操作 | id | 当前 | 改为 | 原因 |
+|---|---|---|---|---|---|
+| `xhs-autoscript-collect.mjs:84` | **保留** | `finish_after_collect_links` | `stop_all` | `stop_all` | 正常完成信号（`AUTOSCRIPT_DONE_LINKS_COLLECTED`），runtime 识别为 script_complete，不是错误 |
+| `xhs-autoscript-ops.mjs:71` | **保留** | `xhs_wait_search_permit` | `stop_all` | `stop_all` | 搜索门禁拿不到许可 = 无法执行，应该停止 |
+| `xhs-autoscript-ops.mjs:214` | **保留** | `abort_on_login_guard` | `stop_all` | `stop_all` | 登录失效 = 会话级阻塞，停止是正确的 |
+| `xhs-autoscript-ops.mjs:229` | **保留** | `abort_on_risk_guard` | `stop_all` | `stop_all` | 风控出现 = 会话级阻塞，停止是正确的 |
+| `xhs-autoscript-base.mjs:134` | **保留** | 默认配置 | 条件 `stop_all`/`chain_stop` | 不改 | 严格模式下全停、非严格模式链路停止，设计合理 |
+
+**结论：剩余的 `stop_all` 全部是会话级阻塞信号（登录失效、风控、门禁、正常完成），不应该改为 continue。P0 改动已经覆盖了所��"可恢复的局部失败"场景。**
+
+额外已清理：35 个 `.bak*` 临时文件已删除并提交。
+
+当前 Epic 状态：**P0 全部完成，P1 两项均评估为当前行为已正确，无需改动。**
+
+<!-- cache-meta
+requestId: openai-responses-tabglm.key1-glm-5-turbo-20260322T121244713-23715-119
+sessionId: 019d0120-eac0-72f2-b35b-9e311d09871b
+model: glm-5-turbo
+provider: anthropic-messages
+finishReason: stop
+-->
+
+### User · 2026/03/22 12:16:30
+
+那我们提交并开始测试
+
+<!-- cache-meta
+requestId: openai-responses-unknown-unknown-20260322T121629954-23720-124
+sessionId: 019d0120-eac0-72f2-b35b-9e311d09871b
+model: gpt-5.4
+provider: openai-responses
+-->
