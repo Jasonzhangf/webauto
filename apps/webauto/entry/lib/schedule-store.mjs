@@ -938,10 +938,21 @@ export function markScheduleTaskResult(id, result = {}) {
   task.runCount = (Number(task.runCount) || 0) + 1;
   if (status !== 'success') task.failCount = (Number(task.failCount) || 0) + 1;
 
-  const fromMs = Number.isFinite(Date.parse(finishedAt)) ? Date.parse(finishedAt) : Date.now();
-  task.nextRunAt = nextRunAt(task, fromMs, true);
-  if (task.scheduleType === 'once') {
-    task.enabled = false;
+  // Handle retry override: when failed with a valid retryAt, use that for nextRunAt
+  const retryAt = normalizeText(result.retryAt ?? result.nextRunAtOverride);
+  if (status === 'failed' && retryAt) {
+    const retryMs = Date.parse(retryAt);
+    if (!Number.isFinite(retryMs)) {
+      throw new Error(`invalid retryAt ISO timestamp: ${retryAt}`);
+    }
+    task.nextRunAt = new Date(retryMs).toISOString();
+    // When retrying, do NOT disable once tasks — the retry may succeed
+  } else {
+    const fromMs = Number.isFinite(Date.parse(finishedAt)) ? Date.parse(finishedAt) : Date.now();
+    task.nextRunAt = nextRunAt(task, fromMs, true);
+    if (task.scheduleType === 'once') {
+      task.enabled = false;
+    }
   }
   if (task.maxRuns && task.runCount >= task.maxRuns) {
     task.enabled = false;

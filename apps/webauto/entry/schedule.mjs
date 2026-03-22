@@ -23,6 +23,7 @@ import {
   updateScheduleTask,
 } from './lib/schedule-store.mjs';
 import { listAccountProfiles } from './lib/account-store.mjs';
+import { evaluateRetry } from './lib/schedule-retry.mjs';
 
 let xhsRunnerPromise = null;
 let weiboRunnerPromise = null;
@@ -371,14 +372,16 @@ async function executeTask(task, options = {}) {
         planOnly: result?.planOnly === true,
       },
     };
-  } catch (error) {
-    const durationMs = Date.now() - startedAt;
-    const message = error?.message || String(error);
+ } catch (error) {
+   const durationMs = Date.now() - startedAt;
+   const message = error?.message || String(error);
+    const retry = evaluateRetry(error, task);
     const runResult = markScheduleTaskResult(task.id, {
       status: 'failed',
       error: message,
       durationMs,
       finishedAt: new Date().toISOString(),
+      retryAt: retry.shouldRetry ? retry.retryAt : undefined,
     });
     return {
       ok: false,
@@ -387,6 +390,7 @@ async function executeTask(task, options = {}) {
       name: task.name,
       durationMs,
       error: message,
+      retry: retry.shouldRetry ? { errorType: retry.errorType, retryAt: retry.retryAt } : undefined,
       runResult,
     };
   } finally {

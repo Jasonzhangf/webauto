@@ -447,4 +447,72 @@ describe('schedule-store', () => {
     assert.equal(claimB.ok, false);
     assert.equal(claimB.reason, 'resource_busy');
   });
+
+  it('failed + retryAt overrides nextRunAt and does not disable once tasks', () => {
+    useTempSchedulesRoot();
+
+    // Create a once task
+    const onceTask = addScheduleTask({
+      name: 'retry-once-task',
+      scheduleType: 'once',
+      runAt: new Date(Date.now() - 60_000).toISOString(),
+      commandType: 'xhs-unified',
+      commandArgv: { profile: 'p-retry', keyword: 'k-retry' },
+    });
+    assert.equal(onceTask.enabled, true);
+
+    // Fail with retryAt
+    const futureRetry = new Date(Date.now() + 120_000).toISOString();
+    const afterFail = markScheduleTaskResult(onceTask.id, {
+      status: 'failed',
+      error: 'timeout',
+      finishedAt: new Date().toISOString(),
+      retryAt: futureRetry,
+    });
+
+    // nextRunAt should be set to retryAt, NOT disabled
+    assert.equal(afterFail.enabled, true, 'once task should remain enabled when retrying');
+    assert.equal(afterFail.nextRunAt, futureRetry, 'nextRunAt should be the retryAt value');
+    assert.equal(afterFail.failCount, 1);
+    assert.equal(afterFail.lastStatus, 'failed');
+  });
+
+  it('invalid retryAt ISO throws error', () => {
+    useTempSchedulesRoot();
+    const task = addScheduleTask({
+      name: 'bad-retry-task',
+      scheduleType: 'interval',
+      intervalMinutes: 5,
+      commandType: 'xhs-unified',
+      commandArgv: { profile: 'p', keyword: 'k' },
+    });
+
+    assert.throws(() => {
+      markScheduleTaskResult(task.id, {
+        status: 'failed',
+        error: 'timeout',
+        retryAt: 'not-a-valid-date',
+      });
+    }, /invalid retryAt ISO timestamp/);
+  });
+
+  it('failed without retryAt disables once tasks normally', () => {
+    useTempSchedulesRoot();
+    const onceTask = addScheduleTask({
+      name: 'no-retry-once',
+      scheduleType: 'once',
+      runAt: new Date(Date.now() - 60_000).toISOString(),
+      commandType: 'xhs-unified',
+      commandArgv: { profile: 'p', keyword: 'k' },
+    });
+
+    const afterFail = markScheduleTaskResult(onceTask.id, {
+      status: 'failed',
+      error: 'something broke',
+      finishedAt: new Date().toISOString(),
+    });
+
+    assert.equal(afterFail.enabled, false, 'once task without retry should be disabled');
+    assert.equal(afterFail.nextRunAt, null);
+  });
 });

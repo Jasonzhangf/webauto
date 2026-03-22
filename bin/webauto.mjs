@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import minimist from 'minimist';
 import { spawn, spawnSync } from 'node:child_process';
-import { existsSync, writeFileSync, readFileSync, mkdirSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
@@ -242,9 +242,6 @@ function applyDefaultRuntimeEnv() {
   if (!String(process.env.WEBAUTO_REPO_ROOT || '').trim()) {
     process.env.WEBAUTO_REPO_ROOT = ROOT;
   }
-  if (isGlobalInstall() && !String(process.env.WEBAUTO_SKIP_BUILD_CHECK || '').trim()) {
-    process.env.WEBAUTO_SKIP_BUILD_CHECK = '1';
-  }
   if (
     !String(process.env.WEBAUTO_HOME || '').trim()
     && !String(process.env.WEBAUTO_ROOT || process.env.WEBAUTO_PORTABLE_ROOT || '').trim()
@@ -255,37 +252,6 @@ function applyDefaultRuntimeEnv() {
 }
 
 applyDefaultRuntimeEnv();
-
-const STATE_FILE = path.join(resolveWebautoHome(), 'cli-state.json');
-
-function loadState() {
-  try {
-    return JSON.parse(readFileSync(STATE_FILE, 'utf-8'));
-  } catch {
-    return { initialized: false, version: null };
-  }
-}
-
-function saveState(state) {
-  try {
-    const dir = path.dirname(STATE_FILE);
-    if (!existsSync(dir)) {
-      mkdirSync(dir, { recursive: true });
-    }
-    writeFileSync(STATE_FILE, JSON.stringify(state, null, 2));
-  } catch {}
-}
-
-function isGlobalInstall() {
-  // Check if running from global node_modules
-  const execPath = process.argv[1] || '';
-  const npmPrefix = String(process.env.NPM_CONFIG_PREFIX || '').trim();
-  return execPath.includes('node_modules/@web-auto/webauto') || 
-         execPath.includes('/opt/homebrew/lib/node_modules') ||
-         execPath.includes('/usr/local/lib/node_modules') ||
-         (npmPrefix ? execPath.includes(npmPrefix) : false) ||
-         !existsSync(path.join(ROOT, '.git'));
-}
 
 function resolveOnPath(candidates) {
   const pathEnv = process.env.PATH || process.env.Path || '';
@@ -325,10 +291,6 @@ function npmRunner() {
   return wrapWindowsRunner('npm.cmd');
 }
 
-function uiConsoleScriptPath() {
-  return path.join(ROOT, 'apps', 'desktop-console', 'entry', 'ui-console.mjs');
-}
-
 function daemonScriptPath() {
   return path.join(ROOT, 'apps', 'webauto', 'entry', 'daemon.mjs');
 }
@@ -348,13 +310,11 @@ function printMainHelp() {
   console.log(`webauto CLI
 
 Usage:
-  webauto               # 直接启动 UI Console
+  webauto               # 显示帮助
   webauto --help
   webauto account --help
   webauto schedule --help
   webauto deps --help
-  webauto ui --help
-  webauto ui cli --help
   webauto daemon --help
   webauto xhs --help
 
@@ -362,10 +322,6 @@ Core Commands:
   webauto account <list|sync|add|get|update|delete|login|sync-alias> [options]
   webauto schedule <list|get|add|update|delete|import|export|run|run-due|daemon> [options]
   webauto deps <check|auto|install|uninstall|reinstall> [options]
-  webauto ui console [--build] [--install] [--check]
-  webauto ui restart [--build] [--install] [--timeout <ms>] [--reason <text>]
-  webauto ui cli <action> [options]
-  webauto daemon <start|stop|status|run|relay|autostart>
   webauto test [--layer <l0|l1|l2|l3|xhs_collect|all>] [--output <path>] [--json]
   webauto xhs install [--download-browser] [--download-geoip] [--ensure-backend]
   webauto xhs unified [xhs options...]
@@ -394,18 +350,8 @@ Examples (standard):
   webauto schedule daemon --interval-sec 30
   webauto deps install --all
   webauto deps reinstall --all
-  webauto ui console --check
-  webauto ui console --build
-  webauto ui console --install
-  webauto ui restart --build --reason "reload-after-pull"
-  webauto ui cli --help
-  webauto ui cli start --build
-  webauto ui cli tab --tab 配置
-  webauto ui cli input --selector "#keyword-input" --value "seedance2.0"
-  webauto ui cli click --selector "#start-btn"
   webauto --daemon
   webauto --daemon stop
-  webauto --daemon relay -- xhs unified --profile profile-8 --keyword 春晚 --max-notes 20 --stage links
   webauto daemon autostart install
   webauto xhs install --ensure-backend
   webauto xhs unified --profile xiaohongshu-batch-1 --keyword "seedance2.0" --max-notes 100 --do-comments true --persist-comments true --do-likes true --like-keywords "真牛逼" --env debug --tab-count 4
@@ -429,7 +375,6 @@ Options:
   --layer, -l   Which layer(s) to run (default: all)
   --output, -o  JSON report output path (default: ./.tmp/ui-test-report-<timestamp>.json)
   --json        Print JSON report to stdout (summary suppressed)
-  --headless    Set HEADLESS=1 for UI tests
   --profile     Pass WEBAUTO_TEST_PROFILE to tests
   --keyword     Pass WEBAUTO_TEST_KEYWORD to tests
   --target      Pass WEBAUTO_TEST_TARGET to tests
@@ -445,76 +390,18 @@ Examples:
 `);
 }
 
-function printUiConsoleHelp() {
-  console.log(`webauto ui
-
-Usage:
-  webauto ui console [--build] [--install] [--check] [--no-daemon]
-  webauto ui restart [--build] [--install] [--timeout <ms>] [--reason <text>]
-  webauto ui cli <action> [options]
-
-Options:
-  --check       只检查构建/依赖状态，不启动 UI
-  --build       缺少构建产物时自动构建
-  --install     缺少依赖时自动安装
-  --no-daemon   前台模式运行（不后台守护）
-
-CLI Actions:
-  start         启动 UI（可配合 --build/--install）
-  restart       广播重启消息，应用自停并自启（可配合 --reason）
-  status        获取 UI 运行状态（含 runId/错误计数）
-  snapshot      获取 UI 快照（含当前 tab 与关键控件值）
-  tab           切换 tab（--tab config 或 --label 配置）
-  click         点击控件（--selector）
-  focus         聚焦控件（--selector）
-  input         输入文本（--selector --value）
-  select        选择下拉项（--selector --value）
-  press         输入按键（--key Enter/Escape）
-  probe         读取控件状态（exists/count/value/text/checked，可选 --detailed）
-  click-text    按文案点击按钮（无 id 控件）
-  dialogs       控制 alert/confirm/prompt 静默模式
-  wait          等待元素状态（--selector --state visible|exists|hidden|text_contains|text_equals|value_equals|not_disabled）
-  run           按 steps.json 执行动作序列
-  full-cover    真实 UI CLI 全功能覆盖回归（无 mock）
-
-Common Options:
-  --auto-start    未检测到 UI 时自动拉起
-  --host <host>   控制通道 host（默认 127.0.0.1）
-  --port <n>      控制通道端口（默认 7716）
-  --json          输出 JSON
-  --detailed      probe 时返回 rect/style/attributes 等详细信息
-
-Examples:
-  webauto ui console --check
-  webauto ui console --build
-  webauto ui console --install
-  webauto ui restart --reason "git pull"
-  webauto ui cli start --build
-  webauto ui cli status --json
-  webauto ui cli tab --tab 配置
-  webauto ui cli input --selector "#keyword-input" --value "春晚"
-  webauto ui cli click --selector "#start-btn"
-  webauto ui cli probe --selector "#start-btn" --detailed
-  webauto ui cli full-cover --build --output ./.tmp/ui-cli-full-cover.json
-  webauto test --layer l0
-`);
-}
-
 function printDaemonHelp() {
   console.log(`webauto daemon
 
 Usage:
   webauto --daemon
   webauto --daemon start|stop|status|run
-  webauto --daemon relay [--detach] -- <webauto args...>
-  webauto daemon <start|stop|status|run|relay|autostart>
+  webauto daemon <start|stop|status|run|autostart>
 
 Examples:
   webauto --daemon
   webauto --daemon status --json
   webauto --daemon stop
-  webauto --daemon relay -- xhs unified --profile profile-8 --keyword 春晚 --max-notes 20 --stage links
-  webauto --daemon relay --detach -- xhs unified --profile profile-8 --keyword 春晚 --max-notes 100 --stage links
   webauto daemon autostart install
   webauto daemon autostart status --json
 `);
@@ -702,13 +589,6 @@ Examples:
 `);
 }
 
-function exists(p) {
-  try {
-    return existsSync(p);
-  } catch {
-    return false;
-  }
-}
 
 async function run(cmd, args, options = {}) {
   await new Promise((resolve, reject) => {
@@ -759,192 +639,36 @@ async function runInDir(dir, cmd, args) {
   });
 }
 
-function checkDesktopConsoleDeps() {
-  const electronNames = process.platform === 'win32'
-    ? ['electron.exe']
-    : (process.platform === 'darwin' ? ['electron', path.join('Electron.app', 'Contents', 'MacOS', 'Electron')] : ['electron']);
-  const roots = [
-    path.join(ROOT, 'node_modules', 'electron', 'dist'),
-    path.join(ROOT, 'apps', 'desktop-console', 'node_modules', 'electron', 'dist'),
-  ];
-  const candidates = roots.flatMap((base) => electronNames.map((name) => path.join(base, name)));
-  return candidates.some((p) => exists(p));
-}
-
-function checkDesktopConsoleBuilt() {
-  return exists(path.join(ROOT, 'apps', 'desktop-console', 'dist', 'renderer', 'index.html'));
-}
-
-function checkServicesBuilt() {
-  return exists(path.join(ROOT, 'dist', 'modules')) && exists(path.join(ROOT, 'dist', 'services'));
-}
-
-async function ensureDepsAndBuild() {
-  console.log('[webauto] First run from global install, setting up...');
-  
-  // Check if we have desktop-console source
-  const appDir = path.join(ROOT, 'apps', 'desktop-console');
-  if (!exists(appDir)) {
-    console.error('❌ desktop-console source not found in package');
-    process.exit(1);
-  }
-
-  // Global package should already ship renderer build.
-  if (isGlobalInstall()) {
-    if (!checkDesktopConsoleDeps()) {
-      console.log('[webauto] Installing desktop-console runtime dependencies...');
-      const npm = npmRunner();
-      await run(npm.cmd, [...npm.prefix, '--prefix', appDir, '--workspaces=false', 'install', '--omit=dev']);
-    }
-    if (!checkDesktopConsoleDeps()) {
-      console.error('❌ electron runtime installation failed for desktop-console.');
-      process.exit(1);
-    }
-    if (!checkDesktopConsoleBuilt()) {
-      console.error('❌ desktop-console dist missing from package. Please reinstall @web-auto/webauto.');
-      process.exit(1);
-    }
-    const pkgJson = JSON.parse(readFileSync(path.join(ROOT, 'package.json'), 'utf-8'));
-    saveState({ initialized: true, version: pkgJson.version });
-    console.log('[webauto] Setup complete!');
-    return;
-  }
-
-  // Install deps if needed
-  if (!checkDesktopConsoleDeps()) {
-    console.log('[webauto] Installing desktop-console dependencies...');
-  const npm = npmRunner();
-  await runInDir(appDir, npm.cmd, [...npm.prefix, 'install']);
-  }
-
-  // Build if needed  
-  if (!checkDesktopConsoleBuilt()) {
-    console.log('[webauto] Building desktop-console...');
-  const npm = npmRunner();
-  await runInDir(appDir, npm.cmd, [...npm.prefix, 'run', 'build']);
-  }
-
-  // Mark as initialized
-  const pkgJson = JSON.parse(readFileSync(path.join(ROOT, 'package.json'), 'utf-8'));
-  saveState({ initialized: true, version: pkgJson.version });
-  console.log('[webauto] Setup complete!');
-}
-
-async function ensureUiRuntimeReady({ build, install }) {
-  let okServices = checkServicesBuilt();
-  let okDeps = checkDesktopConsoleDeps();
-  let okUiBuilt = checkDesktopConsoleBuilt();
-
-  if (isGlobalInstall()) {
-    const state = loadState();
-    const pkgJson = JSON.parse(readFileSync(path.join(ROOT, 'package.json'), 'utf-8'));
-    if (!state.initialized || state.version !== pkgJson.version || !okDeps || !okUiBuilt) {
-      await ensureDepsAndBuild();
-      okDeps = checkDesktopConsoleDeps();
-      okUiBuilt = checkDesktopConsoleBuilt();
-    }
-  } else if (!okServices) {
-    if (!build) {
-      console.error('❌ missing dist/ (services/modules). Run: npm run build:services');
-      process.exit(2);
-    }
-    const npm = npmRunner();
-    await run(npm.cmd, [...npm.prefix, 'run', 'build:services']);
-    okServices = checkServicesBuilt();
-  }
-
-  if (!okDeps) {
-    if (isGlobalInstall()) {
-      console.error('❌ electron runtime missing from installed package after setup.');
-      process.exit(2);
-    }
-    if (!install && !build) {
-      console.error('❌ missing apps/desktop-console/node_modules. Run: npm --prefix apps/desktop-console install');
-      process.exit(2);
-    }
-    const npm = npmRunner();
-    await runInDir(path.join(ROOT, 'apps', 'desktop-console'), npm.cmd, [...npm.prefix, 'install']);
-    okDeps = checkDesktopConsoleDeps();
-  }
-
-  if (!okUiBuilt) {
-    if (isGlobalInstall()) {
-      console.error('❌ missing apps/desktop-console/dist in installed package after setup.');
-      process.exit(2);
-    }
-    if (!build) {
-      console.error('❌ missing apps/desktop-console/dist. Run: npm --prefix apps/desktop-console run build');
-      process.exit(2);
-    }
-    const npm = npmRunner();
-    await runInDir(path.join(ROOT, 'apps', 'desktop-console'), npm.cmd, [...npm.prefix, 'run', 'build']);
-    okUiBuilt = checkDesktopConsoleBuilt();
-  }
-
-  if (!okDeps || !okUiBuilt || (!isGlobalInstall() && !okServices)) {
-    console.error('❌ ui runtime prerequisites are not ready');
-    process.exit(2);
-  }
-}
-
-async function uiConsole({ build, install, checkOnly, noDaemon }) {
-  console.log(`[webauto] version ${ROOT_VERSION}`);
-  const okServices = checkServicesBuilt();
-  const okDeps = checkDesktopConsoleDeps();
-  const okUiBuilt = checkDesktopConsoleBuilt();
-
-  if (checkOnly) {
-    console.log(`[check] repoRoot: ${ROOT}`);
-    console.log(`[check] dist/services: ${okServices ? 'OK' : 'MISSING'}`);
-    console.log(`[check] desktop-console deps: ${okDeps ? 'OK' : 'MISSING'}`);
-    console.log(`[check] desktop-console dist: ${okUiBuilt ? 'OK' : 'MISSING'}`);
-    console.log(`[check] isGlobalInstall: ${isGlobalInstall()}`);
-    return;
-  }
-
-  await ensureUiRuntimeReady({ build, install });
-
-  const uiScript = uiConsoleScriptPath();
-  const uiArgs = [];
-  if (noDaemon) uiArgs.push('--no-daemon');
-  await run(process.execPath, [uiScript, ...uiArgs]);
-}
 
 async function daemonProxy(rawArgv) {
   const daemonScript = daemonScriptPath();
   const filtered = rawArgv.filter((item) => item !== '--daemon');
-  const controlSet = new Set([
-    'start',
-    'stop',
-    'status',
-    'run',
-    'relay',
-    'ui-start',
-    'ui-stop',
-    'ui-status',
-    'service-status',
-    'job-status',
-    'job-list',
-    'autostart',
-    'help',
-    '--help',
-    '-h',
-  ]);
+ const controlSet = new Set([
+   'start',
+   'stop',
+   'status',
+   'run',
+   'autostart',
+   'help',
+   '--help',
+   '-h',
+ ]);
   let daemonArgs = [];
   if (filtered.length === 0) {
     daemonArgs = ['start'];
-  } else if (controlSet.has(String(filtered[0] || '').trim().toLowerCase())) {
-    daemonArgs = filtered;
-  } else {
-    daemonArgs = ['relay', '--', ...filtered];
-  }
+ } else if (controlSet.has(String(filtered[0] || '').trim().toLowerCase())) {
+   daemonArgs = filtered;
+ } else {
+    console.error(`❌ Unknown daemon command: ${filtered[0]}. Use: start|stop|status|run|autostart`);
+    process.exit(2);
+ }
   await run(process.execPath, [daemonScript, ...daemonArgs]);
 }
 
 async function main() {
   const rawArgv = process.argv.slice(2);
   const args = minimist(process.argv.slice(2), {
-    boolean: ['help', 'build', 'install', 'check', 'full', 'link', 'skip-tests', 'skip-pack', 'no-daemon', 'no-bump', 'json', 'daemon'],
+    boolean: ['help', 'skip-tests', 'skip-pack', 'no-bump', 'json', 'daemon'],
     string: ['bump'],
     alias: { h: 'help' },
   });
@@ -952,9 +676,8 @@ async function main() {
   const cmd = String(args._[0] || '').trim();
   const sub = String(args._[1] || '').trim();
   const daemonBypass = String(process.env.WEBAUTO_DAEMON_BYPASS || '').trim() === '1';
-  const daemonFlag = !daemonBypass && (rawArgv.includes('--daemon') || args.daemon === true);
-  const noDaemon = rawArgv.includes('--no-daemon') || rawArgv.includes('--foreground') || args['no-daemon'] === true;
-  const sessionZero = isWindowsSessionZero();
+ const daemonFlag = !daemonBypass && (rawArgv.includes('--daemon') || args.daemon === true);
+ const sessionZero = isWindowsSessionZero();
 
   const getDaemonSubcommand = () => {
     if (cmd === 'daemon') return String(args._[1] || 'start').trim().toLowerCase();
@@ -965,24 +688,17 @@ async function main() {
 
   if (sessionZero) {
     const daemonSub = getDaemonSubcommand();
-    const allowedDaemon = new Set([
-      'status',
-      'stop',
-      'ui-start',
-      'ui-status',
-      'ui-stop',
-      'relay',
-      'job-status',
-      'job-list',
-      'service-status',
-      'help',
-      '--help',
-      '-h',
-    ]);
+   const allowedDaemon = new Set([
+     'status',
+     'stop',
+     'help',
+     '--help',
+     '-h',
+   ]);
     if (cmd === 'daemon' || daemonFlag) {
       if (!allowedDaemon.has(daemonSub)) {
-        console.error('[webauto] Session 0 blocked: daemon start/run must be executed from a non-Session 0 desktop session.');
-        console.error('[webauto] If daemon is already running, use: webauto --daemon ui-start (or --daemon status).');
+       console.error('[webauto] Session 0 blocked: daemon start/run must be executed from a non-Session 0 desktop session.');
+        console.error('[webauto] If daemon is already running, use: webauto --daemon status.');
         process.exit(2);
       }
     } else {
@@ -991,7 +707,7 @@ async function main() {
       const allowedCmds = new Set(['version', 'deps', 'build:dev', 'build:release', 'build:daemon']);
       if (!isHelp && !isXhsStatus && !allowedCmds.has(cmd)) {
         console.error(`[webauto] Session 0 blocked: ${cmd || 'ui'} is not allowed.`);
-        console.error('[webauto] Use a non-Session 0 desktop session to start daemon, then use: webauto --daemon ui-start.');
+        console.error('[webauto] Use a non-Session 0 desktop session to start daemon.');
         process.exit(2);
       }
     }
@@ -1016,10 +732,6 @@ async function main() {
       printDepsHelp();
       return;
     }
-    if (cmd === 'ui') {
-      printUiConsoleHelp();
-      return;
-    }
     if (cmd === 'daemon' || daemonFlag) {
       printDaemonHelp();
       return;
@@ -1040,19 +752,14 @@ async function main() {
     return;
   }
 
-  if (!cmd) {
-    if (daemonFlag) {
-      await daemonProxy(rawArgv);
-      return;
-    }
-    await uiConsole({
-      build: false,
-      install: false,
-      checkOnly: false,
-      noDaemon,
-    });
+ if (!cmd) {
+   if (daemonFlag) {
+     await daemonProxy(rawArgv);
+     return;
+   }
+    printMainHelp();
     return;
-  }
+ }
 
   if (daemonFlag) {
     await daemonProxy(rawArgv);
@@ -1099,12 +806,10 @@ async function main() {
 
   // build:dev - local development mode
   if (cmd === 'build:dev') {
-    console.log('[webauto] Running local dev setup...');
-    const npm = npmRunner();
-    await run(npm.cmd, [...npm.prefix, 'run', 'build:services']);
-    await runInDir(path.join(ROOT, 'apps', 'desktop-console'), npm.cmd, [...npm.prefix, 'install']);
-    await runInDir(path.join(ROOT, 'apps', 'desktop-console'), npm.cmd, [...npm.prefix, 'run', 'build']);
-    console.log('[webauto] Dev setup complete');
+   console.log('[webauto] Running local dev setup...');
+   const npm = npmRunner();
+   await run(npm.cmd, [...npm.prefix, 'run', 'build:services']);
+   console.log('[webauto] Dev setup complete');
     return;
   }
 
@@ -1138,58 +843,18 @@ async function main() {
     } else {
       console.log('[webauto] Skipping tests (--skip-tests)');
     }
-    await run(npm.cmd, [...npm.prefix, 'run', 'build:services']);
-    await run(npm.cmd, [...npm.prefix, '--prefix', 'apps/desktop-console', 'run', 'build']);
-    if (!skipPack) {
-      await run(npm.cmd, [...npm.prefix, 'pack', '--dry-run']);
+   await run(npm.cmd, [...npm.prefix, 'run', 'build:services']);
+   if (!skipPack) {
+     await run(npm.cmd, [...npm.prefix, 'pack', '--dry-run']);
     } else {
       console.log('[webauto] Skipping npm pack validation (--skip-pack)');
     }
-    // Clean up state for fresh install
-    saveState({ initialized: false, version: null });
-    console.log('[webauto] Release gate complete');
+   console.log('[webauto] Release gate complete');
     console.log('[webauto] Ready to publish (npm publish --access public)');
-    return;
-  }
+   return;
+ }
 
-  if (cmd === 'ui' && sub === 'console') {
-    await uiConsole({
-      build: args.build === true,
-      install: args.install === true,
-      checkOnly: args.check === true,
-      noDaemon,
-    });
-    return;
-  }
-
-  if (cmd === 'ui' && sub === 'restart') {
-    await ensureUiRuntimeReady({
-      build: args.build === true,
-      install: args.install === true,
-    });
-    const script = path.join(ROOT, 'apps', 'desktop-console', 'entry', 'ui-cli.mjs');
-    await run(process.execPath, [script, 'restart', ...rawArgv.slice(2)]);
-    return;
-  }
-
-  if (cmd === 'ui' && sub === 'cli') {
-    await ensureUiRuntimeReady({
-      build: args.build === true,
-      install: args.install === true,
-    });
-    const script = path.join(ROOT, 'apps', 'desktop-console', 'entry', 'ui-cli.mjs');
-    await run(process.execPath, [script, ...rawArgv.slice(2)]);
-    return;
-  }
-
-  // Legacy: keep compatibility for historical `ui test` usage.
-  if (cmd === 'ui' && sub === 'test') {
-    console.warn('[webauto] `ui test` 已废弃，建议改用 `webauto ui cli ...`。');
-    const uiConsoleScript = path.join(ROOT, 'apps', 'desktop-console', 'entry', 'ui-console.mjs');
-    await run(process.execPath, [uiConsoleScript, ...rawArgv.slice(1)]);
-    return;
-  }
-  if (cmd === 'account') {
+ if (cmd === 'account') {
     const script = path.join(ROOT, 'apps', 'webauto', 'entry', 'account.mjs');
     await run(process.execPath, [script, ...rawArgv.slice(1)]);
     return;

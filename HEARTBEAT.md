@@ -1,102 +1,61 @@
-# HEARTBEAT.md - 小红书采集压力测试
+# HEARTBEAT.md - CLI 去 UI/daemon 精简
+Heartbeat-Until: 2026-03-22T06:00:00+08:00
 
-**Last Updated**: 2026-03-16 23:56 CST
-**Status**: ❌ 暂停 - submit_search click 超时问题
-
----
-
-## 🎯 当前任务
-
-200 条压力测试遇到新问题：`submit_search` 操作 click 超时
+**Last Updated**: 2026-03-22 00:30 CST
+**Status**: 🚧 进行中：CLI 去 UI/daemon 精简与调度设计
 
 ---
 
-## 🔍 问题定位
+## 📋 当前计划任务列表
 
-### 错误信息
-```
-mouse:click(retry) (attempt 2/2) timed out after 30000ms
-operation: submit_search
-runId: 0fd77d3d-b285-4e9c-b4b8-8cc83b26a7cb
-```
+1. ✅ **移除 desktop UI 依赖** (2026-03-22)
+   - 清理 `bin/webauto.mjs` 中 desktop-console/electron 相关逻辑
+   - 移除 uiConsole、ensureUiRuntimeReady、checkDesktopConsoleDeps 等函数
+   - 移除 daemon relay 支持
+   - 移除 UI CLI 命令 (ui console/restart/cli/test)
+   - 清理 build:dev/build:release 中的 desktop-console 构建步骤
+   - 文件从 1314 行精简到 983 行
 
-### DOM 状态（失败时）
-- `href`: "https://www.xiaohongshu.com/explore"
-- `searchVisible`: true ✅
-- `detailVisible`: false
-- `activeElement`: search-input ✅
+2. ✅ **移除 daemon guard** (2026-03-22)
+   - 移除 `xhs-unified.mjs` 中的 daemon worker ID 检查
+   - CLI 可直接执行 `webauto xhs unified` 无需 daemon
 
-### 根因分析
+3. ✅ **daemon 设计文档** (2026-03-22)
+   - 创建 `docs/daemon-design.md`
+   - 包含：调度模型、租约机制、重试/退避策略、错误分类、断点续传
 
-**问题**: `submit_search` 在 type 前先 click 搜索输入框以获取焦点
+4. ✅ **更新 cli-design.md** (2026-03-22)
+   - 更新 Evidence Matrix（executor 直连 runUnified）
+   - 更新当前问题描述
+   - 移除 relay 引用
 
-**代码位置**: `collect-ops.mjs:550-557`
-```javascript
-await clickPointImpl(profileId, input.center, { steps: 3 });
-pushTrace({ kind: 'click', stage: 'submit_search', target: 'search_input' });
-await sleepRandomImpl(actionDelayMinMs, actionDelayMaxMs, pushTrace, 'submit_pre_type');
+5. ✅ **补充单元测试** (2026-03-22)
+   - 更新 `ui-cli-command.test.mjs` → 重写为 CLI 帮助输出测试
+   - 新增 `schedule-retry.test.mjs`（错误分类 + 退避计算，18 个用例）
+   - 现有 `schedule-cli.test.mjs` 全部通过（11 个用例）
 
-if (keyword && String(input.value || '') !== keyword) {
-  await clearAndTypeImpl(profileId, keyword, Number(params.keyDelayMs ?? 65) || 65);
-```
+## 📋 待办
 
-**为什么 click 超时**:
-- 搜索输入框���见但 click 操作响应慢或无响应
-- 30 秒超时后失败
+1. 将 classifyError/calcBackoffMs 提取为共享模块
+2. 实现重试策略到 schedule.mjs
+3. 完善 wa CLI 命令（init/run/status/login/stop）
+4. E2E smoke test（webauto xhs unified 直接执行）
 
-**解决方案**:
-1. `clearAndType` 已经使用键盘操作（Ctrl+A/Cmd+A + Backspace）
-2. 键盘操作可以获取焦点，不需要预先 click
-3. 移除 submit_search 中的 click 操作
+## 📋 关键文件
 
----
+- `bin/webauto.mjs` - 主 CLI 入口（已精简）
+- `bin/wa.mjs` - 新 CLI 入口
+- `cli/` - CLI 模块目录
+- `apps/webauto/entry/xhs-unified.mjs` - XHS 统一入口（daemon guard 已移除）
+- `apps/webauto/entry/schedule.mjs` - 调度入口
+- `apps/webauto/entry/daemon.mjs` - Daemon 入口
+- `docs/cli-design.md` - CLI 设计文档
+- `docs/daemon-design.md` - Daemon 调度设计文档
 
-## 🔧 修复方案
+## 📋 证据
 
-### 修改文件
-`modules/camo-runtime/src/autoscript/action-providers/xhs/collect-ops.mjs`
-
-### 修改内容
-移除 submit_search 中 type 前的 click 操作
-
-**Before**:
-```javascript
-await clickPointImpl(profileId, input.center, { steps: 3 });
-pushTrace({ kind: 'click', stage: 'submit_search', target: 'search_input' });
-await sleepRandomImpl(actionDelayMinMs, actionDelayMaxMs, pushTrace, 'submit_pre_type');
-```
-
-**After**:
-```javascript
-// Skip click - clearAndType uses keyboard shortcuts (Ctrl+A/Cmd+A) which handle focus
-pushTrace({ kind: 'skip_click', stage: 'submit_search', target: 'search_input', reason: 'keyboard_type_handles_focus' });
-await sleepRandomImpl(actionDelayMinMs, actionDelayMaxMs, pushTrace, 'submit_pre_type');
-```
-
----
-
-## 📋 问题总结
-
-### 已修复
-✅ fill_keyword 的 type 操作 click 超时（已修复，832e2c6e）
-✅ sync_window_viewport 卡住（已修复，重启 daemon）
-
-### 当前问题
-❌ submit_search 的 type 前置 click 超时
-- 原因：同样的 click 超时问题，但在不同位置
-- 方案：移除 click，依赖键盘操作
-
-### 模式
-所有对 input 元素的 type 操作都应该：
-1. **不**预先 click
-2. 直接使用键盘操作（Ctrl+A/Cmd+A + Backspace + type）
-3. 键盘操作会自动获取焦点
-
----
-
-## ⏰ 下一步
-
-1. 修改 `collect-ops.mjs` 移除 submit_search 的 click
-2. 提交代码
-3. 重新���动 200 条测试
-4. 验证修复
+- `node bin/webauto.mjs --help` → 输出无 UI/electron/relay 引用
+- `node bin/webauto.mjs` → 显示帮助而非启动 UI
+- `node --test tests/unit/webauto/ui-cli-command.test.mjs` → 5/5 pass
+- `node --test tests/unit/webauto/schedule-retry.test.mjs` → 18/18 pass
+- `node --test tests/unit/webauto/schedule-cli.test.mjs` → 11/11 pass

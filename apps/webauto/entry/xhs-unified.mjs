@@ -7,10 +7,10 @@ export { runUnified } from './lib/xhs-unified-runner.mjs';
 async function main() {
   const argv = minimist(process.argv.slice(2));
   if (argv.help || argv.h) {
-    printUnifiedHelp();
-    return;
-  }
-  await runUnified(argv);
+   printUnifiedHelp();
+   return;
+ }
+ await runUnified(argv);
 }
 
 const isDirectExec =
@@ -18,7 +18,7 @@ const isDirectExec =
 
 if (isDirectExec) {
   main().catch((err) => {
-    console.error('â?xhs-unified failed:', err?.message || String(err));
+    console.error('ï¿½?xhs-unified failed:', err?.message || String(err));
     process.exit(1);
   });
 }

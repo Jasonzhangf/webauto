@@ -13,22 +13,46 @@ function run(args) {
   });
 }
 
-test('webauto ui cli --help prints ui cli usage', () => {
-  const ret = run(['ui', 'cli', '--help']);
+test('webauto --help prints main help', () => {
+  const ret = run(['--help']);
   assert.equal(ret.status, 0, ret.stderr || ret.stdout);
-  assert.match(ret.stdout, /webauto ui cli/);
-  assert.match(ret.stdout, /restart/);
-  assert.match(ret.stdout, /click --selector/);
-  assert.match(ret.stdout, /full-cover/);
-  assert.match(ret.stdout, /probe/);
-  assert.match(ret.stdout, /--detailed/);
-  assert.match(ret.stdout, /text_contains\|text_equals\|value_equals\|not_disabled/);
+  assert.match(ret.stdout, /webauto CLI/);
+  assert.match(ret.stdout, /webauto xhs/);
+  assert.match(ret.stdout, /webauto schedule/);
+  assert.match(ret.stdout, /webauto account/);
+  assert.match(ret.stdout, /webauto deps/);
 });
 
-test('webauto ui --help includes ui cli actions', () => {
-  const ret = run(['ui', '--help']);
+test('webauto (no args) shows help instead of launching UI', () => {
+  const ret = run([]);
   assert.equal(ret.status, 0, ret.stderr || ret.stdout);
-  assert.match(ret.stdout, /webauto ui cli/);
-  assert.match(ret.stdout, /webauto ui restart/);
+  assert.match(ret.stdout, /webauto CLI/);
+});
+
+test('webauto xhs --help prints xhs usage', () => {
+  const ret = run(['xhs', '--help']);
+  assert.equal(ret.status, 0, ret.stderr || ret.stdout);
+  assert.match(ret.stdout, /webauto xhs/);
+  assert.match(ret.stdout, /unified/);
+  assert.match(ret.stdout, /collect/);
   assert.match(ret.stdout, /status/);
+});
+
+test('webauto daemon --help prints daemon usage', () => {
+  const ret = run(['daemon', '--help']);
+  assert.equal(ret.status, 0, ret.stderr || ret.stdout);
+  assert.match(ret.stdout, /webauto daemon/);
+  // relay should not appear in help
+  assert.ok(!ret.stdout.includes('relay'), 'daemon help should not mention relay');
+});
+
+test('webauto help output has no UI references', () => {
+  const ret = run(['--help']);
+  assert.equal(ret.status, 0, ret.stderr || ret.stdout);
+  // UI-related commands should not appear
+  assert.ok(!ret.stdout.includes('ui console'), 'help should not mention ui console');
+  assert.ok(!ret.stdout.includes('ui cli'), 'help should not mention ui cli');
+  assert.ok(!ret.stdout.includes('desktop-console'), 'help should not mention desktop-console');
+  assert.ok(!ret.stdout.includes('electron'), 'help should not mention electron');
+  assert.ok(!ret.stdout.includes('relay'), 'help should not mention relay');
 });
