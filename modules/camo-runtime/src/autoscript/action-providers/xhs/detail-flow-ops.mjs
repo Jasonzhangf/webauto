@@ -9,6 +9,7 @@ import { getCurrentTabIndex, loadCollectedLinks, readCollectedLinksCache, readAc
 import { readDetailSlotState, shouldCloseCurrentDetail, shouldReuseDetailForCurrentTab, writeDetailSlotState } from './detail-slot-state.mjs';
 import { isDetailVisible, readDetailCloseTarget, closeDetailToSearch, readDetailSnapshot } from './detail-ops.mjs';
 import { readXhsInteractionGuard, buildXhsGuardFailure } from './auth-ops.mjs';
+import { captureOperationFailure } from './diagnostic-ops.mjs';
 import {
   requestXhsGatePermit,
   confirmXhsGateUsage,
@@ -467,6 +468,7 @@ export async function executeOpenDetailOperation({ profileId, params = {}, conte
     throw new Error('detail openByLinks=false (click mode) is not supported');
   }
   const modeNext = mode === 'next';
+  const operationIdForSnapshot = modeNext ? 'open_next_detail' : 'open_first_detail';
   const testingOverrides = context?.testingOverrides && typeof context.testingOverrides === 'object'
     ? context.testingOverrides
     : null;
@@ -491,7 +493,43 @@ export async function executeOpenDetailOperation({ profileId, params = {}, conte
       if (useLinks) {
         await clearDetailGateQueueOnGuard({ profileId, params, state, pushTrace, testingOverrides, stage: `${stage}_clear_queue` });
       }
+      try {
+        await captureOperationFailure({
+          profileId,
+          params: {
+            ...params,
+            runId: String(params.runId || context.runId || '').trim() || null,
+            operationId: operationIdForSnapshot,
+            operationAction: 'xhs_open_detail',
+            failureCode: String(guard.stopCode || 'GUARD_DETECTED').trim() || 'GUARD_DETECTED',
+            failureMessage: String(guard.stopCode || 'guard detected').trim() || 'guard detected',
+            keyword: state.keyword || params.keyword || null,
+            env: params.env || state.env || null,
+          },
+          context,
+          stage,
+          noteId: state.currentNoteId || params.noteId || '',
+          reason: String(guard.stopCode || 'GUARD_DETECTED').trim() || 'GUARD_DETECTED',
+          extra: {
+            guard,
+            url: guard.url || null,
+            mode,
+            useLinks,
+          },
+        });
+      } catch {
+        // best-effort snapshot: never block core stop flow
+      }
       pushTrace({ kind: 'guard', stage, code: guard.stopCode, url: guard.url || null });
+      if (guard.stopCode === 'RISK_CONTROL_DETECTED') {
+        const riskCooldownMs = Math.floor(30000 + Math.random() * 30001);
+        pushTrace({ kind: 'risk_control_cooldown', stage, cooldownMs: riskCooldownMs });
+        await sleep(riskCooldownMs);
+        const riskTerminalErr = new Error('AUTOSCRIPT_DONE_RISK_CONTROL_DETECTED');
+        riskTerminalErr.isTerminal = true;
+        riskTerminalErr.riskStopCode = 'RISK_CONTROL_DETECTED';
+        throw riskTerminalErr;
+      }
       return buildXhsGuardFailure({ profileId, guard, stage, codeMode: 'guard' });
     }
     return null;
@@ -580,6 +618,33 @@ export async function executeOpenDetailOperation({ profileId, params = {}, conte
             isDetailVisibleImpl,
             sleepImpl,
           });
+          try {
+            await captureOperationFailure({
+              profileId,
+              params: {
+                ...params,
+                runId: String(params.runId || context.runId || '').trim() || null,
+                operationId: operationIdForSnapshot,
+                operationAction: 'xhs_open_detail',
+                failureCode: 'AUTOSCRIPT_DONE_DETAIL_LINKS_EXHAUSTED',
+                failureMessage: 'detail link queue exhausted before opening detail',
+                keyword: state.keyword || params.keyword || null,
+                env: params.env || state.env || null,
+              },
+              context,
+              stage: 'open_detail_done_cleanup',
+              noteId: state.currentNoteId || params.noteId || '',
+              reason: 'AUTOSCRIPT_DONE_DETAIL_LINKS_EXHAUSTED',
+              extra: {
+                cause: 'missing_claimed_link',
+                mode,
+                useLinks,
+                cleanupResult,
+              },
+            });
+          } catch {
+            // best-effort snapshot
+          }
           pushTrace({ kind: 'cleanup', stage: 'open_detail_done_cleanup', result: cleanupResult });
           emitActionTrace(context, actionTrace, { stage: 'xhs_open_detail' });
           throw new Error('AUTOSCRIPT_DONE_DETAIL_LINKS_EXHAUSTED');
@@ -605,6 +670,34 @@ export async function executeOpenDetailOperation({ profileId, params = {}, conte
             isDetailVisibleImpl,
             sleepImpl,
           });
+          try {
+            await captureOperationFailure({
+              profileId,
+              params: {
+                ...params,
+                runId: String(params.runId || context.runId || '').trim() || null,
+                operationId: operationIdForSnapshot,
+                operationAction: 'xhs_open_detail',
+                failureCode: 'AUTOSCRIPT_DONE_DETAIL_LINKS_EXHAUSTED',
+                failureMessage: 'detail link queue exhausted by attempted-link dedup guard',
+                keyword: state.keyword || params.keyword || null,
+                env: params.env || state.env || null,
+              },
+              context,
+              stage: 'open_detail_done_cleanup',
+              noteId: state.currentNoteId || params.noteId || '',
+              reason: 'AUTOSCRIPT_DONE_DETAIL_LINKS_EXHAUSTED',
+              extra: {
+                cause: 'attempted_link_dedup_guard',
+                linkKey: activeLinkKey,
+                mode,
+                useLinks,
+                cleanupResult,
+              },
+            });
+          } catch {
+            // best-effort snapshot
+          }
           pushTrace({ kind: 'cleanup', stage: 'open_detail_done_cleanup', result: cleanupResult });
           emitActionTrace(context, actionTrace, { stage: 'xhs_open_detail' });
           throw new Error('AUTOSCRIPT_DONE_DETAIL_LINKS_EXHAUSTED');
@@ -720,12 +813,76 @@ export async function executeOpenDetailOperation({ profileId, params = {}, conte
             const guardAfterGoto = await readXhsInteractionGuard({ profileId, params, testingOverrides });
             if (guardAfterGoto?.stopCode) {
               await clearDetailGateQueueOnGuard({ profileId, params, state, pushTrace, testingOverrides, stage: 'open_detail_after_goto_clear_queue' });
+              try {
+                await captureOperationFailure({
+                  profileId,
+                  params: {
+                    ...params,
+                    runId: String(params.runId || context.runId || '').trim() || null,
+                    operationId: operationIdForSnapshot,
+                    operationAction: 'xhs_open_detail',
+                    failureCode: String(guardAfterGoto.stopCode || 'GUARD_DETECTED').trim() || 'GUARD_DETECTED',
+                    failureMessage: String(guardAfterGoto.stopCode || 'guard detected after goto').trim() || 'guard detected after goto',
+                    keyword: state.keyword || params.keyword || null,
+                    env: params.env || state.env || null,
+                  },
+                  context,
+                  stage: 'open_detail_after_goto',
+                  noteId: state.currentNoteId || params.noteId || '',
+                  reason: String(guardAfterGoto.stopCode || 'GUARD_DETECTED').trim() || 'GUARD_DETECTED',
+                  extra: {
+                    guard: guardAfterGoto,
+                    redirectedUrl: redirectedUrl || null,
+                    effectiveNoteUrl: effectiveNoteUrl || null,
+                    mode,
+                    useLinks,
+                  },
+                });
+              } catch {
+                // best-effort snapshot
+              }
               pushTrace({ kind: 'guard', stage: 'open_detail_after_goto', code: guardAfterGoto.stopCode, url: guardAfterGoto.url || redirectedUrl || effectiveNoteUrl || null });
+              if (guardAfterGoto.stopCode === 'RISK_CONTROL_DETECTED') {
+                const riskCooldownMs = Math.floor(30000 + Math.random() * 30001);
+                pushTrace({ kind: 'risk_control_cooldown', stage: 'open_detail_after_goto', cooldownMs: riskCooldownMs });
+                await sleep(riskCooldownMs);
+                const riskTerminalErr = new Error('AUTOSCRIPT_DONE_RISK_CONTROL_DETECTED');
+                riskTerminalErr.isTerminal = true;
+                riskTerminalErr.riskStopCode = 'RISK_CONTROL_DETECTED';
+                throw riskTerminalErr;
+              }
               return buildXhsGuardFailure({ profileId, guard: guardAfterGoto, stage: 'open_detail_after_goto', codeMode: 'guard' });
             }
             const openBlocker = classifyOpenRedirectBlocker(redirectedUrl);
             if (openBlocker) {
               await clearDetailGateQueueOnGuard({ profileId, params, state, pushTrace, testingOverrides, stage: 'open_detail_redirect_blocker_clear_queue' });
+              try {
+                await captureOperationFailure({
+                  profileId,
+                  params: {
+                    ...params,
+                    runId: String(params.runId || context.runId || '').trim() || null,
+                    operationId: operationIdForSnapshot,
+                    operationAction: 'xhs_open_detail',
+                    failureCode: String(openBlocker.code || 'OPEN_DETAIL_REDIRECT_BLOCKER').trim() || 'OPEN_DETAIL_REDIRECT_BLOCKER',
+                    failureMessage: String(openBlocker.message || 'detail redirected to blocker').trim() || 'detail redirected to blocker',
+                    keyword: state.keyword || params.keyword || null,
+                    env: params.env || state.env || null,
+                  },
+                  context,
+                  stage: 'open_detail_redirect_blocker',
+                  noteId: state.currentNoteId || params.noteId || '',
+                  reason: String(openBlocker.code || 'OPEN_DETAIL_REDIRECT_BLOCKER').trim() || 'OPEN_DETAIL_REDIRECT_BLOCKER',
+                  extra: {
+                    redirectedUrl: redirectedUrl || null,
+                    effectiveNoteUrl: effectiveNoteUrl || null,
+                    mode,
+                    useLinks,
+                  },
+                });
+              } catch {
+                // best-effort snapshot
+              }
               pushTrace({
                 kind: 'error',
                 stage: 'open_detail',
@@ -738,6 +895,13 @@ export async function executeOpenDetailOperation({ profileId, params = {}, conte
                 const riskCooldownMs = Math.floor(30000 + Math.random() * 30001);
                 pushTrace({ kind: 'risk_control_cooldown', stage: 'open_detail', cooldownMs: riskCooldownMs });
                 await sleep(riskCooldownMs);
+                // RISK_CONTROL_DETECTED 是致命错误，必须终止脚本
+                // 不能返回 failure result 让 runtime 静默跳过（onFailure: 'continue' 会导致循环断裂僵死）
+                // 使用 AUTOSCRIPT_DONE_ 前缀让 runtime.extractTerminalDoneCode 识别为 terminal
+                const riskTerminalErr = new Error('AUTOSCRIPT_DONE_RISK_CONTROL_DETECTED');
+                riskTerminalErr.isTerminal = true;
+                riskTerminalErr.riskStopCode = 'RISK_CONTROL_DETECTED';
+                throw riskTerminalErr;
               }
 
               return buildXhsGuardFailure({
