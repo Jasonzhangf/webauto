@@ -23,6 +23,12 @@
 - session-init.mjs 的 ensureSessionInitialized 已修改为默认不重启
 - xhs-unified-profile-blocks.mjs 的 runProfile 任务完成后会回到主页
 
+### SearchGate 规则（避免风控）
+- **commentBudget 是 tab 轮转阈值**，不是评论采集上限。每采集 N 条评论后轮转到下一个 tab，分散请求避免风控。默认 tabCount>1 时 50 条轮转一次。禁止移除或设为 0
+- SearchGate 限制是**防风控设计**，不是障碍
+- 遇到 consecutive_same_resource_limit 错误：**直接换关键字**，不要尝试绕过
+- daemon 排他性控制：同一时间只允许一个任务运行（已在 daemon.mjs 实现）
+
 ## 2026-03-16 Tab 池管理修复
 
 ### 问题
