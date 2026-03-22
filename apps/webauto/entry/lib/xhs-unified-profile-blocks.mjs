@@ -432,6 +432,11 @@ export async function runProfile(spec, argv, baseOverrides = {}) {
     stats,
   };
 
+  // 任务完成后回到主页（浏览器默认不重启，恢复方式是回到主页+清残余）
+  if (stopPayload.reason !== 'script_failure') {
+    try { runCamo(['goto', profileId, XHS_HOME_URL], { rootDir: process.cwd(), timeoutMs: 15000 }); } catch { /* ignore */ }
+  }
+
   await writeJson(spec.summaryPath, profileResult);
   return profileResult;
 }

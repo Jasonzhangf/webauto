@@ -158,7 +158,20 @@ export async function ensureSessionInitialized(profileId, options = {}) {
   const maxTabs = Number.isFinite(Number(options.maxTabs))
     ? Math.floor(Number(options.maxTabs))
     : null;
-  const restartSession = options.restartSession !== false;
+  // 浏览器默认不重启；仅显式要求时才重启
+  const restartSession = options.restartSession === true;
+
+  if (!restartSession) {
+    const { getSessionByProfile } = await import('../../../../modules/camo-runtime/src/utils/browser-service.mjs');
+    const existingSession = await getSessionByProfile(id).catch(() => null);
+    if (existingSession) {
+      if (url) {
+        const gotoRet = runCamo(['goto', id, url], { rootDir, timeoutMs });
+        return { ok: true, profileId: id, headless, reused: true, goto: gotoRet };
+      }
+      return { ok: true, profileId: id, headless, reused: true };
+    }
+  }
   let stopRet = null;
   if (restartSession) {
     stopRet = runCamo(['stop', id], {
