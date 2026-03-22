@@ -83104,3 +83104,45 @@ sessionId: 019d0120-eac0-72f2-b35b-9e311d09871b
 model: gpt-5.4
 provider: openai-responses
 -->
+
+### Assistant · 2026/03/22 12:08:28
+
+Jason，已完成 P0 全部修复并提交：
+
+**Epic webauto-9990 进度：**
+
+| 任务 | 状态 | 说明 |
+|---|---|---|
+| P0-1: daemon.mjs UI 残留清理 | ✅ done | ~60行 UI 代码全部移除 |
+| P0-2: open_first_detail onFailure | ✅ done | `stop_all` → `continue` |
+| P0-3: collect_links onFailure | ✅ done | `stop_all` → `continue` |
+| P1-1: RISK_CONTROL skip 改造 | ❌ 已驳回 | RISK_CONTROL 是会话级别，不是���记级别，skip 无意义。当前行为：风控触发后 `buildXhsGuardFailure` 返回 `ok:false`，runtime 标记为 failed 并 stop script。这是正确的——风控后不应该继续请求其他笔记 |
+| P1-2: DETAIL_LINKS_EXHAUSTED 改造 | ◐ 待定 | `throw Error` 被 runtime 的 `extractTerminalDoneCode` 识别为正常完成信号（`AUTOSCRIPT_DONE_*`），触发 `script_complete` 停止。当前行为实际上是正确的，只是信号传递方式不够清晰 |
+
+**关键改动文件：**
+- `apps/webauto/entry/daemon.mjs` — UI 残留清理
+- `apps/webauto/entry/lib/xhs-unified-blocks.mjs` — 移除 resetTaskServices/runWebautoCli
+- `modules/camo-runtime/src/autoscript/xhs-autoscript-collect.mjs` — collect_links onFailure→continue
+- `modules/camo-runtime/src/autoscript/xhs-autoscript-detail-ops.mjs` — open_first_detail onFailure→continue
+- `apps/desktop-console/` — 整个目录删除（~180文件）
+
+commit: `e460a145`
+
+<!-- cache-meta
+requestId: openai-responses-tabglm.key1-glm-5-turbo-20260322T120812537-23678-82
+sessionId: 019d0120-eac0-72f2-b35b-9e311d09871b
+model: glm-5-turbo
+provider: anthropic-messages
+finishReason: stop
+-->
+
+### User · 2026/03/22 12:10:34
+
+还有哪些需要改造的继续
+
+<!-- cache-meta
+requestId: openai-responses-unknown-unknown-20260322T121034510-23688-92
+sessionId: 019d0120-eac0-72f2-b35b-9e311d09871b
+model: gpt-5.4
+provider: openai-responses
+-->
