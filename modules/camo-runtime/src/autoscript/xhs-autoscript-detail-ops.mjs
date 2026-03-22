@@ -39,17 +39,12 @@ export function buildXhsDetailOperations(options) {
     noteIntervalMs,
     noteIntervalMinMs,
     noteIntervalMaxMs,
-    tabCount,
-    autoCloseDetail,
-    detailRotateComments,
-  } = options;
-  const rotateCommentBudget = Math.max(0, Number(detailRotateComments ?? 0) || 0);
-  const isProd = String(env || '').trim() === 'prod';
-  const commentBudget = isProd
-    ? (maxComments > 0
-      ? maxComments
-      : ((Number(tabCount || 1) > 1 && rotateCommentBudget > 0) ? rotateCommentBudget : 0))
-    : 0;
+   tabCount,
+   autoCloseDetail,
+   detailRotateComments,
+} = options;
+// commentBudget 已禁用 - 用户要求不要自行限制评论采集数量
+const commentBudget = maxComments > 0 ? maxComments : 0;
 
   const matchGateEnabled = options.matchGateEnabled === true;
   // In openByLinks mode we do not close modal per note; we only finalize link/anchor state.
