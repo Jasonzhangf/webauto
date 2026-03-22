@@ -172,14 +172,6 @@ export async function runUnified(argv, overrides = {}) {
       searchGateTimeoutMs: 60000,
     });
     console.log(JSON.stringify({
-      event: 'xhs.unified.service_reset',
-      ok: services.serviceReset.ok,
-      skipped: services.serviceReset.skipped === true,
-      reason: services.serviceReset.reason || null,
-      actionLogPath: services.serviceReset.actionLogPath || null,
-      statusReady: Boolean(services.serviceReset.status?.json?.ready),
-    }));
-    console.log(JSON.stringify({
       event: 'xhs.unified.search_gate',
       ok: services.searchGate.ok,
       skipped: services.searchGate.skipped === true,
@@ -540,6 +532,5 @@ export function printUnifiedHelp() {
     '  --operation-min-interval <ms> Min operation interval',
     '  --event-cooldown <ms>        Event cooldown',
     '  --pacing-jitter <ms>         Pacing jitter',
-    '  --service-reset <bool>       Reset ui cli services before task',
   ].join("\n"));
 }

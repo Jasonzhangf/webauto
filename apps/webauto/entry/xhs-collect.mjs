@@ -14,6 +14,22 @@ async function main() {
     return;
   }
 
+  // 硬性收敛：长时间运行任务必须通过 daemon 启动
+  const daemonWorkerId = process.env.WEBAUTO_DAEMON_WORKER_ID || '';
+  const daemonBypass = process.env.WEBAUTO_DAEMON_BYPASS === '1';
+  if (!daemonWorkerId && !daemonBypass) {
+    console.error([
+      '❌ xhs-collect: 非 daemon 方式启动已禁止',
+      '',
+      '请通过 daemon 启动任务：',
+      '  webauto daemon start',
+      '  webauto daemon relay --detach -- xhs collect --profile <id> --keyword <kw> [options...]',
+      '',
+      '如需调试绕过（仅限开发环境）：',
+      '  WEBAUTO_DAEMON_BYPASS=1 node bin/webauto.mjs xhs collect ...',
+    ].join('\n'));
+    process.exit(1);
+  }
   await runXhsCollect(argv);
 }
 

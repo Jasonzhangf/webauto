@@ -62,14 +62,21 @@ export function resolveSearchResultTokenLink(rawHref, baseOrigin = 'https://www.
   const noteId = extractNoteIdFromHref(url.pathname || '') || extractNoteIdFromHref(href);
   if (!noteId) return null;
   const token = String(url.searchParams.get('xsec_token') || '').trim();
-  const xsecSource = String(url.searchParams.get('xsec_source') || '').trim();
+  const xsecSourceRaw = String(url.searchParams.get('xsec_source') || '').trim();
+  const sourceRaw = String(url.searchParams.get('source') || '').trim();
+  const fromSearchResult = String(url.pathname || '').includes('/search_result');
+  const xsecSource = xsecSourceRaw || (fromSearchResult ? 'pc_search' : '');
+  const source = sourceRaw || (fromSearchResult ? 'web_explore_feed' : '');
   const detailUrl = token
-    ? `${baseOrigin}/explore/${noteId}?xsec_token=${token}${xsecSource ? `&xsec_source=${xsecSource}` : ''}&source=web_explore_feed`
+    ? `${baseOrigin}/explore/${noteId}?xsec_token=${token}`
+      + `${xsecSource ? `&xsec_source=${xsecSource}` : ''}`
+      + `${source ? `&source=${source}` : ''}`
     : '';
   return {
     noteId,
     token,
     xsecSource,
+    source,
     searchUrl: url.toString(),
     detailUrl,
   };
@@ -158,4 +165,18 @@ export async function readJsonIfExists(filePath, fallback = {}) {
 export function handleRaiseError({ params }) {
   const code = String(params.code || params.message || 'AUTOSCRIPT_ABORT').trim();
   return asErrorPayload('OPERATION_FAILED', code || 'AUTOSCRIPT_ABORT');
+}
+
+/**
+ * 归一化 noteId 为 base noteId（去掉 query 参数和 token）
+ * 用于去重逻辑：同一帖子即使带不同 token/xsec_source 也视为同一帖子
+ */
+export function normalizeBaseNoteId(noteIdOrUrl) {
+  const text = String(noteIdOrUrl || '').trim();
+  if (!text) return '';
+  // 去掉 ? 及其后面的所有内容（query 参数、token 等）
+  const parts = text.split('?')[0];
+  // 如果是 URL，提取 /explore/ 后面的部分
+  const match = parts.match(/\/explore\/([^/?#]+)/);
+  return match && match[1] ? String(match[1]).trim() : parts.trim();
 }

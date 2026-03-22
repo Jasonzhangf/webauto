@@ -702,6 +702,25 @@ export async function executeOperation({ profileId, operation, context = {} }) {
       return { ok: true, code: 'OPERATION_DONE', message: 'new_page done', data: result };
     }
 
+    if (action === 'prune_excess_tabs') {
+      const maxTabs = Math.max(1, Math.floor(Number(params.maxTabs ?? 1) || 1));
+      const pageList = await callAPI('page:list', { profileId: resolvedProfile });
+      const { pages } = extractPageList(pageList);
+      if (pages.length <= maxTabs) {
+        return { ok: true, code: 'OPERATION_SKIPPED', message: 'tab count within limit', data: { current: pages.length, max: maxTabs } };
+      }
+      const sorted = [...pages].sort((a, b) => Number(a.index) - Number(b.index));
+      const toClose = sorted.slice(0, sorted.length - maxTabs);
+      let closed = 0;
+      for (const page of toClose) {
+        try {
+          await callAPI('page:close', { profileId: resolvedProfile, index: Number(page.index) });
+          closed += 1;
+        } catch { /* ignore */ }
+      }
+      return { ok: true, code: 'OPERATION_DONE', message: `pruned ${closed} tabs`, data: { closed, remaining: Math.max(0, sorted.length - maxTabs) } };
+    }
+
     if (action === 'switch_page') {
       const index = Number(params.index ?? params.value);
       if (!Number.isFinite(index)) {
@@ -712,9 +731,48 @@ export async function executeOperation({ profileId, operation, context = {} }) {
     }
 
     if (action === 'wait') {
-      const ms = Math.max(0, Number(params.ms ?? params.value ?? 0));
+      // Normalize minMs/maxMs: clamp negative values to 0, handle single parameter, swap if min > max
+      let rawMin = Number(params.minMs);
+      let rawMax = Number(params.maxMs);
+      const rawMs = Number(params.ms ?? params.value);
+      
+      // Clamp negative values to 0
+      rawMin = Number.isFinite(rawMin) ? Math.max(0, rawMin) : 0;
+      rawMax = Number.isFinite(rawMax) ? Math.max(0, rawMax) : 0;
+      
+      // Handle single parameter fallback
+      let minMs, maxMs;
+      if (rawMin > 0 && rawMax > 0) {
+        // Both provided: normalize by swapping if needed
+        minMs = Math.min(rawMin, rawMax);
+        maxMs = Math.max(rawMin, rawMax);
+      } else if (rawMin > 0) {
+        // Only minMs provided: treat as fixed delay
+        minMs = rawMin;
+        maxMs = rawMin;
+      } else if (rawMax > 0) {
+        // Only maxMs provided: treat as fixed delay
+        minMs = rawMax;
+        maxMs = rawMax;
+      } else if (Number.isFinite(rawMs)) {
+        // Fallback to ms/value parameter
+        minMs = Math.max(0, rawMs);
+        maxMs = minMs;
+      } else {
+        // No valid parameter: zero delay
+        minMs = 0;
+        maxMs = 0;
+      }
+      
+      // Generate random delay within normalized range
+      const ms = maxMs > minMs ? Math.floor(minMs + Math.random() * (maxMs - minMs + 1)) : maxMs;
       await new Promise((resolve) => setTimeout(resolve, ms));
-      return { ok: true, code: 'OPERATION_DONE', message: 'wait done', data: { ms } };
+      // Log wait delay details for debugging
+      if (process.env.DEBUG_WAIT_DELAY === 'true') {
+        const label = params.debugLabel ? `:${params.debugLabel}` : "";
+        console.log(`[wait_action${label}] delay: ${ms}ms (minMs=${minMs}, maxMs=${maxMs}, jitter=${maxMs - minMs})`);
+      }
+      return { ok: true, code: 'OPERATION_DONE', message: 'wait done', data: { ms, minMs, maxMs } };
     }
 
     if (action === 'scroll') {

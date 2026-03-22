@@ -111,6 +111,25 @@ export async function executeViewportOperation({ profileId, action, params = {} 
       const followWidth = Math.max(320, outerWidth - frameW);
       const followHeight = Math.max(240, outerHeight - frameH);
 
+      const widthAligned = Math.abs(innerWidth - followWidth) <= tolerance;
+      const heightAligned = Math.abs(innerHeight - followHeight) <= tolerance;
+      if (widthAligned && heightAligned && !resizedWindow) {
+        return {
+          ok: true,
+          code: 'OPERATION_DONE',
+          message: 'sync_window_viewport already aligned',
+          data: {
+            followWindow: true,
+            viewport: { width: followWidth, height: followHeight },
+            frame: { width: frameW, height: frameH },
+            resizedWindow,
+            windowTarget,
+            measured,
+            skipped: true,
+          },
+        };
+      }
+
       await callWithTimeout('page:setViewport', { profileId, width: followWidth, height: followHeight }, apiTimeoutMs);
       const synced = await probeWindow();
       return {

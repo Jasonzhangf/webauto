@@ -1,5 +1,20 @@
 # WebAuto Memory - Long Term
 
+## 2026-03-20 用户画像/偏好（Jason）
+
+### 执行方式
+- 现场勘验/检查原因 **不需要询问**，直接执行并给证据
+- 等待必须用 clock 定时，不要空转“继续执行”循环
+- 单条/局部流程未跑通前，不要跑完整流程压力测试
+- 巡检默认 **5 分钟**间隔，无需再询问
+
+### 测试偏好
+- 测试关键词避免重复（如 claude/kimi/deepseekAI/春晚机器人/月全食 等）
+- 测试优先 headless（用户明确要求）
+
+### 记忆要求
+- CACHE.md = 短期记忆，MEMORY.md = 长期记忆（需要时必须查）
+
 ## 2026-03-16 Tab 池管理修复
 
 ### 问题
@@ -77,3 +92,551 @@ Tab 2-5 (轮转详情页) ← goto 切换，间隔 2-5 秒
 - 固定 5 个 tab：1 搜索 + 4 详情
 - 初始化时清理多余 tab
 - 每次操作前同步实际浏览器状态
+
+---
+
+## 2026-03-18 压力测试启动流程优化
+
+### 新增必做步骤
+- **启动压力测试后，先验证第一条帖子是否成功执行**，再进入等待/巡检。
+- 目的：避免第一条即失败导致无效等待。
+
+### 验证方法
+1. 从 runId 的 events.jsonl 中确认 `open_first_detail` 成功：`visited=1`。
+2. 检查第一条 `comments_harvest` 成功，且没有 `autoscript:error` / `autoscript:stop`。
+3. 若第一条失败，立即停止并修复后再重启。
+
+### 备注
+- 该流程用于所有压力测试（5/50/200）。
+
+---
+
+## 2026-03-16 小红书 5 条测试完成 - 所有修复验证通过
+
+### 测试信息
+- runId: f75962be-3beb-4916-8a5e-e8470cbb8b90
+- 关键字: deepseekAI
+- Target: 5 条
+- Profile: xhs-qa-1
+- 完成时间: 2026-03-16 21:59:24 CST
+
+### 测试结果 ✅
+- 状态: completed
+- 终态原因: script_complete
+- Tab 数量: 5 个（符合预期，≤5）
+- 评论总数: 5590 条
+
+### 已处理帖子（5/5）
+1. 67bbf030000000002802bf61 - 299 条评论
+2. 690a05ca000000000700a69e - 43 条评论
+3. 698c59b6000000000b00a889 - 173 条评论
+4. 698def79000000000b008360 - 183 条评论
+5. 699e25e4000000002602fc76 - 52 条评论
+
+所有帖子都有完整文件：
+- comments.jsonl（原始评论）
+- comments.md（格式化评论）
+- content.md（帖子内容）
+- likes.summary.json（点赞摘要）
+
+### 验证的修复
+
+#### 1. fill_keyword selector 修复 ✅
+**问题**: 任务卡在 fill_keyword 操作，搜索输入框无法定位
+**根因**: selector `#search-input` 不匹配实际 DOM 结构
+**修复**: 扩展 selector 为 `#search-input, input.search-input`
+**修改文件**: `modules/camo-runtime/src/autoscript/xhs-autoscript-ops.mjs`
+**验证**: ✅ 成功，任务从 collect 到 detail 全流程正常运行
+
+#### 2. Tab 池管理修复 ✅
+**问题**: Tab 泄漏，打开 32 个 tab 而不是 5 个
+**根因**: newPage 和 newTab 混用，缺少关闭机制
+**修复**: 
+- 重写 `tab-ops.mjs`，统一使用 newTab
+- 添加 `closeExcessTabs`、`syncTabPoolWithBrowser`
+- 强制 tab 数量 ≤ 5
+**修改文件**: 
+- `modules/camo-runtime/src/autoscript/action-providers/xhs/tab-ops.mjs`
+- `modules/camo-runtime/src/container/runtime-core/operations/tab-pool.mjs`
+**验证**: ✅ 成功，Tab 数量稳定在 5 个，无泄漏
+
+#### 3. 评论采集流程 ✅
+**状态**: 所有帖子正常采集评论，无卡死
+**验证**: 
+- 5590 条评论完整落盘
+- 每个帖子有 comments.jsonl
+- 无异常终止
+
+### 关键指标验证
+| 指标 | 目标 | 实际 | 状态 |
+|------|------|------|------|
+| Tab 数量 | ≤5 | 5 | ✅ 通过 |
+| 评论采集 | 全部 | 5590 条 | ✅ 通过 |
+| 任务完成 | completed | completed | ✅ 通过 |
+| 内容文件 | 全部 | 5/5 | ✅ 通过 |
+| 评论文件 | 全部 | 5/5 | ✅ 通过 |
+| 点赞摘要 | 全部 | 5/5 | ✅ 通过 |
+
+### 提交记录
+- b2bb663c: fix(fill_keyword): 修复搜索输入框 selector 不匹配问题
+- e57248a8: docs(heartbeat): 记录 5 条测试完成，所有修复验证通过
+
+### 后续计划
+1. ✅ 5 条测试完成
+2. 准备 200 条压力测试
+3. 继续验证稳定性和性能
+
+Tags: #xhs #test #fix-validation #tab-pool #fill_keyword #completed
+
+---
+
+## 2026-03-18 camo 和 camo-runtime 的关系
+
+### 仓库结构
+- **~/code/camo** - @web-auto/camo npm 包的源代码仓库（当前版本 0.1.25）
+- **webauto/modules/camo-runtime/** - webauto 项目的 vendor 副本（从 camo 复制）
+- **webauto/node_modules/@web-auto/camo/** - npm 安装的 camo 包（运行时依赖）
+
+### browser-service 架构
+- browser-service 是 camo 的核心服务，监听在 localhost:7704
+- 所有 action 通过 HTTP POST 发送到 `/command` 端点
+- action 的路由在 `src/services/browser-service/index.js` 的 `handleCommand` 函数中
+- 新增 action 只需在该 switch 中添加 case
+
+### newTab vs newPage
+- camo 原生只支持 `newPage` action
+- webauto 的 modules/camo-runtime/ 中修改为使用 `newTab`
+- **2026-03-18 修复**：在 camo 源代码中添加 `case 'newTab':`（fall-through 到 newPage）
+- 修改文件：`~/code/camo/src/services/browser-service/index.js` 第 495 行
+
+### 关键文件映射
+| 职责 | camo 仓库路径 | webauto vendor 路径 |
+|------|--------------|-------------------|
+| Tab 池管理 | src/container/runtime-core/operations/tab-pool.mjs | modules/camo-runtime/src/container/runtime-core/operations/tab-pool.mjs |
+| Action 路由 | src/services/browser-service/index.js | (同上，通过 npm 包) |
+| API 调用 | src/utils/browser-service.mjs (callAPI) | modules/camo-runtime/src/... (callAPI) |
+| Tab 操作 | src/autoscript/action-providers/xhs/tab-ops.mjs | modules/camo-runtime/src/autoscript/action-providers/xhs/tab-ops.mjs |
+
+### vendor 同步规则
+- webauto 的 modules/camo-runtime/ 是独立副本，可能与 camo 源代码有差异
+- 修改 camo 源代码后，需要重新构建/安装 npm 包
+- modules/camo-runtime/ 的修改不会自动同步到 camo 仓库
+- npm 安装的是编译后的包，不是源代码
+
+
+---
+
+## 2026-03-18 Skill 更新
+
+### webauto-debug-workflow SKILL.md 更新
+新增章节：
+- **Environment Pre-flight (must)**：环境启动前必须检查全局/本地版本统一、服务健康、端口冲突、清理孤立进程
+- **Clock tool rule**：必须使用 clock() agent tool，禁止 sleep/poll/external cron
+- **Resilience Rule (must)**：任务目标是完成，单个detail出错可跳过，尽力恢复
+- **Global unique source of truth**：全局唯一真源原则
+- **Page Access & Onsite Inspection**：问题处理流程（日志→camo现场勘验→截图修复→风控升级）
+- **Anti-Detection Operation Skeleton**：模拟人操作、不用JS、可视范围内、操作间隔
+- **Memory Search**：调试前先搜索 CACHE.md（短期）和 MEMORY.md（长期）
+
+### 修复记录
+- **newTab action**：在 camo browser-service/index.js 添加 `case 'newTab':` fall-through
+  - ~/code/camo/src/services/browser-service/index.js
+  - /Volumes/extension/code/camo/src/services/browser-service/index.js
+  - webauto/node_modules/@web-auto/camo/src/.../index.js
+
+- **Global webauto uninstalled**：卸载了全局 @web-auto/webauto (0.1.4)，避免与本地 (0.1.19) 冲突
+
+## 2026-03-19 压力测试关键字输入修复
+
+### 问题：搜索关键字被错误替换
+- **现象**: 输入 `claude`，搜索结果 URL 显示 `keyword=小红书网页版`
+- **根因**: `fill_keyword` action 使用 `type` 但未设置 `click: true`
+  - type action 默认不点击，依赖输入框已有焦点
+  - 如果焦点不在搜索框，typing 会进入错误位置
+  - 小红书搜索框可能有预填内容或联想词被误输入
+
+### 修复
+- **文件**: `modules/camo-runtime/src/autoscript/xhs-autoscript-ops.mjs`
+- **改动**: fill_keyword params 增加 `click: true`
+```js
+// 之前
+params: { selector: '#search-input, input.search-input', text: keyword }
+// 之后
+params: { selector: '#search-input, input.search-input', text: keyword, click: true }
+```
+
+### 验证
+- 修复后 afterUrl: `https://www.xiaohongshu.com/search_result?keyword=claude`
+- 关键字正确传递，搜索结果正常
+
+### 经验教训
+1. 搜索输入框必须先点击聚焦再输入
+2. 不能假设页面元素已有焦点
+3. 测试前验证实际搜索 URL 中的 keyword 参数
+
+---
+
+## 压力测试配置
+
+### 标准参数
+- 关键字: `claude`
+- 目标: 200 条笔记
+- 评论: 开启 (do-comments=true, persist-comments=true)
+- 点赞: 开启 (do-likes=true)
+- 环境: debug
+- Tab 数: 4
+- service-reset: false (绕过 UI CLI bridge)
+
+### 已修复的 bugs
+1. **snapshot is not defined** - harvest-ops.mjs 中 snapshot 变量未定义
+2. **runId 未传递到 detail gate** - detail-flow-ops.mjs 需要从 context.runId 注入
+3. **搜索关键字错误** - fill_keyword 需要强制 click 聚焦
+
+
+
+---
+
+## 2026-03-19 评论覆盖率与滚动恢复
+
+### 结论
+- 评论覆盖率目标：visibleCount / expectedCommentsCount >= 0.9（低于 90% 视为不足）
+- 到底部但覆盖率不足时必须触发 coverage_retry：回滚到评论顶部、再次展开、再向下滚动
+- recovery/coverage_retry 的第一次滚动必须 focus click（skipFocusClick=false），否则 scrollTop 不变导致滚动无效
+
+### 证据
+- runId: 337c4f5e-a04c-43f0-95f8-c90633d096c5
+- 现象：coverage_retry_start 触发后无后续事件，scrollTop 未变化
+- runId: c65a6951-1d28-472d-bbf6-369929a0a86e
+- 现象：coverage 126/358 卡住，scrollTop=15015/18148，recovery 滚动无效
+
+### 修复
+- coverage_retry 回滚步数：min(20, ceil(scrollHeight/800))
+- recovery_scroll_up/down & coverage_retry 的第一次滚动执行 focus click
+- state machine 文档更新：xhs-detail-comments-likes.v2026-03-19.md
+
+
+### 设计-实现一致性验证（2026-03-19）
+- 已验证 harvest-ops.mjs 与 v2026-03-19 状态机设计一致：
+  - 覆盖率阈值：coverageRate >= 0.9
+  - coverage_retry 流程（start/scrolled_to_top/expand/complete）
+  - scrollToTopSteps = min(20, ceil(scrollHeight/800))
+  - recovery/coverage_retry 首次滚动必须 focus click（skipFocusClick=false）
+  - reached_bottom 仅在 coverageEnough 时允许退出
+
+证据：
+- modules/camo-runtime/src/autoscript/action-providers/xhs/harvest-ops.mjs
+- docs/arch/state-machines/xhs-detail-comments-likes.v2026-03-19.md
+
+---
+
+## 2026-03-19 搜索关键词轮换规则
+- 用户要求：每个关键词使用 2 次后切换到下一个
+- 目的：避免 search gate 对连续同词的限流
+- 应用于：smoke/压力测试序列（1 → 5 → 20 → 200）
+ - 落地：新增 CLI 支持 `--keywords` 列表 + `--keyword-rotate-limit`，由运行时自动轮换并写入 ~/.webauto/state/keyword-rotation.json
+
+## Coverage Retry Sweep 策略 (2026-03-19)
+
+### 背景
+coverage_retry 原始设计：滚到评论区顶部 → 在顶部做 expand pass → continue loop
+问题：展开按钮分散在整个评论列表中，在顶部看不到任何按钮 → NO_TARGETS → retry 无效
+
+### 解决方案
+将 coverage_retry 改为 scroll-down-with-expand sweep：
+1. 滚到评论区顶部（复用 scroll-to-top 逻辑）
+2. 然后逐步向下滚动（每步 600px），每步做一次 expand pass
+3. 连续 3 步无目标则提前终止（sweepMaxNoTargetSteps=3）
+4. 最多 40 步（sweepMaxSteps=40）
+5. **sweep 中跳过 reanchor**（只 expand 不 refocus，省 ~6s/步）
+
+### 性能对比
+| 版本 | 每步耗时 | 40步耗时 | 600s内完成 |
+|------|---------|---------|-----------|
+| 有 reanchor | ~15s | ~600s | ❌ 刚好 timeout |
+| 无 reanchor | ~8s | ~320s | ✅ 充裕 |
+
+### 参数
+- maxCoverageRetries: 3（默认值，从 2 增加）
+- sweepScrollStep: max(600, scrollStepMin)
+- sweepMaxSteps: min(40, ceil(scrollHeight/sweepScrollStep))
+- sweepMaxNoTargetSteps: 3（连续无目标提前退出）
+
+### 修改文件
+- `modules/camo-runtime/src/autoscript/action-providers/xhs/harvest-ops.mjs`
+  - 行 1464: maxCoverageRetries ?? 3
+  - 行 1777-1810: sweep 逻辑（替换旧的顶部 expand 循环）
+
+### 已知问题
+- comments.jsonl 落盘丢失：collectedRows=99 但 jsonl 只有 81 行，mergeCommentsJsonl 可能有去重 bug
+
+## 2026-03-19: 非人类动作风险修复
+
+### 风控根因
+最近 3 次测试（kimi/claude/春晚机器人）全部在 open_first_detail 阶段触发 RISK_CONTROL_DETECTED（error_code=300013）。
+证据：
+- open_detail 失败后 500ms backoff 内立即重试，风控不会在 500ms 内解除
+- 搜索后立即打开详情（无间隔）
+- settle 时间偏短（280-820ms）
+
+### 修复内容
+
+#### 1. backoff 增大（避免失败后快速重试）
+- `xhs-autoscript-base.mjs` 行 117: retry.backoffMs 500 → 3000
+- `xhs-autoscript-detail-ops.mjs` 行 355: open_next_detail backoffMs 1000 → 5000
+- `xhs-autoscript-detail-ops.mjs` 行 110: open_first_detail 添加 retry: { attempts: 1 }（风控后不重试）
+
+#### 2. pacing 默认值增大（操作间更自然）
+- `xhs-unified-options.mjs` 行 101: jitterMs 900 → 1500
+- `xhs-unified-options.mjs` 行 102: navigationMinIntervalMs 2200 → 3500
+
+#### 3. 评论��动 settle 增大
+- `harvest-ops.mjs` 行 1257-1258: settleMinMs 280→500, settleMaxMs 820→1500
+
+#### 4. collect_links 后增加延迟（搜索→详情间缓冲）
+- `xhs-autoscript-collect.mjs`: 新增 wait_after_collect 操作（3-6秒随机）
+- `xhs-autoscript-detail-ops.mjs` 行 106: dependsOn collect_links → wait_after_collect
+
+### afterScrollDetail bug
+- `afterScrollDetail is not defined` 在 kimi 测试中出现 3 次
+- 当前源码中 afterScrollDetail 在正确的 else 块内定义和使用
+- 该 bug 已在后续重构中修复（.bak 文件是旧版本）
+
+## 2026-03-19 21:52: 非人类动作风险完整修复
+
+### 修复文件汇总
+
+#### 1. `xhs-autoscript-base.mjs`
+- 行 117: `retry.backoffMs` 500 → 3000（默认重试退避增大到 3 秒）
+- 行 39+: 新增 `humanizedDelay(minMs, maxMs, rng, debugLabel)` 导出函数
+
+#### 2. `xhs-autoscript-detail-ops.mjs`
+- 行 109-110: `open_first_detail` 添加 `retry: { attempts: 1, backoffMs: 0 }`（风控后不重试）
+- 行 353: `open_next_detail` retry 从 `{ attempts: 3, backoffMs: 5000 }` → `{ attempts: 1, backoffMs: 0 }`
+- 行 106: dependsOn `collect_links` → `wait_after_collect`
+
+#### 3. `xhs-autoscript-collect.mjs`
+- 新增 `wait_after_collect` operation（3-6 秒随机延迟）
+- 位于 collect_links 和 finish_after_collect_links 之间
+
+#### 4. `xhs-unified-options.mjs`
+- 行 101: `jitterMs` 默认值 900 → 1500
+- 行 102: `navigationMinIntervalMs` 默认值 2200 → 3500
+
+#### 5. `harvest-ops.mjs`
+- 行 1257: `settleMinMs` 280 → 500
+- 行 1258: `settleMaxMs` 820 → 1500
+- 行 1493+: comments_harvest 主循环第一轮入口添加 400-1200ms humanized delay
+
+#### 6. `detail-flow-ops.mjs`
+- 行 ~460: `executeOpenDetailOperation` 入口添加 400-1200ms pre-open humanized delay
+- 行 740+: RISK_CONTROL_DETECTED 后添加 30-60 秒冷却等待再返回 guard failure
+
+### 设计原则
+1. **风控硬停机**: RISK_CONTROL_DETECTED 后冷却 30-60s 再停止脚本，避免快速重试加重风控
+2. **不再重试 detail**: open_first_detail 和 open_next_detail 的 retry.attempts 固定为 1
+3. **入口人类化延迟**: 所有 detail 打开前 400-1200ms 随机等待
+4. **collect→detail 缓冲**: 搜索后等 3-6 秒再打开详情
+5. **评论采集入口延迟**: comments_harvest 第一轮前 400-1200ms 随机等待
+6. **增大全局 pacing**: jitter/navigateInterval/settle 都增大
+
+### 效果预期
+- 风控后不再触发快速重试（之前 11ms 就重试）
+- 操作间延迟更接近人类行为
+- 搜索→详情 间有缓冲时间
+
+### 2026-03-20 点击模式默认化 + smoke test 验证
+- **默认 detailOpenByLinks 改为仅在 resume 时启用**（避免 goto 直达导致风控）。
+  - 文件: `apps/webauto/entry/lib/xhs-unified-options.mjs`
+  - 逻辑: detailOpenByLinks 默认值 = resumeRequested && (stage in {full,detail})
+- **点击模式补齐 noteId**：`!useLinks && !noteId` 时自动选取首个可见搜索候选。
+  - 文件: `modules/camo-runtime/src/autoscript/action-providers/xhs/detail-flow-ops.mjs`
+  - 用 `readSearchCandidates` 取 `visibleEnough && inViewport` 第一个。
+- **visitedNoteIds 初始化防护**：push 前确保 `state.detailGateState` 存在。
+  - 文件: `detail-flow-ops.mjs`
+- **验证**：月全食 smoke test（runId: 6bd08ad8-de7a-4f27-b738-1077b0bd8d63）
+  - 点击打开详情成功、无风控
+  - commentsTotal=209 / expected=236（coverage≈0.89），reached_bottom
+  - 输出：`~/.webauto/download/xiaohongshu/debug/月全食/68c12e4c000000001b036f64/comments.jsonl`
+- **注意**：本次测试使用默认 headful 模式（符合项目默认 headful 规则）。
+
+### 2026-03-20 评论容器滚动修复 + Tab 生命周期管理设计
+
+#### 评论容器滚动根因
+- **问题**：`scrollBySelector` 使用 `keyboard:press(PageDown)` 滚动评论，但 `.note-scroller` 的 `tabIndex=-1`，无法获得焦点
+- **证据**：425 次 `visible_comments_probe`，scrollTop 只有 `0` 和 `51` 两个值（scrollHeight=1531, 可滚动 918px）
+- **根因链**：
+  1. `scrollBySelector` 的 `focusClick` 点击坐标 `(1010, 169)` 命中 `<span class="note-text">`，焦点被转移
+  2. PageDown 作用在错误的元素上（页面背景而非评论容器）
+  3. `camo scroll --selector .note-scroller` 正常（用 `mouse:wheel`，不受焦点影响）
+- **修复**：在 `scrollBySelector` 发送 PageDown 前，通过 JS 设置 `tabIndex=0` 并 `focus()` 滚动容器
+  - 文件: `modules/camo-runtime/src/autoscript/action-providers/xhs/dom-ops.mjs` 第 304-338 行
+  - 新增 `ensureScrollFocus` 选项（默认启用）
+  - 手动验证：focus 后 PageDown ×3 从 scrollTop=0 → 918（到底）
+
+#### Tab 生命周期管理设计（待实施）
+- **问题**：XHS 网站自身开 tab（captcha、搜索链接、window.open）完全绕过应用层管理，导致 136 个 tab
+- **用户要求**：
+  1. camo 启动 profile 时要加入 `--max-tabs` 参数
+  2. 不加默认 1 个 tab
+  3. 同一个 profile 下不管做什么调试都只能有这么多 tab
+  4. 这是 camo 层硬限制，不是应用层软约束
+- **设计方案**：
+  1. `camo start` 命令增加 `--max-tabs N` 参数（默认 1）
+  2. BrowserSession 初始化时保存 maxTabs 到 session options
+  3. `context.on('page')` 事件中检查 tab 数量，超过就关闭最旧非活跃 tab
+  4. `newPage()` API 调用前检查 tab 数量
+  5. profile config 文件持久化 maxTabs
+- **实施层次**：
+  - `@web-auto/camo` npm 包：BrowserSession + page-hooks（需要 PR）
+  - `modules/camo-runtime/` vendor 层：runtime-core operations tab guard
+  - autoscript 层：每轮 detail 循环前调用 `prune_excess_tabs`
+- **已完成**：
+  - `tab-ops.mjs` 导出 `pruneExcessTabs`，已注册为 `xhs_prune_excess_tabs` action
+  - `closeExcessTabs` 支持 `keepActive` 选项，保留当前活跃 tab
+- **待做**：
+  - camo 包中 BrowserSession 加 maxTabs 强制限制
+  - `camo start --max-tabs N` CLI 参数
+  - runtime-core operations 中加 tab guard（拦截 new_page 操作）
+
+## 2026-03-20 13:30 - Click Mode open_next_detail 死循环修复
+
+### 问题根因
+在 click mode（detailOpenByLinks=false）下，`open_next_detail` 使用 `auto_select_candidate` 选择帖子，但没有检查 `visitedNoteIds`。导致每次都选择同一个帖子，形成无限循环：
+- open_first_detail 打开帖子 A → comments_harvest 完成 → close_detail 关闭
+- open_next_detail 再次选择帖子 A → comments_harvest → close_detail → ...
+
+### 修复
+文件：`modules/camo-runtime/src/autoscript/action-providers/xhs/detail-flow-ops.mjs` 第 508-528 行
+
+在 `auto_select_candidate` 逻辑中加入 `visitedNoteIds` 检查：
+1. 获取当前 `state.detailGateState.visitedNoteIds`
+2. 在 `find()` 回调中跳过已访问的 noteId
+3. 如果所有可见候选都已访问，抛出 `AUTOSCRIPT_DONE_DETAIL_LINKS_EXHAUSTED`
+
+### 证据
+- runId: 7689ff30-8830-4c92-bd7d-f476d8e6bc28
+- 事件日志：2640 行，open_next_detail operation_done 出现 22 次
+- 所有 operation_done 中 noteId 都是同一个：69b2d4e700000000220228bf
+- comments_harvest 完成 10 次，都是同一个帖子
+
+### 分层次调试原则更新
+已更新 `~/.codex/skills/webauto-debug-workflow/SKILL.md`，加入分层次调试原则（L1→L2→L3→L4）。
+
+## 2026-03-21 测试环境禁用 comment budget
+
+### 结论
+- 非 production（env != prod）测试中禁用 comment budget（commentBudget=0），避免 tab_comment_budget 早停导致覆盖率偏低。
+
+### 修改位置
+- `modules/camo-runtime/src/autoscript/xhs-autoscript-detail-ops.mjs`
+  - 新增 `isProd` 判断，仅 prod 才启用 commentBudget。
+
+### 证据/原因
+- detail 5 测试中出现覆盖率 0.46，exitReason=tab_comment_budget_reached。
+- 用户要求：测试不允许设置 comment budget，只有 production 才使用。
+
+## 2026-03-21 14:58 - once:true 操作失败后无限重调度修复
+
+### 问题
+`ensure_tab_pool` 配置 `once: true` + `onFailure: 'continue'`，当 tab 创建失败后：
+- operationState 设为 'skipped'（因 onFailure=continue）
+- `shouldSchedule` 只检查 `status === 'done'` 才阻止重调度
+- 'skipped' 状态不阻止重调度 → 每次触发事件都重新调度
+- 导致浏览器反复打开/关闭（闪动抢焦点）
+
+### 修复
+1. **runtime.mjs shouldSchedule**: `once: true` 操作无论终态（done/skipped/failed）都不再重调度
+   - 文件: `modules/camo-runtime/src/autoscript/runtime.mjs`
+   - 原逻辑: `if (operation.once && status === 'done') return false`
+   - 新逻辑: `if (operation.once && (status === 'done' || 'skipped' || 'failed')) return false`
+
+2. **ensure_tab_pool retry 降为 1 次，backoff 0**
+   - 文件: `modules/camo-runtime/src/autoscript/xhs-autoscript-ops.mjs`
+   - `retry: { attempts: 2, backoffMs: 500 }` → `retry: { attempts: 1, backoffMs: 0 }`
+
+### 用户画像记忆
+- Jason 不允许反复尝试失败的操作，代码层面必须硬性约束
+- 发现容器/页面处理错误修改后，必须手动 camo 验证后再自动测试
+- 勘验不需要询问，记入记忆和用户画像
+- 称呼用户为 Jason
+
+## 2026-03-21 15:24 - 禁止 click mode（强制）
+
+### 用户强制要求
+- **默认不允许 click mode**，必须使用 URL mode（detailOpenByLinks=true）
+- 任何测试必须显式或默认走 URL mode
+- 不允许再使用 click mode，必须记忆并执行
+
+### 修复
+- `apps/webauto/entry/lib/xhs-unified-options.mjs`
+  - 默认 `detailOpenByLinks` 设为 true（URL mode）
+- 若用户明确要求 click mode 才允许临时使用
+
+## 2026-03-21 修复总结
+
+### 关键修复
+1. **keyword rotation 默认改为 false** — 用户传入的 keyword 不再被静默轮换
+2. **detailOpenByLinks 默认改为 true（URL mode）** — 禁止 click mode，必须用 URL mode
+3. **stop 时浏览器回到主页而非关闭** — `resetProfileSession` 导航到主页，不调用 `cleanupProfileSession`
+4. **commentsAdded 改为 newCommentsAdded，添加 commentsProcessed** — 支持断点续传，区分新增和处理总数
+5. **submit_search focus 失败不 abort** — 继续使用 clearAndType 键盘输入
+6. **once:true 操作失败后不再重调度** — 防止浏览器反复闪动
+
+### 运行模式结论
+- **不要用 autoscript 模式**（`WEBAUTO_RUNTIME_MODE=autoscript`）— 不启动 HTTP API
+- **必须用 unified 模式**（`WEBAUTO_RUNTIME_MODE=unified`）— 启动完整 HTTP 服务
+
+### daemon 使用规范
+- daemon 是长期运行服务，不要反复启停
+- 用 `daemon relay --detach` 启动新任务
+- stop 只中止任务，不关闭浏览器
+- 浏览器跨任务保持 alive
+
+### 用户偏好
+- 称呼用户为 Jason
+- 发现问题必须先勘验现场（截图/日志），直接修复，不要猜测和询问
+- 修改代码后必须手动验证再进行自动化测试
+
+## 2026-03-21 架构 Review 结论
+
+### autoscript 模式 vs unified 模式
+
+**autoscript 模式**（`WEBAUTO_RUNTIME_MODE=autoscript`）：
+- 只启动 browser-service（`ensureBrowserService()`）
+- 不启动 HTTP API
+- 没有任务调度、统计上报、WebSocket 推送
+- **结论：无实际业务用途，应删除**
+
+**unified 模式**（`WEBAUTO_RUNTIME_MODE=unified`）：
+- 启动完整 HTTP API（port 7701）
+- 包含任务注册、状态管理、WebSocket 事件推送
+- 通过 `ensureProfileSession` → `runProfile` → camo HTTP API 执行 autoscript
+- **结论：保留 unified 模式作为唯一入口**
+
+### click mode 分析
+
+click mode 在代码中约有 5 个条件分支（`if (!useLinks)`），分布在：
+- `detail-flow-ops.mjs`：auto_select_candidate、close_detail 等
+- `xhs-autoscript-detail-ops.mjs`：manual trigger
+
+**结论：click mode 已被 URL mode 取代，应清理残留代码**
+
+### 执行计划
+1. 删除 `apps/webauto/server.ts` 中的 autoscript 模式
+2. 清理 `detail-flow-ops.mjs` 中的 click mode 分支
+3. 清理 `xhs-autoscript-detail-ops.mjs` 中的 click mode 注释
+
+## 2026-03-21 点赞按钮定位修复
+
+**问题**：小红书评论区使用虚拟滚动，DOM 中 comment-item 数量（12-16个）远少于已采集评论总数。`readLikeTargetByIndex` 用 DOM index 定位点赞按钮，但 `match_probe` 返回的是累积评论的全局 index，导致 index 不对齐，大量 like_target_missing。
+
+**修复**：
+1. 新增 `readLikeTargetByCommentId(profileId, commentId, fallbackIndex)` - 通过 commentId（data-id）定位
+2. `processVisibleCommentLikes` 改用 `readVisibleCommentTargets` 获取当前可见评论
+3. `pushTrace` 记录实际 reason（comment_not_in_dom / like_target_missing）
+
+**关键文件**：
+- `modules/camo-runtime/src/autoscript/action-providers/xhs/comments-ops.mjs` - readLikeTargetByCommentId
+- `modules/camo-runtime/src/autoscript/action-providers/xhs/harvest-ops.mjs` - processVisibleCommentLikes 改用 commentId
+
+**漏网之鱼保障**：每轮滚动后 applyVisibleLikePass 重新扫描可见评论 + dedupKey 去重

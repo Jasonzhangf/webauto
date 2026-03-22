@@ -2,7 +2,7 @@ import { handleRaiseError } from './auth-ops.mjs';
 import { executeAssertLoggedInOperation } from './auth-ops.mjs';
 import { executeSubmitSearchOperation, executeCollectLinksOperation } from './collect-ops.mjs';
 import { executeWaitSearchPermitOperation } from './search-gate-ops.mjs';
-import { executeSwitchTabIfNeeded } from './tab-ops.mjs';
+import { executeSwitchTabIfNeeded, pruneExcessTabs } from './tab-ops.mjs';
 import { executeOpenDetailOperation, executeCloseDetailOperation } from './detail-flow-ops.mjs';
 import { executeDetailHarvestOperation, executeExpandRepliesOperation, executeCommentsHarvestOperation, executeCommentMatchOperation, executeCommentLikeOperation, executeCommentReplyOperation } from './harvest-ops.mjs';
 import { executeTimeoutSnapshotOperation, executeDebugSnapshotOperation } from './diagnostic-ops.mjs';
@@ -14,6 +14,7 @@ export const XHS_ACTION_HANDLERS = {
   xhs_submit_search: executeSubmitSearchOperation,
   xhs_collect_links: executeCollectLinksOperation,
   xhs_tab_switch_if_needed: executeSwitchTabIfNeeded,
+  xhs_prune_excess_tabs: pruneExcessTabs,
   xhs_open_detail: executeOpenDetailOperation,
   xhs_detail_harvest: executeDetailHarvestOperation,
   xhs_expand_replies: executeExpandRepliesOperation,

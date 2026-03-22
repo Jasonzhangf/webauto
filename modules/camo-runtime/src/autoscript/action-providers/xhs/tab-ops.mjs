@@ -56,7 +56,7 @@ function ensureRuntimeTabPool(context = {}) {
  * @param {number} keepCount 保留的tab数量
  * @param {object} existingPages 当前页面列表
  */
-async function closeExcessTabs(profileId, keepCount, existingPages = null) {
+async function closeExcessTabs(profileId, keepCount, existingPages = null, options = {}) {
   let pages = existingPages;
   if (!pages) {
     const pageList = await callAPI('page:list', { profileId });
@@ -67,9 +67,18 @@ async function closeExcessTabs(profileId, keepCount, existingPages = null) {
     return { closed: 0, kept: pages.length };
   }
 
-  // 按index排序，保留前 keepCount 个
+  const keepActive = options.keepActive !== false;
+  const activeIndex = options.activeIndex ?? null;
   const sortedPages = [...pages].sort((a, b) => Number(a.index) - Number(b.index));
-  const toClose = sortedPages.slice(keepCount);
+  const keepSet = new Set();
+  if (keepActive && Number.isFinite(Number(activeIndex))) {
+    keepSet.add(Number(activeIndex));
+  }
+  for (const page of sortedPages) {
+    if (keepSet.size >= keepCount) break;
+    keepSet.add(Number(page.index));
+  }
+  const toClose = sortedPages.filter((p) => !keepSet.has(Number(p.index)));
   let closed = 0;
 
   for (const page of toClose) {
@@ -82,7 +91,7 @@ async function closeExcessTabs(profileId, keepCount, existingPages = null) {
     }
   }
 
-  return { closed, kept: keepCount };
+  return { closed, kept: keepSet.size };
 }
 
 /**
@@ -98,7 +107,7 @@ async function syncTabPoolWithBrowser(profileId, context) {
 
   // 如果页面数量超过限制，关闭多余的
   if (pages.length > TAB_COUNT) {
-    await closeExcessTabs(profileId, TAB_COUNT, pages);
+    await closeExcessTabs(profileId, TAB_COUNT, pages, { keepActive: true, activeIndex });
 
     // 重新获取页面列表
     const newList = await callAPI('page:list', { profileId });
@@ -116,6 +125,20 @@ async function syncTabPoolWithBrowser(profileId, context) {
   pool.count = pool.slots.length;
 
   return { pages: sortedPages, activeIndex, pool };
+}
+
+/**
+ * 外部可调用的清理：强制关闭超出 tabCount 的页面
+ */
+export async function pruneExcessTabs({ profileId, context, tabCount = TAB_COUNT }) {
+  const pageList = await callAPI('page:list', { profileId });
+  const pages = extractPageList(pageList);
+  const activeIndex = extractActiveIndex(pageList);
+  const result = await closeExcessTabs(profileId, tabCount, pages, { keepActive: true, activeIndex });
+  if (context?.runtime && typeof context.runtime === 'object') {
+    context.runtime.lastTabPruneAt = new Date().toISOString();
+  }
+  return { ok: true, ...result };
 }
 
 /**

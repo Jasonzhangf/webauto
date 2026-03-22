@@ -2,7 +2,7 @@ import { getProfileState } from './state.mjs';
 import { emitActionTrace, buildTraceRecorder, emitOperationProgress } from './trace.mjs';
 import { buildElementCollectability, normalizeInlineText } from './utils.mjs';
 import { readDetailSnapshot, readDetailState } from './detail-ops.mjs';
-import { readCommentsSnapshot, readCommentEntryPoint, readCommentTotalTarget, readCommentScrollContainerTarget, readVisibleCommentTarget, readVisibleCommentTargets, readResumeAnchorPairTarget, readLikeTargetByIndex, readReplyTargetByIndex, readReplyInputTarget, readReplySendButtonTarget, readExpandReplyTargets } from './comments-ops.mjs';
+import { readCommentsSnapshot, readCommentEntryPoint, readCommentTotalTarget, readCommentScrollContainerTarget, readVisibleCommentTarget, readVisibleCommentTargets, readResumeAnchorPairTarget, readLikeTargetByIndex, readLikeTargetByCommentId, readReplyTargetByIndex, readReplyInputTarget, readReplySendButtonTarget, readExpandReplyTargets } from './comments-ops.mjs';
 import { consumeTabBudget } from './tab-state.mjs';
 import { markDetailSlotProgress, readDetailSlotState, writeDetailSlotState } from './detail-slot-state.mjs';
 import { resolveXhsOutputContext, readJsonlRows, mergeCommentsJsonl, writeCommentsMd, writeContentMarkdown, appendLikeStateRows, writeLikeSummary } from './persistence.mjs';
@@ -398,7 +398,11 @@ async function processVisibleCommentLikes({ profileId, state, params, current, s
   if (maxLikes <= 0) {
     return { hitCount: 0, likedCount: 0, skippedCount: 0, alreadyLikedSkipped: 0, dedupSkipped: 0 };
   }
-  const comments = Array.isArray(current?.comments) ? current.comments : [];
+  // Use visible comment targets to avoid DOM index mismatch due to virtual scrolling
+  const visible = await readVisibleCommentTargets(profileId).catch(() => null);
+  const comments = Array.isArray(visible?.comments)
+    ? visible.comments
+    : (Array.isArray(current?.comments) ? current.comments : []);
   const binding = resolveRuntimeNoteBinding(state, params);
   const boundNoteId = String(binding.noteId || state.currentNoteId || '').trim() || null;
   const boundHref = String(binding.href || state.currentHref || '').trim() || null;
@@ -468,12 +472,18 @@ async function processVisibleCommentLikes({ profileId, state, params, current, s
       pushTrace({ kind: 'skip', stage: 'inline_comment_like', index: idx, reason: 'note_binding_mismatch', expectedNoteId: boundNoteId, actualNoteId: preLikeNoteId });
       continue;
     }
-    const target = await readLikeTargetByIndex(profileId, idx);
+    const target = await readLikeTargetByCommentId(profileId, row?.commentId, idx);
     if (!target?.found || !target?.center) {
       roundSkippedCount += 1;
       session.skippedCount += 1;
       session.skippedIndexes.push(idx);
-      pushTrace({ kind: 'skip', stage: 'inline_comment_like', index: idx, reason: 'like_target_missing' });
+      pushTrace({
+        kind: 'skip',
+        stage: 'inline_comment_like',
+        index: idx,
+        reason: target?.reason || 'like_target_missing',
+        commentId: row?.commentId || null,
+      });
       continue;
     }
     await highlightStep('xhs-detail-comment-like', target, 'matched', 'comment like', 1800);

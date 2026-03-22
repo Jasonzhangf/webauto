@@ -155,6 +155,9 @@ export async function ensureSessionInitialized(profileId, options = {}) {
   const url = String(options.url || '').trim();
   const rootDir = String(options.rootDir || process.cwd()).trim();
   const timeoutMs = Math.max(1000, Math.floor(toNumber(options.timeoutMs, 60000)));
+  const maxTabs = Number.isFinite(Number(options.maxTabs))
+    ? Math.floor(Number(options.maxTabs))
+    : null;
   const restartSession = options.restartSession !== false;
   let stopRet = null;
   if (restartSession) {
@@ -182,6 +185,7 @@ export async function ensureSessionInitialized(profileId, options = {}) {
     startArgs.push('--width', String(startWindow.width));
     startArgs.push('--height', String(startWindow.height));
   }
+  if (maxTabs && maxTabs >= 1) startArgs.push('--max-tabs', String(maxTabs));
   if (url) startArgs.push('--url', url);
   const startRet = runCamo(startArgs, {
     rootDir,

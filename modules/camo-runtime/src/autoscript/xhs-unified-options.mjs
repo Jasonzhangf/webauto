@@ -79,7 +79,9 @@ export function resolveXhsUnifiedOptions(rawOptions = {}) {
   const tabOpenDelayMs = toNonNegativeInt(rawOptions.tabOpenDelayMs, 1400);
   const tabOpenMinDelayMs = toNonNegativeInt(rawOptions.tabOpenMinDelayMs, 10000);
   const noteIntervalMs = toPositiveInt(rawOptions.noteIntervalMs, 1200, 200);
-  const submitMethod = toTrimmedString(rawOptions.submitMethod, 'click').toLowerCase();
+  const noteIntervalMinMs = toPositiveInt(rawOptions.noteIntervalMinMs, 2000, 1000);
+  const noteIntervalMaxMs = toPositiveInt(rawOptions.noteIntervalMaxMs, 5000, noteIntervalMinMs);
+  const submitMethod = toTrimmedString(rawOptions.submitMethod, 'enter').toLowerCase();
   const submitActionDelayMinMs = toPositiveInt(rawOptions.submitActionDelayMinMs, 180, 20);
   const submitActionDelayMaxMs = toPositiveInt(rawOptions.submitActionDelayMaxMs, 620, submitActionDelayMinMs);
   const submitSettleMinMs = toPositiveInt(rawOptions.submitSettleMinMs, 1200, 60);
@@ -96,8 +98,8 @@ export function resolveXhsUnifiedOptions(rawOptions = {}) {
   const commentsSettleMaxMs = toPositiveInt(rawOptions.commentsSettleMaxMs, 820, commentsSettleMinMs);
   const defaultOperationMinIntervalMs = toNonNegativeInt(rawOptions.defaultOperationMinIntervalMs, 1200);
   const defaultEventCooldownMs = toNonNegativeInt(rawOptions.defaultEventCooldownMs, 700);
-  const defaultPacingJitterMs = toNonNegativeInt(rawOptions.defaultPacingJitterMs, 900);
-  const navigationMinIntervalMs = toNonNegativeInt(rawOptions.navigationMinIntervalMs, 2200);
+  const defaultPacingJitterMs = toNonNegativeInt(rawOptions.defaultPacingJitterMs, 1500);
+  const navigationMinIntervalMs = toNonNegativeInt(rawOptions.navigationMinIntervalMs, 3500);
   const maxNotes = toPositiveInt(rawOptions.maxNotes, 30, 1);
   const maxComments = toNonNegativeInt(rawOptions.maxComments, 0);
   const resume = toBoolean(rawOptions.resume, false);
@@ -149,7 +151,7 @@ export function resolveXhsUnifiedOptions(rawOptions = {}) {
   const detailLinksStartup = detailOpenByLinks && stage === 'detail';
   const autoResumeDetailLinksStartup = (stage === 'full' || stage === 'detail') && toBoolean(rawOptions.resume, false);
   const effectiveDetailLinksStartup = autoResumeDetailLinksStartup || detailLinksStartup;
-  if (!tabCountProvided && detailLoopEnabled) tabCount = 4;
+  if (!tabCountProvided && detailLoopEnabled) tabCount = 3;
   const detailRotateComments = toNonNegativeInt(
     rawOptions.detailRotateComments,
     detailLoopEnabled && tabCount > 1 && maxComments <= 0 ? 50 : 0,
@@ -197,6 +199,8 @@ export function resolveXhsUnifiedOptions(rawOptions = {}) {
     tabOpenDelayMs,
     tabOpenMinDelayMs,
     noteIntervalMs,
+    noteIntervalMinMs,
+    noteIntervalMaxMs,
     submitMethod,
     submitActionDelayMinMs,
     submitActionDelayMaxMs,

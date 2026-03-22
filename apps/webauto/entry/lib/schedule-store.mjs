@@ -576,6 +576,7 @@ function normalizeTaskRecord(raw = {}) {
     nextRunAt: normalizeText(raw.nextRunAt),
     commandType: normalizeText(raw.commandType) || DEFAULT_COMMAND_TYPE,
     commandArgv: normalizeCommandArgv(raw.commandArgv),
+    taskMode: normalizeText(raw.taskMode ?? raw.task_mode) || 'cruise',
     createdAt: normalizeText(raw.createdAt),
     updatedAt: normalizeText(raw.updatedAt),
     lastRunAt: normalizeText(raw.lastRunAt),
@@ -954,10 +955,35 @@ export function markScheduleTaskResult(id, result = {}) {
       task.enabled = false;
     }
   }
-  if (task.maxRuns && task.runCount >= task.maxRuns) {
+  if (result.disable === true) {
+    task.enabled = false;
+    task.nextRunAt = null;
+  } else if (task.maxRuns && task.runCount >= task.maxRuns) {
     task.enabled = false;
     task.nextRunAt = null;
   }
+  task.updatedAt = nowIso();
+
+  const idx = index.tasks.findIndex((item) => item.id === task.id);
+  if (idx < 0) throw new Error(`task not found: ${id}`);
+  index.tasks[idx] = task;
+  saveIndex(index);
+  return sanitizeTaskForOutput(task);
+}
+
+export function markScheduleTaskSkipped(id, options = {}) {
+  const index = loadIndex();
+  const target = ensureTask(String(id || '').trim(), index);
+  const task = normalizeTaskRecord(target);
+  if (!task) throw new Error(`invalid task: ${id}`);
+
+  const skippedAt = normalizeText(options.skippedAt) || nowIso();
+  const fromMs = Number.isFinite(Date.parse(task.nextRunAt))
+    ? Date.parse(task.nextRunAt)
+    : (Number.isFinite(Date.parse(skippedAt)) ? Date.parse(skippedAt) : Date.now());
+
+  // Advance nextRunAt without incrementing runCount/failCount
+  task.nextRunAt = nextRunAt(task, fromMs, true);
   task.updatedAt = nowIso();
 
   const idx = index.tasks.findIndex((item) => item.id === task.id);

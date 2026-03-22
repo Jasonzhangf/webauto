@@ -494,7 +494,7 @@ export async function readExpandReplyTargets(profileId) {
       if (!isVisible(node)) continue;
       const text = String(node.textContent || '').replace(/\\s+/g, ' ').trim();
       if (!text) continue;
-      if (!(/展开/.test(text) && /回复/.test(text))) continue;
+      if (!(/展开.*(更多|回复)|查看.*(更多|全部)|更多评论/.test(text))) continue;
       const rect = readRect(node);
       if (!rect) continue;
       const key = [
@@ -723,7 +723,16 @@ export async function readCommentScrollContainerTarget(profileId) {
       }
     }
     candidates.sort((a, b) => a.score - b.score);
-    const target = candidates[0] || null;
+    let target = candidates[0] || null;
+    const scrollableTargets = candidates.filter((c) => c.canScroll);
+    // If scrollable targets exist, prefer them over non-scrollable ones
+    if (scrollableTargets.length > 0 && target && !target.canScroll) {
+      target = {
+        ...scrollableTargets[0],
+        preferredScrollable: true,
+        originalSelector: String(target.selector || '').trim(),
+      };
+    }
     if (!target) return { found: false, reason: 'no_scroll_container' };
     if (!allowedSelectorSet.has(String(target.selector || '').trim())) {
       return {
@@ -1036,6 +1045,79 @@ export async function readLikeTargetByIndex(profileId, index) {
         width: Number(containerRect.width || 0),
         height: Number(containerRect.height || 0),
       },
+    };
+  })()`;
+  return evaluateReadonly(profileId, script);
+}
+
+/**
+ * Locate a comment's like button by commentId (data-id attribute) instead of DOM index.
+ * This avoids issues with virtual scrolling where DOM indices shift as elements are
+ * added/removed. Falls back to DOM index if commentId is empty.
+ */
+export async function readLikeTargetByCommentId(profileId, commentId, fallbackIndex) {
+  const cid = String(commentId || '').trim();
+  const fbIdx = Math.max(0, Number(fallbackIndex) || 0);
+  if (!cid) {
+    return readLikeTargetByIndex(profileId, fbIdx);
+  }
+  const script = `(() => {
+    const cid = ${JSON.stringify(cid)};
+    const detailRoot = document.querySelector('.note-detail-mask')
+      || document.querySelector('.note-detail-page')
+      || document.querySelector('.note-detail-dialog')
+      || document.querySelector('.note-container')
+      || document.querySelector('.outer-link-container')
+      || document.querySelector('.main-content');
+    if (!detailRoot) return { found: false, reason: 'no_detail_root' };
+    const vw = Number(window.innerWidth || 0);
+    const vh = Number(window.innerHeight || 0);
+    const readRect = (node) => node?.getBoundingClientRect?.() || null;
+    const intersectionArea = (a, b) => {
+      const left = Math.max(Number(a.left || 0), Number(b.left || 0));
+      const right = Math.min(Number(a.right || 0), Number(b.right || 0));
+      const top = Math.max(Number(a.top || 0), Number(b.top || 0));
+      const bottom = Math.min(Number(a.bottom || 0), Number(b.bottom || 0));
+      const width = Math.max(0, right - left);
+      const height = Math.max(0, bottom - top);
+      return width * height;
+    };
+    const toVisiblePoint = (rect) => {
+      const left = Math.max(1, Math.min(vw - 1, Number(rect.left || 0)));
+      const right = Math.max(left + 1, Math.min(vw - 1, Number(rect.right || (Number(rect.left || 0) + Number(rect.width || 0)))));
+      const top = Math.max(1, Math.min(vh - 1, Number(rect.top || 0)));
+      const bottom = Math.max(top + 1, Math.min(vh - 1, Number(rect.bottom || (Number(rect.top || 0) + Number(rect.height || 0)))));
+      return {
+        x: Math.max(1, Math.round(left + (right - left) * 0.5)),
+        y: Math.max(1, Math.round(top + (bottom - top) * 0.5)),
+      };
+    };
+    const allNodes = Array.from(detailRoot.querySelectorAll('.comment-item, [class*="comment-item"]'));
+    const node = allNodes.find((n) => {
+      if (!(n instanceof Element)) return false;
+      const nid = n.getAttribute('data-id') || n.getAttribute('data-comment-id') || n.id || '';
+      return nid === cid;
+    });
+    if (!node) return { found: false, reason: 'comment_not_in_dom', commentId: cid };
+    const likeBtn = node.querySelector('.like-wrapper, [class*="like-wrapper"], [class*="like"], .like-btn, .like');
+    if (!(likeBtn instanceof Element)) return { found: false, hasNode: true, reason: 'like_target_missing', commentId: cid };
+    const rect = likeBtn.getBoundingClientRect();
+    if (!rect || rect.width <= 1 || rect.height <= 1) {
+      return { found: false, hasNode: true, reason: 'like_target_not_visible', commentId: cid };
+    }
+    const className = String(likeBtn.className || '');
+    const ariaPressed = String(likeBtn.getAttribute?.('aria-pressed') || '').trim().toLowerCase();
+    const dataSelected = String(likeBtn.getAttribute?.('selected') || likeBtn.getAttribute?.('data-selected') || '').trim().toLowerCase();
+    const liked = /active|liked|selected|is-liked|already-liked/.test(className) || ariaPressed === 'true' || dataSelected === 'true';
+    const countEl = likeBtn.querySelector('.count, [class*="count"]');
+    const countText = String(countEl?.textContent || '').replace(/\s+/g, ' ').trim();
+    return {
+      found: true,
+      commentId: cid,
+      liked,
+      likeStatus: className,
+      likeCountText: countText,
+      center: toVisiblePoint(rect),
     };
   })()`;
   return evaluateReadonly(profileId, script);

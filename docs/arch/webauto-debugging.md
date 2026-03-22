@@ -30,3 +30,22 @@
 - 任务日志：`~/.webauto/download/.../run.log`
 - 事件流：`run-events.jsonl`
 - 超时快照：`diagnostics/timeouts/*.json + *.png`
+
+
+## 评论覆盖率不足的处理（2026-03-19）
+
+当 expectedCommentsCount > 0 且 visibleCount / expectedCommentsCount < 0.9：
+
+1. **不要在 reached_bottom 时直接退出**。
+2. 触发 `coverage_retry`：
+   - 回滚到评论顶部（确保 scroll 容器先获得 focus click）
+   - 重新执行 expand replies pass
+   - 重新向下滚动采集
+3. 如果重试次数耗尽仍未达到 90%，以 `coverage_insufficient` 退出。
+
+**关键锚点**：
+- 评论容器 `.note-scroller`
+- scrollSignature(top/clientHeight/scrollHeight/atBottom)
+- 覆盖率 = visibleCount / expectedCommentsCount
+
+**注意**：如果 scrollTop 在 recovery/coverage_retry 中不变，说明容器未聚焦或被遮挡，应强制 focus click。 

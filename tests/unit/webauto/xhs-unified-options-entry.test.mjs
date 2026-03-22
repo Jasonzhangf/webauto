@@ -21,11 +21,11 @@ describe('xhs unified entry options', () => {
       keyword: 'deepseek',
       stage: 'detail',
       'max-notes': 1,
-      'detail-open-by-links': false,
+      // Click mode forbidden by policy; removed,
     }, 'xhs-qa-1');
 
-    assert.equal(options.detailOpenByLinks, false);
-    assert.equal(options.autoCloseDetail, false);
+    assert.equal(options.detailOpenByLinks, true);
+    assert.equal(options.autoCloseDetail, true);
   });
 
   it('full mode defaults to safe-link detail opening', async () => {

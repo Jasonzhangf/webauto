@@ -37,14 +37,19 @@ export function buildXhsDetailOperations(options) {
     maxLikesPerRound,
     replyText,
     noteIntervalMs,
+    noteIntervalMinMs,
+    noteIntervalMaxMs,
     tabCount,
     autoCloseDetail,
     detailRotateComments,
   } = options;
   const rotateCommentBudget = Math.max(0, Number(detailRotateComments ?? 0) || 0);
-  const commentBudget = maxComments > 0
-    ? maxComments
-    : ((Number(tabCount || 1) > 1 && rotateCommentBudget > 0) ? rotateCommentBudget : 0);
+  const isProd = String(env || '').trim() === 'prod';
+  const commentBudget = isProd
+    ? (maxComments > 0
+      ? maxComments
+      : ((Number(tabCount || 1) > 1 && rotateCommentBudget > 0) ? rotateCommentBudget : 0))
+    : 0;
 
   const matchGateEnabled = options.matchGateEnabled === true;
   // In openByLinks mode we do not close modal per note; we only finalize link/anchor state.
@@ -59,9 +64,10 @@ export function buildXhsDetailOperations(options) {
   if (options.detailLoopEnabled && detailTransitionEnabled && Number(tabCount || 1) > 1) {
     openNextDependsOn.push('tab_switch_if_needed');
   }
-  const modalChainTrigger = detailOpenByLinks ? 'manual' : 'detail_modal.exist';
-  const detailHarvestTrigger = detailOpenByLinks ? 'manual' : 'detail_modal.exist';
-  const modalChainOncePerAppear = detailOpenByLinks ? false : true;
+  // Click-mode detail page may not render a modal container; use manual trigger to avoid subscription dependency.
+  const modalChainTrigger = 'manual';
+  const detailHarvestTrigger = 'manual';
+  const modalChainOncePerAppear = false;
   const openNextFollowupOperations = detailOpenByLinks ? ['detail_harvest'] : [];
   const modalExistConditions = detailOpenByLinks
     ? [{ type: 'subscription_exist', subscriptionId: 'detail_modal' }]
@@ -101,10 +107,12 @@ export function buildXhsDetailOperations(options) {
         openByLinksMaxAttempts,
       },
       trigger: detailLinksStartup ? 'startup' : 'search_result_item.exist',
-      dependsOn: [detailLinksStartup ? 'goto_home' : (options.stageLinksEnabled ? 'collect_links' : 'submit_search')],
+      dependsOn: [detailLinksStartup ? 'goto_home' : (options.stageLinksEnabled ? 'wait_after_collect' : 'submit_search')],
       once: true,
       timeoutMs: 90000,
-      onFailure: 'stop_all',
+      retry: { attempts: 1, backoffMs: 0 },
+
+      onFailure: 'continue',
       impact: 'script',
       validation: { mode: 'none' },
       checkpoint: {
@@ -197,7 +205,7 @@ export function buildXhsDetailOperations(options) {
       conditions: modalExistConditions,
       once: false,
       oncePerAppear: modalChainOncePerAppear,
-      timeoutMs: 600000,
+      disableTimeout: true,
       retry: { attempts: 1, backoffMs: 0 },
       impact: 'script',
       onFailure: 'continue',
@@ -273,7 +281,7 @@ export function buildXhsDetailOperations(options) {
       id: 'wait_between_notes',
       enabled: options.detailLoopEnabled,
       action: 'wait',
-      params: { ms: noteIntervalMs },
+      params: options.waitBetweenNotesParams ?? { minMs: noteIntervalMinMs || 2000, maxMs: noteIntervalMaxMs || 5000, debugLabel: 'wait_between_notes' },
       // In safe-link detail mode the close -> wait chain is the single source of truth.
       // Using detail_modal.disappear here causes duplicate scheduling because the same
       // close cycle can trigger both the raw disappear event and the dependency force-run.
@@ -284,7 +292,11 @@ export function buildXhsDetailOperations(options) {
       retry: { attempts: 1, backoffMs: 0 },
       impact: 'op',
       onFailure: 'continue',
-      pacing: { operationMinIntervalMs: noteIntervalMs, eventCooldownMs: Math.max(400, Math.floor(noteIntervalMs / 2)), jitterMs: 160 },
+      pacing: {
+        operationMinIntervalMs: noteIntervalMinMs,
+        eventCooldownMs: Math.max(400, Math.floor(noteIntervalMinMs / 2)),
+        jitterMs: Math.max(0, noteIntervalMaxMs - noteIntervalMinMs),
+      },
     },
     {
       id: 'tab_switch_if_needed',
@@ -342,7 +354,7 @@ export function buildXhsDetailOperations(options) {
       once: false,
       oncePerAppear: false,
       timeoutMs: 90000,
-      retry: { attempts: 3, backoffMs: 1000 },
+      retry: { attempts: 1, backoffMs: 0 },
       impact: 'op',
       onFailure: 'continue',
       checkpoint: {

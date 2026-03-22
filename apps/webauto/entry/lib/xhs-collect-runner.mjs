@@ -18,6 +18,7 @@ function resolveCollectArgs(argv = {}) {
       ...argv,
       keyword,
       'max-notes': maxNotes,
+      ...(argv['keyword-rotate'] === undefined ? { 'keyword-rotate': false } : {}),
     },
   };
 }
@@ -45,20 +46,48 @@ export function getCollectHelpLines() {
 
 export async function runXhsCollect(argv = {}) {
   const { keyword, maxNotes, env, outputRoot, runArgv } = resolveCollectArgs(argv);
-  await runUnified(runArgv, { stage: 'links' });
+  const summary = await runUnified(runArgv, { stage: 'links' });
+  const runId = summary?.runId || summary?.results?.[0]?.runId || null;
+  if (!runId) {
+    console.error(JSON.stringify({
+      event: 'xhs.collect.runid_missing',
+      keyword,
+      env,
+      maxNotes,
+      summaryKeys: summary ? Object.keys(summary) : [],
+    }));
+    throw new Error('COLLECT_RUNID_MISSING: failed to extract runId from summary');
+  }
+  console.log(JSON.stringify({
+    event: 'xhs.collect.verify_start',
+    keyword,
+    env,
+    maxNotes,
+    runId,
+  }));
   try {
-    await assertCollectedLinksCount({
+    const verifyResult = await assertCollectedLinksCount({
       keyword,
       env,
       outputRoot,
       target: maxNotes,
+      runId,
     });
+    console.log(JSON.stringify({
+      event: 'xhs.collect.verify_success',
+      keyword,
+      env,
+      maxNotes,
+      runId,
+      linksPath: verifyResult?.linksPath || null,
+    }));
   } catch (error) {
     console.error(JSON.stringify({
       event: 'xhs.collect.links_count_mismatch',
       keyword,
       env,
       maxNotes,
+      runId,
       message: error?.message || String(error),
       details: error?.details || null,
     }));

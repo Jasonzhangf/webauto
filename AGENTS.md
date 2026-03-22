@@ -101,20 +101,51 @@ curl http://127.0.0.1:7704/health
 
 ## 6) CLI 标准入口
 
+### 6.1 启动/关闭唯一真源（硬性限制）
+
+**代码层面硬性限制**：xhs-unified/xhs-collect 入口已加入 daemon 环境检测，非 daemon 启动将直接拒绝。
+
+| 操作 | 唯一命令 | 说明 |
+|------|----------|------|
+| 启动 daemon | `webauto daemon start` | 启动后台守护进程，管理所有任务 |
+| 启动任务 | `webauto daemon relay --detach -- xhs unified ...` | 通过 daemon 中继启动，进程不会丢失 |
+| 查看任务状态 | `webauto xhs status --json` | 查看当前运行状态 |
+| 查看 daemon 状态 | `webauto daemon status --json` | 查看 daemon 及所有 jobs |
+| 停止任务 | API `POST /api/v1/tasks/<runId>/stop` | 停止指定 runId 的任务 |
+| 停止 daemon | `webauto daemon stop` | 停止守护进程（会连带终止所有 jobs） |
+
+**禁止行为**：
+- ❌ `nohup node bin/webauto.mjs xhs unified ... &`（进程会被静默杀死）
+- ❌ 直接 fork 子进程运行 xhs unified（无生命周期管理）
+- ❌ 前台 exec 管道启动（管道断开进程丢失）
+
+### 6.2 标准命令
+
 ```bash
-# WebAuto
+# Daemon 管理（唯一启动/关闭真源）
+webauto daemon start                          # 启动守护进程
+webauto daemon status --json                  # 查看守护进程状态
+webauto daemon stop                           # 停止守护进程
+
+# 任务启动（必须通过 daemon relay）
+webauto daemon relay --detach -- xhs unified --profile xiaohongshu-batch-1 --keyword "seedance2.0" --max-notes 100 --do-comments true --persist-comments true --do-likes true --like-keywords "真牛" --env debug --tab-count 4
+webauto daemon relay --detach -- xhs collect --profile xiaohongshu-batch-1 --keyword "seedance2.0" --max-notes 100 --env debug
+
+# 任务状态查看
+webauto xhs status --json
+webauto xhs status --run-id <runId> --json
+
+# WebAuto UI
 webauto --help
 webauto ui console --check
 webauto ui console --build
 webauto ui console --install
 webauto ui console
 
-# XHS
+# XHS 安装与状态
 webauto xhs install --download-geoip --ensure-backend
-webauto xhs unified --profile xiaohongshu-batch-1 --keyword "seedance2.0" --max-notes 100 --do-comments true --persist-comments true --do-likes true --like-keywords "真牛" --env debug --tab-count 4
-webauto xhs status --json
 
-# Camo
+# Camo 浏览器管理
 camo help
 camo init
 camo start xiaohongshu-batch-1 --url https://www.xiaohongshu.com --alias xhs-main
@@ -137,11 +168,34 @@ Windows 优先 `pwsh` / `powershell`。
 - UI 与业务逻辑必须解耦。
 
 仓库边界：
-- `webauto`：业务编排与策略
-- `camo`：通用 runtime 能力
-- 发现业务逻辑进入 `camo` 时，必须回迁到 `webauto`。
+- `camo`：**通用框架**（framework），提供 runtime 能力，**禁止包含任何业务特定文件**
+- `webauto`：**业务项目**（application），负责业务编排与策略
+- `modules/camo-runtime/`：vendor 代码，从 `@web-auto/camo` 复制非 CLI runtime 能力用于 app 端编排
+- 发现业务逻辑进入 `camo` 时，必须回迁到 `webauto`
+- 发现业务特定文件（如 `xhs-*.mjs`）进入 `@web-auto/camo` 时，必须移除并回迁到 `webauto` 的 `modules/camo-runtime/`
 
----
+### 代码仓库关系
+
+**modules/camo-runtime/**（webauto 项目内）：
+- 定位：vendor 代码副本
+- 说明：README.md 明确标注 "vendored from @web-auto/camo"
+- 包含：autoscript schema/runtime + 业务特定代码（如 XHS）
+- 用途：直接被 webauto 运行时使用
+- 修改：在此修改业务特定功能（如 xhs-autoscript-*.mjs）
+
+**node_modules/@web-auto/camo/**：
+- 定位：独立 npm 包（@web-auto/camo）
+- 来源：https://github.com/Jasonzhangf/camo.git
+- 包含：通用 runtime 框架 + CLI 命令
+- 用途：提供通用 runtime 能力
+- 约束：**禁止包含业务特定文件**（如 xhs-*.mjs）
+
+**架构原则**：
+- camo 是框架层，保持通用性和可复用性
+- webauto 是应用层，包含业务特定逻辑
+- 业务文件（如 xhs-*.mjs）只存在于 webauto 项目内
+- 框架升级时，业务项目更新依赖即可获得新能力
+
 
 ## 8) 小红书风控与执行约束（强制）
 

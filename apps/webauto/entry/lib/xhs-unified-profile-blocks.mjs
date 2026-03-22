@@ -95,6 +95,7 @@ export async function ensureProfileSession(profileId, options = {}) {
     rootDir: process.cwd(),
     timeoutMs: 60000,
     headless: options?.headless === true,
+    maxTabs: options?.tabCount ?? null,
   });
   if (!ret?.ok) return false;
   const ready = await waitForActiveSession(id, {
@@ -107,10 +108,6 @@ export async function ensureProfileSession(profileId, options = {}) {
 export async function runProfile(spec, argv, baseOverrides = {}) {
   const profileId = spec.profileId;
   const headless = parseBool(argv.headless, false);
-  const sessionOk = await ensureProfileSession(profileId, { headless });
-  if (!sessionOk) {
-    throw new Error(`No active session for profile: ${profileId}`);
-  }
   const busEnabled = parseBool(argv['bus-events'], false) || process.env.WEBAUTO_BUS_EVENTS === '1';
   const busPublishable = new Set([
     'xhs.unified.start',
@@ -138,6 +135,10 @@ export async function runProfile(spec, argv, baseOverrides = {}) {
     overrides.seedCollectMaxRounds = parseNonNegativeInt(spec.seedCollectMaxRounds, 0);
   }
   const options = await buildUnifiedOptions(argv, profileId, overrides);
+  const sessionOk = await ensureProfileSession(profileId, { headless, tabCount: options.tabCount });
+  if (!sessionOk) {
+    throw new Error(`No active session for profile: ${profileId}`);
+  }
   console.log(JSON.stringify({
     event: 'xhs.unified.flow_gate',
     profileId,
@@ -185,12 +186,13 @@ export async function runProfile(spec, argv, baseOverrides = {}) {
       progress: {
         total: Math.max(0, Number(spec.assignedNotes) || 0),
         processed: Math.max(0, Number(stats.openedNotes) || 0),
-        failed: Math.max(0, Number(stats.operationErrors) || 0),
+        failed: stats.taskFailed ? 1 : 0,
       },
       stats: {
         notesProcessed: Math.max(0, Number(stats.openedNotes) || 0),
         commentsCollected: Math.max(0, Number(stats.commentsCollected) || 0),
         newCommentsAdded: Math.max(0, Number(stats.newCommentsAdded) || 0),
+        stopReason: stats.stopReason || null,
         likesPerformed: Math.max(0, Number(stats.likesNewCount) || 0),
         likesSkippedTotal: Math.max(0, Number(stats.likesSkippedCount) || 0),
         likeAlreadySkipped: Math.max(0, Number(stats.likesAlreadyCount) || 0),
@@ -329,6 +331,7 @@ export async function runProfile(spec, argv, baseOverrides = {}) {
         notesProcessed: 0,
         commentsCollected: 0,
         newCommentsAdded: 0,
+        stopReason: null,
         likesPerformed: 0,
         likesSkippedTotal: 0,
         likeAlreadySkipped: 0,
@@ -392,12 +395,13 @@ export async function runProfile(spec, argv, baseOverrides = {}) {
       progress: {
         total: Math.max(0, Number(spec.assignedNotes) || 0),
         processed: Math.max(0, Number(stats.openedNotes) || 0),
-        failed: Math.max(0, Number(stats.operationErrors) || 0),
+        failed: stats.taskFailed ? 1 : 0,
       },
       stats: {
         notesProcessed: Math.max(0, Number(stats.openedNotes) || 0),
         commentsCollected: Math.max(0, Number(stats.commentsCollected) || 0),
         newCommentsAdded: Math.max(0, Number(stats.newCommentsAdded) || 0),
+        stopReason: stats.stopReason || null,
         likesPerformed: Math.max(0, Number(stats.likesNewCount) || 0),
         likesSkippedTotal: Math.max(0, Number(stats.likesSkippedCount) || 0),
         likeAlreadySkipped: Math.max(0, Number(stats.likesAlreadyCount) || 0),

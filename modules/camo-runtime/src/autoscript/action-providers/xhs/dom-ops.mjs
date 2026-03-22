@@ -301,6 +301,7 @@ export async function scrollBySelector(profileId, selector, options = {}) {
   if (!normalizedSelector) throw new Error('scrollBySelector requires selector');
   const amount = Math.max(1, Math.round(Number(options.amount ?? 300) || 300));
   const direction = String(options.direction || 'down').trim().toLowerCase() === 'up' ? 'up' : 'down';
+  const shouldEnsureFocus = options.ensureScrollFocus !== false;
   const target = await evaluateReadonly(profileId, `(() => {
     const node = document.querySelector("${normalizedSelector}");
     if (!(node instanceof Element)) return { found: false, reason: 'selector_not_found' };
@@ -323,6 +324,19 @@ export async function scrollBySelector(profileId, selector, options = {}) {
   if (!target?.found || !target?.center) {
     throw new Error(`scrollBySelector target unavailable: ${target?.reason || 'unknown'}`);
   }
+  if (shouldEnsureFocus) {
+    await evaluateReadonly(profileId, `(() => {
+      const node = document.querySelector("${normalizedSelector}");
+      if (!(node instanceof Element)) return { ok: false, reason: 'selector_not_found' };
+      try {
+        if (typeof node.tabIndex !== 'number' || node.tabIndex < 0) node.tabIndex = 0;
+        node.focus?.();
+        return { ok: document.activeElement === node, tabIndex: node.tabIndex };
+      } catch (error) {
+        return { ok: false, reason: String(error?.message || error) };
+      }
+    })()`);
+  }
   const focusTarget = options.focusTarget && typeof options.focusTarget === 'object' && options.focusTarget.center
     ? {
         ...target,
@@ -343,17 +357,15 @@ export async function scrollBySelector(profileId, selector, options = {}) {
       duration: 1800,
     });
   }
+  const focusClickTimeoutMs = Math.max(800, Number(options.focusClickTimeoutMs ?? options.clickTimeoutMs ?? 5000) || 5000);
   if (options.skipFocusClick !== true) {
-    await callAPI('mouse:click', {
-      profileId,
-      x: focusTarget.center.x,
-      y: focusTarget.center.y,
+    await clickPoint(profileId, focusTarget.center, {
       button: 'left',
       clicks: 1,
-      delay: 30,
-      nudgeBefore: true,
+      nudgeBefore: false,
+      timeoutMs: focusClickTimeoutMs,
+      afterClickSleepMs: 1200,
     });
-    await sleep(1200);
   } else {
     await sleep(240);
   }

@@ -67,7 +67,6 @@ const SOCKET_PATH = process.platform === 'win32'
   ? '\\\\.\\pipe\\webauto-daemon'
   : path.join(RUN_DIR, 'webauto-daemon.sock');
 const WEBAUTO_BIN = path.join(ROOT, 'bin', 'webauto.mjs');
-const UI_CLI_SCRIPT = path.join(ROOT, 'apps', 'desktop-console', 'entry', 'ui-cli.mjs');
 const WORKER_HEARTBEAT_INTERVAL_MS = 30_000;
 const WORKER_HEARTBEAT_MISS_LIMIT = 3;
 const WORKER_HEARTBEAT_STALE_MS = WORKER_HEARTBEAT_INTERVAL_MS * WORKER_HEARTBEAT_MISS_LIMIT;
@@ -187,27 +186,6 @@ function runNode(args, options = {}) {
     child.on('close', (code) => resolve({ ok: code === 0, code, stdout, stderr }));
   });
 }
-
-async function runUiCli(args = [], options = {}) {
-  const ret = await runNode([UI_CLI_SCRIPT, ...args], { env: options.env || {} });
-  const parsed = parseJsonFromMixedOutput(ret.stdout, ret.stderr);
-  return { ...ret, json: parsed };
-}
-
-async function runUiCliBounded(args = [], maxWaitMs = 20_000, options = {}) {
-  const uiTask = runUiCli(args, options);
-  const timeoutTask = sleep(Math.max(1_000, Number(maxWaitMs) || 20_000)).then(() => ({
-    ok: false,
-    code: null,
-    stdout: '',
-    stderr: '',
-    json: null,
-    timeout: true,
-    error: `ui_cli_timeout_${Math.max(1_000, Number(maxWaitMs) || 20_000)}ms`,
-  }));
-  return Promise.race([uiTask, timeoutTask]);
-}
-
 function requestDaemon(payload, timeoutMs = 15_000) {
   return new Promise((resolve, reject) => {
     const client = net.createConnection(SOCKET_PATH);
@@ -268,12 +246,10 @@ async function startDaemonServer() {
 
   const state = {
     startedAt: Date.now(),
-    desiredUi: false,
     jobs: new Map(),
     jobsOrder: [],
     workers: new Map(),
     workersOrder: [],
-    uiWorkerId: null,
     shuttingDown: false,
     shutdownReason: null,
     shutdownStartedAt: null,
@@ -318,7 +294,6 @@ async function startDaemonServer() {
       socket: SOCKET_PATH,
       jobs,
       workers,
-      desiredUi: state.desiredUi,
       shuttingDown: state.shuttingDown,
     });
   };
@@ -375,20 +350,6 @@ async function startDaemonServer() {
     return worker;
   };
 
-  const allocateUiWorker = () => {
-    const currentId = String(state.uiWorkerId || '').trim();
-    const current = currentId ? state.workers.get(currentId) : null;
-    if (current && current.status === 'running') return current;
-    const worker = registerWorker({
-      id: `ui_${Date.now()}_${randomUUID().slice(0, 8)}`,
-      token: randomUUID(),
-      kind: 'ui-desktop',
-      source: 'daemon-ui-start',
-      status: 'running',
-    });
-    state.uiWorkerId = worker?.id || null;
-    return worker;
-  };
 
   const startRelayJob = async (params = {}) => {
     const args = Array.isArray(params.args) ? params.args : [];
@@ -464,8 +425,7 @@ async function startDaemonServer() {
         pid: process.pid,
         startedAt: new Date(state.startedAt).toISOString(),
         uptimeMs: Date.now() - state.startedAt,
-        desiredUi: state.desiredUi,
-        shuttingDown: state.shuttingDown,
+          shuttingDown: state.shuttingDown,
         shutdownReason: state.shutdownReason,
         shutdownStartedAt: state.shutdownStartedAt,
         socket: SOCKET_PATH,
@@ -522,7 +482,6 @@ async function startDaemonServer() {
       state.shuttingDown = true;
       state.shutdownReason = 'rpc_shutdown';
       state.shutdownStartedAt = nowIso();
-      state.desiredUi = false;
       updateHeartbeat();
       if (!state.shutdownTimer) {
         state.shutdownTimer = setTimeout(() => {
@@ -533,56 +492,6 @@ async function startDaemonServer() {
         state.shutdownTimer.unref();
       }
       return { ok: true, shuttingDown: true, pid: process.pid };
-    }
-    if (method === 'ui.start') {
-      state.desiredUi = true;
-      const uiWorker = allocateUiWorker();
-      const env = uiWorker ? buildWorkerEnv(uiWorker) : {};
-      const ret = await runUiCliBounded(['start', '--json'], 150_000, { env });
-      const statusPid = Number(ret?.json?.status?.pid || 0);
-      if (uiWorker && Number.isFinite(statusPid) && statusPid > 0) uiWorker.pid = Math.floor(statusPid);
-      return {
-        ok: ret.ok,
-        result: ret.json || null,
-        code: ret.code,
-        stdout: ret.stdout,
-        stderr: ret.stderr,
-        timeout: ret.timeout === true,
-        error: ret.error || ret?.json?.error || null,
-      };
-    }
-    if (method === 'ui.stop') {
-      state.desiredUi = false;
-      const ret = await runUiCliBounded(['stop', '--json'], 20_000);
-      if (state.uiWorkerId) {
-        markWorkerStopped(state.uiWorkerId, 'ui_stop_requested', { source: 'daemon-ui-stop' });
-      }
-      return {
-        ok: ret.ok,
-        result: ret.json || null,
-        code: ret.code,
-        stdout: ret.stdout,
-        stderr: ret.stderr,
-        timeout: ret.timeout === true,
-        error: ret.error || ret?.json?.error || null,
-      };
-    }
-    if (method === 'ui.status') {
-      const ret = await runUiCliBounded(['status', '--json'], 20_000);
-      const statusPid = Number(ret?.json?.pid || 0);
-      if (state.uiWorkerId && Number.isFinite(statusPid) && statusPid > 0) {
-        const worker = state.workers.get(state.uiWorkerId);
-        if (worker) worker.pid = Math.floor(statusPid);
-      }
-      return {
-        ok: ret.ok,
-        result: ret.json || null,
-        code: ret.code,
-        stdout: ret.stdout,
-        stderr: ret.stderr,
-        timeout: ret.timeout === true,
-        error: ret.error || ret?.json?.error || null,
-      };
     }
     if (method === 'relay.start') {
       return startRelayJob(params);
@@ -707,7 +616,6 @@ Usage:
   webauto --daemon
   webauto --daemon start|stop|status|run
   webauto --daemon relay [--detach] -- <webauto args...>
-  webauto --daemon ui-start|ui-stop|ui-status
 
 Notes:
   - \`--daemon\` 默认等价于 \`--daemon start\`
@@ -762,27 +670,6 @@ async function main() {
     return;
   }
 
-  if (cmd === 'ui-start') {
-    await ensureDaemonStarted(undefined, { allowStart: true });
-    const ret = await requestDaemon({ method: 'ui.start', params: {} }, 180_000);
-    print(ret, jsonMode);
-    if (!ret?.ok) process.exit(1);
-    return;
-  }
-  if (cmd === 'ui-stop') {
-    await ensureDaemonStarted(undefined, { allowStart: true });
-    const ret = await requestDaemon({ method: 'ui.stop', params: {} }, 30_000);
-    print(ret, jsonMode);
-    if (!ret?.ok) process.exit(1);
-    return;
-  }
-  if (cmd === 'ui-status') {
-    await ensureDaemonStarted(undefined, { allowStart: true });
-    const ret = await requestDaemon({ method: 'ui.status', params: {} }, 30_000);
-    print(ret, jsonMode);
-    if (!ret?.ok) process.exit(1);
-    return;
-  }
 
   if (cmd === 'job-status') {
     await ensureDaemonStarted(undefined, { allowStart: true });

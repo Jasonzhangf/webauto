@@ -1,9 +1,54 @@
 import { resolveXhsUnifiedOptions } from './xhs-unified-options.mjs';
 
+export function computeNoteDelayMs(minMs, maxMs, rng = Math.random, debugLabel = 'wait_between_notes') {
+  const min = Number.isFinite(minMs) ? Math.max(0, Number(minMs)) : 0;
+  const max = Number.isFinite(maxMs) ? Math.max(0, Number(maxMs)) : 0;
+  const normalizedMin = Math.min(min, max);
+  const normalizedMax = Math.max(min, max);
+  const delay = normalizedMax <= normalizedMin
+    ? normalizedMax
+    : Math.floor(normalizedMin + rng() * (normalizedMax - normalizedMin + 1));
+  if (process.env.DEBUG_WAIT_DELAY === 'true') {
+    console.log(`[computeNoteDelayMs:${debugLabel}] delay: ${delay}ms (minMs=${normalizedMin}, maxMs=${normalizedMax}, jitter=${normalizedMax - normalizedMin})`);
+  }
+  return delay;
+}
+
+/**
+ * Entry function for wait_between_notes delay generation.
+ * This is the actual entry point used by the runtime.
+ * Allows rng injection for testing.
+ */
+export function computeWaitBetweenNotesDelay(options, rng = Math.random) {
+  const { noteIntervalMinMs, noteIntervalMaxMs } = options;
+  return computeNoteDelayMs(noteIntervalMinMs, noteIntervalMaxMs, rng, 'wait_between_notes');
+}
+
+/**
+ * Humanized random delay helper.
+ * Returns a random delay between minMs and maxMs, inclusive.
+ * Can be used inline or with sleep().
+ */
+export function humanizedDelay(minMs = 400, maxMs = 1200, rng = Math.random, debugLabel = 'humanized_delay') {
+  const min = Math.max(0, Number(minMs) || 0);
+  const max = Math.max(min, Number(maxMs) || 0);
+  const delay = max <= min ? max : Math.floor(min + rng() * (max - min + 1));
+  if (process.env.DEBUG_WAIT_DELAY === 'true') {
+    console.log(`[humanizedDelay:${debugLabel}] delay: ${delay}ms (minMs=${min}, maxMs=${max})`);
+  }
+  return delay;
+}
+
 const DEFAULT_SOURCE = 'scripts/xiaohongshu/phase-unified-harvest.mjs';
 
 export function buildXhsAutoscriptBase(rawOptions = {}, overrides = {}) {
   const options = resolveXhsUnifiedOptions({ ...rawOptions, ...overrides });
+  // Attach wait_between_notes params for downstream operations
+  options.waitBetweenNotesParams = {
+    minMs: options.noteIntervalMinMs,
+    maxMs: options.noteIntervalMaxMs,
+    debugLabel: 'wait_between_notes',
+  };
   const {
     profileId,
     keyword,
@@ -15,6 +60,9 @@ export function buildXhsAutoscriptBase(rawOptions = {}, overrides = {}) {
     openByLinksMaxAttempts,
     tabOpenDelayMs,
     noteIntervalMs,
+    noteIntervalMinMs,
+    noteIntervalMaxMs,
+    waitBetweenNotesParams,
     submitMethod,
     submitActionDelayMinMs,
     submitActionDelayMaxMs,
@@ -81,7 +129,7 @@ export function buildXhsAutoscriptBase(rawOptions = {}, overrides = {}) {
     throttle,
     defaults: {
       disableTimeout: strictFailure ? false : true,
-      retry: { attempts: 2, backoffMs: 500 },
+      retry: { attempts: 2, backoffMs: 3000 },
       impact: 'subscription',
       onFailure: strictFailure ? 'stop_all' : 'chain_stop',
       validationMode: 'none',
@@ -106,6 +154,8 @@ export function buildXhsAutoscriptBase(rawOptions = {}, overrides = {}) {
       openByLinksMaxAttempts,
       tabOpenDelayMs,
       noteIntervalMs,
+      noteIntervalMinMs,
+      noteIntervalMaxMs,
       submitMethod,
       submitActionDelayMinMs,
       submitActionDelayMaxMs,
@@ -201,5 +251,12 @@ export function buildXhsAutoscriptBase(rawOptions = {}, overrides = {}) {
     ],
   };
 
-  return { options, base };
+  // Helper function to log wait_between_notes delay (for debugging)
+  const debugWaitBetweenNotesDelay = (minMs, maxMs, ms) => {
+    if (process.env.DEBUG_WAIT_DELAY === 'true') {
+      console.log(`[wait_between_notes] generated delay: ${ms}ms (minMs=${minMs}, maxMs=${maxMs}, jitter=${maxMs - minMs})`);
+    }
+  };
+
+  return { options, base, debugWaitBetweenNotesDelay };
 }

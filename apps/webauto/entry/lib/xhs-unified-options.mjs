@@ -1,3 +1,4 @@
+import fs from 'node:fs';
 import path from 'node:path';
 import { resolvePlatformFlowGate } from './flow-gate.mjs';
 import { resolveXhsStage } from './xhs-unified-stages.mjs';
@@ -20,6 +21,27 @@ function resolveSharedHarvestPath({ sharedHarvestPath, outputRoot, env, keyword 
   const safeEnv = sanitizeForPath(env, 'debug');
   const safeKeyword = sanitizeForPath(keyword, 'unknown');
   return path.join(path.resolve(root), 'xiaohongshu', safeEnv, safeKeyword, 'safe-detail-urls.jsonl');
+}
+
+function resolveTaskMode(argv, overrides = {}) {
+  const raw = overrides.taskMode ?? argv['task-mode'] ?? argv['task_mode'] ?? 'cruise';
+  const mode = String(raw || '').trim().toLowerCase() || 'cruise';
+  if (mode !== 'cruise' && mode !== 'single') {
+    throw new Error(`invalid --task-mode: ${mode}. use cruise|single`);
+  }
+  return mode;
+}
+
+function countJsonlLines(filePath) {
+  if (!filePath) return 0;
+  try {
+    if (!fs.existsSync(filePath)) return 0;
+    const raw = fs.readFileSync(filePath, 'utf8');
+    if (!raw) return 0;
+    return raw.split('\n').filter((line) => line.trim().length > 0).length;
+  } catch {
+    return 0;
+  }
 }
 
 export async function buildUnifiedOptions(argv, profileId, overrides = {}) {
@@ -95,7 +117,8 @@ export async function buildUnifiedOptions(argv, profileId, overrides = {}) {
   const replyText = String(argv['reply-text'] || '感谢分享，已关注').trim() || '感谢分享，已关注';
   const outputRoot = String(argv['output-root'] || '').trim();
   const uiTriggerId = String(argv['ui-trigger-id'] || process.env.WEBAUTO_UI_TRIGGER_ID || '').trim();
-  const resume = parseBool(overrides.resume ?? argv.resume, false);
+  const taskMode = resolveTaskMode(argv, overrides);
+  // resume is resolved later via effectiveOverrides to support task-mode adjustments
   const incrementalMax = parseBool(overrides.incrementalMax ?? argv['incremental-max'], true);
   const sharedHarvestPath = resolveSharedHarvestPath({
     sharedHarvestPath: overrides.sharedHarvestPath ?? argv['shared-harvest-path'] ?? '',
@@ -103,6 +126,15 @@ export async function buildUnifiedOptions(argv, profileId, overrides = {}) {
     env,
     keyword,
   });
+  const singleExistingLinks = taskMode === 'single'
+    ? countJsonlLines(sharedHarvestPath)
+    : 0;
+  const singleTargetReached = taskMode === 'single'
+    && maxNotes > 0
+    && singleExistingLinks >= maxNotes;
+  const effectiveOverrides = singleTargetReached
+    ? { ...overrides, stage: 'detail', resume: true, detailOpenByLinks: true }
+    : overrides;
   const searchSerialKey = String(overrides.searchSerialKey ?? argv['search-serial-key'] ?? '').trim();
   const seedCollectCount = parseNonNegativeInt(
     overrides.seedCollectCount ?? argv['seed-collect-count'],
@@ -113,20 +145,22 @@ export async function buildUnifiedOptions(argv, profileId, overrides = {}) {
     Math.max(6, Math.ceil(Math.max(1, maxNotes) / 2)),
   );
   const dryRun = parseBool(argv['dry-run'], false);
-  const skipAccountSync = parseBool(overrides.skipAccountSync ?? argv['skip-account-sync'], false);
+  const skipAccountSync = parseBool(effectiveOverrides.skipAccountSync ?? argv['skip-account-sync'], false);
   const disableDryRun = parseBool(argv['no-dry-run'], false);
   const effectiveDryRun = disableDryRun ? false : dryRun;
-  const stage = resolveXhsStage(argv, overrides);
-  const stageLinksEnabled = true;
+  const stage = resolveXhsStage(argv, effectiveOverrides);
+  // When resuming/detail-only, disable collect/link operations.
+  const stageLinksEnabled = !singleTargetReached;
 
   // If auto-resume is enabled, use detail-links mode to skip collect
   // and directly use existing safe-detail-urls.
   // Default to URL mode (detailOpenByLinks=true). Click mode is forbidden by policy.
-  const resumeRequested = parseBool(overrides.resume ?? argv.resume, false);
+  const resumeRequested = parseBool(effectiveOverrides.resume ?? argv.resume, false);
+  const resume = resumeRequested;
   const detailLinksByResume = resumeRequested && (stage === 'detail' || stage === 'full');
 
   const detailOpenByLinks = parseBool(
-    overrides.detailOpenByLinks ?? argv['detail-open-by-links'],
+    effectiveOverrides.detailOpenByLinks ?? argv['detail-open-by-links'],
     true,
   );
   if (detailOpenByLinks !== true) {
@@ -140,24 +174,24 @@ export async function buildUnifiedOptions(argv, profileId, overrides = {}) {
     && resumeRequested;
   const effectiveDetailLinksStartup = autoResumeDetailLinksStartup || detailLinksStartup;
   const autoCloseDetail = parseBool(
-    overrides.autoCloseDetail ?? argv['auto-close-detail'],
-   detailOpenByLinks || !(stage === 'detail' && maxNotes <= 1),
- );
-  if (stage === 'detail' || stage === 'full' || parseBool(overrides.doComments ?? argv['do-comments'], false)) {
+    effectiveOverrides.autoCloseDetail ?? argv['auto-close-detail'],
+    detailOpenByLinks || !(stage === 'detail' && maxNotes <= 1),
+  );
+  if (stage === 'detail' || stage === 'full' || parseBool(effectiveOverrides.doComments ?? argv['do-comments'], false)) {
     commentsScrollStepMin = Math.max(commentsScrollStepMin, 960);
     commentsScrollStepMax = Math.max(commentsScrollStepMax, 1280, commentsScrollStepMin);
   }
-  if (!tabCountProvided && (stage === 'detail' || stage === 'full' || parseBool(overrides.doComments ?? argv['do-comments'], false))) {
+  if (!tabCountProvided && (stage === 'detail' || stage === 'full' || parseBool(effectiveOverrides.doComments ?? argv['do-comments'], false))) {
     tabCount = 4;
   }
   const detailRotateComments = parseNonNegativeInt(
-    overrides.detailRotateComments ?? argv['detail-rotate-comments'],
+    effectiveOverrides.detailRotateComments ?? argv['detail-rotate-comments'],
     (tabCount > 1 && maxComments <= 0) ? 50 : 0,
   );
   const stageDetailEnabled = stage === 'detail';
   const stageContentEnabled = stage === 'detail' || stage === 'full' || stage === 'content' || stage === 'like' || stage === 'reply';
-  const likeRequested = parseBool(overrides.doLikes ?? argv['do-likes'], stage === 'like');
-  const replyRequested = parseBool(overrides.doReply ?? argv['do-reply'], stage === 'reply');
+  const likeRequested = parseBool(effectiveOverrides.doLikes ?? argv['do-likes'], stage === 'like');
+  const replyRequested = parseBool(effectiveOverrides.doReply ?? argv['do-reply'], stage === 'reply');
   const stageLikeEnabled = (stage === 'detail' || stage === 'like' || stage === 'full')
     && likeRequested
     && !effectiveDryRun;
@@ -165,17 +199,20 @@ export async function buildUnifiedOptions(argv, profileId, overrides = {}) {
     && replyRequested
     && !effectiveDryRun;
   const commentsRequested = parseBool(
-    overrides.doComments ?? argv['do-comments'],
+    effectiveOverrides.doComments ?? argv['do-comments'],
     stageContentEnabled || stageLikeEnabled || stageReplyEnabled,
   );
   const doComments = commentsRequested;
   const maxLikesPerRound = maxLikesPerRoundRaw > 0
     ? maxLikesPerRoundRaw
     : (stageLikeEnabled ? 5 : 0);
-  const doHomepage = stageContentEnabled && parseBool(overrides.doHomepage ?? argv['do-homepage'], true);
-  const doImages = stageContentEnabled && parseBool(overrides.doImages ?? argv['do-images'], false);
-  const doOcr = stageContentEnabled && parseBool(overrides.doOcr ?? argv['do-ocr'], false);
-  const persistComments = doComments && parseBool(overrides.persistComments ?? argv['persist-comments'], !effectiveDryRun);
+  const doHomepage = stageContentEnabled && parseBool(effectiveOverrides.doHomepage ?? argv['do-homepage'], true);
+  const doImages = stageContentEnabled && parseBool(effectiveOverrides.doImages ?? argv['do-images'], false);
+  const doOcr = stageContentEnabled && parseBool(effectiveOverrides.doOcr ?? argv['do-ocr'], false);
+  const persistComments = doComments && parseBool(
+    effectiveOverrides.persistComments ?? argv['persist-comments'],
+    !effectiveDryRun,
+  );
 
   const base = {
     profileId,
@@ -191,6 +228,9 @@ export async function buildUnifiedOptions(argv, profileId, overrides = {}) {
     tabOpenMinDelayMs: 10000,
     tabOpenDelayMs,
     noteIntervalMs,
+    taskMode,
+    singleExistingLinks,
+    singleTargetReached,
     submitMethod,
     submitActionDelayMinMs,
     submitActionDelayMaxMs,
@@ -233,8 +273,8 @@ export async function buildUnifiedOptions(argv, profileId, overrides = {}) {
     doHomepage,
     doImages,
     doOcr,
-   persistComments,
-   sharedHarvestPath,
+    persistComments,
+    sharedHarvestPath,
     searchSerialKey,
     seedCollectCount,
     seedCollectMaxRounds,

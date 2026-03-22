@@ -12,6 +12,7 @@ import {
   listDueScheduleTasks,
   listScheduleTasks,
   markScheduleTaskResult,
+  markScheduleTaskSkipped,
   normalizeSchedulerPolicy,
   releaseScheduleDaemonLease,
   releaseScheduleTaskClaim,
@@ -319,6 +320,15 @@ async function executeTask(task, options = {}) {
     policy,
   });
   if (!claim.ok) {
+    const skipReasons = new Set([
+      'task_busy',
+      'resource_busy',
+      'max_concurrency',
+      'platform_max_concurrency',
+    ]);
+    if (skipReasons.has(claim.reason)) {
+      markScheduleTaskSkipped(task?.id, { skippedAt: new Date().toISOString() });
+    }
     return {
       ok: false,
       skipped: true,
@@ -339,6 +349,7 @@ async function executeTask(task, options = {}) {
   try {
     const commandType = String(task?.commandType || 'xhs-unified').trim();
     const commandArgv = ensureProfileArgForTask(commandType, task?.commandArgv || {});
+    if (task?.taskMode) commandArgv["task-mode"] = task.taskMode;
     const result = await withConsoleSilenced(quietExecutors, async () => {
       if (commandType === 'xhs-unified') {
         const runUnified = await getXhsRunner();
@@ -354,6 +365,17 @@ async function executeTask(task, options = {}) {
       throw new Error(`unsupported commandType at executeTask: ${commandType}`);
     });
     const durationMs = Date.now() - startedAt;
+    const profileResults = Array.isArray(result?.results) ? result.results : [];
+    const hasRiskControl = profileResults.some((item) => {
+      const reason = String(item?.reason || '').toLowerCase();
+      const stopReason = String(item?.stats?.stopReason || '').toLowerCase();
+      return reason.includes('risk') || reason.includes('n_detected')
+        || stopReason.includes('risk') || stopReason.includes('n_detected')
+        || stopReason.includes('风控') || reason.includes('风控');
+    });
+    if (hasRiskControl) {
+      throw new Error('risk_control_detected');
+    }
     const runResult = markScheduleTaskResult(task.id, {
       status: 'success',
       durationMs,
@@ -376,12 +398,16 @@ async function executeTask(task, options = {}) {
    const durationMs = Date.now() - startedAt;
    const message = error?.message || String(error);
     const retry = evaluateRetry(error, task);
+    const riskControl = retry.errorType === 'risk_control'
+      || /risk_control|n_detected|风控/i.test(message);
+    const allowRetry = retry.shouldRetry && !riskControl;
     const runResult = markScheduleTaskResult(task.id, {
       status: 'failed',
       error: message,
       durationMs,
       finishedAt: new Date().toISOString(),
-      retryAt: retry.shouldRetry ? retry.retryAt : undefined,
+      retryAt: (allowRetry && task?.scheduleType === 'once') ? retry.retryAt : undefined,
+      disable: riskControl === true,
     });
     return {
       ok: false,
@@ -390,7 +416,7 @@ async function executeTask(task, options = {}) {
       name: task.name,
       durationMs,
       error: message,
-      retry: retry.shouldRetry ? { errorType: retry.errorType, retryAt: retry.retryAt } : undefined,
+      retry: allowRetry ? { errorType: retry.errorType, retryAt: retry.retryAt } : undefined,
       runResult,
     };
   } finally {

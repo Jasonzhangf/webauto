@@ -1,4 +1,3 @@
-Clock-Stop-When: no-open-tasks
 
 ## 背景
 CLI 重构 Phase 2：UI 代码已清理，daemon guard 已移除，daemon 设计文档已创建

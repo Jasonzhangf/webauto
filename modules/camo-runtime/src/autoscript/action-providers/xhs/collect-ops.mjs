@@ -1,6 +1,6 @@
 import { getProfileState, withSerializedLock } from './state.mjs';
 import { buildTraceRecorder, emitActionTrace, emitOperationProgress } from './trace.mjs';
-import { resolveSearchLockKey, randomBetween, resolveSearchResultTokenLink } from './utils.mjs';
+import { resolveSearchLockKey, randomBetween, resolveSearchResultTokenLink, normalizeBaseNoteId } from './utils.mjs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -539,13 +539,56 @@ export async function executeSubmitSearchOperation({ profileId, params = {}, con
     }
 
     // Skip click before type - clearAndType uses keyboard shortcuts (Ctrl+A/Cmd+A) which handle focus
+    // But some pages lose focus; verify anchor (input value) and retry with a short focus click if needed.
     pushTrace({ kind: 'skip_click', stage: 'submit_search', target: 'search_input', reason: 'keyboard_type_handles_focus' });
-    await sleepRandomImpl(actionDelayMinMs, actionDelayMaxMs, pushTrace, 'submit_pre_type');
-
-    if (keyword && String(input.value || '') !== keyword) {
-      await clearAndTypeImpl(profileId, keyword, Number(params.keyDelayMs ?? 65) || 65);
-      pushTrace({ kind: 'type', stage: 'submit_search', target: 'search_input', length: keyword.length });
-      await sleepRandomImpl(actionDelayMinMs, actionDelayMaxMs, pushTrace, 'submit_after_type');
+    let currentInput = input;
+    let currentValue = String(currentInput?.value || '');
+    let focusFailed = false;
+    if (keyword && currentValue !== keyword) {
+      const maxTypeAttempts = 2;
+      for (let attempt = 1; attempt <= maxTypeAttempts; attempt += 1) {
+        if (currentInput?.center) {
+          try {
+            await clickPointImpl(profileId, currentInput.center, { steps: 3, timeoutMs: 1500, retryOnFailure: false });
+            pushTrace({ kind: 'click', stage: 'submit_search_focus', attempt });
+          } catch (error) {
+            pushTrace({ kind: 'focus_error', stage: 'submit_search_focus', attempt, error: String(error?.message || error) });
+            // Focus click failed but clearAndType uses Ctrl+A/Cmd+A which handles focus.
+            // Continue typing instead of aborting.
+          }
+        } else {
+          // No center coordinates; clearAndType may still work via keyboard shortcut.
+        }
+        await sleepRandomImpl(actionDelayMinMs, actionDelayMaxMs, pushTrace, 'submit_pre_type');
+        await clearAndTypeImpl(profileId, keyword, Number(params.keyDelayMs ?? 65) || 65);
+        pushTrace({ kind: 'type', stage: 'submit_search', target: 'search_input', length: keyword.length, attempt });
+        await sleepRandomImpl(actionDelayMinMs, actionDelayMaxMs, pushTrace, 'submit_after_type');
+        currentInput = await readSearchInputImpl(profileId);
+        if (!currentInput || currentInput.ok !== true) break;
+        currentValue = String(currentInput.value || '');
+        const normalizedValue = currentValue.replace(/\s+/g, '').trim();
+        const normalizedKeyword = String(keyword || '').replace(/\s+/g, '').trim();
+        if (normalizedValue === normalizedKeyword) break;
+      }
+      const normalizedValue = currentValue.replace(/\s+/g, '').trim();
+      const normalizedKeyword = String(keyword || '').replace(/\s+/g, '').trim();
+      if (focusFailed) {
+        // Focus failed: only allow submit if input already matches keyword.
+        pushTrace({ kind: 'focus_error_skip_submit', stage: 'submit_search', expected: keyword, actual: currentValue });
+        if (keyword && normalizedValue !== normalizedKeyword) {
+          // Keep typing attempt even if focus click failed. Fall through to mismatch handling.
+        }
+      }
+      if (keyword && normalizedValue !== normalizedKeyword) {
+        // Hard-fail on input mismatch to avoid submitting stale keyword.
+        pushTrace({ kind: 'input_mismatch', stage: 'submit_search', expected: keyword, actual: currentValue, softFail: false });
+        return {
+          ok: false,
+          code: 'SEARCH_INPUT_MISMATCH',
+          message: 'search input mismatch; abort submit to prevent wrong keyword',
+          data: { expected: keyword, actual: currentValue },
+        };
+      }
     }
 
     const guardBeforeSubmit = await assertNoGuard('submit_search_before_submit');
@@ -557,10 +600,18 @@ export async function executeSubmitSearchOperation({ profileId, params = {}, con
       if (method === 'click') {
         const target = await resolveSelectorTargetImpl(profileId, ['.input-button .search-icon', '.input-button', 'button.min-width-search-icon'], { requireViewport: true });
         if (target && target.center) {
-          await clickPointImpl(profileId, target.center, { steps: 3 });
-          via = target.selector || 'click';
-          pushTrace({ kind: 'click', stage: 'submit_search', selector: via, attempt });
-          return;
+          try {
+            await clickPointImpl(profileId, target.center, { steps: 3 });
+            via = target.selector || 'click';
+            pushTrace({ kind: 'click', stage: 'submit_search', selector: via, attempt });
+            return;
+          } catch (error) {
+            // Fallback to Enter when click fails (overlay/blocked)
+            await pressKeyImpl(profileId, 'Enter');
+            via = 'enter_fallback_error';
+            pushTrace({ kind: 'key', stage: 'submit_search', key: 'Enter', fallback: true, attempt, error: String(error?.message || error) });
+            return;
+          }
         }
         await pressKeyImpl(profileId, 'Enter');
         via = 'enter_fallback';
@@ -661,6 +712,7 @@ export async function executeCollectLinksOperation({ profileId, params = {}, con
       keyword,
       env,
       outputRoot,
+      runId: String(context.runId || null).trim(),
     },
     state,
   });
@@ -697,7 +749,8 @@ export async function executeCollectLinksOperation({ profileId, params = {}, con
   if (state.preCollectedNoteIds.length === 0) {
     const existing = await readJsonlRowsImpl(linksPath);
     for (const row of existing) {
-      const noteId = String(row?.noteId || '').trim();
+      const noteIdRaw = String(row?.noteId || row?.noteUrl || row?.safeDetailUrl || '').trim();
+      const noteId = normalizeBaseNoteId(noteIdRaw);
       if (noteId && !state.preCollectedNoteIds.includes(noteId)) {
         state.preCollectedNoteIds.push(noteId);
       }
@@ -771,8 +824,10 @@ export async function executeCollectLinksOperation({ profileId, params = {}, con
          const resolved = resolveSearchResultTokenLink(row.href);
          // Only persist links with valid token (detailUrl will be empty if token is missing/invalid)
           if (!resolved?.detailUrl || !resolved.noteId) return null;
+          const baseNoteId = normalizeBaseNoteId(resolved.noteId || resolved.detailUrl);
+          if (!baseNoteId) return null;
          return {
-           noteId: resolved.noteId,
+           noteId: baseNoteId,
            safeDetailUrl: resolved.detailUrl,
            noteUrl: resolved.detailUrl,
            listUrl: state.lastListUrl,
@@ -787,10 +842,11 @@ export async function executeCollectLinksOperation({ profileId, params = {}, con
           }
           const filtered = [];
           for (const candidate of candidates) {
-            const noteId = String(candidate?.noteId || '').trim();
+            const noteIdRaw = String(candidate?.noteId || candidate?.noteUrl || candidate?.safeDetailUrl || '').trim();
+            const noteId = normalizeBaseNoteId(noteIdRaw);
             if (noteId && !state.preCollectedNoteIds.includes(noteId)) {
               state.preCollectedNoteIds.push(noteId);
-              filtered.push(candidate);
+              filtered.push({ ...candidate, noteId });
             }
             if (filtered.length >= remaining) break;
           }

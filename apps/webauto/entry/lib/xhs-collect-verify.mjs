@@ -6,12 +6,19 @@ function toTarget(value) {
   return Math.max(0, Math.floor(num));
 }
 
-export async function readCollectedLinksCount({ keyword, env, outputRoot } = {}) {
+export async function readCollectedLinksCount({ keyword, env, outputRoot, runId } = {}) {
+  if (!runId || typeof runId !== 'string' || !runId.trim()) {
+    const err = new Error('COLLECT_VERIFY_RUNID_REQUIRED: runId is required for verification');
+    err.code = 'COLLECT_VERIFY_RUNID_REQUIRED';
+    err.details = { keyword, env, outputRoot, runId };
+    throw err;
+  }
   const ctx = resolveXhsOutputContext({
     params: {
       keyword,
       env,
       outputRoot,
+      runId,
     },
   });
   const rows = await readJsonlRows(ctx.linksPath);
@@ -21,9 +28,15 @@ export async function readCollectedLinksCount({ keyword, env, outputRoot } = {})
   };
 }
 
-export async function assertCollectedLinksCount({ keyword, env, outputRoot, target } = {}) {
+export async function assertCollectedLinksCount({ keyword, env, outputRoot, target, runId } = {}) {
   const expected = toTarget(target);
-  const { linksPath, count } = await readCollectedLinksCount({ keyword, env, outputRoot });
+  if (!runId || typeof runId !== 'string' || !runId.trim()) {
+    const err = new Error('COLLECT_VERIFY_RUNID_REQUIRED: runId is required for verification');
+    err.code = 'COLLECT_VERIFY_RUNID_REQUIRED';
+    err.details = { keyword, env, outputRoot, target, runId };
+    throw err;
+  }
+  const { linksPath, count } = await readCollectedLinksCount({ keyword, env, outputRoot, runId });
   if (expected > 0 && count < expected) {
     const err = new Error(`COLLECT_COUNT_MISMATCH expected=${expected} actual=${count}`);
     err.code = 'COLLECT_COUNT_MISMATCH';

@@ -165,6 +165,8 @@ export function createProfileStats(spec) {
     operationErrors: 0,
     recoveryFailed: 0,
     terminalCode: null,
+    stopReason: null,
+    taskFailed: false,
     commentPaths: [],
     likeSummaryPaths: [],
     likeStatePaths: [],
@@ -236,6 +238,12 @@ export function updateProfileStatsFromEvent(stats, payload) {
   }
   if (event === 'autoscript:operation_recovery_failed') {
     stats.recoveryFailed += 1;
+    return;
+  }
+  if (event === 'autoscript:stop' || event === 'xhs.unified.stop') {
+    const reason = String(payload?.reason || '').trim() || null;
+    stats.stopReason = reason;
+    stats.taskFailed = reason ? reason !== 'script_complete' : stats.taskFailed;
     return;
   }
   if (event === 'autoscript:operation_terminal') {
