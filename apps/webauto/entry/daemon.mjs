@@ -269,6 +269,17 @@ async function startDaemonServer() {
     staleMs: Math.max(0, Date.now() - Number(worker.lastHeartbeatMs || state.startedAt)),
   });
 
+
+  const summarizeJob = (job) => ({
+    id: job.id,
+    args: job.args,
+    pid: job.pid || null,
+    status: job.status,
+    code: job.code ?? null,
+    startedAt: job.startedAt || null,
+    finishedAt: job.finishedAt || null,
+    logPath: job.logPath || null,
+  });
   const updateHeartbeat = () => {
     const jobs = state.jobsOrder
       .slice(-20)
@@ -354,6 +365,18 @@ async function startDaemonServer() {
   const startRelayJob = async (params = {}) => {
     const args = Array.isArray(params.args) ? params.args : [];
     if (args.length === 0) return { ok: false, error: 'missing relay args' };
+
+    // 排他性控制：同一时间只允许一个任务运行
+    const activeJobs = state.jobsOrder
+      .map((id) => state.jobs.get(id))
+      .filter((j) => j && j.status === 'running');
+    if (activeJobs.length > 0) {
+      return {
+        ok: false,
+        error: 'task_already_running',
+        activeJob: { id: activeJobs[0].id, pid: activeJobs[0].pid, startedAt: activeJobs[0].startedAt },
+      };
+    }
     const wait = params.wait === true;
     const jobId = `job_${Date.now()}_${randomUUID().slice(0, 8)}`;
     const logPath = path.join(JOB_LOG_DIR, `${jobId}.log`);
@@ -401,12 +424,12 @@ async function startDaemonServer() {
 
     if (!wait) {
       updateHeartbeat();
-      return { ok: true, detached: true, job };
+      return { ok: true, detached: true, job: summarizeJob(job) };
     }
 
     await new Promise((resolve) => child.on('close', resolve));
     updateHeartbeat();
-    return { ok: true, detached: false, job };
+    return { ok: true, detached: false, job: summarizeJob(job) };
   };
 
   const handleMethod = async (method, params = {}) => {
