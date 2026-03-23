@@ -562,7 +562,15 @@ export async function executeSubmitSearchOperation({ profileId, params = {}, con
           // No center coordinates; clearAndType may still work via keyboard shortcut.
         }
         await sleepRandomImpl(actionDelayMinMs, actionDelayMaxMs, pushTrace, 'submit_pre_type');
-        await clearAndTypeImpl(profileId, keyword, Number(params.keyDelayMs ?? 65) || 65);
+        await clearAndTypeImpl(
+          profileId,
+          keyword,
+          Number(params.keyDelayMs ?? 65) || 65,
+          {
+            actionTimeoutMs: Math.max(1500, Number(params.clearAndTypeActionTimeoutMs ?? 8000) || 8000),
+            typeTimeoutMs: Math.max(2000, Number(params.clearAndTypeTypeTimeoutMs ?? 12000) || 12000),
+          },
+        );
         pushTrace({ kind: 'type', stage: 'submit_search', target: 'search_input', length: keyword.length, attempt });
         await sleepRandomImpl(actionDelayMinMs, actionDelayMaxMs, pushTrace, 'submit_after_type');
         currentInput = await readSearchInputImpl(profileId);
@@ -591,7 +599,15 @@ export async function executeSubmitSearchOperation({ profileId, params = {}, con
             pushTrace({ kind: 'click', stage: 'submit_search_mismatch_retry_focus', reason: 'input_mismatch_final' });
           }
           await sleepRandomImpl(500, 1000, pushTrace, 'submit_mismatch_pre_type');
-          await clearAndTypeImpl(profileId, keyword, Number(params.keyDelayMs ?? 65) || 65);
+          await clearAndTypeImpl(
+            profileId,
+            keyword,
+            Number(params.keyDelayMs ?? 65) || 65,
+            {
+              actionTimeoutMs: Math.max(1500, Number(params.clearAndTypeActionTimeoutMs ?? 8000) || 8000),
+              typeTimeoutMs: Math.max(2000, Number(params.clearAndTypeTypeTimeoutMs ?? 12000) || 12000),
+            },
+          );
           pushTrace({ kind: 'type', stage: 'submit_search_mismatch_retry', target: 'search_input', length: keyword.length });
           // Anchor: wait for input value to match keyword (poll with timeout)
           const anchorTimeoutMs = 5000;

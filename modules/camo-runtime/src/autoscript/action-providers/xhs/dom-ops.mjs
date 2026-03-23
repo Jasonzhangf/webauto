@@ -28,13 +28,30 @@ function withTimeout(promise, timeoutMs, code = 'OP_TIMEOUT') {
   });
 }
 
-export async function evaluateReadonly(profileId, script) {
-  const payload = await runEvaluateScript({
-    profileId,
-    script,
-    highlight: false,
-  });
-  return extractEvaluateResultData(payload) || payload?.result || payload?.data || payload || {};
+export async function evaluateReadonly(profileId, script, options = {}) {
+  const timeoutMs = Math.max(2000, Number(options?.timeoutMs) || 12000);
+  try {
+    const payload = await withTimeout(
+      runEvaluateScript({
+        profileId,
+        script,
+        highlight: false,
+        timeoutMs,
+      }),
+      timeoutMs + 1500,
+      'EVALUATE_TIMEOUT',
+    );
+    return extractEvaluateResultData(payload) || payload?.result || payload?.data || payload || {};
+  } catch (error) {
+    if (String(error?.code || '') === 'EVALUATE_TIMEOUT' && options?.onTimeout === 'return') {
+      return {
+        ok: false,
+        code: 'EVALUATE_TIMEOUT',
+        timeout: true,
+      };
+    }
+    throw error;
+  }
 }
 
 const HIGHLIGHT_STATE_STYLE = {
@@ -406,14 +423,31 @@ export async function pressKey(profileId, key) {
   });
 }
 
-export async function clearAndType(profileId, text, keyDelayMs = 60) {
-  await pressKey(profileId, process.platform === 'darwin' ? 'Meta+A' : 'Control+A');
-  await pressKey(profileId, 'Backspace');
-  await callAPI('keyboard:type', {
-    profileId,
-    text: String(text || ''),
-    delay: Math.max(0, Number(keyDelayMs) || 0),
-  });
+export async function clearAndType(profileId, text, keyDelayMs = 60, options = {}) {
+  const actionTimeoutMs = Math.max(1500, Number(options?.actionTimeoutMs ?? 8000) || 8000);
+  const typeDelayMs = Math.max(0, Number(keyDelayMs) || 0);
+  const estimatedTypeMs = Math.max(1200, String(text || '').length * Math.max(1, typeDelayMs) + 3200);
+  const typeTimeoutMs = Math.max(actionTimeoutMs, Number(options?.typeTimeoutMs ?? estimatedTypeMs) || estimatedTypeMs);
+
+  await withTimeout(
+    pressKey(profileId, process.platform === 'darwin' ? 'Meta+A' : 'Control+A'),
+    actionTimeoutMs,
+    'CLEAR_AND_TYPE_SELECT_TIMEOUT',
+  );
+  await withTimeout(
+    pressKey(profileId, 'Backspace'),
+    actionTimeoutMs,
+    'CLEAR_AND_TYPE_BACKSPACE_TIMEOUT',
+  );
+  await withTimeout(
+    callAPI('keyboard:type', {
+      profileId,
+      text: String(text || ''),
+      delay: typeDelayMs,
+    }),
+    typeTimeoutMs,
+    'CLEAR_AND_TYPE_TYPE_TIMEOUT',
+  );
 }
 
 export { sleep, withTimeout };
