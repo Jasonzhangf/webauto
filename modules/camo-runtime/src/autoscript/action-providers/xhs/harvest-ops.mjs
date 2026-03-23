@@ -751,11 +751,17 @@ export async function executeCommentsHarvestOperation({ profileId, params = {}, 
     }
   };
   const restoreResumeAnchor = async (mode = 'initial') => {
+    progress('resume_anchor_restore_start', { mode });
     const binding = readExpectedBinding();
     const slotState = readDetailSlotState(state, binding.tabIndex, { tabCount: params.tabCount });
     const resumeAnchor = slotState?.resumeAnchor || null;
-    if (!resumeAnchor) return { ok: true, restored: false, reason: 'no_resume_anchor' };
+    if (!resumeAnchor) {
+      progress('resume_anchor_restore_skip', { mode, reason: 'no_resume_anchor' });
+      return { ok: true, restored: false, reason: 'no_resume_anchor' };
+    }
+    const anchorProbeStartedAt = Date.now();
     const anchorTarget = await readResumeAnchorPairTargetImpl(profileId, resumeAnchor).catch(() => null);
+    progress('resume_anchor_probe_done', { mode, elapsedMs: Date.now() - anchorProbeStartedAt, found: anchorTarget?.found === true, reason: anchorTarget?.reason || null });
     progress('resume_anchor_probe', {
       mode,
       restored: anchorTarget?.found === true,
@@ -786,7 +792,8 @@ export async function executeCommentsHarvestOperation({ profileId, params = {}, 
       };
     }
     await highlightStep('xhs-detail-comment-item', anchorTarget, 'processed', 'resume anchor', 3200);
-    await sleepImpl(1200);
+    await waitForAnchor(profileId, { selectors: ['.comment-item', '.note-scroller'], timeoutMs: 2000, intervalMs: 200, description: 'resume_anchor_after_click' });
+    progress('resume_anchor_restore_done', { mode, restored: true });
     return { ok: true, restored: true, target: anchorTarget };
   };
   const saveResumeAnchor = async (reason = 'loop') => {
