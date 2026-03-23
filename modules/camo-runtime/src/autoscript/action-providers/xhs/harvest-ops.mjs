@@ -6,7 +6,7 @@ import { readCommentsSnapshot, readCommentEntryPoint, readCommentTotalTarget, re
 import { consumeTabBudget } from './tab-state.mjs';
 import { markDetailSlotProgress, readDetailSlotState, writeDetailSlotState } from './detail-slot-state.mjs';
 import { resolveXhsOutputContext, readJsonlRows, mergeCommentsJsonl, writeCommentsMd, writeContentMarkdown, appendLikeStateRows, writeLikeSummary } from './persistence.mjs';
-import { clickPoint, sleep, clearAndType, pressKey, scrollBySelector, highlightVisualTarget, clearVisualHighlight, readLocation } from './dom-ops.mjs';
+import { clickPoint, sleep, clearAndType, pressKey, scrollBySelector, highlightVisualTarget, clearVisualHighlight, readLocation, waitForAnchor } from './dom-ops.mjs';
 
 const ALLOWED_COMMENT_SCROLL_SELECTORS = new Set(['.comments-container', '.comment-list', '.comments-el', '.note-scroller']);
 
@@ -2414,8 +2414,40 @@ export async function executeExpandRepliesOperation({ profileId, context = {} })
   const textsSeen = new Set(initialCandidates.map((target) => String(target.text || '').trim()).filter(Boolean));
   const clickTimeline = [];
 
+// 锚点：等待评论容器稳定后再查找展开回复按钮
+    const commentAnchorSelectors = ['.comment-item', '.comments-container', '.note-scroller'];
+    const expandWaitAnchor = async () => {
+      const anchorResult = await waitForAnchor(profileId, {
+        selectors: commentAnchorSelectors,
+        timeoutMs: 5000,
+        intervalMs: 400,
+        description: 'expand_replies:wait_comment_context',
+      });
+      if (!anchorResult.ok) {
+        pushTrace({ kind: 'anchor_wait', stage: 'expand_replies', ok: false, elapsed: anchorResult.elapsed, reason: anchorResult.reason });
+      }
+      return anchorResult;
+    };
+    // 锚点：点击展开后等待新内容出现（DOM 变化）
+    const expandClickWaitAnchor = async (beforeCount) => {
+      const anchorResult = await waitForAnchor(profileId, {
+        selectors: commentAnchorSelectors,
+        timeoutMs: 3000,
+        intervalMs: 250,
+        description: 'expand_replies:wait_after_click',
+        probe: async () => {
+          // 自定义 probe：检查评论数量是否变化
+          const snap = await readCommentsSnapshot(profileId).catch(() => null);
+          const currentCount = Array.isArray(snap?.comments) ? snap.comments.length : 0;
+          if (currentCount > beforeCount) return { newCount: currentCount };
+          return null;
+        },
+      });
+      return anchorResult;
+    };
   let expanded = 0;
   for (let step = 1; step <= maxExpand; step += 1) {
+    await expandWaitAnchor();
     const liveTargets = await readExpandReplyTargetsImpl(profileId).catch(() => null);
     const liveCandidates = normalizeTargets(Array.isArray(liveTargets?.targets)
       ? liveTargets.targets.map((node) => ({
@@ -2476,7 +2508,9 @@ export async function executeExpandRepliesOperation({ profileId, context = {} })
     clickedKeys.add(targetKey);
     await clickPointImpl(profileId, target.center, { steps: 2 });
     pushTrace({ kind: 'click', stage: 'expand_replies', text: target.text.slice(0, 60), center: target.center });
-    await sleepImpl(350);
+    // 锚点等待：点击展开后等待新评论出现或超时，不再傻等固定时间
+    const beforeExpandCount = collectedRows ? collectedRows.length : 0;
+    await expandClickWaitAnchor(beforeExpandCount);
     expanded += 1;
     const afterTargets = await readExpandReplyTargetsImpl(profileId).catch(() => null);
     const afterCandidates = normalizeTargets(Array.isArray(afterTargets?.targets)
