@@ -4,7 +4,7 @@ import { resolveSearchLockKey, randomBetween, resolveSearchResultTokenLink, norm
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { sleep, readLocation, clickPoint, clearAndType, pressKey, resolveSelectorTarget, sleepRandom, evaluateReadonly } from './dom-ops.mjs';
+import { sleep, readLocation, clickPoint, clearAndType, pressKey, typeText, resolveSelectorTarget, sleepRandom, evaluateReadonly } from './dom-ops.mjs';
 import { readSearchInput, readSearchViewportReady, readSearchCandidates } from './search-ops.mjs';
 import { buildSelectorCheck, ensureActiveSession, maybeSelector } from '../../../container/runtime-core/index.mjs';
 import { getDomSnapshotByProfile } from '../../../utils/browser-service.mjs';
@@ -500,6 +500,7 @@ export async function executeSubmitSearchOperation({ profileId, params = {}, con
     const clickPointImpl = typeof testingOverrides?.clickPoint === 'function' ? testingOverrides.clickPoint : clickPoint;
     const sleepRandomImpl = typeof testingOverrides?.sleepRandom === 'function' ? testingOverrides.sleepRandom : sleepRandom;
     const clearAndTypeImpl = typeof testingOverrides?.clearAndType === 'function' ? testingOverrides.clearAndType : clearAndType;
+    const typeTextImpl = typeof testingOverrides?.typeText === 'function' ? testingOverrides.typeText : typeText;
     const readLocationImpl = typeof testingOverrides?.readLocation === 'function' ? testingOverrides.readLocation : readLocation;
     const readCandidateWindowImpl = typeof testingOverrides?.readCandidateWindow === 'function' ? testingOverrides.readCandidateWindow : readCandidateWindow;
     const resolveSelectorTargetImpl = typeof testingOverrides?.resolveSelectorTarget === 'function' ? testingOverrides.resolveSelectorTarget : resolveSelectorTarget;
@@ -571,6 +572,26 @@ export async function executeSubmitSearchOperation({ profileId, params = {}, con
             typeTimeoutMs: Math.max(2000, Number(params.clearAndTypeTypeTimeoutMs ?? 12000) || 12000),
           },
         );
+        // 锚点驱动 fallback：Meta+A/Control+A 超时时，直接继续 type（不依赖全选）
+        // 防止 submit_search 因 select 卡死超过 operation timeout。
+        try {
+          const typedInput = await readSearchInputImpl(profileId);
+          const typedValue = String(typedInput?.value || '').replace(/\s+/g, '').trim();
+          const typedKeyword = String(keyword || '').replace(/\s+/g, '').trim();
+          if (typedKeyword && typedValue !== typedKeyword) {
+            await typeTextImpl(
+              profileId,
+              keyword,
+              Number(params.keyDelayMs ?? 65) || 65,
+              {
+                typeTimeoutMs: Math.max(2000, Number(params.clearAndTypeTypeTimeoutMs ?? 12000) || 12000),
+              },
+            );
+            pushTrace({ kind: 'type_fallback', stage: 'submit_search', reason: 'post_clear_type_mismatch', attempt });
+          }
+        } catch (fallbackError) {
+          pushTrace({ kind: 'type_fallback_error', stage: 'submit_search', attempt, error: String(fallbackError?.message || fallbackError) });
+        }
         pushTrace({ kind: 'type', stage: 'submit_search', target: 'search_input', length: keyword.length, attempt });
         await sleepRandomImpl(actionDelayMinMs, actionDelayMaxMs, pushTrace, 'submit_after_type');
         currentInput = await readSearchInputImpl(profileId);
@@ -608,6 +629,24 @@ export async function executeSubmitSearchOperation({ profileId, params = {}, con
               typeTimeoutMs: Math.max(2000, Number(params.clearAndTypeTypeTimeoutMs ?? 12000) || 12000),
             },
           );
+          try {
+            const typedInput = await readSearchInputImpl(profileId);
+            const typedValue = String(typedInput?.value || '').replace(/\s+/g, '').trim();
+            const typedKeyword = String(keyword || '').replace(/\s+/g, '').trim();
+            if (typedKeyword && typedValue !== typedKeyword) {
+              await typeTextImpl(
+                profileId,
+                keyword,
+                Number(params.keyDelayMs ?? 65) || 65,
+                {
+                  typeTimeoutMs: Math.max(2000, Number(params.clearAndTypeTypeTimeoutMs ?? 12000) || 12000),
+                },
+              );
+              pushTrace({ kind: 'type_fallback', stage: 'submit_search_mismatch_retry', reason: 'post_clear_type_mismatch' });
+            }
+          } catch (fallbackError) {
+            pushTrace({ kind: 'type_fallback_error', stage: 'submit_search_mismatch_retry', error: String(fallbackError?.message || fallbackError) });
+          }
           pushTrace({ kind: 'type', stage: 'submit_search_mismatch_retry', target: 'search_input', length: keyword.length });
           // Anchor: wait for input value to match keyword (poll with timeout)
           const anchorTimeoutMs = 5000;

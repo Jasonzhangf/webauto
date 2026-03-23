@@ -423,17 +423,44 @@ export async function pressKey(profileId, key) {
   });
 }
 
+export async function typeText(profileId, text, keyDelayMs = 60, options = {}) {
+  const typeDelayMs = Math.max(0, Number(keyDelayMs) || 0);
+  const estimatedTypeMs = Math.max(1200, String(text || '').length * Math.max(1, typeDelayMs) + 3200);
+  const typeTimeoutMs = Math.max(1500, Number(options?.typeTimeoutMs ?? estimatedTypeMs) || estimatedTypeMs);
+  await withTimeout(
+    callAPI('keyboard:type', {
+      profileId,
+      text: String(text || ''),
+      delay: typeDelayMs,
+    }),
+    typeTimeoutMs,
+    'TYPE_TEXT_TIMEOUT',
+  );
+}
+
 export async function clearAndType(profileId, text, keyDelayMs = 60, options = {}) {
   const actionTimeoutMs = Math.max(1500, Number(options?.actionTimeoutMs ?? 8000) || 8000);
   const typeDelayMs = Math.max(0, Number(keyDelayMs) || 0);
   const estimatedTypeMs = Math.max(1200, String(text || '').length * Math.max(1, typeDelayMs) + 3200);
   const typeTimeoutMs = Math.max(actionTimeoutMs, Number(options?.typeTimeoutMs ?? estimatedTypeMs) || estimatedTypeMs);
+  const allowSelectFallback = options?.allowSelectFallback !== false;
+  const primarySelectKey = process.platform === 'darwin' ? 'Meta+A' : 'Control+A';
+  const fallbackSelectKey = process.platform === 'darwin' ? 'Control+A' : 'Meta+A';
 
-  await withTimeout(
-    pressKey(profileId, process.platform === 'darwin' ? 'Meta+A' : 'Control+A'),
-    actionTimeoutMs,
-    'CLEAR_AND_TYPE_SELECT_TIMEOUT',
-  );
+  try {
+    await withTimeout(
+      pressKey(profileId, primarySelectKey),
+      actionTimeoutMs,
+      'CLEAR_AND_TYPE_SELECT_TIMEOUT',
+    );
+  } catch (error) {
+    if (!allowSelectFallback) throw error;
+    await withTimeout(
+      pressKey(profileId, fallbackSelectKey),
+      actionTimeoutMs,
+      'CLEAR_AND_TYPE_SELECT_FALLBACK_TIMEOUT',
+    );
+  }
   await withTimeout(
     pressKey(profileId, 'Backspace'),
     actionTimeoutMs,
