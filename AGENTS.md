@@ -633,3 +633,21 @@ curl http://127.0.0.1:7704/health
 2. 根因分析
 3. 修复内容
 4. 验证结果（命令输出/截图）
+
+## 11) 输入法与键盘输入规则（强制）
+
+1. **禁止依赖 keyboard.type 输入文本内容**：macOS 中文输入法（IME）会拦截 Playwright 的 `keyboard.type`，导致输入内容被吞、变形或超时。
+2. **搜索输入框必须使用 fillInputValue**：通过 `evaluate()` 直接设置 `input.value`，绕过 input pipeline 和 IME。
+3. **keyboard:press 仅限快捷键**：如 `Meta+A`（全选）、`Backspace`（删除）、`Enter`（提交）等不需要输入文本内容的键盘操作。
+4. **browser-service input pipeline 是串行的**：所有 `keyboard:*` 和 `mouse:click` 操作通过 `withInputActionLock` 串行执行。一个操作卡住会阻塞后续所有输入操作。
+
+```javascript
+// ✅ 正确：用 fillInputValue 设置搜索关键字
+await fillInputValue(profileId, ['#search-input', 'input.search-input'], keyword);
+
+// ❌ 错误：用 keyboard:type 设置搜索关键字（会被 IME 干扰）
+await callAPI('keyboard:type', { profileId, text: keyword, delay: 65 });
+
+// ✅ 正确：用 keyboard:press 按快捷键
+await pressKey(profileId, 'Enter');
+```
