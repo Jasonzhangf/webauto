@@ -1412,7 +1412,7 @@ export async function executeCommentsHarvestOperation({ profileId, params = {}, 
   let rounds = 0;
   let effectiveMaxRounds = maxRounds;
   let noProgressRounds = 0;
-  let stagnationRounds = 0;
+  let scrollStuckRounds = 0;
   let recoveries = 0;
   let lastSignature = '';
   let lastProgressAt = Date.now();
@@ -1654,6 +1654,12 @@ const applyVisibleLikePass = async (currentSnapshot) => {
     if (newComments.length > 0 || scrollAdvanced) {
       lastProgressAt = Date.now();
     }
+    // 锚点驱动：滚动不动检测 - scrollTop 未变化视为到底
+    if (scrollAdvanced || (scrollMeta?.atBottom)) {
+      scrollStuckRounds = 0;
+    } else {
+      scrollStuckRounds += 1;
+    }
     if (newComments.length > 0 || scrollAdvanced) {
       stagnationRounds = 0;
     } else {
@@ -1676,11 +1682,18 @@ const applyVisibleLikePass = async (currentSnapshot) => {
       break;
     }
 
+    // 锚点驱动：连续 3 次滚动不动视为到底
+    if (scrollStuckRounds >= 3) {
+      exitReason = 'scroll_stuck_3_times';
+      reachedBottom = true;
+    }
+
     if (reachedBottom) {
-      exitReason = 'reached_bottom';
+      exitReason = reachedBottom ? 'reached_bottom' : 'scroll_stalled_after_recovery';
       break;
     }
-    if (stagnationRounds >= stagnationExitRounds && recoveries >= maxRecoveries) {
+    if ((stagnationRounds >= stagnationExitRounds && recoveries >= maxRecoveries)
+      || (scrollStuckRounds >= 3 && recoveries >= maxRecoveries)) {
       exitReason = reachedBottom ? 'reached_bottom' : 'scroll_stalled_after_recovery';
       break;
     }
