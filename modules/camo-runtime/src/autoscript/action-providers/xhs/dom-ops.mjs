@@ -649,7 +649,7 @@ export async function fillInputValue(profileId, selectors, value, options = {}) 
     })()
   `;
   
-  const result = await runEvaluateScript(profileId, script, { timeoutMs });
+  const result = await runEvaluateScript({ profileId, script, timeoutMs });
   const data = extractEvaluateResultData(result);
   
   if (!data?.ok) {
