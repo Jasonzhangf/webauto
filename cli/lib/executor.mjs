@@ -7,7 +7,7 @@ import { ok, fail, info } from './output.mjs';
 import { runUnified } from '../../apps/webauto/entry/lib/xhs-unified-runner.mjs';
 
 /**
- * Execute a unified run via daemon relay.
+ * Execute a unified run directly.
  */
 export async function executeUnifiedRun(options) {
   const arg = (value, fallback = '') => {

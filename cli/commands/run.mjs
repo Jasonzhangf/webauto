@@ -62,7 +62,7 @@ export async function runCommand(args, opts) {
     return;
   }
   
-  // Execute via daemon relay
+  // Execute directly via runUnified
   const { executeUnifiedRun } = await import('../lib/executor.mjs');
   await executeUnifiedRun(options);
 }
