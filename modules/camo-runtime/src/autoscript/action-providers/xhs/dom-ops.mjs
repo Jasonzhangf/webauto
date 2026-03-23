@@ -627,6 +627,10 @@ export async function fillInputValue(profileId, selectors, value, options = {}) 
       for (const sel of selectors) {
         const el = document.querySelector(sel);
         if (el && el.tagName === 'INPUT') {
+          // 先聚焦元素，确保后续键盘事件能正确发送
+          el.focus();
+          el.click();
+          
           // 使用原生 setter 绕过 React/Vue 受控组件
           const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
             window.HTMLInputElement.prototype, 'value'
