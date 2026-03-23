@@ -5,6 +5,34 @@
 
 ---
 
+## 0) WebAuto 调试唯一流程（2026-03-23，最高优先级）
+
+> 本节高于历史调试细则；冲突时以本节为准。
+
+1. **daemon 常驻 + task 派发**
+   - 启动：`webauto daemon start`
+   - 派发：`webauto daemon task submit --detach -- xhs unified ...`
+   - 禁止：`webauto daemon relay ...`（已下线）
+2. **调试分层执行（禁止跳层）**
+   - L1 Operation（click/scroll/input/anchor-wait）
+   - L2 编排单元（submit_search/open_detail/comments_harvest）
+   - L3 单条闭环（1 条）
+   - L4 批量（5→50→200）
+3. **修改基础操作后，必须先手动 camo 验证**
+   - 只有手动验证通过，才能进入自动脚本测试。
+4. **等待必须锚点驱动**
+   - 超时是最长等待时间，不是固定 sleep。
+   - 锚点出现立即返回；禁止无锚点等待。
+5. **文本输入规则（强制）**
+   - 文本内容默认用 `fillInputValue`（evaluate 设置 value + input/change 事件）。
+   - `keyboard.type` 不作为文本输入主路径（IME 干扰风险高）。
+   - `keyboard:press` 仅用于快捷键（Enter/Meta+A 等）。
+6. **XHS 调试策略默认值**
+   - 默认 URL mode（非 click mode，除非用户明确要求）。
+   - 评论阶段按 tab 轮转执行，`commentBudget` 用于轮转阈值（默认 50）。
+
+---
+
 ## 1) 回复与执行规则（强制）
 
 1. 以工具调用为准：真正执行必须落在命令/工具调用，纯口头状态不算完成。

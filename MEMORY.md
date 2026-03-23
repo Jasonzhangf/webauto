@@ -23,6 +23,15 @@
 - session-init.mjs 的 ensureSessionInitialized 已修改为默认不重启
 - xhs-unified-profile-blocks.mjs 的 runProfile 任务完成后会回到主页
 
+### 2026-03-23 新增稳定偏好（必须遵守）
+- daemon 为常驻后台；应用通过 `webauto daemon task submit` 派发任务（relay 已下线）。
+- 调试必须分层：先基础 Operation，再编排，再单条，再批量；禁止跳层压测。
+- 改动基础操作（click/scroll/input）后，必须先手动 camo 验证通过，再跑自动脚本。
+- 等待必须锚点驱动：无锚点等待无意义，禁止 fixed sleep 作为完成条件。
+- 文本输入默认 `fillInputValue`，`keyboard.type` 不作为主路径（IME 影响大）。
+- 默认 URL mode，禁止默认 click mode（除非用户明确指定）。
+- `commentBudget` 是 tab 轮转阈值，不是评论上限；默认按 50 轮转。
+
 ### SearchGate 规则（避免风控）
 - **commentBudget 是 tab 轮转阈值**，不是评论采集上限。每采集 N 条评论后轮转到下一个 tab，分散请求避免风控。默认 tabCount>1 时 50 条轮转一次。禁止移除或设为 0
 - SearchGate 限制是**防风控设计**，不是障碍
