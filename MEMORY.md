@@ -814,3 +814,22 @@ Tags: #timeout #anchor #single-source-of-truth
 - [ ] 统计指标：completed/total 而不只是 success
 
 Tags: #resilience #partial-failure #completion-rate
+
+## 2026-03-23 Tab 管控硬性规则
+
+### maxTabs 默认值
+- **默认 maxTabs = 5**（不是 1）
+- camo BrowserSession 已修改：`options.maxTabs ?? 5`
+- 位置：`@web-auto/camo/src/services/browser-service/internal/BrowserSession.js`
+- 不传 `--max-tabs` 时默认允许 5 个 tab
+
+### Tab 泄漏防护
+- XHS 网站通过 `window.open` / `target=_blank` 打开新 tab
+- camo 的 `context.on('page', ...)` 会拦截并调用 `enforceMaxTabs()`
+- 超出 maxTabs 的 tab 会被自动关闭（优先关闭 captcha/blank 页）
+
+### 检查命令
+```bash
+ps aux | grep "plugin-container.*tab" | grep -v grep | wc -l
+```
+Tags: #tab-management #max-tabs #camo
