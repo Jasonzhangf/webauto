@@ -228,7 +228,6 @@ async function ensureDetailGateQueueInitialized({
     testingOverrides,
   });
   state.detailGateState = {
-    visitedNoteIds: Array.isArray(detailGateState.visitedNoteIds) ? detailGateState.visitedNoteIds : [],
     ...detailGateState,
     key: gateKey,
     queueSignature: cacheSignature,
@@ -590,23 +589,6 @@ export async function executeOpenDetailOperation({ profileId, params = {}, conte
         assignedLink = link;
         slotState = readDetailSlotState(state, currentTabIndex, { tabCount: params.tabCount });
         
-        const baseNoteId = normalizeBaseNoteId(link?.noteUrl || link?.noteId || null);
-        const visitedNoteIds = Array.isArray(state.detailGateState?.visitedNoteIds) ? state.detailGateState.visitedNoteIds : [];
-        if (baseNoteId && visitedNoteIds.includes(baseNoteId)) {
-          pushTrace({ kind: 'dedup', stage: 'open_detail_dedup_skip', noteId: baseNoteId, reason: 'already_visited' });
-          await releaseClaimedDetailLink({
-            profileId,
-            params,
-            state,
-            currentTabIndex,
-            activeEntry: readActiveLinkForTab(state, currentTabIndex),
-            pushTrace,
-            testingOverrides,
-            reason: 'dedup_skip',
-            skip: true,
-          });
-          continue;
-        }
         if (!link?.noteUrl) {
           const cleanupResult = await cleanupDetailContextOnDone({
             profileId,
@@ -1064,20 +1046,6 @@ export async function executeOpenDetailOperation({ profileId, params = {}, conte
   state.currentNoteId = resolvedNoteId;
   state.currentHref = resolvedHref;
   
-  const baseNoteId = normalizeBaseNoteId(resolvedNoteId || resolvedHref || null);
-  if (baseNoteId) {
-    const visitedNoteIds = Array.isArray(state.detailGateState?.visitedNoteIds) ? state.detailGateState.visitedNoteIds : [];
-    if (!visitedNoteIds.includes(baseNoteId)) {
-      if (!state.detailGateState) {
-        state.detailGateState = {};
-      }
-      if (!Array.isArray(state.detailGateState.visitedNoteIds)) {
-        state.detailGateState.visitedNoteIds = [];
-      }
-      state.detailGateState.visitedNoteIds.push(baseNoteId);
-      pushTrace({ kind: 'dedup', stage: 'open_detail_mark_visited', noteId: baseNoteId, count: state.detailGateState.visitedNoteIds.length });
-    }
-  }
   if (!shouldReuseOpenDetail) {
     const returnUrl = useLinks ? resolveReturnUrl(beforeUrl || state.lastListUrl || null) : (beforeUrl || state.lastListUrl || null);
     state.lastListUrl = returnUrl || null;

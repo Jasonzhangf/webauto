@@ -267,6 +267,8 @@ export function buildXhsDetailOperations(options) {
       conditions: closeDetailConditions,
       once: false,
       oncePerAppear: modalChainOncePerAppear,
+      onFailure: 'continue',
+      impact: 'op',
       pacing: { operationMinIntervalMs: 2500, eventCooldownMs: 1300, jitterMs: 180 },
       validation: { mode: 'none' },
       checkpoint: {
