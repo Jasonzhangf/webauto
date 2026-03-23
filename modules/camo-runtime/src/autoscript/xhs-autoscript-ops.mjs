@@ -78,7 +78,7 @@ export function buildXhsSearchOperations(options) {
     {
       id: 'fill_keyword',
       enabled: !detailLinksStartup,
-      action: 'type',
+      action: 'xhs_fill_keyword',
       // Note: avoid click here to prevent camo input pipeline click timeout
       // Focus is enough for input elements; click retries can cause long stalls without anchor checks.
       params: { selector: '#search-input, input.search-input', text: keyword },

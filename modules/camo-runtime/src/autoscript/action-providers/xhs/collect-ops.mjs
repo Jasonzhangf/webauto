@@ -485,6 +485,41 @@ async function waitForContainerReady(profileId, containerId, timeoutMs = 5000, i
   return { ok: false, code: 'CONTAINER_TIMEOUT', message: `container not ready within ${timeoutMs}ms`, data: { selector } };
 }
 
+
+export async function executeFillKeywordOperation({ profileId, params = {}, context = {} }) {
+  const keyword = String(params.text || params.keyword || '').trim();
+  const selectors = ['#search-input', 'input.search-input'];
+  const timeoutMs = Math.max(1000, Number(params.timeoutMs ?? 5000) || 5000);
+  
+  if (!keyword) {
+    return { ok: false, code: 'NO_KEYWORD', message: 'no keyword provided' };
+  }
+  
+  try {
+    const fillResult = await fillInputValue(profileId, selectors, keyword, { timeoutMs });
+    
+    // Verify the value was set correctly
+    const input = await readSearchInput(profileId);
+    const currentValue = String(input?.value || '').trim();
+    const normalizedValue = currentValue.replace(/\s+/g, '');
+    const normalizedKeyword = keyword.replace(/\s+/g, '');
+    
+    if (normalizedValue !== normalizedKeyword) {
+      // Value mismatch - log warning but don't fail
+      console.warn(`[xhs_fill_keyword] value mismatch: expected="${keyword}", actual="${currentValue}"`);
+    }
+    
+    return {
+      ok: true,
+      code: 'OPERATION_DONE',
+      message: 'xhs_fill_keyword done',
+      data: { selector: fillResult.selector, value: fillResult.value, length: fillResult.value.length, keyword }
+    };
+  } catch (error) {
+    return { ok: false, code: 'FILL_FAILED', message: String(error?.message || error), data: { keyword } };
+  }
+}
+
 export async function executeSubmitSearchOperation({ profileId, params = {}, context = {} }) {
   const lockKey = resolveSearchLockKey(params);
   const lockTimeoutMs = Math.max(2000, Number(params.lockTimeoutMs ?? 20000) || 20000);
