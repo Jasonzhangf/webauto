@@ -146,12 +146,12 @@ function normalizeAnchorsSample(sample) {
 }
 
 async function readAnchorsSample(profileId) {
-  const payload = await evaluateReadonly(profileId, buildAnchorsSampleScript());
+  const payload = await evaluateReadonly(profileId, buildAnchorsSampleScript(), { timeoutMs: 6000, onTimeout: 'return' });
   return Array.isArray(payload?.anchorsSample) ? payload.anchorsSample : [];
 }
 
 async function readSearchAnchors(profileId, { listSelector, anchorSelector, selectorsMeta } = {}) {
-  const payload = await evaluateReadonly(profileId, buildSearchAnchorsScript(listSelector, anchorSelector));
+  const payload = await evaluateReadonly(profileId, buildSearchAnchorsScript(listSelector, anchorSelector), { timeoutMs: 6000, onTimeout: 'return' });
   return {
     listSelector,
     anchorSelector,
@@ -179,7 +179,7 @@ async function readSearchBottomMarker(profileId) {
     }
     return { found: false };
   })()`;
-  const payload = await evaluateReadonly(profileId, script);
+  const payload = await evaluateReadonly(profileId, script, { timeoutMs: 6000, onTimeout: 'return' });
   return payload && typeof payload === 'object' ? payload : { found: false };
 }
 
@@ -247,7 +247,7 @@ async function readSearchTokenLinks(profileId, { limit = 60 } = {}) {
     }
     return { rows: out };
   })()`;
-  const payload = await evaluateReadonly(profileId, script);
+  const payload = await evaluateReadonly(profileId, script, { timeoutMs: 6000, onTimeout: 'return' });
   return Array.isArray(payload?.rows) ? payload.rows : [];
 }
 
@@ -487,7 +487,9 @@ async function waitForContainerReady(profileId, containerId, timeoutMs = 5000, i
 
 export async function executeSubmitSearchOperation({ profileId, params = {}, context = {} }) {
   const lockKey = resolveSearchLockKey(params);
-  return withSerializedLock(lockKey ? `xhs_submit_search:${lockKey}` : '', async () => {
+  const lockTimeoutMs = Math.max(2000, Number(params.lockTimeoutMs ?? 20000) || 20000);
+  const lockId = lockKey ? `xhs_submit_search:${lockKey}` : '';
+  return withSerializedLock(lockId, async () => {
     const profileState = getProfileState(profileId);
     const metrics = profileState.metrics || (profileState.metrics = {});
     const { actionTrace, pushTrace } = buildTraceRecorder();
@@ -580,14 +582,62 @@ export async function executeSubmitSearchOperation({ profileId, params = {}, con
         }
       }
       if (keyword && normalizedValue !== normalizedKeyword) {
-        // Hard-fail on input mismatch to avoid submitting stale keyword.
-        pushTrace({ kind: 'input_mismatch', stage: 'submit_search', expected: keyword, actual: currentValue, softFail: false });
-        return {
-          ok: false,
-          code: 'SEARCH_INPUT_MISMATCH',
-          message: 'search input mismatch; abort submit to prevent wrong keyword',
-          data: { expected: keyword, actual: currentValue },
-        };
+        // Mismatch after clearAndType retries — do one final attempt with explicit click-focus before failing.
+        pushTrace({ kind: 'input_mismatch', stage: 'submit_search', expected: keyword, actual: currentValue, softFail: true, maxTypeAttemptsReached: true });
+        try {
+          const retryInput = await readSearchInputImpl(profileId);
+          if (retryInput?.center) {
+            await clickPointImpl(profileId, retryInput.center, { steps: 3, timeoutMs: 2000, retryOnFailure: false });
+            pushTrace({ kind: 'click', stage: 'submit_search_mismatch_retry_focus', reason: 'input_mismatch_final' });
+          }
+          await sleepRandomImpl(500, 1000, pushTrace, 'submit_mismatch_pre_type');
+          await clearAndTypeImpl(profileId, keyword, Number(params.keyDelayMs ?? 65) || 65);
+          pushTrace({ kind: 'type', stage: 'submit_search_mismatch_retry', target: 'search_input', length: keyword.length });
+          // Anchor: wait for input value to match keyword (poll with timeout)
+          const anchorTimeoutMs = 5000;
+          const anchorPollMs = 300;
+          const anchorStart = Date.now();
+          let anchorMatched = false;
+          while ((Date.now() - anchorStart) < anchorTimeoutMs) {
+            await sleep(anchorPollMs);
+            const anchorInput = await readSearchInputImpl(profileId);
+            if (!anchorInput || anchorInput.ok !== true) continue;
+            const anchorValue = String(anchorInput.value || '').replace(/\s+/g, '').trim();
+            const anchorKeyword = keyword.replace(/\s+/g, '').trim();
+            if (anchorValue === anchorKeyword) {
+              anchorMatched = true;
+              pushTrace({ kind: 'anchor_matched', stage: 'submit_search_mismatch_retry', elapsedMs: Date.now() - anchorStart });
+              break;
+            }
+          }
+          if (anchorMatched) {
+            await sleepRandomImpl(300, 800, pushTrace, 'submit_mismatch_after_type');
+            currentInput = await readSearchInputImpl(profileId);
+            currentValue = currentInput?.ok === true ? String(currentInput.value || '') : '';
+            // Re-check normalized values
+            const reNorm = currentValue.replace(/\s+/g, '').trim();
+            const reKey = keyword.replace(/\s+/g, '').trim();
+            if (reNorm === reKey) {
+              // Mismatch resolved — fall through to submit
+              pushTrace({ kind: 'mismatch_resolved', stage: 'submit_search', expected: keyword, actual: currentValue });
+              // Guard check before proceeding
+              const guardAfterRetry = await assertNoGuard('submit_search_after_mismatch_retry');
+              if (guardAfterRetry) return guardAfterRetry;
+              // Re-read for beforeUrl below
+            } else {
+              // Still mismatched after all retries — hard fail
+              pushTrace({ kind: 'input_mismatch_final', stage: 'submit_search', expected: keyword, actual: currentValue, softFail: false });
+              return {
+                ok: false,
+                code: 'SEARCH_INPUT_MISMATCH',
+                message: 'search input mismatch after all retries; abort submit',
+                data: { expected: keyword, actual: currentValue },
+              };
+            }
+          }
+        } catch (retryErr) {
+          pushTrace({ kind: 'mismatch_retry_error', stage: 'submit_search', error: String(retryErr?.message || retryErr) });
+        }
       }
     }
 
@@ -629,17 +679,44 @@ export async function executeSubmitSearchOperation({ profileId, params = {}, con
       while ((Date.now() - startedAt) < searchReadyTimeoutMs) {
         const guardDuringWait = await assertNoGuard(`submit_search_wait_ready_${attempt}`);
         if (guardDuringWait) return { ready: false, guardResult: guardDuringWait };
-        lastSnapshot = await readSearchViewportReadyImpl(profileId);
+        try {
+          lastSnapshot = await readSearchViewportReadyImpl(profileId);
+        } catch (error) {
+          const errText = String(error?.code || error?.message || error);
+          pushTrace({
+            kind: 'error',
+            stage: 'submit_wait_viewport_ready',
+            attempt,
+            error: errText,
+          });
+          lastSnapshot = {
+            readySelector: '',
+            visibleNoteCount: 0,
+            hasList: false,
+            hasInput: false,
+            inputHasValue: false,
+            href: '',
+            error: errText,
+          };
+        }
         const readySelector = String(lastSnapshot?.readySelector || '').trim();
         const visibleNoteCount = Math.max(0, Number(lastSnapshot?.visibleNoteCount || 0) || 0);
-        if (readySelector || visibleNoteCount > 0) {
-          return { ready: true, readySelector: readySelector || null, visibleNoteCount, elapsedMs: Math.max(0, Date.now() - startedAt), href: String(lastSnapshot?.href || '') };
+        const anchorFound = lastSnapshot?.anchorFound === true || lastSnapshot?.hasList === true;
+        if (readySelector || visibleNoteCount > 0 || anchorFound) {
+          return {
+            ready: true,
+            readySelector: readySelector || (anchorFound ? '.search-result-list' : null),
+            visibleNoteCount,
+            elapsedMs: Math.max(0, Date.now() - startedAt),
+            href: String(lastSnapshot?.href || ''),
+            lastSnapshot,
+          };
         }
         const waitMs = randomBetween(searchReadyPollMinMs, searchReadyPollMaxMs);
         pushTrace({ kind: 'wait', stage: 'submit_wait_viewport_ready', attempt, waitMs, elapsedMs: Math.max(0, Date.now() - startedAt), visibleNoteCount });
         await sleep(waitMs);
       }
-      return { ready: false, readySelector: null, visibleNoteCount: 0, elapsedMs: searchReadyTimeoutMs, href: String(lastSnapshot?.href || '') };
+      return { ready: false, readySelector: null, visibleNoteCount: 0, elapsedMs: searchReadyTimeoutMs, href: String(lastSnapshot?.href || ''), lastSnapshot };
     };
 
     await triggerSubmitOnce(1);
@@ -658,12 +735,29 @@ export async function executeSubmitSearchOperation({ profileId, params = {}, con
           readyResult.visibleNoteCount = retryResult.visibleNoteCount;
           readyResult.elapsedMs = retryResult.elapsedMs;
           readyResult.href = retryResult.href;
+          readyResult.lastSnapshot = retryResult.lastSnapshot || readyResult.lastSnapshot;
           break;
         }
       }
     }
     if (!readyResult.ready) {
-      throw new Error('SEARCH_VIEWPORT_READY_TIMEOUT');
+      const inputAfter = await readSearchInputImpl(profileId).catch(() => null);
+      return {
+        ok: false,
+        code: 'SEARCH_VIEWPORT_READY_TIMEOUT',
+        message: 'search viewport not ready within timeout',
+        data: {
+          readySelector: readyResult.readySelector || null,
+          visibleNoteCount: readyResult.visibleNoteCount || 0,
+          href: readyResult.href || null,
+          lastSnapshot: readyResult.lastSnapshot || null,
+          anchorFound: readyResult.lastSnapshot?.anchorFound === true,
+          anchor: readyResult.lastSnapshot?.anchor || null,
+          inputValue: String(inputAfter?.value || ''),
+          timeoutMs: searchReadyTimeoutMs,
+          retries: searchReadyRetryCount,
+        },
+      };
     }
 
     const windowBefore = await readCandidateWindowImpl(profileId, Number(params.index ?? 0));
@@ -680,6 +774,16 @@ export async function executeSubmitSearchOperation({ profileId, params = {}, con
 
     emitActionTrace(context, actionTrace, { stage: 'xhs_submit_search' });
     return { ok: true, code: 'OPERATION_DONE', message: 'xhs_submit_search done', data: { keyword: keyword || null, method: via, beforeUrl, afterUrl, searchReady: readyResult.ready, readySelector: readyResult.readySelector || null, visibleNoteCount: readyResult.visibleNoteCount, elapsedMs: readyResult.elapsedMs, searchCount: metrics.searchCount, indexWindowBefore: windowBefore, indexWindowAfter: windowAfter } };
+  }, { timeoutMs: lockTimeoutMs }).catch((error) => {
+    if (String(error?.code || '') === 'LOCK_TIMEOUT') {
+      return {
+        ok: false,
+        code: 'LOCK_TIMEOUT',
+        message: 'submit_search lock wait timeout',
+        data: { lockId, timeoutMs: lockTimeoutMs },
+      };
+    }
+    throw error;
   });
 }
 
@@ -741,7 +845,7 @@ export async function executeCollectLinksOperation({ profileId, params = {}, con
 
   const readListScrollInfo = async () => {
     const script = `(() => { const listNode = document.querySelector(".feeds-container"); return { scrollTop: listNode ? listNode.scrollTop : 0, scrollHeight: listNode ? listNode.scrollHeight : 0, clientHeight: listNode ? listNode.clientHeight : 0 }; })()`;
-    const payload = await evaluateReadonly(profileId, script);
+    const payload = await evaluateReadonly(profileId, script, { timeoutMs: 6000, onTimeout: 'return' });
     return { scrollTop: Number(payload?.scrollTop || 0), scrollHeight: Number(payload?.scrollHeight || 0), clientHeight: Number(payload?.clientHeight || 0) };
   };
   state.collectLastUrl = state.collectLastUrl || null;
