@@ -4,7 +4,7 @@ import { resolveSearchLockKey, randomBetween, resolveSearchResultTokenLink, norm
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { sleep, readLocation, clickPoint, pressKey, fillInputValue, resolveSelectorTarget, sleepRandom, evaluateReadonly } from './dom-ops.mjs';
+import { sleep, readLocation, pressKey, fillInputValue, sleepRandom, evaluateReadonly } from './dom-ops.mjs';
 import { readSearchInput, readSearchViewportReady, readSearchCandidates } from './search-ops.mjs';
 import { buildSelectorCheck, ensureActiveSession, maybeSelector } from '../../../container/runtime-core/index.mjs';
 import { getDomSnapshotByProfile } from '../../../utils/browser-service.mjs';
@@ -498,11 +498,9 @@ export async function executeSubmitSearchOperation({ profileId, params = {}, con
       ? context.testingOverrides
       : null;
     const readSearchInputImpl = typeof testingOverrides?.readSearchInput === 'function' ? testingOverrides.readSearchInput : readSearchInput;
-    const clickPointImpl = typeof testingOverrides?.clickPoint === 'function' ? testingOverrides.clickPoint : clickPoint;
     const sleepRandomImpl = typeof testingOverrides?.sleepRandom === 'function' ? testingOverrides.sleepRandom : sleepRandom;
     const readLocationImpl = typeof testingOverrides?.readLocation === 'function' ? testingOverrides.readLocation : readLocation;
     const readCandidateWindowImpl = typeof testingOverrides?.readCandidateWindow === 'function' ? testingOverrides.readCandidateWindow : readCandidateWindow;
-    const resolveSelectorTargetImpl = typeof testingOverrides?.resolveSelectorTarget === 'function' ? testingOverrides.resolveSelectorTarget : resolveSelectorTarget;
     const pressKeyImpl = typeof testingOverrides?.pressKey === 'function' ? testingOverrides.pressKey : pressKey;
     const readSearchViewportReadyImpl = typeof testingOverrides?.readSearchViewportReady === 'function'
       ? testingOverrides.readSearchViewportReady
@@ -517,8 +515,7 @@ export async function executeSubmitSearchOperation({ profileId, params = {}, con
       return null;
     };
 
-    const methodRequested = String(params.method || params.submitMethod || 'click').trim().toLowerCase();
-    const method = ['click', 'enter', 'form'].includes(methodRequested) ? methodRequested : 'click';
+    const method = 'enter'; // 单一真源：只使用 Enter 提交搜索
     const keyword = String(params.keyword || '').trim();
     const env = String(params.env || profileState.env || 'debug').trim();
     const outputRoot = String(params.outputRoot || params.downloadRoot || params.rootDir || profileState.outputRoot || '').trim();
@@ -599,28 +596,8 @@ export async function executeSubmitSearchOperation({ profileId, params = {}, con
 
     const beforeUrl = await readLocationImpl(profileId);
     let via = method;
+    // 单一真源：只使用 Enter 提交搜索
     const triggerSubmitOnce = async (attempt = 1) => {
-      if (method === 'click') {
-        const target = await resolveSelectorTargetImpl(profileId, ['.input-button .search-icon', '.input-button', 'button.min-width-search-icon'], { requireViewport: true });
-        if (target && target.center) {
-          try {
-            await clickPointImpl(profileId, target.center, { steps: 3 });
-            via = target.selector || 'click';
-            pushTrace({ kind: 'click', stage: 'submit_search', selector: via, attempt });
-            return;
-          } catch (error) {
-            // Fallback to Enter when click fails (overlay/blocked)
-            await pressKeyImpl(profileId, 'Enter');
-            via = 'enter_fallback_error';
-            pushTrace({ kind: 'key', stage: 'submit_search', key: 'Enter', fallback: true, attempt, error: String(error?.message || error) });
-            return;
-          }
-        }
-        await pressKeyImpl(profileId, 'Enter');
-        via = 'enter_fallback';
-        pushTrace({ kind: 'key', stage: 'submit_search', key: 'Enter', fallback: true, attempt });
-        return;
-      }
       await pressKeyImpl(profileId, 'Enter');
       via = 'Enter';
       pushTrace({ kind: 'key', stage: 'submit_search', key: 'Enter', attempt });
@@ -655,7 +632,10 @@ export async function executeSubmitSearchOperation({ profileId, params = {}, con
         const readySelector = String(lastSnapshot?.readySelector || '').trim();
         const visibleNoteCount = Math.max(0, Number(lastSnapshot?.visibleNoteCount || 0) || 0);
         const anchorFound = lastSnapshot?.anchorFound === true || lastSnapshot?.hasList === true;
-        if (readySelector || visibleNoteCount > 0 || anchorFound) {
+        const currentHref = String(lastSnapshot?.href || '');
+        // 单一真源：搜索成功必须 URL 发生变化（不能仍在 /explore）
+        const urlChanged = currentHref !== beforeUrl && !currentHref.includes('/explore');
+        if ((readySelector || visibleNoteCount > 0 || anchorFound) && urlChanged) {
           return {
             ready: true,
             readySelector: readySelector || (anchorFound ? '.search-result-list' : null),
