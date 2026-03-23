@@ -396,7 +396,6 @@ export class AutoscriptRunner {
       'tab_pool_switch_slot',
       'sync_window_viewport',
       'verify_subscriptions',
-      'xhs_fill_keyword',
       'xhs_submit_search',
       'xhs_assert_logged_in',
       'xhs_open_detail',

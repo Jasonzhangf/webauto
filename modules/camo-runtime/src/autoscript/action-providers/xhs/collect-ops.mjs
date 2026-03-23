@@ -4,7 +4,7 @@ import { resolveSearchLockKey, randomBetween, resolveSearchResultTokenLink, norm
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { sleep, readLocation, clickPoint, clearAndType, pressKey, typeText, fillInputValue, resolveSelectorTarget, sleepRandom, evaluateReadonly } from './dom-ops.mjs';
+import { sleep, readLocation, clickPoint, pressKey, fillInputValue, resolveSelectorTarget, sleepRandom, evaluateReadonly } from './dom-ops.mjs';
 import { readSearchInput, readSearchViewportReady, readSearchCandidates } from './search-ops.mjs';
 import { buildSelectorCheck, ensureActiveSession, maybeSelector } from '../../../container/runtime-core/index.mjs';
 import { getDomSnapshotByProfile } from '../../../utils/browser-service.mjs';
@@ -486,40 +486,6 @@ async function waitForContainerReady(profileId, containerId, timeoutMs = 5000, i
 }
 
 
-export async function executeFillKeywordOperation({ profileId, params = {}, context = {} }) {
-  const keyword = String(params.text || params.keyword || '').trim();
-  const selectors = ['#search-input', 'input.search-input'];
-  const timeoutMs = Math.max(1000, Number(params.timeoutMs ?? 5000) || 5000);
-  
-  if (!keyword) {
-    return { ok: false, code: 'NO_KEYWORD', message: 'no keyword provided' };
-  }
-  
-  try {
-    const fillResult = await fillInputValue(profileId, selectors, keyword, { timeoutMs });
-    
-    // Verify the value was set correctly
-    const input = await readSearchInput(profileId);
-    const currentValue = String(input?.value || '').trim();
-    const normalizedValue = currentValue.replace(/\s+/g, '');
-    const normalizedKeyword = keyword.replace(/\s+/g, '');
-    
-    if (normalizedValue !== normalizedKeyword) {
-      // Value mismatch - log warning but don't fail
-      console.warn(`[xhs_fill_keyword] value mismatch: expected="${keyword}", actual="${currentValue}"`);
-    }
-    
-    return {
-      ok: true,
-      code: 'OPERATION_DONE',
-      message: 'xhs_fill_keyword done',
-      data: { selector: fillResult.selector, value: fillResult.value, length: fillResult.value.length, keyword }
-    };
-  } catch (error) {
-    return { ok: false, code: 'FILL_FAILED', message: String(error?.message || error), data: { keyword } };
-  }
-}
-
 export async function executeSubmitSearchOperation({ profileId, params = {}, context = {} }) {
   const lockKey = resolveSearchLockKey(params);
   const lockTimeoutMs = Math.max(2000, Number(params.lockTimeoutMs ?? 20000) || 20000);
@@ -534,8 +500,6 @@ export async function executeSubmitSearchOperation({ profileId, params = {}, con
     const readSearchInputImpl = typeof testingOverrides?.readSearchInput === 'function' ? testingOverrides.readSearchInput : readSearchInput;
     const clickPointImpl = typeof testingOverrides?.clickPoint === 'function' ? testingOverrides.clickPoint : clickPoint;
     const sleepRandomImpl = typeof testingOverrides?.sleepRandom === 'function' ? testingOverrides.sleepRandom : sleepRandom;
-    const clearAndTypeImpl = typeof testingOverrides?.clearAndType === 'function' ? testingOverrides.clearAndType : clearAndType;
-    const typeTextImpl = typeof testingOverrides?.typeText === 'function' ? testingOverrides.typeText : typeText;
     const readLocationImpl = typeof testingOverrides?.readLocation === 'function' ? testingOverrides.readLocation : readLocation;
     const readCandidateWindowImpl = typeof testingOverrides?.readCandidateWindow === 'function' ? testingOverrides.readCandidateWindow : readCandidateWindow;
     const resolveSelectorTargetImpl = typeof testingOverrides?.resolveSelectorTarget === 'function' ? testingOverrides.resolveSelectorTarget : resolveSelectorTarget;
@@ -576,140 +540,57 @@ export async function executeSubmitSearchOperation({ profileId, params = {}, con
       throw new Error('SEARCH_INPUT_NOT_FOUND');
     }
 
-    // Skip click before type - clearAndType uses keyboard shortcuts (Ctrl+A/Cmd+A) which handle focus
-    // But some pages lose focus; verify anchor (input value) and retry with a short focus click if needed.
-    pushTrace({ kind: 'skip_click', stage: 'submit_search', target: 'search_input', reason: 'keyboard_type_handles_focus' });
+    pushTrace({ kind: 'fill_start', stage: 'submit_search', target: 'search_input' });
     let currentInput = input;
     let currentValue = String(currentInput?.value || '');
-    let focusFailed = false;
-    if (keyword && currentValue !== keyword) {
-      const maxTypeAttempts = 2;
-      for (let attempt = 1; attempt <= maxTypeAttempts; attempt += 1) {
-        if (currentInput?.center) {
-          try {
-            await clickPointImpl(profileId, currentInput.center, { steps: 3, timeoutMs: 1500, retryOnFailure: false });
-            pushTrace({ kind: 'click', stage: 'submit_search_focus', attempt });
-          } catch (error) {
-            pushTrace({ kind: 'focus_error', stage: 'submit_search_focus', attempt, error: String(error?.message || error) });
-            // Focus click failed but clearAndType uses Ctrl+A/Cmd+A which handles focus.
-            // Continue typing instead of aborting.
-          }
-        } else {
-          // No center coordinates; clearAndType may still work via keyboard shortcut.
-        }
-        // 使用 fillInputValue 直接设置输入框值，绕过输入法和 input pipeline
-        // 原因：browser-service 的 input pipeline 是串行的，keyboard.type 会被输入法干扰
-        // fillInputValue 使用 evaluate 直接设置 DOM value，不受输入法影响
-        await sleepRandomImpl(actionDelayMinMs, actionDelayMaxMs, pushTrace, 'submit_pre_type');
-        try {
-          const fillResult = await fillInputValue(
-            profileId,
-            ['#search-input', 'input.search-input'],
-            keyword,
-            { timeoutMs: 5000 },
-          );
-          pushTrace({ kind: 'fill_input', stage: 'submit_search', target: 'search_input', selector: fillResult.selector, value: fillResult.value, attempt });
-        } catch (fillError) {
-          pushTrace({ kind: 'fill_input_error', stage: 'submit_search', attempt, error: String(fillError?.message || fillError) });
-          // Fallback: 如果 fill 失败，尝试旧的 clearAndType 方式
-          await clearAndTypeImpl(
-            profileId,
-            keyword,
-            Number(params.keyDelayMs ?? 65) || 65,
-            {
-              actionTimeoutMs: Math.max(1500, Number(params.clearAndTypeActionTimeoutMs ?? 8000) || 8000),
-              typeTimeoutMs: Math.max(2000, Number(params.clearAndTypeTypeTimeoutMs ?? 12000) || 12000),
-              allowProceedOnSelectFailure: true,
-              skipSelectAll: true,
-            },
-          );
-        }
-        pushTrace({ kind: 'type', stage: 'submit_search', target: 'search_input', length: keyword.length, attempt });
-        await sleepRandomImpl(actionDelayMinMs, actionDelayMaxMs, pushTrace, 'submit_after_type');
-        currentInput = await readSearchInputImpl(profileId);
-        if (!currentInput || currentInput.ok !== true) break;
-        currentValue = String(currentInput.value || '');
-        const normalizedValue = currentValue.replace(/\s+/g, '').trim();
-        const normalizedKeyword = String(keyword || '').replace(/\s+/g, '').trim();
-        if (normalizedValue === normalizedKeyword) break;
+    if (keyword) {
+      await sleepRandomImpl(actionDelayMinMs, actionDelayMaxMs, pushTrace, 'submit_pre_fill');
+      let fillResult;
+      try {
+        fillResult = await fillInputValue(
+          profileId,
+          ['#search-input', 'input.search-input'],
+          keyword,
+          { timeoutMs: 5000 },
+        );
+      } catch (fillError) {
+        pushTrace({ kind: 'fill_input_error', stage: 'submit_search', error: String(fillError?.message || fillError) });
+        return {
+          ok: false,
+          code: 'SEARCH_INPUT_FILL_FAILED',
+          message: String(fillError?.message || fillError || 'fillInputValue failed'),
+          data: { expected: keyword },
+        };
       }
+      pushTrace({
+        kind: 'fill_input',
+        stage: 'submit_search',
+        target: 'search_input',
+        selector: fillResult.selector,
+        value: fillResult.value,
+      });
+
+      await sleepRandomImpl(actionDelayMinMs, actionDelayMaxMs, pushTrace, 'submit_after_fill');
+      currentInput = await readSearchInputImpl(profileId);
+      if (!currentInput || currentInput.ok !== true) {
+        return {
+          ok: false,
+          code: 'SEARCH_INPUT_VERIFY_FAILED',
+          message: 'search input cannot be read after fill',
+          data: { expected: keyword },
+        };
+      }
+      currentValue = String(currentInput.value || '');
       const normalizedValue = currentValue.replace(/\s+/g, '').trim();
-      const normalizedKeyword = String(keyword || '').replace(/\s+/g, '').trim();
-      if (focusFailed) {
-        // Focus failed: only allow submit if input already matches keyword.
-        pushTrace({ kind: 'focus_error_skip_submit', stage: 'submit_search', expected: keyword, actual: currentValue });
-        if (keyword && normalizedValue !== normalizedKeyword) {
-          // Keep typing attempt even if focus click failed. Fall through to mismatch handling.
-        }
-      }
-      if (keyword && normalizedValue !== normalizedKeyword) {
-        // Mismatch after clearAndType retries — do one final attempt with explicit click-focus before failing.
-        pushTrace({ kind: 'input_mismatch', stage: 'submit_search', expected: keyword, actual: currentValue, softFail: true, maxTypeAttemptsReached: true });
-        try {
-          const retryInput = await readSearchInputImpl(profileId);
-          if (retryInput?.center) {
-            await clickPointImpl(profileId, retryInput.center, { steps: 3, timeoutMs: 2000, retryOnFailure: false });
-            pushTrace({ kind: 'click', stage: 'submit_search_mismatch_retry_focus', reason: 'input_mismatch_final' });
-          }
-          await sleepRandomImpl(500, 1000, pushTrace, 'submit_mismatch_pre_type');
-          // 使用 fillInputValue 直接设置值（同主流程，绕过输入法）
-          try {
-            const fillResult = await fillInputValue(
-              profileId,
-              ['#search-input', 'input.search-input'],
-              keyword,
-              { timeoutMs: 5000 },
-            );
-            pushTrace({ kind: 'fill_input', stage: 'submit_search_mismatch_retry', selector: fillResult.selector, value: fillResult.value });
-          } catch (fillError) {
-            pushTrace({ kind: 'fill_input_error', stage: 'submit_search_mismatch_retry', error: String(fillError?.message || fillError) });
-          }
-          pushTrace({ kind: 'type', stage: 'submit_search_mismatch_retry', target: 'search_input', length: keyword.length });
-          // Anchor: wait for input value to match keyword (poll with timeout)
-          const anchorTimeoutMs = 5000;
-          const anchorPollMs = 300;
-          const anchorStart = Date.now();
-          let anchorMatched = false;
-          while ((Date.now() - anchorStart) < anchorTimeoutMs) {
-            await sleep(anchorPollMs);
-            const anchorInput = await readSearchInputImpl(profileId);
-            if (!anchorInput || anchorInput.ok !== true) continue;
-            const anchorValue = String(anchorInput.value || '').replace(/\s+/g, '').trim();
-            const anchorKeyword = keyword.replace(/\s+/g, '').trim();
-            if (anchorValue === anchorKeyword) {
-              anchorMatched = true;
-              pushTrace({ kind: 'anchor_matched', stage: 'submit_search_mismatch_retry', elapsedMs: Date.now() - anchorStart });
-              break;
-            }
-          }
-          if (anchorMatched) {
-            await sleepRandomImpl(300, 800, pushTrace, 'submit_mismatch_after_type');
-            currentInput = await readSearchInputImpl(profileId);
-            currentValue = currentInput?.ok === true ? String(currentInput.value || '') : '';
-            // Re-check normalized values
-            const reNorm = currentValue.replace(/\s+/g, '').trim();
-            const reKey = keyword.replace(/\s+/g, '').trim();
-            if (reNorm === reKey) {
-              // Mismatch resolved — fall through to submit
-              pushTrace({ kind: 'mismatch_resolved', stage: 'submit_search', expected: keyword, actual: currentValue });
-              // Guard check before proceeding
-              const guardAfterRetry = await assertNoGuard('submit_search_after_mismatch_retry');
-              if (guardAfterRetry) return guardAfterRetry;
-              // Re-read for beforeUrl below
-            } else {
-              // Still mismatched after all retries — hard fail
-              pushTrace({ kind: 'input_mismatch_final', stage: 'submit_search', expected: keyword, actual: currentValue, softFail: false });
-              return {
-                ok: false,
-                code: 'SEARCH_INPUT_MISMATCH',
-                message: 'search input mismatch after all retries; abort submit',
-                data: { expected: keyword, actual: currentValue },
-              };
-            }
-          }
-        } catch (retryErr) {
-          pushTrace({ kind: 'mismatch_retry_error', stage: 'submit_search', error: String(retryErr?.message || retryErr) });
-        }
+      const normalizedKeyword = keyword.replace(/\s+/g, '').trim();
+      if (normalizedValue !== normalizedKeyword) {
+        pushTrace({ kind: 'input_mismatch_final', stage: 'submit_search', expected: keyword, actual: currentValue, softFail: false });
+        return {
+          ok: false,
+          code: 'SEARCH_INPUT_MISMATCH',
+          message: 'search input mismatch after fill',
+          data: { expected: keyword, actual: currentValue },
+        };
       }
     }
 

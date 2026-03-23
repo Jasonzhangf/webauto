@@ -76,27 +76,6 @@ export function buildXhsSearchOperations(options) {
       },
     },
     {
-      id: 'fill_keyword',
-      enabled: !detailLinksStartup,
-      action: 'xhs_fill_keyword',
-      // Note: avoid click here to prevent camo input pipeline click timeout
-      // Focus is enough for input elements; click retries can cause long stalls without anchor checks.
-      params: { selector: '#search-input, input.search-input', text: keyword },
-      trigger: 'startup',
-      dependsOn: ['wait_search_permit'],
-      once: true,
-      validation: {
-        mode: 'both',
-        pre: { page: { hostIncludes: ['xiaohongshu.com'], checkpointIn: ['home_ready', 'search_ready'] } },
-        post: { container: { selector: '#search-input, input.search-input', mustExist: true, minCount: 1 } },
-      },
-      checkpoint: {
-        containerId: 'xiaohongshu_home.search_input',
-        targetCheckpoint: 'search_ready',
-        recovery,
-      },
-    },
-    {
       id: 'submit_search',
       enabled: !detailLinksStartup,
       action: 'xhs_submit_search',
@@ -112,7 +91,7 @@ export function buildXhsSearchOperations(options) {
         settleMaxMs: submitSettleMaxMs,
       },
       trigger: 'startup',
-      dependsOn: ['fill_keyword'],
+      dependsOn: ['wait_search_permit'],
       once: true,
       timeoutMs: 120000,
       validation: detailLinksStartup ? undefined : {
