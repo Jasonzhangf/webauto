@@ -662,3 +662,81 @@ export async function fillInputValue(profileId, selectors, value, options = {}) 
   
   return data;
 }
+
+/**
+ * waitForAnchor - 锚点驱动的等待函数
+ * 最大等待时间内轮询检查锚点，锚点出现立即返回。不是傻等。
+ *
+ * @param {string} profileId
+ * @param {object} options
+ * @param {string|string[]} options.selectors - CSS selectors（任一匹配=成功）
+ * @param {function} options.probe - 自定义 async probe（返回 truthy=成功）
+ * @param {number} options.timeoutMs - 最大等待时间（default 8000）
+ * @param {number} options.intervalMs - 轮询间隔（default 300）
+ * @returns {{ ok: boolean, elapsed: number, reason: string|null, result: any|null }}
+ */
+export async function waitForAnchor(profileId, options = {}) {
+  const {
+    selectors = [],
+    probe = null,
+    timeoutMs = 8000,
+    intervalMs = 300,
+    description = 'waitForAnchor',
+  } = options;
+
+  const normalizedSelectors = (Array.isArray(selectors) ? selectors : [String(selectors)]).filter(Boolean);
+  const hasSelectors = normalizedSelectors.length > 0;
+  const hasProbe = typeof probe === 'function';
+  if (!hasSelectors && !hasProbe) {
+    return { ok: false, elapsed: 0, reason: 'no_selectors_or_probe', result: null };
+  }
+
+  const start = Date.now();
+  const effectiveInterval = Math.max(100, Math.min(2000, Number(intervalMs) || 300));
+  const effectiveTimeout = Math.max(1000, Number(timeoutMs) || 8000);
+
+  const checkSelectors = async () => {
+    if (!hasSelectors) return null;
+    const script = `(() => {
+      const selectors = ${JSON.stringify(normalizedSelectors)};
+      for (const sel of selectors) {
+        const node = document.querySelector(sel);
+        if (node) {
+          const rect = node.getBoundingClientRect();
+          const style = window.getComputedStyle(node);
+          if (style && style.display !== 'none' && style.visibility !== 'hidden') {
+            return { found: true, selector: sel, count: document.querySelectorAll(sel).length };
+          }
+        }
+      }
+      return { found: false };
+    })()`;
+    try {
+      return await evaluateReadonly(profileId, script, { timeoutMs: 3000, onTimeout: 'return' });
+    } catch {
+      return { found: false };
+    }
+  };
+
+  while (Date.now() - start < effectiveTimeout) {
+    if (hasSelectors) {
+      const selResult = await checkSelectors();
+      if (selResult?.found) {
+        return { ok: true, elapsed: Date.now() - start, reason: 'selector_found', result: selResult };
+      }
+    }
+    if (hasProbe) {
+      try {
+        const probeResult = await probe();
+        if (probeResult) {
+          return { ok: true, elapsed: Date.now() - start, reason: 'probe_succeeded', result: probeResult };
+        }
+      } catch {
+        // probe error = not ready, continue polling
+      }
+    }
+    await sleep(Math.max(80, effectiveInterval));
+  }
+
+  return { ok: false, elapsed: Date.now() - start, reason: 'timeout', result: null };
+}

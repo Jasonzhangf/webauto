@@ -6,7 +6,7 @@ import { readCommentsSnapshot, readCommentEntryPoint, readCommentTotalTarget, re
 import { consumeTabBudget } from './tab-state.mjs';
 import { markDetailSlotProgress, readDetailSlotState, writeDetailSlotState } from './detail-slot-state.mjs';
 import { resolveXhsOutputContext, readJsonlRows, mergeCommentsJsonl, writeCommentsMd, writeContentMarkdown, appendLikeStateRows, writeLikeSummary } from './persistence.mjs';
-import { clickPoint, sleep, clearAndType, pressKey, scrollBySelector, highlightVisualTarget, clearVisualHighlight, readLocation } from './dom-ops.mjs';
+import { clickPoint, sleep, clearAndType, pressKey, scrollBySelector, highlightVisualTarget, clearVisualHighlight, readLocation, waitForAnchor } from './dom-ops.mjs';
 
 const ALLOWED_COMMENT_SCROLL_SELECTORS = new Set(['.comments-container', '.comment-list', '.comments-el', '.note-scroller']);
 
@@ -2416,6 +2416,13 @@ export async function executeExpandRepliesOperation({ profileId, context = {} })
 
   let expanded = 0;
   for (let step = 1; step <= maxExpand; step += 1) {
+    // 锚点等待：确保评论容器稳定后再查找展开回复按钮（不嵌套 evaluate）
+    await waitForAnchor(profileId, {
+      selectors: ['.comment-item', '.comments-container', '.note-scroller'],
+      timeoutMs: 4000,
+      intervalMs: 300,
+      description: 'expand_replies:wait_comment_context_stable',
+    });
     const liveTargets = await readExpandReplyTargetsImpl(profileId).catch(() => null);
     const liveCandidates = normalizeTargets(Array.isArray(liveTargets?.targets)
       ? liveTargets.targets.map((node) => ({
@@ -2478,6 +2485,13 @@ export async function executeExpandRepliesOperation({ profileId, context = {} })
     pushTrace({ kind: 'click', stage: 'expand_replies', text: target.text.slice(0, 60), center: target.center });
     await sleepImpl(350);
     expanded += 1;
+    // 锚点等待：点击展开后短暂等待 DOM 更新
+    await waitForAnchor(profileId, {
+      selectors: ['.comment-item'],
+      timeoutMs: 2500,
+      intervalMs: 200,
+      description: 'expand_replies:wait_after_expand_click',
+    });
     const afterTargets = await readExpandReplyTargetsImpl(profileId).catch(() => null);
     const afterCandidates = normalizeTargets(Array.isArray(afterTargets?.targets)
       ? afterTargets.targets.map((node) => ({
