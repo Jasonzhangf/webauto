@@ -833,3 +833,27 @@ Tags: #resilience #partial-failure #completion-rate
 ps aux | grep "plugin-container.*tab" | grep -v grep | wc -l
 ```
 Tags: #tab-management #max-tabs #camo
+
+## 2026-03-23 评论覆盖率异常根因与修复（现场勘验）
+
+### 根因（已证据化）
+- 覆盖率低并非策略问题，而是代码错误：`stagnationRounds is not defined`
+- 触发位置：comments_harvest
+- 证据：
+  - `~/.webauto/logs/daemon-jobs/job_1774270203345_e0175a04.log`
+  - `~/.webauto/download/xiaohongshu/debug/AI绘画技巧/diagnostics/debug-ops/*comments_harvest*_error-*.json`
+
+### 修复
+- commit: `32355981`
+- 恢复 `stagnationRounds` 变量定义
+
+### 到底判定规则（按 Jason 指导）
+1. 空评论：`comments_empty`
+2. 评论容器到底：`scroll.atBottom=true` -> `reached_bottom`
+3. 回滚后重试仍滚不动：连续3次 -> `scroll_stuck_3_times`（原因单独记录）
+
+### 验证
+- run/job: `8a9c5f14-1f0c-4da9-973d-dbe8f1523237` / `job_1774272043565_53ede6b4`
+- comments_harvest: `commentsProcessed=72`, `expected=73`, `coverage=0.99`, `reachedBottom=true`
+
+Tags: #coverage #bottom-anchor #root-cause-fixed
