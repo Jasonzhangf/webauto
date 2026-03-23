@@ -899,12 +899,33 @@ export async function executeCommentsHarvestOperation({ profileId, params = {}, 
             error: message,
             errorCode: errorCode || null,
           });
-          return {
-            ok: false,
-            code: errorCode.includes('TIMEOUT') ? 'COMMENTS_CONTEXT_FOCUS_CLICK_TIMEOUT' : 'COMMENTS_CONTEXT_FOCUS_CLICK_FAILED',
-            message: errorCode.includes('TIMEOUT') ? 'comment entry click timeout' : 'comment entry click failed',
-            data: { mode, selector: entry.selector || null, error: message, errorCode: errorCode || null },
-          };
+
+          // 锚点校验：entry 点击超时后复核评论容器锚点，若已可用则跳过 entry 点击继续
+          const fallbackAfterEntry = await readCommentScrollContainerTargetImpl(profileId).catch(() => null);
+          const fallbackScrollAfterEntry = sanitizeCommentScrollTarget(fallbackAfterEntry);
+          const fallbackVisibleAfterEntry = await readVisibleCommentTargetImpl(profileId).catch(() => null);
+          const fallbackHasStrongAfterEntry = Boolean(
+            (fallbackScrollAfterEntry?.found && fallbackScrollAfterEntry?.center)
+            || (fallbackVisibleAfterEntry?.found && fallbackVisibleAfterEntry?.center)
+          );
+          progress('focus_comment_context_entry_click_timeout_anchor_check', {
+            mode,
+            selector: entry.selector || null,
+            fallbackHasStrongContext: fallbackHasStrongAfterEntry,
+            errorCode: errorCode || null,
+          });
+          if (!fallbackHasStrongAfterEntry) {
+            return {
+              ok: false,
+              code: errorCode.includes('TIMEOUT') ? 'COMMENTS_CONTEXT_FOCUS_CLICK_TIMEOUT' : 'COMMENTS_CONTEXT_FOCUS_CLICK_FAILED',
+              message: errorCode.includes('TIMEOUT') ? 'comment entry click timeout' : 'comment entry click failed',
+              data: { mode, selector: entry.selector || null, error: message, errorCode: errorCode || null, anchorChecked: true, anchorReady: false },
+            };
+          }
+          // 锚点已就绪，跳过 entry click 后的 sleep，直接继续
+          commentScrollRaw = fallbackAfterEntry;
+          commentScroll = fallbackScrollAfterEntry || commentScroll;
+          visibleComment = fallbackVisibleAfterEntry || visibleComment;
         }
         await highlightStep('xhs-detail-comment-entry', entry, 'processed', 'comment entry', 4200);
         await sleepImpl(5000);
@@ -1043,19 +1064,50 @@ export async function executeCommentsHarvestOperation({ profileId, params = {}, 
               error: message,
               errorCode: errorCode || null,
             });
-            return {
-              ok: false,
-              code: errorCode.includes('TIMEOUT') ? 'COMMENTS_CONTEXT_FOCUS_CLICK_TIMEOUT' : 'COMMENTS_CONTEXT_FOCUS_CLICK_FAILED',
-              message: errorCode.includes('TIMEOUT') ? 'comment focus click timeout' : 'comment focus click failed',
-              data: {
+
+            // 锚点校验：点击超时后立即复核评论容器锚点，若锚点仍可用则继续执行（不因点击超时直接失败）
+            const fallbackCommentScrollRaw = await readCommentScrollContainerTargetImpl(profileId).catch(() => null);
+            const fallbackCommentScroll = sanitizeCommentScrollTarget(fallbackCommentScrollRaw);
+            const fallbackVisibleComment = await readVisibleCommentTargetImpl(profileId).catch(() => null);
+            const fallbackHasStrongContext = Boolean(
+              (fallbackCommentScroll?.found && fallbackCommentScroll?.center)
+              || (fallbackVisibleComment?.found && fallbackVisibleComment?.center)
+            );
+            progress('focus_comment_context_after_click_timeout_anchor_check', {
+              mode,
+              selector: commentScroll?.selector || null,
+              fallbackCommentScrollFound: Boolean(fallbackCommentScroll?.found && fallbackCommentScroll?.center),
+              fallbackVisibleCommentFound: Boolean(fallbackVisibleComment?.found && fallbackVisibleComment?.center),
+              fallbackHasStrongContext,
+              errorCode: errorCode || null,
+            });
+            if (fallbackHasStrongContext) {
+              commentScrollRaw = fallbackCommentScrollRaw;
+              commentScroll = fallbackCommentScroll || commentScroll;
+              visibleComment = fallbackVisibleComment || visibleComment;
+              progress('focus_comment_context_click_timeout_but_anchor_ready', {
                 mode,
                 selector: commentScroll?.selector || null,
                 focusSource: clickableTarget?.source || null,
                 focusSelector: clickableTarget?.selector || null,
-                error: message,
-                errorCode: errorCode || null,
-              },
-            };
+              });
+            } else {
+              return {
+                ok: false,
+                code: errorCode.includes('TIMEOUT') ? 'COMMENTS_CONTEXT_FOCUS_CLICK_TIMEOUT' : 'COMMENTS_CONTEXT_FOCUS_CLICK_FAILED',
+                message: errorCode.includes('TIMEOUT') ? 'comment focus click timeout' : 'comment focus click failed',
+                data: {
+                  mode,
+                  selector: commentScroll?.selector || null,
+                  focusSource: clickableTarget?.source || null,
+                  focusSelector: clickableTarget?.selector || null,
+                  error: message,
+                  errorCode: errorCode || null,
+                  anchorChecked: true,
+                  anchorReady: false,
+                },
+              };
+            }
           }
           await highlightStep(focusChannel, clickableTarget, 'processed', focusLabel, 4200);
           await sleepImpl(5000);
