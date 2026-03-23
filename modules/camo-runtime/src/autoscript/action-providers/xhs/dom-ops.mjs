@@ -601,3 +601,60 @@ export async function resolveSelectorTarget(profileId, selectors, options = {}) 
   if (!payload || payload.ok !== true || !payload.target?.center) return null;
   return payload.target;
 }
+
+/**
+ * 直接设置输入框的值，绕过输入法和 input pipeline。
+ * 使用 Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set 
+ * 来避免 React/Vue 等框架的 value 受控组件限制。
+ * 
+ * 注意：此方法不触发键盘事件，只触发 input/change 事件。
+ * 适用于输入法可能干扰 keyboard.type 的场景。
+ */
+export async function fillInputValue(profileId, selectors, value, options = {}) {
+  const normalizedSelectors = normalizeArray(selectors)
+    .map((item) => String(item || '').trim())
+    .filter(Boolean);
+  if (normalizedSelectors.length === 0) {
+    throw new Error('FILL_INPUT_NO_SELECTORS');
+  }
+  
+  const timeoutMs = Math.max(1000, Number(options?.timeoutMs ?? 5000) || 5000);
+  const script = `
+    (function() {
+      const selectors = ${JSON.stringify(normalizedSelectors)};
+      const value = ${JSON.stringify(String(value || ''))};
+      
+      for (const sel of selectors) {
+        const el = document.querySelector(sel);
+        if (el && el.tagName === 'INPUT') {
+          // 使用原生 setter 绕过 React/Vue 受控组件
+          const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
+            window.HTMLInputElement.prototype, 'value'
+          ).set;
+          nativeInputValueSetter.call(el, value);
+          
+          // 触发 input 和 change 事件
+          el.dispatchEvent(new Event('input', { bubbles: true }));
+          el.dispatchEvent(new Event('change', { bubbles: true }));
+          
+          return {
+            ok: true,
+            selector: sel,
+            value: el.value,
+            length: el.value.length
+          };
+        }
+      }
+      return { ok: false, error: 'INPUT_NOT_FOUND', selectors };
+    })()
+  `;
+  
+  const result = await runEvaluateScript(profileId, script, { timeoutMs });
+  const data = extractEvaluateResultData(result);
+  
+  if (!data?.ok) {
+    throw new Error(data?.error || 'FILL_INPUT_FAILED');
+  }
+  
+  return data;
+}

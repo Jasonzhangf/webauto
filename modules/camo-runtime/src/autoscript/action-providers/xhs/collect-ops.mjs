@@ -4,7 +4,7 @@ import { resolveSearchLockKey, randomBetween, resolveSearchResultTokenLink, norm
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { sleep, readLocation, clickPoint, clearAndType, pressKey, typeText, resolveSelectorTarget, sleepRandom, evaluateReadonly } from './dom-ops.mjs';
+import { sleep, readLocation, clickPoint, clearAndType, pressKey, typeText, fillInputValue, resolveSelectorTarget, sleepRandom, evaluateReadonly } from './dom-ops.mjs';
 import { readSearchInput, readSearchViewportReady, readSearchCandidates } from './search-ops.mjs';
 import { buildSelectorCheck, ensureActiveSession, maybeSelector } from '../../../container/runtime-core/index.mjs';
 import { getDomSnapshotByProfile } from '../../../utils/browser-service.mjs';
@@ -562,35 +562,32 @@ export async function executeSubmitSearchOperation({ profileId, params = {}, con
         } else {
           // No center coordinates; clearAndType may still work via keyboard shortcut.
         }
+        // 使用 fillInputValue 直接设置输入框值，绕过输入法和 input pipeline
+        // 原因：browser-service 的 input pipeline 是串行的，keyboard.type 会被输入法干扰
+        // fillInputValue 使用 evaluate 直接设置 DOM value，不受输入法影响
         await sleepRandomImpl(actionDelayMinMs, actionDelayMaxMs, pushTrace, 'submit_pre_type');
-        await clearAndTypeImpl(
-          profileId,
-          keyword,
-          Number(params.keyDelayMs ?? 65) || 65,
-          {
-            actionTimeoutMs: Math.max(1500, Number(params.clearAndTypeActionTimeoutMs ?? 8000) || 8000),
-            typeTimeoutMs: Math.max(2000, Number(params.clearAndTypeTypeTimeoutMs ?? 12000) || 12000),
-            allowProceedOnSelectFailure: true,
-            skipSelectAll: true,
-          },
-        );
         try {
-          const typedInput = await readSearchInputImpl(profileId);
-          const typedValue = String(typedInput?.value || '').replace(/\s+/g, '').trim();
-          const typedKeyword = String(keyword || '').replace(/\s+/g, '').trim();
-          if (typedKeyword && typedValue !== typedKeyword) {
-            await typeTextImpl(
-              profileId,
-              keyword,
-              Number(params.keyDelayMs ?? 65) || 65,
-              {
-                typeTimeoutMs: Math.max(2000, Number(params.clearAndTypeTypeTimeoutMs ?? 12000) || 12000),
-              },
-            );
-            pushTrace({ kind: 'type_fallback', stage: 'submit_search', reason: 'post_clear_type_mismatch', attempt });
-          }
-        } catch (fallbackError) {
-          pushTrace({ kind: 'type_fallback_error', stage: 'submit_search', attempt, error: String(fallbackError?.message || fallbackError) });
+          const fillResult = await fillInputValue(
+            profileId,
+            ['#search-input', 'input.search-input'],
+            keyword,
+            { timeoutMs: 5000 },
+          );
+          pushTrace({ kind: 'fill_input', stage: 'submit_search', target: 'search_input', selector: fillResult.selector, value: fillResult.value, attempt });
+        } catch (fillError) {
+          pushTrace({ kind: 'fill_input_error', stage: 'submit_search', attempt, error: String(fillError?.message || fillError) });
+          // Fallback: 如果 fill 失败，尝试旧的 clearAndType 方式
+          await clearAndTypeImpl(
+            profileId,
+            keyword,
+            Number(params.keyDelayMs ?? 65) || 65,
+            {
+              actionTimeoutMs: Math.max(1500, Number(params.clearAndTypeActionTimeoutMs ?? 8000) || 8000),
+              typeTimeoutMs: Math.max(2000, Number(params.clearAndTypeTypeTimeoutMs ?? 12000) || 12000),
+              allowProceedOnSelectFailure: true,
+              skipSelectAll: true,
+            },
+          );
         }
         pushTrace({ kind: 'type', stage: 'submit_search', target: 'search_input', length: keyword.length, attempt });
         await sleepRandomImpl(actionDelayMinMs, actionDelayMaxMs, pushTrace, 'submit_after_type');
@@ -620,34 +617,17 @@ export async function executeSubmitSearchOperation({ profileId, params = {}, con
             pushTrace({ kind: 'click', stage: 'submit_search_mismatch_retry_focus', reason: 'input_mismatch_final' });
           }
           await sleepRandomImpl(500, 1000, pushTrace, 'submit_mismatch_pre_type');
-          await clearAndTypeImpl(
-            profileId,
-            keyword,
-            Number(params.keyDelayMs ?? 65) || 65,
-            {
-              actionTimeoutMs: Math.max(1500, Number(params.clearAndTypeActionTimeoutMs ?? 8000) || 8000),
-              typeTimeoutMs: Math.max(2000, Number(params.clearAndTypeTypeTimeoutMs ?? 12000) || 12000),
-              allowProceedOnSelectFailure: true,
-              skipSelectAll: true,
-            },
-          );
+          // 使用 fillInputValue 直接设置值（同主流程，绕过输入法）
           try {
-            const typedInput = await readSearchInputImpl(profileId);
-            const typedValue = String(typedInput?.value || '').replace(/\s+/g, '').trim();
-            const typedKeyword = String(keyword || '').replace(/\s+/g, '').trim();
-            if (typedKeyword && typedValue !== typedKeyword) {
-              await typeTextImpl(
-                profileId,
-                keyword,
-                Number(params.keyDelayMs ?? 65) || 65,
-                {
-                  typeTimeoutMs: Math.max(2000, Number(params.clearAndTypeTypeTimeoutMs ?? 12000) || 12000),
-                },
-              );
-              pushTrace({ kind: 'type_fallback', stage: 'submit_search_mismatch_retry', reason: 'post_clear_type_mismatch' });
-            }
-          } catch (fallbackError) {
-            pushTrace({ kind: 'type_fallback_error', stage: 'submit_search_mismatch_retry', error: String(fallbackError?.message || fallbackError) });
+            const fillResult = await fillInputValue(
+              profileId,
+              ['#search-input', 'input.search-input'],
+              keyword,
+              { timeoutMs: 5000 },
+            );
+            pushTrace({ kind: 'fill_input', stage: 'submit_search_mismatch_retry', selector: fillResult.selector, value: fillResult.value });
+          } catch (fillError) {
+            pushTrace({ kind: 'fill_input_error', stage: 'submit_search_mismatch_retry', error: String(fillError?.message || fillError) });
           }
           pushTrace({ kind: 'type', stage: 'submit_search_mismatch_retry', target: 'search_input', length: keyword.length });
           // Anchor: wait for input value to match keyword (poll with timeout)
