@@ -2,7 +2,7 @@ import { evaluateReadonly, pressKey, sleep } from './dom-ops.mjs';
 import { getProfileState } from './state.mjs';
 
 export async function readDetailLinks(profileId) {
-  const href = await evaluateReadonly(profileId, 'String(location.href || "")');
+  const href = await evaluateReadonly(profileId, 'String(location.href || "")', { timeoutMs: 6000, onTimeout: 'return' });
   const noteMatch = href?.match?.(/\/explore\/([^/?#]+)/);
   return {
     currentUrl: href || null,
@@ -53,7 +53,7 @@ export async function readDetailState(profileId) {
       commentsContextAvailable: Boolean(document.querySelector('.comments-container, .comment-list, .comment-item, [class*="comment-item"], .note-scroller')),
     };
   })()`;
-  return evaluateReadonly(profileId, script);
+  return evaluateReadonly(profileId, script, { timeoutMs: 6000, onTimeout: 'return' });
 }
 
 export async function readDetailSnapshot(profileId) {
@@ -158,7 +158,7 @@ export async function readDetailSnapshot(profileId) {
       capturedAt: new Date().toISOString(),
     };
   })()`;
-  return evaluateReadonly(profileId, script);
+  return evaluateReadonly(profileId, script, { timeoutMs: 6000, onTimeout: 'return' });
 }
 
 export async function readExpandButtons(profileId) {
@@ -204,7 +204,7 @@ export async function readExpandButtons(profileId) {
     }
     return { rows: out };
   })()`;
-  return evaluateReadonly(profileId, script);
+  return evaluateReadonly(profileId, script, { timeoutMs: 6000, onTimeout: 'return' });
 }
 
 export async function isDetailVisible(profileId) {
@@ -250,7 +250,7 @@ export async function isDetailVisible(profileId) {
     }
     return { detailVisible: false, selector: null, href: String(location.href || '') };
   })()`;
-  return evaluateReadonly(profileId, script);
+  return evaluateReadonly(profileId, script, { timeoutMs: 6000, onTimeout: 'return' });
 }
 
 export async function readDetailCloseTarget(profileId) {
@@ -272,7 +272,7 @@ export async function readDetailCloseTarget(profileId) {
     }
     return { found: false };
   })()`;
-  return evaluateReadonly(profileId, script);
+  return evaluateReadonly(profileId, script, { timeoutMs: 6000, onTimeout: 'return' });
 }
 
 export async function closeDetailToSearch(profileId, pushTrace = null) {

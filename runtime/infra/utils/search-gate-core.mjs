@@ -182,8 +182,6 @@ export function claimDetailLink(state, body = {}, now = Date.now()) {
     if (!entry?.link) continue;
     if (queue.completed.has(nextKey)) continue;
     if (queue.skipped.has(nextKey)) continue;
-    // STRICT GLOBAL DEDUP: never reclaim if already seen once
-    if (queue.seen.has(nextKey)) continue;
     const owner = String(queue.consumerByKey.get(nextKey) || '').trim();
     if (owner && owner !== consumerId) continue;
 
@@ -198,10 +196,11 @@ export function claimDetailLink(state, body = {}, now = Date.now()) {
       queue.activeByConsumer.set(consumerId, active);
       queue.consumerByKey.set(nextKey, consumerId);
     }
-    // Mark as seen immediately on first claim to prevent reclaims
+    const prevSeen = queue.seen.get(nextKey) || {};
     queue.seen.set(nextKey, {
       consumerId,
       claimedAt: new Date(now).toISOString(),
+      claimCount: Math.max(0, Number(prevSeen?.claimCount || 0)) + 1,
     });
     queue.updatedAt = claimedAt;
     return buildDetailQueueResponse(queue, {

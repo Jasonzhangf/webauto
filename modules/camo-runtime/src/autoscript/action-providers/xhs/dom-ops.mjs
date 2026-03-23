@@ -444,6 +444,7 @@ export async function clearAndType(profileId, text, keyDelayMs = 60, options = {
   const estimatedTypeMs = Math.max(1200, String(text || '').length * Math.max(1, typeDelayMs) + 3200);
   const typeTimeoutMs = Math.max(actionTimeoutMs, Number(options?.typeTimeoutMs ?? estimatedTypeMs) || estimatedTypeMs);
   const allowSelectFallback = options?.allowSelectFallback !== false;
+  const skipSelectAll = options?.skipSelectAll === true;
   const allowProceedOnSelectFailure = options?.allowProceedOnSelectFailure === true;
   const primarySelectKey = process.platform === 'darwin' ? 'Meta+A' : 'Control+A';
   const fallbackSelectKey = process.platform === 'darwin' ? 'Control+A' : 'Meta+A';
@@ -451,22 +452,23 @@ export async function clearAndType(profileId, text, keyDelayMs = 60, options = {
   let selectOk = false;
   try {
     await withTimeout(
-      pressKey(profileId, primarySelectKey),
+      skipSelectAll ? Promise.resolve() : pressKey(profileId, primarySelectKey),
       actionTimeoutMs,
       'CLEAR_AND_TYPE_SELECT_TIMEOUT',
     );
-    selectOk = true;
+    if (!skipSelectAll) selectOk = true;
   } catch (error) {
-    if (!allowSelectFallback) {
+    if (skipSelectAll) { /* skip */ }
+    else if (!allowSelectFallback) {
       if (!allowProceedOnSelectFailure) throw error;
     } else {
       try {
         await withTimeout(
-          pressKey(profileId, fallbackSelectKey),
+          skipSelectAll ? Promise.resolve() : pressKey(profileId, fallbackSelectKey),
           actionTimeoutMs,
           'CLEAR_AND_TYPE_SELECT_FALLBACK_TIMEOUT',
         );
-        selectOk = true;
+        if (!skipSelectAll) selectOk = true;
       } catch (fallbackError) {
         if (!allowProceedOnSelectFailure) throw fallbackError;
       }
@@ -474,7 +476,7 @@ export async function clearAndType(profileId, text, keyDelayMs = 60, options = {
   }
   try {
     await withTimeout(
-      pressKey(profileId, 'Backspace'),
+      skipSelectAll ? Promise.resolve() : pressKey(profileId, 'Backspace'),
       actionTimeoutMs,
       'CLEAR_AND_TYPE_BACKSPACE_TIMEOUT',
     );

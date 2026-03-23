@@ -44,7 +44,7 @@ export async function readCommentEntryPoint(profileId) {
       viewport: { width: vw, height: vh },
     };
   })()`;
-  return evaluateReadonly(profileId, script);
+  return evaluateReadonly(profileId, script, { timeoutMs: 6000, onTimeout: 'return' });
 }
 
 export async function readCommentTotalTarget(profileId) {
@@ -82,7 +82,7 @@ export async function readCommentTotalTarget(profileId) {
       viewport: { width: vw, height: vh },
     };
   })()`;
-  return evaluateReadonly(profileId, script);
+  return evaluateReadonly(profileId, script, { timeoutMs: 6000, onTimeout: 'return' });
 }
 
 export async function readVisibleCommentTarget(profileId) {
@@ -188,7 +188,7 @@ export async function readVisibleCommentTarget(profileId) {
       text: String(picked.node.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 120),
     };
   })()`;
-  return evaluateReadonly(profileId, script);
+  return evaluateReadonly(profileId, script, { timeoutMs: 6000, onTimeout: 'return' });
 }
 
 export async function readVisibleCommentTargets(profileId) {
@@ -312,7 +312,7 @@ export async function readVisibleCommentTargets(profileId) {
       viewport: { width: vw, height: vh },
     };
   })()`;
-  return evaluateReadonly(profileId, script);
+  return evaluateReadonly(profileId, script, { timeoutMs: 6000, onTimeout: 'return' });
 }
 
 export async function readResumeAnchorPairTarget(profileId, resumeAnchor = null) {
@@ -435,7 +435,7 @@ export async function readResumeAnchorPairTarget(profileId, resumeAnchor = null)
     }
     return { found: false, reason: 'resume_anchor_pair_not_visible', visibleCount: comments.length };
   })()`;
-  return evaluateReadonly(profileId, script);
+  return evaluateReadonly(profileId, script, { timeoutMs: 6000, onTimeout: 'return' });
 }
 
 export async function readExpandReplyTargets(profileId) {
@@ -531,7 +531,7 @@ export async function readExpandReplyTargets(profileId) {
       targets,
     };
   })()`;
-  return evaluateReadonly(profileId, script);
+  return evaluateReadonly(profileId, script, { timeoutMs: 6000, onTimeout: 'return' });
 }
 
 export async function readCommentScrollContainerTarget(profileId) {
@@ -763,7 +763,7 @@ export async function readCommentScrollContainerTarget(profileId) {
       viewport: { width: vw, height: vh },
     };
   })()`;
-  return evaluateReadonly(profileId, script);
+  return evaluateReadonly(profileId, script, { timeoutMs: 6000, onTimeout: 'return' });
 }
 
 export async function readCommentFocusTarget(profileId) {
@@ -802,7 +802,7 @@ export async function readCommentFocusTarget(profileId) {
       viewport: { width: vw, height: vh },
     };
   })()`;
-  return evaluateReadonly(profileId, script);
+  return evaluateReadonly(profileId, script, { timeoutMs: 6000, onTimeout: 'return' });
 }
 
 export async function readCommentsSnapshot(profileId) {
@@ -915,7 +915,7 @@ export async function readCommentsSnapshot(profileId) {
     }
     return { detailVisible, hasCommentsContext, expectedCommentsCount, commentCount: comments.length, comments, commentCountFromUi: chatCountParsed ?? null, commentCountFromUiText: chatCountText || null, scroll };
   })()`;
-  return evaluateReadonly(profileId, script);
+  return evaluateReadonly(profileId, script, { timeoutMs: 6000, onTimeout: 'return' });
 }
 
 export async function readLikeTargetByIndex(profileId, index) {
@@ -1047,7 +1047,7 @@ export async function readLikeTargetByIndex(profileId, index) {
       },
     };
   })()`;
-  return evaluateReadonly(profileId, script);
+  return evaluateReadonly(profileId, script, { timeoutMs: 6000, onTimeout: 'return' });
 }
 
 /**
@@ -1120,7 +1120,7 @@ export async function readLikeTargetByCommentId(profileId, commentId, fallbackIn
       center: toVisiblePoint(rect),
     };
   })()`;
-  return evaluateReadonly(profileId, script);
+  return evaluateReadonly(profileId, script, { timeoutMs: 6000, onTimeout: 'return' });
 }
 export async function readReplyTargetByIndex(profileId, index) {
   const idx = Math.max(0, Number(index) || 0);
@@ -1140,7 +1140,7 @@ export async function readReplyTargetByIndex(profileId, index) {
       viewport: { width: vw, height: vh },
     };
   })()`;
-  return evaluateReadonly(profileId, script);
+  return evaluateReadonly(profileId, script, { timeoutMs: 6000, onTimeout: 'return' });
 }
 
 export async function readReplyInputTarget(profileId) {
@@ -1157,7 +1157,7 @@ export async function readReplyInputTarget(profileId) {
       viewport: { width: vw, height: vh },
     };
   })()`;
-  return evaluateReadonly(profileId, script);
+  return evaluateReadonly(profileId, script, { timeoutMs: 6000, onTimeout: 'return' });
 }
 
 export async function readReplyInputValue(profileId) {
@@ -1166,7 +1166,7 @@ export async function readReplyInputValue(profileId) {
     if (!input) return { found: false };
     return { found: true, value: String(input.value || input.textContent || '').trim() };
   })()`;
-  return evaluateReadonly(profileId, script);
+  return evaluateReadonly(profileId, script, { timeoutMs: 6000, onTimeout: 'return' });
 }
 
 export async function readReplySendButtonTarget(profileId) {
@@ -1182,5 +1182,5 @@ export async function readReplySendButtonTarget(profileId) {
       viewport: { width: vw, height: vh },
     };
   })()`;
-  return evaluateReadonly(profileId, script);
+  return evaluateReadonly(profileId, script, { timeoutMs: 6000, onTimeout: 'return' });
 }

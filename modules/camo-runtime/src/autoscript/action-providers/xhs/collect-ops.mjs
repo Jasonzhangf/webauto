@@ -571,10 +571,9 @@ export async function executeSubmitSearchOperation({ profileId, params = {}, con
             actionTimeoutMs: Math.max(1500, Number(params.clearAndTypeActionTimeoutMs ?? 8000) || 8000),
             typeTimeoutMs: Math.max(2000, Number(params.clearAndTypeTypeTimeoutMs ?? 12000) || 12000),
             allowProceedOnSelectFailure: true,
+            skipSelectAll: true,
           },
         );
-        // 锚点驱动 fallback：Meta+A/Control+A 超时时，直接继续 type（不依赖全选）
-        // 防止 submit_search 因 select 卡死超过 operation timeout。
         try {
           const typedInput = await readSearchInputImpl(profileId);
           const typedValue = String(typedInput?.value || '').replace(/\s+/g, '').trim();
@@ -629,6 +628,7 @@ export async function executeSubmitSearchOperation({ profileId, params = {}, con
               actionTimeoutMs: Math.max(1500, Number(params.clearAndTypeActionTimeoutMs ?? 8000) || 8000),
               typeTimeoutMs: Math.max(2000, Number(params.clearAndTypeTypeTimeoutMs ?? 12000) || 12000),
               allowProceedOnSelectFailure: true,
+              skipSelectAll: true,
             },
           );
           try {

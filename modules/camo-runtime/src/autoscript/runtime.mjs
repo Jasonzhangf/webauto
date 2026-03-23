@@ -425,8 +425,27 @@ export class AutoscriptRunner {
       && Number(rawOperationTimeout) > 0;
     const defaultDisableTimeout = Boolean(this.script?.defaults?.disableTimeout);
 
+    // Startup and infrastructure operations must ALWAYS have a timeout –
+    // they can hang (headless display probe, tab-pool stall, viewport lock)
+    // and there is no user-visible anchor to detect the hang.
+    const NON_DISABLABLE_ACTIONS = new Set([
+      'sync_window_viewport',
+      'verify_subscriptions',
+      'ensure_tab_pool',
+      'goto',
+      'evaluate',
+      'new_page',
+      'switch_page',
+    ]);
+    const action = String(operation?.action || '').trim().toLowerCase();
+    const isNonDisablable = NON_DISABLABLE_ACTIONS.has(action);
+
     // Keep default "no-timeout" mode, but allow operation-level timeout to opt in.
     if (defaultDisableTimeout && operationDisableTimeout !== false && !hasOperationTimeout) {
+      // Even when timeout is disabled by default, infrastructure actions get a safety net.
+      if (isNonDisablable) {
+        return this.getDefaultTimeoutMs(operation);
+      }
       return 0;
     }
 

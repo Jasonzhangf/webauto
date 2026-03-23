@@ -105,6 +105,7 @@ export function buildXhsSearchOperations(options) {
         searchSerialKey,
         sharedHarvestPath,
         method: submitMethod,
+        lockTimeoutMs: Number(options.submitLockTimeoutMs ?? 20000) || 20000,
         actionDelayMinMs: submitActionDelayMinMs,
         actionDelayMaxMs: submitActionDelayMaxMs,
         settleMinMs: submitSettleMinMs,

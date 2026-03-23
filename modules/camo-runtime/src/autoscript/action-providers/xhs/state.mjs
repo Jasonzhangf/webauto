@@ -88,16 +88,31 @@ function toLockKey(text, fallback = '') {
   return value || fallback;
 }
 
-export async function withSerializedLock(lockKey, fn) {
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, Math.max(0, ms)));
+
+export async function withSerializedLock(lockKey, fn, options = {}) {
   const key = toLockKey(lockKey);
   if (!key) return fn();
+  const timeoutMs = Math.max(0, Number(options.timeoutMs) || 0);
   const previous = XHS_OPERATION_LOCKS.get(key) || Promise.resolve();
   let release;
   const gate = new Promise((resolve) => {
     release = resolve;
   });
   XHS_OPERATION_LOCKS.set(key, previous.catch(() => null).then(() => gate));
-  await previous.catch(() => null);
+  const waitForPrev = previous.catch(() => null);
+  if (timeoutMs > 0) {
+    await Promise.race([
+      waitForPrev,
+      sleep(timeoutMs).then(() => {
+        const error = new Error(`LOCK_TIMEOUT:${key}`);
+        error.code = 'LOCK_TIMEOUT';
+        throw error;
+      }),
+    ]);
+  } else {
+    await waitForPrev;
+  }
   try {
     return await fn();
   } finally {

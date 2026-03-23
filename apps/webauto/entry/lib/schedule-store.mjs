@@ -663,6 +663,40 @@ export function releaseScheduleDaemonLease(options = {}) {
   return releaseLease(resolveDaemonLeasePath(), { ownerId });
 }
 
+export function reapStaleLocks() {
+  const nowMs = Date.now();
+  const dirs = [
+    resolveTaskClaimsRoot(),
+    resolveResourceClaimsRoot(),
+  ];
+  let reaped = 0;
+
+  const daemonLeasePath = resolveDaemonLeasePath();
+  if (fs.existsSync(daemonLeasePath)) {
+    const lease = readLease(daemonLeasePath);
+    if (isLeaseStale(lease, nowMs)) {
+      safeUnlink(daemonLeasePath);
+      reaped++;
+    }
+  }
+
+  for (const dir of dirs) {
+    if (!fs.existsSync(dir)) continue;
+    const entries = fs.readdirSync(dir, { withFileTypes: true });
+    for (const entry of entries) {
+      if (!entry.isFile() || !entry.name.endsWith('.json')) continue;
+      const fullPath = path.join(dir, entry.name);
+      const lease = readLease(fullPath);
+      if (isLeaseStale(lease, nowMs)) {
+        safeUnlink(fullPath);
+        reaped++;
+      }
+    }
+  }
+
+  return { reaped };
+}
+
 function releaseResourceClaims(resourceKeys, ownerId, runToken = null) {
   const outcomes = [];
   for (const key of resourceKeys) {

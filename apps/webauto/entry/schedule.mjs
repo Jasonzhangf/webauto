@@ -22,9 +22,59 @@ import {
   setSchedulerPolicy,
   resolveSchedulesRoot,
   updateScheduleTask,
+  reapStaleLocks,
 } from './lib/schedule-store.mjs';
 import { listAccountProfiles } from './lib/account-store.mjs';
 import { evaluateRetry } from './lib/schedule-retry.mjs';
+import path from 'node:path';
+import { resolveWebautoRoot } from './lib/profilepool.mjs';
+
+const BROWSER_PIDS_FILE = path.join(resolveWebautoRoot(), 'run', 'browser-pids.json');
+
+const trackedBrowserPids = new Set();
+
+function readBrowserPids() {
+  try {
+    const raw = fs.readFileSync(BROWSER_PIDS_FILE, 'utf8');
+    const data = JSON.parse(raw);
+    return new Set(Array.isArray(data?.pids) ? data.pids.filter((p) => Number.isFinite(p) && p > 0) : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function writeBrowserPids(pids) {
+  try {
+    fs.mkdirSync(path.dirname(BROWSER_PIDS_FILE), { recursive: true });
+    fs.writeFileSync(BROWSER_PIDS_FILE, JSON.stringify({ pids: [...pids], updatedAt: new Date().toISOString() }), 'utf8');
+  } catch {
+    // ignore
+  }
+}
+
+function trackBrowserPid(pid) {
+  if (!Number.isFinite(pid) || pid <= 0) return;
+  trackedBrowserPids.add(pid);
+  writeBrowserPids(trackedBrowserPids);
+}
+
+function killTrackedBrowserPids() {
+  const pids = readBrowserPids();
+  const all = new Set([...trackedBrowserPids, ...pids]);
+  let killed = 0;
+  for (const pid of all) {
+    try {
+      process.kill(pid, 0);
+      process.kill(pid, 'SIGTERM');
+      killed++;
+    } catch {
+      // not alive or permission denied
+    }
+  }
+  trackedBrowserPids.clear();
+  try { fs.unlinkSync(BROWSER_PIDS_FILE); } catch {}
+  return { scanned: all.size, killed };
+}
 
 let xhsRunnerPromise = null;
 let weiboRunnerPromise = null;
@@ -595,6 +645,12 @@ async function cmdDaemon(argv, jsonMode) {
   const intervalSec = parsePositiveInt(argv['interval-sec'], 30);
   const limit = parsePositiveInt(argv.limit, 20);
   const runOnce = argv.once === true;
+
+  // Clean up stale leases from crashed daemon instances
+  const staleResult = reapStaleLocks();
+  if (staleResult.reaped > 0) {
+    console.error(`[schedule] Reaped ${staleResult.reaped} stale lock files on startup`);
+  }
   if (runOnce) {
     const policy = resolveRuntimePolicy(argv);
     const onceResult = await runDue(limit, {
@@ -667,6 +723,7 @@ async function cmdDaemon(argv, jsonMode) {
   const shutdown = () => {
     clearInterval(timer);
     clearInterval(leaseHeartbeat);
+    killTrackedBrowserPids();
     releaseScheduleDaemonLease({ ownerId });
     console.log(JSON.stringify({
       ts: new Date().toISOString(),
@@ -676,6 +733,18 @@ async function cmdDaemon(argv, jsonMode) {
   };
   process.on('SIGINT', shutdown);
   process.on('SIGTERM', shutdown);
+  process.on('uncaughtException', (error) => {
+    console.error('[schedule] Uncaught exception:', error.message);
+    killTrackedBrowserPids();
+    releaseScheduleDaemonLease({ ownerId });
+    process.exit(1);
+  });
+  process.on('unhandledRejection', (reason) => {
+    console.error('[schedule] Unhandled rejection:', reason);
+    killTrackedBrowserPids();
+    releaseScheduleDaemonLease({ ownerId });
+    process.exit(1);
+  });
 }
 
 async function main() {

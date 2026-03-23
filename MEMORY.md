@@ -539,7 +539,7 @@ coverage_retry 原始设计：滚到评论区顶部 → 在顶部做 expand pass
 ## 2026-03-21 测试环境禁用 comment budget
 
 ### 结论
-- 非 production（env != prod）测试中禁用 comment budget（commentBudget=0），避免 tab_comment_budget 早停导致覆盖率偏低。
+- commentBudget 是 tab 轮转阈值（不是采集上限），测试和生产都必须启用，禁止设为 0
 
 ### 修改位置
 - `modules/camo-runtime/src/autoscript/xhs-autoscript-detail-ops.mjs`

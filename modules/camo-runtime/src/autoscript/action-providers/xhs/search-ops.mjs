@@ -20,7 +20,7 @@ export async function readSearchInput(profileId) {
       viewport: { width: vw, height: vh },
     };
   })()`;
-  return evaluateReadonly(profileId, script);
+  return evaluateReadonly(profileId, script, { timeoutMs: 6000, onTimeout: 'return' });
 }
 
 export async function readSearchCandidates(profileId) {
@@ -76,7 +76,7 @@ export async function readSearchCandidates(profileId) {
     }
     return { rows, page: { href: String(location.href || ''), innerHeight: Number(window.innerHeight || 0) } };
   })()`;
-  return evaluateReadonly(profileId, script);
+  return evaluateReadonly(profileId, script, { timeoutMs: 6000, onTimeout: 'return' });
 }
 
 export async function readSearchCandidateByNoteId(profileId, noteId, options = {}) {
@@ -107,7 +107,7 @@ export async function readSearchCandidateByNoteId(profileId, noteId, options = {
     }
     return { found: false };
   })()`;
-  const payload = await evaluateReadonly(profileId, script);
+  const payload = await evaluateReadonly(profileId, script, { timeoutMs: 6000, onTimeout: 'return' });
   if (!payload || payload.found !== true) return { found: false };
   return payload;
 }
@@ -128,7 +128,7 @@ export async function readSearchHitAtPoint(profileId, point) {
     const noteId = (seg.split('?')[0].split('#')[0] || '').trim();
     return { found: true, noteId, href };
   })()`;
-  return evaluateReadonly(profileId, script);
+  return evaluateReadonly(profileId, script, { timeoutMs: 6000, onTimeout: 'return' });
 }
 
 export async function ensureSearchCandidateFullyVisible(profileId, noteId, options = {}) {
@@ -151,17 +151,23 @@ export async function readSearchViewportReady(profileId) {
       if (!rect || rect.width <= 1 || rect.height <= 1) return false;
       return rect.bottom > 0 && rect.top < window.innerHeight;
     }).length;
+    const anchorFound = !!list || items.length > 0;
     const readySelector = items.length > 0 ? '.note-item' : (list ? '.search-result-list' : '');
     return {
       readySelector,
       visibleNoteCount: visibleCount,
+      anchorFound,
+      anchor: {
+        list: !!list,
+        items: items.length,
+      },
       hasList: !!list || items.length > 0,
       hasInput: !!input,
       inputHasValue: input instanceof HTMLInputElement && !!input.value,
       href: String(location.href || ''),
     };
   })()`;
-  return evaluateReadonly(profileId, script);
+  return evaluateReadonly(profileId, script, { timeoutMs: 6000, onTimeout: 'return' });
 }
 
 export async function paintSearchCandidates(profileId, { candidates = [] } = {}) {
@@ -182,5 +188,5 @@ export async function paintSearchCandidates(profileId, { candidates = [] } = {})
     setTimeout(() => overlay.remove(), 2000);
     return { painted: candidates.length };
   })()`;
-  return evaluateReadonly(profileId, script);
+  return evaluateReadonly(profileId, script, { timeoutMs: 6000, onTimeout: 'return' });
 }
