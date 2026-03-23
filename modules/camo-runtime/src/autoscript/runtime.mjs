@@ -1383,6 +1383,14 @@ export class AutoscriptRunner {
 
       if (this.isNonBlockingOperation(operation)) {
         const env = String(this.script?.metadata?.env || '').trim().toLowerCase();
+        // 单条失败不阻碍整体流程：设置 status='skipped' 让依赖链可以继续
+        this.operationState.set(operation.id, {
+          status: 'skipped',
+          runs: Number(this.operationState.get(operation.id)?.runs || 0) + 1,
+          lastError: result?.code || 'OPERATION_FAILED',
+          updatedAt: nowIso(),
+          result,
+        });
         if (env === 'debug') {
           this.log('autoscript:operation_nonblocking_failure', {
             operationId: operation.id,
