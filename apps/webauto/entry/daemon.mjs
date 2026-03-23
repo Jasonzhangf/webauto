@@ -237,6 +237,16 @@ function buildWorkerEnv(worker) {
   };
 }
 
+async function waitDaemonStopped(timeoutMs = 8_000) {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt <= timeoutMs) {
+    const alive = await pingDaemon();
+    if (!alive?.ok) return true;
+    await sleep(200);
+  }
+  return false;
+}
+
 async function startDaemonServer() {
   ensureDirs();
   cleanupRuntimeFiles();
@@ -318,7 +328,7 @@ async function startDaemonServer() {
     const worker = {
       id,
       token,
-      kind: String(input.kind || 'relay').trim() || 'relay',
+      kind: String(input.kind || 'task').trim() || 'task',
       source: String(input.source || '').trim() || null,
       pid: Number.isFinite(Number(input.pid)) ? Math.floor(Number(input.pid)) : null,
       jobId: String(input.jobId || '').trim() || null,
@@ -338,7 +348,7 @@ async function startDaemonServer() {
       if (!worker.source) worker.source = existing.source || null;
       if (!worker.jobId) worker.jobId = existing.jobId || null;
       if (!(worker.pid > 0)) worker.pid = existing.pid || null;
-      if (!worker.kind) worker.kind = existing.kind || 'relay';
+      if (!worker.kind) worker.kind = existing.kind || 'task';
     } else {
       state.workersOrder.push(id);
     }
@@ -362,9 +372,9 @@ async function startDaemonServer() {
   };
 
 
-  const startRelayJob = async (params = {}) => {
+  const startTaskJob = async (params = {}) => {
     const args = Array.isArray(params.args) ? params.args : [];
-    if (args.length === 0) return { ok: false, error: 'missing relay args' };
+    if (args.length === 0) return { ok: false, error: 'missing task args' };
 
     // 排他性控制：同一时间只允许一个任务运行
     const activeJobs = state.jobsOrder
@@ -382,10 +392,10 @@ async function startDaemonServer() {
     const logPath = path.join(JOB_LOG_DIR, `${jobId}.log`);
     const logStream = createWriteStream(logPath, { flags: 'a' });
     const worker = registerWorker({
-      id: `relay_${jobId}`,
+      id: `task_${jobId}`,
       token: randomUUID(),
-      kind: 'relay',
-      source: 'daemon-relay',
+      kind: 'task',
+      source: 'daemon-task',
       jobId,
       status: 'running',
     });
@@ -516,24 +526,55 @@ async function startDaemonServer() {
       }
       return { ok: true, shuttingDown: true, pid: process.pid };
     }
-    if (method === 'relay.start') {
-      return startRelayJob(params);
+    if (method === 'task.submit') {
+      return startTaskJob(params);
     }
-    if (method === 'relay.status') {
+    if (method === 'task.status') {
       const id = String(params.id || '').trim();
       if (!id) return { ok: false, error: 'missing id' };
       const job = state.jobs.get(id);
       if (!job) return { ok: false, error: `job_not_found:${id}` };
       return { ok: true, job };
     }
-    if (method === 'relay.list') {
+    if (method === 'task.list') {
       const limit = Math.max(1, Number(params.limit || 20) || 20);
+      const statusFilter = String(params.status || '').trim();
       const jobs = state.jobsOrder
         .slice(-limit)
         .map((id) => state.jobs.get(id))
         .filter(Boolean)
+        .filter((job) => !statusFilter || job.status === statusFilter)
         .reverse();
       return { ok: true, jobs };
+    }
+    if (method === 'task.stop') {
+      const id = String(params.id || '').trim();
+      if (!id) return { ok: false, error: 'missing id' };
+      const job = state.jobs.get(id);
+      if (!job) return { ok: false, error: `job_not_found:${id}` };
+      if (job.status !== 'running') {
+        return { ok: true, stopped: false, reason: `task_not_running:${job.status}`, job: summarizeJob(job) };
+      }
+      const ret = await terminatePidTree(job.pid);
+      if (!ret?.ok) return { ok: false, error: 'task_stop_failed', job: summarizeJob(job) };
+      job.status = 'stopped';
+      job.code = -15;
+      job.finishedAt = nowIso();
+      updateHeartbeat();
+      return { ok: true, stopped: true, job: summarizeJob(job) };
+    }
+    if (method === 'task.delete') {
+      const id = String(params.id || '').trim();
+      if (!id) return { ok: false, error: 'missing id' };
+      const job = state.jobs.get(id);
+      if (!job) return { ok: false, error: `job_not_found:${id}` };
+      if (job.status === 'running') {
+        return { ok: false, error: 'cannot_delete_running_task', job: summarizeJob(job) };
+      }
+      state.jobs.delete(id);
+      state.jobsOrder = state.jobsOrder.filter((jobId) => jobId !== id);
+      updateHeartbeat();
+      return { ok: true, deleted: true, id };
     }
     return { ok: false, error: `unsupported_method:${method}` };
   };
@@ -637,14 +678,18 @@ function printHelp() {
 
 Usage:
   webauto --daemon
-  webauto --daemon start|stop|status|run
-  webauto --daemon relay [--detach] -- <webauto args...>
+  webauto --daemon start|stop|status|restart|run
+  webauto --daemon task submit [--detach] -- <webauto args...>
+  webauto --daemon task status --job-id <id>
+  webauto --daemon task list [--limit <n>] [--status <running|completed|failed|stopped>]
+  webauto --daemon task stop --job-id <id>
+  webauto --daemon task delete --job-id <id>
 
 Notes:
   - \`--daemon\` 默认等价于 \`--daemon start\`
   - \`run\` 为前台运行，仅用于调试
-  - relay 默认同步等待并返回结果；加 --detach 可改为后台任务
-  - relay 可把普通 CLI 命令经 daemon 中继执行
+  - task submit 默认同步等待并返回结果；加 --detach 可改为后台任务
+  - task submit 可把普通 CLI 命令经 daemon 调度执行
 `);
 }
 
@@ -686,6 +731,20 @@ async function main() {
     return;
   }
 
+  if (cmd === 'restart') {
+    const stopRet = await requestDaemon({ method: 'shutdown', params: {} }).catch((error) => ({ ok: false, error: error?.message || String(error) }));
+    if (!stopRet?.ok) {
+      await forceStopByPidFile();
+    }
+    const stopped = await waitDaemonStopped(8_000);
+    if (!stopped) {
+      await forceStopByPidFile();
+    }
+    const status = await ensureDaemonStarted(undefined, { allowStart: true });
+    print({ ok: true, restarted: true, status }, jsonMode);
+    return;
+  }
+
   if (cmd === 'status') {
     const ret = await requestDaemon({ method: 'status', params: {} }).catch((error) => ({ ok: false, error: error?.message || String(error) }));
     print(ret, jsonMode);
@@ -697,7 +756,7 @@ async function main() {
   if (cmd === 'job-status') {
     await ensureDaemonStarted(undefined, { allowStart: true });
     const id = String(args['job-id'] || args._[1] || '').trim();
-    const ret = await requestDaemon({ method: 'relay.status', params: { id } });
+    const ret = await requestDaemon({ method: 'task.status', params: { id } });
     print(ret, jsonMode);
     if (!ret?.ok) process.exit(1);
     return;
@@ -706,23 +765,60 @@ async function main() {
   if (cmd === 'job-list') {
     await ensureDaemonStarted(undefined, { allowStart: true });
     const limit = Number(args._[1] || 20) || 20;
-    const ret = await requestDaemon({ method: 'relay.list', params: { limit } });
+    const statusFilter = String(args.status || '').trim();
+    const ret = await requestDaemon({ method: 'task.list', params: { limit, status: statusFilter } });
     print(ret, jsonMode);
     if (!ret?.ok) process.exit(1);
     return;
   }
 
-  if (cmd === 'relay') {
+  if (cmd === 'task') {
+    const sub = String(args._[1] || '').trim().toLowerCase();
+    if (sub === 'status') {
+      await ensureDaemonStarted(undefined, { allowStart: true });
+      const id = String(args['job-id'] || args._[2] || '').trim();
+      const ret = await requestDaemon({ method: 'task.status', params: { id } });
+      print(ret, jsonMode);
+      if (!ret?.ok) process.exit(1);
+      return;
+    }
+    if (sub === 'list') {
+      await ensureDaemonStarted(undefined, { allowStart: true });
+      const limit = Number(args._[2] || 20) || 20;
+      const statusFilter = String(args.status || '').trim();
+      const ret = await requestDaemon({ method: 'task.list', params: { limit, status: statusFilter } });
+      print(ret, jsonMode);
+      if (!ret?.ok) process.exit(1);
+      return;
+    }
+    if (sub === 'stop') {
+      await ensureDaemonStarted(undefined, { allowStart: true });
+      const id = String(args['job-id'] || args._[2] || '').trim();
+      const ret = await requestDaemon({ method: 'task.stop', params: { id } }, 60_000);
+      print(ret, jsonMode);
+      if (!ret?.ok) process.exit(1);
+      return;
+    }
+    if (sub === 'delete') {
+      await ensureDaemonStarted(undefined, { allowStart: true });
+      const id = String(args['job-id'] || args._[2] || '').trim();
+      const ret = await requestDaemon({ method: 'task.delete', params: { id } });
+      print(ret, jsonMode);
+      if (!ret?.ok) process.exit(1);
+      return;
+    }
+
+    // task submit
     const idx = rawArgv.indexOf('--');
-    const relayArgs = idx >= 0 ? rawArgv.slice(idx + 1) : rawArgv.slice(1);
-    if (relayArgs.length === 0) {
-      print({ ok: false, error: 'missing relay args' }, jsonMode);
+    const taskArgs = idx >= 0 ? rawArgv.slice(idx + 1) : rawArgv.slice(cmd === 'task' ? 2 : 1);
+    if (taskArgs.length === 0) {
+      print({ ok: false, error: 'missing task args' }, jsonMode);
       process.exit(1);
       return;
     }
     await ensureDaemonStarted(undefined, { allowStart: true });
     const wait = args.detach !== true;
-    const ret = await requestDaemon({ method: 'relay.start', params: { args: relayArgs, wait } }, 120_000);
+    const ret = await requestDaemon({ method: 'task.submit', params: { args: taskArgs, wait } }, 120_000);
     print(ret, jsonMode);
     if (!ret?.ok) process.exit(1);
     return;

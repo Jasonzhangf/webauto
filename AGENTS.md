@@ -108,7 +108,7 @@ curl http://127.0.0.1:7704/health
 | 操作 | 唯一命令 | 说明 |
 |------|----------|------|
 | 启动 daemon | `webauto daemon start` | 启动后台守护进程，管理所有任务 |
-| 启动任务 | `webauto daemon relay --detach -- xhs unified ...` | 通过 daemon 中继启动，进程不会丢失 |
+| 启动任务 | `webauto daemon task submit --detach -- xhs unified ...` | 通过 daemon 任务调度启动，进程不会丢失 |
 | 查看任务状态 | `webauto xhs status --json` | 查看当前运行状态 |
 | 查看 daemon 状态 | `webauto daemon status --json` | 查看 daemon 及所有 jobs |
 | 停止任务 | API `POST /api/v1/tasks/<runId>/stop` | 停止指定 runId 的任务 |
@@ -127,9 +127,15 @@ webauto daemon start                          # 启动守护进程
 webauto daemon status --json                  # 查看守护进程状态
 webauto daemon stop                           # 停止守护进程
 
-# 任务启动（必须通过 daemon relay）
-webauto daemon relay --detach -- xhs unified --profile xiaohongshu-batch-1 --keyword "seedance2.0" --max-notes 100 --do-comments true --persist-comments true --do-likes true --like-keywords "真牛" --env debug --tab-count 4
-webauto daemon relay --detach -- xhs collect --profile xiaohongshu-batch-1 --keyword "seedance2.0" --max-notes 100 --env debug
+# 任务启动（必须通过 daemon task submit）
+webauto daemon task submit --detach -- xhs unified --profile xiaohongshu-batch-1 --keyword "seedance2.0" --max-notes 100 --do-comments true --persist-comments true --do-likes true --like-keywords "真牛" --env debug --tab-count 4
+webauto daemon task submit --detach -- xhs collect --profile xiaohongshu-batch-1 --keyword "seedance2.0" --max-notes 100 --env debug
+
+# 任务调度管理
+webauto daemon task list --limit 20
+webauto daemon task status --job-id <jobId>
+webauto daemon task stop --job-id <jobId>
+webauto daemon task delete --job-id <jobId>
 
 # 任务状态查看
 webauto xhs status --json

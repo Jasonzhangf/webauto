@@ -395,13 +395,20 @@ function printDaemonHelp() {
 
 Usage:
   webauto --daemon
-  webauto --daemon start|stop|status|run
-  webauto daemon <start|stop|status|run|autostart>
+  webauto --daemon start|stop|status|restart|run
+  webauto daemon <start|stop|status|restart|run|task|autostart>
+  webauto daemon task submit [--detach] -- <webauto args...>
+  webauto daemon task status --job-id <id>
+  webauto daemon task list [--limit <n>] [--status <running|completed|failed|stopped>]
+  webauto daemon task stop --job-id <id>
+  webauto daemon task delete --job-id <id>
 
 Examples:
   webauto --daemon
   webauto --daemon status --json
+  webauto --daemon restart
   webauto --daemon stop
+  webauto daemon task submit --detach -- xhs unified --profile xhs-qa-1 --keyword "春分养生" --max-notes 5 --do-comments true --persist-comments true --env debug --task-mode single
   webauto daemon autostart install
   webauto daemon autostart status --json
 `);
@@ -647,19 +654,21 @@ async function daemonProxy(rawArgv) {
    'start',
    'stop',
    'status',
+   'restart',
    'run',
+   'task',
    'autostart',
    'help',
    '--help',
    '-h',
  ]);
   let daemonArgs = [];
-  if (filtered.length === 0) {
+ if (filtered.length === 0) {
     daemonArgs = ['start'];
  } else if (controlSet.has(String(filtered[0] || '').trim().toLowerCase())) {
    daemonArgs = filtered;
  } else {
-    console.error(`❌ Unknown daemon command: ${filtered[0]}. Use: start|stop|status|run|autostart`);
+    console.error(`❌ Unknown daemon command: ${filtered[0]}. Use: start|stop|status|restart|run|task|autostart`);
     process.exit(2);
  }
   await run(process.execPath, [daemonScript, ...daemonArgs]);
@@ -687,10 +696,11 @@ async function main() {
   };
 
   if (sessionZero) {
-    const daemonSub = getDaemonSubcommand();
+   const daemonSub = getDaemonSubcommand();
    const allowedDaemon = new Set([
      'status',
      'stop',
+     'task',
      'help',
      '--help',
      '-h',
