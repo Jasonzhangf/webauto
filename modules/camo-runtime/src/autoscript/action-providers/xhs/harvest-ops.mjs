@@ -1413,6 +1413,7 @@ export async function executeCommentsHarvestOperation({ profileId, params = {}, 
   let effectiveMaxRounds = maxRounds;
   let noProgressRounds = 0;
   let scrollStuckRounds = 0;
+  let stagnationRounds = 0;
   let recoveries = 0;
   let lastSignature = '';
   let lastProgressAt = Date.now();
