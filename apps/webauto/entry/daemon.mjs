@@ -16,6 +16,8 @@ import {
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 
+import { performHealthCheck } from './lib/health-check.mjs';
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '../../..');
 
@@ -431,12 +433,26 @@ async function startDaemonServer() {
     const args = Array.isArray(params.args) ? params.args : [];
     if (args.length === 0) return { ok: false, error: 'missing task args' };
 
-    // 提交前清理残留僵尸 worker 进程，防止 inputActionLock 等资源被占用
+    // ── 任务提交前环境初始化 ──
+    // 第一步：reconcile 进程状态
     const runningPids = state.jobsOrder
+      .map((id) => state.jobs.get(id))
+      .filter((j) => j && j.status === 'running' && j.pid);
+    for (const job of runningPids) {
+      if (!isPidAlive(job.pid)) {
+        job.status = 'failed';
+        job.code = -1;
+        job.finishedAt = nowIso();
+      }
+    }
+    updateHeartbeat();
+
+    // 第二步：清理残留僵尸 worker 进程
+    const supervisedPids = state.jobsOrder
       .map((id) => state.jobs.get(id))
       .filter((j) => j && j.status === 'running' && j.pid)
       .map((j) => j.pid);
-    await cleanupOrphanedWorkers(runningPids);
+    await cleanupOrphanedWorkers(supervisedPids);
 
     // 排他性控制：同一时间只允许一个任务运行
     const activeJobs = state.jobsOrder
@@ -449,6 +465,22 @@ async function startDaemonServer() {
         activeJob: { id: activeJobs[0].id, pid: activeJobs[0].pid, startedAt: activeJobs[0].startedAt },
       };
     }
+
+    // 第三步：可靠健康检查（确认 browser-service + 输入操作真正可用）
+    try {
+      const health = await performHealthCheck({ skipInputTest: false });
+      if (!health.ok) {
+        return {
+          ok: false,
+          error: 'pre_submit_health_check_failed',
+          health,
+          message: `环境不健康：${health.summary}。建议重启 camo 或 browser-service`,
+        };
+      }
+    } catch (err) {
+      // 健康检查自身异常不阻塞提交（容错）
+    }
+
     const wait = params.wait === true;
     const jobId = `job_${Date.now()}_${randomUUID().slice(0, 8)}`;
     const logPath = path.join(JOB_LOG_DIR, `${jobId}.log`);
