@@ -671,7 +671,8 @@ export async function fillInputValue(profileId, selectors, value, options = {}) 
  * @param {object} options
  * @param {string|string[]} options.selectors - CSS selectors（任一匹配=成功）
  * @param {function} options.probe - 自定义 async probe（返回 truthy=成功）
- * @param {number} options.timeoutMs - 最大等待时间（default 8000）
+ * @param {number} options.timeoutMs - 单次最大等待时间（default 5000）
+ * @param {number} options.retryCount - 最大重试次数（default 3）
  * @param {number} options.intervalMs - 轮询间隔（default 300）
  * @returns {{ ok: boolean, elapsed: number, reason: string|null, result: any|null }}
  */
@@ -679,7 +680,8 @@ export async function waitForAnchor(profileId, options = {}) {
   const {
     selectors = [],
     probe = null,
-    timeoutMs = 8000,
+    timeoutMs = 5000,
+    retryCount = 3,
     intervalMs = 300,
     description = 'waitForAnchor',
   } = options;
@@ -693,7 +695,8 @@ export async function waitForAnchor(profileId, options = {}) {
 
   const start = Date.now();
   const effectiveInterval = Math.max(100, Math.min(2000, Number(intervalMs) || 300));
-  const effectiveTimeout = Math.max(1000, Number(timeoutMs) || 8000);
+  const effectiveTimeout = Math.max(1000, Number(timeoutMs) || 5000);
+  const effectiveRetryCount = Math.max(1, Number(retryCount) || 3);
 
   const checkSelectors = async () => {
     if (!hasSelectors) return null;
@@ -718,25 +721,46 @@ export async function waitForAnchor(profileId, options = {}) {
     }
   };
 
-  while (Date.now() - start < effectiveTimeout) {
-    if (hasSelectors) {
-      const selResult = await checkSelectors();
-      if (selResult?.found) {
-        return { ok: true, elapsed: Date.now() - start, reason: 'selector_found', result: selResult };
-      }
-    }
-    if (hasProbe) {
-      try {
-        const probeResult = await probe();
-        if (probeResult) {
-          return { ok: true, elapsed: Date.now() - start, reason: 'probe_succeeded', result: probeResult };
+  for (let attempt = 1; attempt <= effectiveRetryCount; attempt += 1) {
+    const attemptStart = Date.now();
+    while (Date.now() - attemptStart < effectiveTimeout) {
+      if (hasSelectors) {
+        const selResult = await checkSelectors();
+        if (selResult?.found) {
+          return {
+            ok: true,
+            elapsed: Date.now() - start,
+            reason: 'selector_found',
+            result: selResult,
+            attempt,
+          };
         }
-      } catch {
-        // probe error = not ready, continue polling
       }
+      if (hasProbe) {
+        try {
+          const probeResult = await probe();
+          if (probeResult) {
+            return {
+              ok: true,
+              elapsed: Date.now() - start,
+              reason: 'probe_succeeded',
+              result: probeResult,
+              attempt,
+            };
+          }
+        } catch {
+          // probe error = not ready, continue polling
+        }
+      }
+      await sleep(Math.max(80, effectiveInterval));
     }
-    await sleep(Math.max(80, effectiveInterval));
   }
 
-  return { ok: false, elapsed: Date.now() - start, reason: 'timeout', result: null };
+  return {
+    ok: false,
+    elapsed: Date.now() - start,
+    reason: 'timeout',
+    result: null,
+    attempts: effectiveRetryCount,
+  };
 }

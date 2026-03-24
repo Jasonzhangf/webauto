@@ -569,7 +569,7 @@ export async function executeSubmitSearchOperation({ profileId, params = {}, con
     let currentValue = String(currentInput?.value || '');
     if (keyword) {
       // 锚点等待：填充前等待输入框就绪（最大 actionDelayMaxMs，出现即返回）
-      await waitForAnchor(profileId, { selectors: ['#search-input', 'input.search-input'], timeoutMs: actionDelayMaxMs, intervalMs: 200, description: 'submit_pre_fill_anchor' });
+      await waitForAnchor(profileId, { selectors: ['#search-input', 'input.search-input'], timeoutMs: Math.min(actionDelayMaxMs, 5000), intervalMs: 300, description: 'submit_pre_fill_anchor' });
       let fillResult;
       try {
         fillResult = await fillInputValue(
@@ -596,7 +596,7 @@ export async function executeSubmitSearchOperation({ profileId, params = {}, con
       });
 
       // 锚点等待：填充后等待输入框稳定（最大 actionDelayMaxMs，出现即返回）
-      await waitForAnchor(profileId, { selectors: ['#search-input', 'input.search-input'], timeoutMs: actionDelayMaxMs, intervalMs: 200, description: 'submit_after_fill_anchor' });
+      await waitForAnchor(profileId, { selectors: ['#search-input', 'input.search-input'], timeoutMs: Math.min(actionDelayMaxMs, 5000), intervalMs: 300, description: 'submit_after_fill_anchor' });
       currentInput = await readSearchInputImpl(profileId);
       if (!currentInput || currentInput.ok !== true) {
         return {
@@ -868,14 +868,14 @@ export async function executeCollectLinksOperation({ profileId, params = {}, con
     if (state.collectScrollRollbackNeeded) {
       const before = await readSearchViewportReady(profileId).catch(() => null);
       await pressKey(profileId, 'PageUp');
-      await waitCollectSettle(profileId, { timeoutMs: 3000, description: 'collect_scroll_settle' });
+      await waitCollectSettle(profileId, { timeoutMs: 5000, description: 'collect_scroll_settle' });
       const after = await readSearchViewportReady(profileId).catch(() => null);
       state.collectScrollRollbackNeeded = false;
       return { before, after };
     }
     const before = await readSearchViewportReady(profileId).catch(() => null);
     await pressKey(profileId, 'PageDown');
-    await waitCollectSettle(profileId, { timeoutMs: 3000, description: 'collect_scroll_settle' });
+    await waitCollectSettle(profileId, { timeoutMs: 5000, description: 'collect_scroll_settle' });
     const after = await readSearchViewportReady(profileId).catch(() => null);
     return { before, after };
   };

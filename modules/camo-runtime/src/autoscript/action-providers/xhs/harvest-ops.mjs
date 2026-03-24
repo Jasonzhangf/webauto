@@ -523,7 +523,7 @@ async function processVisibleCommentLikes({ profileId, state, params, current, s
     await clickPoint(profileId, target.center, { steps: 2 });
     await highlightStep('xhs-detail-comment-like', target, 'processed', 'comment like', 3200);
     // 锚点等待：点赞后等待 DOM 稳定（最大 800ms，出现即返回）
-    await waitForAnchor(profileId, { selectors: ['.comment-item', '.note-scroller', '.content-container'], timeoutMs: 800, intervalMs: 120, description: 'inline_like_post_click_settle' });
+    await waitForAnchor(profileId, { selectors: ['.comment-item', '.note-scroller', '.content-container'], timeoutMs: 5000, intervalMs: 300, description: 'inline_like_post_click_settle' });
     const postLikeDetailState = await readDetailState(profileId).catch(() => null);
     const postLikeDetail = await readDetailSnapshot(profileId).catch(() => null);
     emitOperationProgress(context, {
@@ -793,7 +793,7 @@ export async function executeCommentsHarvestOperation({ profileId, params = {}, 
       };
     }
     await highlightStep('xhs-detail-comment-item', anchorTarget, 'processed', 'resume anchor', 3200);
-    await waitForAnchor(profileId, { selectors: ['.comment-item', '.note-scroller'], timeoutMs: 2000, intervalMs: 200, description: 'resume_anchor_after_click' });
+    await waitForAnchor(profileId, { selectors: ['.comment-item', '.note-scroller'], timeoutMs: 5000, intervalMs: 300, description: 'resume_anchor_after_click' });
     progress('resume_anchor_restore_done', { mode, restored: true });
     return { ok: true, restored: true, target: anchorTarget };
   };
@@ -856,11 +856,13 @@ export async function executeCommentsHarvestOperation({ profileId, params = {}, 
         ".comments-container .comment-item",
         ".comment-list .comment-item",
       ],
-      timeoutMs: 8000,
+      timeoutMs: 5000,
       intervalMs: 300,
       description: "focus_comment_context_wait_dom_ready",
     });
 
+    // 重新读取 commentTotal，避免锚点等待期间从"评论"占位变成数字后仍使用旧值
+    commentTotal = await readCommentTotalTargetImpl(profileId);
     let commentScrollRaw = await readCommentScrollContainerTargetImpl(profileId);
     let commentScroll = sanitizeCommentScrollTarget(commentScrollRaw);
     let visibleComment = await readVisibleCommentTargetImpl(profileId);
@@ -2262,7 +2264,7 @@ export async function executeCommentLikeOperation({ profileId, params = {}, cont
     liked += 1;
     likedIndexes.push(idx);
     // 锚点等待：点赞后等待 DOM 稳定
-    await waitForAnchor(profileId, { selectors: ['.comment-item', '.note-scroller'], timeoutMs: 800, intervalMs: 120, description: 'comment_like_post_click_settle' });
+    await waitForAnchor(profileId, { selectors: ['.comment-item', '.note-scroller'], timeoutMs: 5000, intervalMs: 300, description: 'comment_like_post_click_settle' });
   }
 
   state.detailLinkState = {
@@ -2319,7 +2321,7 @@ export async function executeCommentReplyOperation({ profileId, params = {}, con
   await clickPoint(profileId, target.center, { steps: 2 });
   pushTrace({ kind: 'click', stage: 'comment_reply', target: 'reply_button', index });
     // 锚点等待：点击回复按钮后等待输入框出现
-    await waitForAnchor(profileId, { selectors: [".comment-input-wrapper", ".reply-input", ".comment-input", "textarea"], timeoutMs: 2000, intervalMs: 150, description: "comment_reply_input_anchor" });
+    await waitForAnchor(profileId, { selectors: [".comment-input-wrapper", ".reply-input", ".comment-input", "textarea"], timeoutMs: 5000, intervalMs: 300, description: "comment_reply_input_anchor" });
   let inputTarget = await readReplyInputTarget(profileId);
   if (!inputTarget?.found) {
     inputTarget = await readReplyInputTarget(profileId);
@@ -2332,11 +2334,11 @@ export async function executeCommentReplyOperation({ profileId, params = {}, con
   await clickPoint(profileId, inputTarget.center, { steps: 2 });
   pushTrace({ kind: 'click', stage: 'comment_reply', target: 'reply_input' });
     // 锚点等待：点击输入框后等待可输入状态
-    await waitForAnchor(profileId, { selectors: [".comment-input-wrapper textarea", "textarea:focus"], timeoutMs: 1200, intervalMs: 100, description: "comment_reply_input_focus_anchor" });
+    await waitForAnchor(profileId, { selectors: [".comment-input-wrapper textarea", "textarea:focus"], timeoutMs: 5000, intervalMs: 300, description: "comment_reply_input_focus_anchor" });
   await clearAndType(profileId, replyText, 60);
   pushTrace({ kind: 'type', stage: 'comment_reply', length: replyText.length });
     // 锚点等待：输入文本后等待发送按钮出现
-    await waitForAnchor(profileId, { selectors: ['.reply-btn', '.send-btn'], timeoutMs: 1500, intervalMs: 120, description: 'comment_reply_send_btn_anchor' });
+    await waitForAnchor(profileId, { selectors: ['.reply-btn', '.send-btn'], timeoutMs: 5000, intervalMs: 300, description: 'comment_reply_send_btn_anchor' });
   let sendTarget = await readReplySendButtonTarget(profileId);
   if (!sendTarget?.found) {
     sendTarget = await readReplySendButtonTarget(profileId);
@@ -2349,7 +2351,7 @@ export async function executeCommentReplyOperation({ profileId, params = {}, con
   await clickPoint(profileId, sendTarget.center, { steps: 2 });
   pushTrace({ kind: 'click', stage: 'comment_reply', target: 'send_button' });
     // 锚点等待：发送后等待回复出现
-    await waitForAnchor(profileId, { selectors: [".comment-item", ".note-scroller", ".reply-item"], timeoutMs: 2000, intervalMs: 150, description: "comment_reply_send_settle" });
+    await waitForAnchor(profileId, { selectors: [".comment-item", ".note-scroller", ".reply-item"], timeoutMs: 5000, intervalMs: 300, description: "comment_reply_send_settle" });
   const state = getProfileState(profileId);
   state.detailLinkState = {
     ...(state.detailLinkState && typeof state.detailLinkState === 'object' ? state.detailLinkState : {}),
@@ -2463,8 +2465,8 @@ export async function executeExpandRepliesOperation({ profileId, context = {} })
 
   const initialAnchor = await waitForAnchor(profileId, {
     selectors: ['.comment-item', '.comments-container', '.note-scroller'],
-    timeoutMs: 1200,
-    intervalMs: 120,
+    timeoutMs: 5000,
+    intervalMs: 300,
     description: 'expand_replies:wait_initial_context',
   });
 
@@ -2540,8 +2542,8 @@ export async function executeExpandRepliesOperation({ profileId, context = {} })
     // 锚点等待：点击后等待评论容器稳定（最大 900ms，出现即返回）
     const afterClickAnchor = await waitForAnchor(profileId, {
       selectors: ['.comment-item', '.note-scroller'],
-      timeoutMs: 900,
-      intervalMs: 120,
+      timeoutMs: 5000,
+      intervalMs: 300,
       description: 'expand_replies:wait_after_expand_click',
     });
     const afterTargets = await readExpandReplyTargetsImpl(profileId).catch(() => null);
