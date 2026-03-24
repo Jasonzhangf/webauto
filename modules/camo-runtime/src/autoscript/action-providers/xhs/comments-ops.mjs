@@ -2,6 +2,11 @@ import { evaluateReadonly } from './dom-ops.mjs';
 import { getProfileState } from './state.mjs';
 import { normalizeInlineText, sanitizeAuthorText, clamp } from './utils.mjs';
 
+// 点赞按钮精确定位：优先 .like-wrapper > .like-lottie（心形图标 SVG 容器），fallback 到 .like-wrapper
+const LIKE_BTN_SELECTOR = '.like-wrapper';
+const LIKE_ICON_SELECTOR = '.like-lottie';
+
+
 export async function readCommentEntryPoint(profileId) {
   const script = `(() => {
     const detailRoot = document.querySelector('.note-detail-mask')
@@ -263,9 +268,10 @@ export async function readVisibleCommentTargets(profileId) {
         const contentEl = node.querySelector('.content, .comment-text, [class*="content"], [class*="comment-text"]');
         const authorLinkEl = authorEl?.querySelector?.('a[href]') || null;
         const nodeId = node.getAttribute('data-id') || node.getAttribute('data-comment-id') || node.id || '';
-        const likeBtn = node.querySelector('.like-wrapper, [class*="like-wrapper"], [class*="like"], .like-btn, .like');
+        const _lw = node.querySelector(".like-wrapper");
+        const likeBtn = _lw ? (_lw.querySelector(".like-lottie") || _lw) : (node.querySelector(".like-btn, .like") || null);
         const likeRect = readRect(likeBtn);
-        const className = String(likeBtn?.className || '');
+        const className = String(_lw?.className || likeBtn?.className || '');
         const ariaPressed = String(likeBtn?.getAttribute?.('aria-pressed') || '').trim().toLowerCase();
         const dataSelected = String(likeBtn?.getAttribute?.('selected') || likeBtn?.getAttribute?.('data-selected') || '').trim().toLowerCase();
         const liked = /active|liked|selected|is-liked|already-liked/.test(className) || ariaPressed === 'true' || dataSelected === 'true';
@@ -1001,7 +1007,8 @@ export async function readLikeTargetByIndex(profileId, index) {
         },
       };
     }
-    const likeBtn = node.querySelector('.like-wrapper, [class*="like-wrapper"], [class*="like"], .like-btn, .like');
+    const _lw = node.querySelector(".like-wrapper");
+    const likeBtn = _lw ? (_lw.querySelector(".like-lottie") || _lw) : (node.querySelector(".like-btn, .like") || null);
     if (!(likeBtn instanceof Element)) return { found: false, hasNode: true, reason: 'like_target_missing' };
     const rect = likeBtn.getBoundingClientRect();
     if (!rect || rect.width <= 1 || rect.height <= 1) {
@@ -1025,7 +1032,7 @@ export async function readLikeTargetByIndex(profileId, index) {
         },
       };
     }
-    const className = String(likeBtn.className || '');
+    const className = String(_lw?.className || likeBtn?.className || '');
     const ariaPressed = String(likeBtn.getAttribute?.('aria-pressed') || '').trim().toLowerCase();
     const dataSelected = String(likeBtn.getAttribute?.('selected') || likeBtn.getAttribute?.('data-selected') || '').trim().toLowerCase();
     const liked = /active|liked|selected|is-liked|already-liked/.test(className) || ariaPressed === 'true' || dataSelected === 'true';
@@ -1099,13 +1106,14 @@ export async function readLikeTargetByCommentId(profileId, commentId, fallbackIn
       return nid === cid;
     });
     if (!node) return { found: false, reason: 'comment_not_in_dom', commentId: cid };
-    const likeBtn = node.querySelector('.like-wrapper, [class*="like-wrapper"], [class*="like"], .like-btn, .like');
+    const _lw = node.querySelector(".like-wrapper");
+    const likeBtn = _lw ? (_lw.querySelector(".like-lottie") || _lw) : (node.querySelector(".like-btn, .like") || null);
     if (!(likeBtn instanceof Element)) return { found: false, hasNode: true, reason: 'like_target_missing', commentId: cid };
     const rect = likeBtn.getBoundingClientRect();
     if (!rect || rect.width <= 1 || rect.height <= 1) {
       return { found: false, hasNode: true, reason: 'like_target_not_visible', commentId: cid };
     }
-    const className = String(likeBtn.className || '');
+    const className = String(_lw?.className || likeBtn?.className || '');
     const ariaPressed = String(likeBtn.getAttribute?.('aria-pressed') || '').trim().toLowerCase();
     const dataSelected = String(likeBtn.getAttribute?.('selected') || likeBtn.getAttribute?.('data-selected') || '').trim().toLowerCase();
     const liked = /active|liked|selected|is-liked|already-liked/.test(className) || ariaPressed === 'true' || dataSelected === 'true';
