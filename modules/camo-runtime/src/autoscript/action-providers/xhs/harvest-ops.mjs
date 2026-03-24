@@ -1249,6 +1249,7 @@ export async function executeCommentsHarvestOperation({ profileId, params = {}, 
   }
   let commentScroll = focusResult?.scrollTarget || null;
   const expandRepliesAggregate = createExpandRepliesAggregate(state.currentNoteId || null);
+  const expandPassTimeoutMs = Math.max(6000, Number(params.expandPassTimeoutMs ?? 18000) || 18000);
   const reanchorAfterExpandPass = async ({ phase = 'initial', round = 0, passResult = null } = {}) => {
     const expandedCount = Math.max(0, Number(passResult?.data?.expanded ?? 0) || 0);
     if (expandedCount <= 0) return { ok: true, reanchored: false };
@@ -1376,7 +1377,6 @@ export async function executeCommentsHarvestOperation({ profileId, params = {}, 
     Number(params.stagnationExitRounds ?? (recoveryNoProgressRounds + maxRecoveries + 2)) || (recoveryNoProgressRounds + maxRecoveries + 2),
   );
   const noChangeTimeoutMs = Math.max(30000, Number(params.noChangeTimeoutMs ?? 30000) || 30000);
-  const expandPassTimeoutMs = Math.max(6000, Number(params.expandPassTimeoutMs ?? 18000) || 18000);
   const refocusRetryDelayMs = Math.max(800, Number(params.refocusRetryDelayMs ?? 1200) || 1200);
 
   const makeRowKey = (row) => {
