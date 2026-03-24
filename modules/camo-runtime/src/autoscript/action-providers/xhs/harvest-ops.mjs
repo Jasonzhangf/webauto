@@ -846,6 +846,21 @@ export async function executeCommentsHarvestOperation({ profileId, params = {}, 
     const preferScrollContainerClick = options?.preferScrollContainerClick === true;
     progress('focus_comment_context_start', { mode });
     let commentTotal = await readCommentTotalTargetImpl(profileId);
+
+    // 锚点等待：等待评论区 DOM 就绪（.total 匹配 "X条评论" 或 .comment-item 出现）
+    // 评论区需要从网络加载，初始占位文字是 "评论"，不是数字
+    const commentContextAnchor = await waitForAnchor(profileId, {
+      selectors: [
+        ".total",
+        ".note-scroller .comment-item",
+        ".comments-container .comment-item",
+        ".comment-list .comment-item",
+      ],
+      timeoutMs: 8000,
+      intervalMs: 300,
+      description: "focus_comment_context_wait_dom_ready",
+    });
+
     let commentScrollRaw = await readCommentScrollContainerTargetImpl(profileId);
     let commentScroll = sanitizeCommentScrollTarget(commentScrollRaw);
     let visibleComment = await readVisibleCommentTargetImpl(profileId);
@@ -857,6 +872,9 @@ export async function executeCommentsHarvestOperation({ profileId, params = {}, 
       });
     }
     progress('focus_comment_context_targets_read', {
+      commentContextAnchorOk: commentContextAnchor?.ok === true,
+      commentContextAnchorReason: commentContextAnchor?.reason || null,
+      commentContextAnchorElapsedMs: commentContextAnchor?.elapsed || 0,
       mode,
       commentTotalFound: Boolean(commentTotal?.found && commentTotal?.center),
       commentScrollFound: Boolean(commentScroll?.found && commentScroll?.center),
