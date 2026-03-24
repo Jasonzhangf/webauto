@@ -3,7 +3,7 @@ import minimist from 'minimist';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import {
   createWriteStream,
   existsSync,
@@ -126,12 +126,67 @@ async function terminatePidTree(pid) {
     await new Promise((resolve) => child.on('close', resolve));
     return { ok: !isPidAlive(target) };
   }
+
+  // POSIX: terminate child tree first, then parent.
+  try {
+    const child = spawn('pkill', ['-TERM', '-P', String(target)], { windowsHide: true });
+    await new Promise((resolve) => child.on('close', resolve));
+  } catch {}
+
   try { process.kill(target, 'SIGTERM'); } catch {}
-  await sleep(600);
+  await sleep(800);
   if (!isPidAlive(target)) return { ok: true };
+
+  try {
+    const child = spawn('pkill', ['-KILL', '-P', String(target)], { windowsHide: true });
+    await new Promise((resolve) => child.on('close', resolve));
+  } catch {}
   try { process.kill(target, 'SIGKILL'); } catch {}
-  await sleep(200);
+  await sleep(300);
+
+  if (isPidAlive(target)) {
+    try {
+      const child = spawn('kill', ['-9', String(target)], { windowsHide: true });
+      await new Promise((resolve) => child.on('close', resolve));
+    } catch {}
+    await sleep(120);
+  }
   return { ok: !isPidAlive(target) };
+}
+
+function findOrphanedWorkerPids(supervisedPids = []) {
+  if (process.platform === 'win32') return [];
+  try {
+    const ret = spawnSync('pgrep', ['-f', 'apps/webauto/entry/xhs-(unified|collect)\\.mjs'], {
+      encoding: 'utf8',
+      windowsHide: true,
+    });
+    const stdout = String(ret.stdout || '').trim();
+    if (!stdout) return [];
+    const supervised = new Set(
+      (Array.isArray(supervisedPids) ? supervisedPids : [])
+        .map((n) => Number(n))
+        .filter((n) => Number.isFinite(n) && n > 0),
+    );
+    return stdout
+      .split(/\r?\n/g)
+      .map((line) => Number(line.trim()))
+      .filter((pid) => Number.isFinite(pid) && pid > 0)
+      .filter((pid) => !supervised.has(pid));
+  } catch {
+    return [];
+  }
+}
+
+async function cleanupOrphanedWorkers(supervisedPids = []) {
+  const pids = findOrphanedWorkerPids(supervisedPids);
+  if (pids.length === 0) return { ok: true, cleaned: 0, pids: [] };
+  const results = [];
+  for (const pid of pids) {
+    const ret = await terminatePidTree(pid);
+    results.push({ pid, ok: !!ret?.ok, error: ret?.error || null });
+  }
+  return { ok: results.every((item) => item.ok), cleaned: results.filter((item) => item.ok).length, pids, results };
 }
 
 async function forceStopByPidFile() {
@@ -375,6 +430,13 @@ async function startDaemonServer() {
   const startTaskJob = async (params = {}) => {
     const args = Array.isArray(params.args) ? params.args : [];
     if (args.length === 0) return { ok: false, error: 'missing task args' };
+
+    // 提交前清理残留僵尸 worker 进程，防止 inputActionLock 等资源被占用
+    const runningPids = state.jobsOrder
+      .map((id) => state.jobs.get(id))
+      .filter((j) => j && j.status === 'running' && j.pid)
+      .map((j) => j.pid);
+    await cleanupOrphanedWorkers(runningPids);
 
     // 排他性控制：同一时间只允许一个任务运行
     const activeJobs = state.jobsOrder
@@ -622,12 +684,53 @@ async function startDaemonServer() {
   const heartbeatTimer = setInterval(updateHeartbeat, 5_000);
   heartbeatTimer.unref();
 
+  // 启动时清理残留僵尸进程
+  const reconcileJobProcessStates = () => {
+    let changed = 0;
+    for (const job of state.jobs.values()) {
+      if (job.status !== 'running' || !job.pid) continue;
+      if (isPidAlive(job.pid)) continue;
+      job.status = 'failed';
+      job.code = -1;
+      job.finishedAt = nowIso();
+      changed += 1;
+    }
+    if (changed > 0) updateHeartbeat();
+  };
+
+  // 启动时清理残留僵尸进程
+  cleanupOrphanedWorkers().then((result) => {
+    if (result.cleaned > 0) {
+      process.stdout.write(`[daemon] startup: cleaned ${result.cleaned} orphaned worker(s)\n`);
+    }
+  }).catch(() => {});
+
+  // 定期巡检：reconcile job process states + cleanup orphans
+  const housekeepingTimer = setInterval(() => {
+    reconcileJobProcessStates();
+    const runningPids = state.jobsOrder
+      .map((id) => state.jobs.get(id))
+      .filter((j) => j && j.status === 'running' && j.pid)
+      .map((j) => j.pid);
+    cleanupOrphanedWorkers(runningPids).catch(() => {});
+  }, 30_000);
+  housekeepingTimer.unref();
+
   process.on('SIGINT', () => {
     try { server.close(); } catch {}
     cleanupRuntimeFiles();
     process.exit(0);
   });
   process.on('SIGTERM', () => {
+    // 关闭前清理所有 running job 的进程
+    for (const job of state.jobs.values()) {
+      if (job.status !== 'running' || !job.pid) continue;
+      terminatePidTree(job.pid).then(() => {}).catch(() => {});
+      job.status = 'stopped';
+      job.code = -15;
+      job.finishedAt = nowIso();
+    }
+    updateHeartbeat();
     try { server.close(); } catch {}
     cleanupRuntimeFiles();
     process.exit(0);
