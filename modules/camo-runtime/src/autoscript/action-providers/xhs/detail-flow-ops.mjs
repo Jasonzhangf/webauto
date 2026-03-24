@@ -60,8 +60,9 @@ async function settleOpenedDetailState(profileId, params = {}, pushTrace, expect
   const readDetailSnapshotImpl = typeof deps.readDetailSnapshot === 'function' ? deps.readDetailSnapshot : readDetailSnapshot;
   const pollMin = Math.max(120, Number(params.pollDelayMinMs ?? 160) || 160);
   const pollMax = Math.max(pollMin, Number(params.pollDelayMaxMs ?? 320) || 320);
-  const minObserveMs = Math.max(700, Math.min(2500, Number(params.postOpenDelayMinMs ?? 1200) || 1200));
-  const maxObserveMs = Math.max(minObserveMs, Math.min(6000, Number(params.postOpenDelayMaxMs ?? 3000) || 3000));
+  const minObserveMs = Math.max(0, Math.min(1200, Number(params.postOpenDelayMinMs ?? 400) || 400));
+  const maxObserveMs = Math.max(minObserveMs, Math.min(3000, Number(params.postOpenDelayMaxMs ?? 1800) || 1800));
+  const requiredStableReads = Math.max(1, Math.min(2, Number(params.postOpenStableReads ?? 1) || 1));
   const startedAt = Date.now();
   const deadline = startedAt + maxObserveMs;
   let stableReads = 0;
@@ -97,7 +98,7 @@ async function settleOpenedDetailState(profileId, params = {}, pushTrace, expect
       ? { ...snapshot, href, noteIdFromUrl: noteId }
       : { href, noteIdFromUrl: noteId };
     const elapsedMs = Date.now() - startedAt;
-    if (noteId && stableReads >= 2 && elapsedMs >= minObserveMs) {
+    if (noteId && stableReads >= requiredStableReads && elapsedMs >= minObserveMs) {
       break;
     }
     const waitMs = Math.floor(pollMin + Math.random() * Math.max(1, pollMax - pollMin + 1));
