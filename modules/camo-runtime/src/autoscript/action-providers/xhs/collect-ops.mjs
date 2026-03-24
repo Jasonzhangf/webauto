@@ -4,7 +4,7 @@ import { resolveSearchLockKey, randomBetween, resolveSearchResultTokenLink, norm
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { sleep, readLocation, pressKey, fillInputValue, sleepRandom, evaluateReadonly } from './dom-ops.mjs';
+import { sleep, readLocation, pressKey, fillInputValue, sleepRandom, evaluateReadonly, waitForAnchor } from './dom-ops.mjs';
 import { readSearchInput, readSearchViewportReady, readSearchCandidates } from './search-ops.mjs';
 import { buildSelectorCheck, ensureActiveSession, maybeSelector } from '../../../container/runtime-core/index.mjs';
 import { getDomSnapshotByProfile } from '../../../utils/browser-service.mjs';
@@ -647,7 +647,13 @@ export async function executeSubmitSearchOperation({ profileId, params = {}, con
         }
         const waitMs = randomBetween(searchReadyPollMinMs, searchReadyPollMaxMs);
         pushTrace({ kind: 'wait', stage: 'submit_wait_viewport_ready', attempt, waitMs, elapsedMs: Math.max(0, Date.now() - startedAt), visibleNoteCount });
-        await sleep(waitMs);
+        // 锚点等待：不是傻等，最长 waitMs，锚点出现立即返回
+        await waitForAnchor(profileId, {
+          selectors: ['#search-result .note-item:has(a.cover)', '.search-result-list', '.feeds-container .note-item:has(a.cover)'],
+          timeoutMs: waitMs,
+          intervalMs: Math.max(120, Math.min(300, Math.floor(waitMs / 2))),
+          description: 'submit_search_wait_ready_anchor',
+        });
       }
       return { ready: false, readySelector: null, visibleNoteCount: 0, elapsedMs: searchReadyTimeoutMs, href: String(lastSnapshot?.href || ''), lastSnapshot };
     };
