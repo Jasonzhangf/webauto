@@ -444,6 +444,31 @@ export async function handleCollectAnchorEmpty({
 }
 
 
+
+/**
+ * waitCollectSettle - 锚点驱动的收集阶段等待
+ * 用于 collect 阶段滚动后的 DOM 稳定等待，替代 waitSearchReadyOnce（后者依赖 submit_search 作用域变量）。
+ * 最大等待时间内轮询锚点，锚点出现立即返回。
+ */
+async function waitCollectSettle(profileId, options = {}) {
+  const {
+    timeoutMs = 3000,
+    intervalMs = 200,
+    description = 'collect_settle',
+  } = options;
+  return waitForAnchor(profileId, {
+    selectors: [
+      '.feeds-container .note-item:has(a.cover)',
+      '.search-result-list .note-item:has(a.cover)',
+      '.note-item:has(a.cover)',
+    ],
+    timeoutMs,
+    intervalMs,
+    description,
+  });
+}
+
+
 async function readCandidateWindow(profileId, index) {
   const data = await readSearchCandidates(profileId);
   const rows = Array.isArray(data?.rows) ? data.rows : [];
@@ -529,6 +554,7 @@ export async function executeSubmitSearchOperation({ profileId, params = {}, con
     const searchReadyRetryCount = Math.max(1, Number(params.searchReadyRetryCount ?? 3) || 3);
 
 
+    const submitSearchPhaseStart = Date.now();
     const guardBeforeInput = await assertNoGuard('submit_search_before_input');
     if (guardBeforeInput) return guardBeforeInput;
 
@@ -537,11 +563,13 @@ export async function executeSubmitSearchOperation({ profileId, params = {}, con
       throw new Error('SEARCH_INPUT_NOT_FOUND');
     }
 
+    const tFillPhase = Date.now();
     pushTrace({ kind: 'fill_start', stage: 'submit_search', target: 'search_input' });
     let currentInput = input;
     let currentValue = String(currentInput?.value || '');
     if (keyword) {
-      await sleepRandomImpl(actionDelayMinMs, actionDelayMaxMs, pushTrace, 'submit_pre_fill');
+      // 锚点等待：填充前等待输入框就绪（最大 actionDelayMaxMs，出现即返回）
+      await waitForAnchor(profileId, { selectors: ['#search-input', 'input.search-input'], timeoutMs: actionDelayMaxMs, intervalMs: 200, description: 'submit_pre_fill_anchor' });
       let fillResult;
       try {
         fillResult = await fillInputValue(
@@ -567,7 +595,8 @@ export async function executeSubmitSearchOperation({ profileId, params = {}, con
         value: fillResult.value,
       });
 
-      await sleepRandomImpl(actionDelayMinMs, actionDelayMaxMs, pushTrace, 'submit_after_fill');
+      // 锚点等待：填充后等待输入框稳定（最大 actionDelayMaxMs，出现即返回）
+      await waitForAnchor(profileId, { selectors: ['#search-input', 'input.search-input'], timeoutMs: actionDelayMaxMs, intervalMs: 200, description: 'submit_after_fill_anchor' });
       currentInput = await readSearchInputImpl(profileId);
       if (!currentInput || currentInput.ok !== true) {
         return {
@@ -591,9 +620,11 @@ export async function executeSubmitSearchOperation({ profileId, params = {}, con
       }
     }
 
+    const tVerifyPhase = Date.now();
     const guardBeforeSubmit = await assertNoGuard('submit_search_before_submit');
     if (guardBeforeSubmit) return guardBeforeSubmit;
 
+    const tSubmitPhase = Date.now();
     const beforeUrl = await readLocationImpl(profileId);
     let via = method;
     // 单一真源：只使用 Enter 提交搜索
@@ -660,6 +691,7 @@ export async function executeSubmitSearchOperation({ profileId, params = {}, con
 
     await triggerSubmitOnce(1);
     const readyResult = await waitSearchReadyOnce(1);
+    pushTrace({ kind: 'elapsed', stage: 'submit_search', phase: 'submit_and_wait', elapsedMs: Date.now() - tSubmitPhase });
     if (readyResult.guardResult) return readyResult.guardResult;
     if (!readyResult.ready) {
       for (let retry = 2; retry <= searchReadyRetryCount; retry += 1) {
@@ -711,6 +743,7 @@ export async function executeSubmitSearchOperation({ profileId, params = {}, con
     metrics.searchCount = Math.max(0, Number(metrics.searchCount || 0) || 0) + 1;
     metrics.lastSearchAt = new Date().toISOString();
 
+          totalElapsedMs: Date.now() - submitSearchPhaseStart,
     emitActionTrace(context, actionTrace, { stage: 'xhs_submit_search' });
     return { ok: true, code: 'OPERATION_DONE', message: 'xhs_submit_search done', data: { keyword: keyword || null, method: via, beforeUrl, afterUrl, searchReady: readyResult.ready, readySelector: readyResult.readySelector || null, visibleNoteCount: readyResult.visibleNoteCount, elapsedMs: readyResult.elapsedMs, searchCount: metrics.searchCount, indexWindowBefore: windowBefore, indexWindowAfter: windowAfter } };
   }, { timeoutMs: lockTimeoutMs }).catch((error) => {
@@ -835,14 +868,14 @@ export async function executeCollectLinksOperation({ profileId, params = {}, con
     if (state.collectScrollRollbackNeeded) {
       const before = await readSearchViewportReady(profileId).catch(() => null);
       await pressKey(profileId, 'PageUp');
-      await waitSearchReadyOnce(1);
+      await waitCollectSettle(profileId, { timeoutMs: 3000, description: 'collect_scroll_settle' });
       const after = await readSearchViewportReady(profileId).catch(() => null);
       state.collectScrollRollbackNeeded = false;
       return { before, after };
     }
     const before = await readSearchViewportReady(profileId).catch(() => null);
     await pressKey(profileId, 'PageDown');
-    await waitSearchReadyOnce(1);
+    await waitCollectSettle(profileId, { timeoutMs: 3000, description: 'collect_scroll_settle' });
     const after = await readSearchViewportReady(profileId).catch(() => null);
     return { before, after };
   };
