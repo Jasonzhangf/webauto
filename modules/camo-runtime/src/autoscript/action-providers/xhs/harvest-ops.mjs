@@ -1263,18 +1263,32 @@ export async function executeCommentsHarvestOperation({ profileId, params = {}, 
     };
   };
   const runExpandRepliesPass = async ({ phase = 'initial', round = 0 } = {}) => {
-    const passResult = await executeExpandRepliesOperation({
-      profileId,
-      context: {
-        ...context,
-        event: { count: 12, elements: [] },
-      },
-    }).catch((error) => ({
-      ok: false,
-      code: 'EXPAND_REPLIES_FAILED',
-      message: error?.message || 'expand replies failed',
-      data: null,
-    }));
+    progress('expand_replies_pass_start', { phase, round, timeoutMs: expandPassTimeoutMs });
+    let timeoutFired = false;
+    const timeoutResult = sleepImpl(expandPassTimeoutMs).then(() => {
+      timeoutFired = true;
+      return {
+        ok: false,
+        code: 'EXPAND_REPLIES_TIMEOUT',
+        message: `expand replies exceeded ${expandPassTimeoutMs}ms`,
+        data: { phase, round, timeoutMs: expandPassTimeoutMs },
+      };
+    });
+    const passResult = await Promise.race([
+      executeExpandRepliesOperation({
+        profileId,
+        context: {
+          ...context,
+          event: { count: 12, elements: [] },
+        },
+      }).catch((error) => ({
+        ok: false,
+        code: 'EXPAND_REPLIES_FAILED',
+        message: error?.message || 'expand replies failed',
+        data: null,
+      })),
+      timeoutResult,
+    ]);
     if (state.lastExpandReplies && typeof state.lastExpandReplies === 'object') {
       mergeExpandRepliesAggregate(expandRepliesAggregate, state.lastExpandReplies);
     }
@@ -1283,6 +1297,7 @@ export async function executeCommentsHarvestOperation({ profileId, params = {}, 
       round,
       ok: passResult?.ok === true || passResult?.code === 'EXPAND_REPLIES_NO_TARGETS',
       code: passResult?.code || null,
+      timedOut: timeoutFired,
       expanded: Math.max(0, Number(passResult?.data?.expanded ?? state.lastExpandReplies?.clicks ?? 0) || 0),
       visibleMax: Math.max(0, Number(passResult?.data?.visibleMax ?? state.lastExpandReplies?.visibleMax ?? 0) || 0),
       clicksTotal: expandRepliesAggregate.clicks,
@@ -1340,6 +1355,7 @@ export async function executeCommentsHarvestOperation({ profileId, params = {}, 
     Number(params.stagnationExitRounds ?? (recoveryNoProgressRounds + maxRecoveries + 2)) || (recoveryNoProgressRounds + maxRecoveries + 2),
   );
   const noChangeTimeoutMs = Math.max(30000, Number(params.noChangeTimeoutMs ?? 30000) || 30000);
+  const expandPassTimeoutMs = Math.max(6000, Number(params.expandPassTimeoutMs ?? 18000) || 18000);
   const refocusRetryDelayMs = Math.max(800, Number(params.refocusRetryDelayMs ?? 1200) || 1200);
 
   const makeRowKey = (row) => {
