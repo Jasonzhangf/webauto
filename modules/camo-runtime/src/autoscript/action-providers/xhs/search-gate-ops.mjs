@@ -459,7 +459,17 @@ export async function executeWaitSearchPermitOperation({ profileId, params = {},
       }
       if (error?.code === 'SEARCH_GATE_UNREACHABLE') {
         pushTrace({ kind: 'permit', stage: 'wait_search_permit', ok: false, code: 'SEARCH_GATE_UNREACHABLE', error: 'Gate unreachable - will retry after backoff', attempt: attempts, gateUnreachableRetry: true });
-        const backoffMs = Math.min(4000 * Math.pow(1.3, Math.min(attempts - 1, 10)), 45_000);
+        // After 3 retries, allow search to proceed (gate is optional/degradable)
+        if (attempts >= 3) {
+          emitActionTrace(context, actionTrace, { stage: 'xhs_wait_search_permit' });
+          return {
+            ok: true,
+            code: 'PERMIT_GRANTED_GATE_UNREACHABLE',
+            message: 'search permit granted (gate unreachable, proceeding without gate)',
+            data: { attempts, gateUnreachable: true },
+          };
+        }
+        const backoffMs = Math.min(3000 * Math.pow(1.3, Math.min(attempts - 1, 5)), 15_000);
         await new Promise((resolve) => setTimeout(resolve, backoffMs));
         continue;
       }

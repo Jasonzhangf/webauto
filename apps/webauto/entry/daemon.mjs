@@ -120,6 +120,12 @@ function isPidAlive(pid) {
   }
 }
 
+function logDaemonEvent(event, payload = {}) {
+  try {
+    process.stdout.write(`[daemon] ${event} ${JSON.stringify(payload)}\n`);
+  } catch {}
+}
+
 async function terminatePidTree(pid) {
   const target = Number(pid || 0);
   if (!Number.isFinite(target) || target <= 0) return { ok: false, error: 'invalid_pid' };
@@ -156,7 +162,7 @@ async function terminatePidTree(pid) {
   return { ok: !isPidAlive(target) };
 }
 
-function findOrphanedWorkerPids(supervisedPids = []) {
+function findOrphanedWorkerPids(supervisedPids = [], excludedPids = []) {
   if (process.platform === 'win32') return [];
   try {
     const ret = spawnSync('pgrep', ['-f', 'apps/webauto/entry/xhs-(unified|collect)\\.mjs'], {
@@ -170,25 +176,39 @@ function findOrphanedWorkerPids(supervisedPids = []) {
         .map((n) => Number(n))
         .filter((n) => Number.isFinite(n) && n > 0),
     );
+    const excluded = new Set(
+      (Array.isArray(excludedPids) ? excludedPids : [])
+        .map((n) => Number(n))
+        .filter((n) => Number.isFinite(n) && n > 0),
+    );
+    excluded.add(Number(process.pid || 0));
     return stdout
       .split(/\r?\n/g)
       .map((line) => Number(line.trim()))
       .filter((pid) => Number.isFinite(pid) && pid > 0)
-      .filter((pid) => !supervised.has(pid));
+      .filter((pid) => !supervised.has(pid))
+      .filter((pid) => !excluded.has(pid));
   } catch {
     return [];
   }
 }
 
-async function cleanupOrphanedWorkers(supervisedPids = []) {
-  const pids = findOrphanedWorkerPids(supervisedPids);
+async function cleanupOrphanedWorkers(supervisedPids = [], excludedPids = []) {
+  const pids = findOrphanedWorkerPids(supervisedPids, excludedPids);
   if (pids.length === 0) return { ok: true, cleaned: 0, pids: [] };
   const results = [];
   for (const pid of pids) {
     const ret = await terminatePidTree(pid);
     results.push({ pid, ok: !!ret?.ok, error: ret?.error || null });
   }
-  return { ok: results.every((item) => item.ok), cleaned: results.filter((item) => item.ok).length, pids, results };
+  const summary = {
+    ok: results.every((item) => item.ok),
+    cleaned: results.filter((item) => item.ok).length,
+    pids,
+    results,
+  };
+  logDaemonEvent('orphan_cleanup', summary);
+  return summary;
 }
 
 async function forceStopByPidFile() {
@@ -343,6 +363,7 @@ async function startDaemonServer() {
     pid: job.pid || null,
     status: job.status,
     code: job.code ?? null,
+    exitSignal: job.exitSignal || null,
     startedAt: job.startedAt || null,
     finishedAt: job.finishedAt || null,
     logPath: job.logPath || null,
@@ -359,6 +380,7 @@ async function startDaemonServer() {
         finishedAt: job.finishedAt || null,
         pid: job.pid || null,
         code: job.code ?? null,
+        exitSignal: job.exitSignal || null,
       }));
     const workers = state.workersOrder
       .slice(-50)
@@ -507,6 +529,7 @@ async function startDaemonServer() {
       pid: Number(child.pid || 0) || null,
       status: 'running',
       code: null,
+      exitSignal: null,
       startedAt: nowIso(),
       finishedAt: null,
       logPath,
@@ -517,12 +540,27 @@ async function startDaemonServer() {
     child.stdout.on('data', (chunk) => logStream.write(chunk));
     child.stderr.on('data', (chunk) => logStream.write(chunk));
 
-    child.on('close', (code) => {
-      job.status = code === 0 ? 'completed' : 'failed';
-      job.code = code;
-      job.finishedAt = nowIso();
+    child.on('close', (code, signal) => {
+      // If already marked stopped by task.stop/shutdown, keep stopped state.
+      if (job.status === 'stopped') {
+        job.code = job.code ?? (code ?? -15);
+        job.exitSignal = signal || job.exitSignal || null;
+        job.finishedAt = job.finishedAt || nowIso();
+      } else {
+        job.status = code === 0 ? 'completed' : 'failed';
+        job.code = code;
+        job.exitSignal = signal || null;
+        job.finishedAt = nowIso();
+      }
       logStream.end();
       if (worker) markWorkerStopped(worker.id, 'worker_exit', { status: job.status });
+      logDaemonEvent('job_close', {
+        jobId: job.id,
+        pid: job.pid,
+        status: job.status,
+        code: job.code,
+        signal: job.exitSignal,
+      });
       updateHeartbeat();
     });
 
@@ -653,7 +691,9 @@ async function startDaemonServer() {
       if (!ret?.ok) return { ok: false, error: 'task_stop_failed', job: summarizeJob(job) };
       job.status = 'stopped';
       job.code = -15;
+      job.exitSignal = 'SIGTERM';
       job.finishedAt = nowIso();
+      logDaemonEvent('task_stop', { jobId: job.id, pid: job.pid, ok: true });
       updateHeartbeat();
       return { ok: true, stopped: true, job: summarizeJob(job) };
     }
@@ -737,36 +777,30 @@ async function startDaemonServer() {
     }
   }).catch(() => {});
 
-  // 定期巡检：reconcile job process states + cleanup orphans
+  // 定期巡检：仅 reconcile，不执行自动 orphan kill（避免误杀 running job）
   const housekeepingTimer = setInterval(() => {
     reconcileJobProcessStates();
-    const runningPids = state.jobsOrder
-      .map((id) => state.jobs.get(id))
-      .filter((j) => j && j.status === 'running' && j.pid)
-      .map((j) => j.pid);
-    cleanupOrphanedWorkers(runningPids).catch(() => {});
   }, 30_000);
   housekeepingTimer.unref();
 
-  process.on('SIGINT', () => {
-    try { server.close(); } catch {}
-    cleanupRuntimeFiles();
-    process.exit(0);
-  });
-  process.on('SIGTERM', () => {
+  const shutdownDaemon = () => {
     // 关闭前清理所有 running job 的进程
     for (const job of state.jobs.values()) {
       if (job.status !== 'running' || !job.pid) continue;
       terminatePidTree(job.pid).then(() => {}).catch(() => {});
       job.status = 'stopped';
       job.code = -15;
+      job.exitSignal = 'SIGTERM';
       job.finishedAt = nowIso();
     }
     updateHeartbeat();
     try { server.close(); } catch {}
     cleanupRuntimeFiles();
     process.exit(0);
-  });
+  };
+
+  process.on('SIGINT', shutdownDaemon);
+  process.on('SIGTERM', shutdownDaemon);
 }
 
 async function ensureDaemonStarted(timeoutMs = 15_000, options = {}) {

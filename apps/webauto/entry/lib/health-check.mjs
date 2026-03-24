@@ -171,8 +171,11 @@ export async function performHealthCheck(options = {}) {
   }
 
   // 3. 输入操作响应（关键：验证无死锁）
-  if (!skipInputTest && checks.browserServiceSession.ok && profileId) {
-    checks.inputResponsiveness = await checkInputResponsiveness(profileId);
+  const resolvedProfileId = profileId
+    || (checks.browserServiceSession?.sessions?.[0]?.profileId)
+    || null;
+  if (!skipInputTest && checks.browserServiceSession.ok && resolvedProfileId) {
+    checks.inputResponsiveness = await checkInputResponsiveness(resolvedProfileId);
   } else if (skipInputTest) {
     checks.inputResponsiveness = { ok: true, skipped: true, reason: 'skipInputTest' };
   } else {

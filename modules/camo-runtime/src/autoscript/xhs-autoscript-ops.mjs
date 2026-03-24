@@ -61,6 +61,7 @@ export function buildXhsSearchOperations(options) {
       params: {
         key: profileId,
         keyword,
+        denyOnConsecutiveSame: false,
       },
       trigger: 'startup',
       dependsOn: ['goto_home'],
