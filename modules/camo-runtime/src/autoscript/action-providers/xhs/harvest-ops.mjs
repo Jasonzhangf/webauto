@@ -2421,15 +2421,15 @@ export async function executeExpandRepliesOperation({ profileId, context = {} })
   const textsSeen = new Set(initialCandidates.map((target) => String(target.text || '').trim()).filter(Boolean));
   const clickTimeline = [];
 
+  const initialAnchor = await waitForAnchor(profileId, {
+    selectors: ['.comment-item', '.comments-container', '.note-scroller'],
+    timeoutMs: 1200,
+    intervalMs: 120,
+    description: 'expand_replies:wait_initial_context',
+  });
+
   let expanded = 0;
   for (let step = 1; step <= maxExpand; step += 1) {
-    // 锚点等待：确保评论容器稳定后再查找展开回复按钮（不嵌套 evaluate）
-    await waitForAnchor(profileId, {
-      selectors: ['.comment-item', '.comments-container', '.note-scroller'],
-      timeoutMs: 4000,
-      intervalMs: 300,
-      description: 'expand_replies:wait_comment_context_stable',
-    });
     const liveTargets = await readExpandReplyTargetsImpl(profileId).catch(() => null);
     const liveCandidates = normalizeTargets(Array.isArray(liveTargets?.targets)
       ? liveTargets.targets.map((node) => ({
@@ -2464,6 +2464,11 @@ export async function executeExpandRepliesOperation({ profileId, context = {} })
         textsSample: Array.from(textsSeen).slice(0, 20),
         clickTimeline,
         exhaustedTargets: true,
+        anchorWait: {
+          initialOk: initialAnchor?.ok === true,
+          initialReason: initialAnchor?.reason || null,
+          initialElapsedMs: Number(initialAnchor?.elapsed || 0),
+        },
       };
       if (expanded === 0) {
         return {
@@ -2492,11 +2497,11 @@ export async function executeExpandRepliesOperation({ profileId, context = {} })
     pushTrace({ kind: 'click', stage: 'expand_replies', text: target.text.slice(0, 60), center: target.center });
     await sleepImpl(350);
     expanded += 1;
-    // 锚点等待：点击展开后短暂等待 DOM 更新
-    await waitForAnchor(profileId, {
-      selectors: ['.comment-item'],
-      timeoutMs: 2500,
-      intervalMs: 200,
+    // 锚点等待：点击后等待评论容器稳定（最大 900ms，出现即返回）
+    const afterClickAnchor = await waitForAnchor(profileId, {
+      selectors: ['.comment-item', '.note-scroller'],
+      timeoutMs: 900,
+      intervalMs: 120,
       description: 'expand_replies:wait_after_expand_click',
     });
     const afterTargets = await readExpandReplyTargetsImpl(profileId).catch(() => null);
@@ -2521,6 +2526,9 @@ export async function executeExpandRepliesOperation({ profileId, context = {} })
       text: String(target.text || '').slice(0, 120),
       beforeVisible,
       afterVisible: afterCandidates.length,
+      afterClickAnchorOk: afterClickAnchor?.ok === true,
+      afterClickAnchorReason: afterClickAnchor?.reason || null,
+      afterClickAnchorElapsedMs: Number(afterClickAnchor?.elapsed || 0),
     });
   }
 
@@ -2536,6 +2544,11 @@ export async function executeExpandRepliesOperation({ profileId, context = {} })
     textsSample: Array.from(textsSeen).slice(0, 20),
     clickTimeline,
     exhaustedTargets: expanded < maxExpand,
+    anchorWait: {
+      initialOk: initialAnchor?.ok === true,
+      initialReason: initialAnchor?.reason || null,
+      initialElapsedMs: Number(initialAnchor?.elapsed || 0),
+    },
   };
 
   emitActionTrace(context, actionTrace, { stage: 'xhs_expand_replies' });
