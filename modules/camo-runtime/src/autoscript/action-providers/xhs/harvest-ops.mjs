@@ -1249,7 +1249,7 @@ export async function executeCommentsHarvestOperation({ profileId, params = {}, 
   }
   let commentScroll = focusResult?.scrollTarget || null;
   const expandRepliesAggregate = createExpandRepliesAggregate(state.currentNoteId || null);
-  const expandPassTimeoutMs = Math.max(6000, Number(params.expandPassTimeoutMs ?? 18000) || 18000);
+  const expandPassTimeoutMs = Math.max(5000, Number(params.expandPassTimeoutMs ?? 8000) || 8000);
   const reanchorAfterExpandPass = async ({ phase = 'initial', round = 0, passResult = null } = {}) => {
     const expandedCount = Math.max(0, Number(passResult?.data?.expanded ?? 0) || 0);
     if (expandedCount <= 0) return { ok: true, reanchored: false };

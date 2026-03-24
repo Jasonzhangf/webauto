@@ -367,12 +367,13 @@ export async function scrollBySelector(profileId, selector, options = {}) {
       }
     : target;
   if (options.highlight !== false) {
-    await highlightVisualTarget(profileId, focusTarget, {
+    // Fire-and-forget: highlight is cosmetic (red border flash), don't block scrolling
+    highlightVisualTarget(profileId, focusTarget, {
       channel: 'xhs-scroll-anchor',
       state: 'focus',
       label: `scroll ${direction}`,
       duration: 1800,
-    });
+    }).catch(() => { /* ignore highlight errors during scroll */ });
   }
   const focusClickTimeoutMs = Math.max(800, Number(options.focusClickTimeoutMs ?? options.clickTimeoutMs ?? 5000) || 5000);
   if (options.skipFocusClick !== true) {
