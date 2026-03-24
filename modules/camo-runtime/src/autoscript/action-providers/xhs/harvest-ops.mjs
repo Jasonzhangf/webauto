@@ -7,6 +7,8 @@ import { consumeTabBudget } from './tab-state.mjs';
 import { markDetailSlotProgress, readDetailSlotState, writeDetailSlotState } from './detail-slot-state.mjs';
 import { resolveXhsOutputContext, readJsonlRows, mergeCommentsJsonl, writeCommentsMd, writeContentMarkdown, appendLikeStateRows, writeLikeSummary } from './persistence.mjs';
 import { clickPoint, sleep, clearAndType, pressKey, scrollBySelector, highlightVisualTarget, clearVisualHighlight, readLocation, waitForAnchor } from './dom-ops.mjs';
+import path from 'node:path';
+import { captureScreenshotToFile } from './diagnostic-utils.mjs';
 
 const ALLOWED_COMMENT_SCROLL_SELECTORS = new Set(['.comments-container', '.comment-list', '.comments-el', '.note-scroller']);
 
@@ -524,6 +526,27 @@ async function processVisibleCommentLikes({ profileId, state, params, current, s
     await highlightStep('xhs-detail-comment-like', target, 'processed', 'comment like', 3200);
     // 锚点等待：点赞后等待 DOM 稳定（最大 800ms，出现即返回）
     await waitForAnchor(profileId, { selectors: ['.comment-item', '.note-scroller', '.content-container'], timeoutMs: 5000, intervalMs: 300, description: 'inline_like_post_click_settle' });
+    // 点赞后截图留存证据
+    try {
+      const likeKeyword = String(params.keyword || state.keyword || 'unknown').trim();
+      const likeScreenshotDir = path.join(
+        process.env.HOME || process.env.USERPROFILE || '/tmp',
+        '.webauto', 'download', 'xiaohongshu', 'debug', likeKeyword, 'like-screenshots',
+      );
+      const ts = new Date().toISOString().replace(/[:.]/g, '-');
+      const ssPath = path.join(likeScreenshotDir, `like_${boundNoteId || 'unknown'}_idx${idx}_${ts}.png`);
+      const saved = await captureScreenshotToFile({ profileId, filePath: ssPath }).catch(() => null);
+      if (saved) {
+        emitOperationProgress(context, {
+          kind: 'like_screenshot',
+          stage: 'inline_comment_like',
+          index: idx,
+          screenshotPath: saved,
+          noteId: boundNoteId,
+          commentPreview: String(row?.content || '').slice(0, 80),
+        });
+      }
+    } catch { /* screenshot is auxiliary, never block */ }
     const postLikeDetailState = await readDetailState(profileId).catch(() => null);
     const postLikeDetail = await readDetailSnapshot(profileId).catch(() => null);
     emitOperationProgress(context, {
