@@ -12,23 +12,35 @@ node scripts/test/webauto-smoke.mjs
 
 ## 覆盖范围
 
-单一流水线，按顺序检查 XHS 脚本链路所需的全部能力：
+单一流水线，4 个阶段按顺序检查：
 
-1. **模块可加载**
-   - dom-ops / comments-ops / harvest-ops / detail-flow-ops / diagnostic-utils / xhs-unified-options
-2. **Camo 运行时连通性**
-   - `:7704/health`
-   - `evaluate` 可执行
-   - `screenshot` 可执行
-   - `mouse:click` / `keyboard:press`
-3. **XHS 页面上下文**
-   - 当前是否在 xiaohongshu 域
-   - feed/detail 页面上下文
-   - `.comment-item` / `.like-wrapper` / `.like-lottie`
-   - like-target 检测（`.like-wrapper > .like-lottie`）
-   - liked 状态读取
+### Phase 0 — Environment & Dependencies
+- Node 版本（>=20）
+- @web-auto/camo 版本 + engine 兼容性 + bin 文件存在
+- webauto 版本
+- 关键运行时 deps（ajv / iconv-lite / minimist）
+- camo-runtime vendor 目录存在
+- XHS action provider 文件存在（dom-ops / comments-ops / harvest-ops / detail-flow-ops / diagnostic-utils）
+
+### Phase 1 — Camo Runtime Connectivity
+- `:7704/health`
+- `evaluate` 命令
+- `screenshot` 命令
+- `mouse:click` 命令
+- `keyboard:press` 命令
+
+### Phase 2 — XHS Module Load
+- 动态 import 6 个核心 XHS 模块（无报错即通过）
+
+### Phase 3 — XHS Page Context & Selectors
+- 当前是否在 xiaohongshu 域
+- feed/detail 页面上下文
+- `.comment-item` / `.like-wrapper` / `.like-lottie`
+- like-target 检测（`.like-wrapper > .like-lottie`）
+- liked 状态读取
 
 ## 判定规则
 
 - `FAIL=0` 即通过
-- `SKIP` 允许存在（例如当前页面无评论）
+- `SKIP` 允许存在（例如当前页面无评论、非 xhs 页面）
+- Phase 1 失败时 Phase 3 自动 skip

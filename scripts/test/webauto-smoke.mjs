@@ -2,9 +2,11 @@
 /**
  * WebAuto XHS 脚本最小自测（单一真源）
  *
- * 说明：
- * - 只保留 XHS 脚本所需能力自测
- * - 移除 XHS 脚本之外的泛化测试
+ * 覆盖：
+ *   Phase 0 - 环境依赖（node版本、camo版本、关键deps、vendor文件）
+ *   Phase 1 - Camo 运行时连通性（health、evaluate/screenshot/click/press）
+ *   Phase 2 - XHS 模块加载
+ *   Phase 3 - XHS 页面上下文 & like-target selector 链
  *
  * 用法：
  *   node scripts/test/webauto-smoke.mjs
@@ -12,6 +14,8 @@
  */
 import http from 'node:http';
 import path from 'node:path';
+import fs from 'node:fs';
+import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -25,16 +29,93 @@ let skip = 0;
 
 function ok(name, detail = '') {
   pass += 1;
-  console.log(`  ✅ [xhs-script] ${name}${detail ? ` — ${detail}` : ''}`);
+  console.log(`  ✅ [${currentPhase}] ${name}${detail ? ` — ${detail}` : ''}`);
 }
 function bad(name, detail = '') {
   fail += 1;
-  console.log(`  ❌ [xhs-script] ${name}${detail ? ` — ${detail}` : ''}`);
+  console.log(`  ❌ [${currentPhase}] ${name}${detail ? ` — ${detail}` : ''}`);
 }
 function skipIt(name, reason = '') {
   skip += 1;
-  console.log(`  ⏭️  [xhs-script] ${name}${reason ? ` — ${reason}` : ''}`);
+  console.log(`  ⏭️  [${currentPhase}] ${name}${reason ? ` — ${reason}` : ''}`);
 }
+
+// ══════════════════════════════════════════
+// Phase 0: 环境依赖 & 版本
+// ══════════════════════════════════════════
+
+let currentPhase = 'env';
+
+function testEnvironment() {
+  console.log('\n📦 Environment & Dependencies');
+
+  const req = createRequire(import.meta.url);
+  const nodeVer = process.versions.node;
+  const nodeMajor = parseInt(nodeVer.split('.')[0], 10);
+  nodeMajor >= 20
+    ? ok('node version', nodeVer)
+    : bad('node version', `${nodeVer} (need >=20)`);
+
+  // @web-auto/camo
+  try {
+    const camoPkg = req(path.join(PROJECT_ROOT, 'node_modules/@web-auto/camo/package.json'));
+    const camoVer = camoPkg.version || 'unknown';
+    ok('@web-auto/camo', `v${camoVer}`);
+
+    const minNode = (camoPkg.engines?.node || '').match(/(\d+)/)?.[1];
+    if (minNode && nodeMajor < parseInt(minNode, 10)) {
+      bad('camo engine check', `node ${nodeVer} < required ${camoPkg.engines.node}`);
+    }
+
+    const bins = camoPkg.bin || {};
+    for (const [name, binPath] of Object.entries(bins)) {
+      const resolved = path.join(PROJECT_ROOT, 'node_modules/@web-auto/camo', binPath);
+      fs.existsSync(resolved)
+        ? ok(`camo bin/${name}`, binPath)
+        : bad(`camo bin/${name}`, `${binPath} missing`);
+    }
+  } catch (e) {
+    bad('@web-auto/camo', `load failed: ${String(e.message || e).slice(0, 80)}`);
+  }
+
+  // webauto
+  try {
+    const webautoPkg = req(path.join(PROJECT_ROOT, 'package.json'));
+    ok('webauto', `v${webautoPkg.version || 'unknown'}`);
+  } catch (e) {
+    bad('webauto', `package.json load failed: ${String(e.message || e).slice(0, 80)}`);
+  }
+
+  // key runtime deps
+  const criticalDeps = ['ajv', 'iconv-lite', 'minimist'];
+  for (const dep of criticalDeps) {
+    try {
+      const depPkg = req(path.join(PROJECT_ROOT, 'node_modules', dep, 'package.json'));
+      ok(`dep ${dep}`, `v${depPkg.version || 'ok'}`);
+    } catch {
+      bad(`dep ${dep}`, 'not installed');
+    }
+  }
+
+  // camo-runtime vendor
+  const vendorDir = path.join(PROJECT_ROOT, 'modules/camo-runtime/src/autoscript');
+  fs.existsSync(vendorDir)
+    ? ok('camo-runtime vendor', 'exists')
+    : bad('camo-runtime vendor', `${vendorDir} missing`);
+
+  // xhs action provider files
+  const xhsDir = path.join(vendorDir, 'action-providers/xhs');
+  const requiredFiles = ['dom-ops.mjs', 'comments-ops.mjs', 'harvest-ops.mjs', 'detail-flow-ops.mjs', 'diagnostic-utils.mjs'];
+  for (const f of requiredFiles) {
+    fs.existsSync(path.join(xhsDir, f))
+      ? ok(`xhs ${f}`, 'exists')
+      : bad(`xhs ${f}`, 'missing');
+  }
+}
+
+// ══════════════════════════════════════════
+// Phase 1: Camo runtime connectivity
+// ══════════════════════════════════════════
 
 async function httpGet(url, timeoutMs = 3000) {
   return new Promise((resolve) => {
@@ -96,7 +177,54 @@ async function callCamo(action, args = {}, timeoutMs = 8000) {
   });
 }
 
-async function loadXhsModules() {
+currentPhase = 'camo';
+
+async function testCamoRuntime() {
+  console.log('\n🔌 Camo Runtime');
+
+  const health = await httpGet('http://127.0.0.1:7704/health', 3000);
+  health.ok ? ok('health (:7704)') : bad('health (:7704)', health.body);
+
+  if (!health.ok) {
+    skipIt('evaluate', 'runtime unhealthy');
+    skipIt('screenshot', 'runtime unhealthy');
+    skipIt('mouse:click', 'runtime unhealthy');
+    skipIt('keyboard:press', 'runtime unhealthy');
+    return false;
+  }
+
+  const evalRes = await callCamo('evaluate', { profileId, script: '(() => 1 + 1)()' }, 5000);
+  evalRes.ok && evalRes.data?.result === 2
+    ? ok('evaluate', 'result=2')
+    : bad('evaluate', JSON.stringify(evalRes.data).slice(0, 80));
+
+  const ss = await callCamo('screenshot', { profileId }, 8000);
+  const base64 = String(ss.data?.data || ss.data?.result?.data || '');
+  if (ss.ok && base64.length > 0) {
+    const size = Buffer.from(base64, 'base64').length;
+    size > 1000 ? ok('screenshot', `${size} bytes`) : bad('screenshot', 'too small');
+  } else {
+    bad('screenshot', JSON.stringify(ss.data).slice(0, 80));
+  }
+
+  const click = await callCamo('mouse:click', { profileId, x: 1, y: 1, button: 'left', clicks: 1 }, 5000);
+  click.ok ? ok('mouse:click') : bad('mouse:click', JSON.stringify(click.data).slice(0, 80));
+
+  const key = await callCamo('keyboard:press', { profileId, key: 'Escape' }, 5000);
+  key.ok ? ok('keyboard:press') : bad('keyboard:press', JSON.stringify(key.data).slice(0, 80));
+
+  return true;
+}
+
+// ══════════════════════════════════════════
+// Phase 2: XHS module load
+// ══════════════════════════════════════════
+
+currentPhase = 'module';
+
+async function testModuleLoad() {
+  console.log('\n📦 XHS Module Load');
+
   const modules = [
     'modules/camo-runtime/src/autoscript/action-providers/xhs/dom-ops.mjs',
     'modules/camo-runtime/src/autoscript/action-providers/xhs/comments-ops.mjs',
@@ -109,50 +237,22 @@ async function loadXhsModules() {
   for (const rel of modules) {
     try {
       await import(`file://${path.resolve(PROJECT_ROOT, rel)}`);
-      ok(`module load: ${path.basename(rel)}`);
+      ok(`load ${path.basename(rel)}`);
     } catch (e) {
-      bad(`module load: ${path.basename(rel)}`, String(e?.message || e).slice(0, 80));
+      bad(`load ${path.basename(rel)}`, String(e?.message || e).slice(0, 80));
     }
   }
 }
 
-async function testXhsScript() {
-  console.log('\n📱 XHS Script Minimal Self-Test');
+// ══════════════════════════════════════════
+// Phase 3: XHS page context & selectors
+// ══════════════════════════════════════════
 
-  // 1) runtime health (XHS 脚本依赖)
-  const health = await httpGet('http://127.0.0.1:7704/health', 3000);
-  if (!health.ok) {
-    bad('camo runtime health (:7704)', health.body);
-    skipIt('后续 XHS 脚本能力', 'runtime unhealthy');
-    return;
-  }
-  ok('camo runtime health (:7704)');
+currentPhase = 'xhs';
 
-  // 2) XHS modules (XHS 脚本代码依赖)
-  await loadXhsModules();
+async function testXhsPageContext() {
+  console.log('\n📱 XHS Page Context & Selectors');
 
-  // 3) command channel + screenshot + input chain (XHS 操作链依赖)
-  const evalRes = await callCamo('evaluate', { profileId, script: '(() => 1 + 1)()' }, 5000);
-  evalRes.ok && evalRes.data?.result === 2
-    ? ok('evaluate command channel', 'result=2')
-    : bad('evaluate command channel', JSON.stringify(evalRes.data).slice(0, 80));
-
-  const ss = await callCamo('screenshot', { profileId }, 8000);
-  const base64 = String(ss.data?.data || ss.data?.result?.data || '');
-  if (ss.ok && base64.length > 0) {
-    const size = Buffer.from(base64, 'base64').length;
-    size > 1000 ? ok('screenshot command', `${size} bytes`) : bad('screenshot command', 'too small');
-  } else {
-    bad('screenshot command', JSON.stringify(ss.data).slice(0, 80));
-  }
-
-  const click = await callCamo('mouse:click', { profileId, x: 1, y: 1, button: 'left', clicks: 1 }, 5000);
-  click.ok ? ok('mouse:click command') : bad('mouse:click command', JSON.stringify(click.data).slice(0, 80));
-
-  const key = await callCamo('keyboard:press', { profileId, key: 'Escape' }, 5000);
-  key.ok ? ok('keyboard:press command') : bad('keyboard:press command', JSON.stringify(key.data).slice(0, 80));
-
-  // 4) 当前页面 XHS 上下文与 like-target 选择器链
   const page = await callCamo(
     'evaluate',
     {
@@ -177,7 +277,6 @@ async function testXhsScript() {
           likeTargetFound: !!target,
           likeTargetTag: target?.tagName || null,
           likeTargetClass: String(target?.className || ''),
-          likeWrapperClass: String(_lw?.className || ''),
           liked: /active|liked|selected|is-liked/.test(String(_lw?.className || '')),
           rect: rect ? {
             w: Math.round(rect.width || 0),
@@ -194,8 +293,8 @@ async function testXhsScript() {
   const d = page.data?.result || {};
   if (!d.onXhs) {
     skipIt('xhs host check', `host=${d.host || 'unknown'}`);
+    skipIt('xhs page context', 'not on xhs');
     skipIt('xhs selector chain', 'not on xhs');
-    skipIt('like-target detection', 'not on xhs');
     return;
   }
 
@@ -228,6 +327,10 @@ async function testXhsScript() {
   }
 }
 
+// ══════════════════════════════════════════
+// Main
+// ══════════════════════════════════════════
+
 async function main() {
   console.log('═══════════════════════════════════════════════');
   console.log('  WebAuto XHS Script Minimal Self-Test');
@@ -235,7 +338,22 @@ async function main() {
   console.log(`  profile: ${profileId}`);
   console.log(`  time:    ${new Date().toISOString()}`);
 
-  await testXhsScript();
+  // Phase 0: always runs (no camo needed)
+  testEnvironment();
+
+  // Phase 1: camo runtime (may skip later phases)
+  const camoOk = await testCamoRuntime();
+
+  // Phase 2: module load (no camo needed)
+  await testModuleLoad();
+
+  // Phase 3: page context (needs camo)
+  if (camoOk) {
+    await testXhsPageContext();
+  } else {
+    currentPhase = 'xhs';
+    skipIt('XHS page context', 'camo runtime unavailable');
+  }
 
   console.log('\n═══════════════════════════════════════════════');
   console.log(`  Results: ${pass} passed / ${fail} failed / ${skip} skipped / ${pass + fail + skip} total`);
