@@ -231,6 +231,7 @@ export function buildXhsFeedLikeOperations(options = {}) {
         likeIntervalMaxMs: options.likeIntervalMaxMs,
         maxFeedTabs: options.maxFeedTabs,
         maxScrolls: options.maxScrolls,
+        maxNoProgressScrolls: options.maxNoProgressScrolls,
       },
       trigger: 'search_result_item.exist',
       dependsOn: ['submit_search'],

@@ -121,7 +121,8 @@ export async function buildUnifiedOptions(argv, profileId, overrides = {}) {
   const likeIntervalMinMs = parseIntFlag(argv['like-interval-min'], 1000, 500);
   const likeIntervalMaxMs = parseIntFlag(argv['like-interval-max'], 5000, likeIntervalMinMs);
   const maxFeedTabs = parseIntFlag(argv['max-feed-tabs'], 5, 1);
-  const maxScrolls = parseIntFlag(argv['max-scrolls'], 5, 1);
+  const maxScrolls = parseIntFlag(argv['max-scrolls'], 80, 1);
+  const maxNoProgressScrolls = parseIntFlag(argv['max-no-progress-scrolls'], 3, 1);
   const outputRoot = String(argv['output-root'] || '').trim();
   const uiTriggerId = String(argv['ui-trigger-id'] || process.env.WEBAUTO_UI_TRIGGER_ID || '').trim();
   const taskMode = resolveTaskMode(argv, overrides);
@@ -273,6 +274,7 @@ export async function buildUnifiedOptions(argv, profileId, overrides = {}) {
     likeIntervalMaxMs,
     maxFeedTabs,
     maxScrolls,
+    maxNoProgressScrolls,
     replyText,
     stage,
     stageLinksEnabled,

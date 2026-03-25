@@ -143,7 +143,8 @@ export function resolveXhsUnifiedOptions(rawOptions = {}) {
   const likeIntervalMinMs = toPositiveInt(rawOptions.likeIntervalMinMs, 1000, 500);
   const likeIntervalMaxMs = toPositiveInt(rawOptions.likeIntervalMaxMs, 5000, likeIntervalMinMs);
   const maxFeedTabs = toPositiveInt(rawOptions.maxFeedTabs, 5, 1);
-  const maxScrolls = toPositiveInt(rawOptions.maxScrolls, 5, 1);
+  const maxScrolls = toPositiveInt(rawOptions.maxScrolls, 80, 1);
+  const maxNoProgressScrolls = toPositiveInt(rawOptions.maxNoProgressScrolls, 3, 1);
 
   const detailLoopEnabled = stageDetailEnabled || stageContentEnabled || stageLikeEnabled || stageReplyEnabled;
   const stageFeedLikeEnabled = stage === 'feed-like';
@@ -258,6 +259,7 @@ export function resolveXhsUnifiedOptions(rawOptions = {}) {
     likeIntervalMaxMs,
     maxFeedTabs,
     maxScrolls,
+    maxNoProgressScrolls,
     stageFeedLikeEnabled,
     feedLikeEnabled,
     replyText,
