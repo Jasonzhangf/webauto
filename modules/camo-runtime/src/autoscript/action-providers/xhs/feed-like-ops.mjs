@@ -211,8 +211,24 @@ async function executeFeedLikeClick({ profileId, candidate, pushTrace }) {
     return evaluateReadonly(profileId, script, { timeoutMs: 5000, onTimeout: 'return' }).catch(() => ({ ok: false, reason: 'eval_failed' }));
   };
 
+  // click 前重新确认 liked 状态（SCAN 和 click 之间可能有时间差）
+  const preClickCheck = await readCandidateLikedAfterClick();
+  if (preClickCheck?.ok === true && preClickCheck?.liked === true) {
+    pushTrace({
+      kind: 'click',
+      stage: 'feed_like',
+      noteId: candidate.noteId,
+      center: candidate.center,
+      selectorChanged: false,
+      preShot,
+      postShot: null,
+      postStatus: preClickCheck,
+      code: 'ALREADY_LIKED',
+    });
+    return { ok: false, code: 'ALREADY_LIKED', noteId: candidate.noteId, preShot };
+  }
+
   try {
-    // click 不加 timeout，按要求只看 selector 状态变化
     await clickPoint(profileId, candidate.center, { clicks: 1, timeoutMs: 10000 });
   } catch {
     // 点击超时或失败，跳过此候选，不阻塞主流程
@@ -472,6 +488,8 @@ export async function executeFeedLikeOperation({ profileId, params = {}, context
         noteId: candidate.noteId,
         screenshotPre: result.preShot || null,
         screenshotPost: result.postShot || null,
+        postStatus: result.postStatus || null,
+        postSelectorOk: result.postSelector?.ok || null,
         selectorChanged: result.selectorChanged === true,
         roundLiked,
         roundSkipped,
@@ -491,6 +509,8 @@ export async function executeFeedLikeOperation({ profileId, params = {}, context
         reason: result.code || 'unknown',
         screenshotPre: result.preShot || null,
         screenshotPost: result.postShot || null,
+        postStatus: result.postStatus || null,
+        postSelectorOk: result.postSelector?.ok || null,
       });
     }
   }
