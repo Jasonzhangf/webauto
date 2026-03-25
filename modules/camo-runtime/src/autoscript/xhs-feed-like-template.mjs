@@ -4,6 +4,7 @@ import {
   buildXhsGuardOperations,
   buildXhsSearchOperations,
   buildXhsFeedLikeOperations,
+  buildXhsTabPoolOperation,
 } from './xhs-autoscript-ops.mjs';
 
 export function buildXhsFeedLikeAutoscript(rawOptions = {}) {
@@ -12,9 +13,13 @@ export function buildXhsFeedLikeAutoscript(rawOptions = {}) {
     source: 'scripts/xiaohongshu/phase-feed-like.mjs',
   });
 
+  // feed-like 只在搜索结果页操作，不需要 acrossPages 验证和 tab pool
+  const searchOps = buildXhsSearchOperations({ ...options, detailLoopEnabled: false });
+  const filteredSearchOps = searchOps.filter(op => op.id !== 'verify_subscriptions_all_pages');
+
   const operations = [
     ...buildXhsBootstrapOperations(options),
-    ...buildXhsSearchOperations(options),
+    ...filteredSearchOps,
     ...buildXhsFeedLikeOperations(options),
     {
       id: 'finish_after_feed_like',
