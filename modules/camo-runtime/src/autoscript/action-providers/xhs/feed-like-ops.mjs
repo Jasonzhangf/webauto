@@ -191,7 +191,10 @@ async function executeFeedLikeClick({ profileId, candidate, pushTrace }) {
   // 小红书的 DOM: .note-item 内有 .like-wrapper.like-active 或 .like-lottie.like-active
   const noteId = String(candidate?.noteId || '').trim();
   const likeActiveSelectors = noteId
-    ? NOTE_LIKED_USE_SELECTORS.map((sel) => `.note-item:has(a.cover[href*="${noteId}"]) ${sel}`)
+    ? [
+        `.note-item a.cover[href*="${noteId}"] ~ .footer .like-wrapper svg.reds-icon.like-icon use[href="#liked"]`,
+        `.note-item a.cover[href*="${noteId}"] ~ .footer .like-wrapper svg.reds-icon.like-icon use[xlink\\:href="#liked"]`,
+      ]
     : [];
 
   // click 前用锚点检查是否已经 liked（避免重复点击）
