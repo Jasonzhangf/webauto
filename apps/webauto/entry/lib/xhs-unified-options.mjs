@@ -11,6 +11,7 @@ import {
 } from './xhs-unified-blocks.mjs';
 import { buildXhsUnifiedAutoscript } from '../../../../modules/camo-runtime/src/autoscript/xhs-unified-template.mjs';
 import { buildXhsCollectAutoscript } from '../../../../modules/camo-runtime/src/autoscript/xhs-collect-template.mjs';
+import { buildXhsFeedLikeAutoscript } from '../../../../modules/camo-runtime/src/autoscript/xhs-feed-like-template.mjs';
 import { buildXhsDetailAutoscript } from '../../../../modules/camo-runtime/src/autoscript/xhs-detail-template.mjs';
 
 function resolveSharedHarvestPath({ sharedHarvestPath, outputRoot, env, keyword }) {
@@ -115,6 +116,12 @@ export async function buildUnifiedOptions(argv, profileId, overrides = {}) {
   const matchKeywords = String(argv['match-keywords'] || keyword).trim();
   const likeKeywords = String(argv['like-keywords'] || '').trim();
   const replyText = String(argv['reply-text'] || '感谢分享，已关注').trim() || '感谢分享，已关注';
+  const keywords = String(argv.keywords || '').trim();
+  const maxLikesPerTab = parseIntFlag(argv['max-likes-per-tab'], 10, 1);
+  const likeIntervalMinMs = parseIntFlag(argv['like-interval-min'], 1000, 500);
+  const likeIntervalMaxMs = parseIntFlag(argv['like-interval-max'], 5000, likeIntervalMinMs);
+  const maxFeedTabs = parseIntFlag(argv['max-feed-tabs'], 5, 1);
+  const maxScrolls = parseIntFlag(argv['max-scrolls'], 5, 1);
   const outputRoot = String(argv['output-root'] || '').trim();
   const uiTriggerId = String(argv['ui-trigger-id'] || process.env.WEBAUTO_UI_TRIGGER_ID || '').trim();
   const taskMode = resolveTaskMode(argv, overrides);
@@ -260,6 +267,12 @@ export async function buildUnifiedOptions(argv, profileId, overrides = {}) {
     matchMinHits,
     matchKeywords,
     likeKeywords,
+    keywords,
+    maxLikesPerTab,
+    likeIntervalMinMs,
+    likeIntervalMaxMs,
+    maxFeedTabs,
+    maxScrolls,
     replyText,
     stage,
     stageLinksEnabled,
@@ -307,5 +320,6 @@ export function resolveAutoscriptBuilder(stage) {
   const normalized = String(stage || '').trim().toLowerCase();
   if (normalized === 'links') return buildXhsCollectAutoscript;
   if (normalized === 'detail') return buildXhsDetailAutoscript;
+  if (normalized === 'feed-like') return buildXhsFeedLikeAutoscript;
   return buildXhsUnifiedAutoscript;
 }

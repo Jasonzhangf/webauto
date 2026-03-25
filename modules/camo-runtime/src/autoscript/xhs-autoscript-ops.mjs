@@ -217,4 +217,36 @@ export function buildXhsGuardOperations(options = {}) {
   ];
 }
 
+export function buildXhsFeedLikeOperations(options = {}) {
+  return [
+    {
+      id: 'feed_like_round',
+      action: 'xhs_feed_like',
+      params: {
+        keyword: options.keyword,
+        keywords: options.keywords,
+        maxLikesPerRound: options.maxLikesPerTab,
+        maxLikesPerTab: options.maxLikesPerTab,
+        likeIntervalMinMs: options.likeIntervalMinMs,
+        likeIntervalMaxMs: options.likeIntervalMaxMs,
+        maxFeedTabs: options.maxFeedTabs,
+        maxScrolls: options.maxScrolls,
+      },
+      trigger: 'search_result_item.exist',
+      dependsOn: ['submit_search'],
+      once: true,
+      timeoutMs: 900000,
+      retry: { attempts: 1, backoffMs: 0 },
+      impact: 'script',
+      onFailure: 'stop_all',
+      validation: { mode: 'none' },
+      checkpoint: {
+        containerId: 'xiaohongshu_search.search_result_item',
+        targetCheckpoint: 'search_ready',
+        recovery: options.recovery,
+      },
+    },
+  ];
+}
+
 export { buildXhsDetailOperations };

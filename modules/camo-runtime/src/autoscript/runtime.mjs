@@ -405,6 +405,8 @@ export class AutoscriptRunner {
       'xhs_comment_match',
       'xhs_comment_like',
       'xhs_comment_reply',
+      'xhs_feed_like',
+      'xhs_feed_like_tab_switch',
       'xhs_close_detail',
     ].includes(action)) {
       return 45_000;

@@ -138,8 +138,16 @@ export function resolveXhsUnifiedOptions(rawOptions = {}) {
 
   const matchKeywords = splitCsv(rawOptions.matchKeywords || '');
   const likeKeywords = splitCsv(rawOptions.likeKeywords || '');
+  const keywords = splitCsv(rawOptions.keywords || '');
+  const maxLikesPerTab = toPositiveInt(rawOptions.maxLikesPerTab, 10, 1);
+  const likeIntervalMinMs = toPositiveInt(rawOptions.likeIntervalMinMs, 1000, 500);
+  const likeIntervalMaxMs = toPositiveInt(rawOptions.likeIntervalMaxMs, 5000, likeIntervalMinMs);
+  const maxFeedTabs = toPositiveInt(rawOptions.maxFeedTabs, 5, 1);
+  const maxScrolls = toPositiveInt(rawOptions.maxScrolls, 5, 1);
 
   const detailLoopEnabled = stageDetailEnabled || stageContentEnabled || stageLikeEnabled || stageReplyEnabled;
+  const stageFeedLikeEnabled = stage === 'feed-like';
+  const feedLikeEnabled = stageFeedLikeEnabled;
   const stageLinksEnabled = stageLinksRequested || detailLoopEnabled;
   const collectOpenLinksOnly = stageLinksEnabled;
   const detailOpenByLinks = toBoolean(rawOptions.detailOpenByLinks, stageLinksEnabled && detailLoopEnabled);
@@ -244,6 +252,14 @@ export function resolveXhsUnifiedOptions(rawOptions = {}) {
     matchMinHits,
     matchKeywords,
     likeKeywords,
+    keywords,
+    maxLikesPerTab,
+    likeIntervalMinMs,
+    likeIntervalMaxMs,
+    maxFeedTabs,
+    maxScrolls,
+    stageFeedLikeEnabled,
+    feedLikeEnabled,
     replyText,
     sharedHarvestPath,
     searchSerialKey,
