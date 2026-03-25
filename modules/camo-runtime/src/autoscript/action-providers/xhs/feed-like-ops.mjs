@@ -303,6 +303,7 @@ export async function executeFeedLikeOperation({ profileId, params = {}, context
   let scrollCount = state.feedLikeState.scrollCount || 0;
   let noProgressScrolls = 0;
   let rollbackCycles = 0;
+  let emptyScanRetries = 0;
 
   while (roundLiked < maxLikes) {
     // 扫描：失败直接退出（环境异常，继续无意义）
@@ -321,9 +322,30 @@ export async function executeFeedLikeOperation({ profileId, params = {}, context
         scrollCount,
         roundLiked,
         roundSkipped,
+        emptyScanRetries,
       });
+
+      // 搜索结果刚渲染时可能出现短暂空窗口：用锚点等待，不做固定 sleep
+      if (emptyScanRetries < 3) {
+        emptyScanRetries += 1;
+        await waitForAnchor(profileId, {
+          selectors: [
+            '.note-item:has(a.cover)',
+            '.note-item .like-lottie',
+            '.note-item .like-wrapper',
+            'svg.reds-icon.like-icon',
+          ],
+          timeoutMs: 3000,
+          intervalMs: 200,
+          description: 'feed_like_scan_empty_settle',
+        }).catch(() => null);
+        continue;
+      }
+
       break;
     }
+
+    emptyScanRetries = 0;
 
     const unliked = scan.candidates
       .map((c) => ({ ...c, keyword: params.keyword || state.keyword || 'unknown' }))
