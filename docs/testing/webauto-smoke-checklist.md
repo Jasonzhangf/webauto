@@ -60,3 +60,16 @@ node scripts/test/webauto-smoke.mjs --block xhs
 - 迁移验收：`FAIL=0`
 - 若 `SKIP>0`，需要确认是否是预期（如未启动 daemon）
 
+## 最新执行记录
+
+- 时间戳（用户提供）：
+  - `timeRef=now`
+  - `utc=2026-03-25T01:25:14.089Z`
+  - `local=2026-03-25 09:25:14.089 +08:00`
+  - `tz=Asia/Shanghai`
+  - `nowMs=1774401914089`
+  - `ntpOffsetMs=22`
+
+- 最近 smoke 结果：
+  - `node scripts/test/webauto-smoke.mjs`
+  - `33 passed / 0 failed / 4 skipped`
