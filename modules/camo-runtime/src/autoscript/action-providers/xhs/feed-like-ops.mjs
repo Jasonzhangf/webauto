@@ -11,8 +11,7 @@
 import { callAPI } from '../../../utils/browser-service.mjs';
 import { getProfileState } from './state.mjs';
 import { buildTraceRecorder, emitOperationProgress } from './trace.mjs';
-import { evaluateReadonly, clickPoint, waitForAnchor, sleep, sleepRandom, pressKey } from './dom-ops.mjs';
-import { readSearchViewportReady } from './search-ops.mjs';
+import { evaluateReadonly, clickPoint, waitForAnchor, sleepRandom, pressKey } from './dom-ops.mjs';
 
 const NOTE_ITEM_SELECTOR = '.note-item';
 
@@ -36,7 +35,7 @@ async function readFeedWindowSignature(profileId) {
       scrollTop,
       scrollHeight,
       clientHeight,
-      signature: BACKTICK${first}|${last}|${ids.length}|${scrollTop}|${scrollHeight}|${clientHeight}BACKTICK,
+      signature: [first, last, ids.length, scrollTop, scrollHeight, clientHeight].join('|'),
     };
   })()`;
   return evaluateReadonly(profileId, script, { timeoutMs: 6000, onTimeout: 'return' });
@@ -44,7 +43,7 @@ async function readFeedWindowSignature(profileId) {
 
 async function waitForFeedWindowChange(profileId, beforeSignature) {
   return waitForAnchor(profileId, {
-    selectors: ['.note-item:has(a.cover)', '.feeds-container', '.search-result-list'],
+    selectors: [],
     timeoutMs: 5000,
     intervalMs: 300,
     description: 'feed_like_after_scroll_window_change',
@@ -59,14 +58,13 @@ async function waitForFeedWindowChange(profileId, beforeSignature) {
 
 /** 安全 callAPI 包装：超时后返回 null 而非抛异常 */
 async function safeCallAPI(action, payload = {}, timeoutMs = 15000) {
-  const timer = new AbortController();
-  const tid = setTimeout(() => timer.abort(), timeoutMs);
+  const start = Date.now();
   try {
-    return await callAPI(action, payload);
+    const result = await callAPI(action, payload);
+    if (Date.now() - start > timeoutMs) return null;
+    return result;
   } catch {
     return null;
-  } finally {
-    clearTimeout(tid);
   }
 }
 
@@ -206,8 +204,9 @@ export async function executeFeedLikeOperation({ profileId, params = {}, context
   const maxLikes = Math.max(1, Number(params.maxLikesPerRound ?? params.maxLikes ?? 10) || 10);
   const likeIntervalMinMs = Math.max(500, Number(params.likeIntervalMinMs ?? 1000) || 1000);
   const likeIntervalMaxMs = Math.max(likeIntervalMinMs, Number(params.likeIntervalMaxMs ?? 5000) || 5000);
-  const maxScrolls = Math.max(1, Number(params.maxScrolls ?? 80) || 80);
   const maxNoProgressScrolls = Math.max(1, Number(params.maxNoProgressScrolls ?? 3) || 3);
+  const rollbackMin = Math.max(1, Number(params.rollbackMin ?? 3) || 3);
+  const rollbackMax = Math.max(rollbackMin, Number(params.rollbackMax ?? 5) || 5);
 
   if (!state.feedLikeState) {
     state.feedLikeState = {
@@ -229,8 +228,9 @@ export async function executeFeedLikeOperation({ profileId, params = {}, context
   let roundSkipped = 0;
   let scrollCount = state.feedLikeState.scrollCount || 0;
   let noProgressScrolls = 0;
+  let rollbackCycles = 0;
 
-  while (roundLiked < maxLikes && scrollCount <= maxScrolls) {
+  while (roundLiked < maxLikes) {
     // 扫描：失败直接退出（环境异常，继续无意义）
     let scan;
     try {
@@ -269,63 +269,111 @@ export async function executeFeedLikeOperation({ profileId, params = {}, context
     });
 
     if (unliked.length === 0) {
-      if (scrollCount < maxScrolls) {
-        const beforeWindow = await readFeedWindowSignature(profileId).catch(() => null);
-        const beforeSignature = String(beforeWindow?.signature || '').trim();
-        if (beforeSignature) state.feedLikeState.seenWindowSignatures.add(beforeSignature);
+      const beforeWindow = await readFeedWindowSignature(profileId).catch(() => null);
+      const beforeSignature = String(beforeWindow?.signature || '').trim();
+      if (beforeSignature) state.feedLikeState.seenWindowSignatures.add(beforeSignature);
+
+      try {
+        await pressKey(profileId, 'PageDown');
+      } catch {
+        emitOperationProgress(context, { kind: 'feed_like_scroll_key_error', stage: 'feed_like' });
+        break;
+      }
+
+      let changed = false;
+      try {
+        const changedResult = await waitForFeedWindowChange(profileId, beforeSignature);
+        changed = changedResult?.ok === true;
+      } catch {
+        // ignore
+      }
+
+      const afterWindow = await readFeedWindowSignature(profileId).catch(() => null);
+      const afterSignature = String(afterWindow?.signature || '').trim();
+      if (afterSignature) state.feedLikeState.seenWindowSignatures.add(afterSignature);
+
+      const progressed = changed || (beforeSignature && afterSignature && beforeSignature !== afterSignature);
+      if (progressed) {
+        noProgressScrolls = 0;
+      } else {
+        noProgressScrolls += 1;
+      }
+
+      scrollCount += 1;
+      state.feedLikeState.scrollCount = scrollCount;
+      emitOperationProgress(context, {
+        kind: 'feed_like_scroll_probe',
+        stage: 'feed_like',
+        scrollCount,
+        noProgressScrolls,
+        progressed,
+        beforeSignature: beforeSignature ? beforeSignature.slice(0, 120) : null,
+        afterSignature: afterSignature ? afterSignature.slice(0, 120) : null,
+      });
+
+      if (noProgressScrolls >= maxNoProgressScrolls) {
+        const rollbackSteps = Math.floor(rollbackMin + Math.random() * (rollbackMax - rollbackMin + 1));
+        emitOperationProgress(context, {
+          kind: 'feed_like_scroll_rollback_start',
+          stage: 'feed_like',
+          rollbackSteps,
+          noProgressScrolls,
+        });
+
+        const rollbackBaseSig = afterSignature || beforeSignature || '';
+        for (let i = 0; i < rollbackSteps; i += 1) {
+          try {
+            await pressKey(profileId, 'PageUp');
+            await waitForAnchor(profileId, {
+              selectors: ['.note-item:has(a.cover)', '.feeds-container', '.search-result-list'],
+              timeoutMs: 3000,
+              intervalMs: 300,
+              description: 'feed_like_rollback_pageup_settle',
+            });
+          } catch {
+            break;
+          }
+        }
 
         try {
           await pressKey(profileId, 'PageDown');
+          await waitForFeedWindowChange(profileId, rollbackBaseSig);
         } catch {
-          // pressKey 失败，跳过滚动
-          emitOperationProgress(context, { kind: 'feed_like_scroll_key_error', stage: 'feed_like' });
-          break;
-        }
-        // 锚点等待：滚动后等窗口签名变化（最大 5s）
-        let changed = false;
-        try {
-          const changedResult = await waitForFeedWindowChange(profileId, beforeSignature);
-          changed = changedResult?.ok === true;
-        } catch {
-          // 滚动锚点超时，继续（可能已到底部）
+          // ignore
         }
 
-        const afterWindow = await readFeedWindowSignature(profileId).catch(() => null);
-        const afterSignature = String(afterWindow?.signature || '').trim();
-        if (afterSignature) state.feedLikeState.seenWindowSignatures.add(afterSignature);
+        const rollbackAfter = await readFeedWindowSignature(profileId).catch(() => null);
+        const rollbackAfterSig = String(rollbackAfter?.signature || '').trim();
+        const rollbackProgressed = Boolean(rollbackAfterSig && rollbackAfterSig !== rollbackBaseSig);
 
-        const progressed = changed || (beforeSignature && afterSignature && beforeSignature !== afterSignature);
-        if (progressed) {
-          noProgressScrolls = 0;
-        } else {
-          noProgressScrolls += 1;
-        }
-
-        scrollCount += 1;
-        state.feedLikeState.scrollCount = scrollCount;
         emitOperationProgress(context, {
-          kind: 'feed_like_scroll_probe',
+          kind: 'feed_like_scroll_rollback_done',
           stage: 'feed_like',
-          scrollCount,
-          noProgressScrolls,
-          progressed,
-          beforeSignature: beforeSignature ? beforeSignature.slice(0, 120) : null,
-          afterSignature: afterSignature ? afterSignature.slice(0, 120) : null,
+          rollbackSteps,
+          rollbackCycles,
+          rollbackProgressed,
+          rollbackBaseSig: rollbackBaseSig ? rollbackBaseSig.slice(0, 120) : null,
+          rollbackAfterSig: rollbackAfterSig ? rollbackAfterSig.slice(0, 120) : null,
         });
 
-        if (noProgressScrolls >= maxNoProgressScrolls) {
-          emitOperationProgress(context, {
-            kind: 'feed_like_scroll_stalled',
-            stage: 'feed_like',
-            scrollCount,
-            noProgressScrolls,
-            reason: 'window_signature_not_changed',
-          });
-          break;
+        if (rollbackProgressed) {
+          noProgressScrolls = 0;
+        } else {
+          rollbackCycles += 1;
+          if (rollbackCycles >= 3) {
+            emitOperationProgress(context, {
+              kind: 'feed_like_scroll_stalled',
+              stage: 'feed_like',
+              scrollCount,
+              noProgressScrolls,
+              rollbackCycles,
+              reason: 'rollback_not_progressed',
+            });
+            break;
+          }
         }
-        continue;
       }
-      break;
+      continue;
     }
 
     // 随机选择一个候选
