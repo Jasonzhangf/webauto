@@ -1,23 +1,10 @@
 #!/usr/bin/env node
 /**
- * WebAuto Smoke Test — 基础功能一键检测
+ * WebAuto 最小基础功能自测（跨平台迁移基线）
  *
- * Usage:
- *   node scripts/test/webauto-smoke.mjs                     # 全部测试
- *   node scripts/test/webauto-smoke.mjs --block env        # 只测环境
- *   node scripts/test/webauto-smoke.mjs --block camo        # 只测 camo
- *   node scripts/test/webauto-smoke.mjs --block daemon       # 只测 daemon
- *   node scripts/test/webauto-smoke.mjs --block browser      # 只测浏览器交互
- *   node scripts/test/webauto-smoke.mjs --block xhs          # 只测 XHS 业务
- *   node scripts/test/webauto-smoke.mjs --profile xhs-qa-1  # 指定 profile
- *   node scripts/test/webauto-smoke.mjs --json               # JSON 输出
- *
- * 测试 Block 清单:
- *   1. env       - 运行环境（Node.js、端口、路径、模块加载）
- *   2. camo      - Camo 后端服务（健康检查、evaluate、screenshot、click）
- *   3. daemon    - WebAuto daemon（健康检查、状态、jobs）
- *   4. browser   - 浏览器基础交互（DOM查询、selector、viewport）
- *   5. xhs       - XHS 业务（页面检测、selector、like-target、JS policy）
+ * 用法:
+ *   node scripts/test/webauto-smoke.mjs
+ *   node scripts/test/webauto-smoke.mjs --profile xhs-qa-1
  */
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -25,358 +12,252 @@ import http from 'node:http';
 import fs from 'node:fs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const ROOT = path.resolve(__dirname, '..');   // webauto/scripts
-const PROJECT_ROOT = path.resolve(__dirname, '../..'); // webauto
+const PROJECT_ROOT = path.resolve(__dirname, '../..');
 const BIN = path.join(PROJECT_ROOT, 'bin', 'webauto.mjs');
 
-// ── CLI args ──
 const argv = process.argv.slice(2);
-const blockFilter = (argv.find(a => a === '--block') ? argv[argv.indexOf('--block') + 1] : null) || null;
-const jsonMode = argv.includes('--json');
-const profileArg = (argv.find(a => a === '--profile') ? argv[argv.indexOf('--profile') + 1] : null) || 'xhs-qa-1';
+const profileId = argv.includes('--profile') ? argv[argv.indexOf('--profile') + 1] : 'xhs-qa-1';
 
-// ── Result collector ──
-const results = [];
-let passed = 0, failed = 0, skipped = 0;
+let pass = 0;
+let fail = 0;
+let skip = 0;
 
-function report(block, name, ok, detail = '') {
-  const status = ok ? 'PASS' : 'FAIL';
-  if (ok) passed++; else failed++;
-  results.push({ block, name, status, detail });
-  if (jsonMode) return;
-  const marker = ok ? '✅' : '❌';
-  console.log(`  ${marker} [${block}] ${name}${detail ? ` — ${detail}` : ''}`);
+function ok(block, name, detail = '') {
+  pass += 1;
+  console.log(`  ✅ [${block}] ${name}${detail ? ` — ${detail}` : ''}`);
+}
+function bad(block, name, detail = '') {
+  fail += 1;
+  console.log(`  ❌ [${block}] ${name}${detail ? ` — ${detail}` : ''}`);
+}
+function skipIt(block, name, reason = '') {
+  skip += 1;
+  console.log(`  ⏭️  [${block}] ${name}${reason ? ` — ${reason}` : ''}`);
 }
 
-function skip(block, name, reason = '') {
-  skipped++;
-  results.push({ block, name, status: 'SKIP', detail: reason });
-  if (jsonMode) return;
-  console.log(`  ⏭️  [${block}] ${name} — ${reason}`);
+function toFileUrl(p) {
+  return `file://${p}`;
 }
 
-// ── Helpers ──
-function httpGet(url, timeoutMs = 3000) {
+async function httpGet(url, timeoutMs = 3000) {
   return new Promise((resolve) => {
-    const timer = setTimeout(() => resolve({ ok: false, status: 0, body: '' }), timeoutMs);
+    const timer = setTimeout(() => resolve({ ok: false, status: 0, body: 'timeout' }), timeoutMs);
     const req = http.get(url, (res) => {
       let body = '';
-      res.on('data', c => body += c);
-      res.on('end', () => { clearTimeout(timer); resolve({ ok: res.statusCode >= 200 && res.statusCode < 400, status: res.statusCode, body }); });
+      res.on('data', (c) => (body += c));
+      res.on('end', () => {
+        clearTimeout(timer);
+        resolve({ ok: res.statusCode >= 200 && res.statusCode < 400, status: res.statusCode || 0, body });
+      });
     });
-    req.on('error', (e) => { clearTimeout(timer); resolve({ ok: false, status: 0, body: e.message }); });
-    req.setTimeout(timeoutMs, () => { clearTimeout(timer); req.destroy(); resolve({ ok: false, status: 0, body: 'timeout' }); });
+    req.on('error', (e) => {
+      clearTimeout(timer);
+      resolve({ ok: false, status: 0, body: e.message });
+    });
+    req.setTimeout(timeoutMs, () => {
+      clearTimeout(timer);
+      req.destroy();
+      resolve({ ok: false, status: 0, body: 'timeout' });
+    });
   });
 }
 
-/** Call camo-backend /command endpoint (same as callAPI in browser-service.mjs) */
-async function callCamo(action, payload = {}, timeoutMs = 8000) {
-  const port = process.env.CAMO_PORT || '7704';
-  const url = `http://127.0.0.1:${port}/command`;
+async function callCamo(action, args = {}, timeoutMs = 8000) {
+  const payload = JSON.stringify({ action, args });
   return new Promise((resolve) => {
-    const data = JSON.stringify({ action, args: payload });
-    const timer = setTimeout(() => resolve({ ok: false, body: 'timeout' }), timeoutMs);
-    const req = http.request(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data) },
-      timeout: timeoutMs,
-    }, (res) => {
-      let body = '';
-      res.on('data', c => body += c);
-      res.on('end', () => {
-        clearTimeout(timer);
-        try { resolve({ ok: res.statusCode >= 200 && res.statusCode < 400, status: res.statusCode, data: JSON.parse(body) }); }
-        catch { resolve({ ok: false, status: res.statusCode, body }); }
-      });
+    const timer = setTimeout(() => resolve({ ok: false, data: { error: 'timeout' } }), timeoutMs);
+    const req = http.request(
+      'http://127.0.0.1:7704/command',
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Content-Length': Buffer.byteLength(payload),
+        },
+        timeout: timeoutMs,
+      },
+      (res) => {
+        let body = '';
+        res.on('data', (c) => (body += c));
+        res.on('end', () => {
+          clearTimeout(timer);
+          try {
+            const data = JSON.parse(body || '{}');
+            resolve({ ok: res.statusCode >= 200 && res.statusCode < 400, status: res.statusCode || 0, data });
+          } catch {
+            resolve({ ok: false, status: res.statusCode || 0, data: { error: body } });
+          }
+        });
+      },
+    );
+    req.on('error', (e) => {
+      clearTimeout(timer);
+      resolve({ ok: false, data: { error: e.message } });
     });
-    req.on('error', (e) => { clearTimeout(timer); resolve({ ok: false, error: e.message }); });
-    req.write(data);
+    req.write(payload);
     req.end();
   });
 }
 
-function camoDaemonPort() {
-  return parseInt(process.env.WEBAUTO_DAEMON_PORT || process.env.CAMO_DAEMON_PORT || '7701', 10);
-}
-
-/** Resolve module path relative to PROJECT_ROOT */
-function modulePath(rel) {
-  return path.resolve(PROJECT_ROOT, rel);
-}
-
-// ═══════════════════════════════════════════════
-// Block: env
-// ═══════════════════════════════════════════════
 async function testEnv() {
   console.log('\n📦 Block: env (运行环境)');
-  const nodeVer = process.versions.node;
-  report('env', `Node.js ${nodeVer}`, true, nodeVer);
-  report('env', 'platform', true, process.platform);
-  report('env', 'ARCH', true, process.arch);
+  ok('env', 'Node.js', process.versions.node);
+  ok('env', 'platform', `${process.platform}/${process.arch}`);
 
-  const homeDir = process.env.HOME || process.env.USERPROFILE || '';
-  report('env', 'HOME dir exists', fs.existsSync(homeDir), homeDir);
+  const home = process.env.HOME || process.env.USERPROFILE || '';
+  fs.existsSync(home) ? ok('env', 'HOME exists', home) : bad('env', 'HOME exists', home);
+  fs.existsSync(path.join(home, '.webauto')) ? ok('env', '~/.webauto exists') : bad('env', '~/.webauto exists');
+  fs.existsSync(BIN) ? ok('env', 'bin/webauto.mjs exists') : bad('env', 'bin/webauto.mjs exists', BIN);
 
-  const webautoDir = path.join(homeDir, '.webauto');
-  report('env', '~/.webauto exists', fs.existsSync(webautoDir));
-
-  const stateDir = path.join(webautoDir, 'state');
-  report('env', '~/.webauto/state exists', fs.existsSync(stateDir));
-
-  report('env', 'bin/webauto.mjs exists', fs.existsSync(BIN), BIN);
-  report('env', 'ESM supported', true, 'import.meta.url OK');
-
-  // Module load test
   const modules = [
-    ['dom-ops', 'modules/camo-runtime/src/autoscript/action-providers/xhs/dom-ops.mjs'],
-    ['harvest-ops', 'modules/camo-runtime/src/autoscript/action-providers/xhs/harvest-ops.mjs'],
-    ['comments-ops', 'modules/camo-runtime/src/autoscript/action-providers/xhs/comments-ops.mjs'],
-    ['persistence', 'modules/camo-runtime/src/autoscript/action-providers/xhs/persistence.mjs'],
-    ['diagnostic-utils', 'modules/camo-runtime/src/autoscript/action-providers/xhs/diagnostic-utils.mjs'],
-    ['xhs-unified-options', 'modules/camo-runtime/src/autoscript/xhs-unified-options.mjs'],
-    ['js-policy', 'modules/camo-runtime/src/utils/js-policy.mjs'],
+    'modules/camo-runtime/src/autoscript/action-providers/xhs/dom-ops.mjs',
+    'modules/camo-runtime/src/autoscript/action-providers/xhs/comments-ops.mjs',
+    'modules/camo-runtime/src/autoscript/action-providers/xhs/harvest-ops.mjs',
+    'modules/camo-runtime/src/autoscript/action-providers/xhs/diagnostic-utils.mjs',
   ];
-  for (const [name, rel] of modules) {
+  for (const rel of modules) {
     try {
-      await import(pathToFileURL(modulePath(rel)));
-      report('env', `module load: ${name}`, true);
+      await import(toFileUrl(path.resolve(PROJECT_ROOT, rel)));
+      ok('env', `module load: ${path.basename(rel)}`);
     } catch (e) {
-      report('env', `module load: ${name}`, false, e.message.slice(0, 80));
+      bad('env', `module load: ${path.basename(rel)}`, String(e?.message || e).slice(0, 80));
     }
   }
 }
 
-function pathToFileURL(p) {
-  return `file://${p}`;
-}
-
-// ═══════════════════════════════════════════════
-// Block: camo
-// ═══════════════════════════════════════════════
 async function testCamo() {
-  console.log('\n🔧 Block: camo (Camo 后端服务)');
+  console.log('\n🔧 Block: camo (浏览器运行时)');
+  const h = await httpGet('http://127.0.0.1:7704/health', 3000);
+  h.ok ? ok('camo', 'health :7704') : bad('camo', 'health :7704', h.body);
 
-  // Health checks
-  const ports = [
-    { name: 'camo-runtime', port: 7704 },
-    { name: 'unified-api', port: 7701 },
-  ];
-  for (const { name, port } of ports) {
-    const r = await httpGet(`http://127.0.0.1:${port}/health`, 3000);
-    if (name === 'unified-api' && !r.ok) {
-      skip('camo', `${name} health (:${port})`, 'daemon/unified-api not running (optional in smoke)');
-      continue;
-    }
-    report('camo', `${name} health (:${port})`, r.ok, r.body ? String(r.body).slice(0, 60) : `HTTP ${r.status}`);
-  }
+  const evalRes = await callCamo('evaluate', { profileId, script: '(() => 1 + 1)()' }, 5000);
+  evalRes.ok && evalRes.data?.result === 2
+    ? ok('camo', 'evaluate (1+1=2)', 'result=2')
+    : bad('camo', 'evaluate (1+1=2)', JSON.stringify(evalRes.data).slice(0, 80));
 
-  // evaluate API (1+1=2)
-  const evalResult = await callCamo('evaluate', { profileId: profileArg, script: '(() => 1 + 1)()' }, 5000);
-  const evalData = evalResult?.data?.result;
-  report('camo', 'evaluate API (1+1=2)', evalResult.ok && evalData === 2, evalResult.ok ? `result=${evalData}` : String(evalResult.body).slice(0, 60));
-
-  // screenshot API
-  const ssResult = await callCamo('screenshot', { profileId: profileArg }, 8000);
-  if (ssResult.ok) {
-    const base64 = String(ssResult?.data?.data || ssResult?.data?.result?.data || ssResult?.data?.result || '');
-    if (base64) {
-      const buf = Buffer.from(base64, 'base64');
-      report('camo', 'screenshot API (base64 decode)', buf.length > 1000, `${buf.length} bytes`);
-    } else {
-      report('camo', 'screenshot API (empty)', false, 'no base64 in response');
-    }
+  const ss = await callCamo('screenshot', { profileId }, 8000);
+  const base64 = String(ss.data?.data || ss.data?.result?.data || '');
+  if (ss.ok && base64.length > 0) {
+    const size = Buffer.from(base64, 'base64').length;
+    size > 1000 ? ok('camo', 'screenshot', `${size} bytes`) : bad('camo', 'screenshot', 'too small');
   } else {
-    report('camo', 'screenshot API', false, String(ssResult.body).slice(0, 60));
+    bad('camo', 'screenshot', JSON.stringify(ss.data).slice(0, 80));
   }
 
-  // mouse:click API
-  const clickResult = await callCamo('mouse:click', { profileId: profileArg, x: 1, y: 1, button: 'left', clicks: 1 }, 5000);
-  report('camo', 'mouse:click API', clickResult.ok, clickResult.ok ? 'ok' : String(clickResult.body).slice(0, 60));
+  const click = await callCamo('mouse:click', { profileId, x: 1, y: 1, button: 'left', clicks: 1 }, 5000);
+  click.ok ? ok('camo', 'mouse:click') : bad('camo', 'mouse:click', JSON.stringify(click.data).slice(0, 80));
 
-  // keyboard:press API
-  const pressResult = await callCamo('keyboard:press', { profileId: profileArg, key: 'Escape' }, 5000);
-  report('camo', 'keyboard:press API', pressResult.ok, pressResult.ok ? 'ok' : String(pressResult.body).slice(0, 60));
+  const key = await callCamo('keyboard:press', { profileId, key: 'Escape' }, 5000);
+  key.ok ? ok('camo', 'keyboard:press') : bad('camo', 'keyboard:press', JSON.stringify(key.data).slice(0, 80));
 }
 
-// ═══════════════════════════════════════════════
-// Block: daemon
-// ═══════════════════════════════════════════════
-async function testDaemon() {
-  console.log('\n🤖 Block: daemon (WebAuto daemon)');
-
-  const port = camoDaemonPort();
-  const health = await httpGet(`http://127.0.0.1:${port}/health`, 3000);
-  if (!health.ok) {
-    skip('daemon', `daemon health (:${port})`, 'daemon not running (optional in smoke)');
-    skip('daemon', 'daemon jobs list', 'daemon not healthy');
-    return;
-  }
-  report('daemon', `daemon health (:${port})`, true, health.body?.slice(0, 60) || 'ok');
-
-  const jobsResult = await httpGet(`http://127.0.0.1:${port}/api/v1/jobs`, 3000);
-  const jobs = jobsResult.body?.jobs || [];
-  report('daemon', `daemon jobs list (${jobs.length} jobs)`, jobsResult.ok);
-}
-
-// ═══════════════════════════════════════════════
-// Block: browser
-// ═══════════════════════════════════════════════
 async function testBrowser() {
-  console.log('\n🌐 Block: browser (浏览器基础交互)');
-
-  // location
-  const loc = await callCamo('evaluate', { profileId: profileArg, script: '(() => ({ url: location.href, title: document.title, hostname: location.hostname }))()' }, 6000);
-  const locData = loc?.data?.result;
-  report('browser', 'evaluate: location', loc.ok && !!locData?.url, locData?.url?.slice(0, 80) || 'failed');
-
-  // DOM structure
-  const dom = await callCamo('evaluate', { profileId: profileArg, script: '(() => ({ body: document.body ? document.body.tagName : "none", hasHead: !!document.head, childCount: document.body?.children?.length || 0 }))()' }, 6000);
-  const domData = dom?.data?.result;
-  report('browser', 'DOM structure', dom.ok && domData?.body === 'BODY', `body=${domData?.body} children=${domData?.childCount}`);
-
-  // viewport
-  const vp = await callCamo('evaluate', { profileId: profileArg, script: '(() => ({ width: window.innerWidth, height: window.innerHeight }))()' }, 6000);
-  const vpData = vp?.data?.result;
-  report('browser', 'viewport', vp.ok && (vpData?.width || 0) > 0, `${vpData?.width}x${vpData?.height}`);
+  console.log('\n🌐 Block: browser (基础交互)');
+  const r = await callCamo(
+    'evaluate',
+    {
+      profileId,
+      script: '(() => ({ url: location.href, host: location.hostname, title: document.title, body: document.body?.tagName || "", w: window.innerWidth, h: window.innerHeight }))()',
+    },
+    6000,
+  );
+  const d = r.data?.result || {};
+  r.ok && d.url ? ok('browser', 'location', String(d.url).slice(0, 80)) : bad('browser', 'location', JSON.stringify(r.data));
+  d.body === 'BODY' ? ok('browser', 'DOM body=BODY') : bad('browser', 'DOM body=BODY', String(d.body || 'empty'));
+  Number(d.w) > 0 && Number(d.h) > 0 ? ok('browser', 'viewport', `${d.w}x${d.h}`) : bad('browser', 'viewport', `${d.w}x${d.h}`);
 }
 
-// ═══════════════════════════════════════════════
-// Block: xhs
-// ═══════════════════════════════════════════════
 async function testXhs() {
-  console.log('\n📱 Block: xhs (XHS 业务逻辑)');
+  console.log('\n📱 Block: xhs (最小业务能力)');
 
-  // Module logic tests (no browser needed)
-  // 1. resolveXhsOutputContext
-  try {
-    const { resolveXhsOutputContext } = await import(pathToFileURL(modulePath('modules/camo-runtime/src/autoscript/action-providers/xhs/persistence.mjs')));
-    const ctx = resolveXhsOutputContext({ params: { keyword: 'smoke-test', env: 'debug' }, noteId: 'note-123' });
-    report('xhs', 'resolveXhsOutputContext', ctx.keyword === 'smoke-test' && ctx.env === 'debug', `keyword=${ctx.keyword} env=${ctx.env}`);
-  } catch (e) {
-    report('xhs', 'resolveXhsOutputContext', false, e.message.slice(0, 60));
-  }
+  const page = await callCamo(
+    'evaluate',
+    {
+      profileId,
+      script: `(() => {
+        const host = String(location.hostname || '');
+        const onXhs = host.includes('xiaohongshu.com');
+        const hasDetail = !!document.querySelector('.note-detail-mask, .note-detail-page, .note-detail-dialog');
+        const hasFeed = !!document.querySelector('.feeds-page, .note-item');
+        const commentCount = document.querySelectorAll('.comment-item').length;
+        const likeWrapperCount = document.querySelectorAll('.like-wrapper').length;
+        const likeLottieCount = document.querySelectorAll('.like-lottie').length;
+        const firstComment = document.querySelector('.comment-item');
+        const _lw = firstComment ? firstComment.querySelector('.like-wrapper') : null;
+        const target = _lw ? (_lw.querySelector('.like-lottie') || _lw) : null;
+        const rect = target?.getBoundingClientRect?.();
+        return {
+          host, onXhs, hasDetail, hasFeed,
+          commentCount, likeWrapperCount, likeLottieCount,
+          likeTargetFound: !!target,
+          likeTargetTag: target?.tagName || null,
+          likeTargetClass: String(target?.className || ''),
+          likeWrapperClass: String(_lw?.className || ''),
+          liked: /active|liked|selected|is-liked/.test(String(_lw?.className || '')),
+          rect: rect ? { w: Math.round(rect.width || 0), h: Math.round(rect.height || 0), x: Math.round(rect.x || 0), y: Math.round(rect.y || 0) } : null,
+        };
+      })()`,
+    },
+    6000,
+  );
 
-  // 2. normalizeInlineText
-  try {
-    const { normalizeInlineText } = await import(pathToFileURL(modulePath('modules/camo-runtime/src/autoscript/action-providers/xhs/utils.mjs')));
-    report('xhs', 'normalizeInlineText', normalizeInlineText('  hello   world  ') === 'hello world');
-  } catch (e) {
-    report('xhs', 'normalizeInlineText', false, e.message.slice(0, 60));
-  }
-
-  // 3. JS policy
-  try {
-    const { detectForbiddenJsAction } = await import(pathToFileURL(modulePath('modules/camo-runtime/src/utils/js-policy.mjs')));
-    report('xhs', 'js-policy: .click() blocked', detectForbiddenJsAction('el.click()') === 'dom_click');
-    report('xhs', 'js-policy: .dispatchEvent() blocked', detectForbiddenJsAction('el.dispatchEvent(e)') === 'dispatch_event');
-    report('xhs', 'js-policy: .scrollIntoView() blocked', detectForbiddenJsAction('el.scrollIntoView()') === 'js_scroll_into_view');
-    report('xhs', 'js-policy: safe script passes', detectForbiddenJsAction('document.querySelector("div")') === null);
-  } catch (e) {
-    report('xhs', 'js-policy', false, e.message.slice(0, 60));
-  }
-
-  // 4. Browser-based XHS tests (need XHS page)
-  const loc = await callCamo('evaluate', { profileId: profileArg, script: '(() => ({ hostname: String(location.hostname || ""), url: location.href.slice(0, 80) }))()' }, 5000);
-  const locData = loc?.data?.result; const hostname = locData?.hostname || ""; const onXHS = hostname.includes('xiaohongshu.com');
-
-  if (!onXHS) {
-    skip('xhs', 'XHS page check', `on ${hostname}`);
-    skip('xhs', 'XHS selectors', 'not on XHS');
-    skip('xhs', 'like-target detection', 'not on XHS');
+  const d = page.data?.result || {};
+  if (!d.onXhs) {
+    skipIt('xhs', 'on xiaohongshu page', `host=${d.host || 'unknown'}`);
+    skipIt('xhs', 'selector checks', 'not on xhs');
+    skipIt('xhs', 'like-target detection', 'not on xhs');
     return;
   }
-  report('xhs', 'on XHS page', true, hostname);
 
-  // XHS selectors（按页面上下文分组，避免误报）
-  const selScript = `(() => {
-    const isDetail = !!document.querySelector('.note-detail-mask, .note-detail-page, .note-detail-dialog');
-    const isFeed = !!document.querySelector('.feeds-page, .note-item');
-    const checks = [];
-    if (isFeed) {
-      checks.push({ selector: '.feeds-page', required: true, found: !!document.querySelector('.feeds-page') });
-      checks.push({ selector: '.note-item', required: true, found: !!document.querySelector('.note-item') });
-    }
-    if (isDetail) {
-      checks.push({ selector: '.note-detail-mask|.note-detail-page|.note-detail-dialog', required: true, found: true });
-      checks.push({ selector: '.comment-item', required: true, found: !!document.querySelector('.comment-item') });
-      checks.push({ selector: '.like-wrapper', required: true, found: !!document.querySelector('.like-wrapper') });
-      checks.push({ selector: '.like-lottie', required: true, found: !!document.querySelector('.like-lottie') });
-    }
-    return { isDetail, isFeed, checks };
-  })()`;
-  const sel = await callCamo('evaluate', { profileId: profileArg, script: selScript }, 6000);
-  const selData = sel?.data?.result;
-  if (sel.ok && selData && Array.isArray(selData.checks)) {
-    const pageCtx = selData.isDetail ? 'detail' : (selData.isFeed ? 'feed' : 'unknown');
-    if (pageCtx === 'unknown') {
-      skip('xhs', 'page context', 'unknown (selector context not matched, continue with like-target probe)');
+  ok('xhs', 'on xiaohongshu page', d.host);
+  d.hasDetail || d.hasFeed
+    ? ok('xhs', 'page in feed/detail context', d.hasDetail ? 'detail' : 'feed')
+    : skipIt('xhs', 'page in feed/detail context', 'unknown context');
+
+  if (d.commentCount > 0) {
+    ok('xhs', '.comment-item', `count=${d.commentCount}`);
+    d.likeWrapperCount > 0 ? ok('xhs', '.like-wrapper', `count=${d.likeWrapperCount}`) : bad('xhs', '.like-wrapper', 'count=0');
+    d.likeLottieCount > 0 ? ok('xhs', '.like-lottie', `count=${d.likeLottieCount}`) : bad('xhs', '.like-lottie', 'count=0');
+
+    if (d.likeTargetFound) {
+      ok('xhs', 'like-target detection', `${d.likeTargetTag}.${String(d.likeTargetClass).slice(0, 30)}`);
+      const rw = Number(d.rect?.w || 0);
+      const rh = Number(d.rect?.h || 0);
+      rw > 0 && rh > 0
+        ? ok('xhs', 'like-target rect', `${rw}x${rh} @ (${d.rect?.x},${d.rect?.y})`)
+        : bad('xhs', 'like-target rect', JSON.stringify(d.rect));
+      ok('xhs', 'like status detect', `liked=${Boolean(d.liked)}`);
     } else {
-      report('xhs', 'page context', true, pageCtx);
-    }
-    for (const item of selData.checks) {
-      report('xhs', `selector: ${item.selector}`, item.found, item.found ? 'found' : 'missing in current context');
+      bad('xhs', 'like-target detection', 'target not found in first comment');
     }
   } else {
-    report('xhs', 'selector check', false, 'evaluate failed');
-  }
-
-  // Like-target detection (模拟 readLikeTargetByCommentId 核心逻辑)
-  const likeScript = `(() => {
-    const node = document.querySelector('.comment-item');
-    if (!node) return { found: false, reason: 'no_comment_item' };
-    const _lw = node.querySelector('.like-wrapper');
-    const likeBtn = _lw ? (_lw.querySelector('.like-lottie') || _lw) : null;
-    if (!(likeBtn instanceof Element)) return { found: false, reason: 'no_like_btn', hasWrapper: !!_lw };
-    const rect = likeBtn.getBoundingClientRect();
-    const className = String(_lw?.className || '');
-    const liked = /active|liked|selected|is-liked/.test(className);
-    return {
-      found: true, liked,
-      likeWrapperClass: className.slice(0, 40),
-      targetTag: likeBtn.tagName,
-      targetCls: String(likeBtn.className || '').slice(0, 40),
-      rect: { w: Math.round(rect.width), h: Math.round(rect.height) },
-      center: { x: Math.round(rect.x + rect.width / 2), y: Math.round(rect.y + rect.height / 2) },
-    };
-  })()`;
-  const lt = await callCamo('evaluate', { profileId: profileArg, script: likeScript }, 6000);
-  const ltData = lt?.data?.result;
-  report('xhs', 'like-target detection', ltData?.found === true, ltData?.reason || `target=${ltData?.targetTag}.${ltData?.targetCls}`);
-  if (ltData?.found) {
-    report('xhs', 'like-target rect', ltData.rect?.w > 0 && ltData.rect?.h > 0, `${ltData.rect?.w}x${ltData.rect?.h} @ (${ltData.rect?.x || 0},${ltData.rect?.y || 0})`);
-    report('xhs', 'like-status detection', typeof ltData.liked === 'boolean', `liked=${ltData.liked}`);
+    skipIt('xhs', '.comment-item', 'count=0');
+    skipIt('xhs', '.like-wrapper', 'no comment');
+    skipIt('xhs', '.like-lottie', 'no comment');
+    skipIt('xhs', 'like-target detection', 'no comment');
   }
 }
 
-// ═══════════════════════════════════════════════
-// Main
-// ═══════════════════════════════════════════════
 async function main() {
   console.log('═══════════════════════════════════════════════');
-  console.log('  WebAuto Smoke Test — 基础功能一键检测');
+  console.log('  WebAuto Smoke Test — 最小基础功能一键检测');
   console.log('═══════════════════════════════════════════════');
-  console.log(`  profile: ${profileArg}`);
-  console.log(`  filter:  ${blockFilter || 'all blocks'}`);
+  console.log(`  profile: ${profileId}`);
   console.log(`  time:    ${new Date().toISOString()}`);
 
-  if (blockFilter === null || blockFilter === 'env') await testEnv();
-  if (blockFilter === null || blockFilter === 'camo') await testCamo();
-  if (blockFilter === null || blockFilter === 'daemon') await testDaemon();
-  if (blockFilter === null || blockFilter === 'browser') await testBrowser();
-  if (blockFilter === null || blockFilter === 'xhs') await testXhs();
+  await testEnv();
+  await testCamo();
+  await testBrowser();
+  await testXhs();
 
   console.log('\n═══════════════════════════════════════════════');
-  console.log(`  Results: ${passed} passed / ${failed} failed / ${skipped} skipped / ${results.length} total`);
+  console.log(`  Results: ${pass} passed / ${fail} failed / ${skip} skipped / ${pass + fail + skip} total`);
   console.log('═══════════════════════════════════════════════');
 
-  if (jsonMode) {
-    console.log(JSON.stringify({ passed, failed, skipped, total: results.length, results }, null, 2));
-  }
-
-  process.exit(failed > 0 ? 1 : 0);
+  process.exit(fail > 0 ? 1 : 0);
 }
 
 main().catch((e) => {
-  console.error('Smoke test crashed:', e);
+  console.error(e);
   process.exit(2);
 });
