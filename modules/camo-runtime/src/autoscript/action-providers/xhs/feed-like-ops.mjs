@@ -174,7 +174,10 @@ async function executeFeedLikeClick({ profileId, candidate, pushTrace }) {
     return captureScreenshotToFile({ profileId, filePath }).catch(() => null);
   };
 
-  const preShot = await captureLikeSnapshot('pre');
+  const preShot = await Promise.race([
+    captureLikeSnapshot('pre'),
+    new Promise((resolve) => setTimeout(() => resolve(null), 8000)),
+  ]);
 
   const readCandidateLikedAfterClick = async () => {
     const noteId = String(candidate?.noteId || '').trim();
@@ -219,7 +222,7 @@ async function executeFeedLikeClick({ profileId, candidate, pushTrace }) {
       noteId: candidate.noteId,
       reason: 'click_timeout_or_error',
     });
-    return { ok: false, code: 'CLICK_FAILED' };
+    return { ok: false, code: 'CLICK_FAILED', noteId: candidate.noteId, preShot };
   }
 
   const postSelector = await waitForAnchor(profileId, {
@@ -235,7 +238,10 @@ async function executeFeedLikeClick({ profileId, candidate, pushTrace }) {
 
   const postStatus = await readCandidateLikedAfterClick();
 
-  const postShot = await captureLikeSnapshot('post');
+  const postShot = await Promise.race([
+    captureLikeSnapshot('post'),
+    new Promise((resolve) => setTimeout(() => resolve(null), 8000)),
+  ]);
 
   const selectorChanged = postSelector?.ok === true && postStatus?.ok === true && postStatus?.liked === true;
 
