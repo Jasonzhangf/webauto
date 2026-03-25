@@ -4,7 +4,7 @@
  *
  * 覆盖：
  *   Phase 0 - 环境依赖（node版本、camo版本、关键deps、vendor文件）
- *   Phase 1 - Camo 运行时连通性（health、evaluate/screenshot/click/press）
+ *   Phase 1 - Camo 运行时连通性（health、evaluate/screenshot + anchor click/press）
  *   Phase 2 - XHS 模块加载
  *   Phase 3 - XHS 页面上下文 & like-target selector 链
  *   Phase 4 - Feed-like 分层 block 配置校验（多关键词截断/每轮点赞数/操作链）
@@ -178,6 +178,40 @@ async function callCamo(action, args = {}, timeoutMs = 8000) {
   });
 }
 
+async function resolveVisibleAnchor(selectors, timeoutMs = 5000) {
+  const list = Array.isArray(selectors) ? selectors : [selectors].filter(Boolean);
+  if (list.length === 0) return { ok: false, reason: 'no_selectors' };
+  const script = `(() => {
+    const selectors = ${JSON.stringify(list)};
+    const viewport = { width: window.innerWidth, height: window.innerHeight };
+    const isVisible = (el) => {
+      if (!el) return false;
+      const style = window.getComputedStyle(el);
+      if (!style || style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity || '1') === 0) return false;
+      const rect = el.getBoundingClientRect();
+      if (!rect || rect.width <= 1 || rect.height <= 1) return false;
+      const cx = rect.left + rect.width / 2;
+      const cy = rect.top + rect.height / 2;
+      if (cx < 0 || cy < 0 || cx > viewport.width || cy > viewport.height) return false;
+      return { rect, center: { x: cx, y: cy } };
+    };
+    for (const sel of selectors) {
+      const el = document.querySelector(sel);
+      const visible = isVisible(el);
+      if (visible) {
+        return { selector: sel, rect: visible.rect, center: visible.center, viewport };
+      }
+    }
+    return { selector: null, reason: 'no_visible_anchor', viewport };
+  })()`;
+  const res = await callCamo('evaluate', { profileId, script }, timeoutMs);
+  const data = res.data?.result || res.data?.data || res.data || {};
+  if (!res.ok || !data?.selector) {
+    return { ok: false, reason: data?.reason || 'no_visible_anchor', details: data };
+  }
+  return { ok: true, anchor: data };
+}
+
 currentPhase = 'camo';
 
 async function testCamoRuntime() {
@@ -208,11 +242,31 @@ async function testCamoRuntime() {
     bad('screenshot', JSON.stringify(ss.data).slice(0, 80));
   }
 
-  const click = await callCamo('mouse:click', { profileId, x: 1, y: 1, button: 'left', clicks: 1 }, 5000);
-  click.ok ? ok('mouse:click') : bad('mouse:click', JSON.stringify(click.data).slice(0, 80));
+  const anchor = await resolveVisibleAnchor(['#search-input', 'input.search-input', 'input']);
+  if (!anchor.ok) {
+    skipIt('mouse:click', `no visible anchor (${anchor.reason})`);
+    skipIt('keyboard:press', `no visible anchor (${anchor.reason})`);
+    return true;
+  }
+
+  const click = await callCamo('mouse:click', {
+    profileId,
+    x: anchor.anchor.center.x,
+    y: anchor.anchor.center.y,
+    button: 'left',
+    clicks: 1,
+  }, 5000);
+  click.ok
+    ? ok('mouse:click', `anchor=${anchor.anchor.selector}`)
+    : bad('mouse:click', JSON.stringify(click.data).slice(0, 80));
+
+  if (!click.ok) {
+    skipIt('keyboard:press', 'anchor click failed');
+    return true;
+  }
 
   const key = await callCamo('keyboard:press', { profileId, key: 'Escape' }, 5000);
-  key.ok ? ok('keyboard:press') : bad('keyboard:press', JSON.stringify(key.data).slice(0, 80));
+  key.ok ? ok('keyboard:press', `anchor=${anchor.anchor.selector}`) : bad('keyboard:press', JSON.stringify(key.data).slice(0, 80));
 
   return true;
 }

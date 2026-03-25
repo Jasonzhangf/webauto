@@ -858,6 +858,7 @@ Tags: #tab-management #max-tabs #camo
 
 Tags: #coverage #bottom-anchor #root-cause-fixed
 
+
 ## 进程生命周期管理（硬性限制）
 
 ### 根因
@@ -929,3 +930,6 @@ Tags: #lifecycle #zombie-process #daemon
 3. **滚动检测**: `readFeedWindowSignature` 判断是否有新内容
 4. **断点续传**: 持久化每个 tab 的 scrollPage、likedCount、completed 状态
 
+
+- 2026-03-25: click/press 必须基于可见元素锚点；超时只能围绕锚点（无锚点超时无意义）；smoke/验证前先用 camo 手动探测可用锚点。
+Tags: #anchor #visible #click #timeout
