@@ -880,3 +880,52 @@ Tags: #coverage #bottom-anchor #root-cause-fixed
 - **daemon 是唯一启动/关闭真源**
 - **task stop 后如果进程仍存在，daemon housekeeping 会自动清理**
 Tags: #lifecycle #zombie-process #daemon
+
+## Feed-Like 多 Tab 轮转策略 (2026-03-25)
+
+### 核心流程
+
+```
+初始化: 打开最多 4 个 Tab，每个 Tab 搜索一个 keyword
+
+循环:
+  Tab1 点 5 个 → Tab2 点 5 个 → Tab3 点 5 个 → Tab4 点 5 个 → Tab1 点 5 个 → ...
+
+每个 Tab 内:
+  1. scan 读取当前页面所有 .note-item
+  2. 过滤出 unliked[] 
+  3. 随机选 5 个（不足则全选）
+  4. 逐个点击，间隔 1-5s 随机
+  5. 当前页点完 → 滚动到下一页 → 继续
+  6. 到底无新内容 → 标记 tab 完成
+
+退出条件:
+  - 所有 tab 都到底了
+  - 达到总点赞上限
+  - 风控触发
+```
+
+### Keywords 规则
+
+- 一次最多 4 个 keyword
+- 不足 4 个：有几个开几个 tab
+- 超过 4 个：截断，只取前 4 个
+- 每个 keyword 对应一个独立的搜索 Tab
+
+### 风控策略
+
+| 策略 | 说明 |
+|------|------|
+| Tab 切换分散 | 每 tab 点 5 个就切换，避免单 tab 连续操作过多 |
+| 页面内随机 | 5 个候选从 unliked 中随机抽取，不按顺序 |
+| 时间间隔 | 每次点赞间隔 1-5s 随机 |
+| 滚动策略 | 点完当前页才滚动，避免遗漏 |
+| 循环轮转 | 4 个 tab 轮转，回到 Tab1 继续 |
+
+### 技术要点
+
+1. **点赞状态检测**: 使用 `use[*|href="#liked"]` 选择器（命名空间感知）
+2. **Tab 切换**: `page:switch` + anchor 等待页面就绪
+3. **滚动检测**: `readFeedWindowSignature` 判断是否有新内容
+4. **断点续传**: 持久化每个 tab 的 scrollPage、likedCount、completed 状态
+

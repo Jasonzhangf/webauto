@@ -1,6 +1,13 @@
 /**
  * Feed-like operations: 点赞搜索结果列表中的 note-item
  *
+ * 多 Tab 轮转策略:
+ * - 每个 keyword 打开一个搜索 Tab（最多 4 个 Tab）
+ * - Tab1 点 5 个 → Tab2 点 5 个 → Tab3 点 5 个 → Tab4 点 5 个 → Tab1 点 5 个 → ...
+ * - 每个 Tab 内 5 个候选随机选择
+ * - 当前页点完滚动到下一页继续
+ * - 所有 Tab 到底 → 完成
+ *
  * 防阻塞原则：
  * - 每个 await 调用都有超时保护或 try-catch
  * - 固定 sleep 替换为锚点等待（ waitForAnchor ）
@@ -16,6 +23,9 @@ import { evaluateReadonly, clickPoint, waitForAnchor, sleepRandom, pressKey } fr
 import { captureScreenshotToFile } from './diagnostic-utils.mjs';
 
 const NOTE_ITEM_SELECTOR = '.note-item';
+const MAX_FEED_TABS = 4; // 最多 4 个 Tab
+const LIKES_PER_ROUND = 5; // 每 Tab 每轮点 5 个
+
 const NOTE_LIKED_USE_SELECTORS = [
   'svg.reds-icon.like-icon use[*|href="#liked"]',
   'svg.reds-icon.like-icon use[href="#liked"]',
@@ -104,7 +114,6 @@ export async function readFeedLikeCandidates(profileId, options = {}) {
       const item = items[i];
       if (!isVisible(item)) continue;
 
-      // 点击目标必须尽量落在图标本体，避免命中 wrapper 中的计数文本区域
       const likeBtn = item.querySelector('.like-wrapper svg.reds-icon.like-icon, svg.reds-icon.like-icon, .like-lottie');
       if (!likeBtn) continue;
 
@@ -188,8 +197,6 @@ async function executeFeedLikeClick({ profileId, candidate, pushTrace }) {
     new Promise((resolve) => setTimeout(() => resolve(null), 8000)),
   ]);
 
-  // 构建针对特定 noteId 的 like-active 选择器
-  // 小红书的 DOM: .note-item 内有 .like-wrapper.like-active 或 .like-lottie.like-active
   const noteId = String(candidate?.noteId || '').trim();
   // 必须使用 [*|href="#liked"]：xlink:href 是命名空间属性，普通 CSS 不匹配
   const likeActiveSelectors = noteId
@@ -244,7 +251,6 @@ async function executeFeedLikeClick({ profileId, candidate, pushTrace }) {
       }).catch(() => ({ ok: false, reason: 'anchor_timeout' }))
     : { ok: false, reason: 'no_noteId' };
 
-  // 简单的 postStatus（只用锚点结果，不用 evaluate）
   const postStatus = { ok: postSelector?.ok === true, liked: postSelector?.ok === true };
 
   const postShot = await Promise.race([
@@ -276,19 +282,20 @@ async function executeFeedLikeClick({ profileId, candidate, pushTrace }) {
 }
 
 /**
- * 执行搜索结果点赞操作（主入口）
+ * 执行单 Tab 单轮点赞（点 N 个后返回，由调度层控制 Tab 切换）
  *
- * 防阻塞原则：
- * - scan 失败 → 退出（不重试 scan）
- * - 单次 click 失败 → skip，继续下一个
- * - 滚动后用锚点等待而非固定 sleep
- * - 整个函数永远返回 ok: true（局部失败不阻止完成）
+ * - 每轮点 likesPerRound 个（默认 5），不足则点当前页所有 unliked
+ * - 当前页点完 → 滚动到下一页继续找 unliked
+ * - 当前 Tab 到底 → 返回 tabExhausted: true
+ * - 单次 click 失败 → skip，不阻塞
+ *
+ * @returns {{ ok: boolean, code: string, data: { roundLiked, roundSkipped, tabExhausted } }}
  */
 export async function executeFeedLikeOperation({ profileId, params = {}, context = {} }) {
   const state = getProfileState(profileId);
   const { actionTrace, pushTrace } = buildTraceRecorder();
 
-  const maxLikes = Math.max(1, Number(params.maxLikesPerRound ?? params.maxLikes ?? 10) || 10);
+  const likesPerRound = Math.max(1, Number(params.likesPerRound ?? LIKES_PER_ROUND) || LIKES_PER_ROUND);
   const minTopSafePx = Math.max(60, Number(params.minTopSafePx ?? 90) || 90);
   const likeIntervalMinMs = Math.max(500, Number(params.likeIntervalMinMs ?? 1000) || 1000);
   const likeIntervalMaxMs = Math.max(likeIntervalMinMs, Number(params.likeIntervalMaxMs ?? 5000) || 5000);
@@ -296,36 +303,49 @@ export async function executeFeedLikeOperation({ profileId, params = {}, context
   const rollbackMin = Math.max(1, Number(params.rollbackMin ?? 3) || 3);
   const rollbackMax = Math.max(rollbackMin, Number(params.rollbackMax ?? 5) || 5);
 
-  if (!state.feedLikeState) {
-    state.feedLikeState = {
-      totalLiked: 0,
-      totalSkipped: 0,
+  // 获取当前 Tab 的点赞状态
+  const tabState = state.feedLikeTabState;
+  const currentTabIndex = tabState?.currentTabIndex ?? 0;
+  if (!state.feedLikeTabStates) {
+    state.feedLikeTabStates = {};
+  }
+  if (!state.feedLikeTabStates[currentTabIndex]) {
+    state.feedLikeTabStates[currentTabIndex] = {
       likedNoteIds: new Set(),
       seenWindowSignatures: new Set(),
       scrollCount: 0,
+      exhausted: false,
     };
   }
-  if (!(state.feedLikeState.likedNoteIds instanceof Set)) {
-    state.feedLikeState.likedNoteIds = new Set(Array.isArray(state.feedLikeState.likedNoteIds) ? state.feedLikeState.likedNoteIds : []);
+  const tabData = state.feedLikeTabStates[currentTabIndex];
+  if (!(tabData.likedNoteIds instanceof Set)) {
+    tabData.likedNoteIds = new Set(Array.isArray(tabData.likedNoteIds) ? tabData.likedNoteIds : []);
   }
-  if (!(state.feedLikeState.seenWindowSignatures instanceof Set)) {
-    state.feedLikeState.seenWindowSignatures = new Set(Array.isArray(state.feedLikeState.seenWindowSignatures) ? state.feedLikeState.seenWindowSignatures : []);
+  if (!(tabData.seenWindowSignatures instanceof Set)) {
+    tabData.seenWindowSignatures = new Set(Array.isArray(tabData.seenWindowSignatures) ? tabData.seenWindowSignatures : []);
+  }
+
+  // 全局统计
+  if (!state.feedLikeGlobalState) {
+    state.feedLikeGlobalState = { totalLiked: 0, totalSkipped: 0 };
   }
 
   let roundLiked = 0;
   let roundSkipped = 0;
-  let scrollCount = state.feedLikeState.scrollCount || 0;
+  let scrollCount = tabData.scrollCount || 0;
   let noProgressScrolls = 0;
   let rollbackCycles = 0;
   let emptyScanRetries = 0;
+  let tabExhausted = false;
 
-  while (roundLiked < maxLikes) {
-    // 扫描：失败直接退出（环境异常，继续无意义）
+  while (roundLiked < likesPerRound && !tabExhausted) {
+    // 扫描
     let scan;
     try {
       scan = await readFeedLikeCandidates(profileId, { maxCandidates: 100, minTopSafePx });
     } catch {
       emitOperationProgress(context, { kind: 'feed_like_scan_error', stage: 'feed_like' });
+      tabExhausted = true;
       break;
     }
 
@@ -339,7 +359,6 @@ export async function executeFeedLikeOperation({ profileId, params = {}, context
         emptyScanRetries,
       });
 
-      // 搜索结果刚渲染时可能出现短暂空窗口：用锚点等待，不做固定 sleep
       if (emptyScanRetries < 3) {
         emptyScanRetries += 1;
         await waitForAnchor(profileId, {
@@ -356,37 +375,46 @@ export async function executeFeedLikeOperation({ profileId, params = {}, context
         continue;
       }
 
+      // 持续扫描为空 → Tab 到底
+      tabExhausted = true;
+      tabData.exhausted = true;
       break;
     }
 
     emptyScanRetries = 0;
 
+    const keyword = params.keyword || tabState?.tabKeywords?.[currentTabIndex] || 'unknown';
     const unliked = scan.candidates
-      .map((c) => ({ ...c, keyword: params.keyword || state.keyword || 'unknown' }))
-      .filter((c) => !c.liked && c.noteId && !state.feedLikeState.likedNoteIds.has(c.noteId));
+      .map((c) => ({ ...c, keyword }))
+      .filter((c) => !c.liked && c.noteId && !tabData.likedNoteIds.has(c.noteId));
 
-    state.feedLikeState.unlikedCount = unliked.length;
+    tabData.unlikedCount = unliked.length;
 
     emitOperationProgress(context, {
       kind: 'feed_like_scan_result',
       stage: 'feed_like',
+      tabIndex: currentTabIndex,
+      keyword,
       totalCount: scan.totalCount,
       unlikedCount: unliked.length,
       alreadyLiked: scan.likedCount,
-      seenWindows: state.feedLikeState.seenWindowSignatures.size,
+      seenWindows: tabData.seenWindowSignatures.size,
       roundLiked,
       roundSkipped,
     });
 
+    // 当前页没有 unliked → 滚动到下一页
     if (unliked.length === 0) {
       const beforeWindow = await readFeedWindowSignature(profileId).catch(() => null);
       const beforeSignature = String(beforeWindow?.signature || '').trim();
-      if (beforeSignature) state.feedLikeState.seenWindowSignatures.add(beforeSignature);
+      if (beforeSignature) tabData.seenWindowSignatures.add(beforeSignature);
 
       try {
         await pressKey(profileId, 'PageDown');
       } catch {
         emitOperationProgress(context, { kind: 'feed_like_scroll_key_error', stage: 'feed_like' });
+        tabExhausted = true;
+        tabData.exhausted = true;
         break;
       }
 
@@ -400,7 +428,7 @@ export async function executeFeedLikeOperation({ profileId, params = {}, context
 
       const afterWindow = await readFeedWindowSignature(profileId).catch(() => null);
       const afterSignature = String(afterWindow?.signature || '').trim();
-      if (afterSignature) state.feedLikeState.seenWindowSignatures.add(afterSignature);
+      if (afterSignature) tabData.seenWindowSignatures.add(afterSignature);
 
       const progressed = changed || (beforeSignature && afterSignature && beforeSignature !== afterSignature);
       if (progressed) {
@@ -410,10 +438,11 @@ export async function executeFeedLikeOperation({ profileId, params = {}, context
       }
 
       scrollCount += 1;
-      state.feedLikeState.scrollCount = scrollCount;
+      tabData.scrollCount = scrollCount;
       emitOperationProgress(context, {
         kind: 'feed_like_scroll_probe',
         stage: 'feed_like',
+        tabIndex: currentTabIndex,
         scrollCount,
         noProgressScrolls,
         progressed,
@@ -479,6 +508,9 @@ export async function executeFeedLikeOperation({ profileId, params = {}, context
               rollbackCycles,
               reason: 'rollback_not_progressed',
             });
+            // Tab 到底
+            tabExhausted = true;
+            tabData.exhausted = true;
             break;
           }
         }
@@ -494,154 +526,191 @@ export async function executeFeedLikeOperation({ profileId, params = {}, context
 
     if (result.ok) {
       roundLiked += 1;
-      state.feedLikeState.totalLiked += 1;
-      if (candidate.noteId) state.feedLikeState.likedNoteIds.add(candidate.noteId);
+      state.feedLikeGlobalState.totalLiked += 1;
+      if (candidate.noteId) tabData.likedNoteIds.add(candidate.noteId);
 
       emitOperationProgress(context, {
         kind: 'feed_like_done',
         stage: 'feed_like',
+        tabIndex: currentTabIndex,
         noteId: candidate.noteId,
-        screenshotPre: result.preShot || null,
-        screenshotPost: result.postShot || null,
-        postStatus: result.postStatus || null,
-        postSelectorOk: result.postSelector?.ok || null,
         selectorChanged: result.selectorChanged === true,
         roundLiked,
         roundSkipped,
+        totalLiked: state.feedLikeGlobalState.totalLiked,
       });
 
       // 随机间隔（风控）
-      if (roundLiked < maxLikes) {
+      if (roundLiked < likesPerRound) {
         await sleepRandom(likeIntervalMinMs, likeIntervalMaxMs, null, 'feed_like_interval');
       }
     } else {
       roundSkipped += 1;
-      state.feedLikeState.totalSkipped += 1;
+      state.feedLikeGlobalState.totalSkipped += 1;
 
-      // 已点赞跳过：写入本轮去重，避免同一窗口反复命中同一 noteId 形成死循环
       if (result.code === 'ALREADY_LIKED' && candidate.noteId) {
-        state.feedLikeState.likedNoteIds.add(candidate.noteId);
+        tabData.likedNoteIds.add(candidate.noteId);
       }
 
       emitOperationProgress(context, {
         kind: 'feed_like_click_failed',
         stage: 'feed_like',
+        tabIndex: currentTabIndex,
         noteId: candidate.noteId,
         reason: result.code || 'unknown',
         screenshotPre: result.preShot || null,
         screenshotPost: result.postShot || null,
-        postStatus: result.postStatus || null,
-        postSelectorOk: result.postSelector?.ok || null,
       });
     }
   }
 
-  return {
-    ok: true,
-    code: 'FEED_LIKE_ROUND_DONE',
-    data: {
-      roundLiked,
-      roundSkipped,
-      scrollCount,
-      totalLiked: state.feedLikeState.totalLiked,
-      totalSkipped: state.feedLikeState.totalSkipped,
-    },
-  };
+  tabData.exhausted = tabExhausted;
+
+  // 如果 Tab 没到底，正常返回本轮结果
+  if (!tabExhausted) {
+    return {
+      ok: true,
+      code: 'FEED_LIKE_ROUND_DONE',
+      data: {
+        tabIndex: currentTabIndex,
+        roundLiked,
+        roundSkipped,
+        tabExhausted: false,
+        totalLiked: state.feedLikeGlobalState.totalLiked,
+        totalSkipped: state.feedLikeGlobalState.totalSkipped,
+      },
+    };
+  }
+
+  // Tab 到底：切换到下一个 Tab 继续点赞
+  const switchResult = await executeFeedLikeTabSwitch({ profileId, params, context });
+  if (switchResult.code === 'ALL_TABS_DONE') {
+    return {
+      ok: true,
+      code: 'ALL_TABS_EXHAUSTED',
+      data: {
+        tabIndex: currentTabIndex,
+        roundLiked,
+        totalLiked: state.feedLikeGlobalState.totalLiked,
+        totalSkipped: state.feedLikeGlobalState.totalSkipped,
+      },
+    };
+  }
+
+  // 递归：在新 Tab 上继续点赞
+  return executeFeedLikeOperation({ profileId, params, context });
 }
 
 /**
- * Tab ��换操作（多关键字/多 tab 场景）
+ * 多 Tab 轮转操作
  *
- * 防阻塞原则：
- * - page:switch / newTab 加超时
- * - 切换后用锚点等待而非固定 sleep
- * - 全部 try-catch 保护，任何失败返回安全的降级结果
+ * 策略: Tab1 → Tab2 → Tab3 → Tab4 → Tab1 → ... 循环
+ * - 已有 Tab → page:switch 切换
+ * - 还有未使用的 keyword → 打开新 Tab + 搜索
+ * - 所有 Tab 都 exhausted → 返回 ALL_TABS_DONE
+ *
+ * keywords 规则: 最多 4 个，不足则有多少用多少，超过截断
  */
 export async function executeFeedLikeTabSwitch({ profileId, params = {}, context = {} }) {
   const state = getProfileState(profileId);
 
-  const maxFeedTabs = Math.max(1, Number(params.maxFeedTabs ?? 5) || 5);
   const keywords = Array.isArray(params.keywords)
-    ? params.keywords
+    ? params.keywords.slice(0, MAX_FEED_TABS)
     : (params.keywords
         ? String(params.keywords)
             .split(',')
             .map((k) => k.trim())
             .filter(Boolean)
+            .slice(0, MAX_FEED_TABS)
         : []);
-  const maxLikesPerTab = Math.max(1, Number(params.maxLikesPerTab ?? 10) || 10);
 
+  // 初始化 Tab 状态
   if (!state.feedLikeTabState) {
-    state.feedLikeTabState = { currentTabIndex: 0, tabKeywords: [], tabsOpened: 0 };
+    state.feedLikeTabState = {
+      currentTabIndex: 0,
+      tabKeywords: [...keywords],
+      tabsOpened: 0,
+    };
+  }
+  if (!state.feedLikeTabStates) {
+    state.feedLikeTabStates = {};
+  }
+  if (!state.feedLikeGlobalState) {
+    state.feedLikeGlobalState = { totalLiked: 0, totalSkipped: 0 };
   }
 
-  // 获取当前浏览器 tab 列表（超时保护）
+  const tabState = state.feedLikeTabState;
+  const effectiveKeywords = tabState.tabKeywords.length > 0 ? tabState.tabKeywords : keywords;
+
+  // 获取当前浏览器 tab 列表
   const pageList = await safeCallAPI('page:list', { profileId }, 10000);
   const pages = pageList?.pages || pageList?.data?.pages || [];
   if (pages.length === 0) {
     return { ok: true, code: 'PAGE_LIST_EMPTY', message: 'no tabs available' };
   }
 
-  // 如果当前 tab 还没点赞够且有未点赞候选，不切换
-  const currentTabLikes = state.feedLikeState?.totalLiked || 0;
-  const unlikedCount = state.feedLikeState?.unlikedCount || 0;
+  const activeTabCount = pages.length;
 
-  if (currentTabLikes < maxLikesPerTab && unlikedCount > 0) {
+  // 检查当前 Tab 是否已 exhausted
+  const currentTabIndex = tabState.currentTabIndex ?? 0;
+  const currentTabData = state.feedLikeTabStates[currentTabIndex];
+  const currentExhausted = currentTabData?.exhausted === true;
+
+  // 决定下一个 Tab 索引（轮转）
+  let nextTabIndex;
+  if (currentExhausted) {
+    // 当前 Tab 已到底，切到下一个
+    nextTabIndex = (currentTabIndex + 1) % Math.max(activeTabCount, 1);
+  } else {
+    // 当前 Tab 未到底但本轮点够了，正常轮转到下一个
+    nextTabIndex = (currentTabIndex + 1) % Math.max(activeTabCount, 1);
+  }
+
+  // 检查所有 Tab 是否都已 exhausted
+  let allExhausted = true;
+  for (let i = 0; i < activeTabCount; i += 1) {
+    if (state.feedLikeTabStates[i]?.exhausted !== true) {
+      allExhausted = false;
+      break;
+    }
+  }
+
+  if (allExhausted && tabState.tabsOpened >= effectiveKeywords.length) {
+    emitOperationProgress(context, {
+      kind: 'feed_like_all_tabs_done',
+      stage: 'feed_like',
+      totalTabs: tabState.tabsOpened,
+      totalLiked: state.feedLikeGlobalState.totalLiked,
+      totalSkipped: state.feedLikeGlobalState.totalSkipped,
+    });
     return {
       ok: true,
-      code: 'TAB_SWITCH_SKIPPED',
-      message: 'current tab not exhausted',
-      data: { currentTabLikes, maxLikesPerTab },
+      code: 'ALL_TABS_DONE',
+      message: 'all feed tabs exhausted',
+      data: {
+        totalTabs: tabState.tabsOpened,
+        totalLiked: state.feedLikeGlobalState.totalLiked,
+        totalSkipped: state.feedLikeGlobalState.totalSkipped,
+      },
     };
   }
 
-  // 尝试切换到下一个已存在的 tab
-  const nextTabIndex = state.feedLikeTabState.currentTabIndex + 1;
+  // 检查是否需要打开新 Tab（还有未使用的 keyword）
+  const needNewTab = tabState.tabsOpened < effectiveKeywords.length && activeTabCount < MAX_FEED_TABS;
 
-  if (nextTabIndex < pages.length && nextTabIndex < maxFeedTabs) {
-    const switchResult = await safeCallAPI('page:switch', { profileId, index: pages[nextTabIndex].index }, 10000);
-    if (!switchResult) {
-      // 切换失败，不阻塞
-      return { ok: true, code: 'TAB_SWITCH_FAILED', message: 'page:switch failed' };
-    }
-
-    // 锚点等待：切换 tab 后等页面就绪（最大 5s）
-    try {
-      await waitForAnchor(profileId, {
-        selectors: ['#search-input', '.note-item', '.feeds-container'],
-        timeoutMs: 5000,
-        intervalMs: 300,
-        description: 'feed_like_tab_switch_settle',
-      });
-    } catch {
-      // 锚点超时，继续
-    }
-
-    state.feedLikeTabState.currentTabIndex = nextTabIndex;
-
-    // 重置当前 tab 的点赞状态
-    state.feedLikeState = { totalLiked: 0, totalSkipped: 0, likedNoteIds: new Set(), scrollCount: 0 };
-
-    return {
-      ok: true,
-      code: 'TAB_SWITCH_DONE',
-      message: 'switched to existing tab',
-      data: { newTabIndex: nextTabIndex },
-    };
-  }
-
-  // 如果还有未使用的关键字，打开新 tab 并搜索
-  if (keywords.length > 0 && state.feedLikeTabState.tabsOpened < keywords.length && pages.length < maxFeedTabs) {
-    const nextKeywordIndex = state.feedLikeTabState.tabsOpened;
-    const nextKeyword = keywords[nextKeywordIndex];
-
-    if (nextKeyword) {
+  if (needNewTab) {
+    const nextKeywordIndex = tabState.tabsOpened;
+    const nextKeyword = effectiveKeywords[nextKeywordIndex];
+    if (!nextKeyword) {
+      // 不应该到这里，但安全保护
+      tabState.tabsOpened = effectiveKeywords.length;
+    } else {
       const newTabResult = await safeCallAPI('newTab', { profileId, url: 'https://www.xiaohongshu.com/explore' }, 15000);
       if (!newTabResult) {
         return { ok: true, code: 'NEW_TAB_FAILED', message: 'newTab failed' };
       }
 
-      // 锚点等待：新 tab 打开后等页面就绪
+      // 锚点等待
       try {
         await waitForAnchor(profileId, {
           selectors: ['#search-input', '.note-item', '.feeds-container', '.explore-page'],
@@ -650,7 +719,7 @@ export async function executeFeedLikeTabSwitch({ profileId, params = {}, context
           description: 'feed_like_new_tab_settle',
         });
       } catch {
-        // 锚点超时，继续
+        // anchor timeout, continue
       }
 
       const newList = await safeCallAPI('page:list', { profileId }, 5000);
@@ -660,33 +729,89 @@ export async function executeFeedLikeTabSwitch({ profileId, params = {}, context
         await safeCallAPI('page:switch', { profileId, index: newTab.index }, 10000);
       }
 
-      state.feedLikeTabState.tabsOpened += 1;
-      state.feedLikeTabState.tabKeywords.push(nextKeyword);
-      state.feedLikeTabState.currentTabIndex = newPages.length > 0 ? newPages.length - 1 : state.feedLikeTabState.currentTabIndex;
+      tabState.tabsOpened += 1;
+      tabState.currentTabIndex = newPages.length > 0 ? newPages.length - 1 : tabState.currentTabIndex;
 
-      // 重置点赞状态并标记待搜索关键字
-      state.feedLikeState = {
-        totalLiked: 0,
-        totalSkipped: 0,
+      // 初始化新 Tab 状态
+      state.feedLikeTabStates[tabState.currentTabIndex] = {
         likedNoteIds: new Set(),
+        seenWindowSignatures: new Set(),
         scrollCount: 0,
+        exhausted: false,
         pendingKeyword: nextKeyword,
       };
+
+      emitOperationProgress(context, {
+        kind: 'feed_like_new_tab_opened',
+        stage: 'feed_like',
+        tabIndex: tabState.currentTabIndex,
+        keyword: nextKeyword,
+        totalTabsOpened: tabState.tabsOpened,
+      });
 
       return {
         ok: true,
         code: 'NEW_TAB_OPENED',
-        message: 'opened new tab with new keyword',
-        data: { newTabIndex: state.feedLikeTabState.currentTabIndex, keyword: nextKeyword, needSearch: true },
+        message: `opened new tab ${tabState.currentTabIndex} with keyword "${nextKeyword}"`,
+        data: {
+          newTabIndex: tabState.currentTabIndex,
+          keyword: nextKeyword,
+          needSearch: true,
+          totalTabsOpened: tabState.tabsOpened,
+        },
       };
     }
   }
 
-  // 所有 tab 都已处理完毕
+  // 切换到下一个 Tab（轮转）
+  if (nextTabIndex < activeTabCount) {
+    const switchResult = await safeCallAPI('page:switch', { profileId, index: pages[nextTabIndex].index }, 10000);
+    if (!switchResult) {
+      return { ok: true, code: 'TAB_SWITCH_FAILED', message: 'page:switch failed' };
+    }
+
+    // 锚点等待
+    try {
+      await waitForAnchor(profileId, {
+        selectors: ['#search-input', '.note-item', '.feeds-container'],
+        timeoutMs: 5000,
+        intervalMs: 300,
+        description: 'feed_like_tab_switch_settle',
+      });
+    } catch {
+      // anchor timeout, continue
+    }
+
+    tabState.currentTabIndex = nextTabIndex;
+
+    emitOperationProgress(context, {
+      kind: 'feed_like_tab_switched',
+      stage: 'feed_like',
+      fromTabIndex: currentTabIndex,
+      toTabIndex: nextTabIndex,
+      tabExhausted: currentExhausted,
+    });
+
+    return {
+      ok: true,
+      code: 'TAB_SWITCH_DONE',
+      message: `switched from tab ${currentTabIndex} to tab ${nextTabIndex}`,
+      data: {
+        fromTabIndex: currentTabIndex,
+        toTabIndex: nextTabIndex,
+        tabExhausted: currentExhausted,
+      },
+    };
+  }
+
   return {
     ok: true,
     code: 'ALL_TABS_DONE',
     message: 'all feed tabs processed',
-    data: { totalTabs: state.feedLikeTabState.tabsOpened, totalLiked: state.feedLikeState?.totalLiked || 0 },
+    data: {
+      totalTabs: tabState.tabsOpened,
+      totalLiked: state.feedLikeGlobalState.totalLiked,
+      totalSkipped: state.feedLikeGlobalState.totalSkipped,
+    },
   };
 }

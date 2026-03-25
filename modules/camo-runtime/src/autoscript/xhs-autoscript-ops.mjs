@@ -225,18 +225,15 @@ export function buildXhsFeedLikeOperations(options = {}) {
       params: {
         keyword: options.keyword,
         keywords: options.keywords,
-        maxLikesPerRound: options.maxLikesPerTab,
-        maxLikesPerTab: options.maxLikesPerTab,
+        likesPerRound: options.likesPerRound ?? options.maxLikesPerTab ?? 5,
         likeIntervalMinMs: options.likeIntervalMinMs,
         likeIntervalMaxMs: options.likeIntervalMaxMs,
-        maxFeedTabs: options.maxFeedTabs,
-        maxScrolls: options.maxScrolls,
         maxNoProgressScrolls: options.maxNoProgressScrolls,
       },
       trigger: 'search_result_item.exist',
       dependsOn: ['submit_search'],
-      once: true,
-      timeoutMs: 900000,
+      once: true, // 单次长运行，内部自行管理 Tab 轮转
+      timeoutMs: 1800000, // 30 分钟总超时
       retry: { attempts: 1, backoffMs: 0 },
       impact: 'script',
       onFailure: 'stop_all',

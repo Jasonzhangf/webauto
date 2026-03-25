@@ -4,7 +4,6 @@ import {
   buildXhsGuardOperations,
   buildXhsSearchOperations,
   buildXhsFeedLikeOperations,
-  buildXhsTabPoolOperation,
 } from './xhs-autoscript-ops.mjs';
 
 export function buildXhsFeedLikeAutoscript(rawOptions = {}) {
@@ -13,14 +12,22 @@ export function buildXhsFeedLikeAutoscript(rawOptions = {}) {
     source: 'scripts/xiaohongshu/phase-feed-like.mjs',
   });
 
-  // feed-like 只在搜索结果页操作，不需要 acrossPages 验证和 tab pool
   const searchOps = buildXhsSearchOperations({ ...options, detailLoopEnabled: false });
   const filteredSearchOps = searchOps.filter(op => op.id !== 'verify_subscriptions_all_pages');
+
+  // keywords: 最多 4 个，不足则有多少用多少，超过截断
+  const rawKeywords = options.keywords || [];
+  const keywords = Array.isArray(rawKeywords)
+    ? rawKeywords.slice(0, 4)
+    : (typeof rawKeywords === 'string'
+        ? rawKeywords.split(',').map(k => k.trim()).filter(Boolean).slice(0, 4)
+        : []);
 
   const operations = [
     ...buildXhsBootstrapOperations(options),
     ...filteredSearchOps,
-    ...buildXhsFeedLikeOperations(options),
+    // 单一主操作：内部自行管理 Tab 轮转 + 点赞循环
+    ...buildXhsFeedLikeOperations({ ...options, keywords }),
     {
       id: 'finish_after_feed_like',
       action: 'raise_error',
