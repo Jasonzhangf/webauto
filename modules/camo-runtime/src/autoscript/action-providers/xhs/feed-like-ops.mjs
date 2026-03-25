@@ -1,11 +1,11 @@
 /**
  * Feed-like operations: 点赞搜索结果列表中的 note-item
  *
- * 功能：
- * - 扫描当前搜索结果页面上可见的 .note-item
- * - 检测每个 note-item 上的 .like-lottie 点赞按钮状态
- * - 随机选择未点赞的候选进行点赞
- * - 支持多 tab 轮转（每个 tab 点赞 N 条后切换）
+ * 防阻塞原则：
+ * - 每个 await 调用都有超时保护或 try-catch
+ * - 固定 sleep 替换为锚点等待（ waitForAnchor ）
+ * - 单次点赞失败不阻塞主流程（ catch + skip ）
+ * - tab 切换用锚点等待页面就绪而非固定延时
  */
 
 import { callAPI } from '../../../utils/browser-service.mjs';
@@ -15,6 +15,19 @@ import { evaluateReadonly, clickPoint, waitForAnchor, sleep, sleepRandom, pressK
 import { readSearchViewportReady } from './search-ops.mjs';
 
 const NOTE_ITEM_SELECTOR = '.note-item';
+
+/** 安全 callAPI 包装：超时后返回 null 而非抛异常 */
+async function safeCallAPI(action, payload = {}, timeoutMs = 15000) {
+  const timer = new AbortController();
+  const tid = setTimeout(() => timer.abort(), timeoutMs);
+  try {
+    return await callAPI(action, payload);
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(tid);
+  }
+}
 
 /**
  * 读取当前搜索结果页面上所有可见的 note-item 及其点赞状态
@@ -93,21 +106,38 @@ export async function readFeedLikeCandidates(profileId, options = {}) {
 }
 
 /**
- * 执行单次点赞操作
+ * 执行单次点赞操作（防阻塞：超时 + try-catch）
  */
 async function executeFeedLikeClick({ profileId, candidate, pushTrace }) {
   if (!candidate || !candidate.center) {
-    return { ok: false, code: 'INVALID_CANDIDATE', message: 'candidate missing or no center point' };
+    return { ok: false, code: 'INVALID_CANDIDATE' };
   }
 
-  await clickPoint(profileId, candidate.center, { steps: 2 });
+  try {
+    // clickPoint 加超时保护
+    await clickPoint(profileId, candidate.center, { steps: 2, timeoutMs: 8000 });
+  } catch {
+    // 点击超时或失败，跳过此候选，不阻塞主流程
+    pushTrace({
+      kind: 'skip',
+      stage: 'feed_like',
+      noteId: candidate.noteId,
+      reason: 'click_timeout_or_error',
+    });
+    return { ok: false, code: 'CLICK_FAILED' };
+  }
 
-  await waitForAnchor(profileId, {
-    selectors: ['.note-item', '.feeds-container'],
-    timeoutMs: 3000,
-    intervalMs: 200,
-    description: 'feed_like_post_click_settle',
-  });
+  // 锚点等待：点赞后等 DOM 稳定（最大 3s）
+  try {
+    await waitForAnchor(profileId, {
+      selectors: ['.note-item', '.feeds-container'],
+      timeoutMs: 3000,
+      intervalMs: 200,
+      description: 'feed_like_post_click_settle',
+    });
+  } catch {
+    // 锚点等待超时，不阻塞
+  }
 
   pushTrace({
     kind: 'click',
@@ -122,12 +152,11 @@ async function executeFeedLikeClick({ profileId, candidate, pushTrace }) {
 /**
  * 执行搜索结果点赞操作（主入口）
  *
- * 流程：
- * 1. 扫描当前可见的 note-item
- * 2. 筛选未点赞的候选
- * 3. 随机选择并点赞
- * 4. 重复直到达到 maxLikes 或无可选候选
- * 5. 需要时滚动加载更多
+ * 防阻塞原则：
+ * - scan 失败 → 退出（不重试 scan）
+ * - 单次 click 失败 → skip，继续下一个
+ * - 滚动后用锚点等待而非固定 sleep
+ * - 整个函数永远返回 ok: true（局部失败不阻止完成）
  */
 export async function executeFeedLikeOperation({ profileId, params = {}, context = {} }) {
   const state = getProfileState(profileId);
@@ -137,7 +166,6 @@ export async function executeFeedLikeOperation({ profileId, params = {}, context
   const likeIntervalMinMs = Math.max(500, Number(params.likeIntervalMinMs ?? 1000) || 1000);
   const likeIntervalMaxMs = Math.max(likeIntervalMinMs, Number(params.likeIntervalMaxMs ?? 5000) || 5000);
   const maxScrolls = Math.max(1, Number(params.maxScrolls ?? 5) || 5);
-  const scrollDelayMs = Math.max(500, Number(params.scrollDelayMs ?? 1500) || 1500);
 
   if (!state.feedLikeState) {
     state.feedLikeState = { totalLiked: 0, totalSkipped: 0, likedNoteIds: new Set(), scrollCount: 0 };
@@ -148,7 +176,14 @@ export async function executeFeedLikeOperation({ profileId, params = {}, context
   let scrollCount = state.feedLikeState.scrollCount || 0;
 
   while (roundLiked < maxLikes && scrollCount <= maxScrolls) {
-    const scan = await readFeedLikeCandidates(profileId, { maxCandidates: 100 });
+    // 扫描：失败直接退出（环境异常，继续无意义）
+    let scan;
+    try {
+      scan = await readFeedLikeCandidates(profileId, { maxCandidates: 100 });
+    } catch {
+      emitOperationProgress(context, { kind: 'feed_like_scan_error', stage: 'feed_like' });
+      break;
+    }
 
     if (!scan?.ok || scan.candidates.length === 0) {
       emitOperationProgress(context, {
@@ -165,7 +200,6 @@ export async function executeFeedLikeOperation({ profileId, params = {}, context
       (c) => !c.liked && c.noteId && !state.feedLikeState.likedNoteIds.has(c.noteId),
     );
 
-    // 保存 unlikedCount 供 tab-switch 判断
     state.feedLikeState.unlikedCount = unliked.length;
 
     emitOperationProgress(context, {
@@ -180,8 +214,24 @@ export async function executeFeedLikeOperation({ profileId, params = {}, context
 
     if (unliked.length === 0) {
       if (scrollCount < maxScrolls) {
-        await pressKey(profileId, 'PageDown');
-        await sleep(scrollDelayMs);
+        try {
+          await pressKey(profileId, 'PageDown');
+        } catch {
+          // pressKey 失败，跳过滚动
+          emitOperationProgress(context, { kind: 'feed_like_scroll_key_error', stage: 'feed_like' });
+          break;
+        }
+        // 锚点等待：滚动后等搜索结果锚点出现（最大 5s）
+        try {
+          await waitForAnchor(profileId, {
+            selectors: ['.note-item:has(a.cover)', '.feeds-container'],
+            timeoutMs: 5000,
+            intervalMs: 300,
+            description: 'feed_like_after_scroll',
+          });
+        } catch {
+          // 滚动锚点超时，继续（可能已到底部）
+        }
         scrollCount += 1;
         state.feedLikeState.scrollCount = scrollCount;
         continue;
@@ -232,7 +282,12 @@ export async function executeFeedLikeOperation({ profileId, params = {}, context
 }
 
 /**
- * Tab 切换操作（多关键字/多 tab 场景）
+ * Tab ��换操作（多关键字/多 tab 场景）
+ *
+ * 防阻塞原则：
+ * - page:switch / newTab 加超时
+ * - 切换后用锚点等待而非固定 sleep
+ * - 全部 try-catch 保护，任何失败返回安全的降级结果
  */
 export async function executeFeedLikeTabSwitch({ profileId, params = {}, context = {} }) {
   const state = getProfileState(profileId);
@@ -252,9 +307,12 @@ export async function executeFeedLikeTabSwitch({ profileId, params = {}, context
     state.feedLikeTabState = { currentTabIndex: 0, tabKeywords: [], tabsOpened: 0 };
   }
 
-  // 获取当前浏览器 tab 列表
-  const pageList = await callAPI('page:list', { profileId });
+  // 获取当前浏览器 tab 列表（超时保护）
+  const pageList = await safeCallAPI('page:list', { profileId }, 10000);
   const pages = pageList?.pages || pageList?.data?.pages || [];
+  if (pages.length === 0) {
+    return { ok: true, code: 'PAGE_LIST_EMPTY', message: 'no tabs available' };
+  }
 
   // 如果当前 tab 还没点赞够且有未点赞候选，不切换
   const currentTabLikes = state.feedLikeState?.totalLiked || 0;
@@ -273,8 +331,24 @@ export async function executeFeedLikeTabSwitch({ profileId, params = {}, context
   const nextTabIndex = state.feedLikeTabState.currentTabIndex + 1;
 
   if (nextTabIndex < pages.length && nextTabIndex < maxFeedTabs) {
-    await callAPI('page:switch', { profileId, index: pages[nextTabIndex].index });
-    await sleep(2000);
+    const switchResult = await safeCallAPI('page:switch', { profileId, index: pages[nextTabIndex].index }, 10000);
+    if (!switchResult) {
+      // 切换失败，不阻塞
+      return { ok: true, code: 'TAB_SWITCH_FAILED', message: 'page:switch failed' };
+    }
+
+    // 锚点等待：切换 tab 后等页面就绪（最大 5s）
+    try {
+      await waitForAnchor(profileId, {
+        selectors: ['#search-input', '.note-item', '.feeds-container'],
+        timeoutMs: 5000,
+        intervalMs: 300,
+        description: 'feed_like_tab_switch_settle',
+      });
+    } catch {
+      // 锚点超时，继续
+    }
+
     state.feedLikeTabState.currentTabIndex = nextTabIndex;
 
     // 重置当前 tab 的点赞状态
@@ -294,20 +368,33 @@ export async function executeFeedLikeTabSwitch({ profileId, params = {}, context
     const nextKeyword = keywords[nextKeywordIndex];
 
     if (nextKeyword) {
-      await callAPI('newTab', { profileId, url: 'https://www.xiaohongshu.com/explore' });
-      await sleep(2000);
+      const newTabResult = await safeCallAPI('newTab', { profileId, url: 'https://www.xiaohongshu.com/explore' }, 15000);
+      if (!newTabResult) {
+        return { ok: true, code: 'NEW_TAB_FAILED', message: 'newTab failed' };
+      }
 
-      const newList = await callAPI('page:list', { profileId });
+      // 锚点等待：新 tab 打开后等页面就绪
+      try {
+        await waitForAnchor(profileId, {
+          selectors: ['#search-input', '.note-item', '.feeds-container', '.explore-page'],
+          timeoutMs: 8000,
+          intervalMs: 300,
+          description: 'feed_like_new_tab_settle',
+        });
+      } catch {
+        // 锚点超时，继续
+      }
+
+      const newList = await safeCallAPI('page:list', { profileId }, 5000);
       const newPages = newList?.pages || newList?.data?.pages || [];
       if (newPages.length > 0) {
         const newTab = newPages[newPages.length - 1];
-        await callAPI('page:switch', { profileId, index: newTab.index });
-        await sleep(1000);
+        await safeCallAPI('page:switch', { profileId, index: newTab.index }, 10000);
       }
 
       state.feedLikeTabState.tabsOpened += 1;
       state.feedLikeTabState.tabKeywords.push(nextKeyword);
-      state.feedLikeTabState.currentTabIndex = newPages.length - 1;
+      state.feedLikeTabState.currentTabIndex = newPages.length > 0 ? newPages.length - 1 : state.feedLikeTabState.currentTabIndex;
 
       // 重置点赞状态并标记待搜索关键字
       state.feedLikeState = {
