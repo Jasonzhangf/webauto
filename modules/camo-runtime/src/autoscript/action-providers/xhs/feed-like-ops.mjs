@@ -16,7 +16,10 @@ import { evaluateReadonly, clickPoint, waitForAnchor, sleepRandom, pressKey } fr
 import { captureScreenshotToFile } from './diagnostic-utils.mjs';
 
 const NOTE_ITEM_SELECTOR = '.note-item';
-const NOTE_LIKED_USE_SELECTOR = 'svg.reds-icon.like-icon use[href="#liked"], svg.reds-icon.like-icon use[xlink\\:href="#liked"]';
+const NOTE_LIKED_USE_SELECTORS = [
+  'svg.reds-icon.like-icon use[href="#liked"]',
+  'svg.reds-icon.like-icon use[xlink\\:href="#liked"]',
+];
 
 async function readFeedWindowSignature(profileId) {
   const script = `(() => {
@@ -100,10 +103,10 @@ export async function readFeedLikeCandidates(profileId, options = {}) {
       const item = items[i];
       if (!isVisible(item)) continue;
 
-      const likeBtn = item.querySelector('.like-lottie, .like-wrapper, svg.reds-icon.like-icon');
+      const likeBtn = item.querySelector('.like-wrapper, svg.reds-icon.like-icon, .like-lottie');
       if (!likeBtn) continue;
 
-      const likedUse = item.querySelector(${JSON.stringify(NOTE_LIKED_USE_SELECTOR)});
+      const likedUse = item.querySelector(${JSON.stringify(NOTE_LIKED_USE_SELECTORS.join(', '))});
       const likedHref = String(likedUse?.getAttribute('href') || likedUse?.getAttribute('xlink:href') || '').trim();
       const liked = likedHref === '#liked';
 
@@ -180,14 +183,14 @@ async function executeFeedLikeClick({ profileId, candidate, pushTrace }) {
   // 构建针对特定 noteId 的 like-active 选择器
   // 小红书的 DOM: .note-item 内有 .like-wrapper.like-active 或 .like-lottie.like-active
   const noteId = String(candidate?.noteId || '').trim();
-  const likeActiveSelector = noteId
-    ? `.note-item:has(a.cover[href*="${noteId}"]) ${NOTE_LIKED_USE_SELECTOR}`
-    : null;
+  const likeActiveSelectors = noteId
+    ? NOTE_LIKED_USE_SELECTORS.map((sel) => `.note-item:has(a.cover[href*="${noteId}"]) ${sel}`)
+    : [];
 
   // click 前用锚点检查是否已经 liked（避免重复点击）
-  if (likeActiveSelector) {
+  if (likeActiveSelectors.length > 0) {
     const preCheck = await waitForAnchor(profileId, {
-      selectors: [likeActiveSelector],
+      selectors: likeActiveSelectors,
       timeoutMs: 1000,
       intervalMs: 100,
       description: 'feed_like_pre_check_already_liked',
@@ -221,9 +224,9 @@ async function executeFeedLikeClick({ profileId, candidate, pushTrace }) {
   }
 
   // click 后用锚点等待 .like-active 出现（不用 evaluate）
-  const postSelector = likeActiveSelector
+  const postSelector = likeActiveSelectors.length > 0
     ? await waitForAnchor(profileId, {
-        selectors: [likeActiveSelector],
+        selectors: likeActiveSelectors,
         timeoutMs: 5000,
         intervalMs: 200,
         description: 'feed_like_selector_turned_active',
