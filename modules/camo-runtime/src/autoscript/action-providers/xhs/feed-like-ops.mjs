@@ -191,10 +191,10 @@ async function executeFeedLikeClick({ profileId, candidate, pushTrace }) {
   // 构建针对特定 noteId 的 like-active 选择器
   // 小红书的 DOM: .note-item 内有 .like-wrapper.like-active 或 .like-lottie.like-active
   const noteId = String(candidate?.noteId || '').trim();
+  // 必须使用 [*|href="#liked"]：xlink:href 是命名空间属性，普通 CSS 不匹配
   const likeActiveSelectors = noteId
     ? [
-        `.note-item a.cover[href*="${noteId}"] ~ .footer .like-wrapper svg.reds-icon.like-icon use[href="#liked"]`,
-        `.note-item a.cover[href*="${noteId}"] ~ .footer .like-wrapper svg.reds-icon.like-icon use[xlink\\:href="#liked"]`,
+        `.note-item a.cover[href*="${noteId}"] ~ .footer .like-wrapper svg.reds-icon.like-icon use[*|href="#liked"]`,
       ]
     : [];
 

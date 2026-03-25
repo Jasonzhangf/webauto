@@ -857,3 +857,26 @@ Tags: #tab-management #max-tabs #camo
 - comments_harvest: `commentsProcessed=72`, `expected=73`, `coverage=0.99`, `reachedBottom=true`
 
 Tags: #coverage #bottom-anchor #root-cause-fixed
+
+## 进程生命周期管理（硬性限制）
+
+### 根因
+- daemon `task stop` 后 xhs-unified 进程可能不退出，成为僵尸进程
+- 僵尸进程持有 browser-service 的 `inputActionLock`（Promise 链锁）
+- 新任务的 `keyboard:press` 在 `withInputActionLock` 中永远等待锁释放
+- 最终 callAPI 超时 270s (90s × 3)
+
+### 修复 (commit 79dc3d58)
+1. `terminatePidTree`: POSIX 先 `pkill -TERM -P` 杀子进程树，再 SIGTERM 主进程，最终 SIGKILL
+2. `findOrphanedWorkerPids`: pgrep 查找无 daemon 监管的残留 xhs-unified/xhs-collect
+3. `cleanupOrphanedWorkers`: 清理所有发现的孤儿进程
+4. daemon 启动时清理孤儿进程
+5. daemon 每 30s 定期巡检：reconcile job 进程状态 + 清理孤儿
+6. task submit 前清理孤儿进程
+7. daemon SIGTERM/SIGINT 时先清理所有 running job
+
+### 规则
+- **禁止手动 kill 进程后不重启 daemon**
+- **daemon 是唯一启动/关闭真源**
+- **task stop 后如果进程仍存在，daemon housekeeping 会自动清理**
+Tags: #lifecycle #zombie-process #daemon
