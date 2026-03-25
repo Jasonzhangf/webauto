@@ -210,7 +210,7 @@ async function executeFeedLikeClick({ profileId, candidate, pushTrace }) {
 
   try {
     // click 不加 timeout，按要求只看 selector 状态变化
-    await clickPoint(profileId, candidate.center, { clicks: 1 });
+    await clickPoint(profileId, candidate.center, { clicks: 1, timeoutMs: 10000 });
   } catch {
     // 点击超时或失败，跳过此候选，不阻塞主流程
     pushTrace({
