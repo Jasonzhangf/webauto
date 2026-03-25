@@ -179,59 +179,40 @@ async function executeFeedLikeClick({ profileId, candidate, pushTrace }) {
     new Promise((resolve) => setTimeout(() => resolve(null), 8000)),
   ]);
 
-  const readCandidateLikedAfterClick = async () => {
-    const noteId = String(candidate?.noteId || '').trim();
-    const fallbackIndex = Math.max(0, Number(candidate?.index || 0) || 0);
-    const script = `(() => {
-      const noteId = ${JSON.stringify(noteId)};
-      const fallbackIndex = ${fallbackIndex};
-      const items = Array.from(document.querySelectorAll('.note-item'));
-      let item = null;
-      if (noteId) {
-        item = items.find((node) => {
-          const href = String(node.querySelector('a.cover')?.getAttribute('href') || '');
-          return href.includes('/' + noteId) || href.includes(noteId);
-        }) || null;
-      }
-      if (!item) item = items[fallbackIndex] || null;
-      if (!(item instanceof Element)) return { ok: false, reason: 'item_not_found' };
-      const lw = item.querySelector('.like-wrapper');
-      const ll = item.querySelector('.like-lottie');
-      if (!(lw instanceof Element) && !(ll instanceof Element)) return { ok: false, reason: 'like_target_missing' };
-      const wrapperClass = String(lw?.className || '');
-      const lottieClass = String(ll?.className || '');
-      const liked = /(^|\s)like-active(\s|$)/.test(wrapperClass + " " + lottieClass);
-      return {
-        ok: true,
-        liked,
-        wrapperClass,
-        lottieClass,
-      };
-    })()`;
-    return evaluateReadonly(profileId, script, { timeoutMs: 5000, onTimeout: 'return' }).catch(() => ({ ok: false, reason: 'eval_failed' }));
-  };
+  // 构建针对特定 noteId 的 like-active 选择器
+  // 小红书的 DOM: .note-item 内有 .like-wrapper.like-active 或 .like-lottie.like-active
+  const noteId = String(candidate?.noteId || '').trim();
+  const likeActiveSelector = noteId
+    ? `.note-item:has(a.cover[href*="${noteId}"]) .like-wrapper.like-active, .note-item:has(a.cover[href*="${noteId}"]) .like-lottie.like-active`
+    : null;
 
-  // click 前重新确认 liked 状态（SCAN 和 click 之间可能有时间差）
-  const preClickCheck = await readCandidateLikedAfterClick();
-  if (preClickCheck?.ok === true && preClickCheck?.liked === true) {
-    pushTrace({
-      kind: 'click',
-      stage: 'feed_like',
-      noteId: candidate.noteId,
-      center: candidate.center,
-      selectorChanged: false,
-      preShot,
-      postShot: null,
-      postStatus: preClickCheck,
-      code: 'ALREADY_LIKED',
-    });
-    return { ok: false, code: 'ALREADY_LIKED', noteId: candidate.noteId, preShot };
+  // click 前用锚点检查是否已经 liked（避免重复点击）
+  if (likeActiveSelector) {
+    const preCheck = await waitForAnchor(profileId, {
+      selectors: [likeActiveSelector],
+      timeoutMs: 1000,
+      intervalMs: 100,
+      description: 'feed_like_pre_check_already_liked',
+    }).catch(() => null);
+    
+    if (preCheck?.ok === true) {
+      pushTrace({
+        kind: 'click',
+        stage: 'feed_like',
+        noteId: candidate.noteId,
+        center: candidate.center,
+        selectorChanged: false,
+        preShot,
+        postShot: null,
+        code: 'ALREADY_LIKED',
+      });
+      return { ok: false, code: 'ALREADY_LIKED', noteId: candidate.noteId, preShot };
+    }
   }
 
   try {
     await clickPoint(profileId, candidate.center, { clicks: 1, timeoutMs: 10000 });
   } catch {
-    // 点击超时或失败，跳过此候选，不阻塞主流程
     pushTrace({
       kind: 'skip',
       stage: 'feed_like',
@@ -241,18 +222,18 @@ async function executeFeedLikeClick({ profileId, candidate, pushTrace }) {
     return { ok: false, code: 'CLICK_FAILED', noteId: candidate.noteId, preShot };
   }
 
-  const postSelector = await waitForAnchor(profileId, {
-    selectors: [],
-    timeoutMs: 5000,
-    intervalMs: 200,
-    description: 'feed_like_selector_turned_active',
-    probe: async () => {
-      const status = await readCandidateLikedAfterClick();
-      return status?.ok === true && status?.liked === true;
-    },
-  }).catch(() => ({ ok: false, reason: 'selector_timeout' }));
+  // click 后用锚点等待 .like-active 出现（不用 evaluate）
+  const postSelector = likeActiveSelector
+    ? await waitForAnchor(profileId, {
+        selectors: [likeActiveSelector],
+        timeoutMs: 5000,
+        intervalMs: 200,
+        description: 'feed_like_selector_turned_active',
+      }).catch(() => ({ ok: false, reason: 'anchor_timeout' }))
+    : { ok: false, reason: 'no_noteId' };
 
-  const postStatus = await readCandidateLikedAfterClick();
+  // 简单的 postStatus（只用锚点结果，不用 evaluate）
+  const postStatus = { ok: postSelector?.ok === true, liked: postSelector?.ok === true };
 
   const postShot = await Promise.race([
     captureLikeSnapshot('post'),
@@ -502,6 +483,12 @@ export async function executeFeedLikeOperation({ profileId, params = {}, context
     } else {
       roundSkipped += 1;
       state.feedLikeState.totalSkipped += 1;
+
+      // 已点赞跳过：写入本轮去重，避免同一窗口反复命中同一 noteId 形成死循环
+      if (result.code === 'ALREADY_LIKED' && candidate.noteId) {
+        state.feedLikeState.likedNoteIds.add(candidate.noteId);
+      }
+
       emitOperationProgress(context, {
         kind: 'feed_like_click_failed',
         stage: 'feed_like',
