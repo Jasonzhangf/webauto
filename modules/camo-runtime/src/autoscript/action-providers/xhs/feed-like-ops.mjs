@@ -16,6 +16,7 @@ import { evaluateReadonly, clickPoint, waitForAnchor, sleepRandom, pressKey } fr
 import { captureScreenshotToFile } from './diagnostic-utils.mjs';
 
 const NOTE_ITEM_SELECTOR = '.note-item';
+const NOTE_LIKED_USE_SELECTOR = 'svg.reds-icon.like-icon use[href="#liked"], svg.reds-icon.like-icon use[xlink\\:href="#liked"]';
 
 async function readFeedWindowSignature(profileId) {
   const script = `(() => {
@@ -99,15 +100,12 @@ export async function readFeedLikeCandidates(profileId, options = {}) {
       const item = items[i];
       if (!isVisible(item)) continue;
 
-      const likeBtn = item.querySelector('.like-lottie');
+      const likeBtn = item.querySelector('.like-lottie, .like-wrapper, svg.reds-icon.like-icon');
       if (!likeBtn) continue;
 
-      const className = String(likeBtn.className || '');
-      const parentClass = String(likeBtn.parentElement?.className || '');
-      const ariaPressed = String(likeBtn.getAttribute('aria-pressed') || '').toLowerCase();
-      const liked = /(^|\s)like-active(\s|$)/.test(className) ||
-                    /(^|\s)like-active(\s|$)/.test(parentClass) ||
-                    ariaPressed === 'true';
+      const likedUse = item.querySelector(${JSON.stringify(NOTE_LIKED_USE_SELECTOR)});
+      const likedHref = String(likedUse?.getAttribute('href') || likedUse?.getAttribute('xlink:href') || '').trim();
+      const liked = likedHref === '#liked';
 
       const cover = item.querySelector('a.cover');
       const href = cover ? String(cover.getAttribute('href') || '') : '';
@@ -183,7 +181,7 @@ async function executeFeedLikeClick({ profileId, candidate, pushTrace }) {
   // 小红书的 DOM: .note-item 内有 .like-wrapper.like-active 或 .like-lottie.like-active
   const noteId = String(candidate?.noteId || '').trim();
   const likeActiveSelector = noteId
-    ? `.note-item:has(a.cover[href*="${noteId}"]) .like-wrapper.like-active, .note-item:has(a.cover[href*="${noteId}"]) .like-lottie.like-active`
+    ? `.note-item:has(a.cover[href*="${noteId}"]) ${NOTE_LIKED_USE_SELECTOR}`
     : null;
 
   // click 前用锚点检查是否已经 liked（避免重复点击）
