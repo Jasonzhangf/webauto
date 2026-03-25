@@ -17,6 +17,7 @@ import { captureScreenshotToFile } from './diagnostic-utils.mjs';
 
 const NOTE_ITEM_SELECTOR = '.note-item';
 const NOTE_LIKED_USE_SELECTORS = [
+  'svg.reds-icon.like-icon use[*|href="#liked"]',
   'svg.reds-icon.like-icon use[href="#liked"]',
   'svg.reds-icon.like-icon use[xlink\\:href="#liked"]',
 ];
