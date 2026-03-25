@@ -103,7 +103,8 @@ export async function readFeedLikeCandidates(profileId, options = {}) {
       const item = items[i];
       if (!isVisible(item)) continue;
 
-      const likeBtn = item.querySelector('.like-wrapper, svg.reds-icon.like-icon, .like-lottie');
+      // 点击目标必须尽量落在图标本体，避免命中 wrapper 中的计数文本区域
+      const likeBtn = item.querySelector('.like-wrapper svg.reds-icon.like-icon, svg.reds-icon.like-icon, .like-lottie');
       if (!likeBtn) continue;
 
       const likedUse = item.querySelector(${JSON.stringify(NOTE_LIKED_USE_SELECTORS.join(', '))});
@@ -125,7 +126,13 @@ export async function readFeedLikeCandidates(profileId, options = {}) {
       };
 
       const hit = document.elementFromPoint(center.x, center.y);
-      const hitMatches = !!hit && (hit === likeBtn || likeBtn.contains(hit) || hit.contains(likeBtn) || !!hit.closest('.like-wrapper'));
+      const hitMatches = !!hit && (
+        hit === likeBtn
+        || likeBtn.contains(hit)
+        || hit.contains(likeBtn)
+        || !!hit.closest('svg.reds-icon.like-icon')
+        || !!hit.closest('.like-lottie')
+      );
       if (!hitMatches) continue;
 
       candidates.push({
