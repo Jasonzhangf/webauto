@@ -7,6 +7,7 @@
  *   Phase 1 - Camo 运行时连通性（health、evaluate/screenshot/click/press）
  *   Phase 2 - XHS 模块加载
  *   Phase 3 - XHS 页面上下文 & like-target selector 链
+ *   Phase 4 - Feed-like 分层 block 配置校验（多关键词截断/每轮点赞数/操作链）
  *
  * 用法：
  *   node scripts/test/webauto-smoke.mjs
@@ -245,6 +246,101 @@ async function testModuleLoad() {
 }
 
 // ══════════════════════════════════════════
+// Phase 4: Feed-like block layering checks
+// ══════════════════════════════════════════
+
+currentPhase = 'feed-like';
+
+async function testFeedLikeLayering() {
+  console.log('\n🔁 Feed-like Block Layering');
+
+  try {
+    const templateMod = await import(`file://${path.resolve(PROJECT_ROOT, 'modules/camo-runtime/src/autoscript/xhs-feed-like-template.mjs')}`);
+    const opsMod = await import(`file://${path.resolve(PROJECT_ROOT, 'modules/camo-runtime/src/autoscript/xhs-autoscript-ops.mjs')}`);
+    const actionsMod = await import(`file://${path.resolve(PROJECT_ROOT, 'modules/camo-runtime/src/autoscript/action-providers/xhs/actions.mjs')}`);
+
+    const build = templateMod?.buildXhsFeedLikeAutoscript;
+    if (typeof build !== 'function') {
+      bad('buildXhsFeedLikeAutoscript', 'missing export');
+      return;
+    }
+
+    const script = build({
+      profileId: 'xhs-qa-1',
+      stage: 'feed-like',
+      keyword: '团建',
+      keywords: ['团建策划', '团队建设', '广东团建', '团建', '超额关键字'],
+      maxLikesPerTab: 5,
+      likeIntervalMinMs: 1000,
+      likeIntervalMaxMs: 3000,
+    });
+
+    const ops = Array.isArray(script?.operations) ? script.operations : [];
+    const feedLikeRound = ops.find((op) => op?.id === 'feed_like_round');
+    const finishOp = ops.find((op) => op?.id === 'finish_after_feed_like');
+
+    feedLikeRound
+      ? ok('feed_like_round operation', 'exists')
+      : bad('feed_like_round operation', 'missing');
+
+    if (feedLikeRound) {
+      const k = feedLikeRound?.params?.keywords;
+      const likesPerRound = Number(feedLikeRound?.params?.likesPerRound || 0);
+
+      Array.isArray(k)
+        ? ok('feed_like params.keywords type', `array(${k.length})`)
+        : bad('feed_like params.keywords type', typeof k);
+
+      if (Array.isArray(k)) {
+        k.length === 4
+          ? ok('keywords truncation (max=4)', k.join(','))
+          : bad('keywords truncation (max=4)', `got ${k.length}`);
+        k[0] === '团建策划' && k[3] === '团建'
+          ? ok('keywords order keep-first-4')
+          : bad('keywords order keep-first-4', JSON.stringify(k));
+      }
+
+      likesPerRound === 5
+        ? ok('likesPerRound from maxLikesPerTab', '5')
+        : bad('likesPerRound from maxLikesPerTab', String(likesPerRound));
+
+      feedLikeRound?.once === true
+        ? ok('feed_like_round scheduling mode', 'single op (loop inside)')
+        : bad('feed_like_round scheduling mode', `once=${String(feedLikeRound?.once)}`);
+    }
+
+    if (finishOp) {
+      const deps = Array.isArray(finishOp.dependsOn) ? finishOp.dependsOn : [];
+      deps.includes('feed_like_round')
+        ? ok('finish op dependency', 'dependsOn feed_like_round')
+        : bad('finish op dependency', JSON.stringify(deps));
+    } else {
+      bad('finish_after_feed_like operation', 'missing');
+    }
+
+    const actionMap = actionsMod?.XHS_ACTION_HANDLERS || actionsMod?.xhsActions || {};
+    typeof actionMap?.xhs_feed_like === 'function'
+      ? ok('action xhs_feed_like', 'registered')
+      : bad('action xhs_feed_like', 'missing');
+    typeof actionMap?.xhs_feed_like_tab_switch === 'function'
+      ? ok('action xhs_feed_like_tab_switch', 'registered')
+      : bad('action xhs_feed_like_tab_switch', 'missing');
+
+    const feedOps = opsMod?.buildXhsFeedLikeOperations?.({
+      keyword: '团建',
+      keywords: ['a', 'b', 'c', 'd'],
+      maxLikesPerTab: 5,
+    }) || [];
+    const direct = feedOps.find((op) => op?.id === 'feed_like_round');
+    Number(direct?.params?.likesPerRound || 0) === 5
+      ? ok('buildXhsFeedLikeOperations likesPerRound', '5')
+      : bad('buildXhsFeedLikeOperations likesPerRound', JSON.stringify(direct?.params || {}));
+  } catch (e) {
+    bad('feed-like layering check', String(e?.message || e).slice(0, 120));
+  }
+}
+
+// ══════════════════════════════════════════
 // Phase 3: XHS page context & selectors
 // ══════════════════════════════════════════
 
@@ -354,6 +450,9 @@ async function main() {
     currentPhase = 'xhs';
     skipIt('XHS page context', 'camo runtime unavailable');
   }
+
+  // Phase 4: feed-like block layering (no camo required)
+  await testFeedLikeLayering();
 
   console.log('\n═══════════════════════════════════════════════');
   console.log(`  Results: ${pass} passed / ${fail} failed / ${skip} skipped / ${pass + fail + skip} total`);

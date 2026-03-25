@@ -12,7 +12,7 @@ node scripts/test/webauto-smoke.mjs
 
 ## 覆盖范围
 
-单一流水线，4 个阶段按顺序检查：
+单一流水线，5 个阶段按顺序检查：
 
 ### Phase 0 — Environment & Dependencies
 - Node 版本（>=20）
@@ -38,6 +38,14 @@ node scripts/test/webauto-smoke.mjs
 - `.comment-item` / `.like-wrapper` / `.like-lottie`
 - like-target 检测（`.like-wrapper > .like-lottie`）
 - liked 状态读取
+
+### Phase 4 — Feed-like 分层 Block 配置
+- `xhs-feed-like-template` 构建成功
+- `feed_like_round` operation 存在
+- `keywords` 截断规则：最多 4 个（超出截断，顺序保持）
+- `likesPerRound` 由 `maxLikesPerTab` 映射（默认 5）
+- `finish_after_feed_like` 依赖链正确
+- Action 注册完整：`xhs_feed_like` / `xhs_feed_like_tab_switch`
 
 ## 判定规则
 

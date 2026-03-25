@@ -225,7 +225,8 @@ export function buildXhsFeedLikeOperations(options = {}) {
       params: {
         keyword: options.keyword,
         keywords: options.keywords,
-        likesPerRound: options.likesPerRound ?? options.maxLikesPerTab ?? 5,
+        maxLikesPerTab: options.maxLikesPerTab,
+        likesPerRound: options.maxLikesPerTab ?? 5,
         likeIntervalMinMs: options.likeIntervalMinMs,
         likeIntervalMaxMs: options.likeIntervalMaxMs,
         maxNoProgressScrolls: options.maxNoProgressScrolls,

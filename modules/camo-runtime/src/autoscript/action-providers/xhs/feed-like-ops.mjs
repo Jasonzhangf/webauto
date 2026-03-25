@@ -566,23 +566,7 @@ export async function executeFeedLikeOperation({ profileId, params = {}, context
 
   tabData.exhausted = tabExhausted;
 
-  // 如果 Tab 没到底，正常返回本轮结果
-  if (!tabExhausted) {
-    return {
-      ok: true,
-      code: 'FEED_LIKE_ROUND_DONE',
-      data: {
-        tabIndex: currentTabIndex,
-        roundLiked,
-        roundSkipped,
-        tabExhausted: false,
-        totalLiked: state.feedLikeGlobalState.totalLiked,
-        totalSkipped: state.feedLikeGlobalState.totalSkipped,
-      },
-    };
-  }
-
-  // Tab 到底：切换到下一个 Tab 继续点赞
+  // 每轮点完 likesPerRound 个后，切换到下一个 Tab（轮转）
   const switchResult = await executeFeedLikeTabSwitch({ profileId, params, context });
   if (switchResult.code === 'ALL_TABS_DONE') {
     return {
@@ -595,6 +579,62 @@ export async function executeFeedLikeOperation({ profileId, params = {}, context
         totalSkipped: state.feedLikeGlobalState.totalSkipped,
       },
     };
+  }
+
+  // 新 Tab 需要搜索关键字
+  if (switchResult.data?.needSearch && switchResult.data?.keyword) {
+    const searchKeyword = switchResult.data.keyword;
+    const state2 = getProfileState(profileId);
+    const latestTabState = state2.feedLikeTabState || { currentTabIndex: 0 };
+    if (state2.feedLikeTabStates) {
+      const newTabIndex = latestTabState.currentTabIndex ?? 0;
+      state2.feedLikeTabStates[newTabIndex] = state2.feedLikeTabStates[newTabIndex] || {};
+      state2.feedLikeTabStates[newTabIndex].pendingKeyword = searchKeyword;
+    }
+
+    emitOperationProgress(context, {
+      kind: 'feed_like_search_new_tab',
+      stage: 'feed_like',
+      keyword: searchKeyword,
+      tabIndex: latestTabState.currentTabIndex ?? 0,
+    });
+
+    // 执行搜索：填入关键字 + 回车
+    try {
+      const searchInput = await waitForAnchor(profileId, {
+        selectors: ['#search-input', 'input.search-input'],
+        timeoutMs: 5000,
+        intervalMs: 300,
+        description: 'feed_like_new_tab_search_input',
+      }).catch(() => null);
+
+      if (searchInput?.ok) {
+        await safeCallAPI('keyboard:type', {
+          profileId,
+          selector: '#search-input, input.search-input',
+          text: searchKeyword,
+          clearFirst: true,
+        }, 8000);
+        await sleepRandom(300, 600, null, 'feed_like_search_type_settle');
+        await safeCallAPI('keyboard:press', {
+          profileId,
+          key: 'Enter',
+        }, 5000);
+        await waitForAnchor(profileId, {
+          selectors: ['.note-item:has(a.cover)', 'svg.reds-icon.like-icon', '.like-wrapper'],
+          timeoutMs: 10000,
+          intervalMs: 500,
+          description: 'feed_like_new_tab_search_results',
+        }).catch(() => null);
+      }
+    } catch (err) {
+      emitOperationProgress(context, {
+        kind: 'feed_like_search_error',
+        stage: 'feed_like',
+        keyword: searchKeyword,
+        error: String(err?.message || err || 'unknown'),
+      });
+    }
   }
 
   // 递归：在新 Tab 上继续点赞
