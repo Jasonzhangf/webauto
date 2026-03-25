@@ -9,9 +9,11 @@
  */
 
 import { callAPI } from '../../../utils/browser-service.mjs';
+import path from 'node:path';
 import { getProfileState } from './state.mjs';
 import { buildTraceRecorder, emitOperationProgress } from './trace.mjs';
 import { evaluateReadonly, clickPoint, waitForAnchor, sleepRandom, pressKey } from './dom-ops.mjs';
+import { captureScreenshotToFile } from './diagnostic-utils.mjs';
 
 const NOTE_ITEM_SELECTOR = '.note-item';
 
@@ -103,8 +105,8 @@ export async function readFeedLikeCandidates(profileId, options = {}) {
       const className = String(likeBtn.className || '');
       const parentClass = String(likeBtn.parentElement?.className || '');
       const ariaPressed = String(likeBtn.getAttribute('aria-pressed') || '').toLowerCase();
-      const liked = /active|liked|selected|is-liked/.test(className) ||
-                    /active|liked/.test(parentClass) ||
+      const liked = /(^|\s)like-active(\s|$)/.test(className) ||
+                    /(^|\s)like-active(\s|$)/.test(parentClass) ||
                     ariaPressed === 'true';
 
       const cover = item.querySelector('a.cover');
@@ -160,9 +162,55 @@ async function executeFeedLikeClick({ profileId, candidate, pushTrace }) {
     return { ok: false, code: 'INVALID_CANDIDATE' };
   }
 
+  const captureLikeSnapshot = async (suffix) => {
+    const kw = String(candidate?.keyword || 'unknown').trim() || 'unknown';
+    const note = String(candidate?.noteId || 'unknown').trim() || 'unknown';
+    const ts = new Date().toISOString().replace(/[:.]/g, '-');
+    const filePath = path.join(
+      process.env.HOME || process.env.USERPROFILE || '/tmp',
+      '.webauto', 'download', 'xiaohongshu', 'debug', kw, 'diagnostics',
+      `feed-like-${suffix}-${note}-${ts}.png`,
+    );
+    return captureScreenshotToFile({ profileId, filePath }).catch(() => null);
+  };
+
+  const preShot = await captureLikeSnapshot('pre');
+
+  const readCandidateLikedAfterClick = async () => {
+    const noteId = String(candidate?.noteId || '').trim();
+    const fallbackIndex = Math.max(0, Number(candidate?.index || 0) || 0);
+    const script = `(() => {
+      const noteId = ${JSON.stringify(noteId)};
+      const fallbackIndex = ${fallbackIndex};
+      const items = Array.from(document.querySelectorAll('.note-item'));
+      let item = null;
+      if (noteId) {
+        item = items.find((node) => {
+          const href = String(node.querySelector('a.cover')?.getAttribute('href') || '');
+          return href.includes('/' + noteId) || href.includes(noteId);
+        }) || null;
+      }
+      if (!item) item = items[fallbackIndex] || null;
+      if (!(item instanceof Element)) return { ok: false, reason: 'item_not_found' };
+      const lw = item.querySelector('.like-wrapper');
+      const ll = item.querySelector('.like-lottie');
+      if (!(lw instanceof Element) && !(ll instanceof Element)) return { ok: false, reason: 'like_target_missing' };
+      const wrapperClass = String(lw?.className || '');
+      const lottieClass = String(ll?.className || '');
+      const liked = /(^|\s)like-active(\s|$)/.test(wrapperClass + " " + lottieClass);
+      return {
+        ok: true,
+        liked,
+        wrapperClass,
+        lottieClass,
+      };
+    })()`;
+    return evaluateReadonly(profileId, script, { timeoutMs: 5000, onTimeout: 'return' }).catch(() => ({ ok: false, reason: 'eval_failed' }));
+  };
+
   try {
-    // clickPoint 加超时保护
-    await clickPoint(profileId, candidate.center, { steps: 2, timeoutMs: 8000 });
+    // click 不加 timeout，按要求只看 selector 状态变化
+    await clickPoint(profileId, candidate.center, { clicks: 1 });
   } catch {
     // 点击超时或失败，跳过此候选，不阻塞主流程
     pushTrace({
@@ -174,26 +222,42 @@ async function executeFeedLikeClick({ profileId, candidate, pushTrace }) {
     return { ok: false, code: 'CLICK_FAILED' };
   }
 
-  // 锚点等待：点赞后等 DOM 稳定（最大 3s）
-  try {
-    await waitForAnchor(profileId, {
-      selectors: ['.note-item', '.feeds-container'],
-      timeoutMs: 3000,
-      intervalMs: 200,
-      description: 'feed_like_post_click_settle',
-    });
-  } catch {
-    // 锚点等待超时，不阻塞
-  }
+  const postSelector = await waitForAnchor(profileId, {
+    selectors: [],
+    timeoutMs: 5000,
+    intervalMs: 200,
+    description: 'feed_like_selector_turned_active',
+    probe: async () => {
+      const status = await readCandidateLikedAfterClick();
+      return status?.ok === true && status?.liked === true;
+    },
+  }).catch(() => ({ ok: false, reason: 'selector_timeout' }));
+
+  const postStatus = await readCandidateLikedAfterClick();
+
+  const postShot = await captureLikeSnapshot('post');
+
+  const selectorChanged = postSelector?.ok === true && postStatus?.ok === true && postStatus?.liked === true;
 
   pushTrace({
     kind: 'click',
     stage: 'feed_like',
     noteId: candidate.noteId,
     center: candidate.center,
+    selectorChanged,
+    preShot,
+    postShot,
+    postStatus,
   });
 
-  return { ok: true, code: 'LIKE_DONE', noteId: candidate.noteId };
+  return {
+    ok: selectorChanged,
+    code: selectorChanged ? 'LIKE_DONE' : 'LIKE_SELECTOR_NOT_CHANGED',
+    noteId: candidate.noteId,
+    preShot,
+    postShot,
+    selectorChanged,
+  };
 }
 
 /**
@@ -260,9 +324,9 @@ export async function executeFeedLikeOperation({ profileId, params = {}, context
       break;
     }
 
-    const unliked = scan.candidates.filter(
-      (c) => !c.liked && c.noteId && !state.feedLikeState.likedNoteIds.has(c.noteId),
-    );
+    const unliked = scan.candidates
+      .map((c) => ({ ...c, keyword: params.keyword || state.keyword || 'unknown' }))
+      .filter((c) => !c.liked && c.noteId && !state.feedLikeState.likedNoteIds.has(c.noteId));
 
     state.feedLikeState.unlikedCount = unliked.length;
 
@@ -400,6 +464,9 @@ export async function executeFeedLikeOperation({ profileId, params = {}, context
         kind: 'feed_like_done',
         stage: 'feed_like',
         noteId: candidate.noteId,
+        screenshotPre: result.preShot || null,
+        screenshotPost: result.postShot || null,
+        selectorChanged: result.selectorChanged === true,
         roundLiked,
         roundSkipped,
       });
@@ -411,6 +478,14 @@ export async function executeFeedLikeOperation({ profileId, params = {}, context
     } else {
       roundSkipped += 1;
       state.feedLikeState.totalSkipped += 1;
+      emitOperationProgress(context, {
+        kind: 'feed_like_click_failed',
+        stage: 'feed_like',
+        noteId: candidate.noteId,
+        reason: result.code || 'unknown',
+        screenshotPre: result.preShot || null,
+        screenshotPost: result.postShot || null,
+      });
     }
   }
 
