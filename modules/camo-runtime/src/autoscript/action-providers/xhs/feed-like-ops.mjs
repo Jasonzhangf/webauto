@@ -73,6 +73,7 @@ async function safeCallAPI(action, payload = {}, timeoutMs = 15000) {
  */
 export async function readFeedLikeCandidates(profileId, options = {}) {
   const maxCandidates = Math.max(1, Number(options.maxCandidates || 50) || 50);
+  const minTopSafePx = Math.max(60, Number(options.minTopSafePx || 90) || 90);
 
   const script = `(() => {
     const items = Array.from(document.querySelectorAll('${NOTE_ITEM_SELECTOR}'));
@@ -108,14 +109,21 @@ export async function readFeedLikeCandidates(profileId, options = {}) {
 
       const cover = item.querySelector('a.cover');
       const href = cover ? String(cover.getAttribute('href') || '') : '';
-      const noteIdMatch = href.match(/\\/explore\\/([a-zA-Z0-9]+)/);
+      const noteIdMatch = href.match(/\\/(?:explore|search_result)\\/([a-zA-Z0-9]+)/);
       const noteId = noteIdMatch ? noteIdMatch[1] : null;
 
       const rect = likeBtn.getBoundingClientRect();
+      if (!rect || rect.width <= 2 || rect.height <= 2) continue;
+      if (rect.top < ${minTopSafePx}) continue;
+      if (rect.bottom > vh - 8) continue;
       const center = {
         x: Math.round(rect.left + rect.width / 2),
         y: Math.round(rect.top + rect.height / 2),
       };
+
+      const hit = document.elementFromPoint(center.x, center.y);
+      const hitMatches = !!hit && (hit === likeBtn || likeBtn.contains(hit) || hit.contains(likeBtn) || !!hit.closest('.like-wrapper'));
+      if (!hitMatches) continue;
 
       candidates.push({
         index: i,
@@ -202,6 +210,7 @@ export async function executeFeedLikeOperation({ profileId, params = {}, context
   const { actionTrace, pushTrace } = buildTraceRecorder();
 
   const maxLikes = Math.max(1, Number(params.maxLikesPerRound ?? params.maxLikes ?? 10) || 10);
+  const minTopSafePx = Math.max(60, Number(params.minTopSafePx ?? 90) || 90);
   const likeIntervalMinMs = Math.max(500, Number(params.likeIntervalMinMs ?? 1000) || 1000);
   const likeIntervalMaxMs = Math.max(likeIntervalMinMs, Number(params.likeIntervalMaxMs ?? 5000) || 5000);
   const maxNoProgressScrolls = Math.max(1, Number(params.maxNoProgressScrolls ?? 3) || 3);
@@ -234,7 +243,7 @@ export async function executeFeedLikeOperation({ profileId, params = {}, context
     // 扫描：失败直接退出（环境异常，继续无意义）
     let scan;
     try {
-      scan = await readFeedLikeCandidates(profileId, { maxCandidates: 100 });
+      scan = await readFeedLikeCandidates(profileId, { maxCandidates: 100, minTopSafePx });
     } catch {
       emitOperationProgress(context, { kind: 'feed_like_scan_error', stage: 'feed_like' });
       break;
