@@ -180,6 +180,10 @@ export function applyCamoEnv({ env = process.env, repoRoot = process.cwd() } = {
     const fromWebauto = String(env.WEBAUTO_INPUT_ACTION_TIMEOUT_MS || '').trim();
     if (fromWebauto) env.CAMO_INPUT_ACTION_TIMEOUT_MS = fromWebauto;
   }
+  if (!String(env.CAMO_INPUT_MODE || '').trim()) {
+    const fromWebauto = String(env.WEBAUTO_INPUT_MODE || '').trim();
+    if (fromWebauto) env.CAMO_INPUT_MODE = fromWebauto;
+  }
   if (!String(env.CAMO_INPUT_ACTION_MAX_ATTEMPTS || '').trim()) {
     const fromWebauto = String(env.WEBAUTO_INPUT_ACTION_MAX_ATTEMPTS || '').trim();
     if (fromWebauto) env.CAMO_INPUT_ACTION_MAX_ATTEMPTS = fromWebauto;
