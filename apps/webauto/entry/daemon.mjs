@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import minimist from 'minimist';
+import { resolveTaskArgs } from './daemon-task-args.mjs';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
@@ -978,8 +979,7 @@ async function main() {
     }
 
     // task submit
-    const idx = rawArgv.indexOf('--');
-    const taskArgs = idx >= 0 ? rawArgv.slice(idx + 1) : rawArgv.slice(cmd === 'task' ? 2 : 1);
+    const taskArgs = resolveTaskArgs(rawArgv, cmd);
     if (taskArgs.length === 0) {
       print({ ok: false, error: 'missing task args' }, jsonMode);
       process.exit(1);

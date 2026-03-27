@@ -1,6 +1,6 @@
 {
   "name": "@web-auto/webauto",
-  "version": "0.1.19",
+  "version": "0.1.20",
   "type": "module",
   "bin": {
     "webauto": "bin/webauto.mjs"
@@ -12,11 +12,6 @@
     "runtime/",
     "scripts/",
     "services/",
-    "apps/desktop-console/dist/",
-    "apps/desktop-console/default-settings.json",
-    "apps/desktop-console/package.json",
-    "apps/desktop-console/entry/ui-console.mjs",
-    "apps/desktop-console/entry/ui-cli.mjs",
     "apps/webauto/",
     "!dist/**/*.map",
     "!dist/**/__tests__/**",
@@ -33,11 +28,10 @@
     "!services/**/tests/**",
     "!services/**/*.test.*",
     "!services/**/*.spec.*",
-    "!services/**/*.map",
-    "!apps/desktop-console/dist/**/*.map"
+    "!services/**/*.map"
   ],
   "dependencies": {
-    "@web-auto/camo": "file:../../code/camo",
+    "@web-auto/camo": "0.2.0",
     "ajv": "^8.18.0",
     "esbuild-register": "^3.6.0",
     "iconv-lite": "^0.6.3",
@@ -48,11 +42,14 @@
     "undici": "^7.22.0",
     "ws": "^8.19.0"
   },
+  "bundleDependencies": [
+    "@web-auto/camo"
+  ],
   "scripts": {
     "postinstall": "node scripts/postinstall-resources.mjs",
     "prepack": "npm run build",
     "start:mcp:browser": "npx @browsermcp/mcp@latest",
-    "build": "npm run prebuild && npm run build:services && npm run self-check:post-build && npm run ui:test && npm --prefix apps/desktop-console run build",
+    "build": "npm run prebuild && npm run build:services && npm run self-check:post-build && npm run ui:test",
     "build:services": "tsc -p tsconfig.services.json",
     "self-check:post-build": "node scripts/self-check.mjs --quick --post-build",
     "start": "node dist/apps/webauto/server.js",
@@ -62,9 +59,6 @@
     "check:modules": "echo \"Module checks skipped\"",
     "check:ts": "tsc --noEmit -p tsconfig.services.json",
     "test:modules:unit": "npx tsx --test $(find modules -name \"*.test.ts\" -o -name \"*.test.mts\" 2>/dev/null | tr \"\\n\" \" \")",
-    "test:desktop-console:unit": "tsx --test apps/desktop-console/src/main/profile-store.test.mts apps/desktop-console/src/main/index-streaming.test.mts apps/desktop-console/src/main/ui-cli-bridge.test.mts apps/desktop-console/src/main/task-gateway.test.mts apps/desktop-console/src/main/heartbeat-watchdog.test.mts apps/desktop-console/src/main/core-daemon-manager.test.mts apps/desktop-console/src/main/desktop-settings.test.mts apps/desktop-console/src/main/env-check.test.mts apps/desktop-console/src/main/state-bridge.test.mts",
-    "test:desktop-console:renderer": "npm --prefix apps/desktop-console run test:renderer",
-    "test:desktop-console:coverage": "c8 --reporter=text --reporter=lcov --all --src apps/desktop-console/src/main --extension .mts --extension .mjs --extension .ts --exclude \"**/*.test.*\" --check-coverage --lines 75 --functions 75 --branches 55 --statements 75 --include \"apps/desktop-console/src/main/profile-store.mts\" --include \"apps/desktop-console/src/main/ui-cli-bridge.mts\" --include \"apps/desktop-console/src/main/task-gateway.mts\" --include \"apps/desktop-console/src/main/heartbeat-watchdog.mts\" --include \"apps/desktop-console/src/main/core-daemon-manager.mts\" --include \"apps/desktop-console/src/main/desktop-settings.mts\" --include \"apps/desktop-console/src/main/env-check.mts\" --include \"apps/desktop-console/src/main/state-bridge.mts\" tsx --test apps/desktop-console/src/main/profile-store.test.mts apps/desktop-console/src/main/index-streaming.test.mts apps/desktop-console/src/main/ui-cli-bridge.test.mts apps/desktop-console/src/main/task-gateway.test.mts apps/desktop-console/src/main/heartbeat-watchdog.test.mts apps/desktop-console/src/main/core-daemon-manager.test.mts apps/desktop-console/src/main/desktop-settings.test.mts apps/desktop-console/src/main/env-check.test.mts",
     "test:webauto:schedule:unit": "node --test tests/unit/webauto/schedule-store.test.mjs tests/unit/webauto/schedule-cli.test.mjs",
     "test:webauto:ui-cli:unit": "node --test tests/unit/webauto/ui-cli-command.test.mjs",
     "test:webauto:test-cli:unit": "node --test tests/unit/webauto/test-cli-command.test.mjs",
@@ -76,19 +70,17 @@
     "test:e2e-ui:l3": "npx vitest --config tests/e2e-ui/vitest.config.ts tests/e2e-ui/stability/restart.test.ts",
     "test:xhs:collect": "node scripts/test/xhs-collect-smoke.mjs",
     "test:webauto:schedule:coverage": "c8 --reporter=text --reporter=text-summary --check-coverage --lines 85 --functions 85 --branches 60 --statements 85 --include apps/webauto/entry/lib/schedule-store.mjs --include apps/webauto/entry/schedule.mjs node --test tests/unit/webauto/schedule-store.test.mjs tests/unit/webauto/schedule-cli.test.mjs",
-    "test:ci": "npm test && npm --prefix apps/desktop-console run test:renderer",
+    "test:ci": "npm test",
     "coverage:ci": "node scripts/test/run-coverage.mjs",
     "build:release": "node bin/webauto.mjs build:release",
     "version:bump": "node scripts/bump-version.mjs patch",
     "version:bump:minor": "node scripts/bump-version.mjs minor",
     "version:bump:major": "node scripts/bump-version.mjs major",
-    "test": "npm run check:modules && npm run check:ts && npm run test:modules:unit && npm run test:webauto:schedule:unit && npm run test:webauto:ui-cli:unit && npm run test:webauto:test-cli:unit && npm run test:webauto:install:unit && npm run test:desktop-console:unit && npm run test:services:unit",
+    "test": "npm run check:modules && npm run check:ts && npm run test:modules:unit && npm run test:webauto:schedule:unit && npm run test:webauto:ui-cli:unit && npm run test:webauto:test-cli:unit && npm run test:webauto:install:unit && npm run test:services:unit",
     "cli:session-manager": "tsx modules/session-manager/src/cli.ts",
     "cli:logging": "tsx modules/logging/src/cli.ts",
     "cli:operations": "tsx modules/operations/src/cli.ts",
     "ui:test": "echo 'UI tests migrated to runtime/infra/utils/scripts/development/'",
-    "ui:console:build": "npm --prefix apps/desktop-console run build",
-    "ui:console:run": "npm --prefix apps/desktop-console start",
     "ui:test:driver": "node runtime/infra/utils/scripts/development/eval-in-session.mjs",
     "ui:state": "node runtime/infra/utils/scripts/development/highlight-search-containers.mjs",
     "service:kill-port": "node runtime/infra/utils/scripts/service/kill-port.mjs",

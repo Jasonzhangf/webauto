@@ -88,7 +88,8 @@ function main() {
   }
   const nextVersion = bumpSemver(prevRootVersion, kind);
 
-  const prevDesktopVersion = updatePackageVersion(DESKTOP_PACKAGE, nextVersion);
+  const desktopExists = existsSync(DESKTOP_PACKAGE);
+  const prevDesktopVersion = desktopExists ? updatePackageVersion(DESKTOP_PACKAGE, nextVersion) : null;
   const prevVersion = updatePackageVersion(ROOT_PACKAGE, nextVersion);
   const lockUpdated = updateRootLockVersion(ROOT_LOCK, nextVersion);
 
@@ -102,7 +103,7 @@ function main() {
     lockUpdated,
     files: [
       ROOT_PACKAGE,
-      DESKTOP_PACKAGE,
+      ...(desktopExists ? [DESKTOP_PACKAGE] : []),
       ...(lockUpdated ? [ROOT_LOCK] : []),
     ],
   };
@@ -113,7 +114,9 @@ function main() {
   }
   console.log(`[version] bump ${kind}: ${prevVersion} -> ${nextVersion}`);
   console.log(`[version] updated: ${ROOT_PACKAGE}`);
-  console.log(`[version] updated: ${DESKTOP_PACKAGE}`);
+  if (desktopExists) {
+    console.log(`[version] updated: ${DESKTOP_PACKAGE}`);
+  }
   if (lockUpdated) console.log(`[version] updated: ${ROOT_LOCK}`);
 }
 

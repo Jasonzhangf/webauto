@@ -1,5 +1,12 @@
 # WebAuto Memory - Long Term
 
+## 2026-03-27 唯一启动脚本方式（强制）
+
+- 统一入口仅允许 `node bin/webauto.mjs` / `webauto` CLI。
+- 任何历史脚本只作为薄包装，必须转发到 `bin/webauto.mjs`，禁止直连 runner/entry。
+
+Tags: #single-entry #cli #startup
+
 ## 2026-03-20 用户画像/偏好（Jason）
 
 ### 执行方式
@@ -932,4 +939,31 @@ Tags: #lifecycle #zombie-process #daemon
 
 
 - 2026-03-25: click/press 必须基于可见元素锚点；超时只能围绕锚点（无锚点超时无意义）；smoke/验证前先用 camo 手动探测可用锚点。
+- 2026-03-27: feed-like 关键字耗尽判定改为“双向滚动无候选”：
+  - 向下滚动无可点赞候选连续 10 次 → 切换向上
+  - 向上滚动无可点赞候选连续 10 次 → 判定该关键字耗尽
+  - 不再使用滚动次数上限作为停止条件
+
+- 2026-03-27: smoke test 增加 newTab/newPage 兼容性验证（跨平台差异必须可见）
+
 Tags: #anchor #visible #click #timeout
+
+## 2026-03-27 Windows newTab 验证
+
+- 已确认 `newTab` 在 Windows 可用且可切换：`newTab open`、`page:list` 增长、`page:switch` 成功。
+- 验证在 `profile-2`（headful，`--no-headless`）上完成；用于 feed-like 4 tab 轮转的前置条件。
+- 结论：`browser-service` 必须支持 `newTab`（与 `newPage` 同一路径）才能保证 tab 轮转正常。
+
+Tags: #newtab #page-switch #windows #feed-like #tab-rotation
+- 2026-03-27: Camoufox/Firefox does not support CDP input; `CAMO_INPUT_MODE=cdp` causes `browserContext.newCDPSession: CDP session is only available in Chromium` and breaks `mouse:click`. Use default Playwright input mode for Camoufox.
+- 2026-03-27: feed-like per-tab search now uses `pendingKeyword` + `fillInputValue` (no `keyboard:type`) and resets `feedLikeTabState` when keywords change to ensure 4-keyword tab mapping.
+
+## 2026-03-27 Feed-like 点击候选命中修复（Windows）
+
+- 问题：`readFeedLikeCandidates` 使用 `elementFromPoint` 命中判断过严，like 图标被上层 DOM 遮挡时候选为 0。
+- 修复：使用 `elementsFromPoint` 扫描命中栈，允许命中 `.like-wrapper`/`like-icon`/`.like-lottie` 祖先。
+- 手动验证：`node .tmp/manual-like-verify.mjs` 成功完成候选读取 → `clickPoint` → `use[*|href="#liked"]` 锚点出现（~650ms）。
+
+Tags: #feed-like #hit-test #elementsFromPoint #windows #manual-verify
+- 2026-03-27: feed-like click 失败不可阻塞任务；同一 note 的 click 失败计数达到阈值后标记为 blocked，跳过并继续滚动/轮转。
+Tags: #feed-like #nonblocking #click-failed #skip

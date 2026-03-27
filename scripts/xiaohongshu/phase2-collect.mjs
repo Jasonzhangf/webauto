@@ -1,30 +1,42 @@
 #!/usr/bin/env node
 import minimist from 'minimist';
 import path from 'node:path';
+import { spawn } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { runXhsCollect, getCollectHelpLines } from '../../apps/webauto/entry/lib/xhs-collect-runner.mjs';
 import { readCollectedLinksCount } from '../../apps/webauto/entry/lib/xhs-collect-verify.mjs';
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(SCRIPT_DIR, '..', '..');
+const BIN = path.join(REPO_ROOT, 'bin', 'webauto.mjs');
 if (!process.env.CAMO_CONTAINER_LIBRARY_ROOT) {
   process.env.CAMO_CONTAINER_LIBRARY_ROOT = path.join(REPO_ROOT, 'apps', 'webauto', 'resources', 'container-library');
 }
 
-function printHelp() {
-  console.log(getCollectHelpLines().join('\n'));
+function runCollectViaCli(argv = []) {
+  return new Promise((resolve) => {
+    const args = ['xhs', 'collect', ...argv];
+    const child = spawn(process.execPath, [BIN, ...args], {
+      cwd: REPO_ROOT,
+      env: process.env,
+      stdio: 'inherit',
+    });
+    child.on('exit', (code) => resolve({ ok: code === 0, code: code ?? 0 }));
+  });
 }
 
 async function main() {
   const argv = minimist(process.argv.slice(2));
   if (argv.help || argv.h) {
-    printHelp();
+    await runCollectViaCli(process.argv.slice(2));
     return;
   }
   if (!process.env.CAMO_DIAGNOSTICS_NO_SCREENSHOT) {
     process.env.CAMO_DIAGNOSTICS_NO_SCREENSHOT = '1';
   }
-  await runXhsCollect(argv);
+  const ret = await runCollectViaCli(process.argv.slice(2));
+  if (!ret.ok) {
+    throw new Error(`phase2-collect failed with exit code ${ret.code}`);
+  }
   await verifyPersistedCollectCount(argv);
 }
 

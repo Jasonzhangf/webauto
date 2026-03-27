@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+﻿#!/usr/bin/env node
 /**
  * WebAuto XHS 脚本最小自测（单一真源）
  *
@@ -337,6 +337,69 @@ async function testSubmitSearchBasic() {
     : bad('submit_search result', ready.reason || 'not_ready');
 }
 
+function parsePageListResult(res) {
+  const data = res?.data?.result || res?.data?.data || res?.data || {};
+  const pages = Array.isArray(data.pages) ? data.pages : [];
+  const activeIndex = data.activeIndex ?? pages.find((p) => p?.active)?.index ?? null;
+  return { pages, activeIndex };
+}
+
+async function testTabOpenCompatibility() {
+  currentPhase = 'tab-open';
+  console.log('\n[Tab Open] New Tab / New Page Compatibility');
+
+  const baseList = await callCamo('page:list', { profileId }, 8000);
+  if (!baseList.ok) {
+    bad('page:list (baseline)', JSON.stringify(baseList.data).slice(0, 80));
+    return;
+  }
+
+  const baseInfo = parsePageListResult(baseList);
+  const baseCount = baseInfo.pages.length;
+
+  const tryOpen = async (actionName) => {
+    const res = await callCamo(actionName, { profileId, url: 'https://www.xiaohongshu.com/explore' }, 12000);
+    if (!res.ok) {
+      const err = JSON.stringify(res.data || {}).slice(0, 120);
+      if (err.toLowerCase().includes('unknown action')) {
+        skipIt(`${actionName} open`, 'unsupported');
+        return;
+      }
+      bad(`${actionName} open`, err);
+      return;
+    }
+    ok(`${actionName} open`, 'ok');
+
+    const afterList = await callCamo('page:list', { profileId }, 8000);
+    if (!afterList.ok) {
+      bad(`${actionName} page:list`, JSON.stringify(afterList.data).slice(0, 80));
+      return;
+    }
+    const afterInfo = parsePageListResult(afterList);
+    afterInfo.pages.length > baseCount
+      ? ok(`${actionName} page:list`, `count=${afterInfo.pages.length}`)
+      : bad(`${actionName} page:list`, `count=${afterInfo.pages.length} (no increase)`);
+
+    const last = afterInfo.pages[afterInfo.pages.length - 1];
+    if (last?.index === undefined || last?.index === null) {
+      skipIt(`${actionName} page:switch`, 'no tab index');
+      return;
+    }
+
+    const sw = await callCamo('page:switch', { profileId, index: last.index }, 10000);
+    sw.ok
+      ? ok(`${actionName} page:switch`, `index=${last.index}`)
+      : bad(`${actionName} page:switch`, JSON.stringify(sw.data).slice(0, 80));
+
+    if (baseInfo.activeIndex !== null && baseInfo.activeIndex !== undefined) {
+      await callCamo('page:switch', { profileId, index: baseInfo.activeIndex }, 10000);
+    }
+  };
+
+  await tryOpen('newTab');
+  await tryOpen('newPage');
+}
+
 // ══════════════════════════════════════════
 // Phase 2: XHS module load
 // ══════════════════════════════════════════
@@ -560,6 +623,7 @@ async function main() {
   // Phase 1.5: submit search (base ops)
   if (camoOk) {
     await testSubmitSearchBasic();
+    await testTabOpenCompatibility();
   } else {
     currentPhase = 'submit-search';
     skipIt('submit_search', 'camo runtime unavailable');
