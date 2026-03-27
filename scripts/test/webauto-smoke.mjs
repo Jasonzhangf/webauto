@@ -5,6 +5,7 @@
  * 覆盖：
  *   Phase 0 - 环境依赖（node版本、camo版本、关键deps、vendor文件）
  *   Phase 1 - Camo 运行时连通性（health、evaluate/screenshot + anchor click/press）
+ *   Phase 1.5 - submit_search 基础链路（可见输入框 -> 输入 -> Enter -> 结果锚点）
  *   Phase 2 - XHS 模块加载
  *   Phase 3 - XHS 页面上下文 & like-target selector 链
  *   Phase 4 - Feed-like 分层 block 配置校验（多关键词截断/每轮点赞数/操作链）
@@ -48,6 +49,7 @@ function skipIt(name, reason = '') {
 let currentPhase = 'env';
 
 function testEnvironment() {
+  currentPhase = 'env';
   console.log('\n📦 Environment & Dependencies');
 
   const req = createRequire(import.meta.url);
@@ -212,9 +214,8 @@ async function resolveVisibleAnchor(selectors, timeoutMs = 5000) {
   return { ok: true, anchor: data };
 }
 
-currentPhase = 'camo';
-
 async function testCamoRuntime() {
+  currentPhase = 'camo';
   console.log('\n🔌 Camo Runtime');
 
   const health = await httpGet('http://127.0.0.1:7704/health', 3000);
@@ -271,13 +272,77 @@ async function testCamoRuntime() {
   return true;
 }
 
+async function waitForSearchResult(timeoutMs = 12000) {
+  const startAt = Date.now();
+  while (Date.now() - startAt < timeoutMs) {
+    const res = await callCamo('evaluate', {
+      profileId,
+      script: `(() => {
+        const href = String(location.href || '');
+        const list = document.querySelector('.search-result-list, .feeds-container, .feeds-page');
+        const items = document.querySelectorAll('#search-result .note-item:has(a.cover), .search-result-list .note-item:has(a.cover), .feeds-container .note-item:has(a.cover)');
+        const itemCount = items.length;
+        const ready = itemCount > 0 || !!list;
+        return { href, itemCount, hasList: !!list, ready };
+      })()`,
+    }, 5000);
+
+    const data = res.data?.result || {};
+    if (data?.ready) {
+      return { ok: true, ...data };
+    }
+
+    await new Promise((r) => setTimeout(r, 250));
+  }
+  return { ok: false, reason: 'timeout' };
+}
+
+async function testSubmitSearchBasic() {
+  currentPhase = 'submit-search';
+  console.log('\n🔎 Submit Search (Basic)');
+
+  const anchor = await resolveVisibleAnchor(['#search-input', 'input.search-input']);
+  if (!anchor.ok) {
+    skipIt('submit_search', `no visible search input (${anchor.reason})`);
+    return;
+  }
+
+  const click = await callCamo('mouse:click', {
+    profileId,
+    x: anchor.anchor.center.x,
+    y: anchor.anchor.center.y,
+    button: 'left',
+    clicks: 1,
+  }, 5000);
+  if (!click.ok) {
+    bad('submit_search focus click', JSON.stringify(click.data).slice(0, 80));
+    return;
+  }
+  ok('submit_search focus click', `anchor=${anchor.anchor.selector}`);
+
+  const selectAllKey = process.platform === 'darwin' ? 'Meta+A' : 'Control+A';
+  await callCamo('keyboard:press', { profileId, key: selectAllKey }, 3000);
+  await callCamo('keyboard:press', { profileId, key: 'Backspace' }, 3000);
+
+  const keyword = 'tuanjian';
+  const typeRes = await callCamo('keyboard:type', { profileId, text: keyword }, 8000);
+  typeRes.ok ? ok('submit_search type', keyword) : bad('submit_search type', JSON.stringify(typeRes.data).slice(0, 80));
+
+  const enterRes = await callCamo('keyboard:press', { profileId, key: 'Enter' }, 5000);
+  enterRes.ok ? ok('submit_search enter', 'sent') : bad('submit_search enter', JSON.stringify(enterRes.data).slice(0, 80));
+
+  const ready = await waitForSearchResult(12000);
+  ready.ok
+    ? ok('submit_search result', `items=${ready.itemCount}`)
+    : bad('submit_search result', ready.reason || 'not_ready');
+}
+
 // ══════════════════════════════════════════
 // Phase 2: XHS module load
 // ══════════════════════════════════════════
 
-currentPhase = 'module';
-
 async function testModuleLoad() {
+  currentPhase = 'module';
   console.log('\n📦 XHS Module Load');
 
   const modules = [
@@ -303,9 +368,8 @@ async function testModuleLoad() {
 // Phase 4: Feed-like block layering checks
 // ══════════════════════════════════════════
 
-currentPhase = 'feed-like';
-
 async function testFeedLikeLayering() {
+  currentPhase = 'feed-like';
   console.log('\n🔁 Feed-like Block Layering');
 
   try {
@@ -398,9 +462,8 @@ async function testFeedLikeLayering() {
 // Phase 3: XHS page context & selectors
 // ══════════════════════════════════════════
 
-currentPhase = 'xhs';
-
 async function testXhsPageContext() {
+  currentPhase = 'xhs';
   console.log('\n📱 XHS Page Context & Selectors');
 
   const page = await callCamo(
@@ -493,6 +556,14 @@ async function main() {
 
   // Phase 1: camo runtime (may skip later phases)
   const camoOk = await testCamoRuntime();
+
+  // Phase 1.5: submit search (base ops)
+  if (camoOk) {
+    await testSubmitSearchBasic();
+  } else {
+    currentPhase = 'submit-search';
+    skipIt('submit_search', 'camo runtime unavailable');
+  }
 
   // Phase 2: module load (no camo needed)
   await testModuleLoad();

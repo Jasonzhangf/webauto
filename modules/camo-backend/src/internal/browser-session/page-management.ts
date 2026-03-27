@@ -218,7 +218,9 @@ export class BrowserSessionPageManagement {
     const opener = this.deps.getActivePage() || ctx.pages()[0];
     if (!opener) throw new Error('no_opener_page');
 
-    await opener.bringToFront().catch((): any => null);
+    if (process.platform !== 'win32') {
+      await opener.bringToFront().catch((): any => null);
+    }
     const before = this.collectPages(ctx).length;
     if (!options?.strictShortcut) {
       page = await this.openPageViaContext(ctx, before);
@@ -274,10 +276,12 @@ export class BrowserSessionPageManagement {
     } catch {
       /* ignore */
     }
-    try {
-      await page.bringToFront();
-    } catch {
-      /* ignore */
+    if (process.platform !== 'win32') {
+      try {
+        await page.bringToFront();
+      } catch {
+        /* ignore */
+      }
     }
     if (url) {
       await page.goto(url, { waitUntil: resolveNavigationWaitUntil() });
@@ -302,10 +306,12 @@ export class BrowserSessionPageManagement {
     } catch {
       /* ignore */
     }
-    try {
-      await page.bringToFront();
-    } catch {
-      /* ignore */
+    if (process.platform !== 'win32') {
+      try {
+        await page.bringToFront();
+      } catch {
+        /* ignore */
+      }
     }
     await ensurePageRuntime(page, true).catch(() => {});
     this.deps.recordLastKnownUrl(page.url());
@@ -334,10 +340,12 @@ export class BrowserSessionPageManagement {
     if (nextIndex >= 0) {
       const nextPage = remaining[nextIndex];
       this.deps.setActivePage(nextPage);
-      try {
-        await nextPage.bringToFront();
-      } catch {
-        /* ignore */
+      if (process.platform !== 'win32') {
+        try {
+          await nextPage.bringToFront();
+        } catch {
+          /* ignore */
+        }
       }
       await ensurePageRuntime(nextPage, true).catch(() => {});
       this.deps.recordLastKnownUrl(nextPage.url());
