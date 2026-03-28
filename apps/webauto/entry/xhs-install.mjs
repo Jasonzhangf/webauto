@@ -247,12 +247,12 @@ function runPackageCommand(packageName, commandArgs) {
 function normalizePathForPlatform(raw, platform = process.platform) {
   const input = String(raw || '').trim();
   const isWinPath = platform === 'win32' || /^[A-Za-z]:[\\/]/.test(input);
-  const pathApi = isWinPath ? path.win32 : path;
-  return isWinPath ? pathApi.normalize(input) : path.resolve(input);
+  const pathApi = isWinPath ? path.win32 : (platform === 'win32' ? path.win32 : path.posix);
+  return isWinPath ? pathApi.normalize(input) : pathApi.resolve(input);
 }
 
 function normalizeLegacyWebautoRoot(raw, platform = process.platform) {
-  const pathApi = platform === 'win32' ? path.win32 : path;
+  const pathApi = platform === 'win32' ? path.win32 : path.posix;
   const resolved = normalizePathForPlatform(raw, platform);
   const base = pathApi.basename(resolved).toLowerCase();
   if (base === '.webauto' || base === 'webauto') return resolved;

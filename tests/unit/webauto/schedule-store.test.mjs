@@ -15,6 +15,7 @@ import {
   listDueScheduleTasks,
   listScheduleTasks,
   markScheduleTaskResult,
+  markScheduleTaskSkipped,
   removeScheduleTask,
   releaseScheduleDaemonLease,
   releaseScheduleTaskClaim,
@@ -132,6 +133,28 @@ describe('schedule-store', () => {
 
     const loaded = getScheduleTask(task.id);
     assert.equal(loaded.maxRuns, null);
+  });
+
+  it('rejects duplicate schedule task ids', () => {
+    useTempSchedulesRoot();
+    const created = addScheduleTask({
+      id: 'sched-dup',
+      name: 'dup-task',
+      scheduleType: 'interval',
+      intervalMinutes: 10,
+      commandType: 'xhs-unified',
+      commandArgv: { profile: 'p1', keyword: 'k1' },
+    });
+    assert.equal(created.id, 'sched-dup');
+
+    assert.throws(() => addScheduleTask({
+      id: 'sched-dup',
+      name: 'dup-task-2',
+      scheduleType: 'interval',
+      intervalMinutes: 10,
+      commandType: 'xhs-unified',
+      commandArgv: { profile: 'p2', keyword: 'k2' },
+    }), /task id already exists/i);
   });
 
   it('lists due once tasks and disables after completion', () => {
@@ -514,5 +537,62 @@ describe('schedule-store', () => {
 
     assert.equal(afterFail.enabled, false, 'once task without retry should be disabled');
     assert.equal(afterFail.nextRunAt, null);
+  });
+
+  it('update disables task when runCount reaches maxRuns', () => {
+    useTempSchedulesRoot();
+    const task = addScheduleTask({
+      name: 'maxruns-disable',
+      scheduleType: 'interval',
+      intervalMinutes: 5,
+      maxRuns: 1,
+      commandType: 'xhs-unified',
+      commandArgv: { profile: 'p-max', keyword: 'k-max' },
+    });
+
+    const finished = markScheduleTaskResult(task.id, {
+      status: 'success',
+      finishedAt: new Date().toISOString(),
+    });
+    assert.equal(finished.runCount, 1);
+
+    const updated = updateScheduleTask(task.id, { enabled: true });
+    assert.equal(updated.enabled, false);
+    assert.equal(updated.nextRunAt, null);
+  });
+
+  it('markScheduleTaskResult supports explicit disable', () => {
+    useTempSchedulesRoot();
+    const task = addScheduleTask({
+      name: 'disable-on-result',
+      scheduleType: 'interval',
+      intervalMinutes: 10,
+      commandType: 'xhs-unified',
+      commandArgv: { profile: 'p-disable', keyword: 'k-disable' },
+    });
+
+    const disabled = markScheduleTaskResult(task.id, {
+      status: 'failed',
+      error: 'manual-stop',
+      finishedAt: new Date().toISOString(),
+      disable: true,
+    });
+    assert.equal(disabled.enabled, false);
+    assert.equal(disabled.nextRunAt, null);
+  });
+
+  it('markScheduleTaskSkipped advances nextRunAt without incrementing counts', () => {
+    useTempSchedulesRoot();
+    const task = addScheduleTask({
+      name: 'skip-task',
+      scheduleType: 'interval',
+      intervalMinutes: 5,
+      commandType: 'xhs-unified',
+      commandArgv: { profile: 'p-skip', keyword: 'k-skip' },
+    });
+    const before = getScheduleTask(task.id);
+    const skipped = markScheduleTaskSkipped(task.id, { skippedAt: new Date().toISOString() });
+    assert.equal(skipped.runCount, before.runCount);
+    assert.notEqual(skipped.nextRunAt, before.nextRunAt);
   });
 });

@@ -346,7 +346,10 @@ describe('schedule cli', () => {
       '--json',
     ], {
       cwd: repoRoot,
-      env: makeEnv(root),
+      env: {
+        ...makeEnv(root),
+        WEBAUTO_SCHEDULE_TEST_MAX_TICKS: '1',
+      },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
 
@@ -359,14 +362,21 @@ describe('schedule cli', () => {
       stderr += String(chunk || '');
     });
 
-    await new Promise((resolve) => setTimeout(resolve, 600));
-    child.kill('SIGTERM');
-    const { code, signal } = await new Promise((resolve) => {
+    const exit = new Promise((resolve) => {
       child.on('exit', (exitCode, exitSignal) => resolve({ code: exitCode, signal: exitSignal }));
     });
+    const result = await Promise.race([
+      exit,
+      new Promise((resolve) => setTimeout(() => resolve({ timeout: true }), 5_000)),
+    ]);
+    if (result.timeout) {
+      child.kill('SIGTERM');
+      const final = await exit;
+      throw new Error(stderr || `schedule daemon did not exit in time: ${final.code}/${final.signal}`);
+    }
 
-    const graceful = code === 0 || signal === 'SIGTERM';
-    assert.equal(graceful, true, stderr || `unexpected exit code/signal: ${code}/${signal}`);
+    const { code, signal } = result;
+    assert.equal(code, 0, stderr || `unexpected exit code/signal: ${code}/${signal}`);
     assert.match(stdout, /\"event\":\"schedule\.tick\"/);
     assert.match(stdout, /\"event\":\"schedule\.stopped\"/);
   });

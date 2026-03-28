@@ -836,7 +836,7 @@ async function main() {
   if (cmd === 'build:release') {
     const skipTests = args['skip-tests'] === true;
     const skipPack = args['skip-pack'] === true;
-    const noBump = args['no-bump'] === true;
+    const noBump = args['no-bump'] === true || args.bump === false;
     const bumpType = String(args.bump || 'patch').trim().toLowerCase();
     if (!['patch', 'minor', 'major'].includes(bumpType)) {
       console.error(`Unsupported --bump value: ${bumpType}`);

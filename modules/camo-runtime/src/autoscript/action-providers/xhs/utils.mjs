@@ -96,6 +96,14 @@ export function resolveSearchLockKey(params = {}) {
   return keyword && env ? `${env}:${keyword}` : keyword || env || '';
 }
 
+export function resolveSearchSubmitMethod(params = {}) {
+  const requestedMethod = String(params.submitMethod || params.method || '').trim().toLowerCase();
+  if (process.platform === 'win32' && (requestedMethod === 'click' || requestedMethod === 'button')) {
+    return 'click';
+  }
+  return 'enter';
+}
+
 export function clamp(value, min, max) {
   return Math.min(Math.max(value, min), max);
 }

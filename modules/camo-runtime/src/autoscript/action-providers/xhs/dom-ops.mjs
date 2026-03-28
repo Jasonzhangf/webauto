@@ -417,11 +417,16 @@ export async function wheel(profileId, deltaY) {
   }
 }
 
-export async function pressKey(profileId, key) {
-  await callAPI('keyboard:press', {
-    profileId,
-    key: String(key || '').trim(),
-  });
+export async function pressKey(profileId, key, options = {}) {
+  const timeoutMs = Math.max(500, Number(options?.timeoutMs ?? 8000) || 8000);
+  await withTimeout(
+    callAPI('keyboard:press', {
+      profileId,
+      key: String(key || '').trim(),
+    }),
+    timeoutMs,
+    'KEY_PRESS_TIMEOUT',
+  );
 }
 
 export async function typeText(profileId, text, keyDelayMs = 60, options = {}) {

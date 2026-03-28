@@ -1,11 +1,11 @@
 import { getProfileState, withSerializedLock } from './state.mjs';
 import { buildTraceRecorder, emitActionTrace, emitOperationProgress } from './trace.mjs';
-import { resolveSearchLockKey, randomBetween, resolveSearchResultTokenLink, normalizeBaseNoteId } from './utils.mjs';
+import { resolveSearchLockKey, randomBetween, resolveSearchResultTokenLink, normalizeBaseNoteId, resolveSearchSubmitMethod } from './utils.mjs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { sleep, readLocation, pressKey, fillInputValue, sleepRandom, evaluateReadonly, waitForAnchor } from './dom-ops.mjs';
-import { readSearchInput, readSearchViewportReady, readSearchCandidates } from './search-ops.mjs';
+import { sleep, readLocation, pressKey, fillInputValue, sleepRandom, evaluateReadonly, waitForAnchor, clickPoint } from './dom-ops.mjs';
+import { readSearchInput, readSearchViewportReady, readSearchCandidates, readSearchButton } from './search-ops.mjs';
 import { buildSelectorCheck, ensureActiveSession, maybeSelector } from '../../../container/runtime-core/index.mjs';
 import { getDomSnapshotByProfile } from '../../../utils/browser-service.mjs';
 import { resolveXhsOutputContext, mergeLinksJsonl, readJsonlRows } from './persistence.mjs';
@@ -540,7 +540,7 @@ export async function executeSubmitSearchOperation({ profileId, params = {}, con
       return null;
     };
 
-    const method = 'enter'; // 单一真源：只使用 Enter 提交搜索
+    const method = resolveSearchSubmitMethod(params); // 默认 Enter，Windows 可通过 submitMethod=click 启用按钮提交
     const keyword = String(params.keyword || '').trim();
     const env = String(params.env || profileState.env || 'debug').trim();
     const outputRoot = String(params.outputRoot || params.downloadRoot || params.rootDir || profileState.outputRoot || '').trim();
@@ -627,11 +627,35 @@ export async function executeSubmitSearchOperation({ profileId, params = {}, con
     const tSubmitPhase = Date.now();
     const beforeUrl = await readLocationImpl(profileId);
     let via = method;
-    // 单一真源：只使用 Enter 提交搜索
+    // 单一真源：默认只使用 Enter 提交搜索（Windows 可按 submitMethod=click 启用按钮提交）
     const triggerSubmitOnce = async (attempt = 1) => {
-      await pressKeyImpl(profileId, 'Enter');
+      if (method === 'click') {
+        await waitForAnchor(profileId, {
+          selectors: ['.input-button', '.input-button .search-icon'],
+          timeoutMs: Math.min(actionDelayMaxMs, 5000),
+          intervalMs: 300,
+          description: 'submit_search_button_anchor',
+        });
+        const button = await readSearchButton(profileId);
+        if (!button?.ok || !button.center) {
+          throw new Error(`SEARCH_BUTTON_NOT_FOUND:${String(button?.reason || 'unknown')}`);
+        }
+        try {
+          await clickPoint(profileId, button.center, { timeoutMs: 8000 });
+          pushTrace({ kind: 'click', stage: 'submit_search', target: 'search_button', attempt });
+        } catch (error) {
+          pushTrace({ kind: 'click_error', stage: 'submit_search', target: 'search_button', attempt, error: String(error?.message || error) });
+        }
+        via = 'click';
+        return;
+      }
+      try {
+        await pressKeyImpl(profileId, 'Enter');
+        pushTrace({ kind: 'key', stage: 'submit_search', key: 'Enter', attempt });
+      } catch (error) {
+        pushTrace({ kind: 'key_error', stage: 'submit_search', key: 'Enter', attempt, error: String(error?.message || error) });
+      }
       via = 'Enter';
-      pushTrace({ kind: 'key', stage: 'submit_search', key: 'Enter', attempt });
     };
 
     const waitSearchReadyOnce = async (attempt = 1) => {

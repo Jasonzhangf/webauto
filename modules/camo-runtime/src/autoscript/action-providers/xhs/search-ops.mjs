@@ -23,6 +23,38 @@ export async function readSearchInput(profileId) {
   return evaluateReadonly(profileId, script, { timeoutMs: 6000, onTimeout: 'return' });
 }
 
+export async function readSearchButton(profileId) {
+  const script = `(() => {
+    const node = document.querySelector('.input-button, .input-button .search-icon');
+    const button = node?.closest ? (node.closest('.input-button') || node) : node;
+    if (!(button instanceof Element)) return { ok: false, reason: 'not_found' };
+    const rect = button.getBoundingClientRect?.();
+    if (!rect || rect.width <= 1 || rect.height <= 1) return { ok: false, reason: 'not_visible' };
+    try {
+      const style = window.getComputedStyle(button);
+      if (style) {
+        if (style.display === 'none') return { ok: false, reason: 'display_none' };
+        if (style.visibility === 'hidden' || style.visibility === 'collapse') return { ok: false, reason: 'hidden' };
+        const opacity = Number.parseFloat(String(style.opacity || '1'));
+        if (Number.isFinite(opacity) && opacity <= 0.01) return { ok: false, reason: 'opacity' };
+      }
+    } catch {}
+    const vw = Number(window.innerWidth || 0);
+    const vh = Number(window.innerHeight || 0);
+    const center = {
+      x: Math.max(1, Math.min(Math.max(1, vw - 1), Math.round(rect.left + rect.width / 2))),
+      y: Math.max(1, Math.min(Math.max(1, vh - 1), Math.round(rect.top + rect.height / 2))),
+    };
+    return {
+      ok: true,
+      center,
+      rect: { left: Number(rect.left || 0), top: Number(rect.top || 0), width: Number(rect.width || 0), height: Number(rect.height || 0) },
+      viewport: { width: vw, height: vh },
+    };
+  })()`;
+  return evaluateReadonly(profileId, script, { timeoutMs: 6000, onTimeout: 'return' });
+}
+
 export async function readSearchCandidates(profileId) {
   const script = `(() => {
     const minVisibleRatio = 0.5;

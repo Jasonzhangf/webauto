@@ -1,5 +1,14 @@
 # WebAuto Memory - Long Term
 
+## 2026-03-28 Feed-like 4-tab 轮转卡死根因与修复
+
+- 现象：4-tab 已创建，但运行中被站点打开额外 Tab（用户主页等），active tab 被夺走；feed-like 仍按旧 tabIndex 扫描，导致长期无候选、反复 scroll_exhausted，轮转无法继续。
+- 根因：`executeFeedLikeOperation` 未在每轮操作前校验 active tab，导致实际操作页与 state.currentTabIndex 脱钩。
+- 修复：在 `executeFeedLikeOperation` 开始处增加 `page:list` + `page:switch` 纠偏逻辑，active 与 currentTabIndex 不一致时强制切回目标 tab，并用锚点确认稳定。
+- 文件：`modules/camo-runtime/src/autoscript/action-providers/xhs/feed-like-ops.mjs`
+
+Tags: #feed-like #tab-rotation #active-tab #realign #windows
+
 ## 2026-03-27 唯一启动脚本方式（强制）
 
 - 统一入口仅允许 `node bin/webauto.mjs` / `webauto` CLI。
@@ -968,71 +977,5 @@ Tags: #feed-like #hit-test #elementsFromPoint #windows #manual-verify
 - 2026-03-27: feed-like click 失败不可阻塞任务；同一 note 的 click 失败计数达到阈值后标记为 blocked，跳过并继续滚动/轮转。
 Tags: #feed-like #nonblocking #click-failed #skip
 
-## 2026-03-29 Daemon Inspection Scheduler
-
-- 模块：`apps/webauto/entry/lib/inspection-scheduler.mjs`（322 行）
-- 工厂函数：`createInspectionScheduler(opts)` 返回 `InspectionScheduler` 实例
-- 配置参数：`intervalMs`（默认 60s）、`maxResumeAttempts`（默认 3）、`maxTotalRounds`（默认 360）
-- 核心方法：`startInspection()`、`stopInspection()`、`stopAll()`、`destroy()`
-- `_tick()` 逻辑：running→skip, completed→terminate, failed/stopped→onResubmit
-- `_buildResumeArgs()` 在 `xhs unified/collect/like/feed-like/status` 后注入 `--resume true`
-- Daemon 集成点（`apps/webauto/entry/daemon.mjs`）：
-  - state.inspection 实例化
-  - `startJobInspection()` 在 startTaskJob 中为 XHS 任务启动巡检
-  - `task.stop` handler 中调用 `stopInspection()`
-  - `shutdownDaemon` 中调用 `destroy()`
-- 单测 39 个覆盖：constructor, start/stop, tick 状态转换, _buildResumeArgs, logger, integration
-
-Tags: #inspection-scheduler #daemon #auto-resume #xhs
-
-## 2026-03-29 统一社交平台命令格式
-
-- CLI 格式统一为 `webauto <platform> <action> [options]`
-- XHS 新增子命令：`like`（`xhs-like.mjs`）、`feed-like`（`xhs-feed-like.mjs`）、`deps`（转发到 `xhs-install.mjs`）
-- `weibo` 命令改为 stub（入口缺失，exit 1）
-- `xhs run` 输出 deprecated 警告后转发到 `xhs unified`
-- `printXhsHelp()` 显示 9 个子命令：unified, collect, like, feed-like, status, install, deps, gate, orchestrate
-- 设计文档：`docs/arch/unified-platform-commands.md`
-
-Tags: #cli #platform-commands #xhs #like #feed-like #deps
-
-## 2026-03-29 Daemon Inspection Scheduler（巡检调度器）
-
-### 新增模块
-- `apps/webauto/entry/lib/inspection-scheduler.mjs` — daemon 级别定时巡检
-- `tests/unit/webauto/inspection-scheduler.test.mjs` — 40 个测试用例
-
-### 功能
-- daemon 提交任务时自动挂载巡检（`startJobInspection`）
-- 巡检逻辑（每 60s）：
-  - `completed` → 终止巡检，回调 onComplete
-  - `running` → 跳过，等下一轮
-  - `failed`/`stopped` → 自动注入 `--resume true` 重新提交（断点重续）
-  - 超过 maxResumeAttempts(3) / maxTotalRounds(360) → 终止
-- 手动 `task.stop` 不触发重续（先 stopInspection 再杀进程）
-- daemon shutdown 时 destroy() 清理所有定时器
-- 所有 xhs 子命令均挂载巡检（unified/collect/like/feed-like 等）
-
-Tags: #daemon #inspection #checkpoint-resume #auto-resume
-
-## 2026-03-29 统一社交平台命令格式（设计决策）
-
-### 目标格式
-```bash
-webauto <platform> <action> [options]
-```
-
-### XHS 子命令
-- `unified`（全功能）
-- `collect`（仅采集）
-- `like`（仅点赞）
-- `feed-like`（首页点赞）
-- `deps`（依赖管理）
-- `status` / `install` / `gate` / `orchestrate`
-
-### 兼容策略
-- `xhs run` 保留别名但输出 deprecated 提示
-- `webauto deps` 顶层保留兼容，推荐 `webauto xhs deps`
-- `webauto weibo` 改为 stub（入口缺失）
-
-Tags: #cli #command-format #platform-namespace
+- 2026-03-28: Windows 上 `mouse:click` / `keyboard:press` 长时间超时（browser-service timeout）时，通常是 camo 会话卡死；需 `camo stop <profile>` 后 `camo start <profile> --url https://www.xiaohongshu.com/explore --no-headless` 重启会话，输入链路恢复正常。
+Tags: #camo #input-timeout #session-restart #windows

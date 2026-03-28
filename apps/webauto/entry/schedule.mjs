@@ -645,6 +645,7 @@ async function cmdDaemon(argv, jsonMode) {
   const intervalSec = parsePositiveInt(argv['interval-sec'], 30);
   const limit = parsePositiveInt(argv.limit, 20);
   const runOnce = argv.once === true;
+  const testMaxTicks = parsePositiveInt(process.env.WEBAUTO_SCHEDULE_TEST_MAX_TICKS, null);
 
   // Clean up stale leases from crashed daemon instances
   const staleResult = reapStaleLocks();
@@ -696,6 +697,29 @@ async function cmdDaemon(argv, jsonMode) {
     renewScheduleDaemonLease({ ownerId, leaseMs: daemonLeaseMs });
   }, leaseHeartbeatMs);
   leaseHeartbeat.unref?.();
+  let stopped = false;
+  let timer = null;
+  let tickCount = 0;
+  let pendingShutdown = false;
+  let handlersReady = false;
+  const shutdown = () => {
+    if (stopped) return;
+    stopped = true;
+    if (timer) clearInterval(timer);
+    clearInterval(leaseHeartbeat);
+    killTrackedBrowserPids();
+    releaseScheduleDaemonLease({ ownerId });
+    console.log(JSON.stringify({
+      ts: new Date().toISOString(),
+      event: 'schedule.stopped',
+    }));
+    process.exit(0);
+  };
+  const scheduleShutdown = () => {
+    if (stopped) return;
+    const handle = setTimeout(() => shutdown(), 0);
+    handle.unref?.();
+  };
   const tick = async () => {
     const result = await runDue(limit, {
       quietExecutors: jsonMode,
@@ -715,24 +739,22 @@ async function cmdDaemon(argv, jsonMode) {
       taskIds: result.results.map((item) => item.taskId),
     };
     console.log(JSON.stringify(line));
-  };
-  await tick();
-  const timer = setInterval(() => {
-    void tick();
-  }, intervalSec * 1000);
-  const shutdown = () => {
-    clearInterval(timer);
-    clearInterval(leaseHeartbeat);
-    killTrackedBrowserPids();
-    releaseScheduleDaemonLease({ ownerId });
-    console.log(JSON.stringify({
-      ts: new Date().toISOString(),
-      event: 'schedule.stopped',
-    }));
-    process.exit(0);
+    tickCount += 1;
+    if (testMaxTicks && tickCount >= testMaxTicks) {
+      pendingShutdown = true;
+      if (handlersReady) {
+        scheduleShutdown();
+      }
+    }
   };
   process.on('SIGINT', shutdown);
   process.on('SIGTERM', shutdown);
+
+  await tick();
+  timer = setInterval(() => {
+    void tick();
+  }, intervalSec * 1000);
+  /* c8 ignore start -- crash handlers are non-deterministic in unit tests */
   process.on('uncaughtException', (error) => {
     console.error('[schedule] Uncaught exception:', error.message);
     killTrackedBrowserPids();
@@ -745,6 +767,11 @@ async function cmdDaemon(argv, jsonMode) {
     releaseScheduleDaemonLease({ ownerId });
     process.exit(1);
   });
+  /* c8 ignore stop */
+  handlersReady = true;
+  if (pendingShutdown) {
+    scheduleShutdown();
+  }
 }
 
 async function main() {

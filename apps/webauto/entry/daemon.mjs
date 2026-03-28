@@ -8,15 +8,18 @@ import { spawn, spawnSync } from 'node:child_process';
 import {
   createWriteStream,
   existsSync,
+  closeSync,
   mkdirSync,
+  openSync,
+  readSync,
   readFileSync,
   rmSync,
+  statSync,
   unlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
-import { createInspectionScheduler } from './lib/inspection-scheduler.mjs';
 
 import { performHealthCheck } from './lib/health-check.mjs';
 
@@ -75,6 +78,18 @@ const WORKER_HEARTBEAT_INTERVAL_MS = 30_000;
 const WORKER_HEARTBEAT_MISS_LIMIT = 3;
 const WORKER_HEARTBEAT_STALE_MS = WORKER_HEARTBEAT_INTERVAL_MS * WORKER_HEARTBEAT_MISS_LIMIT;
 const DAEMON_SHUTDOWN_GRACE_MS = WORKER_HEARTBEAT_INTERVAL_MS + 5_000;
+const STALL_CHECK_INTERVAL_MS = Math.max(
+  60_000,
+  Number(process.env.WEBAUTO_DAEMON_STALL_CHECK_INTERVAL_MS || 15 * 60 * 1000),
+);
+const STALL_TIMEOUT_MS = Math.max(
+  60_000,
+  Number(process.env.WEBAUTO_DAEMON_STALL_TIMEOUT_MS || STALL_CHECK_INTERVAL_MS),
+);
+const STALL_LOG_TAIL_BYTES = Math.max(
+  32 * 1024,
+  Number(process.env.WEBAUTO_DAEMON_STALL_LOG_TAIL_BYTES || 256 * 1024),
+);
 
 function ensureDirs() {
   mkdirSync(RUN_DIR, { recursive: true });
@@ -249,6 +264,68 @@ function parseJsonFromMixedOutput(stdout = '', stderr = '') {
   return null;
 }
 
+function readLogTailLines(filePath, maxBytes = STALL_LOG_TAIL_BYTES) {
+  if (!filePath) return [];
+  try {
+    const stat = statSync(filePath);
+    if (!stat || stat.size <= 0) return [];
+    const start = Math.max(0, stat.size - Math.max(1024, maxBytes));
+    const length = stat.size - start;
+    const fd = openSync(filePath, 'r');
+    try {
+      const buffer = Buffer.alloc(length);
+      readSync(fd, buffer, 0, length, start);
+      return buffer.toString('utf8').split(/\r?\n/g).map((line) => line.trim()).filter(Boolean);
+    } finally {
+      closeSync(fd);
+    }
+  } catch {
+    return [];
+  }
+}
+
+function parseEventTimestamp(payload) {
+  if (!payload) return null;
+  const raw = payload.ts ?? payload.timestamp ?? payload.time ?? null;
+  if (typeof raw === 'number' && Number.isFinite(raw)) return raw;
+  if (typeof raw === 'string' && raw.trim()) {
+    const ms = Date.parse(raw);
+    if (Number.isFinite(ms)) return ms;
+  }
+  return null;
+}
+
+function isProgressEventName(eventName) {
+  const name = String(eventName || '').trim();
+  if (!name) return false;
+  return name.startsWith('autoscript:') || name.startsWith('xhs.unified.');
+}
+
+function resolveLastProgressFromLog(logPath) {
+  const lines = readLogTailLines(logPath, STALL_LOG_TAIL_BYTES);
+  for (let i = lines.length - 1; i >= 0; i -= 1) {
+    const line = lines[i];
+    if (!line || !line.startsWith('{')) continue;
+    let payload;
+    try {
+      payload = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (!payload || !isProgressEventName(payload.event)) continue;
+    const tsMs = parseEventTimestamp(payload);
+    if (!Number.isFinite(tsMs)) continue;
+    return { tsMs, event: payload.event, raw: payload };
+  }
+  try {
+    const stat = statSync(logPath);
+    if (stat?.mtimeMs) return { tsMs: stat.mtimeMs, event: 'log_mtime', raw: null };
+  } catch {
+    return null;
+  }
+  return null;
+}
+
 function runNode(args, options = {}) {
   return new Promise((resolve) => {
     const child = spawn(process.execPath, args, {
@@ -343,13 +420,6 @@ async function startDaemonServer() {
     shutdownReason: null,
     shutdownStartedAt: null,
     shutdownTimer: null,
-    // Inspection Scheduler
-    inspection: createInspectionScheduler({
-      intervalMs: 60_000,
-      maxResumeAttempts: 3,
-      maxTotalRounds: 360,
-      logger: (event, data) => logDaemonEvent(event, data),
-    }),
   };
 
   const summarizeWorker = (worker) => ({
@@ -377,38 +447,6 @@ async function startDaemonServer() {
     finishedAt: job.finishedAt || null,
     logPath: job.logPath || null,
   });
-
-  const RESUME_ELIGIBLE_PLATFORMS = new Set(['xhs', 'weibo']);
-  const isResumeEligible = (args = []) => {
-    return Array.isArray(args) && args.length >= 2
-      && RESUME_ELIGIBLE_PLATFORMS.has(args[0]);
-  };
-
-  const startJobInspection = (jobId, args) => {
-    const eligible = isResumeEligible(args);
-    if (!eligible) {
-      logDaemonEvent('inspection_skip_not_eligible', { jobId, reason: 'not_xhs_resume_task' });
-      return;
-    }
-    state.inspection.startInspection({
-      jobId,
-      getJobStatus: () => {
-        const job = state.jobs.get(jobId);
-        if (!job) return { status: 'unknown', args: [], code: null };
-        return { status: job.status, args: job.args || [], code: job.code ?? null };
-      },
-      onResubmit: async (resumeArgs) => {
-        logDaemonEvent('inspection_resubmit', { jobId, resumeArgs });
-        const result = await startTaskJob({ args: resumeArgs, env: {}, wait: false });
-        if (!result.ok) throw new Error('inspection resubmit failed: ' + result.error);
-        const originalJob = state.jobs.get(jobId);
-        if (originalJob) originalJob.resumedTo = result.job.id;
-        logDaemonEvent('inspection_resubmit_ok', { originalJobId: jobId, newJobId: result.job.id });
-      },
-      onComplete: (summary) => { logDaemonEvent('inspection_complete', summary); },
-    });
-    logDaemonEvent('inspection_started_for_job', { jobId });
-  };
   const updateHeartbeat = () => {
     const jobs = state.jobsOrder
       .slice(-20)
@@ -491,6 +529,81 @@ async function startDaemonServer() {
     return worker;
   };
 
+  const spawnTaskJob = (args = [], meta = {}) => {
+    const jobId = `job_${Date.now()}_${randomUUID().slice(0, 8)}`;
+    const logPath = path.join(JOB_LOG_DIR, `${jobId}.log`);
+    const logStream = createWriteStream(logPath, { flags: 'a' });
+    const worker = registerWorker({
+      id: `task_${jobId}`,
+      token: randomUUID(),
+      kind: 'task',
+      source: meta.source || 'daemon-task',
+      jobId,
+      status: 'running',
+    });
+
+    const child = spawn(process.execPath, [WEBAUTO_BIN, ...args], {
+      cwd: ROOT,
+      env: { ...process.env, ...buildWorkerEnv(worker) },
+      stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true,
+    });
+
+    const job = {
+      id: jobId,
+      args,
+      pid: Number(child.pid || 0) || null,
+      status: 'running',
+      code: null,
+      exitSignal: null,
+      startedAt: nowIso(),
+      finishedAt: null,
+      logPath,
+      restartOf: meta.restartOf || null,
+      restartReason: meta.restartReason || null,
+    };
+    state.jobs.set(jobId, job);
+    state.jobsOrder.push(jobId);
+
+    child.stdout.on('data', (chunk) => logStream.write(chunk));
+    child.stderr.on('data', (chunk) => logStream.write(chunk));
+
+    child.on('close', (code, signal) => {
+      // If already marked stopped/stalled by daemon, keep current state.
+      if (job.status === 'stopped' || job.status === 'stalled') {
+        job.code = job.code ?? (code ?? -15);
+        job.exitSignal = signal || job.exitSignal || null;
+        job.finishedAt = job.finishedAt || nowIso();
+      } else {
+        job.status = code === 0 ? 'completed' : 'failed';
+        job.code = code;
+        job.exitSignal = signal || null;
+        job.finishedAt = nowIso();
+      }
+      logStream.end();
+      if (worker) markWorkerStopped(worker.id, 'worker_exit', { status: job.status });
+      logDaemonEvent('job_close', {
+        jobId: job.id,
+        pid: job.pid,
+        status: job.status,
+        code: job.code,
+        signal: job.exitSignal,
+      });
+      updateHeartbeat();
+    });
+
+    return { job, worker, child };
+  };
+
+  const findWorkerByJobId = (jobId) => {
+    const id = String(jobId || '').trim();
+    if (!id) return null;
+    const worker = state.workersOrder
+      .map((workerId) => state.workers.get(workerId))
+      .find((item) => item && item.jobId === id);
+    return worker || null;
+  };
+
 
   const startTaskJob = async (params = {}) => {
     const args = Array.isArray(params.args) ? params.args : [];
@@ -545,69 +658,7 @@ async function startDaemonServer() {
     }
 
     const wait = params.wait === true;
-    const jobId = `job_${Date.now()}_${randomUUID().slice(0, 8)}`;
-    const logPath = path.join(JOB_LOG_DIR, `${jobId}.log`);
-    const logStream = createWriteStream(logPath, { flags: 'a' });
-    const worker = registerWorker({
-      id: `task_${jobId}`,
-      token: randomUUID(),
-      kind: 'task',
-      source: 'daemon-task',
-      jobId,
-      status: 'running',
-    });
-
-    const child = spawn(process.execPath, [WEBAUTO_BIN, ...args], {
-      cwd: ROOT,
-      env: { ...process.env, ...buildWorkerEnv(worker) },
-      stdio: ['ignore', 'pipe', 'pipe'],
-      windowsHide: true,
-    });
-
-    const job = {
-      id: jobId,
-      args,
-      pid: Number(child.pid || 0) || null,
-      status: 'running',
-      code: null,
-      exitSignal: null,
-      startedAt: nowIso(),
-      finishedAt: null,
-      logPath,
-    };
-    state.jobs.set(jobId, job);
-    state.jobsOrder.push(jobId);
-
-    child.stdout.on('data', (chunk) => logStream.write(chunk));
-    child.stderr.on('data', (chunk) => logStream.write(chunk));
-
-    if (jobId && Array.isArray(args)) {
-      startJobInspection(jobId, args);
-    }
-
-    child.on('close', (code, signal) => {
-      // If already marked stopped by task.stop/shutdown, keep stopped state.
-      if (job.status === 'stopped') {
-        job.code = job.code ?? (code ?? -15);
-        job.exitSignal = signal || job.exitSignal || null;
-        job.finishedAt = job.finishedAt || nowIso();
-      } else {
-        job.status = code === 0 ? 'completed' : 'failed';
-        job.code = code;
-        job.exitSignal = signal || null;
-        job.finishedAt = nowIso();
-      }
-      logStream.end();
-      if (worker) markWorkerStopped(worker.id, 'worker_exit', { status: job.status });
-      logDaemonEvent('job_close', {
-        jobId: job.id,
-        pid: job.pid,
-        status: job.status,
-        code: job.code,
-        signal: job.exitSignal,
-      });
-      updateHeartbeat();
-    });
+    const { job, child } = spawnTaskJob(args, { source: 'daemon-task' });
 
     if (!wait) {
       updateHeartbeat();
@@ -724,17 +775,14 @@ async function startDaemonServer() {
         .reverse();
       return { ok: true, jobs };
     }
-   if (method === 'task.stop') {
-     const id = String(params.id || '').trim();
-     if (!id) return { ok: false, error: 'missing id' };
-     const job = state.jobs.get(id);
-     if (!job) return { ok: false, error: `job_not_found:${id}` };
-     if (job.status !== 'running') {
-       return { ok: true, stopped: false, reason: `task_not_running:${job.status}`, job: summarizeJob(job) };
-     }
-      state.inspection.stopInspection(id);
-      logDaemonEvent('task_stop_inspection_stopped', { jobId: id });
-
+    if (method === 'task.stop') {
+      const id = String(params.id || '').trim();
+      if (!id) return { ok: false, error: 'missing id' };
+      const job = state.jobs.get(id);
+      if (!job) return { ok: false, error: `job_not_found:${id}` };
+      if (job.status !== 'running') {
+        return { ok: true, stopped: false, reason: `task_not_running:${job.status}`, job: summarizeJob(job) };
+      }
       const ret = await terminatePidTree(job.pid);
       if (!ret?.ok) return { ok: false, error: 'task_stop_failed', job: summarizeJob(job) };
       job.status = 'stopped';
@@ -831,6 +879,73 @@ async function startDaemonServer() {
   }, 30_000);
   housekeepingTimer.unref();
 
+  let stallCheckRunning = false;
+  const checkStalledJobs = async () => {
+    if (stallCheckRunning || state.shuttingDown) return;
+    stallCheckRunning = true;
+    try {
+      const nowMs = Date.now();
+      for (const job of state.jobs.values()) {
+        if (job.status !== 'running' || !job.pid) continue;
+        const progress = resolveLastProgressFromLog(job.logPath);
+        const startedAtMs = job.startedAt ? Date.parse(job.startedAt) : null;
+        const lastProgressMs = Number.isFinite(progress?.tsMs)
+          ? progress.tsMs
+          : (Number.isFinite(startedAtMs) ? startedAtMs : null);
+        if (!Number.isFinite(lastProgressMs)) continue;
+        job.lastProgressMs = lastProgressMs;
+        job.lastProgressAt = new Date(lastProgressMs).toISOString();
+        job.lastProgressEvent = progress?.event || null;
+        const staleMs = Math.max(0, nowMs - lastProgressMs);
+        if (staleMs < STALL_TIMEOUT_MS) continue;
+
+        logDaemonEvent('job_stalled', {
+          jobId: job.id,
+          pid: job.pid,
+          staleMs,
+          lastProgressAt: job.lastProgressAt,
+          lastProgressEvent: job.lastProgressEvent,
+        });
+
+        const worker = findWorkerByJobId(job.id);
+        const stopped = await terminatePidTree(job.pid);
+        const stillAlive = !stopped?.ok && isPidAlive(job.pid);
+        if (stillAlive) {
+          logDaemonEvent('job_stall_kill_failed', { jobId: job.id, pid: job.pid });
+          continue;
+        }
+
+        job.status = 'stalled';
+        job.code = -88;
+        job.exitSignal = 'STALL_TIMEOUT';
+        job.finishedAt = nowIso();
+        if (worker) markWorkerStopped(worker.id, 'stalled', { status: 'stalled' });
+
+        const restarted = spawnTaskJob(job.args, {
+          source: 'daemon-stall-restart',
+          restartOf: job.id,
+          restartReason: 'stall_timeout',
+        });
+        logDaemonEvent('job_restart', {
+          fromJobId: job.id,
+          toJobId: restarted.job.id,
+          ok: true,
+          reason: 'stall_timeout',
+        });
+        updateHeartbeat();
+      }
+    } catch (err) {
+      logDaemonEvent('stall_check_error', { error: err?.message || String(err) });
+    } finally {
+      stallCheckRunning = false;
+    }
+  };
+
+  const stallCheckTimer = setInterval(() => {
+    void checkStalledJobs();
+  }, STALL_CHECK_INTERVAL_MS);
+  stallCheckTimer.unref();
+
   const shutdownDaemon = () => {
     // 关闭前清理所有 running job 的进程
     for (const job of state.jobs.values()) {
@@ -842,8 +957,6 @@ async function startDaemonServer() {
       job.finishedAt = nowIso();
     }
     updateHeartbeat();
-    state.inspection.destroy();
-
     try { server.close(); } catch {}
     cleanupRuntimeFiles();
     process.exit(0);

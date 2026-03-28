@@ -6,6 +6,11 @@ import * as os from 'node:os';
 import { CollectionDataManager, buildCollectionId } from './index.js';
 import type { PostRecord, CommentRecord } from './types.js';
 
+const IS_WIN = process.platform === 'win32';
+const sanitizePathSegment = (value: string) => (
+  IS_WIN ? value.replace(/[<>:"/\\|?*]/g, '_').replace(/[. ]+$/g, '') : value
+);
+
 async function setupTestDir(): Promise<string> {
   const testDir = path.join(os.tmpdir(), `webauto-test-${Date.now()}`);
   await fs.promises.mkdir(testDir, { recursive: true });
@@ -172,7 +177,8 @@ test('CollectionDataManager: user collection ID with name', async () => {
     assert.equal(collectionId, 'user:123456:张三', 'Collection ID should include user name');
     
     const paths = dm.getPaths();
-    assert.ok(paths.collectionDir.includes('user:123456:张三'), 'Directory should include user name');
+    const expectedDirName = sanitizePathSegment('user:123456:张三');
+    assert.ok(paths.collectionDir.includes(expectedDirName), 'Directory should include user name');
   } finally {
     await cleanupTestDir(testDir);
   }

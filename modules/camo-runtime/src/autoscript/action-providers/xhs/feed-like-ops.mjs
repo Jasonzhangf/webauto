@@ -20,6 +20,8 @@ import path from 'node:path';
 import { getProfileState } from './state.mjs';
 import { buildTraceRecorder, emitOperationProgress } from './trace.mjs';
 import { evaluateReadonly, clickPoint, waitForAnchor, sleepRandom, pressKey, fillInputValue } from './dom-ops.mjs';
+import { readSearchButton } from './search-ops.mjs';
+import { resolveSearchSubmitMethod } from './utils.mjs';
 import { captureScreenshotToFile } from './diagnostic-utils.mjs';
 
 const NOTE_ITEM_SELECTOR = '.note-item';
@@ -103,13 +105,19 @@ async function waitForFeedWindowChange(profileId, beforeSignature) {
 
 /** 瀹夊叏 callAPI 鍖呰锛氳秴鏃跺悗杩斿洖 null 鑰岄潪鎶涘紓甯?*/
 async function safeCallAPI(action, payload = {}, timeoutMs = 15000) {
-  const start = Date.now();
+  const effectiveTimeoutMs = Math.max(500, Number(timeoutMs) || 15000);
+  let timer;
   try {
-    const result = await callAPI(action, payload);
-    if (Date.now() - start > timeoutMs) return null;
-    return result;
+    return await Promise.race([
+      callAPI(action, payload),
+      new Promise((resolve) => {
+        timer = setTimeout(() => resolve(null), effectiveTimeoutMs);
+      }),
+    ]);
   } catch {
     return null;
+  } finally {
+    if (timer) clearTimeout(timer);
   }
 }
 
@@ -335,6 +343,8 @@ export async function executeFeedLikeOperation({ profileId, params = {}, context
   const minTopSafePx = Math.max(60, Number(params.minTopSafePx ?? 90) || 90);
   const likeIntervalMinMs = Math.max(500, Number(params.likeIntervalMinMs ?? 1000) || 1000);
   const likeIntervalMaxMs = Math.max(likeIntervalMinMs, Number(params.likeIntervalMaxMs ?? 5000) || 5000);
+  const scrollIntervalMinMs = Math.max(400, Number(params.scrollIntervalMinMs ?? 900) || 900);
+  const scrollIntervalMaxMs = Math.max(scrollIntervalMinMs, Number(params.scrollIntervalMaxMs ?? 1600) || 1600);
   const noCandidateLimit = Math.max(1, Number(params.noCandidateLimit ?? 10) || 10);
   const keywords = resolveFeedLikeKeywords(params);
 
@@ -374,6 +384,38 @@ export async function executeFeedLikeOperation({ profileId, params = {}, context
     tabData.pendingKeywordAttempts = 0;
   }
 
+  // Ensure we are operating on the expected tab even if the site opened extra tabs.
+  try {
+    const pageList = await safeCallAPI('page:list', { profileId }, 8000);
+    const pages = pageList?.pages || pageList?.data?.pages || [];
+    const activeIndex = Number.isInteger(pageList?.activeIndex)
+      ? pageList.activeIndex
+      : pages.findIndex((p) => p?.active === true);
+    if (pages.length > 0 && currentTabIndex < pages.length) {
+      const targetPageIndex = pages[currentTabIndex]?.index;
+      const isActive = targetPageIndex === activeIndex || pages[currentTabIndex]?.active === true;
+      if (!isActive && Number.isInteger(targetPageIndex)) {
+        const switchResult = await safeCallAPI('page:switch', { profileId, index: targetPageIndex }, 10000);
+        if (switchResult) {
+          await waitForAnchor(profileId, {
+            selectors: ['#search-input', '.note-item', '.feeds-container'],
+            timeoutMs: 5000,
+            intervalMs: 300,
+            description: 'feed_like_tab_realign',
+          }).catch(() => null);
+          emitOperationProgress(context, {
+            kind: 'feed_like_tab_realigned',
+            stage: 'feed_like',
+            fromTabIndex: activeIndex,
+            toTabIndex: currentTabIndex,
+          });
+        }
+      }
+    }
+  } catch {
+    // best-effort; continue with current page
+  }
+
   if (tabData.pendingKeyword) {
     const searchKeyword = String(tabData.pendingKeyword || '').trim();
     tabData.pendingKeywordAttempts = Number(tabData.pendingKeywordAttempts || 0) + 1;
@@ -394,8 +436,43 @@ export async function executeFeedLikeOperation({ profileId, params = {}, context
       }).catch(() => null);
 
       if (searchInput?.ok && searchKeyword) {
+        const submitMethod = resolveSearchSubmitMethod(params);
         await fillInputValue(profileId, ['#search-input', 'input.search-input'], searchKeyword);
-        await pressKey(profileId, 'Enter');
+        if (submitMethod === 'click') {
+          await waitForAnchor(profileId, {
+            selectors: ['.input-button', '.input-button .search-icon'],
+            timeoutMs: 5000,
+            intervalMs: 300,
+            description: 'feed_like_search_button',
+          }).catch(() => null);
+          const button = await readSearchButton(profileId);
+          if (!button?.ok || !button.center) {
+            throw new Error(`SEARCH_BUTTON_NOT_FOUND:${String(button?.reason || 'unknown')}`);
+          }
+          try {
+            await clickPoint(profileId, button.center, { timeoutMs: 8000 });
+          } catch (error) {
+            emitOperationProgress(context, {
+              kind: 'feed_like_search_click_error',
+              stage: 'feed_like',
+              keyword: searchKeyword,
+              tabIndex: currentTabIndex,
+              error: String(error?.message || error),
+            });
+          }
+        } else {
+          try {
+            await pressKey(profileId, 'Enter');
+          } catch (error) {
+            emitOperationProgress(context, {
+              kind: 'feed_like_search_key_error',
+              stage: 'feed_like',
+              keyword: searchKeyword,
+              tabIndex: currentTabIndex,
+              error: String(error?.message || error),
+            });
+          }
+        }
         await waitForAnchor(profileId, {
           selectors: [
             '#search-result .note-item:has(a.cover)',
@@ -578,6 +655,9 @@ export async function executeFeedLikeOperation({ profileId, params = {}, context
         beforeSignature: beforeSignature ? beforeSignature.slice(0, 120) : null,
         afterSignature: afterSignature ? afterSignature.slice(0, 120) : null,
       });
+
+      // 避免连续滚动过快，增加间隔以更接近真人行为
+      await sleepRandom(scrollIntervalMinMs, scrollIntervalMaxMs, null, 'feed_like_scroll_interval');
 
       const directionLimitReached = scrollDirection === 'up'
         ? noCandidateUp >= noCandidateLimit

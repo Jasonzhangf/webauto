@@ -1,6 +1,6 @@
 {
   "name": "@web-auto/webauto",
-  "version": "0.1.20",
+  "version": "0.1.22",
   "type": "module",
   "bin": {
     "webauto": "bin/webauto.mjs"
@@ -31,7 +31,7 @@
     "!services/**/*.map"
   ],
   "dependencies": {
-    "@web-auto/camo": "0.2.0",
+    "@web-auto/camo": "0.2.1",
     "ajv": "^8.18.0",
     "esbuild-register": "^3.6.0",
     "iconv-lite": "^0.6.3",
@@ -58,7 +58,7 @@
     "test:services": "node runtime/infra/utils/scripts/test-services.mjs",
     "check:modules": "echo \"Module checks skipped\"",
     "check:ts": "tsc --noEmit -p tsconfig.services.json",
-    "test:modules:unit": "npx tsx --test $(find modules -name \"*.test.ts\" -o -name \"*.test.mts\" 2>/dev/null | tr \"\\n\" \" \")",
+    "test:modules:unit": "node scripts/run-tests.mjs modules",
     "test:webauto:schedule:unit": "node --test tests/unit/webauto/schedule-store.test.mjs tests/unit/webauto/schedule-cli.test.mjs",
     "test:webauto:ui-cli:unit": "node --test tests/unit/webauto/ui-cli-command.test.mjs",
     "test:webauto:test-cli:unit": "node --test tests/unit/webauto/test-cli-command.test.mjs",

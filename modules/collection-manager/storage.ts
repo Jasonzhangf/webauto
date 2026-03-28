@@ -6,21 +6,30 @@ import * as fs from 'fs';
 import * as path from 'path';
 import type { CollectionMeta, PostRecord, CommentRecord } from './types';
 
+function sanitizePathSegment(input: string): string {
+  const raw = String(input || '').trim();
+  if (process.platform !== 'win32') return raw;
+  const replaced = raw.replace(/[<>:"/\\|?*]/g, '_').replace(/[. ]+$/g, '');
+  return replaced || '_';
+}
+
 export class CollectionStorage {
   private baseDir: string;
   private collectionDir: string;
   private platform: string;
   private env: string;
   private collectionId: string;
+  private collectionDirName: string;
 
   constructor(baseDir: string, platform: string, env: string, collectionId: string) {
     this.baseDir = baseDir;
     this.platform = platform;
     this.env = env;
     this.collectionId = collectionId;
+    this.collectionDirName = sanitizePathSegment(collectionId);
     
     // Directory structure: baseDir/platform/env/collectionId/
-    this.collectionDir = path.join(baseDir, platform, env, collectionId);
+    this.collectionDir = path.join(baseDir, platform, env, this.collectionDirName);
   }
 
   /**
@@ -164,9 +173,24 @@ export class CollectionStorage {
     const dir = path.join(baseDir, platform, env);
     try {
       const entries = await fs.promises.readdir(dir, { withFileTypes: true });
-      return entries
-        .filter(e => e.isDirectory())
-        .map(e => e.name);
+      const results: string[] = [];
+      for (const entry of entries) {
+        if (!entry.isDirectory()) continue;
+        const entryName = entry.name;
+        const metaPath = path.join(dir, entryName, 'collection-meta.json');
+        let collectionId = entryName;
+        try {
+          const raw = await fs.promises.readFile(metaPath, 'utf-8');
+          const meta = JSON.parse(raw) as CollectionMeta;
+          if (meta && typeof meta.collectionId === 'string' && meta.collectionId.trim()) {
+            collectionId = meta.collectionId.trim();
+          }
+        } catch {
+          // ignore and fallback to dir name
+        }
+        results.push(collectionId);
+      }
+      return results;
     } catch {
       return [];
     }

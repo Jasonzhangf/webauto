@@ -25,9 +25,9 @@ function extractResult(payload) {
   return payload || {};
 }
 
-async function callBrowserApi(action, args = {}) {
+async function callBrowserApi(action, args = {}, options = {}) {
   const { callAPI } = await import('../../../../modules/camo-runtime/src/utils/browser-service.mjs');
-  return callAPI(action, args);
+  return callAPI(action, args, options);
 }
 
 async function resolveStartWindow(profileOptions = {}) {
@@ -159,57 +159,69 @@ export async function ensureSessionInitialized(profileId, options = {}) {
     ? Math.floor(Number(options.maxTabs))
     : null;
   // 浏览器默认不重启；仅显式要求时才重启
-  const restartSession = options.restartSession === true;
+  let restartSession = options.restartSession === true;
 
   if (!restartSession) {
     const { getSessionByProfile } = await import('../../../../modules/camo-runtime/src/utils/browser-service.mjs');
     const existingSession = await getSessionByProfile(id).catch(() => null);
     if (existingSession) {
-      const currentUrl = String(
-        existingSession.current_url
-        || existingSession.currentUrl
-        || existingSession.url
-        || '',
-      ).trim();
-      const onRiskErrorPage = (
-        currentUrl.includes('/website-login/error')
-        || currentUrl.includes('error_code=300011')
-        || currentUrl.includes('httpStatus=461')
-        || currentUrl.includes('verifyType=400')
-      );
-      let riskRecovery = null;
-      if (onRiskErrorPage) {
-        const recoverRet = runCamo(['goto', id, 'https://www.xiaohongshu.com/explore'], {
-          rootDir,
-          timeoutMs: Math.max(10000, Math.min(timeoutMs, 20000)),
-        });
-        riskRecovery = {
-          detected: true,
-          fromUrl: currentUrl,
-          gotoHomeOk: recoverRet?.ok === true,
-        };
-        if (recoverRet?.ok) {
-          await sleep(3000);
-        }
+      const probeTimeoutMs = Math.max(1500, Math.min(timeoutMs, 8000));
+      let probeOk = true;
+      try {
+        await callBrowserApi('page:list', { profileId: id }, { timeoutMs: probeTimeoutMs });
+        await callBrowserApi('evaluate', { profileId: id, script: 'window.location.href' }, { timeoutMs: probeTimeoutMs });
+      } catch {
+        probeOk = false;
       }
-      if (url) {
-        const gotoRet = runCamo(['goto', id, url], { rootDir, timeoutMs });
+      if (!probeOk) {
+        restartSession = true;
+      } else {
+        const currentUrl = String(
+          existingSession.current_url
+          || existingSession.currentUrl
+          || existingSession.url
+          || '',
+        ).trim();
+        const onRiskErrorPage = (
+          currentUrl.includes('/website-login/error')
+          || currentUrl.includes('error_code=300011')
+          || currentUrl.includes('httpStatus=461')
+          || currentUrl.includes('verifyType=400')
+        );
+        let riskRecovery = null;
+        if (onRiskErrorPage) {
+          const recoverRet = runCamo(['goto', id, 'https://www.xiaohongshu.com/explore'], {
+            rootDir,
+            timeoutMs: Math.max(10000, Math.min(timeoutMs, 20000)),
+          });
+          riskRecovery = {
+            detected: true,
+            fromUrl: currentUrl,
+            gotoHomeOk: recoverRet?.ok === true,
+          };
+          if (recoverRet?.ok) {
+            await sleep(3000);
+          }
+        }
+        if (url) {
+          const gotoRet = runCamo(['goto', id, url], { rootDir, timeoutMs });
+          return {
+            ok: true,
+            profileId: id,
+            headless,
+            reused: true,
+            goto: gotoRet,
+            riskRecovery,
+          };
+        }
         return {
           ok: true,
           profileId: id,
           headless,
           reused: true,
-          goto: gotoRet,
           riskRecovery,
         };
       }
-      return {
-        ok: true,
-        profileId: id,
-        headless,
-        reused: true,
-        riskRecovery,
-      };
     }
   }
   let stopRet = null;
