@@ -58,17 +58,26 @@ export function getCamoRunner(rootDir = process.cwd()) {
 function parseLastJson(stdout) {
   const text = String(stdout || '').trim();
   if (!text) return null;
-  const lines = text.split('\n').map((line) => line.trim()).filter(Boolean).reverse();
-  for (const line of lines) {
+  // Try parsing the entire stdout as a single JSON first (handles pretty-printed multi-line output)
+  try {
+    return JSON.parse(text);
+  } catch {}
+  // Fallback: scan trailing lines for a JSON blob
+  const lines = text.split('\n').map((line) => line.trim()).filter(Boolean);
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const candidate = lines.slice(i).join('\n');
     try {
-      return JSON.parse(line);
+      return JSON.parse(candidate);
     } catch {
-      continue;
+      try {
+        return JSON.parse(lines[i]);
+      } catch {
+        continue;
+      }
     }
   }
   return null;
 }
-
 export function runCamo(args, options = {}) {
   const rootDir = String(options.rootDir || process.cwd());
   const timeoutMs = Number(options.timeoutMs) > 0 ? Number(options.timeoutMs) : 60000;
