@@ -414,6 +414,32 @@ Examples:
 `);
 }
 
+
+function printWeiboHelp() {
+  console.log(`webauto weibo
+
+Usage:
+  webauto weibo collect --profile <id> --keyword <kw> [options...]
+
+Subcommands:
+  collect      搜索微博并采集不重复的链接集合（分页遍历 + URL 去重）
+
+Required:
+  --profile <id>       camo profile ID（必须为已登录的微博 profile）
+  --keyword <kw>       搜索关键词
+
+Options:
+  --target <n>         目标链接数（默认 10）
+  --max-notes <n>      target 别名
+  --max-pages <n>      最大翻页数（默认 50）
+  --page-delay <ms>    翻页间隔（默认 2000）
+  --env <name>         输出环境目录（默认 prod）
+  --output-root <p>    自定义输出根目录
+
+Output:
+  默认目录: ~/.webauto/download/weibo/<env>/search:<keyword>/
+`);
+}
 function printXhsHelp() {
   console.log(`webauto xhs
 
@@ -696,13 +722,10 @@ async function main() {
       printAccountHelp();
       return;
     }
- if (cmd === 'weibo') {
-    console.error('\u26a0\ufe0f  weibo 模块暂不可用（入口文件缺失）。');
-    console.error('未来将按 webauto <platform> <action> 格式重建。');
-    console.error('');
-    console.error('当前可用平台: webauto xhs <unified|collect|like|feed-like|status|install|deps|gate>');
-    process.exit(1);
-  }
+    if (cmd === "weibo") {
+      printWeiboHelp();
+      return;
+    }
 
     if (cmd === 'schedule') {
       printScheduleHelp();
@@ -754,6 +777,17 @@ async function main() {
   if (cmd === 'test') {
     const script = path.join(ROOT, 'apps', 'webauto', 'entry', 'test.mjs');
     await run(process.execPath, [script, ...rawArgv.slice(1)]);
+    return;
+  }
+
+  if (cmd === "weibo") {
+    const weiboSub = String(args._[1] || "").trim();
+    if (!weiboSub || weiboSub === "help") {
+      printWeiboHelp();
+      return;
+    }
+    const script = path.join(ROOT, "apps", "webauto", "entry", "weibo-collect.mjs");
+    await run(process.execPath, [script, ...rawArgv.slice(2)]);
     return;
   }
 
@@ -838,14 +872,6 @@ async function main() {
     const script = path.join(ROOT, 'apps', 'webauto', 'entry', 'account.mjs');
     await run(process.execPath, [script, ...rawArgv.slice(1)]);
     return;
-  }
-
- if (cmd === 'weibo') {
-    console.error('\u26a0\ufe0f  weibo 模块暂不可用（入口文件缺失）。');
-    console.error('未来将按 webauto <platform> <action> 格式重建。');
-    console.error('');
-    console.error('当前可用平台: webauto xhs <unified|collect|like|feed-like|status|install|deps|gate>');
-    process.exit(1);
   }
 
   if (cmd === 'schedule') {

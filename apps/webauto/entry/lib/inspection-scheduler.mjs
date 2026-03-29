@@ -264,12 +264,16 @@ export class InspectionScheduler {
   _buildResumeArgs(args = []) {
     if (!Array.isArray(args) || args.length < 2) return null;
 
-    // Pattern: ['xhs', '<subcommand>', ...options]
-    if (args[0] !== 'xhs') return null;
+    // Pattern: ['<platform>', '<subcommand>', ...options]
+    const ELIGIBLE_PLATFORMS = new Set(['xhs', 'weibo']);
+    if (!ELIGIBLE_PLATFORMS.has(args[0])) return null;
 
     const sub = args[1];
-    const ELIGIBLE = new Set(['unified', 'collect', 'like', 'feed-like', 'status']);
-    if (!ELIGIBLE.has(sub)) return null;
+    const ELIGIBLE_XHS_SUBS = new Set(['unified', 'collect', 'like', 'feed-like', 'status']);
+    const ELIGIBLE_WEIBO_SUBS = new Set(['collect']);
+    const isEligibleSub = (args[0] === 'xhs' && ELIGIBLE_XHS_SUBS.has(sub)) ||
+      (args[0] === 'weibo' && ELIGIBLE_WEIBO_SUBS.has(sub));
+    if (!isEligibleSub) return null;
 
     // Check if --resume already present (in any form)
     const hasResume = args.some((a) => {

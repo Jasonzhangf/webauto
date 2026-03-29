@@ -378,13 +378,14 @@ async function startDaemonServer() {
     logPath: job.logPath || null,
   });
 
-  const isXhsResumeEligible = (args = []) => {
+  const RESUME_ELIGIBLE_PLATFORMS = new Set(['xhs', 'weibo']);
+  const isResumeEligible = (args = []) => {
     return Array.isArray(args) && args.length >= 2
-      && args[0] === 'xhs';
+      && RESUME_ELIGIBLE_PLATFORMS.has(args[0]);
   };
 
   const startJobInspection = (jobId, args) => {
-    const eligible = isXhsResumeEligible(args);
+    const eligible = isResumeEligible(args);
     if (!eligible) {
       logDaemonEvent('inspection_skip_not_eligible', { jobId, reason: 'not_xhs_resume_task' });
       return;

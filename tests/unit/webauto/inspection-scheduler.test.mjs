@@ -395,7 +395,12 @@ describe('InspectionScheduler - _buildResumeArgs', () => {
     assert.deepEqual(result, ['xhs', 'feed-like', '--resume', 'true', '--profile', 'test']);
   });
 
-  it('returns null for non-xhs command', () => {
+  it('injects --resume for eligible weibo collect', () => {
+    const result = s._buildResumeArgs(['weibo', 'collect', '--profile', 'test', '--keyword', 'AI']);
+    assert.deepEqual(result, ['weibo', 'collect', '--resume', 'true', '--profile', 'test', '--keyword', 'AI']);
+  });
+
+  it('returns null for non-eligible weibo subcommand', () => {
     assert.equal(s._buildResumeArgs(['weibo', 'unified', '--profile', 'test']), null);
   });
 
