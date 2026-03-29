@@ -421,6 +421,9 @@ Usage:
   webauto xhs install [--download-browser] [--download-geoip] [--ensure-backend] [--install|--reinstall|--uninstall] [--browser|--geoip|--all]
   webauto xhs unified --profile <id> --keyword <kw> [options...]
   webauto xhs collect --profile <id> --keyword <kw> [options...]
+  webauto xhs like --profile <id> --keyword <kw> [options...]
+  webauto xhs feed-like --profile <id> [options...]
+  webauto xhs deps <check|auto|install|uninstall|reinstall> [options...]
   webauto xhs status [--run-id <id>] [--json]
   webauto xhs gate <get|list|set|reset|path> [--platform <name>] [--patch-json <json>] [--json]
   webauto xhs orchestrate --profile <id> --keyword <kw> [options...]
@@ -429,6 +432,9 @@ Subcommands:
   install      运行资源管理（兼容旧入口），支持检查/安装/卸载/重装 camoufox、geoip，按需拉起 backend
   unified      运行统一脚本（搜索 + 打开详情 + 评论抓取 + 点赞）
   collect      仅采集链接（links-only 模式）
+  like         仅点赞（内部转发 unified --stage like）
+  feed-like    首页 Feed 点赞（内部转发 unified --stage feed-like）
+  deps         依赖管理（兼容顶层 webauto deps）
   status       查询当前任务状态与错误摘要（支持 runId 详情）
   gate         管理平台流控参数（默认配置可修改并自动生效）
   orchestrate  运行编排入口（默认调用 unified 模式）
@@ -464,46 +470,8 @@ Like Options:
   --match-min-hits <n>       最低命中词数，默认 1
   --match-keywords "<...>"   匹配关键词集合（默认回落到 keyword）
 
-Optional Advanced:
-  --do-reply <bool>          是否回复（默认 false）
-  --reply-text "<text>"      回复文案（默认: 感谢分享，已关注）
-  --do-ocr <bool>            是否启用 OCR（默认 false）
-  --ocr-command "<cmd>"      OCR 命令路径
-  --input-mode protocol|...  输入模式（默认 protocol）
-
-Standard Workflows:
-  1) 初始化与后端检查
-     webauto xhs install --download-geoip --ensure-backend
-
-  2) 全功能采集（搜索 + 评论 + 点赞）
-
-  2) 仅采集链接（links-only）
-     webauto xhs collect --profile xiaohongshu-batch-1 --keyword "seedance2.0" --max-notes 100 --env debug
-     webauto xhs unified --profile xiaohongshu-batch-1 --keyword "seedance2.0" --max-notes 100 --do-comments true --persist-comments true --do-likes true --like-keywords "真牛逼" --env debug --tab-count 4
-
-  3) 只做搜索 + 评论抓取（不点赞）
-     webauto xhs unified --profile xiaohongshu-batch-1 --keyword "seedance2.0" --max-notes 50 --do-comments true --persist-comments true --do-likes false --env debug
-
-  4) 点赞策略增强（多关键词 + 命中阈值）
-     webauto xhs unified --profile xiaohongshu-batch-1 --keyword "deepseek新模型" --max-notes 100 --do-comments true --persist-comments true --do-likes true --like-keywords "真牛逼,真敬业,太强了" --match-mode any --match-min-hits 1 --max-likes 3 --env debug --tab-count 4
-
-  5) 多账号并行分片（总量100，3账号并发）
-     webauto xhs unified --profiles xiaohongshu-batch-1,xiaohongshu-batch-2,xiaohongshu-batch-3 --keyword "seedance2.0" --total-notes 100 --parallel --concurrency 3 --do-comments true --persist-comments true --do-likes true --like-keywords "真牛逼" --env debug --tab-count 4
-
-  6) 查看运行状态与错误
-     webauto xhs status
-     webauto xhs status --run-id <runId> --json
-
-  7) 查看/修改流控 gate（按平台隔离）
-     webauto xhs gate get --platform xiaohongshu --json
-     webauto xhs gate set --platform xiaohongshu --patch-json '{"noteInterval":{"minMs":2600,"maxMs":5200}}' --json
-
 Output:
   默认目录: ~/.webauto/download/xiaohongshu/<env>/<keyword>/
-  典型产物:
-    - <noteId>/comments.jsonl
-    - like-evidence/<noteId>/summary-*.json
-    - .like-state.jsonl
 `);
 }
 
@@ -728,10 +696,12 @@ async function main() {
       printAccountHelp();
       return;
     }
-  if (cmd === 'weibo') {
-    const script = path.join(ROOT, 'apps', 'webauto', 'entry', 'weibo-unified.mjs');
-    await run(process.execPath, [script, ...rawArgv.slice(1)]);
-    return;
+ if (cmd === 'weibo') {
+    console.error('\u26a0\ufe0f  weibo 模块暂不可用（入口文件缺失）。');
+    console.error('未来将按 webauto <platform> <action> 格式重建。');
+    console.error('');
+    console.error('当前可用平台: webauto xhs <unified|collect|like|feed-like|status|install|deps|gate>');
+    process.exit(1);
   }
 
     if (cmd === 'schedule') {
@@ -870,10 +840,12 @@ async function main() {
     return;
   }
 
-  if (cmd === 'weibo') {
-    const script = path.join(ROOT, 'apps', 'webauto', 'entry', 'weibo-unified.mjs');
-    await run(process.execPath, [script, ...rawArgv.slice(1)]);
-    return;
+ if (cmd === 'weibo') {
+    console.error('\u26a0\ufe0f  weibo 模块暂不可用（入口文件缺失）。');
+    console.error('未来将按 webauto <platform> <action> 格式重建。');
+    console.error('');
+    console.error('当前可用平台: webauto xhs <unified|collect|like|feed-like|status|install|deps|gate>');
+    process.exit(1);
   }
 
   if (cmd === 'schedule') {
@@ -936,13 +908,45 @@ async function main() {
       return;
     }
 
-    if (sub === 'collect') {
-      const script = path.join(ROOT, 'apps', 'webauto', 'entry', 'xhs-collect.mjs');
+   if (sub === 'collect') {
+     const script = path.join(ROOT, 'apps', 'webauto', 'entry', 'xhs-collect.mjs');
+     await run(process.execPath, [script, ...rawArgv.slice(2)]);
+     return;
+   }
+
+    if (sub === 'like') {
+      const script = path.join(ROOT, 'apps', 'webauto', 'entry', 'xhs-like.mjs');
       await run(process.execPath, [script, ...rawArgv.slice(2)]);
       return;
     }
 
+    if (sub === 'feed-like') {
+      const script = path.join(ROOT, 'apps', 'webauto', 'entry', 'xhs-feed-like.mjs');
+      await run(process.execPath, [script, ...rawArgv.slice(2)]);
+      return;
+    }
+
+    if (sub === 'deps') {
+      const script = path.join(ROOT, 'apps', 'webauto', 'entry', 'xhs-install.mjs');
+      const passthrough = rawArgv.slice(3);
+      const modeArgs = [];
+      const depsSub = passthrough[0] || 'check';
+      const hasSelection = passthrough.some((item) => item === '--browser' || item === '--geoip' || item === '--all' || item === '--download-browser' || item === '--download-geoip');
+      const disableEnsureBackend = passthrough.includes('--no-ensure-backend');
+      if (depsSub === 'check') {}
+      else if (depsSub === 'auto') { modeArgs.push('--auto'); if (!hasSelection) modeArgs.push('--all'); }
+      else if (depsSub === 'install') { modeArgs.push('--install'); if (!hasSelection) modeArgs.push('--all'); if (!disableEnsureBackend) modeArgs.push('--ensure-backend'); }
+      else if (depsSub === 'uninstall' || depsSub === 'remove') { modeArgs.push('--uninstall'); if (!hasSelection) modeArgs.push('--all'); }
+      else if (depsSub === 'reinstall') { modeArgs.push('--reinstall'); if (!hasSelection) modeArgs.push('--all'); if (!disableEnsureBackend) modeArgs.push('--ensure-backend'); }
+      const forwarded = passthrough.filter((item) => item !== '--no-ensure-backend');
+      await run(process.execPath, [script, ...modeArgs, ...forwarded]);
+      return;
+    }
+
     if (sub === 'unified' || sub === 'run') {
+      if (sub === 'run') {
+        process.stderr.write('[deprecated] `xhs run` is deprecated, use `xhs unified` instead\n');
+      }
       const script = path.join(ROOT, 'apps', 'webauto', 'entry', 'xhs-unified.mjs');
       await run(process.execPath, [script, ...rawArgv.slice(2)]);
       return;
