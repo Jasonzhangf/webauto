@@ -16,6 +16,7 @@ import {
 } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
+import { createInspectionScheduler } from './lib/inspection-scheduler.mjs';
 
 import { performHealthCheck } from './lib/health-check.mjs';
 
@@ -342,6 +343,13 @@ async function startDaemonServer() {
     shutdownReason: null,
     shutdownStartedAt: null,
     shutdownTimer: null,
+    // Inspection Scheduler
+    inspection: createInspectionScheduler({
+      intervalMs: 60_000,
+      maxResumeAttempts: 3,
+      maxTotalRounds: 360,
+      logger: (event, data) => logDaemonEvent(event, data),
+    }),
   };
 
   const summarizeWorker = (worker) => ({
@@ -369,6 +377,37 @@ async function startDaemonServer() {
     finishedAt: job.finishedAt || null,
     logPath: job.logPath || null,
   });
+
+  const isXhsResumeEligible = (args = []) => {
+    return Array.isArray(args) && args.length >= 2
+      && args[0] === 'xhs';
+  };
+
+  const startJobInspection = (jobId, args) => {
+    const eligible = isXhsResumeEligible(args);
+    if (!eligible) {
+      logDaemonEvent('inspection_skip_not_eligible', { jobId, reason: 'not_xhs_resume_task' });
+      return;
+    }
+    state.inspection.startInspection({
+      jobId,
+      getJobStatus: () => {
+        const job = state.jobs.get(jobId);
+        if (!job) return { status: 'unknown', args: [], code: null };
+        return { status: job.status, args: job.args || [], code: job.code ?? null };
+      },
+      onResubmit: async (resumeArgs) => {
+        logDaemonEvent('inspection_resubmit', { jobId, resumeArgs });
+        const result = await startTaskJob({ args: resumeArgs, env: {}, wait: false });
+        if (!result.ok) throw new Error('inspection resubmit failed: ' + result.error);
+        const originalJob = state.jobs.get(jobId);
+        if (originalJob) originalJob.resumedTo = result.job.id;
+        logDaemonEvent('inspection_resubmit_ok', { originalJobId: jobId, newJobId: result.job.id });
+      },
+      onComplete: (summary) => { logDaemonEvent('inspection_complete', summary); },
+    });
+    logDaemonEvent('inspection_started_for_job', { jobId });
+  };
   const updateHeartbeat = () => {
     const jobs = state.jobsOrder
       .slice(-20)
@@ -541,6 +580,10 @@ async function startDaemonServer() {
     child.stdout.on('data', (chunk) => logStream.write(chunk));
     child.stderr.on('data', (chunk) => logStream.write(chunk));
 
+    if (jobId && Array.isArray(args)) {
+      startJobInspection(jobId, args);
+    }
+
     child.on('close', (code, signal) => {
       // If already marked stopped by task.stop/shutdown, keep stopped state.
       if (job.status === 'stopped') {
@@ -680,14 +723,17 @@ async function startDaemonServer() {
         .reverse();
       return { ok: true, jobs };
     }
-    if (method === 'task.stop') {
-      const id = String(params.id || '').trim();
-      if (!id) return { ok: false, error: 'missing id' };
-      const job = state.jobs.get(id);
-      if (!job) return { ok: false, error: `job_not_found:${id}` };
-      if (job.status !== 'running') {
-        return { ok: true, stopped: false, reason: `task_not_running:${job.status}`, job: summarizeJob(job) };
-      }
+   if (method === 'task.stop') {
+     const id = String(params.id || '').trim();
+     if (!id) return { ok: false, error: 'missing id' };
+     const job = state.jobs.get(id);
+     if (!job) return { ok: false, error: `job_not_found:${id}` };
+     if (job.status !== 'running') {
+       return { ok: true, stopped: false, reason: `task_not_running:${job.status}`, job: summarizeJob(job) };
+     }
+      state.inspection.stopInspection(id);
+      logDaemonEvent('task_stop_inspection_stopped', { jobId: id });
+
       const ret = await terminatePidTree(job.pid);
       if (!ret?.ok) return { ok: false, error: 'task_stop_failed', job: summarizeJob(job) };
       job.status = 'stopped';
@@ -795,6 +841,8 @@ async function startDaemonServer() {
       job.finishedAt = nowIso();
     }
     updateHeartbeat();
+    state.inspection.destroy();
+
     try { server.close(); } catch {}
     cleanupRuntimeFiles();
     process.exit(0);
