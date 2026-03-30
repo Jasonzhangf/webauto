@@ -1,4 +1,4 @@
-import { asErrorPayload } from '../../container/runtime-core/utils.mjs';
+import { asErrorPayload } from '../../../container/runtime-core/utils.mjs';
 
 export function isWeiboAutoscriptAction(action) {
   const normalized = String(action || '').trim();
@@ -12,5 +12,42 @@ export async function executeWeiboAutoscriptOperation({
   operation = null,
   context = {},
 }) {
+  const normalized = String(action || '').trim();
+
+  if (normalized === 'weibo_detail_open' || normalized === 'weibo_open_detail') {
+    const { executeOpenDetailOperation } = await import('./detail-flow-ops.mjs');
+    return executeOpenDetailOperation({ profileId, params });
+  }
+
+  if (normalized === 'weibo_detail_close' || normalized === 'weibo_close_detail') {
+    const { executeCloseDetailOperation } = await import('./detail-flow-ops.mjs');
+    return executeCloseDetailOperation({ profileId, params });
+  }
+
+  if (normalized === 'weibo_detail_harvest' || normalized === 'weibo_harvest_detail') {
+    const { executeHarvestDetailOperation } = await import('./harvest-ops.mjs');
+    return executeHarvestDetailOperation({ profileId, params });
+  }
+
+  if (normalized === 'weibo_comments_extract' || normalized === 'weibo_extract_comments') {
+    const { extractComments } = await import('./comments-ops.mjs');
+    return extractComments(profileId);
+  }
+
+  if (normalized === 'weibo_comments_scroll_to_bottom' || normalized === 'weibo_scroll_comments') {
+    const { scrollCommentsToBottom } = await import('./comments-ops.mjs');
+    return scrollCommentsToBottom(profileId, params);
+  }
+
+  if (normalized === 'weibo_detail_snapshot' || normalized === 'weibo_read_detail') {
+    const { readDetailSnapshot } = await import('./detail-ops.mjs');
+    return readDetailSnapshot(profileId);
+  }
+
+  if (normalized === 'weibo_detail_state' || normalized === 'weibo_read_detail_state') {
+    const { readDetailState } = await import('./detail-ops.mjs');
+    return readDetailState(profileId);
+  }
+
   return asErrorPayload('UNSUPPORTED_OPERATION', `Unsupported weibo operation: ${action}`);
 }

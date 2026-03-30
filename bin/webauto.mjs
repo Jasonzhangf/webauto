@@ -420,9 +420,11 @@ function printWeiboHelp() {
 
 Usage:
   webauto weibo collect --profile <id> --keyword <kw> [options...]
+  webauto weibo detail --profile <id> --links-file <path> [options...]
 
 Subcommands:
   collect      搜索微博并采集不重复的链接集合（分页遍历 + URL 去重）
+  detail       采集微博帖子详情（正文、图片、视频、外链、评论）
 
 Required:
   --profile <id>       camo profile ID（必须为已登录的微博 profile）
@@ -438,6 +440,29 @@ Options:
 
 Output:
   默认目录: ~/.webauto/download/weibo/<env>/search:<keyword>/
+`);
+}
+
+function printWeiboDetailHelp() {
+  console.log(`webauto weibo detail --profile <id> --links-file <path> [options]
+
+Required:
+  --profile <id>          camo profile ID
+  --links-file <path>     links.jsonl 文件路径（weibo collect 的输出）
+
+Options:
+  --max-posts <n>         最大采集帖子数（默认 10）
+  --content-enabled       采集正文（默认 true）
+  --images-enabled        下载图片（默认 true）
+  --videos-enabled        下载视频（默认 false）
+  --comments-enabled      采集评论（默认 true）
+  --expand-all-replies    展开所有子回复（默认 true）
+  --max-comments <n>      评论数量上限（0=全部）
+  --post-interval-min-ms  帖子间隔最小值（默认 2000）
+  --post-interval-max-ms  帖子间隔最大值（默认 5000）
+  --env <name>            输出环境目录（默认 prod）
+  --output-root <p>       自定义输出根目录
+  --keyword <kw>          关键词，用于输出目录命名 (default: detail)
 `);
 }
 function printXhsHelp() {
@@ -723,6 +748,11 @@ async function main() {
       return;
     }
     if (cmd === "weibo") {
+      const weiboSub = String(args._[1] || "").trim();
+      if (weiboSub === "detail") {
+        printWeiboDetailHelp();
+        return;
+      }
       printWeiboHelp();
       return;
     }
@@ -786,7 +816,16 @@ async function main() {
       printWeiboHelp();
       return;
     }
-    const script = path.join(ROOT, "apps", "webauto", "entry", "weibo-collect.mjs");
+    if (weiboSub === "detail" && (args.help || args.h)) {
+      printWeiboDetailHelp();
+      return;
+    }
+    let script;
+    if (weiboSub === "detail") {
+      script = path.join(ROOT, "apps", "webauto", "entry", "weibo-detail.mjs");
+    } else {
+      script = path.join(ROOT, "apps", "webauto", "entry", "weibo-collect.mjs");
+    }
     await run(process.execPath, [script, ...rawArgv.slice(2)]);
     return;
   }
