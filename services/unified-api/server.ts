@@ -9,6 +9,7 @@ import { spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import os from 'node:os';
+import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { applyCamoEnv } from '../../apps/webauto/entry/lib/camo-env.mjs';
 import { RemoteSessionManager } from './RemoteSessionManager.js';
@@ -641,6 +642,111 @@ class UnifiedApiServer {
         return;
       }
 
+      // ====================================================================
+      // Schedule API endpoints
+      // ====================================================================
+      const scheduleBase = '/api/v1/schedules';
+      if (url.pathname === scheduleBase || url.pathname === scheduleBase + '/') {
+        try {
+          const scheduleMod = await import('../../apps/webauto/entry/lib/schedule-store.mjs');
+          if (req.method === 'GET') {
+            const result = scheduleMod.listScheduleTasks();
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: true, data: result }));
+          } else if (req.method === 'POST') {
+            const payload = await this.readJsonBody(req);
+            const task = scheduleMod.addScheduleTask(payload);
+            res.writeHead(201, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: true, data: task }));
+          } else {
+            res.writeHead(405, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: false, error: 'Method not allowed' }));
+          }
+        } catch (err) {
+          const msg = err?.message || String(err);
+          res.writeHead(msg.includes('already exists') ? 409 : 400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: false, error: msg }));
+        }
+        return;
+      }
+
+      // GET/PATCH/DELETE /api/v1/schedules/:id
+      const scheduleIdMatch = url.pathname.match(/^\/api\/v1\/schedules\/([^/]+)$/);
+      if (scheduleIdMatch) {
+        try {
+          const scheduleMod = await import('../../apps/webauto/entry/lib/schedule-store.mjs');
+          const taskId = decodeURIComponent(scheduleIdMatch[1]);
+          if (req.method === 'GET') {
+            const task = scheduleMod.getScheduleTask(taskId);
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: true, data: task }));
+          } else if (req.method === 'PATCH') {
+            const payload = await this.readJsonBody(req);
+            const task = scheduleMod.updateScheduleTask(taskId, payload);
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: true, data: task }));
+          } else if (req.method === 'DELETE') {
+            const task = scheduleMod.removeScheduleTask(taskId);
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: true, data: task }));
+          } else {
+            res.writeHead(405, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: false, error: 'Method not allowed' }));
+          }
+        } catch (err) {
+          const msg = err?.message || String(err);
+          res.writeHead(msg.includes('not found') ? 404 : 400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: false, error: msg }));
+        }
+        return;
+      }
+
+      // POST /api/v1/schedules/run-due
+      if (url.pathname === '/api/v1/schedules/run-due' && req.method === 'POST') {
+        try {
+          const scheduleMod = await import('../../apps/webauto/entry/lib/schedule-store.mjs');
+          const due = scheduleMod.listDueScheduleTasks(20);
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: true, data: due }));
+        } catch (err) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: false, error: err?.message || String(err) }));
+        }
+        return;
+      }
+
+      // POST /api/v1/schedules/:id/run
+      const scheduleRunMatch = url.pathname.match(/^\/api\/v1\/schedules\/([^/]+)\/run$/);
+      if (scheduleRunMatch && req.method === 'POST') {
+        try {
+          const taskId = decodeURIComponent(scheduleRunMatch[1]);
+          const scheduleMod = await import('../../apps/webauto/entry/lib/schedule-store.mjs');
+          const task = scheduleMod.getScheduleTask(taskId);
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: true, data: { taskId, claimed: true, task } }));
+        } catch (err) {
+          const msg = err?.message || String(err);
+          res.writeHead(msg.includes('not found') ? 404 : 400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: false, error: msg }));
+        }
+        return;
+      }
+
+      // ====================================================================
+      // Static file: Task Board
+      // ====================================================================
+      if (url.pathname === '/task-board' || url.pathname === '/task-board/') {
+        const boardPath = path.join(fallbackRepoRoot, 'apps', 'webauto', 'resources', 'task-board.html');
+        try {
+          const html = fs.readFileSync(boardPath, 'utf8');
+          res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+          res.end(html);
+        } catch (err) {
+          res.writeHead(404, { 'Content-Type': 'text/plain' });
+          res.end('Task board not found: ' + (err?.message || String(err)));
+        }
+        return;
+      }
       // WebSocket endpoints
       if (url.pathname === '/ws' || url.pathname === '/bus') {
         res.writeHead(426, { 'Content-Type': 'text/plain' });

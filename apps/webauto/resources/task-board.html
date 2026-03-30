@@ -1,0 +1,469 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>WebAuto 任务看板</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg-base:#0a0c10;--bg-elevated:#11141b;--bg-overlay:#1a1f29;--bg-hover:#232836;--bg-active:#2a3040;
+  --accent:#6366f1;--accent-hover:#818cf8;--accent-active:#4f46e5;
+  --success:#22c55e;--warning:#f59e0b;--danger:#ef4444;--info:#06b6d4;
+  --text-1:#f1f5f9;--text-2:#94a3b8;--text-3:#64748b;--text-4:#475569;
+  --border:rgba(148,163,184,.15);--border-strong:rgba(148,163,184,.25);
+  --radius:10px;--radius-sm:6px;
+  --font:"Inter","Segoe UI","PingFang SC","Microsoft YaHei",system-ui,sans-serif;
+  --mono:"JetBrains Mono","SF Mono","Fira Code",monospace;
+  --gap:12px;
+}
+body{font:13px/1.5 var(--font);background:var(--bg-base);color:var(--text-1);min-height:100vh;display:flex;flex-direction:column}
+a{color:var(--accent-hover);text-decoration:none}
+
+/* Header */
+header{height:48px;display:flex;align-items:center;padding:0 16px;border-bottom:1px solid var(--border);background:var(--bg-elevated);gap:12px;flex-shrink:0}
+header .logo{font-weight:700;font-size:15px;background:linear-gradient(135deg,var(--accent),var(--info));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+header .sep{width:1px;height:20px;background:var(--border)}
+header .clock{font-family:var(--mono);font-size:12px;color:var(--text-3)}
+.auto-refresh{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-2)}
+.auto-refresh input[type=checkbox]{accent-color:var(--accent)}
+
+/* Layout */
+.layout{display:flex;flex:1;overflow:hidden}
+.main-col{flex:1;display:flex;flex-direction:column;overflow-y:auto;padding:var(--gap);gap:var(--gap)}
+.side-col{width:280px;border-left:1px solid var(--border);background:var(--bg-elevated);overflow-y:auto;padding:var(--gap);display:flex;flex-direction:column;gap:var(--gap)}
+
+/* Cards */
+.card{background:var(--bg-overlay);border:1px solid var(--border);border-radius:var(--radius);padding:14px}
+.card-title{font-weight:700;font-size:13px;margin-bottom:10px;display:flex;align-items:center;gap:8px}
+.card-title .badge{font-size:11px;padding:2px 8px;border-radius:99px;font-weight:500}
+.badge-running{background:rgba(34,197,94,.15);color:var(--success)}
+.badge-queued{background:rgba(245,158,11,.15);color:var(--warning)}
+.badge-stopped{background:rgba(148,163,184,.1);color:var(--text-3)}
+.badge-idle{background:rgba(148,163,184,.1);color:var(--text-3)}
+.badge-active{background:rgba(34,197,94,.15);color:var(--success)}
+
+/* Buttons */
+button{font:12px/1.4 var(--font);padding:6px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-overlay);color:var(--text-1);cursor:pointer;transition:all .15s}
+button:hover{background:var(--bg-hover);border-color:var(--border-strong)}
+button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+button.primary:hover{background:var(--accent-hover)}
+button.danger{color:var(--danger);border-color:rgba(239,68,68,.3)}
+button.danger:hover{background:rgba(239,68,68,.1)}
+button.sm{padding:3px 8px;font-size:11px}
+.btn-row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+
+/* Activity task cards */
+.task-card{display:flex;align-items:center;gap:12px;padding:10px 12px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg-overlay);transition:background .15s}
+.task-card:hover{background:var(--bg-hover)}
+.task-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0}
+.task-dot.running{background:var(--success);box-shadow:0 0 8px rgba(34,197,94,.4)}
+.task-dot.queued{background:var(--warning)}
+.task-dot.completed{background:var(--text-3)}
+.task-dot.failed{background:var(--danger)}
+.task-info{flex:1;min-width:0}
+.task-name{font-weight:600;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.task-meta{font-size:11px;color:var(--text-3);display:flex;gap:10px;margin-top:2px;flex-wrap:wrap}
+.task-progress{font-family:var(--mono);font-size:12px;color:var(--text-2);white-space:nowrap}
+.progress-bar{height:4px;background:var(--bg-active);border-radius:2px;margin-top:4px;overflow:hidden}
+.progress-fill{height:100%;background:var(--accent);border-radius:2px;transition:width .3s}
+.task-actions{display:flex;gap:4px;flex-shrink:0}
+
+/* Empty state */
+.empty{color:var(--text-4);font-size:12px;padding:20px;text-align:center}
+
+/* Schedule table */
+.schedule-table{width:100%;border-collapse:collapse;font-size:12px}
+.schedule-table th{text-align:left;padding:8px 10px;border-bottom:1px solid var(--border-strong);color:var(--text-2);font-weight:600;white-space:nowrap}
+.schedule-table td{padding:7px 10px;border-bottom:1px solid var(--border);vertical-align:middle}
+.schedule-table tr:hover td{background:var(--bg-hover)}
+.schedule-table .toggle{cursor:pointer;user-select:none}
+.schedule-table .toggle.off{opacity:.4}
+.platform-icon{font-size:14px}
+
+/* Profile sidebar */
+.profile-card{display:flex;align-items:center;gap:10px;padding:8px 10px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-overlay)}
+.profile-card:hover{background:var(--bg-hover)}
+.profile-indicator{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.profile-indicator.active{background:var(--success);box-shadow:0 0 6px rgba(34,197,94,.4)}
+.profile-indicator.idle{background:var(--text-4)}
+.profile-info{flex:1;min-width:0}
+.profile-name{font-weight:600;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.profile-detail{font-size:11px;color:var(--text-3)}
+
+/* Modal */
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;z-index:100;opacity:0;pointer-events:none;transition:opacity .2s}
+.modal-overlay.show{opacity:1;pointer-events:auto}
+.modal{background:var(--bg-elevated);border:1px solid var(--border-strong);border-radius:var(--radius);padding:20px;width:540px;max-width:90vw;max-height:80vh;overflow-y:auto}
+.modal h3{margin-bottom:16px;font-size:15px}
+.form-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.form-grid .full{grid-column:1/-1}
+.form-group{display:flex;flex-direction:column;gap:4px}
+.form-group label{font-size:11px;color:var(--text-2);font-weight:600}
+.form-group input,.form-group select{font:12px/1.5 var(--font);padding:6px 10px;background:var(--bg-overlay);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text-1)}
+.form-group input:focus,.form-group select:focus{outline:none;border-color:var(--accent)}
+.form-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:16px}
+
+/* Responsive */
+@media(max-width:768px){.side-col{display:none}.layout{flex-direction:column}}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">WebAuto 任务看板</div>
+  <div class="sep"></div>
+  <div class="clock" id="clock"></div>
+  <div style="flex:1"></div>
+  <label class="auto-refresh"><input type="checkbox" id="autoRefresh" checked /> 自动刷新 10s</label>
+  <button class="sm" id="refreshBtn">🔄 刷新</button>
+</header>
+<div class="layout">
+  <div class="main-col">
+    <!-- Active Tasks & Queue -->
+    <div class="card">
+      <div class="card-title">
+        活动 & 队列
+        <span class="badge badge-running" id="runningCount">0 running</span>
+        <span class="badge badge-queued" id="queuedCount">0 queued</span>
+      </div>
+      <div id="activeTasks"></div>
+    </div>
+    <!-- Schedule Tasks -->
+    <div class="card" style="flex:1">
+      <div class="card-title">
+        周期性任务
+        <span class="badge" style="background:rgba(99,102,241,.15);color:var(--accent)" id="scheduleCount">0</span>
+      </div>
+      <div class="btn-row" style="margin-bottom:10px">
+        <button class="primary sm" id="addTaskBtn">＋ 新增任务</button>
+        <button class="sm" id="runDueBtn">▶ 执行到期</button>
+        <button class="sm" id="exportBtn">📥 导出</button>
+        <button class="sm" id="importBtn">📤 导入</button>
+      </div>
+      <div style="overflow-x:auto">
+        <table class="schedule-table">
+          <thead>
+            <tr>
+              <th>启用</th>
+              <th>名称</th>
+              <th>平台</th>
+              <th>调度</th>
+              <th>下次执行</th>
+              <th>运行次数</th>
+              <th>上次状态</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody id="scheduleBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+  <!-- Sidebar: Profiles -->
+  <div class="side-col">
+    <div class="card">
+      <div class="card-title">浏览器 Runtime / Profile</div>
+      <div id="profileList"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Edit Modal -->
+<div class="modal-overlay" id="modal">
+  <div class="modal">
+    <h3 id="modalTitle">新增任务</h3>
+    <input type="hidden" id="editId" />
+    <div class="form-grid">
+      <div class="form-group"><label>任务名</label><input id="fName" placeholder="例：deepseek-每30分钟" /></div>
+      <div class="form-group"><label>平台</label>
+        <select id="fPlatform"><option value="xiaohongshu">📕 小红书</option><option value="weibo">📰 微博</option><option value="1688">🛒 1688</option></select>
+      </div>
+      <div class="form-group"><label>调度类型</label>
+        <select id="fScheduleType"><option value="periodic">周期任务</option><option value="scheduled">定时任务</option><option value="immediate">立即执行</option></select>
+      </div>
+      <div class="form-group" id="fIntervalGroup"><label>间隔（分钟）</label><input id="fInterval" type="number" min="1" value="30" /></div>
+      <div class="form-group"><label>关键词</label><input id="fKeyword" placeholder="搜索关键词" /></div>
+      <div class="form-group"><label>目标数</label><input id="fTarget" type="number" min="1" value="50" /></div>
+      <div class="form-group"><label>Profile</label><input id="fProfile" placeholder="留空自动选择" /></div>
+      <div class="form-group"><label>环境</label>
+        <select id="fEnv"><option value="debug">debug</option><option value="prod">prod</option></select>
+      </div>
+      <div class="form-group"><label>启用</label><select id="fEnabled"><option value="true">是</option><option value="false">否</option></select></div>
+    </div>
+    <div class="form-actions">
+      <button id="cancelBtn">取消</button>
+      <button class="primary" id="saveBtn">保存</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const API = '/api/v1';
+const $ = (s) => document.querySelector(s);
+const $$ = (s) => document.querySelectorAll(s);
+
+// State
+let state = { tasks: [], schedules: [], sessions: [], pollTimer: null };
+
+// Clock
+function updateClock() {
+  const now = new Date();
+  $('#clock').textContent = now.toLocaleString('zh-CN', { hour12: false });
+}
+setInterval(updateClock, 1000);
+updateClock();
+
+// API helpers
+async function api(path, opts = {}) {
+  const res = await fetch(API + path, { headers: { 'Content-Type': 'application/json' }, ...opts });
+  const data = await res.json();
+  if (!data.success) throw new Error(data.error || 'Unknown error');
+  return data.data;
+}
+
+// Render: Active Tasks
+function renderActiveTasks() {
+  const el = $('#activeTasks');
+  const running = state.tasks.filter(t => t.status === 'running' || t.status === 'starting');
+  const others = state.tasks.filter(t => t.status !== 'running' && t.status !== 'starting');
+
+  $('#runningCount').textContent = `${running.length} running`;
+  $('#queuedCount').textContent = `${others.length} other`;
+
+  if (state.tasks.length === 0) {
+    el.innerHTML = '<div class="empty">暂无活动任务</div>';
+    return;
+  }
+
+  let html = '';
+  for (const t of running) {
+    const pct = t.progress?.total > 0 ? Math.round((t.progress.processed / t.progress.total) * 100) : 0;
+    const elapsed = t.startedAt ? formatDuration(Date.now() - t.startedAt) : '-';
+    html += `
+      <div class="task-card" style="margin-bottom:8px">
+        <div class="task-dot running"></div>
+        <div class="task-info">
+          <div class="task-name">${esc(t.runId?.slice(0,8) || t.profileId || 'unknown')}</div>
+          <div class="task-meta">
+            <span>🔍 ${esc(t.keyword || '-')}</span>
+            <span>👤 ${esc(t.profileId || '-')}</span>
+            <span>⏱ ${elapsed}</span>
+            <span>${esc(t.phase || '')}</span>
+          </div>
+          ${t.progress?.total > 0 ? `<div class="progress-bar"><div class="progress-fill" style="width:${pct}%"></div></div>` : ''}
+        </div>
+        <div class="task-progress">${t.progress?.processed || 0}/${t.progress?.total || 0}</div>
+        <div class="task-actions">
+          <button class="sm danger" onclick="stopTask('${esc(t.runId)}')">⏹ 停止</button>
+        </div>
+      </div>`;
+  }
+  for (const t of others.slice(0, 5)) {
+    const dotClass = t.status === 'completed' ? 'completed' : t.status === 'failed' ? 'failed' : 'queued';
+    html += `
+      <div class="task-card" style="margin-bottom:6px;opacity:.7">
+        <div class="task-dot ${dotClass}"></div>
+        <div class="task-info">
+          <div class="task-name">${esc(t.runId?.slice(0,8) || 'unknown')}</div>
+          <div class="task-meta"><span>${esc(t.status)}</span><span>🔍 ${esc(t.keyword || '-')}</span></div>
+        </div>
+      </div>`;
+  }
+  el.innerHTML = html;
+}
+
+// Render: Schedule Table
+function renderScheduleTable() {
+  const body = $('#scheduleBody');
+  $('#scheduleCount').textContent = state.schedules.length;
+  if (state.schedules.length === 0) {
+    body.innerHTML = '<tr><td colspan="8" class="empty">暂无周期性任务，点击"新增任务"创建</td></tr>';
+    return;
+  }
+  body.innerHTML = state.schedules.map(t => {
+    const platformIcon = t.commandType?.includes('xhs') || t.commandType?.includes('xiaohongshu') ? '📕' : t.commandType?.includes('weibo') ? '📰' : t.commandType?.includes('1688') ? '🛒' : '📋';
+    const scheduleLabel = t.scheduleType === 'periodic' ? `每 ${t.intervalMinutes || 30} 分钟` : t.scheduleType === 'daily' ? '每天' : t.scheduleType === 'scheduled' ? '定时' : '一次性';
+    const nextRun = t.nextRunAt ? formatTime(t.nextRunAt) : '-';
+    const lastStatus = t.lastStatus === 'success' ? '<span style="color:var(--success)">✅</span>' : t.lastStatus === 'failed' ? '<span style="color:var(--danger)">❌</span>' : '-';
+    return `<tr>
+      <td><span class="toggle ${t.enabled ? '' : 'off'}" onclick="toggleSchedule('${esc(t.id)}',${!t.enabled})">${t.enabled ? '✅' : '⬜'}</span></td>
+      <td style="font-weight:600">${esc(t.name || t.id)}</td>
+      <td><span class="platform-icon">${platformIcon}</span></td>
+      <td>${scheduleLabel}</td>
+      <td style="font-family:var(--mono);font-size:11px">${nextRun}</td>
+      <td style="font-family:var(--mono)">${t.runCount || 0}${t.failCount ? ` <span style="color:var(--danger)">(${t.failCount}失败)</span>` : ''}</td>
+      <td>${lastStatus}</td>
+      <td class="btn-row">
+        <button class="sm" onclick="runSchedule('${esc(t.id)}')">▶</button>
+        <button class="sm" onclick="editSchedule('${esc(t.id)}')">✏️</button>
+        <button class="sm danger" onclick="deleteSchedule('${esc(t.id)}')">🗑</button>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+// Render: Profiles
+function renderProfiles() {
+  const el = $('#profileList');
+  if (!state.sessions || state.sessions.length === 0) {
+    el.innerHTML = '<div class="empty">暂无浏览器会话</div>';
+    return;
+  }
+  el.innerHTML = state.sessions.map(s => {
+    const isActive = s.lastPhase === 'running' || s.lastPhase === 'detail';
+    const indClass = isActive ? 'active' : 'idle';
+    const statusLabel = isActive ? 'active' : 'idle';
+    const lastUrl = s.currentUrl ? s.currentUrl.replace(/https?:\/\/(www\.)?/, '').slice(0, 30) : '-';
+    return `<div class="profile-card" style="margin-bottom:6px">
+      <div class="profile-indicator ${indClass}"></div>
+      <div class="profile-info">
+        <div class="profile-name">${esc(s.profileId || s.sessionId || 'unknown')}</div>
+        <div class="profile-detail">${statusLabel} · ${lastUrl}</div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+// Data loading
+async function loadAll() {
+  try {
+    const [tasks, schedData, sessions] = await Promise.all([
+      api('/tasks').catch(() => []),
+      api('/schedules').catch(() => ({ tasks: [] })),
+      api('/sessions').catch(() => []),
+    ]);
+    state.tasks = Array.isArray(tasks) ? tasks : [];
+    state.schedules = Array.isArray(schedData?.tasks) ? schedData.tasks : [];
+    state.sessions = Array.isArray(sessions) ? sessions : [];
+    renderActiveTasks();
+    renderScheduleTable();
+    renderProfiles();
+  } catch (e) {
+    console.error('loadAll error:', e);
+  }
+}
+
+// Actions
+async function stopTask(runId) {
+  if (!confirm(`确认停止任务 ${runId}?`)) return;
+  try {
+    await fetch(`${API}/tasks/${runId}/stop`, { method: 'POST', headers: { 'Content-Type': 'application/json' } });
+    await loadAll();
+  } catch (e) { alert('停止失败: ' + e.message); }
+}
+
+async function toggleSchedule(id, enabled) {
+  try { await api(`/schedules/${id}`, { method: 'PATCH', body: JSON.stringify({ enabled }) }); await loadAll(); }
+  catch (e) { alert('操作失败: ' + e.message); }
+}
+
+async function runSchedule(id) {
+  try { await api(`/schedules/${id}/run`, { method: 'POST' }); await loadAll(); }
+  catch (e) { alert('执行失败: ' + e.message); }
+}
+
+async function deleteSchedule(id) {
+  if (!confirm('确认删除此任务?')) return;
+  try { await api(`/schedules/${id}`, { method: 'DELETE' }); await loadAll(); }
+  catch (e) { alert('删除失败: ' + e.message); }
+}
+
+// Modal
+function openModal(task = null) {
+  $('#modal').classList.add('show');
+  $('#modalTitle').textContent = task ? '编辑任务' : '新增任务';
+  $('#editId').value = task?.id || '';
+  $('#fName').value = task?.name || '';
+  $('#fPlatform').value = task?.commandType?.includes('weibo') ? 'weibo' : task?.commandType?.includes('1688') ? '1688' : 'xiaohongshu';
+  $('#fScheduleType').value = task?.scheduleType || 'periodic';
+  $('#fInterval').value = task?.intervalMinutes || 30;
+  $('#fEnabled').value = String(task?.enabled ?? true);
+  // Parse commandArgv for keyword/target/profile/env
+  const argv = task?.commandArgv || [];
+  const kwIdx = argv.indexOf('--keyword') !== -1 ? argv.indexOf('--keyword') + 1 : argv.indexOf('-k') !== -1 ? argv.indexOf('-k') + 1 : -1;
+  const tgtIdx = argv.indexOf('--max-notes') !== -1 ? argv.indexOf('--max-notes') + 1 : argv.indexOf('-n') !== -1 ? argv.indexOf('-n') + 1 : argv.indexOf('--target') !== -1 ? argv.indexOf('--target') + 1 : -1;
+  const profIdx = argv.indexOf('--profile') !== -1 ? argv.indexOf('--profile') + 1 : argv.indexOf('-p') !== -1 ? argv.indexOf('-p') + 1 : -1;
+  const envIdx = argv.indexOf('--env') !== -1 ? argv.indexOf('--env') + 1 : argv.indexOf('-e') !== -1 ? argv.indexOf('-e') + 1 : -1;
+  $('#fKeyword').value = kwIdx >= 0 ? argv[kwIdx] || '' : '';
+  $('#fTarget').value = tgtIdx >= 0 ? argv[tgtIdx] || 50 : 50;
+  $('#fProfile').value = profIdx >= 0 ? argv[profIdx] || '' : '';
+  $('#fEnv').value = envIdx >= 0 ? argv[envIdx] || 'debug' : 'debug';
+}
+
+function closeModal() { $('#modal').classList.remove('show'); }
+
+async function saveTask() {
+  const id = $('#editId').value;
+  const platform = $('#fPlatform').value;
+  const commandType = platform === 'xiaohongshu' ? 'xhs-unified' : platform === 'weibo' ? 'weibo-collect' : '1688-search';
+  const argv = [];
+  if ($('#fKeyword').value) { argv.push('--keyword', $('#fKeyword').value); }
+  if ($('#fTarget').value) { argv.push('--max-notes', $('#fTarget').value); }
+  if ($('#fProfile').value) { argv.push('--profile', $('#fProfile').value); }
+  if ($('#fEnv').value) { argv.push('--env', $('#fEnv').value); }
+  const body = {
+    name: $('#fName').value || undefined,
+    commandType,
+    commandArgv: argv,
+    scheduleType: $('#fScheduleType').value,
+    intervalMinutes: Number($('#fInterval').value) || 30,
+    enabled: $('#fEnabled').value === 'true',
+  };
+  try {
+    if (id) {
+      await api(`/schedules/${id}`, { method: 'PATCH', body: JSON.stringify(body) });
+    } else {
+      await api('/schedules', { method: 'POST', body: JSON.stringify(body) });
+    }
+    closeModal();
+    await loadAll();
+  } catch (e) { alert('保存失败: ' + e.message); }
+}
+
+function editSchedule(id) {
+  const task = state.schedules.find(t => t.id === id);
+  if (task) openModal(task);
+}
+
+async function exportAll() {
+  try {
+    const data = await api('/schedules');
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `webauto-schedules-${new Date().toISOString().slice(0,10)}.json`;
+    a.click();
+  } catch (e) { alert('导出失败: ' + e.message); }
+}
+
+// Helpers
+function esc(s) { const d = document.createElement('div'); d.textContent = String(s || ''); return d.innerHTML; }
+function formatDuration(ms) {
+  const s = Math.floor(ms / 1000); const m = Math.floor(s / 60); const h = Math.floor(m / 60);
+  return h > 0 ? `${h}h${m % 60}m` : m > 0 ? `${m}m${s % 60}s` : `${s}s`;
+}
+function formatTime(iso) {
+  try { return new Date(iso).toLocaleString('zh-CN', { hour12: false, month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }); }
+  catch { return iso || '-'; }
+}
+
+// Event bindings
+$('#refreshBtn').onclick = loadAll;
+$('#addTaskBtn').onclick = () => openModal();
+$('#cancelBtn').onclick = closeModal;
+$('#saveBtn').onclick = saveTask;
+$('#runDueBtn').onclick = async () => { try { await api('/schedules/run-due', { method: 'POST' }); await loadAll(); } catch (e) { alert(e.message); } };
+$('#exportBtn').onclick = exportAll;
+$('#modal').onclick = (e) => { if (e.target === $('#modal')) closeModal(); };
+
+// Auto-refresh
+function startPoll() {
+  if (state.pollTimer) clearInterval(state.pollTimer);
+  state.pollTimer = setInterval(() => { if ($('#autoRefresh').checked) loadAll(); }, 10000);
+}
+
+// Init
+loadAll().then(startPoll);
+</script>
+</body>
+</html>
