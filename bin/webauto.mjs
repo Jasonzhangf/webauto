@@ -324,7 +324,7 @@ Core Commands:
   webauto deps <check|auto|install|uninstall|reinstall> [options]
   webauto test [--layer <l0|l1|l2|l3|xhs_collect|all>] [--output <path>] [--json]
   webauto xhs install [--download-browser] [--download-geoip] [--ensure-backend]
-  webauto xhs unified [xhs options...]
+  webauto xhs [xhs options...]        # default = unified
   webauto xhs status [--run-id <id>] [--json]
   webauto xhs gate <get|list|set|reset|path> [--platform <name>] [--patch-json <json>] [--json]
   webauto xhs orchestrate [xhs options...]
@@ -354,7 +354,7 @@ Examples (standard):
   webauto --daemon stop
   webauto daemon autostart install
   webauto xhs install --ensure-backend
-  webauto xhs unified --profile xiaohongshu-batch-1 --keyword "seedance2.0" --max-notes 100 --do-comments true --persist-comments true --do-likes true --like-keywords "真牛逼" --env debug --tab-count 4
+  webauto xhs --profile xiaohongshu-batch-1 --keyword "seedance2.0" --max-notes 100 --do-comments true --persist-comments true --do-likes true --like-keywords "真牛逼" --env debug --tab-count 4
 
 Tips:
   - xhs 命令会转发到 apps/webauto/entry/xhs-*.mjs
@@ -408,7 +408,7 @@ Examples:
   webauto --daemon status --json
   webauto --daemon restart
   webauto --daemon stop
-  webauto daemon task submit --detach -- xhs unified --profile xhs-qa-1 --keyword "春分养生" --max-notes 5 --do-comments true --persist-comments true --env debug --task-mode single
+  webauto daemon task submit --detach -- xhs --profile xhs-qa-1 --keyword "春分养生" --max-notes 5 --do-comments true --persist-comments true --env debug --task-mode single
   webauto daemon autostart install
   webauto daemon autostart status --json
 `);
@@ -470,7 +470,7 @@ function printXhsHelp() {
 
 Usage:
   webauto xhs install [--download-browser] [--download-geoip] [--ensure-backend] [--install|--reinstall|--uninstall] [--browser|--geoip|--all]
-  webauto xhs unified --profile <id> --keyword <kw> [options...]
+  webauto xhs --profile <id> --keyword <kw> [options...]
   webauto xhs collect --profile <id> --keyword <kw> [options...]
   webauto xhs like --profile <id> --keyword <kw> [options...]
   webauto xhs feed-like --profile <id> [options...]
@@ -481,7 +481,7 @@ Usage:
 
 Subcommands:
   install      运行资源管理（兼容旧入口），支持检查/安装/卸载/重装 camoufox、geoip，按需拉起 backend
-  unified      运行统一脚本（搜索 + 打开详情 + 评论抓取 + 点赞）
+  unified      运行统一脚本（搜索 + 打开详情 + 评论抓取 + 点赞，默认）
   collect      仅采集链接（links-only 模式）
   like         仅点赞（内部转发 unified --stage like）
   feed-like    首页 Feed 点赞（内部转发 unified --stage feed-like）
@@ -962,36 +962,48 @@ async function main() {
   }
 
   if (cmd === 'xhs') {
-    if (!sub || sub === 'help') {
+    const subNormalized = String(sub || '').trim().toLowerCase();
+    const hasOnlyXhs = rawArgv.length === 1;
+    const defaultToUnified = !subNormalized || subNormalized.startsWith('-');
+    if (subNormalized === 'help') {
       printXhsHelp();
       return;
     }
+    if (defaultToUnified) {
+      if (hasOnlyXhs) {
+        printXhsHelp();
+        return;
+      }
+      const script = path.join(ROOT, 'apps', 'webauto', 'entry', 'xhs-unified.mjs');
+      await run(process.execPath, [script, ...rawArgv.slice(1)]);
+      return;
+    }
 
-    if (sub === 'install') {
+    if (subNormalized === 'install') {
       const script = path.join(ROOT, 'apps', 'webauto', 'entry', 'xhs-install.mjs');
       await run(process.execPath, [script, ...rawArgv.slice(2)]);
       return;
     }
 
-   if (sub === 'collect') {
+   if (subNormalized === 'collect') {
      const script = path.join(ROOT, 'apps', 'webauto', 'entry', 'xhs-collect.mjs');
      await run(process.execPath, [script, ...rawArgv.slice(2)]);
      return;
    }
 
-    if (sub === 'like') {
+    if (subNormalized === 'like') {
       const script = path.join(ROOT, 'apps', 'webauto', 'entry', 'xhs-like.mjs');
       await run(process.execPath, [script, ...rawArgv.slice(2)]);
       return;
     }
 
-    if (sub === 'feed-like') {
+    if (subNormalized === 'feed-like') {
       const script = path.join(ROOT, 'apps', 'webauto', 'entry', 'xhs-feed-like.mjs');
       await run(process.execPath, [script, ...rawArgv.slice(2)]);
       return;
     }
 
-    if (sub === 'deps') {
+    if (subNormalized === 'deps') {
       const script = path.join(ROOT, 'apps', 'webauto', 'entry', 'xhs-install.mjs');
       const passthrough = rawArgv.slice(3);
       const modeArgs = [];
@@ -1008,8 +1020,8 @@ async function main() {
       return;
     }
 
-    if (sub === 'unified' || sub === 'run') {
-      if (sub === 'run') {
+    if (subNormalized === 'unified' || subNormalized === 'run') {
+      if (subNormalized === 'run') {
         process.stderr.write('[deprecated] `xhs run` is deprecated, use `xhs unified` instead\n');
       }
       const script = path.join(ROOT, 'apps', 'webauto', 'entry', 'xhs-unified.mjs');
@@ -1017,19 +1029,19 @@ async function main() {
       return;
     }
 
-    if (sub === 'status') {
+    if (subNormalized === 'status') {
       const script = path.join(ROOT, 'apps', 'webauto', 'entry', 'xhs-status.mjs');
       await run(process.execPath, [script, ...rawArgv.slice(2)]);
       return;
     }
 
-    if (sub === 'gate') {
+    if (subNormalized === 'gate') {
       const script = path.join(ROOT, 'apps', 'webauto', 'entry', 'flow-gate.mjs');
       await run(process.execPath, [script, ...rawArgv.slice(2)]);
       return;
     }
 
-    if (sub === 'orchestrate') {
+    if (subNormalized === 'orchestrate') {
       const script = path.join(ROOT, 'apps', 'webauto', 'entry', 'xhs-orchestrate.mjs');
       await run(process.execPath, [script, ...rawArgv.slice(2)]);
       return;
