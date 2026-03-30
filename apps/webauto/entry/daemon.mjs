@@ -1011,7 +1011,7 @@ function printHelp() {
 Usage:
   webauto --daemon
   webauto --daemon start|stop|status|restart|run
-  webauto --daemon task submit [--detach] -- <webauto args...>
+  webauto --daemon task submit [--wait] -- <webauto args...>
   webauto --daemon task status --job-id <id>
   webauto --daemon task list [--limit <n>] [--status <running|completed|failed|stopped>]
   webauto --daemon task stop --job-id <id>
@@ -1020,7 +1020,7 @@ Usage:
 Notes:
   - \`--daemon\` 默认等价于 \`--daemon start\`
   - \`run\` 为前台运行，仅用于调试
-  - task submit 默认同步等待并返回结果；加 --detach 可改为后台任务
+  - task submit 默认后台 detached 立即返回；加 --wait 可改为同步等待
   - task submit 可把普通 CLI 命令经 daemon 调度执行
 `);
 }
@@ -1028,7 +1028,7 @@ Notes:
 async function main() {
   const rawArgv = process.argv.slice(2);
   const args = minimist(rawArgv, {
-    boolean: ['help', 'json', 'detach'],
+    boolean: ['help', 'json', 'detach', 'wait'],
     string: ['job-id'],
     alias: { h: 'help' },
   });
@@ -1148,7 +1148,7 @@ async function main() {
       return;
     }
     await ensureDaemonStarted(undefined, { allowStart: true });
-    const wait = args.detach !== true;
+    const wait = args.wait === true;
     const ret = await requestDaemon({ method: 'task.submit', params: { args: taskArgs, wait } }, 120_000);
     print(ret, jsonMode);
     if (!ret?.ok) process.exit(1);

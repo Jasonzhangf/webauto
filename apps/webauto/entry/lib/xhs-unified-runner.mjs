@@ -108,6 +108,9 @@ export async function runUnified(argv, overrides = {}) {
   let profiles = parseProfiles(argv);
   if (profiles.length === 0) {
     profiles = resolveDefaultXhsProfiles();
+    if (profiles.length > 1) {
+      profiles = [profiles[0]];
+    }
     if (profiles.length > 0) {
       console.log(JSON.stringify({
         event: 'xhs.unified.auto_profiles_selected',

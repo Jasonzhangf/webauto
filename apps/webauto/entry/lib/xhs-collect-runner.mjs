@@ -30,7 +30,7 @@ export function getCollectHelpLines() {
     '  --profile <id>       配置好的 camo profile',
     '  --keyword <kw>       搜索关键词（可选，默认随机热搜）',
     '  --max-notes <n>      目标链接数（默认 21，确保超过一页）',
-    '  --env <name>         输出环境目录（默认 debug/prod）',
+    '  --env <name>         输出环境目录（默认 release/prod）',
     '  --output-root <p>    自定义输出根目录',
     '  --plan-only          仅生成计划不执行',
     '',

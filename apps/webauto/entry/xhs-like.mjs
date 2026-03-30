@@ -9,18 +9,21 @@ async function main() {
     console.log(`webauto xhs like
 
 Usage:
-  webauto xhs like --profile <id> --keyword <kw> [options...]
+  webauto xhs like --keyword <kw> [options...]
 
 Description:
   仅执行点赞操作（基于搜索结果）。
   内部转发到 unified --stage like。
 
 Required:
-  --profile <id>     camo profile ID
   --keyword <kw>     搜索关键词
 
+Optional:
+  --profile <id>     camo profile ID (未提供将自动选择最近可用的一个 profile)
+
 Examples:
-  webauto xhs like --profile xiaohongshu-batch-1 --keyword "AI绘��" --like-keywords "牛逼,好看" --env debug
+  webauto xhs like --keyword "AI绘画" --like-keywords "牛逼,好看" --env debug
+  webauto xhs like --profile xiaohongshu-batch-1 --keyword "AI绘画" --env debug
 `);
     return;
   }
@@ -36,3 +39,4 @@ if (isDirectExec) {
     process.exit(1);
   });
 }
+

@@ -22,7 +22,7 @@ async function main() {
       '',
       '请通过 daemon 启动任务：',
       '  webauto daemon start',
-      '  webauto daemon task submit --detach -- weibo detail --profile <id> --links-file <path> [options...]',
+      '  webauto daemon task submit -- weibo detail --profile <id> --links-file <path> [options...]',
       '',
       '如需调试绕过（仅限开发环境）：',
       '  WEBAUTO_DAEMON_BYPASS=1 node bin/webauto.mjs weibo detail ...',
