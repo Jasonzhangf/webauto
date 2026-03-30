@@ -124,6 +124,28 @@ export async function appendLog({ filePath, message }) {
   await fs.appendFile(filePath, line, 'utf8');
 }
 
+export function resolveTimelineOutputContext({ params = {}, state = {} } = {}) {
+  const dateRaw = String(params.date || state.date || new Date().toISOString().slice(0, 10)).trim();
+  const envRaw = String(params.env || state.env || 'prod').trim();
+  const root = resolveDownloadRoot(
+    params.outputRoot || params.downloadRoot || params.rootDir
+    || state.outputRoot || state.downloadRoot || state.rootDir,
+  );
+  const date = sanitizeForPath(dateRaw, 'unknown');
+  const env = sanitizeForPath(envRaw, 'prod');
+  const collectionDir = path.join(root, 'weibo', env, `timeline:${date}`);
+  return {
+    root,
+    env,
+    date,
+    collectionDir,
+    postsPath: path.join(collectionDir, 'posts.jsonl'),
+    linksPath: path.join(collectionDir, 'links.jsonl'),
+    metaPath: path.join(collectionDir, 'collection-meta.json'),
+    logPath: path.join(collectionDir, 'run.log'),
+  };
+}
+
 export function resolveWeiboDetailOutputContext({ params = {}, state = {} } = {}) {
   const keywordRaw = String(params.keyword || state.keyword || 'unknown').trim();
   const envRaw = String(params.env || state.env || 'prod').trim();

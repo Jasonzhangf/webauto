@@ -179,6 +179,7 @@ async function harvestSinglePost(profileId, post, args) {
       bottomText: '没有更多',
       imagesDir: args.imagesEnabled ? preCtx.imagesDir : null,
       videosDir: args.videosEnabled ? preCtx.videosDir : null,
+      postDir: preCtx.postDir,
     },
   });
 
@@ -245,6 +246,7 @@ async function persistPostResult(harvest, args, logPath) {
       commentScrollResult: harvest.commentScrollResult || null,
       quotedContent: harvest.quotedContent || null,
       quotedAuthor: harvest.quotedAuthor || null,
+      actionTrace: harvest.actionTrace || [],
     },
   });
 

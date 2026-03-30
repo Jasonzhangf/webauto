@@ -7,6 +7,7 @@ const DEFAULT_COMMAND_TYPE = 'xhs-unified';
 const SUPPORTED_COMMAND_TYPES = [
   'xhs-unified',
   '1688-search',
+  'weibo-timeline',
 ];
 const DEFAULT_INTERVAL_MINUTES = 30;
 const DAY_MS = 24 * 60 * 60 * 1000;

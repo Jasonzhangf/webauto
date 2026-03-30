@@ -1,10 +1,12 @@
 import { readDetailSnapshot, downloadImage, downloadVideo } from './detail-ops.mjs';
 import { readCommentPanelState, scrollCommentsToBottom, extractComments, isCommentPanelEmpty, expandAllSubReplies } from './comments-ops.mjs';
 import { executeOpenDetailOperation, executeCloseDetailOperation } from './detail-flow-ops.mjs';
-import { sleep } from './common.mjs';
+import { sleep, devtoolsEval } from './common.mjs';
 import { getWeiboProfileState } from './state.mjs';
 import { buildTraceRecorder } from './trace.mjs';
+import path from 'node:path';
 import { captureScreenshotToFile, sanitizeFileComponent } from './diagnostic-utils.mjs';
+import { ensureDir } from './persistence.mjs';
 
 export async function downloadWithRetry(url, destDir, index, maxRetries = 3) {
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
@@ -47,7 +49,11 @@ export async function executeHarvestDetailOperation({ profileId, params = {} } =
 
   const openResult = await executeOpenDetailOperation({ profileId, params: { url } });
   if (!openResult.ok) {
-    await captureScreenshotToFile({ profileId, filePath: `/tmp/weibo-diag-open-fail-${sanitizeFileComponent(url)}.png` }).catch(() => {});
+    const postDir = params.postDir || '';
+    const diagDir = postDir ? path.join(postDir, 'diagnostic') : '';
+    const diagFile = diagDir ? path.join(diagDir, `open-fail-${sanitizeFileComponent(url)}.png`) : `/tmp/weibo-diag-open-fail-${sanitizeFileComponent(url)}.png`;
+    if (diagDir) await ensureDir(diagDir).catch(() => {});
+    await captureScreenshotToFile({ profileId, filePath: diagFile }).catch(() => {});
     return { ok: false, error: openResult.error, message: openResult.message, url };
   }
 
@@ -57,6 +63,33 @@ export async function executeHarvestDetailOperation({ profileId, params = {} } =
 
   let snapshot = {};
   if (contentEnabled || imagesEnabled || videosEnabled || linksEnabled) {
+    // Fix 3: anchor-driven wait for content container before snapshot
+    if (contentEnabled) {
+      const contentAnchors = ['[class*="detail_wbtext"]', '.wbpro-feed-content', '[class*="wbtext"]'];
+      let contentReady = false;
+      for (let retry = 0; retry < 2 && !contentReady; retry++) {
+        const anchorStart = Date.now();
+        const anchorTimeout = retry === 0 ? 5000 : 3000;
+        while (Date.now() - anchorStart < anchorTimeout) {
+          const checkScript = `(() => {
+            const sels = ${JSON.stringify(contentAnchors)};
+            for (const s of sels) {
+              const el = document.querySelector(s);
+              if (el && el.textContent.trim().length > 0) return true;
+            }
+            return false;
+          })()`;
+          try {
+            const found = await devtoolsEval(profileId, checkScript);
+            if (found) { contentReady = true; break; }
+          } catch {}
+          await sleep(300);
+        }
+        if (!contentReady && retry === 0) {
+          await sleep(1000);
+        }
+      }
+    }
     snapshot = await readDetailSnapshot(profileId).catch(() => ({}));
   }
 
@@ -135,5 +168,6 @@ export async function executeHarvestDetailOperation({ profileId, params = {} } =
     commentCount: commentsResult.total || 0,
     commentScrollResult,
     capturedAt: snapshot.capturedAt || new Date().toISOString(),
+    actionTrace: trace.actionTrace,
   };
 }
