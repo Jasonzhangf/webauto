@@ -179,7 +179,7 @@ button.sm{padding:3px 8px;font-size:11px}
         <select id="fPlatform"><option value="xiaohongshu">📕 小红书</option><option value="weibo">📰 微博</option><option value="1688">🛒 1688</option></select>
       </div>
       <div class="form-group"><label>调度类型</label>
-        <select id="fScheduleType"><option value="periodic">周期任务</option><option value="scheduled">定时任务</option><option value="immediate">立即执行</option></select>
+        <select id="fScheduleType"><option value="periodic">周期任务（分钟）</option><option value="daily">每天</option><option value="scheduled">定时任务</option><option value="immediate">立即执行</option></select>
       </div>
       <div class="form-group" id="fIntervalGroup"><label>间隔（分钟）</label><input id="fInterval" type="number" min="1" value="30" /></div>
       <div class="form-group"><label>关键词</label><input id="fKeyword" placeholder="搜索关键词" /></div>
@@ -282,7 +282,7 @@ function renderScheduleTable() {
   }
   body.innerHTML = state.schedules.map(t => {
     const platformIcon = t.commandType?.includes('xhs') || t.commandType?.includes('xiaohongshu') ? '📕' : t.commandType?.includes('weibo') ? '📰' : t.commandType?.includes('1688') ? '🛒' : '📋';
-    const scheduleLabel = t.scheduleType === 'periodic' ? `每 ${t.intervalMinutes || 30} 分钟` : t.scheduleType === 'daily' ? '每天' : t.scheduleType === 'scheduled' ? '定时' : '一次性';
+    const scheduleLabel = t.scheduleType === 'periodic' || t.scheduleType === 'interval' ? `每 ${t.intervalMinutes || 30} 分钟` : t.scheduleType === 'daily' ? '每天' : t.scheduleType === 'scheduled' ? `定时 ${t.runAt ? t.runAt.slice(11,16) : ''}` : t.scheduleType === 'immediate' ? '一次性' : String(t.scheduleType || '-');
     const nextRun = t.nextRunAt ? formatTime(t.nextRunAt) : '-';
     const lastStatus = t.lastStatus === 'success' ? '<span style="color:var(--success)">✅</span>' : t.lastStatus === 'failed' ? '<span style="color:var(--danger)">❌</span>' : '-';
     return `<tr>
@@ -375,7 +375,8 @@ function openModal(task = null) {
   $('#editId').value = task?.id || '';
   $('#fName').value = task?.name || '';
   $('#fPlatform').value = task?.commandType?.includes('weibo') ? 'weibo' : task?.commandType?.includes('1688') ? '1688' : 'xiaohongshu';
-  $('#fScheduleType').value = task?.scheduleType || 'periodic';
+  const stMap = { interval: 'periodic', periodic: 'periodic', daily: 'daily', scheduled: 'scheduled', immediate: 'immediate' };
+  $('#fScheduleType').value = stMap[task?.scheduleType] || task?.scheduleType || 'periodic';
   $('#fInterval').value = task?.intervalMinutes || 30;
   $('#fEnabled').value = String(task?.enabled ?? true);
   // Parse commandArgv for keyword/target/profile/env
@@ -405,7 +406,7 @@ async function saveTask() {
     name: $('#fName').value || undefined,
     commandType,
     commandArgv: argv,
-    scheduleType: $('#fScheduleType').value,
+    scheduleType: { periodic: 'interval', daily: 'daily', scheduled: 'scheduled', immediate: 'immediate' }[$('#fScheduleType').value] || $('#fScheduleType').value,
     intervalMinutes: Number($('#fInterval').value) || 30,
     enabled: $('#fEnabled').value === 'true',
   };
