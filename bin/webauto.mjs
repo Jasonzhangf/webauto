@@ -468,6 +468,33 @@ Options:
   -k, --keyword <kw>      关键词，用于输出目录命名 (default: detail)
 `);
 }
+
+function printWeiboUnifiedHelp() {
+  console.log(`webauto weibo unified - Weibo unified collection runner
+
+Usage:
+  webauto weibo unified [options]
+
+Subcommands (via --task-type):
+  timeline   刷新主页时间线，采集帖子（默认）
+  search     搜索采集微博链接（需 --keyword）
+  monitor    监控模式（委托 timeline）
+
+Options:
+  --task-type <timeline|search|monitor>  任务类型（默认 timeline）
+  -p, --profile <id>                     camo profile ID（默认 weibo）
+  -n, --target <number>                  最大采集数（默认 50）
+  -e, --env <string>                     输出环境目录（默认 prod）
+  --date <YYYY-MM-DD>                    采集日期（默认今天）
+  --output-root <path>                   自定义输出根目录
+  --scroll-delay <ms>                    滚动间隔（默认 2500）
+  --max-empty-scrolls <n>                空滚动终止阈值（默认 2）
+  -k, --keyword <string>                 搜索关键词（search 模式必需）
+  --max-pages <number>                   最大搜索页数（默认 3）
+  -h, --help                             显示帮助
+`);
+}
+
 function printXhsHelp() {
   console.log(`webauto xhs
 
@@ -756,6 +783,10 @@ async function main() {
         printWeiboDetailHelp();
         return;
       }
+      if (weiboSub === "unified" && (args.help || args.h)) {
+        printWeiboUnifiedHelp();
+        return;
+      }
       printWeiboHelp();
       return;
     }
@@ -823,9 +854,15 @@ async function main() {
       printWeiboDetailHelp();
       return;
     }
+    if (weiboSub === "unified" && (args.help || args.h)) {
+      printWeiboUnifiedHelp();
+      return;
+    }
     let script;
     if (weiboSub === "detail") {
       script = path.join(ROOT, "apps", "webauto", "entry", "weibo-detail.mjs");
+    } else if (weiboSub === "unified") {
+      script = path.join(ROOT, "apps", "webauto", "entry", "weibo-unified.mjs");
     } else {
       script = path.join(ROOT, "apps", "webauto", "entry", "weibo-collect.mjs");
     }
