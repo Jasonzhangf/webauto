@@ -979,3 +979,27 @@ Tags: #feed-like #nonblocking #click-failed #skip
 
 - 2026-03-28: Windows 上 `mouse:click` / `keyboard:press` 长时间超时（browser-service timeout）时，通常是 camo 会话卡死；需 `camo stop <profile>` 后 `camo start <profile> --url https://www.xiaohongshu.com/explore --no-headless` 重启会话，输入链路恢复正常。
 Tags: #camo #input-timeout #session-restart #windows
+
+## 2026-03-30 微博 Detail Pipeline 提交 & CLI 统一
+
+### 微博 Detail 功能（commit 2bba9caa）
+- 新增微博帖子详情采集管线：正文、图片、视频、外链、评论
+- 文件结构对齐 XHS：`detail-flow-ops.mjs` / `detail-ops.mjs` / `comments-ops.mjs` / `harvest-ops.mjs` / `persistence.mjs` / `state.mjs` / `trace.mjs` / `common.mjs` / `diagnostic-utils.mjs`
+- 入口：`weibo-detail.mjs` → `lib/weibo-detail-runner.mjs`
+- 支持 daemon 环境检测、skip visited、图片 `orj480` → `large` 升级
+- 评论采集支持子回复展开（`expandAllSubReplies`）
+- 输出：`content.md` + `comments.jsonl` + `comments.md` + `meta.json` + `images/` + `videos/`
+
+### CLI 统一（commit e66ab5de）
+- Weibo 和 XHS 共享统一短写：`-p`/`--profile`, `-k`/`--keyword`, `-n`/`--max-notes`, `-e`/`--env`
+- Weibo collect：`--max-notes` 升为首选，`--target` 降为别名
+- Weibo detail：新增 `--max-notes/-n` 别名（原 `--max-posts`）
+- 两者均支持 `--note-interval` 作为间隔别名
+- 主帮助新增 `webauto weibo collect` 和 `webauto weibo detail`
+
+### 待后续修复
+- `detail-flow-ops.mjs` 过于简陋（25 行），缺 guard 检查/trace/error recovery
+- 跨层导入：`common.mjs` 和 `detail-flow-ops.mjs` 从 `apps/webauto` 导入 `camo-cli.mjs`，违反 camo runtime 层约束
+- 缺单元测试（detail-ops/comments-ops/harvest-ops）
+
+Tags: #weibo #detail #cli #unified-flags #max-notes
