@@ -317,6 +317,7 @@ Usage:
   webauto deps --help
   webauto daemon --help
   webauto xhs --help
+  webauto weibo --help
 
 Core Commands:
   webauto account <list|sync|add|get|update|delete|login|sync-alias> [options]
@@ -328,6 +329,8 @@ Core Commands:
   webauto xhs status [--run-id <id>] [--json]
   webauto xhs gate <get|list|set|reset|path> [--platform <name>] [--patch-json <json>] [--json]
   webauto xhs orchestrate [xhs options...]
+  webauto weibo collect -p <id> -k <kw> [options...]    # 搜索采集微博链接
+  webauto weibo detail -p <id> --links-file <path> [options...]  # 采集帖子详情
   webauto version [--json]
   webauto version bump [patch|minor|major]
 
@@ -419,23 +422,23 @@ function printWeiboHelp() {
   console.log(`webauto weibo
 
 Usage:
-  webauto weibo collect --profile <id> --keyword <kw> [options...]
-  webauto weibo detail --profile <id> --links-file <path> [options...]
+  webauto weibo collect -p <id> -k <kw> [options...]
+  webauto weibo detail -p <id> --links-file <path> [options...]
 
 Subcommands:
   collect      搜索微博并采集不重复的链接集合（分页遍历 + URL 去重）
   detail       采集微博帖子详情（正文、图片、视频、外链、评论）
 
 Required:
-  --profile <id>       camo profile ID（必须为已登录的微博 profile）
-  --keyword <kw>       搜索关键词
+  -p, --profile <id>   camo profile ID（必须为已登录的微博 profile）
+  -k, --keyword <kw>   搜索关键词
 
 Options:
-  --target <n>         目标链接数（默认 10）
-  --max-notes <n>      target 别名
+  -n, --max-notes <n>  目标链接数（默认 10）
+      --target <n>     --max-notes 别名
   --max-pages <n>      最大翻页数（默认 50）
   --page-delay <ms>    翻页间隔（默认 2000）
-  --env <name>         输出环境目录（默认 prod）
+  -e, --env <name>     输出环境目录（默认 prod）
   --output-root <p>    自定义输出根目录
 
 Output:
@@ -444,14 +447,14 @@ Output:
 }
 
 function printWeiboDetailHelp() {
-  console.log(`webauto weibo detail --profile <id> --links-file <path> [options]
+  console.log(`webauto weibo detail -p <id> --links-file <path> [options]
 
 Required:
-  --profile <id>          camo profile ID
+  -p, --profile <id>      camo profile ID
   --links-file <path>     links.jsonl 文件路径（weibo collect 的输出）
 
 Options:
-  --max-posts <n>         最大采集帖子数（默认 10）
+  -n, --max-posts <n>     最大采集帖子数（默认 10）
   --content-enabled       采集正文（默认 true）
   --images-enabled        下载图片（默认 true）
   --videos-enabled        下载视频（默认 false）
@@ -460,9 +463,9 @@ Options:
   --max-comments <n>      评论数量上限（0=全部）
   --post-interval-min-ms  帖子间隔最小值（默认 2000）
   --post-interval-max-ms  帖子间隔最大值（默认 5000）
-  --env <name>            输出环境目录（默认 prod）
+  -e, --env <name>        输出环境目录（默认 prod）
   --output-root <p>       自定义输出根目录
-  --keyword <kw>          关键词，用于输出目录命名 (default: detail)
+  -k, --keyword <kw>      关键词，用于输出目录命名 (default: detail)
 `);
 }
 function printXhsHelp() {

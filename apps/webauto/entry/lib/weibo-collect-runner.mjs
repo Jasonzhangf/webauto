@@ -38,16 +38,18 @@ function normalizePost(raw) {
 function resolveCollectArgs(argv = {}) {
   const keyword = String(argv.keyword || argv.k || '').trim();
   if (!keyword) throw new Error('WEIBO_COLLECT_KEYWORD_REQUIRED: --keyword is required');
-  const target = Number.isFinite(Number(argv.target ?? argv['max-notes']))
-    ? Math.max(1, Number(argv.target ?? argv['max-notes']))
+  const maxNotes = Number.isFinite(Number(argv['max-notes'] ?? argv.target ?? argv.n))
+    ? Math.max(1, Number(argv['max-notes'] ?? argv.target ?? argv.n))
     : 10;
-  const env = String(argv.env || 'prod').trim() || 'prod';
+  const env = String(argv.env || argv.e || 'prod').trim() || 'prod';
   const outputRoot = String(argv['output-root'] || '').trim();
   const maxPages = Number.isFinite(Number(argv['max-pages'])) ? Math.max(1, Number(argv['max-pages'])) : 50;
-  const profileId = String(argv.profile || '').trim();
+  const profileId = String(argv.profile || argv.p || '').trim();
   if (!profileId) throw new Error('WEIBO_COLLECT_PROFILE_REQUIRED: --profile is required');
-  const pageDelayMs = Number.isFinite(Number(argv['page-delay'])) ? Number(argv['page-delay']) : 2000;
-  return { keyword, target, env, outputRoot, maxPages, profileId, pageDelayMs };
+  const pageDelayMs = Number.isFinite(Number(argv['page-delay'] ?? argv['note-interval']))
+    ? Math.max(500, Number(argv['page-delay'] ?? argv['note-interval']))
+    : 2000;
+  return { keyword, maxNotes, env, outputRoot, maxPages, profileId, pageDelayMs };
 }
 
 export function getWeiboCollectHelpLines() {
@@ -55,23 +57,23 @@ export function getWeiboCollectHelpLines() {
     'Usage: webauto weibo collect --profile <id> --keyword <kw> [options]',
     '',
     'Options:',
-    '  --profile <id>       camo profile ID (required)',
-    '  --keyword <kw>       search keyword (required)',
-    '  --target <n>         target link count (default: 10)',
-    '  --max-notes <n>      alias for --target',
-    '  --env <name>         output env dir (default: prod)',
+    '  -p, --profile <id>       camo profile ID (required)',
+    '  -k, --keyword <kw>       search keyword (required)',
+    '  -n, --max-notes <n>      target link count (default: 10)',
+    '      --target <n>         alias for --max-notes',
+    '  -e, --env <name>         output env dir (default: prod)',
     '  --output-root <p>    custom output root dir',
     '  --max-pages <n>      max pages to crawl (default: 50)',
     '  --page-delay <ms>    delay between pages (default: 2000)',
     '',
     'Examples:',
-    '  WEBAUTO_DAEMON_BYPASS=1 webauto weibo collect --profile weibo --keyword "AI" --target 10',
+    '  WEBAUTO_DAEMON_BYPASS=1 webauto weibo collect -p weibo -k "AI" -n 10',
     '  WEBAUTO_DAEMON_BYPASS=1 webauto weibo collect --profile weibo --keyword "AI" --max-pages 3',
-  ];
+    ];
 }
 
 export async function runWeiboCollect(argv = {}) {
-  const { keyword, target, env, outputRoot, maxPages, profileId, pageDelayMs } = resolveCollectArgs(argv);
+  const { keyword, maxNotes: target, env, outputRoot, maxPages, profileId, pageDelayMs } = resolveCollectArgs(argv);
   const runId = generateRunId();
   const startedAt = new Date().toISOString();
   const ctx = resolveWeiboOutputContext({ params: { keyword, env, outputRoot } });

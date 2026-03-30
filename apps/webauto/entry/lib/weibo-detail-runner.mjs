@@ -21,13 +21,13 @@ function generateRunId() {
 }
 
 function resolveDetailArgs(argv = {}) {
-  const profileId = String(argv.profile || '').trim();
+  const profileId = String(argv.profile || argv.p || '').trim();
   if (!profileId) throw new Error('WEIBO_DETAIL_PROFILE_REQUIRED: --profile is required');
 
   const linksFile = String(argv['links-file'] || '').trim();
   if (!linksFile) throw new Error('WEIBO_DETAIL_LINKS_FILE_REQUIRED: --links-file is required');
 
-  const maxPosts = Number.isFinite(Number(argv['max-posts'])) ? Math.max(1, Number(argv['max-posts'])) : 10;
+  const maxPosts = Number.isFinite(Number(argv['max-posts'] ?? argv['max-notes'] ?? argv.n)) ? Math.max(1, Number(argv['max-posts'] ?? argv['max-notes'] ?? argv.n)) : 10;
   const contentEnabled = argv['content-enabled'] !== 'false';
   const imagesEnabled = argv['images-enabled'] !== 'false';
   const videosEnabled = argv['videos-enabled'] === 'true';
@@ -35,13 +35,13 @@ function resolveDetailArgs(argv = {}) {
   const commentsEnabled = argv['comments-enabled'] !== 'false';
   const expandAllReplies = argv['expand-all-replies'] !== 'false';
   const maxComments = Number.isFinite(Number(argv['max-comments'])) ? Math.max(0, Number(argv['max-comments'])) : 0;
-  const env = String(argv.env || 'prod').trim() || 'prod';
+  const env = String(argv.env || argv.e || 'prod').trim() || 'prod';
   const outputRoot = String(argv['output-root'] || '').trim();
-  const postIntervalMinMs = Number.isFinite(Number(argv['post-interval-min'])) ? Number(argv['post-interval-min']) : 2000;
-  const postIntervalMaxMs = Number.isFinite(Number(argv['post-interval-max'])) ? Number(argv['post-interval-max']) : 5000;
+  const postIntervalMinMs = Number.isFinite(Number(argv['post-interval-min'] ?? argv['note-interval'])) ? Number(argv['post-interval-min'] ?? argv['note-interval']) : 2000;
+  const postIntervalMaxMs = Number.isFinite(Number(argv['post-interval-max'] ?? argv['note-interval'])) ? Number(argv['post-interval-max'] ?? (Number(argv['note-interval']) * 2 || 5000)) : 5000;
   const force = argv.force === 'true' || argv.force === true;
 
-  const keyword = String(argv.keyword || '').trim();
+  const keyword = String(argv.keyword || argv.k || '').trim();
   return {
     profileId,
     linksFile,
@@ -66,15 +66,13 @@ export function getWeiboDetailHelpLines() {
   return [
     'Usage: webauto weibo detail --profile <id> --links-file <path> [options]',
     '',
-    'Subcommands:',
-    '  detail       采集微博帖子详情（正文、图片、视频、评论）',
-    '',
     'Required:',
-    '  --profile <id>              camo profile ID (required)',
+    '  -p, --profile <id>              camo profile ID (required)',
     '  --links-file <path>         links.jsonl 文件路径 (required)',
     '',
     'Options:',
-    '  --max-posts <n>             最大帖子数 (default: 10)',
+    '  -n, --max-posts <n>             最大帖子数 (default: 10)',
+    '      --max-notes <n>             alias for --max-posts',
     '  --content-enabled <bool>    采集正文 (default: true)',
     '  --images-enabled <bool>     下载图片 (default: true)',
     '  --videos-enabled <bool>     下载视频 (default: false)',
@@ -82,12 +80,12 @@ export function getWeiboDetailHelpLines() {
     '  --comments-enabled <bool>   采集评论 (default: true)',
     '  --expand-all-replies <bool> 展开子回复 (default: true)',
     '  --max-comments <n>          最大评论数 0=全部 (default: 0)',
-    '  --env <name>                输出env目录 (default: prod)',
+    '  -e, --env <name>                输出env目录 (default: prod)',
     '  --output-root <path>        自定义输出根目录',
     '  --post-interval-min <ms>    帖子间隔最小ms (default: 2000)',
     '  --post-interval-max <ms>    帖子间隔最大ms (default: 5000)',
     '  --force                     强制重新采集，跳过已完成 (default: false)',
-    '  --keyword <kw>              关键词，用于输出目录命名 (default: detail)',
+    '  -k, --keyword <kw>              关键词，用于输出目录命名 (default: detail)',
     '',
     'Examples:',
     '  WEBAUTO_DAEMON_BYPASS=1 webauto weibo detail --profile weibo --links-file ./links.jsonl --max-posts 5',
