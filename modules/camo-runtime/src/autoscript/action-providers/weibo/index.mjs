@@ -49,5 +49,15 @@ export async function executeWeiboAutoscriptOperation({
     return readDetailState(profileId);
   }
 
+
+  if (normalized === 'weibo_video_resolve' || normalized === 'weibo_resolve_video') {
+    const { extractVideoUrl } = await import('./video-ops.mjs');
+    return extractVideoUrl(profileId, params.url);
+  }
+
+  if (normalized === 'weibo_detect_platform' || normalized === 'weibo_detect') {
+    const { detectPlatform } = await import('./video-ops.mjs');
+    return detectPlatform(params.url);
+  }
   return asErrorPayload('UNSUPPORTED_OPERATION', `Unsupported weibo operation: ${action}`);
 }

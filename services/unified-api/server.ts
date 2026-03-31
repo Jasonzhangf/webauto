@@ -733,10 +733,41 @@ class UnifiedApiServer {
       }
 
       // ====================================================================
+      // ====================================================================
+      // Video resolve API
+      // ====================================================================
+      if (url.pathname === '/api/v1/video/resolve' || url.pathname === '/api/v1/video/resolve/') {
+        if (req.method !== 'POST') {
+          res.writeHead(405, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: false, error: 'METHOD_NOT_ALLOWED' }));
+          return;
+        }
+        try {
+          const parsed = await this.readJsonBody(req);
+          const targetUrl = String(parsed.url || '').trim();
+          const profileId = String(parsed.profileId || 'weibo').trim();
+          if (!targetUrl) {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ ok: false, error: 'URL_REQUIRED', message: 'url is required' }));
+            return;
+          }
+          const { extractVideoUrl } = await import(
+            new URL('../../modules/camo-runtime/src/autoscript/action-providers/weibo/video-ops.mjs', import.meta.url)
+          );
+          const result = await extractVideoUrl(profileId, targetUrl);
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify(result));
+        } catch (err) {
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: false, error: 'INTERNAL_ERROR', message: String(err?.message || err) }));
+        }
+        return;
+      }
+
       // Static file: Task Board
       // ====================================================================
       if (url.pathname === '/task-board' || url.pathname === '/task-board/') {
-        const boardPath = path.join(fallbackRepoRoot, 'apps', 'webauto', 'resources', 'task-board.html');
+        const boardPath = path.join(repoRoot, 'apps', 'webauto', 'resources', 'task-board.html');
         try {
           const html = fs.readFileSync(boardPath, 'utf8');
           res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });

@@ -428,6 +428,7 @@ Usage:
 Subcommands:
   collect      搜索微博并采集不重复的链接集合（分页遍历 + URL 去重）
   detail       采集微博帖子详情（正文、图片、视频、外链、评论）
+  video        解析视频真实链接（短链自动跳转，返回直链 URL）
 
 Required:
   -p, --profile <id>   camo profile ID（必须为已登录的微博 profile）
@@ -466,6 +467,28 @@ Options:
   -e, --env <name>        输出环境目录（默认 prod）
   --output-root <p>       自定义输出根目录
   -k, --keyword <kw>      关键词，用于输出目录命名 (default: detail)
+`);
+}
+
+
+function printWeiboVideoHelp() {
+  console.log(`webauto weibo video — 解析视频真实链接
+
+Usage:
+  webauto weibo video <url> [options]
+
+Arguments:
+  <url>                 微博短链 (t.cn) / 微博链接 / 小红书链接
+
+Options:
+  -p, --profile <id>    camo profile ID（默认 weibo）
+  -c, --copy            复制视频链接到剪贴板
+  -j, --json            输出完整 JSON
+  -h, --help            显示帮助
+
+Examples:
+  webauto weibo video http://t.cn/AXIt31Y5
+  webauto weibo video https://weibo.com/tv/show/1034:xxx
 `);
 }
 
@@ -787,6 +810,10 @@ async function main() {
         printWeiboUnifiedHelp();
         return;
       }
+      if (weiboSub === "video" && (args.help || args.h)) {
+        printWeiboVideoHelp();
+        return;
+      }
       printWeiboHelp();
       return;
     }
@@ -858,11 +885,17 @@ async function main() {
       printWeiboUnifiedHelp();
       return;
     }
+    if (weiboSub === "video" && (args.help || args.h)) {
+      printWeiboVideoHelp();
+      return;
+    }
     let script;
     if (weiboSub === "detail") {
       script = path.join(ROOT, "apps", "webauto", "entry", "weibo-detail.mjs");
     } else if (weiboSub === "unified") {
       script = path.join(ROOT, "apps", "webauto", "entry", "weibo-unified.mjs");
+    } else if (weiboSub === "video") {
+      script = path.join(ROOT, "apps", "webauto", "entry", "weibo-video.mjs");
     } else {
       script = path.join(ROOT, "apps", "webauto", "entry", "weibo-collect.mjs");
     }
