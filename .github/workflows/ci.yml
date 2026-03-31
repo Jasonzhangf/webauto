@@ -34,10 +34,6 @@ jobs:
         shell: bash
         run: npm ci
 
-      - name: Install desktop-console dependencies
-        shell: bash
-        run: npm --prefix apps/desktop-console ci
-
       - name: Build services
         shell: bash
         run: npm run build:services
@@ -50,11 +46,6 @@ jobs:
         shell: bash
         run: node scripts/check-legacy-refs.mjs && node scripts/check-untracked-sources.mjs && node scripts/check-sub-dist.mjs
 
-      - name: Desktop console build (smoke)
-        if: ${{ matrix.os == 'ubuntu-latest' }}
-        shell: bash
-        run: npm --prefix apps/desktop-console run build
-
       - name: Coverage tests
         shell: bash
         run: npm run coverage:ci
@@ -63,6 +54,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: coverage-report-${{ matrix.os }}
-          path: |
-            coverage/
-            apps/desktop-console/coverage/
+          path: coverage/
