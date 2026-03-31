@@ -516,6 +516,47 @@ async function testFeedLikeLayering() {
     Number(direct?.params?.likesPerRound || 0) === 5
       ? ok('buildXhsFeedLikeOperations likesPerRound', '5')
       : bad('buildXhsFeedLikeOperations likesPerRound', JSON.stringify(direct?.params || {}));
+
+    const unlikeTemplateMod = await import(`file://${path.resolve(PROJECT_ROOT, 'modules/camo-runtime/src/autoscript/xhs-feed-unlike-template.mjs')}`);
+    const buildUnlike = unlikeTemplateMod?.buildXhsFeedUnlikeAutoscript;
+    if (typeof buildUnlike !== 'function') {
+      bad('buildXhsFeedUnlikeAutoscript', 'missing export');
+      return;
+    }
+
+    const unlikeScript = buildUnlike({
+      profileId: 'xhs-qa-1',
+      stage: 'feed-unlike',
+      keyword: '团建',
+      keywords: ['团建策划', '团队建设', '广东团建', '团建', '超额关键字'],
+      maxLikesPerTab: 5,
+      likeIntervalMinMs: 1000,
+      likeIntervalMaxMs: 3000,
+    });
+
+    const unlikeOps = Array.isArray(unlikeScript?.operations) ? unlikeScript.operations : [];
+    const unlikeRound = unlikeOps.find((op) => op?.id === 'feed_like_round');
+    const finishUnlike = unlikeOps.find((op) => op?.id === 'finish_after_feed_unlike');
+
+    unlikeRound
+      ? ok('feed_unlike_round operation', 'exists (feed_like_round id)')
+      : bad('feed_unlike_round operation', 'missing');
+
+    if (unlikeRound) {
+      const mode = unlikeRound?.params?.actionMode || unlikeRound?.params?.mode || '';
+      mode === 'unlike'
+        ? ok('feed_unlike actionMode', 'unlike')
+        : bad('feed_unlike actionMode', JSON.stringify(mode));
+    }
+
+    if (finishUnlike) {
+      const deps = Array.isArray(finishUnlike.dependsOn) ? finishUnlike.dependsOn : [];
+      deps.includes('feed_like_round')
+        ? ok('finish_after_feed_unlike dependency', 'dependsOn feed_like_round')
+        : bad('finish_after_feed_unlike dependency', JSON.stringify(deps));
+    } else {
+      bad('finish_after_feed_unlike operation', 'missing');
+    }
   } catch (e) {
     bad('feed-like layering check', String(e?.message || e).slice(0, 120));
   }

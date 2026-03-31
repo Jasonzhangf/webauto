@@ -12,6 +12,7 @@ import {
 import { buildXhsUnifiedAutoscript } from '../../../../modules/camo-runtime/src/autoscript/xhs-unified-template.mjs';
 import { buildXhsCollectAutoscript } from '../../../../modules/camo-runtime/src/autoscript/xhs-collect-template.mjs';
 import { buildXhsFeedLikeAutoscript } from '../../../../modules/camo-runtime/src/autoscript/xhs-feed-like-template.mjs';
+import { buildXhsFeedUnlikeAutoscript } from '../../../../modules/camo-runtime/src/autoscript/xhs-feed-unlike-template.mjs';
 import { buildXhsDetailAutoscript } from '../../../../modules/camo-runtime/src/autoscript/xhs-detail-template.mjs';
 
 function resolveSharedHarvestPath({ sharedHarvestPath, outputRoot, env, keyword }) {
@@ -323,5 +324,6 @@ export function resolveAutoscriptBuilder(stage) {
   if (normalized === 'links') return buildXhsCollectAutoscript;
   if (normalized === 'detail') return buildXhsDetailAutoscript;
   if (normalized === 'feed-like') return buildXhsFeedLikeAutoscript;
+  if (normalized === 'feed-unlike') return buildXhsFeedUnlikeAutoscript;
   return buildXhsUnifiedAutoscript;
 }

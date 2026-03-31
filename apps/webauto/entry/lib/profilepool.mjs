@@ -87,6 +87,14 @@ export function listProfilesForPool(prefix) {
   return { root, profiles: poolProfiles };
 }
 
+export function resolveDefaultProfileId() {
+  const { profiles } = listProfiles();
+  if (profiles.length === 1) return profiles[0];
+  const pool = listProfilesForPool('profile').profiles;
+  if (pool.length === 1) return pool[0];
+  return '';
+}
+
 export function resolveNextProfileId(prefix) {
   const normalized = String(prefix || '').trim();
   if (!normalized) throw new Error('prefix is required');

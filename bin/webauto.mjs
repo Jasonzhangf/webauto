@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+﻿#!/usr/bin/env node
 import minimist from 'minimist';
 import { spawn, spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
@@ -7,6 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { applyCamoEnv } from '../apps/webauto/entry/lib/camo-env.mjs';
+import { resolveDefaultProfileId } from '../apps/webauto/entry/lib/profilepool.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const activeChildren = new Set();
@@ -310,17 +311,18 @@ function printMainHelp() {
   console.log(`webauto CLI
 
 Usage:
-  webauto               # 显示帮助
+  webauto               # show help
   webauto --help
   webauto account --help
+  webauto profilepool --help
   webauto schedule --help
   webauto deps --help
   webauto daemon --help
   webauto xhs --help
-  webauto weibo --help
 
 Core Commands:
   webauto account <list|sync|add|get|update|delete|login|sync-alias> [options]
+  webauto profilepool <list|add|login|login-profile|goto-profile|migrate-fingerprints> [options]
   webauto schedule <list|get|add|update|delete|import|export|run|run-due|daemon> [options]
   webauto deps <check|auto|install|uninstall|reinstall> [options]
   webauto test [--layer <l0|l1|l2|l3|xhs_collect|all>] [--output <path>] [--json]
@@ -329,44 +331,39 @@ Core Commands:
   webauto xhs status [--run-id <id>] [--json]
   webauto xhs gate <get|list|set|reset|path> [--platform <name>] [--patch-json <json>] [--json]
   webauto xhs orchestrate [xhs options...]
-  webauto weibo collect -p <id> -k <kw> [options...]    # 搜索采集微博链接
-  webauto weibo detail -p <id> --links-file <path> [options...]  # 采集帖子详情
   webauto version [--json]
   webauto version bump [patch|minor|major]
 
 Build & Release:
   webauto build:dev        # Local link mode
   webauto build:daemon     # Daemon build (isolated / no-op by default)
-  webauto build:release    # Full release gate (默认自动 bump patch 版本)
+  webauto build:release    # Full release gate (auto bump patch by default)
   webauto build:release -- --bump minor
   webauto build:release -- --no-bump
   webauto build:release -- --skip-tests
   webauto build:release -- --skip-pack
 
 Examples (standard):
-  webauto account add --platform xiaohongshu --alias 主号
-  webauto account list
-  webauto account login xhs-0001 --url https://www.xiaohongshu.com
-  webauto account sync-alias xhs-0001
-  webauto schedule add --name "工作服-半小时" --schedule-type interval --interval-minutes 30 --profile xiaohongshu-batch-1 --keyword "工作服定制" --max-notes 50 --env debug
-  webauto schedule list
-  webauto schedule daemon --interval-sec 30
-  webauto deps install --all
-  webauto deps reinstall --all
-  webauto --daemon
-  webauto --daemon stop
-  webauto daemon autostart install
+  webauto daemon start
   webauto xhs install --ensure-backend
-  webauto xhs --profile xiaohongshu-batch-1 --keyword "seedance2.0" --max-notes 100 --do-comments true --persist-comments true --do-likes true --like-keywords "真牛逼" --env debug --tab-count 4
+  webauto xhs login --wait-sync false --idle-timeout off
+  webauto daemon task submit --detach -- xhs feed-like --keywords "鍥㈤槦寤鸿,鍥㈠缓绛栧垝,娣卞湷鍥㈠缓,骞夸笢鍥㈠缓"
+  webauto xhs status --json
+  webauto daemon task list --limit 5
+  webauto daemon task stop --job-id <id>
+  webauto daemon stop
 
 Tips:
-  - xhs 命令会转发到 apps/webauto/entry/xhs-*.mjs
-  - account 命令会转发到 apps/webauto/entry/account.mjs
-  - schedule 命令会转发到 apps/webauto/entry/schedule.mjs
-  - 全量参数请看: webauto xhs --help
-  - 当前 CLI 版本: ${ROOT_VERSION}
+  - xhs commands forward to apps/webauto/entry/xhs-*.mjs
+  - account commands forward to apps/webauto/entry/account.mjs
+  - schedule commands forward to apps/webauto/entry/schedule.mjs
+  - xhs unified/collect/like/feed-like/unlike must run via daemon task submit
+  - profile is optional when exactly one default profile exists (profile-0)
+  - full options: webauto xhs --help
+  - CLI version: ${readRootVersion()}
 `);
 }
+
 
 function printTestHelp() {
   console.log(`webauto test
@@ -397,187 +394,108 @@ function printDaemonHelp() {
   console.log(`webauto daemon
 
 Usage:
-  webauto --daemon
-  webauto --daemon start|stop|status|restart|run
   webauto daemon <start|stop|status|restart|run|task|autostart>
-  webauto daemon task submit [--wait] -- <webauto args...>
+  webauto daemon task submit [--detach|--wait] -- <webauto args...>
   webauto daemon task status --job-id <id>
   webauto daemon task list [--limit <n>] [--status <running|completed|failed|stopped>]
   webauto daemon task stop --job-id <id>
   webauto daemon task delete --job-id <id>
 
 Examples:
-  webauto --daemon
-  webauto --daemon status --json
-  webauto --daemon restart
-  webauto --daemon stop
-  webauto daemon task submit -- xhs --keyword "春分养生" --max-notes 5 --do-comments true --persist-comments true --task-mode single
+  webauto daemon start
+  webauto daemon status --json
+  webauto daemon task submit --detach -- xhs feed-like --keywords "团队建设,团建策划,深圳团建,广东团建"
+  webauto daemon task list --limit 5
+  webauto daemon task stop --job-id <id>
+  webauto daemon stop
   webauto daemon autostart install
   webauto daemon autostart status --json
 `);
 }
 
-
 function printWeiboHelp() {
   console.log(`webauto weibo
 
 Usage:
-  webauto weibo collect -p <id> -k <kw> [options...]
-  webauto weibo detail -p <id> --links-file <path> [options...]
+  webauto weibo collect --profile <id> --keyword <kw> [options...]
+  webauto weibo detail --profile <id> --links-file <path> [options...]
 
 Subcommands:
-  collect      搜索微博并采集不重复的链接集合（分页遍历 + URL 去重）
-  detail       采集微博帖子详情（正文、图片、视频、外链、评论）
-  video        解析视频真实链接（短链自动跳转，返回直链 URL）
+  collect      脙聝脗娄脙聜脗聬脙聜脗聹脙聝脗搂脙聜脗麓脙聜脗垄脙聝脗楼脙聜脗戮脙聜脗庐脙聝脗楼脙聜脗聧脙聜脗職脙聝脗楼脙聜脗鹿脙聜脗露脙聝脗漏脙聜脗聡脙聜脗聡脙聝脗漏脙聜脗聸脙聜脗聠脙聝脗陇脙聜脗赂脙聜脗聧脙聝脗漏脙聜脗聡脙聜脗聧脙聝脗楼脙聜脗陇脙聜脗聧脙聝脗搂脙聜脗職脙聜脗聞脙聝脗漏脙聜脗聯脙聜脗戮脙聝脗娄脙聜脗聨脙聜脗楼脙聝脗漏脙聜脗聸脙聜脗聠脙聝脗楼脙聜脗聬脙聜脗聢脙聝脗炉脙聜脗录脙聜脗聢脙聝脗楼脙聜脗聢脙聜脗聠脙聝脗漏脙聜脗隆脙聜脗碌脙聝脗漏脙聜脗聛脙聜脗聧脙聝脗楼脙聜脗聨脙聜脗聠 + URL 脙聝脗楼脙聜脗聨脙聜脗禄脙聝脗漏脙聜脗聡脙聜脗聧脙聝脗炉脙聜脗录?
+  detail       脙聝脗漏脙聜脗聡脙聜脗聡脙聝脗漏脙聜脗聸脙聜脗聠脙聝脗楼脙聜脗戮脙聜脗庐脙聝脗楼脙聜脗聧脙聜脗職脙聝脗楼脙聜脗赂脙聜脗聳脙聝脗楼脙聜脗颅脙聜脗聬脙聝脗篓脙聜脗炉脙聜脗娄脙聝脗娄脙聜脗聝脙聜脗聟脙聝脗炉脙聜脗录脙聜脗聢脙聝脗娄脙聜脗颅脙聜脗拢脙聝脗娄脙聜脗聳脙聜脗聡脙聝脗拢脙聜脗聙脙聜脗聛脙聝脗楼脙聜脗聸脙聜脗戮脙聝脗搂脙聜脗聣脙聜脗聡脙聝脗拢脙聜脗聙脙聜脗聛脙聝脗篓脙聜脗搂脙聜脗聠脙聝脗漏脙聜脗垄脙聜脗聭脙聝脗拢脙聜脗聙脙聜脗聛脙聝脗楼脙聜脗陇脙聜脗聳脙聝脗漏脙聜脗聯脙聜脗戮脙聝脗拢脙聜脗聙脙聜脗聛脙聝脗篓脙聜脗炉脙聜脗聞脙聝脗篓脙聜脗庐脙聜脗潞脙聝脗炉脙聜脗录脙聜脗聣
 
 Required:
-  -p, --profile <id>   camo profile ID（必须为已登录的微博 profile）
-  -k, --keyword <kw>   搜索关键词
+  --profile <id>       camo profile ID脙聝脗炉脙聜脗录脙聜脗聢脙聝脗楼脙聜脗驴脙聜脗聟脙聝脗漏脙聜脗隆脙聜脗禄脙聝脗陇脙聜脗赂脙聜脗潞脙聝脗楼脙聜脗路脙聜脗虏脙聝脗搂脙聜脗聶脙聜脗禄脙聝脗楼脙聜脗陆脙聜脗聲脙聝脗搂脙聜脗職脙聜脗聞脙聝脗楼脙聜脗戮脙聜脗庐脙聝脗楼脙聜脗聧脙聜脗職 profile脙聝脗炉脙聜脗录?
+  --keyword <kw>       脙聝脗娄脙聜脗聬脙聜脗聹脙聝脗搂脙聜脗麓脙聜脗垄脙聝脗楼脙聜脗聟脙聜脗鲁脙聝脗漏脙聜脗聰脙聜脗庐脙聝脗篓脙聜脗炉?
 
 Options:
-  -n, --max-notes <n>  目标链接数（默认 10）
-      --target <n>     --max-notes 别名
-  --max-pages <n>      最大翻页数（默认 50）
-  --page-delay <ms>    翻页间隔（默认 2000）
-  -e, --env <name>     输出环境目录（默认 prod）
-  --output-root <p>    自定义输出根目录
+  --target <n>         脙聝脗搂脙聜脗聸脙聜脗庐脙聝脗娄脙聜脗聽脙聜脗聡脙聝脗漏脙聜脗聯脙聜脗戮脙聝脗娄脙聜脗聨脙聜脗楼脙聝脗娄脙聜脗聲脙聜脗掳脙聝脗炉脙聜脗录脙聜脗聢脙聝脗漏脙聜脗禄脙聜脗聵脙聝脗篓脙聜脗庐脙聜脗陇 10脙聝脗炉脙聜脗录?
+  --max-notes <n>      target 脙聝脗楼脙聜脗聢脙聜脗芦脙聝脗楼脙聜脗聬脙聜脗聧
+  --max-pages <n>      脙聝脗娄脙聜脗聹脙聜脗聙脙聝脗楼脙聜脗陇脙聜脗搂脙聝脗搂脙聜脗驴脙聜脗禄脙聝脗漏脙聜脗隆脙聜脗碌脙聝脗娄脙聜脗聲脙聜脗掳脙聝脗炉脙聜脗录脙聜脗聢脙聝脗漏脙聜脗禄脙聜脗聵脙聝脗篓脙聜脗庐?50脙聝脗炉脙聜脗录?
+  --page-delay <ms>    脙聝脗搂脙聜脗驴脙聜脗禄脙聝脗漏脙聜脗隆脙聜脗碌脙聝脗漏脙聜脗聴脙聜脗麓脙聝脗漏脙聜脗職脙聜脗聰脙聝脗炉脙聜脗录脙聜脗聢脙聝脗漏脙聜脗禄脙聜脗聵脙聝脗篓脙聜脗庐?2000脙聝脗炉脙聜脗录?
+  --env <name>         脙聝脗篓脙聜脗戮脙聜脗聯脙聝脗楼脙聜脗聡脙聜脗潞脙聝脗搂脙聜脗聨脙聜脗炉脙聝脗楼脙聜脗垄脙聜脗聝脙聝脗搂脙聜脗聸脙聜脗庐脙聝脗楼脙聜脗陆脙聜脗聲脙聝脗炉脙聜脗录脙聜脗聢脙聝脗漏脙聜脗禄脙聜脗聵脙聝脗篓脙聜脗庐?prod脙聝脗炉脙聜脗录?
+  --output-root <p>    脙聝脗篓脙聜脗聡脙聜脗陋脙聝脗楼脙聜脗庐脙聜脗職脙聝脗陇脙聜脗鹿脙聜脗聣脙聝脗篓脙聜脗戮脙聜脗聯脙聝脗楼脙聜脗聡脙聜脗潞脙聝脗娄脙聜脗聽脙聜脗鹿脙聝脗搂脙聜脗聸脙聜脗庐脙聝脗楼脙聜脗陆脙聜脗聲
 
 Output:
-  默认目录: ~/.webauto/download/weibo/<env>/search:<keyword>/
+  脙聝脗漏脙聜脗禄脙聜脗聵脙聝脗篓脙聜脗庐脙聜脗陇脙聝脗搂脙聜脗聸脙聜脗庐脙聝脗楼脙聜脗陆脙聜脗聲: ~/.webauto/download/weibo/<env>/search:<keyword>/
 `);
 }
 
 function printWeiboDetailHelp() {
-  console.log(`webauto weibo detail -p <id> --links-file <path> [options]
+  console.log(`webauto weibo detail --profile <id> --links-file <path> [options]
 
 Required:
-  -p, --profile <id>      camo profile ID
-  --links-file <path>     links.jsonl 文件路径（weibo collect 的输出）
+  --profile <id>          camo profile ID
+  --links-file <path>     links.jsonl 脙聝脗娄脙聜脗聳脙聜脗聡脙聝脗陇脙聜脗禄脙聜脗露脙聝脗篓脙聜脗路脙聜脗炉脙聝脗楼脙聜脗戮脙聜脗聞脙聝脗炉脙聜脗录脙聜脗聢weibo collect 脙聝脗搂脙聜脗職脙聜脗聞脙聝脗篓脙聜脗戮脙聜脗聯脙聝脗楼脙聜脗聡脙聜脗潞脙聝脗炉脙聜脗录脙聜脗聣
 
 Options:
-  -n, --max-posts <n>     最大采集帖子数（默认 10）
-  --content-enabled       采集正文（默认 true）
-  --images-enabled        下载图片（默认 true）
-  --videos-enabled        下载视频（默认 false）
-  --comments-enabled      采集评论（默认 true）
-  --expand-all-replies    展开所有子回复（默认 true）
-  --max-comments <n>      评论数量上限（0=全部）
-  --post-interval-min-ms  帖子间隔最小值（默认 2000）
-  --post-interval-max-ms  帖子间隔最大值（默认 5000）
-  -e, --env <name>        输出环境目录（默认 prod）
-  --output-root <p>       自定义输出根目录
-  -k, --keyword <kw>      关键词，用于输出目录命名 (default: detail)
+  --max-posts <n>         脙聝脗娄脙聜脗聹脙聜脗聙脙聝脗楼脙聜脗陇脙聜脗搂脙聝脗漏脙聜脗聡脙聜脗聡脙聝脗漏脙聜脗聸脙聜脗聠脙聝脗楼脙聜脗赂脙聜脗聳脙聝脗楼脙聜脗颅脙聜脗聬脙聝脗娄脙聜脗聲脙聜脗掳脙聝脗炉脙聜脗录脙聜脗聢脙聝脗漏脙聜脗禄脙聜脗聵脙聝脗篓脙聜脗庐?10脙聝脗炉脙聜脗录?
+  --content-enabled       脙聝脗漏脙聜脗聡脙聜脗聡脙聝脗漏脙聜脗聸脙聜脗聠脙聝脗娄脙聜脗颅脙聜脗拢脙聝脗娄脙聜脗聳脙聜脗聡脙聝脗炉脙聜脗录脙聜脗聢脙聝脗漏脙聜脗禄脙聜脗聵脙聝脗篓脙聜脗庐?true脙聝脗炉脙聜脗录?
+  --images-enabled        脙聝脗陇脙聜脗赂脙聜脗聥脙聝脗篓脙聜脗陆脙聜脗陆脙聝脗楼脙聜脗聸脙聜脗戮脙聝脗搂脙聜脗聣脙聜脗聡脙聝脗炉脙聜脗录脙聜脗聢脙聝脗漏脙聜脗禄脙聜脗聵脙聝脗篓脙聜脗庐?true脙聝脗炉脙聜脗录?
+  --videos-enabled        脙聝脗陇脙聜脗赂脙聜脗聥脙聝脗篓脙聜脗陆脙聜脗陆脙聝脗篓脙聜脗搂脙聜脗聠脙聝脗漏脙聜脗垄脙聜脗聭脙聝脗炉脙聜脗录脙聜脗聢脙聝脗漏脙聜脗禄脙聜脗聵脙聝脗篓脙聜脗庐?false脙聝脗炉脙聜脗录?
+  --comments-enabled      脙聝脗漏脙聜脗聡脙聜脗聡脙聝脗漏脙聜脗聸脙聜脗聠脙聝脗篓脙聜脗炉脙聜脗聞脙聝脗篓脙聜脗庐脙聜脗潞脙聝脗炉脙聜脗录脙聜脗聢脙聝脗漏脙聜脗禄脙聜脗聵脙聝脗篓脙聜脗庐?true脙聝脗炉脙聜脗录?
+  --expand-all-replies    脙聝脗楼脙聜脗卤脙聜脗聲脙聝脗楼脙聜脗录脙聜脗聙脙聝脗娄脙聜脗聣脙聜脗聙脙聝脗娄脙聜脗聹脙聜脗聣脙聝脗楼脙聜脗颅脙聜脗聬脙聝脗楼脙聜脗聸脙聜脗聻脙聝脗楼脙聜脗陇脙聜脗聧脙聝脗炉脙聜脗录脙聜脗聢脙聝脗漏脙聜脗禄脙聜脗聵脙聝脗篓脙聜脗庐?true脙聝脗炉脙聜脗录?
+  --max-comments <n>      脙聝脗篓脙聜脗炉脙聜脗聞脙聝脗篓脙聜脗庐脙聜脗潞脙聝脗娄脙聜脗聲脙聜脗掳脙聝脗漏脙聜脗聡脙聜脗聫脙聝脗陇脙聜脗赂脙聜脗聤脙聝脗漏脙聜脗聶脙聜脗聬脙聝脗炉脙聜脗录?=脙聝脗楼脙聜脗聟脙聜脗篓脙聝脗漏脙聜脗聝脙聜脗篓脙聝脗炉脙聜脗录?
+  --post-interval-min-ms  脙聝脗楼脙聜脗赂脙聜脗聳脙聝脗楼脙聜脗颅脙聜脗聬脙聝脗漏脙聜脗聴脙聜脗麓脙聝脗漏脙聜脗職脙聜脗聰脙聝脗娄脙聜脗聹脙聜脗聙脙聝脗楼脙聜脗掳脙聜脗聫脙聝脗楼脙聜脗聙脙聜脗录脙聝脗炉脙聜脗录脙聜脗聢脙聝脗漏脙聜脗禄脙聜脗聵脙聝脗篓脙聜脗庐脙聜脗陇 2000脙聝脗炉脙聜脗录?
+  --post-interval-max-ms  脙聝脗楼脙聜脗赂脙聜脗聳脙聝脗楼脙聜脗颅脙聜脗聬脙聝脗漏脙聜脗聴脙聜脗麓脙聝脗漏脙聜脗職脙聜脗聰脙聝脗娄脙聜脗聹脙聜脗聙脙聝脗楼脙聜脗陇脙聜脗搂脙聝脗楼脙聜脗聙脙聜脗录脙聝脗炉脙聜脗录脙聜脗聢脙聝脗漏脙聜脗禄脙聜脗聵脙聝脗篓脙聜脗庐脙聜脗陇 5000脙聝脗炉脙聜脗录?
+  --env <name>            脙聝脗篓脙聜脗戮脙聜脗聯脙聝脗楼脙聜脗聡脙聜脗潞脙聝脗搂脙聜脗聨脙聜脗炉脙聝脗楼脙聜脗垄脙聜脗聝脙聝脗搂脙聜脗聸脙聜脗庐脙聝脗楼脙聜脗陆脙聜脗聲脙聝脗炉脙聜脗录脙聜脗聢脙聝脗漏脙聜脗禄脙聜脗聵脙聝脗篓脙聜脗庐?prod脙聝脗炉脙聜脗录?
+  --output-root <p>       脙聝脗篓脙聜脗聡脙聜脗陋脙聝脗楼脙聜脗庐脙聜脗職脙聝脗陇脙聜脗鹿脙聜脗聣脙聝脗篓脙聜脗戮脙聜脗聯脙聝脗楼脙聜脗聡脙聜脗潞脙聝脗娄脙聜脗聽脙聜脗鹿脙聝脗搂脙聜脗聸脙聜脗庐脙聝脗楼脙聜脗陆脙聜脗聲
+  --keyword <kw>          脙聝脗楼脙聜脗聟脙聜脗鲁脙聝脗漏脙聜脗聰脙聜脗庐脙聝脗篓脙聜脗炉脙聜脗聧脙聝脗炉脙聜脗录脙聜脗聦脙聝脗搂脙聜脗聰脙聜脗篓脙聝脗陇脙聜脗潞脙聜脗聨脙聝脗篓脙聜脗戮脙聜脗聯脙聝脗楼脙聜脗聡脙聜脗潞脙聝脗搂脙聜脗聸脙聜脗庐脙聝脗楼脙聜脗陆脙聜脗聲脙聝脗楼脙聜脗聭脙聜脗陆脙聝脗楼脙聜脗聬脙聜脗聧 (default: detail)
 `);
 }
-
-
-function printWeiboVideoHelp() {
-  console.log(`webauto weibo video — 解析视频真实链接
-
-Usage:
-  webauto weibo video <url> [options]
-
-Arguments:
-  <url>                 微博短链 (t.cn) / 微博链接 / 小红书链接
-
-Options:
-  -p, --profile <id>    camo profile ID（默认 weibo）
-  -c, --copy            复制视频链接到剪贴板
-  -j, --json            输出完整 JSON
-  -h, --help            显示帮助
-
-Examples:
-  webauto weibo video http://t.cn/AXIt31Y5
-  webauto weibo video https://weibo.com/tv/show/1034:xxx
-`);
-}
-
-function printWeiboUnifiedHelp() {
-  console.log(`webauto weibo unified - Weibo unified collection runner
-
-Usage:
-  webauto weibo unified [options]
-
-Subcommands (via --task-type):
-  timeline   刷新主页时间线，采集帖子（默认）
-  search     搜索采集微博链接（需 --keyword）
-  monitor    监控模式（委托 timeline）
-
-Options:
-  --task-type <timeline|search|monitor>  任务类型（默认 timeline）
-  -p, --profile <id>                     camo profile ID（默认 weibo）
-  -n, --target <number>                  最大采集数（默认 50）
-  -e, --env <string>                     输出环境目录（默认 prod）
-  --date <YYYY-MM-DD>                    采集日期（默认今天）
-  --output-root <path>                   自定义输出根目录
-  --scroll-delay <ms>                    滚动间隔（默认 2500）
-  --max-empty-scrolls <n>                空滚动终止阈值（默认 2）
-  -k, --keyword <string>                 搜索关键词（search 模式必需）
-  --max-pages <number>                   最大搜索页数（默认 3）
-  -h, --help                             显示帮助
-`);
-}
-
 function printXhsHelp() {
   console.log(`webauto xhs
 
 Usage:
   webauto xhs install [--download-browser] [--download-geoip] [--ensure-backend] [--install|--reinstall|--uninstall] [--browser|--geoip|--all]
-  webauto xhs --profile <id> --keyword <kw> [options...]
-  webauto xhs collect --profile <id> --keyword <kw> [options...]
-  webauto xhs like --profile <id> --keyword <kw> [options...]
-  webauto xhs feed-like --profile <id> [options...]
+  webauto xhs --keyword <kw> [options...]
+  webauto xhs collect --keyword <kw> [options...]
+  webauto xhs like --keyword <kw> [options...]
+  webauto xhs feed-like --keywords <a,b,c> [options...]
+  webauto xhs feed-unlike --keywords <a,b,c> [options...]
+  webauto xhs login [options...]
   webauto xhs deps <check|auto|install|uninstall|reinstall> [options...]
   webauto xhs status [--run-id <id>] [--json]
   webauto xhs gate <get|list|set|reset|path> [--platform <name>] [--patch-json <json>] [--json]
-  webauto xhs orchestrate --profile <id> --keyword <kw> [options...]
+  webauto xhs orchestrate --keyword <kw> [options...]
+
+Notes:
+  - xhs unified/collect/like/feed-like/unlike must run via daemon task submit
+  - profile is optional when exactly one default profile exists
+  - default profile naming: profile-0, profile-1, ...
 
 Subcommands:
-  install      运行资源管理（兼容旧入口），支持检查/安装/卸载/重装 camoufox、geoip，按需拉起 backend
-  unified      运行统一脚本（搜索 + 打开详情 + 评论抓取 + 点赞，默认）
-  collect      仅采集链接（links-only 模式）
-  like         仅点赞（内部转发 unified --stage like）
-  feed-like    首页 Feed 点赞（内部转发 unified --stage feed-like）
-  deps         依赖管理（兼容顶层 webauto deps）
-  status       查询当前任务状态与错误摘要（支持 runId 详情）
-  gate         管理平台流控参数（默认配置可修改并自动生效）
-  orchestrate  运行编排入口（默认调用 unified 模式）
-
-Unified Required:
-  --profile <id>     配置好的 camo profile（示例: xiaohongshu-batch-1）
-  --keyword <kw>     搜索关键词
-
-Unified Common Options:
-  --max-notes <n>          目标帖子数，默认 30
-  --total-notes <n>        多账号总目标数（按账号自动分片）
-  --total-target <n>       total-notes 别名
-  --parallel               启用多账号并行执行
-  --concurrency <n>        并行度（默认=账号数）
-  --plan-only              仅生成分片计划，不执行
-  --tab-count <n>          轮询 tab 数，默认 4
-  --throttle <ms>          操作节流（默认走 flow-gate 平台配置并随机化）
-  --note-interval <ms>     帖子间等待（默认走 flow-gate 平台配置并随机化）
-  --env <name>             输出环境目录，默认 debug
-  --output-root <path>     自定义输出根目录
-  --dry-run                干跑（禁用点赞/回复）
-  --no-dry-run             强制非干跑
-
-Comment Crawl Options:
-  --do-comments <bool>       是否抓评论，默认 true
-  --persist-comments <bool>  是否落盘评论，默认 true（dry-run 下默认 false）
-
-Like Options:
-  --do-likes <bool>          是否启用点赞，默认 false
-  --like-keywords "<k1,k2>"  点赞关键词（命中评论触发）
-  --max-likes <n>            每轮最多点赞数，默认 2
-  --match-mode any|all       关键词匹配模式，默认 any
-  --match-min-hits <n>       最低命中词数，默认 1
-  --match-keywords "<...>"   匹配关键词集合（默认回落到 keyword）
-
-Output:
-  默认目录: ~/.webauto/download/xiaohongshu/<env>/<keyword>/
+  install      manage resources (browser/geoip/backend)
+  unified      run unified flow (search + detail + comments + likes)
+  collect      links-only collection
+  like         unified --stage like
+  feed-like    unified --stage feed-like
+  feed-unlike  unified --stage feed-unlike
+  login        open login window via profilepool login-profile
+  deps         manage dependencies (alias to webauto deps)
 `);
 }
+
 
 function printAccountHelp() {
   console.log(`webauto account
@@ -619,9 +537,9 @@ Usage:
   webauto schedule daemon [--interval-sec <n>] [--limit <n>] [--once] [--json]
 
 Examples:
-  webauto schedule add --name "deepseek-每30分钟" --schedule-type interval --interval-minutes 30 --profile xiaohongshu-batch-1 --keyword deepseek --max-notes 100 --do-comments true --do-likes true --like-keywords 牛逼 --env debug
-  webauto schedule add --name "每天早上任务" --schedule-type daily --run-at 2026-02-20T09:00:00+08:00 --max-runs 30 --profile xiaohongshu-batch-1 --keyword 工作服
-  webauto schedule add --name "每周巡检" --schedule-type weekly --run-at 2026-02-22T10:30:00+08:00 --max-runs 8 --profile xiaohongshu-batch-1 --keyword deepseek
+  webauto schedule add --name "deepseek-脙聝脗娄脙聜脗炉?0脙聝脗楼脙聜脗聢脙聜脗聠脙聝脗漏脙聜脗聮脙聜脗聼" --schedule-type interval --interval-minutes 30 --profile xiaohongshu-batch-1 --keyword deepseek --max-notes 100 --do-comments true --do-likes true --like-keywords 脙聝脗搂脙聜脗聣脙聜脗聸脙聝脗漏脙聜脗聙?--env debug
+  webauto schedule add --name "脙聝脗娄脙聜脗炉脙聜脗聫脙聝脗楼脙聜脗陇脙聜脗漏脙聝脗娄脙聜脗聴脙聜脗漏脙聝脗陇脙聜脗赂脙聜脗聤脙聝脗陇脙聜脗禄脙聜脗禄脙聝脗楼脙聜脗聤脙聜脗隆" --schedule-type daily --run-at 2026-02-20T09:00:00+08:00 --max-runs 30 --profile xiaohongshu-batch-1 --keyword 脙聝脗楼脙聜脗路脙聜脗楼脙聝脗陇脙聜脗陆脙聜脗聹脙聝脗娄脙聜脗聹?
+  webauto schedule add --name "脙聝脗娄脙聜脗炉脙聜脗聫脙聝脗楼脙聜脗聭脙聜脗篓脙聝脗楼脙聜脗路脙聜脗隆脙聝脗娄脙聜脗拢脙聜脗聙" --schedule-type weekly --run-at 2026-02-22T10:30:00+08:00 --max-runs 8 --profile xiaohongshu-batch-1 --keyword deepseek
   webauto schedule list
   webauto schedule run-due --json
   webauto schedule daemon --interval-sec 30
@@ -640,9 +558,9 @@ Usage:
   webauto deps reinstall [--browser|--geoip|--all] [--ensure-backend] [--json]
 
 Notes:
-  - 不指定资源范围时默认 --all
-  - install/reinstall 默认会追加 --ensure-backend（可用 --no-ensure-backend 关闭）
-  - auto 模式用于 npm 安装后自动补齐缺失资源
+  - 脙聝脗陇脙聜脗赂脙聜脗聧脙聝脗娄脙聜脗聦脙聜脗聡脙聝脗楼脙聜脗庐脙聜脗職脙聝脗篓脙聜脗碌脙聜脗聞脙聝脗娄脙聜脗潞脙聜脗聬脙聝脗篓脙聜脗聦脙聜脗聝脙聝脗楼脙聜脗聸脙聜脗麓脙聝脗娄脙聜脗聴脙聜脗露脙聝脗漏脙聜脗禄脙聜脗聵脙聝脗篓脙聜脗庐脙聜脗陇 --all
+  - install/reinstall 脙聝脗漏脙聜脗禄脙聜脗聵脙聝脗篓脙聜脗庐脙聜脗陇脙聝脗陇脙聜脗录脙聜脗職脙聝脗篓脙聜脗驴脙聜脗陆脙聝脗楼脙聜脗聤?--ensure-backend脙聝脗炉脙聜脗录脙聜脗聢脙聝脗楼脙聜脗聫脙聜脗炉脙聝脗搂脙聜脗聰?--no-ensure-backend 脙聝脗楼脙聜脗聟脙聜脗鲁脙聝脗漏脙聜脗聴脙聜脗颅脙聝脗炉脙聜脗录?
+  - auto 脙聝脗娄脙聜脗篓脙聜脗隆脙聝脗楼脙聜脗录脙聜脗聫脙聝脗搂脙聜脗聰脙聜脗篓脙聝脗陇脙聜脗潞脙聜脗聨 npm 脙聝脗楼脙聜脗庐脙聜脗聣脙聝脗篓脙聜脗拢脙聜脗聟脙聝脗楼脙聜脗聬脙聜脗聨脙聝脗篓脙聜脗聡脙聜脗陋脙聝脗楼脙聜脗聤脙聜脗篓脙聝脗篓脙聜脗隆脙聜脗楼脙聝脗漏脙聜脗陆脙聜脗聬脙聝脗搂脙聜脗录脙聜脗潞脙聝脗楼脙聜脗陇脙聜脗卤脙聝脗篓脙聜脗碌脙聜脗聞脙聝脗娄脙聜脗潞?
 
 Examples:
   webauto deps check --all --json
@@ -740,7 +658,7 @@ async function daemonProxy(rawArgv) {
  } else if (controlSet.has(String(filtered[0] || '').trim().toLowerCase())) {
    daemonArgs = filtered;
  } else {
-    console.error(`❌ Unknown daemon command: ${filtered[0]}. Use: start|stop|status|restart|run|task|autostart`);
+    console.error(`脙聝脗垄脙聜脗聺?Unknown daemon command: ${filtered[0]}. Use: start|stop|status|restart|run|task|autostart`);
     process.exit(2);
  }
   await run(process.execPath, [daemonScript, ...daemonArgs]);
@@ -800,18 +718,14 @@ async function main() {
       printAccountHelp();
       return;
     }
+    if (cmd === 'profilepool') {
+      console.log('Usage: webauto profilepool <list|add|login|login-profile|goto-profile|migrate-fingerprints> ...');
+      return;
+    }
     if (cmd === "weibo") {
       const weiboSub = String(args._[1] || "").trim();
       if (weiboSub === "detail") {
         printWeiboDetailHelp();
-        return;
-      }
-      if (weiboSub === "unified" && (args.help || args.h)) {
-        printWeiboUnifiedHelp();
-        return;
-      }
-      if (weiboSub === "video" && (args.help || args.h)) {
-        printWeiboVideoHelp();
         return;
       }
       printWeiboHelp();
@@ -881,21 +795,9 @@ async function main() {
       printWeiboDetailHelp();
       return;
     }
-    if (weiboSub === "unified" && (args.help || args.h)) {
-      printWeiboUnifiedHelp();
-      return;
-    }
-    if (weiboSub === "video" && (args.help || args.h)) {
-      printWeiboVideoHelp();
-      return;
-    }
     let script;
     if (weiboSub === "detail") {
       script = path.join(ROOT, "apps", "webauto", "entry", "weibo-detail.mjs");
-    } else if (weiboSub === "unified") {
-      script = path.join(ROOT, "apps", "webauto", "entry", "weibo-unified.mjs");
-    } else if (weiboSub === "video") {
-      script = path.join(ROOT, "apps", "webauto", "entry", "weibo-video.mjs");
     } else {
       script = path.join(ROOT, "apps", "webauto", "entry", "weibo-collect.mjs");
     }
@@ -980,8 +882,13 @@ async function main() {
    return;
  }
 
- if (cmd === 'account') {
+  if (cmd === 'account') {
     const script = path.join(ROOT, 'apps', 'webauto', 'entry', 'account.mjs');
+    await run(process.execPath, [script, ...rawArgv.slice(1)]);
+    return;
+  }
+  if (cmd === 'profilepool') {
+    const script = path.join(ROOT, 'apps', 'webauto', 'entry', 'profilepool.mjs');
     await run(process.execPath, [script, ...rawArgv.slice(1)]);
     return;
   }
@@ -1025,7 +932,7 @@ async function main() {
       if (!hasSelection) modeArgs.push('--all');
       if (!disableEnsureBackend) modeArgs.push('--ensure-backend');
     } else {
-      console.error(`❌ 未知 deps 子命令: ${sub}`);
+      console.error(`脙聝脗垄脙聜脗聺?脙聝脗娄脙聜脗聹脙聜脗陋脙聝脗搂脙聜脗聼脙聜脗楼 deps 脙聝脗楼脙聜脗颅脙聜脗聬脙聝脗楼脙聜脗聭脙聜脗陆脙聝脗陇脙聜脗禄? ${sub}`);
       printDepsHelp();
       process.exit(2);
     }
@@ -1076,6 +983,57 @@ async function main() {
       return;
     }
 
+    if (subNormalized === 'feed-unlike') {
+      const script = path.join(ROOT, 'apps', 'webauto', 'entry', 'xhs-feed-unlike.mjs');
+      await run(process.execPath, [script, ...rawArgv.slice(2)]);
+      return;
+    }
+
+      if (subNormalized === 'login') {
+        const script = path.join(ROOT, 'apps', 'webauto', 'entry', 'profilepool.mjs');
+        const raw = rawArgv.slice(2);
+        let profileId = '';
+        const forwarded = [];
+        const valueFlags = new Set([
+          '--profile',
+          '-p',
+          '--url',
+          '--idle-timeout',
+          '--timeout-sec',
+          '--check-interval-sec',
+          '--cookie-interval-ms',
+          '--wait-sync',
+        ]);
+        for (let i = 0; i < raw.length; i += 1) {
+          const item = raw[i];
+          if (item === '--profile' || item === '-p') {
+            profileId = String(raw[i + 1] || '').trim();
+            i += 1;
+            continue;
+          }
+          if (valueFlags.has(item)) {
+            if (i + 1 < raw.length && !String(raw[i + 1] || '').startsWith('-')) {
+              i += 1;
+            }
+            continue;
+          }
+          if (!profileId && item && !String(item).startsWith('-')) {
+            profileId = String(item || '').trim();
+            continue;
+          }
+          forwarded.push(item);
+      }
+        if (!profileId) {
+          profileId = resolveDefaultProfileId();
+        }
+        if (!profileId) {
+          console.error('missing --profile for xhs login and no default profile found');
+          process.exit(2);
+        }
+      await run(process.execPath, [script, 'login-profile', profileId, ...forwarded]);
+      return;
+    }
+
     if (subNormalized === 'deps') {
       const script = path.join(ROOT, 'apps', 'webauto', 'entry', 'xhs-install.mjs');
       const passthrough = rawArgv.slice(3);
@@ -1120,13 +1078,13 @@ async function main() {
       return;
     }
 
-    console.error(`❌ 未知 xhs 子命令: ${sub}`);
+    console.error(`脙聝脗垄脙聜脗聺?脙聝脗娄脙聜脗聹脙聜脗陋脙聝脗搂脙聜脗聼脙聜脗楼 xhs 脙聝脗楼脙聜脗颅脙聜脗聬脙聝脗楼脙聜脗聭脙聜脗陆脙聝脗陇脙聜脗禄? ${sub}`);
     printXhsHelp();
     process.exit(2);
   }
 
   if (cmd === 'dev' && sub === 'install-global') {
-    console.error('❌ `webauto dev install-global` 已迁移，请使用新的 app 入口与 npm 发布流程。');
+    console.error('webauto dev install-global is deprecated; use the new app entry and npm publish flow.');
     process.exit(2);
   }
 
@@ -1145,3 +1103,4 @@ main()
     console.error(err?.stack || err?.message || String(err));
     process.exit(1);
   });
+

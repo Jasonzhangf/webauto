@@ -7,7 +7,7 @@ import {
   listAccountProfiles,
   listSavedProfiles,
 } from './account-store.mjs';
-import { listProfilesForPool } from './profilepool.mjs';
+  import { listProfilesForPool, resolveDefaultProfileId } from './profilepool.mjs';
 import { assertProfilesUsable } from './profile-policy.mjs';
 import { publishBusEvent } from './bus-publish.mjs';
 import {
@@ -51,6 +51,8 @@ function parseProfiles(argv) {
     return Array.from(new Set(listProfilesForPool(profilePool).profiles));
   }
   if (profile) return [profile];
+  const defaultProfile = resolveDefaultProfileId();
+  if (defaultProfile) return [defaultProfile];
   return [];
 }
 
@@ -505,12 +507,13 @@ export async function runUnified(argv, overrides = {}) {
 }
 
 export function printUnifiedHelp() {
-  console.log([
-    'Usage: node apps/webauto/entry/xhs-unified.mjs --profile <id> --keyword <kw> [options]',
-    'Options:',
-    '  --profiles <a,b,c>           Comma-separated profile list',
-    '  --profilepool <prefix>       Profile pool prefix',
-    '  --max-notes <n>              Max notes per profile (without total-notes)',
+    console.log([
+      'Usage: node apps/webauto/entry/xhs-unified.mjs --keyword <kw> [options]',
+      'Options:',
+      '  --profiles <a,b,c>           Comma-separated profile list',
+      '  --profilepool <prefix>       Profile pool prefix',
+      '  --profile <id>               Optional single profile (auto-pick if exactly one default profile exists)',
+      '  --max-notes <n>              Max notes per profile (without total-notes)',
     '  --total-notes <n>            Total notes across profiles (sharded)',
     '  --total-target <n>           Alias for total-notes',
     '  --max-waves <n>              Max shard waves (default 40)',

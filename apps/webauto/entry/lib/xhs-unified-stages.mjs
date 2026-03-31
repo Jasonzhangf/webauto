@@ -1,4 +1,4 @@
-const STAGES = new Set(['full', 'links', 'content', 'like', 'reply', 'detail', 'feed-like']);
+const STAGES = new Set(['full', 'links', 'content', 'like', 'reply', 'detail', 'feed-like', 'feed-unlike']);
 
 function normalizeStage(raw) {
   return String(raw || '').trim().toLowerCase();
@@ -8,7 +8,7 @@ export function resolveXhsStage(argv = {}, overrides = {}) {
   const rawStage = overrides?.stage ?? argv?.stage ?? argv?.['xhs-stage'] ?? 'full';
   const stage = normalizeStage(rawStage) || 'full';
   if (!STAGES.has(stage)) {
-    throw new Error(`invalid --stage: ${stage}. use full|links|content|like|reply|detail|feed-like`);
+    throw new Error(`invalid --stage: ${stage}. use full|links|content|like|reply|detail|feed-like|feed-unlike`);
   }
   return stage;
 }
@@ -57,6 +57,16 @@ export function resolveXhsUnifiedModeOverrides(mode) {
   if (normalized === 'feed-like-only') {
     return {
       stage: 'feed-like',
+      doComments: false,
+      doLikes: false,
+      doReply: false,
+      doOcr: false,
+      persistComments: false,
+    };
+  }
+  if (normalized === 'feed-unlike-only') {
+    return {
+      stage: 'feed-unlike',
       doComments: false,
       doLikes: false,
       doReply: false,

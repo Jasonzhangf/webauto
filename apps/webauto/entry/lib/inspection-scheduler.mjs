@@ -257,7 +257,7 @@ export class InspectionScheduler {
 
   /**
    * Inject --resume true into original args after xhs subcommands.
-   * Eligible subcommands: unified, collect, like, feed-like, status.
+   * Eligible subcommands: unified, collect, like, feed-like, feed-unlike, status.
    * @param {string[]} args
    * @returns {string[]|null} resume args or null if not eligible
    */
@@ -269,7 +269,7 @@ export class InspectionScheduler {
     if (!ELIGIBLE_PLATFORMS.has(args[0])) return null;
 
     const sub = args[1];
-    const ELIGIBLE_XHS_SUBS = new Set(['unified', 'collect', 'like', 'feed-like', 'status']);
+    const ELIGIBLE_XHS_SUBS = new Set(['unified', 'collect', 'like', 'feed-like', 'feed-unlike', 'status']);
     const ELIGIBLE_WEIBO_SUBS = new Set(['collect']);
     const isEligibleSub = (args[0] === 'xhs' && ELIGIBLE_XHS_SUBS.has(sub)) ||
       (args[0] === 'weibo' && ELIGIBLE_WEIBO_SUBS.has(sub));

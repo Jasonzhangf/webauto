@@ -50,6 +50,10 @@ export function resolveWebautoDataRoot(options = {}) {
 
 export function applyCamoEnv({ env = process.env, repoRoot = process.cwd() } = {}) {
   const dataRoot = resolveWebautoDataRoot({ env });
+  const webautoProfilesRoot = String(env.WEBAUTO_PATHS_PROFILES || '').trim();
+  const camoProfilesRoot = String(env.CAMO_PROFILE_ROOT || env.CAMO_PATHS_PROFILES || '').trim();
+  const defaultProfilesRoot = path.join(dataRoot, 'profiles');
+  const unifiedProfilesRoot = webautoProfilesRoot || camoProfilesRoot || defaultProfilesRoot;
   if (!String(env.CAMO_DATA_ROOT || '').trim()) {
     env.CAMO_DATA_ROOT = dataRoot;
   }
@@ -57,9 +61,14 @@ export function applyCamoEnv({ env = process.env, repoRoot = process.cwd() } = {
     env.CAMO_HOME = dataRoot;
   }
 
-  if (!String(env.CAMO_PROFILE_ROOT || env.CAMO_PATHS_PROFILES || '').trim()) {
-    const fromWebauto = String(env.WEBAUTO_PATHS_PROFILES || '').trim();
-    if (fromWebauto) env.CAMO_PROFILE_ROOT = fromWebauto;
+  if (!webautoProfilesRoot) {
+    env.WEBAUTO_PATHS_PROFILES = unifiedProfilesRoot;
+  }
+  if (!camoProfilesRoot) {
+    env.CAMO_PROFILE_ROOT = unifiedProfilesRoot;
+  }
+  if (!String(env.CAMO_PATHS_PROFILES || '').trim()) {
+    env.CAMO_PATHS_PROFILES = unifiedProfilesRoot;
   }
   if (!String(env.CAMO_PATHS_FINGERPRINTS || '').trim()) {
     const fromWebauto = String(env.WEBAUTO_PATHS_FINGERPRINTS || '').trim();
