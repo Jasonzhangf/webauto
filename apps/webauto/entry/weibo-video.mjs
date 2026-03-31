@@ -68,6 +68,11 @@ const result = await extractVideoUrl(profileId, targetUrl);
 const elapsed = Date.now() - t0;
 
 if (!result.ok) {
+  if (result.error === 'UNSUPPORTED_PLATFORM') {
+    console.error(`⚠️ 不支持的平台: ${result.resolvedUrl || result.detectedPlatform}`);
+    console.error(`   当前仅支持微博和小红书的视频解析`);
+    process.exit(1);
+  }
   console.error(`❌ 解析失败: ${result.error} — ${result.message || ''}`);
   process.exit(1);
 }

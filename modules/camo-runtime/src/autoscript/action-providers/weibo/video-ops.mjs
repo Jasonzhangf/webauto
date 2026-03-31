@@ -14,25 +14,44 @@ async function callAPI(action, payload = {}, timeoutMs = 20000) {
   return r.json();
 }
 
+const WEIBO_HOST_RE = /(^|\.)(weibo\.com|weibo\.cn|t\.cn)$/i;
+const XHS_HOST_RE = /(^|\.)(xiaohongshu\.com|xhslink\.com|xhs\.cn)$/i;
+
 /**
- * Detect platform from URL.
+ * Detect platform from URL hostname.
+ * Returns { platform: 'weibo'|'xhs'|'bilibili'|'unknown', host, fullUrl }
  */
 export function detectPlatform(url) {
-  const normalized = String(url || '').trim().toLowerCase();
-  if (normalized.includes('xiaohongshu.com') || normalized.includes('xhslink.com') || normalized.includes('xhs.cn')) {
-    return { platform: 'xhs', resolvedUrl: url };
-  }
-  if (normalized.includes('weibo.com') || normalized.includes('weibo.cn') || normalized.includes('t.cn')) {
-    return { platform: 'weibo', resolvedUrl: url };
-  }
-  if (normalized.includes('bilibili.com') || normalized.includes('b23.tv')) {
-    return { platform: 'bilibili', resolvedUrl: url };
-  }
-  return { platform: 'unknown', resolvedUrl: url };
+  const normalized = String(url || '').trim();
+  let hostname = '';
+  try { hostname = new URL(normalized.startsWith('http') ? normalized : 'https://' + normalized).hostname; } catch { hostname = normalized; }
+  if (WEIBO_HOST_RE.test(hostname)) return { platform: 'weibo', host: hostname, fullUrl: normalized };
+  if (XHS_HOST_RE.test(hostname)) return { platform: 'xhs', host: hostname, fullUrl: normalized };
+  if (/bilibili\.com|b23\.tv/i.test(hostname)) return { platform: 'bilibili', host: hostname, fullUrl: normalized };
+  return { platform: 'unknown', host: hostname, fullUrl: normalized };
 }
 
 /**
- * Extract video from current browser page (no navigation).
+ * Navigate browser to URL, wait for redirects to settle, then read the actual page URL.
+ * Returns { ok, finalUrl, platform } where finalUrl is where the browser actually landed.
+ */
+async function navigateAndDetect(profileId, url) {
+  const gotoResp = await callAPI('goto', { profileId, url }, 20000);
+  if (!gotoResp?.ok) {
+    return { ok: false, error: 'GOTO_FAILED', detail: JSON.stringify(gotoResp) };
+  }
+  await sleep(5000);
+
+  // Read actual URL from browser
+  const urlResp = await callAPI('evaluate', { profileId, script: '(() => location.href)()' }, 5000);
+  const finalUrl = urlResp?.result || url;
+  const platform = detectPlatform(finalUrl).platform;
+
+  return { ok: true, finalUrl, platform };
+}
+
+/**
+ * Extract video from current browser page.
  */
 async function extractVideoFromCurrentPage(profileId) {
   const script = '(() => { var n = function(v) { return String(v || "").replace(/[ \\t\\n]+/g, " ").trim(); }; var videos = document.querySelectorAll("video"); var srcs = []; for (var i = 0; i < videos.length; i++) { var v = videos[i]; var s = v.src || v.currentSrc || ""; if (s) srcs.push(s); var source = v.querySelector("source"); if (source && source.src) srcs.push(source.src); } var authorEl = document.querySelector("a.name") || document.querySelector("[class*=author]"); var author = authorEl ? n(authorEl.textContent) : ""; var contentEl = document.querySelector("[class*=detail_wbtext]") || document.querySelector("[class*=wbtext]"); var title = contentEl ? n(contentEl.textContent).slice(0, 200) : document.title; return { ok: true, videoUrls: srcs, videoCount: videos.length, author: author, title: title, pageUrl: location.href }; })()';
@@ -62,41 +81,8 @@ async function extractVideoFromCurrentPage(profileId) {
 }
 
 /**
- * Navigate browser to URL (async, non-blocking) and extract video.
- */
-async function navigateAndExtractVideo(profileId, url) {
-  const gotoResp = await callAPI('goto', { profileId, url }, 20000);
-  if (!gotoResp?.ok) {
-    return { ok: false, error: 'GOTO_FAILED', stderr: JSON.stringify(gotoResp) };
-  }
-
-  await sleep(5000);
-  return extractVideoFromCurrentPage(profileId);
-}
-
-/**
- * Extract video URL from a Weibo page.
- */
-export async function extractWeiboVideoUrl(profileId, url) {
-  const result = await navigateAndExtractVideo(profileId, url);
-  if (!result.ok) return result;
-  result.platform = 'weibo';
-  return result;
-}
-
-/**
- * Extract video URL from a Xiaohongshu note page.
- */
-export async function extractXhsVideoUrl(profileId, url) {
-  const result = await navigateAndExtractVideo(profileId, url);
-  if (!result.ok) return result;
-  result.platform = 'xhs';
-  return result;
-}
-
-/**
- * Main entry: resolve a URL and extract video.
- * Single navigation for short URLs — browser follows redirects automatically.
+ * Main entry: navigate → detect platform → extract video.
+ * Works with any URL: short links, direct links, unknown links.
  */
 export async function extractVideoUrl(profileId, url) {
   const inputUrl = String(url || '').trim();
@@ -104,21 +90,26 @@ export async function extractVideoUrl(profileId, url) {
     return { ok: false, error: 'URL_REQUIRED', message: 'url is required' };
   }
 
-  const detected = detectPlatform(inputUrl);
-
-  if (detected.platform === 'weibo') {
-    return extractWeiboVideoUrl(profileId, inputUrl);
+  // Step 1: Navigate browser to URL (handles redirects automatically)
+  const nav = await navigateAndDetect(profileId, inputUrl);
+  if (!nav.ok) {
+    return { ok: false, error: nav.error, message: 'Navigation failed', detail: nav.detail };
   }
 
-  if (detected.platform === 'xhs') {
-    return extractXhsVideoUrl(profileId, inputUrl);
+  // Step 2: Check actual landing URL platform
+  if (nav.platform !== 'weibo' && nav.platform !== 'xhs') {
+    return {
+      ok: false,
+      error: 'UNSUPPORTED_PLATFORM',
+      message: `Unsupported platform: ${nav.finalUrl}`,
+      resolvedUrl: nav.finalUrl,
+      detectedPlatform: nav.platform,
+    };
   }
 
-  return {
-    ok: false,
-    error: 'UNSUPPORTED_PLATFORM',
-    message: 'Cannot extract video from platform: ' + detected.platform,
-    resolvedUrl: inputUrl,
-    platform: detected.platform,
-  };
+  // Step 3: Extract video from page
+  const result = await extractVideoFromCurrentPage(profileId);
+  result.platform = nav.platform;
+  result.resolvedUrl = nav.finalUrl;
+  return result;
 }
