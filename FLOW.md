@@ -493,3 +493,137 @@ WEBAUTO_DAEMON_BYPASS=1 webauto weibo detail \
 4. **4个帖子只有 images 无 content**: QymddnAf1, Qymhyz4Iv, Qyl1HpFQP, Qyeh00EYG — 图片下载成功但正文采集失败（可能是 DOM 加载时序问题）
 
 ---
+
+---
+
+## Part 5: 微博时间线 Timeline 采集（已完成 + 已开发 + 已测试）
+
+### Timeline 验证结果 ✅
+
+| # | 验证项 | 命令 | 结论 |
+|---|--------|------|------|
+| T-1 | Profile 登录态 | `camo status weibo` | live=true, url=https://weibo.com/ |
+| T-2 | 页面标题 | `camo devtools eval weibo "document.title"` | "微博 – 随时随地发现新鲜事" |
+| T-3 | 虚拟滚动容器 | `querySelectorAll('.wbpro-scroller-item')` | 6 个可见（虚拟滚动复用，实际视口可见） |
+| T-4 | 帖子提取（前3条） | EXTRACT_TIMELINE_JS eval | 成功提取 author/time/url/text |
+| T-5 | 首次采集 target=5 | `node weibo-unified.mjs --target 5` | 5 posts harvested, 0 emptyScrolls |
+| T-6 | 二次采集 target=5（去重） | 同上 | 5 posts harvested, posts.jsonl 从 5 行增到 10 行（去重正确） |
+| T-7 | 大量采集 target=20 | `node weibo-unified.mjs --target 20` | 20 posts harvested, posts.jsonl 共 30 行（去重正确） |
+| T-8 | 输出文件完整 | `ls collection-dir` | posts.jsonl + links.jsonl + collection-meta.json + run.log |
+| T-9 | run.log 追加 | 3 次运行后 | 6 行 log（start+completed 各 3 次） |
+| T-10 | collection-meta | 最新 meta | totalPosts=20, emptyScrolls=0 |
+
+### Timeline 测试命令（已验证可用）
+
+```bash
+cd ~/github/webauto
+# 基本采集（5条帖子）
+node apps/webauto/entry/weibo-unified.mjs --task-type timeline --target 5 --profile weibo --output-root /tmp/weibo-timeline-test
+# 大量采集（50条帖子，带滚动）
+node apps/webauto/entry/weibo-unified.mjs --task-type timeline --target 50 --profile weibo --scroll-delay 2000
+# 查看采集结果
+cat ~/.webauto/download/weibo/prod/timeline:$(date +%Y-%m-%d)/posts.jsonl | jq
+```
+
+### Timeline 文件架构
+
+```
+~/.webauto/download/weibo/prod/timeline:2026-03-30/
+├── posts.jsonl           # 合并去重的帖子数据（JSONL，每行一条）
+├── links.jsonl           # 链接索引（id/url/authorId/collectedAt）
+├── collection-meta.json  # 运行元信息（runId/totalPosts/completedAt）
+└── run.log               # 运行日志（追加式）
+```
+
+### Timeline 已知限制
+
+1. **images 字段空值较多**: 虚拟滚动下，非视口内图片未加载，src 为空或占位符
+2. **authorId 为 null**: URL 格式 `weibo.com/u/{id}` 而非 `weibo.com/{id}`，正则不匹配
+3. **timeText 非精确时间**: 显示 "X小时前" 等相对时间，非绝对时间戳
+4. **from 字段为 null**: `a[class*='from']` 在虚拟滚动视口内可能未渲染
+
+---
+
+## Part 4: 微博 Timeline 采集 — 真实运行测试报告
+
+### 测试日期: 2026-03-30
+
+### 4.1 环境修复
+
+**问题**: `camo` CLI 二进制文件有两个 bug：
+1. `node_modules/@web-auto/camo/bin/camo.mjs` 使用 Windows 换行符 (`\r\n`)，导致 `env: node\r: No such file or directory`
+2. 文件缺少 execute 权限 (`chmod -x`)
+
+**修复**:
+```bash
+sed -i '' 's/\r$//' ~/github/webauto/node_modules/@web-auto/camo/bin/camo.mjs
+chmod +x ~/github/webauto/node_modules/@web-auto/camo/bin/camo.mjs
+```
+
+**注意**: 这是 node_modules 中的文件，`npm install` 后可能需要重新修复。应考虑在项目 postinstall 脚本中加入自动修复。
+
+### 4.2 首次运行测试 ✅
+
+```bash
+cd ~/github/webauto && node apps/webauto/entry/weibo-unified.mjs --task-type timeline --profile weibo --target 10 --scroll-delay 2000 --max-empty-scrolls 2
+```
+
+**结果**:
+- 状态: `ok: true`
+- runId: `wb_20260330141440._xwy5`
+- 采集帖子: 10 条
+- 耗时: ~9.4 秒
+- 输出目录: `/Users/fanzhang/.webauto/download/weibo/prod/timeline:2026-03-30/`
+- 文件: `posts.jsonl` (10行, 5KB), `links.jsonl` (10行), `collection-meta.json`, `run.log`
+
+**数据验证**: 帖子包含完整字段：id, url, author, authorUrl, ogText, timeText, collectedAt
+
+### 4.3 去重合并测试 ✅
+
+第二次运行（间隔 ~2 分钟）:
+- 状态: `ok: true`
+- 采集帖子: 10 条（新一批时间线帖子）
+- posts.jsonl 总行数: 20（10 + 10）
+- 唯一 URL: 20 / 20
+- 结论: 去重机制正常工作（两批帖子没有重复 URL）
+
+### 4.4 定时任务配置 ✅
+
+**注册 schedule**:
+```bash
+cd ~/github/webauto && node apps/webauto/entry/schedule.mjs add \
+  --name "weibo-timeline-30min" \
+  --command-type weibo-timeline \
+  --interval 30 \
+  --target 30
+```
+
+**任务详情**:
+- ID: `sched-0003`
+- 名称: `weibo-timeline-30min`
+- 类型: `interval`（每 30 分钟执行一次）
+- 每次采集: 30 条帖子
+- command-type: `weibo-timeline`
+- 下次执行: `2026-03-30T14:49:57.296Z`
+
+**代码修改**: 在 `schedule-store.mjs` 的 `SUPPORTED_COMMAND_TYPES` 中新增了 `'weibo-timeline'`。
+
+### 4.5 Schedule 执行器路由验证
+
+`schedule.mjs:408-410` 中 `weibo-*` command-type 的执行逻辑:
+```javascript
+if (commandType.startsWith('weibo-')) {
+  const runWeiboUnified = await getWeiboRunner();
+  return runWeiboUnified(commandArgv);
+}
+```
+→ `getWeiboRunner()` 动态导入 `./weibo-unified.mjs` 的 `runWeiboUnified`
+→ `commandArgv` 中 `task-type: 'timeline'` 已由 `schedule.mjs:285` 自动注入
+
+### 4.6 遗留问题
+
+1. **camo.mjs 换行符问题** — 需要在 postinstall 或构建流程中自动修复
+2. **authorId 字段** — 部分帖子 `authorId: null`，因为 DOM 中 `authorUrl` 格式为 `weibo.com/u/数字` 而非 `weibo.com/数字`，正则 `weibo\.com\/(\d+)` 不匹配 `weibo.com/u/数字` 路径
+3. **images 字段** — 当前测试中所有帖子 `images: []`，需要验证带图帖子是否能正确提取图片 URL
+4. **daemon 模式验证** — 定时任务依赖 schedule daemon 运行，需确认 daemon 进程健康
+

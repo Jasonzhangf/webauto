@@ -23,6 +23,24 @@ import { randomUUID } from 'node:crypto';
 
 import { performHealthCheck } from './lib/health-check.mjs';
 
+import {
+  listDueScheduleTasks,
+  markScheduleTaskResult,
+  markScheduleTaskSkipped,
+  claimScheduleTask,
+  releaseScheduleTaskClaim,
+  renewScheduleTaskClaim,
+  reapStaleLocks,
+  getSchedulerPolicy,
+  normalizeSchedulerPolicy,
+  acquireScheduleDaemonLease,
+  renewScheduleDaemonLease,
+  releaseScheduleDaemonLease,
+  listScheduleTasks,
+} from './lib/schedule-store.mjs';
+import { evaluateRetry } from './lib/schedule-retry.mjs';
+import { listAccountProfiles } from './lib/account-store.mjs';
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '../../..');
 
@@ -90,6 +108,20 @@ const STALL_LOG_TAIL_BYTES = Math.max(
   32 * 1024,
   Number(process.env.WEBAUTO_DAEMON_STALL_LOG_TAIL_BYTES || 256 * 1024),
 );
+
+const SCHEDULE_TICK_INTERVAL_MS = Math.max(
+  10_000,
+  Number(process.env.WEBAUTO_DAEMON_SCHEDULE_INTERVAL_MS || 30_000),
+);
+const SCHEDULE_MAX_CONCURRENCY = Math.max(
+  1,
+  Number(process.env.WEBAUTO_DAEMON_SCHEDULE_CONCURRENCY || 1),
+);
+const SCHEDULE_LEASE_MS = Math.max(
+  30_000,
+  Number(process.env.WEBAUTO_DAEMON_SCHEDULE_LEASE_MS || 30 * 60 * 1000),
+);
+const SCHEDULE_ENABLED = process.env.WEBAUTO_DAEMON_SCHEDULE_DISABLED !== '1';
 
 function ensureDirs() {
   mkdirSync(RUN_DIR, { recursive: true });
@@ -793,6 +825,28 @@ async function startDaemonServer() {
       updateHeartbeat();
       return { ok: true, stopped: true, job: summarizeJob(job) };
     }
+    if (method === 'schedule.status') {
+      return {
+        ok: true,
+        enabled: SCHEDULE_ENABLED,
+        ownerId: scheduleOwnerId,
+        leaseAcquired: scheduleLeaseAcquired,
+        intervalMs: SCHEDULE_TICK_INTERVAL_MS,
+        concurrency: SCHEDULE_MAX_CONCURRENCY,
+        leaseMs: SCHEDULE_LEASE_MS,
+        running: scheduleRunning,
+      };
+    }
+    if (method === 'schedule.list') {
+      const tasks = listScheduleTasks();
+      return { ok: true, tasks };
+    }
+    if (method === 'schedule.run-now') {
+      if (state.shuttingDown) return { ok: false, error: 'daemon_shutting_down' };
+      setTimeout(() => { void scheduleTick(); }, 0);
+      return { ok: true, triggered: true };
+    }
+
     if (method === 'task.delete') {
       const id = String(params.id || '').trim();
       if (!id) return { ok: false, error: 'missing id' };
@@ -946,6 +1000,161 @@ async function startDaemonServer() {
   }, STALL_CHECK_INTERVAL_MS);
   stallCheckTimer.unref();
 
+
+  // ── Schedule integration ──────────────────────────────────────────────
+
+  let scheduleOwnerId = null;
+  let scheduleLeaseAcquired = false;
+  let scheduleRunning = false;
+  let scheduleTickTimer = null;
+
+  function createScheduleOwnerId() {
+    return `daemon-${process.pid}-${Date.now().toString(36)}-${Math.random().toString(16).slice(2, 8)}`;
+  }
+
+  function normalizePlatformByCommandType(commandType) {
+    const value = String(commandType || '').trim().toLowerCase();
+    if (value.startsWith('weibo')) return 'weibo';
+    if (value.startsWith('1688')) return '1688';
+    return 'xiaohongshu';
+  }
+
+  function pickAutoProfile(platform) {
+    const rows = listAccountProfiles({ platform }).profiles || [];
+    const validRows = rows
+      .filter((row) => row?.valid === true && String(row?.accountId || '').trim())
+      .sort((a, b) => {
+        const ta = Date.parse(String(a?.updatedAt || '')) || 0;
+        const tb = Date.parse(String(b?.updatedAt || '')) || 0;
+        if (tb !== ta) return tb - ta;
+        return String(a?.profileId || '').localeCompare(String(b?.profileId || ''));
+      });
+    return String(validRows[0]?.profileId || '').trim();
+  }
+
+  function ensureProfileArg(commandType, commandArgv) {
+    const argv = commandArgv && typeof commandArgv === 'object' ? { ...commandArgv } : {};
+    if (String(argv?.profile || '').trim()) return argv;
+    if (String(argv?.profiles || '').trim()) return argv;
+    if (String(argv?.profilepool || '').trim()) return argv;
+    const platform = normalizePlatformByCommandType(commandType);
+    const profile = pickAutoProfile(platform);
+    if (!profile) return argv;
+    argv.profile = profile;
+    return argv;
+  }
+
+  async function scheduleExecuteTask(task) {
+    const runToken = createScheduleOwnerId();
+    const policy = normalizeSchedulerPolicy(getSchedulerPolicy());
+    const claim = claimScheduleTask(task, {
+      ownerId: scheduleOwnerId,
+      runToken,
+      leaseMs: SCHEDULE_LEASE_MS,
+      policy,
+    });
+    if (!claim.ok) {
+      const skipReasons = new Set(['task_busy', 'resource_busy', 'max_concurrency', 'platform_max_concurrency']);
+      if (skipReasons.has(claim.reason)) {
+        markScheduleTaskSkipped(task?.id, { skippedAt: new Date().toISOString() });
+      }
+      return { ok: false, skipped: true, taskId: task?.id, reason: claim.reason };
+    }
+    const heartbeatMs = Math.max(5_000, Math.floor(SCHEDULE_LEASE_MS / 3));
+    const heartbeat = setInterval(() => {
+      renewScheduleTaskClaim(task.id, { ownerId: scheduleOwnerId, runToken, leaseMs: SCHEDULE_LEASE_MS });
+    }, heartbeatMs);
+    heartbeat.unref();
+    const startedAt = Date.now();
+    try {
+      const commandType = String(task?.commandType || 'xhs-unified').trim();
+      let commandArgv = ensureProfileArg(commandType, task?.commandArgv || {});
+      if (task?.taskMode) commandArgv['task-mode'] = task.taskMode;
+
+      // Build full CLI args and submit via daemon task system
+      const cliArgs = [commandType];
+      for (const [key, val] of Object.entries(commandArgv)) {
+        if (val === undefined || val === null) continue;
+        const flag = `--${key}`;
+        if (val === true) { cliArgs.push(flag); continue; }
+        if (val === false) continue;
+        cliArgs.push(flag, String(val));
+      }
+
+      const ret = await startTaskJob({ args: cliArgs, wait: true });
+      const durationMs = Date.now() - startedAt;
+
+      const status = ret?.ok ? 'success' : 'failed';
+      markScheduleTaskResult(task.id, {
+        status,
+        durationMs,
+        runId: ret?.job?.id || null,
+        finishedAt: new Date().toISOString(),
+      });
+      return { ok: ret?.ok, taskId: task.id, durationMs };
+    } catch (error) {
+      const durationMs = Date.now() - startedAt;
+      const message = error?.message || String(error);
+      const retry = evaluateRetry(error, task);
+      const riskControl = retry.errorType === 'risk_control' || /risk_control|n_detected|风控/i.test(message);
+      markScheduleTaskResult(task.id, {
+        status: 'failed',
+        error: message,
+        durationMs,
+        finishedAt: new Date().toISOString(),
+        retryAt: (retry.shouldRetry && !riskControl && task?.scheduleType === 'once') ? retry.retryAt : undefined,
+        disable: riskControl,
+      });
+      return { ok: false, taskId: task.id, error: message };
+    } finally {
+      clearInterval(heartbeat);
+      releaseScheduleTaskClaim(task.id, { ownerId: scheduleOwnerId, runToken });
+    }
+  }
+
+  async function scheduleTick() {
+    if (scheduleRunning || state.shuttingDown || !SCHEDULE_ENABLED) return;
+    scheduleRunning = true;
+    try {
+      // Acquire lease on first tick
+      if (!scheduleLeaseAcquired) {
+        const lease = acquireScheduleDaemonLease({ ownerId: scheduleOwnerId, leaseMs: SCHEDULE_LEASE_MS });
+        if (!lease.ok) return; // Another schedule daemon is running
+        scheduleLeaseAcquired = true;
+        const hbMs = Math.max(5_000, Math.floor(SCHEDULE_LEASE_MS / 3));
+        setInterval(() => {
+          renewScheduleDaemonLease({ ownerId: scheduleOwnerId, leaseMs: SCHEDULE_LEASE_MS });
+        }, hbMs).unref();
+      }
+      const dueTasks = listDueScheduleTasks(10);
+      for (const task of dueTasks) {
+        if (state.shuttingDown) break;
+        // Wait for no running jobs (daemon exclusive task policy)
+        const activeJobs = state.jobsOrder.map((id) => state.jobs.get(id)).filter((j) => j && j.status === 'running');
+        if (activeJobs.length > 0) break;
+        await scheduleExecuteTask(task);
+      }
+    } catch (err) {
+      logDaemonEvent('schedule_tick_error', { error: err?.message || String(err) });
+    } finally {
+      scheduleRunning = false;
+    }
+  }
+
+  // Clean stale schedule locks on startup
+  try {
+    const staleResult = reapStaleLocks();
+    if (staleResult.reaped > 0) {
+      process.stdout.write(`[daemon] schedule: reaped ${staleResult.reaped} stale lock(s)\n`);
+    }
+  } catch {}
+
+  scheduleOwnerId = createScheduleOwnerId();
+  // First tick immediately (with 5s delay for daemon to stabilize)
+  setTimeout(() => { void scheduleTick(); }, 5_000).unref();
+  scheduleTickTimer = setInterval(() => { void scheduleTick(); }, SCHEDULE_TICK_INTERVAL_MS);
+  scheduleTickTimer.unref();
+
   const shutdownDaemon = () => {
     // 关闭前清理所有 running job 的进程
     for (const job of state.jobs.values()) {
@@ -956,6 +1165,14 @@ async function startDaemonServer() {
       job.exitSignal = 'SIGTERM';
       job.finishedAt = nowIso();
     }
+    // Release schedule lease on shutdown
+    if (scheduleLeaseAcquired && scheduleOwnerId) {
+      try {
+        releaseScheduleDaemonLease({ ownerId: scheduleOwnerId });
+      } catch {}
+    }
+    if (scheduleTickTimer) clearInterval(scheduleTickTimer);
+
     updateHeartbeat();
     try { server.close(); } catch {}
     cleanupRuntimeFiles();
