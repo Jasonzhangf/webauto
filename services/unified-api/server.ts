@@ -752,7 +752,7 @@ class UnifiedApiServer {
             return;
           }
           const { extractVideoUrl } = await import(
-            new URL('../../modules/camo-runtime/src/autoscript/action-providers/weibo/video-ops.mjs', import.meta.url)
+            new URL('../../modules/camo-runtime/src/autoscript/action-providers/weibo/video-ops.mjs', import.meta.url).href
           );
           const result = await extractVideoUrl(profileId, targetUrl);
           res.writeHead(200, { 'Content-Type': 'application/json' });
