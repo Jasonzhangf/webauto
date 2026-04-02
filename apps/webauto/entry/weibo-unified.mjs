@@ -25,6 +25,8 @@ const { values } = parseArgs({
     'max-empty-scrolls': { type: 'string', default: '2' },
     keyword: { type: 'string' },
     'max-pages': { type: 'string', default: '3' },
+    'user-ids': { type: 'string' },
+    'with-detail': { type: 'string' },
     help: { type: 'boolean', short: 'h' },
   },
   strict: false,

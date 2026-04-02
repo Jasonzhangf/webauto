@@ -29,7 +29,7 @@ export function resolveWeiboOutputContext({ params = {}, state = {} } = {}) {
   );
   const keyword = sanitizeForPath(keywordRaw, 'unknown');
   const env = sanitizeForPath(envRaw, 'prod');
-  const keywordDir = path.join(root, 'weibo', env, `search:${keyword}`);
+  const keywordDir = path.join(root, 'weibo', env, keyword);
   return {
     root,
     env,
@@ -157,7 +157,7 @@ export function resolveWeiboDetailOutputContext({ params = {}, state = {} } = {}
   const keyword = sanitizeForPath(keywordRaw, 'unknown');
   const env = sanitizeForPath(envRaw, 'prod');
   const postId = sanitizeForPath(postIdRaw, 'unknown');
-  const keywordDir = path.join(root, 'weibo', env, `search:${keyword}`);
+  const keywordDir = path.join(root, 'weibo', env, keyword);
   const postDir = path.join(keywordDir, postId);
   return {
     root,

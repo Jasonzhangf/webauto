@@ -13,7 +13,7 @@ export async function readCollectedLinksCount({ keyword, env, outputRoot } = {})
     err.details = { keyword, env, outputRoot };
     throw err;
   }
-  const ctx = resolveWeiboOutputContext({ params: { keyword, env, outputRoot } });
+  const ctx = resolveWeiboOutputContext({ params: { keyword: 'search:' + keyword, env, outputRoot } });
   const rows = await readJsonlRows(ctx.linksPath);
   const uniqueUrls = new Set(rows.map((r) => String(r?.url || '').trim()).filter(Boolean));
   return {

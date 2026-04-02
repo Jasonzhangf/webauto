@@ -724,7 +724,9 @@ async function main() {
     }
     if (cmd === "weibo") {
       const weiboSub = String(args._[1] || "").trim();
-      if (weiboSub === "detail") {
+      if (weiboSub === "unified") {
+      script = path.join(ROOT, "apps", "webauto", "entry", "weibo-unified.mjs");
+    } else if (weiboSub === "detail") {
         printWeiboDetailHelp();
         return;
       }
@@ -796,12 +798,27 @@ async function main() {
       return;
     }
     let script;
-    if (weiboSub === "detail") {
+    if (weiboSub === "unified") {
+      script = path.join(ROOT, "apps", "webauto", "entry", "weibo-unified.mjs");
+    } else if (weiboSub === "detail") {
       script = path.join(ROOT, "apps", "webauto", "entry", "weibo-detail.mjs");
     } else {
       script = path.join(ROOT, "apps", "webauto", "entry", "weibo-collect.mjs");
     }
     await run(process.execPath, [script, ...rawArgv.slice(2)]);
+    return;
+  }
+
+  // Handle weibo-timeline and weibo-watch commands from schedule daemon
+  if (cmd === "weibo-timeline") {
+    const script = path.join(ROOT, "apps", "webauto", "entry", "weibo-unified.mjs");
+    await run(process.execPath, [script, ...rawArgv.slice(1)]);
+    return;
+  }
+
+  if (cmd === "weibo-watch") {
+    const script = path.join(ROOT, "apps", "webauto", "entry", "weibo-unified.mjs");
+    await run(process.execPath, [script, ...rawArgv.slice(1)]);
     return;
   }
 

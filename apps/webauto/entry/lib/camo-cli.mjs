@@ -97,7 +97,8 @@ export function runCamo(args, options = {}) {
     env,
     encoding: 'utf8',
     timeout: timeoutMs,
-    windowsHide: true,
+    windowsHide: process.platform === 'win32',
+    shell: false,
   });
   const stdout = String(ret.stdout || '').trim();
   const stderr = String(ret.stderr || '').trim();

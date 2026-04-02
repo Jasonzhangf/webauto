@@ -76,7 +76,7 @@ export async function runWeiboCollect(argv = {}) {
   const { keyword, maxNotes: target, env, outputRoot, maxPages, profileId, pageDelayMs } = resolveCollectArgs(argv);
   const runId = generateRunId();
   const startedAt = new Date().toISOString();
-  const ctx = resolveWeiboOutputContext({ params: { keyword, env, outputRoot } });
+  const ctx = resolveWeiboOutputContext({ params: { keyword: 'search:' + keyword, env, outputRoot } });
 
   await appendLog({ filePath: ctx.logPath, message: `run_start runId=${runId} keyword="${keyword}" target=${target} profile=${profileId}` });
 

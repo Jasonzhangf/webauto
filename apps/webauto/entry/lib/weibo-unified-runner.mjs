@@ -15,6 +15,8 @@ import {
 } from '../../../../modules/camo-runtime/src/autoscript/action-providers/weibo/timeline-ops.mjs';
 import { extractSearchPage } from './weibo-search-extract.mjs';
 
+
+import { runUserProfileTask } from './weibo-user-profile-runner.mjs';
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -37,6 +39,8 @@ function resolveUnifiedArgs(argv = {}) {
   const maxEmptyScrolls = Math.max(1, Number(argv['max-empty-scrolls'] || 2));
   const keyword = String(argv.keyword || argv.k || '').trim();
   const maxPages = Math.max(1, Number(argv['max-pages'] || 3));
+  const userIds = String(argv['user-ids'] || '').trim().split(',').map(s => s.trim()).filter(Boolean);
+  const withDetail = argv['with-detail'] === 'true' || argv['with-detail'] === true;
 
   return {
     taskType,
@@ -49,6 +53,8 @@ function resolveUnifiedArgs(argv = {}) {
     maxEmptyScrolls,
     keyword,
     maxPages,
+    userIds,
+    withDetail,
   };
 }
 
@@ -59,7 +65,7 @@ weibo-unified - Weibo unified collection runner
 Usage: node weibo-unified.mjs [options]
 
 Options:
-  --task-type <timeline|search|monitor>  Task type (default: timeline)
+  --task-type <timeline|search|monitor|user-profile>  Task type (default: timeline)
   --profile <id>                         Camoufox profile ID (default: weibo)
   --target <number>                      Max posts to collect (default: 50)
   --env <string>                         Environment label (default: prod)
@@ -69,6 +75,8 @@ Options:
   --max-empty-scrolls <n>                Stop after N empty scrolls (default: 2)
   --keyword <string>                     Search keyword (required for search type)
   --max-pages <number>                   Max search pages (default: 3)
+  --user-ids <id1,id2,...>               User IDs for user-profile type (comma-separated)
+  --with-detail <bool>                   Collect detail for each post after user-profile (default: false)
   -h, --help                             Show this help
 `.trim());
 }
@@ -136,7 +144,7 @@ async function runSearchTask(args) {
     throw new Error('WEIBO_SEARCH_KEYWORD_REQUIRED: --keyword is required for search task type');
   }
   const runId = generateRunId();
-  const params = { keyword, env, outputRoot };
+  const params = { keyword: 'search:' + keyword, env, outputRoot };
   const ctx = resolveWeiboOutputContext({ params });
   await ensureDir(ctx.keywordDir);
 
@@ -231,6 +239,8 @@ async function runSearchTask(args) {
     env,
     totalPosts: allPosts.length,
     maxPages,
+    userIds,
+    withDetail,
     completedAt: new Date().toISOString(),
   }});
 
@@ -255,6 +265,8 @@ export async function runWeiboUnified(argv = {}) {
   console.log(`[weibo-unified] task-type=${args.taskType} profile=${args.profileId} target=${args.target}`);
 
   switch (args.taskType) {
+    case 'user-profile':
+      return runUserProfileTask(args);
     case 'search':
       return runSearchTask(args);
     case 'monitor':
