@@ -489,8 +489,8 @@ function validateGenericCommand(argv, platform, commandType = '') {
     if (!weiboTaskType && commandType === 'weibo-timeline') weiboTaskType = 'timeline';
     if (!weiboTaskType && commandType === 'weibo-search') weiboTaskType = 'search';
     if (!weiboTaskType && commandType === 'weibo-monitor') weiboTaskType = 'monitor';
-    if (!['timeline', 'search', 'monitor'].includes(weiboTaskType)) {
-      throw new Error(`weibo task requires task-type: timeline|search|monitor`);
+    if (!['timeline', 'search', 'monitor', 'user-profile'].includes(weiboTaskType)) {
+      throw new Error(`weibo task requires task-type: timeline|search|monitor|user-profile`);
     }
     const userId = normalizeText(argv['user-id'] || argv.userId);
     if (weiboTaskType === 'monitor' && !userId) {

@@ -259,6 +259,9 @@ function buildCommandArgv(argv) {
     'taskType',
     'user-id',
     'userId',
+    'user-ids',
+    'with-detail',
+    'max-empty-scrolls',
   ];
   for (const key of keys) {
     const value = pickArgvValue(argv, key);
