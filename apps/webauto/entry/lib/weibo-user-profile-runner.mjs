@@ -5,7 +5,9 @@ import {
   writeCollectionMeta,
   appendLog,
   ensureDir,
+  readJsonlRows,
 } from '../../../../modules/camo-runtime/src/autoscript/action-providers/weibo/persistence.mjs';
+import path from 'node:path';
 import {
   navigateToUserProfile,
   harvestUserProfile,
@@ -58,12 +60,21 @@ export async function runUserProfileTask(args) {
     }
     console.log(`[${runId}] Page loaded: ${navResult.title}`);
 
+    // Load existing post URLs for dedup (resume support)
+    const existingPosts = await readJsonlRows(ctx.postsPath);
+    const existingUrls = existingPosts.map(p => p?.url).filter(Boolean);
+
+    // Set checkpoint path for crash recovery
+    const checkpointPath = path.join(ctx.keywordDir, 'checkpoint.json');
+
     const harvestResult = await harvestUserProfile({
       profileId,
       userId,
       target,
       scrollDelay,
       maxEmptyScrolls,
+      existingUrls,
+      checkpointPath,
     });
 
     if (!harvestResult.ok) {
@@ -72,7 +83,7 @@ export async function runUserProfileTask(args) {
       continue;
     }
 
-    console.log(`[${runId}] Harvested ${harvestResult.total} posts in ${harvestResult.rounds} rounds`);
+    console.log(`[${runId}] Harvested ${harvestResult.newPosts || harvestResult.total} new posts (skipped ${harvestResult.skippedDuplicates || 0} existing) in ${harvestResult.rounds} rounds`);
 
     const posts = harvestResult.posts || [];
     if (posts.length > 0) {

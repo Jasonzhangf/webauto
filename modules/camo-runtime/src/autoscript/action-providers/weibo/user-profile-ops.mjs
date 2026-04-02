@@ -147,10 +147,28 @@ export async function harvestUserProfile({
   userId,
   target = 50,
   scrollDelay = 2500,
-  maxEmptyScrolls = 2,
+  maxEmptyScrolls = 3,
+  existingUrls = null,
+  checkpointPath = null,
 } = {}) {
   const allPosts = [];
-  const seenUrls = new Set();
+  const seenUrls = existingUrls instanceof Set ? existingUrls : new Set(existingUrls || []);
+  let resumedCount = seenUrls.size;
+
+  // Resume from checkpoint if available
+  if (checkpointPath) {
+    try {
+      const fs = await import('fs');
+      const raw = await fs.promises.readFile(checkpointPath, 'utf-8');
+      const ckpt = JSON.parse(raw);
+      if (ckpt?.seenUrls) {
+        for (const u of ckpt.seenUrls) seenUrls.add(u);
+        resumedCount = seenUrls.size;
+        console.log(`[user-profile:${userId}] resumed from checkpoint with ${resumedCount} existing URLs`);
+      }
+    } catch {}
+  }
+
   let emptyScrollCount = 0;
   let rounds = 0;
 
@@ -179,6 +197,17 @@ export async function harvestUserProfile({
 
     if (allPosts.length >= target) break;
 
+    // Save checkpoint every 5 rounds
+    if (checkpointPath && rounds % 5 === 0) {
+      try {
+        const fs = await import('fs');
+        await fs.promises.writeFile(checkpointPath, JSON.stringify({
+          userId, target, rounds, collectedCount: allPosts.length,
+          seenUrls: [...seenUrls], savedAt: new Date().toISOString(),
+        }, null, 2));
+      } catch {}
+    }
+
     // Check if bottom reached or no new posts
     const scrollInfo = await checkBottomReached(profileId);
     const noProgress = newInThisRound === 0 || scrollInfo?.stagnation;
@@ -200,8 +229,11 @@ export async function harvestUserProfile({
   return {
     ok: true,
     posts: allPosts,
-    total: allPosts.length,
+    total: allPosts.length + resumedCount,
+    newPosts: allPosts.length,
+    skippedDuplicates: resumedCount,
     rounds,
     emptyScrolls: emptyScrollCount,
+    resumedFromCheckpoint: resumedCount > 0,
   };
 }
