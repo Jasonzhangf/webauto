@@ -1,4 +1,16 @@
-import { runCamo } from '../../../../../../apps/webauto/entry/lib/camo-cli.mjs';
+import { execSync } from 'child_process';
+
+function runCamo(args, opts = {}) {
+  const timeoutMs = opts.timeoutMs || 30000;
+  try {
+    const result = execSync(`camo ${args.join(' ')}`, {
+      timeout: timeoutMs, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    return { stdout: result, stderr: '', ok: true };
+  } catch (err) {
+    return { stdout: err.stdout || '', stderr: err.stderr || err.message, ok: false };
+  }
+}
 import { waitForDetailPage } from './detail-ops.mjs';
 
 export async function executeOpenDetailOperation({ profileId, params = {} } = {}) {

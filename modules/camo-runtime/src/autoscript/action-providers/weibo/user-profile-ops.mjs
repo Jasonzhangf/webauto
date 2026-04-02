@@ -24,10 +24,11 @@ const SCROLL_BOTTOM_JS = String.raw`(() => {
 })()`;
 
 const CHECK_BOTTOM_JS = String.raw`(() => {
-  const bottomEl = document.querySelector('div[class*="_box_1px0u"]');
-  if (!bottomEl) return JSON.stringify({ bottom: false });
-  const text = bottomEl.textContent || '';
-  return JSON.stringify({ bottom: text.includes('没有更多') });
+  return JSON.stringify({
+    scrollY: window.scrollY,
+    bodyHeight: document.body.scrollHeight,
+    innerHeight: window.innerHeight,
+  });
 })()`;
 
 const EXTRACT_USER_PROFILE_POSTS_JS = String.raw`(() => {
@@ -79,8 +80,8 @@ const EXPAND_TRUNCATED_JS = String.raw`(() => {
   for (const item of items) {
     const rect = item.getBoundingClientRect();
     if (rect.top >= window.innerHeight || rect.bottom <= 0) continue;
-    const expandBtn = item.querySelector('[class*="expand"]');
-    if (expandBtn && (expandBtn.textContent.trim() === '展开' || expandBtn.textContent.trim() === '展开全文')) {
+    const expandBtn = item.querySelector('span.expand');
+    if (expandBtn) {
       expandBtn.click();
       expanded++;
     }
@@ -90,12 +91,15 @@ const EXPAND_TRUNCATED_JS = String.raw`(() => {
 
 export async function navigateToUserProfile(profileId, userId) {
   const url = `https://weibo.com/u/${userId}`;
-  const result = await callAPI('goto', { profileId, url }, 30000);
-  if (!result?.ok) {
-    return { ok: false, error: result.error || result.stderr || 'goto failed' };
+  // Use camo CLI goto (more reliable than callAPI for navigation)
+  const { execSync } = await import('child_process');
+  try {
+    execSync(`camo goto ${profileId} --url ${url}`, { timeout: 30000, encoding: 'utf-8' });
+  } catch (err) {
+    return { ok: false, error: err.message || 'goto failed' };
   }
-  await sleep(3000);
-  const title = await devtoolsEval(profileId, CHECK_TITLE_JS, { timeoutMs: 5000 });
+  await sleep(4000);
+  const title = await devtoolsEval(profileId, CHECK_TITLE_JS, { timeoutMs: 10000 });
   return { ok: true, title: title || '' };
 }
 
@@ -126,15 +130,16 @@ export async function scrollUserProfileToBottom(profileId) {
   await devtoolsEval(profileId, SCROLL_BOTTOM_JS, { timeoutMs: 5000 });
 }
 
-export async function checkBottomReached(profileId) {
+export async function checkBottomReached(profileId, prevState = {}) {
   const raw = await devtoolsEval(profileId, CHECK_BOTTOM_JS, { timeoutMs: 5000 });
   if (raw && typeof raw === 'string') {
     try {
       const data = JSON.parse(raw);
-      return data.bottom === true;
+      const stagnation = (prevState.scrollY === data.scrollY && prevState.bodyHeight === data.bodyHeight);
+      return { ...data, stagnation };
     } catch {}
   }
-  return false;
+  return { stagnation: false };
 }
 
 export async function harvestUserProfile({
@@ -174,17 +179,13 @@ export async function harvestUserProfile({
 
     if (allPosts.length >= target) break;
 
-    // Check if bottom reached
-    const bottomReached = await checkBottomReached(profileId);
-    if (bottomReached) {
-      console.log(`[user-profile:${userId}] bottom reached after ${rounds} rounds`);
-      break;
-    }
-
-    if (newInThisRound === 0) {
+    // Check if bottom reached or no new posts
+    const scrollInfo = await checkBottomReached(profileId);
+    const noProgress = newInThisRound === 0 || scrollInfo?.stagnation;
+    if (noProgress) {
       emptyScrollCount++;
       if (emptyScrollCount >= maxEmptyScrolls) {
-        console.log(`[user-profile:${userId}] reached end: ${emptyScrollCount} consecutive empty scrolls`);
+        console.log(`[user-profile:${userId}] reached end after ${rounds} rounds (${emptyScrollCount} consecutive no-progress)`);
         break;
       }
     } else {
