@@ -281,6 +281,7 @@ function parseTaskInput(argv, mode = 'add') {
     if (!explicitTaskType) {
       if (commandType === 'weibo-search') commandArgv['task-type'] = 'search';
       else if (commandType === 'weibo-monitor') commandArgv['task-type'] = 'monitor';
+      else if (commandType === 'weibo-user-profile') commandArgv['task-type'] = 'user-profile';
       else commandArgv['task-type'] = 'timeline';
     }
   }
@@ -526,7 +527,7 @@ Task Options:
   --interval-minutes <n>     interval 模式每次触发间隔分钟
   --run-at <iso>             once/daily/weekly 模式锚点时间（ISO）
   --max-runs <n>             最大执行次数（>0；为空=不限）
-  --command-type xhs-unified|1688-search
+  --command-type xhs-unified|1688-search|weibo-user-profile
   --argv-json <json>         透传给任务执行器的参数对象
   --max-concurrency <n>      调度并发上限（默认来自 policy）
   --task-lease-sec <n>       单任务 claim lease 秒数（默认 1800）
@@ -539,7 +540,7 @@ Common xhs argv shortcuts (optional):
   --do-comments <bool> --do-likes <bool> --like-keywords <csv>
   --dry-run <bool> --no-dry-run
 
-  --task-type <timeline|search|monitor>
+  --task-type <timeline|search|monitor|user-profile>
   --user-id <id>             monitor 任务必填
 `);
 }

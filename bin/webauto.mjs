@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env node
+#!/usr/bin/env node
 import minimist from 'minimist';
 import { spawn, spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
@@ -817,6 +817,13 @@ async function main() {
   }
 
   if (cmd === "weibo-watch") {
+    const script = path.join(ROOT, "apps", "webauto", "entry", "weibo-unified.mjs");
+    await run(process.execPath, [script, ...rawArgv.slice(1)]);
+    return;
+  }
+
+  // Handle weibo-user-profile from schedule daemon
+  if (cmd === "weibo-user-profile") {
     const script = path.join(ROOT, "apps", "webauto", "entry", "weibo-unified.mjs");
     await run(process.execPath, [script, ...rawArgv.slice(1)]);
     return;

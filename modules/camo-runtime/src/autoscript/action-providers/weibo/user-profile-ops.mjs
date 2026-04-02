@@ -98,15 +98,44 @@ export async function navigateToUserProfile(profileId, userId) {
   } catch (err) {
     return { ok: false, error: err.message || 'goto failed' };
   }
-  await sleep(4000);
-  const title = await devtoolsEval(profileId, CHECK_TITLE_JS, { timeoutMs: 10000 });
-  return { ok: true, title: title || '' };
+
+  // Wait for page to load with anchor polling (SPA may need time)
+  const ANCHOR_WAIT_MS = 20000;
+  const POLL_INTERVAL = 1000;
+  const start = Date.now();
+  while (Date.now() - start < ANCHOR_WAIT_MS) {
+    await sleep(POLL_INTERVAL);
+    try {
+      const title = await devtoolsEval(profileId, CHECK_TITLE_JS, { timeoutMs: 5000 });
+      if (title && typeof title === 'string' && title.includes('的个人主页')) {
+        await sleep(1000); // extra settle
+        return { ok: true, title };
+      }
+      // Also check for feed items
+      const check = await devtoolsEval(profileId, String.raw`(() => document.querySelectorAll('.vue-recycle-scroller__item-view').length)()`, { timeoutMs: 5000 });
+      if (check && Number(check) > 0) {
+        await sleep(1000);
+        const title2 = await devtoolsEval(profileId, CHECK_TITLE_JS, { timeoutMs: 5000 });
+        return { ok: true, title: title2 || '' };
+      }
+    } catch {}
+  }
+  // Fallback: return whatever we have
+  try {
+    const title = await devtoolsEval(profileId, CHECK_TITLE_JS, { timeoutMs: 5000 });
+    return { ok: true, title: title || '' };
+  } catch {
+    return { ok: false, error: 'page load timeout' };
+  }
 }
 
 export async function extractUserProfilePosts(profileId) {
   const raw = await devtoolsEval(profileId, EXTRACT_USER_PROFILE_POSTS_JS, { timeoutMs: 15000 });
+  const rawType = typeof raw;
+  const rawPreview = rawType === 'string' ? raw.slice(0, 100) : JSON.stringify(raw)?.slice(0, 100);
+  console.error(`[user-profile:DEBUG] extractUserProfilePosts raw type=${rawType} preview=${rawPreview}`);
   if (!raw || typeof raw !== 'string') {
-    return { posts: [], error: 'eval returned non-string' };
+    return { posts: [], error: `eval returned ${rawType}` };
   }
   try {
     const data = JSON.parse(raw);
