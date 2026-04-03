@@ -230,3 +230,30 @@ xiaohongshu_images/
 apps/desktop-console/dist/
 modules/xiaohongshu/app/pnpm-lock.yaml
 scripts/verify-tabs.mjs
+
+# === 2026-04-03 cleanup: temp/test/IDE/toolchain files ===
+
+# Pressure test temp data
+.tmp/
+.tmp_test/
+
+# TypeScript build cache
+tsc/
+
+# IDE & local tool configs
+.claude/
+.beads/
+
+# Tool-local files (functional but machine-specific)
+sitecustomize.py
+
+# Clock/scheduling one-off scripts and state
+clock-schedule-batch.sh
+clock.md
+
+# Finger agent state files (not project docs)
+TASK.md
+HEARTBEAT.md
+
+# Backup files
+FLOW.md.bak*
