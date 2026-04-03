@@ -257,3 +257,7 @@ HEARTBEAT.md
 
 # Backup files
 FLOW.md.bak*
+tsc
+.tmp_test
+ui-preview-page1-init.png
+webauto-bento-init-page.png
